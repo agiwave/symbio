@@ -54,7 +54,7 @@ impl Budget {
     }
 }
 
-/// 投影的产出：**只能**是 `View`，不是 `Result`（"可降级"由类型强制，见 01 §3）。
+/// 投影的产出：**只能**是 `View`，不是 `Result`（"可降级"由类型强制，见 DE-001 §3）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View<V> {
     pub value: V,
@@ -340,7 +340,7 @@ mod must_fail {
     /// 这个写法**形状合法**（形参表正确），因此 `new` 挡不住它 ——
     /// 它证明"签名约束"只能守住"句柄进不来"，守不住"内部调全局函数"。
     /// 该反例的存在是刻意保留的：**投影纯度的二级强制必须是 CI 静态扫描**
-    /// （禁 `SystemTime::now` / `rand` / 全局可变状态），见 01 §3 的强制方式列。
+    /// （禁 `SystemTime::now` / `rand` / 全局可变状态），见 DE-001 §3 的强制方式列。
     ///
     /// 因此本函数**预期能编译通过**，用于界定一级强制的边界。
     pub fn projection_reads_clock() -> Projection<u64> {

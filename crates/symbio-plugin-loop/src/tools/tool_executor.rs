@@ -338,7 +338,7 @@ pub async fn execute_tool_async(
             let visitor = tool_visitor.clone();
             let tool_ctx2 = tool_ctx.clone();
             let canonical = invoke_name.clone();
-            // 执行不在表上（AR-025 §3）：按名取行 + capability_invoke；查不到即
+            // 执行不在表上（DE-025 §3）：按名取行 + capability_invoke；查不到即
             // 诚实的 NotFound（文案与机制化之前逐字一致）。
             Box::pin(async move {
                 match visitor.get(&canonical).await.and_then(|r| r.cap().cloned()) {
@@ -512,7 +512,7 @@ pub async fn execute_tool_async(
 ///    终态的同时给出结果：只有父状态没有结果，用户看到的就是「调用凭空消失、
 ///    会话照旧往下走」。见 `dispatch::unfinished::not_executed_result`。
 ///
-/// 3. **外部执行闸门在每个调用点各判一次**（S8）：判据批首读一次
+/// 3. **外部执行闸门在每个调用点各判一次**：判据批首读一次
 ///    （[`BreakerInputs`]），结论按调用点出——`Refuse` 零事件、`Break` 走出参
 ///    随收束入格、`Allow` 照旧开窗。
 /// 4. **声明闸由能力包自己判**（DE-025 D-219）：工具在 `CapabilityMeta.behaviors`
@@ -536,13 +536,13 @@ pub async fn process_tool_calls_async(
     facts: &dyn Store<Event = Event>,
     // 淘汰闸的部署级判据（session 已折成一个值，见 D-086 §4）。
     elimination_revoked: bool,
-    // 效果出参（批⑧ 的承诺与后续效果族共用一条通路，DE-025 D-207）：每次终态调用
+    // 效果出参（承诺与后续效果族共用一条通路，DE-025 D-207）：每次终态调用
     // 交出一条 `EffectInput`，轮末由写口问能力包的行为要草稿并落格。
     // out-param 而不是返回值：本函数的返回值是节点对（消费方三处都在用），
     // 再加一个只会逼着每个调用方都写 `let _ = `。
     effects: &mut Vec<EffectInput>,
-    // 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的**理由**，同一条口径交回
-    // 调用方随收束入格。**只记 `Break`**——`Refuse`（未授权）按 S09 §6 验收 1
+    // 熔断出参：外部执行闸门判 `Break` 的**理由**，同一条口径交回
+    // 调用方随收束入格。**只记 `Break`**——`Refuse`（未授权）按 DE-039 §6 验收 1
     // 不得产生任何事件，两种拒绝在事件面上必须分得开。
     breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {

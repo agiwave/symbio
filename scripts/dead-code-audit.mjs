@@ -397,23 +397,18 @@ if (rustWaived.length) {
 // 自废。故：
 //   ① 每个 `#[allow(dead_code)]`（含模块级 `#![allow(dead_code)]`）必须在**同一行**
 //      或其上 3 行内写 `// dead-code-allow R-002: <非空理由>`——与 R-001 同一判空；
-//   ② 数量走棘轮：只许降（接线一批、摘一批），`grep -c` 即可复核，不靠自觉。
-//   ③ 理由必须指到**清偿步**（`04 §3.1 批N` 或其 A/B 表行）：接入 + 摘标记 + 步状态
-//      改"完成"三者同批发生，账在 `docs/003-design/016-工程落地与验证.md §3.1`，本文件只判数量。
-//      基线每次随该表的批次下调，不随本文件的意志上调。
+//   ② 数量走棘轮：只许降，`grep -c` 即可复核，不靠自觉。
+//   ③ 理由必须**指名消费方**（`消费方=<谁在用>`）：这类标记存在的唯一理由是消费方
+//      不在 Rust 侧（前端镜像 / 协议文档 / 审计脚本），rustc 看不见那些调用点——
+//      判据只能是理由里那个非空名字（口径登记在 `SP-015`）。
 const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
   ? Number(process.env.DEAD_CODE_R002_BASELINE)
   : 8
-  // 2026-10-09 TurnRunner 族下沉**未动本基线**：`ActorSpec` 失去经 `TurnInput`（原根导出）的顺带可达性后，`dead_code` 一度点名它的 `pattern`/`capabilities`/`budget_ms`/`scope` 与 `Scope::Child`——但它们的处置不是 R-002（R-002 只收**零生产消费方**的冻结契约名），而是把 `ActorSpec` 升为根 `pub use` + `core-export-audit` C-003 的单消费方豁免（它有 1 个生产消费方 `crates/symbio-plugin-session`，属「接缝」）。故基线维持 8（= C 类 8），与 04 §3.1「终局棘轮基线 = 8」一致
-  // 04 §3.1 批⑫ 摘 5（13 → 8）：B 类零散契约接线——keys/mod.rs 1（TRACE_ID 根导出 + tauri commands.rs 字面量换 TRACE_ID.name() + 网关 dispatch_once 记 trace_id，002-ERROR_CODES.md「后端会记录」的第 2 个落点）+ plugin/route.rs 1（ROUTE_SESSION_CHAT_ABORT 判为删除：只删 Rust 侧常量，路由 / 003-ROUTES.md / e2e 不动）+ mcp/manager.rs 1（TestConnectionResult 富提示进 VDFS_ACTION_TEST 的 message 与 data）+ local 2（todo_write / codebase_search 构造签名去 security 字段，审批由 SecureToolWrapper 兜底）；余 8 = C 类 8（见 04 §3.1 C 段，即终局棘轮）
-  // 04 §3.1 批⑪ 子批 B 摘 5（18 → 13）：技能编译与路由接线——actors/mod.rs 5（SkillCompiler / SkillCompiler::compile / SkillRoute / SkillRouter / SkillRouter::route，消费方 crates/symbio-plugin-loop/src/skill_events.rs::{compile, route}，写侧进 derived_facts::record_to_wal、读侧进 chat_loop/inputs.rs 步 ⑤）；余 13 = 批⑫ 5 + C 类 8（见 04 §3.1 C 段）
-  // 04 §3.1 批⑩ 子批 B 摘 5（41 → 36）：插话抢占接线——actors/mod.rs 5（Preemption / PreemptionDecider / decide / held_event / control_event，消费方 crates/symbio-plugin-session/src/transcript/inbox.rs 忙窗判定 + 空闲落格 + 插话轮后写恢复；同域新增 resume_event 无标记）
-  // 04 §3.1 批⑩ 子批 A 摘 5（46 → 41）：外部执行闸门接线——actors/mod.rs 4（GateDecision / CircuitBreaker / gate / break_event，消费方 crates/symbio-plugin-loop/src/tools/tool_executor.rs 判定 + v2_bridge.rs::record_to_wal 落格）+ event/mod.rs 1（EVENT_CONTROL_OPENED = task.controlled，写方同上按名写格）
-  // 04 §3.1 批⑨ 摘 10（56 → 46）：任务表接线——projection/readyset.rs 3（ReadyTask / ReadySetView / readyset，读出口 stats 列 + 调度段两处消费）+ event/mod.rs 5（task.* 名字表，写方 crates/symbio-plugin-loop/src/task_events.rs 按名写格）+ invariants/mod.rs 2（acyclic_deps / rework_bounded 进 check_all——条数不写在这里，它归代码与 DC-001）
-  // 04 §3.1 批⑧ 摘 19（75 → 56）：身份 / 承诺 / 声誉全接线——actors/mod.rs 8（ActorSpec 3 起于 TurnInput.actor 入参 + run/run_streaming 平凡值、CommitmentKeeper 5 经 core 域内入口 commitment_events 落四格）+ projection/reputation.rs 7（stats.rs::read 新列 reputation，own/by_principal 全有全无）+ event/mod.rs 4（commitment.* 名字表，写方 derived_facts::record_to_wal 按名写格）
-  // 04 §3.1 批⑦ 摘 13（88 → 75）：记忆三段接线全摘——event/mod.rs 记忆事件名字表 4（写方 crates/symbio-plugin-loop/src/memory_events.rs 按名写格）+ view/mod.rs 视图类型 3（RecallEntry/RecallView/contains_content 生产读视图与去重）+ projection/recall.rs 1（召回进 prepare_turn_inputs）+ projection/consolidate.rs 3（巩固写方过 accept）+ actors/mod.rs 2（RecallTranslator 落 memory.recalled）
-  // 04 §3.1 批⑥ 摘 11（99 → 88）：governance/mod.rs 标记**全摘**——矩阵生产构造住 crate::authz（from_names 按能力名闭集校验），写侧 can_reply 进 v2_bridge 收束闸、读侧 can_see 进 session/stats 读闸
-  // 04 §3.1 批⑤ 摘 16（115 → 99）：Decider 族 5 + S4 断点锚 2 + 测试面转 #[cfg(test)] 9（其中 3 处本属批⑫，随桩迁入 ⇒ 批⑫ 8 → 5）
+  // 8 = 全部为 C 类结构性承认（消费方在前端镜像 / 协议文档 / 审计脚本）。下调就在这里
+  // 写理由；上调不合法——新死码要么接上、要么删掉。`TurnRunner` 族下沉时基线**未动**：
+  // `ActorSpec` 的字段失去经 `TurnInput` 的顺带可达性后，处置是把它升为根 `pub use` +
+  // `core-export-audit` C-003 的单消费方豁免（1 个生产消费方 `crates/symbio-plugin-session`，
+  // 属「接缝」），不是 R-002——R-002 只收**零生产消费方**的冻结契约名。
 
 /**
  * R-002 的承认理由：复用 R-001 的回看（同行 + 上 3 行、理由非空）。
@@ -424,40 +419,15 @@ function r002Reason(lines, i) {
   return waiverReason(lines, i)
 }
 
-// ③ **承认必须挂到计划步**：理由里给出 `04 §3.1 批N`（或 `04 §3.1 C 类`），
-//    且批号必须真实存在于 `docs/003-design/016-工程落地与验证.md §3.1` 的清偿批次表。
-//    于是「一处死码 ↔ 一个计划步」双向可查：`grep "04 §3.1 批⑥"` = 该批待摘清单，
-//    表里的 `-N` = 该批完成判据；批次号以表为唯一来源，写不存在的批号等于没挂。
-//
-// 起两处**登记形态**（不迁事实）：① 本段的 3 条口径已登记为条目
-//    `SP-015`——批号**闭集**（`批①…批⑫` + `C 类`）
-//    随口径一并登记在该条目里；② 规则源改读 `SP-015`（批号词表），04 §3.1 只留指路。
-//    「批号必须真实存在」这条对账关系（防写不存在的批号）是价值所在，规则源跟着词表走。
-const PLAN_04_PATH = join(REPO, 'docs', '003-design', '016-工程落地与验证.md')
-const S31_1_PATH = join(REPO, 'docs', '005-spec', '015.md')
-// 回归测试用 `--root=` 注入最小仓库，那里没有条目——**没有台账就不判这一条**
-// （否则 fixture 全红，守卫的测试自己成了噪音）；真仓里条目在，规则才生效。
-//
-// 规则源优先读 `docs/005-spec/015.md`（起的批号闭集 owner），
-// 读不到再退回 04 §3.1 的旧表（迁移期兼容 / fixture 无条目）。
-const S31_1 = existsSync(S31_1_PATH) ? readFileSync(S31_1_PATH, 'utf8') : null
-const PLAN_04 = existsSync(PLAN_04_PATH) ? readFileSync(PLAN_04_PATH, 'utf8') : null
-// 批号是**写法**（`批①`…）；`SP-015` 写 `批① 摘 9`，04 §3.1 旧表写 `| ① |`——
-// 两种都认（规则源迁移期的兼容），故同时收「批+圈号」与「| 圈号 |」。
-const batchSource = S31_1 ?? PLAN_04
-const validBatches = batchSource
-  ? new Set([
-      ...[...batchSource.matchAll(/批([①-⑳])/g)].map((m) => `批${m[1]}`),
-      ...[...batchSource.matchAll(/\|\s*([①-⑳])\s*\|/g)].map((m) => `批${m[1]}`),
-    ])
-  : new Set()
-// `C 类` 是独立的承认档（无批号）：规则源里写 `C. 结构性承认` 或 `C 类` 都认。
-const hasCClass = batchSource ? /C\.?\s*(结构性承认|类)/.test(batchSource) : false
-const REF_RE = /04 §3\.1 (批[①-⑳]|C 类)/
+// ③ **承认必须指名消费方**：消费方不在 Rust 侧（前端镜像 / 协议文档 / 审计脚本）
+//    是这类标记存在的唯一理由——rustc 看不见那些调用点，判据只能是理由里那个名字。
+function hasConsumer(reason) {
+  const m = reason.match(/消费方=([^）)]*)/)
+  return Boolean(m && m[1].trim())
+}
 
 const r002NoReason = []
-const r002BadPlan = []
-const r002ByBatch = new Map()
+const r002NoConsumer = []
 let r002Marks = 0
 for (const [file, code] of rustCorpus) {
   const lines = code.split(/\r?\n/)
@@ -473,19 +443,9 @@ for (const [file, code] of rustCorpus) {
       r002NoReason.push(`${repoRel(file)}:${i + 1}`)
       continue
     }
-    if (!batchSource) continue // 无规则源（fixture 仓库）⇒ 本条不判
-    const ref = reason.match(REF_RE)
-    if (!ref) {
-      r002BadPlan.push(`${repoRel(file)}:${i + 1}  理由未指向 04 §3.1：${reason.slice(0, 60)}`)
-      continue
+    if (!hasConsumer(reason)) {
+      r002NoConsumer.push(`${repoRel(file)}:${i + 1}  理由未指名消费方：${reason.slice(0, 60)}`)
     }
-    const key = ref[1]
-    const known = key === 'C 类' ? hasCClass : validBatches.has(key)
-    if (!known) {
-      r002BadPlan.push(`${repoRel(file)}:${i + 1}  ${key} 不在 04 §3.1 的清偿登记里`)
-      continue
-    }
-    r002ByBatch.set(key, (r002ByBatch.get(key) ?? 0) + 1)
   }
 }
 
@@ -497,21 +457,17 @@ if (r002NoReason.length) {
   for (const loc of r002NoReason) console.log(`    ${loc}`)
   console.log('    ↳ 标记同行或其上 3 行内写 `// dead-code-allow R-002: 理由`（R-001 的理由同样认，理由必填）')
 }
-if (r002BadPlan.length) {
-  console.log(`  ✗ ${r002BadPlan.length} 处承认没挂到计划步（04 §3.1）：`)
-  for (const loc of r002BadPlan) console.log(`    ${loc}`)
-  console.log('    ↳ 理由尾缀写 `；04 §3.1 批N 接线后摘除`——批号取自 04 §3.1 清偿批次表')
+if (r002NoConsumer.length) {
+  console.log(`  ✗ ${r002NoConsumer.length} 处承认没指名消费方：`)
+  for (const loc of r002NoConsumer) console.log(`    ${loc}`)
+  console.log('    ↳ 理由写 `消费方=<谁在用>`——消费方不在 Rust 侧是这类标记存在的唯一理由')
 }
 if (r002OverRatchet) {
   console.log(`  ✗ 承认标记 ${r002Marks} > 基线 ${R002_BASELINE} —— 只许降：`)
-  console.log('    ↳ 接线一批就摘一批；新出现的死码要么删掉、要么接上，不许再加 allow')
+  console.log('    ↳ 新出现的死码要么删掉、要么接上，不许再加 allow')
 }
-if (!r002NoReason.length && !r002BadPlan.length && !r002OverRatchet) {
-  console.log('  ✓ 标记均带理由并挂到计划步，数量未超基线')
-  if (batchSource) {
-    const tally = [...r002ByBatch].sort((a, b) => a[0].localeCompare(b[0], 'zh'))
-    console.log(`  · 各清偿批待摘：${tally.map(([k, n]) => `${k} ${n}`).join(' · ')}`)
-  }
+if (!r002NoReason.length && !r002NoConsumer.length && !r002OverRatchet) {
+  console.log('  ✓ 标记均带理由并指名消费方，数量未超基线')
 }
 
 const lines = dead.reduce((n, f) => n + lineCount(f), 0)
@@ -520,7 +476,7 @@ process.exit(
   dead.length ||
     rustUnused.length ||
     r002NoReason.length ||
-    r002BadPlan.length ||
+    r002NoConsumer.length ||
     r002OverRatchet ||
     unusedUnwaived.length
     ? 1

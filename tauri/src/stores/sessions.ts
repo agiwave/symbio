@@ -815,7 +815,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (typeof meta.workdir === 'string' && meta.workdir) lastUsedWorkdir.value = meta.workdir
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
-    // 信封没有操作枚举（S27）——无载荷变更，其他页面按各自语义回读收敛；
+    // 信封没有操作枚举——无载荷变更，其他页面按各自语义回读收敛；
     // 后端事件（`vdfs/write` 落库后广播）随后到达，各订阅方幂等收敛
     publishVdfsChangedLocal({ path: vdfsSessionAddr(mountDir, id) })
 
@@ -927,7 +927,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     removeSessionLocal(id)
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
-    // 信封没有操作枚举（S27）——无载荷变更，消费端回读 `NotFound` 即删除；
+    // 信封没有操作枚举——无载荷变更，消费端回读 `NotFound` 即删除；
     // 后端事件随后到达，各订阅方幂等收敛
     if (addr) publishVdfsChangedLocal({ path: addr })
   }

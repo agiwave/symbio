@@ -257,7 +257,7 @@ async fn prepare_call(
         }
     };
 
-    // 同参重复调用的判据（[] 步 2）：签名与落库节点里的参数文本同源
+    // 同参重复调用的判据：签名与落库节点里的参数文本同源
     // （[`tool_call_args_text`]），于是「上下文里的那一次」与「这一次」可比。
     // 只登记、只回报——不拦截、不改执行结果。
     let signature = call_signature(&name, &tool_call_args_text(tc));
@@ -455,7 +455,7 @@ async fn emit_terminal(
                 obj.insert("failure_kind".into(), json!("overflow_dropped"));
             }
             tool_messages.push(tool_msg);
-            // 结果子节点必须有父节点终态配套（同 S20.1 不变量）：否则前端永远转圈。
+            // 结果子节点必须有父节点终态配套（同 工具终态不变量）：否则前端永远转圈。
             if let Some(parent_update) = emit_parent_finalized(
                 sink,
                 context_messages,
@@ -533,7 +533,7 @@ async fn finish_call(
     } = ready;
     let (final_res, success, mut pending_user_prompt) = out;
 
-    // 代际立约的了结（批⑧）：跑完即知履约与否。**待用户审批的不记**——
+    // 代际立约的了结：跑完即知履约与否。**待用户审批的不记**——
     // 承诺还没到可判时刻，抢跑记成履约或违约都是假事实（审批结束后随
     // resume 那一轮再记）。
     if pending_user_prompt.is_none() {

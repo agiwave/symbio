@@ -19,7 +19,7 @@
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
  *   - S-011:        补充注入点的位置（两处行序断言：`turn_runner/stream.rs` 的结果/注入次序、
  *                   `turn_exec/call.rs` 的抽干点/运行器开轮次序；位置错了不会有任何测试变红）
- *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 无出处的批次号）
+ *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 批次号）
  *   - S-013:        `WalkBuilder` 构造点必须钉遍历序（默认序是文件系统返回序 ⇒
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
  *   - S-014:        ChatNode 存量 `role` 格的直写只许降（棘轮；身份写 `principal`，
@@ -571,9 +571,8 @@ console.log()
 //   ① 待办标记：注释行以 `TODO` / `FIXME` / `XXX` / `HACK` 起头——待办有自己的
 // 登记处（`docs/007-task/` 下登记条目：引入新待办就登记成条目，
 //      **不是代码注释**），写在注释里就等于「谁也不会再看见」的那一类；
-//   ② 无出处的批次号：`批 N` / `批次 N` 且**同一行没有 `plan/NN`**。批次号属实施
-//      计划，单独一个数字不知道是哪份计划的哪一批；带出处就是合法指认
-//      （仓内既有的 `[plan/11 批 2 ③](…)` 那种写法全部通过）。
+//   ② 批次号：`批 N` / `批次 N`。批次号属施工计划——代码注释里留下它，读者既不知道
+//      是哪份计划的哪一批，也无人回头改它。
 //
 // **已知边界（刻意不判）**：`本批` / `诚实缺口` / `曾经` 在注释里都可能是**运行期语义**
 // 或**陷阱说明**——「本批未执行的工具调用」说的是这一批工具调用（`tool_executor` 的
@@ -590,7 +589,6 @@ const S012_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'd
 const S012_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
 const S012_TODO_RE = /^\s*(?:\/\/[/!]*)\s*(?:TODO|FIXME|XXX|HACK)\b/
 const S012_BATCH_RE = /批(?:次)?\s*\d/
-const S012_ANCHOR_RE = /plan\/\d+/
 const WAIVER_S012_RE = /\/\/\s*grep-audit-allow S-012:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
 
 {
@@ -608,15 +606,15 @@ const WAIVER_S012_RE = /\/\/\s*grep-audit-allow S-012:[^\n]*[A-Za-z0-9\u4e00-\u9
       if (WAIVER_S012_RE.test(l) || (i > 0 && WAIVER_S012_RE.test(lines[i - 1]))) return
       const why = S012_TODO_RE.test(l)
         ? '注释以 TODO / FIXME 起头 ⇒ 待办登记进计划文档，不写进代码注释'
-        : S012_BATCH_RE.test(l) && !S012_ANCHOR_RE.test(l)
-          ? '批次号没有出处 ⇒ 写成 `plan/NN 批 M`（单独的「批 N」指不出是哪份计划的第几批）'
+        : S012_BATCH_RE.test(l)
+          ? '批次号属施工计划 ⇒ 注释只写不变量与陷阱，不写施工过程'
           : null
       if (!why) return
       err(`${disp(file)}:${i + 1}  ${why}`)
       s012++
     })
   }
-  if (s012 === 0) ok('S-012 通过：注释里没有待办标记与无出处的批次号')
+  if (s012 === 0) ok('S-012 通过：注释里没有待办标记与批次号')
 }
 console.log()
 

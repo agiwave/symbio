@@ -1,12 +1,12 @@
 import './_selfrun.mjs';
-// T35 技能编译与召回（`SkillCompiler` + 召回视图，S9 第 22 步，S11）：
+// T35 技能编译与召回（`SkillCompiler` + 召回视图）：
 // 一轮**成功**收束 ⇒ 编译出一条技能（`memory.encoded{tag:"skill"}`）；下一轮技能
 // 进召回视图、注入段带上技能正文；换一个进程（B 会话）说同一句话 ⇒ 召回视图里
 // 照样认得它（跨进程稳定）；校准列从出口读得出这次编译被用了两次。
 //
 // ## 本用例钉的是什么
 //
-// [11 批 2 ③](../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") 的接线判据：
+// 接线判据：
 // 「每件接线一条 e2e（**接线前后行为可见地不同**，否则等于没接）」——这里钉的是
 // `SkillCompiler`：写方挂在 `derived_facts::record_learning`（`turn_exec` 轮末）上，
 // 读方挂在召回视图（注入段的原料）上。
@@ -148,8 +148,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 技能编译挂在这条路上（`derived_facts::record_learning` 的步 22）。
-        // `skill_compile_enabled` **显式打开**：它默认 off（S11 §4 平凡值
+        // 技能编译挂在这条路上（`derived_facts::record_learning`）。
+        // `skill_compile_enabled` **显式打开**：它默认 off（DE-041 §4 平凡值
         // 「不编译，只检索」），本用例验的正是打开之后的行为，不能依赖默认值。
         session: { ...DIALOG_FACE_OFF, skill_compile_enabled: true },
       },

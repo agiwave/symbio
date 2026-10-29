@@ -129,7 +129,7 @@ pub struct MessageVocab {
 /// 承诺面：立约 / 履约 / 违约 / 对等断言四格。
 ///
 /// 与 [`ChatVocab`] 分开的理由是域不同而不是消费方少：承诺的配对规则（载荷 `id`）
-/// 是 S08 的形状知识，与发言折叠没有共同语义。声誉投影与成格函数是它仅有的两个
+/// 是 形状知识，与发言折叠没有共同语义。声誉投影与成格函数是它仅有的两个
 /// 消费方，把 11 条发言名塞给它们只会让耦合面说谎。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitmentVocab {

@@ -82,7 +82,7 @@ fn require_token_for_non_loopback_is_the_documented_boundary() {
     for bind in ["127.0.0.1", "localhost", "::1"] {
         assert!(
             require_token_for_non_loopback(bind, "").is_ok(),
-            "{bind} + 空令牌应放行（本机开发形态，见 plan/11 §2-G）"
+            "{bind} + 空令牌应放行（本机开发形态）"
         );
     }
     // 非回环 + 空令牌：拒绝

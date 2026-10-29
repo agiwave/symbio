@@ -30,7 +30,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     let response = (!outcome.fell_back).then_some(outcome.text.as_str());
     // 本轮开口格（`u-{turn}`）的 seq —— 记忆 / 任务 / 承诺的溯源锚。
     //
-    // 读**完整史**（`range(0)`，S2.7-b2）：这三个写方（`record_derived` 的
+    // 读**完整史**（`range(0)`）：这三个写方（`record_derived` 的
     // 承诺与任务表 / `record_learning` 的记忆三段）都是**累计口径**——它们的幂等
     // doc-link-allow D-004: 「曾经落过什么」问的是事实网格里有无该条记录，属数据语义
     // 判据与状态推导要看**曾经**落过什么。被快照取代而移入归档段的那些事实同样在
@@ -58,7 +58,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &derived.effects,
         &derived.breaks,
     );
-    // 调度（S04 §3，`D-139` 裁决 4）：**必须排在任务表落格之后**，且**重新取史**
+    // 调度（DE-034 §3，`D-139` 裁决 4）：**必须排在任务表落格之后**，且**重新取史**
     // ——调度的输入是本轮刚开的格；拿 `all`（轮初那份）算，这一轮新开的任务要等到
     // 下一轮才进候选集，第一轮因此永远派不出东西。
     let scheduled = store.range(Seq::new(0));
@@ -73,7 +73,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &format!("t{turn_no}-s"),
         symbio_core::clock_now_ms(),
     );
-    // 淘汰回路（S13 §3，）：**必须排在承诺落格之后**——它读的声誉投影
+    // 淘汰回路（DE-043 §3）：**必须排在承诺落格之后**——它读的声誉投影
     // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
     // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。
     super::super::derived_facts::record_elimination(store.as_ref(), turn_no, user_seq);
@@ -136,7 +136,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 }
 
 /// **定稿答话轮**（缺口 5）：`classify` 判 `Answered` ⇒ 本轮**一个模型请求都不发**，
-/// 但收束格仍须由 v2 运行器落（用户格已由编排层在判决之前落，）。
+/// 但收束格仍须由 v2 运行器落（用户格已由编排层在判决之前落）。
 ///
 /// ## 它解决的是什么
 ///
@@ -185,7 +185,7 @@ pub(crate) async fn execute_final_reply_turn(
     turn_no: u64,
     user_seq: u64,
     drive_seq: u64,
-    // 本轮用户发言：记忆编码的**内容**（`record_learning` 步 11）。答话轮同样
+    // 本轮用户发言：记忆编码的**内容**（`record_learning`）。答话轮同样
     // 是「用户说了什么」的一轮，不传它就只能记下判断、丢掉经验。
     user_text: &str,
     reply: &str,
@@ -200,7 +200,7 @@ pub(crate) async fn execute_final_reply_turn(
     // 往回是这条轮次里唯一一次真实推理，不入格则 `Reason` 节点对普通答话轮从未
     // 存在（AMD MiMo 实测 2026-10-13）。模板产线 / 生成失败退模板 ⇒ `None`。
     reasoning: Option<(String, String)>,
-    // 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2，与工具轮同源：
+    // 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（与工具轮同源：
     // `run_seam` 从 `context.consolidated` 取走的那一份）。
     // 答话轮在步骤 2 就短路收尾，**不进** [`super::drive`]，所以它也得自己落这一格
     // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。

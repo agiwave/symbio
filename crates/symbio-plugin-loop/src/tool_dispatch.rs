@@ -81,7 +81,7 @@ use symbio_core::node_build::{
 pub(crate) struct DerivedFacts {
     /// 效果出参（DE-025 D-207）：每次终态调用一条，轮末由写口问能力包要草稿。
     pub(crate) effects: Vec<EffectInput>,
-    /// 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的理由。
+    /// 熔断出参：外部执行闸门判 `Break` 的理由。
     pub(crate) breaks: Vec<&'static str>,
 }
 
@@ -234,8 +234,7 @@ pub struct DispatchOutcome {
     /// 成功与否。仅供可观测/展示；**不改变**本轮终态（信息性，见上）。
     pub ok: bool,
     /// 本次调用**收束于等待用户动作**（confirm / ask_user ⇒ 本轮停下等用户）。
-    /// 运行器据此**停止工具循环**（恢复前提见
-    /// plan/11 批 2）。
+    /// 运行器据此**停止工具循环**。
     pub needs_user_action: bool,
     /// 等待用户时卡片载荷（工具自决的 `prompt` 形状：审批卡 / 提问卡不同）。
     ///
@@ -1561,7 +1560,7 @@ impl SessionDispatchPort {
             self.elimination_revoked,
             // 效果出参（DE-025 D-207）：每次终态调用一条。
             &mut effects,
-            // 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的理由。
+            // 熔断出参：外部执行闸门判 `Break` 的理由。
             &mut breaks,
         )
         .await;

@@ -45,7 +45,7 @@
 //   gen-facts          事实文件是代码的投影（`gen-verify-facts` 读 CURRENT §2，故须先跑）
 //     → registry-audit --write   汇总页是条目 front-matter 的投影（里面含 `[[…]]` 记号）
 //       → gen-doc-refs           引用地址由编号解析生成
-//         → gen-verify-facts     verify 程序的期望数据是 01 §8 / 02 / 阶梯表的投影
+//         → gen-verify-facts     verify 程序的期望数据是 DE-001 §8 / 02 / 阶梯表的投影
 //
 // 少了任一环，下一环就对着半成品工作。
 import path from 'node:path'
@@ -90,7 +90,7 @@ export const STEPS = [
     cwd: repoRoot,
   },
   {
-    // verify 程序的期望数据是 01 §8 / 02 坐标系 / 阶梯表的投影（输入含 CURRENT §2
+    // verify 程序的期望数据是 DE-001 §8 / 02 坐标系 / 阶梯表的投影（输入含 CURRENT §2
     // 与已展开的引用地址，故排在全链最后）。它原先在 `55-verify` 里生成——那既让
     // `doc-count-audit` 读一拍前的产物，也把整个 verify 阶段锁死在批后串行。
     // 生成前移后，`55-verify` 只剩只读程序 + 写 `verify-target/`，得以进并发批。

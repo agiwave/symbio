@@ -3,8 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [10 §3 批 2b](../../crates/symbio-plugin-session/src/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
-// 「`confirm` 工具 → 本轮停在等用户 → 回填答案 → 续跑并收束」。
+// 出口判据：「`confirm` 工具 → 本轮停在等用户 → 回填答案 → 续跑并收束」。
 //
 // 这条判据之所以必须端到端，是因为它要证的三件事**各自只能在一处被看见**：
 //
@@ -20,7 +19,7 @@ import './_selfrun.mjs';
 //
 // ## 为什么工具用 `ask_user`（而不是 `confirm`）
 //
-// plan/10 §3 写的 `confirm` 是**场景代称**（"一个会停在等用户的工具"），不是工具名——
+// 判据里的 `confirm` 是**场景代称**（"一个会停在等用户的工具"），不是工具名——
 // 本仓没有名为 `confirm` 的工具。真正的 pending 触发点是 `ask_user`：interactive
 // 模式下它返回 `failure_kind = needs_interaction` + `prompt` 载荷，编排层据此构造
 // `user_prompt`（`WaitingUserAction`）节点、运行器停止工具循环且**不收束**。
@@ -32,17 +31,15 @@ import './_selfrun.mjs';
 //
 // ## 恢复入口为什么是 gateway 直发节点动作
 //
-// plan/10 §2.4 的前置原文：CLI 把 `resume: None` 写死（`crates/symbio-cli/src/client.rs`），
-// **没有恢复入口**。批 2b 要补的正是这个入口。这里取该条明确列出的第二种形态——
-// 「e2e 直发」：经 gateway HTTP 边界（与 Tauri 前端同构的 `/api/v1/invoke`）
-// 发一条恢复请求。
+// CLI 把 `resume: None` 写死（`crates/symbio-cli/src/client.rs`），**没有恢复入口**。
+// 这里取「e2e 直发」形态：经 gateway HTTP 边界（与 Tauri 前端同构的
+// `/api/v1/invoke`）发一条恢复请求。
 //
-// 入口形状随输入面双轨退役改过一次（ 步② / [D-066]）：曾经的
-// `session/chat/send` `resume` 字段已删除，恢复改走**节点动作**——
-// `vdfs/action(<sid>/message/<target_id>, "answer", { answer })`。好处依旧是不动
+// 入口形状（[D-066]）：恢复走**节点动作**——
+// `vdfs/action(<sid>/message/<target_id>, "answer", { answer })`。好处是不动
 // 生产代码，且验的正是**前端恢复走的同一条路**（`vdfs_provider` 的 resume 臂 →
-// `start_turn` 直连）；落点是目标消息自身，这一点与旧入口逐字相同（恢复就该
-// 「落在当时那条消息上」，入队会让它排到新消息之后，候选早被改写）。
+// `start_turn` 直连）；落点是目标消息自身（恢复就该「落在当时那条消息上」，
+// 入队会让它排到新消息之后，候选早被改写）。
 //
 // ## 为什么工具调用场景要 `once: true`（与 T26 同因）
 //

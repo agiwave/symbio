@@ -1,11 +1,11 @@
-//! 记忆三段验收（S5）。
+//! 记忆三段验收。
 //!
 //! 每段各自的**出口判据**逐条钉住：
 //!
-//! - 步 11 编码：写一条**带溯源、带编码时刻**的记忆；同文去重、空发言跳过、超长截断；
-//! - 步 12 召回：跨会话扫、新近度降序、被遗忘的不算；注入段有空态与排版口径；
+//! - 编码：写一条**带溯源、带编码时刻**的记忆；同文去重、空发言跳过、超长截断；
+//! - 召回：跨会话扫、新近度降序、被遗忘的不算；注入段有空态与排版口径；
 //!   检索事实溯源到触发它的那一格、同一锚幂等；
-//! - 步 13 巩固：**过 `accept` 才入格**——代数上界与保真度下界两个拒收分支都在
+//! - 巩固：**过 `accept` 才入格**——代数上界与保真度下界两个拒收分支都在
 //!   生产可达；过了就写合并产物 + 排除式遗忘两条源记忆（Log 不删）。
 
 use super::{
@@ -165,7 +165,7 @@ fn payload_str<'a>(event: &'a Event, key: &str) -> Option<&'a str> {
 
 // ==================== 编码 ====================
 
-/// 出口判据：一条记忆**带溯源 + 带编码时刻**入格（溯源覆盖 100% = S06 的验收），
+/// 出口判据：一条记忆**带溯源 + 带编码时刻**入格（溯源覆盖 100% = 验收），
 /// 且同文去重、空发言不记、超长截断。
 #[test]
 fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
@@ -330,7 +330,7 @@ fn dedupe_covers_the_whole_history_not_the_recall_window() {
     );
 }
 
-/// 步 11b：智能体收束正文 → tag=`判断` 的记忆——S10 七类认知内容
+/// 判断编码：智能体收束正文 → tag=`判断` 的记忆——S10 七类认知内容
 /// 里 `recall:tag=judgment` 的**生产写方**（此前参数在、值缺写方）。
 ///
 /// 与经验那条同文去重 / 同截断 / 同溯源（本轮开口格）；空正文不记。
@@ -357,7 +357,7 @@ fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
     assert_eq!(
         payload_str(ev, "tag"),
         Some(JUDGMENT_TAG),
-        "S10 的 recall:tag=judgment 从此有生产写方"
+        " recall:tag=judgment 从此有生产写方"
     );
     assert_eq!(
         payload_str(ev, "content"),
@@ -470,7 +470,7 @@ fn encode_payload_carries_the_content_side_vis_scope() {
     );
 }
 
-// ==================== 步 13 · 巩固 ====================
+// ==================== 巩固 ====================
 
 /// ① 的巩固侧判据：合并产物**继承源记忆的内容侧可见域**——合并不放大
 /// 可见域（源是 shared ⇒ 产物 shared；源读不到 ⇒ 落 thread_private）。
@@ -519,7 +519,7 @@ fn consolidated_memory_inherits_the_source_vis_scope() {
     );
 }
 
-/// 步 13 · 门槛：不到 4 条不触发；到 4 条合并**最旧两条**，保真度 1，源记忆被
+/// 巩固 · 门槛：不到 4 条不触发；到 4 条合并**最旧两条**，保真度 1，源记忆被
 /// 排除式遗忘（Log 不删），投影里不再包含它们。
 #[test]
 fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
@@ -625,15 +625,15 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
 
 /// **巩固只合并同标签的记忆**——`recall(.., Some(tag), None)` 的标签过滤是**承重**的。
 ///
-/// 技能（`tag = "skill"`）与经验同住一张网格（S11 §2「技能是事实，不是特殊类型」），
+/// 技能（`tag = "skill"`）与经验同住一张网格（DE-041 §2「技能是事实，不是特殊类型」），
 /// 若这个过滤退化成恒真，`consolidate` 眼里的「最旧两条」会变成**技能**：合并产物成了
 /// 技能正文、两条技能被排除式遗忘——**技能静默消失，没有任何报错**。
 ///
 /// 两条技能刻意比四条经验**更旧**：这样"选错了"必然可见（选对时它们根本不在候选里）。
-/// 这也是「读侧过滤」这条设计（[roadmap/S10 §5](../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入")）
+/// 这也是「读侧过滤」这条设计（[DE-040 §5](../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入")）
 /// 在生产链上唯一可观察的后果——过滤本身的纯函数性质在 core 的 `recall.test.rs` 钉。
 ///
-/// 批④ 把同一条判据**复用**到「判断」标签：[`CONSOLIDABLE_TAGS`] 里两个
+/// 同一条判据**复用**到「判断」标签：[`CONSOLIDABLE_TAGS`] 里两个
 /// 生产写方的标签各自成组合并，技能仍在外。三条并行：经验 4 条合并、判断 4 条
 /// 合并、技能 2 条不动——过滤器若对任一标签恒真，对应那条线当场红。
 #[test]
@@ -744,7 +744,7 @@ fn consolidation_never_merges_across_tags() {
     );
 }
 
-/// 步 13 · 保真度闸：两条都超长的记忆合并不下 ⇒ 丢掉的那一半算失真 ⇒ 低于 0.7
+/// 巩固 · 保真度闸：两条都超长的记忆合并不下 ⇒ 丢掉的那一半算失真 ⇒ 低于 0.7
 /// 下界 ⇒ **拒收**（源记忆原样保留，不是降标入库）。这个分支在生产上必须可达，
 /// 否则 `accept` 的第二个参数就是装饰。
 #[test]
@@ -781,7 +781,7 @@ fn consolidate_refuses_a_lossy_merge_and_keeps_the_sources() {
     assert!(view.contains_content(&"甲".repeat(ENCODE_MAX_CHARS)));
 }
 
-/// 步 13 · 代数闸（G7）：源代数 3 ⇒ 合并后代数 4 > `max_gen` ⇒ 拒收。
+/// 巩固 · 代数闸（G7）：源代数 3 ⇒ 合并后代数 4 > `max_gen` ⇒ 拒收。
 /// 与上一条并排要证的是**两条参数各自独立生效**——不是同一个 if 判两次。
 #[test]
 fn consolidate_stops_at_the_generation_ceiling() {
@@ -801,7 +801,7 @@ fn consolidate_stops_at_the_generation_ceiling() {
     assert_eq!(mem_count(&store), 4, "代数到顶后源记忆原样保留");
 }
 
-/// 步 13 · 代数推进：源代数 1 ⇒ 产物代数 2（读的是源事件载荷里的 `generation`，
+/// 巩固 · 代数推进：源代数 1 ⇒ 产物代数 2（读的是源事件载荷里的 `generation`，
 /// 不是「数一数有几条合并产物」）。
 #[test]
 fn consolidate_reads_generation_from_the_source_payload() {
@@ -931,9 +931,9 @@ fn fidelity_is_measured_against_the_original_sources_across_generations() {
     );
 }
 
-// ==================== 步 12 · 召回（读方 + 注入段） ====================
+// ==================== 召回（读方 + 注入段） ====================
 
-/// 步 12 读方：跨会话合并、新近度降序、被遗忘的不算；一条记忆都没有 ⇒ `None`。
+/// 读方：跨会话合并、新近度降序、被遗忘的不算；一条记忆都没有 ⇒ `None`。
 #[test]
 fn recall_view_scans_neighbour_sessions_newest_first() {
     let a = EventStore::new();
@@ -974,7 +974,7 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
     );
 }
 
-/// 步 12 读方**消费混合打分**：本轮用户正文作 query 时，
+/// 读方**消费混合打分**：本轮用户正文作 query 时，
 /// 内容相关的旧记忆排到无关的新记忆前面——注入段「最新在前」的排版因此
 /// 把最相关的排在模型眼前。
 ///
@@ -1021,7 +1021,7 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
     );
 }
 
-// ==================== 步 12 · 读侧预过滤 ====================
+// ==================== 读侧预过滤 ====================
 
 /// **判断记忆不出会话**（产地的第二个消费方落地）：`thread_private` 的记忆
 /// 只给**记录它的那个会话**看——别的会话的召回视图里没有它，本会话照常看得见。
@@ -1267,9 +1267,9 @@ fn prompt_section_says_degraded_instead_of_pretending_completeness() {
     );
 }
 
-// ==================== 步 12 · 写方（检索事实） ====================
+// ==================== 写方（检索事实） ====================
 
-/// 步 12 写方：`memory.recalled` 溯源到**触发检索的那格事件**，载荷由视图出
+/// 写方：`memory.recalled` 溯源到**触发检索的那格事件**，载荷由视图出
 /// （Translator 不造信息），同一锚幂等（WAL 的 `Duplicate` 不该在生产上冒头）。
 #[test]
 fn record_recalled_anchors_the_retrieval_and_is_idempotent() {

@@ -1,10 +1,10 @@
-//! `consolidate` —— 巩固的接受边界（S5，[DE-001 §9.3](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、
+//! `consolidate` —— 巩固的接受边界（[DE-001 §9.3](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、
 //! [DE-018 §4](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构") ③ 加 consolidate）。
 //!
 //! ## 架构只提供位置，不提供算法
 //!
-//! 巩固策略（压什么、留什么）是**算法问题**（[roadmap/S06 §7](../../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")）；
-//! 本模块只固化**接受条件**——它是两条，不是一条（01 §9.3）：
+//! 巩固策略（压什么、留什么）是**算法问题**（[DE-036 §7](../../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")）；
+//! 本模块只固化**接受条件**——它是两条，不是一条（DE-001 §9.3）：
 //!
 //! | 约束 | 参数 | 性质 | 拒收行为 |
 //! |---|---|---|---|
@@ -25,7 +25,7 @@ pub struct ConsolidateParams {
 
 impl Default for ConsolidateParams {
     fn default() -> Self {
-        // 权威取值（01 §8）：max_gen = 3、min_fidelity = 0.7。
+        // 权威取值（DE-001 §8）：max_gen = 3、min_fidelity = 0.7。
         ConsolidateParams {
             max_gen: 3,
             min_fidelity: 0.7,
@@ -33,7 +33,7 @@ impl Default for ConsolidateParams {
     }
 }
 
-/// 拒收形态（01 §9.3 表的两臂）。
+/// 拒收形态（DE-001 §9.3 表的两臂）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Rejection {
     /// 代数超界：派生代数超过 `max_gen`。

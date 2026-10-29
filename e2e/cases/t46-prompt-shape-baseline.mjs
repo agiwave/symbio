@@ -3,11 +3,10 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [plan/13 终点第 2 条](../../docs/archive/13-质量改进总纲.md)：「有一份 prompt 形状基线，
+// [13 终点第 2 条](../../docs/archive/13-质量改进总纲.md)：「有一份 prompt 形状基线，
 // 能回答『这样对模型是变好还是变坏』」。[D-048a](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README")
 // 判过「拍平是退步」，但那次判定依据的是**论证**，不是记录——连「现在送出去的是什么形状」
-// 都没有一份可核对的东西，「结构化一定更好」同样未经测量（登记条目
-// 相应批次）。
+// 都没有一份可核对的东西，「结构化一定更好」同样未经测量。
 //
 // 基线本体在 [`docs/004-ref/PROMPT_SHAPE.md`](../../docs/004-ref/PROMPT_SHAPE.md)
 // （生成物，唯一写者是本用例带 `PROMPT_SHAPE_UPDATE=1`），**判据口径**（什么进基线、

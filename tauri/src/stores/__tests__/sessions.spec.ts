@@ -259,7 +259,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
       store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
 
       emit({ path: '@vfs/session/s1' })
-      // 信封没有操作枚举（S27）：先回读 stat 分辨删除与否（NotFound ⇒ 本地即时移除）；
+      // 信封没有操作枚举：先回读 stat 分辨删除与否（NotFound ⇒ 本地即时移除）；
       // 理由随请求进 `metadata.origin`，路由留痕据此可判「这一次读是为什么」
       expect(vdfsApi.statVdfs).toHaveBeenCalledWith(
         READBACK_REASON.RESOURCE_SIGNAL,

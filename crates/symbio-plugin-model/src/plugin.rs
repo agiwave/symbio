@@ -883,7 +883,7 @@ impl Plugin for ModelPlugin {
                     "traverse: 无可用 Model Provider（requested={requested:?}），跳过注册"
                 );
             }
-            // 入表：**一行一个已启用 provider**，当次生效者带**生效位**（AR-025 4b）。
+            // 入表：**一行一个已启用 provider**，当次生效者带**生效位**（DE-025 §3）。
             // 「生效者必然是目录里的一员」由此是结构而不是纪律——生效位长在目录行上：
             // 生效 provider 不在目录里（未启用 / 协议工厂不可用）⇒ 没有任何行带位
             // ⇒ 会话报「未找到可用的 Model Provider」，而不是替它挑一个别的。

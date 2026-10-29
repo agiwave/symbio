@@ -192,7 +192,7 @@ fn declaring_one_goal_does_not_declare_another() {
     assert!(!v.is_declared("目标 B"), "只有升格过的那条才算声明");
 }
 
-/// 自发发起且被采纳率 = 已升格 / 已表达（02 §3.1 外部效标 · 主动性）。
+/// 自发发起且被采纳率 = 已升格 / 已表达（DE-008 §3.1.1 外部效标 · 主动性）。
 /// 分母含「表达过但没升格」的欲——被否决 / 被忽略也是事实，不藏。
 #[test]
 fn adoption_rate_counts_unpromoted_intents_in_the_denominator() {

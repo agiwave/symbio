@@ -682,7 +682,7 @@ fn text_content_is_plain_text() {
     assert!(matches!(msgs[0].content, Some(MessageContent::Text(_))));
 }
 
-// ── ⑥ 变更格：编辑 / 删除（S2.7-b1，D-053）──────────────────────────
+// ── ⑥ 变更格：编辑 / 删除（D-053）──────────────────────────
 
 /// 一条 `message.edited`：载荷由**写侧同一条序列化路径**造出来
 /// （`serde_json::to_value(&msg)` 再包一层 `{"message": …}`，见
@@ -853,7 +853,7 @@ fn a_malformed_edit_payload_is_skipped() {
     assert_eq!(got[0].text, "问");
 }
 
-// ── ⑦ 压缩快照：**取代**前缀（S2.7-b2）────────────────────────────────
+// ── ⑦ 压缩快照：**取代**前缀────────────────────────────────
 
 /// 一条 `session.consolidated`：载荷 = 压缩后的整份消息列表（写侧把
 /// `context.messages` 逐条序列化进去，与落库那一份同源）。
@@ -1011,7 +1011,7 @@ fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
     assert_eq!(seqs, vec![1, 2, 3], "从 1 起重发，跨快照边界仍单调");
 }
 
-// ── ⑦ 诞生格：`message.added`（S2.7-b3 前置，D-054）─────────────────
+// ── ⑦ 诞生格：`message.added`（D-054）─────────────────
 
 /// 一条 `message.added`：载荷 = 完整 `ChatNode` 列表（写侧 `message_events::added`
 /// 直给，同一条序列化路径——手写 JSON 会钉住我抄的那份）。

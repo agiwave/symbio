@@ -208,7 +208,7 @@ export async function connectEventBus(): Promise<Connection> {
  * - `filter.sessionId` 可选（null/undefined 接收所有该 kind 的事件）
  * - 首次订阅时会自动触发总线连接；连接是全局单例
  *
- * ## 这里**没有**回放缓冲（S20 删除）
+ * ## 这里**没有**回放缓冲
  *
  * 曾经有一段「切换会话防乱序」的机制：订阅具体 `sessionId` 时先拉
  * `event_bus/pending/snapshot`，在快照派发完之前把实时事件缓存起来，再按
@@ -255,7 +255,7 @@ export function subscribe(
 // `VdfsChange { path, data? }`（`schemas/vdfs.ts`）。
 // 「这条变更属于哪一类资源 / 哪一个会话」由**展示地址前缀**表达，不再靠第二条频道。
 //
-// ## 信封没有操作枚举（S27）：`{path, data?}`，语义全在 `data` 的字段上
+// ## 信封没有操作枚举：`{path, data?}`，语义全在 `data` 的字段上
 //
 // `path` **恒为被变更节点自身的地址**：会话是容器，其下是若干并列的集合（消息 /
 // 子会话 / 记忆 / 工作目录，后续还会有任务列表、请求队列……），集合项的形状统一为
@@ -265,7 +265,7 @@ export function subscribe(
 // 会话节点上是 `VdfsNode` 全量视图；缺失 = 无载荷，回读收敛（资源删除回读
 // `NotFound` 即删除）。这里曾有过 `created` / `updated` / `deleted` 操作枚举与
 // 一张「按变更频率分配载荷宽度」的表，全部**没有生产性生产者**（或与载荷语义
-// 重复），S27 整体退役——判据见 `schemas/vdfs.VdfsChange`。
+// 重复），操作枚举整体退役——判据见 `schemas/vdfs.VdfsChange`。
 //
 // 顺序敏感的实时面（会话运行态 / 消息正文）**也在这条通道上**（D-025）：
 // 顺序是**节点属性**（`ChatNode.seq` 决定显示顺序），不靠到达顺序——消费端

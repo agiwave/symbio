@@ -1,7 +1,7 @@
 //! `recall` 单测 —— 投影参数（**读侧过滤**）的三条性质：排除 / 可逆 / 活参数，
 //! 外加混合打分的语义维判据。
 //!
-//! 对应 [roadmap/S10 §5](../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入") 的结论：
+//! 对应 [DE-040 §5](../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入") 的结论：
 //! 「通用性过滤」与 `memory.forgotten` 同构 ⇒ 它必须是**读侧投影参数**、不能是写侧过滤，
 //! 因为只有读侧**可逆**（改参数即可召回，事实从不丢）。`tag` 是该机制**唯一已落地**的实例，
 //! 而且是**承重**的：`memory_events::consolidate` 依赖它（只合并同标签的记忆）。
@@ -94,7 +94,7 @@ fn a_tag_filter_keeps_only_its_own_tag() {
     );
 }
 
-// ── 判据二：可逆（S10 §5.4 的「决定性理由」）────────────────────────────
+// ── 判据二：可逆（DE-040 §5.4 的「决定性理由」）────────────────────────────
 
 #[test]
 fn widening_the_filter_recalls_what_it_excluded_without_touching_the_log() {
@@ -116,7 +116,7 @@ fn widening_the_filter_recalls_what_it_excluded_without_touching_the_log() {
     );
 
     // 可逆的**机制**：两次调用之间事实源逐字节不变（读侧过滤只改视图，不改事实）。
-    // 对照写侧过滤：内容根本没落盘，放宽阈值也召不回（S10 §5.4）。
+    // 对照写侧过滤：内容根本没落盘，放宽阈值也召不回（DE-040 §5.4）。
     assert_eq!(
         store.range(Seq::new(0)),
         snap,
@@ -275,7 +275,7 @@ fn ranking_is_deterministic_when_scores_and_ts_tie() {
     assert_eq!(first.entries[0].content, "连接池太大");
 }
 
-// ── 判据六：可降级（S06 §6 验收 2 的执行方——此前无人在 recall 侧盯它）─────
+// ── 判据六：可降级（DE-036 §6 验收 2 的执行方——此前无人在 recall 侧盯它）─────
 
 #[test]
 fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
@@ -296,7 +296,7 @@ fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
     let starved = recall(VIEWER, None, None).apply(&snap, i64::MAX, Budget::new(0, 5));
     assert!(
         starved.degraded,
-        "超窗必须标 degraded（S06 §6 验收 2：检索预算耗尽 → 标降级）"
+        "超窗必须标 degraded（DE-036 §6 验收 2：检索预算耗尽 → 标降级）"
     );
     assert!(
         !starved.value.entries.is_empty(),
@@ -318,8 +318,8 @@ fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
     assert_eq!(generous.value.entries.len(), snap.len(), "一条不漏");
 }
 
-// ── as-of 与主体隔离（[04 §3.1](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
-// 步 11–13 的验收 1 / 3 / 4）──────────────────────────────────────────────────
+// ── as-of 与主体隔离（[DE-016 §10](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
+// 的 C12 / C13）──────────────────────────────────────────────────
 //
 // 这三条钉的是**投影本身**：后台巩固不得污染在途视图（C12）、遗忘是排除而不是删除、
 // `actor == viewer` 的最小隔离（C13）。换预算档、换查询都测不到它们。

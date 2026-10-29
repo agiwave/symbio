@@ -210,7 +210,7 @@ fn change_constructors_are_mount_free() {
 /// 这条断言锁两个具体的失败模式：
 ///
 /// 1. **枚举复活**——`change` 取值（`created` / `updated` / `deleted`）曾被
-///    消费端当分派键；S27 起语义全在 `data` 的字段上，`change` 字段若回来
+///    消费端当分派键；语义全在 `data` 的字段上，`change` 字段若回来
 ///    而没有生产性生产者，就是又一次「无生产者也要留着」。
 /// 2. **载荷在不需要时被序列化出去**——`data` 是 `Option` +
 ///    `skip_serializing_if`，所以绝大多数变更（资源信号）的线上形状仍是

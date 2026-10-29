@@ -3,13 +3,13 @@
 //! 能力清单是**开放集**，所以用坐标系而不是清单来保证完备：
 //!   横向五维（知/行/言/省/欲）——回答"这是什么种类的能力"，正交且合起来完备
 //!   纵向五轴（主动/时域/抽象/自我模型/自主）——回答"这条轴被抬到了第几级"
-//!   刻度四级（L1–L4，**格数由 02 §3.1 表的列数算出**）——回答"抬到了第几格"
+//!   刻度四级（L1–L4，**格数由 DE-008 §3.1 表的列数算出**）——回答"抬到了第几格"
 //! 新增能力必须回答"属于哪一维、把哪条轴抬到第几级、由哪一阶点亮"；
-//! 答不出 = 它是已有维度的组合（02 §2.1）。
+//! 答不出 = 它是已有维度的组合（DE-008 §2.2）。
 //!
 //! **本程序里没有手填的计划数据**：名册（含等级 / 类型 / 落点）、五维、五轴、刻度格数、
 //! 天梯的「核心能力」列、共线上限与登记、以及四处**声明**
-//! （02 §2 条数、§3.3 共线、§6.2 生长位、§7 社交能力的轴）都由 `facts`
+//! （DE-008 §2 条数、§3.3 共线、§6.2 生长位、§7 社交能力的轴）都由 `facts`
 //! （生成自 [02](../008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）给出，判据在这里，数据不在这里。
 //!
 //! 反向用例：假维度 / 假轴 / 越界天梯 / 越界等级 / 假类型 / 不存在的阶号必须被分类器拒绝；
@@ -38,7 +38,7 @@ fn classify(c: &facts::Capability) -> Result<(), String> {
     }
     if c.level < 1 || c.level > LEVEL_MAX {
         return Err(format!(
-            "「{}」的等级 {} 越界（应 L1-L{LEVEL_MAX}，刻度格数来自 02 §3.1）",
+            "「{}」的等级 {} 越界（应 L1-L{LEVEL_MAX}，刻度格数来自 DE-008 §3.1）",
             c.name, c.level
         ));
     }
@@ -68,7 +68,7 @@ fn counts_by_dim() -> Vec<(&'static str, usize)> {
         .collect()
 }
 
-/// 名册算出的空格子（生长位），按 02 §6.2 的「维 × 轴」写法给
+/// 名册算出的空格子（生长位），按 DE-008 §6.2 的「维 × 轴」写法给
 fn empty_cells() -> Vec<(&'static str, &'static str)> {
     DIMENSIONS
         .iter()
@@ -166,7 +166,7 @@ fn tier_core_mismatches(cores: &[facts::TierCore], caps: &[&facts::Capability]) 
 }
 
 /// 伪高阶识别：看起来高阶、实际是宽度或工程的能力。
-/// 词表是 02 §5 那张表的「说法」列，不在这里另抄一份。
+/// 词表是 DE-008 §5 那张表的「说法」列，不在这里另抄一份。
 fn is_pseudo(name: &str) -> bool {
     PSEUDO.iter().any(|p| name.contains(p))
 }
@@ -175,7 +175,7 @@ fn main() {
     println!("═══ 能力坐标系完备性 ═══");
     let caps: Vec<&facts::Capability> = CAPABILITIES.iter().collect();
     println!(
-        "名册：{} 项（02 §6.1）；维 {} 个 × 轴 {} 个 = {} 格，天梯 T1-T{}，刻度 L1-L{}，类型 {} 种",
+        "名册：{} 项（DE-008 §6.1）；维 {} 个 × 轴 {} 个 = {} 格，天梯 T1-T{}，刻度 L1-L{}，类型 {} 种",
         CAPABILITIES.len(),
         DIMENSIONS.len(),
         AXES.len(),
@@ -313,7 +313,7 @@ fn main() {
         println!("  T{t}");
     }
 
-    println!("\n═══ 伪高阶识别（词表 = 02 §5 的「说法」列）═══");
+    println!("\n═══ 伪高阶识别（词表 = DE-008 §5 的「说法」列）═══");
     for p in PSEUDO {
         println!("  {p} → 伪高阶 = {}", is_pseudo(p));
     }
@@ -419,7 +419,7 @@ fn main() {
 
     // ── 断言 ──
     assert!(bad.is_empty(), "名册每一行都必须能归入五维五轴、刻度、类型闭集与阶梯");
-    assert!(!CAPABILITIES.is_empty(), "名册为空说明 02 §6.1 被读成了一张空表");
+    assert!(!CAPABILITIES.is_empty(), "名册为空说明 DE-008 §6.1 被读成了一张空表");
     assert!(count_bad.is_empty(), "逐维条数必须与 §2 的声明一致：{count_bad:?}");
     assert!(
         missing.is_empty() && unlisted.is_empty(),

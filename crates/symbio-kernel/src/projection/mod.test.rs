@@ -1,4 +1,4 @@
-//! `projection` 单测 —— S0 出口判据 N1（投影确定性：双跑逐字节相同，[DE-016 §10 C6](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+//! `projection` 单测 —— 出口判据 N1（投影确定性：双跑逐字节相同，[DE-016 §10 C6](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 //!
 //! 纯净性本身是**编译期**的（`new` 的泛型约束）；这里守的是二级：确定性可观测。
 
@@ -11,7 +11,7 @@ fn ev(id: &str, kind: &str, verb: Verb, turn: u64) -> Event {
     Event::pending(id, kind, Entity::Turn, verb, turn, "main").with_ts(1_000)
 }
 
-/// 骨架投影：统计**交给它的事件**里某 kind 的条数（S1 起的 `turnstate` 视图从
+/// 骨架投影：统计**交给它的事件**里某 kind 的条数（起的 `turnstate` 视图从
 /// 这里长出来）。闭包只返回 `V`——降级与预算由 `apply` 统一执行（D-105）。
 fn seen_count_projection() -> Projection<usize> {
     Projection::new(|events, _now| events.iter().filter(|e| e.kind == "user.message").count())

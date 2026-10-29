@@ -7,10 +7,10 @@ use symbio_core::{Entity, Event, EventStore, Seq, Store, Verb};
 #[test]
 fn authority_defaults_match_plan_01() {
     let p = ConsolidateParams::default();
-    assert_eq!(p.max_gen, 3, "01 §8：consolidate:max_gen = 3");
+    assert_eq!(p.max_gen, 3, "DE-001 §8：consolidate:max_gen = 3");
     assert!(
         (p.min_fidelity - 0.7).abs() < f64::EPSILON,
-        "01 §8：min_fidelity = 0.7"
+        "DE-001 §8：min_fidelity = 0.7"
     );
 }
 

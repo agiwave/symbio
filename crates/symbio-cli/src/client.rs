@@ -28,7 +28,7 @@
 //! 的兜底网。根因是把「数据的属性」当成了「传输的属性」——顺序由单一订阅连接给出，
 //! 不由帧里的序号给出（D-025）。
 //!
-//! 信封没有操作枚举（S27）：形状 `{path, data?}`，语义全在 `data` 的字段上
+//! 信封没有操作枚举：形状 `{path, data?}`，语义全在 `data` 的字段上
 //! （`delta` 追加 / `content` 替换 / `status = removed` 移除）。
 //!
 //! 旧的 `kind = "session"` 事件频道（`Status` / `Update` / `Abort` 帧）已废除
@@ -105,7 +105,7 @@ fn route_log_enabled() -> bool {
 /// 顺序保证，调用侧不必 `select!` 多条连接，也不必做任何跨通道的顺序推理。
 pub enum Frame {
     /// 一条数据变更。会话归属由 `path` 给出（`<根>/session/<sid>/…`），
-    /// 语义全在 `data` 的字段上（信封没有操作枚举，S27）。
+    /// 语义全在 `data` 的字段上（信封没有操作枚举）。
     Change(Box<VdfsChange>),
     /// 背压标记：后端明示「你可能漏了变更」。唯一恢复路径是整份重读，
     /// 而 CLI 只做流式输出（已打印的正文不可回收）——留痕即可。
@@ -256,7 +256,7 @@ impl SymbioClient {
     /// `vdfs/watch` 登记进 provider 的变更表（`VdfsChangeSubscriptions::watch`）——
     /// 没有 watch 就没有 sink，也就没有任何帧会上总线。
     ///
-    /// S27 把两条下行通道并成一条（`session/stream` 退役、会话实时面迁到 `vdfs`
+    /// 两条下行通道已并成一条（`session/stream` 退役、会话实时面迁到 `vdfs`
     /// 频道）时，这里保留了 `event_bus/subscribe` 却**漏掉了 `vdfs/watch`**。
     /// 后果不是报错，而是**一条变更都收不到**：正文不渲染（stdout 为空）、
     /// 会话运行态永远停在「处理中」，一路卡到超时——与「模型没有产出内容」

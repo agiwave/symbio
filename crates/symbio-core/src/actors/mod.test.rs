@@ -1,9 +1,9 @@
-//! `actors` 单测 —— 含 **S01 闭环彩排**（零 LLM 跑通完整闭环——应答由彩排内的定值给出，
+//! `actors` 单测 —— 含 **闭环彩排**（零 LLM 跑通完整闭环——应答由彩排内的定值给出，
 //! 链路一条不少）。
 //!
-//! 彩排把 S0 的地基（store / projection / invariants）与 S1 的 ② `actors`
+//! 彩排把 地基（store / projection / invariants）与  ② `actors`
 //! 拧成一条完整链路，验收断言逐条对应
-//! [roadmap/S01 §6](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")。
+//! [DE-031 §6](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")。
 
 use super::*;
 use crate::cost_ledger;
@@ -39,7 +39,7 @@ fn seed_root(store: &EventStore) -> u64 {
         .value()
 }
 
-// ── ActorSpec / Pattern（01 §4 契约形状） ──────────────────────────────
+// ── ActorSpec / Pattern（DE-001 §4 契约形状） ──────────────────────────────
 
 #[test]
 fn trivial_spec_is_the_s01_baseline() {
@@ -57,7 +57,7 @@ fn trivial_spec_is_the_s01_baseline() {
     );
 }
 
-// ── 批①：收束闸判读**规格自己身上**的能力集 ─────────────────────
+// ── 收束闸判读**规格自己身上**的能力集 ─────────────────────
 
 /// 三种主体形态一次钉住：会话主体（`reply` ⇒ 发言放 / 产物拒）、对等主体
 /// （`produce.artifact` ⇒ 发言拒 / 产物放）、空表（平凡值 ⇒ 两臂皆拒）。
@@ -104,7 +104,7 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
 
     // 平凡值 `trivial`：权限取实（该主体自己的授权行）——`session/main` 能收束。
     // 这正是订正 trivial 空表的理由：空表下平凡值连一轮对话都收束不了
-    // （而 S01 §4 要求「平凡值下系统完整运行」）。
+    // （而 DE-031 §4 要求「平凡值下系统完整运行」）。
     let baseline = trivial_actor_spec("session/main");
     assert!(
         actor_can_land_speech(&baseline) && actor_can_land_artifact(&baseline),
@@ -155,7 +155,7 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
     }
 }
 
-// ── S01 闭环彩排 ────────────────────────────────────────────────────────
+// ── 闭环彩排 ────────────────────────────────────────────────────────
 /// 一轮完整对话：用户消息入库 → 应答 → final/fallback 入库 → 三查。
 ///
 /// 返回 (store, 收束事件 seq)；`reply = None` 模拟**无应答**（走兜底那一支）。
@@ -330,7 +330,7 @@ fn two_finals_are_caught_by_n3() {
     );
 }
 
-// ── S2 彩排：真实执行形状 ──
+// ── 彩排：真实执行形状 ──
 //
 // 接入真实模型（pattern = reasoner）→ 真实对话 → N1/N3/N5 仍全绿；
 // 兜底埋点 + 四层 budget_ms 就位 → 时延埋点可测。
@@ -581,11 +581,11 @@ async fn four_tier_budgets_are_measurable() {
         budget_exceeded(&snapshot, Some(LatencyTier::Deep.budget_ms())).is_empty(),
         "同一时延在深度档预算内"
     );
-    // 反向锚：预算表口径（01 §10）在 adapters 域的单测里逐值钉死。
+    // 反向锚：预算表口径（DE-001 §10）在 adapters 域的单测里逐值钉死。
     assert_eq!(LatencyTier::Reflex.budget_ms(), 80);
 }
 
-// ── S5 彩排：记忆链路 ──
+// ── 彩排：记忆链路 ──
 //
 // 这里留的是**内核侧**的判据：编码格子的溯源覆盖（I2）。巩固入库前的保真度
 // 闸门（N8）随 `consolidate` 住它的写方（`crates/symbio-plugin-loop`，DE-025 D-221）；
@@ -611,16 +611,16 @@ fn memory_event_without_provenance_is_caught() {
     assert!(bad[0].why.contains("记忆"), "{}", bad[0].why);
 }
 
-// ── S6 彩排：多主体与对等承诺 ──
+// ── 彩排：多主体与对等承诺 ──
 //
 // principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/no-direct-call-audit.mjs，
-// 出口判据「直连调用 0」；成对性拒绝 = S08 §6 验收 3，已在 governance 测试区覆盖）。
+// 出口判据「直连调用 0」；成对性拒绝 = DE-038 §6 验收 3，已在 governance 测试区覆盖）。
 // commitment 立约 + 声誉投影（出口判据「声誉双跑一致」）。
 
 use crate::governance::{Capability, PermissionMatrix, PrincipalPolicy, VisScope};
 use crate::projection::reputation::reputation;
 
-/// S08 §6 验收 1 + 4：thread_private 互不可见；内容可见域放宽成 public 后，
+/// DE-038 §6 验收 1 + 4：thread_private 互不可见；内容可见域放宽成 public 后，
 /// 同一主体、同一份事件切片立刻可见——证明「可见域是参数在生效」，不是投影写死。
 #[test]
 fn principals_are_isolated_until_scope_widened() {
@@ -668,7 +668,7 @@ fn principals_are_isolated_until_scope_widened() {
     assert_eq!(
         seen_by_a.len(),
         1,
-        "thread_private：A 只见自己（S08 §6 验收 1）"
+        "thread_private：A 只见自己（DE-038 §6 验收 1）"
     );
     assert_eq!(seen_by_a[0].actor, "session/a");
 
@@ -856,7 +856,7 @@ fn commitment_records_pair_by_payload_id() {
     );
     assert_eq!(
         recs[0].why, "子智能体没起来",
-        "违约原因跟着记录走（S08 §5）"
+        "违约原因跟着记录走（DE-038 §5）"
     );
     assert_eq!(recs[0].promise, "把周报整理完");
     assert_eq!(recs[0].anchor_seq, 4, "锚 = 立约那一轮开口的 seq（I2）");
@@ -864,14 +864,14 @@ fn commitment_records_pair_by_payload_id() {
     assert_eq!(recs[1].why, "", "守约的记录不该带原因");
 }
 
-// ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会") 断言 2/3/4，）──
+// ── S13 淘汰回路（[DE-043 §6](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会") 断言 2/3/4）──
 use crate::actors::EliminationDecider;
 use crate::authz::PRINCIPAL_ARBITER;
 use crate::event::Entity as VEntity;
 use crate::governance::{GrantsChange, GrantsOverlay};
 use crate::projection::reputation::{plain_score, ReputationEntry};
 
-/// S13 §6 断言 2 + 4（反向用例）：主体**自报**的声誉事件进不了投影。
+/// DE-043 §6 断言 2 + 4（反向用例）：主体**自报**的声誉事件进不了投影。
 ///
 /// 投影只认 `commitment` 实体的事件派生（`from` = 立约方），一条自称
 /// 「我声誉 99」的事件（无论落在哪个格子上）对 `reputation()` 的输出毫无影响——
@@ -1002,7 +1002,7 @@ fn should_eliminate_flips_only_below_the_threshold() {
     );
 }
 
-/// S13 §6 断言 3：淘汰 = 一条**可审计、可撤销**的 grants 变更事件。
+/// DE-043 §6 断言 3：淘汰 = 一条**可审计、可撤销**的 grants 变更事件。
 ///
 /// 三条判据各钉一边：① 事件落在 `verdict × asserted` 格、actor 是仲裁者
 /// （不是被淘汰主体——「谁做的裁决」在事实源里说得出来）；② 载荷六字段齐全
@@ -1118,7 +1118,7 @@ fn elimination_event_keeps_invariants_green() {
     );
 }
 
-// ── S7 彩排：任务树与返工 ──
+// ── 彩排：任务树与返工 ──
 //
 // DAG 调度 + readyset（C14 无环）；独立验证者（C15 不自验，构造期拒绝）；
 // 返工闭环（返工那格，返工次数有界 = 终止性前提 2）。
@@ -1191,7 +1191,7 @@ fn assert_task(store: &EventStore, id: &str, actor: &str) {
         .expect("终态必入库");
 }
 
-/// S03 §6 验收 1：构造含环依赖图（a→b→c→a）→ 无环检测必须报错。
+/// DE-033 §6 验收 1：构造含环依赖图（a→b→c→a）→ 无环检测必须报错。
 #[test]
 fn cyclic_dependency_graph_is_rejected() {
     let store = EventStore::new();
@@ -1203,7 +1203,7 @@ fn cyclic_dependency_graph_is_rejected() {
     assert!(bad[0].why.contains("依赖环"), "{}", bad[0].why);
 }
 
-/// S03 §6 验收 4（反向）：把环去掉一个依赖 → 断言 1 必须通过（检测在算，不是常量 false）。
+/// DE-033 §6 验收 4（反向）：把环去掉一个依赖 → 断言 1 必须通过（检测在算，不是常量 false）。
 #[test]
 fn breaking_one_edge_makes_graph_pass() {
     let store = EventStore::new();
@@ -1229,7 +1229,7 @@ fn dangling_dependency_is_rejected() {
     assert!(bad[0].why.contains("悬空"), "{}", bad[0].why);
 }
 
-/// S03 §6 验收 2（C15）：同一主体同时持 define.work 与 assert.verification → 拒绝。
+/// DE-033 §6 验收 2（C15）：同一主体同时持 define.work 与 assert.verification → 拒绝。
 #[test]
 fn self_verifier_is_rejected_at_construction() {
     let both = PermissionMatrix::new(vec![PrincipalPolicy::paired(
@@ -1378,7 +1378,7 @@ fn rework_creates_new_node_instead_of_rollback() {
     assert_eq!(bad.len(), 2, "上界 1 时第 2、3 轮都违规：{bad:?}");
 }
 
-/// S03 §6 验收 3：注入 N 步任务链 → 在 rework 上界内终止（全链跑完、检查全绿）。
+/// DE-033 §6 验收 3：注入 N 步任务链 → 在 rework 上界内终止（全链跑完、检查全绿）。
 #[test]
 fn n_step_chain_terminates_within_rework_bound() {
     let store = EventStore::new();
@@ -1443,7 +1443,7 @@ fn n_step_chain_terminates_within_rework_bound() {
     );
 }
 
-/// S09 §6 验收 3：grants 表高风险组合（外部执行 + 自验）→ 构造期拒绝。
+/// DE-039 §6 验收 3：grants 表高风险组合（外部执行 + 自验）→ 构造期拒绝。
 #[test]
 fn high_risk_grant_combo_is_rejected() {
     let risky = PermissionMatrix::new(vec![PrincipalPolicy::paired(
@@ -1519,13 +1519,13 @@ fn cost_ledger_accumulates_per_principal() {
     assert_eq!(ledger.value.of("session/ghost"), Default::default());
 }
 
-// ── S9 彩排：自治与学习 ──
+// ── 彩排：自治与学习 ──
 //
-// 定时触发的**授权面**（出口判据「自主写入对话 0」，roadmap/S12）留在这里；
+// 定时触发的**授权面**（出口判据「自主写入对话 0」，DE-042）留在这里；
 // 触发、长目标预算、欲治理与技能编译 / 路由的实现和用例随唯一消费方住
 // `crates/symbio-plugin-session/src/transcript/autonomous` 与 `crates/symbio-plugin-loop/src/skill_events`（D-189）。
 
-/// S12 §6 验收 2：自主发起者尝试写 `chat.assistant.final` → 授权拒绝且不产生事件。
+/// DE-042 §6 验收 2：自主发起者尝试写 `chat.assistant.final` → 授权拒绝且不产生事件。
 ///
 /// 判据查的是**生产授权表**（`authz::production_matrix`），
 /// 不是自造矩阵——自造矩阵只证明「一个我自己写的策略拒绝了我自己」，生产表改了它照样绿。
@@ -1562,10 +1562,10 @@ fn autonomous_actor_cannot_write_to_dialog() {
     );
 }
 
-// S12 §6 验收 3 + 4：长目标预算判定的实现随发起者住 `crates/symbio-plugin-session/src/transcript/autonomous`
+// DE-042 §6 验收 3 + 4：长目标预算判定的实现随发起者住 `crates/symbio-plugin-session/src/transcript/autonomous`
 // （D-189）；core 只留授权表结论（见上一条）。
 
-// 02 §2.3 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
+// [DE-001 §4.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
 // 无任何自主任务但读侧投影照常（J2 平凡值）。实现与用例随唯一消费方住
 // `crates/symbio-plugin-session/src/transcript/autonomous`（D-189）。
 

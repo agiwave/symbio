@@ -134,7 +134,7 @@ impl RebuildSeq {
 /// 出现的那一份——收束载荷的 `tool_calls[]` 与 `artifact.added` 记的是同一批调用，
 /// 只认先到的那条（它们形状相同，但结果正文只归 `artifact.added`，见模块文档）。
 ///
-/// ## 折叠：不只是追加（S2.7-b1，D-053）
+/// ## 折叠：不只是追加（D-053）
 ///
 /// 事实网格里除了「追加了什么」，还有「**改过什么**」——`message.edited` /
 /// `message.removed`。它们是**变更格**，语义不是「加一条节点」而是：
@@ -146,7 +146,7 @@ impl RebuildSeq {
 ///
 /// 少了这一段，一次截断在重建面上等于**没发生过**——被删的消息会复活。
 ///
-/// ## 压缩快照：**取代**前缀（S2.7-b2）
+/// ## 压缩快照：**取代**前缀
 ///
 /// `session.consolidated`（`message × progressed`）不是「改一条」，而是「**整段被摘要
 /// 取代**」：它的载荷就是压缩后的整份消息列表，因此重建从它**开始**——先把它那份列表
@@ -438,7 +438,7 @@ fn reported_node(e: &Event) -> ChatNode {
     m
 }
 
-/// 对话面开场白（`turn × asserted`，）：`Escalate` 首响。
+/// 对话面开场白（`turn × asserted`）：`Escalate` 首响。
 ///
 /// 形状经 [`crate::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
 /// 及 `reported_node` 同一条纪律：构造只有一份，漂移才不可能）。理由码与

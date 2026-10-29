@@ -1,9 +1,9 @@
 import './_selfrun.mjs';
-// T22 对话面措辞（S3）：模板产线零 LLM / 生成产线答话进请求包 / 首响被剔除 / 卸载与开关。
+// T22 对话面措辞：模板产线零 LLM / 生成产线答话进请求包 / 首响被剔除 / 卸载与开关。
 //
 // ## 本用例钉的是什么
 //
-// S3 让 `compose` 真的开始说话，并把 `session` 接上它。判决是**枚举**（S2 已落位），
+// S3 让 `compose` 真的开始说话，并把 `session` 接上它。判决是**枚举**（已落位），
 // 措辞是**文本**——本用例验的不是"插件返回了什么字符串"，而是**会话转写里多出了
 // 什么、请求包里少了什么**：
 //
@@ -194,7 +194,7 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         gateway: gatewayConfig(GATEWAY_PORT),
-        // 判决 / 措辞出厂默认 `true`（S3 起），开场白出厂默认 `false`（机制化前端后）。
+        // 判决 / 措辞出厂默认 `true`（起），开场白出厂默认 `false`（机制化前端后）。
         // 这里仍**显式**写出三个值，是让本用例的前提自证——不依赖默认值，翻转默认值
         // 不会悄悄改变本用例验的是什么：`opening_enabled: true` 正是 B 线第 2 步
         // 那句 `Escalate` 首响（OPENING_NEEDS_WORK）能出现的前提。

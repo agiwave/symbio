@@ -99,7 +99,7 @@ async fn replace_all_is_silent_set_is_announced() {
     assert_eq!(paths, vec!["loud".to_string()]);
     assert!(
         seen.read().unwrap()[0].data.is_none(),
-        "资源信号无载荷：信封没有操作枚举（S27），消费端回读收敛"
+        "资源信号无载荷：信封没有操作枚举，消费端回读收敛"
     );
 
     // 整表替换同样是静默的（且丢掉旧条目）

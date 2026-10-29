@@ -22,7 +22,7 @@
 //! 执行点只有一个（`batch::prepare_call` 的 [`first_refusal`]），于是「宿主还有几道
 //! 闸、各自什么出口」读这张表即可。
 //!
-//! **出口不对称是表的一列，不是被抹平的差异**（S09 §6）：
+//! **出口不对称是表的一列，不是被抹平的差异**（DE-039 §6）：
 //! - [`RefusalTrace::ZeroEvent`]：拒止**不产事件**（外部执行 `Refuse`，验收 1）；
 //! - [`RefusalTrace::Recorded`]：拒因**入格**，经出参交回随收束落 `task.controlled`
 //!   （外部执行 `Break`，验收 2）；
@@ -41,9 +41,9 @@ use symbio_plugin_api::effects::{BeforeReadings, BeforeRefusal};
 pub(crate) struct GateReadings {
     /// `MODE` 配置读数（`interactive` 下本批可在前序待用户时中止）。
     pub(crate) mode: String,
-    /// 熔断 `gate-timeout` 的起算时刻（量「这份输入已经读了多久」，）。
+    /// 熔断 `gate-timeout` 的起算时刻（量「这份输入已经读了多久」）。
     pub(crate) gate_started: std::time::Instant,
-    /// 外部执行闸门判据（S8）。
+    /// 外部执行闸门判据。
     pub(crate) breaker: BreakerInputs,
     /// 工具自声明的行为位。
     pub(crate) decls: ToolDecls,
@@ -130,7 +130,7 @@ pub(crate) async fn read_batch_gates(
         assign_work_revoked: elimination_revoked,
     };
     let principal = batch_principal(&ctx);
-    // 工具自声明的行为位同批首读一次（见 `ToolDecls`，）：声明闸的管辖对象与效果
+    // 工具自声明的行为位同批首读一次（见 `ToolDecls`）：声明闸的管辖对象与效果
     // 端口的选实现依据都是它，按工具名判的那份副本因此不再存在。没有 visitor ⇒
     // 声明为空 ⇒ 声明闸都不命中、效果端口也无事可做（缺声明与漏声明同形，e2e 兜行为）。
     //
@@ -159,7 +159,7 @@ pub(crate) async fn read_batch_gates(
         })
         .collect();
 
-    // 同参重复调用的**台账**（[] 步 2）：批首收进本批之外已出现过的调用签名，
+    // 同参重复调用的**台账**：收进此前已出现过的调用签名，
     // 之后每处理一条调用就登记一条。登记以**模型发出的调用**为准，被闸门拒掉的也算
     // ——「绕圈」是模型侧的事实，与本次执行成败无关。
     let current_call_ids: Vec<String> = tool_calls.iter().filter_map(|tc| tc.id.clone()).collect();
@@ -181,7 +181,7 @@ pub(crate) async fn read_batch_gates(
 
 // ── 闸门表与拒止骨架──────────────────────────────────────────────
 
-/// 一次拒止的失败语义——**出口不对称的登记处**（S09 §6）。
+/// 一次拒止的失败语义——**出口不对称的登记处**（DE-039 §6）。
 ///
 /// 四个变体不是四份实现，而是四种**事实出口**：它们决定 [`refuse`] 是否把理由
 /// 交回入格、是否记违约承诺。把差异收进类型而不是抹平，是为了让「哪类拒止留下
@@ -306,7 +306,7 @@ pub(crate) const GATES: &[GateRow] = &[GateRow {
     traces: &[RefusalTraceKind::ZeroEvent, RefusalTraceKind::Recorded],
 }];
 
-/// 闸门结论（S8，[roadmap/S09 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
+/// 闸门结论（[DE-039 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateDecision {
     /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
@@ -318,7 +318,7 @@ pub enum GateDecision {
     Allow,
 }
 
-/// 熔断闸门（S8，[roadmap/S09](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
+/// 熔断闸门（[DE-039](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 ///
 /// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
 /// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。
@@ -379,7 +379,7 @@ impl CircuitBreaker {
     }
 }
 
-/// 外部执行闸（S8）：授权 + 时延 / 预算。判据紧贴执行窗口之前、
+/// 外部执行闸：授权 + 时延 / 预算。判据紧贴执行窗口之前、
 /// **先于 PreToolUse 钩子**——对一通马上要被拒的调用先跑钩子，等于让拒绝白白
 /// 付一次钩子往返。
 fn external_execution(ctx: &GateContext<'_>) -> Option<Refusal> {
@@ -477,7 +477,7 @@ pub(crate) async fn refuse(
         reason = refusal.reason
     );
 
-    // `Break` 才入格：`Refuse` 按 S09 §6 验收 1 不得产生任何事件。
+    // `Break` 才入格：`Refuse` 按 DE-039 §6 验收 1 不得产生任何事件。
     if let Some(reason) = refusal.trace.break_reason() {
         if !breaks.contains(&reason) {
             breaks.push(reason);

@@ -38,7 +38,7 @@ pub fn pattern_for_principal(principal: &str) -> Pattern {
     }
 }
 
-/// S01 的平凡值主体（[roadmap/S01 §4](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")）：
+/// 平凡值主体（[DE-031 §4](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")）：
 /// 全规则驱动、预算放宽、单主体——平凡值下系统完整运行。
 ///
 /// **测试面**构造点（ADR-067：生产按真实授权行立规格）；`cfg(test)` 挂在这里，
@@ -87,10 +87,10 @@ pub fn actor_can_land_artifact(spec: &ActorSpec) -> bool {
     holds(spec, crate::governance::Capability::ProduceArtifact.name())
 }
 
-/// 写侧判定（S07 **抢占判定者**）：本规格能否落控制事实（`task.held` / `control`）。
+/// 写侧判定（**抢占判定者**）：本规格能否落控制事实（`task.held` / `control`）。
 ///
 /// 与收束两臂并列的第三个能力读方：`judge.intent` 是判定者的**全部**权威
-/// （[S07 §5](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")
+/// （[DE-037 §5](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")
 /// 「判定者不得直接发言」——它没有 `reply.*`，只有 `judge.intent`，由
 /// `authz::ROWS` 那一行保证）。该字段在生产里必须**真被读**：`inbox`
 /// 直驱判定者时若绕开规格、写控制事实也不查 `judge.intent`，这条权威就只是声明。
@@ -98,10 +98,10 @@ pub fn actor_can_judge_intent(spec: &ActorSpec) -> bool {
     holds(spec, crate::governance::Capability::JudgeIntent.name())
 }
 
-/// 写侧判定（S13 **仲裁者**）：本规格能否落裁决事实（`verdict.asserted`）。
+/// 写侧判定（**仲裁者**）：本规格能否落裁决事实（`verdict.asserted`）。
 ///
 /// 与 [`actor_can_judge_intent`] 同一条纪律的第四个能力读方：`assert.verification`
-/// 是仲裁者的**全部**权威（S13 §3 三角色行），C15 构造期保证持它的那一行不持
+/// 是仲裁者的**全部**权威（DE-043 §3 三角色行），C15 构造期保证持它的那一行不持
 /// `define.work` / `produce.artifact`（不成对自验）。轮末淘汰步
 /// （`crates/symbio-plugin-loop/src/derived_facts::record_elimination`）写裁决前读它——缺能力 ⇒
 /// 一条裁决都不写（fail-closed：没有资格的判定不该留下事实）。
@@ -112,11 +112,11 @@ pub fn actor_can_assert_verification(spec: &ActorSpec) -> bool {
     )
 }
 
-/// 写侧判定（S04 **调度者**）：本规格能否落发放事实（`task.ready` /
+/// 写侧判定（**调度者**）：本规格能否落发放事实（`task.ready` /
 /// `task.assigned`）。
 ///
 /// 第五个能力读方，与收束两臂 / 判意图 / 盖章同一条纪律：`assign.work` 是调度者的
-/// **全部**权威（S04 §3 的 ActorSpec 行只持它），写点读规格而不回头查表。
+/// **全部**权威（DE-034 §3 的 ActorSpec 行只持它），写点读规格而不回头查表。
 /// 缺它 ⇒ 调度者一条事实都不写（fail-closed）——没有资格的调度不该留下「我派过」
 /// 的痕迹。
 pub fn actor_can_assign_work(spec: &ActorSpec) -> bool {

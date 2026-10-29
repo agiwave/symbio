@@ -299,7 +299,7 @@ export default defineCase(
         // 父会话的承诺族：委派成功 ⇒ opened + released。
         const offered = r2Events.find((e) => e.kind === 'commitment.opened');
         const released = r2Events.find((e) => e.kind === 'commitment.released');
-        assert(offered, '委派先立约（代际立约，S08）');
+        assert(offered, '委派先立约（代际立约）');
         assert(released, '工人真跑完 ⇒ 守约了结（不是违约）');
         assertEq(offered.actor, 'session/main', '承诺方 = 父会话主体');
 

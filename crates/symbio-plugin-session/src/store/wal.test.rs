@@ -1,4 +1,4 @@
-//! `wal` 单测 —— S4 两步的出口判据（[roadmap/S05 §6](../../../../docs/003-design/035-长会话与断点恢复.md "DE-035-长会话与断点恢复")
+//! `wal` 单测 —— S4 两步的出口判据（[DE-035 §6](../../../../docs/003-design/035-长会话与断点恢复.md "DE-035-长会话与断点恢复")
 //! 四条验收逐条落地）+ C11 / N2（崩溃恢复后投影 == 崩溃前投影）。
 
 use super::*;
@@ -114,7 +114,7 @@ fn torn_tail_line_is_not_committed() {
 fn recovery_projection_is_byte_identical_to_pre_crash() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("events.jsonl");
-    // 崩溃前的完整对话（S01 闭环形状）。
+    // 崩溃前的完整对话（闭环形状）。
     {
         let store = EventWalStore::open(&path).unwrap();
         store
@@ -180,7 +180,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
         before_cp.value, after_cp,
         "C11：恢复后 checkpoint == 崩溃前（逐字节）"
     );
-    // 恢复后 seq 仍单调（S05 §5：恢复后 seq 单调的 CI 断言）。
+    // 恢复后 seq 仍单调（DE-035 §5：恢复后 seq 单调的 CI 断言）。
     assert!(
         check_all(vocab(), &snapshot).is_empty(),
         "{:?}",
@@ -303,7 +303,7 @@ fn duplicate_is_rejected_after_recovery() {
     );
 }
 
-/// 断点状态可序列化且可回读（S05 §5：checkpoint 可序列化——序列化失败有信号）。
+/// 断点状态可序列化且可回读（DE-035 §5：checkpoint 可序列化——序列化失败有信号）。
 ///
 /// 往返直接走 JSON：断点是**派生视图**（恢复 = 重放 + 投影），没有「写回事件」
 /// 这一步，所以序列化的对象就是状态本身。
@@ -390,7 +390,7 @@ fn open_readonly_on_a_missing_file_creates_nothing() {
     );
 }
 
-/// 批 0 反向用例（plan/11 §3 批 0 判据）：
+/// 反向用例：
 /// 两个写者交错 ⇒ 第二个拿不到写者令牌、`append` 返回 `NotTheWriter`，且**盘上零丢失**。
 ///
 /// 这是本批的核心：在此之前「单写者」只由进程内 `RwLock` 保证，第二个写者会静默地
@@ -542,7 +542,7 @@ fn writer_token_is_released_when_the_store_drops() {
     assert_eq!(second.head().value(), 2, "接手后继续单调递增");
 }
 
-// ── 段归档（S2.7-b2）：被取代的前缀移入归档段，live 从 cut 起 ──────────────
+// ── 段归档：被取代的前缀移入归档段，live 从 cut 起 ──────────────
 
 /// 造 `n` 条事件（号 0..n）并返回（临时目录, WAL 路径, 持令牌的实例）。
 fn seeded(n: usize) -> (tempfile::TempDir, std::path::PathBuf, EventWalStore) {
@@ -732,7 +732,7 @@ fn reopening_after_archival_sees_only_the_live_tail() {
 /// 「被取代」由折叠侧处理（`mutations_latest_snapshot` 从最近一份快照起折）。
 /// 按布局分叉的第二个口（只给 live 窗口）会让「读哪个」取决于调用方是否知道
 /// 「这条会话压缩过没有」——那是布局泄漏进抽象
-/// （[plan/14 §2.2](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）。
+/// （[DE-001 §4.3](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源）。
 #[test]
 fn range_unions_archives_with_live_in_seq_order() {
     let (_dir, _path, store) = seeded(12);

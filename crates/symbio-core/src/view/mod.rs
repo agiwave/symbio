@@ -33,8 +33,8 @@ pub fn is_agent_id(id: &str) -> bool {
     principal_namespace(id).is_some_and(|ns| AGENT_NAMESPACES.contains(&ns))
 }
 
-/// **可见域的平凡判据**（plan/11 批 1 ③，
-/// S08 §4 的 `vis_scope` 平凡值）：`actor` 这条事实在 `viewer` 的视图里可见吗？
+/// **可见域的平凡判据**（[DE-001 §12.1](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
+/// 的 `vis_scope` 平凡值）：`actor` 这条事实在 `viewer` 的视图里可见吗？
 ///
 /// 三条规则，一条判定方（判据在 [] 后由前缀切到命名空间登记表）：
 ///

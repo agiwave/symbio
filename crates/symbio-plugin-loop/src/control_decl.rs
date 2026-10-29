@@ -154,9 +154,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         &[FactRole::StopsTurn],
     ),
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Turn, Verb::Asserted)),
-    // 记忆找回（S5）：行表与事实表已经在用这个名字。
+    // 记忆找回：行表与事实表已经在用这个名字。
     EventDecl::new(EVENT_MEMORY_RECALLED, (Entity::Memory, Verb::Asserted)),
-    // 巩固与遗忘（S5 的两格）：写方 `memory_events::consolidate`、读方 [`crate::recall`]
+    // 巩固与遗忘（的两格）：写方 `memory_events::consolidate`、读方 [`crate::recall`]
     // 都在本插件，名字与格位因此随本插件声明（DE-024 D-201）。同族的 `memory.encoded` /
     // `memory.calibrated` 走另一条：`session` 也读它们，名字因此登记进本插件清单的
     // `shared_events`，格位仍由本插件交出（DE-024 D-204 / D-205），不回内核。
@@ -170,7 +170,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
     // 校准观测：技能**被用过之后**的一次命中 / 回退记录（`payload: { skill_id, fallback }`）。
     //
-    // 为什么不能继续复用 `memory.recalled`：那是 S11 §3 的省格决定，代价落在**读侧**——
+    // 为什么不能继续复用 `memory.recalled`：那是 DE-041 §3 的省格决定，代价落在**读侧**——
     // 校准投影只能靠载荷有没有这两个字段认自己的输入，同一张格子两种语义，判别退化成
     // 「谁恰好带了这两个字段」，那不是闭集：任何将来带这两个字段的事件都会被算进置信度。
     // 给它一格后读侧按名字过滤，判别回到闭集；写侧不变（仍是轮末 `derived_facts` 收束族，
@@ -183,7 +183,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 控制面的一格（写方两个插件各一处：工具闸的熔断 / 拒因在本插件，打断处置在
     // `session` 的 inbox）：owner 是本插件，名字走清单生成，不回内核。
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
-    // ── 任务族（S7 / S04 / S07）──
+    // ── 任务族（/ S04 / S07）──
     //
     // 这一族的五格此前由内核命名，而写方与调度者全在本插件、读数被 `session` 的
     // `stats` 列消费——名字随 owner 登记进清单（DE-024 D-204），折叠在构造期收这张表
@@ -194,8 +194,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 推进：执行中的普通事实。在 `readyset` 里它同时是**解除挂起**——挂起是一条事件，
     // 恢复也是一条。
     EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)),
-    // 暂挂（插话抢占 / 等外部资源；roadmap/S07 里这一格叫 `task.blocked`，
-    // 本仓库以 `task.held` 单点定义）。写方是 `session` 的收件箱（批⑩）。
+    // 暂挂（插话抢占 / 等外部资源；DE-037 里这一格叫 `task.blocked`，
+    // 本仓库以 `task.held` 单点定义）。写方是 `session` 的收件箱。
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)),
     // 终态：验证通过（验收通过才终态）。
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)),
@@ -273,7 +273,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
             "terminated",
         ],
     },
-    // 助手文本事实的另一半（`report_due` 的「最近一句」锚点，）：
+    // 助手文本事实的另一半（`report_due` 的「最近一句」锚点）：
     // 兜底与收束同为 `Closed`，其余三格落 `turn × asserted / progressed`。
     FactDecl {
         name: "chat.assistant.fallback",
@@ -317,7 +317,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
         expand: &[],
         fields: &["text", "status"],
     },
-    // 阶段事实：`result` 是这一步的结论（召回命中 / 续写种类，）。
+    // 阶段事实：`result` 是这一步的结论（召回命中 / 续写种类）。
     //
     // `model_calls` 是**这一步打了几次模型**（D-122 决策 4 / 5）：`source` 记的是
     // 判决的**来源**，读不出「有没有打过模型」（模型调了而应答不可解析 ⇒

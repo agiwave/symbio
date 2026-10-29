@@ -1,6 +1,6 @@
 //! `actors` —— 主体（②，[DE-001 §4](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 //!
-//! ## 形状（01 §4 的五字段，一字未增）
+//! ## 形状（DE-001 §4 的五字段，一字未增）
 //!
 //! `model` 与 `context` **不是字段**：`model` 是 `pattern` 的函数（Decider→无、
 //! Reasoner→LLM、Translator→小模型），`context` 是 `projection` 的参数——

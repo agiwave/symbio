@@ -230,7 +230,7 @@ test('CI：无差异 ⇒ 通过（不误报）', async () => {
 test('链：中间态有差异而末态没有 ⇒ 绿（逐格 autoWork 会在这里恒红）', async () => {
   const f = 'c1.rs'
   write(f, 'clean-one\n') // 与 HEAD 一致：跑之前是干净的
-  // 步 1 写成「半成品」，步 2 再写成末态（= HEAD 那一版）。
+  // `'step-1'` 写成「半成品」，`'step-2'` 再写成末态（= HEAD 那一版）。
   const r = await chain({ 'step-1': { [f]: '半成品' }, 'step-2': { [f]: 'clean-one\n' } })
   assert.equal(r.ok, true, '末态没有差异 ⇒ 不该红，也不该有 note')
   assert.equal(r.note, undefined)

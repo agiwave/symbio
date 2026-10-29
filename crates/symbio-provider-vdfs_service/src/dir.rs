@@ -300,7 +300,7 @@ impl DirVdfs {
     }
 
     fn announce(&self, id: &str, _created: bool) {
-        // 信封没有操作枚举（S27）：「新建还是更新」不再单独成字段——
+        // 信封没有操作枚举：「新建还是更新」不再单独成字段——
         // 消费端回读即得当前状态，不需要为它保留一个分派键。
         vdfs_notify_change(&self.kind, id);
     }

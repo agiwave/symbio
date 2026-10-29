@@ -142,7 +142,7 @@ fn delegation(id: &str, promise: &str, ok: bool, why: &str) -> EffectInput {
     }
 }
 
-/// 代际立约（S08 §3「加格子，不加机制」）：
+/// 代际立约（DE-038 §3「加格子，不加机制」）：
 /// 本轮的 `agent_run` 委托落成 `commitment.opened` → `released`，**同锚在本轮开口**。
 #[test]
 fn settled_delegation_becomes_commitment_opened_then_released() {
@@ -258,8 +258,8 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
     );
 }
 
-/// 违约必须可观测（S08 §5）：`broken` 带 `why`，并**宣告**给承诺对象——
-/// 宣告仍是同一份事实源里的一格，不是新通道（S08 §2「通信 = 没有直连」）。
+/// 违约必须可观测（DE-038 §5）：`broken` 带 `why`，并**宣告**给承诺对象——
+/// 宣告仍是同一份事实源里的一格，不是新通道（DE-038 §2「通信 = 没有直连」）。
 #[test]
 fn breached_delegation_is_declared_to_the_counterparty() {
     let store = EventStore::new();
@@ -297,7 +297,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
     assert_eq!(
         broken.payload.get("why").and_then(|v| v.as_str()),
         Some("子会话中途失败"),
-        "违约必须带 why（可观测，S08 §5）"
+        "违约必须带 why（可观测，DE-038 §5）"
     );
 
     let asserted = snap
@@ -323,7 +323,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
 
 /// `Break` 的理由落成 `control × opened`，溯源锚是本轮开口；`breaks` 为空 ⇒ 一格都不落。
 ///
-/// 这是 [roadmap/S09 §6](../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断") 的两条
+/// 这是 [DE-039 §6](../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断") 的两条
 /// **相反**验收：验收 1（未授权 ⇒ 拒绝且不产生事件）与验收 2（预算耗尽 ⇒ 必须产出
 /// 熔断事件）。两条必须由**同一个出参**分别触发——有理由就落、没理由就不落；
 /// 「反正都落一条」违反 1，「反正都不落」违反 2。
@@ -353,7 +353,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
     let brk = snap
         .iter()
         .find(|e| e.entity == Entity::Control && e.verb == Verb::Opened)
-        .expect("熔断必须成格（S09 §6 验收 2：不允许静默继续）");
+        .expect("熔断必须成格（DE-039 §6 验收 2：不允许静默继续）");
     assert_eq!(
         brk.payload.get("reason").and_then(|v| v.as_str()),
         Some("budget-exhausted"),
@@ -387,15 +387,15 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
     );
     assert!(
         !snap.iter().any(|e| e.entity == Entity::Control),
-        "没有熔断理由 ⇒ 不产生任何事件（S09 §6 验收 1）"
+        "没有熔断理由 ⇒ 不产生任何事件（DE-039 §6 验收 1）"
     );
 }
 
-/// 记忆三段（步 11 编码 / 步 12 检索锚 / 步 13 巩固）全部在同一份 WAL 里可读，
+/// 记忆三段（编码 / 检索锚 / 巩固）全部在同一份 WAL 里可读，
 /// 且 `check_all` 全绿（溯源 100%）。
 ///
 /// 端到端接线由 `turn_exec.test.rs::full_turn_lands_memory_and_learning_facts` 带反向
-/// 自检覆盖；本用例钉的是**巩固要用刷新后的快照**——步 11 刚写下的那条必须对步 13
+/// 自检覆盖；本用例钉的是**巩固要用刷新后的快照**——编码 刚写下的那条必须对巩固
 /// 可见（先巩固后编码会让第 4 条永远等不到代数 1）。
 #[test]
 fn record_learning_wires_all_three_memory_steps() {
@@ -434,9 +434,9 @@ fn record_learning_wires_all_three_memory_steps() {
                 && e.event_id.starts_with("v2m-"))
             .count(),
         4,
-        "步 11：每轮各编码一条经验"
+        "编码：每轮各编码一条经验"
     );
-    // 步 11b：判断编码同文去重——四轮收束都是同一句「答」，
+    // 判断编码：判断编码同文去重——四轮收束都是同一句「答」，
     // 跨标签同文也只记一条（`contains_content` 比的是全部记忆）。
     assert_eq!(
         snap.iter()
@@ -444,11 +444,11 @@ fn record_learning_wires_all_three_memory_steps() {
                 && e.event_id.starts_with("v2j-"))
             .count(),
         1,
-        "步 11b：判断每轮各编一条，同文去重（四轮同一句 ⇒ 只一条）"
+        "判断编码：判断每轮各编一条，同文去重（四轮同一句 ⇒ 只一条）"
     );
     snap.iter()
         .find(|e| e.kind == EVENT_MEMORY_CONSOLIDATED)
-        .expect("步 13：第 4 条到齐即触发巩固（编码先于巩固 ⇒ 刚写的那条对巩固可见）")
+        .expect("巩固：第 4 条到齐即触发巩固（编码先于巩固 ⇒ 刚写的那条对巩固可见）")
         .payload
         .get("generation")
         .and_then(|v| v.as_u64())
@@ -462,7 +462,7 @@ fn record_learning_wires_all_three_memory_steps() {
         "最旧的两条源记忆被排除式遗忘（Log 不删，只是投影不再包含）"
     );
 
-    // 步 12：视图在收束前读出，收束时才落成事实（溯源锚那时才存在）。
+    // 检索：视图在收束前读出，收束时才落成事实（溯源锚那时才存在）。
     let view = recall(symbio_core::PRINCIPAL_USER, None, None)
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
@@ -489,7 +489,7 @@ fn record_learning_wires_all_three_memory_steps() {
     let recalled = snap
         .iter()
         .find(|e| e.kind == EVENT_MEMORY_RECALLED)
-        .expect("步 12：检索事实入格");
+        .expect("检索：检索事实入格");
     let fifth_user = snap
         .iter()
         .rfind(|e| e.kind == EVENT_USER_MESSAGE)
@@ -506,7 +506,7 @@ fn record_learning_wires_all_three_memory_steps() {
     );
 }
 
-// ── 淘汰回路（S13 §3，）：轮末声誉裁决 ──────────────────────────────
+// ── 淘汰回路（DE-043 §3）：轮末声誉裁决 ──────────────────────────────
 
 /// 一轮**违约**的委托 ⇒ 声誉 −1 ⇒ 轮末写一条 `verdict.asserted` 收回 `assign.work`。
 ///

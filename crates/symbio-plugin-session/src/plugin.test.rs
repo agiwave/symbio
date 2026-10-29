@@ -115,7 +115,7 @@ fn config_definition_defaults_come_from_session_config() {
 /// ## 为什么「少一个字段」是要害，不是样式问题
 ///
 /// 少登记的字段就是「能力在后端存在、产品里既设不了也看不见」：`skill_compile_enabled`
-/// （S11 技能编译）与 `conation_enabled`（S12 自主层）这两个**高阶能力的开关**曾长期
+/// （技能编译）与 `conation_enabled`（自主层）这两个**高阶能力的开关**曾长期
 /// 只躺在 `session/PLUGIN.yml` 里，前端设置页没有任何控件——用户根本开不了它们，
 /// 于是那些能力的「存在」在导航层不可达，等于虚假实现。
 ///

@@ -522,8 +522,8 @@ symbio_core::submit_object_creator!(PLUGIN_ID_SESSION, SessionPlugin::build, dyn
 ///
 /// 字段键集合与 `SessionConfig` 序列化后的键集合**完全相等**，由单测
 /// `config_definition_covers_every_session_config_field` 守着。少一个字段就是
-/// 「开关存在、产品里开不了」——`skill_compile_enabled`（S11 技能编译）与
-/// `conation_enabled`（S12 自主层）这两个**高阶能力**的开关曾长期只躺在配置文件里，
+/// 「开关存在、产品里开不了」——`skill_compile_enabled`（技能编译）与
+/// `conation_enabled`（自主层）这两个**高阶能力**的开关曾长期只躺在配置文件里，
 /// 前端设置页根本没有它们的控件，正是这条判据要防的形态。
 ///
 /// ## 默认值单一真源

@@ -5,17 +5,17 @@
 //!
 //! 1. `agent:main` 持 6 项、**不持验证**（C15 不自验），首响与追加发言都放行；
 //! 2. **自主发起者那一行比主智能体窄**（只持 `define.work`、不持 `reply.*`，
-//!    S12 §3/§5「自主行为不得冒充用户对话」）；
+//!    DE-042 §3/§5「自主行为不得冒充用户对话」）；
 //! 3. **抢占判定者那一行比主智能体窄**（只持 `judge.intent`、不持 `reply.*`，
-//!    S07 §5「判定者不得直接发言」）；
-//! 4. **对等主体那一行比主智能体窄**（只持 `produce.artifact`，S08 §3——第一个
+//!    DE-037 §5「判定者不得直接发言」）；
+//! 4. **对等主体那一行比主智能体窄**（只持 `produce.artifact`，DE-038 §3——第一个
 //!    对等/图侧主体，窄于主智能体那一行）；
 //! 5. 取表口只有一条口径（[D-099]）：**表是权威**，登记过的主体拿自己那一行，
 //!    未登记的主体在表里没有行 ⇒ 每个谓词为假（fail-closed）；
 //! 6. 读写两侧的闸按**属主 / 矩阵成员**分：主智能体与属主各得其所，`user` 不入表
 //!    （发言不是能力），矩阵外主体拒绝；表构造失败时的降级面（空矩阵）一概拒绝
 //!    ——fail-closed 不因降级而松开；
-//! 7. **工人 / 规划者 / 验证者三行比主智能体窄**（S02/S03 三角色， 行与路径
+//! 7. **工人 / 规划者 / 验证者三行比主智能体窄**（三角色， 行与路径
 //!    同批）：各自单能力独持，`production_matrix` 拿登记行，C15 两面（规划者不认证、
 //!    验证者不产出）在表这一层可见；
 //! 8. **绑定即登记**（[D-100]）：未部署的主体经绑定拿到来源行——能力随绑定来、
@@ -47,7 +47,7 @@ fn main_agent_row_is_the_documented_shape() {
     );
 }
 
-/// 自主发起者那一行（S12 §3）：**比主智能体窄**——只持 `define.work`，不持任何 `reply.*`。
+/// 自主发起者那一行（DE-042 §3）：**比主智能体窄**——只持 `define.work`，不持任何 `reply.*`。
 ///
 /// 这一行是本表里第一条「少给」的记录：它是这一主体的**全部能力来源**——
 /// 「自主行为不得冒充用户对话」与断言同方向（D-099：未登记 = 拒，窄行是唯一入口）。
@@ -71,7 +71,7 @@ fn the_autonomous_row_is_narrower_than_main() {
     );
 }
 
-/// 抢占判定者那一行（S07 §5）：**比主智能体窄**——只持 `judge.intent`，不持任何 `reply.*`。
+/// 抢占判定者那一行（DE-037 §5）：**比主智能体窄**——只持 `judge.intent`，不持任何 `reply.*`。
 ///
 /// 判据落在**生产表**上（`production_matrix`），不再是自造矩阵：自造矩阵只证明
 /// 「我拒我」，表里少一行它照样绿。D-099 之后方向与断言同向：表是权威，
@@ -87,7 +87,7 @@ fn the_reflex_row_is_narrower_than_main() {
     );
     assert!(
         !matrix.can_reply(PRINCIPAL_REFLEX) && !matrix.can_reply(PRINCIPAL_REFLEX),
-        "判定者不得直接发言（首响与追加都不放行，S07 §5）"
+        "判定者不得直接发言（首响与追加都不放行，DE-037 §5）"
     );
     assert_eq!(
         matrix.sees_of(PRINCIPAL_REFLEX),
@@ -105,10 +105,10 @@ fn the_reflex_row_is_narrower_than_main() {
     assert!(!matrix.can_reply(PRINCIPAL_REFLEX));
 }
 
-/// 对等主体那一行（S08 §3）：**第一个对等（图侧）主体的窄行**——只持 `produce.artifact`，
+/// 对等主体那一行（DE-038 §3）：**第一个对等（图侧）主体的窄行**——只持 `produce.artifact`，
 /// 严格窄于主智能体。
 ///
-/// S08 §3.1 的纪律：对等主体出现必须**自带窄行同批落地**——窄行是它唯一的入口
+/// DE-038 §3.1 的纪律：对等主体出现必须**自带窄行同批落地**——窄行是它唯一的入口
 /// （D-099：表是权威，未登记 = 拒）。
 #[test]
 fn the_peer_row_is_narrower_than_main() {
@@ -117,7 +117,7 @@ fn the_peer_row_is_narrower_than_main() {
     assert_eq!(caps.len(), 1, "只持 produce.artifact：{caps:?}");
     assert!(
         matrix.can_write(PRINCIPAL_PEER, Capability::ProduceArtifact),
-        "对等体的权威动作是产生产物（S08 §3 的 ActorSpec 行），否则这一行没有理由存在"
+        "对等体的权威动作是产生产物（DE-038 §3 的 ActorSpec 行），否则这一行没有理由存在"
     );
     assert!(
         !matrix.can_reply(PRINCIPAL_PEER) && !matrix.can_reply(PRINCIPAL_PEER),
@@ -143,7 +143,7 @@ fn the_peer_row_is_narrower_than_main() {
     );
 }
 
-/// 组织形态三角色（S13 §3，）：市场 / 仲裁 / 守门三行**各自单能力独持**，
+/// 组织形态三角色（DE-043 §3）：市场 / 仲裁 / 守门三行**各自单能力独持**，
 /// 且都严格窄于主智能体那一行。
 ///
 /// 与自主 / 判定 / 对等三行同一条纪律：主体出现必须自带窄行同批落地——窄行是唯一
@@ -167,10 +167,10 @@ fn the_three_society_rows_are_narrower_than_main() {
     assert_eq!(
         matrix.sees_of(PRINCIPAL_MARKET),
         Some(VisScope::Public),
-        "S13 §3：市场公告 vis_scope = public——取这个值的第一行"
+        "DE-043 §3：市场公告 vis_scope = public——取这个值的第一行"
     );
 
-    // 仲裁者：只盖章（assert.verification），本表验证能力的持有者之一（另一行 = verifier，）。
+    // 仲裁者：只盖章（assert.verification），本表验证能力的持有者之一（另一行 = verifier）。
     let arbiter = matrix.grants_of(PRINCIPAL_ARBITER);
     assert_eq!(arbiter.len(), 1, "只持 assert.verification：{arbiter:?}");
     assert!(matrix.can_write(PRINCIPAL_ARBITER, Capability::AssertVerification));
@@ -239,7 +239,7 @@ fn the_three_role_rows_are_narrower_than_main() {
     let matrix = production_matrix();
     let main_len = matrix.grants_of(PRINCIPAL_MAIN).len();
 
-    // 工人：只产生产物（S02 worker 行），树侧委派链上以产物收束的子主体。
+    // 工人：只产生产物（worker 行），树侧委派链上以产物收束的子主体。
     let worker = matrix.grants_of(PRINCIPAL_WORKER);
     assert_eq!(worker.len(), 1, "只持 produce.artifact：{worker:?}");
     assert!(matrix.can_write(PRINCIPAL_WORKER, Capability::ProduceArtifact));
@@ -258,7 +258,7 @@ fn the_three_role_rows_are_narrower_than_main() {
         "工人的产物是会话自己的工作记录，不是公共域公告"
     );
 
-    // 规划者：只立任务（S03 规划者行），与自主行同款独持先例。
+    // 规划者：只立任务（规划者行），与自主行同款独持先例。
     let planner = matrix.grants_of(PRINCIPAL_PLANNER);
     assert_eq!(planner.len(), 1, "只持 define.work：{planner:?}");
     assert!(matrix.can_write(PRINCIPAL_PLANNER, Capability::DefineWork));
@@ -272,7 +272,7 @@ fn the_three_role_rows_are_narrower_than_main() {
         Some(VisScope::ThreadPrivate)
     );
 
-    // 验证者：只独立判定（S03 验证者行），与仲裁行同持验证能力而不同角色。
+    // 验证者：只独立判定（验证者行），与仲裁行同持验证能力而不同角色。
     let verifier = matrix.grants_of(PRINCIPAL_VERIFIER);
     assert_eq!(verifier.len(), 1, "只持 assert.verification：{verifier:?}");
     assert!(matrix.can_write(PRINCIPAL_VERIFIER, Capability::AssertVerification));
@@ -317,7 +317,7 @@ fn the_three_role_rows_are_narrower_than_main() {
 /// 钉的是谓词面的**分派**，不是每个主体自己的窄行（那些在上面各测里）：对等主体
 /// 产物闸放行、发言闸仍拒；主智能体两道都放；判定者 / 自主层产物闸也拒（它们
 /// 持的不是 `produce.artifact`）。没有这道分派，对等主体跑一轮永远收束不了
-/// （D-065 的批②③ 合并理由）；反过来若产物闸误用了 `can_reply`，对等主体的
+/// （D-065 的合并理由）；反过来若产物闸误用了 `can_reply`，对等主体的
 /// 产物也落不了格——两种错位都被这条钉住。
 #[test]
 fn the_closure_gate_is_dispatched_by_kind() {
@@ -626,7 +626,7 @@ fn binding_never_widens_a_deployed_row() {
     );
     assert!(
         !production_matrix().can_reply(PRINCIPAL_WORKER),
-        "工人仍无发言权（步 3 的行形状是静态事实，运行期绑定改不动它）"
+        "工人仍无发言权（行形状是静态事实，运行期绑定改不动它）"
     );
 }
 

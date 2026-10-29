@@ -1,6 +1,6 @@
 // verify 阶段：`docs/003-design/verify/` 的验证程序**自己证明自己**。
 //
-// 这批程序是 v2 方案的"硬证据"（`docs/003-design/README.md §4`、`04 §4` 的 C29），
+// 这批程序是 v2 方案的"硬证据"（`docs/003-design/README.md §4`、`DE-016 §4` 的 C29），
 // 在此之前它们只能手敲 `rustc --edition 2021 <f>.rs -o <out> && <out>` 跑一遍，
 // 输出一份**手工提交的快照**——零断言的守卫等于没有守卫，
 // 而"人手跑过一次"同样不是守卫：没有任何东西保证它明天还绿。
@@ -114,7 +114,7 @@ export default {
           name: file.replace(/\.rs$/, ''),
           hasNegative: src.includes('should_not_compile'),
           // 断言数（棘轮，只许涨）：前两格只到文件级，把某个程序的断言删到只剩
-          // 一条时程序数与反例数都不变 ⇒ 全绿。而 `03 §5.1` 纪律 1 写着「零断言的
+          // 一条时程序数与反例数都不变 ⇒ 全绿。而 `DE-016 §5.1` 纪律 1 写着「零断言的
           // 程序不可能失败」——那条纪律此前没有任何机器判据。
           //
           // 口径是**文本出现次数**，含 `should_not_compile` 模块内正常档不执行的那些：
@@ -188,7 +188,7 @@ export default {
     // 它已是本轮投影；但 CI 的 verify job 只跑本阶段（`--only=verify`），没有 06。
     // 这一格 `--check` 补上那道漂移闸：没有它，「程序全绿」只证明「程序与仓库里
     // 那份已提交的 mod.rs 自洽」，不证明 mod.rs 仍是文档的投影——文档改了、
-    // 忘了重跑生成器，正是这套「外置期望数据」要防的第一种失效（plan/13 批 M1）。
+    // 忘了重跑生成器，正是这套「外置期望数据」要防的第一种失效。
     yield {
       label: 'verify: facts 漂移复核（gen-verify-facts --check）',
       cmd: process.execPath,

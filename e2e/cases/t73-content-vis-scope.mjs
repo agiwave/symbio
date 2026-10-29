@@ -102,7 +102,7 @@ export default defineCase(
     const nosharedWal = join(hd.homedir, 'session', NOSHARED_SID, V2_WAL);
 
     try {
-      // ── ① 会话 A：正常一轮 ⇒ 步 11 把用户发言编成 `vis_scope = shared` 的记忆 ──
+      // ── ① 会话 A：正常一轮 ⇒ 经验编码把用户发言编成 `vis_scope = shared` 的记忆 ──
       const a = runCli({ ...base, session: SHARED_SID, message: '共享认知提问' });
       assertEq(a.code, 0, `会话 A 一轮退出码（stderr: ${a.stderr.slice(0, 400)}）`);
 
@@ -123,7 +123,7 @@ export default defineCase(
         sharedMemory,
         `会话 A 应有一条 memory.encoded（实际 kinds: ${JSON.stringify(sharedEvents.map((e) => e.kind))}）`,
       );
-      assertEq(sharedMemory.payload.tag, '经验', '步 11 编码的是经验记忆（用户发言）');
+      assertEq(sharedMemory.payload.tag, '经验', '编码的是经验记忆（用户发言）');
       assertEq(
         sharedMemory.payload.vis_scope,
         'shared',

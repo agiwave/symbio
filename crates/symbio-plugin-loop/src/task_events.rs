@@ -1,4 +1,4 @@
-//! 任务表写方（S7）：
+//! 任务表写方：
 //! **会话任务清单 → v2 事实源 → 两个消费方**（读出口 `session/stats` 的 `readyset`
 //! 列 + 交给执行者的调度段）。
 //!
@@ -34,7 +34,7 @@
 //! - **回退出终态 = 返工**：`completed → pending / in_progress` 写
 //!   `task.rework_created` + 一个**新节点**的 `task.opened`（`{id}-r{n}`），
 //!   旧节点仍是终态——返工是新增一条事实，不是回滚
-//!   （[roadmap/S03 §2](../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）。
+//!   （[DE-033 §2](../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）。
 //!   这正是 `rework_bounded` 的**生产写方**：不是一条永远空转的断言。
 //! - **溯源锚**：全部锚在本轮 `user.message` 格（`user_seq`）——任务是「这轮模型
 //!   说该做什么」，出处是这一轮的开口；`task.asserted` 是断言类事件，无溯源即违规
@@ -371,7 +371,7 @@ fn declared_items(args: &serde_json::Value) -> Vec<TaskItem> {
 }
 
 /// 任务表的**效果与写侧判断**：一次成功的 `todo_write` 声明 → `task.*` 草稿
-/// （DE-025 D-207）；不持权威的主体连写都不许写（S03 §3 / D-219）。
+/// （DE-025 D-207）；不持权威的主体连写都不许写（DE-033 §3 / D-219）。
 ///
 /// ## 为什么实现住这里，而不是工具所在的那个插件
 ///
@@ -396,7 +396,7 @@ impl ToolBehavior for TaskTable {
         behaviors::TASK_TABLE
     }
 
-    /// 写侧资格（[roadmap/S03 §3](../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）：
+    /// 写侧资格（[DE-033 §3](../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）：
     /// **立任务（`define.work`）或独立判定（`assert.verification`）二居其一**。
     ///
     /// 两项**互不可写**（C15：`PermissionMatrix::new` 拒绝同持）⇒ 没有任何主体能
@@ -442,7 +442,7 @@ impl ToolBehavior for TaskTable {
 
 symbio_plugin_api::submit_behavior!(TaskTable);
 
-/// 调度（S04 §3，`D-139` 裁决 3）：就绪集 → `task.ready` / `task.assigned`。
+/// 调度（DE-034 §3，`D-139` 裁决 3）：就绪集 → `task.ready` / `task.assigned`。
 ///
 /// ## 谁写、凭什么写
 ///
@@ -509,7 +509,7 @@ pub(crate) fn schedule(
     Ok(())
 }
 
-/// 调度段（S7）：就绪任务集渲染成一段提示，请求视图**置顶**注入。
+/// 调度段：就绪任务集渲染成一段提示，请求视图**置顶**注入。
 ///
 /// 只读不写（与 `memory_events::recall_view` 同款的只读视图），因此：
 /// - 没有事实源 / 读不到 ⇒ `None`——请求里就少一段，不存在「空占位」；
@@ -559,7 +559,7 @@ pub(crate) struct ScheduleFact {
     pub payload: serde_json::Value,
 }
 
-/// 调度者（S04 §3 的 `Decider` 行，[DE-034](../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约")）：
+/// 调度者（DE-034 §3 的 `Decider` 行，[DE-034](../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约")）：
 /// 就绪集 → 发放 / 到期判死。
 ///
 /// 它是一个 `Decider`，不是组件：输入 `ReadySet` 视图，输出 `task.assigned` 事件；

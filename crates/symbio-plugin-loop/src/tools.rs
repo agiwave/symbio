@@ -36,7 +36,7 @@ pub use self::dispatch::unfinished::{is_unanswered, NOT_EXECUTED};
 // 非测试构建下允许无引用——同 core 事件字典的做法（见 `symbio_core::mod.rs`）。
 #[allow(unused_imports)]
 pub use self::dispatch::unfinished::ABORTED;
-// 外部执行闸门（S09）：判据住在 `gates`（唯一生产消费方是本域的 `external_execution`，
+// 外部执行闸门：判据住在 `gates`（唯一生产消费方是本域的 `external_execution`，
 // D-190）；`derived_facts` 的熔断写方经本门面取用，不深潜子模块。
 pub(crate) use self::dispatch::gates::CircuitBreaker;
 // 测试面（`tool_executor.test.rs`）要按结论比对；生产侧只问「是不是 Allow」。

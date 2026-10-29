@@ -77,7 +77,7 @@ pub(crate) fn project(events: &[Event]) -> RuntimeFacts {
 /// `Some(Some(_))` = 一轮收束。
 ///
 /// 结局问的是**结果面**，所以读 `status`（三值）；「为什么停」读 `reason`
-/// （闭集，）——两个问题两个字段，本函数只问前者。
+/// （闭集）——两个问题两个字段，本函数只问前者。
 fn outcome_step(e: &Event) -> Option<Option<RuntimeOutcome>> {
     match e.kind.as_str() {
         EVENT_USER_MESSAGE => Some(None),

@@ -638,7 +638,7 @@ fn message_path_round_trips_through_parser() {
 // 工作目录节点的形状由 `workdir::tree_node` 单点保证（见其单测）：
 // 目录 `l`、文件 `rw`——本文件不再另设一份转换逻辑，因此无需重复断言。
 
-/// 会话节点自带清单字段（S8）：`message_count` / `metadata` / `meta_tags`
+/// 会话节点自带清单字段：`message_count` / `metadata` / `meta_tags`
 /// 挂在 flatten 的 attributes 上，使会话清单无需再走一次额外的列接口
 #[test]
 fn vdfs_session_node_carries_list_fields() {

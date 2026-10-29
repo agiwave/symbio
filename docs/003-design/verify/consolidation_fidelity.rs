@@ -106,7 +106,7 @@ pub fn similarity(a: &[i32], b: &[i32]) -> f64 {
 
 // ─────────────────── 巩固策略：max_gen + min_fidelity 双约束 ───────────────────
 
-/// 巩固参数（对应 01 §8 权威参数表的 `projection` 行取值扩展）
+/// 巩固参数（对应 DE-001 §8 权威参数表的 `projection` 行取值扩展）
 #[derive(Debug, Clone, Copy)]
 pub struct ConsolidatePolicy {
     /// 形态约束：代数上界（plan3 已有）

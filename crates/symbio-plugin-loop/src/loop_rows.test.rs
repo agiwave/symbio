@@ -928,8 +928,7 @@ fn rows_are_stable_and_globally_ordered() {
             // 幕的推进：收束之后、宣布下一次往返之前（`D-222` 裁决 2）。
             "continue-turn",
             "announce-model",
-            // 每个端口两行（`dispatch` / `await`）：`model`（ 步 2）与 `tool`
-            // （ 步 3）。租约**没有行**——看护读 `stale_sent` 视图，不经行表；
+            // 每个端口两行（`dispatch` / `await`）：`model` 与 `tool`。租约**没有行**——看护读 `stale_sent` 视图，不经行表；
             // `turn` 不是端口（`D-222` §一），它那四行随端口退场。
             // `open-tools` 是工具调用的创建行（D-117），不与派发合并。
             "dispatch-model",
@@ -1815,7 +1814,7 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
 /// 三行工具债的键取 `(port, id, attempt)`：上一 attempt 的 `granted` / `sent`
 /// 只关它自己那一次。若键退回逻辑 `(port, id)`，第二次尝试的 `request`
 /// 会被上一 attempt 的出口提前关掉——没有任何执行体会判它、派它，
-/// 「永不派发的 request」正是 PL-016 §2.3 禁止的形态。
+/// 「永不派发的 request」正是 DE-022 D-117 禁止的形态。
 #[test]
 fn a_retried_request_reopens_authorization_and_dispatch() {
     let id = "c-1";

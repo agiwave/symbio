@@ -3,9 +3,8 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [10 §3 批 1](../../crates/symbio-plugin-session/src/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
-// 「mock-llm `toolCalls` → 工具执行 → **`/_requests` 回读**：工具结果进了下一次请求；
-// 网格有 `artifact.added` 且带溯源」。
+// 出口判据：「mock-llm `toolCalls` → 工具执行 → **`/_requests` 回读**：工具结果进了
+// 下一次请求；网格有 `artifact.added` 且带溯源」。
 //
 // 这条判据之所以必须端到端，是因为它要证的三件事**各自只能在一处被看见**：
 //

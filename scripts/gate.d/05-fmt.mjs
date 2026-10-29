@@ -6,7 +6,7 @@
 //
 // ⚠️ CI 的 rust-checks job 因此必须是 `--only=fmt,backend`（不能只 `--only=backend`）：
 //    少了 fmt，CI 就没有「格式化差异必须判红」这道闸——autoWork 的 CI 语义是
-//    「跑完仍有差异 ⇒ 红」，它随本阶段一起从 backend 的 `--only` 清单里被划走了。
+//    「跑完仍有差异 ⇒ 红」，而 fmt 不挂在 backend 泳道下。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'

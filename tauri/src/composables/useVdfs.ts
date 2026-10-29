@@ -28,7 +28,7 @@
  *   - 其余（资源信号 / 状态帧）重拉收敛，但只在变更**真的影响本目录的条目集合**
  *     时才拉（见 `affects`：自身 / 直接子项 / 祖先）。
  *
- * ## UI 约定（S11）
+ * ## UI 约定
  *
  * - **无面包屑**：路径即导航，层级靠左栏切目录 + 中栏点目录钻入 + 宿主返回键；
  * - **无「新建目录」按钮**：新建 = 新建一种**类型**（会话 / 模型 / …）；
@@ -554,7 +554,7 @@ export function useVdfs(opts: UseVdfsOptions) {
    * O(n²) 的 `vdfs/list` 流量）。
    */
   function applyAppend(change: VdfsChange): boolean {
-    // S27：载荷在 `data` 上——消息帧是 `{id, delta}` 窄载荷；无载荷或载荷里
+    // 载荷在 `data` 上——消息帧是 `{id, delta}` 窄载荷；无载荷或载荷里
     // 没有 `delta`（全量帧 / 节点视图）都不是「尾部追加」。
     const data = change.data as { delta?: unknown } | null | undefined
     const delta = typeof data?.delta === 'string' ? data.delta : null

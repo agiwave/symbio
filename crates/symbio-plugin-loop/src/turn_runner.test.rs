@@ -71,7 +71,7 @@ impl TurnRunner {
                 window_turns: None,
                 // 单请求入口（无工具轮）没有轮内循环 ⇒ 没有注入时机。
                 inject: None,
-                // 平凡值身份（S08 §4：单主体 = 今天的状态）。
+                // 平凡值身份（DE-038 §4：单主体 = 今天的状态）。
                 actor: trivial_actor_spec("session/main"),
                 // 没有请求视图层可拼（三段由调用方的 `build_request_view` 给出）。
                 // 恒走生成：定稿答话轮由 `turn_exec` 自己把答话交进来。
@@ -571,7 +571,7 @@ mod turn_runner_tests {
     }
 
     /// 工具结果进转写（`tool` / 工具名 + text）——跨轮 prompt 因此能重建**含工具**的
-    /// 对话（plan/10 批 3）；且工具行
+    /// 对话；且工具行
     /// 投影成 `role: "tool"` 的**结构化消息**（带工具名与合成 `tool_call_id`），与轮内
     /// 交换（`tool_exchange_messages`）同形。
     #[test]
@@ -2601,7 +2601,7 @@ mod tool_round_tests {
         );
     }
 
-    /// **压缩快照不在窗口内也要带上**（S2.7-b2）：它是当前历史的**基线**。
+    /// **压缩快照不在窗口内也要带上**：它是当前历史的**基线**。
     ///
     /// ## 回归的是什么
     ///
@@ -2838,7 +2838,7 @@ mod tool_round_tests {
         assert_eq!(
             artifact.produced_by,
             Some(0),
-            "产物格溯源指向本轮用户格（S02 §3 的 caused_by 断言）"
+            "产物格溯源指向本轮用户格（DE-032 §3 的 caused_by 断言）"
         );
         let cell = snapshot
             .iter()
@@ -3212,8 +3212,7 @@ mod tool_round_tests {
 
     /// **唤醒幕续写同一轮**（审批 / 问答恢复）：**不重开用户格**、收束记在**原轮**上。
     ///
-    /// 这是 plan/11 批 2
-    /// 的核心判据：等待轮的**收束格**刻意留给恢复幕（进展格不是收束格），续写把它
+    /// 这是唤醒幕的核心判据：等待轮的**收束格**刻意留给恢复幕（进展格不是收束格），续写把它
     /// **真正填上**（见收尾的 kinds 断言）。若续写另开新轮（`u-1` + `f-1`），原轮
     /// 永远等不到收束事件——C4 的产物口径（D-067）会掩盖它，但 `last_open_turn`
     /// 仍按 final / fallback 找轮，恢复链路会先断。
@@ -4575,7 +4574,7 @@ mod reflex_turn_tests {
         assert!(!out.fell_back && !out.aborted && !out.awaits_user);
         assert!(
             out.cost_ms <= LatencyTier::Reflex.budget_ms(),
-            "命中后耗时必须在反射档预算内（S11 §6.2：命中显著低于未命中）：{}",
+            "命中后耗时必须在反射档预算内（DE-041 §6.2：命中显著低于未命中）：{}",
             out.cost_ms
         );
 

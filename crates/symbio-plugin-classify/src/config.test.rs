@@ -30,7 +30,7 @@ fn plain_value_is_reachable_from_config() {
     assert!(!c.rule_shortcut);
 }
 
-/// 「独立模型」与「提示词覆盖」都能从配置里写进来（S6 的两条产线）
+/// 「独立模型」与「提示词覆盖」都能从配置里写进来（的两条产线）
 #[test]
 fn model_and_prompt_come_from_config() {
     let c: ClassifyConfig =

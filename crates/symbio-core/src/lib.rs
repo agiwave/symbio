@@ -125,7 +125,7 @@ pub use agent::{agent_perms_init_slot, agent_perms_of, AgentPermissions, AgentSc
 // 抢占判定 / 外部执行闸门）归 owner 插件，不再经此处出根。
 // `pub use` 而非 `pub use`：消费方全在本 crate 内，进根公开面只会给
 // C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
-// `EliminationDecider`（S13 淘汰回路的裁决侧，）：判定在 core、轮末驱动与
+// `EliminationDecider`（淘汰回路的裁决侧）：判定在 core、轮末驱动与
 // 闸门接线都在 `plugins`（derived_facts 的轮末步 + 工具执行层的撤销闸），
 // `pub` 出根，不进公开面。
 pub use actors::{commitment_events, commitment_records};
@@ -240,7 +240,7 @@ pub use store::{AppendError, StoreInvariant};
 // ⇒ 按 C-003「名字没跨出 core 的符号不许占根出口」收回 core 内
 // （core 内走 `governance::PermissionMatrix` 深引，C-002 只管插件侧）。
 //
-// `GrantsOverlay`（S13 淘汰回路的机制半边）：授权表是装配期常量，淘汰是
+// `GrantsOverlay`（淘汰回路的机制半边）：授权表是装配期常量，淘汰是
 // 运行期事实 ⇒ 覆盖层住表旁边（表答「登记过什么」，它答「其中什么被收回了」）。
 // 两个插件侧消费方——`derived_facts` 轮末步（判「有没有既有淘汰」）与工具执行层的
 // 撤销闸（判「现在准不准委派」）⇒ 与 `VisScope` 同形态 `pub` 出根。

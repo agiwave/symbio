@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T74 淘汰回路（相应批次，S13 §6 断言 3）：
+// T74 淘汰回路（相应批次，DE-043 §6 断言 3）：
 // 声誉低于阈值 ⇒ 一条**可审计**的 `verdict.asserted` 收回 `assign.work` ⇒ `agent_run`
 // 被闸拒（同会话与**别的会话**都拒——部署级口径）。
 //
@@ -20,7 +20,7 @@ import './_selfrun.mjs';
 //   立约 + 违约 ⇒ 声誉 −1 ⇒ 轮末落裁决。这一轮的 `agent_run` **放行**（闸只在
 //   裁决之后才可能拒）——正对照与淘汰同批，缺了它「闸恒拒」也能全绿。
 // - **A 轮 2**：再委托 ⇒ 闸拒（同会话，覆盖层里已有那条撤销）；轮末**不落第二条
-//   裁决**（幂等），但如实再记一笔违约（约了没派成，S08 §5）。
+//   裁决**（幂等），但如实再记一笔违约（约了没派成，DE-038 §5）。
 // - **B 会话**：另一个会话、同一主体 ⇒ 同样被拒。裁决在 A 的 WAL 里，闸扫的是
 //   **全部会话**——「换个会话绕开淘汰」这条静默面由这一格钉住。
 //
@@ -170,7 +170,7 @@ export default defineCase(
       const v = verdicts[0];
       assertEq(v.actor, 'session/arbiter', '裁决者是仲裁者，不是被淘汰主体');
       assertEq(v.payload?.subject, 'session/main');
-      assertEq(v.payload?.capability, 'assign.work', '收回的是派活能力（S13 §2 字面机制）');
+      assertEq(v.payload?.capability, 'assign.work', '收回的是派活能力（DE-043 §2 字面机制）');
       assertEq(v.payload?.change, 'revoke');
       assertEq(v.payload?.score, -1, '判据值随事件落盘（守约 − 违约）');
       assertEq(v.payload?.threshold, 0);
@@ -190,7 +190,7 @@ export default defineCase(
       assertEq(
         a2Events.filter((e) => e.kind === 'commitment.broken').length,
         2,
-        '但违约如实再记一笔（约了没派成，S08 §5——被闸拒同样是没履约）',
+        '但违约如实再记一笔（约了没派成，DE-038 §5——被闸拒同样是没履约）',
       );
 
       // ── ③ B 会话：部署级口径——别处的裁决在这里照样拒 ────────────────────

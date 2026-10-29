@@ -1,5 +1,5 @@
-//! `recall` 投影（S5，[DE-001 §9](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、
-//! [roadmap/S06 §3](../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")）。
+//! `recall` 投影（[DE-001 §9](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、
+//! [DE-036 §3](../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")）。
 //!
 //! ## 为什么住 loop 插件（DE-024 D-201）
 //!
@@ -18,12 +18,12 @@
 //! - **as-of**：形参 `now` 就是 as-of 锚——`ts > now` 的事件（含巩固与遗忘）
 //!   不影响视图（C12：后台巩固不得污染在途决策）；
 //! - **排除式遗忘**：`memory.forgotten` 不是删除，是投影不再包含——Log 永不删，
-//!   遗忘可撤销、可审计（01 §9.3）；
+//!   遗忘可撤销、可审计（DE-001 §9.3）；
 //! - **可降级**：预算耗尽 ⇒ `degraded: true` + 部分结果，**不允许空且不标降级**
-//!   （S06 §6 验收 2；I3 在检索面上的形状）；
+//!   （DE-036 §6 验收 2；I3 在检索面上的形状）；
 //! - **混合打分（语义维）**：`query` 非空 ⇒ 内容重叠分降序（[`crate::recall_score`]），
 //!   平手 ts 降序、再平手 seq 降序；`query` 为空 ⇒ 纯 ts 降序——**平凡值**
-//!   （J2：没有查询就是本维落地前的行为，逐字不变）。 批②。
+//!   （J2：没有查询就是本维的平凡值，逐字不变）。
 //!
 //! ## 跨主体隔离的边界划分（诚实划界）
 //!
@@ -71,7 +71,7 @@ pub struct RecallEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct RecallView {
     pub entries: Vec<RecallEntry>,
-    /// 本次召回是否因预算耗尽而**只给出部分结果**（S06 §6 验收 2）。
+    /// 本次召回是否因预算耗尽而**只给出部分结果**（DE-036 §6 验收 2）。
     #[serde(default)]
     pub degraded: bool,
 }
@@ -85,9 +85,9 @@ impl RecallView {
 
 /// `recall` 投影：召回 `viewer` 自己的、as-of 可见、未被遗忘的记忆。
 ///
-/// - `tag`：内容标签过滤（`None` = 全部；「记忆类型」是过滤参数，01 §9.1）。这是
+/// - `tag`：内容标签过滤（`None` = 全部；「记忆类型」是过滤参数，DE-001 §9.1）。这是
 ///   「**读侧过滤**」这条设计的唯一已落地实例（通用性过滤 / 分层过滤与它同构，见
-///   [roadmap/S10 §5](../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入")）：过滤只改视图、
+///   [DE-040 §5](../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入")）：过滤只改视图、
 ///   事实永不删 ⇒ **放宽即召回**（可逆）。它是**承重**的——`memory_events::consolidate`
 ///   靠它只合并同标签的记忆。三条性质（排除 / 可逆 / 活参数）由 `recall.test.rs` 钉住。
 /// - `query`：混合打分的**语义维**——本轮检索意图（`None` / 空 = 无查询 =
@@ -99,7 +99,7 @@ impl RecallView {
 ///   （[D-105](../../../docs/003-design/001-核心架构.md#d-105-投影预算语义收敛到框架层闭包只返回-v窗口截断由-apply-统一执行 "DE-001-核心架构")）——超窗只交出切片头部，
 ///   外壳 `degraded` 由框架置位。本闭包不再自带配额扫描；视图字段
 ///   `RecallView::degraded`（视图脱离外壳
-///   流动时的自描述，）由**取值点**从外壳誊抄——外壳是唯一的降级事实源。
+///   流动时的自描述）由**取值点**从外壳誊抄——外壳是唯一的降级事实源。
 pub fn recall(
     viewer: impl Into<String>,
     tag: Option<String>,
@@ -120,7 +120,7 @@ pub fn recall(
             match e.kind.as_str() {
                 crate::control_decl::EVENT_MEMORY_ENCODED | EVENT_MEMORY_CONSOLIDATED => {
                     // 巩固产物（压缩后的新记忆）同样可召回——它也是一条记忆，
-                    // 只是 generation > 0（01 §9.2）。
+                    // 只是 generation > 0（DE-001 §9.2）。
                     if e.actor != viewer {
                         continue; // thread_private：默认只见自己的
                     }

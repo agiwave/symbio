@@ -25,9 +25,9 @@
 //! 2. **忙则排队，不抢占**：会话正在跑（`is_working`）时只把条目留在队里，等这一轮
 //!    收尾再取下一条——不合并、不中断、不并发；**排队的是插话，不是在跑的任务**：
 //!    忙窗里本模块的抢占判定者（[`PreemptionDecider`]）会评估当前任务要不要挂起
-//!    （S8），结论经 [`super::super::active::PreemptPending`] 跨过忙窗、
+//!    ，结论经 [`super::super::active::PreemptPending`] 跨过忙窗、
 //!    在空闲分支落成事实。挂起 / 恢复**都不开新轮、都不动队列**，所以与「不抢占」
-//!    不冲突（判定顺序见 [04 §2.1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）；
+//!    不冲突（判定顺序见 [DE-016 §9.1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）；
 //! 3. **机制统一**：顶层会话与子智能体空间共用本模块，没有"子智能体专用分支"。
 //!
 //! ## 为什么是**每插件实例一个**消费者
@@ -144,7 +144,7 @@ pub(crate) fn take_inbox_batch_sync(
     batch
 }
 
-// ── S07 抢占判定（S8）────────────────────────────────────────────
+// ── S07 抢占判定────────────────────────────────────────────
 //
 // 唯一生产消费方就是本文件的忙窗判定与空闲落格链（D-190）；判定是纯函数，
 // 落格是事件，两者各住一边。
@@ -159,15 +159,15 @@ pub enum Preemption {
     /// 排队：任务不可中断 / final 已发出（已发出的发言不可撤回）。
     Queue,
     /// 判定超时：**默认「继续」不挂起**——挂起会留下需要恢复的状态，继续不会；
-    /// 两个选择都可能错，错的代价不对称，默认选代价小的（04 §2.1）。
+    /// 两个选择都可能错，错的代价不对称，默认选代价小的（DE-016 §9.1）。
     TimeoutDefaultContinue,
 }
 
-/// 抢占判定者（S8，[roadmap/S07 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")）。
+/// 抢占判定者（[DE-037 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")）。
 ///
 /// `pattern = decider`、`capabilities = [JudgeIntent]`、`budget_ms = 80`——
 /// 系统第一次需要在几十毫秒内对外部信号做决策。**判定者只产控制事件**
-/// （`task.controlled`），无 `reply.*` 写权——它不得直接发言（S07 §5，由
+/// （`task.controlled`），无 `reply.*` 写权——它不得直接发言（DE-037 §5，由
 /// grants 表保证：`authz::ROWS` 里 [`PRINCIPAL_REFLEX`] 那一行，判据见
 /// `authz.test.rs::the_reflex_row_is_narrower_than_main`）。
 ///
@@ -177,10 +177,10 @@ pub enum Preemption {
 pub struct PreemptionDecider;
 
 impl PreemptionDecider {
-    /// S07 抢占判定者**行**（`ActorSpec` 生产构造点，[] 批②）。
+    /// S07 抢占判定者**行**（`ActorSpec` 生产构造点）。
     ///
     /// `{ principal: session/reflex, pattern: decider, capabilities: [judge.intent],
-    /// budget_ms: 80, scope: root }`——五个字段全部**取实**，与 S07 §3 表逐字相符：
+    /// budget_ms: 80, scope: root }`——五个字段全部**取实**，与 DE-037 §3 表逐字相符：
     /// principal/pattern/capabilities 同源于授权表那一行（[] 落地的
     /// `PRINCIPAL_REFLEX` 窄行），budget = 反射档，scope = root。
     ///
@@ -206,7 +206,7 @@ impl PreemptionDecider {
     ///
     /// `elapsed_ms`：判定者自身耗时（调用方 `Instant` 计时后传入——判定是纯函数，
     /// 计时留在边界上）。预算内（≤ `budget_ms`）才做实质判定，超时走默认分支。
-    /// 判定顺序（04 §2.1）：无在跑任务 → 放行；final 已发出 → 排队；否则 → 挂起。
+    /// 判定顺序（DE-016 §9.1）：无在跑任务 → 放行；final 已发出 → 排队；否则 → 挂起。
     ///
     /// 能力（`judge.intent`）**不在本函数判**：它是**写权**，拦在落格那一侧
     /// （[`SessionPlugin::commit_preemption`] 的写侧闸），与 `decide` 是纯函数判定分开——
@@ -262,7 +262,7 @@ impl PreemptionDecider {
     /// 挂起事件（`task × held`）——挂起就是一条事件，不需要新状态机。
     ///
     /// 两个锚各司其职，别混：
-    /// - `source_seq` = **挂起前最后一条已落事实的 seq**（04 §2.2 步 1「记录当前
+    /// - `source_seq` = **挂起前最后一条已落事实的 seq**（DE-016 §9.2「记录当前
     ///   seq 为 T」）——它是幂等键的后半段，因此必须**每次挂起都不同**：同一个任务
     ///   可以被挂起多次（挂起 → 恢复 → 再挂起），拿任务开格 seq 当锚会让第二次撞
     ///   `Duplicate` 而**静默丢掉**那次挂起（J3）。
@@ -271,8 +271,7 @@ impl PreemptionDecider {
     ///   `produced_by` 会让落格后那条边指向**自己**（`produced_by == seq`）。
     ///   I2 只查"有没有边"时这是绿的，`provenance_dangling` 上线后它必须红——
     ///   调用方因此传 `head - 1`（见 [`SessionPlugin::append_preemption`]）。
-    /// - `as_of_seq` = 任务开格 seq（[`Self::decide`] 给出的 as-of 重放锚，04 §2.2
-    ///   步 5）——它是判据的一部分，随事实一起落盘，不留在内存里。
+    /// - `as_of_seq` = 任务开格 seq（[`Self::decide`] 给出的 as-of 重放锚，DE-016 §9.2）——它是判据的一部分，随事实一起落盘，不留在内存里。
     pub fn held_event(&self, task_id: &str, source_seq: u64, as_of_seq: u64) -> Event {
         Event::pending(
             format!("held-{task_id}-{source_seq}"),
@@ -480,7 +479,7 @@ impl SessionPlugin {
     /// 2. 有会话挂着**未结清的抢占判定**（`preempt != None`）——挂起在插话轮**之前**
     ///    落格，恢复必须在它**之后**；中间隔着插话轮，而那段时间队列恰好是空的
     ///    （消息已出队）。只看队列就会在这里睡过去，恢复事件永不落格 ⇒ 任务永久
-    ///    停在 `held` 上（S07 §5 的静默失效）。
+    ///    停在 `held` 上（DE-037 §5 的静默失效）。
     ///
     /// 另有两条**没有事件会来**的路径，只能等退避：队首有东西但会话已空闲（启动
     /// 失败被放回）、或 `Resume` 落格失败（开档暂时不可用）。
@@ -524,7 +523,7 @@ impl SessionPlugin {
         let Ok(store) = self.get_store().await else {
             return Vec::new();
         };
-        // 判据消费 `task.*`（任务**状态**），口径是累计的（S2.7-b2）：`range(0)` 里
+        // 判据消费 `task.*`（任务**状态**），口径是累计的：`range(0)` 里
         // 含被快照取代而移入归档段的那些开格 ⇒ 「压缩前开、尚未收束」的任务不会在
         // 就绪集里**静默**消失（等于任务没了）。
         store.snapshot(session_id).unwrap_or_default()
@@ -548,7 +547,7 @@ impl SessionPlugin {
     ///
     /// ## 锚 = 落格前的 `head`，不是任务开格 seq
     ///
-    /// 04 §2.2 步 1「记录当前 seq 为 T」。它同时是幂等键的后半段，因此必须**每次
+    /// DE-016 §9.2「记录当前 seq 为 T」。它同时是幂等键的后半段，因此必须**每次
     /// 都不同**：同一任务可以挂起多次（挂起 → 恢复 → 再挂起），拿开格 seq 当锚会让
     /// 第二次撞 `Duplicate` 而**静默丢掉**那次挂起——任务因此照常出现在就绪集里，
     /// 挂起等于没发生（J3）。
@@ -599,7 +598,7 @@ impl SessionPlugin {
         Ok(Some(anchor))
     }
 
-    /// 忙窗内的抢占判定（S8，[DE-016 §9.1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+    /// 忙窗内的抢占判定（[DE-016 §9.1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
     ///
     /// 三条边界，少一条这个函数就会变成噪声或变成第二个时延源：
     ///
@@ -611,7 +610,7 @@ impl SessionPlugin {
     ///    [`Self::settle_preemption`]）。
     ///
     /// `elapsed_ms` 计的是**读判据本身**的耗时：判定者要读它的输入，这段时延就是
-    /// 判定的时延（S07 的 `budget_ms = 80` 说的是这件事，不是纯函数自身）。
+    /// 判定的时延（的 `budget_ms = 80` 说的是这件事，不是纯函数自身）。
     async fn judge_preemption(&self, state: &Arc<ActiveSessionState>) {
         {
             let inner = state.inner.read().await;
@@ -636,11 +635,11 @@ impl SessionPlugin {
         }
     }
 
-    /// 把「判出了挂起」落成事实（04 §2.2 步 1–2），再把状态推到待收。
+    /// 把「判出了挂起」落成事实（DE-016 §9.2），再把状态推到待收。
     ///
     /// 在空闲分支、**取到插话批之后**调用：没有插话轮要保护就什么都不写——
     /// `task.held` 会让任务退出 `readyset`，而 readyset 是模型唯一的调度候选来源，
-    /// 写了却没人来收就是任务凭空消失（S07 §5 的静默失效）。
+    /// 写了却没人来收就是任务凭空消失（DE-037 §5 的静默失效）。
     async fn commit_preemption(&self, state: &Arc<ActiveSessionState>) {
         let hold = {
             let inner = state.inner.read().await;
@@ -653,7 +652,7 @@ impl SessionPlugin {
             return;
         };
         // 写侧闸（与 `turn_runner::closure_gate` 同一形态）：落控制事实
-        // 需要 `judge.intent`——判定者只产控制事件、无 `reply.*`（S07 §5），那条界限
+        // 需要 `judge.intent`——判定者只产控制事件、无 `reply.*`（DE-037 §5），那条界限
         // 由授权表的窄行给，读的是判定者规格**自己身上**的能力集（不再回头查表）。
         // 拒绝 ⇒ 不落任何控制事实，且清 `Hold`：留着会让消费者为一个写不出的挂起空转。
         let spec = PreemptionDecider.spec();
@@ -688,7 +687,7 @@ impl SessionPlugin {
         }
     }
 
-    /// 结清抢占：写恢复事件，或把没有插话可处理的那次判定作废（04 §2.2 步 6）。
+    /// 结清抢占：写恢复事件，或把没有插话可处理的那次判定作废（DE-016 §9.2）。
     ///
     /// 在空闲分支、**取到空批之后**调用。三种去向：
     ///
@@ -774,7 +773,7 @@ impl SessionPlugin {
                 self.settle_preemption(&state).await;
                 continue;
             }
-            // 有插话要开跑：先把挂起落成事实（04 §2.2 步 1–2），再开轮——顺序反了
+            // 有插话要开跑：先把挂起落成事实（DE-016 §9.2），再开轮——顺序反了
             // 就是「插话轮开跑时任务还在就绪集里」，判定白做。
             self.commit_preemption(&state).await;
 

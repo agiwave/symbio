@@ -13,7 +13,7 @@ use symbio_plugin_api::vocab;
 // 这条链子：`system.triggered` 必须存在且溯源指向更早的格子、健康自检紧随其后、
 // 「欲」永远入格、任务却**只在闸门放行时**才长出来。分开断言是因为三者各自的失效
 // 都不报错：漏了触发 = 自主行为查无此事；漏了自检 = `system` 实体只开不进；
-// 漏了闸门 = 自己写自己的对话（[roadmap/S12 §5](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")「自主写入对话 0」）。
+// 漏了闸门 = 自己写自己的对话（[DE-042 §5](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")「自主写入对话 0」）。
 
 fn autonomy_plugin(conation_enabled: bool) -> (tempfile::TempDir, Arc<SessionPlugin>) {
     let dir = tempfile::tempdir().expect("临时目录创建失败");
@@ -248,7 +248,7 @@ fn seed_root(store: &EventStore) -> u64 {
         .value()
 }
 
-/// S12 §6 验收 1：无用户消息时，定时触发必须产生 `system.triggered` 事件
+/// DE-042 §6 验收 1：无用户消息时，定时触发必须产生 `system.triggered` 事件
 /// （触发器产出事件，不是旁路——自主行为同样走 I1 单通道 + I2 溯源）。
 #[test]
 fn scheduled_trigger_produces_event_not_side_channel() {
@@ -271,7 +271,7 @@ fn scheduled_trigger_produces_event_not_side_channel() {
     );
 }
 
-/// S12 §6 验收 3 + 4：长目标超过自主层预算 → 必须被看见；预算改小 → 判定改变。
+/// DE-042 §6 验收 3 + 4：长目标超过自主层预算 → 必须被看见；预算改小 → 判定改变。
 #[test]
 fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     let store = EventStore::new();
@@ -328,7 +328,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     );
 }
 
-/// 02 §2.3 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
+/// [DE-001 §4.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
 /// 无任何自主任务但读侧投影照常（J2 平凡值）。ZST 令牌零开销。
 #[test]
 fn conation_governance_three_rules() {

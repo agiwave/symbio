@@ -41,7 +41,7 @@ fn sliding_window(messages: &[ChatNode], max_turns: usize) -> Vec<ChatNode> {
 ///
 /// 仅作用于返回的构造结果，不修改存储。
 fn normalize_message_content(msg: ChatNode) -> Option<ChatNode> {
-    // 占位消息（无角色）直接丢弃（判据走 `node_role` 折叠，）
+    // 占位消息（无角色）直接丢弃（判据走 `node_role` 折叠）
     msg.node_role()?;
     let content_ok = matches!(
         &msg.content,

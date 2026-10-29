@@ -1,5 +1,5 @@
 /**
- * 详情表单的保存载荷派生（从 `DetailForm.vue` 按职责拆出，见 plan/13 批 C6）。
+ * 详情表单的保存载荷派生（从 `DetailForm.vue` 按职责拆出）。
  *
  * 这一层是**纯函数**：字段序列化（list → string[]、map → 对象）、id 派生、
  * name 回落链，只看传入的 `SaveContext`，不认识组件的响应式状态——

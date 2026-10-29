@@ -338,7 +338,7 @@ pub mod failure_kind {
     }
 }
 
-/// 收集口：**一张表，三个方法**（AR-025）。
+/// 收集口：**一张表，三个方法**（DE-025）。
 ///
 /// 收敛前这里是十六个方法的形态：`register` / `register_batch` /
 /// `list_capability` / `invoke` / `has_capability` 五个方法专服工具一族，

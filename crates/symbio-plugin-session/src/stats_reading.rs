@@ -111,13 +111,13 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
 
     let mut lat_parts = Vec::new();
     let mut fb_parts = Vec::new();
-    // 外部效标两族（02 §3.1 · 主动性 / 时域跨度）：与 lat/fb 同批扫描、同一份
+    // 外部效标两族（DE-008 §3.1.1 · 主动性 / 时域跨度）：与 lat/fb 同批扫描、同一份
     // snapshot——「多扫一遍」不是更彻底，是多一次读错范围的机会。
     let mut con_parts = Vec::new();
     let mut span_parts = Vec::new();
     let mut aut_parts = Vec::new();
     for snapshot in snapshots {
-        // SLO 四列是**累计口径**（S2.7-b2）：被快照取代而移入归档段的前缀也在
+        // SLO 四列是**累计口径**：被快照取代而移入归档段的前缀也在
         // `range(0)` 里，实例聚合不会**静默**少算。
         lat_parts.push(slo_report(CHAT_VOCAB).read_all(snapshot).value);
         fb_parts.push(fallback_rate(CHAT_VOCAB).read_all(snapshot).value);
@@ -161,7 +161,7 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
                 "rate": s.rate(),
             })).collect::<Vec<_>>(),
         },
-        // 外部效标两族（02 §3.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
+        // 外部效标两族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
         // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
         // 键名稳定（不随文档改字号）：conation ↔ 主动性、span ↔ 时域跨度。
         "axes": {
@@ -351,7 +351,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
     };
 
     // 承诺：一条一行读的是清单，面板只报「几条约、几条约没守住」——违约必须
-    // 当着人的面出声（S08 §5），所以有违约就是留意语气，没有才是常态。
+    // 当着人的面出声（DE-038 §5），所以有违约就是留意语气，没有才是常态。
     let cm = &stats.commitments;
     let cm_total = cm.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
     let cm_broken = cm.get("broken").and_then(|v| v.as_u64()).unwrap_or(0);

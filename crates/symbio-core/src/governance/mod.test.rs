@@ -176,7 +176,7 @@ fn can_reply_reads_the_single_reply_capability() {
     assert!(!holder.can_reply("session/ghost"));
 }
 
-/// 与 S1/S2 彩排链路对接的形状预演：主体对**事件切片**的可见子集为空 ⇒ 越界读取 0。
+/// 与 S1/彩排链路对接的形状预演：主体对**事件切片**的可见子集为空 ⇒ 越界读取 0。
 #[test]
 fn foreign_principal_reads_nothing_from_a_private_thread() {
     use crate::event::Event;
@@ -328,7 +328,7 @@ fn widen_is_commutative_idempotent_and_monotone() {
 
 // ── ：授权覆盖层（淘汰回路的机制半边）─────────────────────────────
 
-/// 撤销回路（S13 §6 断言 3「淘汰 = 一条可审计、可撤销的 grants 变更事件」）：
+/// 撤销回路（DE-043 §6 断言 3「淘汰 = 一条可审计、可撤销的 grants 变更事件」）：
 /// 收回 ⇒ `is_revoked` 翻真 ⇒ 恢复 ⇒ 翻假 ⇒ **再收回** ⇒ 又翻真。
 ///
 /// last-wins 是这条回路的全部语义：恢复之后再违约必须还能再淘汰

@@ -128,7 +128,7 @@ fn one_open_per_turn_passes() {
 
 #[test]
 fn two_opens_in_one_turn_is_detected() {
-    // 同一个 `u-{turn}` 落两回——单写者被绕过的痕迹（plan/11 批 0）。
+    // 同一个 `u-{turn}` 落两回——单写者被绕过的痕迹。
     let events = stored(vec![
         pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
         pending("u0-again", "user.message", Entity::Turn, Verb::Opened, 0),
@@ -201,7 +201,7 @@ fn non_asserted_events_need_no_provenance() {
 
 #[test]
 fn reply_without_provenance_is_detected() {
-    // S01 §5：回复必须有 produced_by——用户收到的话必须可追溯。
+    // DE-031 §5：回复必须有 produced_by——用户收到的话必须可追溯。
     let bare = Event {
         produced_by: None,
         ..pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0)
@@ -213,7 +213,7 @@ fn reply_without_provenance_is_detected() {
 
 #[test]
 fn fallback_without_provenance_is_detected() {
-    // 兜底也是一条普通事件——同样逃不出 I2（roadmap/S01 §2 的关键设计）。
+    // 兜底也是一条普通事件——同样逃不出 I2（DE-031 §2 的关键设计）。
     let bare = Event {
         produced_by: None,
         ..pending(

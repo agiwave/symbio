@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T45 压缩**入格 + 段归档**（S2.7-b2 判据，[D-053] 决策 6）：
+// T45 压缩**入格 + 段归档**（[D-053] 决策 6）：
 // 真实压缩触发 ⇒ 快照落 `session.consolidated`（`message × progressed`）⇒
 // 被取代的前缀移出 live 段、进归档段 ⇒ 删掉 `messages.json` 后重建 =
 // **快照 + 其后事实**（压缩前的轮次**不复活**）。

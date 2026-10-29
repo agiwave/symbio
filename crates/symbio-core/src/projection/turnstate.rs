@@ -1,4 +1,4 @@
-//! `turnstate` 投影（S1，[DE-018 §4](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")：③ 加 `turnstate`）。
+//! `turnstate` 投影（[DE-018 §4](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")：③ 加 `turnstate`）。
 //!
 //! **projection 参数表的取值**（[DE-001 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
 //! `projection = turnstate`），平凡值链的终点：S01 说 `projection` 平凡值是

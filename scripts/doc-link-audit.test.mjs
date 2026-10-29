@@ -340,7 +340,7 @@ test('D-004：「初版五条」这类时序回指判红', () => {
   assert.equal(r.status, 1, r.stdout)
 })
 
-test('D-004：裸数字箭头不误报（04 §3.1 状态表合法记着测试数增减 56 → 46）', () => {
+test('D-004：裸数字箭头不误报（状态表合法记着测试数增减 56 → 46）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n| 批 | 判定 | 用例 |\n|---|---|---|\n| ⑨ | ✅ | 56 → 46 |\n' })
   assert.equal(r.status, 0, r.stdout)
 })

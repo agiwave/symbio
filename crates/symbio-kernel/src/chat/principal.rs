@@ -215,7 +215,7 @@ impl Principal {
     }
 }
 
-// **读侧兼容反序列化**（[D-069 §决策 6]，）：`Option<Principal>` 字段上的
+// **读侧兼容反序列化**（[D-069 §决策 6]）：`Option<Principal>` 字段上的
 // 显式标记，语义已由 [`Principal::deserialize`] 的实现给出——`null` / 缺席 ⇒ `None`，
 // 字符串 ⇒ `Principal::from_legacy`，对象 ⇒ 正常解构。字段用 `#[serde(default)]` 即可。
 //

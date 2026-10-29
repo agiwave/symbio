@@ -18,7 +18,7 @@ import {
 
 const REPO = path.resolve(import.meta.dirname, '..')
 
-// ── 最小可用夹具：01 §8 参数表 + 02 坐标系七张表 + 阶梯总表 + 两阶文档 ──────
+// ── 最小可用夹具：DE-001 §8 参数表 + 02 坐标系七张表 + 阶梯总表 + 两阶文档 ──────
 //
 // 夹具刻意只给两阶、两维：反向用例注入的是**形状**（少一行 / 多一个加粗 / 未知键 /
 // 表头改名 / 越界取值），与阶数、维数无关；两阶足以暴露「名册配对」「累计点亮全表」的两端。
@@ -179,7 +179,7 @@ scope = child:<id>
 const S10 = `
 ## 2. 为什么它能落在 v2 上（J1）
 
-| 需求 | 认知体系要什么 | 落在 v2 的哪（逐条对 01 §8 的取值域） | 归属阶段 |
+| 需求 | 认知体系要什么 | 落在 v2 的哪（逐条对 DE-001 §8 的取值域） | 归属阶段 |
 |---|---|---|---|
 | \`C01\` | 七类认知内容入库 | \`event.entity = turn\`、\`projection = recall:tag=judgment\` | S06 |
 | \`C06\` | 向量索引 + 关系索引 | — **不占参数键**：索引是 \`Store\` 的实现细节 | S06 |
@@ -317,7 +317,7 @@ test('反向：赋值块用了一个不在 §8 表里的键 ⇒ 指认它是要�
   const bad = S02.replace('scope = child:<id>', 'wizard.mode = on')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02: bad, S10 } })),
-    /不在 01 §8 参数表里的键 `wizard.mode`/,
+    /不在 DE-001 §8 参数表里的键 `wizard.mode`/,
   )
 })
 
@@ -344,12 +344,12 @@ test('反向：§4 一行加粗都没有 ⇒ 退路口读不出来，抛错', ()
   assert.throws(() => fallbackOf(none, ['store'], 'S02'), /应有且只有 1 行/)
 })
 
-test('反向：§4 只在本文那一节里找表（S02 前面另有一张「参数」表时不误吃）', () => {
+test('反向：§4 只在本文那一节里找表（前面另有一张「参数」表时不误吃）', () => {
   const withEarlier = '## 3.\n\n| 参数 | 今天 |\n|---|---|\n| `projection` | `x` |\n\n' + S02.replace('## 3. 增量清单（只加数据）\n', '')
   assert.deepEqual(fallbackOf(withEarlier, ['store'], 'S02'), ['store', 'memory'])
 })
 
-// ── 取值域（01 §8 的「取值域」列）：读得出形态，越界就红 ─────────────────
+// ── 取值域（DE-001 §8 的「取值域」列）：读得出形态，越界就红 ─────────────────
 
 test('取值域读得出来：`↳ §6` 的集合由那张网格自己拥有，`*` 是开放值域', () => {
   const d = domainsOf(ARCH)
@@ -370,7 +370,7 @@ test('反向：§3 赋一个值域之外的取值 ⇒ 抛错（「0 值域扩展
   const bad = S02.replace('store = wal', 'store = sqlite')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02: bad, S10 } })),
-    /`store = sqlite` 越出 01 §8 声明的取值域/,
+    /`store = sqlite` 越出 DE-001 §8 声明的取值域/,
   )
 })
 
@@ -378,7 +378,7 @@ test('反向：§4 退路口的平凡值越界 ⇒ 同样抛（退路口也是�
   const bad = S02.replace('**`memory`**', '**`sqlite`**')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02: bad, S10 } })),
-    /§4 退路口.*越出 01 §8/,
+    /§4 退路口.*越出 DE-001 §8/,
   )
 })
 
@@ -498,7 +498,7 @@ test('反向：§6.1 名册整张不见 ⇒ 抛错，绝不返回空名册（空
   assert.throws(() => frameOf(gone), /§6\.1 名册里找不到表头首列为「能力」的表/)
 })
 
-// ── 认知需求清单（S10 §2 是唯一 owner）：读得出，越界就红 ─────────────────
+// ── 认知需求清单（DE-040 §2 是唯一 owner）：读得出，越界就红 ─────────────────
 
 test('需求清单进生成物：落点逐项吃 §8，`—` 那行读成空赋值', () => {
   const ds = demandsOf(S10, 'S10')
@@ -528,7 +528,7 @@ test('反向：需求的取值越出 §8 ⇒ 同一条判据，照样抛', () =>
   const bad = S10.replace('`event.entity = turn`', '`event.entity = memory`')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02, S10: bad } })),
-    /§2 C01：`event\.entity = memory` 越出 01 §8 声明的取值域/,
+    /§2 C01：`event\.entity = memory` 越出 DE-001 §8 声明的取值域/,
   )
 })
 
@@ -536,7 +536,7 @@ test('反向：需求用了一个不在 §8 的键 ⇒ 指认它是要走 ADR �
   const bad = S10.replace('`principal = person:zhangsan`', '`cognition.layer = 5`')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02, S10: bad } })),
-    /不在 01 §8 参数表里的键 `cognition\.layer`/,
+    /不在 DE-001 §8 参数表里的键 `cognition\.layer`/,
   )
 })
 
@@ -566,7 +566,7 @@ test('反向：S10 那篇读不到 ⇒ 抛错，而不是产出一份没有需�
 
 // ── dogfood：真实仓库的文档必须能被同一份代码读出来，且生成物未漂移 ────────
 
-test('真实 docs/plan 读得出 10 个顶层键与 13 阶名册', () => {
+test('真实 docs/003-design 读得出 10 个顶层键与 13 阶名册', () => {
   const text = generate(REPO)
   assert.equal([...text.matchAll(/^ {4}"/gm)].length >= 10, true)
   assert.match(text, /pub const MECHANISMS/)
@@ -595,7 +595,7 @@ test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是�
 test('真实 S10 读得出 16 条认知需求，其中恰有一条不占参数面', () => {
   const s10 = fs.readFileSync(path.join(REPO, 'docs', '003-design', '040-个人认知体系注入.md'), 'utf8')
   const ds = demandsOf(s10, 'S10')
-  assert.equal(ds.length, 16, 'S10 §2 与 03 §7.1 都说 16 条——数一下，别信')
+  assert.equal(ds.length, 16, 'DE-040 §2 与 DE-016 §7.1 都说 16 条——数一下，别信')
   assert.equal(ds.filter((d) => !d.assignments.length).length, 1, '只有 C06（索引）不占参数面')
   assert.equal(new Set(ds.map((d) => d.stage)).size >= 5, true, '落点跨阶：认知体系不是单独一阶')
 })

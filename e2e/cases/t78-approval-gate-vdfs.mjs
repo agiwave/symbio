@@ -132,7 +132,7 @@ export default defineCase(
       return abs;
     };
 
-    // 事实面读面：授权级联（ 步 3）必须留下 `request` + `authz.denied`，
+    // 事实面读面：授权级联必须留下 `request` + `authz.denied`，
     // 而拒绝的那一笔**不能**有 `sent`——「没放行 ⇒ 没派发」是 fail-closed 的
     // 唯一可观测形态。直接读会话 WAL，不经过转写（转写是投影，不是事实源）。
     const readWal = (sid) =>
@@ -259,7 +259,7 @@ export default defineCase(
       );
 
       // 事实面：批准恢复的那一笔必须走完 `request → granted → sent → response`。
-      // 这是 步 4 的分水岭——在此之前 resume 直接调执行层，端口账上
+      // 这是端口账的分水岭——在此之前 resume 直接调执行层，端口账上
       // 只有首轮的 `denied`，批准后的执行是事实面的空白。
       const aFacts = toolFacts(readWal(SID_INTERACTIVE));
       const aGranted = aFacts

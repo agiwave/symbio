@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use symbio_core::ApprovalGrants;
 
 // 建树策略的形状与 flat 折叠住 core `node_build`（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
-// 裁决三，[plan/14 步 6](../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 切片批）：写侧构造
+// 裁决三）：写侧构造
 // 词表被留守与驱动器两个插件共用，隔着 E-009 的插件墙只能住 core；配置面在这里
 // **续一发短路径**——`plugin.rs` / `state.rs` / `tool_dispatch.rs` 等既有引用不经改动。
 pub use symbio_core::node_build::PresentationTree;
@@ -226,7 +226,7 @@ pub struct SessionConfig {
     /// 上界是"最多说几次"。没有它，一个长时间运行的任务会按间隔反复刷屏。
     #[serde(default = "default_progress_max_per_turn")]
     pub progress_max_per_turn: u32,
-    /// 「欲」升格为任务的总开关（**E3 平凡值：`false`**，[02 §2.3](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
+    /// 「欲」升格为任务的总开关（**E3 平凡值：`false`**，[DE-008 §2.3](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
     ///
     /// ## 它控制什么
     ///
@@ -241,7 +241,7 @@ pub struct SessionConfig {
     /// 触发（`HeartbeatConfig::enabled`，按会话、藏在 `Session.metadata`）问的是
     /// 「系统要不要定时做事」；本开关（按插件、藏在 `PLUGIN.yml`）问的是「做出来的事
     /// 要不要升格为长期任务」。两者的平凡值都关，但关掉的是**不同的东西**——合成一个
-    /// 就没法只关其中一层（S12 §4「两层开关独立」）。
+    /// 就没法只关其中一层（DE-042 §4「两层开关独立」）。
     ///
     /// 为什么放 session 的配置面：它是**治理策略**（授权 / 预算 / 审计的入口），
     /// 不是某个插件的内部参数，归编排侧的旋钮面（与 `classify_enabled` 同一条）。
@@ -255,12 +255,12 @@ pub struct SessionConfig {
     /// 短于这个上界。
     #[serde(default = "default_conation_enabled")]
     pub conation_enabled: bool,
-    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
+    /// 技能编译的总开关（**DE-041 §4 平凡值：`false`**，[DE-041 §4](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
     ///
     /// ## 它控制什么
     ///
     /// 轮末收束时，本轮的**成功轨迹**（`chat.assistant.final` 收束格）要不要被固化成一条
-    /// `memory.encoded{tag:"skill"}`——S11 §4 的平凡值 `projection = recall` 说的
+    /// `memory.encoded{tag:"skill"}`——DE-041 §4 的平凡值 `projection = recall` 说的
     /// 正是「不编译，只检索」：
     /// - `true`：`skill_events::compile` 在收束时写技能事件（同文去重，同一句 trigger
     ///   至多编译一次），本轮的用户发言与助手回答一起被固化下来；
@@ -271,14 +271,14 @@ pub struct SessionConfig {
     /// ## 它**不**等于"开了就更快"
     ///
     /// 快路（`SkillRoute::SkillFastPath`）今天只作用在**提示词**上：低置信的技能
-    /// 会被摘出本轮召回视图（回退）。「真正跳过模型、跑出 S11 §6.2 的命中 P99 比
+    /// 会被摘出本轮召回视图（回退）。「真正跳过模型、跑出 DE-041 §6.2 的命中 P99 比
     /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
     #[serde(default = "default_skill_compile_enabled")]
     pub skill_compile_enabled: bool,
-    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")
+    /// 技能快路的**执行半边**（[DE-041 §4](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")
     /// 参数表里的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
     ///
-    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[D-079](../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类s11-4-的-actorpattern-是开关参数前者不该做分派点 "DE-005-协议规范")）：
+    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[D-079](../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类de-041-4-的-actorpattern-是开关参数前者不该做分派点 "DE-005-协议规范")）：
     /// 那个字段是**主体分类**（由授权谓词派生：持 `reply.*` ⇒ `Reasoner`），从不做分派；
     /// 这里是**逐轮开关**（命中时跳不跳模型）。两者名字撞了，把后者当成分派点会立刻
     /// 把本开关关死——`session/main` 派生 `Reasoner`，接上去快路永不命中。
@@ -288,20 +288,20 @@ pub struct SessionConfig {
     /// [`skill_compile_enabled`] 让技能**存在**、`skill_events::route` 让低置信技能**不进
     /// 提示词**；本开关决定命中时**要不要跳过模型**：
     /// - `true`：本轮发言**逐字命中**某条已编译技能（且该技能过置信度闸）⇒ 本轮以
-    ///   **技能正文**收束，**一次模型调用都不发生**（S11 §2「命中技能后走 `budget_ms`
+    ///   **技能正文**收束，**一次模型调用都不发生**（DE-041 §2「命中技能后走 `budget_ms`
     ///   更小的 ActorSpec」、§6.2「命中后 `cost_ms` 显著低于未命中路径」）；
-    /// - `false`：**永远走完整推理**——退化成 S03（S11 §4 平凡值）。
+    /// - `false`：**永远走完整推理**——退化成 S03（DE-041 §4 平凡值）。
     ///
     /// ## 与 [`skill_compile_enabled`] 为什么是两个开关
     ///
-    /// S11 §4 的两行参数是独立的：`projection = skill_compile`（编不编）与
+    /// DE-041 §4 的两行参数是独立的：`projection = skill_compile`（编不编）与
     /// `actor.pattern`（命中后走不走快路，即本开关）。合成一个会让「只编译、不加速」
     /// 无法表达——而那正是**观察编译质量**时最需要的形态（编译是数据，加速是行为）。
     ///
     /// ## 命中判据取**恒等**，不是"同类"
     ///
     /// 命中 = 本轮发言与技能的 `trigger` **逐字相同**（归一化 = `trim` + 与写方
-    /// **同一个**截断上限）。更宽的"同类"判定是算法问题（S11 §7：架构只提供
+    /// **同一个**截断上限）。更宽的"同类"判定是算法问题（DE-041 §7：架构只提供
     /// `skill_compile` 这个位置），本开关不假装它已解决——因此命中率取决于
     /// **重复发言**，不取决于语义相似。这是诚实划界，不是缺陷：后续接入匹配算法时，
     /// 改的是**数据**（`skill_events::take_match` 一处），不是结构。
@@ -428,7 +428,7 @@ pub fn default_supplements_max_per_drain() -> usize {
 }
 pub fn default_classify_enabled() -> bool {
     // S3 生效：`compose` 的两条产线已落地，`Answered` 必然有话说（最差是变体兜底），
-    // 沉默的前提不复存在。S2 的"先交机制、默认关闭"到此结束——见字段文档。
+    // 沉默的前提不复存在。"先交机制、默认关闭"到此结束——见字段文档。
     true
 }
 pub fn default_compose_enabled() -> bool {
@@ -464,13 +464,13 @@ pub fn default_progress_max_per_turn() -> u32 {
 }
 
 pub fn default_conation_enabled() -> bool {
-    // E3 平凡值（02 §2.3）：关掉后「欲」照样入格、照样可读，只是不升格为任务——
+    // E3 平凡值（[DE-001 §4.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：关掉后「欲」照样入格、照样可读，只是不升格为任务——
     // 系统退化为纯响应式且**仍完整运行**。开不开它是价值判断，不是架构选择。
     false
 }
 
 pub fn default_skill_compile_enabled() -> bool {
-    // S11 §4 平凡值：编译开关 = false（不编译，只检索）。关掉后技能链路
+    // DE-041 §4 平凡值：编译开关 = false（不编译，只检索）。关掉后技能链路
     // （编译 → 校准 → 回退）整条退到「没有技能」的形态，而召回 / 巩固照常跑；
     // 技能从经验里学来，不是系统的前提。
     //
@@ -481,7 +481,7 @@ pub fn default_skill_compile_enabled() -> bool {
 }
 
 pub fn default_skill_fast_path() -> bool {
-    // S11 §4 平凡值：参数 `actor.pattern = reasoner`（永远走完整推理，退化成 S03）——
+    // DE-041 §4 平凡值：参数 `actor.pattern = reasoner`（永远走完整推理，退化成 S03）——
     // 注意这是**参数表的取值**，不是 core 的 `ActorSpec.pattern`（D-079）。
     // 开它是**行为改变**（命中时以技能正文收束、不调模型），因此默认关：
     // 「不加速」是安全退路口，而"只编译不加速"本身是有意义的观察形态。

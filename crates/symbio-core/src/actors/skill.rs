@@ -1,4 +1,4 @@
-//! 技能词汇（[roadmap/S11](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）：`memory.encoded` 载荷里的技能标签。
+//! 技能词汇（[DE-041](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）：`memory.encoded` 载荷里的技能标签。
 //!
 //! 编译与路由是单消费方策略，归 owner 插件（`crates/symbio-plugin-loop/src/skill_events.rs`，D-189）；
 //! 本域只留这个**共享词汇**——写方在 loop、读数口在 session（D-177 / D-182）。

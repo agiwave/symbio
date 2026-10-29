@@ -102,7 +102,7 @@ async fn main() -> ExitCode {
     // 判定使用方式：心跳守护 > 显式消息 > 强制 REPL > 管道输入（非终端）> 交互 REPL。
     //
     // 各分支只产出**退出码**，`client` 以可变借用进入——进程退出前的全局收尾
-    // （整树 `stop(Shutdown)`，）收在下面的唯一出口，四种用法的退出路径
+    // （整树 `stop(Shutdown)`）收在下面的唯一出口，四种用法的退出路径
     // 都不会漏（收尾散进各分支，第三种用法出现时最容易漏掉）。
     let exit = if args.heartbeat {
         run_heartbeat_daemon(&mut client, &args).await

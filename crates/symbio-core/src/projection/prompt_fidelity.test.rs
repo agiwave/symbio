@@ -319,7 +319,7 @@ fn removed(ids: &[&str]) -> Event {
     .with_payload(serde_json::json!({ "ids": ids }))
 }
 
-// ── 第四类：取代格（压缩快照，S2.7-b2）────────────────────────────────
+// ── 第四类：取代格（压缩快照）────────────────────────────────
 
 /// 一条 `session.consolidated`（载荷 `messages` = 压缩后的整份列表）。
 fn snapshot(msgs: &[(&str, &str, &str)]) -> Event {

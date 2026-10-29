@@ -1,13 +1,12 @@
 import './_selfrun.mjs';
-// T36 自主层接线（`AutonomousInitiator` + `IntentGate`，S9 第 21 步，S12）：
+// T36 自主层接线（`AutonomousInitiator` + `IntentGate`）：
 // 会话空闲到点 ⇒ 心跳触发一轮 ⇒ 「欲」过闸门 ⇒ 过了才真的发出那一轮。
 //
 // ## 本用例钉的是什么
 //
-// [11 批 2 ③](../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") 的接线判据：
-// 「每件接线一条 e2e（**接线前后行为可见地不同**，否则等于没接）」，且该处明写
-// **`IntentGate` 必须与 `AutonomousInitiator` 同批成对**——无门即写 = 自主层直写
-// 对话/任务，破「自主写入对话 0」。所以本用例钉的是**这一对**：
+// 接线判据：
+// 「每件接线一条 e2e（**接线前后行为可见地不同**，否则等于没接）」，且两者必须
+// 成对——无门即写 = 自主层直写对话/任务，破「自主写入对话 0」。本用例钉的是**这一对**：
 //
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
@@ -31,7 +30,7 @@ import './_selfrun.mjs';
 //
 // ## 闸门的两个判决怎么在一条用例里都跑到
 //
-// `IntentGate::evaluate` 的三条（S12 §4）：
+// `IntentGate::evaluate` 的三条（DE-042 §4）：
 // - `!policy.enabled` ⇒ 拒（**关停开关**，`conation_enabled` 默认 false）；
 // - `goal.len() > max_goal_len`（默认 **200 字节**）⇒ 拒「目标过宽」；
 // - 否则 ⇒ 放行。
@@ -169,7 +168,7 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // `conation_enabled` **显式打开**：它默认 false（S12 §4 平凡值「关掉后系统
+        // `conation_enabled` **显式打开**：它默认 false（DE-042 §4 平凡值「关掉后系统
         // 退化为纯响应式」），本用例验的是打开之后闸门**能放行**的那条路。
         // 拒收那条路不靠这个开关，靠提示词长度——两个判决因此可以并存。
         session: { ...DIALOG_FACE_OFF, conation_enabled: true },

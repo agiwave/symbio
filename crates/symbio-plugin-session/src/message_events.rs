@@ -554,7 +554,7 @@ fn append_into(
     target: &str,
     payload: Value,
 ) -> Result<(), TryAppendError> {
-    // 完整史（S2.7-b2）：
+    // 完整史：
     // - **溯源锚**：被编辑的消息若来自压缩前（其定义事件在归档段里），切片里没有它
     //   ⇒ 退回 `last()` 的弱锚（`provenance` 的兜底）；
     // - **幂等键**：`n` = 本会话内 `Message` 实体的**全局**计数。只数没被取代的那段

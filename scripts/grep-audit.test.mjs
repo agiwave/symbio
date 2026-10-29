@@ -454,21 +454,15 @@ test('S-011 is skipped (not failed) when either file is outside the scope', () =
 })
 
 // ── S-012: 代码注释里的实施排期指认 ────────────────────────────────────
-// 这批注释没有 owner：「本批未修」的下一批修了，句子就指着已不存在的时间点；
-// 单独的「批 2」在批次重排后无人能解。判据只取两种无歧义形态（待办标记 / 无出处批次号）。
+// 这类注释没有 owner：「本批未修」的下一批修了，句子就指着已不存在的时间点；
+// 单独的「批 2」在批次重排后无人能解。判据只取两种无歧义形态（待办标记 / 批次号）。
 const S012_FILE = 'crates/symbio-core/src/actors/mod.rs'
 
-test('S-012 fires on a batch number with no plan anchor', () => {
+test('S-012 fires on a batch number', () => {
   const r = s010Audit({ [S012_FILE]: '/// 运行器据此停止工具循环（批 2 的恢复前提）。\n' })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /S-012/)
-  assert.match(r.stdout, /批次号没有出处/)
-})
-
-test('S-012 accepts the same batch number with its plan anchor', () => {
-  const src =
-    '/// 恢复前提见 [plan/11 批 2](../../../../docs/003-design/011-Agent目录规范.md)。\n'
-  assert.equal(s010Audit({ [S012_FILE]: src }).status, 0)
+  assert.match(r.stdout, /批次号属施工计划/)
 })
 
 test('S-012 fires on a TODO / FIXME marker left in a comment', () => {
@@ -499,8 +493,8 @@ test('S-012 covers cli and the verify programs, not just symbio', () => {
 test('S-012 waiver requires a reason (same line or the line above)', () => {
   const hit = '/// 运行器据此停止工具循环（批 2 的恢复前提）。\n'
   for (const waived of [
-    hit.replace('\n', '  // grep-audit-allow S-012: 同段首行已给 plan/11 出处\n'),
-    `// grep-audit-allow S-012: 同段首行已给 plan/11 出处\n${hit}`,
+    hit.replace('\n', '  // grep-audit-allow S-012: 恢复前提写在同段首行\n'),
+    `// grep-audit-allow S-012: 恢复前提写在同段首行\n${hit}`,
   ]) {
     const r = s010Audit({ [S012_FILE]: waived })
     assert.equal(r.status, 0, r.stdout)

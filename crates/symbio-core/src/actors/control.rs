@@ -1,4 +1,4 @@
-//! 控制面主体：淘汰回路（[roadmap/S13](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）。
+//! 控制面主体：淘汰回路（[DE-043](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）。
 //!
 //! 抢占判定归 `crates/symbio-plugin-session/src/transcript/inbox`、外部执行闸门归
 //! `crates/symbio-plugin-loop/src/tools/dispatch/gates`（同插件内两处消费，D-190）；留在这里的
@@ -11,7 +11,7 @@ use crate::governance::GrantsChange;
 use crate::projection::reputation::ReputationEntry;
 use crate::{pattern_for_principal, ActorSpec, Event, Scope};
 
-/// 淘汰判定者（S13 §3，[roadmap/S13 §2/§3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
+/// 淘汰判定者（DE-043 §3，[DE-043 §2/§3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
 /// 声誉投影低于阈值 ⇒ 收回 `assign.work` 的**裁决侧**。
 ///
 /// 与已归 owner 的抢占判定同形而同用：判定是**纯函数**（读视图出结论），落格是
@@ -50,7 +50,7 @@ impl EliminationDecider {
     /// 淘汰阈值（平凡值）：声誉分**低于**它即淘汰。
     ///
     /// 平凡打分 = 守约 − 违约（`plain_score`），阈值 0 ⇒ **任何未配平的违约**
-    /// （净分为负）就触发。它是**参数不是架构**（S13 §4 的平凡值表同口径）：
+    /// （净分为负）就触发。它是**参数不是架构**（DE-043 §4 的平凡值表同口径）：
     /// 换阈值不改本判定的形状；`should_eliminate` 是唯一读它的地方。
     ///
     /// **为什么不分档（项 13 的复核结论）**：分档要的是**分数上的梯度**，
@@ -94,7 +94,7 @@ impl EliminationDecider {
     /// 淘汰事件（`verdict × asserted`，`change = "revoke"`）——可审计可撤销的那一格。
     ///
     /// 载荷六字段全为**数据**：`subject`（被收回的主体）、`capability`
-    /// （收回的能力，恒为 `assign.work`——S13 §2 淘汰行的字面机制）、`change`、
+    /// （收回的能力，恒为 `assign.work`——DE-043 §2 淘汰行的字面机制）、`change`、
     /// `score` / `threshold`（判据的当时值，审计时要能复算）、`why`（人话理由）。
     /// `source_seq` = 溯源锚（I2：断言类事件必须非空）。
     pub fn elimination_event(

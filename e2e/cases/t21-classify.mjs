@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T21 轮首判决（S2）：规则短路 / 快速档分类 / 需要干活 / 开关与卸载的平凡值。
+// T21 轮首判决：规则短路 / 快速档分类 / 需要干活 / 开关与卸载的平凡值。
 //
 // ## 本用例钉的是什么
 //
@@ -116,7 +116,7 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         gateway: gatewayConfig(GATEWAY_PORT),
-        // 两个开关的出厂默认都已是 `true`（S3 起，见 `SessionConfig` 的字段文档）。
+        // 两个开关的出厂默认都已是 `true`（起，见 `SessionConfig` 的字段文档）。
         // 这里仍**显式**写出，是让本用例的前提自证——不依赖任何默认值，翻转默认值
         // 不会悄悄改变本用例验的是什么。
         session: { classify_enabled: true },

@@ -58,7 +58,7 @@ fn load_history_false_is_honored() {
 // 会话选定哪个 agent ⇒ 规格就从授权表那一行取。三个角色主体（工人 / 规划者 / 验证者）
 // 逐一钉：**能力集从登记行取**（单一真源，不是空表也不是硬编码清单）、**模式按矩阵
 // 谓词派生**（工人无发言权而有产物能力 ⇒ `Translator`，与对等行同形；规划者 / 验证者
-// 两者皆无 ⇒ `Decider`，与 S03 §3 的 ActorSpec 行 `pattern: decider` 一致）、**预算
+// 两者皆无 ⇒ `Decider`，与 DE-033 §3 的 ActorSpec 行 `pattern: decider` 一致）、**预算
 // 按模式**（声明档，`D-223` 订正 2——不是本幕的档位）、**作用域由委派链给**（子会话
 // ⇒ `Child(父主体)`）。
 //
@@ -103,12 +103,12 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
     assert_eq!(
         planner.capabilities,
         vec!["define.work".to_string()],
-        "规划者的权威动作是立任务（S03 §3 grants 行）"
+        "规划者的权威动作是立任务（DE-033 §3 grants 行）"
     );
     assert_eq!(
         planner.pattern,
         Pattern::Decider,
-        "define.work 独持 ⇒ Decider（S03 §3 ActorSpec 行 pattern: decider）"
+        "define.work 独持 ⇒ Decider（DE-033 §3 ActorSpec 行 pattern: decider）"
     );
 
     let verifier = request_actor_spec(agent_ctx("verifier").as_ref(), Scope::Root);
@@ -116,7 +116,7 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
     assert_eq!(
         verifier.capabilities,
         vec!["assert.verification".to_string()],
-        "验证者的权威动作是独立判定（S03 §3 grants 行）"
+        "验证者的权威动作是独立判定（DE-033 §3 grants 行）"
     );
     assert_eq!(verifier.pattern, Pattern::Decider);
     // `Decider` 是「确定，毫秒级」那一类 ⇒ 声明档 `Reflex`（同上：不是本幕的档）。
@@ -127,13 +127,13 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
 ///
 /// `pattern` 由授权谓词派生（持 `reply` ⇒ `Reasoner`），而**每一个会跑模型的轮次
 /// 主体都持 `reply`**。所以凡是要判「跑不跑模型」的地方，读到的永远是 `Reasoner`：
-/// 把它接成分派闸门，等于把技能快路（S11 §4 参数表的同名参数，落地形态是
+/// 把它接成分派闸门，等于把技能快路（DE-041 §4 参数表的同名参数，落地形态是
 /// `SessionConfig::skill_fast_path`）永久关死。两者的区别见 [D-079]。
 ///
 /// 机器判据不在这里（单测拦不住调用点的闸门），在 `e2e/cases/t41-skill-fast-path.mjs`：
 /// 把 pattern 接成分派点 ⇒ 快路永不命中 ⇒ 那条用例的「零模型调用」断言不成立。
 ///
-/// 决策 D-079 见 [D-079](../../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类s11-4-的-actorpattern-是开关参数前者不该做分派点 "D-079")
+/// 决策 D-079 见 [D-079](../../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类de-041-4-的-actorpattern-是开关参数前者不该做分派点 "D-079")
 #[test]
 fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
     use symbio_core::{Pattern, Scope};

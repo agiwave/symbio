@@ -158,7 +158,7 @@ use decl::{Builder, FactDecl, Frozen, Gap, RowDecl, Session};
 static SIDE_REGISTRY: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
 fn main() {
-    println!("═══ 注册口的封闭性（PL-016 §3.3 · T-243 口径 2）═══");
+    println!("═══ 注册口的封闭性═══");
 
     // ── 1. 方法面就是那几个口，一个都不能变宽 ──
     //

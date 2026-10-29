@@ -25,7 +25,7 @@
 
 use std::marker::PhantomData;
 
-// ───────────────────────── 四层时延（对应 01 §10）─────────────────────────
+// ───────────────────────── 四层时延（对应 DE-001 §10）─────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LatencyTier {
@@ -48,7 +48,7 @@ impl LatencyTier {
             LatencyTier::Autonomic => 86_400_000,
         }
     }
-    /// 该档位**是否允许**触碰模型（判据是时延，不是形式 —— 见 01 §10）
+    /// 该档位**是否允许**触碰模型（判据是时延，不是形式 —— 见 DE-001 §10）
     pub fn may_call_model(self) -> bool {
         matches!(self, LatencyTier::Fast | LatencyTier::Deep | LatencyTier::Autonomic)
     }

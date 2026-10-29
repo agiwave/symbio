@@ -152,7 +152,7 @@ pub async fn resolve_fs(
 fn event_bus_sink() -> VdfsChangeSink {
     // 信封与 provider 侧形状重合（本层只补 `map_paths` 挂载名），**原样**投上总线——
     // 不再有一个「换信封」的翻译层（那层曾叫 `to_change_event` → `VdfsChangeEvent`，
-    // 两者形状逐字相同，纯复制；S27 合并删除）。
+    // 两者形状逐字相同，纯复制，合并时删除）。
     Arc::new(move |change: VdfsChange| {
         let data = serde_json::to_value(&change).unwrap_or(serde_json::Value::Null);
         symbio_core::EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, data);

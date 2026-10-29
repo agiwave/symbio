@@ -25,7 +25,7 @@
 //! ## 没跑到的调用同样是没履约
 //!
 //! 协议失败 / 超限丢弃 / 被闸门拒止 / 批被中止的 `agent_run` 都走 `success = false`：
-//! 「约了没履约」比「查无此约」诚实（S08 §5——违约可被观测是 T5 的全部前提）。
+//! 「约了没履约」比「查无此约」诚实（DE-038 §5——违约可被观测是 T5 的全部前提）。
 //! 待用户审批的不在此列：承诺还没到可判时刻，抢跑记成履约或违约都是假事实。
 
 use symbio_core::commitment_events;
@@ -85,7 +85,7 @@ const COMMITMENT_VOCAB: symbio_core::CommitmentVocab = symbio_core::CommitmentVo
 
 symbio_plugin_api::submit_behavior!(DelegationPromise);
 
-/// 淘汰回路的前置判断：主体被收回 `assign.work` ⇒ 本次委派不执行（S13 §3）。
+/// 淘汰回路的前置判断：主体被收回 `assign.work` ⇒ 本次委派不执行（DE-043 §3）。
 ///
 /// ## 为什么判断住这里
 ///
@@ -96,8 +96,8 @@ symbio_plugin_api::submit_behavior!(DelegationPromise);
 ///
 /// ## 出口
 ///
-/// 可审计拒绝，**记违约承诺**：这次调用确实约了派活却没派成（S08 §5）。判断本身
-/// 不产事件——`verdict.asserted` 早已在事实源里，本层只是读侧（S13 §3）。
+/// 可审计拒绝，**记违约承诺**：这次调用确实约了派活却没派成（DE-038 §5）。判断本身
+/// 不产事件——`verdict.asserted` 早已在事实源里，本层只是读侧（DE-043 §3）。
 pub struct DelegationGate;
 
 impl ToolBehavior for DelegationGate {

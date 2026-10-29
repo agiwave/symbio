@@ -903,7 +903,7 @@ fn assign_seq_places_trailing_run_after_last_existing() {
     assert_eq!(msgs[1].seq, Some(6));
 }
 
-// ── `apply`：唯一写入口（S2.7-b3 前置，D-054 决策 2 + 3）──────────────
+// ── `apply`：唯一写入口（D-054 决策 2 + 3）──────────────
 
 use super::super::paths::V2_WAL_FILE;
 use symbio_core::{Event, Seq, Store};

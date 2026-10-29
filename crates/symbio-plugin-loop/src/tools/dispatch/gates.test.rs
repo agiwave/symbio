@@ -185,7 +185,7 @@ fn blocked_refusal_keeps_hook_wording_and_semantics() {
 // 策略实现随 D-190 从 core 迁到本闸门文件；这里钉判定表与「熔断不静默」的
 // 事件形状。整批路径（授权 → 闸门 → 拒止）仍在 `tool_executor.test.rs`。
 
-/// S09 §6 验收 1：未授权 ⇒ `Refuse`（调用方因此零事件；事件面判据在整批路径里）。
+/// DE-039 §6 验收 1：未授权 ⇒ `Refuse`（调用方因此零事件；事件面判据在整批路径里）。
 /// 超时**先于**授权判定——判据顺序本身是规格。
 #[test]
 fn circuit_breaker_refuses_unauthorized() {
@@ -201,7 +201,7 @@ fn circuit_breaker_refuses_unauthorized() {
     );
 }
 
-/// S09 §6 验收 2 + 4：预算耗尽 / 超时熔断（都必须写事件）；预算放宽 ⇒ 放行。
+/// DE-039 §6 验收 2 + 4：预算耗尽 / 超时熔断（都必须写事件）；预算放宽 ⇒ 放行。
 #[test]
 fn circuit_breaker_break_table_and_event() {
     let gate = CircuitBreaker;

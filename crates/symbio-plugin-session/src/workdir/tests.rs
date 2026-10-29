@@ -142,7 +142,7 @@ async fn stat_shapes_the_node_without_inlining_content() {
     assert_eq!(read_content(wd, "README.md").await.unwrap(), "# demo");
 }
 
-/// 工作目录**往返**：写 → 列 → 读 → 删（S6 会话内部链路的真实 IO 闭合）
+/// 工作目录**往返**：写 → 列 → 读 → 删（会话内部链路的真实 IO 闭合）
 ///
 /// VDFS 侧的 `<id>/workdir[/<rel>]` 最终全部落到这四个函数上，而此前
 /// 只有「列 / 读既有文件」的单点测试——写入与删除的实际落盘没有闭合验证。

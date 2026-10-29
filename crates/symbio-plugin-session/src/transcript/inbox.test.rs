@@ -5,7 +5,7 @@
 //! 真跑一轮要整棵树（能力收集 + 模型 provider），那是 e2e 的活（`e2e/cases/t15-*.mjs`）。
 //! 本文件锁的是队列本身的规则：顺序、身份、两种取消的分界、**忙则排队**，以及
 //! 忙窗里那条**只判不落、空闲才落格**的抢占链。前几者是 D-026 的核心承诺，
-//! 后者是 S8 的落格时序——它们恰好**能**在单测里钉死，因为判的都是
+//! 后者是 落格时序——它们恰好**能**在单测里钉死，因为判的都是
 //! "这一趟要不要动队列 / 动事实源"，与跑得成跑不成无关。
 
 use super::*;
@@ -328,12 +328,12 @@ async fn zero_bound_is_clamped_to_one() {
     assert_eq!(batch.len(), 1, "上界 0 会让队列永不消费，必须兜到 1");
 }
 
-// ────────────── 插话抢占：忙窗判、空闲落、收在插话轮之后（S8）───────
+// ────────────── 插话抢占：忙窗判、空闲落、收在插话轮之后───────
 //
 // 上面几例钉的是**队列**规则（忙则排队，D-026）；这一段钉的是跨过忙窗的那条
 // 链子。断言一律看**就绪集**：`readyset` 是模型唯一的调度候选来源，挂起没落格、
 // 恢复没落格对用户都是「任务凭空消失 / 永不复活」，而两者都**不报错**——
-// 正是 04 §2.2 步 6 要防的静默失效。
+// 正是 DE-016 §9.2 要防的静默失效。
 
 /// 每例独占存储根：抢占要往事实源写格，共用 `test_dir()` 会跨用例串味。
 fn preempt_plugin() -> (tempfile::TempDir, Arc<SessionPlugin>) {
@@ -370,7 +370,7 @@ fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<symbio_core::Event> {
 }
 
 /// 一轮的事实。`final_first` = 收束发言在 `task.opened` **之前**——这正是
-/// 轮末收束的落笔顺序（收束格先落、派生事实后补；04 §2.1 的判据输入，见那里的
+/// 轮末收束的落笔顺序（收束格先落、派生事实后补；DE-016 §9.1 的判据输入，见那里的
 /// 「顺序是判据」注记）。
 fn turn_facts(final_first: bool) -> Vec<symbio_core::Event> {
     use symbio_core::{Entity, Event, Verb};
@@ -471,15 +471,15 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
     assert_eq!(p.inbox_items(sid).await.len(), 1, "启动失败 ⇒ 放回队首");
     assert!(
         has_fact(&p, sid, Entity::Task, Verb::Held),
-        "挂起必须落成 `task × held` 事实（04 §2.2 步 1–2）"
+        "挂起必须落成 `task × held` 事实（DE-016 §9.2）"
     );
     assert!(
         has_fact(&p, sid, Entity::Control, Verb::Opened),
-        "打断处置必须留一条 `control × opened`（S07 §6.1 验收 1）"
+        "打断处置必须留一条 `control × opened`（DE-037 §6.1 验收 1）"
     );
     assert!(
         ready_ids(&p, sid).is_empty(),
-        "挂起的任务退出就绪集——插话轮因此看不见在跑的任务（S07 §5）"
+        "挂起的任务退出就绪集——插话轮因此看不见在跑的任务（DE-037 §5）"
     );
     assert!(
         symbio_core::check_all(vocab(), &read_wal(&p, sid)).is_empty(),
@@ -488,12 +488,12 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
     );
 
     // ③ 插话轮收尾：**批空 ⇒ 收**。挂起不收就是永久挂起——任务从此再也不进
-    //    就绪集，且没有一条消息说得出为什么（S07 §5 的静默失效）。
+    //    就绪集，且没有一条消息说得出为什么（DE-037 §5 的静默失效）。
     p.clear_inbox(sid).await;
     assert!(!p.clone().drain_inbox_once().await);
     assert!(
         has_fact(&p, sid, Entity::Task, Verb::Progressed),
-        "恢复必须落成 `task × progressed` 事实（04 §2.2 步 6）"
+        "恢复必须落成 `task × progressed` 事实（DE-016 §9.2）"
     );
     assert_eq!(
         ready_ids(&p, sid),
@@ -514,7 +514,7 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
 
 /// 反向：同样一组事实，只把收束发言挪到 `task.opened` **之后** ⇒ 结论翻面。
 ///
-/// 判据是「任务开格之后有没有收束发言」（04 §2.1）：有 ⇒ 排队不挂起（已发出的
+/// 判据是「任务开格之后有没有收束发言」（DE-016 §9.1）：有 ⇒ 排队不挂起（已发出的
 /// 发言不可撤回）。所以挂起是**判出来的**，不是无条件写的一格——收束在任务之后的
 /// 老布局会话走的就是这一支。
 #[tokio::test]
@@ -686,7 +686,7 @@ fn facts(store: &EventStore) -> Vec<Event> {
     store.range(symbio_core::Seq::new(0))
 }
 
-/// S07 §6 验收 1：注入打断事件 → 80ms 内必须产出处置（Suspend ⇒ task.controlled 落库）。
+/// DE-037 §6 验收 1：注入打断事件 → 80ms 内必须产出处置（Suspend ⇒ task.controlled 落库）。
 #[test]
 fn interruption_within_reflex_budget_produces_control_event() {
     let store = EventStore::new();
@@ -719,7 +719,7 @@ fn interruption_within_reflex_budget_produces_control_event() {
     }
 }
 
-/// S07 §6 验收 4（反向）：同一场景，预算放宽 → 判定结果必须改变（预算参数在生效）。
+/// DE-037 §6 验收 4（反向）：同一场景，预算放宽 → 判定结果必须改变（预算参数在生效）。
 #[test]
 fn widening_budget_changes_preemption_outcome() {
     let store = EventStore::new();
@@ -743,7 +743,7 @@ fn widening_budget_changes_preemption_outcome() {
     );
 }
 
-/// 04 §2.3 边界：final 已发出后到达插话 → 不抢占，排队（已发出的发言不可撤回）。
+/// DE-016 §9.3 边界：final 已发出后到达插话 → 不抢占，排队（已发出的发言不可撤回）。
 #[test]
 fn interruption_after_final_is_queued_not_preempted() {
     let store = EventStore::new();
@@ -767,7 +767,7 @@ fn interruption_after_final_is_queued_not_preempted() {
     );
 }
 
-/// S07 §6 验收 2 + 3：挂起期间任务不在 readyset（二次调度 0）；以挂起锚 as-of 重放
+/// DE-037 §6 验收 2 + 3：挂起期间任务不在 readyset（二次调度 0）；以挂起锚 as-of 重放
 /// 与挂起前一致（恢复零状态迁移）；恢复事件让任务重新就绪。
 #[test]
 fn suspended_task_leaves_readyset_and_restores() {
@@ -793,11 +793,11 @@ fn suspended_task_leaves_readyset_and_restores() {
     );
     assert!(
         suspended.value.ready.is_empty(),
-        "挂起期间不得二次调度（S07 §6 验收 2）"
+        "挂起期间不得二次调度（DE-037 §6 验收 2）"
     );
 
     // 验收 3：以挂起锚（as-of 排除 held 事件）重放 → 与挂起前一致。
-    // 恢复零状态迁移——投影是纯函数，给同一个 T 就得到同一个视图（04 §2.2）。
+    // 恢复零状态迁移——投影是纯函数，给同一个 T 就得到同一个视图（DE-016 §9.2）。
     let at_t = symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX).apply(
         &events,
         1_000,
@@ -828,7 +828,7 @@ fn suspended_task_leaves_readyset_and_restores() {
     assert_eq!(restored.value, before.value, "恢复后视图与挂起前一致");
 }
 
-/// S07 §5：判定者的生产行只授予 `judge.intent`——无 `reply.*` 写权（不得直接发言）。
+/// DE-037 §5：判定者的生产行只授予 `judge.intent`——无 `reply.*` 写权（不得直接发言）。
 ///
 /// 判据走**生产表**（`production_matrix`），不是自造矩阵：表里少一行 `session/reflex`，
 /// 自造矩阵照样绿。表是权威（D-099）。
@@ -838,13 +838,13 @@ fn preemption_decider_row_grants_only_judge_intent() {
     assert_eq!(
         grants,
         vec!["judge.intent".to_string()],
-        "判定者只产控制事件、不得发言（S07 §5 的窄行）"
+        "判定者只产控制事件、不得发言（DE-037 §5 的窄行）"
     );
 }
 
-/// 批②：S07 判定者**行**——五字段取实 + 能力读方。
+/// S07 判定者**行**——五字段取实 + 能力读方。
 ///
-/// 判据分两半：① 行的形状与 S07 §3 表逐字相符（五字段全部取实、非平凡值）；
+/// 判据分两半：① 行的形状与 DE-037 §3 表逐字相符（五字段全部取实、非平凡值）；
 /// ② **能力读方**——`can_judge_intent` 读规格**自己身上**的能力集，含反向用例
 /// （清空能力集 ⇒ 写权拒；判定若绕回授权表则这条绿）。
 #[test]
@@ -854,7 +854,11 @@ fn preemption_decider_spec_carries_its_row_and_gates_on_judge_intent() {
         spec.principal, PRINCIPAL_REFLEX,
         "主体名 = 授权表那一行的键"
     );
-    assert_eq!(spec.pattern, Pattern::Decider, "规则判定，非模型（S07 §3）");
+    assert_eq!(
+        spec.pattern,
+        Pattern::Decider,
+        "规则判定，非模型（DE-037 §3）"
+    );
     assert_eq!(
         spec.capabilities,
         vec!["judge.intent".to_string()],

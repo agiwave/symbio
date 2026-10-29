@@ -824,7 +824,7 @@ fn setup_full() -> Fixture {
     setup_full_with(false)
 }
 
-/// 同 [`setup_full`]，另可开技能编译——步 22 的**编译**半边要它才动
+/// 同 [`setup_full`]，另可开技能编译——技能编译的**编译**半边要它才动
 /// （观测半边不需要，`memory.recalled` 与开关无关）。
 fn setup_full_with(skill_compile: bool) -> Fixture {
     setup_with_settings(move |settings| settings.skill_compile_enabled = skill_compile)
@@ -1510,7 +1510,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     assert_eq!(
         snap[1].produced_by,
         Some(0),
-        "产物格溯源指向本轮用户格（S02 §3 的 produced_by 断言）"
+        "产物格溯源指向本轮用户格（DE-032 §3 的 produced_by 断言）"
     );
     assert_eq!(snap[2].kind, EVENT_CHAT_ASSISTANT_FINAL);
 }
@@ -1660,22 +1660,22 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
     );
 }
 
-// ==================== 收束派生事实：记忆与学习（步 11–13 + 步 22）====================
+// ==================== 收束派生事实：记忆与学习（编码 / 检索 / 巩固 + 技能编译）====================
 
-/// **收束派生事实**：记忆三段（步 11–13）与技能观测 / 编译（步 22）必须入格。
+/// **收束派生事实**：记忆三段（编码 / 检索 / 巩固）与技能观测 / 编译必须入格。
 ///
 /// ## 这个用例挡的是什么
 ///
 /// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，而记忆与学习
 /// **不是轮次事实**——运行器一处都不写，写方是 `derived_facts::record_learning`。
-/// 写方若不被调用（或出参没交回），长期记忆（S06）与技能
-/// 自我改进（S11）就**静默全丢**。
+/// 写方若不被调用（或出参没交回），长期记忆与技能
+/// 自我改进就**静默全丢**。
 ///
 /// 三条断言各自钉一段：
-/// ① 步 11 编码（`memory.encoded{tag:"经验"}`，锚 = 本轮用户格）；
-/// ② 步 22 观测（`memory.recalled{skill_id, fallback}`，锚同）——缺它 `calibration`
-///    永远读到「零使用」，置信度恒 1.0，回退一次都不会发生（S11 §5 静默失效第 2 行）；
-/// ③ 步 22 编译（`memory.encoded{tag:"skill"}`）——缺它下一轮无技能可用。
+/// ① 编码（`memory.encoded{tag:"经验"}`，锚 = 本轮用户格）；
+/// ② 技能观测（`memory.recalled{skill_id, fallback}`，锚同）——缺它 `calibration`
+///    永远读到「零使用」，置信度恒 1.0，回退一次都不会发生（DE-041 §5 静默失效第 2 行）；
+/// ③ 技能编译（`memory.encoded{tag:"skill"}`）——缺它下一轮无技能可用。
 ///
 /// **反向自检**：注掉 `turn_exec` 里的 `record_learning` 调用，本用例必须红。
 #[tokio::test]
@@ -1715,11 +1715,11 @@ async fn full_turn_lands_memory_and_learning_facts() {
         .collect();
     assert!(
         encoded.iter().any(|e| e.payload["tag"] == "经验"),
-        "步 11 编码必须入格：{kinds:?}"
+        "编码必须入格：{kinds:?}"
     );
     assert!(
         encoded.iter().any(|e| e.payload["tag"] == "skill"),
-        "步 22 技能编译必须入格：{kinds:?}"
+        "技能编译必须入格：{kinds:?}"
     );
     assert!(
         !encoded.is_empty() && encoded.iter().all(|e| e.produced_by == Some(user_seq)),
@@ -1732,7 +1732,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
         // `memory.calibrated`）。旧写法按载荷字段判别——那正是本判据要证明不再依赖的。
         .filter(|e| e.kind == EVENT_MEMORY_CALIBRATED)
         .collect();
-    assert_eq!(obs_events.len(), 1, "步 22 观测必须逐条入格：{kinds:?}");
+    assert_eq!(obs_events.len(), 1, "技能观测必须逐条入格：{kinds:?}");
     assert!(
         !events
             .iter()
@@ -1797,7 +1797,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         session: &fx.session,
         provider: Arc::new(provider),
         // 无插件宿主 ⇒ `agent_run` 诚实失败（"No parent plugin"）。失败同样是
-        // **没履约**——立约与违约都要入格（S08 §5：违约可被观测是 T5 的前提）。
+        // **没履约**——立约与违约都要入格（DE-038 §5：违约可被观测是 T5 的前提）。
         parent: None,
         ctx: test_ctx_declaring(std::slice::from_ref(&tool_meta)).await,
         system_prompt: "system",
@@ -1847,7 +1847,7 @@ async fn full_turn_lands_derived_commitment_facts() {
     );
     assert!(
         events.iter().any(|e| e.kind == EVENT_COMMITMENT_BROKEN),
-        "无宿主 ⇒ 委托失败 ⇒ 违约必须可观测（S08 §5）：{kinds:?}"
+        "无宿主 ⇒ 委托失败 ⇒ 违约必须可观测（DE-038 §5）：{kinds:?}"
     );
     assert!(
         check_all(guard_vocab(), &events).is_empty(),
@@ -1856,7 +1856,7 @@ async fn full_turn_lands_derived_commitment_facts() {
     );
 }
 
-// ==================== 快路（S11）的收束半边 ====================
+// ==================== 快路的收束半边 ====================
 
 /// 轮首 host 已选中快路（出口格落了）⇒ 本轮**一次模型都不调**，以技能正文收束；
 /// 派发格声明 `reflex`，收束格 `cost_ms` 在反射档预算内。
@@ -1864,7 +1864,7 @@ async fn full_turn_lands_derived_commitment_facts() {
 /// ## 判据只有一个，就是"没调模型"
 ///
 /// `prompts` 为空是本用例最硬的一条。技能命中若只是"把技能正文当提示词喂给模型"，
-/// 请求数照样是 1——那样"跳过模型"就是一句空话，S11 §6.2 的加速根本不存在。
+/// 请求数照样是 1——那样"跳过模型"就是一句空话，DE-041 §6.2 的加速根本不存在。
 /// 其余三条（`tier = reflex` / `model = reflex` / `cost_ms` 在预算内）钉的是**埋点**：
 /// 没有它们，"跳过"发生了却无从观测。
 ///
@@ -1939,7 +1939,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
         .expect("反射档同样要有派发格（T-225）");
     assert_eq!(
         dispatch.payload["tier"], "reflex",
-        "派发格声明反射档（S11 §3 的档位观测；兜底率按层统计靠它）"
+        "派发格声明反射档（DE-041 §3 的档位观测；兜底率按层统计靠它）"
     );
     assert_eq!(
         dispatch.payload["budget_ms"],
@@ -1954,7 +1954,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
     );
     assert!(
         snap[1].cost_ms <= LatencyTier::Reflex.budget_ms(),
-        "命中后耗时必须在反射档预算内（S11 §6.2：命中显著低于未命中）：{}",
+        "命中后耗时必须在反射档预算内（DE-041 §6.2：命中显著低于未命中）：{}",
         snap[1].cost_ms
     );
     assert!(

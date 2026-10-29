@@ -377,26 +377,26 @@ pub(crate) async fn run_recall(
         recall_query.as_deref(),
         &recall_viewer,
     );
-    // 调度段的**数据**（S7）：就绪任务集只读一次、本轮各工具轮复用
+    // 调度段的**数据**：就绪任务集只读一次、本轮各工具轮复用
     // ——与召回同一条口径（同一轮内集合不漂移）。
     //
     // 这里不再直接渲染：渲染搬进 `context::providers::ReadySetProvider`（DE-025 D-215），
     // 本函数只把「本轮的事实切片 + 容量」交给端口。于是「有哪几段」不再写在这里。
-    // 技能路由（S9）：
-    // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
+    // 技能路由：
+    // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，DE-041 §5）。
     // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；
     // 临时会话同「不读不写」——没有事实源就没有技能，无从判。
     //
     // **一次判定、两个出口**：观测存进 `TurnState::skill_route`（轮末收束才入格，
     // 溯源锚那时才在事实源里），可用集存进 `TurnState::skill_hits`（供 `turn_exec`
-    // 装配反射档，S11 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」）。
+    // 装配反射档，DE-041 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」）。
     // 分两处各判一遍必然漂移成「摘出视图的那条」与「拿去执行的那条」不是同一条。
     let routing = turn
         .recall_view
         .as_mut()
         .map(|view| super::super::skill_events::route(&facts, view))
         .unwrap_or_default();
-    // 快路开关（S11 §4 参数表的 `actor.pattern`；**不是** core 的 `ActorSpec.pattern`，
+    // 快路开关（DE-041 §4 参数表的 `actor.pattern`；**不是** core 的 `ActorSpec.pattern`，
     // 两者同名不同物，见 D-079）：关着时可用集恒空——判定照常发生、
     // 观测照常落格（"只编译不加速"的观察形态），只是没人拿它去装配——这就是它
     // 作为一个独立开关的全部含义（见 `SessionConfig` 字段文档）。

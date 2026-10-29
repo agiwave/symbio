@@ -17,7 +17,7 @@ import './_selfrun.mjs';
 // | 首帧 `streaming` + 非空正文 | 用户能看到「正在发生什么」，不是空白等待 |
 // | 终态帧（completed / failed）**带正文** | 「压掉了多少 / 为什么失败」实时可见（不是只落库） |
 // | 位置在「本轮 Turn 之前」 | 压缩是会话里真实发生的一步，有先后 |
-// | 失败时带 `failure_kind` | 可诊断（S20.6） |
+// | 失败时带 `failure_kind` | 可诊断 |
 // | 重写后逐条 `removed` + 快照帧（`meta.compacted`） | 前端历史能被就地收敛，不必猜 |
 //
 // 触发参数沿用 T8（实测校准）：`max_context_tokens=16000` + 每轮超大回复，

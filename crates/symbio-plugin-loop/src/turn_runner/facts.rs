@@ -156,7 +156,7 @@ pub(crate) fn with_status(mut produced: serde_json::Value, status: &str) -> serd
     produced
 }
 
-/// 给收束格载荷补**停机原因**（`reason`，）。
+/// 给收束格载荷补**停机原因**（`reason`）。
 ///
 /// 与 [`with_status`] 是两个维度，缺一不可：
 /// - `status` 说**结果**是哪一类（三值，读侧按它折出 `RuntimeOutcome`）；
@@ -245,8 +245,8 @@ pub(crate) fn with_terminated(mut payload: serde_json::Value) -> serde_json::Val
     payload
 }
 
-/// 按主体过滤一批事件（**可见域入口**，plan/11 批 1
-/// ③）：`None` = 不过滤（与接线前逐字一致），`Some(v)` = 只交 `visible_to` 通过的事件。
+/// 按主体过滤一批事件（**可见域入口**）：`None` = 不过滤（与接线前逐字一致），
+/// `Some(v)` = 只交 `visible_to` 通过的事件。
 ///
 /// 全部可见时**不复制**（借用原切片）——平凡值下（单主体会话）这条路径与
 /// 接线前逐字一致，零拷贝。
@@ -277,7 +277,7 @@ pub(crate) fn filter_visible<'a>(events: &'a [Event], viewer: Option<&str>) -> C
 /// 第二层是**可见域**（`viewer`，见 [`filter_visible`]）：窗口先按轮切，
 /// 再按主体滤——两层都只改视图，不改数据。
 ///
-/// ## 压缩快照**不在窗口内也要带上**（S2.7-b2）
+/// ## 压缩快照**不在窗口内也要带上**
 ///
 /// `session.consolidated` 是当前历史的**基线**（它的载荷就是压缩后的整份列表），
 /// 窗口裁的是「更早的轮次」，不是基线本身。而归档之后没被取代的那段只剩

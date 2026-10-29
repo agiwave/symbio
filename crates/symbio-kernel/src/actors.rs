@@ -21,7 +21,7 @@ pub enum Pattern {
 
 /// 作用域（[DE-001 §8](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
-/// `root` 是**一等输入**，不是"没有子智能体"的特例（03 §2 推论：
+/// `root` 是**一等输入**，不是"没有子智能体"的特例（推论：
 /// 不出现 `if (children.is_empty())` 分支）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {

@@ -14,7 +14,7 @@
 
 use super::*;
 
-/// 验收（01 §10）：四层预算严格递增，取值与 §8 参数表一致。
+/// 验收（DE-001 §10）：四层预算严格递增，取值与 §8 参数表一致。
 #[test]
 fn four_tier_budgets_are_strictly_increasing() {
     let tiers = [

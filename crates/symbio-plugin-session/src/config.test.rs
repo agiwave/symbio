@@ -57,7 +57,7 @@ fn missing_memory_keys_fall_back_to_defaults() {
     );
 }
 
-/// 出厂**打开**判决与措辞：S2 的"先交机制、默认关闭"到 S3 结束——`compose` 的两条
+/// 出厂**打开**判决与措辞："先交机制、默认关闭"到 S3 结束——`compose` 的两条
 /// 产线已落地，`Answered` 必然有话说（最差是变体兜底），沉默的前提不复存在。
 ///
 /// 本断言把「翻默认值」这一动作钉在**同一批**里：翻转它的人必须同时让措辞侧就位，
@@ -244,7 +244,7 @@ fn missing_presentation_tree_key_falls_back_to_default() {
     assert_eq!(c.presentation_tree(), PresentationTree::Grouped);
 }
 
-/// 「欲」升格开关出厂关着（E3 平凡值，02 §2.3）：关掉后心跳照常触发、「欲」照常
+/// 「欲」升格开关出厂关着（E3 平凡值，[DE-001 §4.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：关掉后心跳照常触发、「欲」照常
 /// 入格，只是**一条自主任务都不产生**——退化为纯响应式且仍完整运行。
 ///
 /// 这条默认值一旦翻转，每个开了心跳的会话都会凭空多出 `budget_ms = 86400000` 的
@@ -258,7 +258,7 @@ fn conation_is_off_by_default_and_falls_back_when_the_key_is_missing() {
     assert!(!from_empty.conation_enabled);
 }
 
-/// 技能编译开关出厂关着（S11 §4 平凡值 `projection = recall`：不编译，只检索）。
+/// 技能编译开关出厂关着（DE-041 §4 平凡值 `projection = recall`：不编译，只检索）。
 ///
 /// 这条默认值一旦翻转，每个会话都会在收束时凭空多出一条 `memory.encoded`——
 /// 技能集随对话长度增长，而它的回退机制还没被用户认可过。关掉时整条

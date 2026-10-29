@@ -1,8 +1,8 @@
 //! 能力扩充阶梯审计：13 阶从低阶到高阶，是否始终无需新增机制
 //!
 //! **本程序里没有手填的计划数字。** 数据全部来自 `facts`（生成物，由
-//! `scripts/gen-verify-facts.mjs` 从 `docs/plan` 抽取）：
-//!   · 机制表与其**取值域** ← [01 §8 权威参数表](../001-核心架构.md)
+//! `scripts/gen-verify-facts.mjs` 从 `docs/003-design` 抽取）：
+//!   · 机制表与其**取值域** ← [DE-001 §8 权威参数表](../001-核心架构.md)
 //!   · 名册与**声明**（逐阶新增键数、参数变化数）← [路线图总览 §1](../../003-design/030-能力阶梯总览.md "DE-030-能力阶梯总览")
 //!   · 每阶点亮的机制键 ← 各阶文档 §3 的 `capability-assign` 块
 //!   · 每阶的退路口 ← 各阶文档 §4 里平凡值**加粗**的那一行
@@ -14,9 +14,9 @@
 //!   Q1 有没有任何一阶用到机制表之外的键（越界键应为 0）
 //!   Q2 逐阶新增键数量是否如总表所声明（末 5 阶应为 0）
 //!   Q3 每阶的退路口是否是个**真的**平凡值（J2：平凡值 ≠ 本阶取值）
-//!   Q4 名册是否只有一份：总表行数与 roadmap 的阶文件数相等、且按 id 逐一对应
+//!   Q4 名册是否只有一份：总表行数与阶文档数相等、且按 id 逐一对应
 //!   Q5 有没有任何一阶取了一个**值域之外**的值（越界取值应为 0——这一条此前由一个
-//!      恒为 `false`、任何输入都翻不动的标志冒充，见 plan/13 §1 M8）
+//!      恒为 `false`、任何输入都翻不动的标志冒充，见 M8）
 //!
 //! 沿用三条验证纪律：输入不含结论 / 每条断言配反向用例 / 结论由遍历算出而非硬编码。
 //!
@@ -29,7 +29,7 @@ use facts::{DOMAINS, MECHANISMS, STAGE_CLAIMS, STAGE_DOCS, domain_of, in_domain}
 #[derive(Clone)]
 struct Stage {
     id: &'static str,
-    /// roadmap 目录里的那篇（名册与文档一一对应的凭据）
+    /// 阶梯文档里对应的那篇（名册与文档一一对应的凭据）
     file: &'static str,
     name: &'static str,
     /// 本阶点亮的机制键 → 取值（§3 的赋值块）
@@ -51,7 +51,7 @@ fn stages() -> Vec<Stage> {
         .iter()
         .map(|c| {
             let doc = STAGE_DOCS.iter().find(|d| d.id == c.id).unwrap_or_else(|| {
-                panic!("总表声明了 {}，roadmap 目录里却没有对应的阶文档", c.id)
+                panic!("总表声明了 {}，阶梯文档里却没有对应的阶文档", c.id)
             });
             Stage {
                 id: c.id,
@@ -112,7 +112,7 @@ fn j2_violations(roster: &[Stage]) -> Vec<&'static str> {
         .collect()
 }
 
-/// Q5：越界取值 = 需要一次值域扩展。值域与匹配规则都在 `facts`（[01 §8](../001-核心架构.md)
+/// Q5：越界取值 = 需要一次值域扩展。值域与匹配规则都在 `facts`（[DE-001 §8](../001-核心架构.md)
 /// 那张表的生成物，判据见 `facts::in_domain`）。没有值域行的键不在这里报——那正是 Q1 的
 /// 越界键，同一处红不该有两种说法。
 fn out_of_domain(roster: &[Stage]) -> Vec<(String, String)> {
@@ -153,7 +153,7 @@ fn main() {
     println!("═══ 能力扩充阶梯审计 ═══\n");
     let roster = stages();
     println!(
-        "阶数：{}（名册 = 总表行数 ∩ roadmap 阶文件数，二者按 id 配对）\n",
+        "阶数：{}（名册 = 总表行数 ∩ 阶文档数，二者按 id 配对）\n",
         roster.len()
     );
 
@@ -279,12 +279,12 @@ fn main() {
     // ── 断言 ──
     assert!(
         !roster.is_empty(),
-        "名册为空：总表或 roadmap 目录读不出来，绿灯是假的"
+        "名册为空：总表或阶梯文档读不出来，绿灯是假的"
     );
     assert_eq!(
         STAGE_CLAIMS.len(),
         STAGE_DOCS.len(),
-        "总表行数与 roadmap 阶文件数不等——有一阶只存在于一处"
+        "总表行数与阶文档数不等——有一阶只存在于一处"
     );
     assert!(bad.is_empty(), "有任何一阶需要新增机制键");
     assert!(
@@ -307,19 +307,19 @@ fn main() {
     );
     assert!(
         odv.is_empty(),
-        "有任何一阶取了 01 §8 值域之外的值——那是**值域扩展**，得先改那张表并走 ADR"
+        "有任何一阶取了 DE-001 §8 值域之外的值——那是**值域扩展**，得先改那张表并走 ADR"
     );
 
     // ── D-061 的落点：`store` 值域里不得有 `distributed` ──────────────────
     //
     // 这一格在**多副本下必然违反 I1（seq 单调）**，而溯源边依赖 seq 严格递增
-    // （01 §13.3）——留着它等于值域自己宣称一个 I1 不成立的取值合法。D-061 判
+    // （DE-001 §13.3）——留着它等于值域自己宣称一个 I1 不成立的取值合法。D-061 判
     // 「多副本不在计划内 ⇒ 退役」，本断言就是那条决策**能红的落点**：谁把它加回
-    // 01 §8 的表，facts 里就会有它，这里立刻红。决策由此不是「写完了」而是有人看着。
+    // DE-001 §8 的表，facts 里就会有它，这里立刻红。决策由此不是「写完了」而是有人看着。
     //
     // 重新引入的正道是写一条新 ADR 取代 D-061 并答全那四问（全局序来源 / 同
     // event_id 冲突裁决 / 溯源边指向 / 脑裂与 I3），而不是删掉这条断言。
-    let store_forms = facts::domain_of("store").expect("01 §8 必须有 store 的取值域行");
+    let store_forms = facts::domain_of("store").expect("DE-001 §8 必须有 store 的取值域行");
     assert!(
         !store_forms.forms.contains(&"distributed"),
         "`store` 的值域里出现 `distributed`——它在多副本下与 I1（seq 单调）冲突，\

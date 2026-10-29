@@ -16,7 +16,7 @@ fn missing_keys_fall_back_to_defaults() {
     assert_eq!(ComposeConfig::default().model_id(), None);
 }
 
-/// 「独立模型」与「指令段覆盖」都能从配置里写进来（S6 的两条产线）
+/// 「独立模型」与「指令段覆盖」都能从配置里写进来（的两条产线）
 #[test]
 fn model_and_instruction_come_from_config() {
     let c: ComposeConfig =

@@ -14,7 +14,7 @@ import './_selfrun.mjs';
 // | 断言 | 唯一能看见它的地方 |
 // |---|---|
 // | 超限不炸轮：33 调用的响应照常走完（CLI 退出 0、收束正文在） | CLI stdout / 退出码 |
-// | 33 个 tool_call 全部终态、33 个结果子节点成对（S20.1 不变量） | 生产读出口 `readSessionMessages` |
+// | 33 个 tool_call 全部终态、33 个结果子节点成对（工具终态不变量） | 生产读出口 `readSessionMessages` |
 // | 被丢弃的调用带 `overflow_dropped` 成因 + 反馈正文（不混进 not_executed） | 同上（meta + content） |
 // | **模型看得见反馈**：下一次请求的工具结果里带着超限提示 | mock-llm `/_requests` 回读 |
 //

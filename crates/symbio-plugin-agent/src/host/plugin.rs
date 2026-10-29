@@ -421,7 +421,7 @@ impl Plugin for AgentPlugin {
 
         // ── agent_run：无条件注册 ──
         let store = AgentDirStore::new(self.dir().dir());
-        // `register_batch(vec![一个元素])` 随 Tool 族收敛为 put（AR-025 4a）：
+        // `register_batch(vec![一个元素])` 随 Tool 族收敛为 put（DE-025 §3）：
         // 其实这里从来只有一个能力，批入口本无存在理由。
         // （`new` 自己返回 `Arc<Self>`，此处只做最后一次 trait object 收窄。）
         let agent_run: Arc<dyn Capability> = super::subagent::AgentRunCapability::new(

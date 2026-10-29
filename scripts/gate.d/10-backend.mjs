@@ -57,7 +57,7 @@ export default {
     // 而 `clippy --all-targets` 的 target 集合是 `check --tests` 的**超集**
     // （lib + bins + tests + examples + benches ⊇ lib + bins + tests），且 clippy
     // 本身含完整类型检查 ⇒ check 那一遍是纯冗余。删掉它，workspace 级每次少一整遍
-    // 编译（本次实测该步 31s）。
+    // 编译（实测约 31s）。
     //
     // 需要「只要类型错误、不要 lint」的快速档时，正确做法是**单独跑** `cargo check`，
     // 而不是把它塞回门禁的必跑链里。

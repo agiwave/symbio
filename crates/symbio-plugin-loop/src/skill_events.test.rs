@@ -1,4 +1,4 @@
-//! 技能编译与路由验收（S9）：
+//! 技能编译与路由验收：
 //! **编译 → 观测 → 校准 → 回退**的每一环都要看得见，且每条口径各配一个反向用例
 //! （同 trigger 不重编译；零使用不判死、一次回退即摘；本轮没技能 ⇒ 连投影都不跑）。
 
@@ -240,7 +240,7 @@ fn a_new_skill_stays_in_the_prompt_and_is_observed_as_a_fast_path() {
     );
 }
 
-/// 反向（S11 §5 静默失效第 2 行的守卫）：**一次回退**就把置信度打到阈值以下
+/// 反向（DE-041 §5 静默失效第 2 行的守卫）：**一次回退**就把置信度打到阈值以下
 /// ⇒ 技能被摘出本轮视图（不进提示词），观测记 `fallback = true`；它同时**不进
 /// 可用集**——回退的技能连提示词都不该在，更不该被拿去执行。
 #[test]
@@ -273,7 +273,7 @@ fn a_fallen_back_skill_is_dropped_from_this_turn() {
     );
 }
 
-/// **快照边界不缩小校准账**（P6-② 的愈合点，[plan/14 §2.2](../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）：
+/// **快照边界不缩小校准账**（[DE-001 §4.3](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源）：
 /// 技能与它的回退观测都写在快照之前 ⇒ 压缩之后这条技能**仍**判不可信、仍被摘出
 /// 本轮视图。判据问的是「这条技能被记过回退没有」，与那段历史之后被压掉没有无关。
 /// 读方吃的是事实源的**完整史**（`Store::range`，D-085），不是「从最新快照起的
@@ -340,7 +340,7 @@ fn without_any_skill_the_reader_touches_nothing() {
 ///
 /// 反向即失效：归一化与写方不同源（写方存的是 `truncate_chars(user_text.trim(), N)`，
 /// 读方若拿原文比），长发言**永远命不中**——而且没有任何报错，表现为"技能明明编了
-/// 却从不生效"。这条判据同时钉住"更宽的『同类』不在本批"（S11 §7：那是算法问题）。
+/// 却从不生效"。这条判据同时钉住"更宽的『同类』不在本批"（DE-041 §7：那是算法问题）。
 #[test]
 fn the_hit_judgement_is_literal_after_the_writers_normalisation() {
     let hits = vec![SkillLlmHit {
@@ -377,9 +377,8 @@ fn the_hit_judgement_is_literal_after_the_writers_normalisation() {
     );
 }
 
-/// 链路前提（[plan/12 批 1](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的「写侧
-/// 前提」+ plan/11 批 2 ③
-/// 的接线判据）：技能入格后，**生产读方** `memory_events::recall_view` 必须把它召回，
+/// 链路前提（写侧入格 + 接线判据）：技能入格后，**生产读方**
+/// `memory_events::recall_view` 必须把它召回，
 /// 随后 `route` 必须真的判出观测。
 ///
 /// 反向即断链：`memory × *` 的 actor 是属主（`PRINCIPAL_USER`），写方归位前是 core
@@ -441,7 +440,7 @@ fn the_production_recall_view_sees_the_compiled_skill() {
 
 // ── 编译与路由单元验收（D-189：实现随唯一消费方住本插件） ──
 
-/// S11 §6 验收 1 + 4：编译产出的技能事件 produced_by 必须非空；置空 → I2 抓住。
+/// DE-041 §6 验收 1 + 4：编译产出的技能事件 produced_by 必须非空；置空 → I2 抓住。
 #[test]
 fn compiled_skill_requires_provenance() {
     let compiler = SkillCompiler;
@@ -460,7 +459,7 @@ fn compiled_skill_requires_provenance() {
     assert!(bad, "无溯源的技能必须被看见");
 }
 
-/// S11 §6 验收 2 + 3：命中技能 cost 显著低于完整推理；置信度低于阈值必回退。
+/// DE-041 §6 验收 2 + 3：命中技能 cost 显著低于完整推理；置信度低于阈值必回退。
 #[test]
 fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
     let store = EventStore::new();

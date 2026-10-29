@@ -802,7 +802,7 @@ async fn semantic_search(
 /// 降级：用 ripgrep 库做正则关键词检索（跨平台，不依赖 `rg` 可执行文件）
 ///
 /// 返回 `(片段, 降级说明)`。查询不是合法正则时**不静默返回空**（那与「真的没搜到」
-/// 同形，）：先按字面量重试一次（`regex::escape`），并把「按字面量匹配」写进
+/// 同形）：先按字面量重试一次（`regex::escape`），并把「按字面量匹配」写进
 /// 说明；字面量也编译不出来时才返回空 + 说明。
 async fn keyword_search(workdir: &Path, query: &str, limit: usize) -> (Vec<Value>, Option<String>) {
     let (matcher, notice) = match RegexMatcherBuilder::new().case_smart(false).build(query) {

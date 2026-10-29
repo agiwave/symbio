@@ -40,7 +40,7 @@ fn text_of(m: &ChatNode) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
 }
 
-/// 记忆段置顶（S5）：
+/// 记忆段置顶：
 /// 一条 `meta.kind = recall_context` 的消息，正文逐字送达。
 #[test]
 fn memory_section_is_prepended() {
@@ -55,7 +55,7 @@ fn memory_section_is_prepended() {
     assert!(text_of(&sections[0]).contains("我叫 Kestrel"));
 }
 
-/// 就绪段（S7）：与记忆段并存时**不争 index 0**——
+/// 就绪段：与记忆段并存时**不争 index 0**——
 /// 「记忆置顶」不被本段改掉。
 #[test]
 fn readyset_section_sits_after_memory() {

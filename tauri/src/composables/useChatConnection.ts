@@ -213,7 +213,7 @@ export const ALLOW_FOREVER_KEY: InjectionKey<
  * - ❌ `messagesMap`（per-instance 缓存）—— store 是唯一权威
  * - ❌ `flushMessagesToStore`（onBeforeUnmount 写回）—— store 自动维护
  * - ❌ `onUpdateMessages` 回调—— store 直接读
- * - ❌ `kind = "session"` 事件订阅—— 状态是节点属性，不是事件（S20）
+ * - ❌ `kind = "session"` 事件订阅—— 状态是节点属性，不是事件
  *
  * ## `removeMessage` / `markRemoved`
  *

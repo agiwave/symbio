@@ -8,7 +8,7 @@
 //!
 //! 故本文件改为**直接钉事实读法的取值**：`rounds` / `steps` / `in_flight` 三个数
 //! 各自对得上哪一格事件（见模块头的对应表）。旧读法（[`progress_of`]）的投影判据
-//! 用例自 `delegate.test.rs` 随实现同住本文件（plan/14 步 6 · 批次 6a，[D-081](../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表")
+//! 用例自 `delegate.test.rs` 随实现同住本文件（[D-081](../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表")
 //! 裁决一第 4 条：进展的类型与读法归本模块）。
 
 use super::{progress_from_facts, progress_of, STEPS_MAX, STEP_MAX_CHARS};

@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T32 单写者（[plan/11 批 0](../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") 判据）：
+// T32 单写者（[DE-001 §4.3](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 判据）：
 // **两个进程写同一会话** ⇒ 第二个拿到 `NotTheWriter`（可判别的信号），
 // 历史里只有甲的问答。
 //
@@ -32,10 +32,10 @@ import './_selfrun.mjs';
 //
 // ## 为什么乙的断言是「失败」而不是「跳过」
 //
-// 批 0 的语义就是**单写者**：第二个写者不该静默地写出重复 seq，而该拿到
+// 单写者的语义：第二个写者不该静默地写出重复 seq，而该拿到
 // `AppendError::NotTheWriter`。这个错误经 `turn_exec` 映射成
 // `PluginError::InternalError("运行器落格失败：NotTheWriter")` ⇒ 乙这一轮失败、
-// 退出码非零。**失败即正确**：信号可达本身就是本批要证的事。
+// 退出码非零。**失败即正确**：信号可达本身就是本用例要证的事。
 import { spawn } from 'node:child_process';
 import {
   MockLlm,

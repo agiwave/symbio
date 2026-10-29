@@ -62,7 +62,7 @@ pub const EVENT_BUS_KIND_SYSTEM: &str = "system";
 ///
 /// 不由本模块发布：一切资源的生命周期与状态变化都是 VDFS 变更，由 provider 写成功后
 /// 调 `symbio_core::vdfs::host::vdfs_notify_change`，经 `watch` 的 sink
-/// （`crates/symbio-plugin-vdfs/src/host.rs::event_bus_sink`）原样投到总线上（规范 §9；信封与 `VdfsChange` 形状重合，S27 起不再有独立的 `VdfsChangeEvent`）。
+/// （`crates/symbio-plugin-vdfs/src/host.rs::event_bus_sink`）原样投到总线上（规范 §9；信封与 `VdfsChange` 形状重合，不再有独立的 `VdfsChangeEvent`）。
 ///
 /// 常量放这里而非 vdfs 插件，是贯彻上面那条「闭集只有一个家」——发布方只是引用者。
 /// 历史上并存的 `kind = "entity"` 频道（`publish_entity_changed` /

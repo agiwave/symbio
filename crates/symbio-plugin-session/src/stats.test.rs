@@ -1,11 +1,11 @@
-//! `session/stats` 读数口的判据（[plan/12 §4](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+//! `session/stats` 读数口的判据：
 //!
 //! 1. **复算**——出口的读数与直接 `apply` 逐字相等。同一切片、同一个 as-of：
 //!    出口只能调已有的投影，不许另写一份统计（否则两套口径会静默漂移）。
 //! 2. **反向**——从事实源里删掉一条事件，对应那一列必须跟着变（证明它真的在算，
 //!    不是常数）。
 //! 3. **纯读**——没有事实源时是「有据的零」，且**不得**为了读而创建文件。
-//! 4. **读侧闸**——声明读方身份才判可见域：属主全量、非属主全零（批⑥）。
+//! 4. **读侧闸**——声明读方身份才判可见域：属主全量、非属主全零。
 
 use super::{fleet_reading, read};
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
@@ -357,7 +357,7 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
     );
 }
 
-// ── 外部效标两列（02 §3.1：主动性 / 时域跨度）────────────────────────────────
+// ── 外部效标两列（DE-008 §3.1.1：主动性 / 时域跨度）────────────────────────────────
 //
 // ## 为什么单独一组用例
 //
@@ -1025,7 +1025,7 @@ fn invariants_move_when_the_wal_changes() {
     let clean = read_at(&wal, symbio_core::PRINCIPAL_MAIN);
 
     // 复算：出口的清单与直接 `check_all` 逐字相等（口径只活在 core，出口不复判）。
-    // 切片口径 = 完整史（归档段 + 未取代那段，S2.7-b2）：出口读什么，复算就比什么。
+    // 切片口径 = 完整史（归档段 + 未取代那段）：出口读什么，复算就比什么。
     let store = EventWalStore::open_readonly(&wal).unwrap();
     let snap = store.range(Seq::new(0));
     assert_eq!(
@@ -1059,7 +1059,7 @@ fn invariants_move_when_the_wal_changes() {
     );
 }
 
-/// **归档不缩小读数**（S2.7-b2）：压缩把被取代的前缀移进归档段后，读数口拿到的
+/// **归档不缩小读数**：压缩把被取代的前缀移进归档段后，读数口拿到的
 /// 仍是完整史（归档段 + 未取代那段），而不是那一小段窗口。
 ///
 /// ## 只给窗口会错在两处（都是静默的）
@@ -1070,7 +1070,7 @@ fn invariants_move_when_the_wal_changes() {
 ///    它们从分母 / 分子 / 样本里抹掉。
 ///
 /// 按布局分叉的第二个读法（只给窗口）因此不是「多一个选择」，而是把布局知识
-/// 交给每个调用方去挑——挑错还是静默的（[plan/14 §2.2](../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）。
+/// 交给每个调用方去挑——挑错还是静默的（[DE-001 §4.3](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源）。
 ///
 /// ## 反向自检
 ///
@@ -1236,7 +1236,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     let store = EventWalStore::open(&wal).unwrap();
     let t = 1_700_000_000_000i64;
     // 一轮对话（与 `seed` 同形的最小事实源）+ 一条 **shared** 的经验记忆
-    // （`derived_facts::record_learning` 步 11 的生产形态）。
+    // （`derived_facts::record_learning` 的生产形态）。
     let u0 = Event::pending(
         "u0",
         EVENT_USER_MESSAGE,
@@ -1340,7 +1340,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 声誉列（S6 的读侧）：
+/// 声誉列（的读侧）：
 /// `own` 取**本会话主体**，`by_principal` 把这份事实源里的主体原样摊开（`own` 在其中，
 /// 不另造口径）；判据只有一处——core 的 `reputation` 投影，本处只取数 + 排版。
 #[test]
@@ -1404,7 +1404,7 @@ fn reputation_column_reports_own_and_by_principal() {
     assert_eq!(denied.reputation, serde_json::json!({}));
 }
 
-/// 承诺列（段二，S08 §5 的读侧出口）：
+/// 承诺列（段二，DE-038 §5 的读侧出口）：
 /// 一轮里委托过一次 ⇒ 这里就**读得出那一条**（谁向谁、承诺了什么、违约为什么）。
 ///
 /// ## 这条判据补的是哪一半
@@ -1418,7 +1418,7 @@ fn reputation_column_reports_own_and_by_principal() {
 ///
 /// ## 三个方向
 ///
-/// ① 违约必须带原因出现在读数里（"违约可被观测"是 S08 §5 的全部前提）；
+/// ① 违约必须带原因出现在读数里（"违约可被观测"是 DE-038 §5 的全部前提）；
 /// ② 违约率的分母是**已了结**数：一条在途 + 一条违约 ⇒ 率 100%，不是 50%——
 ///   把没跑完的轮算进分母等于把「还在做」读成「没做到」；
 /// ③ 无读权限 ⇒ 四列那一族的空形状（`{ items: [], total: 0 }`），不是缺列。
@@ -1525,7 +1525,7 @@ fn commitments_column_exposes_each_delegation_record() {
     assert_eq!(denied.commitments["total"], 0);
 }
 
-/// 就绪集列（S7）：候选集入列 + **复算同源** + 读侧闸（反向）。
+/// 就绪集列：候选集入列 + **复算同源** + 读侧闸（反向）。
 ///
 /// `may_read = false ⇒ {ready: []}` 与四列同款（空切片 = 有源但不给你看），
 /// 不是声誉那列的空对象——「没有任务」与「不给你看」由 `has_wal` 与列的上下游分辨。
@@ -1595,7 +1595,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 校准列（S9 的读侧）：
+/// 校准列（的读侧）：
 /// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
 ///
 /// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`skill_events::route`
@@ -1730,7 +1730,7 @@ fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
     assert!(denied.has_wal, "has_wal 独立于可见域");
 }
 
-/// 转写列（**对话面读侧**，[plan/12 批 2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+/// 转写列（**对话面读侧**）：
 /// 读的是**事实源**（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` /
 /// `artifact.added` 四格）而不是会话存储里的消息副本。
 ///
@@ -1789,7 +1789,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 转写列把**工具结果**也读出来（plan/10 批 3）：
+/// 转写列把**工具结果**也读出来：
 /// `artifact.added` 进投影 ⇒ 列里多一条 `role = "tool"`（带 `tool` = 工具名）。
 ///
 /// 这是「口径只活在 core 投影」的直接后果——出口不加任何判断，投影多一格，列就多一行。

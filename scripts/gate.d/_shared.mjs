@@ -28,7 +28,7 @@ const REPO_ROOT = path.resolve(SHARED_DIR, '..', '..')
 /**
  * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
  *
- * S27（916）：VdfsChange 信封 = `{path, data?}`、操作枚举整个退役——信封构造
+ * VdfsChange 信封 = `{path, data?}`、操作枚举整个退役——信封构造
  *      守卫（`bare` 无载荷 / `with_data` 带载荷 / 无 `change` 键）、门面原样透传、
  *      transcript 四帧生命周期（首帧全量副本 / delta 窄载荷 / removed 状态帧 /
  *      运行态随节点视图）。`transcript_stream` 已随 D-025 退役，908 中相关
@@ -137,7 +137,7 @@ export const BASELINE = {
   // `loop_rows.test.rs` 十条钉住；阶段折叠与 `report_due` 的纯函数判据在
   // `decl/mod.test.rs`；旧对拍的另一半（同一份日志切片的「已做」判定）由 `turn_head`
   // 视图的用例与 `stage_events.test.rs` 保留的 7 条承担。
-  // baseline-allow rustTests: 批 步 5d 净删 3 条（2097→2094）——被测对象整条退役：
+  // baseline-allow rustTests: 净删 3 条（2097→2094）——被测对象整条退役：
   // ① `resume.rs` / `resume.test.rs` 整份删除（6 条），被测的是**恢复路径的私有旁路**
   // （自己写协议事实、自己跑执行体）；旁路退役后唤醒 / 续写只能从事实进环。判据没有丢：
   // 唤醒那一笔的落格形状、读侧还原、拒绝还原、关账后读不回，由新增的
@@ -195,7 +195,7 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1434→1437），逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 批 （02be8fc5）的同一净删在 CI 口径下修一格（1437→1436）——删掉的
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table` 无 `cfg` 门，Linux 那一跑的求和同样少它一条。逐条归属见上方 `rustTests` 的注。
-  // baseline-allow ciRustTestsTotal: 批 步 5d 的同一净删 3 条在 CI 口径下的折算（1436→1433）——
+  // baseline-allow ciRustTestsTotal: 同一净删 3 条在 CI 口径下的折算（1436→1433）——
   // `--workspace` 求和含 symbio lib 目标，删掉的 3 条在两种口径里是同一批，逐条归属见上方
   // `rustTests` 的注。非侵蚀。
   // baseline-allow ciRustTestsTotal: S04 调度者与租约的同一增量在 CI 口径下修一格（1437→1443），逐条归属见上方 `rustTests` 的注。非侵蚀。
@@ -209,7 +209,7 @@ export const BASELINE = {
   // `-p symbio` 的分包口径被数进 `rustTests`，两个口径各数各的。现在本地与 CI **只留
   // 一个口径**（`cargo test --workspace` 求和），数字变大是口径合并的结果，非侵蚀。
   // baseline-allow ciRustTestsTotal: `recall` 投影迁 loop（D-201）的同一净减 2 条（2334→2332）——
-  // core 的 S5 彩排五条里，as-of 不污染、主体隔离、忽略 as-of 的反向锚三条随投影搬进
+  // core 的 彩排五条里，as-of 不污染、主体隔离、忽略 as-of 的反向锚三条随投影搬进
   // `crates/symbio-plugin-loop/src/recall.test.rs`（用例数不变），另两条（预算耗尽降级、检索产出带溯源视图）在
   // loop 已有同判据用例（`exhausted_budget_degrades_…` / `recall_translator_produces_provenanced_…`），
   // 删的是重复的那一份，不是判据。非侵蚀。
@@ -270,7 +270,7 @@ export const BASELINE = {
   // 越界必须红。真实日志的**回放**不跑这条——夹具只留信封、`reason` 在载荷里、且它采于
   // 之前；硬跑只会得到「每条收束格都缺 reason」的假红，那不是判据错了。
   verifyAsserts: 256,
-  // 唯一一处**向上**的 panic 面（实测 77）：段归档（S2.7-b2）与它的读侧——
+  // 唯一一处**向上**的 panic 面（实测 77）：段归档与它的读侧——
   // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
   // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定
   // （同 `len`/`head` 的 `expect("WalStore 锁中毒")`）。P6-④ 的 `SessionStore` 事实源
@@ -340,7 +340,7 @@ export function ratchetVerdict({ actual, baseline, name, kind = '通过数', uni
  * 会让每一跑都红，于是豁免被喂到失效；只比最近一版又漏掉「已经提交的那次下调」。
  * 两版足够让**下调发生的当次**变红，无论它还在工作区还是已进 HEAD。
  *
- * ⚠️ 只判 `BASELINE` 一个对象是**覆盖面**问题而非正确性问题——plan/13 批 M12 把它
+ * ⚠️ 只判 `BASELINE` 一个对象是**覆盖面**问题而非正确性问题——`ratchetErosion` 把它
  * 泛化成 {@link ratchetErosion}（多落点 + 两种方向），本函数保留为 `dir: 'floor'`
  * 的那一格，语义一字未改。
  */

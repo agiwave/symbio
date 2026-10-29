@@ -1,5 +1,4 @@
-//! `slo_report` 验收——时延列口径（final 实测、按 turn 归档、兜底不混入）；
-//! 末尾附**阶段三扫描口**（opt-in：walk 各会话的 v2 WAL，三投影同源出报告）。
+//! `slo_report` 验收——时延列口径（final 实测、按 turn 归档、兜底不混入）。
 
 use super::slo_report;
 use super::{SloLatencyView, TierLatency};
@@ -121,7 +120,7 @@ fn latency_samples_group_by_declared_tier_and_exclude_fallback() {
     assert_eq!(view, again);
 }
 
-/// 三列同源（阶段三报告的形态）：时延 + 兜底率 + 成本台账出自同一事件切片。
+/// 三列同源（SLO 报告形态）：时延 + 兜底率 + 成本台账出自同一事件切片。
 #[test]
 fn three_slo_columns_share_one_event_slice() {
     let store = EventStore::new();
@@ -145,7 +144,7 @@ fn three_slo_columns_share_one_event_slice() {
     assert_eq!(ledger.of("session/main").spent_ms, 5000);
 }
 
-// ── 跨会话合并（P2：聚合逻辑升为生产代码，[plan/13 批 P2]）──────────────────
+// ── 跨会话合并（聚合逻辑在生产代码里，不在调用方）──────────────────────────
 //
 // ## 为什么单测在这里而不是只在 e2e
 //
@@ -240,17 +239,6 @@ fn fallback_merge_adds_counts_and_keeps_the_rate_pure() {
     );
 }
 
-// ── 阶段三扫描口（已退役，2026-10-09，P2）──────────────────────────────────
-//
-// 原形态：`#[ignore]` + 需 `SYMBIO_SLO_SCAN_ROOTS` 手工跑。**退役理由**：它的
-// 全部职责已被两件事接走，且都从「手工 opt-in」变成「每轮门禁自动跑」：
-//
-//   ① 跨会话**聚合口径**（并集 / 重排 / 相加）⇒ 升为 core 的
-//      `SloLatencyView::merge` / `FallbackRateView::merge`，由
-//      `merge_unions_samples_per_tier_rather_than_overwriting` 等三条纯函数判据钉；
-//   ② **扫描 + 落成读数** ⇒ 生产路径 `crates/symbio-plugin-session/src/stats.rs` 的聚合列
-//      （`fleet`），由 `fleet_aggregates_every_session_in_the_instance` 等四条判据钉，
-//      其中「只走一层」「坏 WAL 不拖垮整列」是原 `#[ignore]` 测试**从未覆盖**的两条。
-//
-// 保留它只会多一份要走环境变量的手工入口，而那份入口与生产读数之间没有任何
-// 对账——正是「一个事实两个 owner」。故删，不保留 deprecated 形态。
+// 跨会话聚合口径由 core 的 `SloLatencyView::merge` / `FallbackRateView::merge` 钉；
+// 扫描与落成读数走 `session/stats` 的实例级聚合列 `fleet`（含「只走一层」与
+// 「坏 WAL 不拖垮整列」两条判据）。

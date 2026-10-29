@@ -80,7 +80,7 @@ pub struct TurnInput {
     /// 因此这里收到的是它的位置而不是正文：运行器不再拥有「用户说了什么」，
     /// 只拥有「拿哪一格当锚」。续写轮同样填被续写轮的用户格。
     pub user_seq: u64,
-    /// 本次执行的**幕号**（`turn.dispatch` / 阶段事实的幂等键尾段，）。
+    /// 本次执行的**幕号**（`turn.dispatch` / 阶段事实的幂等键尾段）。
     ///
     /// 新开一轮 = 用户格的 seq；续写幕 = 续写阶段事实的 seq。同一轮里多次执行
     /// （恢复后的续写幕）因此各有一组互不撞号的格。
@@ -114,7 +114,7 @@ pub struct TurnInput {
     /// `viewer` 都取它（身份经入参给入，`ActorSpec` 在生产构造）。
     ///
     /// 身份是数据不是常量：同一个会话引擎跑在哪个 agent 上，由**调用方**说了算
-    /// （`crates/symbio-plugin-loop/src/turn_exec.rs` 从会话元数据派生）。S08 §4 的平凡值是
+    /// （`crates/symbio-plugin-loop/src/turn_exec.rs` 从会话元数据派生）。DE-038 §4 的平凡值是
     /// `agent:main`——所有主体同一身份时退化成单主体，与接线前逐字一致。
     pub actor: ActorSpec,
     // 请求级前缀**不是**本包的字段（`D-222` 订正 3）：它由 `prepare_request_sections`
@@ -389,13 +389,13 @@ impl TurnRunner {
     /// - 用户消息：`turn × opened`（`user.message`），一次；
     /// - 每轮工具调用：**不单独占格**——工具结果才是产物事实，落
     ///   `artifact × asserted`（`artifact.added`，载荷 `{ tool, text }`），
-    ///   `produced_by` 指向**本轮用户格**（S02 §3 的 `produced_by` 断言）；
+    ///   `produced_by` 指向**本轮用户格**（DE-032 §3 的 `produced_by` 断言）；
     /// - 收束：`chat.assistant.final`（或失败的兜底格）——**只落一次**。
     ///
     /// ## prompt 的两段
     ///
     /// 基线由 `prepare::render_messages` 从转写投影出（历史来自事实源，含**往轮**的
-    /// 工具结果——plan/10 批 3 起）；
+    /// 工具结果）；
     /// 而**本轮**刚发生的交换，投影里当然还没有（快照取在它落格之前），故由本函数
     /// **就地累积**追加——模型必须看到自己请求过什么、拿到了什么，否则会重复调用
     /// 同一个工具。
@@ -407,8 +407,7 @@ impl TurnRunner {
     /// `terminated: { at }` + 顶层 `reason: interrupted`，半截正文 / 半截思考一并入格），绝不复用兜底格
     /// （那是**失败**的形状，且会污染兜底率）；等待用户落进展格
     /// （`chat.assistant.progress`，`turn × progressed`，载荷 `status: "pending"`），
-    /// 不收束轮次（plan/11 批 2
-    /// 恢复后续写同一轮、以收束格了结）。「一轮至多一条收束格」不变。
+    /// 不收束轮次（恢复后续写同一轮、以收束格了结）。「一轮至多一条收束格」不变。
     ///
     /// 起一轮：准备阶段可能直接收束（定稿答话 / 空答兜底），否则交回一个
     /// [`TurnSession`]。**这里不再有循环**——步的推进归调用方。
@@ -954,7 +953,7 @@ fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
     within_delegation_ceiling(actor, kind)
 }
 
-/// 落一条**否定事实**（[`EVENT_AUTHZ_DENIED`]，）。
+/// 落一条**否定事实**（[`EVENT_AUTHZ_DENIED`]）。
 ///
 /// 闸门拒绝时此前只留一条 `warn`：日志里剩下的是「该轮没收束」，与「根本没跑完」
 /// 同形。本函数把否定落成事实——判定与矩阵**一个字不动**，变的只是否定的表达。
@@ -976,7 +975,7 @@ fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
 /// `key` = 被拒的**目标格名**（`chat.assistant.final` / `.fallback` / `artifact.added`）。
 /// 义务环落地后它会换成 `Pattern` 的键（DE-015 §4.2 的 `denied(key)`）——今天没有
 /// `Decl`，先用格名，那是同一件事在日志里的名字。
-/// 落一条**否定事实**（[`EVENT_AUTHZ_DENIED`]，）。
+/// 落一条**否定事实**（[`EVENT_AUTHZ_DENIED`]）。
 ///
 /// 载荷 `{ key, kind, reason, detail }`：`reason` 取 [`ClosureReason::Denied`]——
 /// 与收束格**同一个字段名、同一个闭集**，于是读侧能用**一个**问题（「这一轮为什么停」）

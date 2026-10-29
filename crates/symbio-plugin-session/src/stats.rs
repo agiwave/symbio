@@ -3,9 +3,7 @@
 //! 背景：SLO §1.2 的四列（时延 / 兜底 / 成本 / 断点）由本插件的投影与 core 的
 //! 协议投影算得出，
 //! 但**算得出 ≠ 读得到**——没有生产出口，投影只是「能算的函数」，三类收益
-//! 无法验收、回归也看不见（[plan/12 §2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
-//! 本模块就是那一格的读侧出口：[plan/12 §3 批 0](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
-//! 的出口形态②（只读路由）。
+//! 无法验收、回归也看不见。本模块就是那一格的读侧出口：出口形态②（只读路由）。
 //! 读数今天还多一族**能力视图**：键来自各能力包公开的 `shared_views` 清单、值由
 //! owner 自己的折叠算出，本插件只按名字读、不写任何视图名（DE-025 D-221）——
 //! 一项新能力公开一条视图，这一列就多一格，本文件不动一行。
@@ -140,7 +138,7 @@ pub(crate) struct SessionStats {
     ///
     /// 不同币种**不相加**：金额只在同一币种内可加，汇率不是事实源里的东西。
     pub spend: serde_json::Value,
-    /// 校准（S9 的**读侧**）：
+    /// 校准（的**读侧**）：
     /// `calibration` 投影原样序列化（`{ by_skill: { <skill_id>: { skill_id, uses,
     /// fallbacks } } }`，按 `skill_id` 字典序）——`confidence = 1 − 回退率` 的口径活在
     /// core 的投影里，本处不重算。
@@ -163,7 +161,7 @@ pub(crate) struct SessionStats {
     /// 任务表两条**无宽限**（环与超界不是时序假象），本处只取数——
     /// 「不变量进 CI/读侧」：e2e 断言的就是这一列。
     pub invariants: serde_json::Value,
-    /// 声誉（S6 的**读侧**）：`own` = 本会话
+    /// 声誉（的**读侧**）：`own` = 本会话
     /// 主体自己的条目，`by_principal` = 这份事实源里每个主体的条目（`own` 在其中，
     /// 原样摊开、不另造口径）。
     ///
@@ -192,7 +190,7 @@ pub(crate) struct SessionStats {
     /// 归**四列**那一族（同一份切片、同一个 as-of）：`may_read = false` ⇒ 切片已空 ⇒
     /// `{ items: [], total: 0, … }`，两种「零条」由 `has_wal` 分辨。
     pub commitments: serde_json::Value,
-    /// 就绪任务集（S7 的**读侧**）：
+    /// 就绪任务集（的**读侧**）：
     /// `readyset` 投影原样序列化（`{ ready: [ { task_id, seq, depends_on } ] }`），
     /// 按 `task_id` 字典序——同一份事实源永远读出同一个集合。
     ///
@@ -201,14 +199,13 @@ pub(crate) struct SessionStats {
     /// 与「没有任务 / 依赖未闭合」本来就同值，两种「空」由 `has_wal` 与本列的
     /// 上下游（清单在不在）分辨，不靠列的形状。
     pub readyset: serde_json::Value,
-    /// 转写（**对话面读侧**，[plan/12 批 2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+    /// 转写（**对话面读侧**）：
     /// `transcript` 投影原样序列化（`{ entries: [ { role, text } ] }`，按事件顺序 =
     /// append-only 的时间序；`role` 是 `"user"` / `"assistant"` / `"tool"`，
     /// 工具行另带 `tool` = 工具名）。
     ///
     /// 读的是**事实源本身**（`user.message` / `chat.assistant.final` /
-    /// `chat.assistant.fallback` / `artifact.added` 四格——最后一格是
-    /// plan/10 批 3 纳入的工具结果），
+    /// `chat.assistant.fallback` / `artifact.added` 四格——最后一格是工具结果），
     /// 不是会话存储里的消息副本——同一份事实既喂模型（`Reasoner` 组 prompt 的输入）
     /// 又能从这里读回，D-044 的「实测与判据同源」。
     ///
@@ -216,11 +213,10 @@ pub(crate) struct SessionStats {
     /// `{ entries: [] }`），不取声誉列的空对象形态：对话为空与「不给你看」由 `has_wal`
     /// 分辨——同一份判定，换个列名不换判据。
     ///
-    /// 逐条可见域（「这条是谁说的」）属 11 §2-E
-    /// 的呈现面过滤（S08 的 `vis_scope`），落地前本列只有**整列**闸——与其余各列同款，
-    /// 不在这里先造一个半开的判据。
+    /// 逐条可见域（「这条是谁说的」）不在这里过滤：本列只有**整列**闸（`may_read`），
+    /// 与其余各列同款。
     pub transcript: serde_json::Value,
-    /// 主动性（[02 §3.1 外部效标](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") · 主动性）：
+    /// 主动性（[DE-008 §3.1 外部效标](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") · 主动性）：
     /// `conation` 投影原样序列化（`{ intents: [ { seq, ts, goal, task_id } ] }`，按 seq 升序）——
     /// 「自发发起且被采纳」的分子 / 分母同出一列：已升格（`task_id` 非空）/ 已表达。
     ///
@@ -305,7 +301,7 @@ pub(crate) struct SessionStats {
     pub skill_compile_enabled: bool,
     /// 本会话**已编译技能数**：事实源里 `memory.encoded{tag:"skill"}` 的条数。
     ///
-    /// 技能是事实、不是特殊类型（S11），故这里只数列里已有的格子，**不新增投影**。
+    /// 技能是事实、不是特殊类型，故这里只数列里已有的格子，**不新增投影**。
     /// 归四列那一族（同一份切片、同一个 as-of）：`may_read = false` ⇒ 切片已空 ⇒
     /// `0`，与「开着但没编译过」由 [`Self::skill_compile_enabled`] 分辨。
     pub compiled_skills: usize,
@@ -369,7 +365,7 @@ pub(crate) fn read(
 
     // 读侧闸：**读什么由能看什么决定**——各列与不变量列都只从「你看得见的事实」算，不先算完再裁结果。
     //
-    // 属主 = 本机会话的属主（`SESSION_OWNER`，部署事实；`[会话] ≈ [线程]`，S4 的
+    // 属主 = 本机会话的属主（`SESSION_OWNER`，部署事实；`[会话] ≈ [线程]`，
     // thread 实体落地前用会话属主）。于是：
     // 属主本人 = 全量读数（与不声明时逐字一致）；矩阵外主体 = **空切片**
     // ⇒ 四列全零、就绪集为空、不变量清单为空，与 `has_wal: true` 并排即可分辨「有源但不给你
@@ -404,7 +400,7 @@ pub(crate) fn read(
     // 金额列：同一个切片、同一个 as-of，读应答载荷的 `spend`（价格 × 用量，
     // 写方在 adapter 边界折好）。它不重算价格——配置改了也只影响之后的事实。
     let spend = spend_ledger().read_all(&snapshot).value;
-    // 校准列（[plan/12 批 1](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：与四列同一份
+    // 校准列：与四列同一份
     // 切片、同一个 as-of。名字交进投影（DE-024 D-205）：写方是 `loop`，本插件经清单
     // 生成物取它——不引用兄弟插件（E-009），也不由 core 代答。
     let cal = calibration_for(symbio_plugin_api::events::EVENT_MEMORY_CALIBRATED)
@@ -473,7 +469,7 @@ pub(crate) fn read(
     // 「这个主体几分」，本列问「这一约是什么、违约为什么」。切片已按 `may_read` 取过。
     let commitments = commitments_reading(&snapshot);
 
-    // 就绪集列（批⑨）：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
+    // 就绪集列：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
     // 已被换成空的 ⇒ 本列是 `{ready: []}`（四列的形态），不是声誉那列的空对象。
     // 名字交进投影（DE-024 D-206）：这一族的 owner 是 `loop`，本插件经清单生成物交出
     // 整族的拼写——不引用兄弟插件（E-009），也不由 core 或内核代答。
@@ -484,10 +480,9 @@ pub(crate) fn read(
     )
     .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
 
-    // 转写列（对话面读侧，[plan/12 批 2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+    // 转写列（对话面读侧）：
     // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
-    // 与四列同一份切片、同一个 as-of。口径（四格 → 三角色，含
-    // plan/10 批 3 的工具结果）只活在 core
+    // 与四列同一份切片、同一个 as-of。口径（四格 → 三角色，含工具结果）只活在 core
     // 的 `transcript` 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒
     // `{ entries: [] }`（四列形态，与就绪集 / 校准同族）。
     let transcript = serde_json::to_value(
@@ -497,7 +492,7 @@ pub(crate) fn read(
     )
     .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
 
-    // 主动性列（02 §3.1 外部效标）：与四列同一份切片、同一个 as-of。观测面是
+    // 主动性列（DE-008 §3.1.1 外部效标）：与四列同一份切片、同一个 as-of。观测面是
     // `conation.expressed`（欲）与 `task.opened`（升格，溯源认）——「自发发起」的
     // 分子分母都是事实源里已有的事件，不加新格子。`may_read = false` 时切片已空
     // ⇒ `{ intents: [], adoption_rate: 0.0 }`（四列形态）。
@@ -527,7 +522,7 @@ pub(crate) fn read(
     // 实例级聚合列（P2）。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
     // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（axes 两族给有据的
     // 零 / 空，不给「缺列」——读方不必为每个键分诊它在不在）。
-    // 技能编译列：技能就是 `memory.encoded{tag:"skill"}` 这条事实（S11），故只数
+    // 技能编译列：技能就是 `memory.encoded{tag:"skill"}` 这条事实，故只数
     // 切片里的格子，不另造投影。切片已按 `may_read` 取过 ⇒ 无权读的人得 0，
     // 与「开着但没编译过」由部署开关 `skill_compile_enabled` 分辨。
     let compiled_skills = snapshot

@@ -32,11 +32,11 @@
 //! - **令牌不走 URL**：HTTP 用 `Authorization: Bearer`；WS 除该头外，浏览器还可经
 //!   `Sec-WebSocket-Protocol: symbio.v1, bearer.<token>` 携带（浏览器 WS 构造器不能
 //!   自定义头）。续订只回选 `symbio.v1`，**不回显 `bearer.*`**——回显等于把令牌写进
-//!   响应头，代理与日志都会记下。语义与理由见 AR-008 §5.2。
+//!   响应头，代理与日志都会记下。语义与理由见 DE-013 §6。
 //! - **连接上限**：`inbound_max_connections` 个配额，到顶后不再 `accept`（背压交给
 //!   内核队列），而不是先收下再排队。HTTP 一次调用、WS 与 SSE 的每条长连接各占一个。
 //! - **重放防护**：`POST /api/v1/invoke` 的 `Idempotency-Key` 在 TTL 内重复即 409，
-//!   不缓存首次结果（拒绝重放，见 AR-008 §5.1.1）。
+//!   不缓存首次结果（拒绝重放，见 DE-013 §5.1.1）。
 
 use super::config::{is_readonly_allowed, GatewayConfig};
 use base64::Engine;
@@ -297,7 +297,7 @@ fn connection_cap(configured: usize) -> usize {
 /// 释放（失败没有产生副作用，可以带同一个键重试）。
 ///
 /// 它是**进程内**的边界：重启即清空。跨进程去重需要持久化，而网关的定位是
-/// 「本机的另一个入口」，不是集群网关（AR-008 §5.1.1）。
+/// 「本机的另一个入口」，不是集群网关（DE-013 §5.1.1）。
 struct Idempotency {
     seen: Mutex<HashMap<String, Instant>>,
 }

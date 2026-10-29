@@ -19,7 +19,7 @@ use symbio_core::Store;
 // 已按 阶段拆去 `tools/dispatch/`，父模块顶层不再导入它们——测试自己拿。
 use symbio_core::{failure_kind, Seq};
 // `LatencyTier` 是**测试自己**要的：它只被父模块里的熔断段用到，那段已按域
-// 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../docs/archive/13-质量改进总纲.md)），
+// 拆去 `tool_executor/breaker.rs`，
 // 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
 use symbio_core::{
     Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequestExt,
@@ -427,7 +427,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
     assert_eq!(updates[0].status, Some(NodeStatus::Completed));
 }
 
-/// [] 步 2 判据：**第二次同参调用不再静默**。
+/// 判据：**第二次同参调用不再静默**。
 ///
 /// 事故现场（会话 `cli1a14222066f0`）：模型要的是「一共多少处命中」，而截断结果里
 /// 没有一个字的总数，它唯一的动作就是原样重发 ⇒ 同一份结果执行两次、白跑一轮。
@@ -613,14 +613,14 @@ fn tc_context(ids: &[&str]) -> Vec<ChatNode> {
         .collect()
 }
 
-/// S20.1 不变量：**本批每个 ToolCall 都必须以终态收场，且必须有结果子节点**。
+/// 工具终态不变量：**本批每个 ToolCall 都必须以终态收场，且必须有结果子节点**。
 ///
 /// 中止（`is_aborted`）时循环在第一个工具之前就 `break`，本批一个都没执行——
 /// 若不收口，这些节点会停在参数流式阶段广播出的 `Streaming` 上：
 /// 前端永远转「运行中」（把"卡住"伪装成"在跑"）。`Streaming` 是瞬态状态
 /// （只广播、不落盘），停在 Streaming 是**广播层**的收口缺口，不是持久层问题。
 ///
-/// **只补父节点是不够的**（S23 实测事故）：前端 `ToolCallNode` 的「结果」段按**子节点**
+/// **只补父节点是不够的**（实测事故）：前端 `ToolCallNode` 的「结果」段按**子节点**
 /// 渲染，缺子节点就是「有请求、无响应」，而请求视图那边有 `flatten_chat_messages`
 /// 的占位兜底 ⇒ 模型看得见、用户看不见，于是它长期潜伏。两条断言必须同时在。
 #[tokio::test]
@@ -741,7 +741,7 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
     )
     .await;
 
-    assert_eq!(msgs.len(), 1, "丢弃调用必须有结果子节点（S20.1 不变量）");
+    assert_eq!(msgs.len(), 1, "丢弃调用必须有结果子节点（工具终态不变量）");
     assert_eq!(msgs[0].node_role(), Some(NodeRole::Tool));
     assert_eq!(msgs[0].status, Some(NodeStatus::Completed));
     let text = msgs[0]
@@ -1116,7 +1116,7 @@ async fn record_effect_never_overwrites_an_earlier_judgement() {
     assert_eq!(out[1].why, "被 PreToolUse 钩子拦下");
 }
 
-// ==================== 外部执行闸门（S8） ====================
+// ==================== 外部执行闸门 ====================
 
 /// 带会话 id 的请求上下文。成本台账不再按它定位——事实轨以**值**交给执行层
 /// （D-084 §1-A）；会话 id 仍随上下文走，因为其余工具面按它归属。
@@ -1152,7 +1152,7 @@ fn external_execution_capability_is_read_from_the_matrix() {
 
 /// 事实源那一半：台账累计把预算吃满 ⇒ 工具**不执行**，且 `Break` 走出参。
 ///
-/// 这条用例钉的是 [roadmap/S09 §6](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
+/// 这条用例钉的是 [DE-039 §6](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
 /// 验收 2 的前半句（预算耗尽必须判得出来，不允许静默继续）；后半句——
 /// 理由真的落成一条 `control × opened` 事件——钉在事实源入格那一侧的用例里
 /// （写方是 `derived_facts::record_derived`，由 v2 运行器在轮末收束调用）；工具执行层
@@ -1240,13 +1240,13 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
     assert_eq!(
         breaks,
         vec!["budget-exhausted"],
-        "Break 必须经出参交回调用方——它没有这一格就是静默继续（S09 §6 验收 2）"
+        "Break 必须经出参交回调用方——它没有这一格就是静默继续（DE-039 §6 验收 2）"
     );
 
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 预算在生效而非常量（S09 §6.4 的反向用例在生产判据上的形状）：
+/// 预算在生效而非常量（DE-039 §6.4 的反向用例在生产判据上的形状）：
 /// 同一份事实源，预算放得比已耗宽 ⇒ 同一次判定翻成放行、出参为空。
 #[tokio::test]
 async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
@@ -1318,7 +1318,7 @@ async fn the_ledger_comes_from_the_facts_value() {
     );
 }
 
-/// 声明闸是**可审计拒绝**：结果回灌 + 父节点收敛 + 违约承诺照记（S13 §3）。
+/// 声明闸是**可审计拒绝**：结果回灌 + 父节点收敛 + 违约承诺照记（DE-043 §3）。
 ///
 /// 判据住声明闸（真实实现是 agent 的 `DelegationGate`，DE-025 D-219）；这里钉的是
 /// **宿主接线**：工具声明了 `assign_work`、批首读数是「已收回」⇒ 工具不执行，且
@@ -1416,7 +1416,7 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// ==================== 任务表写侧闸：纯产出主体不立任务（S03 §3，） ====================
+// ==================== 任务表写侧闸：纯产出主体不立任务（DE-033 §3） ====================
 //
 // 钉的是**闸门的接线**（判据本身是 `task_events::TaskTable::before`，见
 // `task_events.test.rs`）：`todo_write` 到达执行窗口之前被拒——`Refused:` 回灌模型、

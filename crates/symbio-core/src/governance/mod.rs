@@ -20,7 +20,7 @@
 //!
 //! 本域的 [`Capability`]（权限矩阵的键）与 `capability` 域的
 //! `Capability`（LLM 可见工具描述符）是**两个概念**：前者回答「有权做什么」，
-//! 后者回答「暴露什么工具」。计划文本同名（01 §7），代码里以**路径限定**消歧：
+//! 后者回答「暴露什么工具」。计划文本同名（DE-001 §7），代码里以**路径限定**消歧：
 //! 本枚举只经 `governance::Capability` 引用，**不进根平铺**——两个 `Capability`
 //! 同时出现在调用点，正是命名纪律要阻止的错位。
 //!
@@ -105,7 +105,7 @@ closed_set! {
     /// 权限能力（[DE-001 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：**6 个封顶**）。
     ///
     /// 按「权威动作的种类」划分，不按「有多少个智能体」划分——新主体不新增能力，
-    /// 新动作种类才走 ADR（03 §3）。
+    /// 新动作种类才走 ADR（DE-016 §3）。
     ///
     /// 名面判据：**认不出的能力名拒绝整体构造**（[`PermissionMatrix::from_names`]）——
     /// 不把拼写错误静默读成「没有这个能力」，那等于把授权表的笔误变成一条悄悄生效的拒绝。
@@ -239,7 +239,7 @@ pub enum PairingViolation {
     ReadOnly { principal: String },
     /// 同一主体同时持有 `DefineWork` 与 `AssertVerification`（C15：不自验）——拒绝。
     /// 验证者 ≠ 产出者不是纪律是构造期约束：双持的主体给自己的产物盖章，
-    /// 质量闸门等于没有（S7，[roadmap/S03 §5](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）。
+    /// 质量闸门等于没有（[DE-033 §5](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）。
     SelfVerifier { principal: String },
 }
 
@@ -290,7 +290,7 @@ pub struct PermissionMatrix {
 
 impl PermissionMatrix {
     /// 由主体策略集构造。**任何一侧缺失即整体拒绝**（出口判据「只有写侧 → 拒绝」，
-    /// [plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 7 步）。
+    /// [DE-001 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
     pub fn new(policies: Vec<PrincipalPolicy>) -> Result<Self, PairingViolation> {
         for p in &policies {
             if p.grants.is_empty() {
@@ -303,8 +303,8 @@ impl PermissionMatrix {
                     principal: p.principal.clone(),
                 });
             }
-            // C15（不自验）：DefineWork + AssertVerification 不得同持（S7）；
-            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
+            // C15（不自验）：DefineWork + AssertVerification 不得同持；
+            // 高风险组合（[DE-039 §5](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
             // 验收 3）：外部执行（ProduceArtifact）+ AssertVerification 同样不得同持——
             // 给自己的外部动作盖章 = 质量闸门等于没有。
             let verifies = p.grants.contains(&Capability::AssertVerification);
@@ -437,12 +437,12 @@ impl PermissionMatrix {
     }
 }
 
-/// 授权变更（淘汰回路的一格，[roadmap/S13 §3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
+/// 授权变更（淘汰回路的一格，[DE-043 §3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
 /// 对某主体某项能力的一次**收回**或**恢复**。
 ///
 /// ## 为什么是数据而不是状态
 ///
-/// S13 §5 的强制项「淘汰必须可申诉」与 §6 断言 3「淘汰 = 一条 grants 变更事件，可被
+/// DE-043 §5 的强制项「淘汰必须可申诉」与 §6 断言 3「淘汰 = 一条 grants 变更事件，可被
 /// 审计、可被撤销」要求的正是这个形状：「谁被收回了什么」若只活在内存布尔里，
 /// 审计无从谈起（没有流水），撤销也无从谈起（没有逆操作）。变更经事件通道落盘，
 /// 撤销就是往同一条通道里再写一条 `Restore`——last-wins 折叠出当前状态，
@@ -495,7 +495,7 @@ impl GrantsChange {
 /// ## 为什么需要它（而不是直接改表）
 ///
 /// 授权表（`authz::ROWS`）是**常量**——宿主装配期定稿，运行期不改。淘汰却是运行期
-/// 事实：声誉掉到阈值以下的主体要被收回 `assign.work`（S13 §2「淘汰」行）。两条路
+/// 事实：声誉掉到阈值以下的主体要被收回 `assign.work`（DE-043 §2「淘汰」行）。两条路
 /// 都不通：把表改成可变的 ⇒ 「表授予 A、闸门判 B」的漂移面回来了（表不再是单一
 /// 权威）；不收回 ⇒ 淘汰这条断言在生产里没有对应物（§6 断言 3 未点亮）。
 ///
@@ -512,7 +512,7 @@ impl GrantsChange {
 ///
 /// ## 审计面在事件流里，不在本类型上
 ///
-/// 「可审计」（S13 §6 断言 3）的全部含义是**流水可查**：`verdict.asserted` 事件
+/// 「可审计」（DE-043 §6 断言 3）的全部含义是**流水可查**：`verdict.asserted` 事件
 /// 就在 Log 里（经 `EliminationDecider::verdict_grants_changes` 读），本类型只做
 /// 折叠与判定。曾设想过 `changes()` / `revoked()` 两个便利读数，但它们**没有生产
 /// 消费方**——按本项目纪律（「接线了却永不生效」正是要拦的静默失效）下线：

@@ -26,7 +26,7 @@ use symbio_core::{vdfs_context, VdfsProvider};
 use symbio_deploy::PLUGIN_ID_AGENT;
 use symbio_providers::DefaultToolVisitor;
 
-/// 收集器的工具元数据（AR-025 4a 后 `list_capability` 收敛为 `list(kind)`）——
+/// 收集器的工具元数据（`list_capability` 收敛为 `list(kind)`）——
 /// 本文件的断言一律按名字说话，经这个小助手读，免得每个断言点各写一遍展开。
 async fn tool_metas_of(manager: &DefaultToolVisitor) -> Vec<CapabilityMeta> {
     manager

@@ -254,7 +254,7 @@ export default defineCase(
         );
         assertEq(offered.produced_by, userCell.seq, '立约锚在本轮开口格（I2）');
         const broken = peerEvents.find((e) => e.kind === 'commitment.broken');
-        assert(broken, '工具失败 ⇒ 违约必须成格（S08 §5：违约可被观测）');
+        assert(broken, '工具失败 ⇒ 违约必须成格（DE-038 §5：违约可被观测）');
         const declared = peerEvents.find((e) => e.kind === 'commitment.asserted');
         assert(declared, '违约宣告必须成格');
         assert(

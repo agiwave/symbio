@@ -42,7 +42,7 @@ pub(crate) fn request_source_principal(ctx: &dyn symbio_core::PluginInvokeReques
 /// | 字段 | 取法 |
 /// |---|---|
 /// | `principal` | [`request_principal`]（会话选定的 agent ⇒ 主体名） |
-/// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_gate` 读规格自己的这份集合（`actor_can_land_speech` / `actor_can_land_artifact`），不再回头查表 |
+/// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。它有**真读方**：写侧收束闸 `turn_runner::closure_gate` 读规格自己的这份集合（`actor_can_land_speech` / `actor_can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`pattern_for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
 /// | `budget_ms` | 主体的**声明档**：由 `pattern` 派生（[`declared_budget`]——模式三值本来就按时延分）。它**不是**本幕的预算——本幕的档位要等轮首四行跑完才折得出来（`D-223` 订正 1），而主体在幕首就建（`D-222` 订正 3）。本幕实际用的档与预算归 `turn.dispatch` 那一格（`chat_loop::land_dispatch` 由档位直接折 `budget_ms`），`I3` 读的永远是那一格 |
 /// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算，[]） |
@@ -124,7 +124,7 @@ fn declared_budget(pattern: symbio_core::Pattern) -> u64 {
 pub(crate) struct SessionContext {
     pub messages: Vec<ChatNode>,
     pub session: Arc<super::super::turn_session::LoopSession>,
-    /// **本轮发生过的压缩**（压缩后的整份消息列表，S2.7-b2）。
+    /// **本轮发生过的压缩**（压缩后的整份消息列表）。
     ///
     /// ## 为什么不在压缩现场直接落格
     ///
@@ -214,7 +214,7 @@ pub(crate) struct TurnState {
     /// `None` = 本请求没有用户新发言（`resume` 重跑等）——判决无从谈起，
     /// Q1 也不下结论（见 `delegate.rs`）。
     pub(crate) input_utterance: Option<(String, String)>,
-    /// 本轮的**长期记忆召回视图**（S5，`memory_events::recall_view`）。
+    /// 本轮的**长期记忆召回视图**（`memory_events::recall_view`）。
     ///
     /// 只在本轮**第一次请求**取一次（与 classify / history 同一条 `request_round == 0`
     /// 口径）：同一轮内记忆不该漂移，事实源也只扫一遍；后续工具轮复用同一份视图，
@@ -223,7 +223,7 @@ pub(crate) struct TurnState {
     /// 落 `memory.recalled` 的时机在**轮末收束**（`derived_facts::record_learning`）而不是
     /// 取视图那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub recall_view: Option<super::super::recall::RecallView>,
-    /// 本轮**技能路由**的判定（S9）：
+    /// 本轮**技能路由**的判定：
     /// 每条 `(skill_id, fallback)`，即 `skill_events::route` 对召回视图里一条技能的判决。
     ///
     /// 形态与 [`TurnState::gate_breaks`] / [`TurnState::task_decls`] 完全对称：
@@ -237,7 +237,7 @@ pub(crate) struct TurnState {
     /// 空表 = 本轮没召回技能 / 没判（与 `None` 的「取都没取」不同，但收束侧
     /// 一视同仁）。
     pub(crate) skill_route: Vec<(String, bool)>,
-    /// 本轮**可用**的技能集（S11 快路的候选，`skill_events::route` 的出参之一）：
+    /// 本轮**可用**的技能集（快路的候选，`skill_events::route` 的出参之一）：
     /// 过了置信度闸、且本轮发言可能命中的那些。
     ///
     /// 与 [`TurnState::skill_route`] **同一次判定**的两个出口（同一个 `match`）：

@@ -319,7 +319,7 @@ function judgeSession(homedir, sid, strict) {
   // J4 收束格 reason 非空
   //
   // 「收束格」是**两种**：`chat.assistant.final`（正常定稿）与 `chat.assistant.fallback`
-  // （模型没答成 / 空答， 步 5c 起由 `close` 执行体独占写）。只认 final 会把
+  // （模型没答成 / 空答由 `close` 执行体独占写）。只认 final 会把
   // **每一条失败轮**都判成「没跑到定稿」——而失败轮恰恰是 D-122 决策 5 要求
   // 「照样有格」的那一轮。判据的口径必须与方案里的收束格集合一致。
   const CLOSING = ['chat.assistant.final', 'chat.assistant.fallback']
