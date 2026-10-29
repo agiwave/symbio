@@ -12,7 +12,7 @@
  * | `CP-003` | 少一个守卫调用；动作签名多一份 `&mut`；`Ctx` 多一个 `&mut` 字段；派发器点问（`owes(`） |
  * | `CP-004` | 内核里出现行名字面量 |
  * | `CP-005` | 收束格第二个构造点；`ACTOR_CLOSE.writes` 里少一格 |
- * | `CP-006` | 循环体改一个字节（基线未跟）；控制面多一份文件（基线未跟）；基线整个缺失 |
+ * | `CP-006` | 循环体改一个字节（基线未跟）；控制面多一份文件（基线未跟）；基线整个缺失；<br>声明第三个端口（裁决闭集只有两个）；闭集那一节读不出 |
  * | `CP-007` | 规范里多出第七条 `TC-n`；`## 判据` 表点名一个不存在的脚本 |
  * | `CP-008` | `seal` 改成借用式；`impl Frozen` 长出 `&mut self` 方法 |
  *
@@ -45,6 +45,7 @@ const TURN_EXEC = `${LOOP}/turn_exec.rs`
 const SETTLE = `${LOOP}/turn_runner/settle.rs`
 const DECL = 'crates/symbio-kernel/src/decl/mod.rs'
 const SPEC = 'docs/005-spec/033.md'
+const RULING = 'docs/003-design/015-义务环.md'
 
 /** 逐个删 —— 不用 rmSync(recursive)（沙箱会拦截批量删除）。 */
 function rmTree(dir) {
@@ -302,6 +303,28 @@ const SPEC_TEXT = [
   '',
 ].join('\n')
 
+/**
+ * 端口闭集的裁决原文（夹具）：判据只认这一句「今天只有…端口：`a`、`b`」，
+ * 所以夹具里必须**也**有这一段——否则 `CP-006` 会因为读不出闭集而红（那正是
+ * 「闭集没有输入」那条反向用例）。
+ */
+const RULING_TEXT = [
+  '## D-222 幕是身份，不是端口也不是迭代器',
+  '',
+  '#### 一、端口闭集',
+  '',
+  '> **端口** = 一次跨出控制面的往返。',
+  '',
+  '按这条定义，今天只有两个端口：`model`、`tool`。三个被排除的：',
+  '',
+  '| 候选 | 排除的理由 |',
+  '|---|---|',
+  '| 时钟 | `now` 是入参，没有派出动作，也没有应答 |',
+  '',
+  '#### 二、幕是身份，不是推进',
+  '',
+].join('\n')
+
 function cleanTree() {
   return {
     [`${LOOP}/lib.rs`]: 'pub mod loop_rows;\npub mod turn_exec;\npub mod turn_runner;\n',
@@ -315,6 +338,7 @@ function cleanTree() {
     'crates/symbio-kernel/src/adapters.rs': KERNEL_ADAPTERS_SRC,
     'crates/symbio-core/src/lib.rs': 'pub struct Event {\n    pub name: String,\n}\n',
     [SPEC]: SPEC_TEXT,
+    [RULING]: RULING_TEXT,
     'docs/003-design/016-工程落地与验证.md': '## 关键决策\n\n### D-234 夹具决策\n\n机制面基线挂在这条决策上。\n',
     'scripts/control-plane-audit.mjs': '// 夹具占位：CP-007 只判「§判据表点名的脚本存在」\n',
     'scripts/control-plane-audit.test.mjs': '// 夹具占位\n',
@@ -444,6 +468,35 @@ test('CP-006：控制面多一份生产文件而基线未跟 ⇒ 红', () => {
 
 test('CP-006：基线整个缺失 ⇒ 红（判据没有输入，宁红不静默）', () => {
   assertRed(audit(cleanTree(), { withBaseline: false }), 'CP-006')
+})
+
+test('CP-006：声明第三个端口而裁决闭集只有两个 ⇒ 红（闭集不是实现顺手扩的）', () => {
+  const files = cleanTree()
+  files[ROWS] = files[ROWS].replace(
+    'PortDecl { port: "model", concurrency: 0 }',
+    'PortDecl { port: "model", concurrency: 0 },\n    PortDecl { port: "clock", concurrency: 3600 }',
+  )
+  assertRed(audit(files), 'CP-006')
+})
+
+test('CP-006：端口声明在行表之外的 crate（kernel）里 ⇒ 红（跨 crate 看，不只判行表）', () => {
+  const files = cleanTree()
+  files['crates/symbio-kernel/src/adapters.rs'] += '\nconst CLOCK: PortDecl = PortDecl { port: "clock" };\n'
+  assertRed(audit(files), 'CP-006')
+})
+
+test('CP-006：裁决那一节读不出 ⇒ 红（闭集没有输入）', () => {
+  const files = cleanTree()
+  delete files[RULING]
+  assertRed(audit(files), 'CP-006')
+})
+
+test('CP-006：裁决先加了端口、代码还没声明 ⇒ 仍绿（设计先于实施，缺的一侧只是读数）', () => {
+  const files = cleanTree()
+  files[RULING] = files[RULING].replace('`model`、`tool`', '`model`、`tool`、`clock`')
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /裁决有而代码未声明：.*\bclock\b/)
 })
 
 // ───────────────────────────── CP-007 ─────────────────────────────

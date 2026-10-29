@@ -22,7 +22,7 @@
  * | `CP-003` | `TC-1c` 守卫同处 | 五道守卫各一份实现、各一个调用点；不重入由类型守 |
  * | `CP-004` | `TC-2` 机制层无域名 | 行名 / 执行体名 / 端口名 / 事件名不进 kernel 与 core |
  * | `CP-005` | `TC-4` 事实面唯一写方 | 收束格（final / fallback）各只有一个构造点 |
- * | `CP-006` | `TC-5` 横向扩展零改机制 | 机制面（驱动循环 / 选债 / 在途判据）字节冻结，控制面文件数只许降 |
+ * | `CP-006` | `TC-5` 横向扩展零改机制 | 机制面（驱动循环 / 选债 / 在途判据）字节冻结，控制面文件数只许降，端口不越出裁决的闭集 |
  * | `CP-007` | `TC-6` 判据集闭集 | 六条不变量与八条码一一对上；判据数不随能力数增长 |
  * | `CP-008` | `TC-3` 声明面封闭 | `seal` 是按值消费的唯一出口；冻结后没有可变方法 |
  *
@@ -55,6 +55,11 @@
  *   而本条看不见——这与 `PTS-005` 是同一条边界（要关掉它得先收窄 `Event` 字段）。
  * - `CP-007` 是元判据：它判的是**判据集自己**（六条 ↔ 八码 ↔ 规范表），判不出某条码
  *   内部是否恒真。恒真由 `control-plane-audit.test.mjs` 逐条注入反向用例来钉。
+ * - `CP-006` 的端口闭集读的是 `D-222` §一里那句「今天只有…端口：…」，**不是**本脚本的
+ *   一行常量——抄一份名单就是第二个 owner。改那句话 = 改裁决，判据跟着走；散文里的
+ *   候选表（时钟 / 存储为什么被排除）不参与判定。它判「有没有越出闭集」，判不到
+ *   「新端口是不是真往返」——那要读 `awaited` / `max_attempts` / 应答载荷，归 `D-222` §一
+ *   的判定口径，不是本脚本能替的。
  *
  * ## 用法
  *
@@ -66,7 +71,7 @@
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns CP 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结 / 判据集闭集 / 声明面封闭）
+// @ns CP 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结与端口闭集 / 判据集闭集 / 声明面封闭）
 // @codes CP-001 CP-002 CP-003 CP-004 CP-005 CP-006 CP-007 CP-008
 
 import fs from 'node:fs'
@@ -95,6 +100,8 @@ const SETTLE_REL = `${LOOP}/turn_runner/settle.rs`
 const DECL_REL = `${KERNEL}/decl/mod.rs`
 const ADAPTERS_REL = `${KERNEL}/adapters.rs`
 const SPEC_REL = 'docs/005-spec/033.md'
+/** 端口闭集的 owner：`D-222` §一。闭集名单**不在本脚本里**——抄一份就是第二个 owner */
+const RULING_REL = 'docs/003-design/015-义务环.md'
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
 
 /**
@@ -326,6 +333,51 @@ function portNames() {
 const ROW_NAMES = rowNames()
 const ACTOR_NAMES = actorNames()
 const PORT_NAMES = portNames()
+
+/**
+ * 全仓生产代码里**声明**的端口：`PortDecl { port: "…" }`，跨 crate 看。
+ *
+ * 不从 `rowsCode` 里取（`portNames()` 只读行表）：闭集判的是「有没有人在行表之外
+ * 新开一个端口」，只读行表等于只判自己。
+ */
+function declaredPorts() {
+  const out = []
+  for (const rel of allCratesProd()) {
+    const code = prodCodeOf(rel)
+    if (code === null) continue
+    for (const m of code.matchAll(/\bPortDecl\s*\{/g)) {
+      // `pub struct PortDecl {` 是**类型定义**，不是一条声明
+      if (/\bstruct\s+$/.test(code.slice(Math.max(0, m.index - 12), m.index))) continue
+      const body = blockBody(code, code.indexOf('{', m.index))
+      const name = /\bport:\s*"([^"]+)"/.exec(code.slice(body.start, body.end))
+      if (name) out.push({ port: name[1], rel })
+    }
+  }
+  return out
+}
+
+/**
+ * 裁决里那张「端口闭集」点名的端口（owner：`DE-015` `D-222` §一）。
+ *
+ * 读不出不是「没有约束」，是**判据没有输入**——调用方按红处置（宁红不静默）。
+ * 只认那一句「今天只有…端口：`a`、`b`」：散文里的候选表（时钟 / 存储）不参与判定。
+ */
+function rulingPorts() {
+  const text = readRel(RULING_REL)
+  if (text === null) return { error: `读不出 \`${RULING_REL}\`` }
+  const at = text.indexOf('#### 一、端口闭集')
+  if (at < 0) return { error: '找不到「#### 一、端口闭集」' }
+  // 从这一**行之后**找下一个标题：从 `at + 1` 起找会把本行自己认成下一个标题
+  const rest = text.slice(text.indexOf('\n', at) + 1)
+  const next = rest.search(/^#{1,6}\s/m)
+  const section = next < 0 ? rest : rest.slice(0, next)
+  const line = section.split('\n').find((l) => l.includes('今天') && /端口[：:]/.test(l))
+  if (!line) return { error: '「端口闭集」里找不到那句「今天只有…端口：…」' }
+  const ports = [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1])
+  if (ports.length === 0) return { error: '「端口闭集」那句话里没有点名任何端口' }
+  return { ports }
+}
+
 /**
  * `CP-004` 的词表 = **行名 + 执行体名**。
  *
@@ -744,6 +796,45 @@ if (!baseline) {
   }
 }
 
+/**
+ * 端口闭集：代码里声明的端口必须落在 `D-222` §一的名单内。
+ *
+ * 这一条是 `TC-5` 的**另一半**：字节冻结只判「加端口有没有改机制」，判不到
+ * 「这个端口该不该存在」。两者合起来才是「横向扩展」的代价界——端口是声明出来的，
+ * 而**声明哪些端口**是裁决，不是实现。
+ *
+ * 方向是单向的：代码里多一个裁决没点的端口 ⇒ 红（静默扩端口）；裁决点了而代码还没
+ * 声明 ⇒ 只是读数（设计先于实施，允许代码晚一步）。要加端口，先改 `D-222` §一——
+ * 那是一次可见的裁决改动，而不是在 `PORTS` 里多加一个结构体。
+ */
+const ruling = rulingPorts()
+const declaredPortsAll = declaredPorts()
+let closureReading = '(未判定)'
+if (ruling.error) {
+  report(
+    'CP-006',
+    RULING_REL,
+    `端口闭集读不出：${ruling.error} —— 闭集的 owner 是 \`D-222\` §一，读不出即判据没有输入（宁红不静默）`,
+  )
+} else {
+  const closed = new Set(ruling.ports)
+  for (const d of declaredPortsAll) {
+    if (closed.has(d.port)) continue
+    report(
+      'CP-006',
+      d.rel,
+      `声明了端口 \`${d.port}\`，但裁决里今天的端口闭集只有 ${ruling.ports.map((p) => `\`${p}\``).join('、')}。` +
+        '顺带一问：它需要一台 host 或一段循环才能跑吗？需要的话它就不是端口，是环的一部分（`D-222` §一）。' +
+        '真要加，先改那条裁决——闭集不是实现顺手扩的',
+    )
+  }
+  const declaredNames = new Set(declaredPortsAll.map((d) => d.port))
+  const pending = ruling.ports.filter((p) => !declaredNames.has(p))
+  closureReading =
+    `${ruling.ports.map((p) => `\`${p}\``).join(' · ')}（裁决 \`D-222\` §一）· 代码声明 ${declaredPortsAll.length} 条` +
+    (pending.length ? ` · 裁决有而代码未声明：${pending.join(' / ')}（读数，代码晚于裁决）` : '')
+}
+
 /** 控制面不该按能力开文件：文件名词干等于端口名 / 行名 ⇒ 有人给一个能力单开了一份机制 */
 for (const rel of loopProdFiles) {
   const stem = path.basename(rel, '.rs')
@@ -900,6 +991,7 @@ if (errors === 0) {
     ),
   )
   console.log(dim(`  控制面生产文件 ${loopProdFiles.length} 份（基线 ${baseline?.extension?.productionFiles ?? '?'}）`))
+  console.log(dim(`  端口闭集 ${closureReading}`))
   console.log(dim(`  机制面指纹 ${mechanismHash}`))
   for (const [, constName, literal] of CLOSURE_CELLS) {
     const sites = closureSites[constName] ?? []
