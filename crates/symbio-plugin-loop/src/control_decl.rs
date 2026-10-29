@@ -425,7 +425,11 @@ fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {
 /// **在途**协议调用的唯一口径：`sent` 中没有被 `response` / `failed` / `retry`
 /// （同 port + id + attempt）关掉的。
 ///
-/// 两个视图（`in_flight` / `stale_sent`）共用它，而不是各写一遍关账规则：
+/// 它答的是**一个**问题：此刻有没有「已派出、未收清」的往返。两个视图
+/// （`in_flight` / `stale_sent`）是它的两份投影，不是两套判据——后者只多折了
+/// 「卡了多久 / 到顶没有」两格。归 `TC-1c`（空账本守卫的输入：有一笔在飞时账本
+/// 不算空，步数上界先收回再判）；租约看护 `reap` 读的也是这一份。
+///
 /// 「什么算在途」只能有一处口径，否则两个视图会在某个角落说不同的话。
 ///
 /// 三个出口都只关**同一次尝试**（D-138）：`failed` 不再按逻辑 id 一次关掉所有
@@ -572,6 +576,31 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
     e.seq.is_some_and(|s| s.value() >= anchor_seq)
 }
 
+/// 「**这一轮结束了没有**」——收束判据的唯一口径（`turn_head.closed` / `turn_head.closure`
+/// 与 [`turn_closed`] 共用这一份，不各写一遍）。
+///
+/// 答的是**一个**问题：本幕的锚之后出现过收束格（`chat.assistant.final` / `.fallback`）没有。
+/// `has_final` / `model_outcome_failed` / `reflex_answered` 是同一套判据的**输入**（「该不该
+/// 收束」），不是另外几套：它们都折进 [`turn_head`] 的 `closeable` 一格。
+///
+/// 取**最近一条**而不是「任意一条」：兜底格与收束格可以先后出现（中止路径先兜底、
+/// 收束行随后关门），`reason` 要按 `seq` 取末条。
+///
+/// 归 `TC-1a`（一个环的停机面）：这一格为真 ⇒ 环上不再有这一轮的债可还。
+fn close_mark(events: &[Event], turn: u64, anchor_seq: u64) -> Option<&Event> {
+    events
+        .iter()
+        .filter(|e| {
+            e.turn == turn
+                && matches!(
+                    e.kind.as_str(),
+                    "chat.assistant.final" | "chat.assistant.fallback"
+                )
+                && after_anchor(e, anchor_seq)
+        })
+        .max_by_key(|e| seq_of(e))
+}
+
 /// 轮头（升到 v5，步 5d 升到 v6）：五个策略行的开账条件全在这一格里，
 /// 收束行与执行行也是。
 ///
@@ -687,15 +716,9 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
             && after_anchor(e, anchor_seq)
             && str_field(e, "result") == Some("answered")
     });
-    // 本幕是否已收束（与 [`turn_closed`] 同一判法：幕锚之后出现过收束格）。
-    let closed = events.iter().any(|e| {
-        e.turn == turn
-            && matches!(
-                e.kind.as_str(),
-                "chat.assistant.final" | "chat.assistant.fallback"
-            )
-            && after_anchor(e, anchor_seq)
-    });
+    // 本幕是否已收束（唯一口径在 [`close_mark`]：幕锚之后出现过收束格）。
+    let closed_mark = close_mark(events, turn, anchor_seq);
+    let closed = closed_mark.is_some();
     // 本幕**为什么**停下（v13）：本幕最近一条收束格的 `reason` 一格
     // （`ClosureReason` 的线格式）。未收束 ⇒ `null`。
     //
@@ -706,23 +729,8 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     //
     // 取**最近一条**而不是「任意一条」：收束格一条就够（收束之后不再落），但
     // 兜底格与收束格可以先后出现（中止路径先兜底、收束行随后关门），口径统一
-    // 按 seq 取末条。
-    let closure = closed
-        .then(|| {
-            events
-                .iter()
-                .filter(|e| {
-                    e.turn == turn
-                        && matches!(
-                            e.kind.as_str(),
-                            "chat.assistant.final" | "chat.assistant.fallback"
-                        )
-                        && after_anchor(e, anchor_seq)
-                })
-                .max_by_key(|e| seq_of(e))
-                .and_then(|e| str_field(e, "reason"))
-        })
-        .flatten();
+    // 按 seq 取末条——就是 [`close_mark`] 那一份。
+    let closure = closed_mark.and_then(|e| str_field(e, "reason"));
     // 本幕最近一条 `response(port=model)`：收束格（`calls` 空）与工具格
     // （`calls` 非空且未关完）共用同一次选取，口径只在这里。
     //
@@ -748,6 +756,9 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     //
     // `calls` 取不到数组 ⇒ 不算收束（宁可让 `close-turn` 不开账，也不拿一个来路不明的
     // 形状把没答完的一轮判成答完）；没有响应（首步就中止 / 失败的轮）同理。
+    //
+    // 它与 `closed` / `model_outcome_failed` / `reflex_answered` 是**同一套**收束判据的
+    // 四格输入（折成下面 `closeable` 一格），不是四套判据：问的都是「这一轮结束了没有」。
     let has_final = !closed && model_calls.is_some_and(|calls| calls.is_empty());
     // 本幕模型端口的**结局**（c）：本幕**派发过**的一次模型往返，最后落在
     // `failed(port=model)` 上——模型没答成，且之后没有更晚的成功应答。
@@ -918,20 +929,14 @@ fn turn_stages(events: &[Event], _now: i64) -> serde_json::Value {
 /// 本幕是否已经收束（收束 / 兜底格出现在幕锚之后）。
 ///
 /// `[]` = 还开着；一条 `{turn}` = 已关。执行行与反射行都拿它作出口。
+///
+/// 判法与 [`turn_head`] 的 `closed` 是**同一份**（[`close_mark`]），不是同一个问题的第二种写法。
 fn turn_closed(events: &[Event], _now: i64) -> serde_json::Value {
     let Some((turn, anchor)) = drive_of(events) else {
         return serde_json::Value::Array(Vec::new());
     };
     let anchor_seq = anchor.map(seq_of).unwrap_or(0);
-    let closed = events.iter().any(|e| {
-        e.turn == turn
-            && matches!(
-                e.kind.as_str(),
-                "chat.assistant.final" | "chat.assistant.fallback"
-            )
-            && after_anchor(e, anchor_seq)
-    });
-    if closed {
+    if close_mark(events, turn, anchor_seq).is_some() {
         serde_json::json!([{ "turn": turn }])
     } else {
         serde_json::Value::Array(Vec::new())
