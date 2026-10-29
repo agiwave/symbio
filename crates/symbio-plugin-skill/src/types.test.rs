@@ -5,7 +5,7 @@
 use super::*;
 use serde_json::json;
 
-/// TEST-S2.1：SkillConfig::default() 4 个字段默认值
+/// SkillConfig::default() 4 个字段默认值
 #[test]
 fn skill_config_default_values() {
     let cfg = SkillConfig::default();
@@ -15,7 +15,7 @@ fn skill_config_default_values() {
     assert!(cfg.report_token_estimate);
 }
 
-/// TEST-S2.2：SkillConfig JSON 反序列化使用默认值
+/// SkillConfig JSON 反序列化使用默认值
 #[test]
 fn skill_config_deserialize_uses_defaults_for_missing_fields() {
     let cfg: SkillConfig = serde_json::from_str("{}").unwrap();
@@ -25,7 +25,7 @@ fn skill_config_deserialize_uses_defaults_for_missing_fields() {
     assert!(cfg.report_token_estimate);
 }
 
-/// TEST-S2.3：SkillConfig 反序列化支持覆盖所有字段
+/// SkillConfig 反序列化支持覆盖所有字段
 #[test]
 fn skill_config_deserialize_overrides_all() {
     let cfg: SkillConfig = serde_json::from_str(
@@ -43,7 +43,7 @@ fn skill_config_deserialize_overrides_all() {
     assert!(!cfg.report_token_estimate);
 }
 
-/// TEST-S1.1：单个变量替换
+/// 单个变量替换
 #[test]
 fn substitute_variables_single() {
     let skill = Skill {
@@ -61,7 +61,7 @@ fn substitute_variables_single() {
     assert_eq!(out, "Hello, world!");
 }
 
-/// TEST-S1.2：多变量替换
+/// 多变量替换
 #[test]
 fn substitute_variables_multi() {
     let skill = Skill {
@@ -83,7 +83,7 @@ fn substitute_variables_multi() {
     assert_eq!(out, "Hi, Alice! You are 30.");
 }
 
-/// TEST-S1.3：变量不替换占位符时原样保留
+/// 变量不替换占位符时原样保留
 #[test]
 fn substitute_variables_missing_key_kept() {
     let skill = Skill {
@@ -101,7 +101,7 @@ fn substitute_variables_missing_key_kept() {
     assert_eq!(out, "Hello, ${name}!");
 }
 
-/// TEST-S1.4：variables 不是 object 时不替换
+/// variables 不是 object 时不替换
 #[test]
 fn substitute_variables_non_object_noop() {
     let skill = Skill {
@@ -119,7 +119,7 @@ fn substitute_variables_non_object_noop() {
     assert_eq!(out, "Hello, ${name}!");
 }
 
-/// TEST-S1.5：同一变量在文本中多次出现全部替换
+/// 同一变量在文本中多次出现全部替换
 #[test]
 fn substitute_variables_repeating_key() {
     let skill = Skill {

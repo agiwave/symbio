@@ -7,7 +7,7 @@ use crate::schemas::mcp_config::{McpServerConfig, McpTransportType};
 use crate::types::McpTool;
 use serde_json::json;
 
-/// TEST-M2.1：stdio transport 但缺 command 字段 → 返回错误
+/// stdio transport 但缺 command 字段 → 返回错误
 #[tokio::test]
 async fn discover_tools_stdio_missing_command() {
     let mgr = McpManager::new();
@@ -20,7 +20,7 @@ async fn discover_tools_stdio_missing_command() {
     assert!(err.contains("command"), "unexpected error: {err}");
 }
 
-/// TEST-M2.2：http transport 但缺 url 字段 → 返回错误
+/// http transport 但缺 url 字段 → 返回错误
 #[tokio::test]
 async fn discover_tools_http_missing_url() {
     let mgr = McpManager::new();
@@ -33,7 +33,7 @@ async fn discover_tools_http_missing_url() {
     assert!(err.contains("url"), "unexpected error: {err}");
 }
 
-/// TEST-M3.1：stdio call_tool 缺 command → 返回错误
+/// stdio call_tool 缺 command → 返回错误
 #[tokio::test]
 async fn call_tool_stdio_missing_command() {
     let mgr = McpManager::new();
@@ -49,7 +49,7 @@ async fn call_tool_stdio_missing_command() {
     assert!(err.contains("command"), "unexpected error: {err}");
 }
 
-/// TEST-M8.1：McpManager::new 持有共享的 http_client
+/// McpManager::new 持有共享的 http_client
 #[test]
 fn mcp_manager_holds_http_client() {
     let mgr = McpManager::new();
@@ -57,7 +57,7 @@ fn mcp_manager_holds_http_client() {
     let _ = mgr.http_client.clone();
 }
 
-/// TEST-M11.1：discover 缓存命中
+/// discover 缓存命中
 #[tokio::test]
 async fn discover_tools_cache_hit() {
     let mgr = McpManager::new();
@@ -87,7 +87,7 @@ async fn discover_tools_cache_hit() {
     assert_eq!(result[0].name, "test_tool");
 }
 
-/// TEST-M11.2：invalidate_discover_cache 清除缓存
+/// invalidate_discover_cache 清除缓存
 #[tokio::test]
 async fn invalidate_discover_cache_clears_entry() {
     let mgr = McpManager::new();
@@ -105,7 +105,7 @@ async fn invalidate_discover_cache_clears_entry() {
     assert!(!cache.contains_key("x"));
 }
 
-/// TEST-M11.3：per-server Mutex 序列化
+/// per-server Mutex 序列化
 #[tokio::test]
 async fn per_server_lock_serializes() {
     let mgr = McpManager::new();
@@ -114,7 +114,7 @@ async fn per_server_lock_serializes() {
     assert!(Arc::ptr_eq(&lock1, &lock2), "同一 server 应共享锁");
 }
 
-/// TEST-M11.4：不同 server 用不同锁
+/// 不同 server 用不同锁
 #[tokio::test]
 async fn different_servers_have_different_locks() {
     let mgr = McpManager::new();
@@ -123,7 +123,7 @@ async fn different_servers_have_different_locks() {
     assert!(!Arc::ptr_eq(&lock1, &lock2), "不同 server 应独立锁");
 }
 
-/// TEST-M11.5：McpSessionCache 基本 CRUD
+/// McpSessionCache 基本 CRUD
 #[tokio::test]
 async fn session_cache_basic_crud() {
     let cache = McpSessionCache::new();
@@ -175,7 +175,7 @@ fn filter_tools_white_list_narrows_tools() {
     assert_eq!(filtered[0].name, "search");
 }
 
-/// TEST-MR20.1：test_connection 走 stdio（不存在的命令）→ 返回错误
+/// test_connection 走 stdio（不存在的命令）→ 返回错误
 #[tokio::test]
 async fn test_connection_stdio_missing_command() {
     let mgr = McpManager::new();
@@ -188,7 +188,7 @@ async fn test_connection_stdio_missing_command() {
     assert!(result.is_err(), "test_connection 应返回错误");
 }
 
-/// TEST-MR20.2：test_connection 走 http（缺 url）→ 返回错误
+/// test_connection 走 http（缺 url）→ 返回错误
 #[tokio::test]
 async fn test_connection_http_missing_url() {
     let mgr = McpManager::new();
@@ -201,7 +201,7 @@ async fn test_connection_http_missing_url() {
     assert!(result.is_err(), "test_connection 应返回错误");
 }
 
-/// TEST-MR24.1：discover 失败但有陈旧缓存 → 返回陈旧缓存
+/// discover 失败但有陈旧缓存 → 返回陈旧缓存
 #[tokio::test]
 async fn discover_tools_falls_back_to_stale_cache_on_failure() {
     let mgr = McpManager::new();
@@ -235,7 +235,7 @@ async fn discover_tools_falls_back_to_stale_cache_on_failure() {
     assert_eq!(result[0].name, "stale_tool");
 }
 
-/// TEST-MR24.2：discover 失败且无任何缓存 → 返回错误
+/// discover 失败且无任何缓存 → 返回错误
 #[tokio::test]
 async fn discover_tools_errors_when_no_cache_and_failure() {
     let mgr = McpManager::new();
@@ -250,7 +250,7 @@ async fn discover_tools_errors_when_no_cache_and_failure() {
 
 // ===== BUG-MR29：forget_server 清理所有内部状态 =====
 
-/// TEST-MR29.1：forget_server 清理 discover cache
+/// forget_server 清理 discover cache
 #[tokio::test]
 async fn forget_server_clears_cache() {
     let mgr = McpManager::new();
@@ -270,7 +270,7 @@ async fn forget_server_clears_cache() {
     assert!(!cache.contains_key("ghost"), "discover cache 应被清理");
 }
 
-/// TEST-MR29.2：forget_server 清理 session cache
+/// forget_server 清理 session cache
 #[tokio::test]
 async fn forget_server_clears_session_cache() {
     let mgr = McpManager::new();
@@ -285,7 +285,7 @@ async fn forget_server_clears_session_cache() {
     );
 }
 
-/// TEST-MR29.3：forget_server 清理 server_locks
+/// forget_server 清理 server_locks
 #[tokio::test]
 async fn forget_server_clears_lock() {
     let mgr = McpManager::new();
@@ -300,7 +300,7 @@ async fn forget_server_clears_lock() {
     assert!(!locks.contains_key("ghost"), "server_locks 应被清理");
 }
 
-/// TEST-MR29.4：forget_server 幂等：不存在 server 调用也不报错
+/// forget_server 幂等：不存在 server 调用也不报错
 #[tokio::test]
 async fn forget_server_nonexistent_is_idempotent() {
     let mgr = McpManager::new();
@@ -310,7 +310,7 @@ async fn forget_server_nonexistent_is_idempotent() {
 
 // ===== BUG-MR30：TestConnectionResult 字段 =====
 
-/// TEST-MR30.1：TestConnectionResult 基本字段
+/// TestConnectionResult 基本字段
 #[test]
 fn test_connection_result_fields() {
     use super::TestConnectionResult;
@@ -330,7 +330,7 @@ fn test_connection_result_fields() {
     assert_eq!(r.elapsed_ms, 123);
 }
 
-/// TEST-MR30.2：TestConnectionResult 字段默认
+/// TestConnectionResult 字段默认
 #[test]
 fn test_connection_result_default_construction() {
     use super::TestConnectionResult;
@@ -351,7 +351,7 @@ fn test_connection_result_default_construction() {
     assert_eq!(r.elapsed_ms, 0);
 }
 
-/// TEST-MR30.3：富提示按结构体文档承诺的形状（名字 / 版本 / 工具数 / 协议 / 耗时）
+/// 富提示按结构体文档承诺的形状（名字 / 版本 / 工具数 / 协议 / 耗时）
 ///
 /// 这一行是 `TestConnectionResult` 摘 `#[allow(dead_code)]` 的接线判据：字段从
 /// 「取回来了没人看」变成**用户看得见的那一句**，形状由本测钉住。
@@ -377,7 +377,7 @@ fn test_connection_result_success_message_is_rich() {
     );
 }
 
-/// TEST-MR30.4：server 没报名字 / 版本时不留空洞（不出现「来自  ，」）
+/// server 没报名字 / 版本时不留空洞（不出现「来自  ，」）
 #[test]
 fn test_connection_result_success_message_without_identity() {
     use super::TestConnectionResult;

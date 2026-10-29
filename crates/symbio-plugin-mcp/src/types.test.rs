@@ -14,7 +14,7 @@ fn tool(name: &str) -> McpTool {
     }
 }
 
-/// TEST-M1.1：无 include / exclude 时全部通过
+/// 无 include / exclude 时全部通过
 #[test]
 fn filter_tools_none_passes_all() {
     let tools = vec![tool("a"), tool("b"), tool("c")];
@@ -22,7 +22,7 @@ fn filter_tools_none_passes_all() {
     assert_eq!(filtered.len(), 3);
 }
 
-/// TEST-M1.2：include 白名单
+/// include 白名单
 #[test]
 fn filter_tools_include_whitelist() {
     let tools = vec![tool("a"), tool("b"), tool("c")];
@@ -32,7 +32,7 @@ fn filter_tools_include_whitelist() {
     assert_eq!(names, vec!["a", "c"]);
 }
 
-/// TEST-M1.3：exclude 黑名单
+/// exclude 黑名单
 #[test]
 fn filter_tools_exclude_blacklist() {
     let tools = vec![tool("a"), tool("b"), tool("c")];
@@ -42,7 +42,7 @@ fn filter_tools_exclude_blacklist() {
     assert_eq!(names, vec!["a", "c"]);
 }
 
-/// TEST-M1.4：include + exclude 同时设置，exclude 优先
+/// include + exclude 同时设置，exclude 优先
 #[test]
 fn filter_tools_include_then_exclude() {
     let tools = vec![tool("a"), tool("b"), tool("c")];
@@ -53,7 +53,7 @@ fn filter_tools_include_then_exclude() {
     assert_eq!(names, vec!["a", "c"]);
 }
 
-/// TEST-M1.5：include 空列表 → 全部过滤掉
+/// include 空列表 → 全部过滤掉
 #[test]
 fn filter_tools_empty_include_filters_all() {
     let tools = vec![tool("a"), tool("b")];
@@ -62,7 +62,7 @@ fn filter_tools_empty_include_filters_all() {
     assert!(filtered.is_empty());
 }
 
-/// TEST-M1.6：exclude 名称不存在的工具 → 不影响
+/// exclude 名称不存在的工具 → 不影响
 #[test]
 fn filter_tools_exclude_nonexistent_no_op() {
     let tools = vec![tool("a"), tool("b")];
@@ -73,7 +73,7 @@ fn filter_tools_exclude_nonexistent_no_op() {
 
 // ===== BUG-MR27：tool name 校验 =====
 
-/// TEST-MR27.1：合法名称（字母/数字/下划线/连字符）
+/// 合法名称（字母/数字/下划线/连字符）
 #[test]
 fn validate_tool_name_accepts_valid() {
     assert!(validate_tool_name("search").is_ok());
@@ -87,21 +87,21 @@ fn validate_tool_name_accepts_valid() {
     );
 }
 
-/// TEST-MR27.2：空名拒绝
+/// 空名拒绝
 #[test]
 fn validate_tool_name_rejects_empty() {
     let err = validate_tool_name("").unwrap_err();
     assert!(err.contains("不能为空"));
 }
 
-/// TEST-MR27.3：超长名称拒绝
+/// 超长名称拒绝
 #[test]
 fn validate_tool_name_rejects_too_long() {
     let err = validate_tool_name(&"x".repeat(65)).unwrap_err();
     assert!(err.contains("64 字符"));
 }
 
-/// TEST-MR27.4：非法字符（空格/点/中文等）拒绝
+/// 非法字符（空格/点/中文等）拒绝
 #[test]
 fn validate_tool_name_rejects_invalid_chars() {
     assert!(validate_tool_name("with space").is_err());
@@ -111,7 +111,7 @@ fn validate_tool_name_rejects_invalid_chars() {
     assert!(validate_tool_name("with😀emoji").is_err());
 }
 
-/// TEST-MR27.5：filter_valid_tool_names 保留合法 / 交出被丢弃的名字
+/// filter_valid_tool_names 保留合法 / 交出被丢弃的名字
 #[test]
 fn filter_valid_tool_names_separates() {
     let tools = vec![
@@ -132,7 +132,7 @@ fn filter_valid_tool_names_separates() {
     assert_eq!(names, vec!["search", "read_file", "git-commit"]);
 }
 
-/// TEST-MR27.6：filter_valid_tool_names 全空 / 全合法
+/// filter_valid_tool_names 全空 / 全合法
 #[test]
 fn filter_valid_tool_names_edge_cases() {
     assert!(filter_valid_tool_names(vec![]).0.is_empty());

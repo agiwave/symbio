@@ -19,7 +19,7 @@ fn make_capability(server: &str, tool_name: &str) -> McpToolCapability {
     McpToolCapability::new(server.to_string(), tool, config, Arc::new(manager))
 }
 
-/// TEST-M7.1：三段式命名 `mcp.<server>.<tool>`
+/// 三段式命名 `mcp.<server>.<tool>`
 #[test]
 fn namespaced_name_three_part() {
     assert_eq!(
@@ -28,7 +28,7 @@ fn namespaced_name_three_part() {
     );
 }
 
-/// TEST-M7.2：meta 名称遵循三段式
+/// meta 名称遵循三段式
 #[test]
 fn meta_uses_namespaced_name() {
     let cap = make_capability("git", "commit");
@@ -36,7 +36,7 @@ fn meta_uses_namespaced_name() {
     assert_eq!(m.name, "mcp.git.commit");
 }
 
-/// TEST-M7.3：meta 描述前缀标记 server
+/// meta 描述前缀标记 server
 #[test]
 fn meta_description_prefixes_server() {
     let cap = make_capability("git", "commit");
@@ -45,7 +45,7 @@ fn meta_description_prefixes_server() {
     assert!(m.description.contains("commit desc"));
 }
 
-/// TEST-M7.4：meta 分类为 Mcp
+/// meta 分类为 Mcp
 #[test]
 fn meta_category_is_mcp() {
     let cap = make_capability("git", "commit");
@@ -53,7 +53,7 @@ fn meta_category_is_mcp() {
     assert_eq!(m.category, Some(CapabilityCategory::Mcp));
 }
 
-/// TEST-M7.5：input_schema 透传
+/// input_schema 透传
 #[test]
 fn meta_input_schema_passthrough() {
     let cap = make_capability("git", "commit");
@@ -64,7 +64,7 @@ fn meta_input_schema_passthrough() {
     );
 }
 
-/// TEST-M7.6：同 server 不同 tool 名不冲突
+/// 同 server 不同 tool 名不冲突
 #[test]
 fn namespaced_name_avoids_collision() {
     let a = McpToolCapability::namespaced_name("server1", "search");

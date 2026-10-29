@@ -4,7 +4,7 @@
 
 use super::*;
 
-/// TEST-F1.1：McpServerConfig 序列化时 transport_type 序列化为 "type"
+/// McpServerConfig 序列化时 transport_type 序列化为 "type"
 #[test]
 fn mcp_server_config_serializes_transport_type_as_type() {
     let cfg = McpServerConfig {
@@ -24,7 +24,7 @@ fn mcp_server_config_serializes_transport_type_as_type() {
     assert_eq!(v["url"], "http://example.com/mcp");
 }
 
-/// TEST-F1.2：McpServerConfig 缺省字段在序列化时被省略
+/// McpServerConfig 缺省字段在序列化时被省略
 #[test]
 fn mcp_server_config_omits_none_fields() {
     let cfg = McpServerConfig::default(); // 全 None + stdio + enabled=true
@@ -37,7 +37,7 @@ fn mcp_server_config_omits_none_fields() {
     assert!(v.get("exclude_tools").is_none());
 }
 
-/// TEST-F1.3：McpServerConfig 反序列化时 transport_type 缺省为 stdio
+/// McpServerConfig 反序列化时 transport_type 缺省为 stdio
 #[test]
 fn mcp_server_config_deserializes_missing_type_as_stdio() {
     let json = r#"{"command": "echo", "args": ["hi"]}"#;
@@ -46,7 +46,7 @@ fn mcp_server_config_deserializes_missing_type_as_stdio() {
     assert_eq!(cfg.command, Some("echo".to_string()));
 }
 
-/// TEST-F1.4：McpServerConfig 反序列化时 enabled 缺省为 true
+/// McpServerConfig 反序列化时 enabled 缺省为 true
 #[test]
 fn mcp_server_config_enabled_defaults_true() {
     let json = r#"{"command": "echo"}"#;
@@ -54,7 +54,7 @@ fn mcp_server_config_enabled_defaults_true() {
     assert!(cfg.enabled);
 }
 
-/// TEST-F1.5：McpServerConfig 反序列化所有字段名使用 snake_case
+/// McpServerConfig 反序列化所有字段名使用 snake_case
 #[test]
 fn mcp_server_config_deserializes_all_fields_snake_case() {
     let json = r#"{
@@ -88,7 +88,7 @@ fn legacy_sse_type_is_read_as_http_and_rewritten() {
     assert_eq!(v["url"], "http://x/sse");
 }
 
-/// TEST-F1.6：McpConfig 缺省为空
+/// McpConfig 缺省为空
 #[test]
 fn mcp_config_default_is_empty() {
     let cfg = McpConfig::default();

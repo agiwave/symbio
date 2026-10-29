@@ -16,7 +16,7 @@ fn make_skill_dir(parent: &Path, name: &str, body_chars: usize) -> PathBuf {
     dir
 }
 
-/// TEST-S3.1：max_skills 截断后续目录
+/// max_skills 截断后续目录
 #[tokio::test]
 async fn max_skills_truncates_across_dirs() {
     let tmp = TempDir::new().unwrap();
@@ -36,7 +36,7 @@ async fn max_skills_truncates_across_dirs() {
     assert_eq!(skills.len(), 2);
 }
 
-/// TEST-S3.2：max_body_chars 截断单个 skill body
+/// max_body_chars 截断单个 skill body
 #[tokio::test]
 async fn max_body_chars_truncates_single_skill() {
     let tmp = TempDir::new().unwrap();
@@ -57,7 +57,7 @@ async fn max_body_chars_truncates_single_skill() {
     assert!(skills[0].body.contains("body truncated"));
 }
 
-/// TEST-S3.3：不存在目录返回空 vec 而不报错
+/// 不存在目录返回空 vec 而不报错
 #[tokio::test]
 async fn missing_dir_returns_empty() {
     let tmp = TempDir::new().unwrap();
@@ -69,7 +69,7 @@ async fn missing_dir_returns_empty() {
     assert!(skills.is_empty());
 }
 
-/// TEST-S4.1：正常 SKILL.md 解析成功
+/// 正常 SKILL.md 解析成功
 #[tokio::test]
 async fn parse_normal_skill_md() {
     let tmp = TempDir::new().unwrap();
@@ -91,7 +91,7 @@ async fn parse_normal_skill_md() {
     assert!(skill.body.contains("body content"));
 }
 
-/// TEST-S4.2：缺 name 字段 → 报错
+/// 缺 name 字段 → 报错
 #[tokio::test]
 async fn parse_missing_name_errors() {
     let tmp = TempDir::new().unwrap();
@@ -108,7 +108,7 @@ async fn parse_missing_name_errors() {
     assert!(err.to_string().contains("name"));
 }
 
-/// TEST-S4.3：缺 description 字段 → 报错
+/// 缺 description 字段 → 报错
 #[tokio::test]
 async fn parse_missing_description_errors() {
     let tmp = TempDir::new().unwrap();
@@ -121,7 +121,7 @@ async fn parse_missing_description_errors() {
     assert!(err.to_string().contains("description"));
 }
 
-/// TEST-S4.4：缺 frontmatter → 报错
+/// 缺 frontmatter → 报错
 #[tokio::test]
 async fn parse_missing_frontmatter_errors() {
     let tmp = TempDir::new().unwrap();
@@ -134,7 +134,7 @@ async fn parse_missing_frontmatter_errors() {
     assert!(err.to_string().to_lowercase().contains("frontmatter"));
 }
 
-/// TEST-S4.5：disable-model-invocation 默认 false
+/// disable-model-invocation 默认 false
 #[tokio::test]
 async fn parse_disable_model_invocation_default_false() {
     let tmp = TempDir::new().unwrap();
@@ -149,7 +149,7 @@ async fn parse_disable_model_invocation_default_false() {
     assert!(!skill.disable_model_invocation);
 }
 
-/// TEST-SR6.1：SKILL.md 目录名与 frontmatter name 不一致 → 报错
+/// SKILL.md 目录名与 frontmatter name 不一致 → 报错
 #[tokio::test]
 async fn parse_dir_name_must_match_frontmatter_name() {
     let tmp = TempDir::new().unwrap();
@@ -173,7 +173,7 @@ async fn parse_dir_name_must_match_frontmatter_name() {
     assert!(msg.contains("right-name"));
 }
 
-/// TEST-SR6.2：SKILL.md 目录名与 frontmatter name 一致 → 成功
+/// SKILL.md 目录名与 frontmatter name 一致 → 成功
 #[tokio::test]
 async fn parse_dir_name_matches_frontmatter_name_ok() {
     let tmp = TempDir::new().unwrap();
@@ -188,7 +188,7 @@ async fn parse_dir_name_matches_frontmatter_name_ok() {
     assert_eq!(skill.name, "matched");
 }
 
-/// TEST-SR1.1：跨目录同名 skill 后加载覆盖
+/// 跨目录同名 skill 后加载覆盖
 #[tokio::test]
 async fn duplicate_skill_name_later_overrides() {
     let tmp = TempDir::new().unwrap();
@@ -228,7 +228,7 @@ async fn duplicate_skill_name_later_overrides() {
     );
 }
 
-/// TEST-SR1.2：不同名 skill 全部保留
+/// 不同名 skill 全部保留
 #[tokio::test]
 async fn unique_skill_names_all_kept() {
     let tmp = TempDir::new().unwrap();
@@ -341,7 +341,7 @@ async fn budget_trim_applies_to_the_merged_collection() {
 
 // ===== BUG-SR7：description 长度校验 =====
 
-/// TEST-SR7.1：description 长度 < 10 报错
+/// description 长度 < 10 报错
 #[tokio::test]
 async fn parse_short_description_errors() {
     let tmp = TempDir::new().unwrap();
@@ -363,7 +363,7 @@ async fn parse_short_description_errors() {
     assert!(msg.contains("description 太短"));
 }
 
-/// TEST-SR7.2：description 长度 = 9 (boundary 边界) 报错
+/// description 长度 = 9 (boundary 边界) 报错
 #[tokio::test]
 async fn parse_description_boundary_just_below_errors() {
     let tmp = TempDir::new().unwrap();
@@ -380,7 +380,7 @@ async fn parse_description_boundary_just_below_errors() {
     assert!(err.to_string().contains("BUG-SR7"));
 }
 
-/// TEST-SR7.3：description 长度 = 10 成功
+/// description 长度 = 10 成功
 #[tokio::test]
 async fn parse_description_min_length_ok() {
     let tmp = TempDir::new().unwrap();
@@ -396,7 +396,7 @@ async fn parse_description_min_length_ok() {
     assert_eq!(skill.description, "1234567890");
 }
 
-/// TEST-SR7.4：description 仅含空白字符仍视为过短
+/// description 仅含空白字符仍视为过短
 #[tokio::test]
 async fn parse_description_whitespace_only_errors() {
     let tmp = TempDir::new().unwrap();
@@ -415,7 +415,7 @@ async fn parse_description_whitespace_only_errors() {
 
 // ===== BUG-SR8：跳过隐藏目录 =====
 
-/// TEST-SR8.1：`.git`、``.symbio` 等隐藏目录被跳过
+/// `.git`、``.symbio` 等隐藏目录被跳过
 #[tokio::test]
 async fn load_skills_skips_hidden_dirs() {
     let tmp = TempDir::new().unwrap();
@@ -435,7 +435,7 @@ async fn load_skills_skips_hidden_dirs() {
     assert_eq!(names, vec!["valid"], "应只加载非隐藏目录");
 }
 
-/// TEST-SR8.2：普通 skill 名称以 `.` 开头（罕见但合法）不应被错误跳过
+/// 普通 skill 名称以 `.` 开头（罕见但合法）不应被错误跳过
 ///
 /// 实际不会发生（目录名以 `.` 开头 = 隐藏），但保留行为：仅跳过**整目录名**以 `.` 开头。
 #[tokio::test]

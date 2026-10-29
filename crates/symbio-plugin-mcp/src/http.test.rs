@@ -5,7 +5,7 @@
 use super::super::types::JsonRpcError;
 use super::is_session_expired;
 
-/// TEST-MR22.1：code = -32000 视为 session 失效
+/// code = -32000 视为 session 失效
 #[test]
 fn session_expired_by_code() {
     let err = JsonRpcError {
@@ -16,7 +16,7 @@ fn session_expired_by_code() {
     assert!(is_session_expired(&err));
 }
 
-/// TEST-MR22.2：message 含 "session not found" 视为 session 失效
+/// message 含 "session not found" 视为 session 失效
 #[test]
 fn session_expired_by_message_not_found() {
     let err = JsonRpcError {
@@ -27,7 +27,7 @@ fn session_expired_by_message_not_found() {
     assert!(is_session_expired(&err));
 }
 
-/// TEST-MR22.3：message 含 "expired" 视为 session 失效
+/// message 含 "expired" 视为 session 失效
 #[test]
 fn session_expired_by_message_expired() {
     let err = JsonRpcError {
@@ -38,7 +38,7 @@ fn session_expired_by_message_expired() {
     assert!(is_session_expired(&err));
 }
 
-/// TEST-MR22.4：其它错误不被识别为 session 失效
+/// 其它错误不被识别为 session 失效
 #[test]
 fn non_session_error_not_misidentified() {
     let err = JsonRpcError {
@@ -49,7 +49,7 @@ fn non_session_error_not_misidentified() {
     assert!(!is_session_expired(&err));
 }
 
-/// TEST-MR22.5：tool error 不被识别为 session 失效
+/// tool error 不被识别为 session 失效
 #[test]
 fn tool_error_not_misidentified_as_session_expired() {
     let err = JsonRpcError {
@@ -62,7 +62,7 @@ fn tool_error_not_misidentified_as_session_expired() {
 
 // ===== BUG-MR28 / BUG-MR31 / BUG-MR25：自定义 headers / 超时 / SSE =====
 
-/// TEST-MR28.1：apply_custom_headers 合并自定义头
+/// apply_custom_headers 合并自定义头
 #[test]
 fn apply_custom_headers_merges() {
     use crate::schemas::mcp_config::{McpServerConfig, McpTransportType};
@@ -87,7 +87,7 @@ fn apply_custom_headers_merges() {
     assert!(headers.contains_key("x-custom"));
 }
 
-/// TEST-MR28.2：保留头（content-type / accept / mcp-session-id）被过滤
+/// 保留头（content-type / accept / mcp-session-id）被过滤
 #[test]
 fn apply_custom_headers_filters_reserved() {
     use crate::schemas::mcp_config::{McpServerConfig, McpTransportType};
@@ -115,7 +115,7 @@ fn apply_custom_headers_filters_reserved() {
     // （实际请求中由 build_request 显式设置）
 }
 
-/// TEST-MR31.1：effective_timeout 使用默认 30s
+/// effective_timeout 使用默认 30s
 #[test]
 fn effective_timeout_default() {
     use crate::schemas::mcp_config::McpServerConfig;
@@ -126,7 +126,7 @@ fn effective_timeout_default() {
     );
 }
 
-/// TEST-MR31.2：effective_timeout 读取 timeout_secs
+/// effective_timeout 读取 timeout_secs
 #[test]
 fn effective_timeout_custom() {
     use crate::schemas::mcp_config::McpServerConfig;
@@ -140,7 +140,7 @@ fn effective_timeout_custom() {
     );
 }
 
-/// TEST-MR31.3：effective_timeout 0/None fallback 到默认
+/// effective_timeout 0/None fallback 到默认
 #[test]
 fn effective_timeout_zero_fallback() {
     use crate::schemas::mcp_config::McpServerConfig;
@@ -155,7 +155,7 @@ fn effective_timeout_zero_fallback() {
     );
 }
 
-/// TEST-MR25.1：SSE 响应中取最后一个 data: 行的 JSON
+/// SSE 响应中取最后一个 data: 行的 JSON
 #[test]
 fn sse_parse_takes_last_data_line() {
     let sse = "\
