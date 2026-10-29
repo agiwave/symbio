@@ -77,7 +77,7 @@ use crate::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVE
 
 pub mod ring;
 
-use ring::{check_ports, check_rows, overlaps, Decl, Gap, Overlap, PortDecl};
+use ring::{check_ports, check_rows, overlaps, Decl, Gap, Overlap, PortDecl, RowWrites};
 
 /// 一个事实名的声明。
 ///
@@ -287,7 +287,12 @@ impl Builder {
     }
 
     /// 冻结并跑装载期全部检查。通过 ⇒ [`Frozen`]（只读）；失败 ⇒ 全部缺口。
-    pub fn seal(self) -> Result<Arc<Frozen>, Vec<Gap>> {
+    ///
+    /// `row_writes` 是**行级写入归属**（D-248）：共享执行体（通用行执行体，D-241）的
+    /// 多行各自声明写哪些格，而 `ActorDecl.writes` 只有执行体级的并集，表达不了
+    /// 「这一行写这一格、那一行写另一格」。名单是冻结的**输入**，不是第二个注册口
+    /// ——装载仍然只有「`declare` → `seal`」两个动作。没有逐行名单的行按并集判。
+    pub fn seal(self, row_writes: &RowWrites) -> Result<Arc<Frozen>, Vec<Gap>> {
         let mut gaps = Vec::new();
 
         let mut event_names = HashSet::new();
@@ -421,7 +426,7 @@ impl Builder {
         };
         // §3.4 的七道检查查的是**这张表**，所以它住在这里而不是插件里：行与端口
         // 已经进了注册口，再让调用方自己想起来跑一遍，就是「半张表继续跑」的入口。
-        gaps.extend(check_rows(&frozen.rows, &frozen));
+        gaps.extend(check_rows(&frozen.rows, &frozen, row_writes));
         gaps.extend(check_ports(&frozen.rows, &frozen, &frozen.ports));
         if !gaps.is_empty() {
             return Err(gaps);

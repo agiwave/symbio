@@ -115,7 +115,7 @@ fn fact_extension_is_owner_local() {
             rows: rows(&[FIXTURE_FACT]),
         },
     );
-    let frozen = b.seal().expect("新增事实只经声明口接入，内核不认识它");
+    let frozen = b.seal(&[]).expect("新增事实只经声明口接入，内核不认识它");
     assert!(frozen.fact(FIXTURE_FACT).is_some());
     assert_eq!(frozen.facts().len(), 6, "协议五格 + 夹具一格");
 }
@@ -143,7 +143,7 @@ fn view_extension_is_owner_local() {
             rows: rows(&[FIXTURE_FACT]),
         },
     );
-    let frozen = b.seal().expect("新增视图只经声明口接入");
+    let frozen = b.seal(&[]).expect("新增视图只经声明口接入");
     let view = frozen.view(FIXTURE_VIEW).expect("视图在冻结表里");
     assert_eq!(view.ver, 1);
     assert_eq!(
@@ -179,7 +179,7 @@ fn strategy_extension_is_owner_local() {
             },
         },
     );
-    let frozen = b.seal().expect("新增策略行 = 一行声明 + 一个执行体");
+    let frozen = b.seal(&[]).expect("新增策略行 = 一行声明 + 一个执行体");
     assert!(frozen.actor("fixture-actor").is_some());
     assert!(
         frozen.rows().iter().any(|r| r.by == Some("fixture-actor")),
@@ -218,7 +218,7 @@ fn plugin_extension_is_owner_local() {
         },
     );
     let frozen = b
-        .seal()
+        .seal(&[])
         .expect("两个 owner 各自交表即可共装，内核不登记插件名");
     assert!(frozen.fact(A_FACT).is_some());
     assert!(frozen.fact(B_FACT).is_some());

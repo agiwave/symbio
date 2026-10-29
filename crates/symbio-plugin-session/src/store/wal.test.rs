@@ -1337,7 +1337,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
             rows: protocol_rows(),
         },
     );
-    let frozen = b.seal().expect("注入表的协议五格必须有归宿");
+    let frozen = b.seal(&[]).expect("注入表的协议五格必须有归宿");
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("events.jsonl");
@@ -1518,7 +1518,7 @@ fn a_domain_cell_is_gated_like_any_other_declared_cell() {
             rows: protocol_rows(),
         },
     );
-    let frozen = b.seal().expect("注入表的协议五格必须有归宿");
+    let frozen = b.seal(&[]).expect("注入表的协议五格必须有归宿");
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("events.jsonl");

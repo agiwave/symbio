@@ -8,13 +8,13 @@
  * | 码 | 反向用例 |
  * |---|---|
  * | `CP-001` | 驱动文件里多一个 `loop {`；另一份文件多一处 `loop_rows::next(` |
- * | `CP-002` | 派发器直问求解器（`ring::owed(`）；第二个 `ring::drive(`；<br>第四处 `round_trip` 调用；`round_trip` 不经 `dispatch_with`；表外点问闭集读不出 |
+ * | `CP-002` | 派发器直问求解器（`ring::owed(`）；第二个 `ring::drive(`；<br>闭集之外的 `round_trip` 调用；`round_trip` 不经 `dispatch_with`；表外点问闭集读不出 |
  * | `CP-003` | 少一个守卫调用；动作签名多一份 `&mut`；`Ctx` 多一个 `&mut` 字段；派发器点问（`owes(`） |
  * | `CP-004` | 内核里出现行名字面量 |
  * | `CP-005` | 收束格第二个构造点；`ACTOR_CLOSE.writes` 里少一格 |
  * | `CP-006` | 循环体改一个字节（基线未跟）；控制面多一份文件（基线未跟）；基线整个缺失；<br>声明第三个端口（裁决闭集只有两个）；闭集那一节读不出 |
  * | `CP-007` | 规范里多出第七条 `TC-n`；`## 判据` 表点名一个不存在的脚本 |
- * | `CP-008` | `seal` 改成借用式；`impl Frozen` 长出 `&mut self` 方法 |
+ * | `CP-008` | `seal` 改成借用式；`seal` 之后多一个公开方法；`impl Frozen` 长出 `&mut self` 方法 |
  *
  * 另有两条**不该红**的用例（防止判据被注释措辞骗到）：
  *   - 注释里写 `loop {` / `ring::owed(` / `"close"` ⇒ 仍绿（判据读剥注释后的代码）；
@@ -617,6 +617,15 @@ test('CP-007：§判据表点名一个不存在的执行方脚本 ⇒ 红', () =
 test('CP-008：seal 改成借用式（同一份声明事后还能改）⇒ 红', () => {
   const files = cleanTree()
   files[DECL] = files[DECL].replace('pub fn seal(self)', 'pub fn seal(&mut self)')
+  assertRed(audit(files), 'CP-008')
+})
+
+test('CP-008：seal 之后多一个公开方法（第二条注册路径）⇒ 红', () => {
+  const files = cleanTree()
+  files[DECL] = files[DECL].replace(
+    '    pub fn seal(self) -> Frozen {',
+    '    pub fn reseal(self) -> Frozen { self.seal() }\n\n    pub fn seal(self) -> Frozen {',
+  )
   assertRed(audit(files), 'CP-008')
 })
 

@@ -567,11 +567,14 @@ impl TurnSession {
         }
     }
 
-    /// 记一次模型往返（**只给夹具**：生产路径的步数在 [`Self::announce_model`] 里记）。
+    /// 记一次模型往返：生产路径在 [`Self::announce_model`] 与能力行往返
+    /// （`turn_exec::run_plugin_row`，D-242）里记；夹具也用它造可控的步数序列。
     ///
     /// 派发器的「无进展」与「步数上界」两条守卫要靠它造出可控的步数序列：夹具在同一
     /// 个 `by` 上换动作时，那一步不落格，只能自己把步数推上去（否则永不返回）。
-    #[cfg(test)]
+    ///
+    /// **能力行往返也计一步**：它同样是一次真实的模型调用，不计数就等于给能力开一条
+    /// 绕过步数上界的花钱通道。
     pub(crate) fn record_model_step(&mut self) {
         self.steps += 1;
     }
@@ -783,6 +786,12 @@ impl TurnSession {
     /// 本次 drive 的 `now`（幕锚那条唤醒事实的 `ts`，判据 12）——派发器选债用它。
     pub(crate) fn now_ms(&self) -> i64 {
         self.run.now_ms()
+    }
+
+    /// 本幕的锚：能力行往返的逻辑 id 要带它，否则续写幕会与首幕撞成同一笔账
+    /// （与 `port::Round` 同一条理由）。
+    pub(crate) fn drive_seq(&self) -> u64 {
+        self.run.drive_seq
     }
 
     /// 本幕主体（写事件的 `actor`）：行执行体交草稿时由宿主盖章。

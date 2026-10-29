@@ -120,7 +120,7 @@ fn freeze(rows: &[Decl], actors: &[ActorDecl]) -> Result<Arc<Frozen>, Vec<Gap>> 
     for r in rows {
         b.row(r.clone());
     }
-    b.seal()
+    b.seal(&[])
 }
 
 /// 反向用例的断言面：`seal()` 报出的缺口（装载成功 ⇒ 空表）。
@@ -136,7 +136,7 @@ fn decl_world() -> Arc<Frozen> {
     for name in ["f", "g", "h"] {
         b.row(home(name));
     }
-    b.seal().expect("用例的声明集必须能冻结")
+    b.seal(&[]).expect("用例的声明集必须能冻结")
 }
 
 fn pattern(
@@ -485,7 +485,7 @@ fn an_actor_serving_an_engine_exit_row_needs_a_write_or_a_port_contract() {
             &[pattern(EVENT_SENT, &["id"], &[])],
             &[],
         ));
-        b.seal().err().unwrap_or_default()
+        b.seal(&[]).err().unwrap_or_default()
     };
     assert!(
         !gaps_for(&["g"], false).contains(&gap),
@@ -695,7 +695,7 @@ fn world_batch() -> Arc<Frozen> {
         &[pattern("done", &[], &[])],
         &[],
     ));
-    b.seal().expect("篮子世界的声明集必须能冻结")
+    b.seal(&[]).expect("篮子世界的声明集必须能冻结")
 }
 
 /// 篮子表上的装载缺口（`rows` 与声明集一起 `seal`）。
@@ -704,7 +704,7 @@ fn seal_batch(rows: &[Decl]) -> Vec<Gap> {
     for r in rows {
         b.row(r.clone());
     }
-    b.seal().err().unwrap_or_default()
+    b.seal(&[]).err().unwrap_or_default()
 }
 
 fn row_exp(
@@ -1144,7 +1144,7 @@ fn freeze_exit_view(evidence: &'static [&'static str]) -> Result<Arc<Frozen>, Ve
     for r in exit_view_rows() {
         b.row(r);
     }
-    b.seal()
+    b.seal(&[])
 }
 
 /// 出口视图**只帮我算**的那一格，在依赖图上不是收口方（D-160）：图无环、装载绿。
@@ -1242,7 +1242,7 @@ fn rows_that_cannot_collide_are_not_reported() {
     for r in rows {
         b.row(r.clone());
     }
-    let frozen = b.seal().expect("相交报告只在装载成功的表上算");
+    let frozen = b.seal(&[]).expect("相交报告只在装载成功的表上算");
     assert_eq!(
         frozen.overlaps(),
         vec![Overlap {
@@ -1272,7 +1272,7 @@ fn seal_protocol(rows: &[Decl], port: PortDecl) -> Vec<Gap> {
     for r in rows {
         b.row(r.clone());
     }
-    b.seal().err().unwrap_or_default()
+    b.seal(&[]).err().unwrap_or_default()
 }
 
 fn port_x() -> PortDecl {

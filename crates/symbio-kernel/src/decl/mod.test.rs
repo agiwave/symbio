@@ -51,7 +51,7 @@ fn cover(fact: &'static str, by: Option<&'static str>) -> Decl {
 
 /// `seal()` 报出的缺口（装载成功 ⇒ 空表）。
 fn gaps_of(b: Builder) -> Vec<Gap> {
-    b.seal().err().unwrap_or_default()
+    b.seal(&[]).err().unwrap_or_default()
 }
 
 /// 只回答「签名是 `fn(&[Event], i64)`」的探针：机制用例不关心视图算什么。
@@ -94,7 +94,7 @@ fn kernel_declares_only_the_protocol_cells() {
     ] {
         b.row(cover(name, None));
     }
-    let frozen = b.seal().expect("协议五格必须能冻结");
+    let frozen = b.seal(&[]).expect("协议五格必须能冻结");
     let facts: Vec<_> = frozen.facts().iter().map(|f| f.name).collect();
     assert_eq!(
         facts,
@@ -131,7 +131,7 @@ fn protocol_events_match_the_kernel_grid() {
     ] {
         b.row(cover(name, None));
     }
-    let frozen = b.seal().expect("协议五格必须能冻结");
+    let frozen = b.seal(&[]).expect("协议五格必须能冻结");
     for e in PROTOCOL_EVENTS {
         assert_eq!(frozen.event_cell(e.name), Some(e.cell));
         assert_eq!(
@@ -202,7 +202,7 @@ fn declare_records_the_owner_of_each_fact_and_view() {
             rows: &[],
         },
     );
-    let frozen = b.seal().expect("owner 登记不改变任何形状判据");
+    let frozen = b.seal(&[]).expect("owner 登记不改变任何形状判据");
     assert_eq!(frozen.view_owner("owned-view"), Some("plugins/example"));
     for name in [
         EVENT_REQUEST,
@@ -218,12 +218,13 @@ fn declare_records_the_owner_of_each_fact_and_view() {
 /// §3.2 的扩展面只有两个口：`declare` 交六张表，`seal` 消耗 Builder。
 ///
 /// 断言取的是**方法指针**——类型必须逐字对上：`declare` 借 `&mut self`，`seal`
-/// 收 `self`。后者是「运行期不能注册」真正落地的那一格：冻结之后连一个
-/// `&mut Builder` 都造不出来。
+/// 收 `self`（行级写入名单是冻结的输入，不改变「消耗」这一格）。后者是「运行期
+/// 不能注册」真正落地的那一格：冻结之后连一个 `&mut Builder` 都造不出来。
 #[test]
 fn the_two_registration_ports_are_the_whole_surface() {
+    type SealFn = fn(Builder, &ring::RowWrites) -> Result<Arc<Frozen>, Vec<Gap>>;
     let _declare: fn(&mut Builder, &'static str, PluginDeclarations<'_>) = Builder::declare;
-    let _seal: fn(Builder) -> Result<Arc<Frozen>, Vec<Gap>> = Builder::seal;
+    let _seal: SealFn = Builder::seal;
 }
 
 #[test]
@@ -239,7 +240,7 @@ fn every_protocol_reference_is_a_field() {
     ] {
         b.row(cover(name, None));
     }
-    let frozen = b.seal().unwrap();
+    let frozen = b.seal(&[]).unwrap();
     for f in frozen.facts() {
         for field in f
             .port
@@ -391,7 +392,7 @@ fn eval_respects_the_declared_cost() {
         cost: 1,
         eval: probe,
     });
-    let frozen = b.seal().unwrap();
+    let frozen = b.seal(&[]).unwrap();
     let one = vec![ev(
         1,
         EVENT_SENT,
@@ -446,7 +447,7 @@ fn the_scan_bound_is_the_cost_every_view_declares() {
         b.view(probe_view_costing(name, &[(EVENT_REQUEST, "id")], 64));
     }
 
-    let frozen = b.seal().expect("三条视图同读一条事实、同一声明成本");
+    let frozen = b.seal(&[]).expect("三条视图同读一条事实、同一声明成本");
     assert_eq!(
         frozen.scan_bound(),
         Some(64),
@@ -463,7 +464,7 @@ fn a_table_without_views_has_no_scan_bound() {
     let mut b = Builder::empty();
     b.fact(request_fact());
     b.row(cover(EVENT_REQUEST, None));
-    let frozen = b.seal().expect("只有一行一事实也合法");
+    let frozen = b.seal(&[]).expect("只有一行一事实也合法");
     assert_eq!(frozen.scan_bound(), None, "没有视图 ⇒ 没有可切的界");
 }
 
@@ -571,7 +572,7 @@ fn unmanned_roles_are_reported_per_variant() {
             rows: &[],
         },
     );
-    let frozen = b.seal().expect("只交事件行也能冻结");
+    let frozen = b.seal(&[]).expect("只交事件行也能冻结");
     assert_eq!(
         frozen.unmanned_roles(),
         vec![
@@ -622,7 +623,7 @@ fn unmanned_roles_are_reported_per_variant() {
             rows: &[],
         },
     );
-    let frozen = b.seal().expect("角色不影响形状判据");
+    let frozen = b.seal(&[]).expect("角色不影响形状判据");
     assert!(
         frozen.unmanned_roles().is_empty(),
         "{:?}",

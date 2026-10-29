@@ -93,10 +93,10 @@ use symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use symbio_core::{
-    is_stop_fact, llm_short_id, run_ops, ActorSpec, AppendError, CapabilityMeta,
+    is_stop_fact, llm_short_id, run_ops, ActorSpec, AdapterError, AppendError, CapabilityMeta,
     ConsolidateRequest, DeltaSink, Entity, Event, ExecAbortSignal, ExecEventSink, FullModel,
     LatencyTier, LlmAdapter, ModelProvider, Plugin, PluginError, PluginInvokeRequest,
-    ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnOutput, Verb,
+    PromptMessage, ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnOutput, Verb,
 };
 use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
@@ -1242,12 +1242,29 @@ pub(crate) fn run_continue<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     })
 }
 
-/// 通用行执行体（DE-025 D-241）：`plugin_row` 选中的动作——把这一笔债的**纯值**
-/// 交给能力实现，把草稿交给宿主唯一写口。
+/// 通用行执行体（DE-025 D-241 / D-242）：`plugin_row` 选中的动作——把这一笔债的
+/// **纯值**交给能力实现，把草稿交给宿主唯一写口；能力要模型时由**宿主**代付一次往返。
 ///
 /// 三件事：查这一行的实现（装载期 [`super::loop_rows::assemble`] 已保证存在）、
 /// 构造 [`symbio_plugin_api::rows::RowRequest`]、逐条 `append`。它不认识任何能力名，
 /// 也不按行名分支——行与实现的对应由能力包自己的 `submit_row!` 给出。
+///
+/// ## 能力往返为什么由这里付
+///
+/// 能力交的是 [`symbio_plugin_api::rows::RowStep::Ask`]（提示纯值），不是 provider
+/// 调用。一次往返的**四格协议事实**由端口层落（`request` / `sent` / `response` /
+/// `failed`），身份带 `via = row/<行名>`：判据侧据此把能力往返与「这一轮自己的模型
+/// 往返」分开（后者才能让整轮收束，D-122 决策 2）。
+///
+/// 台账与租约沿用 `model` 端口：`round_trip` 站在 `dispatch-model` 那一行上，`awaited
+/// = false`、`max_attempts = 1`——等待方是这一层栈帧，进程一死它就没了，重试没有对象。
+/// 步数**照记一步**：能力往返也是真花钱的模型调用，不计数就是给能力开一条绕过
+/// 步数上界的通道。
+///
+/// 失败不吞：适配器失败已落 `failed`，回执以 [`symbio_plugin_api::rows::ModelReply::
+/// Failed`] 交回解析函数——它仍要产出一笔关账的事实（推进优先于猜测）。中止是
+/// **类型**上的另一种停法（`AdapterError::Aborted`）：不交回执、不写能力事实，交回
+/// 派发器走中止出口。
 ///
 /// 事实切片是**本轮**的（与环共用同一份收窄，理由见 `loop_rows::turn_slice`）：
 /// 能力判断「这一步欠不欠、写什么」只从本轮事实里读。
@@ -1260,23 +1277,142 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             ))));
         };
         let turn = ctx.session.turn();
-        let events = ctx.store.range(Seq::new(0));
-        let facts = super::loop_rows::turn_slice(&events, turn);
-        let request = symbio_plugin_api::rows::RowRequest {
-            row: ctx.row,
-            key: &ctx.key,
-            turn,
-            now_ms: ctx.session.now_ms(),
-            principal: ctx.session.principal(),
-            user_seq: ctx.session.user_seq(),
-            facts,
+        let now_ms = ctx.session.now_ms();
+        let user_seq = ctx.session.user_seq();
+        let drive_seq = ctx.session.drive_seq();
+        let principal = ctx.session.principal().to_string();
+
+        // ── 第一相位：这一行直接写什么（或要一次往返）────────────────────
+        let step = {
+            let events = ctx.store.range(Seq::new(0));
+            let facts = super::loop_rows::turn_slice(&events, turn);
+            let request = symbio_plugin_api::rows::RowRequest {
+                row: ctx.row,
+                key: &ctx.key,
+                turn,
+                now_ms,
+                principal: &principal,
+                user_seq,
+                facts,
+            };
+            handler.run(&request)
         };
-        for draft in handler.run(&request) {
-            let event = draft.into_event(turn, request.principal);
-            ctx.store.append(event).map_err(ActorError::Append)?;
+        let ask = match step {
+            symbio_plugin_api::rows::RowStep::Facts(drafts) => {
+                return land_drafts(ctx.store.as_ref(), drafts, turn, &principal);
+            }
+            symbio_plugin_api::rows::RowStep::Ask(ask) => ask,
+        };
+
+        // ── 第二相位：宿主代付一次模型往返（四格协议事实归端口层）──────────
+        ctx.session.record_model_step();
+        let via = format!("row/{}", ctx.row);
+        // 逻辑 id 带「本行在本轮已请求过几次」：一次失败重来不会撞上一笔的幂等键。
+        let prior = {
+            let events = ctx.store.range(Seq::new(0));
+            super::loop_rows::turn_slice(&events, turn)
+                .iter()
+                .filter(|e| {
+                    e.kind == symbio_core::EVENT_REQUEST
+                        && e.payload.get("port").and_then(serde_json::Value::as_str)
+                            == Some("model")
+                        && e.payload.get("via").and_then(serde_json::Value::as_str)
+                            == Some(via.as_str())
+                })
+                .count()
+        };
+        let step_name = format!("cap-{}-{prior}", ctx.row);
+        let round = super::port::Round {
+            turn,
+            produced_by: user_seq,
+            drive_seq,
+            now: now_ms,
+            step: &step_name,
+            via: &via,
+        };
+        let llm = ctx.llm.clone();
+        let tok = ctx.tok;
+        let prompt = ask.prompt;
+        let result = super::port::round_trip(ctx.store.as_ref(), round, || async move {
+            llm.generate(
+                &tok,
+                &[PromptMessage {
+                    role: "user".into(),
+                    text: prompt,
+                    tool_call_id: None,
+                    tool: None,
+                    tool_calls: None,
+                }],
+            )
+            .await
+        })
+        .await;
+
+        // ── 第三相位：回执交回能力，落它交出的草稿 ────────────────────────
+        let reply_owned: String;
+        let reply = match result {
+            Ok(text) => {
+                reply_owned = text;
+                symbio_plugin_api::rows::ModelReply::Text(&reply_owned)
+            }
+            // 中止不是失败：不交回执、不写能力事实，派发器的中止出口接手。
+            Err(super::port::DispatchError::Actor(AdapterError::Aborted)) => return Ok(()),
+            // 失败已落 `failed`；回执仍要交回，由能力写一笔关账事实。
+            Err(super::port::DispatchError::Actor(e)) => {
+                reply_owned = format!("{e}");
+                symbio_plugin_api::rows::ModelReply::Failed(&reply_owned)
+            }
+            Err(super::port::DispatchError::Store(e)) => return Err(ActorError::Append(e)),
+            Err(super::port::DispatchError::NotOwed(row)) => {
+                return Err(ActorError::Read(PluginError::InternalError(format!(
+                    "能力行 {} 的模型往返未被派发行 `{row}` 承认",
+                    ctx.row
+                ))))
+            }
+            Err(super::port::DispatchError::NoPort(port)) => {
+                return Err(ActorError::Read(PluginError::InternalError(format!(
+                    "能力行 {} 请求的模型端口 `{port}` 没有声明",
+                    ctx.row
+                ))))
+            }
+        };
+        let drafts = {
+            let events = ctx.store.range(Seq::new(0));
+            let facts = super::loop_rows::turn_slice(&events, turn);
+            let request = symbio_plugin_api::rows::RowRequest {
+                row: ctx.row,
+                key: &ctx.key,
+                turn,
+                now_ms,
+                principal: &principal,
+                user_seq,
+                facts,
+            };
+            handler.parse(&request, reply)
+        };
+        if drafts.is_empty() {
+            return Err(ActorError::Read(PluginError::InternalError(format!(
+                "能力行 {} 请求了模型往返却一笔事实都没解析出——拿到回执之后写什么是这一行的义务",
+                ctx.row
+            ))));
         }
-        Ok(())
+        land_drafts(ctx.store.as_ref(), drafts, turn, &principal)
     })
+}
+
+/// 把能力交出的草稿逐条落到宿主唯一写口（`turn` 与主体由宿主盖章）。
+fn land_drafts(
+    store: &dyn Store<Event = Event>,
+    drafts: Vec<symbio_plugin_api::FactDraft>,
+    turn: u64,
+    principal: &str,
+) -> Result<(), ActorError> {
+    for draft in drafts {
+        store
+            .append(draft.into_event(turn, principal))
+            .map_err(ActorError::Append)?;
+    }
+    Ok(())
 }
 
 /// 把「备输入」的出口落成阶段事实（`turn.stage{stage:"inputs"}`）。

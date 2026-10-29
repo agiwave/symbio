@@ -8,7 +8,7 @@
 //! 那一半——五条协议自读行 + 一条产物自读行。它与
 //! `symbio-plugin-session/src/declarations.test.rs` 的同名夹具同形，只在 `cfg(test)` 生效。
 
-use super::{NOTES_CREATED, NOTES_INDEXED, OWNER};
+use super::{NOTES_CREATED, NOTES_INDEXED, NOTES_INSIGHT, OWNER};
 use symbio_core::ring::{Decl, Pattern};
 use symbio_core::{ActorDecl, Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb};
 
@@ -68,7 +68,7 @@ fn harness_declarations() -> PluginDeclarations<'static> {
             name: symbio_plugin_api::rows::PLUGIN_ROW,
             mode: LatencyTier::Deep,
             reads: &[],
-            writes: &[NOTES_INDEXED],
+            writes: &[NOTES_INDEXED, NOTES_INSIGHT],
         }],
         rows: protocol_rows(),
     }

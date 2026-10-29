@@ -495,10 +495,13 @@ where
     S: Store<Event = Event> + ?Sized,
 {
     let facts = store.range(symbio_core::Seq::new(0));
+    // 不按 `via` 收窄：能力行与内部往返的请求同样「宣布之后没有等待方」时，处置
+    // 逐字相同——它们等的是那一刻的栈帧，栈帧没了就没有可重试的对象。按 `via`
+    // 收窄会让这类请求既不进 `reap`（还没有 `sent`）也不被本函数关掉，`dispatch-model`
+    // 于是永远欠着同一笔。
     let open = facts.iter().find(|r| {
         r.kind == EVENT_REQUEST
             && r.payload.get("port").and_then(|v| v.as_str()) == Some(port)
-            && r.payload.get("via").is_none()
             && !facts.iter().any(|e| {
                 matches!(e.kind.as_str(), EVENT_SENT | EVENT_FAILED)
                     && e.payload.get("port").and_then(|v| v.as_str()) == Some(port)

@@ -79,7 +79,7 @@ fn core_table() -> Arc<Frozen> {
             rows,
         },
     );
-    b.seal().expect("控制面声明集必须能冻结")
+    b.seal(&[]).expect("控制面声明集必须能冻结")
 }
 
 /// 每条控制面事实都必须有事件行（`seal` 的 `FactWithoutEvent` 的直接断言）。

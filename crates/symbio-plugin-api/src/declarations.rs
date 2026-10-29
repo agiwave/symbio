@@ -77,10 +77,13 @@ pub fn assemble_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
     for d in submissions {
         builder.declare(d.owner, (d.make)());
     }
+    // 逐行写入名单随装配一起交：共享执行体（`plugin_row`）的多行各自写哪一格只有
+    // 实现知道，执行体的并集表达不了（D-248）。冻结表与运行时对账因此同源。
+    let row_writes = crate::rows::row_writes();
     // 「每一档守卫角色都有人住」由门禁判仓库（CS-008），不在这里判：本函数也会被
     // **只链接了部分插件**的用例调到（session 的单测里没有 loop 的声明表），
     // 那种子集装配报红是假红。
-    builder.seal()
+    builder.seal(&row_writes)
 }
 
 /// 进程内冻结一次。`OnceLock` 缓存的是**同一个 `Result`**（成功或全部缺口），

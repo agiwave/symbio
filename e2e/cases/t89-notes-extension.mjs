@@ -1,12 +1,12 @@
 import './_selfrun.mjs';
-// T89 扩展夹具：`notes` 能力包只经 plugin-api 接入后，七个扩展面在真实链路上生效。
+// T89 扩展夹具：`notes` 能力包只经 plugin-api 接入后，八个扩展面在真实链路上生效。
 //
 // ## 这条用例补的是什么
 //
 // T88 证的是「插件的工具随装配位进出」；本用例证的是 DE-025 的**扩展面本身**
 // （EX-001）：一个新能力包不改 core / kernel / loop / session，只靠 plugin-api 的
 // 提交点就能做到——工具、前置判断、领域事实、效果、上下文、**对外可读的视图**、
-// **轮内行执行**七面：
+// **轮内行执行**、**模型往返**八面：
 //
 // | 面 | 提交点 | 本用例的读数 |
 // |---|---|---|
@@ -17,6 +17,7 @@ import './_selfrun.mjs';
 // | 上下文 | `submit_context_provider!` | 下一轮请求前缀里出现 `最近记下的便签` |
 // | 视图 | `ViewDecl` + `PLUGIN.yml` 的 `shared_views` | `session/stats` 的 `capability_views['notes.recent']` 读到那条便签 |
 // | 轮内行执行 | `submit_row!`（`by = plugin_row`，D-241） | `capability_views['notes.digest']` 读到行执行体落下的 `notes.indexed` |
+// | 模型往返 | `RowStep::Ask` + `submit_row!`（D-242） | 行执行体借宿主一次往返；`capability_views['notes.insights']` 读到 `notes.insight` |
 //
 // 「事件真的落格」与「上下文真的贡献了」是**同一条读数的两面**：上下文 provider 只读
 // 会话事实切片，它渲染得出来，就说明行为产出的 `notes.created` 已经入格。
@@ -60,6 +61,10 @@ import {
 const NOTE_TEXT = '周五交报告';
 /** provider 的开场白（`notes_context` 段的首行）——历史里不会出现这串字 */
 const CONTEXT_HEAD = '最近记下的便签';
+/** 反思提示的开场白（`NoteReflect::run` 造的那条）——同样不在历史里 */
+const REFLECT_HEAD = '请反思它';
+/** mock 对一次反思往返的回答：落成 `notes.insight` 的正文 */
+const INSIGHT_TEXT = '这条便签提醒：报告要提前准备。';
 
 /**
  * mock 场景表：三轮共用一份。
@@ -76,6 +81,13 @@ function scenarios() {
       toolCalls: [
         { id: 'call_n1', name: 'notes_add', arguments: { text: NOTE_TEXT } },
       ],
+    },
+    // 能力行借宿主的那一次往返：请求正文是 `notes` 自己造的提示，不是用户发言。
+    {
+      id: 'note-reflect',
+      match: REFLECT_HEAD,
+      times: 1,
+      content: INSIGHT_TEXT,
     },
     { id: 'note-final', afterTool: true, times: 1, content: '便签已记下。' },
     { id: 'note-ask', match: '我刚才说过', content: '（回顾）' },
@@ -149,11 +161,26 @@ export default defineCase(
       );
 
       const afterFirst = await llm.requests();
-      assertEq(afterFirst.length, 2, `第一轮应是工具轮 + 收尾轮两次请求，实际 ${afterFirst.length}`);
+      // 工具轮 → 能力行的一次往返 → 收尾轮：能力往返是**真的模型调用**，也计数。
+      assertEq(
+        afterFirst.length,
+        3,
+        `第一轮应是工具轮 + 能力往返 + 收尾轮三次请求，实际 ${afterFirst.length}`,
+      );
       const tools = toolNames(afterFirst[0].body);
       assert(
         tools.includes('notes_add'),
         `能力包注册的工具应进模型工具面（实际: ${tools.join(',')}）`,
+      );
+      // 中间那次请求的正文由 `NoteReflect` 自己造：带反思提示与索引到的便签正文。
+      const reflectRequest = afterFirst.find((r) => requestText(r.body).includes(REFLECT_HEAD));
+      assert(
+        reflectRequest,
+        `应有一次由能力行发起的模型往返（请求正文里出现 ${REFLECT_HEAD}）`,
+      );
+      assert(
+        requestText(reflectRequest.body).includes(NOTE_TEXT),
+        `能力往返的提示应带上索引到的便签正文（实际: ${requestText(reflectRequest.body)}）`,
       );
 
       const second = runCli({
@@ -269,6 +296,39 @@ export default defineCase(
           digest.value?.items?.[0]?.text,
           NOTE_TEXT,
           '行执行体从 artifact.added 的定稿参数里取出的正文应与原调用一致',
+        );
+
+        // ── 第八面：能力行借宿主一次模型往返，落下的洞察被同一读口读到 ─────
+        // `notes.reflect` 读 `notes.indexed`、交一条提示；宿主调模型、落四格协议事实，
+        // 回执交回 `parse`，落一条 `notes.insight`。`status = ok` 说明这次往返答成了；
+        // `tool_call_id` 与索引行同键——两笔事实说的是同一条便签。
+        const insights = inv.body?.data?.capability_views?.['notes.insights'];
+        assert(
+          insights,
+          `能力视图列应有 notes.insights 这一格（实际: ${JSON.stringify(inv.body?.data?.capability_views)}）`,
+        );
+        assertEq(insights.status, 'ok', `notes.insights 跨插件读应成功：${JSON.stringify(insights)}`);
+        assertEq(insights.owner, 'notes', 'owner 来自清单生成物');
+        assertEq(insights.ver, 1, '版本随 owner 的 ViewDecl 走');
+        assertEq(
+          insights.value?.count,
+          1,
+          `只有一条成功索引的便签会开反思行：${JSON.stringify(insights.value)}`,
+        );
+        assertEq(
+          insights.value?.items?.[0]?.status,
+          'ok',
+          `这次往返应答成：${JSON.stringify(insights.value)}`,
+        );
+        assertEq(
+          insights.value?.items?.[0]?.text,
+          INSIGHT_TEXT,
+          '洞察正文就是模型回执，由能力的解析函数原样落格',
+        );
+        assertEq(
+          insights.value?.items?.[0]?.tool_call_id,
+          indexedId,
+          '反思与索引说的是同一条工具调用',
         );
       } finally {
         api.stop();

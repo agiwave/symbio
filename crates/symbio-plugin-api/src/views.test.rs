@@ -99,7 +99,7 @@ fn frozen() -> Arc<Frozen> {
             rows: protocol_rows(),
         },
     );
-    builder.seal().expect("小世界应能冻结")
+    builder.seal(&[]).expect("小世界应能冻结")
 }
 
 fn event(id: &str, text: &str, ts: i64) -> Event {

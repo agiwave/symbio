@@ -1173,7 +1173,7 @@ fn declared_facts_all_have_a_row_home() {
     // （`invariants::declared_budget_ms`），表里没有一行以它为前件或出口——
     // 按口径它是业务事实，归投影管，不该挂进表里当孤儿。
     let frozen = frozen();
-    let orphans: Vec<_> = check_rows(ROWS, &frozen)
+    let orphans: Vec<_> = check_rows(ROWS, &frozen, &[])
         .iter()
         .filter_map(|g| match g {
             Gap::OrphanFact { fact } => Some(*fact),

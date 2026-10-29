@@ -9,8 +9,9 @@
 //! | 领域事实 | [`decl`] 的 `EventDecl`（`notes.created`，`Domain × Opened`） | `submit_declarations!` |
 //! | 上下文段 | [`context::NotesProvider`] | `submit_context_provider!` |
 //! | 行为 | [`behavior::NoteCapture`] | `submit_behavior!` |
-//! | 视图 | [`decl`] 的 `ViewDecl`（`notes.recent` / `notes.digest`） | `submit_declarations!` + `PLUGIN.yml` 的 `shared_views` |
-//! | 行执行体 | [`row::NoteIndex`] | `submit_row!`（通用执行体 `plugin_row`，D-241） |
+//! | 视图 | [`decl`] 的 `ViewDecl`（`notes.recent` / `notes.digest` / `notes.insights`） | `submit_declarations!` + `PLUGIN.yml` 的 `shared_views` |
+//! | 行执行体 | [`row::NoteIndex`] / [`row::NoteReflect`] | `submit_row!`（通用执行体 `plugin_row`，D-241） |
+//! | 模型往返 | [`row::NoteReflect`] 交 `RowStep::Ask`，回执落 `notes.insight` | 宿主代付（`plugin_row` → `round_trip`，D-242） |
 //!
 //! `core` / `kernel` 不认识「便签」这个词：领域事实落在 `Entity::Domain` 扩展位，
 //! 写闸按本插件自己的 `EventDecl` 放行，读侧一律不解释（D-209）。
@@ -23,7 +24,7 @@
 //! | [`tool`] | `notes_add` 的入参校验与执行 |
 //! | [`decl`] | 本插件拥有的那个事件名与格位 |
 //! | [`behavior`] | 成功调用 ⇒ 一条 `notes.created` 草稿（写口仍是宿主的） |
-//! | [`row`] | 成功的产物 ⇒ 一条 `notes.indexed` 草稿（轮内，通用行执行体） |
+//! | [`row`] | 成功的产物 ⇒ `notes.indexed`；已索引的便签 ⇒ 一次模型往返与 `notes.insight` |
 //! | [`context`] | 把最近的便签渲染成一段上下文 |
 //!
 //! 内部依赖是单向的：`plugin` → `tool`；`behavior` / `context` 只读 [`decl`] 的名字，

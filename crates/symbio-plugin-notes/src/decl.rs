@@ -38,6 +38,15 @@ pub(crate) const NOTES_INDEXED: &str = "notes.indexed";
 /// 行名：把一条成功的 `notes_add` 产物收进索引。`by = plugin_row`（D-241）。
 pub(crate) const NOTES_INDEX: &str = "notes.index";
 
+/// 轮内反思事实：本能力对一条已索引便签的洞察（D-242 的模型往返产物）。
+pub(crate) const NOTES_INSIGHT: &str = "notes.insight";
+
+/// 行名：对一条已索引便签做一次模型往返，落一条洞察。`by = plugin_row`（D-242）。
+pub(crate) const NOTES_REFLECT: &str = "notes.reflect";
+
+/// 对外可读的视图：本能力在轮内反思出的洞察。
+pub(crate) const NOTES_INSIGHTS: &str = "notes.insights";
+
 /// 对外可读的视图：最近几条便签（新→旧）。
 pub(crate) const NOTES_RECENT: &str = "notes.recent";
 
@@ -58,6 +67,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new(NOTES_CREATED, (Entity::Domain, Verb::Opened)),
     // 索引事实是「这次结果已处理」的断言，不是开新领域：`Domain × Asserted`。
     EventDecl::new(NOTES_INDEXED, (Entity::Domain, Verb::Asserted)),
+    // 洞察同理：本能力对自己处理过的那条便签的断言。
+    EventDecl::new(NOTES_INSIGHT, (Entity::Domain, Verb::Asserted)),
 ];
 
 pub(crate) const FACTS: &[FactDecl] = &[
@@ -75,6 +86,15 @@ pub(crate) const FACTS: &[FactDecl] = &[
         key: &[],
         expand: &[],
         fields: &["tool_call_id", "text"],
+    },
+    // 反思事实同样按行上的 `tool_call_id` 关账；`status` 记这次往返答成了没有
+    // （失败也要关账，D-242）。
+    FactDecl {
+        name: NOTES_INSIGHT,
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["tool_call_id", "text", "status"],
     },
 ];
 
@@ -125,6 +145,31 @@ pub(crate) const ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
+    // 轮内反思：一条 `notes.indexed` 落格之后，本能力借宿主的一次模型往返写一条
+    // `notes.insight`（`by = plugin_row`，实现交 `RowStep::Ask`，D-242）。
+    //
+    // `prio` 46 紧接索引行（45）：索引产物一入格，本行就是最小的可还债；`until`
+    // 与 `owes` 同键，答成与失败都关账——失败也回一条 `status = failed` 的洞察，
+    // 不把债留在原地再打一次模型。
+    Decl {
+        name: NOTES_REFLECT,
+        prio: 46,
+        by: Some(symbio_plugin_api::rows::PLUGIN_ROW),
+        // 这一行真的要一次模型往返：最宽档（`plugin_row` 的执行体档）。
+        tier: LatencyTier::Deep,
+        expand: None,
+        owes: Pattern {
+            source: NOTES_INDEXED,
+            key: &["tool_call_id"],
+            eq: &[],
+        },
+        until: &[Pattern {
+            source: NOTES_INSIGHT,
+            key: &["tool_call_id"],
+            eq: &[],
+        }],
+        unless: &[],
+    },
 ];
 
 pub(crate) const VIEWS: &[ViewDecl] = &[
@@ -146,6 +191,16 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &[],
         cost: RECENT_COST,
         eval: indexed_notes,
+    },
+    // 反思那一笔的读回：`notes.insight` → 本能力对已索引便签的洞察。读方同样不必
+    // 认识行、执行体或模型往返——它读到的是「一次能力请求模型之后落了什么」。
+    ViewDecl {
+        name: NOTES_INSIGHTS,
+        ver: 1,
+        reads: &[(NOTES_INSIGHT, "tool_call_id")],
+        evidence: &[],
+        cost: RECENT_COST,
+        eval: notes_insights,
     },
 ];
 
@@ -183,6 +238,28 @@ fn indexed_notes(events: &[Event], _now: i64) -> Value {
         items.push(json!({
             "tool_call_id": e.payload.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
             "text": e.payload.get("text").and_then(Value::as_str).unwrap_or(""),
+        }));
+    }
+    if items.len() > RECENT_LIMIT {
+        items.drain(..items.len() - RECENT_LIMIT);
+    }
+    json!({ "count": items.len(), "items": items })
+}
+
+/// 纯折叠：`notes.insight` → `{ count, items: [{ text, tool_call_id, status }] }`。
+///
+/// `status` 原样透出（`ok` / `failed`）：失败也是一次往返的产物，读方要能把它与
+/// 「还没反思过」区分开——后者根本不在这一格里。
+fn notes_insights(events: &[Event], _now: i64) -> Value {
+    let mut items: Vec<Value> = Vec::new();
+    for e in events {
+        if e.kind != NOTES_INSIGHT {
+            continue;
+        }
+        items.push(json!({
+            "tool_call_id": e.payload.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
+            "text": e.payload.get("text").and_then(Value::as_str).unwrap_or(""),
+            "status": e.payload.get("status").and_then(Value::as_str).unwrap_or(""),
         }));
     }
     if items.len() > RECENT_LIMIT {

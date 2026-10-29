@@ -19,15 +19,15 @@ impl RowHandler for Recorder {
         &["test.indexed"]
     }
 
-    fn run(&self, req: &RowRequest<'_>) -> Vec<FactDraft> {
-        vec![FactDraft {
+    fn run(&self, req: &RowRequest<'_>) -> RowStep {
+        RowStep::Facts(vec![FactDraft {
             key: format!("r-{}-{}", req.anchor(), req.key_of("id").unwrap_or("-")),
             kind: "test.indexed".to_string(),
             entity: Entity::Domain,
             verb: Verb::Asserted,
             payload: serde_json::json!({ "facts": req.facts.len() }),
             produced_by: Some(req.user_seq),
-        }]
+        }])
     }
 }
 
@@ -63,8 +63,28 @@ fn request_is_pure_values() {
     assert_eq!(req.key_of("id"), Some("call-1"));
     assert_eq!(req.key_of("absent"), None);
     assert_eq!(req.anchor(), "t3");
-    let drafts = handler_for("test.row").unwrap().run(&req);
+    let RowStep::Facts(drafts) = handler_for("test.row").unwrap().run(&req) else {
+        panic!("Recorder 不请求往返");
+    };
     assert_eq!(drafts.len(), 1);
     assert_eq!(drafts[0].key, "r-t3-call-1");
     assert_eq!(drafts[0].produced_by, Some(42));
+}
+
+/// 解析口的默认实现是空：不请求往返的实现不该被迫回答「回执怎么办」。
+#[test]
+fn parse_defaults_to_no_facts() {
+    let req = RowRequest {
+        row: "test.row",
+        key: &[],
+        turn: 1,
+        now_ms: 0,
+        principal: "session/a",
+        user_seq: 1,
+        facts: &[],
+    };
+    let drafts = handler_for("test.row")
+        .unwrap()
+        .parse(&req, ModelReply::Failed("boom"));
+    assert!(drafts.is_empty());
 }

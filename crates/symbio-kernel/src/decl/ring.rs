@@ -42,9 +42,32 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use super::Frozen;
+use super::{ActorDecl, Frozen};
 use crate::event::{EVENT_FAILED, EVENT_RESPONSE, EVENT_SENT};
 use crate::{Event, LatencyTier};
+
+/// 行级写入归属：`(行名, 该行执行时实际写入的事实名)`。
+///
+/// `ActorDecl.writes` 是**执行体级**的并集——它回答「这个执行体可能写哪些格」，
+/// 装不下「共享它的每一行各自写哪些」。通用行执行体（D-241）让多行共用一条
+/// `ActorDecl`，并集于是让每一行的出口都「可能被别的行写」：两行以上必然成假环。
+/// 装配方把实现声明的逐行名单交进来，依赖图与第 6 条按**这一行**的名单判（D-248）。
+pub type RowWrites = [(&'static str, &'static [&'static str])];
+
+/// 这一行的实际写入名单：有逐行声明就用它，否则退回执行体的并集。
+///
+/// 非通用执行体的行没有逐行声明（它们的 `run` 就是那一行自己），并集即该行的名单。
+fn row_writes_of<'a>(
+    row: &str,
+    actor: &'a ActorDecl,
+    row_writes: &'a RowWrites,
+) -> &'a [&'static str] {
+    row_writes
+        .iter()
+        .find(|(name, _)| *name == row)
+        .map(|(_, writes)| *writes)
+        .unwrap_or(actor.writes)
+}
 
 /// 信封三格：每条事实都带，因此**不**要求写进 `FactDecl.fields`（模块文档 §「模式
 /// 只做等值」）。第 3 条检查对它们放行，其余字段名一律要在声明里。
@@ -580,7 +603,7 @@ fn exit_fact_names(source: &'static str, frozen: &Frozen) -> Vec<&'static str> {
     }
 }
 
-pub fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
+pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec<Gap> {
     let mut gaps = Vec::new();
     let mut names = HashSet::new();
     for decl in rows {
@@ -686,11 +709,14 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
                     // 看空账本，派发那一支看 `sent` 关不关账（`waiting` ⇒ 步数上界 / `reap`）。
                     let engine_only_exits = !exits.is_empty()
                         && exits.iter().all(|f| super::ENGINE_ONLY_CELLS.contains(f));
+                    // 共享执行体的行按**自己**声明的写入判（D-248）：并集会把「这
+                    // 个执行体可能写」读成「这一行会写」，多行共用时每一行的出口
+                    // 都被别的行的并集认领，收口检查与依赖图同时失真。
+                    let writes = row_writes_of(decl.name, actor, row_writes);
                     let reaches_exit = if engine_only_exits {
-                        !actor.writes.is_empty()
-                            || frozen.ports.iter().any(|p| exits.contains(&p.before))
+                        !writes.is_empty() || frozen.ports.iter().any(|p| exits.contains(&p.before))
                     } else {
-                        exits.iter().any(|f| actor.writes.contains(f))
+                        exits.iter().any(|f| writes.contains(f))
                     };
                     if !reaches_exit {
                         gaps.push(Gap::ActorCannotClose {
@@ -735,7 +761,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
             gaps.push(Gap::OrphanActor { actor: actor.name });
         }
     }
-    gaps.extend(check_dependency_graph(rows, frozen));
+    gaps.extend(check_dependency_graph(rows, frozen, row_writes));
     gaps
 }
 
@@ -760,12 +786,14 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
 ///   只画「行等行」，不去猜代码里写了什么。
 /// - 两边的出口**不共这一族事实**时不设防（见 [`writes_that_cell`] 的 `None` 分支）：
 ///   那条执行体多写的格落在哪一档，声明面说不出 ⇒ 照旧成边。
-fn check_dependency_graph(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
+fn check_dependency_graph(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec<Gap> {
     let mut gaps = Vec::new();
     let mut state = vec![Visit::New; rows.len()];
     let mut stack: Vec<usize> = Vec::new();
     for start in 0..rows.len() {
-        walk(rows, frozen, start, &mut state, &mut stack, &mut gaps);
+        walk(
+            rows, frozen, row_writes, start, &mut state, &mut stack, &mut gaps,
+        );
     }
     gaps
 }
@@ -814,7 +842,7 @@ fn writes_that_cell(frozen: &Frozen, other: &Decl, fact: &str, at_exit: &Pattern
 }
 
 /// `at` 的出边：哪些**别的**行的执行体会写到它的出口。
-fn producers_of(rows: &[Decl], frozen: &Frozen, at: usize) -> Vec<usize> {
+fn producers_of(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites, at: usize) -> Vec<usize> {
     let exits = exit_cells(&rows[at], frozen);
     rows.iter()
         .enumerate()
@@ -824,9 +852,10 @@ fn producers_of(rows: &[Decl], frozen: &Frozen, at: usize) -> Vec<usize> {
                 .by
                 .and_then(|name| frozen.actor(name))
                 .is_some_and(|actor| {
-                    exits.iter().any(|(f, p)| {
-                        actor.writes.contains(f) && writes_that_cell(frozen, other, f, p)
-                    })
+                    let writes = row_writes_of(other.name, actor, row_writes);
+                    exits
+                        .iter()
+                        .any(|(f, p)| writes.contains(f) && writes_that_cell(frozen, other, f, p))
                 })
         })
         .map(|(i, _)| i)
@@ -838,6 +867,7 @@ fn producers_of(rows: &[Decl], frozen: &Frozen, at: usize) -> Vec<usize> {
 fn walk(
     rows: &[Decl],
     frozen: &Frozen,
+    row_writes: &RowWrites,
     at: usize,
     state: &mut [Visit],
     stack: &mut Vec<usize>,
@@ -855,8 +885,8 @@ fn walk(
     }
     state[at] = Visit::OnStack;
     stack.push(at);
-    for next in producers_of(rows, frozen, at) {
-        walk(rows, frozen, next, state, stack, gaps);
+    for next in producers_of(rows, frozen, row_writes, at) {
+        walk(rows, frozen, row_writes, next, state, stack, gaps);
     }
     stack.pop();
     state[at] = Visit::Done;

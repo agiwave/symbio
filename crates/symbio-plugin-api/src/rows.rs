@@ -26,6 +26,14 @@
 //! 一笔债的身份（`row` + `key`）、轮锚（`turn` / `now_ms` / `user_seq`）、写事件的
 //! 主体，以及**本轮**的事实切片——能力要判断什么，从事实里读。
 //!
+//! ## 需要模型的能力：提示 + 解析函数（D-242）
+//!
+//! 反思 / 压缩 / 技能编译这类能力要一次 LLM 往返。它们不拿 provider：`run` 返回
+//! [`RowStep::Ask`] 交一条提示，宿主完成调用、预算、租约与四格协议事实，再把回执
+//! 以 [`ModelReply`] 交回 [`RowHandler::parse`]。能力看到的始终只有纯值——提示
+//! 是自己造的那条，回执是模型答的那条；用哪个供应商、重试几次、花多少预算都是
+//! 宿主的事（D-242 的「被否」第一条）。
+//!
 //! ## 写入的声明在实现手里，不在 `ActorDecl` 里
 //!
 //! 一行写哪些领域格随能力而变，`ActorDecl` 是宿主侧的静态投影，装不下每行不同的
@@ -79,6 +87,36 @@ impl RowRequest<'_> {
     }
 }
 
+/// 一行**这一步**的产物：直接落格，或要一次模型往返（D-242）。
+pub enum RowStep {
+    /// 本步直接落格（不需要往返）。
+    Facts(Vec<FactDraft>),
+    /// 本步要一次模型往返：宿主执行并记账，回执交 [`RowHandler::parse`]。
+    Ask(ModelAsk),
+}
+
+/// 一次模型往返的**请求**（纯值）：只有提示正文。
+///
+/// 不带模型名、温度、凭据与预算：那些是宿主与 provider 之间的事。带上它们等于让
+/// 能力知道「用哪个供应商、花多少钱」，跨插件依赖 provider crate 只是时间问题
+/// （D-242 的「被否」第一条）。
+pub struct ModelAsk {
+    /// 交给模型的提示正文。
+    pub prompt: String,
+}
+
+/// 一次模型往返的**回执**（纯值）：答成的正文，或失败的理由。
+///
+/// 失败也是回执：宿主已经把 `failed(port=model)` 落格，解析函数仍要产出一笔关账
+/// 的事实——「推进优先于猜测」，而不是把债留在原地再打一次模型。
+#[derive(Debug, Clone, Copy)]
+pub enum ModelReply<'a> {
+    /// 模型答成了；这里是正文。
+    Text(&'a str),
+    /// 这一次往返失败（`failed` 已落格）；理由由端口给出。
+    Failed(&'a str),
+}
+
 /// 能力对自己的**一行**的实现。
 ///
 /// 一个实现 = 一行 + 一次 `submit_row!`；加一行只改能力包。行仍然由能力的
@@ -97,12 +135,24 @@ pub trait RowHandler: Sync {
     /// 会让这一步以 `undeclared-write` 收束，而不是静默放行。
     fn writes(&self) -> &'static [&'static str];
 
-    /// 这一笔债的产物：待落格的事实草稿。空 = 本步没有效果。
+    /// 这一笔债的产物：直接落的事实草稿，或一次模型往返。
     ///
     /// **必须保证推进**：返回空而债仍开着，环会在同一个债上反复选中它，直到步数
     /// 上界把这一轮判成 `step_limit`。因此「这一笔不该记账」要在行的 `owes` 里
     /// 排除（用 `eq` 收窄），而不是在实现里返回空。
-    fn run(&self, req: &RowRequest<'_>) -> Vec<FactDraft>;
+    fn run(&self, req: &RowRequest<'_>) -> RowStep;
+
+    /// 模型往返的回执 → 这一笔债的产物（D-242）。
+    ///
+    /// 只有 `run` 交过 [`RowStep::Ask`] 的实现会被调到；收的仍然是纯值。
+    ///
+    /// **必须保证推进**：即使回执是 [`ModelReply::Failed`] 也要落一笔关账的事实。
+    /// 宿主把「交过 `Ask` 却一笔都不落」判成实现违约并报错——那不是可重试的暂态，
+    /// 而是这一行没有回答「拿到回执之后写什么」。
+    fn parse(&self, req: &RowRequest<'_>, reply: ModelReply<'_>) -> Vec<FactDraft> {
+        let _ = (req, reply);
+        Vec::new()
+    }
 }
 
 /// 一条行实现的链接期提交。
@@ -158,6 +208,17 @@ pub fn declared_writes() -> Vec<&'static str> {
     all.sort_unstable();
     all.dedup();
     all
+}
+
+/// 逐行的写入名单：`(行名, 该行实现声明写的事实名)`。
+///
+/// 依赖图与第 6 条按**这一行**判，而不是按执行体并集（D-248）：多行共用一个
+/// `plugin_row` 时，并集会让每一行的出口都被别的行认领，两行以上必然成假环。
+pub fn row_writes() -> Vec<(&'static str, &'static [&'static str])> {
+    handlers()
+        .into_iter()
+        .map(|h| (h.row(), h.writes()))
+        .collect()
 }
 
 #[cfg(test)]
