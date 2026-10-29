@@ -396,7 +396,7 @@ pub trait Plugin: Send + Sync + 'static {
 
     /// 装配后、开始服务前调用一次（**同步**，见 D-033）
     ///
-    /// 默认无操作——16 个内置插件因此一行不改、行为与加钩子前完全一致。
+    /// 默认无操作——内置插件因此一行不改、行为与加钩子前完全一致。
     ///
     /// 为什么是**同步**的：装配路径（`HomePlugin::build` → `Composite::build` →
     /// `PluginRegistry::mount_all`）是同步的，工厂签名本身非 async，在那里 await
