@@ -8,7 +8,7 @@
  * | 码 | 反向用例 |
  * |---|---|
  * | `CP-001` | 驱动文件里多一个 `loop {`；另一份文件多一处 `loop_rows::next(` |
- * | `CP-002` | 派发器直问求解器（`ring::owed(`）；第二个 `ring::drive(` |
+ * | `CP-002` | 派发器直问求解器（`ring::owed(`）；第二个 `ring::drive(`；<br>第四处 `round_trip` 调用；`round_trip` 不经 `dispatch_with`；表外点问闭集读不出 |
  * | `CP-003` | 少一个守卫调用；动作签名多一份 `&mut`；`Ctx` 多一个 `&mut` 字段；派发器点问（`owes(`） |
  * | `CP-004` | 内核里出现行名字面量 |
  * | `CP-005` | 收束格第二个构造点；`ACTOR_CLOSE.writes` 里少一格 |
@@ -46,6 +46,7 @@ const SETTLE = `${LOOP}/turn_runner/settle.rs`
 const DECL = 'crates/symbio-kernel/src/decl/mod.rs'
 const SPEC = 'docs/005-spec/033.md'
 const RULING = 'docs/003-design/015-义务环.md'
+const TRIP_RULING = 'docs/003-design/022-行表与派发面.md'
 
 /** 逐个删 —— 不用 rmSync(recursive)（沙箱会拦截批量删除）。 */
 function rmTree(dir) {
@@ -325,20 +326,80 @@ const RULING_TEXT = [
   '',
 ].join('\n')
 
+/**
+ * 表外点问闭集的裁决原文（夹具）：`D-235` 只认那一句「今天只有…处：`x.rs`、`y.rs`」，
+ * 且这句话在 `###` 这一级节内、位于自己带的 `####` 小节里——夹具必须照这个形状写，
+ * 否则 `CP-002` 会因为读不出闭集而红（那正是「闭集没有输入」那条反向用例）。
+ */
+const TRIP_RULING_TEXT = [
+  '## 行表与派发面（夹具）',
+  '',
+  '### D-235 表外点问的终态',
+  '',
+  '#### 三、可判：闭集，不是归零',
+  '',
+  '> 今天只有三处：`port/classify.rs`（判决）、`chat_loop/compose.rs`（措辞）、`port.rs`（压缩摘要，`Compress::summary`）。',
+  '',
+  '#### 四、什么会推翻本条',
+  '',
+  '### D-236 下一条',
+  '',
+].join('\n')
+
+/**
+ * `round_trip` 的入账口与三处调用点（夹具）：判据钉两件事——函数体里
+ * `announce_with` / `dispatch_with` 各一次（一步，不是两笔债），调用文件 ⊆ 裁决点名的闭集。
+ */
+const PORT_SRC = `pub struct Port;
+
+impl Port {
+    fn announce_with(&self) {}
+
+    fn dispatch_with(&self) {}
+}
+
+pub fn round_trip(port: &Port) {
+    port.announce_with();
+    port.dispatch_with();
+}
+
+pub fn summary(port: &Port) {
+    round_trip(port);
+}
+`
+
+const CLASSIFY_SRC = `use crate::port::{round_trip, Port};
+
+pub fn classify(port: &Port) {
+    round_trip(port);
+}
+`
+
+const COMPOSE_SRC = `use crate::port::{round_trip, Port};
+
+pub fn wording(port: &Port) {
+    round_trip(port);
+}
+`
+
 function cleanTree() {
   return {
-    [`${LOOP}/lib.rs`]: 'pub mod loop_rows;\npub mod turn_exec;\npub mod turn_runner;\n',
+    [`${LOOP}/lib.rs`]: 'pub mod loop_rows;\npub mod port;\npub mod turn_exec;\npub mod turn_runner;\n',
     [`${LOOP}/turn_runner/mod.rs`]: 'pub mod settle;\n',
     [ROWS]: LOOP_ROWS,
     [DRIVE]: DRIVE_SRC,
     [TURN_EXEC]: TURN_EXEC_SRC,
     [SETTLE]: SETTLE_SRC,
+    [`${LOOP}/port.rs`]: PORT_SRC,
+    [`${LOOP}/port/classify.rs`]: CLASSIFY_SRC,
+    [`${LOOP}/chat_loop/compose.rs`]: COMPOSE_SRC,
     'crates/symbio-kernel/src/lib.rs': 'pub mod adapters;\npub mod decl;\n',
     [DECL]: KERNEL_DECL_SRC,
     'crates/symbio-kernel/src/adapters.rs': KERNEL_ADAPTERS_SRC,
     'crates/symbio-core/src/lib.rs': 'pub struct Event {\n    pub name: String,\n}\n',
     [SPEC]: SPEC_TEXT,
     [RULING]: RULING_TEXT,
+    [TRIP_RULING]: TRIP_RULING_TEXT,
     'docs/003-design/016-工程落地与验证.md': '## 关键决策\n\n### D-234 夹具决策\n\n机制面基线挂在这条决策上。\n',
     'scripts/control-plane-audit.mjs': '// 夹具占位：CP-007 只判「§判据表点名的脚本存在」\n',
     'scripts/control-plane-audit.test.mjs': '// 夹具占位\n',
@@ -354,6 +415,7 @@ test('干净夹具：八条判据全绿，读数是「循环体 1 个」', () =>
     assert.match(r.stdout, new RegExp(`✓ ${code}`), r.stdout)
   }
   assert.match(r.stdout, /循环体 1 个/)
+  assert.match(r.stdout, /表外点问 裁决点名 3 处 · 代码调用 3 处/)
   assert.match(r.stdout, new RegExp(`收束格 chat\\.assistant\\.final：${SETTLE.replace(/[/.]/g, '\\$&')}`))
 })
 
@@ -497,6 +559,37 @@ test('CP-006：裁决先加了端口、代码还没声明 ⇒ 仍绿（设计先
   const r = audit(files)
   assert.equal(r.status, 0, r.stdout + r.stderr)
   assert.match(r.stdout, /裁决有而代码未声明：.*\bclock\b/)
+})
+
+// ───────────────── CP-002 · 表外点问闭集（D-235）─────────────────
+
+test('CP-002：第四处 round_trip 调用 ⇒ 红（表外点问是闭集，不是清单）', () => {
+  const files = cleanTree()
+  files[`${LOOP}/turn_runner/extra_trip.rs`] = COMPOSE_SRC
+  assertRed(audit(files), 'CP-002')
+})
+
+test('CP-002：round_trip 绕过 dispatch_with（直连适配器）⇒ 红（一步被拆成两笔债）', () => {
+  const files = cleanTree()
+  files[`${LOOP}/port.rs`] = PORT_SRC.replace('port.dispatch_with();', 'port.send_direct();')
+  assertRed(audit(files), 'CP-002')
+})
+
+test('CP-002：表外点问闭集那一节读不出 ⇒ 红（闭集没有输入）', () => {
+  const files = cleanTree()
+  delete files[TRIP_RULING]
+  assertRed(audit(files), 'CP-002')
+})
+
+test('CP-002：裁决先点名第四处、代码还没调用 ⇒ 仍绿（设计先于实施，缺的一侧只是读数）', () => {
+  const files = cleanTree()
+  files[TRIP_RULING] = files[TRIP_RULING].replace(
+    '`port.rs`（压缩摘要',
+    '`turn_runner/refuse.rs`（预留）、`port.rs`（压缩摘要',
+  )
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /裁决有而代码未调用：.*turn_runner\/refuse\.rs/)
 })
 
 // ───────────────────────────── CP-007 ─────────────────────────────

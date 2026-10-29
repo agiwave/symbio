@@ -39,7 +39,7 @@ stats / slo / tiers / span 与 transcript 分组也各自以轮次编号为轴�
 
 ### 不做什么
 
-- **不动 loop 插件内部的 `Turn*` 名字**：`T-001` 的边界写明「名字只是症状」，`D-231` 也只收同名不同义、不为同名改名。
+- **不动 loop 插件内部的 `Turn*` 名字**：`D-231` 只收同名不同义、不为同名改名——名字只是症状，越界的位置才是问题。
 - **不动 session 的任务壳**（`TurnLauncher` / watchdog / `TurnOutcome` 三值）：那是产品词汇，
   不在这条射程。
 

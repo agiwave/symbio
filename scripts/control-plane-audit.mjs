@@ -18,7 +18,7 @@
  * | 码 | 规范 | 判什么 |
  * |---|---|---|
  * | `CP-001` | `TC-1a` 循环体唯一 | 驱动循环只有一个；选债调用只有一个且在其中 |
- * | `CP-002` | `TC-1b` 选债口唯一 | 求解器只在 `loop_rows.rs` 被问；派发器不点问行 |
+ * | `CP-002` | `TC-1b` 选债口唯一 | 求解器只在 `loop_rows.rs` 被问；派发器不点问行；表外点问是裁决点名的闭集 |
  * | `CP-003` | `TC-1c` 守卫同处 | 五道守卫各一份实现、各一个调用点；不重入由类型守 |
  * | `CP-004` | `TC-2` 机制层无域名 | 行名 / 执行体名 / 端口名 / 事件名不进 kernel 与 core |
  * | `CP-005` | `TC-4` 事实面唯一写方 | 收束格（final / fallback）各只有一个构造点 |
@@ -60,6 +60,11 @@
  *   候选表（时钟 / 存储为什么被排除）不参与判定。它判「有没有越出闭集」，判不到
  *   「新端口是不是真往返」——那要读 `awaited` / `max_attempts` / 应答载荷，归 `D-222` §一
  *   的判定口径，不是本脚本能替的。
+ * - `CP-002` 的表外点问闭集读的是 `D-235` 那句「今天只有三处：…」（那一节在 `DE-022`），
+ *   判的是**调用文件**是否越出点名的清单。它判不到「这一处是不是真的载荷加工」（派出与
+ *   收应答是否同窗归 `D-235` 判据 1），也判不到「新调用点是不是另一种合法形状」——两者
+ *   都只能由改裁决回答。它另钉 `round_trip` 自己的形状（同一函数体里 announce / dispatch
+ *   各一次），因为「一步」与「两笔债」的区别就在那里。
  *
  * ## 用法
  *
@@ -102,6 +107,8 @@ const ADAPTERS_REL = `${KERNEL}/adapters.rs`
 const SPEC_REL = 'docs/005-spec/033.md'
 /** 端口闭集的 owner：`D-222` §一。闭集名单**不在本脚本里**——抄一份就是第二个 owner */
 const RULING_REL = 'docs/003-design/015-义务环.md'
+/** 表外点问闭集的 owner：`D-235`（行表那一侧）。名单同样从裁决原文读 */
+const TRIP_RULING_REL = 'docs/003-design/022-行表与派发面.md'
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
 
 /**
@@ -471,6 +478,98 @@ if (owedCallSites.filter((c) => c.rel === ROWS_REL).length !== 1) {
     `求解器在 \`${ROWS_REL}\` 里被问了 ${owedCallSites.filter((c) => c.rel === ROWS_REL).length} 次（应恰好 1 次：\`fn owes\` 的点问）—— ` +
       '多出来的那一处要么是第二个选债口，要么是没人用的死代码',
   )
+}
+
+// ── 表外点问：闭集，不是归零（`D-235`）────────────────────────────────
+//
+// 判决 / 措辞 / 压缩摘要三处由 `round_trip` 自己 announce + dispatch：它们是那一行的
+// **载荷加工**（派出与收应答在同一个动作窗口里，环在那一段 `.await` 里选不了任何行），
+// 不是两笔债。判据因此不是「调用点归零」，而是**闭集**——名单从裁决原文读，不在本脚本里
+// 抄一份（与 `CP-006` 读 [D-222] §一 同一教训）。
+
+function rulingTripSites() {
+  const text = readRel(TRIP_RULING_REL)
+  if (text === null) return { error: `读不出 \`${TRIP_RULING_REL}\`` }
+  const at = text.indexOf('### D-235')
+  if (at < 0) return { error: '找不到 `### D-235`' }
+  const rest = text.slice(text.indexOf('\n', at) + 1)
+  // 只收 `###` 与更浅的标题：这一节自己带 `####` 小节，按任意标题切会切在第一节
+  const next = rest.search(/^#{1,3}\s/m)
+  const section = next < 0 ? rest : rest.slice(0, next)
+  const line = section.split('\n').find((l) => l.includes('今天只有') && /\.rs`/.test(l))
+  if (!line) return { error: '`D-235` 里找不到那句「今天只有…：…」' }
+  const sites = [...line.matchAll(/`([^`]+\.rs)`/g)].map((m) => m[1])
+  if (sites.length === 0) return { error: '「今天只有…」那句话里没有点名任何 `.rs` 文件' }
+  return { sites }
+}
+
+/**
+ * `port::round_trip` 的调用点。只数控制面里的**自由函数**调用：`provider.round_trip(…)`
+ * 是 `ModelProvider` 的方法（适配器那一侧），不是这个入账口。
+ */
+const tripCallSites = []
+for (const rel of prodFiles(LOOP)) {
+  const code = prodCodeOf(rel)
+  if (code === null) continue
+  for (const s of callSites(code, 'round_trip')) {
+    const before = code.slice(Math.max(0, s.index - 16), s.index)
+    if (/\.\s*$/.test(before)) continue
+    tripCallSites.push({ rel, index: s.index })
+  }
+}
+
+const tripRuling = rulingTripSites()
+let tripClosureReading = '(未判定)'
+if (tripRuling.error) {
+  report('CP-002', TRIP_RULING_REL, `表外点问的闭集读不出：${tripRuling.error} —— 闭集没有输入，判据不许靠猜`)
+} else {
+  for (const s of tripCallSites) {
+    const named = tripRuling.sites.some((t) => s.rel === t || s.rel.endsWith(`/${t}`))
+    if (!named) {
+      report(
+        'CP-002',
+        s.rel,
+        '`round_trip(` 调用不在裁决的闭集里（`D-235`）—— 表外多了一笔在动作里打的往返：' +
+          '若环在它飞着的时候有事可做，按 `D-222` 订正 2 拆成 `announce` / `dispatch` / `await` 三行；' +
+          '若它是某一行的载荷加工，先改裁决把这一处登记进去',
+      )
+    }
+  }
+  const pending = tripRuling.sites.filter(
+    (t) => !tripCallSites.some((s) => s.rel === t || s.rel.endsWith(`/${t}`)),
+  )
+  tripClosureReading =
+    `裁决点名 ${tripRuling.sites.length} 处 · 代码调用 ${tripCallSites.length} 处（` +
+    (tripCallSites.map((s) => s.rel.replace(`${LOOP}/`, '')).join(' · ') || '无') +
+    '）' +
+    (pending.length ? ` · 裁决有而代码未调用：${pending.join(' / ')}（读数，代码晚于裁决）` : '')
+}
+
+// `round_trip` 自己的形状：同一函数体里 announce 与 dispatch 各一次——它是「一步」的
+// 入账口；拆成两处就是把一笔帧内往返伪装成两笔债（`D-235`）。
+{
+  const portCode = prodCodeOf(`${LOOP}/port.rs`)
+  const def = portCode === null ? [] : defSites(portCode, 'round_trip')
+  if (def.length === 1) {
+    const open = portCode.indexOf('{', def[0].index)
+    const body = portCode.slice(open, matchBrace(portCode, open))
+    const announces = sitesOf(body, /\bannounce_with\s*\(/g).length
+    const dispatches = sitesOf(body, /\bdispatch_with\s*\(/g).length
+    if (announces !== 1 || dispatches !== 1) {
+      report(
+        'CP-002',
+        `${LOOP}/port.rs`,
+        `\`round_trip\` 的函数体里 \`announce_with(\` ${announces} 次、\`dispatch_with(\` ${dispatches} 次（应各 1 次）—— ` +
+          '它是「一步」的入账口：拆开就是把一笔帧内往返伪装成两笔债（D-235）',
+      )
+    }
+  } else {
+    report(
+      'CP-002',
+      `${LOOP}/port.rs`,
+      `\`fn round_trip\` 的定义有 ${def.length} 处（应恰好 1 处）—— 入账口没有唯一形状`,
+    )
+  }
 }
 
 /** 幂等点问（`owes`）是**读数**不是判据：`OB-002` / `OB-004` 已按 `J0` 退场为读数 */
@@ -992,6 +1091,7 @@ if (errors === 0) {
   )
   console.log(dim(`  控制面生产文件 ${loopProdFiles.length} 份（基线 ${baseline?.extension?.productionFiles ?? '?'}）`))
   console.log(dim(`  端口闭集 ${closureReading}`))
+  console.log(dim(`  表外点问 ${tripClosureReading}`))
   console.log(dim(`  机制面指纹 ${mechanismHash}`))
   for (const [, constName, literal] of CLOSURE_CELLS) {
     const sites = closureSites[constName] ?? []
