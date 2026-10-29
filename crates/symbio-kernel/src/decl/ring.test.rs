@@ -471,7 +471,7 @@ fn an_actor_serving_an_engine_exit_row_needs_a_write_or_a_port_contract() {
                 before: EVENT_SENT,
                 lease_ms: 1_000,
                 max_attempts: 1,
-                concurrent: false,
+                concurrency: 0,
             });
         }
         b.row(home(EVENT_SENT));
@@ -642,20 +642,20 @@ fn a_port_is_declared_once_and_found_by_name() {
             before: "sent",
             lease_ms: 600_000,
             max_attempts: 3,
-            concurrent: false,
+            concurrency: 0,
         },
         PortDecl {
             port: "tool",
             before: "sent",
             lease_ms: 30_000,
             max_attempts: 2,
-            concurrent: true,
+            concurrency: 4,
         },
     ];
     assert_eq!(port_of(PORTS, "turn").map(|p| p.lease_ms), Some(600_000));
     assert_eq!(port_of(PORTS, "tool").map(|p| p.max_attempts), Some(2));
     // 并发许可是端口级声明的一部分，与租约 / 尝试上限同处一次声明。
-    assert_eq!(port_of(PORTS, "tool").map(|p| p.concurrent), Some(true));
+    assert_eq!(port_of(PORTS, "tool").map(|p| p.concurrency), Some(4));
     // 没有这个端口 ⇒ `None`，不是默认值：漏声明要显形，不能静默拿一个默认租约。
     assert!(port_of(PORTS, "model").is_none());
 }
@@ -1281,7 +1281,7 @@ fn port_x() -> PortDecl {
         before: EVENT_SENT,
         lease_ms: 1_000,
         max_attempts: 1,
-        concurrent: false,
+        concurrency: 0,
     }
 }
 

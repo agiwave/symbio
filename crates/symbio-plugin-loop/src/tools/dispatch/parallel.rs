@@ -25,8 +25,10 @@
 //! ## 并发上限
 //!
 //! 一次响应可能带很多个只读调用（megabatch 的上限在流层）。无上限扇出会让每个
-//! 调用各起一条子进程 / 网络请求，机器被自己的工具打满；[`MAX_IN_FLIGHT`] 是最小
-//! 的「有上限」而不是调优参数。
+//! 调用各起一条子进程 / 网络请求，机器被自己的工具打满。上限**由端口声明**
+//! （`PortDecl.concurrency`）给出，执行层不持有一个常量：常量会让第二个端口的上界
+//! 只能跟着改引擎，而「加端口 = 加声明」是终态成本（DE-015 §6 判据 1）。
+//! `0` / `1` = 串行；更大的值 = 至多几条同时在飞。
 
 use std::collections::HashMap;
 use symbio_core::{CapabilityMeta, CapabilityRiskLevel};
@@ -39,9 +41,6 @@ pub(crate) enum ExecPolicy {
     /// 必须独占执行窗口：前序在途调用先全部收口，本调用跑完再放下一条。
     Serial,
 }
-
-/// 批内同时在途的上限。
-pub(crate) const MAX_IN_FLIGHT: usize = 4;
 
 /// 风险档 → 执行策略的**唯一映射**（新增一档只改这里）。
 pub(crate) const fn policy_for_risk(risk: CapabilityRiskLevel) -> ExecPolicy {
@@ -60,13 +59,14 @@ pub(crate) fn policy_for_mode(mode: &str, risk_policy: ExecPolicy) -> ExecPolicy
     }
 }
 
-/// 端口声明 → 整批策略。`concurrent=false` 是**硬闸**：即使风险档是 `Low`、
-/// 模式是 `auto`，也不得并行。`true` 时仍走 [`policy_for_mode`] 的既有规则。
+/// 端口声明 → 整批策略。`concurrency <= 1` 是**硬闸**：即使风险档是 `Low`、
+/// 模式是 `auto`，也不得并行。更大的值仍走 [`policy_for_mode`] 的既有规则；
+/// 「至多几条在飞」由调用方按同一个数截断。
 ///
-/// 声明与策略分开的理由见 `PortDecl.concurrent`：端口只说「允不允许同批并发」，
+/// 声明与策略分开的理由见 `PortDecl.concurrency`：端口只说「同批最多几笔在飞」，
 /// 具体哪几条能同时在途由风险档决定；两者不是一个问题，不能互相替代。
-pub(crate) fn policy_for_port(concurrent: bool, mode: &str, risk_policy: ExecPolicy) -> ExecPolicy {
-    if !concurrent {
+pub(crate) fn policy_for_port(concurrency: u16, mode: &str, risk_policy: ExecPolicy) -> ExecPolicy {
+    if concurrency <= 1 {
         ExecPolicy::Serial
     } else {
         policy_for_mode(mode, risk_policy)

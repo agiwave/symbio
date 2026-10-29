@@ -653,7 +653,7 @@ pub(crate) static PORTS: &[PortDecl] = &[
         lease_ms: 600_000,
         max_attempts: 1,
         // 一次模型往返是一条调用；同批并发在它下面的工具端口。
-        concurrent: false,
+        concurrency: 0,
     },
     // 工具批次里的**单次调用**。一次模型响应可带 N 个调用 ⇒
     // 同一批写 N 条 `request`，各自一个 id。
@@ -674,9 +674,10 @@ pub(crate) static PORTS: &[PortDecl] = &[
         before: EVENT_SENT,
         lease_ms: 600_000,
         max_attempts: 2,
-        // 一次模型响应可带 N 个工具调用：同批子债允许并发，
-        // 具体哪几条同时在途仍由风险档决定（`dispatch/parallel.rs`）。
-        concurrent: true,
+        // 一次模型响应可带 N 个工具调用：同批至多四条在飞。四不是调优参数，
+        // 而是「有上限」的最小值；具体哪几条同时在途仍由风险档决定
+        // （`tools/dispatch/parallel.rs`）。
+        concurrency: 4,
     },
 ];
 

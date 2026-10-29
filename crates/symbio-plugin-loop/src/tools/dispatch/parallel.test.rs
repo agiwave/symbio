@@ -41,20 +41,24 @@ fn interactive_mode_forces_serial() {
     );
 }
 
-/// 端口声明是**硬闸**：`concurrent=false` 压过风险档与模式；`true` 时逐字沿用
+/// 端口声明是**硬闸**：`concurrency <= 1` 压过风险档与模式；更大的值逐字沿用
 /// 既有规则。这是「并发集合是声明，不是执行体自觉」的最小判据。
 #[test]
 fn a_non_concurrent_port_forces_serial() {
     assert_eq!(
-        policy_for_port(false, "auto", ExecPolicy::Parallel),
+        policy_for_port(0, "auto", ExecPolicy::Parallel),
         ExecPolicy::Serial
     );
     assert_eq!(
-        policy_for_port(true, "auto", ExecPolicy::Parallel),
+        policy_for_port(1, "auto", ExecPolicy::Parallel),
+        ExecPolicy::Serial
+    );
+    assert_eq!(
+        policy_for_port(4, "auto", ExecPolicy::Parallel),
         ExecPolicy::Parallel
     );
     assert_eq!(
-        policy_for_port(true, "interactive", ExecPolicy::Parallel),
+        policy_for_port(4, "interactive", ExecPolicy::Parallel),
         ExecPolicy::Serial
     );
 }

@@ -59,10 +59,11 @@ pub(crate) struct GateReadings {
     pub(crate) session_facts: Vec<Event>,
     /// 工具自声明的风险档：批内执行策略的分流依据，与 `decls` 同一份元数据。
     pub(crate) risks: ToolRisks,
-    /// `tool` 端口是否声明同批可并发（DE-015 §3.3 / ）。
+    /// `tool` 端口的同批在飞上限（`PortDecl.concurrency`，`0` / `1` = 串行）。
     ///
-    /// 批首读一次，阶段②只消费这个布尔；`false` 是硬闸，不能被风险档绕过。
-    pub(crate) concurrent: bool,
+    /// 批首读一次，阶段②只消费这个数。上限是声明的一部分：新端口自带自己的上界，
+    /// 执行层不需要为它改一个常量。
+    pub(crate) concurrency: u16,
     /// 本批留底 `(id, name, args)`——阶段③「哪些没被执行」的收口依据。
     pub(crate) batch_meta: Vec<(String, String, serde_json::Value)>,
     /// 同参重复调用台账；阶段②逐条登记，故为可变读数。
@@ -139,9 +140,9 @@ pub(crate) async fn read_batch_gates(
     let metas = symbio_core::tool_metas(&ctx).await;
     let decls = ToolDecls::of_metas(&metas);
     let risks = ToolRisks::of_metas(&metas);
-    // 端口声明与元数据同一处读数：批内能否并发由 `PortDecl` 说，执行层只消费。
-    let concurrent = symbio_core::ring::port_of(super::super::super::loop_rows::PORTS, "tool")
-        .is_some_and(|p| p.concurrent);
+    // 端口声明与元数据同一处读数：批内上界由 `PortDecl` 说，执行层只消费。
+    let concurrency = symbio_core::ring::port_of(super::super::super::loop_rows::PORTS, "tool")
+        .map_or(0, |p| p.concurrency);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -173,7 +174,7 @@ pub(crate) async fn read_batch_gates(
         principal,
         session_facts,
         risks,
-        concurrent,
+        concurrency,
         batch_meta,
         seen_calls,
     }

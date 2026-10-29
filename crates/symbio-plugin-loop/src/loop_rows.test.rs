@@ -148,9 +148,9 @@ fn plain() -> Value {
 /// 是一次调用，没有「同批子债」。
 #[test]
 fn only_the_tool_port_declares_batch_concurrency() {
-    let of = |port: &str| PORTS.iter().find(|p| p.port == port).map(|p| p.concurrent);
-    assert_eq!(of("tool"), Some(true));
-    assert_eq!(of("model"), Some(false));
+    let of = |port: &str| PORTS.iter().find(|p| p.port == port).map(|p| p.concurrency);
+    assert_eq!(of("tool"), Some(4));
+    assert_eq!(of("model"), Some(0));
     // `turn` 不是端口（`D-222` §一）：它连声明都没有，遑论并发。
     assert_eq!(of("turn"), None);
 }

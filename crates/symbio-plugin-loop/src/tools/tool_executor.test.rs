@@ -1581,6 +1581,8 @@ struct ProbeTool {
     meta: CapabilityMeta,
     barrier: Option<Arc<tokio::sync::Barrier>>,
     sleep_ms: u64,
+    /// 执行体返回错误：用于「部分失败」——失败那一笔只关自己的账。
+    fail: bool,
     active: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
 }
@@ -1600,6 +1602,7 @@ impl ProbeTool {
             },
             barrier: None,
             sleep_ms: 0,
+            fail: false,
             active: active.clone(),
             peak: peak.clone(),
         }
@@ -1612,6 +1615,11 @@ impl ProbeTool {
 
     fn with_sleep(mut self, ms: u64) -> Self {
         self.sleep_ms = ms;
+        self
+    }
+
+    fn with_failure(mut self) -> Self {
+        self.fail = true;
         self
     }
 }
@@ -1638,6 +1646,12 @@ impl symbio_core::Capability for ProbeTool {
             tokio::time::sleep(std::time::Duration::from_millis(self.sleep_ms)).await;
         }
         self.active.fetch_sub(1, Ordering::SeqCst);
+        if self.fail {
+            return Err(PluginError::InternalError(format!(
+                "boom:{}",
+                self.meta.name
+            )));
+        }
         Ok(serde_json::json!({ "content": format!("done:{}", self.meta.name) }))
     }
 }
@@ -1946,6 +1960,88 @@ async fn interactive_mode_keeps_the_batch_serial() {
         peak.load(Ordering::SeqCst),
         1,
         "交互模式必须整批串行（审批卡不能两张同时推到用户面前）"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 部分失败：同批两条只读调用，一条失败一条成功——失败那一笔**只关自己的账**，
+/// 兄弟照常跑完并正常收口。「整批失败」会让已经成功的世界副作用被事实面否认。
+#[tokio::test]
+async fn a_failed_sibling_does_not_cancel_the_rest_of_the_batch() {
+    let dir = test_dir().join("t190-partial-failure");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
+
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    // 失败的那条先结束（20ms），成功的那条后结束（60ms）：若失败会取消兄弟，
+    // 成功那条就不会出现在结果里。
+    let bad = Arc::new(
+        ProbeTool::new("probe_bad", CapabilityRiskLevel::Low, &active, &peak)
+            .with_sleep(20)
+            .with_failure(),
+    );
+    let good = Arc::new(
+        ProbeTool::new("probe_good", CapabilityRiskLevel::Low, &active, &peak).with_sleep(60),
+    );
+    let ctx = ctx_with_probes(vec![bad, good]).await;
+    let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let nodes = vec![
+        tool_call_node("tc-bad", "probe_bad"),
+        tool_call_node("tc-good", "probe_good"),
+    ];
+    let mut effects = Vec::new();
+    let mut breaks = Vec::new();
+
+    let (msgs, updates) = process_tool_calls_async(
+        probe_calls(&[("tc-bad", "probe_bad"), ("tc-good", "probe_good")]),
+        &parent,
+        &sink,
+        &abort,
+        ctx,
+        &nodes,
+        &dir,
+        &EventStore::new(),
+        false,
+        &mut effects,
+        &mut breaks,
+    )
+    .await;
+
+    assert_eq!(msgs.len(), 2, "失败不得吞掉兄弟的结果");
+    assert_eq!(peak.load(Ordering::SeqCst), 2, "两条必须同时在途");
+    assert!(
+        msg_text(&msgs[0]).contains("boom:probe_bad"),
+        "第一条是自己的失败结果（实际: {}）",
+        msg_text(&msgs[0])
+    );
+    assert!(
+        msg_text(&msgs[1]).contains("done:probe_good"),
+        "兄弟照常收口（实际: {}）",
+        msg_text(&msgs[1])
+    );
+
+    assert_eq!(updates.len(), 2);
+    assert_eq!(
+        updates[0]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("failure_kind"))
+            .and_then(|v| v.as_str()),
+        Some("error"),
+        "失败那一笔的父终态带 failure_kind=error"
+    );
+    assert_eq!(
+        updates[1]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("success"))
+            .and_then(|v| v.as_bool()),
+        Some(true),
+        "成功那一笔不受兄弟失败影响"
     );
 
     std::fs::remove_dir_all(&dir).ok();

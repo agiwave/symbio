@@ -848,7 +848,9 @@ pub(crate) async fn run_batch(
     let session_facts = readings.session_facts.as_slice();
     let before = readings.before;
     let risks = &readings.risks;
-    let concurrent = readings.concurrent;
+    // 同批在飞上限来自端口声明（`0` / `1` = 串行）；执行层只消费，不持有常量。
+    let concurrency = readings.concurrency;
+    let cap = usize::from(concurrency).max(1);
     let seen_calls = &mut readings.seen_calls;
 
     // 在途执行（启动顺序 = 调用顺序）、待收口队列与已完成产出。
@@ -928,7 +930,7 @@ pub(crate) async fn run_batch(
                     // 分流：风险档映射（唯一映射在 `parallel::policy_for_risk`），
                     // 交互模式整批压成串行（审批 / 提问一次只处理一张卡）。
                     let policy =
-                        policy_for_port(concurrent, mode, risks.policy_for_call(&ready.name));
+                        policy_for_port(concurrency, mode, risks.policy_for_call(&ready.name));
                     if policy == ExecPolicy::Serial {
                         // 串行边界：在途先全部按序收口，本调用独占执行窗口。
                         flush_all(
@@ -975,7 +977,7 @@ pub(crate) async fn run_batch(
                         .await;
                     } else {
                         // 只读调用：攒到并发上限就先收口最早的一条，再继续启动。
-                        if order.len() >= MAX_IN_FLIGHT {
+                        if order.len() >= cap {
                             flush_one(
                                 &mut inflight,
                                 &mut order,
