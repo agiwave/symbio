@@ -24,13 +24,14 @@ lists: [gate-codes=owner]
 |---|---|---|---|---|
 | **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–004 | `C-005` |
-| **CP** | 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结与端口闭集 / 判据集闭集 / 声明面封闭 / 存量能力名棘轮） | `scripts/control-plane-audit.mjs` | CP-001–009 | `CP-010` |
+| **CP** | 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结与端口闭集 / 判据集闭集 / 声明面封闭） | `scripts/control-plane-audit.mjs` | CP-001–008 | `CP-009` |
 | **CS** | core 形状 | `scripts/core-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–010 | `CS-011` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–020 | `D-021` |
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
 | **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–013 | `E-014` |
 | **EOL** | 行尾（工作树 / 入库 / 声明三面一致） | `scripts/eol-audit.mjs` | EOL-001–003 | `EOL-004` |
+| **EX** | 能力全面拆分（名册处置与迁移边界） | `scripts/capability-ledger-audit.mjs` | EX-006 | `EX-007` |
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–006 | `GW-007` |
@@ -79,7 +80,6 @@ lists: [gate-codes=owner]
 | **CP-006** | `scripts/control-plane-audit.mjs` |
 | **CP-007** | `scripts/control-plane-audit.mjs` |
 | **CP-008** | `scripts/control-plane-audit.mjs` |
-| **CP-009** | `scripts/control-plane-audit.mjs` |
 | **CS-001** | `scripts/core-shape-audit.mjs` |
 | **CS-002** | `scripts/core-shape-audit.mjs` |
 | **CS-003** | `scripts/core-shape-audit.mjs` |
@@ -131,6 +131,7 @@ lists: [gate-codes=owner]
 | **EOL-001** | `scripts/eol-audit.mjs` |
 | **EOL-002** | `scripts/eol-audit.mjs` |
 | **EOL-003** | `scripts/eol-audit.mjs` |
+| **EX-006** | `scripts/capability-ledger-audit.mjs` |
 | **FB-001** | `scripts/facts-boundary-audit.mjs` |
 | **FB-002** | `scripts/facts-boundary-audit.mjs` |
 | **GC-001** | `scripts/gate-codes-audit.mjs` |

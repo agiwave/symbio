@@ -9,7 +9,7 @@ created: 2026-10-29
 parent: T-001-能力全面拆分
 deps: [T-010-名册五十四条处置, T-003-主动开口纯插件验证, T-004-通用行执行体, T-005-模型往返端口, T-006-段预算与通用省略]
 where: `crates/symbio-plugin-session/src`, `crates/symbio-plugin-session/src/projections`
-exit: `crates/symbio-plugin-session` 非测试代码里不再有按能力名 / 工具名的读法或策略；每个模块都能指认归属（能力包或五类残留之一）；按名字出富化的读法归零；迁移提交不含机制增量（`EX-007`：`core` / `kernel` diff = 0，`session` 只含删除与绑定切换）；`CP-009` 对 session 的基线为空
+exit: `crates/symbio-plugin-session` 非测试代码里不再有按能力名 / 工具名的读法或策略；每个模块都能指认归属（能力包或五类残留之一）；按名字出富化的读法归零；迁移提交不含机制增量（`EX-007`：`core` / `kernel` diff = 0，`session` 只含删除与绑定切换）；`SC-006` 的基线里不再有 session 条目
 ---
 
 # S7：session 存量能力逐批迁出
@@ -42,6 +42,6 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
    - 打断与插话：裁决走 I-3，收件箱事实走 I-1；E2 强制留核；
    - 主动开口：与 heartbeat 归并，session 的 initiator / gate 只留强制点；
    - 目标自生成 / 内在动机：判定生产者进 conation 能力包，IntentGate 留核。
-3. 每批跑端到端与 `EX-003` 反向用例，`CP-009` 基线只减不增；核对 `EX-007`（`core` / `kernel` diff = 0，`session` 只含删除与绑定切换）。
+3. 每批跑端到端与 `EX-003` 反向用例，`SC-006` 基线只减不增；核对 `EX-007`（`core` / `kernel` diff = 0，`session` 只含删除与绑定切换）。
 4. 全部搬完后核对：session 的 `lib.rs` 导出面只剩基底接口，能力名的读写为零。
 5. 与 S6 的终态合并检查，再进 S8。
