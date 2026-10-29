@@ -41,8 +41,8 @@
 //!
 //! - [`super::derived_facts::record_learning`]：编码 / 检索锚 / 巩固 / 技能观测与编译；
 //! - [`super::derived_facts::record_derived`]：**效果**（`ToolBehavior::after` 交出的
-//!   草稿：承诺 / 任务表 / …，DE-025 D-207）与熔断（`CircuitBreaker::break_event`，
-//!   S8）——前者的数据来源是工具执行层交回的 `EffectInput`，后者是熔断理由，
+//!   草稿：承诺 / 任务表 / …，DE-025 D-207）与熔断（`CircuitBreaker::break_event`）
+//!   ——前者的数据来源是工具执行层交回的 `EffectInput`，后者是熔断理由，
 //!   都由 [`super::tool_dispatch::SessionDispatchPort`] 经 `take_derived` 交回。
 //!
 //! 效果**不按工具名分派**：本模块只补宿主面（轮锚 / 溯源 / 主体）再问声明，具体是哪

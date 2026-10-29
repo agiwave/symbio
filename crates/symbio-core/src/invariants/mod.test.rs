@@ -194,7 +194,7 @@ fn asserted_without_provenance_is_detected() {
 #[test]
 fn non_asserted_events_need_no_provenance() {
     // 普通过程事件（opened 等）不是声明，不要求 produced_by——
-    // S1 起收束类（chat.assistant.final/fallback）例外，见下。
+    // 收束类（chat.assistant.final/fallback）例外，见下。
     let events = vec![pending("u0", "user.message", Entity::Turn, Verb::Opened, 0)];
     assert!(produced_by_coverage(&events).is_empty());
 }
@@ -543,7 +543,7 @@ fn check_all_on_clean_sequence_is_empty() {
     assert!(check_all(EVENTS, &events).is_empty(), "合规序列九查全绿");
 }
 
-// ── 故障注入用例集（S1：超时 / 乱序 / 重复 final / 无溯源，4 类违规全被捕获）────
+// ── 故障注入用例集（超时 / 乱序 / 重复 final / 无溯源，4 类违规全被捕获）────
 //
 // 每类故障注入事件序列，断言**对应的检查必须红**。反向用例（合规序列不报警）在上方各检查区。
 

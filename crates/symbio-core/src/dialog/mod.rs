@@ -78,8 +78,8 @@ pub struct DecideRequest {
     ///
     /// ## 为什么这个字段现在才加
     ///
-    /// S1 时它没有生产者（`conversation_view` 尚未建立），写了就是替未来猜形状。
-    /// S2 里投影函数与它的第一个消费方同批落位，字段与生产者同时出现。
+    /// 它要有生产者才有意义（`conversation_view` 建立之后才有值），所以字段与
+    /// 投影函数同时落位，不替未来猜形状。
     #[serde(default)]
     pub context: Vec<ChatNode>,
 }

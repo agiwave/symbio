@@ -37,7 +37,7 @@ pub struct ActorSpec {
     pub principal: String,
     /// 三种模式之一（机制，封顶）。
     pub pattern: Pattern,
-    /// 能力名（数据）。S3 之前不做枚举闭集与校验（归 ⑥ `governance`）。
+    /// 能力名（数据）。这里不做枚举闭集与校验（归 ⑥ `governance`）。
     pub capabilities: Vec<String>,
     /// I3 时延预算（毫秒）。
     pub budget_ms: u64,

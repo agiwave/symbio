@@ -185,7 +185,7 @@ fn session_node_publishes_the_context_watermark_reading() {
     assert_eq!(empty.attributes.get("context_watermark"), None);
 }
 
-/// 会话内部寻址（S6/S16）：`<id>` / `<id>/MEMORY.md` / `<id>/message[/<mid>]` /
+/// 会话内部寻址：`<id>` / `<id>/MEMORY.md` / `<id>/message[/<mid>]` /
 /// `<id>/subsession[/<sub>]` / `<id>/workdir[/<rel>]` / `<id>/_run/<op>`。
 /// 未知区段与越界层级一律 NotFound——不给半通不通的路径留口子。
 #[test]

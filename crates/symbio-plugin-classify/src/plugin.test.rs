@@ -290,7 +290,7 @@ async fn decide_without_payload_fails() {
     assert!(r.is_err(), "缺载荷应报错，实得 {:?}", r.is_ok());
 }
 
-/// 契约扩展不破坏老调用方：只带 S1 那两个字段的载荷必须仍可解析
+/// 契约扩展不破坏老调用方：只带最初那两个字段的载荷必须仍可解析
 #[tokio::test]
 async fn legacy_payload_without_new_fields_still_parses() {
     let req = PluginSimpleRequest::new(None, None);

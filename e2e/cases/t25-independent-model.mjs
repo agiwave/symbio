@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// S6 给两个插件各加了一个 provider id 与一段可覆盖的提示词。**这两件事的判据都在
+// 两个插件各有自己的 provider id 与一段可覆盖的提示词。**这两件事的判据都在
 // 「请求真的发到哪去了」**——插件内部怎么取、怎么降级，从外部看不见；能看见的只有
 // mock LLM 收到的那份请求体（`body.model` / `body.temperature` / `body.messages[0]`）。
 //

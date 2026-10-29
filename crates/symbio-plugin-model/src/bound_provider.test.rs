@@ -432,7 +432,7 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
     let (port, captured) = spawn_mock_after(SSE_OK, std::time::Duration::from_millis(5));
     let adapter = ProviderLlmAdapter::new(mock_provider(port));
 
-    // 彩排链路（与 S2 同形，只换适配器）：用户消息入库 → Reasoner 生成。
+    // 彩排链路（与最小闭环同形，只换适配器）：用户消息入库 → Reasoner 生成。
     let tok = TokenIssuer::issue_deep();
     let store = EventStore::new();
     store

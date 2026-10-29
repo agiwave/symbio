@@ -38,7 +38,7 @@ import { red, green } from './color.mjs'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
 
-/** 主体类型名单（显式，S6 起维护；新增主体在此登记）。 */
+/** 主体类型名单（显式，多主体面起维护；新增主体在此登记）。 */
 const PRINCIPALS = ['Decider', 'Reasoner', 'RecallTranslator', 'CommitmentKeeper']
 
 /**

@@ -49,7 +49,7 @@ use symbio_core::{actor_can_assert_verification, Entity, Event, Seq, Store, Verb
 use crate::control_decl::EVENT_MEMORY_CALIBRATED;
 use symbio_plugin_api::effects::EffectInput;
 
-/// 收束派生事实中的**效果 / 熔断**半边（DE-038 §3 / S7 / S8）。
+/// 收束派生事实中的**效果 / 熔断**半边（DE-038 §3）。
 ///
 /// ## 为什么它与「轮次事实」分开成函数
 ///
