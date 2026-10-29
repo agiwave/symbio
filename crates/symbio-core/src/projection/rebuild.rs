@@ -543,7 +543,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     // 到界面上却不是，等于把已记的东西丢掉。
     //
     // 读 `detail` 而不是 `reason`：后者是闭集（`fallback`），对用户没有信息量；
-    // 闭集服务判据与统计，人话服务界面——这正是 把两者分开的原因。
+    // 闭集服务判据与统计，人话服务界面——这正是把两者分开的原因。
     let why = e
         .payload
         .get("detail")

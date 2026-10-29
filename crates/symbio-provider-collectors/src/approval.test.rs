@@ -1,6 +1,6 @@
 //! `providers/collectors/approval.rs` 的单元测试。
 //!
-//! 覆盖 的两处形状：
+//! 覆盖审批闸门的两处形状：
 //! 1. **判定 [`approval_gate`]**——风险档与阈值的比较、`approved: true` 放行、
 //!    逐工具的永久放行上限、`mode=auto` 走 `PERMISSION_DENIED`（无人可授权时
 //!    **不产卡**），其余产卡。

@@ -86,7 +86,7 @@ pub const PRINCIPAL_USER: &str = "person/local";
 /// 本表给它一行：`produce.artifact`——工具的权威动作是**产生产物**
 /// （`artifact.added` 的响应正文），与 `session/worker` / `session/peer-b` 同款独持。
 /// 今天写侧闸按会话主体判，不按工具主体判，故这一行是**声明性**的——它把「工具
-/// 是主体」写进表；[] 之后 `plugin::attributed` 会按 kind=Tool 补上这个
+/// 是主体」写进表；`plugin::attributed` 会按 kind=Tool 补上这个
 /// principal 值，判据不变。
 pub const PRINCIPAL_TOOL_VDFS_WRITE: &str = "vdfs/write";
 
@@ -100,7 +100,7 @@ pub const PRINCIPAL_TOOL_CONTENT_SEARCH: &str = "local/content_search";
 ///
 /// 这里**不立 Rust 常量**：今天压缩节点由会话主体落、写侧没有消费方，`dead_code`
 /// 会逐条点名，而 R-002 的棘轮不许为「将来会用」加承认标记——常量的唯一 owner 是
-/// [D-069 §决策 2] 那张表，写侧接线时（[] 把「压缩由谁写」的判据换掉）随接线
+/// [D-069 §决策 2] 那张表，写侧接线时（把「压缩由谁写」的判据换掉）随接线
 /// 一批立常量、随布线摘标记，两步同批发生。
 ///
 /// 自主发起者的身份（[DE-042 §3](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")）
@@ -132,7 +132,7 @@ pub const PRINCIPAL_REFLEX: &str = "session/reflex";
 ///
 /// **为什么必须登记**：未登记的 `session/<id>` 在表里没有行 ⇒ 每个谓词为假
 /// （[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）；登记过的行就是它的权威能力集。
-/// DE-038 §3.1 的纪律是：**对等主体出现必须自带窄行同批落地**（同 设计文档「闸不能晚于
+/// DE-038 §3.1 的纪律是：**对等主体出现必须自带窄行同批落地**（同「闸不能晚于
 /// 发起者」）——窄行不是补丁，是它唯一的入口。
 pub const PRINCIPAL_PEER: &str = "session/peer-b";
 
@@ -231,7 +231,7 @@ pub const SESSION_OWNER: &str = PRINCIPAL_USER;
 /// 召回的逐条预过滤（`crates/symbio-plugin-loop/src/memory_events.rs`，跨会话切片逐条判）。两边各自的
 /// 那一层**作用域**差别是有意保留的（整列闸要表达「未声明读方 = 全量」，召回要表达
 /// 「别处的 `thread_private` 连属主也不进召回」），但**放宽的那两支必须同一条**——
-/// 各写一遍就会漂成「stats 给看、召回不给看」这类没有理由的半开半掩（②、 ⑧）。
+/// 各写一遍就会漂成「stats 给看、召回不给看」这类没有理由的半开半掩（②、⑧）。
 pub fn content_visible(scope: VisScope, viewer: &str) -> bool {
     viewer == SESSION_OWNER || production_matrix().can_see(viewer, SESSION_OWNER, scope)
 }
@@ -274,7 +274,7 @@ pub const PRINCIPAL_SCHEDULER: &str = "scheduler/main";
 
 /// **立任务**能力名（`DefineWork` 的书写形态）——任务表写侧闸的授权判据
 /// （[DE-033 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")
-/// 「规划者 ▸ `define.work`」， 落地其读方）。
+/// 「规划者 ▸ `define.work`」，落地其读方）。
 ///
 /// 与 [`CAP_ASSIGN_WORK`] 同一条理由提成常量：这个名字今天出现在四个地方——授权表行
 /// （`session/main` / `session/autonomous` / `session/planner`）、`AutonomousInitiator` 写
@@ -483,7 +483,7 @@ fn bind_inheriting_in(matrix: &EffectiveMatrix, session_id: &str, principal: &st
     insert_binding(&mut map, session_id, principal, row);
 }
 
-/// **会话结束 ⇒ 登记行回收**（[]）：一次删掉该会话登记过的全部行。
+/// **会话结束 ⇒ 登记行回收**：一次删掉该会话登记过的全部行。
 ///
 /// 与 [`bind_root`] / [`bind_inheriting`] 的登记者是同一个键——会话 id 因此是
 /// 绑定面的**生命周期单位**，进程级只增不减只属于「会话还活着」的那些行。

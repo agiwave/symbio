@@ -191,7 +191,7 @@ export default defineCase(
       );
       assert(
         section2.includes(RESPONSE),
-        `技能正文应出现在注入段里（ actor 归位后技能才进得了召回视图）：\n${section2}`,
+        `技能正文应出现在注入段里（actor 归位后技能才进得了召回视图）：\n${section2}`,
       );
       // 第 3 轮照旧（校准没掉 ⇒ 技能还在视图里）。
       assert(

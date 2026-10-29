@@ -2,7 +2,7 @@
 //!
 //! ## 一行是数据，不是函数
 //!
-//! 旧策略表（`loop_registry`， 已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
+//! 旧策略表（`loop_registry`，已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
 //! ——判断住在函数体里。这里的一行是 [`Decl`]：`owes` / `until` / `unless` 三个
 //! [`Pattern`] 加 `by` / `prio`。判断因此可 diff、可装载期检查；执行体只拿到一笔 [`Debt`]。
 //!
@@ -122,7 +122,7 @@ pub struct PortDecl {
     /// 引擎在运行执行体**之前**落的那个事实名（协议族里的 `sent`）。
     ///
     /// 搬运行者不写它：它的 `run` 可能**不产生事实就返回**，依赖它自觉 ⇒
-    /// 派发行永远不还清，而没有任何东西会红（DE-015 §2.3； 判据 2）。
+    /// 派发行永远不还清，而没有任何东西会红（DE-015 §2.3 判据 2）。
     pub before: &'static str,
     /// 租约：`sent` 之后多久没有应答算「卡住」（毫秒）。
     pub lease_ms: u64,

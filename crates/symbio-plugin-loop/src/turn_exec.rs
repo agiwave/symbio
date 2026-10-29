@@ -29,7 +29,7 @@
 //!
 //! 反射档把 `actor.budget_ms` 按档位派生（`LatencyTier::Reflex.budget_ms()`），
 //! 该值随主体走、并由接缝以**数值**写入 `turn.dispatch` 载荷的 `budget_ms`
-//! （/ ）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
+//! ——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
 //! 由它获得真读方。缺该数值的历史事件回退读 `tier`
 //! 字符串再映射，两条路径读的是**同一条事实的两种形态**，见 `declared_budget_ms` 文档。
 //!
@@ -145,7 +145,7 @@ enum UiNodeKind {
 
 impl UiNodeKind {
     /// 给这一帧的节点定形状：正文是 `Body`，推理是 `Notice`（折叠叶，[D-070 §决策 3]
-    /// []——reasoning 与 compression 同格，前端渲染二者一样，业务区分只在 `style_tag`）。
+    /// ——reasoning 与 compression 同格，前端渲染二者一样，业务区分只在 `style_tag`）。
     fn shape(self, node: ChatNode) -> ChatNode {
         match self {
             UiNodeKind::Text => node,

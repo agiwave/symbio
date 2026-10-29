@@ -996,7 +996,7 @@ async fn run_compression_llm(
     // 出口静默、中止共享；协议细节（请求构造 / 重试 / SSE 解析）由 model 插件实现承担。
     let out = orchestrator
         .provider
-        // internal-model-allow IM-001: 压缩摘要是内部请求（tools 空 / 出口按前端场景静默或过滤桥），不是对话轮次；档位归属由 裁 A/B
+        // internal-model-allow IM-001: 压缩摘要是内部请求（tools 空 / 出口按前端场景静默或过滤桥），不是对话轮次；档位归属另裁 A/B
         .round_trip(system_prompt, messages, &[], root_id, env)
         .await?;
 

@@ -339,7 +339,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
     },
     // 用户格：`meta` 是可选的补充元数据（`prepare.rs` 只在非空时写）。
     //
-    // `tier` / `budget_ms` 是**历史形态**： 起用户格先于任何判决落，档位那时
+    // `tier` / `budget_ms` 是**历史形态**：用户格先于任何判决落，档位那时
     // 还没定 ⇒ 新写入不再带它们。声明保留，读方（`declared_tier` / `declared_budget_ms`）
     // 因此仍能读旧 WAL；新事实的档位在 `turn.dispatch`。
     FactDecl {

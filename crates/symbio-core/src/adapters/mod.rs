@@ -265,7 +265,7 @@ pub trait LlmAdapter: Send + Sync {
     ///
     /// 默认实现 = **忽略工具清单、`tool_calls` 恒空**——这是**诚实降级**而非失败：
     /// 不支持工具的适配器照常答文本。没有这条通道，运行器在**类型上**就拿不到模型
-    /// 请求的工具调用（见 设计文档 §1）。
+    /// 请求的工具调用。
     ///
     /// 与 [`Self::generate_streaming`] 的关系：无工具时两者等价（默认实现即经它委托）
     /// ——「有工具」与「无工具」不是两条执行路径，是同一条的两种入参。
@@ -284,7 +284,7 @@ pub trait LlmAdapter: Send + Sync {
             reasoning: String::new(),
             tool_calls: Vec::new(),
             // 同一条如实：`generate_streaming` 不带结束原因，这一层**看不见** finish。
-            // 填 `Stop` 是假称「自然结束」——那正是 被放过的形态；`Other("unknown")`
+            // 填 `Stop` 是假称「自然结束」——那正是「未知被当成完成」的形态；`Other("unknown")`
             // 说的是「这一层给不出原因」，判据据此按未知处理而不是按完成处理。
             finish: ModelFinishReason::Other("unknown".to_string()),
             cost_ms,

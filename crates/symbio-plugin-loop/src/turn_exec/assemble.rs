@@ -302,7 +302,7 @@ pub(crate) async fn assemble_turn(
     // `principal` 已在落阶段事实时取过（同一取值点 `request_principal`）：
     // `actor` 随 `input` 被移动进运行器，轮末的记忆与学习写方（`record_learning`）
     // 仍要以它为主体——先取字符串，不依赖 `actor` 的存活。
-    // 作用域（[]）：`agent_run` 派生的子会话挂父主体，顶层会话恒 `Root`。
+    // 作用域：`agent_run` 派生的子会话挂父主体，顶层会话恒 `Root`。
     // 与身份同批取——两者都经 `ctx` / 元数据解析，分开取会让「主体是 A、作用域按 B 算」。
     let scope = session.scope();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), scope);

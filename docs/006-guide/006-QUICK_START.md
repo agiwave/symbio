@@ -97,7 +97,7 @@ cargo clippy --all-targets --workspace -- -D warnings
 ## 目录结构速览
 
 **一个插件 = 一个目录**（配置与数据同处，整目录可拷贝移植；机制见
-[VDFS 前端页面规范](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3 地址模型 与 `symbio_core::plugin::dir`）：
+[VDFS 前端页面规范](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3 地址模型与 `symbio_core::plugin::dir`）：
 
 ```
 <homedir>/ # 默认 ~/.symbio

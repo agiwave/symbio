@@ -221,7 +221,7 @@ pub(crate) async fn execute_final_reply_turn(
     //
     // 主体**不吃档位**（`D-223` 订正 2）：规格里那一格是主体的声明档，本幕的档与预算
     // 归 `turn.dispatch`（下面那次 `land_dispatch` 直接折 `tier.budget_ms()`）。
-    // 作用域与身份同批取（[]）：子会话挂父主体，顶层会话恒 `Root`。
+    // 作用域与身份同批取：子会话挂父主体，顶层会话恒 `Root`。
     let scope = session.scope();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), scope);
     // 压缩入格 + 归档：与接缝同序（`D-223` 订正 1：压缩必须早于派发格）。归档之后才

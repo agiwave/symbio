@@ -144,7 +144,7 @@ impl PersistentChatSession {
         self.store.load_session(&self.session_id).await
     }
 
-    /// 本会话所属**父会话的主体**——委派链上的父主体（[]）。
+    /// 本会话所属**父会话的主体**——委派链上的父主体。
     ///
     /// 口径三段，每一段都只有一个 owner：子会话 `metadata.parent_session_id`
     /// → 父会话 `metadata.agent_id` → `authz::principal_of`（部署事实的唯一派生点）。
@@ -207,7 +207,7 @@ impl PersistentChatSession {
 /// `metadata.agent_id` → [`symbio_core::principal_of`]）的**唯一实现**。
 ///
 /// [`PersistentChatSession::delegating_principal`] 是运行期读面；会话**创建**时
-/// （`commands::session_upsert`）也要用同一份判据登记主体行（[]），两处
+/// （`commands::session_upsert`）也要用同一份判据登记主体行，两处
 /// 各写一遍迟早分叉成「登记挂 A、运行期判 B」。
 pub(super) async fn delegating_principal_in(
     store: &SessionStore,

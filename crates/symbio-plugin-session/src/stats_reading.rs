@@ -52,7 +52,7 @@ pub(super) struct ViewerRequest {
 /// 反过来取最窄会让共享内容被私有内容拖着一起锁死，那是把产地的宽度读丢了。
 ///
 /// 缺省（没有任何记忆事件 / 存量事件没有这个字段）= `thread_private`（C10）——
-/// 与 之前的接线逐字一致，存量事实源不因这次接线改变读数。
+/// 与旧接线逐字一致，存量事实源不因这次接线改变读数。
 pub(super) fn content_scope_of(snapshot: &[symbio_core::Event]) -> VisScope {
     let mut widest = VisScope::ThreadPrivate;
     for e in snapshot {

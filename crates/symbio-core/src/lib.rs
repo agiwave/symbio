@@ -19,7 +19,7 @@ mod capability;
 mod chat;
 mod clock;
 mod creator;
-// 事实 / 视图声明层：字段清单与视图读法在装载期可查。 起是
+// 事实 / 视图声明层：字段清单与视图读法在装载期可查。
 // 义务环的输入面——行表（`crates/symbio-plugin-loop/src/loop_rows.rs`）用 `Frozen::eval` 求视图值。
 pub(crate) mod decl;
 // 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。它属封闭语法，

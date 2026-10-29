@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T73 内容侧可见域（相应批次 ②）：
+// T73 内容侧可见域（②）：
 // 矩阵内主体读得到**他人**的共享内容，矩阵外主体读不到；且判据随**内容**走——
 // 同一个读方（`session/main`）在「无共享内容」的会话上照旧空切片。
 //
@@ -116,7 +116,7 @@ export default defineCase(
       });
       assertEq(b.code, 0, `会话 B 一轮退出码（stderr: ${b.stderr.slice(0, 400)}）`);
 
-      // ── ③ 事实源直读（ ① 的生产出口）：产地真的落进了 WAL ─────────────
+      // ── ③ 事实源直读（① 的生产出口）：产地真的落进了 WAL ─────────────
       const sharedEvents = walLines(sharedWal);
       const sharedMemory = sharedEvents.find((e) => e.kind === 'memory.encoded');
       assert(

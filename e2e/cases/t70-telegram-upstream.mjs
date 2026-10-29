@@ -5,7 +5,7 @@ import './_selfrun.mjs';
 //
 // RE-005「通道与自动化面」行的 `telegram` 格：t69 已入三条**纯本地**路由
 // （`status` / `set_chat_id` / `stop_listener`），另三条都打 `api_url()`，而它曾把
-// `https://api.telegram.org/bot<token>` **写死** ⇒ 无靶子可打（转交 ）。
+// `https://api.telegram.org/bot<token>` **写死** ⇒ 无靶子可打。
 // 给 `TelegramConfig` 加了 `api_base`（缺省即官方端点，对现有部署零行为变化），
 // 本用例把它指向 `MockHttp`，三条上游路由各钉一条判据。
 //

@@ -412,7 +412,7 @@ fn encode_payload_carries_the_content_side_vis_scope() {
     let store = EventStore::new();
     let t = 1_700_000_000_000i64;
 
-    // 默认（不给 with_vis_scope）= thread_private——与 之前的载荷只差一个字段。
+    // 默认（不给 with_vis_scope）= thread_private——与显式设置前的载荷只差一个字段。
     encode(
         &store,
         &store.range(Seq::new(0)),

@@ -133,7 +133,7 @@ impl SessionPlugin {
             self.save_session(&session)
                 .await
                 .map_err(vdfs_from_plugin_error)?;
-            // 创建即登记（[]）：会话诞生的那一刻声明主体行，运行期装配点
+            // 创建即登记：会话诞生的那一刻声明主体行，运行期装配点
             // 只在身份被显式改写时做幂等兜底。
             self.bind_session_identity(&session).await;
             self.notify_change(&id);
@@ -515,7 +515,7 @@ impl SessionPlugin {
         Ok(())
     }
 
-    // ==================== 创建即登记（[]） ====================
+    // ==================== 创建即登记 ====================
 
     /// **绑定会话身份**：会话创建时登记，身份被 metadata 改写时换行。
     ///
@@ -590,7 +590,7 @@ impl SessionPlugin {
         // 清理活跃条目
         self.active_mgr.sessions.write().await.remove(session_id);
 
-        // 子会话随父目录一起删除：登记面也按会话回收（[]），所以在删除**前**
+        // 子会话随父目录一起删除：登记面也按会话回收，所以在删除**前**
         // 先把后代 id 记下来——删完之后磁盘上不再有可枚举的来源。
         let descendants = self.descendant_session_ids(session_id).await;
 

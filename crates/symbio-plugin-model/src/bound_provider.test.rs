@@ -639,7 +639,7 @@ async fn reflex_tier_system_overhead_is_measured_and_bounded() {
 /// 链路与 CI 侧校准（[`reflex_tier_system_overhead_is_measured_and_bounded`]）
 /// **完全同形**：事件网格（`EventStore`）→ `Reasoner`（持 `FullModel` 令牌）→
 /// `ProviderLlmAdapter` → 真实端点。差异只在端点——mock 即答量的是**系统自身开销**，
-/// 真实模型量的是**主导项延迟**。产出可抄进 设计文档 的报告行。
+/// 真实模型量的是**主导项延迟**。产出可抄进 `docs/004-ref/004-slo-calibration.md` 的报告行。
 ///
 /// 守卫：每轮落在**深度档**（60s）内——真实模型延迟的主导项必须被四层预算接住。
 ///

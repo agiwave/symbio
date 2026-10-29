@@ -299,7 +299,7 @@ export default defineCase(
       // （实测 3 条记忆 + 6 行能力目录 = 9）。记忆段照旧三条，只是它不独占一条消息。
       const memSection = recallSectionText(reqs[5]);
       const lines = memSection.split('\n').filter((l) => l.startsWith('- '));
-      // 3 行经验（合并 + 周报 + 温水）——shared 的跨会话召回（ 写方取值，
+      // 3 行经验（合并 + 周报 + 温水）——shared 的跨会话召回（写方取值，
       // `agent:main` 是矩阵内主体）。
       assertEq(
         lines.filter((l) => [T_COFFEE, T_MEET, T_REPORT, T_WATER].some((t) => l.includes(t))).length,

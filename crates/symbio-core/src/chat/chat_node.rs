@@ -117,7 +117,7 @@ pub fn message_of_node(node: &crate::VdfsNode, text: String) -> Option<ChatNode>
     })
 }
 
-/// 存量 `role` 属性 → 主体的**一次性别名**（[D-069 §决策 6][]）。
+/// 存量 `role` 属性 → 主体的**一次性别名**（[D-069 §决策 6]）。
 ///
 /// 判据与落库点 `attributed` 同一份：人归 `person/local`，工具归工具名合成的
 /// 真实地址，其余（助手 / 系统说明）归本机主智能体。只在

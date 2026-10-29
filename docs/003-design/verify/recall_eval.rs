@@ -140,7 +140,7 @@ fn production_recall(pool: &[Memory], query: &str, k: usize) -> Vec<usize> {
         .collect()
 }
 
-/// 平凡值路径：同一内核在无查询时 = 纯 ts 降序（ J2 判据）。
+/// 平凡值路径：同一内核在无查询时 = 纯 ts 降序（J2 判据）。
 fn trivial_recall(pool: &[Memory], _query: &str, k: usize) -> Vec<usize> {
     let entries: Vec<ScoreEntry> = pool
         .iter()
@@ -769,7 +769,7 @@ fn main() {
     //    三变体全过才算过。`pass^k ≤ pass@1` 是结构恒等式（V0 就是原样）——
     //    反过来成立说明变体集没真的扰动输入，这条恒等式即是它的空转探测。
     let vs = variants(&cs[0]);
-    assert_eq!(vs.len(), 4, "变体集固定为 原样 + 三种扰动");
+    assert_eq!(vs.len(), 4, "变体集固定为「原样 + 三种扰动」");
     assert_ne!(
         vs[1].memories[0].content, vs[0].memories[0].content,
         "V1 必须真的反转池序（否则这条扰动是空转）"

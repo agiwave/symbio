@@ -1,7 +1,7 @@
 //! `actors` 单测 —— 含 **闭环彩排**（零 LLM 跑通完整闭环——应答由彩排内的定值给出，
 //! 链路一条不少）。
 //!
-//! 彩排把 地基（store / projection / invariants）与  ② `actors`
+//! 彩排把地基（store / projection / invariants）与 `actors`
 //! 拧成一条完整链路，验收断言逐条对应
 //! [DE-031 §6](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")。
 
@@ -781,7 +781,7 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
     assert_eq!(now.of("session/b").score, 0, "违约计入后声誉下降");
 }
 
-/// 读侧翻译（`commitment_records`， 段二）：
+/// 读侧翻译（`commitment_records`）：
 /// 一次立约读出**一条记录**，状态、原因、锚都在同一条上。
 ///
 /// ## 这个用例挡的是什么

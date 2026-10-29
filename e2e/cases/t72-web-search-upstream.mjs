@@ -4,8 +4,8 @@ import './_selfrun.mjs';
 // ## 这一条补的是哪一格
 //
 // RE-005「Web 外取」行的 `web_search` 格：三个上游地址（Tavily / Serper /
-// DuckDuckGo HTML）曾**全部写死在代码里** ⇒ 只能打真外网、CI 无网 ⇒ 零覆盖
-// （ ⑤）。 给 `WebConfig` 加了 `search_api_base`（空 = 官方端点，
+// DuckDuckGo HTML）曾**全部写死在代码里** ⇒ 只能打真外网、CI 无网 ⇒ 零覆盖。
+// 给 `WebConfig` 加了 `search_api_base`（空 = 官方端点，
 // 对现有部署零行为变化；非空 = 替换基址、路径按供应商契约保留），本用例把它
 // 指向 `MockHttp`，两条实际可达的上游路各钉一条判据。
 //

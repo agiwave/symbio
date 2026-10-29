@@ -101,7 +101,7 @@ fn attributed(m: cm::ChatNode, session_principal: &str) -> cm::ChatNode {
     }
     use symbio_core::principal::Principal;
     let mut out = m;
-    // 归属判据与 [] 的字符串主体一致，这里只把它折成 `Principal` 结构体：
+    // 归属判据与字符串主体一致，这里只把它折成 `Principal` 结构体：
     // `person/local` ⇒ Person 一族，`session/*` ⇒ Agent 一族（`from_legacy` 按 namespace 派生）。
     //
     // `role = tool` 的结果节点归**工具自己**（Tool 一族，地址由

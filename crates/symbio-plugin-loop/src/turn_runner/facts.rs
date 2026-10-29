@@ -178,7 +178,7 @@ pub(crate) fn with_reason(
 ///
 /// 只判 `Length`：内容安全过滤（`ContentFilter`）与未识别原因（`Other`）今天
 /// 也走自然收束——把它们另立取值是发明闭集以外的值，而闭集的意义就在于
-/// 可穷举。这一处残留的混淆记录在 的处理过程里。
+/// 可穷举。
 pub(crate) fn reason_of_finish(
     finish: &symbio_core::ModelFinishReason,
 ) -> symbio_core::ClosureReason {

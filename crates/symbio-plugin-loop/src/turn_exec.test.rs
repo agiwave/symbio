@@ -1517,7 +1517,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     assert_eq!(snap[2].kind, EVENT_CHAT_ASSISTANT_FINAL);
 }
 
-/// 轮边界汇报「产生即上线」（-轮中对话面节点不入实时面 的另一半）：
+/// 轮边界汇报「产生即上线」（「轮中对话面节点不入实时面」的另一半）：
 /// `chat.assistant.reported` 落格的那一刻，同一个节点就经流式桥到实时面，
 /// 而不是等轮末的落库镜像一起到。
 ///
@@ -2392,7 +2392,7 @@ async fn run_one_turn(fx: &Fixture, sink: &symbio_core::ExecEventSink, turn: u64
 ///
 /// ① 端口收到的 id 序列与寄存值逐字相同（驱动器不改写压缩结果）；
 /// ② 快照事件排在本轮**派发格之前**——压缩仍是本轮执行的前置动作，归档把旧史
-/// 整段移走。用户格按 先于快照落（它必须先于压缩判决），随归档段保留在
+/// 整段移走。用户格先于快照落（它必须先于压缩判决），随归档段保留在
 /// 完整史里；派发 / 阶段 / 收束格都排在快照之后，现行窗口不夹旧事件。
 ///
 /// 反向自检：去掉 `drive_turn` 里的 `session.consolidate` 调用 ⇒ ① 红；
@@ -2419,7 +2419,7 @@ async fn consolidation_is_forwarded_before_the_turn_runs() {
     req.consolidation = Some(compacted.as_slice());
     drive_turn(req).await.expect("第二轮成功");
 
-    // ── ① 转发：整份列表原样交给会话动作，一 次 ──
+    // ── ① 转发：整份列表原样交给会话动作，一次 ──
     let got = fx.port.consolidated.lock().unwrap();
     assert_eq!(got.len(), 1, "本轮只发起一次压缩动作");
     let ids: Vec<&str> = got[0].iter().map(|m| m.id.as_str()).collect();

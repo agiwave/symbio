@@ -8,7 +8,7 @@
 //!   「落点 + 两个标记」——错了不会报错、只表现为界面不对，必须由断言钉住。
 //!   其中依赖 `conversation_view` 投影的两条**留在 session 侧**（投影不是 core 的地盘）。
 //! - **建树 flat 折叠**（原 `message_build.test.rs`）：`detach_if_flat` /
-//!   `flatten_whole_tree` / `turn_root_of` 的 [] 判据——`grouped`/`deep` 逐字
+//!   `flatten_whole_tree` / `turn_root_of` 的判据——`grouped`/`deep` 逐字
 //!   零改动、flat 只脱本轮直接子节点、夹在工具卡内的子会话骨架绝不折叠。
 
 use super::*;
@@ -154,7 +154,7 @@ fn each_node_gets_its_own_id() {
     assert_ne!(a.id, b.id, "两个节点不能共用 id");
 }
 
-// ── 建树策略 flat 折叠（[]，原 message_build.test.rs）──────────────
+// ── 建树策略 flat 折叠（原 message_build.test.rs）──────────────
 
 fn node(id: &str, parent: Option<&str>) -> ChatNode {
     ChatNode {

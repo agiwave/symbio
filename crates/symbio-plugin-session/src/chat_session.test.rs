@@ -1137,7 +1137,7 @@ async fn apply_reports_a_failed_fact_write_and_writes_nothing() {
     );
 }
 
-// ── 作用域的第一个生产构造点（[]）──────────────────────────────────────
+// ── 作用域的第一个生产构造点 ──────────────────────────────────────
 //
 // `PersistentChatSession::delegating_principal` 按会话元数据的**委派链**取值：子会话挂
 // 父主体，顶层会话恒 `None`（调用方据此落 `Scope::Root`）。本段钉的是「取值链读得出

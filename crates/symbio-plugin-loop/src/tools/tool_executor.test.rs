@@ -16,7 +16,7 @@ use symbio_plugin_api::effects::EffectInput;
 // 生产侧的读发生在 `tool_executor/breaker.rs` 子模块里）；`use super::*` 因此带不过来。
 use symbio_core::Store;
 // `failure_kind` 与 `Seq` 同样是**测试自己**要的：批首闸门读数与逐条执行的闸门段
-// 已按 阶段拆去 `tools/dispatch/`，父模块顶层不再导入它们——测试自己拿。
+// 已拆去 `tools/dispatch/`，父模块顶层不再导入它们——测试自己拿。
 use symbio_core::{failure_kind, Seq};
 // `LatencyTier` 是**测试自己**要的：它只被父模块里的熔断段用到，那段已按域
 // 拆去 `tool_executor/breaker.rs`，

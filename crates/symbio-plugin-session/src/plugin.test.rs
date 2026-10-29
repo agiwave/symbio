@@ -356,7 +356,7 @@ async fn session_clear_route_is_retired() {
 /// `get_messages`（存在性校验改走进程内 VDFS 纯接口 `get_vfs_provider` + `stat`）
 /// 与 `update`（会话 metadata 写入收敛为 `vdfs/write`）。
 ///
-/// 每条路径现在都有一个 VDFS 入口（映射见 设计文档）
+/// 每条路径现在都有一个 VDFS 入口
 /// ——除了 `chat/clear_messages`：它的替代入口（`action(<sid>/message, "clear")`）
 /// 后来也随功能一起下掉了，因为「清空历史」与「删除会话」在用户眼里是同一件事。
 /// 与 `session/clear` 同理：退役不会让任何既有测试变红，因此需要一条**正向**的

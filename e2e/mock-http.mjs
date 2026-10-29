@@ -126,7 +126,7 @@ const server = http.createServer(async (req, res) => {
     );
   }
 
-  // ---------- Telegram Bot API 形状（ 的本地靶子） ----------
+  // ---------- Telegram Bot API 形状（t70 的本地靶子） ----------
   //
   // 真实端点是 `POST {api_base}/bot<token>/sendMessage|getUpdates`，路径里带
   // token ⇒ 不能按字面量匹配，按前缀模式认。回包形状对齐 Bot API：
@@ -142,7 +142,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ ok: true, result: [{ update_id: 100100 }] }));
   }
 
-  // ---------- 搜索服务形状（ ⑤ 的本地靶子） ----------
+  // ---------- 搜索服务形状（t72 的本地靶子） ----------
   //
   // `web_search` 的三家上游路径是供应商契约（Tavily/Serper `POST /search`、
   // DuckDuckGo HTML `GET /html/?q=…`），配置只替换基址 ⇒ mock 按路径认：

@@ -219,7 +219,7 @@ pub fn llm_build_tool_message(
 
 // ==================== 建树折叠（`presentation_tree` 的节点侧） ====================
 //
-// 建树策略的 flat 折叠（[]）。`grouped` 是今天行为：本轮 reasoning/text/tool_call
+// 建树策略的 flat 折叠。`grouped` 是今天行为：本轮 reasoning/text/tool_call
 // 挂 `Skeleton{run}` 根下；`flat` 把本轮**响应骨架的直接子节点**升到会话根
 // （`parent_id: None`），工具结果仍挂自己的 tool_call 骨架下（那是「工具调用内部
 // 有自己的骨架」，与建树策略正交）。前端只看 `parent_id`、**不知道这个开关**——
@@ -231,7 +231,7 @@ pub fn llm_build_tool_message(
 // grouped 的「骨架子树」逐字等价，遍历器多一条并集即可。`grouped` 从不写这个键，
 // 存量数据零字节改动，两档各自可独立回退。
 
-/// 建树策略 —— 后端组树时新节点 `parent_id` 的挂法（[]）。
+/// 建树策略 —— 后端组树时新节点 `parent_id` 的挂法。
 ///
 /// 这是一个**纯后端旋钮**：前端只按 `parent_id` 插树，不知道本开关存在，切档
 /// 前端零代码改动（这是本任务判据的核心）。档间差异只在「本轮节点挂会话根，

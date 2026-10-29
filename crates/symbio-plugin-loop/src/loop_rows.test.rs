@@ -2572,7 +2572,7 @@ fn writes_closed_admits_declared_and_protocol_only() {
     );
 }
 
-// ── 本次 drive 的 `now`：只来自唤醒事实（判据 12 · ）──────────────────
+// ── 本次 drive 的 `now`：只来自唤醒事实（判据 12）──────────────────
 
 /// 「这份日志在 `now` 这一刻有没有到期的在途」——租约没有行，判据读视图。
 fn any_stale(events: &[Event], now: i64) -> bool {

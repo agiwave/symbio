@@ -214,7 +214,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     );
 }
 
-/// `to` 是**数据**（[D-067](../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")， 的单测判据）：
+/// `to` 是**数据**（[D-067](../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）：
 /// 来源主体由调用方传入——对等主体向「把消息交进来的那个主体」立约，不再写死
 /// 本机用户。缺省回落 `PRINCIPAL_USER` 的行为由上面的用例钉住（传入的就是它）。
 #[test]
@@ -395,7 +395,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
 /// 且 `check_all` 全绿（溯源 100%）。
 ///
 /// 端到端接线由 `turn_exec.test.rs::full_turn_lands_memory_and_learning_facts` 带反向
-/// 自检覆盖；本用例钉的是**巩固要用刷新后的快照**——编码 刚写下的那条必须对巩固
+/// 自检覆盖；本用例钉的是**巩固要用刷新后的快照**——编码刚写下的那条必须对巩固
 /// 可见（先巩固后编码会让第 4 条永远等不到代数 1）。
 #[test]
 fn record_learning_wires_all_three_memory_steps() {

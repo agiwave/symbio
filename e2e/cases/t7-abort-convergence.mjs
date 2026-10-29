@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 // 走真实双入口（REPL stdin 发送 + gateway `POST /api/v1/invoke` 中止），与
 // Tauri 前端同构。one-shot CLI 一轮即退、进程内 gateway 随之消失，因此必须长驻。
 // 钉的不变量：
-// - 中止后**不得有节点停在 streaming/pending**（ converge_inflight 职责）；
+// - 中止后**不得有节点停在 streaming/pending**（converge_inflight 职责）；
 // - 会话节点 attributes.outcome = "aborted"（经 vdfs/stat 真实边界读取）；
 // - Turn 根 → Aborted，Turn 子节点 → Completed（abort_terminal_of 契约）。
 import {

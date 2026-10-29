@@ -239,7 +239,7 @@ pub struct DispatchOutcome {
     /// 等待用户时卡片载荷（工具自决的 `prompt` 形状：审批卡 / 提问卡不同）。
     ///
     /// **它是事实的一部分**：`needs_user_action` 只说明「这轮停在等用户」，而恢复
-    /// （`resume`）要拿 `meta.prompt` 复现那张卡。 起读路径走 WAL 重建 ⇒ 这张卡
+    /// （`resume`）要拿 `meta.prompt` 复现那张卡。读路径走 WAL 重建 ⇒ 这张卡
     /// 必须能从事实折出来，故随载荷入格（`Some` 仅当 [`Self::needs_user_action`]）。
     /// 运行器不认识它的形状——原样透传（与 `text` 同一条：只搬数据，不解释）。
     pub prompt: Option<serde_json::Value>,

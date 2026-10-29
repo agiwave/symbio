@@ -48,7 +48,7 @@ impl SessionStore {
     /// 不是这个句柄（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构") §1）。
     ///
     /// `Ok(None)` = 没有事实源（临时会话 / 目录不存在）；`Err` = 目录在、事实源
-    /// **打不开**——后者是 的真失败，调用方不得当成「没有事实源」静默跳过。
+    /// **打不开**——后者是真正的失败，调用方不得当成「没有事实源」静默跳过。
     pub(crate) fn facts(&self, session_id: &str) -> Result<Option<Arc<EventWalStore>>, String> {
         let mut cache = self.facts.lock().expect("会话事实源表锁中毒");
         if let Some(store) = cache.get(session_id) {

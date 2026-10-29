@@ -128,7 +128,7 @@ impl SessionPlugin {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;
         let mut messages = ordered(overlay_live(session.messages, live));
-        // 呈现投影（[]）：转写列表与会话叶子是同一份数据的两个地址，必须给
+        // 呈现投影：转写列表与会话叶子是同一份数据的两个地址，必须给
         // 同一棵树——`session_content` 用同一个 `flatten_whole_tree`、同一个档位，
         // 这里跟着投一次，否则流式期间两条路径分叉（`grouped` 档下即时返回、零改动）。
         let mode = self.presentation_mode().await;

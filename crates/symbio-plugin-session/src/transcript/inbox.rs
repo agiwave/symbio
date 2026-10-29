@@ -181,8 +181,8 @@ impl PreemptionDecider {
     ///
     /// `{ principal: session/reflex, pattern: decider, capabilities: [judge.intent],
     /// budget_ms: 80, scope: root }`——五个字段全部**取实**，与 DE-037 §3 表逐字相符：
-    /// principal/pattern/capabilities 同源于授权表那一行（[] 落地的
-    /// `PRINCIPAL_REFLEX` 窄行），budget = 反射档，scope = root。
+    /// principal/pattern/capabilities 同源于授权表那一行（`PRINCIPAL_REFLEX`
+    /// 窄行），budget = 反射档，scope = root。
     ///
     /// 判定者必须有**行**：若 `decide` 被直驱、预算由调用方现算、规格从不构造，就是
     /// 「判定真、行假」。本构造点让预算与能力有了随主体走的载体，读方见

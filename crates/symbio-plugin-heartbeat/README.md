@@ -92,5 +92,5 @@ impl: done
 
 ### D-077 心跳片的落点定为一层的插件目录：卸载单位与第二个消费单位都由它给出
 
-[D-076](README.md "crates/symbio-plugin-heartbeat/README") 把心跳裁成两件事并逐口定了归属，2a 已把落格与参数推导搬进 `transcript/autonomous.rs`；那条末尾留下一道没答的题——「标记词汇表进不进 core 由 2b 的切片落点 决定」，而那个落点本身是新的形状裁决。本决策就答这一题：调度半（间隔 / 抖动 / 空闲基线 / 常驻循环 / 设置工具 / 选项族那一行）住在哪。
+[D-076](README.md "crates/symbio-plugin-heartbeat/README") 把心跳裁成两件事并逐口定了归属，落格与参数推导已经搬进 `transcript/autonomous.rs`；那条末尾留下一道没答的题——「标记词汇表进不进 core 由调度半的落点决定」，而那个落点本身是新的形状裁决。本决策就答这一题：调度半（间隔 / 抖动 / 空闲基线 / 常驻循环 / 设置工具 / 选项族那一行）住在哪。
 

@@ -427,8 +427,7 @@ await-tools     72  批次收尾：产物格 / 等待进展格 / 交换累加 / 
 （[`report_due`](../../../symbio-core/src/decl/mod.rs) v6 的 `tool_rounds`，与 `Prepared` 里的活计数器
 `tool_round` 同一个读数——前者的写方就是模型应答本身）。静默时长与配额同样由
 `report_due` 算出，四格一起构成汇报行的 `due`。**按工具轮写的判据在这一层恒假**，而这类旋钮的默认值恰好也是「不限制」——
-恒假与没配长得一样，没有信号能区分（裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")；
-fade 判定归 该批）。
+恒假与没配长得一样，没有信号能区分（裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
 
 `persist_turn` 里**没有**工具分发路径：v1 外壳那段 `process_tool_calls_async` 分支的进入条件
 （`TurnOutput.tool_calls` 非空）在 v2 恒不成立，随 [DE-014 步骤 5](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 删除；

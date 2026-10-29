@@ -68,7 +68,7 @@ export default defineCase('T14 会话期间零回读（无 stat / read / list）
     const routes = routeTrace(r.stderr);
     // 留痕本身要有内容——路由开关失效时不能退化成「零回读」的假绿灯。
     assert(routes.length > 0, `路由留痕为空（SYMBIO_ROUTE_LOG 失效？）`);
-    // 「恰好一次会话请求」在输入面双轨退役（ 步②）后改判**地址形状**：
+    // 「恰好一次会话请求」在输入面双轨退役后改判**地址形状**：
     // 会话的收件箱 `<根>/session/<sid>/inbox` 恰好被写一次。带地址的留痕之所以
     // 必需——`vdfs/write` 这一条路由上同时跑着两件事（启动期落会话 metadata、
     // 本轮入队），只看路由名会把它们混为一件、也会把「选项变了多落一次」误判为

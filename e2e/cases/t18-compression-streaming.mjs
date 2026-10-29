@@ -269,7 +269,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
 
     // ── 阶段 5：重试恢复（F）——绕过熔断、删除-重建、成功 ──
     //
-    // 恢复入口随输入面双轨退役改走节点动作（ 步② / [D-066]）：
+    // 恢复入口随输入面双轨退役改走节点动作（[D-066]）：
     // 曾经的 `session/chat/send` + `resume.action = "retry_compaction"` 等价于
     // `action(<sid>/message/<失败压缩节点 id>, "retry_compaction")`。
     const retryAnchor = rt.changes.length;

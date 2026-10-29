@@ -20,7 +20,7 @@ pub enum NodeRole {
 }
 
 /// 节点**形状**——五值闭集（`body` / `notice` / `skeleton` / `interaction` / `typing`），
-/// 是前端呈现的**唯一分派轴**（[D-070 §决策 3]，[]）。这五值是**纯 UI 形状**概念
+/// 是前端呈现的**唯一分派轴**（[D-070 §决策 3]）。这五值是**纯 UI 形状**概念
 /// （展开叶 / 折叠叶 / 容器 / 交互 / 占位），不含任何业务。同 shape 内的业务变体
 /// （run/tool/reasoning/compression…）走 `meta.style_tag`，**只在后端作业务判据**，
 /// 前端从不读它——业务差异呈现靠 `title`/`icon`/`actions` 数据（[D-070 §决策 2]）。
@@ -33,7 +33,7 @@ pub enum NodeRole {
 /// **不在本枚举**：它们只存在于存量 VDFS 属性里，经 [`legacy_shape_to_style_tag`]
 /// 在 `message_of_node`（宿主的读边界）一次性折叠成新形态 + `style_tag` 注入。
 ///
-/// 决策依据：[D-070 §决策 1 / 3]·父批：[]。
+/// 决策依据：[D-070 §决策 1 / 3]。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -51,7 +51,7 @@ pub enum NodeKind {
     Skeleton,
     /// 等待用户回应（`ask_user` 提问或工具执行前确认）
     Interaction,
-    /// 进行中的占位（前端合成，见 []）
+    /// 进行中的占位（前端合成）
     Typing,
 }
 
@@ -87,7 +87,7 @@ pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'stati
 
 /// **style_tag 词表**（[D-070 §决策 3]）——同一 shape 下的**后端业务注记**。
 ///
-/// [] 起它**不再是前端呈现分派轴**：前端只按 `NodeKind` 五值 + `title`/`icon`/`actions`
+/// 它**不再是前端呈现分派轴**：前端只按 `NodeKind` 五值 + `title`/`icon`/`actions`
 /// 数据渲染，从不 `switch(style_tag)`。本词表住在 `meta` 里，只服务后端业务判据
 /// （`is_run` / `is_tool_call` / `is_reasoning` / `is_compression`）与 LLM 请求重建。
 /// 后端认识业务天经地义；前端不认。加一个业务变体 = 加一行常量 + 后端填 `title`/`icon`，前端零改动。
@@ -330,18 +330,18 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 
-    /// 呈现标题（[D-070 §决策 2 / 3]，[]）：后端在构造节点时填的**面向用户显示文本**
+    /// 呈现标题（[D-070 §决策 2 / 3]）：后端在构造节点时填的**面向用户显示文本**
     /// （思考="思考过程" / 压缩="上下文压缩" / 工具=工具名 / 轮=智能体名）。
     /// 前端**照数据显示**，不再按业务类型查表生成——这是"前端不懂业务"的落点之一。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
-    /// 呈现徽标标识（[]）：后端填的**图标词**（不是颜色、不是业务词）；前端把标识
+    /// 呈现徽标标识：后端填的**图标词**（不是颜色、不是业务词）；前端把标识
     /// 映射到 UI 资产表（class→svg 那种映射，不是 `switch(type)`）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
 
-    /// 本节点**可发起的恢复动作**（[D-070 §决策 3]，[]）：后端算好「这个节点现在
+    /// 本节点**可发起的恢复动作**（[D-070 §决策 3]）：后端算好「这个节点现在
     /// 能重试 / 审批 / 补参 / 回答 / 重跑压缩」中的哪几种，随节点下发。前端只做
     /// 「列表里有 `retry` 就画重试按钮」的**数据渲染**，不再按业务类型（tool/compression/run）
     /// 反推该发哪种动作——那是前端最后一处业务耦合，本字段把它搬回后端。
@@ -510,7 +510,7 @@ impl ChatNode {
             .and_then(Value::as_str)
     }
 
-    /// 写 `meta.tool_name`（链式构造 helper， 构造侧）。`None` 不写
+    /// 写 `meta.tool_name`（链式构造 helper，构造侧）。`None` 不写
     /// （缺席=没有，不往 meta 里塞 null）。
     pub fn with_tool_name(mut self, name: Option<String>) -> Self {
         let Some(name) = name else { return self };
@@ -564,7 +564,7 @@ impl ChatNode {
             .and_then(Value::as_str)
     }
 
-    /// 写入 `meta.style_tag`（链式构造 helper， 构造侧）。
+    /// 写入 `meta.style_tag`（链式构造 helper，构造侧）。
     ///
     /// `meta` 已有对象则并入该对象；`meta` 是非对象 JSON（不该发生）时原样保留、不注入。
     pub fn with_style_tag(mut self, tag: &'static str) -> Self {
@@ -589,7 +589,7 @@ impl ChatNode {
 
     /// 本节点是不是「推理正文」（`Notice` + tag `reasoning`）。
     ///
-    /// []：reasoning 从 `Body + tag` 归位到 `Notice`（折叠叶，[DE-019 §3]）——
+    /// reasoning 从 `Body + tag` 归位到 `Notice`（折叠叶，[DE-019 §3]）——
     /// 与 compression 同格，靠 `style_tag` 在后端区分。
     pub fn is_reasoning(&self) -> bool {
         self.msg_type == Some(NodeKind::Notice)
@@ -598,14 +598,14 @@ impl ChatNode {
 
     /// 本节点是不是「普通正文」（`Body`）。
     ///
-    /// []：reasoning 已离开 `Body`，故 `Body` 无需再排除 reasoning tag。
+    /// reasoning 已离开 `Body`，故 `Body` 无需再排除 reasoning tag。
     pub fn is_text(&self) -> bool {
         self.msg_type == Some(NodeKind::Body)
     }
 
     /// 本节点是不是「压缩记录」（`Notice` 且**不是** reasoning）。
     ///
-    /// []：`Notice` 现在同时承载 reasoning 与 compression，裸判 `msg_type==Notice`
+    /// `Notice` 现在同时承载 reasoning 与 compression，裸判 `msg_type==Notice`
     /// 会把思考也算成压缩——压缩判据必须显式排除 reasoning。存量无 tag 的裸 `Notice`
     /// 仍按压缩兜底（历史上 compression 是唯一 Notice 变体）。
     pub fn is_compression(&self) -> bool {

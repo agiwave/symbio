@@ -45,7 +45,7 @@ pub(crate) fn request_source_principal(ctx: &dyn symbio_core::PluginInvokeReques
 /// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。它有**真读方**：写侧收束闸 `turn_runner::closure_gate` 读规格自己的这份集合（`actor_can_land_speech` / `actor_can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`pattern_for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
 /// | `budget_ms` | 主体的**声明档**：由 `pattern` 派生（[`declared_budget`]——模式三值本来就按时延分）。它**不是**本幕的预算——本幕的档位要等轮首四行跑完才折得出来（`D-223` 订正 1），而主体在幕首就建（`D-222` 订正 3）。本幕实际用的档与预算归 `turn.dispatch` 那一格（`chat_loop::land_dispatch` 由档位直接折 `budget_ms`），`I3` 读的永远是那一格 |
-/// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算，[]） |
+/// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算） |
 ///
 /// 决策 D-065 见 [D-065](../../../../docs/003-design/011-Agent目录规范.md#d-065-对等侧收束commitmentasserted-缺的不是写方而是对等-offerassert②-与-③-同一批收束格按种类判 "D-065")
 ///
@@ -65,7 +65,7 @@ pub(crate) fn request_actor_spec(
     use symbio_core::{pattern_for_principal, ActorSpec, PluginInvokeRequestExt};
     let principal = request_principal(ctx);
     // 绑定即登记（[D-100]）：登记的主 owner 是**会话创建点**
-    // （`session::commands::session_upsert` 的 create 分支，[]）；这里只在
+    // （`session::commands::session_upsert` 的 create 分支）；这里只在
     // 「本请求显式改写了身份」（请求级 `agent_id`）或临时会话没有创建点时做
     // **幂等兜底**——同一会话重绑只替换自己那一条，行仍随会话回收。
     //
@@ -436,7 +436,7 @@ pub struct ChatOrchestrator {
     /// 那句开场白（本轮照旧进工具循环），真实答复（`Answered`）不受影响。为什么独立于
     /// `compose_enabled`：后者关掉会连答复一起没，本开关只削派活前的旁白。
     pub opening_enabled: bool,
-    /// 建树策略的**请求级快照**（`TurnSettings::presentation_tree`，[]）。
+    /// 建树策略的**请求级快照**（`TurnSettings::presentation_tree`）。
     ///
     /// 与 `classify_enabled` / `compose_enabled` 同一条取值纪律：组树档在一次请求生命周期
     /// 内不变，取一次快照即可。`flat` 下本轮响应骨架的直接子节点升根（见
@@ -542,7 +542,7 @@ impl ChatOrchestrator {
                     // 答案取自思考：这一格就是正文（`Body`），不挂 reasoning tag。
                     finalized
                 } else {
-                    // 独立思考：归位 `Notice`（折叠叶，[]），呈现（title/icon）
+                    // 独立思考：归位 `Notice`（折叠叶），呈现（title/icon）
                     // 由前后端交互面统一派生，不在这里写；tag 只作后端业务注记。
                     let mut n = finalized;
                     n.msg_type = Some(NodeKind::Notice);

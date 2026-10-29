@@ -11,7 +11,7 @@
 //! 的 `acyclic_deps` / `rework_bounded` 把算法层抽成了 std-only 内核
 //! （`invariants/kernel.rs`，`dep_graph_core` / `rework_core`），本程序 `#[path]`
 //! 包含**同一个文件**。此前本文件自己又写了一遍 Kahn——生产改环检测、这里
-//! 仍全绿的「验的东西与跑的不是同一个」，正是 要堵的失效。
+//! 仍全绿的「验的东西与跑的不是同一个」，正是这一层要堵的失效。
 //!
 //! 生产与这里的分工：生产 `acyclic_deps(&[Event])` 从**任务格事件切片**解析出
 //! `(task_id, depends_on)` 喂内核；本程序从**自造任务树**构造同样的输入喂

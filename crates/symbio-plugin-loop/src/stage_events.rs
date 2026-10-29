@@ -199,7 +199,7 @@ impl StageFact {
         self
     }
 
-    /// 恢复幕：这一轮以哪种恢复动作续写（ `resume_allowed` 来源）。
+    /// 恢复幕：这一轮以哪种恢复动作续写（`resume_allowed` 来源）。
     ///
     /// `identity` = 本幕的序数：同一轮可以先后恢复两次**同类**动作，只按
     /// `(turn, round, stage, kind)` 记会把第二次静默吸收掉（幂等键撞上就会让
@@ -210,7 +210,7 @@ impl StageFact {
         fact
     }
 
-    /// 第几次请求（ `round` 来源）。
+    /// 第几次请求（`round` 来源）。
     ///
     /// `identity` = 本幕的锚（`drive_seq`）：同一轮号的续写幕会从 `round = 0`
     /// 重来，只按 `(turn, round, stage)` 记会撞首幕的幂等键，于是撞格取回首幕

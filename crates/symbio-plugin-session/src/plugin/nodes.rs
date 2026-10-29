@@ -828,7 +828,7 @@ pub(crate) fn session_content(
     // （`vdfs_provider` 的两个 Read 分支）在同一个作用域里做过对账后传入，
     // 仅为让"两处是同一份数据的两个地址、对账口径只有一份"这件事在签名上可见。
     _reconcile_with: &str,
-    // 建树策略（[]）：呈现读侧的投影档位。调用方（`vdfs_provider` 的两个
+    // 建树策略：呈现读侧的投影档位。调用方（`vdfs_provider` 的两个
     // Read 分支）从本插件 `SessionConfig` 取值传入——`grouped` 档下投影即时返回、
     // 形状与今天逐字相同，`flat` 档把本轮响应骨架的直接子节点升根。
     mode: super::super::config::PresentationTree,

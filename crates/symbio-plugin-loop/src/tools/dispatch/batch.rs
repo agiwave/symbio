@@ -20,7 +20,7 @@
 //!
 //! 判据（「这段错了谁会红」）：批内事件与父节点终态用例红——`tool_executor.test.rs`
 //! 的 `process_tool_calls_async` 组（中止、交互 break、闸门拒止、协议失败、
-//! 待用户审批的 `WaitingUserAction`）、事件批序断言，以及 的并行组。
+//! 待用户审批的 `WaitingUserAction`）、事件批序断言，以及并行执行的用例组。
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, VecDeque};
@@ -273,7 +273,7 @@ async fn prepare_call(
         });
     seen_calls.push(signature);
     if repeat_note.is_some() {
-        // 「要不要真的拦」留给实际数据判（见 ），先把绕圈的次数记进日志。
+        // 「要不要真的拦」留给实际数据判，先把绕圈的次数记进日志。
         plugin_warn!("session", "[Tool] 同参重复调用：{name}（调用 id={id}）");
     }
 
@@ -455,7 +455,7 @@ async fn emit_terminal(
                 obj.insert("failure_kind".into(), json!("overflow_dropped"));
             }
             tool_messages.push(tool_msg);
-            // 结果子节点必须有父节点终态配套（同 工具终态不变量）：否则前端永远转圈。
+            // 结果子节点必须有父节点终态配套（同工具终态不变量）：否则前端永远转圈。
             if let Some(parent_update) = emit_parent_finalized(
                 sink,
                 context_messages,

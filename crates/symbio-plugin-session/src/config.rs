@@ -334,7 +334,7 @@ pub struct SessionConfig {
     /// 建树策略（`grouped` / `flat`，出厂默认 `grouped` = 今天行为；见 [`PresentationTree`]）。
     ///
     /// 后端组树时决定本轮节点的 `parent_id` 挂哪，前端只按 `parent_id` 插树、
-    /// **不知道这个开关存在**——这是 [] 判据的核心：切档前端零代码改动。
+    /// **不知道这个开关存在**——这是该判据的核心：切档前端零代码改动。
     /// 认不出的写法按出厂默认处理（手写 `PLUGIN.yml` 写错不该改变组树），与
     /// `SettingConfig::verbosity` 同一条读侧容错纪律。`deep` 档随子会话转播桥
     /// 改造在 149-ii 接线。

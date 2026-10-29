@@ -18,7 +18,7 @@ use super::TOOL_NAMESPACES;
 /// **主体族**（[D-069 §决策 1]）——四值闭集。
 ///
 /// `role` 已退出协议顶层，`kind` 是主体族的唯一承载点。
-/// 因此 [] 里 `NodeRole::User` ↔ `PrincipalKind::Person`，`Assistant` ↔ `Agent`，
+/// 因此映射里 `NodeRole::User` ↔ `PrincipalKind::Person`，`Assistant` ↔ `Agent`，
 /// `Tool` ↔ `Tool`，`System` ↔ `System`；读侧一次性别名靠这套映射把旧消息里的 role 补进 kind。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -47,7 +47,7 @@ impl PrincipalKind {
     /// 是否智能体一族——`visible_to` 的运行时判据（[D-069 §决策 3]）。
     ///
     /// 注意与 `symbio_core::view::is_agent_id` 的分工：那条**从 id 反推 kind**（用于
-    /// 只有字符串的授权表判据），本条**从结构体字段直接读**。[] 之后协议携带 `Principal`
+    /// 只有字符串的授权表判据），本条**从结构体字段直接读**。协议携带 `Principal`
     /// 结构体，`visible_to` 会切到 `kind.is_agent()`——`is_agent_id` 只服务 id 层的
     /// 可见域判据（`view::visible_to`）。
     pub fn is_agent(&self) -> bool {
@@ -176,7 +176,7 @@ impl Principal {
     ///   （`agent:main` ⇒ `{Agent, session/main}`）。
     /// - 裸 `user` ⇒ `{Person, person/local}`（今天的会话属主）。
     ///
-    /// 只在 [] 的一次性读侧别名里用；新写入点直接构造 `Principal` 结构体，
+    /// 只在一次性读侧别名里用；新写入点直接构造 `Principal` 结构体，
     /// 不走这条映射（构造即定型）。
     pub fn from_legacy(s: &str) -> Principal {
         // 新形态：`<ns>/<name>` 已带 namespace。

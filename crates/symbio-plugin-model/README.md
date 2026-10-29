@@ -67,5 +67,5 @@ DE-002 选 `tract-onnx` 而弃 ORT，理由有三（零 C/C++ 编译、不引入
 
 ### D-106 模型消费端口归一：内部请求共享 LlmAdapter，未识别协议不静默兜底
 
-`LlmAdapter` + `TokenIssuer`。 `classify/decide.rs` 与 `compose/wording.rs` 改经 `ProviderLlmAdapter::for_turn` + `generate_turn(&FullModel, …)`；内部请求的形态 一项不少——工具集 `&[]`、出口 `SilentDeltas`、system prompt 就地构造、中止走 调用方给的共享信号。
+`LlmAdapter` + `TokenIssuer`。`classify/decide.rs` 与 `compose/wording.rs` 改经 `ProviderLlmAdapter::for_turn` + `generate_turn(&FullModel, …)`；内部请求的形态一项不少——工具集 `&[]`、出口 `SilentDeltas`、system prompt 就地构造、中止走调用方给的共享信号。
 

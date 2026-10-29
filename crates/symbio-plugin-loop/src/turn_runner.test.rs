@@ -3931,7 +3931,7 @@ mod tool_round_tests {
     /// 与 [`ReasoningOnlyFinalLlm`] **只差一个字段**：末轮同样是「正文空 + 只有思考」，
     /// 但 provider 说这次响应是被 `max_tokens` 掐断的（`finish = length`）。
     /// 两个用例并排的意义就在这对差异上——把 `finish` 改成 `Stop` 本用例必红，
-    /// 把 `Stop` 改成 `Length` 上面那条必红（[]：判据只认「思考写完没有」）。
+    /// 把 `Stop` 改成 `Length` 上面那条必红（判据只认「思考写完没有」）。
     struct TruncatedReasoningFinalLlm {
         prompts: Arc<Mutex<Vec<Vec<PromptMessage>>>>,
     }
@@ -4646,7 +4646,7 @@ mod reflex_turn_tests {
     }
 }
 
-/// 作用域上限：**委派不放大权威**（[]）。
+/// 作用域上限：**委派不放大权威**。
 ///
 /// `closure_gate` 的两道——主体自己那一行、以及 `scope = child <parent>` 时的父主体那道。
 /// 本模块钉的是**第二道**：同一份能力集，换 `scope` 必须换结果（反向用例），

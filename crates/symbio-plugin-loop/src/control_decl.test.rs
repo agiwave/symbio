@@ -345,7 +345,7 @@ fn in_flight_drops_the_attempt_retry_voided() {
     );
 }
 
-/// 一条带租约的派发事实（ `sent` 形状）。
+/// 一条带租约的派发事实（`sent` 形状）。
 fn sent_at(id: &str, attempt: u64, lease_ms: u64, cap: u64, ts: i64) -> Event {
     ev_at(
         1,

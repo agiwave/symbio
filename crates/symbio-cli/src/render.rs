@@ -37,8 +37,8 @@ use crate::protocol::{is_progress_surface, meta_of, waiting_card, WaitingCard, M
 
 /// 本终端认识的**呈现面**——由 [`ChatNode`] 谓词折出来，而不是直接读 `msg_type` 变体名。
 ///
-/// 为什么要这一层：`NodeKind` 正处于双形态共存档期（旧六值 ↔ 新形态 + `meta.style_tag`，
-/// ），变体名会随写方迁移而删；谓词两形态都认，折一次就与协议形状解耦了。
+/// 为什么要这一层：`NodeKind` 正处于双形态共存档期（旧六值 ↔ 新形态 + `meta.style_tag`），
+/// 变体名会随写方迁移而删；谓词两形态都认，折一次就与协议形状解耦了。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Surface {
     /// 正文（`msg_type` 缺省也按正文处理——早期增量还没带类型）
@@ -379,7 +379,7 @@ impl Renderer {
     /// 「答完了」——可在 `auto` 模式下**没有任何人能回答那张卡**，本轮实际停在半路。
     /// 静默的代价正是「用户以为在跑，其实在等一个看不见的回答」。
     ///
-    /// CLI 不实现终端应答入口（那条按 [] 收窄为「只播报」），所以两条模式
+    /// CLI 不实现终端应答入口（那条收窄为「只播报」），所以两条模式
     /// 都到此为止；区别只在「没人能答」与「请在桌面端答」。
     fn announce_waiting(&mut self, card: &WaitingCard) {
         if self.wrote_text {

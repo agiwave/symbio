@@ -20,7 +20,7 @@ import './_selfrun.mjs';
 //
 // ## 与 t55 的分工
 //
-// t55 判「多工具轮的结果累进 + 末轮思考收束」（ 的单点守卫）；本用例判
+// t55 判「多工具轮的结果累进 + 末轮思考收束」（这一步的单点守卫）；本用例判
 // **逐请求的角色序列与发言进场时序**——重放结构的全量形状，不含工具轮细节的
 // 语义（那归 t55 / t26）。
 import { join } from 'node:path';
@@ -144,7 +144,7 @@ export default defineCase(
         '塌缩消息应带工具名（结果与调用对得上）',
       );
 
-      // ── ⑤ 结果跨轮存活（ 失忆族的结构面）────────────────────────────
+      // ── ⑤ 结果跨轮存活（失忆族的结构面）────────────────────────────
       assertToolResultCarriedForward(
         reqs,
         { toolName: TOOL, resultText: ECHO_TEXT, fromIndex: 1 },
