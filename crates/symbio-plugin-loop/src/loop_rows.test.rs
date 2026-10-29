@@ -2539,35 +2539,13 @@ fn the_row_table_and_the_binding_table_agree() {
     }
 }
 
-/// 过渡豁免是一条**有名有姓、会自己变红**的名单（D-123 决策 2）。
-///
-/// 它放宽的是运行期写入封闭，每加一条都要回答「为什么这条执行体声明不了这一格」——
-/// `execute` + `chat.assistant.fallback` 那一条的理由与删除条件记在
-/// `ActorEntry::transitional` 的头注（步 5c 之后：收束格全部归 `close` 执行体，
-/// 只剩两条**控制面**失败——它们在日志上没有模型的终局事实，收束行开不出账）。
-/// 名单变长必须先过这条用例。
-#[test]
-fn the_transitional_exemptions_are_pinned() {
-    let actual: Vec<(&str, &[&str])> = super::ACTORS
-        .iter()
-        .map(|e| (e.decl.name, e.transitional))
-        .filter(|(_, list)| !list.is_empty())
-        .collect();
-    // 名单**空**（D-166）：唯一一条豁免是 `execute` 写的兜底格，而那一笔随「模型往返
-    // 的派发」搬到了 `relay`——它的出口是引擎独占的 `sent` / `failed`，与 `close` 的
-    // 出口不同族，于是那两格**声明得了**（`ACTOR_RELAY.writes`），不再需要豁免。
-    // 从「一条豁免」到「零条」也是判据的一半：豁免只许随写方搬走而消失，不许为了
-    // 让读数好看而新增。
-    let expected: Vec<(&str, &[&str])> = Vec::new();
-    assert_eq!(actual, expected, "过渡豁免名单变了——先补裁决，再改这条用例");
-}
-
 /// 运行期写入封闭的口径（D-123 决策 2 的那一句「协议格豁免，领域格必须声明」）。
 ///
-/// 派发器读账本用的就是这一个谓词：这里钉住三类各一条，越界那一类必须为假——
-/// 名单外的领域格正是这条判据要拦的事。
+/// 派发器读账本用的就是这一个谓词：这里钉住两类各一条，越界那一类必须为假——
+/// 名单外的领域格正是这条判据要拦的事。**没有第三类**：声明不了的一次写出不存在
+/// （D-238——那种情形在装载期就成环，装载不上）。
 #[test]
-fn writes_closed_admits_declared_protocol_and_exempted_only() {
+fn writes_closed_admits_declared_and_protocol_only() {
     let events = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),

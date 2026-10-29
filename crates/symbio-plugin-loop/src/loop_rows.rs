@@ -267,10 +267,8 @@ const ACTOR_WAITER_TOOLS: ActorDecl = ActorDecl {
 /// 名单里那两格只在**控制面失败**时落：模型往返派不出去（行不欠 / 端口没声明）或
 /// 模型要了工具而本轮没有分发通道。两条路在日志上都没有模型的终局事实
 /// （`failed(port=model)` 落不下来）⇒ 收束行开不出账 ⇒ 兜底格只能由**手上拿着这一笔
-/// 往返的那一方**就地落。D-166 之前那一方是 `execute`（走它的过渡豁免，因为它的出口
-/// 与 `close` 的出口同族 ⇒ 声明就是一条假环）；写方搬到这里之后，本行的出口是引擎
-/// 独占的 `sent` / `failed`，与 `close` 的出口不同族，于是**声明得了**——过渡豁免
-/// 随之清空（`ACTORS` 上不再有任何一条）。
+/// 往返的那一方**就地落。本行的出口是引擎独占的 `sent` / `failed`，与 `close` 的出口
+/// 不同族，于是那两格**声明得了**（D-166）。
 ///
 /// ## 它不交回产出
 ///
@@ -442,18 +440,10 @@ const ACTOR_CONTINUE: ActorDecl = ActorDecl {
 ///
 /// 动作住在 [`turn_exec`]（它要本轮草稿与七个端口），这张表只把它指到名字上。
 ///
-/// `transitional` 是这条执行体**今天确实写得出、但 `decl.writes` 声明不了**的领域格。
-/// 声明不了不是遗漏，是装载期会红：把收束格写进一个出口与 `close` 同族的执行体名单，
-/// `close-turn` 的出口格就同时是两个执行体的出口格 ⇒ `Gap::DependencyCycle`（注①）。
-/// 账本对账因此需要一个**有名有姓、会自己变红**的过渡豁免：它只在这条表项上生效，且由
-/// `the_transitional_exemptions_are_pinned` 钉死内容——多一条就红，
-/// 而不是将错就错地放宽名单。
-///
-/// **今天这张表上一条都没有**（D-166）：唯一那条（`execute` 写兜底格）随模型往返的
-/// 派发搬到了 [`ACTOR_RELAY`]——它的出口是引擎独占的 `sent` / `failed`，与 `close`
-/// 的出口不同族，那两格因此**声明得了**。这一格保留为空列表而不是删字段：它是装载期
-/// 的判据面（「声明不了的一次写出」必须有名有姓地登记），删掉它等于下次有人需要时
-/// 只能偷偷放宽 `decl.writes`。
+/// **「声明不了的一次写出」没有出口**（D-238）：同一格被两个执行体写 ⇒ 依赖图成环
+/// （`Gap::DependencyCycle`），装载直接红。这种情形不需要一个有名有姓的豁免槽位来放行，
+/// 它的正确答案是把写方搬到出口不同族的执行体上（D-166 就是这么收的）；真要出现
+/// 「必须放行且搬不走」的写出，那是一条新裁决，不是往这张表上加一列。
 ///
 /// 这张表是**派发器的入参**（[`super::turn_exec::drive`] 的 `actors`，D-123
 /// 决策 4）：生产传 [`ACTORS`]，测试在同一张表的形状上注册别的东西。判据 14 那条
@@ -462,86 +452,68 @@ const ACTOR_CONTINUE: ActorDecl = ActorDecl {
 pub(crate) struct ActorEntry {
     pub(crate) decl: ActorDecl,
     pub(crate) run: super::turn_exec::Action,
-    pub(crate) transitional: &'static [&'static str],
 }
 
 pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_EXECUTE,
         run: super::turn_exec::run_execute,
-        // 豁免已清空（D-166）：那两格兜底写随模型往返的派发搬到了 [`ACTOR_RELAY`]，
-        // 而它的出口与 `close` 不同族 ⇒ 声明得了，不必再借豁免。
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_CLOSE,
         run: super::turn_exec::run_close,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_OPENER,
         run: super::turn_exec::run_open,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_AUTHORIZER,
         run: super::turn_exec::run_authorize,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_COURIER,
         run: super::turn_exec::run_begin_tools,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_WAITER_TOOLS,
         run: super::turn_exec::run_finish_tools,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_WAITER,
         run: super::turn_exec::run_await,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_RELAY,
         run: super::turn_exec::run_model,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_CLASSIFY,
         run: super::turn_exec::run_classify,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_COMPRESS,
         run: super::turn_exec::run_compress,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_RECALL,
         run: super::turn_exec::run_recall,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_REFLEX,
         run: super::turn_exec::run_reflex,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_SEAM,
         run: super::turn_exec::run_seam,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_REPORT,
         run: super::turn_exec::run_report,
-        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_CONTINUE,
         run: super::turn_exec::run_continue,
-        transitional: &[],
     },
 ];
 
@@ -610,12 +582,9 @@ const PROTOCOL_CELLS: &[&str] = &[
 /// 领域格」只能拿**实际写入**对账——而实际写入的唯一可信取法是日志尾段（决策 1）。
 impl Next {
     /// 账本上的这一格收不收得拢：每一格都要**在这张表里对得上一个名字**——协议五格
-    /// （引擎写）、`decl.writes`（执行体声明）、`transitional`（过渡豁免）。
-    /// 对不上就是越界，派发器不静默。
+    /// （引擎写）与 `decl.writes`（执行体声明）。对不上就是越界，派发器不静默。
     pub(crate) fn writes_closed(&self, kind: &str) -> bool {
-        PROTOCOL_CELLS.contains(&kind)
-            || self.writes.contains(&kind)
-            || self.tolerated.contains(&kind)
+        PROTOCOL_CELLS.contains(&kind) || self.writes.contains(&kind)
     }
 }
 
@@ -932,8 +901,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // 两条**控制面**失败（模型往返派不出去 / 工具批开不出来）在 D-166 之后归
     // `relay` / `waiter` 那一方就地落兜底格：它们的模型端口**没有终局事实**
     // （`failed(port=model)` 落不下来）⇒ 收束行开不出账。那两行的出口与 `close`
-    // 不同族，声明得了，所以 `transitional` 全表为空（见 [`ACTOR_EXECUTE`] 的
-    // `transitional`——字段还在，但它不是任何一行的出口）。
+    // 不同族，兜底格因此进得了 `decl.writes`（「声明不了的写出」没有豁免槽位，D-238）。
     Decl {
         name: "close-turn",
         prio: 55,
@@ -1554,8 +1522,6 @@ pub(crate) struct Next {
     /// 让派发器再查一次表，是因为「跑哪个动作」与「它写了什么」必须同源——
     /// 分两次查就能查出两份答案（D-123 决策 2）。
     pub(crate) writes: &'static [&'static str],
-    /// 这条执行体的**过渡豁免名单**（[`ActorEntry::transitional`] 的同一份，同源）。
-    pub(crate) tolerated: &'static [&'static str],
 }
 
 /// 取最小可还债；没有可还的债 ⇒ `None`（收束 / 装载失败 / 只剩 blocked 行）。
@@ -1601,7 +1567,6 @@ pub(crate) fn next(
         key: debt.key.trace(),
         action: entry.run,
         writes: entry.decl.writes,
-        tolerated: entry.transitional,
     })
 }
 

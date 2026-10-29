@@ -5106,18 +5106,13 @@ mod actor_ledger_tests {
     }
 
     /// 夹具绑定表：名单照抄生产声明（[`ACTOR_EXECUTE`]），只换手法。
-    ///
-    /// `transitional` 清空——那两条豁免是给收束格的旁路写的（d 随旁路一起删），
-    /// 留着就等于把要测的越界路径关掉。
     static ACTORS_WRITE_NOTHING: &[ActorEntry] = &[ActorEntry {
         decl: ACTOR_EXECUTE,
         run: writes_nothing,
-        transitional: &[],
     }];
     static ACTORS_WRITE_OFF_LIST: &[ActorEntry] = &[ActorEntry {
         decl: ACTOR_EXECUTE,
         run: writes_off_the_list,
-        transitional: &[],
     }];
 
     /// 本轮入参：先落用户格（与 [`super::seed_user`] 同一条纪律），执行体一律不给工具。

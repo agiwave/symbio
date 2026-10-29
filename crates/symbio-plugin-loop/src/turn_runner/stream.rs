@@ -479,9 +479,8 @@ where
     //
     //     这一格**就地落**（不走收束动作）：工具批开不出来这件事在日志上没有
     //     任何事实（`failed(port=model)` 落不下来——模型应答是好的，缺的是分发
-    //     通道），收束行因此判不出「该收束了」；它由 `execute` 执行体的**过渡
-    //     豁免**兜着（`loop_rows::ACTORS`）。生产里这一路不可达（模型调用点恒带
-    //     分发通道）。
+    //     通道），收束行因此判不出「该收束了」；兜底格写进 `waiter` 的
+    //     `decl.writes`（`ACTOR_WAITER`）。生产里这一路不可达（模型调用点恒带分发通道）。
     if !has_dispatch {
         let cost = run.started.elapsed().as_millis() as u64;
         // 这一轮没有可派的工具批：正文归刚才那条 `response` 事实，这里只记结局。

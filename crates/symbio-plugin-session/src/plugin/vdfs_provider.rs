@@ -123,7 +123,7 @@ impl SessionPlugin {
     /// WAL 重建优先**、`messages.json` 只作 v1 遗留兜底（见 `store::load_messages`）。
     /// 因此这里取 `session.messages` 拿到的就是真源那一份——本函数不再自己判断
     /// 「缓存在不在、要不要重建」：那是**存储层的职责**，在插件层再判一次就是同一条
-    /// 规矩的第二份口径（早期「缓存不在才重建」的过渡形态， 收敛掉）。
+    /// 规矩的第二份口径。
     pub(super) async fn transcript_of(&self, id: &str) -> VdfsResult<Vec<cm::ChatNode>> {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;
