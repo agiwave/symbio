@@ -169,7 +169,7 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
         // 落格失败与动作失败走**同一个出口**（`ActorError` 的语义，这里折成
         // `TurnExecExit::Failed`）：调用方只认这一条通道，不为「开轮」单开一条。
         Err(e) => Err(TurnExecExit::Failed(PluginError::InternalError(format!(
-            "v2 运行器落格失败：{e:?}"
+            "运行器落格失败：{e:?}"
         )))),
         Ok(super::TurnSessionBegin::Done(_)) => {
             Err(TurnExecExit::Failed(PluginError::InternalError(

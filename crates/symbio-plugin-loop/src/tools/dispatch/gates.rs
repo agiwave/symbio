@@ -43,7 +43,7 @@ pub(crate) struct GateReadings {
     pub(crate) mode: String,
     /// 熔断 `gate-timeout` 的起算时刻（量「这份输入已经读了多久」，）。
     pub(crate) gate_started: std::time::Instant,
-    /// 外部执行闸门判据（S8 第 20 步）。
+    /// 外部执行闸门判据（S8）。
     pub(crate) breaker: BreakerInputs,
     /// 工具自声明的行为位。
     pub(crate) decls: ToolDecls,
@@ -306,7 +306,7 @@ pub(crate) const GATES: &[GateRow] = &[GateRow {
     traces: &[RefusalTraceKind::ZeroEvent, RefusalTraceKind::Recorded],
 }];
 
-/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
+/// 闸门结论（S8，[roadmap/S09 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateDecision {
     /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
@@ -318,7 +318,7 @@ pub enum GateDecision {
     Allow,
 }
 
-/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
+/// 熔断闸门（S8，[roadmap/S09](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 ///
 /// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
 /// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。
@@ -379,7 +379,7 @@ impl CircuitBreaker {
     }
 }
 
-/// 外部执行闸（S8 第 20 步）：授权 + 时延 / 预算。判据紧贴执行窗口之前、
+/// 外部执行闸（S8）：授权 + 时延 / 预算。判据紧贴执行窗口之前、
 /// **先于 PreToolUse 钩子**——对一通马上要被拒的调用先跑钩子，等于让拒绝白白
 /// 付一次钩子往返。
 fn external_execution(ctx: &GateContext<'_>) -> Option<Refusal> {

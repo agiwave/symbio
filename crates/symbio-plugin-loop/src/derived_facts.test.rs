@@ -142,7 +142,7 @@ fn delegation(id: &str, promise: &str, ok: bool, why: &str) -> EffectInput {
     }
 }
 
-/// 代际立约（[04 §3.1 批⑧](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")，S08 §3「加格子，不加机制」）：
+/// 代际立约（S08 §3「加格子，不加机制」）：
 /// 本轮的 `agent_run` 委托落成 `commitment.opened` → `released`，**同锚在本轮开口**。
 #[test]
 fn settled_delegation_becomes_commitment_opened_then_released() {

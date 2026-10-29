@@ -880,9 +880,7 @@ async fn exhausted(st: &mut StageRuntime, detail: &str) -> Result<TurnOutcome, T
 
 /// 落格失败的统一出口（与 [`super::open_turn`] 的同一句话）。
 fn append_exit(e: symbio_core::AppendError) -> TurnExecExit {
-    TurnExecExit::Failed(PluginError::InternalError(format!(
-        "v2 运行器落格失败：{e:?}"
-    )))
+    TurnExecExit::Failed(PluginError::InternalError(format!("运行器落格失败：{e:?}")))
 }
 
 fn actor_exit(e: ActorError) -> TurnExecExit {

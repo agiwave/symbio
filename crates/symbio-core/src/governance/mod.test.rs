@@ -1,16 +1,16 @@
-//! `governance` 单测 —— S3 两步的出口判据逐条钉死。
+//! `governance` 单测 —— 出口判据逐条钉死。
 //!
-//! 第 7 步：`grants_of` / `sees_of` 成对，只有写侧 → 拒绝；
-//! 第 8 步：`vis_scope` 默认 `thread_private` → 越界读取 0。
+//! 成对：`grants_of` / `sees_of` 成对，只有写侧 → 拒绝；
+//! 默认隔离：`vis_scope` 默认 `thread_private` → 越界读取 0。
 //!
-//! [04 §3.1 批⑥](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的接线面（判定在 core、
+//! 接线面（判定在 core、
 //! 构造与调用在 core 外，故各钉一半）：`from_names` 认不出的能力名**拒绝整体构造**、
 //! `can_reply` 只问一个 `reply` 能力（调用点不复述）。
 
 use super::*;
 use crate::event::Entity;
 
-/// 验收（第 7 步）：只有写侧 → 拒绝。
+/// 验收：只有写侧 → 拒绝。
 #[test]
 fn write_only_policy_is_rejected() {
     let result = PermissionMatrix::new(vec![PrincipalPolicy {
@@ -27,7 +27,7 @@ fn write_only_policy_is_rejected() {
     );
 }
 
-/// 验收（第 7 步反向侧）：只有读侧 → 同样拒绝。
+/// 验收（反向侧）：只有读侧 → 同样拒绝。
 #[test]
 fn read_only_policy_is_rejected() {
     let result = PermissionMatrix::new(vec![PrincipalPolicy {
@@ -43,7 +43,7 @@ fn read_only_policy_is_rejected() {
     );
 }
 
-/// 验收（第 7 步）：成对策略构造成功，读写两侧都可查。
+/// 验收：成对策略构造成功，读写两侧都可查。
 #[test]
 fn paired_policy_serves_both_sides() {
     let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
@@ -67,7 +67,7 @@ fn paired_policy_serves_both_sides() {
     );
 }
 
-/// 验收（第 7 步）：fail-closed——未知主体写与读全拒。
+/// 验收：fail-closed——未知主体写与读全拒。
 #[test]
 fn unknown_principal_is_fail_closed() {
     let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
@@ -89,7 +89,7 @@ fn vis_scope_defaults_to_thread_private() {
     assert_eq!(VisScope::default(), VisScope::ThreadPrivate);
 }
 
-/// 验收（第 8 步）：默认隔离下越界读取 0。
+/// 验收：默认隔离下越界读取 0。
 #[test]
 fn thread_private_yields_zero_out_of_bounds_reads() {
     let matrix = PermissionMatrix::new(vec![

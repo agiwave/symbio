@@ -1,4 +1,4 @@
-//! `recall` 投影（S5 第 12 步，[plan/01 §9](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、
+//! `recall` 投影（S5，[DE-001 §9](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、
 //! [roadmap/S06 §3](../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")）。
 //!
 //! ## 为什么住 loop 插件（DE-024 D-201）
@@ -50,7 +50,7 @@ pub struct RecallEntry {
     pub ts: Timestamp,
     /// 内容（编码时的正文）。
     pub content: String,
-    /// 认知内容标签（七类，[plan/01 §9.1](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")；
+    /// 认知内容标签（七类，[DE-001 §9.1](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")；
     /// 「记忆类型」不是枚举，是过滤参数——加第六类只加参数）。
     pub tag: String,
 }

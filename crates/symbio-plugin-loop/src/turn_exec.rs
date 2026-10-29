@@ -39,11 +39,10 @@
 //! 而是本轮的派生副作用——运行器一处都不写，写方只有轮末这两个函数
 //! （溯源锚 = 这里原生写的 `u-{turn}` 格）：
 //!
-//! - [`super::derived_facts::record_learning`]：步 11 编码 / 步 12 检索锚 / 步 13 巩固 /
-//!   步 22 技能观测与编译；
+//! - [`super::derived_facts::record_learning`]：编码 / 检索锚 / 巩固 / 技能观测与编译；
 //! - [`super::derived_facts::record_derived`]：**效果**（`ToolBehavior::after` 交出的
 //!   草稿：承诺 / 任务表 / …，DE-025 D-207）与熔断（`CircuitBreaker::break_event`，
-//!   S8 步 20）——前者的数据来源是工具执行层交回的 `EffectInput`，后者是熔断理由，
+//!   S8）——前者的数据来源是工具执行层交回的 `EffectInput`，后者是熔断理由，
 //!   都由 [`super::tool_dispatch::SessionDispatchPort`] 经 `take_derived` 交回。
 //!
 //! 效果**不按工具名分派**：本模块只补宿主面（轮锚 / 溯源 / 主体）再问声明，具体是哪
@@ -51,7 +50,7 @@
 //!
 //! ## 写侧授权闸（判在运行器）
 //!
-//! **写侧授权闸**（[plan/01 §7](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）判的是「主体此刻
+//! **写侧授权闸**（[DE-001 §7](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）判的是「主体此刻
 //! 能否写本轮的收束格」（`reply.first` / `reply.append`），由运行器在落收束格**之前**
 //! 判（`turn_runner::closure_gate`，谓词 `can_reply` 只定义一次）。拒绝 ⇒ 收束格
 //! 不落、该轮留在未收束态（`check_all` 的 C4 报得出），本模块据 `closure_denied`

@@ -34,7 +34,7 @@ import './_selfrun.mjs';
 //
 // 批 0 的语义就是**单写者**：第二个写者不该静默地写出重复 seq，而该拿到
 // `AppendError::NotTheWriter`。这个错误经 `turn_exec` 映射成
-// `PluginError::InternalError("v2 运行器落格失败：NotTheWriter")` ⇒ 乙这一轮失败、
+// `PluginError::InternalError("运行器落格失败：NotTheWriter")` ⇒ 乙这一轮失败、
 // 退出码非零。**失败即正确**：信号可达本身就是本批要证的事。
 import { spawn } from 'node:child_process';
 import {

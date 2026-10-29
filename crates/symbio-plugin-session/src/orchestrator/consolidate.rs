@@ -75,7 +75,7 @@ pub(crate) fn consolidate_into_wal(
         Entity::Message,
         Verb::Progressed,
         // `turn = 0`：压缩不属于任何一轮——它发生在轮**边界**上，被取代的是**多轮**的
-        // 历史（与 `memory.*` 同一约定，见 plan/01 §6）。
+        // 历史（与 `memory.*` 同一约定，见 DE-001 §6）。
         0,
         principal,
     )

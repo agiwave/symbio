@@ -1,9 +1,9 @@
-//! `adapters` —— 外部资源的唯一接缝（v2 ⑤，[plan/05 §3.3](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")）。
+//! `adapters` —— 外部资源的唯一接缝（⑤，[DE-018 §3.3](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")）。
 //!
 //! ## 为什么令牌住这里
 //!
 //! 「能不能碰模型」本质是「能不能拿到外部资源句柄」——归属 ⑤ 是唯一的正确位置
-//! （[plan/05 §3.3](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")）。时延闸门不是新机制，
+//! （[DE-018 §3.3](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")）。时延闸门不是新机制，
 //! 就是本包的**依赖注入策略**：`assemble` / 令牌签发按档位给证，调用方拿到的
 //! 令牌类型决定它能调哪些方法——**反射档超时不是被检测到，而是不可能发生**。
 //!
@@ -11,7 +11,7 @@
 //!
 //! 形状逐字来自可执行论证
 //! `docs/003-design/verify/latency_gate.rs`；
-//! 四层预算表来自 [plan/01 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")。
+//! 四层预算表来自 [DE-001 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")。
 //!
 //! ## 「依赖」的边界（诚实划界）
 //!
@@ -26,7 +26,7 @@ use crate::PromptMessage;
 use crate::{CapabilityMeta, ModelFinishReason, TurnToolCallInfo};
 use crate::{ModelSpend, ModelUsage};
 
-// ── 四层时延（[plan/01 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，一等契约） ──
+// ── 四层时延（[DE-001 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，一等契约） ──
 
 // 档位本身是共享语法，住 `symbio_kernel`；令牌与签发仍是本模块的部署策略。
 pub use symbio_kernel::LatencyTier;
@@ -229,7 +229,7 @@ pub trait LlmAdapter: Send + Sync {
         messages: &[PromptMessage],
     ) -> Result<String, AdapterError>;
 
-    /// 埋点版生成（SLO 校准，[plan/04 §1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+    /// 埋点版生成（SLO 校准，[DE-016 §8](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// 除文本外返回 **adapter 边界实测耗时**（毫秒）。默认实现包一层
     /// `Instant`——桩与真实适配器零改动共享；调用方把它写到 final 事件的
     /// `cost_ms`，成本台账（③ cost_ledger）与熔断判据从此有了真实来源

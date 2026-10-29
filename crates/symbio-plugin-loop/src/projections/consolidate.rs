@@ -1,5 +1,5 @@
-//! `consolidate` —— 巩固的接受边界（S5 第 13 步，[plan/01 §9.3](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、
-//! [plan/05 §4](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构") ③ 加 consolidate）。
+//! `consolidate` —— 巩固的接受边界（S5，[DE-001 §9.3](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、
+//! [DE-018 §4](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构") ③ 加 consolidate）。
 //!
 //! ## 架构只提供位置，不提供算法
 //!
@@ -14,7 +14,7 @@
 //! 只写代数上界时，系统会产出「代数合规但已经失真」的记忆——这就是 N8
 //! （保真度 100%）要堵的静默失效：失真的巩固一旦入库，后续决策全被污染。
 
-/// 巩固参数（[plan/01 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") `projection.param` 的两个取值）。
+/// 巩固参数（[DE-001 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") `projection.param` 的两个取值）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ConsolidateParams {
     /// 巩固代数上界（派生代数 ≤ max_gen，防代数发散）。

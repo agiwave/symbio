@@ -652,10 +652,7 @@ pub(crate) async fn land_answered_turn(
     )
     .await
     {
-        symbio_core::plugin_warn!(
-            "session",
-            "[Session] v2 定稿答话入格失败（本轮照常收尾）: {e}"
-        );
+        symbio_core::plugin_warn!("session", "[Session] 定稿答话入格失败（本轮照常收尾）: {e}");
     }
 }
 

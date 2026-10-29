@@ -1017,7 +1017,7 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
     assert_eq!(after.checkpoint["event_count"], 2);
 }
 
-/// 不变量列随事实源反向变化（[04 §3.1 批④](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+/// 不变量列随事实源反向变化：
 /// 真实形状的两轮全绿 ⇒ 空；删掉收束格 ⇒ C4 必须报出那个缺口。
 #[test]
 fn invariants_move_when_the_wal_changes() {
@@ -1149,8 +1149,7 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     );
 }
 
-/// 读侧闸（[04 §3.1 批⑥](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：声明**属主**
-/// 身份 ⇒ 与不声明逐字相同——闸的存在不是为了把属主挡在外面。
+/// 读侧闸：声明**属主**身份 ⇒ 与不声明逐字相同——闸的存在不是为了把属主挡在外面。
 #[test]
 fn declaring_the_owner_reads_everything() {
     let wal = seed("gate-owner");
@@ -1341,7 +1340,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 声誉列（[plan/12 批 2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")，S6 第 15 步的读侧）：
+/// 声誉列（S6 的读侧）：
 /// `own` 取**本会话主体**，`by_principal` 把这份事实源里的主体原样摊开（`own` 在其中，
 /// 不另造口径）；判据只有一处——core 的 `reputation` 投影，本处只取数 + 排版。
 #[test]
@@ -1526,7 +1525,7 @@ fn commitments_column_exposes_each_delegation_record() {
     assert_eq!(denied.commitments["total"], 0);
 }
 
-/// 就绪集列（S7 步 16，[04 §3.1 批⑨]）：候选集入列 + **复算同源** + 读侧闸（反向）。
+/// 就绪集列（S7）：候选集入列 + **复算同源** + 读侧闸（反向）。
 ///
 /// `may_read = false ⇒ {ready: []}` 与四列同款（空切片 = 有源但不给你看），
 /// 不是声誉那列的空对象——「没有任务」与「不给你看」由 `has_wal` 与列的上下游分辨。
@@ -1596,7 +1595,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+/// 校准列（S9 的读侧）：
 /// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
 ///
 /// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`skill_events::route`

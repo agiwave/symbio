@@ -1,5 +1,5 @@
-//! `actors` 单测 —— 含 **S01 闭环彩排**（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
-//! 第 3 步：零 LLM 跑通完整闭环——应答由彩排内的定值给出，链路一条不少）。
+//! `actors` 单测 —— 含 **S01 闭环彩排**（零 LLM 跑通完整闭环——应答由彩排内的定值给出，
+//! 链路一条不少）。
 //!
 //! 彩排把 S0 的地基（store / projection / invariants）与 S1 的 ② `actors`
 //! 拧成一条完整链路，验收断言逐条对应
@@ -330,10 +330,10 @@ fn two_finals_are_caught_by_n3() {
     );
 }
 
-// ── S2 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 5–6 步）：真实执行形状 ──
+// ── S2 彩排：真实执行形状 ──
 //
-// 步骤 5：接入真实模型（pattern = reasoner）→ 真实对话 → N1/N3/N5 仍全绿；
-// 步骤 6：兜底埋点 + 四层 budget_ms 就位 → 时延埋点可测。
+// 接入真实模型（pattern = reasoner）→ 真实对话 → N1/N3/N5 仍全绿；
+// 兜底埋点 + 四层 budget_ms 就位 → 时延埋点可测。
 // 这里用 ⑤ adapters 的确定性桩（StubLlmAdapter）代替真实模型——闭环形状与
 // 真实接线完全一致，只换适配器。
 
@@ -472,7 +472,7 @@ async fn rehearse_reasoner_turn(
     }
 }
 
-/// 验收（步骤 5）：接入「真实模型」→ 真实对话 → N1/N3/N5 仍全绿。
+/// 验收：接入「真实模型」→ 真实对话 → N1/N3/N5 仍全绿。
 #[tokio::test]
 async fn reasoner_turn_keeps_all_invariants_green() {
     let llm = MinimalStub::succeed("stub-model");
@@ -534,7 +534,7 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
     );
 }
 
-/// 验收（步骤 6 上半）：生成失败 → 兜底埋点（cost_ms / produced_by / error 载荷）。
+/// 验收：生成失败 → 兜底埋点（cost_ms / produced_by / error 载荷）。
 #[tokio::test]
 async fn reasoner_failure_produces_fallback_with_telemetry() {
     let llm = MinimalStub::always_fail("模型不可用");
@@ -562,7 +562,7 @@ async fn reasoner_failure_produces_fallback_with_telemetry() {
     );
 }
 
-/// 验收（步骤 6 下半）：四层 budget_ms 就位——同一时延在不同档位下结论不同。
+/// 验收：四层 budget_ms 就位——同一时延在不同档位下结论不同。
 #[tokio::test]
 async fn four_tier_budgets_are_measurable() {
     // 注入 120ms 时延：反射档（80ms）超预算，深度档（60s）预算内。
@@ -585,14 +585,14 @@ async fn four_tier_budgets_are_measurable() {
     assert_eq!(LatencyTier::Reflex.budget_ms(), 80);
 }
 
-// ── S5 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 11 步）：记忆链路 ──
+// ── S5 彩排：记忆链路 ──
 //
-// 这里留的是**内核侧**的判据：编码格子的溯源覆盖（步 11 / I2）。巩固入库前的保真度
-// 闸门（步 13 / N8）随 `consolidate` 住它的写方（`crates/symbio-plugin-loop`，DE-025 D-221）；
+// 这里留的是**内核侧**的判据：编码格子的溯源覆盖（I2）。巩固入库前的保真度
+// 闸门（N8）随 `consolidate` 住它的写方（`crates/symbio-plugin-loop`，DE-025 D-221）；
 // 检索那半条链路（`recall` 投影的 as-of、预算降级、主体隔离）随投影住它的唯一生产
 // 消费方（[DE-024](../../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-201），验收在同侧。
 
-/// 步骤 11：溯源覆盖 100%——无溯源的记忆事件被 I2 抓住。
+/// 溯源覆盖 100%——无溯源的记忆事件被 I2 抓住。
 #[test]
 fn memory_event_without_provenance_is_caught() {
     let bare = Event {
@@ -611,11 +611,11 @@ fn memory_event_without_provenance_is_caught() {
     assert!(bad[0].why.contains("记忆"), "{}", bad[0].why);
 }
 
-// ── S6 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 14–15 步）：多主体与对等承诺 ──
+// ── S6 彩排：多主体与对等承诺 ──
 //
-// 第 14 步：principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/no-direct-call-audit.mjs，
+// principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/no-direct-call-audit.mjs，
 // 出口判据「直连调用 0」；成对性拒绝 = S08 §6 验收 3，已在 governance 测试区覆盖）。
-// 第 15 步：commitment 立约 + 声誉投影（出口判据「声誉双跑一致」）。
+// commitment 立约 + 声誉投影（出口判据「声誉双跑一致」）。
 
 use crate::governance::{Capability, PermissionMatrix, PrincipalPolicy, VisScope};
 use crate::projection::reputation::reputation;
@@ -684,7 +684,7 @@ fn principals_are_isolated_until_scope_widened() {
     );
 }
 
-/// 第 15 步：立约 → 守约 / 违约 → 声誉投影。违约可观测（broken 必带 why），
+/// 立约 → 守约 / 违约 → 声誉投影。违约可观测（broken 必带 why），
 /// 声誉记在承诺方（from）头上。
 #[test]
 fn commitment_lifecycle_feeds_reputation() {
@@ -1118,10 +1118,10 @@ fn elimination_event_keeps_invariants_green() {
     );
 }
 
-// ── S7 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 16–18 步）：任务树与返工 ──
+// ── S7 彩排：任务树与返工 ──
 //
-// 16 DAG 调度 + readyset（C14 无环）；17 独立验证者（C15 不自验，构造期拒绝）；
-// 18 返工闭环（返工那格，返工次数有界 = 终止性前提 2）。
+// DAG 调度 + readyset（C14 无环）；独立验证者（C15 不自验，构造期拒绝）；
+// 返工闭环（返工那格，返工次数有界 = 终止性前提 2）。
 
 use crate::invariants::{acyclic_deps, rework_bounded};
 use crate::projection::readyset::readyset_for;
@@ -1260,7 +1260,7 @@ fn self_verifier_is_rejected_at_construction() {
     assert!(split.is_ok(), "分工后必须通过：{split:?}");
 }
 
-/// 第 16 步：readyset 就绪集 = 非终态 ∧ 依赖闭合；双跑一致（N1）。
+/// readyset 就绪集 = 非终态 ∧ 依赖闭合；双跑一致（N1）。
 #[test]
 fn readyset_contains_only_dependency_closed_tasks() {
     let store = EventStore::new();
@@ -1291,7 +1291,7 @@ fn readyset_contains_only_dependency_closed_tasks() {
     assert_eq!(rs.value, again.value);
 }
 
-/// 第 18 步：返工闭环——验证判不合格 ⇒ 新增返工节点（不是回滚）⇒ 旧节点不再就绪。
+/// 返工闭环——验证判不合格 ⇒ 新增返工节点（不是回滚）⇒ 旧节点不再就绪。
 #[test]
 fn rework_creates_new_node_instead_of_rollback() {
     let store = EventStore::new();
@@ -1519,9 +1519,9 @@ fn cost_ledger_accumulates_per_principal() {
     assert_eq!(ledger.value.of("session/ghost"), Default::default());
 }
 
-// ── S9 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 21–22 步）：自治与学习 ──
+// ── S9 彩排：自治与学习 ──
 //
-// 21 定时触发的**授权面**（出口判据「自主写入对话 0」，roadmap/S12）留在这里；
+// 定时触发的**授权面**（出口判据「自主写入对话 0」，roadmap/S12）留在这里；
 // 触发、长目标预算、欲治理与技能编译 / 路由的实现和用例随唯一消费方住
 // `crates/symbio-plugin-session/src/transcript/autonomous` 与 `crates/symbio-plugin-loop/src/skill_events`（D-189）。
 

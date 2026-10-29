@@ -207,9 +207,9 @@ pub(crate) async fn execute_final_reply_turn(
     consolidation: Option<&[ChatNode]>,
 ) -> Result<(), PluginError> {
     // 事实源：与 [`super::assemble_turn`] 同一条路径——交付包构造的唯一句柄（D-084 §2）。
-    let store = session.facts().ok_or_else(|| {
-        PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
-    })?;
+    let store = session
+        .facts()
+        .ok_or_else(|| PluginError::InternalError("执行需要持久会话（临时会话无事实源）".into()))?;
     // **补落寄存的变更**：答话轮同样是会话侧的落格窗口，经端口动作发起。
     // 与 [`super::assemble_turn`] 同序（在运行器落格之前——本轮的用户格已由编排层先落）。
     if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
@@ -291,7 +291,7 @@ pub(crate) async fn execute_final_reply_turn(
     // 收束路径与交付包对不上，出声。
     let outcome = match TurnRunner::begin(store.as_ref(), input)
         .await
-        .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?
+        .map_err(|e| PluginError::InternalError(format!("运行器落格失败：{e:?}")))?
     {
         TurnSessionBegin::Done(outcome) => outcome,
         TurnSessionBegin::Run(_) => {

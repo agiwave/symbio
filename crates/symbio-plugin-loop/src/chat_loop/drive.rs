@@ -167,7 +167,7 @@ fn open_drive(
 ) -> Result<Drive, super::state::TurnExit> {
     let store = context.session.facts().ok_or_else(|| {
         super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(
-            "v2 执行需要持久会话（临时会话无事实源）".into(),
+            "执行需要持久会话（临时会话无事实源）".into(),
         ))
     })?;
     // ── 行表是开幕的前提（DE-015 §3.4：装载失败即拒绝启动，不许部分成功）──────

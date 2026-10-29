@@ -60,9 +60,9 @@ pub use kernel::{
     EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 
-// ==================== 事件溯源契约（v2 阶段 S0） ====================
+// ==================== 事件溯源契约 ====================
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
-// 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
+// 模块依赖纪律见 [DE-018 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
 pub use event::{
     event_answer_node_id, event_output_text_node_id, event_payload_node_id,
     event_tool_result_node_id, ClosureReason,
@@ -90,23 +90,19 @@ pub use projection::transcript::PromptMessage;
 pub use projection::turnstate::{turnstate, TurnState};
 pub use store::EventStore;
 
-// ==================== 主体（v2 阶段 S1，② actors） ====================
-// 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
+// ==================== 主体（② actors） ====================
+// 只收类型化输入、只产事件（DE-018 §3.1 ② 行）。
 //
 // ⚠️ `TurnRunner` / `TurnInput` / `TurnOutcome` / `TurnResume` / `RoundInjector`
-// **已不在本层**（2026-10-09 下沉到 `crates/symbio-plugin-loop/src/turn_runner.rs`）：它们是**执行引擎**
-// （流循环 + 落格顺序），生产消费方只有 session 一个，按 README §4 四问第 1 问该下沉；
+// **不在本层**（住 `crates/symbio-plugin-loop/src/turn_runner.rs`）：它们是**执行引擎**
+// （流循环 + 落格顺序），生产消费方只有 session 一个，按 README §4 四问第 1 问归插件；
 // 且它们**不是** F1–F6 冻结锚点（F3 冻的是 `ActorSpec` 字段集 + 档位→令牌映射，不是运行器）。
-// 曾登记为 `plan/01 §4` 冻结契约名是**误记**——`plan/01` 全文没有 `TurnRunner` 一词。
 //
-// `ActorSpec`（F3 冻结锚点：`plan/01 §4` 的**主体规格五字段**）**留根出口**
+// `ActorSpec`（F3 冻结锚点：`DE-001 §4` 的**主体规格五字段**）**留根出口**
 // （经 `kernel` 门面的 `pub use`，不是 `pub`）。F3 冻的是**字段集**，它只能住 core；
-// 而 core 外
-// （`crates/symbio-plugin-session` 构造 / 读 `principal`）要够得着它、C-002 又禁插件深引域目录
-// ⇒ 必须显式占根出口
-// （C-002 禁止插件深引域目录）。它只有 1 个生产消费方（`crates/symbio-plugin-session`），属 C-003
-// 的「接缝」而非「该下沉」——下沉即等于把 F3 冻结契约搬出 core，故登记进
-// `core-export-audit.mjs` 的 `WAIVERS`（与 `PermissionMatrix` / `VisScope` 同一形态）。
+// 而 core 外（`crates/symbio-plugin-session` 的 `turn_exec` 构造与 `transcript/inbox` 的
+// 判定者行）要够得着它、C-002 又禁插件深引域目录 ⇒ 必须显式占根出口。两个生产消费方
+// 都在 session，C-003 的「≥2 消费方」成立；且它是 F3 冻结契约，下沉即等于把它搬出 core。
 // ── Agent 权限声明（DE-011 §5.3 / D-153）──────────────────────────────────
 //
 // 消费方三个：agent 插件（写侧，解析 manifest 发布作用域）、session 的能力收集
@@ -152,10 +148,10 @@ pub use event::{EVENT_TRIGGER_KINDS, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER
 // 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub` 出根
 // （C-003 数 `pub use`）。
 
-// ==================== 记忆三段（v2 阶段 S5 步 11–13） ====================
+// ==================== 记忆三段 ====================
 // 写方 / 召回注入 / 巩固的消费方只有 `crates/symbio-plugin-session` 的记忆链路**一个**。C-003 的
 // 口径是「单消费方不算架构元素，该下沉」——可下沉的只有消费方，算法不行：
-// `recall` 是 ③ 的投影、`consolidate` 是 01 §9.3 的接受边界、事件名字表是 D-043
+// `recall` 是 ③ 的投影、`consolidate` 是 DE-001 §9.3 的接受边界、事件名字表是 D-043
 // 的单点定义，都必须留在 core。故按 `symbio_core/README.md §4 四问` 留 core，以
 // **`pub`** 出根：只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`），
 // 与 `lock_read` / `ObjectConstructor` 同一形态。记忆事件名字表同样只对写方可见——
@@ -171,20 +167,20 @@ pub use actors::{
     actor_can_assert_verification, actor_can_assign_work, actor_can_judge_intent,
     actor_can_land_artifact, actor_can_land_speech, pattern_for_principal,
 };
-// 承诺 / 裁决 / 名字表三组**业务事件名**已随 D-203 归零批从内核迁出，因此也不再从这里
+// 承诺 / 裁决 / 名字表三组**业务事件名**已随 D-203 从内核迁出，因此也不再从这里
 // 出根。它们现在各有 owner：写方在自己的 `EventDecl` 里声明，需要跨插件共享的走清单
 // `shared_events` → 生成物 `symbio_plugin_api::events`（D-204），core 的折叠经三张
 // 词汇表（[`ChatVocab`] / [`MessageVocab`] / [`CommitmentVocab`]）在构造期收名字
 // （D-205 / D-206）。**core 一行都不读这些拼写**，故没有一条该占根出口。
 // 就绪集出根：生产消费方是 `crates/symbio-plugin-loop` 的调度段与 `crates/symbio-plugin-session` 的 `stats`
-// 列（04 §3.1 批⑨）。与 `reputation` 同一形态：`pub` 出根，只在本 crate 内可见、
+// 列。与 `reputation` 同一形态：`pub` 出根，只在本 crate 内可见、
 // 不进对外公开面（C-003 数 `pub use`）。
 // `TaskVocab` 随它一起出根：折叠的词汇面是构造期形参（DE-024 D-206），两个调用方都要
 // 能**命名**这张表才交得出整族的拼写——它不是 core 里的第二份字典，字段全是调用方给的。
 pub use projection::readyset::{readyset_for, ReadySetView};
 pub use projection::reputation::reputation;
 pub use projection::task_vocab::TaskVocab;
-// 对话面的三张词汇表（DE-024 D-203 归零批）：与 `TaskVocab` 同一条通路——折叠要认的
+// 对话面的三张词汇表（DE-024 D-203）：与 `TaskVocab` 同一条通路——折叠要认的
 // 每一条名字由调用方在构造期交进来。`crates/symbio-plugin-loop` 与 `crates/symbio-plugin-session` 各持一份常量
 // （owner 的声明与清单生成物），core 一行都不读这些拼写。
 // 按**面**分三张而不是合成一张：`reputation` 只认承诺四条，`changes` 只认产物一条，
@@ -198,14 +194,14 @@ pub use projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};
 pub(crate) use view::principal_namespace;
 pub use view::visible_to;
 
-// ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
-// 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
+// ==================== 适配器（⑤ adapters） ====================
+// 时延闸门 = 本包的依赖注入策略（DE-018 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
 // 生成端口 `LlmAdapter` 是 core 的唯一适配器契约；工具分发归 loop 插件本地（D-118）。
 pub use adapters::{
     DeltaSink, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter, SilentDeltas, TokenIssuer,
 };
-// 执行引擎（`TurnRunner` 族）2026-10-09 下沉 `crates/symbio-plugin-loop/src/turn_runner.rs` 后，仍需要的
-// core 内部面。它们**不能下沉**——core 自己也在用（`TokenIssuer` 铸令牌、`provider_adapter`
+// 执行引擎（`TurnRunner` 族）在 core 外（`crates/symbio-plugin-loop/src/turn_runner.rs`）
+// 但它仍需要的 core 内部面。它们**不能下沉**——core 自己也在用（`TokenIssuer` 铸令牌、`provider_adapter`
 // 实现 trait、`store` 读写、`invariants` 判据、`prompt_fidelity` 复核）；插件又不能深引域
 // 目录（C-002）⇒ 以 `pub` 出根：只在本 crate 内可见、不进对外公开面（C-003 只数
 // `pub use`），与 `visible_to` / `recall` 同一形态。（`ActorSpec` 不在此列——它是 F3 冻结
@@ -215,12 +211,12 @@ pub use adapters::{AdapterError, FullModel};
 // `session` 的 `store/wal.rs` 都**在生产路径**上调用它（C-002 禁止它们深引
 // `symbio_core::invariants::…`，故必须经根出口）。这里是真·跨插件消费，不是测试面残留。
 pub use invariants::unresolved_turns;
-// 预算判定（I3）随策略测试搬到插件侧：`check_all` 用固定声明预算，而策略用例要
+// 预算判定（I3）：`check_all` 用固定声明预算，而策略用例要
 // 拧预算参数验证「判定随参数变」。core 外消费方只有 `session` 的
 // `transcript/autonomous.test.rs`，但它属于**判据词汇**（与 `unresolved_turns` 同一族），
-// 拆 crate 后无法用 `cfg(test)` 只对下游可见，故常开 `pub`。
+// 下游 crate 无法用 `cfg(test)` 只对它们可见，故常开 `pub`。
 pub use invariants::budget_exceeded;
-// 事实网格 → prompt 的双向完整性复核（D-048）：下沉后的运行器组装 prompt 时调它。
+// 事实网格 → prompt 的双向完整性复核（D-048）：`TurnRunner` 组装 prompt 时调它。
 pub use projection::prompt_fidelity::verify as verify_prompt_fidelity;
 // `PromptMessage` 的结构化子件：`PromptMessage.tool_calls` 的载荷类型。它跨出 core 到
 // `crates/symbio-plugin-session`，而 C-002 禁止插件深引域目录 ⇒ 随 `PromptMessage` 一起以
@@ -228,24 +224,23 @@ pub use projection::prompt_fidelity::verify as verify_prompt_fidelity;
 pub use projection::transcript::PromptToolCall;
 pub use store::{AppendError, StoreInvariant};
 
-// ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
-// 读写成对、fail-closed（plan/01 §7）。根出口只出**可见域**一个类型：
+// ==================== 权限与可见性（⑥ governance） ====================
+// 读写成对、fail-closed（DE-001 §7）。根出口只出**可见域**一个类型：
 // 判定面（`crates/symbio-plugin-session` 的读侧闸）要指称它，构造面（本根 `authz`）的表行也带它。
 // core 外消费方只有 `crates/symbio-plugin-session` 一个，但它**不能**下沉——core 内 `authz` /
 // `governance` 自己也在用（core 不依赖插件），插件又够不着 `governance` 域目录的深引
-// （C-002）⇒ 必须留根出口。故按 C-003 的接缝口径登记进 `core-export-audit` 的 WAIVERS。
+// （C-002）⇒ 必须留根出口；C-003 的「≥2 消费方」由 core 内这两个模块成立。
 // governance::Capability（权限能力，闭集）与 capability::Capability（LLM 工具
 // 描述符）是两个概念，**刻意不进根平铺**：授权表走能力名字符串（由
 // `PermissionMatrix::from_names` 按闭集校验），轮次→能力的映射收在 `can_reply` 里，
 // core 外的调用点既不深引也不与 `Capability` 撞名，见 governance/mod.rs 同名辨析。
 //
-// `PermissionMatrix` **不在根出口**（收窄）：它最后一个 core 外消费方是
-// `stats.rs` 的读侧闸—— 把那一格改成按内容侧可见域判之后，闸只经
-// `authz::production_matrix()` 拿表（返回类型走类型推导，不点名），插件侧再没有
-// 一处指称这个类型 ⇒ 按 C-003「名字没跨出 core 的符号不许占根出口」收回 core 内
+// `PermissionMatrix` **不在根出口**（收窄）：core 外没有一处指称这个类型——
+// `stats.rs` 的读侧闸只经 `authz::production_matrix()` 拿表（返回类型走类型推导，不点名）
+// ⇒ 按 C-003「名字没跨出 core 的符号不许占根出口」收回 core 内
 // （core 内走 `governance::PermissionMatrix` 深引，C-002 只管插件侧）。
 //
-// `GrantsOverlay`（S13 淘汰回路的机制半边，）：授权表是装配期常量，淘汰是
+// `GrantsOverlay`（S13 淘汰回路的机制半边）：授权表是装配期常量，淘汰是
 // 运行期事实 ⇒ 覆盖层住表旁边（表答「登记过什么」，它答「其中什么被收回了」）。
 // 两个插件侧消费方——`derived_facts` 轮末步（判「有没有既有淘汰」）与工具执行层的
 // 撤销闸（判「现在准不准委派」）⇒ 与 `VisScope` 同形态 `pub` 出根。
@@ -253,7 +248,7 @@ pub use store::{AppendError, StoreInvariant};
 // `verdict_grants_changes` 的返回值（类型推导，不点名），没有第二处指称。
 pub use governance::GrantsOverlay;
 pub use governance::VisScope;
-// 授权表的**外部面**（同批）：`authz` 收敛成域目录后，`symbio_core::authz::…`
+// 授权表的**外部面**：`authz` 收敛成域目录后，`symbio_core::authz::…`
 // 就是一条深路径（C-002 判红），而插件侧有十几个符号在用。按 §1 的口径，根平铺是
 // 唯一合法路径 ⇒ 表仍住 `authz/`，出口逐个列在这里。`pub` 与
 // `visible_to` / `recall` 同形态：跨插件可见、不进对外公开面（C-003 只数 `pub use`）。

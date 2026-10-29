@@ -183,7 +183,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 控制面的一格（写方两个插件各一处：工具闸的熔断 / 拒因在本插件，打断处置在
     // `session` 的 inbox）：owner 是本插件，名字走清单生成，不回内核。
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
-    // ── 任务族（S7 步 16–18 / S04 / S07 批⑩）──
+    // ── 任务族（S7 / S04 / S07）──
     //
     // 这一族的五格此前由内核命名，而写方与调度者全在本插件、读数被 `session` 的
     // `stats` 列消费——名字随 owner 登记进清单（DE-024 D-204），折叠在构造期收这张表

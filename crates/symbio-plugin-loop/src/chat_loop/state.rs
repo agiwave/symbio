@@ -214,7 +214,7 @@ pub(crate) struct TurnState {
     /// `None` = 本请求没有用户新发言（`resume` 重跑等）——判决无从谈起，
     /// Q1 也不下结论（见 `delegate.rs`）。
     pub(crate) input_utterance: Option<(String, String)>,
-    /// 本轮的**长期记忆召回视图**（S5 步 12，`memory_events::recall_view`）。
+    /// 本轮的**长期记忆召回视图**（S5，`memory_events::recall_view`）。
     ///
     /// 只在本轮**第一次请求**取一次（与 classify / history 同一条 `request_round == 0`
     /// 口径）：同一轮内记忆不该漂移，事实源也只扫一遍；后续工具轮复用同一份视图，
@@ -223,7 +223,7 @@ pub(crate) struct TurnState {
     /// 落 `memory.recalled` 的时机在**轮末收束**（`derived_facts::record_learning`）而不是
     /// 取视图那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub recall_view: Option<super::super::recall::RecallView>,
-    /// 本轮**技能路由**的判定（S9 步 22，[04 §3.1 批⑪](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+    /// 本轮**技能路由**的判定（S9）：
     /// 每条 `(skill_id, fallback)`，即 `skill_events::route` 对召回视图里一条技能的判决。
     ///
     /// 形态与 [`TurnState::gate_breaks`] / [`TurnState::task_decls`] 完全对称：

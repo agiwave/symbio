@@ -1,4 +1,4 @@
-//! 时延档位：四层预算的**数据面**（[plan/01 §10](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+//! 时延档位：四层预算的**数据面**（[DE-001 §10](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 //!
 //! 这里只装档位本身（判据是 `budget_ms`，不是「工具」这个名词）；令牌与签发中心
 //! （`RuleOnly` / `FullModel` / `TokenIssuer`）是部署侧的依赖注入策略，仍住
@@ -18,7 +18,7 @@ pub enum LatencyTier {
 }
 
 impl LatencyTier {
-    /// 四层预算（[plan/01 §8](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表）。
+    /// 四层预算（[DE-001 §8](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表）。
     pub fn budget_ms(self) -> u64 {
         match self {
             LatencyTier::Reflex => 80,

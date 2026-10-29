@@ -512,7 +512,7 @@ pub async fn execute_tool_async(
 ///    终态的同时给出结果：只有父状态没有结果，用户看到的就是「调用凭空消失、
 ///    会话照旧往下走」。见 `dispatch::unfinished::not_executed_result`。
 ///
-/// 3. **外部执行闸门在每个调用点各判一次**（S8 第 20 步）：判据批首读一次
+/// 3. **外部执行闸门在每个调用点各判一次**（S8）：判据批首读一次
 ///    （[`BreakerInputs`]），结论按调用点出——`Refuse` 零事件、`Break` 走出参
 ///    随收束入格、`Allow` 照旧开窗。
 /// 4. **声明闸由能力包自己判**（DE-025 D-219）：工具在 `CapabilityMeta.behaviors`

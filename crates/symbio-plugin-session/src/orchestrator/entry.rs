@@ -21,7 +21,7 @@ use super::*;
 ///
 /// ## 为什么收成一份
 ///
-/// 收口前，`provider_id`（`resolve_session_params`）、`workdir`（第 5 步）、
+/// 收口前，`provider_id`（`resolve_session_params`）、`workdir`、
 /// `agent_id`（派发任务内）**各触发一次 `get_or_create_session`**。实测单次请求
 /// **8–11 次 `load_session`**，而 `load_session` 每次都把 meta 与消息**两个文件**
 /// 整份读出——这三处读的却是**同一份元数据**。

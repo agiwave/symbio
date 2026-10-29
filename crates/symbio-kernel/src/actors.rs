@@ -5,7 +5,7 @@
 //! 因此留在 `symbio_core::actors` 作为自由函数（`trivial_actor_spec` /
 //! `actor_can_land_speech` …），不进内核。
 
-/// 主体模式（[plan/01 §4](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：机制，**3 个封顶**）。
+/// 主体模式（[DE-001 §4](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：机制，**3 个封顶**）。
 ///
 /// 模式选择的判据是函数不是清单：可写成确定性规则 → [`Pattern::Decider`]；
 /// 只需重述已有事实 → [`Pattern::Translator`]；否则 → [`Pattern::Reasoner`]。
@@ -19,7 +19,7 @@ pub enum Pattern {
     Translator,
 }
 
-/// 作用域（[plan/01 §8](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+/// 作用域（[DE-001 §8](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
 /// `root` 是**一等输入**，不是"没有子智能体"的特例（03 §2 推论：
 /// 不出现 `if (children.is_empty())` 分支）。
@@ -30,7 +30,7 @@ pub enum Scope {
     Child(String),
 }
 
-/// 主体规格（[plan/01 §4](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的 `ActorSpec`，五字段）。
+/// 主体规格（[DE-001 §4](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的 `ActorSpec`，五字段）。
 #[derive(Debug, Clone)]
 pub struct ActorSpec {
     /// 身份（数据，无限增长——如 `"session/main"`）。

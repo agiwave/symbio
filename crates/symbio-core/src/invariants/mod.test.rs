@@ -543,10 +543,9 @@ fn check_all_on_clean_sequence_is_empty() {
     assert!(check_all(EVENTS, &events).is_empty(), "合规序列九查全绿");
 }
 
-// ── 故障注入用例集（S1 步骤 4：超时 / 乱序 / 重复 final / 无溯源，4 类违规全被捕获）────
+// ── 故障注入用例集（S1：超时 / 乱序 / 重复 final / 无溯源，4 类违规全被捕获）────
 //
-// [plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 4 步的产物：每类故障注入
-// 事件序列，断言**对应的检查必须红**。反向用例（合规序列不报警）在上方各检查区。
+// 每类故障注入事件序列，断言**对应的检查必须红**。反向用例（合规序列不报警）在上方各检查区。
 
 #[test]
 fn fault_timeout_turn_never_settles_is_caught() {
@@ -712,7 +711,7 @@ fn fault_budget_exceeded_is_caught() {
     assert!(budget_exceeded(&events, None).is_empty(), "无预算 ⇒ 不判");
 }
 
-// ── 读侧宽限（04 §3.1 批④：两条 I3 检查接进读出口前先立的口径）────────────
+// ── 读侧宽限（两条 I3 检查接进读出口前先立的口径）────────────
 
 #[test]
 fn read_side_graces_the_trailing_open_turn_but_flags_the_overtaken_one() {

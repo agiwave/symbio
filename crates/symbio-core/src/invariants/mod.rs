@@ -1,4 +1,4 @@
-//! 可执行不变量检查（v2 F4，[plan/01 §5](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、[plan/04 §4](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+//! 可执行不变量检查（F4，[DE-001 §5](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、[DE-016 §10](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 //!
 //! ## 形态：纯函数，不是 trait
 //!
@@ -19,8 +19,8 @@
 //! 词汇随数据传，不走进程全局：没有装配的进程里（单测与可执行论证程序）全局表是空的，
 //! 判据会在「看不见」的状态下全绿。
 //!
-//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")；
-//! [`open_unique_per_turn`] 随 plan/11 批 0 补入）
+//! ## 覆盖的 CI 断言（S0 出口判据 + S1 故障注入，[DE-031 §5](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")；
+//! [`open_unique_per_turn`] 是单写者的观测面）
 //!
 //! | 断言 | 不变量 | 检查 | 函数 |
 //! |---|---|---|---|
@@ -43,7 +43,7 @@
 //! ## 判定纪律
 //!
 //! 每条检查配**反向用例**：喂入违规序列，违规必须被看见；看不见 = 检查是摆设。
-//! 故障注入用例集（S1 步骤 4）在 `mod.test.rs` 的 fault 区统一收纳。
+//! 故障注入用例集（S1）在 `mod.test.rs` 的 fault 区统一收纳。
 //!
 //! ## 宽限（C4 / C5 的读侧形参）
 //!
@@ -179,7 +179,7 @@ pub fn seq_monotonic(events: &[Event]) -> Vec<Violation> {
 /// C2 / N3（I1）：每 `turn` 至多 1 条定稿发言。
 ///
 /// 「定稿」= 收束格上扮演 `finalizes_turn` 角色那一条（词汇来自 `vocab`，
-/// DE-024 D-203；格位定义见 [plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+/// DE-024 D-203；格位定义见 [DE-001 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 /// 一轮对用户说两次「最终答复」，转写的收敛性就没了——这是 I1 在发言路径上的形状。
 pub fn final_unique_per_turn(vocab: &[EventDecl], events: &[Event]) -> Vec<Violation> {
     // 哪些事件算数（定稿的判据）是本模块的解析层；「每 turn 至多一条」
@@ -202,12 +202,11 @@ pub fn final_unique_per_turn(vocab: &[EventDecl], events: &[Event]) -> Vec<Viola
 
 /// I1 单通道（C2 的对偶）：每 `turn` 至多 1 条**开轮**事件（`u-{turn}`）。
 ///
-/// 开轮 = 落在 `turn × opened` 那一格（[plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")），
+/// 开轮 = 落在 `turn × opened` 那一格（[DE-001 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）
 /// 与 [`final_unique_per_turn`] 是同一枚硬币的两面——一轮只能**开**一次、只能**收**一次。
 /// 开两次 = 同一个 `u-{turn}` 事件号落进网格两回：那一轮的输入成了两条、`turn` 计数
 /// 跟着虚增（兜底率的分母就在这条上），而**没有任何下游会察觉**——单写者被绕过的
-/// 典型痕迹。plan/11 批 0
-/// 的 0-A 在**写入侧**用写者令牌堵住并发写，本检查是它在**事实源上**的观测面：
+/// 典型痕迹。写者令牌在**写入侧**堵住并发写，本检查是它在**事实源上**的观测面：
 /// 令牌漏了、或有人绕过唯一写入口直接落盘，这里就红。
 pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
     // 与 final_unique_per_turn 同一内核：
@@ -230,7 +229,7 @@ pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 
 /// C3 / N5（I2）：**声明类**事件必须带溯源。
 ///
-/// 「声明」= 宣称某件事为真或已发生，三类（[plan/03 §2 I2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+/// 「声明」= 宣称某件事为真或已发生，三类（[DE-016 §2 I2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// - **断言类**（`verb == Asserted`）：`task.verified` / `artifact.added` / `classify.verdict`…
 /// - **收束类**（`turn × closed` 的 `chat.assistant.final` / `chat.assistant.fallback`）：
 ///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")）；
@@ -354,10 +353,10 @@ const MAX_REWORK_ROUNDS: u32 = 3;
 ///   宁可漏报、不可假红：拿最严档比，会把别的档位的正常流量整片报成违规）。
 ///
 /// 末两条是任务表的判定（[`acyclic_deps`]：依赖成环 / 悬空，即
-/// [04 §4 断言清单](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的 C14；
+/// [DE-016 §10 断言清单](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的 C14；
 /// [`rework_bounded`]：同一任务的返工轮数不超过 [`MAX_REWORK_ROUNDS`]）——
 /// 都是**结构判定、无宽限**：环与超界不是「读取瞬间的时序假象」，不会假红
-/// （04 §3.1 批⑨ 的「断言进 CI」）。
+/// ——「断言进 CI」。
 ///
 /// 要严判就绕过本函数直接调 [`unresolved_turns`]（`false`）/ [`budget_exceeded`]。
 pub fn check_all(vocab: &[EventDecl], events: &[Event]) -> Vec<Violation> {
@@ -601,8 +600,8 @@ pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violatio
 /// `{ task_id, depends_on }`——**图是数据，不是机制**。
 /// 悬空依赖（依赖不存在的任务）同样判违规。反向用例见测试区（验收 1 / 4）。
 ///
-/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的
-/// 「断言进 CI」）：读出口 `session/stats` 的 `invariants` 列与 e2e 都跑它。
+/// 接进 [`check_all`] 的
+/// 「断言进 CI」：读出口 `session/stats` 的 `invariants` 列与 e2e 都跑它。
 pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
     // 解析层：从任务开轮格收出 (task_id, depends_on)；判定（悬空 + Kahn 环）
     // 走 kernel::dep_graph_core——verify/termination.rs 包含的是同一份内核。
@@ -668,7 +667,7 @@ pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
 ///
 /// 返工 = 任务格上扮演 `counts_rework` 角色的那条事实（新增一条事实，不是修改历史）；
 /// 同一被返工节点的返工轮数超过 `max_rework` ⇒ 违规——无上界的返工可能永不终止
-/// （终止性论证程序前提 2）。接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+/// （终止性论证程序前提 2）。接进 [`check_all`]。
 pub fn rework_bounded(vocab: &[EventDecl], events: &[Event], max_rework: u32) -> Vec<Violation> {
     // 解析层：收出按时间序的 replaces 序列；计数判定走 kernel::rework_core
     // ——可执行论证程序的前提 2 用例包含的是同一份内核。

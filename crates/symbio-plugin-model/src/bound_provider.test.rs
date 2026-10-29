@@ -576,7 +576,7 @@ async fn unreachable_endpoint_maps_to_generation_failed() {
     assert!(result.is_err(), "不可达端点必须失败");
 }
 
-/// SLO 校准实测（G2，[plan/04 §1](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") §1.2）：
+/// SLO 校准实测（G2，[DE-016 §8.2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// **系统自身开销**（不含模型推理——mock 即答）在 N 轮真实 HTTP/SSE 全链路上的
 /// 分布。这个数字回答 G2 的缺口「只有预算断言，没有实测」：
 ///
