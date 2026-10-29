@@ -1143,7 +1143,10 @@ fn declared_executor_without_run_is_a_load_gap() {
     assert!(
         gaps.iter().any(|g| matches!(
             g,
-            Gap::UnmannedRow { row: "fixture-unmanned", by: "fixture-actor" }
+            Gap::UnmannedRow {
+                row: "fixture-unmanned",
+                by: "fixture-actor"
+            }
         )),
         "没有 run 的 by 必须在装载期点名，实际缺口：{gaps:?}"
     );
