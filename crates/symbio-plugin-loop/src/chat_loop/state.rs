@@ -327,15 +327,28 @@ pub(crate) struct TurnState {
     ///
     /// 它是「这一幕是新支」的唯一记号：`prepare-turn` 备好输入、因而握着新根 id 时，
     /// 按它落一条 `turn.branch`（`{of, into}`）。旧支当场从「当前读的那一支」降成候选——
-    /// 实时面由收尾补发标注帧（见 [`TurnState::branch_root`]），不必等整份重读。
+    /// 实时面由收尾按那一格补发标注帧，不必等整份重读。
     /// 取走（`take()`）即消费：幕间续写的第二幕不再另开一支。
     pub(crate) retry_of: Option<String>,
-    /// 本轮**开出了新支**时记下新支的根 id（`prepare-turn` 落 `turn.branch` 那一刻填）。
+}
+
+impl TurnState {
+    /// 本轮开出的**新支根 id**：本幕 `turn.branch` 那一格的 `into`（没有 = 本轮没开新支）。
     ///
-    /// 它是收尾时补发分支标注帧的依据：那一格事实落下时新支的**节点**还不存在（要等本轮
-    /// 产出落库才进得了投影），当场读回来只有一条成员，重建一个字段都不盖（单支不成组）。
-    /// 所以补发不在落格处，在 [`super::finish_turn`]。
-    pub(crate) branch_root: Option<String>,
+    /// 取最近一格：幂等键是 `branch-{root}`，一轮正常最多一条；按 `turn` 收窄排除了
+    /// 上一轮的支。读的是本幕已经在手的事实切片（`self.facts`），不为补发再多读一次日志。
+    /// 它**不是**一份状态：这就是那一格事实本身，草稿不另存一个 `branch_root` 字段
+    /// （DE-022 D-226）。
+    pub(crate) fn branch_root(&self) -> Option<String> {
+        self.facts
+            .iter()
+            .filter(|e| {
+                e.turn == self.turn_no && e.kind == symbio_plugin_api::events::EVENT_TURN_BRANCH
+            })
+            .filter_map(|e| e.payload.get("into").and_then(|v| v.as_str()))
+            .next_back()
+            .map(str::to_string)
+    }
 }
 
 /// 主循环的唯一退出原因。

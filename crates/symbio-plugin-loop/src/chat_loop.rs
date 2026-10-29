@@ -726,7 +726,7 @@ async fn finish_turn(
     // 刷新页面 / 切回会话才看见 `‹ 1/2 ›`。所以本轮落库之后（新支的节点这才进得了投影）
     // 按已盖章的那一份把**组内每个成员**补发一次：切换器当场出现，两支谁在上谁在下也当场
     // 分明。落格那一刻做不了这件事——那时组里只有一条现存成员，重建一个字段都不盖。
-    if let Some(into) = turn.branch_root.clone() {
+    if let Some(into) = turn.branch_root() {
         republish_branch_group(context, sink, &into).await;
     }
 

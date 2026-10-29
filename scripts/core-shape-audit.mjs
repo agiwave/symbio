@@ -18,6 +18,7 @@
  * | CS-006 | —— | 逐条内核业务事件名核**消费方分布**：报出「≥2 crate 消费」与「core 读者」两类各几条，第三种（恰好一个消费方且 core 不读）判红 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是当批可迁的形状。这条把判据逐名落到代码；`core 读者` 那一类**不是**归属证据，是待迁存量——名字随那条读者一起迁出（DE-024 D-203） |
  * | CS-008 | —— | core / kernel 的**生产代码**里事件名字面量数 = 0（首段闭集 = `Entity` 的变体；`#[cfg(test)] mod x;` 的夹具文件剔出判据面） | **名字从第二条路回来**：CS-005 / CS-006 的输入都是内核那张表，表归零之后两者都没有输入，而 `match e.kind.as_str() { "chat.assistant.final" => … }` 照样能让「加一条事件」变成改架构模块。这条是 D-203 承诺的翻转，落成独立一格而不是翻转 CS-006（那会让判据在归零后空转） |
  * | CS-009 | `structFields` / `enumVariants` | core + kernel **生产代码**里 `pub struct` 的字段总数、`pub enum` 的变体总数，两格都只许降 | **数据面变宽**：CS-001 只数 trait / `fn` / 默认体，`CapabilityMeta` 的字段、`Entity` 的变体、`FactRole` 的变体都不在它的判定面里——内核可以靠数据面持续变宽而全绿（DE-025 D-212） |
+ * | CS-010 | `turnStateFields` | 控制面草稿 `TurnState` 的字段数只许降（冻结 21） | **草稿变宽**：CS-009 只看 core / kernel 的**公共**数据面，而草稿是 loop 插件内部的 `pub(crate)`，一格都看不见；每多一格就多一份只有某条路径知道的状态（DE-022 D-226） |
  *
  * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
  * 域文件（authz / chat / plugin / event_bus / projection …）的插件 id 字面量不是内核
@@ -48,7 +49,7 @@
  * 论证的事；它只保证：让核心形状变宽，必须显式触碰一处基线数字，并留下一条能被人打开的
  * 决策。红不红不由执行者判断。
  *
- * ## 为什么只有这五格（口径边界，别顺手加）
+ * ## 为什么只有这几格（口径边界，别顺手加）
  *
  * - **不判行数**：`08 §3.3` 写着「加了数据 / 加了调用点 / 改了文档，都不是架构改动」，
  *   而契约加字段是数据变化——行棘轮会对它红，那是误报；一个只会误报的守卫最后一定被人
@@ -60,6 +61,10 @@
  *   `Entity` 的变体都是这样长回来的，而 CS-001 一格都看不见。它因此是**第二组格**
  *   （`structFields` / `enumVariants`），不与 trait 三格混在一个基线里：两组量的失效面
  *   不同，混在一起会让「哪一格涨了」在数字里看不出来。
+ * - **控制面草稿（CS-010）与内核数据面（CS-009）也必须分两组**：CS-009 只量 core /
+ *   kernel 的**公共**数据面，`TurnState` 是 loop 插件的 `pub(crate)` 草稿，公共面一格都
+ *   碰不到它。它的失效面与内核同形——每多一格就多一份**只有某条路径知道**的状态——所以
+ *   单独立一格（DE-022 D-226），而不是顺手塞进 CS-009 的基线。
  *
  * ## 与既有判据的分工（一个事实只有一个 owner）
  *
@@ -91,12 +96,13 @@
  *
  * 环境变量 `CORE_SHAPE_BASELINE=<traits>:<methods>:<defaults>` **只给回归测试用**（真仓门禁
  * 不设）；它不动任何文件就能把上限放到天边，所以 `gate.d/35-baseline.mjs` 另判一次
- * 「覆盖值不得比默认值更松」。`VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 同理。
+ * 「覆盖值不得比默认值更松」。`VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 同理；
+ * `CORE_DATA_BASELINE=<structFields>:<enumVariants>`、`TURN_STATE_BASELINE=<字段数>` 同理。
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
-// @codes CS-001 CS-002 CS-003 CS-004 CS-005 CS-006 CS-008 CS-009
+// @codes CS-001 CS-002 CS-003 CS-004 CS-005 CS-006 CS-008 CS-009 CS-010
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -319,6 +325,29 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
       return { structFields, enumVariants }
     })()
   : { structFields: 565, enumVariants: 245 }
+
+/**
+ * CS-010 控制面草稿的字段棘轮（[DE-022](../docs/003-design/022-行表与派发面.md "DE-022-行表与派发面") D-226）。
+ *
+ * `TurnState` 是 loop 插件在幕内借来借去的草稿：请求轮次、锚点、请求级缓存与产物寄存位。
+ * 它不在公共面上（`pub(crate)`），CS-009 一格都看不见；而它是控制面里**唯一一处会自己
+ * 长字段**的地方——每多一格，就多一份只有某条路径知道的状态，而事实面本可以回答它。
+ *
+ * 口径按[字段身份]判，不按「压数字」：**事实的第二份拷贝 ⇒ 退出，读日志**；产物寄存位
+ * ⇒ 允许（`D-123` 决策 5 允许「不交回」，不是「不留痕」，最终仍要落格）；请求级缓存 ⇒
+ * 允许，但注释要能指出「为什么它不是第二份状态」。三种身份的逐字段处置见 D-226。
+ *
+ * 基线 = 处置表留下的字段数，也就是目标值（21）。只许降：删掉一格就同步改这里；加一格
+ * 必须先在 `docs/003-design/` 立一条决策，再在基线旁写
+ * `core-shape-allow turnStateFields: D-NNN <理由>`（CS-002 校验那条决策能打开）。
+ *
+ * `TURN_STATE_BASELINE=<字段数>` 与另外三条同一条纪律：只给回归测试用，
+ * `35-baseline` 另判覆盖值不得比默认值更松。
+ */
+const TURN_STATE_REL = 'crates/symbio-plugin-loop/src/chat_loop/state.rs'
+const TURN_STATE_BASELINE = process.env.TURN_STATE_BASELINE
+  ? Number(process.env.TURN_STATE_BASELINE)
+  : 21
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
@@ -548,6 +577,22 @@ function measureDataSurface(dir) {
   return rows
 }
 
+/**
+ * 控制面草稿 `TurnState` 的字段数（CS-010 的读法）。
+ *
+ * 字段切分与 CS-009 同一条（`topLevelSegments`：顶层逗号，泛型 / 函数指针 / 属性里的
+ * 逗号靠深度跳过）；入口不同——草稿是 `pub(crate) struct`，不在 `pub struct` 的判定面里。
+ * 读不到（文件不在 / struct 改名）返回 `null`：调用方按「判据失去输入」处理，不静默算 0。
+ */
+function countTurnStateFields(abs) {
+  if (!fs.existsSync(abs)) return null
+  const txt = blankTestModules(blankComments(fs.readFileSync(abs, 'utf8')).join('\n'))
+  const m = /\bpub(?:\(crate\))?\s+struct\s+TurnState\s*\{/.exec(txt)
+  if (!m) return null
+  const open = txt.indexOf('{', m.index)
+  if (open < 0) return null
+  return topLevelSegments(txt.slice(open + 1, matchBrace(txt, open))).length
+}
 
 const coreDir = path.join(ROOT, CORE_REL)
 if (!fs.existsSync(path.join(coreDir, 'lib.rs'))) {
@@ -644,6 +689,35 @@ for (const [key, cap] of Object.entries(DATA_BASELINE)) {
   }
 }
 
+// ==================== CS-010 控制面草稿字段棘轮 ====================
+
+const turnStateAbs = path.join(ROOT, TURN_STATE_REL)
+/** 判据有没有输入：文件在就算「该读它」，读到才算数；真仓（有宿主侧插件域）缺文件也红 */
+const turnStateApplicable = fs.existsSync(turnStateAbs) || hasPlugins
+const turnStateFields = countTurnStateFields(turnStateAbs)
+if (!Number.isFinite(TURN_STATE_BASELINE)) {
+  report(
+    'CS-010',
+    `基线 \`turnStateFields\` 不是数字（${TURN_STATE_BASELINE}）—— 判据读不出即失效，宁红不静默`,
+  )
+} else if (turnStateFields === null) {
+  if (turnStateApplicable) {
+    report(
+      'CS-010',
+      `读不出 \`${TURN_STATE_REL}\` 里的 \`TurnState\`——草稿被删 / 改名 / 搬走，` +
+        '字段棘轮失去输入（夹具仓库没有宿主侧插件域时不判）',
+    )
+  }
+} else if (turnStateFields > TURN_STATE_BASELINE) {
+  report(
+    'CS-010',
+    `控制面草稿变宽：\`TurnState\` 字段数实测 ${turnStateFields} > 基线 ${TURN_STATE_BASELINE} —— ` +
+      '草稿里每一格都该先回答「它是事实的第二份拷贝 / 产物寄存位 / 请求级缓存」' +
+      '（逐字段处置与目标值见 DE-022 D-226）。要让新的一格成立，先在 `docs/003-design/` 立一条决策，' +
+      '再在基线旁写 core-shape-allow turnStateFields: D-NNN <理由>',
+  )
+}
+
 // ==================== CS-002 放宽必须挂得住一条决策 ====================
 
 /**
@@ -659,10 +733,14 @@ for (const [key, cap] of Object.entries(DATA_BASELINE)) {
  */
 const waivers = []
 const selfPath = path.join(ROOT, SELF_REL)
-// 放宽口有两个基线对象（形状三格 + 数据两格），键名不重名；豁免注释只写格名，
+// 放宽口有三个基线对象（形状三格 + 数据两格 + 草稿一格），键名不重名；豁免注释只写格名，
 // 因此校验面取并集——`core-shape-allow enumVariants: D-209 …` 与
 // `core-shape-allow methods: D-077 …` 走同一条判定。
-const WAIVABLE_KEYS = [...Object.keys(SHAPE_BASELINE), ...Object.keys(DATA_BASELINE)]
+const WAIVABLE_KEYS = [
+  ...Object.keys(SHAPE_BASELINE),
+  ...Object.keys(DATA_BASELINE),
+  'turnStateFields',
+]
 if (fs.existsSync(selfPath)) {
   const selfText = fs.readFileSync(selfPath, 'utf8').replace(/\r\n/g, '\n')
   for (const m of selfText.matchAll(WAIVER_RE)) {
@@ -1070,6 +1148,14 @@ if (errors.length === 0) {
   ruleLine(true, 'CS-009', `数据面棘轮：${dataLine}（只许降；新领域走 Entity::Domain 扩展位）`)
   ruleLine(
     true,
+    'CS-010',
+    turnStateFields === null
+      ? '控制面草稿字段棘轮：夹具仓库没有 TurnState，CS-010 不适用'
+      : `控制面草稿字段棘轮：turnStateFields ${turnStateFields}/${TURN_STATE_BASELINE}（只许降；` +
+          '新增一格要先立决策，逐字段处置见 DE-022 D-226）',
+  )
+  ruleLine(
+    true,
     'CS-002',
     waivers.length
       ? `放宽 ${waivers.length} 格，引用的 ADR 全部能打开：${waivers.map((w) => `${w.key}←${w.reason.match(ADR_REF_RE)?.[0]}`).join('、')}`
@@ -1151,6 +1237,13 @@ if (errors.length === 0) {
       yellow('提示') +
         `：数据面已收到基线下方（${dataUnder.map((k) => `${k} ${dataValues[k]}<${DATA_BASELINE[k]}`).join(' · ')}），` +
         `请同步本脚本的 DATA_BASELINE——留着旧数字等于把余量白留给下一次`,
+    )
+  }
+  if (turnStateFields !== null && turnStateFields < TURN_STATE_BASELINE) {
+    console.log(
+      yellow('提示') +
+        `：TurnState 已收到基线下方（turnStateFields ${turnStateFields}<${TURN_STATE_BASELINE}），` +
+        '请同步本脚本的 TURN_STATE_BASELINE——留着旧数字等于把余量白留给下一次',
     )
   }
   if (VERBOSE) {

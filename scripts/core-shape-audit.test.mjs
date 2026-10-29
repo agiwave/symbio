@@ -52,8 +52,10 @@ const ONE = 'pub trait Store {\n    fn one(&self) -> u32;\n}\n'
  * 不显式给基线就测不到棘轮（真仓的值是 20:72:24）。
  * `data` 是 `CORE_DATA_BASELINE=<structFields>:<enumVariants>`（CS-009），默认 `0:0`——
  * 绝大多数夹具里没有公共数据面，给 `0:0` 让提示噪音不出现在无关用例里。
+ * `turnState` 是 `TURN_STATE_BASELINE=<字段数>`（CS-010），默认不给——夹具仓库里没有
+ * 草稿文件时 CS-010 不适用，与真仓的默认基线无关。
  */
-function audit(files, { baseline = '1:1:0', vocab, data = '0:0' } = {}) {
+function audit(files, { baseline = '1:1:0', vocab, data = '0:0', turnState } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-shape-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
@@ -63,6 +65,7 @@ function audit(files, { baseline = '1:1:0', vocab, data = '0:0' } = {}) {
     }
     const env = { ...process.env, NO_COLOR: '1', CORE_SHAPE_BASELINE: baseline, CORE_DATA_BASELINE: data }
     if (vocab !== undefined) env.VOCAB_BASELINE = vocab
+    if (turnState !== undefined) env.TURN_STATE_BASELINE = turnState
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env,
@@ -191,11 +194,16 @@ test('CS-004 只量内核文件集：域文件里的插件 id 字面量不判红
     [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
     'crates/symbio-core/src/plugin/mod.rs': '',
     'crates/symbio-plugin-session/src/.keep': '',
+    // 这个夹具按真仓形状造（有宿主侧插件域）⇒ CS-010 的草稿文件必须同样在场。
+    [TURN_STATE]: draft(['a']),
   }
-  const ok = audit(files, { baseline: '5:5:0' })
+  const ok = audit(files, { baseline: '5:5:0', turnState: '1' })
   assert.equal(ok.status, 0, ok.stderr + ok.stdout)
 
-  const bad = audit({ ...files, [ALPHA]: five + 'pub const A: &str = "session";\n' }, { baseline: '5:5:0' })
+  const bad = audit(
+    { ...files, [ALPHA]: five + 'pub const A: &str = "session";\n' },
+    { baseline: '5:5:0', turnState: '1' },
+  )
   assert.equal(bad.status, 1, '同一字面量落进内核文件就必须红')
   assert.match(bad.stderr, /CS-004/)
   assert.match(bad.stderr, /回流/)
@@ -534,4 +542,77 @@ test('CS-006：没有插件 crate 的夹具仓库 ⇒ 不适用，不许静默�
   const r = audit(core(ONE, vocab()), { baseline: '1:1:0', vocab: '1:1' })
   assert.equal(r.status, 0, r.stderr + r.stdout)
   assert.match(r.stdout, /CS-006.*不适用/)
+})
+
+// ==================== CS-010 控制面草稿字段棘轮 ====================
+
+const TURN_STATE = 'crates/symbio-plugin-loop/src/chat_loop/state.rs'
+/** 一个只有字段的草稿夹具（字段名随便起，棘轮数的是格数） */
+const draft = (fields) =>
+  `pub(crate) struct TurnState {\n${fields.map((f) => `    pub(crate) ${f}: u8,`).join('\n')}\n}\n`
+
+test('CS-010：草稿字段数等于基线 ⇒ 通过', () => {
+  const r = audit(core(ONE, { [TURN_STATE]: draft(['a', 'b']) }), {
+    baseline: '1:1:0',
+    turnState: '2',
+  })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /CS-010.*turnStateFields 2\/2/)
+})
+
+test('CS-010：草稿多一格 ⇒ 红（每多一格就多一份只有某条路径知道的状态）', () => {
+  const r = audit(core(ONE, { [TURN_STATE]: draft(['a', 'b', 'c']) }), {
+    baseline: '1:1:0',
+    turnState: '2',
+  })
+  assert.equal(r.status, 1, '草稿变宽必须红')
+  assert.match(r.stderr, /CS-010/)
+  assert.match(r.stderr, /字段数实测 3 > 基线 2/)
+})
+
+test('CS-010：反向——泛型 / 元组 / 属性的逗号不算字段分隔', () => {
+  const src =
+    'pub(crate) struct TurnState {\n' +
+    '    #[allow(dead_code)]\n' +
+    '    a: BTreeMap<u8, u8>,\n' +
+    '    b: Option<(String, String)>,\n' +
+    '}\n'
+  const r = audit(core(ONE, { [TURN_STATE]: src }), { baseline: '1:1:0', turnState: '2' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('CS-010：文件在但读不出 TurnState ⇒ 红（判据失去输入，宁红不静默）', () => {
+  const r = audit(core(ONE, { [TURN_STATE]: 'pub(crate) struct Other {\n    a: u8,\n}\n' }), {
+    baseline: '1:1:0',
+    turnState: '2',
+  })
+  assert.equal(r.status, 1, '草稿被改名 ⇔ 棘轮失去输入')
+  assert.match(r.stderr, /CS-010/)
+  assert.match(r.stderr, /读不出/)
+})
+
+test('CS-010：真仓缺草稿文件 ⇒ 红（文件删了，判据不能跟着消失）', () => {
+  const five =
+    ONE +
+    'pub trait Capability {\n    fn c(&self);\n}\n' +
+    'pub trait ModelProvider {\n    fn m(&self);\n}\n' +
+    'pub trait VdfsProvider {\n    fn v(&self);\n}\n' +
+    'pub trait Registry {\n    fn r(&self);\n}\n'
+  const r = audit(
+    {
+      [CORE_MOD]: 'mod alpha;\n',
+      [ALPHA]: five,
+      'crates/symbio-core/src/plugin/mod.rs': '',
+    },
+    { baseline: '5:5:0' },
+  )
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /CS-010/)
+  assert.match(r.stderr, /读不出/)
+})
+
+test('CS-010：夹具仓库没有草稿文件 ⇒ 不适用（不许静默当成已通过）', () => {
+  const r = audit(core(ONE), { baseline: '1:1:0' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /CS-010.*不适用/)
 })

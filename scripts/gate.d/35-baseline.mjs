@@ -94,6 +94,19 @@ function coreDataCells(text) {
   return cells
 }
 
+/** `scripts/core-shape-audit.mjs` 的 `TURN_STATE_BASELINE`（CS-010）：控制面草稿字段数，
+ *  一格。与 CS-009 一样是三元的单格形状（`? Number(...)` 与 `: 数字`）——按 `deadCodeCells`
+ *  同一条正则读，写成 `: Number(...)` 会让这一项永远解析不到格、静默显示成「跳过」。
+ *  放宽的资格由 CS-002 判（`core-shape-allow turnStateFields: D-NNN`），本条只判数字有没有
+ *  比上一版更松。 */
+function turnStateCells(text) {
+  const cells = new Map()
+  const norm = text.replace(/\r\n/g, '\n')
+  const m = /\?\s*Number\(process\.env\.TURN_STATE_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
+  if (m) cells.set('turnStateFields', Number(m[1]))
+  return cells
+}
+
 /** `scripts/projection-purity.mjs` 的 `PROJ_BASELINE`（PP-004）：三元尾部对象，两格。
  *  键序就是 `CORE_PROJECTION_BASELINE=<files>:<ctors>` 的位置口径；放宽的**资格**由
  *  PP-005 判（注释里必须挂一条存在的 `### D-NNN`），本条只判数字有没有比上一版更松。 */
@@ -325,6 +338,18 @@ const RATCHETS = [
     waivers: waiverReader('core-shape-allow'),
     envVar: 'CORE_DATA_BASELINE',
     label: 'core / kernel 公共数据面两格（struct 字段数 / enum 变体数，只许降）',
+  },
+  {
+    // CS-010 控制面草稿一格（`TurnState` 字段数）。它与 core-shape / core-data 住同一个
+    // 文件、用同一个豁免标记名，但量的是 loop 插件的 `pub(crate)` 草稿——公共面棘轮
+    // （CS-009）看不见它。放宽的资格由 CS-002 判，本条只判数字有没有比上一版更松。
+    id: 'turn-state',
+    file: 'scripts/core-shape-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: turnStateCells,
+    waivers: waiverReader('core-shape-allow'),
+    envVar: 'TURN_STATE_BASELINE',
+    label: '控制面草稿 `TurnState` 字段数（CS-010，只许降）',
   },
   {
     // PP-004 core 投影面两格（产投影文件数 / 投影构造器条数）。能力折叠一旦长回

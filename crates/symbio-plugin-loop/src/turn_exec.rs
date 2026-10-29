@@ -1296,8 +1296,8 @@ pub(crate) fn land_retry_branch(
         of,
         seq.value()
     );
-    // 收尾时按这一格补发组内的标注帧（见 `TurnState::branch_root`）。
-    turn.branch_root = Some(root_id.to_string());
+    // 收尾时按**这一格**补发组内的标注帧（`finish_turn` 从本幕的事实切片读回
+    // `into`）：新支的根 id 不再在草稿上另存一份。
     Ok(())
 }
 

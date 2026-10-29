@@ -1013,9 +1013,8 @@ async fn drive_lands_one_branch_fact_for_a_retry_and_consumes_the_registration()
     );
     let root_id = h
         .turn
-        .branch_root
-        .clone()
-        .expect("收尾记下了本幕的根（组内标注要用）");
+        .branch_root()
+        .expect("收尾能从事实切片读回本幕的根（组内标注要用）");
 
     let branch_facts = |h: &ControlHarness| -> Vec<Event> {
         h.facts
