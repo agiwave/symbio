@@ -140,7 +140,7 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
 CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）跑的是**同一个脚本**
-（`--only=backend --ci --profile=<dev|release>` / `--only=frontend-static,frontend-build` / `--only=facts-write,docs,facts,baseline --ci`
+（`--only=fmt,backend,rustdoc --ci --profile=<dev|release>` / `--only=frontend-static,frontend-build` / `--only=facts-write,docs,facts,baseline --ci`
 / `--only=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链），
 所以本地通过 ≈ CI 通过。注意后两个 `--ci` 不是可选项：`backend` 含 `cargo fmt`——门禁**自动执行**
 的工作，少了 `--ci` 就没有判红手段；`facts-write` 是**生成链**（事实 → 汇总页 → 引用地址 →

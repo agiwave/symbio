@@ -250,6 +250,30 @@ test('★ `long: true` 的任务先起：并发池按声明序发任务，长杆
   }
 })
 
+test('★ 挂死不静默：默认超时回收进程树，静默期有心跳', () => {
+  // 两个失败模式各一条断言：①一个只睡不输出的任务原先要等 60s 的 spawnSync 上限
+  // 才被砍断（真门禁里是**永远**等下去）；②安静三分钟的 doc 与卡死在台上同形。
+  const demo = withStageDir({
+    'zz-hang.mjs':
+      `export default { id: 'zz-hang', title: '挂死演示（测试注入，勿留）', tasks: [\n` +
+      `  { label: '长睡不起', cmd: process.execPath, args: ['-e', 'setTimeout(() => {}, 60000)'] },\n` +
+      `] }\n`,
+  })
+  try {
+    const r = runGate(['--only=zz-hang'], {
+      ...demo.env,
+      GATE_TASK_TIMEOUT_MS: '3000',
+      GATE_HEARTBEAT_MS: '1000',
+    })
+    const out = stripAnsi(r.stdout + r.stderr)
+    assert.notEqual(r.status, 0, `超时任务必须判红：\n${out}`)
+    assert.match(out, /超过 3s 未结束，回收进程树/, `必须说明超时、且回收的是整棵进程树：\n${out}`)
+    assert.match(out, /⏳/, `静默期必须有心跳，否则「还在跑」与「卡死」同形：\n${out}`)
+  } finally {
+    demo.dispose()
+  }
+})
+
 test('★ 失败项：日志末几行与相对路径直接印在汇总里（不必再跑一次门禁）', () => {
   const demo = withDemoStage()
   try {
@@ -445,6 +469,31 @@ test('★ 阶段级并发必须连成**一批**：中间夹一个串行阶段就
   // 这条断言同时是那条前移的**回归钉**：谁把生成挪回 verify，批连续性判据里
   // verify 会连同它自己的 `parallel` 一起红。
   assert.ok(stages[idx('verify')]?.parallel, 'verify 必须标 parallel 并连进主批——它与 docs 的 mod.rs 竞态已随生成前移消掉')
+  // rustdoc 与 backend 共用同一条 `.cargo-lock`：并跑**不省墙钟**，它标 parallel 的
+  // 全部意义是「留在批里 + 有一个能 `--skip=rustdoc` 的名字」。标成串行则它 2m43s
+  // 会作为一整段加在批后，`--skip` 省下的那点时间还不够付这次串行。
+  assert.ok(idx('rustdoc') >= 0, 'rustdoc 阶段必须存在（断链判据的唯一执行方）')
+  assert.ok(
+    stages[idx('rustdoc')]?.parallel,
+    'rustdoc 必须留在批内并标 parallel——它不是「能与 backend 重叠」，而是「不许把 2m43s 串到批后」',
+  )
+})
+
+test('★ 拆出去的阶段必须仍在 CI 里：ci.yml 的 --only 名单要包含它', () => {
+  // 拆阶段最危险的失效方式不是报错，是**从默认全量里消失**：本地默认还跑，CI 的
+  // backend job 若只写 `--only=fmt,backend`，rustdoc 就成了「任何时候都没人跑」。
+  // 这条判据把「拆出去」与「进 CI」钉在一起。
+  const ci = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8')
+  const lists = [...ci.matchAll(/--only=([^\s"'`]+)/g)].map((m) => m[1].split(','))
+  assert.ok(lists.length > 0, 'ci.yml 里必须有带 --only= 的门禁调用')
+  assert.ok(
+    lists.some((ids) => ids.includes('backend')),
+    `应有一个 job 跑 backend：${JSON.stringify(lists)}`,
+  )
+  assert.ok(
+    lists.some((ids) => ids.includes('backend') && ids.includes('rustdoc')),
+    `rustdoc 已从 backend 泳道拆成独立阶段 ⇒ 跑 backend 的 job 必须同时点名 rustdoc：${JSON.stringify(lists)}`,
+  )
 })
 
 test('★ 关键路径：cli release 重建在批内（backend 泳道尾），mod.rs 生成在批前（06 链）', async () => {

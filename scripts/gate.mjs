@@ -28,13 +28,18 @@
  * 适合并发的：只读审计脚本（扫文件）、`rustc` 独立编译、彼此隔离的 e2e 用例。
  * 不适合的：任何 cargo 命令、写同一个输出目录的任务。
  *
+ * **唯一的例外是 `15-rustdoc`**，它要的是**名字**不是速度：`cargo doc` 与 backend
+ * 同争 `.cargo-lock`，并跑不会省下任何墙钟（锁把它们排成先后，总和不变），但
+ * 独立成阶段 id 之后「这一轮不跑它」是一次显式选择（`--skip=rustdoc`），而不是
+ * 从某个泳道里悄悄删掉一项。判据与代价写在那个文件头。
+ *
  * 阶段级同构：阶段对象同样可以标 `parallel: true`——连续标了的**阶段**合成一批
  * 并发跑，约束与任务级相同：**只有相互无数据依赖的阶段才可标**（每个阶段为什么
  * 安全，写在它自己的文件头，不在本文件复述）。当前编排（2026-10-19）：
  *
  *   05-fmt（屏障，单独跑）
  *     → 06-facts-write（生成器链，串行；docs 读它的产物，故必须是批的前置）
- *     → [10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv ∥ 55-verify]
+ *     → [10-backend ∥ 15-rustdoc ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv ∥ 55-verify]
  *     → 56-frontend-build → 58-e2e → 60-facts（必须最后）
  *
  * ⚠️ **批只由「连续」的 `parallel: true` 阶段组成**：中间夹一个没标 `parallel` 的阶段，
@@ -71,6 +76,17 @@
  *   node scripts/gate.mjs --base=<ref>          棘轮基准版本（只对 baseline 阶段有意义）
  *   node scripts/gate.mjs --list                只列出阶段与任务，不执行
  *   node scripts/gate.mjs --help                打印用法并退出（**不跑任何阶段**）
+ *
+ * ## 不许挂死
+ *
+ * 命令型任务有**默认 30 分钟超时**（`GATE_TASK_TIMEOUT_MS` 可覆盖）：超时即回收
+ * **整棵进程树**并判红。只杀直接子进程会留下 cargo/rustc 孙进程继续握着
+ * `.cargo-lock`，于是「一次超时」变成「接下来每一轮都卡在 Blocking waiting for
+ * file lock」——那才是门禁卡死的完整形态。
+ *
+ * 长任务每 30 秒打一行心跳（`GATE_HEARTBEAT_MS` 可调，0 = 关）；静默超过 2 分钟
+ * 换成告警语气并点明最常见的等待对象（`.cargo-lock`）。三分钟的 `cargo doc` 与
+ * 「卡死」在台上原本长得一模一样，心跳就是用来把它们分开的。
  *
  * 参数是**白名单**：未识别的参数、`--only=` 的空清单、`--only` / `--skip` 里不存在的
  * 阶段 id 一律**拒绝**（退出码 2，用法见 `--help`）。理由：本脚本的默认动作是全量门禁
@@ -322,8 +338,55 @@ const fmtDuration = (ms) => {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
+/**
+ * 命令型任务的默认超时。**没有超时才是卡死的成因**：cargo 等 `.cargo-lock`
+ * （持有者可能是一个早已没人看、也没退出的构建进程）、前端工具等 stdin、网络
+ * 下载挂住——这些都不产生任何输出，门禁于是永远不出结论，而台上看起来和「正在跑」
+ * 一模一样。30 分钟是冷编译 + 最慢单例的宽松上界；`GATE_TASK_TIMEOUT_MS` 可覆盖。
+ */
+const DEFAULT_TASK_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.GATE_TASK_TIMEOUT_MS)
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 30 * 60 * 1000
+})()
+
+/** 心跳间隔：长任务每这么久报一次「还在跑、最近看到了什么」。 */
+const HEARTBEAT_MS = (() => {
+  const raw = Number(process.env.GATE_HEARTBEAT_MS)
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 30_000
+})()
+
+/** 静默多久算「可能卡住」——心跳行从这一档起换告警语气。 */
+const STALL_WARN_MS = 120_000
+
+/**
+ * 回收**整棵进程树**。只杀直接子进程会留下孙进程（cargo → rustc / rustdoc、
+ * npm → node）继续持有 `.cargo-lock` 与 `target/` 写入权——一次超时就变成接下来
+ * 每一轮都卡在 `Blocking waiting for file lock` 上。Windows 用 `taskkill /T`，
+ * 其余平台退回 `SIGKILL`（本仓的卡死样本全部出自 Windows 的 cargo 锁）。
+ */
+function killTree(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+  }
+  try {
+    child.kill('SIGKILL')
+  } catch {
+    /* 已经退出 */
+  }
+}
+
 function run(o) {
-  const { label, cmd, args = [], cwd = repoRoot, timeoutMs = 0, echo = 'filtered', env, quiet = false } = o
+  const {
+    label,
+    cmd,
+    args = [],
+    cwd = repoRoot,
+    timeoutMs = DEFAULT_TASK_TIMEOUT_MS,
+    echo = 'filtered',
+    env,
+    quiet = false,
+  } = o
   // `quiet`：并发批里**不往 stdout 写任何东西**——多个任务同时 echo 会交错成
   // 不可读的乱码（`▸ a … ▸ b … ok (1s) ok (2s)`）。详情仍完整落在各自的日志
   // 文件里，批跑完由调用方按原顺序打印一行结论。单任务（非并行）行为不变。
@@ -359,7 +422,16 @@ function run(o) {
       if (settled) return
       settled = true
       pending = result
-      sink.end(() => resolve(result))
+      let resolved = false
+      const done = () => {
+        if (resolved) return
+        resolved = true
+        resolve(result)
+      }
+      sink.end(done)
+      // 日志句柄卡住（磁盘满 / 文件被占）不该让整轮门禁陪它一起挂死：
+      // 结论先出来，缺的那段证据由 `failureDetail` 的「读不到」分支如实呈现。
+      setTimeout(done, 2000).unref()
     }
     // 日志文件本身写不进去（本机实测过：批量删除守卫 / 文件被占用）不能让整轮门禁吊死，
     // 也不能让一个没人接的 `error` 事件把门禁炸掉——带结果返回，缺的那段证据由
@@ -373,19 +445,51 @@ function run(o) {
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
         timedOut = true
-        child.kill('SIGKILL')
+        const mark = quiet ? `      ⚠ [${label}] ` : '      '
+        console.log(yellow(`${mark}超过 ${fmtDuration(timeoutMs)} 未结束，回收进程树…`))
+        killTree(child)
       }, timeoutMs)
+    }
+
+    // **心跳**：三分钟的 `cargo doc` 与「卡死」在台上长得一模一样——两者都只有
+    // 一行 `▸ label …` 之后再无动静。心跳把「还在跑」与「在等某个东西」分开：
+    // 持续有输出 ⇒ 正常；长时间静默 ⇒ 标出来，并指认最常见的那个原因（cargo 锁）。
+    // 并发批里也照打：行首带任务名，交错也能对上号。
+    let lastLine = ''
+    let lastActivity = Date.now()
+    const beat =
+      HEARTBEAT_MS > 0
+        ? setInterval(() => {
+            const silent = Date.now() - lastActivity
+            if (silent < HEARTBEAT_MS) return
+            const elapsed = fmtDuration(Date.now() - started)
+            const tail = lastLine ? `，最近输出：${lastLine.slice(0, 100)}` : '，至今没有任何输出'
+            if (silent >= STALL_WARN_MS) {
+              console.log(
+                yellow(
+                  `      ⚠ [${label}] 已静默 ${fmtDuration(silent)}（总 ${elapsed}）${tail}` +
+                    '——若这是 cargo，多半在等 `.cargo-lock`（日志里会出现 Blocking waiting for file lock）',
+                ),
+              )
+            } else {
+              console.log(dim(`      ⏳ [${label}] 已运行 ${elapsed}，静默 ${fmtDuration(silent)}${tail}`))
+            }
+          }, Math.max(1000, Math.min(HEARTBEAT_MS, 30_000)))
+        : null
+    const stopBeat = () => {
+      if (beat) clearInterval(beat)
     }
 
     const consume = (chunk) => {
       const text = chunk.toString()
       chunks.push(text)
       sink.write(text)
-      if (echo !== 'none') {
-        for (const raw of text.split('\n')) {
-          const line = raw.replace(/\r/g, '').trimEnd()
-          if (!line) continue
-          if (echo === 'filtered' && NOISE.test(line)) continue
+      lastActivity = Date.now()
+      for (const raw of text.split('\n')) {
+        const line = raw.replace(/\r/g, '').trimEnd()
+        if (!line) continue
+        lastLine = line
+        if (echo !== 'none' && !(echo === 'filtered' && NOISE.test(line))) {
           console.log(`      ${dim(line)}`)
         }
       }
@@ -396,6 +500,7 @@ function run(o) {
 
     child.on('error', (err) => {
       if (timer) clearTimeout(timer)
+      stopBeat()
       if (!quiet) {
         console.log(red('启动失败'))
         console.log(red(`      ${err.message}`))
@@ -416,6 +521,7 @@ function run(o) {
 
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer)
+      stopBeat()
       const ok = code === 0 && signal === null && !timedOut
       const ms = Date.now() - started
       if (!quiet) {
