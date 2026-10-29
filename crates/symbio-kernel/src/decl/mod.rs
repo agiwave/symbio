@@ -46,7 +46,7 @@
 //!
 //! 内核只声明**协议五格**（`request` / `sent` / `response` / `failed` / `retry`）——
 //! 它们是引擎自己的写读面，属于语法而非业务。控制面事实与全部视图由
-//! `plugins::loop::control_decl` 声明，经 [`Builder::declare`] 交进来；内核不认识
+//! `crates/symbio-plugin-loop/src/control_decl.rs` 声明，经 [`Builder::declare`] 交进来；内核不认识
 //! 那些名字。新增一个视图、一个控制面事实、一处字段，改的是插件文件，不是本模块。
 //!
 //! **owner 就是「谁把这张表交进 `Builder`」**（DE-023 D-178）：`declare` 的第一个
@@ -61,7 +61,7 @@
 //!
 //! ## 生产接线
 //!
-//! 装载入口在 `plugins::loop::loop_rows`：它把 [`Builder::new`] 预置的协议五格与
+//! 装载入口在 `crates/symbio-plugin-loop/src/loop_rows.rs`：它把 [`Builder::new`] 预置的协议五格与
 //! 插件自己的声明集一起 `seal`，再交给 `owed` / `drive`。`Frozen::eval` 的成本上界
 //! 仍按声明生效：调用方传入**本轮切片**（不是整份 WAL），一轮的事件数由轮的生命周期
 //! 界定。
@@ -136,7 +136,7 @@ pub struct ViewDecl {
 /// 方案 §2.3 的草图把 `run` 画进 `ActorDecl`，其签名 `BoxFuture<'static, …>` 与
 /// §2.6 契约 1（`drive` 是 async、持本轮草稿）在类型上互斥：`'static` 的 future
 /// 借不到草稿，也借不到 `&dyn LlmAdapter`。执行体的可调用面因此住在**注册它的
-/// 插件**里（`plugins::loop::turn_exec::ACTORS`），机制层只持有静态可查的四样——
+/// 插件**里（`crates/symbio-plugin-loop/src/turn_exec::ACTORS`），机制层只持有静态可查的四样——
 /// 「一个 `by` 一个动作」由绑定表与冻结表同时保证。裁决见 D-119。
 ///
 /// 与 `actors::ActorSpec` 无关：那里的 actor 是**主体**（人格 / 推理），这里的
@@ -170,7 +170,7 @@ pub struct PluginDeclarations<'a> {
 
 /// 内核自己交出的声明（协议五格）的 owner 标识。
 ///
-/// 与插件 owner（如 `"plugins/loop"`）同处一个命名空间：`Frozen` 的 owner 清单里
+/// 与插件 owner（如 `"crates/symbio-plugin-loop"`）同处一个命名空间：`Frozen` 的 owner 清单里
 /// 没有第二种来源，问「这一条归谁」永远只有一个答案（DE-023 D-178）。
 pub const KERNEL_OWNER: &str = "kernel";
 
@@ -349,7 +349,7 @@ impl Builder {
             }
             // §3.4 第 5 条（写入封闭）的声明侧：执行体的账本不许含引擎独占的格子。
             // 「实际写入 ⊆ `writes`」那一半在运行期对账，判定输入是日志尾段而不是
-            // 执行体交回的陈述（D-123 决策 1–2；实现 `plugins/loop` 的 `turn_exec::drive`）。
+            // 执行体交回的陈述（D-123 决策 1–2；实现 `crates/symbio-plugin-loop` 的 `turn_exec::drive`）。
             for fact in a.writes {
                 if ENGINE_ONLY_CELLS.contains(fact) {
                     gaps.push(Gap::ActorWritesEngineCell {

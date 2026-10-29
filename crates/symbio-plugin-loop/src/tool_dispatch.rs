@@ -220,7 +220,7 @@ pub(crate) struct WakeBatch {
 ///
 /// 刻意只装**结果**：消费方（运行器）要的是「拿什么回填给模型」与「要不要停」，
 /// 不是插件侧的节点形状。节点怎么建、往哪发，是分发方自己的事——运行器不认识
-/// `ChatNode` 的图语义（那在 `plugins/session`），只认识这段文本。
+/// `ChatNode` 的图语义（那在 `crates/symbio-plugin-session`），只认识这段文本。
 ///
 /// 它住在插件里而不是 core：生产消费方只有本插件的运行器（README §4 四问第 1 问）。
 #[derive(Debug, Clone, Default)]

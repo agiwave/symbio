@@ -4,7 +4,8 @@
  *
  * ## 它守的是什么
  *
- * `Plugin` trait 只有三个方法：`meta` / `route` / `traverse`（`symbio_core/plugin/mod.rs`）。
+ * `Plugin` trait 无默认体的方法只有三个：`meta` / `route` / `traverse`
+ * （`crates/symbio-kernel/src/plugin/mod.rs`）。
  * 后两个是全仓**仅有的两条**跨插件寻址通道，而它们的地址是**字符串**——
  * 字符串不会因为改名而编译失败，只会静默地指向一个不存在的地方。
  *
@@ -32,7 +33,7 @@
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  * | E-009 | 插件不得依赖兄弟插件：**Cargo.toml 不声明** · 源码不 `symbio_plugin_<兄弟>` · `include!`/`#[path]` 不跨 crate · `symbio` 门面只许 dev，**测试代码同样判** | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过（Rust 私有可见性包含"定义模块的后代"），旧实现判的就是这个形态。拆 crate（D-191）后兄弟插件是独立 crate，该路径**不可能存在**——约束由 cargo 的依赖图物理给出，但它的物理位置也搬到了 `Cargo.toml`：现在能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条**静默空转**（全仓 4 处 `crate::plugins` 全是注释），绿灯是假的。现判五条通路：清单（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法）· 源码裸 `symbio_plugin_<x>`（连 `symbio::symbio_plugin_<x>::` 一并命中）· 旧路径兜底（机制回退时立刻红）· `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码，绕过前四条）。测试也判：让它对仓内可见去喂一条测试，隔离已经先被拆掉了一个模块 |
- * | E-013 | `plugins/loop/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../docs/003-design/001-核心架构.md "D-083") 的闭族通货：`crate::symbio_core` + 通用库 + crate 根日志/工厂宏。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
+ * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../docs/003-design/001-核心架构.md "D-083") 的闭族通货：`crate::symbio_core` + 通用库 + crate 根日志/工厂宏。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_core::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
  *
@@ -125,7 +126,7 @@ function report(rule, severity, file, line, message) {
 // ── 文件收集 ─────────────────────────────────────────────────────────────
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'target', 'docs', 'archive'])
 
-/** 插件目录名：从文件绝对路径取 `plugins/` 下的首段 */
+/** 插件目录名：从文件绝对路径取 `crates/symbio-plugin-<id>/` 的 crate 名并去掉前缀 */
 const pluginDirOf = (abs) =>
   path.relative(PLUGINS_DIR, abs).split(/[/\\]/)[0].replace(PLUGIN_CRATE_PREFIX, '')
 
@@ -293,7 +294,7 @@ const crateDirOf = (id) => path.join(PLUGINS_DIR, PLUGIN_CRATE_PREFIX + id)
  */
 const CONFIG_MOUNT_PLUGINS = new Set(['gateway', 'local', 'telegram', 'web'])
 
-/** 该绝对路径是否落在 `plugins/` 之下（E-007 的适用范围） */
+/** 该绝对路径是否落在某个插件 crate 之下（E-007 的适用范围） */
 const isInPluginsDir = (abs) =>
   abs
     .split(path.sep)
@@ -373,7 +374,7 @@ function discoverPlugins() {
 const pluginDirs = discoverPlugins()
 const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 
-// 常量表：先收全仓（装配方 `assembly.generated.rs` 的 `PLUGIN_ID_*`、`routes.rs` 的 `ROUTE_*`、
+// 常量表：先收全仓（装配方 `crates/symbio-deploy/src/lib.rs` 的 `PLUGIN_ID_*`、`routes.rs` 的 `ROUTE_*`、
 // 前端 `constants/routes.gen.ts` 的生成常量）
 //
 // `tauri/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树
@@ -597,7 +598,7 @@ for (const abs of codeFiles) {
 
     // E-007：插件不得按值持有兄弟插件实例
     //
-    // 只扫 `plugins/` 之下：`session/chat_loop/state.rs` 等虽在 `plugins/` 里，
+    // 只扫插件 crate 之下：`symbio-plugin-loop/src/chat_loop/state.rs` 等虽在插件里，
     // 但其 `parent` 字段是向上引用（豁免 3），不会误报。
     // **行首括号深度 > 0 ⇒ 形参，不是字段**（见 `parenDepthAtLineStart`）——
     // 多行函数签名里的 `plugin: Arc<dyn Plugin>,` 与字段行逐字同形。
@@ -755,7 +756,7 @@ for (const dirName of dirNames) {
 //
 // 「插件之间互不可见」是这条判据从第一天起的语义，但它的**载体换过一次**，而判据没跟。
 //
-// 拆 crate 之前（`crates/plugins/`）：兄弟插件是同一 crate 的兄弟模块。Rust 的私有可见性
+// 拆 crate 之前：兄弟插件是同一 crate 的兄弟模块。Rust 的私有可见性
 // 只到「定义模块**与它的后代**」，`plugins` 是共同父模块 ⇒ `crate::plugins::web` 编得过。
 // 拦住它的只有「没人这么写」。旧实现判的就是这个形态。
 //
@@ -950,7 +951,7 @@ for (const abs of codeFiles) {
   }
 }
 
-// ── E-013：`plugins/loop/**` 的 import 根 ⊆ 闭族 ─────────────────────────
+// ── E-013：`crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族 ─────────────────────────
 //
 // [D-083](../docs/003-design/001-核心架构.md "DE-001-核心架构") §4 把跨墙通货收成闭族（穷举即白名单，族外无
 // 通货），[D-086](../docs/003-design/014-单环一表.md "DE-014-单环一表") §9 把「import 根 ⊆ 闭族」列为切片判据。

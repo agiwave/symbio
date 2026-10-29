@@ -104,7 +104,7 @@ impl: done
 
 ### D-040 work 并入 memory：记忆的两个作用域同属一个所有者
 
-①`work` 整体并入 `memory`，`<根>/memory` 一个挂载点住两份记忆——`AGENTS.md`（智能体腿，分形）+ `WORKSPACE.md`（工作区腿）；`PLUGIN_ID_WORK`、装配清单条目与 `plugins/work/` 整体删除。
+①`work` 整体并入 `memory`，`<根>/memory` 一个挂载点住两份记忆——`AGENTS.md`（智能体腿，分形）+ `WORKSPACE.md`（工作区腿）；`PLUGIN_ID_WORK`、装配清单条目与 work 插件目录整体删除。
 
 ### D-109 两套检索内核不合一：打分各归各，「平手有稳定次级键、截断在全序之后」是全项目一份的排序口径
 

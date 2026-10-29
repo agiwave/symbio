@@ -85,7 +85,7 @@ impl DirVdfs {
     /// Windows 会把 `demo/..\..\escaped.txt` 解析到条目目录之外，而
     /// `remove_inner` 用的是 `remove_dir_all`。
     ///
-    /// 这是**纵深防御**：访问层的 `plugins::vdfs::fs::normalize_addr` 已拦一道，
+    /// 这是**纵深防御**：访问层的 `crates/symbio-plugin-vdfs/src/fs.rs::normalize_addr` 已拦一道，
     /// 但 provider 可能经其它访问路径被复用（解包、直接构造），不能假设上游
     /// 一定校验过。
     fn checked_inner(&self, id: &str, rel: &str) -> VdfsResult<PathBuf> {

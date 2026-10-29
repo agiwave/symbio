@@ -19,7 +19,7 @@
 //! ## 它与代码检索的关系（[D-109](../../symbio-plugin-memory/README.md#d-109-两套检索内核不合一打分各归各平手有稳定次级键截断在全序之后是全项目一份的排序口径 "crates/symbio-plugin-memory/src/README")）
 //!
 //! 本文件是**记忆侧**「查询 → 相关性」这条打分口径的唯一 owner。代码检索
-//! （`plugins/local/codebase_search.rs` 的 `semantic_search`）是**另一份**打分实现
+//! （`crates/symbio-plugin-local/src/codebase_search.rs` 的 `semantic_search`）是**另一份**打分实现
 //! （嵌入余弦），两边**刻意不合一**：量纲不同（计数 vs [−1,1]）、候选来源不同
 //! （事件 Log vs 文件系统）。共享的只有判据形状那一半——**分数降序之后必须有稳定
 //! 次级键，top-k 截断在全序之后**；两侧各自的实例与这条的 owner 都登记在 D-109。

@@ -103,7 +103,7 @@ pub fn actor_can_judge_intent(spec: &ActorSpec) -> bool {
 /// 与 [`actor_can_judge_intent`] 同一条纪律的第四个能力读方：`assert.verification`
 /// 是仲裁者的**全部**权威（S13 §3 三角色行），C15 构造期保证持它的那一行不持
 /// `define.work` / `produce.artifact`（不成对自验）。轮末淘汰步
-/// （`plugins/session/derived_facts::record_elimination`）写裁决前读它——缺能力 ⇒
+/// （`crates/symbio-plugin-loop/src/derived_facts::record_elimination`）写裁决前读它——缺能力 ⇒
 /// 一条裁决都不写（fail-closed：没有资格的判定不该留下事实）。
 pub fn actor_can_assert_verification(spec: &ActorSpec) -> bool {
     holds(

@@ -45,7 +45,7 @@ fn session_option_fields_declare_the_option_bar_in_order() {
 /// 从 `session.metadata` 回退取值。改 key = 静默失效（选项能选、能存，但没人读），
 /// 故在这里钉死。
 ///
-/// `heartbeat` 不在这张表里：它随调度搬进了 `plugins/heartbeat`，那个键的**读方**是
+/// `heartbeat` 不在这张表里：它随调度搬进了 `crates/symbio-plugin-heartbeat`，那个键的**读方**是
 /// 心跳插件（设置工具与调度器）而不是会话解析链，因此本插件不再声明它。
 #[test]
 fn field_keys_are_the_metadata_keys_the_parsers_read() {

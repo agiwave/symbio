@@ -1,4 +1,4 @@
-//! `session/chat_loop/compose.rs` 的单元测试 —— 对话面节点**进得了对话线**这一半。
+//! `crates/symbio-plugin-loop/src/chat_loop/compose.rs` 的单元测试 —— 对话面节点**进得了对话线**这一半。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!

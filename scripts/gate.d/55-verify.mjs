@@ -39,7 +39,7 @@
 //   | 程序 | 包含的生产文件 | 判什么 |
 //   |---|---|---|
 //   | `consolidation_fidelity` | `symbio_core/text/merge_kernel.rs` | 巩固合并的保真度下界 |
-//   | `recall_eval` | `plugins/loop/recall_score.rs` | 检索排序的 recall@k / 依赖度 |
+//   | `recall_eval` | `crates/symbio-plugin-loop/src/recall_score.rs` | 检索排序的 recall@k / 依赖度 |
 // | `invariants` | `symbio_core/invariants/kernel.rs` | I1 的 seq 单调无跳号 / 每 turn 一条 final |
 // | `termination` | `symbio_core/invariants/kernel.rs` | 终止性前提 2（返工上界）/ 前提 3（依赖图无环） |
 //

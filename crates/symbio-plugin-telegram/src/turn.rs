@@ -435,7 +435,7 @@ fn is_resync(frame: &PluginFrame) -> bool {
 /// 错误，只在运行期表现为「调用失败」——`plugin-entry-audit` E-003 拦的正是这个。
 /// 尚无 core 常量的两条（`vdfs/write` / `vdfs/stat`）按 `cli` 的先例自持字面量：
 /// core 只把 `root` / `watch` / `unwatch` 三条列为跨插件例外，其余协议路径归 vdfs
-/// 插件自己（见 `plugins/vdfs/protocol.rs` 的模块文档）。
+/// 插件自己（见 `crates/symbio-plugin-vdfs/src/protocol.rs` 的模块文档）。
 async fn route_json(
     router: &Arc<dyn Plugin>,
     ctx: &Arc<dyn PluginInvokeRequest>,

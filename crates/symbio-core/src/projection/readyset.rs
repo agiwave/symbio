@@ -33,7 +33,7 @@
 //!
 //! 建节点 / 推进 / 挂起 / 终态 / 租约是**算法角色**；它们的拼写由调用方在构造期交进来
 //! （`readyset_for(vocab, cap)`，DE-024 D-206）。
-//! 写方与调度者是 `plugins/loop`，读数还被 `plugins/session` 的 `stats` 消费，所以名字登记进
+//! 写方与调度者是 `crates/symbio-plugin-loop`，读数还被 `crates/symbio-plugin-session` 的 `stats` 消费，所以名字登记进
 //! loop 的清单、由生成物交给 session（D-204）——core 一行都不比对它们。
 
 use super::super::event::{Entity, Event};
@@ -87,7 +87,7 @@ struct Lease {
 ///
 /// 生产消费方两处（[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：读出口
 /// `session/stats` 的 `readyset` 列，与请求装配时交给执行者的**调度段**
-/// （`plugins/loop/task_events`）、以及调度者自己。两者传同一个 `cap`（写方 = 会话配置），
+/// （`crates/symbio-plugin-loop/src/task_events`）、以及调度者自己。两者传同一个 `cap`（写方 = 会话配置），
 /// 因此「候选集多大」只有一处定义。
 pub fn readyset_for(vocab: TaskVocab<'_>, cap: usize) -> Projection<ReadySetView> {
     let cap = cap.max(1);

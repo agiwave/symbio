@@ -88,7 +88,7 @@ created: 2026-07-20
  两者的值域与判据（RG-006 / RG-008 / RG-024 / RG-025）在 SP-001 与 [DE-017](003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")，本页不复述。
 - **`id` 是身份，`status` / `impl` 是状态**：字段语义见 SP-001；各 kind 的状态词由该 kind README meta 声明。
 - **目录不参与判定**：`kind` 只来自 front-matter；文档搬去别的目录不会破机制，只需把 `id` 与它一起改（判据会拦）。
- **模块文档就地登记**（`crates/crates/plugins/*/README.md` 与模块 `docs/` 不搬进 `docs/`）——「就近放置」优先于「按类归堆」。
+ **模块文档就地登记**（`crates/symbio-plugin-*/README.md` 与模块 `docs/` 不搬进 `docs/`）——「就近放置」优先于「按类归堆」。
 - **引用只写编号**：文档之间互相引用时只写 `[[编号]]`（如 `[[SP-001]]`；要显示文字写 `[[编号|显示文字]]`），
  **地址既不手写也不维护**——由 `node scripts/gen-doc-refs.mjs` 从登记解析生成，每次门禁重算全仓地址。
  判据三条：编号不存在判红（RF-001）、地址漂移自动重算（RF-002）、**指向已登记文档的手工地址判红**（RF-003）。
@@ -199,7 +199,7 @@ owner 从各文档 front-matter 的 `lists: [<id>=owner]` 读（与 [RE-007-清�
 | `docs/006-guide/` | 上手 / 插件开发 / 排障 |
 | `docs/007-task/` | 在办任务（过程类；完成后由提交者删除，`git log` 保留） |
 | `docs/archive/` | 历史：已废止机制、一次性评审、已落地的实施方案、已退场的决策记录；**不进登记** |
-| 模块目录 | `crates/crates/plugins/<plugin>/README.md`（+ `docs/`）、`tauri/`、`cli/`、`e2e/`——就近放置，同一套登记机制管 |
+| 模块目录 | `crates/symbio-plugin-<plugin>/README.md`（+ `docs/`）、`crates/*/README.md`、`tauri/`、`e2e/`——就近放置，同一套登记机制管 |
 
 **加一篇文档 = 建文件 + 写 front-matter**（`kind` / `id` / `title` / `status` / `created`，设计再加 `impl`），
 文件名按编号规范起，`id` 与文件名一致；不需要改任何清单：汇总页由脚本重生成。

@@ -1,13 +1,13 @@
 //! 会话插件的配置（`<本插件目录>/PLUGIN.yml`）。
 //!
-//! ## 为什么在插件里，而不是 `symbio_core/schemas`
+//! ## 为什么在插件里，而不是 core
 //!
-//! 它不住在 `symbio_core/schemas::session::session_config`，与同目录的
+//! 它不住在 core 的 `chat` 模块（`crates/symbio-core/src/chat/`），不与那里的
 //! `session_chat` / `chat_node` 并列。但两者性质不同：
 //!
 //! - **协议 schema**（那两个）是**跨插件契约**——agent / local / model 都按同一份
 //!   定义拼 WS 帧与 payload，改了会同时影响多方，因此归核心；
-//! - **本文件是配置**：全仓引用**只在 `src/plugins/session/` 内**，前端与 CLI 零镜像，
+//! - **本文件是配置**：全仓引用**只在 `crates/symbio-plugin-session/` 内**，前端与 CLI 零镜像，
 //!   `lib.rs` 也不导出。它描述的是「本插件自己的旋钮」，不是任何跨插件接口。
 //!
 //! 判据与 `ChatSession` 契约下沉时同一条（见 `chat_session.rs` 模块文档）：

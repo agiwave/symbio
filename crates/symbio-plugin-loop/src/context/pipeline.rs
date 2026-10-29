@@ -936,7 +936,7 @@ async fn send_compression_request(
 ///
 /// ## 为什么是一道逐帧白名单，而不是「换一个出口」
 ///
-/// 模型插件的流循环（`plugins/model/stream.rs`）发出的帧有三类：
+/// 模型插件的流循环（`crates/symbio-plugin-model/src/stream.rs`）发出的帧有三类：
 ///
 /// 1. **运行骨架根帧**（`is_run()`：`type=skeleton` + `style_tag=run`，`id = 请求 root_id`）——压缩请求
 ///    的 root 是一次性 id，这条帧若进转写，前端会多出一个**永远停在流式的空

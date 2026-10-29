@@ -1,4 +1,4 @@
-//! `plugins/model/tool_accumulator.rs` 的单元测试 —— 与实现同级分文件。
+//! `crates/symbio-plugin-model/src/tool_accumulator.rs` 的单元测试 —— 与实现同级分文件。
 //!
 //! 自 `symbio_core/llm/turn.test.rs` 迁入（该文件里测累积器的那 10 条），
 //! 断言随 `get_completed(&mut self)` → `finish(self)` 的收口语义调整：

@@ -15,9 +15,9 @@ created: 2026-07-20
 
 | 层 | 目录 / 挂载点 | 职责 |
 | --- | --- | --- |
-| **核心库** | `symbio/` | `symbio_core` 契约 · 分形插件路由 · 多协议 LLM 适配 · 会话（持久化 / 生命周期 / 压缩） · Agent 资产与记忆 |
+| **核心库** | `crates/` | `symbio-core` 契约 · `symbio-kernel` 内核 · 插件与 provider 各一个 crate · `symbio` 装配 |
 | **桌面前端** | `tauri/` | Vue 3 + Pinia + Tauri 2；`src-tauri/` 是只暴露 3 个 IPC 命令（`route_v2` / `route_v2_send` / `route_v2_close`）的薄适配层 |
-| **命令行前端** | `cli/` | 纯 Rust：REPL / 单次 / 管道 / 心跳守护，进程内直连插件树，不经 IPC |
+| **命令行前端** | `crates/symbio-cli/` | 纯 Rust：REPL / 单次 / 管道 / 心跳守护，进程内直连插件树，不经 IPC |
 | **入站通道** | `gateway` · `telegram` 插件 | 树内插件：HTTP / WS 入站请求转发给父级路由（与 `route_v2` 同构）；Telegram 长轮询收发 |
 
 设计原则：**UI 只做配置与展示，业务逻辑全在核心库**；各前端各自建树、不共享内存，但共用同一套插件装配与路径协议。
@@ -54,7 +54,7 @@ cd tauri && npm install && npm run tauri dev
 ### 命令行
 
 ```bash
-node cli/scripts/build-cli.mjs # 产物落在仓库根：target/debug/symbio-cli.exe
+node crates/symbio-cli/scripts/build-cli.mjs # 产物落在仓库根：target/debug/symbio-cli.exe
 ./target/debug/symbio-cli.exe -m "你好" # 单条；系统目录默认 <当前目录>/.symbio
 ./target/debug/symbio-cli.exe # REPL；系统目录在别处时加 --homedir <路径>
 ```
@@ -62,7 +62,7 @@ node cli/scripts/build-cli.mjs # 产物落在仓库根：target/debug/symbio-cli
 ### 编译与门禁
 
 ```bash
-cd symbio && cargo build --lib # 只编核心库
+cargo build -p symbio-core # 只编核心库
 node scripts/gate.mjs # 提交前一条命令：Rust 编译 / 单测 / clippy / fmt · 前端类型检查与 vitest · 静态审计 · 事实表生成
 node e2e/run-tests.mjs # 端到端：mock LLM / MCP / HTTP，不需要真 API Key
 ```
@@ -75,9 +75,8 @@ node e2e/run-tests.mjs # 端到端：mock LLM / MCP / HTTP，不需要真 API Ke
 
 ```
 symbio/
-├── symbio/ # Rust 核心库：symbio_core（契约）· plugins（插件树）· providers（嵌入 / 存储）
+├── crates/ # Rust：symbio-core（契约）· symbio-kernel · 插件与 provider 各一 crate · symbio-cli
 ├── tauri/ # Vue 3 桌面端（src-tauri = 3 命令的薄适配层）
-├── cli/ # 纯 Rust CLI 前端（根 workspace 成员，共用仓库根的 target/）
 ├── docs/ # 系统级文档（目标 / 场景 / 计划 / 架构 / 参考 / 指南 / 规范 / 任务 / 决策，历史在 archive/）
 ├── e2e/ # 端到端用例（mock LLM / MCP / HTTP + 网关 WS）
 ├── examples/ # Agent 示例包

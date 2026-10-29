@@ -684,7 +684,7 @@ fn row(label: &str, value: String) -> ReadingRow {
 }
 
 /// 一次压缩 / 一份压缩产物的**事实行**（数字取自节点 `meta`，口径见
-/// `plugins/loop/context/pipeline.rs::compression_stats` 的文档注释）。
+/// `crates/symbio-plugin-loop/src/context/pipeline.rs::compression_stats` 的文档注释）。
 ///
 /// ## 缺数字就不出行，绝不补 0
 ///
@@ -744,7 +744,7 @@ pub(crate) fn notice_stats_of(m: &cm::ChatNode) -> Option<ReadingSection> {
 /// 会话级**上下文水位**读数（挂会话节点 `attributes.context_watermark`）。
 ///
 /// 入参是 `SessionSummary::context` —— 最近一轮 Turn 骨架 `meta.context` 的原样投影
-/// （四个绝对 token 数，写方 `plugins/loop/context.rs::context_watermark`）。本函数是
+/// （四个绝对 token 数，写方 `crates/symbio-plugin-loop/src/context.rs::context_watermark`）。本函数是
 /// 这些数**变成话**的唯一一处，与 [`notice_stats_of`] 同一条纪律：
 ///
 /// - 单位与精度只在这里定（[`format_tokens`] 全仓唯一）；

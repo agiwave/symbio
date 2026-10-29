@@ -54,7 +54,7 @@ const MESSAGE_VOCAB: symbio_core::MessageVocab = symbio_core::MessageVocab {
 };
 use symbio_core::{LlmAdapter as _, TokenIssuer};
 
-/// 与生产渲染同一口径（`plugins/loop/turn_runner/prepare.rs::render_messages`）：
+/// 与生产渲染同一口径（`crates/symbio-plugin-loop/src/turn_runner/prepare.rs::render_messages`）：
 /// 事件切片 → 转写投影 → 消息数组。测试不能引兄弟插件的实现（E-009），故在此
 /// 直接调同一个投影入口。
 fn render_messages(events: &[Event]) -> Vec<PromptMessage> {
@@ -645,9 +645,9 @@ async fn reflex_tier_system_overhead_is_measured_and_bounded() {
 ///
 /// 边界（2026-10-09）：本测只到**适配器边界**（`generate_timed` 的实测耗时），
 /// 不驱动会话侧执行链（用户消息入格 / final 收束 / 成本入账 / 不变量校验）——
-/// 那条链是 `session` 的 `TurnRunner` 职责。插件互不可见（见 `plugins/mod.rs`
-/// 架构原则），模型层测试不越界去够会话层符号；执行链本身的覆盖在
-/// `session/turn_runner.test.rs`（stub 适配器全链路）。
+/// 那条链是 `loop` 的 `TurnRunner` 职责。插件互不可见（判据 `plugin-entry-audit` E-009），
+/// 模型层测试不越界去够会话层符号；执行链本身的覆盖在
+/// `crates/symbio-plugin-loop/src/turn_runner.test.rs`（stub 适配器全链路）。
 #[tokio::test]
 #[ignore = "需要真实端点凭据：SYMBIO_REHEARSE_API_BASE / _API_KEY / _MODEL"]
 async fn real_provider_full_calibration() {

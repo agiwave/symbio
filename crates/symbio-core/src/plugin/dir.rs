@@ -38,7 +38,7 @@
 //! - ❌ 不要按插件名反推落位（`HomedirRegistry::get().join(PLUGIN_X)` 或等价的
 //!   「类别根 + 类别名」拼法）——那等于把「装配决策」写死进插件，插件挪个位置就全错；
 //! - ✅ 实例方法里用 `self.dir`；按 id 派生路径的**自由函数**则让调用方把根当参数
-//!   传进来（见 `plugins::session::paths`，`root` 是首个入参）。
+//!   传进来（见 `crates/symbio-plugin-session/src/paths.rs`，`root` 是首个入参）。
 //!
 //! 注释与文档同理：写「本插件自己的目录」，不写 `<homedir>/…` 具体路径。
 //! 插件目录是**父插件给的**，不是插件算出来的。

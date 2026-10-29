@@ -48,7 +48,7 @@ pub struct Request {
     pub load_history: Option<bool>,
     /// 会话恢复操作（与 `single_message` 互斥）。
     ///
-    /// 存在时由 session 插件会话循环（`session/chat_loop.rs:run_chat_loop`）在 turn 循环前处理：
+    /// 存在时由 loop 插件的会话循环（`crates/symbio-plugin-loop/src/chat_loop.rs:run_chat_loop`）在 turn 循环前处理：
     /// - `RetrySubtree`：Failed Turn 那一支**不删**，另开一支重走 LLM 请求（两支并存可切换）
     /// - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：删除旧工具响应子节点 →
     ///   重新执行工具（approve/retry/supply）或直接生成结果（reject/answer）→

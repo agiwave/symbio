@@ -544,7 +544,7 @@ pub(crate) const SCHEDULE_BUDGET_MS: u64 = 80;
 ///
 /// 取值理由与端口租约同一条：**比最慢的可接受持有长，比「用户已经以为坏了」短**。
 /// 任务是模型驱动的一步工作，分钟级足够；到期不续即放回候选池（不是重试——重试语义
-/// 归端口，见 `plugins/loop/port`）。
+/// 归端口，见 `crates/symbio-plugin-loop/src/port`）。
 const LEASE_MS: i64 = 300_000;
 
 /// 调度者要落的一笔事实（**只描述，不构造 `Event`**）。
@@ -582,7 +582,7 @@ pub(crate) struct ScheduleFact {
 /// ## 它不做什么
 ///
 /// 不做优先级与公平性（`readyset` 的打分参数）、不做抢占（那是
-/// `plugins/session/transcript/inbox.rs::PreemptionDecider` 的活）、不做验收
+/// `crates/symbio-plugin-session/src/transcript/inbox.rs::PreemptionDecider` 的活）、不做验收
 /// （`task.asserted` 归验证者）。它只回答一个问题：**这一刻该把哪几笔活交出去，
 /// 交给谁，租到什么时候**。
 pub(crate) struct ScheduleDecider;

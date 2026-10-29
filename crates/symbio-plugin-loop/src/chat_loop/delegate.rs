@@ -41,7 +41,7 @@ use symbio_plugin_api::context::DelegateVerdict;
 
 // ── Q1：worker 启动条件 ────────────────────────────────────────────────
 
-/// Q1 理由码。与 `schemas::dialog` 的 `REASON_*` 同一条约定：理由码是**英文短词**，
+/// Q1 理由码。与 core `dialog` 模块的 `REASON_*` 同一条约定：理由码是**英文短词**，
 /// 可观测、可穷举、可被测试逐个钉住——没有理由码的判定不可审计（D-047 不变量）。
 ///
 /// 出厂值（前缀 / 关键词 / 阈值）的真源在 **core**（`WORKER_*` 常量，与 session

@@ -190,7 +190,7 @@ const NO_MEMBER_SET = [
   {
     owner: 'docs/003-design/009-VDFS规范.md',
     why:
-      '§5 自己声明 `plugins/vdfs/protocol.rs` 的 `VDFS_OPS` 是唯一操作清单——' +
+      '§5 自己声明 `crates/symbio-plugin-vdfs/src/protocol.rs` 的 `VDFS_OPS` 是唯一操作清单——' +
       '操作族与「VDFS 操作」集合同源同成员，不新增第二份',
   },
 ]

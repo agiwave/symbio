@@ -218,7 +218,7 @@ async fn self_listing_shows_child_dirs_by_registered_name() {
         "目录名来自子插件自己的注册；顺序按 meta.order"
     );
     // 本层**不填条目地址**（容器不知道自己被挂在哪里）——地址由访问层按
-    // 请求地址回填，见 `plugins/vdfs/host.rs::fill_paths`
+    // 请求地址回填，见 `crates/symbio-plugin-vdfs/src/host.rs::fill_paths`
     assert!(root[0].path.is_empty(), "条目地址留给分发层");
     assert_eq!(root[0].node.title, "乙");
     assert_eq!(root[0].node.kind, VDFS_KIND_DIR);
@@ -794,7 +794,7 @@ async fn sub_provider_fetched_via_trait_method() {
 // ==================== 条目地址不在本层回填 ====================
 //
 // 地址是「某一份列表」给条目的定位，按 `<请求地址>/<name>` 推导即可，由**访问层**
-// 统一回填（`plugins/vdfs/host.rs::fill_paths`）。容器**不碰**它——它连自己挂在
+// 统一回填（`crates/symbio-plugin-vdfs/src/host.rs::fill_paths`）。容器**不碰**它——它连自己挂在
 // 哪里都不知道，自己填必然缺前缀（嵌套时就是缺外层那一段）。
 //
 // 子 provider 只在「地址推不出来」时才自己填（`VdfsItem::path`，如设置页条目

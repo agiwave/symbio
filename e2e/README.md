@@ -37,10 +37,10 @@ E2E_DEBUG=1 node e2e/run-tests.mjs # 失败时输出错误堆栈
 ```
 
 **被测二进制不需要你记得重建**：`scripts/cli-binary.mjs` 是这条知识的唯一真相
-（门禁与 e2e 共用）。判据是**内容指纹**——`crates/symbio-cli/src` + `symbio/src` 的全部源码与
-两个 crate 的清单算一个 sha256，构建成功后写成构建戳（`.symbio-cli.build-stamp`，
-与二进制同目录）。使用前比对：戳一致就直接用；不一致就 `cargo build --release`
-（cargo 自己判增量，源码没真变时 0.3 s 结束）再写戳。
+（门禁与 e2e 共用）。判据是**内容指纹**——整个 `crates/` 树的源码与根清单
+（`Cargo.toml` / `Cargo.lock`）算一个 sha256，构建成功后写成构建戳
+（`.symbio-cli.build-stamp`，与二进制同目录）。使用前比对：戳一致就直接用；不一致就
+`cargo build --release`（cargo 自己判增量，源码没真变时 0.3 s 结束）再写戳。
 
 为什么不能用「文件在不在」当判据：照它判，本机那份过期 exe 就会被一直
 用下去，e2e 的失败形态与**眼前的源码直接矛盾**（源码里明明有的字段，运行时是
@@ -49,8 +49,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs # 失败时输出错误堆栈
 
 产物只有一个去处：`cli` 是根 workspace（根 `Cargo.toml` 的 `members`）的成员，cargo 把所有
 成员的产物写进同一个 `<仓库根>/target/`，所以二进制就在 `target/release/symbio-cli.exe`。
-机制按「候选位置取最新的那份」解析（`scripts/cli-binary.mjs`），过渡期残留在 `symbio/target/`、
-`cli/target/` 的旧产物因此不会被当成「缺失」——但**指路只指第一候选**。手工
+`scripts/cli-binary.mjs` 只解析这一条路径。手工
 `cargo build --release` 也可以，代价只是下次使用时会多跑一次 cargo（戳没更新）。
 
 `E2E_CLI_EXE=<path>` 指向外部二进制会**绕过**新鲜度判定——外部产物无法用本仓源码

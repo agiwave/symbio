@@ -34,9 +34,9 @@
 //   交回开发者 shell 处理。
 // - 默认 dry-run，必须显式 `--fix` 才动文件。
 //
-// 用法：
-//   node scripts/repair-target-cache.mjs            # 仅调查
-//   node scripts/repair-target-cache.mjs --fix      # 执行修复
+// 用法（仓库根执行）：
+//   node crates/symbio-cli/scripts/repair-target-cache.mjs            # 仅调查
+//   node crates/symbio-cli/scripts/repair-target-cache.mjs --fix      # 执行修复
 
 import { spawnSync } from 'node:child_process';
 import { readdirSync, rmSync, statSync } from 'node:fs';

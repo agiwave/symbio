@@ -419,7 +419,7 @@ async fn migrated_session_routes_stay_retired() {
 /// 断言落在**句柄**上而不是「有没有新回合」：后者要等一个心跳间隔才验得出，而句柄
 /// `is_finished()` 直接钉住「这条 loop 已退出」这一事实本身。
 ///
-/// 2b 切片后本插件只剩**收件箱消费者**一条（心跳扫描搬进了 `plugins/heartbeat`，
+/// 2b 切片后本插件只剩**收件箱消费者**一条（心跳扫描搬进了 `crates/symbio-plugin-heartbeat`，
 /// 判据跟着搬到那边的 `plugin.test.rs`）：这里的 `2 → 1` 是**在册任务变了**，
 /// 不是判据放宽——每条常驻 loop 都由它的**所有者**记下句柄，一处也不许漏。
 #[tokio::test]
@@ -433,7 +433,7 @@ async fn stop_terminates_resident_loops() {
     assert_eq!(
         plugin.resident_tasks.len(),
         1,
-        "收件箱消费者该在册（心跳扫描已随 2b 切进 plugins/heartbeat）"
+        "收件箱消费者该在册（心跳扫描已随 2b 切进 crates/symbio-plugin-heartbeat）"
     );
 
     Plugin::stop(plugin.clone(), PluginStopReason::Disabled)

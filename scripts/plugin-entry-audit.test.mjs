@@ -519,7 +519,7 @@ pub struct FooPlugin {
   assert.match(r.stdout, /\[ERROR\]\s+E-007\s+crates\/symbio-plugin-composite\/src\/composite\.rs:\d/)
 })
 
-test('E-007 不误报：不在 `plugins/` 之下的同类字段', () => {
+test('E-007 不误报：不在插件 crate 之下的同类字段', () => {
   const r = audit({
     ...CLEAN,
     'crates/symbio-core/src/registry.rs': 'pub struct Reg {\n    held: Arc<RwLock<Option<Arc<dyn Plugin>>>>,\n}\n',
@@ -548,7 +548,7 @@ test('提取正确性：`*.test.rs` 里的假 route 不参与臂提取', () => {
     ...CLEAN,
     // walk 先深度再同级，`chat_loop/state.test.rs` 会排在 `plugin.rs` 之前；
     // 不过滤掉它，session 会被误判成「恒 NotFound、零路由臂」。
-    'crates/symbio-plugin-session/src/chat_loop/state.test.rs': `impl Plugin for FakePlugin {
+    'crates/symbio-plugin-loop/src/chat_loop/state.test.rs': `impl Plugin for FakePlugin {
     async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         if ctx.get(PATH).as_deref() != Some("hook/fire") {
@@ -610,12 +610,12 @@ test('E-008 命中：标记的前缀在代码里没有同名常量（前缀写�
 
 // ── E-009：插件不得直接 use 兄弟插件模块 ────────────────────────────────
 //
-// 真实形态：`plugins/mod.rs` 的架构原则说「插件之间互相不可见」，但 Rust 的私有
-// 可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到 `plugins::web`。当前代码为 0，
-// 但没有任何守卫；这条规则把它钉住。
+// 真实形态：「插件之间互相不可见」过去只靠「没人这么写」兜底——Rust 的私有
+// 可见性包含"定义模块的后代" ⇒ 旧布局里 `plugins::mcp` 能路径到 `plugins::web`。
+// 拆分后兄弟插件是独立 crate，而判据仍把 `crate::plugins` 钉成零。
 const E009_HIT = /\[ERROR\]\s+E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:\d/
 
-test('E-009 命中：`plugins/mcp` 里 `use crate::plugins::web::…`', () => {
+test('E-009 命中：`crates/symbio-plugin-mcp` 里 `use crate::plugins::web::…`', () => {
   const r = audit({
     ...CLEAN,
     'crates/symbio-plugin-mcp/src/caller.rs': 'use crate::plugins::web::something;\n',
@@ -643,7 +643,7 @@ test('E-009 不误报：文档链接（注释里的 `crate::plugins::web`）', (
   assert.doesNotMatch(r.stdout, E009_HIT)
 })
 
-test('E-009 不误报：不在 `plugins/` 之下的同类引用（如 `cli/`）', () => {
+test('E-009 不误报：不在插件 crate 之下的同类引用（如 `cli/`）', () => {
   const r = audit({
     ...CLEAN,
     'crates/symbio-cli/src/client.rs': 'use crate::plugins::web::something;\n',
@@ -1043,7 +1043,7 @@ test('E-012 不误报：注释里的示例声明（文档写了一条不存在�
   assert.doesNotMatch(r.stdout, E012_HIT)
 })
 
-// ── E-013：`plugins/loop/**` 的 import 根 ⊆ 闭族 ─────────────────────────
+// ── E-013：`crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族 ─────────────────────────
 //
 // D-083 §4 的闭族是枚举白名单；D-086 §9 把「import 根 ⊆ 闭族」列为切片判据。
 // E-009 只拦兄弟插件，拦不住 `crate::providers` / 族外第三方 crate 这类族外根。

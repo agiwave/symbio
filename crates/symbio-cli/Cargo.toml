@@ -14,7 +14,7 @@ path = "src/main.rs"
 [dependencies]
 # 核心库：进程内直接复用同一套分形插件树，不经过任何 IPC/协议改动。
 symbio = { path = "../symbio" }
-# 版本与 features 刻意与 ../crates/symbio/Cargo.toml 完全一致：
-# 同一份 tokio 单元 → 复用 symbio/target 里已编译好的 rlib，避免重复编译。
+# 版本与 features 刻意与 ../symbio/Cargo.toml 完全一致：
+# 同一份 tokio 单元 → 复用仓库根 target/ 里已编译好的 rlib，避免重复编译。
 tokio = { workspace = true, features = ["full"] }
 serde_json = { workspace = true }

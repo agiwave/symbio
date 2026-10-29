@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  cliBinaryCandidates,
+  cliArtifactRelPath,
   cliBinaryPath,
   cliBinaryState,
   cliBuildFingerprint,
@@ -87,7 +87,7 @@ test('symbio 侧源码改动同样让指纹失效（CLI 复用同一套插件树
 
 test('新增一个源文件 ⇒ 指纹变', () => {
   const before = cliBuildFingerprint(root)
-  write('crates/plugins/new.rs', 'pub const X: u8 = 1;\n')
+  write('crates/symbio-plugin-x/src/lib.rs', 'pub const X: u8 = 1;\n')
   assert.notEqual(cliBuildFingerprint(root), before)
 })
 
@@ -116,7 +116,7 @@ test('没有二进制 ⇒ 不新鲜，原因是「不存在」', () => {
 })
 
 test('二进制在但没有构建戳 ⇒ 不新鲜（来源不明，不许当最新用）', () => {
-  const bin = cliBinaryCandidates(root)[1] // cli/target/release/
+  const bin = cliBinaryPath(root)
   fs.mkdirSync(path.dirname(bin), { recursive: true })
   fs.writeFileSync(bin, 'fake binary')
   const st = cliBinaryState(root)
@@ -148,17 +148,14 @@ test('不许构建时（build: false）不新鲜 ⇒ 抛错，绝不静默用旧
   )
 })
 
-// ================= 路径：两个候选取最新的那个 =================
+// ================= 路径：只有根 workspace 的一份产物 =================
 
-test('两个候选都存在时取**最新**的那份，不是第一个', () => {
-  const [a, b] = cliBinaryCandidates(root)
-  fs.mkdirSync(path.dirname(a), { recursive: true })
-  fs.writeFileSync(a, 'stale from months ago')
-  fs.utimesSync(a, new Date('2020-01-01T00:00:00Z'), new Date('2020-01-01T00:00:00Z'))
-  fs.writeFileSync(b, 'just built')
-  assert.equal(cliBinaryPath(root), b, '换过 .cargo/config.toml 后旧位置可能残留一份，不能按顺序取')
+test('路径是 <root>/target/<profile>/<exe>，没有第二个去处', () => {
+  assert.equal(cliBinaryPath(root), path.join(root, 'target', 'release', EXE))
+  assert.equal(cliBinaryPath(root, 'debug'), path.join(root, 'target', 'debug', EXE))
 })
 
-test('候选路径与平台一致（win32 带 .exe）', () => {
-  for (const p of cliBinaryCandidates(root)) assert.equal(path.basename(p), EXE)
+test('相对写法与绝对路径指向同一处（文档指路照它抄）', () => {
+  assert.equal(cliArtifactRelPath('debug'), `target/debug/${EXE}`)
+  assert.equal(path.join(root, cliArtifactRelPath('release')), cliBinaryPath(root))
 })

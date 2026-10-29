@@ -810,7 +810,7 @@ fn durable_layer_rejects_stream_delta() {
 
 // ==================== 序号分配（`max_seq` / `assign_seq`）====================
 //
-// 自 `symbio_core/schemas/session/chat_node.test.rs` 迁入：`seq` **字段**是跨栈
+// 自 `crates/symbio-core/src/chat/chat_node.test.rs` 迁入：`seq` **字段**是跨栈
 // schema（留 core），而「怎么补号」是会话存储的实现策略（随 `assign_seq` 迁到这里）。
 //
 // 前置条件（见 `assign_seq` 文档）：无号项只出现在**开头**或**末尾**。下面每条用例的

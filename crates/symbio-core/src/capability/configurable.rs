@@ -74,7 +74,7 @@ pub async fn capability_configurables(visitor: &dyn Registry) -> Vec<VdfsItem> {
 /// 传入插件自己的 [`PluginConfigFile`]，条目形状由本函数统一构造（见 [`capability_entry_of`]）。
 /// 收集器不存在时静默跳过：本通道是**增益**，没有它插件照常工作，
 /// 只是设置页列不出它。收集器由容器在广播前放进 `ctx`，见
-/// `plugins/composite/vdfs.rs::children_of`。
+/// `crates/symbio-plugin-composite/src/vdfs.rs::children_of`。
 pub async fn capability_announce_configurable(
     ctx: &Arc<dyn PluginInvokeRequest>,
     config: &PluginConfigFile,

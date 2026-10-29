@@ -8,7 +8,7 @@
 //      三条通配，第一版把它们存进同一个 Map 键 `'*'` ⇒ 后一条盖掉前一条，
 //      公开面从 251 个掉到 134 个，`PLUGIN_ID_*` / `PathKey` / `PluginStopReason` / `PLUGIN_KEY_*`
 //      全部凭空消失。
-//   2. **`symbio/src` 直属文件被跳过**：`lib.rs` / `plugins/mod.rs` 这类**不在插件子目录里**
+//   2. **`symbio/src` 直属文件被跳过**：`lib.rs` / `assembly.rs` 这类**不在插件子目录里**
 //      的文件当时返回 `null` 单位被整体跳过 ⇒ 「只在注册表里被用到」的符号被算成
 //      **0 个消费方**（`PluginErrorCode` / `PluginIdentity` 一族全部假报）。
 //      「数不到」与「真的没人用」是两件事。
@@ -67,11 +67,11 @@ test('多条 `pub use <域>::*` 都要展开，不能互相覆盖', () => {
 // D-191 后壳 crate 是 `crates/symbio`：单位取 **crate 名**（`symbio`），不再是
 // `symbio/(crate root)`——后者是「`crates/` 底下统统算一个」时期的兜底标签。
 test('壳 crate 直属文件也算消费方，不能被跳过', () => {
-  // 反例守卫：第一版对不在 `plugins/<名>/` 下的文件返回 null 单位并跳过 ⇒ 假报 0 消费方。
+  // 反例守卫：第一版对不在插件 crate 下的文件返回 null 单位并跳过 ⇒ 假报 0 消费方。
   const out = audit({
     'crates/symbio-core/src/lib.rs': 'pub use alpha::*;\n',
     'crates/symbio-core/src/alpha/mod.rs': 'pub struct AlphaThing;\n',
-    'crates/symbio/lib.rs': 'use crate::symbio_core::AlphaThing;\n',
+    'crates/symbio/src/lib.rs': 'use crate::symbio_core::AlphaThing;\n',
   })
   assert.match(out, /AlphaThing\s+->\s+symbio/, out)
   assert.doesNotMatch(out, /--- 0 个消费方[\s\S]*\n\s*alpha\s+AlphaThing\n/, out)
@@ -107,12 +107,12 @@ test('宏生成的键计入公开面（它们没有 `pub` 关键字）', () => {
 })
 
 test('id 常量被它的同名 provider 用，不算下放候选', () => {
-  // `EMBEDDING_ALPHA` 就是 `providers/alpha` 自己的名字，它用自己天经地义。
+  // `EMBEDDING_ALPHA` 就是 `symbio-provider-alpha` 自己的名字，它用自己天经地义。
   // （插件工厂 id 已搬去装配方，内核不再有 `PLUGIN_ID_*`；嵌入服务 id 仍住 core。）
   const out = audit({
     'crates/symbio-core/src/lib.rs': 'pub use embedding::*;\n',
     'crates/symbio-core/src/embedding/ids.rs': 'pub const EMBEDDING_ALPHA: &str = "alpha";\n',
-    'crates/symbio-providers/alpha/x.rs': 'fn f() { let _ = EMBEDDING_ALPHA; }\n',
+    'crates/symbio-provider-alpha/x.rs': 'fn f() { let _ = EMBEDDING_ALPHA; }\n',
   })
   assert.doesNotMatch(out, /EMBEDDING_ALPHA\s+->/, out)
 })

@@ -140,7 +140,7 @@ impl Clone for PluginSerializeData {
 /// 统一有效载荷
 ///
 /// **3 态穷尽枚举**，按「怎么交付给对端」分成两类——分类点唯一
-/// （`plugins::gateway::server::classify_payload`）：
+/// （`crates/symbio-plugin-gateway/src/server.rs::classify_payload`）：
 /// - **一次性**：`Data` / `Empty` —— 可直接转成线上载荷；
 /// - **长连接**：`Session` —— 返回通道，后续用帧通信。
 ///

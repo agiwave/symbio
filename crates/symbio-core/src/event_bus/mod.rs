@@ -62,7 +62,7 @@ pub const EVENT_BUS_KIND_SYSTEM: &str = "system";
 ///
 /// 不由本模块发布：一切资源的生命周期与状态变化都是 VDFS 变更，由 provider 写成功后
 /// 调 `symbio_core::vdfs::host::vdfs_notify_change`，经 `watch` 的 sink
-/// （`plugins/vdfs/host.rs::event_bus_sink`）原样投到总线上（规范 §9；信封与 `VdfsChange` 形状重合，S27 起不再有独立的 `VdfsChangeEvent`）。
+/// （`crates/symbio-plugin-vdfs/src/host.rs::event_bus_sink`）原样投到总线上（规范 §9；信封与 `VdfsChange` 形状重合，S27 起不再有独立的 `VdfsChangeEvent`）。
 ///
 /// 常量放这里而非 vdfs 插件，是贯彻上面那条「闭集只有一个家」——发布方只是引用者。
 /// 历史上并存的 `kind = "entity"` 频道（`publish_entity_changed` /
@@ -88,7 +88,7 @@ static RESYNC_INFLIGHT: LazyLock<DashMap<String, ()>> = LazyLock::new(DashMap::n
 /// | 角色 | 谁 |
 /// |---|---|
 /// | 生产方 | `cli`（`crates/symbio-cli/src/client.rs` 构造并发往 `event_bus/subscribe`） |
-/// | 消费方 | `plugins/event_bus`（`plugin.rs` 把路由载荷反序列化成它） |
+/// | 消费方 | `crates/symbio-plugin-event_bus`（`plugin.rs` 把路由载荷反序列化成它） |
 ///
 /// 两侧**分属不同 crate 且互相不可见**（cli 是独立 crate，只能经 `symbio` 的公开面
 /// = `symbio_core` 取用），core 是唯一共同可见处——这正是它不能下沉的原因，
@@ -191,7 +191,7 @@ impl EventBus {
 /// 构建事件信封 `{type:"bus_event", data:{kind, session_id, data}}`。
 ///
 /// **信封形状的唯一构建入口**：投帧方一律走这里，不要手搓同形状的 `json!`——
-/// `plugins/event_bus/plugin.rs` 的 `connected` 帧与下面的 `resync_marker` 都是它的调用方，
+/// `crates/symbio-plugin-event_bus/src/plugin.rs` 的 `connected` 帧与下面的 `resync_marker` 都是它的调用方，
 /// 手搓的那一份在形状漂移时不会有任何编译错误。解包侧有两个对偶：变更走
 /// [`event_bus_vdfs_change_of`]，指令走 [`event_bus_resync_of`]。
 ///
@@ -295,8 +295,8 @@ fn resync_marker(kind: &str) -> PluginFrame {
 /// ## 为什么必须由 core 给这一个入口
 ///
 /// 判别读的是**线上字面量**（信封的 `data.kind` 与 `data.data.type`），两侧分属不同 crate。
-/// 这里曾有两个消费方各写一份（`plugins/telegram/turn.rs::is_resync`、`crates/symbio-cli/src/client.rs`），
-/// 而第三个订阅者（`plugins/agent/host/subagent.rs` 的转播桥）**一份都没写**：它把解不出
+/// 这里曾有两个消费方各写一份（`crates/symbio-plugin-telegram/src/turn.rs::is_resync`、`crates/symbio-cli/src/client.rs`），
+/// 而第三个订阅者（`crates/symbio-plugin-agent/src/host/subagent.rs` 的转播桥）**一份都没写**：它把解不出
 /// 变更的帧一律 `continue`，于是把「你可能漏了帧」这条指令也丢了——而那条指令正是它
 /// 「本轮结束」的唯一兜底（漏掉会话态帧 ⇒ 一直等到父会话中止）。
 /// 产帧方与解帧方各写一份、漏写无人发现，正是 [`event_bus_vdfs_change_of`] 存在的那个理由。

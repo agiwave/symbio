@@ -9,7 +9,7 @@ impl: done
 
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：持有事实源、转写与运行态，负责加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具与选项，并在**一轮的边界**上派发 / 等待 / 收尾（[D-086](../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。一轮的执行本体（主循环、上下文压缩、工具链）住在独立插件 [`plugins/loop`](../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")：session 经 `loop/<sid>` 的 `run_turn` 动作把交付包交给它，loop 只经地址面 `session/<sid>/_run/<op>` 回读 / 写回会话状态。Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：持有事实源、转写与运行态，负责加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具与选项，并在**一轮的边界**上派发 / 等待 / 收尾（[D-086](../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。一轮的执行本体（主循环、上下文压缩、工具链）住在独立插件 [`crates/symbio-plugin-loop`](../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")：session 经 `loop/<sid>` 的 `run_turn` 动作把交付包交给它，loop 只经地址面 `session/<sid>/_run/<op>` 回读 / 写回会话状态。Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
@@ -32,7 +32,7 @@ flowchart TD
  SaveUser --> LoadHistory[3. 加载历史上下文<br>get_context_messages 轮次窗口对齐]
  LoadHistory --> InvokeLoop[4. 派发 loop/&lt;sid&gt; run_turn<br>TurnDispatch：TurnSpec + facts + sink]
 
- subgraph Loop 驱动器插件（plugins/loop）
+ subgraph Loop 驱动器插件（crates/symbio-plugin-loop）
  LoadHistory --> BuildPrompt[5. 解析系统提示词<br>收集各插件注册的段<br>人格/记忆/指令]
  BuildPrompt --> AggTools[6. 工具汇集<br>Registry 收集口]
  AggTools --> Resolve[7. 获取生效 ModelProvider<br>capability_model_active 单次解析]
@@ -132,7 +132,7 @@ session:
  * 一次用户 Prompt 触发一个请求；请求内部 `推理 -> 工具调用 -> 工具结果返回 -> 再推理` 的迭代在
  v2 运行器的环体里跑完（[`../loop/turn_runner.rs`](../symbio-plugin-loop/src/turn_runner.rs) 的 2e/2f），**主循环侧看不见第几轮工具**。
  * 界只有三条：单条响应内的工具调用数上限 `MAX_TOOL_CALLS_PER_RESPONSE = 32`
- （`plugins/model/stream.rs`，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
+ （`crates/symbio-plugin-model/src/stream.rs`，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
  把剩余调用放到下一轮）、用户中止、provider 断流。
  * 长度截断（`finish = Length`）后的自动续写有 `loop_rows::MAX_STAGE_ROUNDS = 3`
  （[`../loop/chat_loop/turn.rs`](../symbio-plugin-loop/src/chat_loop/turn.rs)），它数的是**续写次数**，不是工具轮数。
@@ -158,7 +158,7 @@ session:
  * 系统将从该 `User` 消息起点开始，返回**完整且未遭打碎的最近 $N$ 轮历史对话**。
  * **动态语义压缩**：当滑动窗口内的对话历史 Token 预估值超过大模型上下文限制的 **70%** 时，且 `auto_compress` 开启，系统将自动对老旧历史进行 LLM 语义合并。
 * **Rust 实现策略**：
- * **Turn 对齐获取 (`plugins/session/chat_session/read.rs`)**：
+ * **Turn 对齐获取 (`crates/symbio-plugin-session/src/chat_session/read.rs`)**：
  * `ChatSession::get_context_messages` 中先做三层清理（过滤 `Failed` 消息、剔除孤儿节点、content 归一兜底），再以 `context_messages` (可通过参数显式覆盖) 调用 `sliding_window` 实现 User 消息轮次级对齐：
 
  ```rust
@@ -176,7 +176,7 @@ session:
  messages[start_idx..].to_vec
  ```
 
- * **语义合并 (`plugins/session/context.rs`)**：
+ * **语义合并 (`crates/symbio-plugin-loop/src/context.rs`)**：
  * 每次大模型执行 Turn 之前，`prepare_compression`（配合 `should_start_compression` 的 Token 估计检测）会检测 Token 估计值。如果超标，它会将历史会话（保留最近 30% 活跃明细）打包发送给一个背景 LLM，并使用特殊的 System Prompt 提炼出高密度的 **`<state_snapshot>` XML 状态快照**：
 
  ```xml
@@ -202,7 +202,7 @@ session:
  * 被删除消息若关联 `.txt` 存档文件，存档文件同步物理删除，杜绝磁盘文件泄露。
  * **只保留完整的 User / Assistant 文本对话**，本地存储长期维持在极简规模。
 * **Rust 实现策略**：
- * **物理清理 (`plugins/session/chat_session/write.rs` 内的 `prune_historical_tool_calls`，保存消息时调用；该函数只被 session 插件消费，定义在 session 插件内)**：
+ * **物理清理 (`crates/symbio-plugin-session/src/chat_session/write.rs` 内的 `prune_historical_tool_calls`，保存消息时调用；该函数只被 session 插件消费，定义在 session 插件内)**：
 
  ```rust
  // keep_turns = 配置的 context_messages（默认 6）：
@@ -316,10 +316,10 @@ S5 的**事件记忆**是另一层：`memory_events.rs` 把每轮用户发言编
 
 | 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
 | :--- | :--- | :--- | :--- | :--- |
-| **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `plugins/session/chat_session/write.rs` |
-| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（[`../loop/turn_runner.rs`](../symbio-plugin-loop/src/turn_runner.rs) 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | `plugins/model/stream.rs` |
-| **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session/read.rs`<br>`plugins/session/context.rs` |
-| **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `plugins/session/chat_session/write.rs`（`prune_historical_tool_calls`） |
+| **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `crates/symbio-plugin-session/src/chat_session/write.rs` |
+| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（[`../loop/turn_runner.rs`](../symbio-plugin-loop/src/turn_runner.rs) 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | `crates/symbio-plugin-model/src/stream.rs` |
+| **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `crates/symbio-plugin-session/src/chat_session/read.rs`<br>`crates/symbio-plugin-loop/src/context.rs` |
+| **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `crates/symbio-plugin-session/src/chat_session/write.rs`（`prune_historical_tool_calls`） |
 | **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | [`../loop/context/view.rs`](../symbio-plugin-loop/src/context/view.rs) |
 
 通过这套**五维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求层（`build_request_sections` 三段注入，只追加不改写）→ 语义压缩层（`auto_compress` 语义合并）"的上下文治理链路，实现了高保真度的会话还原与清爽的本地持久化。请求体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）——模型看到的每条历史都能在网格里找到出处，`prompt_fidelity` 每轮复核这一点。

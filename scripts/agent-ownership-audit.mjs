@@ -5,7 +5,7 @@
  * ## 它治的病
  *
  * 「智能体自身的记忆归 `memory`、设置归 `setting`」这类**归属声明**在本仓有三处手写副本
- * （`plugins/agent/README.md`、`host/mod.rs`、`host/plugin.rs` 的模块文档），而它们的
+ * （`crates/symbio-plugin-agent/README.md`、`host/mod.rs`、`host/plugin.rs` 的模块文档），而它们的
  * 事实来源在别处：清单是装配方（`crates/symbio-deploy/src/lib.rs`）的常量，目录是 `crates/symbio-plugin-<id>/`。
  * **没有任何东西会因此变红**——09 报告 D-4/D-9 抓到 README 有 5 处过期描述，其中两处
  * 直接把读者指向不存在的模块（`host/instruction.rs`）与不存在的插件（`work`），
@@ -101,7 +101,7 @@ function agentDocs(root) {
   const relOf = (abs) => path.relative(root, abs).split(path.sep).join('/')
   const asLines = (txt) => txt.split(/\r?\n/).map((text, i) => ({ text, line: i + 1 }))
   // README 住 **crate 根**，不是 `src/`（D-191 后一插件一 crate：`crates/symbio-plugin-<id>/README.md`）。
-  // 拆分前 AGENT_REL 是 `symbio/src/plugins/agent`，README 正好在它下面；现在
+  // 拆分前 README 住在 `src/` 下；现在
   // AGENT_REL 指 `crates/symbio-plugin-agent/src`，照旧拼 `src/README.md` 会读不到——
   // 而读不到的效果是**整份归属语料消失**（AO-002/AO-003/AO-005 全部空转），不是报错。
   const readme = path.join(path.dirname(agentDir), 'README.md')

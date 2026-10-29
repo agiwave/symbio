@@ -18,7 +18,7 @@ use serde_json::json;
 use symbio_core::{chat_node as cm, ReadingSection, ReadingTone};
 
 /// 一条压缩节点（形状 = 折叠叶；压缩的数字住在 `meta`，owner 是
-/// `plugins/loop/context/pipeline.rs::compression_stats`）。
+/// `crates/symbio-plugin-loop/src/context/pipeline.rs::compression_stats`）。
 fn compression(meta: serde_json::Value) -> cm::ChatNode {
     cm::ChatNode {
         id: "m1".into(),

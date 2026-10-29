@@ -1,4 +1,4 @@
-//! `plugins/home/homedir.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `crates/symbio-plugin-home/src/homedir.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 

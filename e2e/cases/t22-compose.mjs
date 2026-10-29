@@ -92,7 +92,7 @@ import {
 } from '../helpers.mjs';
 import { join } from 'node:path';
 
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
+/** v2 事实源文件名（与 `crates/symbio-plugin-session/src/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
 const V2_WAL = 'v2-events.wal';
 
 /** 逐行读一份 WAL（与 t45 / t71 / t74 同一口径：判据落在**事实层**，转写只是它的投影）。 */

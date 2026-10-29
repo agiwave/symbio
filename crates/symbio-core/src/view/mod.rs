@@ -5,7 +5,7 @@
 //! 既有路径 `crate::view::…` 两类都解析得到。
 //!
 //! 召回视图（`RecallView` / `RecallEntry`）不在这里：它的产出方与消费方都在
-//! `plugins/loop`，形状归那条投影自己持有（[DE-024](../../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-201）。
+//! `crates/symbio-plugin-loop`，形状归那条投影自己持有（[DE-024](../../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-201）。
 
 pub use symbio_kernel::view::*;
 

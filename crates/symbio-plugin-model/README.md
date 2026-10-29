@@ -20,15 +20,15 @@ impl: done
 
 ## 明确不做
 
-- 工具执行与审批流分发：工具注册由各工具插件 traverse 提供，执行由 `plugins/loop` 的 tool_executor 编排
+- 工具执行与审批流分发：工具注册由各工具插件 traverse 提供，执行由 `crates/symbio-plugin-loop` 的 tool_executor 编排
 - 通过落库接口回写消息：转写由 session 持久化，model 对 session 零依赖
-- 会话循环 / 上下文裁剪 / 压缩：主循环整体位于 `plugins/loop`，模型只收到「这一刻要什么」
+- 会话循环 / 上下文裁剪 / 压缩：主循环整体位于 `crates/symbio-plugin-loop`，模型只收到「这一刻要什么」
 
 ## 路由
 
 **无**（权威登记见 [路由参考](../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Model 插件）。model 的全部对外能力
 都在 VDFS 上（`<根>/model`）。持久化分两处：跨条目状态（`default_provider_id`）写自己的
-`plugins/model/PLUGIN.yml`，Provider 明细是资源、各存各的 `provider.json`。
+`crates/symbio-plugin-model/PLUGIN.yml`，Provider 明细是资源、各存各的 `provider.json`。
 
 模型 provider **不设插件路由**：`<根>/model` 挂载点由本插件自己的 `impl VdfsProvider`
 提供——落盘走 `providers` 出口的 `SingleFileVdfs`（实现住 `providers/vdfs_service/`；

@@ -382,7 +382,7 @@ async fn resource_tree_membership_is_derived_from_providers() {
 //
 // 「切出一个插件」的**兑现判据**不是目录搬对了，而是：停用它 ⇒ 少掉的正好是它这一
 // 个功能，其余一切照旧。这条判据跨插件，故两侧各钉一半——本插件自己那半
-// （`traverse` put 两行 + `stop` ⇒ 循环退出）在 `plugins/heartbeat/plugin.test.rs`；
+// （`traverse` put 两行 + `stop` ⇒ 循环退出）在 `crates/symbio-plugin-heartbeat/src/plugin.test.rs`；
 // 这里钉的是**容器侧**：经**工厂 id + 真实 `mount_all`** 装配，不 import 兄弟模块
 // （E-009），停用的动作走注册表的 `set_enabled`（= 前端那个开关背后的同一个动词）。
 
@@ -591,7 +591,7 @@ async fn disabling_a_slice_removes_its_rows_and_keeps_the_rest() {
 // ③ 存储侧 `list` / `stat` / 读转写 / 写收件箱全绿。
 //
 // 仍然经**工厂 id + 真实 `mount_all`** 装配：本文件不能 `use symbio_plugin_session`
-// 或 `plugins::loop`（E-009 测试同样判），跨插件的形状由地址面与 core 词汇表达。
+// 或 loop 插件（E-009 测试同样判），跨插件的形状由地址面与 core 词汇表达。
 
 use symbio_core::chat_node as cm;
 use symbio_core::node_build::PresentationTree;

@@ -38,7 +38,7 @@ pub const VDFS_KIND_FILE: &str = "file";
 // 节点 `ext` 是宿主选择详情呈现方式的键。VDFS 只透传、不解释；
 // 以下是**约定俗成**的几个取值，宿主可自由增添自己的扩展名。
 // （会话域的两个扩展名 `session` / `message` 属会话词表，
-// 住在 `plugins/session/plugin/words.rs`，不在此登记。）
+// 住在 `crates/symbio-plugin-session/src/plugin/words.rs`，不在此登记。）
 
 /// 定义驱动表单（呈现描述放 `node.schema`）
 pub const VDFS_EXT_FORM: &str = "form";
@@ -101,7 +101,7 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 /// 移除帧走 provider 自己的变更通道（与它的增 / 改变更同一条）：从机制看，被删的
 /// 就是那一个条目——「删这一段」与「删这一个」在**单条**变更上完全同形，机制因此
 /// 不需要认识「区间」这个概念。会话消息的落地形态见
-/// `plugins/session/commands.rs::truncate_messages` / `clear_messages`（写语义域）。
+/// `crates/symbio-plugin-session/src/commands.rs::truncate_messages` / `clear_messages`（写语义域）。
 ///
 /// 回执里的被删 id 列表（随 `VdfsActionResult::data`）是**权威**列表：
 /// 调用方据此幂等对齐本地视图，不依赖推送。

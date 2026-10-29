@@ -23,7 +23,7 @@
 //! | 事件补全 | 子插件报出的相对路径补成树内全路径再交给上层 sink |
 //!
 //! **本层不填条目地址**：地址是「某一份列表」的定位（`VdfsItem::path`），
-//! 按 `<父地址>/<name>` 推导即可，由访问层（`plugins/vdfs/host.rs::fill_paths`）
+//! 按 `<父地址>/<name>` 推导即可，由访问层（`crates/symbio-plugin-vdfs/src/host.rs::fill_paths`）
 //! 用**请求地址**统一回填。本层若自己填，就必须知道自己的挂载前缀——而它不知道
 //! （composite 可被另一个 composite 包含），填出来的会缺前缀。
 //!

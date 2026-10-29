@@ -228,7 +228,7 @@ impl AgentPlugin {
     ///
     /// ⚠️ 它与**地址空间里的当前父地址**（`VDFS_PARENT_ADDR`）是两回事：后者含根名
     /// （地址字面量只由 vdfs 插件自己决定，外部注释里也不写死——见
-    /// `plugins/vdfs/fs.rs` 的 `VDFS_ADDR_ROOT`），供子 provider 计算给模型 / 用户看的
+    /// `crates/symbio-plugin-vdfs/src/fs.rs` 的 `VDFS_ADDR_ROOT`），供子 provider 计算给模型 / 用户看的
     /// 展示地址。两者都由本函数给出：前者用于**路径回填**，后者经子上下文传下去。
     ///
     /// 分形：`<id>` 只是本级的挂载名，任意层级都一样——子智能体内部的 `agent` 实例
@@ -336,7 +336,7 @@ impl AgentPlugin {
                 // ⚠️ **条目地址原样透出，本层不填**（与容器同一契约，见
                 // `composite/vdfs.rs::container_leaves_item_addresses_untouched`）：
                 // 条目地址要么由**拥有者**填成树内绝对地址，要么**留空**由访问层
-                // （`plugins/vdfs/host.rs::item_addr`）按请求地址回填——而请求地址
+                // （`crates/symbio-plugin-vdfs/src/host.rs::item_addr`）按请求地址回填——而请求地址
                 // 是完整地址，含本挂载点被挂在哪（`agent/`）。
                 //
                 // 本层**填不出**这个地址：`mount_rel` 只是本插件空间内的首段

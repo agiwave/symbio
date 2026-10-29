@@ -415,7 +415,7 @@ pub(crate) fn tool_exchange_messages(
 
 /// 合成 / 选取 `tool_call_id`（跨轮唯一，见 [`tool_exchange_messages`] 的 `round`）。
 ///
-/// 优先级与 v1 的请求构建**同一口径**（`plugins/model/message_builder.rs`：wire id
+/// 优先级与 v1 的请求构建**同一口径**（`crates/symbio-plugin-model/src/message_builder.rs`：wire id
 /// 优先、历史数据回退节点 id）：
 /// 1. `wire_id`——provider 自己签发的 `tool_call_id`，模型认得它，跨轮天然唯一；
 /// 2. `id`——节点 id（会话内唯一），provider 没给 wire id 时的对照物；

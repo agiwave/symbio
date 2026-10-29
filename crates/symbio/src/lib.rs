@@ -1,35 +1,23 @@
-//! Symbio - Fractal Plugin Architecture Library
+//! Symbio 宿主装配 crate。
 //!
-//! Symbio 是一个基于分形插件架构的核心库，提供:
-//! - 统一的插件接口
-//! - 通用对象创建注册表（基于 `inventory` 的静态注册 + `PluginInvokeRequest` 驱动的运行时构造）
-//! - 流式调用支持
-//! - 能力路由系统
+//! 插件实现住在各自的 `crates/symbio-plugin-<id>/`；本 crate 只做三件事：
 //!
-//! ## 模块分层
+//! 1. **把插件 crate 链接进来**——`pub use <crate>;` 同时完成链接与门面出口；
+//!    漏一行，那个插件的 `inventory` 注册项就会被链接器丢掉（不报错，只少功能）。
+//!    这些行由 `scripts/facts/plugin-links-rs.mjs` 从目录投影，**不手改**。
+//! 2. [`assembly`]：装配策略——一棵标准插件树挂哪些插件、哪些插件不许停用。
+//!    它不是机制而是**装配方的数据**（常量由 `PLUGIN.yml` 生成到 `symbio-deploy`），
+//!    故不住 `symbio_core`（core 只经 `REQUIRED_PLUGINS` 接收装配结果）。
+//! 3. [`init`]：日志初始化与根插件构造。
 //!
-//! - `plugins/`：业务插件（私有，插件之间不直接相互引用）
-//! - `symbio_core/`：核心抽象（Plugin trait、PluginInvokeRequest、schemas、**服务 trait**）
-//!   与**架构元素**——含 `authz`（本机部署的授权策略表：谁持有什么能力 + 可见域），
-//!   表与它校验用的机制（`governance`）同住一处，`pub(crate)` 开给全 crate
-//! - `assembly`：宿主装配策略（私有）——一棵标准插件树挂哪些插件、哪些插件不许停用。
-//!   它不是机制而是**装配方的数据**，故不住 `symbio_core`（core 只经 `REQUIRED_PLUGINS`
-//!   接收装配结果）
-//! - `hooks` / `routes`：宿主侧的机制助手与跨插件地址——两者互相配套，
-//!   `fire_hook` 是地址的唯一 core 外消费方，故一起住宿主（DE-023 D-184）。
-//!   `hooks` 私有；`routes` 公开（同仓 `cli` 是独立 crate，订阅地址要从这里取）
-//! - `providers/`：通用服务基础设施（私有，**不**对外暴露）
-//!   - 各服务的**抽象**在 `symbio_core::embedding`
-//!   - 各服务的**实现**在 `src/providers/`
-//!   - 各服务通过 `submit_object_creator!` 工厂注册
-//!   - 业务模块通过 `creator_create_object::<dyn XXXService>(...)` 获取实例
-//!   - **不**通过 `pub use` 暴露给 crate 外部
+//! `symbio_core` / `symbio_deploy` 在这里重导出，供宿主与 CLI 取契约；
+//! **插件之间不许经本门面互相可见**（E-009：插件只依赖 core / plugin-api / kernel / deploy）。
 
 pub mod assembly;
 pub mod init;
 
 // ── 门面出口 ──────────────────────────────────────────────────────────────
-// 旧的 `symbio::symbio_core` / `symbio::routes` 路径在此保持可用。
+// 宿主与 CLI 从这里取契约；插件自身只依赖 core / plugin-api（E-009）。
 pub use symbio_core;
 pub use symbio_deploy;
 

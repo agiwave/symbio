@@ -198,7 +198,7 @@ pub struct VdfsNode {
     /// 三级取值，语义各不相同：
     ///
     /// - `None`（缺省）：**不表态**。列表分发按条目数决定（
-    ///   `plugins/vdfs/host.rs::VDFS_LIST_SEARCH_MIN_ITEMS`）——「几条东西的目录
+    ///   `crates/symbio-plugin-vdfs/src/host.rs::VDFS_LIST_SEARCH_MIN_ITEMS`）——「几条东西的目录
     ///   不需要搜索框」这件事由服务端统一判，使用方不各自设阈值；
     /// - `Some(true)`：provider 明确要求启用（它比机制更懂这份清单：条目可能很少
     ///   但每个名字都很长 / 挨得很近）；

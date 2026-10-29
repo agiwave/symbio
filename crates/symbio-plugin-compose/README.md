@@ -11,7 +11,7 @@ impl: done
 
 「首响 / 答话 / 汇报」的措辞——**只输出文本，不做判决**。
 
-判决的产出方见 `schemas::dialog::Verdict` 的变体表：`Answered` / `Escalate` 归
+判决的产出方见 `crates/symbio-core/src/dialog/` 里 `Verdict` 的变体表：`Answered` / `Escalate` 归
 [`../classify/README.md`](../symbio-plugin-classify/README.md "crates/symbio-plugin-classify/README")，`Report` 由 `session` 自己判出。
 本插件**不知道任何一个产出方存在**：它执行上游给出的判决结果，而两条调用边都从
 `session` 出发 —— 插件之间没有边。
@@ -74,7 +74,7 @@ compose(verdict)
 **兜底随变体而不同**：`Answered` 的兜底是「好的。」（口吻是"能直接答"），`Escalate`
 的兜底是「好，我来处理。」（本轮**会**干活）。用同一句会让用户以为要干活而本轮已经收尾。
 
-**理由码不定义在本插件里**：词表是 `schemas::dialog` 的 `REASON_*`（`Verdict::reason`
+**理由码不定义在本插件里**：词表是 core `dialog` 模块（`crates/symbio-core/src/dialog/`）的 `REASON_*`（`Verdict::reason`
 的取值），生产方 `classify` 与本插件都从那里取同一批常量，**没有可漂的第二处**。
 本插件因此只有一件事要保证：表里没有的码走通用模板兜底（**降级而不失效**），
 以及 `from_context` 在表里**没有**行。
@@ -121,7 +121,7 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 且首响紧跟用户消息，进了请求包会让线上出现连续两条 `assistant`（部分协议直接 400）。
 
 `Report` 的理由码由 **`session` 自己产**（判决 `Report` 也由它判出，见
-`schemas::dialog::Verdict` 的变体表）——本插件按判决分派、不看这个码，所以它
+`Verdict` 的变体表（`crates/symbio-core/src/dialog/`））——本插件按判决分派、不看这个码，所以它
 不在共享词表里，也不需要在表里占一行。
 
 ## 机制

@@ -2,7 +2,7 @@
 //!
 //! ## 它补的是哪一格
 //!
-//! 声明表（事件 / 事实 / 视图 / 端口 / 执行体 / 行）本来由 `plugins/loop` 私有装载：
+//! 声明表（事件 / 事实 / 视图 / 端口 / 执行体 / 行）本来由 `crates/symbio-plugin-loop` 私有装载：
 //! `loop_rows::load` 是 `Builder::declare` 的唯一生产调用点。于是别的插件即使想声明
 //! 一个新事实或一条新视图，也只能改 loop 的文件——这就是「加能力要改别人的模块」的
 //! 剩余来源（DE-024 D-198）。
@@ -47,7 +47,7 @@ inventory::collect!(DeclarationsDecl);
 /// 提交一份声明表。在插件 crate 的模块作用域调用一次即可。
 ///
 /// ```ignore
-/// symbio_plugin_api::submit_declarations!("plugins/notes", notes_declarations);
+/// symbio_plugin_api::submit_declarations!("crates/symbio-plugin-notes", notes_declarations);
 ///
 /// fn notes_declarations() -> PluginDeclarations<'static> {
 ///     todo!("由插件自己的声明模块返回六张表")

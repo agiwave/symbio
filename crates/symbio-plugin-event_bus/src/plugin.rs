@@ -5,7 +5,7 @@
 //! 2. **广播**：帧原样投递给每个已注册连接，`{ kind, session_id, data }` 由消费方自己分派
 //! 3. **握手**：新连接拿到一条 `system` 帧（`connected`）
 //!
-//! 发布方在本进程里只有一个：vdfs 宿主的变更投递（`plugins/vdfs/host.rs`，一切资源与
+//! 发布方在本进程里只有一个：vdfs 宿主的变更投递（`crates/symbio-plugin-vdfs/src/host.rs`，一切资源与
 //! 转写的实时变化都走它）。本插件因此不是「按 `kind` 分流的路由器」——频道闭集、
 //! 无服务端过滤，形状与判据见 `symbio_core::event_bus` 的模块文档。
 //!

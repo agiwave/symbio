@@ -6,11 +6,11 @@
 //!
 //! 真正的构造器（`llm_build_assistant_messages` / `TurnStreamChildIds` /
 //! `TurnOutput::into_messages`）生产上只有 session 一个消费方，已随 D-023 从
-//! `symbio_core::llm::turn` 下沉到 `plugins/session/message_build.rs`；
+//! `symbio_core::llm::turn` 下沉到 `crates/symbio-plugin-loop/src/message_build.rs`；
 //! 插件之间禁止互引（`plugin-entry-audit` E-009），本文件不能再调它。
 //!
 //! 于是两侧**各锁一半**，形状靠注释互指：
-//! - 形状（构造器产出什么）→ `plugins/session/message_build.test.rs` 的
+//! - 形状（构造器产出什么）→ `crates/symbio-plugin-loop/src/message_build.test.rs` 的
 //!   用例 A / A2 / B / C / D 与流式 id 复用回归；
 //! - 视图（给定同形状的树怎么扁平化）→ 本文件的用例 E / F 及其余 flatten 用例。
 
@@ -117,7 +117,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
 ///
 /// 输入是本地 fixture：reasoning-only 的落库形状 = run 骨架 + 单个正文 `Body` 子节点。
 /// 「构造器不生成带 reasoning tag 的子节点」这半边锁在
-/// `plugins/session/message_build.test.rs` 的用例 A（见文件头说明）。
+/// `crates/symbio-plugin-loop/src/message_build.test.rs` 的用例 A（见文件头说明）。
 #[test]
 fn reasoning_only_flattens_to_single_assistant_message() {
     let reasoning = "只有思考";
@@ -139,7 +139,7 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 /// 用例 F：普通 reasoning + 文本 扁平化后 content 与 reasoning_content 各归其位
 ///
 /// 输入是本地 fixture（run 骨架 + 推理 Body + 正文 Body 三节点）；三节点的产出形状锁在
-/// `plugins/session/message_build.test.rs` 的用例 B（见文件头说明）。
+/// `crates/symbio-plugin-loop/src/message_build.test.rs` 的用例 B（见文件头说明）。
 #[test]
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
     let msgs = turn_tree(vec![

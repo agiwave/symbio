@@ -263,10 +263,10 @@ const roster = (anchor) => ({
   ].join('\n'),
 })
 /** 锚点指向的文件（最小仓库里真有这个文件，D-011 才验得到「文件存在」之外的部分） */
-const ROSTER_RS = { 'crates/symbio-plugin-session/src/context.rs': 'pub fn ctx_load() {}\n' }
+const ROSTER_RS = { 'crates/symbio-plugin-loop/src/context.rs': 'pub fn ctx_load() {}\n' }
 
 test('D-011 锚点指向不存在的符号 ⇒ 红（改一处即红，这是本条的硬要求）', () => {
-  const r = audit({ ...RS, ...ROSTER_RS, ...roster('`crates/symbio-plugin-session/src/context.rs::GONE_FN`') })
+  const r = audit({ ...RS, ...ROSTER_RS, ...roster('`crates/symbio-plugin-loop/src/context.rs::GONE_FN`') })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-011 .*锚点符号在 Rust 源码中不存在/)
   assert.match(r.stdout, /GONE_FN/)
@@ -291,8 +291,8 @@ test('D-011 有效锚点通过：`文件` 与 `文件::符号` 两种形态都�
     'docs/003-design/008-能力注册表与能力坐标系.md': [
       '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
       '|---|---|---|:-:|:-:|:-:|:-:|---|',
-      '| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `crates/symbio-plugin-session/src/context.rs` |',
-      '| 语义记忆 | 知 | 时域跨度 | T3 | L3 | 认知 | S06 | `crates/symbio-plugin-session/src/context.rs::ctx_load` |',
+      '| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `crates/symbio-plugin-loop/src/context.rs` |',
+      '| 语义记忆 | 知 | 时域跨度 | T3 | L3 | 认知 | S06 | `crates/symbio-plugin-loop/src/context.rs::ctx_load` |',
       '',
     ].join('\n'),
   })

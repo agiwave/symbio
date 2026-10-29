@@ -15,7 +15,7 @@
 //! 同一路由两份常量就是「一个事实两个 owner」，必然漂移。
 //!
 //! 这与 model 插件把 `ModelProtocol` 钩子与注册常量收在
-//! `plugins/model/protocols/` 的做法一致（见 `symbio_core::model_provider` 的模块文档）。
+//! `crates/symbio-plugin-model/src/protocols/` 的做法一致（见 `symbio_core::model_provider` 的模块文档）。
 //!
 //! `VdfsProvider`
 

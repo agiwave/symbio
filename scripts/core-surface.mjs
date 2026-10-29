@@ -25,13 +25,13 @@
  * 4. **测试文件不是消费方**（`X.test.rs` 与 `tests.rs`，约定见 `test-layout-audit.mjs`）：
  *    消费方数要回答的是「**谁依赖它**」，而测试依赖的是**被测对象**，不是它要长期持有的
  *    接口。把测试算进来会让「一个模块在生产用、另一个模块的测试顺手写了一次名字」读成
- *    「两个模块依赖」——`TurnRunner` 就是这样长期显为 2 消费方（生产只有 `plugins/session`，
- *    第二个单位来自 `plugins/model/bound_provider.test.rs` 的彩排），而同族的
+ *    「两个模块依赖」——`TurnRunner` 就是这样长期显为 2 消费方（生产只有 `crates/symbio-plugin-session`，
+ *    第二个单位来自 `crates/symbio-plugin-model/src/bound_provider.test.rs` 的彩排），而同族的
  *    `TurnOutcome` / `TurnResume` 因为没被那个测试提到，一直显为单消费方。**同一个功能、
  *    四个名字，两种判决**——差别只在测试里恰好写了哪几个名字，那与「该不该住 core」无关。
  *    ⚠️ 本条是 2026-10-09 补的**口径修正**：此前测试算消费方，棘轮基线（单消费方 61）按
  *    那个口径算；口径一改，基线随之一并重定（见 `core-export-audit.mjs` 的 `BASELINE`）。
- * 5. **`crates/` 直属文件（`lib.rs` / `plugins/mod.rs` 这类不在插件子目录里的）
+ * 5. **`crates/` 直属文件（`lib.rs` / `assembly.rs` 这类不在插件子目录里的）
  *    也是消费方**：第一版把它们跳过，于是「只在注册表里被用到」的符号被算成 0——
  *    `PluginErrorCode` / `PluginIdentity` 一族全部假报。**「数不到」与「真的没人用」
  *    是两件事**，归属函数因此**永不返回 null**（见 `core-surface-audit.mjs` 的 `unitOf`）。
@@ -300,8 +300,8 @@ export const CROSS_CRATE = [
  * 任何符号的消费方数**结构上永远 ≤1**，判据于是要么恒红要么被基线掩盖。
  * 实测夹具（两个插件消费同一符号）因此被判「单消费方 1 个」，是真误判。
  *
- * 单位取 crate 名而不是 `plugins/<id>`：D-191 把插件目录平铺成 `crates/symbio-plugin-<id>`，
- * 「哪个插件在用」这一层信息由 crate 名承载，再合成 `plugins/<id>` 只会多一层易漂移的映射。
+ * 单位取 crate 名：插件是 `crates/symbio-plugin-<id>`，「哪个插件在用」由 crate 名承载，
+ * 再合成 id 只会多一层易漂移的映射。
  */
 export function unitOf(rel) {
   const norm = rel.split(path.sep).join('/')
@@ -310,11 +310,6 @@ export function unitOf(rel) {
   }
   const m0 = norm.match(/^crates\/([^/]+)\//)
   if (m0) return m0[1]
-  const m = norm.match(/^symbio\/src\/plugins\/([^/]+)\//)
-  if (m) return `plugins/${m[1]}`
-  const m2 = norm.match(/^symbio\/src\/providers\/([^/]+)\//)
-  if (m2) return `providers/${m2[1]}`
-  if (/^symbio\/src\/plugins\/[^/]+$/.test(norm)) return 'plugins/(registry)'
   return null
 }
 
@@ -323,16 +318,14 @@ export function unitOf(rel) {
  * **同名插件 / provider** 使用。这是**正常**的——常量就是它自己的名字，不该算
  * 「下放候选」。
  *
- * 单位形态随 D-191 变过一次：插件消费方的单位从 `plugins/<slug>` 变成 crate 名
- * `symbio-plugin-<slug>`，两种都认（旧形态在回归测试的夹具里仍然在用）。
+ * 插件 / provider 的消费方单位是 crate 名：`symbio-plugin-<slug>` /
+ * `symbio-provider-<slug>`。
  */
 export function isSelfReference({ name, units }) {
   const m = name.match(/^(?:PLUGIN_ID|EMBEDDING)_([A-Z]+)$/)
   if (!m || units.length !== 1) return false
   const slug = m[1].toLowerCase()
   return (
-    units[0] === `plugins/${slug}` ||
-    units[0] === `providers/${slug}` ||
     units[0] === `symbio-plugin-${slug}` ||
     units[0] === `symbio-provider-${slug}`
   )
@@ -400,7 +393,7 @@ export function collectMacroBodies(root, coreRel, symbols) {
  * 错的答案，已一并改掉。**
  *
  * 错在哪：**消费就是依赖，自己依赖自己也是依赖。** `LonelyThing` 声明在 `actors`、
- * 被 `actors/other.rs` 用着，那就是 `actors` 在消费它——凭什么把它沉到 `plugins/alpha`？
+ * 被 `actors/other.rs` 用着，那就是 `actors` 在消费它——凭什么把它沉到另一个插件？
  * 把 core 内部的依赖从计数里滤掉，等于**假装 core 不用它**，判据于是给出一个在事实上
  * 不成立的动作建议。
  *
@@ -489,7 +482,7 @@ const PARENT_MODULE_CACHE = new Map()
 /**
  * `#[cfg(test)] mod test_support;` 这类模块：文件名不是 `.test.rs`，但它**不参与
  * 生产构建**。旧口径只看文件名，于是把其中的类型读成生产消费方——`EventStore`
- * 因此在 C0 工作清单里（唯一「生产」消费方就是 `plugins/loop/test_support.rs`）。
+ * 因此在 C0 工作清单里（唯一「生产」消费方就是 `crates/symbio-plugin-loop/src/test_support.rs`）。
  *
  * 判据取自声明方：同名 `mod` 声明紧前（允许空行与单行注释）必须是 `#[cfg(test)]`。
  */

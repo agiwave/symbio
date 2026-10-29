@@ -3,7 +3,7 @@
 //! ## 为什么本文件还要交一份「协议行」夹具
 //!
 //! 插件自己的单元测试二进制**只链接本 crate**：装配表里只有内核协议五格与本插件
-//! 声明的三个事件，而协议事实的归宿行住在 `plugins/loop`——不在这里，就没有行读它们，
+//! 声明的三个事件，而协议事实的归宿行住在 `crates/symbio-plugin-loop`——不在这里，就没有行读它们，
 //! `seal` 判据 7 报 `OrphanFact`，整张表失败（D-198「失败是整体失败」），写闸于是
 //! 退到共享表。`system.*` 由本插件声明，不在共享表里 ⇒ 写不进去。
 //!
@@ -57,7 +57,10 @@ fn harness_declarations() -> PluginDeclarations<'static> {
     }
 }
 
-symbio_plugin_api::submit_declarations!("plugins/session-test-harness", harness_declarations);
+symbio_plugin_api::submit_declarations!(
+    "crates/symbio-plugin-session-test-harness",
+    harness_declarations
+);
 
 #[test]
 fn owned_events_resolve_through_the_process_assembly() {

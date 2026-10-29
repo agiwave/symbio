@@ -34,7 +34,7 @@ impl: done
 | 机制 | 位置 | 本接口如何依托 |
 |---|---|---|
 | 分形路由唯一入口 | `root.route(ctx)`；入口参数是上下文键值对（`symbio_core/keys/`） | 服务只做"请求 → `PluginSimpleRequest`"翻译，业务零改动 |
-| 必需插件清单 | `plugins/home/plugin.rs` 的 `SYSTEM_PLUGINS`，经 ctx 键 `REQUIRED_PLUGINS` 随构造传入 | `gateway` 在清单内，容器据此补目录 / 配置文件并实例化（容器**不内置**任何清单） |
+| 必需插件清单 | `crates/symbio-plugin-home/src/plugin.rs` 的 `SYSTEM_PLUGINS`，经 ctx 键 `REQUIRED_PLUGINS` 随构造传入 | `gateway` 在清单内，容器据此补目录 / 配置文件并实例化（容器**不内置**任何清单） |
 | 插件构造 | `Composite::build` **扫描自己的目录（系统根）**，逐目录 `creator_create_object`，并把插件自身目录经 `PLUGIN_DIR` 告知它 | 网关的开关就是它自己 `PLUGIN.yml` 里的 `inbound_enabled` |
 | 插件配置 | **没有第二条配置协议**：配置 = 插件目录里的 `PLUGIN.yml`（`<根>/gateway/PLUGIN.yml`），读写走 `vdfs/read` / `vdfs/write` | 网关只要把自己的 `PluginConfigFile` 声明出去即可被设置页与 LLM 同时读写 |
 | 设置页清单 | `ConfigurableVisitor` 收集通道（`symbio_core/capability/configurable.rs`）：插件在 `traverse` 里 `capability_announce_configurable` 一次 | 网关的「开放接口」自动出现在设置页，**前端零改动** |
@@ -59,7 +59,7 @@ crates/symbio-plugin-gateway/src/
 └── server.rs // 手写 HTTP/1.1 + WebSocket：/api/v1/invoke、/api/v1/ws、/api/v1/events、/api/v1/health
 ```
 
-- 插件 id：`PLUGIN_ID_GATEWAY = "gateway"`（装配方 `crates/crates/crates/assembly.rs`）。
+- 插件 id：`PLUGIN_ID_GATEWAY = "gateway"`（装配方 `crates/symbio-deploy/src/lib.rs`）。
 - 配置键、默认值与只读白名单：见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")「Gateway 插件」；设置页表单由**配置的拥有者**下发的 `DetailDefinition` 渲染。
 - **零新依赖、纯 Rust**（手写 HTTP/1.1 + WS 帧解析，不引 axum / tungstenite），与"无 C 编译"铁律一致。
 
@@ -75,7 +75,7 @@ crates/symbio-plugin-gateway/src/
 
 **做法**：网关不取 root，而是持有构造期登记的 `Weak` 父级（worker `Composite`），
 每次请求 `parent.route(ctx)` —— `Composite` 按首段在**已挂载子插件**里分发，
-未命中直接 `NotFound`（源码 `plugins/composite/composite.rs` 的 `route`）。
+未命中直接 `NotFound`（源码 `crates/symbio-plugin-composite/src/composite.rs` 的 `route`）。
 父级以 `Weak` 保存，不产生循环引用；`home/reload` 重建插件树时网关实例随之重建，
 转发目标恒为当前树。
 

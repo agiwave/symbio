@@ -120,7 +120,7 @@ function cfgTestModulesOf(dir) {
  * 再抹一层**带 `#[cfg(test)]` 的单个项**。
  *
  * `stripTestModules` 只认 `mod xxx { }` 块；本仓有把测试辅助写成
- * `#[cfg(test)] pub(crate) fn assert_*` 的（`plugins/model/protocols/partial_json.rs`），
+ * `#[cfg(test)] pub(crate) fn assert_*` 的（`crates/symbio-plugin-model/src/protocols/partial_json.rs`），
  * 它们住在**生产文件**里，不抹掉就会被当成生产 panic 面登记进去——于是登记表里
  * 混进两处根本不会在生产编译的代码，而「登记 = 显式事实」这句话就掺了假。
  *

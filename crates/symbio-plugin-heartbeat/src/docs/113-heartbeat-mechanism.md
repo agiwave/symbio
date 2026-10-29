@@ -29,7 +29,7 @@ impl: done
 3. **触发即重置**：**成功**触发的那一刻写入锚点，作为防热循环下限（即使回合零写盘也不会 15s 连发）。失败不写——失败都是暂时的（会话正被写 / 无事实源），压着原锚点等下个 tick 重试，按整段 interval 推迟等于把一次本可成功的触发白白睡掉。
 4. **重启追赶**：锚点首次见到某会话时回退 `session.updated_at` —— 进程重启或新进程接入同一 store 时，按磁盘时间戳补触发已空闲的会话。这也是「每个进程都扫描全部会话」的设计根源：无需专职守护，任何存活进程都能兜底。`updated_at` 缺失则**不触发**（「不知道它活动过」不能读成「它一直空闲」）。
 5. **抖动防雪崩**：每会话固定 jitter = `hash(session_id) % 30s`（确定性，不是随机——同一会话每次求得的抖动要稳定），避免多会话在同一 tick 齐触发。
-6. **先落事实，再开轮**：调度器只答「什么时候该开一轮」。这一次开轮**是系统自己发起的**这件事，先落成事实源里的四格（触发 / 自检 / 欲 / 闸门放行才长任务），落成了才入队；运行参数（`mode` / `include_history`）由服务端按会话自己的数据推导。两者都住在会话那一侧：`plugins/session/transcript/autonomous.rs`（`request_autonomous_round`），入口是收件箱写臂识别 `meta.trigger`（`plugins/session/plugin/nodes.rs::trigger_declaration`），归属与逐口裁决见 [D-076](../../README.md "crates/symbio-plugin-heartbeat/README")。**落格失败 ⇒ `Conflict` 且连队列都不碰**：一条永远跑不起来的队首会把后面的用户消息一起堵死。
+6. **先落事实，再开轮**：调度器只答「什么时候该开一轮」。这一次开轮**是系统自己发起的**这件事，先落成事实源里的四格（触发 / 自检 / 欲 / 闸门放行才长任务），落成了才入队；运行参数（`mode` / `include_history`）由服务端按会话自己的数据推导。两者都住在会话那一侧：`crates/symbio-plugin-session/src/transcript/autonomous.rs`（`request_autonomous_round`），入口是收件箱写臂识别 `meta.trigger`（`crates/symbio-plugin-session/src/plugin/nodes.rs::trigger_declaration`），归属与逐口裁决见 [D-076](../../README.md "crates/symbio-plugin-heartbeat/README")。**落格失败 ⇒ `Conflict` 且连队列都不碰**：一条永远跑不起来的队首会把后面的用户消息一起堵死。
 
 ## 调度细节
 
@@ -70,5 +70,5 @@ symbio-cli --heartbeat [--homedir <路径>]
 
 - 多进程共享同一 store 时存在极小的同 tick 竞态窗口（A 进程刚触发、心跳消息尚未落盘时 B 进程同 tick 扫描）；守护模式部署建议 store 隔离。
 - 日志中的 `~/.symbio/...` 为静态模板文本，不代表实际 homedir 解析结果。
-- **可停用**：本插件在必需清单里（`ASSEMBLY_SUB_AGENT_PLUGINS`），因此**可停用不可删除**。停用的可执行形态是注册表的 `set_enabled(false)` ⇒ `stop(Disabled)`：常驻循环在停机窗口内退出（超时要 `abort`），能力表里的 `heartbeat` 两行（工具 + 选项）随下一轮收集消失，会话那一侧一行不少。判据两处各钉一半：本片 `plugin.test.rs`，容器侧 `plugins/composite/composite.test.rs`（经工厂 id + 真实 `mount_all`，不 import 兄弟模块）。
+- **可停用**：本插件在必需清单里（`ASSEMBLY_SUB_AGENT_PLUGINS`），因此**可停用不可删除**。停用的可执行形态是注册表的 `set_enabled(false)` ⇒ `stop(Disabled)`：常驻循环在停机窗口内退出（超时要 `abort`），能力表里的 `heartbeat` 两行（工具 + 选项）随下一轮收集消失，会话那一侧一行不少。判据两处各钉一半：本片 `plugin.test.rs`，容器侧 `crates/symbio-plugin-composite/src/composite.test.rs`（经工厂 id + 真实 `mount_all`，不 import 兄弟模块）。
 - **停用后已存的配置不动**：`metadata.heartbeat` 是会话的数据，不是本插件的数据——它的 owner 是那块 metadata 的语义，谁在场都能读；卸载会话才带走它。

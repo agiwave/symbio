@@ -7,7 +7,7 @@
 //! - 协议适配（`ModelProtocol` 钩子 trait、`resolve_protocol_id`、
 //!   `MODEL_PROTOCOL_*` 注册常量、`ReasoningConfig`、协议事件方言
 //!   `ModelProtocolEvent`、行解析契约 `SseLineParser`）定义在 model 插件内部
-//!   （`plugins/model/protocols/`），core 不暴露这些类型；
+//!   （`crates/symbio-plugin-model/src/protocols/`），core 不暴露这些类型；
 //! - model 插件的 `BoundProvider`（持久化配置 + 协议钩子实现的绑定）是本
 //!   trait 的生产实现：`round_trip` 五态机、`effective_context_tokens`
 //!   收敛、ping 等完整行为均由其提供。

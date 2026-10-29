@@ -1,4 +1,4 @@
-//! `symbio_core/schemas/session/node_build.rs` 的单元测试 —— 与实现同级分文件
+//! `crates/symbio-core/src/turn/node_build.rs` 的单元测试 —— 与实现同级分文件
 //! （约定：`X.rs` + `X.test.rs`）。
 //!
 //! 两批用例随构造器自 session 上移（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")

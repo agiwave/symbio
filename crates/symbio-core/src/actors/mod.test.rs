@@ -588,7 +588,7 @@ async fn four_tier_budgets_are_measurable() {
 // ── S5 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 11 步）：记忆链路 ──
 //
 // 这里留的是**内核侧**的判据：编码格子的溯源覆盖（步 11 / I2）。巩固入库前的保真度
-// 闸门（步 13 / N8）随 `consolidate` 住它的写方（`plugins/loop`，DE-025 D-221）；
+// 闸门（步 13 / N8）随 `consolidate` 住它的写方（`crates/symbio-plugin-loop`，DE-025 D-221）；
 // 检索那半条链路（`recall` 投影的 as-of、预算降级、主体隔离）随投影住它的唯一生产
 // 消费方（[DE-024](../../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-201），验收在同侧。
 
@@ -1128,7 +1128,7 @@ use crate::projection::readyset::readyset_for;
 use crate::projection::task_vocab::TaskVocab;
 
 /// 任务族五格的**夹具拼写**（DE-024 D-206）：名字与格位都在 owner 插件
-/// （`plugins/loop::control_decl` + 清单 `shared_events`），core 与内核都不认识它们。
+/// （`crates/symbio-plugin-loop::control_decl` + 清单 `shared_events`），core 与内核都不认识它们。
 /// core 的夹具因此自己交一张表给折叠的构造口——与 `REWORK_VOCAB` 同一形状：词汇是数据。
 const TASK: TaskVocab<'static> = TaskVocab {
     opened: "task.opened",
@@ -1138,12 +1138,12 @@ const TASK: TaskVocab<'static> = TaskVocab {
     lease: "task.assigned",
 };
 
-/// `memory.encoded`：名字与格位都在 owner 插件（`plugins/loop` 的 `EventDecl` + 清单
+/// `memory.encoded`：名字与格位都在 owner 插件（`crates/symbio-plugin-loop` 的 `EventDecl` + 清单
 /// `shared_events`，DE-024 D-204），core 不认识它。core 的夹具因此自己写这条字面量——
 /// 与 `REWORK` 同一形状：词汇是数据，不是 core 的常量。
 const MEMORY_ENCODED: &str = "memory.encoded";
 
-/// 返工那一格：名字与角色随 owner 插件（`plugins/loop::control_decl`），core 不认识它。
+/// 返工那一格：名字与角色随 owner 插件（`crates/symbio-plugin-loop::control_decl`），core 不认识它。
 ///
 /// core 的判据只认角色（DE-024 D-203），所以这里自己声明一行当词汇面——生产环境里
 /// 这张表由 owner 在装配期交来（`Frozen::vocab`）。
@@ -1523,7 +1523,7 @@ fn cost_ledger_accumulates_per_principal() {
 //
 // 21 定时触发的**授权面**（出口判据「自主写入对话 0」，roadmap/S12）留在这里；
 // 触发、长目标预算、欲治理与技能编译 / 路由的实现和用例随唯一消费方住
-// `plugins/session/transcript/autonomous` 与 `plugins/loop/skill_events`（D-189）。
+// `crates/symbio-plugin-session/src/transcript/autonomous` 与 `crates/symbio-plugin-loop/src/skill_events`（D-189）。
 
 /// S12 §6 验收 2：自主发起者尝试写 `chat.assistant.final` → 授权拒绝且不产生事件。
 ///
@@ -1534,7 +1534,7 @@ fn cost_ledger_accumulates_per_principal() {
 /// ② 它**持** `define.work`（否则 ① 可能只是「矩阵整个是空的」的平凡真）；
 /// ③ 主智能体**持** `reply`（对照：拒绝是**针对这个主体**的，不是一律拒绝）。
 ///
-/// 「拒绝 ⇒ 不产生事件」的**执行**在写侧闸（`plugins/session` 运行器的
+/// 「拒绝 ⇒ 不产生事件」的**执行**在写侧闸（`crates/symbio-plugin-session` 运行器的
 /// `turn_runner::closure_gate`，其判据用例见
 /// `turn_runner.test.rs::closure_is_withheld_when_the_principal_lacks_the_grant`）
 /// ——core 这边只钉**表里的结论**，不假装自己跑过那条闸。
@@ -1562,12 +1562,12 @@ fn autonomous_actor_cannot_write_to_dialog() {
     );
 }
 
-// S12 §6 验收 3 + 4：长目标预算判定的实现随发起者住 `plugins/session/transcript/autonomous`
+// S12 §6 验收 3 + 4：长目标预算判定的实现随发起者住 `crates/symbio-plugin-session/src/transcript/autonomous`
 // （D-189）；core 只留授权表结论（见上一条）。
 
 // 02 §2.3 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
 // 无任何自主任务但读侧投影照常（J2 平凡值）。实现与用例随唯一消费方住
-// `plugins/session/transcript/autonomous`（D-189）。
+// `crates/symbio-plugin-session/src/transcript/autonomous`（D-189）。
 
 /// 档位名字往返：LatencyTier::name / from_name 互逆；未知名字不静默归类。
 #[test]
@@ -1676,5 +1676,5 @@ fn a_live_lease_leaves_the_ready_set_and_expiry_returns_it() {
     );
 }
 
-// 调度者的策略与租约判据随唯一消费方住 `plugins/loop/task_events`（D-189）；
+// 调度者的策略与租约判据随唯一消费方住 `crates/symbio-plugin-loop/src/task_events`（D-189）；
 // 本文件只留候选集投影的判据（`readyset`）。

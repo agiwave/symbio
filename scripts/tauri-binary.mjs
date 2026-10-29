@@ -56,8 +56,8 @@
  *
  * - `tauri/src-tauri/src`、`capabilities`、`Cargo.toml` / `Cargo.lock` /
  *   `build.rs` / `tauri.conf.json`（壳自身）；
- * - `symbio/src` 与它的清单——壳的 `Cargo.toml` 写着
- *   `symbio = { path = "../../symbio" }`，**整棵插件树被编译进壳**；
+ * - `crates/` 整棵树——壳的 `Cargo.toml` 写着
+ *   `symbio = { path = "../../crates/symbio" }`，**整棵插件树被编译进壳**；
  *   那几条「源码里不存在」的日志正是从这里来的。
  *
  * **不含 `tauri/src`（前端）**：dev 下前端由 Vite 现服（改了就热更，产物无需重建），

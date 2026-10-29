@@ -45,7 +45,7 @@ impl: done
 
 任何第三条连接都要先改 D-086。本插件的 import 根被
 [`E-013`](../../scripts/plugin-entry-audit.mjs) 钉在闭族内：只准
-`crate::symbio_core` + 通用库 + crate 根日志 / 工厂宏，不得引用 `crate::plugins::session`
+`crate::symbio_core` + 通用库 + crate 根日志 / 工厂宏，不得引用 `symbio_plugin_session`
 或任何兄弟插件。
 
 ## 卸载 / 停用判据

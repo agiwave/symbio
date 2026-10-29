@@ -237,7 +237,7 @@ impl SessionPlugin {
     /// 没有 runtime 时（部分单元测试里的裸构造）**一条也不起**：那种场景没有会话要跑，
     /// 构造方不因此失败，而「没启动过」在停机侧就是空表，无事可做。
     ///
-    /// 心跳扫描循环**不在这里**：它随切片搬进了 `plugins/heartbeat`
+    /// 心跳扫描循环**不在这里**：它随切片搬进了 `crates/symbio-plugin-heartbeat`
     /// （[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），判据不变——每条常驻任务
     /// 都由它的**所有者**在构造点记下句柄。
     pub(crate) fn start_resident_tasks(self: &Arc<Self>) {
@@ -492,7 +492,7 @@ impl Plugin for SessionPlugin {
             }
         }
         // 能力收集（available_tools）：本插件**不再贡献工具**——`heartbeat` 那条随调度
-        // 搬进 `plugins/heartbeat`（[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），
+        // 搬进 `crates/symbio-plugin-heartbeat`（[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），
         // 而它曾是 session 在 LLM 可见工具清单里唯一的一条。
         // VDFS 挂载点由容器从 `get_vfs_provider` 派生（目录名 = 实例名）。
         if let Some(visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) {

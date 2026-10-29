@@ -8,7 +8,7 @@
 //! 「生效者不在目录里」这个没有错误信号的非法状态。表只有三方法，这条不变量于是换了
 //! 承载方式：生效位**长在目录行上**（[`CapabilityRow::model`] 的 `active` 参数），
 //! 生效者不在目录里从此**不可表达**；写出整批的 model 插件知道哪个是当次生效者，逐行
-//! `put` 即可（`plugins/model/plugin.rs` 的 traverse 分支）。
+//! `put` 即可（`crates/symbio-plugin-model/src/plugin.rs` 的 traverse 分支）。
 //!
 //! 唯一生效由表的写入实现维持：带生效位的行入表时先把同族旧生效行降位
 //! （见 [`Registry::put`] 文档与 `CapabilityRow::demote`）。

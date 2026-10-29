@@ -17,7 +17,7 @@ impl: done
 > 留在 `crates/symbio-plugin-session/src/orchestrator/`（存储与生命周期）。
 > 本文只回答一个问题：**主循环的结构是什么**。「压缩策略有哪些」见 [`../README.md`](../../README.md "crates/symbio-plugin-session/README")（五大压缩策略）；节点状态与流见 [`./018-node-state-streaming.md`](105-node-state-streaming.md "DE-105-node-state-streaming")。
 > 模块拆分见 [`./017-module-layout.md`](104-module-layout.md "DE-104-module-layout")；驱动器形状见 [`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")；设计理由见 [`000-架构决策汇总.md`](../../../../docs/003-design/README.md "DE-000-设计总览")。
-> 代码位置一律按**符号名**检索——模块拆分后行号会漂移；下文路径未写插件前缀时，①/② 在 `plugins/session/`，③/④ 在 `plugins/loop/`。
+> 代码位置一律按**符号名**检索——模块拆分后行号会漂移；下文路径未写插件前缀时，①/② 在 `crates/symbio-plugin-session/src/`，③/④ 在 `crates/symbio-plugin-loop/src/`。
 
 ---
 
@@ -687,7 +687,7 @@ payload）⇒ `Value::Null`，仍由工具自己给出「缺少必填参数」�
 
 ### 10.1 形状
 
-新增 [`plugins/model/protocols/sse.rs`](../../../symbio-plugin-model/src/protocols/sse.rs)：
+新增 [`crates/symbio-plugin-model/src/protocols/sse.rs`](../../../symbio-plugin-model/src/protocols/sse.rs)：
 
 ```text
 trait SseLineParser {
@@ -708,7 +708,7 @@ trait PartialLineExtractor {
 留给下一次 `push`。SSE 分块由 TCP 决定，一个中文字符横跨两块是常态；若用
 `from_utf8_lossy` 各替换出一个 U+FFFD，而完整行给出的是真字符，按前缀截断会吃字。
 
-流循环侧（[`plugins/model/stream.rs`](../../../symbio-plugin-model/src/stream.rs)）只做：按 `\n` 切行
+流循环侧（[`crates/symbio-plugin-model/src/stream.rs`](../../../symbio-plugin-model/src/stream.rs)）只做：按 `\n` 切行
 → 交给 `parse_line` → 按前缀截断去重（`LineProgress`）→ 尾巴交给提取器。
 
 ### 10.2 协议层：`JsonLineExtractor`

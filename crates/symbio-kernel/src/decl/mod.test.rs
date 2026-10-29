@@ -1,7 +1,7 @@
 //! 声明层（内核）的单元用例：装载 / 冻结 / 声明侧的三道检查。
 //!
 //! 控制面事实与视图的口径用例住在它们的 owner 那里
-//! （`plugins::loop::control_decl`）；本文件只测**机制**：内核只声明协议五格，
+//! （`crates/symbio-plugin-loop/src/control_decl.rs`）；本文件只测**机制**：内核只声明协议五格，
 //! 插件的六张表经 `Builder::declare` 一次交齐，`seal` 是唯一出口。
 
 use serde_json::{json, Value};

@@ -563,7 +563,7 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
  思考 / **工具参数** / **工具响应**一律成立（后端构造帧只有三处：
  `symbio_core::llm::turn::llm_message_frame`（完整消息）/
  `symbio_core/llm/frames.rs::llm_state_frame`（剥正文的状态帧）/
- `plugins/model/stream.rs::llm_emit_delta`（增量）；工具参数与 Text / Reasoning 同构，
+ `crates/symbio-plugin-model/src/stream.rs::llm_emit_delta`（增量）；工具参数与 Text / Reasoning 同构，
  工具响应透传子会话的增量帧。三个位置由消费方数量决定，见 D-023）。
  消费端按 `type` / `role` 猜"该追加还是该替换"是错误来源：实测曾把
  `role = tool` 的流式响应当成全量重发，正文被**最后一片**覆盖——工具卡片

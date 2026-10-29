@@ -70,7 +70,7 @@
 
 mod config;
 // 智能体腿实现与插件同名：memory 插件 = 智能体记忆（`memory`）+ 工作区记忆（`workspace`），
-// 两个作用域腿模块并列，先例见 `plugins/composite/mod.rs`
+// 两个作用域腿模块并列，先例见 `crates/symbio-plugin-composite/src/composite.rs`
 #[allow(clippy::module_inception)]
 mod memory;
 mod plugin;

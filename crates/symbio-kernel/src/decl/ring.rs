@@ -218,7 +218,7 @@ pub fn owed<'a>(rows: &'a [Decl], frozen: &Frozen, events: &[Event], now: i64) -
 /// 「执行体还没接线」不是求解器的第四种条件——那种行显式写 `by = None`，
 /// 接线时与 `ActorDecl` 注册同批改回 `Some`（DE-015 §2.2 / D-118 订正 1）。
 ///
-/// 按行点问（`plugins::loop::loop_rows::owes`）仍留给「刚写完 request，这一行
+/// 按行点问（`crates/symbio-plugin-loop/src/loop_rows.rs::owes`）仍留给「刚写完 request，这一行
 /// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `prio` 裁决）是
 /// 调度器唯一的选债口（D-118 决策 1–2）。
 pub fn drive<'a>(

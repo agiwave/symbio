@@ -54,7 +54,7 @@ fn cover(fact: &'static str, by: Option<&'static str>) -> Decl {
 
 /// 控制面声明集**装起来**的样子：检查的出口只有一个（§3.3），所以连「只想看视图算得
 /// 对不对」的用例也得让这张表通过全部检查——给每个事实补一行归宿即可，控制面
-/// （`plugins::loop::loop_rows`）的真行本来就在做同一件事。
+/// （`crates/symbio-plugin-loop/src/loop_rows.rs`）的真行本来就在做同一件事。
 fn core_table() -> Arc<Frozen> {
     let mut rows: Vec<Decl> = FACTS.iter().map(|f| cover(f.name, None)).collect();
     for name in [

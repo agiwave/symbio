@@ -7,7 +7,7 @@
 //! + 能力插件目录（`skill/` `mcp/` `plugin_manager/`），存在即安装，无需在 manifest 里登记。
 //!
 //! 智能体自身的 `AGENTS.md` 不归本插件（归 `memory`，分形）——本层只验证「它的
-//! 注入确实发生在本插件撑起的那棵子树上」，落位与闸门的用例在 `plugins/memory`。
+//! 注入确实发生在本插件撑起的那棵子树上」，落位与闸门的用例在 `crates/symbio-plugin-memory`。
 
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;

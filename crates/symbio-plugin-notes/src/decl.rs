@@ -35,7 +35,7 @@ const RECENT_LIMIT: usize = 20;
 const RECENT_COST: u32 = 4096;
 
 /// owner —— 与目录名同形（`crates/symbio-plugin-notes`），装配表按它排序与报缺口。
-pub(crate) const OWNER: &str = "plugins/notes";
+pub(crate) const OWNER: &str = "crates/symbio-plugin-notes";
 
 pub(crate) const EVENTS: &[EventDecl] = &[EventDecl::new(
     NOTES_CREATED,

@@ -40,9 +40,9 @@
 //!
 //! | 情形 | 写法 | 范本 |
 //! |---|---|---|
-//! | 无状态（unit struct） | 直接 `Arc::new(Self)` | `plugins/model/protocols/*.rs` 的 `build` |
+//! | 无状态（unit struct） | 直接 `Arc::new(Self)` | `crates/symbio-plugin-model/src/protocols/*.rs` 的 `build` |
 //! | **构造昂贵**（建会话 / 载模型 / 开连接） | 实现**自己** `LazyLock` 单例，构造只 `Arc::clone` | `providers/embedding/local.rs` 的 `build_local` |
-//! | 每个挂载点必须独立（持目录 / 配置 / 状态） | 就让它每次新建——**这是 `dyn Plugin` 的语义** | `plugins/composite/registry.rs::mount_child` |
+//! | 每个挂载点必须独立（持目录 / 配置 / 状态） | 就让它每次新建——**这是 `dyn Plugin` 的语义** | `crates/symbio-plugin-composite/src/registry.rs::mount_child` |
 //!
 //! **机制层不代管缓存**：`dyn Plugin` 的「每挂载点一实例」语义要求同一 id 在
 //! 不同子树下返回不同对象（见 D-035「被否决的方案」）。

@@ -45,10 +45,10 @@ import {
 /** 本用例的会话 id */
 const SID = 'e2e-t45';
 
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径） */
+/** v2 事实源文件名（与 `crates/symbio-plugin-session/src/paths.rs::V2_WAL_FILE` 同一常量口径） */
 const V2_WAL = 'v2-events.wal';
 
-/** `messages.json`（与 `plugins/session/store/mod.rs::MESSAGES_FILE` 同一常量口径） */
+/** `messages.json`（与 `crates/symbio-plugin-session/src/store/mod.rs::MESSAGES_FILE` 同一常量口径） */
 const MESSAGES_JSON = 'messages.json';
 
 /** 归档段子目录（与 `symbio_core/store/wal.rs::WAL_ARCHIVE_SUBDIR` 同一常量口径） */

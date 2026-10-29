@@ -108,7 +108,7 @@ impl ViewRead {
         self.name
     }
 
-    /// 公开这条视图的 owner（与声明表的 owner 同形，如 `plugins/notes`）。
+    /// 公开这条视图的 owner（与声明表的 owner 同形，如 `crates/symbio-plugin-notes`）。
     pub fn owner(&self) -> &'static str {
         self.owner
     }

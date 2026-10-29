@@ -25,14 +25,14 @@ const SCAN_TIMEOUT_MS = budget(await machine(), 'docs::grep-audit 回归测试',
 function audit(source, { waiver = '', strict = false, scope = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-'))
   try {
-    const plugins = path.join(root, 'crates/plugins')
-    fs.mkdirSync(path.join(plugins, 'other'), { recursive: true })
-    fs.writeFileSync(path.join(plugins, 'other/sample.rs'), source.replace('WAIVER', waiver))
+    const pluginDir = path.join(root, 'crates/symbio-plugin-other/src')
+    fs.mkdirSync(pluginDir, { recursive: true })
+    fs.writeFileSync(path.join(pluginDir, 'sample.rs'), source.replace('WAIVER', waiver))
     const env = { ...process.env, NO_COLOR: '1' }
     delete env.SCOPE
     // fixture 树里没有全仓的存量债务：S-014 的棘轮基线钉在 0，它不参与这些用例的成败
     env.LEGACY_ROLE_WRITE_BASELINE = '0'
-    if (scope) env.SCOPE = plugins
+    if (scope) env.SCOPE = pluginDir
     const result = spawnSync(process.execPath, [script, ...(strict ? ['--strict'] : [])], {
       cwd: root, env, encoding: 'utf8', timeout: 10000,
     })
@@ -52,7 +52,7 @@ async fn example() {
 test('default scope checks a non-agent plugin', () => {
   const r = audit(suspect)
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /other\/sample.rs:3/)
+  assert.match(r.stdout, /symbio-plugin-other\/src\/sample.rs:3/)
 })
 test('test markers do not suppress S-002', () => {
   assert.equal(audit('#[tokio::test]\n' + suspect).status, 1)
@@ -189,15 +189,15 @@ test('S-009 waiver requires a reason', () => {
 })
 
 // ── S-010：vdfs 挂载根名不得出现在 vdfs 插件之外 ──────────────────────
-// 根名是 vdfs 插件的挂载规则（plugins/vdfs/fs.rs::VDFS_ADDR_ROOT，全仓唯一字面量）。
+// 根名是 vdfs 插件的挂载规则（crates/symbio-plugin-vdfs/src/fs.rs::VDFS_ADDR_ROOT，全仓唯一字面量）。
 // 历史上它曾蔓延到前端与十几份文档，「改个挂载名」变成全仓手术——本规则把收口钉死。
-// S-010 的扫描根与 resolveScope 同策略（cwd 有 symbio/ 即视为仓库树），故用
+// S-010 的扫描根与 resolveScope 同策略（cwd 有 `crates/` 即视为仓库树），故用
 // 独立的夹具构造器：按相对路径布文件，直接跑脚本。
 function s010Audit(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s010-'))
   try {
-    // 仓库树标记：S-010 以「cwd 下有 symbio/」判定扫描根，缺了会回落到真实仓库
-    fs.mkdirSync(path.join(root, 'crates', 'plugins'), { recursive: true })
+    // 仓库树标记：S-010 以「cwd 下有 `crates/`」判定扫描根，缺了会回落到真实仓库
+    fs.mkdirSync(path.join(root, 'crates'), { recursive: true })
     for (const [rel, content] of Object.entries(files)) {
       const p = path.join(root, rel)
       fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -288,7 +288,7 @@ test('S-010 still fires inside the repo tree when runtime dirs are present', () 
 })
 
 test('S-010 waiver requires a reason (same line or the line above)', () => {
-  // 仓库树标记：crates/plugins（同时是其它规则的扫描范围）
+  // 仓库树标记：`crates/`（同时是其它规则的扫描范围）
   const mark = { 'crates/symbio-plugin-vdfs/src/fs.rs': '' }
   const r1 = s010Audit({ ...mark, 'docs/x.md': `<!-- grep-audit-allow S-010: 历史快照示例 -->\n.vdfs/session\n` })
   assert.equal(r1.status, 0)
@@ -598,7 +598,7 @@ const S014_FILE = 'crates/symbio-plugin-session/src/sample.rs'
 function roleAudit(source, baseline) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s014-'))
   try {
-    // 仓库树标记：扫描根按「cwd 下有 symbio/」判定，缺了会回落到真实仓库
+    // 仓库树标记：扫描根按「cwd 下有 `crates/`」判定，缺了会回落到真实仓库
     const target = path.join(root, S014_FILE)
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, source)
@@ -641,7 +641,7 @@ test('S-014 fixture 树不比棘轮：扫描根不是真实仓库 ⇒ 跳过', (
   const src = 'fn n() -> ChatNode {\n    ChatNode { role: Some(NodeRole::Assistant), ..Default::default() }\n}\n'
   const r = roleAudit(src, 1)
   assert.equal(r.status, 0, r.stdout)
-  // 临时树里 `symbio/src` 只躺着一个 fixture，存量恒 0/1——它与基线的差是「树不对」，
+  // 临时树里 `crates/` 只躺着一个 fixture，存量恒 0/1——它与基线的差是「树不对」，
   // 不是「该收紧」。据此判红会让守卫自己的回归测试变成噪音。
   assert.match(r.stdout, /S-014 跳过：当前树不是真实仓库（临时 fixture），棘轮不比/)
 })

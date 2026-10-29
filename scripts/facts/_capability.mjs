@@ -38,7 +38,7 @@ const PLUGIN_CRATE_PREFIX = 'symbio-plugin-'
 export const UNKNOWN = '—'
 
 /**
- * VDFS 地址根名（`plugins/vdfs/fs.rs` 的 `VDFS_ADDR_ROOT`）。
+ * VDFS 地址根名（`crates/symbio-plugin-vdfs/src/fs.rs` 的 `VDFS_ADDR_ROOT`）。
  *
  * 输出到文档时替换为 `<vdfs_root>` 占位（见 S-010：根名字面量只归 vdfs 插件）——
  * 「生成器不手写事实」那条纪律的同一条：根名改了，两份投影（RE-006 的能力矩阵与
@@ -53,7 +53,7 @@ export function vdfsAddrRoot() {
   )
   const src = fs.readFileSync(file, 'utf8')
   const m = src.match(/pub const VDFS_ADDR_ROOT:\s*&str\s*=\s*"([^"]+)"/)
-  if (!m) throw new Error('cannot extract VDFS_ADDR_ROOT from plugins/vdfs/fs.rs')
+  if (!m) throw new Error('cannot extract VDFS_ADDR_ROOT from crates/symbio-plugin-vdfs/src/fs.rs')
   return m[1]
 }
 

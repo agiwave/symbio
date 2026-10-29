@@ -76,7 +76,7 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
         //
         // core 只知道「加消息」——抽干、合并、**落格**全在这里（插件侧）。
         // core 不该知道「收件箱补充」这个概念（队列、`merge_supplements`、
-        // `InboxItem` 都在 `plugins/session`），而落格也不需要 core 参与：
+        // `InboxItem` 都在 `crates/symbio-plugin-session`），而落格也不需要 core 参与：
         // 本函数自己就开着 `store`。
         //
         // 汇报（缺口 4）**不在这里**：批次边界那件事成了 `policy.report` 行，

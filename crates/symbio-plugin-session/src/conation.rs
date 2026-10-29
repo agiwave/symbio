@@ -75,7 +75,7 @@ pub struct ConationView {
 impl ConationView {
     /// 该目标是否**已声明**（存在一条已升格为任务的同目标欲）。
     ///
-    /// 生产消费方：自主触发（`plugins/session/transcript/autonomous.rs`）的长目标去重判据——
+    /// 生产消费方：自主触发（`crates/symbio-plugin-session/src/transcript/autonomous.rs`）的长目标去重判据——
     /// 心跳按 `interval_seconds` 周期性表达同一条欲，每次都开格会让就绪集无界增长，而
     /// `readyset` 是模型唯一的调度候选来源。故「声明过就不再声明」（重新发起是 S03 返工机制
     /// 的事，不由心跳每 tick 重开）。

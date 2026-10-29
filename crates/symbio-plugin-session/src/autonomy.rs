@@ -13,7 +13,7 @@
 //!
 //! 判据是消费方分布：这条折叠的**唯一**生产消费方是本插件（[`crate::stats`] 与
 //! [`crate::stats_reading`]），core 里没有第二个模块在生产用它 ⇒ 它不是共享类型，
-//! 占根出口只会让「读数口径」住在没人读的地方。同族的 `readyset` 由 `plugins/loop`
+//! 占根出口只会让「读数口径」住在没人读的地方。同族的 `readyset` 由 `crates/symbio-plugin-loop`
 //! 与本插件**两方**消费，因此留在 core——两条不同的处置来自同一条判据，不是两份口径。
 //!
 //! 词汇仍是 [`symbio_core::TaskVocab`]（D-206）：本折叠只用 `held` 与 `terminal` 两格，

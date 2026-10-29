@@ -248,7 +248,7 @@ fn fallback_merge_adds_counts_and_keeps_the_rate_pure() {
 //   ① 跨会话**聚合口径**（并集 / 重排 / 相加）⇒ 升为 core 的
 //      `SloLatencyView::merge` / `FallbackRateView::merge`，由
 //      `merge_unions_samples_per_tier_rather_than_overwriting` 等三条纯函数判据钉；
-//   ② **扫描 + 落成读数** ⇒ 生产路径 `plugins/session/stats.rs` 的聚合列
+//   ② **扫描 + 落成读数** ⇒ 生产路径 `crates/symbio-plugin-session/src/stats.rs` 的聚合列
 //      （`fleet`），由 `fleet_aggregates_every_session_in_the_instance` 等四条判据钉，
 //      其中「只走一层」「坏 WAL 不拖垮整列」是原 `#[ignore]` 测试**从未覆盖**的两条。
 //

@@ -75,7 +75,7 @@ pub(crate) fn idle_baseline(anchor: Option<i64>, updated_at: i64) -> i64 {
 pub(crate) struct SessionView {
     pub(crate) id: String,
     /// 正在工作（`status == working`）：地址面读不到运行态时 provider **保守报 working**
-    /// （见 `plugins/session/plugin/vdfs_provider.rs` 的运行态投影），本片因此继承
+    /// （见 `crates/symbio-plugin-session/src/plugin/vdfs_provider.rs` 的运行态投影），本片因此继承
     /// 「宁可不触发也不打断在跑的回合」这一侧。
     pub(crate) working: bool,
     pub(crate) updated_at: Option<i64>,

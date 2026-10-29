@@ -33,7 +33,7 @@ impl: done
 | [DE-113-heartbeat-mechanism](../../../symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md "DE-113-heartbeat-mechanism") | 现行设计 | 会话空闲心跳：调度语义、设置工具、CLI 守护模式、homedir 传导 |
 | [DE-106-perf](106-perf.md "DE-106-perf") | 现行设计 | 会话/转写的前端性能设计 + 存储拆分（元数据与消息分文件，清单慢的根因解药） |
 | [DE-109-vdfs-session-messages](109-vdfs-session-messages.md "DE-109-vdfs-session-messages") | 现行设计 | 会话消息的 VDFS 化：转写即列表、流式即追加；地址与节点形状、变更语义、不变量 |
-| [DE-107-session-options](107-session-options.md "DE-107-session-options") | 现行规范（2026-09-23 旧机制下线） | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走统一 `Registry`（选项行）|
+| [DE-107-session-options](107-session-options.md "DE-107-session-options") | 现行规范 | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走统一 `Registry`（选项行）|
 
 > **已归档的过程产物**（一次性审计 / 迁移记录，进 `docs/archive/`）：
 > [`legacy-route-migration.md`](../../../../docs/archive/legacy-route-migration.md)（会话旧路由审计，迁移已全部落地）、

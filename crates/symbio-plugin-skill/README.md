@@ -24,4 +24,4 @@ impl: done
 
 ## 关联
 
-- 工具收集管线：`plugins/session/capabilities.rs`
+- 工具收集管线：`crates/symbio-plugin-session/src/capabilities.rs`

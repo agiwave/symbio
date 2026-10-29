@@ -4,7 +4,7 @@
 //!
 //! 这里锁的是**静态面**：给模型的声明（`meta`）与回执形状（`view`），以及
 //! 「拿不到宿主 / 拿不到 VDFS 视图」时诚实报错而不是猜一个默认值。带会话的完整链路
-//! 由 `plugins/session` 的存储用例与端到端验证覆盖——本文件不 mock 地址面。
+//! 由 `crates/symbio-plugin-session` 的存储用例与端到端验证覆盖——本文件不 mock 地址面。
 
 use super::*;
 use symbio_core::PluginSimpleRequest;

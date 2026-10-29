@@ -38,7 +38,7 @@ use symbio_plugin_api::context::section_meta;
 ///
 /// 1. `slots::RECALL`：记忆是**背景事实**。置顶而不是置尾——置尾会把「最后一条 user
 ///    消息」从用户的问题换成记忆，mock 场景匹配与轮次窗口都会读错；也不进系统提示词
-///    ——那里有「唯一真源 = 注册段」的纪律（`plugins/session/README.md`）。
+///    ——那里有「唯一真源 = 注册段」的纪律（`crates/symbio-plugin-session/README.md`）。
 /// 2. `slots::READYSET`：`readyset` 投影的**候选集**，不是替模型决定做哪件事
 ///    （`projection::readyset` 模块头的边界）。
 /// 3. `slots::DELEGATE`：委派者的身份目录。

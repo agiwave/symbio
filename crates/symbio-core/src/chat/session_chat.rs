@@ -13,7 +13,7 @@ pub struct Request {
     ///
     /// 随每次发送携带；为空时回退会话 `metadata.provider_id`（默认 `none` = 用默认 Provider）。
     /// 与 `mode` / `risk_level` 是**完全对称**的三条链：`req > session.metadata > 默认`
-    /// （`plugins/session/orchestrator/entry.rs::resolve_session_params`）。
+    /// （`crates/symbio-plugin-session/src/orchestrator/entry.rs::resolve_session_params`）。
     /// 这条回退是 [D-066](../../../../docs/003-design/012-会话输入与地址.md#d-066-输入面退役的前置条件解除地址写入不承载运行选项三项运行参数已有会话-metadata-回退协议面不必变宽 "DE-012-会话输入与地址") 的前提——
     /// 「地址写入不承载运行选项」正靠它成立，故它同时是一条不变量。
     #[serde(skip_serializing_if = "Option::is_none")]

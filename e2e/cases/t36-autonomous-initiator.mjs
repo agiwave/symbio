@@ -79,7 +79,7 @@ const SID_BROAD = 'e2e-t36-broad';
  *
  * 曾经的写法是两条同文（`MSG`），靠 `once` + 场景数组顺序「各自消耗各自那条」——
  * 那把判据绑在了 **mock 场景的消耗顺序**上，而消耗顺序由「哪个会话的轮先到 LLM」决定，
- * 后者取自会话目录的 `read_dir` 顺序（`plugins/session/store/mod.rs::session_dirs_under`
+ * 后者取自会话目录的 `read_dir` 顺序（`crates/symbio-plugin-session/src/store/mod.rs::session_dirs_under`
  * 未钉排序）：NTFS 上恰是名字序、ext4 上是哈希序。于是同一份用例在 CI（Linux）上
  * 让 `e2e-t36-broad` 拿到短提示词场景、`e2e-t36-ok` 拿到长提示词场景，两条判据双双
  * 落空（2026-10-15 CI 实测）。**判据不能住在平台顺序里**：这里改成按内容配对，

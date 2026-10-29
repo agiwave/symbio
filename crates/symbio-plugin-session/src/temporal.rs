@@ -9,8 +9,8 @@ use time::{format_description, OffsetDateTime};
 ///
 /// ## 这里不读任何 `AGENTS.md`
 ///
-/// `{homedir}/AGENTS.md` 与 `<agentdir>/AGENTS.md` 都归 `agent` 插件
-/// （见 `plugins/agent/host/instruction.rs`），`work` 只认 `{workdir}`。
+/// `{homedir}/AGENTS.md` 与 `<agentdir>/AGENTS.md` 都归 `memory` 插件
+/// （见 `crates/symbio-plugin-memory/src/memory.rs`），`work` 只认 `{workdir}`。
 ///
 /// ## 时间上下文为什么挂在用户消息上
 ///

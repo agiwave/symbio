@@ -1327,7 +1327,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
 
     let mut b = Builder::new();
     b.declare(
-        "plugins/session-test",
+        "crates/symbio-plugin-session-test",
         PluginDeclarations {
             events: FIXTURE_EVENTS,
             facts: &[],

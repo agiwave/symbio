@@ -3,9 +3,9 @@
  * 重新预热 Cargo 本地依赖缓存。
  *
  * 为什么需要它：
- *   symbio/.cargo/config.toml 里固定了 `net.offline = true`，构建全程不触网、
- *   只读 ~/.cargo 缓存。因此**新增或升级依赖后**，必须跑一次本脚本把新 crate
- *   拉进缓存，否则离线构建会直接报「缺少 crate」。
+ *   仓库的构建入口（`build-cli.mjs`、门禁）显式传 `--offline`，只读 ~/.cargo
+ *   缓存、不触网。因此**新增或升级依赖后**，必须跑一次本脚本把新 crate 拉进
+ *   缓存，否则下一次离线构建会直接报「缺少 crate」。
  *
  * 用法（需要网络）：
  *   node scripts/cargo-offline-refresh.mjs
@@ -22,7 +22,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
-const crateDir = path.resolve(scriptDir, '..', 'symbio')
+const repoRoot = path.resolve(scriptDir, '..')
 
 /** 只校验离线可解析，不联网 */
 const checkOnly = process.argv.includes('--check')
@@ -35,7 +35,7 @@ const checkOnly = process.argv.includes('--check')
 function runCargo(args, options = {}) {
   const { quiet = false } = options
   const result = spawnSync('cargo', args, {
-    cwd: crateDir,
+    cwd: repoRoot,
     stdio: quiet ? ['ignore', 'ignore', 'inherit'] : 'inherit',
     // shell:false + 参数数组 —— 跨平台无引号转义问题
     shell: false,
@@ -55,7 +55,7 @@ if (checkOnly) {
   console.log('[check] 校验离线可解析（不联网）...')
   // 输出丢弃：只要退出码为 0 即代表离线依赖完整
   const result = spawnSync('cargo', ['metadata', '--offline', '--format-version', '1'], {
-    cwd: crateDir,
+    cwd: repoRoot,
     stdio: ['ignore', 'ignore', 'pipe'],
     shell: false,
   })

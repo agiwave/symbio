@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）。
 //!
 //! 这里锁的是会话选项栏**本插件那一格**的声明。前三条随调度从
-//! `plugins/session/options/tests.rs` 一起搬来（那条字段不再由会话声明，
+//! `crates/symbio-plugin-session/src/options/tests.rs` 一起搬来（那条字段不再由会话声明，
 //! 判据却一条没少——搬文件不等于搬掉回归）。
 
 use super::*;
@@ -104,7 +104,7 @@ fn heartbeat_trigger_option_is_gone() {
     assert_eq!(actions, vec!["save"]);
 }
 
-/// 号段 `60` 是登记在 `plugins/session/options/mod.rs` 模块文档里的**跨插件约定**
+/// 号段 `60` 是登记在 `crates/symbio-plugin-session/src/options/mod.rs` 模块文档里的**跨插件约定**
 /// （插件之间不可见，只能靠号段）。撞车的表现是两行叠在一起，而不是编译错误。
 #[test]
 fn order_slot_is_the_registered_one() {

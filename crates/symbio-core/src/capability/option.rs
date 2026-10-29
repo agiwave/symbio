@@ -37,7 +37,7 @@
 //! 它的**写入者是全体插件**（在 `traverse` 里注册字段），安装它的宿主只是其中之一，
 //! 故不隶属于任何插件。
 //! **收集管线**（`collect_options` / `collect_capabilities`）只有 session 一个消费方，
-//! 按「依赖方数量」判据（D-023）下沉到 `plugins/session/capabilities.rs`。
+//! 按「依赖方数量」判据（D-023）下沉到 `crates/symbio-plugin-session/src/capabilities.rs`。
 //!
 //! ```text
 //! 在 core：行词汇 + 读协议（本文件）        ← 写入者、读写者都认

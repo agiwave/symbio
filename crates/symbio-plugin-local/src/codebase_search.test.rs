@@ -436,7 +436,9 @@ fn generated_files_are_not_indexed() {
     assert!(!is_source_file(Path::new("a/b.exe"))); // 不在扩展名白名单
 
     // 正常文件不受影响 —— 别把闸门开成"只留 .rs"
-    assert!(is_source_file(Path::new("crates/crates/crates/lib.rs")));
+    assert!(is_source_file(Path::new(
+        "crates/symbio-plugin-notes/src/lib.rs"
+    )));
     assert!(is_source_file(Path::new("tauri/src/stores/sessions.ts")));
     // doc-link-allow D-010: 下一行是这条测试的史实叙述（已删除文件），不是入链
     // 这里原用 设计文档 当「.md 也是源文件」的例子；仓库已不维护变更日志

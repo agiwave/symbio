@@ -20,8 +20,8 @@
  *
  * mtime 会被 git checkout / 解压 / 复制 / 恢复备份改写，方向还不确定——
  * 既可能假旧（多一次无害的重建），也可能**假新**（把过期产物当最新，正是要防的）。
- * 内容指纹只问一件事：**构建输入变了吗**。代价是哈希 `crates/symbio-cli/src` + `symbio/src`
- * 的全部 `.rs`（本仓 272 文件 / 约 3 MB）与四个清单，约 10 ms —— 每次检查都付得起。
+ * 内容指纹只问一件事：**构建输入变了吗**。代价是哈希整个 `crates/` 树的源码
+ * 与根清单（数千文件 / 约数十 MB），约几十毫秒 —— 每次检查都付得起。
  *
  * 大文件（`include_bytes!` 进来的内嵌资产，如 24 MB 的 `model.onnx`）改用
  * **(大小, mtime)**：它每次变动大小或时间必变，而每次为它读 24 MB 纯属浪费。
@@ -59,72 +59,23 @@ const LARGE_INPUT_BYTES = 1024 * 1024
 const STAMP_NAME = '.symbio-cli.build-stamp'
 
 /**
- * 三个候选位置（按优先级：根 workspace 的 target 在前）。
+ * CLI 二进制的绝对路径。
  *
- * 根 workspace 统一后，cli 的 release 二进制默认落在仓库根 `target/release/`
- * （所有成员共用一个 target/）。旧位置的 `symbio/target/`、`cli/target/` 只在
- * 过渡期（尚未清理的旧产物）可能存在，一并探测以避免「找不到即判定缺失」。
- *
- * 写死单一位置会让「二进制找不到 ⇒ 每次都判定缺失」与「e2e 拿不到二进制 ⇒
- * 全用例失败（且失败形态是 -1 + 空 stderr，与崩溃无法区分）」同时发生。
+ * 只有一个去处：`cli` 是根 workspace 的成员，cargo 把所有成员的产物写进**同一个**
+ * 根 `target/`。路径是目录结构的投影，没有第二个候选——探测别处只会把过期产物
+ * 当成「找到了」，而那正是本机制要防的假失败。
  */
-export function cliBinaryCandidates(repoRoot, profile = 'release') {
-  return [
-    path.join(repoRoot, 'target', profile, EXE),
-    path.join(repoRoot, 'crates', 'symbio', 'target', profile, EXE),
-    path.join(repoRoot, 'crates', 'symbio-cli', 'target', profile, EXE),
-  ]
+export function cliBinaryPath(repoRoot, profile = 'release') {
+  return path.join(repoRoot, 'target', profile, EXE)
 }
 
 /**
- * CLI 产物的**规范**路径（相对仓库根、正斜杠）——文档指路只认这一条。
+ * 同一路径的**相对**写法（正斜杠）——文档指路只认这一条。
  *
- * 为什么单列一个出口：[`cliBinaryCandidates`] 为了「找不到即判定缺失」这个假失败，
- * 容忍过渡期的旧位置（见其文档），而**指路的文档不能容忍**——写着旧位置的那一刻
- * 它就把读者送去用一份过期二进制（[] 实测：照 `../symbio/target/debug/…` 找产物，
- * 一整批结论都跑在旧产物上）。所以 doc 侧判据（`doc-symbol-audit` D-012）只比
- * 这里给的第一候选，且用相对写法——文档里能直接照抄。
+ * `doc-symbol-audit` 的 D-012 拿它当唯一标准：文档里写的产物路径必须解析回这里。
  */
 export function cliArtifactRelPath(profile = 'debug') {
   return `target/${profile}/${EXE}`
-}
-
-/**
- * 按 profile 取**实际存在**的最新产物；一个都不存在 ⇒ `null`。
- *
- * 为什么单列这个出口：[`cliBinaryPath`] 在「一份都没有」时会回落到第一候选（那是给
- * 状态报告用的，它要能说出「预期在哪儿」）。而**构建脚本**问的是另一个问题——
- * 「我刚刚建出来的那份，现在到底在哪」。这两个问题混用就会出现本文件开头记的那类
- * 事故：构建成功、打印一条规范路径、而那条路径在本机不存在（`cli/.cargo/config.toml`
- * 可以把 `target-dir` 重定向到别处），读者照着它敲，用的是几个月前的旧产物。
- *
- * 所以：**要判断「有没有」，问这个函数；要报告「预期在哪」，问 `cliBinaryPath`。**
- */
-export function cliArtifactPath(repoRoot, profile = 'release') {
-  let best = null
-  for (const p of cliBinaryCandidates(repoRoot, profile)) {
-    let st
-    try {
-      st = fs.statSync(p)
-    } catch {
-      continue
-    }
-    if (!best || st.mtimeMs > best.mtimeMs) best = { p, mtimeMs: st.mtimeMs }
-  }
-  return best ? best.p : null
-}
-
-/**
- * 取**最新**的那个已存在候选，而不是第一个。
- *
- * 换过 `cli/.cargo/config.toml`（或从别的机器拷来 target/）之后，两个位置可能
- * 各躺着一份。此时「第一个」可能恰是几个月前那份——正是要防的过期产物。
- * 构建产物里最新的一份才对应最近一次构建。
- *
- * 一份都不存在时回落到第一候选：调用方（`cliBinaryState`）要用它说出「预期在哪」。
- */
-export function cliBinaryPath(repoRoot, profile = 'release') {
-  return cliArtifactPath(repoRoot, profile) ?? cliBinaryCandidates(repoRoot, profile)[0]
 }
 
 /**
@@ -133,9 +84,6 @@ export function cliBinaryPath(repoRoot, profile = 'release') {
  * 跳过构建产物与依赖目录：本函数现在的扫描根是**整个 `crates/`**，若把
  * `crates/<成员>/target/` 收进指纹，写构建戳这个动作本身（戳就写在 `target/release/`
  * 里）会改变指纹 ⇒ 「刚写完戳就不新鲜」，机制自锁。
- *
- * 这不是假想的场景：`cliBinaryCandidates` 的过渡期候选之一就是
- * `crates/symbio/target/release/`，回归测试正是往那里放假二进制。
  */
 const SKIP_DIRS = new Set(['target', 'node_modules', '.git', 'dist', '.cache'])
 
@@ -156,18 +104,17 @@ function walkFiles(dir, out = []) {
 }
 
 /**
- * 构建输入清单 = `crates/` 整棵树 + 根清单 + 可能存在的 build.rs / .cargo 配置。
+ * 构建输入清单 = `crates/` 整棵树 + 根清单 + 可能存在的根 `.cargo/config.toml`。
  *
  * 用「列目录」而不是「读 Cargo 的依赖图」：依赖图要跑 cargo metadata（几百毫秒且
  * 需要网络语义），而这里只需要**宁可多算**——多纳入一个文件只会多触发一次无害的
  * cargo 增量构建，漏掉一个才会让过期产物蒙混过关。
  *
- * ## 为什么只有一个源码根，且必须是 `crates/`
+ * ## 为什么只有一个源码根
  *
- * CLI 复用整棵插件树，所以「CLI 的构建输入」在拆 crate 前是 `cli/src` + `symbio/src`
- * 两处。拆 crate（D-191）后两者都成了 `crates/` 的成员，若仍写成两个子根
- * （`crates/symbio-cli/src` + `crates`），**后者包含前者** ⇒ 同一文件收两遍，
- * 清单里出现重复项（指纹仍然可用，但清单本身不再是一份集合）。
+ * CLI 复用整棵插件树，构建输入就是整个 `crates/`。写成 `crates/symbio-cli/src` 与
+ * `crates/` 两个根时，**后者包含前者** ⇒ 同一文件收两遍，清单里出现重复项（指纹仍然
+ * 可用，但清单本身不再是一份集合）。
  *
  * 故只走一个根，并用 `Set` 去重：清单是**文件集合**这件事由数据结构保证，
  * 而不是靠调用方小心不要写出包含关系的子根。
@@ -182,14 +129,7 @@ export function cliBuildInputs(repoRoot) {
     files.push(abs)
   }
   for (const p of walkFiles(path.join(repoRoot, 'crates'))) push(p)
-  for (const rel of [
-    'Cargo.toml',
-    'Cargo.lock',
-    'crates/symbio-cli/build.rs',
-    'crates/symbio-cli/.cargo/config.toml',
-    'crates/symbio/build.rs',
-    'crates/symbio/.cargo/config.toml',
-  ]) {
+  for (const rel of ['Cargo.toml', 'Cargo.lock', '.cargo/config.toml']) {
     const p = path.join(repoRoot, rel)
     if (fs.existsSync(p)) push(p)
   }
@@ -288,7 +228,7 @@ export function ensureCliBinary(repoRoot, { build = true, log = null } = {}) {
   const after = cliBinaryState(repoRoot)
   if (!after.exists) {
     throw new Error(
-      `cargo build --release 成功但找不到二进制（预期其一：${cliBinaryCandidates(repoRoot).join(' | ')}）`,
+      `cargo build --release 成功但找不到二进制（预期：${cliBinaryPath(repoRoot)}）`,
     )
   }
   fs.writeFileSync(cliStampPath(after.binaryPath), after.fingerprint, 'utf8')

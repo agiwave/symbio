@@ -342,7 +342,7 @@ impl ClosureReason {
 
 // ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")）────
 //
-// 校准断言 `memory.calibrated`（`memory × asserted`）不在这里：写方只有 `plugins/loop`
+// 校准断言 `memory.calibrated`（`memory × asserted`）不在这里：写方只有 `crates/symbio-plugin-loop`
 // 一家，名字与格位由它自己的 `EventDecl` 交出（`control_decl`），读侧投影的名字由调用方
 // 在构造期交进 core（DE-024 D-205 / D-204）。
 //
@@ -360,7 +360,7 @@ impl ClosureReason {
 // ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）──
 //
 // 这一节现在是空的。五格（开任务 / 推进 / 暂挂 / 终态 / 发放）与 `task.ready` /
-// `task.rework_created` 同属一个 owner：写方与调度者都在 `plugins/loop`，`session` 只作为
+// `task.rework_created` 同属一个 owner：写方与调度者都在 `crates/symbio-plugin-loop`，`session` 只作为
 // **第二个消费方**读它们——名字因此登记进 owner 清单（`shared_events`，判据 CS-007），
 // 格子与租约纪律随 owner 的 `EventDecl` 走（DE-024 D-204 / D-206）。
 //
@@ -428,7 +428,7 @@ pub enum Entity {
     Control,
     System,
     /// 消息列表上的一次**变更**（编辑 / 删除 / 压缩快照）。名字由 owner 声明
-    /// （`plugins/session` 的 `message.edited` 等四条），内核不持有拼写。
+    /// （`crates/symbio-plugin-session` 的 `message.edited` 等四条），内核不持有拼写。
     ///
     /// 与 `Turn` 的分界：`turn` 记的是「这一轮说了什么」，本实体记的是
     /// 「列表里的某条被改成 / 去掉了 / 整段被摘要取代了」——它跨轮、不开始任何一轮。

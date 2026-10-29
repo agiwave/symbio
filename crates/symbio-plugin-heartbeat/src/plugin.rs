@@ -8,7 +8,7 @@
 //!
 //! [`Plugin::start`] 是**同步**钩子（[D-033](../../../docs/003-design/002-架构总览.md#d-033-生命周期钩子start-同步stop-异步停用与卸载各给理由 "DE-002-架构总览")：
 //! 装配路径整条是同步的），而循环体是 task。session 的常驻任务同在此处
-//! （`plugins/session/plugin.rs` 的 `start_resident_tasks`）——两处都在**构造点**交出句柄，
+//! （`crates/symbio-plugin-session/src/plugin.rs` 的 `start_resident_tasks`）——两处都在**构造点**交出句柄，
 //! 「谁来持有句柄」因此只有一个注册点。
 //!
 //! ## 停机形状沿用 D-075 的 P1

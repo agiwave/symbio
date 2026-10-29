@@ -324,7 +324,7 @@ export function runCli({ homedir, workdir, message, provider = null, session = n
   if (!existsSync(exe)) {
     throw new Error(
       `CLI 二进制不存在：${exe}\n` +
-        `构建：node scripts/cli-binary.mjs（等价于 cd cli && cargo build --release）；\n` +
+        `构建：node scripts/cli-binary.mjs（等价于仓库根 cargo build -p symbio-cli --release）；\n` +
         `或经 E2E_CLI_EXE 指向既有二进制（会绕过新鲜度判定）。`,
     )
   }
@@ -454,7 +454,7 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
 // ---------- 会话实时面（与 Tauri 前端同构） ----------
 
 /**
- * 会话集合在 VDFS 根下的**顶层段名**（后端 `plugins/session` 的 `SESSION_SEG`）。
+ * 会话集合在 VDFS 根下的**顶层段名**（后端 `crates/symbio-plugin-session` 的 `SESSION_SEG`）。
  *
  * 与 `SEG_MESSAGES` 同一理由自持：地址是跨端契约，写错表现为「读了个不存在的
  * 地址」而不是编译错误，而 e2e 的断言恰恰要靠地址形状判定行为（收件箱写入
@@ -462,7 +462,7 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
  */
 export const SESSION_SEG = 'session';
 
-/** 会话下的**消息集合段名**（后端 `plugins/session` 的 `SEG_MESSAGES`）。 */
+/** 会话下的**消息集合段名**（后端 `crates/symbio-plugin-session` 的 `SEG_MESSAGES`）。 */
 export const SEG_MESSAGES = 'message';
 
 /**

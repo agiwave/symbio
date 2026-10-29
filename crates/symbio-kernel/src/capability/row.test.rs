@@ -45,7 +45,7 @@ impl Capability for StubTool {
     }
 }
 
-/// 改名装饰器（与 `plugins/agent/host/scope.rs` 的 `PrefixedCapability` 同形）：
+/// 改名装饰器（与 `crates/symbio-plugin-agent/src/host/scope.rs` 的 `PrefixedCapability` 同形）：
 /// 只换 `meta().name`，执行原样透传。行词汇对它的全部要求是**不截断**。
 struct Renamed {
     inner: Arc<dyn Capability>,

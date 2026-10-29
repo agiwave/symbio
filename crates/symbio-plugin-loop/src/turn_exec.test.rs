@@ -447,7 +447,7 @@ impl ExecTranscriptWriter for CollectingFrames {
 /// ## 为什么这条在插件层而不在 core
 ///
 /// core 只提供「工具循环里什么时候问一次」这个挂点（`TurnInput::inject`）；
-/// 「什么是补充」「它怎么落成 `turn.supplemented`」全在 `plugins/session`（收件箱、
+/// 「什么是补充」「它怎么落成 `turn.supplemented`」全在 `crates/symbio-plugin-session`（收件箱、
 /// `merge_supplements`、`EventWalStore`）。core 那侧的判据是
 /// `injected_messages_reach_the_next_request_of_the_same_turn`（只验「进了本轮请求」）。
 ///
@@ -1775,7 +1775,7 @@ async fn full_turn_lands_derived_commitment_facts() {
     let (provider, _prompts) = FaithfulProvider::new(Behavior::ToolThenAgentRun);
 
     // 注册面与模型面同一份元数据：`agent_run` 自声明「派活 + 立约」两个行为名，
-    // 承诺记账只认声明——与生产（`plugins/agent/host/subagent.rs`）逐字同形。
+    // 承诺记账只认声明——与生产（`crates/symbio-plugin-agent/src/host/subagent.rs`）逐字同形。
     let tool_meta = CapabilityMeta {
         name: "agent_run".into(),
         description: "派生一个子智能体".into(),

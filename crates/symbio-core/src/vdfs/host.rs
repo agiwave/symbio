@@ -15,11 +15,11 @@
 //!
 //! 纯接口（[`VdfsProvider`] trait 与其域类型）在
 //! [`crate::vdfs`]；`vdfs/*` 的**分发**（收集挂载点、
-//! 路径解析、树状遍历、事件投递）是 vdfs 插件的职责，见 `plugins/vdfs/host.rs`。
+//! 路径解析、树状遍历、事件投递）是 vdfs 插件的职责，见 `crates/symbio-plugin-vdfs/src/host.rs`。
 //!
 //! 本模块之所以留在 core，是因为**实现方**（如 `plugin_manager` 插件）是插件而非
 //! 宿主本身——它需要把宿主句柄从 [`VdfsContext`] 里取出、并把调用宿主服务
-//! 得到的 [`PluginError`] 翻回协议错误。让它去依赖 `plugins/vdfs` 会破坏
+//! 得到的 [`PluginError`] 翻回协议错误。让它去依赖 `crates/symbio-plugin-vdfs` 会破坏
 //! 「插件之间不互相依赖」的分层。
 //!
 //! `VdfsProvider`
@@ -63,7 +63,7 @@ pub fn vdfs_host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn PluginInvokeReques
 /// ## 为什么「一条变更只出总线一次」是必须的
 ///
 /// 广播源是整棵子树共用的（[`vdfs_notify_change`] 不按路径分流），而投递的终点是**一个
-/// 全局广播出口**（`plugins/vdfs/host.rs::event_bus_sink` → `EventBus::try_publish`
+/// 全局广播出口**（`crates/symbio-plugin-vdfs/src/host.rs::event_bus_sink` → `EventBus::try_publish`
 /// 推给全部前端连接）。因此两条**重叠**的订阅（会话清单订 `<根>/session`、转写订
 /// `<根>/session/<id>/message`）若各投一次，同一条变更就会在总线上出现两次——
 /// 前端把它当两条变更各落地一次，流式正文当场叠字。

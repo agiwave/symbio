@@ -685,7 +685,7 @@ mod turn_runner_tests {
             self.0.lock().unwrap().push(text.to_string());
         }
         // 本组用例的桩不产推理增量；推理通道由
-        // `plugins/model/bound_provider.test.rs` 的桥接用例覆盖（那里有 SSE 级 fixture）。
+        // `crates/symbio-plugin-model/src/bound_provider.test.rs` 的桥接用例覆盖（那里有 SSE 级 fixture）。
         fn on_reasoning(&self, _text: &str) {}
         fn on_tool_frame(&self, _frame: &symbio_core::chat_node::ChatNode) {}
     }
@@ -1469,7 +1469,7 @@ mod tool_round_tests {
     ///
     /// 另一半——「注入的内容成为事实、下一轮仍可见」——**不在 core**：
     /// 「什么是补充」「它怎么落成 `turn × asserted`」是插件侧的概念（收件箱、
-    /// `merge_supplements`、`EventWalStore` 都在 `plugins/session`），core 只提供
+    /// `merge_supplements`、`EventWalStore` 都在 `crates/symbio-plugin-session`），core 只提供
     /// 「循环里什么时候问一次」这个挂点（见 [`TurnInput::inject`]）。
     ///
     /// 把落格也做进 core 会让 core 知道「补充」是什么——而它不必知道。

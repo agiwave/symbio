@@ -5,7 +5,7 @@
 //! 这里锁的是**本片对外声明的那几格**：能力表里恰好两行（Tool + Option）、
 //! 停机时那条常驻循环真的退出。两半各管一件事，合起来是 D-077 的守卫前半——
 //! 「停用 `heartbeat` ⇒ 这两行一起消失」的**跨插件**那一半在
-//! `plugins/composite` 的守卫用例里（本文件不能 import 兄弟模块，E-009）。
+//! `crates/symbio-plugin-composite` 的守卫用例里（本文件不能 import 兄弟模块，E-009）。
 
 use super::*;
 use symbio_core::{

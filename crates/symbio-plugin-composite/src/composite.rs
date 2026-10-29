@@ -214,10 +214,10 @@ impl Plugin for Composite {
     ///
     /// 容器把子插件的 vfs provider 聚合进它，子智能体的 `agent/<id>` 挂载点也经它
     /// 往下钻——`agent` 插件拿到子 composite 的 `Arc<dyn Plugin>` 后调本方法即可取回
-    /// 同一个 provider，无需任何类型耦合（见 `plugins/agent/host/vdfs.rs` 的 `sub_vfs`）。
+    /// 同一个 provider，无需任何类型耦合（见 `crates/symbio-plugin-agent/src/host/vdfs.rs` 的 `sub_vfs`）。
     ///
     /// 插件管理插件也走这条：它经 `ctx.parent()` 拿到本容器，取回这个 provider，
-    /// 再以注册表动词读写插件集合（见 `plugins/plugin_manager/plugin.rs`）。
+    /// 再以注册表动词读写插件集合（见 `crates/symbio-plugin-plugin_manager/src/plugin.rs`）。
     fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
         let root: Arc<dyn VdfsProvider> = self.vdfs.clone();
         Some(root)

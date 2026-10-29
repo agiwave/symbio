@@ -16,7 +16,7 @@
 //! 生命周期钩子（`fire_hook`）住宿主 `symbio_plugin_api::hooks`：session 派发前与 loop 轮内都触发它，
 //! 两边共用同一条路由助手（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
 //!
-//! `heartbeat` 工具**不在这里**：它随调度一起切出为 `plugins/heartbeat`
+//! `heartbeat` 工具**不在这里**：它随调度一起切出为 `crates/symbio-plugin-heartbeat`
 //! （[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），而本域是分发与执行基础设施。
 //!
 //! ## 共享面走门面，不深潜

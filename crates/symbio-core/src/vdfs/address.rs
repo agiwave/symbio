@@ -11,12 +11,12 @@
 //! ## 绝对地址怎么来：一层层往下传，不写死、不问全局
 //!
 //! ```text
-//! plugins/vdfs  ──静态声明根名──▶ AddrRootDecl（编译期随二进制生效）
+//! crates/symbio-plugin-vdfs  ──静态声明根名──▶ AddrRootDecl（编译期随二进制生效）
 //! composite     ──装配子插件时──▶ 当前父地址 = join(根名, 子插件名)，经 ctx 传递
 //! 子插件        ──存下父地址────▶ 绝对地址 = join(父地址, 相对地址)，本地纯数据操作
 //! ```
 //!
-//! - 根名的字面量**只在 vdfs 插件内**（`plugins/vdfs/fs.rs`），它经
+//! - 根名的字面量**只在 vdfs 插件内**（`crates/symbio-plugin-vdfs/src/fs.rs`），它经
 //!   [`AddrRootDecl`] 静态声明——早于任何插件实例构造，容器转发时即可读取；
 //! - 当前父地址是**上下文数据**（`VDFS_PARENT_ADDR`）：父插件把请求转发给子
 //!   插件时改写它，与 `WORKDIR` / `SESSION_ID` 同类；

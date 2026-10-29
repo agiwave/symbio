@@ -25,7 +25,7 @@
 //!
 //! 对照：`ModelProvider` 是同样的形状——**契约**在
 //! core（session 只认这个 trait），**协议字段名与实现**在 model 插件
-//! （`plugins/model/protocols/` 的四个适配器）。本模块里没有任何协议字段名，只有字符集与
+//! （`crates/symbio-plugin-model/src/protocols/` 的四个适配器）。本模块里没有任何协议字段名，只有字符集与
 //! 分隔符这两个「契约本身」的参数。
 //!
 //! 反面例子（**故意没进 core**）：工具结果的字段名读取器

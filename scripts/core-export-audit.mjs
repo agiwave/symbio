@@ -23,11 +23,11 @@
  * **测试文件不算架构消费方。** 本条要回答的是「谁依赖它」，而测试依赖的是**被测对象**，
  * 不是它要长期持有的接口。旧口径把测试算进来 ⇒「一个模块在生产用、另一个模块的测试
  * 顺手写了一次名字」读成「两个模块依赖」⇒ 真·单消费方符号逃过下沉。实测：
- * `TurnRunner` / `TurnInput`（生产只有 `plugins/session`，第二个单位来自
- * `plugins/model/bound_provider.test.rs` 的彩排）长期显为 ≥2，而同族的 `TurnOutcome` /
+ * `TurnRunner` / `TurnInput`（生产只有 `crates/symbio-plugin-session`，第二个单位来自
+ * `crates/symbio-plugin-model/src/bound_provider.test.rs` 的彩排）长期显为 ≥2，而同族的 `TurnOutcome` /
  * `TurnResume`（没被那个测试提到）一直显为单消费方——**同一个功能、四个名字、两种判决**。
- * 这族符号已于 2026-10-09 整体下沉 `plugins/session`（见 `symbio_core/mod.rs` 的
- * `actors` 导出注与 `plugins/session/turn_runner.rs` 文件头）——本条口径修正的动机即由此暴露。
+ * 这族符号已于 2026-10-09 整体下沉 `crates/symbio-plugin-session`（见 `symbio_core/mod.rs` 的
+ * `actors` 导出注与 `crates/symbio-plugin-loop/src/turn_runner.rs` 文件头）——本条口径修正的动机即由此暴露。
  *
  * 但**「0 消费方」那一半仍按含测试计**：只被别模块测试用到的符号，收窄它当场把那些测试
  * 编译坏（C-002 又不许它们深引）⇒「测试在用」**足以**让它留在根出口。故本条实际分三档：
@@ -125,22 +125,22 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // 内核公共面豁免：**0 条**（2026-10-26 D-190 后）。
       //
       // 最后一条 `ActorSpec` 是**协议接缝**（F3 冻结字段集），曾因 core 外唯一生产
-      // 消费方是 `plugins/session` 而豁免；抢占判定随 D-190 搬进
-      // `plugins/session/transcript/inbox.rs` 后，`ActorSpec` 有了第二个生产消费方
+      // 消费方是 `crates/symbio-plugin-session` 而豁免；抢占判定随 D-190 搬进
+      // `crates/symbio-plugin-session/src/transcript/inbox.rs` 后，`ActorSpec` 有了第二个生产消费方
       // （`turn_exec` 构造 + `inbox` 构造判定者行），C-003 的「≥2 消费方」判据自行
       // 成立 ⇒ 条目按纪律 2 退役，不留空转豁免。
       //
       // `branch_hide_unselected`（节点树接缝）与 `EVENT_TURN_STAGE`（线上事件名）随 C-003
       // 的判定范围收窄到内核公共面而**移出本帐**：它们不是封闭语法，属域账本。
       // 前者仍是单消费方接缝（子树收法 `node_build::subtree_of` 只有一份），C 迁出
-      // session 域时一并处置；后者已在 P1c 随 owner 声明迁回 `plugins/loop`（D-197），
+      // session 域时一并处置；后者已在 P1c 随 owner 声明迁回 `crates/symbio-plugin-loop`（D-197），
       // core 不再出根。口径见 DE-023 D-185。
       //
       // 此前的投影类条目已清零：`turnstate` / `SloLatencyView` / `FallbackRateView` /
       // `mutations_latest_snapshot` 经 `isSinkCandidate` 核验**本来就不是单消费方**
       // （core 自己的投影域在生产使用它们），豁免条目空转，直接删除；`token_ledger`
-      // 的唯一生产消费方是 `plugins/session/stats.rs`，按 D-180 连同类型与实现搬进
-      // 会话插件（`plugins/session/token_ledger.rs`），根出口与条目同时退役。
+      // 的唯一生产消费方是 `crates/symbio-plugin-session/src/stats.rs`，按 D-180 连同类型与实现搬进
+      // 会话插件（`crates/symbio-plugin-session/src/token_ledger.rs`），根出口与条目同时退役。
     }
 
 /**
@@ -201,10 +201,10 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  * 使用**它」的单消费方；一个符号在 `--verbose` 的 `[ 1]` 里出现即代表它仍待处置。
  *
  * - **单消费方投影下沉批**（2026-10-26）：`spend_ledger` 的视图类型与实现搬进唯一消费方
- *   `plugins/session`（DE-023 D-180），根出口与豁免条目同时删除——豁免账本 13 → 12。
+ *   `crates/symbio-plugin-session`（DE-023 D-180），根出口与豁免条目同时删除——豁免账本 13 → 12。
  *   违规格计数不变（该符号本就在豁免里，不计入 `one`）。
  *
- * - **B2 投影豁免清零批**（2026-10-26）：`token_ledger` 同法搬进 `plugins/session`
+ * - **B2 投影豁免清零批**（2026-10-26）：`token_ledger` 同法搬进 `crates/symbio-plugin-session`
  *   （唯一消费方 `stats.rs`），豁免账本 12 → 11，`one` 不变。另核验四条「投影类」豁免
  *   （`turnstate` / `SloLatencyView` / `FallbackRateView` / `mutations_latest_snapshot`）
  *   本就不是 `isSinkCandidate`（core 自己的投影域在生产使用它们），条目空转 ⇒ 删除；
@@ -274,7 +274,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  *
  * 377→**371**（2026-10-27，D-206）：任务族五格的拼写改由折叠的构造口交出，`EVENT_TASK_*`
  * 五条随内核常量一起不再出根（−5），`TaskVocab` 出一条（+1）；`autonomy` 投影连同
- * `AutonomyView` 随**唯一生产消费方**下沉 `plugins/session`（−2）。登记值此前停在 381 而
+ * `AutonomyView` 随**唯一生产消费方**下沉 `crates/symbio-plugin-session`（−2）。登记值此前停在 381 而
  * 实测已是 377——那 4 条是上一批同批退役却没同步的数字（黄提示不是红灯，所以它活了一轮）。
  *
  * **`one` 那一格本批涨过又落回 11**，落回的方式值得记一笔：`autonomy()` 改名 `autonomy_for()`
@@ -284,13 +284,13 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  * 投影就搬进哪个——**不是**把数字提到 12，也不是给它挂一条豁免。
  */
 // core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）。此后 397→395 是测试替身外置带来的真收窄；395→396 是 VdfsListResponse 上移（消费方 2，换掉 agent 侧手写的 "path" 字面量，D-196）；396→389 是 7 条 owner-local 事件名迁出根出口（D-197）；389→386 是 `conation` 投影随唯一
-// 消费方下沉 plugins/session，`conation` / `ConationView` / `EVENT_CONATION_EXPRESSED`
-// 三条出口一起退役；386→381 是 `recall` 投影随唯一消费方下沉 plugins/loop，`recall` /
+// 消费方下沉 crates/symbio-plugin-session，`conation` / `ConationView` / `EVENT_CONATION_EXPRESSED`
+// 三条出口一起退役；386→381 是 `recall` 投影随唯一消费方下沉 crates/symbio-plugin-loop，`recall` /
 // `RecallView` / `RecallEntry` 三条出口与 `EVENT_MEMORY_CONSOLIDATED` /
 // `EVENT_MEMORY_FORGOTTEN` 两条同批退役（D-201）；登记值此后**停在 381 而实测已是 377**
 // （那 4 条是同批退役却没同步数字的黄提示，不是本批新增）；377→371 是 D-206：任务族五条名字
 // 不再经 core 出根（−5，折叠在构造期收 `TaskVocab`，+1）、`autonomy` 投影随唯一生产消费方
-// 下沉 plugins/session（`autonomy` / `AutonomyView` 两条出口退役，−2）
+// 下沉 crates/symbio-plugin-session（`autonomy` / `AutonomyView` 两条出口退役，−2）
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
   : 343

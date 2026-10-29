@@ -50,7 +50,7 @@ impl VdfsContext {
     }
 
     /// 转发方写入当前父地址（同名覆盖；vdfs 核心协议把操作派发给 provider 的
-    /// 那一跳调用——见 `plugins/composite/vdfs.rs` 的 `dispatch`）
+    /// 那一跳调用——见 `crates/symbio-plugin-composite/src/vdfs.rs` 的 `dispatch`）
     pub fn with_parent_addr(mut self, addr: impl Into<String>) -> Self {
         self.parent_addr = addr.into();
         self

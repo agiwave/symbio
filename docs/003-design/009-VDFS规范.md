@@ -95,12 +95,12 @@ symbio_core/vdfs/*.rs ← centerpiece：VdfsProvider trait
  VdfsWriteResponse / VdfsError / VdfsChange）
  + VdfsContext + 路径工具 + 回填
 symbio_core/vdfs/host.rs ← symbio 桥：上下文注入 + 错误翻译
-plugins/vdfs/protocol.rs ← 线路信封：vdfs/* 请求响应 + 协议路径常量
+crates/symbio-plugin-vdfs/src/protocol.rs ← 线路信封：vdfs/* 请求响应 + 协议路径常量
  + VDFS_OPS（变更事件与 provider 侧 VdfsChange 同形）
-plugins/vdfs/fs.rs ← UnifiedFs：地址分流 + 口径映射 + 根守卫
-plugins/vdfs/physical.rs ← 物理层：磁盘文件 + FsPolicy 安全守卫
-plugins/vdfs/host.rs ← 访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递
-plugins/composite/vdfs.rs ← 拓扑：逐子插件收集子目录 provider，组合成
+crates/symbio-plugin-vdfs/src/fs.rs ← UnifiedFs：地址分流 + 口径映射 + 根守卫
+crates/symbio-plugin-vdfs/src/physical.rs ← 物理层：磁盘文件 + FsPolicy 安全守卫
+crates/symbio-plugin-vdfs/src/host.rs ← 访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递
+crates/symbio-plugin-composite/src/vdfs.rs ← 拓扑：逐子插件收集子目录 provider，组合成
  包含子目录列表的 provider
 ```
 
@@ -119,7 +119,7 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 - **纯接口层不得出现 `use crate::…`**。`vdfs/` 可原样抽出为独立
  crate，供任何宿主（不限于 symbio）复用。
 - **core 不暴露线路类型**：`VdfsPathRequest` / `VdfsListResponse` … 只存在于
- `plugins/vdfs/protocol.rs`，core 的任何 `pub` 面都不得出现它们。这是与
+ `crates/symbio-plugin-vdfs/src/protocol.rs`，core 的任何 `pub` 面都不得出现它们。这是与
  `model_provider` 一致的分层（core = 纯 trait；协议适配在插件）。
 - **trait 上不得出现「位置」相关成员**（`mount` / `category` 之类，§2.4）——
  provider 是纯目录语义，不知道也不关心自己出现在哪个地址。
@@ -136,7 +136,7 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 实现方（如 `plugin_manager` 插件）是**插件**而非宿主本身，它需要两件宿主能力：
 从 `VdfsContext` 取回宿主句柄、把下游 `PluginError` 翻回 `VdfsError`。
 这两件事放在 `symbio_core::vdfs::host`（桥层），使实现方**只依赖 core**，
-不去依赖 `plugins/vdfs`——否则插件之间就产生了横向依赖。访问层（`dispatch`）
+不去依赖 `crates/symbio-plugin-vdfs`——否则插件之间就产生了横向依赖。访问层（`dispatch`）
 不是实现方需要的，因此留在 vdfs 插件内部。
 
 ### 2.4 子目录名不属于 provider
@@ -218,7 +218,7 @@ src/main.rs 同上            ├─▶ 物理层（磁盘真实文件）
 #### 3.1.1 根名归属（全项目唯一一处字面量）
 
 `<根>` **叫什么，是 vdfs 插件自己的挂载规则**，字面量只存在于
-`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`（审计规则 S-010 强制）。它经
+`crates/symbio-plugin-vdfs/src/fs.rs::VDFS_ADDR_ROOT`（审计规则 S-010 强制）。它经
 `AddrRootDecl` **静态声明**（`inventory::submit!`，编译期随二进制生效，
 早于任何插件实例构造——容器装配子插件时就要用）。由此推出两条纪律：
 
@@ -425,7 +425,7 @@ size updated_at children binary hidden schema new_type attributes
 
 ## 5. 协议操作
 
-`plugins/vdfs/protocol.rs` 的 `VDFS_OPS` 是唯一操作清单（**线路信封只存在于插件内，
+`crates/symbio-plugin-vdfs/src/protocol.rs` 的 `VDFS_OPS` 是唯一操作清单（**线路信封只存在于插件内，
 core 不暴露**）；操作闭集见 [当前事实表](../004-ref/006-当前事实表.md "RE-006-当前事实表") §3.2，信封的线上形状以
 `protocol.rs` 为准。语义要点：
 
@@ -440,7 +440,7 @@ core 不暴露**）；操作闭集见 [当前事实表](../004-ref/006-当前事
 
 机制级守卫分两处（provider 都无需重复）：
 
-**访问层统一施加**（`plugins/vdfs/host.rs`，与资源语义无关）：
+**访问层统一施加**（`crates/symbio-plugin-vdfs/src/host.rs`，与资源语义无关）：
 
 - `..` 穿越 → `ValidationError`（在 `normalize_addr` 就发生）；
 - `write` 必须携带 `text` 或 `b64`；
@@ -749,11 +749,11 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 重写三个文件即可：
 
 - `symbio_core/vdfs/host.rs`（桥：装上下文、翻错误）；
-- `plugins/vdfs/host.rs` + `fs.rs`（访问层与门面：拆信封、地址分流、树遍历、
+- `crates/symbio-plugin-vdfs/src/host.rs` + `fs.rs`（访问层与门面：拆信封、地址分流、树遍历、
  事件投递——`UnifiedFs` 只依赖纯接口，可原样带走）；
 - 容器的注册接线（子插件收集方式随宿主插件机制而变）。
 
-`symbio_core/vdfs/`（纯接口）与 `plugins/vdfs/protocol.rs`（线路信封）
+`symbio_core/vdfs/`（纯接口）与 `crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封）
 **原样复用**——前者零宿主依赖，后者只依赖前者。
 
 ## 12. 一致性要求
@@ -773,7 +773,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 - 消费者 **不得**按 `kind` 判定能力，只能依据 `access`。
 - 前端 **不得**硬编码资源类型 / 标签 / 路径模板 / 能力开关，只登记 ext → 渲染器、
  子目录名 → 图标这类纯 UI 映射。
-- 接口变更先改 `vdfs/provider.rs`（trait 是 centerpiece），线路变更先改 `plugins/vdfs/protocol.rs`，再改访问层与前端两侧契约。
+- 接口变更先改 `vdfs/provider.rs`（trait 是 centerpiece），线路变更先改 `crates/symbio-plugin-vdfs/src/protocol.rs`，再改访问层与前端两侧契约。
 
 ## 关键决策
 

@@ -10,7 +10,7 @@ use crate::{CommitmentVocab, Event};
 /// 的两个名字，违约必须带 `why`（可观测，S08 §5）。
 ///
 /// 四个格名由调用方在构造期交进来（`CommitmentVocab`，DE-024 D-203）：本域只留
-/// 「立约 → 了结 → 告知」的形状，拼写归 owner（`plugins/loop` 的清单）。
+/// 「立约 → 了结 → 告知」的形状，拼写归 owner（`crates/symbio-plugin-loop` 的清单）。
 #[derive(Debug, Clone, Copy)]
 pub struct CommitmentKeeper {
     v: CommitmentVocab,
@@ -85,7 +85,7 @@ impl CommitmentKeeper {
 /// NDC-001：定义域外不得提及主体类型名——提及即可持有，持有即可绕过事实源直连）。
 ///
 /// 返回**待入格的事件序列**：立约（`opened`）→ 了结（`released` / `broken`）→
-/// 必要时宣告（`asserted`）。写方（`plugins/session` 的轮末收束）只管按序 append，
+/// 必要时宣告（`asserted`）。写方（`crates/symbio-plugin-session` 的轮末收束）只管按序 append，
 /// 「什么时候落格」是它的决定，「怎么把一次立约变成格子」是本域的决定——与
 /// `recalled_event` 同一形态。
 ///

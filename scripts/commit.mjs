@@ -250,11 +250,17 @@ function guessScope() {
     let s = null
     if (f.startsWith('e2e/')) s = 'e2e'
     else if (f.startsWith('scripts/')) s = 'gate'
-    else if (f.startsWith('symbio/')) {
-      const m = f.match(/^symbio\/src\/(?:plugins\/([^/]+)|symbio_core)/)
-      s = m ? (m[1] ?? 'core') : null
+    else if (f.startsWith('crates/symbio-plugin-')) {
+      const m = f.match(/^crates\/symbio-plugin-([^/]+)\//)
+      s = m ? m[1] : null
+    } else if (f.startsWith('crates/symbio-cli/')) s = 'cli'
+    else if (
+      f.startsWith('crates/symbio/') ||
+      f.startsWith('crates/symbio-core/') ||
+      f.startsWith('crates/symbio-kernel/')
+    ) {
+      s = 'core'
     } else if (f.startsWith('tauri/')) s = 'ui'
-    else if (f.startsWith('cli/')) s = 'cli'
     else if (f.startsWith('docs/')) s = 'docs'
     if (s) counts.set(s, (counts.get(s) ?? 0) + 1)
   }

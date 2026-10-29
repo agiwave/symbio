@@ -152,7 +152,7 @@ impl RebuildSeq {
 /// 取代**」：它的载荷就是压缩后的整份消息列表，因此重建从它**开始**——先把它那份列表
 /// 按序收下，再从它的**下标之后**接着折事实。它之前的事件一律不再参与——「被取代」发生在
 /// **折叠侧**，不在读口：切片里带着那段前缀（`range(0)` 给完整史，前缀来自归档段，见
-/// `crate::plugins::session::store::EventWalStore`）也照样不参与。
+/// 会话插件的 `EventWalStore`）也照样不参与。
 ///
 /// 少了这一段，一次压缩在重建面上等于**没发生过**——被压掉的消息会全部复活，
 /// 而压缩的全部意义就是让它们不再进入上下文。
@@ -471,7 +471,7 @@ fn opening_node(e: &Event) -> ChatNode {
 
 /// 收束 / 进展 / 兜底格 → `[Turn 根, Reasoning 子?, Text 子?, rounds 的中途产出…]`。
 ///
-/// 形状与 `plugins/session/message_build::llm_build_assistant_messages` 同源（同一判据：
+/// 形状与 `crates/symbio-plugin-loop/src/message_build::llm_build_assistant_messages` 同源（同一判据：
 /// reasoning-only 时那段内容归 Text 子节点，不另立 Reasoning 子，否则同一段内容
 /// 在存储层出现两份）。
 fn produced_nodes(e: &Event) -> Vec<ChatNode> {

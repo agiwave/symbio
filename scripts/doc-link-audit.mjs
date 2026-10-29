@@ -544,7 +544,7 @@ function containsWord(text, word) {
 
 /**
  * 证据锚点的**兼容写法**：crate 化（D-191）之后，文档里沿用插件相对路径
- * （`local/policy/mod.rs`、`plugins/loop/memory_events.rs`）是合理缩写，落点变成
+ * （`local/policy/mod.rs`、`crates/symbio-plugin-loop/src/memory_events.rs`）是合理缩写，落点变成
  * `crates/symbio-plugin-<id>/src/…`。这里只做「同一份文档化事实的另一种写法」的展开，
  * 不放宽任何判定：展开出来的每个候选仍要精确存在，`::symbol` / `:line` 照旧核对。
  */

@@ -93,7 +93,7 @@ test('symbio 侧源码改动同样让指纹失效（整棵插件树被编译进�
 
 test('新增一个插件源文件 ⇒ 指纹变', () => {
   const before = tauriBuildFingerprint(root)
-  write('crates/plugins/new.rs', 'pub const X: u8 = 1;\n')
+  write('crates/symbio-plugin-x/src/lib.rs', 'pub const X: u8 = 1;\n')
   assert.notEqual(tauriBuildFingerprint(root), before)
 })
 

@@ -72,7 +72,7 @@ pub(crate) const SPEC_V2: &str = "agent-dir/v2";
 ///
 /// 子树里的 `memory` 实例按同一个名字读它，但**两边不同源**：这是规范约定的
 /// 文件名（包结构的一部分），不是跨插件契约——插件之间不互相 import
-/// （`plugins/mod.rs` 架构原则），各持一份字面量正是那条原则的代价，可接受。
+/// （判据 `plugin-entry-audit` E-009），各持一份字面量正是那条原则的代价，可接受。
 const AGENTS_MD: &str = "AGENTS.md";
 
 /// Agent 插件主结构（宿主接入层）。

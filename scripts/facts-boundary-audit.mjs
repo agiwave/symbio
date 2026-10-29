@@ -11,7 +11,7 @@
  *
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
- * | FB-001 | 生产 Rust 源码里 `EventWalStore::open` / `open_readonly` 只许出现在 `plugins/session/store/` | 引擎写点绕过 `SessionStore::facts` 自己开档（第二个 `head`、第二把令牌） |
+ * | FB-001 | 生产 Rust 源码里 `EventWalStore::open` / `open_readonly` 只许出现在 `crates/symbio-plugin-session/src/store/` | 引擎写点绕过 `SessionStore::facts` 自己开档（第二个 `head`、第二把令牌） |
  * | FB-002 | D-084 §4 的能力文件清单里，`session_dir` / `V2_WAL_FILE` / `open_readonly` / `EventWalStore::open` 零命中 | 能力面重新长出「拼路径再读」的知识 |
  *
  * ## 为什么判生产文件而不是全仓
@@ -27,7 +27,7 @@
  * 判定基于**去注释后的文本**，不是 AST：
  * - 宏拼出来的调用（`concat!` 之类的类型名）看不到；
  * - 路径别名（`use ... as Wal`）能绕过 FB-001——但类型本身仍是
- *   `pub(in crate::plugins::session)`，绕过者必须就在会话插件内，且 FB-002 仍会命中
+ *   `pub(crate)`，绕过者必须就在会话插件 crate 内，且 FB-002 仍会命中
  *   它拼路径的那一半；
  * - 它挡的是「顺手写回去」，不挡「刻意开新口」——后者要先改 D-084。
  *
@@ -55,7 +55,7 @@ const ROOT = rootArg
   : path.resolve(scriptDir, '..')
 
 /** D-084 §4 的能力文件（DE-014 迁移表「能力自取磁盘」一行；
- *  6b 成片搬家后驱动器侧的文件住 `plugins/loop/`，`rebuild` 住 core schema）。
+ *  6b 成片搬家后驱动器侧的文件住 `crates/symbio-plugin-loop/src/`，`rebuild` 住 core schema）。
  *  `elimination` 随 D-219 迁入 `symbio-plugin-agent` 的 `before` 实现：它只读
  *  控制面批首算好的读数，连取事实的入口都没有，故退出本清单。 */
 const CAPABILITY_FILES = [

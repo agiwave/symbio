@@ -3,7 +3,7 @@
 //! ## 它是什么
 //!
 //! 「首响 / 答话 / 汇报」——**只输出文本，不做判决**。它执行上游判决
-//! （`schemas::dialog::Verdict`）：`Answered` 说一句答话、`Escalate` 说一句首响、
+//! （`Verdict`，`crates/symbio-core/src/dialog/`）：`Answered` 说一句答话、`Escalate` 说一句首响、
 //! `Report` 说一句进度。判决的产出方见该枚举的变体表（`Answered` / `Escalate` 归
 //! [`symbio_plugin_classify`]，`Report` 由 `session` 自己判出）——本插件两种都执行，
 //! 不区分来源。

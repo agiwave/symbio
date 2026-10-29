@@ -25,7 +25,7 @@ created: 2026-09-11
 - **客户端**：`crates/symbio-cli/src/client.rs`（进程内 `SymbioClient`，订阅 `event_bus/subscribe`）
 - **渲染器**：`crates/symbio-cli/src/render.rs`（stdout = 模型文本，stderr = 进度/工具/错误/日志）
 - **参数**：`crates/symbio-cli/src/args.rs`（手写解析，不引 clap，守最小依赖）
-- **构建**：`cli/scripts/build-cli.mjs`（注入 C 工具链并归一化路径分隔符）
+- **构建**：`crates/symbio-cli/scripts/build-cli.mjs`（离线构建并打印产物路径）
 
 > 设计铁律：CLI **不改动** `symbio/` 的任何一行代码、不改动协议。它只是把「请求 →
 > `PluginSimpleRequest`」这一层适配从 Tauri IPC 换成进程内直连。

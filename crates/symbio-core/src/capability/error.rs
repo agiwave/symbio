@@ -5,13 +5,12 @@
 //! 立刻中止并明确报错——最典型的就是"会话绑定了一个不存在的智能体"。
 //!
 //! 解决：收集期错误写入 ctx 上的一个共享桶，由编排方（session 插件的能力收集管线
-//! `plugins/session/capabilities.rs`）在收集结束后统一取用判定。
+//! `crates/symbio-plugin-session/src/capabilities.rs`）在收集结束后统一取用判定。
 //!
 //! ## 归属规则
 //!
 //! 写侧是**任何参与 traverse 的插件**（当前为 agent 插件报子智能体装配硬错误），
-//! 读侧是 session 编排方——插件之间互相不可见、不得直接引用（见 `plugins/mod.rs`
-//! 的架构原则），故错误通道必须作为共享设施定义在 core。
+//! 读侧是 session 编排方——插件之间互相不可见、不得直接引用（判据 `plugin-entry-audit` E-009），故错误通道必须作为共享设施定义在 core。
 //!
 //! 反向规则：只被单一插件消费的设施定义在该插件内部，core 不承载单模块内部定义。
 //! 收集管线本身（`collect_capabilities` / `attach_capabilities`）只有 session 插件

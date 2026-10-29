@@ -116,7 +116,7 @@ pub struct TurnInput {
     /// ①：`"session/main"` 从字面量变成**入参**，`ActorSpec` 首次在生产构造）。
     ///
     /// 身份是数据不是常量：同一个会话引擎跑在哪个 agent 上，由**调用方**说了算
-    /// （`plugins/session/turn_exec` 从会话元数据派生）。S08 §4 的平凡值是
+    /// （`crates/symbio-plugin-loop/src/turn_exec.rs` 从会话元数据派生）。S08 §4 的平凡值是
     /// `agent:main`——所有主体同一身份时退化成单主体，与接线前逐字一致。
     pub actor: ActorSpec,
     // 请求级前缀**不是**本包的字段（`D-222` 订正 3）：它由 `prepare_request_sections`
@@ -148,7 +148,7 @@ pub struct TurnInput {
     /// 循环搬到外面。
     ///
     /// 但 core **不该**知道那是「收件箱补充」——那是插件侧的概念（收件箱、
-    /// `merge_supplements`、`ChatNode` 合并都在 `plugins/session`）。于是这个口
+    /// `merge_supplements`、`ChatNode` 合并都在 `crates/symbio-plugin-session`）。于是这个口
     /// 收的是**已经折好的消息**（`PromptMessage` 本来就存在），落格也在插件侧做
     /// （`turn_exec` 自己开着 `EventWalStore`）。
     ///

@@ -50,7 +50,7 @@ const Q_C1 = 'ghost 自身第一问';
 const Q_C2 = 'ghost 自身第二问';
 const R_C1 = 'ghost 第一轮的收束。';
 
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
+/** v2 事实源文件名（与 `crates/symbio-plugin-session/src/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
 const V2_WAL = 'v2-events.wal';
 /** 注入段抬头（与 `memory_events.rs::RECALL_SECTION_HEAD` 同一常量口径）。 */
 const HEAD = '【长期记忆】';

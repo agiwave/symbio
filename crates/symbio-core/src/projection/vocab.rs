@@ -10,7 +10,7 @@
 //!
 //! 折叠里真正需要的不是「这个名字叫什么」，而是「这条事实在我的算法里是哪一格」。
 //! 把名字改成**构造期形参**之后，core 只留折叠的形状，拼写由调用方交进来：
-//! 两个消费方（`plugins/loop` 与 `plugins/session`）各自从 owner 的清单生成物取常量，
+//! 两个消费方（`crates/symbio-plugin-loop` 与 `crates/symbio-plugin-session`）各自从 owner 的清单生成物取常量，
 //! core 一行都不读（D-205 的单名字版本扩成整面）。
 //!
 //! ## 为什么是三张表，不是一张

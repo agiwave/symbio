@@ -210,7 +210,7 @@ export const BASELINE = {
   // 一个口径**（`cargo test --workspace` 求和），数字变大是口径合并的结果，非侵蚀。
   // baseline-allow ciRustTestsTotal: `recall` 投影迁 loop（D-201）的同一净减 2 条（2334→2332）——
   // core 的 S5 彩排五条里，as-of 不污染、主体隔离、忽略 as-of 的反向锚三条随投影搬进
-  // `plugins/loop/recall.test.rs`（用例数不变），另两条（预算耗尽降级、检索产出带溯源视图）在
+  // `crates/symbio-plugin-loop/src/recall.test.rs`（用例数不变），另两条（预算耗尽降级、检索产出带溯源视图）在
   // loop 已有同判据用例（`exhausted_budget_degrades_…` / `recall_translator_produces_provenanced_…`），
   // 删的是重复的那一份，不是判据。非侵蚀。
   // baseline-allow ciRustTestsTotal: S1.0 收口（D-203）净减 1 条（2352→2351）——删的是**已不存在的
@@ -237,9 +237,9 @@ export const BASELINE = {
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
-  // baseline-allow vitestFiles: 批 （`76324817`，D-063 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `crates/symbio-plugin-session/src/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
+  // baseline-allow vitestFiles: 批 （`76324817`，D-063 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `crates/symbio-plugin-loop/src/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
   // baseline-allow vitestTests: 同一批 ：上述 spec 的用例 + `tauri/src/stores/__tests__/appearance.spec.ts` 随分栏退役收窄的那部分，合计 856→838（-18）。`appearance` 的其余行为仍由该 spec 的保留用例守着（只删了分栏相关的那一段），非侵蚀。
-  // baseline-allow vitestTests: 批 段一（D-111）净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `plugins/session/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。
+  // baseline-allow vitestTests: 批 段一（D-111）净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `crates/symbio-plugin-session/src/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。
   // baseline-allow vitestTests: 1002 → 1003（+1，D-147 / D-149）——新增的是**判据用例**，不是补回覆盖：
   // 折叠顺序反转后「主体优先 / 残留格兜底 / 旧形态不再归一」三组各要一条断言，
   // 由 8 条变 9 条（原「历史裸字符串一路通吃」那条拆成地址归一 + 旧形态不归一，净 +1）。

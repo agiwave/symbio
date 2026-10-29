@@ -22,7 +22,7 @@ created: 2026-07-20
 
 | 工具 | 版本 | 说明 |
 |---|---|---|
-| Rust | **1.93.1（锁定）** | 由 `symbio/rust-toolchain.toml` 自动激活；CI 与本地必须同版，否则 `cargo fmt --check` 会因格式规则漂移而失败 |
+| Rust | **1.93.1（锁定）** | 由根 `rust-toolchain.toml` 自动激活；CI 与本地必须同版，否则 `cargo fmt --check` 会因格式规则漂移而失败 |
 | Node.js | ≥ 18 | 前端构建 |
 | Tauri CLI | 2.x | `cargo install tauri-cli --version "^2.0"` |
 | 平台 | Windows / macOS / Linux | Tauri 三平台均已配置 CI |
@@ -42,22 +42,19 @@ created: 2026-07-20
 
 ```
 symbio/
-├── symbio/ # Rust 核心库（crate 根：cargo 命令在此目录跑）
-│ ├── src/
-│ │ ├── symbio_core/ # 框架层：Plugin trait / 路由 / Schema
-│ │ ├── plugins/ # 业务插件（各含 README.md）
-│ │ ├── providers/ # 基础设施（嵌入、文件存储）
-│ │ ├── init.rs # 根插件装配入口
-│ │ └── lib.rs
-│ ├── rust-toolchain.toml # 锁定 Rust 版本
-│ └── Cargo.toml
+├── crates/ # Rust 全 workspace（根 Cargo.toml 的 members；cargo 命令在仓库根跑）
+│ ├── symbio-core/ # 框架层：Plugin trait / 路由 / Schema
+│ ├── symbio-kernel/ # 内核：控制面 / 事件 / 投影
+│ ├── symbio-plugin-*/ # 业务插件（各含 README.md）
+│ ├── symbio-provider-*/ # 基础设施（嵌入、文件存储）
+│ ├── symbio/ # 装配 crate：根插件装配入口
+│ └── symbio-cli/ # 纯 Rust CLI 前端
 ├── tauri/ # Vue 3 桌面端
 │ ├── src/ # 前端代码
 │ └── src-tauri/ # 仅 3 个 Tauri command 的薄适配层
-├── cli/ # 纯 Rust CLI 前端（进程内直连插件树）
 ├── docs/ # 系统级文档（历史归档在 docs/archive/）
 ├── scripts/ # 门禁与生成脚本（gate.mjs / facts/current.mjs …）
-└── rustfmt.toml · clippy.toml # 位于仓库根
+└── rustfmt.toml · clippy.toml · rust-toolchain.toml # 位于仓库根
 ```
 
 > 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [RE-006 §5](docs/004-ref/006-当前事实表.md "RE-006-当前事实表")（自动生成）。
@@ -66,7 +63,7 @@ symbio/
 
 ## 3. 提交前检查
 
-**一条命令跑完全部**（后端含 `cli/` → 前端 → 静态审计 → MSRV → 事实文件）：
+**一条命令跑完全部**（Rust 全 workspace → 前端 → 静态审计 → MSRV → 事实文件）：
 
 ```bash
 node scripts/gate.mjs # 全量
@@ -111,14 +108,14 @@ node scripts/gate.mjs --ci # 对齐 CI（cargo test --workspace）
 
 **e2e 的被测二进制同理：不用你记得重建，也不靠文档提醒。** 判据在
 `scripts/cli-binary.mjs`（门禁与 e2e 共用的唯一真相），是**内容指纹**而非「文件在不在」：
-`crates/symbio-cli/src` + `symbio/src` 的全部源码与两个 crate 的清单算一个 sha256，构建成功后写成构建戳；
+整个 `crates/` 树与根清单（`Cargo.toml` / `Cargo.lock`）算一个 sha256，构建成功后写成构建戳；
 使用前比对，不一致就先 `cargo build --release`（cargo 自己判增量）再写戳，`--check` 只判不建。
 「文件在就算新鲜」会把一份过期 exe 一直用下去，e2e 因此报出**与眼前源码直接矛盾**的断言失败
 （源码里明明有的字段，运行时是 `undefined`），排查方向被引到源码上——改用指纹判据就是为了消掉这个失败模式。
 
 **壳（Tauri）那一侧同理，而且更贵。** 它不会报错，只会让**日志**看起来来自当前源码：于是
 「日志里有一条源码中不存在的行」会被当成「代码没接上」，去读一遍代码。机制在
-`scripts/tauri-binary.mjs`，指纹覆盖壳自身的源码 / 权限集 / 清单 + **整棵 `symbio/src`
+`scripts/tauri-binary.mjs`，指纹覆盖壳自身的源码 / 权限集 / 清单 + **整棵 `crates/`
 插件树**（壳把它编译进去，插件日志正是从那里来的）。`npm run tauri dev|build` 会在构建**前**
 把指纹写成构建戳（`before*Command` → `npm run stamp:dev|release`），壳启动时读**自己旁边**
 那个戳并打进日志首行。于是任何一段日志自带「我是谁」，与 `node scripts/tauri-binary.mjs
@@ -286,17 +283,25 @@ mod tests;
 
 ## 5. 插件开发流程
 
-新增一个业务插件的最短路径：
+新增一个业务插件的最短路径（**加插件 = 建 crate 目录 + 写 `PLUGIN.yml` + 实现声明**，
+装配方与 `symbio_core` 零改动）：
 
-1. 在 `crates/crates/plugins/<name>/` 下创建 `mod.rs` + `plugin.rs`。
-2. 在 `crates/crates/plugins/mod.rs` 加一行**私有** `mod <name>;`（`mod` 刻意私有——插件之间互不可见）。
+1. 建 crate：`crates/symbio-plugin-<name>/`，内含
+ `Cargo.toml`（`name = "symbio-plugin-<name>"`，内部依赖走 `path`，外部版本一律 `{ workspace = true }`）、
+ `PLUGIN.yml`（`plugin_id` **必须等于目录名**；`plugin_assembly: sub_agent` + 整数 `plugin_order`，或 `none`）、
+ `src/lib.rs` 与 `src/plugin.rs`。根清单的 `members = ["crates/*", …]` 会自动收进，不用改 `Cargo.toml`。
+2. 装配行由生成器投影：`crates/symbio-deploy/src/lib.rs` 的 `PLUGIN_ID_*` 与装配清单来自各插件
+ `PLUGIN.yml`；`crates/symbio/Cargo.toml` 的依赖行与 `crates/symbio/src/lib.rs` 的 `pub use` 行
+ 来自目录投影（`scripts/facts/plugin-links-*.mjs`）。**两侧都不手改**，门禁自动重生成。
 3. 实现 [`Plugin`](docs/003-design/005-协议规范.md "DE-005-协议规范") trait 的 `route` 与 `traverse`；在文件末尾用
  `submit_object_creator!(PLUGIN_<NAME>, <Name>Plugin::build, dyn Plugin)` 自注册。
- **无需改 `init.rs`**：`home` 构造 `worker`(Composite) 时按目录扫描子插件——这正是"零配置"。
-4. 若插件**可配置**（要出现在设置页）：在 `home` 的 `ensure_defaults` 加插件名、在 `setting` 的
- `SETTING_SECTIONS` 加 `(id, 中文名)`、并在该插件自己的 `detail_definition` 加返回 `config_definition(...)` 的分支。
-5. 若插件要出现在前端：**无需手写路由常量**——在插件 `route` 里加一条 `match` 臂，门禁即把它生成进
- `tauri/src/constants/routes.gen.ts`；再到 `tauri/src/services/` 下加对应 TS 客户端、导入那个常量。
+ **无需改 `init.rs`**：`home` 按装配清单构造子插件——这正是"零配置"。
+4. 若插件**可配置**（要出现在设置页）：在 `plugin.rs` 里构造
+ `PluginConfigFile::new(dir, "中文名", config_definition())`，并在 `traverse` 里
+ `capability_announce_configurable(&ctx, &self.config_file)`——设置页列的就是各插件
+ 自己交出来的这份配置文档，**没有中心注册表**要改。
+5. 若插件要出现在前端：**无需手写路由常量**——在插件 `route` 里加一条 `match` 臂，生成器即把它
+ 投影进 `tauri/src/constants/routes.gen.ts`；再到 `tauri/src/services/` 下加对应 TS 客户端、导入那个常量。
 6. 文档按**唯一来源**更新：**新增路由只在 [003-ROUTES.md](docs/004-ref/003-ROUTES.md "RE-003-ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 001-CONFIGURATION.md、错误码进 002-ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/facts/current.mjs`。
 
 > **变更历史就是 `git log`，本仓库不维护 `CHANGELOG.md`**——git 记录比手抄更准确、不会漂移，

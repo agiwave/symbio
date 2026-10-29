@@ -9,7 +9,7 @@
 //!
 //! 问题不在帧本身，而在**帧被用错了地方**：`PluginChannel` 是**跨进程传输原语**
 //! （前端链路要过 Tauri IPC / HTTP），而 `provider.round_trip` 与 `tool.execute`
-//! 的两端**始终在同一个进程、同一个 spawn 里**（见 `plugins/model/bound_provider.rs`）。
+//! 的两端**始终在同一个进程、同一个 spawn 里**（见 `crates/symbio-plugin-model/src/bound_provider.rs`）。
 //! 进程内的调用不该付进程外的代价。
 //!
 //! ## 拆成两个语义单一的原语

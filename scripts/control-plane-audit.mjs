@@ -308,7 +308,7 @@ function rowNames() {
 /**
  * 执行体名：`ActorDecl { name: <CONST> }` 里被点名的常量 → 它的字面值。
  *
- * 不取「所有 `const X: &str`」：同一份文件里还有插件 id 之类的常量（`"plugins/loop"`），
+ * 不取「所有 `const X: &str`」：同一份文件里还有插件 id 之类的常量（`"crates/symbio-plugin-loop"`），
  * 把它们算进词表会让判据去机制层找一串本来就该出现的路径。
  */
 function actorNames() {

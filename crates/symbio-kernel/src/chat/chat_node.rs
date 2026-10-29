@@ -132,7 +132,7 @@ impl NodeStatus {
     ///
     /// ## 为什么需要它
     ///
-    /// VDFS 节点投影（`plugins/session/plugin/nodes.rs::message_status`）要把状态
+    /// VDFS 节点投影（`crates/symbio-plugin-session/src/plugin/nodes.rs::message_status`）要把状态
     /// 写进 `VdfsNode.status`，而前端按同一套词读回。若那里手写字符串字面量，
     /// 枚举改名时就会出现「存储写 `streaming`、节点报 `streaming` 之外的词」
     /// 这种**编译期看不见**的分叉。
@@ -303,7 +303,7 @@ pub struct ChatNode {
     /// ## 与 `content` 互斥，语义由字段本身给出
     ///
     /// 一帧里两者**绝不同时出现**——同帧携带即协议违例，唯一写入点
-    /// （`plugins/session/transcript.rs::Transcript::apply`）报错丢弃。
+    /// （`crates/symbio-plugin-session/src/transcript.rs::Transcript::apply`）报错丢弃。
     /// 消费端因此永远不必从帧的形状里推断「该拼接还是该替换」：
     ///
     /// | 字段 | 语义 | 用在哪 |
@@ -361,7 +361,7 @@ pub struct ChatNode {
     ///
     /// ## 为什么不落存储
     ///
-    /// 它由会话的**交付出口**从节点已有的 `meta` 数字现算（`plugins/session/stats_reading.rs`），
+    /// 它由会话的**交付出口**从节点已有的 `meta` 数字现算（`crates/symbio-plugin-session/src/stats_reading.rs`），
     /// 存储与事件里的节点永不含这一格——与 `title`/`icon`/`actions` 同一条纪律
     /// （呈现不是事实），改一次文案不必迁移历史，存量会话重新读到就带行。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -422,7 +422,7 @@ pub struct ChatNode {
     ///
     /// `#[serde(skip)]` 让它**不进出** `ChatNode` 的序列化形状——前端从不消费它
     /// （过去只是 copy-through 到 store），LLM 请求构造侧仍走 Rust 结构体字段读取。
-    /// VDFS 属性投影（`plugins/session/plugin/nodes.rs`）与 WAL 事件载荷
+    /// VDFS 属性投影（`crates/symbio-plugin-session/src/plugin/nodes.rs`）与 WAL 事件载荷
     /// （`turn_runner.rs::artifact.added`）**独立于本字段的 serde 属性**，仍把
     /// wire id 写进 `attributes.tool_call_id` / 事件 `tool_call_id` 键——那是后端
     /// 到后端的存储形状，不是前端 wire。宿主侧的 `message_of_node` 逆投影照原路读回。
@@ -482,8 +482,9 @@ pub enum ResumeAction {
 
 /// 会话恢复请求（与 `session_chat::Request.message` 互斥；存在时走 resume 分支）。
 ///
-/// 由 session 编排层随请求透传，最终在 session 插件会话循环
-/// （`session/chat_loop.rs:run_chat_loop`）的 turn 循环前由 `session/resume.rs:process_resume` 处理。
+/// 由 session 编排层随请求透传，最终在 loop 插件的会话循环
+/// （`crates/symbio-plugin-loop/src/chat_loop.rs`）的 turn 循环前由唤醒支
+/// （`crates/symbio-plugin-loop/src/chat_loop/wake.rs`）处理。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ResumeRequest {
     /// 目标消息 ID（Failed Turn 或 ToolCall，稳定标识，覆盖式更新锚点）

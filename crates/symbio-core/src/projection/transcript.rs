@@ -54,7 +54,7 @@ pub struct TranscriptView {
 /// ## 为什么 core 自己定义这个类型，而不是直接用 provider 的 `ChatNode`
 ///
 /// `ChatNode` 是**图语义**（有 `id` / `tool_calls` / `status` / 帧类型），
-/// 住在 `plugins/session`；core 不认识那套（见 `plugins/loop/tool_dispatch.rs` 的
+/// 住在 `crates/symbio-plugin-session`；core 不认识那套（见 `crates/symbio-plugin-loop/src/tool_dispatch.rs` 的
 /// `DispatchOutcome` 文档：core 只
 /// 认识「拿什么回填给模型」这段文本）。若 core 的出口就是 `ChatNode`，core 就
 /// 被某个 provider 的线格式绑住了。

@@ -55,7 +55,7 @@ pub struct Args {
     /// 心跳守护模式：常驻宿主插件树里的 `heartbeat` 调度插件。
     ///
     /// 心跳机制完全在后端闭环（配置存 `Session.metadata.heartbeat`，调度循环随插件树
-    /// 构建启动，判空闲与开轮各住 `plugins/heartbeat` 与 `plugins/session`）。CLI 只需
+    /// 构建启动，判空闲与开轮各住 `crates/symbio-plugin-heartbeat` 与 `crates/symbio-plugin-session`）。CLI 只需
     /// 保持进程存活，调度器就会按各会话的空闲节奏自动触发心跳对话；本进程同时渲染
     /// 事件总线上的会话活动。
     pub heartbeat: bool,

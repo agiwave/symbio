@@ -13,11 +13,11 @@
 //!
 //! ## 本域只装「必须留在核内」的策略
 //!
-//! 单消费方的策略实现归 owner 插件（D-189 / D-190）：调度在 `plugins/loop/task_events`、
-//! 技能编译与路由在 `plugins/loop/skill_events`、检索 Translator 在
-//! `plugins/loop/memory_events`、自主层与意欲闸门在 `plugins/session/transcript/autonomous`；
-//! 抢占判定在 `plugins/session/transcript/inbox`、外部执行闸门在
-//! `plugins/loop/tools/dispatch/gates`。
+//! 单消费方的策略实现归 owner 插件（D-189 / D-190）：调度在 `crates/symbio-plugin-loop/src/task_events`、
+//! 技能编译与路由在 `crates/symbio-plugin-loop/src/skill_events`、检索 Translator 在
+//! `crates/symbio-plugin-loop/src/memory_events`、自主层与意欲闸门在 `crates/symbio-plugin-session/src/transcript/autonomous`；
+//! 抢占判定在 `crates/symbio-plugin-session/src/transcript/inbox`、外部执行闸门在
+//! `crates/symbio-plugin-loop/src/tools/dispatch/gates`。
 //!
 //! 留在本域的三类各有判据：
 //!

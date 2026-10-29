@@ -114,7 +114,7 @@ pub const PRINCIPAL_TOOL_CONTENT_SEARCH: &str = "local/content_search";
 pub const PRINCIPAL_AUTONOMOUS: &str = "session/autonomous";
 
 /// 抢占判定者的身份（[roadmap/S07 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")）
-/// ——表里那一行的名字与 `plugins/session/transcript/inbox.rs::PreemptionDecider` 三个事件
+/// ——表里那一行的名字与 `crates/symbio-plugin-session/src/transcript/inbox.rs::PreemptionDecider` 三个事件
 /// （`task.held` / `task.progress` / `control.opened`）的 `actor` 是同一个常量。
 /// 策略本体已随 D-190 归 session 插件；常量留在这里，因为它是**本机部署事实**（表与判定同住）。
 ///
@@ -229,7 +229,7 @@ pub const SESSION_OWNER: &str = PRINCIPAL_USER;
 /// ## 为什么它必须是唯一的
 ///
 /// 这条判据今天有**两个消费方**：`session/stats` 的整列闸（一份事实源一个答案）与
-/// 召回的逐条预过滤（`plugins/loop/memory_events.rs`，跨会话切片逐条判）。两边各自的
+/// 召回的逐条预过滤（`crates/symbio-plugin-loop/src/memory_events.rs`，跨会话切片逐条判）。两边各自的
 /// 那一层**作用域**差别是有意保留的（整列闸要表达「未声明读方 = 全量」，召回要表达
 /// 「别处的 `thread_private` 连属主也不进召回」），但**放宽的那两支必须同一条**——
 /// 各写一遍就会漂成「stats 给看、召回不给看」这类没有理由的半开半掩（②、 ⑧）。

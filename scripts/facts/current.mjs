@@ -116,7 +116,7 @@ function extractToolNames(t, consts) {
   for (const mm of t.matchAll(/\btool\(\s*"([a-z][a-z0-9_]*)"/g)) {
     out.add(mm[1]);
   }
-  // `ToolSpec { name: "vdfs_*" }` 表项（`plugins/vdfs/tools/spec.rs` 的同形工具表）——
+  // `ToolSpec { name: "vdfs_*" }` 表项（`crates/symbio-plugin-vdfs/src/tools/spec.rs` 的同形工具表）——
   // 九个 vdfs 工具走这张 static 表，不是 `CapabilityMeta` 字面量，漏掉它 §2 会
   // 少七行（2026-10-14 补：e2e LLM 调用契约钉运行时工具面时发现文档与实测不符）。
   // `name` 是 `ToolSpec` 的首字段，故贴名匹配不会误伤别处的 `name:`。
@@ -383,7 +383,7 @@ function render() {
   L.push("");
 
   // ── §1 插件总表 ─────────────────────────────────────────────────────
-  L.push("## 1. 插件总表（`crates/plugins/`）");
+  L.push("## 1. 插件总表（一插件一 crate：`crates/symbio-plugin-*/`）");
   L.push("");
   L.push(
     "| 插件目录 | 注册名 | VDFS 挂载点 | 自有路由（静态可提取） | 实现的核心 trait | 配置文件 | 模块 README |"
@@ -458,7 +458,7 @@ function render() {
   L.push("### 3.2 VDFS 的两条链路不是一一对应");
   L.push("");
   L.push(
-    "同 `plugins/vdfs/protocol.rs::VDFS_OPS` 的操作，前端链路与 LLM 工具链路**各有各的子集**：" +
+    "同 `crates/symbio-plugin-vdfs/src/protocol.rs::VDFS_OPS` 的操作，前端链路与 LLM 工具链路**各有各的子集**：" +
       "逐条操作见 §2.2，工具短名见 §2.1（`vdfs_*` 那九条）。" +
       "`watch` / `unwatch` / `action` **不经工具暴露**，故工具面是操作面的真子集。",
   );
@@ -476,7 +476,7 @@ function render() {
     "| 会话与其消息 | `<homedir>/session/<id>/{session.json,messages.json}` | **单一具体类型** `SessionStore`（持久=磁盘布局 / 临时=进程内驻留）——**没有后端选型维度**，要换存储就是换类型 |"
   );
           const vdfsRoot = "<vdfs_root>"; // grep-audit-allow S-010: CURRENT.md 约定用占位，不写字面量
-  // 真实值来自 plugins/vdfs/fs.rs::VDFS_ADDR_ROOT（运行期抽取，防漂移）；
+  // 真实值来自 crates/symbio-plugin-vdfs/src/fs.rs::VDFS_ADDR_ROOT（运行期抽取，防漂移）；
   // 输出仅做占位，不直接写字面量。
   if (!vdfsAddrRoot()) {
     throw new Error("VDFS_ADDR_ROOT 为空，CURRENT.md §4 回写缺陷");
@@ -484,10 +484,9 @@ function render() {
   L.push(
     `| Agent 目录 | \`agent/<id>\`（工作区级 + 全局级双层） | \`AgentDirStore\` 自管，不经 \`vdfs_service\`；虚拟视图以 \`${vdfsRoot}/agent/<id>\` 进入 |`
   );
-  // ⚠️ 路径**不带 `plugins/` 层**：那一层早已废除（`symbio_core/plugin/dir.rs`
-  // 顶部写明了理由与自举环），系统根下就是「一个插件一个目录」的扁平结构。
-  // 这里曾长期写着 `<homedir>/plugins/<插件>/PLUGIN.yml`，与代码和 001-CONFIGURATION.md
-  // 都不符——而本表自称「权威事实」，错了会被逐字抄进别处。
+  // ⚠️ 运行期路径**不带**仓库布局那一层：系统根下就是「一个插件一个目录」的扁平
+  // 结构（`symbio_core/plugin/dir.rs` 顶部写明了理由与自举环）。本表自称「权威
+  // 事实」，路径写错会被逐字抄进别处。
   L.push(
     "| 插件配置（含会话配置） | `<homedir>/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `PluginConfigFile` 自读写，**无第二种后端、无第二条配置协议** |"
   );
@@ -566,12 +565,12 @@ const cell = (s) => String(s ?? "").replace(/\|/g, "\\|").replace(/\s*\n\s*/g, "
 /**
  * 能力文本里的**根名字面量**替换成 `<vdfs_root>` 占位。
  *
- * 为什么必须遮：仓级守卫 S-010 规定 VDFS 挂载根的字面量只归 `plugins/vdfs/fs.rs`
+ * 为什么必须遮：仓级守卫 S-010 规定 VDFS 挂载根的字面量只归 `crates/symbio-plugin-vdfs/src/fs.rs`
  * 一处，消费方一律取运行期值。工具描述是**喂给模型的文案**，它在代码里提到那个目录
  * 是合理的；可本表一旦把它原样吐进文档，就等于给根名造了第二处出现——而 §4 的存储
  * 布局表早就用 `grep-audit-allow S-010` 的同一套占位处理过这件事。
  *
- * 取值来自运行期抽取（`vdfsAddrRoot()` 读 `plugins/vdfs/fs.rs`），因此这里不硬编码
+ * 取值来自运行期抽取（`vdfsAddrRoot()` 读 `crates/symbio-plugin-vdfs/src/fs.rs`），因此这里不硬编码
  * 任何字面量，根名改了这里自动跟着改。
  */
 function maskRoot(text) {
@@ -620,7 +619,7 @@ function capabilityMatrixSection(root, plugins) {
     "这里不逐条复述，只说明空格的含义；");
   L.push("> - 描述尾部的 `…` = 该描述在运行期由 `format!` 拼装，表中给的是它的**静态开头一段**" +
     "（其余部分只有运行期才知道，如可用智能体清单），不是取全了；");
-  L.push("> - `vdfs_*` 工具的「类别」列整族为空：类别由 `plugins/vdfs/tools/mod.rs::tool()` " +
+  L.push("> - `vdfs_*` 工具的「类别」列整族为空：类别由 `crates/symbio-plugin-vdfs/src/tools/mod.rs::tool()` " +
     "统一置为 `Resource`，不在每条表项里逐条写；");
   L.push("> - 本节**不**覆盖路由的调用方与契约——那归 " + refLink('RE-003-ROUTES', '003-ROUTES.md') + "；" +
     "也不覆盖「测到了什么」——那归 " + refLink('RE-005-e2e覆盖矩阵', 'RE-005-e2e覆盖矩阵') + "。");
@@ -657,7 +656,7 @@ function capabilityMatrixSection(root, plugins) {
   L.push("<!-- list:vdfs-ops owner -->");
   L.push("");
   L.push(
-    `共 ${cap.vdfsOps.length} 个，取自 \`plugins/vdfs/protocol.rs::VDFS_OPS\`。` +
+    `共 ${cap.vdfsOps.length} 个，取自 \`crates/symbio-plugin-vdfs/src/protocol.rs::VDFS_OPS\`。` +
       "两条链路（前端 vs LLM 工具）不是一一对应，见 §3.2。",
   );
   L.push("");

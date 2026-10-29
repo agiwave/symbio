@@ -47,7 +47,7 @@ symbio_core::inventory::submit! {
 
 /// VDFS 插件：把**容器注册的 VDFS 根**以一组 `vdfs/*` 操作暴露给前端与 LLM。
 ///
-/// 它不持有挂载点表——根之下有什么，由组合容器决定（见 `plugins/composite/vdfs.rs`）。
+/// 它不持有挂载点表——根之下有什么，由组合容器决定（见 `crates/symbio-plugin-composite/src/vdfs.rs`）。
 pub struct VdfsPlugin {
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
 }

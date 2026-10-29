@@ -9,7 +9,7 @@
 //! ## 为什么需要独立模块
 //!
 //! 上下文裁剪（轮次窗口 / 工具结果窗口 / 自动摘要）的所有判据最终都要落到
-//! "这段内容占多少 token"。此前 `plugins/model/compression.rs` 用
+//! "这段内容占多少 token"。此前 `crates/symbio-plugin-session/src/transcript/compression.rs` 用
 //! `text.len() / 4` 估算——`len()` 是 **UTF-8 字节数**，
 //! 中文 1 字 = 3 字节被估成 0.75 token（实际约 1.0~1.5），
 //! 低估约 2 倍，导致压缩触发时上下文早已超限。

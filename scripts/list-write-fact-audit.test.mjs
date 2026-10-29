@@ -70,13 +70,13 @@ const WRITER = [
 ].join('\n')
 
 test('干净夹具通过（write.rs 内的原语 + apply 汇聚）', () => {
-  const r = audit({ 'plugins/session/chat_session/write.rs': WRITER })
+  const r = audit({ 'crates/symbio-plugin-session/src/chat_session/write.rs': WRITER })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
 test('append_messages 出了 write.rs → LWF-001 变红（绕过唯一写入口）', () => {
   const r = audit({
-    'plugins/session/commands.rs': 'async fn patch(session: &S) {\n    session.append_messages(msgs).await?;\n}\n',
+    'crates/symbio-plugin-session/src/commands.rs': 'async fn patch(session: &S) {\n    session.append_messages(msgs).await?;\n}\n',
   })
   assert.equal(r.status, 1, '绕过 apply 的节点级写原语必须红')
   assert.match(r.stderr, /LWF-001/)
@@ -85,7 +85,7 @@ test('append_messages 出了 write.rs → LWF-001 变红（绕过唯一写入口
 
 test('replace_all 出了 write.rs 且没有寄存锚 → LWF-002 变红', () => {
   const r = audit({
-    'plugins/session/other.rs': 'async fn rewrite(session: &S) {\n    session.replace_all(list).await?;\n}\n',
+    'crates/symbio-plugin-session/src/other.rs': 'async fn rewrite(session: &S) {\n    session.replace_all(list).await?;\n}\n',
   })
   assert.equal(r.status, 1, '无寄存锚的取代原语必须红')
   assert.match(r.stderr, /LWF-002/)
@@ -98,13 +98,13 @@ test('replace_all 带真实寄存锚（±20 行内的 consolidated = Some(...)�
   lines.push('    let _ = context.session.replace_all(context.messages.clone()).await;')
   lines.push('    Ok(())')
   lines.push('}')
-  const r = audit({ 'plugins/session/context/pipeline.rs': lines.join('\n') + '\n' })
+  const r = audit({ 'crates/symbio-plugin-session/src/context/pipeline.rs': lines.join('\n') + '\n' })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
 test('寄存锚只在注释里 → LWF-002 变红（锚必须是真代码）', () => {
   const r = audit({
-    'plugins/session/other.rs': [
+    'crates/symbio-plugin-session/src/other.rs': [
       'async fn rewrite(session: &S) {',
       '    // 寄存：context.consolidated = Some(new_messages.clone());——只是说说',
       '    session.replace_all(list).await?;',
@@ -121,21 +121,21 @@ test('寄存锚在窗口边界之外（>20 行）→ LWF-002 变红', () => {
   for (let i = 0; i < 25; i++) lines.push(`    let filler_${i} = ${i};`)
   lines.push('    session.replace_all(list).await?;')
   lines.push('}')
-  const r = audit({ 'plugins/session/other.rs': lines.join('\n') + '\n' })
+  const r = audit({ 'crates/symbio-plugin-session/src/other.rs': lines.join('\n') + '\n' })
   assert.equal(r.status, 1, '锚离调用点太远就不算这次的锚')
   assert.match(r.stderr, /LWF-002/)
 })
 
 test('端口转发 `self.port.replace_all(...)` 不是原语调用（不误报）', () => {
   const r = audit({
-    'plugins/loop/turn_session.rs': 'async fn replace_all(&self) {\n    self.port.replace_all(nodes, dropped, head).await\n}\n',
+    'crates/symbio-plugin-loop/src/turn_session.rs': 'async fn replace_all(&self) {\n    self.port.replace_all(nodes, dropped, head).await\n}\n',
   })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
 test('地址面中继带非空豁免理由 → 放行', () => {
   const r = audit({
-    'plugins/session/run_actions.rs': [
+    'crates/symbio-plugin-session/src/run_actions.rs': [
       'async fn relay(session: &S) {',
       '    // list-write-fact-allow LWF-002: 中继无锚可持，寄存发生在 loop 压缩现场。',
       '    session.replace_all(nodes).await;',
@@ -148,7 +148,7 @@ test('地址面中继带非空豁免理由 → 放行', () => {
 
 test('豁免理由为空 → 仍报 LWF-002（空理由等于没有豁免）', () => {
   const r = audit({
-    'plugins/session/run_actions.rs': [
+    'crates/symbio-plugin-session/src/run_actions.rs': [
       'async fn relay(session: &S) {',
       '    // list-write-fact-allow LWF-002:',
       '    session.replace_all(nodes).await;',
@@ -162,7 +162,7 @@ test('豁免理由为空 → 仍报 LWF-002（空理由等于没有豁免）', (
 
 test('message_events::edited 出了 write.rs → LWF-001 变红（第二个写入口）', () => {
   const r = audit({
-    'plugins/session/commands.rs': 'fn land(dir: &Path, m: &ChatNode) {\n    message_events::edited(dir, m);\n}\n',
+    'crates/symbio-plugin-session/src/commands.rs': 'fn land(dir: &Path, m: &ChatNode) {\n    message_events::edited(dir, m);\n}\n',
   })
   assert.equal(r.status, 1, '事实落格函数不得有第二个调用方')
   assert.match(r.stderr, /LWF-001/)
@@ -170,13 +170,13 @@ test('message_events::edited 出了 write.rs → LWF-001 变红（第二个写�
 
 test('.test.rs 与注释里的提及不触发（不误报）', () => {
   const r = audit({
-    'plugins/session/commands.test.rs': [
+    'crates/symbio-plugin-session/src/commands.test.rs': [
       'async fn patch(session: &S) {',
       '    session.append_messages(msgs).await?; // 测试是排演驱动方',
       '}',
       '',
     ].join('\n'),
-    'plugins/session/docs.rs': [
+    'crates/symbio-plugin-session/src/docs.rs': [
       '//! 文档里提到 `append_messages` 与 `message_events::edited` 不算调用。',
       '/// 另一段：`replace_all` 的契约是只补缺号。',
       'pub fn unrelated() {}',

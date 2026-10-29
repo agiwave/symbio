@@ -14,7 +14,7 @@
 //!
 //! 虚拟层根归**组合容器**所有：容器把自己的组合视图注册为 VDFS 根
 //! （`Registry::put` 上的挂载族根行 `CapabilityRow::mount_root`，
-//! 见 `plugins/composite/vdfs.rs`）。
+//! 见 `crates/symbio-plugin-composite/src/vdfs.rs`）。
 //! 本层只取这个根、交给门面，把**规范化后的地址**原样递过去——
 //! 根之下有多少类别、叫什么，本层完全不知道、也不必知道。
 //! 于是「新增资源 = 新增一个注册」不需要改动本层任何一行。

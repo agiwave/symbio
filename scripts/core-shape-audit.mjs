@@ -239,18 +239,18 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  *   ⇒ 40/38 → 33/32。`task.ready` 本来就没有 `CELLS` 行，所以行数只减 6。
  *
  * - **P1c 第二批迁出**（同日）：`conation.expressed` 的读侧投影（`ConationView`）随**唯一
- *   生产消费方**下沉 `plugins/session`，core 不再按这个名字读 ⇒ 内核常量与它的 `CELLS` 行
+ *   生产消费方**下沉 `crates/symbio-plugin-session`，core 不再按这个名字读 ⇒ 内核常量与它的 `CELLS` 行
  *   一起退役 ⇒ 33/32 → 32/31（判据见 DE-024 D-201）。
  *
  * - **P1c 第三批迁出**（同日）：`recall` 投影（连同 `RecallView` / `RecallEntry` 与排序内核
- *   `recall_score.rs`）下沉 `plugins/loop`——它的读侧全在本插件。`memory.consolidated` /
+ *   `recall_score.rs`）下沉 `crates/symbio-plugin-loop`——它的读侧全在本插件。`memory.consolidated` /
  *   `memory.forgotten` 自此只有 loop 读，两条内核常量与两行 `CELLS` 同批退役
- *   ⇒ 32/31 → 30/29。`memory.encoded` 当时留内核：`plugins/session` 的 `stats` 是它的第二个
+ *   ⇒ 32/31 → 30/29。`memory.encoded` 当时留内核：`crates/symbio-plugin-session` 的 `stats` 是它的第二个
  *   生产读方，两个插件同时消费的名字不能被任一插件独占（E-009）——它的出口是**共享词汇表**
  *   （D-203 裁决三路线③），不是继续住在内核。
  *
  * - **D-203 首批迁出**（同日）：core 的终止性判据 `rework_bounded` 改读 `CountsRework`
- *   角色之后，`task.rework_created` 的唯一生产消费方只剩 `plugins/loop`（CS-006 逐名点出）
+ *   角色之后，`task.rework_created` 的唯一生产消费方只剩 `crates/symbio-plugin-loop`（CS-006 逐名点出）
  *   ⇒ 名字、`EventDecl` 行与 `CELLS` 行同批归 loop ⇒ 30/29 → 29/28。
  *
  * - **D-204 首批迁出**（同日）：跨插件名字的登记口改到各插件自己的 `PLUGIN.yml`
@@ -622,8 +622,7 @@ const shape = mergeShapes(scanDirs.map((d) => measureCoreShape(d, kernelAbs)))
 // 夹具仓库（没有宿主侧插件域）只造一两个 trait 验棘轮本身，不要求凑齐五格。
 //
 // 标记物取 `symbio-core/src/plugin/`：它是**宿主侧插件域**（目录 / 清单 / 遍历端点），
-// 只有真仓有。D-191 之前标记写成 symbio/src/plugins/mod.rs（壳里的装配清单所在），拆分那次
-// 改动把它替换成了常量 `false`——于是「五格齐全」与 CS-004 的字面量回流**同时静默失效**，
+// 只有真仓有。拆分之前标记取自壳里的装配清单，那批改动把它替换成了常量 `false`——于是「五格齐全」与 CS-004 的字面量回流**同时静默失效**，
 // 门禁全绿而两条判据没跑。回归测试（CS-004 那条）是唯一抓住它的地方。
 const hasPlugins = fs.existsSync(path.join(ROOT, 'crates/symbio-core/src/plugin/mod.rs'))
 if (hasPlugins) {
@@ -778,9 +777,8 @@ if (fs.existsSync(selfPath)) {
  * 插件的**目录名**就是插件 id 的词表来源：新增插件 = 新 crate，不需要改本脚本。
  * 词表为空（夹具仓库）⇒ CS-004 不适用（CS-003 照判）。
  *
- * D-191 后插件平铺在 `crates/symbio-plugin-<id>`：id 由 crate 名去前缀反推，
- * 不再是「`plugins/` 下的目录名」。旧写法 `crates/plugins` 在真仓永不存在 ⇒
- * 词表恒空 ⇒ CS-004 恒不判（同一类静默失效，见上方 `hasPlugins` 的注）。
+ * 插件是 `crates/symbio-plugin-<id>`：id 由 crate 名去前缀反推。词表从
+ * `crates/` 下的插件 crate 名枚举，CS-004 因此总能拿到真实 id。
  */
 const PLUGIN_CRATE_PREFIX = 'symbio-plugin-'
 const pluginsDir = path.join(ROOT, 'crates')

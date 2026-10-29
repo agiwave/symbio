@@ -18,7 +18,7 @@ pub struct RouteConnection {
     /// ## 它只用来收口**订阅表**，绝不用来中止业务任务
     ///
     /// 会话与总线插件各自 spawn 了一个「等它触发后反注册订阅」的任务
-    /// （`plugins/session/plugin.rs`、`plugins/event_bus/plugin.rs`）。若不触发，
+    /// （`crates/symbio-plugin-session/src/plugin.rs`、`crates/symbio-plugin-event_bus/src/plugin.rs`）。若不触发，
     /// 那些任务永不执行——订阅表就只能靠「下一次发布时探测 `tx.is_closed()`」兜底，
     /// 而那要求**之后还有发布**；没有发布就一直留着。
     ///

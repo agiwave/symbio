@@ -37,5 +37,5 @@ impl: done
 
 ## 关联
 
-- 工具收集管线：`plugins/session/capabilities.rs`
+- 工具收集管线：`crates/symbio-plugin-session/src/capabilities.rs`
 - 压缩守卫：`../session/README.md` 策略③ / `crates/symbio-plugin-session/src/docs/101-context-compression-design.md`

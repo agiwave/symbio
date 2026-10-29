@@ -67,13 +67,13 @@ lists: [route-contracts=owner]
 
 ### 资源（VDFS）
 
-资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址（`<根>/<插件名>/…`）。**操作闭集见 [RE-006 §2.2](006-当前事实表.md "RE-006-当前事实表")**（源码 `plugins/vdfs/protocol.rs::VDFS_OPS`，有测试锁计数）——本文不抄那份清单。每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘经 `crates/symbio-provider-vdfs_service/src/`（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §2 分层与落点 / §8 一致性要求）。
+资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址（`<根>/<插件名>/…`）。**操作闭集见 [RE-006 §2.2](006-当前事实表.md "RE-006-当前事实表")**（源码 `crates/symbio-plugin-vdfs/src/protocol.rs::VDFS_OPS`，有测试锁计数）——本文不抄那份清单。每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘经 `crates/symbio-provider-vdfs_service/src/`（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §2 分层与落点 / §8 一致性要求）。
 
 ---
 
 ## Home 插件（根容器）
 
-根插件，自身终结以下路径；其余路径按首段剥离后转发给 `worker`（Composite），未命中的一律兜底转发给 `worker`（源码：`plugins/home/plugin.rs` 的 `route`）。四条静态路由（`home/get_homedir` / `home/get_workspace` / `home/reload` / `home/set_workspace`）的契约见上表。
+根插件，自身终结以下路径；其余路径按首段剥离后转发给 `worker`（Composite），未命中的一律兜底转发给 `worker`（源码：`crates/symbio-plugin-home/src/plugin.rs` 的 `route`）。四条静态路由（`home/get_homedir` / `home/get_workspace` / `home/reload` / `home/set_workspace`）的契约见上表。
 
 > **这四条臂全部以 `home/` 开头**（`home` 是系统根、前缀即目录名）：工作区切换与 homedir 管理是同一份 home 自有状态（`PLUGIN.yml` 的 `work` / `homedir` 配置段），故同一条命名空间。它与 `memory` 插件的记忆挂载点（`<根>/memory`）互不相干；`memory` 插件的 `route` 恒 `NotFound`，故不冲突。
 
@@ -83,7 +83,7 @@ lists: [route-contracts=owner]
 
 **本插件无自有协议路由**：agent 目录的访问 / 新建 / 删除 / 导出全部由 VDFS 承担（`<根>/agent/…`）——`vdfs/list` / `vdfs/read` / `vdfs/write`（新建类型 `zip`，即整包导入）/`vdfs/delete` / 节点动作 `export`（`vdfs/action`）。故 `route` 直接返回 `NotFound` 并指引到 VDFS。
 
-**能力贡献（不是路由）**：唯一 LLM 工具 `agent_run`（启动 / 续跑子智能体，源码`plugins/agent/host/subagent.rs`），由模型经能力调用触达，不经 `route`。**LLM 可见工具清单以 [RE-006 §2.1](006-当前事实表.md "RE-006-当前事实表") 为准**，本文件不重复登记。
+**能力贡献（不是路由）**：唯一 LLM 工具 `agent_run`（启动 / 续跑子智能体，源码`crates/symbio-plugin-agent/src/host/subagent.rs`），由模型经能力调用触达，不经 `route`。**LLM 可见工具清单以 [RE-006 §2.1](006-当前事实表.md "RE-006-当前事实表") 为准**，本文件不重复登记。
 
 ---
 
@@ -233,7 +233,7 @@ mcp_servers:
 
 ## Gateway 插件
 
-HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端与 route_v2 同构接入插件树。四类端点：`POST /api/v1/invoke`（对齐 `route_v2`）、`WS /api/v1/ws`（首帧即请求体，此后双向 `PluginFrame`）、`GET /api/v1/events`（SSE，`event_bus/subscribe` 的只读包装，信封原样、仍需另走 `vdfs/watch`）、`GET /api/v1/health`。
+HTTP/WebSocket 入站网关（`crates/symbio-plugin-gateway/src/server.rs`），外部客户端与 route_v2 同构接入插件树。四类端点：`POST /api/v1/invoke`（对齐 `route_v2`）、`WS /api/v1/ws`（首帧即请求体，此后双向 `PluginFrame`）、`GET /api/v1/events`（SSE，`event_bus/subscribe` 的只读包装，信封原样、仍需另走 `vdfs/watch`）、`GET /api/v1/health`。
 
 令牌只走 `Authorization: Bearer`；浏览器 WS 经 `Sec-WebSocket-Protocol: symbio.v1, bearer.<token>` 携带（握手只回选 `symbio.v1`）。查询串令牌不被接受。`POST /api/v1/invoke` 可带 `Idempotency-Key`：分派前登记，TTL 内重复回 409，失败释放（语义见 [DE-013](../003-design/013-HTTP开放接口.md "DE-013-HTTP开放接口") §5.1.1）；SSE 在只读模式下拒绝（§5.5）。
 

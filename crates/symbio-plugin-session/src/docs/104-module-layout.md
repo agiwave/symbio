@@ -58,7 +58,7 @@ impl: done
 | 持久化 | `store/mod.rs` | 一种磁盘布局、两种驻留方式；没有可切换的存储后端 |
 | 运行态 | `active.rs` + `runtime.rs` | `active.rs`：进程内运行态注册表（待消费请求、请求 id、中止信号、变更订阅）；`runtime.rs`：上一轮结局从生命周期事实折出的**投影**（D-083 §5.2） |
 | 能力与选项收集 | `capabilities.rs` | `collect_capabilities`（工具）与 `collect_options`（选项字段）两个 traverse 收集器，同处一地 |
-| 心跳 | **不住本插件**：`plugins/heartbeat` | 空闲扫描与触发调度（15 秒节拍、错峰、每 tick 上限）连同它的设置工具与选项行是一个**独立插件**（落点判据 [D-077](../../../symbio-plugin-heartbeat/README.md "crates/symbio-plugin-heartbeat/README")）。本插件与它相接的只有两处：收件箱写臂识别 `meta.trigger`（`plugin/nodes.rs::trigger_declaration`）与自主开轮的落格窗口（`transcript/autonomous.rs`） |
+| 心跳 | **不住本插件**：`crates/symbio-plugin-heartbeat` | 空闲扫描与触发调度（15 秒节拍、错峰、每 tick 上限）连同它的设置工具与选项行是一个**独立插件**（落点判据 [D-077](../../../symbio-plugin-heartbeat/README.md "crates/symbio-plugin-heartbeat/README")）。本插件与它相接的只有两处：收件箱写臂识别 `meta.trigger`（`plugin/nodes.rs::trigger_declaration`）与自主开轮的落格窗口（`transcript/autonomous.rs`） |
 | 选项 | `options/mod.rs` | 会话自有选项的字段声明（`build_option_definition`；收集器在 `capabilities.rs`） |
 | 工作目录 | `workdir/{mod,fs_watcher}.rs` | 会话工作目录的 VDFS 实现（`<根>/session/<id>/workdir/<rel>`）与其下的文件系统监听 |
 | 会话记忆 | `memory.rs` | 本会话自己的 `MEMORY.md`：落位、地址、两道闸门与系统提示词注册段（机制在 `providers/memory`） |
@@ -110,8 +110,7 @@ impl: done
 
 `context/pipeline.rs` 与 `resume.rs` 的两行随 6b-③ 成片搬出而消（文件已不在本插件）；
 `SessionPlugin` **类型本身**不入表：inherent impl 分布在领域层文件是全仓惯例
-（`commands.rs` / `options` 皆如此），见 `crates/crates/plugins/mod.rs`
-的架构原则。
+（`commands.rs` / `options` 皆如此），没有「一个类型一个 impl 文件」的集中处。
 
 ### 1.5 跨片共享词表（住 core，不住本插件）
 
@@ -122,8 +121,8 @@ impl: done
 
 | core 落点 | 装什么 | 取用方（留守 / 驱动器） |
 |---|---|---|
-| `symbio_core::schemas::session::node_build` | ChatNode 的**写侧构造与建树整形**：`dialog_node`、`llm_build_*`、`PresentationTree` 与 `detach_if_flat` / `flatten_whole_tree` / `turn_root_of` | 留守：`chat_session/read` · `plugin/{nodes,vdfs_provider}` · `config`（档名解析）· `orchestrator/failure`；驱动器：`chat_loop/{io,compose}` · `message_build` · `resume` · `report_exec` · `tool_dispatch` · `tools/tool_executor` · `turn_exec` · `turn_runner` |
-| `symbio_core::schemas::session::facts` | 跨端口的**事实记录类型**：`Delegation`、`TaskDeclaration` / `TaskItem` / `TaskStatus`、`ReportDraft` | 写侧驱动器 `tools/tool_executor/{delegation,task_decl}` 的 `note_*` 出参 · 落侧 `derived_facts` · 读侧 `task_events` · `tool_dispatch` · `report_exec` |
+| `symbio_core::node_build` | ChatNode 的**写侧构造与建树整形**：`dialog_node`、`llm_build_*`、`PresentationTree` 与 `detach_if_flat` / `flatten_whole_tree` / `turn_root_of` | 留守：`chat_session/read` · `plugin/{nodes,vdfs_provider}` · `config`（档名解析）· `orchestrator/failure`；驱动器：`chat_loop/{io,compose}` · `message_build` · `resume` · `report_exec` · `tool_dispatch` · `tools/tool_executor` · `turn_exec` · `turn_runner` |
+| `symbio_core::facts` | 跨端口的**事实记录类型**：`Delegation`、`TaskDeclaration` / `TaskItem` / `TaskStatus`、`ReportDraft` | 写侧驱动器 `tools/tool_executor/{delegation,task_decl}` 的 `note_*` 出参 · 落侧 `derived_facts` · 读侧 `task_events` · `tool_dispatch` · `report_exec` |
 | `symbio_core::text::merge_kernel` | 巩固合并的**纯计算内核**（截断 / 分句 / 合并 + 保真度，只依赖 `std`，verify 程序以 `#[path]` 共有同一份源码） | 驱动器 `memory_events`（续一条原名短路径，调用点不动）· `skill_events` |
 | `symbio_core::request_principal` | 「本请求以谁的身份跑轮」的**唯一取值点**（core 既有键 `AGENT_ID` 的纯派生函数，不住任何片） | 驱动器 `chat_loop` / `chat_loop/state` · `chat_loop/inputs` · `context/pipeline`；留守 `stats` |
 

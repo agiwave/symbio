@@ -22,9 +22,10 @@ created: 2026-09-07
 
 ### 1. 编译核心库
 
+以下命令都在**仓库根**执行（根 workspace 单 target，成员产物统一落在 `target/`）：
+
 ```bash
-cd symbio
-cargo build --lib
+cargo build -p symbio-core
 ```
 
 ### 2. 启动桌面端
@@ -73,8 +74,7 @@ npm run tauri dev
 ### 核心库测试
 
 ```bash
-cd symbio
-cargo test --lib
+cargo test --workspace
 # 期望: 全部通过（0 failed）。测试数量随迭代增长，文档不锁死具体数字
 ```
 
@@ -88,8 +88,7 @@ npm test
 ### Clippy 检查
 
 ```bash
-cd symbio
-cargo clippy --lib --tests -- -D warnings
+cargo clippy --all-targets --workspace -- -D warnings
 # 期望: 0 warnings
 ```
 

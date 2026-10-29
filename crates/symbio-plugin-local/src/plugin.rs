@@ -160,7 +160,7 @@ impl LocalPlugin {
         let ask_user = Arc::new(AskUserTool);
 
         // 文件编辑类能力（read/edit/write/delete/list/search）已迁入 VDFS 的物理层
-        // （见 plugins/vdfs/physical.rs），由 `vdfs` 插件以 `vdfs_*` 工具统一暴露，
+        // （见 crates/symbio-plugin-vdfs/src/physical.rs），由 `vdfs` 插件以 `vdfs_*` 工具统一暴露，
         // 此处不再提供原生工具。本插件在 VDFS 上只挂一个**配置文件**。
         let tool_impls: Vec<Arc<dyn Capability>> =
             vec![shell, content_search, todo_write, codebase_search, ask_user];

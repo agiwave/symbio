@@ -12,7 +12,7 @@
 //!
 //! **这条名字不写在 core 里**（DE-024 D-205）：投影读哪条名字由调用方在构造期交进来
 //! （owner 交自家常量，第二个消费方交清单生成物），core 只留折叠的形状。写方只有
-//! `plugins/loop`，而读数被 loop 与 session 同时消费，所以投影住这儿、名字住清单。
+//! `crates/symbio-plugin-loop`，而读数被 loop 与 session 同时消费，所以投影住这儿、名字住清单。
 
 use super::super::event::Event;
 use super::Projection;

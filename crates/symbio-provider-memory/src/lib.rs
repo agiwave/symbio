@@ -15,7 +15,7 @@
 //! | 子智能体 | memory（`<根>/agent/<id>/memory/AGENTS.md`） | memory | `<agentdir>/AGENTS.md` |
 //!
 //! 挂载名与物理名**可以不同**：工作区腿的挂载名是 `WORKSPACE.md` 而物理文件仍是
-//! `AGENTS.md`——地址里已经写了作用域，名字就不必再靠目录区分（见 `plugins/memory/workspace.rs`）。
+//! `AGENTS.md`——地址里已经写了作用域，名字就不必再靠目录区分（见 `crates/symbio-plugin-memory/src/workspace.rs`）。
 //!
 //! 各层形态完全一样——**一个 UTF-8 文本文件、两道容量闸门、一行头信息的提示词片段、
 //! 一个 VDFS 读写节点**。几份实现就是几份会各自漂移的口径：「写侧是拒绝还是截断」

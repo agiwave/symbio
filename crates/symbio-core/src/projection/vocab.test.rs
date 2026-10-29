@@ -108,7 +108,7 @@ fn no_event_name_is_claimed_by_two_fields() {
 
 /// 领域扩展位在**读侧**也是「不解释」：`Domain × 任意动词` 一律不是对话槽位。
 ///
-/// 这条判据钉的是 DE-025 D-209 的另一半。写侧的证据在 `plugins/session` 的写闸
+/// 这条判据钉的是 DE-025 D-209 的另一半。写侧的证据在 `crates/symbio-plugin-session` 的写闸
 /// （`a_domain_cell_is_gated_like_any_other_declared_cell`）：owner 声明了就放行。
 /// 读侧的证据在这里：**放行之后 core 也不会因此「懂」这个领域**——它不进对话折叠、
 /// 不产节点、不参与任何核心判据。

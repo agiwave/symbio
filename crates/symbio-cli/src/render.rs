@@ -18,7 +18,7 @@
 //!
 //! 「未打印过的那一段」按**每节点已打印长度**算，不按快照长度算：一段内容可能先以
 //! `Reasoning` 形态到达（思考不进 stdout），收束时被定为正文（同 id 换类型，见
-//! `session/chat_loop/state.rs` 的 `finalize_assistant_turn`）——按快照长度它就不是
+//! `crates/symbio-plugin-loop/src/chat_loop/state.rs` 的 `finalize_assistant_turn`）——按快照长度它就不是
 //! 新增，那段回答于是永远打不出来。
 //!
 //! ## 为什么仍然要维护一份本地快照

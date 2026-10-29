@@ -9,7 +9,7 @@
  * 判据：
  *   **D-005**（`module::symbol` 形态）：提取所有 *.md 中反引号包裹、以 `::` 分段且
  *     **每段为标识符**的路径（≥2 段，剥尾部 `()`），取最后一段查它是否以整词出现在
- *     Rust 源码（symbio/src、crates/symbio-cli/src、tauri/src-tauri/src）的 .rs 语料里；查不到 ⇒ ERROR。
+ *     Rust 源码（整棵 `crates/`、`tauri/src-tauri/src`）的 .rs 语料里；查不到 ⇒ ERROR。
  *   **D-009**（裸常量名形态）：反引号里的单段全大写名（形如 `ROUTE_SESSION_CHAT_SEND`，
  *     `^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`）必须在 Rust ∪ 前端（tauri/src）∪ 门禁脚本
  *     （scripts）语料里逐字存在——
@@ -91,7 +91,7 @@ const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..')
 
 /** Rust 语料根：任一缺失可容忍，全缺即「范围读不出」。`docs/003-design/verify` 是硬证据程序
  *  的 Rust 源（`rustc` 直接编译的那批文件），它们声明的常量同样是文档指认的对象。 */
-const RS_ROOTS = ['crates', 'crates/symbio-kernel/src', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
+const RS_ROOTS = ['crates', 'tauri/src-tauri/src', 'docs/003-design/verify']
 /** D-009 的第二份语料：裸常量名是跨栈事实，前端声明的常量同样被文档指认 */
 const FE_ROOTS = ['tauri/src']
 /** D-009 的第三份语料：只回答存在性，不开族（原因见文件头）。

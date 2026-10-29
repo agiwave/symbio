@@ -234,7 +234,7 @@ test('自引用：`PLUGIN_ID_ALPHA` 被同名插件用，不算单消费方', ()
 
 test('C-003 口径：测试文件不算架构消费方（生产 1 + 测试 1 ⇒ 单消费方）', () => {
   // 第二个「消费方」只来自 `*.test.rs`。旧口径把它算成 ≥2 ⇒ 放行；那正是 `TurnRunner`
-  // 长期逃过下沉的机制（生产只有 `plugins/session`，第二个单位来自 model 的彩排测试）。
+  // 长期逃过下沉的机制（生产只有 `crates/symbio-plugin-session`，第二个单位来自 model 的彩排测试）。
   const r = audit(
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',

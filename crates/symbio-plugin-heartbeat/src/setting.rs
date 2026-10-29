@@ -2,7 +2,7 @@
 //!
 //! ## 它为什么在本插件里，却写进别人的存储
 //!
-//! 会话 metadata 是**透传的场景数据**：存储侧（`plugins/session`）只按键做浅合并，
+//! 会话 metadata 是**透传的场景数据**：存储侧（`crates/symbio-plugin-session`）只按键做浅合并，
 //! 不认识任何键的内容（`heartbeat` 与 `my_plugin_flag` 对它而言是同一种东西）。
 //! 「这块数据是什么意思」的 owner 是本插件——读写它的两半（[`crate::scheduler`]
 //! 的扫描与 [`crate::tool`] 的设置入口）因此共用这一个形状，

@@ -12,8 +12,8 @@ impl: done
 状态：现行规范
 范围：会话页输入区下方的「选项栏」与会话详情页的可修改项（**同一批字段、两种渲染形态**）
 关联：`docs/003-design/009-VDFS规范.md`（`node.schema` 详情方言）、
-`crates/symbio-core/src/schemas/detail.rs`（`DetailDefinition` / `DetailField` 方言权威定义）、
-`crates/symbio-core/src/capability/option.rs`（选项读协议 `capability_option_fields`；收集管线 `collect_options` 在 `plugins/session/capabilities.rs`）、
+`crates/symbio-kernel/src/present/detail.rs`（`DetailDefinition` / `DetailField` 方言权威定义）、
+`crates/symbio-core/src/capability/option.rs`（选项读协议 `capability_option_fields`；收集管线 `collect_options` 在 `crates/symbio-plugin-session/src/capabilities.rs`）、
 `crates/symbio-plugin-session/src/options/mod.rs`（选项宿主：会话自有字段的声明）、
 `tauri/src/schemas/vdfs-form.ts`（前端方言 + 条件求值 / 紧凑取值规则）、
 `tauri/src/composables/useSessionOptionBar.ts` + `tauri/src/components/chat/ChatOptionBar.vue`
@@ -83,7 +83,7 @@ impl: done
 **定义与会话无关**：它只声明「有哪些字段、候选有哪些、什么条件禁用」，既不带当前
 值，也不问「是哪个会话」。因此同一份定义在「新建草稿」与「已落盘会话」两个载体上
 **逐字节相同**，`default` 也始终表示「后端的缺省回落」而非当前值
-（`plugins/session/options/mod.rs::build_option_definition` 用**空的请求上下文**收集，
+（`crates/symbio-plugin-session/src/options/mod.rs::build_option_definition` 用**空的请求上下文**收集，
 签名里没有 `ctx`）。
 
 ## 3. 定义方言（复用 `DetailDefinition`）
@@ -118,7 +118,7 @@ impl: done
 - **草稿节点没有任何属性**。判定「已有对话历史」必须用 `truthy: true`
  （对缺席键求值 `false`），**不能**用 `not_equals: 0`（对缺席键求值 `true`
  ——那会让新建会话一上来就把工作目录锁死）。这是这条规则最容易踩的坑，
- 已在 `plugins/session/options/tests.rs` 钉死。
+ 已在 `crates/symbio-plugin-session/src/options/tests.rs` 钉死。
 
 求值与紧凑取值的唯一实现在 `tauri/src/schemas/vdfs-form.ts`
 （`evalDetailCondition` / `compactFieldText`），纵向表单与选项栏**共用**，防两形态漂移。
@@ -308,24 +308,6 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 - 子表单字段的 `interval_seconds` 缺省值与子对象缺省值**同源**（一个常量），
  两处各写一个数字迟早会漂（已有断言）。
 
-> **「立即心跳」按钮已取消（2026-09-18）**。它原是一个独立的命令型选项，
-> 取消理由是**它的作用与「在输入框里直接发一条消息」完全重复**——心跳的实质
-> 就是往会话发一轮提示词，用户想立刻做一次，在输入框发即可。
+> **不单设「立即心跳」按钮**：它的作用与「在输入框里直接发一条消息」完全重复——
+> 心跳的实质就是往会话发一轮提示词，用户想立刻做一次，在输入框发即可。
 > 论证见 [legacy-route-migration.md §5.1](../../../../docs/archive/legacy-route-migration.md)。
-
-## 10. 已下线的旧机制（2026-09-23）
-
-在这之前，会话选项走的是与其它资源**平行的一套机制**：
-
-| 旧物 | 现状 |
-|---|---|
-| `symbio_core/schemas/options.rs`（`OptionNode` / `OptionAction` / `OptionType` / `OptionDisplay` / `OptionsRequest` / `OptionsResponse` / `OPTIONS_LIST` / `SESSION_STATE_ENDPOINT` / `OPTION_PICK_*`） | **已删除**（`OPTION_PICK_*` 迁 `detail.rs` 的 `DETAIL_PICK_*`；节点类型由 `DetailField` 取代） |
-| `worker/session/options/list` 路由与 `handle_list_options` | **已删除**（子层懒加载一并取消：候选只有一层） |
-| 选项收集器 `OptionVisitor` 的 `register_option` / `register_batch` / `list_options` | **已删除**（曾只剩 `register_option_field` / `list_option_fields`；4e 起整个 trait 退场，读写统一走 `Registry`） |
-| `plugins/session/options/mod.rs` 的 `*_option` 节点构造器、`apply_chat_bar_display_defaults`、`inject_session_scope`、`find_node` | **已删除** |
-| agent / model 的 `contribute_options` 旧节点分支与 `current_label` 回填 | **已删除** |
-| 前端 `schemas/options.ts` / `services/options.ts` / `composables/useSessionOptions.ts` / `registry/optionIcons.ts` | **已删除**（图标并入 `registry/vdfsIcons.ts`） |
-
-**为什么必须下线**：同一件事有两条下发通道，而没有任何守卫会因「两边说的不一样」
-变红。迁移期靠「同一次广播喂两套产物」维持一致，那只是权宜——真正的解药是删掉
-其中一套。完整账目见 `docs/archive/session-options-unification.md`。

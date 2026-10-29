@@ -2,10 +2,10 @@
 //!
 //! ## 这个模块为什么在 core
 //!
-//! 写侧只有一个——`plugins/agent`（它扫描 Agent 目录、读 manifest，是唯一能把
+//! 写侧只有一个——`crates/symbio-plugin-agent`（它扫描 Agent 目录、读 manifest，是唯一能把
 //! `agent_id` 解析成一份声明的地方）；读侧是**一堆互不相认的宿主工具**
 //! （`web` 的三个出站工具、`vdfs` 的九个路径工具）。插件之间互相不可见
-//! （见 `plugins/mod.rs` 的架构原则），所以「声明长什么样、怎么判」必须作为
+//! （判据 `plugin-entry-audit` E-009），所以「声明长什么样、怎么判」必须作为
 //! 共享设施住 core，与能力收集期错误通道（`capability::error`）同一条归属规则。
 //!
 //! ## 语义：grant，不是 ceiling

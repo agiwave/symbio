@@ -63,7 +63,7 @@ function makeRoot(files) {
 const run = (root) =>
   spawnSync(process.execPath, [script, `SRC_ROOT=${root}`], { encoding: 'utf8' })
 
-const fixture = (body) => ({ 'plugins/session/lib.rs': body })
+const fixture = (body) => ({ 'crates/symbio-plugin-session/src/lib.rs': body })
 
 test('① 干净夹具（没有任何 round_trip 调用）→ 通过', () => {
   const root = makeRoot(fixture('fn a() { let _: u8 = 1; }\n'))

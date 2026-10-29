@@ -71,7 +71,7 @@ impl ToolBehavior for DelegationPromise {
 }
 
 /// 承诺面词汇表（DE-024 D-203 / D-206）：本插件写 `commitment.*` 四格里的三格，
-/// 名字的 owner 是 `plugins/loop`（它声明格位与角色），本插件经清单生成物取用
+/// 名字的 owner 是 `crates/symbio-plugin-loop`（它声明格位与角色），本插件经清单生成物取用
 /// ——E-009 禁兄弟插件依赖，故不引用 loop 的 `control_decl`。
 ///
 /// 表小到只有四个字段，正是它存在的理由：本插件只做「立约 / 履约 / 违约」这一件事，

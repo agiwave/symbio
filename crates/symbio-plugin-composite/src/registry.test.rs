@@ -165,7 +165,7 @@ async fn unregistered_provider_leaves_a_reason_on_the_entry() {
 async fn a_non_plugin_factory_is_told_apart_from_an_unregistered_one() {
     let root = temp_root("fail-wrong-kind");
     // `openai_chat` 是**真**工厂 id，但它注册的是 `dyn ModelProtocol`（见
-    // `plugins/model/protocols/mod.rs`）——正好是「工厂在、产物不是插件」那一条。
+    // `crates/symbio-plugin-model/src/protocols/mod.rs`）——正好是「工厂在、产物不是插件」那一条。
     put_plugin(&root, "alpha", r#"{"plugin_provider": "openai_chat"}"#);
 
     let reg = registry_at(&root, Vec::new());

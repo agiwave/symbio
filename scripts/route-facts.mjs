@@ -188,8 +188,8 @@ export function controlPlaneRoutes(root) {
 }
 
 /**
- * 路由常量的**唯一**定义处。拆 crate（D-191）前它在 `crates/routes.rs`，拆后随
- * `symbio-plugin-api` 下沉；两处不同步时 `existsSync` 恒假 ⇒ 本函数返回空清单，
+ * 路由常量的**唯一**定义处（`symbio-plugin-api`）。路径和生成物不同步时
+ * `existsSync` 恒假 ⇒ 本函数返回空清单，
  * E-012 从「每条常量都判」退化成「无可判」，**以绿灯形式静默失效**。
  * 故路径只在这里写一次，调用方一律引用它。
  */

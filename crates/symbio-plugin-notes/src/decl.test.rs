@@ -2,7 +2,7 @@
 //!
 //! ## 为什么本文件还要交一份「协议行」夹具
 //!
-//! 插件自己的测试二进制只链接本 crate：协议事实的归宿行住在 `plugins/loop`，
+//! 插件自己的测试二进制只链接本 crate：协议事实的归宿行住在 `crates/symbio-plugin-loop`，
 //! 不在这里 ⇒ `seal` 判据 7 报 `OrphanFact`，整张表失败（DE-015 §3.4）。夹具补的正是
 //! 完整进程里由 loop 提供的那一半——五条自读行让协议事实有归宿。它与
 //! `symbio-plugin-session/src/declarations.test.rs` 的同名夹具同形，只在 `cfg(test)` 生效。
@@ -50,7 +50,10 @@ fn harness_declarations() -> PluginDeclarations<'static> {
     }
 }
 
-symbio_plugin_api::submit_declarations!("plugins/notes-test-harness", harness_declarations);
+symbio_plugin_api::submit_declarations!(
+    "crates/symbio-plugin-notes-test-harness",
+    harness_declarations
+);
 
 /// `notes.created` 落在 `Domain × Opened`，owner 是本插件。
 ///

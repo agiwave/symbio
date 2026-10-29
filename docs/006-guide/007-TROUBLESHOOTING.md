@@ -86,12 +86,12 @@ node scripts/tauri-binary.mjs --check # 本机产物是否对应当前源码（�
 | 与 `--print` **不一致** | 先重建再复现，别在过期产物上找原因 |
 | `unknown` | 产物没带构建戳（打包分发、或直接用 `cargo build`）⇒ **来源不可判断**，请用 `npm run tauri dev` 重新构建后复现 |
 
-指纹覆盖壳自身的源码 / 权限集 / 清单，以及**整棵 `symbio/src` 插件树**——壳把它
+指纹覆盖壳自身的源码 / 权限集 / 清单，以及**整棵 `crates/` 插件树**——壳把它
 编译进去，插件那几类日志（`[session INFO]` / `[model INFO]` / `[Tool]`）正是从那里
 来的。`tauri/src`（前端）**不在**其中：dev 下它由 Vite 现服、release 下由同一条命令
 先行构建，所以「前端新不新鲜」不是这个指纹回答的问题。
 
-戳写在产物旁边（`tauri/src-tauri/target/<profile>/`），由 `npm run tauri dev|build`
+戳写在产物旁边（仓库根 `target/<profile>/`，与壳二进制同目录），由 `npm run tauri dev|build`
 的 `before*Command` 在**构建前**写入。判据与实现见 `scripts/tauri-binary.mjs`。
 
 ---
@@ -116,17 +116,16 @@ debug = "line-tables-only"
 **原因**：插件未正确注册。
 
 **检查清单**：
-1. `plugin.rs` 末尾是否调用了 `submit_object_creator!`
+1. 插件 `plugin.rs` 末尾是否调用了 `submit_object_creator!`
 2. 插件 ID 是否与配置中的 `plugin_provider` 匹配
-3. 是否在 `mod.rs` 中正确导出
+3. 插件是否由 `crates/symbio-plugin-<id>/` 目录投影进 `symbio` 的依赖行（`plugin-links` 生成段）
 
 ### 问题：Clippy 警告
 
 **解决**：
 
 ```bash
-cd symbio
-cargo clippy --lib --tests -- -D warnings
+cargo clippy --all-targets --workspace -- -D warnings
 ```
 
 常见警告修复：
@@ -215,13 +214,10 @@ curl -X POST ... -d '{"path": "_root"}'
 
 ### 问题：内存占用高
 
-**排查方法**：
-
-```bash
-# 检查内存使用
-cargo build --release
-valgrind --tool=massif ./target/release/symbio
-```
+**排查方法**：先用发布档观察常驻内存（桌面壳 `target/release/symbio-tauri`、CLI
+`target/release/symbio-cli`），再换 debug 档对比——两者差值就是「没被优化掉的那部分」。
+需要堆剖析时用平台工具（Linux `valgrind --tool=massif`，Windows 用 Visual Studio 的
+「诊断工具」附加到进程）。
 
 **常见原因**：
 - 大量 Session 未释放 (检查连接超时配置)
@@ -239,7 +235,7 @@ valgrind --tool=massif ./target/release/symbio
 
 ```bash
 # 串行测试
-cargo test --lib -- --test-threads=1
+cargo test --workspace -- --test-threads=1
 
 # 或等待其他构建完成
 ```
@@ -250,10 +246,10 @@ cargo test --lib -- --test-threads=1
 
 ```bash
 # 显示测试输出
-cargo test --lib -- --nocapture
+cargo test --workspace -- --nocapture
 
-# 运行单个测试
-cargo test test_name -- --nocapture
+# 运行单个测试（过滤名是位置参数）
+cargo test <测试名> -- --nocapture
 ```
 
 ---

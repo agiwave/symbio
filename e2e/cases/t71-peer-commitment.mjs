@@ -65,7 +65,7 @@ const PEER_Q = '对等体请把这件事委托出去并汇报。';
 /** 对等体收尾轮的汇总正文（发言闸拒 ⇒ 这句话**不会**出现在任何格子里）。 */
 const PEER_SUMMARY = '对等体已汇总。';
 
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
+/** v2 事实源文件名（与 `crates/symbio-plugin-session/src/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
 const V2_WAL = 'v2-events.wal';
 
 /** 读一份 WAL 文件的行（逐行 JSON）。 */

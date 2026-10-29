@@ -9,9 +9,9 @@
 //!
 //! **只被一个插件消费的部分不在本层**（D-023 的依赖方数量判据）：
 //! 落库视图与消息构造（`llm_build_assistant_messages` / `llm_build_tool_message` /
-//! `TurnStreamChildIds` / `TurnOutput` 的三个方法）在 `plugins/session/message_build.rs`，
-//! 状态帧与删除帧的发射口在 `plugins/session/transcript/frames.rs`，增量帧 `llm_emit_delta`
-//! 在 `plugins/model/stream.rs`。留守的六个导出逐个都有两个以上消费方
+//! `TurnStreamChildIds` / `TurnOutput` 的三个方法）在 `crates/symbio-plugin-loop/src/message_build.rs`，
+//! 状态帧与删除帧的发射口在 `crates/symbio-core/src/llm/frames.rs`，增量帧 `llm_emit_delta`
+//! 在 `crates/symbio-plugin-model/src/stream.rs`。留守的六个导出逐个都有两个以上消费方
 //! （`llm_message_frame` 是登记在案的例外）。
 //!
 //! 依赖关系（单向）：
@@ -23,9 +23,9 @@
 //! ```
 //!
 //! **只有一侧认的东西都不在这里**：HTTP 重试机器与 SSE 流循环
-//! （`plugins/model/http.rs` / `stream.rs`）、行解析契约
-//! （`plugins/model/protocols/sse.rs`）、协议事件方言
-//! （`plugins/model/protocols/mod.rs` 的 `ModelProtocolEvent`）都只有 model
+//! （`crates/symbio-plugin-model/src/http.rs` / `stream.rs`）、行解析契约
+//! （`crates/symbio-plugin-model/src/protocols/sse.rs`）、协议事件方言
+//! （`crates/symbio-plugin-model/src/protocols/mod.rs` 的 `ModelProtocolEvent`）都只有 model
 //! 插件使用，按「依赖方数量」判据（D-023）住在
 //! 该插件内。本层只留**多消费方**共用的契约与数据结构。
 

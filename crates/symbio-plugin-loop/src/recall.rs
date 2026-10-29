@@ -10,7 +10,7 @@
 //!
 //! 两个名字因此只有本插件读：`memory.consolidated` 与 `memory.forgotten` 的名字与格位
 //! 由本插件声明，core 不再有 `recall` / `RecallView` / `RecallEntry` 三条根出口。
-//! `memory.encoded` **仍登记在本插件清单**——`plugins/session` 的 `stats` 也读它，
+//! `memory.encoded` **仍登记在本插件清单**——`crates/symbio-plugin-session` 的 `stats` 也读它，
 //! 两个插件同时消费的名字不能被任一插件独占（E-009）。
 //!
 //! ## 四条口径（每条对应一条验收）

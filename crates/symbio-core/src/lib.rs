@@ -20,7 +20,7 @@ mod chat;
 mod clock;
 mod creator;
 // 事实 / 视图声明层：字段清单与视图读法在装载期可查。 起是
-// 义务环的输入面——行表（`plugins::loop::loop_rows`）用 `Frozen::eval` 求视图值。
+// 义务环的输入面——行表（`crates/symbio-plugin-loop/src/loop_rows.rs`）用 `Frozen::eval` 求视图值。
 pub(crate) mod decl;
 // 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。它属封闭语法，
 // 经 `kernel` 门面以 `pub` 出根（C-003 只数 `pub use`）：避开与 `actors::Pattern`
@@ -94,7 +94,7 @@ pub use store::EventStore;
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
 //
 // ⚠️ `TurnRunner` / `TurnInput` / `TurnOutcome` / `TurnResume` / `RoundInjector`
-// **已不在本层**（2026-10-09 下沉到 `plugins/session/turn_runner.rs`）：它们是**执行引擎**
+// **已不在本层**（2026-10-09 下沉到 `crates/symbio-plugin-loop/src/turn_runner.rs`）：它们是**执行引擎**
 // （流循环 + 落格顺序），生产消费方只有 session 一个，按 README §4 四问第 1 问该下沉；
 // 且它们**不是** F1–F6 冻结锚点（F3 冻的是 `ActorSpec` 字段集 + 档位→令牌映射，不是运行器）。
 // 曾登记为 `plan/01 §4` 冻结契约名是**误记**——`plan/01` 全文没有 `TurnRunner` 一词。
@@ -102,9 +102,9 @@ pub use store::EventStore;
 // `ActorSpec`（F3 冻结锚点：`plan/01 §4` 的**主体规格五字段**）**留根出口**
 // （经 `kernel` 门面的 `pub use`，不是 `pub`）。F3 冻的是**字段集**，它只能住 core；
 // 而 core 外
-// （`plugins/session` 构造 / 读 `principal`）要够得着它、C-002 又禁插件深引域目录
+// （`crates/symbio-plugin-session` 构造 / 读 `principal`）要够得着它、C-002 又禁插件深引域目录
 // ⇒ 必须显式占根出口
-// （C-002 禁止插件深引域目录）。它只有 1 个生产消费方（`plugins/session`），属 C-003
+// （C-002 禁止插件深引域目录）。它只有 1 个生产消费方（`crates/symbio-plugin-session`），属 C-003
 // 的「接缝」而非「该下沉」——下沉即等于把 F3 冻结契约搬出 core，故登记进
 // `core-export-audit.mjs` 的 `WAIVERS`（与 `PermissionMatrix` / `VisScope` 同一形态）。
 // ── Agent 权限声明（DE-011 §5.3 / D-153）──────────────────────────────────
@@ -143,17 +143,17 @@ pub use actors::{EliminationDecider, SKILL_TAG};
 // 的名字有清单登记口，不需要内核或 core 代它们保管。
 //
 // `EVENT_TRIGGER_*` 两条同族：`meta.trigger` 的键名与它的 `kind` 取值。写体标记的
-// 生产方（`plugins/heartbeat`）与消费方（`plugins/session` 的收件箱写臂）分属两个
+// 生产方（`crates/symbio-plugin-heartbeat`）与消费方（`crates/symbio-plugin-session` 的收件箱写臂）分属两个
 // 插件，而 `kind` 还被 core 自己的 `system.triggered` 载荷用着——字典因此不能在任一
 // 插件里（否则另一侧复述字面量），判据见 [D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")。
 #[allow(unused_imports)]
 pub use event::{EVENT_TRIGGER_KINDS, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY};
-// 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
+// 协议族的名字：消费方是 `decl`（声明层）与 loop 插件（端口行与端口
 // 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub` 出根
 // （C-003 数 `pub use`）。
 
 // ==================== 记忆三段（v2 阶段 S5 步 11–13） ====================
-// 写方 / 召回注入 / 巩固的消费方只有 `plugins/session` 的记忆链路**一个**。C-003 的
+// 写方 / 召回注入 / 巩固的消费方只有 `crates/symbio-plugin-session` 的记忆链路**一个**。C-003 的
 // 口径是「单消费方不算架构元素，该下沉」——可下沉的只有消费方，算法不行：
 // `recall` 是 ③ 的投影、`consolidate` 是 01 §9.3 的接受边界、事件名字表是 D-043
 // 的单点定义，都必须留在 core。故按 `symbio_core/README.md §4 四问` 留 core，以
@@ -176,7 +176,7 @@ pub use actors::{
 // `shared_events` → 生成物 `symbio_plugin_api::events`（D-204），core 的折叠经三张
 // 词汇表（[`ChatVocab`] / [`MessageVocab`] / [`CommitmentVocab`]）在构造期收名字
 // （D-205 / D-206）。**core 一行都不读这些拼写**，故没有一条该占根出口。
-// 就绪集出根：生产消费方是 `plugins/loop` 的调度段与 `plugins/session` 的 `stats`
+// 就绪集出根：生产消费方是 `crates/symbio-plugin-loop` 的调度段与 `crates/symbio-plugin-session` 的 `stats`
 // 列（04 §3.1 批⑨）。与 `reputation` 同一形态：`pub` 出根，只在本 crate 内可见、
 // 不进对外公开面（C-003 数 `pub use`）。
 // `TaskVocab` 随它一起出根：折叠的词汇面是构造期形参（DE-024 D-206），两个调用方都要
@@ -185,7 +185,7 @@ pub use projection::readyset::{readyset_for, ReadySetView};
 pub use projection::reputation::reputation;
 pub use projection::task_vocab::TaskVocab;
 // 对话面的三张词汇表（DE-024 D-203 归零批）：与 `TaskVocab` 同一条通路——折叠要认的
-// 每一条名字由调用方在构造期交进来。`plugins/loop` 与 `plugins/session` 各持一份常量
+// 每一条名字由调用方在构造期交进来。`crates/symbio-plugin-loop` 与 `crates/symbio-plugin-session` 各持一份常量
 // （owner 的声明与清单生成物），core 一行都不读这些拼写。
 // 按**面**分三张而不是合成一张：`reputation` 只认承诺四条，`changes` 只认产物一条，
 // 让它们收一张 20 字段的表会把耦合面说宽——表的大小应当等于那个算法真正的依赖。
@@ -204,7 +204,7 @@ pub use view::visible_to;
 pub use adapters::{
     DeltaSink, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter, SilentDeltas, TokenIssuer,
 };
-// 执行引擎（`TurnRunner` 族）2026-10-09 下沉 `plugins/session/turn_runner.rs` 后，仍需要的
+// 执行引擎（`TurnRunner` 族）2026-10-09 下沉 `crates/symbio-plugin-loop/src/turn_runner.rs` 后，仍需要的
 // core 内部面。它们**不能下沉**——core 自己也在用（`TokenIssuer` 铸令牌、`provider_adapter`
 // 实现 trait、`store` 读写、`invariants` 判据、`prompt_fidelity` 复核）；插件又不能深引域
 // 目录（C-002）⇒ 以 `pub` 出根：只在本 crate 内可见、不进对外公开面（C-003 只数
@@ -223,15 +223,15 @@ pub use invariants::budget_exceeded;
 // 事实网格 → prompt 的双向完整性复核（D-048）：下沉后的运行器组装 prompt 时调它。
 pub use projection::prompt_fidelity::verify as verify_prompt_fidelity;
 // `PromptMessage` 的结构化子件：`PromptMessage.tool_calls` 的载荷类型。它跨出 core 到
-// `plugins/session`，而 C-002 禁止插件深引域目录 ⇒ 随 `PromptMessage` 一起以
+// `crates/symbio-plugin-session`，而 C-002 禁止插件深引域目录 ⇒ 随 `PromptMessage` 一起以
 // `pub` 出根。
 pub use projection::transcript::PromptToolCall;
 pub use store::{AppendError, StoreInvariant};
 
 // ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
 // 读写成对、fail-closed（plan/01 §7）。根出口只出**可见域**一个类型：
-// 判定面（`plugins/session` 的读侧闸）要指称它，构造面（本根 `authz`）的表行也带它。
-// core 外消费方只有 `plugins/session` 一个，但它**不能**下沉——core 内 `authz` /
+// 判定面（`crates/symbio-plugin-session` 的读侧闸）要指称它，构造面（本根 `authz`）的表行也带它。
+// core 外消费方只有 `crates/symbio-plugin-session` 一个，但它**不能**下沉——core 内 `authz` /
 // `governance` 自己也在用（core 不依赖插件），插件又够不着 `governance` 域目录的深引
 // （C-002）⇒ 必须留根出口。故按 C-003 的接缝口径登记进 `core-export-audit` 的 WAIVERS。
 // governance::Capability（权限能力，闭集）与 capability::Capability（LLM 工具
@@ -274,7 +274,7 @@ pub use authz::{PRINCIPAL_ARBITER, PRINCIPAL_PEER, PRINCIPAL_WORKER, SESSION_OWN
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。
-// 行解析契约与协议事件方言只有 model 插件使用，住在 `plugins/model/protocols/`。
+// 行解析契约与协议事件方言只有 model 插件使用，住在 `crates/symbio-plugin-model/src/protocols/`。
 pub use llm::model_provider::{ModelFinishReason, ModelSpend, ModelUsage};
 pub use llm::turn::{
     llm_emit_message, llm_message_frame, llm_removed_frame, llm_short_id, TurnOutput,

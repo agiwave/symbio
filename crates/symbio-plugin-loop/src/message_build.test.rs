@@ -4,7 +4,7 @@
 //! 本文件是**落库形状**的唯一契约测试（D-023 随迁而来的两批用例）：
 //! - 原 `symbio_core/llm/turn.test.rs`：`TurnOutput` 三个方法
 //!   （`is_reasoning_only` / `effective_text` / `into_messages`）的形状不变式；
-//! - 原 `plugins/model/message_builder.test.rs` 的用例 A / A2 / B / C / D 与两条
+//! - 原 `crates/symbio-plugin-model/src/message_builder.test.rs` 的用例 A / A2 / B / C / D 与两条
 //!   **流式 id 复用**回归：它们测的一直是**本模块的构造器**，此前只是借住在
 //!   model 侧（当时构造器还在 `symbio_core::llm::turn`）。
 //!
@@ -12,7 +12,7 @@
 //! 插件之间禁止互引（`plugin-entry-audit` E-009），那侧不能再调这里。
 //!
 //! 时间上下文（`temporal_context`）随其唯一调用点（用户消息落库）留在 session，
-//! 用例见 `plugins/session/temporal.test.rs`。
+//! 用例见 `crates/symbio-plugin-session/src/temporal.test.rs`。
 
 use super::*;
 use symbio_core::chat_node::{NodeRole, CHAT_STYLE_TAG_TOOL};

@@ -11,8 +11,8 @@
 //! | 符号 | 消费方 | 为什么位置相反 |
 //! |---|---|---|
 //! | `llm_emit_message` / `llm_message_frame` | model（`stream.rs`）· session（`chat_loop` · `plugin` · `vdfs_provider`） | 两侧共用；且 `llm_message_frame` 是 core 自己 `llm_emit_message` 的帧派生（「完整消息必然带状态」只实现一次），两者**同进退** |
-//! | [`llm_removed_frame`] | `plugins/agent`（`subagent.rs`）· session | 两个插件共用的构造点 |
-//! | `llm_emit_delta` | model（`stream.rs` 的流循环热路径） | 唯一调用方是 model，随调用点住在 `plugins/model/stream.rs` |
+//! | [`llm_removed_frame`] | `crates/symbio-plugin-agent`（`subagent.rs`）· session | 两个插件共用的构造点 |
+//! | `llm_emit_delta` | model（`stream.rs` 的流循环热路径） | 唯一调用方是 model，随调用点住在 `crates/symbio-plugin-model/src/stream.rs` |
 //!
 //! 反向依赖（core → 本模块）是被禁止的：core 不认识任何插件。所以 core 侧的
 //! 帧原语**不能**调用这里，允许的方向只有 session → core。
@@ -24,7 +24,7 @@ use crate::ExecEventSink;
 /// 发送一帧**状态**：身份 + 状态 + 元数据 + 错误，**不带正文**。
 ///
 /// 流式节点的正文已由 `llm_emit_delta`（model 的流循环，住
-/// `plugins/model/stream.rs`）逐帧上线，这里再带一次只是把同一段文字二次传输
+/// `crates/symbio-plugin-model/src/stream.rs`）逐帧上线，这里再带一次只是把同一段文字二次传输
 /// （且会把权威副本的完整正文重新发一遍）。`content` / `delta` 一律剥掉，
 /// 免得调用方传了一条「内容齐全的副本」就顺手把它送上热路径。
 pub async fn llm_emit_state(sink: &ExecEventSink, msg: ChatNode) {

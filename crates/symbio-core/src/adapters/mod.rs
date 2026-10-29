@@ -190,7 +190,7 @@ pub trait DeltaSink: Send + Sync + 'static {
     ///
     /// ## 为什么是整条消息而不是拆开的参数
     ///
-    /// **工具节点的构造权在分发方**（`plugins/loop/tool_dispatch.rs`），不在这里：model 插件的
+    /// **工具节点的构造权在分发方**（`crates/symbio-plugin-loop/src/tool_dispatch.rs`），不在这里：model 插件的
     /// 转写面已经用**同一个节点 id** 广播（流式 / 落库 / 执行三处同 id，见
     /// `tool_accumulator`），分发方稍后以同一 id 定格与落库。桥若在这里自建节点、
     /// 或把帧拆成裸参数再让消费端重组，就会出现第二张卡。所以消费端的义务只是

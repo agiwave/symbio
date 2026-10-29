@@ -32,7 +32,7 @@
  *                   唤醒 / 续写只能从事实进环
  *
  * 用法：
- *   node scripts/grep-audit.mjs            # 审计 crates/plugins（全部插件）
+ *   node scripts/grep-audit.mjs            # 审计 crates/（全部插件与 core）
  *   node scripts/grep-audit.mjs --strict   # 严格模式：warning 也算失败
  *   SCOPE=<dir> node scripts/grep-audit.mjs
  *
@@ -85,12 +85,8 @@ const isDir = (p) => {
 
 function resolveScope() {
   if (process.env.SCOPE) return path.resolve(cwd, process.env.SCOPE)
-  // crate 化（D-191）后插件不再住一个目录：S-002 的扫描面是**整个 workspace 源树**，
-  // 插件与 core 都在 `crates/` 下；夹具仓库没有 `crates/` 时退回旧写法。
-  for (const p of [path.resolve(cwd, 'crates'), path.resolve(cwd, 'src/plugins')]) {
-    if (isDir(p)) return p
-  }
-  return path.resolve(cwd, 'src/plugins')
+  // 插件与 core 都在 `crates/` 下：S-002 的扫描面是**整个 workspace 源树**。
+  return path.resolve(cwd, 'crates')
 }
 
 /**
@@ -99,12 +95,11 @@ function resolveScope() {
  * S-010 起的每条规则都要在「当前工作树」与「仓库根」之间选一个扫描基准：选错方向不会
  * 报错，只会**去错的地方找**——夹具造的违规一条也搜不到，用例全红而真仓全绿。
  *
- * 标记随 D-191 换过一次：从前是 symbio/（壳目录），拆 crate 后根下再无该目录，
- * 于是每条规则都恒落到 `repoRoot`。**六条规则各写了一遍同一个判断**，改一处漏五处，
- * 故抽成这一格；标记必须与 `resolveScope` 同一口径（`crates/` 优先，symbio/ 兼容旧树）。
+ * 标记必须与 `resolveScope` 同一口径：cwd 下有 `crates/` 才算仓库树。
+ * **六条规则各写一遍判断**会改一处漏五处，故抽成这一格。
  */
 function looksLikeRepoTree(dir) {
-  return isDir(path.resolve(dir, 'crates')) || isDir(path.resolve(dir, 'symbio'))
+  return isDir(path.resolve(dir, 'crates'))
 }
 
 const scopeAbs = resolveScope()
@@ -341,7 +336,7 @@ console.log()
 
 // ── S-010: vdfs 挂载根名不得出现在 vdfs 插件之外 ───────────────────────
 //
-// 根名是 vdfs 插件自己的挂载规则（`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，
+// 根名是 vdfs 插件自己的挂载规则（`crates/symbio-plugin-vdfs/src/fs.rs::VDFS_ADDR_ROOT`，
 // 全仓唯一的字面量）。历史上它曾以 `.vdfs` 的形态蔓延到全系统——前端路径代数、
 // 提示词地址、十几份文档——导致「改个挂载名」变成全仓手术。现机制已收口：
 // 后端插件经 `AddrRootDecl` 静态声明、父地址经上下文传递（`VDFS_PARENT_ADDR`）、
@@ -440,7 +435,7 @@ for (const file of s010Files) {
     if (WAIVER_S010_RE.test(l) || (i > 0 && WAIVER_S010_RE.test(lines[i - 1]))) return
     err(
       `${disp(file)}:${i + 1}  出现 vdfs 挂载根名字面量；根名只归 vdfs 插件` +
-        `（plugins/vdfs/fs.rs），消费方用运行期数据（后端 VDFS_PARENT_ADDR / 前端 vdfsRoot 锚点）`,
+        `（crates/symbio-plugin-vdfs/src/fs.rs），消费方用运行期数据（后端 VDFS_PARENT_ADDR / 前端 vdfsRoot 锚点）`,
     )
     s010++
   })
@@ -992,8 +987,7 @@ console.log('--- S-017: 恢复路径不许再有旁路 ---')
     })
   }
   // `resume_anchor`：整个生产树（插件 + core 的视图层）都不许再有这个名字。
-  // 扫描根随 D-191 从 `crates/plugins`（平铺前的插件目录）改成 `crates`：拆分后插件
-  // 各是一个 crate，旧根不存在 ⇒ `walk` 返回空 ⇒ 这条判据只扫 core、插件侧全盲。
+  // 扫描根是 `crates`：插件各是一个 crate，与 core 的视图层同在这个根下。
   for (const file of ['crates'].flatMap((r) =>
     walk(path.join(S017_BASE, r)),
   )) {

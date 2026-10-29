@@ -686,7 +686,7 @@ pub(crate) async fn land_answered_turn(
 /// ⚠️ 顺带记下：**「历史中所有 ToolCall 都有结果子节点」从来不是判据**——
 /// 「ToolCall 无结果」是**合法状态**（交互模式下工具批被用户审批中断时，本批剩余
 /// ToolCall 会被有意留空，由请求视图层 `flatten_chat_messages`
-/// （`plugins/model/message_builder.rs`）合成占位 tool 结果喂回模型）。
+/// （`crates/symbio-plugin-model/src/message_builder.rs`）合成占位 tool 结果喂回模型）。
 /// 按历史判定会让 approve/reject 恢复后的续写被永久挡住。
 fn gate_turn(turn: &TurnState) -> Gate {
     // ── 退出条件：用户中止（边界检查点）─────────────────────────────────

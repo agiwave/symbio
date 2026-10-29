@@ -8,7 +8,7 @@
 //!
 //! 依赖方向：本文件只依赖 core 契约（`ModelProvider` / `LlmAdapter` /
 //! `ExecEventSink` 均在 core）——纯胶水就该住在契约旁边。真实传输层的全链路
-//! 彩排（真实 TCP + HTTP + SSE）挂在 **`plugins/model/bound_provider.test.rs`**：
+//! 彩排（真实 TCP + HTTP + SSE）挂在 **`crates/symbio-plugin-model/src/bound_provider.test.rs`**：
 //! 那份测试要装配 `BoundProvider` / `openai_chat` 等插件内部件，而
 //! `plugins::model` 是私有模块（core 侧**在可见性上**就到不了它）——
 //! 依赖方向由编译器保证，不靠约定。
@@ -17,9 +17,9 @@
 //!
 //! | 消费方 | 用什么 | 场景 |
 //! |---|---|---|
-//! | `plugins/loop/turn_exec` | `for_turn` + `generate_turn` | 对话轮（含工具通道） |
-//! | `plugins/classify/decide` | `for_turn` + `generate_turn` | 内部请求（空工具、`SilentDeltas`） |
-//! | `plugins/compose/wording` | `for_turn` + `generate_turn` | 内部请求（同上） |
+//! | `crates/symbio-plugin-loop/src/turn_exec` | `for_turn` + `generate_turn` | 对话轮（含工具通道） |
+//! | `crates/symbio-plugin-classify/src/decide.rs` | `for_turn` + `generate_turn` | 内部请求（空工具、`SilentDeltas`） |
+//! | `crates/symbio-plugin-compose/src/wording.rs` | `for_turn` + `generate_turn` | 内部请求（同上） |
 //! | core 自身测试 / 彩排 | 端口面 | 只依赖 core 契约 |
 //!
 //! **结论（不是迁移）：留 core。** 三个插件模块消费，且实现只依赖 core 契约；
@@ -54,7 +54,7 @@ use crate::{llm_short_id, ExecTranscriptWriter, ModelProvider, PluginError};
 ///
 /// 为什么正文/推理要记账而工具调用不记：model 插件的窄帧只带 `id + delta`、不带
 /// `msg_type`，正文与推理的归属只能靠登记表判；工具调用**不需要判**——它的节点
-/// 构造权在分发方（`plugins/loop/tool_dispatch.rs`），model 插件的转写面与分发方共用**同一个节点 id**
+/// 构造权在分发方（`crates/symbio-plugin-loop/src/tool_dispatch.rs`），model 插件的转写面与分发方共用**同一个节点 id**
 /// （见 `tool_accumulator`），消费端把帧原样送进自己的帧序即可，桥若自建节点或
 /// 拆装重组必然出现第二张卡。收束帧不经此桥：终态由消费方负责
 /// （model 插件只发 Streaming 快照与窄帧，见 `state.rs` 的收口）。

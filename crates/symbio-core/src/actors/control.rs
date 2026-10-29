@@ -1,7 +1,7 @@
 //! 控制面主体：淘汰回路（[roadmap/S13](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）。
 //!
-//! 抢占判定归 `plugins/session/transcript/inbox`、外部执行闸门归
-//! `plugins/loop/tools/dispatch/gates`（同插件内两处消费，D-190）；留在这里的
+//! 抢占判定归 `crates/symbio-plugin-session/src/transcript/inbox`、外部执行闸门归
+//! `crates/symbio-plugin-loop/src/tools/dispatch/gates`（同插件内两处消费，D-190）；留在这里的
 //! [`EliminationDecider`] 是唯一真正跨 owner 的策略——写侧裁决在 loop 轮末、
 //! 读侧翻译（[`EliminationDecider::verdict_grants_changes`]）在 session 工具层，
 //! 配对映射因此必须留核（D-187 第 1 条）。
@@ -21,7 +21,7 @@ use crate::{pattern_for_principal, ActorSpec, Event, Scope};
 /// |---|---|
 /// | 判据（阈值、低于即淘汰） | [`Self::should_eliminate`]（纯函数） |
 /// | 那一格事件（`verdict × asserted`） | [`Self::elimination_event`] / [`Self::restoration_event`] |
-/// | 什么时候判、对谁判 | 调用方（`plugins/loop/derived_facts` 的轮末步） |
+/// | 什么时候判、对谁判 | 调用方（`crates/symbio-plugin-loop/src/derived_facts` 的轮末步） |
 ///
 /// ## 为什么 actor 是仲裁者而不是被淘汰主体
 ///
@@ -85,7 +85,7 @@ impl EliminationDecider {
     ///
     /// 只问分数——「对谁判」（持 `assign.work` 的主体）、「判过没有」（无既有
     /// verdict）都由调用方定：判定者不持有授权表以外的任何判据（与
-    /// `plugins/loop/tools/dispatch/gates::CircuitBreaker::gate` 的 `authorized`
+    /// `crates/symbio-plugin-loop/src/tools/dispatch/gates::CircuitBreaker::gate` 的 `authorized`
     /// 出参同一条纪律）。
     pub fn should_eliminate(&self, entry: &ReputationEntry) -> bool {
         entry.score < Self::THRESHOLD
@@ -161,7 +161,7 @@ impl EliminationDecider {
 
     /// 裁决格（`verdict × asserted`）事件流水 → [`GrantsChange`] 序列：**载荷 ↔ 变更的映射**。
     ///
-    /// 淘汰回路的读侧半边：闸门（`plugins/session` 的工具执行层）拿不到裁决者本体，
+    /// 淘汰回路的读侧半边：闸门（`crates/symbio-plugin-session` 的工具执行层）拿不到裁决者本体，
     /// 它有的是事件切片——本函数就是「切片 → 覆盖层」之间唯一的那步翻译。
     /// 与 `commitment_events` 同形态（写侧的成格函数 / 读侧的翻译函数各住一边）。
     ///

@@ -11,8 +11,8 @@ pub use symbio_kernel::llm::turn::*;
 ///
 /// 用在正文对接收端是**新的权威副本**的帧上：一次性节点（工具结果 / 用户消息
 /// 回填）的单帧完成、存储回执、压缩快照。流式节点的正文已由 `llm_emit_delta`
-/// （`plugins/model/stream.rs`）逐帧传过，它的终态走 `llm_emit_state`
-/// （`plugins/session/transcript/frames.rs`），不在这里重发。
+/// （`crates/symbio-plugin-model/src/stream.rs`）逐帧传过，它的终态走 `llm_emit_state`
+/// （`crates/symbio-core/src/llm/frames.rs`），不在这里重发。
 pub async fn llm_emit_message(sink: &ExecEventSink, msg: ChatNode) {
     sink.emit(llm_message_frame(&msg)).await;
 }

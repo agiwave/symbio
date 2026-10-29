@@ -12,7 +12,7 @@
 //! ## 根为什么是**单槽**，以及谁被挡在外面
 //!
 //! 根归系统 Agent：子智能体子树里也有容器（它会把自己登记成根），其注册经
-//! `plugins/agent/host/scope.rs::SubAgentVisitor` **丢弃**——否则子树会劫持整个 `<根>`，
+//! `crates/symbio-plugin-agent/src/host/scope.rs::SubAgentVisitor` **丢弃**——否则子树会劫持整个 `<根>`，
 //! 系统侧全部挂载点瞬间消失（判据 = 该文件的单测 + e2e `t39`）。
 //!
 //! ## 挂载清单（非根的挂载行）为什么不存在
@@ -38,7 +38,7 @@ use std::sync::Arc;
 /// 取 VDFS 根 provider（**服务 `<根>` 的那一个**）。
 ///
 /// 无容器注册时为 `None`（等价于「系统里没有资源」）——调用方给空根降级
-/// （`plugins/vdfs/host.rs::root_of`），不在这里替它造一个。
+/// （`crates/symbio-plugin-vdfs/src/host.rs::root_of`），不在这里替它造一个。
 pub async fn capability_vdfs_root(visitor: &dyn Registry) -> Option<Arc<dyn VdfsProvider>> {
     visitor
         .list(family::MOUNT)

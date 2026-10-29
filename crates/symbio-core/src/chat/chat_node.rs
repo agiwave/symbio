@@ -10,10 +10,10 @@ pub use symbio_kernel::chat::chat_node::*;
 
 // ==================== 转写地址与节点投影 ====================
 //
-// 下面两项从 `plugins/session` 上移到 core：它们描述的是**跨插件的契约**，
-// 不是会话插件的内部实现。上移之前，`plugins/agent` 为了构造子会话转播桥，
-// 不得不 `use crate::plugins::session::plugin::{…}` —— 那是全仓**唯一**一处
-// 真跨插件引用，违反 `plugins/mod.rs` 声明的「插件独立原则」。
+// 下面两项从 `crates/symbio-plugin-session` 上移到 core：它们描述的是**跨插件的契约**，
+// 不是会话插件的内部实现。上移之前，`crates/symbio-plugin-agent` 为了构造子会话转播桥，
+// 不得不从会话插件的内部模块取类型 —— 那是全仓**唯一**一处
+// 真跨插件引用，违反插件独立原则（判据 `plugin-entry-audit` E-009）。
 //
 // 判据：一个符号该不该在 core，看**消费方是谁**——只要有一个消费方不是它所在
 // 的那个插件，它就不是那个插件的私事（与 D-023「准入判据 = 依赖方数量」同款）。
@@ -40,7 +40,7 @@ pub const SEG_MESSAGES: &str = "message";
 ///
 /// ## 为什么在 core
 ///
-/// 它必须与「拼」（`plugins/session/plugin/nodes.rs::message_node`）**成对演进**：
+/// 它必须与「拼」（`crates/symbio-plugin-session/src/plugin/nodes.rs::message_node`）**成对演进**：
 /// `attributes` 增字段时不可能只改一边。而消费方（agent 的转播桥）不是 session
 /// 插件——契约住 core，两侧都依赖它，就不会有一侧从对方内部「借」实现。
 ///

@@ -133,7 +133,7 @@ const TS_CONST_FILES = [VDFS_TS]
  *
  * 会话域的四条（`VDFS_KIND_MESSAGES` / `VDFS_KIND_INBOX` / `VDFS_EXT_SESSION` /
  * `VDFS_EXT_MESSAGE`）属另一类：会话词表已**下沉**到会话插件
- * （`plugins/session/plugin/words.rs`，内核词表不再持有），前端仍按旧名镜像它们。
+ * （`crates/symbio-plugin-session/src/plugin/words.rs`，内核词表不再持有），前端仍按旧名镜像它们。
  * 指向那个文件即**继续受本组逐字比对**——下沉不该让镜像失去看守。
  */
 const ALIASES = [
@@ -443,7 +443,7 @@ const STRUCT_SETS = [
   },
   // ── home 四条控制面臂的载荷（相应批次 段二 / [D-112] 决策 2）────────────
   //
-  // 这一族**必须**带模块限定：`plugins/home/schemas.rs` 里四个模块各有一个
+  // 这一族**必须**带模块限定：`crates/symbio-plugin-home/src/schemas.rs` 里四个模块各有一个
   // `Response`，不限定就会拿第一个匹配去比四个接口。前端把同名结构体放进**同名
   // namespace**，两侧的类型名与限定词逐字一致。
   {
@@ -840,7 +840,7 @@ function declAttrs(src, idx) {
  *
  * `moduleName`（可选）：在 `pub mod <moduleName> { … }` 的**体内**找结构体。
  * 为什么需要：一份契约文件按路由分模块时，各模块里的类型常常同名——
- * `plugins/home/schemas.rs` 的四个模块各有一个 `Response`（reload / 取工作区 /
+ * `crates/symbio-plugin-home/src/schemas.rs` 的四个模块各有一个 `Response`（reload / 取工作区 /
  * 切工作区 / 取系统目录），四份**不同**的契约。不限定模块就只能取文件里第一个
  * 匹配，于是四条登记会拿同一个类型比四个接口：该红的红不了（错配的对恰好字段名
  * 重合），不该红的反而红（另一模块的字段在这里"不存在"）。

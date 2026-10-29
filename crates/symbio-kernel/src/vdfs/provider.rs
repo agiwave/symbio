@@ -9,7 +9,7 @@
 //! - 每个资源域 = 一份 [`VdfsProvider`] 实现，`Arc<dyn VdfsProvider>` 是使用方与
 //!   实现方之间**唯一**的交换物；
 //! - 线上形状（`vdfs/*` 请求 / 响应信封、协议路径常量）定义在 vdfs 插件内部
-//!   （`plugins/vdfs/protocol.rs`），**core 不暴露这些类型**。
+//!   （`crates/symbio-plugin-vdfs/src/protocol.rs`），**core 不暴露这些类型**。
 //!
 //! **分层、依赖方向、开放边界（本模块可原样抽出为独立 crate）见
 //! `../../../../docs/003-design/009-VDFS规范.md` §2**——此处不复述。

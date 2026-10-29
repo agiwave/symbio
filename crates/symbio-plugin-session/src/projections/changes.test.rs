@@ -1,6 +1,6 @@
 //! 变更账的折叠判据（[D-169]）：收哪些、谁说话、界外怎么办。
 //!
-//! 折叠的**呈现**（地址、文案）由会话出口自己钉（`plugins/session/changes.test.rs`）——
+//! 折叠的**呈现**（地址、文案）由会话出口自己钉（`crates/symbio-plugin-session/src/changes.test.rs`）——
 //! 本文件只判折叠这一半：从事实到 `{path, op, turn, changes}`。
 //!
 //! 判据的口径是**字段**而不是工具名：`file_op` 由写族工具声明的行为交出

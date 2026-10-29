@@ -75,7 +75,7 @@ impl<V: 'static> Projection<V> {
     ///
     /// 两个参数各是一条**口径**，不是一次选择：
     /// - `now = i64::MAX`：WAL 是**落盘**事实源，文件里每一条都已发生，没有「未来的
-    ///   事件」可滤（as-of 口径见 `plugins/session/stats.rs` §as-of）；写小一寸不是
+    ///   事件」可滤（as-of 口径见 `crates/symbio-plugin-session/src/stats.rs` §as-of）；写小一寸不是
     ///   「更保守」，是**少读一寸事实**，而且没有任何东西会为此变红；
     /// - `Budget::generous()`：窗口 = 全量 ⇒ `degraded` 恒假（框架接管前全部生产调用方
     ///   的现状，见本模块头）。

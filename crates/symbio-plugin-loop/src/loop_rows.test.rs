@@ -2843,7 +2843,7 @@ fn an_empty_row_table_owes_nothing_and_never_panics() {
 }
 
 /// 声明 owner 清单（DE-023 D-178）：真表装载后，每条控制面事实与视图都能答出
-/// 「谁交进来的」——控制面视图**全部**由 `plugins/loop` 声明，没有一条是无主的。
+/// 「谁交进来的」——控制面视图**全部**由 `crates/symbio-plugin-loop` 声明，没有一条是无主的。
 #[test]
 fn every_control_plane_declaration_records_its_owner() {
     let f = load(ROWS).expect("真表必须能冻结");

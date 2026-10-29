@@ -183,7 +183,7 @@ impl CapabilityRiskLevel {
     /// 3. `risk ≤ grant` ⇒ 不高于该工具的永久放行上限（`Grant`）。
     ///
     /// 为什么放在类型上、且返回「依据」而不只是布尔：执行闸门
-    /// （`providers/collectors/approval.rs`）与授权级联的记录方（`plugins/loop`）
+    /// （`providers/collectors/approval.rs`）与授权级联的记录方（`crates/symbio-plugin-loop`）
     /// 必须用同一份判据；两处各写一遍「或」，放宽安全约束的一侧漏改没有任何东西会
     /// 红。记录方还需要依据本身——不加它，事后无法从日志分辨「这次为什么没问」，
     /// 而三档的全部差别正是这个「为什么」。

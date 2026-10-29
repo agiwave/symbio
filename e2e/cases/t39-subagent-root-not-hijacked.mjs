@@ -30,14 +30,14 @@ import './_selfrun.mjs';
 // ## 为什么只钉根、不钉模型（诚实边界）
 //
 // 根那一半的顺序是**确定**的：容器在自己的 `traverse` 里**先**登记自己的根、**再**遍历
-// 子插件（`plugins/composite/composite.rs` 的 `register_vdfs_root` 在子循环之前），
+// 子插件（`crates/symbio-plugin-composite/src/composite.rs` 的 `register_vdfs_root` 在子循环之前），
 // 而子树的根只能在那次遍历里被登记 ⇒ 一旦把丢弃改成转发，**子树的根必然最后写入**，
 // 本用例必然变红。
 //
 // 模型那一半没有这个性质：系统 `model` 与 `agent` 都是容器的**子插件**，谁后注册谁生效，
 // 而子插件的遍历序来自 `HashMap`（逐进程随机）⇒ 端到端钉不住（实测：把丢弃改成转发后
 // 本用例仍通过，因为系统 `model` 恰好后注册）。模型侧的判据因此落在单测
-// （`plugins/agent/host/scope.test.rs` 的 `sub_agent_model_registration_is_discarded`）。
+// （`crates/symbio-plugin-agent/src/host/scope.test.rs` 的 `sub_agent_model_registration_is_discarded`）。
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {

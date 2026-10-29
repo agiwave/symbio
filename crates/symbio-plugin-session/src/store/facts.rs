@@ -64,7 +64,7 @@ impl SessionStore {
             .map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))?;
         // 写闸先问装配期冻结表（DE-024 D-198）。装载失败不阻断事实源打开——
         // 写闸仍会退到进程装配表与共享表（已知名字照常），而义务环的装载口会带着同一份
-        // 缺口拒绝开幕（`plugins/loop`）；这里再抛一次只会让会话连读都打不开。
+        // 缺口拒绝开幕（`crates/symbio-plugin-loop`）；这里再抛一次只会让会话连读都打不开。
         if let Ok(frozen) = symbio_plugin_api::sealed_declarations() {
             store = store.with_declarations(frozen);
         }

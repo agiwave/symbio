@@ -74,9 +74,9 @@ board.columns: [scope]
 | `SP-027` | C-003 根出口单消费方豁免账本（5 条） | scripts/core-export-audit.mjs 的 WAIVERS 账本（ActorSpec / turnstate / SloLatencyView / FallbackRateView / mutations_latest_snapshot） | `scripts/core-export-audit.mjs` | — | — |
 | `SP-028` | doc-link D-004 全文豁免（定义变更史禁区的两处反例措辞） | docs/archive/13-质量改进总纲.md 首行与 docs/README.md 首行的 doc-link-allow D-004 | `scripts/doc-link-audit.mjs` | — | — |
 | `SP-029` | dead-code R-002 契约登记存量（8 处） | scripts/dead-code-audit.mjs 的 R-002 死码承认账本（终局基线 8，见 docs/003-design/016-工程落地与验证.md §3.1） | `scripts/dead-code-audit.mjs` | — | — |
-| `SP-030` | panic-allow 不变量登记（C7，56 个登记项 / 71 处 panic 面） | crates/crates/** 的 panic-allow 注释、scripts/panic-audit.mjs 账本与 scripts/_shared.mjs 的 BASELINE.panicSites | `scripts/panic-audit.mjs` | — | — |
+| `SP-030` | panic-allow 不变量登记（C7，56 个登记项 / 71 处 panic 面） | crates/** 的 panic-allow 注释、scripts/panic-audit.mjs 账本与 scripts/_shared.mjs 的 BASELINE.panicSites | `scripts/panic-audit.mjs` | — | — |
 | `SP-031` | color 守卫自指豁免（测试与实现提到禁用模式） | scripts/color.test.mjs（守卫回归与实现里的禁用模式字样） | `scripts/color.test.mjs` | — | — |
-| `SP-032` | 设计文档的编号分区——0xx 系统级、1xx 组件级 | docs/003-design/ 的系统级设计，与就地存放的组件级设计（crates/crates/**、tauri/docs、cli/docs） | `scripts/registry-audit.mjs` | — | — |
+| `SP-032` | 设计文档的编号分区——0xx 系统级、1xx 组件级 | docs/003-design/ 的系统级设计，与就地存放的组件级设计（crates/**、tauri/docs、crates/symbio-cli/docs） | `scripts/registry-audit.mjs` | — | — |
 | `SP-033` | 控制面终态判据：六条不变量与判据的退场规则 | 控制面（义务环 / 派发面 / 驱动循环）的验收判据；不覆盖文档登记、插件入口、前端与 SLO 等其它判据命名空间 | `scripts/control-plane-audit.test.mjs` | — | — |
 
 ## 草案（draft）

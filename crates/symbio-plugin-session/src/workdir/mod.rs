@@ -5,7 +5,7 @@
 //! `SessionPlugin` 的 `VdfsProvider` 实现在「工作目录」这一段上的落点——
 //! **不存在第二套树协议**。
 //!
-//! 与磁盘上的物理层（`plugins/vdfs/physical.rs`）不同，这里的地址是**会话内**
+//! 与磁盘上的物理层（`crates/symbio-plugin-vdfs/src/physical.rs`）不同，这里的地址是**会话内**
 //! 的（工作目录由会话元数据决定），因此归 session 插件，而不是 vdfs 插件。
 //!
 //! 路径安全：节点地址一律为工作目录内的相对路径（`/` 分隔）；拒绝 `..`

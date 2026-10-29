@@ -5,7 +5,7 @@
 use super::model_provider::{ModelFinishReason, ModelSpend, ModelUsage};
 use serde_json::Value;
 
-// 工具调用信息（**结果形态**——累积过程在 `plugins/model/tool_accumulator.rs`）
+// 工具调用信息（**结果形态**——累积过程在 `crates/symbio-plugin-model/src/tool_accumulator.rs`）
 
 /// Tool call information
 #[derive(Debug, Clone)]
@@ -33,7 +33,7 @@ pub struct TurnToolCallInfo {
     /// 存在理由：超限的处置必须是**反馈**而不是整轮失败——模型必须从工具结果里
     /// 读到「为什么后面的调用没了、下一步该怎么办」；整轮 `Err` 会让模型对发生
     /// 了什么一无所知，表现为流程无故中断（`6cf9520d` 死循环守卫的反馈面，
-    /// 检测面在 `plugins/model/stream.rs` 的 `ToolCallDelta` 分支）。
+    /// 检测面在 `crates/symbio-plugin-model/src/stream.rs` 的 `ToolCallDelta` 分支）。
     pub overflow_notice: Option<String>,
 }
 
@@ -42,11 +42,11 @@ pub struct TurnToolCallInfo {
 /// 一轮 LLM 请求的**产物**（`ModelProvider::round_trip` 的返回类型）。
 ///
 /// **只装结果，不装过程**：工具调用的分片累积是 model 插件的实现细节
-/// （`plugins/model/tool_accumulator.rs`），收口后才以 [`Self::tool_calls`] 的形态
+/// （`crates/symbio-plugin-model/src/tool_accumulator.rs`），收口后才以 [`Self::tool_calls`] 的形态
 /// 交给 session。于是「一轮请求产出了什么」这个契约面里不含任何状态机。
 ///
 /// **三个读方法不在本模块**：`is_reasoning_only` / `effective_text` /
-/// `into_messages`（落库视图）定义在 `plugins/session/message_build.rs`——
+/// `into_messages`（落库视图）定义在 `crates/symbio-plugin-loop/src/message_build.rs`——
 /// 它们的外部消费方只有 session，且 `into_messages` 依赖那侧的
 /// `llm_build_assistant_messages`。固有实现可落在同一 crate 的任意模块，
 /// 调用方不需要 import 实现所在处。
