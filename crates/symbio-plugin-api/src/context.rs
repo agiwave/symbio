@@ -43,6 +43,14 @@
 //! 宿主按「轮首段在前、请求级段在后」拼一次请求前缀——两种段在这个数组里的先后
 //! 是判据，不是实现细节。判断（例如 Q1「本轮该不该起 worker」）仍在控制面：
 //! 请求级输入交的是**判完的结论**（[`DelegateVerdict`]），provider 只落笔。
+//!
+//! ## 预算与裁剪（D-243）
+//!
+//! 段不是白送的：每段占 token，段数由插件决定，宿主不能假设「拼上就一定放得下」。
+//! provider 用 [`ContextSection::new`] 声明**优先级**，成本由宿主在收集后计量
+//! （[`fit_sections`] 的注入闭包）——两格读数都挂在段上，裁剪只认这两格与收集次序，
+//! 不按插件名 / 段名特判。放不下的段在这里被裁掉并计入 [`SectionFit`]，宿主据此出声
+//! （裁了谁、超了多少）；「谁更重要」仍是声明方的判断，本模块不做第二遍。
 
 use serde_json::Value;
 use symbio_core::{CapabilityMeta, Event, WorkerProgress};
@@ -148,13 +156,117 @@ pub enum DelegateVerdict<'a> {
     Idle,
 }
 
-/// 一段要注入的文本。
+/// 一段要注入的文本，带裁剪要用的两格读数（D-243）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextSection {
     /// 段身份（见 [`slots`]）。
     pub slot: &'static str,
     /// 正文。空串由拼接方过滤（判据只有一处：取值点）。
     pub text: String,
+    /// 正文的 token 成本。**唯一写点是宿主**：provider 经 [`ContextSection::new`]
+    /// 构造时填 0（= 未计量），[`fit_sections`] 用宿主注入的计量回填——成本必须与
+    /// 预算同一把尺，让 provider 各写一份估算就成了第二套计量。
+    pub cost: usize,
+    /// 裁剪优先级：数大者先留。
+    ///
+    /// 与收集次序判的不是一件事：次序是**模型读到的先后**（由 owner 字典序决定，
+    /// DE-025 §3 第 4 条），本值只在放不下时决定**先丢谁**。
+    pub prio: u8,
+}
+
+impl ContextSection {
+    /// provider 侧的构造口：成本留 0，等宿主计量。
+    pub fn new(slot: &'static str, text: String, prio: u8) -> Self {
+        Self {
+            slot,
+            text,
+            cost: 0,
+            prio,
+        }
+    }
+}
+
+/// 段裁剪的读数（D-243）：预算多少、要了多少、留下了多少、裁掉了谁。
+///
+/// 报告是**读数**不是判据：裁剪规则只认 [`ContextSection::prio`] 与收集次序，
+/// 不按插件名 / 段名特判——否则「放不下时谁先走」就成了按名字硬编码的规则。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SectionFit {
+    /// 本次可用的 token 预算。
+    pub budget: usize,
+    /// 全部段成本之和（裁剪前）。
+    pub demanded: usize,
+    /// 留下段的成本之和。
+    pub kept_cost: usize,
+    /// 被裁掉的段：`(段身份, 成本)`，按收集次序。
+    pub dropped: Vec<(&'static str, usize)>,
+}
+
+impl SectionFit {
+    /// 是否发生了裁剪。
+    pub fn trimmed(&self) -> bool {
+        !self.dropped.is_empty()
+    }
+
+    /// 超界量：需求超出预算多少 token（未超界为 0）。
+    pub fn over(&self) -> usize {
+        self.demanded.saturating_sub(self.budget)
+    }
+}
+
+/// 按预算确定性裁剪（D-243）：`(prio 降序, 收集下标升序)` 逐段贪心。
+///
+/// 放不下的段**跳过而不是停**：更高优先级的段已经先试过，剩下的余量让更小的段
+/// 继续试，能留一段是一段。输出保持**收集次序**——段的先后是模型读到的次序，
+/// 与裁决次序无关。
+///
+/// `cost_of` 是宿主注入的计量（token）；[`ContextSection::cost`] 在这里被回填。
+/// 计量器由调用方给而不是本模块自带：插件面不认识宿主的 tokenizer，而成本必须
+/// 与预算同一把尺（见字段文档）。
+pub fn fit_sections<F>(
+    sections: Vec<ContextSection>,
+    budget: usize,
+    cost_of: F,
+) -> (Vec<ContextSection>, SectionFit)
+where
+    F: Fn(&str) -> usize,
+{
+    let mut sections = sections;
+    for s in &mut sections {
+        s.cost = cost_of(&s.text);
+    }
+
+    let demanded = sections.iter().map(|s| s.cost).sum();
+    let mut order: Vec<usize> = (0..sections.len()).collect();
+    order.sort_by(|&a, &b| sections[b].prio.cmp(&sections[a].prio).then(a.cmp(&b)));
+
+    let mut keep = vec![false; sections.len()];
+    let mut kept_cost = 0usize;
+    for i in order {
+        if kept_cost + sections[i].cost <= budget {
+            kept_cost += sections[i].cost;
+            keep[i] = true;
+        }
+    }
+
+    let dropped = sections
+        .iter()
+        .zip(&keep)
+        .filter(|(_, k)| !**k)
+        .map(|(s, _)| (s.slot, s.cost))
+        .collect();
+    let fit = SectionFit {
+        budget,
+        demanded,
+        kept_cost,
+        dropped,
+    };
+    let kept = sections
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(s, k)| k.then_some(s))
+        .collect();
+    (kept, fit)
 }
 
 /// 能力对**自己的上下文贡献**的实现。

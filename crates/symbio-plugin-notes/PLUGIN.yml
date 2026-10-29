@@ -1,6 +1,6 @@
 # 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
 plugin_id: notes
-plugin_comment: 便签扩展夹具：一个工具、一条 Domain 事实、一条轮内索引行、一条轮内反思行（借宿主一次模型往返）、一个上下文段、一条效果行为
+plugin_comment: 便签扩展夹具：一个工具、一条 Domain 事实、三条轮内行（索引、反思借宿主一次模型往返、答成后压缩）、一个上下文段、一条效果行为
 plugin_assembly: sub_agent
 plugin_order: 200
 # 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →

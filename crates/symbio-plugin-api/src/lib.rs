@@ -29,9 +29,9 @@ pub mod view_names;
 pub mod views;
 
 pub use context::{
-    providers as context_providers, section_meta, sections as context_sections, Cadence,
-    ContextProvider, ContextRequest, ContextSection, DelegateVerdict, LiveInputs, RecallFacts,
-    RecallLine,
+    fit_sections, providers as context_providers, section_meta, sections as context_sections,
+    Cadence, ContextProvider, ContextRequest, ContextSection, DelegateVerdict, LiveInputs,
+    RecallFacts, RecallLine, SectionFit,
 };
 pub use declarations::{
     assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations, vocab,

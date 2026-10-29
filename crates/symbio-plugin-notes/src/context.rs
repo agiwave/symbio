@@ -17,6 +17,10 @@ const MAX_NOTES: usize = 5;
 /// 段身份（`ChatNode.meta.kind`）。
 pub(crate) const SLOT: &str = "notes_context";
 
+/// 段优先级（D-243）：便签是**提示**——模型没有它也能从本轮工具结果里看到同样的内容，
+/// 所以排在背景记忆 / 委派面之后。
+const PRIO: u8 = 60;
+
 pub(crate) struct NotesProvider;
 
 impl ContextProvider for NotesProvider {
@@ -41,7 +45,7 @@ impl ContextProvider for NotesProvider {
             text.push_str("\n- ");
             text.push_str(note.trim());
         }
-        vec![ContextSection { slot: SLOT, text }]
+        vec![ContextSection::new(SLOT, text, PRIO)]
     }
 }
 

@@ -195,6 +195,19 @@ pub fn estimate_context_tokens(messages: &[ChatNode], overhead_tokens: usize) ->
     messages.iter().map(estimate_message_tokens).sum::<usize>() + overhead_tokens
 }
 
+/// 上下文段的预算（token）：上限减去**已经被占用的那一体**（历史消息 + 请求级固定开销）。
+///
+/// 与 [`context_watermark`] 的 `request_tokens` 同一把尺（`estimate_context_tokens`）：
+/// 水位是给出口看的读数，本函数是给裁剪的上界——两个数若各算各的，就会出现
+/// 「水位说已满、段却以为自己还有空间」。
+pub fn section_budget(
+    messages: &[ChatNode],
+    overhead_tokens: usize,
+    context_limit: usize,
+) -> usize {
+    context_limit.saturating_sub(estimate_context_tokens(messages, overhead_tokens))
+}
+
 /// 估算请求级固定开销：system prompt + **给定**工具定义。
 ///
 /// 与 [`estimate_request_overhead`] 算法完全一致，区别只在于**不自己取工具**——

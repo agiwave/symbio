@@ -28,6 +28,11 @@ use symbio_plugin_api::context::{self, Cadence, ContextProvider, ContextRequest,
 /// `run_recall` 里已经做完——provider 无权改判，也不需要看见 `RecallView`。
 pub(crate) struct RecallProvider;
 
+/// 段优先级（D-243）：预算放不下时先丢谁，数大者先留。
+///
+/// 召回是**背景事实**：丢了它，模型不知道自己此前做过什么，本轮每一步都要重新试错。
+const RECALL_PRIO: u8 = 90;
+
 impl ContextProvider for RecallProvider {
     fn owner(&self) -> &'static str {
         "loop"
@@ -35,10 +40,11 @@ impl ContextProvider for RecallProvider {
 
     fn provide(&self, req: &ContextRequest<'_>) -> Vec<ContextSection> {
         match req.recall.and_then(memory_events::prompt_section) {
-            Some(text) => vec![ContextSection {
-                slot: context::slots::RECALL,
+            Some(text) => vec![ContextSection::new(
+                context::slots::RECALL,
                 text,
-            }],
+                RECALL_PRIO,
+            )],
             None => Vec::new(),
         }
     }
@@ -50,6 +56,9 @@ impl ContextProvider for RecallProvider {
 /// 「哪些任务就绪」由 `task_events` 的折叠回答，provider 只做排版。
 pub(crate) struct ReadySetProvider;
 
+/// 候选集可以从 `readyset` 视图重算，丢一段不至于让模型误判（见 [`RECALL_PRIO`]）。
+const READYSET_PRIO: u8 = 70;
+
 impl ContextProvider for ReadySetProvider {
     fn owner(&self) -> &'static str {
         "loop"
@@ -57,10 +66,11 @@ impl ContextProvider for ReadySetProvider {
 
     fn provide(&self, req: &ContextRequest<'_>) -> Vec<ContextSection> {
         match task_events::prompt_section(req.facts, req.task_cap) {
-            Some(text) => vec![ContextSection {
-                slot: context::slots::READYSET,
+            Some(text) => vec![ContextSection::new(
+                context::slots::READYSET,
                 text,
-            }],
+                READYSET_PRIO,
+            )],
             None => Vec::new(),
         }
     }
@@ -72,6 +82,10 @@ impl ContextProvider for ReadySetProvider {
 /// 输入里的委派结论是控制面判完的值（`DelegateVerdict`）——provider 不读配置、
 /// 不重判（D-208），只交给 [`delegate::delegate_section`] 排版。
 pub(crate) struct DelegateProvider;
+
+/// 委派段说明「本会话有哪些工具、worker 怎么起」：丢了会让模型对自己的能力面误判，
+/// 只排在背景记忆之后（见 [`RECALL_PRIO`]）。
+const DELEGATE_PRIO: u8 = 80;
 
 impl ContextProvider for DelegateProvider {
     fn owner(&self) -> &'static str {
@@ -87,10 +101,11 @@ impl ContextProvider for DelegateProvider {
             return Vec::new();
         };
         match delegate::delegate_section(live.delegate, live.tools, live.workers) {
-            Some(text) => vec![ContextSection {
-                slot: context::slots::DELEGATE,
+            Some(text) => vec![ContextSection::new(
+                context::slots::DELEGATE,
                 text,
-            }],
+                DELEGATE_PRIO,
+            )],
             None => Vec::new(),
         }
     }

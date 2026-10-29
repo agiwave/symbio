@@ -8,7 +8,7 @@
 //! 那一半——五条协议自读行 + 一条产物自读行。它与
 //! `symbio-plugin-session/src/declarations.test.rs` 的同名夹具同形，只在 `cfg(test)` 生效。
 
-use super::{NOTES_CREATED, NOTES_INDEXED, NOTES_INSIGHT, OWNER};
+use super::{NOTES_CREATED, NOTES_INDEXED, NOTES_INSIGHT, NOTES_SUMMARY, OWNER};
 use symbio_core::ring::{Decl, Pattern};
 use symbio_core::{ActorDecl, Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb};
 
@@ -64,11 +64,18 @@ fn harness_declarations() -> PluginDeclarations<'static> {
         ports: &[],
         // `notes.index` 的 `by` 是宿主词汇 `plugin_row`：完整进程里这条 `ActorDecl`
         // 由 loop 的装配给出（写入名单取自实现），本二进制不链接 loop ⇒ 夹具补上。
+        // 名单必须覆盖**每条行实现的收口格**（`notes.summarize` 的 `notes.summary`），
+        // 否则 `seal` 的「执行体走不到出口」在子集装配里红了。
         actors: vec![ActorDecl {
             name: symbio_plugin_api::rows::PLUGIN_ROW,
             mode: LatencyTier::Deep,
             reads: &[],
-            writes: &[NOTES_INDEXED, NOTES_INSIGHT],
+            writes: &[
+                NOTES_INDEXED,
+                NOTES_INSIGHT,
+                NOTES_SUMMARY,
+                symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
+            ],
         }],
         rows: protocol_rows(),
     }

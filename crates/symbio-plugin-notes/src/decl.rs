@@ -44,6 +44,16 @@ pub(crate) const NOTES_INSIGHT: &str = "notes.insight";
 /// 行名：对一条已索引便签做一次模型往返，落一条洞察。`by = plugin_row`（D-242）。
 pub(crate) const NOTES_REFLECT: &str = "notes.reflect";
 
+/// 轮内摘要事实：本能力把一条便签的**工具结果区间**压成一句摘要（D-249）。
+///
+/// 它是这一行的收口格：`notes.summarize` 的 `until` 只认它，`message.added`
+/// 没有自己的 `FactDecl`（它属于会话的消息面），不能拿来关账。
+pub(crate) const NOTES_SUMMARY: &str = "notes.summary";
+
+/// 行名：一条已反思的便签 ⇒ 一句摘要 + 一条「这段历史被它取代」的区间省略。
+/// `by = plugin_row`（压成什么、压哪一段都由本能力判，宿主只落格）。
+pub(crate) const NOTES_SUMMARIZE: &str = "notes.summarize";
+
 /// 对外可读的视图：本能力在轮内反思出的洞察。
 pub(crate) const NOTES_INSIGHTS: &str = "notes.insights";
 
@@ -69,6 +79,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new(NOTES_INDEXED, (Entity::Domain, Verb::Asserted)),
     // 洞察同理：本能力对自己处理过的那条便签的断言。
     EventDecl::new(NOTES_INSIGHT, (Entity::Domain, Verb::Asserted)),
+    // 摘要同样是本能力对自己的产物（哪一段被压成哪一句）的断言。
+    EventDecl::new(NOTES_SUMMARY, (Entity::Domain, Verb::Asserted)),
 ];
 
 pub(crate) const FACTS: &[FactDecl] = &[
@@ -95,6 +107,16 @@ pub(crate) const FACTS: &[FactDecl] = &[
         key: &[],
         expand: &[],
         fields: &["tool_call_id", "text", "status"],
+    },
+    // 摘要事实：`from` / `to` 是**被取代区间**（事件 seq 闭区间，D-249）。
+    // 与 `message.added` 载荷里的 `elision` 是同一对数——一行写两份说法，
+    // 免得读方为了知道「压了哪一段」还得认识消息面。
+    FactDecl {
+        name: NOTES_SUMMARY,
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["tool_call_id", "text", "from", "to"],
     },
 ];
 
@@ -165,6 +187,31 @@ pub(crate) const ROWS: &[Decl] = &[
         },
         until: &[Pattern {
             source: NOTES_INSIGHT,
+            key: &["tool_call_id"],
+            eq: &[],
+        }],
+        unless: &[],
+    },
+    // 压缩形态（D-249）：一条**答成了**的洞察之后，本能力把那条便签的工具结果
+    // 区间压成一句摘要——摘要本体落 `message.added`（带 `elision` 的诞生格），
+    // 收口格是本能力自己的 `notes.summary`。
+    //
+    // `prio` 47 紧接反思行（46）：洞察一入格，这一行就是最小的可还债。`eq` 收窄到
+    // `status = ok`：失败往返的洞察没有可压的正文，开这笔债只会写出一句空摘要。
+    Decl {
+        name: NOTES_SUMMARIZE,
+        prio: 47,
+        by: Some(symbio_plugin_api::rows::PLUGIN_ROW),
+        // 摘要由本能力按事实现算，不再调模型：与索引行同档。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: NOTES_INSIGHT,
+            key: &["tool_call_id"],
+            eq: &[("status", Lit::Str("ok"))],
+        },
+        until: &[Pattern {
+            source: NOTES_SUMMARY,
             key: &["tool_call_id"],
             eq: &[],
         }],

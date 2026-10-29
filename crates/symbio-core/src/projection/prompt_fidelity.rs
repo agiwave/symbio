@@ -48,12 +48,23 @@
 //! 认领仍走**同一份**翻译（[`super::mutations::snapshot_entries`]）与**同一份**
 //! 折叠索引：两个出口不可能对同一条给出两种读法。
 //!
+//! ## 第五类：区间省略（D-249）
+//!
+//! 带 `elision` 的 `message.added` 是「这段历史被这份摘要取代」：载荷里那批节点与取代格
+//! **同一个动作**（认领，见 [`claim_nodes`]），被它取代的那段**事件**与未选中分支
+//! **同一个处置**（不认领，见 [`Elisions`]）。不带 `elision` 的诞生格仍是界面卡片
+//! （由 `excluded_from_prompt` 认领「不该出现在 prompt 里」）。
+//!
+//! 两类都不新增报告变体：缺口仍落在既有的「丢事实 / 角色不符 / 界面文本泄漏」三条上——
+//! 判据面按**病**分，不按**事由**分。
+//!
 //! ## 为什么它便宜到每轮都跑
 //!
 //! 纯函数 + 单测层：不起 CLI、不 mock LLM、不碰 IO。所以它不会被「太重」跳过——这一点
 //! 是本条存在的意义，全量 e2e 反而做不到（每步都要重起进程、跑 42 个用例）。
 
 use super::super::event::Event;
+use super::elision::{is_replacement, Elisions};
 use super::mutations::OutputIndex;
 use super::vocab::{slot_node_of, slot_of, ChatSlot};
 use crate::{ChatVocab, MessageVocab};
@@ -114,8 +125,10 @@ fn expected_role(
         }
         Some(ChatSlot::Fallback) => Some("assistant"),
         Some(ChatSlot::ArtifactAdded) => Some("tool"),
-        // 界面文本（汇报 / 开场白 / 诞生格）由 `excluded_from_prompt` 认领；
-        // 变更格与取代格由 `is_mutation` / `is_snapshot` 认领——它们都不产 entry。
+        // 界面文本（汇报 / 开场白 / 不带 `elision` 的诞生格）由 `excluded_from_prompt`
+        // 认领；变更格与取代格由 `is_mutation` / `is_snapshot` 认领；**带** `elision`
+        // 的诞生格在 `verify` 里按载荷认领一批（[`claim_nodes`]）——它们都不产「一条事件
+        // → 一条 entry」的映射，所以这里返回 `None`。
         Some(
             ChatSlot::Reported
             | ChatSlot::Opening
@@ -139,9 +152,10 @@ fn excluded_from_prompt(e: &Event, c: &ChatVocab, m: &MessageVocab) -> bool {
         // 汇报与对话面开场白：与汇报同为界面文本（`exclude_from_context`），
         // 按设计不进请求包——漏进去要红。
         //
-        // 诞生格（D-054 决策 1）同理：本格的节点按定义是**界面文本**——只有
-        // 「找不到别的格承载诞生」的节点才落这里，而承载对话内容的节点必须由
-        // 它自己的事实落。
+        // 诞生格（D-054 决策 1）同理：**不带** `elision` 的诞生格，其节点按定义是
+        // 界面文本——只有「找不到别的格承载诞生」的节点才落这里，而承载对话内容的
+        // 节点必须由它自己的事实落。带 `elision` 的那一档是「取代旧区间的正文」，
+        // 在 `verify` 里已按载荷认领（[`claim_nodes`]），不会走到这里。
         Some(ChatSlot::Reported | ChatSlot::Opening | ChatSlot::MessageAdded)
     )
 }
@@ -335,6 +349,37 @@ fn claim(
     }
 }
 
+/// 认领一批**载荷里的节点**（压缩快照 / 带区间省略的诞生格共用）。
+///
+/// 两类事件的载荷形状相同（`{ messages: [...] }`），检查动作也相同：按**同一份**
+/// 翻译（[`super::mutations::snapshot_entries`]）与**同一份**折叠索引逐条认领。
+/// 各写一遍就会对同一批节点给出两种读法——那种分叉是静默的（本模块反复警告的那个坑）。
+fn claim_nodes(
+    rep: &mut PromptReport,
+    used: &mut [bool],
+    messages: &[crate::PromptMessage],
+    msgs: &[crate::chat_node::ChatNode],
+    mutations: &super::mutations::MessageMutations,
+    kind: &str,
+    turn: u64,
+) {
+    for (node, entry) in super::mutations::snapshot_entries(msgs) {
+        // 与投影同一份折叠索引：被删的跳过（它本就不该在 prompt 里），
+        // 被编辑过的按新读法认领。
+        if mutations.is_removed(&node) || entry.exclude_from_context {
+            continue;
+        }
+        let (role, text) = match mutations.edited(&node) {
+            Some(ed) => (
+                ed.role.clone().unwrap_or_else(|| entry.role.clone()),
+                ed.text.clone().unwrap_or_else(|| entry.text.clone()),
+            ),
+            None => (entry.role.clone(), entry.text.clone()),
+        };
+        claim(rep, used, messages, &text, &role, kind, turn);
+    }
+}
+
 /// 名字由调用方在构造期交进来（`c` 对话面 / `m` 消息面，DE-024 D-203）。
 pub fn verify(
     events: &[Event],
@@ -347,10 +392,11 @@ pub fn verify(
     // 变更格的折叠索引（与 `transcript` **共用同一份**）：编辑过的条目在网格侧
     // 按**新**正文复核，被删掉的从「网格→prompt」跳过。见模块文档「第三类」。
     let mutations = super::mutations::MessageMutations::collect(events, m);
-    // 未选中支的根 id（与 `transcript` **共用同一份**折法，见 `branch::unselected_roots`）：
-    // 那一支的正文按设计就不在请求包里，与「被删掉」同一处置——不跳过就会每次重试都报
-    // 「丢事实」，而恒红的判据等于没有判据。
-    let hidden_branches = super::branch::unselected_roots(events, |id| mutations.is_removed(id), c);
+    // 「这一段不读」的唯一判据（与 `transcript` **共用同一份**，见 [`Elisions`]）：
+    // 未选中分支与显式区间（摘要取代）两种来源合流。那一支 / 那一段的正文按设计就不在
+    // 请求包里，与「被删掉」同一处置——不跳过就会每次重试都报「丢事实」，而恒红的判据
+    // 等于没有判据。
+    let elisions = Elisions::collect(events, c, m, |id| mutations.is_removed(id));
     // 最近一次压缩快照（与 `transcript` **共用同一份**）：只有它是活的，更早的
     // 连自己的列表都已被取代。见模块文档「第四类」。
     let snapshot = super::mutations::mutations_latest_snapshot(events, m);
@@ -397,35 +443,37 @@ pub fn verify(
             rep.consolidations += 1;
             if let Some((si, msgs)) = snapshot.as_ref() {
                 if *si == idx {
-                    for (node, entry) in super::mutations::snapshot_entries(msgs) {
-                        // 与投影同一份折叠索引：被删的跳过（它本就不该在 prompt 里），
-                        // 被编辑过的按新读法认领。
-                        if mutations.is_removed(&node) {
-                            continue;
-                        }
-                        let (role, text) = match mutations.edited(&node) {
-                            Some(ed) => (
-                                ed.role.clone().unwrap_or_else(|| entry.role.clone()),
-                                ed.text.clone().unwrap_or_else(|| entry.text.clone()),
-                            ),
-                            None => (entry.role.clone(), entry.text.clone()),
-                        };
-                        // 「按设计不进请求包」的界面文本**不该**出现在 prompt 里：
-                        // 不认领它（与事件侧 `excluded_from_prompt` 同一处置）。
-                        if entry.exclude_from_context {
-                            continue;
-                        }
-                        claim(
-                            &mut rep,
-                            &mut used,
-                            messages,
-                            &text,
-                            &role,
-                            e.kind.as_str(),
-                            e.turn,
-                        );
-                    }
+                    claim_nodes(
+                        &mut rep,
+                        &mut used,
+                        messages,
+                        msgs,
+                        &mutations,
+                        e.kind.as_str(),
+                        e.turn,
+                    );
                 }
+            }
+            continue;
+        }
+        // 带区间省略的诞生格（D-249）：动作与取代格**相同**——按载荷认领一批期望条目；
+        // 区别只在于它取代的那段历史是**事件**（由下面的 `elisions.elides` 跳过），而
+        // 快照取代的是同一个切片里更早的位置。两类共用一个 [`claim_nodes`]。
+        //
+        // 「这条事实自己也被更晚的区间取代」时整批都不认领：投影那边把同一批节点标成
+        // 不进请求包（见 `transcript` 的同名分支），复核若仍认领就会报一次假缺口。
+        if is_replacement(e) {
+            rep.checked_events += 1;
+            if !elisions.elides(e) {
+                claim_nodes(
+                    &mut rep,
+                    &mut used,
+                    messages,
+                    &super::mutations::added_messages(e),
+                    &mutations,
+                    e.kind.as_str(),
+                    e.turn,
+                );
             }
             continue;
         }
@@ -464,10 +512,11 @@ pub fn verify(
                 continue;
             }
         }
-        // 未选中支的正文**按设计不在请求包里**（D-173），与「被删掉」同一处置：不认领、
-        // 不报「丢事实」。判据与投影共用 [`super::branch::unselected_roots`] 那一份折法——
-        // 「模型读的是哪一支」这件事只能有一个答案，而两处各算一遍的分叉是静默的。
-        if super::branch::event_branch_root(e).is_some_and(|root| hidden_branches.contains(root)) {
+        // 不在请求包里的那一段（未选中支 / 被摘要取代的区间）**按设计**就不该出现
+        // （D-173 / D-249），与「被删掉」同一处置：不认领、不报「丢事实」。判据与投影
+        // 共用 [`Elisions`] 那一份折法——「哪一段不读」只能有一个答案，而两处各算一遍的
+        // 分叉是静默的。
+        if elisions.elides(e) {
             continue;
         }
         let edited = node.as_deref().and_then(|n| mutations.edited(n));

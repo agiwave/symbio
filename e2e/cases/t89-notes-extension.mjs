@@ -19,6 +19,9 @@ import './_selfrun.mjs';
 // | 轮内行执行 | `submit_row!`（`by = plugin_row`，D-241） | `capability_views['notes.digest']` 读到行执行体落下的 `notes.indexed` |
 // | 模型往返 | `RowStep::Ask` + `submit_row!`（D-242） | 行执行体借宿主一次往返；`capability_views['notes.insights']` 读到 `notes.insight` |
 //
+// 第九面（通用省略，D-249）不在本用例：它要等到一条答成的洞察之后，读数在
+// `t91-notes-elision.mjs`（摘要进消息、那段工具结果不再进提示词）。
+//
 // 「事件真的落格」与「上下文真的贡献了」是**同一条读数的两面**：上下文 provider 只读
 // 会话事实切片，它渲染得出来，就说明行为产出的 `notes.created` 已经入格。
 //

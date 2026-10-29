@@ -214,6 +214,27 @@ fn snapshot_messages(e: &Event, v: &MessageVocab) -> Option<Vec<ChatNode>> {
     (!msgs.is_empty()).then_some(msgs)
 }
 
+/// 诞生格（`message.added`）的载荷 → 节点列表（载荷 `{ messages: [...] }`）。
+///
+/// 与 `snapshot_messages` 同一条容错口径：**一条坏条目不该吃掉整批**——逐条解，
+/// 解不出就跳过。空列表不是一次诞生：落一条空事实等于在事实源上留下「什么都没发生」
+/// 的痕迹。
+///
+/// 住在这里而不是转写里：**转写折叠与 prompt 复核都要读这份节点列表**（带
+/// `elision` 的诞生格是「区间被取代」的正文来源，见 [`super::elision`]），两处各译一遍
+/// 就会对同一批节点给出两种读法——那种分叉是静默的（与 [`snapshot_entries`] 同一条理由）。
+pub fn added_messages(e: &Event) -> Vec<ChatNode> {
+    e.payload
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| serde_json::from_value::<ChatNode>(v.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// 压缩快照的载荷（压缩后的整份消息列表）→ 转写条目（含节点身份）。
 ///
 /// ## 为什么必须有且只有这一处翻译

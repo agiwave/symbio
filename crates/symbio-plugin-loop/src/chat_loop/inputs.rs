@@ -9,7 +9,7 @@
 //!   这里，**被选中才跑**）
 
 use symbio_core::CapabilityMeta;
-use symbio_plugin_api::context::{Cadence, DelegateVerdict, LiveInputs};
+use symbio_plugin_api::context::{Cadence, ContextSection, DelegateVerdict, LiveInputs};
 
 use super::super::port::Compress;
 use super::super::stage_events::StageFact;
@@ -190,7 +190,8 @@ pub(crate) async fn collect_reads(
 ///    新分配的：续写幕复用原根，重发骨架会把已完成的卡打回运行态。
 /// 3. **请求级上下文段**（`Cadence::Request`，D-220）：**在 `tools` 收集成形之后**
 ///    才收集——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头；
-/// 4. **请求视图重建**（`build_request_view` 唯一入口）。
+/// 4. **请求视图重建**（`build_request_view` 唯一入口）：段先按预算裁剪（D-243），
+///    再拼成请求视图。
 ///
 /// 失败交回 [`ActorError::Read`]：轮首的读失败发生在幕锚之后、任何请求格之前，
 /// 端口面上没有一笔账可关，由环上抛给编排层的兜底路径。
@@ -321,16 +322,46 @@ pub(crate) async fn prepare_request_sections(
         context.session.task_cap(),
         Some(&live),
     );
-    let mut sections: Vec<(&'static str, String)> = turn
-        .context_sections
-        .iter()
-        .map(|s| (s.slot, s.text.clone()))
-        .collect();
-    sections.extend(
-        symbio_plugin_api::context_sections(&request, Cadence::Request)
-            .into_iter()
-            .map(|s| (s.slot, s.text)),
+    // ── ⑥″ 段预算：放不下就按优先级裁，读数自己出声（D-243）────────────────
+    //
+    // 预算与水位**同一把尺**（[`context::section_budget`]），成本也由同一把尺在
+    // `fit_sections` 里回填——provider 侧不声明成本（那会变成第二套计量），只声明
+    // 优先级。裁剪规则只认段自己声明的 `prio` 与收集次序，宿主不按插件名 / 段名特判：
+    // 「谁先走」是声明方的判断，宿主只执行。
+    let mut sections: Vec<ContextSection> = turn.context_sections.clone();
+    sections.extend(symbio_plugin_api::context_sections(
+        &request,
+        Cadence::Request,
+    ));
+    let budget = context::section_budget(
+        &context.messages,
+        turn.request_overhead,
+        orchestrator.context_limit as usize,
     );
+    let (kept, fit) = {
+        use super::super::tokenizer::{default_tokenizer, Tokenizer};
+        let tok = default_tokenizer();
+        symbio_plugin_api::context::fit_sections(sections, budget, |text| tok.count(text))
+    };
+    if fit.trimmed() {
+        // 只在真的裁了才出声：各段皆空是常态，逐轮打印会把日志淹掉。
+        symbio_core::plugin_info!(
+            "session",
+            "[section-budget] 预算 {} token、需求 {}、保留 {}；裁掉 {} 段（{}）；超界 {}",
+            fit.budget,
+            fit.demanded,
+            fit.kept_cost,
+            fit.dropped.len(),
+            fit.dropped
+                .iter()
+                .map(|(slot, cost)| format!("{slot}={cost}"))
+                .collect::<Vec<_>>()
+                .join(","),
+            fit.over()
+        );
+    }
+    let sections: Vec<(&'static str, String)> =
+        kept.into_iter().map(|s| (s.slot, s.text)).collect();
     Ok(context::build_request_sections(&sections))
 }
 

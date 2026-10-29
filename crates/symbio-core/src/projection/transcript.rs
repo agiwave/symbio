@@ -32,7 +32,6 @@
 use super::super::event::{event_payload_node_id, event_tool_result_node_id, Event};
 use super::vocab::{slot_node_of, slot_of, ChatSlot};
 use super::Projection;
-use crate::chat_node::ChatNode;
 use crate::{ChatVocab, MessageVocab};
 
 use serde::{Deserialize, Serialize};
@@ -41,7 +40,8 @@ use serde::{Deserialize, Serialize};
 // `transcript` 折叠与 `prompt_fidelity` 复核共用同一份「一条消息被读作什么」——
 // 投影 A 不读投影 B（L2）：mutations 不含 `Projection::new`，是可共享的读侧普通函数
 // （`projection-purity.mjs` 静态守：产投影的文件不得导入产投影的兄弟模块）。
-use super::mutations::{snapshot_entries, OutputIndex, TranscriptEntry};
+use super::elision::{is_replacement, Elisions};
+use super::mutations::{added_messages, snapshot_entries, OutputIndex, TranscriptEntry};
 
 /// 转写视图：按事件顺序（append-only ⇒ 时间序）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -167,23 +167,6 @@ impl TranscriptView {
     }
 }
 
-/// 诞生格（`message.added`）的载荷 → 节点列表（载荷 `{ messages: [...] }`）。
-///
-/// 与 `snapshot_messages` 同一条容错口径：**一条坏条目不吃掉整批**——逐条解，
-/// 解不出就跳过。空列表不是一次诞生：落一条空事实等于在事实源上留下「什么都没发生」
-/// 的痕迹。
-fn added_messages(e: &Event) -> Vec<ChatNode> {
-    e.payload
-        .get("messages")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| serde_json::from_value::<ChatNode>(v.clone()).ok())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// `transcript` 投影：从事件切片读出对话转写。
 ///
 /// ## 折叠：不只是追加（D-053）
@@ -203,6 +186,11 @@ fn added_messages(e: &Event) -> Vec<ChatNode> {
 /// 而是**读法**——不选中那一支的助手侧条目照样进转写（用户切回去还看得见），只是标成
 /// 不进请求包。少了这一段，重试在模型眼里等于没发生：新旧两支的答复同时躺在请求包里，
 /// 而下一轮读的还是被用户刚刚不要的那一份。
+///
+/// 以及**区间省略**（`message.added` 载荷的 `elision`，D-249）：一条事实同时说「这段
+/// 历史被这份摘要取代」——载荷里的节点进转写且可见，被指的区间（按 seq 闭区间）照样进
+/// 转写、只是标成不进请求包。分支与区间两种来源在 [`Elisions`] 上合流成**同一个判据**：
+/// 「哪一段不读」只有一个答案，转写与 prompt 复核都用它。
 ///
 /// ## 换基（压缩快照）
 ///
@@ -226,19 +214,16 @@ fn added_messages(e: &Event) -> Vec<ChatNode> {
 pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
     Projection::new(move |events: &[Event], now| {
         let mutations = super::mutations::MessageMutations::collect(events, &m);
+        // 「这一段不读」的**唯一判据**（[`Elisions`]）：显式区间（`message.added` 载荷的
+        // `elision`：这段被摘要取代）与未选中分支两种来源在同一个 `elides` 上合流。
+        // 为什么必须合流见 `elision` 的模块文档——两个出口各判一遍，分叉是静默的。
+        //
         // 未选中支的根 id（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
         // 同一个问题在请求包里只能有**一支**答复，否则模型读到的是自己没说过的话。
         // 这里问「还在不在」的证据取变更格（被删的支不在世），而不是「有没有节点」——
         // 重试那一幕的新支此刻还没有任何节点，而那正是该把旧支挤出请求包的时刻。
         // 两条问法与共享的挑法见 [`super::branch`] 的模块文档。
-        let hidden_branches =
-            super::branch::unselected_roots(events, |id| mutations.is_removed(id), &c);
-        // 这一条事件属不属于「不被读的那一支」。判据（载荷 `turn_id` = 本轮 Turn 根 id，
-        // 没有这个键的恒不在任何支里 = 各支的共同祖先）住在
-        // [`super::branch::event_branch_root`]，`prompt_fidelity` 复核的是**同一句问话**。
-        let hidden_branch = |e: &Event| {
-            super::branch::event_branch_root(e).is_some_and(|root| hidden_branches.contains(root))
-        };
+        let elisions = Elisions::collect(events, &c, &m, |id| mutations.is_removed(id));
         let mut entries: Vec<TranscriptEntry> = Vec::new();
 
         // ── 换基：先收下快照那份列表，再从其下标之后接着折（见函数文档）────────
@@ -317,7 +302,9 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                             role: "user".into(),
                             text: text.to_string(),
                             tool: None,
-                            exclude_from_context: false,
+                            // 用户格不带 `turn_id` ⇒ 分支判据对它恒 false；但显式区间
+                            // （摘要取代的那一段）照样适用——这正是「一个应用点」的意思。
+                            exclude_from_context: elisions.elides(e),
                         },
                         event_payload_node_id(e, "id"),
                         false,
@@ -335,7 +322,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                                 tool: None,
                                 // 未选中支的正文**进转写、不进请求包**：切回那一支时用户
                                 // 还看得见它，模型却同一时刻只该读一支。
-                                exclude_from_context: hidden_branch(e),
+                                exclude_from_context: elisions.elides(e),
                             },
                             produced_node(e),
                             false,
@@ -354,7 +341,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                                 role: "assistant".into(),
                                 text,
                                 tool: None,
-                                exclude_from_context: hidden_branch(e),
+                                exclude_from_context: elisions.elides(e),
                             },
                             produced_node(e),
                             false,
@@ -375,7 +362,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                             role: "assistant".into(),
                             text: detail.to_string(),
                             tool: None,
-                            exclude_from_context: hidden_branch(e),
+                            exclude_from_context: elisions.elides(e),
                         },
                         produced_node(e),
                         false,
@@ -395,7 +382,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                                 role: "user".into(),
                                 text: text.to_string(),
                                 tool: None,
-                                exclude_from_context: false,
+                                exclude_from_context: elisions.elides(e),
                             },
                             event_payload_node_id(e, "id"),
                             false,
@@ -453,22 +440,31 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                             role: "tool".into(),
                             text: text.to_string(),
                             tool: Some(tool.to_string()),
-                            exclude_from_context: hidden_branch(e),
+                            exclude_from_context: elisions.elides(e),
                         },
                         event_tool_result_node_id(e),
                         false,
                     );
                 }
-                // 诞生格（`message × opened`，D-054
-                // 决策 1）：**没有别的格可搭车**的节点在这里出生——今天只有压缩记录节点
-                // （「已压缩上下文」那张卡）。
+                // 诞生格（`message × opened`，D-054 决策 1）：**没有别的格可搭车**的节点
+                // 在这里出生。它有两副面孔，判别位是载荷带不带 `elision`
+                // （[`is_replacement`]，D-249）：
                 //
-                // `exclude_from_context` **恒为 `true`**：本格的节点按定义就是界面文本
-                // （见诞生格 `message × opened` 的边界——承载对话内容的节点必须由它自己的
-                // 事实落）。让它进请求包会让模型看见一条没有对话语义的记录行。
+                // - **不带**（现状：压缩记录卡「已压缩上下文」）⇒ 节点是界面文本，
+                //   `exclude_from_context` 恒为 `true`。让它进请求包会让模型看见一条
+                //   没有对话语义的记录行。
+                // - **带**（「这段历史被这份摘要取代」）⇒ 载荷里的节点就是**取代那段区间
+                //   的正文**，可见性按节点自己的 `meta.exclude_from_context`（与压缩快照
+                //   同一份翻译 [`snapshot_entries`]）；被省略区间的旧事件由
+                //   [`Elisions::elides`] 判掉——同一条事实的两半，不各判一处。
                 Some(ChatSlot::MessageAdded) => {
+                    let replaces = is_replacement(e);
                     for (node, mut entry) in snapshot_entries(&added_messages(e)) {
-                        entry.exclude_from_context = true;
+                        entry.exclude_from_context = if replaces {
+                            entry.exclude_from_context || elisions.elides(e)
+                        } else {
+                            true
+                        };
                         push(entry, node, false);
                     }
                 }

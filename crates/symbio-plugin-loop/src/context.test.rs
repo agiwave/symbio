@@ -234,6 +234,26 @@ fn the_published_watermark_is_the_same_number_the_trigger_compares() {
     );
 }
 
+/// 段预算 = 上限 − 请求水位：两者取同一个 `estimate_context_tokens`，
+/// 超限时预算归零而不是回绕（`saturating_sub` 让「已经没空间」是一个数，不是负数）。
+#[test]
+fn the_section_budget_is_the_limit_minus_what_is_already_used() {
+    let msgs = vec![user_msg(&"中文字符填充".repeat(40))];
+    let overhead = 500;
+    let limit = 100_000;
+    let used = estimate_context_tokens(&msgs, overhead);
+    assert_eq!(section_budget(&msgs, overhead, limit), limit - used);
+    assert_eq!(
+        section_budget(&msgs, overhead, limit),
+        limit
+            - context_watermark(&msgs, overhead, limit)["request_tokens"]
+                .as_u64()
+                .unwrap() as usize,
+        "预算与水位必须同源"
+    );
+    assert_eq!(section_budget(&msgs, overhead, 0), 0);
+}
+
 #[test]
 fn the_threshold_uses_the_producers_coefficient_once() {
     // 70% 只在 `compression_threshold_tokens` 出现一次；读数与判据都从它取。

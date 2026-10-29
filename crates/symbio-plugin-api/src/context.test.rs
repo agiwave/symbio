@@ -12,10 +12,11 @@ impl ContextProvider for Fixed {
     }
 
     fn provide(&self, _req: &ContextRequest<'_>) -> Vec<ContextSection> {
-        vec![ContextSection {
-            slot: slots::RECALL,
-            text: "固定一段".to_string(),
-        }]
+        vec![ContextSection::new(
+            slots::RECALL,
+            "固定一段".to_string(),
+            50,
+        )]
     }
 }
 
@@ -48,10 +49,11 @@ impl ContextProvider for Live {
             DelegateVerdict::Start { reason } => reason,
             _ => "none",
         };
-        vec![ContextSection {
-            slot: slots::DELEGATE,
-            text: format!("tools={} reason={reason}", live.tools.len()),
-        }]
+        vec![ContextSection::new(
+            slots::DELEGATE,
+            format!("tools={} reason={reason}", live.tools.len()),
+            50,
+        )]
     }
 }
 
@@ -192,6 +194,65 @@ fn section_meta_carries_the_slot_verbatim() {
         section_meta(slots::READYSET),
         serde_json::json!({ "kind": "readyset" })
     );
+}
+
+/// 成本由宿主计量回填：provider 构造时是 0，`fit_sections` 用注入的尺写一次。
+#[test]
+fn the_host_measures_the_cost() {
+    let secs = vec![ContextSection::new(slots::RECALL, "abc".to_string(), 10)];
+    assert_eq!(secs[0].cost, 0, "provider 侧不声明成本");
+    let (kept, fit) = fit_sections(secs, 100, |t| t.len());
+    assert_eq!(kept[0].cost, 3);
+    assert_eq!(fit.demanded, 3);
+    assert_eq!(fit.kept_cost, 3);
+    assert!(!fit.trimmed());
+}
+
+/// 放得下 ⇒ 一段不裁，输出保持**收集次序**（不是裁决次序）。
+#[test]
+fn everything_stays_when_it_fits_and_collection_order_is_kept() {
+    let secs = vec![
+        ContextSection::new("low", "aaa".to_string(), 10),
+        ContextSection::new("high", "bb".to_string(), 90),
+    ];
+    let (kept, fit) = fit_sections(secs, 5, |t| t.len());
+    let slots: Vec<&str> = kept.iter().map(|s| s.slot).collect();
+    assert_eq!(slots, ["low", "high"]);
+    assert_eq!(fit.over(), 0);
+}
+
+/// 放不下 ⇒ 先裁优先级低的，报告说清裁了谁、超了多少。
+#[test]
+fn the_lowest_priority_goes_first_and_the_report_names_it() {
+    let secs = vec![
+        ContextSection::new("low", "aaaa".to_string(), 10),
+        ContextSection::new("high", "bbbb".to_string(), 90),
+    ];
+    let (kept, fit) = fit_sections(secs, 6, |t| t.len());
+    assert_eq!(
+        kept.iter().map(|s| s.slot).collect::<Vec<_>>(),
+        ["high"],
+        "高优先级先留"
+    );
+    assert_eq!(fit.dropped, vec![("low", 4)]);
+    assert_eq!(fit.over(), 2);
+    assert!(fit.trimmed());
+}
+
+/// 放不下的高优先级段被**跳过**而不是停：剩下的余量让更小的段继续试。
+#[test]
+fn a_section_that_cannot_fit_is_skipped_not_a_hard_stop() {
+    let secs = vec![
+        ContextSection::new("huge", "0123456789".to_string(), 90),
+        ContextSection::new("small", "ab".to_string(), 10),
+    ];
+    let (kept, fit) = fit_sections(secs, 5, |t| t.len());
+    assert_eq!(
+        kept.iter().map(|s| s.slot).collect::<Vec<_>>(),
+        ["small"],
+        "大段放不下的余量不该被浪费：{fit:?}"
+    );
+    assert_eq!(fit.dropped, vec![("huge", 10)]);
 }
 
 /// 请求里的读侧值包是**借用**：provider 改不动它，也不需要句柄。
