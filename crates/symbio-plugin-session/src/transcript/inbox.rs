@@ -109,7 +109,7 @@ fn announce_drained(change_subs: &VdfsChangeSubscriptions, session_id: &str, bat
     }
 }
 
-/// [`SessionPlugin::take_inbox_batch`] 的**同步**孪生（缺口 3：v2 工具循环的轮边界注入挂点用它）。
+/// [`SessionPlugin::take_inbox_batch`] 的**同步**孪生（v2 工具循环的轮边界注入挂点用它）。
 ///
 /// ## 为什么是自由函数、为什么收这三样
 ///

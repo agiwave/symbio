@@ -1045,7 +1045,7 @@ fn a_thread_private_memory_stays_in_its_own_session() {
     );
     assert!(
         !contents.iter().any(|c| c.contains("A 的判断")),
-        "判断记忆不得跨会话可见（T-117 要消灭的泄漏；实际: {contents:?}）"
+        "判断记忆不得跨会话可见（实际: {contents:?}）"
     );
 
     // 从 A 读：自己的判断照常在——「私有」是按线程，不是不存在。
@@ -1218,7 +1218,7 @@ fn prompt_section_says_degraded_instead_of_pretending_completeness() {
         recall_view(vec![snap(true, &store)], None, "session/main").expect("有记忆 ⇒ 有视图");
     assert!(
         degraded_view.degraded,
-        "外壳降级必须被取值点誊抄进视图字段（T-104：视图脱离外壳流动时自描述）"
+        "外壳降级必须被取值点誊抄进视图字段（视图脱离外壳流动时自描述）"
     );
     assert_eq!(
         degraded_view.entries.len(),

@@ -131,7 +131,7 @@ pub struct ListToolsResult {
 /// 三个字段全部可选 ⇒ 「解析成功」⇒ 返回
 /// `tool_response.result.unwrap_or(Value::Null)` ⇒ **结果被静默换成 `null`**。
 ///
-/// 实测后果（批次 J 的端到端）：MCP 工具确实被调用了（mock server 收到
+/// 实测后果（端到端）：MCP 工具确实被调用了（mock server 收到
 /// `tools/call`），但喂给模型的结果正文是字符串 `"null"`——工具白跑，
 /// 模型拿着空结果继续推理。全程无任何报错。
 ///
@@ -187,7 +187,7 @@ impl McpToolCallResponse {
 /// 「配置了 MCP server，工具列表里却什么都没有」——排查成本极高。
 ///
 /// 已在真实链路验证：修复前 mock server 只收到 `initialize`，`tools/list`
-/// 根本没发出（见 `crates/symbio-plugin-mcp/README.md` 与批次 J 的端到端记录）。
+/// 根本没发出（见 `crates/symbio-plugin-mcp/README.md` 的端到端记录）。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpInitializeResponse {

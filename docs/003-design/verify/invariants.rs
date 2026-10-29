@@ -58,7 +58,7 @@ struct Event {
     status: String,           // 收束格的状态（`completed` / `aborted` / `-`）
     fell_back: bool,          // 走了兜底
     budget_ms: Option<u64>,   // 该轮的单次调用预算（只有用户格带）
-    reason: Option<String>,   // 停机原因（闭集；只有停机格带，T-220）
+    reason: Option<String>,   // 停机原因（闭集；只有停机格带）
 }
 
 #[derive(Debug, PartialEq, Eq)]

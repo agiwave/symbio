@@ -381,7 +381,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                         false,
                     );
                 }
-                // 轮边界折进的补充（缺口 3）：它**是用户说的话**，所以 role=user——
+                // 轮边界折进的补充：它**是用户说的话**，所以 role=user——
                 // 不是为了「让它看起来像用户发言」，而是因为它字面上就是。
                 //
                 // ⚠️ 这条修的是**静默丢失**：补充进了 `context.messages`、会落库、
@@ -402,7 +402,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                         );
                     }
                 }
-                // 轮边界汇报（缺口 4）：它是**助手说的话**（role=assistant），但**不是**
+                // 轮边界汇报：它是**助手说的话**（role=assistant），但**不是**
                 // 模型的对话内容——它是给人看的界面文本。
                 //
                 // 所以 `exclude_from_context: true` ⇒ 进转写（用户看得见、落库留得住）、

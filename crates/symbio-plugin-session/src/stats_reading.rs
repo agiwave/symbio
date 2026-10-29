@@ -91,7 +91,7 @@ pub(super) fn commitments_reading(snapshot: &[Event]) -> serde_json::Value {
     })
 }
 
-/// 实例级聚合列（P2）：把存储层交回的**全部会话快照**合并成一份读数。
+/// 实例级聚合列：把存储层交回的**全部会话快照**合并成一份读数。
 ///
 /// ## 为什么在存储层遍历、在 core 侧合并
 ///

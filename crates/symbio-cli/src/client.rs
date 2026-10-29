@@ -54,7 +54,7 @@ use symbio::symbio_core::{
     Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest, PATH,
     SESSION_ID, WORKDIR,
 };
-// 读数面板方言（P4）：后端下发描述、CLI 只渲染。
+// 读数面板方言：后端下发描述、CLI 只渲染。
 //  这三个名字随返回值流动（C-002：插件侧不深引 core 域目录），与 Tauri 前端
 //  `schemas/reading.ts` 是同一份契约的两半。
 use symbio::symbio_core::{ReadingPanel, ReadingTone};
@@ -715,7 +715,7 @@ impl SymbioClient {
         }
     }
 
-    /// 读当前会话的读数并打到 stderr（REPL 的 `/stats`，P4）。
+    /// 读当前会话的读数并打到 stderr（REPL 的 `/stats`）。
     ///
     /// ## 本方法是**渲染器**，不是统计器
     ///

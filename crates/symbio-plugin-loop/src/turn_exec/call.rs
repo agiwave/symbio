@@ -38,7 +38,7 @@ pub(crate) struct Running {
 /// [`open_turn`] 的出口：草稿与驱动它要的端口。
 ///
 /// `elimination_revoked` 在开轮前取一次（与接线前同一时刻）：淘汰闸的部署级判据由
-/// session 折叠成**一个值**（`D-086 §4`：全量事件过墙是 P6「值注入」的反面）。
+/// session 折叠成**一个值**（`D-086 §4`：全量事件过墙是「值注入」的反面）。
 pub(crate) struct OpenRun {
     pub(crate) session: super::TurnSession,
     pub(crate) llm: std::sync::Arc<dyn LlmAdapter>,
@@ -72,14 +72,14 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
         drive_seq: a.drive_seq,
         window_turns: Some(a.window_turns),
         actor: a.actor.clone(),
-        // 轮内注入（缺口 3）：用户中途说的话折进**本轮**。
+        // 轮内注入：用户中途说的话折进**本轮**。
         //
         // core 只知道「加消息」——抽干、合并、**落格**全在这里（插件侧）。
         // core 不该知道「收件箱补充」这个概念（队列、`merge_supplements`、
         // `InboxItem` 都在 `crates/symbio-plugin-session`），而落格也不需要 core 参与：
         // 本函数自己就开着 `store`。
         //
-        // 汇报（缺口 4）**不在这里**：批次边界那件事成了 `policy.report` 行，
+        // 轮中汇报**不在这里**：批次边界那件事成了 `policy.report` 行，
         // 由同一个环按 `prio` 选中、由它自己的执行体落格上线（D-163）。闭包只留
         // 「抽干」这一件事——它仍然是 core 唯一的轮边界挂点。
         inject: injector(a.supplements.clone()).map(|drain| {
@@ -118,7 +118,7 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
                 },
             ) as super::super::turn_runner::RoundInjector
         }),
-        // 本路**恒**走生成：定稿答话轮（缺口 5）不经这里——它一个模型请求都不发，
+        // 本路**恒**走生成：定稿答话轮不经这里——它一个模型请求都不发，
         // 由 `execute_final_reply_turn` 单独入口落格（见该函数）。
         final_reply: None,
         final_cost_ms: 0,
@@ -193,10 +193,10 @@ fn injector(supplements: Option<SupplementFn>) -> Option<SupplementFn> {
     supplements
 }
 
-/// 抽干结果 → **落格 + 构造注入消息**（缺口 3 的全部逻辑，闭包之外）。
+/// 抽干结果 → **落格 + 构造注入消息**（轮内注入的全部逻辑，闭包之外）。
 ///
-/// 为什么抽出来：闭包在 P3c 里已经 90 行，且一半是「抽干 / 落格 / 造节点」的直线代码。
-/// 缺口 4 要往同一个闭包里再加一段汇报逻辑，不抽出来的话那个闭包会奔到 200 行——
+/// 为什么抽出来：这段逻辑内联在补充注入的闭包里已经 90 行，且一半是「抽干 / 落格 / 造节点」的直线代码。
+/// 轮中汇报要往同一个闭包里再加一段逻辑，不抽出来的话那个闭包会奔到 200 行——
 /// 而它的可读性靠的正是「一眼看到这一轮边界上依次发生了什么」。
 ///
 /// 返回**空 vec** = 本轮无可注入（没有补充 / 正文为空 / 拿不到溯源锚点）。三种情形
@@ -219,7 +219,7 @@ pub(crate) fn supplement_into_request(
         return Vec::new();
     }
     // **落格**：成为一格事实（`turn × asserted`）。不落格的话它只活在这一次请求里，
-    // 下一轮又消失了——而「用户说过的话没有变成事实」正是缺口 3 本身。
+    // 下一轮又消失了——而「用户说过的话没有变成事实」正是轮内注入要消掉的失效本身。
     //
     // 事件 id 带序号（`s-{turn}-{no}`）：一次工具循环里可能折进多条，不带序号会撞
     // 幂等键（`Duplicate`）。

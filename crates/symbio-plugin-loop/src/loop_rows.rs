@@ -237,8 +237,8 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
 /// 派出（出口 `sent`）与收应答（出口 `response` / `failed` / `retry`）分处两个环步，
 /// 两个动作之间那一圈「已派出、未收清」因此在事实面上可见。
 ///
-/// 名单上三格都在**收尾**这一侧：`artifact.added`（2c 产物）、
-/// `chat.assistant.progress`（2d 等待进展）、`turn.supplemented`（2f 轮内注入）——
+/// 名单上三格都在**收尾**这一侧：`artifact.added`（产物）、
+/// `chat.assistant.progress`（等待进展）、`turn.supplemented`（轮内注入）——
 /// 它们的写点在批尾。
 ///
 /// 批次边界汇报（`chat.assistant.reported`）不在名单上：它的写点归 [`ACTOR_REPORT`]，

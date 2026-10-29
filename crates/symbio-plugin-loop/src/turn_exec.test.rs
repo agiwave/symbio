@@ -442,7 +442,7 @@ impl ExecTranscriptWriter for CollectingFrames {
     }
 }
 
-/// 补充成为事实、并在**下一轮**仍可见（缺口 3 的真正判据，插件层那一半）。
+/// 补充成为事实、并在**下一轮**仍可见（插件层那一半判据）。
 ///
 /// ## 为什么这条在插件层而不在 core
 ///
@@ -455,7 +455,7 @@ impl ExecTranscriptWriter for CollectingFrames {
 ///
 /// - **落格**（WAL 有 `turn.supplemented` + 溯源 + `count`）：它成为了事实；
 /// - **回读下一次请求**：它在**本轮**就对模型可见（用户就是在这轮说的话）；
-/// - **重开 WAL 再投影**：它在**下一轮**仍可见——这才是缺口 3 的原始症状
+/// - **重开 WAL 再投影**：它在**下一轮**仍可见——这才是原始症状
 ///   （只进消息列表、不进事实网格的补充，下一轮就从模型眼前消失）。
 ///
 /// ## 反向自检
@@ -544,7 +544,9 @@ async fn supplements_become_facts_visible_next_turn() {
     let sup = snap
         .iter()
         .find(|e| e.kind == symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED)
-        .unwrap_or_else(|| panic!("补充必须落成事实（否则下一轮就消失——那正是缺口 3）：{snap:?}"));
+        .unwrap_or_else(|| {
+            panic!("补充必须落成事实（否则下一轮就消失——那正是轮内注入要消掉的失效）：{snap:?}")
+        });
     assert_eq!(sup.entity, symbio_core::Entity::Turn, "落在 Turn 实体上");
     assert_eq!(sup.verb, symbio_core::Verb::Asserted, "断言类动词");
     assert_eq!(
@@ -1936,7 +1938,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
     let dispatch = all
         .iter()
         .find(|e| e.kind == symbio_plugin_api::events::EVENT_TURN_DISPATCH && e.turn == 0)
-        .expect("反射档同样要有派发格（T-225）");
+        .expect("反射档同样要有派发格");
     assert_eq!(
         dispatch.payload["tier"], "reflex",
         "派发格声明反射档（DE-041 §3 的档位观测；兜底率按层统计靠它）"
@@ -2439,7 +2441,7 @@ async fn consolidation_is_forwarded_before_the_turn_runs() {
         .expect("第二轮的派发格应已落");
     assert!(
         second_user_at < snap_at,
-        "用户格先于压缩快照（T-225：用户格先于任何判决）"
+        "用户格先于压缩快照（用户格先于任何判决）"
     );
     assert!(
         snap_at < dispatch_at,

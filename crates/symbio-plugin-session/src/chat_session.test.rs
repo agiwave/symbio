@@ -196,7 +196,7 @@ async fn test_replace_messages_rejects_absolute_escape() {
     );
 }
 
-// ── 写入期工具链裁剪与配置生效性（审计止血项 P0-2 / P0-3 / P1-②）────────
+// ── 写入期工具链裁剪与配置生效性 ────────────────────────────────
 
 /// 同 `setup`，但注入自定义会话配置（验证 `prune_tool_history` / `max_messages` 等开关）。
 async fn setup_with_config(
@@ -244,7 +244,7 @@ fn tool_round(user_id: &str, tc_id: &str, tool_id: &str) -> Vec<ChatNode> {
     ]
 }
 
-/// 回归（P0-2）：`keep_turns = 0`（语义"不限制"）不得越界 panic。
+/// 回归：`keep_turns = 0`（语义"不限制"）不得越界 panic。
 /// 旧实现直接取 `user_indices[len - 0]` → 下标 `len` 越界。
 #[tokio::test]
 async fn prune_zero_keep_turns_does_not_panic() {
@@ -259,7 +259,7 @@ async fn prune_zero_keep_turns_does_not_panic() {
     assert!(msgs.iter().any(|m| m.id == "r2"));
 }
 
-/// 回归（P0-2）：空列表 + `keep_turns = 0` 同样是空操作。
+/// 回归：空列表 + `keep_turns = 0` 同样是空操作。
 #[tokio::test]
 async fn prune_empty_messages_zero_keep_turns_is_noop() {
     let mut msgs: Vec<ChatNode> = Vec::new();
@@ -367,7 +367,7 @@ async fn prune_drops_nodes_but_never_deletes_archive_files() {
     );
 }
 
-/// 回归（P0-2）：`context_messages = 0` 走完整 `append_messages` 链路也不得失败。
+/// 回归：`context_messages = 0` 走完整 `append_messages` 链路也不得失败。
 ///
 /// 切主后（D-049）正文的真源是事实投影，`append_messages` 交回的**权威副本**
 /// 就是写边界机制（窗口/裁剪/补号）的可观测面——持久判据另由 `apply_*` 与
@@ -394,7 +394,7 @@ async fn append_messages_with_zero_context_messages_does_not_fail() {
     );
 }
 
-/// 新开关（P1-②）：`prune_tool_history = false` 时保留完整工具链。
+/// 新开关：`prune_tool_history = false` 时保留完整工具链。
 #[tokio::test]
 async fn append_messages_keeps_tool_chain_when_prune_disabled() {
     let config = SessionConfig {
@@ -543,7 +543,7 @@ async fn turn_window_eviction_lands_a_removed_fact() {
     );
 }
 
-/// 回归（P0-3）：`max_messages` 不再被存储层 `.max(500)` 硬下限钳制，小值真实生效。
+/// 回归：`max_messages` 不再被存储层 `.max(500)` 硬下限钳制，小值真实生效。
 #[tokio::test]
 async fn max_messages_below_legacy_store_floor_is_honored() {
     let config = SessionConfig {

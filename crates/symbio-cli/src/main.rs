@@ -376,7 +376,7 @@ async fn handle_command(client: &mut SymbioClient, cmd: &str) -> Result<bool, St
             Ok(true)
         }
         "stats" => {
-            // 读数（P4）：调 `session/stats` 只读路由，把后端下发的**面板描述**
+            // 读数：调 `session/stats` 只读路由，把后端下发的**面板描述**
             // 原样打到 stderr。
             //
             // ## 为什么 CLI 不自己拼这些数

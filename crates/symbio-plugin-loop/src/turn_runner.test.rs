@@ -1024,7 +1024,7 @@ mod turn_runner_tests {
         assert_eq!(
             snapshot[2].kind,
             symbio_plugin_api::events::EVENT_TURN_DISPATCH,
-            "派发档另立一格（T-225）"
+            "派发档另立一格"
         );
         let cell = snapshot
             .iter()
@@ -1033,7 +1033,7 @@ mod turn_runner_tests {
         assert_eq!(cell.payload["status"], "aborted", "终止是状态字段");
         assert_eq!(
             cell.payload["reason"], "interrupted",
-            "停机原因入格（顶层 `reason`，闭集取值——T-220）"
+            "停机原因入格（顶层 `reason`，闭集取值）"
         );
         assert!(
             cell.payload["terminated"]["at"].as_i64().is_some(),
@@ -2324,7 +2324,7 @@ mod tool_round_tests {
         }
     }
 
-    /// 定稿答话轮（缺口 5）：`final_reply` 给定时**不调模型**，但两格照落。
+    /// 定稿答话轮：`final_reply` 给定时**不调模型**，但两格照落。
     ///
     /// ## 为什么要钉「两格都在」
     ///
@@ -2825,7 +2825,7 @@ mod tool_round_tests {
         assert_eq!(
             snapshot[2].kind,
             symbio_plugin_api::events::EVENT_TURN_DISPATCH,
-            "派发档另立一格（T-225）"
+            "派发档另立一格"
         );
         let artifact = snapshot
             .iter()
@@ -3099,7 +3099,7 @@ mod tool_round_tests {
         );
     }
 
-    /// **缺口 6 的锚**：provider 实测用量必须沿 `LlmTurn → TurnOutcome` 带出来。
+    /// **实测用量直通的锚**：provider 实测用量必须沿 `LlmTurn → TurnOutcome` 带出来。
     ///
     /// 唯一消费方是 session 的 token 估算校准（`chat_loop/turn.rs::feedback_estimate`）：
     /// 这一格断掉，校准比就冻结在初值 1.0，未校准启发式的系统偏差（实测对 CJK
@@ -3130,7 +3130,7 @@ mod tool_round_tests {
                 input: Some(11),
                 output: Some(22)
             }),
-            "用量断了 ⇒ 校准永远停在 1.0（缺口 6）"
+            "用量断了 ⇒ 校准永远停在 1.0"
         );
     }
 
@@ -3199,7 +3199,7 @@ mod tool_round_tests {
         assert_eq!(
             out.finish,
             ModelFinishReason::Length,
-            "长度截断的收尾原因必须在 TurnOutcome 上可见（T-144）"
+            "长度截断的收尾原因必须在 TurnOutcome 上可见"
         );
         // 收束格照常落（`fell_back=false`，正文照交付）：本判据只钉「带得出真值」，
         // 「带出之后 chat_loop 干什么」不在运行器职责内。
@@ -4017,7 +4017,7 @@ mod tool_round_tests {
         let draft = "打算这样写报告：先读三处，再逐段列数字，然后检查字数。";
         assert!(
             out.fell_back,
-            "被长度截断的思考不是答话——交付它就是把草稿当答案（T-142）"
+            "被长度截断的思考不是答话——交付它就是把草稿当答案"
         );
         assert_ne!(out.text, draft, "回给调用方的不是草稿");
 
@@ -5025,7 +5025,7 @@ mod round_decision_tests {
         assert_eq!(
             final_answer(&truncated, &empty),
             "",
-            "finish=length 时草稿不得提升为答案（T-142）"
+            "finish=length 时草稿不得提升为答案"
         );
 
         let bridged = StreamNodeFacts {
@@ -5305,7 +5305,7 @@ mod dangling_round_tests {
     }
 }
 
-// ── 应答载荷的实测用量（P2-4 的写侧）────────────────────────────────
+// ── 应答载荷的实测用量（写侧）────────────────────────────────────
 
 /// 判据：**「测到了」的唯一记号是 `usage` 这个键在不在**。
 ///

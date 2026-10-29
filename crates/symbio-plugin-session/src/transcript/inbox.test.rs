@@ -862,7 +862,7 @@ fn preemption_decider_spec_carries_its_row_and_gates_on_judge_intent() {
     assert_eq!(
         spec.capabilities,
         vec!["judge.intent".to_string()],
-        "能力取授权表**窄行**（T-081）"
+        "能力取授权表**窄行**"
     );
     assert_eq!(
         spec.budget_ms,

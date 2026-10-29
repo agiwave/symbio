@@ -326,7 +326,7 @@ pub use present::{
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
 };
 pub use turn::{facts, node_build};
-// 6b-③ 跨墙词表（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §7）：session 与
+// 跨墙词表（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §7）：session 与
 // loop 两侧共同命名。全部 `pub` 出根——消费方仍在本 crate 内（C-003 只数
 // `pub use`），而 C-002 禁止插件深引域目录 ⇒ 根别名是唯一合法路径。
 pub use capability::tool_metas;

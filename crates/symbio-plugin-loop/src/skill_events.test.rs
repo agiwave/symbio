@@ -156,7 +156,7 @@ fn compile_writes_a_sourced_skill_exactly_once_per_trigger() {
     assert_eq!(
         skill.payload.get("vis_scope").and_then(|v| v.as_str()),
         Some("shared"),
-        "技能 = 固化的可复用经验 ⇒ shared（T-117：缺席 = 缺省私有，\
+        "技能 = 固化的可复用经验 ⇒ shared（缺席 = 缺省私有，\
          跨会话命中——t35 证据②——就被召回预过滤挡死）"
     );
     assert_eq!(

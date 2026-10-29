@@ -326,7 +326,7 @@ async fn compose_text_from(
     }
 }
 
-/// 只取措辞、不落点（缺口 4 的轮边界路径）。
+/// 只取措辞、不落点（轮边界汇报路径）。
 ///
 /// 与 [`apply_verdict`] 的差别有两条，都是接线逼出来的：
 /// 1. **不拿 `&mut SessionContext`**：轮边界回调是 `Fn + Send + Sync + 'static`，

@@ -375,7 +375,7 @@ fn user_node(e: &Event) -> ChatNode {
     }
 }
 
-/// 轮边界折进的补充（`turn × asserted`，缺口 3）：载荷 `{ text, count, id, ids }`。
+/// 轮边界折进的补充（`turn × asserted`）：载荷 `{ text, count, id, ids }`。
 ///
 /// 形状**逐字复刻落库那一份**（`turn_exec::supplement_into_request` 的 `ChatNode`）：
 /// 它**没有** `msg_type`、**没有** `status`，但**有** `meta.supplement*` 三键
@@ -407,7 +407,7 @@ fn supplement_node(e: &Event) -> ChatNode {
     }
 }
 
-/// 轮边界汇报（`turn × asserted`，缺口 4）：界面文本。
+/// 轮边界汇报（`turn × asserted`）：界面文本。
 ///
 /// 形状**复用写入侧的构造** [`ReportDraft::to_message`]
 /// ——它就是落库镜像上那一格的定义（`dialog_node(text, "progress", true)`）。
@@ -728,7 +728,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         return Vec::new();
     };
     // 本轮的中途产出（思考 / 正文）**排在工具卡片之前**：它发生在模型请求工具之前，
-    // 而落在这张卡片所属的格里正是为了拿到这个位置（写侧见 `turn_runner` 的 2c）。
+    // 而落在这张卡片所属的格里正是为了拿到这个位置（写侧见 `turn_runner` 的产物收尾）。
     // 载荷没有 `round`（恢复路、以及把中途产出只记在收束格 `rounds[]` 的老会话）⇒
     // 一个节点都不多发。
     let mut nodes = match e.payload.get("round") {

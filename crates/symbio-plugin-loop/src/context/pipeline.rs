@@ -245,7 +245,7 @@ async fn compress_snapshot_inner(
     // 若跳过此步直接 replace_all，被压掉的历史在物理层"凭空消失"，
     // 旧存档文件成为孤儿，事后无法审计。
     // 存档目录由 session 在派发前算好（`TurnSpec.transcript_archive_dir`）——
-    // 驱动器不再知道会话存储布局（P6-④）。
+    // 驱动器不再知道会话存储布局。
     let transcript_path = save_transcript_archive(
         &original_messages,
         orchestrator.session.transcript_archive_dir(),
@@ -751,7 +751,7 @@ pub(crate) async fn retry_compaction(
         // force = true：跳过阈值判定并绕过熔断（用户主动重试）
         true,
         // 轮外路径：这一压没有轮可挂（唤醒请求不进 turn 循环），摘要那次模型往返
-        // **不入账**。它是 J8 口径上唯一的已知缺口，登记在 。
+        // **不入账**。这是轮外压缩路径上唯一已知的口径缺口。
         None,
     )
     .await;
@@ -832,7 +832,7 @@ pub(crate) async fn retry_compaction(
 /// 压缩前把完整历史转存为 JSON transcript（best-effort）。
 ///
 /// `dir` 是 session 在派发前算好的存档目录（`TurnSpec.transcript_archive_dir`，
-/// 已含 `<id>/transcripts/`）——驱动器不解析会话存储布局（P6-④）。
+/// 已含 `<id>/transcripts/`）——驱动器不解析会话存储布局。
 fn save_transcript_archive(messages: &[ChatNode], dir: &std::path::Path) -> Option<String> {
     std::fs::create_dir_all(dir).ok()?;
     let ts = std::time::SystemTime::now()

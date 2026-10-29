@@ -557,7 +557,7 @@ async fn open_stage(
         Some(root) => (root, false),
         None => (symbio_core::llm_short_id(), true),
     };
-    // 轮内注入（缺口 3）：把本会话的收件箱抽干口交给工具循环，让「用户中途插话」
+    // 轮内注入：把本会话的收件箱抽干口交给工具循环，让「用户中途插话」
     // **折进本轮**。抽干住在 session（队列与配置都在那边），驱动器经端口取。
     let supplements: super::SupplementFn = {
         let session = context.session.clone();
@@ -583,7 +583,7 @@ async fn open_stage(
             fut
         }) as super::SupplementFn
     };
-    // 轮中汇报（缺口 4）的能力口：**只产措辞**——判定与落格都不在这里（D-163）。
+    // 轮中汇报的能力口：**只产措辞**——判定与落格都不在这里（D-163）。
     // `None` = compose 产线关着：那一行到期时执行体交不回话，只落一格
     // `result:"silent"` 的尝试，这一段静默因此不再重复到期。
     let report = orchestrator.compose_enabled.then(|| {

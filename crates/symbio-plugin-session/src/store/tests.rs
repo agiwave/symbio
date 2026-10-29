@@ -178,7 +178,7 @@ fn recall_snapshots_scans_one_level_deliberately() {
     );
     assert!(
         !contents.contains(&"子会话在委派里记下的"),
-        "嵌套子会话不进顶层召回（刻意范围，T-118；实际: {contents:?}）"
+        "嵌套子会话不进顶层召回（刻意范围；实际: {contents:?}）"
     );
     assert!(snaps.iter().any(|s| s.own), "调用方自己那份 own=true");
 }
@@ -755,7 +755,7 @@ fn current_window_starts_at_the_latest_snapshot() {
     );
 }
 
-// ── P6-④ / D-084：事实源唯一端口（facts / snapshot） ─────────────────────
+// ── D-084：事实源唯一端口（facts / snapshot） ─────────────────────────────
 
 /// 同一会话的 `facts()` 返回**同一个**实例：进程内只有一个 `head`、一把写锁。
 ///

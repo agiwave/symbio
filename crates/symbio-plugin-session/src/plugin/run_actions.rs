@@ -489,7 +489,7 @@ async fn run_elimination_revoked(
 ) -> VdfsResult<VdfsResponse> {
     let session = plugin.run_session(host, dispatch).await?;
     // 存储布局与遍历留在 session，折叠判据仍在 core；loop 只收结论值
-    // （D-086 §4：全量事件过墙是 P6「值注入」的反面）。
+    // （D-086 §4：全量事件过墙是「值注入」的反面）。
     let fleet = session.store_handle().deep_snapshots();
     let events: Vec<_> = fleet.into_iter().flatten().collect();
     let overlay = symbio_core::GrantsOverlay::fold(

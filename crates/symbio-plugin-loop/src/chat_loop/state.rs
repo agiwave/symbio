@@ -264,7 +264,7 @@ pub(crate) struct TurnState {
     ///
     /// 由轮首判决执行体的 `apply_verdict`（`VerdictEffect::Spoke`）填充，交 `turn_exec::drive`
     /// 落成 `chat.assistant.opening` 格。**落格不在本文件**——写者令牌只在执行口，
-    /// 与缺口 5 的答话同一条分割（判定与措辞在 chat_loop，落格在 turn_exec）。
+    /// 与答话同一条分割（判定与措辞在 chat_loop，落格在 turn_exec）。
     /// `None` = 本轮没有开场白（常态）。
     pub(crate) opening_text: Option<String>,
     /// 开场白**对话面节点**的身份与标记（仅 [`TurnState::opening_text`] 有值时消费）。

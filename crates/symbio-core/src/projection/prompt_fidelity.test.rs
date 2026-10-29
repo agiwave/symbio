@@ -87,8 +87,8 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
         artifact(0, "vdfs_read", "文件内容：hello"),
         // 投影不认识的新 kind。
         //
-        // ⚠️ 这一条**换过**：原先用 `turn.supplemented`（P3c 落地前它确实不在投影里）。
-        // P3c 补进投影后忘了登记进 `expected_role`，于是它一直被当成「不在投影范围」
+        // ⚠️ 这一条**换过**：原先用 `turn.supplemented`（当时它确实不在投影里）。
+        // 它补进投影后忘了登记进 `expected_role`，于是它一直被当成「不在投影范围」
         // 跳过——**补充漏进请求包时判据不会红**。所以现在补了登记，而这条用例必须
         // 换一个真正未知的 kind，否则它钉的是「有东西没登记」而不是「投影不认识它」。
         Event::pending(
@@ -154,7 +154,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
         "必须报出「角色不符」：{}",
         role_bad.summary()
     );
-    // ⑤ 界面文本泄漏进请求包（缺口 4 的判据方向）
+    // ⑤ 界面文本泄漏进请求包（轮边界汇报的判据方向）
     let leaked = {
         let evs = vec![user_turn(0, "问"), report(0, "已经完成 1 轮工具调用")];
         let msgs = vec![
@@ -172,7 +172,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
     );
 }
 
-/// 轮边界汇报一格事实（缺口 4）。
+/// 轮边界汇报一格事实。
 fn report(turn: u64, text: &str) -> Event {
     Event::pending(
         format!("r-{turn}"),
@@ -185,7 +185,7 @@ fn report(turn: u64, text: &str) -> Event {
     .with_payload(serde_json::json!({ "text": text, "tool_rounds": 1, "quiet_ms": 0 }))
 }
 
-/// 缺口 4 的**正向**判据：汇报落了格 ⇒ 转写里有它、送模型的那批里**没有**它。
+/// 轮边界汇报的**正向**判据：汇报落了格 ⇒ 转写里有它、送模型的那批里**没有**它。
 ///
 /// 两侧都要钉，缺一不可：
 /// - 只有「不在请求包里」⇒ 事件压根没落格也绿（那是缺口的**原症状**）；

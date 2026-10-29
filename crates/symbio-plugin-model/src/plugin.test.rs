@@ -222,7 +222,7 @@ async fn load_fills_registry_and_mirror_from_its_own_dir() {
     assert_eq!(providers.default_provider_id.as_deref(), Some("openai-1"));
 }
 
-// ── 计价（P2-4）：规范化与折算 ─────────────────────────────────────────
+// ── 计价：规范化与折算 ─────────────────────────────────────────────────
 
 /// 表单总会提交 `pricing` 子对象键：空币种 + 零单价必须规范化回「未配置」。
 #[test]

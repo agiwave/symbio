@@ -87,7 +87,7 @@ pub const WORKER_MIN_CHARS: usize = 0;
 /// 「无事实源 ⇒ 不落派生事实」的分支。
 pub struct TurnDispatch {
     pub spec: TurnSpec,
-    /// 本会话事实轨端口（P6 已构造好的 `Arc<SessionStore>` 取出的同一实例）。
+    /// 本会话事实轨端口（由宿主构造好的 `Arc<SessionStore>` 取出的同一实例）。
     pub facts: Option<Arc<dyn Store<Event = Event>>>,
     /// 执行期帧出口（今日 `run_chat_loop` 的入参）。
     pub sink: ExecEventSink,

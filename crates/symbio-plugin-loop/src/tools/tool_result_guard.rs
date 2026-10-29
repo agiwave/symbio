@@ -9,7 +9,7 @@
 //!    **head/tail 摘要**（保留前 60% + 后 40% 预算，尾部通常是结论/错误，更关键），
 //!    中间插入占位说明。
 //!
-//! 存档位置设计（P1-1）：工具结果语义上是会话资产，历史上写入系统临时目录会被
+//! 存档位置：工具结果语义上是会话资产，历史上写入系统临时目录会被
 //! OS 清理造成历史提示死链；现跟随会话目录持久化。文件名 = 毫秒时间戳 + token 数 + 内容 FNV 指纹，杜绝旧实现"同秒同 token 数互相覆盖"的碰撞；目录按修改时间
 //! 保留最新 [`TOOL_ARCHIVE_KEEP`] 个文件，防止无限累积。
 //!
@@ -166,7 +166,7 @@ pub fn guard_tool_result(text: &str, budget_tokens: usize, archive_dir: &Path) -
     let archive_path = archive_full_text(text, n, archive_dir);
 
     let omit = n.saturating_sub(budget_tokens);
-    // 统一取回协议（P1-2）：三层压缩占位符共用同一格式 —— 「已存档至: <路径> +
+    // 统一取回协议：三层压缩占位符共用同一格式 —— 「已存档至: <路径> +
     // 统一取回入口 local/file_read + 统一分段参数 offset/limit」。
     let archive_hint = match &archive_path {
         Some(p) => format!("完整输出已存档至: {p}{RETRIEVAL_HINT}"),

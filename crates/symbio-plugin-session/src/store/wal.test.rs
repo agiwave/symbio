@@ -758,8 +758,8 @@ fn range_unions_archives_with_live_in_seq_order() {
 ///
 /// 归档把被取代的前缀移出 live ⇒ live 首号不再是 0。按下标切会把「从 seq 11 起」
 /// 读成「从 live 的第 11 条起」= 空集，调用方要的那一条因此在压缩过的会话里
-/// **静默**消失（P6-① 修的就是这一处；唯一的 `from > 0` 调用点在
-/// `transcript/autonomous`，它取 `.next()`，压缩过才显形）。
+/// **静默**消失（唯一的 `from > 0` 调用点在 `transcript/autonomous`，它取
+/// `.next()`，压缩过才显形）。
 #[test]
 fn range_after_archival_selects_by_seq_not_by_position() {
     let (_dir, _path, store) = seeded(12);

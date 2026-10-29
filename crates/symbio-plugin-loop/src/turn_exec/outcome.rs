@@ -195,7 +195,7 @@ pub(crate) async fn classify_turn<'b>(
                 reasoning: reasoning_text,
                 response_text_child_id: child_id,
                 reasoning_child_id,
-                // 实测用量直通：校准反馈的唯一数据源（缺口 6）。这一格若丢，
+                // 实测用量直通：校准反馈的唯一数据源。这一格若丢，
                 // 校准比冻结在初值 1.0，压缩预检会把本可成功的摘要请求误判成
                 // 「注定超限」。
                 usage: outcome.usage,

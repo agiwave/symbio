@@ -28,7 +28,7 @@ fn long_text_is_truncated_and_keeps_head_tail() {
     let g = guard_tool_result(&big, 500, &root());
     assert!(g.truncated);
     assert!(g.text.contains("[... 已省略"));
-    // 统一取回协议：占位符含存档路径与 vdfs_read 取回入口（P1-2）
+    // 统一取回协议：占位符含存档路径与 vdfs_read 取回入口
     assert!(g.text.contains("完整输出已存档至: "));
     assert!(g.text.contains("vdfs_read"));
     // head 与 tail 应分别保留原文片段
@@ -61,7 +61,7 @@ fn test_archive_dir(tag: &str) -> PathBuf {
     dir
 }
 
-/// P1-1 防碰撞：同毫秒同 token 数的不同内容必须落到不同文件
+/// 防碰撞：同毫秒同 token 数的不同内容必须落到不同文件
 /// （旧实现文件名 = 秒级时间戳 + token 数，同秒同 token 数互相覆盖）。
 #[test]
 fn same_milli_same_tokens_do_not_collide() {
@@ -77,7 +77,7 @@ fn same_milli_same_tokens_do_not_collide() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// P1-1 清理策略：目录按修改时间只保留最新 N 个存档。
+/// 清理策略：目录按修改时间只保留最新 N 个存档。
 #[test]
 fn prune_keeps_only_latest_files() {
     let dir = test_archive_dir("prune");
@@ -109,7 +109,7 @@ fn prune_keeps_only_latest_files() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// P1-1 存档位置：session 派发前算好的 `tool_archive_dir` 原样使用
+/// 存档位置：session 派发前算好的 `tool_archive_dir` 原样使用
 ///（跟随会话生命周期），而非系统临时目录。
 #[test]
 fn archive_prefers_session_dir_when_session_id_given() {

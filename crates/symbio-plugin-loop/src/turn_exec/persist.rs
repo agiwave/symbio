@@ -108,7 +108,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     // 恢复入口；恢复时经 [`TurnResume`] 续写同一轮（不重开用户格）。
     // 此处的 `text` 只是模型在工具轮说过的话，不是终答。
 
-    // 折进的补充也要进落库镜像（缺口 3）：排在 `produced` **之前** ——
+    // 折进的补充也要进落库镜像：排在 `produced` **之前** ——
     // 用户先插话、工具结果后到，这是时间序（`persist_messages` 只写尾部增量，
     // 顺序错了落库就乱了）。
     // 同上：锁拿不到就用空的（落库镜像少这批补充，其余不受影响）。
@@ -124,7 +124,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
             reasoning: reasoning_text,
             response_text_child_id: child_id,
             reasoning_child_id,
-            // 实测用量直通：校准反馈的唯一数据源（缺口 6），与上面被拒出口同一条。
+            // 实测用量直通：校准反馈的唯一数据源，与上面被拒出口同一条。
             usage: outcome.usage,
             // 末轮原因直通：与上面被拒出口同一条纪律。`..Default::default`
             // 会把这一格静默填成 Stop，长度截断的自动续写因此不可达。
@@ -135,7 +135,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     })
 }
 
-/// **定稿答话轮**（缺口 5）：`classify` 判 `Answered` ⇒ 本轮**一个模型请求都不发**，
+/// **定稿答话轮**：`classify` 判 `Answered` ⇒ 本轮**一个模型请求都不发**，
 /// 但收束格仍须由 v2 运行器落（用户格已由编排层在判决之前落）。
 ///
 /// ## 它解决的是什么

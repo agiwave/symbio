@@ -51,7 +51,7 @@ impl CommitmentKeeper {
         .with_payload(serde_json::json!({ "id": id }))
     }
 
-    /// 违约收束（**必须带 why**——违约可被观测是 T5 的全部前提）。
+    /// 违约收束（**必须带 why**——违约可被观测是这个机制的全部前提）。
     pub fn breach(&self, id: &str, from: &str, why: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-close-{id}"),
@@ -90,7 +90,7 @@ impl CommitmentKeeper {
 /// `recalled_event` 同一形态。
 ///
 /// 违约才宣告：守约无需告知（履行的东西就摆在那里），违约却必须让承诺对象知道
-/// （DE-038 §5：违约可被观测是 T5 的全部前提）。宣告仍是同一份事实源里的**一格**，
+/// （DE-038 §5：违约可被观测是这个机制的全部前提）。宣告仍是同一份事实源里的**一格**，
 /// 不是新通道（DE-038 §2「通信 = 没有直连」）。
 ///
 /// 生产侧只准调本函数。

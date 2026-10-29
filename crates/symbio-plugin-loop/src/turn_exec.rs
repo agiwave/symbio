@@ -648,7 +648,7 @@ pub(crate) struct ExecTurn<'a> {
     pub window_turns: u64,
     /// 本轮装配进模型的工具清单（空 = 无工具轮）。
     pub tools: &'a [CapabilityMeta],
-    /// 补充抽干口（缺口 3）：工具循环每跑完一轮问一次「用户有没有中途插话」。
+    /// 补充抽干口：工具循环每跑完一轮问一次「用户有没有中途插话」。
     /// 有就折进**本轮**——落一格 `turn.supplemented` 事实 + 进下一次请求。
     ///
     /// **闭包而不是具体类型**：抽干的实现是 `SupplementDrain`（要 config / change_subs / 会话
@@ -658,7 +658,7 @@ pub(crate) struct ExecTurn<'a> {
     ///
     /// 类型定义在插件侧（core 不参与这套，见 `TurnInput::inject`）。
     pub supplements: Option<SupplementFn>,
-    /// 轮中汇报（缺口 4）的**能力口**：`None` = 这一幕的 compose 产线关着
+    /// 轮中汇报的**能力口**：`None` = 这一幕的 compose 产线关着
     /// （`compose_enabled = false`）——那一行到期时执行体交不回话，只落一格
     /// `result:"silent"` 的尝试，这一段静默因此不再重复到期。
     ///

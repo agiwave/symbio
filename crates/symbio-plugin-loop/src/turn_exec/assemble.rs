@@ -200,7 +200,7 @@ pub(crate) async fn assemble_turn(
     //   是它的原用户格 seq——唤醒**不新开用户格**，收束仍记在该轮上（C4 按 turn
     //   配对，另开新轮会把原轮变成永久假缺口）。
 
-    // 折进的补充消息的收集器（缺口 3）：注入闭包（`'static`）往它 push，
+    // 折进的补充消息的收集器：注入闭包（`'static`）往它 push，
     // 执行完随 `ExecTurnResult` 回灌进 `context.messages`（落库动作就是
     // `context.messages.push(merged)`）。不回灌就只活在这一次请求里，
     // 重启即丢，而 t19 等的正是落库那条。

@@ -267,6 +267,6 @@ async fn wrapper_returns_card_without_running_inner() {
     );
     assert!(
         !inner.executed.load(std::sync::atomic::Ordering::SeqCst),
-        "被拦下时绝不落到内层——这就是 T-138 修复的核心不变量"
+        "被拦下时绝不落到内层——这就是「拦下不落内层」的核心不变量"
     );
 }
