@@ -8,9 +8,8 @@
 //! 用户格**不在这里落**：它先于任何判决，由编排层在 `drive` 之前写入，
 //! 本阶段收到的是它的 seq（`TurnInput::user_seq`）。
 //!
-//! **纯结构拆分契约**：本文件体内的顺序、判据与副作用逐字来自
-//! `run_with_tools` 的第一段；早退（定稿答话 / 空答兜底 / 首请求前中止）在
-//! `PreparedFlow::Done` 里返回，语义与拆分前的 `return` 相同。
+//! 早退（定稿答话 / 空答兜底 / 首请求前中止）经 [`PreparedFlow::Done`] 交回结局，
+//! 不把半备好的草稿交出去——幕首之后只有一种状态在流转（[`Prepared`]）。
 
 use super::*;
 use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};

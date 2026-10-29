@@ -236,7 +236,7 @@ impl LlmAdapter for ProviderLlmAdapter {
     /// 工具通道：工具清单下行 + 工具调用上行。
     ///
     /// **空文本在工具轮上是合法的**（纯工具调用轮不说话）——所以这里不做空文本
-    /// 判定，判定归「本轮收束」的那一侧（`TurnRunner::run_with_tools`）：只有
+    /// 判定，判定归「本轮收束」的那一侧（`turn_runner::stream` 的收束路）：只有
     /// 「无工具调用 + 空文本」才是失败。
     ///
     /// ## 工具结果**逐条传消息数组**，不得压扁成一条 user 消息（[D-048a](../../../symbio-plugin-session/README.md#d-048a-v2-的-prompt-形状必须回到结构化消息不把工具结果拍平成纯文本 "crates/symbio-plugin-session/src/README")）

@@ -272,7 +272,7 @@ pub(crate) async fn execute_final_reply_turn(
         dialog: Some(dialog),
         turn_root_id: String::new(),
         // 取数口：**恒定快照**——答话轮没有流式过程（措辞插件的模型往返是静默的，
-        // 此刻已结束），思考事实是调用方搬运来的定值。挂上它，1b 收束格的
+        // 此刻已结束），思考事实是调用方搬运来的定值。挂上它，定稿答话收束格的
         // `produced` 载荷才带 `reasoning` / `reasoning_id`（重建据此复刻 Reason 节点）。
         nodes: reasoning.map(|(reasoning_id, reasoning)| {
             let facts = super::super::turn_runner::StreamNodeFacts {
@@ -283,13 +283,13 @@ pub(crate) async fn execute_final_reply_turn(
             };
             std::sync::Arc::new(move || facts.clone()) as super::super::turn_runner::NodeFactsFn
         }),
-        // 定稿答话轮不经过工具循环的闸门空隙——它一次请求都不发（`final_reply` 走
-        // 1b 分支直接收束）。但信号照传：若用户在答话落格前按下停止，1c 的中止检查
+        // 定稿答话轮不经过工具循环的闸门空隙——它一次请求都不发（`final_reply` 直接
+        // 收束）。但信号照传：若用户在答话落格前按下停止，首请求前中止检查
         // 会在落完用户格后接管，与其它轮同一条路径（终止是状态，不是特例）。
         abort: Some(abort),
     };
-    // `Run` 这一支在本入口**按构造不可达**（`final_reply` 非空 ⇒ `prepare_turn` 的 1b
-    // 就地收束、返回 `Done`）。本入口**不开环**（`D-222` 裁决 5：环只住在
+    // `Run` 这一支在本入口**按构造不可达**（`final_reply` 非空 ⇒ `prepare_turn` 的
+    // 定稿答话分支就地收束、返回 `Done`）。本入口**不开环**（`D-222` 裁决 5：环只住在
     // [`super::drive`]，而它要的那一片编排层状态这一轮根本没有）——真到了这里说明
     // 收束路径与交付包对不上，出声。
     let outcome = match TurnRunner::begin(store.as_ref(), input)

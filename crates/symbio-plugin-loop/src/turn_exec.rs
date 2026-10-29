@@ -976,7 +976,7 @@ pub(crate) fn run_close<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 
 /// 轮首那一组的**读失败**：动作需要 [`HeadCtx`]，而这一台的调用点没给。
 ///
-/// 今天只有定稿答话轮能到这一格，而它在 `prepare` 的 1b 就收束了（驱动不被调用）。
+/// 今天只有定稿答话轮能到这一格，而它在 `prepare` 的定稿答话分支就收束了（驱动不被调用）。
 /// 写成显式错误而不是 `unwrap`：真到了这里，事实面上没有可关的账，交回编排层比
 /// 静默空转好（与 [`ActorError::Read`] 的语义一致）。
 fn head_missing() -> ActorError {

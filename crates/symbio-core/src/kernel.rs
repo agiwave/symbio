@@ -1,7 +1,7 @@
 //! 内核门面：**封闭语法**的唯一汇合口（DE-023 A2 / §5）
 //!
 //! 这里只重导出、不拥有声明：Event 信封、Entity×Verb、`ActorSpec` 五字段、
-//! `Pattern` / `Scope`、声明容器与 `seal`、环七步、5 个封闭语法 trait。**词汇与行为
+//! `Pattern` / `Scope`、声明容器与 `seal`、环求解器、5 个封闭语法 trait。**词汇与行为
 //! 仍住各自的域**——加事实 / 视图 / 策略 / 插件的改动不应落到本文件（DE-023 D-177）。
 //!
 //! 根 [`mod.rs`](mod.rs) 用 `pub use kernel::*` 把它平铺出去，所以对外路径不变
@@ -41,5 +41,5 @@ pub use super::capability::{Capability, Registry};
 pub use super::llm::model_provider::ModelProvider;
 pub use super::vdfs::VdfsProvider;
 
-// ── 协议五格的事件名（环七步的输入面） ──
+// ── 协议五格的事件名（环求解器的输入面） ──
 pub use super::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};

@@ -4,10 +4,10 @@
 //! `tool_round_tests`（工具轮：注入、前缀、窗口、产物、待办、恢复）、
 //! `reflex_turn_tests`（反射档落格）。
 //!
-//! 另附 `run` / `run_streaming` 两个**测试专用**入口：生产一律走
-//! `TurnRunner::run_with_tools`（`turn_exec` 自己构造 `ActorSpec`），无工具轮的简单路径
-//! 只有本文件的用例用得到 ⇒ 按「测试消费的代码住测试模块」就地定义（`impl` 复用调用点的
-//! `.run(…)` 写法），**不占生产文件的表面**（生产面只留 `run_with_tools`）。
+//! 另附 `run` / `run_streaming` / `drive_with_tools` 三个**测试专用**入口：生产入口是
+//! `TurnRunner::begin` 与派发器 `turn_exec::drive`（`turn_exec` 自己构造 `ActorSpec`），
+//! 无工具轮的简单路径与「固定绑定表整轮驱动」只有本文件的用例用得到 ⇒ 按「测试消费的
+//! 代码住测试模块」就地定义，**不占生产文件的表面**。
 
 use super::super::turn_exec::ActorError;
 use super::{TurnInput, TurnOutcome, TurnRunner};
@@ -80,7 +80,7 @@ impl TurnRunner {
                 turn_root_id: String::new(),
                 dialog: None,
                 nodes: None,
-                // 无中止语义的路径：`None` ⇒ 1c 的检查是空操作。
+                // 无中止语义的路径：`None` ⇒ 首请求前中止检查是空操作。
                 abort: None,
             },
             std::sync::Arc::new(SilentDeltas),
@@ -90,7 +90,7 @@ impl TurnRunner {
 
     /// 流式版（测试侧）：生成增量逐片经 `sink` 送出；落格语义与 [`Self::run`] 同一条路径。
     ///
-    /// 无工具轮 = [`Self::run_with_tools`] 的**入参为空的同一路径**（工具清单空、无分发方）
+    /// 无工具轮 = [`Self::drive_with_tools`] 的**入参为空的同一路径**（工具清单空、无分发方）
     /// ——「有工具」与「无工具」不是两条执行路径。
     pub async fn run_streaming(
         &self,
@@ -100,7 +100,7 @@ impl TurnRunner {
         input: TurnInput,
         sink: std::sync::Arc<dyn DeltaSink>,
     ) -> Result<TurnOutcome, ActorError> {
-        self.run_with_tools(
+        self.drive_with_tools(
             store,
             llm,
             tok,
@@ -117,7 +117,7 @@ impl TurnRunner {
     /// 早先这里另写了一份等价循环；那会让「无进展收束」「步数上界」的用例只测到副本。
     /// 现在测试驱动与生产驱动是同一条路径（后果 2 的验收要求）。
     #[allow(clippy::too_many_arguments)]
-    pub async fn run_with_tools(
+    pub async fn drive_with_tools(
         &self,
         store: &std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
         llm: std::sync::Arc<dyn LlmAdapter>,
@@ -973,7 +973,7 @@ mod turn_runner_tests {
             dialog: None,
             nodes: Some(nodes),
             // 无中止语义：本夹具走 `AdapterError::Aborted`（模型中途返回），
-            // 不测 1c 的闸门空隙。
+            // 不测首请求前中止的闸门空隙。
             abort: None,
         }
     }
@@ -1066,7 +1066,7 @@ mod turn_runner_tests {
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -1158,7 +1158,7 @@ mod turn_runner_tests {
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
         TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -1206,7 +1206,7 @@ mod turn_runner_tests {
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -1271,7 +1271,7 @@ mod turn_runner_tests {
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
         let user_seq = super::seed_user(store.as_ref(), 0, "问");
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -1317,7 +1317,7 @@ mod turn_runner_tests {
             std::sync::Arc::new(EventStore::new());
         let user_seq = super::seed_user(store2.as_ref(), 0, "问");
         TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store2,
                 llm.clone(),
                 tok,
@@ -1352,7 +1352,7 @@ mod turn_runner_tests {
     }
 }
 
-// ── 工具轮（`run_with_tools`）：产物落格 + 结果回灌 + 等待用户停下 ──────────
+// ── 工具轮（`drive_with_tools`）：产物落格 + 结果回灌 + 等待用户停下 ──────────
 
 mod tool_round_tests {
     use crate::control_decl::guard_vocab;
@@ -1400,7 +1400,7 @@ mod tool_round_tests {
         });
 
         TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -1521,7 +1521,7 @@ mod tool_round_tests {
         let mut i = input(store.as_ref());
         i.inject = Some(inject);
         TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -2337,7 +2337,7 @@ mod tool_round_tests {
     /// 这一轮一次模型往返都不该发——那是 `Answered` 的全部意义。用记录型桩的 `prompts`
     /// 长度来钉：它长了就说明请求发了出去。
     ///
-    /// **反向自检**：把 `run_with_tools` 步骤 1b 那段短路删掉，本用例必红（桩会被调到）。
+    /// **反向自检**：把 `prepare_turn` 里 `final_reply` 那段短路删掉，本用例必红（桩会被调到）。
     #[tokio::test]
     async fn final_reply_lands_both_cells_without_calling_the_model() {
         let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
@@ -2349,7 +2349,7 @@ mod tool_round_tests {
         i.final_reply = Some("北京今天晴。".into());
         i.final_cost_ms = 1234;
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -2537,7 +2537,7 @@ mod tool_round_tests {
             let mut i = input_at(store.as_ref(), turn, &format!("第 {turn} 轮问题"));
             i.window_turns = Some(0);
             TurnRunner
-                .run_with_tools(
+                .drive_with_tools(
                     &store,
                     llm.clone(),
                     tok,
@@ -2580,7 +2580,7 @@ mod tool_round_tests {
             let mut i = input_at(store.as_ref(), turn, &format!("第 {turn} 轮问题"));
             i.window_turns = Some(1);
             TurnRunner
-                .run_with_tools(
+                .drive_with_tools(
                     &store,
                     llm.clone(),
                     tok,
@@ -2646,7 +2646,7 @@ mod tool_round_tests {
             let mut i = input_at(store.as_ref(), turn, &format!("第 {turn} 轮问题"));
             i.window_turns = Some(0);
             TurnRunner
-                .run_with_tools(
+                .drive_with_tools(
                     &store,
                     llm.clone(),
                     tok,
@@ -2663,7 +2663,7 @@ mod tool_round_tests {
         let mut i = input_at(store.as_ref(), 2, "压缩之后的问题");
         i.window_turns = Some(1);
         TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -2705,7 +2705,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -2874,7 +2874,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -2957,7 +2957,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -3058,7 +3058,7 @@ mod tool_round_tests {
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -3113,7 +3113,7 @@ mod tool_round_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(AnsweringLlm::new());
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -3185,7 +3185,7 @@ mod tool_round_tests {
             std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 std::sync::Arc::new(TruncatedLlm),
                 tok,
@@ -3239,7 +3239,7 @@ mod tool_round_tests {
             rounds: Arc::new(Mutex::new(0)),
         });
         let first = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 std::sync::Arc::new(pending_llm),
                 tok,
@@ -3296,7 +3296,7 @@ mod tool_round_tests {
             rounds: Arc::new(Mutex::new(0)),
         });
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 std::sync::Arc::new(answer_llm),
                 tok,
@@ -3574,7 +3574,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -3795,7 +3795,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -3900,7 +3900,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -4003,7 +4003,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -4131,7 +4131,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 tok,
@@ -4362,7 +4362,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run_with_tools(
+            .drive_with_tools(
                 &store,
                 llm.clone(),
                 TokenIssuer::issue_deep(),

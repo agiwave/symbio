@@ -129,7 +129,7 @@ impl: done
  账本条数冻结只许降——C-003 收窄后由它拦住「共享类型随手进根出口」，DE-023 D-186）。
 
 **封闭语法另有一个汇合口 [`kernel.rs`](src/kernel.rs)**（DE-023 A2）：Event 信封 / Entity×Verb /
-`ActorSpec` 五字段 / `Pattern`·`Scope` / 声明容器与 `seal` / 环七步 / 五个封闭语法 trait
+`ActorSpec` 五字段 / `Pattern`·`Scope` / 声明容器与 `seal` / 环求解器 / 五个封闭语法 trait
 只经它重导出，根用 `pub use kernel::*` 平铺（对外路径不变）。封闭语法的实现与
 CS-001 / CS-004 的**判定范围**（`core-kernel-files:` 标记）都在 `crates/symbio-kernel/src/lib.rs`；
 `kernel.rs` 只剩转出。域行为不进这个文件。

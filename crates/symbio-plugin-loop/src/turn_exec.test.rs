@@ -371,7 +371,7 @@ fn exec_base<'a>(
         tools: &[],
         recalled: None,
         skill_obs: &[],
-        // 快路候选集默认空 ⇒ 与接线前逐字同路（`run_with_tools`）。
+        // 快路候选集默认空 ⇒ 本夹具走无快路的那条。
         reflex: None,
         consolidation: None,
         supplements: None,
