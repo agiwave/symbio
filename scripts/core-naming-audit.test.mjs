@@ -25,8 +25,11 @@ const repoRoot = path.resolve(scriptDir, '..')
 /** 表头：**五列**，第四列必须是「函数 / 自由函数」（守卫会校验这一点） */
 const HEADER = '| 域 | 类型 / trait | 常量 / 静态量 | 函数 / 自由函数 | 备注 |'
 
-/** 造一份 README：`table` 是表格行（不含表头），`modifiers` 是限定词标记内容 */
-function readme(table, modifiers = 'Dyn,Default', header = HEADER) {
+/**
+ * 造一份 README：`table` 是表格行（不含表头），`modifiers` 是限定词标记内容，
+ * `kernelDomains` 是**整块住在内核**的域（D-256 的 `core-domains:kernel` 标记）。
+ */
+function readme(table, modifiers = 'Dyn,Default', header = HEADER, kernelDomains = []) {
   return [
     '# symbio_core —— 内核契约层：命名与结构规范',
     '',
@@ -34,6 +37,7 @@ function readme(table, modifiers = 'Dyn,Default', header = HEADER) {
     '',
     `<!-- core-naming:modifiers ${modifiers} -->`,
     '',
+    ...(kernelDomains.length ? [`<!-- core-domains:kernel ${kernelDomains.join(' ')} -->`, ''] : []),
     header,
     '|---|---|---|---|---|',
     table,
@@ -44,14 +48,17 @@ function readme(table, modifiers = 'Dyn,Default', header = HEADER) {
 }
 
 /** 造一棵最小仓库：`domains` 是 `{ 域名: mod.rs 内容 }`，根 mod.rs 默认通配重导出各域 */
-function repo({ table, domains = {}, rootMod, modifiers, header }) {
+function repo({ table, domains = {}, rootMod, modifiers, header, kernelDomains = {} }) {
   const files = {
-    'crates/symbio-core/README.md': readme(table, modifiers, header),
+    'crates/symbio-core/README.md': readme(table, modifiers, header, Object.keys(kernelDomains)),
     'crates/symbio-core/src/lib.rs':
       rootMod ?? Object.keys(domains).map((d) => `pub use ${d}::*;\n`).join(''),
   }
   for (const [d, src] of Object.entries(domains)) {
     files[`crates/symbio-core/src/${d}/mod.rs`] = src
+  }
+  for (const [d, src] of Object.entries(kernelDomains)) {
+    files[`crates/symbio-kernel/src/${d}/mod.rs`] = src
   }
   return files
 }
@@ -322,6 +329,36 @@ test('反例：表头缺「函数」列 ⇒ 红（读歪了不能报得理直气
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /规则源不可解析/, out(r))
   assert.match(out(r), /五列/, out(r))
+})
+
+// ── 域搬家（D-256）：纯契约域整块住内核，归属不能因此消失 ─────────────────
+
+test('整块住内核的域：README 标记 + 内核模块 ⇒ N-004 / N-005 绿', () => {
+  // 这是 `dialog` 的形态：core 根只平铺转出，声明与实现在 `symbio-kernel`。
+  // 若守卫只认 core 目录，那 17 个符号会同时踩两条——表里多出一个「不存在的域」，
+  // 公开面里多出 17 个「无归属」的符号——而它们其实归属得很清楚。
+  const r = audit(
+    repo({
+      table: '| `dialog` | 契约词 `Verdict` | `REASON_` | — | |',
+      kernelDomains: { dialog: 'pub struct Verdict;\n' },
+      rootMod: 'pub use symbio_kernel::dialog::Verdict;\n',
+    }),
+  )
+  assert.equal(r.status, 0, out(r))
+  assert.match(out(r), /5 条规则全部通过/, out(r))
+})
+
+test('标记说域住在内核，内核里却没有那个模块 ⇒ 红（域搬家不能是一句话）', () => {
+  const files = repo({
+    table: '| `dialog` | 契约词 `Verdict` | `REASON_` | — | |',
+    kernelDomains: { dialog: 'pub struct Verdict;\n' },
+    rootMod: 'pub use symbio_kernel::dialog::Verdict;\n',
+  })
+  delete files['crates/symbio-kernel/src/dialog/mod.rs']
+  const r = audit(files)
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /规则源不可解析/, out(r))
+  assert.match(out(r), /symbio-kernel/, out(r))
 })
 
 // ── 真实仓库：夹具证明不了「表与当前公开面一致」─────────────────────────

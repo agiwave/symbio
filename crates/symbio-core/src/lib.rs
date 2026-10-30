@@ -25,7 +25,6 @@ pub(crate) mod decl;
 // 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。它属封闭语法，
 // 经 `kernel` 门面以 `pub` 出根（C-003 只数 `pub use`）：避开与 `actors::Pattern`
 // 重名，插件只经根路径取用（C-002 禁深引域目录）。
-mod dialog;
 mod embedding;
 mod event;
 mod event_bus;
@@ -313,7 +312,7 @@ pub use vdfs::{absolute_addr, declared_addr_root, descend_addr, join_addr, AddrR
 // | 域 | 一句话 | 形态 |
 // |---|---|---|
 // | `chat` | 一条消息、一个主体长什么样 | **叶子模块**（`chat_node` / `session_chat` / `principal` / `chat_request`） |
-// | `dialog` | 判决是枚举、措辞是文本 | 根平铺符号 |
+// | `dialog` | 判决是枚举、措辞是文本 | **已迁内核**（纯契约，D-256）；根平铺是控制面的稳定路径 |
 // | `present` | 后端下发描述、前端零业务知识渲染 | 根平铺符号 |
 // | `turn` | 一轮次怎么交付、怎么造节点、产出什么 | 交付包平铺；`facts`/`node_build` 走叶子模块 |
 //
@@ -331,14 +330,14 @@ pub use turn::{facts, node_build};
 // `pub use`），而 C-002 禁止插件深引域目录 ⇒ 根别名是唯一合法路径。
 pub use capability::tool_metas;
 pub use chat::chat_request;
-pub use dialog::{
+pub use llm::{llm_emit_state, llm_state_frame};
+pub use projection::rebuild::rebuild;
+pub use projection::turns::count_user_messages;
+pub use symbio_kernel::dialog::{
     ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
     Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
     REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
-pub use llm::{llm_emit_state, llm_state_frame};
-pub use projection::rebuild::rebuild;
-pub use projection::turns::count_user_messages;
 pub use turn::dispatch::{
     run_ops, AddNodesRequest, CompressionBeginReply, CompressionBeginRequest,
     CompressionFinishRequest, CompressionOutcome, ConsolidateRequest, EditFrame, EditNodesRequest,

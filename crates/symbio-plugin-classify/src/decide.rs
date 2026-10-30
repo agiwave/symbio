@@ -39,7 +39,7 @@ use super::config::ClassifyConfig;
 ///
 /// 它必须**只输出一个词**——本模块的解析（[`parse_verdict`]）建立在这一点上。
 /// 让模型输出 JSON 或一句话再解析，等于把「这轮走哪条路」变成一次不可靠的字符串
-/// 匹配（`crates/symbio-core/src/dialog/` 的模块文档写了同一条理由）。
+/// 匹配（`crates/symbio-kernel/src/dialog/` 的模块文档写了同一条理由）。
 ///
 /// 它是 `pub(crate)` 而不是私有：配置的文档与测试要能引用"出厂那份长什么样"，
 /// 而不必再抄一遍字面量。

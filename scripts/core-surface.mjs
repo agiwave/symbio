@@ -173,10 +173,43 @@ export function kindOf(name) {
 }
 
 /**
+ * **住在内核 crate 的域**（D-256）。
+ *
+ * `dialog` 这类纯契约域已整块搬进 `symbio-kernel`，core 根只平铺转出。域目录不在 core
+ * 里，但「这个符号归属哪个域」不能因此消失——前缀规则、改名纪律仍按域名判。
+ *
+ * 声明处是 core README §1.2 的 `<!-- core-domains:kernel … -->` 标记（与 E-008 的
+ * `vocab:` 同一约定：**标了才认，没标不猜**）。声明与内核目录互为核对：标了却没有那个
+ * 模块 ⇒ 直接抛错，否则「域搬家」会变成一句没人核对的话，而这正是本仓反复吃过的亏。
+ */
+export function kernelResidentDomains(root) {
+  const readme = path.join(root, 'crates', 'symbio-core', 'README.md')
+  if (!fs.existsSync(readme)) return new Set()
+  const m = fs.readFileSync(readme, 'utf8').match(/<!--\s*core-domains:kernel\s+([A-Za-z0-9_-]+(?:\s+[A-Za-z0-9_-]+)*)\s*-->/)
+  if (!m) return new Set()
+  const names = m[1].trim().split(/\s+/).filter(Boolean)
+  const kernelSrc = path.join(root, 'crates', 'symbio-kernel', 'src')
+  const missing = names.filter(
+    (n) =>
+      !fs.existsSync(path.join(kernelSrc, n, 'mod.rs')) &&
+      !fs.existsSync(path.join(kernelSrc, `${n}.rs`)),
+  )
+  if (missing.length) {
+    throw new Error(
+      `core README 声明了住在内核的域，但 crates/symbio-kernel/src 里没有对应模块：` +
+        `${missing.join(' / ')}`,
+    )
+  }
+  return new Set(names)
+}
+
+/**
+/**
  * 枚举 `symbio_core` 的公开面。
  *
  * 返回 `{ coreRel, coreDir, domains, symbols, modules }`：
- *   - `domains`：域目录名（`Set`）
+ *   - `domains`：域目录名（`Set`，只含 core 下的）
+ *   - `kernelDomains`：整块住在 `symbio-kernel` 的域（README 标记声明，D-256）
  *   - `symbols`：`Map<符号名, 域>`；`'(root)'` = 直接声明在根 `mod.rs`，
  *     `'(explicit)'` = 根显式列名重导出且未标出域
  *   - `modules`：`symbols` 里其实是**子模块**（命名空间）的那些名字。判定型守卫
@@ -197,7 +230,13 @@ export function collectCoreSurface(root) {
       .map((e) => e.name),
   )
 
-  const rootUses = parsePubUses(fs.readFileSync(rootMod, 'utf8'), domains)
+  // 解析用的「已知域」= core 的域目录 ∪ 住在内核的域。后者只影响**归属判定**
+  // （`symbio_kernel::dialog::{…}` 里的 `dialog` 认得出是域），不改 `domains`——
+  // 「core 有哪些域目录」是另一个问题，混在一起会让 C-001 / C-002 的口径失真。
+  const kernelDomains = kernelResidentDomains(root)
+  const knownDomains = new Set([...domains, ...kernelDomains])
+
+  const rootUses = parsePubUses(fs.readFileSync(rootMod, 'utf8'), knownDomains)
   const symbols = new Map()
   const kernelExports = new Set()
 
@@ -213,7 +252,7 @@ export function collectCoreSurface(root) {
   const facadeUses = (head) => {
     if (facadeCache.has(head)) return facadeCache.get(head)
     const f = path.join(coreDir, `${head}.rs`)
-    const u = fs.existsSync(f) ? parsePubUses(fs.readFileSync(f, 'utf8'), domains) : null
+    const u = fs.existsSync(f) ? parsePubUses(fs.readFileSync(f, 'utf8'), knownDomains) : null
     facadeCache.set(head, u)
     return u
   }
@@ -242,7 +281,7 @@ export function collectCoreSurface(root) {
     const dirMod = path.join(coreDir, domain, 'mod.rs')
     const domMod = fs.existsSync(dirMod) ? dirMod : path.join(coreDir, `${domain}.rs`)
     if (!fs.existsSync(domMod)) continue
-    const dom = parsePubUses(fs.readFileSync(domMod, 'utf8'), domains)
+    const dom = parsePubUses(fs.readFileSync(domMod, 'utf8'), knownDomains)
     for (const [n, d] of dom.names) {
       if (!symbols.has(n)) symbols.set(n, d ?? domain)
       if (domain === 'kernel') kernelExports.add(n) // 封闭语法的公开面（C-003 的唯一判定范围）
@@ -270,7 +309,7 @@ export function collectCoreSurface(root) {
     if (modCache.get(domain).has(name)) modules.add(name)
   }
 
-  return { coreRel, coreDir, domains, symbols, modules, kernelExports }
+  return { coreRel, coreDir, domains, kernelDomains, symbols, modules, kernelExports }
 }
 
 // ==================== 消费方计数（报告型与判定型共用） ====================

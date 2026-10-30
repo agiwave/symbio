@@ -66,7 +66,7 @@ export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_d
  * 把语法臂计进基线，会让「欠账还剩多少」被一个与债无关的数字稀释——248 听起来离 0
  * 很远，133 才是真实的待还量。
  */
-export const WHITELIST_BASELINE = 133
+export const WHITELIST_BASELINE = 115
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'

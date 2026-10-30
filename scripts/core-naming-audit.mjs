@@ -24,7 +24,7 @@
  * | N-001 | 类型 / 常量 / **函数**的名字必须匹配**所属域**登记的前缀 | 「符号带域前缀」是 §1.2 的核心；匹配不上 ⇒ 调用点读不出归属 |
  * | N-002 | 一个前缀只能被**一个**域登记 | 「一域一前缀」——两个域共用前缀 = 一个前缀两种东西，调用点反而更难读 |
  * | N-003 | 符号用了**别的域**的前缀时，按「错放」报（比 N-001 更具体） | `KEY_PROVIDER` 住 `plugin` 却用 `keys` 的前缀：它要么改名，要么搬家——报出「该前缀属于谁」才能让人一次改对 |
- * | N-004 | 每个域目录都必须在表里登记，反之亦然 | 新增域却不登记前缀 ⇒ 该域符号无人核对；表里留一个不存在的域 ⇒ 表在说假话 |
+ * | N-004 | 每个域目录（core 目录，或 README 标记声明住在内核的模块）都必须在表里登记，反之亦然 | 新增域却不登记前缀 ⇒ 该域符号无人核对；表里留一个不存在的域 ⇒ 表在说假话 |
  * | N-005 | 公开面里不得有**无归属域**的类型 / 常量 / 函数 | 根 `mod.rs` 直接声明的符号没有域 ⇒ 无法核对前缀 |
  *
  * **函数也要前缀**：§1.2 给函数的豁免理由曾是「导入行已经带着模块路径」——但 §1.4 要求
@@ -249,15 +249,21 @@ try {
   process.exit(1)
 }
 
-// N-004：域目录 ↔ 表，双向一一对应
+// N-004：域目录 ↔ 表，双向一一对应。
+//
+// 「域目录」不只在 core：纯契约域可以整块住在 `symbio-kernel`（D-256），core 根只平铺
+// 转出。它们由 README §1.2 的 `<!-- core-domains:kernel … -->` 标记声明，并由
+// `core-surface.mjs` 核对内核里真有那个模块（标了没有 ⇒ 那里抛错，比这里报「表格在说
+// 假话」更早）。所以这条的判据是：**表里的每个域，要么有 core 目录、要么有内核模块**。
 const dirs = [...surface.domains].sort()
-for (const d of dirs) {
+const kernelDirs = [...(surface.kernelDomains ?? [])].sort()
+for (const d of [...dirs, ...kernelDirs]) {
   if (!rules.has(d)) {
     report('N-004', `symbio_core/${d}/`, `域目录存在但 README §1.2 的表里没有它的前缀规则`)
   }
 }
 for (const d of [...rules.keys()].sort()) {
-  if (!surface.domains.has(d)) {
+  if (!surface.domains.has(d) && !(surface.kernelDomains ?? new Set()).has(d)) {
     report('N-004', `README §1.2`, `表里登记了域 \`${d}\`，但 \`symbio_core/${d}/\` 目录不存在`)
   }
 }

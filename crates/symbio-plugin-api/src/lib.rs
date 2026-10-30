@@ -90,6 +90,11 @@ pub use symbio_kernel::capability::{
     CapabilityRow, Registry,
 };
 pub use symbio_kernel::decl::{ActorDecl, Builder, FactDecl, PluginDeclarations, ViewDecl};
+pub use symbio_kernel::dialog::{
+    ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
+    Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
+    REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
+};
 pub use symbio_kernel::event::{
     EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
     EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
@@ -101,7 +106,7 @@ pub use symbio_kernel::keys::SymbioKey;
 pub use symbio_kernel::llm::model_provider::{
     ModelFinishReason, ModelProvider, ModelSpend, ModelUsage,
 };
-pub use symbio_kernel::llm::{TurnOutput, TurnToolCallInfo};
+pub use symbio_kernel::llm::{PromptMessage, TurnOutput, TurnToolCallInfo};
 pub use symbio_kernel::plugin::error::{lock_read, lock_write, PluginError, PluginInvokeResponse};
 pub use symbio_kernel::plugin::{
     Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -148,18 +153,14 @@ pub use symbio_core::{
     readyset_for, ring, submit_object_creator, text_floor_char_boundary, text_truncate_bytes,
     transcript, vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change,
     vdfs_unwatch_changes, vdfs_watch_changes, AddrRootDecl, AgentPermissions, AgentScope,
-    ChatVocab, CommitmentVocab, ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan,
-    DeltaSink, EmbeddingService, EventBus, EventBusSubscribeRequest, FullModel, LlmAdapter,
-    MessageVocab, ParseVerdictRequest, PluginConfigFile, PluginConfigMount, PluginDir, PluginEntry,
-    PromptMessage, ProviderLlmAdapter, ReadySetView, RunSnapshot, SilentDeltas, TaskVocab,
-    TokenIssuer, Verdict, WordingReply, AGENT_ID, AGENT_PERMS, CAPABILITY_VISITOR,
-    CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK, CONFIGURABLE_VISITOR, EMBEDDING_LOCAL,
-    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE, MODE, OPTION_VISITOR,
-    PATH, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
-    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PRINCIPAL_MAIN,
-    PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID, REASON_ACK, REASON_CLARIFY, REASON_EMPTY,
-    REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS,
-    REASON_UNCLASSIFIED, REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, TASK_CAP,
-    TOOL_CALL_ID, TRACE_ID, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
-    WORKDIR,
+    ChatVocab, CommitmentVocab, DeltaSink, EmbeddingService, EventBus, EventBusSubscribeRequest,
+    FullModel, LlmAdapter, MessageVocab, PluginConfigFile, PluginConfigMount, PluginDir,
+    PluginEntry, ProviderLlmAdapter, ReadySetView, SilentDeltas, TaskVocab, TokenIssuer, AGENT_ID,
+    AGENT_PERMS, CAPABILITY_VISITOR, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK,
+    CONFIGURABLE_VISITOR, EMBEDDING_LOCAL, EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS,
+    EVENT_BUS_RESYNC_MARKER_TYPE, MODE, OPTION_VISITOR, PATH, PLUGIN_DIR, PLUGIN_FILE,
+    PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
+    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER,
+    PROVIDER_ID, REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, TASK_CAP, TOOL_CALL_ID,
+    TRACE_ID, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };

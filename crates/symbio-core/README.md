@@ -152,6 +152,14 @@ C-001），这层内部面只能跟着升为 `pub`，名字却还是内部助手
 
 <!-- core-naming:modifiers Dyn,Default -->
 
+**住在内核的域**（下面那行 `core-domains:kernel` 标记）是这张表的一个例外，但只是**住址**的例外：
+`dialog` 已整块迁进 `crates/symbio-kernel/src/dialog/`（D-256），因为它是纯契约、没有一行实现。
+它仍然是**本表登记的一个域**——前缀规则、改名纪律、`Verdict` 变体的论证责任都照旧；
+core 根只是平铺转出（控制面的稳定路径）。标记与内核目录互为核对：标了却没有那个模块 ⇒
+`core-naming-audit` 红，因为「域搬家」不能是一句没人核对的话。
+
+<!-- core-domains:kernel dialog -->
+
 <!-- list:core-domains owner -->
 
 | 域 | 类型 / trait | 常量 / 静态量 | 函数 / 自由函数 | 备注 |
@@ -165,7 +173,7 @@ C-001），这层内部面只能跟着升为 `pub`，名字却还是内部助手
 | `chat` | 叶子模块 `chat_node` · `principal` · `chat_request` · `session_chat`（四个**模块命名空间**，符号走模块路径，不出根） | — | — | [D-087](../../docs/003-design/001-核心架构.md "DE-001-核心架构")：会话线格式域——一条消息、一个主体长什么样。子模块形态是 §1.2 登记的「主题命名空间」：节点家族四十余个名字全部平铺进根出口会把内核公开面撑宽一倍，而它们只在同一个语义面里出现。**本域不依赖任何其它域**（只依赖 serde），`llm` / `turn` / `projection` 都指向它 |
 | `clock` | — | — | `clock_` | 只有一个函数 |
 | `creator` | 跨 crate 内部词 `ObjectConstructor` · `Submit` | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象（`ObjectConstructor` / `Submit` 是 `submit_object_creator!` 宏展开的落点，宏跨 crate 使用 ⇒ 必须出根），见 §2 |
-| `dialog` | 契约词 `Verdict` · `DecideRequest` · `DecideOutcome`（含 `DecisionPlan`）· `ParseVerdictRequest` · `ComposeRequest` · `WordingReply` · `RunSnapshot` | `REASON_` | — | [D-087](../../docs/003-design/001-核心架构.md "DE-001-核心架构")：对话面控制契约（session ⇄ `classify` / `compose`）。一条判据：**判决是枚举、措辞是文本**——`Verdict` 要被编排层执行，`ComposeRequest` 的产出只被展示。五个类型名是 [DE-001](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的冻结契约词（改名 = 代码与契约漂移）；`DecideOutcome` / `ParseVerdictRequest` 是 [D-122](../../docs/003-design/015-义务环.md "DE-015-义务环") 决策 2 新增的两面契约（`classify/decide` 的判决结果 = 判完或待跑的计划；`classify/parse` 把自由文本解析回判决）；`REASON_*` 是判决的**理由码**闭集，与 `Verdict` 同进退 |
+| `dialog` | 契约词 `Verdict` · `DecideRequest` · `DecideOutcome`（含 `DecisionPlan`）· `ParseVerdictRequest` · `ComposeRequest` · `WordingReply` · `RunSnapshot` | `REASON_` | — | [D-087](../../docs/003-design/001-核心架构.md "DE-001-核心架构")：对话面控制契约（session ⇄ `classify` / `compose`）。一条判据：**判决是枚举、措辞是文本**——`Verdict` 要被编排层执行，`ComposeRequest` 的产出只被展示。五个类型名是 [DE-001](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的冻结契约词（改名 = 代码与契约漂移）；`DecideOutcome` / `ParseVerdictRequest` 是 [D-122](../../docs/003-design/015-义务环.md "DE-015-义务环") 决策 2 新增的两面契约（`classify/decide` 的判决结果 = 判完或待跑的计划；`classify/parse` 把自由文本解析回判决）；`REASON_*` 是判决的**理由码**闭集，与 `Verdict` 同进退。**本域整块住内核**（`crates/symbio-kernel/src/dialog/`，D-256）：它没有一个实现，全是形状与常量，属语法那一半；core 根只做平铺转出 |
 | `embedding` | `Embedding` | `EMBEDDING_` | — | 服务 id 在 `embedding/ids.rs` |
 | `event` | `Event` / `EventEnvelope` / `EventDecl`（名字 → 格位 + 角色）；契约词 `Seq` · `Entity` · `Verb` · `Timestamp` · `ClosureReason` · `FactRole`（守卫角色闭集，DE-024 D-203） | `EVENT_` | `event_` | 契约词来自 [DE-001 §2](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的冻结契约文本，名字先于模块存在（判据同冻结契约词：改名 = 代码与契约漂移）。见 [D-043](../../docs/003-design/001-核心架构.md "DE-001-核心架构")。`FactRole` 同一规：它是 core 的守卫判据**唯一**认识的词汇——判据问「这条名字扮演什么角色」，角色由 owner 的 `EventDecl::with_roles` 交来，名字不进判据。常量 = 事件**名字表**（名字是数据，单点定义）。函数 = 载荷里的**节点身份**规则（`event_payload_node_id` / `event_produced_text_node_id` / `event_tool_result_node_id` / `event_answer_node_id`，[D-053](../symbio-plugin-session/README.md "crates/symbio-plugin-session/README")）：写侧与三个读侧出口（`rebuild` / `transcript` / `prompt_fidelity`）必须给出**同一个**「这条事件承载哪个节点」的答案，各写一遍的后果是静默的（`message.edited` 定位不上要改的节点 = 「编辑没生效」而无人报错） |
 | `event_bus` | `EventBus` | `EVENT_BUS_` | `event_bus_` | |
@@ -226,7 +234,7 @@ C-001），这层内部面只能跟着升为 `pub`，名字却还是内部助手
 | `clock` | 全项目「当前时间（Unix 毫秒）」唯一实现 | `clock_now_ms` | — |
 | `creator` | 通用对象创建注册表：按 id 装配**任意**类型对象（见 [D-036](../../docs/003-design/002-架构总览.md "DE-002-架构总览")） | `creator_create_object` · `creator_has` · `creator_ids` | — |
 | `decl` | **事实与视图声明层**：`FactDecl`（事实的字段清单）与 `ViewDecl`（视图读了哪些字段、成本上界、求值函数）；`seal` 在装载期检查视图引用的每个 `(事实,字段)` 都在某条事实声明里。内核只声明协议五格（`request` / `sent` / `response` / `failed` / `retry`）；控制面声明归 `crates/symbio-plugin-loop/src/control_decl.rs` | `FactDecl` · `ViewDecl` · `PluginDeclarations` · `Builder` · `Frozen` · `declare` · `seal` | — |
-| `dialog` | 对话面**控制契约**（session ⇄ `classify` / `compose`）——判决是枚举、措辞是文本。生产方是 session，消费方是两个不同插件 ⇒ 满足 D-023 的 core 准入判据 | `Verdict`（闭集）· `DecideRequest` · `DecideOutcome`（含 `DecisionPlan`）· `ParseVerdictRequest` · `ComposeRequest` · `WordingReply` · `RunSnapshot` · `REASON_*`（理由码） | — |
+| `dialog` | 对话面**控制契约**（session ⇄ `classify` / `compose`）——判决是枚举、措辞是文本。生产方是 session，消费方是两个不同插件 ⇒ 满足 D-023 的共享层准入判据；**实现面在内核**（`crates/symbio-kernel/src/dialog/`，D-256），本 crate 只平铺转出 | `Verdict`（闭集）· `DecideRequest` · `DecideOutcome`（含 `DecisionPlan`）· `ParseVerdictRequest` · `ComposeRequest` · `WordingReply` · `RunSnapshot` · `REASON_*`（理由码） | — |
 | `embedding` | 嵌入服务的**抽象**（实现在 `src/providers/embedding`） | `EmbeddingService` · `EmbeddingError` · `EMBEDDING_LOCAL` / `EMBEDDING_NOOP` | `ids` |
 | `event` | v2 事件契约的**中性共享类型层**（④ store 与 ③ projection 都只 import 本域，见 [D-043](../../docs/003-design/001-核心架构.md "DE-001-核心架构")） | `Seq`（私有构造：只有 `Store` 能分配）· `Event`（信封：幂等键 / 网格坐标 / 溯源 / 记账）· `EventEnvelope` · 语法网格闭集 `Entity`(11) × `Verb`(5)（F5）· 名字 → 格位 + 角色一张表 `EventDecl`（**由 owner 声明**，`declare` 一次交齐、`seal` 装载期核；DE-024 D-203：内核不持有任何业务事件名，也不持有名字表）· 节点身份规则 `event_payload_node_id` / `event_produced_text_node_id` / `event_output_text_node_id` / `event_tool_result_node_id` / `event_answer_node_id`（**纯载荷函数**：只读 `payload`，不问名字；「这条名字落在哪个节点」的判据按词汇面搬到 `projection/vocab` 的 `slot_node_of`）· 停机原因闭集 `ClosureReason`（`reason` 载荷字段的唯一取值来源，该批：写侧、审计判据 `closure_reason_closed` 与验证程序三处共用一份 `ALL`，不各写一份）· 守卫角色闭集 `FactRole`（DE-024 D-203：`invariants` 的判据只认这四档，角色随 `EventDecl::with_roles` 由 owner 交来——判据读角色，不抄业务事件名） | — |
 | `event_bus` | 跨插件全局发布设施门面 + 频道词表 | `EventBus` · `EventBusSubscribeRequest` · `EVENT_BUS_KIND_SYSTEM` · `EVENT_BUS_KIND_VDFS` · `EVENT_BUS_RESYNC_MARKER_TYPE` | — |

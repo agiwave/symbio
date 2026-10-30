@@ -14,13 +14,14 @@
 //! 下面的 `core-kernel-files:` 标记是 CS-001（形状）与 CS-004（插件 id 字面量）
 //! 的**判定范围**，由 `scripts/core-shape-audit.mjs` 读取。C2b 把五个封闭语法 trait
 //! 及其签名类型也搬进来后，标记整份迁到本文件（C2a 时它还分居 `symbio_core/kernel.rs`）。
-// core-kernel-files: actors.rs adapters.rs keys.rs capability/family.rs capability/mod.rs capability/row.rs chat/chat_node.rs chat/mod.rs chat/principal.rs decl/mod.rs decl/ring.rs event/mod.rs exec/mod.rs llm/mod.rs llm/model_provider.rs llm/turn.rs plugin/error.rs plugin/mod.rs plugin/response.rs plugin/transport.rs present/detail.rs present/mod.rs present/reading.rs projection/mod.rs store/mod.rs vdfs/access.rs vdfs/change.rs vdfs/content.rs vdfs/context.rs vdfs/error.rs vdfs/mod.rs vdfs/node.rs vdfs/path.rs vdfs/provider.rs vdfs/request.rs vdfs/words.rs view/mod.rs
+// core-kernel-files: actors.rs adapters.rs keys.rs capability/family.rs capability/mod.rs capability/row.rs chat/chat_node.rs chat/mod.rs chat/principal.rs decl/mod.rs dialog/mod.rs decl/ring.rs event/mod.rs exec/mod.rs llm/mod.rs llm/model_provider.rs llm/prompt_message.rs llm/turn.rs plugin/error.rs plugin/mod.rs plugin/response.rs plugin/transport.rs present/detail.rs present/mod.rs present/reading.rs projection/mod.rs store/mod.rs vdfs/access.rs vdfs/change.rs vdfs/content.rs vdfs/context.rs vdfs/error.rs vdfs/mod.rs vdfs/node.rs vdfs/path.rs vdfs/provider.rs vdfs/request.rs vdfs/words.rs view/mod.rs
 
 pub mod actors;
 pub mod adapters;
 pub mod capability;
 pub mod chat;
 pub mod decl;
+pub mod dialog;
 pub mod event;
 pub mod exec;
 pub mod keys;

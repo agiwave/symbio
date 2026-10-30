@@ -13,7 +13,7 @@
 //! | [`config`] | 本插件自己的配置（`<本插件目录>/PLUGIN.yml`） |
 //!
 //! 理由码词表**不在本插件里**：它是 `Verdict` 的 `reason` 取值，而消费方在
-//! `compose`，故住在 core 的 `dialog` 模块（`crates/symbio-core/src/dialog/`，判据见那里的模块文档）。
+//! `compose`，故住在内核的 `dialog` 模块（`crates/symbio-kernel/src/dialog/`，判据见那里的模块文档）。
 //!
 //! 内部依赖是单向的：`plugin` → `rules` / `decide`，两者互不认识，也都不认识
 //! `config` 之外的任何东西。

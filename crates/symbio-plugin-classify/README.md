@@ -22,7 +22,7 @@ impl: done
 ## 契约
 
 入参 `DecideRequest`、出参 `Verdict`，都在
-[`symbio_core::dialog`](../symbio-core/src/dialog/mod.rs) ——
+[`symbio_kernel::dialog`](../symbio-kernel/src/dialog/mod.rs) ——
 契约跨插件（`session` 生产，本插件与 `compose` 消费），故落在 core（D-023）。
 
 `Verdict` 是**闭集枚举**（`Answered` / `Escalate` / `Report`），不是自由文本；

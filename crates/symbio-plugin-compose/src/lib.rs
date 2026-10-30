@@ -13,7 +13,7 @@
 //! | [`config`] | 本插件的旋钮（`PLUGIN.yml`：用哪个模型 / 指令段怎么写） |
 //!
 //! 理由码词表**不在本插件里**：这些码由 `classify` 产出，本插件只按码选措辞，
-//! 所以那份线上词表住在 core 的 `dialog` 模块（`crates/symbio-core/src/dialog/`，判据见那里的模块文档）。
+//! 所以那份线上词表住在内核的 `dialog` 模块（`crates/symbio-kernel/src/dialog/`，判据见那里的模块文档）。
 //!
 //! 内部依赖是单向的：`plugin` → `templates` / `wording` / `config`。
 //! 反过来没有边——`templates` 与 `wording` 互不认识（它们是两条并列的产线，
