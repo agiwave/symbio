@@ -53,14 +53,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use symbio_core::REASON_UNCLASSIFIED;
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_CLASSIFY;
+use symbio_plugin_api::REASON_UNCLASSIFIED;
+use symbio_plugin_api::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
 };
-use symbio_core::{DecideOutcome, DecideRequest, ParseVerdictRequest, Verdict};
-use symbio_core::{DetailDefinition, DetailField};
-use symbio_deploy::PLUGIN_ID_CLASSIFY;
+use symbio_plugin_api::{DecideOutcome, DecideRequest, ParseVerdictRequest, Verdict};
+use symbio_plugin_api::{DetailDefinition, DetailField};
 
 use super::config::ClassifyConfig;
 use super::decide::{parse_verdict, plan};
@@ -97,7 +97,7 @@ impl ClassifyPlugin {
             Ok(Some(c)) => c,
             Ok(None) => ClassifyConfig::default(),
             Err(e) => {
-                symbio_core::plugin_warn!("classify", "读取自身配置失败，改用默认值：{e}");
+                symbio_plugin_api::plugin_warn!("classify", "读取自身配置失败，改用默认值：{e}");
                 ClassifyConfig::default()
             }
         };
@@ -135,7 +135,7 @@ impl ClassifyPlugin {
 
         if self.config.rule_shortcut {
             if let Some(reason) = classify_by_rule(utterance) {
-                symbio_core::plugin_info!(
+                symbio_plugin_api::plugin_info!(
                     "classify",
                     "[Classify] 规则短路命中（session={}, reason={}）",
                     req.session_id,
@@ -218,12 +218,12 @@ impl Plugin for ClassifyPlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_CLASSIFY, ClassifyPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_CLASSIFY, ClassifyPlugin::build, dyn Plugin);
 
 // ==================== 配置文档（`<根>/classify/PLUGIN.yml`） ====================
 

@@ -2,7 +2,7 @@
 
 use super::assemble_response;
 use crate::types::Skill;
-use symbio_core::PluginError;
+use symbio_plugin_api::PluginError;
 
 fn skill(argument_hint: Option<&str>) -> Skill {
     Skill {

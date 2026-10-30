@@ -14,6 +14,9 @@ dead_code = "warn"
 
 [dependencies]
 symbio-core = { path = "../symbio-core" }
+# 装配常量（`PLUGIN_ID_*` / `ASSEMBLY_*`）：生成物、零内部依赖。扩展层插件经本 crate
+# 取用，manifest 里不再单列 `symbio-deploy`——插件 id 是部署契约，不是插件自己的事。
+symbio-deploy = { path = "../symbio-deploy" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续
 # `derive(Deserialize)`——Tauri 命令参数与 gateway 的 WS 入帧都依赖它。

@@ -7,11 +7,11 @@
 //!
 //! 发布方在本进程里只有一个：vdfs 宿主的变更投递（`crates/symbio-plugin-vdfs/src/host.rs`，一切资源与
 //! 转写的实时变化都走它）。本插件因此不是「按 `kind` 分流的路由器」——频道闭集、
-//! 无服务端过滤，形状与判据见 `symbio_core::event_bus` 的模块文档。
+//! 无服务端过滤，形状与判据见 `symbio_plugin_api::event_bus` 的模块文档。
 //!
 //! ## 用法
 //!
-//! `kind` 取 `symbio_core::event_bus::KIND_*` 常量（消费方按它分发，裸字面量改名不会
+//! `kind` 取 `symbio_plugin_api::event_bus::KIND_*` 常量（消费方按它分发，裸字面量改名不会
 //! 编译失败）：
 //!
 //! ```ignore
@@ -19,7 +19,7 @@
 //! EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, change_json);
 //! ```
 //!
-//! `EventBus` 门面是 `symbio_core::event_bus::EventBus`（跨插件共享的核心设施），
+//! `EventBus` 门面是 `symbio_plugin_api::event_bus::EventBus`（跨插件共享的核心设施），
 //! 本插件仅负责建立订阅连接。
 //!
 //! 订阅方拿到帧后按 `kind` 分派；`session_id` 只是 `system` 握手帧的关联信息，
@@ -33,16 +33,16 @@
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
-use symbio_core::SimpleResponse;
-use symbio_core::{
+use symbio_plugin_api::SimpleResponse;
+use symbio_plugin_api::PLUGIN_ID_EVENT_BUS;
+use symbio_plugin_api::{
     event_bus_build_envelope, event_bus_register_subscriber, event_bus_unregister_subscriber,
     EventBus, EventBusSubscribeRequest, EVENT_BUS_KIND_SYSTEM,
 };
-use symbio_core::{
+use symbio_plugin_api::{
     Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload,
 };
-use symbio_deploy::PLUGIN_ID_EVENT_BUS;
 use uuid::Uuid;
 
 /// Event Bus 插件
@@ -121,7 +121,7 @@ impl Plugin for EventBusPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
@@ -154,7 +154,7 @@ impl Plugin for EventBusPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_EVENT_BUS, EventBusPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_EVENT_BUS, EventBusPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

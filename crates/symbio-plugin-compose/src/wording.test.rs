@@ -6,13 +6,13 @@
 //! 生成路径本身由 e2e `t22-compose.mjs` 在真实边界上验（mock LLM）。
 
 use super::*;
-use symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
+use symbio_plugin_api::chat_node::{ChatNode, MessageContent, NodeRole};
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_plugin_api::principal::Principal {
+    use symbio_plugin_api::principal::Principal;
     match role {
-        NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
         NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         NodeRole::System => Principal::from_legacy("system/local"),
@@ -31,11 +31,11 @@ fn node(role: NodeRole, text: &str) -> ChatNode {
 fn request(context: Vec<ChatNode>) -> ComposeRequest {
     ComposeRequest {
         session_id: "s1".to_string(),
-        verdict: symbio_core::Verdict::Answered {
+        verdict: symbio_plugin_api::Verdict::Answered {
             reason: "from_context".to_string(),
         },
         context,
-        snapshot: symbio_core::RunSnapshot::default(),
+        snapshot: symbio_plugin_api::RunSnapshot::default(),
     }
 }
 
@@ -91,7 +91,7 @@ fn only_non_blank_generation_survives() {
 #[tokio::test]
 async fn generation_without_a_model_service_returns_none() {
     let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
 
     let out = generate(
         &ctx,
@@ -108,7 +108,7 @@ async fn generation_without_a_model_service_returns_none() {
 #[tokio::test]
 async fn generation_without_a_user_turn_returns_none() {
     let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
 
     let only_assistant = vec![node(NodeRole::Assistant, "我先说一句")];
     let out = generate(&ctx, &request(only_assistant), &ComposeConfig::default()).await;

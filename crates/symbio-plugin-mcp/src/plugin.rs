@@ -26,11 +26,11 @@
 pub use crate::schemas::mcp_config::{McpConfig, McpServerConfig};
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_MCP;
+use symbio_plugin_api::{
     plugin_dir_from_ctx, Capability, CapabilityMeta, CapabilityRow, Plugin, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
 };
-use symbio_deploy::PLUGIN_ID_MCP;
 use symbio_providers::DirVdfs;
 use tokio::sync::RwLock;
 use tracing::warn;
@@ -117,7 +117,7 @@ impl McpPlugin {
         let entries = match store.entries().await {
             Ok(v) => v,
             Err(_e) => {
-                symbio_core::plugin_warn!("mcp", "list mcps 失败");
+                symbio_plugin_api::plugin_warn!("mcp", "list mcps 失败");
                 return;
             }
         };
@@ -132,13 +132,13 @@ impl McpPlugin {
                 Some(s) => {
                     new_servers.insert(e.id.clone(), s);
                 }
-                None => symbio_core::plugin_warn!("mcp", "解析 server {} 失败", e.id),
+                None => symbio_plugin_api::plugin_warn!("mcp", "解析 server {} 失败", e.id),
             }
         }
 
         let mut cfg = self.config.write().await;
         cfg.servers = new_servers;
-        symbio_core::plugin_info!(
+        symbio_plugin_api::plugin_info!(
             "mcp",
             "从 <本插件目录>/ 加载了 {} 个 MCP Server",
             cfg.servers.len()
@@ -179,8 +179,8 @@ impl Default for McpPlugin {
 // 本模块只剩 **mcp 特有的三件事**：详情定义随节点下发、transport 必填项校验、
 // 写后把 server 回灌进内存 config 与 manager 缓存。
 
-use symbio_core::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
-use symbio_core::{
+use symbio_plugin_api::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
+use symbio_plugin_api::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
     VDFS_ACTION_IMPORT, VDFS_ACTION_TEST, VDFS_EXT_FORM, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
@@ -554,7 +554,7 @@ impl Plugin for McpPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -565,16 +565,16 @@ impl Plugin for McpPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         self.ensure_loaded(&ctx).await;
 
-        let sub_path = ctx.get(symbio_core::PATH).unwrap_or_default();
-        if sub_path != symbio_core::TRAVERSE_AVAILABLE_TOOLS {
-            return Err(symbio_core::PluginError::NotFound(format!(
+        let sub_path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
+        if sub_path != symbio_plugin_api::TRAVERSE_AVAILABLE_TOOLS {
+            return Err(symbio_plugin_api::PluginError::NotFound(format!(
                 "未知遍历路径: {}",
                 sub_path
             )));
         }
 
         // 仅当上游传入了 CAPABILITY_VISITOR 时才注册
-        let Some(tool_visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) else {
+        let Some(tool_visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) else {
             return Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()));
         };
 
@@ -619,7 +619,7 @@ impl Plugin for McpPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_MCP, McpPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_MCP, McpPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

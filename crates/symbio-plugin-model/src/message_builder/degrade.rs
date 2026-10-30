@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use crate::types::*;
-use symbio_core::chat_node::{ChatNode, NodeRole, NodeStatus};
+use symbio_plugin_api::chat_node::{ChatNode, NodeRole, NodeStatus};
 
 /// ToolCall 没有对应结果（执行被打断，未产生结果）时合成的占位 tool 结果。
 ///

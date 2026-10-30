@@ -10,11 +10,11 @@
 //! 生成路径本身由 e2e `t22-compose.mjs` 在真实边界上验（mock LLM）。
 
 use super::*;
-use symbio_core::PluginSimpleRequest;
-use symbio_core::{RunSnapshot, Verdict};
+use symbio_plugin_api::PluginSimpleRequest;
+use symbio_plugin_api::{RunSnapshot, Verdict};
 
 use super::super::templates::{FALLBACK_ANSWERED, FALLBACK_ESCALATE};
-use symbio_core::{
+use symbio_plugin_api::{
     REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_NEEDS_WORK, REASON_THANKS,
     REASON_UNCLASSIFIED,
 };
@@ -230,7 +230,7 @@ async fn traverse_contributes_no_tools() {
 /// `<根>/compose/PLUGIN.yml`——「可 A/B」要能操作，靠的就是这一条。
 #[tokio::test]
 async fn traverse_announces_its_own_config() {
-    use symbio_core::{
+    use symbio_plugin_api::{
         capability_configurables, PluginInvokeRequestExt, Registry, CONFIGURABLE_VISITOR,
     };
     use symbio_providers::DefaultToolVisitor;

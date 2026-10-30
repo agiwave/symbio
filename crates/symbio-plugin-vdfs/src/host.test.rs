@@ -8,8 +8,8 @@ use super::super::physical::PhysicalFs;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Mutex;
-use symbio_core::{CapabilityRow, PluginError, PluginMeta, PluginSimpleRequest, Registry};
-use symbio_core::{VdfsActionResult, VdfsValidationError, VDFS_KIND_DIR};
+use symbio_plugin_api::{CapabilityRow, PluginError, PluginMeta, PluginSimpleRequest, Registry};
+use symbio_plugin_api::{VdfsActionResult, VdfsValidationError, VDFS_KIND_DIR};
 use symbio_providers::DefaultToolVisitor;
 
 fn ctx_with(payload: Value) -> Arc<dyn PluginInvokeRequest> {

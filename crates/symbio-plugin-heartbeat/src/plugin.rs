@@ -23,12 +23,12 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_HEARTBEAT;
+use symbio_plugin_api::{
     CapabilityRow, DynVdfsProvider, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
     CAPABILITY_VISITOR, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
-use symbio_deploy::PLUGIN_ID_HEARTBEAT;
 use tokio::sync::RwLock;
 
 /// 停机时等扫描循环退出的上限：超时才 `abort`。
@@ -179,7 +179,7 @@ impl Plugin for HeartbeatPlugin {
             return Ok(());
         };
         if tokio::time::timeout(STOP_WAIT, &mut join).await.is_err() {
-            symbio_core::plugin_warn!("heartbeat", "扫描循环未在停机窗口内退出，强制取消");
+            symbio_plugin_api::plugin_warn!("heartbeat", "扫描循环未在停机窗口内退出，强制取消");
             join.abort();
         }
         self.restore_scan(join);
@@ -233,7 +233,7 @@ impl Plugin for HeartbeatPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_HEARTBEAT, HeartbeatPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_HEARTBEAT, HeartbeatPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

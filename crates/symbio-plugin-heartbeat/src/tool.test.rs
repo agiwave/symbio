@@ -7,7 +7,7 @@
 //! 由 `crates/symbio-plugin-session` 的存储用例与端到端验证覆盖——本文件不 mock 地址面。
 
 use super::*;
-use symbio_core::PluginSimpleRequest;
+use symbio_plugin_api::PluginSimpleRequest;
 
 /// 工具名与 `action` 枚举：模型侧唯一的入口声明，改名等于工具消失。
 #[test]

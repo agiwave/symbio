@@ -35,7 +35,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     family, Capability, CapabilityFamily, CapabilityMeta, CapabilityRow, ExecEnv, PluginError,
     PluginInvokeRequest, Registry,
 };
@@ -108,7 +108,7 @@ impl Capability for PrefixedCapability {
     /// 的工具（shell 按命令分级）覆写 `risk_for`，改名包装若不显式转发，注册收口点
     /// 的审批闸就读到默认档而丢掉动态分级（闸门住在 `DefaultToolVisitor`
     /// 之后，这条透传路径必须完整）。
-    fn risk_for(&self, args: &serde_json::Value) -> symbio_core::CapabilityRiskLevel {
+    fn risk_for(&self, args: &serde_json::Value) -> symbio_plugin_api::CapabilityRiskLevel {
         self.inner.risk_for(args)
     }
 
@@ -129,7 +129,7 @@ impl Registry for SubAgentVisitor {
         // 模型族**整体丢弃**（生效者与目录都归系统 Agent，见模块文档）：
         // 写入方（model 插件的 traverse）逐行 put，规则只需在这一个入口上挡一次。
         if row.family() == family::MODEL {
-            symbio_core::plugin_debug!(
+            symbio_plugin_api::plugin_debug!(
                 "agent",
                 "丢弃子 Agent `{}` 的模型服务注册（生效者与目录都归系统 Agent）",
                 self.agent_id
@@ -149,7 +149,7 @@ impl Registry for SubAgentVisitor {
         // 转发它等于劫持整个 `<根>`）。非根的挂载行已不存在（见 `capability/mount.rs`），
         // 所以这里不再有「加目录名前缀」那一支。
         if row.vdfs().is_some() {
-            symbio_core::plugin_debug!(
+            symbio_plugin_api::plugin_debug!(
                 "agent",
                 "丢弃子 Agent `{}` 的 VDFS 根注册（单槽，归系统 Agent）",
                 self.agent_id

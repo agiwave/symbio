@@ -43,7 +43,7 @@
 //!
 //! 两件事的成员集合不同，因此不能共用一个动词——把注册表塞进 `List`，资源树就会
 //! 多出一些点进去什么都没有的格子；把 `List` 收窄成注册表，没有 VDFS 的插件就会
-//! 从资源树里消失。动作名与回包形状见 `symbio_core::vdfs` 的
+//! 从资源树里消失。动作名与回包形状见 `symbio_plugin_api::vdfs` 的
 //! `VDFS_ACTION_PLUGINS` / `VDFS_PLUGINS_FIELD`。
 //!
 //! ## 它不是根，也没有任何「根」的概念
@@ -75,19 +75,19 @@ use super::registry::PluginRegistry;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use symbio_core::{descend_addr, vdfs_host_ctx};
-use symbio_core::{DetailDefinition, DetailField, DetailOption};
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_MANAGER;
+use symbio_plugin_api::{descend_addr, vdfs_host_ctx};
+use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption};
+use symbio_plugin_api::{
     Plugin, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest, Registry,
     CONFIGURABLE_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
-use symbio_core::{
+use symbio_plugin_api::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
     VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_PLUGINS, VDFS_EXT_FORM,
     VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD,
 };
-use symbio_deploy::PLUGIN_ID_MANAGER;
 
 use symbio_providers::new_registry;
 
@@ -184,7 +184,7 @@ impl CompositeVdfs {
         let mut owners: HashMap<String, ()> = HashMap::new();
         for (dir, p) in collected {
             if owners.contains_key(&dir) {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "composite",
                     "vdfs: 目录名「{dir}」被多个子插件重复注册，保留首个（其余不可达）"
                 );

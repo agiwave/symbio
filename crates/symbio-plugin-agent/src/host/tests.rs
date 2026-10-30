@@ -17,13 +17,13 @@ use std::sync::Arc;
 // 只为把全部插件的工厂注册（inventory）链进本测试二进制，见 Cargo.toml 的 dev-dependencies 注。
 use symbio as _;
 
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_AGENT;
+use symbio_plugin_api::{
     capability_prompts, family, CapabilityMeta, Plugin, PluginDir, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, Registry, AGENT_ID, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
-use symbio_core::{vdfs_context, VdfsProvider};
-use symbio_deploy::PLUGIN_ID_AGENT;
+use symbio_plugin_api::{vdfs_context, VdfsProvider};
 use symbio_providers::DefaultToolVisitor;
 
 /// 收集器的工具元数据（`list_capability` 收敛为 `list(kind)`）——
@@ -108,7 +108,7 @@ fn ctx_with(
     let manager: Arc<DefaultToolVisitor> = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
-        Arc::clone(&manager) as Arc<dyn symbio_core::Registry>,
+        Arc::clone(&manager) as Arc<dyn symbio_plugin_api::Registry>,
     );
     (ctx, manager)
 }
@@ -145,7 +145,7 @@ async fn agent_import_traverse_and_export() {
         .unwrap();
 
     // 收集期错误桶应为空（装配成功）
-    let errors = symbio_core::capability_take_errors(&ctx).await;
+    let errors = symbio_plugin_api::capability_take_errors(&ctx).await;
     assert!(errors.is_empty(), "不应有收集期错误: {errors:?}");
 
     // agent_run 无条件注册；子 Agent 的技能工具带来源前缀进来
@@ -218,7 +218,7 @@ async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     let plugin = Arc::new(AgentPlugin::new());
     let (ctx, manager) = ctx_with(None, None);
     plugin.traverse(String::new(), ctx.clone()).await.unwrap();
-    let errors = symbio_core::capability_take_errors(&ctx).await;
+    let errors = symbio_plugin_api::capability_take_errors(&ctx).await;
     assert!(errors.is_empty(), "未绑定会话不应有收集期错误: {errors:?}");
     let caps = tool_metas_of(&manager).await;
     assert_eq!(caps.len(), 1, "仅注册 agent_run: {caps:?}");
@@ -243,7 +243,7 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
     let (ctx, _manager) = ctx_with(Some(workdir), Some("ghost"));
     plugin.traverse(String::new(), ctx.clone()).await.unwrap();
 
-    let errors = symbio_core::capability_take_errors(&ctx).await;
+    let errors = symbio_plugin_api::capability_take_errors(&ctx).await;
     assert_eq!(errors.len(), 1, "应有且仅有一条拒绝接入: {errors:?}");
     assert!(
         errors[0].message.contains("拒绝接入") && errors[0].message.contains("agent-dir/v2"),
@@ -263,8 +263,8 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 
 #[tokio::test]
 async fn sub_agent_tree_is_assembled_and_prefixed() {
-    use symbio_core::{PluginDir, PLUGIN_DIR};
-    use symbio_deploy::PLUGIN_ID_AGENT;
+    use symbio_plugin_api::PLUGIN_ID_AGENT;
+    use symbio_plugin_api::{PluginDir, PLUGIN_DIR};
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -335,7 +335,7 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
 
     // 2) 子 Agent 的 skill 实例注册的工具被代理层改名，不与系统的 `read_skill` 撞名
     let tools: Vec<String> = manager
-        .list(symbio_core::family::TOOL)
+        .list(symbio_plugin_api::family::TOOL)
         .await
         .into_iter()
         .map(|row| row.name().to_string())
@@ -392,7 +392,7 @@ async fn declared_limits_reject_the_agent_at_load_time() {
         .await
         .unwrap();
 
-    let errors = symbio_core::capability_take_errors(&ctx).await;
+    let errors = symbio_plugin_api::capability_take_errors(&ctx).await;
     assert_eq!(errors.len(), 1, "应有且仅有一条拒绝接入: {errors:?}");
     assert!(
         errors[0].message.contains("拒绝接入") && errors[0].message.contains("max_prompt_bytes"),
@@ -402,7 +402,7 @@ async fn declared_limits_reject_the_agent_at_load_time() {
     // 先判限额、后发布作用域：这一轮被拒时作用域**不得**已发布
     //（否则下游会拿着一个「已被拒」的授权当放行依据）
     assert!(
-        ctx.get(symbio_core::AGENT_PERMS).is_none(),
+        ctx.get(symbio_plugin_api::AGENT_PERMS).is_none(),
         "提示词限额不过时不得发布作用域"
     );
     // 子树工具没有意义地注册进来（整轮将被丢弃），但技能段也不得注入人格
@@ -462,7 +462,7 @@ async fn declared_tool_limit_rejects_after_the_subtree_is_counted() {
         contributed.iter().map(|c| &c.name).collect::<Vec<_>>()
     );
 
-    let errors = symbio_core::capability_take_errors(&ctx).await;
+    let errors = symbio_plugin_api::capability_take_errors(&ctx).await;
     assert_eq!(errors.len(), 1, "应有且仅有一条拒绝接入: {errors:?}");
     assert!(
         errors[0].message.contains("拒绝接入") && errors[0].message.contains("max_tools"),
@@ -500,7 +500,7 @@ async fn declared_limits_that_are_met_let_the_agent_in() {
         .await
         .unwrap();
 
-    let errors = symbio_core::capability_take_errors(&ctx).await;
+    let errors = symbio_plugin_api::capability_take_errors(&ctx).await;
     assert!(errors.is_empty(), "限额达标不应有收集期错误: {errors:?}");
 }
 
@@ -511,8 +511,8 @@ async fn declared_limits_that_are_met_let_the_agent_in() {
 /// 绕过了 `CompositeVfs` 的 `root_hidden` 过滤。
 #[tokio::test]
 async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
-    use symbio_core::PluginDir;
-    use symbio_deploy::PLUGIN_ID_AGENT;
+    use symbio_plugin_api::PluginDir;
+    use symbio_plugin_api::PLUGIN_ID_AGENT;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -633,9 +633,9 @@ async fn mount_root_lists_only_installed_agents() {
 /// （`<agentdir>/AGENTS.md`）与裸目录同位，分辨不出「绕没绕过挂载点」。
 #[tokio::test]
 async fn sub_agent_mount_crossing_is_uniform_across_operations() {
-    use symbio_core::PluginDir;
-    use symbio_core::VdfsError;
-    use symbio_deploy::PLUGIN_ID_AGENT;
+    use symbio_plugin_api::PluginDir;
+    use symbio_plugin_api::VdfsError;
+    use symbio_plugin_api::PLUGIN_ID_AGENT;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -718,7 +718,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
             &vctx,
             "reviewer/memory/WORKSPACE.md",
             VdfsRequest::Write {
-                content: symbio_core::VdfsContent::text("改过的记忆"),
+                content: symbio_plugin_api::VdfsContent::text("改过的记忆"),
             },
         )
         .await
@@ -784,8 +784,8 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
 /// 与正确实现无从区分）。放一个只在子空间里存在的下级智能体，两种实现必然分岔。
 #[tokio::test]
 async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
-    use symbio_core::PluginDir;
-    use symbio_deploy::PLUGIN_ID_AGENT;
+    use symbio_plugin_api::PluginDir;
+    use symbio_plugin_api::PLUGIN_ID_AGENT;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -881,7 +881,7 @@ fn import_rejects_any_manifest_failing_the_access_gate() {
 /// 因此不存在「列得出来、点进去却报别的错」的中间态。
 #[tokio::test]
 async fn non_mountable_agent_dir_is_not_browsable_at_all() {
-    use symbio_core::VdfsError;
+    use symbio_plugin_api::VdfsError;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -919,7 +919,7 @@ async fn non_mountable_agent_dir_is_not_browsable_at_all() {
             "write",
             "legacyish/foo.md",
             VdfsRequest::Write {
-                content: symbio_core::VdfsContent::text("x"),
+                content: symbio_plugin_api::VdfsContent::text("x"),
             },
         ),
         ("delete", "legacyish/foo.md", DEL),
@@ -939,7 +939,7 @@ async fn non_mountable_agent_dir_is_not_browsable_at_all() {
 
 // ==================== dispatch 请求形态（测试辅助） ====================
 
-use symbio_core::VdfsRequest;
+use symbio_plugin_api::VdfsRequest;
 
 const LIST: VdfsRequest = VdfsRequest::List {};
 const STAT: VdfsRequest = VdfsRequest::Stat;

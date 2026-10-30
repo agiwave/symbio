@@ -16,7 +16,7 @@
 //!   （响应结果也可包在 `Turn`(`Tool`) 内，视复杂度而定；组合节点可选）
 
 use crate::types::*;
-use symbio_core::chat_node::{ChatNode, NodeRole, NodeStatus};
+use symbio_plugin_api::chat_node::{ChatNode, NodeRole, NodeStatus};
 
 use super::degrade;
 use super::tree::RequestTree;

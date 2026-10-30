@@ -7,7 +7,7 @@
 //! 「模型说了什么」到「判决是什么」的映射，以及「说不清时返回什么」。
 
 use super::*;
-use symbio_core::chat_node::MessageContent;
+use symbio_plugin_api::chat_node::MessageContent;
 
 fn reason_of(v: &Verdict) -> &str {
     match v {
@@ -88,10 +88,10 @@ fn unparsable_text_yields_none_not_answered() {
 }
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_plugin_api::principal::Principal {
+    use symbio_plugin_api::principal::Principal;
     match role {
-        NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
         NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         NodeRole::System => Principal::from_legacy("system/local"),

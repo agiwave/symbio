@@ -34,7 +34,7 @@
 //! 能力（技能 / MCP / …）由 Agent 目录里的插件实例自己解释，**复用宿主已有的对应系统**
 //! （§3.2 第 2 条）——宿主替 agent 目录再写一遍技能与 MCP 的解析，两条链必然长期不同步。
 //! 子树因此挂**与父 Agent 同构的默认插件集**（见
-//! [`symbio_deploy::ASSEMBLY_SUB_AGENT_PLUGINS`]，与系统侧是**同一份清单**）：子树会构造
+//! [`symbio_plugin_api::ASSEMBLY_SUB_AGENT_PLUGINS`]，与系统侧是**同一份清单**）：子树会构造
 //! 自己的 `vdfs` 实例，但其注册经 `SubAgentVisitor` 在每一层丢弃（VDFS 根单槽归
 //! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`plugin_manager`、
 //! `memory`、`setting`）全部与父树一致——UI 资源入口因此对齐。`model` 在子树里有
@@ -48,18 +48,18 @@ use crate::host::manifest;
 use crate::host::store::AgentDirStore;
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_core::AgentScope;
-use symbio_core::VdfsAccess;
-use symbio_core::{
+use symbio_plugin_api::AgentScope;
+use symbio_plugin_api::VdfsAccess;
+use symbio_plugin_api::ASSEMBLY_SUB_AGENT_PLUGINS;
+use symbio_plugin_api::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
     CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, Registry, AGENT_ID,
     CAPABILITY_VISITOR, PATH, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
     TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
-use symbio_core::{DetailField, DetailOption};
-use symbio_deploy::ASSEMBLY_SUB_AGENT_PLUGINS;
-use symbio_deploy::{PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE};
+use symbio_plugin_api::{DetailField, DetailOption};
+use symbio_plugin_api::{PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE};
 
 /// 规范标识（见 `docs/003-design/011-Agent目录规范.md`）
 ///
@@ -169,7 +169,7 @@ impl AgentPlugin {
                 .collect(),
         );
 
-        symbio_core::plugin_info!("agent", "装配子 Agent `{}` -> {}", id, dir.display());
+        symbio_plugin_api::plugin_info!("agent", "装配子 Agent `{}` -> {}", id, dir.display());
         let tree = creator_create_object::<dyn Plugin>(PLUGIN_ID_COMPOSITE, sub_context)?;
         self.sub_agents
             .write()
@@ -285,7 +285,7 @@ impl AgentPlugin {
         sub.set(CAPABILITY_VISITOR, scoped_dyn);
 
         if let Err(e) = tree.clone().traverse(String::new(), sub).await {
-            symbio_core::plugin_warn!("agent", "子 Agent `{id}` 能力收集失败：{e:?}");
+            symbio_plugin_api::plugin_warn!("agent", "子 Agent `{id}` 能力收集失败：{e:?}");
         }
         scoped.tool_count()
     }
@@ -314,7 +314,7 @@ impl AgentPlugin {
     /// 来自会话 `metadata.agent_id`。因此这里既不读 `ctx[AGENT_ID]`，也不算
     /// `current_label`。
     async fn contribute_options(&self, ctx: &Arc<dyn PluginInvokeRequest>) {
-        let Some(visitor) = ctx.get(symbio_core::OPTION_VISITOR) else {
+        let Some(visitor) = ctx.get(symbio_plugin_api::OPTION_VISITOR) else {
             return;
         };
 
@@ -375,7 +375,7 @@ impl Plugin for AgentPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -409,7 +409,7 @@ impl Plugin for AgentPlugin {
 
         let workdir = ctx.get(WORKDIR);
 
-        let Some(tool_visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) else {
+        let Some(tool_visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) else {
             return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
         };
 
@@ -521,9 +521,9 @@ impl Plugin for AgentPlugin {
         // 绝对地址 = 上下文父地址 + 相对地址（协议级指路信息，封装入口统一）
         Err(PluginError::NotFound(format!(
             "agent 无自有协议路由 `{path}`：agent 目录一律经 VDFS 访问（{}）",
-            symbio_core::absolute_addr(&ctx, &format!("{PLUGIN_ID_AGENT}/…"))
+            symbio_plugin_api::absolute_addr(&ctx, &format!("{PLUGIN_ID_AGENT}/…"))
         )))
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_AGENT, AgentPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_AGENT, AgentPlugin::build, dyn Plugin);

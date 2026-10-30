@@ -13,7 +13,7 @@
 //!
 //! ## 成格形状仍归 core
 //!
-//! 立约 / 守约 / 违约 / 宣告四格由 [`symbio_core::commitment_events`] 造——那是
+//! 立约 / 守约 / 违约 / 宣告四格由 [`symbio_plugin_api::commitment_events`] 造——那是
 //! **判断种类**（承诺是核心语义，读侧 `commitment_records` 与它配对），不是本能力的
 //! 实现细节。本模块只负责「这一次调用对应哪一次立约、履约了没有」。
 //!
@@ -28,8 +28,8 @@
 //! 「约了没履约」比「查无此约」诚实（DE-038 §5——违约可被观测是 T5 的全部前提）。
 //! 待用户审批的不在此列：承诺还没到可判时刻，抢跑记成履约或违约都是假事实。
 
-use symbio_core::commitment_events;
 use symbio_plugin_api::behaviors;
+use symbio_plugin_api::commitment_events;
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
@@ -76,7 +76,7 @@ impl ToolBehavior for DelegationPromise {
 ///
 /// 表小到只有四个字段，正是它存在的理由：本插件只做「立约 / 履约 / 违约」这一件事，
 /// 不该收到整面发言词汇。
-const COMMITMENT_VOCAB: symbio_core::CommitmentVocab = symbio_core::CommitmentVocab {
+const COMMITMENT_VOCAB: symbio_plugin_api::CommitmentVocab = symbio_plugin_api::CommitmentVocab {
     opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
     released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
     broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,
@@ -119,7 +119,7 @@ impl ToolBehavior for DelegationGate {
                 "主体 {} 的 assign.work 已被淘汰回路收回（verdict.asserted，声誉低于阈值），本次委派未执行",
                 req.principal
             ),
-            symbio_core::failure_kind::PERMISSION_DENIED,
+            symbio_plugin_api::failure_kind::PERMISSION_DENIED,
         ))
     }
 }

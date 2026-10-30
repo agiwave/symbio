@@ -3,7 +3,7 @@ use crate::types::Skill;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
+use symbio_plugin_api::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 
 pub struct SkillExecuteTool {
     skills: Vec<Skill>,
@@ -74,7 +74,7 @@ impl Capability for SkillExecuteTool {
                 },
                 "required": ["name"]
             }),
-            category: Some(symbio_core::CapabilityCategory::Skill),
+            category: Some(symbio_plugin_api::CapabilityCategory::Skill),
             examples: Some(vec![format!(
                 "name='{}'",
                 skill_names.first().unwrap_or(&"skill-name".to_string())

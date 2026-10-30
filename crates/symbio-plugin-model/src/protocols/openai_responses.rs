@@ -15,8 +15,8 @@ use super::{
     description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES,
 };
 use crate::http::get_http_client;
-use symbio_core::capability_to_wire;
-use symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
+use symbio_plugin_api::capability_to_wire;
+use symbio_plugin_api::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
 use tracing::debug;
 
 pub struct OpenaiResponsesProtocol;
@@ -39,7 +39,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
             if let Ok(v) = format!("Bearer {k}").parse() {
                 h.insert("Authorization", v);
             } else {
-                symbio_core::plugin_warn!("model", "Invalid characters in OpenAI API key");
+                symbio_plugin_api::plugin_warn!("model", "Invalid characters in OpenAI API key");
             }
         }
         h
@@ -49,7 +49,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         &self,
         cfg: &ModelProviderConfig,
         system: &str,
-        messages: &[symbio_core::chat_node::ChatNode],
+        messages: &[symbio_plugin_api::chat_node::ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value {
         let mut input_items = Vec::new();
@@ -468,7 +468,11 @@ fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn ModelProtocol> {
     Arc::new(OpenaiResponsesProtocol)
 }
 
-symbio_core::submit_object_creator!(MODEL_PROTOCOL_OPENAI_RESPONSES, build, dyn ModelProtocol);
+symbio_plugin_api::submit_object_creator!(
+    MODEL_PROTOCOL_OPENAI_RESPONSES,
+    build,
+    dyn ModelProtocol
+);
 
 #[cfg(test)]
 #[path = "openai_responses.test.rs"]

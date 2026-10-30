@@ -6,7 +6,7 @@
 //! session 只读**结果**（`TurnOutput::tool_calls`），从不驱动累积过程——即
 //! 「怎么把分片攒成一次调用」是 model 的实现细节，不是两侧共用的契约。
 //!
-//! 历史上它住在 `symbio_core::llm::turn`，理由是「`TurnOutput::into_messages`
+//! 历史上它住在 `symbio_plugin_api::llm::turn`，理由是「`TurnOutput::into_messages`
 //! 依赖它」。那是**循环论证**（D-023 开头点名的那种推理）：`TurnOutput` 之所以
 //! 依赖它，只因为它把累积器当字段带着；把字段换成**结果形态**
 //! （`tool_calls: Vec<TurnToolCallInfo>`）之后，这条依赖自己就消失了。
@@ -35,8 +35,8 @@
 
 use serde_json::Value;
 use std::collections::HashMap;
-use symbio_core::plugin_warn;
-use symbio_core::{llm_short_id, TurnToolCallInfo};
+use symbio_plugin_api::plugin_warn;
+use symbio_plugin_api::{llm_short_id, TurnToolCallInfo};
 
 /// 单次工具调用的累积态（**过程形态**，只在本模块内可见）。
 #[derive(Debug, Default)]

@@ -2,7 +2,7 @@
 
 use super::extract_text;
 use serde_json::json;
-use symbio_core::PluginError;
+use symbio_plugin_api::PluginError;
 
 #[test]
 fn a_non_empty_text_is_accepted_and_trimmed() {

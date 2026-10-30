@@ -40,8 +40,8 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use symbio_core::EmbeddingService;
-use symbio_core::{
+use symbio_plugin_api::EmbeddingService;
+use symbio_plugin_api::{
     creator_create_object, Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginSimpleRequest,
     EMBEDDING_LOCAL,
@@ -912,7 +912,7 @@ impl Capability for CodebaseSearchTool {
                 },
                 "required": ["query"]
             }),
-            category: Some(symbio_core::CapabilityCategory::FileOperation),
+            category: Some(symbio_plugin_api::CapabilityCategory::FileOperation),
             risk: Some(CapabilityRiskLevel::Low),
             examples: Some(vec![
                 "query='数据库连接池初始化'".to_string(),
@@ -928,7 +928,7 @@ impl Capability for CodebaseSearchTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let workdir_str = ctx.get(symbio_core::WORKDIR).ok_or_else(|| {
+        let workdir_str = ctx.get(symbio_plugin_api::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
         })?;
         if workdir_str.is_empty() {

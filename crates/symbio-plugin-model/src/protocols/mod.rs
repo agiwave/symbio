@@ -14,7 +14,7 @@
 //! - 各协议实现（openai_chat / openai_responses / anthropic_messages / gemini_api）
 //!   与 OpenAI 兼容网关的上下文探测（context_probe）
 //! - [`sse`]：`SseLineParser` / `SsePartialLineExtractor` 行解析契约
-//!   （2026-09-26 由 `symbio_core::llm::sse` 迁入，理由见该文件文档头）
+//!   （2026-09-26 由 `symbio_plugin_api::llm::sse` 迁入，理由见该文件文档头）
 //!
 //! 协议的连通性验证统一为 `ModelProtocol::ping` 直调。
 
@@ -33,8 +33,8 @@ pub use sse::{SseLineParser, SsePartialLineExtractor};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use serde_json::Value;
-use symbio_core::chat_node::ChatNode;
-use symbio_core::{CapabilityMeta, ModelFinishReason, ModelUsage, PluginError};
+use symbio_plugin_api::chat_node::ChatNode;
+use symbio_plugin_api::{CapabilityMeta, ModelFinishReason, ModelUsage, PluginError};
 
 use super::model_providers::ModelProviderConfig;
 

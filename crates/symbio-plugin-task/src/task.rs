@@ -48,17 +48,17 @@
 
 use std::collections::BTreeMap;
 
-use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
+use symbio_plugin_api::{ActorSpec, Pattern, Scope};
 
-use symbio_core::ReadySetView;
-use symbio_core::PRINCIPAL_SCHEDULER;
-use symbio_core::{actor_can_assign_work, readyset_for, Entity, Event, Verb};
 use symbio_plugin_api::behaviors;
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
 use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
 use symbio_plugin_api::settle::{Contribution, Contributor, SettleFace, Settling};
+use symbio_plugin_api::ReadySetView;
+use symbio_plugin_api::PRINCIPAL_SCHEDULER;
+use symbio_plugin_api::{actor_can_assign_work, readyset_for, Entity, Event, Verb};
 
 use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
@@ -394,9 +394,9 @@ impl ToolBehavior for TaskTable {
     /// 拒止**不记承诺**：工具没跑，「声明过什么」无从说起。判断不产事件——写资格
     /// 是执行窗口的资格，不是一项事实。
     fn before(&self, req: &BeforeRequest<'_>) -> BeforeDecision {
-        let matrix = symbio_core::production_matrix();
-        let may_write = matrix.can_write_name(req.principal, symbio_core::CAP_DEFINE_WORK)
-            || matrix.can_write_name(req.principal, symbio_core::CAP_ASSERT_VERIFICATION);
+        let matrix = symbio_plugin_api::production_matrix();
+        let may_write = matrix.can_write_name(req.principal, symbio_plugin_api::CAP_DEFINE_WORK)
+            || matrix.can_write_name(req.principal, symbio_plugin_api::CAP_ASSERT_VERIFICATION);
         if may_write {
             return BeforeDecision::Allow;
         }
@@ -407,7 +407,7 @@ impl ToolBehavior for TaskTable {
                     "主体 {} 不持 define.work / assert.verification，不得写任务表（todo_write）",
                     req.principal
                 ),
-                symbio_core::failure_kind::PERMISSION_DENIED,
+                symbio_plugin_api::failure_kind::PERMISSION_DENIED,
             )
             .without_delegation_note(),
         )
@@ -511,7 +511,8 @@ impl ScheduleDecider {
     /// 能力集从**授权表的行**取（`grant_names_of`），不在这里列名字。
     pub(crate) fn spec() -> ActorSpec {
         ActorSpec {
-            capabilities: symbio_core::production_matrix().grant_names_of(PRINCIPAL_SCHEDULER),
+            capabilities: symbio_plugin_api::production_matrix()
+                .grant_names_of(PRINCIPAL_SCHEDULER),
             pattern: Pattern::Decider,
             budget_ms: SCHEDULE_BUDGET_MS,
             scope: Scope::Root,
@@ -682,7 +683,7 @@ pub(crate) fn readyset_cap(history: &[Event]) -> usize {
         .and_then(|e| e.payload.get("readyset_cap"))
         .and_then(|v| v.as_u64())
         .and_then(|v| usize::try_from(v).ok())
-        .unwrap_or(symbio_core::TASK_CAP)
+        .unwrap_or(symbio_plugin_api::TASK_CAP)
 }
 
 /// 收束贡献：把就绪集交给调度者，落成 `task.ready` / `task.assigned`（D-250 / D-252）。
@@ -721,14 +722,14 @@ impl Contributor for ScheduleContributor {
             return Vec::new();
         }
         let spec = ScheduleDecider::spec();
-        let started = symbio_core::clock_now_ms();
+        let started = symbio_plugin_api::clock_now_ms();
         let view = readyset_for(TASK_VOCAB, readyset_cap(at.history))
             .read_all(at.history)
             .value;
         let facts = ScheduleDecider.decide(&spec, &view, at.history, at.principal, at.now_ms);
-        let elapsed = symbio_core::clock_now_ms() - started;
+        let elapsed = symbio_plugin_api::clock_now_ms() - started;
         if elapsed > SCHEDULE_BUDGET_MS as i64 {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[task] 调度超预算（{elapsed}ms > {SCHEDULE_BUDGET_MS}ms）⇒ 本轮不派活"
             );

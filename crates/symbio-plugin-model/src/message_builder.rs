@@ -28,7 +28,7 @@ mod degrade;
 mod shape;
 mod tree;
 
-use symbio_core::chat_node::ChatNode;
+use symbio_plugin_api::chat_node::ChatNode;
 
 use super::types::*;
 
@@ -119,7 +119,7 @@ pub fn flatten_chat_messages(messages: &[ChatNode]) -> Vec<NativeMessage> {
 
 // ChatNode 的**构造**不在本插件：`llm_build_assistant_messages` /
 // `llm_build_tool_message` / `TurnStreamChildIds` / `TurnOutput::into_messages`
-// 生产上只有 session 一个消费方，已随 D-023 从 `symbio_core::llm::turn` 下沉到
+// 生产上只有 session 一个消费方，已随 D-023 从 `symbio_plugin_api::llm::turn` 下沉到
 // `crates/symbio-plugin-loop/src/message_build.rs`。本文件是**读侧**（存储树 → 请求包），
 // 测试用同形状的本地 fixture（理由见 tests 模块文件头）。
 

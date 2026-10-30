@@ -3,9 +3,9 @@
 use super::{NoteCapture, NOTE_CAPTURE};
 use crate::decl::NOTES_CREATED;
 use serde_json::json;
-use symbio_core::{Entity, Event, Verb};
 use symbio_plugin_api::effects::{BeforeDecision, BeforeReadings, BeforeRequest};
 use symbio_plugin_api::{EffectEnv, EffectInput, ToolBehavior};
+use symbio_plugin_api::{Entity, Event, Verb};
 
 fn env() -> EffectEnv<'static> {
     EffectEnv {
@@ -111,7 +111,7 @@ fn a_repeated_note_is_refused_before_execution() {
         panic!("重复便签应在执行前被拒");
     };
     assert_eq!(refusal.gate, "便签");
-    assert_eq!(refusal.kind, symbio_core::failure_kind::ERROR);
+    assert_eq!(refusal.kind, symbio_plugin_api::failure_kind::ERROR);
     assert!(
         refusal.reason.contains("买牛奶"),
         "拒因应带回重复正文: {}",

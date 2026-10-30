@@ -14,7 +14,7 @@
 
 use super::*;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     Capability, ExecEnv, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
 };
 use symbio_providers::DefaultToolVisitor;

@@ -9,10 +9,10 @@
 //! 只管「把字节安全送到端点、把响应安全拿回来」。
 
 use std::sync::OnceLock;
-use symbio_core::plugin_error;
-use symbio_core::plugin_info;
-use symbio_core::plugin_warn;
-use symbio_core::ExecAbortSignal;
+use symbio_plugin_api::plugin_error;
+use symbio_plugin_api::plugin_info;
+use symbio_plugin_api::plugin_warn;
+use symbio_plugin_api::ExecAbortSignal;
 
 /// SSE 流空闲超时：两次数据块之间的最大间隔。
 ///

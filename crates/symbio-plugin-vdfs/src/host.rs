@@ -40,22 +40,22 @@ use super::protocol::*;
 use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use symbio_core::vdfs_context;
-use symbio_core::EVENT_BUS_KIND_VDFS;
-use symbio_core::{
+use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use symbio_plugin_api::vdfs_context;
+use symbio_plugin_api::EVENT_BUS_KIND_VDFS;
+use symbio_plugin_api::{
     vdfs_derive_ext, vdfs_has_parent_segment, DynVdfsProvider, VdfsAccess, VdfsChange,
     VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsParams,
     VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT,
     VDFS_PARAM_WORKDIR,
 };
-use symbio_core::{
+use symbio_plugin_api::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
     Registry, CAPABILITY_VISITOR, WORKDIR,
 };
-use symbio_core::{VdfsRequest, VdfsResponse};
-use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use symbio_plugin_api::{VdfsRequest, VdfsResponse};
 
-// 变更事件的 `kind` 不自持：取自词表的家 `symbio_core::event_bus::EVENT_BUS_KIND_VDFS`
+// 变更事件的 `kind` 不自持：取自词表的家 `symbio_plugin_api::event_bus::EVENT_BUS_KIND_VDFS`
 // （前端 `subscribe({ kind: 'vdfs' })`，见 004-PROTOCOLS.md §事件总线频道）。
 
 // ==================== 统一文件系统 ====================
@@ -107,7 +107,7 @@ pub fn empty_root() -> DynVdfsProvider {
 ///
 /// 调用方需已确保 `visitor` 存在（LLM 链路里它是硬前提，缺失应显式报错）。
 pub async fn root_of(visitor: &Arc<dyn Registry>) -> DynVdfsProvider {
-    symbio_core::capability_vdfs_root(&**visitor)
+    symbio_plugin_api::capability_vdfs_root(&**visitor)
         .await
         .unwrap_or_else(empty_root)
 }
@@ -155,7 +155,7 @@ fn event_bus_sink() -> VdfsChangeSink {
     // 两者形状逐字相同，纯复制，合并时删除）。
     Arc::new(move |change: VdfsChange| {
         let data = serde_json::to_value(&change).unwrap_or(serde_json::Value::Null);
-        symbio_core::EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, data);
+        symbio_plugin_api::EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, data);
     })
 }
 
@@ -200,7 +200,7 @@ pub fn call_params(ctx: &Arc<dyn PluginInvokeRequest>) -> VdfsParams {
 /// **父地址的绝对锚点原样带走**：`/docs` 的子项还是 `/` 打头的地址，不会退化成
 /// 工作目录相对的写法（拼接规则全项目只有一份，见 core 的 `join_addr` 与 [D-172](../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
 fn child_path(base: &str, name: &str) -> String {
-    symbio_core::join_addr(base, name)
+    symbio_plugin_api::join_addr(base, name)
 }
 
 /// 条目在**本次列表**里的地址。
@@ -462,7 +462,9 @@ async fn delete(
         },
     )
     .await?;
-    Ok(PluginPayload::new(&symbio_core::SuccessResponse::default()))
+    Ok(PluginPayload::new(
+        &symbio_plugin_api::SuccessResponse::default(),
+    ))
 }
 
 async fn mkdir(
@@ -516,7 +518,7 @@ async fn action(
 // 实现方都无需重复实现这些逻辑。
 //
 // 注意**移动不在其中**：它不是组合操作而是被整条下线了——理由见
-// `symbio_core::vdfs` 的「没有 `Move`」一节（跨子树时它不是原语，
+// `symbio_plugin_api::vdfs` 的「没有 `Move`」一节（跨子树时它不是原语，
 // 由外层组合才是它的正确位置；当前外层也没提供）。
 
 /// 统一换行符为 `\n`（用于精确替换匹配，与原生 `file_edit` 一致）
@@ -663,7 +665,10 @@ pub(crate) async fn search_via(
                 .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?,
             // 单分支失败降级：不让一棵子树拖垮整个搜索
             Err(e) => {
-                symbio_core::plugin_warn!("vdfs", "vdfs_search: 列出 {dir} 失败，已跳过: {e}");
+                symbio_plugin_api::plugin_warn!(
+                    "vdfs",
+                    "vdfs_search: 列出 {dir} 失败，已跳过: {e}"
+                );
                 continue;
             }
         };
@@ -737,7 +742,9 @@ async fn watch(
     } else {
         root.dispatch(vctx, &addr, VdfsRequest::Unwatch).await?;
     }
-    Ok(PluginPayload::new(&symbio_core::SuccessResponse::default()))
+    Ok(PluginPayload::new(
+        &symbio_plugin_api::SuccessResponse::default(),
+    ))
 }
 
 /// 树状遍历：访问层统一实现（递归 [`VdfsRequest::List`]）。
@@ -770,7 +777,7 @@ async fn tree(
                 .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?,
             // 单分支失败降级：不让一棵子树拖垮整个遍历
             Err(e) => {
-                symbio_core::plugin_warn!("vdfs", "tree: 列出 {dir} 失败，已跳过: {e}");
+                symbio_plugin_api::plugin_warn!("vdfs", "tree: 列出 {dir} 失败，已跳过: {e}");
                 continue;
             }
         };

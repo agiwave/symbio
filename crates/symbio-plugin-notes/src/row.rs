@@ -16,12 +16,12 @@
 //! 也不认识这一行——它只按行名找实现、按实现声明的写入对账。
 
 use serde_json::{json, Value};
-use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
-use symbio_core::principal::Principal;
-use symbio_core::{Entity, Verb};
+use symbio_plugin_api::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
 use symbio_plugin_api::events::{EVENT_ARTIFACT_ADDED, EVENT_MESSAGE_ADDED};
+use symbio_plugin_api::principal::Principal;
 use symbio_plugin_api::rows::{ModelAsk, ModelReply, RowHandler, RowRequest, RowStep};
 use symbio_plugin_api::FactDraft;
+use symbio_plugin_api::{Entity, Verb};
 
 use super::decl::{
     NOTES_INDEX, NOTES_INDEXED, NOTES_INSIGHT, NOTES_REFLECT, NOTES_SUMMARIZE, NOTES_SUMMARY,

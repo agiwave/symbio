@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use symbio_core::PluginError;
+use symbio_plugin_api::PluginError;
 
 use super::types::Skill;
 

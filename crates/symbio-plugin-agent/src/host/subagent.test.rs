@@ -11,8 +11,8 @@
 
 use super::*;
 
-use symbio_core::principal::{Principal, PrincipalKind};
-use symbio_core::{VdfsAccess, VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED};
+use symbio_plugin_api::principal::{Principal, PrincipalKind};
+use symbio_plugin_api::{VdfsAccess, VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED};
 
 fn session_node(status: &str, error: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::dir("sid", "子会话", VdfsAccess::READ);
@@ -131,7 +131,7 @@ fn waiting_interaction_bubbles_as_a_resume_payload() {
     assert_eq!(text, "要把这个文件删掉吗？", "卡片正文是冒泡前累积的正文");
     assert_eq!(
         failure_kind,
-        symbio_core::failure_kind::NEEDS_INTERACTION,
+        symbio_plugin_api::failure_kind::NEEDS_INTERACTION,
         "子会话给的 kind 原样带上（前端按它分审批 UI 与提问 UI）"
     );
     // 续跑参数是**本工具**的：agent_id / session_id / target_id 三样缺一不可 resume。
@@ -176,7 +176,10 @@ fn ordinary_frames_do_not_bubble() {
     else {
         panic!()
     };
-    assert_eq!(failure_kind, symbio_core::failure_kind::NEEDS_APPROVAL);
+    assert_eq!(
+        failure_kind,
+        symbio_plugin_api::failure_kind::NEEDS_APPROVAL
+    );
     assert_eq!(
         prompt["args"]["agent_id"],
         Value::Null,

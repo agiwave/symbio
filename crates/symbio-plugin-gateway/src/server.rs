@@ -44,12 +44,12 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use symbio_core::{
+use symbio_plugin_api::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
+use symbio_plugin_api::{
     EventBusSubscribeRequest, Plugin, PluginChannel, PluginFrame, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginMessageWire, PluginPayload, PluginPayloadWire,
     PluginSimpleRequest, SymbioKey, PATH, TRACE_ID,
 };
-use symbio_plugin_api::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};

@@ -2,7 +2,7 @@
 //!
 //! ## 位置：为什么在 model 插件里，而不在 `symbio_core`
 //!
-//! 本契约原先住在 `symbio_core::llm::sse`（D-022 的
+//! 本契约原先住在 `symbio_plugin_api::llm::sse`（D-022 的
 //! 位置条款）。当时按行切分的循环 `parse_sse_stream` 也在 core，
 //! 于是 core 是**两侧共同可见的中立地**。后来该循环作为「实现细节而非契约」下沉到
 //! [`super::super::stream`]，契约的**唯一消费方**随之离开 core，本文件随即变成

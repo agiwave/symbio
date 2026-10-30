@@ -13,10 +13,7 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-kernel = { path = "../symbio-kernel" }
-symbio-core = { path = "../symbio-core" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-deploy = { path = "../symbio-deploy" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（与其余插件同一条理由，
 # 见 compose 的说明）。
 serde = { workspace = true, features = ["derive", "rc"] }

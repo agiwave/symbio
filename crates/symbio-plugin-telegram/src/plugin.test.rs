@@ -1,7 +1,7 @@
 //! `crates/symbio-plugin-telegram/src/plugin.rs` 的单元测试 —— 与实现同级分文件。
 
 use super::*;
-use symbio_core::{PluginSimpleRequest, PATH};
+use symbio_plugin_api::{PluginSimpleRequest, PATH};
 
 fn temp_plugin() -> (tempfile::TempDir, PluginDir, Arc<TelegramPlugin>) {
     let tmp = tempfile::TempDir::new().unwrap();

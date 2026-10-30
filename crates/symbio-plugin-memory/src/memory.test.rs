@@ -6,7 +6,7 @@
 //! 这里钉的是**本层的个性**：目录从哪来、地址怎么拼出来、空文件怎么降级。
 
 use super::*;
-use symbio_core::VdfsAccess;
+use symbio_plugin_api::VdfsAccess;
 
 /// 宿主目录 = 本插件目录的父目录（容器的装配规则，不需要额外上下文键）
 ///

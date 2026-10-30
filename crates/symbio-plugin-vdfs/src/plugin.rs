@@ -22,7 +22,7 @@
 //! - **根之下有什么** = 容器的注册（根行 `CapabilityRow::mount_root` /
 //!   挂载行 `CapabilityRow::mount`，均经 `Registry::put`）；
 //! - **根挂在哪个地址上** = 本插件的挂载规则（[`VDFS_ADDR_ROOT`]），经
-//!   [`symbio_core::AddrRootDecl`] **静态声明**——随二进制生效，早于任何插件实例构造，
+//!   [`symbio_plugin_api::AddrRootDecl`] **静态声明**——随二进制生效，早于任何插件实例构造，
 //!   容器转发请求时据此改写子上下文的当前父地址（`symbio_core::vdfs::address`）。
 //!
 //! 因此「根改叫什么」只需改 [`VDFS_ADDR_ROOT`] 一行：其它插件的绝对地址一律
@@ -31,18 +31,18 @@
 
 use super::{fs::VDFS_ADDR_ROOT, host, protocol as p, provider::ToolVdfs, tools};
 use std::sync::{Arc, Weak};
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_VDFS;
+use symbio_plugin_api::{
     CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS,
 };
-use symbio_deploy::PLUGIN_ID_VDFS;
 use tokio::sync::RwLock;
 
 // 根名的静态声明：字面量只在本插件内（fs::VDFS_ADDR_ROOT），编译期随二进制
 // 生效——容器的转发点在任何实例构造之前就要用它。
-symbio_core::inventory::submit! {
-    symbio_core::AddrRootDecl(VDFS_ADDR_ROOT)
+symbio_plugin_api::inventory::submit! {
+    symbio_plugin_api::AddrRootDecl(VDFS_ADDR_ROOT)
 }
 
 /// VDFS 插件：把**容器注册的 VDFS 根**以一组 `vdfs/*` 操作暴露给前端与 LLM。
@@ -134,7 +134,7 @@ impl Plugin for VdfsPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_VDFS, VdfsPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_VDFS, VdfsPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

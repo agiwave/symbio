@@ -6,13 +6,13 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use symbio_core::PluginInvokeRequestExt;
-use symbio_core::{
+use symbio_plugin_api::PluginInvokeRequestExt;
+use symbio_plugin_api::PLUGIN_ID_TELEGRAM;
+use symbio_plugin_api::{
     plugin_dir_from_ctx, CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
 };
-use symbio_core::{DetailDefinition, DetailField, SuccessResponse};
-use symbio_deploy::PLUGIN_ID_TELEGRAM;
+use symbio_plugin_api::{DetailDefinition, DetailField, SuccessResponse};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -152,7 +152,7 @@ impl TelegramPlugin {
             Ok(Some(c)) => c,
             Ok(None) => TelegramConfig::default(),
             Err(e) => {
-                symbio_core::plugin_warn!("telegram", "读取自身配置失败，改用默认值：{e}");
+                symbio_plugin_api::plugin_warn!("telegram", "读取自身配置失败，改用默认值：{e}");
                 TelegramConfig::default()
             }
         };
@@ -600,7 +600,7 @@ impl Plugin for TelegramPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -617,16 +617,16 @@ impl Plugin for TelegramPlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let sub_path = ctx.get(symbio_core::PATH).unwrap_or_default();
-        if sub_path != symbio_core::TRAVERSE_AVAILABLE_TOOLS {
-            return Err(symbio_core::PluginError::NotFound(format!(
+        let sub_path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
+        if sub_path != symbio_plugin_api::TRAVERSE_AVAILABLE_TOOLS {
+            return Err(symbio_plugin_api::PluginError::NotFound(format!(
                 "未知遍历路径: {}",
                 sub_path
             )));
         }
 
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()))
     }
@@ -635,7 +635,7 @@ impl Plugin for TelegramPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         let data = match path {
@@ -703,7 +703,7 @@ impl TelegramPlugin {
 // 节点形状、定义校验、落盘都在 [`PluginConfigFile`] 里，这里只做寻址分流。
 
 #[async_trait]
-impl symbio_core::PluginConfigMount for TelegramPlugin {
+impl symbio_plugin_api::PluginConfigMount for TelegramPlugin {
     type Config = TelegramConfig;
     const TITLE: &'static str = "Telegram";
 
@@ -720,6 +720,6 @@ impl symbio_core::PluginConfigMount for TelegramPlugin {
 #[path = "plugin.test.rs"]
 mod tests;
 
-symbio_core::submit_object_creator!(PLUGIN_ID_TELEGRAM, TelegramPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_TELEGRAM, TelegramPlugin::build, dyn Plugin);
 
-symbio_core::impl_config_mount_vdfs!(TelegramPlugin);
+symbio_plugin_api::impl_config_mount_vdfs!(TelegramPlugin);

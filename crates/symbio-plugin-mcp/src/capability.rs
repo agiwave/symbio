@@ -19,7 +19,7 @@ use crate::schemas::mcp_config::McpServerConfig;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     Capability, CapabilityCategory, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
 };
 

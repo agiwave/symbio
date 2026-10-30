@@ -6,11 +6,11 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_TASK;
+use symbio_plugin_api::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, PATH,
 };
-use symbio_deploy::PLUGIN_ID_TASK;
 
 pub struct TaskPlugin;
 
@@ -53,4 +53,4 @@ impl Plugin for TaskPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_TASK, TaskPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_TASK, TaskPlugin::build, dyn Plugin);

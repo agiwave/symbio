@@ -75,7 +75,22 @@ export const GENERATED_FILES = [
  * 标识符（含大小写），`why` 必须非空。现状为零条；出现新的豁免时它必须同时指向
  * 一条能打开的决策（D-252 的豁免在扫描范围之外，不需要条目）。
  */
-export const EXEMPTIONS = []
+export const EXEMPTIONS = [
+  {
+    path: 'crates/symbio-plugin-api/src/lib.rs',
+    token: 'TurnToolCallInfo',
+    why:
+      'D-253：与 `TurnOutput` 同族——它是模型端口的**签名类型**（`ModelProvider` 的工具调用形状），' +
+      '模型插件必须能命名它；D-252 拦的是「配置 / 开关类型进能力面」，不是端口签名本身。',
+  },
+  {
+    path: 'crates/symbio-plugin-api/src/lib.rs',
+    token: 'TurnOutput',
+    why:
+      'D-253：它是 `ModelProvider` 的签名类型，模型插件必须能命名它；D-252 拦的是「配置 / 开关类型' +
+      '进能力面」，不是端口签名本身。改名要动 wire，收益只有脚本好看一点。',
+  },
+]
 
 /**
  * 豁免清单自身的形状判据：一条不解释自己的豁免就是永久后门，通配就是无限张后门。

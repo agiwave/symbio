@@ -6,7 +6,7 @@ mod policy_types;
 pub use policy_tracker::ActionTracker;
 pub use policy_types::AutonomyLevel;
 // CapabilityRiskLevel 来自 core capability 域（统一风险定义，避免跨插件硬编码）
-pub use symbio_core::CapabilityRiskLevel;
+pub use symbio_plugin_api::CapabilityRiskLevel;
 
 /// 规范化路径用于比较
 pub fn normalize_path_for_comparison(path: &Path) -> PathBuf {
@@ -31,7 +31,7 @@ fn path_starts_with_normalized(base: &Path, prefix: &Path) -> bool {
 /// 路径守卫与 VDFS 物理层守卫必须是**同一条**规则，否则修了一处漏另一处。
 /// 这里保留函数名（本模块的公开 API），实现转发过去。
 pub fn is_safe_relative_path(path: &str) -> bool {
-    !symbio_core::vdfs_has_parent_segment(path)
+    !symbio_plugin_api::vdfs_has_parent_segment(path)
 }
 
 /// 策略规则（可运行期热更的部分；动作计数独立在 `tracker`）。
@@ -436,7 +436,7 @@ impl SecurityPolicy {
         }
         for forbidden in &r.forbidden_paths {
             let expanded = shellexpand::tilde(forbidden);
-            if symbio_core::vdfs_path_within(&path_str, expanded.as_ref()) {
+            if symbio_plugin_api::vdfs_path_within(&path_str, expanded.as_ref()) {
                 return false;
             }
         }

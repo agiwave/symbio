@@ -5,17 +5,17 @@
 use super::{
     prompt_section, ScheduleContributor, ScheduleDecider, TaskItem, TaskStatus, TaskTable,
 };
-use symbio_core::PRINCIPAL_SCHEDULER;
-use symbio_core::{
-    actor_can_assign_work, check_all, readyset_for, Budget, Entity, Event, EventDecl, EventStore,
-    Pattern, Scope, Seq, Store, Verb, PRINCIPAL_MAIN,
-};
 use symbio_plugin_api::behaviors;
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeReadings, BeforeRequest, EffectEnv, EffectInput, ToolBehavior,
 };
 use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
 use symbio_plugin_api::settle::{Contributor, SettleFace, Settling};
+use symbio_plugin_api::PRINCIPAL_SCHEDULER;
+use symbio_plugin_api::{
+    actor_can_assign_work, check_all, readyset_for, Budget, Entity, Event, EventDecl, EventStore,
+    Pattern, Scope, Seq, Store, Verb, PRINCIPAL_MAIN,
+};
 
 use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
@@ -71,9 +71,9 @@ fn args_of(items: &[TaskItem]) -> serde_json::Value {
 /// 一份**合法**压缩快照里的节点（与 `turn_exec` 落格的形状同构）。
 ///
 /// 快照要真能被 `mutations_latest_snapshot` 认出来，「现行窗口」那类判据才不是空的。
-fn snapshot_node(id: &str) -> symbio_core::chat_node::ChatNode {
-    use symbio_core::chat_node::{MessageContent, NodeKind, NodeStatus};
-    symbio_core::chat_node::ChatNode {
+fn snapshot_node(id: &str) -> symbio_plugin_api::chat_node::ChatNode {
+    use symbio_plugin_api::chat_node::{MessageContent, NodeKind, NodeStatus};
+    symbio_plugin_api::chat_node::ChatNode {
         id: id.to_string(),
         // 不写 `role`：快照的判据是**身份列表**（id 序列），role 的权威在 `principal`。
         msg_type: Some(NodeKind::Body),
@@ -101,7 +101,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
                 Entity::Turn,
                 Verb::Opened,
                 turn,
-                symbio_core::PRINCIPAL_MAIN,
+                symbio_plugin_api::PRINCIPAL_MAIN,
             ))
             .expect("根事件入格")
             .value(),
@@ -121,13 +121,13 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
     let env = EffectEnv {
         anchor: &stem,
         user_seq: anchor,
-        principal: symbio_core::PRINCIPAL_MAIN,
-        source: symbio_core::PRINCIPAL_USER,
+        principal: symbio_plugin_api::PRINCIPAL_MAIN,
+        source: symbio_plugin_api::PRINCIPAL_USER,
         snapshot: &snapshot,
         applied: &[],
     };
     for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
-        let mut event = draft.into_event(symbio_core::PRINCIPAL_MAIN);
+        let mut event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
         event.turn = turn;
         store.append(event).expect("任务事件入格");
     }
@@ -158,7 +158,7 @@ fn declaration_lands_opened_progress_and_asserted() {
 
     let snapshot = store.range(Seq::new(0));
     // 只看任务格：日志里还有一条根事件（用户格），它的存在与任务语义无关。
-    let tasks: Vec<&symbio_core::Event> = snapshot
+    let tasks: Vec<&symbio_plugin_api::Event> = snapshot
         .iter()
         .filter(|e| e.kind.starts_with("task."))
         .collect();
@@ -473,7 +473,7 @@ fn a_ready_task_survives_the_snapshot_boundary() {
                 Entity::Message,
                 Verb::Progressed,
                 0,
-                symbio_core::PRINCIPAL_MAIN,
+                symbio_plugin_api::PRINCIPAL_MAIN,
             )
             .with_payload(serde_json::json!({
                 // 载荷是**合法**的快照（一份真的 `ChatNode` 列表）：不合法的话
@@ -683,14 +683,14 @@ fn apply_effects(
         let env = EffectEnv {
             anchor: &stem,
             user_seq: anchor,
-            principal: symbio_core::PRINCIPAL_MAIN,
-            source: symbio_core::PRINCIPAL_USER,
+            principal: symbio_plugin_api::PRINCIPAL_MAIN,
+            source: symbio_plugin_api::PRINCIPAL_USER,
             snapshot: &snapshot,
             applied: &applied,
         };
         for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
             kinds.push(draft.kind.clone());
-            let mut event = draft.into_event(symbio_core::PRINCIPAL_MAIN);
+            let mut event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
             event.turn = turn;
             store.append(event.clone()).expect("任务事件入格");
             applied.push(event);
@@ -708,7 +708,7 @@ fn seed_anchor(store: &EventStore) -> u64 {
             Entity::Turn,
             Verb::Opened,
             0,
-            symbio_core::PRINCIPAL_MAIN,
+            symbio_plugin_api::PRINCIPAL_MAIN,
         ))
         .expect("根事件入格")
         .value()
@@ -878,7 +878,7 @@ fn judgement<'a>(args: &'a serde_json::Value, principal: &'a str) -> BeforeReque
 fn role_holders_may_write_the_task_table() {
     let args = serde_json::json!({});
     for agent in ["main", "autonomous", "planner", "arbiter", "verifier"] {
-        let principal = symbio_core::principal_of(Some(agent));
+        let principal = symbio_plugin_api::principal_of(Some(agent));
         assert!(
             matches!(
                 TaskTable.before(&judgement(&args, &principal)),
@@ -909,13 +909,16 @@ fn the_trivial_session_may_write_the_task_table() {
 fn producer_only_principals_are_refused_the_task_table() {
     let args = serde_json::json!({});
     for agent in ["worker", "peer-b", "market", "gatekeeper", "reflex"] {
-        let principal = symbio_core::principal_of(Some(agent));
+        let principal = symbio_plugin_api::principal_of(Some(agent));
         let BeforeDecision::Refuse(refusal) = TaskTable.before(&judgement(&args, &principal))
         else {
             panic!("主体 `{principal}` 不持权威，必须被拒");
         };
         assert_eq!(refusal.gate, "任务表");
-        assert_eq!(refusal.kind, symbio_core::failure_kind::PERMISSION_DENIED);
+        assert_eq!(
+            refusal.kind,
+            symbio_plugin_api::failure_kind::PERMISSION_DENIED
+        );
         assert!(
             refusal.reason.contains(&principal)
                 && refusal.reason.contains("define.work / assert.verification"),
@@ -1041,12 +1044,12 @@ fn an_answered_turn_contributes_no_schedule() {
 /// 不是本包的私有行为——同一份检查也拦着后来者把任务名再声明第二遍。
 #[test]
 fn a_second_declaration_of_the_same_task_event_is_rejected() {
-    fn decls() -> symbio_core::PluginDeclarations<'static> {
+    fn decls() -> symbio_plugin_api::PluginDeclarations<'static> {
         const EVENTS: &[EventDecl] = &[EventDecl::new(
             EVENT_TASK_OPENED,
             (Entity::Task, Verb::Opened),
         )];
-        symbio_core::PluginDeclarations {
+        symbio_plugin_api::PluginDeclarations {
             events: EVENTS,
             facts: &[],
             views: &[],
@@ -1055,7 +1058,7 @@ fn a_second_declaration_of_the_same_task_event_is_rejected() {
             rows: &[],
         }
     }
-    let mut b = symbio_core::Builder::new();
+    let mut b = symbio_plugin_api::Builder::new();
     b.declare("crates/symbio-plugin-task", decls());
     // 旧实现没删干净的样子：同一个名字在第二个 owner 下再声明一次。
     b.declare("crates/symbio-plugin-loop", decls());
@@ -1063,7 +1066,7 @@ fn a_second_declaration_of_the_same_task_event_is_rejected() {
         panic!("同名事件在两个 owner 下声明，装载必须判红");
     };
     assert!(
-        gaps.contains(&symbio_core::ring::Gap::DuplicateEvent {
+        gaps.contains(&symbio_plugin_api::ring::Gap::DuplicateEvent {
             name: EVENT_TASK_OPENED
         }),
         "缺口里必须点名 `{EVENT_TASK_OPENED}` 重名：{gaps:?}"

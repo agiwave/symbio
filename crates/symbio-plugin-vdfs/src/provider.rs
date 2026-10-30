@@ -31,12 +31,12 @@ use super::host::call_params;
 use super::protocol::{VdfsEditResponse, VdfsSearchResult};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use symbio_core::vdfs_context;
-use symbio_core::{
+use symbio_plugin_api::vdfs_context;
+use symbio_plugin_api::{
     DynVdfsProvider, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsRequest,
     VdfsResult, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
 };
-use symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, Registry};
+use symbio_plugin_api::{PluginInvokeRequest, PluginInvokeRequestExt, Registry};
 
 /// 把路径归一成可做前缀比较的键（大小写、分隔符、Windows `\\?\` 前缀）。
 fn audit_path_key(p: &Path) -> String {
@@ -82,9 +82,9 @@ fn audit_outside_workdir(
     };
     if outside_workdir(workdir, &addr) {
         let session = ctx
-            .get(symbio_core::SESSION_ID)
+            .get(symbio_plugin_api::SESSION_ID)
             .unwrap_or_else(|| "-".to_string());
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "vdfs",
             "LLM 工作区外变更：session={session} op={op} path={addr} workdir={workdir}"
         );
@@ -119,7 +119,7 @@ impl ToolVdfs {
         path: &str,
         write: bool,
     ) -> VdfsResult<()> {
-        let Some(scope) = symbio_core::agent_perms_of(ctx.as_ref()) else {
+        let Some(scope) = symbio_plugin_api::agent_perms_of(ctx.as_ref()) else {
             return Ok(());
         };
         let Ok(addr) = super::fs::normalize_addr(path) else {

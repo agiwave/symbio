@@ -52,11 +52,11 @@
 use super::physical::PhysicalFs;
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     vdfs_has_parent_segment, DynVdfsProvider, VdfsChange, VdfsChangeSink, VdfsContext, VdfsError,
     VdfsItem, VdfsProvider, VdfsResult,
 };
-use symbio_core::{VdfsRequest, VdfsResponse};
+use symbio_plugin_api::{VdfsRequest, VdfsResponse};
 
 /// 虚拟根目录的字面名字：系统资源统一在此目录之下。
 ///
@@ -152,7 +152,7 @@ fn half_of(addr: &str) -> Half {
 /// 拼接规则复用机制层的那一份（`join_addr`），本插件只提供根名——「根 + 相对」
 /// 的实现于是只有一处，本门面与其它插件的展示地址不会有第二种拼法。
 pub fn to_display(root_rel: &str) -> String {
-    symbio_core::join_addr(VDFS_ADDR_ROOT, root_rel)
+    symbio_plugin_api::join_addr(VDFS_ADDR_ROOT, root_rel)
 }
 
 /// 解析地址并路由（所有操作的共同第一步）

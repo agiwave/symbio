@@ -22,7 +22,7 @@
 //! 任何写代码——它只声明字段。
 
 use serde_json::{json, Value};
-use symbio_core::{DetailAction, DetailDefinition, DetailField, DetailOption, DetailSection};
+use symbio_plugin_api::{DetailAction, DetailDefinition, DetailField, DetailOption, DetailSection};
 
 /// 展示顺序号段：60 = 心跳任务（号段表见文件头）
 pub(crate) const ORDER_HEARTBEAT: i32 = 60;

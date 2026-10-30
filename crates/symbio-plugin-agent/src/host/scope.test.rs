@@ -5,7 +5,7 @@
 use super::*;
 
 use async_trait::async_trait;
-use symbio_core::{
+use symbio_plugin_api::{
     capability_model_active, capability_model_resolve, capability_prompts, capability_vdfs_root,
     family, CapabilityRow, ModelProvider, TurnOutput, VdfsContent, VdfsContext, VdfsError,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
@@ -109,7 +109,7 @@ impl ModelProvider for LabeledProvider {
     async fn round_trip(
         &self,
         _system_prompt: &str,
-        _messages: &[symbio_core::chat_node::ChatNode],
+        _messages: &[symbio_plugin_api::chat_node::ChatNode],
         _tools: &[CapabilityMeta],
         _root_id: &str,
         _env: &ExecEnv,

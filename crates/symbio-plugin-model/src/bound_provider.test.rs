@@ -22,16 +22,17 @@ use serde_json::json;
 use crate::bound_provider::BoundProvider;
 use crate::model_providers::ModelProviderConfig;
 use crate::protocols::openai_chat::OpenaiChatProtocol;
-use symbio_core::ProviderLlmAdapter;
-use symbio_core::{
-    check_all, cost_ledger, transcript, turnstate, Budget, Entity, Event, EventStore,
-    PromptMessage, Seq, Store, Verb,
-};
+use symbio_core::turnstate;
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use symbio_plugin_api::ProviderLlmAdapter;
+use symbio_plugin_api::{
+    check_all, cost_ledger, transcript, Budget, Entity, Event, EventStore, PromptMessage, Seq,
+    Store, Verb,
+};
 
 /// 对话面 / 消息面的词汇表（DE-024 D-203 / D-206）：本插件不是这两面任何名字的
 /// owner，只用它们调 core 的转写 / 轮态投影。拼写一律取清单生成物（D-204）。
-const CHAT_VOCAB: symbio_core::ChatVocab = symbio_core::ChatVocab {
+const CHAT_VOCAB: symbio_plugin_api::ChatVocab = symbio_plugin_api::ChatVocab {
     user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
     dispatch: symbio_plugin_api::events::EVENT_TURN_DISPATCH,
     supplemented: symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
@@ -45,14 +46,14 @@ const CHAT_VOCAB: symbio_core::ChatVocab = symbio_core::ChatVocab {
     denied: symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
 };
 
-const MESSAGE_VOCAB: symbio_core::MessageVocab = symbio_core::MessageVocab {
+const MESSAGE_VOCAB: symbio_plugin_api::MessageVocab = symbio_plugin_api::MessageVocab {
     artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
     message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
     message_edited: symbio_plugin_api::events::EVENT_MESSAGE_EDITED,
     message_removed: symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
     consolidated: symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
 };
-use symbio_core::{LlmAdapter as _, TokenIssuer};
+use symbio_plugin_api::{LlmAdapter as _, TokenIssuer};
 
 /// 与生产渲染同一口径（`crates/symbio-plugin-loop/src/turn_runner/prepare.rs::render_messages`）：
 /// 事件切片 → 转写投影 → 消息数组。测试不能引兄弟插件的实现（E-009），故在此
@@ -71,7 +72,7 @@ fn render_messages(events: &[Event]) -> Vec<PromptMessage> {
 /// 断言（真实 SSE 聚合文本 / 实测耗时为正 / final 落事件后不变量全绿）一字未改。
 async fn generate_via_port(
     adapter: &ProviderLlmAdapter,
-    tok: &symbio_core::FullModel,
+    tok: &symbio_plugin_api::FullModel,
     snapshot: &[Event],
 ) -> (String, u64) {
     adapter
@@ -243,15 +244,15 @@ impl Collecting {
     }
 }
 
-impl symbio_core::DeltaSink for Collecting {
+impl symbio_plugin_api::DeltaSink for Collecting {
     fn on_delta(&self, text: &str) {
         self.text.lock().unwrap().push(text.to_string());
     }
     fn on_reasoning(&self, text: &str) {
         self.reasoning.lock().unwrap().push(text.to_string());
     }
-    fn on_tool_frame(&self, frame: &symbio_core::chat_node::ChatNode) {
-        use symbio_core::chat_node::MessageContent;
+    fn on_tool_frame(&self, frame: &symbio_plugin_api::chat_node::ChatNode) {
+        use symbio_plugin_api::chat_node::MessageContent;
         let text = match &frame.content {
             Some(MessageContent::Text(t)) => t.clone(),
             _ => String::new(),
@@ -302,7 +303,7 @@ fn mock_provider(port: u16) -> Arc<BoundProvider> {
 /// 聚合全文一致；generate()（委托静默口）与流式路径同源（同一执行路径）。
 #[tokio::test]
 async fn provider_adapter_streams_text_deltas_through_bridge() {
-    use symbio_core::DeltaSink;
+    use symbio_plugin_api::DeltaSink;
 
     let (port, _captured) = spawn_mock_after(SSE_OK, std::time::Duration::from_millis(5));
     let adapter = ProviderLlmAdapter::new(mock_provider(port));
@@ -340,7 +341,7 @@ async fn provider_adapter_streams_text_deltas_through_bridge() {
 /// `text` 里就会多出「先想一下」而 `reasoning` 为空——两条断言各拦一个方向。
 #[tokio::test]
 async fn provider_adapter_routes_reasoning_deltas_to_the_reasoning_channel() {
-    use symbio_core::DeltaSink;
+    use symbio_plugin_api::DeltaSink;
 
     let (port, _captured) = spawn_mock(SSE_REASONING);
     let adapter = ProviderLlmAdapter::new(mock_provider(port));
@@ -371,7 +372,7 @@ async fn provider_adapter_routes_reasoning_deltas_to_the_reasoning_channel() {
 /// 桥在这里只递帧不建节点：节点 id 由转写面给出，分发方以同一 id 定格与落库。
 #[tokio::test]
 async fn provider_adapter_routes_tool_frames_to_the_message_channel() {
-    use symbio_core::DeltaSink;
+    use symbio_plugin_api::DeltaSink;
 
     let (port, _captured) = spawn_mock(SSE_TOOL);
     let adapter = ProviderLlmAdapter::new(mock_provider(port));
@@ -538,7 +539,7 @@ async fn empty_stream_is_a_failure_not_an_empty_answer() {
 /// `turn_runner.test.rs` 与 e2e `t77-length-truncation`。
 #[tokio::test]
 async fn truncated_reasoning_only_stream_is_not_returned_as_answer() {
-    use symbio_core::SilentDeltas;
+    use symbio_plugin_api::SilentDeltas;
 
     let ask = one("写一份报告");
     let tok = TokenIssuer::issue_deep();

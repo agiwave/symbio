@@ -2,9 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use symbio_core::capability_to_wire;
-pub use symbio_core::chat_node::{ChatNode, ContentPart, MessageContent, NodeRole};
-pub use symbio_core::CapabilityMeta;
+use symbio_plugin_api::capability_to_wire;
+pub use symbio_plugin_api::chat_node::{ChatNode, ContentPart, MessageContent, NodeRole};
+pub use symbio_plugin_api::CapabilityMeta;
 
 /// 工具调用定义
 ///
@@ -69,7 +69,7 @@ impl From<NativeMessage> for ChatNode {
             content: msg.content,
             // 增量是帧的形态（只在出方向的转写帧上），不是消息的形态。
             delta: None,
-            status: Some(symbio_core::chat_node::NodeStatus::Completed),
+            status: Some(symbio_plugin_api::chat_node::NodeStatus::Completed),
             meta: None,
             // 读数行只在交付出口的呈现装配里出现，消息本体不带（[D-111]）。
             stats: None,
@@ -190,7 +190,7 @@ impl NativeMessage {
 
         if let Some(ref tool_calls) = self.tool_calls {
             // 工具名转线上形态（`/` `.` 等协议不允许的字符 → `__`，见
-            // `symbio_core::capability::tool_name`）
+            // `symbio_plugin_api::capability::tool_name`）
             let api_tool_calls: Vec<serde_json::Value> = tool_calls
                 .iter()
                 .map(|tc| {

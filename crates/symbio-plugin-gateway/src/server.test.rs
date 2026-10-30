@@ -126,25 +126,25 @@ struct NopRouter;
 
 #[async_trait::async_trait]
 impl Plugin for NopRouter {
-    fn meta(&self) -> symbio_core::PluginMeta {
-        symbio_core::PluginMeta::new("nop-router", "nop")
+    fn meta(&self) -> symbio_plugin_api::PluginMeta {
+        symbio_plugin_api::PluginMeta::new("nop-router", "nop")
     }
 
     async fn route(
         self: Arc<Self>,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<symbio_core::PluginPayload> {
-        Err(symbio_core::PluginError::NotFound("nop".to_string()))
+    ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
+        Err(symbio_plugin_api::PluginError::NotFound("nop".to_string()))
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<symbio_core::PluginPayload> {
-        Ok(symbio_core::PluginPayload::new(
-            &Vec::<serde_json::Value>::new(),
-        ))
+    ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
+        Ok(symbio_plugin_api::PluginPayload::new(&Vec::<
+            serde_json::Value,
+        >::new()))
     }
 }
 
@@ -458,37 +458,37 @@ struct OneFrameRouter;
 
 #[async_trait::async_trait]
 impl Plugin for OneFrameRouter {
-    fn meta(&self) -> symbio_core::PluginMeta {
-        symbio_core::PluginMeta::new("one-frame-router", "one")
+    fn meta(&self) -> symbio_plugin_api::PluginMeta {
+        symbio_plugin_api::PluginMeta::new("one-frame-router", "one")
     }
 
     async fn route(
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<symbio_core::PluginPayload> {
-        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+    ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         if path != symbio_plugin_api::routes::ROUTE_EVENT_BUS_SUBSCRIBE {
-            return Err(symbio_core::PluginError::NotFound(path));
+            return Err(symbio_plugin_api::PluginError::NotFound(path));
         }
-        let (peer, mine) = symbio_core::PluginChannel::pair(4);
+        let (peer, mine) = symbio_plugin_api::PluginChannel::pair(4);
         mine.tx
-            .send(symbio_core::PluginFrame::data(serde_json::json!({
+            .send(symbio_plugin_api::PluginFrame::data(serde_json::json!({
                 "type": "bus_event",
                 "data": {"kind": "system", "session_id": null, "data": {"event": "connected"}},
             })))
             .await
-            .map_err(|e| symbio_core::PluginError::InternalError(e.to_string()))?;
-        Ok(symbio_core::PluginPayload::Session(peer))
+            .map_err(|e| symbio_plugin_api::PluginError::InternalError(e.to_string()))?;
+        Ok(symbio_plugin_api::PluginPayload::Session(peer))
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<symbio_core::PluginPayload> {
-        Ok(symbio_core::PluginPayload::new(
-            &Vec::<serde_json::Value>::new(),
-        ))
+    ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
+        Ok(symbio_plugin_api::PluginPayload::new(&Vec::<
+            serde_json::Value,
+        >::new()))
     }
 }
 

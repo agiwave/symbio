@@ -4,7 +4,7 @@
 
 use super::*;
 
-use symbio_core::{VdfsAccess, VdfsContent, VdfsContext, VdfsNode, VdfsWriteResponse};
+use symbio_plugin_api::{VdfsAccess, VdfsContent, VdfsContext, VdfsNode, VdfsWriteResponse};
 
 /// 记录收到路径与形状的虚拟层替身
 struct V {

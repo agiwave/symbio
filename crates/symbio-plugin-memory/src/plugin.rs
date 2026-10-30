@@ -35,14 +35,14 @@ use super::workspace;
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
-use symbio_core::VdfsAccess;
-use symbio_core::{
+use symbio_plugin_api::VdfsAccess;
+use symbio_plugin_api::PLUGIN_ID_MEMORY;
+use symbio_plugin_api::{
     capability_announce_configurable, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile,
     PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
-use symbio_core::{DetailDefinition, DetailField};
-use symbio_deploy::PLUGIN_ID_MEMORY;
+use symbio_plugin_api::{DetailDefinition, DetailField};
 use symbio_providers::MemoryFile;
 use tokio::sync::RwLock;
 
@@ -117,7 +117,7 @@ impl MemoryPlugin {
             Ok(Some(c)) => c,
             Ok(None) => MemoryConfig::default(),
             Err(e) => {
-                symbio_core::plugin_warn!("memory", "读取自身配置失败，改用默认值：{e}");
+                symbio_plugin_api::plugin_warn!("memory", "读取自身配置失败，改用默认值：{e}");
                 MemoryConfig::default()
             }
         };
@@ -194,11 +194,11 @@ impl MemoryPlugin {
     async fn contribute_prompt(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
-        visitor: &Arc<dyn symbio_core::Registry>,
+        visitor: &Arc<dyn symbio_plugin_api::Registry>,
     ) {
         let store = self.store().await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = symbio_core::absolute_addr(ctx, memory::rel_path());
+        let address = symbio_plugin_api::absolute_addr(ctx, memory::rel_path());
         match memory::segment(&store, &address) {
             Ok(Some(segment)) => {
                 visitor
@@ -206,7 +206,9 @@ impl MemoryPlugin {
                     .await
             }
             Ok(None) => {}
-            Err(e) => symbio_core::plugin_warn!("memory", "读取智能体记忆失败，本轮不注入：{e}"),
+            Err(e) => {
+                symbio_plugin_api::plugin_warn!("memory", "读取智能体记忆失败，本轮不注入：{e}")
+            }
         }
     }
 
@@ -221,7 +223,7 @@ impl MemoryPlugin {
     async fn contribute_workspace_prompt(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
-        visitor: &Arc<dyn symbio_core::Registry>,
+        visitor: &Arc<dyn symbio_plugin_api::Registry>,
     ) {
         let cfg = self.config.read().await.clone();
         if !cfg.workspace_enabled {
@@ -229,7 +231,7 @@ impl MemoryPlugin {
         }
         let store = self.workspace_store_of(ctx).await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = symbio_core::absolute_addr(ctx, workspace::rel_path());
+        let address = symbio_plugin_api::absolute_addr(ctx, workspace::rel_path());
         match store.segment(&workspace::segment_spec(&address)) {
             Ok(Some(segment)) => {
                 visitor
@@ -238,7 +240,9 @@ impl MemoryPlugin {
             }
             // 无工作区：不注入（正常状态，不报错）
             Ok(None) => {}
-            Err(e) => symbio_core::plugin_warn!("memory", "读取工作区记忆失败，本轮不注入：{e}"),
+            Err(e) => {
+                symbio_plugin_api::plugin_warn!("memory", "读取工作区记忆失败，本轮不注入：{e}")
+            }
         }
     }
 }
@@ -263,7 +267,7 @@ impl Plugin for MemoryPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -279,8 +283,8 @@ impl Plugin for MemoryPlugin {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
             "memory 无自有协议路由 `{path}`：记忆一律经 VDFS 访问（{} 与 {}）",
-            symbio_core::absolute_addr(&ctx, memory::rel_path()),
-            symbio_core::absolute_addr(&ctx, workspace::rel_path()),
+            symbio_plugin_api::absolute_addr(&ctx, memory::rel_path()),
+            symbio_plugin_api::absolute_addr(&ctx, workspace::rel_path()),
         )))
     }
 
@@ -307,7 +311,7 @@ impl Plugin for MemoryPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_MEMORY, MemoryPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_MEMORY, MemoryPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

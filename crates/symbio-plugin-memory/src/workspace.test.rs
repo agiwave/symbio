@@ -8,8 +8,8 @@
 
 use super::*;
 use std::sync::Arc;
-use symbio_core::absolute_addr;
-use symbio_core::{
+use symbio_plugin_api::absolute_addr;
+use symbio_plugin_api::{
     PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, VDFS_PARENT_ADDR,
 };
 use tempfile::TempDir;

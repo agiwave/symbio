@@ -11,8 +11,8 @@ use super::*;
 use indexmap::IndexMap;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
-use symbio_core::{vdfs_context, VdfsItem, VDFS_KIND_DIR};
-use symbio_core::{
+use symbio_plugin_api::{vdfs_context, VdfsItem, VDFS_KIND_DIR};
+use symbio_plugin_api::{
     PluginError, PluginInvokeRequest, PluginPayload, PluginSimpleRequest, CAPABILITY_VISITOR,
 };
 use symbio_providers::DefaultToolVisitor;
@@ -76,7 +76,7 @@ impl Plugin for FakeChild {
     }
 }
 
-type PluginInvokeResponse = symbio_core::PluginInvokeResponse<PluginPayload>;
+type PluginInvokeResponse = symbio_plugin_api::PluginInvokeResponse<PluginPayload>;
 
 /// 假子插件：把**给定的** provider 暴露在自己目录名下
 ///
@@ -142,7 +142,7 @@ fn put_manifest(root: &Path, dir: &str, title: &str) {
     let d = root.join(dir);
     std::fs::create_dir_all(&d).unwrap();
     std::fs::write(
-        d.join(symbio_core::PLUGIN_FILE),
+        d.join(symbio_plugin_api::PLUGIN_FILE),
         format!("plugin_provider: {dir}\nplugin_name: {dir}\nplugin_title: {title}\n"),
     )
     .unwrap();
@@ -340,7 +340,7 @@ async fn hidden_children_from_any_provider_are_filtered() {
         }
 
         // 唯一的发现判据：系统链路直接查询，LLM 链路由容器派生挂载行
-        fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+        fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
             Some(Arc::new(MixedProvider))
         }
     }
@@ -558,7 +558,7 @@ async fn deleting_child_dir_root_uninstalls_the_plugin() {
     let root = temp_root("uninstall");
     std::fs::create_dir_all(root.join("alpha")).unwrap();
     std::fs::write(
-        root.join("alpha").join(symbio_core::PLUGIN_FILE),
+        root.join("alpha").join(symbio_plugin_api::PLUGIN_FILE),
         r#"{"plugin_provider": "alpha"}"#,
     )
     .unwrap();

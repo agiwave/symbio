@@ -25,13 +25,13 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
-use symbio_core::chat_node as cm;
-use symbio_core::{
+use symbio_plugin_api::chat_node as cm;
+use symbio_plugin_api::PLUGIN_ID_SESSION;
+use symbio_plugin_api::{
     clock_now_ms, vdfs_context, DynVdfsProvider, PluginInvokeRequest, PluginSimpleRequest,
     VdfsContent, VdfsContext, VdfsNode, VdfsRequest, VdfsResponse, VdfsResult,
     EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY, VDFS_STATUS_WORKING,
 };
-use symbio_deploy::PLUGIN_ID_SESSION;
 
 /// 扫描间隔（秒）
 const TICK_SECS: u64 = 15;
@@ -146,8 +146,8 @@ pub(crate) fn trigger_message(
         // 请求），不是会话主体的自说自话。主体地址沿用 `person/local`——这是
         // 落库点 `attributed` 对 user 形的既有归属，换新地址只会让同一类消息
         // 在存量与新写之间分成两个主体。
-        principal: Some(symbio_core::principal::Principal::from_legacy(
-            symbio_core::PRINCIPAL_USER,
+        principal: Some(symbio_plugin_api::principal::Principal::from_legacy(
+            symbio_plugin_api::PRINCIPAL_USER,
         )),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text(hb.prompt.clone())),
@@ -174,7 +174,7 @@ impl HeartbeatPlugin {
         // 跳过首 tick（interval 首次 tick 立即返回），避免启动瞬间集中触发
         ticker.tick().await;
 
-        symbio_core::plugin_info!("heartbeat", "扫描循环已启动（间隔 {TICK_SECS}s）");
+        symbio_plugin_api::plugin_info!("heartbeat", "扫描循环已启动（间隔 {TICK_SECS}s）");
 
         loop {
             let (wake, stopping) = self.stop_gate();
@@ -207,7 +207,7 @@ impl HeartbeatPlugin {
         let items = match list_sessions(&provider, &vctx).await {
             Ok(items) => items,
             Err(e) => {
-                symbio_core::plugin_warn!("heartbeat", "会话清单读取失败，本轮跳过: {e:?}");
+                symbio_plugin_api::plugin_warn!("heartbeat", "会话清单读取失败，本轮跳过: {e:?}");
                 return;
             }
         };
@@ -232,7 +232,7 @@ impl HeartbeatPlugin {
                 continue;
             };
             if let Err(e) = self.fire_once(&provider, &vctx, &view, idle_ms).await {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "heartbeat",
                     "会话 {} 的心跳本轮未触发（下个 tick 重试）: {e:?}",
                     view.id
@@ -242,7 +242,7 @@ impl HeartbeatPlugin {
             // 锚点只在**触发成功**后推进（理由见文件头「触发失败为什么不写锚点」）
             self.mark_fired(&view.id, now).await;
             fired += 1;
-            symbio_core::plugin_info!("heartbeat", "已触发会话 {} 的心跳任务", view.id);
+            symbio_plugin_api::plugin_info!("heartbeat", "已触发会话 {} 的心跳任务", view.id);
         }
     }
 
@@ -257,7 +257,7 @@ impl HeartbeatPlugin {
         let hb = HeartbeatConfig::from_metadata(&view.metadata);
         let message = trigger_message(&view.id, &hb, idle_ms);
         let body = serde_json::to_string(&message)
-            .map_err(|e| symbio_core::VdfsError::Internal(e.to_string()))?;
+            .map_err(|e| symbio_plugin_api::VdfsError::Internal(e.to_string()))?;
         provider
             .dispatch(
                 vctx,
@@ -275,13 +275,13 @@ impl HeartbeatPlugin {
 async fn list_sessions(
     provider: &DynVdfsProvider,
     vctx: &VdfsContext,
-) -> VdfsResult<Vec<symbio_core::VdfsItem>> {
+) -> VdfsResult<Vec<symbio_plugin_api::VdfsItem>> {
     match provider
         .dispatch(vctx, PLUGIN_ID_SESSION, VdfsRequest::List {})
         .await?
     {
         VdfsResponse::List(items) => Ok(items),
-        _ => Err(symbio_core::VdfsError::Internal(
+        _ => Err(symbio_plugin_api::VdfsError::Internal(
             "vdfs/list 未返回清单".to_string(),
         )),
     }

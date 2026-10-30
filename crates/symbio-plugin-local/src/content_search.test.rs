@@ -322,7 +322,7 @@ async fn no_window_returns_everything_without_note() {
 /// （只验正文形状），这条走 `Capability::execute`，钉的是**交付给编排层的信封形状**。
 #[tokio::test]
 async fn result_carries_the_llm_visible_text_in_output() {
-    use symbio_core::{ExecEnv, PluginInvokeRequest, PluginSimpleRequest, WORKDIR};
+    use symbio_plugin_api::{ExecEnv, PluginInvokeRequest, PluginSimpleRequest, WORKDIR};
 
     let dir = fixture().await;
     let req = PluginSimpleRequest::new(None, None);

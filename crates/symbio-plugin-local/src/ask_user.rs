@@ -17,7 +17,7 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt,
 };
@@ -204,7 +204,7 @@ impl Capability for AskUserTool {
                 },
                 "required": []
             }),
-            category: Some(symbio_core::CapabilityCategory::SystemOperation),
+            category: Some(symbio_plugin_api::CapabilityCategory::SystemOperation),
             risk: Some(CapabilityRiskLevel::Low),
             ..Default::default()
         }
@@ -219,7 +219,7 @@ impl Capability for AskUserTool {
         let prompt = match self.build_prompt_payload(&args) {
             Ok(p) => p,
             Err(e) => {
-                return Err(symbio_core::PluginError::ValidationError(e));
+                return Err(symbio_plugin_api::PluginError::ValidationError(e));
             }
         };
 
@@ -227,12 +227,12 @@ impl Capability for AskUserTool {
         // - auto：无人值守，不产 user_prompt 节点，直接返回友好错误让 LLM 继续（不阻塞）。
         //   failure_kind=tool_unavailable 标记，前端可据此渲染（虽然不产节点，仅信息性）。
         // - interactive：会话流中渲染提问卡（user_prompt 节点），等待用户回答。
-        let mode = ctx.get(symbio_core::MODE).unwrap_or_default();
+        let mode = ctx.get(symbio_plugin_api::MODE).unwrap_or_default();
         if mode == "auto" {
             return Ok(json!({
                 "error": "当前为自动模式，不支持交互式提问（ask_user 不可用）。请基于已有上下文自行决策并继续，或提示用户切换到交互模式以获取交互提问能力。",
                 "success": false,
-                "failure_kind": symbio_core::failure_kind::TOOL_UNAVAILABLE,
+                "failure_kind": symbio_plugin_api::failure_kind::TOOL_UNAVAILABLE,
             }));
         }
 
@@ -247,7 +247,7 @@ impl Capability for AskUserTool {
             "content": "请回答问题以继续",
             "success": false,
             // 编排层凭此标记把本轮收口为「等待用户动作」并构造 user_prompt 节点。
-            "failure_kind": symbio_core::failure_kind::NEEDS_INTERACTION,
+            "failure_kind": symbio_plugin_api::failure_kind::NEEDS_INTERACTION,
             "prompt": prompt,
         }))
     }

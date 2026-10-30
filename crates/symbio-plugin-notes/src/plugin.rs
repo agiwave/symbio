@@ -6,12 +6,12 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_NOTES;
+use symbio_plugin_api::{
     CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS,
 };
-use symbio_deploy::PLUGIN_ID_NOTES;
 
 use super::tool::NotesTool;
 
@@ -62,7 +62,7 @@ impl Plugin for NotesPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_NOTES, NotesPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_NOTES, NotesPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

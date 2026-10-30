@@ -40,7 +40,7 @@
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
 use std::path::{Path, PathBuf};
-use symbio_deploy::PLUGIN_ID_MEMORY;
+use symbio_plugin_api::PLUGIN_ID_MEMORY;
 use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 
 /// 记忆文件名 —— `AGENTS.md`（**本插件自己的**约定，不是跨插件契约）。

@@ -1,6 +1,9 @@
-//! 插件 API —— 插件**可以**依赖的宿主面。
+//! 插件 API —— **扩展层插件的唯一宿主依赖**（DE-023 D-253）。
 //!
-//! 只有四类东西住在这里，四者都不是机制实现、而是插件与宿主共用的词汇：
+//! 两类东西住在这里：
+//!
+//! **一、端口与词汇**（本 crate 自己拥有、或按清单生成）——它们不是机制实现，是插件与
+//! 宿主共用的词：
 //!
 //! - [`routes`]：跨插件调用路径（地址）常量
 //! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂）
@@ -13,6 +16,12 @@
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //! - [`views`]：声明视图的跨插件读口（按 owner 公开的名字读纯折叠）
 //! - [`view_names`]：`shared_views` 清单生成物（哪些视图公开可读）
+//!
+//! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、机制入口与
+//! 装配常量，逐条转发、逐条可审。插件因此只写 `symbio_plugin_api::…`，manifest 里也不
+//! 再列 `symbio-core` / `symbio-kernel` / `symbio-deploy`；控制面（`loop` / `session`）
+//! 不在此列，它们按影响类运行、本来就认识宿主的容器概念（D-253）。判据是
+//! `plugin-surface-audit`（HS-001 零直接依赖 / HS-002 白名单只许降 / HS-003 无空转条目）。
 //!
 //! 插件不得依赖宿主 crate（`symbio`）——那会形成「插件 ← 宿主 ← 插件」的环。
 //! `declarations` 只依赖 `symbio_core` 的声明容器，不认识任何具体插件；收集在链接期
@@ -51,4 +60,72 @@ pub use view_names::SharedViewDecl;
 pub use views::{
     read_all_from as read_shared_view_all, read_from as read_shared_view, shared as shared_views,
     ViewRead, ViewUnavailable,
+};
+
+// ==================== 扩展层宿主面 ====================
+// 本块是**扩展层插件唯一需要认识的宿主入口**：能力包与结构件插件只写
+// `symbio_plugin_api::…`，不再直接依赖 `symbio_core` / `symbio-kernel` / `symbio-deploy`。
+// 判据由 `plugin-surface-audit`（PS-001）执行：非控制面插件的源码与 manifest 里
+// 出现那三个前缀即判红。
+//
+// **白名单而不是通配**：白名单里每一条都能报出一个真实消费方（与 core 的 C-003 同一把
+// 尺子），新增条目要过棘轮（PS-002）。通配（`pub use symbio_core::*`）会让「插件能看见
+// 什么」重新变成不可审的隐式集合——那正是本块要消除的东西。
+//
+// **控制面不在此列**：`loop` / `session` 按 DE-026 的影响类运行，本来就认识宿主的容器
+// 概念（`turn` / 幕），继续直接依赖 core；EX-008 的边界正是这一条。把它们也压进本门面，
+// 只会逼出一批「端口形状不说容器词」的假豁免。
+//
+// 装配常量走 `symbio-deploy`（零内部依赖的生成物——插件 id 与装配位是部署契约，
+// 不是某一条能力包的私事）。
+pub use symbio_deploy::*;
+
+pub use symbio_core::{
+    absolute_addr, actor_can_assign_work, agent_perms_of, capability_announce_configurable,
+    capability_configurables, capability_entry_of, capability_invoke, capability_model_active,
+    capability_model_resolve, capability_option_fields, capability_prompts,
+    capability_report_error, capability_take_errors, capability_to_wire, capability_vdfs_root,
+    chat_node, chat_request, check_all, clock_now_ms, commitment_events, cost_ledger,
+    creator_create_object, creator_has, creator_ids, descend_addr, event_bus_build_envelope,
+    event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
+    event_bus_vdfs_change_of, failure_kind, family, impl_config_mount_vdfs, join_addr,
+    llm_emit_message, llm_removed_frame, llm_short_id, lock_read, lock_write, node_build,
+    plugin_debug, plugin_dir_from_ctx, plugin_error, plugin_expand_tilde_path, plugin_info,
+    plugin_warn, principal, principal_of, production_matrix, readyset_for, ring,
+    submit_object_creator, text_floor_char_boundary, text_truncate_bytes, transcript, vdfs_context,
+    vdfs_derive_ext, vdfs_from_plugin_error, vdfs_has_parent_segment, vdfs_host_ctx,
+    vdfs_notify_change, vdfs_path_within, vdfs_unwatch_changes, vdfs_watch_changes, ActorDecl,
+    ActorSpec, AddrRootDecl, AgentPermissions, AgentScope, Budget, Builder, Capability,
+    CapabilityCategory, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel, CapabilityRow,
+    ChatVocab, CommitmentVocab, ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan,
+    DeltaSink, DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField,
+    DetailOption, DetailPreset, DetailPresetSpec, DetailSection, DynVdfsProvider, EmbeddingService,
+    Entity, Event, EventBus, EventBusSubscribeRequest, EventDecl, EventStore, ExecAbortSignal,
+    ExecEnv, ExecEventSink, ExecTranscriptWriter, FactDecl, FactRole, FullModel, LatencyTier,
+    LlmAdapter, MessageVocab, ModelFinishReason, ModelProvider, ModelSpend, ModelUsage,
+    ParseVerdictRequest, Pattern, Plugin, PluginChannel, PluginConfigFile, PluginConfigMount,
+    PluginDeclarations, PluginDir, PluginEntry, PluginError, PluginFrame, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload,
+    PluginPayloadWire, PluginSimpleRequest, PluginStopReason, PromptMessage, ProviderLlmAdapter,
+    ReadySetView, Registry, RunSnapshot, Scope, Seq, SilentDeltas, SimpleResponse, Store,
+    SuccessResponse, SymbioKey, TaskVocab, TokenIssuer, TurnOutput, TurnToolCallInfo, VdfsAccess,
+    VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsItem,
+    VdfsListResponse, VdfsNewType, VdfsNode, VdfsParams, VdfsProvider, VdfsRequest, VdfsResponse,
+    VdfsResult, VdfsValidationError, VdfsWriteResponse, Verb, Verdict, ViewDecl, WordingReply,
+    ABORT_SIGNAL, AGENT_ID, AGENT_PERMS, CAPABILITY_VISITOR, CAP_ASSERT_VERIFICATION,
+    CAP_DEFINE_WORK, CONFIGURABLE_VISITOR, EMBEDDING_LOCAL, EVENT_BUS_KIND_SYSTEM,
+    EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
+    EVENT_RETRY, EVENT_SENT, EVENT_SINK, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
+    MODE, OPTION_VISITOR, PATH, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE,
+    PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED,
+    PLUGIN_KEY_VERSION, PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
+    REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,
+    REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED, REQUIRED_PLUGINS,
+    RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, TASK_CAP, TOOL_CALL_ID, TRACE_ID,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
+    VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS, VDFS_ACTION_TEST, VDFS_EXT_FORM,
+    VDFS_EXT_ZIP, VDFS_KIND_DIR, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR,
+    VDFS_PARENT_ADDR, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD,
+    VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED, VDFS_STATUS_NONE,
+    VDFS_STATUS_UNKNOWN, VDFS_STATUS_WORKING, WORKDIR,
 };

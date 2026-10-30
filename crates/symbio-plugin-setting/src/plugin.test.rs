@@ -3,14 +3,14 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
-use symbio_core::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
+use symbio_plugin_api::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
 use symbio_providers::DefaultToolVisitor;
 use tempfile::TempDir;
 
 /// 构造带能力收集器的上下文
 fn ctx(parent_addr: &str) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolVisitor>) {
     let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     ctx.set(VDFS_PARENT_ADDR, parent_addr.to_string());
     let visitor = Arc::new(DefaultToolVisitor::new());
@@ -23,7 +23,7 @@ fn ctx(parent_addr: &str) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolVisit
 
 fn plugin(tmp: &TempDir, config: SettingConfig) -> Arc<SettingPlugin> {
     Arc::new(SettingPlugin::new(
-        symbio_core::PluginDir::at(tmp.path().join(PLUGIN_ID_SETTING), PLUGIN_ID_SETTING),
+        symbio_plugin_api::PluginDir::at(tmp.path().join(PLUGIN_ID_SETTING), PLUGIN_ID_SETTING),
         config,
     ))
 }
@@ -70,12 +70,12 @@ async fn filled_profile_is_injected() {
 /// 挂载点是**纯配置挂载点**：根下列出配置文档，按真实文件名可读写
 #[tokio::test]
 async fn mount_serves_the_config_document() {
-    use symbio_core::{vdfs_context, VdfsProvider, VdfsRequest};
+    use symbio_plugin_api::{vdfs_context, VdfsProvider, VdfsRequest};
 
     let tmp = TempDir::new().unwrap();
     let p = plugin(&tmp, SettingConfig::default());
     let vctx = vdfs_context(
-        &(Arc::new(symbio_core::PluginSimpleRequest::new(None, None))
+        &(Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None))
             as Arc<dyn PluginInvokeRequest>),
     );
 
@@ -86,10 +86,10 @@ async fn mount_serves_the_config_document() {
         .into_list()
         .unwrap();
     assert_eq!(nodes.len(), 1, "挂载根下恒为一份配置文档");
-    assert_eq!(nodes[0].node.name, symbio_core::PLUGIN_FILE);
+    assert_eq!(nodes[0].node.name, symbio_plugin_api::PLUGIN_FILE);
     assert_eq!(
         nodes[0].node.ext.as_deref(),
-        Some(symbio_core::VDFS_EXT_FORM),
+        Some(symbio_plugin_api::VDFS_EXT_FORM),
         "配置文档渲染为表单"
     );
 }
@@ -101,7 +101,7 @@ async fn plugin_has_no_own_routes() {
     let tmp = TempDir::new().unwrap();
     let p = plugin(&tmp, SettingConfig::default());
     let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
     ctx.set(PATH, "setting/whatever".to_string());
     let err = p.route(ctx).await.unwrap_err();
     assert!(

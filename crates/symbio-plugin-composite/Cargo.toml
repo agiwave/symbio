@@ -13,10 +13,7 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-kernel = { path = "../symbio-kernel" }
-symbio-core = { path = "../symbio-core" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-deploy = { path = "../symbio-deploy" }
 symbio-providers = { path = "../symbio-providers" }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -38,6 +35,10 @@ tracing = { workspace = true }
 # 测试二进制里没有兄弟插件的注册 ⇒ 装配返回 None。宿主门面把全部插件 `pub use` 进来，
 # 挂成 dev-dependency 即补齐注册表（dev 成环 Cargo 允许）。
 symbio = { path = "../symbio" }
+# 容器测试要扮演一次「轮次派发」才能验证路由转发，那批符号属于**控制面**的容器概念
+# （`TurnSpec` / `TurnDispatch` / …），不在扩展层门面的白名单里（D-253）——测试面直接
+# 取 core，与 EX-008 对 `*.test.rs` 不判是同一条纪律。
+symbio-core = { path = "../symbio-core" }
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { workspace = true, features = ["test-util"] }

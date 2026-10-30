@@ -14,16 +14,18 @@ use super::protocols::resolve_protocol_id;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_MODEL;
+use symbio_plugin_api::{
     capability_report_error, creator_create_object, plugin_dir_from_ctx, CapabilityRow, Plugin,
     PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, PluginSimpleRequest,
 };
-use symbio_core::{DetailField, DetailOption};
-use symbio_deploy::PLUGIN_ID_MODEL;
+use symbio_plugin_api::{DetailField, DetailOption};
 use symbio_providers::{MemoryVdfs, SingleFileVdfs};
 use tokio::sync::RwLock;
-use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
+use {
+    symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
+};
 
 /// Provider 主文件名（磁盘布局：`<本插件目录>/<id>/provider.json`）
 const MANIFEST: &str = "provider.json";
@@ -285,7 +287,7 @@ impl ModelPlugin {
     ///
     /// **不回填当前值**：值来自会话 `metadata.provider_id`，这里只声明候选与缺省。
     async fn contribute_options(&self, ctx: &Arc<dyn PluginInvokeRequest>) {
-        let Some(visitor) = ctx.get(symbio_core::OPTION_VISITOR) else {
+        let Some(visitor) = ctx.get(symbio_plugin_api::OPTION_VISITOR) else {
             return;
         };
 
@@ -294,7 +296,7 @@ impl ModelPlugin {
 
         let providers = self.providers.read().await;
         let requested = ctx
-            .get(symbio_core::PROVIDER_ID)
+            .get(symbio_plugin_api::PROVIDER_ID)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
         // 生效 Provider：请求显式 > 默认（与后端解析链一致）
@@ -390,8 +392,8 @@ impl Default for ModelPlugin {
 // 分工与旧写法一致：`list` 读内存镜像，`stat` / `read` / `delete` / `action`
 // 读磁盘（真相源），避免镜像与磁盘在校验路径上出现分歧。
 
-use symbio_core::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
-use symbio_core::{
+use symbio_plugin_api::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
+use symbio_plugin_api::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_TEST,
     VDFS_EXT_FORM, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
@@ -768,7 +770,7 @@ impl VdfsProvider for ModelPlugin {
 #[path = "plugin.test.rs"]
 mod tests;
 
-symbio_core::submit_object_creator!(PLUGIN_ID_MODEL, ModelPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_MODEL, ModelPlugin::build, dyn Plugin);
 
 #[async_trait]
 impl Plugin for ModelPlugin {
@@ -776,7 +778,7 @@ impl Plugin for ModelPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -801,24 +803,24 @@ impl Plugin for ModelPlugin {
         // （ctx[PROVIDER_ID] > default_provider_id > 首个 enabled），逐行写进
         // CAPABILITY_VISITOR 的**能力表**（生效位标在那一行上，见
         // `capability/model.rs`）；系统提示词注册在本插件名下（`PLUGIN_ID_MODEL`）。
-        let sub_path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let sub_path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         match sub_path.as_str() {
             // 选项收集（与能力收集同一广播机制的第二通道）：贡献「Model」选择项
-            symbio_core::TRAVERSE_AVAILABLE_OPTIONS => {
+            symbio_plugin_api::TRAVERSE_AVAILABLE_OPTIONS => {
                 self.contribute_options(&ctx).await;
                 return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
             }
-            symbio_core::TRAVERSE_AVAILABLE_TOOLS => {}
+            symbio_plugin_api::TRAVERSE_AVAILABLE_TOOLS => {}
             other => {
                 return Err(PluginError::NotFound(format!("未知遍历路径: {other}")));
             }
         }
 
-        if let Some(tool_visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) {
+        if let Some(tool_visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
             let providers = self.providers.read().await;
             // 解析唯一生效 Provider：请求显式指定 > 默认 > 首个启用
             let requested = ctx
-                .get(symbio_core::PROVIDER_ID)
+                .get(symbio_plugin_api::PROVIDER_ID)
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
             let active = providers.resolve(requested.as_deref()).cloned();
@@ -831,7 +833,7 @@ impl Plugin for ModelPlugin {
             //
             // 单个 provider 的协议工厂不可用 ⇒ 它**不在目录里**，而不是让整次注册失败：
             // 一个配坏的条目不该把其余可用的模型一起带走。
-            let mut available: Vec<Arc<dyn symbio_core::ModelProvider>> = Vec::new();
+            let mut available: Vec<Arc<dyn symbio_plugin_api::ModelProvider>> = Vec::new();
             let mut active_in_catalog = false;
             for p in providers.providers.values().filter(|p| p.enabled) {
                 let Some(protocol_id) = resolve_protocol_id(&p.api_protocol) else {

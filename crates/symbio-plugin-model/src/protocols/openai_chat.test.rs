@@ -161,18 +161,18 @@ fn prepared_request_carries_exactly_one_system_message() {
         ..Default::default()
     };
     let msgs = vec![
-        symbio_core::chat_node::ChatNode {
+        symbio_plugin_api::chat_node::ChatNode {
             id: "s1".to_string(),
-            principal: Some(symbio_core::principal::Principal::from_legacy(
+            principal: Some(symbio_plugin_api::principal::Principal::from_legacy(
                 "system/local",
             )),
             content: Some(MessageContent::Text("记忆段".to_string())),
             ..Default::default()
         },
-        symbio_core::chat_node::ChatNode {
+        symbio_plugin_api::chat_node::ChatNode {
             id: "u1".to_string(),
-            principal: Some(symbio_core::principal::Principal::from_legacy(
-                symbio_core::PRINCIPAL_USER,
+            principal: Some(symbio_plugin_api::principal::Principal::from_legacy(
+                symbio_plugin_api::PRINCIPAL_USER,
             )),
             content: Some(MessageContent::Text("问".to_string())),
             ..Default::default()

@@ -21,8 +21,8 @@ use super::{
     description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
 };
 use crate::http::get_http_client;
-use symbio_core::capability_to_wire;
-use symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
+use symbio_plugin_api::capability_to_wire;
+use symbio_plugin_api::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
 use tracing::warn;
 
 pub struct AnthropicProtocol {
@@ -65,7 +65,7 @@ impl ModelProtocol for AnthropicProtocol {
             if let Ok(v) = k.parse() {
                 h.insert("x-api-key", v);
             } else {
-                symbio_core::plugin_warn!("model", "Invalid characters in Anthropic API key");
+                symbio_plugin_api::plugin_warn!("model", "Invalid characters in Anthropic API key");
             }
         }
         h
@@ -75,7 +75,7 @@ impl ModelProtocol for AnthropicProtocol {
         &self,
         cfg: &ModelProviderConfig,
         system: &str,
-        messages: &[symbio_core::chat_node::ChatNode],
+        messages: &[symbio_plugin_api::chat_node::ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value {
         let flattened_messages = crate::message_builder::flatten_chat_messages(messages);
@@ -551,7 +551,11 @@ fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn ModelProtocol> {
     Arc::new(AnthropicProtocol::new())
 }
 
-symbio_core::submit_object_creator!(MODEL_PROTOCOL_ANTHROPIC_MESSAGES, build, dyn ModelProtocol);
+symbio_plugin_api::submit_object_creator!(
+    MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
+    build,
+    dyn ModelProtocol
+);
 
 #[cfg(test)]
 #[path = "anthropic_messages.test.rs"]

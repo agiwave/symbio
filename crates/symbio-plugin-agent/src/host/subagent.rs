@@ -4,7 +4,7 @@
 //!
 //! agent_run 与 file_read / shell 等工具完全同构：
 //! - 经 `traverse(available_tools)` 注册（Capability 机制，见 `super::plugin`）；
-//! - 子会话过程经**执行期出口** `ExecEventSink`（由 ctx 注入，见 `symbio_core::exec`）
+//! - 子会话过程经**执行期出口** `ExecEventSink`（由 ctx 注入，见 `symbio_plugin_api::exec`）
 //!   转播到父视图，前端按普通流式工具渲染——工具**不返回通道**；
 //! - 子会话内工具需要用户审批时，产出 `user_prompt(WaitingUserAction)`——与
 //!   confirm 类工具走**同一套**审批机制：本工具把子会话的审批**转成载荷**
@@ -45,24 +45,24 @@ use super::store::AgentDirStore;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use symbio_core::chat_node::{message_of_node, SEG_MESSAGES};
-use symbio_core::chat_node::{
+use symbio_plugin_api::chat_node::{message_of_node, SEG_MESSAGES};
+use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
-use symbio_core::{
+use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use symbio_plugin_api::PLUGIN_ID_SESSION;
+use symbio_plugin_api::{
     event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
     event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
 };
-use symbio_core::{vdfs_context, VdfsError};
-use symbio_core::{
+use symbio_plugin_api::{vdfs_context, VdfsError};
+use symbio_plugin_api::{
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame, PluginInvokeRequest,
     PluginInvokeRequestExt, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
 };
-use symbio_core::{
+use symbio_plugin_api::{
     VdfsContent, VdfsListResponse, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
 };
-use symbio_deploy::PLUGIN_ID_SESSION;
-use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 
 // ── 本工具的身份约定（续跑参数经**载荷**回传，由 tool_executor 落到 meta.prompt）──
 /// 工具名。**两处必须同源**：`CapabilityMeta.name`（LLM 看到的短名）与待审批载荷
@@ -109,9 +109,9 @@ impl AgentRunCapability {
 }
 
 #[async_trait::async_trait]
-impl symbio_core::Capability for AgentRunCapability {
-    fn meta(&self) -> symbio_core::CapabilityMeta {
-        symbio_core::CapabilityMeta {
+impl symbio_plugin_api::Capability for AgentRunCapability {
+    fn meta(&self) -> symbio_plugin_api::CapabilityMeta {
+        symbio_plugin_api::CapabilityMeta {
             name: NAME.to_string(),
             // 行为名自声明：本工具提供 `assign.work`（淘汰闸的管辖对象），
             // 且是跨主体立约型工具（承诺记账对象）。执行器读这两个名字判，不认工具名——
@@ -160,7 +160,7 @@ impl symbio_core::Capability for AgentRunCapability {
                 },
                 "required": ["prompt"]
             }),
-            category: Some(symbio_core::CapabilityCategory::Chat),
+            category: Some(symbio_plugin_api::CapabilityCategory::Chat),
             examples: Some(vec![
                 "agent_id='<agent-id>', prompt='分析这个项目的架构'".to_string()
             ]),
@@ -235,7 +235,7 @@ impl symbio_core::Capability for AgentRunCapability {
         // **显式** `agent_id` 不受此限 —— 那是调用方的指令，仍在下面照旧对照 store 校验。
         let store = AgentDirStore::new(&self.agent_dir_root);
         let current_agent = ctx
-            .get(symbio_core::AGENT_ID)
+            .get(symbio_plugin_api::AGENT_ID)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .filter(|id| store.get(id).is_some());
@@ -265,8 +265,8 @@ impl symbio_core::Capability for AgentRunCapability {
         // session_id，LLM 携带上次结果的子会话 id 继续对话）/ 新建（都省略）。
         let user_message = || ChatNode {
             id: uuid::Uuid::new_v4().as_simple().to_string(),
-            principal: Some(symbio_core::principal::Principal::from_legacy(
-                symbio_core::PRINCIPAL_USER,
+            principal: Some(symbio_plugin_api::principal::Principal::from_legacy(
+                symbio_plugin_api::PRINCIPAL_USER,
             )),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(req.prompt.clone())),
@@ -326,7 +326,7 @@ impl symbio_core::Capability for AgentRunCapability {
                 )
                 .await
                 {
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "agent",
                         "登记子会话元数据失败（不影响委托执行）: {}",
                         e
@@ -531,7 +531,7 @@ fn validate_working_dir(provided: &str) -> Result<String, PluginError> {
             "Invalid working_dir '{provided}': `..` components are forbidden."
         )));
     }
-    let expanded = symbio_core::plugin_expand_tilde_path(std::path::Path::new(trimmed));
+    let expanded = symbio_plugin_api::plugin_expand_tilde_path(std::path::Path::new(trimmed));
     if !expanded.is_absolute() {
         return Err(PluginError::ValidationError(format!(
             "Invalid working_dir '{provided}': must be an absolute path. \
@@ -822,7 +822,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                     known.remove(&mid);
                     records.remove(&mid);
                     // 删除按 id 生效（不依赖父子锚点），原样转发。
-                    sink.emit(symbio_core::llm_removed_frame(&mid)).await;
+                    sink.emit(symbio_plugin_api::llm_removed_frame(&mid)).await;
                     continue;
                 }
 
@@ -976,7 +976,7 @@ fn pending_bubble_of(
             .as_ref()
             .and_then(|m| m.get("failure_kind"))
             .and_then(Value::as_str)
-            .unwrap_or(symbio_core::failure_kind::NEEDS_APPROVAL)
+            .unwrap_or(symbio_plugin_api::failure_kind::NEEDS_APPROVAL)
             .to_string(),
     })
 }
@@ -1030,7 +1030,9 @@ fn relabel_for_parent(message: &mut ChatNode, tool_call_id: &str) {
     if message.node_role() == Some(NodeRole::Assistant) {
         // 改写到哪一格就跟到哪一格：这张卡现在是 **agent_run 工具的响应**，族归
         // 工具自己——带着子会话 agent 主体的转播节点会被 `visible_to` 当作第三方私有。
-        message.principal = Some(symbio_core::principal::Principal::tool_principal(NAME));
+        message.principal = Some(symbio_plugin_api::principal::Principal::tool_principal(
+            NAME,
+        ));
     }
 }
 
@@ -1138,7 +1140,7 @@ async fn vdfs_watch(
     );
     let _ = c.set_payload(json!({ "path": addr }));
     if let Err(e) = parent.clone().route(c).await {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "agent",
             "agent_run: vdfs/{} 登记失败（{}）: {}",
             if subscribe { "watch" } else { "unwatch" },

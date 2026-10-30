@@ -6,17 +6,17 @@
 //! 这里不重复造一个假容器。
 
 use super::*;
-use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
-use symbio_core::{EVENT_BUS_KIND_SYSTEM, EVENT_BUS_RESYNC_MARKER_TYPE};
+use symbio_plugin_api::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
+use symbio_plugin_api::{EVENT_BUS_KIND_SYSTEM, EVENT_BUS_RESYNC_MARKER_TYPE};
 
 const SID: &str = "chat-1";
 const SESSION_ADDR: &str = "root/session/chat-1";
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**会话广播面**的帧，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_plugin_api::principal::Principal {
+    use symbio_plugin_api::principal::Principal;
     match role {
-        NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
         NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         NodeRole::System => Principal::from_legacy("system/local"),

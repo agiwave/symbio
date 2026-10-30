@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
-use symbio_core::{
+use symbio_plugin_api::{
     Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeResponse,
 };
 use tokio::sync::RwLock;
@@ -36,7 +36,7 @@ impl HttpRequestTool {
     async fn execute_inner(
         &self,
         args: &Value,
-        agent_scope: Option<&symbio_core::AgentScope>,
+        agent_scope: Option<&symbio_plugin_api::AgentScope>,
     ) -> PluginInvokeResponse<Value> {
         let url = args
             .get("url")
@@ -238,11 +238,11 @@ impl Capability for HttpRequestTool {
                 },
                 "required": ["url"]
             }),
-            category: Some(symbio_core::CapabilityCategory::SystemOperation),
+            category: Some(symbio_plugin_api::CapabilityCategory::SystemOperation),
             // 任意方法 + 任意 body + 任意目标主机 ⇒ 高风险。旧的风险表把`http_request`
             // 单独列为 High；改由工具自声明后，若不写这一行就会落到默认 Medium，
             // 等于悄悄放宽了审批——故显式声明。
-            risk: Some(symbio_core::CapabilityRiskLevel::High),
+            risk: Some(symbio_plugin_api::CapabilityRiskLevel::High),
             examples: Some(vec![
                 "url='https://api.example.com/data'".to_string(),
                 "url='https://api.example.com/users', method='POST', body={'name':'test'}"
@@ -258,7 +258,7 @@ impl Capability for HttpRequestTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let scope = symbio_core::agent_perms_of(ctx.as_ref());
+        let scope = symbio_plugin_api::agent_perms_of(ctx.as_ref());
         let data = self.execute_inner(&args, scope.as_ref()).await?;
         Ok(serde_json::to_value(&data)?)
     }

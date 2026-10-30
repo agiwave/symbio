@@ -32,13 +32,13 @@
 
 use super::registry::PluginRegistry;
 use super::vdfs::CompositeVdfs;
-use symbio_core::descend_addr;
-use symbio_core::{
+use symbio_plugin_api::descend_addr;
+use symbio_plugin_api::PLUGIN_ID_COMPOSITE;
+use symbio_plugin_api::{
     lock_read, CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason, VdfsProvider,
     CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
-use symbio_deploy::PLUGIN_ID_COMPOSITE;
 
 use std::sync::{Arc, Weak};
 
@@ -96,7 +96,7 @@ impl Composite {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_COMPOSITE, Composite::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_COMPOSITE, Composite::build, dyn Plugin);
 
 /// 向子插件**广播**一次收集；只有**真失败**才留痕。
 ///
@@ -120,7 +120,7 @@ pub(crate) async fn broadcast_collect(
     match plugin.traverse(String::new(), ctx).await {
         Ok(_) => {}
         Err(e) if collect_declined(&e) => {}
-        Err(e) => symbio_core::plugin_warn!("composite", "收集 {who} 失败：{e}"),
+        Err(e) => symbio_plugin_api::plugin_warn!("composite", "收集 {who} 失败：{e}"),
     }
 }
 

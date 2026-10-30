@@ -10,10 +10,10 @@ use super::*;
 
 use indexmap::IndexMap;
 use std::sync::{Mutex, RwLock};
-use symbio_core::PluginSimpleRequest;
+use symbio_plugin_api::PluginSimpleRequest;
 
 ///  在本作用域是泛型别名，测试里的 trait impl 需要具体化
-type PluginInvokeResponse = symbio_core::PluginInvokeResponse<PluginPayload>;
+type PluginInvokeResponse = symbio_plugin_api::PluginInvokeResponse<PluginPayload>;
 
 // ==================== 嵌套容器的父地址转发 ====================
 //
@@ -316,14 +316,14 @@ async fn top_level_container_falls_back_to_declared_root() {
 struct SilentView;
 
 #[async_trait::async_trait]
-impl symbio_core::VdfsProvider for SilentView {
+impl symbio_plugin_api::VdfsProvider for SilentView {
     async fn dispatch(
         &self,
-        _ctx: &symbio_core::VdfsContext,
+        _ctx: &symbio_plugin_api::VdfsContext,
         _path: &str,
-        _req: symbio_core::VdfsRequest,
-    ) -> symbio_core::VdfsResult<symbio_core::VdfsResponse> {
-        Ok(symbio_core::VdfsResponse::List(Vec::new()))
+        _req: symbio_plugin_api::VdfsRequest,
+    ) -> symbio_plugin_api::VdfsResult<symbio_plugin_api::VdfsResponse> {
+        Ok(symbio_plugin_api::VdfsResponse::List(Vec::new()))
     }
 }
 
@@ -387,7 +387,7 @@ async fn resource_tree_membership_is_derived_from_providers() {
 // （E-009），停用的动作走注册表的 `set_enabled`（= 前端那个开关背后的同一个动词）。
 
 use std::path::{Path, PathBuf};
-use symbio_core::{
+use symbio_plugin_api::{
     capability_option_fields, family, vdfs_context, PluginStopReason, Registry, VdfsContent,
     VdfsRequest, VdfsResponse, OPTION_VISITOR, PLUGIN_FILE, TRAVERSE_AVAILABLE_OPTIONS,
     TRAVERSE_AVAILABLE_TOOLS,
@@ -593,12 +593,14 @@ async fn disabling_a_slice_removes_its_rows_and_keeps_the_rest() {
 // 仍然经**工厂 id + 真实 `mount_all`** 装配：本文件不能 `use symbio_plugin_session`
 // 或 loop 插件（E-009 测试同样判），跨插件的形状由地址面与 core 词汇表达。
 
-use symbio_core::chat_node as cm;
-use symbio_core::node_build::PresentationTree;
 use symbio_core::{
+    TurnDispatch, TurnReport, TurnSettings, TurnSpec, TurnStatus, LOOP_RUN_TURN, TURN_DISPATCH,
+};
+use symbio_plugin_api::chat_node as cm;
+use symbio_plugin_api::node_build::PresentationTree;
+use symbio_plugin_api::{
     chat_request, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter,
-    ModelProvider, Scope, TurnDispatch, TurnOutput, TurnReport, TurnSettings, TurnSpec, TurnStatus,
-    VdfsError, LOOP_RUN_TURN, TURN_DISPATCH,
+    ModelProvider, Scope, TurnOutput, VdfsError,
 };
 
 /// 可闸门假模型：进入即报到，等测试放行后返回一条自然结束的正文。
@@ -679,7 +681,7 @@ fn guard_turn_spec(sid: &str, root: &Path) -> TurnSpec {
             worker_force_prefix: String::new(),
             worker_keywords: String::new(),
             worker_min_chars: 0,
-            task_cap: symbio_core::TASK_CAP,
+            task_cap: symbio_plugin_api::TASK_CAP,
         },
     }
 }
@@ -694,7 +696,7 @@ fn guard_dispatch(
         spec: guard_turn_spec(sid, root),
         // 持久会话的判据是「有事实源」：驱动器不碰磁盘实现，只拿 core 的 Store 对象
         // （生产由 session 注入 `SessionStore::facts` 的同一份 Arc；测试用内存基线）。
-        facts: Some(Arc::new(symbio_core::EventStore::new())),
+        facts: Some(Arc::new(symbio_plugin_api::EventStore::new())),
         sink: ExecEventSink::silent(),
         writer: Arc::new(SilentWriter),
         abort: ExecAbortSignal::new(),

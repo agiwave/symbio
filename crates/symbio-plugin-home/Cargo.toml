@@ -13,10 +13,7 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-kernel = { path = "../symbio-kernel" }
-symbio-core = { path = "../symbio-core" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-deploy = { path = "../symbio-deploy" }
 symbio-providers = { path = "../symbio-providers" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续

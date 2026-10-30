@@ -19,7 +19,7 @@
 //! `disabled_when` 表达——草稿上只有「导入整包」可用（它正是新建智能体的
 //! 唯一入口），其余动作要么隐藏（`open-container`）要么禁用（导出 / 删除）。
 
-use symbio_core::{
+use symbio_plugin_api::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
 
@@ -95,7 +95,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
             // 内容就删掉重导）。它是「新建一个智能体」在详情页上的唯一入口，
             // 与「导出」「删除」同级——不是 `new_type` 上的一个字段。
             DetailAction {
-                id: symbio_core::VDFS_ACTION_IMPORT.into(),
+                id: symbio_plugin_api::VDFS_ACTION_IMPORT.into(),
                 label: "导入整包".into(),
                 style: "primary".into(),
                 when: Some(DetailCondition {
@@ -104,7 +104,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
                     ..Default::default()
                 }),
                 // 载荷是一个本地 zip：使用方先取文件再执行本动作
-                pack: Some(symbio_core::VDFS_EXT_ZIP.into()),
+                pack: Some(symbio_plugin_api::VDFS_EXT_ZIP.into()),
                 busy_label: Some("导入中…".into()),
                 ..Default::default()
             },
@@ -121,7 +121,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
             // 「导出」：VDFS 节点动作 `export`（vdfs/action）→ provider 的
             // `export_zip`，与「导入整包」互为逆向。
             DetailAction {
-                id: symbio_core::VDFS_ACTION_EXPORT.into(),
+                id: symbio_plugin_api::VDFS_ACTION_EXPORT.into(),
                 label: "导出整包".into(),
                 style: "secondary".into(),
                 disabled_when: Some(DetailCondition {

@@ -7,7 +7,7 @@
 //! 2. **VDFS 挂载点**（`<根>/setting`）：配置文档本身，用户在设置页 / 该地址上编辑。
 //!
 //! 挂载点不自己写 `VdfsProvider`：它是**纯配置挂载点**，四臂 dispatch 由
-//! `symbio_core::PluginConfigMount` 的 blanket impl 提供（与 web / local / gateway
+//! `symbio_plugin_api::PluginConfigMount` 的 blanket impl 提供（与 web / local / gateway
 //! 同一条机制），本文件只声明差异。
 //!
 //! ## 本插件不认识「系统」与「子智能体」
@@ -20,13 +20,13 @@ use super::config::{config_definition, SettingConfig};
 use super::segment;
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_SETTING;
+use symbio_plugin_api::{
     capability_announce_configurable, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile,
     PluginConfigMount, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS,
 };
-use symbio_deploy::PLUGIN_ID_SETTING;
 use tokio::sync::RwLock;
 
 /// setting 插件。
@@ -45,7 +45,7 @@ impl SettingPlugin {
             Ok(Some(c)) => c,
             Ok(None) => SettingConfig::default(),
             Err(e) => {
-                symbio_core::plugin_warn!("setting", "读取自身配置失败，改用默认值：{e}");
+                symbio_plugin_api::plugin_warn!("setting", "读取自身配置失败，改用默认值：{e}");
                 SettingConfig::default()
             }
         };
@@ -73,7 +73,7 @@ impl SettingPlugin {
     /// 参与能力收集：交出**系统提示词**（本智能体的自述与偏好）。
     ///
     /// 全空 → 静默跳过：缺省状态不该往提示词里塞一个空标题，也不该进收集期错误桶。
-    async fn contribute_prompt(&self, visitor: &Arc<dyn symbio_core::Registry>) {
+    async fn contribute_prompt(&self, visitor: &Arc<dyn symbio_plugin_api::Registry>) {
         let cfg = self.config.read().await;
         if let Some(text) = segment::segment(&cfg) {
             visitor
@@ -103,7 +103,7 @@ impl Plugin for SettingPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -115,7 +115,7 @@ impl Plugin for SettingPlugin {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
             "setting 无自有协议路由 `{path}`：智能体设置一律经 VDFS 访问（{}）",
-            symbio_core::absolute_addr(&ctx, symbio_core::PLUGIN_FILE)
+            symbio_plugin_api::absolute_addr(&ctx, symbio_plugin_api::PLUGIN_FILE)
         )))
     }
 
@@ -156,10 +156,10 @@ impl PluginConfigMount for SettingPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_SETTING, SettingPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_SETTING, SettingPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]
 mod tests;
 
-symbio_core::impl_config_mount_vdfs!(SettingPlugin);
+symbio_plugin_api::impl_config_mount_vdfs!(SettingPlugin);

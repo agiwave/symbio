@@ -80,7 +80,7 @@ fn api_base_defaults_to_official_endpoint() {
 #[test]
 fn identity_only_manifest_falls_back_to_defaults() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let dir = symbio_core::PluginDir::at(tmp.path().join("telegram"), "telegram");
+    let dir = symbio_plugin_api::PluginDir::at(tmp.path().join("telegram"), "telegram");
     dir.ensure_manifest().unwrap();
 
     let cfg = dir
@@ -98,7 +98,7 @@ fn identity_only_manifest_falls_back_to_defaults() {
 #[test]
 fn wrong_type_still_errors() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let dir = symbio_core::PluginDir::at(tmp.path().join("telegram"), "telegram");
+    let dir = symbio_plugin_api::PluginDir::at(tmp.path().join("telegram"), "telegram");
     dir.ensure_manifest().unwrap();
     std::fs::write(
         dir.config_path(),

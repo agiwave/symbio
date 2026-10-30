@@ -7,13 +7,13 @@ use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::
 // 声明 `High` 却经这条路径直接跑，正是「风险只是宣传语」的第二个洞）。
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_WEB;
+use symbio_plugin_api::{
     plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
     PluginPayload,
 };
-use symbio_core::{DetailDefinition, DetailField};
-use symbio_deploy::PLUGIN_ID_WEB;
+use symbio_plugin_api::{DetailDefinition, DetailField};
 use symbio_providers::approval_gate;
 use tokio::sync::RwLock;
 
@@ -78,7 +78,7 @@ impl WebPlugin {
             Ok(Some(c)) => c,
             Ok(None) => WebConfig::default(),
             Err(e) => {
-                symbio_core::plugin_warn!("web", "读取自身配置失败，改用默认值：{e}");
+                symbio_plugin_api::plugin_warn!("web", "读取自身配置失败，改用默认值：{e}");
                 WebConfig::default()
             }
         };
@@ -128,7 +128,7 @@ impl Plugin for WebPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -136,7 +136,7 @@ impl Plugin for WebPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
 
         if path.starts_with('/') {
             if let Some(parent) = self.get_parent().await {
@@ -151,7 +151,7 @@ impl Plugin for WebPlugin {
             if let Some(payload) = approval_gate(&ctx, tool.as_ref(), &args)? {
                 return Ok(PluginPayload::new(&payload));
             }
-            return symbio_core::capability_invoke(tool.as_ref(), ctx).await;
+            return symbio_plugin_api::capability_invoke(tool.as_ref(), ctx).await;
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }
@@ -161,22 +161,22 @@ impl Plugin for WebPlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let sub_path = ctx.get(symbio_core::PATH).unwrap_or_default();
-        if sub_path != symbio_core::TRAVERSE_AVAILABLE_TOOLS {
-            return Err(symbio_core::PluginError::NotFound(format!(
+        let sub_path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
+        if sub_path != symbio_plugin_api::TRAVERSE_AVAILABLE_TOOLS {
+            return Err(symbio_plugin_api::PluginError::NotFound(format!(
                 "未知遍历路径: {}",
                 sub_path
             )));
         }
 
-        if let Some(visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) {
+        if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
             for tool in self.tool_impls.iter() {
                 visitor.put(CapabilityRow::tool(tool.clone())).await;
             }
         }
         // 顺带声明「本插件有一份配置文档」：设置页据此列出本项并指路到
         // `<根>/web/PLUGIN.yml`（标签与配置节点共用同一个来源，见 `PluginConfigFile`）
-        symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
@@ -185,9 +185,9 @@ impl Plugin for WebPlugin {
 // ==================== VDFS：配置文档（`<根>/web/PLUGIN.yml`） ====================
 //
 // 本插件在 VDFS 上的全部内容 = 一个配置文档，故实现 [`PluginConfigMount`] 即可——
-// 四臂 dispatch 由机制侧提供（见 `symbio_core::PluginConfigMount`），本处只声明差异。
+// 四臂 dispatch 由机制侧提供（见 `symbio_plugin_api::PluginConfigMount`），本处只声明差异。
 
-impl symbio_core::PluginConfigMount for WebPlugin {
+impl symbio_plugin_api::PluginConfigMount for WebPlugin {
     type Config = WebConfig;
     const TITLE: &'static str = "网络工具";
 
@@ -200,6 +200,6 @@ impl symbio_core::PluginConfigMount for WebPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_WEB, WebPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_WEB, WebPlugin::build, dyn Plugin);
 
-symbio_core::impl_config_mount_vdfs!(WebPlugin);
+symbio_plugin_api::impl_config_mount_vdfs!(WebPlugin);

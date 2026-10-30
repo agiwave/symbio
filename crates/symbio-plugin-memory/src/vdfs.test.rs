@@ -4,14 +4,16 @@
 
 use super::*;
 use std::sync::Arc;
-use symbio_core::vdfs_context;
-use symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
+use symbio_plugin_api::vdfs_context;
+use symbio_plugin_api::{
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
+};
 use tempfile::TempDir;
 
 /// 在某宿主目录下造一个本插件实例（插件目录 = `<宿主目录>/memory`）
 fn plugin_in(host: &std::path::Path) -> MemoryPlugin {
     MemoryPlugin::new(
-        symbio_core::PluginDir::at(host.join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
+        symbio_plugin_api::PluginDir::at(host.join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
         super::super::config::MemoryConfig::default(),
     )
 }
@@ -219,7 +221,7 @@ async fn writes_over_the_limit_are_rejected_for_both_scopes() {
         ..super::super::config::MemoryConfig::default()
     };
     let p = MemoryPlugin::new(
-        symbio_core::PluginDir::at(tmp.path().join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
+        symbio_plugin_api::PluginDir::at(tmp.path().join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
         cfg,
     );
     let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
@@ -305,7 +307,7 @@ async fn config_document_is_reachable_by_its_real_name() {
         .into_stat()
         .unwrap();
     assert_eq!(node.name, PLUGIN_FILE);
-    assert_eq!(node.ext.as_deref(), Some(symbio_core::VDFS_EXT_FORM));
+    assert_eq!(node.ext.as_deref(), Some(symbio_plugin_api::VDFS_EXT_FORM));
 }
 
 /// **内存态 = 落盘态**（项四）：经配置文档写口改一次闸门，正在生效的那份与

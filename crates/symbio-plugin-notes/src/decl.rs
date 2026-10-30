@@ -16,11 +16,11 @@
 
 use serde_json::{json, Value};
 
-use symbio_core::ring::{Decl, Lit, Pattern};
-use symbio_core::{
+use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
+use symbio_plugin_api::ring::{Decl, Lit, Pattern};
+use symbio_plugin_api::{
     Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
 };
-use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 
 /// 「记下一条便签」这一事实。落在 `domain × opened`。
 pub(crate) const NOTES_CREATED: &str = "notes.created";

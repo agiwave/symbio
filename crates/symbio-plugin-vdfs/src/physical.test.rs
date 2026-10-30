@@ -4,7 +4,7 @@
 
 use super::*;
 
-use symbio_core::VdfsContext;
+use symbio_plugin_api::VdfsContext;
 
 fn ctx_in(dir: &Path) -> VdfsContext {
     VdfsContext::empty().with_param(
@@ -206,7 +206,7 @@ fn workspace_only_confines_absolute_paths() {
     let _ = std::fs::remove_dir_all(&outside);
 }
 
-// `..` 穿越与黑名单前缀的判定规则测试在 `symbio_core::vdfs`
+// `..` 穿越与黑名单前缀的判定规则测试在 `symbio_plugin_api::vdfs`
 // （规则只有一份实现，测试随之只有一份）。这里只验**策略集成**：
 // 规则接上 `FsPolicy` 之后，哪些路径被真的拦住。
 
@@ -222,7 +222,7 @@ fn blacklist_rejects_only_real_hits() {
 
 /// 策略集成守卫补全：`..` 逃逸、完整黑名单清单、allowed_roots 前缀边界。
 ///
-/// 规则本身在 `symbio_core::vdfs` 只有一份（`vdfs_has_parent_segment` /
+/// 规则本身在 `symbio_plugin_api::vdfs` 只有一份（`vdfs_has_parent_segment` /
 /// `vdfs_path_within`），这里验的是 `FsPolicy` 把规则接对——任一处漏接，下面任一
 /// 断言都会红，从而暴露物理层安全边界被悄悄放开。
 #[test]

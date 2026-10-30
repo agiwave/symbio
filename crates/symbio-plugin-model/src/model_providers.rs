@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use symbio_core::{ModelSpend, ModelUsage};
+use symbio_plugin_api::{ModelSpend, ModelUsage};
 
 fn default_enabled() -> bool {
     true

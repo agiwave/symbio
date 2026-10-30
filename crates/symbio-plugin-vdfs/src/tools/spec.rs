@@ -32,7 +32,7 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use serde_json::Value;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
     VdfsItem,
 };
@@ -384,7 +384,7 @@ async fn tree_receipt(
             Ok(c) => c,
             // 单分支失败降级：不让一棵子树拖垮整个遍历
             Err(e) => {
-                symbio_core::plugin_warn!("vdfs", "vdfs_tree: 列出 {dir} 失败，已跳过: {e}");
+                symbio_plugin_api::plugin_warn!("vdfs", "vdfs_tree: 列出 {dir} 失败，已跳过: {e}");
                 continue;
             }
         };
@@ -399,7 +399,7 @@ async fn tree_receipt(
                 listed_all = false;
                 break;
             }
-            let child_addr = symbio_core::join_addr(&dir, &item.node.name);
+            let child_addr = symbio_plugin_api::join_addr(&dir, &item.node.name);
             // 访问层通常已按同一规则回填；留空时兜一个，保证每个条目都带地址
             if item.path.is_empty() {
                 item.path = child_addr.clone();

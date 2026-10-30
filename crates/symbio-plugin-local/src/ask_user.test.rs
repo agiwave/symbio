@@ -4,12 +4,12 @@
 //! `ask_user.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use symbio_core::PluginSimpleRequest;
+use symbio_plugin_api::PluginSimpleRequest;
 
 /// 构造带 payload 与运行模式的请求上下文。
 fn ctx_with(args: Value, mode: &str) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
-    req.set(symbio_core::MODE, mode.to_string());
+    req.set(symbio_plugin_api::MODE, mode.to_string());
     // 用裸字面量而非 PLUGIN_PAYLOAD_KEY：本行同时验证「桶名就是 "payload"」这一契约
     req.set_raw("payload", Arc::new(args));
     Arc::new(req)
@@ -41,7 +41,7 @@ async fn interactive_mode_returns_pending_intent_not_a_channel() {
     // 更不得是 Session 通道。
     assert_eq!(
         data["failure_kind"],
-        json!(symbio_core::failure_kind::NEEDS_INTERACTION),
+        json!(symbio_plugin_api::failure_kind::NEEDS_INTERACTION),
         "编排层凭 failure_kind 判定本轮结束于等待用户"
     );
     assert!(
@@ -93,9 +93,9 @@ async fn auto_mode_returns_continuable_error_not_pending() {
         .expect("自动模式应返回可继续的错误");
 
     let kind = data["failure_kind"].as_str().unwrap_or_default();
-    assert_eq!(kind, symbio_core::failure_kind::TOOL_UNAVAILABLE);
+    assert_eq!(kind, symbio_plugin_api::failure_kind::TOOL_UNAVAILABLE);
     assert!(
-        !symbio_core::failure_kind::is_pending(kind),
+        !symbio_plugin_api::failure_kind::is_pending(kind),
         "自动模式不得判为等待用户"
     );
     assert!(data.get("prompt").is_none(), "自动模式不产卡片载荷");

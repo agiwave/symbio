@@ -6,7 +6,7 @@
 //!
 //! 真正的构造器（`llm_build_assistant_messages` / `TurnStreamChildIds` /
 //! `TurnOutput::into_messages`）生产上只有 session 一个消费方，已随 D-023 从
-//! `symbio_core::llm::turn` 下沉到 `crates/symbio-plugin-loop/src/message_build.rs`；
+//! `symbio_plugin_api::llm::turn` 下沉到 `crates/symbio-plugin-loop/src/message_build.rs`；
 //! 插件之间禁止互引（`plugin-entry-audit` E-009），本文件不能再调它。
 //!
 //! 于是两侧**各锁一半**，形状靠注释互指：
@@ -16,16 +16,16 @@
 
 use super::*;
 
-use symbio_core::chat_node::{NodeKind, NodeStatus};
+use symbio_plugin_api::chat_node::{NodeKind, NodeStatus};
 
 const TURN_ID: &str = "turn-0001";
 
 /// 身份写 `principal`（D-147）：本文件的树模仿**落库面**（见文件头），
 /// `role` 只是反序列化落点，不是写侧的身份来源。
-fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_plugin_api::principal::Principal {
+    use symbio_plugin_api::principal::Principal;
     match role {
-        NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
         NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         NodeRole::System => Principal::from_legacy("system/local"),
@@ -144,7 +144,7 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
     let msgs = turn_tree(vec![
         child("turn-0001-reason", NodeKind::Notice, "思考过程")
-            .with_style_tag(symbio_core::chat_node::CHAT_STYLE_TAG_REASONING),
+            .with_style_tag(symbio_plugin_api::chat_node::CHAT_STYLE_TAG_REASONING),
         child("turn-0001-text", NodeKind::Body, "正常回复"),
     ]);
 

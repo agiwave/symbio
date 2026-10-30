@@ -4,11 +4,11 @@
 
 use super::*;
 
-use symbio_core::PluginSimpleRequest;
+use symbio_plugin_api::PluginSimpleRequest;
 
 fn ctx(path: &str) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
-    req.set(symbio_core::PATH, path.to_string());
+    req.set(symbio_plugin_api::PATH, path.to_string());
     Arc::new(req)
 }
 

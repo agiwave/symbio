@@ -3,11 +3,11 @@
 //! ## 与 core 的分工（重要）
 //!
 //! - **纯接口**（[`VdfsProvider`] trait 与其域类型）在 core：
-//!   `symbio_core::vdfs`——那是 VDFS 的 centerpiece；
+//!   `symbio_plugin_api::vdfs`——那是 VDFS 的 centerpiece；
 //! - **线路格式**（请求 / 响应信封 + 协议路径常量）在本文件——只有 vdfs 插件
 //!   自己消费，**core 不暴露本文件的任何类型**。唯一例外是 [`VdfsListResponse`]：
 //!   `agent` 也要读它的 `path` 拼子会话地址，按 D-196 它属于领域（两个 Rust 侧消费方），
-//!   归 `symbio_kernel::vdfs`，本文件只 `pub use` 转发。
+//!   归 `symbio_plugin_api::vdfs`，本文件只 `pub use` 转发。
 //!
 //! ⚠️ **三个例外**：`vdfs/root` / `vdfs/watch` / `vdfs/unwatch` **跨插件可见**
 //! （`agent` 拼 Run 根地址、`cli` 订阅 vdfs 频道、前端按它们发请求），因此它们的
@@ -15,14 +15,14 @@
 //! 同一路由两份常量就是「一个事实两个 owner」，必然漂移。
 //!
 //! 这与 model 插件把 `ModelProtocol` 钩子与注册常量收在
-//! `crates/symbio-plugin-model/src/protocols/` 的做法一致（见 `symbio_core::model_provider` 的模块文档）。
+//! `crates/symbio-plugin-model/src/protocols/` 的做法一致（见 `symbio_plugin_api::model_provider` 的模块文档）。
 //!
 //! `VdfsProvider`
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use symbio_core::{VdfsContent, VdfsItem};
 use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use symbio_plugin_api::{VdfsContent, VdfsItem};
 
 // ==================== 协议操作路径 ====================
 //
@@ -180,14 +180,14 @@ pub struct VdfsSearchRequest {
 
 // ==================== 响应 ====================
 
-// `vdfs/list` 与 `vdfs/root` 的响应形状定义在 `symbio_kernel::vdfs`，这里只转发：
+// `vdfs/list` 与 `vdfs/root` 的响应形状定义在 `symbio_plugin_api::vdfs`，这里只转发：
 // 它有两个 Rust 侧消费方（本插件构造、`agent` 读 `path`），按 E-009 后者不能
 // `use symbio_plugin_vdfs`，按 D-196 该类型属于领域而不是某个插件。
 //
 // 用行注释而不是 `///`：给 `pub use` 挂文档注释并链接到被转发的项会让 rustdoc 在
 // 链接解析阶段 panic（`no resolutions for a doc link`，rustc 1.91）。语义与字段说明
-// 在 `symbio_kernel::vdfs::VdfsListResponse` 上。
-pub use symbio_kernel::vdfs::VdfsListResponse;
+// 在 `symbio_core::vdfs::VdfsListResponse` 上。
+pub use symbio_plugin_api::VdfsListResponse;
 
 /// `vdfs/tree` 响应（**扁平**条目列表——层级由每个条目的 `path` 表达）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

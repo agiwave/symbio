@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
-use symbio_core::VdfsNode;
+use symbio_plugin_api::VdfsNode;
 
 #[test]
 fn ops_are_unique_and_prefixed() {
@@ -72,11 +72,13 @@ fn write_request_carries_create_intent() {
 fn list_item_keeps_the_wire_shape() {
     let resp = VdfsListResponse {
         path: "/mem".into(),
-        node: VdfsNode::dir("mem", "内存", symbio_core::VdfsAccess::LIST),
-        items: vec![
-            VdfsItem::new(VdfsNode::file("a.txt", "A", symbio_core::VdfsAccess::READ))
-                .with_path("mem/a.txt"),
-        ],
+        node: VdfsNode::dir("mem", "内存", symbio_plugin_api::VdfsAccess::LIST),
+        items: vec![VdfsItem::new(VdfsNode::file(
+            "a.txt",
+            "A",
+            symbio_plugin_api::VdfsAccess::READ,
+        ))
+        .with_path("mem/a.txt")],
     };
     let v = serde_json::to_value(&resp).unwrap();
     assert_eq!(v["items"][0]["name"], serde_json::json!("a.txt"));

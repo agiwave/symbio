@@ -9,8 +9,10 @@
 //! `symbio-plugin-session/src/declarations.test.rs` 的同名夹具同形，只在 `cfg(test)` 生效。
 
 use super::{NOTES_CREATED, NOTES_INDEXED, NOTES_INSIGHT, NOTES_SUMMARY, OWNER};
-use symbio_core::ring::{Decl, Pattern};
-use symbio_core::{ActorDecl, Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb};
+use symbio_plugin_api::ring::{Decl, Pattern};
+use symbio_plugin_api::{
+    ActorDecl, Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb,
+};
 
 /// loop 拥有的产物格：`notes.index` 的 `owes.source`。完整进程里由 loop 交表，
 /// 本二进制不链接它 ⇒ 夹具补上格位与载荷字段。
@@ -30,11 +32,11 @@ const HARNESS_FACTS: &[FactDecl] = &[FactDecl {
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();
     for name in [
-        symbio_core::EVENT_REQUEST,
-        symbio_core::EVENT_SENT,
-        symbio_core::EVENT_RESPONSE,
-        symbio_core::EVENT_FAILED,
-        symbio_core::EVENT_RETRY,
+        symbio_plugin_api::EVENT_REQUEST,
+        symbio_plugin_api::EVENT_SENT,
+        symbio_plugin_api::EVENT_RESPONSE,
+        symbio_plugin_api::EVENT_FAILED,
+        symbio_plugin_api::EVENT_RETRY,
         symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
     ] {
         let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
@@ -104,11 +106,11 @@ fn the_domain_event_resolves_through_the_process_assembly() {
 #[test]
 fn the_domain_event_does_not_collide_with_protocol_names() {
     for name in [
-        symbio_core::EVENT_REQUEST,
-        symbio_core::EVENT_SENT,
-        symbio_core::EVENT_RESPONSE,
-        symbio_core::EVENT_FAILED,
-        symbio_core::EVENT_RETRY,
+        symbio_plugin_api::EVENT_REQUEST,
+        symbio_plugin_api::EVENT_SENT,
+        symbio_plugin_api::EVENT_RESPONSE,
+        symbio_plugin_api::EVENT_FAILED,
+        symbio_plugin_api::EVENT_RETRY,
     ] {
         assert_ne!(name, NOTES_CREATED);
     }

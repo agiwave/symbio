@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse,
 };
@@ -129,7 +129,7 @@ impl ContentSearchTool {
                     // 安全截断：搜索结果正文常含中文，裸 `&[..N]` 会 panic 在字符边界内
                     format!(
                         "{}...\n\n[输出已截断：超过 {} 字节]",
-                        symbio_core::text_truncate_bytes(&result, MAX_OUTPUT_BYTES, ""),
+                        symbio_plugin_api::text_truncate_bytes(&result, MAX_OUTPUT_BYTES, ""),
                         MAX_OUTPUT_BYTES
                     )
                 } else {
@@ -474,7 +474,7 @@ impl Capability for ContentSearchTool {
                 },
                 "required": ["pattern"]
             }),
-            category: Some(symbio_core::CapabilityCategory::FileOperation),
+            category: Some(symbio_plugin_api::CapabilityCategory::FileOperation),
             risk: Some(CapabilityRiskLevel::Low),
             examples: Some(vec![
                 "pattern='fn main'".to_string(),
@@ -490,7 +490,7 @@ impl Capability for ContentSearchTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let workdir_str = ctx.get(symbio_core::WORKDIR).ok_or_else(|| {
+        let workdir_str = ctx.get(symbio_plugin_api::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
         })?;
         if workdir_str.is_empty() {

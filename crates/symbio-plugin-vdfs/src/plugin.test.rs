@@ -4,7 +4,7 @@
 
 use super::*;
 
-use symbio_core::PluginSimpleRequest;
+use symbio_plugin_api::PluginSimpleRequest;
 
 fn build_plugin() -> Arc<dyn Plugin> {
     VdfsPlugin::build(Arc::new(PluginSimpleRequest::new(None, None)))
@@ -51,7 +51,7 @@ async fn list_unknown_dir_errors() {
 /// 工具集：每个 VDFS 操作恰好一个工具（无 `vdfs_move`——移动已整条下线）
 #[test]
 fn tools_cover_all_ops() {
-    let visitor: Arc<dyn symbio_core::Registry> =
+    let visitor: Arc<dyn symbio_plugin_api::Registry> =
         Arc::new(symbio_providers::DefaultToolVisitor::new());
     let names: Vec<String> = tools::vdfs_tools(Arc::new(ToolVdfs::new(visitor)))
         .iter()

@@ -26,9 +26,9 @@
 //! 的理由是失败方向：`Escalate` 退化成「今天的行为」（全部进工具循环，功能完整），
 //! 而 `Answered` 会让一次分类故障表现成**用户什么都收不到**——静默，无信号。
 
-use symbio_core::chat_node::{ChatNode, NodeRole};
-use symbio_core::Verdict;
-use symbio_core::{
+use symbio_plugin_api::chat_node::{ChatNode, NodeRole};
+use symbio_plugin_api::Verdict;
+use symbio_plugin_api::{
     DecisionPlan, PromptMessage, REASON_CLARIFY, REASON_FROM_CONTEXT, REASON_NEEDS_WORK,
     REASON_REFUSE,
 };

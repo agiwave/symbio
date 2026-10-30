@@ -3,7 +3,7 @@
 //! ## 定位
 //!
 //! 「这个智能体由哪些插件组成」是**容器的事实**：插件根下一层目录 = 一个插件
-//! （见 `symbio_core::plugin::dir`）。本插件是那件事在界面上的**唯一门面**——它把容器
+//! （见 `symbio_plugin_api::plugin::dir`）。本插件是那件事在界面上的**唯一门面**——它把容器
 //! 产出的注册表条目列成一张清单，并把「启用 / 停用 / 添加 / 卸载」转发回容器执行。
 //!
 //! | 谁 | 干什么 |
@@ -19,7 +19,7 @@
 //! 条目**不是**第二种东西：它就是那个插件的配置，只是入口挂在本插件子树里
 //! （`<插件管理>/<插件名>`），读 / 写转发到容器根下的 `<插件名>/PLUGIN.yml`——
 //! 同一份配置仍然只有一个**文件**、一份**定义**（拥有者给的那份，见
-//! `symbio_core::capability::configurable`），本插件只转地址，不代管。
+//! `symbio_plugin_api::capability::configurable`），本插件只转地址，不代管。
 //!
 //! 为什么需要这个入口：装配动作（启用 / 停用 / 卸载）必须出现在**能表达装配态**的
 //! 节点上。而配置条目的真实地址（`<插件名>/PLUGIN.yml`）落在插件自己的资源域里——
@@ -45,24 +45,26 @@
 
 use serde_json::Value;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::ASSEMBLY_UNDISABLABLE_PLUGINS;
+use symbio_plugin_api::PLUGIN_ID_MANAGER;
+use symbio_plugin_api::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, DynVdfsProvider,
 };
-use symbio_core::{DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection};
-use symbio_core::{
+use symbio_plugin_api::{
+    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
+};
+use symbio_plugin_api::{
     Plugin, PluginEntry, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, CONFIGURABLE_VISITOR, PLUGIN_FILE,
     PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
     PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
 };
-use symbio_core::{
+use symbio_plugin_api::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_PLUGINS,
     VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_STATUS_ACTIVE,
     VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
 };
-use symbio_deploy::ASSEMBLY_UNDISABLABLE_PLUGINS;
-use symbio_deploy::PLUGIN_ID_MANAGER;
 
 /// 自有分区（固定清单）：数据由**前端状态**自持，VDFS 侧无正文。
 ///
@@ -101,7 +103,7 @@ fn section_node(s: &SectionSpec) -> VdfsNode {
     let mut n = VdfsNode::file(s.id, s.label, VdfsAccess::READ);
     n.kind = PLUGIN_ID_MANAGER.to_string();
     n.ext = Some(s.id.to_string());
-    n.status = symbio_core::VDFS_STATUS_NONE.to_string();
+    n.status = symbio_plugin_api::VDFS_STATUS_NONE.to_string();
     n
 }
 
@@ -363,7 +365,7 @@ impl PluginManagerPlugin {
     /// 各插件自己交出来的配置声明（`CONFIGURABLE_VISITOR` 通道，容器广播时收集）。
     ///
     /// 条目自带**真实地址**与呈现定义，本插件只按插件名对上号——「这份配置长什么样」
-    /// 只有拥有者说得出来（见 `symbio_core::capability::configurable`）。收集器缺失时（例如容器
+    /// 只有拥有者说得出来（见 `symbio_plugin_api::capability::configurable`）。收集器缺失时（例如容器
     /// 没参与本次请求）静默为空：没有它条目照样列得出，只是少一份表单定义。
     async fn config_entries(ctx: &VdfsContext) -> Vec<VdfsItem> {
         let Ok(host) = vdfs_host_ctx(ctx) else {
@@ -372,7 +374,7 @@ impl PluginManagerPlugin {
         let Some(visitor) = host.get(CONFIGURABLE_VISITOR) else {
             return Vec::new();
         };
-        symbio_core::capability_configurables(&*visitor).await
+        symbio_plugin_api::capability_configurables(&*visitor).await
     }
 
     /// 某插件的配置声明（按条目名对号）
@@ -575,7 +577,7 @@ impl Plugin for PluginManagerPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!("未知路径: {path}")))
     }
 
@@ -588,7 +590,11 @@ impl Plugin for PluginManagerPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_MANAGER, PluginManagerPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(
+    PLUGIN_ID_MANAGER,
+    PluginManagerPlugin::build,
+    dyn Plugin
+);
 
 #[async_trait::async_trait]
 impl VdfsProvider for PluginManagerPlugin {

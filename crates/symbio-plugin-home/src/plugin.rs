@@ -26,14 +26,16 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
-use symbio_core::{
+use symbio_plugin_api::{
     Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PATH, PLUGIN_DIR,
     REQUIRED_PLUGINS,
 };
-use symbio_deploy::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
+use symbio_plugin_api::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
 use tokio::sync::RwLock;
-use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
+use {
+    symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
+};
 
 /// 系统必备插件：**home 的策略**，随构造交给容器。
 ///
@@ -45,7 +47,7 @@ use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_wa
 ///
 /// 若将来两侧确需分叉，**在这里加只属于系统侧的字面量并写清理由**——不要恢复
 /// 「两张各写一遍、靠人同步」的形态（两份各自演化的清单会静默漂移，且没有测试会变红）。
-pub const SYSTEM_PLUGINS: &[&str] = symbio_deploy::ASSEMBLY_SUB_AGENT_PLUGINS;
+pub const SYSTEM_PLUGINS: &[&str] = symbio_plugin_api::ASSEMBLY_SUB_AGENT_PLUGINS;
 
 /// Home 自己的插件目录 = **系统根** `<homedir>`
 ///
@@ -306,7 +308,7 @@ impl HomePlugin {
     /// 每个插件从自己的目录读配置。容器是 home 的**动态内置替身**，因此拿到的
     /// 也是系统根目录——它据此定位插件根 `<系统根>/plugins`。
     pub fn rebuild_worker_sync(&self) -> Result<(), PluginError> {
-        use symbio_core::creator_has;
+        use symbio_plugin_api::creator_has;
         if !creator_has(PLUGIN_ID_COMPOSITE) {
             return Ok(());
         }
@@ -337,7 +339,7 @@ impl HomePlugin {
         );
 
         let worker_plugin: Arc<dyn Plugin> =
-            symbio_core::creator_create_object::<dyn Plugin>("composite", sub_context)
+            symbio_plugin_api::creator_create_object::<dyn Plugin>("composite", sub_context)
                 .expect("composite creator registered but failed to construct");
         self.add_instance_sync("worker".to_string(), worker_plugin);
         plugin_info!(
@@ -442,7 +444,7 @@ impl Default for HomePlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_HOME, HomePlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_HOME, HomePlugin::build, dyn Plugin);
 
 #[async_trait::async_trait]
 impl Plugin for HomePlugin {

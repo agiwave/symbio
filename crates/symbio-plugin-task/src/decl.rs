@@ -9,7 +9,7 @@
 //! core 的折叠只按这张表认名字——所以任务族的 owner 从 `loop` 移到本插件时，
 //! 消费方一个字都不用改。
 
-use symbio_core::{Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb};
+use symbio_plugin_api::{Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb};
 // 跨插件共享的五条走清单生成物（`PLUGIN.yml` 的 `shared_events` → `events.rs`）。
 // `pub(crate) use` 是**转手**不是复制：本插件的写方 / 读方从 `crate::decl` 取名字，
 // 拼写的唯一出处仍是生成物。

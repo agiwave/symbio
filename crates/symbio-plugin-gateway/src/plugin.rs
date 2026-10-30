@@ -6,13 +6,13 @@
 
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_GATEWAY;
+use symbio_plugin_api::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
     PATH,
 };
-use symbio_core::{DetailDefinition, DetailField, DetailOption};
-use symbio_deploy::PLUGIN_ID_GATEWAY;
+use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -106,7 +106,7 @@ impl GatewayPlugin {
             Ok(Some(c)) => c,
             Ok(None) => GatewayConfig::default(),
             Err(e) => {
-                symbio_core::plugin_warn!("gateway", "读取自身配置失败，改用默认值：{e}");
+                symbio_plugin_api::plugin_warn!("gateway", "读取自身配置失败，改用默认值：{e}");
                 GatewayConfig::default()
             }
         };
@@ -175,7 +175,7 @@ impl GatewayPlugin {
     /// 端口被占/绑定失败时调用方只看到「网关没起来」却无从归因。
     pub async fn start_server_logged(&self) {
         if let Err(e) = self.start_server().await {
-            symbio_core::plugin_warn!("gateway", "入站服务启动失败：{e}");
+            symbio_plugin_api::plugin_warn!("gateway", "入站服务启动失败：{e}");
         }
     }
 
@@ -200,7 +200,7 @@ impl Plugin for GatewayPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -252,7 +252,7 @@ impl Plugin for GatewayPlugin {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
@@ -260,11 +260,11 @@ impl Plugin for GatewayPlugin {
 // ==================== VDFS：配置文档（`<根>/gateway/PLUGIN.yml`） ====================
 //
 // 本插件在 VDFS 上的全部内容 = 一个配置文档，故实现 [`PluginConfigMount`] 即可——
-// 四臂 dispatch 由机制侧提供（见 `symbio_core::PluginConfigMount`），本处只声明差异
+// 四臂 dispatch 由机制侧提供（见 `symbio_plugin_api::PluginConfigMount`），本处只声明差异
 // 与写后副作用（重启入站监听）。
 
 #[async_trait]
-impl symbio_core::PluginConfigMount for GatewayPlugin {
+impl symbio_plugin_api::PluginConfigMount for GatewayPlugin {
     type Config = GatewayConfig;
     const TITLE: &'static str = "开放接口";
 
@@ -282,10 +282,10 @@ impl symbio_core::PluginConfigMount for GatewayPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_GATEWAY, GatewayPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_GATEWAY, GatewayPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]
 mod tests;
 
-symbio_core::impl_config_mount_vdfs!(GatewayPlugin);
+symbio_plugin_api::impl_config_mount_vdfs!(GatewayPlugin);

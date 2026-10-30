@@ -11,13 +11,13 @@ use super::{
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::{Arc, Weak};
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_LOCAL;
+use symbio_plugin_api::{
     plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
     PluginPayload,
 };
-use symbio_core::{DetailDefinition, DetailField, DetailOption};
-use symbio_deploy::PLUGIN_ID_LOCAL;
+use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption};
 use symbio_providers::approval_gate;
 use tokio::sync::RwLock;
 
@@ -132,7 +132,7 @@ impl LocalPlugin {
             Ok(Some(c)) => c,
             Ok(None) => LocalConfig::default(),
             Err(e) => {
-                symbio_core::plugin_warn!("local", "读取自身配置失败，改用默认值：{e}");
+                symbio_plugin_api::plugin_warn!("local", "读取自身配置失败，改用默认值：{e}");
                 LocalConfig::default()
             }
         };
@@ -195,7 +195,7 @@ impl Plugin for LocalPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -203,7 +203,7 @@ impl Plugin for LocalPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
 
         if path.starts_with('/') {
             if let Some(parent) = self.get_parent().await {
@@ -223,7 +223,7 @@ impl Plugin for LocalPlugin {
 
             // 信封 ↔ 结果换算收口在 `capability_invoke`：本处与按名执行
             // （`Registry::get` + `capability_invoke`）走同一条拆信封路径。
-            return symbio_core::capability_invoke(tool.as_ref(), ctx).await;
+            return symbio_plugin_api::capability_invoke(tool.as_ref(), ctx).await;
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }
@@ -233,15 +233,15 @@ impl Plugin for LocalPlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let sub_path = ctx.get(symbio_core::PATH).unwrap_or_default();
-        if sub_path != symbio_core::TRAVERSE_AVAILABLE_TOOLS {
-            return Err(symbio_core::PluginError::NotFound(format!(
+        let sub_path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
+        if sub_path != symbio_plugin_api::TRAVERSE_AVAILABLE_TOOLS {
+            return Err(symbio_plugin_api::PluginError::NotFound(format!(
                 "未知遍历路径: {}",
                 sub_path
             )));
         }
 
-        if let Some(visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) {
+        if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
             // 审批闸门由收口点（`DefaultToolVisitor::put`）统一加壳，
             // 本处只交裸工具——过去在这里手工 `SecureToolWrapper::new` 的做法
             // 让闸门长在插件的注册循环里，`vdfs` 等别的注册入口就漏了。
@@ -250,7 +250,7 @@ impl Plugin for LocalPlugin {
             }
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
@@ -260,11 +260,11 @@ impl Plugin for LocalPlugin {
 //
 // 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文件」。
 // 节点形状、定义校验、落盘都在 [`PluginConfigFile`] 里；四臂寻址分流由机制侧
-// 提供（见 `symbio_core::PluginConfigMount`），本处只声明差异与写后副作用。
+// 提供（见 `symbio_plugin_api::PluginConfigMount`），本处只声明差异与写后副作用。
 // 地址就是**真实文件名** `PLUGIN.yml`——它是插件目录里的一个普通文件。
 
 #[async_trait]
-impl symbio_core::PluginConfigMount for LocalPlugin {
+impl symbio_plugin_api::PluginConfigMount for LocalPlugin {
     type Config = super::local_config::LocalConfig;
     const TITLE: &'static str = "本地工具";
 
@@ -284,10 +284,10 @@ impl symbio_core::PluginConfigMount for LocalPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_LOCAL, LocalPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_LOCAL, LocalPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]
 mod tests;
 
-symbio_core::impl_config_mount_vdfs!(LocalPlugin);
+symbio_plugin_api::impl_config_mount_vdfs!(LocalPlugin);

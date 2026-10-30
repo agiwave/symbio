@@ -4,8 +4,10 @@
 
 use super::*;
 
-use symbio_core::VDFS_PARAM_WORKDIR;
-use symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
+use symbio_plugin_api::VDFS_PARAM_WORKDIR;
+use symbio_plugin_api::{
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
+};
 use symbio_providers::DefaultToolVisitor;
 
 /// workdir 由宿主 ctx 翻译成 provider 参数；缺省时不带该键

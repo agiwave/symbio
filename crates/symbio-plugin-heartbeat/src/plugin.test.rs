@@ -8,7 +8,7 @@
 //! `crates/symbio-plugin-composite` 的守卫用例里（本文件不能 import 兄弟模块，E-009）。
 
 use super::*;
-use symbio_core::{
+use symbio_plugin_api::{
     capability_option_fields, family, Plugin, PluginSimpleRequest, PluginStopReason, Registry,
 };
 use symbio_providers::DefaultToolVisitor;

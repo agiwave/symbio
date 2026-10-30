@@ -38,8 +38,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use symbio_core::CapabilityRiskLevel;
-use symbio_core::{
+use symbio_plugin_api::CapabilityRiskLevel;
+use symbio_plugin_api::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
     Capability, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt,
@@ -74,8 +74,10 @@ struct SnapshotTarget {
 impl SnapshotTarget {
     /// 从 ctx 读；任一 id 缺失 ⇒ `None`。
     fn from_ctx(ctx: &dyn PluginInvokeRequest) -> Option<Self> {
-        let msg_id = ctx.get(symbio_core::RESULT_MSG_ID).unwrap_or_default();
-        let tool_call_id = ctx.get(symbio_core::TOOL_CALL_ID).unwrap_or_default();
+        let msg_id = ctx
+            .get(symbio_plugin_api::RESULT_MSG_ID)
+            .unwrap_or_default();
+        let tool_call_id = ctx.get(symbio_plugin_api::TOOL_CALL_ID).unwrap_or_default();
         if msg_id.is_empty() || tool_call_id.is_empty() {
             return None;
         }
@@ -314,7 +316,7 @@ impl ShellTool {
         let mut full = compose_output(&stdout_text, &stderr_text);
         // 最终截断：落在字符边界上，避免中文输出被硬切导致 panic
         if full.len() > MAX_OUTPUT_BYTES {
-            full.truncate(symbio_core::text_floor_char_boundary(
+            full.truncate(symbio_plugin_api::text_floor_char_boundary(
                 &full,
                 MAX_OUTPUT_BYTES,
             ));
@@ -348,7 +350,11 @@ impl ShellTool {
 /// 对已完成的 `JoinHandle` 再次 await 会 panic），只是把 `Err` 从丢掉改成记一笔。
 async fn reap_pump(h: &mut tokio::task::JoinHandle<()>) {
     if let Err(e) = h.await {
-        symbio_core::plugin_warn!("local", "shell 输出泵异常退出（该路输出可能被截断）：{}", e);
+        symbio_plugin_api::plugin_warn!(
+            "local",
+            "shell 输出泵异常退出（该路输出可能被截断）：{}",
+            e
+        );
     }
 }
 
@@ -395,7 +401,7 @@ where
                         // （避免 cat 大文件把内存打爆；最终帧无需再截断）
                         if a.len() < MAX_OUTPUT_BYTES {
                             let remain = MAX_OUTPUT_BYTES - a.len();
-                            let take = symbio_core::text_floor_char_boundary(&line, remain);
+                            let take = symbio_plugin_api::text_floor_char_boundary(&line, remain);
                             if take > 0 {
                                 a.push_str(&line[..take]);
                             }
@@ -434,9 +440,11 @@ where
                                 // 帧要自给自足：这张卡是**本工具的结果流**，
                                 // 族归工具自己（名字就是本插件注册的能力名，见 `meta()`）。
                                 // `role` 格不再手写：`principal.kind` 折叠出同一读法。
-                                principal: Some(symbio_core::principal::Principal::tool_principal(
-                                    get_os_info().2,
-                                )),
+                                principal: Some(
+                                    symbio_plugin_api::principal::Principal::tool_principal(
+                                        get_os_info().2,
+                                    ),
+                                ),
                                 msg_type: Some(NodeKind::Body),
                                 status: Some(NodeStatus::Streaming),
                                 content: Some(MessageContent::Text(snapshot.clone())),
@@ -454,9 +462,11 @@ where
                             id: target.msg_id.clone(),
                             parent_id: Some(target.tool_call_id.clone()),
                             // 与上面 `content` 帧同一身份
-                            principal: Some(symbio_core::principal::Principal::tool_principal(
-                                get_os_info().2,
-                            )),
+                            principal: Some(
+                                symbio_plugin_api::principal::Principal::tool_principal(
+                                    get_os_info().2,
+                                ),
+                            ),
                             msg_type: Some(NodeKind::Body),
                             status: Some(NodeStatus::Streaming),
                             delta: Some(delta),
@@ -507,7 +517,7 @@ impl Capability for ShellTool {
                 },
                 "required": ["command"]
             }),
-            category: Some(symbio_core::CapabilityCategory::SystemOperation),
+            category: Some(symbio_plugin_api::CapabilityCategory::SystemOperation),
             // 静态档取**最高可能**：shell 的实际风险随命令而变（见 `risk_for`），
             // 这里的声明只兜住「有人只看 meta 不看参数」的那些读者。
             risk: Some(CapabilityRiskLevel::High),
@@ -539,7 +549,7 @@ impl Capability for ShellTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let workdir_str = ctx.get(symbio_core::WORKDIR).ok_or_else(|| {
+        let workdir_str = ctx.get(symbio_plugin_api::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
         })?;
         if workdir_str.is_empty() {
@@ -551,7 +561,7 @@ impl Capability for ShellTool {
         // 写入 ctx。字面量→档位的映射问 [`CapabilityRiskLevel::from_name`]（唯一解析点，
         // 审批闸门用同一个方法）——不在这里再写一份 `match`。
         let threshold = ctx
-            .get(symbio_core::RISK_LEVEL)
+            .get(symbio_plugin_api::RISK_LEVEL)
             .map(|s| CapabilityRiskLevel::from_name(&s))
             .unwrap_or_default();
 

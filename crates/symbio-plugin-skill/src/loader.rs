@@ -1,7 +1,7 @@
 use crate::types::Skill;
 use regex::Regex;
 use std::path::{Path, PathBuf};
-use symbio_core::PluginError;
+use symbio_plugin_api::PluginError;
 use tokio::fs;
 use tracing::{debug, warn};
 

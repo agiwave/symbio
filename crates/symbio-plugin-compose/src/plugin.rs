@@ -45,13 +45,13 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_COMPOSE;
+use symbio_plugin_api::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
 };
-use symbio_core::{ComposeRequest, Verdict, WordingReply};
-use symbio_core::{DetailDefinition, DetailField};
-use symbio_deploy::PLUGIN_ID_COMPOSE;
+use symbio_plugin_api::{ComposeRequest, Verdict, WordingReply};
+use symbio_plugin_api::{DetailDefinition, DetailField};
 
 use super::config::ComposeConfig;
 use super::templates::{progress_text, template_for};
@@ -78,7 +78,7 @@ impl ComposePlugin {
             Ok(Some(c)) => c,
             Ok(None) => ComposeConfig::default(),
             Err(e) => {
-                symbio_core::plugin_warn!("compose", "读取自身配置失败，改用默认值：{e}");
+                symbio_plugin_api::plugin_warn!("compose", "读取自身配置失败，改用默认值：{e}");
                 ComposeConfig::default()
             }
         };
@@ -173,12 +173,12 @@ impl Plugin for ComposePlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_COMPOSE, ComposePlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_COMPOSE, ComposePlugin::build, dyn Plugin);
 
 // ==================== 配置文档（`<根>/compose/PLUGIN.yml`） ====================
 

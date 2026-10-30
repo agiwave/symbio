@@ -18,7 +18,7 @@
 //! 走真实模型的路径（快速档分类请求）由 e2e 覆盖，见 `e2e/cases/t21-classify.mjs`。
 
 use super::*;
-use symbio_core::{
+use symbio_plugin_api::{
     DecideOutcome, DecisionPlan, ParseVerdictRequest, PluginSimpleRequest, REASON_ACK,
     REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_THANKS,
 };
@@ -330,7 +330,7 @@ async fn unknown_subcommand_is_not_found() {
 /// 上面的 0 才不是「收集器根本没接上」的同义反复。
 #[tokio::test]
 async fn traverse_registers_no_tool_rows() {
-    use symbio_core::{
+    use symbio_plugin_api::{
         capability_configurables, family, PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR,
         CONFIGURABLE_VISITOR,
     };
@@ -370,7 +370,7 @@ async fn traverse_registers_no_tool_rows() {
 /// （它跨挂载点、推不出来，见 `capability_entry_of` 的说明）。
 #[tokio::test]
 async fn traverse_announces_its_own_config() {
-    use symbio_core::{
+    use symbio_plugin_api::{
         capability_configurables, PluginInvokeRequestExt, Registry, CONFIGURABLE_VISITOR,
     };
     use symbio_providers::DefaultToolVisitor;

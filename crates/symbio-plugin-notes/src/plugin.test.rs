@@ -1,9 +1,9 @@
 //! 插件身份与工具元数据的判据。
 
 use super::{NotesPlugin, NotesTool};
-use symbio_core::{Capability, CapabilityCategory};
-use symbio_deploy::PLUGIN_ID_NOTES;
 use symbio_plugin_api::behaviors;
+use symbio_plugin_api::PLUGIN_ID_NOTES;
+use symbio_plugin_api::{Capability, CapabilityCategory};
 
 #[test]
 fn the_plugin_identity_comes_from_the_manifest() {

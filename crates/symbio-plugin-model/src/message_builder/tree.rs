@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use symbio_core::chat_node::{ChatNode, NodeRole};
+use symbio_plugin_api::chat_node::{ChatNode, NodeRole};
 
 /// LLM 请求包中保留的最近思考条数。
 ///

@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, AGENT_ID, SESSION_ID, WORKDIR,
 };
@@ -160,7 +160,7 @@ impl Capability for TodoWriteTool {
                 },
                 "required": ["todos"]
             }),
-            category: Some(symbio_core::CapabilityCategory::SystemOperation),
+            category: Some(symbio_plugin_api::CapabilityCategory::SystemOperation),
             risk: Some(CapabilityRiskLevel::Medium),
             examples: Some(vec![
                 "todos=[{content:'分析架构',status:'in_progress',priority:'high'}]".to_string(),

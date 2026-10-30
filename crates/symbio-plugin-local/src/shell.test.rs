@@ -6,7 +6,7 @@
 //! 消息帧」——**不再需要构造通道**，也就不再有「谁先返回」的顺序问题。
 
 use super::*;
-use symbio_core::{ExecTranscriptWriter, PluginSimpleRequest};
+use symbio_plugin_api::{ExecTranscriptWriter, PluginSimpleRequest};
 
 /// 记录型写入点：把所有消息帧收进 `Vec`。
 struct RecordingWriter {
@@ -35,13 +35,13 @@ fn make_ctx(
     target: Option<(&str, &str)>,
 ) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
-    req.set(symbio_core::WORKDIR, ".".to_string());
+    req.set(symbio_plugin_api::WORKDIR, ".".to_string());
     if let Some((msg_id, tool_call_id)) = target {
-        req.set(symbio_core::RESULT_MSG_ID, msg_id.to_string());
-        req.set(symbio_core::TOOL_CALL_ID, tool_call_id.to_string());
+        req.set(symbio_plugin_api::RESULT_MSG_ID, msg_id.to_string());
+        req.set(symbio_plugin_api::TOOL_CALL_ID, tool_call_id.to_string());
     }
-    req.set(symbio_core::EVENT_SINK, sink);
-    req.set(symbio_core::ABORT_SIGNAL, ExecAbortSignal::new());
+    req.set(symbio_plugin_api::EVENT_SINK, sink);
+    req.set(symbio_plugin_api::ABORT_SIGNAL, ExecAbortSignal::new());
     // 用裸字面量而非 PLUGIN_PAYLOAD_KEY：本行同时验证「桶名就是 "payload"」这一契约
     req.set_raw(
         "payload",
@@ -57,7 +57,7 @@ fn assert_all_snapshots_use_orchestrator_ids(ops: &[ChatNode], msg_id: &str, too
         assert_eq!(message.parent_id.as_deref(), Some(tool_call_id));
         // 帧不再手写 `role` 格——分派读法经 `node_role` 折叠，
         // shell 流式帧的 Tool 角色由 `principal.kind=tool` 承担。
-        use symbio_core::chat_node::NodeRole;
+        use symbio_plugin_api::chat_node::NodeRole;
         assert_eq!(message.node_role(), Some(NodeRole::Tool));
         assert_eq!(message.status, Some(NodeStatus::Streaming));
         assert!(
@@ -227,15 +227,15 @@ async fn snapshot_target_requires_both_ids() {
     assert!(SnapshotTarget::from_ctx(&bare).is_none());
 
     let half = PluginSimpleRequest::new(None, None);
-    half.set(symbio_core::RESULT_MSG_ID, "res-1".to_string());
+    half.set(symbio_plugin_api::RESULT_MSG_ID, "res-1".to_string());
     assert!(
         SnapshotTarget::from_ctx(&half).is_none(),
         "只有 msg_id 不足以定位快照"
     );
 
     let full = PluginSimpleRequest::new(None, None);
-    full.set(symbio_core::RESULT_MSG_ID, "res-1".to_string());
-    full.set(symbio_core::TOOL_CALL_ID, "tc-1".to_string());
+    full.set(symbio_plugin_api::RESULT_MSG_ID, "res-1".to_string());
+    full.set(symbio_plugin_api::TOOL_CALL_ID, "tc-1".to_string());
     let t = SnapshotTarget::from_ctx(&full).expect("两个 id 齐备");
     assert_eq!(t.msg_id, "res-1");
     assert_eq!(t.tool_call_id, "tc-1");

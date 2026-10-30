@@ -22,7 +22,7 @@
 //! 或生产方加了码而这里忘了配措辞。两种都让用户收到一句通用话而不是空白——
 //! **降级而不失效**。
 
-use symbio_core::{
+use symbio_plugin_api::{
     RunSnapshot, Verdict, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_GREETING,
     REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };

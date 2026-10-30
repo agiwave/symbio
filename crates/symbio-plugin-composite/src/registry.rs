@@ -3,7 +3,7 @@
 //! ## 它是什么
 //!
 //! 「这个智能体由哪些插件组成」是一个**事实**，事实的所在地是磁盘：插件根下的
-//! 一层目录 = 一个插件（见 `symbio_core::plugin::dir` 的模块文档）。本模块把那层
+//! 一层目录 = 一个插件（见 `symbio_plugin_api::plugin::dir` 的模块文档）。本模块把那层
 //! 目录 + 实例表收成一个对象，于是：
 //!
 //! | 谁 | 干什么 |
@@ -43,13 +43,13 @@
 //! 它的配置一起停下**，而不是把它留在树里只关掉行为。
 
 use serde_json::Value;
-use symbio_core::{
+use symbio_plugin_api::ASSEMBLY_UNDISABLABLE_PLUGINS;
+use symbio_plugin_api::{
     creator_create_object, creator_has, creator_ids, lock_read, lock_write, Plugin, PluginDir,
     PluginEntry, PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest,
     PluginStopReason, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
 };
-use symbio_deploy::ASSEMBLY_UNDISABLABLE_PLUGINS;
-use symbio_deploy::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
+use symbio_plugin_api::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
 
 /// **系统级插件工厂**：它们的目录就是**系统根本身**，与业务插件**并列**而非包含其中。
 ///
@@ -172,7 +172,7 @@ impl PluginRegistry {
     pub async fn shutdown_all(&self) {
         for (name, plugin) in self.snapshot() {
             if let Err(e) = plugin.stop(PluginStopReason::Shutdown).await {
-                symbio_core::plugin_warn!("composite", "收尾 {name} 失败：{e}");
+                symbio_plugin_api::plugin_warn!("composite", "收尾 {name} 失败：{e}");
             }
         }
     }
@@ -193,7 +193,7 @@ impl PluginRegistry {
     pub fn ensure_required(&self) {
         for name in &self.required {
             if let Err(e) = PluginDir::at(self.root.join(name), name).ensure_manifest() {
-                symbio_core::plugin_warn!("composite", "必需插件的配置补建失败 {name}：{e}");
+                symbio_plugin_api::plugin_warn!("composite", "必需插件的配置补建失败 {name}：{e}");
             }
         }
     }
@@ -212,12 +212,15 @@ impl PluginRegistry {
                 // 插件根 = 系统根本身，其下**本来就有非插件目录**（如用户自建的
                 // 目录）。没有 `PLUGIN.yml` 只是「它不是插件」，不是异常，故只记 debug。
                 Ok(None) => {
-                    symbio_core::plugin_debug!("composite", "跳过目录（没有 {PLUGIN_FILE}）{name}");
+                    symbio_plugin_api::plugin_debug!(
+                        "composite",
+                        "跳过目录（没有 {PLUGIN_FILE}）{name}"
+                    );
                     continue;
                 }
                 Ok(Some(p)) => p,
                 Err(e) => {
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "composite",
                         "跳过插件目录（配置不符合要求）{name}：{e}"
                     );
@@ -232,7 +235,7 @@ impl PluginRegistry {
                 // 用户要看见它不必翻日志：[`PluginRegistry::entries`] **不要求**工厂注册，
                 // 这类目录照旧进表（未挂载、可停用可卸载），并把这一条原因写进
                 // [`PluginEntry::mount_error`]——展示位在插件管理页。
-                symbio_core::plugin_debug!(
+                symbio_plugin_api::plugin_debug!(
                     "composite",
                     "跳过插件目录（本构建没有 Provider {provider}）{name}——仍进注册表，可停用或卸载"
                 );
@@ -241,13 +244,16 @@ impl PluginRegistry {
             }
             let dir = dir.with_provider(&provider);
             if !dir.enabled() {
-                symbio_core::plugin_debug!("composite", "跳过已停用的插件 {name} -> {provider}");
+                symbio_plugin_api::plugin_debug!(
+                    "composite",
+                    "跳过已停用的插件 {name} -> {provider}"
+                );
                 continue;
             }
             // 停用不是失败，而这里是真的失败：未注册那一类上面已经拦下了，能走到这里的
             // 只剩「产物不是插件」与「构造 panic」，两条都是用户需要知道的事 ⇒ WARN。
             if let Err(e) = self.mount_child(&name, &provider, dir) {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "composite",
                     "跳过构造失败的插件 {name} -> {provider}：{e}"
                 );
@@ -270,10 +276,14 @@ impl PluginRegistry {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                symbio_core::plugin_warn!("composite", "插件根不存在：{}", self.root.display());
+                symbio_plugin_api::plugin_warn!(
+                    "composite",
+                    "插件根不存在：{}",
+                    self.root.display()
+                );
             }
             Err(e) => {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "composite",
                     "读取插件根失败 {}：{e}",
                     self.root.display()
@@ -306,7 +316,7 @@ impl PluginRegistry {
     ///
     /// - **未注册**：本构建没有这个 id——编译期就不存在，通常是旧构建留下的目录；
     /// - **产物不是插件**：id 在工厂表里，但它申报的是别的 trait（同一张表还住着
-    ///   `dyn ModelProtocol` 与 `dyn EmbeddingService`，见 `symbio_core::creator` 的模块文档）。
+    ///   `dyn ModelProtocol` 与 `dyn EmbeddingService`，见 `symbio_plugin_api::creator` 的模块文档）。
     ///
     /// 第三类（构造里 panic）只能在调用点捕获，见 [`Self::mount_child`]。
     ///
@@ -367,7 +377,7 @@ impl PluginRegistry {
         // 装配细节走 debug：每个子插件一行，十几个插件连成一串纯机械噪声，
         // 用户视角「启动刷屏」的主要来源。需要排查装配问题时 `--verbose` /
         // `SYMBIO_LOG=debug` 即可看到全量。
-        symbio_core::plugin_debug!("composite", "正在构造子插件 {name} -> {provider}");
+        symbio_plugin_api::plugin_debug!("composite", "正在构造子插件 {name} -> {provider}");
         // 构造函数是编进这个二进制的代码，它 panic 时容器不该跟着倒——一次 panic
         // 换成这个插件的一句失败原因，与 `Err` 同一呈现、同一去处。
         // （本工作区没有 `panic = "abort"`， unwind 策略下 `catch_unwind` 才接得住。）
@@ -395,14 +405,14 @@ impl PluginRegistry {
         // 此后运行期只读 manifest，停用插件因此也有名字——这条投影是
         // 「停用不失身份」的**唯一**来路，别处不必再读 `meta()` 的身份字段。
         if let Err(e) = dir.seed_identity(&plugin.meta()) {
-            symbio_core::plugin_warn!("composite", "插件身份落位失败 {name}：{e}");
+            symbio_plugin_api::plugin_warn!("composite", "插件身份落位失败 {name}：{e}");
         }
         // **生命周期钩子**（D-033）：装配后、开始服务前一次。
         // 同步——装配路径里没有 async 上下文（见该 ADR）。
         // 失败**不摘掉**插件：与 `provider_of` 同一口径——配了一半也要看得见，
         // 摘掉它用户只看到「插件不见了」，留着则每次调用给出明确错误。
         if let Err(e) = plugin.start(sub_context) {
-            symbio_core::plugin_error!("composite", "子插件启动失败 {}：{}", name, e);
+            symbio_plugin_api::plugin_error!("composite", "子插件启动失败 {}：{}", name, e);
         }
         lock_write(&self.instances).insert(name.to_string(), plugin);
         self.forget_failure(name);
@@ -520,7 +530,7 @@ impl PluginRegistry {
                 // 失败只告警、不阻断——用户按下「停用」就该生效，清理没做完不该反过来
                 // 让插件停不掉（那时插件只剩 `Drop`，而 `Drop` 不能 await）。
                 if let Err(e) = p.stop(PluginStopReason::Disabled).await {
-                    symbio_core::plugin_warn!("composite", "插件停用时清理失败 {name}：{e}");
+                    symbio_plugin_api::plugin_warn!("composite", "插件停用时清理失败 {name}：{e}");
                 }
             }
         }
@@ -534,7 +544,7 @@ impl PluginRegistry {
     /// - 已有插件目录（此前被停用）⇒ 写回启用位并挂载；
     /// - 没有插件目录（从未装过）⇒ 建出目录（只写身份字段）再挂载。
     ///
-    /// 名字 = 工厂 id：目录名 = 挂载名 = 实例名（见 `symbio_core::plugin::dir`）。
+    /// 名字 = 工厂 id：目录名 = 挂载名 = 实例名（见 `symbio_plugin_api::plugin::dir`）。
     /// 返回新挂上的插件名。
     pub fn install(&self, provider: &str) -> Result<String, String> {
         let provider = provider.trim();
@@ -584,7 +594,7 @@ impl PluginRegistry {
         self.forget_failure(name);
         if let Some(p) = plugin {
             if let Err(e) = p.stop(PluginStopReason::Uninstalled).await {
-                symbio_core::plugin_warn!("composite", "插件卸载时清理失败 {name}：{e}");
+                symbio_plugin_api::plugin_warn!("composite", "插件卸载时清理失败 {name}：{e}");
             }
         }
         std::fs::remove_dir_all(dir.dir())

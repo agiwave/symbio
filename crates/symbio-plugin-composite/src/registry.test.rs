@@ -13,8 +13,8 @@ use symbio as _;
 use super::*;
 
 use std::path::Path;
-use symbio_core::{PluginError, PluginPayload};
-use symbio_deploy::{PLUGIN_ID_LOCAL, PLUGIN_ID_MANAGER, PLUGIN_ID_SESSION};
+use symbio_plugin_api::{PluginError, PluginPayload};
+use symbio_plugin_api::{PLUGIN_ID_LOCAL, PLUGIN_ID_MANAGER, PLUGIN_ID_SESSION};
 
 /// 一次性临时插件根（目录名带进程号，避免并行测试互相踩）
 fn temp_root(tag: &str) -> PathBuf {
@@ -231,7 +231,7 @@ fn build_panics(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
     panic!("测试工厂故意 panic")
 }
 
-symbio_core::submit_object_creator!("registry-test-panic-factory", build_panics, dyn Plugin);
+symbio_plugin_api::submit_object_creator!("registry-test-panic-factory", build_panics, dyn Plugin);
 
 // ==================== 装配期：出厂身份落位（D-032） ====================
 
@@ -281,7 +281,7 @@ impl Plugin for SeedPlugin {
     async fn route(
         self: Arc<Self>,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<PluginPayload> {
+    ) -> symbio_plugin_api::PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound("seed".to_string()))
     }
 
@@ -289,13 +289,13 @@ impl Plugin for SeedPlugin {
         self: Arc<Self>,
         _path: String,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<PluginPayload> {
+    ) -> symbio_plugin_api::PluginInvokeResponse<PluginPayload> {
         Ok(PluginPayload::Empty)
     }
 }
 
 // 测试专用工厂：不占用任何生产 id，`installable()` 的断言因此不受影响
-symbio_core::submit_object_creator!("symbio-test-seed", SeedPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!("symbio-test-seed", SeedPlugin::build, dyn Plugin);
 
 // ==================== 可安装清单 ====================
 
@@ -378,18 +378,18 @@ impl Plugin for NopPlugin {
     async fn route(
         self: Arc<Self>,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<symbio_core::PluginPayload> {
-        Err(symbio_core::PluginError::NotFound("nop".to_string()))
+    ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
+        Err(symbio_plugin_api::PluginError::NotFound("nop".to_string()))
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<symbio_core::PluginPayload> {
-        Ok(symbio_core::PluginPayload::new(
-            &Vec::<serde_json::Value>::new(),
-        ))
+    ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
+        Ok(symbio_plugin_api::PluginPayload::new(&Vec::<
+            serde_json::Value,
+        >::new()))
     }
 }
 

@@ -8,15 +8,15 @@
 use crate::http::STREAM_IDLE_TIMEOUT;
 use futures::StreamExt;
 use std::collections::HashMap;
-use symbio_core::chat_node::{
+use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_TOOL,
 };
-use symbio_core::plugin_error;
-use symbio_core::plugin_info;
-use symbio_core::plugin_warn;
-use symbio_core::ModelUsage;
-use symbio_core::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
-use symbio_core::{ExecAbortSignal, ExecEventSink};
+use symbio_plugin_api::plugin_error;
+use symbio_plugin_api::plugin_info;
+use symbio_plugin_api::plugin_warn;
+use symbio_plugin_api::ModelUsage;
+use symbio_plugin_api::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
+use symbio_plugin_api::{ExecAbortSignal, ExecEventSink};
 
 use super::protocols::{utf8_chunk, ModelProtocolEvent, SseLineParser, SsePartialLineExtractor};
 use super::tool_accumulator::TurnToolCallAccumulator;
@@ -181,7 +181,7 @@ fn truncate_for_display(s: &str, max: usize) -> String {
 
 /// 发送一帧**增量**：`delta` 追加到目标节点正文尾部（流式热路径，O(delta)）。
 /// 目标未知时写入点用帧内信息建占位（帧自给自足，不依赖任何先行帧）。
-/// 原住 `symbio_core::llm::turn`（帧家族），按 D-023 的「依赖方数量」判据随
+/// 原住 `symbio_plugin_api::llm::turn`（帧家族），按 D-023 的「依赖方数量」判据随
 /// **唯一调用方**迁到本模块（D-023）：只有这里的流循环发增量帧。终态帧走
 /// session 的 `llm_emit_state`（`crates/symbio-core/src/llm/frames.rs`），完整消息帧走 core 的
 /// `llm_emit_message`——三者同一套帧语义，位置由消费方数量决定。
@@ -202,7 +202,7 @@ async fn llm_emit_delta(sink: &ExecEventSink, message_id: &str, delta: &str) {
 /// 到达时会把已经发过的前缀**再发一遍**（前端重复）。因此完整行路径按这里的
 /// 长度截断，而增量路径每发一次就累加一次。
 /// 这套机制成立的前提是：增量路径吐出的文本**恰好是**完整行文本的前缀。
-/// 该不变量由协议层的提取器保证（见 `symbio_core::sse`）——它必须
+/// 该不变量由协议层的提取器保证（见 `symbio_plugin_api::sse`）——它必须
 /// 与协议解析器用**同一套转义规则**，否则按前缀截断会吃字。
 #[derive(Default)]
 struct LineProgress {

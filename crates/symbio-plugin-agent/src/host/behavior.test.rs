@@ -2,8 +2,8 @@
 
 use super::*;
 use serde_json::json;
-use symbio_core::Verb;
 use symbio_plugin_api::effects::BeforeReadings;
+use symbio_plugin_api::Verb;
 
 fn call<'a>(args: &'a serde_json::Value, success: bool, why: &'a str) -> EffectCall<'a> {
     EffectCall {
@@ -117,7 +117,10 @@ fn a_revoked_principal_cannot_delegate() {
         panic!("已收回 assign.work 的主体必须被拒");
     };
     assert_eq!(refusal.gate, "淘汰");
-    assert_eq!(refusal.kind, symbio_core::failure_kind::PERMISSION_DENIED);
+    assert_eq!(
+        refusal.kind,
+        symbio_plugin_api::failure_kind::PERMISSION_DENIED
+    );
     assert!(refusal.reason.contains("session/worker"), "拒因要点名主体");
     assert!(
         refusal.reason.contains("assign.work 已被淘汰回路收回"),

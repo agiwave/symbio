@@ -7,9 +7,9 @@ use super::*;
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Mutex;
-use symbio_core::AgentScope;
-use symbio_core::{CapabilityRow, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
-use symbio_core::{VdfsAccess, VdfsContext, VdfsProvider, VdfsResponse};
+use symbio_plugin_api::AgentScope;
+use symbio_plugin_api::{CapabilityRow, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
+use symbio_plugin_api::{VdfsAccess, VdfsContext, VdfsProvider, VdfsResponse};
 use symbio_providers::DefaultToolVisitor;
 
 /// 记录收到地址的虚拟层替身（各操作全部直通，便于断言门面转出来的内部口径）
@@ -256,7 +256,7 @@ fn agent_ctx(
         permissions: serde_json::from_value(perms).expect("声明可解析"),
     };
     ctx.set(
-        symbio_core::AGENT_PERMS,
+        symbio_plugin_api::AGENT_PERMS,
         std::sync::Arc::new(std::sync::OnceLock::from(scope)),
     );
     ctx

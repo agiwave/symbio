@@ -13,10 +13,7 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-kernel = { path = "../symbio-kernel" }
-symbio-core = { path = "../symbio-core" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-deploy = { path = "../symbio-deploy" }
 symbio-providers = { path = "../symbio-providers" }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

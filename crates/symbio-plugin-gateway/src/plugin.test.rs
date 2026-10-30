@@ -4,11 +4,11 @@
 
 use super::*;
 
-use symbio_core::{
+use symbio_plugin_api::{
     Plugin, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, PluginSimpleRequest,
     VdfsContent, VdfsRequest, PLUGIN_FILE, VDFS_EXT_FORM,
 };
-use symbio_core::{VdfsContext, VdfsError, VdfsProvider};
+use symbio_plugin_api::{VdfsContext, VdfsError, VdfsProvider};
 
 /// 以子插件直接收的**已剥离前缀**路径（如 `status`）调用 route，
 /// 模拟 home composite 转发后的行为。

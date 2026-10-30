@@ -6,7 +6,7 @@
 //! 因此没法单独测；切出来后它是纯函数，本文件逐条钉它的判据与**顺序**。
 
 use super::*;
-use symbio_core::VdfsAccess;
+use symbio_plugin_api::VdfsAccess;
 
 fn hb_meta(enabled: bool, interval: u64, prompt: &str) -> Value {
     json!({

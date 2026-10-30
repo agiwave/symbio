@@ -33,7 +33,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use symbio_core::plugin_expand_tilde_path;
+use symbio_plugin_api::plugin_expand_tilde_path;
 use tracing::{info, warn};
 
 /// 默认 homedir

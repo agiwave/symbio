@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::model_providers::ModelPricing;
-use symbio_core::ModelUsage;
+use symbio_plugin_api::ModelUsage;
 
 /// 路径末段才是 id：`<根>/model/<id>.model` 与裸 `<id>` 同解
 #[test]
@@ -212,8 +212,8 @@ async fn load_fills_registry_and_mirror_from_its_own_dir() {
     // 坏条目：跳过而不是让整批加载失败
     store.write_text("broken", "}}}").await.unwrap();
 
-    let ctx: std::sync::Arc<dyn symbio_core::PluginInvokeRequest> =
-        std::sync::Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+    let ctx: std::sync::Arc<dyn symbio_plugin_api::PluginInvokeRequest> =
+        std::sync::Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
     plugin.load_from_storage(&ctx).await;
 
     assert_eq!(plugin.entries.ids(), vec!["openai-1".to_string()]);

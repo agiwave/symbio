@@ -12,13 +12,13 @@
 //! 四个字段（`network` / `fs.read` / `fs.write` / `limits`）同批有执行方：
 //! 出站域名在 `web` 三工具发请求前判、glob 在 `vdfs` 路径入口判、限额在装载期判。
 //! 语义是 **grant（列了才能用，空清单即拒）**，不是「上限」——判据与边界见
-//! `symbio_core::agent` 模块文档。字段名因此从 `declared_permissions`
+//! `symbio_plugin_api::agent` 模块文档。字段名因此从 `declared_permissions`
 //! 改回 `permissions`（D-140 的两态之名：没有执行方时叫 declared，有了就叫本名）。
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use symbio_core::AgentPermissions;
+use symbio_plugin_api::AgentPermissions;
 
 /// 本宿主支持的协议主版本（`requires.spec: "^2"` 的判定基准，§10）
 pub const SPEC_MAJOR: u64 = 2;
@@ -58,7 +58,7 @@ pub struct AgentManifest {
     /// 语义是 **grant**：列了才能用，空清单即一律拒（与授权表同一条 fail-closed
     /// 纪律）。`glob` 相对 Agent 目录根判定（§4.3），只管**这个包自己的目录**。
     /// 完整判据、被否候选与「哪些面不在守」（shell / MCP / 模型往返）见
-    /// `symbio_core::agent` 与
+    /// `symbio_plugin_api::agent` 与
     /// [D-153](../../../../docs/003-design/011-Agent目录规范.md#d-153-权限四字段的执行面同批落地空清单即拒glob-只管自己的包 "DE-011-Agent目录规范")。
     ///
     /// **线格式不变**（`permissions`）：它一直是 Agent 包的公开键；Rust 侧曾按

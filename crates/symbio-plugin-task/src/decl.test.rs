@@ -12,18 +12,18 @@
 //! 生产装配（全插件链接）不会走到这份提交——`cfg(test)` 不进 lib 的正常构建。
 
 use super::{EVENT_TASK_REWORK_CREATED, OWNER};
-use symbio_core::ring::{Decl, Pattern};
-use symbio_core::{Entity, LatencyTier, PluginDeclarations};
+use symbio_plugin_api::ring::{Decl, Pattern};
+use symbio_plugin_api::{Entity, LatencyTier, PluginDeclarations};
 
 /// 协议五格的自读行：完整进程里由 loop 交表，本二进制不链接它 ⇒ 夹具补上。
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();
     for name in [
-        symbio_core::EVENT_REQUEST,
-        symbio_core::EVENT_SENT,
-        symbio_core::EVENT_RESPONSE,
-        symbio_core::EVENT_FAILED,
-        symbio_core::EVENT_RETRY,
+        symbio_plugin_api::EVENT_REQUEST,
+        symbio_plugin_api::EVENT_SENT,
+        symbio_plugin_api::EVENT_RESPONSE,
+        symbio_plugin_api::EVENT_FAILED,
+        symbio_plugin_api::EVENT_RETRY,
     ] {
         let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
             source: name,
@@ -67,11 +67,11 @@ fn the_task_event_resolves_through_the_process_assembly() {
     let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert_eq!(
         frozen.event_cell(EVENT_TASK_REWORK_CREATED),
-        Some((Entity::Task, symbio_core::Verb::Asserted))
+        Some((Entity::Task, symbio_plugin_api::Verb::Asserted))
     );
     assert_eq!(frozen.event_owner(EVENT_TASK_REWORK_CREATED), Some(OWNER));
     assert!(frozen.holds_role(
         EVENT_TASK_REWORK_CREATED,
-        symbio_core::FactRole::CountsRework
+        symbio_plugin_api::FactRole::CountsRework
     ));
 }

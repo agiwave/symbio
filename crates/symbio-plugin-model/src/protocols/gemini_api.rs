@@ -13,8 +13,8 @@ use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{description_for_llm, ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
 use crate::http::get_http_client;
-use symbio_core::capability_to_wire;
-use symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
+use symbio_plugin_api::capability_to_wire;
+use symbio_plugin_api::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
 
 pub struct GeminiProtocol;
 
@@ -36,7 +36,7 @@ impl ModelProtocol for GeminiProtocol {
             if let Ok(v) = k.parse() {
                 h.insert("x-goog-api-key", v);
             } else {
-                symbio_core::plugin_warn!("model", "Invalid characters in Gemini API key");
+                symbio_plugin_api::plugin_warn!("model", "Invalid characters in Gemini API key");
             }
         }
         h
@@ -46,7 +46,7 @@ impl ModelProtocol for GeminiProtocol {
         &self,
         cfg: &ModelProviderConfig,
         system: &str,
-        messages: &[symbio_core::chat_node::ChatNode],
+        messages: &[symbio_plugin_api::chat_node::ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value {
         let flattened_messages = crate::message_builder::flatten_chat_messages(messages);
@@ -336,7 +336,7 @@ fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn ModelProtocol> {
     Arc::new(GeminiProtocol)
 }
 
-symbio_core::submit_object_creator!(MODEL_PROTOCOL_GEMINI_API, build, dyn ModelProtocol);
+symbio_plugin_api::submit_object_creator!(MODEL_PROTOCOL_GEMINI_API, build, dyn ModelProtocol);
 
 #[cfg(test)]
 #[path = "gemini_api.test.rs"]

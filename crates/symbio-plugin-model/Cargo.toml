@@ -13,10 +13,7 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-kernel = { path = "../symbio-kernel" }
-symbio-core = { path = "../symbio-core" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-deploy = { path = "../symbio-deploy" }
 symbio-providers = { path = "../symbio-providers" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续
@@ -60,6 +57,9 @@ base64 = { workspace = true }
 tempfile = { workspace = true }
 
 [dev-dependencies]
+# 轮态投影（`turnstate`）是控制面的容器概念，不在扩展层门面白名单里（D-253）：
+# 测试面直接取 core，与 EX-008 对 `*.test.rs` 不判是同一条纪律。
+symbio-core = { path = "../symbio-core" }
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { workspace = true, features = ["test-util"] }

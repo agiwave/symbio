@@ -10,10 +10,10 @@
 //! 前置判断（[`NoteCapture::before`]）是同一份声明的另一半：重复的便签在**执行前**
 //! 就被拒，模型看到的是「已经记过」而不是一条被幂等键悄悄吞掉的成功结果。
 
-use symbio_core::{Entity, Verb};
 use symbio_plugin_api::{
     behaviors, BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
+use symbio_plugin_api::{Entity, Verb};
 
 use super::decl::NOTES_CREATED;
 
@@ -57,7 +57,7 @@ impl ToolBehavior for NoteCapture {
         BeforeDecision::Refuse(BeforeRefusal::new(
             "便签",
             format!("这条便签已经记过（同一会话内重复）：{text}"),
-            symbio_core::failure_kind::ERROR,
+            symbio_plugin_api::failure_kind::ERROR,
         ))
     }
 

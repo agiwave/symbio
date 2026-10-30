@@ -161,7 +161,7 @@ impl AgentDirStore {
     pub fn load_record(dir: &Path) -> Option<AgentDirRecord> {
         let manifest = manifest::load(dir)?;
         if let Err(e) = manifest::validate(&manifest) {
-            symbio_core::plugin_warn!("agent", "跳过 `{}`：{}", dir.display(), e);
+            symbio_plugin_api::plugin_warn!("agent", "跳过 `{}`：{}", dir.display(), e);
             return None;
         }
         Some(AgentDirRecord {

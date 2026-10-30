@@ -38,9 +38,12 @@ fn definition_covers_mcp_form_surface() {
     let import = def
         .actions
         .iter()
-        .find(|a| a.id == symbio_core::VDFS_ACTION_IMPORT)
+        .find(|a| a.id == symbio_plugin_api::VDFS_ACTION_IMPORT)
         .expect("详情页要给出导入入口，否则草稿上无从导入");
-    assert_eq!(import.pack.as_deref(), Some(symbio_core::VDFS_EXT_ZIP));
+    assert_eq!(
+        import.pack.as_deref(),
+        Some(symbio_plugin_api::VDFS_EXT_ZIP)
+    );
     let when = import.when.as_ref().expect("导入只在草稿态");
     assert!(when.holds(&serde_json::json!({ "is_existing": false })));
     assert!(!when.holds(&serde_json::json!({ "is_existing": true })));

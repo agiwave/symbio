@@ -3,7 +3,7 @@
 use super::*;
 // 走生成产线的那个码**不在模板表里**，因此它不在 `templates` 的 use 面上
 // （那正是下面 `from_context_has_no_template_row` 要钉的事）。
-use symbio_core::REASON_FROM_CONTEXT;
+use symbio_plugin_api::REASON_FROM_CONTEXT;
 
 /// 表必须覆盖**每一个**走模板产线的理由码：漏一个 ⇒ 用户收到通用兜底
 /// （降级而不失效，但那是兜底，不是正常路径）。

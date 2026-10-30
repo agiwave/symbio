@@ -30,13 +30,13 @@
 use std::sync::Arc;
 
 use super::config::ComposeConfig;
-use symbio_core::chat_node::{ChatNode, NodeRole};
-use symbio_core::{
+use symbio_plugin_api::chat_node::{ChatNode, NodeRole};
+use symbio_plugin_api::{
     capability_model_resolve, capability_prompts, llm_short_id, ExecAbortSignal, LlmAdapter,
     PluginInvokeRequest, PluginInvokeRequestExt, PromptMessage, ProviderLlmAdapter, Registry,
     SilentDeltas, TokenIssuer, CAPABILITY_VISITOR,
 };
-use symbio_core::{ComposeRequest, WordingReply};
+use symbio_plugin_api::{ComposeRequest, WordingReply};
 
 /// 生成请求的**指令段**（拼在注册的系统提示词之后；可被
 /// `ComposeConfig::instruction` 覆盖）。
@@ -75,7 +75,7 @@ pub(crate) async fn generate(
     // 生成只会得到一句凭空的话——那时连能力访问器都不必碰。
     let messages = build_messages(&req.context);
     if !messages.iter().any(|m| m.role == "user") {
-        symbio_core::plugin_debug!("compose", "[Compose] 对话线里没有用户发言，生成路径跳过");
+        symbio_plugin_api::plugin_debug!("compose", "[Compose] 对话线里没有用户发言，生成路径跳过");
         return None;
     }
 
@@ -87,7 +87,7 @@ pub(crate) async fn generate(
 
     // 选了哪个模型记一笔：配置的 id 写错时**没有错误信号**（行为是"用会话的模型"，
     // 一切照常），这行日志是唯一的线索。
-    symbio_core::plugin_debug!(
+    symbio_plugin_api::plugin_debug!(
         "compose",
         "[Compose] 答话使用模型 '{}'（配置 model={:?}）",
         provider.provider_id(),
@@ -111,7 +111,7 @@ pub(crate) async fn generate(
             // 但这次往返的耗时随 `WordingReply.cost_ms` 交回 `session`，由它落进
             // 本轮收束格的 `cost_ms`——台账仍只读落格事件（D-044），不会因为
             // 「请求是静默的」就少记一整类轮次的成本。
-            symbio_core::plugin_debug!(
+            symbio_plugin_api::plugin_debug!(
                 "compose",
                 "[Compose] 答话往返完成（cost_ms={}）",
                 turn.cost_ms
@@ -132,7 +132,7 @@ pub(crate) async fn generate(
         Err(e) => {
             // 生成失败**不是**本轮的失败：调用方退回模板，用户照旧收到一句答话。
             // 因此 warn 而不 error——把它报成错误会让一次限流看起来像会话故障。
-            symbio_core::plugin_warn!("compose", "[Compose] 答话生成失败，退回模板：{e}");
+            symbio_plugin_api::plugin_warn!("compose", "[Compose] 答话生成失败，退回模板：{e}");
             None
         }
     }

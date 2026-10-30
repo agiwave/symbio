@@ -22,12 +22,12 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_core::chat_node::ChatNode;
-use symbio_core::plugin_error;
-use symbio_core::plugin_info;
-use symbio_core::plugin_warn;
-use symbio_core::TurnOutput;
-use symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError};
+use symbio_plugin_api::chat_node::ChatNode;
+use symbio_plugin_api::plugin_error;
+use symbio_plugin_api::plugin_info;
+use symbio_plugin_api::plugin_warn;
+use symbio_plugin_api::TurnOutput;
+use symbio_plugin_api::{CapabilityMeta, ExecEnv, ModelProvider, PluginError};
 
 use super::http::{endpoint_label, execute_post_with_abort, PostResult};
 use super::model_providers::ModelProviderConfig;

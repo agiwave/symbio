@@ -11,7 +11,7 @@
 
 use super::*;
 use std::path::Path;
-use symbio_core::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
+use symbio_plugin_api::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
 use symbio_providers::DefaultToolVisitor;
 use tempfile::TempDir;
 
@@ -22,7 +22,7 @@ fn ctx(
     parent_addr: &str,
 ) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolVisitor>) {
     let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
     if let Some(w) = workdir {
         ctx.set(WORKDIR, w.to_string());
     }
@@ -39,7 +39,7 @@ fn ctx(
 /// 在某个**宿主目录**下造一个本插件实例（目录 = `<宿主目录>/memory`）
 fn plugin_in(host: &Path) -> Arc<MemoryPlugin> {
     Arc::new(MemoryPlugin::new(
-        symbio_core::PluginDir::at(host.join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
+        symbio_plugin_api::PluginDir::at(host.join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
         MemoryConfig::default(),
     ))
 }
@@ -242,7 +242,7 @@ async fn disabled_workspace_skips_injection_but_keeps_the_mount() {
         ..MemoryConfig::default()
     };
     let p = Arc::new(MemoryPlugin::new(
-        symbio_core::PluginDir::at(tmp.path().join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
+        symbio_plugin_api::PluginDir::at(tmp.path().join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
         cfg,
     ));
 
@@ -260,7 +260,7 @@ async fn plugin_has_no_own_routes() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
     let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
     ctx.set(PATH, "memory/whatever".to_string());
     let err = p.route(ctx).await.unwrap_err();
     assert!(

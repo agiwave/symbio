@@ -31,11 +31,11 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use symbio_core::{
+use symbio_plugin_api::{
     vdfs_has_parent_segment, vdfs_path_within, VdfsAccess, VdfsContent, VdfsContext, VdfsError,
     VdfsNode, VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
 };
-use symbio_core::{VdfsRequest, VdfsResponse};
+use symbio_plugin_api::{VdfsRequest, VdfsResponse};
 
 /// 单文件读取上限（10MB）
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;

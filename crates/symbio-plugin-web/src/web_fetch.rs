@@ -5,7 +5,7 @@ use super::web_config::WebConfig;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
+use symbio_plugin_api::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use tokio::sync::RwLock;
 
 const MAX_RESPONSE_SIZE: usize = 1_048_576; // 1MB
@@ -25,7 +25,7 @@ impl WebFetchTool {
     async fn execute_inner(
         &self,
         args: Value,
-        agent_scope: Option<&symbio_core::AgentScope>,
+        agent_scope: Option<&symbio_plugin_api::AgentScope>,
     ) -> Result<Value, PluginError> {
         let url = args
             .get("url")
@@ -99,7 +99,7 @@ impl WebFetchTool {
         // 安全截断：必须落在字符边界上，否则含中文的响应体会让 `&body[..N]`
         // 直接 panic（字节索引切进多字节字符内部）。
         let (content, truncated) = if body.len() > MAX_RESPONSE_SIZE {
-            let end = symbio_core::text_floor_char_boundary(&body, MAX_RESPONSE_SIZE);
+            let end = symbio_plugin_api::text_floor_char_boundary(&body, MAX_RESPONSE_SIZE);
             (body[..end].to_string(), true)
         } else {
             (body, false)
@@ -139,10 +139,10 @@ impl Capability for WebFetchTool {
                 },
                 "required": ["url"]
             }),
-            category: Some(symbio_core::CapabilityCategory::Network),
+            category: Some(symbio_plugin_api::CapabilityCategory::Network),
             // 只读抓取，不改本地状态⇒ 低风险（与旧风险表一致）。显式声明而非依赖默认档：
             // 默认档是 Medium，那会让「读个网页」在 low 阈值会话里多要一次审批。
-            risk: Some(symbio_core::CapabilityRiskLevel::Low),
+            risk: Some(symbio_plugin_api::CapabilityRiskLevel::Low),
             examples: Some(vec!["url='https://example.com'".to_string()]),
             ..Default::default()
         }
@@ -154,7 +154,7 @@ impl Capability for WebFetchTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let scope = symbio_core::agent_perms_of(ctx.as_ref());
+        let scope = symbio_plugin_api::agent_perms_of(ctx.as_ref());
         let result = self.execute_inner(args, scope.as_ref()).await?;
         Ok(serde_json::to_value(&result)?)
     }

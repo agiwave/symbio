@@ -5,12 +5,12 @@ use crate::types::{Skill, SkillConfig};
 use async_trait::async_trait;
 use std::path::Path;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_SKILL;
+use symbio_plugin_api::{
     plugin_dir_from_ctx, CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     TRAVERSE_AVAILABLE_TOOLS,
 };
-use symbio_deploy::PLUGIN_ID_SKILL;
 use tokio::sync::RwLock;
 
 pub struct SkillPlugin {
@@ -145,8 +145,8 @@ impl SkillPlugin {
 // 本模块只剩 **skill 特有的两件事**——SKILL.md 的摘要解析（frontmatter →
 // 标题/摘要/config）与写前的表单校验。
 
-use symbio_core::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
-use symbio_core::{
+use symbio_plugin_api::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
+use symbio_plugin_api::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
     VDFS_ACTION_IMPORT, VDFS_EXT_FORM, VDFS_STATUS_ACTIVE,
@@ -430,7 +430,7 @@ impl Plugin for SkillPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_plugin_api::VdfsProvider>> {
         Some(self)
     }
 
@@ -438,7 +438,7 @@ impl Plugin for SkillPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
@@ -451,7 +451,9 @@ impl Plugin for SkillPlugin {
                 }
                 let req: ExecuteRequest = ctx.payload()?;
 
-                let skills = self.list_skills(ctx.get(symbio_core::WORKDIR)).await?;
+                let skills = self
+                    .list_skills(ctx.get(symbio_plugin_api::WORKDIR))
+                    .await?;
                 let skill = skills
                     .into_iter()
                     .find(|s| s.name == req.name)
@@ -467,7 +469,9 @@ impl Plugin for SkillPlugin {
                 )?))
             }
             _ => {
-                let skills = self.list_skills(ctx.get(symbio_core::WORKDIR)).await?;
+                let skills = self
+                    .list_skills(ctx.get(symbio_plugin_api::WORKDIR))
+                    .await?;
                 if let Some(skill) = skills.into_iter().find(|s| s.name == path) {
                     // 名称路由没有 args 入口 ⇒ 声明了 `argument_hint` 的技能在这里
                     // 与 `skill/execute` 一样返回校验错误，而不是把未替换的模板直接交出去。
@@ -483,12 +487,14 @@ impl Plugin for SkillPlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let sub_path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let sub_path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         if sub_path == TRAVERSE_AVAILABLE_TOOLS {
-            let skills = self.list_skills(ctx.get(symbio_core::WORKDIR)).await?;
+            let skills = self
+                .list_skills(ctx.get(symbio_plugin_api::WORKDIR))
+                .await?;
 
             if !skills.is_empty() {
-                if let Some(tool_visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) {
+                if let Some(tool_visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
                     let skill_tool = Arc::new(SkillExecuteTool::new(skills));
                     tool_visitor.put(CapabilityRow::tool(skill_tool)).await;
                 }
@@ -498,7 +504,7 @@ impl Plugin for SkillPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_SKILL, SkillPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_SKILL, SkillPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

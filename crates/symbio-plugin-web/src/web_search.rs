@@ -7,7 +7,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
-use symbio_core::{
+use symbio_plugin_api::{
     Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeResponse,
 };
 use tokio::sync::RwLock;
@@ -51,7 +51,7 @@ impl WebSearchTool {
     async fn execute_inner(
         &self,
         args: &Value,
-        agent_scope: Option<&symbio_core::AgentScope>,
+        agent_scope: Option<&symbio_plugin_api::AgentScope>,
     ) -> PluginInvokeResponse<Value> {
         let query = args
             .get("query")
@@ -410,9 +410,9 @@ impl Capability for WebSearchTool {
                 },
                 "required": ["query"]
             }),
-            category: Some(symbio_core::CapabilityCategory::Network),
+            category: Some(symbio_plugin_api::CapabilityCategory::Network),
             // 只读检索 ⇒ 低风险（同 web_fetch）。依赖默认档会让它在 low 阈值下多要审批。
-            risk: Some(symbio_core::CapabilityRiskLevel::Low),
+            risk: Some(symbio_plugin_api::CapabilityRiskLevel::Low),
             examples: Some(vec![
                 "query='rust tutorial'".to_string(),
                 "query='MODEL news', max_results=10".to_string(),
@@ -427,7 +427,7 @@ impl Capability for WebSearchTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let scope = symbio_core::agent_perms_of(ctx.as_ref());
+        let scope = symbio_plugin_api::agent_perms_of(ctx.as_ref());
         let data = self.execute_inner(&args, scope.as_ref()).await?;
         Ok(serde_json::to_value(&data)?)
     }

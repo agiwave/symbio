@@ -16,8 +16,8 @@
 //! 的落地：没有选中 Agent 时它恒过（宿主态，无 manifest 可声明）；选中了而清单为空
 //! ⇒ 一律拒（grant 语义，空清单即没有授权）。
 
-use symbio_core::AgentScope;
-use symbio_core::PluginError;
+use symbio_plugin_api::AgentScope;
+use symbio_plugin_api::PluginError;
 
 /// 从 URL 提取主机
 pub(crate) fn extract_host(url: &str) -> Result<String, PluginError> {

@@ -11,13 +11,13 @@ use super::registry::{HookRegistration, HookRegistry};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Weak};
-use symbio_core::SimpleResponse;
-use symbio_core::{
+use symbio_plugin_api::hooks::{HookEvent, HookOutput};
+use symbio_plugin_api::SimpleResponse;
+use symbio_plugin_api::PLUGIN_ID_HOOK;
+use symbio_plugin_api::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, PluginStopReason,
 };
-use symbio_deploy::PLUGIN_ID_HOOK;
-use symbio_plugin_api::hooks::{HookEvent, HookOutput};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
@@ -71,7 +71,7 @@ impl HooksPlugin {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<HookOutput> {
         let req: HookFireRequest = ctx.payload()?;
-        let workdir = ctx.get(symbio_core::WORKDIR).unwrap_or_default();
+        let workdir = ctx.get(symbio_plugin_api::WORKDIR).unwrap_or_default();
 
         let configs = self
             .registry
@@ -126,7 +126,7 @@ impl Plugin for HooksPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         if path.starts_with('/') {
@@ -162,4 +162,4 @@ impl Plugin for HooksPlugin {
 #[path = "plugin.test.rs"]
 mod tests;
 
-symbio_core::submit_object_creator!(PLUGIN_ID_HOOK, HooksPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_HOOK, HooksPlugin::build, dyn Plugin);

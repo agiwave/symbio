@@ -24,12 +24,12 @@ use super::setting::HeartbeatConfig;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
-use symbio_core::{
+use symbio_plugin_api::PLUGIN_ID_SESSION;
+use symbio_plugin_api::{
     vdfs_context, Capability, CapabilityMeta, DynVdfsProvider, ExecEnv, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, VdfsContent, VdfsContext, VdfsRequest,
     VdfsResponse, SESSION_ID,
 };
-use symbio_deploy::PLUGIN_ID_SESSION;
 
 /// 心跳间隔下限（秒）：调度器扫描周期 15s + 抖动 0-30s，低于 10s 的间隔
 /// 没有可观测意义，只会制造密集空转。
@@ -77,7 +77,7 @@ impl Capability for HeartbeatTool {
                     }
                 }
             }),
-            category: Some(symbio_core::CapabilityCategory::SystemOperation),
+            category: Some(symbio_plugin_api::CapabilityCategory::SystemOperation),
             examples: Some(vec![
                 r#"{"action":"set","interval_seconds":1800,"prompt":"检查任务清单并继续推进待办事项"}"#.to_string(),
                 r#"{"action":"cancel"}"#.to_string(),

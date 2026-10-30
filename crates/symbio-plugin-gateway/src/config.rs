@@ -101,7 +101,7 @@ fn reads_config_document(payload: &serde_json::Value) -> bool {
         .and_then(serde_json::Value::as_str)
         .map(|addr| {
             addr.trim_end_matches('/')
-                .ends_with(&format!("/{}", symbio_core::PLUGIN_FILE))
+                .ends_with(&format!("/{}", symbio_plugin_api::PLUGIN_FILE))
         })
         .unwrap_or(false)
 }

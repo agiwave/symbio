@@ -3,8 +3,8 @@
 use super::{NotesProvider, MAX_NOTES, SLOT};
 use crate::decl::NOTES_CREATED;
 use serde_json::json;
-use symbio_core::{Entity, Event, Verb};
 use symbio_plugin_api::{Cadence, ContextProvider, ContextRequest};
+use symbio_plugin_api::{Entity, Event, Verb};
 
 fn note(id: &str, text: &str) -> Event {
     let mut e = Event::pending(
