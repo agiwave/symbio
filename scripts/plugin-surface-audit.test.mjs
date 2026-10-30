@@ -1,5 +1,5 @@
 /**
- * plugin-surface-audit 回归测试 —— 证明它**会红**（HS-001 / HS-002，D-253）
+ * plugin-surface-audit 回归测试 —— 证明它**会红**（HS-001…004，D-253 / D-254）
  *
  * 一个只会亮绿灯的守卫等于没有守卫。逐条注入真实违规并断言脚本变红：
  *   ① 干净夹具 → exit 0（扩展层插件只写门面）；
@@ -10,7 +10,8 @@
  *   ⑥ 控制面 `symbio-plugin-loop` 直接依赖 core → exit 0 —— 影响类分档（DE-026）；
  *   ⑦ 门面白名单条数超过基线 → exit 1 —— 只许降（HS-002）；
  *   ⑧ 范围读不出（缺 `crates/`）→ exit 2；
- *   ⑨ 门面里有一条扩展层零引用的符号 → exit 1 —— 白名单不许有空转条目（HS-003）。
+ *   ⑨ 门面里有一条扩展层零引用的符号 → exit 1 —— 白名单不许有空转条目（HS-003）；
+ *   ⑩ 胶水层的嵌入臂被设为默认 → exit 1，⑪ 不是 `optional` → exit 1 —— 重臂默认必须关（HS-004，D-254）。
  *
  * 用法：node --test scripts/plugin-surface-audit.test.mjs
  */
@@ -68,6 +69,18 @@ function fixture(plugins) {
   }
   return root
 }
+
+/** 胶水层 `symbio-providers` 的最小 manifest：用来判 HS-004（重臂默认必须关）。 */
+const PROVIDERS_OK = `[package]
+name = "symbio-providers"
+
+[dependencies]
+symbio-provider-embedding = { path = "../symbio-provider-embedding", optional = true }
+
+[features]
+default = []
+embedding = ["dep:symbio-provider-embedding"]
+`
 
 function runOn(root) {
   return spawnSync(process.execPath, [script, `--root=${root}`], { encoding: 'utf8' })
@@ -205,6 +218,53 @@ test('⑧ 范围读不出 ⇒ exit 2', () => {
   try {
     const r = runOn(root)
     assert.equal(r.status, 2, r.stdout + r.stderr)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑩ 胶水层把嵌入臂设为默认 ⇒ 红（HS-004）', () => {
+  const root = fixture({
+    'symbio-plugin-fix': {},
+    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event, Plugin};\n' },
+    'symbio-providers': { manifest: PROVIDERS_OK.replace('default = []', 'default = ["embedding"]') },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /HS-004/)
+    assert.match(r.stdout, /embedding/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑪ 嵌入臂不是 optional ⇒ 红（HS-004）', () => {
+  const root = fixture({
+    'symbio-plugin-fix': {},
+    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event, Plugin};\n' },
+    'symbio-providers': { manifest: PROVIDERS_OK.replace(', optional = true', '') },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /HS-004/)
+    assert.match(r.stdout, /optional/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑫ 嵌入臂默认关闭 ⇒ 绿（HS-004 的正例）', () => {
+  const root = fixture({
+    'symbio-plugin-fix': {},
+    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event, Plugin};\n' },
+    'symbio-providers': { manifest: PROVIDERS_OK },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /HS-004/)
   } finally {
     rmTree(root)
   }

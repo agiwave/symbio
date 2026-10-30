@@ -94,6 +94,9 @@
 // 同构：消费方一律写 `crate::providers::<符号>`，不深引 `::<目录>::<子模块>::`。
 // 深引会让出口形同虚设（子模块一改名就要改所有调用点），也让「公开面」散成两套。
 pub use symbio_provider_collectors as collectors;
+// `embedding` 是**可选臂**（D-254）：它带来 `ort` / `tokenizers` 与 55 个传递依赖，
+// 而插件侧只有 `local` 一个消费者，且只消费「为什么不可用」。
+#[cfg(feature = "embedding")]
 pub use symbio_provider_embedding as embedding;
 pub use symbio_provider_memory as memory;
 pub use symbio_provider_vdfs_service as vdfs_service;
@@ -110,6 +113,7 @@ pub use symbio_provider_memory::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 // `embedding` 的**实例**不在这里：两个实现经 `submit_object_creator!` 注册，
 // 业务模块用 `creator_create_object::<dyn EmbeddingService>(EMBEDDING_*, ctx)` 取。
 // 只出口「为什么不可用」：工具降级时要把原因写进返回体，而原因不是实例。
+#[cfg(feature = "embedding")]
 pub use symbio_provider_embedding::unavailable_reason as embedding_unavailable_reason;
 pub use symbio_provider_vdfs_service::{
     auto_id as vdfs_auto_id, id_of as vdfs_id_of, safe_segment as vdfs_safe_segment, DirVdfs,

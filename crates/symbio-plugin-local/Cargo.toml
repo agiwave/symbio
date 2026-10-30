@@ -14,7 +14,8 @@ dead_code = "warn"
 
 [dependencies]
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-providers = { path = "../symbio-providers" }
+# 本地检索读嵌入的降级原因（`embedding_unavailable_reason`），因此显式开嵌入臂（D-254）。
+symbio-providers = { path = "../symbio-providers", features = ["embedding"] }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续
 # `derive(Deserialize)`——Tauri 命令参数与 gateway 的 WS 入帧都依赖它。

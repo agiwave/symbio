@@ -16,7 +16,8 @@ dead_code = "warn"
 symbio-core = { path = "../symbio-core" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-deploy = { path = "../symbio-deploy" }
-symbio-providers = { path = "../symbio-providers" }
+# 主机装配必须带嵌入臂：语义检索的实现经 `submit_object_creator!` 注册在这里，关掉就等于关掉那条能力（D-254）。
+symbio-providers = { path = "../symbio-providers", features = ["embedding"] }
 # >>> plugin-links:begin
 # 以下依赖行由 `scripts/facts/plugin-links-cargo.mjs` 从 `crates/symbio-plugin-<id>/` 目录投影，请勿手改（加插件 = 建目录 + `PLUGIN.yml`）。
 symbio-plugin-agent = { path = "../symbio-plugin-agent" }

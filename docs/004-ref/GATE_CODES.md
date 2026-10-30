@@ -35,7 +35,7 @@ lists: [gate-codes=owner]
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–006 | `GW-007` |
-| **HS** | 扩展层插件宿主面 | `scripts/plugin-surface-audit.mjs` | HS-001–003 | `HS-004` |
+| **HS** | 扩展层插件宿主面 | `scripts/plugin-surface-audit.mjs` | HS-001–004 | `HS-005` |
 | **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
 | **INJ** | 异常注入矩阵 | `scripts/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
 | **KB** | 前端分支（形态 / 资源类型） | `scripts/kind-branch-audit.mjs` | KB-001–002 | `KB-003` |
@@ -155,6 +155,7 @@ lists: [gate-codes=owner]
 | **HS-001** | `scripts/plugin-surface-audit.mjs` |
 | **HS-002** | `scripts/plugin-surface-audit.mjs` |
 | **HS-003** | `scripts/plugin-surface-audit.mjs` |
+| **HS-004** | `scripts/plugin-surface-audit.mjs` |
 | **IM-001** | `scripts/internal-model-audit.mjs` |
 | **IM-002** | `scripts/internal-model-audit.mjs` |
 | **IM-003** | `scripts/internal-model-audit.mjs` |

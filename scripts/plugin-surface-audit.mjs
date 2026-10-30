@@ -17,6 +17,7 @@
  * | HS-001 | 非控制面插件的源码（注释外）或 manifest 里出现 `symbio_core` / `symbio-kernel` / `symbio-deploy` | 从门面取那个符号；门面里没有 ⇒ 说明它还不该给插件看，先论证再加白名单 |
  * | HS-002 | 门面白名单条数超过基线（只许降） | 加一条要配一条决策理由，并同步上调基线 |
  * | HS-003 | 门面白名单里有符号在**扩展层插件代码里零引用** | 删掉它——白名单的每一条都要报得出消费方（与 C-003 同一把尺子）；报不出的就是空转条目 |
+ * | HS-004 | 插件胶水层 `symbio-providers` 把**嵌入臂**设成默认开启（`default = ["embedding"]` 或依赖不是 `optional`） | 那一条 `default = []` 是有意的：`ort` / `tokenizers` 带来 55 个传递依赖（168 → 113），而插件侧只有 `local` 一个消费者。要开就在宿主与需要它的插件那里显式开（D-254） |
  *
  * ## 为什么按插件身份分档，而不是一刀切
  *
@@ -37,7 +38,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns HS 扩展层插件宿主面
-// @codes HS-001 HS-002 HS-003
+// @codes HS-001 HS-002 HS-003 HS-004
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -62,6 +63,41 @@ export const WHITELIST_BASELINE = 248
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
+/**
+ * 插件胶水层 `symbio-providers` 的**重臂**：嵌入推理（`ort` + `tokenizers`）。
+ * 它默认必须是关的（D-254）——插件要的是 `DefaultToolVisitor` / `MemoryFile` 这些胶水，
+ * 不是一套 ONNX 运行时。判据只看 manifest：`optional = true` + `default` 不含它。
+ */
+export const HEAVY_ARM = {
+  manifest: 'crates/symbio-providers/Cargo.toml',
+  dep: 'symbio-provider-embedding',
+  feature: 'embedding',
+}
+
+/** 返回 `symbio-providers` manifest 里重臂的违规项（文件不存在 ⇒ 无此风险，返回空）。 */
+export function heavyArmViolations(toml) {
+  const errors = []
+  const depLine = toml.split(/\r?\n/).find((l) => new RegExp(`^${HEAVY_ARM.dep}\\s*=`).test(l.trim()))
+  if (!depLine || !/optional\s*=\s*true/.test(depLine)) {
+    errors.push(
+      `${HEAVY_ARM.manifest}  里 \`${HEAVY_ARM.dep}\` 不是 \`optional = true\`——` +
+        `嵌入臂必须可选（HS-004，D-254）：插件不该为一个胶水符号链接整套 ONNX 运行时`,
+    )
+  }
+  const idx = toml.indexOf('[features]')
+  const rest = idx >= 0 ? toml.slice(idx + '[features]'.length) : ''
+  const next = rest.search(/^\[/m)
+  const fb = next >= 0 ? rest.slice(0, next) : rest
+  const dm = /^\s*default\s*=\s*\[([^\]]*)\]/m.exec(fb)
+  if (dm && dm[1].split(',').some((s) => s.trim().replace(/["']/g, '') === HEAVY_ARM.feature)) {
+    errors.push(
+      `${HEAVY_ARM.manifest}  的 \`[features] default\` 含 \`${HEAVY_ARM.feature}\`——` +
+        'HS-004 / D-254：默认关，宿主与需要它的插件各自显式开；默认开等于把这条裁决作废',
+    )
+  }
+  return errors
+}
+
 const BLOCK_START = 'pub use symbio_core::{'
 const BLOCK_END = '};'
 
@@ -212,9 +248,14 @@ export function run(root) {
     )
   }
 
+  // HS-004：插件胶水层的重臂默认必须是关的。文件不存在 ⇒ 这个仓没有那层胶水，无此风险。
+  const heavyP = path.join(root, HEAVY_ARM.manifest)
+  const heavy = fs.existsSync(heavyP) ? heavyArmViolations(fs.readFileSync(heavyP, 'utf8')) : []
+  errors.push(...heavy)
+
   if (errors.length) {
     for (const e of errors) console.log(`${red('[ERROR]')} ${e}`)
-    console.log(`\n扩展层宿主面：${errors.length} 处违规（HS-001 / HS-002）`)
+    console.log(`\n扩展层宿主面：${errors.length} 处违规（HS-001 / HS-002 / HS-004）`)
     return 1
   }
 
@@ -231,7 +272,7 @@ export function run(root) {
       `✓ HS-001 扩展层零直接依赖：${scannedPlugins} 个非控制面插件的 ${scannedFiles} 个源文件与 manifest ` +
         `没有 \`symbio_core\` / \`symbio-kernel\` / \`symbio-deploy\`（控制面 ${CONTROL_PLANE.length} 个豁免：` +
         `${CONTROL_PLANE.join(' / ')}）· HS-002 白名单 ${n} 条（基线 ${WHITELIST_BASELINE}）` +
-        `· HS-003 每条都有扩展层消费方（0 空转）`,
+        `· HS-003 每条都有扩展层消费方（0 空转）· HS-004 胶水层重臂默认关闭（${HEAVY_ARM.feature}）`,
     ),
   )
   return 0

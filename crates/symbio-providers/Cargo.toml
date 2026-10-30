@@ -15,12 +15,20 @@ dead_code = "warn"
 [dependencies]
 symbio-core = { path = "../symbio-core" }
 symbio-provider-collectors = { path = "../symbio-provider-collectors" }
-symbio-provider-embedding = { path = "../symbio-provider-embedding" }
+symbio-provider-embedding = { path = "../symbio-provider-embedding", optional = true }
 symbio-provider-memory = { path = "../symbio-provider-memory" }
 symbio-provider-vdfs_service = { path = "../symbio-provider-vdfs_service" }
 # 统一资源协议：zip 上传解压（MCP / Skill / Agent 以 zip 为主，文件名=目录名）
 # 仅启用 deflate（flate2/miniz_oxide，纯 Rust）：默认 features 会拉入 zstd/lzma 等 C 编译包
 zip = { workspace = true, features = ["deflate"] }
+
+[features]
+# 嵌入推理（`ort` + `tokenizers`）是**宿主的一个服务**，不是插件胶水：它把本层的传递依赖
+# 从 113 顶到 168，而 19 个用本层的插件里只有 `local` 一个会问「为什么不可用」（D-254）。
+# 默认不装——宿主 `symbio` 与 `plugin-local` 显式开；第三方插件照默认拿到的与
+# `plugin-api` 同一量级。
+default = []
+embedding = ["dep:symbio-provider-embedding"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
