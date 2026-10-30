@@ -11,7 +11,7 @@ use crate::test_fixtures::{
     CHAT, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
     EVENT_USER_MESSAGE, MESSAGE,
 };
-use crate::Budget;
+use crate::view::Budget;
 
 /// 投影成 `(role, text)` 序列（折叠关心的就是这两格）。
 fn entries(events: &[Event]) -> Vec<(String, String)> {
@@ -288,7 +288,7 @@ fn the_user_turn_a_snapshot_carries_is_not_emitted_twice() {
 }
 
 /// 去重**只**作用在换基边界，不在事实事件彼此之间：兜底 / 汇报那几格的节点身份是按
-/// `turn_id` 派生的合成 id（[`crate::event_produced_text_node_id`]），同一轮里
+/// `turn_id` 派生的合成 id（[`crate::event::event_produced_text_node_id`]），同一轮里
 /// 两条不同事件可能撞到同一个合成 id，而它们在 `rebuild` 里是两个不同的节点——把它们
 /// 合并就是**另一种**分叉。这条钉住判据的边界，免得后来人把它「顺手」改成全局去重。
 #[test]

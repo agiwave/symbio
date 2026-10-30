@@ -45,6 +45,9 @@ inventory = { workspace = true }
 tempfile = { workspace = true }
 
 [dev-dependencies]
+# 用例共用的事件拼写随 `projection` 搬进 sdk（D-259）：core 仍留 `actors` / `governance`
+# 两组用例，它们读同一份拼写——两份真源就会有两份结论。
+symbio-sdk = { path = "../symbio-sdk", features = ["test-fixtures"] }
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { workspace = true, features = ["test-util"] }

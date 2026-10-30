@@ -26,8 +26,8 @@
 //!
 //! | 节点 | 形状的单点定义 | 重建怎么拿到 |
 //! |---|---|---|
-//! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`crate::node_build`] 的 `llm_build_*` | 直接调用 |
-//! | 对话面节点（首响 / 汇报 / 答话） | [`crate::node_build::dialog_node`]、[`crate::facts::ReportDraft::to_message`] | 直接调用 |
+//! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`crate::turn::node_build`] 的 `llm_build_*` | 直接调用 |
+//! | 对话面节点（首响 / 汇报 / 答话） | [`crate::turn::node_build::dialog_node`]、[`crate::turn::facts::ReportDraft::to_message`] | 直接调用 |
 //! | 用户发言 / 补充 | **写入侧内联构造**（CLI 请求体 / `turn_exec::supplement_into_request`） | 逐字复刻（无共享构造器） |
 //!
 //! 「逐字复刻」那两格是**已知的脆弱点**：没有共享构造器可调，只能靠判据钉住
@@ -65,7 +65,7 @@
 //! `success` / `turn_id`；`turn.supplemented` 带 `id` / `ids`。**节点身份因此是
 //! 事实的一部分**，重建不必凭空造号——只有「载荷确实没记的」（旧事件的补充格、
 //! 恢复路的结果节点）才由事件 id 稳定合成（合成必须**稳定**，见
-//! [`crate::event_payload_node_id`]）。
+//! [`crate::event::event_payload_node_id`]）。
 //!
 //! ## `seq`：重建的顺序锚点
 //!
@@ -75,22 +75,24 @@
 
 use std::collections::HashSet;
 
-use crate::chat_node::{
+use crate::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
 };
+use crate::event::event_payload_node_id;
 use crate::event::{
     event_produced_text_node_id, event_tool_result_node_id, EVENT_FAILED, EVENT_RESPONSE,
 };
 use crate::projection::vocab::{slot_of, ChatSlot};
-use crate::{event_payload_node_id, ChatVocab, Entity, Event, MessageVocab, Verb};
+use crate::projection::vocab::{ChatVocab, MessageVocab};
+use crate::{Entity, Event, Verb};
 
 // 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
-use crate::facts::ReportDraft;
-use crate::node_build::{
+use crate::chat::principal::Principal;
+use crate::turn::facts::ReportDraft;
+use crate::turn::node_build::{
     dialog_node, llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message,
 };
-use crate::principal::Principal;
 
 /// 事件主体 → 节点身份：重建与写侧**同一条**派生（[`Principal::from_legacy`]）。
 ///
@@ -102,7 +104,7 @@ fn actor_principal(e: &Event) -> Principal {
 
 /// 用户一侧（发言 / 补充）：写侧 `attributed` 判 `NodeRole::User` ⇒ `person/local`。
 fn user_principal() -> Principal {
-    Principal::from_legacy(crate::PRINCIPAL_USER)
+    Principal::from_legacy(crate::keys::PRINCIPAL_USER)
 }
 
 /// **重建号**：[`rebuild`] 自己那台发号器（四套序号的归一表见 session 域文档
@@ -192,10 +194,11 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
         .collect();
 
     // ── 压缩快照：先收下它那份列表，再从其下标之后接着折（见函数文档）────────
-    let (start, snapshot_messages) = match crate::mutations_latest_snapshot(events, m) {
-        Some((i, msgs)) => (i + 1, msgs),
-        None => (0, Vec::new()),
-    };
+    let (start, snapshot_messages) =
+        match crate::projection::mutations::mutations_latest_snapshot(events, m) {
+            Some((i, msgs)) => (i + 1, msgs),
+            None => (0, Vec::new()),
+        };
     for mut m in snapshot_messages {
         // 号按**本函数自己的发号器**重发，不用载荷里那份（口径见 [`RebuildSeq`]）。
         seq.assign(&mut m);
@@ -386,7 +389,7 @@ fn user_node(e: &Event) -> ChatNode {
 /// （旧事件）时按事件 id 稳定合成——合成的后果已判定可接受：重开后这条的 id 与
 /// 实时面那份不同，但**内容与角色一致**（D-049 的「呈现细节可能不同」）。
 fn supplement_node(e: &Event) -> ChatNode {
-    use crate::facts::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
+    use crate::turn::facts::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
     let count = e.payload.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
     let ids = e
         .payload
@@ -440,7 +443,7 @@ fn reported_node(e: &Event) -> ChatNode {
 
 /// 对话面开场白（`turn × asserted`）：`Escalate` 首响。
 ///
-/// 形状经 [`crate::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
+/// 形状经 [`crate::turn::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
 /// 及 `reported_node` 同一条纪律：构造只有一份，漂移才不可能）。理由码与
 /// `exclude_from_context` 从载荷读——它们是这条节点的形状（`meta.reason` /
 /// `meta.exclude_from_context`），由写侧 `apply_verdict` 原样透传。
@@ -805,7 +808,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
     let tool_principal = if tool.is_empty() {
         None
     } else {
-        Some(crate::principal::Principal::tool_principal(&tool))
+        Some(crate::chat::principal::Principal::tool_principal(&tool))
     };
     let mut result = if needs_user_action {
         ChatNode {

@@ -40,8 +40,12 @@ mod projection;
 mod store;
 // 用例自己交的事件拼写与三张词汇表（DE-024 D-203 / D-205 / D-206）：只在 `cfg(test)`
 // 下存在，不是 core 的词典——生产拼写由各 owner 的清单生成物提供，core 一行都不读。
+// 实体随 `projection` 搬进 `symbio-sdk`（D-259），core 只用不拥有：这里是 `use` 不是
+// `pub use`——用例写 `crate::test_fixtures::…` 照旧能解析（私有绑定对后代模块可见），
+// 但 core 的根公共面不多出一条。多出那一条会被 C-004 记成「新占根出口的共享类型」，
+// 而它不是 core 的出口，只是 core 的用例借了 SDK 的一份拼写。
 #[cfg(test)]
-mod test_fixtures;
+use symbio_sdk::test_fixtures;
 mod text;
 mod turn;
 mod vdfs;

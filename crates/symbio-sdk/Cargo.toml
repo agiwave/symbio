@@ -34,3 +34,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+
+[features]
+# 只给下游 crate 的测试用：让 `test_fixtures` 在非 cfg(test) 的构建里也可见。
+# 生产构建不开它——拼写来自各 owner 的清单生成物，不来自这里。
+test-fixtures = []

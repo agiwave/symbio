@@ -13,14 +13,16 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::chat_node::{ChatNode, NodeStatus};
-use crate::event::Event;
-use crate::exec::{ExecAbortSignal, ExecEventSink, ExecTranscriptWriter};
+use crate::chat::chat_node::{ChatNode, NodeStatus};
 use crate::llm::model_provider::ModelProvider;
-use crate::node_build::PresentationTree;
 use crate::plugin::Plugin;
-use crate::store::Store;
-use crate::{Scope, SymbioKey};
+use crate::turn::node_build::PresentationTree;
+
+use symbio_kernel::event::Event;
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink, ExecTranscriptWriter};
+use symbio_kernel::keys::SymbioKey;
+use symbio_kernel::store::Store;
+use symbio_kernel::Scope;
 
 /// 驱动器能知道的**全部会话输入**（纯值，不含存储实现）。
 #[derive(Debug, Clone)]

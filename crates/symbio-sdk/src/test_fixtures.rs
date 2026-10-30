@@ -22,42 +22,43 @@
 //! 内核常量（它们是语法闭集的一部分）。
 
 use crate::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};
-use crate::{ChatVocab, CommitmentVocab, Entity, EventDecl, FactRole, MessageVocab, Verb};
+use crate::projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};
+use crate::{Entity, EventDecl, FactRole, Verb};
 
 // ── 对话面（`turn`）──
-pub(crate) const EVENT_USER_MESSAGE: &str = "user.message";
-pub(crate) const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
-pub(crate) const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
-pub(crate) const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
-pub(crate) const EVENT_CHAT_ASSISTANT_OPENING: &str = "chat.assistant.opening";
-pub(crate) const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
-pub(crate) const EVENT_CHAT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
-pub(crate) const EVENT_CHAT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
-pub(crate) const EVENT_TURN_BRANCH: &str = "turn.branch";
-pub(crate) const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
-pub(crate) const EVENT_AUTHZ_DENIED: &str = "authz.denied";
+pub const EVENT_USER_MESSAGE: &str = "user.message";
+pub const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
+pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
+pub const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
+pub const EVENT_CHAT_ASSISTANT_OPENING: &str = "chat.assistant.opening";
+pub const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
+pub const EVENT_CHAT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
+pub const EVENT_CHAT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
+pub const EVENT_TURN_BRANCH: &str = "turn.branch";
+pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
+pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
 
 // ── 产物与消息面 ──
-pub(crate) const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
-pub(crate) const EVENT_MESSAGE_ADDED: &str = "message.added";
-pub(crate) const EVENT_MESSAGE_EDITED: &str = "message.edited";
-pub(crate) const EVENT_MESSAGE_REMOVED: &str = "message.removed";
-pub(crate) const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
+pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
+pub const EVENT_MESSAGE_ADDED: &str = "message.added";
+pub const EVENT_MESSAGE_EDITED: &str = "message.edited";
+pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
+pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
 // ── 承诺面 ──
-pub(crate) const EVENT_COMMITMENT_OPENED: &str = "commitment.opened";
-pub(crate) const EVENT_COMMITMENT_RELEASED: &str = "commitment.released";
-pub(crate) const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
-pub(crate) const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
+pub const EVENT_COMMITMENT_OPENED: &str = "commitment.opened";
+pub const EVENT_COMMITMENT_RELEASED: &str = "commitment.released";
+pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
+pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
 // ── 裁决面 ──
-pub(crate) const EVENT_VERDICT_ASSERTED: &str = "verdict.asserted";
+pub const EVENT_VERDICT_ASSERTED: &str = "verdict.asserted";
 
 /// 用例交出去的声明表：格位与角色与各 owner 的 `EventDecl` 逐条相同。
 ///
 /// 三档角色必须有人住（`seal` 的 `Gap::UnmannedRole`）：预算声明在开轮 / 派发，
 /// 收束在定稿，停机在被拒。用例表照抄这三处，否则守卫判据会在「角色没人住」上红。
-pub(crate) const EVENTS: &[EventDecl] = &[
+pub const EVENTS: &[EventDecl] = &[
     EventDecl::with_roles(
         EVENT_USER_MESSAGE,
         (Entity::Turn, Verb::Opened),
@@ -119,7 +120,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 ];
 
 /// 对话发言面（11 条）。
-pub(crate) const CHAT: ChatVocab = ChatVocab {
+pub const CHAT: ChatVocab = ChatVocab {
     user_message: EVENT_USER_MESSAGE,
     dispatch: EVENT_TURN_DISPATCH,
     supplemented: EVENT_TURN_SUPPLEMENTED,
@@ -134,7 +135,7 @@ pub(crate) const CHAT: ChatVocab = ChatVocab {
 };
 
 /// 消息变更面（5 条）。
-pub(crate) const MESSAGE: MessageVocab = MessageVocab {
+pub const MESSAGE: MessageVocab = MessageVocab {
     artifact_added: EVENT_ARTIFACT_ADDED,
     message_added: EVENT_MESSAGE_ADDED,
     message_edited: EVENT_MESSAGE_EDITED,
@@ -143,7 +144,7 @@ pub(crate) const MESSAGE: MessageVocab = MessageVocab {
 };
 
 /// 承诺面（4 条）。
-pub(crate) const COMMITMENT: CommitmentVocab = CommitmentVocab {
+pub const COMMITMENT: CommitmentVocab = CommitmentVocab {
     opened: EVENT_COMMITMENT_OPENED,
     released: EVENT_COMMITMENT_RELEASED,
     broken: EVENT_COMMITMENT_BROKEN,

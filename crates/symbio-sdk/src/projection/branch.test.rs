@@ -22,7 +22,7 @@ use super::{
     branch_candidates, branch_hide_unselected, branch_selected, drop_branch_subtrees,
     stamp_branches, unselected_roots, META_BRANCH,
 };
-use crate::chat_node::ChatNode;
+use crate::chat::chat_node::ChatNode;
 use crate::test_fixtures::{CHAT, EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED};
 use crate::{Entity, Event, Verb};
 

@@ -428,10 +428,10 @@ const PARAMS = {
 
 /** 三个实现文件 + 一个读侧函数文件（§2 的对象） */
 const PROJ_RS = {
-  'crates/symbio-core/src/projection/readyset.rs': '//! readyset\n',
-  'crates/symbio-core/src/projection/turnstate.rs': '//! turnstate\n',
-  'crates/symbio-core/src/projection/conation.rs': '//! conation\n',
-  'crates/symbio-core/src/projection/span.rs': '//! span 读数口\n',
+  'crates/symbio-sdk/src/projection/readyset.rs': '//! readyset\n',
+  'crates/symbio-sdk/src/projection/turnstate.rs': '//! turnstate\n',
+  'crates/symbio-sdk/src/projection/conation.rs': '//! conation\n',
+  'crates/symbio-sdk/src/projection/span.rs': '//! span 读数口\n',
 }
 
 /** 映射表：`v` 覆盖 §1 的行，`m` 覆盖 §2 的行 */
@@ -496,7 +496,7 @@ test('D-014 承接方指向不存在的文件 ⇒ 红（exit 1）', () => {
 
 test('D-014 目录里多了未归类模块 ⇒ 红（悄悄多一个投影）', () => {
   const files = fixture()
-  files['crates/symbio-core/src/projection/legend.rs'] = '//! 未登记的新视图\n'
+  files['crates/symbio-sdk/src/projection/legend.rs'] = '//! 未登记的新视图\n'
   const r = audit(files)
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-014 .*`projection\/legend\.rs` 没有归属/)

@@ -23,7 +23,7 @@
 // `#[path]` 指向仓库里的**生产文件**；本程序只用它四个内核里的两个，
 // `allow(dead_code)` 只在 verify 侧生效（生产 crate 全用）。
 #[allow(dead_code)]
-#[path = "../../../crates/symbio-core/src/invariants/kernel.rs"]
+#[path = "../../../crates/symbio-sdk/src/invariants/kernel.rs"]
 mod kernel;
 
 use kernel::{dep_graph_core, rework_core, seq_monotonic_core};

@@ -198,7 +198,7 @@ fn a_progress_report_lands_but_stays_out_of_the_request() {
         report(0, "已经完成 1 轮工具调用，用时约 3 秒，还在继续。"),
     ];
     let view = transcript(CHAT, MESSAGE)
-        .apply(&events, i64::MAX, crate::Budget::generous())
+        .apply(&events, i64::MAX, crate::view::Budget::generous())
         .value;
 
     let excluded = view.excluded();
@@ -455,7 +455,7 @@ fn branch_events() -> Vec<Event> {
 fn a_replaced_branch_does_not_make_the_judge_red() {
     let events = branch_events();
     let msgs = transcript(CHAT, MESSAGE)
-        .apply(&events, i64::MAX, crate::Budget::generous())
+        .apply(&events, i64::MAX, crate::view::Budget::generous())
         .value
         .to_messages();
     assert_eq!(
@@ -476,7 +476,7 @@ fn a_replaced_branch_does_not_make_the_judge_red() {
 fn a_leaked_replaced_branch_shows_up_as_an_unsourced_message() {
     let events = branch_events();
     let mut msgs = transcript(CHAT, MESSAGE)
-        .apply(&events, i64::MAX, crate::Budget::generous())
+        .apply(&events, i64::MAX, crate::view::Budget::generous())
         .value
         .to_messages();
     msgs.insert(1, entry("assistant", "甲答复", None));

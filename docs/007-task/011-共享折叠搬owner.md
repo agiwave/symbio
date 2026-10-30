@@ -8,7 +8,7 @@ prio: next
 created: 2026-10-29
 parent: T-001-能力全面拆分
 deps: [T-010-名册五十四条处置]
-where: `crates/symbio-core/src/projection`, `crates/symbio-plugin-api/src/views.rs`, `crates/symbio-plugin-loop/src`, `crates/symbio-plugin-session/src/stats.rs`
+where: `crates/symbio-sdk/src/projection`, `crates/symbio-plugin-api/src/views.rs`, `crates/symbio-plugin-loop/src`, `crates/symbio-plugin-session/src/stats.rs`
 exit: 成本 / 校准 / 声誉 / 凸显四条构造器（覆盖名册 18/19/20/22/23/28 六行）离开 core，各归 owner 能力包；第二个读者改 `ViewRead::named`；迁移前后读数逐字不变；`PP-004` 的 files / ctors 两格只降不升
 ---
 

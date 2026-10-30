@@ -45,9 +45,21 @@ pub mod clock;
 pub mod creator;
 pub mod embedding;
 pub mod event_bus;
+pub mod invariants;
 pub mod keys;
 pub mod llm;
 pub mod logger;
 pub mod plugin;
+pub mod projection;
 pub mod text;
+pub mod turn;
 pub mod vdfs;
+
+/// 用例自己交的事件拼写与三张词表（DE-024 D-203 / D-205 / D-206）。
+///
+/// 只在 `cfg(test)` 或 `test-fixtures` feature 下存在：生产拼写来自各 owner 的清单
+/// 生成物，本模块一份都不参与生产。它随 `projection` 搬来（D-259）——`projection` 的
+/// 用例与仍住 core 的 `actors` / `governance` 用例共用同一份拼写，两份真源会让
+/// 「同一性质两份结论」重演（那是 D-188 抽 `invariants::kernel` 时踩过的坑）。
+#[cfg(any(test, feature = "test-fixtures"))]
+pub mod test_fixtures;

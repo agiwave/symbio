@@ -10,7 +10,7 @@
 
 use super::super::event::Event;
 use super::Projection;
-use crate::ChatVocab;
+use crate::projection::vocab::ChatVocab;
 
 /// 当前 turn 的状态（[`turnstate`] 投影的产出）。
 ///

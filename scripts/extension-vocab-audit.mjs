@@ -90,6 +90,15 @@ export const EXEMPTIONS = [
       'D-253：它是 `ModelProvider` 的签名类型，模型插件必须能命名它；D-252 拦的是「配置 / 开关类型' +
       '进能力面」，不是端口签名本身。改名要动 wire，收益只有脚本好看一点。',
   },
+  {
+    path: 'crates/symbio-plugin-api/src/lib.rs',
+    token: 'turn',
+    why:
+      'D-259：这是 `pub use symbio_sdk::turn::{dispatch::TASK_CAP, node_build};` 两行里的**路径段**，' +
+      '不是形状——判据要拦的是「类型 / 变体 / 字段 / 形参认识容器」，而这两行导出的是一个模块名与' +
+      '一个 `usize` 出厂值。豁免按标识符精确等值，所以它只放过恰好叫 `turn` 的那一段：同文件里' +
+      '任何 `TurnSpec` / `turn_root_of` 这类**新出现的形状名**仍是另一个标识符，照旧判红。',
+  },
 ]
 
 /**

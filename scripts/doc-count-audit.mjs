@@ -63,7 +63,7 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(scriptDir, '..')
 
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', 'archive'])
-const INVARIANTS_REL = path.join('crates', 'symbio-core', 'src', 'invariants', 'mod.rs')
+const INVARIANTS_REL = path.join('crates', 'symbio-sdk', 'src', 'invariants', 'mod.rs')
 const FACTS_REL = path.join('docs', '003-design', 'verify', 'facts', 'mod.rs')
 
 /** 中文数字 → 数值（本仓文档里的计数一律用汉字，量词是 条 / 项 / 个 / 处 / 格）。 */

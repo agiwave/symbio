@@ -240,14 +240,14 @@ pub fn slot_node_of(e: &crate::Event, c: &ChatVocab, m: &MessageVocab) -> Option
     match slot_of(e, c, m)? {
         // 开轮 / 补充 / 汇报 / 开场：一格一句话，各带自己的节点 `id`。
         ChatSlot::UserMessage | ChatSlot::Supplemented | ChatSlot::Reported | ChatSlot::Opening => {
-            Some(crate::event_payload_node_id(e, "id"))
+            Some(crate::event::event_payload_node_id(e, "id"))
         }
         // 收束 / 进展 / 兜底：整格都是「本轮产出的正文」形状。
         ChatSlot::FinalReply | ChatSlot::Fallback | ChatSlot::Progress => {
-            Some(crate::event_answer_node_id(e))
+            Some(crate::event::event_answer_node_id(e))
         }
         // 产物格：一格一张工具结果卡。
-        ChatSlot::ArtifactAdded => Some(crate::event_tool_result_node_id(e)),
+        ChatSlot::ArtifactAdded => Some(crate::event::event_tool_result_node_id(e)),
         ChatSlot::MessageAdded
         | ChatSlot::MessageEdited
         | ChatSlot::MessageRemoved

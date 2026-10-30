@@ -20,7 +20,7 @@ deps: [DE-016-工程落地与验证]
 | `LlmAdapter::generate_timed` | `symbio_core/adapters` | trait 默认方法：adapter 边界 `Instant` 计时，返回 `(文本, 实测毫秒)`。桩与真实适配器零改动共享 |
 | `Reasoner::reply_timed` | `symbio_core/actors` | 埋点版 reply；`reply` 委托它 |
 | `cost_ms` 入事件 | final 事件字段 | 调用方把实测值写到 `chat.assistant.final` 的 `cost_ms` |
-| ③ `cost_ledger` | `symbio_core/projection/cost` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（接上真实来源） |
+| ③ `cost_ledger` | `symbio_sdk/projection/cost` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（接上真实来源） |
 
 闭环：**adapter 边界实测 → final 事件 `cost_ms` → cost_ledger 累计 → CircuitBreaker 判据**——
 成本是同一份事实源算出来的，不是旁路统计（N1 同口径）。

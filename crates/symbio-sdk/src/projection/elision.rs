@@ -40,8 +40,8 @@ use std::collections::HashSet;
 
 use super::super::event::Event;
 use super::vocab::{slot_of, ChatSlot};
-use crate::ChatVocab;
-use crate::MessageVocab;
+use crate::projection::vocab::ChatVocab;
+use crate::projection::vocab::MessageVocab;
 
 /// 一次切片里所有「不读」的落点：显式区间 + 未选中的分支。
 #[derive(Debug, Clone, Default)]

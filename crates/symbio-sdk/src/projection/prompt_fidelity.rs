@@ -67,7 +67,7 @@ use super::super::event::Event;
 use super::elision::{is_replacement, Elisions};
 use super::mutations::OutputIndex;
 use super::vocab::{slot_node_of, slot_of, ChatSlot};
-use crate::{ChatVocab, MessageVocab};
+use crate::projection::vocab::{ChatVocab, MessageVocab};
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
 /// 不该让「内容相同」的报告变成另一种类型。
@@ -358,7 +358,7 @@ fn claim_nodes(
     rep: &mut PromptReport,
     used: &mut [bool],
     messages: &[symbio_kernel::llm::PromptMessage],
-    msgs: &[crate::chat_node::ChatNode],
+    msgs: &[crate::chat::chat_node::ChatNode],
     mutations: &super::mutations::MessageMutations,
     kind: &str,
     turn: u64,

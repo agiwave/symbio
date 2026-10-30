@@ -16,14 +16,15 @@
 //! 那个插件——core 的数据面只装真的跨插件的东西。
 //!
 //! 与 `types::Session` 一族同判：**存储的记录类型，归属随数据 owner，跨插件者上移**。
-//! 本模块只装**数据与纯构造**（[`ReportDraft::to_message`] 经 [`crate::node_build`]
+//! 本模块只装**数据与纯构造**（[`ReportDraft::to_message`] 经 [`crate::turn::node_build`]
 //! 的同一构造器）；记账判据（`note_*` 的门与 `behaviors` 里的 `delegation_promise` 声明）与
 //! 派发机制（行表 / 绑定表 / 执行体）都不在这里——它们是机制不是词汇，随各自的 owner 住插件侧。
 
-use crate::chat_node::ChatNode;
-use crate::event::Event;
-use crate::node_build::dialog_node;
+use crate::chat::chat_node::ChatNode;
+use crate::turn::node_build::dialog_node;
+
 use serde::{Deserialize, Serialize};
+use symbio_kernel::event::Event;
 
 /// 一句汇报的草稿：文本 + 它据以生成的运行现状。
 ///
@@ -106,7 +107,7 @@ impl ReportDraft {
     /// 为什么**不复抄** `dialog_node` 的构造：构造只有一份，漂移才不可能；
     /// `SURFACE_REPLY` / `REASON_PROGRESS` 两个常量留在各自判定点那侧，
     /// 由函数签名（`reason: &str`）承担跨模块契约。
-    pub fn to_message(&self, principal: &crate::principal::Principal) -> ChatNode {
+    pub fn to_message(&self, principal: &crate::chat::principal::Principal) -> ChatNode {
         dialog_node(&self.text, "progress", true, principal)
     }
 }

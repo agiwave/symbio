@@ -20,11 +20,11 @@
 //! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、机制入口与
 //! 装配常量，逐条转发、逐条可审。按**来源**分三臂（D-255 / D-258）：
 //!
-//! | 臂 | 来源 | 性质 |
-//! |---|---|---|
-//! | 语法臂 | `symbio-kernel` | 形状与闭集，**不计债** |
-//! | SDK 臂 | `symbio-sdk` | 只碰内核词汇的宿主机制，**不计债** |
-//! | core 臂 | `symbio-core` | 还欠着的机制（认识容器概念），条数只许降 |
+//! | 臂 | 来源 | 条数 | 性质 |
+//! |---|---|---|---|
+//! | 语法臂 | `symbio-kernel` | 134 | 形状与闭集，**不计债** |
+//! | SDK 臂 | `symbio-sdk` | 108 | 只碰内核词汇的宿主机制，**不计债** |
+//! | core 臂 | `symbio-core` | 6 | 还欠着的机制（认识容器概念），条数只许降 |
 //!
 //! 插件因此只写 `symbio_plugin_api::…`，manifest 里也不列 `symbio-core` /
 //! `symbio-kernel` / `symbio-sdk` / `symbio-deploy`；控制面（`loop` / `session`）
@@ -153,9 +153,9 @@ pub use symbio_sdk::adapters::{
 pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 pub use symbio_sdk::capability::{
     capability_announce_configurable, capability_configurables, capability_entry_of,
-    capability_model_active, capability_model_resolve, capability_option_fields,
+    capability_invoke, capability_model_active, capability_model_resolve, capability_option_fields,
     capability_prompts, capability_report_error, capability_take_errors, capability_to_wire,
-    capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
+    capability_vdfs_root, failure_kind, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
 };
 pub use symbio_sdk::chat::{chat_node, chat_request, principal};
 pub use symbio_sdk::clock::clock_now_ms;
@@ -166,6 +166,7 @@ pub use symbio_sdk::event_bus::{
     event_bus_unregister_subscriber, event_bus_vdfs_change_of, EventBus, EventBusSubscribeRequest,
     EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
 };
+pub use symbio_sdk::invariants::check_all;
 pub use symbio_sdk::keys::{
     AGENT_ID, MODE, PATH, PROVIDER_ID, REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID,
     TOOL_CALL_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
@@ -178,7 +179,14 @@ pub use symbio_sdk::plugin::{
     PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
     TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
+pub use symbio_sdk::projection::cost::cost_ledger;
+pub use symbio_sdk::projection::readyset::{readyset_for, ReadySetView};
+pub use symbio_sdk::projection::task_vocab::TaskVocab;
+pub use symbio_sdk::projection::transcript::transcript;
+pub use symbio_sdk::projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};
 pub use symbio_sdk::text::{text_floor_char_boundary, text_truncate_bytes};
+pub use symbio_sdk::turn::dispatch::TASK_CAP;
+pub use symbio_sdk::turn::node_build;
 pub use symbio_sdk::vdfs::{
     absolute_addr, descend_addr, join_addr, vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx,
     vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, AddrRootDecl,
@@ -189,14 +197,16 @@ pub use symbio_sdk::{
 };
 
 // ---- core 臂：`symbio-core` 的宿主机制（欠账，只许降） ----
-// 这一臂每一条都需要 core 的**控制面**支撑：`capability_invoke` 的调用栈要读一轮的
-// 权限集，`transcript` / `readyset_for` 要读事件与主体，`agent_perms_of` 要读授权表。
-// 它们认识容器概念（`Session` / 幕 / 轮），所以按三层判据（D-258）留在 core。
-// 这一臂是**棘轮**：条数只许降（HS-002）；剩下的 19 条全是「有依赖的中间层」，
-// 迁移顺序与判据见 023 的迁移表与 D-258 的代价段。
+// 这一臂只剩 `authz` 与 `actors` 两域六条。它们不是「还没搬」，是**判据上该留**：
+// `principal_of` / `production_matrix` 读授权表与义务环算出来的**生效矩阵**，
+// `CAP_DEFINE_WORK` / `CAP_ASSERT_VERIFICATION` 是那张矩阵的能力闭集，
+// `actor_can_assign_work` / `commitment_events` 读 `ActorSpec` 的授权字段与承诺环——
+// 四处都认识容器概念（一个主体此刻能做什么、哪一轮在履约）。
+//
+// 这一臂是**棘轮**：条数只许降（HS-002）。走到零的前提不是再搬一批，而是把「能力闭集」
+// 从义务环里拆出来（`authz` 4 条卡在这里）；拆不动就留着，HS-005（门面不得依赖 core）
+// 也就不加——见 023 的 D-259。
 pub use symbio_core::{
-    actor_can_assign_work, capability_invoke, check_all, commitment_events, cost_ledger,
-    failure_kind, node_build, principal_of, production_matrix, readyset_for, transcript, ChatVocab,
-    CommitmentVocab, MessageVocab, ReadySetView, TaskVocab, CAP_ASSERT_VERIFICATION,
-    CAP_DEFINE_WORK, TASK_CAP,
+    actor_can_assign_work, commitment_events, principal_of, production_matrix,
+    CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK,
 };

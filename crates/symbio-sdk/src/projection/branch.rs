@@ -7,8 +7,8 @@
 //! `‹ ›`，是树上没有第二个孩子。裁决与理由见
 //! [D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")。
 //!
-//! 现在重试不删了：它落一条 [`EVENT_TURN_BRANCH`]（`{of, into}`：新根是那一条的另一
-//! 支），用户点切换器落 [`EVENT_BRANCH_SELECTED`]。**「读哪一支」由这两类事实共同说**，
+//! 现在重试不删了：它落一条 `EVENT_TURN_BRANCH`（`{of, into}`：新根是那一条的另一
+//! 支），用户点切换器落 `EVENT_BRANCH_SELECTED`。**「读哪一支」由这两类事实共同说**，
 //! 组内后到的胜出（[`BranchLedger::fold`]）——分支格自带读法，否则「切回旧支再重试」会
 //! 停在用户刚发起重试的那一支上。两者都是**事实**，本模块把它们折回节点
 //! 形状——重建是纯函数，所以「哪一支在当前历史里」必须能从事实里读出来，而不是由
@@ -45,10 +45,10 @@
 //! 「同一轮的第二幕」误读成「另一支」。载荷里因此只出现根 id（节点身份是事实的一部分，
 //! 与 `turn_id` / `result_id` 同一条纪律）。
 
-use crate::chat_node::ChatNode;
+use crate::chat::chat_node::ChatNode;
 use crate::event::Event;
-use crate::node_build::subtree_of;
-use crate::ChatVocab;
+use crate::projection::vocab::ChatVocab;
+use crate::turn::node_build::subtree_of;
 
 /// 成员根节点上的分支标注键（`meta.branch`）。
 ///

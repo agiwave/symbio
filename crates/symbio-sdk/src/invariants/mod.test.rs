@@ -4,10 +4,10 @@
 //! 合规序列**不报警**（检查不是永远红的状态机）。两组都绿，检查才存在。
 
 use super::*;
+use crate::event::ClosureReason;
 use crate::event::{Entity, Event, EventEnvelope, Verb};
 use crate::store::{EventStore, Store};
 use crate::test_fixtures::EVENTS;
-use crate::ClosureReason;
 
 /// 造一条 pending 事件（未入库，无 seq）。
 ///

@@ -43,7 +43,7 @@
 // 共处一处」的全部含义。kernel 是 std-only（理由见它的文件头）；本程序只用它
 // 四个内核里的两个，`allow(dead_code)` 只在 verify 侧生效（生产 crate 全用）。
 #[allow(dead_code)]
-#[path = "../../../crates/symbio-core/src/invariants/kernel.rs"]
+#[path = "../../../crates/symbio-sdk/src/invariants/kernel.rs"]
 mod kernel;
 
 use kernel::{seq_monotonic_core, unique_per_turn_core};

@@ -37,7 +37,7 @@ function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mec
     for (const [rel, content] of Object.entries(extra)) write(rel, content)
     // `check_all` 的形状照代码写：第一条是 `let mut all = …`，其余是 `all.extend(…)`
     write(
-      'crates/symbio-core/src/invariants/mod.rs',
+      'crates/symbio-sdk/src/invariants/mod.rs',
       [
         'pub fn check_all(events: &[Event]) -> Vec<Violation> {',
         '    let mut all = first(events);',
@@ -198,7 +198,7 @@ test('来源读不出（invariants 不存在）⇒ exit 2，不是「零违规�
 test('来源读不出（facts 生成物缺失 ⇒ 机制键数无从取得）⇒ exit 2', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-count-'))
   try {
-    const abs = path.join(root, 'crates', 'symbio-core', 'src', 'invariants')
+    const abs = path.join(root, 'crates', 'symbio-sdk', 'src', 'invariants')
     fs.mkdirSync(abs, { recursive: true })
     fs.writeFileSync(path.join(abs, 'mod.rs'), 'pub fn check_all(e: &[u8]) -> u8 {\n let mut all = a(e);\n all.extend(b(e));\n all\n}\n')
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true })

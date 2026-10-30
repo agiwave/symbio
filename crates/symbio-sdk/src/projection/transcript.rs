@@ -1,6 +1,6 @@
 //! `transcript` 投影——从事件网格读出**对话转写**（会话运行时的历史侧）。
 //!
-//! [`crate::actors::Reasoner`] 组 prompt 的输入：多轮对话时模型
+//! `Reasoner`（`actors` 域，控制面） 组 prompt 的输入：多轮对话时模型
 //! 需要看到自己说过什么（否则第二轮起失忆）。转写是**纯函数读视图**——
 //! 历史来自同一份事实源，不另存副本（D-044：实测与判据同源的同族纪律）。
 //!
@@ -20,7 +20,7 @@
 //! ## 工具结果为什么也在转写里
 //!
 //! 工具轮**当轮**的交换由运行器就地追加（网格里还没有那部分历史，见
-//! [`crate::actors::render_messages`] 的文档）；而**跨轮**的工具结果
+//! `render_messages`（`actors` 域，控制面） 的文档）；而**跨轮**的工具结果
 //! 若不进投影，第二轮起的 prompt 就只剩「用户问过 X、助手答过 Y」——模型看不见
 //! 自己调用过什么、拿到了什么，会**重复调用同一个工具**。所以 `artifact.added`
 //! 进投影：多轮 prompt 因此能重建**含工具**的对话。
@@ -32,7 +32,7 @@
 use super::super::event::{event_payload_node_id, event_tool_result_node_id, Event};
 use super::vocab::{slot_node_of, slot_of, ChatSlot};
 use super::Projection;
-use crate::{ChatVocab, MessageVocab};
+use crate::projection::vocab::{ChatVocab, MessageVocab};
 
 use serde::{Deserialize, Serialize};
 
@@ -180,7 +180,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
         // 收一条条目：**出生时就按索引定稿**（被删的不收；被编辑过的用新读法）。
         //
         // `node` = 该条目对应的节点身份（与 `rebuild` / 变更格同一套 id，见
-        // [`crate::event_payload_node_id`]）。它**不进线格式**——`TranscriptEntry`
+        // [`crate::event::event_payload_node_id`]）。它**不进线格式**——`TranscriptEntry`
         // 的字段一个没多，折叠键只在投影内部存在。
         //
         // **换基边界不重复产行**（`from_snapshot` 为假时才查 `superseded`）：自动压缩把
@@ -196,7 +196,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
         //
         // 收束 / 进展格的内容节点身份取载荷 `answer_id`（引擎在落格前算定，与重建同源），
         // 缺失时按 `turn_id` 派生合成 id（见
-        // [`crate::event_produced_text_node_id`]）。
+        // [`crate::event::event_produced_text_node_id`]）。
         let produced_node = |e: &Event| slot_node_of(e, &c, &m).unwrap_or_default();
         let mut push = |mut entry: TranscriptEntry, node: String, from_snapshot: bool| {
             if mutations.is_removed(&node) {

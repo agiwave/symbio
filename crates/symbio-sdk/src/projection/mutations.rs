@@ -34,9 +34,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::chat_node::{ChatNode, MessageContent, NodeRole};
+use crate::chat::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::event::{Entity, Event, Verb, EVENT_FAILED, EVENT_RESPONSE};
-use crate::MessageVocab;
+use crate::projection::vocab::MessageVocab;
 
 use serde::{Deserialize, Serialize};
 

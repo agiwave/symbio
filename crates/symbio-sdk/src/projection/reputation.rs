@@ -12,7 +12,7 @@
 
 use super::super::event::{Entity, Event};
 use super::Projection;
-use crate::CommitmentVocab;
+use crate::projection::vocab::CommitmentVocab;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

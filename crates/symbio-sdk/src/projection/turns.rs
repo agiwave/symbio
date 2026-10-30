@@ -5,7 +5,7 @@
 //! 压缩之后轮号就会在某一侧倒退（`u-{turn}` 幂等键撞号是**静默**的）。
 
 use crate::event::{Entity, Event, Verb};
-use crate::{ChatVocab, MessageVocab};
+use crate::projection::vocab::{ChatVocab, MessageVocab};
 
 /// WAL 内 `user.message` 计数（新开轮的 turn 号；与桥同一口径）。
 ///

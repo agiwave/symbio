@@ -10,7 +10,7 @@
 //! 之间不再有用 ⇒ 按 D-082 裁决三上移回 core。**同一条判据的第二个形态**：单插件时代
 //! 它确实只有 session 一个消费方。
 //!
-//! 落点是**本模块**而非 [`crate::chat_node`]：`chat_node.rs` 是前端机制化显示节点的
+//! 落点是**本模块**而非 [`crate::chat::chat_node`]：`chat_node.rs` 是前端机制化显示节点的
 //! **形状定义**（角色 / 形状五值 / style_tag 词表 / 线格式），不收留写侧机制；
 //! 构造与折叠是「按该形状产节点」的手艺，与形状源同目录紧邻、各住各的文件。
 //!
@@ -18,18 +18,18 @@
 //!
 //! | 符号 | 消费方 |
 //! |---|---|
-//! | [`dialog_node`] | [`crate::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `report_exec`）· `chat_loop/compose` 的判决落地 |
+//! | [`dialog_node`] | [`crate::turn::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `report_exec`）· `chat_loop/compose` 的判决落地 |
 //! | [`llm_build_text_node`] / [`llm_build_tool_call_nodes`] / [`llm_build_tool_call_node`] / [`tool_call_args_text`] / [`llm_build_tool_message`] | 留守 `message_build::llm_build_assistant_messages` · `tool_dispatch` · `tool_executor` · `rebuild` |
 //! | [`PresentationTree`] / [`detach_if_flat`] / [`flatten_whole_tree`] / [`turn_root_of`] | 留守 `config`（解析）· `chat_session/read` · `plugin/nodes` · 驱动器 `chat_loop/io` · `orchestrator/failure` · `resume` |
 //!
 //! core 侧**没有任何东西反过来调本模块**——方向永远是消费方 → core。
 
-use crate::{
-    chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL},
-    clock_now_ms, llm_short_id, TurnToolCallInfo,
-};
+use crate::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL};
+use crate::chat::principal::Principal;
+use crate::clock::clock_now_ms;
+use crate::llm::llm_short_id;
 
-use crate::principal::Principal;
+use symbio_kernel::llm::TurnToolCallInfo;
 
 // ==================== 节点构造族 ====================
 
@@ -43,7 +43,7 @@ pub const SURFACE_REPLY: &str = "reply";
 /// `compose` 侧的判决文档。
 ///
 /// `principal` 是**这条发言是谁说的**（D-147：身份只写一份）。对话面文本恒由
-/// 本会话主体产出，调用方从请求上下文取 [`crate::request_principal`]。
+/// 本会话主体产出，调用方从请求上下文取 `request_principal`（`authz` 域，控制面）。
 pub fn dialog_node(
     text: &str,
     reason: &str,

@@ -12,11 +12,11 @@
 //!   零改动、flat 只脱本轮直接子节点、夹在工具卡内的子会话骨架绝不折叠。
 
 use super::*;
-use crate::chat_node::{NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
+use crate::chat::chat_node::{NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
 
 /// 构造器入参：本文件的节点模仿**落库/流式面**，身份写 `principal`（D-147）。
-fn assistant_principal() -> crate::principal::Principal {
-    crate::principal::Principal::from_legacy("session/main")
+fn assistant_principal() -> crate::chat::principal::Principal {
+    crate::chat::principal::Principal::from_legacy("session/main")
 }
 
 // ── 对话面节点形状（dialog_node，原 compose.test.rs）────────────────────
