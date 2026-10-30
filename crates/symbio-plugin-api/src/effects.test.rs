@@ -17,7 +17,7 @@ impl ToolBehavior for Recorder {
 
     fn after(&self, call: &EffectCall<'_>) -> Vec<FactDraft> {
         vec![FactDraft {
-            key: format!("r-{}-{}", call.anchor(), call.call_id),
+            key: format!("r-{}-{}", call.anchor, call.call_id),
             kind: "test.recorded".to_string(),
             entity: Entity::Task,
             verb: Verb::Asserted,
@@ -39,7 +39,7 @@ crate::submit_behavior!(Recorder);
 
 fn env() -> EffectEnv<'static> {
     EffectEnv {
-        turn: 3,
+        anchor: "t3",
         user_seq: 42,
         principal: "session/a",
         source: "user",
@@ -67,8 +67,8 @@ fn undeclared_tool_produces_nothing() {
     assert!(apply(&i.call(&env())).is_empty());
 }
 
-/// 声明了就产生：草稿带轮锚、带溯源，且**不含**宿主才有的 `turn` / `actor`
-/// （那两样由 `into_event` 盖章，行为无权指定）。
+/// 声明了就产生：草稿带词干、带溯源，而信封（轮号 / 归属 / 时刻）不在草稿里——
+/// 行为无权指定「这笔账记在哪一轮」，那是写口的事（DE-026 D-252）。
 #[test]
 fn declared_tool_produces_draft_with_anchor() {
     let i = input(&[crate::behaviors::TASK_TABLE]);
@@ -78,8 +78,8 @@ fn declared_tool_produces_draft_with_anchor() {
     assert_eq!(d.key, "r-t3-call-1");
     assert_eq!(d.produced_by, Some(42));
 
-    let event = d.clone().into_event(7, "session/a");
-    assert_eq!(event.turn, 7);
+    let event = d.clone().into_event("session/a");
+    assert_eq!(event.turn, 0, "草稿不带轮号：信封由写口盖（D-252）");
     assert_eq!(event.actor, "session/a");
     assert_eq!(event.event_id, "r-t3-call-1");
     assert_eq!(event.kind, "test.recorded");
@@ -151,7 +151,7 @@ fn facts_chain_snapshot_then_applied() {
     let snapshot = [old];
     let applied = [fresh];
     let env = EffectEnv {
-        turn: 3,
+        anchor: "t3",
         user_seq: 42,
         principal: "session/a",
         source: "user",

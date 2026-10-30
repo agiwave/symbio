@@ -17,10 +17,10 @@
 //! **判断种类**（承诺是核心语义，读侧 `commitment_records` 与它配对），不是本能力的
 //! 实现细节。本模块只负责「这一次调用对应哪一次立约、履约了没有」。
 //!
-//! ## 承诺号带轮锚
+//! ## 承诺号带幂等词干
 //!
-//! `v2c-{轮锚}-{调用 id}`：tool_call id 只在一次模型响应内唯一，而 WAL 的幂等键是
-//! 事件 id——跨轮复用同一个号会让第二次立约撞 `Duplicate`、把整轮收束拖失败。
+//! `v2c-{词干}-{调用 id}`：tool_call id 只在一次模型响应内唯一，而 WAL 的幂等键是
+//! 事件 id——跨请求复用同一个号会让第二次立约撞 `Duplicate`、把整轮收束拖失败。
 //!
 //! ## 没跑到的调用同样是没履约
 //!
@@ -54,7 +54,7 @@ impl ToolBehavior for DelegationPromise {
         let Some(promise) = call.args.get("prompt").and_then(|v| v.as_str()) else {
             return Vec::new();
         };
-        let cid = format!("v2c-{}-{}", call.anchor(), call.call_id);
+        let cid = format!("v2c-{}-{}", call.anchor, call.call_id);
         commitment_events(
             COMMITMENT_VOCAB,
             &cid,

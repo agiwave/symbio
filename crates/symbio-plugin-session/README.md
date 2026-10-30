@@ -224,11 +224,11 @@ session:
 >
 > **边界**：注入段只**追加**，不改写历史。发给模型的对话体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）；请求视图级的内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已按 [D-078](README.md "crates/symbio-plugin-session/README") 退役——那三层改写的是历史正文，与「请求体 = 投影」互斥。
 
-* **段的来源是端口，不是本模块的固定列表**（DE-025 D-215 / D-220）：`symbio_plugin_api::context::ContextProvider` 由能力包注册、`inventory` 编译期收集，`loop` 按节奏收集、按 owner 序拼接。本仓当前提交三条（同以 `owner() == "loop"` 提交，**提交序 = 同节奏内的段序**）：`RecallProvider` 产 `slots::RECALL`、`ReadySetProvider` 产 `slots::READYSET`（两者轮首节奏）、`DelegateProvider` 产 `slots::DELEGATE`（请求级节奏）。加一类每轮上下文 = 加一条 provider，不改 `loop`。
+* **段的来源是端口，不是本模块的固定列表**（DE-025 D-215 / D-220）：`symbio_plugin_api::context::ContextProvider` 由能力包注册、`inventory` 编译期收集，`loop` 按节奏收集、按 owner 序拼接。本仓当前提交三条：`RecallProvider` 产 `slots::RECALL`（`owner() == "loop"`，发言级节奏）、`DelegateProvider` 产 `slots::DELEGATE`（请求级节奏）、`ReadySetProvider` 产 `slots::READYSET`（随任务能力包提交，发言级节奏）。加一类上下文 = 加一条 provider，不改 `loop`。
 * **具体规则**（唯一入口 `build_request_sections`，段各自独立、非空才插）：
  * **长期记忆召回段 (Recall Context)**：`run_recall` 在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档与无目录的临时会话不读），转成端口形状（`RecallFacts`）交给 provider；`RecallProvider` 渲染出段落（`memory_events::prompt_section`，抬头 `【长期记忆】`），非空时产出 `meta.kind = "recall_context"` 的节点。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
- * **任务调度段 (Ready Set)**：`ReadySetProvider` 读本轮事实切片 + 控制面给的容量（`task_cap`）调 `task_events::prompt_section`（**只读**开档、不创建事实源，`off` 档不读），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**候选集空 ⇒ 整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
- * **委派者真源段 (Delegate Context)**：`DelegateProvider`（请求级节奏，`meta.kind = "delegate_context"`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）+ 能力目录 + worker 进展渲染成一段。输入是 `LiveInputs { tools, delegate, workers }`：工具清单是**收集成形后**的那份（轮首取不齐），委派结论是控制面 Q1 判完的三态（`NotJudged` / `Start { reason }` / `Idle`）。provider 不读配置、不重判；渲染函数仍是 [`../loop/chat_loop/delegate.rs`](../symbio-plugin-loop/src/chat_loop/delegate.rs) 的 `delegate_section`。
+ * **任务调度段 (Ready Set)**：`ReadySetProvider`（随任务能力包 `symbio-plugin-task` 提交）读本轮事实切片与**事实里的就绪集容量**（`session.config` 载荷的 `readyset_cap`，D-252）调 `task::prompt_section`（**只读**开档、不创建事实源，`off` 档不读），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**候选集空 ⇒ 整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
+ * **委派者真源段 (Delegate Context)**：`DelegateProvider`（请求级节奏，`meta.kind = "delegate_context"`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）+ 能力目录 + worker 进展渲染成一段。输入是 `LiveInputs { tools, delegate, workers }`：工具清单是**收集成形后**的那份（发言级取不齐），委派结论是控制面 Q1 判完的三态（`NotJudged` / `Start { reason }` / `Idle`）。provider 不读配置、不重判；渲染函数仍是 [`../loop/chat_loop/delegate.rs`](../symbio-plugin-loop/src/chat_loop/delegate.rs) 的 `delegate_section`。
  * **段的消费形态**：`chat_loop::request_view_prefix` 顺序取出视图里**全部**带 `meta.kind` 的段（不按下标——缺一段时下标全部左移；也不按名字查表——那会与 `slots` 形成第二处拼写），拼成一条 `system` 前缀消息交给运行器。**视图次序 = 装配次序 = 模型读到的次序**，而装配次序只与 owner 字典序有关（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
  * **水位治理不在本层**：压缩只有一个入口 `auto_compress_process`（70% 阈值自动触发，加上用户点「失败压缩节点重试」的 `force` 路径），它改写的是存储态上下文（写成 `session.consolidated` 一格事实），不是请求视图。
 * **Rust 实现策略**：
@@ -247,7 +247,7 @@ session:
  }
  ```
 
- * 调用点参数（[`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs)）：轮首段取 `TurnState::context_sections`（`run_recall` 里经 `context_sections(&request, Cadence::Turn)` 收集一次，`request_round == 0` 口径；**段数由 provider 决定**，宿主不假设几段）；请求级段在工具收集完成后经 `context_sections(&request, Cadence::Request)` 收集，两批按「轮首段在前、请求级段在后」拼成一个数组。
+ * 调用点参数（[`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs)）：发言级段取 `TurnState::context_sections`（`run_recall` 里经 `context_sections(&request, Cadence::Utterance)` 收集一次，`request_round == 0` 口径；**段数由 provider 决定**，宿主不假设几段）；请求级段在工具收集完成后经 `context_sections(&request, Cadence::Request)` 收集，两批按「发言级段在前、请求级段在后」拼成一个数组。
 
 ---
 

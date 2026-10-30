@@ -1139,6 +1139,7 @@ impl<'a> Facts<'a> {
                 .entries
                 .iter()
                 .map(|e| symbio_plugin_api::RecallLine {
+                    seq: e.seq,
                     content: &e.content,
                     tag: &e.tag,
                 })

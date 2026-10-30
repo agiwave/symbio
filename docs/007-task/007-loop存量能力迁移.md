@@ -27,8 +27,8 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 |---|---|---|---|---|
 | L1 | 1 / 16 | 工作记忆 + 规划与重规划 | 轮首装配与计划寄存在本轮状态里 | 段走 I-2，跨步状态与计划走 I-1 / I-4 |
 | L2 | 2 / 3 / 6 / 4 | 情景 / 语义 / 长期记忆检索 + 程序记忆 | `memory_events` / `recall` / `skill_events` | 各自能力包；检索段走 I-2，折叠名字读 |
-| L3a | 26 | 独立验证与返工 | `task_events` + 任务表写侧判断 + 轮末调度 + 就绪段 | `symbio-plugin-task`：写侧走 I-1（效果端口 + `before`），就绪段走 I-2（provider），轮末调度走轮末贡献（D-250）；`rework_bounded` 不变量留核 |
-| L3b | 24 / 25 | 技能编译 + 反自动化回退 | `SkillCompiler` / `SkillRouter` | I-4 + I-1；两行同一实现、同包 |
+| L3a | 26 | 独立验证与返工 | `task_events` + 任务表写侧判断 + 收束时调度 + 就绪段 | `symbio-plugin-task`：写侧走 I-1（效果端口 + `before`），就绪段走 I-2（provider），收束时调度走收束贡献（D-250）；`rework_bounded` 不变量留核 |
+| L3b | 24 / 25 | 技能编译 + 反自动化回退 | `SkillCompiler` / `SkillRouter` | I-1（反射行执行体：抢先作答走 `RowStep::Facts`，摘行按名字读折叠，D-251）+ 收束贡献（编译，D-250）；两行同一实现、同包 |
 | L4 | 8 | 副作用分级 | `breaker` | `before` 交拒绝（I-3），状态随包 |
 | L5 | — | 语义压缩 | `COMPRESS` 执行体 + 轮首那一行 | 模型往返端口 + 通用省略事实（`Message` 摘要） |
 | L6 | — | 判决 / 措辞与汇报 | `CLASSIFY` / `REPORT` 执行体 | 判定生产者走 I-1 / I-4；强制留引擎（D-240） |

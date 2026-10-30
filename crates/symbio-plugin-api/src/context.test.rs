@@ -78,13 +78,11 @@ fn facts() -> Vec<Event> {
 
 fn request<'a>(facts: &'a [Event], recall: Option<&'a RecallFacts<'a>>) -> ContextRequest<'a> {
     ContextRequest {
-        turn: 3,
         request_round: 0,
         principal: "session/main",
         query: Some("上周那份设计"),
         facts,
         recall,
-        task_cap: 8,
         live: None,
     }
 }
@@ -104,13 +102,13 @@ fn providers_are_sorted_by_owner() {
 #[test]
 fn a_silent_provider_contributes_nothing() {
     let f = facts();
-    let got = sections(&request(&f, None), Cadence::Turn);
+    let got = sections(&request(&f, None), Cadence::Utterance);
     assert_eq!(got.len(), 1, "只有 Fixed 给了一段：{got:?}");
     assert_eq!(got[0].slot, slots::RECALL);
     assert_eq!(got[0].text, "固定一段");
 }
 
-/// 两种节奏互不串场：轮首收集不问请求级 provider，请求级收集也不问轮首 provider。
+/// 两种节奏互不串场：发言级收集不问请求级 provider，请求级收集也不问发言级 provider。
 #[test]
 fn cadence_selects_which_providers_are_asked() {
     let f = facts();
@@ -123,14 +121,14 @@ fn cadence_selects_which_providers_are_asked() {
     let mut req = request(&f, None);
     req.live = Some(&live);
 
-    let turn_slots: Vec<&str> = sections(&req, Cadence::Turn)
+    let utterance_slots: Vec<&str> = sections(&req, Cadence::Utterance)
         .iter()
         .map(|s| s.slot)
         .collect();
     assert_eq!(
-        turn_slots,
+        utterance_slots,
         [slots::RECALL],
-        "轮首只该问 Turn 节奏的 provider"
+        "发言级只该问 Utterance 节奏的 provider"
     );
 
     let request_sections = sections(&req, Cadence::Request);
@@ -263,6 +261,7 @@ fn a_section_that_cannot_fit_is_skipped_not_a_hard_stop() {
 fn the_request_is_pure_values() {
     let f = facts();
     let line = [RecallLine {
+        seq: 1,
         content: "过往的一句",
         tag: "决策",
     }];

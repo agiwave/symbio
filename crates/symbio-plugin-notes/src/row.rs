@@ -55,7 +55,7 @@ impl RowHandler for NoteIndex {
         };
         let text = note_text(&artifact.payload);
         RowStep::Facts(vec![FactDraft {
-            key: format!("ni-{}-{call_id}", req.anchor()),
+            key: format!("ni-{}-{call_id}", req.anchor),
             kind: NOTES_INDEXED.to_string(),
             entity: Entity::Domain,
             verb: Verb::Asserted,
@@ -118,7 +118,7 @@ impl RowHandler for NoteReflect {
             ModelReply::Failed(_) => ("failed", ""),
         };
         vec![FactDraft {
-            key: format!("nin-{}-{call_id}", req.anchor()),
+            key: format!("nin-{}-{call_id}", req.anchor),
             kind: NOTES_INSIGHT.to_string(),
             entity: Entity::Domain,
             verb: Verb::Asserted,
@@ -201,7 +201,7 @@ impl RowHandler for NoteSummarize {
             .map(|s| s.value());
 
         let mut drafts = vec![FactDraft {
-            key: format!("ns-{}-{call_id}", req.anchor()),
+            key: format!("ns-{}-{call_id}", req.anchor),
             kind: NOTES_SUMMARY.to_string(),
             entity: Entity::Domain,
             verb: Verb::Asserted,
@@ -227,7 +227,7 @@ impl RowHandler for NoteSummarize {
                 ..Default::default()
             };
             drafts.push(FactDraft {
-                key: format!("nsum-{}-{call_id}", req.anchor()),
+                key: format!("nsum-{}-{call_id}", req.anchor),
                 kind: EVENT_MESSAGE_ADDED.to_string(),
                 entity: Entity::Message,
                 verb: Verb::Opened,

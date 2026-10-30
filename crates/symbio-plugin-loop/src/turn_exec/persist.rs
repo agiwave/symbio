@@ -7,49 +7,51 @@
 
 use super::*;
 
-/// 轮末贡献（DE-025 D-250）：逐个询问已链接的能力，按 `(prio, owner)` 落格。
+/// 收束贡献（DE-025 D-250 / D-252）：逐个询问已链接的能力，按 `(prio, owner)` 落格。
 ///
 /// 每问一个之前**重取一次史**：后一个贡献者要看得见前一个刚落格的草稿——编码先于
 /// 巩固、任务表先于调度，这两条依赖都由这一行兑现，而不是由贡献者自己持状态。
 ///
+/// 信封在这里盖：轮号、时刻与归属人之外的一层（`turn` / `ts`）都由写口填，能力只交
+/// 词干与载荷（D-252）——「这笔账记在哪一轮」不是能力的判断。
+///
 /// 失败只记日志、不打断下一个：轮次已收束，附加事实失败不该把成功的一轮说成失败
 /// （与效果 / 记忆三段同一条口径）。
-#[allow(clippy::too_many_arguments)]
 fn land_contributions(
     store: &dyn Store<Event = Event>,
-    face: symbio_plugin_api::TurnFace,
+    face: symbio_plugin_api::SettleFace,
     turn: u64,
     user_seq: u64,
     principal: &str,
     user_text: &str,
     response: Option<&str>,
-    task_cap: usize,
 ) {
     let anchor = format!("t{turn}");
     // 同一轮各贡献者共用同一个时刻：收束这一刻就是它们的 `ts`。
     let now_ms = symbio_core::clock_now_ms();
-    for contributor in symbio_plugin_api::turn::contributors() {
+    for contributor in symbio_plugin_api::settle::contributors() {
         // 完整史（`range(0)`）：累计口径的贡献者（巩固 / 校准）要看得见归档段。
         let history = store.range(Seq::new(0));
-        let end = symbio_plugin_api::TurnEnd {
+        let at = symbio_plugin_api::Settling {
             face,
-            turn,
             now_ms,
             principal,
             user_seq,
             anchor: &anchor,
             user_text,
             response,
-            task_cap,
             history: &history,
         };
-        for draft in contributor.contribute(&end) {
-            let event_id = draft.fact.key.clone();
-            let event = draft.into_event(&end);
+        for contribution in contributor.contribute(&at) {
+            let event_id = contribution.fact.key.clone();
+            let actor = contribution.actor.unwrap_or(principal);
+            let mut event = contribution.fact.into_event(actor);
+            event.turn = turn;
+            event.ts = now_ms;
             if let Err(e) = store.append(event) {
                 symbio_core::plugin_warn!(
                     "session",
-                    "[turn] 轮末贡献入格失败（owner {}，事件 {event_id}，轮 {turn}）：{e:?}",
+                    "[turn] 收束贡献入格失败（owner {}，事件 {event_id}，轮 {turn}）：{e:?}",
                     contributor.owner()
                 );
             }
@@ -108,19 +110,18 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &derived.effects,
         &derived.breaks,
     );
-    // 轮末贡献（DE-025 D-250）：能力在这一刻交出本轮的派生事实（记忆 / 技能 / 调度…）。
+    // 收束贡献（DE-025 D-250）：能力在这一刻交出本轮的派生事实（记忆 / 技能 / 调度…）。
     // 排在效果之后：贡献者要看得见本轮刚落的工具效果（调度的输入就是本轮刚开的任务，
     // 宿主按 `prio` 逐个询问并在每次之前重取史）；排在淘汰回路之前——那一族读的是
     // 承诺与声誉，与这里的贡献没有数据依赖。
     land_contributions(
         store.as_ref(),
-        symbio_plugin_api::TurnFace::Generated,
+        symbio_plugin_api::SettleFace::Generated,
         turn_no,
         user_seq,
         &principal,
         &user_text,
         response,
-        session.task_cap(),
     );
     // 淘汰回路（DE-043 §3）：**必须排在承诺落格之后**——它读的声誉投影
     // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
@@ -358,18 +359,17 @@ pub(crate) async fn execute_final_reply_turn(
     if !outcome.aborted && !outcome.closure_denied {
         let principal = symbio_core::request_principal(ctx.as_ref());
         let response = (!outcome.fell_back).then_some(reply);
-        // 轮末贡献（DE-025 D-250）：答话轮同样是一条「用户说了什么、智能体答了什么」
-        // 的轮次——记忆与学习在这里不该缺席。贡献者按 `TurnFace::Answered` 自行判断
-        // 哪一部分不适用于零工具交换的轮（调度就不该在这一面开账）。
+        // 收束贡献（DE-025 D-250）：答话轮同样是一条「用户说了什么、智能体答了什么」
+        // 的收束——记忆与学习在这里不该缺席。贡献者按 `SettleFace::Answered` 自行判断
+        // 哪一部分不适用于零工具交换的那一刻（调度就不在这个面上开账）。
         land_contributions(
             store.as_ref(),
-            symbio_plugin_api::TurnFace::Answered,
+            symbio_plugin_api::SettleFace::Answered,
             turn_no,
             user_seq,
             &principal,
             user_text,
             response,
-            session.task_cap(),
         );
         super::super::derived_facts::record_learning(
             session.session_id(),

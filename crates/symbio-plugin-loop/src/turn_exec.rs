@@ -45,7 +45,7 @@
 //!   ——前者的数据来源是工具执行层交回的 `EffectInput`，后者是熔断理由，
 //!   都由 [`super::tool_dispatch::SessionDispatchPort`] 经 `take_derived` 交回。
 //!
-//! 效果**不按工具名分派**：本模块只补宿主面（轮锚 / 溯源 / 主体）再问声明，具体是哪
+//! 效果**不按工具名分派**：本模块只补宿主面（词干 / 溯源 / 主体）再问声明，具体是哪
 //! 一笔账由能力包自己实现。加一个效果不改这里一行。
 //!
 //! ## 写侧授权闸（判在运行器）
@@ -1281,6 +1281,8 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
         let user_seq = ctx.session.user_seq();
         let drive_seq = ctx.session.drive_seq();
         let principal = ctx.session.principal().to_string();
+        // 幂等词干由宿主构造（D-252）：执行面只拿到这根不透明词干，不认识「轮次」。
+        let anchor = format!("t{turn}");
 
         // ── 第一相位：这一行直接写什么（或要一次往返）────────────────────
         let step = {
@@ -1289,7 +1291,7 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             let request = symbio_plugin_api::rows::RowRequest {
                 row: ctx.row,
                 key: &ctx.key,
-                turn,
+                anchor: &anchor,
                 now_ms,
                 principal: &principal,
                 user_seq,
@@ -1382,7 +1384,7 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             let request = symbio_plugin_api::rows::RowRequest {
                 row: ctx.row,
                 key: &ctx.key,
-                turn,
+                anchor: &anchor,
                 now_ms,
                 principal: &principal,
                 user_seq,
@@ -1408,9 +1410,9 @@ fn land_drafts(
     principal: &str,
 ) -> Result<(), ActorError> {
     for draft in drafts {
-        store
-            .append(draft.into_event(turn, principal))
-            .map_err(ActorError::Append)?;
+        let mut event = draft.into_event(principal);
+        event.turn = turn;
+        store.append(event).map_err(ActorError::Append)?;
     }
     Ok(())
 }

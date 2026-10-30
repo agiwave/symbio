@@ -34,28 +34,27 @@ fn last_user_text(context: &SessionContext) -> Option<String> {
         })
 }
 
-/// 本轮读侧值包：轮首与请求级两次收集共用同一构造口径。
+/// 本轮读侧值包：两种节奏（发言级 / 请求级）两次收集共用同一构造口径。
 ///
-/// 两种节奏是**同一请求的两半**（轮首段 / 请求级段），必须看到同一刻的值——各拼
-/// 一份就会漂移成「召回读的是 A、委派读的是 B」。`live` 只在请求级收集时为 `Some`。
-#[allow(clippy::too_many_arguments)]
+/// 两种节奏是**同一请求的两半**，必须看到同一刻的值——各拼一份就会漂移成
+/// 「召回读的是 A、委派读的是 B」。`live` 只在请求级收集时为 `Some`。
+///
+/// 这里没有轮号，也没有容量：端口只交值（DE-026 D-252）。段与段的先后由 owner 序
+/// 决定，容量与开关由各自读那条已经落格的事实。
 fn context_request<'a>(
     turn: &TurnState,
     principal: &'a str,
     query: Option<&'a str>,
     facts: &'a [symbio_core::Event],
     recall: Option<&'a symbio_plugin_api::RecallFacts<'a>>,
-    task_cap: usize,
     live: Option<&'a LiveInputs<'a>>,
 ) -> symbio_plugin_api::ContextRequest<'a> {
     symbio_plugin_api::ContextRequest {
-        turn: turn.turn_no,
         request_round: u32::try_from(turn.request_round).unwrap_or(u32::MAX),
         principal,
         query,
         facts,
         recall,
-        task_cap,
         live,
     }
 }
@@ -283,7 +282,7 @@ pub(crate) async fn prepare_request_sections(
         None => DelegateVerdict::NotJudged,
     };
 
-    // 段的**次序**在这里声明（= 模型读到的上下文次序）：轮首段在前、请求级段在后。
+    // 段的**次序**在这里声明（= 模型读到的上下文次序）：发言级段在前、请求级段在后。
     // 加一段 provider 只需提交一条实现，本数组不动。
     let facts = context.session.facts_snapshot();
     let live_lines: Vec<symbio_plugin_api::RecallLine<'_>> = turn
@@ -293,6 +292,7 @@ pub(crate) async fn prepare_request_sections(
             view.entries
                 .iter()
                 .map(|e| symbio_plugin_api::RecallLine {
+                    seq: e.seq,
                     content: &e.content,
                     tag: &e.tag,
                 })
@@ -319,7 +319,6 @@ pub(crate) async fn prepare_request_sections(
         query.as_deref(),
         &facts,
         live_recall.as_ref(),
-        context.session.task_cap(),
         Some(&live),
     );
     // ── ⑥″ 段预算：放不下就按优先级裁，读数自己出声（D-243）────────────────
@@ -452,6 +451,7 @@ pub(crate) async fn run_recall(
             view.entries
                 .iter()
                 .map(|e| symbio_plugin_api::RecallLine {
+                    seq: e.seq,
                     content: &e.content,
                     tag: &e.tag,
                 })
@@ -471,10 +471,9 @@ pub(crate) async fn run_recall(
         recall_query.as_deref(),
         &facts,
         recall_facts.as_ref(),
-        context.session.task_cap(),
         None,
     );
-    let sections = symbio_plugin_api::context_sections(&request, Cadence::Turn);
+    let sections = symbio_plugin_api::context_sections(&request, Cadence::Utterance);
     turn.context_sections = sections;
 
     // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，故必须就地

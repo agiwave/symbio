@@ -86,6 +86,9 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 
 // ============ session ============
 
+/// session.config — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
+pub const EVENT_SESSION_CONFIG: &str = "session.config";
+
 /// session.consolidated — owner `symbio-plugin-session`，格位 `(Message, Progressed)`
 pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
@@ -154,6 +157,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
     EventDecl::new(EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)), // message.edited ← session
     EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
+    EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Turn, Verb::Asserted)), // session.config ← loop
     EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task
     EventDecl::new(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted)), // task.assigned ← task

@@ -15,7 +15,7 @@ use symbio_plugin_api::effects::{
     BeforeDecision, BeforeReadings, BeforeRequest, EffectEnv, EffectInput, ToolBehavior,
 };
 use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
-use symbio_plugin_api::turn::{TurnContributor, TurnEnd, TurnFace};
+use symbio_plugin_api::settle::{Contributor, SettleFace, Settling};
 
 use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
@@ -117,8 +117,9 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
         declared: &[behaviors::TASK_TABLE],
     };
     let snapshot = store.range(Seq::new(0));
+    let stem = format!("t{turn}");
     let env = EffectEnv {
-        turn,
+        anchor: &stem,
         user_seq: anchor,
         principal: symbio_core::PRINCIPAL_MAIN,
         source: symbio_core::PRINCIPAL_USER,
@@ -126,9 +127,9 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
         applied: &[],
     };
     for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
-        store
-            .append(draft.into_event(turn, symbio_core::PRINCIPAL_MAIN))
-            .expect("任务事件入格");
+        let mut event = draft.into_event(symbio_core::PRINCIPAL_MAIN);
+        event.turn = turn;
+        store.append(event).expect("任务事件入格");
     }
 }
 
@@ -678,8 +679,9 @@ fn apply_effects(
     let mut kinds = Vec::new();
     for input in inputs {
         let snapshot = store.range(Seq::new(0));
+        let stem = format!("t{turn}");
         let env = EffectEnv {
-            turn,
+            anchor: &stem,
             user_seq: anchor,
             principal: symbio_core::PRINCIPAL_MAIN,
             source: symbio_core::PRINCIPAL_USER,
@@ -688,7 +690,8 @@ fn apply_effects(
         };
         for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
             kinds.push(draft.kind.clone());
-            let event = draft.into_event(turn, symbio_core::PRINCIPAL_MAIN);
+            let mut event = draft.into_event(symbio_core::PRINCIPAL_MAIN);
+            event.turn = turn;
             store.append(event.clone()).expect("任务事件入格");
             applied.push(event);
         }
@@ -938,10 +941,11 @@ fn an_unbound_subagent_is_refused_the_task_table() {
     ));
 }
 
-// ==================== 轮末贡献：调度不再由宿主代劳（DE-025 D-250） ====================
+// ==================== 收束贡献：调度不再由宿主代劳（DE-025 D-250） ====================
 //
-// 三条判据：只走生成轮（答话轮没有新声明）、事件号与归属跟宿主面同形
-// （`t{turn}-s{n}` / 调度者 / 本轮开口格）、以及宿主盖章（`turn` / `ts`）由端口给。
+// 三条判据：只走生成轮（答话轮没有新声明）、事件号与归属由能力拼出
+// （`t3-s{n}` / 调度者 / 本轮开口格）、以及信封（`turn` / `ts`）不进端口——
+// 草稿交出去时不带信封，由宿主的写口盖章（D-252）。
 
 /// 一条已就绪的任务 + 本轮开口格。
 fn contributor_history(store: &EventStore) -> (u64, Vec<Event>) {
@@ -950,22 +954,20 @@ fn contributor_history(store: &EventStore) -> (u64, Vec<Event>) {
     (anchor, store.range(Seq::new(0)))
 }
 
-fn turn_end<'a>(
-    face: TurnFace,
+fn settling<'a>(
+    face: SettleFace,
     history: &'a [Event],
     anchor: &'a str,
     user_seq: u64,
-) -> TurnEnd<'a> {
-    TurnEnd {
+) -> Settling<'a> {
+    Settling {
         face,
-        turn: 3,
         now_ms: 2_000,
         principal: PRINCIPAL_MAIN,
         user_seq,
         anchor,
         user_text: "做点事",
         response: None,
-        task_cap: usize::MAX,
         history,
     }
 }
@@ -975,9 +977,9 @@ fn turn_end<'a>(
 fn the_contributor_lands_ready_and_assigned_on_a_generated_turn() {
     let store = EventStore::new();
     let (anchor, history) = contributor_history(&store);
-    let end = turn_end(TurnFace::Generated, &history, "t3", anchor);
+    let at = settling(SettleFace::Generated, &history, "t3", anchor);
 
-    let drafts = ScheduleContributor.contribute(&end);
+    let drafts = ScheduleContributor.contribute(&at);
     assert_eq!(
         drafts
             .iter()
@@ -992,7 +994,7 @@ fn the_contributor_lands_ready_and_assigned_on_a_generated_turn() {
             .map(|d| d.fact.key.as_str())
             .collect::<Vec<_>>(),
         vec!["t3-s0", "t3-s1"],
-        "事件号词干由宿主给的轮锚拼出（与旧的 `t{{turn}}-s` 同形）"
+        "事件号词干由宿主给的不透明锚拼出（与旧的 `t{{turn}}-s` 同形）"
     );
     for draft in &drafts {
         assert_eq!(draft.actor, Some(PRINCIPAL_SCHEDULER), "派活的主体是调度者");
@@ -1005,17 +1007,18 @@ fn the_contributor_lands_ready_and_assigned_on_a_generated_turn() {
     }
 }
 
-/// 宿主盖章：`turn` / `ts` 由端口给，能力只声明事实与归属。
+/// 信封不进端口：草稿交出来时 `turn` / `ts` 都是 0，由宿主写口盖章（D-252）。
 #[test]
-fn the_host_stamps_turn_and_time() {
+fn the_draft_carries_no_envelope() {
     let store = EventStore::new();
     let (anchor, history) = contributor_history(&store);
-    let end = turn_end(TurnFace::Generated, &history, "t3", anchor);
-    let event = ScheduleContributor.contribute(&end)[0]
+    let at = settling(SettleFace::Generated, &history, "t3", anchor);
+    let event = ScheduleContributor.contribute(&at)[0]
+        .fact
         .clone()
-        .into_event(&end);
-    assert_eq!(event.turn, 3);
-    assert_eq!(event.ts, 2_000);
+        .into_event(PRINCIPAL_SCHEDULER);
+    assert_eq!(event.turn, 0, "草稿不带轮号：信封由写口盖（D-252）");
+    assert_eq!(event.ts, 0, "草稿不带时刻：信封由写口盖（D-252）");
     assert_eq!(event.actor, PRINCIPAL_SCHEDULER);
 }
 
@@ -1024,9 +1027,9 @@ fn the_host_stamps_turn_and_time() {
 fn an_answered_turn_contributes_no_schedule() {
     let store = EventStore::new();
     let (anchor, history) = contributor_history(&store);
-    let end = turn_end(TurnFace::Answered, &history, "t3", anchor);
+    let at = settling(SettleFace::Answered, &history, "t3", anchor);
     assert!(
-        ScheduleContributor.contribute(&end).is_empty(),
+        ScheduleContributor.contribute(&at).is_empty(),
         "答话轮不该开调度账"
     );
 }

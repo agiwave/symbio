@@ -353,6 +353,9 @@ fn open_drive(
                 "progress_interval_ms": settings.progress_interval_ms,
                 "progress_min_rounds": settings.progress_min_rounds,
                 "progress_max_per_turn": settings.progress_max_per_turn,
+                // 就绪集容量：调度段的预算。能力在收束时读这一格，而不是从端口拿配置包
+                // （DE-026 D-252）。
+                "readyset_cap": settings.task_cap,
                 "is_persistent": context.session.is_persistent(),
             })),
         )

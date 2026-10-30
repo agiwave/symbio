@@ -31,7 +31,7 @@ lists: [gate-codes=owner]
 | **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–013 | `E-014` |
 | **EOL** | 行尾（工作树 / 入库 / 声明三面一致） | `scripts/eol-audit.mjs` | EOL-001–003 | `EOL-004` |
-| **EX** | 能力全面拆分（名册处置与迁移边界） | `scripts/capability-ledger-audit.mjs` · `scripts/capability-migration-audit.mjs` · `scripts/extension-locality-audit.mjs` · `scripts/uninstall-edge-audit.mjs` | EX-002–004、EX-006–007 | `EX-008` |
+| **EX** | 能力全面拆分（名册处置与迁移边界） | `scripts/capability-ledger-audit.mjs` · `scripts/capability-migration-audit.mjs` · `scripts/extension-locality-audit.mjs` · `scripts/extension-vocab-audit.mjs` · `scripts/uninstall-edge-audit.mjs` | EX-002–004、EX-006–008 | `EX-009` |
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–006 | `GW-007` |
@@ -136,6 +136,7 @@ lists: [gate-codes=owner]
 | **EX-004** | `scripts/uninstall-edge-audit.mjs` |
 | **EX-006** | `scripts/capability-ledger-audit.mjs` |
 | **EX-007** | `scripts/capability-migration-audit.mjs` |
+| **EX-008** | `scripts/extension-vocab-audit.mjs` |
 | **FB-001** | `scripts/facts-boundary-audit.mjs` |
 | **FB-002** | `scripts/facts-boundary-audit.mjs` |
 | **GC-001** | `scripts/gate-codes-audit.mjs` |

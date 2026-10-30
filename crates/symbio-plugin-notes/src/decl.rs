@@ -31,7 +31,7 @@ pub(crate) const NOTES_TOOL: &str = "notes_add";
 
 /// 轮内索引事实：`notes_add` 的产物落格后，本能力的一行把这条结果再记一笔。
 ///
-/// 它与 [`NOTES_CREATED`] 的分工：后者是「用户让我记」的领域事实（轮末由行为落），
+/// 它与 [`NOTES_CREATED`] 的分工：后者是「用户让我记」的领域事实（收束时由行为落），
 /// 前者是「这次工具结果已被本能力处理」的派生事实（轮内由通用行执行体落）。
 pub(crate) const NOTES_INDEXED: &str = "notes.indexed";
 

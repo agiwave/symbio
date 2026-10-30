@@ -21,13 +21,11 @@ fn note(id: &str, text: &str) -> Event {
 
 fn request<'a>(facts: &'a [Event]) -> ContextRequest<'a> {
     ContextRequest {
-        turn: 2,
         request_round: 0,
         principal: "session/a",
         query: Some("我记了什么"),
         facts,
         recall: None,
-        task_cap: 8,
         live: None,
     }
 }
@@ -71,7 +69,7 @@ fn only_the_most_recent_notes_are_kept() {
 #[test]
 fn the_section_is_collected_through_the_port() {
     let facts = [note("e1", "买牛奶")];
-    let sections = symbio_plugin_api::context_sections(&request(&facts), Cadence::Turn);
+    let sections = symbio_plugin_api::context_sections(&request(&facts), Cadence::Utterance);
     let own: Vec<_> = sections.iter().filter(|s| s.slot == SLOT).collect();
     assert_eq!(own.len(), 1, "{sections:?}");
 }

@@ -33,14 +33,14 @@
 //!
 //! ## 两种节奏（D-220）
 //!
-//! 段的内容不都在轮首就齐：召回 / 调度只读轮首的读侧值包；委派者真源要的是
+//! 段的内容不都在发言落地时就齐：召回 / 调度只读开口前的读侧值包；委派者真源要的是
 //! **工具清单收集成形之后**的产物（收集是广播，遍历期取集合会漏掉尚未访问到的
 //! 兄弟插件）。因此端口分两种收集节奏：
 //!
-//! - [`Cadence::Turn`]：轮首一次，provider 只读 [`ContextRequest`] 的常驻字段；
+//! - [`Cadence::Utterance`]：一次发言收一次，provider 只读 [`ContextRequest`] 的常驻字段；
 //! - [`Cadence::Request`]：每次模型请求、在工具收集之后，额外带 [`LiveInputs`]。
 //!
-//! 宿主按「轮首段在前、请求级段在后」拼一次请求前缀——两种段在这个数组里的先后
+//! 宿主按「发言级段在前、请求级段在后」拼一次请求前缀——两种段在这个数组里的先后
 //! 是判据，不是实现细节。判断（例如 Q1「本轮该不该起 worker」）仍在控制面：
 //! 请求级输入交的是**判完的结论**（[`DelegateVerdict`]），provider 只落笔。
 //!
@@ -83,6 +83,8 @@ pub mod slots {
 /// 判据（哪些条目可见、哪些技能被摘掉）已经在控制面做完。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecallLine<'a> {
+    /// 来源事实的存储 `seq`——行的身份（摘行的读方按它点名，D-251：摘行按名字读折叠）。
+    pub seq: u64,
     pub content: &'a str,
     pub tag: &'a str,
 }
@@ -98,39 +100,37 @@ pub struct RecallFacts<'a> {
 /// 一次请求的**读侧值包**：provider 能看见的全部输入。
 ///
 /// 全部是借用，构造一次、本轮各 provider 共用——与「事实是值」同一条口径。
+/// 里面**没有轮号、没有配置结构体**（D-252）：要读开关就读 `facts` 里那条
+/// `session.config` 快照，读不到就用出厂值。
 #[derive(Debug, Clone, Copy)]
 pub struct ContextRequest<'a> {
-    /// 轮号。
-    pub turn: u64,
-    /// 本轮第几次请求（0 = 首幕）。分段判据若要看「这是不是第一次」，读它。
+    /// 本轮第几次模型请求（0 = 第一次）。分段判据若要看「这是不是首幕」，读它。
     pub request_round: u32,
     /// 读方主体：可见切片按它收放（不是写方——判的是 A、看的是 B 就没有隔离可言）。
     pub principal: &'a str,
     /// 本轮用户发言（语义维的输入；`None` = resume / 心跳这类没有新发言的请求）。
     pub query: Option<&'a str>,
-    /// 本会话的事实切片（只读）。
+    /// 本会话的事实切片（只读）：开关与折叠的输入都在这里。
     pub facts: &'a [Event],
     /// 已判过的召回视图（见 [`RecallFacts`]）。`None` = 本轮没召回。
     pub recall: Option<&'a RecallFacts<'a>>,
-    /// 任务段的容量上限（控制面的配置投影，不是判据）。与调度无关的来源忽略它。
-    pub task_cap: usize,
-    /// 请求级产物（只在 [`Cadence::Request`] 收集时存在；轮首收集为 `None`）。
+    /// 请求级产物（只在 [`Cadence::Request`] 收集时存在；发言级收集为 `None`）。
     pub live: Option<&'a LiveInputs<'a>>,
 }
 
 /// 段的收集节奏：什么时候收集、能看见哪些请求期产物。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cadence {
-    /// 轮首一次：输入只有 [`ContextRequest`] 的常驻字段。
-    Turn,
+    /// 一次发言收一次（首幕之前）：输入只有 [`ContextRequest`] 的常驻字段。
+    Utterance,
     /// 每次模型请求、工具清单收集成形之后：额外带 [`LiveInputs`]。
     Request,
 }
 
 /// 请求级（[`Cadence::Request`]）才有的输入：收集完成后的本轮产物。
 ///
-/// 这些值在轮首还不存在——工具清单是收集的**产物**（遍历期取集合会漏掉尚未访问
-/// 到的兄弟插件），worker 进展读自存储。宿主在收集完成后一次取齐、按值递入。
+/// 这些值在发言级收集时还不存在——工具清单是收集的**产物**（遍历期取集合会漏掉尚未
+/// 访问到的兄弟插件），worker 进展读自存储。宿主在收集完成后一次取齐、按值递入。
 #[derive(Debug, Clone, Copy)]
 pub struct LiveInputs<'a> {
     /// 本轮最终发给模型的工具清单（收集完成后的快照，与请求体是同一份）。
@@ -278,10 +278,10 @@ pub trait ContextProvider: Sync {
     /// 装配顺序的依据：多个 provider 按 owner 字典序执行（DE-025 §3 第 4 条）。
     fn owner(&self) -> &'static str;
 
-    /// 收集节奏（默认轮首）。需要请求期产物的 provider 声明 [`Cadence::Request`]，
-    /// 并从 `req.live` 取用——轮首收集时它是 `None`。
+    /// 收集节奏（默认发言级）。需要请求期产物的 provider 声明 [`Cadence::Request`]，
+    /// 并从 `req.live` 取用——发言级收集时它是 `None`。
     fn cadence(&self) -> Cadence {
-        Cadence::Turn
+        Cadence::Utterance
     }
 
     /// 本请求要注入的段。可以给多段，也可以一段都不给。
@@ -329,7 +329,7 @@ pub fn providers() -> Vec<&'static dyn ContextProvider> {
 ///
 /// 顺序确定（DE-025 §3 第 4 条）：段的位置就是模型读到的先后，而它只与 owner 字典序
 /// 有关、与装配次序无关。`cadence` 只决定**问哪些 provider**——两种节奏的段由宿主
-/// 按调用次序拼成一个数组（轮首段在前、请求级段在后）。
+/// 按调用次序拼成一个数组（发言级段在前、请求级段在后）。
 pub fn sections(req: &ContextRequest<'_>, cadence: Cadence) -> Vec<ContextSection> {
     let mut out = Vec::new();
     for provider in providers() {

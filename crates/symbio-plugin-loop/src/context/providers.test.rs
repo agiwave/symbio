@@ -16,13 +16,11 @@ fn request<'a>(
     recall: Option<&'a RecallFacts<'a>>,
 ) -> ContextRequest<'a> {
     ContextRequest {
-        turn: 1,
         request_round: 0,
         principal: "session/main",
         query: Some("上次那份设计"),
         facts,
         recall,
-        task_cap: 8,
         live: None,
     }
 }
@@ -38,6 +36,7 @@ fn recall_without_a_view_contributes_nothing() {
 #[test]
 fn recall_renders_the_judged_view() {
     let lines = [RecallLine {
+        seq: 1,
         content: "把总结写进 tmp/a.md",
         tag: "经验",
     }];
@@ -61,6 +60,7 @@ fn recall_renders_the_judged_view() {
 #[test]
 fn recall_says_it_when_degraded() {
     let lines = [RecallLine {
+        seq: 2,
         content: "一条",
         tag: "经验",
     }];
@@ -95,6 +95,7 @@ fn all_providers_are_submitted_under_loop() {
 #[test]
 fn a_collected_request_carries_the_recall_slot() {
     let lines = [RecallLine {
+        seq: 3,
         content: "一条",
         tag: "经验",
     }];
@@ -103,7 +104,7 @@ fn a_collected_request_carries_the_recall_slot() {
         lines: &lines,
     };
     let req = request(&[], Some(&recall));
-    let slots_in_order: Vec<&str> = symbio_plugin_api::context_sections(&req, Cadence::Turn)
+    let slots_in_order: Vec<&str> = symbio_plugin_api::context_sections(&req, Cadence::Utterance)
         .iter()
         .map(|s| s.slot)
         .collect();
@@ -113,7 +114,7 @@ fn a_collected_request_carries_the_recall_slot() {
     );
 }
 
-/// 委派段是**请求级**节奏：轮首收集不问它，工具收集完成后才由 `live` 供给输入。
+/// 委派段是**请求级**节奏：发言级收集不问它，工具收集完成后才由 `live` 供给输入。
 #[test]
 fn the_delegate_section_waits_for_the_request_cadence() {
     let tools = [symbio_core::CapabilityMeta {
@@ -130,13 +131,13 @@ fn the_delegate_section_waits_for_the_request_cadence() {
     let mut req = request(&[], None);
     req.live = Some(&live);
 
-    let turn_slots: Vec<&str> = symbio_plugin_api::context_sections(&req, Cadence::Turn)
+    let utterance_slots: Vec<&str> = symbio_plugin_api::context_sections(&req, Cadence::Utterance)
         .iter()
         .map(|s| s.slot)
         .collect();
     assert!(
-        !turn_slots.contains(&slots::DELEGATE),
-        "轮首不该产出委派段：{turn_slots:?}"
+        !utterance_slots.contains(&slots::DELEGATE),
+        "发言级收集不该产出委派段：{utterance_slots:?}"
     );
 
     let request_sections = symbio_plugin_api::context_sections(&req, Cadence::Request);

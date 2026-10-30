@@ -97,7 +97,7 @@ impl symbio_plugin_api::ToolBehavior for PromiseStub {
         let Some(promise) = call.args.get("prompt").and_then(|v| v.as_str()) else {
             return Vec::new();
         };
-        let cid = format!("v2c-{}-{}", call.anchor(), call.call_id);
+        let cid = format!("v2c-{}-{}", call.anchor, call.call_id);
         symbio_core::commitment_events(
             COMMITMENT_VOCAB,
             &cid,

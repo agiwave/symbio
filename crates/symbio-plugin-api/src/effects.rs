@@ -11,15 +11,15 @@
 //! ```text
 //! 能力插件 ──submit_behavior!──▶ inventory（编译期随二进制生效）
 //! 工具执行层 ──EffectInput（这次调用发生了什么）──▶ 收束出参
-//! 轮末写口  ──apply(EffectCall)──▶ Vec<FactDraft> ──唯一写入口──▶ 事实源
+//! 唯一写口  ──apply(EffectCall)──▶ Vec<FactDraft> ──唯一写入口──▶ 事实源
 //! ```
 //!
 //! ## 为什么效果在**写口**才求值
 //!
-//! `after` 需要轮锚（`t{turn}`）、溯源 seq、主体与来源主体——这些是**宿主在轮末
+//! `after` 需要幂等词干、溯源 seq、主体与来源主体——这些是**宿主在落格那一刻
 //! 才知道的**。若让工具执行层在调用当场求值，那四个值就得一路穿过批处理、并行收口
 //! 与未执行收口五层签名；而它们与「这次调用发生了什么」无关。故工具执行层只交
-//! [`EffectInput`]（纯值），轮末写口用 [`EffectCall`] 补齐宿主面再问行为。
+//! [`EffectInput`]（纯值），写口用 [`EffectCall`] 补齐宿主面再问行为。
 //!
 //! ## 选工具的依据是**声明**，不是名字
 //!
@@ -32,7 +32,7 @@
 //! [`ToolBehavior::before`] 与 `after` 的**选法相同**（按声明选、按 owner 序），出口不同：
 //! `before` 只回答「这次调用能不能跑」，任一实现拒绝即拒绝（fail-closed，DE-025 D-219）。
 //! 它拿的是调用身份 + 主体 + 控制面批首读好的结论（[`BeforeReadings`]），**没有句柄、
-//! 没有轮锚**：判断发生在执行窗口之前，那时「这一轮」还没有可写的事实。
+//! 没有词干**：判断发生在执行窗口之前，那时还没有可写的事实。
 //!
 //! `before` **不改写参数**：工具收到的就是模型发出的那一份。要变换入参的工具在自己的
 //! `Capability.execute` 里做——那里才是入参的唯一解释者；执行层改写参数会让转写里记下
@@ -54,8 +54,8 @@ use symbio_core::{Entity, Event, Verb};
 
 /// 一次工具调用的**效果输入**：工具执行层交出的纯值。
 ///
-/// 不含轮锚 / 主体 / 溯源——那几样是宿主在写口盖的章（见模块文档）。工具执行层
-/// 收集它，`DerivedFacts` 运送它，轮末写口求值。
+/// 不含词干 / 主体 / 溯源——那几样是宿主在写口盖的章（见模块文档）。工具执行层
+/// 收集它，`DerivedFacts` 运送它，写口求值。
 #[derive(Debug, Clone)]
 pub struct EffectInput {
     /// 线上全名（`local/todo_write` 这种形态）。
@@ -117,14 +117,17 @@ impl FileOp {
     }
 }
 
-/// 求值一次调用效果所需的**宿主面**：轮锚、两个主体与两片只读历史。
+/// 求值一次调用效果所需的**宿主面**：幂等词干、两个主体与两片只读历史。
 ///
 /// 与 [`EffectInput`] 分开的理由见模块文档——前者是「发生了什么」，本结构是
 /// 「宿主在哪一刻、以谁的名义、看得见哪些事实」。
+///
+/// 本结构里没有轮号：跨轮唯一性要的是**词干**，而轮号是宿主的容器概念
+/// （DE-026 D-252）。词干由宿主构造（`loop` 的 `t{turn}`），能力只拼接。
 #[derive(Debug, Clone, Copy)]
 pub struct EffectEnv<'a> {
-    /// 本轮序号（承诺号 `v2c-t{turn}-…` 的词干来源）。
-    pub turn: u64,
+    /// 本轮的幂等词干（事件号的前缀来源，由宿主给）。
+    pub anchor: &'a str,
     /// 本轮开口格的 seq——派生事实的溯源锚（I2）。
     pub user_seq: u64,
     /// 本会话主体（写事件的 `actor`）。
@@ -158,7 +161,8 @@ pub struct EffectCall<'a> {
     pub why: &'a str,
     /// 本工具声明的行为名（选行为用，不是给行为读的）。
     pub declared: &'static [&'static str],
-    pub turn: u64,
+    /// 见 [`EffectEnv::anchor`]。
+    pub anchor: &'a str,
     pub user_seq: u64,
     pub principal: &'a str,
     pub source: &'a str,
@@ -169,11 +173,6 @@ pub struct EffectCall<'a> {
 }
 
 impl EffectCall<'_> {
-    /// 轮锚词干（`t{turn}`）——事件号的跨轮唯一性从这里来。
-    pub fn anchor(&self) -> String {
-        format!("t{}", self.turn)
-    }
-
     /// 按发生顺序遍历两片历史（见 [`EffectEnv::facts`]）。
     pub fn facts(&self) -> impl Iterator<Item = &Event> {
         self.snapshot.iter().chain(self.applied.iter())
@@ -191,7 +190,7 @@ impl EffectInput {
             result: &self.result,
             why: &self.why,
             declared: self.declared,
-            turn: env.turn,
+            anchor: env.anchor,
             user_seq: env.user_seq,
             principal: env.principal,
             source: env.source,
@@ -205,7 +204,7 @@ impl EffectInput {
 
 /// 一次工具的**前置判断输入**：纯值。
 ///
-/// 与 [`EffectCall`] 的分界是时机：`before` 在**执行窗口之前**求值，那时轮锚、溯源与
+/// 与 [`EffectCall`] 的分界是时机：`before` 在**执行窗口之前**求值，那时词干、溯源与
 /// 「本轮已落格的草稿」都还不存在；它要看的是「这次调用以谁的名义、在什么结论下发起」。
 #[derive(Debug, Clone, Copy)]
 pub struct BeforeRequest<'a> {
@@ -283,8 +282,9 @@ pub enum BeforeDecision {
 /// 一条**待落格**的事实：行为交出的草稿，宿主盖章入库。
 ///
 /// 字段是「宿主不解释的那部分」：`kind` 由 owner 的 `EventDecl` 登记、`payload`
-/// 由 owner 决定、`key` 是幂等键词干。`turn` / `actor` / `ts` 由写口填——行为
-/// 无权指定「这笔账记在哪一轮、以谁的名义」，那是宿主的事实。
+/// 由 owner 决定、`key` 是幂等键词干。`Event` 的信封三格（轮号 / 归属 / 时刻）由
+/// 写口填——行为无权指定「这笔账记在哪一轮、以谁的名义、在什么时刻」，那是宿主
+/// 的事实（DE-026 D-252）。
 #[derive(Debug, Clone)]
 pub struct FactDraft {
     /// 幂等键（= 入库事件的 `event_id`）。跨轮唯一性由行为用 [`EffectCall::anchor`]
@@ -303,7 +303,7 @@ impl FactDraft {
     /// 从一条**领域成格函数**的产物取草稿。
     ///
     /// 存在的理由：承诺这类判断种类在 core 有自己的成格函数（`commitment_events`），
-    /// 行为不该把它抄一遍。宿主面（`turn` / `actor` / `ts`）在这里被**丢掉**，
+    /// 行为不该把它抄一遍。信封（轮号 / 归属 / 时刻）在这里被**丢掉**，
     /// 由写口按本轮的章重填。
     pub fn from_event(e: Event) -> Self {
         Self {
@@ -316,9 +316,13 @@ impl FactDraft {
         }
     }
 
-    /// 盖章入库：`turn` 与 `actor` 由宿主给。
-    pub fn into_event(self, turn: u64, actor: &str) -> Event {
-        let mut event = Event::pending(self.key, self.kind, self.entity, self.verb, turn, actor);
+    /// 交出门格与载荷，**只盖归属**：轮号与时刻留 0，由写口盖（见 [`Self::from_event`]
+    /// 的同一条分界，DE-026 D-252）。
+    ///
+    /// 为什么本方法不接轮号：`turn` 是宿主的容器概念，能力面拿到它就开始自己数轮次，
+    /// 那等于把业务语义焊进端口。落格点（`loop` 的派生事实与收束写口）本来就持有轮号。
+    pub fn into_event(self, actor: &str) -> Event {
+        let mut event = Event::pending(self.key, self.kind, self.entity, self.verb, 0, actor);
         event.payload = self.payload;
         event.produced_by = self.produced_by;
         event
@@ -422,7 +426,7 @@ pub fn apply(call: &EffectCall<'_>) -> Vec<FactDraft> {
 /// 求一次调用对**产物格**的补充字段：口径同 [`apply`]（按声明选、按 owner 序）。
 ///
 /// 与 [`apply`] 分开的理由是时机不同：本函数只要「发生了什么」（[`EffectInput`]），
-/// 在调用收口时就能算；`apply` 要轮锚与主体，只能在轮末写口算。两件事各有各的
+/// 在调用收口时就能算；`apply` 要词干与主体，只能在写口算。两件事各有各的
 /// 最早可判时刻，合成一次求值只会把其中一件拖到它不需要的时机。
 pub fn annotations(input: &EffectInput) -> Vec<(&'static str, Value)> {
     let mut out = Vec::new();

@@ -93,7 +93,7 @@ pub(crate) fn record_derived(
     breaks: &[&'static str],
 ) {
     // ── 效果（DE-025 D-207）──────────────────────────────────────────────
-    // 工具执行层交出的是**纯值**（这次调用发生了什么），这里补上宿主面（轮锚 /
+    // 工具执行层交出的是**纯值**（这次调用发生了什么），这里补上宿主面（词干 /
     // 溯源 / 两个主体 / 两片只读历史）再问能力包的行为要草稿，最后经唯一写入口落格。
     //
     // 三件事各自只有一份：**判断**（这次调用算不算立约、算不算一次任务声明）在
@@ -109,10 +109,14 @@ pub(crate) fn record_derived(
     //
     // `applied` 是**本轮已落格的草稿**：同轮的后一个效果要看得见前一个。少了它，
     // 同一轮里两次 `todo_write` 会各自从轮初快照出发，把第一条刚开的格再开一次。
+    //
+    // 词干 `anchor` 在这里构造（`t{turn}`）——它是宿主的命名法，能力只拿它拼幂等键
+    // （DE-026 D-252）；轮号也不交进端口，落格时由本处盖章。
+    let anchor = format!("t{turn}");
     let mut applied: Vec<Event> = Vec::new();
     for input in effects {
         let env = symbio_plugin_api::effects::EffectEnv {
-            turn,
+            anchor: &anchor,
             user_seq,
             principal,
             source: to,
@@ -121,7 +125,8 @@ pub(crate) fn record_derived(
         };
         for draft in symbio_plugin_api::apply_effects(&input.call(&env)) {
             let event_id = draft.key.clone();
-            let event = draft.into_event(turn, principal);
+            let mut event = draft.into_event(principal);
+            event.turn = turn;
             match store.append(event.clone()) {
                 Ok(_) => applied.push(event),
                 Err(e) => symbio_core::plugin_warn!(

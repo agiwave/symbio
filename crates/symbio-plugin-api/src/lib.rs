@@ -8,6 +8,7 @@
 //! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）
 //! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份
+//! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //! - [`views`]：声明视图的跨插件读口（按 owner 公开的名字读纯折叠）
@@ -25,7 +26,7 @@ pub mod events;
 pub mod hooks;
 pub mod routes;
 pub mod rows;
-pub mod turn;
+pub mod settle;
 pub mod view_names;
 pub mod views;
 
@@ -45,7 +46,7 @@ pub use effects::{
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_core` 的 `submit_object_creator!` 同形。
 pub use inventory;
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};
-pub use turn::{TurnContributor, TurnDraft, TurnEnd, TurnFace};
+pub use settle::{Contribution, Contributor, SettleFace, Settling};
 pub use view_names::SharedViewDecl;
 pub use views::{
     read_all_from as read_shared_view_all, read_from as read_shared_view, shared as shared_views,

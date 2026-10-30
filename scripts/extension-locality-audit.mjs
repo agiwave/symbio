@@ -22,14 +22,19 @@
  * | 正向证据 | 夹具提交 `77ff41fa`（`symbio-plugin-notes`，EX-001）：新增能力包的四棵树指纹不变。它不在判据范围内也要判——T1 的唯一实证 |
  * | 向前判据 | 范围内**新增 `crates/symbio-plugin-<名字>/PLUGIN.yml`** 的提交，逐个比较父提交与本提交的四棵树指纹 |
  *
- * ## 两处例外，各自有理由
+ * ## 三处例外，各自有理由
  *
  * - **生成物**：已存在的 `*.gen.rs` 可以随能力包的清单变化（`rows.gen.rs` /
  *   `tool_namespaces.gen.rs` / `trigger_kinds.gen.rs`）。它是 `PLUGIN.yml` 的镜像，
  *   作者只改自己目录；生成器保证内容与清单一致（`GEN-001`）。**新出现**的
  *   `*.gen.rs` 不算例外——那是新增一条生成面，属机制补件。
+ * - **迁移批次**（正文声明 `Migration:`，D-247）：**迁出**一条既有能力的提交必然在新增
+ *   `PLUGIN.yml` 的同时删除 `loop` / `session` 里的旧实现——指纹不变反而说明旧实现没删
+ *   （EX-003 要拦的「两份实现同时生效」）。这一类的形状归 `capability-migration-audit`
+ *   （EX-003）判：架构树零非生成 diff、无能力名的新增行、至少删掉一行旧实现。本判据只对
+ *   **没有** `Migration:` 声明的新增能力包守指纹——不声明的提交按「全新能力」论，照旧一格不许动。
  * - **判据之前的提交**：`BEFORE_GUARD` 里的提交不判（crate 拆分本身一次性触过四棵树）。
- *   名单逐条带理由；判据之后的提交没有第二条退路。
+ *   名单逐条带理由；判据之后的提交只有上面两条退路。
  *
  * ## 失效形态（回归测试钉的是这几条）
  *
@@ -56,6 +61,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from './color.mjs'
+import { MIGRATION_RE } from './capability-migration-audit.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
@@ -105,6 +111,16 @@ export function validateBeforeGuard(entries) {
     }
   }
   return errors
+}
+
+/**
+ * 迁移批次的自声明（D-247）：正文一行 `Migration: <批次>`。这类提交里四棵树的变化是
+ * 迁移的**删除侧**——新包接管旧实现时，`loop` / `session` 的旧代码同批退场，指纹必然变；
+ * 删得对不对归 `capability-migration-audit`（EX-003）判。本判据不重复判，只守
+ * **没有**这条声明的新增能力包。
+ */
+export function isMigrationBatch(message) {
+  return MIGRATION_RE.test(String(message ?? ''))
 }
 
 function git(args) {
@@ -363,7 +379,11 @@ function main() {
   const subjects = new Map(commits.map((c) => [c.sha.slice(0, 7), subjectOf(c.message)]))
   const exempt = new Set(BEFORE_GUARD.map((e) => e.sha))
   const candidates = commits.filter(
-    (c) => c.sha !== fixtureFull && !exempt.has(c.sha.slice(0, 8)) && addedPackages(c).length > 0,
+    (c) =>
+      c.sha !== fixtureFull &&
+      !exempt.has(c.sha.slice(0, 8)) &&
+      addedPackages(c).length > 0 &&
+      !isMigrationBatch(c.message),
   )
 
   const bad = []

@@ -1,11 +1,11 @@
 //! 效果行为：一次成功的 `notes_add` ⇒ 一条 `notes.created` 草稿。
 //!
-//! 实现只交 [`FactDraft`]，**不碰事实源**：轮末的唯一写口（`loop` 的 `record_derived`）
-//! 补上轮锚与主体再落格（D-213）。行为与工具通过 `CapabilityMeta.behaviors` 的**名字**
+//! 实现只交 [`FactDraft`]，**不碰事实源**：唯一的写口（`loop` 的 `record_derived`）
+//! 补上宿主面再落格（D-213）。行为与工具通过 `CapabilityMeta.behaviors` 的**名字**
 //! 相连——宿主两侧都不认识 `notes_add` 这个工具名。
 //!
-//! 幂等键用 `EffectCall::anchor`（轮锚）+ 调用 id：同一轮重放不会把一条便签记两次，
-//! 而跨轮同名调用也不会互相吞掉。
+//! 幂等键用 `EffectCall::anchor`（宿主给的不透明词干）+ 调用 id：同一次重放不会把
+//! 一条便签记两次，而跨请求同名调用也不会互相吞掉。
 //!
 //! 前置判断（[`NoteCapture::before`]）是同一份声明的另一半：重复的便签在**执行前**
 //! 就被拒，模型看到的是「已经记过」而不是一条被幂等键悄悄吞掉的成功结果。
@@ -69,7 +69,7 @@ impl ToolBehavior for NoteCapture {
             return Vec::new();
         };
         vec![FactDraft {
-            key: format!("n-{}-{}", call.anchor(), call.call_id),
+            key: format!("n-{}-{}", call.anchor, call.call_id),
             kind: NOTES_CREATED.to_string(),
             entity: Entity::Domain,
             verb: Verb::Opened,

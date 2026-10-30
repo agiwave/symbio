@@ -11,7 +11,7 @@
 //!   `prepare_request_sections`，provider 只排版。
 //!
 //! 两个 provider 都在 `owner() == "loop"` 下提交：同一 owner 内按提交序执行。召回段
-//! 是轮首节奏、委派段是请求级节奏（D-220）——宿主先收轮首段、再收请求级段，于是
+//! 是发言级节奏、委派段是请求级节奏（D-220）——宿主先收发言级段、再收请求级段，于是
 //! 「召回在前、委派在后」与端口化之前逐字一致。
 //!
 //! 调度段不在这里：任务能力已迁出（`symbio-plugin-task`），段随它的能力包走。
@@ -52,7 +52,7 @@ impl ContextProvider for RecallProvider {
 
 /// 委派者真源段（Q1 + Q2 + Q3 合成一条）。
 ///
-/// **请求级节奏**：Q2 的能力目录要的是收集完成后的工具清单，轮首拿不到（D-220）。
+/// **请求级节奏**：Q2 的能力目录要的是收集完成后的工具清单，发言级拿不到（D-220）。
 /// 输入里的委派结论是控制面判完的值（`DelegateVerdict`）——provider 不读配置、
 /// 不重判（D-208），只交给 [`delegate::delegate_section`] 排版。
 pub(crate) struct DelegateProvider;
@@ -86,7 +86,7 @@ impl ContextProvider for DelegateProvider {
 }
 
 // 提交序 = 同节奏内的段序（同 owner 内按提交序执行）：召回在前、委派在后。
-// 调度段由 `symbio-plugin-task` 在轮首节奏下提交，owner 字典序把它排在 `loop` 之后。
+// 调度段由 `symbio-plugin-task` 在发言级节奏下提交，owner 字典序把它排在 `loop` 之后。
 symbio_plugin_api::submit_context_provider!(RecallProvider);
 symbio_plugin_api::submit_context_provider!(DelegateProvider);
 

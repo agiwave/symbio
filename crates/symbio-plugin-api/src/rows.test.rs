@@ -21,7 +21,7 @@ impl RowHandler for Recorder {
 
     fn run(&self, req: &RowRequest<'_>) -> RowStep {
         RowStep::Facts(vec![FactDraft {
-            key: format!("r-{}-{}", req.anchor(), req.key_of("id").unwrap_or("-")),
+            key: format!("r-{}-{}", req.anchor, req.key_of("id").unwrap_or("-")),
             kind: "test.indexed".to_string(),
             entity: Entity::Domain,
             verb: Verb::Asserted,
@@ -54,7 +54,7 @@ fn request_is_pure_values() {
     let req = RowRequest {
         row: "test.row",
         key: &key,
-        turn: 3,
+        anchor: "t3",
         now_ms: 7,
         principal: "session/a",
         user_seq: 42,
@@ -62,7 +62,7 @@ fn request_is_pure_values() {
     };
     assert_eq!(req.key_of("id"), Some("call-1"));
     assert_eq!(req.key_of("absent"), None);
-    assert_eq!(req.anchor(), "t3");
+    assert_eq!(req.anchor, "t3");
     let RowStep::Facts(drafts) = handler_for("test.row").unwrap().run(&req) else {
         panic!("Recorder 不请求往返");
     };
@@ -77,7 +77,7 @@ fn parse_defaults_to_no_facts() {
     let req = RowRequest {
         row: "test.row",
         key: &[],
-        turn: 1,
+        anchor: "t1",
         now_ms: 0,
         principal: "session/a",
         user_seq: 1,

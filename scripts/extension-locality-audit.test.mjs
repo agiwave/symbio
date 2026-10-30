@@ -22,6 +22,7 @@ import {
   TREES,
   addedPackages,
   fingerprints,
+  isMigrationBatch,
   judgeNewCapability,
   parseRawCommits,
   validateBeforeGuard,
@@ -65,6 +66,14 @@ test('addedPackages：只认新增的插件清单', () => {
     ],
   }
   assert.deepEqual(addedPackages(commit), ['crates/symbio-plugin-notes/PLUGIN.yml'])
+})
+
+test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-003 接管），没声明的不豁免', () => {
+  assert.equal(isMigrationBatch('feat(x): 搬家\n\nMigration: L3a'), true)
+  assert.equal(isMigrationBatch('Migration: L1\n'), true)
+  assert.equal(isMigrationBatch('feat(task): 新增能力包\n\n正文里提到 Migration 这个词但没声明行'), false)
+  assert.equal(isMigrationBatch(''), false)
+  assert.equal(isMigrationBatch(null), false)
 })
 
 test('fingerprints：与输入顺序无关', () => {

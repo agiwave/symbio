@@ -14,7 +14,7 @@ fn call<'a>(args: &'a serde_json::Value, success: bool, why: &'a str) -> EffectC
         result: "子智能体已完成",
         why,
         declared: &[behaviors::DELEGATION_PROMISE],
-        turn: 7,
+        anchor: "t7",
         user_seq: 42,
         principal: "session/a",
         source: "user",
@@ -24,7 +24,7 @@ fn call<'a>(args: &'a serde_json::Value, success: bool, why: &'a str) -> EffectC
     }
 }
 
-/// 履约：立约 + 守约两格，承诺号带轮锚（跨轮不撞幂等键）。
+/// 履约：立约 + 守约两格，承诺号带宿主给的词干（跨轮不撞幂等键）。
 #[test]
 fn kept_promise_lands_offer_and_release() {
     let args = json!({ "prompt": "评审这份设计" });

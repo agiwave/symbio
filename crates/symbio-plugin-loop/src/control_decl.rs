@@ -17,7 +17,6 @@ use symbio_core::{
 //
 // 名字、格位与声明在同一处（`EVENTS`），内核不再为它们保留常量。写方 / 读方都从
 // 这里取名字：跨模块引用不复制字面量，改名只改这一行。
-pub(crate) const EVENT_SESSION_CONFIG: &str = "session.config";
 pub(crate) const EVENT_TURN_STAGE: &str = "turn.stage";
 pub(crate) const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 pub(crate) const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
@@ -29,15 +28,20 @@ pub(crate) const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 /// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
 /// 落在 `memory × closed`；`produced_by` 指向被遗忘那条记忆的 seq。
 pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
-// 跨插件共享的四条名字（DE-024 D-204 / D-205 / D-206）：常量的**事实源是本插件清单的
+// 跨插件共享的五条名字（DE-024 D-204 / D-205 / D-206）：常量的**事实源是本插件清单的
 // `shared_events:` 行**，由 `scripts/facts/events-rs.mjs` 投影进
 // `symbio-plugin-api::events`，读侧（`session` 的 `stats` / `inbox` / `conation`，以及它调
 // `calibration_for` 时交进去的那张表）从这里取名字，而不是内核替它们命名。
 //
+// `session.config` 是**配置快照**：它进共享列表的理由与事件名不同——能力包要在收束时
+// 读自己那格开关（`readyset_cap`），而开关的现行值不住端口、住事实（DE-026 D-252）。
+// 本插件既是写方也是读方，名字仍只有一份拼写（生成物）。
+//
 // 任务族五条已随能力迁出（`symbio-plugin-task` 的 `PLUGIN.yml`），本插件不再引用它们的
 // 拼写：调度与折叠都住那个能力包，本插件不需要认识任务名。
 pub(crate) use symbio_plugin_api::events::{
-    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_TASK_CONTROLLED, EVENT_TURN_DISPATCH,
+    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_TASK_CONTROLLED,
+    EVENT_TURN_DISPATCH,
 };
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
@@ -312,6 +316,10 @@ pub(crate) const FACTS: &[FactDecl] = &[
         fields: &["text", "count", "id", "ids"],
     },
     // 本轮配置快照：决策只读它，不读 `SessionConfig` 活值。
+    //
+    // `readyset_cap` 是**就绪集的容量**（调度段的预算）。它在这里而不是在端口入参里：
+    // 开关是宿主本轮决定的那件事，能力读事实即可（DE-026 D-252）——把配置包递进能力面
+    // 会让「每个开关」都变成端口的一格。
     FactDecl {
         name: "session.config",
         port: None,
@@ -324,6 +332,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
             "progress_interval_ms",
             "progress_min_rounds",
             "progress_max_per_turn",
+            "readyset_cap",
             "is_persistent",
         ],
     },

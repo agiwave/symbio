@@ -9,7 +9,7 @@ use symbio_plugin_api::{EffectEnv, EffectInput, ToolBehavior};
 
 fn env() -> EffectEnv<'static> {
     EffectEnv {
-        turn: 3,
+        anchor: "t3",
         user_seq: 42,
         principal: "session/a",
         source: "user",
