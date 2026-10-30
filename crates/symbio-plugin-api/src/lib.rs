@@ -25,6 +25,7 @@ pub mod events;
 pub mod hooks;
 pub mod routes;
 pub mod rows;
+pub mod turn;
 pub mod view_names;
 pub mod views;
 
@@ -44,6 +45,7 @@ pub use effects::{
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_core` 的 `submit_object_creator!` 同形。
 pub use inventory;
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};
+pub use turn::{TurnContributor, TurnDraft, TurnEnd, TurnFace};
 pub use view_names::SharedViewDecl;
 pub use views::{
     read_all_from as read_shared_view_all, read_from as read_shared_view, shared as shared_views,
