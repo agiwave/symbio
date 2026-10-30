@@ -4260,6 +4260,7 @@ dependencies = [
  "serde_json",
  "symbio-core",
  "symbio-deploy",
+ "symbio-kernel",
  "tempfile",
  "tokio",
  "tracing",

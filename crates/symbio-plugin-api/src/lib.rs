@@ -65,11 +65,11 @@ pub use views::{
 // ==================== 扩展层宿主面 ====================
 // 本块是**扩展层插件唯一需要认识的宿主入口**：能力包与结构件插件只写
 // `symbio_plugin_api::…`，不再直接依赖 `symbio_core` / `symbio-kernel` / `symbio-deploy`。
-// 判据由 `plugin-surface-audit`（PS-001）执行：非控制面插件的源码与 manifest 里
+// 判据由 `plugin-surface-audit`（HS-001）执行：非控制面插件的源码与 manifest 里
 // 出现那三个前缀即判红。
 //
 // **白名单而不是通配**：白名单里每一条都能报出一个真实消费方（与 core 的 C-003 同一把
-// 尺子），新增条目要过棘轮（PS-002）。通配（`pub use symbio_core::*`）会让「插件能看见
+// 尺子），新增条目要过棘轮（HS-002）。通配（`pub use symbio_core::*`）会让「插件能看见
 // 什么」重新变成不可审的隐式集合——那正是本块要消除的东西。
 //
 // **控制面不在此列**：`loop` / `session` 按 DE-026 的影响类运行，本来就认识宿主的容器
@@ -80,6 +80,60 @@ pub use views::{
 // 不是某一条能力包的私事）。
 pub use symbio_deploy::*;
 
+// ---- 语法臂：`symbio-kernel` 的封闭语法 ----
+// 这一臂**不计债**：它是内核本来就有的共享类型（事件 / 视图 / 声明容器 / 能力元数据），
+// `symbio-kernel` 的直接依赖只有 6 个，插件经它取语法不增加任何机制面。按来源分臂之后，
+// 「一条符号属于语法还是机制」在门面上直接可读，HS-002 的棘轮只压机制臂，目标才是可判的
+// 0（D-255）。
+pub use symbio_kernel::capability::{
+    family, Capability, CapabilityCategory, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel,
+    CapabilityRow, Registry,
+};
+pub use symbio_kernel::decl::{ActorDecl, Builder, FactDecl, PluginDeclarations, ViewDecl};
+pub use symbio_kernel::event::{
+    EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+    EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
+};
+pub use symbio_kernel::exec::{
+    ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter, ABORT_SIGNAL, EVENT_SINK,
+};
+pub use symbio_kernel::keys::SymbioKey;
+pub use symbio_kernel::llm::model_provider::{
+    ModelFinishReason, ModelProvider, ModelSpend, ModelUsage,
+};
+pub use symbio_kernel::llm::{TurnOutput, TurnToolCallInfo};
+pub use symbio_kernel::plugin::error::{lock_read, lock_write, PluginError, PluginInvokeResponse};
+pub use symbio_kernel::plugin::{
+    Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginMessageWire, PluginMeta, PluginPayload, PluginPayloadWire, PluginSimpleRequest,
+    PluginStopReason, SimpleResponse, SuccessResponse,
+};
+pub use symbio_kernel::present::detail::{
+    DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
+    DetailPreset, DetailPresetSpec, DetailSection,
+};
+pub use symbio_kernel::store::{EventStore, Store};
+pub use symbio_kernel::vdfs::{
+    vdfs_derive_ext, vdfs_has_parent_segment, vdfs_path_within, DynVdfsProvider, VdfsAccess,
+    VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsItem,
+    VdfsListResponse, VdfsNewType, VdfsNode, VdfsParams, VdfsProvider, VdfsRequest, VdfsResponse,
+    VdfsResult, VdfsValidationError, VdfsWriteResponse, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
+    VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS, VDFS_ACTION_TEST, VDFS_EXT_FORM,
+    VDFS_EXT_ZIP, VDFS_KIND_DIR, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR,
+    VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_ACTIVE,
+    VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED, VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN,
+    VDFS_STATUS_WORKING,
+};
+pub use symbio_kernel::view::Budget;
+pub use symbio_kernel::{
+    ActorSpec, Entity, Event, EventDecl, FactRole, LatencyTier, Pattern, Scope, Seq, Verb,
+};
+
+// ---- 机制臂：`symbio-core` 的宿主机制 ----
+// 这一臂是**欠账**：每一条都要 core 的机制支撑（`submit_object_creator` 的链接期收集、
+// `PluginDir` 的配置 IO、`capability_invoke` 的调用栈、`vdfs_*` 的地址装配），所以
+// `symbio-plugin-api` 至今仍依赖 `symbio-core`。压缩这一臂只有一条路：把它指向的宿主子系统
+// 从 core 剥成只依赖 kernel 的层（D-253「不是搬运，是切实现面」）。
 pub use symbio_core::{
     absolute_addr, actor_can_assign_work, agent_perms_of, capability_announce_configurable,
     capability_configurables, capability_entry_of, capability_invoke, capability_model_active,
@@ -88,44 +142,24 @@ pub use symbio_core::{
     chat_node, chat_request, check_all, clock_now_ms, commitment_events, cost_ledger,
     creator_create_object, creator_has, creator_ids, descend_addr, event_bus_build_envelope,
     event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
-    event_bus_vdfs_change_of, failure_kind, family, impl_config_mount_vdfs, join_addr,
-    llm_emit_message, llm_removed_frame, llm_short_id, lock_read, lock_write, node_build,
-    plugin_debug, plugin_dir_from_ctx, plugin_error, plugin_expand_tilde_path, plugin_info,
-    plugin_warn, principal, principal_of, production_matrix, readyset_for, ring,
-    submit_object_creator, text_floor_char_boundary, text_truncate_bytes, transcript, vdfs_context,
-    vdfs_derive_ext, vdfs_from_plugin_error, vdfs_has_parent_segment, vdfs_host_ctx,
-    vdfs_notify_change, vdfs_path_within, vdfs_unwatch_changes, vdfs_watch_changes, ActorDecl,
-    ActorSpec, AddrRootDecl, AgentPermissions, AgentScope, Budget, Builder, Capability,
-    CapabilityCategory, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel, CapabilityRow,
+    event_bus_vdfs_change_of, failure_kind, impl_config_mount_vdfs, join_addr, llm_emit_message,
+    llm_removed_frame, llm_short_id, node_build, plugin_debug, plugin_dir_from_ctx, plugin_error,
+    plugin_expand_tilde_path, plugin_info, plugin_warn, principal, principal_of, production_matrix,
+    readyset_for, ring, submit_object_creator, text_floor_char_boundary, text_truncate_bytes,
+    transcript, vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change,
+    vdfs_unwatch_changes, vdfs_watch_changes, AddrRootDecl, AgentPermissions, AgentScope,
     ChatVocab, CommitmentVocab, ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan,
-    DeltaSink, DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField,
-    DetailOption, DetailPreset, DetailPresetSpec, DetailSection, DynVdfsProvider, EmbeddingService,
-    Entity, Event, EventBus, EventBusSubscribeRequest, EventDecl, EventStore, ExecAbortSignal,
-    ExecEnv, ExecEventSink, ExecTranscriptWriter, FactDecl, FactRole, FullModel, LatencyTier,
-    LlmAdapter, MessageVocab, ModelFinishReason, ModelProvider, ModelSpend, ModelUsage,
-    ParseVerdictRequest, Pattern, Plugin, PluginChannel, PluginConfigFile, PluginConfigMount,
-    PluginDeclarations, PluginDir, PluginEntry, PluginError, PluginFrame, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload,
-    PluginPayloadWire, PluginSimpleRequest, PluginStopReason, PromptMessage, ProviderLlmAdapter,
-    ReadySetView, Registry, RunSnapshot, Scope, Seq, SilentDeltas, SimpleResponse, Store,
-    SuccessResponse, SymbioKey, TaskVocab, TokenIssuer, TurnOutput, TurnToolCallInfo, VdfsAccess,
-    VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsItem,
-    VdfsListResponse, VdfsNewType, VdfsNode, VdfsParams, VdfsProvider, VdfsRequest, VdfsResponse,
-    VdfsResult, VdfsValidationError, VdfsWriteResponse, Verb, Verdict, ViewDecl, WordingReply,
-    ABORT_SIGNAL, AGENT_ID, AGENT_PERMS, CAPABILITY_VISITOR, CAP_ASSERT_VERIFICATION,
-    CAP_DEFINE_WORK, CONFIGURABLE_VISITOR, EMBEDDING_LOCAL, EVENT_BUS_KIND_SYSTEM,
-    EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
-    EVENT_RETRY, EVENT_SENT, EVENT_SINK, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
-    MODE, OPTION_VISITOR, PATH, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE,
-    PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED,
-    PLUGIN_KEY_VERSION, PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
-    REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,
-    REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED, REQUIRED_PLUGINS,
-    RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, TASK_CAP, TOOL_CALL_ID, TRACE_ID,
-    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
-    VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS, VDFS_ACTION_TEST, VDFS_EXT_FORM,
-    VDFS_EXT_ZIP, VDFS_KIND_DIR, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR,
-    VDFS_PARENT_ADDR, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD,
-    VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED, VDFS_STATUS_NONE,
-    VDFS_STATUS_UNKNOWN, VDFS_STATUS_WORKING, WORKDIR,
+    DeltaSink, EmbeddingService, EventBus, EventBusSubscribeRequest, FullModel, LlmAdapter,
+    MessageVocab, ParseVerdictRequest, PluginConfigFile, PluginConfigMount, PluginDir, PluginEntry,
+    PromptMessage, ProviderLlmAdapter, ReadySetView, RunSnapshot, SilentDeltas, TaskVocab,
+    TokenIssuer, Verdict, WordingReply, AGENT_ID, AGENT_PERMS, CAPABILITY_VISITOR,
+    CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK, CONFIGURABLE_VISITOR, EMBEDDING_LOCAL,
+    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE, MODE, OPTION_VISITOR,
+    PATH, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
+    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PRINCIPAL_MAIN,
+    PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID, REASON_ACK, REASON_CLARIFY, REASON_EMPTY,
+    REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS,
+    REASON_UNCLASSIFIED, REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, TASK_CAP,
+    TOOL_CALL_ID, TRACE_ID, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
+    WORKDIR,
 };

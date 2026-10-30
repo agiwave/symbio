@@ -58,8 +58,15 @@ export const FORBIDDEN_MANIFEST = ['symbio-core', 'symbio-kernel', 'symbio-deplo
 /** 源码里不得出现的三个前缀。 */
 export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_deploy::']
 
-/** 门面白名单条数基线：**只降不升**（HS-002）。实测低于它时打提示要求同步下调。 */
-export const WHITELIST_BASELINE = 248
+/**
+ * 机制臂条数基线：**只降不升**（HS-002）。实测低于它时打提示要求同步下调。
+ *
+ * 只数机制臂。门面按来源分两臂（D-255）：语法臂来自 `symbio-kernel`（直接依赖 6 个，
+ * 插件取共享类型不增加任何机制面），机制臂来自 `symbio-core`（每条都要宿主机制支撑）。
+ * 把语法臂计进基线，会让「欠账还剩多少」被一个与债无关的数字稀释——248 听起来离 0
+ * 很远，133 才是真实的待还量。
+ */
+export const WHITELIST_BASELINE = 133
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
@@ -100,6 +107,18 @@ export function heavyArmViolations(toml) {
 
 const BLOCK_START = 'pub use symbio_core::{'
 const BLOCK_END = '};'
+/** 语法臂：可能有多块（按 kernel 子模块分组），因此按正则全量取。 */
+const GRAMMAR_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
+
+/** 把 `a, b as c` 这类清单切成符号名（取 `as` 之后的别名）。 */
+function splitSymbols(body) {
+  return body
+    .replace(/\n/g, ' ')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => s.split(/\s+as\s+/).pop().trim())
+}
 
 /** 读出门面白名单的符号清单（块内逗号分隔）。 */
 export function readWhitelist(root) {
@@ -110,12 +129,17 @@ export function readWhitelist(root) {
   if (i < 0) return null
   const j = src.indexOf(BLOCK_END, i)
   if (j < 0) return null
-  return src
-    .slice(i + BLOCK_START.length, j)
-    .replace(/\n/g, ' ')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
+  return splitSymbols(src.slice(i + BLOCK_START.length, j))
+}
+
+/** 读出门面语法臂的符号清单（`symbio_kernel` 各分块的并集）。 */
+export function readGrammar(root) {
+  const p = path.join(root, FACADE)
+  if (!fs.existsSync(p)) return null
+  const src = fs.readFileSync(p, 'utf8')
+  const out = []
+  for (const m of src.matchAll(GRAMMAR_RE)) out.push(...splitSymbols(m[1]))
+  return out.length ? out : null
 }
 
 /** manifest 的 `[dependencies]` 段里出现的禁用键（只认段内，dev-dependencies 不判）。 */
@@ -231,16 +255,18 @@ export function run(root) {
     console.log(`${red('[ERROR]')} plugin-surface-audit：读不出门面白名单（${FACADE}）`)
     return 1
   }
+  const gram = readGrammar(root) ?? []
   const n = wl.length
   if (n > WHITELIST_BASELINE) {
     errors.push(
-      `门面白名单 ${n} 条 > 基线 ${WHITELIST_BASELINE}——HS-002 只许降（D-253）；` +
+      `门面机制臂 ${n} 条 > 基线 ${WHITELIST_BASELINE}——HS-002 只许降（D-253 / D-255）；` +
         '新增一条要把「谁消费、为什么非给插件不可」写成决策理由，并同步上调 `WHITELIST_BASELINE`',
     )
   }
 
   const used = collectConsumers(root, plugins.filter((p) => !CONTROL_PLANE.includes(p)))
-  for (const s of wl) {
+  // 两臂都判：语法臂不计债，但同样不许有空转条目——它也是门面对插件的承诺。
+  for (const s of [...wl, ...gram]) {
     if (used.has(s)) continue
     errors.push(
       `门面白名单 \`${s}\` 在扩展层插件代码里零引用——HS-003：白名单每一条都要报得出消费方` +
@@ -262,7 +288,7 @@ export function run(root) {
   if (n < WHITELIST_BASELINE) {
     console.log(
       yellow(
-        `△ HS-002 门面白名单 ${n} 条 < 基线 ${WHITELIST_BASELINE}：请把 ` +
+        `△ HS-002 门面机制臂 ${n} 条 < 基线 ${WHITELIST_BASELINE}：请把 ` +
           '`WHITELIST_BASELINE` 同步下调（账本只许降，基线跟着降才不是空转）',
       ),
     )
@@ -271,7 +297,8 @@ export function run(root) {
     green(
       `✓ HS-001 扩展层零直接依赖：${scannedPlugins} 个非控制面插件的 ${scannedFiles} 个源文件与 manifest ` +
         `没有 \`symbio_core\` / \`symbio-kernel\` / \`symbio-deploy\`（控制面 ${CONTROL_PLANE.length} 个豁免：` +
-        `${CONTROL_PLANE.join(' / ')}）· HS-002 白名单 ${n} 条（基线 ${WHITELIST_BASELINE}）` +
+        `${CONTROL_PLANE.join(' / ')}）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}）` +
+        `· 语法臂 ${gram.length} 条不计债 ` +
         `· HS-003 每条都有扩展层消费方（0 空转）· HS-004 胶水层重臂默认关闭（${HEAVY_ARM.feature}）`,
     ),
   )

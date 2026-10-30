@@ -24,7 +24,13 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-import { manifestViolations, readWhitelist, WHITELIST_BASELINE, CONTROL_PLANE } from './plugin-surface-audit.mjs'
+import {
+  CONTROL_PLANE,
+  manifestViolations,
+  readGrammar,
+  readWhitelist,
+  WHITELIST_BASELINE,
+} from './plugin-surface-audit.mjs'
 
 const script = fileURLToPath(new URL('./plugin-surface-audit.mjs', import.meta.url))
 
@@ -282,6 +288,24 @@ test('readWhitelist 解析门面块', () => {
   const root = fixture({ 'symbio-plugin-api': { rs: 'pub use symbio_core::{\n    A, B,\n    C,\n};\n' } })
   try {
     assert.deepEqual(readWhitelist(root), ['A', 'B', 'C'])
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('readGrammar 收齐多个 kernel 分块，且 `as` 取别名', () => {
+  const root = fixture({
+    'symbio-plugin-api': {
+      rs:
+        'pub use symbio_kernel::{\n    Event,\n    Seq,\n};\n' +
+        'pub use symbio_kernel::vdfs::{\n    VdfsError,\n    unavailable_reason as vdfs_unavailable_reason,\n};\n' +
+        'pub use symbio_core::{\n    PluginDir,\n};\n',
+    },
+  })
+  try {
+    // 语法臂按来源分块，读的时候必须全收——只读第一块会让多半语法臂逃过 HS-003。
+    assert.deepEqual(readGrammar(root), ['Event', 'Seq', 'VdfsError', 'vdfs_unavailable_reason'])
+    assert.deepEqual(readWhitelist(root), ['PluginDir'])
   } finally {
     rmTree(root)
   }
