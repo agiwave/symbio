@@ -230,7 +230,7 @@ board.columns: [impl]
 | [`DE-111-INTERACTION`](../../tauri/docs/111-INTERACTION.md) | 前端交互面（用户视角） | 与代码一致 |
 | [`DE-112-architecture`](../../crates/symbio-cli/docs/112-architecture.md) | 架构 | 与代码一致 |
 | [`DE-113-heartbeat-mechanism`](../../crates/symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） | 与代码一致 |
-| [`crates/symbio-core/README`](../../crates/symbio-core/README.md) | symbio_core —— 内核契约层：命名与结构规范 | 与代码一致 |
+| [`crates/symbio-core/README`](../../crates/symbio-core/README.md) | symbio_core —— 控制面运行时：命名与结构规范 | 与代码一致 |
 | [`crates/symbio-plugin-agent/README`](../../crates/symbio-plugin-agent/README.md) | Agent 插件 | 与代码一致 |
 | [`crates/symbio-plugin-classify/README`](../../crates/symbio-plugin-classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
 | [`crates/symbio-plugin-compose/README`](../../crates/symbio-plugin-compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |

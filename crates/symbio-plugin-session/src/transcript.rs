@@ -46,7 +46,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use symbio_core::chat_node as cm;
 use symbio_core::{VdfsChange, VdfsChangeSubscriptions};
-use {symbio_core::plugin_debug, symbio_core::plugin_error, symbio_core::plugin_info};
+use {
+    symbio_plugin_api::plugin_debug, symbio_plugin_api::plugin_error,
+    symbio_plugin_api::plugin_info,
+};
 
 /// 自主触发落格：「这次开轮是系统自己发起的」在事实源里的样子（归属理由见模块头）。
 pub(crate) mod autonomous;

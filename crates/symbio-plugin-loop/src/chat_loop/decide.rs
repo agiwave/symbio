@@ -99,7 +99,7 @@ pub(crate) async fn decide_turn(
         })
         .is_err()
     {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[Classify] 判决载荷装不进请求，本轮直接进工具循环"
         );
@@ -113,7 +113,7 @@ pub(crate) async fn decide_turn(
         Ok(payload) => match payload.get::<DecideOutcome>() {
             Ok(outcome) => outcome,
             Err(e) => {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[Classify] 判决载荷不是合法契约，按「无判决」处理：{e}"
                 );
@@ -125,14 +125,17 @@ pub(crate) async fn decide_turn(
         },
         Err(PluginError::NotFound(_)) => {
             // 未挂载 / 已停用：这正是「卸载平凡值」的形态，不是故障。
-            symbio_core::plugin_debug!("session", "[Classify] 未挂载判决插件，本轮直接进工具循环");
+            symbio_plugin_api::plugin_debug!(
+                "session",
+                "[Classify] 未挂载判决插件，本轮直接进工具循环"
+            );
             return Decision {
                 verdict: None,
                 model_calls: 0,
             };
         }
         Err(e) => {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Classify] 判决调用失败，本轮直接进工具循环：{e}"
             );
@@ -171,7 +174,7 @@ async fn decide_by_model(
 ) -> Decision {
     // ① 模型服务：找服务在派发**之前**——找不到就没有这次往返，也就没有账。
     let Some(provider) = resolve_provider(ctx, plan.model_id.as_deref()).await else {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[Classify] 没有可用的模型服务，本轮按「判不出来」处理"
         );
@@ -183,7 +186,7 @@ async fn decide_by_model(
     // ② 事实源：没有它就没有账可记。持久轮的事实源由 `begin_drive` 保证（临时会话
     //    在那里就被拦下），这一段只是把「拦下之前」的形态说清楚。
     let Some(store) = context.session.facts() else {
-        symbio_core::plugin_warn!("session", "[Classify] 本会话没有事实源，判决往返不入账");
+        symbio_plugin_api::plugin_warn!("session", "[Classify] 本会话没有事实源，判决往返不入账");
         return Decision {
             verdict: Some(escalate_unclassified()),
             model_calls: 0,
@@ -267,7 +270,7 @@ async fn parse_reply(
         })
         .is_err()
     {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[Classify] 判决解析载荷装不进请求，按「判不出来」处理"
         );
@@ -277,7 +280,7 @@ async fn parse_reply(
         Ok(payload) => match payload.get::<Verdict>() {
             Ok(verdict) => verdict,
             Err(e) => {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[Classify] 判决解析载荷不是合法契约，按「判不出来」处理：{e}"
                 );
@@ -285,7 +288,7 @@ async fn parse_reply(
             }
         },
         Err(e) => {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Classify] 判决解析失败，按「判不出来」处理：{e}"
             );

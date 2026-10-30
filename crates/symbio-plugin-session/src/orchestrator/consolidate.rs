@@ -95,7 +95,7 @@ pub(crate) fn consolidate_into_wal(
     let seq = match store.append(event) {
         Ok(seq) => seq,
         Err(e) => {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Session] 压缩入格失败（压缩已生效，事实源缺这一格）: {e:?}"
             );
@@ -106,7 +106,7 @@ pub(crate) fn consolidate_into_wal(
     // 增长优化、不是正确性前提；没被取代的那段一字未动（见 `archive_before` 的崩溃安全说明）。
     match store.archive_before(seq) {
         Ok(_) => {}
-        Err(e) => symbio_core::plugin_warn!(
+        Err(e) => symbio_plugin_api::plugin_warn!(
             "session",
             "[Session] 压缩归档失败（事实源保持完整，仅未缩短）: {e}"
         ),
@@ -148,7 +148,7 @@ pub(crate) fn consolidate_outside_turn(
         Err(why) => {
             // 打不开与「没有事实源」是两种处置——前者要出声（压缩已生效、
             // 事实源缺这一格），后者（临时会话）本就无事可落。
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Session] 轮外压缩入格：事实源打不开（压缩已生效，事实源缺这一格）: {why}"
             );

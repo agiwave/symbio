@@ -53,10 +53,10 @@ import { stripRustCode } from './extension-vocab-audit.mjs'
 export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-loop', 'symbio-plugin-session']
 
 /** 扩展层插件不得直接依赖的三个 crate（manifest 键名）。 */
-export const FORBIDDEN_MANIFEST = ['symbio-core', 'symbio-kernel', 'symbio-deploy']
+export const FORBIDDEN_MANIFEST = ['symbio-core', 'symbio-kernel', 'symbio-sdk', 'symbio-deploy']
 
 /** 源码里不得出现的三个前缀。 */
-export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_deploy::']
+export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_sdk::', 'symbio_deploy::']
 
 /**
  * 机制臂条数基线：**只降不升**（HS-002）。实测低于它时打提示要求同步下调。
@@ -66,7 +66,7 @@ export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_d
  * 把语法臂计进基线，会让「欠账还剩多少」被一个与债无关的数字稀释——248 听起来离 0
  * 很远，133 才是真实的待还量。
  */
-export const WHITELIST_BASELINE = 115
+export const WHITELIST_BASELINE = 72
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
@@ -109,6 +109,12 @@ const BLOCK_START = 'pub use symbio_core::{'
 const BLOCK_END = '};'
 /** 语法臂：可能有多块（按 kernel 子模块分组），因此按正则全量取。 */
 const GRAMMAR_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
+/**
+ * SDK 臂：同样按模块分组、可能有多块（D-258）。它**不计债**——这些机制只依赖内核，
+ * 插件取它们不增加「要认识整个宿主」的代价——但它是门面对插件的承诺，所以和语法臂
+ * 一样受 HS-003 管（每一条都要报得出消费方）。
+ */
+const SDK_RE = /pub use symbio_sdk(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
 
 /** 把 `a, b as c` 这类清单切成符号名（取 `as` 之后的别名）。 */
 function splitSymbols(body) {
@@ -139,6 +145,16 @@ export function readGrammar(root) {
   const src = fs.readFileSync(p, 'utf8')
   const out = []
   for (const m of src.matchAll(GRAMMAR_RE)) out.push(...splitSymbols(m[1]))
+  return out.length ? out : null
+}
+
+/** 读出门面 SDK 臂的符号清单（`symbio_sdk` 各分块的并集）。 */
+export function readSdkArm(root) {
+  const p = path.join(root, FACADE)
+  if (!fs.existsSync(p)) return null
+  const src = fs.readFileSync(p, 'utf8')
+  const out = []
+  for (const m of src.matchAll(SDK_RE)) out.push(...splitSymbols(m[1]))
   return out.length ? out : null
 }
 
@@ -256,6 +272,7 @@ export function run(root) {
     return 1
   }
   const gram = readGrammar(root) ?? []
+  const sdk = readSdkArm(root) ?? []
   const n = wl.length
   if (n > WHITELIST_BASELINE) {
     errors.push(
@@ -266,7 +283,7 @@ export function run(root) {
 
   const used = collectConsumers(root, plugins.filter((p) => !CONTROL_PLANE.includes(p)))
   // 两臂都判：语法臂不计债，但同样不许有空转条目——它也是门面对插件的承诺。
-  for (const s of [...wl, ...gram]) {
+  for (const s of [...wl, ...gram, ...sdk]) {
     if (used.has(s)) continue
     errors.push(
       `门面白名单 \`${s}\` 在扩展层插件代码里零引用——HS-003：白名单每一条都要报得出消费方` +
@@ -296,9 +313,9 @@ export function run(root) {
   console.log(
     green(
       `✓ HS-001 扩展层零直接依赖：${scannedPlugins} 个非控制面插件的 ${scannedFiles} 个源文件与 manifest ` +
-        `没有 \`symbio_core\` / \`symbio-kernel\` / \`symbio-deploy\`（控制面 ${CONTROL_PLANE.length} 个豁免：` +
+        `没有 \`symbio_core\` / \`symbio-kernel\` / \`symbio-sdk\` / \`symbio-deploy\`（控制面 ${CONTROL_PLANE.length} 个豁免：` +
         `${CONTROL_PLANE.join(' / ')}）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}）` +
-        `· 语法臂 ${gram.length} 条不计债 ` +
+        `· 语法臂 ${gram.length} 条不计债 · SDK 臂 ${sdk.length} 条不计债 ` +
         `· HS-003 每条都有扩展层消费方（0 空转）· HS-004 胶水层重臂默认关闭（${HEAVY_ARM.feature}）`,
     ),
   )

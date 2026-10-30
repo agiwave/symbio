@@ -183,13 +183,13 @@ fn park(store_dir: &Path, change: &ParkedChange) -> Result<(), String> {
         // 窗口出现——那是比溢出更该被看见的缺陷，故告警而不是静默截断。
         let dropped = &parked[0];
         if let Err(e) = std::fs::remove_file(dropped) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[message] 寄存区已满且最旧一件删不掉（{}）：{e}",
                 dropped.display()
             );
         }
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[message] 寄存区已满（{PARK_CAP}），丢弃最旧的一件寄存变更\
              ——没有持写者令牌的窗口出现，请排查"
@@ -262,7 +262,7 @@ pub fn drain_parked(store: &EventWalStore, session_id: &str) {
             continue;
         }
         let Ok(bytes) = std::fs::read(&path) else {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[message] 寄存件读不出来，已放弃（{}）——该次变更丢失",
                 path.display()
@@ -271,7 +271,7 @@ pub fn drain_parked(store: &EventWalStore, session_id: &str) {
             continue;
         };
         let Ok(change) = serde_json::from_slice::<ParkedChange>(&bytes) else {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[message] 寄存件不是合法形状，已放弃（{}）——该次变更丢失",
                 path.display()
@@ -292,7 +292,7 @@ pub fn drain_parked(store: &EventWalStore, session_id: &str) {
                 if let Err(e) = std::fs::remove_file(&path) {
                     // 已经落了，删不掉只是下一次多问一次幂等键（`Duplicate`），
                     // 不是正确性问题——故 warn 而不改判。
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "session",
                         "[message] 寄存件已补落但删不掉（{}）：{e}",
                         path.display()
@@ -303,7 +303,7 @@ pub fn drain_parked(store: &EventWalStore, session_id: &str) {
             Err(TryAppendError::NotWriter) => return,
             // 无锚：寄存救不了它（这个会话从未走过 v2），也不能让它永远堆在寄存区里。
             Err(TryAppendError::NoAnchor) => {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[message] 寄存的变更补落时无可用溯源锚，已放弃（{} {}）",
                     change.kind,
@@ -313,7 +313,7 @@ pub fn drain_parked(store: &EventWalStore, session_id: &str) {
             }
             // 真失败：补落没有第二次机会（调用方早已把回执发给了用户），出声并出队。
             Err(TryAppendError::Failed(why)) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "[message] 寄存的变更补落失败，该次变更已丢失（重建后不可见）：{}",
                     why
@@ -569,7 +569,7 @@ fn append_into(
         // 寄存也救不了它：补落时切片至少含本轮开轮事件（锚必然可解），但**本轮
         // 之前**就是空切片的话，说明这个会话从未走过 v2——那时「编辑一条 v1 遗留
         // 消息」本就无锚可指，与「令牌被占」是两回事，故仍按 Discarded 出声。
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[message] 变更事实未入格（会话 {session_id}）：切片内没有可用的溯源锚（{kind} {target}）"
         );

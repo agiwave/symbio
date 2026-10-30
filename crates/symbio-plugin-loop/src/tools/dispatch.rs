@@ -39,7 +39,9 @@ use symbio_core::{
 };
 use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
-use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
+use {
+    symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
+};
 
 pub(crate) use self::gates::GateReadings;
 // 闸门表与拒止骨架：逐条执行段按 `first_refusal` 判、经 `refuse` 收口。

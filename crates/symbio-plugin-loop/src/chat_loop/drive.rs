@@ -330,7 +330,7 @@ fn open_drive(
             now_ms,
         ) {
             // 收租失败不阻断新局面：那一笔欠账仍然在日志里开着（不静默当它死了）。
-            symbio_core::plugin_warn!("session", "[Loop] 租约看护失败（继续开新幕）: {e:?}");
+            symbio_plugin_api::plugin_warn!("session", "[Loop] 租约看护失败（继续开新幕）: {e:?}");
         }
     }
     let settings = context.session.settings();

@@ -130,7 +130,7 @@ impl SessionPlugin {
             if let Some(state) = sessions.get(session_id) {
                 let inner = state.inner.read().await;
                 if inner.is_working() || inner.preempt != PreemptPending::None {
-                    symbio_core::plugin_info!(
+                    symbio_plugin_api::plugin_info!(
                         "session",
                         "[Autonomous] 会话 {} 有写方在写，本次触发不落格（下个 tick 重试）",
                         session_id
@@ -144,7 +144,7 @@ impl SessionPlugin {
         let store = match self.get_store().await {
             Ok(store) => store,
             Err(e) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "[Autonomous] 会话 {} 存储句柄不可用：{}",
                     session_id,
@@ -159,7 +159,7 @@ impl SessionPlugin {
         let store = match store.facts(session_id) {
             Ok(Some(store)) => store,
             Ok(None) => {
-                symbio_core::plugin_info!(
+                symbio_plugin_api::plugin_info!(
                     "session",
                     "[Autonomous] 会话 {} 还没有事实源，本次不触发（无可指的溯源锚）",
                     session_id
@@ -167,7 +167,7 @@ impl SessionPlugin {
                 return false;
             }
             Err(e) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "[Autonomous] 会话 {} 事实源开档失败：{}",
                     session_id,
@@ -178,7 +178,7 @@ impl SessionPlugin {
         };
         let head = store.head().value();
         if head == 0 {
-            symbio_core::plugin_info!(
+            symbio_plugin_api::plugin_info!(
                 "session",
                 "[Autonomous] 会话 {} 还没有事实源，本次不触发（无可指的溯源锚）",
                 session_id
@@ -191,7 +191,7 @@ impl SessionPlugin {
         let triggered_seq = match store.append(initiator.trigger(anchor)) {
             Ok(seq) => seq.value(),
             Err(e) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "[Autonomous] 触发事实未入格（会话 {}）：{:?}",
                     session_id,
@@ -202,7 +202,7 @@ impl SessionPlugin {
         };
         // 自检紧跟触发：触发是主事实，自检是这次触发的观测附录（`system × progressed`）。
         if let Err(e) = store.append(initiator.health_event(triggered_seq, idle_ms)) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Autonomous] 健康自检未入格（会话 {}）：{:?}",
                 session_id,
@@ -214,7 +214,7 @@ impl SessionPlugin {
         let conation_seq = match store.append(initiator.express_intent(goal, triggered_seq)) {
             Ok(seq) => seq.value(),
             Err(e) => {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[Autonomous] 意图未入格（会话 {}）：{:?}",
                     session_id,
@@ -227,7 +227,7 @@ impl SessionPlugin {
         // 回读刚落格的那一条：候选的唯一构造路径要读 `seq`，而本地副本还是 pending。
         let source = store.range(Seq::new(conation_seq)).into_iter().next();
         let Some(source) = source else {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Autonomous] 意图回读不到（会话 {}，seq {}）",
                 session_id,
@@ -236,7 +236,7 @@ impl SessionPlugin {
             return true;
         };
         let Some(mut candidate) = ConationCandidate::from_event(&source) else {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Autonomous] 意图构造不出候选（会话 {}）",
                 session_id
@@ -264,7 +264,7 @@ impl SessionPlugin {
                     let opened =
                         initiator.open_long_goal(&task_id, approved.goal(), approved.source_seq());
                     if let Err(e) = store.append(opened) {
-                        symbio_core::plugin_error!(
+                        symbio_plugin_api::plugin_error!(
                             "session",
                             "[Autonomous] 长目标未入格（会话 {}）：{:?}",
                             session_id,
@@ -274,7 +274,7 @@ impl SessionPlugin {
                 }
             }
             Err(reason) => {
-                symbio_core::plugin_info!(
+                symbio_plugin_api::plugin_info!(
                     "session",
                     "[Autonomous] 意图闸门拒绝（会话 {}）：{}",
                     session_id,

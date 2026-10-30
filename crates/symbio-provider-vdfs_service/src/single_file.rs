@@ -109,7 +109,7 @@ impl SingleFileVdfs {
         match entry::remove_entry(&self.base, id).await {
             Ok(()) => {}
             Err(VdfsError::NotFound(_)) => {
-                symbio_core::plugin_warn!(&self.kind, "磁盘上已无条目 {id} 目录，仅清理内存");
+                symbio_sdk::plugin_warn!(&self.kind, "磁盘上已无条目 {id} 目录，仅清理内存");
             }
             Err(e) => return Err(e),
         }

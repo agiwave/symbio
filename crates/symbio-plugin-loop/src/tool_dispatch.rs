@@ -477,7 +477,7 @@ impl ToolPort {
         let has_calls = latest.is_some_and(|e| e.payload.get("calls").is_some());
         // obligation-precheck OB-004: 执行体（OPENER）动手前的复核——同一批被 resume / 重放第二次带进来时，创建行已由 `until` 关掉，早退避免重复落 `request`（不是第二套调度：这里不选行、不排行，只问本行还欠不欠）
         if has_calls && !loop_rows::owes("open-tools", &facts, self.turn, self.now_ms(&facts)) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Tool] 创建行不欠（turn={}），不落 request",
                 self.turn
@@ -570,7 +570,7 @@ impl ToolPort {
                 "deferred": deferred,
             }),
         ) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Tool] 工具请求事实未落格（turn={} / {model_id}）：{e:?}",
                 self.turn
@@ -610,7 +610,7 @@ impl ToolPort {
         let facts = self.facts.range(Seq::new(0));
         // obligation-precheck OB-004: 执行体（AUTHORIZER）动手前的复核——批内授权与策略变更后的续跑共用这份实体，第二次进入时授权行已落事实、不再欠，早退避免重复判放行
         if !loop_rows::owes("authorize-tool", &facts, self.turn, self.now_ms(&facts)) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Tool] 授权行不欠（turn={}），不判放行",
                 self.turn
@@ -663,7 +663,7 @@ impl ToolPort {
                         },
                     ),
                 ) {
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "session",
                         "[Tool] 放行事实未落格（turn={} / {}）：{e:?}",
                         self.turn,
@@ -687,7 +687,7 @@ impl ToolPort {
                     self.facts.as_ref(),
                     denied_event(self.turn, self.user_seq, &call.call, &call.name, why),
                 ) {
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "session",
                         "[Tool] 拒绝事实未落格（turn={} / {}）：{e:?}",
                         self.turn,
@@ -730,7 +730,7 @@ impl ToolPort {
             ) {
                 Ok(()) => call.sent = true,
                 Err(port::DispatchError::NotOwed(row)) => {
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "session",
                         "[Tool] 派发行 `{row}` 不欠（turn={} / {}），不落 sent",
                         self.turn,
@@ -744,7 +744,7 @@ impl ToolPort {
                         "dispatch_row_not_owed",
                     );
                 }
-                Err(e) => symbio_core::plugin_warn!(
+                Err(e) => symbio_plugin_api::plugin_warn!(
                     "session",
                     "[Tool] 工具 sent 未落格（turn={} / {}）：{e:?}",
                     self.turn,
@@ -923,7 +923,7 @@ impl ToolPort {
         let facts = self.facts.range(Seq::new(0));
         // obligation-precheck OB-004: 执行体（AUTHORIZER）动手前的复核——唤醒路径与批内授权是两个入口进同一次判定，行已不欠说明这轮的放行落过事实，早退避免重复写授权格
         if !loop_rows::owes("authorize-tool", &facts, self.turn, self.now_ms(&facts)) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Tool] 授权行不欠（turn={}），不判唤醒放行",
                 self.turn
@@ -961,7 +961,7 @@ impl ToolPort {
                 )
             };
             if let Err(e) = written {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[Tool] 唤醒授权事实未落格（turn={} / {}）：{e:?}",
                     self.turn,
@@ -1017,7 +1017,7 @@ impl ToolPort {
         if answered {
             if let Err(e) = port::succeed(self.facts.as_ref(), &call.call, self.turn, self.user_seq)
             {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[Tool] 工具应答事实未落格（turn={} / {}）：{e:?}",
                     self.turn,
@@ -1042,7 +1042,7 @@ impl ToolPort {
             self.user_seq,
             why,
         ) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Tool] 工具失败事实未落格（turn={} / {}）：{e:?}",
                 self.turn,

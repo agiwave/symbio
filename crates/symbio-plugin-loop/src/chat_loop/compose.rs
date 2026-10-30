@@ -102,7 +102,7 @@ pub(crate) async fn apply_verdict(
     // `Answered` 降级进工具循环，`Escalate` 没有首响，`Report` 什么都没说。
     // 三条都在下面自然成立。
     if !orchestrator.compose_enabled {
-        symbio_core::plugin_debug!("session", "[Compose] 措辞未启用，本轮不产出对话面文本");
+        symbio_plugin_api::plugin_debug!("session", "[Compose] 措辞未启用，本轮不产出对话面文本");
         return (VerdictEffect::Silent, None);
     }
 
@@ -117,7 +117,7 @@ pub(crate) async fn apply_verdict(
             };
             let Some(reply) = reply else {
                 // 判决说能直接答，但没人能说话 ⇒ **降级进工具循环**（不沉默）。
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[Compose] 判决为 Answered（reason={reason}）但取不到措辞，本轮降级进工具循环"
                 );
@@ -139,7 +139,7 @@ pub(crate) async fn apply_verdict(
             // 本开关只削派活前的这一句旁白（机制化前端的 Typing 占位已接管"有动静"
             // 的职责，这句模板话与执行过程信息重复）。
             if !orchestrator.opening_enabled {
-                symbio_core::plugin_debug!(
+                symbio_plugin_api::plugin_debug!(
                     "session",
                     "[Compose] 开场白未启用，Escalate 本轮不写首响"
                 );
@@ -246,7 +246,7 @@ async fn wording_round_trip(
     {
         Ok(reply) => reply,
         Err(e) => {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Compose] 答话往返的端口记账失败（本轮不短路）: {e}"
             );
@@ -305,7 +305,7 @@ async fn compose_text_from(
             }
             Ok(reply) => Some(reply),
             Err(e) => {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[Compose] 措辞载荷不是合法契约，按「无措辞」处理：{e}"
                 );
@@ -314,11 +314,14 @@ async fn compose_text_from(
         },
         Err(PluginError::NotFound(_)) => {
             // 未挂载 / 已停用：这正是「卸载平凡值」的形态，不是故障。
-            symbio_core::plugin_debug!("session", "[Compose] 未挂载措辞插件，本轮不产出对话面文本");
+            symbio_plugin_api::plugin_debug!(
+                "session",
+                "[Compose] 未挂载措辞插件，本轮不产出对话面文本"
+            );
             None
         }
         Err(e) => {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Compose] 措辞调用失败，本轮不产出对话面文本：{e}"
             );
@@ -344,7 +347,7 @@ pub(crate) async fn report_text(
     snapshot: &RunSnapshot,
 ) -> Option<String> {
     if !orchestrator.compose_enabled {
-        symbio_core::plugin_debug!("session", "[Compose] 措辞未启用，本轮不汇报");
+        symbio_plugin_api::plugin_debug!("session", "[Compose] 措辞未启用，本轮不汇报");
         return None;
     }
     // 汇报是**模板**产线（零模型往返），思考事实恒 `None`，这里只取文本。

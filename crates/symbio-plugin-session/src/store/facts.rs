@@ -189,7 +189,7 @@ impl SessionStore {
                     continue;
                 }
                 if md.len() > RECALL_MAX_FILE_BYTES {
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "session",
                         "[memory] 召回跳过超大事实源（{} B > 上限 {} B）：{}",
                         md.len(),
@@ -222,7 +222,7 @@ impl SessionStore {
                     own,
                     events: store.range(Seq::new(0)),
                 }),
-                Err(e) => symbio_core::plugin_warn!(
+                Err(e) => symbio_plugin_api::plugin_warn!(
                     "session",
                     "[memory] 召回读取失败（{}）：{e}",
                     wal.display()
@@ -246,7 +246,7 @@ impl SessionStore {
             .filter_map(|wal| match EventWalStore::open_readonly(&wal) {
                 Ok(store) => Some(store.range(Seq::new(0))),
                 Err(e) => {
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "session",
                         "[facts] 部署级扫描跳过打不开的事实源（{}）：{e}",
                         wal.display()

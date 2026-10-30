@@ -18,10 +18,18 @@
 //! - [`view_names`]：`shared_views` 清单生成物（哪些视图公开可读）
 //!
 //! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、机制入口与
-//! 装配常量，逐条转发、逐条可审。插件因此只写 `symbio_plugin_api::…`，manifest 里也不
-//! 再列 `symbio-core` / `symbio-kernel` / `symbio-deploy`；控制面（`loop` / `session`）
+//! 装配常量，逐条转发、逐条可审。按**来源**分三臂（D-255 / D-258）：
+//!
+//! | 臂 | 来源 | 性质 |
+//! |---|---|---|
+//! | 语法臂 | `symbio-kernel` | 形状与闭集，**不计债** |
+//! | SDK 臂 | `symbio-sdk` | 只碰内核词汇的宿主机制，**不计债** |
+//! | core 臂 | `symbio-core` | 还欠着的机制（认识容器概念），条数只许降 |
+//!
+//! 插件因此只写 `symbio_plugin_api::…`，manifest 里也不列 `symbio-core` /
+//! `symbio-kernel` / `symbio-sdk` / `symbio-deploy`；控制面（`loop` / `session`）
 //! 不在此列，它们按影响类运行、本来就认识宿主的容器概念（D-253）。判据是
-//! `plugin-surface-audit`（HS-001 零直接依赖 / HS-002 白名单只许降 / HS-003 无空转条目）。
+//! `plugin-surface-audit`（HS-001 零直接依赖 / HS-002 core 臂只许降 / HS-003 无空转条目）。
 //!
 //! 插件不得依赖宿主 crate（`symbio`）——那会形成「插件 ← 宿主 ← 插件」的环。
 //! `declarations` 只依赖 `symbio_core` 的声明容器，不认识任何具体插件；收集在链接期
@@ -139,28 +147,41 @@ pub use symbio_kernel::{
 // `PluginDir` 的配置 IO、`capability_invoke` 的调用栈、`vdfs_*` 的地址装配），所以
 // `symbio-plugin-api` 至今仍依赖 `symbio-core`。压缩这一臂只有一条路：把它指向的宿主子系统
 // 从 core 剥成只依赖 kernel 的层（D-253「不是搬运，是切实现面」）。
+// ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core，D-258） ----
+// 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、
+// 对象构造器的链接期登记、日志与协议键。它们与「插件要用一条机制」是同一件事，
+// 与「插件要认识整个宿主」被绑成同一件事。SDK 把这条绑定切开：这一臂只依赖内核。
 pub use symbio_core::{
-    absolute_addr, actor_can_assign_work, agent_perms_of, capability_announce_configurable,
+    actor_can_assign_work, agent_perms_of, capability_announce_configurable,
     capability_configurables, capability_entry_of, capability_invoke, capability_model_active,
     capability_model_resolve, capability_option_fields, capability_prompts,
     capability_report_error, capability_take_errors, capability_to_wire, capability_vdfs_root,
-    chat_node, chat_request, check_all, clock_now_ms, commitment_events, cost_ledger,
-    creator_create_object, creator_has, creator_ids, descend_addr, event_bus_build_envelope,
-    event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
-    event_bus_vdfs_change_of, failure_kind, impl_config_mount_vdfs, join_addr, llm_emit_message,
-    llm_removed_frame, llm_short_id, node_build, plugin_debug, plugin_dir_from_ctx, plugin_error,
-    plugin_expand_tilde_path, plugin_info, plugin_warn, principal, principal_of, production_matrix,
-    readyset_for, ring, submit_object_creator, text_floor_char_boundary, text_truncate_bytes,
-    transcript, vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change,
-    vdfs_unwatch_changes, vdfs_watch_changes, AddrRootDecl, AgentPermissions, AgentScope,
-    ChatVocab, CommitmentVocab, DeltaSink, EmbeddingService, EventBus, EventBusSubscribeRequest,
-    FullModel, LlmAdapter, MessageVocab, PluginConfigFile, PluginConfigMount, PluginDir,
-    PluginEntry, ProviderLlmAdapter, ReadySetView, SilentDeltas, TaskVocab, TokenIssuer, AGENT_ID,
-    AGENT_PERMS, CAPABILITY_VISITOR, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK,
-    CONFIGURABLE_VISITOR, EMBEDDING_LOCAL, EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS,
-    EVENT_BUS_RESYNC_MARKER_TYPE, MODE, OPTION_VISITOR, PATH, PLUGIN_DIR, PLUGIN_FILE,
-    PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
+    chat_node, chat_request, check_all, commitment_events, cost_ledger, failure_kind,
+    impl_config_mount_vdfs, llm_emit_message, llm_removed_frame, llm_short_id, node_build,
+    plugin_dir_from_ctx, plugin_expand_tilde_path, principal, principal_of, production_matrix,
+    readyset_for, ring, transcript, AgentPermissions, AgentScope, ChatVocab, CommitmentVocab,
+    DeltaSink, EmbeddingService, FullModel, LlmAdapter, MessageVocab, PluginConfigFile,
+    PluginConfigMount, PluginDir, PluginEntry, ProviderLlmAdapter, ReadySetView, SilentDeltas,
+    TaskVocab, TokenIssuer, AGENT_PERMS, CAPABILITY_VISITOR, CAP_ASSERT_VERIFICATION,
+    CAP_DEFINE_WORK, CONFIGURABLE_VISITOR, EMBEDDING_LOCAL, OPTION_VISITOR, PLUGIN_DIR,
+    PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
     PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER,
-    PROVIDER_ID, REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, TASK_CAP, TOOL_CALL_ID,
-    TRACE_ID, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
+    TASK_CAP, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
+pub use symbio_sdk::clock::clock_now_ms;
+pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
+pub use symbio_sdk::event_bus::{
+    event_bus_build_envelope, event_bus_register_subscriber, event_bus_resync_of,
+    event_bus_unregister_subscriber, event_bus_vdfs_change_of, EventBus, EventBusSubscribeRequest,
+    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
+};
+pub use symbio_sdk::keys::{
+    AGENT_ID, MODE, PATH, PROVIDER_ID, REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID,
+    TOOL_CALL_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
+};
+pub use symbio_sdk::text::{text_floor_char_boundary, text_truncate_bytes};
+pub use symbio_sdk::vdfs::{
+    absolute_addr, descend_addr, join_addr, vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx,
+    vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, AddrRootDecl,
+};
+pub use symbio_sdk::{plugin_debug, plugin_error, plugin_info, plugin_warn, submit_object_creator};

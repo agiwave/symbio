@@ -247,7 +247,7 @@ impl SessionPlugin {
                 super::super::message_events::drain_parked(&store, session.session_id())
             }
             Ok(None) => {}
-            Err(why) => symbio_core::plugin_warn!(
+            Err(why) => symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Session] 寄存变更补落：事实源打不开（该次变更仍寄存）: {why}"
             ),
@@ -384,7 +384,7 @@ async fn run_replace_all(
     // 前端永久停在压缩前的列表上。
     // list-write-fact-allow LWF-002: 地址面中继无锚可持——取代事实的寄存发生在逻辑调用方（loop 压缩现场 `context/pipeline.rs` 的 `context.consolidated = Some(...)`），本层只执行跨插件转发。
     if let Err(e) = session.replace_all(nodes).await {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "压缩快照缓存落库失败（内存已生效，重启后回退到压缩前）: {e}"
         );
@@ -574,7 +574,7 @@ async fn run_compression_finish(
         }
         Ok(_) => action_data(op, "压缩节点已定稿".to_string(), node),
         Err(err) => {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Compress] 压缩节点落库失败（前端已收到终态）: {err}"
             );

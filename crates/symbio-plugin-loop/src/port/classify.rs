@@ -100,7 +100,10 @@ where
         Err(e) => {
             // 派发没成（模型没答成 / 行不欠 / 落格失败）：判决退回 `Escalate`——
             // **沉默是最坏的失败形态**（用户什么都收不到，且没有错误信号）。
-            symbio_core::plugin_warn!("session", "[Classify] 判决往返未成，按 Escalate 处理：{e}");
+            symbio_plugin_api::plugin_warn!(
+                "session",
+                "[Classify] 判决往返未成，按 Escalate 处理：{e}"
+            );
             Decision {
                 verdict: escalate_unclassified(),
                 model_calls: calls.load(Ordering::SeqCst),

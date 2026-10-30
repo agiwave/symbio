@@ -373,7 +373,7 @@ impl AgentScope {
         agent_perms_init_slot(ctx);
         if let Some(slot) = ctx.get(AGENT_PERMS) {
             if slot.set(self.clone()).is_err() {
-                crate::plugin_warn!(
+                symbio_sdk::plugin_warn!(
                     "agent",
                     "权限作用域重复发布（同一趟收集里两个 Agent？）——保留先到的那一份"
                 );

@@ -492,7 +492,7 @@ impl UiBridge {
         // 静默**：静默的失效与「没有这个同步点」在日志里长得一模一样，下次有人把它
         // 一起删掉也不会有人察觉。`grep-audit` 的 S-002-bonus 因此判它是业务路径吞错。
         if let Err(e) = wait.await {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[v2] UI 桥屏障未完成（emitter 已退出：{}）⇒ 定格帧可能未落出口，时序无法保证",
                 e
@@ -1471,7 +1471,7 @@ pub(crate) fn land_retry_branch(
             .with_produced_by(turn.user_seq),
         )
         .map_err(ActorError::Append)?;
-    symbio_core::plugin_info!(
+    symbio_plugin_api::plugin_info!(
         "session",
         "[Branch] 新支 {} 挂到 {} 之下（seq={}）",
         root_id,

@@ -466,7 +466,7 @@ const BASE = {
   'crates/symbio-plugin-vdfs/src/protocol.rs': PROTOCOL_RS_SRC,
   'crates/symbio-plugin-api/src/routes.rs': ROUTE_RS_SRC,
   // E 组：这条跨栈导航头指向真实存在的 `tauri/src/schemas/vdfs.ts`
-  'crates/symbio-core/src/event_bus/mod.rs':
+  'crates/symbio-sdk/src/event_bus/mod.rs':
     '// Corresponding Frontend: tauri/src/schemas/vdfs.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC,
   [CHAT_RS]: CHAT_RS_SRC,
@@ -961,7 +961,7 @@ test('详情方言取值原语：后端改了 `DETAIL_PICK_*` 的取值 → 变�
 
 test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条头就悬空了）', () => {
   const r = mirror({
-    'crates/symbio-core/src/event_bus/mod.rs':
+    'crates/symbio-sdk/src/event_bus/mod.rs':
       '// Corresponding Frontend: tauri/src/protocols/chat_input.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   })
   assert.equal(r.status, 1)
@@ -971,7 +971,7 @@ test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条
 test('跨栈导航头指向真实文件 → 不红（两个方向都判）', () => {
   const r = mirror()
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /✓ 后端 crates\/symbio-core\/src\/event_bus\/mod\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
+  assert.match(r.stdout, /✓ 后端 crates\/symbio-sdk\/src\/event_bus\/mod\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
   // 反方向：前端 `Corresponding Backend` 同样有守卫（此前它是免检的）
   assert.match(
     r.stdout,
@@ -992,7 +992,7 @@ test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这�
 
 test('没有任何跨栈导航头 → 不红（没写不违规，写了假指针才违规）', () => {
   const r = mirror({
-    'crates/symbio-core/src/event_bus/mod.rs': 'pub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
+    'crates/symbio-sdk/src/event_bus/mod.rs': 'pub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
     [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC.replace(
       /^(\s*)\/\/! Corresponding Frontend: .*$\n/gm,
       '',

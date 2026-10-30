@@ -42,7 +42,7 @@ where
                     symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
                     &why,
                 );
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "actors",
                     "[v2] 产物被授权拒绝（{why}），本轮工具结果不入格（turn={turn}）"
                 );

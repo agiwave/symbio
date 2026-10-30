@@ -162,7 +162,7 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
         .run_op::<bool>(run_ops::ELIMINATION_REVOKED, ())
         .await
         .unwrap_or_else(|e| {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Turn] 淘汰闸判据读取失败（按未收回处理，本轮继续）: {e}"
             );
@@ -230,7 +230,7 @@ pub(crate) fn supplement_into_request(
     // 拿不到溯源锚点 ⇒ **不落也不注入**：I2 要求断言类事件带溯源，而无溯源的断言
     // 事件比不落更难查。
     let Some(anchor) = anchor else {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[Turn] 补充无溯源锚点，本轮丢弃（见本函数「拿不到溯源锚点」处）"
         );
@@ -262,7 +262,7 @@ pub(crate) fn supplement_into_request(
         // 不可见。所以出声。
         //
         // `{:?}` 不是 `{e}`：`AppendError` 只 derive 了 `Debug`。
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[Turn] 补充落格失败（仍注入本轮，下一轮起不可见）: {e:?}"
         );

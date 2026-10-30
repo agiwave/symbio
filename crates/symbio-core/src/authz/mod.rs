@@ -379,7 +379,7 @@ fn write_bound() -> Option<std::sync::RwLockWriteGuard<'static, BoundRows>> {
     match bound_rows().write() {
         Ok(map) => Some(map),
         Err(why) => {
-            crate::plugin_warn!(
+            symbio_sdk::plugin_warn!(
                 "authz",
                 "[governance] 绑定登记写入失败（fail-closed）：{why}"
             );
@@ -500,7 +500,7 @@ pub fn unbind_session(session_id: &str) {
         !entries.is_empty()
     });
     if removed > 0 {
-        crate::plugin_info!(
+        symbio_sdk::plugin_info!(
             "authz",
             "[governance] 会话 {session_id} 结束，回收 {removed} 行绑定登记"
         );
@@ -550,7 +550,7 @@ fn insert_binding(map: &mut BoundRows, holder: &str, principal: &str, grants: Ve
         .last()
         .map(|binding| binding.grants.len())
         .unwrap_or(0);
-    crate::plugin_info!(
+    symbio_sdk::plugin_info!(
         "authz",
         "[governance] 绑定即登记：{principal} ⇒ {granted} 项能力（登记者 {holder}；能力随绑定来，可见域不登记）"
     );
@@ -614,7 +614,7 @@ pub fn request_principal(ctx: &dyn crate::PluginInvokeRequest) -> String {
 pub fn production_matrix() -> &'static EffectiveMatrix {
     MATRIX.get_or_init(|| {
         let deployed = PermissionMatrix::from_names(ROWS).unwrap_or_else(|why| {
-            crate::plugin_warn!(
+            symbio_sdk::plugin_warn!(
                 "authz",
                 "[governance] 授权表构造失败，按 fail-closed 降级为空矩阵（{}）：{}",
                 ROWS.len(),

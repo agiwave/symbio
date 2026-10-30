@@ -344,7 +344,7 @@ pub(crate) async fn prepare_request_sections(
     };
     if fit.trimmed() {
         // 只在真的裁了才出声：各段皆空是常态，逐轮打印会把日志淹掉。
-        symbio_core::plugin_info!(
+        symbio_plugin_api::plugin_info!(
             "session",
             "[section-budget] 预算 {} token、需求 {}、保留 {}；裁掉 {} 段（{}）；超界 {}",
             fit.budget,
@@ -523,7 +523,7 @@ pub(crate) async fn run_reflex(
         .and_then(|t| super::super::skill_events::take_match(&turn.skill_hits, t));
     let result = match hit {
         Some(h) => {
-            symbio_core::plugin_info!(
+            symbio_plugin_api::plugin_info!(
                 "session",
                 "[Loop] 技能命中，走反射档（skill={}，turn={}）",
                 h.skill_id,

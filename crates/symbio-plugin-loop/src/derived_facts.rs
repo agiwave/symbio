@@ -129,7 +129,7 @@ pub(crate) fn record_derived(
             event.turn = turn;
             match store.append(event.clone()) {
                 Ok(_) => applied.push(event),
-                Err(e) => symbio_core::plugin_warn!(
+                Err(e) => symbio_plugin_api::plugin_warn!(
                     "session",
                     "[v2] 效果入格失败（会话 {session_id}，事件 {event_id}）：{e:?}"
                 ),
@@ -143,7 +143,7 @@ pub(crate) fn record_derived(
     // 此处只负责把门推开。
     if let Some(&reason) = breaks.first() {
         if let Err(e) = store.append(super::tools::CircuitBreaker.break_event(reason, user_seq)) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[v2] 熔断事件入格失败（会话 {session_id}）：{e:?}"
             );
@@ -203,7 +203,7 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
     // （fail-closed：没有资格的判定不该留下事实）。
     let spec = decider.spec();
     if !actor_can_assert_verification(&spec) {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[v2] 仲裁者缺 assert.verification，本轮淘汰判定不落格（turn={turn}）"
         );
@@ -226,12 +226,12 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
         }
         let ev = decider.elimination_event(VERDICT, principal, entry.score, user_seq);
         if let Err(e) = store.append(ev) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "session",
                 "[v2] 淘汰裁决入格失败（turn={turn}，subject={principal}）：{e:?}"
             );
         } else {
-            symbio_core::plugin_info!(
+            symbio_plugin_api::plugin_info!(
                 "session",
                 "[v2] 落格 {}：主体 {principal} 收回 assign.work（声誉分 {} 低于阈值 {}）",
                 crate::control_decl::EVENT_VERDICT_ASSERTED,
@@ -285,7 +285,7 @@ pub(crate) fn record_learning(
     now: i64,
 ) {
     let remember = |step: &str, why: String| {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[memory] {step} 失败（会话 {session_id}）：{why}"
         );

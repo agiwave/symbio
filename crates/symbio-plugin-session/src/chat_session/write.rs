@@ -202,7 +202,7 @@ impl PersistentChatSession {
         let facts = match self.store.facts(&self.session_id) {
             Ok(facts) => facts,
             Err(why) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "[message] 变更未能入格，本次变更未生效：{}",
                     why
@@ -252,7 +252,7 @@ impl PersistentChatSession {
                 } => {}
             }
             if let Some(why) = failure {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "[message] 变更未能入格，本次变更未生效：{}",
                     why
@@ -293,7 +293,7 @@ impl PersistentChatSession {
                                     &removed,
                                 )
                             {
-                                symbio_core::plugin_error!(
+                                symbio_plugin_api::plugin_error!(
                                     "session",
                                     "[message] 写入期裁剪的删除事实未入格：{why}\
                                      （被裁的 {} 条在下次重建后会复活）",
@@ -302,7 +302,7 @@ impl PersistentChatSession {
                             }
                         }
                         Ok(None) => {}
-                        Err(why) => symbio_core::plugin_error!(
+                        Err(why) => symbio_plugin_api::plugin_error!(
                             "session",
                             "[message] 写入期裁剪的删除事实未入格：{why}\
                              （被裁的 {} 条在下次重建后会复活）",

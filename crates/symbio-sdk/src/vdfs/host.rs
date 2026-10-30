@@ -13,7 +13,7 @@
 //!
 //! ## 为什么只有这些
 //!
-//! 纯接口（[`VdfsProvider`] trait 与其域类型）在
+//! 纯接口（[`symbio_kernel::vdfs::VdfsProvider`] trait 与其域类型）在
 //! [`crate::vdfs`]；`vdfs/*` 的**分发**（收集挂载点、
 //! 路径解析、树状遍历、事件投递）是 vdfs 插件的职责，见 `crates/symbio-plugin-vdfs/src/host.rs`。
 //!
@@ -25,9 +25,9 @@
 //! `VdfsProvider`
 
 use super::{VdfsChange, VdfsChangeSink, VdfsContext, VdfsError, VdfsResult, VdfsValidationError};
-use crate::{PluginError, PluginInvokeRequest};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+use symbio_kernel::plugin::{PluginError, PluginInvokeRequest};
 
 /// [`PluginError`] → [`VdfsError`]（provider 调宿主服务后翻译回协议错误）
 ///
@@ -260,10 +260,10 @@ mod tests;
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow crates/symbio-core/src/vdfs/host.rs::watch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-core/src/vdfs/host.rs::unwatch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-core/src/vdfs/host.rs::notify: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-core/src/vdfs/host.rs::subscriber_count: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-core/src/vdfs/host.rs::has_subscribers: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-core/src/vdfs/host.rs::paths: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-core/src/vdfs/host.rs::hub_of: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-sdk/src/vdfs/host.rs::watch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-sdk/src/vdfs/host.rs::unwatch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-sdk/src/vdfs/host.rs::notify: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-sdk/src/vdfs/host.rs::subscriber_count: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-sdk/src/vdfs/host.rs::has_subscribers: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-sdk/src/vdfs/host.rs::paths: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-sdk/src/vdfs/host.rs::hub_of: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

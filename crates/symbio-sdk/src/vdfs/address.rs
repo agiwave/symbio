@@ -31,7 +31,8 @@
 
 use std::sync::Arc;
 
-use crate::{PluginInvokeRequest, PluginInvokeRequestExt, VDFS_PARENT_ADDR};
+use crate::keys::VDFS_PARENT_ADDR;
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// 地址空间根的**静态声明** —— 由 vdfs 插件提交（`inventory::submit!`）。
 ///

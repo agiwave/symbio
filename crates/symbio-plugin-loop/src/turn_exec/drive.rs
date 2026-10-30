@@ -326,7 +326,7 @@ pub(crate) async fn drive(
                     break 'step StepEnd::Settled(exhausted(st, detail).await?);
                 }
             };
-            symbio_core::plugin_debug!(
+            symbio_plugin_api::plugin_debug!(
                 "session",
                 "[Loop] 派发 {}（执行体 {}；债 {}）",
                 next.row,
@@ -343,7 +343,7 @@ pub(crate) async fn drive(
                 && st.draft.over_step_limit()
                 && !loop_rows::waiting(&facts, turn_no, now)
             {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "actors",
                     "[v2] 轮内步数超过上限（turn={}），收束为 exhausted（step_limit）",
                     turn_no
@@ -406,7 +406,7 @@ pub(crate) async fn drive(
                 .map(|e| e.kind.as_str())
                 .find(|k| !next.writes_closed(k))
             {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "actors",
                     "[v2] 执行体 {} 写了未登记的事实 `{}`（行 {}，turn={}）——名单 ⊆ 声明的写入封闭在运行期破了",
                     next.by,
@@ -421,7 +421,7 @@ pub(crate) async fn drive(
                 let Some(outcome) = st.draft.take_settled() else {
                     // 账本说收了工、草稿里没有产出 = 有一条收束路径写了停机格却没寄存
                     // 它。不猜一个产出（那等于把「没记账」读成「记了个空账」）。
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "actors",
                         "[v2] 执行体 {} 落了停机格 `{}`（行 {}，turn={}）却没寄存本轮产出——收束路径漏记",
                         next.by,
@@ -542,7 +542,7 @@ async fn open_stage(
         // 从同一份镜像取（与首幕同一个判据：最近一条用户消息）。
         super::super::chat_loop::drive::current_user_text(context)
     };
-    symbio_core::plugin_info!(
+    symbio_plugin_api::plugin_info!(
         "session",
         "[Turn] 第 {} 次请求开始 (msgs={})",
         turn.request_round + 1,
@@ -576,7 +576,7 @@ async fn open_stage(
                     .run_op(symbio_core::run_ops::TAKE_SUPPLEMENTS, ())
                     .await
                     .unwrap_or_else(|e| {
-                        symbio_core::plugin_warn!(
+                        symbio_plugin_api::plugin_warn!(
                             "session",
                             "[Loop] 取出用户补充失败（本轮继续）: {e}"
                         );
@@ -801,7 +801,7 @@ async fn abandon(st: StageRuntime) {
     // 最后一份桥随装配束一起走：`UiBridge::drop` 关队列，发射端排空后退出。
     drop(assembled);
     if let Err(e) = emitter.await {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[Turn] 流式发射任务未正常退出（本幕已收束，继续）: {e}"
         );

@@ -91,4 +91,4 @@ impl Plugin for LoopPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_LOOP, LoopPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_LOOP, LoopPlugin::build, dyn Plugin);

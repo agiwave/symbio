@@ -49,7 +49,7 @@ fn land_contributions(
             event.turn = turn;
             event.ts = now_ms;
             if let Err(e) = store.append(event) {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[turn] 收束贡献入格失败（owner {}，事件 {event_id}，轮 {turn}）：{e:?}",
                     contributor.owner()
@@ -263,7 +263,7 @@ pub(crate) async fn execute_final_reply_turn(
     // **补落寄存的变更**：答话轮同样是会话侧的落格窗口，经端口动作发起。
     // 与 [`super::assemble_turn`] 同序（在运行器落格之前——本轮的用户格已由编排层先落）。
     if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
-        symbio_core::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
+        symbio_plugin_api::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
     // 身份与档位取值点同 [`super::assemble_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
     // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。规格从授权表行取
@@ -286,7 +286,10 @@ pub(crate) async fn execute_final_reply_turn(
             )
             .await
         {
-            symbio_core::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
+            symbio_plugin_api::plugin_warn!(
+                "session",
+                "[Turn] 压缩事实落格失败（压缩已生效）: {e}"
+            );
         }
     }
     // 派发档（`D-223` 订正 1）：答话轮不走快路（`Answered` 是判决的结论，不是技能的命中），

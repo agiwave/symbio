@@ -376,7 +376,7 @@ impl SessionStore {
         for dir in session_dirs_deep(base) {
             if let Err(e) = split_inline_messages(&dir).await {
                 // 单个会话迁移失败不该拖垮整个会话插件——读路径有兜底（内联消息）
-                symbio_core::plugin_warn!("session", "迁移会话目录失败 {:?}: {}", dir, e);
+                symbio_plugin_api::plugin_warn!("session", "迁移会话目录失败 {:?}: {}", dir, e);
             }
         }
         Ok(())
@@ -441,7 +441,7 @@ pub(crate) async fn resolve_store(
 
     let store = Arc::new(SessionStore::new(dir.to_path_buf()));
     if let Err(e) = store.migrate_split_messages().await {
-        symbio_core::plugin_warn!("session", "会话存储迁移失败（读路径有兜底）: {}", e);
+        symbio_plugin_api::plugin_warn!("session", "会话存储迁移失败（读路径有兜底）: {}", e);
     }
 
     // OnceCell::set 在多 writer 竞争时可能失败，但失败时另一线程已成功，直接拿

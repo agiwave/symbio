@@ -14,6 +14,9 @@ dead_code = "warn"
 
 [dependencies]
 symbio-kernel = { path = "../symbio-kernel" }
+# 插件可依赖的机制层（D-258）：日志 / 时钟 / 事件总线 / 地址装配 / 构造器登记 / 文本工具
+# 的实现都住这里。core 依赖它是**用**它，不是重复定义它——域目录只做转发。
+symbio-sdk = { path = "../symbio-sdk" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续
 # `derive(Deserialize)`——Tauri 命令参数与 gateway 的 WS 入帧都依赖它。

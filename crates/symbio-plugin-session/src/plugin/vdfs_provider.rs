@@ -203,7 +203,10 @@ impl SessionPlugin {
         match serde_json::to_value(self.build_option_definition().await) {
             Ok(v) => Some(v),
             Err(e) => {
-                symbio_core::plugin_warn!("session", "选项定义序列化失败（选项栏将为空）: {e}");
+                symbio_plugin_api::plugin_warn!(
+                    "session",
+                    "选项定义序列化失败（选项栏将为空）: {e}"
+                );
                 None
             }
         }

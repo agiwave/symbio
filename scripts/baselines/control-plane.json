@@ -1,10 +1,14 @@
 {
   "mechanism": {
     "file": "crates/symbio-plugin-loop/src/turn_exec/drive.rs",
-    "parts": ["drive loop body", "fn next", "fn waiting"],
-    "hash": "sha256:48637d82819dd42c74cac1740df902ea434df8c9c6027145c49fca88d52dc935",
+    "parts": [
+      "drive loop body",
+      "fn next",
+      "fn waiting"
+    ],
+    "hash": "sha256:6dbdbc754eb270fdb1c137f11ce6d0fe6cbcfc6bcd1bb1107bdfd90b13cdcdde",
     "adr": "D-234 / D-238 / D-241",
-    "reason": "基线落在 D-222 第 2 步收敛之后的控制面形状上：驱动循环体 / 选债包装 fn next / 在途判据 fn waiting 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改，而是改动必须当批说清它属于哪一类——横向扩展的代价（那就改插件）还是机制演进（那就同批更新基线并改这条理由）。这次是 D-241 的**一次性机制演进**：派发器把债实例（`row` + 键）写进 `Ctx`，因为动作只收 `&mut Ctx`，通用执行体 `plugin_row` 需要知道「这是哪一笔债」才能路由到能力的纯值实现。判据面没有多出分支或能力名：派发器仍只做「写环境 → 调执行体」，新增能力不再需要 `ActorEntry`，扩展仍不改机制。"
+    "reason": "基线落在 D-222 第 2 步收敛之后的控制面形状上：驱动循环体 / 选债包装 fn next / 在途判据 fn waiting 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改，而是改动必须当批说清它属于哪一类——横向扩展的代价（那就改插件）还是机制演进（那就同批更新基线并改这条理由）。这次是 D-258 的**纯 import 重写**：日志宏与协议键的定义搬进 `symbio-sdk`，控制面里的 `symbio_core::plugin_warn!` 改写成 `symbio_plugin_api::plugin_warn!`——判据面的三段代码一行逻辑都没动（分支、能力名、调用顺序与原来逐字相同），变的是宏的全路径写法，所以哈希变了而机制没变。"
   },
   "extension": {
     "productionFiles": 62

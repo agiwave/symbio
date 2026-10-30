@@ -42,7 +42,7 @@ impl DefaultToolVisitor {
         let mut families = self.families.write().await;
         match families.get(&family) {
             Some(declared) if declared.is_single() != family.is_single() => {
-                symbio_core::plugin_warn!(
+                symbio_sdk::plugin_warn!(
                     "core",
                     "能力族 `{}` 的槽位声明冲突：先登记为 {}，本次为 {}（族身份按名字，冲突以先登记为准）",
                     family.name(),
@@ -85,7 +85,7 @@ impl Registry for DefaultToolVisitor {
         // 别的方式表现出来，所以这里留一条告警再覆盖。
         if let Some(old) = rows.get(&name) {
             if old.family() != family {
-                symbio_core::plugin_warn!(
+                symbio_sdk::plugin_warn!(
                     "core",
                     "能力表键 `{name}` 跨族同名覆盖：`{}` 行被 `{}` 行顶掉（族不参与键，见 Registry::put）",
                     old.family().name(),

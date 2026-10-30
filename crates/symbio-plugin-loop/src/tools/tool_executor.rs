@@ -21,7 +21,9 @@ use symbio_core::{
 use symbio_core::{
     ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginPayload,
 };
-use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
+use {
+    symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
+};
 
 mod breaker;
 mod decls;

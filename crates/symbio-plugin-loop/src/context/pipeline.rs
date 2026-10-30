@@ -11,13 +11,13 @@ use super::*;
 
 use super::super::chat_loop::{ChatOrchestrator, SessionContext};
 use symbio_core::chat_node::{MessageContent, NodeStatus};
-use symbio_core::plugin_warn;
 use symbio_core::{
     llm_short_id, run_ops, CompressionBeginRequest, CompressionFinishRequest, CompressionOutcome,
     ConsolidateRequest, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError, RemoveNodesRequest,
     ReplaceAllRequest,
 };
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
+use symbio_plugin_api::plugin_warn;
 
 use super::super::port::Compress;
 
@@ -702,7 +702,7 @@ pub(crate) async fn retry_compaction(
     // 而「不入账」这件事必须能被数出来、并且**只能**由用户主动重试解释。
     // `obligation-ring-accept` 的 J9 就按这一行与 `[Compress] 压缩 LLM 请求开始` 的
     // 差额对账：少了它，差额就只是一句「不知道去哪了」。
-    symbio_core::plugin_info!(
+    symbio_plugin_api::plugin_info!(
         "session",
         "[Wake] RetryCompaction: 轮外压缩重试（target={target_id}）——这一次摘要往返没有轮可挂，不入账"
     );
@@ -887,7 +887,7 @@ async fn send_compression_request(
     // 若无日志，长压缩请求表现为"整段时间无任何输出"（用户视角的卡死）。
     // 压缩走完整 LLM 流，长上下文时可能耗时数分钟，必须显式标注开始/结束。
     let compression_started = std::time::Instant::now();
-    symbio_core::plugin_info!(
+    symbio_plugin_api::plugin_info!(
         "session",
         "[Compress] 压缩 LLM 请求开始：root_id={root_id}, 历史消息数={}，约 {} 字符（此窗口内前端无流式输出属正常）",
         messages.len(),
@@ -913,7 +913,7 @@ async fn send_compression_request(
     match &result {
         Ok(msg) => {
             let text_len = msg.content.as_ref().map(|c| c.to_text().len()).unwrap_or(0);
-            symbio_core::plugin_info!(
+            symbio_plugin_api::plugin_info!(
                 "session",
                 "[Compress] 压缩 LLM 请求完成：摘要 {} 字符，耗时 {}s",
                 text_len,
@@ -921,7 +921,7 @@ async fn send_compression_request(
             );
         }
         Err(e) => {
-            symbio_core::plugin_error!(
+            symbio_plugin_api::plugin_error!(
                 "session",
                 "[Compress] 压缩 LLM 请求失败（耗时 {}s）：{e}",
                 compression_started.elapsed().as_secs()

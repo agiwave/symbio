@@ -410,6 +410,10 @@ pub use logger::{
     logger_init, logger_is_initialized, logger_level_enabled, logger_parse_level,
     logger_set_min_level, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN,
 };
+// 四个日志宏与 `submit_object_creator!` 是 `#[macro_export]`，它们挂在**定义 crate 的根**
+// （`symbio-sdk`，D-258）。core 内部按 `symbio_sdk::plugin_warn!` 写，插件按
+// `symbio_plugin_api::plugin_warn!` 写——core 的根**不**再转发一份：同一个名字两个可写
+// 路径正是 C-005 要拦的形态，宏不因为它是宏就例外。
 // 注：记忆（`MemoryFile` / 两道闸门 / 片段渲染 / 节点形状）**整块不在 core**——
 // 实现不隶属任何单个插件（memory / session 各用一个或多个作用域），故归
 // `providers/memory`（方式 B，不套 `dyn`）。**连文件名也不在 core**：各作用域

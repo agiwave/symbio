@@ -81,7 +81,7 @@ pub(crate) async fn land_consolidation(session: &LoopSession, consolidation: Opt
         )
         .await
     {
-        symbio_core::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
+        symbio_plugin_api::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
     }
 }
 
@@ -184,7 +184,7 @@ pub(crate) async fn assemble_turn(
     // 位置在运行器落格之前：补落改的就是运行器即将读的那份切片（prompt 窗口 /
     // 产物编号），不先落完，本轮会站在一份**缺了那次编辑**的状态上做判断。
     if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
-        symbio_core::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
+        symbio_plugin_api::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
 
     // 一次性阶段**不在这里落**：环上的每一行（判决 / 召回 / 压缩）由它自己的执行体

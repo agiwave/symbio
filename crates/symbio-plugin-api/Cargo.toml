@@ -24,6 +24,8 @@ symbio-deploy = { path = "../symbio-deploy" }
 # 语法臂的来源（D-255）：门面按「语法 / 机制」分两臂导出，语法直接来自内核——
 # 内核的直接依赖只有 6 个，插件要共享类型时走的就该是这条边，而不是 core 的平铺。
 symbio-kernel = { path = "../symbio-kernel" }
+# 插件可依赖的宿主机制层（D-258）：门面的机制臂从这里取，core 从此不在插件的依赖图里
+symbio-sdk = { path = "../symbio-sdk" }
 
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }

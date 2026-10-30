@@ -212,7 +212,7 @@ impl Prepared {
             &MESSAGE_VOCAB,
         );
         if !rep.is_complete() {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "actors",
                 "[prompt-fidelity] 送出的消息与事实网格不完整：{}",
                 rep.summary()
@@ -313,7 +313,7 @@ where
                 EVENT_CHAT_ASSISTANT_FINAL,
                 &why,
             );
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "actors",
                 "[v2] 定稿答话被授权拒绝（{why}），本轮不入格（turn={turn}）"
             );

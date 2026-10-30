@@ -153,7 +153,7 @@ pub(crate) fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
     // 而「记忆段明明有东西却没进 prompt」这类失效**没有任何东西会变红**：事实照样
     // 入格、`session/stats` 照样有数。所以取值点自己出声：段在而模型看不见时，
     // 日志里至少有「取到了却没送出」的对照可查。
-    symbio_core::plugin_info!(
+    symbio_plugin_api::plugin_info!(
         "session",
         "[request-prefix] 本轮取到 {} 段（{}），拼进 prompt 前缀",
         kinds.len(),
@@ -166,8 +166,6 @@ pub(crate) use super::context::auto_compress_process;
 
 use std::sync::Arc;
 use symbio_core::chat_request;
-use symbio_core::plugin_info;
-use symbio_core::plugin_warn;
 use symbio_core::ModelFinishReason;
 use symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
@@ -178,6 +176,8 @@ use symbio_core::{
     PluginInvokeRequestExt,
 };
 use symbio_kernel::dialog::RunSnapshot;
+use symbio_plugin_api::plugin_info;
+use symbio_plugin_api::plugin_warn;
 
 use super::context;
 pub(crate) use super::message_build::TurnOutputExt;
@@ -194,7 +194,7 @@ pub async fn run_chat_loop(
     let mut req: chat_request::Request = match ctx.payload() {
         Ok(req) => req,
         Err(e) => {
-            symbio_core::plugin_error!("session", "[Session] 请求体解析失败：{e}");
+            symbio_plugin_api::plugin_error!("session", "[Session] 请求体解析失败：{e}");
             return TurnReport {
                 status: TurnStatus::Failed,
                 error: Some(e.to_string()),
@@ -653,7 +653,10 @@ pub(crate) async fn land_answered_turn(
     )
     .await
     {
-        symbio_core::plugin_warn!("session", "[Session] 定稿答话入格失败（本轮照常收尾）: {e}");
+        symbio_plugin_api::plugin_warn!(
+            "session",
+            "[Session] 定稿答话入格失败（本轮照常收尾）: {e}"
+        );
     }
 }
 

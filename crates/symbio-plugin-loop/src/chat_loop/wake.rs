@@ -24,7 +24,7 @@ use std::sync::Arc;
 use symbio_core::chat_node::{ChatNode, NodeStatus, ResumeAction, ResumeRequest};
 use symbio_core::{llm_short_id, run_ops, RemoveNodesRequest, Seq};
 use symbio_core::{ExecAbortSignal, PluginError, PluginInvokeRequest};
-use {symbio_core::plugin_info, symbio_core::plugin_warn};
+use {symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn};
 
 use super::super::tool_dispatch::{ToolPort, WakeIntent, WakeSpec};
 use super::super::turn_session::LoopSession;

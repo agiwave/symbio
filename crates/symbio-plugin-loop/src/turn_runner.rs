@@ -1031,7 +1031,7 @@ fn deny<S>(
         Ok(_) => {}
         // 同一轮同一格被拒多次：说的是同一件事，落一条就够。
         Err(symbio_core::AppendError::Duplicate) => {}
-        Err(e) => symbio_core::plugin_warn!(
+        Err(e) => symbio_plugin_api::plugin_warn!(
             "actors",
             "[v2] 拒绝事实未入格（turn={turn} / {kind_name} / {key}）：{e:?}"
         ),

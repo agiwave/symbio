@@ -73,7 +73,7 @@ impl StopSignal {
             // 无父插件时 fire_hook 本身就是 no-op，不打噪声日志
             return;
         }
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[Stop] 显式 Stop 触发点未执行，由 StopSignal 生命周期兜底补发一次（last_message 为空）"
         );
@@ -97,7 +97,7 @@ impl StopSignal {
                 // 本方法的全部调用点（WorkingGuard::drop / StopSignal::drop）都处在
                 // 同一条同步析构链上，下一层 Drop 同样不会有运行时，重试只会失败并
                 // 重复告警（进程退出路径本就放弃了外发）。
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[Stop] 当前无 tokio 运行时，Stop 兜底触发被跳过（进程退出路径）"
                 );

@@ -528,7 +528,7 @@ where
         request.produced_by.unwrap_or(request.turn),
         why,
     )?;
-    symbio_core::plugin_warn!(
+    symbio_plugin_api::plugin_warn!(
         "session",
         "[Loop] `{port}` 请求 `{}` 没有等待方（上一段生命在宣布与派出之间结束）——判死",
         call.id
@@ -585,7 +585,7 @@ where
             why,
         )?;
         killed += 1;
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[Loop] `{port}` 调用 `{}` 已派出但没有等待方（草稿里没有这一批）——判死",
             call.id

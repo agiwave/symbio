@@ -395,7 +395,7 @@ impl WorkdirWatchManager {
         let root = PathBuf::from(workdir);
         tokio::spawn(async move {
             if let Err(e) = w.start(root).await {
-                symbio_core::plugin_error!("session", format!("[Workdir] 监听出错: {e}"));
+                symbio_plugin_api::plugin_error!("session", format!("[Workdir] 监听出错: {e}"));
             }
         });
         self.watchers.insert(workdir.to_string(), watcher);
@@ -446,7 +446,7 @@ impl WorkdirWatchManager {
             if still_empty {
                 containers.remove(&wd);
                 if let Some((_, watcher)) = watchers.remove(&wd) {
-                    symbio_core::plugin_info!("session", "[Workdir] 监听已停止: {wd}");
+                    symbio_plugin_api::plugin_info!("session", "[Workdir] 监听已停止: {wd}");
                     drop(watcher);
                 }
             }

@@ -1431,7 +1431,7 @@ fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
     }
     let overlapping = frozen.overlaps();
     if !overlapping.is_empty() {
-        symbio_core::plugin_info!(
+        symbio_plugin_api::plugin_info!(
             "session",
             "[Loop] 相交行对 {} 组（可能同时开账，裁决归 prio）：{}",
             overlapping.len(),
@@ -1461,7 +1461,7 @@ fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
 static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| match assemble() {
     Ok(frozen) => Some(frozen),
     Err(gaps) => {
-        symbio_core::plugin_error!(
+        symbio_plugin_api::plugin_error!(
             "session",
             "[Loop] 行表装载失败，义务环拒绝启动（开幕带错退出）：{:?}",
             gaps
@@ -1679,7 +1679,7 @@ pub(crate) fn next(
     // 动作与声明**一次查全**：查不到动作就按「没有可还的债」显形并出声（不猜动作、
     // 也不猜它写了什么）——那是行表与绑定表被改坏的形状，不是第四种可还性。
     let Some(entry) = debt.decl.by.and_then(|by| entry_of(by, actors)) else {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[Loop] 行表与执行体绑定表脱节（行 {} 的 `by={:?}` 没有动作），本步不派发",
             debt.decl.name,
@@ -1762,7 +1762,7 @@ fn trace(frozen: &Frozen, debt: &symbio_core::ring::Debt<'_>) {
     let decl = debt.decl;
     let key = debt.key.trace();
     let view = frozen.view(decl.owes.source);
-    symbio_core::plugin_debug!(
+    symbio_plugin_api::plugin_debug!(
         "session",
         "[Loop] 行 {} 可还（{} / {}ms；债 {}；视图 {} v{}）",
         decl.name,

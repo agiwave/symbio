@@ -38,7 +38,7 @@ fn error_translation_roundtrip() {
 /// provider 侧取回宿主句柄：类型匹配给 `Some`，不匹配报 InternalError
 #[test]
 fn host_ctx_downcasts_invoke_request() {
-    use crate::PluginSimpleRequest;
+    use symbio_kernel::plugin::PluginSimpleRequest;
     let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let vctx = vdfs_context(&host);
     let back = vdfs_host_ctx(&vctx).expect("应取回宿主句柄");

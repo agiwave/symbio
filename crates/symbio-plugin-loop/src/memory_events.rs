@@ -571,7 +571,7 @@ pub(crate) fn consolidate(
     // 最初一代——窗口只封「聚合扫」，不封「按 seq 取一条」。
     let (scan, truncated) = history_window(snapshot);
     if truncated {
-        symbio_core::plugin_debug!(
+        symbio_plugin_api::plugin_debug!(
             "session",
             "[memory] 巩固只扫尾部 {} 条事实（全史 {} 条）：窗外更旧的记忆本轮不参与压缩",
             scan.len(),
@@ -640,14 +640,14 @@ pub(crate) fn consolidate(
         match accept(&ConsolidateParams::default(), generation, fidelity) {
             Ok(()) => {}
             Err(Rejection::RejectedMaxGen { generation, max }) => {
-                symbio_core::plugin_debug!(
+                symbio_plugin_api::plugin_debug!(
                     "session",
                     "[memory] 巩固停在代数上界（gen {generation} > max {max}，tag={tag}）：源记忆原样保留"
                 );
                 continue;
             }
             Err(Rejection::RejectedLowFidelity { fidelity, min }) => {
-                symbio_core::plugin_debug!(
+                symbio_plugin_api::plugin_debug!(
                     "session",
                     "[memory] 巩固保真度不足（{fidelity:.3} < {min}，tag={tag}）：源记忆原样保留"
                 );

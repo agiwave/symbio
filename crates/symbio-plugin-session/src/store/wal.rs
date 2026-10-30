@@ -288,7 +288,7 @@ impl WalInner {
             }
             if let Some(missing) = self.unresolved_before(event.turn) {
                 self.degraded_i3 += 1;
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[invariant-I3] 新开轮 turn {} 越过了未收束的 turn {}（本轮照常入格；\
                      读侧 session/stats 的 unresolved_turns 会报同一条）",

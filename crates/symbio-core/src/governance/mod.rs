@@ -548,7 +548,7 @@ impl GrantsOverlay {
     /// 本判定答「其中什么现在被收回了」。
     pub fn is_revoked(&self, principal: &str, capability: &str) -> bool {
         if Capability::parse_name(capability).is_none() {
-            crate::plugin_warn!(
+            symbio_sdk::plugin_warn!(
                 "governance",
                 "能力名 `{capability}` 不在能力闭集内（主体 {principal}），按已收回判"
             );
@@ -559,7 +559,7 @@ impl GrantsOverlay {
                 && c.principal() == principal
                 && Capability::parse_name(c.capability()).is_none()
         }) {
-            crate::plugin_warn!(
+            symbio_sdk::plugin_warn!(
                 "governance",
                 "主体 {principal} 的变更流水里有能力名认不出的收回项，任何能力查询按已收回判"
             );

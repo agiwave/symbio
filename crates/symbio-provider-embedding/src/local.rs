@@ -384,8 +384,8 @@ fn build_noop(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn EmbeddingService> {
     Arc::new(NoopEmbeddingService)
 }
 
-symbio_core::submit_object_creator!(EMBEDDING_LOCAL, build_local, dyn EmbeddingService);
-symbio_core::submit_object_creator!(EMBEDDING_NOOP, build_noop, dyn EmbeddingService);
+symbio_sdk::submit_object_creator!(EMBEDDING_LOCAL, build_local, dyn EmbeddingService);
+symbio_sdk::submit_object_creator!(EMBEDDING_NOOP, build_noop, dyn EmbeddingService);
 
 #[cfg(test)]
 #[path = "local.test.rs"]

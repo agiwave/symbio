@@ -87,7 +87,7 @@ pub async fn collect_capabilities(
         .traverse(String::new(), traverse_ctx.clone())
         .await
     {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "core",
             "collect_capabilities: traverse 失败（工具集可能不完整）: {:?}",
             e
@@ -164,7 +164,7 @@ pub async fn collect_options(
     traverse_ctx.set(OPTION_VISITOR, visitor.clone());
 
     if let Err(e) = parent.clone().traverse(String::new(), traverse_ctx).await {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "collect_options: traverse 失败（选项集可能不完整）: {:?}",
             e

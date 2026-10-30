@@ -253,7 +253,7 @@ impl TurnLauncher {
                         Err(e) => format!("读取会话元数据失败: {}", e),
                         Ok(_) => "会话未绑定工作目录，且上下文未提供".to_string(),
                     };
-                    symbio_core::plugin_error!("session", &msg);
+                    symbio_plugin_api::plugin_error!("session", &msg);
                     self.convergence
                         .broadcast_error_with_idle(&state, msg)
                         .await;
@@ -298,7 +298,7 @@ impl TurnLauncher {
                 Err(e) => {
                     // 元数据读取失败只影响"回退不可用"：按未选择处理并记日志，
                     // 不阻断会话（显式携带 agent_id 的请求不受影响）。
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "session",
                         "读取会话元数据失败（agent_id 回退不可用）: {}",
                         e
@@ -380,7 +380,7 @@ impl TurnLauncher {
                     .await;
                     if let Err(e) = appended {
                         let msg = format!("追加用户消息到存储失败: {}", e);
-                        symbio_core::plugin_error!("session", "{}", &msg);
+                        symbio_plugin_api::plugin_error!("session", "{}", &msg);
                         runner_spawn
                             .convergence
                             .broadcast_error_with_idle(&state_spawn, msg)
@@ -428,7 +428,10 @@ impl TurnLauncher {
                     )),
                 );
             } else {
-                symbio_core::plugin_warn!("session", "会话引擎句柄构造失败，chat 将回退内存会话");
+                symbio_plugin_api::plugin_warn!(
+                    "session",
+                    "会话引擎句柄构造失败，chat 将回退内存会话"
+                );
             }
 
             let tool_visitor = collect_capabilities(Some(&parent_spawn), &chat_ctx).await;
@@ -437,7 +440,7 @@ impl TurnLauncher {
             // 绝不静默降级成"没有人格的通用助手"。
             if let Some(first) = capability_take_errors(&chat_ctx).await.into_iter().next() {
                 let msg = format!("[{}] {}", first.plugin, first.message);
-                symbio_core::plugin_error!("session", "能力收集失败: {}", &msg);
+                symbio_plugin_api::plugin_error!("session", "能力收集失败: {}", &msg);
                 runner_spawn
                     .convergence
                     .broadcast_error_with_idle(&state_spawn, msg)

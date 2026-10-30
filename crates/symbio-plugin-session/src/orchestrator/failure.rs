@@ -115,7 +115,7 @@ impl Convergence {
         let failing_turn_id = match failing_turn_id {
             Some(id) => id,
             None => {
-                symbio_core::plugin_info!(
+                symbio_plugin_api::plugin_info!(
                     "session",
                     "persist_failure: 无在途 Turn（错误发生在 Turn 创建之前），仅广播会话级错误"
                 );
@@ -160,7 +160,7 @@ impl Convergence {
         let chat_session = match self.open_chat_session(session_id).await {
             Ok(cs) => cs,
             Err(e) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "persist_failure: open session failed: {}",
                     e
@@ -171,7 +171,7 @@ impl Convergence {
         let mut all = match chat_session.get_messages().await {
             Ok(m) => m,
             Err(e) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "persist_failure: get_messages failed: {}",
                     e
@@ -314,7 +314,11 @@ impl Convergence {
         let (edited, born): (Vec<_>, Vec<_>) =
             latest.into_iter().partition(|m| known.contains(&m.id));
         if let Err(e) = chat_session.apply(MessageChange::Edited(edited)).await {
-            symbio_core::plugin_error!("session", "persist_failure: apply(Edited) failed: {}", e);
+            symbio_plugin_api::plugin_error!(
+                "session",
+                "persist_failure: apply(Edited) failed: {}",
+                e
+            );
         }
         if let Err(e) = chat_session
             .apply(MessageChange::Born {
@@ -323,7 +327,11 @@ impl Convergence {
             })
             .await
         {
-            symbio_core::plugin_error!("session", "persist_failure: apply(Born) failed: {}", e);
+            symbio_plugin_api::plugin_error!(
+                "session",
+                "persist_failure: apply(Born) failed: {}",
+                e
+            );
         }
 
         // 6. 仅发布本次状态真正变化的消息（服务端权威终态，前端只信服务端）：
@@ -380,7 +388,7 @@ impl Convergence {
         let chat_session = match self.open_chat_session(session_id).await {
             Ok(cs) => cs,
             Err(e) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "converge_inflight: open session failed: {}",
                     e
@@ -391,7 +399,7 @@ impl Convergence {
         let mut all = match chat_session.get_messages().await {
             Ok(m) => m,
             Err(e) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "converge_inflight: get_messages failed: {}",
                     e
@@ -448,11 +456,15 @@ impl Convergence {
             })
             .await
         {
-            symbio_core::plugin_error!("session", "converge_inflight: apply(Born) failed: {}", e);
+            symbio_plugin_api::plugin_error!(
+                "session",
+                "converge_inflight: apply(Born) failed: {}",
+                e
+            );
             return 0;
         }
 
-        symbio_core::plugin_info!(
+        symbio_plugin_api::plugin_info!(
             "session",
             "converge_inflight: {} 个节点定稿（根 Turn → Aborted，子节点 → Completed；原因：{}）",
             converged,

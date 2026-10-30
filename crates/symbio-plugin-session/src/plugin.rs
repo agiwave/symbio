@@ -217,7 +217,7 @@ impl SessionPlugin {
             Ok(Some(c)) => c,
             Ok(None) => SessionConfig::default(),
             Err(e) => {
-                symbio_core::plugin_warn!("session", "读取自身配置失败，改用默认值：{e}");
+                symbio_plugin_api::plugin_warn!("session", "读取自身配置失败，改用默认值：{e}");
                 SessionConfig::default()
             }
         };
@@ -392,7 +392,9 @@ impl SessionPlugin {
                     .await;
             }
             Ok(None) => {}
-            Err(e) => symbio_core::plugin_warn!("session", "读取会话记忆失败，本轮不注入：{e}"),
+            Err(e) => {
+                symbio_plugin_api::plugin_warn!("session", "读取会话记忆失败，本轮不注入：{e}")
+            }
         }
     }
 }
@@ -427,7 +429,7 @@ impl Plugin for SessionPlugin {
         let mut tasks = self.resident_tasks.take_all();
         for task in tasks.iter_mut() {
             if tokio::time::timeout(STOP_WAIT, &mut *task).await.is_err() {
-                symbio_core::plugin_warn!("session", "常驻任务未在停机窗口内退出，强制取消");
+                symbio_plugin_api::plugin_warn!("session", "常驻任务未在停机窗口内退出，强制取消");
                 task.abort();
             }
         }
@@ -512,7 +514,7 @@ impl Plugin for SessionPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_SESSION, SessionPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_SESSION, SessionPlugin::build, dyn Plugin);
 
 // ==================== 配置文档（`<根>/session/PLUGIN.yml`） ====================
 

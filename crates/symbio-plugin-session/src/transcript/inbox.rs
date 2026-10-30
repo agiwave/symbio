@@ -557,7 +557,7 @@ impl SessionPlugin {
         build: impl FnOnce(u64) -> Vec<Event>,
     ) -> Result<Option<u64>, String> {
         let session_store = self.get_store().await.map_err(|e| {
-            symbio_core::plugin_error!(
+            symbio_plugin_api::plugin_error!(
                 "session",
                 "[preempt] 存储句柄不可用（会话 {}）：{}",
                 session_id,
@@ -570,7 +570,7 @@ impl SessionPlugin {
             // 没有事实源 ⇒ 没有任务可挂起、也没有要收的。
             Ok(None) => return Ok(None),
             Err(e) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "[preempt] 事实源开档失败（会话 {}）：{}",
                     session_id,
@@ -589,7 +589,7 @@ impl SessionPlugin {
         for event in build(anchor) {
             let id = event.event_id.clone();
             if let Err(e) = store.append(event) {
-                symbio_core::plugin_warn!(
+                symbio_plugin_api::plugin_warn!(
                     "session",
                     "[preempt] 事件 {id} 未入格（会话 {session_id}）：{e:?}"
                 );
@@ -657,7 +657,7 @@ impl SessionPlugin {
         // 拒绝 ⇒ 不落任何控制事实，且清 `Hold`：留着会让消费者为一个写不出的挂起空转。
         let spec = PreemptionDecider.spec();
         if !symbio_core::actor_can_judge_intent(&spec) {
-            symbio_core::plugin_warn!(
+            symbio_plugin_api::plugin_warn!(
                 "actors",
                 "[preempt] 判定者缺 judge.intent，拒绝落控制事实（principal={}，task={task_id}）",
                 spec.principal
@@ -780,7 +780,7 @@ impl SessionPlugin {
             match self.clone().run_inbox_turn(&state.session_id, &batch).await {
                 Ok(()) => started = true,
                 Err(e) => {
-                    symbio_core::plugin_error!(
+                    symbio_plugin_api::plugin_error!(
                         "session",
                         "收件箱条目 {} 未能启动（会话 {}）：{}",
                         batch[0].id,

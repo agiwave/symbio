@@ -32,13 +32,13 @@ use serde_json::json;
 use std::sync::atomic::Ordering;
 pub(crate) use stop::StopSignal;
 use symbio_core::chat_request;
-use symbio_core::plugin_debug;
 use symbio_core::{
     capability_take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
     APPROVAL_GRANTS, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use symbio_core::{chat_node as cm, session_chat};
+use symbio_plugin_api::plugin_debug;
 
 use std::sync::Arc;
 use std::time::Duration;

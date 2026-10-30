@@ -1,0 +1,30 @@
+[package]
+name = "symbio-sdk"
+version = "0.1.14"
+description = "Symbio SDK: host mechanism plugins may depend on (config IO, event bus, address assembly, authz tables)"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+# 依赖面即判据：**只有内核**。出现第二个 Symbio crate（尤其 symbio-core）就说明又有机制
+# 不是「插件能用的」而是「控制面才知道的」，那条该留在 core（DE-023 D-258）。
+[dependencies]
+symbio-kernel = { path = "../symbio-kernel" }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+time = { workspace = true, features = ["serde", "formatting", "parsing", "macros"] }
+dashmap = { workspace = true }
+inventory = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[dev-dependencies]
+uuid = { workspace = true, features = ["v4"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

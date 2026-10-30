@@ -179,7 +179,7 @@ pub(crate) async fn classify_turn<'b>(
     // **未入格** ⇒ 本轮的派生事实**也不写**（承诺 / 任务 / 熔断 / 记忆全不写）。
     // 用户的答案照旧经 `produced` 回给调用方——收束格是**记录**，不是呈现。
     if outcome.closure_denied {
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "session",
             "[turn-exec] 收束被授权拒绝，本轮派生事实不入格（turn={turn_no}）"
         );

@@ -79,7 +79,7 @@ impl TurnLauncher {
         error: impl Into<String>,
     ) {
         let err = error.into();
-        symbio_core::plugin_error!("session", "{}", &err);
+        symbio_plugin_api::plugin_error!("session", "{}", &err);
         self.convergence
             .persist_failure(
                 session_id,
@@ -150,7 +150,7 @@ impl TurnLauncher {
         provider_id: Option<String>,
         rid: u64,
     ) {
-        symbio_core::plugin_info!(
+        symbio_plugin_api::plugin_info!(
             "session",
             "[Session] Turn 任务启动：session={session_id}, rid={rid}, provider={:?}",
             provider_id
@@ -224,7 +224,7 @@ impl TurnLauncher {
         // 上报值与用户设置取 min）；此处仅保留降档可见日志。
         let context_limit = provider.effective_context_tokens().await;
         if context_limit < provider.max_context_tokens() {
-            symbio_core::plugin_info!(
+            symbio_plugin_api::plugin_info!(
                 "session",
                 "模型服务上报最大上下文 {context_limit}，低于用户设置 {}，运行时采用较小值",
                 provider.max_context_tokens()
@@ -443,7 +443,7 @@ impl TurnLauncher {
                     .await;
                 match report.status {
                     symbio_core::TurnStatus::Completed => {
-                        symbio_core::plugin_info!(
+                        symbio_plugin_api::plugin_info!(
                             "session",
                             "[Consume] Turn 任务正常结束（运行时长={}s）",
                             started.elapsed().as_secs()
@@ -498,7 +498,7 @@ impl TurnLauncher {
                 return;
             }
             TurnOutcome::Finished(Ok(Err(e))) => {
-                symbio_core::plugin_error!(
+                symbio_plugin_api::plugin_error!(
                     "session",
                     "[ChatLoop] 驱动器派发异常退出: {e} (code={})",
                     e.code()
@@ -522,13 +522,13 @@ impl TurnLauncher {
                 // 默认 panic hook，日志文件/结构化日志里将查不到。
                 let detail = join_err.to_string();
                 let msg = if join_err.is_panic() {
-                    symbio_core::plugin_error!(
+                    symbio_plugin_api::plugin_error!(
                         "session",
                         "[ChatLoop] chat_loop 任务 panic，已被 join 隔离：{detail}"
                     );
                     "服务器内部发生未预期的错误".to_string()
                 } else {
-                    symbio_core::plugin_error!(
+                    symbio_plugin_api::plugin_error!(
                         "session",
                         "[ChatLoop] 任务 join 失败（cancelled）：{detail}"
                     );
@@ -550,7 +550,7 @@ impl TurnLauncher {
                     "消费循环超时：{} 秒内 Turn 任务未结束，疑似 LLM/工具链路挂死，已强制收尾（在途 Turn 标记为失败）",
                     1800
                 );
-                symbio_core::plugin_error!("session", "[Consume] {}", &msg);
+                symbio_plugin_api::plugin_error!("session", "[Consume] {}", &msg);
                 self.teardown_failed_turn(
                     &state,
                     &session_id,
@@ -563,7 +563,7 @@ impl TurnLauncher {
                 return;
             }
             TurnOutcome::Superseded => {
-                symbio_core::plugin_info!(
+                symbio_plugin_api::plugin_info!(
                     "session",
                     "[Consume] 会话状态已复位或请求已更换（is_working/request_id 变更），Turn 任务让位：运行时长={}s",
                     started.elapsed().as_secs()
@@ -597,7 +597,7 @@ impl TurnLauncher {
         if let Some(sig) = &signal {
             sig.abort();
         }
-        symbio_core::plugin_info!(
+        symbio_plugin_api::plugin_info!(
             "session",
             "[Abort] 收到中止请求：中止信号{}（{}）",
             if registered {
@@ -624,7 +624,7 @@ impl TurnLauncher {
                     break;
                 }
                 if std::time::Instant::now() >= deadline {
-                    symbio_core::plugin_warn!(
+                    symbio_plugin_api::plugin_warn!(
                         "session",
                         "[Abort] 中止信号未在 3s 内注销，强制收敛"
                     );
@@ -662,7 +662,7 @@ impl TurnLauncher {
         // 顺序有意：节点补丁先于会话状态。前端 `applySessionNode` 在
         // `working → 非 working` 迁移时会清掉"等待审批"角标与活动文字，因此
         // 消息节点必须先落地，否则会出现"会话已空闲、节点还在跑"的一帧。
-        symbio_core::plugin_info!(
+        symbio_plugin_api::plugin_info!(
             "session",
             "[Abort] 收口完成：{} 个在途节点定稿为 Completed",
             converged

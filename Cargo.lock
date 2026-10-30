@@ -4199,6 +4199,7 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "symbio-kernel",
+ "symbio-sdk",
  "tempfile",
  "thiserror 2.0.21",
  "time",
@@ -4261,6 +4262,7 @@ dependencies = [
  "symbio-core",
  "symbio-deploy",
  "symbio-kernel",
+ "symbio-sdk",
  "tempfile",
  "tokio",
  "tracing",
@@ -4672,6 +4674,7 @@ dependencies = [
  "serde_json",
  "symbio-core",
  "symbio-kernel",
+ "symbio-sdk",
  "tempfile",
  "tokio",
  "tracing",
@@ -4686,6 +4689,7 @@ dependencies = [
  "regex",
  "symbio-core",
  "symbio-kernel",
+ "symbio-sdk",
  "tempfile",
  "time",
  "tokenizers",
@@ -4715,6 +4719,7 @@ dependencies = [
  "serde_json",
  "symbio-core",
  "symbio-kernel",
+ "symbio-sdk",
  "tempfile",
  "time",
  "tokio",
@@ -4735,6 +4740,22 @@ dependencies = [
  "tempfile",
  "tokio",
  "zip",
+]
+
+[[package]]
+name = "symbio-sdk"
+version = "0.1.14"
+dependencies = [
+ "dashmap",
+ "inventory",
+ "serde",
+ "serde_json",
+ "symbio-kernel",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

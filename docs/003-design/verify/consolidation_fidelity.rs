@@ -30,7 +30,7 @@
 //! - **概念链**（本文件原有）：特征向量域上的抽象模型，回答「min_fidelity 这个
 //!   机制在不在算、阈值敏不敏感、拒绝理由可不可区分」——那是**设计论证**；
 //! - **生产内核段**（`main` 末尾，`#[path]` 包含生产
-//!   [`crates/symbio-core/src/text/merge_kernel.rs`](../../../crates/symbio-core/src/text/merge_kernel.rs)）：
+//!   [`crates/symbio-sdk/src/text/merge_kernel.rs`](../../../crates/symbio-sdk/src/text/merge_kernel.rs)）：
 //!   跑的是生产这条保真度算法本身——**字符域的保留率**，与概念链的向量域读数
 //!   互相印证（同一现象：逐代下降、阈值前停）。没有这一段，本程序论证的机制
 //!   与生产实现的闸门（`memory_events::consolidate` → `accept`）之间就只剩一句
@@ -43,7 +43,7 @@ use std::collections::HashMap;
 // 生产内核：`#[path]` 指向仓库里的生产文件——**这一行就是「跑的是
 // 生产」的全部含义**（与 `recall_eval.rs` 同一条纪律）。它是 `memory_events::consolidate`
 // 调用的同一份源码：分句 / 合并 / 保真度。
-#[path = "../../../crates/symbio-core/src/text/merge_kernel.rs"]
+#[path = "../../../crates/symbio-sdk/src/text/merge_kernel.rs"]
 mod merge_kernel;
 
 // ───────────────────────── 领域类型 ─────────────────────────

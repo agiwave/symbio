@@ -582,7 +582,7 @@ where
             EVENT_CHAT_ASSISTANT_FINAL,
             &why,
         );
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "actors",
             "[v2] 快路收束被授权拒绝（{why}），本轮不入格（turn={}）",
             run.turn
@@ -924,7 +924,7 @@ where
             EVENT_CHAT_ASSISTANT_FINAL,
             &why,
         );
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "actors",
             "[v2] 收束被授权拒绝（{why}），本轮不入格（turn={}）",
             run.turn
@@ -1019,7 +1019,7 @@ where
             EVENT_CHAT_ASSISTANT_FINAL,
             &why,
         );
-        symbio_core::plugin_warn!(
+        symbio_plugin_api::plugin_warn!(
             "actors",
             "[v2] 中止收束被授权拒绝（{why}），本轮不入格（turn={}）",
             run.turn
