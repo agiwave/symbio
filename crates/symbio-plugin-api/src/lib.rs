@@ -150,6 +150,7 @@ pub use symbio_kernel::{
 pub use symbio_sdk::adapters::{
     DeltaSink, FullModel, LlmAdapter, ProviderLlmAdapter, SilentDeltas, TokenIssuer,
 };
+pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 pub use symbio_sdk::capability::{
     capability_announce_configurable, capability_configurables, capability_entry_of,
     capability_model_active, capability_model_resolve, capability_option_fields,
@@ -159,6 +160,7 @@ pub use symbio_sdk::capability::{
 pub use symbio_sdk::chat::{chat_node, chat_request, principal};
 pub use symbio_sdk::clock::clock_now_ms;
 pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
+pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};
 pub use symbio_sdk::event_bus::{
     event_bus_build_envelope, event_bus_register_subscriber, event_bus_resync_of,
     event_bus_unregister_subscriber, event_bus_vdfs_change_of, EventBus, EventBusSubscribeRequest,
@@ -190,12 +192,11 @@ pub use symbio_sdk::{
 // 这一臂每一条都需要 core 的**控制面**支撑：`capability_invoke` 的调用栈要读一轮的
 // 权限集，`transcript` / `readyset_for` 要读事件与主体，`agent_perms_of` 要读授权表。
 // 它们认识容器概念（`Session` / 幕 / 轮），所以按三层判据（D-258）留在 core。
-// 这一臂是**棘轮**：条数只许降（HS-002）；剩下的 25 条全是「有依赖的中间层」，
+// 这一臂是**棘轮**：条数只许降（HS-002）；剩下的 19 条全是「有依赖的中间层」，
 // 迁移顺序与判据见 023 的迁移表与 D-258 的代价段。
 pub use symbio_core::{
-    actor_can_assign_work, agent_perms_of, capability_invoke, check_all, commitment_events,
-    cost_ledger, failure_kind, node_build, principal_of, production_matrix, readyset_for,
-    transcript, AgentPermissions, AgentScope, ChatVocab, CommitmentVocab, EmbeddingService,
-    MessageVocab, ReadySetView, TaskVocab, AGENT_PERMS, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK,
-    EMBEDDING_LOCAL, TASK_CAP,
+    actor_can_assign_work, capability_invoke, check_all, commitment_events, cost_ledger,
+    failure_kind, node_build, principal_of, production_matrix, readyset_for, transcript, ChatVocab,
+    CommitmentVocab, MessageVocab, ReadySetView, TaskVocab, CAP_ASSERT_VERIFICATION,
+    CAP_DEFINE_WORK, TASK_CAP,
 };

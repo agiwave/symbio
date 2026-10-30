@@ -4756,6 +4756,7 @@ dependencies = [
  "shellexpand",
  "symbio-kernel",
  "tempfile",
+ "thiserror 2.0.21",
  "time",
  "tokio",
  "tracing",

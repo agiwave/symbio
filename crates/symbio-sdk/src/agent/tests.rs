@@ -6,7 +6,7 @@
 //! `*.example.com`）。任何一条放松都是把边界改成装饰。
 
 use super::*;
-use crate::{PluginInvokeRequestExt, PluginSimpleRequest};
+use symbio_kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
 
 fn perms(yaml: serde_json::Value) -> AgentPermissions {
     serde_json::from_value(yaml).expect("声明可解析")

@@ -17,6 +17,7 @@ dead_code = "warn"
 [dependencies]
 symbio-kernel = { path = "../symbio-kernel" }
 async-trait = { workspace = true }
+thiserror = { workspace = true }
 dirs = { workspace = true }
 serde_yaml_ng = { workspace = true }
 shellexpand = { workspace = true }

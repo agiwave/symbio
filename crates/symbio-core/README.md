@@ -17,11 +17,12 @@ impl: done
 （不认的机制住 `symbio-sdk`，D-258）。
 本文是该目录**命名与结构**的唯一 owner。
 
-**十二个域的实现住 `symbio-sdk`**（`text` · `clock` · `logger` · `event_bus` · `creator` ·
-`vdfs` · `keys` · `chat` · `capability` · `adapters` · `llm` · `plugin`）：它们有实现，但只碰
-内核词汇与自己的表。本目录下这十二个域只剩转发（`pub use symbio_sdk::<域>::*;`）——域登记
-与命名纪律照旧，`symbio_core::<域>::…` 这条路径不变。域目录不删，是因为它是 §1.2 的登记面
-（`core-naming-audit` N-004）：搬的是住址，不是归属。
+**十四个域的实现住 `symbio-sdk`**（`text` · `clock` · `logger` · `event_bus` · `creator` ·
+`vdfs` · `keys` · `chat` · `capability` · `adapters` · `llm` · `plugin` · `agent` ·
+`embedding`）：它们有实现，但只碰内核词汇与自己的表。本目录下这十四个域只剩转发
+（`pub use symbio_sdk::<域>::*;`）——域登记与命名纪律照旧，`symbio_core::<域>::…` 这条
+路径不变。域目录不删，是因为它是 §1.2 的登记面（`core-naming-audit` N-004）：搬的是住址，
+不是归属。
 
 封闭语法（五个语法 trait 与签名类型）的实现住 `symbio-kernel` crate（[DE-023 D-188](../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性")），
 本目录以同名私有 shim `pub use symbio_kernel::…` 转出——对外路径 `symbio_core::<符号>` 不变。

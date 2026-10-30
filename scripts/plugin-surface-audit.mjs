@@ -70,10 +70,11 @@ export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_s
  * 115 → 72（D-258 第一批：`text` / `clock` / `logger` / `event_bus` / `creator` /
  * `vdfs` / `keys` 七个域搬进 `symbio-sdk`）→ 25（第二批：`chat` / `capability` /
  * `adapters` / `llm` / `plugin` 五个域；另把 `chat` 的三个子命名空间与内核语法
- * `ring` 各归其臂）。这些条**不是还清了存量**，是搬了家：它们一条不少地留在门面上，
- * 只是改从 `symbio_sdk` / `symbio_kernel` 取（HS-003 照旧逐条核消费方）。
+ * `ring` 各归其臂）→ 19（第三批：`agent` 与 `embedding` 两个域）。这些条**不是还清了
+ * 存量**，是搬了家：它们一条不少地留在门面上，只是改从 `symbio_sdk` / `symbio_kernel`
+ * 取（HS-003 照旧逐条核消费方）。
  */
-export const WHITELIST_BASELINE = 25
+export const WHITELIST_BASELINE = 19
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
