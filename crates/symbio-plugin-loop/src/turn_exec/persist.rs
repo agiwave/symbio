@@ -109,8 +109,9 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &derived.breaks,
     );
     // 轮末贡献（DE-025 D-250）：能力在这一刻交出本轮的派生事实（记忆 / 技能 / 调度…）。
-    // 排在效果之后：贡献者要看得见本轮刚落的工具效果；排在淘汰回路之前——那一族读的
-    // 是承诺与声誉，与这里的贡献没有数据依赖，位置因此沿用原「调度」那一段。
+    // 排在效果之后：贡献者要看得见本轮刚落的工具效果（调度的输入就是本轮刚开的任务，
+    // 宿主按 `prio` 逐个询问并在每次之前重取史）；排在淘汰回路之前——那一族读的是
+    // 承诺与声誉，与这里的贡献没有数据依赖。
     land_contributions(
         store.as_ref(),
         symbio_plugin_api::TurnFace::Generated,
@@ -120,21 +121,6 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &user_text,
         response,
         session.task_cap(),
-    );
-    // 调度（DE-034 §3，`D-139` 裁决 4）：**必须排在任务表落格之后**，且**重新取史**
-    // ——调度的输入是本轮刚开的格；拿 `all`（轮初那份）算，这一轮新开的任务要等到
-    // 下一轮才进候选集，第一轮因此永远派不出东西。
-    let scheduled = store.range(Seq::new(0));
-    super::super::derived_facts::record_schedule(
-        session.session_id(),
-        store.as_ref(),
-        &scheduled,
-        session.task_cap(),
-        &principal,
-        turn_no,
-        user_seq,
-        &format!("t{turn_no}-s"),
-        symbio_core::clock_now_ms(),
     );
     // 淘汰回路（DE-043 §3）：**必须排在承诺落格之后**——它读的声誉投影
     // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。

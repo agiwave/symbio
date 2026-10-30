@@ -1,9 +1,11 @@
-//! 三个上下文 provider 的判据：段身份、空返回、节奏，以及「渲染不变」。
+//! 本插件两个上下文 provider 的判据：段身份、空返回、节奏。
 //!
-//! 这一组用例判的是**搬移前后输出一致**：召回段与调度段的排版原先在
-//! `memory_events::prompt_section` / `task_events::prompt_section`，现在由 provider
-//! 调用同一对函数产出——所以这里不重复断言排版细节（那些由各自模块的用例钉），
-//! 只断言「provider 在什么情况下给段、给的哪一段、次序如何」。
+//! 这一组用例判的是**搬移前后输出一致**：召回段的排版原先在
+//! `memory_events::prompt_section`，现在由 provider 调用同一函数产出——所以这里不
+//! 重复断言排版细节（那些由各自模块的用例钉），只断言「provider 在什么情况下给段、
+//! 给的哪一段、次序如何」。
+//!
+//! 调度段的 provider 已随任务能力迁出（`symbio-plugin-task`），它的判据在那边。
 
 use super::*;
 use symbio_plugin_api::context::{slots, Cadence, RecallFacts, RecallLine};
@@ -71,19 +73,12 @@ fn recall_says_it_when_degraded() {
     assert!(text.contains("部分"), "降级说明没出现在正文里：{text}");
 }
 
-/// 调度段：没有就绪任务 ⇒ 一段都不给（「算不出来」就是没有那一段，不是空占位）。
-#[test]
-fn readyset_without_ready_tasks_contributes_nothing() {
-    let req = request(&[], None);
-    assert!(ReadySetProvider.provide(&req).is_empty());
-}
-
-/// 三条 provider 都在 `loop` 名下各提交一次。
+/// 两条 provider 都在 `loop` 名下各提交一次。
 ///
 /// 提交序 = 同节奏内的段序（同一 owner 内 `inventory` 保持提交序，`providers()` 的
 /// 排序是稳定的）：端口化之前段的次序写死在 `build_request_sections` 的数组里，
-/// 现在是「召回先提交、调度次之、委派最后」。**改提交序就是改模型读到的先后**——
-/// 那是行为变化，不是重构，所以这条判据至少要把「各提交了一次」钉住。
+/// 现在是「召回先提交、委派最后」。**改提交序就是改模型读到的先后**——那是行为
+/// 变化，不是重构，所以这条判据至少要把「各提交了一次」钉住。
 #[test]
 fn all_providers_are_submitted_under_loop() {
     let loop_owned = symbio_plugin_api::context_providers()
@@ -91,8 +86,8 @@ fn all_providers_are_submitted_under_loop() {
         .filter(|p| p.owner() == "loop")
         .count();
     assert_eq!(
-        loop_owned, 3,
-        "本插件必须恰好提交三条上下文 provider（召回 + 调度 + 委派）"
+        loop_owned, 2,
+        "本插件必须恰好提交两条上下文 provider（召回 + 委派）"
     );
 }
 

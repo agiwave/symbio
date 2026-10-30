@@ -15,7 +15,7 @@
 //! | 替身 | 消费方 |
 //! |---|---|
 //! | [`StubLlmAdapter`] | `symbio-plugin-loop` 的 `turn_runner.test.rs` |
-//! | [`trivial_actor_spec`] | `symbio-plugin-loop`（`task_events` / `turn_runner`）· `symbio-plugin-session`（`store/wal`） |
+//! | [`trivial_actor_spec`] | `symbio-plugin-task`（`task`）· `symbio-plugin-loop`（`turn_runner`）· `symbio-plugin-session`（`store/wal`） |
 
 use async_trait::async_trait;
 use symbio_core::{

@@ -9,9 +9,8 @@
 //! 装载机制的所在。
 
 use symbio_core::{
-    ChatVocab, CommitmentVocab, Entity, Event, EventDecl, FactDecl, FactRole, MessageVocab,
-    TaskVocab, Verb, ViewDecl, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
-    EVENT_SENT,
+    ChatVocab, CommitmentVocab, Entity, Event, EventDecl, FactDecl, FactRole, MessageVocab, Verb,
+    ViewDecl, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 
 // ── 本插件持有的事件名（DE-024 D-197 / D-201）──
@@ -22,14 +21,6 @@ pub(crate) const EVENT_SESSION_CONFIG: &str = "session.config";
 pub(crate) const EVENT_TURN_STAGE: &str = "turn.stage";
 pub(crate) const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 pub(crate) const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
-pub(crate) const EVENT_TASK_READY: &str = "task.ready";
-/// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。落在
-/// `task × asserted`（返工本身是一次质量判定的事实）。
-///
-/// 写方 [`crate::task_events`]，读方是 core 的终止性判据——它经 `CountsRework` 角色
-/// 取这一格，不抄名字（DE-024 D-203），所以这个名字的两个端面都在本插件，随本插件
-/// 声明（D-197 / D-201）。
-pub(crate) const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
 ///
 /// 写方是 `memory_events::consolidate`（过 `accept` 闸门才落格），读方是 [`crate::recall`]
@@ -38,24 +29,15 @@ pub(crate) const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 /// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
 /// 落在 `memory × closed`；`produced_by` 指向被遗忘那条记忆的 seq。
 pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
-// 跨插件共享的八条名字（DE-024 D-204 / D-205 / D-206）：常量的**事实源是本插件清单的
+// 跨插件共享的四条名字（DE-024 D-204 / D-205 / D-206）：常量的**事实源是本插件清单的
 // `shared_events:` 行**，由 `scripts/facts/events-rs.mjs` 投影进
 // `symbio-plugin-api::events`，读侧（`session` 的 `stats` / `inbox` / `conation`，以及它调
-// `calibration_for` / `readyset_for` 时交进去的那张表）从这里取名字，而不是内核替它们命名。
+// `calibration_for` 时交进去的那张表）从这里取名字，而不是内核替它们命名。
+//
+// 任务族五条已随能力迁出（`symbio-plugin-task` 的 `PLUGIN.yml`），本插件不再引用它们的
+// 拼写：调度与折叠都住那个能力包，本插件不需要认识任务名。
 pub(crate) use symbio_plugin_api::events::{
-    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
-    EVENT_TASK_CONTROLLED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
-    EVENT_TURN_DISPATCH,
-};
-
-/// 本插件交出**任务族**的拼写（DE-024 D-206）：core 的 `readyset_for` 在构造期收这张表，
-/// 字段是它们在算法里的角色——终态与租约同落 `Task × Asserted`，所以按格子命不出这五个名字。
-pub(crate) const TASK_VOCAB: TaskVocab<'static> = TaskVocab {
-    opened: EVENT_TASK_OPENED,
-    progressed: EVENT_TASK_PROGRESS,
-    held: EVENT_TASK_HELD,
-    terminal: EVENT_TASK_ASSERTED,
-    lease: EVENT_TASK_ASSIGNED,
+    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_TASK_CONTROLLED, EVENT_TURN_DISPATCH,
 };
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
@@ -183,37 +165,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 控制面的一格（写方两个插件各一处：工具闸的熔断 / 拒因在本插件，打断处置在
     // `session` 的 inbox）：owner 是本插件，名字走清单生成，不回内核。
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
-    // ── 任务族（/ S04 / S07）──
-    //
-    // 这一族的五格此前由内核命名，而写方与调度者全在本插件、读数被 `session` 的
-    // `stats` 列消费——名字随 owner 登记进清单（DE-024 D-204），折叠在构造期收这张表
-    // 的拼写（D-206）。领域形状：任务图是 `depends_on` 载荷字段（数据不是机制，C14
-    // 判无环），返工是新增一条事件而不是改历史（append-only 已提供撤销语义）。
-    // 开任务：载荷 `{ task_id, depends_on, goal }`。
-    EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)),
-    // 推进：执行中的普通事实。在 `readyset` 里它同时是**解除挂起**——挂起是一条事件，
-    // 恢复也是一条。
-    EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)),
-    // 暂挂（插话抢占 / 等外部资源；DE-037 里这一格叫 `task.blocked`，
-    // 本仓库以 `task.held` 单点定义）。写方是 `session` 的收件箱。
-    EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)),
-    // 终态：验证通过（验收通过才终态）。
-    EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)),
-    // 就绪判死（调度者写，`reason: "lease_expired"`）：名字随 owner 声明入库——写闸
-    // 只认声明过的名字，没声明的格位一律 `OffGrid`。
-    EventDecl::new(EVENT_TASK_READY, (Entity::Task, Verb::Progressed)),
-    // 发放（租约）：载荷 `{ task_id, owner, lease_ms, until_ms }`，与终态同落
-    // `Task × Asserted`。**唯一写方是调度者**（`ScheduleDecider`），且写侧闸读
-    // `assign.work`（`ActorSpec::can_assign_work`）——没有该能力的主体零事件
-    // （fail-closed）。租约不是锁原语：持有状态由投影从这格算出，到期由调度者判死。
-    EventDecl::new(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted)),
-    // 返工轮：终止前提 2（`rework_bounded`）的计数对象。写方 `task_events`，读方
-    // core 判据经角色取它（DE-024 D-203）。
-    EventDecl::with_roles(
-        EVENT_TASK_REWORK_CREATED,
-        (Entity::Task, Verb::Asserted),
-        &[FactRole::CountsRework],
-    ),
+    // 任务族七格已随能力迁出（`symbio-plugin-task`）——名字、格位与角色都在那个
+    // 能力包的声明表里。本插件只留 `task.controlled`：它是**控制面**的格子（工具闸
+    // 的熔断与拒因在本插件），与任务语义无关。
     // ── 对话面补登（DE-024 D-203 归零批）──
     //
     // 下面九条的写方在本插件、读方是 core 的折叠

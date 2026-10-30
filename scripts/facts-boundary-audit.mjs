@@ -55,12 +55,12 @@ const ROOT = rootArg
   : path.resolve(scriptDir, '..')
 
 /** D-084 §4 的能力文件（DE-014 迁移表「能力自取磁盘」一行；
- *  6b 成片搬家后驱动器侧的文件住 `crates/symbio-plugin-loop/src/`，`rebuild` 住 core schema）。
+ *  6b 成片搬家后驱动器侧的文件住各能力包，`rebuild` 住 core schema）。
  *  `elimination` 随 D-219 迁入 `symbio-plugin-agent` 的 `before` 实现：它只读
  *  控制面批首算好的读数，连取事实的入口都没有，故退出本清单。 */
 const CAPABILITY_FILES = [
   'crates/symbio-plugin-loop/src/skill_events.rs',
-  'crates/symbio-plugin-loop/src/task_events.rs',
+  'crates/symbio-plugin-task/src/task.rs',
   'crates/symbio-plugin-loop/src/memory_events.rs',
   'crates/symbio-plugin-session/src/worker_progress.rs',
   'crates/symbio-plugin-loop/src/tools/tool_executor/breaker.rs',

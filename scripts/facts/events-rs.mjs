@@ -46,8 +46,9 @@ const HEADER = `//! 跨插件事件名常量 —— **由 \`scripts/facts/events
 //!   不必把 owner 插件也链进同一个二进制（那正是 E-009 禁掉的那条边）。
 //! - **内核不认识业务事件名**（DE-024 D-203 / D-204）：内核的两张表只留封闭语法——Entity×Verb
 //!   网格与协议五格。名字要跨插件就登记进清单，不要回内核加行（CS-005 / CS-007）。
-//! - **角色不在这里**：\`FactRole\` 是 owner 交给守卫的陈述，仍住 \`EventDecl\` 由装配表读；
-//!   本表只投影「名字 + 格位」两维。
+//! - **角色跟着投影**：\`FactRole\` 是 owner 交给守卫的陈述；跨插件共享的名字若只投影
+//!   「名字 + 格位」，读角色的守卫（\`FinalizesTurn\` / \`StopsTurn\` / …）在只链接本 crate
+//!   的进程里就会静默失效。\`SHARED_EVENTS\` 因此逐行带上 owner 声明里的角色。
 //!
 //! # 命名
 //!
@@ -56,7 +57,7 @@ const HEADER = `//! 跨插件事件名常量 —— **由 \`scripts/facts/events
 
 const NAME_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/
 const DECL_RE =
-  /EventDecl::(?:with_roles|new)\s*\(\s*(?:"([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"|([A-Z][A-Z0-9_]*))/g
+  /EventDecl::(with_roles|new)\s*\(\s*(?:"([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"|([A-Z][A-Z0-9_]*))/g
 /**
  * 声明处的格位：`(Entity::Memory, Verb::Opened)`（跨行也认）。
  * 路径限定写法（`(symbio_core::Entity::Memory, …)`——不 `use` 直接全量写）同认：
@@ -129,16 +130,23 @@ function ownerDeclarations(texts) {
   const cells = new Map()
   for (const t of texts) {
     for (const m of t.matchAll(DECL_RE)) {
-      const value = m[1] ?? localConsts.get(m[2]) ?? (m[2] ? m[2].replace(/^EVENT_/, '').toLowerCase().replace(/_/g, '.') : undefined)
+      const kind = m[1]
+      const ident = m[2] ? null : m[3]
+      const value = m[2] ?? localConsts.get(ident) ?? (ident ? ident.replace(/^EVENT_/, '').toLowerCase().replace(/_/g, '.') : undefined)
       if (!value || cells.has(value)) continue
-      const window = t.slice(m.index, m.index + 400)
+      // 窗口**止于下一条声明**：`with_roles` 的角色是这条声明自己的第三实参，不能
+      // 从相邻的下一行借来——`new` 形态没有角色这一维，越界匹配会把邻居的角色
+      // 贴到它头上（守卫于是对错误的名字生效，比漏投影更难发现）。
+      const rest = t.slice(m.index)
+      const next = rest.indexOf('EventDecl::', m[0].length)
+      const window = (next < 0 ? rest : rest.slice(0, next)).slice(0, 400)
       const cell = window.match(CELL_RE)
       if (!cell) {
         cells.set(value, null)
         continue
       }
       // 角色只从 `with_roles` 的第三实参里取：`new` 形态没有角色这一维。
-      const rolesText = window.slice(cell.index + cell[0].length).match(ROLES_RE)
+      const rolesText = kind === 'with_roles' ? window.slice(cell.index + cell[0].length).match(ROLES_RE) : null
       const roles = rolesText
         ? [...rolesText[1].matchAll(/FactRole::([A-Za-z0-9_]+)/g)].map((r) => r[1])
         : []

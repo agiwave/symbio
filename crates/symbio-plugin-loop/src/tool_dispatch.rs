@@ -72,8 +72,8 @@ use symbio_core::node_build::{
 /// 出参从分发点回到运行器的**唯一通道**：不收集它，这两样就静默全丢
 /// （与记忆 / 学习同一个坑——出参不交回，写方就无从落格）。
 ///
-/// 任务表**不在这里**：它是一条效果（`task_events::TaskTable`），走 `effects`
-/// 那一条通路（DE-025 D-207）。
+/// 任务表**不在这里**：它是一条效果（`symbio-plugin-task` 的 `TaskTable`），走
+/// `effects` 那一条通路（DE-025 D-207）。
 ///
 /// 形态仿 [`SessionDispatchPort::produced`]：`dispatch` 在 `&self` 上跑，出参却要
 /// 跨 await 累积，故用 `Mutex` 收，调用方在桥释放前 `take_derived` 取走。

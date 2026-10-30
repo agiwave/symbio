@@ -14,7 +14,7 @@
 //! ## 效果只有一条通路
 //!
 //! 承诺、任务表、文件变更**都不在本模块**：它们各自是能力包里的一个 `ToolBehavior`
-//! （`symbio-plugin-agent` / `symbio-plugin-loop` / `symbio-plugin-vdfs`），本模块只把
+//! （`symbio-plugin-agent` / `symbio-plugin-task` / `symbio-plugin-vdfs`），本模块只把
 //! `EffectInput` 补上宿主面、问出草稿、交给唯一写入口。加一个新效果不需要动这里
 //! （DE-025 D-207）。
 //!
@@ -143,38 +143,6 @@ pub(crate) fn record_derived(
                 "[v2] 熔断事件入格失败（会话 {session_id}）：{e:?}"
             );
         }
-    }
-}
-
-/// 调度（DE-034 §3，`D-139` 裁决 3–4）：任务表落完之后**再取一次史**，把就绪集派出去。
-///
-/// ## 为什么单独一个函数，而不塞进 [`record_derived`]
-///
-/// 它的输入是**刚写完的任务表**：`record_derived` 收到的是轮初那份切片，本轮新开的
-/// `task.opened` 不在里面——用它在 `record_derived` 内部算，等于永远晚一轮（第一轮
-/// 开了任务、第二轮才派）。取一次新史是最便宜的正确做法，代价是 store 多读一遍。
-///
-/// ## 失败只记日志
-///
-/// 与同族三路（承诺 / 任务表 / 熔断）同一条口径：轮次已收束，派生事实失败不该把
-/// 成功的一轮说成失败。调度没派成，下一轮还有机会——它的输入是事实，不是请求作用域
-/// 状态。
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn record_schedule(
-    session_id: &str,
-    store: &dyn Store<Event = Event>,
-    snapshot: &[Event],
-    cap: usize,
-    owner: &str,
-    turn: u64,
-    user_seq: u64,
-    id_prefix: &str,
-    now: i64,
-) {
-    if let Err(why) =
-        super::task_events::schedule(store, snapshot, cap, owner, turn, user_seq, id_prefix, now)
-    {
-        symbio_core::plugin_warn!("session", "[task] 调度失败（会话 {session_id}）：{why}");
     }
 }
 

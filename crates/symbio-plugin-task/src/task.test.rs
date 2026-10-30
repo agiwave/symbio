@@ -1,25 +1,35 @@
-//! 任务表写方验收：
-//! **清单声明 → 事实 → 两个消费方**的每一环都要看得见，且每条口径各配一个反向用例
+//! 任务能力包验收：
+//! **清单声明 → 事实 → 三个消费方**的每一环都要看得见，且每条口径各配一个反向用例
 //! （声明不变 ⇒ 不补事件；降级 ⇒ 不产事实；成环 ⇒ `invariants` 必须报出来）。
 
-use super::{prompt_section, ScheduleDecider, TaskItem, TaskStatus, TaskTable};
-use crate::control_decl::guard_vocab;
+use super::{
+    prompt_section, ScheduleContributor, ScheduleDecider, TaskItem, TaskStatus, TaskTable,
+};
 use symbio_core::PRINCIPAL_SCHEDULER;
 use symbio_core::{
-    actor_can_assign_work, check_all, readyset_for, Budget, Entity, Event, EventStore, Pattern,
-    Scope, Seq, Store, Verb, PRINCIPAL_MAIN,
+    actor_can_assign_work, check_all, readyset_for, Budget, Entity, Event, EventDecl, EventStore,
+    Pattern, Scope, Seq, Store, Verb, PRINCIPAL_MAIN,
 };
 use symbio_plugin_api::behaviors;
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeReadings, BeforeRequest, EffectEnv, EffectInput, ToolBehavior,
 };
 use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
+use symbio_plugin_api::turn::{TurnContributor, TurnEnd, TurnFace};
 
-use crate::control_decl::{
+use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
     EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED, TASK_VOCAB,
 };
 use symbio_testkit::trivial_actor_spec;
+
+/// 判据的词汇面：本 crate 的声明表（`submit_declarations!`）链接进来即生效。
+///
+/// 不直接写 `symbio_plugin_api::vocab()` 是让每条用例读同一个名字——词汇面的出处
+/// 若换（例如加一层装配注入），改这一处。
+fn guard_vocab() -> &'static [EventDecl] {
+    symbio_plugin_api::vocab()
+}
 
 fn item(id: &str, goal: &str, deps: &[&str], status: TaskStatus) -> TaskItem {
     TaskItem {
@@ -442,7 +452,7 @@ fn prompt_section_is_absent_when_nothing_is_ready() {
 /// （[D-085](../../symbio-plugin-session/README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "crates/symbio-plugin-session/src/README")；归档自身的判据在
 /// `session::store::wal.test.rs`）。本用例因此只需一份「较早任务格 + 较晚快照」的完整史。
 ///
-/// **反向自检**：把 `task_events::prompt_section` 的切片换成「从最新快照起自切窗口」
+/// **反向自检**：把 [`prompt_section`] 的切片换成「从最新快照起自切窗口」
 /// （`session::store::current_window(...)`）⇒ 本用例红（`prompt_section` 返回 `None`——
 /// 那条任务在模型视野里静默消失，而事实源里它一直开着）。
 #[test]
@@ -926,4 +936,133 @@ fn an_unbound_subagent_is_refused_the_task_table() {
         TaskTable.before(&judgement(&args, "session/reviewer")),
         BeforeDecision::Refuse(_)
     ));
+}
+
+// ==================== 轮末贡献：调度不再由宿主代劳（DE-025 D-250） ====================
+//
+// 三条判据：只走生成轮（答话轮没有新声明）、事件号与归属跟宿主面同形
+// （`t{turn}-s{n}` / 调度者 / 本轮开口格）、以及宿主盖章（`turn` / `ts`）由端口给。
+
+/// 一条已就绪的任务 + 本轮开口格。
+fn contributor_history(store: &EventStore) -> (u64, Vec<Event>) {
+    let anchor = seed_anchor(store);
+    open_task(store, "a", &[], PRINCIPAL_SCHEDULER);
+    (anchor, store.range(Seq::new(0)))
+}
+
+fn turn_end<'a>(
+    face: TurnFace,
+    history: &'a [Event],
+    anchor: &'a str,
+    user_seq: u64,
+) -> TurnEnd<'a> {
+    TurnEnd {
+        face,
+        turn: 3,
+        now_ms: 2_000,
+        principal: PRINCIPAL_MAIN,
+        user_seq,
+        anchor,
+        user_text: "做点事",
+        response: None,
+        task_cap: usize::MAX,
+        history,
+    }
+}
+
+/// 生成轮：就绪集 → `task.ready` + `task.assigned`，号是 `t3-s{n}`、归属是调度者。
+#[test]
+fn the_contributor_lands_ready_and_assigned_on_a_generated_turn() {
+    let store = EventStore::new();
+    let (anchor, history) = contributor_history(&store);
+    let end = turn_end(TurnFace::Generated, &history, "t3", anchor);
+
+    let drafts = ScheduleContributor.contribute(&end);
+    assert_eq!(
+        drafts
+            .iter()
+            .map(|d| d.fact.kind.as_str())
+            .collect::<Vec<_>>(),
+        vec![EVENT_TASK_READY, EVENT_TASK_ASSIGNED],
+        "先记就绪、再发放"
+    );
+    assert_eq!(
+        drafts
+            .iter()
+            .map(|d| d.fact.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["t3-s0", "t3-s1"],
+        "事件号词干由宿主给的轮锚拼出（与旧的 `t{{turn}}-s` 同形）"
+    );
+    for draft in &drafts {
+        assert_eq!(draft.actor, Some(PRINCIPAL_SCHEDULER), "派活的主体是调度者");
+        assert_eq!(draft.fact.entity, Entity::Task);
+        assert_eq!(
+            draft.fact.produced_by,
+            Some(anchor),
+            "溯源锚是本轮开口格（I2）"
+        );
+    }
+}
+
+/// 宿主盖章：`turn` / `ts` 由端口给，能力只声明事实与归属。
+#[test]
+fn the_host_stamps_turn_and_time() {
+    let store = EventStore::new();
+    let (anchor, history) = contributor_history(&store);
+    let end = turn_end(TurnFace::Generated, &history, "t3", anchor);
+    let event = ScheduleContributor.contribute(&end)[0]
+        .clone()
+        .into_event(&end);
+    assert_eq!(event.turn, 3);
+    assert_eq!(event.ts, 2_000);
+    assert_eq!(event.actor, PRINCIPAL_SCHEDULER);
+}
+
+/// 反向：定稿答话轮没有工具交换，也就没有新声明——贡献者一条都不交。
+#[test]
+fn an_answered_turn_contributes_no_schedule() {
+    let store = EventStore::new();
+    let (anchor, history) = contributor_history(&store);
+    let end = turn_end(TurnFace::Answered, &history, "t3", anchor);
+    assert!(
+        ScheduleContributor.contribute(&end).is_empty(),
+        "答话轮不该开调度账"
+    );
+}
+
+/// **EX-003 反向用例**：两份实现同时生效必须红。
+///
+/// 迁出之后，唯一能守住「旧实现没删干净」的装载期判据是 `Gap::DuplicateEvent`：
+/// 同名事件在两个 owner 下各声明一次，`seal` 必须把重名报出来。这条判的是**装配口**，
+/// 不是本包的私有行为——同一份检查也拦着后来者把任务名再声明第二遍。
+#[test]
+fn a_second_declaration_of_the_same_task_event_is_rejected() {
+    fn decls() -> symbio_core::PluginDeclarations<'static> {
+        const EVENTS: &[EventDecl] = &[EventDecl::new(
+            EVENT_TASK_OPENED,
+            (Entity::Task, Verb::Opened),
+        )];
+        symbio_core::PluginDeclarations {
+            events: EVENTS,
+            facts: &[],
+            views: &[],
+            ports: &[],
+            actors: Vec::new(),
+            rows: &[],
+        }
+    }
+    let mut b = symbio_core::Builder::new();
+    b.declare("crates/symbio-plugin-task", decls());
+    // 旧实现没删干净的样子：同一个名字在第二个 owner 下再声明一次。
+    b.declare("crates/symbio-plugin-loop", decls());
+    let Err(gaps) = b.seal(&symbio_plugin_api::rows::row_writes()) else {
+        panic!("同名事件在两个 owner 下声明，装载必须判红");
+    };
+    assert!(
+        gaps.contains(&symbio_core::ring::Gap::DuplicateEvent {
+            name: EVENT_TASK_OPENED
+        }),
+        "缺口里必须点名 `{EVENT_TASK_OPENED}` 重名：{gaps:?}"
+    );
 }

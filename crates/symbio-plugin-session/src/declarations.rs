@@ -37,7 +37,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("turn.branch_selected", (Entity::Turn, Verb::Asserted)),
 ];
 
-/// **消费方**侧的任务族词汇表（DE-024 D-206）：这一族的 owner 是 `crates/symbio-plugin-loop`，本插件只是
+/// **消费方**侧的任务族词汇表（DE-024 D-206）：这一族的 owner 是 `crates/symbio-plugin-task`，本插件只是
 /// 读 `readyset` / `autonomy` 两列的第二个消费方，所以拼写取自清单生成物
 /// `symbio_plugin_api::events`——不是兄弟插件（E-009 禁那条边），也不是 core 或内核代答。
 /// 交出整族而不是本插件用到的那两格：折叠收的是同一张表，两张各读各的拼写迟早分岔。
@@ -54,8 +54,9 @@ pub(crate) const TASK_VOCAB: symbio_core::TaskVocab<'static> = symbio_core::Task
 /// 与 [`TASK_VOCAB`] 同一条通路、同一个理由：折叠（`transcript` / `rebuild` /
 /// `prompt_fidelity` / `branch` / `mutations` / `slo` / `commitment_records` …）住在
 /// core，两个插件都调它，所以拼写只能来自**清单生成物**——本插件是 `message.*` 与
-/// `session.consolidated` / `turn.branch_selected` 五条的 owner，其余十六条的 owner 是
-/// `crates/symbio-plugin-loop`（E-009 禁兄弟插件依赖，故不引用 loop 的 `control_decl`）。
+/// `session.consolidated` / `turn.branch_selected` 五条的 owner，其余十一条的 owner 是
+/// `crates/symbio-plugin-loop`（E-009 禁兄弟插件依赖，故不引用 loop 的 `control_decl`）；
+/// 任务族五条已随能力迁到 `crates/symbio-plugin-task`——拼写同样只从清单生成物取。
 ///
 /// ## 为什么是三张而不是一张
 ///

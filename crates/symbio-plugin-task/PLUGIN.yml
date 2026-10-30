@@ -1,0 +1,12 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: task
+plugin_comment: 任务表：清单声明成事实、独立验证与返工、就绪集调度与调度段
+plugin_assembly: sub_agent
+plugin_order: 45
+# 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
+# crates/symbio-plugin-api/src/events.rs）。格位仍住 decl::EVENTS。
+shared_events: task.asserted, task.assigned, task.held, task.opened, task.progress
+
+# 授权行：调度者只持 `assign.work`——发放的权威动作是派活，
+# 不立任务（`define.work`）、不发言（`reply`）。
+principal_scheduler: scheduler/main|assign.work|thread_private

@@ -13,7 +13,7 @@ import './_selfrun.mjs';
 // | 读侧闸与各列共用同一次判定 | `principal: agent:ghost` ⇒ `{ready: []}` + `has_wal: true` |
 // | 断言真的在跑 | `invariants` 为空（两轮都收束 ⇒ 没有可报的违规） |
 //
-// 单测各自只看得见一层：`task_events.test.rs` 用假事件验状态推进与返工，
+// 单测各自只看得见一层：`symbio-plugin-task` 的 `task.test.rs` 用假事件验状态推进与返工，
 // `stats.test.rs` 验列的复算，`view.test.rs` 验调度段的插入位置。
 // 没有任何单测**同时**看得见「模型给的名字」「读侧就绪集」「进请求的段落」
 // 「出口读的列」四者指向同一张任务图——那正是端到端的增量。

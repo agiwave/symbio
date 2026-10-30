@@ -9,9 +9,6 @@ use super::*;
 // `use super::*` 因此带不过来。
 use symbio_core::chat_node::NodeRole;
 use symbio_core::PluginSimpleRequest;
-// `EffectInput` 是**测试自己**要的：闸门拒止的判据是「连效果输入都不产生」，
-// 而父模块只把它当出参类型（`use super::*` 带不过来）。
-use symbio_plugin_api::effects::EffectInput;
 // `Store` 是**测试自己**要的（`store.append` 是 trait 方法；父模块顶层不导入它——
 // 生产侧的读发生在 `tool_executor/breaker.rs` 子模块里）；`use super::*` 因此带不过来。
 use symbio_core::Store;
@@ -105,30 +102,6 @@ async fn factory_decls() -> ToolDecls {
         visitor as Arc<dyn Registry>,
     );
     ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await)
-}
-
-/// 注册面 + 可选的 `AGENT_ID`：声明闸的整批路径用例按需构造。
-async fn ctx_declaring(
-    behaviors: &'static [&'static str],
-    agent_id: Option<&str>,
-) -> Arc<dyn PluginInvokeRequest> {
-    let req = PluginSimpleRequest::new(None, None);
-    if let Some(id) = agent_id {
-        req.set(symbio_core::AGENT_ID, id.to_string());
-    }
-    let visitor = Arc::new(DefaultToolVisitor::new());
-    visitor
-        .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
-            name: "todo_write".to_string(),
-            behaviors,
-            ..Default::default()
-        })) as Arc<dyn Capability>))
-        .await;
-    req.set(
-        symbio_core::CAPABILITY_VISITOR,
-        visitor as Arc<dyn Registry>,
-    );
-    Arc::new(req)
 }
 
 // ── 测试用的声明闸 ────────────────────────────────────────────────
@@ -1411,151 +1384,6 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
         effects[0].why.contains("assign.work 已被淘汰回路收回"),
         "违约理由要写明成因（实际: {}）",
         effects[0].why
-    );
-
-    std::fs::remove_dir_all(&dir).ok();
-}
-
-// ==================== 任务表写侧闸：纯产出主体不立任务（DE-033 §3） ====================
-//
-// 钉的是**闸门的接线**（判据本身是 `task_events::TaskTable::before`，见
-// `task_events.test.rs`）：`todo_write` 到达执行窗口之前被拒——`Refused:` 回灌模型、
-// 父节点收敛、工具没有执行（没有路由往返）、**不交效果输入**（效果只在跑完后求值，
-// 见 DE-025 D-213）。
-//
-// 之后这道闸的判据是**注册面 + 声明**：ctx 的 `CAPABILITY_VISITOR` 里要有一位
-// 自声明 `task_table` 的 `todo_write`（生产即如此）——本用例的 ctx 因此带一份与
-// 生产同形的注册面，否则闸「看不见」这次调用（无声明 = 不命中，由 e2e 兜真实行为）。
-
-/// 工人主体（只持 `produce.artifact`）调 `todo_write` ⇒ 拒止。
-///
-/// 今天没有任何生产路径让工人调任务表——此用例防的是**未来**：角色行落地后，
-/// 一个绑 `worker` 的子会话调 `todo_write` 被诚实拒止，而不是静默以主智能体
-/// 的资格写下去。C15 的精神：产出者不自我认证。
-#[tokio::test]
-async fn a_producer_only_principal_is_refused_the_task_table() {
-    let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-task-table");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("建插件目录");
-
-    let worker_ctx =
-        ctx_declaring(&[symbio_plugin_api::behaviors::TASK_TABLE], Some("worker")).await;
-
-    let sink = ExecEventSink::silent();
-    let abort = ExecAbortSignal::new();
-    let parent = ChatNode {
-        id: "tc-task".into(),
-        principal: Some(principal_for(NodeRole::Assistant)),
-        msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "local/todo_write"})),
-        status: Some(NodeStatus::Streaming),
-        ..Default::default()
-    };
-    let tcs = vec![TurnToolCallInfo {
-        id: Some("tc-task".into()),
-        wire_id: None,
-        name: Some("local/todo_write".into()),
-        arguments: json!({ "todos": [{ "id": "t1", "content": "干活", "status": "completed" }] }),
-        parse_error: None,
-        overflow_notice: None,
-    }];
-    let mut effects: Vec<EffectInput> = Vec::new();
-    let (msgs, updates) = process_tool_calls_async(
-        tcs,
-        &None,
-        &sink,
-        &abort,
-        worker_ctx,
-        std::slice::from_ref(&parent),
-        &dir,
-        &EventStore::new(),
-        false,
-        &mut effects,
-        &mut Vec::new(),
-    )
-    .await;
-
-    assert_eq!(msgs.len(), 1, "被闸拦下的调用也必须有结果子节点");
-    let text = msgs[0]
-        .content
-        .as_ref()
-        .map(|c| c.to_text())
-        .unwrap_or_default();
-    assert!(
-        text.contains("Refused:") && text.contains("define.work / assert.verification"),
-        "结果要写明是被任务表闸拒的（实际: {text}）"
-    );
-    assert_eq!(updates.len(), 1, "父节点必须收到终态（否则永远转下去）");
-    assert_eq!(
-        updates[0]
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("failure_kind"))
-            .and_then(|v| v.as_str()),
-        Some(failure_kind::PERMISSION_DENIED),
-    );
-    assert!(
-        effects.is_empty(),
-        "工具没跑 ⇒ 连效果输入都不产生（跑了才判，DE-025 D-213）"
-    );
-
-    std::fs::remove_dir_all(&dir).ok();
-}
-
-/// 平凡值会话（无 `AGENT_ID` ⇒ `agent:main`，持 `define.work`）**不被本闸拦**。
-///
-/// 这是「闸不改变现有行为」的反向对照：注册面照生产同形声明了 `task_table`，
-/// 主会话的 `todo_write` 照常走到路由（无 parent ⇒ 路由失败是另一回事，结果里
-/// 不会有任务表闸的 `Refused:`）。
-#[tokio::test]
-async fn the_trivial_session_is_not_refused_the_task_table() {
-    let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-task-table-open");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("建插件目录");
-
-    let sink = ExecEventSink::silent();
-    let abort = ExecAbortSignal::new();
-    let parent = ChatNode {
-        id: "tc-task2".into(),
-        principal: Some(principal_for(NodeRole::Assistant)),
-        msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "local/todo_write"})),
-        status: Some(NodeStatus::Streaming),
-        ..Default::default()
-    };
-    let tcs = vec![TurnToolCallInfo {
-        id: Some("tc-task2".into()),
-        wire_id: None,
-        name: Some("local/todo_write".into()),
-        arguments: json!({ "todos": [] }),
-        parse_error: None,
-        overflow_notice: None,
-    }];
-    let mut effects: Vec<EffectInput> = Vec::new();
-    let (msgs, _updates) = process_tool_calls_async(
-        tcs,
-        &None,
-        &sink,
-        &abort,
-        ctx_declaring(&[symbio_plugin_api::behaviors::TASK_TABLE], None).await,
-        std::slice::from_ref(&parent),
-        &dir,
-        &EventStore::new(),
-        false,
-        &mut effects,
-        &mut Vec::new(),
-    )
-    .await;
-
-    assert_eq!(msgs.len(), 1);
-    let text = msgs[0]
-        .content
-        .as_ref()
-        .map(|c| c.to_text())
-        .unwrap_or_default();
-    assert!(
-        !text.contains("define.work / assert.verification"),
-        "平凡值会话（agent:main 持 define.work）不得被任务表闸拒（实际: {text}）"
     );
 
     std::fs::remove_dir_all(&dir).ok();

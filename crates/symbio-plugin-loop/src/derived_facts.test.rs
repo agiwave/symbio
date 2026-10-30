@@ -115,19 +115,6 @@ impl symbio_plugin_api::ToolBehavior for PromiseStub {
 
 symbio_plugin_api::submit_behavior!(PromiseStub);
 
-/// 一次 `todo_write` 的效果输入（任务表的**实现**住本 crate 的 `task_events::TaskTable`）。
-fn task_table(id: &str, todos: serde_json::Value) -> EffectInput {
-    EffectInput {
-        tool: "local/todo_write".to_string(),
-        call_id: id.to_string(),
-        args: serde_json::json!({ "todos": todos }),
-        success: true,
-        result: String::new(),
-        why: String::new(),
-        declared: &[symbio_plugin_api::behaviors::TASK_TABLE],
-    }
-}
-
 /// 一次 `agent_run` 的效果输入（承诺的**实现**住 agent 插件——本 crate 的测试二进制
 /// 以 dev 依赖链接它，见 `Cargo.toml` 的说明；这里只造值，不造实现）。
 fn delegation(id: &str, promise: &str, ok: bool, why: &str) -> EffectInput {
@@ -673,18 +660,22 @@ fn a_principal_without_assign_work_is_never_eliminated() {
     );
 }
 
-// ── 三族互不连累 ────────────────────────────────────────────────────────
+// ── 两族互不连累 ────────────────────────────────────────────────────────
 
-/// 承诺写不进去时，任务表与熔断**照样写**。
+/// 承诺写不进去时，熔断**照样写**。
 ///
-/// 三族共用同一个锚点（`user_seq`），但彼此没有数据依赖——一族写失败就让另外两族
-/// 的事实一起消失，是 `?` 的副作用，不是设计意图。此前的实现正是这样：承诺段用
-/// `map_err(..)?`，于是第一个 `append` 失败后函数直接返回，任务表与熔断事件都没写。
+/// 两族共用同一个锚点（`user_seq`），但彼此没有数据依赖——一族写失败就让另一族的
+/// 事实一起消失，是 `?` 的副作用，不是设计意图。此前的实现正是这样：承诺段用
+/// `map_err(..)?`，于是第一个 `append` 失败后函数直接返回，熔断事件也没写。
+///
+/// 任务表不在这条判据里：它已随能力迁出（`symbio-plugin-task`），本测试二进制
+/// 不链接那个写方；「效果失败不连累熔断」与「承诺失败不连累熔断」仍共用这一段
+/// 效果循环，所以独立性由本用例钉住。
 ///
 /// 反向守卫：让效果通路的写口对承诺抛错（而不是记日志继续），本用例立刻变红
-/// （`task.*` 与熔断格都找不到）。三族各自独立是 D-207 之后仍然成立的判据。
+/// （熔断格找不到）。各族独立是 D-207 之后仍然成立的判据。
 #[test]
-fn commitment_failure_does_not_block_task_or_breaker() {
+fn commitment_failure_does_not_block_the_breaker() {
     /// 拒绝一切 `commitment.*` 事实、其余照常落库的写口。
     struct CommitmentsRefuse(EventStore);
 
@@ -717,13 +708,7 @@ fn commitment_failure_does_not_block_task_or_breaker() {
         user_seq,
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
-        &[
-            delegation("call-1", "让 reviewer 复查这段", true, ""),
-            task_table(
-                "call-2",
-                serde_json::json!([{ "id": "t1", "content": "复查上下文收敛" }]),
-            ),
-        ],
+        &[delegation("call-1", "让 reviewer 复查这段", true, "")],
         &["成本超预算"],
     );
 
@@ -733,11 +718,7 @@ fn commitment_failure_does_not_block_task_or_breaker() {
         !snap.iter().any(|e| e.kind.starts_with("commitment.")),
         "注入没生效：承诺事件不该写进去"
     );
-    // 断言二：另两族照常落库。
-    assert!(
-        snap.iter().any(|e| e.kind.starts_with("task.")),
-        "承诺写失败后任务表被连累了——三族之间没有依赖，不该互相打断"
-    );
+    // 断言二：另一族照常落库。
     // 熔断格按 `Entity::Control` 认，不按 kind 字符串认：`crate::control_decl::EVENT_TASK_CONTROLLED` 的
     // 字面量不住公开面（`event` 模块是私有的），而本用例判的是「那一格写没写进去」，
     // 不是它的 kind 拼写。

@@ -15,7 +15,7 @@ use super::super::control_decl::{EVENT_AUTHZ_GRANTED, FACTS, VIEWS};
 use super::{load, LOOP_OWNER, PORTS, ROWS};
 use symbio_core::ring::{check_rows, drive, owed, Decl, Gap, Pattern};
 use symbio_core::Frozen;
-use symbio_core::{Entity, Event, Seq, Verb};
+use symbio_core::{Entity, Event, EventDecl, FactRole, PluginDeclarations, Seq, Verb};
 
 fn ev(turn: u64, kind: &str, payload: Value) -> Event {
     static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -41,6 +41,36 @@ fn ev_at(turn: u64, kind: &str, payload: Value, ts: i64) -> Event {
 fn frozen() -> Arc<Frozen> {
     super::load(ROWS).expect("生产行表必须装载得起来，否则义务环拒绝启动")
 }
+
+/// 本测试二进制要能代表**完整进程**的装配表：`assemble`（生产装配口）在完整表上
+/// 判「每一档守卫角色都有人住」，而 `CountsRework` 的居民 `task.rework_created`
+/// 随任务能力包搬出了本插件（DE-025 的一个能力/一个插件）。这里只交**那一格**的
+/// 测试声明，作为能力包在同一进程里的替身——名字、格位与角色与它的声明逐字相同；
+/// 生产进程里由 `symbio-plugin-task` 交同一行，本插件不认识它（E-009）。
+///
+/// 不链接任务能力包（那会是一条编译期兄弟边，`EX-004` 判红）：子集二进制只需要
+/// 「这一档角色有居民」，不需要那个 crate 的任何符号。
+fn task_capability_fixture() -> PluginDeclarations<'static> {
+    const EVENTS: &[EventDecl] = &[EventDecl::with_roles(
+        "task.rework_created",
+        (Entity::Task, Verb::Asserted),
+        &[FactRole::CountsRework],
+    )];
+    PluginDeclarations {
+        events: EVENTS,
+        facts: &[],
+        views: &[],
+        ports: &[],
+        actors: Vec::new(),
+        rows: &[],
+    }
+}
+
+// 提交序与生产装配一致：测试二进制的声明表也要有这条替身，`assemble` 才看得见居民。
+symbio_plugin_api::submit_declarations!(
+    "crates/symbio-plugin-loop-test-harness",
+    task_capability_fixture
+);
 
 /// 这一行此刻是否**欠着**这笔账（`open`：`owes` 命中且没有被 `until` 关掉）。
 ///

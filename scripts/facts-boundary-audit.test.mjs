@@ -18,7 +18,7 @@ const script = path.join(scriptDir, 'facts-boundary-audit.mjs')
 /** 与守卫里的清单一致：夹具要让每个文件都存在，否则 FB-002 会先报清单漂移。 */
 const CAPABILITY_FILES = [
   'crates/symbio-plugin-loop/src/skill_events.rs',
-  'crates/symbio-plugin-loop/src/task_events.rs',
+  'crates/symbio-plugin-task/src/task.rs',
   'crates/symbio-plugin-loop/src/memory_events.rs',
   'crates/symbio-plugin-session/src/worker_progress.rs',
   'crates/symbio-plugin-loop/src/tools/tool_executor/breaker.rs',

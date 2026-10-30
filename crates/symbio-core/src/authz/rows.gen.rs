@@ -27,8 +27,6 @@ use super::VisScope;
 pub(crate) const ROWS: &[(&str, &[&str], VisScope)] = &[
     // ============ local ============
     (PRINCIPAL_TOOL_CONTENT_SEARCH, &["produce.artifact"], VisScope::ThreadPrivate),
-    // ============ loop ============
-    (PRINCIPAL_SCHEDULER, &["assign.work"], VisScope::ThreadPrivate),
     // ============ session ============
     (PRINCIPAL_MAIN, &["judge.intent", "reply", "define.work", "produce.artifact", "assign.work"], VisScope::ThreadPrivate),
     (PRINCIPAL_AUTONOMOUS, &["define.work"], VisScope::ThreadPrivate),
@@ -40,6 +38,8 @@ pub(crate) const ROWS: &[(&str, &[&str], VisScope)] = &[
     (PRINCIPAL_WORKER, &["produce.artifact"], VisScope::ThreadPrivate),
     (PRINCIPAL_PLANNER, &["define.work"], VisScope::ThreadPrivate),
     (PRINCIPAL_VERIFIER, &["assert.verification"], VisScope::ThreadPrivate),
+    // ============ task ============
+    (PRINCIPAL_SCHEDULER, &["assign.work"], VisScope::ThreadPrivate),
     // ============ vdfs ============
     (PRINCIPAL_TOOL_VDFS_WRITE, &["produce.artifact"], VisScope::ThreadPrivate),
     // ============ web ============

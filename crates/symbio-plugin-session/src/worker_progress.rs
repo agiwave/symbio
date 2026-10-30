@@ -158,7 +158,7 @@ pub(crate) async fn for_session(
 /// 从事实快照算出 Q3 进展（**纯函数**：只吃一份事件切片，可穷举测试）。
 ///
 /// 调用方用 `SessionStore::snapshot` 取
-/// 「有没有事实源」：有为 `Some`、无则走旧读法——与 `task_events::prompt_section`
+/// 「有没有事实源」：有为 `Some`、无则走旧读法——与调度段（`symbio-plugin-task`）
 /// 同一条纪律（无源 ⇒ 不产出，不造空壳）。
 pub fn progress_from_facts(
     snapshot: &[Event],

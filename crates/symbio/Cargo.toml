@@ -38,6 +38,7 @@ symbio-plugin-plugin_manager = { path = "../symbio-plugin-plugin_manager" }
 symbio-plugin-session = { path = "../symbio-plugin-session" }
 symbio-plugin-setting = { path = "../symbio-plugin-setting" }
 symbio-plugin-skill = { path = "../symbio-plugin-skill" }
+symbio-plugin-task = { path = "../symbio-plugin-task" }
 symbio-plugin-telegram = { path = "../symbio-plugin-telegram" }
 symbio-plugin-vdfs = { path = "../symbio-plugin-vdfs" }
 symbio-plugin-web = { path = "../symbio-plugin-web" }

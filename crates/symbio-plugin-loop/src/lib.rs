@@ -34,7 +34,6 @@ mod report_exec;
 mod session_port;
 mod skill_events;
 mod stage_events;
-mod task_events;
 mod tokenizer;
 mod tool_dispatch;
 mod tools;

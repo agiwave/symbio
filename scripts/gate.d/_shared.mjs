@@ -233,7 +233,14 @@ export const BASELINE = {
   // （「多一条就红」永远不会触发），而 `ActorEntry.transitional` 已随 D-238 删除。同一批没有丢判据：
   // 运行期写入封闭仍由 `writes_closed_admits_declared_and_protocol_only` 钉（协议五格 + `decl.writes`
   // 两支，越界必须为假），「声明不了的一次写出」由装载期成环（`Gap::DependencyCycle`）判。非侵蚀。
-  ciRustTestsTotal: 2440,
+  // baseline-allow ciRustTestsTotal: L3a 任务能力迁出净 +2（2440 → 2442）——新建 `symbio-plugin-task`
+  // 28 条（`task.test.rs` 27 + `decl.test.rs` 1）：23 条从 loop 的 `task_events.test.rs` 原样搬家，
+  // 3 条补在迁出后的端口面（写侧闸的 before、调度段、轮末贡献），1 条是 `EX-003` 反向用例
+  // （同名事件在两个 owner 下声明 ⇒ `DuplicateEvent` 必红）；loop 删 26 条（`task_events.test.rs`
+  // 23 + `tool_executor.test.rs` 2 条写侧闸 + `providers.test.rs` 1 条调度段），角色居住由测试
+  // 二进制的声明替身满足。判据没有丢：同一批断言随能力一起搬家，只换了 executor 与测试二进制。
+  // 非侵蚀。
+  ciRustTestsTotal: 2442,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

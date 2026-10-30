@@ -1,23 +1,16 @@
-//! 任务表写方：
-//! **会话任务清单 → v2 事实源 → 两个消费方**（读出口 `session/stats` 的 `readyset`
-//! 列 + 交给执行者的调度段）。
+//! 任务能力：**会话任务清单 → 任务事实 → 三个消费方**。
 //!
-//! 与 `super::memory_events` 同族：任务不是另开一份存储，任务就是
-//! `v2-events.wal` 里的 `task.*` 事件（D-044 同族纪律）。清单本身（
-//! `local/todo_write`）是**纯内存、会话作用域**的（见其模块头）；事实源是同一份
-//! 状态的持久化，两处各算一次就是两套真相——所以本模块只**转写观察到的声明**，
-//! 不自己维护任务图。
+//! 三个消费方各走一条已存在的扩展面，本模块只提供判据与排版：
 //!
-//! ## 两处消费方（一个事实一个出口）
-//!
-//! | 消费方 | 形态 | 门控 |
+//! | 消费方 | 形态 | 扩展面 |
 //! |---|---|---|
-//! | 读出口 `session/stats` | `readyset` 列（与四列同款：事实源读什么算什么） | `may_read` |
-//! | 调度段 [`prompt_section`] | 请求视图**置顶**一段 `role=user` 的提示 | 有任务 ∧ 就绪集非空 ∧ `request_round == 0` |
+//! | 读出口 `session/stats` 的 `readyset` 列 | 事实源读什么算什么 | 共享声明（`TASK_VOCAB`） |
+//! | 调度段 [`prompt_section`] | 请求视图置顶一段 `role=user` 的提示 | 上下文 provider（`context`） |
+//! | 轮末调度 | 就绪集 → `task.ready` / `task.assigned` | 轮末贡献（[`ScheduleContributor`]，D-250） |
 //!
-//! 投影给的是**候选集**（`readyset` 是纯函数，同一份切片永远算出同一个集合），
-//! 选哪一个是调用方的策略——调度段把候选集交给本轮的执行者（模型），不替它决定
-//! （`projection::readyset` 模块头的边界：优先级 / 公平性 / 饥饿都是打分参数）。
+//! 任务不是另开一份存储：任务就是事实源里的 `task.*` 事件（D-044 同族纪律）。清单本身
+//! （`local/todo_write`）是纯内存、会话作用域的；本模块只**转写观察到的声明**，
+//! 不自己维护任务图。
 //!
 //! ## 六条口径（为什么是这样）
 //!
@@ -41,13 +34,8 @@
 //!   （I2）。事件号 `v2t-{轮锚}-{调用 id}-{n}`：轮锚挡跨轮撞键，调用 id 挡同一轮里
 //!   两次声明互撞。
 //! - **写方**：判断与成格都在本模块的 [`TaskTable`]（效果端口的行为实现），落格在
-//!   宿主的唯一写入口——`turn_exec` 轮末调
-//!   [`super::derived_facts::record_derived`]，后者把本轮全部效果草稿交给
-//!   `Store::append`。本模块**不再自己写事实源**：写口唯一（I1）。
-//!   别按「与记忆同一个写方」推断——记忆与学习住
-//!   [`super::derived_facts::record_learning`]，承诺 / 任务表 / 熔断住
-//!   [`super::derived_facts::record_derived`]；写侧授权闸判在运行器
-//!   （见 `turn_exec` 模块文档的「写侧授权闸」）。
+//!   宿主的唯一写入口——`turn_exec` 轮末把本轮全部效果草稿交给 `Store::append`。
+//!   本模块**不写事实源**：写口唯一（I1）。
 //!
 //! ## 诚实划界
 //!
@@ -64,24 +52,22 @@ use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
 
 use symbio_core::ReadySetView;
 use symbio_core::PRINCIPAL_SCHEDULER;
-use symbio_core::{actor_can_assign_work, readyset_for, Entity, Event, Store, Verb};
+use symbio_core::{actor_can_assign_work, readyset_for, Entity, Event, Verb};
 use symbio_plugin_api::behaviors;
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
+use symbio_plugin_api::turn::{TurnContributor, TurnDraft, TurnEnd, TurnFace};
 
-// 任务族的名字与格位都在本插件的声明表里（DE-024 D-204 / D-206）：`readyset_for` 在构造期
-// 收 `TASK_VOCAB`，core 的折叠不比对任何一条名字。
-use crate::control_decl::{
+use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
     EVENT_TASK_PROGRESS, EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED, TASK_VOCAB,
 };
 
 // ==================== 声明态：任务表的输入形状 ====================
 //
-// 它们住这里而不是 core：写侧（[`TaskTable`]）与落/读侧（本模块的折叠）同属
-// 这一个插件，没有第二个消费方。`todo_write` 只声明行为名，不再交记录类型——
-// 声明随效果端口走（DE-025 D-207 / D-214）。
+// 写侧（[`TaskTable`]）与落/读侧（本模块的折叠）同属本插件，没有第二个消费方。
+// `todo_write` 只声明行为名，不交记录类型——声明随效果端口走（DE-025 D-207 / D-214）。
 
 /// 一项任务的声明态（一次 `todo_write` 调用里的一项）。
 #[derive(Debug, Clone)]
@@ -389,7 +375,7 @@ pub(crate) struct TaskTable;
 impl ToolBehavior for TaskTable {
     fn owner(&self) -> &'static str {
         // 与 `PLUGIN.yml` 的 `plugin_id` 同一串：owner 序即装配序。
-        "loop"
+        "task"
     }
 
     fn behavior(&self) -> &'static str {
@@ -442,73 +428,6 @@ impl ToolBehavior for TaskTable {
 
 symbio_plugin_api::submit_behavior!(TaskTable);
 
-/// 调度（DE-034 §3，`D-139` 裁决 3）：就绪集 → `task.ready` / `task.assigned`。
-///
-/// ## 谁写、凭什么写
-///
-/// 写方是**调度者**（`actors::schedule::ScheduleDecider`），不是本模块：本模块只做
-/// 「把事实交给 store」这一件与其余任务事实相同的事。资格由写侧闸判
-/// （`ActorSpec::can_assign_work`，缺 `assign.work` ⇒ 零事实，fail-closed）。
-///
-/// ## 为什么在轮末调
-///
-/// 调度的输入是**本轮刚写完的任务表**：模型在这一轮声明了任务（`task.opened`），
-/// 轮末才有东西可派。调用点排在 [`write`] 之后、且**重新取一次史**——拿旧切片算，
-/// 这一轮新开的格不在候选集里（`derived_facts::record_schedule` 的调用点注释）。
-///
-/// ## 事件号
-///
-/// `{id_prefix}-s{n}`：`id_prefix` 由调用方给（`t{turn}-s`），一次调度一个序列。
-/// 与任务表写方的 `v2t-{anchor}` 前缀不同源，因此同一轮内两批事实的幂等键不撞。
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn schedule(
-    store: &dyn Store<Event = Event>,
-    snapshot: &[Event],
-    cap: usize,
-    owner: &str,
-    turn: u64,
-    produced_by: u64,
-    id_prefix: &str,
-    now: i64,
-) -> Result<(), String> {
-    let spec = ScheduleDecider::spec();
-    let started = symbio_core::clock_now_ms();
-    let view = readyset_for(TASK_VOCAB, cap).read_all(snapshot).value;
-    let facts = ScheduleDecider.decide(&spec, &view, snapshot, owner, now);
-    // 预算（`I3` 的反射档）：**算完再判**——能拦的只有落格这一半。超预算就一笔都
-    // 不落，而不是落一半：半批租约没人认账（下一轮它们既不在候选集里、也没人持有）。
-    let elapsed = symbio_core::clock_now_ms() - started;
-    if elapsed > SCHEDULE_BUDGET_MS as i64 {
-        symbio_core::plugin_warn!(
-            "session",
-            "[task] 调度超预算（{elapsed}ms > {SCHEDULE_BUDGET_MS}ms）⇒ 本轮不派活"
-        );
-        return Ok(());
-    }
-    for (n, fact) in facts.into_iter().enumerate() {
-        let verb = if fact.kind == EVENT_TASK_READY {
-            Verb::Progressed
-        } else {
-            Verb::Asserted
-        };
-        store
-            .append(
-                Event::pending(
-                    format!("{id_prefix}-{n}"),
-                    fact.kind,
-                    Entity::Task,
-                    verb,
-                    turn,
-                    &spec.principal,
-                )
-                .with_produced_by(produced_by)
-                .with_payload(fact.payload),
-            )
-            .map_err(|err| format!("调度事实入格失败：{err:?}"))?;
-    }
-    Ok(())
-}
-
 /// 调度段：就绪任务集渲染成一段提示，请求视图**置顶**注入。
 ///
 /// 只读不写（与 `memory_events::recall_view` 同款的只读视图），因此：
@@ -517,8 +436,6 @@ pub(crate) fn schedule(
 ///
 /// `snapshot` 是本会话事实的**值**（[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
 /// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
-///
-/// 调用方（`chat_loop::inputs`）按 `request_round == 0` 取一次、本轮各工具轮复用。
 pub(crate) fn prompt_section(snapshot: &[Event], cap: usize) -> Option<String> {
     let ready = readyset_for(TASK_VOCAB, cap).read_all(snapshot).value.ready;
     if ready.is_empty() {
@@ -549,7 +466,7 @@ const LEASE_MS: i64 = 300_000;
 
 /// 调度者要落的一笔事实（**只描述，不构造 `Event`**）。
 ///
-/// 事件信封（`event_id` / `turn` / `produced_by` / 溯源）由本文件的 [`schedule`] 统一给
+/// 事件信封（`turn` / `ts` / `produced_by` / 归属）由轮末贡献端口统一盖章
 /// ——调度者只回答「该有什么」。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ScheduleFact {
@@ -748,6 +665,81 @@ fn ready_recorded(events: &[Event], task_id: &str) -> bool {
     }
 }
 
+/// 轮末贡献：把就绪集交给调度者，落成 `task.ready` / `task.assigned`（D-250）。
+///
+/// ## 为什么是贡献而不是环上的债
+///
+/// 没有就绪任务时它什么都不写——那是合法结局，不是「欠一条行」。写成轮末贡献，
+/// 环不必为它编一个天然空转的 `owes`。
+///
+/// ## 为什么住在轮末而不是在效果之后另开一个调用点
+///
+/// 调度的输入是**本轮刚写完的任务表**：任务表的格在效果端口落完之后才在史里。
+/// 轮末贡献端口按 `prio` 逐个询问，并且**每问一个之前重取一次史**（D-250），
+/// 于是这里读到的 `history` 一定包含本轮新开的任务——不需要宿主为调度多写一行
+/// 分支，也不需要本插件持有 store。
+///
+/// ## 只走生成轮
+///
+/// 定稿答话轮（[`TurnFace::Answered`]）没有工具交换，也就没有新的任务声明；
+/// 调度在同一份史上是幂等的（已发放的不会再发），但多算一次没有意义。
+/// 用 [`TurnFace`] 显式划界，而不是从 `history` 里猜。
+///
+/// ## 预算（`I3` 的反射档）
+///
+/// **算完再判**——能拦的只有落格这一半；超预算就一笔都不交，而不是交一半：
+/// 半批租约没人认账（下一轮它们既不在候选集里、也没人持有）。
+pub(crate) struct ScheduleContributor;
+
+impl TurnContributor for ScheduleContributor {
+    fn owner(&self) -> &'static str {
+        "task"
+    }
+
+    fn contribute(&self, end: &TurnEnd<'_>) -> Vec<TurnDraft> {
+        if end.face != TurnFace::Generated {
+            return Vec::new();
+        }
+        let spec = ScheduleDecider::spec();
+        let started = symbio_core::clock_now_ms();
+        let view = readyset_for(TASK_VOCAB, end.task_cap)
+            .read_all(end.history)
+            .value;
+        let facts = ScheduleDecider.decide(&spec, &view, end.history, end.principal, end.now_ms);
+        let elapsed = symbio_core::clock_now_ms() - started;
+        if elapsed > SCHEDULE_BUDGET_MS as i64 {
+            symbio_core::plugin_warn!(
+                "session",
+                "[task] 调度超预算（{elapsed}ms > {SCHEDULE_BUDGET_MS}ms）⇒ 本轮不派活"
+            );
+            return Vec::new();
+        }
+        facts
+            .into_iter()
+            .enumerate()
+            .map(|(n, fact)| {
+                let verb = if fact.kind == EVENT_TASK_READY {
+                    Verb::Progressed
+                } else {
+                    Verb::Asserted
+                };
+                TurnDraft::new(FactDraft {
+                    key: format!("{}-s{n}", end.anchor),
+                    kind: fact.kind.to_string(),
+                    entity: Entity::Task,
+                    verb,
+                    payload: fact.payload,
+                    produced_by: Some(end.user_seq),
+                })
+                // 派活的主体是调度者，不是跑这一轮的主体：归属由能力声明（D-250）。
+                .with_actor(PRINCIPAL_SCHEDULER)
+            })
+            .collect()
+    }
+}
+
+symbio_plugin_api::submit_turn_contributor!(ScheduleContributor);
+
 #[cfg(test)]
-#[path = "task_events.test.rs"]
+#[path = "task.test.rs"]
 mod tests;

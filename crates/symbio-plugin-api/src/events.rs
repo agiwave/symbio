@@ -13,8 +13,9 @@
 //!   不必把 owner 插件也链进同一个二进制（那正是 E-009 禁掉的那条边）。
 //! - **内核不认识业务事件名**（DE-024 D-203 / D-204）：内核的两张表只留封闭语法——Entity×Verb
 //!   网格与协议五格。名字要跨插件就登记进清单，不要回内核加行（CS-005 / CS-007）。
-//! - **角色不在这里**：`FactRole` 是 owner 交给守卫的陈述，仍住 `EventDecl` 由装配表读；
-//!   本表只投影「名字 + 格位」两维。
+//! - **角色跟着投影**：`FactRole` 是 owner 交给守卫的陈述；跨插件共享的名字若只投影
+//!   「名字 + 格位」，读角色的守卫（`FinalizesTurn` / `StopsTurn` / …）在只链接本 crate
+//!   的进程里就会静默失效。`SHARED_EVENTS` 因此逐行带上 owner 声明里的角色。
 //!
 //! # 命名
 //!
@@ -90,22 +91,22 @@ pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
 // ============ task ============
 
-/// task.asserted — owner `symbio-plugin-loop`，格位 `(Task, Asserted)`
+/// task.asserted — owner `symbio-plugin-task`，格位 `(Task, Asserted)`
 pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 
-/// task.assigned — owner `symbio-plugin-loop`，格位 `(Task, Asserted)`
+/// task.assigned — owner `symbio-plugin-task`，格位 `(Task, Asserted)`
 pub const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 
 /// task.controlled — owner `symbio-plugin-loop`，格位 `(Control, Opened)`
 pub const EVENT_TASK_CONTROLLED: &str = "task.controlled";
 
-/// task.held — owner `symbio-plugin-loop`，格位 `(Task, Held)`
+/// task.held — owner `symbio-plugin-task`，格位 `(Task, Held)`
 pub const EVENT_TASK_HELD: &str = "task.held";
 
-/// task.opened — owner `symbio-plugin-loop`，格位 `(Task, Opened)`
+/// task.opened — owner `symbio-plugin-task`，格位 `(Task, Opened)`
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 
-/// task.progress — owner `symbio-plugin-loop`，格位 `(Task, Progressed)`
+/// task.progress — owner `symbio-plugin-task`，格位 `(Task, Progressed)`
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
 
 // ============ turn ============
@@ -142,7 +143,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Turn, Verb::Closed)), // chat.assistant.fallback ← loop
     EventDecl::with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Turn, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_OPENING, (Entity::Turn, Verb::Asserted)), // chat.assistant.opening ← loop
-    EventDecl::with_roles(EVENT_CHAT_ASSISTANT_PROGRESS, (Entity::Turn, Verb::Progressed), &[FactRole::DeclaresBudget]), // chat.assistant.progress ← loop
+    EventDecl::new(EVENT_CHAT_ASSISTANT_PROGRESS, (Entity::Turn, Verb::Progressed)), // chat.assistant.progress ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_REPORTED, (Entity::Turn, Verb::Asserted)), // chat.assistant.reported ← loop
     EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← loop
     EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← loop
@@ -154,15 +155,15 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)), // message.edited ← session
     EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
     EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
-    EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← loop
-    EventDecl::with_roles(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted), &[FactRole::CountsRework]), // task.assigned ← loop
+    EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task
+    EventDecl::new(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted)), // task.assigned ← task
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
-    EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← loop
-    EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← loop
-    EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← loop
+    EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task
+    EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← task
+    EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← task
     EventDecl::new(EVENT_TURN_BRANCH, (Entity::Turn, Verb::Asserted)), // turn.branch ← loop
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Turn, Verb::Asserted)), // turn.branch_selected ← session
     EventDecl::with_roles(EVENT_TURN_DISPATCH, (Entity::Turn, Verb::Asserted), &[FactRole::DeclaresBudget]), // turn.dispatch ← loop
-    EventDecl::with_roles(EVENT_TURN_SUPPLEMENTED, (Entity::Turn, Verb::Asserted), &[FactRole::DeclaresBudget]), // turn.supplemented ← loop
+    EventDecl::new(EVENT_TURN_SUPPLEMENTED, (Entity::Turn, Verb::Asserted)), // turn.supplemented ← loop
     EventDecl::with_roles(EVENT_USER_MESSAGE, (Entity::Turn, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop
 ];
