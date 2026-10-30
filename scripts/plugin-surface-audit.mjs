@@ -61,12 +61,19 @@ export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_s
 /**
  * 机制臂条数基线：**只降不升**（HS-002）。实测低于它时打提示要求同步下调。
  *
- * 只数机制臂。门面按来源分两臂（D-255）：语法臂来自 `symbio-kernel`（直接依赖 6 个，
- * 插件取共享类型不增加任何机制面），机制臂来自 `symbio-core`（每条都要宿主机制支撑）。
- * 把语法臂计进基线，会让「欠账还剩多少」被一个与债无关的数字稀释——248 听起来离 0
+ * 只数机制臂。门面按来源分三臂（D-255 / D-258）：语法臂来自 `symbio-kernel`（直接依赖
+ * 6 个，插件取共享类型不增加任何机制面）、SDK 臂来自 `symbio-sdk`（机制实现，但不认
+ * 容器概念，同样不计债）、机制臂来自 `symbio-core`（每条都要控制面支撑）。
+ * 把前两臂计进基线，会让「欠账还剩多少」被两个与债无关的数字稀释——248 听起来离 0
  * 很远，133 才是真实的待还量。
+ *
+ * 115 → 72（D-258 第一批：`text` / `clock` / `logger` / `event_bus` / `creator` /
+ * `vdfs` / `keys` 七个域搬进 `symbio-sdk`）→ 25（第二批：`chat` / `capability` /
+ * `adapters` / `llm` / `plugin` 五个域；另把 `chat` 的三个子命名空间与内核语法
+ * `ring` 各归其臂）。这些条**不是还清了存量**，是搬了家：它们一条不少地留在门面上，
+ * 只是改从 `symbio_sdk` / `symbio_kernel` 取（HS-003 照旧逐条核消费方）。
  */
-export const WHITELIST_BASELINE = 72
+export const WHITELIST_BASELINE = 25
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
@@ -110,11 +117,20 @@ const BLOCK_END = '};'
 /** 语法臂：可能有多块（按 kernel 子模块分组），因此按正则全量取。 */
 const GRAMMAR_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
 /**
+ * 单名一行的写法（`pub use symbio_kernel::view::Budget;` / `pub use symbio_sdk::clock::clock_now_ms;`）。
+ *
+ * 花括号组与单名一行是同一张名单的两种排版，**判据必须两种都读到**：
+ * 只认花括号组时，一条单名重导出让 HS-003 的「每条都要报得出消费方」整条绕过去——
+ * 那正是最容易藏匿空转条目的形状（一行、无逗号、无人注意）。
+ */
+const GRAMMAR_SINGLE_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_]+)*::([A-Za-z0-9_]+);/g
+/**
  * SDK 臂：同样按模块分组、可能有多块（D-258）。它**不计债**——这些机制只依赖内核，
  * 插件取它们不增加「要认识整个宿主」的代价——但它是门面对插件的承诺，所以和语法臂
  * 一样受 HS-003 管（每一条都要报得出消费方）。
  */
 const SDK_RE = /pub use symbio_sdk(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
+const SDK_SINGLE_RE = /pub use symbio_sdk(?:::[A-Za-z0-9_]+)*::([A-Za-z0-9_]+);/g
 
 /** 把 `a, b as c` 这类清单切成符号名（取 `as` 之后的别名）。 */
 function splitSymbols(body) {
@@ -145,6 +161,7 @@ export function readGrammar(root) {
   const src = fs.readFileSync(p, 'utf8')
   const out = []
   for (const m of src.matchAll(GRAMMAR_RE)) out.push(...splitSymbols(m[1]))
+  for (const m of src.matchAll(GRAMMAR_SINGLE_RE)) out.push(m[1])
   return out.length ? out : null
 }
 
@@ -155,6 +172,7 @@ export function readSdkArm(root) {
   const src = fs.readFileSync(p, 'utf8')
   const out = []
   for (const m of src.matchAll(SDK_RE)) out.push(...splitSymbols(m[1]))
+  for (const m of src.matchAll(SDK_SINGLE_RE)) out.push(m[1])
   return out.length ? out : null
 }
 

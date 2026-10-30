@@ -16,6 +16,10 @@ dead_code = "warn"
 # 不是「插件能用的」而是「控制面才知道的」，那条该留在 core（DE-023 D-258）。
 [dependencies]
 symbio-kernel = { path = "../symbio-kernel" }
+async-trait = { workspace = true }
+dirs = { workspace = true }
+serde_yaml_ng = { workspace = true }
+shellexpand = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
@@ -23,8 +27,9 @@ time = { workspace = true, features = ["serde", "formatting", "parsing", "macros
 dashmap = { workspace = true }
 inventory = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [dev-dependencies]
-uuid = { workspace = true, features = ["v4"] }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

@@ -18,8 +18,8 @@
 //! 不由 agent 直接驱动），因此定义在 session 插件内。
 
 use crate::keys::SymbioKey;
-use crate::{PluginInvokeRequest, PluginInvokeRequestExt};
 use std::sync::Arc;
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use tokio::sync::Mutex;
 
 /// 能力收集期错误
@@ -38,9 +38,9 @@ pub struct CapabilityError {
 ///
 /// ## 为什么 `parse → None` 且 `WIRE = false`
 ///
-/// 与收集面三条通道键（[`crate::CAPABILITY_VISITOR`] /
-/// [`crate::OPTION_VISITOR`] /
-/// [`crate::CONFIGURABLE_VISITOR`]）同款，但这里**两条都要写**：
+/// 与收集面三条通道键（[`crate::capability::CAPABILITY_VISITOR`] /
+/// [`crate::capability::OPTION_VISITOR`] /
+/// [`crate::capability::CONFIGURABLE_VISITOR`]）同款，但这里**两条都要写**：
 /// 值是 `Arc<Mutex<Vec<..>>>`，`CapabilityError` 也没有 `Serialize`
 /// ⇒ 它连「进程外表达」都不成立，故 `WIRE = false`。
 /// （`CONFIG` 只需 `parse → None`：值本身可序列化，只是不做「从字符串恢复」

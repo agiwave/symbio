@@ -69,8 +69,8 @@
 //!   有哪些」的**声明**，不含任何会话状态）；
 //! - 单插件失败只记日志，不中断收集。
 
-use crate::DetailField;
-use crate::{family, Registry};
+use symbio_kernel::capability::{family, Registry};
+use symbio_kernel::present::DetailField;
 
 /// 列出已注册的选项字段：按 `order` 升序稳定排序（同号保持注册顺序），`order` 不下发。
 ///

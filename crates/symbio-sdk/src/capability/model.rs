@@ -32,8 +32,8 @@
 //! 不在这里长第二条链路。
 
 use super::{family, Registry};
-use crate::ModelProvider;
 use std::sync::Arc;
+use symbio_kernel::llm::ModelProvider;
 
 /// 取**当次生效**的模型服务（会话引擎用的那个）。
 ///

@@ -296,7 +296,13 @@ export function collectCoreSurface(root) {
   // symbio_kernel::<域>::*;`，`pub mod family;` / `pub mod failure_kind { … }` 的
   // 声明落在 kernel 侧。只查 core 会把这两个子命名空间读成函数（N-001 假红），
   // 故两处取并集——与「公开面同口径」是同一条纪律：公开面在哪，判定就在哪。
+  //
+  // 同一条纪律现在覆盖第三处：D-258 之后有些域的实现住 `symbio-sdk`，core 的域
+  // `mod.rs` 只剩 `pub use symbio_sdk::<域>::*;`，`mod chat_request;` / `mod turn;`
+  // 这类声明在 SDK 侧。少读一处，`chat_request`（子命名空间）就会被 `kindOf` 读成
+  // 函数而报 N-001 假红——这正是它第一次出现的方式。
   const kernelDir = path.join(root, 'crates', 'symbio-kernel', 'src')
+  const sdkDir = path.join(root, 'crates', 'symbio-sdk', 'src')
   const modCache = new Map()
   const modules = new Set()
   for (const [name, domain] of symbols) {
@@ -304,6 +310,7 @@ export function collectCoreSurface(root) {
     if (!modCache.has(domain)) {
       const found = declaredModules(path.join(coreDir, domain, 'mod.rs'))
       for (const n of declaredModules(path.join(kernelDir, domain, 'mod.rs'))) found.add(n)
+      for (const n of declaredModules(path.join(sdkDir, domain, 'mod.rs'))) found.add(n)
       modCache.set(domain, found)
     }
     if (modCache.get(domain).has(name)) modules.add(name)

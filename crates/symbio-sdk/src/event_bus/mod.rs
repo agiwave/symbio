@@ -18,7 +18,7 @@
 //! 再谈 `kind` 过滤与新增频道。
 //!
 //! 把它放在 `symbio_core`（而非某个具体插件）是为了遵循「插件互不可见」的分层原则：
-//! 任何插件都通过 `crate::EventBus` 访问，而非直接引用
+//! 任何插件都通过 `crate::event_bus::EventBus` 访问，而非直接引用
 //! `plugins::event_bus` 模块。
 
 use dashmap::DashMap;

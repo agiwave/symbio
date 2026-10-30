@@ -138,7 +138,14 @@ function splitTop(s) {
   if (cur.trim()) parts.push(cur);
   return parts.map((p) => p.trim()).filter(Boolean);
 }
-function expandUse(path) {
+function expandUse(path, depth = 0) {
+  // 深度闸：\b 词边界挡住了 `Refuse => {`，但**文档注释里写出来的 use 片段**能再次
+  // 把它骗进来——`[^;]+` 会一路吃到很远的那个 `;`，中间夹着不成对的花括号时，
+  // `prefix + p + rest` 每层都把同一段正文再摊一遍，字符串指数增长直到
+  // `RangeError: Invalid string length`（2026-10-30 实测，整轮门禁因此红）。
+  // 花括号嵌套超过 8 层不可能是真的 use 语句；到此收手，按原样当一条路径，
+  // 让下游按「指不到模块」报出来，而不是让判据脚本自己崩掉。
+  if (depth > 8) return [path.trim()];
   const i = path.indexOf('{');
   if (i === -1) return [path.trim()];
   const close = path.lastIndexOf('}');
@@ -146,7 +153,7 @@ function expandUse(path) {
   const body = path.slice(i + 1, close);
   const rest = path.slice(close + 1); // 如 "::X"
   const out = [];
-  for (const p of splitTop(body)) out.push(...expandUse(prefix + p + rest));
+  for (const p of splitTop(body)) out.push(...expandUse(prefix + p + rest, depth + 1));
   return out;
 }
 

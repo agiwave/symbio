@@ -541,7 +541,7 @@ const META_KEYS = [
   },
   {
     key: 'recoverable',
-    owner: 'crates/symbio-core/src/chat/chat_node.rs',
+    owner: 'crates/symbio-sdk/src/chat/chat_node.rs',
     what: '该失败可由用户就地重试',
   },
   {

@@ -37,10 +37,15 @@
 pub use inventory;
 pub use symbio_kernel::*;
 
+pub mod adapters;
+pub mod capability;
+pub mod chat;
 pub mod clock;
 pub mod creator;
 pub mod event_bus;
 pub mod keys;
+pub mod llm;
 pub mod logger;
+pub mod plugin;
 pub mod text;
 pub mod vdfs;

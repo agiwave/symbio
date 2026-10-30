@@ -180,3 +180,13 @@ pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 // `Arc<dyn Registry>` 搬去 `symbio_core::capability::collect`；错误桶键
 // `CAPABILITY_ERRORS`（值类型带 `CapabilityError`）搬去 `symbio_core::capability::error`。
 // 判据同 D-095 根因一：键与值同住，`keys` 只留机制与通用词汇键。
+
+// ==================== 主体名 ====================
+// 判定用的主体名与实际写入的主体名各写一份字符串会漂，故只在这里定义一次（与上面的协议键
+// 同族：都是「宿主方言的字符串」）。`authz` 的授权表与 `chat` 的缺省主体都从这里取。
+/// 主会话主体。
+pub const PRINCIPAL_MAIN: &str = "session/main";
+/// 用户主体。
+pub const PRINCIPAL_USER: &str = "person/local";
+/// 调度器主体。
+pub const PRINCIPAL_SCHEDULER: &str = "scheduler/main";

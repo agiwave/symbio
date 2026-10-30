@@ -4,7 +4,7 @@
 //! `chat_request.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::chat_node::ResumeAction;
+use crate::chat::chat_node::ResumeAction;
 
 /// 全字段显式赋值（`Some`）的样本，供键集合契约使用。
 ///

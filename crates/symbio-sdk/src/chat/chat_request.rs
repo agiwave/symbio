@@ -4,7 +4,7 @@
 //! 驱动器切成独立插件后，这个纯值要隔着 E-009 的插件墙被两端命名；它不是会话
 //! 宿主的状态，也不含任何存储实现。
 
-use crate::chat_node::{ChatNode, ResumeRequest};
+use crate::chat::chat_node::{ChatNode, ResumeRequest};
 use serde::{Deserialize, Serialize};
 
 /// Model 推理请求 (由 Session 插件或 Agent 发起)

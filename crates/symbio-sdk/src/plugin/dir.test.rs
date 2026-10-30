@@ -4,9 +4,9 @@
 
 use super::*;
 
-use crate::PluginMeta;
-use crate::{DetailField, DetailSection};
 use serde_json::json;
+use symbio_kernel::plugin::PluginMeta;
+use symbio_kernel::present::{DetailField, DetailSection};
 
 fn definition() -> DetailDefinition {
     let mut port = DetailField {

@@ -224,7 +224,7 @@ fn hub_of(kind: &str) -> Arc<VdfsChangeSubscriptions> {
 
 /// 广播一次变更（订阅方据此刷新，**非轮询**）。无订阅者时直接返回。
 ///
-/// 由集中式存储实现（`crate::providers::vdfs_service` 的三种拓扑）与目录自管型
+/// 由集中式存储实现（`symbio_kernel::capability::providers::vdfs_service` 的三种拓扑）与目录自管型
 /// provider（agent 目录）在写 / 删成功后调用。
 ///
 /// **它只发无载荷变更**（`VdfsChange::bare`）——绝大多数资源信号长这样。带业务

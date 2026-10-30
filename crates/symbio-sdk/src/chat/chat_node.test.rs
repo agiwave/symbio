@@ -1,4 +1,4 @@
-//! `crates/symbio-core/src/chat/chat_node.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `crates/symbio-sdk/src/chat/chat_node.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
@@ -174,8 +174,8 @@ fn style_tag_reads_and_merges_meta() {
 // ==================== message_of_node 读边界折叠存量旧词 ====================
 
 /// 用 `attributes` JSON 造一个 VDFS 节点（`message_of_node` 的输入形状）。
-fn vdfs_with_attrs(name: &str, attrs: serde_json::Value) -> crate::VdfsNode {
-    crate::VdfsNode {
+fn vdfs_with_attrs(name: &str, attrs: serde_json::Value) -> symbio_kernel::vdfs::VdfsNode {
+    symbio_kernel::vdfs::VdfsNode {
         name: name.to_string(),
         status: "completed".to_string(),
         attributes: attrs.as_object().cloned().unwrap_or_default(),
@@ -294,7 +294,7 @@ fn message_of_node_folds_attr_tool_name_into_meta() {
 /// 读到后同样只有一份身份，显式 `principal` 优先。
 #[test]
 fn message_of_node_folds_legacy_role_into_principal() {
-    use crate::principal::PrincipalKind;
+    use crate::chat::principal::PrincipalKind;
 
     let m = message_of_node(
         &vdfs_with_attrs("j", serde_json::json!({"role": "user"})),

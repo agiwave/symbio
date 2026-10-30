@@ -32,8 +32,8 @@
 //! 不是拿一份清单做集合减法。
 
 use super::{family, Registry};
-use crate::VdfsProvider;
 use std::sync::Arc;
+use symbio_kernel::vdfs::VdfsProvider;
 
 /// 取 VDFS 根 provider（**服务 `<根>` 的那一个**）。
 ///

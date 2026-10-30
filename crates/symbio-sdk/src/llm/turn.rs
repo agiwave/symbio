@@ -1,7 +1,7 @@
 //! 单轮 LLM 的**共享帧原语**与 id 原语；类型面已迁入 `symbio-kernel`（D-188 C2b）。
 
-use crate::chat_node::{ChatNode, NodeStatus};
-use crate::ExecEventSink;
+use crate::chat::chat_node::{ChatNode, NodeStatus};
+use symbio_kernel::exec::ExecEventSink;
 
 pub use symbio_kernel::llm::turn::*;
 
@@ -12,7 +12,7 @@ pub use symbio_kernel::llm::turn::*;
 /// 用在正文对接收端是**新的权威副本**的帧上：一次性节点（工具结果 / 用户消息
 /// 回填）的单帧完成、存储回执、压缩快照。流式节点的正文已由 `llm_emit_delta`
 /// （`crates/symbio-plugin-model/src/stream.rs`）逐帧传过，它的终态走 `llm_emit_state`
-/// （`crates/symbio-core/src/llm/frames.rs`），不在这里重发。
+/// （`crates/symbio-sdk/src/llm/frames.rs`），不在这里重发。
 pub async fn llm_emit_message(sink: &ExecEventSink, msg: ChatNode) {
     sink.emit(llm_message_frame(&msg)).await;
 }

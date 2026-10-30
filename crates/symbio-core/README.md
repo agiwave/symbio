@@ -17,19 +17,20 @@ impl: done
 （不认的机制住 `symbio-sdk`，D-258）。
 本文是该目录**命名与结构**的唯一 owner。
 
-**七个域的实现住 `symbio-sdk`**（`text` · `clock` · `logger` · `event_bus` · `creator` ·
-`vdfs` · `keys`）：它们有实现，但只碰内核词汇与自己的表。本目录下这七个域只剩转发
-（`pub use symbio_sdk::<域>::*;`）——域登记与命名纪律照旧，`symbio_core::<域>::…` 这条路径
-不变。域目录不删，是因为它是 §1.2 的登记面（`core-naming-audit` N-004）：搬的是住址，不是归属。
+**十二个域的实现住 `symbio-sdk`**（`text` · `clock` · `logger` · `event_bus` · `creator` ·
+`vdfs` · `keys` · `chat` · `capability` · `adapters` · `llm` · `plugin`）：它们有实现，但只碰
+内核词汇与自己的表。本目录下这十二个域只剩转发（`pub use symbio_sdk::<域>::*;`）——域登记
+与命名纪律照旧，`symbio_core::<域>::…` 这条路径不变。域目录不删，是因为它是 §1.2 的登记面
+（`core-naming-audit` N-004）：搬的是住址，不是归属。
 
 封闭语法（五个语法 trait 与签名类型）的实现住 `symbio-kernel` crate（[DE-023 D-188](../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性")），
 本目录以同名私有 shim `pub use symbio_kernel::…` 转出——对外路径 `symbio_core::<符号>` 不变。
-本目录**仍然拥有**不属于封闭语法的部分：共享机制（`event_bus` / `logger`）与读本机部署表的行为
-（`authz` / `governance`、`ActorSpec` 的授权读法自由函数、VDFS 地址拼接）。
+本目录**仍然拥有**不属于封闭语法的部分：读本机部署表的行为（`authz` / `governance`、
+`ActorSpec` 的授权读法自由函数）与控制面的编排（`turn` / `projection` / `invariants`）。
 
 > 「不放实现」是**方向**而非字面事实：域里既有纯契约（`vdfs` / `capability` / `llm`
-> 的 trait 面），也有共享实现（`event_bus` 的全局订阅表、`logger` 的进程级闸门）。
-> 判据是「谁依赖它」，不是「它抽象不抽象」——把共享机制硬抽成 trait
+> 的 trait 面），也有共享实现——只是共享实现现在住 `symbio-sdk`（D-258）。
+> 判据是「认不认容器概念」，不是「它抽象不抽象」——把共享机制硬抽成 trait
 > 只会多一层间接（见 [D-035](../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 
 各域职责、域清单与豁免词表在下面的 §1–§3；单个域的机制写在它的 `mod.rs` 文档头里

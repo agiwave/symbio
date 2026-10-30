@@ -550,8 +550,17 @@ function containsWord(text, word) {
  */
 function evidenceAlternates(base) {
   const out = new Set()
-  if (base.startsWith('symbio_core/')) {
-    out.add(`crates/symbio-core/src/${base.slice('symbio_core/'.length)}`)
+  // 「crate 名当目录名」的缩写（`symbio_core/llm/frames.rs`）。表里列全，是因为缺一项
+  // 就会让写对的事实锚点被读成「指不到」——而报错落在读者眼里，原因却在解析器。
+  // D-258 之后 `symbio-sdk` 也是被引用的事实所在地，故与 core / kernel / deploy 并列。
+  const CRATE_DIRS = {
+    'symbio_core/': 'crates/symbio-core/src/',
+    'symbio_sdk/': 'crates/symbio-sdk/src/',
+    'symbio_kernel/': 'crates/symbio-kernel/src/',
+    'symbio_deploy/': 'crates/symbio-deploy/src/',
+  }
+  for (const [pfx, dir] of Object.entries(CRATE_DIRS)) {
+    if (base.startsWith(pfx)) out.add(`${dir}${base.slice(pfx.length)}`)
   }
   const stripped = base.replace(/^plugins\//, '')
   const m = /^([a-z_]+)\/(.+)$/.exec(stripped)

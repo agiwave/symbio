@@ -70,7 +70,7 @@ use crate::{principal_namespace, VisScope};
 ///
 /// id 是**可路由地址**（[D-069 §决策 2](../../../../docs/003-design/005-协议规范.md#d-069-principal-三字段kind-与-id-分家id-是可路由地址 "DE-005-协议规范")）：
 /// `<namespace>/<name>`——`session` 是本机智能体的归属 namespace。
-pub const PRINCIPAL_MAIN: &str = "session/main";
+pub use symbio_sdk::keys::PRINCIPAL_MAIN;
 
 /// 本机用户的身份——用户发言事件的 `actor`。
 ///
@@ -78,7 +78,7 @@ pub const PRINCIPAL_MAIN: &str = "session/main";
 /// `person` 是概念 namespace（无插件归属时用概念名）。语义不变：`user.message`
 /// **不入能力表**（能力按「智能体的权威动作种类」划分，人的发言不是动作种类），
 /// 本表**不为它立行**——表里没有它的行 ⇒ `can_reply` fail-closed（[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）。
-pub const PRINCIPAL_USER: &str = "person/local";
+pub use symbio_sdk::keys::PRINCIPAL_USER;
 
 /// **vdfs 写工具**的身份（[D-069 §决策 2]）——工具响应叶子的 `principal`；
 /// 与调用它的 `session/<caller>` 平级（工具请求节点仍归调用者）。id 的 namespace 是插件名。
@@ -270,7 +270,7 @@ pub const CAP_ASSIGN_WORK: &str = Capability::AssignWork.name();
 /// 注意它**不取代** `session/main` 上的 `assign.work`：那一格是淘汰回路的管辖对象
 /// （「谁还在被授予派活权」，见 `derived_facts::record_elimination`），两者是**同一能力
 /// 的两个用途**——一个是「有资格派」，一个是「派这个动作由谁执行」。
-pub const PRINCIPAL_SCHEDULER: &str = "scheduler/main";
+pub use symbio_sdk::keys::PRINCIPAL_SCHEDULER;
 
 /// **立任务**能力名（`DefineWork` 的书写形态）——任务表写侧闸的授权判据
 /// （[DE-033 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")

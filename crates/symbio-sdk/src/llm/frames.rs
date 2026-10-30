@@ -18,8 +18,8 @@
 //! 帧原语**不能**调用这里，允许的方向只有 session → core。
 //! 插件之间同样禁止互引（`plugin-entry-audit` E-009）——本插件之外没人能引用本文件。
 
-use crate::chat_node::{ChatNode, NodeStatus};
-use crate::ExecEventSink;
+use crate::chat::chat_node::{ChatNode, NodeStatus};
+use symbio_kernel::exec::ExecEventSink;
 
 /// 发送一帧**状态**：身份 + 状态 + 元数据 + 错误，**不带正文**。
 ///

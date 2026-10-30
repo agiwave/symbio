@@ -31,9 +31,13 @@ pub const PRINCIPAL_USER: &str = "person/local";
 `;
 
 /**
- * 一棵临时仓库：`plugins` 是 `{ id: yml }`，`consts` 是 `authz/mod.rs` 的常量段。
+ * 一棵临时仓库：`plugins` 是 `{ id: yml }`，`consts` 是 `authz/mod.rs` 的常量段，
+ * `sdkConsts` 是 `symbio-sdk` 的 `keys/mod.rs` 的常量段。
+ *
+ * 两处都要建出来：`PRINCIPAL_*` 常量横跨 `keys`（机制层要用的主体名）与 `authz`
+ * （授权表自己的主体名）两个文件，生成器读的是**并集**。只建一处，测的就不是真形状。
  */
-function fixtureRepo({ plugins, consts = AUTHZ_CONSTS, governance = GOVERNANCE }) {
+function fixtureRepo({ plugins, consts = AUTHZ_CONSTS, sdkConsts = '', governance = GOVERNANCE }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "authz-rows-"));
   for (const [id, yml] of Object.entries(plugins)) {
     const dir = path.join(root, "crates", `symbio-plugin-${id}`);
@@ -46,6 +50,9 @@ function fixtureRepo({ plugins, consts = AUTHZ_CONSTS, governance = GOVERNANCE }
   const authz = path.join(root, "crates", "symbio-core", "src", "authz");
   fs.mkdirSync(authz, { recursive: true });
   fs.writeFileSync(path.join(authz, "mod.rs"), consts);
+  const keys = path.join(root, "crates", "symbio-sdk", "src", "keys");
+  fs.mkdirSync(keys, { recursive: true });
+  fs.writeFileSync(path.join(keys, "mod.rs"), sdkConsts);
   return root;
 }
 
@@ -119,6 +126,22 @@ test("同一主体被两个插件声明 ⇒ 抛错（一个主体只能有一行
   withRepo({ plugins: { session: OK_PLUGIN, web: dup } }, (root) => {
     assert.throws(() => collectPrincipals(root), /一个主体只能有一行/);
   });
+});
+
+test("同一主体在两个常量文件里各写一次 ⇒ 抛错（并集仍只许一个名字）", () => {
+  // `keys` 与 `authz` 分居两处之后，重复不再表现为「同一文件两行」，
+  // 而是「两个文件各一条」——抽取器合并成一张表时若不查重，
+  // 后读到的那条会静默覆盖前一条，写错的那个文件永远不会被发现。
+  withRepo(
+    {
+      plugins: { session: OK_PLUGIN },
+      consts: `pub const PRINCIPAL_MAIN: &str = "session/main";\n`,
+      sdkConsts: `pub const PRINCIPAL_MAIN_COPY: &str = "session/main";\n`,
+    },
+    (root) => {
+      assert.throws(() => collectPrincipals(root), /一个主体只能有一个名字/);
+    },
+  );
 });
 
 test("真仓：生成物与各插件清单一致（手改过它就红）", () => {

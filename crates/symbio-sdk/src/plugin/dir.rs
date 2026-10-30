@@ -85,17 +85,17 @@
 //! 自己的 `write` 里。
 
 use crate::keys::SymbioKey;
-use crate::vdfs_notify_change;
-use crate::DetailDefinition;
-use crate::{
-    VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsRequest, VdfsResponse, VdfsResult,
-    VdfsWriteResponse, VDFS_EXT_FORM,
-};
+use crate::vdfs::vdfs_notify_change;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
+use symbio_kernel::present::DetailDefinition;
+use symbio_kernel::vdfs::{
+    VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsRequest, VdfsResponse, VdfsResult,
+    VdfsWriteResponse, VDFS_EXT_FORM,
+};
 use tokio::sync::RwLock;
 
 /// 插件配置文件名（插件目录下）
@@ -239,8 +239,11 @@ pub const PLUGIN_DIR: PluginDirKey = PluginDirKey;
 /// 或父插件没传），因此这里**不回退**到任何「常规位置」——回退必然读全局
 /// homedir，在子智能体里指错作用域。运行时若需要自己的目录，用插件持有
 /// 的 `self.dir`（构造时经本函数取得），不要拿请求 ctx 再取一次。
-pub fn plugin_dir_from_ctx(ctx: &dyn crate::PluginInvokeRequest, plugin: &str) -> PluginDir {
-    use crate::PluginInvokeRequestExt;
+pub fn plugin_dir_from_ctx(
+    ctx: &dyn symbio_kernel::plugin::PluginInvokeRequest,
+    plugin: &str,
+) -> PluginDir {
+    use symbio_kernel::plugin::PluginInvokeRequestExt;
     match ctx.get(PLUGIN_DIR) {
         Some(dir) => dir,
         None => panic!(
@@ -421,7 +424,7 @@ impl PluginDir {
     /// 调用点在容器的装配路径（子插件构造**成功之后**）——那时手里才有 `PluginMeta`。
     /// 停用的插件不被构造、因此不会走到这里；它的身份早在首次装配时就已落位，
     /// 这正是「停用后仍显示名字」的来路。
-    pub fn seed_identity(&self, meta: &crate::PluginMeta) -> Result<(), String> {
+    pub fn seed_identity(&self, meta: &symbio_kernel::plugin::PluginMeta) -> Result<(), String> {
         let mut map = self.read_manifest()?.unwrap_or_default();
         let mut changed = false;
 
@@ -622,12 +625,12 @@ pub struct PluginEntry {
     pub mount_error: Option<String>,
 }
 
-/// 与 [`crate::PluginMeta`] 的缺省 `order` **同一口径**（未构造的插件没有 meta）
+/// 与 [`symbio_kernel::plugin::PluginMeta`] 的缺省 `order` **同一口径**（未构造的插件没有 meta）
 ///
 /// 直接取 `PluginMeta::default().order` 而不是另写一个字面量：这两个数必须相等，
 /// 而「必须相等」的两个字面量迟早会不等。
 fn default_entry_order() -> i32 {
-    crate::PluginMeta::default().order
+    symbio_kernel::plugin::PluginMeta::default().order
 }
 
 // ==================== 配置文件的 VDFS 呈现 ====================
@@ -878,29 +881,35 @@ pub async fn config_mount_dispatch<T: PluginConfigMount + ?Sized>(
 /// 把 [`config_mount_dispatch`] 接到具体插件类型上（`VdfsProvider` 已住内核，
 /// 宿主侧不能再写 blanket impl——orphan 规则，见上）。
 ///
-/// ## 宏里的路径必须走**根平铺**，不能走 `$crate::<域>::…`
+/// ## 路径全部走 `$crate::…`，不走 `symbio_sdk::…`
 ///
-/// 本宏在**别的 crate 里展开**，展开出来的 `$crate::plugin::config_mount_dispatch`
-/// 要求 `plugin` 模块对那个 crate 可见。域模块是 `pub(crate)`（C-001：根出口唯一），
-/// 于是设置 / telegram 两个插件的 `impl_config_mount_vdfs!` 一起编译失败 ——
-/// `error[E0603]: module \`plugin\` is private`。
+/// 本宏在**别的 crate 里展开**，而那个 crate 的依赖图里只有 `symbio-plugin-api`：
+/// 它不认识 `symbio-sdk`，写绝对路径 `symbio_sdk::vdfs::…` 在调用点就是一个
+/// `error[E0433]: failed to resolve`。`$crate` 展开成**定义 crate**（本 crate），
+/// 调用方无需在 manifest 里列 `symbio-sdk` ——这正是 `#[macro_export]` 的契约。
 ///
-/// 这类引用**grep 不到消费方**：写的是 `$crate::…`，真正用它的地方是宏调用点。
-/// 所以「域模块可以收成 `pub(crate)`」这条判断只在「没有宏引用它」时成立——
-/// 拆 crate 时按文本引用数收窄 `plugin` / `authz` / `decl` / `view` 四个域，
-/// 恰好漏掉了这一处（`plugin` 是唯一被宏引用路径的域）。
+/// 取词汇的两段路径都要求对应模块对**宏的展开体**可见：
+///
+/// | 词 | 路径 | 为什么可见 |
+/// |---|---|---|
+/// | `VdfsProvider` / `VdfsContext` / `VdfsRequest` / `VdfsResult` / `VdfsResponse` | [`crate::vdfs`] | 该模块通配转出 `symbio_kernel::vdfs`，是内核语法在本 crate 的落点 |
+/// | [`config_mount_dispatch`] | [`crate::plugin`] | 本 crate 的 `plugin` 是 `pub mod`，域路径即对外的地址 |
+///
+/// **这类引用 grep 不到消费方**：写的是 `$crate::…`，真正用它的地方是宏调用点。
+/// 「域模块可以收成 `pub(crate)`」这条判断只在「没有宏引用它」时成立——
+/// 按文本引用数收窄模块时，被宏引用的那个域会漏掉（`plugin` 就是被宏引用路径的域）。
 #[macro_export]
 macro_rules! impl_config_mount_vdfs {
     ($ty:ty) => {
         #[::async_trait::async_trait]
-        impl $crate::VdfsProvider for $ty {
+        impl $crate::vdfs::VdfsProvider for $ty {
             async fn dispatch(
                 &self,
-                _ctx: &$crate::VdfsContext,
+                _ctx: &$crate::vdfs::VdfsContext,
                 path: &str,
-                req: $crate::VdfsRequest,
-            ) -> $crate::VdfsResult<$crate::VdfsResponse> {
-                $crate::config_mount_dispatch(self, path, req).await
+                req: $crate::vdfs::VdfsRequest,
+            ) -> $crate::vdfs::VdfsResult<$crate::vdfs::VdfsResponse> {
+                $crate::plugin::config_mount_dispatch(self, path, req).await
             }
         }
     };
@@ -940,4 +949,4 @@ mod tests;
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow crates/symbio-core/src/plugin/dir.rs::plugin_dir_from_ctx: 穷尽性不变量：上游已穷举 / 已校验，走到 else 说明本文件的判据漏了一个分支，属代码缺陷。
+// panic-allow crates/symbio-sdk/src/plugin/dir.rs::plugin_dir_from_ctx: 穷尽性不变量：上游已穷举 / 已校验，走到 else 说明本文件的判据漏了一个分支，属代码缺陷。

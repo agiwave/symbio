@@ -10,7 +10,7 @@
  *
  * ## 名字仍在代码里，行在清单里
  *
- * `PRINCIPAL_*` 常量留在 `authz/mod.rs`——它们的文档注释解释了**每一行为什么这么窄**
+ * `PRINCIPAL_*` 常量住在 `symbio-sdk` 的 `keys` 域——它们的文档注释解释了**每一行为什么这么窄**
  * （那是设计理由，不是部署事实，塞进 YAML 只会让两份文档各说一半）。本生成器因此
  * 做一件反向核对：**常量集合与清单集合必须相等**。少一条 = 声明了一个没人能引用的
  * 主体；多一条 = 常量指向一行不存在的授权——两种都当场抛错，不生成。
@@ -31,13 +31,28 @@ import path from "node:path";
 import { pluginIds, readPluginManifest, pluginManifestRel } from "./_plugin-yml.mjs";
 
 const OUT_REL = "crates/symbio-core/src/authz/rows.gen.rs";
-const AUTHZ_MOD_REL = "crates/symbio-core/src/authz/mod.rs";
+// `PRINCIPAL_*` 常量横跨两处，生成器两处都读、合并成一张表再核对：
+//
+// - `symbio-sdk` 的 `keys` 域：机制层要用的主体名（`session/main` / `person/local` /
+//   `scheduler/main`）。它们被 VDFS 地址装配、消息主体回填这些**不认容器概念**的代码
+//   引用，随 D-258 一起搬出 core。
+// - `core` 的 `authz` 域：授权表自己的主体名（工具主体与各会话角色）。它们与
+//   `governance` 的能力闭集同住一棵模块树——表与判定分家，就会出现「表授予 A、
+//   闸门判 B」而没有任何东西变红的错位。
+//
+// 两处合并之后**仍然只有一个值表**：同一个主体 id 出现在两个文件里由下面的
+// `prior` 分支当场抛错（一个主体只能有一个名字）。
+const AUTHZ_MOD_RELS = [
+  "crates/symbio-sdk/src/keys/mod.rs",
+  "crates/symbio-core/src/authz/mod.rs",
+];
+const AUTHZ_MOD_REL = AUTHZ_MOD_RELS[0];
 const GOVERNANCE_REL = "crates/symbio-core/src/governance/mod.rs";
 
 /** 清单键前缀：`principal_main: session/main|reply+…|thread_private`。 */
 const KEY_PREFIX = "principal_";
 
-/** 有常量、但**不入表**的主体——理由见 `authz/mod.rs` 的 `PRINCIPAL_USER`。 */
+/** 有常量、但**不入表**的主体——理由见 `keys` 域里 `PRINCIPAL_USER` 的文档。 */
 const NOT_A_ROW = new Map([["person/local", "用户发言不是权威动作种类，能力表不为它立行"]]);
 
 const HEADER = `//! 本机主体清单：\`(主体, 能力名, 可见域)\` —— **由 \`scripts/facts/authz-rows.mjs\` 生成，请勿手改**。
@@ -57,7 +72,7 @@ const HEADER = `//! 本机主体清单：\`(主体, 能力名, 可见域)\` —�
 //! **窄行是唯一入口**（D-099）：未登记的主体在表里没有行 ⇒ 每个谓词为假，
 //! 「忘配窄行」的后果是一条**会被看见的拒绝**，不是一次静默超权。
 //!
-//! 名字与理由住在 \`authz/mod.rs\` 的 \`PRINCIPAL_*\` 常量上（那里写着每行为什么这么窄）；
+//! 名字与理由住在 \`PRINCIPAL_*\` 常量上（\`symbio_sdk::keys\` 与 \`authz/mod.rs\` 两处，写着每行为什么这么窄）；
 //! 生成器双向核对两者：常量集合 ≠ 清单集合即抛错。`;
 
 /** 从 `governance/mod.rs` 的 `Capability` 声明里抽拼写——闭集的唯一出处。 */
@@ -73,17 +88,19 @@ export function capabilitySpellings(root) {
   return new Set(names);
 }
 
-/** `authz/mod.rs` 的 `PRINCIPAL_*` 常量：`主体 id ⇒ 常量名`（值集合由它给出）。 */
+/** `keys` 与 `authz` 两处的 `PRINCIPAL_*` 常量：`主体 id ⇒ 常量名`（值集合由它们给出）。 */
 export function principalConstants(root) {
-  const text = fs.readFileSync(path.join(root, ...AUTHZ_MOD_REL.split("/")), "utf8");
   const out = new Map();
-  for (const m of text.matchAll(/^pub const (PRINCIPAL_[A-Z0-9_]+): &str = "([^"]+)";/gm)) {
-    const [, name, value] = m;
-    const prior = out.get(value);
-    if (prior) throw new Error(`${AUTHZ_MOD_REL}：${value} 有两条常量（${prior} / ${name}）——一个主体只能有一个名字`);
-    out.set(value, name);
+  for (const rel of AUTHZ_MOD_RELS) {
+    const text = fs.readFileSync(path.join(root, ...rel.split("/")), "utf8");
+    for (const m of text.matchAll(/^pub const (PRINCIPAL_[A-Z0-9_]+): &str = "([^"]+)";/gm)) {
+      const [, name, value] = m;
+      const prior = out.get(value);
+      if (prior) throw new Error(`${rel}：${value} 有两条常量（${prior} / ${name}）——一个主体只能有一个名字`);
+      out.set(value, name);
+    }
   }
-  if (out.size === 0) throw new Error(`${AUTHZ_MOD_REL}：一条 \`PRINCIPAL_*\` 常量都没读到——抽取口径变了`);
+  if (out.size === 0) throw new Error(`${AUTHZ_MOD_RELS.join(" + ")}：一条 \`PRINCIPAL_*\` 常量都没读到——抽取口径变了`);
   return out;
 }
 
@@ -175,7 +192,7 @@ export function render(rows) {
   L.push(`use super::{${names.join(", ")}};`);
   L.push("use super::VisScope;");
   L.push("");
-  L.push("/// 本机主体清单（生成物；理由住在 `authz/mod.rs` 的常量文档上）。");
+  L.push("/// 本机主体清单（生成物；理由住在 `PRINCIPAL_*` 常量的文档上）。");
   // 一行一行摆（`#[rustfmt::skip]`）：表是**清单的镜像**，一行一个主体才读得出
   // 「这台机器上有谁」；让 rustfmt 按宽度折行会把同一张表折成两种形状。
   L.push("#[rustfmt::skip]");

@@ -49,13 +49,12 @@
 //! 与 VDFS provider 的**逐子插件独立收集器**不同，本通道用**共享收集器**：
 //! 声明自带目录名，不存在归属歧义，所以容器可以让所有子插件注册进同一个实例。
 
-use crate::VdfsItem;
-use crate::{
-    family, CapabilityRow, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
-    CONFIGURABLE_VISITOR,
-};
-use crate::{PluginConfigFile, PLUGIN_FILE};
+use crate::capability::CONFIGURABLE_VISITOR;
+use crate::plugin::{PluginConfigFile, PLUGIN_FILE};
 use std::sync::Arc;
+use symbio_kernel::capability::{family, CapabilityRow, Registry};
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_kernel::vdfs::VdfsItem;
 
 /// 列出已声明的设置页条目（按注册顺序）——读侧唯一入口。
 ///

@@ -6,8 +6,8 @@
 
 use super::*;
 
-use crate::DetailDefinition;
-use crate::PluginDir;
+use crate::plugin::PluginDir;
+use symbio_kernel::present::DetailDefinition;
 
 fn config() -> PluginConfigFile {
     PluginConfigFile::new(

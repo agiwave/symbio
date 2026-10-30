@@ -46,7 +46,7 @@ pub const SEG_MESSAGES: &str = "message";
 ///
 /// `None` = 节点状态词不在 [`NodeStatus`] 的词表里（正常不该发生；
 /// 发生即两侧已分叉，宁可丢这一条也不要造出一个状态错误的消息）。
-pub fn message_of_node(node: &crate::VdfsNode, text: String) -> Option<ChatNode> {
+pub fn message_of_node(node: &symbio_kernel::vdfs::VdfsNode, text: String) -> Option<ChatNode> {
     /// attributes 里的值都是 `json!(..)` 塞进去的，原样反序列化即可回读类型。
     fn attr<T: serde::de::DeserializeOwned>(
         m: &serde_json::Map<String, Value>,
@@ -125,12 +125,12 @@ pub fn message_of_node(node: &crate::VdfsNode, text: String) -> Option<ChatNode>
 /// 新写方不走这条。
 fn legacy_principal(role: NodeRole, tool_name: Option<&str>) -> Principal {
     match role {
-        NodeRole::User => Principal::from_legacy(crate::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(crate::keys::PRINCIPAL_USER),
         NodeRole::Tool => match tool_name {
             Some(name) => Principal::tool_principal(name),
-            None => Principal::from_legacy(crate::PRINCIPAL_MAIN),
+            None => Principal::from_legacy(crate::keys::PRINCIPAL_MAIN),
         },
-        _ => Principal::from_legacy(crate::PRINCIPAL_MAIN),
+        _ => Principal::from_legacy(crate::keys::PRINCIPAL_MAIN),
     }
 }
 /// 呈现派生的**宿主扩展**：形状谓词住内核，`title` / `icon` / `actions` 的翻译是宿主业务知识，

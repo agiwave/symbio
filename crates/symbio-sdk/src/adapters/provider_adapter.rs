@@ -32,16 +32,19 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::{AdapterError, DeltaSink, FullModel, LlmAdapter, LlmTurn, SilentDeltas};
-use crate::chat_node::{
+use crate::capability::CapabilityMeta;
+use crate::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_RUN,
     CHAT_STYLE_TAG_TOOL,
 };
-use crate::CapabilityMeta;
-use crate::ExecAbortSignal;
-use crate::ExecEnv;
-use crate::ExecEventSink;
-use crate::{llm_short_id, ExecTranscriptWriter, ModelProvider, PluginError};
+use crate::llm::turn::llm_short_id;
+use symbio_kernel::exec::ExecAbortSignal;
+use symbio_kernel::exec::ExecEnv;
+use symbio_kernel::exec::ExecEventSink;
+use symbio_kernel::exec::ExecTranscriptWriter;
+use symbio_kernel::llm::ModelProvider;
 use symbio_kernel::llm::PromptMessage;
+use symbio_kernel::plugin::PluginError;
 
 /// 流式帧桥：把 `round_trip` 的转写帧**择要**转成增量——三条出口各管一类：
 /// - **正文 / 推理**（[`DeltaSink::on_delta`] / [`DeltaSink::on_reasoning`]）：
@@ -542,4 +545,4 @@ impl LlmAdapter for ProviderLlmAdapter {
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow crates/symbio-core/src/adapters/provider_adapter.rs::apply: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-sdk/src/adapters/provider_adapter.rs::apply: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

@@ -97,6 +97,7 @@ pub use symbio_kernel::capability::{
     family, Capability, CapabilityCategory, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel,
     CapabilityRow, Registry,
 };
+pub use symbio_kernel::decl::ring;
 pub use symbio_kernel::decl::{ActorDecl, Builder, FactDecl, PluginDeclarations, ViewDecl};
 pub use symbio_kernel::dialog::{
     ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
@@ -142,32 +143,20 @@ pub use symbio_kernel::{
     ActorSpec, Entity, Event, EventDecl, FactRole, LatencyTier, Pattern, Scope, Seq, Verb,
 };
 
-// ---- 机制臂：`symbio-core` 的宿主机制 ----
-// 这一臂是**欠账**：每一条都要 core 的机制支撑（`submit_object_creator` 的链接期收集、
-// `PluginDir` 的配置 IO、`capability_invoke` 的调用栈、`vdfs_*` 的地址装配），所以
-// `symbio-plugin-api` 至今仍依赖 `symbio-core`。压缩这一臂只有一条路：把它指向的宿主子系统
-// 从 core 剥成只依赖 kernel 的层（D-253「不是搬运，是切实现面」）。
 // ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core，D-258） ----
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、
 // 对象构造器的链接期登记、日志与协议键。它们与「插件要用一条机制」是同一件事，
 // 与「插件要认识整个宿主」被绑成同一件事。SDK 把这条绑定切开：这一臂只依赖内核。
-pub use symbio_core::{
-    actor_can_assign_work, agent_perms_of, capability_announce_configurable,
-    capability_configurables, capability_entry_of, capability_invoke, capability_model_active,
-    capability_model_resolve, capability_option_fields, capability_prompts,
-    capability_report_error, capability_take_errors, capability_to_wire, capability_vdfs_root,
-    chat_node, chat_request, check_all, commitment_events, cost_ledger, failure_kind,
-    impl_config_mount_vdfs, llm_emit_message, llm_removed_frame, llm_short_id, node_build,
-    plugin_dir_from_ctx, plugin_expand_tilde_path, principal, principal_of, production_matrix,
-    readyset_for, ring, transcript, AgentPermissions, AgentScope, ChatVocab, CommitmentVocab,
-    DeltaSink, EmbeddingService, FullModel, LlmAdapter, MessageVocab, PluginConfigFile,
-    PluginConfigMount, PluginDir, PluginEntry, ProviderLlmAdapter, ReadySetView, SilentDeltas,
-    TaskVocab, TokenIssuer, AGENT_PERMS, CAPABILITY_VISITOR, CAP_ASSERT_VERIFICATION,
-    CAP_DEFINE_WORK, CONFIGURABLE_VISITOR, EMBEDDING_LOCAL, OPTION_VISITOR, PLUGIN_DIR,
-    PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
-    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER,
-    TASK_CAP, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+pub use symbio_sdk::adapters::{
+    DeltaSink, FullModel, LlmAdapter, ProviderLlmAdapter, SilentDeltas, TokenIssuer,
 };
+pub use symbio_sdk::capability::{
+    capability_announce_configurable, capability_configurables, capability_entry_of,
+    capability_model_active, capability_model_resolve, capability_option_fields,
+    capability_prompts, capability_report_error, capability_take_errors, capability_to_wire,
+    capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
+};
+pub use symbio_sdk::chat::{chat_node, chat_request, principal};
 pub use symbio_sdk::clock::clock_now_ms;
 pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
 pub use symbio_sdk::event_bus::{
@@ -179,9 +168,34 @@ pub use symbio_sdk::keys::{
     AGENT_ID, MODE, PATH, PROVIDER_ID, REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID,
     TOOL_CALL_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
 };
+pub use symbio_sdk::keys::{PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER};
+pub use symbio_sdk::llm::{llm_emit_message, llm_removed_frame, llm_short_id};
+pub use symbio_sdk::plugin::{
+    plugin_dir_from_ctx, plugin_expand_tilde_path, PluginConfigFile, PluginConfigMount, PluginDir,
+    PluginEntry, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED,
+    PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+};
 pub use symbio_sdk::text::{text_floor_char_boundary, text_truncate_bytes};
 pub use symbio_sdk::vdfs::{
     absolute_addr, descend_addr, join_addr, vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx,
     vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, AddrRootDecl,
 };
-pub use symbio_sdk::{plugin_debug, plugin_error, plugin_info, plugin_warn, submit_object_creator};
+pub use symbio_sdk::{
+    impl_config_mount_vdfs, plugin_debug, plugin_error, plugin_info, plugin_warn,
+    submit_object_creator,
+};
+
+// ---- core 臂：`symbio-core` 的宿主机制（欠账，只许降） ----
+// 这一臂每一条都需要 core 的**控制面**支撑：`capability_invoke` 的调用栈要读一轮的
+// 权限集，`transcript` / `readyset_for` 要读事件与主体，`agent_perms_of` 要读授权表。
+// 它们认识容器概念（`Session` / 幕 / 轮），所以按三层判据（D-258）留在 core。
+// 这一臂是**棘轮**：条数只许降（HS-002）；剩下的 25 条全是「有依赖的中间层」，
+// 迁移顺序与判据见 023 的迁移表与 D-258 的代价段。
+pub use symbio_core::{
+    actor_can_assign_work, agent_perms_of, capability_invoke, check_all, commitment_events,
+    cost_ledger, failure_kind, node_build, principal_of, production_matrix, readyset_for,
+    transcript, AgentPermissions, AgentScope, ChatVocab, CommitmentVocab, EmbeddingService,
+    MessageVocab, ReadySetView, TaskVocab, AGENT_PERMS, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK,
+    EMBEDDING_LOCAL, TASK_CAP,
+};

@@ -15,14 +15,14 @@
 //! **窄行是唯一入口**（D-099）：未登记的主体在表里没有行 ⇒ 每个谓词为假，
 //! 「忘配窄行」的后果是一条**会被看见的拒绝**，不是一次静默超权。
 //!
-//! 名字与理由住在 `authz/mod.rs` 的 `PRINCIPAL_*` 常量上（那里写着每行为什么这么窄）；
+//! 名字与理由住在 `PRINCIPAL_*` 常量上（`symbio_sdk::keys` 与 `authz/mod.rs` 两处，写着每行为什么这么窄）；
 //! 生成器双向核对两者：常量集合 ≠ 清单集合即抛错。
 
 #[rustfmt::skip]
 use super::{PRINCIPAL_ARBITER, PRINCIPAL_AUTONOMOUS, PRINCIPAL_GATEKEEPER, PRINCIPAL_MAIN, PRINCIPAL_MARKET, PRINCIPAL_PEER, PRINCIPAL_PLANNER, PRINCIPAL_REFLEX, PRINCIPAL_SCHEDULER, PRINCIPAL_TOOL_CONTENT_SEARCH, PRINCIPAL_TOOL_VDFS_WRITE, PRINCIPAL_TOOL_WEB_FETCH, PRINCIPAL_VERIFIER, PRINCIPAL_WORKER};
 use super::VisScope;
 
-/// 本机主体清单（生成物；理由住在 `authz/mod.rs` 的常量文档上）。
+/// 本机主体清单（生成物；理由住在 `PRINCIPAL_*` 常量的文档上）。
 #[rustfmt::skip]
 pub(crate) const ROWS: &[(&str, &[&str], VisScope)] = &[
     // ============ local ============

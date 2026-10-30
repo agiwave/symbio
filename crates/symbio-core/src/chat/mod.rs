@@ -1,30 +1,6 @@
-//! `chat` —— 会话线格式域：一条消息、一个主体长什么样。
+//! 线格式与主体的纯形状（ChatNode / SessionChat / Principal / ChatRequest）。
 //!
-//! 本域只说**形状与解析**：节点（[`chat_node`]）、主体地址（[`principal`]）、
-//! 两个入口请求值（[`chat_request`] / [`session_chat`]）。它**不含机制**：
-//!
-//! | 问题 | 不属于本域，属于 |
-//! |---|---|
-//! | 节点怎么落库 / 怎么读回 | `store`（信封）、`projection`（视图） |
-//! | 按形状**造**节点（写侧手艺） | `turn::node_build` |
-//! | 跑一次模型要说什么话 | `llm`（模型契约） |
-//!
-//! ## 为什么是「叶子模块」而不是平铺符号
-//!
-//! 节点的字段家族有四十余个名字（角色 / 形状 / 状态 / 内容分段 / 恢复动作…），
-//! 全部平铺进根出口会把「内核公开面」撑宽一倍，而它们只在**一个**语义面里出现：
-//! 调用点写 `symbio_core::chat_node::ChatNode` 时，读的人一眼就知道自己拿的是线格式。
-//! 这也是 §1.4 登记的叶子模块形态（同 `session_chat`）。
-//!
-//! ## 依赖方向
-//!
-//! 本域的形状类型（节点 / 主体）已迁入 `symbio-kernel`（D-188 C2b）；这里以同名
-//! 模块转出，路径与根出口不变。`message_of_node` 等依赖宿主地址的投影仍住本域。
-//!
-//! 本域**不依赖任何其它域**（只依赖 serde）：`llm` / `turn` / `projection` 都指向它。
-//! 一旦这里开始 `use` 别的域，就说明某个「机制」被误当成了形状。
+//! **实现住 `symbio-sdk`**（D-258）：这一域的每条都只碰内核词汇与自己的表，不认容器概念。
+//! 本模块只转发，`symbio_core::chat::…` 这条稳定路径不变。
 
-pub mod chat_node;
-pub mod chat_request;
-pub mod principal;
-pub mod session_chat;
+pub use symbio_sdk::chat::*;
