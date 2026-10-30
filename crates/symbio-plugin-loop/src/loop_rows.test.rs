@@ -3218,3 +3218,25 @@ fn a_turn_inside_the_bound_is_handed_over_whole() {
     assert_eq!(slice.len(), events.len(), "恰好等于上界不算超界");
     assert!(super::turn_slice(&[], 14).is_empty(), "空切片不 panic");
 }
+
+/// 零往返作答（D-260）：宿主代落的 `turn.stage` 只对**声明会作答**的能力行豁免，
+/// 其余行照旧越界判红。
+#[test]
+fn only_answering_plugin_rows_may_land_the_host_stage_fact() {
+    use super::super::control_decl::EVENT_TURN_STAGE;
+    use super::super::turn_exec::run_plugin_row;
+    use symbio_core::ring::Key;
+
+    let row = |answers: bool| super::Next {
+        row: "test.row",
+        by: symbio_plugin_api::rows::PLUGIN_ROW,
+        key: Key(Vec::new()),
+        action: run_plugin_row,
+        writes: &[],
+        answers,
+    };
+    assert!(row(true).writes_closed(EVENT_TURN_STAGE));
+    assert!(!row(false).writes_closed(EVENT_TURN_STAGE));
+    // 豁免只有那一格：收束格仍归收束执行体（D-163）。
+    assert!(!row(true).writes_closed("chat.assistant.final"));
+}

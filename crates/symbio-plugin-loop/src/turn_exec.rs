@@ -1297,12 +1297,36 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 principal: &principal,
                 user_seq,
                 facts,
+                history: &events,
             };
             handler.run(&request)
         };
         let ask = match step {
             symbio_plugin_api::rows::RowStep::Facts(drafts) => {
                 return land_drafts(ctx.store.as_ref(), drafts, turn, &principal);
+            }
+            // 零往返作答（D-260）：草稿按同一份名单落，随后由**宿主**代落「已答」阶段格
+            // 并把正文寄给收束行。收束格仍归 `close-turn`（D-163），这一行只答不落定稿。
+            symbio_plugin_api::rows::RowStep::Answer(answer) => {
+                land_drafts(ctx.store.as_ref(), answer.facts, turn, &principal)?;
+                let round = ctx
+                    .head
+                    .as_ref()
+                    .map(|head| head.turn.request_round)
+                    .unwrap_or(0);
+                super::stage_events::land(
+                    ctx.store.as_ref(),
+                    turn,
+                    user_seq,
+                    &principal,
+                    &[super::stage_events::StageFact::reflex(
+                        round, drive_seq, "answered",
+                    )],
+                )
+                .map_err(ActorError::Append)?;
+                ctx.session
+                    .set_reflex(Some(super::turn_runner::ReflexAnswer { text: answer.text }));
+                return Ok(());
             }
             symbio_plugin_api::rows::RowStep::Ask(ask) => ask,
         };
@@ -1390,6 +1414,7 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 principal: &principal,
                 user_seq,
                 facts,
+                history: &events,
             };
             handler.parse(&request, reply)
         };

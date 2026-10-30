@@ -675,9 +675,16 @@ const PROTOCOL_CELLS: &[&str] = &[
 /// 领域格」只能拿**实际写入**对账——而实际写入的唯一可信取法是日志尾段（决策 1）。
 impl Next {
     /// 账本上的这一格收不收得拢：每一格都要**在这张表里对得上一个名字**——协议五格
-    /// （引擎写）与 `decl.writes`（执行体声明）。对不上就是越界，派发器不静默。
+    /// （引擎写）与 `decl.writes`（执行体声明）。
+    ///
+    /// 另有两条按行开的口子：`plugin_row` 的作答行由宿主代落 `turn.stage`
+    /// （[`RowStep::Answer`](symbio_plugin_api::rows::RowStep::Answer)，D-260），
+    /// 那一格不是能力交的草稿，因此只对**声明会作答**的行豁免。对不上就是越界，
+    /// 派发器不静默。
     pub(crate) fn writes_closed(&self, kind: &str) -> bool {
-        PROTOCOL_CELLS.contains(&kind) || self.writes.contains(&kind)
+        PROTOCOL_CELLS.contains(&kind)
+            || (self.answers && kind == EVENT_TURN_STAGE)
+            || self.writes.contains(&kind)
     }
 }
 
@@ -1648,6 +1655,9 @@ pub(crate) struct Next {
     /// 让派发器再查一次表，是因为「跑哪个动作」与「它写了什么」必须同源——
     /// 分两次查就能查出两份答案（D-123 决策 2）。
     pub(crate) writes: &'static [&'static str],
+    /// 这一行会不会零往返作答（D-260）：会作答的行由宿主代落 `turn.stage`，
+    /// 账本对**它**额外豁免那一格。
+    pub(crate) answers: bool,
 }
 
 /// 取最小可还债；没有可还的债 ⇒ `None`（收束 / 装载失败 / 只剩 blocked 行）。
@@ -1696,12 +1706,14 @@ pub(crate) fn next(
     } else {
         entry.decl.writes
     };
+    let answers = by == PLUGIN_ROW && symbio_plugin_api::rows::answers_of(debt.decl.name);
     Some(Next {
         row: debt.decl.name,
         by,
         key: debt.key,
         action: entry.run,
         writes,
+        answers,
     })
 }
 

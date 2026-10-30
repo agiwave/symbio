@@ -70,6 +70,11 @@ pub struct RowRequest<'a> {
     pub user_seq: u64,
     /// **本轮**的事实切片（不早于本轮第一条事件）：判断只从事实里读。
     pub facts: &'a [Event],
+    /// 完整史（含本轮之前）：累计口径的判断（技能表、巩固、校准）按它读。
+    ///
+    /// 与 [`symbio_plugin_api::settle::Settling::history`] 同形：视图求解器按轮收窄
+    /// 是为了给每个视图一个成本上界，行是一次单调用、按需读，不该被同一个上界误伤。
+    pub history: &'a [Event],
 }
 
 impl RowRequest<'_> {
@@ -84,10 +89,24 @@ impl RowRequest<'_> {
 
 /// 一行**这一步**的产物：直接落格，或要一次模型往返（D-242）。
 pub enum RowStep {
-    /// 本步直接落格（不需要往返）。
+    /// 本步直接落格（不需要往返）：中间产物，落完继续欠下一步。
     Facts(Vec<FactDraft>),
+    /// 本步**就是这一轮的答复**：落 `facts`，宿主再落「已答」阶段格并把正文交给收束行
+    /// （零模型往返，D-260）。
+    Answer(AnswerStep),
     /// 本步要一次模型往返：宿主执行并记账，回执交 [`RowHandler::parse`]。
     Ask(ModelAsk),
+}
+
+/// 一条「不调模型也能收束」的产物：正文 + 本步要落的事实。
+///
+/// 收束格（`chat.assistant.final`）不在这里：它仍由 `close-turn` 统一落（D-163）。
+/// 正文只经宿主寄存给收束行，能力不直接写定稿格。
+pub struct AnswerStep {
+    /// 这一轮答复的正文。
+    pub text: String,
+    /// 本步要落的事实（按 [`RowHandler::writes`] 对账）。
+    pub facts: Vec<FactDraft>,
 }
 
 /// 一次模型往返的**请求**（纯值）：只有提示正文。
@@ -136,6 +155,15 @@ pub trait RowHandler: Sync {
     /// 上界把这一轮判成 `step_limit`。因此「这一笔不该记账」要在行的 `owes` 里
     /// 排除（用 `eq` 收窄），而不是在实现里返回空。
     fn run(&self, req: &RowRequest<'_>) -> RowStep;
+
+    /// 本行是否可能返回 [`RowStep::Answer`]（零往返作答，D-260）。
+    ///
+    /// 默认 `false`。声明为 `true` 的行，宿主会在它作答时代落一条
+    /// `turn.stage{stage:"reflex"}` 阶段格；运行期账本对**这一行**额外豁免那一格
+    /// （它是宿主代写的，不是能力交的草稿）。没走作答路径的行不受影响。
+    fn answers(&self) -> bool {
+        false
+    }
 
     /// 模型往返的回执 → 这一笔债的产物（D-242）。
     ///
@@ -189,6 +217,11 @@ pub fn handler_for(row: &str) -> Option<&'static dyn RowHandler> {
 /// 这一行的写入声明（运行期账本守卫用）。
 pub fn writes_of(row: &str) -> Option<&'static [&'static str]> {
     handler_for(row).map(|h| h.writes())
+}
+
+/// 这一行会不会零往返作答（宿主据此豁免它代写的阶段格，D-260）。
+pub fn answers_of(row: &str) -> bool {
+    handler_for(row).is_some_and(|h| h.answers())
 }
 
 /// 全部行实现的写入并集（装配期并进 `plugin_row` 的 `ActorDecl`）。
