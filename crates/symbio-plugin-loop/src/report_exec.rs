@@ -31,7 +31,7 @@ use symbio_core::chat_node::ChatNode;
 /// 也不再自己数批次。
 pub(crate) type ReportTextFn = Arc<
     dyn Fn(
-            symbio_core::RunSnapshot,
+            symbio_kernel::dialog::RunSnapshot,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send>>
         + Send
         + Sync,

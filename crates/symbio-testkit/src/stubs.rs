@@ -20,8 +20,9 @@
 use async_trait::async_trait;
 use symbio_core::{
     production_matrix, ActorSpec, AdapterError, CapabilityMeta, DeltaSink, FullModel, LlmAdapter,
-    LlmTurn, ModelFinishReason, Pattern, PromptMessage, Scope,
+    LlmTurn, ModelFinishReason, Pattern, Scope,
 };
+use symbio_kernel::llm::PromptMessage;
 
 /// 零 LLM 桩——彩排与测试用。可注入**确定性失败**，用于演练兜底路径。
 ///

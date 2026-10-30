@@ -95,6 +95,27 @@ test('根 `pub mod <域>;` → C-001 变红', () => {
   assert.match(r.stderr, /lib\.rs:1/)
 })
 
+test('根转发内核符号 `pub use symbio_kernel::…` → C-005 变红', () => {
+  const r = audit(
+    clean({
+      [CORE_MOD]:
+        'mod actors;\npub use actors::{AlphaThing};\npub use symbio_kernel::dialog::Verdict;\n',
+    }),
+  )
+  assert.equal(r.status, 1, '根上出现第二个可写名字必须红')
+  assert.match(r.stderr, /C-005/)
+  assert.match(r.stderr, /lib\.rs:3/)
+})
+
+test('C-005 只判根：域模块里的镜像转发放行（`symbio_core::chat::chat_node` 这条路径靠它）', () => {
+  const r = audit(
+    clean({
+      'crates/symbio-core/src/chat/mod.rs': 'pub use symbio_kernel::chat::chat_node::*;\n',
+    }),
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
 test('deep 引 `symbio_core::<域>::…` → C-002 变红', () => {
   const r = audit(
     clean({

@@ -22,7 +22,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use symbio_core::{DecideOutcome, DecisionPlan, Event, Store, Verdict, REASON_UNCLASSIFIED};
+use symbio_core::{Event, Store};
+use symbio_kernel::dialog::{DecideOutcome, DecisionPlan, Verdict, REASON_UNCLASSIFIED};
 
 use super::{round_trip, Round};
 

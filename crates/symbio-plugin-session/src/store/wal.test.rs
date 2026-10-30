@@ -10,10 +10,10 @@ use symbio_core::FactRole;
 use symbio_core::{check_all, unresolved_turns};
 use symbio_core::{
     transcript, verify_prompt_fidelity, Builder, Entity, Event, EventDecl, LatencyTier,
-    PluginDeclarations, PromptMessage, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
-    EVENT_RETRY, EVENT_SENT,
+    PluginDeclarations, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 use symbio_core::{turnstate, TurnState};
+use symbio_kernel::llm::PromptMessage;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };

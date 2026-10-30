@@ -91,7 +91,10 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
             let sink_msgs = a.collected.clone();
             std::sync::Arc::new(
                 move |anchor: Option<u64>| -> std::pin::Pin<
-                    Box<dyn std::future::Future<Output = Vec<symbio_core::PromptMessage>> + Send>,
+                    Box<
+                        dyn std::future::Future<Output = Vec<symbio_kernel::llm::PromptMessage>>
+                            + Send,
+                    >,
                 > {
                     // `async move` 块按值捕获，所以这里先各 clone 一份——
                     // 否则第一次调用就把捕获物搬走，闭包退化成 `FnOnce`。
@@ -210,7 +213,7 @@ pub(crate) fn supplement_into_request(
     turn_no: u64,
     sink_msgs: &Arc<std::sync::Mutex<Vec<ChatNode>>>,
     no_counter: &std::sync::atomic::AtomicU64,
-) -> Vec<symbio_core::PromptMessage> {
+) -> Vec<symbio_kernel::llm::PromptMessage> {
     let Some(drained) = batch else {
         return Vec::new();
     };
@@ -283,7 +286,7 @@ pub(crate) fn supplement_into_request(
     if let Ok(mut sink) = sink_msgs.lock() {
         sink.push(msg);
     }
-    vec![symbio_core::PromptMessage {
+    vec![symbio_kernel::llm::PromptMessage {
         role: "user".into(),
         text,
         tool_call_id: None,

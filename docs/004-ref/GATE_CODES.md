@@ -23,7 +23,7 @@ lists: [gate-codes=owner]
 | 前缀 | 归属 | 声明脚本 | 已用号段 | 下一个可用号 |
 |---|---|---|---|---|
 | **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
-| **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–004 | `C-005` |
+| **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–005 | `C-006` |
 | **CP** | 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结与端口闭集 / 判据集闭集 / 声明面封闭） | `scripts/control-plane-audit.mjs` | CP-001–008 | `CP-009` |
 | **CS** | core 形状 | `scripts/core-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–010 | `CS-011` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–020 | `D-021` |
@@ -73,6 +73,7 @@ lists: [gate-codes=owner]
 | **C-002** | `scripts/core-export-audit.mjs` |
 | **C-003** | `scripts/core-export-audit.mjs` |
 | **C-004** | `scripts/core-export-audit.mjs` |
+| **C-005** | `scripts/core-export-audit.mjs` |
 | **CP-001** | `scripts/control-plane-audit.mjs` |
 | **CP-002** | `scripts/control-plane-audit.mjs` |
 | **CP-003** | `scripts/control-plane-audit.mjs` |

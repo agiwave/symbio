@@ -58,7 +58,8 @@
 use std::sync::Arc;
 
 use symbio_core::chat_node::ChatNode;
-use symbio_core::{ComposeRequest, RunSnapshot, Verdict, WordingReply};
+use symbio_kernel::dialog::{ComposeRequest, RunSnapshot, Verdict, WordingReply};
+
 use symbio_core::{PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH, SESSION_ID};
 use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
 // 对话面节点的构造器已上移 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）

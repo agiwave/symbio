@@ -22,9 +22,9 @@
 use async_trait::async_trait;
 
 use crate::chat_node::ChatNode;
-use crate::PromptMessage;
 use crate::{CapabilityMeta, ModelFinishReason, TurnToolCallInfo};
 use crate::{ModelSpend, ModelUsage};
+use symbio_kernel::llm::PromptMessage;
 
 // ── 四层时延（[DE-001 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，一等契约） ──
 

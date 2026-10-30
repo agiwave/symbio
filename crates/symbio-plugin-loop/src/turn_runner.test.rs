@@ -1366,9 +1366,10 @@ mod tool_round_tests {
     use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_TURN_STAGE};
     use symbio_core::{
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, Entity, Event,
-        EventStore, FullModel, LlmAdapter, LlmTurn, ModelFinishReason, PromptMessage, Seq,
-        SilentDeltas, Store, TokenIssuer, TurnToolCallInfo, Verb,
+        EventStore, FullModel, LlmAdapter, LlmTurn, ModelFinishReason, Seq, SilentDeltas, Store,
+        TokenIssuer, TurnToolCallInfo, Verb,
     };
+    use symbio_kernel::llm::PromptMessage;
     use symbio_plugin_api::events::{
         EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_PROGRESS,
         EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,

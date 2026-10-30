@@ -348,10 +348,10 @@ pub(crate) fn tool_exchange_messages(
     turn: &symbio_core::LlmTurn,
     outcomes: &[super::super::tool_dispatch::DispatchOutcome],
     round: usize,
-) -> Vec<symbio_core::PromptMessage> {
-    let mut out: Vec<symbio_core::PromptMessage> = Vec::new();
+) -> Vec<symbio_kernel::llm::PromptMessage> {
+    let mut out: Vec<symbio_kernel::llm::PromptMessage> = Vec::new();
     if !turn.text.trim().is_empty() {
-        out.push(symbio_core::PromptMessage {
+        out.push(symbio_kernel::llm::PromptMessage {
             role: "assistant".into(),
             text: turn.text.trim().to_string(),
             tool_call_id: None,
@@ -371,7 +371,7 @@ pub(crate) fn tool_exchange_messages(
     for (i, call) in turn.tool_calls.iter().enumerate() {
         let name = call.name.as_deref().unwrap_or("<unnamed>");
         let id = prompt_call_id(call, round, i);
-        out.push(symbio_core::PromptMessage {
+        out.push(symbio_kernel::llm::PromptMessage {
             role: "assistant".into(),
             text: format!("调用工具 {} {}", name, call.arguments),
             tool_call_id: Some(id.clone()),
@@ -402,7 +402,7 @@ pub(crate) fn tool_exchange_messages(
             Some(i) => prompt_call_id(&turn.tool_calls[i], round, i),
             None => outcome.call_id.clone(),
         };
-        out.push(symbio_core::PromptMessage {
+        out.push(symbio_kernel::llm::PromptMessage {
             role: "tool".into(),
             text: outcome.text.clone(),
             tool_call_id: Some(id),

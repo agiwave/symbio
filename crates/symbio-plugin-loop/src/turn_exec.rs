@@ -96,8 +96,9 @@ use symbio_core::{
     is_stop_fact, llm_short_id, run_ops, ActorSpec, AdapterError, AppendError, CapabilityMeta,
     ConsolidateRequest, DeltaSink, Entity, Event, ExecAbortSignal, ExecEventSink, FullModel,
     LatencyTier, LlmAdapter, ModelProvider, Plugin, PluginError, PluginInvokeRequest,
-    PromptMessage, ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnOutput, Verb,
+    ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnOutput, Verb,
 };
+use symbio_kernel::llm::PromptMessage;
 use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_USER_MESSAGE,
@@ -1160,7 +1161,7 @@ pub(crate) fn run_report<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             .unwrap_or(0) as usize;
         let body = match head.report_port {
             Some(port) => {
-                (port.text)(symbio_core::RunSnapshot {
+                (port.text)(symbio_kernel::dialog::RunSnapshot {
                     tool_rounds,
                     quiet_ms,
                 })

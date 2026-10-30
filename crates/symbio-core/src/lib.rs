@@ -77,15 +77,13 @@ pub use projection::calibration::calibration_for;
 pub use projection::cost::cost_ledger;
 pub use projection::mutations::mutations_latest_snapshot;
 pub use projection::transcript::transcript;
-// 结构化 prompt 消息（D-048a）：core 的**最小结构化出口**——角色、正文、
-// `tool_call_id`、`tool_calls`。线格式（`ChatNode`）由 adapter 边界翻译，
-// core 内部不认识 provider 的图语义。
+// 结构化 prompt 消息（D-048a）：角色、正文、`tool_call_id`、`tool_calls`。线格式
+// （`ChatNode`）由 adapter 边界翻译，core 内部不认识 provider 的图语义。
 //
-// **为什么它占根出口而 `PromptToolCall` 不占**：C-003 的准则是「只有一个模块消费
-// 的不算架构元素」。`PromptMessage` 跨了 core 边界——`LlmAdapter` 是 core 的公开
-// trait，它的入参类型不能是 core 私有的（否则 core 外**根本无法实现那个 trait**，
-// 测试替身 / 外部适配器都写不出来）。`PromptToolCall` 只被 `actors` 用，留在模块路径。
-pub use projection::transcript::PromptMessage;
+// **它不住 core 的根**：这个形状是 `LlmAdapter::generate(tok, &[PromptMessage])` 的**入参**，
+// 与 `TurnOutput` 是端口出参同一类，所以按 D-256 归 `symbio_kernel` 的 `llm` 模块。
+// core 的根只出「core 自己定义的东西」（D-257）——根上出现内核符号，会让「core 的公开面」
+// 与「kernel 的公开面」在两个地方各说一遍，且两边可以各自漂移。
 pub use projection::turnstate::{turnstate, TurnState};
 pub use store::EventStore;
 
@@ -217,10 +215,6 @@ pub use invariants::unresolved_turns;
 pub use invariants::budget_exceeded;
 // 事实网格 → prompt 的双向完整性复核（D-048）：`TurnRunner` 组装 prompt 时调它。
 pub use projection::prompt_fidelity::verify as verify_prompt_fidelity;
-// `PromptMessage` 的结构化子件：`PromptMessage.tool_calls` 的载荷类型。它跨出 core 到
-// `crates/symbio-plugin-session`，而 C-002 禁止插件深引域目录 ⇒ 随 `PromptMessage` 一起以
-// `pub` 出根。
-pub use projection::transcript::PromptToolCall;
 pub use store::{AppendError, StoreInvariant};
 
 // ==================== 权限与可见性（⑥ governance） ====================
@@ -312,7 +306,7 @@ pub use vdfs::{absolute_addr, declared_addr_root, descend_addr, join_addr, AddrR
 // | 域 | 一句话 | 形态 |
 // |---|---|---|
 // | `chat` | 一条消息、一个主体长什么样 | **叶子模块**（`chat_node` / `session_chat` / `principal` / `chat_request`） |
-// | `dialog` | 判决是枚举、措辞是文本 | **已迁内核**（纯契约，D-256）；根平铺是控制面的稳定路径 |
+// | `dialog` | 判决是枚举、措辞是文本 | **已迁内核**（纯契约，D-256）；core 根不转发，控制面按 D-257 直取 `symbio_kernel::dialog` |
 // | `present` | 后端下发描述、前端零业务知识渲染 | 根平铺符号 |
 // | `turn` | 一轮次怎么交付、怎么造节点、产出什么 | 交付包平铺；`facts`/`node_build` 走叶子模块 |
 //
@@ -333,11 +327,6 @@ pub use chat::chat_request;
 pub use llm::{llm_emit_state, llm_state_frame};
 pub use projection::rebuild::rebuild;
 pub use projection::turns::count_user_messages;
-pub use symbio_kernel::dialog::{
-    ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
-    Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
-    REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
-};
 pub use turn::dispatch::{
     run_ops, AddNodesRequest, CompressionBeginReply, CompressionBeginRequest,
     CompressionFinishRequest, CompressionOutcome, ConsolidateRequest, EditFrame, EditNodesRequest,

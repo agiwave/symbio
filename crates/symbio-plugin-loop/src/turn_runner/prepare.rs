@@ -72,8 +72,8 @@ pub(crate) struct Prepared {
     /// 基线 prompt（**结构化**消息数组，D-048a）。建草稿时是**空的**，由
     /// [`Prepared::render_base`] 在接缝上填——压缩改的就是消息列表，而压缩是环里的一行
     /// （`D-222` 订正 3：草稿先于任何动作存在），建草稿那一刻它还不在事实源里。
-    pub(crate) base_messages: Vec<symbio_core::PromptMessage>,
-    pub(crate) exchange: Vec<symbio_core::PromptMessage>,
+    pub(crate) base_messages: Vec<symbio_kernel::llm::PromptMessage>,
+    pub(crate) exchange: Vec<symbio_kernel::llm::PromptMessage>,
     pub(crate) tool_round: usize,
     pub(crate) cost_ms: u64,
     pub(crate) artifact_no: u64,
@@ -191,7 +191,7 @@ impl Prepared {
         };
         self.base_messages.insert(
             0,
-            symbio_core::PromptMessage {
+            symbio_kernel::llm::PromptMessage {
                 role: "system".into(),
                 text: p.to_string(),
                 tool_call_id: None,
@@ -367,7 +367,7 @@ where
 
     let started = std::time::Instant::now();
     // 本轮内已发生的工具交换（调用 + 结果），供下一次请求追加。
-    let exchange: Vec<symbio_core::PromptMessage> = Vec::new();
+    let exchange: Vec<symbio_kernel::llm::PromptMessage> = Vec::new();
     // 本回合内已走完的**工具轮数**——只用于给合成 id 编号。
     let tool_round: usize = 0;
     // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，D-044 的实测口径）。
@@ -435,7 +435,7 @@ where
 /// **拍成一段文本**会把 `role: tool` 降级成散文里的纯文本，模型就看不到
 /// 「这是工具结果」、也拿不到 `tool_call_id`——那是已判定的退步，不是排版偏好。
 /// 本轮刚发生的工具交换快照取在它落格**之前**，由调用方就地追加到基线上。
-pub(crate) fn render_messages(events: &[Event]) -> Vec<symbio_core::PromptMessage> {
+pub(crate) fn render_messages(events: &[Event]) -> Vec<symbio_kernel::llm::PromptMessage> {
     // `read_all` 说的是**口径**（as-of 一切已发生、不设扫描窗口），不是作用域。
     symbio_core::transcript(CHAT_VOCAB, MESSAGE_VOCAB)
         .read_all(events)

@@ -41,11 +41,13 @@ use std::sync::Arc;
 
 use symbio_core::chat_node::ChatNode;
 use symbio_core::{
-    capability_model_resolve, DecideOutcome, DecisionPlan, ExecAbortSignal, LlmAdapter,
-    ParseVerdictRequest, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    ProviderLlmAdapter, Registry, SilentDeltas, TokenIssuer, Verdict, CAPABILITY_VISITOR,
+    capability_model_resolve, ExecAbortSignal, LlmAdapter, Plugin, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, ProviderLlmAdapter, Registry, SilentDeltas,
+    TokenIssuer, CAPABILITY_VISITOR,
 };
-use symbio_core::{DecideRequest, PATH, SESSION_ID};
+use symbio_core::{PATH, SESSION_ID};
+use symbio_kernel::dialog::DecideRequest;
+use symbio_kernel::dialog::{DecideOutcome, DecisionPlan, ParseVerdictRequest, Verdict};
 use symbio_plugin_api::routes::{ROUTE_CLASSIFY_DECIDE, ROUTE_CLASSIFY_PARSE};
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};

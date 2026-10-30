@@ -40,8 +40,8 @@ use crate::CapabilityMeta;
 use crate::ExecAbortSignal;
 use crate::ExecEnv;
 use crate::ExecEventSink;
-use crate::PromptMessage;
 use crate::{llm_short_id, ExecTranscriptWriter, ModelProvider, PluginError};
+use symbio_kernel::llm::PromptMessage;
 
 /// 流式帧桥：把 `round_trip` 的转写帧**择要**转成增量——三条出口各管一类：
 /// - **正文 / 推理**（[`DeltaSink::on_delta`] / [`DeltaSink::on_reasoning`]）：

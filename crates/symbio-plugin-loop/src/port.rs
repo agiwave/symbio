@@ -825,7 +825,7 @@ where
 ///
 /// ## 调用点为什么能断定「这一笔真会打模型」
 ///
-/// [`symbio_core::Verdict::needs_wording_generation`] 是这条判据的唯一 owner：
+/// [`symbio_kernel::dialog::Verdict::needs_wording_generation`] 是这条判据的唯一 owner：
 /// 措辞插件按它决定是否生成，编排层按它决定要不要记账。两处各判一遍会漂移成
 /// 「记了账却没打模型」（三格从此不代表一次模型往返，日志不能再用来数调用）或
 /// 「打了模型没账」（本任务要关的那个缺口）。

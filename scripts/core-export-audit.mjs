@@ -9,7 +9,7 @@
  * 只有一个模块用的必须下沉到那个模块里。内核之外的根出口是一本**过渡期域账本**：
  * 它只许减，不许再长。」
  *
- * 四条规则，一一对应：
+ * 五条规则，一一对应：
  *
  * | 规则 | 判什么 | 为什么必须判 |
  * |---|---|---|
@@ -17,6 +17,7 @@
  * | C-002 | core 外的**代码**不得出现 `symbio_core::<域>`（含裸 `use crate::symbio_core::<域>;`） | 深引 = 消费方绕过根出口：符号从根导出移除后深引点照样编译通过，公开面变成两套。裸模块导入此前**没有**任何审计在拦（旧 E-010 的正则要求尾 `::`） |
  * | C-003 | **内核门面**导出的符号，**生产**消费方数必须 ≥2 | D-023 的判据（依赖方数量）此前只有**报告型** `core-surface-audit` 在数、判定权在人手里，于是长期停在 0 消费方 139 / 单消费方 64 上不动。A2 起判定范围 = `kernel.rs` 的公共面（D-185） |
  * | C-004 | 非内核根账本的**条目数**只许降 | C-003 收窄后，其余根出口不再被判「配不配占出口」；不加这一格就会留下一段只长不判的真空。新增共享类型默认插件本地（D-182），要占根出口必须显式改数字，而那一步由 `gate.d/35-baseline.mjs` 按基准版本判 |
+ * | C-005 | 根 `lib.rs` 不转发内核符号（`pub use symbio_kernel::…`）| 根上一旦转发，同一个符号就有两个可写名字，消费方一半写 core、一半写 kernel，C-004 的账本里也混进内核语法——「core 的公共面」与「kernel 的公共面」各说一遍，还能各自漂移（D-256 搬完纯契约后，平铺的唯一用处是让控制面的 import 面暂时不动，D-257 撤掉它） |
  *
  * ## 「消费方」的口径（2026-10-09 修正，C-003 的判据输入）
  *
@@ -78,7 +79,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns C core 出口
-// @codes C-001 C-002 C-003 C-004
+// @codes C-001 C-002 C-003 C-004 C-005
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -282,6 +283,13 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  * `pub mod autonomy;` 与 `pub use projection::autonomy::…` 都被读成「core 内另有生产消费方」。
  * 那是口径的盲区（模块声明不是使用），不是符号的属性。处置按 D-200：唯一消费方在哪个插件，
  * 投影就搬进哪个——**不是**把数字提到 12，也不是给它挂一条豁免。
+ *
+ * **343 → 324**（2026-10-30，D-257）：D-256 把 `dialog` 整块与 `PromptMessage` 搬进内核时，
+ * core 的根仍平铺转出这 19 条，理由是「控制面的 import 面先不动」。那是迁移期的便利：
+ * 同一个符号在 `symbio_core::Verdict` 与 `symbio_kernel::dialog::Verdict` 两处都写得通，
+ * 消费方一半写这边一半写那边——账本里因此混进了 19 条内核语法，C-004 数的不再是「core 的
+ * 共享类型」。撤掉平铺（控制面改从 `symbio_kernel::dialog` / `symbio_kernel::llm` 直取）
+ * 之后，这 19 条**不再属于本账**，不是「清偿了 19 条存量」；C-005 从此拦回潮。
  */
 // core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）。此后 397→395 是测试替身外置带来的真收窄；395→396 是 VdfsListResponse 上移（消费方 2，换掉 agent 侧手写的 "path" 字面量，D-196）；396→389 是 7 条 owner-local 事件名迁出根出口（D-197）；389→386 是 `conation` 投影随唯一
 // 消费方下沉 crates/symbio-plugin-session，`conation` / `ConationView` / `EVENT_CONATION_EXPRESSED`
@@ -293,7 +301,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
 // 下沉 crates/symbio-plugin-session（`autonomy` / `AutonomyView` 两条出口退役，−2）
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 343
+  : 324
 
 /**
  * C-004 的**下沉候选**格：域账本里「单消费方」的条目数上限（只许降）。
@@ -361,6 +369,29 @@ rootLines.forEach((line, i) => {
     `根 lib.rs 出现 \`pub mod ${m[1]};\` —— 子目录不得对外开模块门；改成 \`mod ${m[1]};\`` +
       `（只在 crate 内可见则 \`pub(crate) mod ${m[1]};\`），` +
       `把需要出现在公共面上的东西在根 \`pub use\` 显式列出`,
+    `${CORE_REL}/lib.rs:${i + 1}`,
+  )
+})
+
+// ==================== C-005 根不转发内核符号 ====================
+//
+// `pub use symbio_kernel::…` 出现在**域模块**里是镜像转发（`chat/mod.rs` 那一族把内核的
+// 域原样续在原路径上，`symbio_core::chat::chat_node` 这条稳定路径因此仍成立）。出现在**根**
+// 上就是另一回事：同一个符号于是有两个可写名字（`symbio_core::Verdict` 与
+// `symbio_kernel::dialog::Verdict`），消费方一半写这边一半写那边，C-004 数的根账本里也就
+// 混进了 kernel 的语法——「core 的公开面」与「kernel 的公共面」各说一遍，且两边能各自漂移。
+// D-256 把纯契约搬进内核之后，根平铺只剩一个用处：让控制面的 import 面暂时不动。那是
+// 迁移期的便利，不是边界；D-257 把它撤掉。
+const KERNEL_FORWARD_RE = /^\s*pub\s+(?:use\s+symbio_kernel\s*::|use\s+symbio_kernel\s*::\s*\{)/
+const rootCodeLines = blankComments(rootRaw)
+rootCodeLines.forEach((line, i) => {
+  if (!KERNEL_FORWARD_RE.test(line)) return
+  if (waived(rootLines, i)) return
+  report(
+    'C-005',
+    '根 lib.rs 转发内核符号（`pub use symbio_kernel::…`）—— 内核的公共面只有一处' +
+      '（`symbio_kernel` 自己的根），core 的根只出 core 自己定义的东西；' +
+      '消费方直接写 `symbio_kernel::<域>::<符号>`（域模块内的镜像转发不受本条约束）',
     `${CORE_REL}/lib.rs:${i + 1}`,
   )
 })
@@ -500,6 +531,7 @@ if (errors.length === 0) {
   console.log('\n== core-export-audit ==')
   ruleLine(true, 'C-001', '根出口唯一：根 lib.rs 无 `pub mod <域>;`')
   ruleLine(true, 'C-002', `core 外无深引（${domains.size} 个域目录动态取自 core）`)
+  ruleLine(true, 'C-005', '根不转发内核符号：根 lib.rs 无 `pub use symbio_kernel::…`（域模块的镜像转发不计）')
   ruleLine(
     true,
     'C-003',

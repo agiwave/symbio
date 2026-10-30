@@ -3,7 +3,8 @@
 //! 判据跟着定义走：**谁定义，谁守**。桩住本 crate，它的确定性就由本文件判——
 //! 否则 core 的测试面要继续为一个不属于它的类型背书。
 
-use symbio_core::{AdapterError, LlmAdapter as _, PromptMessage, TokenIssuer};
+use symbio_core::{AdapterError, LlmAdapter as _, TokenIssuer};
+use symbio_kernel::llm::PromptMessage;
 
 use super::StubLlmAdapter;
 

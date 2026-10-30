@@ -171,12 +171,13 @@ use symbio_core::plugin_warn;
 use symbio_core::ModelFinishReason;
 use symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
-    llm_emit_message, llm_short_id, run_ops, RunSnapshot, TurnOutput, TurnReport, TurnStatus,
+    llm_emit_message, llm_short_id, run_ops, TurnOutput, TurnReport, TurnStatus,
 };
 use symbio_core::{
     ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginInvokeRequest,
     PluginInvokeRequestExt,
 };
+use symbio_kernel::dialog::RunSnapshot;
 
 use super::context;
 pub(crate) use super::message_build::TurnOutputExt;

@@ -31,8 +31,9 @@
 use std::borrow::Cow;
 use symbio_core::{
     actor_can_land_artifact, actor_can_land_speech, visible_to, ActorSpec, AdapterError, Entity,
-    Event, FullModel, LatencyTier, LlmAdapter, LlmTurn, PromptToolCall, Seq, Store, Verb,
+    Event, FullModel, LatencyTier, LlmAdapter, LlmTurn, Seq, Store, Verb,
 };
+use symbio_kernel::llm::PromptToolCall;
 use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
@@ -295,7 +296,7 @@ pub type RoundInjector = std::sync::Arc<
     dyn Fn(
             Option<u64>,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Vec<symbio_core::PromptMessage>> + Send>,
+            Box<dyn std::future::Future<Output = Vec<symbio_kernel::llm::PromptMessage>> + Send>,
         > + Send
         + Sync,
 >;
