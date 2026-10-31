@@ -223,8 +223,9 @@ pub(crate) struct TurnState {
     /// 口径）：同一轮内记忆不该漂移，事实源也只扫一遍；后续工具轮复用同一份视图，
     /// 渲染 [`chat_loop::inputs`] 每次调用现算（纯内存，零 I/O）。
     ///
-    /// 落 `memory.recalled` 的时机在**轮末收束**（`derived_facts::record_learning`）而不是
-    /// 取视图那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
+    /// 落 `memory.recalled` 的时机在**轮末收束**（能力包 `semantic` 的收束贡献，宿主在
+    /// `land_contributions` 里把这个值交进 `Settling.recall`）而不是取视图那一刻：
+    /// 溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub recall_view: Option<symbio_plugin_api::retrieval::Retrieval>,
     /// 本轮**已收集的上下文段**（DE-025 D-215）：由 `run_recall` 一次收集、本轮各
     /// 工具轮复用。

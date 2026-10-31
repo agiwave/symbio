@@ -238,19 +238,28 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
     }
 }
 
-/// 收束派生事实中的**记忆**半边（检索入格 + 巩固）。
+/// 收束派生事实中的**记忆**半边——现在只剩**巩固**。
 ///
 /// ## 为什么它与「轮次事实」是两件事
 ///
 /// 轮次事实（`u-{turn}` 开口 / 收束格）记的是**这一轮说了什么、答应了什么**，
 /// 由 v2 运行器原生记账。但记忆**不是轮次事实**，而是本轮的**派生副作用**：
-/// `turn_exec` 一处都不写（它只写轮次事实）。漏调本函数，「检索锚 / 巩固」会
-/// **静默全丢**——长期记忆随之失效。
+/// `turn_exec` 一处都不写（它只写轮次事实）。漏调本函数，巩固会**静默全丢**——
+/// 记忆无界增长、注入越来越偏，而没有任何一处报错。
 ///
-/// ## 锚点由调用方给，锚的**含义**不由调用方定
+/// ## 这里只剩巩固：另外两半都走了收束贡献
 ///
-/// `user_seq` = 本轮 `user.message` 格的 seq（`u-{turn}` 开口格）。它由
-/// `turn_exec` 给，但「溯源锚必须是本轮的开口」这条不变（I2：记忆溯源覆盖 100%）。
+/// | 那一半 | 写方 | 为什么不在本函数 |
+/// |---|---|---|
+/// | 编码（经验 / 判断） | 能力包 `episodic` 的贡献 | 它不保证产出，写成债要给这一行编一个「天然空转」的 `owes`（D-263） |
+/// | 检索事实（`memory.recalled`） | 能力包 `semantic` 的贡献 | 同上，且它读的是**值**（`Settling.recall`），不必宿主代劳（D-264 第 4 条） |
+/// | 巩固 | **本函数** | 触发条件是聚合计数（活记忆 ≥ 4），落在 DE-025 §5.1 的「聚合触发」空格里——那一格没有位置（D-268 / D-269） |
+///
+/// ## 形参里没有锚
+///
+/// 检索事实与编码的溯源锚都指向本轮 `user.message` 格，而两者都是收束贡献：锚由宿主
+/// 填进 `Settling.user_seq`，能力侧只读、不改含义 ⇒ 本函数不需要它。剩下唯一的事实
+/// （合并产物）不带溯源边——它由 `sources` 载荷指回源记忆。
 ///
 /// ## 失败只记日志不冒泡
 ///
@@ -258,18 +267,12 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
 ///
 /// ## 顺序是判据
 ///
-/// 1. **编码不在本函数**：经验 + 判断两条编码是情景记忆能力包的收束贡献
-///    （`land_contributions`，DE-026 D-263），宿主在本函数**之前**已把它们落格；
-/// 2. 检索事实的溯源锚同为本轮开口；
-/// 3. 巩固最后，且用**刷新后的**快照——它要看得见 1 刚落下的那条。
-#[allow(clippy::too_many_arguments)]
+/// 巩固读的是**刷新后的**快照：编码与检索事实都是收束贡献，宿主在调本函数**之前**
+/// 已把它们落格 ⇒ 第 4 条到齐即触发的判据看得见本轮刚落下的那条。
 pub(crate) fn record_learning(
     session_id: &str,
     store: &dyn Store<Event = Event>,
     turn: u64,
-    user_seq: u64,
-    principal: &str,
-    recalled: Option<&symbio_plugin_api::retrieval::Retrieval>,
     now: i64,
 ) {
     let remember = |step: &str, why: String| {
@@ -279,14 +282,6 @@ pub(crate) fn record_learning(
         );
     };
 
-    // ── 检索入格：本轮召回视图 → 一条 `memory.recalled` ─────────────
-    if let Some(view) = recalled {
-        if let Err(why) =
-            super::memory_events::record_recalled(store, view, user_seq, principal, now)
-        {
-            remember("检索入格", why);
-        }
-    }
     // ── 巩固（用**刷新后**的快照）──────────────────────────────────
     // 巩固是**累计口径**：它要把
     // doc-link-allow D-004: 「曾经记过什么」是记忆族的语义问句，非版本变更史

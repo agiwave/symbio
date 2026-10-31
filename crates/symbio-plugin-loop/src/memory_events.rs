@@ -18,7 +18,7 @@
 //! | 编码 | 能力包贡献的同文去重 | ——（写方已迁出，D-263） |
 //! | 可见域收放 | core 的读侧闸（`content_visible` / `VisScope`） | 逐条收放，交**可见切片**（I-8） |
 //! | 检索 | 能力包的 `Retriever`（折叠 / 排序 / 预算） | 把切片交给 `retrieve_all`，读回读数 |
-//! | 检索事实 | 本模块（`memory.recalled` 的写方，D-189） | 读数 → 一格事实（L2c 随语义包迁出） |
+//! | 检索事实 | 能力包的 `semantic` 收束贡献（D-264 第 4 条） | ——（写方已迁出，本模块只交 `Settling.recall` 这个值） |
 //! | 巩固 | 本模块（`consolidate::accept` 的调用方） | 按名字读 `memory.live`，合并最旧两条，**过门才入格** |
 //!
 //! 巩固的**算法**（怎么合并、保真度怎么算）仍在 core 的 `merge_kernel` 与
@@ -52,7 +52,7 @@ use symbio_core::merge_kernel::merge_with_fidelity;
 
 use symbio_core::FleetSnapshot;
 use symbio_core::PRINCIPAL_USER;
-use symbio_core::{Entity, Event, Seq, Store, Verb};
+use symbio_core::{Entity, Event, Store, Verb};
 
 use crate::projections::consolidate::{accept, ConsolidateParams, Rejection};
 
@@ -230,72 +230,12 @@ fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
     }
 }
 
-// ==================== 写方（检索事实） ====================
+// ==================== 写方（检索事实）已迁出 ====================
 
-/// 检索 Translator（`pattern = Translator` 的 S5 形态，[DE-001 §9.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
-/// 读读数 → 一格 `memory.recalled` 事实（D-189：唯一生产消费方在本文件）。
-///
-/// **Translator 不创造信息**：召回内容原样来自能力包的读数（③ 的检索面产出），
-/// 本函数只把「读到的读数」落成「一条事实」——`memory.recalled` 事件
-/// （`memory × asserted` 格子，带溯源指向触发它的事件）。
-///
-/// 载荷三键 `found` / `top` / `degraded` **全是读数自带的**数据（降级也要有
-/// 生产读数口——只活在端口或提示词里，就没有一条事件说得出「这轮记忆只显示了
-/// 一部分」）。
-///
-/// `trigger_seq`：触发本次检索的事件 seq（溯源锚——I2：断言类必带溯源）。
-pub(crate) fn recalled_event(
-    view: &Retrieval,
-    trigger_seq: u64,
-    // 谁在断言「我召回了这些」——会话主体（`memory.recalled` 的 `actor`）。
-    actor: &str,
-) -> Event {
-    let top = view
-        .entries
-        .first()
-        .map(|e| e.content.as_str())
-        .unwrap_or("");
-    Event::pending(
-        format!("recalled-{trigger_seq}"),
-        crate::control_decl::EVENT_MEMORY_RECALLED,
-        Entity::Memory,
-        Verb::Asserted,
-        0,
-        actor,
-    )
-    .with_produced_by(trigger_seq)
-    .with_payload(serde_json::json!({
-        "found": view.entries.len(),
-        "top": top,
-        // 本次召回是否只给出**部分结果**。
-        // 观测落进事实才有**生产读数口**：降级只活在端口 / 提示词里，就没有
-        // 一条事件说得出「这一轮的记忆只显示了一部分」（静默的两种形态之一）。
-        "degraded": view.degraded,
-    }))
-}
-
-/// 检索的写方：本轮读数 → 一条 `memory.recalled`（Translator 出事实，不造信息）。
-///
-/// `trigger_seq` 是**本轮 `user.message` 格**——溯源锚要等到那格入盘才存在，所以这条
-/// 事实与本轮其它事实一起在收束时入格（不是取读数那一刻）。同一锚已落 ⇒ 幂等跳过。
-pub(crate) fn record_recalled(
-    store: &dyn Store<Event = Event>,
-    view: &Retrieval,
-    trigger_seq: u64,
-    actor: &str,
-    now: i64,
-) -> Result<(), String> {
-    let already = store.range(Seq::new(0)).iter().any(|e| {
-        e.kind == crate::control_decl::EVENT_MEMORY_RECALLED && e.produced_by == Some(trigger_seq)
-    });
-    if already {
-        return Ok(());
-    }
-    store
-        .append(recalled_event(view, trigger_seq, actor).with_ts(now))
-        .map_err(|e| format!("memory.recalled 入格失败：{e:?}"))?;
-    Ok(())
-}
+// 检索事实（`memory.recalled`）自 L2c 起由能力包写：`symbio-plugin-memory` 的
+// `semantic` 子模块交一条收束贡献，读 `Settling.recall`（宿主在收束时交进去的读数）
+// 落一格事实（DE-026 D-264 第 4 条）。本模块因此不再持有这条事实的名字、格位与写口
+// ——留在这里就是第二个写方（I1），两份实现可以同时生效。
 
 // ==================== 巩固 ====================
 

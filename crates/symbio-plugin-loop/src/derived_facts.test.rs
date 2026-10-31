@@ -20,14 +20,11 @@
 
 use super::{record_derived, record_elimination, record_learning};
 use crate::control_decl::guard_vocab;
-use symbio_core::{check_all, Entity, Event, EventEnvelope as _, EventStore, Seq, Store, Verb};
+use symbio_core::{check_all, Entity, Event, EventStore, Seq, Store, Verb};
 use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 
-use crate::control_decl::{
-    COMMITMENT_VOCAB, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
-};
-use symbio_plugin_api::retrieval::{Retrieval, Retrieved};
+use crate::control_decl::{COMMITMENT_VOCAB, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
 
 /// 播下「本轮开口 + 收束」两格，返回 `(snapshot, user_seq)`。
 ///
@@ -408,13 +405,14 @@ fn seed_episodic_encoded(
         .value()
 }
 
-/// 记忆两段（检索锚 / 巩固）全部在同一份 WAL 里可读，且 `check_all` 全绿（溯源 100%）。
+/// 巩固在同一份 WAL 里可读，且 `check_all` 全绿。
 ///
 /// 端到端接线由 `turn_exec.test.rs` 的记忆用例带反向自检覆盖；本用例钉的是**巩固要用
 /// 刷新后的快照**——贡献刚落格的编码必须对巩固可见（先巩固后编码会让第 4 条永远等不到
-/// 代数 1）。技能观测与编译不经过本函数（D-262：交接缝贡献），所以这里也不留它们的入参。
+/// 代数 1）。编码 / 检索事实 / 技能观测都不经过本函数（D-262 / D-263 / D-264：
+/// 交接缝贡献），所以这里也不留它们的入参。
 #[test]
-fn record_learning_wires_retrieval_and_consolidation() {
+fn record_learning_wires_consolidation() {
     let store = EventStore::new();
 
     // 轮 0–3：每轮说一句、四句互不相同，编码以写方的形状种入 ⇒ 第 4 轮收束时
@@ -434,15 +432,7 @@ fn record_learning_wires_retrieval_and_consolidation() {
             i,
             user_seq,
         );
-        record_learning(
-            "derived-test",
-            &store,
-            i,
-            user_seq,
-            symbio_core::PRINCIPAL_MAIN,
-            None,
-            symbio_core::clock_now_ms(),
-        );
+        record_learning("derived-test", &store, i, symbio_core::clock_now_ms());
     }
 
     let snap = store.range(Seq::new(0));
@@ -470,67 +460,9 @@ fn record_learning_wires_retrieval_and_consolidation() {
         "最旧的两条源记忆被排除式遗忘（Log 不删，只是投影不再包含）"
     );
 
-    // 检索：读数在收束前取出，收束时才落成事实（溯源锚那时才存在）。
-    //
-    // 读数由能力包的检索面给（本二进制不链接它，E-009 连测试一起判）：这里从活集
-    // 直接构造一份**同形**的值——本用例判的是 `record_learning` 的接线，不是检索本身。
-    let view = Retrieval {
-        degraded: false,
-        entries: snap
-            .iter()
-            .filter(|e| {
-                e.entity == Entity::Memory && e.kind == crate::control_decl::EVENT_MEMORY_ENCODED
-            })
-            .map(|e| Retrieved {
-                seq: e.seq().map(|s| s.value()).unwrap_or(0),
-                content: e
-                    .payload
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                tag: e
-                    .payload
-                    .get("tag")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            })
-            .collect(),
-    };
-    assert!(!view.entries.is_empty(), "还有活记忆可召回");
-
-    let (_, user_seq) = seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 4, "第五句", 44);
-    seed_episodic_encoded(&store, "v2m-t4", "第五句", 4, user_seq);
-    record_learning(
-        "derived-test",
-        &store,
-        4,
-        user_seq,
-        symbio_core::PRINCIPAL_MAIN,
-        Some(&view),
-        symbio_core::clock_now_ms(),
-    );
-
-    let snap = store.range(Seq::new(0));
-    let recalled = snap
-        .iter()
-        .find(|e| e.kind == EVENT_MEMORY_RECALLED)
-        .expect("检索：检索事实入格");
-    let fifth_user = snap
-        .iter()
-        .rfind(|e| e.kind == EVENT_USER_MESSAGE)
-        .expect("本轮用户格");
-    assert_eq!(
-        recalled.produced_by,
-        fifth_user.seq().map(|s| s.value()),
-        "溯源锚 = 触发检索的那格用户发言"
-    );
-    assert!(
-        check_all(guard_vocab(), &snap).is_empty(),
-        "{:?}",
-        check_all(guard_vocab(), &snap)
-    );
+    // 检索事实（`memory.recalled`）不在本函数：写方是能力包 `semantic` 的收束贡献
+    // （D-264 第 4 条），判据在它的 `contributor.test.rs`——本二进制不链接那个包
+    // （E-009 连测试一起判），这里无法、也不该复刻。
 }
 
 // ── 淘汰回路（DE-043 §3）：轮末声誉裁决 ──────────────────────────────

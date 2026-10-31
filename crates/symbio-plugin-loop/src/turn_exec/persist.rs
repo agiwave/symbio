@@ -151,18 +151,16 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
     // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。
     super::super::derived_facts::record_elimination(store.as_ref(), turn_no, user_seq);
-    // 记忆：检索锚 / 巩固（`record_learning`）。编码与技能编译、回退观测都不在这里——
-    // 它们是能力包的收束贡献（`land_contributions`，D-250 / D-262 / D-263），
-    // 上面那一步已把经验 + 判断两条落格，本函数读的是**含新格**的史。
+    // 记忆：只剩**巩固**（`record_learning`）。编码、检索事实与技能编译、回退观测
+    // 都不在这里——它们是能力包的收束贡献（`land_contributions`，D-250 / D-262 /
+    // D-263 / D-264），上面那一步已把编码与 `memory.recalled` 落格，本函数读的是
+    // **含新格**的史。
     super::super::derived_facts::record_learning(
         session.session_id(),
         // `store` 是 `Arc<dyn Store>`（轮内注入闭包要 `'static`），而本函数
         // 收 `&dyn Store` ⇒ `as_ref()` 一次取到 trait object。
         store.as_ref(),
         turn_no,
-        user_seq,
-        &principal,
-        recalled,
         symbio_core::clock_now_ms(),
     );
 
@@ -394,18 +392,14 @@ pub(crate) async fn execute_final_reply_turn(
             &principal,
             user_text,
             response,
-            // 答话轮不建召回视图（与下方 `record_learning` 同一条理由）⇒ 无检索读数。
+            // 答话轮不建召回视图（分类器判 `direct` 的前提就是「现有对话里答得出」）
+            // ⇒ 语义记忆的贡献者拿到 `None`，这一轮不落 `memory.recalled`。
             None,
         );
         super::super::derived_facts::record_learning(
             session.session_id(),
             store.as_ref(),
             turn_no,
-            user_seq,
-            &principal,
-            // 答话轮不建召回视图：分类器判 `direct` 的前提就是「现有对话里答得出」，
-            // 这一轮没有检索往返，也就没有 `memory.recalled` 可记。
-            None,
             symbio_core::clock_now_ms(),
         );
     }

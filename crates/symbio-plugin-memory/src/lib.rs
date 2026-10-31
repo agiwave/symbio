@@ -73,7 +73,10 @@
 //! - [`recall`]：**检索**（名册第 6 行，DE-026 D-264）——轮首检索面（`Retriever`）、
 //!   活集折叠与它的声明视图 `memory.live`、召回段的排版与 provider。它读的是
 //!   `episodic` 落下的格子：同一份记忆的写与读在同一个所有者手里。
-//! - [`decl`]：本插件交出的全部声明（一个 owner 一次提交，两个能力模块各交几张）。
+//! - [`semantic`]：**语义记忆**（名册第 3 行，DE-026 D-264）——本轮检索读数落成一格
+//!   `memory.recalled` 的收束贡献，外加这条事实的名字与格位。它不重算折叠：读数由
+//!   [`recall`] 产出、由宿主作为值交进来（`Settling.recall`）。
+//! - [`decl`]：本插件交出的全部声明（一个 owner 一次提交，三个能力模块各交几张）。
 
 mod config;
 mod decl;
@@ -84,5 +87,6 @@ mod episodic;
 mod memory;
 mod plugin;
 mod recall;
+mod semantic;
 mod vdfs;
 mod workspace;

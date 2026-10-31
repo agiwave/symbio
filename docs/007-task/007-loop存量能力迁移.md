@@ -26,7 +26,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 | 批 | 名册行 | 能力 | 今天在 loop 的样子 | 迁出后的形状 |
 |---|---|---|---|---|
 | L1 | 1 / 16 | 工作记忆 + 规划与重规划 | 轮首装配与计划寄存在本轮状态里 | 段走 I-2，跨步状态与计划走 I-1 / I-4 |
-| L2 | 2 / 3 / 6 | 情景 / 语义 / 长期记忆检索 | #2 已落（L2a，D-263：编码 = 收束贡献，随 `symbio-plugin-memory` 的 `episodic` 子模块，D-267）；#6 已落（L2b，D-264 / D-270：检索面 + 折叠 + 注入段 + `memory.live` 全进同包 `recall` 子模块）；#3 待迁（L2c：`memory_events` 的 `memory.recalled` 写口与召回事实）；程序记忆 #4 已随 L3b 迁出 | 与 #2 同包（`symbio-plugin-memory`，D-267）；检索段走 I-2，折叠名字读 |
+| L2 | 2 / 3 / 6 | 情景 / 语义 / 长期记忆检索 | #2 已落（L2a，D-263：编码 = 收束贡献，随 `symbio-plugin-memory` 的 `episodic` 子模块，D-267）；#6 已落（L2b，D-264 / D-270：检索面 + 折叠 + 注入段 + `memory.live` 全进同包 `recall` 子模块）；#3 已落（L2c，D-264 第 4 条：召回事实进同包 `semantic` 子模块，名字与格位随写方走）；程序记忆 #4 已随 L3b 迁出 | 与 #2 同包（`symbio-plugin-memory`，D-267）；检索段走 I-2，折叠名字读 |
 | L3a | 26 | 独立验证与返工 | `task_events` + 任务表写侧判断 + 收束时调度 + 就绪段 | `symbio-plugin-task`：写侧走 I-1（效果端口 + `before`），就绪段走 I-2（provider），收束时调度走收束贡献（D-250）；`rework_bounded` 不变量留核 |
 | L3b | 24 / 25 / 4 | 技能编译 + 反自动化回退 + 程序记忆 | `SkillCompiler` / `SkillRouter`（原 `skill_events`） | 已落 `symbio-plugin-skill`（D-262）：`skill.recall` 行执行体（命中交 `RowStep::Answer`，摘行走 `skill.retreat` 名字读）+ 轮末收束贡献（编译）；两行同一实现、同包 |
 | L4 | 8 | 副作用分级 | `breaker` | `before` 交拒绝（I-3），状态随包 |
@@ -51,7 +51,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 | L3a 独立验证与返工 | 已落 | `crates/symbio-plugin-task` |
 | L3b 技能编译 / 反自动化回退 / 程序记忆 | 已落 | `crates/symbio-plugin-skill`（D-262） |
 | L2b 长期记忆检索 | 已落 | `crates/symbio-plugin-memory` 的 `recall` 子模块（D-264 / D-270）：`live.rs` 折叠、`score.rs` 排序内核、`section.rs` 注入段、`mod.rs` 的 `RecallRetrieval`、`provider.rs` 的 `RecallProvider`、`decl.rs` 的 `memory.live`；loop 侧只剩 `visible_slice` 与写口 |
-| L2c 语义记忆 | 设计已定（D-264），未起 | `crates/symbio-plugin-memory` 的 `semantic` 子模块 |
+| L2c 语义记忆 | 已落 | `crates/symbio-plugin-memory` 的 `semantic` 子模块（D-264 第 4 条）：`decl.rs` 交名字与格位、`contributor.rs` 交 `SemanticRecall`；loop 的 `EVENT_MEMORY_RECALLED` / `EventDecl` / `recalled_event` / `record_recalled` 同批删除，`record_learning` 只剩巩固（7 参 → 4 参） |
 | L1 / L4 / L5 / L6 / L7 | 未起（L4 还缺一条 `### D-NNN`：`breaker` 的判据要读授权矩阵与成本台账，两样都在 core，先裁「谁读、怎么读」再动手） | — |
 | L8 多轮对话 | 不迁（D-222 留环） | — |
 

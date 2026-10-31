@@ -19,7 +19,6 @@ use symbio_core::{
 // 这里取名字：跨模块引用不复制字面量，改名只改这一行。
 pub(crate) const EVENT_TURN_STAGE: &str = "turn.stage";
 pub(crate) const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
-pub(crate) const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 // 跨插件共享的名字（DE-024 D-204 / D-205 / D-206 / DE-026 D-263）：常量的**事实源是本插件清单的
 // `shared_events:` 行**，由 `scripts/facts/events-rs.mjs` 投影进
 // `symbio-plugin-api::events`，读侧（`session` 的 `stats` / `inbox` / `conation`，情景记忆
@@ -138,8 +137,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         &[FactRole::StopsTurn],
     ),
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Turn, Verb::Asserted)),
-    // 记忆找回：行表与事实表已经在用这个名字。
-    EventDecl::new(EVENT_MEMORY_RECALLED, (Entity::Memory, Verb::Asserted)),
+    // 记忆找回（`memory.recalled`）的格位已随写方迁进能力包（`symbio-plugin-memory` 的
+    // `semantic` 子模块，DE-026 D-264 第 4 条）：那条事实没有第二个读方 ⇒ 不是共同读面
+    // ⇒ 格位随写方走（D-263 第 2 条的反面分支）。本插件不再持有这个名字。
     // 巩固与遗忘的两格：写方 `memory_events::consolidate` 在本插件，读方是能力包的
     // 活集折叠（`memory.live`，D-268）；格位由本插件交出（DE-024 D-201）；名字进清单
     // `shared_events`——情景记忆能力包的编码去重读这一活集。同族的 `memory.encoded`

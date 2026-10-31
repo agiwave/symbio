@@ -252,7 +252,17 @@ export const BASELINE = {
   // 判据，随 provider 进 `recall/provider.test.rs`（3 条，合并了「不渲染空读数」与
   // 「按 owner 交段」）。`memory_events.test.rs` 的 2 条是 `prompt_section` 的排版判据，
   // 搬进 `recall/section.test.rs`（同名）。不是判据退役，是判据随能力搬家。非侵蚀。
-  ciRustTestsTotal: 2459,
+  // baseline-allow ciRustTestsTotal: L2c 语义记忆迁出净 +3（2459 → 2462）——同一次搬家的两端：
+  // **+6 新增**（`crates/symbio-plugin-memory/src/semantic/contributor.test.rs`：三个读数逐字
+  // 誊写 / 降级不丢 / 无检索即无事实 / 锚落在轮首 / 同锚二次收束不重复 / 事实落库后不变量仍绿），
+  // **−3 删除**（loop 的 `memory_events.test.rs` 三条写方判据：`record_recalled_anchors_…`、
+  // `recall_translator_produces_provenanced_…`、`recalled_event_records_degradation_…`）。
+  // 逐条归属：前两条判的是「写口在宿主」这件事本身（锚取 `user_seq`、载荷带溯源），迁出后
+  // 同一批断言改由包内的收束贡献判——贡献拿 `Settling.recall` 与 `Settling.user_seq`，判据
+  // 不丢只换了入口；降级那条直接对应包内的 `degraded_is_recorded_instead_of_dropped`。
+  // `record_learning_wires_retrieval_and_consolidation` 改名 `…_wires_consolidation`（检索片段
+  // 随写口迁走，条数不变）。不是判据退役，是判据随能力搬家。非侵蚀。
+  ciRustTestsTotal: 2462,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

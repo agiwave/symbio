@@ -7,13 +7,13 @@
 //!
 //! - 召回：宿主那一半——跨会话扫、可见域收放、新近在前（折叠 / 排序 / 预算自 L2b
 //!   起住能力包，由 `crates/symbio-plugin-memory/src/recall/` 的用例钉）；
-//!   检索事实溯源到触发它的那一格、同一锚幂等；
+//!   检索事实（`memory.recalled`）的判据随写方迁进能力包（`semantic` 的
+//!   `contributor.test.rs`）——本文件不再判它；
 //! - 巩固：**过 `accept` 才入格**——代数上界与保真度下界两个拒收分支都在
 //!   生产可达；过了就写合并产物 + 排除式遗忘两条源记忆（Log 不删）。
 
 use super::{
-    consolidate, merge_with_fidelity, record_recalled, visible_slice, CONSOLIDATE_MIN_ENTRIES,
-    MERGE_MAX_CHARS,
+    consolidate, merge_with_fidelity, visible_slice, CONSOLIDATE_MIN_ENTRIES, MERGE_MAX_CHARS,
 };
 use crate::control_decl::guard_vocab;
 use symbio_core::SKILL_TAG;
@@ -25,9 +25,7 @@ use symbio_core::{
 };
 use symbio_plugin_api::retrieval::{Retrieval, Retrieved};
 
-use crate::control_decl::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
-};
+use crate::control_decl::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
 
 /// 标签字面量：写方搬走之后，这些种子夹具需要的值是**生产值的镜像**
 /// （情景记忆能力包的 `MEMORY_TAG` / `JUDGMENT_TAG`）。一致理由与
@@ -816,52 +814,6 @@ fn an_out_of_matrix_viewer_is_shown_no_shared_memory() {
     );
 }
 
-// ==================== 写方（检索事实） ====================
-
-/// 写方：`memory.recalled` 溯源到**触发检索的那格事件**，载荷由视图出
-/// （Translator 不造信息），同一锚幂等（WAL 的 `Duplicate` 不该在生产上冒头）。
-#[test]
-fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
-    let store = EventStore::new();
-    let trigger = seed_encoded(&store, "m1", "记住这条", 1000);
-
-    let view = live_reading(&store);
-    assert_eq!(view.entries.len(), 1);
-
-    record_recalled(&store, &view, trigger, symbio_core::PRINCIPAL_MAIN, 9000).expect("入格");
-    let snap = store.range(Seq::new(0));
-    let ev = snap
-        .iter()
-        .find(|e| e.kind == EVENT_MEMORY_RECALLED)
-        .expect("写了一条检索事实");
-    assert_eq!(ev.entity, Entity::Memory);
-    assert_eq!(ev.verb, Verb::Asserted, "落在 memory × asserted");
-    assert_eq!(ev.produced_by, Some(trigger), "溯源 = 触发本次检索的事件");
-    assert_eq!(ev.actor, "session/main");
-    assert_eq!(
-        ev.actor,
-        symbio_core::PRINCIPAL_MAIN,
-        "Translator 写死的 actor 必须与本机主智能体常量同值（对齐测试）"
-    );
-    assert_eq!(ev.ts, 9000, "检索事实也填时刻");
-    assert_eq!(ev.payload.get("found").and_then(|v| v.as_u64()), Some(1));
-    assert!(payload_str(ev, "top").is_some_and(|s| s.contains("记住这条")));
-
-    // 幂等：同一锚再落一次仍是 1 条。
-    record_recalled(&store, &view, trigger, symbio_core::PRINCIPAL_MAIN, 9001)
-        .expect("重复调用不失败");
-    assert_eq!(
-        store
-            .range(Seq::new(0))
-            .iter()
-            .filter(|e| e.kind == EVENT_MEMORY_RECALLED)
-            .count(),
-        1,
-        "同一锚只落一条"
-    );
-    assert!(check_all(guard_vocab(), &store.range(Seq::new(0))).is_empty());
-}
-
 // ==================== 合并算法（本模块的算法面） ====================
 
 /// 合并算法的两条边界：句界不许把数字切坏；装不下丢的句子必须算成失真。
@@ -989,124 +941,5 @@ fn memories_older_than_the_window_wait_for_a_later_round() {
             .len(),
         1,
         "窗口覆盖到它们时 ⇒ 照常合并最旧两条"
-    );
-}
-
-// ── 检索 Translator（D-189：实现随唯一消费方住本插件） ──
-
-use super::recalled_event;
-use symbio_core::PRINCIPAL_MAIN;
-
-/// 编码一条记忆（带溯源与编码时刻）——与生产写方同一格子。
-fn encode_at(store: &EventStore, id: &str, ts: i64, content: &str, tag: &str, source: u64) {
-    store
-        .append(
-            Event::pending(
-                id,
-                crate::control_decl::EVENT_MEMORY_ENCODED,
-                Entity::Memory,
-                Verb::Opened,
-                0,
-                PRINCIPAL_MAIN,
-            )
-            .with_produced_by(source)
-            .with_ts(ts)
-            .with_payload(serde_json::json!({ "content": content, "tag": tag })),
-        )
-        .expect("编码必入库");
-}
-
-/// 全链路：检索 Translator 产出 memory.recalled（带溯源），三条不变量仍全绿。
-#[test]
-fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
-    let store = EventStore::new();
-    // 根事件先落：记忆事件的溯源指向它，否则那条边指向自己。
-    store
-        .append(Event::pending(
-            "u0",
-            symbio_plugin_api::events::EVENT_USER_MESSAGE,
-            Entity::Turn,
-            Verb::Opened,
-            0,
-            PRINCIPAL_USER,
-        ))
-        .unwrap();
-    encode_at(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
-    // 读数由能力包的检索面给（本二进制不链接它）：这里直接构造一份**同形**的值
-    // ——本用例判的是 Translator 的出事实，不是检索本身。
-    let view = Retrieval {
-        degraded: false,
-        entries: vec![Retrieved {
-            seq: 1,
-            content: "用户偏好简洁答复".into(),
-            tag: "semantic".into(),
-        }],
-    };
-    store
-        .append(recalled_event(&view, 0, PRINCIPAL_MAIN))
-        .unwrap();
-    let snapshot = store.range(Seq::new(0));
-    assert!(
-        check_all(guard_vocab(), &snapshot).is_empty(),
-        "{:?}",
-        check_all(guard_vocab(), &snapshot)
-    );
-    let recalled = snapshot
-        .iter()
-        .find(|e| e.kind == EVENT_MEMORY_RECALLED)
-        .unwrap();
-    assert_eq!(recalled.payload["found"], 1);
-}
-
-/// 降级也要有**生产读数口**：
-/// `degraded` 从 `memory.recalled` 的载荷读出——不只在投影外壳或提示词里活着。
-/// 反向：不降级的检索不标降级（不谎称）。
-#[test]
-fn recalled_event_records_degradation_instead_of_dropping_it() {
-    let store = EventStore::new();
-    for i in 0..4i64 {
-        encode_at(
-            &store,
-            &format!("g{i}"),
-            100 + i,
-            &format!("片段 {i}"),
-            "experience",
-            0,
-        );
-    }
-    let snapshot = store.range(Seq::new(0));
-
-    // 降级视图 = **取值点誊抄外壳之后**的形态（D-105：外壳是唯一的降级事实源，
-    // 誊抄判据在 `recall.test.rs` / 本文件）。本测试钉的是**下游**：视图带着
-    // `degraded` 流动时，`memory.recalled` 不得把它丢掉。
-    let degraded = Retrieval {
-        entries: vec![Retrieved {
-            seq: 0,
-            content: "片段 0".into(),
-            tag: "experience".into(),
-        }],
-        degraded: true,
-    };
-    let event = recalled_event(&degraded, 0, PRINCIPAL_MAIN);
-    assert_eq!(
-        event.payload.get("degraded").and_then(|v| v.as_bool()),
-        Some(true),
-        "部分结果的检索必须把 degraded 写进事实——读数口靠的是这条事件"
-    );
-
-    let _ = snapshot;
-    let full = Retrieval {
-        degraded: false,
-        entries: vec![Retrieved {
-            seq: 0,
-            content: "片段 0".into(),
-            tag: "experience".into(),
-        }],
-    };
-    let ok = recalled_event(&full, 0, PRINCIPAL_MAIN);
-    assert_eq!(
-        ok.payload.get("degraded").and_then(|v| v.as_bool()),
-        Some(false),
-        "不降级不标降级"
     );
 }

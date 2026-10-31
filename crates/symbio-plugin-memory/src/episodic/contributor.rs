@@ -27,9 +27,7 @@
 //! 载荷不带 `vec` 键：向量索引是 Store 的实现细节（DE-001 §9.2，D-152）。
 
 use serde_json::json;
-use symbio_plugin_api::events::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-};
+use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
 use symbio_plugin_api::{
     truncate_chars, Contribution, Contributor, Entity, Event, FactDraft, Settling, Verb,
     PRINCIPAL_USER,
@@ -112,27 +110,17 @@ fn draft(
     .with_actor(PRINCIPAL_USER)
 }
 
-/// 活记忆的正文集：编码 ∪ 巩固产物，排除被遗忘的源（排除式遗忘，Log 不删）。
+/// 活记忆的正文集：**折叠只有一份**（[`crate::recall::live::live`]），这里只取正文。
 ///
-/// 与 loop 的 `recall` 投影同一口径的**读**：viewer 取 [`PRINCIPAL_USER`]（认知
-/// 归属人），不带查询（去重问「在不在」，不问「排多前」）。技能标签的同文也算重复
-/// ——同一个事实不必按标签记两遍。
+/// 去重问的是「在不在」，不是「排多前」⇒ 不带查询、不关心次序。技能标签的同文也算
+/// 重复——同一个事实不必按标签记两遍。
+///
+/// 不在这里再写一份折叠：`D-268`「一副折叠两个读者」要求的就是这个形状，两份实现
+/// 必然漂移（同一 crate 内更没有任何接口边界可以拦住它）。
 fn live_contents(history: &[Event]) -> Vec<String> {
-    let forgotten: Vec<u64> = history
-        .iter()
-        .filter(|e| e.entity == Entity::Memory && e.kind == EVENT_MEMORY_FORGOTTEN)
-        .filter_map(|e| e.produced_by)
-        .collect();
-    history
-        .iter()
-        .filter(|e| {
-            e.entity == Entity::Memory
-                && (e.kind == EVENT_MEMORY_ENCODED || e.kind == EVENT_MEMORY_CONSOLIDATED)
-                && e.actor == PRINCIPAL_USER
-        })
-        .filter(|e| !forgotten.contains(&e.seq.map(|s| s.value()).unwrap_or(u64::MAX)))
-        .filter_map(|e| e.payload.get("content").and_then(|v| v.as_str()))
-        .map(str::to_string)
+    crate::recall::live::live(history, i64::MAX)
+        .into_iter()
+        .map(|e| e.content)
         .collect()
 }
 
