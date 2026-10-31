@@ -54,7 +54,7 @@ use super::super::chat_loop::state::{
 };
 use super::super::loop_rows;
 use super::super::report_exec::ReportLanding;
-use super::super::tool_dispatch::{DerivedFacts, SessionDispatchPort, ToolDispatch};
+use super::super::tool_dispatch::{DerivedFacts, PortOutput, SessionDispatchPort, ToolDispatch};
 use super::super::turn_runner::{TurnOutcome, TurnSession};
 use super::{
     classify_turn, open_turn, persist_turn, ActorError, Assembled, Ctx, HeadParts, Running,
@@ -706,8 +706,10 @@ async fn close_stage(
         report_landing,
         port,
     } = host;
-    let produced = port.take_produced();
-    let derived = port.take_derived();
+    let PortOutput {
+        nodes: produced,
+        derived,
+    } = port.take_output();
     drop(port);
     drop(report_landing);
     let root_id = assembled.root_id.clone();

@@ -75,14 +75,31 @@ use symbio_core::node_build::{
 /// 任务表**不在这里**：它是一条效果（`symbio-plugin-task` 的 `TaskTable`），走
 /// `effects` 那一条通路（DE-025 D-207）。
 ///
-/// 形态仿 [`SessionDispatchPort::produced`]：`dispatch` 在 `&self` 上跑，出参却要
-/// 跨 await 累积，故用 `Mutex` 收，调用方在桥释放前 `take_derived` 取走。
+/// `dispatch` 在 `&self` 上跑，出参却要跨 await 累积，故由 [`PortOutput`] 的
+/// `Mutex` 收，调用方在桥释放前一次取走。
 #[derive(Default)]
 pub(crate) struct DerivedFacts {
     /// 效果出参（DE-025 D-207）：每次终态调用一条，轮末由写口问能力包要草稿。
     pub(crate) effects: Vec<EffectInput>,
     /// 熔断出参：外部执行闸门判 `Break` 的理由。
     pub(crate) breaks: Vec<&'static str>,
+}
+
+/// 一次工具批次交回运行器的**全部出参**（DE-044 `E-3`）。
+///
+/// 两条出参——节点（供会话镜像）与收束派生事实（供轮末写口落格）——形状同构：
+/// 都由执行层产生、写方在别处、且必须跨 `await` 累积。分成两个 `Mutex` 只是历史
+/// 分层（一个来自 UI 桥、一个来自执行层），不是两种语义；合成一处后取用点只有
+/// 一次加锁，也不会出现「取了一条忘了另一条」。
+///
+/// [`DispatchOutcome`] 不在本结构里：它是**同步返回值**，一次调用即交齐，
+/// 没有跨 `await` 累积的问题——把它塞进 `Mutex` 只会把返回值变成第二条通道。
+#[derive(Default)]
+pub(crate) struct PortOutput {
+    /// 本轮产生的全部消息（供 chat_loop 并入落库权威镜像）。
+    pub(crate) nodes: Vec<ChatNode>,
+    /// 本轮工具执行层交回的收束派生事实。
+    pub(crate) derived: DerivedFacts,
 }
 
 /// 一笔已开账的工具端口调用（创建动作的产物）。
@@ -1092,10 +1109,8 @@ pub(crate) struct SessionDispatchPort {
     port: ToolPort,
     /// 流式桥：交出本轮正文节点并切下一轮。
     bridge: Arc<UiBridge>,
-    /// 本轮产生的全部消息（供 chat_loop 并入落库权威镜像）。
-    produced: Mutex<Vec<ChatNode>>,
-    /// 本轮工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）。
-    derived: Mutex<DerivedFacts>,
+    /// 本轮全部出参（消息 + 收束派生事实），幕尾一次取走。
+    out: Mutex<PortOutput>,
     /// 本轮建树策略（`ExecTurn` 的请求级快照，与流式发射同一个取值）。
     presentation_tree: PresentationTree,
     /// 淘汰闸的部署级判据（session 已折成**一个值**，见 D-086 §4）。
@@ -1130,8 +1145,7 @@ impl SessionDispatchPort {
             root_id,
             port: ToolPort::new(facts_for_port, turn, user_seq, drive_seq),
             bridge,
-            produced: Mutex::new(Vec::new()),
-            derived: Mutex::new(DerivedFacts::default()),
+            out: Mutex::new(PortOutput::default()),
             presentation_tree,
             elimination_revoked,
         }
@@ -1144,14 +1158,9 @@ impl SessionDispatchPort {
         ))
     }
 
-    /// 取走本轮产生的消息（调用方在桥释放前取）。
-    pub(crate) fn take_produced(&self) -> Vec<ChatNode> {
-        std::mem::take(&mut self.produced.lock().unwrap())
-    }
-
-    /// 取走本轮工具执行层交回的收束派生事实（调用方在桥释放前取）。
-    pub(crate) fn take_derived(&self) -> DerivedFacts {
-        std::mem::take(&mut self.derived.lock().unwrap())
+    /// 取走本轮全部出参（消息 + 收束派生事实），调用方在桥释放前取一次。
+    pub(crate) fn take_output(&self) -> PortOutput {
+        std::mem::take(&mut self.out.lock().unwrap())
     }
 
     /// 三动作契约的创建步（实体在 [`ToolPort::open_batch`]）。
@@ -1271,7 +1280,7 @@ impl SessionDispatchPort {
         };
         let mut produced = call_nodes;
         produced.push(result);
-        self.produced.lock().unwrap().extend(produced);
+        self.out.lock().unwrap().nodes.extend(produced);
         // 关账归 [`ToolDispatch::finish`]（下一个环步）——与正常批次同一条分工。
         Some(outcome)
     }
@@ -1525,7 +1534,7 @@ impl SessionDispatchPort {
             frame.status = Some(NodeStatus::Streaming);
             llm_emit_message(&self.sink, frame).await;
         }
-        self.produced.lock().unwrap().extend(produced);
+        self.out.lock().unwrap().nodes.extend(produced);
         call_nodes
     }
 
@@ -1576,7 +1585,7 @@ impl SessionDispatchPort {
             }
         }
         produced.extend(tool_msgs.iter().cloned());
-        self.produced.lock().unwrap().extend(produced);
+        self.out.lock().unwrap().nodes.extend(produced);
         // 产物格的富化字段（DE-025 D-207）：按**调用 id** 归户，随 `artifact.added`
         // 入格。在这里算而不是在运行器里算，是因为「这个工具声明了什么行为」只有
         // 执行层读过（批首那份元数据），运行器没有注册表也没有 `declared`。
@@ -1590,11 +1599,11 @@ impl SessionDispatchPort {
             })
             .filter(|(_, a)| !a.is_empty())
             .collect();
-        // 三份收束派生事实出参收进取件面（`take_derived`）——调用方在桥释放前取走。
+        // 三份收束派生事实出参收进取件面（`take_output`）——调用方在桥释放前取走。
         {
-            let mut d = self.derived.lock().unwrap();
-            d.effects.extend(effects);
-            d.breaks.extend(breaks);
+            let mut o = self.out.lock().unwrap();
+            o.derived.effects.extend(effects);
+            o.derived.breaks.extend(breaks);
         }
 
         // ④ 映射为 core 的事实形状（运行器据此落 `artifact.added` 并拼下一轮 prompt）。
@@ -1665,8 +1674,7 @@ impl SessionDispatchPort {
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::take_produced: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::take_derived: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::take_output: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::dispatch_window: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::run_batch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::wake_result_begin: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
