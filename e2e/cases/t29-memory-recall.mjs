@@ -10,7 +10,8 @@ import './_selfrun.mjs';
 // 每轮还编一条**判断**记忆（智能体收束正文，tag=判断）——注入段从此
 // 一问一答成对出现，判据按标签分开数（见 `A_ANSWERS`）。
 //
-// 为什么必须端到端：单测（`memory_events.test.rs` / `derived_facts.test.rs`）把三段各自的
+// 为什么必须端到端：单测（情景记忆能力包的 `contributor.test.rs` + loop 的
+// `memory_events.test.rs` / `derived_facts.test.rs`）把三段各自的
 // 出口判据钉死了，但它们证不了三件只有这条链路能看见的事：
 //
 // | 要证的事 | 唯一能看见它的地方 |
