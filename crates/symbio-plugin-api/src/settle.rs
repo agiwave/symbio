@@ -47,6 +47,7 @@
 
 use symbio_core::Event;
 
+use crate::context::RecallFacts;
 use crate::effects::FactDraft;
 
 /// 这一轮走的是哪一面——贡献者据此判断自己该不该落笔。
@@ -83,6 +84,12 @@ pub struct Settling<'a> {
     pub user_text: &'a str,
     /// 本轮成功收束的正文；兜底收束 / 中止为 `None`（固化失败套路比不记更坏）。
     pub response: Option<&'a str>,
+    /// 本轮的检索读数（轮首折叠的结果，摘除之后）；`None` = 本轮没走检索。
+    ///
+    /// 这一格补的是**已在场的形参**：宿主的记忆半边今天就把同一个值交给收束写方
+    /// （DE-026 D-264 第 2 条）——语义记忆的贡献者读它落 `memory.recalled` 的三个
+    /// 读数，而不是在收束时重算折叠（重算 = 一轮两个时刻两套读数）。
+    pub recall: Option<&'a RecallFacts<'a>>,
     /// 完整史（含归档前缀）：累计口径的贡献者（巩固 / 校准）要看得见全部，
     /// 开关也读这里（`session.config` 那一格）。
     pub history: &'a [Event],

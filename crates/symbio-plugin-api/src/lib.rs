@@ -12,6 +12,7 @@
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）
 //! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份
 //! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）
+//! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //! - [`views`]：声明视图的跨插件读口（按 owner 公开的名字读纯折叠）
@@ -41,6 +42,7 @@ pub mod declarations;
 pub mod effects;
 pub mod events;
 pub mod hooks;
+pub mod retrieval;
 pub mod routes;
 pub mod rows;
 pub mod settle;

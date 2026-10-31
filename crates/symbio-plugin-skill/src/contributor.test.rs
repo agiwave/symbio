@@ -40,6 +40,7 @@ fn settling<'a>(history: &'a [Event], response: Option<&'a str>) -> Settling<'a>
         anchor: "t1",
         user_text: "把周报整理成摘要",
         response,
+        recall: None,
         history,
     }
 }

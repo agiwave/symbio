@@ -60,6 +60,7 @@ fn at() -> Settling<'static> {
         anchor: "t3",
         user_text: "说了什么",
         response: Some("答了什么"),
+        recall: None,
         history: &[],
     }
 }

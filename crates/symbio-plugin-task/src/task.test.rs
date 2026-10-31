@@ -971,6 +971,7 @@ fn settling<'a>(
         anchor,
         user_text: "做点事",
         response: None,
+        recall: None,
         history,
     }
 }

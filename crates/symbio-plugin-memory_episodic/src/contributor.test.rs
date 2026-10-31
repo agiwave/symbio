@@ -57,6 +57,7 @@ fn settling<'a>(
         anchor: "t3",
         user_text,
         response,
+        recall: None,
         history,
     }
 }

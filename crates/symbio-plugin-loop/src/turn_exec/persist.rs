@@ -17,6 +17,10 @@ use super::*;
 ///
 /// 失败只记日志、不打断下一个：轮次已收束，附加事实失败不该把成功的一轮说成失败
 /// （与效果 / 记忆三段同一条口径）。
+///
+/// 形参宽是这一族的固有形状：八个量都是本轮的**事实端口**（与
+/// [`execute_final_reply_turn`] 同一条口径），收成结构体只会把同一次调用拆成两处。
+#[allow(clippy::too_many_arguments)]
 fn land_contributions(
     store: &dyn Store<Event = Event>,
     face: symbio_plugin_api::SettleFace,
@@ -25,8 +29,27 @@ fn land_contributions(
     principal: &str,
     user_text: &str,
     response: Option<&str>,
+    recalled: Option<&super::super::recall::RecallView>,
 ) {
     let anchor = format!("t{turn}");
+    // 本轮的检索读数（DE-026 D-264 第 2 条）：与宿主读侧排版、`record_learning`
+    // 同一个值形——摘除之后的条目在这里交给贡献者，而不是让能力自己反查。
+    let recall_lines: Vec<symbio_plugin_api::RecallLine<'_>> = recalled
+        .map(|view| {
+            view.entries
+                .iter()
+                .map(|e| symbio_plugin_api::RecallLine {
+                    seq: e.seq,
+                    content: &e.content,
+                    tag: &e.tag,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let recall = recalled.map(|view| symbio_plugin_api::RecallFacts {
+        degraded: view.degraded,
+        lines: &recall_lines,
+    });
     // 同一轮各贡献者共用同一个时刻：收束这一刻就是它们的 `ts`。
     let now_ms = symbio_core::clock_now_ms();
     for contributor in symbio_plugin_api::settle::contributors() {
@@ -40,6 +63,7 @@ fn land_contributions(
             anchor: &anchor,
             user_text,
             response,
+            recall: recall.as_ref(),
             history: &history,
         };
         for contribution in contributor.contribute(&at) {
@@ -121,6 +145,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &principal,
         &user_text,
         response,
+        recalled,
     );
     // 淘汰回路（DE-043 §3）：**必须排在承诺落格之后**——它读的声誉投影
     // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
@@ -369,6 +394,8 @@ pub(crate) async fn execute_final_reply_turn(
             &principal,
             user_text,
             response,
+            // 答话轮不建召回视图（与下方 `record_learning` 同一条理由）⇒ 无检索读数。
+            None,
         );
         super::super::derived_facts::record_learning(
             session.session_id(),
