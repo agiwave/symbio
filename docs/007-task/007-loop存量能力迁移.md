@@ -2,7 +2,7 @@
 kind: task
 id: T-007-loop存量能力迁移
 title: S6：loop 存量能力逐批迁出
-status: todo
+status: doing
 track: arch
 prio: next
 created: 2026-10-29
@@ -42,6 +42,39 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 说明前置设计不足：停下这一批，把补件单列为带 `### D-NNN` 的独立提交（通用、不含能力名），
 再恢复迁移。不许在迁移提交里顺手在 `loop` 加行、加分支、加常量；也不许把能力实现搬进
 `core` / `kernel` 或别的控制面模块来「满足」封闭集——那是反向拆分。
+
+### 进度
+
+| 批 | 状态 | 落点 |
+|---|---|---|
+| L2a 情景记忆编码 | 已落 | `crates/symbio-plugin-memory_episodic`（D-263） |
+| L3a 独立验证与返工 | 已落 | `crates/symbio-plugin-task` |
+| L3b 技能编译 / 反自动化回退 / 程序记忆 | 已落 | `crates/symbio-plugin-skill`（D-262） |
+| L2b 长期记忆检索 | 设计已定（D-264），未起 | `crates/symbio-plugin-memory_recall` |
+| L2c 语义记忆 | 设计已定（D-264），未起 | `crates/symbio-plugin-memory_semantic` |
+| L1 / L4 / L5 / L6 / L7 | 未起（L4 还缺一条 `### D-NNN`：`breaker` 的判据要读授权矩阵与成本台账，两样都在 core，先裁「谁读、怎么读」再动手） | — |
+| L8 多轮对话 | 不迁（D-222 留环） | — |
+
+**L2b 起手前已探明的三条约束**（省下一次重复勘察，都是这次实际踩到的）：
+
+1. **目录名必须能拼成标识符**。`scripts/facts/assembly.mjs` 的 `constName` 是
+   `PLUGIN_ID_` + 目录名大写，而 `plugin_id` 又必须等于目录名（否则生成期直接抛错）。
+   所以目录是 `symbio-plugin-memory_recall`（下划线）——连字符会拼出
+   `PLUGIN_ID_MEMORY-RECALL`，那是一段非法标识符，`gen-facts` 不拦、`cargo check`
+   才炸。名册第 2 行已经踩过同一条，D-264 正文已按这个口径改正。
+2. **扫描配额要在包内重算**。`Retrieval` 自带 `degraded`，意味着
+   `RECALL_SCAN_QUOTA` 的截断语义（`Projection::apply` 的三行：配额取 `max(1)`、
+   只截尾、`degraded = 窗口 < 全长`）必须由 `Retriever::retrieve` 自己实现一遍。
+   省掉就是「空且不标降级」——DE-036 §6 验收 2 要消灭的那个形态。
+3. **测试面比代码面大**。`memory_events.test.rs` 里有 15 条用例直接钉
+   `recall_view` / `prompt_section` 的口径（新近序、查询语义维、跨会话只扫一层、
+   降级措辞、同文去重、排除式遗忘）。它们随能力一起搬，不能删——那 15 条就是
+   D-264 四条口径的验收，删掉等于把验收一起搬没了。
+
+**为什么不半途提交**：`D-245` 要求「插件落好 → 绑定切换 + 旧实现删除」同一提交，
+`D-247` 禁止迁移提交夹带机制增量。两批各是一个原子批次，起手就必须走完；
+把 crate 建好但 loop 未切绑定的中间态**不能进主干**（两份实现同时生效，`EX-003`
+正是判它的反向用例）。
 
 ## 处理过程
 
