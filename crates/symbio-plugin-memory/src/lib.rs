@@ -67,8 +67,12 @@
 //! - [`workspace`]：工作区腿的落位、挂载名、片段规格（本层的个性）
 //! - [`plugin`]：插件本体（`Plugin` 实现 + 工作区作用域闸门收口处）
 //! - [`vdfs`]：VDFS 挂载点（`VdfsProvider` 实现）
+//! - [`episodic`]：**事件形态**的记忆——轮末两条编码（经验 / 判断）经收束贡献落格
+//!   （名册第 2 行，DE-026 D-263）。它与上面两腿是同一个所有者的第三种载体：
+//!   文件形态能被人手改，事件形态只能被轮末写，两者都叫「记忆」，不该有两个 crate。
 
 mod config;
+mod episodic;
 // 智能体腿实现与插件同名：memory 插件 = 智能体记忆（`memory`）+ 工作区记忆（`workspace`），
 // 两个作用域腿模块并列，先例见 `crates/symbio-plugin-composite/src/composite.rs`
 #[allow(clippy::module_inception)]

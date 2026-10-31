@@ -26,7 +26,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 | 批 | 名册行 | 能力 | 今天在 loop 的样子 | 迁出后的形状 |
 |---|---|---|---|---|
 | L1 | 1 / 16 | 工作记忆 + 规划与重规划 | 轮首装配与计划寄存在本轮状态里 | 段走 I-2，跨步状态与计划走 I-1 / I-4 |
-| L2 | 2 / 3 / 6 | 情景 / 语义 / 长期记忆检索 | #2 已落（L2a，D-263：编码 = 收束贡献，形状与归宿行随 `symbio-plugin-memory_episodic`）；#3 / #6 待迁：`memory_events` 读侧 / `recall`（程序记忆 #4 已随 L3b 迁出） | 各自能力包；检索段走 I-2，折叠名字读 |
+| L2 | 2 / 3 / 6 | 情景 / 语义 / 长期记忆检索 | #2 已落（L2a，D-263：编码 = 收束贡献，随 `symbio-plugin-memory` 的 `episodic` 子模块，D-267）；#3 / #6 待迁：`memory_events` 读侧 / `recall`（程序记忆 #4 已随 L3b 迁出） | 与 #2 同包（`symbio-plugin-memory`，D-267）；检索段走 I-2，折叠名字读 |
 | L3a | 26 | 独立验证与返工 | `task_events` + 任务表写侧判断 + 收束时调度 + 就绪段 | `symbio-plugin-task`：写侧走 I-1（效果端口 + `before`），就绪段走 I-2（provider），收束时调度走收束贡献（D-250）；`rework_bounded` 不变量留核 |
 | L3b | 24 / 25 / 4 | 技能编译 + 反自动化回退 + 程序记忆 | `SkillCompiler` / `SkillRouter`（原 `skill_events`） | 已落 `symbio-plugin-skill`（D-262）：`skill.recall` 行执行体（命中交 `RowStep::Answer`，摘行走 `skill.retreat` 名字读）+ 轮末收束贡献（编译）；两行同一实现、同包 |
 | L4 | 8 | 副作用分级 | `breaker` | `before` 交拒绝（I-3），状态随包 |
@@ -47,21 +47,20 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 
 | 批 | 状态 | 落点 |
 |---|---|---|
-| L2a 情景记忆编码 | 已落 | `crates/symbio-plugin-memory_episodic`（D-263） |
+| L2a 情景记忆编码 | 已落 | `crates/symbio-plugin-memory` 的 `episodic` 子模块（D-263 / D-267） |
 | L3a 独立验证与返工 | 已落 | `crates/symbio-plugin-task` |
 | L3b 技能编译 / 反自动化回退 / 程序记忆 | 已落 | `crates/symbio-plugin-skill`（D-262） |
-| L2b 长期记忆检索 | 设计已定（D-264），未起 | `crates/symbio-plugin-memory_recall` |
-| L2c 语义记忆 | 设计已定（D-264），未起 | `crates/symbio-plugin-memory_semantic` |
+| L2b 长期记忆检索 | 设计已定（D-264），未起 | `crates/symbio-plugin-memory` 的 `recall` 子模块 |
+| L2c 语义记忆 | 设计已定（D-264），未起 | `crates/symbio-plugin-memory` 的 `semantic` 子模块 |
 | L1 / L4 / L5 / L6 / L7 | 未起（L4 还缺一条 `### D-NNN`：`breaker` 的判据要读授权矩阵与成本台账，两样都在 core，先裁「谁读、怎么读」再动手） | — |
 | L8 多轮对话 | 不迁（D-222 留环） | — |
 
 **L2b 起手前已探明的三条约束**（省下一次重复勘察，都是这次实际踩到的）：
 
-1. **目录名必须能拼成标识符**。`scripts/facts/assembly.mjs` 的 `constName` 是
-   `PLUGIN_ID_` + 目录名大写，而 `plugin_id` 又必须等于目录名（否则生成期直接抛错）。
-   所以目录是 `symbio-plugin-memory_recall`（下划线）——连字符会拼出
-   `PLUGIN_ID_MEMORY-RECALL`，那是一段非法标识符，`gen-facts` 不拦、`cargo check`
-   才炸。名册第 2 行已经踩过同一条，D-264 正文已按这个口径改正。
+1. **不新建 crate，落 `symbio-plugin-memory` 的子模块**（`D-267`）。记忆是一个所有者：
+   文件形态（`AGENTS.md` / `WORKSPACE.md`）与事件形态（`memory.encoded`）是同一个
+   所有者的三种载体，拆成四个插件之后没有任何一处说得出「记忆归谁」。`episodic`
+   子模块已经并回去了，`recall` / `semantic` 照同一个形状落。
 2. **扫描配额要在包内重算**。`Retrieval` 自带 `degraded`，意味着
    `RECALL_SCAN_QUOTA` 的截断语义（`Projection::apply` 的三行：配额取 `max(1)`、
    只截尾、`degraded = 窗口 < 全长`）必须由 `Retriever::retrieve` 自己实现一遍。

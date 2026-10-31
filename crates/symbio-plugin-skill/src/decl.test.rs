@@ -5,7 +5,7 @@
 //! 插件自己的测试二进制只链接本 crate：`turn.recalled` 视图与 `turn.stage` /
 //! `user.message` 事实的归宿行住在 `crates/symbio-plugin-loop`，`memory.encoded` 的
 //! 格位也在那里；它的**事实形状**自 DE-026 D-263 起住情景记忆能力包
-//! （`crates/symbio-plugin-memory_episodic`）。不在这里 ⇒ `seal` 报 `OrphanFact` /
+//! （`crates/symbio-plugin-memory`）。不在这里 ⇒ `seal` 报 `OrphanFact` /
 //! `UnknownSource` / `UnknownFact` / `FactWithoutEvent`，整张表失败（DE-015 §3.4）。
 //! 夹具补的正是完整进程里由那两个 owner 提供的那一半——视图、事实形状与通用行执行体
 //! 的声明。它与 notes 的同名夹具同形，只在 `cfg(test)` 生效。

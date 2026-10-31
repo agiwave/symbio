@@ -15,9 +15,9 @@ use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
 use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{FactDecl, LatencyTier, PluginDeclarations};
 
-/// owner —— 与目录名同形（`crates/symbio-plugin-memory_episodic`），
+/// owner —— 与插件目录同形（`crates/symbio-plugin-memory`，D-267：记忆一个所有者），
 /// 装配表与贡献次序按它排序。
-pub(crate) const OWNER: &str = "crates/symbio-plugin-memory_episodic";
+pub(crate) const OWNER: &str = "crates/symbio-plugin-memory";
 
 /// 认知内容标签：本轮**用户发言**编成的情景记忆标「经验」（七类，DE-030）。
 pub(crate) const MEMORY_TAG: &str = "经验";

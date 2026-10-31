@@ -9,8 +9,8 @@ use symbio_plugin_api::{
     Contribution, Contributor, Entity, Event, Seq, SettleFace, Settling, Verb, PRINCIPAL_USER,
 };
 
+use super::super::decl::{ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG};
 use super::EpisodicEncode;
-use crate::decl::{ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG};
 
 fn ev(seq: u64, kind: &str, entity: Entity, verb: Verb, payload: serde_json::Value) -> Event {
     let mut e = Event::pending(format!("seed-{seq}"), kind, entity, verb, 0, PRINCIPAL_USER);

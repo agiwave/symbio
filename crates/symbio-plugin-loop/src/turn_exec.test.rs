@@ -1663,7 +1663,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
 ///
 /// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，而记忆**不是轮次
 /// 事实**——运行器一处都不写。编码自 D-263 起是**情景记忆能力包的收束贡献**
-/// （`crates/symbio-plugin-memory_episodic`）：本插件一侧再写一笔就是同一事实两个
+/// （`crates/symbio-plugin-memory`）：本插件一侧再写一笔就是同一事实两个
 /// 写方。所以这里反向钉住「一轮跑完，本插件不落任何 `memory.encoded`」——正向判据
 /// （带溯源入格、同文去重、截断、可见域）随写方迁进那个包的 `contributor.test.rs`，
 /// 端到端由 e2e `t29` 带。
