@@ -30,6 +30,7 @@ lists: [gate-codes=owner]
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
 | **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–013 | `E-014` |
+| **EL** | 引擎收口（DE-044 的账本读数） | `scripts/engine-ledger-audit.mjs` | EL-001–003 | `EL-004` |
 | **EOL** | 行尾（工作树 / 入库 / 声明三面一致） | `scripts/eol-audit.mjs` | EOL-001–003 | `EOL-004` |
 | **EX** | 能力全面拆分（名册处置与迁移边界） | `scripts/capability-ledger-audit.mjs` · `scripts/capability-migration-audit.mjs` · `scripts/extension-locality-audit.mjs` · `scripts/extension-vocab-audit.mjs` · `scripts/uninstall-edge-audit.mjs` | EX-002–004、EX-006–008 | `EX-009` |
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
@@ -130,6 +131,9 @@ lists: [gate-codes=owner]
 | **E-011** | `scripts/plugin-entry-audit.mjs` |
 | **E-012** | `scripts/plugin-entry-audit.mjs` |
 | **E-013** | `scripts/plugin-entry-audit.mjs` |
+| **EL-001** | `scripts/engine-ledger-audit.mjs` |
+| **EL-002** | `scripts/engine-ledger-audit.mjs` |
+| **EL-003** | `scripts/engine-ledger-audit.mjs` |
 | **EOL-001** | `scripts/eol-audit.mjs` |
 | **EOL-002** | `scripts/eol-audit.mjs` |
 | **EOL-003** | `scripts/eol-audit.mjs` |
