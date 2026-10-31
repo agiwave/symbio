@@ -173,7 +173,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 77 · draft 0 · retired 2（共 79）
+**计数**：active 77 · draft 1 · retired 2（共 80）
 
 ## 现行设计（active）
 
@@ -259,7 +259,9 @@ board.columns: [impl]
 
 ## 草案（draft）
 
-（无）
+| 编号 | 设计 | 落地 |
+|---|---|---|
+| [`DE-044-引擎收口与简化`](044-引擎收口与简化.md) | 引擎收口与简化 | 未落地 |
 
 ## 废止（retired）
 
