@@ -143,13 +143,13 @@ pub(crate) struct Dispatch<'a> {
 }
 
 impl Dispatch<'_> {
-    /// 这一行此刻还欠不欠——**唯一的现读点**。
-    fn row_owed<S>(&self, store: &S) -> bool
-    where
-        S: Store<Event = Event> + ?Sized,
-    {
-        let facts = store.range(symbio_core::Seq::new(0));
-        super::loop_rows::owes(self.row, &facts, self.turn, self.now)
+    /// 这一行此刻还欠不欠——**唯一的现读点**（结论由 `loop_rows::owes` 出）。
+    ///
+    /// 事实面由调用方给：一批 N 笔派发只需要读一次全量（[`begin_with_facts`]），
+    /// 每笔再各读一遍是把同一份日志扫 N 遍。传的是**事实**不是**结论**——
+    /// 「欠不欠」仍然只在这里判，调用点拿不到替引擎下结论的口子。
+    fn row_owed(&self, facts: &[Event]) -> bool {
+        super::loop_rows::owes(self.row, facts, self.turn, self.now)
     }
 }
 
@@ -340,6 +340,28 @@ pub(crate) fn begin<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
+    let facts = store.range(symbio_core::Seq::new(0));
+    begin_with_facts(store, ports, plan, &facts)
+}
+
+/// 与 [`begin`] 同一条 `before`，但**事实面由调用方给**：一批 N 笔只读一次全量。
+///
+/// 为什么可以共用一份切片：同批各笔落的 `before` 都只关**自己那一笔**的账，
+/// 而行「还欠不欠」在批内恒真（批首欠 ⇒ 还有未派的笔 ⇒ 每笔判下来仍欠）。
+/// 落最后一笔后行不再欠，但那时循环已经结束——所以「批首读一次」与「每笔现读」
+/// 在这一处**结论逐字相同**，省掉的只是 N−1 次全量扫描。
+///
+/// 调用方拿到的口子只有「给事实」，没有「给结论」：欠不欠仍由 [`Dispatch::row_owed`]
+/// 判（`D-136` 的唯一现读点）。
+pub(crate) fn begin_with_facts<S>(
+    store: &S,
+    ports: &[PortDecl],
+    plan: Dispatch<'_>,
+    facts: &[Event],
+) -> Result<(), DispatchError<std::convert::Infallible>>
+where
+    S: Store<Event = Event> + ?Sized,
+{
     let Dispatch {
         call,
         turn,
@@ -348,7 +370,7 @@ where
         ..
     } = plan;
     let decl = ring::port_of(ports, call.port).ok_or(DispatchError::NoPort(call.port))?;
-    if !plan.row_owed(store) {
+    if !plan.row_owed(facts) {
         return Err(DispatchError::NotOwed(row.to_string()));
     }
     append(

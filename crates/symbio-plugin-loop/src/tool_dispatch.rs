@@ -724,6 +724,9 @@ impl ToolPort {
     ///
     /// 派发行欠不欠由引擎现读（D-136）：这里只交出授权行与读账的 `now`，
     /// 引擎回 [`port::DispatchError::NotOwed`] 就是「没有这笔账」，如实落 `failed`。
+    ///
+    /// 事实面**批首读一次**（`begin_with_facts`）：批内每笔落的 `sent` 只关自己那一笔，
+    /// 而行的欠状态在批内恒真（见那条函数的说明）——每笔现读是同一份日志扫 N 遍。
     pub(crate) fn begin_calls(&self, calls: &mut [ToolPortCall]) {
         if !calls.iter().any(|c| c.granted) {
             return;
@@ -731,7 +734,7 @@ impl ToolPort {
         let facts = self.facts.range(Seq::new(0));
         let now = self.now_ms(&facts);
         for call in calls.iter_mut().filter(|c| c.granted) {
-            match port::begin(
+            match port::begin_with_facts(
                 self.facts.as_ref(),
                 loop_rows::PORTS,
                 port::Dispatch {
@@ -744,6 +747,7 @@ impl ToolPort {
                     // 普通批次把结果等在当前草稿里，进程一死就没人接了。
                     awaited: call.wake.is_some(),
                 },
+                &facts,
             ) {
                 Ok(()) => call.sent = true,
                 Err(port::DispatchError::NotOwed(row)) => {
