@@ -29,6 +29,7 @@ import {
   manifestViolations,
   readGrammar,
   readWhitelist,
+  SDK_BASELINE,
   WHITELIST_BASELINE,
 } from './plugin-surface-audit.mjs'
 
@@ -199,6 +200,48 @@ test('⑦ 白名单超基线 ⇒ 红（HS-002 只许降）', () => {
     const r = runOn(root)
     assert.equal(r.status, 1, r.stdout + r.stderr)
     assert.match(r.stdout, /HS-002/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑦b SDK 臂超基线 ⇒ 红（D-269：机制面同进棘轮）', () => {
+  const many = Array.from({ length: SDK_BASELINE + 3 }, (_, i) => `S${i}`)
+  const root = fixture({
+    // 每一条都有人用（HS-003 不参与本用例），只有条数越界 ⇒ 红只能来自 HS-002。
+    'symbio-plugin-fix': {
+      rs:
+        many.map((s) => `pub fn use_${s}() { symbio_plugin_api::${s}(); }`).join(' ') +
+        ' pub fn ev(e: symbio_plugin_api::Event) { let _ = e; }',
+    },
+    'symbio-plugin-api': {
+      rs: `pub use symbio_core::{Event}; pub use symbio_sdk::{ ${many.join(', ')} };`,
+    },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /机制臂（SDK）/, '报的必须是 SDK 臂越界，不是别的错')
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑦c SDK 臂恰好等于基线 ⇒ 绿（棘轮不动就没事）', () => {
+  const many = Array.from({ length: SDK_BASELINE }, (_, i) => `S${i}`)
+  const root = fixture({
+    'symbio-plugin-fix': {
+      rs:
+        many.map((s) => `pub fn use_${s}() { symbio_plugin_api::${s}(); }`).join(' ') +
+        ' pub fn ev(e: symbio_plugin_api::Event) { let _ = e; }',
+    },
+    'symbio-plugin-api': {
+      rs: `pub use symbio_core::{Event}; pub use symbio_sdk::{ ${many.join(', ')} };`,
+    },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
   } finally {
     rmTree(root)
   }

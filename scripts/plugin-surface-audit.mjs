@@ -81,6 +81,19 @@ export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_s
  */
 export const WHITELIST_BASELINE = 6
 
+/**
+ * SDK 臂（机制面）的基线：**这一臂同样进棘轮**（D-269 第 3 条）。
+ *
+ * 此前这一臂「不计债」——只由 HS-003 要求「每条有扩展层消费方」。代价是它成了
+ * 门面增长的**零代价通道**：`D-261` 加两条（校准视图 / 字符截断）、`D-268` 改判前
+ * 还要再加一条（保真度内核），没有任何门禁会红。机制面是「能力能调用宿主什么」的
+ * 完整清单，与 `core` 臂是同一件事的两种住址，因此必须同一把尺子。
+ *
+ * 准入（D-269 §5.1 的两条判据）：与容器概念无关 ∧ ≥2 条能力要用。一条能力撑不起
+ * 一次架构改动——要加一条就把理由写成决策，并同步上调本基线。
+ */
+export const SDK_BASELINE = 110
+
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
 /**
@@ -304,6 +317,13 @@ export function run(root) {
         '新增一条要把「谁消费、为什么非给插件不可」写成决策理由，并同步上调 `WHITELIST_BASELINE`',
     )
   }
+  const ns = sdk.length
+  if (ns > SDK_BASELINE) {
+    errors.push(
+      `门面机制臂（SDK）${ns} 条 > 基线 ${SDK_BASELINE}——HS-002 只许降，两臂同一把尺子（D-269）；` +
+        '新增一条要过 §5.1 的两条准入（不提能力名 ∧ ≥2 条能力要用），写成决策并同步上调 `SDK_BASELINE`',
+    )
+  }
 
   const used = collectConsumers(root, plugins.filter((p) => !CONTROL_PLANE.includes(p)))
   // 两臂都判：语法臂不计债，但同样不许有空转条目——它也是门面对插件的承诺。
@@ -334,12 +354,21 @@ export function run(root) {
       ),
     )
   }
+  if (ns < SDK_BASELINE) {
+    console.log(
+      yellow(
+        `△ HS-002 门面机制臂（SDK）${ns} 条 < 基线 ${SDK_BASELINE}：请把 ` +
+          '`SDK_BASELINE` 同步下调（账本只许降，基线跟着降才不是空转）',
+      ),
+    )
+  }
   console.log(
     green(
       `✓ HS-001 扩展层零直接依赖：${scannedPlugins} 个非控制面插件的 ${scannedFiles} 个源文件与 manifest ` +
         `没有 \`symbio_core\` / \`symbio-kernel\` / \`symbio-sdk\` / \`symbio-deploy\`（控制面 ${CONTROL_PLANE.length} 个豁免：` +
         `${CONTROL_PLANE.join(' / ')}）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}）` +
-        `· 语法臂 ${gram.length} 条不计债 · SDK 臂 ${sdk.length} 条不计债 ` +
+        `+ SDK 臂 ${ns} 条（基线 ${SDK_BASELINE}，D-269 起同进棘轮）` +
+        `· 语法臂 ${gram.length} 条不计债 ` +
         `· HS-003 每条都有扩展层消费方（0 空转）· HS-004 胶水层重臂默认关闭（${HEAVY_ARM.feature}）`,
     ),
   )
