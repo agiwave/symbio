@@ -72,7 +72,7 @@ pub struct RowRequest<'a> {
     pub facts: &'a [Event],
     /// 完整史（含本轮之前）：累计口径的判断（技能表、巩固、校准）按它读。
     ///
-    /// 与 [`symbio_plugin_api::settle::Settling::history`] 同形：视图求解器按轮收窄
+    /// 与 [`crate::settle::Settling::history`] 同形：视图求解器按轮收窄
     /// 是为了给每个视图一个成本上界，行是一次单调用、按需读，不该被同一个上界误伤。
     pub history: &'a [Event],
 }

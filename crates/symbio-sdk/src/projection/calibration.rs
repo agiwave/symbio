@@ -2,8 +2,8 @@
 //!
 //! 技能会持续犯错而自己不知道——架构没有"技能自动失效"机制（DE-041 §7 诚实划界），
 //! 只能靠**校准观测**后由路由者回退：每个技能记录使用次数与回退次数，
-//! 置信度 = 1 − 回退率。低于阈值 ⇒ `SkillRouter`（`actors` 域，控制面）
-//! 不得走技能路径（反自动化回退）。
+//! 置信度 = 1 − 回退率。低于阈值 ⇒ 技能能力的召回行（`row.rs`，控制面）
+//! 不得走技能路径（反自动化回退），`skill.retreat` 视图把这条结论交给宿主摘提示词。
 //!
 //! 观测面：校准断言落**自己的格子**（`memory.calibrated`，`payload: { skill_id,
 //! fallback }`）。它曾复用 `memory.recalled`（DE-041 §3「不加新格子」），代价是读侧
@@ -12,7 +12,8 @@
 //!
 //! **这条名字不写在 core 里**（DE-024 D-205）：投影读哪条名字由调用方在构造期交进来
 //! （owner 交自家常量，第二个消费方交清单生成物），core 只留折叠的形状。写方只有
-//! `crates/symbio-plugin-loop`，而读数被 loop 与 session 同时消费，所以投影住这儿、名字住清单。
+//! `crates/symbio-plugin-skill`（D-262），而读数被技能能力与 session 同时消费，
+//! 所以投影住这儿、名字住清单。
 
 use super::super::event::Event;
 use super::Projection;

@@ -179,9 +179,7 @@ pub use symbio_sdk::plugin::{
     PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
     TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
-pub use symbio_sdk::projection::calibration::{
-    calibration_for, CalibrationView, SkillStats,
-};
+pub use symbio_sdk::projection::calibration::calibration_for;
 pub use symbio_sdk::projection::cost::cost_ledger;
 pub use symbio_sdk::projection::readyset::{readyset_for, ReadySetView};
 pub use symbio_sdk::projection::task_vocab::TaskVocab;

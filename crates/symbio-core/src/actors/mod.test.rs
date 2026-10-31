@@ -1523,7 +1523,7 @@ fn cost_ledger_accumulates_per_principal() {
 //
 // 定时触发的**授权面**（出口判据「自主写入对话 0」，DE-042）留在这里；
 // 触发、长目标预算、欲治理与技能编译 / 路由的实现和用例随唯一消费方住
-// `crates/symbio-plugin-session/src/transcript/autonomous` 与 `crates/symbio-plugin-loop/src/skill_events`（D-189）。
+// `crates/symbio-plugin-session/src/transcript/autonomous` 与 `crates/symbio-plugin-skill`（D-189 / D-262）。
 
 /// DE-042 §6 验收 2：自主发起者尝试写 `chat.assistant.final` → 授权拒绝且不产生事件。
 ///

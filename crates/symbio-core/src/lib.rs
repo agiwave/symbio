@@ -120,7 +120,7 @@ pub use store::EventStore;
 pub use agent::{agent_perms_init_slot, agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 // 跨域 actor 策略（D-189 / D-190）：`EliminationDecider` 的写侧裁决在 loop 轮末、
 // 读侧翻译（`verdict_grants_changes`）在 session 工具层——配对映射跨两个 owner，
-// 留 core（判据见 D-187 第 1 条 / D-190）。`SKILL_TAG` 是 loop 写、session 读的
+// 留 core（判据见 D-187 第 1 条 / D-190）。`SKILL_TAG` 是技能能力包写、session 读的
 // 共享词汇（D-177）。
 // 单消费方策略（调度 / 技能编译与路由 / 检索 Translator / 自主层与意欲闸门 /
 // 抢占判定 / 外部执行闸门）归 owner 插件，不再经此处出根。
@@ -256,7 +256,7 @@ pub use authz::{
     PRINCIPAL_REFLEX, PRINCIPAL_SCHEDULER, PRINCIPAL_USER,
 };
 // 行名 / 属主。四个名字的消费方**不同类**，别当成一组：
-// - `SESSION_OWNER`：**生产**消费方三处（`loop` 的 `memory_events` / `skill_events`、
+// - `SESSION_OWNER`：**生产**消费方两处（`loop` 的 `memory_events`、
 //   `session` 的 `stats`）；
 // - `PRINCIPAL_ARBITER` / `PRINCIPAL_WORKER`：只有 core 外测试点名
 //   （`derived_facts.test.rs` / `autonomous.test.rs`）；

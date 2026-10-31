@@ -14,7 +14,7 @@
 //! ## 本域只装「必须留在核内」的策略
 //!
 //! 单消费方的策略实现归 owner 插件（D-189 / D-190）：调度在 `crates/symbio-plugin-loop/src/task_events`、
-//! 技能编译与路由在 `crates/symbio-plugin-loop/src/skill_events`、检索 Translator 在
+//! 技能编译与路由在 `crates/symbio-plugin-skill`（D-262）、检索 Translator 在
 //! `crates/symbio-plugin-loop/src/memory_events`、自主层与意欲闸门在 `crates/symbio-plugin-session/src/transcript/autonomous`；
 //! 抢占判定在 `crates/symbio-plugin-session/src/transcript/inbox`、外部执行闸门在
 //! `crates/symbio-plugin-loop/src/tools/dispatch/gates`。
@@ -28,7 +28,7 @@
 //! - `spec`：`ActorSpec` 的数据面在 `symbio_kernel`，读本机部署表的动作（模式派生 /
 //!   能力位判定）留宿主（D-188）。
 //!
-//! `SKILL_TAG` 是 loop 写、session 读的共享词汇，按 D-177 / D-182 留在本域。
+//! `SKILL_TAG` 是技能能力包写、session 读的共享词汇，按 D-177 / D-182 留在本域。
 
 mod commitment;
 mod control;
