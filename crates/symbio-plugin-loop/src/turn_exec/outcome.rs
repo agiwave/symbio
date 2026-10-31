@@ -75,7 +75,7 @@ pub(crate) struct Settled<'b> {
     /// 借自调用方的本轮状态（[`super::super::chat_loop::state::TurnState`]），
     /// 与 [`Running`] 的寿命无关：环收工之后调用方才交得出来（`D-222` 裁决 5 的
     /// 「按步借、按步还」——环里那份借用已经还回去了）。
-    pub(crate) recalled: Option<&'b super::super::recall::RecallView>,
+    pub(crate) recalled: Option<&'b symbio_plugin_api::retrieval::Retrieval>,
     pub(crate) child_id: String,
     pub(crate) reasoning_child_id: String,
     pub(crate) reasoning_text: String,
@@ -84,7 +84,7 @@ pub(crate) struct Settled<'b> {
 /// 一轮的执行之三：结局归类——消费 [`Running`]，产 [`Classified`]。
 pub(crate) async fn classify_turn<'b>(
     r: Running,
-    recalled: Option<&'b super::super::recall::RecallView>,
+    recalled: Option<&'b symbio_plugin_api::retrieval::Retrieval>,
 ) -> Result<Classified<'b>, TurnExecExit> {
     let Running {
         session,

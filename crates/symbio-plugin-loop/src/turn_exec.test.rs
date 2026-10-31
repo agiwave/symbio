@@ -188,7 +188,7 @@ struct ExecTurn<'a> {
     drive_seq: u64,
     window_turns: u64,
     tools: &'a [CapabilityMeta],
-    recalled: Option<&'a super::super::recall::RecallView>,
+    recalled: Option<&'a symbio_plugin_api::retrieval::Retrieval>,
     /// 快路作答的正文：生产里由技能行的 `RowStep::Answer` 让宿主经
     /// `TurnSession::set_reflex` 寄进草稿（D-260）。夹具在同一处模拟那一半。
     reflex_text: Option<&'a str>,

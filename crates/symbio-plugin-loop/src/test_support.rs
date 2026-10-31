@@ -193,3 +193,202 @@ pub(crate) fn loop_session(
 ) -> LoopSession {
     LoopSession::new(spec, Some(facts as Arc<dyn Store<Event = Event>>), port)
 }
+
+// ==================== 能力包替身：`memory.live`（DE-026 D-268）====================
+//
+// ## 为什么需要它
+//
+// 巩固读的是**能力包交的声明视图** `memory.live`（记忆一个所有者，D-267）。本插件的
+// 单测二进制**不链接**那个包（E-009：插件之间连测试也不许有兄弟边），于是：
+//
+// - `seal` 的 `OrphanFact` 会为 `memory.consolidated` / `memory.forgotten` 报红
+//   （它们的形状住本插件，归宿行住能力包）；
+// - `read_shared_view_all("memory.live")` 会返回 `Unknown`，巩固整条路径不可达。
+//
+// 所以本二进制交一份**替身声明**：名字、形状与求值与能力包逐字同构。这与
+// `loop_rows.test.rs` 的 `task_capability_fixture` 同一个先例（子集二进制只需要
+// 「这一格有居民」，不需要那个 crate 的任何符号）。
+//
+// ## 替身不是第二份实现
+//
+// 折叠的**判据**住能力包（`crates/symbio-plugin-memory/src/recall/live.rs`），由它的
+// 用例钉；这里只保证「形状对、读数对得上」。两处若漂移，能力包的用例不会红——
+// 但 e2e 会（真实装配里跑的是能力包那份）。所以本替身的价值是「让 loop 的巩固用例
+// 可跑」，不是「证明折叠对」。
+
+/// 替身视图的求值：与能力包 `recall::live` 同形的折叠（新近在前，排除式遗忘）。
+fn memory_live_fixture(events: &[Event], now: i64) -> Value {
+    use symbio_core::Entity;
+    let mut live: Vec<(u64, i64, String, String)> = Vec::new();
+    let mut forgotten: Vec<u64> = Vec::new();
+    for e in events {
+        if e.ts > now || e.entity != Entity::Memory {
+            continue;
+        }
+        match e.kind.as_str() {
+            symbio_plugin_api::events::EVENT_MEMORY_ENCODED
+            | symbio_plugin_api::events::EVENT_MEMORY_CONSOLIDATED => {
+                if e.actor != symbio_core::PRINCIPAL_USER {
+                    continue;
+                }
+                live.push((
+                    e.seq.map(|s| s.value()).unwrap_or(u64::MAX),
+                    e.ts,
+                    e.payload
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    e.payload
+                        .get("tag")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                ));
+            }
+            symbio_plugin_api::events::EVENT_MEMORY_FORGOTTEN => {
+                if let Some(target) = e.produced_by {
+                    forgotten.push(target);
+                }
+            }
+            _ => {}
+        }
+    }
+    live.retain(|(seq, ..)| !forgotten.contains(seq));
+    live.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.cmp(&a.0)));
+    Value::Array(
+        live.into_iter()
+            .map(|(seq, ts, content, tag)| {
+                serde_json::json!({ "seq": seq, "ts": ts, "content": content, "tag": tag })
+            })
+            .collect(),
+    )
+}
+
+/// 记忆族的三张归宿行（生产上住 `symbio-plugin-memory` 的 `episodic::decl::ROWS`）。
+const MEMORY_SINK_ROWS: &[symbio_plugin_api::ring::Decl] = &[
+    // 三行同形：有即闭合（`owes` 与 `until` 同一个源、空键、空 eq）。
+    symbio_plugin_api::ring::Decl {
+        name: symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
+        prio: 200,
+        by: None,
+        tier: symbio_plugin_api::LatencyTier::Reflex,
+        expand: None,
+        owes: symbio_plugin_api::ring::Pattern {
+            source: symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
+            key: &[],
+            eq: &[],
+        },
+        until: &[symbio_plugin_api::ring::Pattern {
+            source: symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
+            key: &[],
+            eq: &[],
+        }],
+        unless: &[],
+    },
+    symbio_plugin_api::ring::Decl {
+        name: symbio_plugin_api::events::EVENT_MEMORY_CONSOLIDATED,
+        prio: 200,
+        by: None,
+        tier: symbio_plugin_api::LatencyTier::Reflex,
+        expand: None,
+        owes: symbio_plugin_api::ring::Pattern {
+            source: symbio_plugin_api::events::EVENT_MEMORY_CONSOLIDATED,
+            key: &[],
+            eq: &[],
+        },
+        until: &[symbio_plugin_api::ring::Pattern {
+            source: symbio_plugin_api::events::EVENT_MEMORY_CONSOLIDATED,
+            key: &[],
+            eq: &[],
+        }],
+        unless: &[],
+    },
+    symbio_plugin_api::ring::Decl {
+        name: symbio_plugin_api::events::EVENT_MEMORY_FORGOTTEN,
+        prio: 200,
+        by: None,
+        tier: symbio_plugin_api::LatencyTier::Reflex,
+        expand: None,
+        owes: symbio_plugin_api::ring::Pattern {
+            source: symbio_plugin_api::events::EVENT_MEMORY_FORGOTTEN,
+            key: &[],
+            eq: &[],
+        },
+        until: &[symbio_plugin_api::ring::Pattern {
+            source: symbio_plugin_api::events::EVENT_MEMORY_FORGOTTEN,
+            key: &[],
+            eq: &[],
+        }],
+        unless: &[],
+    },
+];
+
+fn memory_capability_fixture() -> symbio_plugin_api::PluginDeclarations<'static> {
+    use symbio_plugin_api::events::{
+        EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
+    };
+    const FACTS: &[symbio_plugin_api::FactDecl] = &[
+        symbio_plugin_api::FactDecl {
+            name: EVENT_MEMORY_ENCODED,
+            port: None,
+            key: &[],
+            expand: &[],
+            fields: &[
+                "content",
+                "tag",
+                "generation",
+                "vis_scope",
+                "skill_id",
+                "trigger",
+            ],
+        },
+        symbio_plugin_api::FactDecl {
+            name: EVENT_MEMORY_CONSOLIDATED,
+            port: None,
+            key: &[],
+            expand: &[],
+            fields: &[
+                "content",
+                "tag",
+                "generation",
+                "fidelity",
+                "sources",
+                "vis_scope",
+            ],
+        },
+        symbio_plugin_api::FactDecl {
+            name: EVENT_MEMORY_FORGOTTEN,
+            port: None,
+            key: &[],
+            expand: &[],
+            fields: &["why", "into"],
+        },
+    ];
+    const VIEWS: &[symbio_plugin_api::ViewDecl] = &[symbio_plugin_api::ViewDecl {
+        name: "memory.live",
+        ver: 1,
+        reads: &[
+            (EVENT_MEMORY_ENCODED, "content"),
+            (EVENT_MEMORY_ENCODED, "tag"),
+            (EVENT_MEMORY_CONSOLIDATED, "content"),
+            (EVENT_MEMORY_CONSOLIDATED, "tag"),
+        ],
+        evidence: &[],
+        cost: 4096,
+        eval: memory_live_fixture,
+    }];
+    symbio_plugin_api::PluginDeclarations {
+        events: &[],
+        facts: FACTS,
+        views: VIEWS,
+        ports: &[],
+        actors: Vec::new(),
+        rows: MEMORY_SINK_ROWS,
+    }
+}
+
+symbio_plugin_api::submit_declarations!(
+    "crates/symbio-plugin-loop-test-harness-memory",
+    memory_capability_fixture
+);

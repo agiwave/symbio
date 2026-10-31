@@ -26,7 +26,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 | 批 | 名册行 | 能力 | 今天在 loop 的样子 | 迁出后的形状 |
 |---|---|---|---|---|
 | L1 | 1 / 16 | 工作记忆 + 规划与重规划 | 轮首装配与计划寄存在本轮状态里 | 段走 I-2，跨步状态与计划走 I-1 / I-4 |
-| L2 | 2 / 3 / 6 | 情景 / 语义 / 长期记忆检索 | #2 已落（L2a，D-263：编码 = 收束贡献，随 `symbio-plugin-memory` 的 `episodic` 子模块，D-267）；#3 / #6 待迁：`memory_events` 读侧 / `recall`（程序记忆 #4 已随 L3b 迁出） | 与 #2 同包（`symbio-plugin-memory`，D-267）；检索段走 I-2，折叠名字读 |
+| L2 | 2 / 3 / 6 | 情景 / 语义 / 长期记忆检索 | #2 已落（L2a，D-263：编码 = 收束贡献，随 `symbio-plugin-memory` 的 `episodic` 子模块，D-267）；#6 已落（L2b，D-264 / D-270：检索面 + 折叠 + 注入段 + `memory.live` 全进同包 `recall` 子模块）；#3 待迁（L2c：`memory_events` 的 `memory.recalled` 写口与召回事实）；程序记忆 #4 已随 L3b 迁出 | 与 #2 同包（`symbio-plugin-memory`，D-267）；检索段走 I-2，折叠名字读 |
 | L3a | 26 | 独立验证与返工 | `task_events` + 任务表写侧判断 + 收束时调度 + 就绪段 | `symbio-plugin-task`：写侧走 I-1（效果端口 + `before`），就绪段走 I-2（provider），收束时调度走收束贡献（D-250）；`rework_bounded` 不变量留核 |
 | L3b | 24 / 25 / 4 | 技能编译 + 反自动化回退 + 程序记忆 | `SkillCompiler` / `SkillRouter`（原 `skill_events`） | 已落 `symbio-plugin-skill`（D-262）：`skill.recall` 行执行体（命中交 `RowStep::Answer`，摘行走 `skill.retreat` 名字读）+ 轮末收束贡献（编译）；两行同一实现、同包 |
 | L4 | 8 | 副作用分级 | `breaker` | `before` 交拒绝（I-3），状态随包 |
@@ -50,7 +50,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 | L2a 情景记忆编码 | 已落 | `crates/symbio-plugin-memory` 的 `episodic` 子模块（D-263 / D-267） |
 | L3a 独立验证与返工 | 已落 | `crates/symbio-plugin-task` |
 | L3b 技能编译 / 反自动化回退 / 程序记忆 | 已落 | `crates/symbio-plugin-skill`（D-262） |
-| L2b 长期记忆检索 | 设计已定（D-264 / D-268），未起：纯迁移，补件已落 | `crates/symbio-plugin-memory` 的 `recall` 子模块 |
+| L2b 长期记忆检索 | 已落 | `crates/symbio-plugin-memory` 的 `recall` 子模块（D-264 / D-270）：`live.rs` 折叠、`score.rs` 排序内核、`section.rs` 注入段、`mod.rs` 的 `RecallRetrieval`、`provider.rs` 的 `RecallProvider`、`decl.rs` 的 `memory.live`；loop 侧只剩 `visible_slice` 与写口 |
 | L2c 语义记忆 | 设计已定（D-264），未起 | `crates/symbio-plugin-memory` 的 `semantic` 子模块 |
 | L1 / L4 / L5 / L6 / L7 | 未起（L4 还缺一条 `### D-NNN`：`breaker` 的判据要读授权矩阵与成本台账，两样都在 core，先裁「谁读、怎么读」再动手） | — |
 | L8 多轮对话 | 不迁（D-222 留环） | — |
@@ -71,10 +71,14 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
    `recall_view` / `prompt_section` 的口径（新近序、查询语义维、跨会话只扫一层、
    降级措辞、同文去重、排除式遗忘）。它们随能力一起搬，不能删——那 15 条就是
    D-264 四条口径的验收，删掉等于把验收一起搬没了。
-4. **`memory.live` 的两块事实形状 —— 已裁决（D-268）**：`memory.consolidated` /
-   `memory.forgotten` 今天没有 `FactDecl`，而 `ViewDecl.reads` 只认已登记字段。写方仍在
-   `loop` ⇒ 形状随写方走，补在 `control_decl` 的 `FACTS` 里。它是**同一批的声明面**，
-   不是前置补件。
+4. **`memory.live` 的两块事实形状 —— 已裁决（`D-268` 第 3 条），落地时订正（`D-270`）**：
+   `memory.consolidated` / `memory.forgotten` 今天没有 `FactDecl`，而 `ViewDecl.reads` 只认
+   已登记字段。`D-268` 原判「形状随写方走，补在 `control_decl` 的 `FACTS` 里」——**实测
+   不成立**：`OrphanFact` 要求形状至少被一行**直接或经视图**读到，而 `ROWS` 在能力包，
+   loop 的私有小世界（`loop_rows::tests`）里没有任何行读它，58 项当场红；反过来把形状留
+   宿主，包内 `memory.live` 的 `reads` 报 `UnknownFact`（`E-009`）。`D-270` 因此改判：
+   **形状随事实词汇的 owner 走，不随写方走**——两张形状与归宿行同住能力包。它是**同一批
+   的声明面**，不是前置补件。
 5. **`memory.forgotten` 的排除边读信封字段 —— 已裁决（D-268）**：`produced_by` 在信封上，
    `reads` 只收 `(事实名, 载荷字段)` ⇒ 依赖图少一条边。读数不受影响（折叠拿的是完整
    `&[Event]`），缺口登记在 D-268「一处登记在案的缺口」里。不开 `reads` 的口子。

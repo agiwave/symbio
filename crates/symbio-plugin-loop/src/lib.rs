@@ -25,10 +25,8 @@ mod port;
 // `memory_events`，判定跟着调用方走。
 mod projections;
 mod provider;
-// 记忆检索的读侧：`recall` 投影与它的排序内核（DE-024 D-201：随唯一生产消费方从 core
-// 的 `projection/` 搬进来——core 不再按 `memory.consolidated` / `memory.forgotten` 读事实）。
-mod recall;
-mod recall_score;
+// 记忆检索（`recall` 投影与排序内核）自 L2b 起住 `crates/symbio-plugin-memory` 的
+// `recall` 子模块（DE-026 D-264）：控制面只留可见域收放（`memory_events`）与读口。
 // 轮中汇报那一行的落点与能力口（DE-015 的 D-163）。
 mod report_exec;
 mod session_port;

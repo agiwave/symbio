@@ -70,13 +70,19 @@
 //! - [`episodic`]：**事件形态**的记忆——轮末两条编码（经验 / 判断）经收束贡献落格
 //!   （名册第 2 行，DE-026 D-263）。它与上面两腿是同一个所有者的第三种载体：
 //!   文件形态能被人手改，事件形态只能被轮末写，两者都叫「记忆」，不该有两个 crate。
+//! - [`recall`]：**检索**（名册第 6 行，DE-026 D-264）——轮首检索面（`Retriever`）、
+//!   活集折叠与它的声明视图 `memory.live`、召回段的排版与 provider。它读的是
+//!   `episodic` 落下的格子：同一份记忆的写与读在同一个所有者手里。
+//! - [`decl`]：本插件交出的全部声明（一个 owner 一次提交，两个能力模块各交几张）。
 
 mod config;
+mod decl;
 mod episodic;
 // 智能体腿实现与插件同名：memory 插件 = 智能体记忆（`memory`）+ 工作区记忆（`workspace`），
 // 两个作用域腿模块并列，先例见 `crates/symbio-plugin-composite/src/composite.rs`
 #[allow(clippy::module_inception)]
 mod memory;
 mod plugin;
+mod recall;
 mod vdfs;
 mod workspace;

@@ -21,7 +21,8 @@
 //! | [`contributor`] | 收束贡献：两条编码与同文去重 |
 //!
 //! 读侧（召回、巩固、遗忘）仍在 `crates/symbio-plugin-loop`——那是控制面的
-//! 行与投影，名册里另计（#3 / #6 待迁）。
+//! 行与过程。检索读侧（名册 #6）自 L2b 起已搬回本 crate 的 [`crate::recall`]；
+//! 巩固留控制面（D-268），它按名字读本包交的声明视图 `memory.live`。
 
 mod contributor;
-mod decl;
+pub(crate) mod decl;

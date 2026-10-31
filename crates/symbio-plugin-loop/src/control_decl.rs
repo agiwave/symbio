@@ -140,8 +140,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Turn, Verb::Asserted)),
     // 记忆找回：行表与事实表已经在用这个名字。
     EventDecl::new(EVENT_MEMORY_RECALLED, (Entity::Memory, Verb::Asserted)),
-    // 巩固与遗忘的两格：写方 `memory_events::consolidate`、读方 [`crate::recall`]
-    // 都在本插件，格位由本插件交出（DE-024 D-201）；名字自 DE-026 D-263 起进清单
+    // 巩固与遗忘的两格：写方 `memory_events::consolidate` 在本插件，读方是能力包的
+    // 活集折叠（`memory.live`，D-268）；格位由本插件交出（DE-024 D-201）；名字进清单
     // `shared_events`——情景记忆能力包的编码去重读这一活集。同族的 `memory.encoded`
     // 同理共享（`session` 也读它，DE-024 D-204），不回内核。`memory.calibrated` 已随
     // 技能能力迁出，格位与写方都在那个能力包（D-262）。
@@ -390,6 +390,11 @@ pub(crate) const FACTS: &[FactDecl] = &[
             "turn_id",
         ],
     },
+    // 巩固与遗忘的两格形状**不在本表**：它们随活集折叠住能力包
+    // （`crates/symbio-plugin-memory/src/episodic/decl.rs`，DE-026 D-270 订正 D-268 第 3 条）。
+    // 判据是装载期的一条硬约束：`seal` 的 `OrphanFact` 要求每条声明的事实有归宿行，
+    // 而归宿行随记忆族一起住能力包 ⇒ 形状若留在本表，本插件自己那张行表
+    // （`load(ROWS)`，不含能力包）就装载不起来。名字与格位仍在本插件的 `EVENTS`。
 ];
 
 fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {

@@ -269,7 +269,7 @@ pub(crate) fn record_learning(
     turn: u64,
     user_seq: u64,
     principal: &str,
-    recalled: Option<&super::recall::RecallView>,
+    recalled: Option<&symbio_plugin_api::retrieval::Retrieval>,
     now: i64,
 ) {
     let remember = |step: &str, why: String| {

@@ -20,16 +20,14 @@
 
 use super::{record_derived, record_elimination, record_learning};
 use crate::control_decl::guard_vocab;
-use symbio_core::{
-    check_all, Budget, Entity, Event, EventEnvelope as _, EventStore, Seq, Store, Verb,
-};
+use symbio_core::{check_all, Entity, Event, EventEnvelope as _, EventStore, Seq, Store, Verb};
 use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 
-use super::super::recall::recall;
 use crate::control_decl::{
     COMMITMENT_VOCAB, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
+use symbio_plugin_api::retrieval::{Retrieval, Retrieved};
 
 /// 播下「本轮开口 + 收束」两格，返回 `(snapshot, user_seq)`。
 ///
@@ -472,10 +470,34 @@ fn record_learning_wires_retrieval_and_consolidation() {
         "最旧的两条源记忆被排除式遗忘（Log 不删，只是投影不再包含）"
     );
 
-    // 检索：视图在收束前读出，收束时才落成事实（溯源锚那时才存在）。
-    let view = recall(symbio_core::PRINCIPAL_USER, None, None)
-        .apply(&snap, i64::MAX, Budget::generous())
-        .value;
+    // 检索：读数在收束前取出，收束时才落成事实（溯源锚那时才存在）。
+    //
+    // 读数由能力包的检索面给（本二进制不链接它，E-009 连测试一起判）：这里从活集
+    // 直接构造一份**同形**的值——本用例判的是 `record_learning` 的接线，不是检索本身。
+    let view = Retrieval {
+        degraded: false,
+        entries: snap
+            .iter()
+            .filter(|e| {
+                e.entity == Entity::Memory && e.kind == crate::control_decl::EVENT_MEMORY_ENCODED
+            })
+            .map(|e| Retrieved {
+                seq: e.seq().map(|s| s.value()).unwrap_or(0),
+                content: e
+                    .payload
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                tag: e
+                    .payload
+                    .get("tag")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            })
+            .collect(),
+    };
     assert!(!view.entries.is_empty(), "还有活记忆可召回");
 
     let (_, user_seq) = seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 4, "第五句", 44);

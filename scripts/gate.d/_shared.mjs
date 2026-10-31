@@ -240,7 +240,19 @@ export const BASELINE = {
   // 23 + `tool_executor.test.rs` 2 条写侧闸 + `providers.test.rs` 1 条调度段），角色居住由测试
   // 二进制的声明替身满足。判据没有丢：同一批断言随能力一起搬家，只换了 executor 与测试二进制。
   // 非侵蚀。
-  ciRustTestsTotal: 2457,
+  // baseline-allow ciRustTestsTotal: L2b 长期记忆检索迁出净 +2（2457 → 2459）——同一次
+  // 搬家的两端：**+19 新增**（`crates/symbio-plugin-memory/src/recall/` 四份测试：折叠
+  // `live.test.rs` 6、检索面 `mod.test.rs` 7、注入段 `section.test.rs` 3、provider 3）；
+  // **−17 删除**（loop 的 `recall.test.rs` 整文件 11、`context/providers.test.rs` 7→3 减 4、
+  // `memory_events.test.rs` 20→18 减 2）。逐条归属：`recall.test.rs` 的 11 条里，7 条
+  // 排序/配额判据在 `mod.test.rs` 原样重落，3 条标签过滤随 `tag` 退出检索面而退役——
+  // 判据没有丢，换成折叠层的 `every_tag_stays_in_the_live_set_so_the_reader_picks`
+  // （「折叠不丢任何一条 ⇒ 读方换标签即换一批」正是那三条要钉的机制面）；as-of / 归属人 /
+  // 反向锚 3 条进 `live.test.rs`。`providers.test.rs` 的 4 条是 `RecallProvider` 的渲染
+  // 判据，随 provider 进 `recall/provider.test.rs`（3 条，合并了「不渲染空读数」与
+  // 「按 owner 交段」）。`memory_events.test.rs` 的 2 条是 `prompt_section` 的排版判据，
+  // 搬进 `recall/section.test.rs`（同名）。不是判据退役，是判据随能力搬家。非侵蚀。
+  ciRustTestsTotal: 2459,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

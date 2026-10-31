@@ -760,7 +760,7 @@ async fn close_stage(
 /// `Settled` 还带着那个借用——收在一处，借用在返回前结束。
 async fn classify_and_persist(
     running: Running,
-    recalled: Option<&super::super::recall::RecallView>,
+    recalled: Option<&symbio_plugin_api::retrieval::Retrieval>,
 ) -> Result<super::ExecTurnResult, TurnExecExit> {
     match classify_turn(running, recalled).await? {
         super::Classified::Finished(v) => v,

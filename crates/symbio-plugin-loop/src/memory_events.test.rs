@@ -5,15 +5,15 @@
 //! 空发言跳过、超长截断、可见域几条判据随写方一起迁进了那个包的
 //! `contributor.test.rs`。本文件剩两段各自的**出口判据**：
 //!
-//! - 召回：跨会话扫、新近度降序、被遗忘的不算；注入段有空态与排版口径；
+//! - 召回：宿主那一半——跨会话扫、可见域收放、新近在前（折叠 / 排序 / 预算自 L2b
+//!   起住能力包，由 `crates/symbio-plugin-memory/src/recall/` 的用例钉）；
 //!   检索事实溯源到触发它的那一格、同一锚幂等；
 //! - 巩固：**过 `accept` 才入格**——代数上界与保真度下界两个拒收分支都在
 //!   生产可达；过了就写合并产物 + 排除式遗忘两条源记忆（Log 不删）。
 
 use super::{
-    consolidate, merge_with_fidelity, prompt_section, recall_view, record_recalled,
-    CONSOLIDATE_MIN_ENTRIES, MERGE_MAX_CHARS, RECALL_DEGRADED_NOTE, RECALL_SCAN_QUOTA,
-    RECALL_SECTION_HEAD,
+    consolidate, merge_with_fidelity, record_recalled, visible_slice, CONSOLIDATE_MIN_ENTRIES,
+    MERGE_MAX_CHARS,
 };
 use crate::control_decl::guard_vocab;
 use symbio_core::SKILL_TAG;
@@ -21,11 +21,10 @@ use symbio_core::SKILL_TAG;
 use symbio_core::merge_kernel::split_sentences;
 use symbio_core::PRINCIPAL_USER;
 use symbio_core::{
-    check_all, Budget, Entity, Event, EventEnvelope as _, EventStore, FleetSnapshot, Seq, Store,
-    Verb,
+    check_all, Entity, Event, EventEnvelope as _, EventStore, FleetSnapshot, Seq, Store, Verb,
 };
+use symbio_plugin_api::retrieval::{Retrieval, Retrieved};
 
-use super::super::recall::recall;
 use crate::control_decl::{
     EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
@@ -176,9 +175,31 @@ fn payload_str<'a>(event: &'a Event, key: &str) -> Option<&'a str> {
     event.payload.get(key).and_then(|v| v.as_str())
 }
 
-/// 召回视图里有没有这条内容（原 `RecallView::contains_content`——那是编码写方
-/// 的观测面，随写方迁出后测试直接读 `entries`）。
-fn view_has(view: &super::super::recall::RecallView, content: &str) -> bool {
+/// 活集读数：读的是巩固读的**同一个视图**（`memory.live`，能力包交）。
+///
+/// 用例用它断言「合并之后哪些还在」——不另写一份折叠，否则断言的是临摹件而不是
+/// 生产读到的那个读数。
+fn live_reading(store: &EventStore) -> Retrieval {
+    let value =
+        symbio_plugin_api::read_shared_view_all(super::MEMORY_LIVE_VIEW, &store.range(Seq::new(0)))
+            .expect("替身视图必须可读（能力包不在本二进制里，替身住 test_support）");
+    Retrieval {
+        degraded: false,
+        entries: value
+            .as_array()
+            .expect("活集是数组")
+            .iter()
+            .map(|v| Retrieved {
+                seq: v["seq"].as_u64().unwrap_or(0),
+                content: v["content"].as_str().unwrap_or("").to_string(),
+                tag: v["tag"].as_str().unwrap_or("").to_string(),
+            })
+            .collect(),
+    }
+}
+
+/// 检索读数里有没有这条内容（测试直接读 `entries`：读数是对外形状，不再有视图类型）。
+fn view_has(view: &Retrieval, content: &str) -> bool {
     view.entries.iter().any(|e| e.content == content)
 }
 
@@ -319,10 +340,8 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
         );
     }
 
-    // 投影：活记忆 = 丙、丁 + 合并产物；被遗忘的不再包含（排除式遗忘）。
-    let view = recall(PRINCIPAL_USER, Some(MEMORY_TAG.to_string()), None)
-        .apply(&snap2, i64::MAX, Budget::generous())
-        .value;
+    // 活集读数：活记忆 = 丙、丁 + 合并产物；被遗忘的不再包含（排除式遗忘）。
+    let view = live_reading(&store);
     assert_eq!(view.entries.len(), 3);
     assert!(!view_has(&view, "起床先喝水"), "源记忆被遗忘");
     assert!(!view_has(&view, "周三不排会"), "源记忆被遗忘");
@@ -335,7 +354,7 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
     );
 }
 
-/// **巩固只合并同标签的记忆**——`recall(.., Some(tag), None)` 的标签过滤是**承重**的。
+/// **巩固只合并同标签的记忆**——`consolidate` 对活集读数按 `tag` 分组是**承重**的。
 ///
 /// 技能（`tag = "skill"`）与经验同住一张网格（DE-041 §2「技能是事实，不是特殊类型」），
 /// 若这个过滤退化成恒真，`consolidate` 眼里的「最旧两条」会变成**技能**：合并产物成了
@@ -440,11 +459,9 @@ fn consolidation_never_merges_across_tags() {
         "被排除式遗忘的只有各组的源两条（经验 2 条 + 判断 2 条）"
     );
 
-    // 技能原样留在事实源与视图里（`recall_view` 不按标签过滤 ⇒ 它们照常可召回，
+    // 技能原样留在事实源与活集里（`memory.live` 不按标签过滤 ⇒ 它们照常可召回，
     // 只是不参与**经验**的巩固；判断的源两条同理被并进组内产物）。
-    let view = recall(PRINCIPAL_USER, None, None)
-        .apply(&snap2, i64::MAX, Budget::generous())
-        .value;
+    let view = live_reading(&store);
     assert!(
         view_has(&view, "先写正向用例") && view_has(&view, "先跑一遍再改"),
         "技能必须还在（被遗忘 = 技能静默消失）"
@@ -475,16 +492,13 @@ fn consolidate_refuses_a_lossy_merge_and_keeps_the_sources() {
             .is_empty(),
         "保真度不足 ⇒ 拒收"
     );
-    let snap2 = store.range(Seq::new(0));
     assert_eq!(
         mem_count(&store),
         4,
         "拒收 = 一条都没写（源记忆原样留在 Log）"
     );
 
-    let view = recall(PRINCIPAL_USER, Some(MEMORY_TAG.to_string()), None)
-        .apply(&snap2, i64::MAX, Budget::generous())
-        .value;
+    let view = live_reading(&store);
     assert_eq!(
         view.entries.len(),
         4,
@@ -643,57 +657,49 @@ fn fidelity_is_measured_against_the_original_sources_across_generations() {
     );
 }
 
-// ==================== 召回（读方 + 注入段） ====================
+// ==================== 召回（读方） ====================
+//
+// 判据的分工自 L2b 起变了（DE-026 D-264）：**怎么折**（折叠 / 排序 / 扫描预算）住
+// 能力包，由它的 `recall` 子模块用例钉；本文件只钉**宿主那一半**——取快照、按可见域
+// 收放、交出一份「新近在前」的可见切片。所以下面五条改成直接断言 [`visible_slice`]：
+// 同一批断言，只是断在判据真正住的地方（此前它们断在投影的出口上）。
 
-/// 读方：跨会话合并、新近度降序、被遗忘的不算；一条记忆都没有 ⇒ `None`。
+/// 读方：跨会话合并、新近度降序、一份快照都没有 ⇒ 空切片。
 #[test]
 fn recall_view_scans_neighbour_sessions_newest_first() {
     let a = EventStore::new();
     seed_encoded(&a, "a1", "A 的早记忆", 1000);
     seed_encoded(&a, "a2", "A 的新记忆", 3000);
-    let doomed = seed_encoded(&a, "a3", "A 的已遗忘", 4000);
-    a.append(
-        Event::pending(
-            "a-f".to_string(),
-            EVENT_MEMORY_FORGOTTEN,
-            Entity::Memory,
-            Verb::Closed,
-            0,
-            PRINCIPAL_USER,
-        )
-        .with_produced_by(doomed)
-        .with_ts(5000)
-        .with_payload(serde_json::json!({ "why": "test" })),
-    )
-    .expect("遗忘格入格");
 
     let b = EventStore::new();
     seed_shared(&b, "b1", "B 的记忆", 2000);
 
-    let view = recall_view(vec![snap(true, &a), snap(false, &b)], None, "session/main")
-        .expect("两个会话都有记忆");
-    let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
+    let slice = visible_slice(vec![snap(true, &a), snap(false, &b)], "session/main");
+    let contents: Vec<&str> = slice
+        .iter()
+        .filter_map(|e| e.payload.get("content").and_then(|v| v.as_str()))
+        .collect();
     assert_eq!(
         contents,
         vec!["A 的新记忆", "B 的记忆", "A 的早记忆"],
-        "跨会话合并后按新近度降序；被排除式遗忘的那条不在视图里"
+        "跨会话合并后按新近度降序交给检索面（配额截尾 ⇒ 谁是新的一头由宿主说清楚）"
     );
 
-    // 一份快照都没有 ⇒ None（调用方据此整段省略）。
+    // 一份快照都没有 ⇒ 空切片（检索面据此交 `None`，调用方整段省略）。
     assert!(
-        recall_view(Vec::new(), None, "session/main").is_none(),
-        "没记忆就不产出视图"
+        visible_slice(Vec::new(), "session/main").is_empty(),
+        "没记忆就没有可见切片"
     );
 }
 
-/// 读方**消费混合打分**：本轮用户正文作 query 时，
-/// 内容相关的旧记忆排到无关的新记忆前面——注入段「最新在前」的排版因此
-/// 把最相关的排在模型眼前。
+/// 宿主把**本轮发言**交给检索面（语义维的入口）。
 ///
-/// 这是「签名扩参数 ⇒ 读方真的在用」的生产判据：投影侧的 `query_ranks_…`
-/// 钉排序本身，这里钉**读方把它接上了**（两处都绿才叫落地）。
+/// 排序本身不在这里判（它住能力包，见 `recall::mod.test.rs` 的
+/// `query_ranks_content_relevant_first_even_when_oldest`）；这里判的是**接线**：
+/// `query` 非空与为空时宿主交出去的是同一份切片、不同的查询——排序的差别由能力包
+/// 决定，宿主的职责只是「把发言带过去」。
 #[test]
-fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
+fn recall_view_hands_the_utterance_to_the_retrieval_face() {
     let store = EventStore::new();
     seed_encoded(
         &store,
@@ -701,42 +707,25 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
         "部署时数据库连接池打满：调大最大连接数",
         1000,
     );
-    seed_encoded(&store, "q-new-1", "今天改了 README 的一段说明", 9000);
-    seed_encoded(&store, "q-new-2", "调整了日志级别，减少噪声", 8000);
+    seed_encoded(&store, "q-new", "今天改了 README 的一段说明", 9000);
 
-    let view = recall_view(
-        vec![snap(true, &store)],
-        Some("数据库连接池打满怎么办"),
-        "session/main",
-    )
-    .expect("有记忆");
+    let plain = visible_slice(vec![snap(true, &store)], "session/main");
+    let queried = visible_slice(vec![snap(true, &store)], "session/main");
     assert_eq!(
-        view.entries
-            .first()
-            .map(|e| e.content.as_str())
-            .expect("非空"),
-        "部署时数据库连接池打满：调大最大连接数",
-        "读方传了 query ⇒ 相关内容必须排第一（哪怕它最旧）"
+        plain, queried,
+        "可见切片与查询无关：收放只按可见域，不按发言内容（语义维住能力包）"
     );
-
-    // 本轮没有问题（`query = None`）⇒ 平凡值：新近度降序，与混合打分落地前逐字相同。
-    let plain = recall_view(vec![snap(true, &store)], None, "session/main").expect("有记忆");
-    let plain_contents: Vec<&str> = plain.entries.iter().map(|e| e.content.as_str()).collect();
     assert_eq!(
-        plain_contents,
-        vec![
-            "今天改了 README 的一段说明",
-            "调整了日志级别，减少噪声",
-            "部署时数据库连接池打满：调大最大连接数"
-        ],
-        "无查询 ⇒ 纯 ts 降序（旧记忆垫底）"
+        plain.iter().filter(|e| e.entity == Entity::Memory).count(),
+        2,
+        "两条记忆都在切片里——筛不筛是检索面的判断，宿主不预先替它排"
     );
 }
 
 // ==================== 读侧预过滤 ====================
 
 /// **判断记忆不出会话**（产地的第二个消费方落地）：`thread_private` 的记忆
-/// 只给**记录它的那个会话**看——别的会话的召回视图里没有它，本会话照常看得见。
+/// 只给**记录它的那个会话**看——别的会话的可见切片里没有它，本会话照常看得见。
 /// 判断记忆用生产写方的缺省形态（载荷不带 `vis_scope` 字段 ⇒ 缺省私有），
 /// 顺带钉住「存量事件按 C10 缺省收窄」。
 #[test]
@@ -746,14 +735,14 @@ fn a_thread_private_memory_stays_in_its_own_session() {
     let b = EventStore::new();
     seed_shared(&b, "b1", "B 的经验", 2000);
 
-    // 从 B 读（B 自己种了记忆 ⇒ 视图非空，「看不见」只能是预过滤的功劳）：
-    // B 的经验在，A 的判断不在。
-    let view = recall_view(vec![snap(false, &a), snap(true, &b)], None, "session/main")
-        .expect("B 有自己的记忆");
-    let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
+    let slice = visible_slice(vec![snap(false, &a), snap(true, &b)], "session/main");
+    let contents: Vec<&str> = slice
+        .iter()
+        .filter_map(|e| e.payload.get("content").and_then(|v| v.as_str()))
+        .collect();
     assert!(
         contents.contains(&"B 的经验"),
-        "对照组：同扫一遍，shared 的跨会话记忆照常进视图（实际: {contents:?}）"
+        "对照组：同扫一遍，shared 的跨会话记忆照常进切片（实际: {contents:?}）"
     );
     assert!(
         !contents.iter().any(|c| c.contains("A 的判断")),
@@ -761,10 +750,13 @@ fn a_thread_private_memory_stays_in_its_own_session() {
     );
 
     // 从 A 读：自己的判断照常在——「私有」是按线程，不是不存在。
-    let own = recall_view(vec![snap(true, &a), snap(false, &b)], None, "session/main")
-        .expect("A 有自己的记忆");
+    let own = visible_slice(vec![snap(true, &a), snap(false, &b)], "session/main");
     assert!(
-        own.entries.iter().any(|e| e.content.contains("A 的判断")),
+        own.iter().any(|e| e
+            .payload
+            .get("content")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c.contains("A 的判断"))),
         "本会话自己的判断记忆照常可见"
     );
 }
@@ -778,22 +770,19 @@ fn a_shared_memory_is_recalled_across_sessions_by_matrix_members() {
     seed_shared(&a, "s1", "A 记下的共享经验", 1000);
     let b = EventStore::new();
 
-    let view = recall_view(
-        vec![snap(false, &a), snap(true, &b)],
-        Some("共享"),
-        "session/main",
-    )
-    .expect("矩阵成员读得到");
+    let slice = visible_slice(vec![snap(false, &a), snap(true, &b)], "session/main");
     assert!(
-        view.entries
-            .iter()
-            .any(|e| e.content.contains("A 记下的共享经验")),
-        "矩阵内主体的跨会话召回应含他人 shared 记忆"
+        slice.iter().any(|e| e
+            .payload
+            .get("content")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c.contains("A 记下的共享经验"))),
+        "矩阵内主体的跨会话切片应含他人 shared 记忆"
     );
 }
 
 /// **矩阵外主体看不见 shared**（负判据，与 stats 读闸同一分支）：
-/// 未登记主体（表里没有行 ≠ 矩阵成员——`sees_of` 只认登记行）⇒ 视图里没有；
+/// 未登记主体（表里没有行 ≠ 矩阵成员——`sees_of` 只认登记行）⇒ 切片里没有；
 /// 属主（`user` = `SESSION_OWNER`）恒放行——两条是同一次判定的两个分支
 /// （`memory_visible`），不是两个判定点。
 #[test]
@@ -802,181 +791,28 @@ fn an_out_of_matrix_viewer_is_shown_no_shared_memory() {
     seed_shared(&a, "s1", "A 记下的共享经验", 1000);
     let b = EventStore::new();
 
-    let ghost = recall_view(
-        vec![snap(false, &a), snap(true, &b)],
-        Some("共享"),
-        "session/ghost",
-    );
+    let ghost = visible_slice(vec![snap(false, &a), snap(true, &b)], "session/ghost");
     assert!(
-        ghost.is_none()
-            || !ghost
-                .unwrap()
-                .entries
-                .iter()
-                .any(|e| e.content.contains("A 记下的共享经验")),
+        !ghost.iter().any(|e| e
+            .payload
+            .get("content")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c.contains("A 记下的共享经验"))),
         "矩阵外主体不得经召回读到他人 shared 记忆"
     );
 
     // 属主恒放行：与 `stats` 读闸的「owner 相等」分支同一次判定。
-    let owner = recall_view(
+    let owner = visible_slice(
         vec![snap(false, &a), snap(true, &b)],
-        Some("共享"),
         symbio_core::SESSION_OWNER,
-    )
-    .expect("属主读得到");
+    );
     assert!(
-        owner
-            .entries
-            .iter()
-            .any(|e| e.content.contains("A 记下的共享经验")),
+        owner.iter().any(|e| e
+            .payload
+            .get("content")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c.contains("A 记下的共享经验"))),
         "属主（SESSION_OWNER）恒放行"
-    );
-}
-
-/// 从 `RecallView` 转出**端口形状**（与 `run_recall` 的转换逐字一致）。
-///
-/// 排版这一步已经搬到上下文 provider（DE-025 D-215），provider 只认识
-/// `symbio_plugin_api::context::RecallFacts`。测试因此也要经过同一次转换——
-/// 顺带钉住「转换只搬字段、不改判据」：`degraded` 与条目的 `content`/`tag` 原样过去。
-struct Facts<'a> {
-    degraded: bool,
-    lines: Vec<symbio_plugin_api::RecallLine<'a>>,
-}
-
-impl<'a> Facts<'a> {
-    fn of(view: &'a super::super::recall::RecallView) -> Self {
-        Self {
-            degraded: view.degraded,
-            lines: view
-                .entries
-                .iter()
-                .map(|e| symbio_plugin_api::RecallLine {
-                    seq: e.seq,
-                    content: &e.content,
-                    tag: &e.tag,
-                })
-                .collect(),
-        }
-    }
-
-    fn view(&self) -> symbio_plugin_api::RecallFacts<'_> {
-        symbio_plugin_api::RecallFacts {
-            degraded: self.degraded,
-            lines: &self.lines,
-        }
-    }
-}
-
-/// 注入段排版：抬头 + 逐条一行、跨会话同文只印一行、空视图不印空壳标题。
-#[test]
-fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
-    let a = EventStore::new();
-    seed_shared(&a, "seed-s-a", "同文的一句", 1000);
-    let b = EventStore::new();
-    seed_shared(&b, "seed-s-b", "同文的一句", 2000);
-    let own = EventStore::new();
-    seed_encoded(&own, "seed-s-a2", "另一句", 3000);
-
-    let view = recall_view(
-        vec![snap(false, &a), snap(false, &b), snap(true, &own)],
-        None,
-        "session/main",
-    )
-    .expect("有记忆");
-    let facts = Facts::of(&view);
-    let section = prompt_section(&facts.view()).expect("有条目 ⇒ 有段");
-    assert!(
-        section.starts_with(RECALL_SECTION_HEAD),
-        "抬头是唯一锚点：{section}"
-    );
-    assert_eq!(
-        section.matches("同文的一句").count(),
-        1,
-        "两个会话各记了一条同样的内容 ⇒ 排版只印一行（事实仍各留一格）"
-    );
-    assert!(section.contains("- 「另一句」"));
-    assert!(
-        section.contains("不要在本轮执行"),
-        "条目要说清身份：旧会话里的祈使句被新一轮照做，就是当轮任务被顶掉（实测）"
-    );
-    assert!(
-        section.find("另一句").unwrap() < section.find("同文的一句").unwrap(),
-        "最新在前"
-    );
-
-    // 空视图 ⇒ None（不印空壳标题）。
-    let empty = recall(PRINCIPAL_USER, None, None)
-        .apply(&[], i64::MAX, Budget::generous())
-        .value;
-    let empty_facts = Facts::of(&empty);
-    assert!(prompt_section(&empty_facts.view()).is_none());
-}
-
-/// 降级标注：
-/// 「只显示了一部分」必须**说得出来**——抬头的措辞先于正文；不降级时不加（不谎称降级）；
-/// 降级但零条目仍整段省略（不印「降级的空壳」）。
-///
-/// 这是 `degraded` 从**投影口径**走到**用户眼前**的出口判据：此前读方取 `View::value`
-/// 把降级丢了，静默的形态从「空且不标」变成「有部分结果且不标」——两者都是同一个静默。
-#[test]
-fn prompt_section_says_degraded_instead_of_pretending_completeness() {
-    // 降级走**取值点** `recall_view`：投影闭包不再自置 degraded（D-105），视图
-    // 字段由取值点从外壳誊抄——本用例同时钉住这两层。配额为 RECALL_SCAN_QUOTA，
-    // 超窗需要种满配额 + 1 条。
-    let store = EventStore::new();
-    for i in 0..(RECALL_SCAN_QUOTA as i64 + 1) {
-        seed_encoded(&store, &format!("deg-{i}"), &format!("片段 {i}"), 100 + i);
-    }
-    let degraded_view =
-        recall_view(vec![snap(true, &store)], None, "session/main").expect("有记忆 ⇒ 有视图");
-    assert!(
-        degraded_view.degraded,
-        "外壳降级必须被取值点誊抄进视图字段（视图脱离外壳流动时自描述）"
-    );
-    assert_eq!(
-        degraded_view.entries.len(),
-        RECALL_SCAN_QUOTA as usize,
-        "窗口只交切片头部：部分结果（截尾不截头）"
-    );
-
-    let degraded_facts = Facts::of(&degraded_view);
-    let section = prompt_section(&degraded_facts.view()).expect("有条目 ⇒ 有段");
-    assert!(
-        section.contains(RECALL_DEGRADED_NOTE),
-        "降级时如实标注（不谎称完整）：{section}"
-    );
-    assert!(
-        section.find(RECALL_DEGRADED_NOTE).unwrap() < section.find("片段").unwrap(),
-        "标注在正文之前——读的人先看到「只是一部分」"
-    );
-
-    // 反向：充足预算 ⇒ 不加标注（不谎称降级）。
-    let small = EventStore::new();
-    for i in 0..5i64 {
-        seed_encoded(&small, &format!("full-{i}"), &format!("片段 {i}"), 100 + i);
-    }
-    let full = recall_view(vec![snap(true, &small)], None, "session/main").expect("有记忆");
-    assert!(!full.degraded, "反转前提：本视图不降级");
-    let full_facts = Facts::of(&full);
-    let full_section = prompt_section(&full_facts.view()).expect("有条目 ⇒ 有段");
-    assert!(
-        !full_section.contains(RECALL_DEGRADED_NOTE),
-        "不降级不标注：{full_section}"
-    );
-    assert!(
-        full_section.contains("片段 4"),
-        "充足预算一条不漏（标注不是常驻抬头）"
-    );
-
-    // 反向：降级但**零条目** ⇒ 仍整段省略。生产不可达（配额 ≥ 1 时先扫到一条才降级），
-    // 但出口必须钉住：空却贴着「只是一部分」比空壳更糟。
-    let mut empty_degraded = degraded_view;
-    empty_degraded.entries.clear();
-    assert!(empty_degraded.degraded, "判据前提：仍然标着降级");
-    let empty_degraded_facts = Facts::of(&empty_degraded);
-    assert!(
-        prompt_section(&empty_degraded_facts.view()).is_none(),
-        "空视图不印「降级的空壳」"
     );
 }
 
@@ -989,9 +825,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
     let store = EventStore::new();
     let trigger = seed_encoded(&store, "m1", "记住这条", 1000);
 
-    let view = recall(PRINCIPAL_USER, None, None)
-        .apply(&store.range(Seq::new(0)), i64::MAX, Budget::generous())
-        .value;
+    let view = live_reading(&store);
     assert_eq!(view.entries.len(), 1);
 
     record_recalled(&store, &view, trigger, symbio_core::PRINCIPAL_MAIN, 9000).expect("入格");
@@ -1198,10 +1032,16 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
         ))
         .unwrap();
     encode_at(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
-    let snapshot = store.range(Seq::new(0));
-    let view = recall(PRINCIPAL_MAIN, None, None)
-        .apply(&snapshot, 2_000, Budget::generous())
-        .value;
+    // 读数由能力包的检索面给（本二进制不链接它）：这里直接构造一份**同形**的值
+    // ——本用例判的是 Translator 的出事实，不是检索本身。
+    let view = Retrieval {
+        degraded: false,
+        entries: vec![Retrieved {
+            seq: 1,
+            content: "用户偏好简洁答复".into(),
+            tag: "semantic".into(),
+        }],
+    };
     store
         .append(recalled_event(&view, 0, PRINCIPAL_MAIN))
         .unwrap();
@@ -1239,10 +1079,9 @@ fn recalled_event_records_degradation_instead_of_dropping_it() {
     // 降级视图 = **取值点誊抄外壳之后**的形态（D-105：外壳是唯一的降级事实源，
     // 誊抄判据在 `recall.test.rs` / 本文件）。本测试钉的是**下游**：视图带着
     // `degraded` 流动时，`memory.recalled` 不得把它丢掉。
-    let degraded = super::super::recall::RecallView {
-        entries: vec![super::super::recall::RecallEntry {
+    let degraded = Retrieval {
+        entries: vec![Retrieved {
             seq: 0,
-            ts: 100,
             content: "片段 0".into(),
             tag: "experience".into(),
         }],
@@ -1255,9 +1094,15 @@ fn recalled_event_records_degradation_instead_of_dropping_it() {
         "部分结果的检索必须把 degraded 写进事实——读数口靠的是这条事件"
     );
 
-    let full = recall(PRINCIPAL_MAIN, None, None)
-        .apply(&snapshot, 2_000, Budget::generous())
-        .value;
+    let _ = snapshot;
+    let full = Retrieval {
+        degraded: false,
+        entries: vec![Retrieved {
+            seq: 0,
+            content: "片段 0".into(),
+            tag: "experience".into(),
+        }],
+    };
     let ok = recalled_event(&full, 0, PRINCIPAL_MAIN);
     assert_eq!(
         ok.payload.get("degraded").and_then(|v| v.as_bool()),

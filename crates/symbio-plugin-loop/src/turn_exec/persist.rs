@@ -29,7 +29,7 @@ fn land_contributions(
     principal: &str,
     user_text: &str,
     response: Option<&str>,
-    recalled: Option<&super::super::recall::RecallView>,
+    recalled: Option<&symbio_plugin_api::retrieval::Retrieval>,
 ) {
     let anchor = format!("t{turn}");
     // 本轮的检索读数（DE-026 D-264 第 2 条）：与宿主读侧排版、`record_learning`

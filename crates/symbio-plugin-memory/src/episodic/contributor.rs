@@ -35,7 +35,8 @@ use symbio_plugin_api::{
     PRINCIPAL_USER,
 };
 
-use super::decl::{ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG, OWNER};
+use super::decl::{ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG};
+use crate::decl::OWNER;
 
 pub(crate) struct EpisodicEncode;
 

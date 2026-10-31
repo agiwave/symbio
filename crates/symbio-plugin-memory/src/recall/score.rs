@@ -1,12 +1,16 @@
-//! `recall` 的**排序内核**（纯函数，无 crate 依赖）。
+//! 检索的**排序内核**（纯函数，无 crate 依赖）。
 //!
 //! ## 为什么单独成一个文件
 //!
 //! 它是**生产读侧与召回评测集的唯一共有实现**：
 //!
-//! - 生产：`super::recall`（`recall` 投影）调 [`rank`] 排 `RecallEntry`；
+//! - 生产：`super::RecallRetrieval::retrieve`（轮首检索面，DE-026 D-264）调 [`rank`]
+//!   排活集条目；
 //! - 评测：`docs/003-design/verify/recall_eval.rs` 用 `#[path]` **包含本文件**，对
-//!   召回评测集跑同一份排序，出「生产投影的 recall@k」。
+//!   召回评测集跑同一份排序，出「生产检索的 recall@k」。
+//!
+//! 本文件自 L2b 起住能力包（`crates/symbio-plugin-memory/src/recall/`）：排序是
+//! 检索能力自己的判据（名册 #6「排序与预算在包内」），控制面不再有一份。
 //!
 //! 两边共用一份源码，而不是各写一份同构逻辑——临摹件会随生产漂移而**静默**失效
 //! （要消灭的正是这个形态：评测集此前测的是三个假想召回器，其中一个
@@ -16,7 +20,7 @@
 //! 入口只有 [`terms`] / [`overlap`] / [`rank`] 三个纯函数与 [`ScoreEntry`] 一个
 //! 数据结构。算法判据（怎么分词、怎么算重叠、平手怎么断）只有这一份。
 //!
-//! ## 它与代码检索的关系（[D-109](../../symbio-plugin-memory/README.md#d-109-两套检索内核不合一打分各归各平手有稳定次级键截断在全序之后是全项目一份的排序口径 "crates/symbio-plugin-memory/src/README")）
+//! ## 它与代码检索的关系（[D-109](../../README.md#d-109-两套检索内核不合一打分各归各平手有稳定次级键截断在全序之后是全项目一份的排序口径 "crates/symbio-plugin-memory/src/README")）
 //!
 //! 本文件是**记忆侧**「查询 → 相关性」这条打分口径的唯一 owner。代码检索
 //! （`crates/symbio-plugin-local/src/codebase_search.rs` 的 `semantic_search`）是**另一份**打分实现
@@ -25,16 +29,16 @@
 //! 次级键，top-k 截断在全序之后**；两侧各自的实例与这条的 owner 都登记在 D-109。
 //! 想「把两套检索内核合成一套」之前先读那条：它已经被否决过一次，理由在账上。
 
-/// 一条待排序的条目——生产 `RecallEntry` 与评测 `Memory` 的**最小公共形状**。
+/// 一条待排序的条目——生产活集条目与评测 `Memory` 的**最小公共形状**。
 ///
-/// 字段与 `crate::recall::RecallEntry` 逐字对应（生产侧做一次显式转换）：
+/// 字段与 [`super::live::LiveEntry`] 逐字对应（生产侧做一次显式转换）：
 /// 带 `tag` 是给将来的标签维度留位（今天是内容维度，混合打分的其余维度落地时
 /// 加在这个排序函数里，不动两边的调用形态）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScoreEntry {
     /// 内容（召回正文；打分跑在它上面）。
     pub content: String,
-    /// 认知内容标签（`tag` 过滤在投影层做完，排序层只看结果）。
+    /// 认知内容标签（标签的取舍在读方做完——巩固按标签分组、检索不看它）。
     pub tag: String,
     /// 编码时间（Unix 毫秒）——内容打分的**第一平手**判据。
     pub ts: i64,

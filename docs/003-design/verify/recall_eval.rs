@@ -10,9 +10,12 @@
 //! ## 本程序跑的是**生产排序内核**，不是它的临摹件
 //!
 //! 排序经 `#[path]` **包含生产文件**：[`recall_score`]
-//! （`crates/symbio-plugin-loop/src/recall_score.rs`——`recall` 投影的排序实现）。因此这里出的
-//! recall@k 是**生产投影的口径**：查询驱动的内容重叠分降序，
+//! （`crates/symbio-plugin-memory/src/recall/score.rs`——轮首检索面的排序实现）。
+//! 因此这里出的 recall@k 是**生产检索的口径**：查询驱动的内容重叠分降序，
 //! 平手 ts 降序、再平手 seq 降序。
+//!
+//! 住址自 L2b 起随能力搬（DE-026 D-264）：排序是检索能力自己的判据，控制面不再有
+//! 一份；`#[path]` 只改路径，共有形状（D-082）不变。
 //!
 //! ## 代价：这套数字与生产绑死
 //!
@@ -22,9 +25,9 @@
 //! 黑盒纪律点名要防的形态。代价是本文件不能脱离生产文件单独编译，换来的是
 //! 「换排序 = 两边同时换」。
 //!
-//! 边界（诚实划界）：池成员资格（`tag` 过滤 / as-of / 排除式遗忘 / 预算）由
-//! 投影的外壳负责，**不在本文件**——那些各有口径判据（`recall.test.rs` /
-//! DE-036 §6 验收）。本程序钉的是**排序**：给定同一个池，生产把用户想找的那条
+//! 边界（诚实划界）：池成员资格（as-of / 排除式遗忘 / 预算）由能力包的活集折叠
+//! 负责，**不在本文件**——那些各有口径判据（`recall/live.test.rs` / `recall/mod.test.rs`
+//! 与 DE-036 §6 验收）。本程序钉的是**排序**：给定同一个池，生产把用户想找的那条
 //! 排到多前。
 //!
 //! ## 评测集为什么是**数据**而不是断言
@@ -84,8 +87,8 @@
 // ── 生产排序内核（唯一共有实现）─────────────────────────────────
 //
 // `#[path]` 指向仓库里的生产文件——**这一行就是「跑的是生产」的全部含义**。
-// 它被 `recall` 投影与召回评测集共同编译：改排序只有一处可改，两边同时变。
-#[path = "../../../crates/symbio-plugin-loop/src/recall_score.rs"]
+// 它被轮首检索面与召回评测集共同编译：改排序只有一处可改，两边同时变。
+#[path = "../../../crates/symbio-plugin-memory/src/recall/score.rs"]
 mod recall_score;
 
 use recall_score::{rank, ScoreEntry};
@@ -667,7 +670,7 @@ fn main() {
     let prod = recall_at_k(production_recall, &cs);
     let triv = recall_at_k(trivial_recall, &cs);
     let (pass_all, pass_failed) = pass_at_k(production_recall, &cs);
-    println!("\n生产投影（recall_score）的 recall@k：");
+    println!("\n生产检索（recall_score）的 recall@k：");
     println!("  {:<14} {:.3}  ← 内容匹配（有查询，生产读侧口径）", "production", prod);
     println!("  {:<14} {:.3}  ← 纯 ts 降序（无查询，J2 平凡值）", "trivial", triv);
     println!("  {:<14} {:.3}  ← pass^4：池序反转 / 更旧噪声 / 重复入池 三变体全过", "pass^k", pass_all);
