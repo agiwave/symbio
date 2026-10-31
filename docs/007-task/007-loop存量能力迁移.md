@@ -7,8 +7,8 @@ track: arch
 prio: next
 created: 2026-10-29
 parent: T-001-能力全面拆分
-deps: [T-010-名册五十四条处置]
-where: `crates/symbio-plugin-loop/src/loop_rows.rs`, `crates/symbio-plugin-loop/src/turn_exec.rs`, `crates/symbio-plugin-loop/src/chat_loop`
+deps: []
+where: `docs/003-design/026-能力拆分与影响类.md` §2.3, `crates/symbio-plugin-loop/src/loop_rows.rs`, `crates/symbio-plugin-loop/src/turn_exec.rs`, `crates/symbio-plugin-loop/src/chat_loop`
 exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常量与策略清零——只剩环、写口、全局守门、过程体、会话基底五类；每一批都是「插件落好 → 绑定切换 + 旧实现删除」同一提交，端到端行为逐字不变；迁移提交不含机制增量（`EX-007`：`core` / `kernel` diff = 0，`loop` 只含删除与绑定切换）；`SC-006` 的基线里不再有 `loop` 条目
 ---
 
@@ -16,7 +16,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 
 ## 内容
 
-前置的 S1–S5 把账与三样通用件补齐后，`loop` 里的能力就能一段一段搬走。批次以 S1 的账为准
+前置的账（`DE-026` §2.3）与三样通用件（S3–S5）补齐后，`loop` 里的能力就能一段一段搬走。批次以 §2.3 的账为准
 （名册在 loop 的 10 行：工作记忆、情景记忆、语义记忆、程序记忆、长期记忆检索、
 副作用分级、规划与重规划、技能编译、反自动化回退、独立验证与返工）；另有三步
 名册不单列（折在「多轮对话」里）但同样按名字存在于 `loop`，`SC-006` 的零工具名口径一并要求迁出：

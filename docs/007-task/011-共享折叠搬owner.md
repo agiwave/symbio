@@ -7,8 +7,8 @@ track: arch
 prio: next
 created: 2026-10-29
 parent: T-001-能力全面拆分
-deps: [T-010-名册五十四条处置]
-where: `crates/symbio-sdk/src/projection`, `crates/symbio-plugin-api/src/views.rs`, `crates/symbio-plugin-loop/src`, `crates/symbio-plugin-session/src/stats.rs`
+deps: []
+where: `docs/003-design/026-能力拆分与影响类.md` §2.3, `crates/symbio-sdk/src/projection`, `crates/symbio-plugin-api/src/views.rs`, `crates/symbio-plugin-loop/src`, `crates/symbio-plugin-session/src/stats.rs`
 exit: 成本 / 校准 / 声誉 / 凸显四条构造器（覆盖名册 18/19/20/22/23/28 六行）离开 core，各归 owner 能力包；第二个读者改 `ViewRead::named`；迁移前后读数逐字不变；`PP-004` 的 files / ctors 两格只降不升
 ---
 
@@ -31,4 +31,4 @@ exit: 成本 / 校准 / 声誉 / 凸显四条构造器（覆盖名册 18/19/20/2
 2. 同一提交把第二读者的类型读改成 `ViewRead::named`，删掉 core 的导出。
 3. 跑该折叠的两侧读数用例，确认迁移前后逐字相同。
 4. 四条构造器搬完后核对 `PP-004`：文件和构造器两格都应下降；基线只许跟着代码往下改。
-5. 更新名册账（S1）对应行，绿灯后提交。
+5. 更新名册账（`DE-026` §2.3）对应行，绿灯后提交。

@@ -4,7 +4,7 @@
  *
  * ## 它治的病
  *
- * `DE-008 §6.1` 的 54 行名册是拆分的**完整输入**，`S1` 的处置账是逐行回答。
+ * `DE-008 §6.1` 的 54 行名册是拆分的**完整输入**，`DE-026 §2.3` 的处置账是逐行回答。
  * 两份表之间的每一处漂移都长得像一句正常的话：
  *
  * - 名册加了一行，账里没跟上 ⇒ 那条能力**不存在于拆分计划**，而账本看起来「54/54 齐」；
@@ -51,7 +51,7 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.resolve(scriptDir, '..')
 
 const ROSTER_REL = 'docs/003-design/008-能力注册表与能力坐标系.md'
-const LEDGER_REL = 'docs/007-task/010-名册五十四条处置.md'
+const LEDGER_REL = 'docs/003-design/026-能力拆分与影响类.md'
 
 /** 处置闭集：`拆` 的三种限定与 `留` 的五个残留类，外加「待裁决」。 */
 const DISPOSITIONS = [
@@ -147,7 +147,7 @@ if (!rosterRows || rosterRows.length === 0) {
 }
 
 if (!ledgerRows || ledgerRows.length === 0) {
-  report(LEDGER_REL, '处置账表读不出（`### 账本` 的表格头没了）—— 「54/54」没有可核对的输入')
+  report(LEDGER_REL, '处置账表读不出（`DE-026 §2.3` 的表格头没了）—— 「54/54」没有可核对的输入')
 } else {
   ledger = ledgerRows.map((r) => ({
     line: r.line,
@@ -161,7 +161,7 @@ if (!ledgerRows || ledgerRows.length === 0) {
 }
 
 if (!totalRows || totalRows.length === 0) {
-  report(LEDGER_REL, '账本缺 `### 合计` 对账表 —— 汇总与逐行账必须同源，没有汇总就没有「能拆未拆」的反向读数')
+  report(LEDGER_REL, '账本缺合计表（`DE-026 §2.3.1`）—— 汇总与逐行账必须同源，没有汇总就没有「能拆未拆」的反向读数')
 }
 
 // ── 逐行账自洽 ───────────────────────────────────────────────────────

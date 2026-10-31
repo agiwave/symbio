@@ -1,7 +1,7 @@
 /**
  * capability-ledger-audit 回归测试 —— 证明 EX-006 **每种漂移都会红**
  *
- * `EX-006` 的判定读两份文档：`DE-008 §6.1` 的名册与 `S1` 的逐行处置账。它守的
+ * `EX-006` 的判定读两份文档：`DE-008 §6.1` 的名册与 `DE-026 §2.3` 的逐行处置账。它守的
  * 不是「有没有这张表」，而是两张表**指向同一件事**。这条守卫的失效形态全是
  * 「看起来在算」：
  *
@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./capability-ledger-audit.mjs', import.meta.url))
 
 const ROSTER = 'docs/003-design/008-能力注册表与能力坐标系.md'
-const LEDGER = 'docs/007-task/010-名册五十四条处置.md'
+const LEDGER = 'docs/003-design/026-能力拆分与影响类.md'
 
 const ROSTER_TEXT = [
   '# 能力名册（夹具）',
