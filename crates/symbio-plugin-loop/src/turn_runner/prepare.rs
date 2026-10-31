@@ -252,7 +252,8 @@ where
     // 压缩）由它自己的执行体当场入日志，溯源锚就是那一刻已在的用户格 seq（I2）。
     //
     // 1″. 派发档与开场白**也不在这里落**（`D-223` 订正 1）：两者的内容要到轮首四行跑完
-    // 才存在（档位折自 `policy.reflex` 的出口格，开场白是判决行 `Escalate` 首响），
+    // 才存在（档位折自技能行作答后宿主代落的 `stage:"reflex"` 格，开场白是判决行
+    // `Escalate` 首响），
     // 落点在接缝上（`chat_loop::land_dispatch` / `land_opening`）。草稿在幕首就建
     // （`D-222` 订正 3），那一刻它们一格都还没有。
     // 1b. 定稿答话：用户格照常开，答话照常收束，**模型不参与**。
@@ -417,8 +418,8 @@ where
         pending_model: None,
         pending_round: None,
         pending_calls: None,
-        // 快路：正文由 `policy.reflex` 的执行体经 [`super::TurnSession::set_reflex`]
-        // 寄存（`D-222` 订正 3：那一行是环的债，它的产物在草稿建好之后才到）。
+        // 快路：正文由技能行作答后宿主经 [`super::TurnSession::set_reflex`] 寄存
+        // （`D-260`：那一行是环的债，它的产物在草稿建好之后才到）。
         // 零模型往返时驱动环的第一个债就是 `close-turn`（55 < 60）——本段照常备好
         // 派发格与 prompt，只是不发请求。
         closing: None,

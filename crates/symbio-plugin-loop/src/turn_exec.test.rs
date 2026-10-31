@@ -29,7 +29,7 @@ use symbio_plugin_api::events::{
 };
 use symbio_providers::DefaultToolVisitor;
 
-use crate::control_decl::{CHAT_VOCAB, EVENT_MEMORY_RECALLED, EVENT_SESSION_CONFIG, MESSAGE_VOCAB};
+use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, MESSAGE_VOCAB};
 
 use super::super::session_port::SessionPort;
 use super::super::test_support::{default_settings, loop_session, turn_spec, FakeSessionPort};
@@ -167,8 +167,8 @@ fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> 
 ///
 /// 生产里幕首之后只有**一个环**（`D-222` 裁决 5）：轮首四行、接缝、汇报与轮内各行
 /// 同住一张绑定表，先后由 `prio` 说。接缝读的寄存物因此不再另开一条通道递进来——
-/// 它们住在**本轮状态**与**会话上下文**上（`recall_view` / `skill_route` /
-/// `head_reflex` / `opening_text` / `consolidated`），由环上的动作自己取走。本夹具
+/// 它们住在**本轮状态**与**会话上下文**上（`recall_view` / `opening_text` /
+/// `consolidated`），由环上的动作自己取走。本夹具
 /// 替幕首把那一片备好，于是轮首那几行没开账时这些寄存是 `None`，开账时由执行体覆盖。
 ///
 /// **本地同名结构遮蔽了 `super::*` 里的 `ExecTurn`**——五个 struct 字面量因此
@@ -189,8 +189,9 @@ struct ExecTurn<'a> {
     window_turns: u64,
     tools: &'a [CapabilityMeta],
     recalled: Option<&'a super::super::recall::RecallView>,
-    skill_obs: &'a [(String, bool)],
-    reflex: Option<&'a super::super::turn_runner::ReflexAnswer>,
+    /// 快路作答的正文：生产里由技能行的 `RowStep::Answer` 让宿主经
+    /// `TurnSession::set_reflex` 寄进草稿（D-260）。夹具在同一处模拟那一半。
+    reflex_text: Option<&'a str>,
     consolidation: Option<&'a [ChatNode]>,
     supplements: Option<super::SupplementFn>,
     supplemental_no: Arc<std::sync::atomic::AtomicU64>,
@@ -231,8 +232,7 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         window_turns,
         tools,
         recalled,
-        skill_obs,
-        reflex,
+        reflex_text,
         consolidation,
         supplements,
         supplemental_no,
@@ -272,8 +272,6 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         drive_seq,
         now_ms,
         recall_view: recalled.cloned(),
-        skill_route: skill_obs.to_vec(),
-        head_reflex: reflex.cloned(),
         opening_text: opening_text.map(String::from),
         opening_dialog: opening_dialog.cloned(),
         ..Default::default()
@@ -311,7 +309,8 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let open = super::open_turn(&assembled).await?;
     // 幕首之后那一半（分发方 / 汇报落地面 / 宿主面）与生产同一个构造点：夹具自己备的
     // 只是幕首（用户格 / 配置格由本文件的 `seed_*` 直给）。
-    let stage = super::stage_runtime(assembled, emitter, open);
+    let mut stage = super::stage_runtime(assembled, emitter, open);
+    stage.set_reflex_for_test(reflex_text.map(str::to_string));
     let head = stage.head_parts(
         orchestrator.clone(),
         request_ctx,
@@ -328,9 +327,7 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         // 环跑到收束格出现：归类（中止 / 授权拒 / 正常）与落格按本文件要验的
         // 那几条契约做——生产的镜像并入与封根不在夹具里（`stage.test.rs` 钉）。
         super::DriveEnd::Running(running) => {
-            match super::classify_turn(*running, turn.recall_view.as_ref(), &turn.skill_route)
-                .await?
-            {
+            match super::classify_turn(*running, turn.recall_view.as_ref()).await? {
                 super::Classified::Finished(v) => v,
                 super::Classified::Settled(settled) => super::persist_turn(settled),
             }
@@ -370,9 +367,7 @@ fn exec_base<'a>(
         window_turns: 6,
         tools: &[],
         recalled: None,
-        skill_obs: &[],
-        // 快路候选集默认空 ⇒ 本夹具走无快路的那条。
-        reflex: None,
+        reflex_text: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
@@ -525,8 +520,7 @@ async fn supplements_become_facts_visible_next_turn() {
             ..Default::default()
         }],
         recalled: None,
-        skill_obs: &[],
-        reflex: None,
+        reflex_text: None,
         consolidation: None,
         supplements: Some(supplements),
         supplemental_no: Default::default(),
@@ -1376,8 +1370,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
             ..Default::default()
         }],
         recalled: None,
-        skill_obs: &[],
-        reflex: None,
+        reflex_text: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
@@ -1580,8 +1573,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
             ..Default::default()
         }],
         recalled: None,
-        skill_obs: &[],
-        reflex: None,
+        reflex_text: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
@@ -1662,36 +1654,31 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
     );
 }
 
-// ==================== 收束派生事实：记忆与学习（编码 / 检索 / 巩固 + 技能编译）====================
+// ==================== 收束派生事实：记忆（编码 / 检索 / 巩固）====================
 
-/// **收束派生事实**：记忆三段（编码 / 检索 / 巩固）与技能观测 / 编译必须入格。
+/// **收束派生事实**：记忆三段（编码 / 检索 / 巩固）必须入格；技能观测与编译
+/// **不得**由本插件写。
 ///
 /// ## 这个用例挡的是什么
 ///
-/// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，而记忆与学习
+/// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，而记忆
 /// **不是轮次事实**——运行器一处都不写，写方是 `derived_facts::record_learning`。
-/// 写方若不被调用（或出参没交回），长期记忆与技能
-/// 自我改进就**静默全丢**。
+/// 写方若不被调用（或出参没交回），长期记忆就**静默全丢**。
 ///
-/// 三条断言各自钉一段：
-/// ① 编码（`memory.encoded{tag:"经验"}`，锚 = 本轮用户格）；
-/// ② 技能观测（`memory.recalled{skill_id, fallback}`，锚同）——缺它 `calibration`
-///    永远读到「零使用」，置信度恒 1.0，回退一次都不会发生（DE-041 §5 静默失效第 2 行）；
-/// ③ 技能编译（`memory.encoded{tag:"skill"}`）——缺它下一轮无技能可用。
+/// 技能观测与编译在 D-262 之后是**技能能力包的收束贡献**（`Contributor`）——
+/// 本插件一侧再写一笔就是同一事实两个 owner。所以本用例除了钉编码，还反向钉住
+/// 「loop 不落技能那两格」：注入一份"看起来命中了技能"的夹具之后，
+/// `memory.calibrated` 与 `memory.encoded{tag:"skill"}` 都不得出现。
 ///
-/// **反向自检**：注掉 `turn_exec` 里的 `record_learning` 调用，本用例必须红。
+/// **反向自检**：注掉 `turn_exec` 里的 `record_learning` 调用，编码断言必须红。
 #[tokio::test]
-async fn full_turn_lands_memory_and_learning_facts() {
-    use crate::control_decl::EVENT_MEMORY_CALIBRATED;
-
+async fn full_turn_lands_memory_encoding_facts() {
     let fx = setup_full_with(true);
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::Faithful);
 
-    // 技能路由判定由读侧给出（生产里是 `prepare_request_sections` 调 `skill_events::route`）。
-    let obs = [("sk-1".to_string(), false)];
-    let mut req = tool_free_req(
+    let req = tool_free_req(
         &fx,
         Arc::new(provider),
         &sink,
@@ -1699,7 +1686,6 @@ async fn full_turn_lands_memory_and_learning_facts() {
         0,
         "你好",
     );
-    req.skill_obs = &obs;
     drive_turn(req).await.expect("full 轮执行成功");
 
     let events = fx.facts.range(Seq::new(0));
@@ -1720,33 +1706,18 @@ async fn full_turn_lands_memory_and_learning_facts() {
         "编码必须入格：{kinds:?}"
     );
     assert!(
-        encoded.iter().any(|e| e.payload["tag"] == "skill"),
-        "技能编译必须入格：{kinds:?}"
-    );
-    assert!(
         !encoded.is_empty() && encoded.iter().all(|e| e.produced_by == Some(user_seq)),
         "记忆的溯源锚必须是本轮开口（I2）：{encoded:?}"
     );
-
-    let obs_events: Vec<&Event> = events
-        .iter()
-        // 按**格子**认自己的输入（校准观测从 `memory.recalled` 搬进
-        // `memory.calibrated`）。旧写法按载荷字段判别——那正是本判据要证明不再依赖的。
-        .filter(|e| e.kind == EVENT_MEMORY_CALIBRATED)
-        .collect();
-    assert_eq!(obs_events.len(), 1, "技能观测必须逐条入格：{kinds:?}");
+    assert!(
+        !encoded.iter().any(|e| e.payload["tag"] == "skill"),
+        "技能编译不归本插件写（D-262：交接缝贡献）：{encoded:?}"
+    );
     assert!(
         !events
             .iter()
-            .any(|e| { e.kind == EVENT_MEMORY_RECALLED && e.payload.get("skill_id").is_some() }),
-        "校准观测不得再落在 `memory.recalled` 上——那会让一张格子背两种语义"
-    );
-    assert_eq!(obs_events[0].payload["skill_id"], "sk-1");
-    assert_eq!(obs_events[0].payload["fallback"], false);
-    assert_eq!(
-        obs_events[0].produced_by,
-        Some(user_seq),
-        "观测的溯源锚同为本轮开口"
+            .any(|e| e.kind == symbio_plugin_api::events::EVENT_MEMORY_CALIBRATED),
+        "技能观测不归本插件写（D-262：交接缝贡献）：{kinds:?}"
     );
 }
 
@@ -1810,8 +1781,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         window_turns: 6,
         tools: std::slice::from_ref(&tool_meta),
         recalled: None,
-        skill_obs: &[],
-        reflex: None,
+        reflex_text: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
@@ -1872,10 +1842,10 @@ async fn full_turn_lands_derived_commitment_facts() {
 ///
 /// ## 选中的那一半在别处
 ///
-/// 判定（逐字命中 ∧ 只对新开轮）是 `policy.reflex` 那一行的 `owes`，执行体在轮首
-/// host 落 `stage:"reflex"` 并把正文寄进本轮状态（D-163）；本用例从**那个事实**
-/// 出发，钉的是收束：`turn_head.reflex_answered` 让 `close-turn` 成为第一笔债，
-/// `announce-model` 不欠 ⇒ 模型一次不被调。
+/// 判定（逐字命中 ∧ 只对新开轮）与作答都是 `skill.recall` 那一行的事（D-262）；
+/// 宿主只代落 `stage:"reflex"` 并经 `set_reflex` 把正文寄进本轮状态（D-260）。
+/// 本用例从**这两样产物**出发，钉的是收束：`turn_head.reflex_answered` 让
+/// `close-turn` 成为第一笔债，`announce-model` 不欠 ⇒ 模型一次不被调。
 #[tokio::test]
 async fn a_reflex_answer_closes_without_any_model_call() {
     let fx = setup_full();
@@ -1892,7 +1862,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
         0,
         "你好",
     );
-    // 生产侧由 `run_reflex` 执行体落这一格（出口那一格当场入日志）。
+    // 生产侧由宿主在 `RowStep::Answer` 之后落这一格（D-260）。
     super::super::stage_events::land(
         fx.facts.as_ref(),
         0,
@@ -1905,11 +1875,8 @@ async fn a_reflex_answer_closes_without_any_model_call() {
         )],
     )
     .expect("快路出口格落格");
-    // 正文由轮首 host 寄进本轮状态（同一执行体的另一半产出）。
-    let answer = super::super::turn_runner::ReflexAnswer {
-        text: "先列要点；再合并同类项。".to_string(),
-    };
-    req.reflex = Some(&answer);
+    // 正文由宿主在同一处寄进草稿（能力只答，不碰草稿）。
+    req.reflex_text = Some("先列要点；再合并同类项。");
     let res = drive_turn(req).await.expect("快路执行成功");
 
     assert_eq!(
@@ -1966,16 +1933,15 @@ async fn a_reflex_answer_closes_without_any_model_call() {
     );
 }
 
-/// 反向（边界）：本幕是**唤醒幕** ⇒ `policy.reflex` 不开账，技能不得顶掉刚被
-/// 批准的那次工具。
+/// 跨插件契约（D-262）：本轮的召回清单在事实面上带 `resumed` 一格，
+/// 技能行据此判「唤醒幕不重答」（同一份清单不让它顶掉刚被批准的那次工具）。
 ///
-/// 唤醒幕的身份是**事实**（`turn.stage{stage:"resume"}`），`turn_head` 据此判
-/// `resumed` ⇒ 该行的 `owes` 不成立。判据在**行表**上，不在执行链里——所以这里
-/// 直接问表，并在旁边立一个**没有恢复阶段**的对照，证明"不开账"不是因为永不
-/// 开账（否则这条判据会在任何一行上恒过）。
+/// 技能行自己不开判定账——判定随能力住在技能包；本插件
+/// 只保证**它读得到那条判据**：`turn.recalled` 的每条目都带幕锚之后的召回阶段
+/// 与 `resumed`。所以这里两侧各钉一遍：唤醒幕 ⇒ `resumed: true`；新开一轮 ⇒ `false`。
 #[test]
-fn a_skill_hit_never_takes_over_a_resumed_turn() {
-    // 事实轨以值注入（`EventStore`）：本用例不碰会话存储布局，只钉行表的判据。
+fn the_recall_list_carries_the_resumed_flag() {
+    // 事实轨以值注入（`EventStore`）：本用例不碰会话存储布局，只钉视图的判据。
     let store = EventStore::new();
     let user_seq = store
         .append(
@@ -1994,7 +1960,7 @@ fn a_skill_hit_never_takes_over_a_resumed_turn() {
 
     // 本幕锚 = 恢复阶段事实（`chat_loop::begin_drive` 在生产里落它）：它把幕锚从
     // 用户格挪到这一条 ⇒ `turn_head.resumed = true`。
-    super::super::stage_events::land_with_seqs(
+    let resume_seq = super::super::stage_events::land_with_seqs(
         &store,
         0,
         user_seq,
@@ -2003,27 +1969,37 @@ fn a_skill_hit_never_takes_over_a_resumed_turn() {
             0, "approve", "1",
         )],
     )
-    .expect("恢复阶段事实落格");
+    .expect("恢复阶段事实落格")
+    .first()
+    .copied()
+    .expect("恢复阶段有 seq");
 
-    // `skill_hit` 由召回阶段格折出（本幕确实命中了技能）。
+    let recalled = [(user_seq + 1, "skill".to_string())];
     super::super::stage_events::land(
         &store,
         0,
-        user_seq,
+        resume_seq,
         "system",
         &[super::super::stage_events::StageFact::recall(
-            0, user_seq, "hit",
+            0, resume_seq, &recalled, true,
         )],
     )
     .expect("召回阶段事实落格");
 
     let slice = store.range(Seq::new(0));
-    assert!(
-        !super::super::loop_rows::owes("policy.reflex", &slice, 0, 0),
-        "唤醒幕（resumed）不开快路的账：{slice:?}"
+    let view = super::super::loop_rows::view("turn.recalled", &slice, 0, 0)
+        .expect("turn.recalled 必须可求值");
+    let entries = view.as_array().expect("视图出数组");
+    assert_eq!(entries.len(), 1, "{view}");
+    assert_eq!(entries[0]["recall"], recalled[0].0);
+    assert_eq!(entries[0]["tag"], "skill");
+    assert_eq!(
+        entries[0]["resumed"], true,
+        "唤醒幕的召回清单必须自报 resumed（技能行据此不重答）：{view}"
     );
 
-    // 对照：同一份事实去掉恢复阶段就必须开账——否则上一条判据恒过。
+    // 对照：同一形状换成新开一轮（锚 = 用户格）⇒ `resumed: false`——
+    // 否则 `resumed` 恒真或恒假，上一条判据就恒过。
     let fresh = EventStore::new();
     let fresh_seq = fresh
         .append(
@@ -2045,14 +2021,16 @@ fn a_skill_hit_never_takes_over_a_resumed_turn() {
         fresh_seq,
         "system",
         &[super::super::stage_events::StageFact::recall(
-            0, fresh_seq, "hit",
+            0, fresh_seq, &recalled, false,
         )],
     )
     .expect("召回阶段事实落格");
     let slice = fresh.range(Seq::new(0));
-    assert!(
-        super::super::loop_rows::owes("policy.reflex", &slice, 0, 0),
-        "没有恢复阶段 ⇒ 快路开账：{slice:?}"
+    let view = super::super::loop_rows::view("turn.recalled", &slice, 0, 0)
+        .expect("turn.recalled 必须可求值");
+    assert_eq!(
+        view[0]["resumed"], false,
+        "新开一轮的召回清单不得自称唤醒幕：{view}"
     );
 }
 

@@ -5,4 +5,9 @@ plugin_assembly: sub_agent
 plugin_order: 40
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 control_decl::EVENTS。
-shared_events: artifact.added, authz.denied, chat.assistant.fallback, chat.assistant.final, chat.assistant.opening, chat.assistant.progress, chat.assistant.reported, commitment.asserted, commitment.broken, commitment.opened, commitment.released, memory.calibrated, memory.encoded, session.config, task.controlled, turn.branch, turn.dispatch, turn.supplemented, user.message
+# `memory.calibrated` 不在本行：它随技能观测搬回技能包（D-262），本插件不再写它。
+shared_events: artifact.added, authz.denied, chat.assistant.fallback, chat.assistant.final, chat.assistant.opening, chat.assistant.progress, chat.assistant.reported, commitment.asserted, commitment.broken, commitment.opened, commitment.released, memory.encoded, session.config, task.controlled, turn.branch, turn.dispatch, turn.supplemented, user.message
+# 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
+# crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住 `control_decl::VIEWS`。
+# 本轮的召回清单：技能行按 `(recall, stage)` 认领自己那条（D-262）。
+shared_views: turn.recalled

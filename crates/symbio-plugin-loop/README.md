@@ -61,7 +61,7 @@ impl: done
 主循环（`chat_loop*` / `loop_rows.rs` / `report_exec.rs` / `stage_events.rs` /
 `turn_runner.rs` / `turn_exec.rs`）· 上下文与请求（`context*` / `message_build.rs` / `tokenizer.rs` /
 `model_chat.rs`）· 工具与分派（`tools*` / `tool_dispatch.rs`）· 事实与记忆
-（`derived_facts.rs` / `memory_events.rs` / `skill_events.rs` / `task_events.rs` /
-`resume.rs`）。逐项职责见
+（`derived_facts.rs` / `memory_events.rs` / `task_events.rs` / `resume.rs`；技能观测与
+校准随技能能力住在 `symbio-plugin-skill`，D-262）。逐项职责见
 [`../session/docs/104-module-layout.md`](../symbio-plugin-session/src/docs/104-module-layout.md "DE-104-module-layout")
 §1.4，主环结构见 [`../session/docs/102-core-loop.md`](../symbio-plugin-session/src/docs/102-core-loop.md "DE-102-core-loop")。

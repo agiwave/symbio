@@ -381,9 +381,10 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
 /// 记忆三段（编码 / 检索锚 / 巩固）全部在同一份 WAL 里可读，
 /// 且 `check_all` 全绿（溯源 100%）。
 ///
-/// 端到端接线由 `turn_exec.test.rs::full_turn_lands_memory_and_learning_facts` 带反向
+/// 端到端接线由 `turn_exec.test.rs::full_turn_lands_memory_encoding_facts` 带反向
 /// 自检覆盖；本用例钉的是**巩固要用刷新后的快照**——编码刚写下的那条必须对巩固
-/// 可见（先巩固后编码会让第 4 条永远等不到代数 1）。
+/// 可见（先巩固后编码会让第 4 条永远等不到代数 1）。技能观测与编译不经过本函数
+/// （D-262：交接缝贡献），所以这里也不留它们的入参。
 #[test]
 fn record_learning_wires_all_three_memory_steps() {
     let store = EventStore::new();
@@ -408,8 +409,6 @@ fn record_learning_wires_all_three_memory_steps() {
             &format!("t{i}"),
             Some("答"),
             None,
-            &[],
-            false,
             symbio_core::clock_now_ms(),
         );
     }
@@ -467,8 +466,6 @@ fn record_learning_wires_all_three_memory_steps() {
         "t4",
         Some("答"),
         Some(&view),
-        &[],
-        false,
         symbio_core::clock_now_ms(),
     );
 

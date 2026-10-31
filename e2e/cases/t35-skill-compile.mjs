@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T35 技能编译与召回（`SkillCompiler` + 召回视图）：
+// T35 技能编译与召回（技能能力包的轮末贡献者 + 召回视图）：
 // 一轮**成功**收束 ⇒ 编译出一条技能（`memory.encoded{tag:"skill"}`）；下一轮技能
 // 进召回视图、注入段带上技能正文；换一个进程（B 会话）说同一句话 ⇒ 召回视图里
 // 照样认得它（跨进程稳定）；校准列从出口读得出这次编译被用了两次。
@@ -8,7 +8,7 @@ import './_selfrun.mjs';
 //
 // 接线判据：
 // 「每件接线一条 e2e（**接线前后行为可见地不同**，否则等于没接）」——这里钉的是
-// `SkillCompiler`：写方挂在 `derived_facts::record_learning`（`turn_exec` 轮末）上，
+// 技能能力的编译贡献者：写方是 `symbio-plugin-skill` 的 `Contributor`（收束时发言级询问），
 // 读方挂在召回视图（注入段的原料）上。
 //
 // | 要证的事 | 唯一能看见它的地方 |
@@ -20,12 +20,12 @@ import './_selfrun.mjs';
 //
 // ## 为什么必须端到端（单测证不了的两件事）
 //
-// 单测（`skill_events.test.rs`）直接调 `compile` / 召回，把两端的出口判据钉死了，
+// 单测（`contributor.test.rs` / `row.test.rs`）直接调编译与召回判定，把两端的出口判据钉死了，
 // 但它证不了这条链路**真的接在真实轮次上**：
 //
-// 1. **`actor` 归位是生产链路的生死线**：`SkillCompiler::compile` 造的信封 `actor`
-//    是占位 `agent:main`，而召回投影按 `actor == viewer` 过滤（`thread_private`）。
-//    写方不把它归位成属主（`user`），技能就被挡在召回视图外 ⇒ 注入段恒不带技能
+// 1. **`actor` 归位是生产链路的生死线**：技能贡献者交出的 `FactDraft` 若带占位 `agent:main`，
+//    而召回投影按 `actor == viewer` 过滤（`thread_private`），写方不把它归位成属主
+//    （`user`），技能就被挡在召回视图外 ⇒ 注入段恒不带技能
 //    （「编译了却从不生效」的静默失效）。这一条只有在**真实轮次**里跑得出来。
 // 2. **注入段真的被改写**：摘技能 / 换段都发生在请求装配里，只有回读**发给大模型
 //    的请求包**才看得见这一层。
@@ -226,7 +226,7 @@ export default defineCase(
 
         // ## 校准列里有几条技能？（判据是「TRIGGER 那条的账目」，不是「总共几条」）
         //
-        // `compile` 的去重判据是**同一 trigger 至多一条**（`skill_events::compile` 的文
+        // `compile` 的去重判据是**同一 trigger 至多一条**（`contributor::SkillCompile` 的文
         // 档），**不是**「一个会话至多一条」——每轮成功收束都按本轮用户发言编一条是
         // 设计（技能集按轨迹生长）。所以这里数「编了几条」是**测错的东西**：A 跑了
         // TRIGGER / R2 / R3 三轮成功轮，`memory.encoded{tag:"skill"}` 就有三条

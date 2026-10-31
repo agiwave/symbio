@@ -59,6 +59,8 @@ fn classify_fact_carries_reason_and_source() {
             result: None,
             identity: None,
             model_calls: 0,
+            recalled: Vec::new(),
+            resumed: false,
         }
     );
 
@@ -86,6 +88,8 @@ fn classify_fact_carries_reason_and_source() {
             result: None,
             identity: None,
             model_calls: 0,
+            recalled: Vec::new(),
+            resumed: false,
         }
     );
 }
@@ -94,8 +98,18 @@ fn classify_fact_carries_reason_and_source() {
 fn payload_carries_only_what_the_fact_has() {
     // 没有判决的阶段：载荷只有阶段 + 轮次，不带 `source` / `reason`。
     assert_eq!(
-        StageFact::ran(StageName::Recall, 2).payload(),
-        serde_json::json!({ "stage": "recall", "round": 2 })
+        StageFact::ran(StageName::Inputs, 2).payload(),
+        serde_json::json!({ "stage": "inputs", "round": 2 })
+    );
+    // 召回阶段例外：它的载荷还带逐条结果与 `resumed`（`turn.recalled` 的数据面）。
+    assert_eq!(
+        StageFact::recall(2, 9, &[(3, "经验".into()), (7, "skill".into())], false).payload(),
+        serde_json::json!({
+            "stage": "recall",
+            "round": 2,
+            "recalled": [{ "seq": 3, "tag": "经验" }, { "seq": 7, "tag": "skill" }],
+            "resumed": false,
+        })
     );
 
     let decided = StageFact::classify(

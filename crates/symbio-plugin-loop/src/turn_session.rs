@@ -76,14 +76,6 @@ impl LoopSession {
         &self.spec.settings
     }
 
-    pub(crate) fn skill_compile_enabled(&self) -> bool {
-        self.spec.settings.skill_compile_enabled
-    }
-
-    pub(crate) fn skill_fast_path(&self) -> bool {
-        self.spec.settings.skill_fast_path
-    }
-
     /// 工具结果存档目录（session 在派发前按会话子目录算好）。
     pub(crate) fn tool_archive_dir(&self) -> &Path {
         &self.spec.tool_archive_dir

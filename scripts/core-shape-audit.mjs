@@ -338,7 +338,8 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
  * ⇒ 允许（`D-123` 决策 5 允许「不交回」，不是「不留痕」，最终仍要落格）；请求级缓存 ⇒
  * 允许，但注释要能指出「为什么它不是第二份状态」。三种身份的逐字段处置见 D-226。
  *
- * 基线 = 处置表留下的字段数，也就是目标值（21）。只许降：删掉一格就同步改这里；加一格
+ * 基线 = 处置表留下的字段数，也就是目标值：D-226 处置后为 21，D-262 又取走
+ * `skill_route` / `skill_hits` / `head_reflex` 三格，现行 18。只许降：删掉一格就同步改这里；加一格
  * 必须先在 `docs/003-design/` 立一条决策，再在基线旁写
  * `core-shape-allow turnStateFields: D-NNN <理由>`（CS-002 校验那条决策能打开）。
  *
@@ -348,7 +349,7 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
 const TURN_STATE_REL = 'crates/symbio-plugin-loop/src/chat_loop/state.rs'
 const TURN_STATE_BASELINE = process.env.TURN_STATE_BASELINE
   ? Number(process.env.TURN_STATE_BASELINE)
-  : 21
+  : 18
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

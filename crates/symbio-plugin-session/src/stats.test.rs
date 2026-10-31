@@ -1598,8 +1598,8 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
 /// 校准列（的读侧）：
 /// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
 ///
-/// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`skill_events::route`
-/// 的产物）——本处按**写方落下的真实形状**造（`Memory × Asserted`、`turn = 0`、
+/// 观测面 = 技能召回行收束时落的 `memory.calibrated{skill_id, fallback}`（技能包的
+/// `row::SkillRecall` 产物）——本处按**写方落下的真实形状**造（`Memory × Asserted`、`turn = 0`、
 /// `produced_by` 指向本轮用户格），只把载荷换成校准认的那两把钥匙。
 #[test]
 fn calibration_column_recomputes_and_moves_with_the_wal() {

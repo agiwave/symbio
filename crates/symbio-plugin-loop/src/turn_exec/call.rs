@@ -58,8 +58,9 @@ pub(crate) struct OpenRun {
 /// 一条安静的出口——真到了那里说明有人改坏了 `TurnInput`，按内部错误报出来。
 pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
     // 深度档：完整推理（含工具内环）。快路的**判定**已经不在这一层：它由环上的
-    // `policy.reflex` 行选中，出口格（`stage:"reflex"`）与正文随本轮状态到接缝；
-    // 本侧只把正文交给收束动作，不自己落 `final`（D-163）。
+    // `skill.recall` 行（能力包）选中，出口格（`stage:"reflex"`）由宿主代落、正文由
+    // 宿主经 `set_reflex` 寄进草稿；本侧只把正文交给收束动作，不自己落 `final`
+    // （D-260 / D-262）。
     let llm: std::sync::Arc<dyn LlmAdapter> = std::sync::Arc::new(ProviderLlmAdapter::for_turn(
         a.provider.clone(),
         &a.system_prompt,

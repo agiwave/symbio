@@ -40,8 +40,7 @@ pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 // 任务族五条已随能力迁出（`symbio-plugin-task` 的 `PLUGIN.yml`），本插件不再引用它们的
 // 拼写：调度与折叠都住那个能力包，本插件不需要认识任务名。
 pub(crate) use symbio_plugin_api::events::{
-    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_TASK_CONTROLLED,
-    EVENT_TURN_DISPATCH,
+    EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_TASK_CONTROLLED, EVENT_TURN_DISPATCH,
 };
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
@@ -143,29 +142,18 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 记忆找回：行表与事实表已经在用这个名字。
     EventDecl::new(EVENT_MEMORY_RECALLED, (Entity::Memory, Verb::Asserted)),
     // 巩固与遗忘（的两格）：写方 `memory_events::consolidate`、读方 [`crate::recall`]
-    // 都在本插件，名字与格位因此随本插件声明（DE-024 D-201）。同族的 `memory.encoded` /
-    // `memory.calibrated` 走另一条：`session` 也读它们，名字因此登记进本插件清单的
-    // `shared_events`，格位仍由本插件交出（DE-024 D-204 / D-205），不回内核。
+    // 都在本插件，名字与格位因此随本插件声明（DE-024 D-201）。同族的 `memory.encoded`
+    // 走另一条：`session` 也读它，名字因此登记进本插件清单的 `shared_events`，格位仍
+    // 由本插件交出（DE-024 D-204），不回内核。`memory.calibrated` 已随技能能力迁出，
+    // 格位与写方都在那个能力包（D-262）。
     EventDecl::new(
         EVENT_MEMORY_CONSOLIDATED,
         (Entity::Memory, Verb::Progressed),
     ),
     EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)),
-    // 编码进记忆（写方 `memory_events` / `skill_events`，读方还有 `session` 的 `stats`）：
+    // 编码进记忆（写方 `memory_events`，读方还有 `session` 的 `stats`）：
     // 跨插件消费 ⇒ 名字登记进清单、格位由本插件交出（DE-024 D-204）。
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
-    // 校准观测：技能**被用过之后**的一次命中 / 回退记录（`payload: { skill_id, fallback }`）。
-    //
-    // 为什么不能继续复用 `memory.recalled`：那是 DE-041 §3 的省格决定，代价落在**读侧**——
-    // 校准投影只能靠载荷有没有这两个字段认自己的输入，同一张格子两种语义，判别退化成
-    // 「谁恰好带了这两个字段」，那不是闭集：任何将来带这两个字段的事件都会被算进置信度。
-    // 给它一格后读侧按名字过滤，判别回到闭集；写侧不变（仍是轮末 `derived_facts` 收束族，
-    // **不开第二写通道**——I1）。
-    //
-    // 读侧投影 `symbio_core::calibration_for` 住在 core（loop 的路由阈值与 session 的
-    // 校准列同时消费它），而**名字由调用方在构造期交进来**（DE-024 D-205）：本插件交这个
-    // 常量，`session` 交清单生成物里同名的那条——core 一行都不读它。
-    EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)),
     // 控制面的一格（写方两个插件各一处：工具闸的熔断 / 拒因在本插件，打断处置在
     // `session` 的 inbox）：owner 是本插件，名字走清单生成，不回内核。
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
@@ -275,12 +263,17 @@ pub(crate) const FACTS: &[FactDecl] = &[
         expand: &[],
         fields: &["text", "status"],
     },
-    // 阶段事实：`result` 是这一步的结论（召回命中 / 续写种类）。
+    // 阶段事实：`result` 是这一步的结论（判决 / 续写种类）。
     //
     // `model_calls` 是**这一步打了几次模型**（D-122 决策 4 / 5）：`source` 记的是
     // 判决的**来源**，读不出「有没有打过模型」（模型调了而应答不可解析 ⇒
     // `source=fallback`）。这一格是那次模型往返在事实层唯一的**数**——判据侧
     // 拿它对账「观测 ⇔ 三格」。
+    //
+    // `recalled` / `resumed` 只在召回阶段格上出现：前者是本幕召回的条目清单
+    // （每条 `{seq, tag}`，seq 是事实的存储位置），后者标记这一幕是续写幕。
+    // 宿主不解释技能语义——它只把「本幕召回了什么」按名字公开给能力包
+    // （`turn.recalled` 视图），由能力包判哪条该摘。
     FactDecl {
         name: "turn.stage",
         port: None,
@@ -293,6 +286,8 @@ pub(crate) const FACTS: &[FactDecl] = &[
             "reason",
             "result",
             "model_calls",
+            "recalled",
+            "resumed",
         ],
     },
     // 用户格：`meta` 是可选的补充元数据（`prepare.rs` 只在非空时写）。
@@ -334,6 +329,10 @@ pub(crate) const FACTS: &[FactDecl] = &[
             "progress_max_per_turn",
             "readyset_cap",
             "is_persistent",
+            // 技能能力的两个开关（D-252：开关走事实，能力面不拿配置包）。
+            // 技能包的行与贡献者读这里，缺省 `false`（与出厂值同向）。
+            "skill_compile_enabled",
+            "skill_fast_path",
         ],
     },
     // 本轮派发档（`turn.dispatch`）**不在本表**：表里没有一行以它为前件或出口，
@@ -588,11 +587,15 @@ fn close_mark(events: &[Event], turn: u64, anchor_seq: u64) -> Option<&Event> {
         .max_by_key(|e| seq_of(e))
 }
 
-/// 轮头（v6）：五个策略行的开账条件全在这一格里，
+/// 轮头（v17）：五个策略行的开账条件全在这一格里，
 /// 收束行与执行行也是。
 ///
-/// `done` 三格按幕锚折叠（续写幕复用轮号，不能按轮扫全史）；`skill_hit` 取本幕
-/// 召回阶段的结论，`resumed` 区分续写幕与用户新发言。
+/// `done` 三格按幕锚折叠（续写幕复用轮号，不能按轮扫全史）；`resumed` 区分续写幕
+/// 与用户新发言。
+///
+/// v17：删掉 `skill_hit`——技能命中不再折进本视图。哪条技能该摘出提示词由能力包
+/// 自己的视图判（`skill.retreat`，宿主按名字读），本视图只负责暴露「本幕召回了什么」
+/// （`turn.recalled`）。
 ///
 /// v5 加一格 `tools_open`：本幕最近一条模型应答交回了工具调用、且其中至少一笔
 /// 还没被终局关掉。执行行的开账条件要它——工具批没关时模型不许再往下走
@@ -628,6 +631,10 @@ fn close_mark(events: &[Event], turn: u64, anchor_seq: u64) -> Option<&Event> {
 ///
 /// v16（`D-225`）：把内部的 `closed` 一并吐出来（口径不变，与 [`closure`] 同一条格）。
 /// [`next_round_trip`] 判「幕还开着」要它——那一格此前只在视图内部用。
+///
+/// v17（`D-262`）：去掉 `skill_hit` 一格——技能命中判定随能力搬回技能包（技能行
+/// 自己判、自己答），本视图不再需要从召回格里读出「命中了没有」。`reflex_answered`
+/// 保留：它读的是宿主代落的 `reflex` 阶段格，是收束行的前件。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let Some((turn, anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -668,20 +675,13 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
                 && after_anchor(e, anchor_seq)
         })
     };
-    let skill_hit = events.iter().any(|e| {
-        e.turn == turn
-            && e.kind == "turn.stage"
-            && str_field(e, "stage") == Some("recall")
-            && u64_field(e, "round") == Some(round)
-            && after_anchor(e, anchor_seq)
-            && str_field(e, "result") == Some("hit")
-    });
-    // 本幕是否已走快路作答（D-163）：`policy.reflex` 的出口只有这一格
-    // （`stage:"reflex"`，`result` 是命中的技能 id）。收束行据此在**零模型往返**
-    // 的轮上开账——快路不落 `response(port=model)`，`has_final` 折不出来。
+    // 本幕是否已走快路作答（D-163）：这一格是宿主在**技能行作答**之后代落的
+    // `turn.stage{stage:"reflex", result: <技能 id>}`（D-260）。收束行据此在
+    // **零模型往返**的轮上开账——快路不落 `response(port=model)`，`has_final`
+    // 折不出来。
     //
-    // `result:"miss"` 不算「已答」：那是执行体在命中集为空时用来关账的结局
-    // （正常不可达，开账条件与命中判定同源），这一轮该照常进模型往返。
+    // `result:"miss"` 不算「已答」：那是宿主在命中集为空时用来关账的结局
+    // （命中判定在技能行里、开账条件由 `turn.recalled` 给出），这一轮该照常进模型往返。
     let reflex_answered = events.iter().any(|e| {
         e.turn == turn
             && e.kind == "turn.stage"
@@ -869,7 +869,6 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "compress_done": stage_since("compress"),
         "is_persistent": flag("is_persistent"),
         "recall_done": stage_since("recall"),
-        "skill_hit": skill_hit,
         "reflex_answered": reflex_answered,
         // 本幕的请求输入已备好：接缝行的出口（`stage:"inputs"`，`result: ready`）。
         // 接缝行以 `false` 开账、以它为出口；它的 `prio`（52）排在收束与执行之前，
@@ -911,6 +910,61 @@ fn turn_stages(events: &[Event], _now: i64) -> serde_json::Value {
             })
             .collect(),
     )
+}
+
+/// 本幕召回条目**逐条摊开**（`turn.recalled`）：能力包的行按名字读的债键面。
+///
+/// 一条召回条目一行：`recall` = 记忆事件的 seq，`tag` = 记忆标签，`stage` = 落下
+/// 这张召回阶段格的 seq，`resumed` = 本幕是不是续写幕。技能行拿它当债键
+/// （`eq tag = "skill"`）——「哪些条目是技能、命中没命中」的判据住能力包
+/// （D-262），宿主只负责把召回这件事的**结果**如实摊开。
+///
+/// `stage` 进键的理由与 [`turn_stages`] 同一条：续写幕会重跑召回（恢复后事实源
+/// 变了），新幕有新锚、新格；同一轮同一技能因此是两笔债，而不是撞上幂等键的一笔。
+///
+/// 只取**本幕最近一张**召回格：幕外的历史格不参与本幕的债。
+fn turn_recalled(events: &[Event], _now: i64) -> serde_json::Value {
+    let Some((turn, anchor)) = drive_of(events) else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    let anchor_seq = anchor.map(seq_of).unwrap_or(0);
+    let Some(stage) = events
+        .iter()
+        .filter(|e| {
+            e.turn == turn
+                && e.kind == "turn.stage"
+                && str_field(e, "stage") == Some("recall")
+                && after_anchor(e, anchor_seq)
+        })
+        .max_by_key(|e| seq_of(e))
+    else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    let stage_seq = seq_of(stage);
+    let resumed = stage
+        .payload
+        .get("resumed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let entries: Vec<serde_json::Value> = stage
+        .payload
+        .get("recalled")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    Some(serde_json::json!({
+                        "recall": item.get("seq")?.as_u64()?,
+                        "tag": item.get("tag")?.as_str()?,
+                        "stage": stage_seq,
+                        "resumed": resumed,
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::Value::Array(entries)
 }
 
 /// 本幕是否已经收束（收束 / 兜底格出现在幕锚之后）。
@@ -1322,9 +1376,11 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     // v13 → v14（`D-222` 订正 2）：`model_open` 的关账格从 `sent` 挪到 `response` /
     // `failed` / `retry`（一次往返占两个环步）。读面补 `retry` 的 `port` / `id` /
     // `attempt`——判「这笔账关没关」的三个关账格里先前只有两个在面上。
+    // v16 → v17（`D-262`）：`skill_hit` 随技能能力退出读面（命中判定搬回技能包）。
+    // `turn.stage` 的 `result` 仍在读面里——`reflex_answered` 与 `answered` 都读它。
     ViewDecl {
         name: "turn_head",
-        ver: 16,
+        ver: 17,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -1389,6 +1445,29 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &["turn.stage"],
         cost: 4096,
         eval: turn_stages,
+    },
+    // 本幕召回条目（v1，`D-262`）：能力包的行按名字读的债键面。
+    //
+    // 输出召回阶段格摊开的每一条记忆：`{recall, tag, stage, resumed}`。名字进本插件
+    // 清单的 `shared_views`——读方是 `symbio-plugin-skill` 的 `skill.recall` 行，
+    // 它按 `eq tag = "skill"` 取自己那一批；宿主不替它判「哪条是技能」。
+    //
+    // `stage` 是落那张召回格的阶段事实 seq：续写幕会重跑召回，新幕锚 ⇒ 新格，
+    // 同一轮同一技能因此是两笔债，而不是撞上幂等键的一笔。
+    ViewDecl {
+        name: "turn.recalled",
+        ver: 1,
+        reads: &[
+            ("user.message", "id"),
+            ("turn.stage", "stage"),
+            ("turn.stage", "round"),
+            ("turn.stage", "recalled"),
+            ("turn.stage", "resumed"),
+        ],
+        // 输出只由召回阶段格折出；`user.message` 只用来定位幕锚。
+        evidence: &["turn.stage"],
+        cost: 4096,
+        eval: turn_recalled,
     },
     // 本幕是否收束：执行行与反射行的出口。
     //

@@ -321,68 +321,57 @@ fn recall_row_owes_only_at_turn_head_with_a_persistent_store() {
     assert!(!owes("policy.recall", &later, 0));
 }
 
+/// 跨插件读面（`D-262`）：`turn.recalled` 只认**幕锚之后最近的那一格**召回阶段，
+/// 并把它折成逐条 `(recall, tag, stage, resumed)`。
+///
+/// 技能行自己判命中、自己答；本插件交出去的只有这份清单。所以这里的判据是
+/// 「清单不夹带上幕的条目」——夹带会让技能行把上一幕的技能再认领一次。
 #[test]
-fn reflex_row_owes_on_a_recall_hit_outside_resume() {
-    let hit = vec![
-        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(
-            1,
-            "session.config",
-            json!({"classify_enabled": false, "is_persistent": true}),
-        ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "recall", "round": 0, "result": "hit"}),
-        ),
-    ];
-    assert!(owes("policy.reflex", &hit, 0));
+fn the_recall_list_is_the_latest_recall_stage_after_the_anchor() {
+    use super::super::stage_events::StageFact;
 
-    // 召回没命中。
-    let miss = vec![
-        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(
-            1,
-            "session.config",
-            json!({"classify_enabled": false, "is_persistent": true}),
-        ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "recall", "round": 0, "result": "miss"}),
-        ),
-    ];
-    assert!(!owes("policy.reflex", &miss, 0));
-
-    // 续写幕：同一轮号、恢复格成为新幕锚 ⇒ 召回命中也不走快路。
-    let mut resumed = hit.clone();
-    resumed.push(ev(
+    // 上一条（不属于本幕）：锚之前落的召回阶段，条目不得出现在清单里。
+    let before = ev(
         1,
         "turn.stage",
-        json!({"stage": "resume", "round": 0, "result": "approve"}),
-    ));
-    resumed.push(ev(
-        1,
-        "session.config",
-        json!({"classify_enabled": false, "is_persistent": true}),
-    ));
-    resumed.push(ev(1, "turn.stage", json!({"stage": "round", "round": 0})));
-    assert!(!owes("policy.reflex", &resumed, 0));
-
-    // 出口是快路自己的阶段格（D-163）：正文归收束格，快路只关自己这一笔账。
-    let mut answered = hit.clone();
-    answered.push(ev(
+        StageFact::recall(0, 0, &[(99, "经验".into())], false).payload(),
+    );
+    let user = ev(1, "user.message", json!({"text": "hi", "id": "u-1"}));
+    let live = [(5u64, "经验".to_string()), (6u64, "skill".to_string())];
+    let stage = ev(
         1,
         "turn.stage",
-        json!({"stage": "reflex", "round": 0, "result": "sk-1"}),
-    ));
-    assert!(!owes("policy.reflex", &answered, 0));
-    // 收束本身**不是**这一行的出口：只落 final、没落快路格 ⇒ 仍欠（那一轮照常进模型往返）。
-    let mut closed = hit.clone();
-    closed.push(ev(1, "chat.assistant.final", json!({"text": "答完了"})));
-    assert!(owes("policy.reflex", &closed, 0));
+        StageFact::recall(0, 0, &live, true).payload(),
+    );
+    // 更后一格（同一幕重跑召回）覆盖前一格：清单只留最新的那一次。
+    let later = [(7u64, "skill".to_string())];
+    let newest = ev(
+        1,
+        "turn.stage",
+        StageFact::recall(0, 0, &later, false).payload(),
+    );
+    let stage_seq = stage.seq.map(|s| s.value()).unwrap_or(0);
+    let newest_seq = newest.seq.map(|s| s.value()).unwrap_or(0);
+
+    let events = vec![before.clone(), user.clone(), stage.clone(), newest];
+    let list = super::view("turn.recalled", &events, 1, 0).expect("视图必须可求值");
+    assert_eq!(
+        list,
+        json!([{ "recall": 7, "tag": "skill", "stage": newest_seq, "resumed": false }]),
+        "只认最近那一格召回阶段"
+    );
+
+    // 对照：没有更后那一格时，清单来自本幕那一格（否则上一条判据在「恒取最新」
+    // 与「只取某一条」两种实现下都过）。
+    let events = vec![before, user, stage];
+    let list = super::view("turn.recalled", &events, 1, 0).expect("视图必须可求值");
+    assert_eq!(
+        list,
+        json!([
+            { "recall": 5, "tag": "经验", "stage": stage_seq, "resumed": true },
+            { "recall": 6, "tag": "skill", "stage": stage_seq, "resumed": true },
+        ])
+    );
 }
 
 #[test]
@@ -609,26 +598,8 @@ fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
     recall.push(stage(StageFact::ran(StageName::Recall, 0)));
     assert!(!owes("policy.recall", &recall, 0));
 
-    // `policy.reflex`：开账读的是**召回那格的 `result`**（`with_result` 是生产写它的唯一入口），
-    // 出口是快路自己的阶段格 `StageName::Reflex`（D-164：正文归收束格，不在这里）。
-    let mut reflex = vec![
-        user(),
-        config(json!({"is_persistent": true})),
-        round(),
-        stage(StageFact::ran(StageName::Recall, 0).with_result("hit")),
-    ];
-    assert!(owes("policy.reflex", &reflex, 0));
-    reflex.push(stage(StageFact::reflex(0, 1, "sk-1")));
-    assert!(!owes("policy.reflex", &reflex, 0));
-    // 没有答完的轮上，收束行也不该被快路「替」成已答：`result:"miss"` 只关账、不开收束。
-    let mut missed = vec![
-        user(),
-        config(json!({"is_persistent": true})),
-        round(),
-        stage(StageFact::ran(StageName::Recall, 0).with_result("hit")),
-    ];
-    missed.push(stage(StageFact::reflex(0, 1, "miss")));
-    assert!(!owes("policy.reflex", &missed, 0));
+    // 快路（`policy.reflex`）那一行已随技能能力退出本表（`D-262`）：命中判定、作答
+    // 与观测都是 `skill.recall` 的事，本插件只剩收束行读它代落的 `reflex` 阶段格。
 
     // `policy.report`：另一张视图（`report_due`，按静默时长与配额折）。出口格
     // `chat.assistant.reported` 用常量种类 + 生产 id 形状 `rp-{turn}-{no}`。
@@ -709,9 +680,9 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
         );
     }
     // 剩下的策略行正相反：它们没有执行体，所以那几处直问**就是**派发点（调度旁路，
-    // 归零对象）。轮首那四行（`policy.classify` / `policy.compress` / `policy.recall` /
-    // `policy.reflex`）已由轮首派发点接管（D-159 / D-163），`policy.report` 由批次
-    // 边界派发点接管（D-163），都不再在这笔账里。
+    // 归零对象）。轮首那三行（`policy.classify` / `policy.compress` / `policy.recall`）
+    // 已由轮首派发点接管（D-159），`policy.report` 由批次
+    // 边界派发点接管（D-163），都不再在这笔账里。快路出表（D-262），不再是一行。
     // 这一格是 `D-158` 记的那笔账的**归零点**：再接回一行就是倒退（旁路读数 0/1）。
     let unwired: Vec<&str> = ROWS
         .iter()
@@ -949,7 +920,6 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.classify",
             "policy.compress",
             "policy.recall",
-            "policy.reflex",
             // 接缝：轮首那几行的产物是它的前件，轮内的行接在它后面。
             "prepare-turn",
             "policy.report",
@@ -982,7 +952,6 @@ fn rows_are_stable_and_globally_ordered() {
             symbio_core::LatencyTier::Fast,
             symbio_core::LatencyTier::Fast,
             symbio_core::LatencyTier::Deep,
-            symbio_core::LatencyTier::Reflex,
             symbio_core::LatencyTier::Reflex,
             // 接缝只装配、不调模型：快速档。
             symbio_core::LatencyTier::Fast,
@@ -2769,18 +2738,13 @@ fn the_overlap_report_on_the_production_table() {
             // 事实，报告读不出「这是另一幕」，只知道键与读面相交。
             ("policy.classify", "policy.compress", head),
             ("policy.classify", "policy.recall", head),
-            ("policy.classify", "policy.reflex", head),
             ("policy.classify", "prepare-turn", head),
             ("policy.classify", "continue-turn", head),
             ("policy.compress", "policy.recall", head),
-            ("policy.compress", "policy.reflex", head),
             ("policy.compress", "prepare-turn", head),
             ("policy.compress", "continue-turn", head),
-            ("policy.recall", "policy.reflex", head),
             ("policy.recall", "prepare-turn", head),
             ("policy.recall", "continue-turn", head),
-            ("policy.reflex", "prepare-turn", head),
-            ("policy.reflex", "continue-turn", head),
             ("prepare-turn", "continue-turn", head),
             // 宣布行与 `model` 端口的两行同键：宣布之后请求开着（`model_open`），
             // 派发行欠、宣布行不欠；派出之后等待行欠、宣布行仍不欠。

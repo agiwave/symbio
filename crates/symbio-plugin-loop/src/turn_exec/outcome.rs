@@ -70,13 +70,12 @@ pub(crate) struct Settled<'b> {
     pub(crate) principal: String,
     pub(crate) to: String,
     pub(crate) user_text: String,
-    /// 本轮的召回视图与技能观测（轮末 `record_learning` 的两份入参）。
+    /// 本轮的召回视图（轮末 `record_learning` 的入参）。
     ///
     /// 借自调用方的本轮状态（[`super::super::chat_loop::state::TurnState`]），
     /// 与 [`Running`] 的寿命无关：环收工之后调用方才交得出来（`D-222` 裁决 5 的
     /// 「按步借、按步还」——环里那份借用已经还回去了）。
     pub(crate) recalled: Option<&'b super::super::recall::RecallView>,
-    pub(crate) skill_obs: &'b [(String, bool)],
     pub(crate) child_id: String,
     pub(crate) reasoning_child_id: String,
     pub(crate) reasoning_text: String,
@@ -86,7 +85,6 @@ pub(crate) struct Settled<'b> {
 pub(crate) async fn classify_turn<'b>(
     r: Running,
     recalled: Option<&'b super::super::recall::RecallView>,
-    skill_obs: &'b [(String, bool)],
 ) -> Result<Classified<'b>, TurnExecExit> {
     let Running {
         session,
@@ -166,13 +164,14 @@ pub(crate) async fn classify_turn<'b>(
         return Ok(Classified::Finished(Err(TurnExecExit::Aborted(partial))));
     }
 
-    // ── 收束派生事实（两半）：承诺 / 任务表 / 熔断 + 记忆与学习 ────────────────
+    // ── 收束派生事实（两半）：承诺 / 任务表 / 熔断 + 记忆 ─────────────────────
     //
     // **本步的存在理由**：轮次事实由运行器原生入格，这两半都**不是轮次事实**，而是
     // 本轮的**派生副作用**——运行器一处都不写，写方就是这里的 `record_derived` /
     // `record_learning`（溯源锚 = 运行器原生写的 `u-{turn}` 格）。不在这里补，
-    // 代际立约/ 任务表/ 熔断（DE-039 §6 验收 2）/ 长期记忆/
-    // 技能自我改进就整体失效。
+    // 代际立约/ 任务表/ 熔断（DE-039 §6 验收 2）/ 长期记忆
+    // 就整体失效。技能编译与回退观测不住这里：它们是技能能力包的收束贡献
+    // （`Contributor`，D-250 / D-262），由 `settle` 统一落格。
     //
     // 兜底收束的 `response` 为 `None`：兜底说明这条路没走通，固化它等于把失败写成
     // 套路。写侧闸拒（`closure_denied`，见运行器的 `closure_gate`）：收束格
@@ -221,7 +220,6 @@ pub(crate) async fn classify_turn<'b>(
         to,
         user_text,
         recalled,
-        skill_obs,
         child_id,
         reasoning_child_id,
         reasoning_text,

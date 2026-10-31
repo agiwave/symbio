@@ -32,7 +32,6 @@ mod recall_score;
 // 轮中汇报那一行的落点与能力口（DE-015 的 D-163）。
 mod report_exec;
 mod session_port;
-mod skill_events;
 mod stage_events;
 mod tokenizer;
 mod tool_dispatch;

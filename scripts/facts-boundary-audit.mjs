@@ -59,7 +59,6 @@ const ROOT = rootArg
  *  `elimination` 随 D-219 迁入 `symbio-plugin-agent` 的 `before` 实现：它只读
  *  控制面批首算好的读数，连取事实的入口都没有，故退出本清单。 */
 const CAPABILITY_FILES = [
-  'crates/symbio-plugin-loop/src/skill_events.rs',
   'crates/symbio-plugin-task/src/task.rs',
   'crates/symbio-plugin-loop/src/memory_events.rs',
   'crates/symbio-plugin-session/src/worker_progress.rs',

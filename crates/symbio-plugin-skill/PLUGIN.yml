@@ -3,3 +3,12 @@ plugin_id: skill
 plugin_comment: 技能
 plugin_assembly: sub_agent
 plugin_order: 150
+# 本插件**拥有**的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
+# crates/symbio-plugin-api/src/events.rs）。格位仍住在 `decl::EVENTS`。
+# `memory.encoded` 不在这里：它的格位由 loop 交（会话统计也读它，E-009 的反面），
+# 本插件只交事实形状与写入。
+shared_events: memory.calibrated
+# 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
+# crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住 `decl::VIEWS`。
+# 宿主（loop）按这个名字过滤本轮提示词：低置信技能不进模型面前。
+shared_views: skill.retreat

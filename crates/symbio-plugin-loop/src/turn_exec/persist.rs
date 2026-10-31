@@ -74,7 +74,6 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         to,
         user_text,
         recalled,
-        skill_obs,
         child_id,
         reasoning_child_id,
         reasoning_text,
@@ -127,7 +126,8 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
     // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。
     super::super::derived_facts::record_elimination(store.as_ref(), turn_no, user_seq);
-    // 记忆与学习：同一函数（`record_learning`）。
+    // 记忆：编码 / 检索锚 / 巩固（`record_learning`）。技能编译与回退观测不在这里——
+    // 它们是技能能力包的收束贡献（`land_contributions`，D-250 / D-262）。
     super::super::derived_facts::record_learning(
         session.session_id(),
         // `store` 是 `Arc<dyn Store>`（轮内注入闭包要 `'static`），而本函数
@@ -141,8 +141,6 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &format!("t{turn_no}"),
         response,
         recalled,
-        skill_obs,
-        session.skill_compile_enabled(),
         symbio_core::clock_now_ms(),
     );
 
@@ -353,12 +351,12 @@ pub(crate) async fn execute_final_reply_turn(
             ))
         }
     };
-    // ── 记忆与学习（与 [`persist_turn`] 同一条口径）──────────────────────
+    // ── 记忆（与 [`persist_turn`] 同一条口径）──────────────────────────────
     //
     // 三个跳过条件与 `classify_turn` 逐条对齐：中止 / 收束被授权拒绝 ⇒ 本轮
-    // 没有定稿产出，派生事实全不写；兜底 ⇒ 只写用户经验（判断与技能编译都不写，
-    // 失败的路不该被固化成记忆）。**没有工具交换不构成跳过条件**——记忆是轮级
-    // 派生，不是工具副产物。
+    // 没有定稿产出，派生事实全不写；兜底 ⇒ 只写用户经验（收束贡献拿到的
+    // `response` 是 `None`，技能编译因此不写）。**没有工具交换不构成跳过条件**
+    // ——记忆是轮级派生，不是工具副产物。
     if !outcome.aborted && !outcome.closure_denied {
         let principal = symbio_core::request_principal(ctx.as_ref());
         let response = (!outcome.fell_back).then_some(reply);
@@ -387,8 +385,6 @@ pub(crate) async fn execute_final_reply_turn(
             // 答话轮不建召回视图：分类器判 `direct` 的前提就是「现有对话里答得出」，
             // 这一轮没有检索往返，也就没有 `memory.recalled` 可记。
             None,
-            &[],
-            session.skill_compile_enabled(),
             symbio_core::clock_now_ms(),
         );
     }

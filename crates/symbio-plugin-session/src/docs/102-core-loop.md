@@ -311,8 +311,8 @@ struct TurnState {
  last_saved: usize, // 增量落库锚点
  drive_seq: u64, // 本幕的锚：新轮 = 用户格 seq；续幕 = 新落的 `round` 格
  now_ms: i64, // 本幕的 `now`：幕锚那条事实的 ts（判据 12）
- // 其余是本轮的读侧产物：input_utterance / recall_view / skill_route / skill_hits /
- // context_sections / opening_text / opening_dialog / head_answer / head_reflex
+ // 其余是本轮的读侧产物：input_utterance / recall_view / context_sections /
+ // opening_text / opening_dialog / head_answer
  // （各自由对应的行在幕内填一次，收幕交给归类与落库）
 }
 ```

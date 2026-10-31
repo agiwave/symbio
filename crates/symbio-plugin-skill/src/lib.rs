@@ -1,6 +1,9 @@
+mod contributor;
+mod decl;
 mod detail;
 mod loader;
 mod plugin;
+mod row;
 mod skill_response;
 mod skill_tool;
 mod types;

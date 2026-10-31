@@ -104,8 +104,9 @@ pub struct TurnInput {
     /// `None` = 调用方不提供信号（单测 / 无中止语义的路径），行为与接线前逐字一致。
     pub abort: Option<symbio_core::ExecAbortSignal>,
     // 本轮装配进哪一时延档**不是**本包的字段（`D-223` 订正 1）：档位折自
-    // `policy.reflex` 的出口格（`turn_head.reflex_answered`），而那是轮首的一行——
-    // 草稿在幕首就建，那一刻那一格还没有。它的落点是接缝（`chat_loop::land_dispatch`）。
+    // 技能行作答后宿主代落的 `stage:"reflex"` 格（`turn_head.reflex_answered`），
+    // 而那是轮首的一行——草稿在幕首就建，那一刻那一格还没有。它的落点是接缝
+    // （`chat_loop::land_dispatch`）。
     /// 对话窗口（最近的 turn 数，**含当前轮**）；`None` = 全量。
     ///
     /// 会话轮必填——WAL 里的事实只增不减，不带窗口的 prompt 会随会话
@@ -191,8 +192,8 @@ pub struct TurnInput {
     /// `ProviderLlmAdapter::generate_turn` 实测 → `WordingReply.cost_ms` →
     /// 此处 → `chat.assistant.final.cost_ms`。
     pub final_cost_ms: u64,
-    // 快路正文**不是**本包的字段，理由与上面那条逐字相同：`policy.reflex` 是轮首
-    // 的一行，它的产物在草稿建好之后才到，入口是 [`TurnSession::set_reflex`]。
+    // 快路正文**不是**本包的字段，理由与上面那条逐字相同：技能行是轮首的一行，
+    // 它的产物在草稿建好之后才到，入口是 [`TurnSession::set_reflex`]。
     // 两者的区别（`final_reply` 不进驱动循环、`reflex` 照进驱动循环）写在那个入口上。
     /// 定稿答话**对话面节点**的身份与标记（仅 `final_reply` 有值时消费）。
     ///
@@ -560,7 +561,7 @@ impl TurnSession {
     /// 答话（不进驱动循环，收束格由轮首准备就地落），这个是技能命中的快路（照进驱动
     /// 循环，收束归 `close-turn` 行）。
     ///
-    /// 为什么它也不在 `TurnInput` 里：`policy.reflex` 是轮首的一行，它的产物在草稿
+    /// 为什么它也不在 `TurnInput` 里：技能行是轮首的一行，它的产物在草稿
     /// 建好之后才到——与 [`Self::set_prefix`] 同一条时序理由。
     pub(crate) fn set_reflex(&mut self, answer: Option<ReflexAnswer>) {
         if let Some(answer) = answer {

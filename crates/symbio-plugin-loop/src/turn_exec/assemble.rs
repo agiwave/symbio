@@ -8,7 +8,8 @@
 //! ## 为什么分幕首与接缝两段
 //!
 //! 草稿要排到幕首（`D-222` 订正 3：`Ctx.session` 不是 `Option`），而三格事实要等
-//! `policy.compress` / `policy.reflex` / 判决那几行跑完才有（`D-223` 订正 1 / 订正 2）。
+//! `policy.compress` / 技能行的作答（`stage:"reflex"`）/ 判决那几行跑完才有
+//! （`D-223` 订正 1 / 订正 2，`D-262`）。
 //! 两件事落在同一段里，就必然有一头是错的：要么草稿建在格之后（搬不到幕首），要么格
 //! 落在草稿之前（档位读不到）。于是幕首段只做「不需要等」的事，接缝段专管「要等」的
 //! 四件——两段之间的边界就是 `TurnRunner::begin`。
@@ -91,7 +92,7 @@ pub(crate) async fn land_consolidation(session: &LoopSession, consolidation: Opt
 ///
 /// | 动作 | 为什么要等那几行 | 落成什么 |
 /// |---|---|---|
-/// | 定档 | 折自 `policy.reflex` 的出口格（`turn_head.reflex_answered`） | `turn.dispatch`（`tier` / `budget_ms` / `principal`） |
+/// | 定档 | 折自宿主代落的 `stage:"reflex"` 格（`turn_head.reflex_answered`） | `turn.dispatch`（`tier` / `budget_ms` / `principal`） |
 /// | 首响上线 | 判决行 `Escalate` 的那句话 | `chat.assistant.opening` + 一帧实时面 |
 /// | （压缩入格） | 同为本幕的前置动作，见 [`land_consolidation`] | `session.consolidated` + 归档 |
 ///
@@ -284,8 +285,8 @@ pub(crate) async fn assemble_turn(
     });
 
     // 档位与两格事实**不在这里落**（`D-223` 订正 1 / 订正 2）：档位折自
-    // `policy.reflex` 的出口格，开场白是判决行 `Escalate` 的首响——两者都要等轮首
-    // 那几行跑完。落点是接缝（[`land_seam`]），由 [`super::call`] 在 `begin` 之后调。
+    // 技能行作答后宿主代落的 `stage:"reflex"` 格（`D-260`），开场白是判决行
+    // `Escalate` 的首响——两者都要等轮首那几行跑完。落点是接缝（[`land_seam`]），由 [`super::call`] 在 `begin` 之后调。
     //
     // 本段（幕首）只做「不需要等那几行」的事：取事实源、补落寄存变更、建收集器与
     // 流式桥、定主体与来源主体。

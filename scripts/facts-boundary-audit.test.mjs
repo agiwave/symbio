@@ -17,7 +17,6 @@ const script = path.join(scriptDir, 'facts-boundary-audit.mjs')
 
 /** 与守卫里的清单一致：夹具要让每个文件都存在，否则 FB-002 会先报清单漂移。 */
 const CAPABILITY_FILES = [
-  'crates/symbio-plugin-loop/src/skill_events.rs',
   'crates/symbio-plugin-task/src/task.rs',
   'crates/symbio-plugin-loop/src/memory_events.rs',
   'crates/symbio-plugin-session/src/worker_progress.rs',
@@ -101,13 +100,13 @@ test('FB-001 正例：存储层与测试夹具可以直接开档', () => {
 test('FB-002 反例：能力文件拼路径 ⇒ 红', () => {
   const r = audit(
     repo({
-      'crates/symbio-plugin-loop/src/skill_events.rs':
+      'crates/symbio-plugin-task/src/task.rs':
         'fn f() { let p = paths::session_dir(root, id).join(V2_WAL_FILE); }\n',
     }),
   )
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /FB-002/, out(r))
-  assert.match(out(r), /skill_events\.rs:1/, out(r))
+  assert.match(out(r), /task\.rs:1/, out(r))
 })
 
 test('FB-002 正例：词只出现在注释里不算违规', () => {

@@ -171,6 +171,14 @@ impl StageRuntime {
         }
     }
 
+    /// 夹具用：把快路正文寄进草稿。生产里由宿主在 `RowStep::Answer` 之后同一处调用
+    /// （`turn_exec::run_plugin_row`），夹具只是把那一半补上。
+    #[cfg(test)]
+    pub(crate) fn set_reflex_for_test(&mut self, text: Option<String>) {
+        self.draft
+            .set_reflex(text.map(|text| super::super::turn_runner::ReflexAnswer { text }));
+    }
+
     /// 轮首那一片的**owned 半边**：桥 / 发射口 / 根 id / 主体 / 汇报面全从宿主面克隆。
     ///
     /// 写在幕上而不是每个调用点各拼一份：这两组句柄只该有一个来源（装配束），
@@ -707,14 +715,9 @@ async fn close_stage(
     let Driver::Control(control) = driver else {
         return Ok(CloseEnd::Running(Box::new(running)));
     };
-    // 归类（中止 / 授权拒 / 正常）与派生事实落格。借的是本轮状态里
-    // 那两份读数（召回视图 / 技能观测），它们在幕内被填好、环收工之后才交得出来。
-    let res = classify_and_persist(
-        running,
-        control.turn.recall_view.as_ref(),
-        &control.turn.skill_route,
-    )
-    .await?;
+    // 归类（中止 / 授权拒 / 正常）与派生事实落格。借的是本轮状态里的
+    // 召回视图，它在幕内被填好、环收工之后才交得出来。
+    let res = classify_and_persist(running, control.turn.recall_view.as_ref()).await?;
     // 收口：镜像并入（v2 原生产生的消息）→ 中止复查 → 定格 → 落库 → 封根。
     //
     // 次序与 `stage` 拆出去之前逐字一致：`finalize_turn_root` 必须晚于定格（Turn 是
@@ -751,14 +754,13 @@ async fn close_stage(
 
 /// 归类与落格：提前了结（中止 / 授权拒）原样交回，正常收束落派生事实。
 ///
-/// 单列一个函数只为一件事：`classify_turn` 借的是本轮状态里的两份读数，而它返回的
+/// 单列一个函数只为一件事：`classify_turn` 借的是本轮状态里的召回视图，而它返回的
 /// `Settled` 还带着那个借用——收在一处，借用在返回前结束。
-async fn classify_and_persist<'b>(
+async fn classify_and_persist(
     running: Running,
-    recalled: Option<&'b super::super::recall::RecallView>,
-    skill_obs: &'b [(String, bool)],
+    recalled: Option<&super::super::recall::RecallView>,
 ) -> Result<super::ExecTurnResult, TurnExecExit> {
-    match classify_turn(running, recalled, skill_obs).await? {
+    match classify_turn(running, recalled).await? {
         super::Classified::Finished(v) => v,
         super::Classified::Settled(settled) => persist_turn(settled),
     }

@@ -91,15 +91,15 @@ impl VerdictSource {
 /// 派发侧的行由 `loop_rows` 的 `Decl.name` 指认，本枚举只管事实里记了什么）。
 ///
 /// `policy.report` 也在这里：它的到期由 `report_due` 视图算，但「这一档静默试过
-/// 没有」得记在日志上（[`StageName::Report`]）。快路（`policy.reflex`）在这里：
-/// `reflex` 是它的出口格（见 [`StageName::Reflex`]）。
+/// 没有」得记在日志上（[`StageName::Report`]）。快路（技能行作答）在这里：
+/// `reflex` 是宿主代落的出口格（见 [`StageName::Reflex`]）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StageName {
     Decide,
     Compress,
     Recall,
-    /// 反射档这一轮已作答（`result` = 命中的技能 id）。它是 `policy.reflex`
-    /// 的出口，也是 `turn_head.reflex_answered` 的唯一来源。
+    /// 反射档这一轮已作答（`result` = 宿主的作答结局）。它是技能行
+    /// `RowStep::Answer` 的宿主代落格，也是 `turn_head.reflex_answered` 的唯一来源。
     Reflex,
     /// 这一次静默区间报过（`result` = `sent` / `silent`）。
     ///
@@ -163,8 +163,8 @@ pub(crate) struct StageFact {
     pub(crate) round: usize,
     /// 仅 `classify` 携带；其余阶段 `None`（载荷不带 `reason` / `source`）。
     pub(crate) verdict: Option<VerdictFact>,
-    /// 这一步的**结论**：`recall` 的 `hit` / `miss`、`resume` 的恢复种类、
-    /// `round` 无结论。`None` = 这一步没有可记的结论（载荷不带 `result`）。
+    /// 这一步的**结论**：`resume` 的恢复种类、`reflex` 的作答结局、`round` 无结论。
+    /// `None` = 这一步没有可记的结论（载荷不带 `result`）。
     pub(crate) result: Option<String>,
     /// 同一性里的**附加段**（不进载荷）：`resume` 用它区分同一轮同类的两次恢复
     /// （两次 `approve` 是同一种动作，却是两次不同的恢复）。`None` = 同一性只由
@@ -178,6 +178,16 @@ pub(crate) struct StageFact {
     ///
     /// 只有 `decide` 与 `compress` 这两步带它（其余阶段恒 0，载荷里不写）。
     pub(crate) model_calls: u64,
+    /// 本幕召回的**逐条结果**（仅 `recall` 携带）：`(记忆事件 seq, 标签)`。
+    ///
+    /// 它是 `turn.recalled` 视图的数据面——能力包的行按这条名单取自己的债
+    /// （`eq tag = "skill"`）。宿主只把召回结果如实摊开，不判「哪条是技能」。
+    pub(crate) recalled: Vec<(u64, String)>,
+    /// 本幕是不是续写幕（仅 `recall` 携带）。
+    ///
+    /// 续写幕里「命中技能就快路作答」不成立（D-260 的行作答要新开轮），能力包的
+    /// 行读这一格自己把快路关掉——宿主不替它判。
+    pub(crate) resumed: bool,
 }
 
 impl StageFact {
@@ -190,6 +200,8 @@ impl StageFact {
             result: None,
             identity: None,
             model_calls: 0,
+            recalled: Vec::new(),
+            resumed: false,
         }
     }
 
@@ -241,6 +253,8 @@ impl StageFact {
             result: None,
             identity: None,
             model_calls,
+            recalled: Vec::new(),
+            resumed: false,
         }
     }
 
@@ -257,27 +271,37 @@ impl StageFact {
         fact
     }
 
-    /// 召回格：本幕的技能命中与否（`result` = `hit` / `miss`）。
+    /// 召回格：本幕召回了哪几条、是不是续写幕。
+    ///
+    /// `recalled` 是**逐条结果**（记忆事件 seq + 标签）——`turn.recalled` 视图的数据面，
+    /// 能力包的行按它取自己的债（`eq tag`）。`resumed` 让那一行自己决定快路开不开
+    /// （续写幕不走快路，D-260）。
     ///
     /// 同一性带上本幕的锚（`drive_seq`）——与 [`Self::compress`] 同一条理由：召回在
     /// 续写幕会重跑（恢复后事实源变了，本轮视图应当重取），只按 `(turn, round, stage)`
-    /// 记就撞首幕那一格 ⇒ 本幕的 `result` **不落**。而这一行的收口与 `policy.reflex`
-    /// 的 `skill_hit` 都只读**本幕锚之后**的那一格（`turn_stages` / `turn_head` 按幕锚
-    /// 折叠）：撞掉的不是载荷，是判据本身。
-    pub(crate) fn recall(round: usize, drive_seq: u64, result: &str) -> Self {
-        let mut fact = Self::ran(StageName::Recall, round).with_result(result);
+    /// 记就撞首幕那一格 ⇒ 本幕的载荷**不落**。而 `turn.recalled` 只读**本幕锚之后**
+    /// 的那一格：撞掉的不是载荷，是判据本身。
+    pub(crate) fn recall(
+        round: usize,
+        drive_seq: u64,
+        recalled: &[(u64, String)],
+        resumed: bool,
+    ) -> Self {
+        let mut fact = Self::ran(StageName::Recall, round);
         fact.identity = Some(drive_seq.to_string());
+        fact.recalled = recalled.to_vec();
+        fact.resumed = resumed;
         fact
     }
 
-    /// 反射档格：这一轮由技能正文直接作答（`result` = 命中的技能 id）。
+    /// 反射档格：这一轮的技能行直接作答（`result` = 宿主的作答结局）。
     ///
-    /// 同一性带上本幕的锚（`drive_seq`）——与 [`Self::recall`] 同一条理由：快路
-    /// 只在**新开轮**成立（`policy.reflex` 的 `resumed = false`），续写幕不会重跑；
-    /// 但同一轮若因事实源补落重放，撞格取回首幕才是对的语义。
+    /// 这一格由**宿主**在 `RowStep::Answer` 之后代落（D-260）：执行体只答，不落
+    /// 「已答」也不落收束；收束格由 `close-turn` 统一落（D-163）。`turn_head.
+    /// reflex_answered` 读它，收束行因此在零模型往返的轮上也开得出账。
     ///
-    /// 这一格是 `policy.reflex` 的**出口**：执行体只落「已答」，收束格由
-    /// `close-turn` 统一落（D-163）。
+    /// 同一性带上本幕的锚（`drive_seq`）——与 [`Self::recall`] 同一条理由：同一轮
+    /// 若因事实源补落重放，撞格取回首幕才是对的语义。
     pub(crate) fn reflex(round: usize, drive_seq: u64, skill_id: &str) -> Self {
         let mut fact = Self::ran(StageName::Reflex, round).with_result(skill_id);
         fact.identity = Some(drive_seq.to_string());
@@ -347,6 +371,17 @@ impl StageFact {
         // 判决与压缩。其余阶段恒 0，载荷里不写这个字段——「恒 0 的字段」是噪声。
         if matches!(self.stage, StageName::Decide | StageName::Compress) {
             payload["model_calls"] = serde_json::Value::from(self.model_calls);
+        }
+        // 召回的结果只对 `recall` 有意义：逐条 seq + 标签，以及本幕是不是续写幕。
+        // 它们是 `turn.recalled` 的数据面，别的阶段不写这两格。
+        if self.stage == StageName::Recall {
+            payload["recalled"] = serde_json::Value::Array(
+                self.recalled
+                    .iter()
+                    .map(|(seq, tag)| serde_json::json!({ "seq": seq, "tag": tag }))
+                    .collect(),
+            );
+            payload["resumed"] = serde_json::Value::Bool(self.resumed);
         }
         payload
     }

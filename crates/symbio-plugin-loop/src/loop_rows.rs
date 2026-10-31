@@ -12,8 +12,8 @@
 //! 0  authorize-tool─ 授权级联：一笔工具请求先判「放行 / 拒绝」
 //! 10 classify       ── 轮首判决（本幕 round=0 且有发言）
 //! 30 compress      ── 自动压缩（开关开着且本幕还没压过）
-//! 40 recall        ── 记忆 / 技能 / 任务段（有持久事实源且本幕还没召回）
-//! 50 reflex        ── 技能快路（非续写幕且本幕召回命中）
+//! 40 recall        ── 记忆 / 任务段（有持久事实源且本幕还没召回）
+//! 50 skill.recall  ── 技能判定（能力包的行：过闸 / 作答 / 落观测，D-262）
 //! 52 prepare-turn  ── 接缝：轮首那几行跑完、任何请求之前的一次性装配
 //! 53 report        ── 中途汇报（静默到期 ∧ 配额未满 ∧ 停在已关闭的批次边界）
 //! 55 close-turn ── 收束：本幕最近一次模型应答没有工具调用
@@ -72,9 +72,10 @@ use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_SESSION_CONFIG, EVENT_TURN_
 
 /// 这张表里**接了线的执行体**：`execute`（宣布一次模型往返）、`close`（收束）、
 /// `opener` / `authorizer` / `courier`（工具批三笔债）、`relay` / `waiter`
-/// （模型往返的派出与收回）、轮首那四条 `classify` / `compress` / `recall` /
-/// `reflex`、接缝 `seam`，以及 `report`——**一张表就是全部**（`D-222` 裁决 5），
-/// 它们借的 `Ctx` 面不同，名字面上没有任何区别。
+/// （模型往返的派出与收回）、轮首那三条 `classify` / `compress` / `recall`、
+/// 接缝 `seam`，以及 `report`——**一张表就是全部**（`D-222` 裁决 5），
+/// 它们借的 `Ctx` 面不同，名字面上没有任何区别。技能行不在本表：它是能力包提交的
+/// `plugin_row`（`by = PLUGIN_ROW`），名字与判据都住那个包（D-262）。
 ///
 /// `by` 只有两种取值（DE-015 §2.2）：`Some(名字)` ⇒ 引擎跑它，`None` ⇒ 引擎什么都不做。
 /// 「还没接线」不是第三种取值，也不是求解器的第四个过滤条件（D-118 订正 1）——
@@ -144,12 +145,6 @@ const COMPRESS: &str = "compress";
 /// 名字与旧行 `effects.classify` 的那个能力名同源：这一行跑的是「问一次 `classify`
 /// 并**执行**它判成的枚举」，判决本身住在能力插件里，执行体只做编排与入账。
 const CLASSIFY: &str = "classify";
-/// 快路执行体（D-163）：`policy.reflex` 行选中的动作。
-///
-/// 它只落「反射档已答」那一格，并把技能正文寄进本轮状态；收束格由
-/// [`ACTOR_CLOSE`] 统一落——两个执行体都写 `final` 会让依赖图成环
-/// （`reflex → close → execute → reflex`，DE-015 §3.4 第 1 条）。
-const REFLEX: &str = "reflex";
 /// 接缝执行体：`prepare-turn` 行选中的动作（`D-223` 订正 1）。
 ///
 /// 它是「轮首那几行跑完、任何请求之前」的那一次装配：压缩入格、水位与根骨架、
@@ -295,7 +290,8 @@ const ACTOR_RELAY: ActorDecl = ActorDecl {
 /// 它**不**覆盖轮首准备的定稿答话分支：那一轮一次模型往返都不发，收束格由
 /// `turn_runner/prepare.rs` 就地落，但**构造点仍只有一个**（`settle::land_final`，`TC-4`）——
 /// 「谁有权写」的答案也仍是这一行的 `writes`。快路（技能命中）同样零往返，
-/// 但它进驱动循环：`policy.reflex` 只落「已答」，收束格仍归这一格（D-163）。
+/// 但它进驱动循环：技能行的 `RowStep::Answer` 只落「已答」并由宿主代落阶段格，
+/// 收束格仍归这一格（D-163 / D-260）。
 ///
 /// 两条收束格都在它名下：`chat.assistant.final`（答完了 / 中止）与
 /// `chat.assistant.fallback`（模型没答成 / 空答）。独占不是洁癖，是装载期的硬约束：
@@ -370,19 +366,6 @@ const ACTOR_CLASSIFY: ActorDecl = ActorDecl {
     name: CLASSIFY,
     // 判决可能落到模型，但不生成：快速档（与行的 `tier` 同值，更慢就装载红）。
     mode: LatencyTier::Fast,
-    reads: &[],
-    writes: &[EVENT_TURN_STAGE],
-};
-
-/// 快路执行体的声明（D-163）。
-///
-/// 名单只有 `turn.stage` 一格：快路的**出口**就是 `stage:"reflex"` 那一格，
-/// 装载期第 6 条判的正是「执行体走不走得到自己那一行的收口」。技能正文随本轮
-/// 状态交给收束动作，**不进**事实网格（正文属于收束格的载荷，D-163）。
-const ACTOR_REFLEX: ActorDecl = ActorDecl {
-    name: REFLEX,
-    // 技能命中即出话、零模型往返：反射档（与行同档，更慢就装载红）。
-    mode: LatencyTier::Reflex,
     reads: &[],
     writes: &[EVENT_TURN_STAGE],
 };
@@ -524,10 +507,6 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_RECALL,
         run: super::turn_exec::run_recall,
-    },
-    ActorEntry {
-        decl: ACTOR_REFLEX,
-        run: super::turn_exec::run_reflex,
     },
     ActorEntry {
         decl: ACTOR_SEAM,
@@ -885,36 +864,6 @@ pub(crate) static ROWS: &[Decl] = &[
             source: "turn_stages",
             key: &["turn", "round"],
             eq: &[("stage", Lit::Str("recall"))],
-        }],
-        unless: &[],
-    },
-    // ── 反射档（技能快路）────────────────────────────────────────────────
-    //
-    // 续写幕不走快路（落格形状会撞幂等键）；`skill_hit` 来自本幕召回阶段的
-    // `result`，所以「命中」这件事第一次有了事实形态。
-    //
-    // 出口是 `reflex` 阶段格（D-163）：执行体只落「已答」并把技能正文寄进本轮
-    // 状态，收束格由 `close-turn` 统一落——快路自身再写 `final` 会让依赖图成环。
-    // 收束行据此在**零模型往返**的轮上也能开出账（`turn_head.reflex_answered`）。
-    Decl {
-        name: "policy.reflex",
-        prio: 50,
-        by: Some(REFLEX),
-        // 快路就是「不调模型」：反射档是它的定义。
-        tier: LatencyTier::Reflex,
-        expand: None,
-        owes: Pattern {
-            source: "turn_head",
-            key: &["turn", "round"],
-            eq: &[
-                ("resumed", Lit::Bool(false)),
-                ("skill_hit", Lit::Bool(true)),
-            ],
-        },
-        until: &[Pattern {
-            source: "turn_stages",
-            key: &["turn", "round"],
-            eq: &[("stage", Lit::Str("reflex"))],
         }],
         unless: &[],
     },
@@ -1722,36 +1671,19 @@ pub(crate) fn view(name: &str, events: &[Event], turn: u64, now: i64) -> Option<
     frozen()?.eval(name, turn_slice(events, turn), now)
 }
 
-/// 这一行携带的档位。未登记 ⇒ 深度档（fail-safe：不静默提速）。
+/// 本幕的**服务档**：快路作答 ⇒ 反射档，否则深度档。
 ///
-/// 读的是**冻结表**里的那一行（`frozen.rows()`），不是 `static ROWS`：装载入口用
-/// `static` 灌表，读侧只认表——否则「改了 static 但表没重装」这种漂移就没有出口。
-pub(crate) fn tier(name: &str) -> LatencyTier {
-    frozen()
-        .and_then(|frozen| {
-            frozen
-                .rows()
-                .iter()
-                .find(|d| d.name == name)
-                .map(|d| d.tier)
-        })
-        .unwrap_or(LatencyTier::Deep)
-}
-
-/// 本幕的**服务档**：快路作答 ⇒ `policy.reflex` 那一行携带的档，否则深度档。
+/// ## 为什么读 `reflex_answered`
 ///
-/// ## 为什么读 `reflex_answered` 而不是 `skill_hit`
-///
-/// `skill_hit` 是 `policy.reflex` 的**开账前件**（召回命中），`reflex_answered` 是
-/// **已作答**（`stage:"reflex"` 且 `result` 非 `miss`）。两者在正常路径等价，但
-/// `miss` 那一支（命中集为空、行自己关账）只有后者分得出来——照 `skill_hit` 定档会给
-/// 一个要跑模型往返的幕发 80ms 的预算，`I3` 当场误报（[`D-223`] 订正 1）。
+/// 它是「技能行**已作答**」在事实面上的唯一出口（宿主代落的
+/// `stage:"reflex"` 格，D-260）。只有它分得清「命中并答了」与「判过但没答」
+/// ——照一个开账前件定档会给要跑模型往返的幕发 80ms 的预算，`I3` 当场误报
+/// （[`D-223`] 订正 1）。
 ///
 /// ## 为什么读视图而不是读执行体的寄存物
 ///
-/// 寄存物（`TurnState::head_reflex`）是**执行侧**的副本，视图是事实的公开形态。档位要
-/// 入的是幕级事实（`turn.dispatch`），写它的那一侧（接缝）手里只有事实源——读视图让
-/// 「档位」与「快路行欠不欠」逐字同源，不由「两边记得同步」保证。
+/// 档位要入的是幕级事实（`turn.dispatch`），写它的那一侧（接缝）手里只有事实源——
+/// 读视图让「档位」与「技能行答没答」逐字同源，不由「两边记得同步」保证。
 ///
 /// [`D-223`]: ../../../../docs/003-design/022-行表与派发面.md "DE-022-行表与派发面"
 pub(crate) fn turn_tier(events: &[Event], turn: u64, now: i64) -> LatencyTier {
@@ -1759,7 +1691,7 @@ pub(crate) fn turn_tier(events: &[Event], turn: u64, now: i64) -> LatencyTier {
         .and_then(|v| v.get("reflex_answered").and_then(|b| b.as_bool()))
         .unwrap_or(false);
     if answered {
-        tier("policy.reflex")
+        LatencyTier::Reflex
     } else {
         LatencyTier::Deep
     }

@@ -1,4 +1,4 @@
-//! v2 派生事实写入——效果（承诺 / 任务表 / 文件变更…）+ 熔断 + 记忆与学习。
+//! v2 派生事实写入——效果（承诺 / 任务表 / 文件变更…）+ 熔断 + 记忆。
 //!
 //! `turn_exec` 在轮末调用本模块的两个写方，把本轮的**派生副作用**落进同一份持久事实源
 //! （<会话目录>/`v2-events.wal`，`paths::V2_WAL_FILE` 单源）。
@@ -7,9 +7,9 @@
 //!
 //! 轮次事实（`u-{turn}` 开口 / 收束格）由 v2 运行器**原生**入格，运行器一处不缺。
 //! 但下面这些运行器**一处都不写**——它们的出参在工具执行层（`EffectInput` /
-//! 熔断理由）与读侧（召回视图 / 技能判定），由分发方经
-//! `SessionDispatchPort::take_derived` 交回。不在这里补，代际立约/ 任务表/
-//! 熔断（DE-039 §6 验收 2）/ 长期记忆/ 技能自我改进就整体失效。
+//! 熔断理由）与读侧（召回视图），由分发方经 `SessionDispatchPort::take_derived`
+//! 交回。不在这里补，代际立约/ 任务表/ 熔断（DE-039 §6 验收 2）/ 长期记忆就整体失效。
+//! 技能编译与回退观测不在这里：它们是技能能力包的收束贡献（D-250 / D-262）。
 //!
 //! ## 效果只有一条通路
 //!
@@ -38,15 +38,11 @@
 //! 自己就满足了该条件——抢占在生产里一次都不会发生（只有 fallback 收束例外），判定被
 //! 接入却永远走不到 `Suspend`。
 //!
-//! 记忆侧另有顺序（编码[经验 + 判断] → 检索锚 → 巩固 → 技能观测 → 技能编译），
-//! 见 [`record_learning`] 的文档——巩固要用**刷新后**的快照，它得看得见编码
-//! 刚写下的那些。
+//! 记忆侧另有顺序（编码[经验 + 判断] → 检索锚 → 巩固），见 [`record_learning`]
+//! 的文档——巩固要用**刷新后**的快照，它得看得见编码刚写下的那些。
 
 use crate::control_decl::{COMMITMENT_VOCAB, VERDICT};
-use symbio_core::{actor_can_assert_verification, Entity, Event, Seq, Store, Verb};
-// 校准观测的名字由本插件交出（owner 是写方这一家）：常量住在清单生成物
-// `symbio_plugin_api::events`，经 `control_decl` 转手（DE-024 D-204 / D-205）。
-use crate::control_decl::EVENT_MEMORY_CALIBRATED;
+use symbio_core::{actor_can_assert_verification, Event, Seq, Store};
 use symbio_plugin_api::effects::EffectInput;
 
 /// 收束派生事实中的**效果 / 熔断**半边（DE-038 §3）。
@@ -265,9 +261,10 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
 ///
 /// 1. 编码（经验 + 判断）先写——本轮新记忆要能进本轮的巩固；
 /// 2. 检索事实与它平级：溯源锚同为本轮开口；
-/// 3. 巩固最后，且用**刷新后的**快照——它要看得见 1 刚写下的那条；
-/// 4. 技能观测在前、编译在后：观测记的是**本轮判没判、判成什么**，编译产出的是
-///    **下一轮才可能被用的技能**。
+/// 3. 巩固最后，且用**刷新后的**快照——它要看得见 1 刚写下的那条。
+///
+/// 技能观测与编译**不在本函数**：它们是技能能力包的收束贡献（`Contributor`，
+/// D-250 / D-262），由 `settle` 在记忆之后按 `prio` 逐个询问。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_learning(
     session_id: &str,
@@ -280,8 +277,6 @@ pub(crate) fn record_learning(
     anchor_id: &str,
     response: Option<&str>,
     recalled: Option<&super::recall::RecallView>,
-    skill_obs: &[(String, bool)],
-    skill_compile: bool,
     now: i64,
 ) {
     let remember = |step: &str, why: String| {
@@ -348,46 +343,6 @@ pub(crate) fn record_learning(
     if let Err(why) = super::memory_events::consolidate(store, &store.range(Seq::new(0)), turn, now)
     {
         remember("巩固", why);
-    }
-
-    // ── 技能路由观测───────────────────
-    //
-    // 观测只带数据 `{ skill_id, fallback }`——`calibration` 投影的契约就是这两个
-    // 字段（DE-041 §3「不加新格子」曾把它们复用在 `memory.recalled` 上；
-    // 把它们搬进**自己的格子** `memory.calibrated`，读侧改按 `kind` 过滤——
-    // 复用两张格子靠载荷字段判别，读侧就得赌「别的格子恰好不带这两个字段」）。
-    // **没有这一步，回退永远不会发生**：零使用时置信度按 1.0 算，技能再错也一直
-    // 被用，DE-041 §5 的「一直用错技能而自己不知道」当场应验。
-    for (n, (skill_id, fallback)) in skill_obs.iter().enumerate() {
-        let ev = Event::pending(
-            format!("v2s-{anchor_id}-{n}"),
-            EVENT_MEMORY_CALIBRATED,
-            Entity::Memory,
-            Verb::Asserted,
-            turn,
-            principal,
-        )
-        .with_produced_by(user_seq)
-        .with_ts(now)
-        .with_payload(serde_json::json!({ "skill_id": skill_id, "fallback": fallback }));
-        if let Err(e) = store.append(ev) {
-            remember("路由观测", format!("{e:?}"));
-        }
-    }
-
-    // ── 技能编译 ────────────────────────────────────────────────
-    // 只编译**成功**收束（`response` = 收束格 `chat.assistant.final` 的正文）——兜底说明这条路
-    // 自己没走通，固化它等于把失败写成套路。开关 `skill_compile_enabled` 默认 off
-    // （DE-041 §4 平凡值「不编译，只检索」）：关着时读侧逐条跳过，整条
-    // 编译 → 校准 → 回退链路原地待命、不产生任何事实。
-    if skill_compile {
-        if let Some(response) = response {
-            if let Err(why) = super::skill_events::compile(
-                store, snapshot, turn, user_seq, user_text, response, now,
-            ) {
-                remember("技能编译", why);
-            }
-        }
     }
 }
 

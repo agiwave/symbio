@@ -356,6 +356,10 @@ fn open_drive(
                 // 就绪集容量：调度段的预算。能力在收束时读这一格，而不是从端口拿配置包
                 // （DE-026 D-252）。
                 "readyset_cap": settings.task_cap,
+                // 技能能力包的两个开关（D-241 / D-262）：编译与快路都要在收束 / 判定
+                // 那一刻读**现行值**——能力面不拿配置包，配置以事实为准（D-252）。
+                "skill_compile_enabled": settings.skill_compile_enabled,
+                "skill_fast_path": settings.skill_fast_path,
                 "is_persistent": context.session.is_persistent(),
             })),
         )
@@ -391,7 +395,8 @@ fn open_drive(
 // ── 接缝上的两次落格：档位与开场白 ─────────────────────────────────────────
 //
 // 两者都是**幕级事实**（`turn.dispatch` / `chat.assistant.opening`），但它们的内容要到
-// 轮首四行跑完才存在：档位由 `policy.reflex` 的出口格折出（`D-223` 订正 1），开场白是
+// 轮首四行跑完才存在：档位由技能行作答后宿主代落的 `stage:"reflex"` 格折出
+// （`D-260`），开场白是
 // 判决行 `Escalate` 首响的那句话。所以它们**不能**跟 `begin_drive` 一起落（那里太早，
 // 四行一格都还没写），也不能留在 `TurnRunner::begin` 里（草稿要排到幕首，`D-222` 订正 3）
 // ——落点是接缝：轮首四行之后、内环之前。

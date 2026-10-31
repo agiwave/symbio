@@ -223,32 +223,6 @@ pub(crate) struct TurnState {
     /// 落 `memory.recalled` 的时机在**轮末收束**（`derived_facts::record_learning`）而不是
     /// 取视图那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub recall_view: Option<super::super::recall::RecallView>,
-    /// 本轮**技能路由**的判定：
-    /// 每条 `(skill_id, fallback)`，即 `skill_events::route` 对召回视图里一条技能的判决。
-    ///
-    /// 形态与 [`TurnState::gate_breaks`] / [`TurnState::task_decls`] 完全对称：
-    /// **读侧填**（`prepare_request_sections` 拿置信度闸判），**轮末收束入格**
-    /// （`derived_facts::record_learning` → 一条 `memory.recalled` 载荷 `{skill_id, fallback}`），
-    /// 中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
-    ///
-    /// 为什么不能在收束那一刻现算：回退的判决同时**改写了 `recall_view`
-    ///**（低置信的技能被摘出本轮视图），事后重算看到的是已经被改过的视图，
-    /// 判决与它作用的对象对不上；而且溯源锚要等到 `user.message` 落盘才存在。
-    /// 空表 = 本轮没召回技能 / 没判（与 `None` 的「取都没取」不同，但收束侧
-    /// 一视同仁）。
-    pub(crate) skill_route: Vec<(String, bool)>,
-    /// 本轮**可用**的技能集（快路的候选，`skill_events::route` 的出参之一）：
-    /// 过了置信度闸、且本轮发言可能命中的那些。
-    ///
-    /// 与 [`TurnState::skill_route`] **同一次判定**的两个出口（同一个 `match`）：
-    /// 观测供校准归并，这一份供执行侧装配反射档。分两处各判一遍必然漂移成
-    /// 「摘出视图的那条」与「拿去执行的那条」不是同一条。
-    ///
-    /// 它只在 `skill_fast_path` **开着**时被填充（见
-    /// `chat_loop::inputs` 的 `fast_armed`）：跳过的是 v2 运行器里的那一次模型调用。
-    /// 开关关着时这里是空表，但**判定照常发生**——观测照常落格，那正是
-    /// 「只编译、不加速」的观察形态；只是没人拿这一份去装配。
-    pub(crate) skill_hits: Vec<super::super::skill_events::SkillLlmHit>,
     /// 本轮**已收集的上下文段**（DE-025 D-215）：由 `run_recall` 一次收集、本轮各
     /// 工具轮复用。
     ///
@@ -278,12 +252,6 @@ pub(crate) struct TurnState {
     /// 存在这里：执行体不交回产出（D-123 决策 5），而收束格要由**派发点**在两个动作
     /// 之间落——只有派发点知道判决是否已经问完。`None` = 本轮照常进工具循环。
     pub(crate) head_answer: Option<super::super::chat_loop::AnsweredTurn>,
-    /// **本幕快路命中的技能正文**（`policy.reflex` 执行体的产出，D-163）。
-    ///
-    /// 执行体在轮首落「已答」阶段格（出口），把正文寄存在这里：收束格由
-    /// `close-turn` 的执行体落——只有它知道收束该在什么时候发生，正文则只有
-    /// 快路执行体算得出。`None` = 本幕没走快路。
-    pub(crate) head_reflex: Option<super::super::turn_runner::ReflexAnswer>,
     /// 本轮请求的**固定开销**（系统提示词 + 工具清单折算的 token 数）。
     ///
     /// 由准备段（`collect_reads`）算出后写在这里，供压缩行的执行体

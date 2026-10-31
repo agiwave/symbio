@@ -150,7 +150,7 @@ impl TurnRunner {
     /// `exhausted{undeclared-write}`」两条用例没有这条接缝就永远只能挂在「按构造不可达」上。
     ///
     /// `prefix` / `reflex` 是**备输入的产物**（`D-222` 订正 3）：生产里由
-    /// `prepare_request_sections` 的 ⑥ 与轮首的 `policy.reflex` 给，夹具自己造。它们是这条
+    /// `prepare_request_sections` 的 ⑥ 与技能行作答后宿主经 `set_reflex` 的寄存给，夹具自己造。它们是这条
     /// 路径上的第二个接缝——「前缀排在基线之前」与「快路零往返」两条用例要它才造得出来。
     ///
     /// 本函数是**生产编排的测试门面**：`begin` → 填 → 驱动，三步与
@@ -4479,8 +4479,8 @@ mod tool_round_tests {
     }
 }
 //
-// **选中**那一半在轮首 host（`policy.reflex` 的出口格由 `loop_rows` / `turn_exec` 的
-// 用例覆盖）；这里只钉**收束**：正文直落 `final`、`model` 记 `reflex`、经 sink 上线、
+// **选中**那一半在轮首 host（技能行作答后宿主代落的 `stage:"reflex"` 格由 `loop_rows` /
+// `turn_exec` 的用例覆盖）；这里只钉**收束**：正文直落 `final`、`model` 记 `reflex`、经 sink 上线、
 // `cost_ms` 入账。三条判据分列：
 // - **落格**：载荷与模型应答同一形状，`produced_by` 指向开轮格；
 // - **零往返**：`announce-model` 的前件排除已作答的快路轮，桩模型一次都不该被调到；
@@ -4526,7 +4526,7 @@ mod reflex_turn_tests {
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
         let user_seq = super::seed_user(store.as_ref(), 0, "把周报整理成摘要");
 
-        // 轮首 host 的出口格：`policy.reflex` 已选中（收束行的前件就是它）。
+        // 轮首 host 代落的出口格：技能行已作答（收束行的前件就是它）。
         land(
             store.as_ref(),
             0,
@@ -4561,8 +4561,8 @@ mod reflex_turn_tests {
                 std::sync::Arc::from(Vec::new()),
                 None,
                 super::super::super::loop_rows::ACTORS,
-                // 快路正文是**备输入的产物**（`D-222` 订正 3）：生产里由轮首那台 host
-                // 的 `policy.reflex` 寄存，草稿建好之后填。
+                // 快路正文是**备输入的产物**（`D-222` 订正 3）：生产里由技能行作答后
+                // 宿主经 `set_reflex` 寄存，草稿建好之后填。
                 None,
                 Some(super::super::super::turn_runner::ReflexAnswer {
                     text: "先列要点；再合并同类项。".to_string(),

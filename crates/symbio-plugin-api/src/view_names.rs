@@ -22,4 +22,6 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: "notes.digest", owner: "notes" },
     SharedViewDecl { name: "notes.insights", owner: "notes" },
     SharedViewDecl { name: "notes.recent", owner: "notes" },
+    SharedViewDecl { name: "skill.retreat", owner: "skill" },
+    SharedViewDecl { name: "turn.recalled", owner: "loop" },
 ];

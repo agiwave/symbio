@@ -67,7 +67,7 @@ pub const EVENT_COMMITMENT_RELEASED: &str = "commitment.released";
 
 // ============ memory ============
 
-/// memory.calibrated — owner `symbio-plugin-loop`，格位 `(Memory, Asserted)`
+/// memory.calibrated — owner `symbio-plugin-skill`，格位 `(Memory, Asserted)`
 pub const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
 
 /// memory.encoded — owner `symbio-plugin-loop`，格位 `(Memory, Opened)`
@@ -152,7 +152,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← loop
     EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← loop
     EventDecl::new(EVENT_COMMITMENT_RELEASED, (Entity::Commitment, Verb::Closed)), // commitment.released ← loop
-    EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)), // memory.calibrated ← loop
+    EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)), // memory.calibrated ← skill
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← loop
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
     EventDecl::new(EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)), // message.edited ← session

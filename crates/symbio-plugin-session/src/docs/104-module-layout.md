@@ -85,7 +85,7 @@ impl: done
 | 主循环 | `chat_loop.rs` + `chat_loop/{state,inputs,turn,compose,delegate,drive}.rs` · `loop_rows.rs` · `report_exec.rs` · `stage_events.rs` · `turn_runner.rs` · `turn_exec.rs` | 环骨架、状态与契约、输入准备、**行表**、汇报的落点与能力口、阶段事实、执行引擎与单环派发器。`loop_rows.rs` 每行 = `Decl` 数据（`owes` / `until` / `unless` + 全局 `prio`）；**只有一张绑定表**，派发器 `turn_exec::drive` 向 `ring::drive` 传全表，结论由引擎现读；声明与视图在 `symbio_core::decl`（DE-015） |
 | 上下文与请求 | `context.rs` + `context/{pipeline,view,prompt}.rs` · `message_build.rs` · `tokenizer.rs` · `model_chat.rs` | 压缩 / 注入 / 请求视图、助手轮装配、Token 估算与头尾切分、Model 推理请求协议 |
 | 工具与分派 | `tools.rs` + `tools/{tool_executor,tool_result_guard}.rs` · `tool_dispatch.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档 |
-| 事实与记忆 | `derived_facts.rs` · `memory_events.rs` · `skill_events.rs` · `task_events.rs` · `resume.rs` | 轮末派生事实（承诺 / 任务表 / 熔断 + 记忆三段 + 技能观测）经会话动作面落格；恢复与历史重写 |
+| 事实与记忆 | `derived_facts.rs` · `memory_events.rs` · `task_events.rs` · `resume.rs` | 轮末派生事实（承诺 / 任务表 / 熔断 + 记忆三段）经会话动作面落格；恢复与历史重写。技能观测与校准随技能能力住 `symbio-plugin-skill`（D-262） |
 
 > 两片的连接只有三条：**触发**（session → `loop/<sid>` `run_turn`）、**回程**（动作返回 `TurnReport`）、
 > **会话侧读写**（loop → `session/<sid>/_run/<op>`）。任何第四条连接都要先改 D-086。
@@ -123,7 +123,7 @@ impl: done
 |---|---|---|
 | `symbio_core::node_build` | ChatNode 的**写侧构造与建树整形**：`dialog_node`、`llm_build_*`、`PresentationTree` 与 `detach_if_flat` / `flatten_whole_tree` / `turn_root_of` | 留守：`chat_session/read` · `plugin/{nodes,vdfs_provider}` · `config`（档名解析）· `orchestrator/failure`；驱动器：`chat_loop/{io,compose}` · `message_build` · `resume` · `report_exec` · `tool_dispatch` · `tools/tool_executor` · `turn_exec` · `turn_runner` |
 | `symbio_core::facts` | 跨端口的**事实记录类型**：`Delegation`、`TaskDeclaration` / `TaskItem` / `TaskStatus`、`ReportDraft` | 写侧驱动器 `tools/tool_executor/{delegation,task_decl}` 的 `note_*` 出参 · 落侧 `derived_facts` · 读侧 `task_events` · `tool_dispatch` · `report_exec` |
-| `symbio_core::text::merge_kernel` | 巩固合并的**纯计算内核**（截断 / 分句 / 合并 + 保真度，只依赖 `std`，verify 程序以 `#[path]` 共有同一份源码） | 驱动器 `memory_events`（续一条原名短路径，调用点不动）· `skill_events` |
+| `symbio_core::text::merge_kernel` | 巩固合并的**纯计算内核**（截断 / 分句 / 合并 + 保真度，只依赖 `std`，verify 程序以 `#[path]` 共有同一份源码） | 驱动器 `memory_events`（续一条原名短路径，调用点不动） |
 | `symbio_core::request_principal` | 「本请求以谁的身份跑轮」的**唯一取值点**（core 既有键 `AGENT_ID` 的纯派生函数，不住任何片） | 驱动器 `chat_loop` / `chat_loop/state` · `chat_loop/inputs` · `context/pipeline`；留守 `stats` |
 
 判据与 `types::Session` 一族同一条：**词汇的归属随数据 owner，跨插件者上移**。

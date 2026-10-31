@@ -364,7 +364,7 @@ pub(crate) async fn prepare_request_sections(
     Ok(context::build_request_sections(&sections))
 }
 
-/// `recall` 执行体（`policy.recall`）：长期记忆召回 + 技能路由 + 调度段。
+/// `recall` 执行体（`policy.recall`）：长期记忆召回 + 调度段。
 ///
 /// 它是环上 `policy.recall` 那一行的动作（[`super::super::turn_exec::run_recall`]
 /// 转过来），入参由 `Ctx` 的轮首借面给出：请求句柄 + 事实源 + 会话上下文 + 本轮状态。
@@ -377,9 +377,12 @@ pub(crate) async fn prepare_request_sections(
 /// 格。动作做完却不入日志，本幕的第二次选债照样读到「没做过」⇒ 环走不动。
 /// 落格能力此刻就在本层（与 `begin_drive` 落用户格 / 配置 / 轮次格同一条路、同一个句柄）。
 ///
-/// `result` 记技能命中与否——义务环的 `has_match` 与反射行的 `skill_hit` 都只从
-/// 日志读（输入闭包）。同一性缀本幕锚（`drive_seq`）：续写幕照常重跑召回，撞首幕
-/// 的幂等键会让那一格的载荷不落、结论在事实面消失（规则见 `stage_events` 模块文档）。
+/// 召回阶段格带的是**逐条结果**（`(seq, tag)` + 本幕是不是续写幕）——`turn.recalled`
+/// 视图把它摊成能力包的债键面（D-262）：技能行按 `eq tag = "skill"` 取自己那一批，
+/// 命中判定与观测都住那个能力包。宿主不认识「哪条记忆是技能」。
+///
+/// 同一性缀本幕锚（`drive_seq`）：续写幕照常重跑召回，撞首幕的幂等键会让那一格的载荷
+/// 不落、结论在事实面消失（规则见 `stage_events` 模块文档）。
 pub(crate) async fn run_recall(
     ctx: &Arc<dyn PluginInvokeRequest>,
     store: &dyn symbio_core::Store<Event = symbio_core::Event>,
@@ -412,27 +415,42 @@ pub(crate) async fn run_recall(
     //
     // 这里不再直接渲染：渲染搬进 `context::providers::ReadySetProvider`（DE-025 D-215），
     // 本函数只把「本轮的事实切片 + 容量」交给端口。于是「有哪几段」不再写在这里。
-    // 技能路由：
-    // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，DE-041 §5）。
-    // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；
-    // 临时会话同「不读不写」——没有事实源就没有技能，无从判。
-    //
-    // **一次判定、两个出口**：观测存进 `TurnState::skill_route`（轮末收束才入格，
-    // 溯源锚那时才在事实源里），可用集存进 `TurnState::skill_hits`（供 `turn_exec`
-    // 装配反射档，DE-041 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」）。
-    // 分两处各判一遍必然漂移成「摘出视图的那条」与「拿去执行的那条」不是同一条。
-    let routing = turn
+    // 本幕的召回名单（债键面）：逐条 `(seq, tag)` 进召回阶段格，能力包的行从
+    // `turn.recalled` 视图按标签取自己的那一批（D-262）。取**摘除之前**的名单——
+    // 回退的判定也是能力包的事（它要给低置信技能落 `fallback = true` 的观测），
+    // 宿主若先摘掉，观测就永远没有数据源。
+    let recalled: Vec<(u64, String)> = turn
         .recall_view
-        .as_mut()
-        .map(|view| super::super::skill_events::route(&facts, view))
+        .as_ref()
+        .map(|view| {
+            view.entries
+                .iter()
+                .map(|e| (e.seq, e.tag.clone()))
+                .collect()
+        })
         .unwrap_or_default();
-    // 快路开关（DE-041 §4 参数表的 `actor.pattern`；**不是** core 的 `ActorSpec.pattern`，
-    // 两者同名不同物，见 D-079）：关着时可用集恒空——判定照常发生、
-    // 观测照常落格（"只编译不加速"的观察形态），只是没人拿它去装配——这就是它
-    // 作为一个独立开关的全部含义（见 `SessionConfig` 字段文档）。
-    let fast_armed = context.session.skill_fast_path();
-    turn.skill_route = routing.obs;
-    turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
+
+    // 反自动化回退（DE-041 §5）：低置信的技能**不进本轮提示词**。
+    //
+    // 判据住能力包：`skill.retreat` 是它公开的共享视图（按 `memory.calibrated`
+    // 折出的 `{recall}` 名单）。宿主只按名字读、按 seq 摘——不认识阈值，也不认识
+    // 「技能」这个词。读不到（能力包没装 / 快照超预算）时**不摘**：退化方向是
+    // 「原样留着当背景事实」，不是「静默删掉一条记忆」（D-262）。
+    let retreat: Vec<u64> = symbio_plugin_api::read_shared_view_all("skill.retreat", &facts)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("recall").and_then(serde_json::Value::as_u64))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !retreat.is_empty() {
+        if let Some(view) = turn.recall_view.as_mut() {
+            view.entries.retain(|entry| !retreat.contains(&entry.seq));
+        }
+    }
 
     // ── 上下文段：判断在上面，渲染在端口后面（DE-025 D-208 / D-215）──────────
     //
@@ -476,12 +494,18 @@ pub(crate) async fn run_recall(
     let sections = symbio_plugin_api::context_sections(&request, Cadence::Utterance);
     turn.context_sections = sections;
 
+    // 本幕是不是续写幕：能力包的行读这一格自己决定快路开不开（续写幕不走快路，
+    // D-260 的作答要新开轮）。判据与 `turn_head.resumed` 同源——幕锚是不是恢复格。
+    let resumed = facts
+        .iter()
+        .find(|e| e.seq.map(|s| s.value()) == Some(turn.drive_seq))
+        .is_some_and(|e| {
+            e.kind == super::super::control_decl::EVENT_TURN_STAGE
+                && e.payload.get("stage").and_then(serde_json::Value::as_str) == Some("resume")
+        });
+
     // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，故必须就地
-    // 入日志（见本函数文档）。`result` 记技能命中与否——义务环的 `has_match` 只从
-    // 日志读（输入闭包）。
-    let hit = last_user_text(context).as_deref().is_some_and(|text| {
-        super::super::skill_events::take_match(&turn.skill_hits, text).is_some()
-    });
+    // 入日志（见本函数文档）。
     super::super::stage_events::land(
         store,
         turn.turn_no,
@@ -490,61 +514,8 @@ pub(crate) async fn run_recall(
         &[StageFact::recall(
             turn.request_round,
             turn.drive_seq,
-            if hit { "hit" } else { "miss" },
-        )],
-    )
-    .map_err(super::super::turn_exec::ActorError::Append)?;
-    Ok(())
-}
-
-/// 快路格的执行体（环上的 `policy.reflex` 行）：命中即作答，**零模型往返**。
-///
-/// ## 它只落「已答」，不落收束
-///
-/// 出口格是 `turn.stage{stage:"reflex"}`（`result` = 命中的技能 id），正文在这里
-/// 寄进本轮状态（[`TurnState::head_reflex`]）：收束格 `chat.assistant.final` 由
-/// `close-turn` 的执行体落——两个执行体写同一批格会让依赖图成环（D-163）。
-/// 收束行据此在零往返的轮上开账（`turn_head.reflex_answered`）。
-///
-/// ## 开账条件与命中判定同源
-///
-/// 本行动作只在 `turn_head.skill_hit` 成立时被选中，而那一格来自 [`run_recall`]
-/// 对同一份 `skill_hits` / 用户发言的 `take_match`。因此这里命中为空是**不可达**的；
-/// 真出现了也只落 `result:"miss"` 把账关掉，不拿空正文冒充作答（那一轮照常进模型往返）。
-pub(crate) async fn run_reflex(
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    store: &dyn symbio_core::Store<Event = symbio_core::Event>,
-    context: &SessionContext,
-    turn: &mut TurnState,
-) -> Result<(), super::super::turn_exec::ActorError> {
-    let text = last_user_text(context);
-    let hit = text
-        .as_deref()
-        .and_then(|t| super::super::skill_events::take_match(&turn.skill_hits, t));
-    let result = match hit {
-        Some(h) => {
-            symbio_plugin_api::plugin_info!(
-                "session",
-                "[Loop] 技能命中，走反射档（skill={}，turn={}）",
-                h.skill_id,
-                turn.turn_no
-            );
-            turn.head_reflex = Some(super::super::turn_runner::ReflexAnswer {
-                text: h.content.clone(),
-            });
-            h.skill_id.clone()
-        }
-        None => "miss".to_string(),
-    };
-    super::super::stage_events::land(
-        store,
-        turn.turn_no,
-        turn.user_seq,
-        &symbio_core::request_principal(ctx.as_ref()),
-        &[StageFact::reflex(
-            turn.request_round,
-            turn.drive_seq,
-            &result,
+            &recalled,
+            resumed,
         )],
     )
     .map_err(super::super::turn_exec::ActorError::Append)?;

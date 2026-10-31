@@ -14,18 +14,19 @@
 //! ## 反射档（快路）：唯一不调模型的一条
 //!
 //! 开 `skill_fast_path` 且本轮发言**逐字命中**一条已编译技能时，本轮改走快路——
-//! 以技能正文收束，**一次模型调用都不发生**。**选中**发生在环上
-//! （`policy.reflex` 行，出口格 `turn.stage{stage:"reflex"}`）；本模块只消费那次
-//! 选中的结果：正文由 `policy.reflex` 的执行体经 [`TurnSession::set_reflex`] 寄存，
-//! 由 `close-turn` 的执行体落成同一格 `chat.assistant.final`（D-163）。
+//! 以技能正文收束，**一次模型调用都不发生**。判定与作答都住技能能力包
+//! （`skill.recall` 行，D-262）：它交回 `RowStep::Answer`，**宿主**代落
+//! `turn.stage{stage:"reflex"}` 并把正文经 [`TurnSession::set_reflex`] 寄给收束行，
+//! 由 `close-turn` 的执行体落成同一格 `chat.assistant.final`（D-163 / D-260）。
 //! 它不是"又一条执行链"：产物落的是**同一轮的三格**（`u-{turn}` / `turn.dispatch` /
 //! `f-{turn}`），收束后仍走同一段 `record_learning`，收口（步骤 5–7）也完全共享；
 //! 变的只是**生成那一格**由谁产出（快路这一轮没有 `llm` 形参 ⇒ "反射档调模型"写不出来）。
 //!
 //! 两条边界，缺一条都会静默走错：
 //! - **只对新开轮**：续写轮不新开用户格（调用方直给原轮的 `user_seq`），而反射档的
-//!   落格形状就是新开一轮 ⇒ 走它会撞幂等键（`Duplicate`），既完不成收束也把本轮变成错误；
-//! - **开关默认关**：关着时候选集恒空，本轮照常走 [`drive`]。
+//!   落格形状就是新开一轮 ⇒ 走它会撞幂等键（`Duplicate`），既完不成收束也把本轮变成错误
+//!   （技能行自己读召回格里的 `resumed` 判这一条，D-260）；
+//! - **开关默认关**：关着时候选不会被作答，本轮照常走 [`drive`]。
 //!
 //! 反射档把 `actor.budget_ms` 按档位派生（`LatencyTier::Reflex.budget_ms()`），
 //! 该值随主体走、并由接缝以**数值**写入 `turn.dispatch` 载荷的 `budget_ms`
@@ -1049,23 +1050,6 @@ pub(crate) fn run_compress<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `reflex` 执行体：`policy.reflex` 行选中的动作（D-163）。
-///
-/// 它只落「反射档已答」那一格，并把技能正文寄进本轮状态；收束格由 `close-turn`
-/// 统一落——快路自身再写 `final` 会让依赖图成环。
-pub(crate) fn run_reflex<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
-    Box::pin(async move {
-        let head = take_head(ctx)?;
-        super::chat_loop::run_reflex(
-            head.request_ctx,
-            ctx.store.as_ref(),
-            head.context,
-            head.turn,
-        )
-        .await
-    })
-}
-
 /// 接缝执行体：`prepare-turn` 行选中的动作（`D-223` 订正 1 / 订正 2）。
 ///
 /// 轮首那几行跑完之后、任何请求之前的一次性装配。次序是硬的：
@@ -1074,7 +1058,8 @@ pub(crate) fn run_reflex<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 ///    半截 Turn 根）、早于派发格（`consolidation_is_forwarded_before_the_turn_runs`）；
 /// 2. 水位 + 根骨架 + 请求视图——三者都要轮首那几行寄存下来的值；
 /// 3. `inputs` 格（`turn_head.prepared`）与重试分支（根 id 已定）；
-/// 4. 定档 + 首响——两格都要等轮首那几行（档位折自 `policy.reflex` 的出口格）；
+/// 4. 定档 + 首响——两格都要等轮首那几行（档位折自技能行作答之后代落的
+///    `reflex` 阶段格，D-163 / D-260）；
 /// 5. 基线 prompt / 前缀 / 快路正文——基线必须在压缩之后渲染。
 pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
@@ -1118,7 +1103,6 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
         ctx.session.render_base(ctx.store.as_ref());
         ctx.session
             .set_prefix(super::chat_loop::request_view_prefix(&sections));
-        ctx.session.set_reflex(head.turn.head_reflex.clone());
         Ok(())
     })
 }

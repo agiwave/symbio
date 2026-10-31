@@ -4,9 +4,9 @@
 //! ## 为什么住 loop 插件（DE-024 D-201）
 //!
 //! `conation` 同一条判据：唯一生产消费方是谁，投影就搬进谁。`recall` 的读侧全部落在
-//! 本插件——`memory_events`（召回与注入段）、`skill_events`（技能路由读召回视图）、
-//! `derived_facts` / `turn_exec` / `chat_loop`（视图随轮态流动），core 里只有这条投影
-//! 自己读 `memory.*` 三个名字。
+//! 本插件——`memory_events`（召回与注入段）、`derived_facts` / `turn_exec` /
+//! `chat_loop`（视图随轮态流动），core 里只有这条投影自己读 `memory.*` 三个名字。
+//! 技能能力按名字读本插件交出的 `turn.recalled`（D-262），不反向依赖本投影。
 //!
 //! 两个名字因此只有本插件读：`memory.consolidated` 与 `memory.forgotten` 的名字与格位
 //! 由本插件声明，core 不再有 `recall` / `RecallView` / `RecallEntry` 三条根出口。

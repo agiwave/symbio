@@ -135,6 +135,9 @@ fn control_plane_loads_and_freezes() {
             "stale_sent",
             "turn_head",
             "turn_stages",
+            // 本轮召回清单（`D-262`）：技能行按 `(recall, stage)` 认领自己那条，
+            // 本幕是不是续写幕也在它的条目上（`resumed`）。
+            "turn.recalled",
             "turn_closed",
             // `turn_round` 已随 `turn` 端口退场（`D-222` §一）：它的两个读者是
             // `announce-turn` / `dispatch-turn`，两条行一起删了。
@@ -178,7 +181,9 @@ fn control_plane_loads_and_freezes() {
     // （内部往返带 `via`，D-122 决策 2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 16);
+    // v17：`skill_hit` 随技能能力退出读面（`D-262`）；`reflex_answered` 改由宿主代落的
+    // `stage:"reflex"` 格折出（D-260），本视图不再认 `memory.recalled` 的技能字段。
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 17);
     // v2：幕锚多一档续幕轮次格（`turn_stages` / `turn_closed` 的窗口因此能从续幕起算）。
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 2);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 2);
@@ -481,7 +486,6 @@ fn turn_head_reads_round_and_done_from_facts() {
             "compress_done": false,
             "is_persistent": true,
             "recall_done": true,
-            "skill_hit": true,
             // 判决那格的 `result` 缺席（旧夹具只记了「判过」）⇒ 不是答话轮。
             "answered": false,
             // 本幕没走快路 ⇒ 收束行不因它开账。
@@ -644,7 +648,6 @@ fn turn_head_resume_drive_starts_from_the_resume_anchor() {
     assert_eq!(head["anchor"], json!(seq(&events[6])));
     assert_eq!(head["classify_done"], json!(false));
     assert_eq!(head["recall_done"], json!(false));
-    assert_eq!(head["skill_hit"], json!(false));
     assert_eq!(head["auto_compress"], json!(true), "配置按幕取最新一份");
     assert_eq!(turn_closed(&events, 0), json!([]), "首幕的终态不算本幕收束");
 
