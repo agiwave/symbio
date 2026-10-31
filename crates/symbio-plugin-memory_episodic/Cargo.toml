@@ -1,0 +1,25 @@
+[package]
+name = "symbio-plugin-memory_episodic"
+version = "0.1.14"
+description = "Symbio plugin: memory_episodic"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+symbio-plugin-api = { path = "../symbio-plugin-api" }
+# `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（与其余插件同一条理由，
+# 见 compose 的说明）。
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+
+# 日志宏在调用站点展开，宏体里的 `tracing::warn!` 按调用方作用域解析 ⇒ 本 crate 的
+# 真实依赖（与其余插件同一条理由）。
+tracing = { workspace = true }

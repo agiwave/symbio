@@ -4,7 +4,7 @@
 //!
 //! | 能力面 | 本模块交什么 | 怎么写 |
 //! |---|---|---|
-//! | 编译 | 收束贡献（`memory.encoded{tag:"skill"}`） | `contributor.rs`，`submit_contributor!`（D-250） |
+//! | 编译 | 收束贡献（`memory.encoded{tag:"skill"}`，名字与事实形状归情景记忆家族，D-263） | `contributor.rs`，`submit_contributor!`（D-250） |
 //! | 回退 | `skill.retreat` 视图（低置信技能的 seq 集）+ `skill.recall` 行（观测与命中） | `decl` + `row.rs`，行 `by = plugin_row`（D-241） |
 //! | 命中 | `skill.answered`（这一条技能在本轮判成什么） | `skill.recall` 行的出口格 |
 //!
@@ -18,8 +18,11 @@
 //!
 //! ## 名字
 //!
-//! `memory.encoded` 的**格位**由 loop 交（它同时是会话统计的读方）；本能力交事实
-//! 形状与写入。`memory.calibrated` 自本能力迁入起由本能力**整条拥有**——名字、格位、
+//! `memory.encoded` 的**名字、格位与事实形状**都随记忆家族走：格位由 loop 交（它
+//! 同时是会话统计的读方），事实形状由情景记忆能力包交（DE-026 D-263）。本能力只是
+//! 这条事实的一个**写方**（`tag:"skill"` 那半），不申报它的形状与归宿——一个事实
+//! 只有一个形状 owner，`seal` 的 `DuplicateFact` 也按这条判。
+//! `memory.calibrated` 自本能力迁入起由本能力**整条拥有**——名字、格位、
 //! 写方与读方都在这里（此前写作在 loop）。
 //!
 //! `tag` 的取值 `"skill"` 是本能力自己的词汇：跨插件读方（会话统计）经 core 的
@@ -57,7 +60,7 @@ pub(crate) const SKILL_RECALL: &str = "skill.recall";
 
 /// 技能正文与触发串的截断上限（字符）。
 ///
-/// 与记忆编码同一口径（`memory_events::ENCODE_MAX_CHARS`）——编译写下的触发串必须
+/// 与记忆编码同一口径（情景记忆能力包的 `ENCODE_MAX_CHARS`）——编译写下的触发串必须
 /// 与命中判定截断的**同一对函数、同一个上限**，否则长发言永远命不中。
 pub(crate) const COMPILE_LIMIT: usize = 400;
 
@@ -79,14 +82,6 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 ];
 
 pub(crate) const FACTS: &[FactDecl] = &[
-    // 技能事实：与记忆同格子（`memory.encoded`），格位由 loop 交，形状由本能力交。
-    FactDecl {
-        name: EVENT_MEMORY_ENCODED,
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["content", "tag", "skill_id", "trigger", "vis_scope"],
-    },
     // 校准观测：两个字段就是 `calibration_for` 的契约。
     FactDecl {
         name: EVENT_MEMORY_CALIBRATED,
@@ -122,28 +117,9 @@ pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
 }];
 
 pub(crate) const ROWS: &[Decl] = &[
-    // 技能事实的**归宿行**：`owes` 与 `until` 同源——有技能即闭合，没有则不欠。
-    //
-    // 没有它，`seal` 会把 `memory.encoded` 判成 `OrphanFact`（每条事实都要有归宿行；
-    // 本能力不把它做成环上的债——编译没有「必须发生」的时机，它是一条收束贡献）。
-    Decl {
-        name: EVENT_MEMORY_ENCODED,
-        prio: 200,
-        by: None,
-        tier: LatencyTier::Reflex,
-        expand: None,
-        owes: Pattern {
-            source: EVENT_MEMORY_ENCODED,
-            key: &[],
-            eq: &[("tag", Lit::Str(SKILL_TAG))],
-        },
-        until: &[Pattern {
-            source: EVENT_MEMORY_ENCODED,
-            key: &[],
-            eq: &[("tag", Lit::Str(SKILL_TAG))],
-        }],
-        unless: &[],
-    },
+    // `memory.encoded` 的归宿行不在这里：一条事实只有一张归宿行，它随事实形状的 owner
+    // 走（情景记忆能力包，DE-026 D-263）。`tag:"skill"` 那半同样是「有即闭合」，
+    // 被那张 eq 为空的行覆盖。
     // 校准观测的归宿行（同上）。
     Decl {
         name: EVENT_MEMORY_CALIBRATED,

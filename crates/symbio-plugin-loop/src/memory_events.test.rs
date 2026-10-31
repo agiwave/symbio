@@ -1,17 +1,19 @@
-//! 记忆三段验收。
+//! 记忆读侧与巩固的验收。
 //!
-//! 每段各自的**出口判据**逐条钉住：
+//! **编码的判据不在这里**：经验 + 判断两条编码是情景记忆能力包的收束贡献
+//! （`crates/symbio-plugin-memory_episodic`，DE-026 D-263），带溯源入格、同文去重、
+//! 空发言跳过、超长截断、可见域几条判据随写方一起迁进了那个包的
+//! `contributor.test.rs`。本文件剩两段各自的**出口判据**：
 //!
-//! - 编码：写一条**带溯源、带编码时刻**的记忆；同文去重、空发言跳过、超长截断；
 //! - 召回：跨会话扫、新近度降序、被遗忘的不算；注入段有空态与排版口径；
 //!   检索事实溯源到触发它的那一格、同一锚幂等；
 //! - 巩固：**过 `accept` 才入格**——代数上界与保真度下界两个拒收分支都在
 //!   生产可达；过了就写合并产物 + 排除式遗忘两条源记忆（Log 不删）。
 
 use super::{
-    consolidate, encode, merge_with_fidelity, prompt_section, recall_view, record_recalled,
-    EncodeContent, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG,
-    MERGE_MAX_CHARS, RECALL_DEGRADED_NOTE, RECALL_SCAN_QUOTA, RECALL_SECTION_HEAD,
+    consolidate, merge_with_fidelity, prompt_section, recall_view, record_recalled,
+    CONSOLIDATE_MIN_ENTRIES, MERGE_MAX_CHARS, RECALL_DEGRADED_NOTE, RECALL_SCAN_QUOTA,
+    RECALL_SECTION_HEAD,
 };
 use crate::control_decl::guard_vocab;
 use symbio_core::SKILL_TAG;
@@ -27,6 +29,16 @@ use super::super::recall::recall;
 use crate::control_decl::{
     EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
+
+/// 标签字面量：写方搬走之后，这些种子夹具需要的值是**生产值的镜像**
+/// （情景记忆能力包的 `MEMORY_TAG` / `JUDGMENT_TAG`）。一致理由与
+/// `memory_events.rs` 的 `CONSOLIDABLE_TAGS` 同一条：端到端判据（e2e t29）钉住，
+/// 不由 crate 依赖保证。
+const MEMORY_TAG: &str = "经验";
+const JUDGMENT_TAG: &str = "判断";
+
+/// 编码截断上限（写方包的同名常量镜像）：巩固的保真度判据要种出**到界**的长内容。
+const ENCODE_MAX_CHARS: usize = 400;
 
 /// 读方只吃值：一份会话的事实切片 + `own` 标记（生产上由会话存储层枚举时判定）。
 fn snap(own: bool, store: &EventStore) -> FleetSnapshot {
@@ -99,13 +111,14 @@ fn seed_encoded_as(store: &EventStore, id: &str, content: &str, tag: &str, ts: i
         .value()
 }
 
-/// 种入一条**经验**记忆（多数用例的默认标签，形态与写方 `encode` 一致）。
+/// 种入一条**经验**记忆（多数用例的默认标签，形态与写方一致——写方是情景记忆
+/// 能力包的收束贡献，D-263）。
 fn seed_encoded(store: &EventStore, id: &str, content: &str, ts: i64) -> u64 {
     seed_encoded_as(store, id, content, MEMORY_TAG, ts)
 }
 
-/// 种入一条 **`vis_scope = shared`** 的记忆（
-/// 的跨会话用例用）：经验类记忆的生产写方取值（`encode` 落 `shared`）。
+/// 种入一条 **`vis_scope = shared`** 的记忆（跨会话用例用）：经验类记忆的生产写方
+/// 取值（写方落 `shared`）。
 /// 与 [`seed_encoded`] 的差别只有载荷多一个字段——缺省（不带它）=
 /// `thread_private` ⇒ 跨会话不可见，跨会话判据想看见内容必须显式种成 shared。
 fn seed_shared(store: &EventStore, id: &str, content: &str, ts: i64) -> u64 {
@@ -163,311 +176,10 @@ fn payload_str<'a>(event: &'a Event, key: &str) -> Option<&'a str> {
     event.payload.get(key).and_then(|v| v.as_str())
 }
 
-// ==================== 编码 ====================
-
-/// 出口判据：一条记忆**带溯源 + 带编码时刻**入格（溯源覆盖 100% = 验收），
-/// 且同文去重、空发言不记、超长截断。
-#[test]
-fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
-    let store = EventStore::new();
-    let t = 1_700_000_000_000i64;
-
-    let seq = encode(
-        &store,
-        &store.range(Seq::new(0)),
-        3,
-        41,
-        t,
-        EncodeContent::new("你好", MEMORY_TAG, "v2m-u1-a0"),
-    )
-    .expect("编码不失败")
-    .expect("写了记忆");
-    assert_eq!(seq, 0, "首格 seq 从 0 起");
-
-    let snap = store.range(Seq::new(0));
-    let ev = &snap[0];
-    assert_eq!(ev.kind, crate::control_decl::EVENT_MEMORY_ENCODED);
-    assert_eq!(ev.entity, Entity::Memory);
-    assert_eq!(
-        ev.actor, PRINCIPAL_USER,
-        "记忆属主 = 会话属主（读侧同一个人）"
-    );
-    assert_eq!(ev.turn, 3);
-    assert_eq!(
-        ev.produced_by,
-        Some(41),
-        "溯源指向本轮 user.message 格（I2）"
-    );
-    assert_eq!(ev.ts, t, "ts = 编码时刻（RecallEntry::ts 的契约）");
-    assert_eq!(payload_str(ev, "content"), Some("你好"));
-    assert_eq!(
-        payload_str(ev, "tag"),
-        Some(MEMORY_TAG),
-        "标签是认知内容之一"
-    );
-    assert_eq!(
-        ev.payload.get("generation").and_then(|v| v.as_u64()),
-        Some(0)
-    );
-    assert!(
-        ev.payload.get("vec").is_none(),
-        "载荷里没有 vec 键：恒空的预留键不算承诺（ADR-110），内容只在 content"
-    );
-    assert!(
-        check_all(guard_vocab(), &snap).is_empty(),
-        "{:?}",
-        check_all(guard_vocab(), &snap)
-    );
-
-    // 同文去重（判定方 = core 的 `contains_content`）、空白不记。
-    assert_eq!(
-        encode(
-            &store,
-            &store.range(Seq::new(0)),
-            3,
-            42,
-            t + 1,
-            EncodeContent::new("你好", MEMORY_TAG, "v2m-u1-a1"),
-        )
-        .expect("编码不失败"),
-        None,
-        "同一句话不再记一条"
-    );
-    assert_eq!(
-        encode(
-            &store,
-            &store.range(Seq::new(0)),
-            4,
-            43,
-            t + 2,
-            EncodeContent::new("   \n", MEMORY_TAG, "v2m-u2-a0"),
-        )
-        .expect("编码不失败"),
-        None,
-        "空发言不记"
-    );
-    assert_eq!(store.range(Seq::new(0)).len(), 1, "去重期间只写了一格");
-
-    // 不同内容 ⇒ 记；超长 ⇒ 按字符截断（记忆是提炼，不是转写副本）。
-    let long = "问".repeat(ENCODE_MAX_CHARS + 100);
-    encode(
-        &store,
-        &store.range(Seq::new(0)),
-        5,
-        44,
-        t + 3,
-        EncodeContent::new(&long, MEMORY_TAG, "v2m-u3-a0"),
-    )
-    .expect("编码不失败")
-    .expect("不同内容要记");
-    let snap = store.range(Seq::new(0));
-    assert_eq!(snap.len(), 2);
-    assert_eq!(
-        payload_str(&snap[1], "content").map(|s| s.chars().count()),
-        Some(ENCODE_MAX_CHARS),
-        "截断按字符数（不切 UTF-8 字节）"
-    );
-    assert!(
-        check_all(guard_vocab(), &snap).is_empty(),
-        "{:?}",
-        check_all(guard_vocab(), &snap)
-    );
-}
-
-/// **去重读的是全史，不是近 N 条窗口**（项二，以判据结案）。
-///
-/// 立批时给的方案是「有界扫描 + 去重窗口参数」，实测把它否了：同一轮里真正贵的是
-/// 把事实切片交回值那一步（release、2 万格：`range(0)` ≈9.8 ms，而在交回的切片上跑
-/// 一遍全量去重投影 ≈0.14 ms）——砍窗口省掉的是这条链上最便宜的一节，代价是去重从此
-/// **看不见窗口外的记忆**：一句很久以前的话会被再记一条，重复的那条还继续挤占召回预算。
-/// 所以口径保持全量，并把「全量」从 `read_all` 的副产物升级成有人钉的判据。
-#[test]
-fn dedupe_covers_the_whole_history_not_the_recall_window() {
-    let store = EventStore::new();
-    let oldest = "很久以前说过的一句";
-    seed_encoded(&store, "old", oldest, 1000);
-    for i in 0..RECALL_SCAN_QUOTA {
-        seed_encoded(
-            &store,
-            &format!("m-{i}"),
-            &format!("中间的第 {i} 句"),
-            2000 + i as i64,
-        );
-    }
-    let snap = store.range(Seq::new(0));
-
-    // 最旧那条在「召回扫描配额」之外，去重照样拦得住。
-    assert_eq!(
-        encode(
-            &store,
-            &snap,
-            9,
-            41,
-            9_000,
-            EncodeContent::new(oldest, MEMORY_TAG, "v2m-w-a0"),
-        )
-        .expect("编码不失败"),
-        None,
-        "窗口外的旧记忆仍然拦得住重复：去重口径是全量"
-    );
-
-    // 反判据：按生产读方的顺序（ts 降序）读同一片事实、套上召回那份配额，最旧那条
-    // 就落在窗口外 ⇒ 用它去重会静默放行重复。配额本身只截前 N 格，「最近 N 条」是
-    // 读方先排序才有的形状——两层都在这条判据里。
-    let mut desc = snap.clone();
-    desc.sort_by(|a, b| b.ts.cmp(&a.ts));
-    let windowed = recall(PRINCIPAL_USER, None, None)
-        .apply(&desc, i64::MAX, Budget::new(0, RECALL_SCAN_QUOTA))
-        .value;
-    assert_eq!(
-        windowed.entries.len(),
-        RECALL_SCAN_QUOTA as usize,
-        "配额读数就是「最近 {RECALL_SCAN_QUOTA} 条」这个形状"
-    );
-    assert!(
-        !windowed.contains_content(oldest),
-        "窗口外的那条确实进不了视图 ⇒ 全量去重不是顺手写出来的，是有意的口径"
-    );
-}
-
-/// 判断编码：智能体收束正文 → tag=`判断` 的记忆——S10 七类认知内容
-/// 里 `recall:tag=judgment` 的**生产写方**（此前参数在、值缺写方）。
-///
-/// 与经验那条同文去重 / 同截断 / 同溯源（本轮开口格）；空正文不记。
-#[test]
-fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
-    let store = EventStore::new();
-    let t = 1_700_000_000_000i64;
-
-    let seq = encode(
-        &store,
-        &store.range(Seq::new(0)),
-        3,
-        41,
-        t,
-        EncodeContent::new("连接池调到 50 并加了索引", JUDGMENT_TAG, "v2j-u1-a0"),
-    )
-    .expect("编码不失败")
-    .expect("写了记忆");
-    assert_eq!(seq, 0, "首格 seq 从 0 起");
-
-    let snap = store.range(Seq::new(0));
-    let ev = &snap[0];
-    assert_eq!(ev.kind, crate::control_decl::EVENT_MEMORY_ENCODED);
-    assert_eq!(
-        payload_str(ev, "tag"),
-        Some(JUDGMENT_TAG),
-        " recall:tag=judgment 从此有生产写方"
-    );
-    assert_eq!(
-        payload_str(ev, "content"),
-        Some("连接池调到 50 并加了索引"),
-        "记的是智能体自己的结论"
-    );
-    assert_eq!(ev.produced_by, Some(41), "溯源同指本轮开口格（I2）");
-    assert!(
-        check_all(guard_vocab(), &snap).is_empty(),
-        "{:?}",
-        check_all(guard_vocab(), &snap)
-    );
-
-    // 同文去重跨标签：同一句已被任一标签记过 ⇒ 不写第二条。
-    assert_eq!(
-        encode(
-            &store,
-            &store.range(Seq::new(0)),
-            3,
-            42,
-            t + 1,
-            EncodeContent::new("连接池调到 50 并加了索引", MEMORY_TAG, "v2m-u1-a1"),
-        )
-        .expect("编码不失败"),
-        None,
-        "跨标签同文也算重复——同一个事实不必按标签记两遍"
-    );
-    // 空正文不记（兜底收束那条路根本不调本函数——response = None）。
-    assert_eq!(
-        encode(
-            &store,
-            &store.range(Seq::new(0)),
-            4,
-            43,
-            t + 2,
-            EncodeContent::new("  ", JUDGMENT_TAG, "v2j-u2-a0"),
-        )
-        .expect("编码不失败"),
-        None,
-        "空发言不记"
-    );
-    assert_eq!(store.range(Seq::new(0)).len(), 1, "只写了一格");
-}
-
-/// ① 的**生产用例**：`memory.encoded` 载荷带内容侧可见域——判据不落在
-/// `governance/mod.test.rs`（那边测的是枚举与字符串映射的机制），落在写方本身：
-/// 默认 `thread_private`（C10 缺省，存量行为逐字不变），`with_vis_scope` 显式
-/// 给宽（生产调用点 = 经验记忆的 `shared`，见 `derived_facts::record_learning`）。
-/// 空 / 同文两条早退路径同样不写格——没有产地就没有假事实。
-#[test]
-fn encode_payload_carries_the_content_side_vis_scope() {
-    let store = EventStore::new();
-    let t = 1_700_000_000_000i64;
-
-    // 默认（不给 with_vis_scope）= thread_private——与显式设置前的载荷只差一个字段。
-    encode(
-        &store,
-        &store.range(Seq::new(0)),
-        3,
-        41,
-        t,
-        EncodeContent::new("默认可见域的一句话", MEMORY_TAG, "v2m-vs-a0"),
-    )
-    .expect("编码不失败")
-    .expect("写了记忆");
-    // 显式 shared（人的认知可借用的书写形态）。
-    encode(
-        &store,
-        &store.range(Seq::new(0)),
-        3,
-        42,
-        t + 1,
-        EncodeContent::new("可被借用的一句话", MEMORY_TAG, "v2m-vs-a1")
-            .with_vis_scope(symbio_core::VisScope::Shared),
-    )
-    .expect("编码不失败")
-    .expect("写了记忆");
-
-    let snap = store.range(Seq::new(0));
-    assert_eq!(snap.len(), 2);
-    assert_eq!(
-        payload_str(&snap[0], "vis_scope"),
-        Some("thread_private"),
-        "缺省 = C10 的 thread_private（存量行为不变）"
-    );
-    assert_eq!(
-        payload_str(&snap[1], "vis_scope"),
-        Some("shared"),
-        "显式给定 shared —— 内容侧产地由此可写"
-    );
-    assert!(
-        check_all(guard_vocab(), &snap).is_empty(),
-        "{:?}",
-        check_all(guard_vocab(), &snap)
-    );
-
-    // 空正文不写格：可见域不制造空事实。
-    assert_eq!(
-        encode(
-            &store,
-            &store.range(Seq::new(0)),
-            4,
-            43,
-            t + 2,
-            EncodeContent::new("  ", MEMORY_TAG, "v2m-vs-a2")
-                .with_vis_scope(symbio_core::VisScope::Shared),
-        )
-        .expect("编码不失败"),
-        None,
-    );
+/// 召回视图里有没有这条内容（原 `RecallView::contains_content`——那是编码写方
+/// 的观测面，随写方迁出后测试直接读 `entries`）。
+fn view_has(view: &super::super::recall::RecallView, content: &str) -> bool {
+    view.entries.iter().any(|e| e.content == content)
 }
 
 // ==================== 巩固 ====================
@@ -612,10 +324,10 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
         .apply(&snap2, i64::MAX, Budget::generous())
         .value;
     assert_eq!(view.entries.len(), 3);
-    assert!(!view.contains_content("起床先喝水"), "源记忆被遗忘");
-    assert!(!view.contains_content("周三不排会"), "源记忆被遗忘");
-    assert!(view.contains_content("喝水要喝温的"));
-    assert!(view.contains_content("周四发周报"));
+    assert!(!view_has(&view, "起床先喝水"), "源记忆被遗忘");
+    assert!(!view_has(&view, "周三不排会"), "源记忆被遗忘");
+    assert!(view_has(&view, "喝水要喝温的"));
+    assert!(view_has(&view, "周四发周报"));
     assert!(
         check_all(guard_vocab(), &snap2).is_empty(),
         "{:?}",
@@ -734,7 +446,7 @@ fn consolidation_never_merges_across_tags() {
         .apply(&snap2, i64::MAX, Budget::generous())
         .value;
     assert!(
-        view.contains_content("先写正向用例") && view.contains_content("先跑一遍再改"),
+        view_has(&view, "先写正向用例") && view_has(&view, "先跑一遍再改"),
         "技能必须还在（被遗忘 = 技能静默消失）"
     );
     assert!(
@@ -778,7 +490,7 @@ fn consolidate_refuses_a_lossy_merge_and_keeps_the_sources() {
         4,
         "四条活记忆全在：拒收不丢记忆、也不降标"
     );
-    assert!(view.contains_content(&"甲".repeat(ENCODE_MAX_CHARS)));
+    assert!(view_has(&view, &"甲".repeat(ENCODE_MAX_CHARS)));
 }
 
 /// 巩固 · 代数闸（G7）：源代数 3 ⇒ 合并后代数 4 > `max_gen` ⇒ 拒收。

@@ -4159,6 +4159,7 @@ dependencies = [
  "symbio-plugin-loop",
  "symbio-plugin-mcp",
  "symbio-plugin-memory",
+ "symbio-plugin-memory_episodic",
  "symbio-plugin-model",
  "symbio-plugin-notes",
  "symbio-plugin-plugin_manager",
@@ -4480,6 +4481,17 @@ dependencies = [
  "symbio-providers",
  "tempfile",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "symbio-plugin-memory_episodic"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "symbio-plugin-api",
  "tracing",
 ]
 

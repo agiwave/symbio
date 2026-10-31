@@ -39,6 +39,7 @@ pub use symbio_plugin_local;
 pub use symbio_plugin_loop;
 pub use symbio_plugin_mcp;
 pub use symbio_plugin_memory;
+pub use symbio_plugin_memory_episodic;
 pub use symbio_plugin_model;
 pub use symbio_plugin_notes;
 pub use symbio_plugin_plugin_manager;

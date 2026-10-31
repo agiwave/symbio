@@ -45,6 +45,9 @@ pub const PLUGIN_ID_MCP: &str = "mcp";
 /// 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
 pub const PLUGIN_ID_MEMORY: &str = "memory";
 
+/// 情景记忆：轮末两条编码（经验 + 判断），经收束贡献落格
+pub const PLUGIN_ID_MEMORY_EPISODIC: &str = "memory_episodic";
+
 /// 模型服务（子智能体自己的模型；子树会话自行解析）
 pub const PLUGIN_ID_MODEL: &str = "model";
 
@@ -83,6 +86,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "session", // 会话
     "loop", // 驱动器：一轮的判决 / 工具循环（经地址面被会话触发，随每棵子树分形）
     "task", // 任务表：清单声明成事实、独立验证与返工、就绪集调度与调度段
+    "memory_episodic", // 情景记忆：轮末两条编码（经验 + 判断），经收束贡献落格
     "heartbeat", // 心跳调度：会话空闲后自主开一轮（经地址面写会话收件箱，随每棵子树分形）
     "classify", // 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）

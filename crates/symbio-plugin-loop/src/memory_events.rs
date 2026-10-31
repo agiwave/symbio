@@ -1,5 +1,8 @@
-//! 记忆三段：
-//! **写方 / 召回注入 / 巩固**——全部落在 per-session 的 v2 事实源上。
+//! 记忆的**读侧与巩固**：召回注入 / 检索事实 / 巩固——全部落在 per-session 的 v2 事实源上。
+//!
+//! **编码写方不在本模块**：轮末两条编码（经验 / 判断）是情景记忆能力包的收束贡献
+//! （`crates/symbio-plugin-memory_episodic`，DE-026 D-263）。本模块是它的下游——
+//! 召回读它落下的格，巩固压缩它落下的格。
 //!
 //! 与 `super::memory`（本会话 `MEMORY.md` 置顶约定，文件形态）的分工：那层记
 //! 「钉住的约定」，本层是
@@ -7,11 +10,11 @@
 //! 记忆**——不另开文件，记忆就是 `v2-events.wal` 里的普通事件（D-044 同族纪律：
 //! 同一事实一份持久化，没有旁路存储）。
 //!
-//! ## 三段各自的判定方（一个规则一个判定方）
+//! ## 各段判定方（一个规则一个判定方）
 //!
-//! | 段 | core 的判定方 | 本模块做什么 |
+//! | 段 | 判定方 | 本模块做什么 |
 //! |---|---|---|
-//! | 编码 | `RecallView::contains_content` 同文去重 | 本轮用户发言 → `memory.encoded` |
+//! | 编码 | 能力包贡献的同文去重（判据与 `recall` 投影同口径） | ——（写方已迁出，D-263） |
 //! | 召回 | `recall` 投影（as-of / 排除式遗忘 / 预算 / 混合打分） | 读视图 → 注入请求视图 + `memory.recalled` |
 //! | 巩固 | `consolidate::accept`（代数上界 + 保真度下界） | 合并最旧两条，**过门才入格** |
 //!
@@ -23,30 +26,30 @@
 //!
 //! | 标签 | 写方 | 溯源 |
 //! |---|---|---|
-//! | [`MEMORY_TAG`]（经验） | 本轮**用户**发言（编码） | 本轮 `user.message` 格 |
-//! | [`JUDGMENT_TAG`]（判断） | 本轮**智能体**的收束正文（判断编码） | 同一个 `user.message` 格（这条判断因它而起） |
+//! | 「经验」 | 本轮**用户**发言（能力包编码） | 本轮 `user.message` 格 |
+//! | 「判断」 | 本轮**智能体**的收束正文（能力包编码） | 同一个 `user.message` 格（这条判断因它而起） |
 //!
 //! 「判断」是七类认知内容里 S10 点名要有生产写方的那一类（`recall:tag=judgment`，
-//! §3.1）。每轮记一问一答两条，跨会话召回才既
-//! 「记得你问过」也「记得我当时怎么答」。巩固同标签进行（[`CONSOLIDABLE_TAGS`]），
+//! DE-036 §3.1）。每轮记一问一答两条，跨会话召回才既
+//! 「记得你问过」也「记得我当时怎么答」。巩固同标签进行（[`CONSOLIDABLE_TAGS`]——
+//! 取值跟写方拼，两个标签的字面量与能力包各写一份，一致性由 e2e t29 钉住），
 //! 技能标签**不在其内**（合并会毁掉 `skill_id` 身份，技能有自己的生死周期）。
 //!
 //! ## 四条口径（为什么是这样）
 //!
-//! - **记什么**：轮末把本轮用户发言编码成一条**情景记忆**（actor = `user`、溯源指向
-//!   本轮 `user.message` 格、标签「经验」——七类认知内容之一，DE-030）。同文去重
-//!   的判定方在 core，本模块不重写一遍比对。空发言不记；超长截断（`ENCODE_MAX_CHARS`）
-//!   ——转写（`messages.json`）已存全文，记忆存**提炼**，两处各存全文就等于两份
-//!   事实源。
+//! - **记什么**：由能力包的编码贡献决定（空发言不记、超长截断、同文去重读全量史，
+//!   DE-036 §3）——转写（`messages.json`）已存全文，记忆存**提炼**，两处各存全文
+//!   就等于两份事实源。
 //! - **载荷里没有 `vec` 键，而且不该有**：向量索引是 Store 的实现细节（DE-001 §9.2），召回走
 //!   标签 + 时间口径；恒空的预留键没有任何读方，却会让「写了就是有了」的假承诺进事实形状
 //!   ——见 [D-110](../../symbio-plugin-memory/README.md#d-110-恒空预留键不进事实形状记忆的向量键与它的写方同批落格 "crates/symbio-plugin-memory/src/README")。
 //!   而「有值的向量键」同样不进：写侧是每轮两次编码、读侧是每轮一次召回，写时成本与读时
 //!   收益的方向是反的；索引要落也落在 `Store` 侧（可重建），不落在事实里——四条理由与
 //!   将来的正确形态见 [DE-036 的 `D-152`](../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")。
-//! - **存哪 / 怎么读**：写方只写**本会话自己的** `v2-events.wal`（共享文件需要跨进程
-//!   锁，而 `WalStore` 没有——两个进程同写一份会互相截尾）；召回反过来
-//!   **跨会话扫**（[`recall_view`]），读侧无锁、按文件数与字节双预算封顶。
+//! - **存哪 / 怎么读**：写方（能力包的贡献经宿主唯一写入口）只写**本会话自己的**
+//!   `v2-events.wal`（共享文件需要跨进程锁，而 `WalStore` 没有——两个进程同写一份会
+//!   互相截尾）；召回反过来**跨会话扫**（[`recall_view`]），读侧无锁、按文件数与字节
+//!   双预算封顶。
 //! - **何时注入**：请求视图**置顶**一条 `role=user`、`meta.kind = recall_context` 的
 //!   记忆消息（请求级注入、不落库）。不进系统提示词——那里有「唯一真源 =
 //!   注册段」的纪律（`crates/symbio-plugin-session/README.md`）；也不置尾——置尾会把「最后一条
@@ -55,7 +58,7 @@
 // 巩固合并的纯计算内核：生产与 verify 共有同一份源码（立这条纪律，
 // 住址随 [D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三归位 core 文本域）。
 // 本模块续一条原名短路径——调用点一行不动。
-use symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
+use symbio_core::merge_kernel::merge_with_fidelity;
 
 use symbio_core::FleetSnapshot;
 use symbio_core::PRINCIPAL_USER;
@@ -71,28 +74,11 @@ use symbio_plugin_api::context::RecallFacts;
 
 // ==================== 常量（口径的数值面，单点定义） ====================
 
-/// 认知内容标签：自动编码的情景内容一律标「**经验**」（七类：知识 / 经验 / 技能 /
-/// 判断 / 策略 / 直觉 / 情绪，[DE-030](../../../docs/003-design/030-能力阶梯总览.md "DE-030-能力阶梯总览")）。
-///
-/// 分类需要模型判断，不在本步（分类的落点是 S10）——但标签不能留空：巩固按标签
-/// 分组，空标签等于没有分组。
-pub(crate) const MEMORY_TAG: &str = "经验";
-
-/// 认知内容标签「**判断**」：智能体自己的收束结论。
-///
-///  `recall:tag=judgment` 的**唯一生产写方**（§3.1）：
-/// 轮末把本轮成功收束的正文（`response`）编成一条判断记忆，
-/// 与用户发言那条（[`MEMORY_TAG`]）同文去重、同截断、同溯源（本轮开口格）。
-/// 兜底收束的正文不记（`response = None`）——固化失败套路等于把没走通的路写成
-/// 记忆，与技能编译同一条纪律。
-pub(crate) const JUDGMENT_TAG: &str = "判断";
-
 /// 单条记忆正文的字符上限（截断点）。
-pub(crate) const ENCODE_MAX_CHARS: usize = 400;
-
-/// 合并产物正文的字符上限。保真度按「**最初源**的句子留存率」算（跨代累积），
-/// 装不下被丢的句子即失真 ⇒ 两条都很长的记忆合并不过 `accept` 的 0.7 下界，
+///
+/// 与巩固产物同一个数：两条都很长的记忆合并不过 `accept` 的 0.7 下界，
 /// **源记忆原样保留**（拒收路径在生产上可达，不是只活在测试里的死分支）。
+/// 编码侧的截断上限住在写方（情景记忆能力包，DE-026 D-263）。
 pub(crate) const MERGE_MAX_CHARS: usize = 400;
 
 /// 触发一次巩固所需的**活**记忆条数（同标签）。取 4：每合并一次净减 1 条，
@@ -103,10 +89,13 @@ pub(crate) const CONSOLIDATE_MIN_ENTRIES: usize = 4;
 ///
 /// 两个生产写方的标签都在内（经验 / 判断）——写方不加巩固域，记忆
 /// 就无界增长（每轮一条），那是**静默失效**：扫得越来越慢、注入越来越偏，
-/// 没有任何一处报错。技能标签（`SKILL_TAG`）**刻意在外**：合并会丢掉载荷里的
+/// 没有任何一处报错。标签的字面量由写方交出（情景记忆能力包，DE-026 D-263），
+/// 这里按**取值**拼一份——两条拼写是否一致由 e2e t29 钉住，不由本模块依赖
+/// 那个 crate 来保证（与技能包对 `SKILL_TAG` 的处理同一条口径）。
+/// 技能标签（`SKILL_TAG`）**刻意在外**：合并会丢掉载荷里的
 /// `skill_id` 身份，路由与校准账整条断——技能有自己的生命周期（编译 / 置信度
 /// 闸 / 反自动化回退），不由巩固代管。
-pub(crate) const CONSOLIDABLE_TAGS: [&str; 2] = [MEMORY_TAG, JUDGMENT_TAG];
+pub(crate) const CONSOLIDABLE_TAGS: [&str; 2] = ["经验", "判断"];
 
 /// 注入段的字节上限——按**整条**追加，装不下就停（不切半行）。
 pub(crate) const RECALL_MAX_BYTES: usize = 4096;
@@ -197,7 +186,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// ## `viewer` = 本轮主体
 ///
 /// **读侧预过滤**（`projection/recall.rs` 模块文档指派给读侧的那一半）：记忆事件
-/// 的载荷带着内容侧可见域（`memory_events::encode` 的产地），本读方按它
+/// 的载荷带着内容侧可见域（产地 = 情景记忆能力包的编码贡献，DE-026 D-263），本读方按它
 /// 逐条收放——
 ///
 /// - `thread_private`（判断记忆的写方取值）：只对**记录它的那个会话**的轮次可见
@@ -271,7 +260,7 @@ pub(crate) fn recall_view(
 ///   缺省（存量事件没有 `vis_scope` 字段）= `thread_private` ⇒ 只剩 own 一条路。
 ///
 /// 取值口径也在 core（`symbio_core::VisScope::of_event`：认不出 = 私有，不把笔误读宽）——
-/// 产地在 `encode`，判定只消费不重算。
+/// 产地在写方（能力包的编码贡献），判定只消费不重算。
 fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
     use symbio_core::VisScope;
     match VisScope::of_event(e) {
@@ -324,106 +313,6 @@ pub(crate) fn prompt_section(facts: &RecallFacts<'_>) -> Option<String> {
         out.push_str(&text);
     }
     Some(out)
-}
-
-// ==================== 写方（编码） ====================
-
-/// 编码三元组：**编什么**——正文 + 认知内容标签 + 事件 id。
-///
-/// 三个字段同生同灭（一条 `memory.encoded` 的身份三元组：内容、分类、格名），
-/// 拆成平铺形参时调用点必然按位置传——参数的排错没有任何守卫看得见（把 `tag`
-/// 与 `event_id` 对调，编译照过、行为全错）。收成一组成员也顺带解掉平铺时 8 个
-/// 形参撞 clippy 上限（7）的问题。
-#[derive(Debug, Clone)]
-pub(crate) struct EncodeContent<'a> {
-    pub user_text: &'a str,
-    pub tag: &'a str,
-    pub event_id: String,
-    /// **内容侧可见域**：
-    /// 这条记忆对谁可见——判定依赖的输入若没有事实来源，判定就只能是平凡值
-    /// （同 D-053 / D-054 把「变更」升为事实的同一条纪律）。落盘形态 =
-    /// `VisScope::name` 的字符串；生产取值只有两个：
-    /// 经验（用户发言，人的认知可供借用）取 `shared`，判断（智能体收束，本部署
-    /// 私有的工作记忆）取 `thread_private`。
-    pub vis_scope: symbio_core::VisScope,
-}
-
-impl<'a> EncodeContent<'a> {
-    pub(crate) fn new(user_text: &'a str, tag: &'a str, event_id: impl Into<String>) -> Self {
-        Self {
-            user_text,
-            tag,
-            event_id: event_id.into(),
-            vis_scope: symbio_core::VisScope::ThreadPrivate,
-        }
-    }
-
-    /// 内容侧可见域（建造者式一票，避免第五个位置参数被按位传错）。
-    pub(crate) fn with_vis_scope(mut self, vis_scope: symbio_core::VisScope) -> Self {
-        self.vis_scope = vis_scope;
-        self
-    }
-}
-
-/// 编码写方：本轮发言 → 一条 `memory.encoded`（空 / 同文 ⇒ 不写）。
-///
-/// `tag` 是认知内容标签（七类）：[`MEMORY_TAG`] = 用户发言（经验），
-/// [`JUDGMENT_TAG`] = 智能体收束正文（判断）。返回写入的 seq。
-/// 溯源 `produced_by` 指向本轮 `user.message` 格（I2：记忆溯源覆盖
-/// 100%，见 `invariants::produced_by_coverage`）；`ts` 是**编码时刻**（`RecallEntry::ts`
-/// 的契约，跨会话新近度排序靠它）。
-///
-/// 载荷的 `vis_scope` = [`EncodeContent::vis_scope`]（内容侧可见域产地）——
-/// 读侧判定（`stats` 的可见域闸、跨主体召回）读的是这个字段，写侧不判。
-pub(crate) fn encode(
-    store: &dyn Store<Event = Event>,
-    snapshot: &[Event],
-    turn: u64,
-    user_seq: u64,
-    now: i64,
-    content: EncodeContent<'_>,
-) -> Result<Option<u64>, String> {
-    let trimmed = content.user_text.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    let encoded = truncate_chars(trimmed, ENCODE_MAX_CHARS);
-
-    // 同文去重：判定方是 core 的 `contains_content`（比的是**已落盘的全部记忆**，
-    // 走 `read_all` 的全量读数口径——落盘的都已发生，不给时钟回拨留重复口子）。
-    // 全量不是省事：实测比过「近 N 条窗口」，窗口省掉的是本轮最便宜的一节
-    // （交回的切片上跑一遍投影），代价是窗口外的同文被再记一条——判据
-    // `dedupe_covers_the_whole_history_not_the_recall_window` 钉住这条口径。
-    // 范围是本会话：
-    // 跨会话的同一句话在两个会话各记一条是两次独立编码，由排版去重（见上）。
-    // 跨标签同文也算重复：同一个事实不必按标签记两遍。
-    // `query = None`：去重问「在不在」，不问「排多前」——无查询 = 平凡值（ts 序）。
-    let view = recall(PRINCIPAL_USER, None, None).read_all(snapshot).value;
-    if view.contains_content(&encoded) {
-        return Ok(None);
-    }
-
-    let seq = store
-        .append(
-            Event::pending(
-                content.event_id,
-                crate::control_decl::EVENT_MEMORY_ENCODED,
-                Entity::Memory,
-                Verb::Opened,
-                turn,
-                PRINCIPAL_USER,
-            )
-            .with_produced_by(user_seq)
-            .with_ts(now)
-            .with_payload(serde_json::json!({
-                "content": encoded,
-                "tag": content.tag,
-                "generation": 0u32,
-                "vis_scope": content.vis_scope.name(),
-            })),
-        )
-        .map_err(|e| format!("memory.encoded 入格失败：{e:?}"))?;
-    Ok(Some(seq.value()))
 }
 
 // ==================== 写方（检索事实） ====================
@@ -606,7 +495,7 @@ pub(crate) fn consolidate(
                 .unwrap_or(0) as u32
         };
         // 可见域同样从源事件载荷读（合并产物继承源记忆的内容侧可见域）——
-        // 同标签的源可见域相同（写方按标签定，见 `record_learning`），取不到
+        // 同标签的源可见域相同（写方按标签定，见情景记忆能力包的编码贡献），取不到
         // （源不在快照里）时落 thread_private：合并放大可见域比丢一次合并更坏。
         let scope_of = |seq: u64| -> symbio_core::VisScope {
             snapshot

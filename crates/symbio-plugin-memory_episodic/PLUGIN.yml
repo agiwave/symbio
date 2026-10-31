@@ -1,0 +1,8 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: memory_episodic
+plugin_comment: 情景记忆：轮末两条编码（经验 + 判断），经收束贡献落格
+plugin_assembly: sub_agent
+plugin_order: 46
+# 本插件**不拥有**任何跨插件事件名：`memory.encoded` 的名字与格位仍由 loop 交出
+# （它同时是召回与巩固的读方，`session` 的 stats 也读它），本插件只交事实形状、
+# 归宿行与写入（DE-026 D-263）。读到的名字来自清单生成物 `symbio-plugin-api/src/events.rs`。

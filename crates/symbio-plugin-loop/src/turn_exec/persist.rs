@@ -81,8 +81,8 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     let response = (!outcome.fell_back).then_some(outcome.text.as_str());
     // 本轮开口格（`u-{turn}`）的 seq —— 记忆 / 任务 / 承诺的溯源锚。
     //
-    // 读**完整史**（`range(0)`）：这三个写方（`record_derived` 的
-    // 承诺与任务表 / `record_learning` 的记忆三段）都是**累计口径**——它们的幂等
+    // 读**完整史**（`range(0)`）：这两个写方（`record_derived` 的
+    // 承诺与任务表 / `record_learning` 的记忆两段）都是**累计口径**——它们的幂等
     // doc-link-allow D-004: 「曾经落过什么」问的是事实网格里有无该条记录，属数据语义
     // 判据与状态推导要看**曾经**落过什么。被快照取代而移入归档段的那些事实同样在
     // `range(0)` 里 ⇒ 压缩前开过的任务不会在就绪集里消失，幂等判据也不会失效
@@ -126,20 +126,17 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
     // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。
     super::super::derived_facts::record_elimination(store.as_ref(), turn_no, user_seq);
-    // 记忆：编码 / 检索锚 / 巩固（`record_learning`）。技能编译与回退观测不在这里——
-    // 它们是技能能力包的收束贡献（`land_contributions`，D-250 / D-262）。
+    // 记忆：检索锚 / 巩固（`record_learning`）。编码与技能编译、回退观测都不在这里——
+    // 它们是能力包的收束贡献（`land_contributions`，D-250 / D-262 / D-263），
+    // 上面那一步已把经验 + 判断两条落格，本函数读的是**含新格**的史。
     super::super::derived_facts::record_learning(
         session.session_id(),
         // `store` 是 `Arc<dyn Store>`（轮内注入闭包要 `'static`），而本函数
         // 收 `&dyn Store` ⇒ `as_ref()` 一次取到 trait object。
         store.as_ref(),
-        &all,
         turn_no,
         user_seq,
-        &user_text,
         &principal,
-        &format!("t{turn_no}"),
-        response,
         recalled,
         symbio_core::clock_now_ms(),
     );
@@ -207,8 +204,9 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 ///    但**记忆不在此列**：编码的是「这一轮用户说了什么、智能体答了什么」，与
 ///    有没有工具交换无关。跳过它就是答话轮记忆静默丢失（实测：默认配置下
 ///    「记住我的幸运数字」由 `classify` 判成答话 ⇒ WAL 里没有 `memory.encoded`，
-///    下一个会话当然想不起来）。因此这里与 [`persist_turn`] 一样调
-///    `record_learning`——见 DE-036「记忆编码是轮级派生，不依附驱动循环」。
+///    下一个会话当然想不起来）。因此这里与 [`persist_turn`] 一样先走
+///    `land_contributions`（编码是情景记忆能力包的收束贡献，D-263）、再调
+///    `record_learning`（检索锚 + 巩固）——见 DE-036「记忆编码是轮级派生，不依附驱动循环」。
 /// 2. **不上线 UI 帧**：答话节点已由 `apply_verdict` 推进 `context.messages`
 ///    （`dialog_node`，`exclude_from_context = false`），由 `finish_turn` 落库 ⇒ 这里用
 ///    [`SilentDeltas`]；再发一次就是同一条答话重复上屏。
@@ -375,13 +373,9 @@ pub(crate) async fn execute_final_reply_turn(
         super::super::derived_facts::record_learning(
             session.session_id(),
             store.as_ref(),
-            &store.range(Seq::new(0)),
             turn_no,
             user_seq,
-            user_text,
             &principal,
-            &format!("t{turn_no}"),
-            response,
             // 答话轮不建召回视图：分类器判 `direct` 的前提就是「现有对话里答得出」，
             // 这一轮没有检索往返，也就没有 `memory.recalled` 可记。
             None,

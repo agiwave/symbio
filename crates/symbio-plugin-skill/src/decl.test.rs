@@ -4,10 +4,11 @@
 //!
 //! 插件自己的测试二进制只链接本 crate：`turn.recalled` 视图与 `turn.stage` /
 //! `user.message` 事实的归宿行住在 `crates/symbio-plugin-loop`，`memory.encoded` 的
-//! 格位也在那里。不在这里 ⇒ `seal` 报 `OrphanFact` / `UnknownSource` /
-//! `FactWithoutEvent`，整张表失败（DE-015 §3.4）。夹具补的正是完整进程里由 loop
-//! 提供的那一半——视图、两条事实与通用行执行体的声明。它与 notes 的同名夹具同形，
-//! 只在 `cfg(test)` 生效。
+//! 格位也在那里；它的**事实形状**自 DE-026 D-263 起住情景记忆能力包
+//! （`crates/symbio-plugin-memory_episodic`）。不在这里 ⇒ `seal` 报 `OrphanFact` /
+//! `UnknownSource` / `UnknownFact` / `FactWithoutEvent`，整张表失败（DE-015 §3.4）。
+//! 夹具补的正是完整进程里由那两个 owner 提供的那一半——视图、事实形状与通用行执行体
+//! 的声明。它与 notes 的同名夹具同形，只在 `cfg(test)` 生效。
 
 use super::{
     retreating_skills, EVENTS, FACTS, OWNER, ROWS, SKILL_ANSWERED, SKILL_RECALL, SKILL_RETREAT,
@@ -27,6 +28,23 @@ const HARNESS_EVENTS: &[EventDecl] = &[
 ];
 
 const HARNESS_FACTS: &[FactDecl] = &[
+    // `memory.encoded` 的**形状**夹具：完整进程由情景记忆能力包申报（D-263），本
+    // 二进制不链接它——`skill.retreat` 读它的 `tag` / `skill_id`，缺形状会报
+    // `UnknownFact`。字段表与该包 `decl.rs` 的申报同构。
+    FactDecl {
+        name: EVENT_MEMORY_ENCODED,
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &[
+            "content",
+            "tag",
+            "generation",
+            "vis_scope",
+            "skill_id",
+            "trigger",
+        ],
+    },
     FactDecl {
         name: "turn.stage",
         port: None,
@@ -79,8 +97,37 @@ fn harness_declarations() -> PluginDeclarations<'static> {
             reads: &[],
             writes: &[EVENT_MEMORY_CALIBRATED, SKILL_ANSWERED],
         }],
-        rows: harness_protocol_rows(),
+        rows: harness_rows(),
     }
+}
+
+/// `memory.encoded` 的归宿行夹具：完整进程由情景记忆能力包交（D-263），本二进制
+/// 不链接它 ⇒ 缺行会报 `OrphanFact`。形状与那张行同构（有即闭合，eq 为空）。
+fn harness_encoded_sink_row() -> Decl {
+    let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
+        source: EVENT_MEMORY_ENCODED,
+        key: &[],
+        eq: &[],
+    }]));
+    Decl {
+        name: EVENT_MEMORY_ENCODED,
+        prio: 200,
+        by: None,
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: pattern[0],
+        until: pattern,
+        unless: &[],
+    }
+}
+
+fn harness_rows() -> &'static [Decl] {
+    static ALL: std::sync::OnceLock<&'static [Decl]> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| {
+        let mut v: Vec<Decl> = harness_protocol_rows().to_vec();
+        v.push(harness_encoded_sink_row());
+        Box::leak(v.into_boxed_slice())
+    })
 }
 
 /// 内核协议五格的归宿行：内核总是声明这五条事实，而本二进制不链接 loop ⇒ 它们的
@@ -124,11 +171,22 @@ symbio_plugin_api::submit_declarations!(
 );
 
 /// 本能力包自己的表先自证：事件 / 事实 / 视图 / 行四块都有内容。
+///
+/// `memory.encoded` **不在**本包的 `FACTS` / `ROWS` 里（D-263）：形状的 owner 是
+/// 情景记忆能力包，本包只是 `tag:"skill"` 那半的一个写方——一处申报两个 owner，
+/// 完整进程的 `seal` 会报 `DuplicateFact`。
 #[test]
 fn the_skill_package_submits_its_own_surfaces() {
     assert!(!EVENTS.is_empty());
-    assert!(FACTS.iter().any(|f| f.name == EVENT_MEMORY_ENCODED));
     assert!(FACTS.iter().any(|f| f.name == EVENT_MEMORY_CALIBRATED));
+    assert!(
+        !FACTS.iter().any(|f| f.name == EVENT_MEMORY_ENCODED),
+        "编码事实的形状随记忆家族走，本包不再申报（D-263）"
+    );
+    assert!(
+        !ROWS.iter().any(|r| r.name == EVENT_MEMORY_ENCODED),
+        "归宿行同样只有一张，随形状 owner 走"
+    );
     assert!(VIEWS.iter().any(|v| v.name == SKILL_RETREAT));
     assert!(ROWS.iter().any(|r| r.name == SKILL_RECALL));
 }

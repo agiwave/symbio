@@ -12,10 +12,11 @@
 //!
 //! - **轮次事实本身**（开口 / 收束 / 成本 / 重试 attempt）：那是运行器的面，判据在
 //!   `turn_exec.test.rs`；
-//! - **记忆三段的端到端接线**：`turn_exec.test.rs::full_turn_lands_memory_and_learning_facts`
+//! - **记忆两段的端到端接线**：`turn_exec.test.rs::full_turn_writes_no_memory_encoding_from_the_host`
 //!   带**反向自检**（注掉运行器里的 `record_learning` 调用本用例必须红）。本文件
-//!   只钉 `record_learning` 自己的口径，尤其是**巩固要用刷新后的快照**（编码刚写下
-//!   的那条必须对巩固可见）——那一层端到端看不见。
+//!   只钉 `record_learning` 自己的口径，尤其是**巩固要用刷新后的快照**（刚落格的编码
+//!   必须对巩固可见）——那一层端到端看不见。编码本身不在这里：它是情景记忆能力包的
+//!   收束贡献（D-263），本文件的种子直接播它落格后的形状。
 
 use super::{record_derived, record_elimination, record_learning};
 use crate::control_decl::guard_vocab;
@@ -378,36 +379,69 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
     );
 }
 
-/// 记忆三段（编码 / 检索锚 / 巩固）全部在同一份 WAL 里可读，
-/// 且 `check_all` 全绿（溯源 100%）。
+/// 种入一条写方**已落格**的经验编码（`v2m-` 事件号与情景记忆能力包的贡献同形，
+/// D-263）：`record_learning` 不再自己编码，巩固的输入由这一步播出来。
+fn seed_episodic_encoded(
+    store: &EventStore,
+    id: &str,
+    content: &str,
+    turn: u64,
+    user_seq: u64,
+) -> u64 {
+    store
+        .append(
+            Event::pending(
+                id.to_string(),
+                crate::control_decl::EVENT_MEMORY_ENCODED,
+                Entity::Memory,
+                Verb::Opened,
+                turn,
+                symbio_core::PRINCIPAL_USER,
+            )
+            .with_produced_by(user_seq)
+            .with_payload(serde_json::json!({
+                "content": content,
+                "tag": "经验",
+                "generation": 0u32,
+                "vis_scope": "shared",
+            })),
+        )
+        .expect("编码种子入格")
+        .value()
+}
+
+/// 记忆两段（检索锚 / 巩固）全部在同一份 WAL 里可读，且 `check_all` 全绿（溯源 100%）。
 ///
-/// 端到端接线由 `turn_exec.test.rs::full_turn_lands_memory_encoding_facts` 带反向
-/// 自检覆盖；本用例钉的是**巩固要用刷新后的快照**——编码刚写下的那条必须对巩固
-/// 可见（先巩固后编码会让第 4 条永远等不到代数 1）。技能观测与编译不经过本函数
-/// （D-262：交接缝贡献），所以这里也不留它们的入参。
+/// 端到端接线由 `turn_exec.test.rs` 的记忆用例带反向自检覆盖；本用例钉的是**巩固要用
+/// 刷新后的快照**——贡献刚落格的编码必须对巩固可见（先巩固后编码会让第 4 条永远等不到
+/// 代数 1）。技能观测与编译不经过本函数（D-262：交接缝贡献），所以这里也不留它们的入参。
 #[test]
-fn record_learning_wires_all_three_memory_steps() {
+fn record_learning_wires_retrieval_and_consolidation() {
     let store = EventStore::new();
 
-    // 轮 0–3：每轮说一句、四句互不相同 ⇒ 第 4 轮收束时活记忆到 4 条 ⇒ 巩固触发。
+    // 轮 0–3：每轮说一句、四句互不相同，编码以写方的形状种入 ⇒ 第 4 轮收束时
+    // 活记忆到 4 条 ⇒ 巩固触发。
     for i in 0..4u64 {
-        let (snapshot, user_seq) = seed_turn(
+        let (_, user_seq) = seed_turn(
             &store,
             symbio_core::PRINCIPAL_MAIN,
             i,
             &format!("第 {i} 条约定"),
             i,
         );
+        seed_episodic_encoded(
+            &store,
+            &format!("v2m-t{i}"),
+            &format!("第 {i} 条约定"),
+            i,
+            user_seq,
+        );
         record_learning(
             "derived-test",
             &store,
-            &snapshot,
             i,
             user_seq,
-            &format!("第 {i} 条约定"),
             symbio_core::PRINCIPAL_MAIN,
-            &format!("t{i}"),
-            Some("答"),
             None,
             symbio_core::clock_now_ms(),
         );
@@ -420,21 +454,11 @@ fn record_learning_wires_all_three_memory_steps() {
                 && e.event_id.starts_with("v2m-"))
             .count(),
         4,
-        "编码：每轮各编码一条经验"
-    );
-    // 判断编码：判断编码同文去重——四轮收束都是同一句「答」，
-    // 跨标签同文也只记一条（`contains_content` 比的是全部记忆）。
-    assert_eq!(
-        snap.iter()
-            .filter(|e| e.kind == crate::control_decl::EVENT_MEMORY_ENCODED
-                && e.event_id.starts_with("v2j-"))
-            .count(),
-        1,
-        "判断编码：判断每轮各编一条，同文去重（四轮同一句 ⇒ 只一条）"
+        "种子：每轮一条写方形状的编码（编码本身的判据在能力包 `contributor.test.rs`）"
     );
     snap.iter()
         .find(|e| e.kind == EVENT_MEMORY_CONSOLIDATED)
-        .expect("巩固：第 4 条到齐即触发巩固（编码先于巩固 ⇒ 刚写的那条对巩固可见）")
+        .expect("巩固：第 4 条到齐即触发巩固（贡献先于本函数落格 ⇒ 刚写的那条对巩固可见）")
         .payload
         .get("generation")
         .and_then(|v| v.as_u64())
@@ -454,17 +478,14 @@ fn record_learning_wires_all_three_memory_steps() {
         .value;
     assert!(!view.entries.is_empty(), "还有活记忆可召回");
 
-    let (snapshot, user_seq) = seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 4, "第五句", 44);
+    let (_, user_seq) = seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 4, "第五句", 44);
+    seed_episodic_encoded(&store, "v2m-t4", "第五句", 4, user_seq);
     record_learning(
         "derived-test",
         &store,
-        &snapshot,
         4,
         user_seq,
-        "第五句",
         symbio_core::PRINCIPAL_MAIN,
-        "t4",
-        Some("答"),
         Some(&view),
         symbio_core::clock_now_ms(),
     );

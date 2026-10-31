@@ -20,18 +20,16 @@ use symbio_core::{
 pub(crate) const EVENT_TURN_STAGE: &str = "turn.stage";
 pub(crate) const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 pub(crate) const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
-/// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
-///
-/// 写方是 `memory_events::consolidate`（过 `accept` 闸门才落格），读方是 [`crate::recall`]
-/// ——两端都在本插件，名字因此随本插件走（D-201）。
-pub(crate) const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
-/// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
-/// 落在 `memory × closed`；`produced_by` 指向被遗忘那条记忆的 seq。
-pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
-// 跨插件共享的五条名字（DE-024 D-204 / D-205 / D-206）：常量的**事实源是本插件清单的
+// 跨插件共享的名字（DE-024 D-204 / D-205 / D-206 / DE-026 D-263）：常量的**事实源是本插件清单的
 // `shared_events:` 行**，由 `scripts/facts/events-rs.mjs` 投影进
-// `symbio-plugin-api::events`，读侧（`session` 的 `stats` / `inbox` / `conation`，以及它调
-// `calibration_for` 时交进去的那张表）从这里取名字，而不是内核替它们命名。
+// `symbio-plugin-api::events`，读侧（`session` 的 `stats` / `inbox` / `conation`，情景记忆
+// 能力包的编码去重，以及它调 `calibration_for` 时交进去的那张表）从这里取名字，
+// 而不是内核替它们命名。
+//
+// `memory.consolidated` / `memory.forgotten` 自 D-263 起进来：写方与投影读方仍都在
+// 本插件，但编码能力包的同文去重要读「活记忆 = 编码 ∪ 巩固产物 − 被遗忘」这一活集。
+// 巩固语义照旧：合并落 `memory × progressed`（过 `accept` 才入格），遗忘**不是物理删除**
+// ——Log 永不删，只是投影不再包含（可撤销、可审计），`produced_by` 指向被遗忘那条的 seq。
 //
 // `session.config` 是**配置快照**：它进共享列表的理由与事件名不同——能力包要在收束时
 // 读自己那格开关（`readyset_cap`），而开关的现行值不住端口、住事实（DE-026 D-252）。
@@ -40,7 +38,8 @@ pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 // 任务族五条已随能力迁出（`symbio-plugin-task` 的 `PLUGIN.yml`），本插件不再引用它们的
 // 拼写：调度与折叠都住那个能力包，本插件不需要认识任务名。
 pub(crate) use symbio_plugin_api::events::{
-    EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_TASK_CONTROLLED, EVENT_TURN_DISPATCH,
+    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_SESSION_CONFIG,
+    EVENT_TASK_CONTROLLED, EVENT_TURN_DISPATCH,
 };
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
@@ -141,11 +140,11 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Turn, Verb::Asserted)),
     // 记忆找回：行表与事实表已经在用这个名字。
     EventDecl::new(EVENT_MEMORY_RECALLED, (Entity::Memory, Verb::Asserted)),
-    // 巩固与遗忘（的两格）：写方 `memory_events::consolidate`、读方 [`crate::recall`]
-    // 都在本插件，名字与格位因此随本插件声明（DE-024 D-201）。同族的 `memory.encoded`
-    // 走另一条：`session` 也读它，名字因此登记进本插件清单的 `shared_events`，格位仍
-    // 由本插件交出（DE-024 D-204），不回内核。`memory.calibrated` 已随技能能力迁出，
-    // 格位与写方都在那个能力包（D-262）。
+    // 巩固与遗忘的两格：写方 `memory_events::consolidate`、读方 [`crate::recall`]
+    // 都在本插件，格位由本插件交出（DE-024 D-201）；名字自 DE-026 D-263 起进清单
+    // `shared_events`——情景记忆能力包的编码去重读这一活集。同族的 `memory.encoded`
+    // 同理共享（`session` 也读它，DE-024 D-204），不回内核。`memory.calibrated` 已随
+    // 技能能力迁出，格位与写方都在那个能力包（D-262）。
     EventDecl::new(
         EVENT_MEMORY_CONSOLIDATED,
         (Entity::Memory, Verb::Progressed),

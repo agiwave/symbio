@@ -76,13 +76,6 @@ pub struct RecallView {
     pub degraded: bool,
 }
 
-impl RecallView {
-    /// 是否包含某内容（跨主体隔离断言 C13 的观测面；写方拿它做**同文去重**）。
-    pub fn contains_content(&self, content: &str) -> bool {
-        self.entries.iter().any(|e| e.content == content)
-    }
-}
-
 /// `recall` 投影：召回 `viewer` 自己的、as-of 可见、未被遗忘的记忆。
 ///
 /// - `tag`：内容标签过滤（`None` = 全部；「记忆类型」是过滤参数，DE-001 §9.1）。这是

@@ -240,7 +240,7 @@ export const BASELINE = {
   // 23 + `tool_executor.test.rs` 2 条写侧闸 + `providers.test.rs` 1 条调度段），角色居住由测试
   // 二进制的声明替身满足。判据没有丢：同一批断言随能力一起搬家，只换了 executor 与测试二进制。
   // 非侵蚀。
-  ciRustTestsTotal: 2451,
+  ciRustTestsTotal: 2453,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

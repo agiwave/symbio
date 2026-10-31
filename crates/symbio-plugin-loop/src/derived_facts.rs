@@ -238,20 +238,19 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
     }
 }
 
-/// 收束派生事实中的**记忆与学习**半边（编码 / 检索 / 巩固 + 技能编译）。
+/// 收束派生事实中的**记忆**半边（检索入格 + 巩固）。
 ///
 /// ## 为什么它与「轮次事实」是两件事
 ///
 /// 轮次事实（`u-{turn}` 开口 / 收束格）记的是**这一轮说了什么、答应了什么**，
-/// 由 v2 运行器原生记账。但记忆与学习**不是轮次事实**，而是本轮的**派生副作用**：
-/// `turn_exec` 一处都不写（它只写轮次事实）。漏调本函数，「编码 / 检索锚 / 巩固 /
-/// 技能观测 / 技能编译」会**静默全丢**——长期记忆与自我改进随之失效。
+/// 由 v2 运行器原生记账。但记忆**不是轮次事实**，而是本轮的**派生副作用**：
+/// `turn_exec` 一处都不写（它只写轮次事实）。漏调本函数，「检索锚 / 巩固」会
+/// **静默全丢**——长期记忆随之失效。
 ///
 /// ## 锚点由调用方给，锚的**含义**不由调用方定
 ///
-/// `user_seq` = 本轮 `user.message` 格的 seq（`u-{turn}` 开口格），`anchor_id` 是
-/// 幂等键的**词干**（`t{turn}`，一轮一个号）。两条都由 `turn_exec` 给，但
-/// 「溯源锚必须是本轮的开口」这条不变（I2：记忆溯源覆盖 100%）。
+/// `user_seq` = 本轮 `user.message` 格的 seq（`u-{turn}` 开口格）。它由
+/// `turn_exec` 给，但「溯源锚必须是本轮的开口」这条不变（I2：记忆溯源覆盖 100%）。
 ///
 /// ## 失败只记日志不冒泡
 ///
@@ -259,23 +258,17 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
 ///
 /// ## 顺序是判据
 ///
-/// 1. 编码（经验 + 判断）先写——本轮新记忆要能进本轮的巩固；
-/// 2. 检索事实与它平级：溯源锚同为本轮开口；
-/// 3. 巩固最后，且用**刷新后的**快照——它要看得见 1 刚写下的那条。
-///
-/// 技能观测与编译**不在本函数**：它们是技能能力包的收束贡献（`Contributor`，
-/// D-250 / D-262），由 `settle` 在记忆之后按 `prio` 逐个询问。
+/// 1. **编码不在本函数**：经验 + 判断两条编码是情景记忆能力包的收束贡献
+///    （`land_contributions`，DE-026 D-263），宿主在本函数**之前**已把它们落格；
+/// 2. 检索事实的溯源锚同为本轮开口；
+/// 3. 巩固最后，且用**刷新后的**快照——它要看得见 1 刚落下的那条。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_learning(
     session_id: &str,
     store: &dyn Store<Event = Event>,
-    snapshot: &[Event],
     turn: u64,
     user_seq: u64,
-    user_text: &str,
     principal: &str,
-    anchor_id: &str,
-    response: Option<&str>,
     recalled: Option<&super::recall::RecallView>,
     now: i64,
 ) {
@@ -286,47 +279,6 @@ pub(crate) fn record_learning(
         );
     };
 
-    // ── 编码────────────────────────────────────
-    // 经验（用户发言）= **人的认知**，可见域 `shared`——智能体读、本人写
-    // （§3 的 grants 行语义， ①：内容侧产地）。单归属主部署下
-    // 「这个人」= 本机用户，认知可供本部署的矩阵内主体借用（SC-010 判据 3）。
-    if let Err(why) = super::memory_events::encode(
-        store,
-        snapshot,
-        turn,
-        user_seq,
-        now,
-        super::memory_events::EncodeContent::new(
-            user_text,
-            super::memory_events::MEMORY_TAG,
-            format!("v2m-{anchor_id}"),
-        )
-        .with_vis_scope(symbio_core::VisScope::Shared),
-    ) {
-        remember("编码", why);
-    }
-    // ── 判断编码（七类认知内容的「判断」写方）────────
-    // 本轮**成功收束**的正文（`response`）→ 一条 tag="判断" 的记忆，与用户发言
-    // 那条同文去重 / 同截断 / 同溯源。兜底收束不记（`response = None`）——固化
-    // 失败套路等于把没走通的路写成记忆（与技能编译同一条纪律）。
-    // 判断 = 智能体自己的收束记录，可见域 `thread_private`（C10 缺省）——
-    // 它是会话私有的工作记忆，不是可跨主体借用的认知（①）。
-    if let Some(response) = response {
-        if let Err(why) = super::memory_events::encode(
-            store,
-            snapshot,
-            turn,
-            user_seq,
-            now,
-            super::memory_events::EncodeContent::new(
-                response,
-                super::memory_events::JUDGMENT_TAG,
-                format!("v2j-{anchor_id}"),
-            ),
-        ) {
-            remember("判断编码", why);
-        }
-    }
     // ── 检索入格：本轮召回视图 → 一条 `memory.recalled` ─────────────
     if let Some(view) = recalled {
         if let Err(why) =

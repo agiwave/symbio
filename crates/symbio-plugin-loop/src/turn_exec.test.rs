@@ -92,7 +92,7 @@ impl Capability for DeclOnlyTool {
 }
 
 /// **轮次事实**（这一轮说了什么 / 跑出了什么）——记忆与学习是**派生副作用**，
-/// 不在其中（见 `full_turn_lands_memory_and_learning_facts`）。
+/// 不在其中（见 `full_turn_writes_no_memory_encoding_from_the_host`）。
 ///
 /// 断言轮次事实时先按它筛一遍：网格里同时住着两类事件，用「总数等于几」去断言
 /// 会把两类混在一起——派生素化多写一条就假红，少写一条又假绿。
@@ -1654,25 +1654,28 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
     );
 }
 
-// ==================== 收束派生事实：记忆（编码 / 检索 / 巩固）====================
+// ==================== 收束派生事实：记忆（检索 / 巩固；编码不归本插件）====================
 
-/// **收束派生事实**：记忆三段（编码 / 检索 / 巩固）必须入格；技能观测与编译
-/// **不得**由本插件写。
+/// **收束派生事实**：检索锚与巩固必须由 `derived_facts::record_learning` 落格；
+/// 编码、技能观测与编译**不得**由本插件写。
 ///
 /// ## 这个用例挡的是什么
 ///
-/// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，而记忆
-/// **不是轮次事实**——运行器一处都不写，写方是 `derived_facts::record_learning`。
-/// 写方若不被调用（或出参没交回），长期记忆就**静默全丢**。
+/// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，而记忆**不是轮次
+/// 事实**——运行器一处都不写。编码自 D-263 起是**情景记忆能力包的收束贡献**
+/// （`crates/symbio-plugin-memory_episodic`）：本插件一侧再写一笔就是同一事实两个
+/// 写方。所以这里反向钉住「一轮跑完，本插件不落任何 `memory.encoded`」——正向判据
+/// （带溯源入格、同文去重、截断、可见域）随写方迁进那个包的 `contributor.test.rs`，
+/// 端到端由 e2e `t29` 带。
 ///
-/// 技能观测与编译在 D-262 之后是**技能能力包的收束贡献**（`Contributor`）——
-/// 本插件一侧再写一笔就是同一事实两个 owner。所以本用例除了钉编码，还反向钉住
-/// 「loop 不落技能那两格」：注入一份"看起来命中了技能"的夹具之后，
-/// `memory.calibrated` 与 `memory.encoded{tag:"skill"}` 都不得出现。
+/// 技能观测与编译在 D-262 之后同理是**技能能力包的收束贡献**（`Contributor`）：
+/// 注入一份"看起来命中了技能"的夹具之后，`memory.calibrated` 与
+/// `memory.encoded{tag:"skill"}` 都不得出现。
 ///
-/// **反向自检**：注掉 `turn_exec` 里的 `record_learning` 调用，编码断言必须红。
+/// **反向自检**：把 `record_learning` 的巩固写口改回自己编码（在 loop 里落
+/// `memory.encoded`），本用例必须红。
 #[tokio::test]
-async fn full_turn_lands_memory_encoding_facts() {
+async fn full_turn_writes_no_memory_encoding_from_the_host() {
     let fx = setup_full_with(true);
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = symbio_core::ExecEventSink::direct(frames.clone());
@@ -1691,27 +1694,13 @@ async fn full_turn_lands_memory_encoding_facts() {
     let events = fx.facts.range(Seq::new(0));
     let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
 
-    let user_seq = events
-        .iter()
-        .find(|e| e.kind == EVENT_USER_MESSAGE)
-        .and_then(|e| e.seq.map(|s| s.value()))
-        .expect("本轮用户格必须入格");
-
     let encoded: Vec<&Event> = events
         .iter()
         .filter(|e| e.kind == crate::control_decl::EVENT_MEMORY_ENCODED)
         .collect();
     assert!(
-        encoded.iter().any(|e| e.payload["tag"] == "经验"),
-        "编码必须入格：{kinds:?}"
-    );
-    assert!(
-        !encoded.is_empty() && encoded.iter().all(|e| e.produced_by == Some(user_seq)),
-        "记忆的溯源锚必须是本轮开口（I2）：{encoded:?}"
-    );
-    assert!(
-        !encoded.iter().any(|e| e.payload["tag"] == "skill"),
-        "技能编译不归本插件写（D-262：交接缝贡献）：{encoded:?}"
+        encoded.is_empty(),
+        "编码不归本插件写（D-263：情景记忆能力包的收束贡献）：{encoded:?}"
     );
     assert!(
         !events

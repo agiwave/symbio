@@ -69,6 +69,12 @@ fn contents(view: &RecallView) -> Vec<&str> {
     view.entries.iter().map(|e| e.content.as_str()).collect()
 }
 
+/// 视图里有没有这条内容（原 `RecallView::contains_content`——它是编码写方的观测面，
+/// 编码迁进情景记忆能力包后不再有人用，测试直接读 `entries`）。
+fn has(view: &RecallView, content: &str) -> bool {
+    view.entries.iter().any(|e| e.content == content)
+}
+
 // ── 判据一：过滤真的在排除（不是「参数收下、行为不变」）──────────────────
 
 #[test]
@@ -380,9 +386,9 @@ fn consolidation_does_not_pollute_as_of_view() {
     );
     // as-of 挪到巩固之后：新记忆可见、旧记忆已被排除式遗忘（Log 未删，投影不再包含）。
     let future = p.apply(&events(), 9_999, Budget::generous());
-    assert!(future.value.contains_content("压缩摘要"));
+    assert!(has(&future.value, "压缩摘要"));
     assert!(
-        !future.value.contains_content("用户偏好简洁答复"),
+        !has(&future.value, "用户偏好简洁答复"),
         "遗忘 = 投影不再包含"
     );
 }
@@ -428,11 +434,11 @@ fn memory_of_a_never_appears_in_b_recall() {
     let events = || store.range(Seq::new(0));
     let b_view = recall("session/b", None, None).apply(&events(), 9_999, Budget::generous());
     assert!(
-        !b_view.value.contains_content("A 的私有记忆"),
+        !has(&b_view.value, "A 的私有记忆"),
         "跨主体默认不可见（C13）"
     );
-    assert!(b_view.value.contains_content("B 的记忆"));
+    assert!(has(&b_view.value, "B 的记忆"));
     let a_view = recall(VIEWER, None, None).apply(&events(), 9_999, Budget::generous());
-    assert!(a_view.value.contains_content("A 的私有记忆"));
-    assert!(!a_view.value.contains_content("B 的记忆"));
+    assert!(has(&a_view.value, "A 的私有记忆"));
+    assert!(!has(&a_view.value, "B 的记忆"));
 }

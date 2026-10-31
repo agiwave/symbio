@@ -33,6 +33,7 @@ symbio-plugin-local = { path = "../symbio-plugin-local" }
 symbio-plugin-loop = { path = "../symbio-plugin-loop" }
 symbio-plugin-mcp = { path = "../symbio-plugin-mcp" }
 symbio-plugin-memory = { path = "../symbio-plugin-memory" }
+symbio-plugin-memory_episodic = { path = "../symbio-plugin-memory_episodic" }
 symbio-plugin-model = { path = "../symbio-plugin-model" }
 symbio-plugin-notes = { path = "../symbio-plugin-notes" }
 symbio-plugin-plugin_manager = { path = "../symbio-plugin-plugin_manager" }
