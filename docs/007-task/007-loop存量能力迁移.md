@@ -9,7 +9,7 @@ created: 2026-10-29
 parent: T-001-能力全面拆分
 deps: []
 where: `docs/003-design/026-能力拆分与影响类.md` §2.3, `crates/symbio-plugin-loop/src/loop_rows.rs`, `crates/symbio-plugin-loop/src/turn_exec.rs`, `crates/symbio-plugin-loop/src/chat_loop`
-exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常量与策略清零——只剩环、写口、全局守门、过程体、会话基底五类；每一批都是「插件落好 → 绑定切换 + 旧实现删除」同一提交，端到端行为逐字不变；迁移提交不含机制增量（`EX-007`：`core` / `kernel` diff = 0，`loop` 只含删除与绑定切换）；`SC-006` 的基线里不再有 `loop` 条目
+exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常量与策略清零——只剩环、写口、全局守门、过程体、会话基底五类；每一批都是「插件落好 → 绑定切换 + 旧实现删除」同一提交，端到端行为逐字不变；迁移提交不含机制增量（`EX-007`：机制面新增行为 0、删除行不限（`D-283`），`loop` 只含删除与绑定切换）；`SC-006` 的基线里不再有 `loop` 条目
 ---
 
 # S6：loop 存量能力逐批迁出
@@ -194,7 +194,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常�
 3. 跑该能力的端到端用例与 `EX-003` 反向用例（两份实现同时生效必须红）。
 4. 如新增了工具名字面量，删掉后同批把 `SC-006` 基线对应条目删掉，确认红变绿不是靠改基线放宽。
 5. 每批提交核对 `EX-007`：提交正文写一行 `Migration: <批次>`（判据按声明认迁移类），
-   同一次提交里 `core` / `kernel` / `plugin-api` 非生成 `.rs` diff = 0，`loop` 的 diff
+   同一次提交里 `sdk` / `kernel` / `plugin-api` 非生成 `.rs` 新增行为 0（删除行照放，`D-283`），`loop` 的 diff
    只有删除与绑定切换；补件另起提交、挂 `Core-Change: D-NNN`。
 6. 八批走完后核对 `loop_rows.rs` 只剩五类残留，再进 S7。
 

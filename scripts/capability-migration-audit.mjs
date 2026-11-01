@@ -11,7 +11,7 @@
  *
  * | 类别 | 怎么认 | 判什么 |
  * |---|---|---|
- * | **迁移批次** | 提交正文里一行 `Migration: <批次>` | `core` / `kernel` / `plugin-api` 的非生成 `.rs` diff = 0；`loop` / `session` 没有新增**带能力名**的源码行（绑定切换可以是通用胶水，为某条能力新加的行不行）；且至少删掉一行旧实现 |
+ * | **迁移批次** | 提交正文里一行 `Migration: <批次>` | 机制面（`sdk` / `kernel` / `plugin-api`）的非生成 `.rs` **新增行为 0**（删除行不限——`D-283`）；`loop` / `session` 没有新增**带能力名**的源码行（绑定切换可以是通用胶水，为某条能力新加的行不行）；且至少删掉一行旧实现 |
  * | **架构补件** | 在架构面新增 `pub` 项，且没有 `Migration:` | 引用一条**能打开**的 `### D-NNN`；新增的非注释代码不含插件 id 字符串、不含工具名 |
  *
  * 两类之外（只改注释、只删架构面、只动文档）不判——判据不假装能判它没定义的东西。
@@ -31,8 +31,9 @@
  *   另一半归 `seal` 的 `Gap::Duplicate{Name,Event,Fact,View,Actor,Port}`
  *   （`crates/symbio-kernel/src/decl/ring.rs`）：同名声明在装载期红，
  *   不在这里按名字再判一遍（SC-006 的教训：同一形状两个 owner）。
- * - **EX-007（D-247）**：夹带、定制、反向拆分三条失败形态——架构面零改动是「反向拆分」
- *   与「夹带」的机械面；补件的决策号与通用性判「定制」。语义是否真的通用（不是把
+ * - **EX-007（D-247）**：夹带、定制、反向拆分三条失败形态——机制面**零新增**是「反向拆分」
+ *   与「夹带」的机械面（`D-283`：删除行不算夹带，旧实现住在机制面的那一批要靠它搬）；
+ *   补件的决策号与通用性判「定制」。语义是否真的通用（不是把
  *   一条能力改名成 trait）由 review 判，脚本只保证「写着能力名 / 工具名」无法通过。
  *
  * ## 搬家不算新增面（D-279）
@@ -46,9 +47,17 @@
  * 限定「文件被删掉」而不是「提交里出现过同样的删除行」：后者会把「从 `loop` 删掉一条
  * 定制分支、同一行加进 `sdk`」也算搬家，而那是 D-247 反向拆分要拦的形态。
  *
+ * 同一把尺在迁移侧的形状是 **D-283**：判的是「面变宽了没有」，所以迁移批在机制面
+ * 不许有**新增行**，而**删除行**照放——`S8` 那六行折叠今天就住在 `sdk/projection/` 里，
+ * 「旧实现删除与绑定切换同提交」（`D-245`）落到它们身上必然是删机制面的文件。
+ * 一条要求「diff = 0」的判据会把整段 `S8` 变成措辞游戏：要么拆成三个提交（中间那个
+ * 让 `PP-003` 判红），要么不写 `Migration:`（让 `EX-003` 判不到）。
+ *
  * ## 失效形态（回归测试钉的是这几条）
  *
  * - 把「有 `Migration:`」当成「不用判」⇒ 只要写上 trailer 就能夹带，判据变装饰；
+ * - 机制面判成「diff = 0」⇒ 折叠长在 `sdk` 的那批（`S8` 六行）搬不动，只能拆提交或
+ *   省 trailer（`D-283`）；
  * - 只判新增、不判删除 ⇒ 插件落地而旧实现留着（两份同时生效）照样绿；
  * - 注释里的工具名 / 插件 id 被算成代码 ⇒ 补件几乎每条都红，豁免写满之后没人再看；
  * - 决策号只做正则不查存在 ⇒ 拼一个不存在的 `D-999` 就能进架构。
@@ -80,7 +89,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
 const argv = process.argv.slice(2)
 
-/** 机制面：迁移批次完全不该碰的三棵树（`plugin-api` 也在内——补件才改它）。 */
+/** 机制面：迁移批次只许在这里收窄、不许变宽的三棵树（`D-283`；补件才改它）。 */
 export const ARCH_TREES = [
   'crates/symbio-sdk',
   'crates/symbio-kernel',
@@ -300,17 +309,23 @@ export function classifyCommit({ message, patch }) {
 
 /**
  * 迁移批次的判定（EX-003 的「同提交删除」+ EX-007 的两条 containment）。
+ *
+ * 机制面判的是**新增行**（`D-283`）：`S8` 那六行折叠今天住在 `sdk/projection/` 里，
+ * 「搬走 = 同一提交删掉旧实现」（`D-245`）落到它们身上必然是删机制面的文件。
+ * 判「diff = 0」会把这一族的删除半边也拦下，于是整段只能拆提交（中间那个让 `PP-003`
+ * 判红）或不写 `Migration:`（让 `EX-003` 判不到）——两条都是把判据变成措辞游戏。
+ * 变宽的那一半一分未松：机制面新增一行非生成源码照样红。
  */
 export function migrationErrors({ sha, patch, pluginIds: ids = [], toolNames = [] }) {
   const errors = []
 
-  const archTouched = patch.filter(
-    (f) => inTrees(f.path, ARCH_TREES) && f.path.endsWith('.rs') && !isGenerated(f.path) && (f.added.length || f.removed.length),
+  const archAdded = patch.filter(
+    (f) => inTrees(f.path, ARCH_TREES) && f.path.endsWith('.rs') && !isGenerated(f.path) && f.added.length,
   )
-  if (archTouched.length) {
+  if (archAdded.length) {
     errors.push(
-      `EX-007 迁移提交改了机制面（${archTouched.map((f) => `\`${f.path}\``).join(' / ')}）` +
-        ' —— 迁移批次 core / kernel / plugin-api diff 必须为 0；确有机制增量就拆成带 `### D-NNN` 的独立补件提交（D-247）',
+      `EX-007 迁移提交在机制面新增了源码（${archAdded.map((f) => `\`${f.path}\``).join(' / ')}）` +
+        ' —— 机制面只许收窄：迁移批次在 sdk / kernel / plugin-api 不许有新增行，确有机制增量就拆成带 `### D-NNN` 的独立补件提交（D-247 / D-283）',
     )
   }
 

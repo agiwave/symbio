@@ -9,7 +9,7 @@ created: 2026-10-29
 parent: T-001-能力全面拆分
 deps: []
 where: `docs/003-design/026-能力拆分与影响类.md` §2.3, `crates/symbio-plugin-session/src`, `crates/symbio-plugin-session/src/projections`
-exit: `crates/symbio-plugin-session` 非测试代码里不再有按能力名 / 工具名的读法或策略；每个模块都能指认归属（能力包或五类残留之一）；按名字出富化的读法归零；四条未建能力（#36/48/50/51）随 conation / heartbeat 包落成能力面（最小形态即可：事实 / 段 / 工具之一）；迁移提交不含机制增量（`EX-007`：`core` / `kernel` diff = 0，`session` 只含删除与绑定切换）；`SC-006` 的基线里不再有 session 条目
+exit: `crates/symbio-plugin-session` 非测试代码里不再有按能力名 / 工具名的读法或策略；每个模块都能指认归属（能力包或五类残留之一）；按名字出富化的读法归零；四条未建能力（#36/48/50/51）随 conation / heartbeat 包落成能力面（最小形态即可：事实 / 段 / 工具之一）；迁移提交不含机制增量（`EX-007`：机制面新增行为 0、删除行不限（`D-283`），`session` 只含删除与绑定切换）；`SC-006` 的基线里不再有 session 条目
 ---
 
 # S7：session 存量能力逐批迁出
@@ -237,6 +237,6 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
    - 目标自生成 / 内在动机：判定生产者进 conation 能力包，IntentGate 留核；
    - 四条未建（#36/48/50/51）：随 conation / heartbeat 包交最小能力面——它们是账里
      唯一「包先建、面后补」的一档，不单独建段。
-4. 每批跑端到端与 `EX-003` 反向用例，`SC-006` 基线只减不增；核对 `EX-007`（`core` / `kernel` diff = 0，`session` 只含删除与绑定切换）。
+4. 每批跑端到端与 `EX-003` 反向用例，`SC-006` 基线只减不增；核对 `EX-007`（机制面新增行为 0，删除行不限——`D-283`；`session` 只含删除与绑定切换）。
 5. 全部搬完后核对：session 的 `lib.rs` 导出面只剩基底接口，能力名的读写为零。
 6. 与 S6 的终态合并检查，再进 S8。

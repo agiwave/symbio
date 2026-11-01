@@ -176,13 +176,24 @@ test('migrationErrors：只搬 session 的实现也判得动', () => {
   assert.deepEqual(mig([{ path: SESSION, added: [], removed: ['fn old() {}'] }]), [])
 })
 
-test('migrationErrors：迁移提交改 SDK 机制面 ⇒ EX-007 红并点名 sdk（D-279 后 core 已并入）', () => {
+test('migrationErrors：迁移提交在 SDK 机制面新增源码 ⇒ EX-007 红并点名 sdk（变宽一分未松）', () => {
   const [e] = mig([
     { path: CORE, added: ['pub fn helper() {}'], removed: [] },
     { path: LOOP, added: [], removed: ['row!("memory")'] },
   ])
   assert.match(e, /EX-007/)
   assert.match(e, /crates\/symbio-sdk/)
+})
+
+test('migrationErrors：折叠整文件搬出机制面、落进能力包 ⇒ 绿（D-283 判的是变宽）', () => {
+  assert.deepEqual(
+    mig([
+      { path: 'crates/symbio-sdk/src/projection/cost.rs', added: [], removed: ['pub fn cost_ledger() {}'] },
+      { path: 'crates/symbio-plugin-cost/src/decl.rs', added: ['name: "cost.ledger"'], removed: [] },
+      { path: LOOP, added: ['ViewRead::named(COST_LEDGER_VIEW)'], removed: ['cost_ledger()'] },
+    ]),
+    [],
+  )
 })
 
 test('migrationErrors：控制面新增的行带能力名 ⇒ EX-007 红（两份可实现）', () => {
