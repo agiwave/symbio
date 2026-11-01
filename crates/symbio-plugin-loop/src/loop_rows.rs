@@ -743,10 +743,16 @@ pub(crate) static ROWS: &[Decl] = &[
     // ## 为什么派发行 `owes` 写 `granted` 而不是 `request ∧ granted`
     //
     // `Decl.owes` 是**一个** `Pattern`（单源等值），跨源合取写不出来；要写就得
-    // 改求解器，而求解器的字节是 PTS-003 的判据面（改它必须挂 ADR）。这里用
+    // 改求解器，而求解器的字节是 PTS-003 的判据面（改它必须挂 ADR）。这条缺口
+    // **裁过：不补**（`D-290`）——补合取省不出一行，行数欠的是出口格的种数，不是
+    // 前件的复杂度；两行形状因此是终态，不是待合一的过渡。这里用
     // **蕴含**代替合取：`granted` 只可能由 `authorize-tool` 从一笔 `request`
     // 派生，所以 `granted ⇒ request` 在数据上成立；`dispatch-tools` 只欠
     // `granted`，与 `request ∧ granted` 的可达债集合相同。
+    //
+    // 蕴含成立的前提要有人守：`authz.granted` **只有 `granted_event` 一个构造点**，
+    // 且与 `request` 同键 `(port, id, attempt)`（D-138）。第二个写方或键不再 1:1 ⇒
+    // 蕴含在数据上断掉而门禁全绿，那是 `D-290` 重开条件第 1 条。
     //
     // 这不是近似：`denied` ⇒ 没有 `granted` ⇒ 派发行**永不**成立（fail-closed），
     // 而「还没判」⇒ `authorize-tool` 仍开着、`dispatch-tools` 不欠——两种状态在
