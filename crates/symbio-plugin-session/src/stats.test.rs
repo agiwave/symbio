@@ -6,9 +6,26 @@
 //!    不是常数）。
 //! 3. **纯读**——没有事实源时是「有据的零」，且**不得**为了读而创建文件。
 //! 4. **读侧闸**——声明读方身份才判可见域：属主全量、非属主全零。
+//!
+//! ## 这一份用例**不**验时延 / 兜底 / 跨度的数字
+//!
+//! 三列的口径已经搬进能力包 `slo`（名册 #13）：`P99 是什么`、`率怎么算`、`跨度怎么折`
+//! 都归 owner，判据在 `crates/symbio-plugin-slo/src/decl.test.rs`（11 条数字用例）。
+//! 本测试进程**不链接** `slo`（`E-009`：本插件不引用兄弟插件），所以这里能验、也只该验
+//! **读方这一半**：
+//!
+//! - 视图缺席 ⇒ 出口交**文档写的空形状**并出声，而不是编一个数（`unavailable_columns_…`）；
+//! - 出口的逐档行是从 owner 的形状**搬**出来的（`the_exit_rows_carry_the_owner_shape`）；
+//! - 面板里的数与列里的数同源（`panel_matches_the_columns_it_describes`）。
+//!
+//! 组合（真实装配下三列的数字对不对）归 e2e `t28-session-stats.mjs`：它读生产二进制的
+//! `tiers[0]` 与 `fleet.by_tier`，那才是「session 读了 slo」这件事的证据。若把数字搬回
+//! 这里，就只能在本进程里塞一份替身 owner——那份替身会让「没链接 owner 必须出声」这条
+//! 判据变成假绿，且卸载 `slo` 之后这些用例照样通过（那不是判据，是噪声）。
 
-use super::{fleet_reading, read};
+use super::{fleet_reading, read, TierRow};
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
+use crate::stats_reading::{fallback_exit_rows, latency_exit_rows, panel_of, totals_of};
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
 use symbio_kernel::event::{Entity, Event, EventEnvelope as _, Seq, Verb};
@@ -20,7 +37,7 @@ use symbio_sdk::projection::calibration::calibration_for;
 use symbio_sdk::projection::cost::cost_ledger;
 use symbio_sdk::projection::transcript::transcript;
 
-use crate::projections::{checkpoint::checkpoint, fallback::fallback_rate, slo::slo_report};
+use crate::projections::checkpoint::checkpoint;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
@@ -223,10 +240,14 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
     (root, wals)
 }
 
-/// **正向**：三个会话 ⇒ `wals = 3`、样本 3 个、时延取全量口径。
+/// **正向**：三个会话 ⇒ `wals = 3`、逐档两列的形状恒在。
 ///
-/// 这条是实例级聚合列的出口判据本身——它红的方式有两种，都是静默的：扫不到（`wals` 少）、
+/// 这条是实例级聚合列的**范围**判据——它红的方式有两种，都是静默的：扫不到（`wals` 少）、
 /// 扫错范围（`wals` 多）。两者都不抛错，所以必须有一个断言直接盯数字。
+///
+/// 逐档两列里**有什么**归 owner（`slo`）：本进程不链接它，于是两列是文档写的空形状、
+/// 合计两格是有据的零。这不是「少验了一条」——是「这一格不是本插件的数」：
+/// 数字在 `crates/symbio-plugin-slo/src/decl.test.rs`，组合在 e2e `t28`。
 #[test]
 fn fleet_aggregates_every_session_in_the_instance() {
     let (root, wals) = seed_instance("agg", 3);
@@ -245,17 +266,14 @@ fn fleet_aggregates_every_session_in_the_instance() {
     );
     assert_eq!(got.fleet["sessions"], 3, "目录里有 WAL 的会话数");
     assert_eq!(
-        got.fleet["by_tier"]["latency"][0]["samples"], 3,
-        "三个会话各一格 final ⇒ 合并后 3 个样本（并集，不是覆盖）"
+        got.fleet["by_tier"],
+        serde_json::json!({ "latency": [], "fallback": [] }),
+        "owner 不在 ⇒ 逐档两列是空表（形状恒在：读方不必为每个键分诊它在不在）"
     );
-    // 样本是 100/200/300 ⇒ P50 = 200（全量口径）。若只扫到本会话，P50 会是 100。
     assert_eq!(
-        got.fleet["by_tier"]["latency"][0]["p50"], 200,
-        "分位数按合并后的全量样本算，不是任一会话自己的"
+        got.fleet["turns"], 0,
+        "合计两格由 owner 的逐档行累加而来 ⇒ owner 不在时是有据的零，不是 null"
     );
-    // 兜底分母同样是全量口径（三格开轮，零兜底）
-    assert_eq!(got.fleet["turns"], 3);
-    assert_eq!(got.fleet["fallbacks"], 0);
 }
 
 /// **反向（范围）**：只走一层——`tool_archives` 里的同名文件不算事实源。
@@ -310,7 +328,6 @@ fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
         got.fleet["sessions"], 1,
         "sessions = 清单数（是文件的路径），不是「路径存在」数"
     );
-    assert_eq!(got.fleet["by_tier"]["latency"][0]["samples"], 1);
 }
 
 /// **聚合吃值**：交几份快照就合并几份，不碰路径、不自行枚举。
@@ -326,10 +343,6 @@ fn fleet_aggregates_the_snapshots_it_is_given() {
     let got = fleet_reading(&facts);
     assert_eq!(got["wals"], 2);
     assert_eq!(got["sessions"], 2, "与 wals 同值：都是交到手里的快照数");
-    assert_eq!(
-        got["by_tier"]["latency"][0]["samples"], 2,
-        "两份快照各一格 final ⇒ 样本并集是 2"
-    );
 }
 
 /// **读侧闸**：不给读的人 ⇒ 聚合列是空形状，且**不扫**。
@@ -361,80 +374,133 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
     );
 }
 
-// ── 外部效标两列（DE-008 §3.1.1：主动性 / 时域跨度）────────────────────────────────
+// ── 出口排版（本插件自己的代码，与 owner 在不在无关）────────────────────────
 //
-// ## 为什么单独一组用例
-//
-// 这两列与四列同族（同切片、同 as-of、同一条读侧闸），判据因此复用
-// 「改输入会变红」的手术刀（`drop_line`）：把一条欲事件删掉 ⇒ 分子 / 分母跟着动；
-// 把末事件删掉 ⇒ 跨度缩短。**读数口是这两列的全部意义**——没有反向用例的
-// 「效标」只是表格里的一行字。
+// 三列的口径归 owner，但**出口长什么样**归本插件：`sample_ms` → `samples`（取个数）、
+// `rate` 原样搬、合计两格逐档相加。这一段拿 owner 的**形状**当输入，验的是搬运没有走样
+// ——没有一条断言涉及「分位数怎么算」「率怎么除」，所以它不是替身 owner。
 
-/// 时域跨度列：跨度 = 末事件 ts − 首事件 ts；删末事件 ⇒ 跨度缩短（读数口会动）。
+/// 逐档两列的出口行：键与 owner 交的同名，`samples` 取样本的**长度**。
 #[test]
-fn span_column_recomputes_and_moves_with_the_wal() {
-    let dir = std::env::temp_dir().join(format!("symbio-stats-span-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("临时目录");
-    let wal = dir.join(super::super::paths::V2_WAL_FILE);
-    let store = EventWalStore::open(&wal).unwrap();
-    for (n, (id, ts)) in [("e0", 1_000i64), ("e1", 1_500), ("e2", 4_200)]
-        .into_iter()
-        .enumerate()
-    {
-        store
-            .append(
-                Event::pending(
-                    id,
-                    EVENT_USER_MESSAGE,
-                    Entity::Turn,
-                    Verb::Opened,
-                    // 三条样例事件各占一轮：同一轮开两次会被写侧闸门拒掉（I1），
-                    // 而本测试要的是「三条事件的时间跨度」，不是三轮业务语义。
-                    n as u64,
-                    "user",
-                )
-                .with_ts(ts)
-                .with_payload(serde_json::json!({ "text": "问" })),
-            )
-            .unwrap();
-    }
-
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(got.span.get("events").and_then(|v| v.as_u64()), Some(3));
+fn the_exit_rows_carry_the_owner_shape() {
+    // owner 交的形状（见 `crates/symbio-plugin-slo/src/decl.rs::latency_rows` 的文档）
+    let latency = serde_json::json!({ "by_tier": [
+        { "tier": "deep", "sample_ms": [900, 1200, 1500], "p50": 1200, "p95": 1500, "p99": 1500 },
+        { "tier": "fast", "sample_ms": [], "p50": 0, "p95": 0, "p99": 0 },
+    ]});
+    let rows = latency_exit_rows(&latency);
     assert_eq!(
-        got.span.get("span_ms").and_then(|v| v.as_u64()),
-        Some(3_200)
+        rows[0]["samples"], 3,
+        "样本数 = `sample_ms` 的长度（出口不放样本数组）"
+    );
+    assert_eq!(rows[0]["p95"], 1500, "分位数原样搬，不在这里重算");
+    assert_eq!(
+        rows[1]["samples"], 0,
+        "空样本的档位仍在表里（不造也不删档位）"
+    );
+    assert!(
+        rows[0].get("sample_ms").is_none(),
+        "出口不带原始样本：实例级的样本数组随会话数线性膨胀，而出口没人读它"
     );
 
-    // 手术刀：删掉末事件 ⇒ 跨度从 3200 缩到 500（读数跟着输入走）
-    drop_line(&wal, "e2");
-    let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let fallback = serde_json::json!({ "by_tier": [
+        { "tier": "deep", "turns": 4, "fallbacks": 1, "rate": 0.25 },
+        { "tier": "fast", "turns": 2, "fallbacks": 2, "rate": 1.0 },
+    ]});
+    let fb = fallback_exit_rows(&fallback);
+    assert_eq!(fb[0]["rate"], 0.25, "率是 owner 算的，本处只搬");
     assert_eq!(
-        after.span.get("span_ms").and_then(|v| v.as_u64()),
-        Some(500)
+        totals_of(&fallback),
+        (6, 3),
+        "合计两格 = 逐档相加（计数可加）"
     );
+
+    // 缺席（空表）⇒ 三样都给得出空，不 panic
+    assert!(latency_exit_rows(&serde_json::json!({ "by_tier": [] })).is_empty());
+    assert!(fallback_exit_rows(&serde_json::json!({ "by_tier": [] })).is_empty());
+    assert_eq!(totals_of(&serde_json::json!({ "by_tier": [] })), (0, 0));
 }
 
-/// 实例级 axes 两族：跨会话合并（分子分母可加 / 中位数只收有跨度的会话）。
+// ── 外部效标两列（DE-008 §3.1.1：主动性 / 时域跨度）────────────────────────────────
+//
+// ## 这两列今天归谁
+//
+// 主动性（`conation.intents`）与跨度（`slo.span`）的折叠都在各自的能力包里；本插件
+// 只按名字读、把值装进出口。于是这里能验的是**读方那一半**：缺席时交什么形状、
+// 形状的键是不是那一列自己的。数字（分子分母、中位数）归 owner 的单测与 e2e。
+//
+// 自主程度列**没有**搬（名册 #13 不搬它）：它仍是本插件的投影，跨会话合并也是本插件
+// 的代码，因此它的数仍在这里判。
+
+/// 三列读不到时交**文档写的空形状**，而不是编一个数。
+///
+/// 本进程不链接 owner ⇒ 三条视图都缺席。这条判据盯的是「装配坏了」必须长得像
+/// 「读不出来」，不能长得像「这一档没有数」——后者会让一次装配故障看起来像一次
+/// 正常的安静（`D-281` 理由 3）。
+///
+/// 空形状的**键**不是随便挑的：`{ by_tier: [] }` 是逐档视图的形状、`{ events, span_ms }`
+/// 是跨度视图的形状（`SessionStats::span` 的文档写的就是它）。若读方替 owner 猜一个
+/// 统一形状，前端就会拿到「跨度列里有一个 by_tier」这种东西。
 #[test]
-fn fleet_axes_aggregate_across_sessions() {
+fn unavailable_columns_take_their_documented_empty_shape() {
+    let wal = seed("absent");
+    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+
+    assert!(got.has_wal, "事实源在——空形状不是因为没源");
+    assert!(
+        got.tiers.is_empty(),
+        "逐档两列缺席 ⇒ 一档也不编：{:?}",
+        got.tiers
+    );
+    assert_eq!(
+        got.span,
+        serde_json::json!({ "events": 0, "span_ms": 0 }),
+        "跨度列的空形状是它自己的键（不是逐档视图的 by_tier）"
+    );
+    // 缺席必须**可诊断**：能力视图那一列按名字报出原因词与人话。
+    let absent = got.capability_views.as_object().expect("能力视图列是对象");
+    assert!(
+        !absent.is_empty(),
+        "清单非空 ⇒ 缺席的每一条都要有名有姓：{absent:?}"
+    );
+    for (name, entry) in absent {
+        assert_eq!(
+            entry["status"].as_str(),
+            Some("unavailable"),
+            "{name}: 本进程没链接 owner ⇒ 必须出声，不能给空值冒充读数"
+        );
+        assert!(
+            entry["reason"].as_str().is_some_and(|r| !r.is_empty()),
+            "{name}: 缺席要带原因词"
+        );
+    }
+}
+
+/// 实例级 `axes` 三族：形状恒在，各自归各自的 owner。
+///
+/// - `span` / `conation` 归能力包（`slo` / `conation`）：本进程不链接它们 ⇒ `span` 是有据
+///   的空、`conation` 是 `null`（零是「一个会话都没主动发起过」，`null` 是「读不出来」）；
+/// - `autonomy` 仍是**本插件**的投影（名册 #13 不搬它）⇒ 跨会话合并是本插件的事，
+///   这里用两个会话各一笔闭环任务证明它真的跨会话累加。
+#[test]
+fn fleet_axes_are_shaped_and_the_autonomy_family_still_aggregates_here() {
     let (root, wals) = seed_instance("axes", 2);
-    // 第二个会话补一条更晚的事件 ⇒ 跨度更长；两会话都只有 2 事件 ⇒ 都进中位数。
-    {
-        let store = EventWalStore::open(&wals[1]).unwrap();
-        store
+    // 两个会话各落一笔闭环任务：跨会话合并的分子因此可判（0 还是 2）。
+    for (i, wal) in wals.iter().enumerate() {
+        EventWalStore::open(wal)
+            .unwrap()
             .append(
                 Event::pending(
-                    "late",
-                    EVENT_USER_MESSAGE,
-                    Entity::Turn,
-                    Verb::Opened,
-                    1,
-                    "user",
+                    format!("a-{i}"),
+                    EVENT_TASK_ASSERTED,
+                    Entity::Task,
+                    Verb::Asserted,
+                    0,
+                    symbio_sdk::authz::PRINCIPAL_MAIN,
                 )
-                .with_ts(9_000)
-                .with_payload(serde_json::json!({ "text": "再问", "tier": "deep" })),
+                // 任务断言是 I2 的声明类事件：没有上游就没有可撤销的溯源。
+                .with_produced_by(0)
+                .with_payload(serde_json::json!({ "task_id": format!("t{i}") })),
             )
             .unwrap();
     }
@@ -461,20 +527,20 @@ fn fleet_axes_aggregate_across_sessions() {
         axes["conation"]
     );
     assert_eq!(
-        axes["span"]["sessions"].as_u64(),
-        Some(2),
-        "两会话都有 ≥2 事件 ⇒ 都进分母"
-    );
-    assert!(
-        axes["span"]["median_ms"].is_u64(),
-        "中位数有数（不是 null）"
+        axes["span"],
+        serde_json::json!({ "sessions": 0, "median_ms": null }),
+        "跨度轴缺席 ⇒ 有据的空（`null` 不是 0：没有样本与中位数 0ms 是两件事）"
     );
     assert_eq!(
         axes["autonomy"]["closed"].as_u64(),
-        Some(0),
-        "没有闭环任务 ⇒ 有据的零"
+        Some(2),
+        "自主程度列仍是本插件的投影 ⇒ 两个会话各一笔闭环 = 2（跨会话真的合并了）"
     );
-    assert_eq!(axes["autonomy"]["unattended_rate"].as_f64(), Some(0.0));
+    assert_eq!(
+        axes["autonomy"]["unattended_rate"].as_f64(),
+        Some(1.0),
+        "两笔都没被挂起 ⇒ 率 = 1.0（率是纯查询，不落第二个数）"
+    );
 }
 
 /// 自主程度列：闭环且未挂起 / 闭环；删掉那条 `task.held` ⇒ 率从 0.5 升到 1.0
@@ -553,8 +619,21 @@ fn autonomy_column_recomputes_and_moves_with_the_wal() {
 #[test]
 fn panel_matches_the_columns_it_describes() {
     let wal = seed("panel");
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    let panel = &got.panel;
+    let mut got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    // 逐档两列的**数**归 owner（本进程不链接 `slo`），而「这些数怎么说」是本插件的排版
+    // 代码（`panel_of` 收 `&SessionStats`）。这里交一档合成的行，验的正是那段排版：
+    // 面板里的值必须逐字来自列里的值——与 owner 在不在无关，也不会因此造出一份替身口径。
+    got.tiers = vec![TierRow {
+        tier: "deep".into(),
+        turns: 2,
+        fallbacks: 1,
+        rate: 0.5,
+        p50: 1200,
+        p95: 1200,
+        p99: 1200,
+        samples: 1,
+    }];
+    let panel = panel_of(&got);
 
     // 分区：时延兜底 / 事实源 / 不变量 / 技能 / 承诺，再加**能力视图**段
     // （段数随公开清单，不是本插件写死的常数——DE-025 D-221）
@@ -847,15 +926,9 @@ fn stats_recompute_equals_direct_apply() {
     assert!(got.has_wal);
     assert_eq!(got.session_id, "s1");
 
-    // 读方复算：同一份切片、同一个 as-of，四列各自直接 apply。
+    // 读方复算：同一份切片、同一个 as-of，各列各自直接 apply。
     let store = EventWalStore::open_readonly(&wal).unwrap();
     let snap = store.range(Seq::new(0));
-    let latency = slo_report(CHAT_VOCAB)
-        .apply(&snap, i64::MAX, Budget::generous())
-        .value;
-    let fallback = fallback_rate(CHAT_VOCAB)
-        .apply(&snap, i64::MAX, Budget::generous())
-        .value;
     let cost = cost_ledger()
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
@@ -873,54 +946,57 @@ fn stats_recompute_equals_direct_apply() {
     .expect("就绪集序列化");
     assert_eq!(got.readyset, rs, "就绪集列同样复算（同切片、同 as-of）");
 
-    assert_eq!(got.tiers.len(), 1, "种子数据只有一档");
-    let row = &got.tiers[0];
-    assert_eq!(row.tier, "deep");
-    assert_eq!(row.turns, fallback.of("deep").turns);
-    assert_eq!(row.fallbacks, fallback.of("deep").fallbacks);
-    assert_eq!(row.rate, fallback.of("deep").rate());
-    assert_eq!(row.p50, latency.of("deep").p50());
-    assert_eq!(row.p95, latency.of("deep").p95());
-    assert_eq!(row.p99, latency.of("deep").p99());
-    assert_eq!(row.samples, latency.of("deep").count());
+    // 时延 / 兜底两列的口径归能力包 `slo`（`D-221` 按名字读、`D-281` 折叠两半）：
+    // 本测试进程不链接它 ⇒ 两列交空表、`tiers` 为空。**数字**归 owner 的单测
+    // （`crates/symbio-plugin-slo/src/decl.test.rs`：轮数 2 / 兜底 1 / 样本 1 / P95 1200），
+    // **组合**归 e2e `t28-session-stats.mjs`（它读生产二进制的 `tiers[0]`）。
+    // 在这里补一份替身 owner 只会让那两条判据变成假绿。
+    assert!(
+        got.tiers.is_empty(),
+        "owner 不在 ⇒ 一档也不编（空表是可诊断的缺席，不是「这一档没有数」）：{:?}",
+        got.tiers
+    );
+
     assert_eq!(got.cost, serde_json::to_value(&cost).unwrap());
     assert_eq!(got.checkpoint, serde_json::to_value(&ck).unwrap());
 
     // 复算还得**算对**：期望值直接写在这里，不从出口自己身上取。
-    assert_eq!((row.turns, row.fallbacks), (2, 1));
-    assert_eq!(row.rate, 0.5);
-    assert_eq!((row.samples, row.p95), (1, 1200), "兜底轮不进时延样本");
     assert_eq!(got.checkpoint["event_count"], 4);
     assert_eq!(got.cost["total_ms"], 4200, "两轮的 cost_ms 都入账");
 }
 
 /// 反向用例：删一格 ⇒ 对应那一列必须变（不是常数）。
+///
+/// 这里的手术刀落在**本插件仍拥有的列**上：断点列数格子、成本列累 `cost_ms`。
+/// 时延 / 兜底两列的反向判据归 owner（`crates/symbio-plugin-slo/src/decl.test.rs`
+/// 用同一把刀：删掉 `chat.assistant.final` ⇒ 样本 1 → 0）。
 #[test]
-fn reverse_case_each_column_moves_when_the_wal_changes() {
+fn reverse_case_the_readout_moves_when_the_wal_changes() {
     let wal = seed("reverse");
+    let before = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    assert_eq!(before.checkpoint["event_count"], 4, "种子四格");
     assert_eq!(
-        read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN).tiers[0].samples,
-        1
+        before.cost["total_ms"], 4200,
+        "1200（成功轮）+ 3000（兜底轮）"
     );
 
-    // 删收束格 ⇒ 时延样本列归零、P95 归零
+    // 删收束格（成功轮 1200ms）⇒ 断点少一条、成本少那一笔
     drop_line(&wal, "f0");
     let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(after.tiers[0].samples, 0, "删掉唯一的 final ⇒ 样本 1 → 0");
-    assert_eq!(after.tiers[0].p95, 0, "无样本 ⇒ 分位数为 0（空档位不报警）");
-    assert_eq!(after.tiers[0].turns, 2, "开轮格还在 ⇒ 分母不受收束格影响");
     assert_eq!(after.checkpoint["event_count"], 3, "断点是事实计数");
+    assert_eq!(
+        after.cost["total_ms"], 3000,
+        "删掉 1200ms 那一笔 ⇒ 成本 4200 → 3000（不是常数）"
+    );
 
-    // 删开轮格 ⇒ 兜底率的**分母**必须变（2 → 1），比率随之变成 1.0
+    // 删开轮格（不带 `cost_ms`）⇒ 断点再少一条，成本不变
     drop_line(&wal, "u0");
     let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(
-        after.tiers[0].turns, 1,
-        "删掉一个 user.message ⇒ 分母 2 → 1"
-    );
-    assert_eq!(after.tiers[0].fallbacks, 1, "兜底格与被删的开轮格无关");
-    assert_eq!(after.tiers[0].rate, 1.0, "分母变了 ⇒ 比率跟着变");
     assert_eq!(after.checkpoint["event_count"], 2);
+    assert_eq!(
+        after.cost["total_ms"], 3000,
+        "开轮格没有 `cost_ms` ⇒ 成本列只认带耗时的事件"
+    );
 }
 
 /// 不变量列随事实源反向变化：
@@ -986,9 +1062,7 @@ fn invariants_move_when_the_wal_changes() {
 fn archival_does_not_shrink_the_readout() {
     let wal = seed("archive");
     let before = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(before.tiers.len(), 1, "两轮同档 ⇒ 一行");
-    assert_eq!(before.tiers[0].turns, 2, "分母 = 两轮");
-    assert_eq!(before.tiers[0].fallbacks, 1, "分子 = 一轮兜底");
+    assert_eq!(before.checkpoint["event_count"], 4, "两轮四格全见");
 
     // 压缩：落一条快照，再把被取代的前缀整段归档（未取代那段只剩快照一条）。
     let store = EventWalStore::open(&wal).unwrap();
@@ -1016,7 +1090,7 @@ fn archival_does_not_shrink_the_readout() {
     assert_eq!(store.len(), 1, "没被取代的那段只剩快照");
     drop(store);
 
-    // 读数口仍看完整史：不变量不假红，四列与成本一分不缩。
+    // 读数口仍看完整史：不变量不假红，各列与成本一分不缩。
     let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(
         after.invariants,
@@ -1024,10 +1098,14 @@ fn archival_does_not_shrink_the_readout() {
         "归档是号空间的窗口边界，不是「事件被丢弃」——C1 不该报违规"
     );
     assert_eq!(
-        after.tiers, before.tiers,
-        "分母 / 分子 / 样本不因归档而缩水"
+        after.checkpoint["event_count"], 5,
+        "断点列读的是完整史（归档段 4 格 + 快照 1 格），不是那一小段窗口（1 格）"
     );
+    // 转写列**有意**在压缩点另起一段（读的是「当前这段历史」，不是全史），所以这里
+    // 不比它——拿它当「没缩水」的证据会读反：压缩后它本来就该只剩快照之后的部分。
     assert_eq!(after.cost, before.cost, "成本台账看的是完整史");
+    // 时延 / 兜底两列同样读 `range(0)`（owner 的视图走同一个口），判据在 e2e `t28`：
+    // 本进程不链接 `slo`，两列在这里恒为空表，比不出「缩水」。
 }
 
 /// 没有事实源 = 有据的零，且读方不许创建文件（真·只读）。

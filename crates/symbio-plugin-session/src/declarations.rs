@@ -24,6 +24,14 @@ pub(crate) const EVENT_SYSTEM_HEALTH: &str = "system.health";
 /// 一遍字面量。改名由 owner 决定，改完这里跟着改，读口不变。
 pub(crate) const CONATION_INTENTS_VIEW: &str = "conation.intents";
 
+/// 时延分层三列的名字：三条视图都由能力包 `crates/symbio-plugin-slo` 交，本插件按名字读。
+///
+/// 与 [`CONATION_INTENTS_VIEW`] 同一条纪律：拼写只有一个来源（owner 的 `PLUGIN.yml`
+/// `shared_views`），这三个常量只是让读点不各写一遍字面量。
+pub(crate) const SLO_LATENCY_VIEW: &str = "slo.latency";
+pub(crate) const SLO_FALLBACK_VIEW: &str = "slo.fallback";
+pub(crate) const SLO_SPAN_VIEW: &str = "slo.span";
+
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 
 pub(crate) const EVENTS: &[EventDecl] = &[

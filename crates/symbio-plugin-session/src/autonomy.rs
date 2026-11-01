@@ -68,7 +68,8 @@ impl AutonomyView {
     }
 
     /// 合并多份视图（**跨会话聚合**）：分子分母可加，率是同一套算式在汇总值上的
-    /// 再应用——不是第二份口径（与 `SpanView::merge` / `ConationView::merge` 同款）。
+    /// 再应用——不是第二份口径（与能力包交 `ViewDecl::agg` 同一条纪律：一片怎么折与
+    /// N 片怎么合是同一个 owner 的两半）。
     pub fn merge(parts: &[AutonomyView]) -> AutonomyView {
         let mut closed = 0u64;
         let mut unattended = 0u64;

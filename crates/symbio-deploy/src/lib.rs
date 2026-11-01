@@ -72,6 +72,9 @@ pub const PLUGIN_ID_SETTING: &str = "setting";
 /// 技能
 pub const PLUGIN_ID_SKILL: &str = "skill";
 
+/// 时延分层：按派发档折叠时延 / 兜底 / 跨度三列（单片读数 + 跨会话合并）
+pub const PLUGIN_ID_SLO: &str = "slo";
+
 /// 任务表：清单声明成事实、独立验证与返工、就绪集调度与调度段
 pub const PLUGIN_ID_TASK: &str = "task";
 
@@ -96,6 +99,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "persona", // 人格：一处定义「我是谁」，两条输出面（轮内正文 / 对话措辞）读同一段
     "causal", // 因果结构：把「A 导致 B」记成事实（工具），再折成可读的因果图（视图）
     "conation", // 目标自生成：把「欲」的表达折成意图视图（单片读数 + 跨会话合并）
+    "slo", // 时延分层：按派发档折叠时延 / 兜底 / 跨度三列（单片读数 + 跨会话合并）
     "classify", // 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）

@@ -31,18 +31,21 @@
 //!   不截断撕裂尾行——截断是**写方**的恢复语义，读方顺手做会与正在落行的写方
 //!   撞车（append 模式下截断后剩下的字节接在新 EOF ⇒ 那一行静默损坏）
 //!   （[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
-//! - **不重写视图类型**：会话口径的投影类型（`SloLatencyView` / `FallbackRateView` /
-//!   `SpanView`）住在本插件的 `projections/`——取数与 `merge` 都是本插件的行为，
-//!   类型随返回值流动、在出口边界一次性序列化。core 只留协议自身的投影（转写 /
-//!   轮状态 / 任务词表等），不再为会话读数占根出口（DE-025 D-221）。
+//! - **不重写视图类型**：口径住在 owner 那里——时延 / 兜底 / 跨度三列归能力包 `slo`
+//!   （`ViewDecl::eval` 与 `agg`），本插件按名字读（`D-221`）并把值原样装进出口
+//!   （`D-281`）；自主程度等仍是本插件 `projections/` 里的纯折叠。core 只留协议自身的
+//!   投影（转写 / 轮状态 / 任务词表等），不再为会话读数占根出口（DE-025 D-221）。
 //!
 //! ## as-of 口径
 //!
 //! 本模块的读数一律走 `Projection::read_all`（= `now = i64::MAX` + 全量预算）：WAL 是
-//! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——与
-//! `projections/slo.test.rs` 的扫描口同一口径。
+//! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——按名字读的视图
+//! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
-use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, CONATION_INTENTS_VIEW, MESSAGE_VOCAB};
+use crate::declarations::{
+    CHAT_VOCAB, COMMITMENT_VOCAB, CONATION_INTENTS_VIEW, MESSAGE_VOCAB, SLO_FALLBACK_VIEW,
+    SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
+};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -60,9 +63,7 @@ use symbio_sdk::projection::cost::cost_ledger;
 use symbio_sdk::projection::readyset::readyset_for;
 use symbio_sdk::projection::transcript::transcript;
 
-use crate::projections::{
-    checkpoint::checkpoint, fallback::fallback_rate, slo::slo_report, span::span,
-};
+use crate::projections::checkpoint::checkpoint;
 
 use super::autonomy::autonomy_for;
 use super::spend_ledger::spend_ledger;
@@ -83,14 +84,73 @@ pub(crate) struct TierRow {
     pub turns: u64,
     /// 其中走了兜底的轮数（分子）。
     pub fallbacks: u64,
-    /// 兜底率（口径在 `TierStats::rate`，本处不重算）。
+    /// 兜底率（口径在能力包 `slo` 的 `rate`，本处只读它交的值）。
     pub rate: f64,
-    /// 成功轮实测时延的分位数（口径在 `TierLatency::percentile`，本处不重算）。
+    /// 成功轮实测时延的分位数（口径在能力包 `slo` 的 `percentile`，本处只读它交的值）。
     pub p50: u64,
     pub p95: u64,
     pub p99: u64,
     /// 时延样本数（兜底轮不计入时延样本——失败的耗时不是成功响应的耗时）。
+    ///
+    /// 取自 owner 交的 `sample_ms` 的**长度**：owner 交的是样本本身（跨会话合并要从
+    /// 样本重算分位数），出口只要个数——取长度是排版，不是重算。
     pub samples: usize,
+}
+
+/// 按名字读一条能力包交的视图；读不到 ⇒ **调用方给的形状**，并出声一次。
+///
+/// 空形状不是「这一档没有数」，是「这一列今天读不出来」——两者的区别由
+/// `capability_views` 那一列的可诊断缺席承担，本处只保证出口形状可读（读方不必分诊）。
+/// 空形状由调用方交而不是本函数写死：`{ by_tier: [] }` 是逐档视图的形状，跨度视图是
+/// `{ events, span_ms }`——读方替 owner 猜形状，就是第二份口径。
+fn read_view_or(
+    name: &str,
+    snapshot: &[Event],
+    empty: impl FnOnce() -> serde_json::Value,
+) -> serde_json::Value {
+    match symbio_plugin_api::read_shared_view_all(name, snapshot) {
+        Ok(value) => value,
+        Err(why) => {
+            symbio_plugin_api::plugin_warn!(
+                symbio_plugin_api::PLUGIN_ID_SESSION,
+                "[stats] `{name}` 读不到（{why}）：按空读数交"
+            );
+            empty()
+        }
+    }
+}
+
+/// 逐档视图的**空形状**：`{ by_tier: [] }`（与 owner 交的形状同键，读方不必分诊）。
+///
+/// 单会话列与实例级聚合列共用它——两处写两份，迟早一处改了另一处没改，
+/// 于是「读不到」在抽屉里与在会话头上长得不一样。
+pub(super) fn empty_by_tier() -> serde_json::Value {
+    serde_json::json!({ "by_tier": [] })
+}
+
+/// 一条视图交的档位名。形状归 owner（`D-281`），本处只做**查表**。
+fn tier_names(view: &serde_json::Value) -> Vec<String> {
+    view.get("by_tier")
+        .and_then(serde_json::Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| r.get("tier").and_then(serde_json::Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 某档位在一条视图里的那一行；查不到 ⇒ `Null`（`get` 对 `Null` 一律 `None`，读方按缺省取）。
+fn tier_of<'a>(view: &'a serde_json::Value, tier: &str) -> &'a serde_json::Value {
+    static NO_ROW: serde_json::Value = serde_json::Value::Null;
+    view.get("by_tier")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|rows| {
+            rows.iter()
+                .find(|r| r.get("tier").and_then(serde_json::Value::as_str) == Some(tier))
+        })
+        .unwrap_or(&NO_ROW)
 }
 
 /// 会话级读数（四列同源，D-044）。
@@ -230,12 +290,12 @@ pub(crate) struct SessionStats {
     /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ { intents: [] }`）：
     /// 欲是流，截断它等于悄悄丢掉「想要过什么」的事实（conation 投影不设配额）。
     pub conation: serde_json::Value,
-    /// 时域跨度（同上 · 时域跨度）：`span` 投影序列化
+    /// 时域跨度（同上 · 时域跨度）：能力包 `slo` 的 `slo.span` 视图原样交出
     /// （`{ events, span_ms }`——本会话事实源的首末事件 `ts` 跨度，Unix 毫秒）。
     ///
-    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ { events: 0, span_ms: 0 }`）。
+    /// 归**四列**那一族（同切片、同 as-of、`may_read = false` ⇒ `{ events: 0, span_ms: 0 }`）。
     /// 实例级「任务级时长中位数」在 `fleet` 的 `axes.span` 族（单会话一个跨度没有
-    /// 中位数可言，见 `SpanView::merge` 的「为什么」）。
+    /// 中位数可言，见 `crates/symbio-plugin-slo/src/decl.rs::span_merged` 的「为什么」）。
     pub span: serde_json::Value,
     /// 自主程度（同上 · 自主程度）：`autonomy` 投影序列化
     /// （`{ closed, unattended }`——已闭环任务数与其中全程未被 `task.held` 挂起的数量）。
@@ -315,10 +375,9 @@ pub(crate) struct SessionStats {
     /// **实例级聚合**（跨会话的 SLO 真数）。
     ///
     /// 上面每一列回答「**这一个会话**怎么样」；本列回答「**整个实例**怎么样」——
-    /// 口径是把本插件目录下**所有**会话的 WAL 各跑一遍四列里的两个投影
-    /// （时延 / 兜底），再交给本插件投影的 `SloLatencyView::merge` /
-    /// `FallbackRateView::merge` 合并。分子分母与分位数因此与单会话列**逐字同一套
-    /// 口径**（D-044：实测与判据同源），本处不另写一套统计。
+    /// 口径是把本插件目录下**所有**会话的 WAL 各读一遍，再交给能力包 `slo` 的
+    /// `ViewDecl::agg` 合并（`D-281`）。分子分母与分位数因此与单会话列**逐字同一套
+    /// 口径**（D-044：实测与判据同源），本处不另写一套统计，也不认识交回来的形状。
     ///
     /// ## 为什么这不是「多一份真相」
     ///
@@ -398,8 +457,12 @@ pub(crate) fn read(
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
     // 四列全部来自同一份事件切片（D-044：实测与判据同源）。
-    let latency = slo_report(CHAT_VOCAB).read_all(&snapshot).value;
-    let fallback = fallback_rate(CHAT_VOCAB).read_all(&snapshot).value;
+    //
+    // 时延与兜底两列由能力包 `slo` 交（`D-221` 按名字读、`D-281` 折叠两半）：本插件不认识
+    // 这两列的形状，也不在这里算分位数或率——那是 owner 的算式。读不到 ⇒ 空表（可诊断的
+    // 缺席，不是「这一档没有数」）。
+    let latency = read_view_or(SLO_LATENCY_VIEW, &snapshot, empty_by_tier);
+    let fallback = read_view_or(SLO_FALLBACK_VIEW, &snapshot, empty_by_tier);
     let cost = cost_ledger().read_all(&snapshot).value;
     // 用量列：与四列同一份切片、同一个 as-of。它读的是应答载荷的 `usage`
     // （`token_ledger` 的模块文档说明为什么不能与 `cost` 合成一列）。
@@ -417,11 +480,9 @@ pub(crate) fn read(
 
     // 档位取两列的并集：只开轮没收束的档位（时延列无样本）与只有兜底样本的
     // 档位都要在表里出现——漏掉一档等于把「这一档没有数」报成「这一档不存在」。
-    let mut names: Vec<String> = latency
-        .by_tier
-        .keys()
-        .chain(fallback.by_tier.keys())
-        .cloned()
+    let mut names: Vec<String> = tier_names(&latency)
+        .into_iter()
+        .chain(tier_names(&fallback))
         .collect();
     names.sort_unstable();
     names.dedup();
@@ -429,17 +490,39 @@ pub(crate) fn read(
     let tiers = names
         .into_iter()
         .map(|t| {
-            let l = latency.of(&t);
-            let f = fallback.of(&t);
+            let l = tier_of(&latency, &t);
+            let f = tier_of(&fallback, &t);
             TierRow {
-                tier: l.tier.clone(),
-                turns: f.turns,
-                fallbacks: f.fallbacks,
-                rate: f.rate(),
-                p50: l.p50(),
-                p95: l.p95(),
-                p99: l.p99(),
-                samples: l.count(),
+                tier: t,
+                turns: f
+                    .get("turns")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                fallbacks: f
+                    .get("fallbacks")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                // 率是 owner 的算式，本处只**读**它交的值（`D-281`：形状归 owner）。
+                rate: f
+                    .get("rate")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0),
+                p50: l
+                    .get("p50")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                p95: l
+                    .get("p95")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                p99: l
+                    .get("p99")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                samples: l
+                    .get("sample_ms")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len),
             }
         })
         .collect();
@@ -509,10 +592,14 @@ pub(crate) fn read(
     // 由 `ViewDecl::agg` 交）。本处只挑两格排版，与 `capability_views` 同一纪律。
     let conation = conation_reading(&snapshot);
 
-    // 时域跨度列（同上）：`span` 投影只读事件信封的 `ts`（入库时间，与 `cost_ms`
-    // 同源的实测面），as-of 之后的事件一概不见。
-    let span = serde_json::to_value(span().read_all(&snapshot).value)
-        .map_err(|e| PluginError::InternalError(format!("时域跨度序列化失败：{e}")))?;
+    // 时域跨度列（同上）：`slo.span` 只读事件信封的 `ts`（入库时间，与 `cost_ms`
+    // 同源的实测面），as-of 之后的事件一概不见。空形状是 `{ events: 0, span_ms: 0 }`
+    // （四列那一族的有据的零），不是逐档视图的 `{ by_tier: [] }`。
+    let span = read_view_or(
+        SLO_SPAN_VIEW,
+        &snapshot,
+        || serde_json::json!({ "events": 0, "span_ms": 0 }),
+    );
 
     // 自主程度列（同上）：`autonomy` 认挂起格与终态格（插话抢占 = 外部介入在事实源
     // 里唯一的痕迹；闭环 = 验收通过）。率是纯查询，此处只落分子分母。

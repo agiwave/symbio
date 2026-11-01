@@ -262,7 +262,17 @@ export const BASELINE = {
   // 不丢只换了入口；降级那条直接对应包内的 `degraded_is_recorded_instead_of_dropped`。
   // `record_learning_wires_retrieval_and_consolidation` 改名 `…_wires_consolidation`（检索片段
   // 随写口迁走，条数不变）。不是判据退役，是判据随能力搬家。非侵蚀。
-  ciRustTestsTotal: 2512,
+  // baseline-allow ciRustTestsTotal: `#13` 时延分层迁出净减 2 条（2513 → 2511）——同一个
+  // 被测对象从「会话的投影」变成「能力包的 `ViewDecl`」，用例随之搬家而不是退役。逐条：
+  // 删 `session/projections/slo.test.rs` 6 条、`fallback.test.rs` 1 条、`span.test.rs` 7 条
+  // （合计 14）；同批新建 `crates/symbio-plugin-slo/src/decl.test.rs` 11 条（单片与 N 片两半
+  // 都判：按档归样本、兜底分子分母、跨度 as-of、合并是样本并集不是分位数平均、空样本给
+  // `median_ms: null`），`session/stats.test.rs` 新增 `the_exit_rows_carry_the_owner_shape`
+  // 1 条（读方那一半：`sample_ms` → `samples`、`rate` 原样搬、合计逐档相加）。14 − 12 = 2。
+  // 覆盖没有丢：数字在能力包，读方的退化方向由 `unavailable_columns_take_their_documented_
+  // empty_shape` 接手，组合由 e2e `t28-session-stats.mjs`（`tiers[0]` 与 `fleet.by_tier` 逐格
+  // 对账）守着。非侵蚀。
+  ciRustTestsTotal: 2511,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

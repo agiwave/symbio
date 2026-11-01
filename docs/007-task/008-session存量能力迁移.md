@@ -50,10 +50,10 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 | `config.rs::conation_enabled` + `ConationPolicy` | 「这一轮该不该自发开一个长目标」的开关与判据 | #32 内在动机 | 同包（与 #31 同一判定生产者） | 开关今天住在 `SessionConfig`（会话配置形状），而 `D-252` 第 2 条要求能力读 `session.config` 这条**事实**、不读宿主的配置类型。**阻塞：开关要有一条事实形状**，那是另一条补件 |
 | `active.rs::PreemptionDecider`（约 120 行） | 「这一条插话该不该挂起在跑的任务」 | #14 打断与插话 | `symbio-plugin-preemption`（I-3 裁决 + I-1 收件箱事实） | 判定与落格被**刻意分开**（`PreemptPending` 三态：判在忙窗、落格在空闲分支），中间那段时间由会话状态背着。搬判定就要把这三态的跨窗契约开成端口——那是补件，不是搬运 |
 | `active.rs` 的其余部分 + `transcript/inbox.rs`（881） | 收件箱 FIFO、在途中止信号、工作态迁移、`turn_done` 唤醒 | — | **留 基底** | 它们是「收件箱的读写接口」，判据对象本身就是基底（本任务 §内容第 4 条） |
-| `projections/slo.rs`（147）+ `tiers.rs`（55） | 时延样本按档位折叠、分位数取法 | #13 时延分层 | `symbio-plugin-slo`（`ViewDecl`，档位是 `Decl.tier` 参数） | 读方是 `stats` 的 `tiers` 列与 `panel_of` 的呈现段，两处都用**类型**（`TierLatency::percentile` / `SloLatencyView::merge`）。改名字读只剩 JSON ⇒ 类型与取法要么跟着搬（那 `merge` 就成了第二份口径），要么在 `stats` 里再实现一遍。**阻塞：跨会话合并的归属没说清** |
-| `projections/fallback.rs`（144） | 每档位的兜底率 | 与 #13 同族（SLO §1.2 两列共用 `tiers`） | 随 #13 同包 | 同上，且它与 `slo` 共用 `declared_tier`——两列必须同包，否则那条唯一判据要跨包 |
+| `projections/slo.rs`（147）+ `tiers.rs`（55） | 时延样本按档位折叠、分位数取法 | #13 时延分层 | **已搬** → `symbio-plugin-slo`（`ViewDecl` + `agg`，`D-281`） | 无——补件甲（`D-281` 两半折叠）+ `D-282`（读数视图可读「有格位、无事实声明」的断言格）落定后搬完：`eval` 交一片、`agg` 交 N 片，`session` 只按名字读 |
+| `projections/fallback.rs`（144） | 每档位的兜底率 | 与 #13 同族（SLO §1.2 两列共用 `tiers`） | **已搬** → 随 #13 同包 | 无——与 `slo` 共用 `declared_tier`，同包搬走，那条唯一判据没有跨包 |
 | `autonomy.rs`（122） | 无人干预完成率 | 名册无此行（DE-008 §3.1 外部效标） | 随 #31/#32 同包（自主层的读数） | 唯一读方是 `stats`；与 `conation` 同一条迁移面 |
-| `projections/span.rs`（110） | 会话级时域跨度 | 名册无此行 | 随 #13 同包（SLO 时延列的同族读数） | 同上 |
+| `projections/span.rs`（110） | 会话级时域跨度 | 名册无此行 | **已搬** → 随 #13 同包 | 无——同族读数，跟着时延列一起进包 |
 | `token_ledger.rs`（107）+ `spend_ledger.rs`（133） | 用量 / 金额台账（按主体、按币种） | #18 成本控制 | S8 的 `symbio-plugin-cost`（与 core 的 `cost` 折叠同包） | 归 S8 不归本段：它要等「熔断与 stats 改名字读」那一批一起动 |
 | `projections/changes.rs`（161）+ `changes.rs`（160） | 工作目录变更账 + 它的只读出口 | 名册无此行 | 随工作目录能力（`symbio-plugin-vdfs` / `local`） | 出口是 VDFS 地址面的一段，与 `workdir` 的读写同属一域；搬它要连出口一起搬，那是另一段的事 |
 | `transcript/autonomous.rs`（539） | 自主触发的**落格与开轮**（四格事实 + 入队） | #15 主动开口 | 拆（受限）：**触发时机已在 `symbio-plugin-heartbeat`**；本文件剩下的「谁有资格在什么时刻写这个会话的事实源」是存储所有者的写窗口纪律，留基底（`D-076` 裁决一 #5/#6） | 无——这一条的拆分已经完成，剩下的半边按裁决**不是能力** |
@@ -84,7 +84,7 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 
 | # | 能力 | 表里在哪 | 处置 |
 |:-:|---|---|---|
-| 13 | 时延分层 | 一 · `projections/slo.rs` + `tiers.rs` | 拆（阻塞：见 §四 共同阻塞） |
+| 13 | 时延分层 | 一 · `projections/slo.rs` + `tiers.rs` | **已拆**：能力包 `symbio-plugin-slo`（三视图 + 两半折叠），`session` 只剩读方 |
 | 14 | 打断与插话 | 一 · `active.rs::PreemptionDecider`（判定）+ 二 · 收件箱（基底） | 拆（阻塞：跨窗三态契约，另一条补件） |
 | 15 | 主动开口 | 一 · `transcript/autonomous.rs` | 拆（受限）：触发时机已在 heartbeat 包，落格与开轮留基底（`D-076` 已裁） |
 | 31 | 目标自生成 | 一 · `conation.rs` | **已拆**：能力包 `symbio-plugin-conation`（事实 + 视图 + 两半折叠），`session` 只剩读方 |
@@ -184,6 +184,21 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
 读数）；去重与汇总的**数字**在 `t36` 里补两条（第二个 tick 只开一格 + `fleet.axes.conation`
 由汇总的分子分母重算）。会话侧的测试代码净减约 110 行，且不含任何折叠逻辑。
 
+`#13` 是这条分工的**第二遍**，也是第一次在「读方原本自己算」的列上走完：`stats.test.rs` 里
+原来有五条按数字断言的用例（时延样本 / 分位数 / 兜底率 / 跨度 / 跨会话合并），搬完之后的
+处置是——
+
+| 原来那条 | 现在归谁 |
+|---|---|
+| `stats_recompute_equals_direct_apply` 里的 `row.p95 / samples / rate` | owner（`slo/src/decl.test.rs`）+ e2e `t28`（`tiers[0]` 逐格对账） |
+| `reverse_case_each_column_moves_when_the_wal_changes` 的档位列 | owner（删 `final` ⇒ 样本 1 → 0）；本处改成断点列与成本列的反向用例 |
+| `span_column_recomputes_and_moves_with_the_wal` | 删；改成 `unavailable_columns_take_their_documented_empty_shape`（缺席交什么形状） |
+| `fleet_axes_aggregate_across_sessions` 的跨度中位数 | 删；改成 `fleet_axes_are_shaped_and_the_autonomy_family_still_aggregates_here`（自主程度仍是本插件的投影，跨会话合并在本处判） |
+| `panel_matches_the_columns_it_describes` 的档位行 | 保留，但输入改成**合成的 `TierRow`**：面板排版是本插件的代码，验的是「面板里的数 = 列里的数」，与 owner 在不在无关 |
+
+净效果：会话侧删掉 4 个旧投影文件（`slo` / `fallback` / `span` / `tiers`，含三个 `.test.rs`），
+`stats.test.rs` 的断言条数下降，而**判据强度不降**——每一条都搬到了能真正判它的那一侧。
+
 **这条经验对后面的每一批都成立**：能力搬走时，读方的用例只能留下「我怎么读、读不到怎么
 办」，凡是「算出来是多少」的断言都跟着实现走——否则搬完只是把实现复制了一份，而规模没降。
 
@@ -212,8 +227,9 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
    成一次，解锁 #32；补件丙（判定与落格之间的那段时间谁背）再独立成一次，解锁 #14。三次
    补件都**不含能力名**、各服务 ≥2 条能力。
    **补件甲已裁并已落（`D-281`）**：`ViewDecl::agg` + `ViewRead::aggregate` / `aggregable`
-   + `ViewUnavailable::NotAggregable`。`#31` 已用它搬完（见 §六）；下一个是 `#13` 时延分层
-   （`slo` / `fallback` / `span` 三件同包，同一个 `agg` 形状）。
+   + `ViewUnavailable::NotAggregable`。`#31` 与 `#13` 都已用它搬完（见 §六）；`#13` 还额外
+   用上 `D-282`（读数视图可以读「有 `EventDecl` 格位、无 `FactDecl` 声明」的断言格，
+   进报告名单而不是判 `UnknownFact`）——`turn.dispatch` 的 `tier` 正是那一类格子。
 3. 按表分批：能独立提交的，一个能力一个提交；共用状态的先拆状态再搬。
    - 时延分层：档位是 `Decl.tier` 参数，读数折叠独立成包；
    - 打断与插话：裁决走 I-3，收件箱事实走 I-1；E2 强制留核；

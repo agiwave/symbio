@@ -64,8 +64,8 @@ CI 每轮重测，数字回归会被当场抓住）。
  扫描（final 事件自带 `cost_ms`，扫描器无需埋点设施——数据已经在事实源里）。
  **扫描口就是生产读数口**：`slo_scan_wal_roots`（不是 `#[ignore]` + 环境变量的手工口），
  职责分两处——跨会话**聚合口径**
- 升为 core 的 `SloLatencyView::merge` / `FallbackRateView::merge`（三条纯函数
- 判据），**扫描 + 落成读数**落在 `session/stats` 的实例级聚合列 `fleet`
+ 归能力包 `slo` 的 `ViewDecl::agg`（`crates/symbio-plugin-slo/src/decl.rs::latency_merged`，
+  `D-281`），**扫描 + 落成读数**落在 `session/stats` 的实例级聚合列 `fleet`
  （四条判据，含「只走一层」与「坏 WAL 不拖垮整列」两条原手工口没有的）。
  e2e 每轮实跑 ⇒ **CI 出真数**；
 4. 兜底率（DE-016 §8.2 第三列）需要真实流量的 fallback 事件计数，读数口同上：`fallback_rate` 投影 + 聚合列 `fleet.by_tier.fallback`（跨会话合并后的

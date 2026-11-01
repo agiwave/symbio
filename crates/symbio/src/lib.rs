@@ -50,6 +50,7 @@ pub use symbio_plugin_plugin_manager;
 pub use symbio_plugin_session;
 pub use symbio_plugin_setting;
 pub use symbio_plugin_skill;
+pub use symbio_plugin_slo;
 pub use symbio_plugin_task;
 pub use symbio_plugin_telegram;
 pub use symbio_plugin_vdfs;
