@@ -54,4 +54,5 @@ pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
     evidence: &[],
     cost: COST,
     eval: memory_live,
+    agg: None,
 }];

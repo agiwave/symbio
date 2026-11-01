@@ -89,6 +89,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
     evidence: &[],
     cost: COST,
     eval: causal_graph,
+    agg: None,
 }];
 
 /// 纯折叠：`causal.link` → `{ count, edges: [{ from, to, confidence }], causes: [...] }`。

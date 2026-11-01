@@ -77,6 +77,7 @@ fn probe_view(name: &'static str, reads: &'static [(&'static str, &'static str)]
         evidence: &[EVENT_REQUEST],
         cost: 1,
         eval: probe,
+        agg: None,
     }
 }
 
@@ -289,6 +290,7 @@ fn view_cannot_read_an_undeclared_fact() {
         evidence: &[],
         cost: 1,
         eval: probe,
+        agg: None,
     });
     assert_eq!(
         gaps_of(b),
@@ -323,6 +325,7 @@ fn evidence_must_be_a_fact_the_view_reads() {
         evidence: &[EVENT_SENT],
         cost: 1,
         eval: probe,
+        agg: None,
     });
     assert_eq!(
         gaps_of(b),
@@ -391,6 +394,7 @@ fn eval_respects_the_declared_cost() {
         evidence: &[EVENT_SENT],
         cost: 1,
         eval: probe,
+        agg: None,
     });
     let frozen = b.seal(&[]).unwrap();
     let one = vec![ev(

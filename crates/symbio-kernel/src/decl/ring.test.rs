@@ -82,6 +82,7 @@ fn declare(actors: &[ActorDecl]) -> Builder {
         evidence: &["f"],
         cost: 64,
         eval: ready_view,
+        agg: None,
     });
     b.view(ViewDecl {
         name: "v_list",
@@ -90,6 +91,7 @@ fn declare(actors: &[ActorDecl]) -> Builder {
         evidence: &["f"],
         cost: 64,
         eval: list_view,
+        agg: None,
     });
     for d in actors {
         b.actor(*d);
@@ -1140,6 +1142,7 @@ fn freeze_exit_view(evidence: &'static [&'static str]) -> Result<Arc<Frozen>, Ve
         evidence,
         cost: 64,
         eval: ready_view,
+        agg: None,
     });
     for r in exit_view_rows() {
         b.row(r);

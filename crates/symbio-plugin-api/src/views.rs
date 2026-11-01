@@ -52,6 +52,11 @@ pub enum ViewUnavailable {
         events: usize,
         cost: u32,
     },
+    /// owner 没交「多片合并」那一半（`ViewDecl::agg` 为 `None`）——这一格不参与跨会话汇总。
+    ///
+    /// 与 `OverBudget` 同族：**可诊断的缺席**。静默返回「恒等 / 空汇总」会把「这一格
+    /// 不参与汇总」读成「汇总下来是零」——那是把缺项伪装成读数（`D-281`）。
+    NotAggregable { name: &'static str },
 }
 
 impl ViewUnavailable {
@@ -66,6 +71,7 @@ impl ViewUnavailable {
             Self::NotShared { .. } => "not_shared",
             Self::Unknown { .. } => "unknown",
             Self::OverBudget { .. } => "over_budget",
+            Self::NotAggregable { .. } => "not_aggregable",
         }
     }
 }
@@ -83,6 +89,9 @@ impl std::fmt::Display for ViewUnavailable {
                 "`{name}` 超出声明扫描成本（{} 条事实 / 上界 {cost}）",
                 events
             ),
+            Self::NotAggregable { name } => {
+                write!(f, "`{name}` 的 owner 没交「多片合并」，这一格不参与跨会话汇总")
+            }
         }
     }
 }
@@ -129,6 +138,47 @@ impl ViewRead {
     /// 全量读：`now = i64::MAX`（落盘事实源没有「未来的事件」可滤）。
     pub fn read_all(&self, events: &[Event]) -> Result<Value, ViewUnavailable> {
         self.read(events, i64::MAX)
+    }
+
+    /// 这一格参不参与跨会话汇总（owner 交没交 `agg` 那一半）。
+    pub fn aggregable(&self) -> Result<bool, ViewUnavailable> {
+        let sealed = sealed_declarations().ok();
+        self.aggregable_in(sealed.as_deref())
+    }
+
+    /// **跨会话合并**：N 份 [`Self::read_all`] 的产物 → 一份汇总（`D-281`）。
+    ///
+    /// 合并函数是 owner 交的（`ViewDecl::agg`），本模块不认识值的形状——与 `read`
+    /// 同一条纪律：口径不抄。读方因此拿得到「分位数 / 率 / 合计」，而不必自己再折
+    /// 一遍（两份口径）、跨插件调 owner（`E-009`）、或反序列化成同名类型（两个形状
+    /// owner）。
+    ///
+    /// 输入为**每个会话一份**的值；空输入也交给 owner（「没有会话」与「会话都是零」
+    /// 是两件事，只有 owner 知道该报哪一个）。
+    ///
+    /// 失败两态：名字读不出来（同 [`Self::read`] 的四种），或 owner 没交合并
+    /// （[`ViewUnavailable::NotAggregable`]）——后者不是「恒等」，是**这一格不在汇总里**。
+    pub fn aggregate(&self, parts: &[Value]) -> Result<Value, ViewUnavailable> {
+        let sealed = sealed_declarations().ok();
+        self.aggregate_in(sealed.as_deref(), parts)
+    }
+
+    fn aggregable_in(&self, frozen: Option<&Frozen>) -> Result<bool, ViewUnavailable> {
+        let frozen = frozen.ok_or(ViewUnavailable::NotSealed)?;
+        Ok(self.view(frozen)?.agg.is_some())
+    }
+
+    fn aggregate_in(
+        &self,
+        frozen: Option<&Frozen>,
+        parts: &[Value],
+    ) -> Result<Value, ViewUnavailable> {
+        let frozen = frozen.ok_or(ViewUnavailable::NotSealed)?;
+        let view = self.view(frozen)?;
+        match view.agg {
+            Some(agg) => Ok(agg(parts)),
+            None => Err(ViewUnavailable::NotAggregable { name: view.name }),
+        }
     }
 
     fn named_in(

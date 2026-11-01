@@ -1323,6 +1323,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, EVENT_RETRY],
         cost: 4096,
         eval: in_flight,
+        agg: None,
     },
     // 卡住：与 `in_flight` 同一口径的在途集合，加上租约与尝试上限两个判断。
     //
@@ -1350,6 +1351,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, EVENT_RETRY],
         cost: 4096,
         eval: stale_sent,
+        agg: None,
     },
     // 轮头（v6）：五个策略行的开账条件 +
     // `close-turn` / `announce-model` 的开账条件。
@@ -1434,6 +1436,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         ],
         cost: 4096,
         eval: turn_head,
+        agg: None,
     },
     // 本幕落下的阶段事实：`decide` / `recall` / `compress` 三行的出口。
     //
@@ -1451,6 +1454,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &["turn.stage"],
         cost: 4096,
         eval: turn_stages,
+        agg: None,
     },
     // 本幕召回条目（v1，`D-262`）：能力包的行按名字读的债键面。
     //
@@ -1474,6 +1478,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &["turn.stage"],
         cost: 4096,
         eval: turn_recalled,
+        agg: None,
     },
     // 本幕是否收束：执行行与反射行的出口。
     //
@@ -1493,6 +1498,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &["chat.assistant.final", "chat.assistant.fallback"],
         cost: 4096,
         eval: turn_closed,
+        agg: None,
     },
     // 幕的推进（`D-222` 裁决 2）：本幕收束之后还开不开下一幕。
     //
@@ -1550,6 +1556,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         ],
         cost: 4096,
         eval: turn_next_round,
+        agg: None,
     },
     // 本幕的下一次模型往返（`D-225`）：`announce-model` 那一行的 `owes`。
     //
@@ -1607,6 +1614,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         ],
         cost: 4096,
         eval: next_round_trip,
+        agg: None,
     },
     // 汇报到期：静默时长 = `now` − 最近一次用户看得见的动静的 `ts`；
     // 配额 = 本轮汇报数 vs `session.config.progress_max_per_turn`。
@@ -1673,6 +1681,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         ],
         cost: 4096,
         eval: report_due,
+        agg: None,
     },
     // 汇报的出口：每条汇报事实关掉它之前那段静默区间。
     //
@@ -1698,6 +1707,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &["chat.assistant.reported"],
         cost: 4096,
         eval: reported_anchors,
+        agg: None,
     },
 ];
 

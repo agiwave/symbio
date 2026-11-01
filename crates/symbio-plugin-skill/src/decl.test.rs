@@ -81,6 +81,7 @@ const HARNESS_VIEWS: &[ViewDecl] = &[ViewDecl {
     evidence: &["turn.stage"],
     cost: 4096,
     eval: turn_recalled,
+    agg: None,
 }];
 
 fn harness_declarations() -> PluginDeclarations<'static> {

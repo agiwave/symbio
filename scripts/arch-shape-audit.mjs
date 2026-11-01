@@ -320,17 +320,19 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
  * 测试用，`35-baseline` 另判覆盖值不得比默认值更松。
  */
 // core-shape-allow enumVariants: D-209 领域轴必须有一个扩展位——`Domain` 是一次性架构决策，换的是此后 notes / calendar 这类新领域的零 kernel diff；被否候选（`Entity` 改开放字符串会丢 F5 闭集、塞进 `Memory`/`Task` 会让读侧靠载荷猜）见 DE-025
+// core-shape-allow structFields: D-281 折叠的第二半只有 owner 知道——`ViewDecl::agg` 补的是「N 份读数怎么合成一个数」（分位数取法 / 率的可加性 / 合计的重排）；读方自己折是两份口径（D-251）、跨插件调 owner 是 E-009、反序列化成同名类型是两个形状 owner，三条都堵死。可选字段而非新面：六条读数折叠共用，`None` 报 `NotAggregable` 不静默恒等，见 DE-025
 //
 // 330:193 → 545:240 不是放宽，是**换了一把尺子的量程**（D-279）：本判据原扫
 // `crates/symbio-sdk/src`，D-258…D-279 把 20 个域搬进 `symbio-sdk` 之后，core 只剩
 // 322 行、量的是残余；被搬走的每一格数据面都还在，只是换了地址。改指 sdk 之后
-// 第一次实测 = 545 / 240，此后照旧只许降。
+// 第一次实测 = 545 / 240，此后照旧只许降。545 → 546 是 `D-281` 的 `ViewDecl::agg`
+// 一格（放宽行在上面），不是余量。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 545, enumVariants: 240 }
+  : { structFields: 546, enumVariants: 240 }
 
 /**
  * CS-010 控制面草稿的字段棘轮（[DE-022](../docs/003-design/022-行表与派发面.md "DE-022-行表与派发面") D-226）。

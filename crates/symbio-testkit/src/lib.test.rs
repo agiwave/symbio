@@ -141,6 +141,7 @@ fn view_extension_is_owner_local() {
                 evidence: &[],
                 cost: 1,
                 eval: eval_ids,
+                agg: None,
             }],
             ports: &[],
             actors: Vec::new(),

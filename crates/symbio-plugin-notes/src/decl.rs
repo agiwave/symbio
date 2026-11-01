@@ -228,6 +228,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &[],
         cost: RECENT_COST,
         eval: recent_notes,
+        agg: None,
     },
     // 行执行体写下的那笔事实的读回：`notes.indexed` → 本能力在轮内收进索引的
     // 工具结果。它证明「通用执行体交出的草稿真的入了格」，读方不必认识行或执行体。
@@ -238,6 +239,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &[],
         cost: RECENT_COST,
         eval: indexed_notes,
+        agg: None,
     },
     // 反思那一笔的读回：`notes.insight` → 本能力对已索引便签的洞察。读方同样不必
     // 认识行、执行体或模型往返——它读到的是「一次能力请求模型之后落了什么」。
@@ -248,6 +250,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &[],
         cost: RECENT_COST,
         eval: notes_insights,
+        agg: None,
     },
 ];
 

@@ -385,6 +385,7 @@ fn memory_capability_fixture() -> symbio_plugin_api::PluginDeclarations<'static>
         evidence: &[],
         cost: 4096,
         eval: memory_live_fixture,
+        agg: None,
     }];
     symbio_plugin_api::PluginDeclarations {
         events: &[],

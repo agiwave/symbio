@@ -16,6 +16,8 @@ use symbio_kernel::event::{Entity, EventDecl, Verb};
 
 const ITEM_ADDED: &str = "test.item.added";
 const RECENT: &str = "test.recent";
+/// 带「多片合并」那一半的视图（`D-281`）。
+const TOTAL: &str = "test.total";
 
 fn recent(events: &[Event], now: i64) -> Value {
     let texts: Vec<&str> = events
@@ -26,6 +28,18 @@ fn recent(events: &[Event], now: i64) -> Value {
     serde_json::json!({ "count": texts.len(), "items": texts })
 }
 
+/// 合并那一半：N 份 `recent` 的产物 → 一个合计。
+///
+/// 形状由 owner 定（`sessions` / `total`），读口不认识它——这正是 `agg` 存在的理由：
+/// 读方拿得到「N 个会话合起来是多少」，而不必自己认识 `count` 这个字段。
+fn total(parts: &[Value]) -> Value {
+    let sum: u64 = parts
+        .iter()
+        .filter_map(|p| p.get("count").and_then(Value::as_u64))
+        .sum();
+    serde_json::json!({ "sessions": parts.len(), "total": sum })
+}
+
 const EVENTS: &[EventDecl] = &[EventDecl::new(ITEM_ADDED, (Entity::Domain, Verb::Opened))];
 const FACTS: &[FactDecl] = &[FactDecl {
     name: ITEM_ADDED,
@@ -34,14 +48,26 @@ const FACTS: &[FactDecl] = &[FactDecl {
     expand: &[],
     fields: &["text"],
 }];
-const VIEWS: &[ViewDecl] = &[ViewDecl {
-    name: RECENT,
-    ver: 7,
-    reads: &[(ITEM_ADDED, "text")],
-    evidence: &[],
-    cost: 2,
-    eval: recent,
-}];
+const VIEWS: &[ViewDecl] = &[
+    ViewDecl {
+        name: RECENT,
+        ver: 7,
+        reads: &[(ITEM_ADDED, "text")],
+        evidence: &[],
+        cost: 2,
+        eval: recent,
+        agg: None,
+    },
+    ViewDecl {
+        name: TOTAL,
+        ver: 1,
+        reads: &[(ITEM_ADDED, "text")],
+        evidence: &[],
+        cost: 2,
+        eval: recent,
+        agg: Some(total),
+    },
+];
 
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();
@@ -114,6 +140,46 @@ fn event(id: &str, text: &str, ts: i64) -> Event {
     )
     .with_ts(ts)
     .with_payload(serde_json::json!({ "text": text }))
+}
+
+/// 合并那一半由 owner 交、经同一张冻结表被调用——读口不认识值的形状（`D-281`）。
+#[test]
+fn aggregate_uses_the_owners_half_through_the_same_table() {
+    let frozen = frozen();
+    let handle = ViewRead::named_in(Some(&frozen), TOTAL, false).expect("已声明");
+    assert!(
+        handle.aggregable_in(Some(&frozen)).expect("小世界已冻结"),
+        "`TOTAL` 交了 `agg` 那一半"
+    );
+
+    // 三份「一个会话」的读数 → 一份汇总。形状是 owner 的（`sessions` / `total`），
+    // 读方一个字都不认识——它只把 `read_in` 的产物原样交回去。
+    let parts: Vec<Value> = [
+        vec![event("a", "甲", 1), event("b", "乙", 2)],
+        vec![event("c", "丙", 3)],
+        Vec::new(),
+    ]
+    .iter()
+    .map(|ev| handle.read_in(Some(&frozen), ev, i64::MAX).unwrap())
+    .collect();
+
+    assert_eq!(
+        handle.aggregate_in(Some(&frozen), &parts).unwrap(),
+        serde_json::json!({ "sessions": 3, "total": 3 })
+    );
+}
+
+/// 没交合并那一半 = **这一格不在汇总里**，不是恒等、不是空汇总（`D-281`）。
+#[test]
+fn not_aggregable_is_a_named_absence_not_an_identity() {
+    let frozen = frozen();
+    let handle = ViewRead::named_in(Some(&frozen), RECENT, false).unwrap();
+    assert!(!handle.aggregable_in(Some(&frozen)).expect("小世界已冻结"));
+    assert_eq!(
+        handle.aggregate_in(Some(&frozen), &[]),
+        Err(ViewUnavailable::NotAggregable { name: RECENT }),
+        "缺席要报名，不许静默返回空对象"
+    );
 }
 
 /// 名字、版本与算法都来自声明表——读口没有自己的副本。
@@ -232,5 +298,12 @@ fn each_absence_state_names_itself() {
     assert!(
         over.to_string().contains("3 条事实 / 上界 2"),
         "超界要报出实测条数与上界：{over}"
+    );
+
+    let no_agg = ViewUnavailable::NotAggregable { name: "a.b" };
+    assert_eq!(no_agg.reason(), "not_aggregable");
+    assert!(
+        no_agg.to_string().contains("a.b") && no_agg.to_string().contains("多片合并"),
+        "要说清是哪一格、缺的是哪一半：{no_agg}"
     );
 }

@@ -114,6 +114,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
     evidence: &[],
     cost: COST,
     eval: retreating_skills,
+    agg: None,
 }];
 
 pub(crate) const ROWS: &[Decl] = &[
