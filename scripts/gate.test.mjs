@@ -469,30 +469,38 @@ test('★ 阶段级并发必须连成**一批**：中间夹一个串行阶段就
   // 这条断言同时是那条前移的**回归钉**：谁把生成挪回 verify，批连续性判据里
   // verify 会连同它自己的 `parallel` 一起红。
   assert.ok(stages[idx('verify')]?.parallel, 'verify 必须标 parallel 并连进主批——它与 docs 的 mod.rs 竞态已随生成前移消掉')
-  // rustdoc 与 backend 共用同一条 `.cargo-lock`：并跑**不省墙钟**，它标 parallel 的
-  // 全部意义是「留在批里 + 有一个能 `--skip=rustdoc` 的名字」。标成串行则它 2m43s
-  // 会作为一整段加在批后，`--skip` 省下的那点时间还不够付这次串行。
-  assert.ok(idx('rustdoc') >= 0, 'rustdoc 阶段必须存在（断链判据的唯一执行方）')
-  assert.ok(
-    stages[idx('rustdoc')]?.parallel,
-    'rustdoc 必须留在批内并标 parallel——它不是「能与 backend 重叠」，而是「不许把 2m43s 串到批后」',
-  )
+  // rustdoc 阶段**已废弃**（D-274）：`cargo doc --no-deps --workspace` 一次 core
+  // 改动实测 4m04s，而 backend 整阶段（clippy + 测试构建 + 测试运行）合计不到 1m5s
+  // ——它一项就比其余全部贵 4 倍，守的却只是文档里的断链。判据降级成一条命令
+  // （写在 D-274 里），不再进任何一轮门禁。
+  // 这条断言钉的是**不许悄悄加回来**：真有第二个消费者（比如开始发 rustdoc），
+  // 先写决策、再改这条，而不是让一个 4 分钟的阶段重新长回关键路径。
+  assert.equal(idx('rustdoc'), -1, 'rustdoc 阶段已废弃（D-274）；要恢复先用决策推翻它')
 })
 
-test('★ 拆出去的阶段必须仍在 CI 里：ci.yml 的 --only 名单要包含它', () => {
-  // 拆阶段最危险的失效方式不是报错，是**从默认全量里消失**：本地默认还跑，CI 的
-  // backend job 若只写 `--only=fmt,backend`，rustdoc 就成了「任何时候都没人跑」。
-  // 这条判据把「拆出去」与「进 CI」钉在一起。
+test('★ 每个阶段都必须在 CI 里有一个点名它的 job：不许出现「只在本地跑」的守卫', async () => {
+  // 拆阶段最危险的失效方式不是报错，是**从默认全量里消失**：本地默认还跑，CI 的某个
+  // job 若没点名它，它就成了一条「推上去也没人跑」的守卫。
+  //
+  // 这条判据原先是**专为 rustdoc 写的**（「跑 backend 的 job 必须同时点名 rustdoc」）。
+  // D-274 废弃 rustdoc 之后，专钉失效了，但那个失效形态还在——所以改成对**全部阶段**
+  // 成立的通用判据：`gate.d/*.mjs` 声明的每个 id 都得在 ci.yml 的某个 `--only=` 里出现。
+  // 加阶段而漏进 CI，这条当场红；这是它比「点名 rustdoc」更强的地方。
   const ci = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8')
   const lists = [...ci.matchAll(/--only=([^\s"'`]+)/g)].map((m) => m[1].split(','))
   assert.ok(lists.length > 0, 'ci.yml 里必须有带 --only= 的门禁调用')
-  assert.ok(
-    lists.some((ids) => ids.includes('backend')),
-    `应有一个 job 跑 backend：${JSON.stringify(lists)}`,
-  )
-  assert.ok(
-    lists.some((ids) => ids.includes('backend') && ids.includes('rustdoc')),
-    `rustdoc 已从 backend 泳道拆成独立阶段 ⇒ 跑 backend 的 job 必须同时点名 rustdoc：${JSON.stringify(lists)}`,
+  const named = new Set(lists.flat())
+  assert.ok(named.has('backend'), `应有一个 job 跑 backend：${JSON.stringify(lists)}`)
+  const dir = path.join(repoRoot, 'scripts', 'gate.d')
+  const ids = []
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.mjs') && !f.startsWith('_')).sort()) {
+    const mod = await import(pathToFileURL(path.join(dir, f)).href)
+    if (mod.default?.id) ids.push(mod.default.id)
+  }
+  assert.deepEqual(
+    ids.filter((id) => !named.has(id)),
+    [],
+    `这些阶段在 CI 里没有任何 job 跑：${ids.filter((id) => !named.has(id)).join(', ')}（ci.yml 的 --only 名单：${JSON.stringify(lists)}）`,
   )
 })
 

@@ -88,9 +88,10 @@ export default {
       cwd: backendDir,
     })
 
-    // rustdoc 的两条 lint（断链 / 伪码块）不在本泳道——它们是**唯一按 crate 数
-    // 线性放大**的判据，单独成 `15-rustdoc.mjs`（id `rustdoc`），理由与代价都在
-    // 那个文件头。要临时跳过它用 `--skip=rustdoc`，不要删任务。
+    // rustdoc 的两条 lint（断链 / 伪码块）**已废弃**（D-274）：`cargo doc --no-deps
+    // --workspace` 一次 core 改动实测 4m04s，是 backend 整阶段（clippy 8s + 测试构建
+    // 17s + 测试运行 39s）的 4 倍，而它守的只是文档里的断链。判据降级为**一条命令**，
+    // 需要时手跑，见 `docs/003-design/016-工程落地与验证.md` 的 D-274。
 
     // cli release 二进制在本泳道尾部重建（e2e 的被测件）。放在这里的理由：
     // - `58-e2e` 的用例只等这份产物；原先构建在批后串行——改 Rust 的那一轮，
