@@ -68,7 +68,7 @@ mod kernel;
 /// 一处违规：事件（按 seq 定位）+ 人话。
 ///
 /// `Serialize` 是**读出口**要的：`session/stats` 在出口边界一次性序列化
-/// （与 `cost_ledger` / `checkpoint` 视图同一形态），类型不进任何插件的 `use`。
+/// （与 `cost.ledger` / `checkpoint` 视图同一形态），类型不进任何插件的 `use`。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Violation {
     /// 违规事件的 `event_id`（seq 尚未分配的pending 事件用它定位）。

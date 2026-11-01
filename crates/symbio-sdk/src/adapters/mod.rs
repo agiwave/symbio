@@ -233,7 +233,7 @@ pub trait LlmAdapter: Send + Sync {
     /// 埋点版生成（SLO 校准，[DE-016 §8](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// 除文本外返回 **adapter 边界实测耗时**（毫秒）。默认实现包一层
     /// `Instant`——桩与真实适配器零改动共享；调用方把它写到 final 事件的
-    /// `cost_ms`，成本台账（③ cost_ledger）与熔断判据从此有了真实来源
+    /// `cost_ms`，成本台账（`cost.ledger`，名册 #18 的能力包视图）与熔断判据从此有了真实来源
     /// （G3：参数有了实测数字）。
     async fn generate_timed(
         &self,
