@@ -132,6 +132,16 @@ impl HookExecutor {
         // tempfile 生成的名字不含空格 / 引号，两种平台都不会因空格而拆参。
         let event_path = event_file.to_string_lossy().into_owned();
 
+        // `kill_on_drop`：**超时必须真的杀掉进程，而不只是「不再等它」**。
+        //
+        // 不加这一条时（2026-11-01 实测），`timeout(300ms, output)` 只丢弃了那个 future，
+        // 而 `Command::output()` 的读管道跑在 tokio 的阻塞任务上、**丢弃 future 不会取消它**，
+        // 于是运行时收尾时仍在等子进程自然退出：钩子已经报超时，进程却继续跑完、继续写文件。
+        // 「timed out」于是成了假话——它只说明调用方不等了。加了之后子进程随 future 一起结束。
+        //
+        // ⚠️ Windows 上杀的是 `cmd.exe`：它起的孙进程（如 `ping`）仍可能继续运行并持有
+        // 继承来的管道句柄，所以 `output()` 的那次等待依然以**子进程自己的寿命**为下界。
+        // 这条约束对判据的影响写在 `executor.test.rs` 的 `timeout_is_enforced_and_reported`。
         let output = if cfg!(target_os = "windows") {
             Command::new("cmd")
                 .arg("/C")
@@ -141,6 +151,7 @@ impl HookExecutor {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .current_dir(workdir)
+                .kill_on_drop(true)
                 .output()
         } else {
             Command::new("sh")
@@ -152,6 +163,7 @@ impl HookExecutor {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .current_dir(workdir)
+                .kill_on_drop(true)
                 .output()
         };
 
