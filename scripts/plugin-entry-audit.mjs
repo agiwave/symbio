@@ -33,11 +33,11 @@
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  * | E-009 | 插件不得依赖兄弟插件：**Cargo.toml 不声明** · 源码不 `symbio_plugin_<兄弟>` · `include!`/`#[path]` 不跨 crate · `symbio` 门面只许 dev，**测试代码同样判** | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过（Rust 私有可见性包含"定义模块的后代"），旧实现判的就是这个形态。拆 crate（D-191）后兄弟插件是独立 crate，该路径**不可能存在**——约束由 cargo 的依赖图物理给出，但它的物理位置也搬到了 `Cargo.toml`：现在能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条**静默空转**（全仓 4 处 `crate::plugins` 全是注释），绿灯是假的。现判五条通路：清单（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法）· 源码裸 `symbio_plugin_<x>`（连 `symbio::symbio_plugin_<x>::` 一并命中）· 旧路径兜底（机制回退时立刻红）· `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码，绕过前四条）。测试也判：让它对仓内可见去喂一条测试，隔离已经先被拆掉了一个模块 |
- * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../docs/003-design/001-核心架构.md "D-083") 的闭族通货：`crate::symbio_core` + 通用库 + crate 根日志/工厂宏。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
- * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_core::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
+ * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../docs/003-design/001-核心架构.md "D-083") 的闭族通货：宿主机制面 `symbio_sdk::` + 封闭语法 `symbio_kernel::` + 通用库 + crate 根日志/工厂宏 + 本插件自己的模块根。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
+ * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_sdk::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
  *
- * （原 E-010「消费方不得深引 `symbio_core::<域>::`」已迁至
+ * （原 E-010「消费方不得深引 `symbio_sdk::<域>::`」已迁至
  * [`core-export-audit.mjs`](core-export-audit.mjs) 的 **C-002** 并退役：深引是
  * **内核出口**的事，不是插件门面的事；两处各判一遍就是两个 owner，域清单与豁免通道
  * 必然分叉。C-002 是它的全量版——域目录动态取自 core、额外拦裸 `use …::core::<域>;`。）
@@ -287,7 +287,7 @@ const crateDirOf = (id) => path.join(PLUGINS_DIR, PLUGIN_CRATE_PREFIX + id)
 /**
  * 纯配置挂载点插件（挂载根下只有一份 `PLUGIN.yml`）——E-011 的适用范围。
  *
- * 这些插件应当实现 `symbio_core::PluginConfigMount`（四臂 dispatch 由机制侧提供），
+ * 这些插件应当实现 `symbio_sdk::PluginConfigMount`（四臂 dispatch 由机制侧提供），
  * 而不是各自手写 `impl VdfsProvider`。**名单即「哪些插件的挂载根确实只有一份配置」
  * 的事实表**：新插件两者之一必居其一——要么加进本名单并实现 `PluginConfigMount`，
  * 要么它有资源条（条目 CRUD / 动态子节点），那就不属于这里。
@@ -570,7 +570,7 @@ for (const abs of codeFiles) {
     const isConstDef = isRust && CONST_DEF_RE.test(line)
 
     // E-003：调用侧不得写字面量 PATH（绝对地址必须来自 crate::routes 常量）
-    if (isRust && /\.set\(\s*(?:crate::symbio_core::)?PATH\s*,\s*"/.test(line)) {
+    if (isRust && /\.set\(\s*(?:crate::symbio_sdk::)?PATH\s*,\s*"/.test(line)) {
       if (!exempted(raw, i, 'E-003')) {
         report(
           'E-003',
@@ -618,12 +618,12 @@ for (const abs of codeFiles) {
     }
 
     // E-010 已退役：内核出口的深引检查迁至 `core-export-audit.mjs` 的 **C-002**
-    // （域目录动态取自 core、额外拦裸 `use …::symbio_core::<域>;`）。深引是内核出口
+    // （域目录动态取自 core、额外拦裸 `use …::symbio_sdk::<域>;`）。深引是内核出口
     // 的事，不是插件门面的事——两处各判一遍必然分叉出两套域清单与豁免通道。
 
     // E-011：纯配置挂载点插件不得手写 `dispatch`
     //
-    // 「挂载根 = 一份配置文档」的插件（见 `symbio_core::PluginConfigMount`）四臂
+    // 「挂载根 = 一份配置文档」的插件（见 `symbio_sdk::PluginConfigMount`）四臂
     // dispatch 骨架逐字相同，机制侧已提供**唯一**实现（泛型 blanket impl）。手写
     // 一份就是把同一段语义复制出去——四份副本改一条错误文案要改四处，且新增插件
     // 「记得抄对每条分支」是纯人肉负担。
@@ -643,7 +643,7 @@ for (const abs of codeFiles) {
           rel(abs),
           i + 1,
           '`impl VdfsProvider` —— 纯配置挂载点插件应实现 `PluginConfigMount`，' +
-            '四臂 dispatch 由机制侧提供（见 `symbio_core::PluginConfigMount`）',
+            '四臂 dispatch 由机制侧提供（见 `symbio_sdk::PluginConfigMount`）',
         )
       }
     }
@@ -959,7 +959,8 @@ for (const abs of codeFiles) {
 // `crate::providers`、`crate::<其它模块>` 或一个新第三方 crate——这些同样会把 loop 钉回仓内实现面。
 //
 // 判据分两半：
-//   ① `crate::<根>` 只许 `symbio_core`、装配方的身份表（`assembly`，纯部署名词）、
+//   ① `crate::<根>` 只许**本插件自己的**模块根（装配方身份表 `assembly`、crate 根的
+//      日志/工厂宏，以及本插件自己的事件声明表 `control_decl` 与折叠 `projections`）；
 //      crate 根的日志/工厂宏，以及**本插件自己的事件声明表**（`control_decl`：名字与
 //      格位随 owner 走后，驱动器取名字只能从这里）；
 //   ② `use <外部根>::` 只许通用库。清单是**闭集**：新增一个根必须回到 D-083 §4
@@ -971,13 +972,16 @@ for (const abs of codeFiles) {
 // 不携带会话状态）。生产文件用它是违规。
 const LOOP_DIR = crateDirOf('loop')
 const LOOP_ALLOWED_CRATE_ROOTS = new Set([
-  'symbio_core',
+  // `symbio_core` 曾在这里：D-191 把它 crate 化、D-279 直接删掉了 crate，
+  // `crate::symbio_core` 这条写法从此不可能出现在任何源码里。留着它就是一条
+  // **永远不会被命中的白名单项**——它不拦任何东西，只让闭族看起来比实际宽（D-280：
+  // 名单里放一条打不中的名字，与没有这条名字的判据等价，但更贵）。
   // 装配方的部署身份表：插件叫什么、标准树装哪些、哪些不得停用。它没有任何插件实现，
   // 只是名词；loop 用它自报工厂 id 与拼会话地址，不构成对兄弟插件实现的依赖。
   'assembly',
   // 宿主机制的词汇面（D-184 随 `fire_hook` + `ROUTE_*` 搬出 core）：
   // `routes` 是跨插件地址常量、`hooks` 是生命周期钩子助手。它们是**宿主机制**，
-  // 不是某个兄弟插件的实现面——闭族要拦的是后者，故与 `symbio_core` 同档。
+  // 不是某个兄弟插件的实现面——闭族要拦的是后者，故与 `assembly` 同档。
   'routes',
   'hooks',
   'plugin_debug',
@@ -1000,10 +1004,14 @@ const LOOP_ALLOWED_CRATE_ROOTS = new Set([
 const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   // ── crate 化（D-191）把三个「crate 内根」变成了三个**外部 crate**：闭族的成员没变，
   //    只是写法从 `crate::symbio_core` / `crate::assembly` / `crate::routes` 变成
-  //    `use symbio_core::…` / `use symbio_deploy::…` / `use symbio_plugin_api::…`。
+  //    `use symbio_sdk::…` / `use symbio_deploy::…` / `use symbio_plugin_api::…`。
   //    这里逐个对应列出，而不是「凡 symbio_ 开头都放行」——前缀白名单会让「新增一个
   //    `symbio-plugin-xxx` 依赖」悄悄落在族内，那正是本条要拦的形态。
-  'symbio_core', // 宿主机制面（原 `crate::symbio_core`）
+  //
+  //    ⚠️ 对应表原本还有**第三个**成员 `symbio_core`（原 `crate::symbio_core`）。D-279
+  //    删掉那个 crate 之后，它连写都写不出来：白名单里留一条永远不会被命中的名字，
+  //    不拦任何东西，只把闭族显得比实际宽（D-280）。故直接删条目，而不是留着「以防
+  //    万一」——真回来时 `symbio-core` 会在 HS-001 / HS-005 上先红。
   'symbio_deploy', // 装配方的部署身份表（原 `crate::assembly`）
   'symbio_plugin_api', // 跨插件地址常量与钩子助手（原 `crate::routes` / `crate::hooks`）
   // 仅测试豁免：`symbio_providers` 是「被多个插件模块公用」的实现层，测试拿它当
@@ -1019,7 +1027,7 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   'symbio_kernel',
   // 宿主机制面（D-272 收入）：`symbio_sdk` 只装插件可用的宿主机制（adapters / chat /
   // turn::dispatch / projection 这类签名与机制），不认容器概念、不反向依赖宿主。
-  // 过去 loop 经 core 根转发拿到同一批符号（`use symbio_core::X`，X 实际住在 sdk）；
+  // 过去 loop 经 core 根转发拿到同一批符号（`use symbio_sdk::X`，X 实际住在 sdk）；
   // D-272 撤掉根转发、消费方按真实归属直写后，这批 import 显形成 `symbio_sdk::…`。
   // 闭族的成员没有变——变了的是写法——与 `symbio_kernel` 同档列出，而不是「凡 symbio_
   // 开头都放行」：那样会让新出现的 `symbio-plugin-xxx` 悄悄落进族内。
@@ -1071,7 +1079,7 @@ if (fs.existsSync(LOOP_DIR)) {
       flag(
         lineAt(m.index),
         root,
-        `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`crate::symbio_core\` ` +
+        `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`symbio_sdk::\` ` +
           `（D-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
       )
     }
@@ -1084,7 +1092,7 @@ if (fs.existsSync(LOOP_DIR)) {
         flag(
           lineIdx,
           root,
-          `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`crate::symbio_core\` ` +
+          `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`symbio_sdk::\` ` +
             `（D-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
         )
       }

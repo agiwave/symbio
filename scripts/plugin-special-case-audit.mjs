@@ -93,7 +93,9 @@ const DEFAULT_PROTOCOLS = path.join('crates', 'symbio-plugin-model', 'src', 'pro
  * 测试文件不在内（它本来就该按名造工具）。
  */
 const MSG_ROOTS = [
-  ['core', path.join('crates', 'symbio-core', 'src')],
+  // 架构层现在是两棵：内核（封闭语法）与 sdk（宿主机制与策略）。D-279 之前这里还有
+  // 一棵 core，它是 sdk 搬迁后的残余——工具名落进残余不再说明任何事情。
+  ['sdk', path.join('crates', 'symbio-sdk', 'src')],
   ['kernel', path.join('crates', 'symbio-kernel', 'src')],
   ['loop', path.join('crates', 'symbio-plugin-loop', 'src')],
   ['session', path.join('crates', 'symbio-plugin-session', 'src')],

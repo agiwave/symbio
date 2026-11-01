@@ -526,14 +526,15 @@ impl SessionPlugin {
     /// 登记以**会话 id** 为持有人：同一会话换主体只替换这一条（旧行先撤），
     /// 删除会话时整册回收（[`Self::delete_session_internal`]）。
     async fn bind_session_identity(&self, session: &Session) {
-        let principal =
-            symbio_core::principal_of(session.metadata.get("agent_id").and_then(Value::as_str));
+        let principal = symbio_sdk::authz::principal_of(
+            session.metadata.get("agent_id").and_then(Value::as_str),
+        );
         let Ok(store) = self.get_store().await else {
             return;
         };
         match super::chat_session::delegating_principal_in(&store, session).await {
-            Some(parent) => symbio_core::bind_inheriting(&session.id, &principal, &parent),
-            None => symbio_core::bind_root(&session.id, &principal),
+            Some(parent) => symbio_sdk::authz::bind_inheriting(&session.id, &principal, &parent),
+            None => symbio_sdk::authz::bind_root(&session.id, &principal),
         }
     }
 
@@ -596,9 +597,9 @@ impl SessionPlugin {
         let store = self.get_store().await?;
         store.delete_session(session_id).await?;
         // 登记行随会话同寿：删除成功后才回收（删除失败时会话仍在，行也该仍在）。
-        symbio_core::unbind_session(session_id);
+        symbio_sdk::authz::unbind_session(session_id);
         for id in descendants {
-            symbio_core::unbind_session(&id);
+            symbio_sdk::authz::unbind_session(&id);
         }
 
         // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：

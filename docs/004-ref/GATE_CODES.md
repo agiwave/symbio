@@ -23,9 +23,8 @@ lists: [gate-codes=owner]
 | 前缀 | 归属 | 声明脚本 | 已用号段 | 下一个可用号 |
 |---|---|---|---|---|
 | **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
-| **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–006 | `C-007` |
 | **CP** | 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结与端口闭集 / 判据集闭集 / 声明面封闭） | `scripts/control-plane-audit.mjs` | CP-001–008 | `CP-009` |
-| **CS** | core 形状 | `scripts/core-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–010 | `CS-011` |
+| **CS** | core 形状 | `scripts/arch-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–010 | `CS-011` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–020 | `D-021` |
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
 | **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
@@ -36,14 +35,13 @@ lists: [gate-codes=owner]
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–006 | `GW-007` |
-| **HS** | 扩展层插件宿主面 | `scripts/plugin-surface-audit.mjs` | HS-001–004 | `HS-005` |
+| **HS** | 扩展层插件宿主面 | `scripts/plugin-surface-audit.mjs` | HS-001–006 | `HS-007` |
 | **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
 | **INJ** | 异常注入矩阵 | `scripts/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
 | **KB** | 前端分支（形态 / 资源类型） | `scripts/kind-branch-audit.mjs` | KB-001–002 | `KB-003` |
 | **LWF** | 列表写入口事实 | `scripts/list-write-fact-audit.mjs` | LWF-001–002 | `LWF-003` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–010 | `M-011` |
 | **ME** | 机制强制等级清单 | `scripts/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
-| **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
 | **OB** | 义务环派发面（调度旁路与幂等点问的两类计数棘轮） | `scripts/obligation-bypass-audit.mjs` | OB-001–004 | `OB-005` |
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
@@ -58,7 +56,7 @@ lists: [gate-codes=owner]
 | **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
-| **V** | core 分域 | `scripts/core-vocab-audit.mjs` | V-001–002 | `V-003` |
+| **V** | 分域形状 | `scripts/domain-vocab-audit.mjs` | V-001–002 | `V-003` |
 
 ## 2. 逐码归属
 
@@ -70,12 +68,6 @@ lists: [gate-codes=owner]
 | **AO-004** | `scripts/agent-ownership-audit.mjs` |
 | **AO-005** | `scripts/agent-ownership-audit.mjs` |
 | **AO-006** | `scripts/agent-ownership-audit.mjs` |
-| **C-001** | `scripts/core-export-audit.mjs` |
-| **C-002** | `scripts/core-export-audit.mjs` |
-| **C-003** | `scripts/core-export-audit.mjs` |
-| **C-004** | `scripts/core-export-audit.mjs` |
-| **C-005** | `scripts/core-export-audit.mjs` |
-| **C-006** | `scripts/core-export-audit.mjs` |
 | **CP-001** | `scripts/control-plane-audit.mjs` |
 | **CP-002** | `scripts/control-plane-audit.mjs` |
 | **CP-003** | `scripts/control-plane-audit.mjs` |
@@ -84,16 +76,16 @@ lists: [gate-codes=owner]
 | **CP-006** | `scripts/control-plane-audit.mjs` |
 | **CP-007** | `scripts/control-plane-audit.mjs` |
 | **CP-008** | `scripts/control-plane-audit.mjs` |
-| **CS-001** | `scripts/core-shape-audit.mjs` |
-| **CS-002** | `scripts/core-shape-audit.mjs` |
-| **CS-003** | `scripts/core-shape-audit.mjs` |
-| **CS-004** | `scripts/core-shape-audit.mjs` |
-| **CS-005** | `scripts/core-shape-audit.mjs` |
-| **CS-006** | `scripts/core-shape-audit.mjs` |
+| **CS-001** | `scripts/arch-shape-audit.mjs` |
+| **CS-002** | `scripts/arch-shape-audit.mjs` |
+| **CS-003** | `scripts/arch-shape-audit.mjs` |
+| **CS-004** | `scripts/arch-shape-audit.mjs` |
+| **CS-005** | `scripts/arch-shape-audit.mjs` |
+| **CS-006** | `scripts/arch-shape-audit.mjs` |
 | **CS-007** | `scripts/shared-event-vocab-audit.mjs` |
-| **CS-008** | `scripts/core-shape-audit.mjs` |
-| **CS-009** | `scripts/core-shape-audit.mjs` |
-| **CS-010** | `scripts/core-shape-audit.mjs` |
+| **CS-008** | `scripts/arch-shape-audit.mjs` |
+| **CS-009** | `scripts/arch-shape-audit.mjs` |
+| **CS-010** | `scripts/arch-shape-audit.mjs` |
 | **D-001** | `scripts/doc-link-audit.mjs` |
 | **D-002** | `scripts/doc-link-audit.mjs` |
 | **D-003** | `scripts/doc-link-audit.mjs` |
@@ -162,6 +154,8 @@ lists: [gate-codes=owner]
 | **HS-002** | `scripts/plugin-surface-audit.mjs` |
 | **HS-003** | `scripts/plugin-surface-audit.mjs` |
 | **HS-004** | `scripts/plugin-surface-audit.mjs` |
+| **HS-005** | `scripts/plugin-surface-audit.mjs` |
+| **HS-006** | `scripts/plugin-surface-audit.mjs` |
 | **IM-001** | `scripts/internal-model-audit.mjs` |
 | **IM-002** | `scripts/internal-model-audit.mjs` |
 | **IM-003** | `scripts/internal-model-audit.mjs` |
@@ -188,11 +182,6 @@ lists: [gate-codes=owner]
 | **ME-003** | `scripts/mechanism-enforcement-audit.mjs` |
 | **ME-004** | `scripts/mechanism-enforcement-audit.mjs` |
 | **ME-005** | `scripts/mechanism-enforcement-audit.mjs` |
-| **N-001** | `scripts/core-naming-audit.mjs` |
-| **N-002** | `scripts/core-naming-audit.mjs` |
-| **N-003** | `scripts/core-naming-audit.mjs` |
-| **N-004** | `scripts/core-naming-audit.mjs` |
-| **N-005** | `scripts/core-naming-audit.mjs` |
 | **NDC-001** | `scripts/no-direct-call-audit.mjs` |
 | **NDC-002** | `scripts/no-direct-call-audit.mjs` |
 | **OB-001** | `scripts/obligation-bypass-audit.mjs` |
@@ -284,5 +273,5 @@ lists: [gate-codes=owner]
 | **SX-003** | `scripts/slo-exit-audit.mjs` |
 | **TD-001** | `scripts/tool-decls-audit.mjs` |
 | **TD-002** | `scripts/tool-decls-audit.mjs` |
-| **V-001** | `scripts/core-vocab-audit.mjs` |
-| **V-002** | `scripts/core-vocab-audit.mjs` |
+| **V-001** | `scripts/domain-vocab-audit.mjs` |
+| **V-002** | `scripts/domain-vocab-audit.mjs` |

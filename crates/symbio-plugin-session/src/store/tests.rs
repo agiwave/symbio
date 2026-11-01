@@ -328,7 +328,7 @@ fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
     ChatNode {
         id: format!("m{}", text.len()),
         principal: Some(Principal::from_legacy(if role_is_user {
-            symbio_core::PRINCIPAL_USER
+            symbio_sdk::authz::PRINCIPAL_USER
         } else {
             "session/main"
         })),

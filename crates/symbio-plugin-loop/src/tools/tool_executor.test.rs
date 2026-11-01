@@ -30,7 +30,7 @@ use symbio_providers::DefaultToolVisitor;
 fn principal_for(role: NodeRole) -> symbio_sdk::chat::principal::Principal {
     use symbio_sdk::chat::principal::Principal;
     match role {
-        NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
         NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         NodeRole::System => Principal::from_legacy("system/local"),
@@ -1112,16 +1112,16 @@ fn gate_ctx(session_id: &str) -> Arc<dyn PluginInvokeRequest> {
 #[test]
 fn external_execution_capability_is_read_from_the_matrix() {
     assert!(
-        symbio_core::production_matrix().can_write_name(
-            symbio_core::PRINCIPAL_MAIN,
-            symbio_core::CAP_EXTERNAL_EXECUTION
+        symbio_sdk::authz::production_matrix().can_write_name(
+            symbio_sdk::authz::PRINCIPAL_MAIN,
+            symbio_sdk::authz::CAP_EXTERNAL_EXECUTION
         ),
         "agent:main 持外部执行能力（本机部署事实）"
     );
     assert!(
-        !symbio_core::production_matrix().can_write_name(
-            symbio_core::PRINCIPAL_USER,
-            symbio_core::CAP_EXTERNAL_EXECUTION
+        !symbio_sdk::authz::production_matrix().can_write_name(
+            symbio_sdk::authz::PRINCIPAL_USER,
+            symbio_sdk::authz::CAP_EXTERNAL_EXECUTION
         ),
         "非 agent 主体不持外部执行能力 ⇒ 判据 false ⇒ Refuse（fail-closed）"
     );
@@ -1153,7 +1153,7 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
                 symbio_kernel::event::Entity::Turn,
                 symbio_kernel::event::Verb::Closed,
                 0,
-                symbio_core::PRINCIPAL_MAIN,
+                symbio_sdk::authz::PRINCIPAL_MAIN,
             )
             .with_cost_ms(LatencyTier::Autonomic.budget_ms() + 1),
         )
@@ -1283,7 +1283,7 @@ async fn the_ledger_comes_from_the_facts_value() {
                 symbio_kernel::event::Entity::Turn,
                 symbio_kernel::event::Verb::Closed,
                 0,
-                symbio_core::PRINCIPAL_MAIN,
+                symbio_sdk::authz::PRINCIPAL_MAIN,
             )
             .with_cost_ms(LatencyTier::Autonomic.budget_ms() + 1),
         )

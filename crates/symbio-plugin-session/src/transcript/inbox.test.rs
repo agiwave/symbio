@@ -21,7 +21,7 @@ use symbio_sdk::chat::session_chat;
 fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
     use symbio_sdk::chat::principal::Principal;
     match role {
-        cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
         cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         cm::NodeRole::System => Principal::from_legacy("system/local"),
@@ -829,7 +829,7 @@ fn suspended_task_leaves_readyset_and_restores() {
 /// 自造矩阵照样绿。表是权威（D-099）。
 #[test]
 fn preemption_decider_row_grants_only_judge_intent() {
-    let grants = symbio_core::production_matrix().grant_names_of(PRINCIPAL_REFLEX);
+    let grants = symbio_sdk::authz::production_matrix().grant_names_of(PRINCIPAL_REFLEX);
     assert_eq!(
         grants,
         vec!["judge.intent".to_string()],
@@ -871,14 +871,14 @@ fn preemption_decider_spec_carries_its_row_and_gates_on_judge_intent() {
 
     // 能力读方：判定者持 judge.intent ⇒ 可落控制事实（`task.held` / `control`）。
     assert!(
-        symbio_core::actor_can_judge_intent(&spec),
+        symbio_sdk::actors::actor_can_judge_intent(&spec),
         "判定者持 judge.intent ⇒ 写侧闸放行"
     );
     // 反向用例：清空能力集 ⇒ 写权拒。判定若绕回授权表，这条会绿（假绿）——它必须红。
     let mut stripped = PreemptionDecider.spec();
     stripped.capabilities.clear();
     assert!(
-        !symbio_core::actor_can_judge_intent(&stripped),
+        !symbio_sdk::actors::actor_can_judge_intent(&stripped),
         "无 judge.intent ⇒ 不得落控制事实（读的是规格自己的集合）"
     );
 }

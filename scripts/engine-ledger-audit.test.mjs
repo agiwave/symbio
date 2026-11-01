@@ -36,7 +36,7 @@ function cleanFiles() {
     [LOOP_ROWS]: rows,
     [DISPATCH]: dispatch + scan.repeat(7),
     [GATES]: scan,
-    [PORT]: `fn g() { let _ = store.range(symbio_core::Seq::new(0)); }\n`.repeat(3),
+    [PORT]: `fn g() { let _ = store.range(symbio_sdk::Seq::new(0)); }\n`.repeat(3),
   }
 }
 
@@ -104,7 +104,7 @@ test('EL-002：多一个 Mutex 字段 ⇒ 红', () => {
 
 test('EL-003：多一处全量读 ⇒ 红（两种写法都算）', () => {
   const files = cleanFiles()
-  files[GATES] += 'fn h() { let _ = store.range(symbio_core::Seq::new(0)); }\n'
+  files[GATES] += 'fn h() { let _ = store.range(symbio_sdk::Seq::new(0)); }\n'
   const box = sandbox(files)
   try {
     const r = run(box.root)

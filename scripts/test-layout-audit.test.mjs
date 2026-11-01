@@ -133,7 +133,7 @@ test('棘轮：往已有内联测试的文件里再加一个测试 → ERROR（�
   assert.match(r.stdout, /测试函数 2 > 基线 1/)
 })
 
-// ★ 旧判据按**模块名**找（`^\s*mod tests\b[^{;]*\{`），因此 `symbio_core/turn.rs`
+// ★ 旧判据按**模块名**找（`^\s*mod tests\b[^{;]*\{`），因此 `symbio_sdk/turn.rs`
 //   那种 `mod tool_call_tests { … }` 里的测试一个都数不到。改按测试函数判之后，
 //   无论模块叫什么名字都会被数到。
 test('测试模块不叫 tests 也要被数到（旧判据漏的就是这条）', () => {

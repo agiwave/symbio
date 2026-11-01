@@ -14,7 +14,7 @@ use symbio_sdk::chat::chat_node::CHAT_STYLE_TAG_REASONING;
 // 「本请求所属会话的主体身份」这个取值点已上移 core（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 1 组）：
 // 它是 core 既有键 `AGENT_ID` 的纯派生函数，不属于任何一个切片，会话驱动器切出去后
 // 读写两侧隔着插件墙都要用。本文件与 `chat_loop` 经这条短路径拿它。
-use symbio_core::request_principal;
+use symbio_sdk::authz::request_principal;
 
 /// 本请求的**来源主体**（[D-067]）：入站消息的出处，`commitment.*` 的 `to`。
 ///
@@ -34,7 +34,7 @@ pub(crate) fn request_source_principal(
     ctx.get(symbio_sdk::keys::SOURCE_PRINCIPAL)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| symbio_core::PRINCIPAL_USER.to_string())
+        .unwrap_or_else(|| symbio_sdk::authz::PRINCIPAL_USER.to_string())
 }
 
 /// 本请求的**主体规格**（`ActorSpec` 的唯一生产构造点，[D-065] 合并批落地）。
@@ -64,9 +64,9 @@ pub(crate) fn request_actor_spec(
     ctx: &dyn symbio_kernel::plugin::PluginInvokeRequest,
     scope: symbio_kernel::actors::Scope,
 ) -> symbio_kernel::actors::ActorSpec {
-    use symbio_core::pattern_for_principal;
     use symbio_kernel::actors::ActorSpec;
     use symbio_kernel::plugin::PluginInvokeRequestExt;
+    use symbio_sdk::actors::pattern_for_principal;
     let principal = request_principal(ctx);
     // 绑定即登记（[D-100]）：登记的主 owner 是**会话创建点**
     // （`session::commands::session_upsert` 的 create 分支）；这里只在
@@ -79,12 +79,12 @@ pub(crate) fn request_actor_spec(
     let session_id = ctx.get(symbio_sdk::keys::SESSION_ID).unwrap_or_default();
     match &scope {
         symbio_kernel::actors::Scope::Child(parent) => {
-            symbio_core::bind_inheriting(&session_id, &principal, parent)
+            symbio_sdk::authz::bind_inheriting(&session_id, &principal, parent)
         }
-        symbio_kernel::actors::Scope::Root => symbio_core::bind_root(&session_id, &principal),
+        symbio_kernel::actors::Scope::Root => symbio_sdk::authz::bind_root(&session_id, &principal),
     }
-    let matrix = symbio_core::production_matrix();
-    // 模式判据住在定义域内（[`symbio_core::pattern_for_principal`]）——
+    let matrix = symbio_sdk::authz::production_matrix();
+    // 模式判据住在定义域内（[`symbio_sdk::actors::pattern_for_principal`]）——
     // 与授权表同源、与主体类型名一起不散出 core 的 actors 域（NDC-001）。
     // 声明档由它派生（`D-223` 订正 2）：模式三值本来就按时延分。
     let pattern = pattern_for_principal(&principal);

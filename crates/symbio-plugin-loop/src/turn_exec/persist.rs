@@ -379,7 +379,7 @@ pub(crate) async fn execute_final_reply_turn(
     // `response` 是 `None`，技能编译因此不写）。**没有工具交换不构成跳过条件**
     // ——记忆是轮级派生，不是工具副产物。
     if !outcome.aborted && !outcome.closure_denied {
-        let principal = symbio_core::request_principal(ctx.as_ref());
+        let principal = symbio_sdk::authz::request_principal(ctx.as_ref());
         let response = (!outcome.fell_back).then_some(reply);
         // 收束贡献（DE-025 D-250）：答话轮同样是一条「用户说了什么、智能体答了什么」
         // 的收束——记忆与学习在这里不该缺席。贡献者按 `SettleFace::Answered` 自行判断

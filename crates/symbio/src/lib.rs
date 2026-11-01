@@ -7,19 +7,18 @@
 //!    这些行由 `scripts/facts/plugin-links-rs.mjs` 从目录投影，**不手改**。
 //! 2. [`assembly`]：装配策略——一棵标准插件树挂哪些插件、哪些插件不许停用。
 //!    它不是机制而是**装配方的数据**（常量由 `PLUGIN.yml` 生成到 `symbio-deploy`），
-//!    故不住 `symbio_core`（core 只经 `REQUIRED_PLUGINS` 接收装配结果）。
+//!    故不住任何架构 crate（装配结果只经 `REQUIRED_PLUGINS` 回流）。
 //! 3. [`init`]：日志初始化与根插件构造。
 //!
-//! `symbio_kernel` / `symbio_sdk` / `symbio_core` / `symbio_deploy` 在这里重导出，供宿主与
-//! CLI 取契约（三层各归各位：语法 / 机制 / 控制面运行时 / 部署事实）；
-//! **插件之间不许经本门面互相可见**（E-009：插件只依赖 core / plugin-api / kernel / deploy）。
+//! `symbio_kernel` / `symbio_sdk` / `symbio_deploy` 在这里重导出，供宿主与 CLI 取契约
+//! （两层各归各位：封闭语法 / 宿主机制与策略 / 部署事实）；
+//! **插件之间不许经本门面互相可见**（E-009：插件只依赖 plugin-api）。
 
 pub mod assembly;
 pub mod init;
 
 // ── 门面出口 ──────────────────────────────────────────────────────────────
-// 宿主与 CLI 从这里取契约；插件自身只依赖 core / plugin-api（E-009）。
-pub use symbio_core;
+// 宿主与 CLI 从这里取契约；插件自身只依赖插件门面（E-009）。
 pub use symbio_deploy;
 pub use symbio_kernel;
 pub use symbio_sdk;

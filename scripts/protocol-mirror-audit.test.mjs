@@ -102,7 +102,7 @@ const CHAT_RS_SRC = [
   '',
   rsStruct('ChatNode', 'id', 'parent_id'),
   '',
-  // H 组：meta.tool_name 的 owner 侧字面（真实仓库住在 `symbio_core/chat/chat_node.rs`）
+  // H 组：meta.tool_name 的 owner 侧字面（真实仓库住在 `symbio_sdk/chat/chat_node.rs`）
   'pub const META_TOOL_NAME: &str = "tool_name";',
 ].join('\n')
 
@@ -983,7 +983,7 @@ test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这�
   const r = mirror({
     [HOME_TS]: HOME_TS_SRC.replace(
       '// Corresponding Backend: crates/symbio-plugin-home/src/schemas.rs',
-      '// Corresponding Backend: crates/symbio-core/src/schemas/home_reload.rs',
+      '// Corresponding Backend: crates/symbio-sdk/src/schemas/home_reload.rs',
     ),
   })
   assert.equal(r.status, 1)

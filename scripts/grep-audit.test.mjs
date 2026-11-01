@@ -161,7 +161,7 @@ test('S-008 waiver requires a reason', () => {
 })
 
 // ── S-009：事件总线 kind 不得用裸字面量 ────────────────────────────────
-// 词表只有 `symbio_core::event_bus::KIND_*` 一套；`kind` 是跨进程字符串，裸字面量
+// 词表只有 `symbio_sdk::event_bus::KIND_*` 一套；`kind` 是跨进程字符串，裸字面量
 // 改名时不会编译失败。本规则拦的正是「发布点写字面量 → 常量无人引用」的**成因**
 // （那正是 R-001 当初报出 `KIND_SESSION` / `KIND_SYSTEM` 的由来）。
 const kindSuspect = `async fn emit() {
@@ -456,7 +456,7 @@ test('S-011 is skipped (not failed) when either file is outside the scope', () =
 // ── S-012: 代码注释里的实施排期指认 ────────────────────────────────────
 // 这类注释没有 owner：「本批未修」的下一批修了，句子就指着已不存在的时间点；
 // 单独的「批 2」在批次重排后无人能解。判据只取两种无歧义形态（待办标记 / 批次号）。
-const S012_FILE = 'crates/symbio-core/src/actors/mod.rs'
+const S012_FILE = 'crates/symbio-sdk/src/actors/mod.rs'
 
 test('S-012 fires on a batch number', () => {
   const r = s010Audit({ [S012_FILE]: '/// 运行器据此停止工具循环（批 2 的恢复前提）。\n' })

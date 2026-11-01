@@ -7,10 +7,10 @@
 
 use super::*;
 use crate::declarations::{EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED as SYSTEM_TRIGGERED};
-use symbio_core::PRINCIPAL_AUTONOMOUS as INITIATOR;
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::store::{EventStore, Store};
 use symbio_kernel::view::Budget;
+use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS as INITIATOR;
 // 任务族的名字由 owner 清单登记、生成物投影（DE-024 D-204 / D-206）。
 use symbio_plugin_api::events::EVENT_TASK_OPENED;
 

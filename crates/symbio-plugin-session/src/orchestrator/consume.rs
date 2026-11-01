@@ -296,7 +296,7 @@ impl TurnLauncher {
                 &session_id,
                 super::super::paths::TRANSCRIPTS_SUBDIR,
             ),
-            principal: symbio_core::request_principal(&*chat_ctx),
+            principal: symbio_sdk::authz::request_principal(&*chat_ctx),
             scope,
             persistent: session.store_handle().is_persistent(),
             context_window: session.context_window(),

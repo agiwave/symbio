@@ -59,7 +59,7 @@ const TS = {
 }
 
 test('失效指认变红：文档指认源码里不存在的符号（exit 1）', () => {
-  const r = audit({ ...RS, 'README.md': '桶名见 `symbio_core::GONE_FN`。\n' })
+  const r = audit({ ...RS, 'README.md': '桶名见 `symbio_sdk::GONE_FN`。\n' })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-005 README\.md:1/)
   assert.match(r.stdout, /GONE_FN/)
@@ -72,7 +72,7 @@ test('整词边界：`register_option` 不因 `register_option_field` 存在而�
 })
 
 test('有效指认通过（exit 0）', () => {
-  const r = audit({ ...RS, 'README.md': '桶名见 `symbio_core::PLUGIN_PAYLOAD_KEY`。\n' })
+  const r = audit({ ...RS, 'README.md': '桶名见 `symbio_sdk::PLUGIN_PAYLOAD_KEY`。\n' })
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /doc-symbol-audit 通过/)
 })
@@ -203,7 +203,7 @@ test('历史行豁免：台账的「判为删除」说的就是这名字不在�
 test('docs/archive/ 整目录排除：归档是历史快照（exit 0）', () => {
   const r = audit({
     ...RS,
-    'docs/archive/old-plan.md': '当时叫 `symbio_core::GONE_FN`。\n',
+    'docs/archive/old-plan.md': '当时叫 `symbio_sdk::GONE_FN`。\n',
     'README.md': '正常文档。\n',
   })
   assert.equal(r.status, 0, r.stdout)
@@ -212,7 +212,7 @@ test('docs/archive/ 整目录排除：归档是历史快照（exit 0）', () => 
 test('排除只认整目录：docs/archive.md 这类同名前缀文件仍受查（exit 1）', () => {
   const r = audit({
     ...RS,
-    'docs/archive.md': '指认 `symbio_core::GONE_FN`。\n',
+    'docs/archive.md': '指认 `symbio_sdk::GONE_FN`。\n',
     'README.md': '正常文档。\n',
   })
   assert.equal(r.status, 1, r.stdout)

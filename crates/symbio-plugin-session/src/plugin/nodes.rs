@@ -420,7 +420,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     if !body.starts_with('{') {
         return Ok(cm::ChatNode {
             principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
-                symbio_core::PRINCIPAL_USER,
+                symbio_sdk::authz::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(raw.to_string())),
@@ -451,7 +451,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     // `principal` 或存量 `role` 的，按它自己声明的形状走。
     if message.principal.is_none() && message.legacy_role().is_none() {
         message.principal = Some(symbio_sdk::chat::principal::Principal::from_legacy(
-            symbio_core::PRINCIPAL_USER,
+            symbio_sdk::authz::PRINCIPAL_USER,
         ));
     }
     message.msg_type.get_or_insert(cm::NodeKind::Body);

@@ -839,7 +839,7 @@ pub(crate) async fn run_batch(
     let mut parent_updates: Vec<ChatNode> = Vec::new();
     // 本会话主体：协议失败兜底建出的 ToolCall 父节点也归它（结果子节点归工具自己）。
     let principal = symbio_sdk::chat::principal::Principal::from_legacy(
-        &symbio_core::request_principal(ctx.as_ref()),
+        &symbio_sdk::authz::request_principal(ctx.as_ref()),
     );
     // 批首读数按本段变量名接线——判据结构只依赖读数，不依赖读数来自哪一段。
     let mode = readings.mode.as_str();

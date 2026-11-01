@@ -19,21 +19,25 @@
 //! - [`view_names`]：`shared_views` 清单生成物（哪些视图公开可读）
 //!
 //! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、机制入口与
-//! 装配常量，逐条转发、逐条可审。按**来源**分三臂（D-255 / D-258）：
+//! 装配常量，逐条转发、逐条可审。按**来源**分两臂（D-255 / D-258 / D-276）：
 //!
 //! | 臂 | 来源 | 条数 | 性质 |
 //! |---|---|---|---|
-//! | 语法臂 | `symbio-kernel` | 134 | 形状与闭集，**不计债** |
-//! | SDK 臂 | `symbio-sdk` | 108 | 只碰内核词汇的宿主机制，**不计债** |
-//! | core 臂 | `symbio-core` | 6 | 还欠着的机制（认识容器概念），条数只许降 |
+//! | 语法臂 | `symbio-kernel` | 136 | 形状与闭集，**不计债但计件**（D-278） |
+//! | SDK 臂 | `symbio-sdk` | 114 | 只碰内核词汇的宿主机制（含授权判定），进棘轮 |
+//!
+//! 第三臂（`symbio-core`，6 条授权符号）已于 D-276 清零：授权判定只查一张部署表，
+//! 不认识轮次 / 幕 / 判决，按 sdk 自己的章程（「插件要用的宿主机制……授权判定」）归位。
+//! 本 crate 的 manifest 因此**不含** `symbio-core`，HS-005 判它不许回头。
 //!
 //! 插件因此只写 `symbio_plugin_api::…`，manifest 里也不列 `symbio-core` /
 //! `symbio-kernel` / `symbio-sdk` / `symbio-deploy`；控制面（`loop` / `session`）
 //! 不在此列，它们按影响类运行、本来就认识宿主的容器概念（D-253）。判据是
-//! `plugin-surface-audit`（HS-001 零直接依赖 / HS-002 core 臂只许降 / HS-003 无空转条目）。
+//! `plugin-surface-audit`（HS-001 零直接依赖 / HS-002 两臂棘轮 / HS-003 无空转条目 /
+//! HS-005 门面不依赖 core / HS-006 语法臂与模块级转发只许不涨）。
 //!
 //! 插件不得依赖宿主 crate（`symbio`）——那会形成「插件 ← 宿主 ← 插件」的环。
-//! `declarations` 只依赖 `symbio_core` 的声明容器，不认识任何具体插件；收集在链接期
+//! `declarations` 只依赖 `symbio-sdk` 的声明容器，不认识任何具体插件；收集在链接期
 //! 发生，因此插件之间仍然零依赖（DE-024 D-198）。
 
 pub mod behaviors;
@@ -201,17 +205,16 @@ pub use symbio_sdk::{
     submit_object_creator,
 };
 
-// ---- core 臂：`symbio-core` 的宿主机制（欠账，只许降） ----
-// 这一臂只剩 `authz` 与 `actors` 两域六条。它们不是「还没搬」，是**判据上该留**：
-// `principal_of` / `production_matrix` 读授权表与义务环算出来的**生效矩阵**，
-// `CAP_DEFINE_WORK` / `CAP_ASSERT_VERIFICATION` 是那张矩阵的能力闭集，
-// `actor_can_assign_work` / `commitment_events` 读 `ActorSpec` 的授权字段与承诺环——
-// 四处都认识容器概念（一个主体此刻能做什么、哪一轮在履约）。
+// ---- 授权判定：机制臂的一部分，单列成账（D-276） ----
+// 这 6 条曾以「认识容器概念」为由留在 `symbio-core`（D-259），门面于是为它们整块依赖
+// 控制面——21 个扩展层插件的编译图里都躺着 grep / ignore / notify（实测多 34 个 crate）。
+// D-276 复核后改判：`principal_of` / `production_matrix` 只查一张**部署表**，`CAP_*` 是那张
+// 表的闭集，`actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——
+// 没有一条认识轮次、幕或判决。而 `symbio-sdk` 的章程本来就写着「授权判定」，欠的是实现。
 //
-// 这一臂是**棘轮**：条数只许降（HS-002）。走到零的前提不是再搬一批，而是把「能力闭集」
-// 从义务环里拆出来（`authz` 4 条卡在这里）；拆不动就留着，HS-005（门面不得依赖 core）
-// 也就不加——见 023 的 D-259。
-pub use symbio_core::{
-    actor_can_assign_work, commitment_events, principal_of, production_matrix,
-    CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK,
+// 这几条与上面的 SDK 臂同源、同一把尺子（HS-002），因此**并入 SDK 基线**：core 臂归零，
+// HS-005（门面 manifest 不得依赖 `symbio-core`）随之成立。
+pub use symbio_sdk::actors::{actor_can_assign_work, commitment_events};
+pub use symbio_sdk::authz::{
+    principal_of, production_matrix, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK,
 };

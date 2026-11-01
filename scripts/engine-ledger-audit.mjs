@@ -21,7 +21,7 @@
  * | `EL-002` | 分发方的出参通道数 | `SessionDispatchPort` 结构体里 `Mutex<` 字段数 |
  * | `EL-003` | 工具路径的全量读点数 | `tool_dispatch` / `gates` / `port` 三处的 `range(…Seq::new(0))` |
  *
- * **第四格（`TurnState` 的字段数）不在这里**：它已有执行方 `core-shape-audit` 的
+ * **第四格（`TurnState` 的字段数）不在这里**：它已有执行方 `arch-shape-audit` 的
  * `CS-010`，再数一遍就是两个基线会各漂各的。
  *
  * ## 为什么是「只许降」而不是「等于」
@@ -100,7 +100,7 @@ function countFullScans() {
   for (const rel of SCAN_FILES) {
     const text = read(rel)
     if (text === null) return null
-    const hits = text.match(/\.range\((?:symbio_core::)?Seq::new\(0\)\)/g)
+    const hits = text.match(/\.range\((?:symbio_sdk::)?Seq::new\(0\)\)/g)
     const n = hits ? hits.length : 0
     perFile.push({ rel, n })
     total += n

@@ -16,7 +16,7 @@
  *   ⑧ SC-005 豁免悬空（登记了而那一行没命中）→ 红；
  *   ⑨ 带理由的豁免 → 绿；**空理由**不算豁免 → 红；
  *   ⑩ 工具名集合读不出来 ⇒ 判据失效，exit 1（不许「读空即全绿」）；
- *   ⑪ SC-006：工具名落在 core / kernel / loop / session 的非测试代码 → 红（不限于比较位置）；
+ *   ⑪ SC-006：工具名落在 sdk / kernel / loop / session 的非测试代码 → 红（不限于比较位置）；
  *   ⑫ SC-006 不误报：前缀 / 后缀变体、`.test.rs` / `tests.rs` / 内联测试模块 → 绿；
  *   ⑬ SC-006 基线：在册且处数相符 → 绿；处数下降而基线不改 → 红（只许降）；
  *      基线缺决策 / 引用不存在的决策 → 红；基线读不出来 → 判据失效；
@@ -77,7 +77,7 @@ function run({
   session = {},
   protocols = {},
   tools = TOOLS_FIXTURE,
-  core = {},
+  sdk = {},
   kernel = {},
   loop = {},
   docs = DOCS_FIXTURE,
@@ -95,13 +95,13 @@ function run({
     write('session', session)
     write('protocols', protocols)
     write('tools', tools)
-    write('core', core)
+    write('sdk', sdk)
     write('kernel', kernel)
     write('loop', loop)
     write('docs', docs)
     const baselineFile = path.join(root, 'tool-names.json')
     if (baseline !== null) fs.writeFileSync(baselineFile, JSON.stringify(baseline))
-    for (const dir of ['session', 'protocols', 'tools', 'core', 'kernel', 'loop', 'docs']) {
+    for (const dir of ['session', 'protocols', 'tools', 'sdk', 'kernel', 'loop', 'docs']) {
       fs.mkdirSync(path.join(root, dir), { recursive: true })
     }
     const result = spawnSync(
@@ -112,7 +112,7 @@ function run({
         `SESSION_ROOT=${path.join(root, 'session')}`,
         `PROTOCOLS_ROOT=${path.join(root, 'protocols')}`,
         `TOOLS_ROOT=${path.join(root, 'tools')}`,
-        `CORE_ROOT=${path.join(root, 'core')}`,
+        `SDK_ROOT=${path.join(root, 'sdk')}`,
         `KERNEL_ROOT=${path.join(root, 'kernel')}`,
         `LOOP_ROOT=${path.join(root, 'loop')}`,
         `DOCS_ROOT=${path.join(root, 'docs')}`,
@@ -186,14 +186,14 @@ test('SC-006 基线与决策都在册 ⇒ 绿（存量占额度）', () => {
 })
 
 test('SC-006：核心树里出现工具名 ⇒ 红（不限于比较位置）', () => {
-  const r = run({ core: { 'lib.rs': 'const DEFAULT_TOOL: &str = "agent_run";\n' } })
+  const r = run({ sdk: { 'lib.rs': 'const DEFAULT_TOOL: &str = "agent_run";\n' } })
   assert.equal(r.status, 1)
   assert.match(r.stderr, /SC-006/)
 })
 
 test('SC-006 不误报：变体名与测试文件', () => {
   const r = run({
-    core: { 'lib.rs': 'const A: &str = "agent_run_v2";\nconst B: &str = "my-agent_run";\n' },
+    sdk: { 'lib.rs': 'const A: &str = "agent_run_v2";\nconst B: &str = "my-agent_run";\n' },
     kernel: {
       'lib.rs': [
         '#[cfg(test)]',
@@ -287,7 +287,7 @@ test('SC-006 豁免：带能打开的决策 ⇒ 绿；缺决策 / 决策不在�
   assert.match(badAdr.stderr, /没有 `### D-999` 条目/)
 
   const dangling = run({
-    core: { 'lib.rs': 'fn f() {}\n// special-case-allow SC-006: D-076 这里早就没有工具名了\n' },
+    sdk: { 'lib.rs': 'fn f() {}\n// special-case-allow SC-006: D-076 这里早就没有工具名了\n' },
   })
   assert.equal(dangling.status, 1)
   assert.match(dangling.stderr, /SC-005/)

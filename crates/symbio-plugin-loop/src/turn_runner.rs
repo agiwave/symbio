@@ -3,7 +3,7 @@
 //! ## 为什么它不在 core
 //!
 //! `core-export-audit` 的 C-003 问的是「**谁依赖它**」，判据是**生产模块数**（测试不算，
-//! 口径见 `scripts/core-surface.mjs`）。本运行器的生产消费方**只有本插件**：core 内除
+//! 口径见 `scripts/fs-walk.mjs`）。本运行器的生产消费方**只有本插件**：core 内除
 //! `actors` 自身外**零使用**——`adapters/mod.rs` / `adapters/provider_adapter.rs` /
 //! `event/mod.rs` 里出现的名字全在**文档注释**里，不是依赖。
 //! 按 `symbio_core/README.md` §4 四问第 1 问「只有一个依赖方 ⇒ 下沉回那个模块」，
@@ -29,7 +29,6 @@
 //! 插件侧**不得**自己补写那两格（否则同轮两份记账的假象会回来）。
 
 use std::borrow::Cow;
-use symbio_core::{actor_can_land_artifact, actor_can_land_speech, visible_to};
 use symbio_kernel::actors::ActorSpec;
 use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
@@ -39,7 +38,10 @@ use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
 };
+use symbio_sdk::actors::actor_can_land_artifact;
+use symbio_sdk::actors::actor_can_land_speech;
 use symbio_sdk::adapters::{AdapterError, FullModel, LlmAdapter, LlmTurn};
+use symbio_sdk::view::visible_to;
 
 // ── 阶段分层 ──────────────────────────────────────
 // 逐步过程按阶段切：准备 → 请求 / 流式 → 工具批 → 轮边界 → 收束。
@@ -1049,7 +1051,7 @@ fn within_delegation_ceiling(actor: &ActorSpec, kind: ClosureKind) -> Result<(),
     let symbio_kernel::actors::Scope::Child(parent) = &actor.scope else {
         return Ok(());
     };
-    let matrix = symbio_core::production_matrix();
+    let matrix = symbio_sdk::authz::production_matrix();
     let granted = match kind {
         ClosureKind::Speech => matrix.can_reply(parent),
         ClosureKind::Artifact => matrix.can_produce_artifact(parent),

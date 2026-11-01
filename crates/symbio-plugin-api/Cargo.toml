@@ -13,7 +13,6 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-core = { path = "../symbio-core" }
 # 装配常量（`PLUGIN_ID_*` / `ASSEMBLY_*`）：生成物、零内部依赖。扩展层插件经本 crate
 # 取用，manifest 里不再单列 `symbio-deploy`——插件 id 是部署契约，不是插件自己的事。
 symbio-deploy = { path = "../symbio-deploy" }

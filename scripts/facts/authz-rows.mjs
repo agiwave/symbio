@@ -1,5 +1,5 @@
 /**
- * 事实 · `crates/symbio-core/src/authz/rows.gen.rs` —— 本机授权表的**行**
+ * 事实 · `crates/symbio-sdk/src/authz/rows.gen.rs` —— 本机授权表的**行**
  *
  * ## 它替掉了什么
  *
@@ -30,7 +30,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pluginIds, readPluginManifest, pluginManifestRel } from "./_plugin-yml.mjs";
 
-const OUT_REL = "crates/symbio-core/src/authz/rows.gen.rs";
+const OUT_REL = "crates/symbio-sdk/src/authz/rows.gen.rs";
 // `PRINCIPAL_*` 常量横跨两处，生成器两处都读、合并成一张表再核对：
 //
 // - `symbio-sdk` 的 `keys` 域：机制层要用的主体名（`session/main` / `person/local` /
@@ -44,10 +44,10 @@ const OUT_REL = "crates/symbio-core/src/authz/rows.gen.rs";
 // `prior` 分支当场抛错（一个主体只能有一个名字）。
 const AUTHZ_MOD_RELS = [
   "crates/symbio-sdk/src/keys/mod.rs",
-  "crates/symbio-core/src/authz/mod.rs",
+  "crates/symbio-sdk/src/authz/mod.rs",
 ];
 const AUTHZ_MOD_REL = AUTHZ_MOD_RELS[0];
-const GOVERNANCE_REL = "crates/symbio-core/src/governance/mod.rs";
+const GOVERNANCE_REL = "crates/symbio-sdk/src/governance/mod.rs";
 
 /** 清单键前缀：`principal_main: session/main|reply+…|thread_private`。 */
 const KEY_PREFIX = "principal_";

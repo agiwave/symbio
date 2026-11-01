@@ -509,7 +509,7 @@ pub(crate) async fn run_classify(
         &**store,
         turn.turn_no,
         turn.user_seq,
-        &symbio_core::request_principal(ctx.as_ref()),
+        &symbio_sdk::authz::request_principal(ctx.as_ref()),
         &[fact],
     )
     .map_err(super::turn_exec::ActorError::Append)?;

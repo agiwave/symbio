@@ -429,15 +429,15 @@ async fn creating_a_session_registers_its_principal_row_and_deleting_it_reclaims
     .into_write()
     .unwrap();
 
-    let principal = symbio_core::principal_of(Some("t182-agent"));
+    let principal = symbio_sdk::authz::principal_of(Some("t182-agent"));
     assert!(
-        symbio_core::production_matrix().can_reply(&principal),
+        symbio_sdk::authz::production_matrix().can_reply(&principal),
         "创建即登记：未部署身份拿到会话面缺省行"
     );
 
     p.delete_session_internal(sid).await.unwrap();
     assert!(
-        symbio_core::production_matrix()
+        symbio_sdk::authz::production_matrix()
             .grants_of(&principal)
             .is_empty(),
         "会话删除 ⇒ 登记行随之回收"
@@ -472,9 +472,9 @@ async fn rewriting_the_agent_identity_replaces_the_session_binding() {
     .into_write()
     .unwrap();
 
-    let old = symbio_core::principal_of(Some("t182-rewrite-old"));
-    let new = symbio_core::principal_of(Some("t182-rewrite-new"));
-    let matrix = symbio_core::production_matrix();
+    let old = symbio_sdk::authz::principal_of(Some("t182-rewrite-old"));
+    let new = symbio_sdk::authz::principal_of(Some("t182-rewrite-new"));
+    let matrix = symbio_sdk::authz::production_matrix();
     assert!(matrix.grants_of(&old).is_empty(), "旧身份的登记随改写撤回");
     assert!(matrix.can_reply(&new), "新身份即时登记，不必等下一轮");
     p.delete_session_internal(sid).await.unwrap();
@@ -511,8 +511,8 @@ async fn a_delegated_child_is_registered_at_creation_and_reclaimed_with_its_pare
     .await
     .unwrap();
 
-    let child_principal = symbio_core::principal_of(Some("t182-child-agent"));
-    let matrix = symbio_core::production_matrix();
+    let child_principal = symbio_sdk::authz::principal_of(Some("t182-child-agent"));
+    let matrix = symbio_sdk::authz::production_matrix();
     assert!(
         !matrix.can_reply(&child_principal),
         "委派取交集：worker 无发言权 ⇒ 子也无"
@@ -524,7 +524,7 @@ async fn a_delegated_child_is_registered_at_creation_and_reclaimed_with_its_pare
 
     p.delete_session_internal(parent).await.unwrap();
     assert!(
-        symbio_core::production_matrix()
+        symbio_sdk::authz::production_matrix()
             .grants_of(&child_principal)
             .is_empty(),
         "父会话删除（子会话一并删除）⇒ 子登记随子树回收"
@@ -900,7 +900,7 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
         .map(|(i, t)| cm::ChatNode {
             id: format!("m{i}"),
             principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
-                symbio_core::PRINCIPAL_USER,
+                symbio_sdk::authz::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text((*t).to_string())),
@@ -936,7 +936,7 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
                 // `turn = 0`：种子是裸数据，不属于任何一轮（与 message_events::append 同约定）。
                 symbio_kernel::event::Verb::Opened,
                 0,
-                symbio_core::PRINCIPAL_USER,
+                symbio_sdk::authz::PRINCIPAL_USER,
             )
             .with_payload(serde_json::json!({ "messages": payload })),
         )
@@ -1005,7 +1005,7 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
             Entity::Turn,
             Verb::Asserted,
             0,
-            symbio_core::PRINCIPAL_USER,
+            symbio_sdk::authz::PRINCIPAL_USER,
         )
         .with_payload(serde_json::json!({ "of": of, "into": into }))
         .with_produced_by(anchor.value()),

@@ -25,9 +25,10 @@ use super::super::plugin::SessionPlugin;
 use crate::conation::conation;
 use crate::declarations::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 use crate::store::EventWalStore;
-use symbio_core::{EffectiveMatrix, PRINCIPAL_AUTONOMOUS};
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::store::Store;
+use symbio_sdk::authz::EffectiveMatrix;
+use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
 use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::chat::session_chat;
 
@@ -253,8 +254,8 @@ impl SessionPlugin {
             }
         };
         // 授权与本体同一把尺：自主主体在 `authz::ROWS` 里只持 `define.work`。
-        let grants = symbio_core::production_matrix();
-        let principal = symbio_core::PRINCIPAL_AUTONOMOUS;
+        let grants = symbio_sdk::authz::production_matrix();
+        let principal = symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
         match IntentGate::approve(&mut candidate, &policy, grants, principal) {
             Ok(approved) => {
                 // E2 的**动作点**：`task.opened` 只从闸门批准过的候选长出来
@@ -503,7 +504,7 @@ impl IntentGate {
         if !policy.enabled {
             return IntentDecision::Rejected("conation disabled");
         }
-        if !grants.can_write_name(principal, symbio_core::CAP_DEFINE_WORK) {
+        if !grants.can_write_name(principal, symbio_sdk::authz::CAP_DEFINE_WORK) {
             return IntentDecision::Rejected("unauthorized: define.work");
         }
         if candidate.goal.len() > policy.max_goal_len {

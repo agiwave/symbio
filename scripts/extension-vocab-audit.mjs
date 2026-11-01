@@ -10,7 +10,7 @@
  * 已经退役的「幕」就是这样重新发给每张能力表的。D-252 的三条整改（端口只收不透明词干、
  * 开关走 `session.config` 事实、类型名去容器词）把存量清干净了；本判据防它长回来。
  *
- * 与 `core-change-audit` / `EX-002` 互补：那两条判**提交的意图面**（这次改动留没留理由、
+ * 与 `arch-change-audit` / `EX-002` 互补：那两条判**提交的意图面**（这次改动留没留理由、
  * 有没有动架构树），本判据判**结果面**——哪怕分十个提交、每个都写了漂亮理由，
  * 只要端口形状上有一格 `turn`，门禁照样红。
  *
@@ -104,7 +104,7 @@ export const EXEMPTIONS = [
     token: 'turn',
     why:
       'D-272：这是 `use symbio_sdk::turn::facts::WorkerProgress;` 一行里的**路径段**，与 lib.rs 的' +
-      ' D-259 豁免同形。过去这个符号经 core 根转发到达（`use symbio_core::WorkerProgress;`），' +
+      ' D-259 豁免同形。过去这个符号经 core 根转发到达（`use symbio_sdk::WorkerProgress;`），' +
       '容器词被转发藏住了；D-272 撤掉根转发、消费方按真实归属直写后，路径段首次显形。' +
       '它仍不是形状——`WorkerProgress` 本身不带容器词；符号归属 `turn` 域是 sdk 的域划分，' +
       '端口形状没有因此认识宿主的容器。',

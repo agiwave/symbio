@@ -1161,7 +1161,7 @@ impl SessionDispatchPort {
 
     /// 本会话主体：节点诞生时写死的主体身份（D-147 档 2）。
     fn principal(&self) -> symbio_sdk::chat::principal::Principal {
-        symbio_sdk::chat::principal::Principal::from_legacy(&symbio_core::request_principal(
+        symbio_sdk::chat::principal::Principal::from_legacy(&symbio_sdk::authz::request_principal(
             self.ctx.as_ref(),
         ))
     }

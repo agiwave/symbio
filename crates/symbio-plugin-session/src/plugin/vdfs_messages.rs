@@ -202,7 +202,7 @@ impl SessionPlugin {
                     (Some(mid), VDFS_ACTION_SWITCH_BRANCH, payload) => {
                         let to = switch_branch_target(payload)?;
                         let host = vdfs_host_ctx(ctx)?;
-                        let actor = symbio_core::request_principal(&*host);
+                        let actor = symbio_sdk::authz::request_principal(&*host);
                         self.switch_branch(id, mid, &to, &actor)
                             .await
                             .map_err(vdfs_from_plugin_error)?;

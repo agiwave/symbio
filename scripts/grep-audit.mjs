@@ -257,13 +257,13 @@ console.log()
 
 // ── S-008: VdfsNode.status 不得用裸字面量 ──────────────────────────────
 //
-// 词表只有一套：`symbio_core::vdfs::VDFS_STATUS_*`（`docs/003-design/009-VDFS规范.md`
+// 词表只有一套：`symbio_sdk::vdfs::VDFS_STATUS_*`（`docs/003-design/009-VDFS规范.md`
 // §3.2）。裸字面量的危险不是拼错（那会立刻看见），而是**改名时不会编译失败**——
 // `status` 是跨进程边界的字符串，改了常量而漏掉字面量，前端只会静默认不出状态。
 //
 // 该词表**曾经**把「以错误结束」从 `error` 改名为 `failed`（理由见
 // `VDFS_STATUS_FAILED` 的文档：与消息层 `NodeStatus::Failed` 同词），而
-// `symbio_core::schemas::options.rs`（**该文件已于 2026-09-23 随会话选项 schema 化
+// `symbio_sdk::schemas::options.rs`（**该文件已于 2026-09-23 随会话选项 schema 化
 // 删除**）里留了一枚 `OPTION_STATUS_ERROR = "error"` 的化石、`mcp` / `skill` /
 // `model` 三个插件各自手写 `"unknown"` / `"active"` / `"disabled"`——共 6 处。
 // 三处都**没有任何测试会因此变红**，故立此规则。
@@ -303,7 +303,7 @@ console.log()
 
 // ── S-009: 事件总线 kind 不得用裸字面量 ────────────────────────────────
 //
-// 词表只有一套：`symbio_core::event_bus::KIND_*`（文档见
+// 词表只有一套：`symbio_sdk::event_bus::KIND_*`（文档见
 // `docs/003-design/005-协议规范.md` §事件总线频道）。与 S-008 同源：`kind` 是
 // **跨进程**字符串，改名不会编译失败，只会让消费方的「按 kind 分派」静默失效。
 //

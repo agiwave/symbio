@@ -97,7 +97,7 @@ const PRINT_BASELINE = argv.includes('--print-baseline')
 /** 控制面（编排层）与机制层（kernel / core）的根 */
 const LOOP = 'crates/symbio-plugin-loop/src'
 const KERNEL = 'crates/symbio-kernel/src'
-const CORE = 'crates/symbio-core/src'
+const CORE = 'crates/symbio-sdk/src'
 const DRIVE_REL = `${LOOP}/turn_exec/drive.rs`
 const ROWS_REL = `${LOOP}/loop_rows.rs`
 const TURN_EXEC_REL = `${LOOP}/turn_exec.rs`

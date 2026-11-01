@@ -4143,7 +4143,6 @@ name = "symbio"
 version = "0.1.14"
 dependencies = [
  "inventory",
- "symbio-core",
  "symbio-deploy",
  "symbio-kernel",
  "symbio-plugin-agent",
@@ -4184,32 +4183,6 @@ dependencies = [
  "symbio",
  "symbio-sdk",
  "tokio",
-]
-
-[[package]]
-name = "symbio-core"
-version = "0.1.14"
-dependencies = [
- "async-trait",
- "dashmap",
- "dirs",
- "glob",
- "grep",
- "ignore",
- "inventory",
- "notify",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "symbio-kernel",
- "symbio-sdk",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -4262,7 +4235,6 @@ dependencies = [
  "inventory",
  "serde",
  "serde_json",
- "symbio-core",
  "symbio-deploy",
  "symbio-kernel",
  "symbio-sdk",
@@ -4309,7 +4281,6 @@ dependencies = [
  "inventory",
  "serde_json",
  "symbio",
- "symbio-core",
  "symbio-plugin-api",
  "symbio-providers",
  "symbio-sdk",
@@ -4439,7 +4410,6 @@ dependencies = [
  "notify",
  "serde",
  "serde_json",
- "symbio-core",
  "symbio-deploy",
  "symbio-kernel",
  "symbio-plugin-api",
@@ -4501,7 +4471,6 @@ dependencies = [
  "reqwest-eventsource",
  "serde",
  "serde_json",
- "symbio-core",
  "symbio-plugin-api",
  "symbio-providers",
  "symbio-sdk",
@@ -4551,7 +4520,6 @@ dependencies = [
  "notify",
  "serde",
  "serde_json",
- "symbio-core",
  "symbio-deploy",
  "symbio-kernel",
  "symbio-plugin-api",
@@ -4679,7 +4647,6 @@ dependencies = [
  "async-trait",
  "indexmap 2.14.2",
  "serde_json",
- "symbio-core",
  "symbio-kernel",
  "symbio-sdk",
  "tempfile",
@@ -4694,7 +4661,6 @@ dependencies = [
  "async-trait",
  "ort",
  "regex",
- "symbio-core",
  "symbio-kernel",
  "symbio-sdk",
  "tempfile",
@@ -4708,7 +4674,6 @@ dependencies = [
 name = "symbio-provider-memory"
 version = "0.1.14"
 dependencies = [
- "symbio-core",
  "symbio-kernel",
  "symbio-sdk",
  "tempfile",
@@ -4725,7 +4690,6 @@ dependencies = [
  "grep",
  "serde",
  "serde_json",
- "symbio-core",
  "symbio-kernel",
  "symbio-sdk",
  "tempfile",
@@ -4740,7 +4704,6 @@ dependencies = [
 name = "symbio-providers"
 version = "0.1.14"
 dependencies = [
- "symbio-core",
  "symbio-provider-collectors",
  "symbio-provider-embedding",
  "symbio-provider-memory",
@@ -4796,7 +4759,6 @@ version = "0.1.14"
 dependencies = [
  "async-trait",
  "serde_json",
- "symbio-core",
  "symbio-kernel",
  "symbio-plugin-api",
  "symbio-sdk",

@@ -13,7 +13,7 @@ fn principal_for(
     use symbio_sdk::chat::principal::Principal;
     match role {
         symbio_sdk::chat::chat_node::NodeRole::User => {
-            Principal::from_legacy(symbio_core::PRINCIPAL_USER)
+            Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER)
         }
         symbio_sdk::chat::chat_node::NodeRole::Assistant => Principal::from_legacy("session/main"),
         symbio_sdk::chat::chat_node::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),

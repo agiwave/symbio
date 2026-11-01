@@ -29,7 +29,7 @@
  *
  * ## 存量（2026-10-20，两处，逐处登记）
  *
- * 1. `symbio_core/adapters/provider_adapter.rs` —— 它就是闸门自己的方法体
+ * 1. `symbio_sdk/adapters/provider_adapter.rs` —— 它就是闸门自己的方法体
  *    （`LlmAdapter::generate` 拿到 `&FullModel` 之后才调它）。记为 `IM-001/gate`：
  *    它**转发调用方的工具集**，这正是 IM-004 允许（且要求）它唯一拥有的形状。
  * 2. `session/context/pipeline.rs::run_compression_llm` —— 压缩摘要（内部请求）。

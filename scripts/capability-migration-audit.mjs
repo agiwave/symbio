@@ -20,7 +20,7 @@
  *
  * 「这次提交是迁移还是补件」是一次提交的**意图**，不是某个文件的属性——同一个
  * 删除行，在迁移批次里是「搬走」，在补件里是「换掉一个不通用的小口子」。这与
- * `core-change-audit` 的 `Core-Change:` 同一种形状：提交者声明类别，判据判声明
+ * `arch-change-audit` 的 `Core-Change:` 同一种形状：提交者声明类别，判据判声明
  * 是否成立。没有声明时宁可漏判，也不猜——猜错的判据会逼人写假声明。
  *
  * ## 两半的分工
@@ -71,7 +71,7 @@ const argv = process.argv.slice(2)
 
 /** 机制面：迁移批次完全不该碰的三棵树（`plugin-api` 也在内——补件才改它）。 */
 export const ARCH_TREES = [
-  'crates/symbio-core',
+  'crates/symbio-sdk',
   'crates/symbio-kernel',
   'crates/symbio-plugin-api',
 ]
@@ -82,7 +82,7 @@ export const CONTROL_TREES = ['crates/symbio-plugin-loop', 'crates/symbio-plugin
 /** 迁移批次的声明：提交正文里一行 `Migration: <批次>`。 */
 export const MIGRATION_RE = /^\s*Migration[:：]\s*(\S.*)$/m
 
-/** `Core-Change:` 段是补件引用的决策号所在处（与 `core-change-audit` 同一格式）。 */
+/** `Core-Change:` 段是补件引用的决策号所在处（与 `arch-change-audit` 同一格式）。 */
 const CORE_CHANGE_RE = /^\s*Core-Change[:：]\s*(.+)$/m
 
 /** 生成物：清单 / 装配的镜像，随能力包增删；它不是机制（D-247）。 */
@@ -347,7 +347,7 @@ export function validateBeforeGuard(entry) {
   return errors
 }
 
-/** `docs/003-design/` 里存在的决策号（与 core-change-audit 同一口径）。 */
+/** `docs/003-design/` 里存在的决策号（与 arch-change-audit 同一口径）。 */
 export function knownDecisions(root) {
   const out = new Set()
   const walk = (dir) => {
@@ -558,6 +558,19 @@ function main() {
   const commits = parseRawCommits(log).filter((c) => forward.has(c.sha))
 
   const bad = []
+  /**
+   * 不追溯名单：`ARCH_TREES` 从 `symbio-core` 扩到 `symbio-sdk` 之后（D-279），
+   * 那三批把域搬进 SDK 的迁移提交会被**按新范围重新判一遍**——它们当年在旧范围下
+   * 通过，而现在「新增的 sdk 文件」看起来像架构补件。
+   *
+   * 判据不追溯历史（`BEFORE_GUARD` 同一条纪律），所以这三条显式列出来，各自写明理由。
+   * 这张表**只增不减地老去**：新提交不许进来，进来就等于「我不打算守这条」。
+   */
+  const GRANDFATHERED = new Map([
+    ['7d2811b9', 'D-258 第一批：7 个域搬进 SDK，新增的是搬来的实现而不是新机制面'],
+    ['09906cbb', 'D-258 第三批：agent / embedding 两域搬迁，同上'],
+    ['72fb57af', 'D-259：turn / projection / invariants 三域下沉，同上'],
+  ])
   let migrations = 0
   let supplements = 0
   for (const c of commits) {
@@ -570,6 +583,7 @@ function main() {
     const r = judgeCommit({ sha: c.sha, message: c.message, patch, decisions, ids, tools })
     if (r.kind === 'migration') migrations += 1
     if (r.kind === 'supplement') supplements += 1
+    if (r.errors.length && GRANDFATHERED.has(r.sha.slice(0, 8))) continue
     if (r.errors.length) bad.push(r)
   }
   if (bad.length) {

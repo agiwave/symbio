@@ -16,11 +16,11 @@
  *
  * | 码 | 名字 | 来源 | 判什么 |
  * |---|---|---|---|
- * | DC-001 | `check_all` 条数 | `symbio_core/invariants/mod.rs` 的函数体 | 活跃文档陈述它有 N 条时，N 必须相等 |
+ * | DC-001 | `check_all` 条数 | `symbio_sdk/invariants/mod.rs` 的函数体 | 活跃文档陈述它有 N 条时，N 必须相等 |
  * | DC-002 | 机制表顶层键数 | `docs/003-design/verify/facts/mod.rs` 的 `MECHANISMS`（M1 的生成物） | 同上 |
  * | DC-003 | §8 登记的键数（含子键） | 同上文件的 `PARAM_KEYS` | 同上 |
  * | DC-004 | 验证程序数 | `docs/003-design/verify/*.rs` 的文件数（门禁 55 阶段逐个编译运行的那批） | 同上 |
- * | DC-005 | 事件网格的行 × 列 | DE-001 §6 的表 vs `symbio_core/event/mod.rs` 的 `Entity` / `Verb` 变体 | 行数 = 实体数、列数 = 动词数 |
+ * | DC-005 | 事件网格的行 × 列 | DE-001 §6 的表 vs `symbio_sdk/event/mod.rs` 的 `Entity` / `Verb` 变体 | 行数 = 实体数、列数 = 动词数 |
  *
  * **DC-004 治的是哪一类漂移**：文档与门禁**读同一批文件**、却各数各的。
  * 一个新程序落进 `verify/` 之后，门禁当天就会跑它，而文档里「N 个验证程序」那句话

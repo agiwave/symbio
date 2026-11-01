@@ -78,7 +78,7 @@ test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-0
 
 test('fingerprints：与输入顺序无关', () => {
   const entries = [
-    f('crates/symbio-core/src/a.rs', '111'),
+    f('crates/symbio-sdk/src/a.rs', '111'),
     f('crates/symbio-kernel/src/b.rs', '222'),
     f('crates/symbio-plugin-loop/src/c.rs', '333'),
   ]
@@ -87,39 +87,39 @@ test('fingerprints：与输入顺序无关', () => {
 
 test('fingerprints：已存在的 *.gen.rs 随清单改，不动指纹', () => {
   const before = [
-    f('crates/symbio-core/src/authz/rows.gen.rs', 'old'),
-    f('crates/symbio-core/src/authz/mod.rs', 'same'),
+    f('crates/symbio-sdk/src/authz/rows.gen.rs', 'old'),
+    f('crates/symbio-sdk/src/authz/mod.rs', 'same'),
   ]
   const after = [
-    f('crates/symbio-core/src/authz/rows.gen.rs', 'new'),
-    f('crates/symbio-core/src/authz/mod.rs', 'same'),
+    f('crates/symbio-sdk/src/authz/rows.gen.rs', 'new'),
+    f('crates/symbio-sdk/src/authz/mod.rs', 'same'),
   ]
   const parent = paths(before)
-  assert.equal(fingerprints(before, parent)['crates/symbio-core'], fingerprints(after, parent)['crates/symbio-core'])
+  assert.equal(fingerprints(before, parent)['crates/symbio-sdk'], fingerprints(after, parent)['crates/symbio-sdk'])
 })
 
 test('fingerprints：新出现的 *.gen.rs 不是生成物镜像，会动指纹', () => {
-  const before = [f('crates/symbio-core/src/domain.rs', 'same')]
+  const before = [f('crates/symbio-sdk/src/domain.rs', 'same')]
   const after = [
-    f('crates/symbio-core/src/domain.rs', 'same'),
-    f('crates/symbio-core/src/agent_helpers.gen.rs', 'fresh'),
+    f('crates/symbio-sdk/src/domain.rs', 'same'),
+    f('crates/symbio-sdk/src/agent_helpers.gen.rs', 'fresh'),
   ]
   const parent = paths(before)
-  assert.notEqual(fingerprints(before, parent)['crates/symbio-core'], fingerprints(after, parent)['crates/symbio-core'])
+  assert.notEqual(fingerprints(before, parent)['crates/symbio-sdk'], fingerprints(after, parent)['crates/symbio-sdk'])
 })
 
 test('fingerprints：一棵树的改动不串到另一棵', () => {
   const before = [
-    f('crates/symbio-core/src/a.rs', '1'),
+    f('crates/symbio-sdk/src/a.rs', '1'),
     f('crates/symbio-plugin-loop/src/b.rs', '2'),
   ]
   const after = [
-    f('crates/symbio-core/src/a.rs', '9'),
+    f('crates/symbio-sdk/src/a.rs', '9'),
     f('crates/symbio-plugin-loop/src/b.rs', '2'),
   ]
   const b = fingerprints(before, paths(before))
   const a = fingerprints(after, paths(before))
-  assert.notEqual(a['crates/symbio-core'], b['crates/symbio-core'])
+  assert.notEqual(a['crates/symbio-sdk'], b['crates/symbio-sdk'])
   assert.equal(a['crates/symbio-plugin-loop'], b['crates/symbio-plugin-loop'])
 })
 
@@ -143,12 +143,12 @@ test('judgeNewCapability：新增能力包夹带 loop 分支 ⇒ 红且点名 lo
   assert.match(r.errors[0], /crates\/symbio-plugin-loop/)
 })
 
-test('judgeNewCapability：新增能力包改 core ⇒ 红', () => {
+test('judgeNewCapability：新增能力包改 SDK ⇒ 红（core 已并入 SDK，D-279）', () => {
   const before = Object.fromEntries(TREES.map((t) => [t, 'h']))
-  const after = { ...before, 'crates/symbio-core': 'changed' }
+  const after = { ...before, 'crates/symbio-sdk': 'changed' }
   const r = judgeNewCapability({ sha: 'x', added: ['crates/symbio-plugin-new/PLUGIN.yml'], before, after })
   assert.equal(r.errors.length, 1)
-  assert.match(r.errors[0], /crates\/symbio-core/)
+  assert.match(r.errors[0], /crates\/symbio-sdk/)
 })
 
 test('judgeNewCapability：指纹读不出 ⇒ 红（判据没有输入）', () => {

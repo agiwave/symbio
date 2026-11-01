@@ -102,7 +102,7 @@ test('只有 docs 改动 ⇒ 命中 docs、不命中 rust/e2e/scripts', () => {
 test('crates 下的清单与源码归 rust；tauri 前端源归 frontend', () => {
   const root = repoWith()
   commit(root, {
-    'crates/symbio-core/src/lib.rs': 'pub fn a() {}\n',
+    'crates/symbio-sdk/src/lib.rs': 'pub fn a() {}\n',
     'crates/symbio-plugin-memory/PLUGIN.yml': 'id: memory\n',
     'tauri/src/App.vue': '<template/>\n',
   })
@@ -114,7 +114,7 @@ test('crates 下的清单与源码归 rust；tauri 前端源归 frontend', () =>
 
 test('crates 下的 README 只算 docs，不许把整个 cargo 链拽起来', () => {
   const root = repoWith()
-  commit(root, { 'crates/symbio-core/README.md': '# x\n' })
+  commit(root, { 'crates/symbio-sdk/README.md': '# x\n' })
   const scope = resolveScope({ repoRoot: root, base: 'origin/v2' })
   assert.equal(scope.hits(['rust']), false)
   assert.equal(scope.hits(['docs']), true)

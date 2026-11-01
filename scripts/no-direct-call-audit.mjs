@@ -7,8 +7,8 @@
  *
  * 主体到主体的**直接调用**前提是**持有对方的句柄**。本扫描禁止两种形态：
  *
- *   - NDC-001：主体类型名出现在其定义域（`symbio_core/actors`）、根重导出
- *     （`symbio_core/mod.rs`）或**测试文件**（`*.test.rs`——测试是排演驱动方，
+ *   - NDC-001：主体类型名出现在其定义域（`symbio_sdk/actors`）、根重导出
+ *     （`symbio_sdk/mod.rs`）或**测试文件**（`*.test.rs`——测试是排演驱动方，
  *     组装主体 + Store 正是 彩排的受认可形态，不是运行时路径）之外。
  *     注释不计（文档提到名字 ≠ 对象图边）。运行时代码能拿到主体 ⇒ 持有即可直连。
  *   - NDC-002：**任何文件**（含定义域与测试）都禁止 `Arc<P>` / `Rc<P>` /
@@ -42,12 +42,12 @@ const repoRoot = path.resolve(scriptDir, '..')
 const PRINCIPALS = ['Decider', 'Reasoner', 'RecallTranslator', 'CommitmentKeeper']
 
 /**
- * 定义域 = 整个 `symbio_core/actors` 模块树（不只是 `mod.rs`）：主体类型在**该域内**
+ * 定义域 = 整个 `symbio_sdk/actors` 模块树（不只是 `mod.rs`）：主体类型在**该域内**
  * 被定义与驱动是合法的（持有即可直连的风险只在该域**之外**）。按**目录**判而不是逐
  * 文件列举——域内按顶层类型拆文件不该顺带把定义域收窄成一张会漂的
  * 清单（那正是本守卫最该防的：域内新增一个主体文件就被误报成 NDC-001）。
  */
-const DEFINITION_DIR = 'symbio-core/src/actors/'
+const DEFINITION_DIRS = ['symbio-sdk/src/actors/']
 /**
  * 另外两处合法出口：
  *  - core 根重导出（crate 化后是 `lib.rs`，不再是 `mod.rs`）；
@@ -55,7 +55,7 @@ const DEFINITION_DIR = 'symbio-core/src/actors/'
  *    变体**声明**，不是对主体类型的指称（D-189 同一条理由，只是那处剥的是
  *    `Pattern::Decider` 的用法形态，枚举体本身剥不掉）。它随 D-188 C2b 住在内核。
  */
-const ALLOWED_FILES = new Set(['symbio-core/src/lib.rs', 'symbio-kernel/src/actors.rs'])
+const ALLOWED_FILES = new Set(['symbio-sdk/src/lib.rs', 'symbio-sdk/src/actors/mod.rs', 'symbio-kernel/src/actors.rs'])
 
 /** 主体句柄形态（任何文件都禁止——含定义域内部；泛型与 `::new` 构造两种写法都拦）。 */
 const HANDLE_RE = new RegExp(
@@ -89,7 +89,7 @@ function audit(root) {
     const text = fs.readFileSync(file, 'utf8')
     const lines = text.split('\n')
     const allowed =
-      ALLOWED_FILES.has(rel) || rel.startsWith(DEFINITION_DIR) || rel.endsWith('.test.rs')
+      ALLOWED_FILES.has(rel) || DEFINITION_DIRS.some((d) => rel.startsWith(d)) || rel.endsWith('.test.rs')
     lines.forEach((line, i) => {
       // 剥注释：文档提到主体名 ≠ 对象图边。
       const code = line.split('//')[0]

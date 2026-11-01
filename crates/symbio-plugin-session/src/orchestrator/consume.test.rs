@@ -16,7 +16,7 @@ use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
     use symbio_sdk::chat::principal::Principal;
     match role {
-        cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
         cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         cm::NodeRole::System => Principal::from_legacy("system/local"),
@@ -52,7 +52,7 @@ fn seed_user_message(dir: &std::path::Path) {
             symbio_kernel::event::Entity::Turn,
             symbio_kernel::event::Verb::Opened,
             1,
-            symbio_core::PRINCIPAL_USER,
+            symbio_sdk::authz::PRINCIPAL_USER,
         )
         .with_payload(serde_json::json!({ "text": "第一问", "id": "u-open" })),
     )

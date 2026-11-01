@@ -82,7 +82,7 @@ fn patched_user(id: &str, text: &str) -> ChatNode {
     ChatNode {
         id: id.into(),
         principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
-            symbio_core::PRINCIPAL_USER,
+            symbio_sdk::authz::PRINCIPAL_USER,
         )),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
@@ -781,7 +781,7 @@ fn only_a_user_message_is_attributed_to_the_user() {
             &patched_msg(
                 "u-1",
                 "改过的问题",
-                Some(symbio_core::PRINCIPAL_USER),
+                Some(symbio_sdk::authz::PRINCIPAL_USER),
                 1_600,
             ),
         ),

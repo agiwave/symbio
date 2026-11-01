@@ -34,9 +34,9 @@
 //! [`refuse`] 骨架，并显式声明自己的失败语义（[`Refusal::blocked`]）。
 
 use super::*;
-use symbio_core::PRINCIPAL_REFLEX;
 use symbio_kernel::event::{Entity, Verb};
 use symbio_plugin_api::effects::{BeforeReadings, BeforeRefusal};
+use symbio_sdk::authz::PRINCIPAL_REFLEX;
 
 /// 批首一次读齐的全部闸门读数（批首一次读齐；逐条执行与未执行收口只按值消费，不再回读事实源）。
 pub(crate) struct GateReadings {
@@ -75,7 +75,7 @@ pub(crate) struct GateReadings {
 /// 与 `request_principal` 同源：判断与落笔因此指向同一个主体，不会出现「按 A 判、
 /// 以 B 记」的两套主体。
 pub(crate) fn batch_principal(ctx: &Arc<dyn PluginInvokeRequest>) -> String {
-    symbio_core::principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref())
+    symbio_sdk::authz::principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref())
 }
 
 /// 上下文里**本批之外**已出现过的工具调用签名（按出现顺序）。

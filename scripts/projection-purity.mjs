@@ -12,12 +12,12 @@
  * | PP-001 | 产投影文件不得 `use` 导入**同根产投影的兄弟**（不含 `Projection::new` 的共享读侧——`mutations` / `rebuild` / `turns` / `prompt_fidelity` / `tiers`——谁都可以导） | 投影 A 读投影 B 的输出（L2，DE-001 §13.2）：视图叠视图，外壳 `degraded` / 预算语义在层间静默丢失 |
  * | PP-002 | 折叠目录里的生产文件禁 `SystemTime::now` / `rand::` / `static mut` / `std::time::Instant` | 隐式全局依赖：时钟、随机数、全局可变状态——确定性（N1）的口径外漏洞 |
  * | PP-003 | 每个 `pub fn X(..) -> Projection<` 构造器必须有**折叠目录之外**的生产消费方，或同文件里一行 `// projection-purity-allow <X>: 非空理由` | 死构造器：抽了纯函数视图却没有调用方——「为将来准备」的投机抽象（本仓只认消费方定的契约） |
- * | PP-004 | core 投影面的两格存量——**产投影文件数**与**投影构造器数**——只许降；放宽要按 PP-005 在本脚本旁留一条挂得住的决策 | **投影长回 core**：能力折叠一旦住在 `symbio_core/projection/`，「加一个能力」就又成了改架构模块。下沉判据是消费方分布（只有一个 owner 在读 ⇒ 归那个 owner），而这条把「又长回来」变成机器可判的红（[DE-025](../docs/003-design/025-能力包与扩展面.md "DE-025-能力包与扩展面") D-221） |
+ * | PP-004 | core 投影面的两格存量——**产投影文件数**与**投影构造器数**——只许降；放宽要按 PP-005 在本脚本旁留一条挂得住的决策 | **投影长回 core**：能力折叠一旦住在 `symbio_sdk/projection/`，「加一个能力」就又成了改架构模块。下沉判据是消费方分布（只有一个 owner 在读 ⇒ 归那个 owner），而这条把「又长回来」变成机器可判的红（[DE-025](../docs/003-design/025-能力包与扩展面.md "DE-025-能力包与扩展面") D-221） |
  * | PP-005 | 上面两格的放宽注释 `// projection-purity-allow <格>: D-NNN <非空理由>` 里的 `D-NNN` 必须在设计文档里有 `### D-NNN` 锚点 | 「改一个数字」看起来像维护：注释写得再像理由，指向不存在的决策就不算豁免（与 CS-002 同一条判据形状） |
  *
  * ## 判定面：折叠搬到哪儿，判据跟到哪儿
  *
- * PP-001 / PP-002 / PP-003 扫的是**所有折叠根**：`crates/symbio-core/src/projection/`
+ * PP-001 / PP-002 / PP-003 扫的是**所有折叠根**：`crates/symbio-sdk/src/projection/`
  * 加上每个 crate 的 `src/projections/`（D-221 把只被一个 owner 读的折叠交还 owner 之后，
  * 判据不能跟着目录一起留下——否则「迁出 core」顺部就变成「逃出纯净性判定」）。
  * PP-004 只判 **core 那一根**：它是横向扩展的棘轮，不是「仓库里一共有几条折叠」。
@@ -59,7 +59,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, dim, yellow } from './color.mjs'
 import { hasDecisionAnchor as anchorExists } from './decision-anchors.mjs'
-import { isTestFile, walk } from './core-surface.mjs'
+import { isTestFile, walk } from './fs-walk.mjs'
 import { blankComments } from './rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -68,7 +68,7 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(scriptDir, '..')
 
-const PROJ_REL = 'crates/symbio-core/src/projection'
+const PROJ_REL = 'crates/symbio-sdk/src/projection'
 const PROJ_DIR = path.join(ROOT, PROJ_REL)
 
 const IMPURITY_TOKENS = [
@@ -266,7 +266,7 @@ for (const [key, cap] of Object.entries(PROJ_BASELINE)) {
   if (now > cap) {
     fail(
       `PP-004 ${PROJ_CELL_LABEL[key]}变宽：实测 ${now} > 基线 ${cap} —— ` +
-        `能力折叠住进 \`symbio_core/projection/\` 就等于「加一个能力要改架构模块」（DE-025 D-221）。` +
+        `能力折叠住进 \`symbio_sdk/projection/\` 就等于「加一个能力要改架构模块」（DE-025 D-221）。` +
         '唯一合法的路径按序走：① 数它有几个 crate 在读——只有一个 owner 在读就**下沉给那个 owner**' +
         '（先例：checkpoint / fallback / slo / span / changes 归 session，consolidate 归 loop）；' +
         '② 别的插件想读 owner 的折叠，走 `symbio_plugin_api::views` 的按名字读口 + ' +

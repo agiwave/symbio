@@ -47,7 +47,7 @@ fn seed_turn(
                 Entity::Turn,
                 Verb::Opened,
                 turn,
-                symbio_core::PRINCIPAL_USER,
+                symbio_sdk::authz::PRINCIPAL_USER,
             )
             .with_payload(serde_json::json!({ "text": text, "tier": "deep" })),
         )
@@ -96,7 +96,7 @@ impl symbio_plugin_api::ToolBehavior for PromiseStub {
             return Vec::new();
         };
         let cid = format!("v2c-{}-{}", call.anchor, call.call_id);
-        symbio_core::commitment_events(
+        symbio_sdk::actors::commitment_events(
             COMMITMENT_VOCAB,
             &cid,
             call.principal,
@@ -132,8 +132,13 @@ fn delegation(id: &str, promise: &str, ok: bool, why: &str) -> EffectInput {
 #[test]
 fn settled_delegation_becomes_commitment_opened_then_released() {
     let store = EventStore::new();
-    let (snapshot, user_seq) =
-        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
     let effects = [delegation("call-1", "让 reviewer 复查这段", true, "")];
     record_derived(
         "derived-test",
@@ -141,8 +146,8 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_MAIN,
-        symbio_core::PRINCIPAL_USER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
         &[],
     );
@@ -177,12 +182,12 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     );
     assert_eq!(
         opened.payload.get("from").and_then(|v| v.as_str()),
-        Some(symbio_core::PRINCIPAL_MAIN),
+        Some(symbio_sdk::authz::PRINCIPAL_MAIN),
         "承诺方 = 会话主体（声誉记在承诺方头上）"
     );
     assert_eq!(
         opened.payload.get("to").and_then(|v| v.as_str()),
-        Some(symbio_core::PRINCIPAL_USER),
+        Some(symbio_sdk::authz::PRINCIPAL_USER),
         "承诺对象 = 会话外的另一方"
     );
     assert_eq!(
@@ -205,8 +210,13 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
 #[test]
 fn the_commitment_counterparty_is_data_not_a_constant() {
     let store = EventStore::new();
-    let (snapshot, user_seq) =
-        seed_turn(&store, symbio_core::PRINCIPAL_PEER, 0, "对等主体跑一轮", 50);
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        symbio_sdk::authz::PRINCIPAL_PEER,
+        0,
+        "对等主体跑一轮",
+        50,
+    );
     let effects = [delegation("call-peer-1", "把结果交给主智能体", true, "")];
     record_derived(
         "derived-test",
@@ -214,8 +224,8 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_PEER,
-        symbio_core::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_PEER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
         &effects,
         &[],
     );
@@ -233,12 +243,12 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
         .expect("立约格");
     assert_eq!(
         opened.payload.get("from").and_then(|v| v.as_str()),
-        Some(symbio_core::PRINCIPAL_PEER),
+        Some(symbio_sdk::authz::PRINCIPAL_PEER),
         "承诺方 = 跑轮的主体（对等体）"
     );
     assert_eq!(
         opened.payload.get("to").and_then(|v| v.as_str()),
-        Some(symbio_core::PRINCIPAL_MAIN),
+        Some(symbio_sdk::authz::PRINCIPAL_MAIN),
         "承诺对象 = 来源主体（传入的数据，不是写死的常量）"
     );
 }
@@ -248,8 +258,13 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
 #[test]
 fn breached_delegation_is_declared_to_the_counterparty() {
     let store = EventStore::new();
-    let (snapshot, user_seq) =
-        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
     let effects = [delegation(
         "call-2",
         "让 reviewer 复查这段",
@@ -262,8 +277,8 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_MAIN,
-        symbio_core::PRINCIPAL_USER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
         &[],
     );
@@ -296,7 +311,8 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         .and_then(|v| v.as_str())
         .expect("宣告载荷带原话");
     assert!(
-        statement.contains(symbio_core::PRINCIPAL_USER) && statement.contains("子会话中途失败"),
+        statement.contains(symbio_sdk::authz::PRINCIPAL_USER)
+            && statement.contains("子会话中途失败"),
         "宣告 = 把这次违约告知承诺对象：{statement}"
     );
     assert_eq!(
@@ -316,15 +332,21 @@ fn breached_delegation_is_declared_to_the_counterparty() {
 fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
     // ── 有理由：落格 ────────────────────────────────────────────────────
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "让它跑一遍", 7);
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        0,
+        "让它跑一遍",
+        7,
+    );
     record_derived(
         "derived-test",
         &store,
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_MAIN,
-        symbio_core::PRINCIPAL_USER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_USER,
         &[],
         &["budget-exhausted"],
     );
@@ -352,15 +374,15 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
 
     // ── 没理由（`Refuse` 或未触发）：一格都不落 ────────────────────────
     let quiet = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(&quiet, symbio_core::PRINCIPAL_MAIN, 0, "问", 1);
+    let (snapshot, user_seq) = seed_turn(&quiet, symbio_sdk::authz::PRINCIPAL_MAIN, 0, "问", 1);
     record_derived(
         "derived-test",
         &quiet,
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_MAIN,
-        symbio_core::PRINCIPAL_USER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_USER,
         &[],
         &[],
     );
@@ -393,7 +415,7 @@ fn seed_episodic_encoded(
                 Entity::Memory,
                 Verb::Opened,
                 turn,
-                symbio_core::PRINCIPAL_USER,
+                symbio_sdk::authz::PRINCIPAL_USER,
             )
             .with_produced_by(user_seq)
             .with_payload(serde_json::json!({
@@ -422,7 +444,7 @@ fn record_learning_wires_consolidation() {
     for i in 0..4u64 {
         let (_, user_seq) = seed_turn(
             &store,
-            symbio_core::PRINCIPAL_MAIN,
+            symbio_sdk::authz::PRINCIPAL_MAIN,
             i,
             &format!("第 {i} 条约定"),
             i,
@@ -477,8 +499,13 @@ fn record_learning_wires_consolidation() {
 #[test]
 fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
     let store = EventStore::new();
-    let (snapshot, user_seq) =
-        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
     let effects = [delegation(
         "call-1",
         "让 reviewer 复查这段",
@@ -491,8 +518,8 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_MAIN,
-        symbio_core::PRINCIPAL_USER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
         &[],
     );
@@ -514,7 +541,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
     assert_eq!(verdict.verb, Verb::Asserted);
     assert_eq!(
         verdict.actor,
-        symbio_core::PRINCIPAL_ARBITER,
+        symbio_sdk::authz::PRINCIPAL_ARBITER,
         "裁决者是仲裁者，不是被淘汰主体"
     );
     assert_eq!(
@@ -523,7 +550,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
         "裁决同锚在本轮开口（I2）"
     );
     let p = &verdict.payload;
-    assert_eq!(p["subject"], symbio_core::PRINCIPAL_MAIN);
+    assert_eq!(p["subject"], symbio_sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(p["capability"], "assign.work");
     assert_eq!(p["change"], "revoke");
     assert_eq!(p["score"], -1, "判据值随事件落盘，审计方看得见");
@@ -534,8 +561,13 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
 #[test]
 fn a_kept_delegation_never_eliminates() {
     let store = EventStore::new();
-    let (snapshot, user_seq) =
-        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
     let effects = [delegation("call-1", "让 reviewer 复查这段", true, "")];
     record_derived(
         "derived-test",
@@ -543,8 +575,8 @@ fn a_kept_delegation_never_eliminates() {
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_MAIN,
-        symbio_core::PRINCIPAL_USER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
         &[],
     );
@@ -566,8 +598,13 @@ fn a_kept_delegation_never_eliminates() {
 #[test]
 fn elimination_does_not_write_a_second_verdict() {
     let store = EventStore::new();
-    let (snapshot, user_seq) =
-        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
     let effects = [delegation(
         "call-1",
         "让 reviewer 复查这段",
@@ -580,8 +617,8 @@ fn elimination_does_not_write_a_second_verdict() {
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_MAIN,
-        symbio_core::PRINCIPAL_USER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
         &[],
     );
@@ -604,8 +641,13 @@ fn elimination_does_not_write_a_second_verdict() {
 #[test]
 fn a_principal_without_assign_work_is_never_eliminated() {
     let store = EventStore::new();
-    let (snapshot, user_seq) =
-        seed_turn(&store, symbio_core::PRINCIPAL_PEER, 0, "对等主体跑一轮", 50);
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        symbio_sdk::authz::PRINCIPAL_PEER,
+        0,
+        "对等主体跑一轮",
+        50,
+    );
     let effects = [delegation(
         "call-peer-1",
         "把结果交给主智能体",
@@ -618,8 +660,8 @@ fn a_principal_without_assign_work_is_never_eliminated() {
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_PEER,
-        symbio_core::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_PEER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
         &effects,
         &[],
     );
@@ -670,8 +712,13 @@ fn commitment_failure_does_not_block_the_breaker() {
     }
 
     let store = EventStore::new();
-    let (snapshot, user_seq) =
-        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
     let refusing = CommitmentsRefuse(store);
 
     record_derived(
@@ -680,8 +727,8 @@ fn commitment_failure_does_not_block_the_breaker() {
         &snapshot,
         0,
         user_seq,
-        symbio_core::PRINCIPAL_MAIN,
-        symbio_core::PRINCIPAL_USER,
+        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_sdk::authz::PRINCIPAL_USER,
         &[delegation("call-1", "让 reviewer 复查这段", true, "")],
         &["成本超预算"],
     );

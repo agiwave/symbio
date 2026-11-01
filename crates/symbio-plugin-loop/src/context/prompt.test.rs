@@ -9,7 +9,7 @@ use super::*;
 fn principal_for(role: NodeRole) -> symbio_sdk::chat::principal::Principal {
     use symbio_sdk::chat::principal::Principal;
     match role {
-        NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
         NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         NodeRole::System => Principal::from_legacy("system/local"),

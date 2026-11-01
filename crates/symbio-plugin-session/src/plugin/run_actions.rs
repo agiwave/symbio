@@ -497,10 +497,10 @@ async fn run_elimination_revoked(
     // （D-086 §4：全量事件过墙是「值注入」的反面）。
     let fleet = session.store_handle().deep_snapshots();
     let events: Vec<_> = fleet.into_iter().flatten().collect();
-    let overlay = symbio_core::GrantsOverlay::fold(
-        symbio_core::EliminationDecider::verdict_grants_changes(&events),
+    let overlay = symbio_sdk::governance::GrantsOverlay::fold(
+        symbio_sdk::actors::EliminationDecider::verdict_grants_changes(&events),
     );
-    let revoked = overlay.is_revoked(&dispatch.spec.principal, symbio_core::CAP_ASSIGN_WORK);
+    let revoked = overlay.is_revoked(&dispatch.spec.principal, symbio_sdk::authz::CAP_ASSIGN_WORK);
     action_data(op, format!("assign.work 已收回：{revoked}"), revoked)
 }
 

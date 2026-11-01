@@ -37,7 +37,7 @@ import {
 const script = fileURLToPath(new URL('./capability-migration-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(path.dirname(script), '..')
 
-const CORE = 'crates/symbio-core/src/a.rs'
+const CORE = 'crates/symbio-sdk/src/a.rs'
 const LOOP = 'crates/symbio-plugin-loop/src/loop_rows.rs'
 const SESSION = 'crates/symbio-plugin-session/src/lib.rs'
 
@@ -117,7 +117,7 @@ test('generatedPaths：描述符声明的输出都在清单里（含不带 .gen.
     'crates/symbio-plugin-api/src/view_names.rs',
     'crates/symbio-plugin-api/src/events.rs',
     'crates/symbio-plugin-api/src/routes.rs',
-    'crates/symbio-core/src/authz/rows.gen.rs',
+    'crates/symbio-sdk/src/authz/rows.gen.rs',
   ]) {
     assert.ok(g.has(p), `生成物清单漏了 ${p}`)
   }
@@ -130,7 +130,7 @@ test('generatedPaths：读不出目录时返回空集，不报错也不假装有
 test('isCapabilitySource：测试与生成物都不算可迁移源码', () => {
   assert.equal(isCapabilitySource(LOOP), true)
   assert.equal(isCapabilitySource('crates/symbio-plugin-loop/src/loop_rows.test.rs'), false)
-  assert.equal(isCapabilitySource('crates/symbio-core/src/authz/rows.gen.rs'), false)
+  assert.equal(isCapabilitySource('crates/symbio-sdk/src/authz/rows.gen.rs'), false)
   assert.equal(isCapabilitySource('crates/symbio-plugin-api/src/view_names.rs'), false)
   assert.equal(isCapabilitySource('crates/symbio-plugin-api/src/context.rs'), true)
 })
@@ -173,13 +173,13 @@ test('migrationErrors：只搬 session 的实现也判得动', () => {
   assert.deepEqual(mig([{ path: SESSION, added: [], removed: ['fn old() {}'] }]), [])
 })
 
-test('migrationErrors：迁移提交改 core ⇒ EX-007 红并点名 core', () => {
+test('migrationErrors：迁移提交改 SDK 机制面 ⇒ EX-007 红并点名 sdk（D-279 后 core 已并入）', () => {
   const [e] = mig([
     { path: CORE, added: ['pub fn helper() {}'], removed: [] },
     { path: LOOP, added: [], removed: ['row!("memory")'] },
   ])
   assert.match(e, /EX-007/)
-  assert.match(e, /crates\/symbio-core/)
+  assert.match(e, /crates\/symbio-sdk/)
 })
 
 test('migrationErrors：控制面新增的行带能力名 ⇒ EX-007 红（两份可实现）', () => {
@@ -227,7 +227,7 @@ test('migrationErrors：迁移中改测试与 .gen.rs 不判（断言与镜像�
   assert.deepEqual(
     mig([
       { path: 'crates/symbio-plugin-loop/src/loop_rows.test.rs', added: ['#[test]'], removed: [] },
-      { path: 'crates/symbio-core/src/authz/rows.gen.rs', added: ['X', 'Y'], removed: ['Z'] },
+      { path: 'crates/symbio-sdk/src/authz/rows.gen.rs', added: ['X', 'Y'], removed: ['Z'] },
       { path: LOOP, added: [], removed: ['row!("memory")'] },
     ]),
     [],

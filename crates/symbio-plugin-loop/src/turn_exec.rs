@@ -1141,7 +1141,7 @@ pub(crate) fn run_report<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let head = take_head(ctx)?;
         let turn_no = head.turn.turn_no;
-        let principal = symbio_core::request_principal(head.request_ctx.as_ref());
+        let principal = symbio_sdk::authz::request_principal(head.request_ctx.as_ref());
         let facts = ctx.store.range(Seq::new(0));
         let Some(view) = super::loop_rows::view("report_due", &facts, turn_no, head.turn.now_ms)
         else {
@@ -1455,7 +1455,7 @@ pub(crate) fn land_inputs(
         store,
         turn.turn_no,
         turn.user_seq,
-        &symbio_core::request_principal(ctx),
+        &symbio_sdk::authz::request_principal(ctx),
         &[super::stage_events::StageFact::inputs(
             turn.request_round,
             turn.drive_seq,
@@ -1488,7 +1488,7 @@ pub(crate) fn land_retry_branch(
                 Entity::Turn,
                 Verb::Asserted,
                 turn.turn_no,
-                symbio_core::request_principal(ctx),
+                symbio_sdk::authz::request_principal(ctx),
             )
             .with_payload(serde_json::json!({ "of": of, "into": root_id }))
             .with_produced_by(turn.user_seq),

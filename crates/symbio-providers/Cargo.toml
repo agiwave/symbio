@@ -13,7 +13,6 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-core = { path = "../symbio-core" }
 symbio-provider-collectors = { path = "../symbio-provider-collectors" }
 symbio-provider-embedding = { path = "../symbio-provider-embedding", optional = true }
 symbio-provider-memory = { path = "../symbio-provider-memory" }

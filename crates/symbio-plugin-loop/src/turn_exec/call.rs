@@ -272,7 +272,7 @@ pub(crate) fn supplement_into_request(
         // 沿用第一条补充的 id（见 `DrainedSupplement::id` 的说明）
         id: drained.id.clone(),
         principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
-            symbio_core::PRINCIPAL_USER,
+            symbio_sdk::authz::PRINCIPAL_USER,
         )),
         content: Some(MessageContent::Text(text.clone())),
         meta: Some(serde_json::json!({

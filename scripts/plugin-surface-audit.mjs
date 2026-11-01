@@ -18,6 +18,8 @@
  * | HS-002 | 门面白名单条数超过基线（只许降） | 加一条要配一条决策理由，并同步上调基线 |
  * | HS-003 | 门面白名单里有符号在**扩展层插件代码里零引用** | 删掉它——白名单的每一条都要报得出消费方（与 C-003 同一把尺子）；报不出的就是空转条目 |
  * | HS-004 | 插件胶水层 `symbio-providers` 把**嵌入臂**设成默认开启（`default = ["embedding"]` 或依赖不是 `optional`） | 那一条 `default = []` 是有意的：`ort` / `tokenizers` 带来 55 个传递依赖（168 → 113），而插件侧只有 `local` 一个消费者。要开就在宿主与需要它的插件那里显式开（D-254） |
+ * | HS-005 | 门面自己的 `[dependencies]` 里有 `symbio-core` | 门面只依赖 kernel + sdk + deploy。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
+ * | HS-006 | 语法臂条数 > 基线，或模块级转发条数 > 基线 | 两格都「只许不涨」：语法臂不计债但计件；模块转发一行换 N 条，要显式（D-278） |
  *
  * ## 为什么按插件身份分档，而不是一刀切
  *
@@ -27,7 +29,7 @@
  *
  * ## 失效形态
  *
- * ① **剥注释写漏** ⇒ 文档里那句「见 `symbio_core::vdfs::address`」被判红，天天误报的
+ * ① **剥注释写漏** ⇒ 文档里那句「见 `symbio_sdk::vdfs::address`」被判红，天天误报的
  * 守卫最后只会被豁免喂死（复用 `extension-vocab-audit` 的 `stripRustCode`，只认代码）；
  * ② **控制面名单写成通配**（`symbio-plugin-*`）⇒ 判据变成空转，谁都能进来；
  * ③ **白名单基线写成大数** ⇒ 只进不出，机制退化成装饰。三者各由回归测试钉住。
@@ -38,7 +40,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns HS 扩展层插件宿主面
-// @codes HS-001 HS-002 HS-003 HS-004
+// @codes HS-001 HS-002 HS-003 HS-004 HS-005 HS-006
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -55,8 +57,8 @@ export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-loop', 'symbio
 /** 扩展层插件不得直接依赖的三个 crate（manifest 键名）。 */
 export const FORBIDDEN_MANIFEST = ['symbio-core', 'symbio-kernel', 'symbio-sdk', 'symbio-deploy']
 
-/** 源码里不得出现的三个前缀。 */
-export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_sdk::', 'symbio_deploy::']
+/** 源码里不得出现的三个前缀（`symbio_core::` 随 crate 一起消失，D-279）。 */
+export const FORBIDDEN_PREFIXES = ['symbio_sdk::', 'symbio_kernel::', 'symbio_deploy::']
 
 /**
  * 机制臂条数基线：**只降不升**（HS-002）。实测低于它时打提示要求同步下调。
@@ -75,11 +77,13 @@ export const FORBIDDEN_PREFIXES = ['symbio_core::', 'symbio_kernel::', 'symbio_s
  * 它们一条不少地留在门面上，只是改从 `symbio_sdk` / `symbio_kernel` 取（HS-003 照旧
  * 逐条核消费方）。
  *
- * 剩的 6 条全在 `authz`（4）与 `actors`（2）——它们读授权表 / 履约环算出来的生效矩阵，
- * 认识「此刻这个主体能做什么」。**这 6 条不是待还的进度条，是判据上的边界**：搬完它们
- * 要么得把能力闭集从义务环里拆出来，要么就得让 SDK 认识容器概念，那条路比欠账更贵。
+ * 剩的 6 条曾在 `authz`（4）与 `actors`（2），理由是「它们认识此刻这个主体能做什么」。
+ * **D-276 复核后改判 0**：`principal_of` / `production_matrix` 只查一张部署表，`CAP_*` 是
+ * 那张表的闭集，`actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——
+ * 没有一条认识轮次、幕或判决。它们随 `governance` / `authz` / `view` / `actors` 的
+ * spec+commitment 一起进 `symbio-sdk`，门面从此不依赖 `symbio-core`（HS-005）。
  */
-export const WHITELIST_BASELINE = 6
+export const WHITELIST_BASELINE = 0
 
 /**
  * SDK 臂（机制面）的基线：**这一臂同样进棘轮**（D-269 第 3 条）。
@@ -92,7 +96,27 @@ export const WHITELIST_BASELINE = 6
  * 准入（D-269 §5.1 的两条判据）：与容器概念无关 ∧ ≥2 条能力要用。一条能力撑不起
  * 一次架构改动——要加一条就把理由写成决策，并同步上调本基线。
  */
-export const SDK_BASELINE = 110
+export const SDK_BASELINE = 114
+
+/**
+ * 语法臂基线：**只许不涨**（D-278）。
+ *
+ * 这一臂长期「不计债」——理由是内核本来就有的共享类型不增加机制面。理由成立，但它顺带
+ * 让 136 条（门面里最大的一臂）成了唯一没有任何数字约束的通道：加一条语法符号不需要过
+ * 任何棘轮。不计**债**与不计**数**是两件事，后者改起来一分钱不花。
+ */
+export const GRAMMAR_BASELINE = 136
+
+/**
+ * 模块级转发的基线：**只许不涨**（D-278）。
+ *
+ * 白名单里有一类条目指向的不是一条符号，而是一个**子模块**（`chat_node` / `ring` /
+ * `principal` / `family`）：一行放出的是一整个命名空间，而 HS-003 只按名字核消费方
+ * （`symbio_plugin_api::chat_node::…` 用到的那些名字根本不在白名单的任何一行里）。
+ * 这不是要禁掉模块转发——同族符号整块给出是合理的——而是要它**显式**：一行换 N 条，
+ * 得在账上有数，不能是排版事故。
+ */
+export const MODULE_REEXPORT_BASELINE = 6
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
@@ -131,6 +155,14 @@ export function heavyArmViolations(toml) {
   return errors
 }
 
+/**
+ * 机制臂的块锚点。**这个块在本仓已经不存在**，而且不该再存在（D-276 清零、D-279 连 crate
+ * 一起删掉）。保留这条锚点的作用是让读法保持诚实：如果哪天有人重新写出
+ * `pub use symbio_core::{…}`，`readWhitelist` 会读到它并按 HS-002 与 0 比较 ⇒ 立刻红。
+ *
+ * ⚠️ 不要把它「顺手改成 `symbio_sdk`」——SDK 臂有自己的正则（`SDK_RE`），拿块锚点去撞它
+ * 会把 114 条 SDK 臂当成机制臂来审，基线 0 当场炸。这个坑真被踩过一次。
+ */
 const BLOCK_START = 'pub use symbio_core::{'
 const BLOCK_END = '};'
 /** 语法臂：可能有多块（按 kernel 子模块分组），因此按正则全量取。 */
@@ -167,7 +199,8 @@ export function readWhitelist(root) {
   if (!fs.existsSync(p)) return null
   const src = fs.readFileSync(p, 'utf8')
   const i = src.indexOf(BLOCK_START)
-  if (i < 0) return null
+  // 块不存在 = 机制臂已经归零（D-276），不是「读不出」：返回空清单，让 HS-002 判 0/0。
+  if (i < 0) return []
   const j = src.indexOf(BLOCK_END, i)
   if (j < 0) return null
   return splitSymbols(src.slice(i + BLOCK_START.length, j))
@@ -234,6 +267,38 @@ export function collectConsumers(root, pluginNames) {
     }
   }
   return used
+}
+
+/**
+ * 门面里**指向子模块**的条目（D-278）。
+ *
+ * 判法是「看文件」而不是「看名字」：对 `pub use <crate>::<父路径>::<名字>;`，去
+ * `<crate>/src/<父路径>/<名字>.rs` 或 `<父路径>/<名字>/mod.rs` 找那个模块。名字撞车是常态
+ * （`projection::transcript` 是模块，`transcript::transcript` 是函数），按名字猜会把函数
+ * 误判成模块，判据就变成噪音。
+ */
+export function collectModuleReexports(root) {
+  const out = new Set()
+  const crates = {
+    symbio_kernel: path.join(root, 'crates', 'symbio-kernel', 'src'),
+    symbio_sdk: path.join(root, 'crates', 'symbio-sdk', 'src'),
+  }
+  const src = fs.readFileSync(path.join(root, FACADE), 'utf8')
+  const isMod = (base, segs, name) => {
+    const dir = path.join(base, ...segs)
+    return fs.existsSync(path.join(dir, name + '.rs')) || fs.existsSync(path.join(dir, name, 'mod.rs'))
+  }
+  for (const m of src.matchAll(/pub use (symbio_kernel|symbio_sdk)::([A-Za-z0-9_:]+)::\{([^}]*)\};/g)) {
+    const base = crates[m[1]]
+    const segs = m[2].split('::')
+    for (const raw of splitSymbols(m[3])) if (isMod(base, segs, raw)) out.add(raw)
+  }
+  for (const m of src.matchAll(/pub use (symbio_kernel|symbio_sdk)::([A-Za-z0-9_:]+)::([A-Za-z0-9_]+);/g)) {
+    const base = crates[m[1]]
+    const segs = m[2].split('::')
+    if (isMod(base, segs, m[3])) out.add(m[3])
+  }
+  return out
 }
 
 function walkRs(dir, out = []) {  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -325,6 +390,22 @@ export function run(root) {
     )
   }
 
+  // 语法臂与模块级转发：两条零代价通道，同一把尺子（D-278）。
+  if (gram.length > GRAMMAR_BASELINE) {
+    errors.push(
+      `门面语法臂 ${gram.length} 条 > 基线 ${GRAMMAR_BASELINE}——HS-006 只许不涨（D-278）：` +
+        '语法臂不计债，但计件；新增一条要写成决策并同步上调 `GRAMMAR_BASELINE`',
+    )
+  }
+  const moduleEntries = [...collectModuleReexports(root)]
+  if (moduleEntries.length > MODULE_REEXPORT_BASELINE) {
+    errors.push(
+      `门面模块级转发 ${moduleEntries.length} 条 > 基线 ${MODULE_REEXPORT_BASELINE}——HS-006 (D-278)：` +
+        `\`${moduleEntries.join('\` / \`')}\` 各自放出一整个子模块，一行换 N 条；` +
+        '要加就把「为什么整块给」写成决策并同步上调基线',
+    )
+  }
+
   const used = collectConsumers(root, plugins.filter((p) => !CONTROL_PLANE.includes(p)))
   // 两臂都判：语法臂不计债，但同样不许有空转条目——它也是门面对插件的承诺。
   for (const s of [...wl, ...gram, ...sdk]) {
@@ -335,6 +416,19 @@ export function run(root) {
     )
   }
 
+  // HS-005：门面自己不得依赖 `symbio-core`（D-276）。机制臂归零之后，这一条把「下次再为
+  // 一条控制面符号整块依赖实现层」的路堵死——否则 21 个插件的编译图会重新背上控制面。
+  const facadeManifest = path.join(root, 'crates', 'symbio-plugin-api', 'Cargo.toml')
+  if (fs.existsSync(facadeManifest)) {
+    const toml = fs.readFileSync(facadeManifest, 'utf8')
+    if (manifestViolations(toml).includes('symbio-core')) {
+      errors.push(
+        'crates/symbio-plugin-api/Cargo.toml  [dependencies] 里有 `symbio-core`——HS-005 (D-276)：' +
+          '门面只依赖 kernel + sdk + deploy；要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口',
+      )
+    }
+  }
+
   // HS-004：插件胶水层的重臂默认必须是关的。文件不存在 ⇒ 这个仓没有那层胶水，无此风险。
   const heavyP = path.join(root, HEAVY_ARM.manifest)
   const heavy = fs.existsSync(heavyP) ? heavyArmViolations(fs.readFileSync(heavyP, 'utf8')) : []
@@ -342,7 +436,7 @@ export function run(root) {
 
   if (errors.length) {
     for (const e of errors) console.log(`${red('[ERROR]')} ${e}`)
-    console.log(`\n扩展层宿主面：${errors.length} 处违规（HS-001 / HS-002 / HS-004）`)
+    console.log(`\n扩展层宿主面：${errors.length} 处违规（HS-001 / HS-002 / HS-004 / HS-005）`)
     return 1
   }
 
@@ -368,7 +462,8 @@ export function run(root) {
         `没有 \`symbio_core\` / \`symbio-kernel\` / \`symbio-sdk\` / \`symbio-deploy\`（控制面 ${CONTROL_PLANE.length} 个豁免：` +
         `${CONTROL_PLANE.join(' / ')}）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}）` +
         `+ SDK 臂 ${ns} 条（基线 ${SDK_BASELINE}，D-269 起同进棘轮）` +
-        `· 语法臂 ${gram.length} 条不计债 ` +
+        `· 语法臂 ${gram.length} 条（基线 ${GRAMMAR_BASELINE}，不计债但计件）` +
+        `· 模块级转发 ${moduleEntries.length} 条（基线 ${MODULE_REEXPORT_BASELINE}）` +
         `· HS-003 每条都有扩展层消费方（0 空转）· HS-004 胶水层重臂默认关闭（${HEAVY_ARM.feature}）`,
     ),
   )

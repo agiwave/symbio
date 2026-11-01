@@ -230,9 +230,11 @@ async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
 
 use crate::declarations::EVENT_CONATION_EXPRESSED;
 use crate::declarations::EVENT_SYSTEM_TRIGGERED;
-use symbio_core::{PRINCIPAL_AUTONOMOUS, PRINCIPAL_USER, PRINCIPAL_WORKER};
 use symbio_kernel::store::EventStore;
 use symbio_plugin_api::events::EVENT_TASK_PROGRESS;
+use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
+use symbio_sdk::authz::PRINCIPAL_USER;
+use symbio_sdk::authz::PRINCIPAL_WORKER;
 use symbio_sdk::invariants::budget_exceeded;
 
 /// 事实源里先放一格：触发是"从当时的状态出发"的，必须先有可指的锚。
@@ -369,7 +371,7 @@ fn conation_governance_three_rules() {
 
     // (c) 关停开关：enabled=false → 评估拒绝，无自主任务；但读侧照常工作。
     let policy_off = ConationPolicy::default();
-    let grants = symbio_core::production_matrix();
+    let grants = symbio_sdk::authz::production_matrix();
     assert_eq!(
         IntentGate::evaluate(&candidate, &policy_off, grants, PRINCIPAL_AUTONOMOUS),
         IntentDecision::Rejected("conation disabled")

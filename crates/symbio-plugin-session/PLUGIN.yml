@@ -8,7 +8,7 @@ plugin_order: 30
 shared_events: message.added, message.edited, message.removed, session.consolidated, turn.branch_selected
 
 # 授权行：`<主体>|<能力名 + 连接>|<可见域>`（scripts/facts/authz-rows.mjs 读取 →
-# crates/symbio-core/src/authz/rows.gen.rs）。能力名的闭集住 governance::Capability。
+# crates/symbio-sdk/src/authz/rows.gen.rs）。能力名的闭集住 governance::Capability。
 # 本插件声明的十个会话主体：主智能体 5 项；其余九行都是**比主智能体窄**的记录
 # （窄行是唯一入口，D-099：未登记主体不派生任何能力）。
 principal_main: session/main|judge.intent+reply+define.work+produce.artifact+assign.work|thread_private

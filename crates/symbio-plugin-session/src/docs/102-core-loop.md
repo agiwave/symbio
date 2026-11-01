@@ -424,7 +424,7 @@ await-tools     72  批次收尾：产物格 / 等待进展格 / 交换累加 / 
 
 **这里数的是请求，不是工具轮。** `TurnState` 上那一格叫 `request_round`（本轮已发出的 LLM 请求数，
 续写时才 +1）；工具轮数从**已落事实**折出：本幕带非空 `calls` 的 `response(port=model)` 条数
-（[`report_due`](../../../symbio-core/src/decl/mod.rs) v6 的 `tool_rounds`，与 `Prepared` 里的活计数器
+（[`report_due`](../../../symbio-kernel/src/decl/mod.rs) v6 的 `tool_rounds`，与 `Prepared` 里的活计数器
 `tool_round` 同一个读数——前者的写方就是模型应答本身）。静默时长与配额同样由
 `report_due` 算出，四格一起构成汇报行的 `due`。**按工具轮写的判据在这一层恒假**，而这类旋钮的默认值恰好也是「不限制」——
 恒假与没配长得一样，没有信号能区分（裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
@@ -641,7 +641,7 @@ CLI / 前端客户端）；执行期走 `ExecEventSink` 进程内直连，与之
 ### 9.1 形状：`ExecEnv` 具名化
 
 数据面统一之后，**签名**也统一：新增
-[`ExecEnv { sink, abort }`](../../../symbio-core/src/exec/mod.rs)——「一次带中止的流式执行」
+[`ExecEnv { sink, abort }`](../../../symbio-kernel/src/exec/mod.rs)——「一次带中止的流式执行」
 的**出 / 入两个方向**，两处共用：
 
 ```text

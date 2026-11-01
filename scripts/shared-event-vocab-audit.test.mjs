@@ -46,7 +46,7 @@ const KERNEL_GRID = `pub const CELLS: &[EventDecl] = &[
 /** owner 插件：清单登记 + 自家 `EventDecl`。 */
 const OWNER = {
   'crates/symbio-plugin-loop/PLUGIN.yml': 'id: loop\nshared_events: memory.encoded\n',
-  'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_core::{Entity, EventDecl, Verb};
+  'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, Verb};
 pub const EVENTS: &[EventDecl] = &[
     EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
 ];
@@ -138,8 +138,8 @@ test('④ 一条名字两个 owner ⇒ 非 0：owner 唯一是这条正道的前
   const r = audit(
     clean({
       'crates/symbio-plugin-session/PLUGIN.yml': 'id: session\nshared_events: memory.encoded\n',
-      'crates/symbio-plugin-session/src/stats.rs': `pub const EVENTS: &[symbio_core::EventDecl] = &[
-    symbio_core::EventDecl::new("memory.encoded", (symbio_core::Entity::Memory, symbio_core::Verb::Opened)),
+      'crates/symbio-plugin-session/src/stats.rs': `pub const EVENTS: &[symbio_sdk::EventDecl] = &[
+    symbio_sdk::EventDecl::new("memory.encoded", (symbio_sdk::Entity::Memory, symbio_sdk::Verb::Opened)),
 ];
 `,
     }),

@@ -3,15 +3,17 @@
  *
  * 一个只会亮绿灯的守卫等于没有守卫。逐条注入真实违规并断言脚本变红：
  *   ① 干净夹具 → exit 0（扩展层插件只写门面）；
- *   ② 源码里出现 `symbio_core::Event` → exit 1 —— 绕过门面直接取宿主面；
- *   ③ 只在注释里提 `symbio_core::vdfs::address` → exit 0 —— 判代码不判措辞；
+ *   ② 源码里出现 `symbio_sdk::Event` → exit 1 —— 绕过门面直接取宿主面；
+ *   ③ 只在注释里提 `symbio_sdk::vdfs::address` → exit 0 —— 判代码不判措辞；
  *   ④ manifest 的 `[dependencies]` 里有 `symbio-core` → exit 1；
  *   ⑤ `[dev-dependencies]` 里有 `symbio-core` → exit 0（测试设施不是运行时面）；
  *   ⑥ 控制面 `symbio-plugin-loop` 直接依赖 core → exit 0 —— 影响类分档（DE-026）；
  *   ⑦ 门面白名单条数超过基线 → exit 1 —— 只许降（HS-002）；
  *   ⑧ 范围读不出（缺 `crates/`）→ exit 2；
  *   ⑨ 门面里有一条扩展层零引用的符号 → exit 1 —— 白名单不许有空转条目（HS-003）；
- *   ⑩ 胶水层的嵌入臂被设为默认 → exit 1，⑪ 不是 `optional` → exit 1 —— 重臂默认必须关（HS-004，D-254）。
+ *   ⑩ 胶水层的嵌入臂被设为默认 → exit 1，⑪ 不是 `optional` → exit 1 —— 重臂默认必须关（HS-004，D-254）；
+ *   ⑬ 门面自己的 manifest 依赖 `symbio-core` → exit 1 —— 机制臂归零之后把回头路堵死（HS-005，D-276）；
+ *   ⑭ 门面模块级转发条数超过基线 → exit 1 —— 一行换 N 条也得在账上有数（HS-006，D-278）。
  *
  * 用法：node --test scripts/plugin-surface-audit.test.mjs
  */
@@ -29,6 +31,7 @@ import {
   manifestViolations,
   readGrammar,
   readWhitelist,
+  MODULE_REEXPORT_BASELINE,
   SDK_BASELINE,
   WHITELIST_BASELINE,
 } from './plugin-surface-audit.mjs'
@@ -96,7 +99,7 @@ function runOn(root) {
 test('① 干净夹具通过', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event, Plugin};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
   })
   try {
     const r = runOn(root)
@@ -109,13 +112,13 @@ test('① 干净夹具通过', () => {
 
 test('② 源码直取 core ⇒ 红', () => {
   const root = fixture({
-    'symbio-plugin-fix': { rs: 'use symbio_core::Event;\npub fn f(_: Event) {}\n' },
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event};\n' },
+    'symbio-plugin-fix': { rs: 'use symbio_sdk::Event;\npub fn f(_: Event) {}\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
     assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /symbio_core::/)
+    assert.match(r.stdout, /symbio_sdk::/)
     assert.match(r.stdout, /HS-001/)
   } finally {
     rmTree(root)
@@ -125,9 +128,9 @@ test('② 源码直取 core ⇒ 红', () => {
 test('③ 只在注释里提 core ⇒ 绿（判代码不判措辞）', () => {
   const root = fixture({
     'symbio-plugin-fix': {
-      rs: '//! 见 `symbio_core::vdfs::address` 的改写规则。\n/// 同上：symbio_kernel::actors。\nuse symbio_plugin_api::Event;\n',
+      rs: '//! 见 `symbio_sdk::vdfs::address` 的改写规则。\n/// 同上：symbio_kernel::actors。\nuse symbio_plugin_api::Event;\n',
     },
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
@@ -145,7 +148,7 @@ test('④ manifest 的 [dependencies] 有 core ⇒ 红', () => {
         'symbio-plugin-api = { path = "../symbio-plugin-api" }\nsymbio-core = { path = "../symbio-core" }',
       ),
     },
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
@@ -161,7 +164,7 @@ test('⑤ dev-dependencies 里的 core 不判', () => {
     'symbio-plugin-fix': {
       manifest: `${CLEAN_MANIFEST}\n[dev-dependencies]\nsymbio-core = { path = "../symbio-core" }\n`,
     },
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
@@ -174,12 +177,12 @@ test('⑤ dev-dependencies 里的 core 不判', () => {
 test('⑥ 控制面插件直接依赖 core ⇒ 绿', () => {
   const root = fixture({
     'symbio-plugin-loop': {
-      rs: 'use symbio_core::Event;\npub fn f(_: Event) {}\n',
+      rs: 'use symbio_sdk::Event;\npub fn f(_: Event) {}\n',
       manifest: CLEAN_MANIFEST.replace('symbio-plugin-fix', 'symbio-plugin-loop'),
     },
     // 门面里那条 `Event` 必须有扩展层消费方，否则 HS-003 反过来判它空转
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
@@ -194,7 +197,7 @@ test('⑦ 白名单超基线 ⇒ 红（HS-002 只许降）', () => {
   const many = Array.from({ length: WHITELIST_BASELINE + 5 }, (_, i) => `S${i}`)
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: `pub use symbio_core::{\n    ${many.join(', ')},\n};\n` },
+    'symbio-plugin-api': { rs: `pub use symbio_sdk::{\n    ${many.join(', ')},\n};\n` },
   })
   try {
     const r = runOn(root)
@@ -215,7 +218,7 @@ test('⑦b SDK 臂超基线 ⇒ 红（D-269：机制面同进棘轮）', () => {
         ' pub fn ev(e: symbio_plugin_api::Event) { let _ = e; }',
     },
     'symbio-plugin-api': {
-      rs: `pub use symbio_core::{Event}; pub use symbio_sdk::{ ${many.join(', ')} };`,
+      rs: `pub use symbio_sdk::{ ${many.join(', ')} };`,
     },
   })
   try {
@@ -236,7 +239,7 @@ test('⑦c SDK 臂恰好等于基线 ⇒ 绿（棘轮不动就没事）', () => 
         ' pub fn ev(e: symbio_plugin_api::Event) { let _ = e; }',
     },
     'symbio-plugin-api': {
-      rs: `pub use symbio_core::{Event}; pub use symbio_sdk::{ ${many.join(', ')} };`,
+      rs: `pub use symbio_sdk::{ ${many.join(', ')} };`,
     },
   })
   try {
@@ -250,7 +253,7 @@ test('⑦c SDK 臂恰好等于基线 ⇒ 绿（棘轮不动就没事）', () => 
 test('⑨ 白名单里的空转条目 ⇒ 红（HS-003）', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event, Ghost};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Ghost};\n' },
   })
   try {
     const r = runOn(root)
@@ -275,7 +278,7 @@ test('⑧ 范围读不出 ⇒ exit 2', () => {
 test('⑩ 胶水层把嵌入臂设为默认 ⇒ 红（HS-004）', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event, Plugin};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
     'symbio-providers': { manifest: PROVIDERS_OK.replace('default = []', 'default = ["embedding"]') },
   })
   try {
@@ -291,7 +294,7 @@ test('⑩ 胶水层把嵌入臂设为默认 ⇒ 红（HS-004）', () => {
 test('⑪ 嵌入臂不是 optional ⇒ 红（HS-004）', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event, Plugin};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
     'symbio-providers': { manifest: PROVIDERS_OK.replace(', optional = true', '') },
   })
   try {
@@ -307,13 +310,54 @@ test('⑪ 嵌入臂不是 optional ⇒ 红（HS-004）', () => {
 test('⑫ 嵌入臂默认关闭 ⇒ 绿（HS-004 的正例）', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{Event, Plugin};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
     'symbio-providers': { manifest: PROVIDERS_OK },
   })
   try {
     const r = runOn(root)
     assert.equal(r.status, 0, r.stdout + r.stderr)
     assert.match(r.stdout, /HS-004/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑬ 门面 manifest 依赖 symbio-core ⇒ 红（HS-005，D-276）', () => {
+  const root = fixture({
+    'symbio-plugin-fix': {},
+    'symbio-plugin-api': {
+      rs: 'pub use symbio_sdk::{Event, Plugin};\n',
+      manifest: CLEAN_MANIFEST + 'symbio-core = { path = "../symbio-core" }\n',
+    },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /HS-005/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑭ 门面模块级转发超过基线 ⇒ 红（HS-006，D-278）', () => {
+  const mods = Array.from({ length: MODULE_REEXPORT_BASELINE + 1 }, (_, i) => `M${i}`)
+  const root = fixture({
+    'symbio-plugin-fix': {
+      rs: mods.map((m) => `pub fn u_${m}() { symbio_plugin_api::${m}::x(); }`).join('\n'),
+    },
+    'symbio-plugin-api': {
+      rs: mods.map((m) => `pub use symbio_sdk::ns::${m};`).join('\n') + '\n',
+    },
+  })
+  // 造出真模块文件：判据看文件不看名字
+  const nsDir = path.join(root, 'crates', 'symbio-sdk', 'src', 'ns')
+  fs.mkdirSync(nsDir, { recursive: true })
+  for (const m of mods) fs.writeFileSync(path.join(nsDir, m + '.rs'), 'pub fn x() {}\n')
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /HS-006/)
+    assert.match(r.stdout, /模块级转发/)
   } finally {
     rmTree(root)
   }
@@ -327,12 +371,36 @@ test('manifestViolations 只认 [dependencies] 段内的禁用键', () => {
   )
 })
 
-test('readWhitelist 解析门面块', () => {
-  const root = fixture({ 'symbio-plugin-api': { rs: 'pub use symbio_core::{\n    A, B,\n    C,\n};\n' } })
+test('readWhitelist 只认机制臂那一个块锚点', () => {
+  // ① 锚点块还在（历史形状）⇒ 逐条读出。这一断言必须走**解析**分支，不能被
+  //    `i < 0 → []` 的早退蒙混过关——否则「读不出」与「已经归零」在测试里长得一模一样，
+  //    正是 D-280 记的空转绿形状（夹具消失，判据扫 0 条，报绿）。
+  const old = fixture({
+    'symbio-plugin-api': { rs: 'pub use symbio_core::{\n    A, B,\n    C,\n};\n' },
+  })
   try {
-    assert.deepEqual(readWhitelist(root), ['A', 'B', 'C'])
+    assert.deepEqual(readWhitelist(old), ['A', 'B', 'C'])
   } finally {
-    rmTree(root)
+    rmTree(old)
+  }
+
+  // ② 只有 SDK 臂 ⇒ 机制臂归零，返回空清单而不是把 SDK 臂顶上来（D-276 / D-279）。
+  //    这正是踩过的坑：块锚点被「顺手改成 symbio_sdk」，114 条 SDK 臂当场被当机制臂审。
+  const sdkOnly = fixture({
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{\n    PluginDir,\n};\n' },
+  })
+  try {
+    assert.deepEqual(readWhitelist(sdkOnly), [])
+  } finally {
+    rmTree(sdkOnly)
+  }
+
+  // ③ 门面文件不存在 ⇒ `null`（读不出），与 ② 的空清单分得开：前者是范围缺失，后者是归零。
+  const empty = fixture({})
+  try {
+    assert.equal(readWhitelist(empty), null)
+  } finally {
+    rmTree(empty)
   }
 })
 
@@ -342,13 +410,14 @@ test('readGrammar 收齐多个 kernel 分块，且 `as` 取别名', () => {
       rs:
         'pub use symbio_kernel::{\n    Event,\n    Seq,\n};\n' +
         'pub use symbio_kernel::vdfs::{\n    VdfsError,\n    unavailable_reason as vdfs_unavailable_reason,\n};\n' +
-        'pub use symbio_core::{\n    PluginDir,\n};\n',
+        'pub use symbio_sdk::{\n    PluginDir,\n};\n',
     },
   })
   try {
     // 语法臂按来源分块，读的时候必须全收——只读第一块会让多半语法臂逃过 HS-003。
     assert.deepEqual(readGrammar(root), ['Event', 'Seq', 'VdfsError', 'vdfs_unavailable_reason'])
-    assert.deepEqual(readWhitelist(root), ['PluginDir'])
+    // 机制臂块（`symbio_core::`）在夹具里不存在 ⇒ 空清单，不是「读不出」
+    assert.deepEqual(readWhitelist(root), [])
   } finally {
     rmTree(root)
   }

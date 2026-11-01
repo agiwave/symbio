@@ -310,7 +310,7 @@ pub(crate) async fn prepare_request_sections(
             lines: &live_lines,
         });
     let query = last_user_text(context);
-    let principal = symbio_core::request_principal(ctx.as_ref());
+    let principal = symbio_sdk::authz::request_principal(ctx.as_ref());
     let live = LiveInputs {
         tools,
         delegate: delegate_verdict,
@@ -399,7 +399,7 @@ pub(crate) async fn run_recall(
     // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
     // 召回的可见切片按它收放——判断记忆只给自己会话看，共享记忆只
     // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
-    let recall_viewer = symbio_core::request_principal(ctx.as_ref());
+    let recall_viewer = symbio_sdk::authz::request_principal(ctx.as_ref());
     // 事实是**值**（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
     // 本会话切片取一次，召回 / 调度段 / 技能路由三个读方共用——同一轮内
     // 它们看到的是同一刻的事实，不各开各的文件。
@@ -516,7 +516,7 @@ pub(crate) async fn run_recall(
         store,
         turn.turn_no,
         turn.user_seq,
-        &symbio_core::request_principal(ctx.as_ref()),
+        &symbio_sdk::authz::request_principal(ctx.as_ref()),
         &[StageFact::recall(
             turn.request_round,
             turn.drive_seq,
@@ -603,7 +603,7 @@ pub(crate) async fn run_compress(
         store.as_ref(),
         turn.turn_no,
         turn.user_seq,
-        &symbio_core::request_principal(ctx.as_ref()),
+        &symbio_sdk::authz::request_principal(ctx.as_ref()),
         &[StageFact::compress(
             turn.request_round,
             compress.calls(),

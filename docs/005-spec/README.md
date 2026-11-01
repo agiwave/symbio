@@ -44,7 +44,7 @@ board.columns: [scope]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 28 · draft 0 · retired 5（共 33）
+**计数**：active 27 · draft 0 · retired 6（共 33）
 
 ## 现行规范（active）
 
@@ -55,7 +55,7 @@ board.columns: [scope]
 | `SP-004` | 提交纪律 1b——跨批行为变更的中间态提交 | 跨多批才能完成的行为变更（中间态必然有红点） | `scripts/check-commit-msg.mjs` | — | — |
 | `SP-005` | 提交纪律 1c——原子批次：多开关必须同翻 | 任一真子集观测值恒零的开关组 | 人工 | — | — |
 | `SP-006` | 提交纪律 2——每一批新增一条 e2e，且跑出厂默认路径 | 全部行为批次的 e2e 用例 | `scripts/gate.d/58-e2e.mjs` | — | — |
-| `SP-007` | 提交纪律 3——架构改动必须逐条论证「必需」 | 全部架构改动（新字段 / 新 kind / 新机制元素 / 放宽既有形状） | `scripts/core-shape-audit.mjs` | — | — |
+| `SP-007` | 提交纪律 3——架构改动必须逐条论证「必需」 | 全部架构改动（新字段 / 新 kind / 新机制元素 / 放宽既有形状） | `scripts/arch-shape-audit.mjs` | — | — |
 | `SP-008` | 提交纪律 4——不做历史数据兼容 | 全部数据形状与协议形状的改动 | `scripts/schema-audit.mjs` | — | — |
 | `SP-009` | 提交纪律 5——完成判据必须含一条端到端判据 | 全部批次的完成判据 | `scripts/gate.d/58-e2e.mjs` | — | — |
 | `SP-010` | 纪律 1——只写目标态：注释只写不变量与陷阱，不写过程 | 全部活跃文档与源码注释 | `scripts/grep-audit.mjs` | — | — |
@@ -71,7 +71,6 @@ board.columns: [scope]
 | `SP-024` | 验证纪律 3——每条断言配反向用例（改输入，结论必须变） | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-025` | 验证纪律 4——声称「编译期强制」必须附一段已知编译不过的代码 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-026` | 验证纪律 5——编译期反例必须写在外部模块里 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
-| `SP-027` | C-003 根出口单消费方豁免账本（5 条） | scripts/core-export-audit.mjs 的 WAIVERS 账本（ActorSpec / turnstate / SloLatencyView / FallbackRateView / mutations_latest_snapshot） | `scripts/core-export-audit.mjs` | — | — |
 | `SP-028` | doc-link D-004 全文豁免（定义变更史禁区的两处反例措辞） | docs/archive/13-质量改进总纲.md 首行与 docs/README.md 首行的 doc-link-allow D-004 | `scripts/doc-link-audit.mjs` | — | — |
 | `SP-029` | dead-code R-002 契约登记存量（8 处） | scripts/dead-code-audit.mjs 的 R-002 死码承认账本（终局基线 8，见 docs/003-design/016-工程落地与验证.md §3.1） | `scripts/dead-code-audit.mjs` | — | — |
 | `SP-030` | panic-allow 不变量登记（C7，56 个登记项 / 71 处 panic 面） | crates/** 的 panic-allow 注释、scripts/panic-audit.mjs 账本与 scripts/_shared.mjs 的 BASELINE.panicSites | `scripts/panic-audit.mjs` | — | — |
@@ -92,6 +91,7 @@ board.columns: [scope]
 | `SP-019` | 验证纪律（旧编号）——已被 SP-022…SP-026 取代 | 同一套纪律的浓缩版；按「一个事实一个 owner」保留全表，本套退场 | — |
 | `SP-020` | 验证纪律（旧编号）——已被 SP-022…SP-026 取代 | 同一套纪律的浓缩版；按「一个事实一个 owner」保留全表，本套退场 | — |
 | `SP-021` | 验证纪律（旧编号）——已被 SP-022…SP-026 取代 | 同一套纪律的浓缩版；按「一个事实一个 owner」保留全表，本套退场 | — |
+| `SP-027` | C-003 根出口单消费方豁免账本（已退役） | 执行方 `core-export-audit` 随 `symbio-core` 退役（D-279）：C-003 判的是「core 根出口里只有一个生产消费方的符号」，而那个根账本不再存在。SDK 的域是**公开面**（人人深引），C-002「不许深引域」在 SDK 上正好反过来。 | — |
 
 <!-- registry:summary end -->
 

@@ -35,16 +35,19 @@
 //! 而 `$crate` 展开成本 crate——宏的使用方不必依赖 `inventory`。
 
 pub use inventory;
-pub use symbio_kernel::*;
+use symbio_kernel::*;
 
+pub mod actors;
 pub mod adapters;
 pub mod agent;
+pub mod authz;
 pub mod capability;
 pub mod chat;
 pub mod clock;
 pub mod creator;
 pub mod embedding;
 pub mod event_bus;
+pub mod governance;
 pub mod invariants;
 pub mod keys;
 pub mod llm;
@@ -54,6 +57,7 @@ pub mod projection;
 pub mod text;
 pub mod turn;
 pub mod vdfs;
+pub mod view;
 
 /// 用例自己交的事件拼写与三张词表（DE-024 D-203 / D-205 / D-206）。
 ///

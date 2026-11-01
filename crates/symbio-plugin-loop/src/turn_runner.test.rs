@@ -1298,7 +1298,7 @@ mod turn_runner_tests {
     ///   「闸把所有人都拒了」的平凡真）。
     #[tokio::test]
     async fn closure_is_withheld_when_the_principal_lacks_the_grant() {
-        use symbio_core::PRINCIPAL_AUTONOMOUS;
+        use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
         use symbio_sdk::invariants::unresolved_turns;
 
         // ── 拒绝：自主发起者不持 `reply.first` ⇒ 收束格不落 ────────────────
@@ -4751,7 +4751,7 @@ mod scope_ceiling_tests {
         // `user` 在授权表里没有行（能力按「智能体的权威动作种类」划分）⇒ 什么都不持。
         let mut spec = trivial_actor_spec("session/main");
         assert!(
-            symbio_core::actor_can_land_speech(&spec),
+            symbio_sdk::actors::actor_can_land_speech(&spec),
             "前提：主智能体自己那一行持 `reply.first`"
         );
 
@@ -4776,10 +4776,10 @@ mod scope_ceiling_tests {
     #[test]
     fn a_narrow_parent_cannot_spawn_a_wider_child() {
         let mut spec = trivial_actor_spec("session/main");
-        spec.scope = Scope::Child(symbio_core::PRINCIPAL_PEER.to_string());
+        spec.scope = Scope::Child(symbio_sdk::authz::PRINCIPAL_PEER.to_string());
 
         assert!(
-            symbio_core::actor_can_land_speech(&spec),
+            symbio_sdk::actors::actor_can_land_speech(&spec),
             "前提：子主体自己那一行放行（这正是「放大」的来源）"
         );
         assert!(
@@ -4823,7 +4823,7 @@ mod denial_fact_tests {
     fn child_of_a_principal_without_reply() -> ActorSpec {
         let mut spec = trivial_actor_spec("session/main");
         assert!(
-            symbio_core::actor_can_land_speech(&spec),
+            symbio_sdk::actors::actor_can_land_speech(&spec),
             "前提：主智能体自己那一行持 reply——拒绝必须来自上限那道闸"
         );
         spec.scope = Scope::Child("user".to_string());
@@ -5017,7 +5017,7 @@ mod denial_fact_tests {
     #[test]
     fn denial_names_the_capability_the_gate_judges() {
         let main = trivial_actor_spec("session/main");
-        let peer = trivial_actor_spec(symbio_core::PRINCIPAL_PEER);
+        let peer = trivial_actor_spec(symbio_sdk::authz::PRINCIPAL_PEER);
 
         let speech_cap = ClosureKind::Speech.capability_name();
         let artifact_cap = ClosureKind::Artifact.capability_name();

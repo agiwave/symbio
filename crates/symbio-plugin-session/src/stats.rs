@@ -47,12 +47,12 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use symbio_core::SKILL_TAG;
 use symbio_kernel::event::Event;
 use symbio_kernel::plugin::{
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
 };
 use symbio_kernel::present::ReadingPanel;
+use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
 use symbio_sdk::keys::SESSION_ID;
 use symbio_sdk::projection::calibration::calibration_for;
@@ -393,7 +393,7 @@ pub(crate) fn read(
     let content_scope = content_scope_of(&snapshot);
     let may_read = match viewer {
         None => true,
-        Some(principal) => symbio_core::content_visible(content_scope, principal),
+        Some(principal) => symbio_sdk::authz::content_visible(content_scope, principal),
     };
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
@@ -640,8 +640,8 @@ impl SessionPlugin {
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
         }) {
-            Some(agent) => symbio_core::principal_of(Some(&agent)),
-            None => symbio_core::request_principal(ctx.as_ref()),
+            Some(agent) => symbio_sdk::authz::principal_of(Some(&agent)),
+            None => symbio_sdk::authz::request_principal(ctx.as_ref()),
         };
         // 技能编译开关是部署配置（不在这份事实源里）：与已编译数并读，才分得清
         // 「关着」与「开着但没编译过」两种零。

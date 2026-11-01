@@ -50,9 +50,9 @@
 // 本模块续一条原名短路径——调用点一行不动。
 use symbio_sdk::text::merge_kernel::merge_with_fidelity;
 
-use symbio_core::PRINCIPAL_USER;
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::store::Store;
+use symbio_sdk::authz::PRINCIPAL_USER;
 use symbio_sdk::turn::facts::FleetSnapshot;
 
 use crate::projections::consolidate::{accept, ConsolidateParams, Rejection};
@@ -217,17 +217,17 @@ pub(crate) fn recall_view(
 /// 两支各有一个 owner：
 /// - 本会话的内容 ⇒ 恒可见（判断记忆的 `thread_private` 走到这一支为止）；
 /// - 别的会话的 `shared` / `public` ⇒ 走 core 的读侧闸
-///   （`symbio_core::content_visible`，与 `stats` 的整列闸**同一条判据**，
+///   （`symbio_sdk::authz::content_visible`，与 `stats` 的整列闸**同一条判据**，
 ///   ⑧——那条判据若在这里复写一遍，就会漂成「stats 给看、召回不给看」）。
 ///   缺省（存量事件没有 `vis_scope` 字段）= `thread_private` ⇒ 只剩 own 一条路。
 ///
-/// 取值口径也在 core（`symbio_core::VisScope::of_event`：认不出 = 私有，不把笔误读宽）——
+/// 取值口径也在 core（`symbio_sdk::governance::VisScope::of_event`：认不出 = 私有，不把笔误读宽）——
 /// 产地在写方（能力包的编码贡献），判定只消费不重算。
 fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
-    use symbio_core::VisScope;
+    use symbio_sdk::governance::VisScope;
     match VisScope::of_event(e) {
         VisScope::ThreadPrivate => own,
-        s => own || symbio_core::content_visible(s, viewer),
+        s => own || symbio_sdk::authz::content_visible(s, viewer),
     }
 }
 
@@ -415,11 +415,11 @@ pub(crate) fn consolidate(
         // 可见域同样从源事件载荷读（合并产物继承源记忆的内容侧可见域）——
         // 同标签的源可见域相同（写方按标签定，见情景记忆能力包的编码贡献），取不到
         // （源不在快照里）时落 thread_private：合并放大可见域比丢一次合并更坏。
-        let scope_of = |seq: u64| -> symbio_core::VisScope {
+        let scope_of = |seq: u64| -> symbio_sdk::governance::VisScope {
             snapshot
                 .iter()
                 .find(|e| e.seq.map(|s| s.value()) == Some(seq))
-                .map(symbio_core::VisScope::of_event)
+                .map(symbio_sdk::governance::VisScope::of_event)
                 .unwrap_or_default()
         };
         let generation = generation_of(source_seqs[0]).max(generation_of(source_seqs[1])) + 1;

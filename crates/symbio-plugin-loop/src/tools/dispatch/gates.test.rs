@@ -156,7 +156,7 @@ fn the_principal_comes_from_the_agent_id() {
 
     assert_eq!(
         batch_principal(&with_agent(None)),
-        symbio_core::PRINCIPAL_MAIN
+        symbio_sdk::authz::PRINCIPAL_MAIN
     );
     assert_eq!(batch_principal(&with_agent(Some("ghost"))), "session/ghost");
     assert_eq!(

@@ -50,9 +50,10 @@ impl BreakerInputs {
     /// 台账读不到 / 还没有事实源 ⇒ **零账**，不是故障——「还没记过账」不等于
     /// 「不许执行」，闸门因为没有账就把工具全拦下才是静默失效。
     pub fn of(snapshot: &[Event], ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
-        let principal = symbio_core::principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref());
-        let authorized = symbio_core::production_matrix()
-            .can_write_name(&principal, symbio_core::CAP_EXTERNAL_EXECUTION);
+        let principal =
+            symbio_sdk::authz::principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref());
+        let authorized = symbio_sdk::authz::production_matrix()
+            .can_write_name(&principal, symbio_sdk::authz::CAP_EXTERNAL_EXECUTION);
         Self {
             authorized,
             spent_ms: session_cost_ms(snapshot, &principal),

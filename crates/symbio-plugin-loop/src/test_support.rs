@@ -115,7 +115,7 @@ impl SessionPort for FakeSessionPort {
                                 Entity::Message,
                                 Verb::Progressed,
                                 0,
-                                symbio_core::PRINCIPAL_MAIN,
+                                symbio_sdk::authz::PRINCIPAL_MAIN,
                             )
                             .with_payload(json!({
                                 "messages": messages,
@@ -164,7 +164,7 @@ pub(crate) fn turn_spec(
         session_id: session_id.to_string(),
         tool_archive_dir,
         transcript_archive_dir,
-        principal: symbio_core::PRINCIPAL_USER.to_string(),
+        principal: symbio_sdk::authz::PRINCIPAL_USER.to_string(),
         scope: Scope::Root,
         persistent: true,
         context_window: 6,
@@ -236,7 +236,7 @@ fn memory_live_fixture(events: &[Event], now: i64) -> Value {
         match e.kind.as_str() {
             symbio_plugin_api::events::EVENT_MEMORY_ENCODED
             | symbio_plugin_api::events::EVENT_MEMORY_CONSOLIDATED => {
-                if e.actor != symbio_core::PRINCIPAL_USER {
+                if e.actor != symbio_sdk::authz::PRINCIPAL_USER {
                     continue;
                 }
                 live.push((

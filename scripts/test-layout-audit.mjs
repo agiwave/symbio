@@ -24,7 +24,7 @@
  *
  * 2026-09-24 前的判定是 `^\s*mod tests\b[^{;]*\{` —— **按模块名找**。它有两个洞：
  *
- *   1. `symbio_core/turn.rs` 的测试写在 `mod tool_call_tests` / `mod turn_output_tests`
+ *   1. `symbio_sdk/turn.rs` 的测试写在 `mod tool_call_tests` / `mod turn_output_tests`
  *      里（14 个测试函数），**一个都数不到**；往里加多少测试都不会红。
  *   2. 棘轮只数**文件数**：往一个已经有内联 `mod tests` 的存量文件里继续加测试，
  *      文件数不变 ⇒ 完全不红。而「继续往里加」恰恰是最容易发生的路径。

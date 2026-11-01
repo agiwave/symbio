@@ -8,7 +8,7 @@
  *  L3 schema 契约：schemas/*.ts 若被 route 调用方以类型名引用则视为存活。
  *  L4 Rust 侧 **R-001（判定型）**：`pub` 声明但全仓（含 cli / tauri / 前端）
  *     一次都没被提及。判据是「这个名字在整仓只出现一次（就是声明那行）」——
- *     `dead_code` lint 对 `pub` 项结构性失明（`symbio_core/mod.rs` 一句
+ *     `dead_code` lint 对 `pub` 项结构性失明（`symbio_sdk/mod.rs` 一句
  *     `pub use plugin::*` 就能让整批函数被当成对外 API），故需要这条补网。
  *  L6 前端 **R-003（判定型）**：未被任何文件引用的导出必须二态——删掉，或整份文件
  *     声明为契约面（文件头 `// dead-code-allow R-003: <理由>`）。「说不清该不该用」
@@ -272,7 +272,7 @@ if (unusedUnwaived.length) {
 // ── Rust 侧 R-001：`pub` 声明但全仓一次都没被提及（**判定型**）──
 //
 // 为什么需要：前端侧有 import 依赖图这张硬网；**Rust 侧一张都没有**。`dead_code`
-// lint 对 `pub` 项结构性失明——`symbio_core/mod.rs` 里一句 `pub use plugin::*`
+// lint 对 `pub` 项结构性失明——`symbio_sdk/mod.rs` 里一句 `pub use plugin::*`
 // 就足以让整批函数被当成"对外 API"，于是攒出过一批零调用的 helper（8 个锁/错误
 // 辅助函数，全仓含 cli / tauri 零引用）。
 //

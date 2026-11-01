@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const script = path.join(scriptDir, 'projection-purity.mjs')
 
-const DIR = 'crates/symbio-core/src/projection'
+const DIR = 'crates/symbio-sdk/src/projection'
 const MOD = `${DIR}/mod.rs`
 const RECALL = `${DIR}/recall.rs`
 const REPUTATION = `${DIR}/reputation.rs`
@@ -287,9 +287,9 @@ test('插件折叠根：产投影兄弟互导 ⇒ PP-001 红', () => {
     repo({
       [`${SESS_DIR}/mod.rs`]: 'pub mod fallback;\npub mod slo;\n',
       [`${SESS_DIR}/fallback.rs`]:
-        'use symbio_core::Projection;\n\npub fn fallback_rate() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
+        'use symbio_sdk::Projection;\n\npub fn fallback_rate() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
       [`${SESS_DIR}/slo.rs`]:
-        'use super::fallback::declared_tier;\nuse symbio_core::Projection;\n\npub fn slo_report() -> Projection<u8> {\n    let _ = declared_tier();\n    Projection::new(|| 0)\n}\n',
+        'use super::fallback::declared_tier;\nuse symbio_sdk::Projection;\n\npub fn slo_report() -> Projection<u8> {\n    let _ = declared_tier();\n    Projection::new(|| 0)\n}\n',
       [SESS_CONSUMER]: 'fn f() {\n    let _ = fallback_rate();\n    let _ = slo_report();\n}\n',
     }),
   )
@@ -305,9 +305,9 @@ test('插件折叠根：共享读侧（不产投影）可被兄弟导 ⇒ 绿', 
       [`${SESS_DIR}/mod.rs`]: 'pub mod fallback;\npub mod slo;\npub mod tiers;\n',
       [`${SESS_DIR}/tiers.rs`]: 'pub(super) fn declared_tier() -> String {\n    String::new()\n}\n',
       [`${SESS_DIR}/fallback.rs`]:
-        'use symbio_core::Projection;\n\npub fn fallback_rate() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
+        'use symbio_sdk::Projection;\n\npub fn fallback_rate() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
       [`${SESS_DIR}/slo.rs`]:
-        'use super::tiers::declared_tier;\nuse symbio_core::Projection;\n\npub fn slo_report() -> Projection<u8> {\n    let _ = declared_tier();\n    Projection::new(|| 0)\n}\n',
+        'use super::tiers::declared_tier;\nuse symbio_sdk::Projection;\n\npub fn slo_report() -> Projection<u8> {\n    let _ = declared_tier();\n    Projection::new(|| 0)\n}\n',
       [SESS_CONSUMER]: 'fn f() {\n    let _ = fallback_rate();\n    let _ = slo_report();\n}\n',
     }),
   )
@@ -319,7 +319,7 @@ test('插件折叠根：体内读时钟 ⇒ PP-002 一样红（判据不留在 c
     repo({
       [`${SESS_DIR}/mod.rs`]: 'pub mod span;\n',
       [`${SESS_DIR}/span.rs`]:
-        'use symbio_core::Projection;\n\npub fn span() -> Projection<u8> {\n    let t = SystemTime::now();\n    let _ = t;\n    Projection::new(|| 0)\n}\n',
+        'use symbio_sdk::Projection;\n\npub fn span() -> Projection<u8> {\n    let t = SystemTime::now();\n    let _ = t;\n    Projection::new(|| 0)\n}\n',
       [SESS_CONSUMER]: 'fn f() {\n    let _ = span();\n}\n',
     }),
   )
@@ -333,7 +333,7 @@ test('插件折叠根：死构造器 ⇒ PP-003 一样红（消费方要在折�
     repo({
       [`${SESS_DIR}/mod.rs`]: 'pub mod checkpoint;\n',
       [`${SESS_DIR}/checkpoint.rs`]:
-        'use symbio_core::Projection;\n\npub fn checkpoint() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
+        'use symbio_sdk::Projection;\n\npub fn checkpoint() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
     }),
   )
   assert.equal(r.status, 1, out(r))
@@ -346,7 +346,7 @@ test('PP-004 只数 core 那一根：插件多一条折叠不影响棘轮 ⇒ �
     repo({
       [`${SESS_DIR}/mod.rs`]: 'pub mod span;\n',
       [`${SESS_DIR}/span.rs`]:
-        'use symbio_core::Projection;\n\npub fn span() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
+        'use symbio_sdk::Projection;\n\npub fn span() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
       [SESS_CONSUMER]: 'fn f() {\n    let _ = span();\n}\n',
     }),
     { CORE_PROJECTION_BASELINE: '1:1' },

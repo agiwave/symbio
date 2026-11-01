@@ -309,7 +309,7 @@ async fn compress_snapshot_inner(
         let retry_msg = ChatNode {
             id: llm_short_id(),
             principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
-                symbio_core::PRINCIPAL_USER,
+                symbio_sdk::authz::PRINCIPAL_USER,
             )),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(
@@ -392,7 +392,7 @@ async fn compress_snapshot_inner(
         id: root_id.to_string(),
         // 快照作为压缩后的首条消息，必须是 user 角色（多数 provider 要求对话以 user 开头）
         principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
-            symbio_core::PRINCIPAL_USER,
+            symbio_sdk::authz::PRINCIPAL_USER,
         )),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(format!(

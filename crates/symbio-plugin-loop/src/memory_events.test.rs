@@ -16,12 +16,12 @@ use super::{
     consolidate, merge_with_fidelity, visible_slice, CONSOLIDATE_MIN_ENTRIES, MERGE_MAX_CHARS,
 };
 use crate::control_decl::guard_vocab;
-use symbio_core::SKILL_TAG;
+use symbio_sdk::actors::SKILL_TAG;
 // 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
-use symbio_core::PRINCIPAL_USER;
 use symbio_kernel::event::{Entity, Event, EventEnvelope as _, Seq, Verb};
 use symbio_kernel::store::{EventStore, Store};
 use symbio_plugin_api::retrieval::{Retrieval, Retrieved};
+use symbio_sdk::authz::PRINCIPAL_USER;
 use symbio_sdk::invariants::check_all;
 use symbio_sdk::text::merge_kernel::split_sentences;
 use symbio_sdk::turn::facts::FleetSnapshot;
@@ -803,7 +803,7 @@ fn an_out_of_matrix_viewer_is_shown_no_shared_memory() {
     // 属主恒放行：与 `stats` 读闸的「owner 相等」分支同一次判定。
     let owner = visible_slice(
         vec![snap(false, &a), snap(true, &b)],
-        symbio_core::SESSION_OWNER,
+        symbio_sdk::authz::SESSION_OWNER,
     );
     assert!(
         owner.iter().any(|e| e

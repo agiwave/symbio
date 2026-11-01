@@ -36,19 +36,7 @@ const git = (ctx, args, label) => ctx.run({ label, cmd: 'git', args, cwd: repoRo
 
 // ── 提取函数：各落点的形状不同，判据的**读法**也必须不同 ─────────
 
-/** `scripts/core-export-audit.mjs` 的 `BASELINE`：默认值写在三元里，形如 `{ zero: 0, one: 61 }`。
- *  **只取默认分支**（`: { … }` 那一侧）——env 覆盖值不进基线判定，它由 `envLoosened` 单判。 */
-function coreExportCells(text) {
-  const cells = new Map()
-  const m = /:\s*\{\s*zero:\s*(\d+),\s*one:\s*(\d+)\s*\}/.exec(text.replace(/\r\n/g, '\n'))
-  if (m) {
-    cells.set('zero', Number(m[1]))
-    cells.set('one', Number(m[2]))
-  }
-  return cells
-}
-
-/** `scripts/core-shape-audit.mjs` 的 `SHAPE_BASELINE`：同样是三元尾部的对象字面量，三格。
+/** `scripts/arch-shape-audit.mjs` 的 `SHAPE_BASELINE`：同样是三元尾部的对象字面量，三格。
  *  键名与键序就是 `CORE_SHAPE_BASELINE=<traits>:<methods>:<defaults>` 的位置口径，
  *  也必须是审计侧读的那三格——任何一边单改，这里就会读不出格（⇒ 判红，不是判绿）。 */
 function coreShapeCells(text) {
@@ -64,7 +52,7 @@ function coreShapeCells(text) {
   return cells
 }
 
-/** `scripts/core-shape-audit.mjs` 的 `VOCAB_BASELINE`：同样是三元尾部的对象字面量，两格。
+/** `scripts/arch-shape-audit.mjs` 的 `VOCAB_BASELINE`：同样是三元尾部的对象字面量，两格。
  *  键序就是 `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 的位置口径。 */
 function vocabCells(text) {
   const cells = new Map()
@@ -78,7 +66,7 @@ function vocabCells(text) {
   return cells
 }
 
-/** `scripts/core-shape-audit.mjs` 的 `DATA_BASELINE`（CS-009）：三元尾部对象，两格。
+/** `scripts/arch-shape-audit.mjs` 的 `DATA_BASELINE`（CS-009）：三元尾部对象，两格。
  *  键序就是 `CORE_DATA_BASELINE=<structFields>:<enumVariants>` 的位置口径。
  *  与 `coreShapeCells` 分开读的理由：两组量住同一个文件但失效面不同，混着读会让
  *  「哪一格涨了」在日志里看不出来。 */
@@ -94,7 +82,7 @@ function coreDataCells(text) {
   return cells
 }
 
-/** `scripts/core-shape-audit.mjs` 的 `TURN_STATE_BASELINE`（CS-010）：控制面草稿字段数，
+/** `scripts/arch-shape-audit.mjs` 的 `TURN_STATE_BASELINE`（CS-010）：控制面草稿字段数，
  *  一格。与 CS-009 一样是三元的单格形状（`? Number(...)` 与 `: 数字`）——按 `deadCodeCells`
  *  同一条正则读，写成 `: Number(...)` 会让这一项永远解析不到格、静默显示成「跳过」。
  *  放宽的资格由 CS-002 判（`core-shape-allow turnStateFields: D-NNN`），本条只判数字有没有
@@ -163,27 +151,6 @@ function deadCodeCells(text) {
   const norm = text.replace(/\r\n/g, '\n')
   const m = /\?\s*Number\(process\.env\.DEAD_CODE_R002_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
   if (m) cells.set('R-002', Number(m[1]))
-  return cells
-}
-
-/** `scripts/core-export-audit.mjs` 的 `DOMAIN_LEDGER_BASELINE`（C-004）：与 R-002 同构的
- *  三元形状，一格——**非内核根账本**条目数上限（只许降）。C-003 收窄到内核公共面之后，
- *  其余根出口只剩这一格冻结它们的增长；放宽它就是让「加共享类型就得改架构」回来。 */
-function domainLedgerCells(text) {
-  const cells = new Map()
-  const norm = text.replace(/\r\n/g, '\n')
-  const m = /\?\s*Number\(process\.env\.CORE_LEDGER_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
-  if (m) cells.set('C-004', Number(m[1]))
-  return cells
-}
-
-/** `scripts/core-export-audit.mjs` 的 `DOMAIN_ONE_BASELINE`（C-004 的下沉候选格）：
- *  与 R-002 同构的三元形状，一格——域账本里单消费方条目的上限（只许降）。 */
-function domainLedgerOneCells(text) {
-  const cells = new Map()
-  const norm = text.replace(/\r\n/g, '\n')
-  const m = /\?\s*Number\(process\.env\.CORE_LEDGER_ONE_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
-  if (m) cells.set('C-004-one', Number(m[1]))
   return cells
 }
 
@@ -271,43 +238,11 @@ const RATCHETS = [
     label: 'BASELINE（Rust / CI / 前端用例数、verify 程序数与断言数、e2e 用例数）',
   },
   {
-    id: 'core-export',
-    file: 'scripts/core-export-audit.mjs',
-    dir: 'ceiling',
-    cellsOf: coreExportCells,
-    waivers: waiverReader('core-export-allow'),
-    envVar: 'CORE_EXPORT_BASELINE',
-    label: 'core 根出口的 0 / 单消费方符号存量（只许降）',
-  },
-  {
-    // C-004：C-003 收窄到内核公共面后，其余根出口不再被判「配不配占出口」；
-    // 它们的存量由这一格冻结（只许降）。放宽 = 让「新增共享类型仍改 core 根出口」
-    // 悄悄回来，所以与 core-export 同一条纪律：必须改一个提交进仓库的数字。
-    id: 'core-ledger',
-    file: 'scripts/core-export-audit.mjs',
-    dir: 'ceiling',
-    cellsOf: domainLedgerCells,
-    waivers: waiverReader('core-export-allow'),
-    envVar: 'CORE_LEDGER_BASELINE',
-    label: '非内核根账本条目数（C-004，只许降）',
-  },
-  {
-    // C-004 的下沉候选格：域账本里只有一个消费方的条目。条目总数只说明账本多长，
-    // 这一格说明其中有多少「本该下沉」；涨 = 又多了一个只为单点需要而占根出口的共享符号。
-    id: 'core-ledger-one',
-    file: 'scripts/core-export-audit.mjs',
-    dir: 'ceiling',
-    cellsOf: domainLedgerOneCells,
-    waivers: waiverReader('core-export-allow'),
-    envVar: 'CORE_LEDGER_ONE_BASELINE',
-    label: '域账本单消费方条目数（C-004 下沉候选，只许降）',
-  },
-  {
     // 形状三格（`pub trait` 数 / `fn` 成员总数 / 带默认体的成员数）。放宽的**资格**由
-    // `core-shape-audit` 的 CS-002 判（注释里必须有能打开的 ADR），本条只判「数字有没有比
+    // `arch-shape-audit` 的 CS-002 判（注释里必须有能打开的 ADR），本条只判「数字有没有比
     // 上一版更松」——两半合起来才是「放宽 = 写一份决策」。
     id: 'core-shape',
-    file: 'scripts/core-shape-audit.mjs',
+    file: 'scripts/arch-shape-audit.mjs',
     dir: 'ceiling',
     cellsOf: coreShapeCells,
     waivers: waiverReader('core-shape-allow'),
@@ -319,7 +254,7 @@ const RATCHETS = [
     // 留着」由 CS-006 逐名判据（DE-024 D-202）；放宽 = 让「新事件仍要改内核手写表」
     // 悄悄回来，所以必须改一个提交进仓库的数字。
     id: 'vocab',
-    file: 'scripts/core-shape-audit.mjs',
+    file: 'scripts/arch-shape-audit.mjs',
     dir: 'ceiling',
     cellsOf: vocabCells,
     // 不设豁免标记：收窄自动生效，变宽只能改基线，而改基线会被本条按基准版本抓住。
@@ -332,7 +267,7 @@ const RATCHETS = [
     // 住同一个文件、用同一个豁免标记名，但**是另一组格**：放宽的资格由 CS-002 判，
     // 本条只判「数字有没有比上一版更松」。
     id: 'core-data',
-    file: 'scripts/core-shape-audit.mjs',
+    file: 'scripts/arch-shape-audit.mjs',
     dir: 'ceiling',
     cellsOf: coreDataCells,
     waivers: waiverReader('core-shape-allow'),
@@ -344,7 +279,7 @@ const RATCHETS = [
     // 文件、用同一个豁免标记名，但量的是 loop 插件的 `pub(crate)` 草稿——公共面棘轮
     // （CS-009）看不见它。放宽的资格由 CS-002 判，本条只判数字有没有比上一版更松。
     id: 'turn-state',
-    file: 'scripts/core-shape-audit.mjs',
+    file: 'scripts/arch-shape-audit.mjs',
     dir: 'ceiling',
     cellsOf: turnStateCells,
     waivers: waiverReader('core-shape-allow'),
@@ -353,7 +288,7 @@ const RATCHETS = [
   },
   {
     // PP-004 core 投影面两格（产投影文件数 / 投影构造器条数）。能力折叠一旦长回
-    // `symbio_core/projection/`，「加一个能力」就又成了改架构模块（DE-025 D-221）；
+    // `symbio_sdk/projection/`，「加一个能力」就又成了改架构模块（DE-025 D-221）；
     // 放宽的资格由 PP-005 判（必须挂一条存在的决策），本条只判数字有没有比上一版更松。
     id: 'core-projection',
     file: 'scripts/projection-purity.mjs',

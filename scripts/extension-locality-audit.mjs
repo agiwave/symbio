@@ -5,13 +5,13 @@
  * ## 它治的病
  *
  * 「加一个能力要不要动架构」只有一个可判的答案：**四棵树的目录指纹不变**——
- * `crates/symbio-core` / `crates/symbio-kernel` / `crates/symbio-plugin-loop` /
+ * `crates/symbio-sdk` / `crates/symbio-kernel` / `crates/symbio-plugin-loop` /
  * `crates/symbio-plugin-session` 是能力**不该**碰的架构面。判据读指纹，不读
  * 「有没有新 crate」：新 crate 只是触发条件；一个提交完全可以新增能力包却顺手
  * 在 `loop` 里加一行按能力名分支，那正是 T1 要抓的形态。
  *
  * 既有守卫各自只看见一半：`SC-006` 判控制面里的工具名字面量，`CP-006` 判机制面
- * 指纹与端口闭集，`core-change-audit` 要求动 core/kernel 的提交留理由——没有一条
+ * 指纹与端口闭集，`arch-change-audit` 要求动 core/kernel 的提交留理由——没有一条
  * 判「这次新增能力有没有动控制面」。本判据补的是**提交的意图面**：同一次提交里
  * 既加能力包又改四棵树，只能说明机制补件夹带了（D-247 的「夹带」）。
  *
@@ -69,7 +69,7 @@ const argv = process.argv.slice(2)
 
 /** 能力不该碰的四棵树。 */
 export const TREES = [
-  'crates/symbio-core',
+  'crates/symbio-sdk',
   'crates/symbio-kernel',
   'crates/symbio-plugin-loop',
   'crates/symbio-plugin-session',

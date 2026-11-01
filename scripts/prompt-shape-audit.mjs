@@ -44,7 +44,7 @@
  * | 谁 | 判什么 |
  * |---|---|
  * | 本脚本 | 出厂路径**送出去的形状**（PS-001…003） |
- * | `symbio_core/projection/prompt_fidelity.rs` | 网格 → prompt 的**内容完整性**（该进的没进、进的没出处） |
+ * | `symbio_sdk/projection/prompt_fidelity.rs` | 网格 → prompt 的**内容完整性**（该进的没进、进的没出处） |
  * | `e2e/cases/t46-*.mjs` | 把真实请求体喂给本脚本（判据的执行方在门内，口径在本脚本） |
  *
  * 完整性与形状是两个面：fidelity 红说明「少了内容」，本脚本红说明「形态变了」。

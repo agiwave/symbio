@@ -29,30 +29,14 @@ export const GUARDS = [
   'eol-audit',
   'test-layout-audit',
   'dead-code-audit',
-  // `core-naming-audit` 把 `symbio_core/README.md` §1.2 的**域前缀对照表**当作规则源
-  // 解析，逐个核对公开符号的前缀是否落在所属域登记的前缀里。它守的是「规范」本身：
-  // 此前那张表**没有任何脚本在判**，于是漂移了三处（`PLUGIN_PROVIDER_FIELD` 住 `vdfs`
-  // 却姓 `PLUGIN`、`KEY_PROVIDER` 住 `plugin` 却用 `keys` 的前缀、插件工厂 id 住 `keys`
-  // 却姓 `PLUGIN`）。它的失效形态有两种，都要靠回归测试钉住：
-  // ① **规则源读不出来**（表被改写/搬走）却仍亮绿灯——绿灯只说明没检查；
-  // ② **前缀比对写宽了**（按字面 contains 而非按词）⇒ 误报一片，最后被人用豁免喂到失效。
-  'core-naming-audit',
-  // `core-vocab-audit` 判 `symbio_core` 的**分域形状**（D-087 的两条承重判据）：
-  // ①`schemas/` 不许回来——它是被拆掉的杂物抽屉，回来即「又出现了没处放的东西」；
-  // ②域间依赖不许出现**新的**环（SCC 归一到「环族」，基线只许降）。
-  // 此前没有任何门禁判依赖方向：`core-naming-audit` 判名字、`core-export-audit` 判
-  // 出口宽度，而「机制依赖词汇」这条纪律只写在 README §1.3 里靠人记——实测已经
-  // 有 2 族环（`plugin ⇄ keys ⇄ vdfs ⇄ chat ⇄ …`、`adapters ⇄ projection`），
-  // 说明「靠人记」的结论是不可信的。
-  'core-vocab-audit',
-  // `core-export-audit` 判 `symbio_core` 的**架构出口有效性**，两条来自架构要求：
-  // 「子目录不许对外 `pub`，必须在根显式输出」（C-001）与「根输出的每个符号必须被
-  // ≥2 个模块消费」（C-002 是深引检查的全量版，**取代了 plugin-entry-audit 的 E-010**：
-  // 域目录动态取自 core、连裸 `use …::symbio_core::<域>;` 一起拦，判定方只留一个）。
-  // 失效形态两头都要钉：① 规则写宽 ⇒ 深引/单消费方照样过（守卫永不命中）；
-  // ② C-003 的棘轮基线写死成大数 ⇒ 存量只进不出，机制退化成装饰——测试用
-  // `CORE_EXPORT_BASELINE=0:0` 把基线压到零，证明它**真的会红**。
-  'core-export-audit',
+  // `domain-vocab-audit` 判 `symbio-sdk` 的**分域形状**（D-087 的两条承重判据，对象随
+  // D-279 的搬迁跟到 sdk）：①`schemas/` 不许回来——它是被拆掉的杂物抽屉，回来即
+  // 「又出现了没处放的东西」；②域间依赖不许出现**新的**环（SCC 归一到「环族」，基线只许降）。
+  // 此前没有任何门禁判依赖方向，而「机制依赖词汇」这条纪律只写在 README §1.3 里靠人记
+  // ——实测曾有 2 族环（`plugin ⇄ keys ⇄ vdfs ⇄ chat ⇄ …`、`adapters ⇄ projection`），
+  // 说明「靠人记」的结论是不可信的。它自己也会空转：路径不在了就扫到 0 条边、报「无新
+  // 增环」（D-280），所以范围读不出必须退 2。
+  'domain-vocab-audit',
   // `plugin-surface-audit`（HS-001 / HS-002）判**扩展层插件只认一个宿主门面**：
   // crate 拆成 kernel / core / plugin-api 之后，插件仍各自列三到四行内部依赖、源码里混写
   // 三种前缀，于是「插件依赖几个架构模块」由某段代码顺手写了哪个前缀决定，而不是由边界
@@ -62,14 +46,14 @@ export const GUARDS = [
   // 又变回一份没人审的隐式集合。失效形态三头都钉：剥注释写漏 ⇒ 文档引用被误判红；
   // 控制面名单写成通配 ⇒ 判据空转；白名单基线写成大数 ⇒ 只进不出。
   'plugin-surface-audit',
-  // `core-shape-audit` 判 `symbio_core` 的**公共形状**（CS-001 三格棘轮：`pub trait` 数 /
+  // `arch-shape-audit` 判 `symbio_core` 的**公共形状**（CS-001 三格棘轮：`pub trait` 数 /
   // `fn` 成员总数 / 带默认体的成员数；CS-002：放宽数字必须挂一条能打开的 ADR）。
   // 它补的是 `SP-007`「架构改动必须逐条论证必需」唯一的真缺口：那条纪律的判据一直写着
   // 「人工核对」，而 C2 那一批（把一个 trait 扩成十个方法、多挂 9 个默认体）在既有全部
   // 判据下**符号数不变、根出口不变 ⇒ 门禁全绿**。失效形态两头都要钉：① 提取写宽
   // （漏数默认体 / 把默认体内的 `fn` 当成成员）⇒ 形状变宽照样绿；② 基线写成大数
   // ⇒ 只进不出，机制退化成装饰。测试用 `CORE_SHAPE_BASELINE=0:0:0` 压到零证明它真的会红。
-  'core-shape-audit',
+  'arch-shape-audit',
   // `shared-event-vocab-audit`（CS-007）判跨插件**事件名**的登记口是不是清单：清单上每
   // 一行必须有 owner 自己的 `EventDecl`（格位）、除 owner 外至少一个插件在生产代码里引用
   // 它、且内核 `event/mod.rs` / `CELLS` 上不再有它。它补的是 CS-005 只剩数字的那半：那两格
@@ -77,8 +61,8 @@ export const GUARDS = [
   // 失效形态两头都钉：① 共享表收单消费方的名字 ⇒ 退化成预置常量（上一轮刚清掉的腐烂）；
   // ② 内核留同名行不清 ⇒ 两处 owner，清单正道看起来开了其实没通。夹具测试逐条注入断言红。
   'shared-event-vocab-audit',
-  // `core-change-audit`（CC-001 / CC-002）判**「改插件顺手动内核」有没有留下理由**：
-  // 触及 `crates/symbio-core/**` 或 `crates/symbio-kernel/**` 的提交必须带
+  // `arch-change-audit`（CC-001 / CC-002）判**「改插件顺手动内核」有没有留下理由**：
+  // 触及 `crates/symbio-sdk/**` 或 `crates/symbio-kernel/**` 的提交必须带
   // `Core-Change:` 段；若同一提交还动了插件 / provider / testkit，那一段里必须有
   // 决策号（D-NNN）——那正是 DE-023 §2 第 1 条「扩展局部性」要拦的形态：
   // 为了让一个新插件跑起来而在内核里加分支，**没有任何静态扫描看得见**（它是一次
@@ -90,7 +74,7 @@ export const GUARDS = [
   // 判红由 CI 变量自动等效 `--require-range`，不靠调用方记得拼参数；本地无 base 才打 ⊘
   // 并明说「不当作通过」）；② 追溯豁免被当成后门——`BASELINE_SHAS` 只允许
   // 放判据诞生之前的提交，新增条目要写理由。
-  'core-change-audit',
+  'arch-change-audit',
   // `kind-branch-audit`（KB-001 / KB-002）判前端**框架层有没有自己认形态**：一处对
   // `NodeKind` 五值的运行时选择 = 一个分支，框架层（`tauri/src/registry/` 之外）目标恒为 0，
   // 机制层的判据与映射表单独计数。它补的是 GO-002 T4 第三条「新增资源只加数据、框架零分支」
@@ -353,7 +337,7 @@ export const GUARDS = [
   // 「为什么留」判不了（那是账本表里人手填的一栏），但**账有多厚**可数：行表的行数、
   // 分发方的出参通道数、工具路径的全量读点数。三样冻成只许降的读数——数字涨了，就说明
   // 有人又加了一处自持，得回去回答那句话。第四格（`TurnState` 字段数）不在这里，
-  // 已有 `core-shape-audit` 的 `CS-010`，再数一遍就是两个基线各漂各的。
+  // 已有 `arch-shape-audit` 的 `CS-010`，再数一遍就是两个基线各漂各的。
   //
   // 方向只留一个（变宽即红、收窄只提示）是刻意的：等于会把收窄也判红，于是改基线成了
   // 常规动作，棘轮失效。失效形态是这一族的老病——读不出时报「没有违规」，故三条读法
@@ -362,7 +346,7 @@ export const GUARDS = [
   // `extension-locality-audit`（EX-002）判**新增能力包有没有动架构面**：一个提交新增
   // `crates/symbio-plugin-<名字>/PLUGIN.yml` 时，`core` / `kernel` / `loop` / `session`
   // 四棵树的**目录指纹**必须与父提交逐一相等。它补的是既有守卫之间那条缝：`SC-006`
-  // 判工具名字面量、`CP-006` 判机制面指纹、`core-change-audit` 要求动 core/kernel 留理由，
+  // 判工具名字面量、`CP-006` 判机制面指纹、`arch-change-audit` 要求动 core/kernel 留理由，
   // 没有一条看「这次加能力有没有顺手改控制面」——而「只判有没有新 crate」正是漏掉它的写法。
   //
   // 两处例外各有理由：已存在的 `*.gen.rs` 是清单的镜像（作者只改自己目录，生成器保证
@@ -377,7 +361,7 @@ export const GUARDS = [
   // D-247 把提交分成两类：迁移批次（正文一行 `Migration: <批次>`）只许删旧实现与切换绑定；
   // 架构补件（在架构面新增 `pub` 项）必须挂一条能打开的 `### D-NNN`，且新增的非注释代码
   // 不含插件 id 与工具名。它补的是既有守卫之间那条缝：`SC-006` 判工具名字面量、
-  // `extension-locality-audit` 判新增能力包、`core-change-audit` 要求动 core/kernel 留理由，
+  // `extension-locality-audit` 判新增能力包、`arch-change-audit` 要求动 core/kernel 留理由，
   // 没有一条判「这次提交有没有在搬走一条能力的同时顺手给它加机制」——那是**一次提交的意图**，
   // 不是某个文件的内容，静态扫描看不见，只能由提交者声明、判据判声明是否成立。
   //
@@ -400,7 +384,7 @@ export const GUARDS = [
   'uninstall-edge-audit',
   // `extension-vocab-audit`（EX-008，[D-252](../../docs/003-design/026-能力拆分与影响类.md "D-252")）判
   // **扩展面不说容器词**：`symbio-plugin-api` 的非生成生产源码里，端口形状（类型 / trait /
-  // 枚举变体 / 字段 / `pub fn` 形参）不得出现 `turn` / 轮 / 幕。它补的是 `core-change-audit`
+  // 枚举变体 / 字段 / `pub fn` 形参）不得出现 `turn` / 轮 / 幕。它补的是 `arch-change-audit`
   // 与 `EX-002` 之间那条缝：那两条判**提交的意图面**（这次改动留没留理由、有没有动架构树），
   // 本判据判**结果面**——哪怕分十个提交、每个都写了漂亮理由，端口上有一格 `turn` 照样红。
   //
@@ -455,12 +439,6 @@ export const GUARDS = [
 //     实测事故：`schemas/hook` 被报成「仅 1 个外部消费文件」，而它实际有 3 个消费文件
 //     ——hook 插件走 `schemas::{HookEvent}` 顶层再导出名，路径里没有子模块名。
 //     报告不判失败 ⇒ 坏了没人发现，故它比判定型守卫**更需要**回归测试。
-//   - `core-surface-audit` 同样是报告型，同样说假话的形态：**少算消费方** ⇒ 在用的
-//     符号被列成「下放候选」。开发时真踩了两次，两条都写成了回归测试：① 三条
-//     `pub use <域>::*` 撞进同一个 Map 键 ⇒ 公开面从 251 掉到 134，`PLUGIN_*` /
-//     `PathKey` / `PluginStopReason` 全部消失；② `symbio/src` 直属文件（`lib.rs` /
-//     `init.rs`）被跳过 ⇒ 只在注册表里被用到的符号被算成 **0 个消费方**。
-//     「数不到」与「真的没人用」是两件事。
 //   - `rust-scan` 是**共享扫描库**，被 `plugin-entry-audit` 与 `facts/current`
 //     共同引用。它的失效形态是本仓最危险的一类：**写错不报错，只静默漏报**——
 //     朴素实现在字符串里的 `//`、`format!("{{}}")` 的字面量括号、未跨行的引号上
@@ -492,7 +470,6 @@ export const TEST_ONLY = [
   'e2e-order',
   'tauri-binary',
   'schema-audit',
-  'core-surface-audit',
   'commit',
   // `registry-lists`（RG-026 / RG-027 / RG-029，清单归属）的失效形态**全是恒真**：
   // 三条判据分别判「同一 id 两个 owner」「声明与正文标记两面对账」「role 是否在闭集内」，
@@ -508,7 +485,7 @@ export const TEST_ONLY = [
   // 查一次用法就丢掉上一次的失败日志。判据 = 退出 0 + 打印用法 + **没进门禁主流程**。
   // 与 `commit` 同类（那里 `--help` 会真的提交一次），两处同批补上。
   'gate',
-  // `md-table` 是全仓唯一的 Markdown 管道表解析库（`core-naming-audit` 与
+  // `md-table` 是全仓唯一的 Markdown 管道表解析库（`domain-vocab-audit` 与
   // `gen-verify-facts` 都吃它）：它的判据是「读不出来必须返回 null」，
   // 而返回 null 与返回空表在调用方那边是红与绿的区别。
   'md-table',
@@ -614,13 +591,15 @@ export const TEST_ONLY = [
  *
  * 逐条理由：
  *  - `color`：ANSI 输出的唯一实现（`scripts/` 下不得手写转义序列）；
- *  - `rust-scan`：Rust 文本扫描库，被 `core-export-audit` / `facts/current` /
+ *  - `rust-scan`：Rust 文本扫描库，被 `arch-shape-audit` / `facts/current` /
  *    `plugin-entry-audit` / `route-facts` 共读；**写错不报错、只静默漏报**，
  *    后果是「生成器说某条路由不存在，其实是抽漏了」；
- *  - `md-table`：全仓唯一的 Markdown 管道表解析库（`core-naming-audit` 与
+ *  - `md-table`：全仓唯一的 Markdown 管道表解析库（`domain-vocab-audit` 与
  *    `gen-verify-facts` 都吃它），判据是「读不出来必须返回 null」；
  *  - `gate.d/_shared`：门禁原语（`BASELINE` / `ratchetVerdict` / `autoWork` / `color`）；
- *  - `core-surface`：`core-surface-audit` 的公开面统计库（它只被那一个审计引用）；
+ *  - `fs-walk`：目录遍历与「这个文件算不算测试面」两条共用判据（`arch-shape-audit` /
+ *    `projection-purity` / `facts-boundary-audit` 共读）；读不出目录时**静默返回空**，
+ *    范围存在性由调用方自己判（D-280）；
  *  - `route-facts`：`docs/004-ref/006-当前事实表.md` §1 路由列、`routes.gen.ts`、`plugin-entry-audit`
  *    三份判定的共读提取实现（M4/M10 立）；
  *  - `gen-facts`：**事实生成机制的执行方**——遍历 `scripts/facts/` 逐个生成，
@@ -669,9 +648,9 @@ export const LIBS = [
   // 门禁步骤。它治的两个病都关于「看不到」：上一轮的失败证据被下一轮冲掉；
   // 失败只给一行文件名、正文要自己去文件里翻（于是人再跑一遍 7 分钟的门禁）。
   'gate.d/_logs',
-  'core-surface',
+  'fs-walk',
   // `decision-anchors` 是「`### D-NNN` 决策锚点在哪」的**唯一扫描实现**。登记成 LIBS：
-  // 三个消费方（`core-shape-audit` 的 CS-002、`projection-purity` 的 PP-005、
+  // 三个消费方（`arch-shape-audit` 的 CS-002、`projection-purity` 的 PP-005、
   // `plugin-special-case-audit` 的特例豁免）各自判「挂着的决策号存不存在」，
   // 而**扫描只有一份**——各写一遍正则，就会有一个消费方在标题格式变了以后静默读不到，
   // 于是「必须挂决策」退化成「随便挂什么都算挂」。判据在它三个消费方的回归测试里。
@@ -749,7 +728,7 @@ export const OUT_OF_GATE = [
 // 报告型：只防崩溃（退出码恒 0，判定需人工复核），走日志不刷屏。
 // 刻意 `echo: 'none'`：这份报告的候选会长期存在（大部分是签名组成部分与自引用），
 // 每次门禁都刷一遍只会训练人忽略它。要看结论就单独跑一次脚本。
-const REPORT_ONLY = ['schema-audit', 'core-surface-audit']
+const REPORT_ONLY = ['schema-audit']
 
 /**
  * 已知的**长杆**：标 `long: true` 让并发池先起它们（LPT，见 `gate.mjs::runConcurrent`）。

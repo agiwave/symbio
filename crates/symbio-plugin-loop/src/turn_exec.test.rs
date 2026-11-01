@@ -44,7 +44,7 @@ use super::super::test_support::{default_settings, loop_session, turn_spec, Fake
 fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
     use symbio_sdk::chat::principal::Principal;
     match role {
-        cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
         cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         cm::NodeRole::System => Principal::from_legacy("system/local"),

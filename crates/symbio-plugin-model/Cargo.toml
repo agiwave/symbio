@@ -59,7 +59,6 @@ tempfile = { workspace = true }
 [dev-dependencies]
 # 轮态投影（`turnstate`）是控制面的容器概念，不在扩展层门面白名单里（D-253）：
 # 测试面直接取 core，与 EX-008 对 `*.test.rs` 不判是同一条纪律。
-symbio-core = { path = "../symbio-core" }
 symbio-sdk = { path = "../symbio-sdk" }
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）

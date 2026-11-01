@@ -42,10 +42,10 @@
 //! 的文档——巩固要用**刷新后**的快照，它得看得见编码刚写下的那些。
 
 use crate::control_decl::{COMMITMENT_VOCAB, VERDICT};
-use symbio_core::actor_can_assert_verification;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::effects::EffectInput;
+use symbio_sdk::actors::actor_can_assert_verification;
 
 /// 收束派生事实中的**效果 / 熔断**半边（DE-038 §3）。
 ///
@@ -192,10 +192,10 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
         .value;
     // 覆盖层：判「有没有既有淘汰」——不复述载荷 ↔ 变更的映射（它在 core 的
     // `EliminationDecider::verdict_grants_changes`，单点定义）。
-    let overlay = symbio_core::GrantsOverlay::fold(
-        symbio_core::EliminationDecider::verdict_grants_changes(&snapshot),
+    let overlay = symbio_sdk::governance::GrantsOverlay::fold(
+        symbio_sdk::actors::EliminationDecider::verdict_grants_changes(&snapshot),
     );
-    let decider = symbio_core::EliminationDecider;
+    let decider = symbio_sdk::actors::EliminationDecider;
     // 写侧闸（与 `inbox::commit_preemption` 的 `judge.intent` 检查同一条纪律）：
     // 落裁决事实需要仲裁者那一行持 `assert.verification`——缺能力 ⇒ 一条都不写
     // （fail-closed：没有资格的判定不该留下事实）。
@@ -207,19 +207,19 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
         );
         return;
     }
-    let matrix = symbio_core::production_matrix();
+    let matrix = symbio_sdk::authz::production_matrix();
     for (principal, entry) in &view.by_principal {
         // 条件 2：持 assign.work 的**部署**主体（淘汰面只认部署表：绑定登记
         // （[D-100]）是运行期身份事实，不构成「部署授予过 assign.work」——
         // 未部署的 `agent:<id>` 不在表里 ⇒ 不淘汰，边界同函数文档）。
-        if !matrix.deployed_can_write_name(principal, symbio_core::CAP_ASSIGN_WORK) {
+        if !matrix.deployed_can_write_name(principal, symbio_sdk::authz::CAP_ASSIGN_WORK) {
             continue;
         }
         if !decider.should_eliminate(entry) {
             continue;
         }
         // 条件 3：已有生效撤销 ⇒ 不重复落格（审计面不缺、幂等键不撞）。
-        if overlay.is_revoked(principal, symbio_core::CAP_ASSIGN_WORK) {
+        if overlay.is_revoked(principal, symbio_sdk::authz::CAP_ASSIGN_WORK) {
             continue;
         }
         let ev = decider.elimination_event(VERDICT, principal, entry.score, user_seq);
@@ -234,7 +234,7 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
                 "[v2] 落格 {}：主体 {principal} 收回 assign.work（声誉分 {} 低于阈值 {}）",
                 crate::control_decl::EVENT_VERDICT_ASSERTED,
                 entry.score,
-                symbio_core::EliminationDecider::THRESHOLD,
+                symbio_sdk::actors::EliminationDecider::THRESHOLD,
             );
         }
     }

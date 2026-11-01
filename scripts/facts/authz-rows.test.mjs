@@ -34,8 +34,12 @@ pub const PRINCIPAL_USER: &str = "person/local";
  * 一棵临时仓库：`plugins` 是 `{ id: yml }`，`consts` 是 `authz/mod.rs` 的常量段，
  * `sdkConsts` 是 `symbio-sdk` 的 `keys/mod.rs` 的常量段。
  *
- * 两处都要建出来：`PRINCIPAL_*` 常量横跨 `keys`（机制层要用的主体名）与 `authz`
+ * 三处都要建出来：`PRINCIPAL_*` 常量横跨 `keys`（机制层要用的主体名）与 `authz`
  * （授权表自己的主体名）两个文件，生成器读的是**并集**。只建一处，测的就不是真形状。
+ *
+ * 三个目录**全在 `symbio-sdk`**：`governance` / `authz` 于 D-276 从 `symbio-core` 搬进来
+ * （授权判定只查一张部署表，不认识轮次、幕与判决），`keys` 早在 D-258 就住这里。
+ * 夹具跟着真仓走——判据读哪个路径，夹具就建哪个路径，否则测的是一棵不存在的仓库。
  */
 function fixtureRepo({ plugins, consts = AUTHZ_CONSTS, sdkConsts = '', governance = GOVERNANCE }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "authz-rows-"));
@@ -44,10 +48,10 @@ function fixtureRepo({ plugins, consts = AUTHZ_CONSTS, sdkConsts = '', governanc
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "PLUGIN.yml"), yml);
   }
-  const gov = path.join(root, "crates", "symbio-core", "src", "governance");
+  const gov = path.join(root, "crates", "symbio-sdk", "src", "governance");
   fs.mkdirSync(gov, { recursive: true });
   fs.writeFileSync(path.join(gov, "mod.rs"), governance);
-  const authz = path.join(root, "crates", "symbio-core", "src", "authz");
+  const authz = path.join(root, "crates", "symbio-sdk", "src", "authz");
   fs.mkdirSync(authz, { recursive: true });
   fs.writeFileSync(path.join(authz, "mod.rs"), consts);
   const keys = path.join(root, "crates", "symbio-sdk", "src", "keys");
@@ -95,7 +99,7 @@ test("可见域不认识 ⇒ 抛错", () => {
 test("常量与行对不上（两个方向）都抛错", () => {
   // 多一行：清单声明了主体，`mod.rs` 没有对应常量。
   withRepo({ plugins: { session: OK_PLUGIN } }, (root) => {
-    fs.writeFileSync(path.join(root, "crates/symbio-core/src/authz/mod.rs"), "");
+    fs.writeFileSync(path.join(root, "crates/symbio-sdk/src/authz/mod.rs"), "");
     assert.throws(() => collectPrincipals(root), /一条 `PRINCIPAL_\*` 常量都没读到/);
   });
 

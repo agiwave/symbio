@@ -19,7 +19,6 @@ const VERDICT: &str = "verdict.asserted";
 
 use super::*;
 use crate::paths;
-use symbio_core::EliminationDecider;
 use symbio_kernel::actors::Scope;
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::event::{Entity, Event, Verb};
@@ -28,6 +27,7 @@ use symbio_kernel::llm::{ModelProvider, TurnOutput};
 use symbio_kernel::plugin::{PluginError, PluginInvokeRequest, PluginSimpleRequest};
 use symbio_kernel::store::Store as _;
 use symbio_kernel::vdfs::{VdfsChange, VdfsChangeSink, VdfsProvider};
+use symbio_sdk::actors::EliminationDecider;
 use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::turn::dispatch::{TurnSettings, TurnSpec, TURN_DISPATCH};
 use symbio_sdk::turn::node_build::PresentationTree;
@@ -37,7 +37,7 @@ use symbio_sdk::vdfs::host::vdfs_context;
 fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
     use symbio_sdk::chat::principal::Principal;
     match role {
-        cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
         cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         cm::NodeRole::System => Principal::from_legacy("system/local"),
@@ -866,10 +866,10 @@ async fn run_elimination_revoked_sees_a_verdict_from_another_session() {
     append_to_session(
         &f.plugin.storage_dir(),
         "sess-a",
-        EliminationDecider.elimination_event(VERDICT, symbio_core::PRINCIPAL_MAIN, -1, 7),
+        EliminationDecider.elimination_event(VERDICT, symbio_sdk::authz::PRINCIPAL_MAIN, -1, 7),
     );
 
-    assert!(revoked(&f, symbio_core::PRINCIPAL_MAIN).await);
+    assert!(revoked(&f, symbio_sdk::authz::PRINCIPAL_MAIN).await);
 }
 
 /// **嵌套子会话**里的裁决在本会话生效（批发现并修的静默面）。
@@ -882,10 +882,10 @@ async fn run_elimination_revoked_scans_nested_sub_sessions() {
         &f.plugin.storage_dir(),
         "sess-parent",
         "sess-child",
-        EliminationDecider.elimination_event(VERDICT, symbio_core::PRINCIPAL_MAIN, -1, 7),
+        EliminationDecider.elimination_event(VERDICT, symbio_sdk::authz::PRINCIPAL_MAIN, -1, 7),
     );
 
-    assert!(revoked(&f, symbio_core::PRINCIPAL_MAIN).await);
+    assert!(revoked(&f, symbio_sdk::authz::PRINCIPAL_MAIN).await);
 }
 
 /// 恢复可逆：revoke + restore（last-wins）⇒ 闸门放行。
@@ -895,7 +895,7 @@ async fn run_elimination_revoked_scans_nested_sub_sessions() {
 async fn run_elimination_revoked_is_flipped_back_by_a_restoration() {
     let f = fixture();
     let root = f.plugin.storage_dir();
-    let principal = symbio_core::PRINCIPAL_MAIN;
+    let principal = symbio_sdk::authz::PRINCIPAL_MAIN;
     append_to_session(
         &root,
         "sess-a",
@@ -920,7 +920,7 @@ async fn run_elimination_revoked_hits_only_the_verdict_subject() {
         EliminationDecider.elimination_event(VERDICT, "session/ghost", -1, 7),
     );
 
-    assert!(!revoked(&f, symbio_core::PRINCIPAL_MAIN).await);
+    assert!(!revoked(&f, symbio_sdk::authz::PRINCIPAL_MAIN).await);
     assert!(revoked(&f, "session/ghost").await);
 }
 
@@ -928,5 +928,5 @@ async fn run_elimination_revoked_hits_only_the_verdict_subject() {
 #[tokio::test(flavor = "multi_thread")]
 async fn run_elimination_revoked_on_an_empty_deployment_is_false() {
     let f = fixture();
-    assert!(!revoked(&f, symbio_core::PRINCIPAL_MAIN).await);
+    assert!(!revoked(&f, symbio_sdk::authz::PRINCIPAL_MAIN).await);
 }

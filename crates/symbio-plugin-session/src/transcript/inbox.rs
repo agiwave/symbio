@@ -43,7 +43,6 @@ use super::super::active::{ActiveSessionState, InboxItem, PreemptPending};
 use super::super::plugin::{inbox_item_node, inbox_item_path, SessionConfig, SessionPlugin};
 use super::supplements;
 use std::sync::Arc;
-use symbio_core::PRINCIPAL_REFLEX;
 use symbio_kernel::actors::{ActorSpec, Scope};
 use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::event::{Entity, Event, Verb};
@@ -51,6 +50,7 @@ use symbio_kernel::plugin::{PluginError, PluginInvokeRequest, PluginInvokeReques
 use symbio_kernel::store::Store;
 use symbio_kernel::vdfs::VdfsChange;
 use symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL;
+use symbio_sdk::authz::PRINCIPAL_REFLEX;
 use symbio_sdk::chat::{chat_node as cm, session_chat};
 use symbio_sdk::keys::{SESSION_ID, SOURCE_PRINCIPAL, WORKDIR};
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
@@ -194,8 +194,8 @@ impl PreemptionDecider {
     pub fn spec(&self) -> ActorSpec {
         let principal = PRINCIPAL_REFLEX.to_string();
         ActorSpec {
-            pattern: symbio_core::pattern_for_principal(&principal),
-            capabilities: symbio_core::production_matrix().grant_names_of(&principal),
+            pattern: symbio_sdk::actors::pattern_for_principal(&principal),
+            capabilities: symbio_sdk::authz::production_matrix().grant_names_of(&principal),
             budget_ms: LatencyTier::Reflex.budget_ms(),
             scope: Scope::Root,
             principal,
@@ -660,7 +660,7 @@ impl SessionPlugin {
         // 由授权表的窄行给，读的是判定者规格**自己身上**的能力集（不再回头查表）。
         // 拒绝 ⇒ 不落任何控制事实，且清 `Hold`：留着会让消费者为一个写不出的挂起空转。
         let spec = PreemptionDecider.spec();
-        if !symbio_core::actor_can_judge_intent(&spec) {
+        if !symbio_sdk::actors::actor_can_judge_intent(&spec) {
             symbio_plugin_api::plugin_warn!(
                 "actors",
                 "[preempt] 判定者缺 judge.intent，拒绝落控制事实（principal={}，task={task_id}）",

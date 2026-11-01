@@ -18,11 +18,11 @@
 //! 而两边都自称是 SLO。
 
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB};
-use symbio_core::VisScope;
 use symbio_kernel::event::Event;
 use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::chat::chat_node::ChatNodePresentationExt;
+use symbio_sdk::governance::VisScope;
 
 use crate::projections::{
     fallback::{fallback_rate, FallbackRateView},
@@ -68,11 +68,11 @@ pub(super) fn content_scope_of(snapshot: &[symbio_kernel::event::Event]) -> VisS
 
 /// 承诺列：立约记录 + 三个计数 + 违约率。
 ///
-/// 记录本身由 core 翻译（[`symbio_core::commitment_records`]——配对规则在写侧
+/// 记录本身由 core 翻译（[`symbio_sdk::actors::commitment_records`]——配对规则在写侧
 /// 那一族里，本处不另发明一套）；这里只做**取数与排版**，与 `slo_report` /
 /// `reputation` 各列同一纪律。率的分母判据（已了结数）写在列定义里，不重复第二遍。
 pub(super) fn commitments_reading(snapshot: &[Event]) -> serde_json::Value {
-    let items = symbio_core::commitment_records(snapshot, &COMMITMENT_VOCAB);
+    let items = symbio_sdk::actors::commitment_records(snapshot, &COMMITMENT_VOCAB);
     let kept = items.iter().filter(|r| r.state == "kept").count();
     let broken = items.iter().filter(|r| r.state == "broken").count();
     let settled = kept + broken;

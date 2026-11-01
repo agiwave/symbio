@@ -256,7 +256,7 @@ function guessScope() {
     } else if (f.startsWith('crates/symbio-cli/')) s = 'cli'
     else if (
       f.startsWith('crates/symbio/') ||
-      f.startsWith('crates/symbio-core/') ||
+      f.startsWith('crates/symbio-sdk/') ||
       f.startsWith('crates/symbio-kernel/')
     ) {
       s = 'core'

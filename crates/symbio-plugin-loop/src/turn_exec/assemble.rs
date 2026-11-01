@@ -190,7 +190,7 @@ pub(crate) async fn assemble_turn(
 
     // 一次性阶段**不在这里落**：环上的每一行（判决 / 召回 / 压缩）由它自己的执行体
     // 当场入日志（D-159 裁决 4）——装配段不是任何一行的出口。
-    let principal = symbio_core::request_principal(ctx.as_ref());
+    let principal = symbio_sdk::authz::request_principal(ctx.as_ref());
     // 节点身份的同一份主体：流式帧与落库副本必须说同一个人（D-147）。
     let session_principal = symbio_sdk::chat::principal::Principal::from_legacy(&principal);
 

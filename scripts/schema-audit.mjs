@@ -3,13 +3,13 @@
  * schema-audit.mjs —— schemas 定义使用情况审计
  *
  * 目标：
- *   1. 找出「未被使用」的 schema 定义（后端 symbio_core/schemas、前端 tauri/src/schemas）
+ *   1. 找出「未被使用」的 schema 定义（后端 symbio_sdk/schemas、前端 tauri/src/schemas）
  *   2. 找出「仅被一个模块使用」的 schema 模块（下放候选）
  *
  * 性质：**决策支持报告，不是判定**。它只输出候选清单，退出码恒为 0（除非自身崩溃）——
  *   因为「未被使用」的判定有天然盲区，必须人工 grep 复核后才可动手：
  *     · 后端：仅统计 `schemas::` 路径引用与标识符出现；`pub use` 再导出的顶层名
- *       （`crate::symbio_core::ChatNode`）靠标识符出现兜底。
+ *       （`crate::symbio_sdk::ChatNode`）靠标识符出现兜底。
  *     · 前端：模块级引用识别 `from '...'`（含 `export * from`）与相对路径，
  *       故 schemas 内部的再导出链（`vdfs.ts` → `./vdfs-form`）不再误报死文件。
  *   本脚本已接入 `gate.mjs`（docs 阶段）：**崩溃会让门禁失败**，报告内容不判失败。
@@ -50,14 +50,14 @@ const rel = (p) => relative(ROOT, p).split(sep).join('/');
 // ---------- 后端 ----------
 const backendFiles = walk(join(ROOT, 'crates'), ['.rs']);
 // ── 后端半边已退役（[D-087](../docs/003-design/001-核心架构.md "D-087")，2026-10-19）──────
-// `symbio_core/schemas/` 已拆成 `chat` / `dialog` / `present` / `turn` 四个域，
+// `symbio_sdk/schemas/` 已拆成 `chat` / `dialog` / `present` / `turn` 四个域，
 // 本脚本赖以工作的三个前提同时消失：①有一个叫 schemas 的目录可枚举；②引用写成
 // `schemas::a::b`；③`schemas/mod.rs` 是唯一的再出口。
 // 「某个契约定义有没有外部消费方」的判据**已经有人管**：`core-export-audit` C-003
 // （零消费方 0 / 单消费方棘轮）按根出口逐符号判，且带只降基线。两条口径并存就是
 // 「一个事实两个 owner」，它们迟早给出不同答案。故后端半边退役，本脚本只保留
 // **前端镜像面**（`tauri/src/schemas` ⇄ 后端真源）的审计。
-const schemasRoot = join(ROOT, 'crates/symbio-core/src/schemas');
+const schemasRoot = join(ROOT, 'crates/symbio-sdk/src/schemas');
 const backendSchemaFiles = existsSync(schemasRoot)
   ? backendFiles.filter((f) => f.startsWith(schemasRoot))
   : [];
@@ -159,7 +159,7 @@ function expandUse(path, depth = 0) {
 
 for (const f of backendFiles) {
   const src = readFileSync(f, 'utf8');
-  const isSchemasMod = rel(f) === 'crates/symbio-core/src/schemas/mod.rs';
+  const isSchemasMod = rel(f) === 'crates/symbio-sdk/src/schemas/mod.rs';
 
   // 1) use 语句（含花括号组展开）
   if (!isSchemasMod) {
@@ -283,7 +283,7 @@ for (const f of backendSchemaFiles) {
   if (cons) for (const cf of cons.keys()) if (!cf.startsWith(schemasRoot)) topConsumers.get(top).add(cf);
 }
 // schemas/mod.rs 的 pub use re-export 也算作「经由顶层模块出口」的消费途径：
-// 消费方 import 的是顶层名（crate::symbio_core::ChatNode），归属到被 re-export 的模块
+// 消费方 import 的是顶层名（crate::symbio_sdk::ChatNode），归属到被 re-export 的模块
 const modRs = existsSync(join(schemasRoot, 'mod.rs'))
   ? readFileSync(join(schemasRoot, 'mod.rs'), 'utf8')
   : '';

@@ -13,7 +13,6 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-core = { path = "../symbio-core" }
 symbio-sdk = { path = "../symbio-sdk" }
 symbio-kernel = { path = "../symbio-kernel" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }

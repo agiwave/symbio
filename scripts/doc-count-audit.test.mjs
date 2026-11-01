@@ -170,7 +170,7 @@ test('不误报：数与名字之间有实词（读侧 `check_all` 会把同一�
     body: OK,
     checkAll: 8,
     extra: {
-      'crates/symbio-core/src/store/wal.rs': '/// 不拒绝而是计数 + 出声，读侧 `check_all` 会把同一条反复计入。\nfn t() {}\n',
+      'crates/symbio-sdk/src/store/wal.rs': '/// 不拒绝而是计数 + 出声，读侧 `check_all` 会把同一条反复计入。\nfn t() {}\n',
     },
   })
   assert.equal(r.status, 0, r.stdout)

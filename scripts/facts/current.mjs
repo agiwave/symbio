@@ -485,7 +485,7 @@ function render() {
     `| Agent 目录 | \`agent/<id>\`（工作区级 + 全局级双层） | \`AgentDirStore\` 自管，不经 \`vdfs_service\`；虚拟视图以 \`${vdfsRoot}/agent/<id>\` 进入 |`
   );
   // ⚠️ 运行期路径**不带**仓库布局那一层：系统根下就是「一个插件一个目录」的扁平
-  // 结构（`symbio_core/plugin/dir.rs` 顶部写明了理由与自举环）。本表自称「权威
+  // 结构（`symbio_sdk/plugin/dir.rs` 顶部写明了理由与自举环）。本表自称「权威
   // 事实」，路径写错会被逐字抄进别处。
   L.push(
     "| 插件配置（含会话配置） | `<homedir>/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `PluginConfigFile` 自读写，**无第二种后端、无第二条配置协议** |"

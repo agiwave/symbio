@@ -38,10 +38,10 @@
 //
 //   | 程序 | 包含的生产文件 | 判什么 |
 //   |---|---|---|
-//   | `consolidation_fidelity` | `symbio_core/text/merge_kernel.rs` | 巩固合并的保真度下界 |
+//   | `consolidation_fidelity` | `symbio_sdk/text/merge_kernel.rs` | 巩固合并的保真度下界 |
 //   | `recall_eval` | `crates/symbio-plugin-loop/src/recall_score.rs` | 检索排序的 recall@k / 依赖度 |
-// | `invariants` | `symbio_core/invariants/kernel.rs` | I1 的 seq 单调无跳号 / 每 turn 一条 final |
-// | `termination` | `symbio_core/invariants/kernel.rs` | 终止性前提 2（返工上界）/ 前提 3（依赖图无环） |
+// | `invariants` | `symbio_sdk/invariants/kernel.rs` | I1 的 seq 单调无跳号 / 每 turn 一条 final |
+// | `termination` | `symbio_sdk/invariants/kernel.rs` | 终止性前提 2（返工上界）/ 前提 3（依赖图无环） |
 //
 // - **只与文档/自造数据耦合**（其余 12 个）：证明「判据在自造样本上自洽」，
 //   不证明「生产实现遵守判据」。其中有几个的被测对象本来就是文档

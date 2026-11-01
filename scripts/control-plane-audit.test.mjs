@@ -125,7 +125,7 @@ function assertRed(r, code) {
 
 // ───────────────────────────── 夹具 ─────────────────────────────
 
-const LOOP_ROWS = `use symbio_core::ring;
+const LOOP_ROWS = `use symbio_sdk::ring;
 
 pub const OPENER: &str = "opener";
 pub const CLOSE: &str = "close";
@@ -396,7 +396,7 @@ function cleanTree() {
     'crates/symbio-kernel/src/lib.rs': 'pub mod adapters;\npub mod decl;\n',
     [DECL]: KERNEL_DECL_SRC,
     'crates/symbio-kernel/src/adapters.rs': KERNEL_ADAPTERS_SRC,
-    'crates/symbio-core/src/lib.rs': 'pub struct Event {\n    pub name: String,\n}\n',
+    'crates/symbio-sdk/src/lib.rs': 'pub struct Event {\n    pub name: String,\n}\n',
     [SPEC]: SPEC_TEXT,
     [RULING]: RULING_TEXT,
     [TRIP_RULING]: TRIP_RULING_TEXT,

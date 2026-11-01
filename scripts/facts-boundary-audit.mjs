@@ -20,7 +20,7 @@
  * 要往盘上落一轮事实。它们不是能力面，也不参与生产调用链。判据若连夹具一起判，
  * 唯一能让门禁变绿的办法是把夹具也套进 `SessionStore`——那既没测到被测对象，
  * 又让「新测试怎么造事实」变成一条不成文的规矩。D-084 的判据因此写明**生产代码**；
- * 排除口径与 `core-shape-audit` 同一套（`*.test.rs` / `tests.rs`）。
+ * 排除口径与 `arch-shape-audit` 同一套（`*.test.rs` / `tests.rs`）。
  *
  * ## 已知边界
  *
@@ -45,7 +45,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, dim } from './color.mjs'
-import { isTestFile, walk } from './core-surface.mjs'
+import { isTestFile, walk } from './fs-walk.mjs'
 import { blankComments } from './rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))

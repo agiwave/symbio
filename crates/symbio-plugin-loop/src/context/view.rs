@@ -48,7 +48,7 @@ pub fn build_request_sections(sections: &[(&'static str, String)]) -> Vec<ChatNo
         .map(|(slot, text)| ChatNode {
             id: uuid::Uuid::new_v4().to_string(),
             principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
-                symbio_core::PRINCIPAL_USER,
+                symbio_sdk::authz::PRINCIPAL_USER,
             )),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(text.clone())),

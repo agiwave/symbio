@@ -162,7 +162,7 @@ fn compression_instruction() -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
-            symbio_core::PRINCIPAL_USER,
+            symbio_sdk::authz::PRINCIPAL_USER,
         )),
         msg_type: Some(NodeKind::Body),
         // 措辞刻意**不提** `<state_snapshot>` 标签名：结构定义只在 system 侧出现

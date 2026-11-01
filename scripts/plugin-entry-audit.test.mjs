@@ -57,7 +57,7 @@ function audit(files, { strict = false } = {}) {
 /** 装配方与 `symbio_core` 的最小事实源：工厂 id、协议端点、路由常量 */
 const CORE = {
   'crates/symbio-deploy/src/lib.rs': `pub const PLUGIN_ID_SESSION: &str = "session";\n`,
-  'crates/symbio-core/src/plugin/traverse.rs':
+  'crates/symbio-sdk/src/plugin/traverse.rs':
     `pub const TRAVERSE_AVAILABLE_TOOLS: &str = "available_tools";\n` +
     `pub const TRAVERSE_AVAILABLE_OPTIONS: &str = "available_options";\n`,
   'crates/symbio-plugin-api/src/routes.rs':
@@ -66,7 +66,7 @@ const CORE = {
 
 /** 一个干净的最小插件：两条静态路由臂 + 只认 `available_tools` 的 traverse */
 const PLUGIN = `use crate::assembly::PLUGIN_ID_SESSION;
-use crate::symbio_core::{PluginError, PluginMeta, PATH, TRAVERSE_AVAILABLE_TOOLS};
+use crate::symbio_sdk::{PluginError, PluginMeta, PATH, TRAVERSE_AVAILABLE_TOOLS};
 
 pub struct SessionPlugin;
 
@@ -148,7 +148,7 @@ const HOME_ARMS = (arms) => ({
   'crates/symbio-deploy/src/lib.rs':
     `${CORE['crates/symbio-deploy/src/lib.rs']}pub const PLUGIN_ID_HOME: &str = "home";\n`,
   'crates/symbio-plugin-home/src/plugin.rs': `use crate::assembly::PLUGIN_ID_HOME;
-use crate::symbio_core::{PluginError, PluginMeta, PATH};
+use crate::symbio_sdk::{PluginError, PluginMeta, PATH};
 
 pub struct HomePlugin;
 
@@ -522,7 +522,7 @@ pub struct FooPlugin {
 test('E-007 不误报：不在插件 crate 之下的同类字段', () => {
   const r = audit({
     ...CLEAN,
-    'crates/symbio-core/src/registry.rs': 'pub struct Reg {\n    held: Arc<RwLock<Option<Arc<dyn Plugin>>>>,\n}\n',
+    'crates/symbio-sdk/src/registry.rs': 'pub struct Reg {\n    held: Arc<RwLock<Option<Arc<dyn Plugin>>>>,\n}\n',
   })
   assert.equal(r.status, 0, r.stdout)
   assert.doesNotMatch(r.stdout, E007_HIT)
@@ -570,7 +570,7 @@ test('提取正确性：`*.test.rs` 里的假 route 不参与臂提取', () => {
 // 已把该词改名为 `failed`（理由见 `vdfs/words.rs::VDFS_STATUS_FAILED`）——两边
 // 各说各话，没有任何测试因此变红；而人读文档写的代码会照 `error` 写。
 const VOCAB_CORE = {
-  'crates/symbio-core/src/vdfs/words.rs':
+  'crates/symbio-sdk/src/vdfs/words.rs':
     `pub const FOO_ONE: &str = "one";\npub const FOO_TWO: &str = "two";\n`,
 }
 const vocabDoc = (line) => ({ ...CLEAN, ...VOCAB_CORE, 'docs/003-design/009-VDFS规范.md': `${line}\n` })
@@ -906,15 +906,15 @@ test('E-009 不误报：装配方 `crates/symbio` 聚合全部插件（inventory
 
 // ── E-010（已迁出）─────────────────────────────────────────────────────
 //
-// 原「消费方不得深引 `symbio_core::<域>::`」连同它在这里的 7 条用例一起迁到了
+// 原「消费方不得深引 `symbio_sdk::<域>::`」连同它在这里的 7 条用例一起迁到了
 // `core-export-audit.test.mjs`（C-002）：深引是**内核出口**的事，判定方只留一个，
-// 覆盖面反而更全——C-002 还拦裸 `use …::symbio_core::<域>;`（本脚本的正则要求尾
+// 覆盖面反而更全——C-002 还拦裸 `use …::symbio_sdk::<域>;`（本脚本的正则要求尾
 // `::`，漏了这种形态），且 `schemas::` 不再有豁免（根 `mod schemas;` 已私有化）。
 
 // ── E-011：纯配置挂载点插件不得手写 `impl VdfsProvider` ──────────────────
 //
 // 真实形态：gateway / local / telegram / web 四臂 dispatch 骨架逐字相同，机制侧
-// 已提供唯一实现（`symbio_core::PluginConfigMount`）。手写一份就是把同一段语义
+// 已提供唯一实现（`symbio_sdk::PluginConfigMount`）。手写一份就是把同一段语义
 // 复制出去。判据靠 `CONFIG_MOUNT_PLUGINS` 名单——名单即「挂载根只有一份配置」的事实表。
 const E011_HIT = /\[ERROR\]\s+E-011\s+\S+:\d/
 
@@ -922,7 +922,7 @@ test('E-011 命中：名单内的插件手写 `impl VdfsProvider`', () => {
   const r = audit({
     ...CLEAN,
     'crates/symbio-plugin-web/src/plugin.rs':
-      'use crate::symbio_core::VdfsProvider;\n' +
+      'use crate::symbio_sdk::VdfsProvider;\n' +
       'impl VdfsProvider for WebPlugin {\n    async fn dispatch(&self) {}\n}\n',
   })
   assert.equal(r.status, 1, r.stdout)
@@ -933,7 +933,7 @@ test('E-011 不误报：名单内的插件实现 `PluginConfigMount`（正确形
   const r = audit({
     ...CLEAN,
     'crates/symbio-plugin-web/src/plugin.rs':
-      'impl crate::symbio_core::PluginConfigMount for WebPlugin {\n' +
+      'impl crate::symbio_sdk::PluginConfigMount for WebPlugin {\n' +
       '    type Config = WebConfig;\n}\n',
   })
   assert.equal(r.status, 0, r.stdout)
@@ -1076,14 +1076,19 @@ test('E-013 命中：loop 生产文件用了 `crate::providers`（实现层，�
   assert.match(r.stdout, /E-013 .*`crate::providers` 不在驱动器闭族内/)
 })
 
-test('E-013 不误报：core / 通用库 / 相对路径 / crate 根宏', () => {
+test('E-013 不误报：宿主机制面 / 通用库 / 相对路径 / crate 根宏', () => {
   const r = audit({
     ...CLEAN,
     'crates/symbio-plugin-loop/src/driver.rs':
       'use std::sync::Arc;\n' +
       'use async_trait::async_trait;\n' +
       'use serde_json::Value;\n' +
-      'use crate::symbio_core::{Plugin, Store};\n' +
+      // crate 化（D-191）之后宿主机制面是**外部 crate**：写法是 `use symbio_sdk::…`，
+      // 不是 `crate::symbio_sdk::…`（后者编译不过）；D-279 又删掉了 core 整棵，
+      // `crate::symbio_core::…` 同样已成死形态。
+      'use symbio_sdk::{Plugin, Store};\n' +
+      'use symbio_kernel::event::Event;\n' +
+      'use crate::control_decl::EVENT_TURN_STAGE;\n' +
       'use crate::{plugin_warn, submit_object_creator};\n' +
       'use super::turn_exec::*;\n' +
       'pub fn f() { plugin_warn!("ok"); }\n',
