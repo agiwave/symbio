@@ -446,13 +446,11 @@ impl Builder {
                 match self.facts.iter().find(|f| f.name == fact) {
                     // 名字在事件表上、只是没有事实声明 ⇒ **报告**，不是缺口（`D-282`）：
                     // 判据 3 的输入（`FactDecl.fields`）缺席，不是它说「字段错了」。
-                    None if event_names.contains(fact) => {
-                        assertion_reads.push(AssertionRead {
-                            view: v.name,
-                            fact,
-                            field,
-                        })
-                    }
+                    None if event_names.contains(fact) => assertion_reads.push(AssertionRead {
+                        view: v.name,
+                        fact,
+                        field,
+                    }),
                     // 名字连事件格位都没有 ⇒ 真拼错，照旧红。
                     None => gaps.push(Gap::UnknownFact { view: v.name, fact }),
                     Some(f) if !f.fields.contains(&field) => gaps.push(Gap::UndeclaredField {
