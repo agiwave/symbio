@@ -22,6 +22,11 @@ const backendDir = repoRoot
 export default {
   id: 'backend',
   title: '后端（cargo，根 workspace）',
+  // 输入面：`rust`（`crates/**` 与 `tauri/src-tauri/**` 的非 `.md` 文件、各 `Cargo.*`、
+  // 工具链 / lint 档位）。**判据**是「编译与测试」，而它的输入里没有一个 `.md`
+  // ——改文档时跑 `cargo test --workspace` 是纯代价（实测冷 1m24s、clippy 3m34s），
+  // 得到的结论与上一轮逐字相同。范围求不出时 `needs` 不生效（全跑），见 `_scope.mjs`。
+  needs: ['rust'],
   // 阶段级并发：本阶段只写 `target/`，与批内其他泳道无数据依赖——docs 守卫只读
   // 源码与 scripts，baseline 只读 git 历史与 scripts，msrv 用独立的
   // `.workbuddy-ai/msrv-target`（不与 backend 争 `.cargo-lock`）。fmt 已拆到

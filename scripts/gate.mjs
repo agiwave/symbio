@@ -116,6 +116,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
 import { machine, describe, budget, recordRun, measuredMs, stageWallMs, setBatchLanes, setTaskKeyScope } from './gate.d/_machine.mjs'
+import { resolveScope, skipReason } from './gate.d/_scope.mjs'
 import {
   LOGS_DIR_NAME,
   KEEP_RUNS,
@@ -226,11 +227,19 @@ const USAGE = `用法：node scripts/gate.mjs [选项]
   （无参数）            跑全部阶段
   --only=id1,id2        只跑指定阶段（id 见 --list；拼错会报错，不会静默跑 0 个阶段）
   --skip=id1,id2        跳过指定阶段（id 同上）
-  --ci                  CI 对齐模式（语义由各任务模块自行解释）
+  --ci                  CI 对齐模式（语义由各任务模块自行解释；**恒全跑**，不看范围）
   --profile=<p>         附加构建档位（语义由各任务模块自行解释）
-  --base=<ref>          棘轮基准版本（只对 baseline 阶段有意义；缺省取最近触碰该落点的提交）
+  --base=<ref>          棘轮基准版本（只对 baseline 阶段有意义）；**同时是本轮变更范围的基准**
+  --full                强制全跑，不看变更范围（范围不可得时本来就全跑）
   --list                只列出阶段与任务，不执行
   --help, -h            打印本用法并退出（**不跑任何阶段**）
+
+  默认行为是「按本次改动收窄」：只有 crates/ 变了才跑 cargo，只有 tauri/ 变了才跑前端，
+  只有 scripts/ 变了才跑那些**检查器自己的回归测试**。范围求不出（浅克隆 / 无上游 /
+  拼错 --base）时一律全跑——少跑的代价是假绿，多跑的代价是几分钟。
+  被跳过的阶段在汇总上是一行 ⊘ 加理由，不是消失（D-224）。
+  只想跑某几段时仍然用 --only= / --skip=，两者与范围判断**叠加**：--only= 先圈候选，
+  范围再决定候选里哪些这一轮不必跑。
 
   查用法一律用 --help。本脚本的默认动作是**全量门禁**（10+ 分钟），所以
   **未识别的参数一律拒绝**（退出码 2）：在默认动作昂贵的脚本上「未知参数不报错、
@@ -259,7 +268,7 @@ if (hasFlag('--help') || hasFlag('-h')) {
 //
 // `--base=<ref>` 由 `35-baseline.mjs` 直接读 `process.argv`（棘轮基准的显式覆盖口，
 // 见该文件），它不经过本文件的解析，但**是**合法参数，故一并放行并登记进用法。
-const KNOWN_FLAGS = new Set(['--ci', '--list', '--help', '-h'])
+const KNOWN_FLAGS = new Set(['--ci', '--list', '--help', '-h', '--full'])
 const KNOWN_PREFIXES = ['--only=', '--skip=', '--profile=', '--base=']
 const unknownArgs = argv.filter(
   (a) => !KNOWN_FLAGS.has(a) && !KNOWN_PREFIXES.some((p) => a.startsWith(p)),
@@ -534,12 +543,26 @@ function run(o) {
   })
 }
 
+/**
+ * 本轮**变更范围**（`gate.d/_scope.mjs`）——「这一轮该不该跑某个阶段」的唯一来源。
+ *
+ * **惰性求值**：`--help` / `--list` / 被拒绝的参数都走不到阶段执行，却都会构造 `ctx`；
+ * 在那里白跑两条 git 命令既没必要，也让「只看清单」这类只读动作带上副作用面
+ * （与日志目录懒建同一条理由）。第一次真问 `ctx.scope` 时才去算。
+ */
+let SCOPE = null
+const scopeOf = () => (SCOPE ??= resolveScope({ repoRoot, base: valOf('--base='), full: hasFlag('--full') || CI }))
+
 const ctx = {
   repoRoot,
   scriptDir,
   logDir,
   ci: CI,
   profile,
+  /** 本轮变更范围；阶段用 `needs: [...]` 声明自己吃哪个面（见 `runStage`）。 */
+  get scope() {
+    return scopeOf()
+  },
   // 棘轮向上自动上调：仅本地门禁写回并暂存（CI 无法提交，只亮绿灯）。见 `_shared.ratchetOrBump`。
   autoBump: !CI,
   run,
@@ -738,6 +761,9 @@ console.log(
   ),
 )
 console.log(dim(`  阶段：${renderPlan(lanePlan)}`))
+// 范围要在**跑之前**说出来：被跳过的阶段在汇总里只有一行 ⊘，而「为什么这轮这么短」
+// 是读者看到的第一个问题。放在阶段行之后，是因为它解释的是那条编排里哪些会被跳过。
+console.log(dim(`  范围：${scopeOf().reason}`))
 
 // ── 机器能力档案：并发度与超时预算的唯一来源（`gate.d/_machine.mjs`） ──────
 //
@@ -900,6 +926,35 @@ function resolveConcurrency(s) {
 async function runStage(s, index) {
   stageHeader(index + 1, s.title)
   const stageStart = Date.now()
+  // ── 阶段级「按变更范围跳过」 ──────────────────────────────────────────────
+  //
+  // 阶段用 `needs: ['rust']` 声明**它的判据吃哪个面**（各阶段在自己的文件头写清
+  // 为什么是这几个面）。本轮改动一个都没碰到 ⇒ 记一条 `⊘` 并写明理由，不是静默消失
+  // ——`D-224` 的判据是「没跑」必须与「跑过且绿」在输出上可区分，`⊘` 行就是那个区分。
+  //
+  // 三条边界：
+  // ① **范围不可得时 `hits()` 恒真**，所以这里不会因为算不出范围而少跑（fail-open 在
+  //    `_scope.mjs` 里，不在调用点——调用点若自己兜底，两处判据必然分叉）；
+  // ② `needs` 缺省 = 无条件跑。**新增阶段默认全跑**，要收窄必须显式声明：写错一个
+  //    数组的代价是白跑几分钟，漏写一个的代价是假绿；
+  // ③ 本判定**不改变任何一条判据的内容**，只改变它这一轮要不要执行。
+  if (Array.isArray(s.needs) && s.needs.length > 0) {
+    const scope = scopeOf()
+    if (!scope.hits(s.needs)) {
+      const note = skipReason(scope, s.needs)
+      console.log(yellow(`  ⊘ ${note}`))
+      record(s.id, {
+        stage: s.id,
+        label: '（本阶段按变更范围跳过）',
+        pass: 'skipped',
+        note,
+        logFile: null,
+        ms: 0,
+      })
+      stageMs.set(s.id, (stageMs.get(s.id) ?? 0) + (Date.now() - stageStart))
+      return
+    }
+  }
   const tasks = materialize(s)
   // **一个阶段产出 0 项 = 这条判据这一轮没人跑**，而汇总表上它连一行都没有——
   // 「跑过了」与「没得跑」看起来一模一样。实测的现成例子是 msrv：阶段写死了 D-191 之前

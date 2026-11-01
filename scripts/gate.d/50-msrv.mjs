@@ -74,6 +74,9 @@ function readMsrvGroups() {
 export default {
   id: 'msrv',
   title: 'MSRV（rust-version 实编译校验）',
+  // 输入面：`rust`。MSRV 只可能被 Rust 源（语言特性）、清单与工具链声明动到；
+  // 纯文档 / 纯前端改动不改变「这些 crate 能不能用 1.91.0 编出来」这个结论。
+  needs: ['rust'],
   // 阶段级并发：CARGO_TARGET_DIR 指向独立的 `.workbuddy-ai/msrv-target/<版本>`，与
   // backend 的编译**不争 `.cargo-lock`**；1.91 与 1.93 的产物本就互不复用，并发只是让
   // 两套 rustc 同时推进（单 crate 编译的 CPU 上不去，两条编译流水线叠着跑才用得起来）。

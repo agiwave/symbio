@@ -23,6 +23,9 @@ const bin = (p) => path.join(frontendDir, 'node_modules', p)
 export default {
   id: 'frontend-build',
   title: '前端构建（vite build）',
+  // 输入面：`frontend`。vite build 只读 `tauri/` 下的前端源与它自己的配置，
+  // 与 `crates/**` 无关；后端改动时重跑它买到的是同一份 `tauri/dist`。
+  needs: ['frontend'],
   tasks(ctx) {
     if (!fs.existsSync(path.join(frontendDir, 'package.json'))) return []
 

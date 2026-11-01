@@ -120,6 +120,11 @@ const DOC_LINT_ENV = {
 export default {
   id: 'rustdoc',
   title: 'rustdoc 断链与伪码块（cargo doc）',
+  // 输入面：`rust`。`cargo-doc-gate.mjs` 的内容指纹已经买到了「内容没变却要重跑」
+  // 那一档，本行买的是更粗的一档：**这一轮根本没碰 Rust**（纯 `.md` / 纯前端改动）。
+  // 那一档里 `cargo doc` 不是「重跑一遍」而是「白跑一遍」——实测冷 4m50s，
+  // 占全量门禁七成以上，而结论不可能变（断链只由 `.rs` 与文档注释决定）。
+  needs: ['rust'],
   // 阶段级并发：本阶段只写 `target/`（`target/doc` 与 cargo 的指纹目录），与批内
   // 其他泳道无数据依赖。与 backend 同处一个 `.cargo-lock` 是**已知且可接受**的：
   // 两条 cargo 命令本来就会互斥排队，墙钟等于两者之和（与把它们串在一条泳道里

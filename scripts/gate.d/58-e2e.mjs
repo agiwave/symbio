@@ -45,6 +45,10 @@ function discoverCases() {
 export default {
   id: 'e2e',
   title: '端到端（CLI × mock LLM × mock MCP）',
+  // 输入面：`rust`（被测件是 `crates/symbio-cli` 的 release 二进制）+ `e2e`（用例自己）。
+  // 前端改动不进这个集合：e2e 跑的是 CLI，不加载任何前端产物。**这是全量门禁里最贵的
+  // 单阶段之一（实测 1m40s、88 例）**，而它对「改了一句文档」的结论恒等于上一轮。
+  needs: ['rust', 'e2e'],
   tasks(ctx) {
     const tasks = []
     if (!fs.existsSync(path.join(cliDir, 'Cargo.toml'))) return tasks

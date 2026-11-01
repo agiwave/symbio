@@ -62,6 +62,9 @@ const bin = (p) => path.join(frontendDir, 'node_modules', p)
 export default {
   id: 'frontend-static',
   title: '前端静态检查（vue-tsc / vitest / eslint）',
+  // 输入面：`frontend`（`tauri/` 下除 `src-tauri/` 的部分）。vue-tsc / vitest / eslint
+  // 的输入里没有 `.rs` 也没有 `docs/`：Rust 侧改动不该让这三项重跑一遍。
+  needs: ['frontend'],
   parallel: true,
   tasks(ctx) {
     if (!fs.existsSync(path.join(frontendDir, 'package.json'))) return []
