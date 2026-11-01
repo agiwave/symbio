@@ -186,7 +186,7 @@ pub struct VdfsSearchRequest {
 //
 // 用行注释而不是 `///`：给 `pub use` 挂文档注释并链接到被转发的项会让 rustdoc 在
 // 链接解析阶段 panic（`no resolutions for a doc link`，rustc 1.91）。语义与字段说明
-// 在 `symbio_core::vdfs::VdfsListResponse` 上。
+// 在 `symbio_kernel::vdfs::VdfsListResponse` 上。
 pub use symbio_plugin_api::VdfsListResponse;
 
 /// `vdfs/tree` 响应（**扁平**条目列表——层级由每个条目的 `path` 表达）

@@ -40,9 +40,11 @@ edition = "2021"
 rust-version = "1.91"
 
 [dependencies]
-symbio-core = { path = "../symbio-core" }
-symbio-kernel = { path = "../symbio-kernel" }
-symbio-deploy = { path = "../symbio-deploy" }
+# **只依赖门面**：`symbio-plugin-api` 已经转出语法（kernel）与机制（sdk）两臂，
+# 装配常量也经它转出（`symbio-deploy` 的 `PLUGIN_ID_*`）。直接写 kernel / sdk /
+# deploy 三行会被 `plugin-surface-audit`（HS-001）判红——那不是风格问题，
+# 它决定「插件依赖几个架构模块」由边界决定还是由某段代码顺手写了哪个前缀决定。
+symbio-plugin-api = { path = "../symbio-plugin-api" }
 async-trait = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -77,12 +79,11 @@ pub mod plugin;
 // crates/symbio-plugin-my_plugin/src/plugin.rs
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, NAME, PATH,
-    TRAVERSE_AVAILABLE_TOOLS,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_MY_PLUGIN, CAPABILITY_VISITOR,
+    PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
-use symbio_deploy::PLUGIN_ID_MY_PLUGIN;
 
 pub struct MyPlugin;
 
@@ -140,7 +141,7 @@ impl Plugin for MyPlugin {
     }
 }
 
-symbio_core::submit_object_creator!(PLUGIN_ID_MY_PLUGIN, MyPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_MY_PLUGIN, MyPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]
@@ -159,7 +160,7 @@ mod tests;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::{
+use symbio_plugin_api::{
     Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
     PluginInvokeRequest,
 };
@@ -234,7 +235,7 @@ plugin_author: me # 作者
 构造，不是不存在）。`meta` 的另一半（`order` / `icon` / `hidden` / `root_access`）
 是**挂载点呈现**，只在运行期读，不投影——没有挂载点就没有这些属性。
 
-> 配置读写走 `symbio_core::plugin::dir` 的 `PluginDir` + `PluginConfigFile`：插件持有自己的
+> 配置读写走门面的 `PluginDir` + `PluginConfigFile`（实现住在 `symbio-sdk` 的 `plugin::dir`）：插件持有自己的
 > `PluginConfigFile`，读 / 写**自己**的 `PLUGIN.yml`（`PluginConfigFile::apply` = 校验 → 落内存 →
 > 落自己的文件 → 广播）。对外地址自动是 `<根>/my_plugin/PLUGIN.yml`，无需写任何路由。
 > 要出现在设置页，只需在 `traverse` 里 `capability_announce_configurable(&ctx, &self.config_file)`——
@@ -319,7 +320,7 @@ impl Plugin for MyContainer {
 ## 流式会话实现
 
 ```rust
-use symbio_core::PluginChannel;
+use symbio_kernel::exec::PluginChannel;
 
 async fn route(
     self: Arc<Self>,
@@ -377,7 +378,7 @@ export async function greet(name: string) {
 ```rust
 // crates/symbio-plugin-my_plugin/src/plugin.test.rs
 use super::*;
-use symbio_core::PluginSimpleRequest;
+use symbio_kernel::plugin::PluginSimpleRequest;
 
 #[tokio::test]
 async fn greet_returns_message() {

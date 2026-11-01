@@ -97,7 +97,7 @@ impl SessionPlugin {
         //   「新建会话」——它只说建在哪个目录，不说叫什么。
         if existing.is_none() && content.create {
             // 名字是不是**本插件生成的**——决定回执里要不要交回它
-            // （见 [`symbio_core::VdfsWriteResponse::name`]）。
+            // （见 [`symbio_kernel::vdfs::request::VdfsWriteResponse::name`]）。
             let anonymous = named.is_none();
             let id = match named {
                 Some(id) => id,
@@ -178,7 +178,7 @@ impl SessionPlugin {
             self.bind_session_identity(&session).await;
         }
         // 资源变更（标题 / metadata）走粗粒度信号：消费方重拉清单收敛。
-        // 不带节点视图，见 `symbio_core::vdfs_notify_change`。
+        // 不带节点视图，见 `symbio_sdk::vdfs::host::vdfs_notify_change`。
         self.notify_change(&id);
         Ok(VdfsResponse::Write(VdfsWriteResponse {
             name: None,
@@ -198,7 +198,7 @@ impl SessionPlugin {
     /// 带连字符），既难读也难抄。
     ///
     /// 项目早已有一致的短 id 约定，这里只是不再例外：
-    /// - `symbio_core::turn::llm_short_id()`（消息节点 id）
+    /// - `symbio_sdk::turn::llm_short_id()`（消息节点 id）
     /// - `vdfs_service::entry::auto_id()`（无名字新建的条目 id，`<kind>-<8位>`）
     ///
     /// 后端**没有任何地方** `Uuid::parse_str` 会话 id（已全仓核对），因此改格式安全；
@@ -567,7 +567,7 @@ impl SessionPlugin {
 
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
     ///
-    /// 唯一入口是 [`symbio_core::VdfsProvider::dispatch`] 的两条 `Delete` 分支（会话本体
+    /// 唯一入口是 [`symbio_kernel::vdfs::provider::VdfsProvider::dispatch`] 的两条 `Delete` 分支（会话本体
     /// 与 `sub_session_at` 的子会话），两者语义相同，共用这一份实现。
     ///
     /// ## 为什么没有第二条删除路径

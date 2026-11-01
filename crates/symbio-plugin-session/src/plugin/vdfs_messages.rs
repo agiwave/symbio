@@ -125,7 +125,7 @@ impl SessionPlugin {
             VdfsRequest::Delete { .. } => {
                 // 转写区段（列表与单条）**不可 delete**：`delete` 的全局语义是
                 // 「**这一个**节点没了」，而「从这条删到末尾」是一种**区间**语义，
-                // 有它自己的动作——[`symbio_core::VDFS_ACTION_TRUNCATE`]（落在起始消息上）。
+                // 有它自己的动作——[`symbio_kernel::vdfs::VDFS_ACTION_TRUNCATE`]（落在起始消息上）。
                 // 动作承载这类集合操作——理由见 `VDFS_ACTION_TRUNCATE` 的文档。
                 Err(VdfsError::Forbidden(format!(
                     "转写区段不可 delete：删除某条及其之后请用 action(\"{truncate}\")：{path}",

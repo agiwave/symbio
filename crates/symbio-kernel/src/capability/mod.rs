@@ -1,6 +1,6 @@
 //! 能力表的**内核面**：Capability / Registry trait、元数据与行词汇（D-188 C2b）。
 //!
-//! 收集通道、审批配置、模型 / 提示词 / 挂载族的自由函数仍在 `symbio_core::capability`。
+//! 收集通道、审批配置、模型 / 提示词 / 挂载族的自由函数仍在 `symbio_sdk::capability`。
 
 pub mod family;
 mod row;

@@ -17,7 +17,7 @@
 //! `crates/symbio-plugin-task` 与本插件**两方**消费，因此留在 core——两条不同的处置
 //! 来自同一条判据，不是两份口径。
 //!
-//! 词汇仍是 [`symbio_core::TaskVocab`]（D-206）：本折叠只用 `held` 与 `terminal` 两格，
+//! 词汇仍是 [`symbio_sdk::projection::task_vocab::TaskVocab`]（D-206）：本折叠只用 `held` 与 `terminal` 两格，
 //! 但收的是整张表——与 core 的 `readyset_for` 拿到的是**同一份**拼写
 //! （`crate::declarations::TASK_VOCAB`），两个折叠不可能各读各的拼写而漂移。
 //!

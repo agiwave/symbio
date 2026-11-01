@@ -1,6 +1,6 @@
 //! 插件契约的**内核面**：Plugin trait、请求上下文、信封与错误（D-188 C2b）。
 //!
-//! 宿主侧的目录、清单、遍历端点仍在 `symbio_core::plugin`；内核只装签名类型。
+//! 宿主侧的目录、清单、遍历端点仍在 `symbio_sdk::plugin`；内核只装签名类型。
 
 pub mod error;
 mod response;

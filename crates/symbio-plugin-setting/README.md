@@ -58,4 +58,4 @@ impl: done
 - 本智能体的记忆：`../memory/README.md`
 - 子智能体目录与接入门槛：`../agent/README.md`
 - 设置页入口（**不拥有任何设置内容**）：`../plugin_manager/README.md`
-- 纯配置挂载点机制：`symbio_core::PluginConfigMount`
+- 纯配置挂载点机制：`symbio_sdk::plugin::dir::PluginConfigMount`

@@ -57,7 +57,7 @@ export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-loop', 'symbio
 /** 扩展层插件不得直接依赖的三个 crate（manifest 键名）。 */
 export const FORBIDDEN_MANIFEST = ['symbio-core', 'symbio-kernel', 'symbio-sdk', 'symbio-deploy']
 
-/** 源码里不得出现的三个前缀（`symbio_core::` 随 crate 一起消失，D-279）。 */
+/** 源码里不得出现的三个前缀（原 `symbio-core` 的前缀随 crate 一起消失，D-279）。 */
 export const FORBIDDEN_PREFIXES = ['symbio_sdk::', 'symbio_kernel::', 'symbio_deploy::']
 
 /**
@@ -156,15 +156,22 @@ export function heavyArmViolations(toml) {
 }
 
 /**
- * 机制臂的块锚点。**这个块在本仓已经不存在**，而且不该再存在（D-276 清零、D-279 连 crate
- * 一起删掉）。保留这条锚点的作用是让读法保持诚实：如果哪天有人重新写出
- * `pub use symbio_core::{…}`，`readWhitelist` 会读到它并按 HS-002 与 0 比较 ⇒ 立刻红。
+ * 门面里按来源 crate 分区的三条 `pub use` 语句形态。
  *
- * ⚠️ 不要把它「顺手改成 `symbio_sdk`」——SDK 臂有自己的正则（`SDK_RE`），拿块锚点去撞它
- * 会把 114 条 SDK 臂当成机制臂来审，基线 0 当场炸。这个坑真被踩过一次。
+ * **这里原来是一条块锚点**（`BLOCK_START` 锚的是旧的 core 门面块）。D-279 删掉那个
+ * crate 之后锚点再也打不中，`readWhitelist` 于是恒返回 `[]`——HS-002 读到「机制臂 0 条」、
+ * 恒等于基线 0、恒绿。**判据与它守的对象一起消失，而它自己不红**（D-280 的第二次实例，
+ * 而且是同一个人在同一件事上第二次踩）。
+ *
+ * 改法是换判据的形状：不问「那段块在不在」，问「门面把这些 `pub use` 都发给了谁」。
+ * 分区是**穷尽**的——除 kernel / sdk / deploy 之外的任何来源都算机制臂，所以
+ * `symbio_core` 若回来不需要任何锚点也当场红；同时要求**至少读到一条** `pub use …::`，
+ * 读不到就退 null（判不了不许亮绿灯）。
  */
-const BLOCK_START = 'pub use symbio_core::{'
-const BLOCK_END = '};'
+const USE_STMT_RE = /pub use\s+([A-Za-z_][A-Za-z0-9_]*)(?:::[A-Za-z0-9_]+)*::(\{[^}]*\}|[A-Za-z0-9_]+|\*)\s*;/g
+
+/** 门面允许的三个来源：语法（kernel）/ 机制（sdk）/ 装配常量（deploy）。 */
+export const FACADE_ARMS = ['symbio_kernel', 'symbio_sdk', 'symbio_deploy']
 /** 语法臂：可能有多块（按 kernel 子模块分组），因此按正则全量取。 */
 const GRAMMAR_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
 /**
@@ -193,17 +200,54 @@ function splitSymbols(body) {
     .map((s) => s.split(/\s+as\s+/).pop().trim())
 }
 
-/** 读出门面白名单的符号清单（块内逗号分隔）。 */
-export function readWhitelist(root) {
+/**
+ * 门面按来源 crate 分区读数。
+ *
+ * 返回 `{ counts, other }`：`counts` 是每个来源 crate 的语句数（日志里显示，让「0 条机制臂」
+ * 是一次**读数**而不是一次沉默），`other` 是除三臂之外那些语句放出的符号名。
+ * 读不到任何 `pub use …::` ⇒ `null`（判据的输入不在，不许亮绿灯，D-280）。
+ */
+export function readFacadeArms(root) {
   const p = path.join(root, FACADE)
   if (!fs.existsSync(p)) return null
   const src = fs.readFileSync(p, 'utf8')
-  const i = src.indexOf(BLOCK_START)
-  // 块不存在 = 机制臂已经归零（D-276），不是「读不出」：返回空清单，让 HS-002 判 0/0。
-  if (i < 0) return []
-  const j = src.indexOf(BLOCK_END, i)
-  if (j < 0) return null
-  return splitSymbols(src.slice(i + BLOCK_START.length, j))
+  // 门面自己的模块（`pub use context::{…}` 这类）不是「来源」，是同一 crate 内的转手。
+  // 按**文件是否存在**判，而不是按名字清单：新加一个本模块的转发不必回改这里。
+  const ownDir = path.join(root, 'crates', 'symbio-plugin-api', 'src')
+  const own = new Set(
+    fs.existsSync(ownDir)
+      ? fs.readdirSync(ownDir).map((f) => f.replace(/\.rs$/, '')).concat(['crate', 'self', 'super'])
+      : [],
+  )
+  const counts = {}
+  const other = []
+  let read = 0
+  for (const m of src.matchAll(USE_STMT_RE)) {
+    read += 1
+    const crate = m[1]
+    counts[crate] = (counts[crate] ?? 0) + 1
+    if (FACADE_ARMS.includes(crate) || own.has(crate)) continue
+    const body = m[2]
+    if (body === '*') {
+      other.push('*')
+      continue
+    }
+    other.push(...splitSymbols(body.replace(/^\{|\}$/g, '')))
+  }
+  if (read === 0) return null
+  return { counts, other, read }
+}
+
+/**
+ * 读出门面白名单的符号清单：**除三臂之外的一切来源**。
+ *
+ * 空清单是一次**测量结果**（门面今天只从 kernel / sdk / deploy 取东西），它的证据是
+ * `readFacadeArms` 确实读到了 `read > 0` 条语句——这正是它和「锚点打不中所以返回 []」
+ * 的区别，也是 D-280 要求的那一步。
+ */
+export function readWhitelist(root) {
+  const arms = readFacadeArms(root)
+  return arms === null ? null : arms.other
 }
 
 /** 读出门面语法臂的符号清单（`symbio_kernel` 各分块的并集）。 */
@@ -368,11 +412,15 @@ export function run(root) {
     }
   }
 
-  const wl = readWhitelist(root)
-  if (wl === null) {
-    console.log(`${red('[ERROR]')} plugin-surface-audit：读不出门面白名单（${FACADE}）`)
+  const arms = readFacadeArms(root)
+  if (arms === null) {
+    console.log(
+      `${red('[ERROR]')} plugin-surface-audit：读不出门面白名单（${FACADE}）——` +
+        '一条 `pub use …::` 都没读到。门面文件在、但读法失效时，HS-002 会读到 0 条并恒绿（D-280）',
+    )
     return 1
   }
+  const wl = arms.other
   const gram = readGrammar(root) ?? []
   const sdk = readSdkArm(root) ?? []
   const n = wl.length
@@ -460,7 +508,9 @@ export function run(root) {
     green(
       `✓ HS-001 扩展层零直接依赖：${scannedPlugins} 个非控制面插件的 ${scannedFiles} 个源文件与 manifest ` +
         `没有 \`symbio_core\` / \`symbio-kernel\` / \`symbio-sdk\` / \`symbio-deploy\`（控制面 ${CONTROL_PLANE.length} 个豁免：` +
-        `${CONTROL_PLANE.join(' / ')}）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}）` +
+        `${CONTROL_PLANE.join(' / ')}）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}，` +
+        `读数来自 ${arms.read} 条 \`pub use\` 语句：` +
+        `${FACADE_ARMS.map((c) => `${c} ${arms.counts[c] ?? 0}`).join(' · ')}）` +
         `+ SDK 臂 ${ns} 条（基线 ${SDK_BASELINE}，D-269 起同进棘轮）` +
         `· 语法臂 ${gram.length} 条（基线 ${GRAMMAR_BASELINE}，不计债但计件）` +
         `· 模块级转发 ${moduleEntries.length} 条（基线 ${MODULE_REEXPORT_BASELINE}）` +

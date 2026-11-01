@@ -14,7 +14,7 @@ deps: [DE-009-VDFS规范]
 范围：Symbio 前端的「三栏资源页」——一套 `vdfs/*` 协议驱动全部资源页的呈现
 关联：
 `docs/003-design/009-VDFS规范.md`（**机制规范，权威**：接口、访问位、协议操作、分层）、
-`crates/symbio-core/src/vdfs/`（纯接口）、
+`crates/symbio-kernel/src/vdfs/`（纯接口）、
 `crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封）、
 `tauri/src/schemas/vdfs.ts`（前端数据契约）、
 `tauri/src/composables/useVdfs.ts`（页面逻辑）、

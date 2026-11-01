@@ -46,7 +46,7 @@ impl PrincipalKind {
 
     /// 是否智能体一族——`visible_to` 的运行时判据（[D-069 §决策 3]）。
     ///
-    /// 注意与 `symbio_core::view::is_agent_id` 的分工：那条**从 id 反推 kind**（用于
+    /// 注意与 `symbio_sdk::view::is_agent_id` 的分工：那条**从 id 反推 kind**（用于
     /// 只有字符串的授权表判据），本条**从结构体字段直接读**。协议携带 `Principal`
     /// 结构体，`visible_to` 会切到 `kind.is_agent()`——`is_agent_id` 只服务 id 层的
     /// 可见域判据（`view::visible_to`）。
@@ -136,7 +136,7 @@ impl Principal {
     /// - 已带 `/` 段的限定名（`local/todo_write`、`mcp/github/create_issue`）原样；
     /// - MCP 双下划线拼接名（`mcp__server__tool`）⇒ `mcp/server/tool`；
     /// - 首段是归属插件（vdfs / web / local / agent）⇒ `ns/其余`
-    ///   （`vdfs_write` → `vdfs/write`，与 `symbio_core::authz` 登记的主体行逐一对齐）；
+    ///   （`vdfs_write` → `vdfs/write`，与 `symbio_sdk::authz` 登记的主体行逐一对齐）；
     /// - 其余只名工具 ⇒ `legacy/<name>`——地址是合成的，族不变。
     ///
     /// 产出对 [`Principal::from_legacy`] **幂等**（这些 namespace 都读回 Tool 族）。

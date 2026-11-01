@@ -2,7 +2,7 @@
 //!
 //! 这里只有形状，没有授权读法：`trivial`（平凡值）与 `can_*`（能力位判定）读的是
 //! 本机**部署表**（`authz` / `governance`），它们不是语法而是宿主事实（D-099），
-//! 因此留在 `symbio_core::actors` 作为自由函数（`trivial_actor_spec` /
+//! 因此留在 `symbio_sdk::actors` 作为自由函数（`trivial_actor_spec` /
 //! `actor_can_land_speech` …），不进内核。
 
 /// 主体模式（[DE-001 §4](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：机制，**3 个封顶**）。

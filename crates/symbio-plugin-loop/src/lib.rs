@@ -11,7 +11,7 @@
 mod chat_loop;
 mod context;
 // 控制面声明集：义务环自己消费的事实与全部视图。新增视图 / 事实 / 字段改这里，
-// 不改内核（`symbio_core::decl` 只留协议五格与装载机制）。
+// 不改内核（`symbio_kernel::decl` 只留协议五格与装载机制）。
 mod control_decl;
 mod derived_facts;
 // 义务环的行表：控制面经 `owes` 问表，判据在数据里。

@@ -8,9 +8,9 @@
 //!
 //! | 键 | 值类型 | 现住 |
 //! |---|---|---|
-//! | `EVENT_SINK` / `ABORT_SIGNAL` | `ExecEventSink` / `ExecAbortSignal` | `symbio_core::exec` |
-//! | `PLUGIN_DIR` · `PLUGIN_PARENT`（原 `PARENT`） | `PluginDir` · `Option<Weak<dyn Plugin>>` | `symbio_core::plugin` |
-//! | `CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR` · `CAPABILITY_ERRORS` | `Arc<dyn Registry>` · 带 `CapabilityError` 的桶 | `symbio_core::capability` |
+//! | `EVENT_SINK` / `ABORT_SIGNAL` | `ExecEventSink` / `ExecAbortSignal` | `symbio_kernel::exec` |
+//! | `PLUGIN_DIR` · `PLUGIN_PARENT`（原 `PARENT`） | `PluginDir` · `Option<Weak<dyn Plugin>>` | `symbio_sdk::plugin` |
+//! | `CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR` · `CAPABILITY_ERRORS` | `Arc<dyn Registry>` · 带 `CapabilityError` 的桶 | `symbio_sdk::capability` |
 //!
 //! 本域自此只留**值类型为通用词汇**（`String` / `Value` / `Vec<String>`）的键——
 //! 那些键没有「原生域」可回，机制（[`SymbioKey`] trait）是它们唯一的家。
@@ -98,7 +98,7 @@ define_string_key!(SourcePrincipalKey, SOURCE_PRINCIPAL, "source_principal");
 define_string_key!(TraceIdKey, TRACE_ID, "trace_id");
 // 当前父地址：本插件在地址空间中挂载点的绝对地址。与 `WORKDIR` / `SESSION_ID`
 // 同类的**上下文数据**：父插件把请求转发给子插件时（route / traverse）改写它，
-// 子插件在少数需要协议级绝对地址的场合读它拼接（见 `symbio_core::vdfs::address`）。
+// 子插件在少数需要协议级绝对地址的场合读它拼接（见 `symbio_sdk::vdfs::address`）。
 // 缺省（顶层请求 / 无 vdfs 装配）为空。
 define_string_key!(VdfsParentAddrKey, VDFS_PARENT_ADDR, "vdfs_parent_addr");
 define_string_key!(ToolCallIdKey, TOOL_CALL_ID, "tool_call_id");
@@ -142,8 +142,8 @@ define_string_key!(
 );
 
 // 注：插件域的两个键不在本域——`PLUGIN_DIR`（值类型 `PluginDir`）随值搬去
-// `symbio_core::plugin::dir`；`PARENT` 改名 `PLUGIN_PARENT`（值类型
-// `Option<Weak<dyn Plugin>>`）随值搬去 `symbio_core::plugin`。判据同 D-095 根因一。
+// `symbio_sdk::plugin::dir`；`PARENT` 改名 `PLUGIN_PARENT`（值类型
+// `Option<Weak<dyn Plugin>>`）随值搬去 `symbio_sdk::plugin`。判据同 D-095 根因一。
 // `CONFIG` 与 trait 同行（契约面），已在 `symbio_kernel::keys`。
 
 /// 必需插件清单 Key —— **构造者**告诉容器「哪些插件即使没有目录也要补出来」
@@ -177,8 +177,8 @@ pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 
 // 注：capability 域的四条通道键不在本域——三条收集通道
 // （`CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR`）随值类型
-// `Arc<dyn Registry>` 搬去 `symbio_core::capability::collect`；错误桶键
-// `CAPABILITY_ERRORS`（值类型带 `CapabilityError`）搬去 `symbio_core::capability::error`。
+// `Arc<dyn Registry>` 搬去 `symbio_sdk::capability::collect`；错误桶键
+// `CAPABILITY_ERRORS`（值类型带 `CapabilityError`）搬去 `symbio_sdk::capability::error`。
 // 判据同 D-095 根因一：键与值同住，`keys` 只留机制与通用词汇键。
 
 // ==================== 主体名 ====================

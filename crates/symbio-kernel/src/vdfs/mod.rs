@@ -1,7 +1,7 @@
 //! VDFS 的**纯接口面**：`VdfsProvider` trait 与域类型（词表 / 访问位 / 节点 / 信封）。
 //!
 //! 宿主侧的桥（上下文注入、错误翻译、变更广播）与当前父地址机制留在
-//! `symbio_core::vdfs::{host, address}`；本 crate 不依赖宿主。
+//! `symbio_sdk::vdfs::{host, address}`；本 crate 不依赖宿主。
 
 mod access;
 mod change;

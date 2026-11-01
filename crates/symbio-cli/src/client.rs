@@ -590,7 +590,7 @@ impl SymbioClient {
     ///
     /// | 无载荷的来源 | 回读的结果 |
     /// |---|---|
-    /// | 资源信号（标题 / metadata / 创建，见 `symbio_core::vdfs_notify_change`） | 会话还在，`status` 没变 ⇒ 空转 |
+    /// | 资源信号（标题 / metadata / 创建，见 `symbio_sdk::vdfs::host::vdfs_notify_change`） | 会话还在，`status` 没变 ⇒ 空转 |
     /// | `emit_session_state` 取不到视图（**唯一原因**：会话已不在） | `stat` 同样 `NotFound` ⇒ 仍然丢弃 |
     ///
     /// 也就是说：那次回读**永远改变不了结论**，却是一笔真实请求——实测每会话一次
@@ -720,7 +720,7 @@ impl SymbioClient {
     /// ## 本方法是**渲染器**，不是统计器
     ///
     /// 它只做三件事：调 `session/stats`、取响应里的 `panel` 描述（
-    /// `symbio_core::ReadingPanel`——与 Tauri 前端的 `ReadingPanel` 组件吃的是
+    /// `symbio_kernel::present::ReadingPanel`——与 Tauri 前端的 `ReadingPanel` 组件吃的是
     /// **同一份**）、按终端排版打出来。**没有任何一个数的含义在这里**：标签、
     /// 单位、精度、语气全由后端排好。
     ///

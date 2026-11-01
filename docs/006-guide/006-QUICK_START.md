@@ -25,7 +25,8 @@ created: 2026-09-07
 以下命令都在**仓库根**执行（根 workspace 单 target，成员产物统一落在 `target/`）：
 
 ```bash
-cargo build -p symbio-core
+cargo build -p symbio          # 宿主装配 crate（连带编出 kernel / sdk 与全部插件）
+# 只编某个插件：cargo build -p symbio-plugin-<id>
 ```
 
 ### 2. 启动桌面端
@@ -97,7 +98,7 @@ cargo clippy --all-targets --workspace -- -D warnings
 ## 目录结构速览
 
 **一个插件 = 一个目录**（配置与数据同处，整目录可拷贝移植；机制见
-[VDFS 前端页面规范](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3 地址模型与 `symbio_core::plugin::dir`）：
+[VDFS 前端页面规范](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3 地址模型与 `symbio_sdk::plugin::dir`）：
 
 ```
 <homedir>/ # 默认 ~/.symbio

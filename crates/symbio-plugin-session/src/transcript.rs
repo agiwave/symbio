@@ -584,7 +584,7 @@ impl Transcript {
     }
 }
 
-/// [`symbio_core::ExecTranscriptWriter`] 的转写域落点：一个只做「锁转写 → apply」
+/// [`symbio_kernel::exec::ExecTranscriptWriter`] 的转写域落点：一个只做「锁转写 → apply」
 /// 的最小 writer（与 `orchestrator::sink::TranscriptSink` 平行——后者多了会话级告警分派，
 /// 压缩增量用不上）。
 ///

@@ -306,7 +306,7 @@ impl PluginManagerPlugin {
     /// 把一次请求转发给**所在容器的根**。
     ///
     /// 转发前把当前父地址**清空**：插件根就是地址空间的根，容器据此为每个子目录续出
-    /// `<根>/<插件>`（见 `symbio_core::vdfs::descend_addr` 的「顶层为空，落到静态声明
+    /// `<根>/<插件>`（见 `symbio_sdk::vdfs::descend_addr` 的「顶层为空，落到静态声明
     /// 的根」）。带着本插件的挂载点转过去，容器的子上下文会算成
     /// `<根>/plugin_manager/<插件>`——那是错的。
     async fn forward(

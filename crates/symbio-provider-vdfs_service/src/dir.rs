@@ -373,7 +373,7 @@ impl VdfsProvider for DirVdfs {
                 // 原语**的语义：目录型条目没有「一份内容」可言，写字节就是解包。
                 // 对外的**入口形态**只有详情页的 `import` 动作
                 // （`VDFS_ACTION_IMPORT`）——它把包字节按 `VdfsUnpack` 装好再交给
-                // provider，见 `symbio_core::vdfs` 的「节点动作」一节。
+                // provider，见 `symbio_kernel::vdfs` 的「节点动作」一节。
                 if content.binary {
                     let (id, _) = entry::split_rel(path)
                         .ok_or_else(|| VdfsError::invalid("整包只能导入到挂载根下的条目地址"))?;

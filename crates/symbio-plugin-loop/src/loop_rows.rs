@@ -637,7 +637,7 @@ fn entry_of(by: &'static str, actors: &'static [ActorEntry]) -> Option<&'static 
 /// 协议五格：运行期写入封闭的**豁免名单**。
 ///
 /// 它们由引擎写（`port.rs` 那一个文件，PTS-005 钉着），因此**不该**出现在任何
-/// `ActorDecl::writes` 里——装载期 [`symbio_core::decl`] 的
+/// `ActorDecl::writes` 里——装载期 [`symbio_kernel::decl`] 的
 /// `ENGINE_ONLY_CELLS` 检查拦的就是「执行体声明了引擎独占的格」。运行期读账本时
 /// 它们当然在：派发的本体住在 `port` 里，执行体的动作调它（`relay` → `dispatch_full`，
 /// `courier` / `turn_relay` → `dispatch`），四格因此落在动作窗口内——写点在执行体里，

@@ -565,7 +565,7 @@ impl TurnLauncher {
 
         // 标题变更 = 该会话节点的一次**资源信号**（粗粒度）：消费方重拉清单即收敛
         // （自动命名与手动改名走同一条链路，不因发起者不同而分流）。
-        // 不带节点视图：见 `symbio_core::vdfs_notify_change`——资源信号不值得让每个消费端
+        // 不带节点视图：见 `symbio_sdk::vdfs::host::vdfs_notify_change`——资源信号不值得让每个消费端
         // 都背一次逐字段合并；运行态才走带视图的 `emit_session_state`。
         self.notify_change(session_id);
     }

@@ -9,7 +9,7 @@
 //!
 //! ## 键与值同住（D-095 根因一）
 //!
-//! 三条键的值类型都是 `Arc<dyn Registry>`（本域契约），故键住本域；`symbio_core::keys`
+//! 三条键的值类型都是 `Arc<dyn Registry>`（本域契约），故键住本域；`symbio_sdk::keys`
 //! 只留机制与通用词汇键。键名（`tool_visitor` / `option_visitor` /
 //! `configurable_visitor`）是 `ctx` 上的外部协议面，**不随搬迁而变**。
 //!
@@ -48,7 +48,7 @@ impl SymbioKey for CapabilityVisitorKey {
 pub const CAPABILITY_VISITOR: CapabilityVisitorKey = CapabilityVisitorKey;
 
 /// 选项收集器 Key —— 与 [`CAPABILITY_VISITOR`] 平行的第二条收集**通道**
-/// （选项 = 可展示的数据节点，见 `symbio_core::capability::option`）。
+/// （选项 = 可展示的数据节点，见 `symbio_sdk::capability::option`）。
 ///
 /// 4e 之后值类型是统一的 [`symbio_kernel::capability::Registry`]：选项是同一张表里的行，
 /// 通道（广播与收集器实例）仍是独立的一条——键没变，变的是行住哪张表。
@@ -70,7 +70,7 @@ impl SymbioKey for OptionVisitorKey {
 pub const OPTION_VISITOR: OptionVisitorKey = OptionVisitorKey;
 
 /// 可配置声明收集器 Key —— 第三条收集**通道**
-/// （可配置 = 「我有配置文档」这一句话，见 `symbio_core::capability::configurable`）。
+/// （可配置 = 「我有配置文档」这一句话，见 `symbio_sdk::capability::configurable`）。
 /// 4e 之后值类型是统一的 [`symbio_kernel::capability::Registry`]。
 pub struct ConfigurableVisitorKey;
 impl SymbioKey for ConfigurableVisitorKey {

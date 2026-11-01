@@ -78,6 +78,6 @@ impl: done
 
 - 机制规范：[`docs/003-design/009-VDFS规范.md`](../../docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范")
 - 前端页面规范：[`docs/003-design/010-VDFS前端页面规范.md`](../../docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范")
-- 纯接口（trait + 域类型）：`symbio_core::vdfs`
-- symbio 桥（上下文注入 / 错误翻译）：`symbio_core::vdfs::host`
+- 纯接口（trait + 域类型）：`symbio_kernel::vdfs`
+- symbio 桥（上下文注入 / 错误翻译）：`symbio_kernel::vdfs::host`
 - 虚拟层拓扑（容器聚合 + 注册为根）：`../composite/README.md`

@@ -1,6 +1,6 @@
 //! 单轮 LLM 产物的**类型面**（`ModelProvider::round_trip` 的返回类型）。
 //!
-//! 帧构造 / 发射与 id 原语是宿主行为，留在 `symbio_core::llm::turn`。
+//! 帧构造 / 发射与 id 原语是宿主行为，留在 `symbio_kernel::llm::turn`。
 
 use super::model_provider::{ModelFinishReason, ModelSpend, ModelUsage};
 use serde_json::Value;

@@ -560,7 +560,7 @@ resume 只删得掉一个）；`PendingPrompt` **没有 id 字段**，那类 bug
 
 ### 7.3 `failure_kind` 是共享闭集
 
-`symbio_core::capability::failure_kind` 收口了这组词（`ERROR` / `NEEDS_APPROVAL` /
+`symbio_kernel::capability::failure_kind` 收口了这组词（`ERROR` / `NEEDS_APPROVAL` /
 `NEEDS_INTERACTION` / `PERMISSION_DENIED` / `TOOL_UNAVAILABLE`），判据只有一条
 `is_pending`。生产方（`local`）与消费方（`session`）读同一份常量，避免各自写字面量
 导致「加一个等待用户的 kind 就漏改判定」（表现是交互模式下本批剩余工具照跑）。
@@ -785,7 +785,7 @@ content 是字符串 → output 是字符串 → success 是布尔 → 顶层是
 - 「**先命中者胜**」而不是「取第一个存在的键」：`{"content":[1,2],"output":"x"}` 里 `content`
  存在但不是字符串 ⇒ 继续走到 `output`；按「存在即取」会把数组原样丢给模型。
 - 「结果文本本就没有契约」（工具返回任意 JSON，模型只消费一段文本）——这层适配是**显式**的。
-- **控制流不得建立在这里**：要判「等待用户动作」用 `symbio_core::failure_kind` 这个约定字段，不猜形状（§7.3）。
+- **控制流不得建立在这里**：要判「等待用户动作」用 `symbio_kernel::capability::failure_kind` 这个约定字段，不猜形状（§7.3）。
 
 ### 11.3 审批闸门：判两次，写一次
 

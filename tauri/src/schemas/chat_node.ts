@@ -43,7 +43,7 @@ export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number]
 export const PRINCIPAL_USER = 'person/local'
 
 /**
- * **主体地址**——后端 `symbio_core::principal::Principal` 的镜像（[D-069 §决策 1]）。
+ * **主体地址**——后端 `symbio_kernel::chat::principal::Principal` 的镜像（[D-069 §决策 1]）。
  *
  * 三个字段正交：`kind` 是一族、`id` 是可路由地址 `<namespace>/<name>`（找到 / 调用 / 查看
  * 主体都靠这个地址）、`title` 是显示名。写侧构造即定型，序列化只出对象形态；
@@ -241,7 +241,7 @@ export const NODE_STATUS_FAILED = 'failed'
  *
  * 协议里没有 `remove` 操作——删除就是一次状态迁移，与出现、增长、完成同走一条
  * 消息帧。落到本状态的帧在接收端**就地移除**该节点（从本地视图消失），不产生
- * 任何「清空重读」。根因见后端 `symbio_core::schemas::session::chat_node::NodeStatus::Removed`。
+ * 任何「清空重读」。根因见后端 `symbio_kernel::chat::chat_node::NodeStatus::Removed`。
  */
 export const NODE_STATUS_REMOVED = 'removed'
 
@@ -400,7 +400,7 @@ export function messageTextOf(content: MessageContent | undefined | null): strin
 }
 
 /**
- * 会话消息（后端 `symbio_core::schemas::session::chat_node::ChatNode` 的镜像）。
+ * 会话消息（后端 `symbio_kernel::chat::chat_node::ChatNode` 的镜像）。
  *
  * **本接口没有 `agent_id` / `prompt` 两个顶层字段**——它们曾在此声明，但后端
  * `ChatNode` 从不下发：`agent_id` 在 `meta` 里（见 `registry/messageTypes.agentNameOf`），

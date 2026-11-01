@@ -123,7 +123,7 @@ pub(crate) fn session_wals_deep(root: &std::path::Path) -> Vec<std::path::PathBu
 ///
 /// 「**有名字**时 id 来自地址（使用方给），**没名字**时 id 由 provider 生成」是
 /// VDFS 的**通用**规则，两处规范同义：`providers/vdfs_service/entry.rs::id_of`
-/// 的注释，以及 [`symbio_core::vdfs::VdfsRequest::Write`] 的「两种目标形态」
+/// 的注释，以及 [`symbio_kernel::vdfs::request::VdfsRequest::Write`] 的「两种目标形态」
 /// 表（具名节点 + 不存在 ⇒ **就地创建**；只有目录自身才「名字由 provider 生成」）。
 ///
 /// ## 为什么不剥 `.session` 后缀

@@ -1,4 +1,4 @@
-//! `crates/symbio-core/src/capability/configurable.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `crates/symbio-sdk/src/capability/configurable.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //! 收集器本身的两条随默认实现迁到 `providers/collectors/configurable_visitor.test.rs`；

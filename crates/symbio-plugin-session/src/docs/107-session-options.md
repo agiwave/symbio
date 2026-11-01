@@ -13,7 +13,7 @@ impl: done
 范围：会话页输入区下方的「选项栏」与会话详情页的可修改项（**同一批字段、两种渲染形态**）
 关联：`docs/003-design/009-VDFS规范.md`（`node.schema` 详情方言）、
 `crates/symbio-kernel/src/present/detail.rs`（`DetailDefinition` / `DetailField` 方言权威定义）、
-`crates/symbio-core/src/capability/option.rs`（选项读协议 `capability_option_fields`；收集管线 `collect_options` 在 `crates/symbio-plugin-session/src/capabilities.rs`）、
+`crates/symbio-sdk/src/capability/option.rs`（选项读协议 `capability_option_fields`；收集管线 `collect_options` 在 `crates/symbio-plugin-session/src/capabilities.rs`）、
 `crates/symbio-plugin-session/src/options/mod.rs`（选项宿主：会话自有字段的声明）、
 `tauri/src/schemas/vdfs-form.ts`（前端方言 + 条件求值 / 紧凑取值规则）、
 `tauri/src/composables/useSessionOptionBar.ts` + `tauri/src/components/chat/ChatOptionBar.vue`

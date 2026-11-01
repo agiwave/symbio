@@ -33,7 +33,7 @@
 //! 新增贡献方取空闲号段。
 //!
 //! 号段只用于**收集层排序**，不下发：前端收到的是已排好序的字段数组
-//! （见 `symbio_core::capability::option` 的 `capability_option_fields`）
+//! （见 `symbio_sdk::capability::option` 的 `capability_option_fields`）
 
 use super::capabilities::collect_options;
 use super::plugin::SessionPlugin;

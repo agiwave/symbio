@@ -103,7 +103,7 @@ pub const RESULT_OUTPUT: &str = "output";
 ///
 /// ## 控制流不得建立在这里
 ///
-/// 需要「本轮结束于等待用户动作」这类判断时，用 [`symbio_core::failure_kind`]
+/// 需要「本轮结束于等待用户动作」这类判断时，用 [`symbio_kernel::capability::failure_kind`]
 /// 这个**约定字段**（见 [`pending_prompt_from`]），不要靠猜 JSON 形状。
 pub fn extract_result(data: &Value) -> String {
     if let Some(content) = data.get(RESULT_CONTENT).and_then(|v| v.as_str()) {
@@ -135,7 +135,7 @@ pub fn extract_result(data: &Value) -> String {
 /// 等待「用户中止」信号（工具执行期间）。
 ///
 /// 只有一个来源：[`ExecAbortSignal`]。它由编排层创建、经 `ctx` 注入（键
-/// `symbio_core::ABORT_SIGNAL`），因此本函数不必再分辨「abort 帧 / 取消令牌 /
+/// `symbio_kernel::exec::ABORT_SIGNAL`），因此本函数不必再分辨「abort 帧 / 取消令牌 /
 /// 已置位标志」——`abort()` 一次调用同时置位与唤醒。
 ///
 /// **「对端消失」不是中止**：历史上主通道关闭曾被当作中止，于是**每一次正常收尾**
@@ -163,13 +163,13 @@ pub struct PendingPrompt {
     pub text: String,
     /// 写进 `meta.prompt` 的载荷——卡片形状由**工具**决定（审批卡 / 提问卡不同）
     pub prompt: Value,
-    /// [`symbio_core::failure_kind`] 里的 pending 取值
+    /// [`symbio_kernel::capability::failure_kind`] 里的 pending 取值
     pub failure_kind: String,
 }
 
 /// 从工具返回的 `Data` 里读出「需要用户动作」的意图。
 ///
-/// 判据是 `failure_kind` 这个**约定字段**（[`symbio_core::failure_kind::is_pending`]），
+/// 判据是 `failure_kind` 这个**约定字段**（[`symbio_kernel::capability::failure_kind::is_pending`]），
 /// 不是靠猜 JSON 形状——[`extract_result`] 那种"从任意 JSON 里找 content/output"
 /// 的启发式可以接受（**结果文本本就没有契约**，见其文档），但**控制流**不能建立
 /// 在启发式上。
@@ -228,11 +228,11 @@ pub(super) fn build_user_prompt_message(
 /// - `pending`：`Some` ⇒ 本轮结束于「等待用户动作」（审批 / 提问）。工具只给
 ///   **载荷**，节点由调用方构造（见 [`PendingPrompt`]）。
 ///
-/// 事件出口（流式增量）经 `ctx` 的 `symbio_core::EVENT_SINK` 注入：工具把增量
+/// 事件出口（流式增量）经 `ctx` 的 `symbio_kernel::exec::EVENT_SINK` 注入：工具把增量
 /// 直接写到出口，本函数**不再有流式分支**——历史上工具可以返回
 /// `PluginPayload::Session` 当事件流，于是本函数要解包帧、做子会话转播的二次
 /// 分派、捕获冒泡的审批节点。那是跨进程传输原语被当作进程内事件流用（见
-/// `symbio_core::exec` 模块头），现在返回值只有「工具结果」一种含义。
+/// `symbio_kernel::exec` 模块头），现在返回值只有「工具结果」一种含义。
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_tool_async(
     parent: &Option<Arc<dyn Plugin>>,
@@ -315,7 +315,7 @@ pub async fn execute_tool_async(
     tool_ctx.set(symbio_sdk::keys::RESULT_MSG_ID, result_msg_id.clone());
     // 执行期双原语注入 —— 工具「把事件写到哪」与「如何感知中止」的唯一来源。
     // 有了它，工具不必再用返回值里的 `PluginPayload::Session` 当事件流
-    // （那是跨进程传输原语，见 `symbio_core::exec` 模块头）。
+    // （那是跨进程传输原语，见 `symbio_kernel::exec` 模块头）。
     tool_ctx.set(symbio_kernel::exec::EVENT_SINK, sink.clone());
     tool_ctx.set(symbio_kernel::exec::ABORT_SIGNAL, abort.clone());
 

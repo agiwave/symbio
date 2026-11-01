@@ -2,7 +2,7 @@
 //!
 //! ## 为什么在 `providers/` 而不是 `symbio_core`
 //!
-//! 收集口 **trait** 是契约（住 `symbio_core::capability`）；它的**默认实现**
+//! 收集口 **trait** 是契约（住 `symbio_sdk::capability`）；它的**默认实现**
 //! 是「不存在第二种实现的机制底座」，因此按 `crate::providers` 的第二种接线方式
 //! **直接组合具体类型，不套 `dyn` 工厂**——再套一层 `creator_create_object` 只是把一次
 //! 构造换成一次字符串查表（与 `vdfs_service` 同款判断；D-035 决策 1.1「≥2 实现才
@@ -27,7 +27,7 @@
 //!
 //! | 部分 | 住哪 |
 //! |---|---|
-//! | 收集口（`Registry` 三方法）· 上下文键（`*_VISITOR`）· 遍历端点字面量 | `symbio_core::capability` |
+//! | 收集口（`Registry` 三方法）· 上下文键（`*_VISITOR`）· 遍历端点字面量 | `symbio_sdk::capability` |
 //! | 收集管线（`collect_capabilities` / `collect_options`） | 各自的宿主（session / composite） |
 //! | **内存版收集器**（本目录） | `providers/` |
 //!
@@ -48,7 +48,7 @@ use symbio_kernel::capability::Registry;
 /// ## 为什么需要一个具名构造点
 ///
 /// `CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR` 三个键的值类型
-/// 都是 `Arc<dyn Registry>`（见 `symbio_core::capability::collect`）。类型相同意味着
+/// 都是 `Arc<dyn Registry>`（见 `symbio_sdk::capability::collect`）。类型相同意味着
 /// 它们**可以**是同一张表，也意味着装配方可以悄悄挂上三个不同实现——那时「三通道
 /// 同表」就裂成三张，没有编译错误，也没有测试会红。
 ///

@@ -46,7 +46,7 @@ pub(crate) fn produced_payload(
 /// `answer` 是这一轮交付给读者的那句话：有工具调用的轮次是正文，收束轮是
 /// [`final_answer`] 折出的那段。`reasoning` 必须与被写进事实的那份**同一个**：
 /// reasoning-only 时正文与思考是同一段，节点归 reasoning id（判据在
-/// [`symbio_core::event_output_text_node_id`]）。
+/// [`symbio_kernel::event::event_output_text_node_id`]）。
 pub(crate) fn answer_id_of(
     answer: &str,
     reasoning: &str,
@@ -288,7 +288,7 @@ pub(crate) fn filter_visible<'a>(events: &'a [Event], viewer: Option<&str>) -> C
 /// 快照载荷里——它们的原始事件已移入归档段）。
 ///
 /// 故窗口 = `[最近一次快照] ++ 窗口内的事件`。只带**最近**一条：更早的快照连它
-/// 自己的列表都已被后来的快照取代（与投影 [`symbio_core::transcript`] 同一口径）。
+/// 自己的列表都已被后来的快照取代（与投影 [`symbio_sdk::projection::transcript`] 同一口径）。
 pub(crate) fn window_by_turn<'a>(
     events: &'a [Event],
     current_turn: u64,

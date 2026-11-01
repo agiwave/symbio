@@ -96,7 +96,7 @@ pub fn store(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: us
 ///
 /// 相对地址是常态：provider 全程只跟相对地址打交道。需要协议级绝对地址的场合
 /// （提示词里印给模型的可编辑地址），由调用方经
-/// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
+/// `symbio_sdk::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
 /// 挂载点叫什么不归本插件。
 pub fn rel_path() -> &'static str {
     MOUNT_FILE

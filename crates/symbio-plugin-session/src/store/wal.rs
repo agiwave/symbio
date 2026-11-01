@@ -784,7 +784,7 @@ impl Store for WalStore {
     }
 }
 
-/// 便捷别名：持久化事实源（信封恒为 [`symbio_core::event::Event`]）。
+/// 便捷别名：持久化事实源（信封恒为 [`symbio_kernel::event::Event`]）。
 pub type EventWalStore = WalStore;
 
 #[cfg(test)]

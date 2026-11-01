@@ -66,7 +66,7 @@ pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,
 };
-// 宏用 `$crate::inventory` 展开（卫生），与 `symbio_core` 的 `submit_object_creator!` 同形。
+// 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};
 pub use settle::{Contribution, Contributor, SettleFace, Settling};
@@ -78,13 +78,13 @@ pub use views::{
 
 // ==================== 扩展层宿主面 ====================
 // 本块是**扩展层插件唯一需要认识的宿主入口**：能力包与结构件插件只写
-// `symbio_plugin_api::…`，不再直接依赖 `symbio_core` / `symbio-kernel` / `symbio-deploy`。
+// `symbio_plugin_api::…`，不再直接依赖 `symbio-kernel` / `symbio-sdk` / `symbio-deploy`。
 // 判据由 `plugin-surface-audit`（HS-001）执行：非控制面插件的源码与 manifest 里
 // 出现那三个前缀即判红。
 //
-// **白名单而不是通配**：白名单里每一条都能报出一个真实消费方（与 core 的 C-003 同一把
-// 尺子），新增条目要过棘轮（HS-002）。通配（`pub use symbio_core::*`）会让「插件能看见
-// 什么」重新变成不可审的隐式集合——那正是本块要消除的东西。
+// **白名单而不是通配**：白名单里每一条都能报出一个真实消费方（与 C-003 同一把尺子），
+// 新增条目要过棘轮（HS-002）。通配（`pub use symbio_sdk::*`）会让「插件能看见什么」
+// 重新变成不可审的隐式集合——那正是本块要消除的东西。
 //
 // **控制面不在此列**：`loop` / `session` 按 DE-026 的影响类运行，本来就认识宿主的容器
 // 概念（`turn` / 幕），继续直接依赖 core；EX-008 的边界正是这一条。把它们也压进本门面，

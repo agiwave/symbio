@@ -156,7 +156,7 @@ impl Plugin for Composite {
                 child_ctx.set(PATH, rest.to_string());
                 // 跨挂载边界的转发：改写子上下文的**当前父地址**——从 ctx 已携带
                 // 的父地址续接（嵌套容器自动得到 `<根>/…/<名字>` 的完整挂载点；
-                // 见 `symbio_core::vdfs::address` 的改写规则）
+                // 见 `symbio_sdk::vdfs::address` 的改写规则）
                 child_ctx.set(
                     VDFS_PARENT_ADDR,
                     descend_addr(&ctx.get(VDFS_PARENT_ADDR).unwrap_or_default(), name),

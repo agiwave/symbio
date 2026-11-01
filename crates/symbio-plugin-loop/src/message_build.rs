@@ -4,7 +4,7 @@
 //! 纯构造器（`llm_build_text_node` / `llm_build_tool_call_nodes` / `llm_build_tool_message`
 //! / `tool_call_args_text`）与建树折叠（`detach_if_flat` / `flatten_whole_tree` /
 //! `turn_root_of` / 枚举 `PresentationTree`）住
-//! [`symbio_core::node_build`]（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
+//! [`symbio_sdk::turn::node_build`]（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
 //! 裁决三）——
 //! 驱动器切成独立插件 `loop` 后，留守的读侧投影（`rebuild`）与驱动器写侧隔着 E-009 的
 //! 插件墙共用同一份形状源。本文件留下的是**只有驱动器有的组合**：
@@ -69,7 +69,7 @@ impl TurnStreamChildIds {
 ///   ├─ `Reasoning`(子)
 ///   ├─ `Text`(回复, 子)
 /// - `ToolCall`(`Assistant` 组合, 子)：自身 `content` 携带请求参数（JSON 文本）
-///   └─ `Text`(响应结果, `Tool`, 子)  ← 由 [`symbio_core::node_build::llm_build_tool_message`] 补充
+///   └─ `Text`(响应结果, `Tool`, 子)  ← 由 [`symbio_sdk::turn::node_build::llm_build_tool_message`] 补充
 pub fn llm_build_assistant_messages(
     id: &str,
     content: &str,

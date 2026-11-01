@@ -99,7 +99,7 @@ pub(crate) fn request_actor_spec(
 
 /// 主体的**声明档**：模式 ⇒ 时延档（`D-223` 订正 2）。
 ///
-/// 判据就是 [`symbio_core::Pattern`] 自己的文档——三值本来就是按**时延**分的：
+/// 判据就是 [`symbio_kernel::actors::Pattern`] 自己的文档——三值本来就是按**时延**分的：
 /// 「确定，毫秒级」⇒ [`LatencyTier::Reflex`]；「事件 → 另一种表示，百毫秒」⇒
 /// [`LatencyTier::Fast`]；「非确定，秒–分钟」⇒ [`LatencyTier::Deep`]。所以这不是
 /// 一张新表，是把模式那一行已经写着的话读出来。
@@ -417,7 +417,7 @@ pub struct ChatOrchestrator {
     ///
     /// 与 `classify_enabled` / `compose_enabled` 同一条取值纪律：组树档在一次请求生命周期
     /// 内不变，取一次快照即可。`flat` 下本轮响应骨架的直接子节点升根（见
-    /// [`symbio_core::node_build::detach_if_flat`]）；前端只按 `parent_id` 插树、不看本字段。
+    /// [`symbio_sdk::turn::node_build::detach_if_flat`]）；前端只按 `parent_id` 插树、不看本字段。
     pub presentation_tree: symbio_sdk::turn::node_build::PresentationTree,
 }
 

@@ -6,7 +6,7 @@
 //!   （`is_reasoning_only` / `effective_text` / `into_messages`）的形状不变式；
 //! - 原 `crates/symbio-plugin-model/src/message_builder.test.rs` 的用例 A / A2 / B / C / D 与两条
 //!   **流式 id 复用**回归：它们测的一直是**本模块的构造器**，此前只是借住在
-//!   model 侧（当时构造器还在 `symbio_core::llm::turn`）。
+//!   model 侧（当时构造器还在 core 的 `llm::turn`）。
 //!
 //! model 侧的 `flatten_chat_messages` 测试改用本地 fixture 构造同形状的树——
 //! 插件之间禁止互引（`plugin-entry-audit` E-009），那侧不能再调这里。

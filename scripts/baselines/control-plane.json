@@ -8,7 +8,7 @@
     ],
     "hash": "sha256:dde838e356f17991b1ec6881bdc228bce0a4d60774f37a7a98e534637efae2f6",
     "adr": "D-234 / D-238 / D-241 / D-260 / D-272",
-    "reason": "基线落在 D-222 第 2 步收敛之后的控制面形状上：驱动循环体 / 选债包装 fn next / 在途判据 fn waiting 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改，而是改动必须当批说清它属于哪一类——横向扩展的代价（那就改插件）还是机制演进（那就同批更新基线并改这条理由）。D-260：fn next 多带一格 answers（这一行会不会零往返作答），运行期写入封闭据此只对作答行豁免宿主代落的 turn.stage。D-272：core 根停止转发 kernel / sdk 符号，本文件的 import 行改写为符号真实归属的 crate 路径（use symbio_core::X -> use symbio_kernel::… / use symbio_sdk::…）；驱动循环体、fn next、fn waiting 的逻辑一字未动，属「与端口无关的机制面字节变化」，故同批更新基线。"
+    "reason": "基线落在 D-222 第 2 步收敛之后的控制面形状上：驱动循环体 / 选债包装 fn next / 在途判据 fn waiting 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改，而是改动必须当批说清它属于哪一类——横向扩展的代价（那就改插件）还是机制演进（那就同批更新基线并改这条理由）。D-260：fn next 多带一格 answers（这一行会不会零往返作答），运行期写入封闭据此只对作答行豁免宿主代落的 turn.stage。D-272：core 根停止转发 kernel / sdk 符号，本文件的 import 行改写为符号真实归属的 crate 路径（`use <删掉的那层>::X` -> `use symbio_kernel::…` / `use symbio_sdk::…`）；驱动循环体、fn next、fn waiting 的逻辑一字未动，属「与端口无关的机制面字节变化」，故同批更新基线。"
   },
   "extension": {
     "productionFiles": 62

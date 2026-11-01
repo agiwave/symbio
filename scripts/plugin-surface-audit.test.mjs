@@ -13,7 +13,9 @@
  *   ⑨ 门面里有一条扩展层零引用的符号 → exit 1 —— 白名单不许有空转条目（HS-003）；
  *   ⑩ 胶水层的嵌入臂被设为默认 → exit 1，⑪ 不是 `optional` → exit 1 —— 重臂默认必须关（HS-004，D-254）；
  *   ⑬ 门面自己的 manifest 依赖 `symbio-core` → exit 1 —— 机制臂归零之后把回头路堵死（HS-005，D-276）；
- *   ⑭ 门面模块级转发条数超过基线 → exit 1 —— 一行换 N 条也得在账上有数（HS-006，D-278）。
+ *   ⑭ 门面模块级转发条数超过基线 → exit 1 —— 一行换 N 条也得在账上有数（HS-006，D-278）；
+ *   ⑮ 机制臂块回到门面 → exit 1 —— 判据按**来源分区**读，不靠一条会失灵的块锚点（D-280）；
+ *   ⑯ 门面一条 `pub use …::` 都读不到 → exit 1 —— 「0 条机制臂」与「一条都没读到」不许长得一样（D-280）。
  *
  * 用法：node --test scripts/plugin-surface-audit.test.mjs
  */
@@ -418,6 +420,40 @@ test('readGrammar 收齐多个 kernel 分块，且 `as` 取别名', () => {
     assert.deepEqual(readGrammar(root), ['Event', 'Seq', 'VdfsError', 'vdfs_unavailable_reason'])
     // 机制臂块（`symbio_core::`）在夹具里不存在 ⇒ 空清单，不是「读不出」
     assert.deepEqual(readWhitelist(root), [])
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑮ 机制臂块回到门面 ⇒ 红（HS-002）：判据靠来源分区，不靠死锚点', () => {
+  // 这一条是 D-280 的正例：`symbio_core` 整棵删掉之后，`BLOCK_START` 式的块锚点再也打不中，
+  // HS-002 于是恒读到「0 条」、恒等于基线、恒绿。改判「门面把这些 `pub use` 发给了谁」之后，
+  // 任何一个三臂之外的来源都算机制臂——不需要锚点，写回来就红。
+  const root = fixture({
+    'symbio-plugin-fix': { rs: 'use symbio_plugin_api::Event;\npub fn f(_: Event) {}\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\npub use symbio_core::{LegacyThing};\n' },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /HS-002/)
+    assert.match(r.stdout, /LegacyThing/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑯ 门面一条 `pub use …::` 都读不到 ⇒ 读不出即红（D-280）', () => {
+  // 「0 条机制臂」与「一条都没读到」在数字上都是 0。前者是归零，后者是判据失效——
+  // 两者不许长得一样，否则删掉门面内容就能让 HS-002 永久通过。
+  const root = fixture({
+    'symbio-plugin-fix': {},
+    'symbio-plugin-api': { rs: '// 门面被清空\n' },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /读不出/)
   } finally {
     rmTree(root)
   }

@@ -2,7 +2,7 @@
 //!
 //! 这里只装档位本身（判据是 `budget_ms`，不是「工具」这个名词）；令牌与签发中心
 //! （`RuleOnly` / `FullModel` / `TokenIssuer`）是部署侧的依赖注入策略，仍住
-//! `symbio_core::adapters`。
+//! `symbio_sdk::adapters`。
 
 /// 时延档位。**判据是时延，不是形式**——约束的是 `budget_ms`，不是"工具"这个名词。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

@@ -110,7 +110,7 @@ pub async fn collect_capabilities(
 }
 
 // 错误通道（CapabilityError / CAPABILITY_ERRORS / capability_report_error / capability_take_errors）
-// 见 `symbio_core::CapabilityError`：写侧是任意参与 traverse 的插件，
+// 见 `symbio_sdk::capability::CapabilityError`：写侧是任意参与 traverse 的插件，
 // 读侧是 session 编排方（orchestrator 在收集结束后 `capability_take_errors` 统一裁决）。
 
 /// 把能力管理器挂到请求上下文，供 model 插件的 chat_loop / tool_executor 取用。
@@ -121,7 +121,7 @@ pub fn attach_capabilities(ctx: &Arc<dyn PluginInvokeRequest>, manager: Arc<dyn 
     ctx.set(symbio_sdk::capability::CAPABILITY_VISITOR, manager);
 }
 
-// 读侧助手 `tool_metas` 的实现住 core（[`symbio_core::tool_metas`]）：loop
+// 读侧助手 `tool_metas` 的实现住 core（[`symbio_sdk::capability::collect::tool_metas`]）：loop
 // 切出后它也是驱动器的读点，跨插件共用同一条口径（D-086 §7）。
 
 // ==================== 选项收集机制（宿主侧） ====================

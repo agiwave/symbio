@@ -495,7 +495,7 @@ impl Convergence {
 /// Model 插件已落库的节点（同一 Turn 下出现两份同内容文本节点的根源）。
 ///
 /// 并集口径（`parent_id` 后代 ∪ `meta.turn_root` 记号）不在这里写第二份——它与重试、
-/// 分支隐藏是同一条判据，单点在 [`symbio_core::node_build::subtree_of`]。
+/// 分支隐藏是同一条判据，单点在 [`symbio_sdk::turn::node_build::subtree_of`]。
 fn subtree_of(messages: &[cm::ChatNode], root: &str) -> std::collections::HashSet<String> {
     symbio_sdk::turn::node_build::subtree_of(messages, root)
 }

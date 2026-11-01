@@ -23,7 +23,7 @@
 //!   挂载行 `CapabilityRow::mount`，均经 `Registry::put`）；
 //! - **根挂在哪个地址上** = 本插件的挂载规则（[`VDFS_ADDR_ROOT`]），经
 //!   [`symbio_plugin_api::AddrRootDecl`] **静态声明**——随二进制生效，早于任何插件实例构造，
-//!   容器转发请求时据此改写子上下文的当前父地址（`symbio_core::vdfs::address`）。
+//!   容器转发请求时据此改写子上下文的当前父地址（`symbio_sdk::vdfs::address`）。
 //!
 //! 因此「根改叫什么」只需改 [`VDFS_ADDR_ROOT`] 一行：其它插件的绝对地址一律
 //! 从**上下文里的当前父地址 + 相对地址**拼出（容器在转发点改写），前端用

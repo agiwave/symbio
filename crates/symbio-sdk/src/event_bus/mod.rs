@@ -62,7 +62,7 @@ pub const EVENT_BUS_KIND_SYSTEM: &str = "system";
 /// VDFS 变更频道 —— **资源实时的唯一频道**。
 ///
 /// 不由本模块发布：一切资源的生命周期与状态变化都是 VDFS 变更，由 provider 写成功后
-/// 调 `symbio_core::vdfs::host::vdfs_notify_change`，经 `watch` 的 sink
+/// 调 `symbio_sdk::vdfs::host::vdfs_notify_change`，经 `watch` 的 sink
 /// （`crates/symbio-plugin-vdfs/src/host.rs::event_bus_sink`）原样投到总线上（规范 §9；信封与 `VdfsChange` 形状重合，不再有独立的 `VdfsChangeEvent`）。
 ///
 /// 常量放这里而非 vdfs 插件，是贯彻上面那条「闭集只有一个家」——发布方只是引用者。
@@ -93,7 +93,7 @@ static RESYNC_INFLIGHT: LazyLock<DashMap<String, ()>> = LazyLock::new(DashMap::n
 ///
 /// 两侧**分属不同 crate 且互相不可见**（cli 是独立 crate，只能经 `symbio` 的公开面
 /// = `symbio_core` 取用），core 是唯一共同可见处——这正是它不能下沉的原因，
-/// 与 `symbio_core::session_chat` 同构。
+/// 与 `symbio_sdk::chat::session_chat` 同构。
 ///
 /// ## 为什么是空结构体（不是遗漏）
 ///

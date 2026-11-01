@@ -20,8 +20,8 @@
 //!
 //! ## core 侧留下了什么
 //!
-//! `ActorSpec`（F3）/ `Pattern` / `Scope`（F5）留在 `symbio_core::actors`——它们是锚点
-//! 与封闭集合，本文件按名引用（`symbio_core::…`，与其它插件同一条路径）。
+//! `ActorSpec`（F3）/ `Pattern` / `Scope`（F5）留在 `symbio_sdk::actors`——它们是锚点
+//! 与封闭集合，本文件经门面按名引用（`symbio_plugin_api::…`，与其它插件同一条路径）。
 //!
 //! ## 落格纪律
 //!
@@ -932,7 +932,7 @@ impl ClosureKind {
 /// ## 谓词与判据
 ///
 /// 谓词是 `PermissionMatrix` 的两种判定（写侧闸判什么**只定义一次**，见
-/// `symbio_core::governance`）：`Speech` 问 `can_reply`，`Artifact` 问
+/// `symbio_sdk::governance`）：`Speech` 问 `can_reply`，`Artifact` 问
 /// `can_produce_artifact`。`Speech` 的 `first` 恒为 `true`：运行器一轮只落一格
 /// 发言收束（`final_unique_per_turn` 是不变量），不存在「同轮追加」那一态。
 ///

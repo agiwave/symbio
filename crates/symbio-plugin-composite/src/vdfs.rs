@@ -355,7 +355,7 @@ impl CompositeVdfs {
     ///
     /// 子插件收到的地址仍是子树相对地址（常态）；仅当它需要协议级绝对
     /// 地址时才取 `ctx.parent_addr()` 拼。改写规则见
-    /// `symbio_core::vdfs::address`：容器自身的父地址（嵌套派发时由上级写入）
+    /// `symbio_sdk::vdfs::address`：容器自身的父地址（嵌套派发时由上级写入）
     /// 非空则原地续接，为空则落到静态声明的根。
     async fn dispatch_to(
         &self,

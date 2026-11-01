@@ -241,7 +241,7 @@ inbound_max_connections: 64
 
 | 变量 | 用途 | 示例 |
 |------|------|------|
-| `RUST_LOG` | Rust 日志级别（`symbio_core::logger` 读取） | `debug`, `symbio=trace` |
+| `RUST_LOG` | Rust 日志级别（`symbio_sdk::logger` 读取） | `debug`, `symbio=trace` |
 | `VITE_LOG_LEVEL` | 前端日志级别（`tauri/src/utils/logger.ts` 读取） | `debug`, `info` |
 
 > 工作区路径**不是**环境变量：它由前端「系统目录」切换器决定，落在

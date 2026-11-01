@@ -27,6 +27,7 @@ lists: [gate-codes=owner]
 | **CS** | core 形状 | `scripts/arch-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–010 | `CS-011` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–020 | `D-021` |
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
+| **DR** | 死路径（写出来的 crate 名必须存在） | `scripts/dead-path-audit.mjs` | DR-001–003 | `DR-004` |
 | **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–013 | `E-014` |
 | **EL** | 引擎收口（DE-044 的账本读数） | `scripts/engine-ledger-audit.mjs` | EL-001–003 | `EL-004` |
@@ -110,6 +111,9 @@ lists: [gate-codes=owner]
 | **DC-003** | `scripts/doc-count-audit.mjs` |
 | **DC-004** | `scripts/doc-count-audit.mjs` |
 | **DC-005** | `scripts/doc-count-audit.mjs` |
+| **DR-001** | `scripts/dead-path-audit.mjs` |
+| **DR-002** | `scripts/dead-path-audit.mjs` |
+| **DR-003** | `scripts/dead-path-audit.mjs` |
 | **DS-001** | `scripts/doc-section-audit.mjs` |
 | **DS-002** | `scripts/doc-section-audit.mjs` |
 | **E-001** | `scripts/plugin-entry-audit.mjs` |

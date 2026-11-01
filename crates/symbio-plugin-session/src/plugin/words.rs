@@ -1,4 +1,4 @@
-//! 会话节点的**协议词表**（自 `symbio_core::vdfs_provider` 下沉，原样搬移不换语义）。
+//! 会话节点的**协议词表**（自 core 的 `vdfs_provider` 下沉，原样搬移不换语义）。
 //!
 //! 这些词是**会话域**的线上契约：`kind` / `ext` / `attributes.outcome` 的取值
 //! 由前端（TS 侧 `schemas/` 有镜像）与 CLI 按字面量判读，谁都不许自己拼。

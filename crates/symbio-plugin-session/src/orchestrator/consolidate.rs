@@ -13,7 +13,7 @@
 //! ## 幂等：按**内容**比对，不按事件 id
 //!
 //! 同一轮里执行口可能被调多次，而压缩只发生一次 ⇒ 第二次不该再落一条。判据是与
-//! 完整史里**最近一份**快照逐 id 比对（[`symbio_core::mutations_latest_snapshot`]）：
+//! 完整史里**最近一份**快照逐 id 比对（[`symbio_sdk::projection::mutations::mutations_latest_snapshot`]）：
 //! 一致 ⇒ 这份已经落过了。用内容而不是事件 id 判，是因为「该不该落」这件事由
 //! **压成了什么**决定，而事件 id 只是它的名字。
 //!

@@ -365,7 +365,7 @@ impl std::fmt::Debug for ExecAbortSignal {
 // ─── 执行期通道键（与值同住，D-095 根因一） ───
 //
 // 这两个键是 [`ExecEventSink`]（出）与 [`ExecAbortSignal`]（入）在 `ctx` 上的唯一
-// 读写凭据。它们曾住 `symbio_core::keys`，与机制分家；搬来本域的判据是**键与值同住**：
+// 读写凭据。它们曾住 core 的 `keys`，与机制分家；搬来本域的判据是**键与值同住**：
 // 值的类型在本域，键就没有理由住别处。`keys` 域自此只留机制（[`SymbioKey`] trait）
 // 与值类型为通用词汇（`String` / `Value` / `Vec<String>`）的键。
 //
@@ -386,8 +386,9 @@ impl std::fmt::Debug for ExecAbortSignal {
 ///
 /// ## 为什么 `parse → None`
 ///
-/// 与收集面三条通道键（`symbio_core::CAPABILITY_VISITOR` /
-/// `symbio_core::OPTION_VISITOR` / `symbio_core::CONFIGURABLE_VISITOR`）同款：进程内专用，没有字符串形态。
+/// 与收集面三条通道键（`symbio_sdk::capability::CAPABILITY_VISITOR` /
+/// `symbio_sdk::capability::OPTION_VISITOR` / `symbio_sdk::capability::CONFIGURABLE_VISITOR`）
+/// 同款：进程内专用，没有字符串形态。
 /// `parse` 返回 `None` 是**刻意的**——它声明「本键不参与任何跨进程/字符串化的往返」，
 /// 而不是「尚未实现」。
 pub struct ExecEventSinkKey;

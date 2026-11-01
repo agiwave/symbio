@@ -1,6 +1,6 @@
 //! `SymbioKey` —— 类型安全的上下文键（内核机制面）。
 //!
-//! 键与值同住的规则和全部键实例留在宿主 `symbio_core::keys`；内核只装**机制**
+//! 键与值同住的规则和全部键实例留在宿主 `symbio_sdk::keys`；内核只装**机制**
 //! （trait 本身），因为 `PluginInvokeRequest` / `ExecEnv` 等签名类型要按它取上下文。
 
 /// 项目全局通用的 Key 特征

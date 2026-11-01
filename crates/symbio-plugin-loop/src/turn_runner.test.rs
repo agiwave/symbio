@@ -1,4 +1,4 @@
-//! `turn_runner` 单测 —— 随运行器一起从 `symbio_core::actors` 下沉（2026-10-09）。
+//! `turn_runner` 单测 —— 随运行器一起从 core 的 `actors` 下沉（2026-10-09）。
 //!
 //! 三段：`turn_runner_tests`（单轮闭环 / WAL 持久 / 兜底 / 授权闸）、
 //! `tool_round_tests`（工具轮：注入、前缀、窗口、产物、待办、恢复）、

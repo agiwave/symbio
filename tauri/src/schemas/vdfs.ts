@@ -1,7 +1,7 @@
 /**
  * VDFS 协议（前端侧类型契约）
  *
- * 域类型与常量对齐后端纯接口：crates/symbio-core/src/vdfs/
+ * 域类型与常量对齐后端纯接口：crates/symbio-kernel/src/vdfs/
  * 操作路径/信封对齐后端线路层：crates/symbio-plugin-vdfs/src/protocol.rs
  * 规范：../../../docs/003-design/009-VDFS规范.md
  *
@@ -209,7 +209,7 @@ export interface VdfsNewType {
  * 于是地址落在**条目**上（{@link VdfsItem}），由分发层按 `<父地址>/<name>`
  * 回填；需要「可寻址的一项」时用 `VdfsItem`。
  *
- * 与后端 `symbio_core::vdfs::VdfsNode` 逐字同构（`scripts/protocol-mirror-audit.mjs` 校验）。
+ * 与后端 `symbio_kernel::vdfs::VdfsNode` 逐字同构（`scripts/protocol-mirror-audit.mjs` 校验）。
  */
 export interface VdfsNode {
   /** 父节点内的唯一标识（路径段） */
@@ -336,7 +336,7 @@ export const VDFS_ACTION_TRUNCATE = 'truncate'
  * 清掉全部条目。
  *
  * 为什么「截断 / 清空」是动作而不是 `delete`：见后端
- * `symbio_core::vdfs` 的 `VDFS_ACTION_TRUNCATE` 文档——`delete` 是
+ * `symbio_kernel::vdfs` 的 `VDFS_ACTION_TRUNCATE` 文档——`delete` 是
  * **逐节点**语义，表达不了「从这里删到末尾」这类集合操作；而清空虽然也能用
  * `delete` 表达（`deleted` 落在列表目录上无歧义），仍与截断一起走动作，
  * 好让**同一个区段的删除只有一种入口形态**。
@@ -445,7 +445,7 @@ export interface VdfsWriteResponse {
 
 /** **重同步指令**：后端通道曾满，消费端可能漏了变更，请按自己的作用域重读。
  *
- *  它是一条**指令**而不是一条变更（后端 `symbio_core::event_bus::RESYNC_MARKER_TYPE`）。
+ *  它是一条**指令**而不是一条变更（后端 `symbio_sdk::event_bus::RESYNC_MARKER_TYPE`）。
  *
  *  它刻意**不带 `path`**——消费端的作用域判定要求 `path` 是字符串，因此本指令会
  *  被既有消费者自然忽略，只在显式登记了重读动作的地方生效（`subscribeVdfsChanged`

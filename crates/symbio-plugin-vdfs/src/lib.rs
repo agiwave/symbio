@@ -26,7 +26,7 @@
 //! ## 与其他层的分工
 //!
 //! - 纯接口（trait + 域类型）：`symbio_plugin_api::vdfs`
-//! - symbio 桥（上下文注入 / 错误翻译）：`symbio_core::vdfs::host`
+//! - symbio 桥（上下文注入 / 错误翻译）：`symbio_sdk::vdfs::host`
 //! - 地址规则与两半分流（**唯一的翻译点**）：本插件的 `fs` 模块
 //! - 物理文件层（磁盘读写 + 路径守卫）：本插件的 `physical` 模块
 //! - 线路信封（`vdfs/*` 请求响应 + 协议路径）：本插件的 `protocol` 模块

@@ -78,7 +78,7 @@ pub fn vdfs_host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn PluginInvokeReques
 /// 而转写的 `delta` 增量**不可丢**——丢一帧，前端就永久少一段正文。同步投递没有
 /// 缓冲，也就不存在丢帧；投递器只做「转成总线事件并 publish」，是非阻塞的，
 /// 持锁调用也不会死锁。（背压由下游 `EventBus::try_publish` 负责：通道满时丢帧
-/// 但**保留订阅**并补送 resync 指令，见 `symbio_core::event_bus`。）
+/// 但**保留订阅**并补送 resync 指令，见 `symbio_sdk::event_bus`。）
 ///
 /// ## 「相关」= 同一子树（自身 / 祖先 / 后代）
 ///

@@ -18,7 +18,7 @@
 //!
 //! ## 为什么放在 providers 而不是 symbio_core
 //!
-//! `symbio_core::vdfs` 是**纯接口**（只依赖 std / serde / async_trait，
+//! `symbio_kernel::vdfs` 是**纯接口**（只依赖 std / serde / async_trait，
 //! 可原样抽出为独立 crate）；带 tokio IO 与 homedir 的**实现**属于宿主基础设施，
 //! 归本层。插件经 `symbio_providers` 的出口取用它们（`DirVdfs` / `SingleFileVdfs` /
 //! `MemoryVdfs`），**不深引**本目录的子模块。

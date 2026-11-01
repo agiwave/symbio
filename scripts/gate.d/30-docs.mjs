@@ -418,6 +418,23 @@ export const GUARDS = [
   // 它仍留在 `GUARDS` 里，是因为「旁路还有几处」这个数**只有它会算**——读数可以留，
   // 裁决必须换（§2 的原文）。
   'obligation-bypass-audit',
+  // `dead-path-audit`（DR-001…003）判**写出来的 crate 名必须存在**：源码与现行文档里
+  // 出现 `symbio_<名字>::` 或 `crates/symbio-<名字>/`，就到 `crates/` 下找同名目录。
+  //
+  // 它补的是 D-279 之后最大的一片静默失效：`symbio_core` 整棵删掉，留下 **186 处**指向
+  // 它的路径——`doc-symbol-audit` 只验 `module::symbol` 的最后一段在 Rust 语料里存在
+  // （`PLUGIN_PAYLOAD_KEY` 确实存在，只是不在那个 crate 里），`doc-link-audit` 只管相对
+  // 链接，`arch-shape-audit` 只管架构 crate 的形状。于是「一个不存在的 crate」可以被
+  // 引用任意多次而全绿。最贵的一处是 `docs/006-guide` 里可直接照抄的 `use …` 样例：
+  // 插件作者照着写，编译不过，而门禁说一切正常。
+  //
+  // 判据**不点名**任何 crate（点名只修这一次）：问的是「这个名字还能不能打开」，于是下
+  // 一层拆分、下一个被删的 crate、以及把 kernel 拼错成 kernal，都落在同一条判据里。
+  // 决策记录（`docs/003-design` 与任务账）退一格：允许写历史，但同一行要有历史标记
+  // （或文件级 `dead-path-history:`）——允许写历史 ≠ 允许把历史写成现状。
+  // 失效形态：① 范围读不出（缺 `crates/`、一个文件都没扫到）⇒ 退 2，不亮绿灯（D-280）；
+  // ② `dead-path-allow:` 空理由不算承认。回归测试十条各钉一头。
+  'dead-path-audit',
 ]
 // 不是**判定型**审计脚本，只跑回归测试（共享库 / 门禁原语 / 报告型脚本）：
 //   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；

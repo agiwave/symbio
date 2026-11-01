@@ -6,7 +6,7 @@
 //!
 //! 口径：
 //! - **turn** = `user.message`（`turn × opened`）——用户消息开启一轮；
-//! - **档位** = `turn.dispatch` 载荷 `tier`（[`symbio_core::LatencyTier`]
+//! - **档位** = `turn.dispatch` 载荷 `tier`（[`symbio_kernel::adapters::LatencyTier`]
 //!   的名字）——**调度决定是数据**：档位要到执行装配期才定，故另立一格；
 //!   历史事件没有这一格时回退读 `user.message` 的 `tier`；缺失/未知 ⇒ `unspecified`
 //!   桶（可观测，不静默归类）；

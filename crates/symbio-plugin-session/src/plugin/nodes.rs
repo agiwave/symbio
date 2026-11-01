@@ -347,7 +347,7 @@ fn cursor_id(before: &str) -> Option<&str> {
 // 并行的「容器页」路由。
 
 // 转写路径段 [`SEG_MESSAGES`] 与节点逆投影 [`message_of_node`] 已上移到
-// `symbio_core::chat_node`——它们描述的是**跨插件契约**
+// `symbio_kernel::chat::chat_node`——它们描述的是**跨插件契约**
 // （agent 的子会话转播桥也要用），不是本插件的私事。本模块继续按原名使用。
 use symbio_sdk::chat::chat_node::SEG_MESSAGES;
 
@@ -478,7 +478,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
 ///
 /// ## 认哪些 kind 由**产出方**说了算（DE-025 D-211）
 ///
-/// 登记表是 `symbio_core::EVENT_TRIGGER_KINDS`（各插件 `PLUGIN.yml` 的 `trigger_kinds:`
+/// 登记表是 `symbio_kernel::event::EVENT_TRIGGER_KINDS`（各插件 `PLUGIN.yml` 的 `trigger_kinds:`
 /// 的投影）。本函数只判**成员资格**：加一种触发方式 = 产出方在自己目录里加一行，
 /// 这条写臂不动。反过来，把这里写成「等值于某一个 kind」就是把别人的部署事实
 /// 抄进 session——每加一种触发方式都要改会话插件。

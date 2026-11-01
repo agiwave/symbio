@@ -72,7 +72,7 @@ pub fn memory_path(root: &std::path::Path, session_id: &str) -> PathBuf {
 /// 相对地址是常态：provider 全程只跟相对地址打交道（变更发射用它构造
 /// `VdfsChange::path`，与 `list` 返回的节点地址严格一致）。需要协议级绝对地址
 /// 的场合（提示词里印给模型的可编辑地址），由调用方经
-/// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
+/// `symbio_sdk::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
 /// 挂载点叫什么不归本插件。
 pub fn memory_rel_path(session_id: &str) -> String {
     format!("{session_id}/{SESSION_MEMORY_FILE}")

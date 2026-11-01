@@ -328,7 +328,7 @@ pub fn drain_parked(store: &EventWalStore, session_id: &str) {
 /// 载荷里可能记着**本条事件所承载的节点身份**的键。
 ///
 /// 与 `rebuild` / `transcript` 取节点身份用的是同一批键（见
-/// [`symbio_core::event_payload_node_id`]）——这里是反向查：**哪个事件承载了
+/// [`symbio_kernel::event::event_payload_node_id`]）——这里是反向查：**哪个事件承载了
 /// 节点 X**。键列在这里而不是内联进 `find`：加一格带新身份键的事件时，
 /// 「哪些键是节点身份」必须只有一处答案。
 const NODE_ID_KEYS: &[&str] = &["id", "text_id", "reasoning_id", "tool_call_id", "result_id"];
