@@ -20,9 +20,11 @@
 
 use super::{record_derived, record_elimination, record_learning};
 use crate::control_decl::guard_vocab;
-use symbio_core::{check_all, Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::{EventStore, Store};
 use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use symbio_sdk::invariants::check_all;
 
 use crate::control_decl::{COMMITMENT_VOCAB, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
 
@@ -432,7 +434,7 @@ fn record_learning_wires_consolidation() {
             i,
             user_seq,
         );
-        record_learning("derived-test", &store, i, symbio_core::clock_now_ms());
+        record_learning("derived-test", &store, i, symbio_sdk::clock::clock_now_ms());
     }
 
     let snap = store.range(Seq::new(0));
@@ -653,9 +655,9 @@ fn commitment_failure_does_not_block_the_breaker() {
 
     impl Store for CommitmentsRefuse {
         type Event = Event;
-        fn append(&self, event: Event) -> Result<Seq, symbio_core::AppendError> {
+        fn append(&self, event: Event) -> Result<Seq, symbio_kernel::store::AppendError> {
             if event.kind.starts_with("commitment.") {
-                return Err(symbio_core::AppendError::Duplicate);
+                return Err(symbio_kernel::store::AppendError::Duplicate);
             }
             self.0.append(event)
         }

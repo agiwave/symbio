@@ -12,6 +12,7 @@ name = "symbio-cli"
 path = "src/main.rs"
 
 [dependencies]
+symbio-sdk = { path = "../symbio-sdk" }
 # 核心库：进程内直接复用同一套分形插件树，不经过任何 IPC/协议改动。
 symbio = { path = "../symbio" }
 # 版本与 features 刻意与 ../symbio/Cargo.toml 完全一致：

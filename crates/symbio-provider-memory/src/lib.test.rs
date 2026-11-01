@@ -18,7 +18,7 @@
 use super::{
     memory_render_segment, MemoryFile, MemoryInjection, MemoryNodeSpec, MemorySegmentSpec,
 };
-use symbio_core::VdfsAccess;
+use symbio_kernel::vdfs::VdfsAccess;
 use tempfile::TempDir;
 
 /// 测试用**合成文件名**：本模块不认识任何真实层的名字，用例自己带一个。

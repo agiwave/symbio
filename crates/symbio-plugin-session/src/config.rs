@@ -21,13 +21,13 @@
 //! 未知键仍被静默忽略。存量配置文件**无需迁移**。
 
 use serde::{Deserialize, Serialize};
-use symbio_core::ApprovalGrants;
+use symbio_sdk::capability::ApprovalGrants;
 
 // 建树策略的形状与 flat 折叠住 core `node_build`（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
 // 裁决三）：写侧构造
 // 词表被留守与驱动器两个插件共用，隔着 E-009 的插件墙只能住 core；配置面在这里
 // **续一发短路径**——`plugin.rs` / `state.rs` / `tool_dispatch.rs` 等既有引用不经改动。
-pub use symbio_core::node_build::PresentationTree;
+pub use symbio_sdk::turn::node_build::PresentationTree;
 
 /// 会话配置 —— 本插件的旋钮（字段真源）。
 ///
@@ -375,11 +375,11 @@ pub struct SessionConfig {
 // 配置面、配置面反过来够不着判定侧；写成两处字面量就是必然漂移的第二份。
 
 /// 出厂值：显式前缀，**带尾空格**——`/work 干活` 命中，`/worker 是什么` 不命中。
-pub const FORCE_PREFIX: &str = symbio_core::WORKER_FORCE_PREFIX;
+pub const FORCE_PREFIX: &str = symbio_sdk::turn::dispatch::WORKER_FORCE_PREFIX;
 /// 出厂值：关键词（子串、忽略大小写）。**空集 = 本层关闭**。
-pub const KEYWORDS: &[&str] = symbio_core::WORKER_KEYWORDS;
+pub const KEYWORDS: &[&str] = symbio_sdk::turn::dispatch::WORKER_KEYWORDS;
 /// 出厂值：主题长度阈值（字符数）。**0 = 本层关闭**。
-pub const MIN_CHARS: usize = symbio_core::WORKER_MIN_CHARS;
+pub const MIN_CHARS: usize = symbio_sdk::turn::dispatch::WORKER_MIN_CHARS;
 
 pub fn default_worker_force_prefix() -> String {
     FORCE_PREFIX.to_string()
@@ -392,7 +392,7 @@ pub fn default_worker_min_chars() -> usize {
 }
 
 /// 出厂值：调度容量（平凡值 = 串行 FIFO）。
-pub const TASK_CAP: usize = symbio_core::TASK_CAP;
+pub const TASK_CAP: usize = symbio_sdk::turn::dispatch::TASK_CAP;
 
 pub fn default_task_cap() -> usize {
     TASK_CAP

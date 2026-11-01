@@ -22,10 +22,11 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::{
-    ApprovalGrants, Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, APPROVAL_GRANTS, MODE, RISK_LEVEL,
-};
+use symbio_kernel::capability::{Capability, CapabilityMeta, CapabilityRiskLevel};
+use symbio_kernel::exec::ExecEnv;
+use symbio_kernel::plugin::{PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_sdk::capability::ApprovalGrants;
+use symbio_sdk::keys::{APPROVAL_GRANTS, MODE, RISK_LEVEL};
 
 /// 从 `ctx[RISK_LEVEL]` 读 per-session 阈值；缺席 = `Medium`（新会话的安全默认）。
 ///
@@ -119,13 +120,13 @@ fn confirm_prompt_payload(
                 tool_name, risk_str
             ),
             "success": false,
-            "failure_kind": symbio_core::failure_kind::PERMISSION_DENIED,
+            "failure_kind": symbio_kernel::capability::failure_kind::PERMISSION_DENIED,
         });
     }
     json!({
         "content": format!("需要确认：{tool_description}"),
         "success": false,
-        "failure_kind": symbio_core::failure_kind::NEEDS_APPROVAL,
+        "failure_kind": symbio_kernel::capability::failure_kind::NEEDS_APPROVAL,
         "prompt": {
             "kind": "confirm",
             "tool_name": tool_name,

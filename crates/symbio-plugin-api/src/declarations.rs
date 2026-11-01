@@ -30,8 +30,9 @@
 
 use std::sync::{Arc, OnceLock};
 
-use symbio_core::ring::Gap;
-use symbio_core::{Builder, Entity, EventDecl, Frozen, PluginDeclarations, Verb};
+use symbio_kernel::decl::ring::Gap;
+use symbio_kernel::decl::{Builder, Frozen, PluginDeclarations};
+use symbio_kernel::event::{Entity, EventDecl, Verb};
 
 use crate::events;
 

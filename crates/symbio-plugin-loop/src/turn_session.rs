@@ -29,7 +29,11 @@ use std::sync::Arc;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use symbio_core::{Event, PluginError, Scope, Seq, Store, TurnSettings, TurnSpec};
+use symbio_kernel::actors::Scope;
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::plugin::PluginError;
+use symbio_kernel::store::Store;
+use symbio_sdk::turn::dispatch::{TurnSettings, TurnSpec};
 
 use super::session_port::SessionPort;
 
@@ -55,8 +59,8 @@ impl LoopSession {
 
     /// 本会话主体（`TurnSpec.principal` 的读口）——消息构造点写 `principal` 的
     /// 唯一地址来源（D-147：身份只写一份）。
-    pub(crate) fn principal(&self) -> symbio_core::principal::Principal {
-        symbio_core::principal::Principal::from_legacy(&self.spec.principal)
+    pub(crate) fn principal(&self) -> symbio_sdk::chat::principal::Principal {
+        symbio_sdk::chat::principal::Principal::from_legacy(&self.spec.principal)
     }
 
     /// 作用域（子会话 ⇒ `Child(父主体)`，顶层 ⇒ `Root`；session 从元数据预计算）。

@@ -9,12 +9,12 @@ use super::*;
 use crate::config::SessionConfig;
 use crate::plugin::SessionPlugin;
 use crate::types::Session;
-use symbio_core::PluginDir;
-use symbio_core::VdfsChangeSubscriptions;
+use symbio_sdk::plugin::PluginDir;
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: cm::NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -44,16 +44,16 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
 /// 以事实在场。空切片上，生产收口路径要落的变更事实（`message_events::append`）
 /// 连溯源锚都解不出、会按口径被丢弃——测的就不再是收口本身。
 fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
-    use symbio_core::Store as _;
+    use symbio_kernel::store::Store as _;
     let payload = serde_json::to_value(nodes).expect("序列化种子消息失败");
     let wal = dir.join(crate::paths::V2_WAL_FILE);
     let s = crate::store::EventWalStore::open(&wal).expect("打开事实源失败");
     s.append(
-        symbio_core::Event::pending(
+        symbio_kernel::event::Event::pending(
             "m-add-0",
             symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
-            symbio_core::Entity::Message,
-            symbio_core::Verb::Opened,
+            symbio_kernel::event::Entity::Message,
+            symbio_kernel::event::Verb::Opened,
             0,
             symbio_core::PRINCIPAL_USER,
         )
@@ -66,15 +66,15 @@ fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
 ///
 /// 它是「切片非空」的来处：没有它，后续变更事实连溯源锚都解不出。
 fn seed_user_message(dir: &std::path::Path) {
-    use symbio_core::Store as _;
+    use symbio_kernel::store::Store as _;
     let wal = dir.join(crate::paths::V2_WAL_FILE);
     let s = crate::store::EventWalStore::open(&wal).expect("打开事实源失败");
     s.append(
-        symbio_core::Event::pending(
+        symbio_kernel::event::Event::pending(
             "u-open",
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
-            symbio_core::Entity::Turn,
-            symbio_core::Verb::Opened,
+            symbio_kernel::event::Entity::Turn,
+            symbio_kernel::event::Verb::Opened,
             1,
             symbio_core::PRINCIPAL_USER,
         )

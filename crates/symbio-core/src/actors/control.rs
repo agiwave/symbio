@@ -8,8 +8,10 @@
 
 use crate::authz::PRINCIPAL_ARBITER;
 use crate::governance::GrantsChange;
+use crate::pattern_for_principal;
 use crate::projection::reputation::ReputationEntry;
-use crate::{pattern_for_principal, ActorSpec, Event, Scope};
+use symbio_kernel::actors::{ActorSpec, Scope};
+use symbio_kernel::event::Event;
 
 /// 淘汰判定者（DE-043 §3，[DE-043 §2/§3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
 /// 声誉投影低于阈值 ⇒ 收回 `assign.work` 的**裁决侧**。

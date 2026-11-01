@@ -2,9 +2,11 @@
 
 use crate::AppState;
 use serde_json::Value;
-use symbio::symbio_core::{
-    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, SymbioKey, TRACE_ID,
+use symbio::symbio_kernel::keys::SymbioKey;
+use symbio::symbio_kernel::plugin::{
+    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };
+use symbio::symbio_sdk::keys::TRACE_ID;
 use tauri::Emitter;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -86,10 +88,12 @@ pub async fn route_v2(
 
     // 创建插件上下文——装配在 core，与 gateway 的 `build_ctx` 是**同一份**：
     // metadata 的字符串 / JSON 两种落桶规则只在这里定义一次。
-    let context = std::sync::Arc::new(symbio::symbio_core::PluginSimpleRequest::from_parts(
-        request.payload,
-        request.metadata.as_object(),
-    ));
+    let context = std::sync::Arc::new(
+        symbio::symbio_kernel::plugin::PluginSimpleRequest::from_parts(
+            request.payload,
+            request.metadata.as_object(),
+        ),
+    );
 
     let root = state.root.clone();
     let rm = state.route_manager.clone();

@@ -11,10 +11,14 @@ use super::{fleet_reading, read};
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
-use symbio_core::{
-    calibration_for, check_all, cost_ledger, transcript, Budget, Entity, Event, EventEnvelope as _,
-    Seq, Store, Verb, SKILL_TAG,
-};
+use symbio_core::SKILL_TAG;
+use symbio_kernel::event::{Entity, Event, EventEnvelope as _, Seq, Verb};
+use symbio_kernel::store::Store;
+use symbio_kernel::view::Budget;
+use symbio_sdk::invariants::check_all;
+use symbio_sdk::projection::calibration::calibration_for;
+use symbio_sdk::projection::cost::cost_ledger;
+use symbio_sdk::projection::transcript::transcript;
 
 use crate::projections::{checkpoint::checkpoint, fallback::fallback_rate, slo::slo_report};
 use symbio_plugin_api::events::{
@@ -53,7 +57,7 @@ fn read_path(
     viewer: Option<&str>,
     principal: &str,
     root: &Path,
-) -> Result<super::SessionStats, symbio_core::PluginError> {
+) -> Result<super::SessionStats, symbio_kernel::plugin::PluginError> {
     read(
         session_id,
         facts_of(wal),
@@ -61,7 +65,7 @@ fn read_path(
         viewer,
         principal,
         false,
-        symbio_core::TASK_CAP,
+        symbio_sdk::turn::dispatch::TASK_CAP,
     )
 }
 
@@ -727,18 +731,21 @@ fn panel_matches_the_columns_it_describes() {
         .find(|r| r.label == "事实源在不在")
         .expect("有在不在行");
     assert_eq!(has_row.value, "在", "seed 造过事实源");
-    assert_eq!(has_row.tone, symbio_core::ReadingTone::Normal);
+    assert_eq!(has_row.tone, symbio_kernel::present::ReadingTone::Normal);
 
     // ③ 不变量段：seed 的 4 格干净 ⇒ 0 条违规、平常语气
     let inv = &panel.sections[2];
     assert_eq!(inv.rows.len(), 1);
     assert_eq!(inv.rows[0].value, "0 条", "干净的事实源 ⇒ 0 违规");
-    assert_eq!(inv.rows[0].tone, symbio_core::ReadingTone::Normal);
+    assert_eq!(
+        inv.rows[0].tone,
+        symbio_kernel::present::ReadingTone::Normal
+    );
     // 反过来：seed 的兜底率是 1/2 = 50%，远超 5% 阈值 ⇒ 时延段**本该**是 warn。
     // 这一条与下面「有违规 ⇒ warn」合起来覆盖两个方向：该标色的标、不该标的不标。
     assert_eq!(
         perf.rows[0].tone,
-        symbio_core::ReadingTone::Warn,
+        symbio_kernel::present::ReadingTone::Warn,
         "兜底率 50% > 5% ⇒ 那一行需留意（面板不许把问题显示成没事）"
     );
     assert!(panel.has_warn(), "有 warn 行 ⇒ `has_warn()` 为真");
@@ -779,7 +786,7 @@ fn panel_matches_the_columns_it_describes() {
         cm_row.value, "本会话没有委托",
         "零条要说人话，不显示「0 条 · 违约 0 条」"
     );
-    assert_eq!(cm_row.tone, symbio_core::ReadingTone::Normal);
+    assert_eq!(cm_row.tone, symbio_kernel::present::ReadingTone::Normal);
 }
 
 /// 能力视图列（DE-025 D-221）：**键完全由公开清单决定，本插件一个名字也不写**。
@@ -909,7 +916,11 @@ fn a_warn_row_appears_when_the_invariants_are_broken() {
     let got = read_at(&wal, symbio_core::PRINCIPAL_MAIN);
     let inv = &got.panel.sections[2];
     let row = &inv.rows[0];
-    assert_eq!(row.tone, symbio_core::ReadingTone::Warn, "违规 ⇒ 需留意");
+    assert_eq!(
+        row.tone,
+        symbio_kernel::present::ReadingTone::Warn,
+        "违规 ⇒ 需留意"
+    );
     assert!(row.value != "0 条", "且不再显示 0 条：{}", row.value);
     assert!(got.panel.has_warn(), "`has_warn()` 必须为真");
 }
@@ -932,7 +943,11 @@ fn a_missing_wal_is_a_warn_row_not_a_silent_zero() {
         .find(|r| r.label == "事实源在不在")
         .expect("有在不在行");
     assert_eq!(row.value, "不在");
-    assert_eq!(row.tone, symbio_core::ReadingTone::Warn, "没跑过 ⇒ 需留意");
+    assert_eq!(
+        row.tone,
+        symbio_kernel::present::ReadingTone::Warn,
+        "没跑过 ⇒ 需留意"
+    );
 }
 
 /// 出口读数 == 直接 `apply`（复算：同源，不是「看起来差不多」）。
@@ -960,9 +975,12 @@ fn stats_recompute_equals_direct_apply() {
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
     let rs = serde_json::to_value(
-        symbio_core::readyset_for(crate::declarations::TASK_VOCAB, symbio_core::TASK_CAP)
-            .apply(&snap, i64::MAX, Budget::generous())
-            .value,
+        symbio_sdk::projection::readyset::readyset_for(
+            crate::declarations::TASK_VOCAB,
+            symbio_sdk::turn::dispatch::TASK_CAP,
+        )
+        .apply(&snap, i64::MAX, Budget::generous())
+        .value,
     )
     .expect("就绪集序列化");
     assert_eq!(got.readyset, rs, "就绪集列同样复算（同切片、同 as-of）");
@@ -1506,7 +1524,11 @@ fn commitments_column_exposes_each_delegation_record() {
         "面板与列对上：{:?}",
         row.value
     );
-    assert_eq!(row.tone, symbio_core::ReadingTone::Warn, "有违约 ⇒ 需留意");
+    assert_eq!(
+        row.tone,
+        symbio_kernel::present::ReadingTone::Warn,
+        "有违约 ⇒ 需留意"
+    );
 
     // 无读权限 ⇒ 空形状（四列那一族），不是缺列、也不是零值条目
     let denied = read_path(
@@ -1571,9 +1593,12 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
     let snap = ro.range(Seq::new(0));
     let direct = serde_json::to_value(
-        symbio_core::readyset_for(crate::declarations::TASK_VOCAB, symbio_core::TASK_CAP)
-            .apply(&snap, i64::MAX, Budget::generous())
-            .value,
+        symbio_sdk::projection::readyset::readyset_for(
+            crate::declarations::TASK_VOCAB,
+            symbio_sdk::turn::dispatch::TASK_CAP,
+        )
+        .apply(&snap, i64::MAX, Budget::generous())
+        .value,
     )
     .expect("序列化");
     assert_eq!(got.readyset, direct, "就绪集列必须复算相等");
@@ -1589,7 +1614,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     .expect("读数");
     assert_eq!(
         denied.readyset,
-        serde_json::json!({ "ready": [], "cap": symbio_core::TASK_CAP })
+        serde_json::json!({ "ready": [], "cap": symbio_sdk::turn::dispatch::TASK_CAP })
     );
     assert_eq!(denied.invariants, serde_json::json!([]));
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
@@ -1684,7 +1709,7 @@ fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
             viewer,
             symbio_core::PRINCIPAL_MAIN,
             enabled,
-            symbio_core::TASK_CAP,
+            symbio_sdk::turn::dispatch::TASK_CAP,
         )
         .expect("读数")
     };

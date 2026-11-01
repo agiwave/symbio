@@ -31,7 +31,7 @@
 //! `0` / `1` = 串行；更大的值 = 至多几条同时在飞。
 
 use std::collections::HashMap;
-use symbio_core::{CapabilityMeta, CapabilityRiskLevel};
+use symbio_kernel::capability::{CapabilityMeta, CapabilityRiskLevel};
 
 /// 一个调用在批内的执行策略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +89,7 @@ impl ToolRisks {
         // 与 `capability_resolve` 的「字面相等优先」不冲突（那里也先认字面名）。
         for meta in metas {
             map.insert(
-                symbio_core::capability_to_wire(&meta.name),
+                symbio_sdk::capability::capability_to_wire(&meta.name),
                 meta.effective_risk(),
             );
         }

@@ -18,11 +18,12 @@
 //! | [`trivial_actor_spec`] | `symbio-plugin-task`（`task`）· `symbio-plugin-loop`（`turn_runner`）· `symbio-plugin-session`（`store/wal`） |
 
 use async_trait::async_trait;
-use symbio_core::{
-    production_matrix, ActorSpec, AdapterError, CapabilityMeta, DeltaSink, FullModel, LlmAdapter,
-    LlmTurn, ModelFinishReason, Pattern, Scope,
-};
+use symbio_core::production_matrix;
+use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
+use symbio_kernel::capability::CapabilityMeta;
+use symbio_kernel::llm::ModelFinishReason;
 use symbio_kernel::llm::PromptMessage;
+use symbio_sdk::adapters::{AdapterError, DeltaSink, FullModel, LlmAdapter, LlmTurn};
 
 /// 零 LLM 桩——彩排与测试用。可注入**确定性失败**，用于演练兜底路径。
 ///

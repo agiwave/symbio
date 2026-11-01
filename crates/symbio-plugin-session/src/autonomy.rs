@@ -42,7 +42,9 @@
 //!   的事）。自主程度与「做得对不对」是两条轴，此处不混。
 
 use serde::{Deserialize, Serialize};
-use symbio_core::{Entity, Event, Projection, TaskVocab};
+use symbio_kernel::event::{Entity, Event};
+use symbio_kernel::projection::Projection;
+use symbio_sdk::projection::task_vocab::TaskVocab;
 
 /// 自主程度视图（**可加**：跨会话合并 = 分子分母分别相加）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

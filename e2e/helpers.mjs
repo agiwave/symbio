@@ -573,11 +573,33 @@ export async function subscribeSessionRealtime(cli, { sessionId, gatewayPort }) 
 }
 
 /**
+ * 实时面「这一轮跑完」的判据（`sendAndSettle` 与起手 spawn 一轮的用例共用）。
+ *
+ * 会话节点的变更帧**不都带状态词**——轮首落骨架、消息增删等写点也会推会话节点帧，
+ * 那些帧的 `data.status` 是 `undefined`。判据若只看「最后一帧不是 working」，一个
+ * 无状态的中间帧就会冒充收尾（t87 在并发 6 下踩过：第三幕只看到 `working→?` 就返回，
+ * 模型请求晚了一拍才落地）。所以先滤出**真正带状态词**的帧，再看「见过 working、
+ * 且最后一个状态帧已离开 working」。
+ *
+ * @param sc `sub.sessionChanges().slice(mark)` 的帧序列
+ * @returns {boolean} 判据成立 ⇒ 调用方可以断言这一轮的产出
+ */
+export function settledAfterWorking(sc) {
+  const st = sc.filter((c) => typeof c.data?.status === 'string');
+  return (
+    st.length > 0 &&
+    st.some((c) => c.data.status === 'working') &&
+    st[st.length - 1].data.status !== 'working'
+  );
+}
+
+/**
  * 经 REPL 发一轮消息，并在**会话实时面**上等这一轮真正跑完。
  *
- * 判据是「会话节点见过 working、且最后一次离开 working」：那一帧是本轮实时面的
- * 最后一帧（后端先清在途、再复位运行态，两者走同一条订阅 FIFO）。水位线 `mark`
- * 不可省——否则订阅后首帧的空闲态会让条件在开跑前就成立（t16 踩过）。
+ * 判据是「会话节点见过 working、且最后一次离开 working」（无状态词的中间帧不算
+ * 收尾，见 {@link settledAfterWorking}）：那一帧是本轮实时面的最后一帧（后端先清
+ * 在途、再复位运行态，两者走同一条订阅 FIFO）。水位线 `mark` 不可省——否则订阅后
+ * 首帧的空闲态会让条件在开跑前就成立（t16 踩过）。
  *
  * **调用前必须没有别的轮还在跑**：判据认的是「水位线之后的那一帧收尾」，而实时面
  * 不带轮的身份——上一轮若在此刻仍未结束，它的收尾帧会被当成本轮的收尾，函数在
@@ -598,14 +620,7 @@ export async function sendAndSettle(cli, sub, message, { timeoutMs = 60_000 } = 
   const mark = sub.sessionChanges().length;
   cli.send(message);
   await waitFor(
-    () => {
-      const sc = sub.sessionChanges().slice(mark);
-      return (
-        sc.length > 0 &&
-        sc.some((c) => c.data?.status === 'working') &&
-        sc[sc.length - 1]?.data?.status !== 'working'
-      );
-    },
+    () => settledAfterWorking(sub.sessionChanges().slice(mark)),
     { what: '本轮跑完（实时面离开 working）', timeoutMs },
   );
 }

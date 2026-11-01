@@ -235,9 +235,13 @@ pub(super) fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
     let store = crate::store::EventWalStore::open_readonly(&path).ok()?;
     // `range` 是 `Store` trait 的方法：trait 必须在作用域里（局部引入，
     // 不为一次读取把这个 trait 抬进本文件的顶层导入）。
-    use symbio_core::Store as _;
-    let snapshot = store.range(symbio_core::Seq::new(0));
-    Some(symbio_core::rebuild(&snapshot, &CHAT_VOCAB, &MESSAGE_VOCAB))
+    use symbio_kernel::store::Store as _;
+    let snapshot = store.range(symbio_kernel::event::Seq::new(0));
+    Some(symbio_sdk::projection::rebuild::rebuild(
+        &snapshot,
+        &CHAT_VOCAB,
+        &MESSAGE_VOCAB,
+    ))
 }
 
 /// 同步版读 `messages.json`

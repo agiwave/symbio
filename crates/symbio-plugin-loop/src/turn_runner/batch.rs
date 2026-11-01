@@ -13,7 +13,7 @@ pub(crate) async fn land_artifacts<S>(
     run: &mut Prepared,
     store: &S,
     outcomes: &[super::super::tool_dispatch::DispatchOutcome],
-) -> Result<(), symbio_core::AppendError>
+) -> Result<(), symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {

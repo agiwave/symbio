@@ -67,9 +67,10 @@ use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use symbio_core::EmbeddingError;
-use symbio_core::EmbeddingService;
-use symbio_core::{PluginInvokeRequest, EMBEDDING_LOCAL, EMBEDDING_NOOP};
+use symbio_kernel::plugin::PluginInvokeRequest;
+use symbio_sdk::embedding::EmbeddingError;
+use symbio_sdk::embedding::EmbeddingService;
+use symbio_sdk::embedding::{EMBEDDING_LOCAL, EMBEDDING_NOOP};
 
 const MODEL_BYTES: &[u8] = include_bytes!("model.onnx");
 const TOKENIZER_BYTES: &[u8] = include_bytes!("tokenizer.json");

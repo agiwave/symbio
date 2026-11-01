@@ -593,14 +593,14 @@ async fn disabling_a_slice_removes_its_rows_and_keeps_the_rest() {
 // 仍然经**工厂 id + 真实 `mount_all`** 装配：本文件不能 `use symbio_plugin_session`
 // 或 loop 插件（E-009 测试同样判），跨插件的形状由地址面与 core 词汇表达。
 
-use symbio_core::{
-    TurnDispatch, TurnReport, TurnSettings, TurnSpec, TurnStatus, LOOP_RUN_TURN, TURN_DISPATCH,
-};
 use symbio_plugin_api::chat_node as cm;
 use symbio_plugin_api::node_build::PresentationTree;
 use symbio_plugin_api::{
     chat_request, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter,
     ModelProvider, Scope, TurnOutput, VdfsError,
+};
+use symbio_sdk::turn::dispatch::{
+    TurnDispatch, TurnReport, TurnSettings, TurnSpec, TurnStatus, LOOP_RUN_TURN, TURN_DISPATCH,
 };
 
 /// 可闸门假模型：进入即报到，等测试放行后返回一条自然结束的正文。

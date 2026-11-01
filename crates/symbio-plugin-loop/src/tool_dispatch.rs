@@ -43,17 +43,21 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
-};
-use symbio_core::{
-    capability_resolve, llm_emit_message, llm_emit_state, tool_metas, ApprovalBasis,
-    ApprovalGrants, CapabilityRiskLevel, Entity, Event, ExecAbortSignal, ExecEventSink, LlmTurn,
-    Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store, Verb, APPROVAL_GRANTS,
-    CAPABILITY_VISITOR, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, MODE, RISK_LEVEL,
-};
+use symbio_kernel::capability::{ApprovalBasis, CapabilityRiskLevel};
+use symbio_kernel::event::{Entity, Event, Seq, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE};
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_kernel::store::Store;
 use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::events::EVENT_AUTHZ_DENIED;
+use symbio_sdk::adapters::LlmTurn;
+use symbio_sdk::capability::{capability_resolve, tool_metas, ApprovalGrants, CAPABILITY_VISITOR};
+use symbio_sdk::chat::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
+};
+use symbio_sdk::keys::{APPROVAL_GRANTS, MODE, RISK_LEVEL};
+use symbio_sdk::llm::llm_emit_state;
+use symbio_sdk::llm::turn::llm_emit_message;
 
 use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
@@ -61,7 +65,7 @@ use super::loop_rows;
 use super::port;
 use super::tools::{is_unanswered, process_tool_calls_async, NOT_EXECUTED};
 use super::turn_exec::UiBridge;
-use symbio_core::node_build::{
+use symbio_sdk::turn::node_build::{
     detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes, PresentationTree,
 };
 
@@ -410,7 +414,7 @@ fn latest_model_response(facts: &[Event], turn: u64, drive: u64) -> Option<&Even
     let prefix = format!("model-{turn}-d{drive}-");
     facts.iter().rev().find(|e| {
         e.turn == turn
-            && e.kind == symbio_core::EVENT_RESPONSE
+            && e.kind == symbio_kernel::event::EVENT_RESPONSE
             && e.payload.get("port").and_then(|v| v.as_str()) == Some("model")
             && e.payload
                 .get("id")
@@ -809,7 +813,7 @@ impl ToolPort {
     /// `failed{superseded}` 关掉：它的结果永远不会来，而新的一次用户动作是新账。
     /// 不关的话 `turn_head.tools_open` 会看见两笔开着，`departed` 的集合债也永远
     /// 差一个终局。
-    pub fn land_wake(&self, spec: &WakeSpec<'_>) -> Result<(), symbio_core::AppendError> {
+    pub fn land_wake(&self, spec: &WakeSpec<'_>) -> Result<(), symbio_kernel::store::AppendError> {
         let facts = self.facts.range(Seq::new(0));
         for stale in facts.iter().filter(|e| {
             e.turn == self.turn && is_wake_request(e) && !wake_terminal(&facts, self.turn, e)
@@ -904,7 +908,7 @@ impl ToolPort {
         });
         let (granted, deny_why) = authz.unwrap_or((false, None));
         let turn = LlmTurn {
-            tool_calls: vec![symbio_core::TurnToolCallInfo {
+            tool_calls: vec![symbio_kernel::llm::TurnToolCallInfo {
                 id: Some(target.clone()),
                 wire_id: (!wire_id.is_empty()).then(|| wire_id.clone()),
                 name: Some(tool.clone()),
@@ -1156,8 +1160,8 @@ impl SessionDispatchPort {
     }
 
     /// 本会话主体：节点诞生时写死的主体身份（D-147 档 2）。
-    fn principal(&self) -> symbio_core::principal::Principal {
-        symbio_core::principal::Principal::from_legacy(&symbio_core::request_principal(
+    fn principal(&self) -> symbio_sdk::chat::principal::Principal {
+        symbio_sdk::chat::principal::Principal::from_legacy(&symbio_core::request_principal(
             self.ctx.as_ref(),
         ))
     }
@@ -1246,7 +1250,7 @@ impl SessionDispatchPort {
             .first()
             .and_then(|n| n.content.as_ref().map(|c| c.to_text()))
             .unwrap_or_default();
-        let result_id = symbio_core::llm_short_id();
+        let result_id = symbio_sdk::llm::turn::llm_short_id();
         let mut result_meta = serde_json::json!({ "success": ok, "tool_name": name });
         if !ok {
             result_meta["failure_kind"] = serde_json::json!("error");
@@ -1256,12 +1260,14 @@ impl SessionDispatchPort {
             parent_id: Some(call_id.clone()),
             // 身份只写主体这一份（D-147）：工具结果的族由 `tool_principal` 折出，
             // 再写一遍 `role` 是两个表达说同一件事。
-            principal: Some(symbio_core::principal::Principal::tool_principal(&name)),
+            principal: Some(symbio_sdk::chat::principal::Principal::tool_principal(
+                &name,
+            )),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(text.clone())),
             status: Some(final_status),
             meta: Some(result_meta),
-            timestamp: Some(symbio_core::clock_now_ms()),
+            timestamp: Some(symbio_sdk::clock::clock_now_ms()),
             ..Default::default()
         };
 
@@ -1389,18 +1395,18 @@ fn denied_event(turn: u64, produced_by: u64, call: &port::Call, tool: &str, why:
         "attempt": attempt,
         "tool": tool,
         "kind": "tool",
-        "reason": symbio_core::ClosureReason::Denied.as_str(),
+        "reason": symbio_kernel::event::ClosureReason::Denied.as_str(),
         "detail": why,
     }))
 }
 
-fn append_authz<S>(store: &S, event: Event) -> Result<(), symbio_core::AppendError>
+fn append_authz<S>(store: &S, event: Event) -> Result<(), symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
     match store.append(event) {
         Ok(_) => Ok(()),
-        Err(symbio_core::AppendError::Duplicate) => Ok(()),
+        Err(symbio_kernel::store::AppendError::Duplicate) => Ok(()),
         Err(e) => Err(e),
     }
 }
@@ -1550,7 +1556,7 @@ impl SessionDispatchPort {
     /// （`Arc<Self>`、模型交回的调用、广播过的节点），不带走任何借用。
     async fn run_batch(
         &self,
-        tool_calls: Vec<symbio_core::TurnToolCallInfo>,
+        tool_calls: Vec<symbio_kernel::llm::TurnToolCallInfo>,
         call_nodes: Vec<ChatNode>,
     ) -> Vec<DispatchOutcome> {
         // ③ 分发（工具执行层：存档 / 钩子 / 审批 / 批尾收口全在里面）。

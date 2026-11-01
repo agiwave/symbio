@@ -41,11 +41,12 @@
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
 use std::sync::Arc;
-use symbio_core::{
-    capability_init_error_bucket, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
-    CAPABILITY_ERRORS, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
-};
+use symbio_kernel::capability::Registry;
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_providers::new_registry;
+use symbio_sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS, OPTION_VISITOR};
+use symbio_sdk::keys::PATH;
+use symbio_sdk::plugin::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
 
 /// 向所有插件广播"贡献工具"，返回装配好的能力管理器。
 ///
@@ -74,13 +75,13 @@ pub async fn collect_capabilities(
 
     let traverse_ctx = ctx.fork();
     traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-    traverse_ctx.set(symbio_core::CAPABILITY_VISITOR, manager.clone());
+    traverse_ctx.set(symbio_sdk::capability::CAPABILITY_VISITOR, manager.clone());
     capability_init_error_bucket(&traverse_ctx);
     // Agent 权限作用域槽（D-153）：agent 插件在 traverse 里发布（它是唯一能把
     // `agent_id` 解析成一份声明的地方），收集结束后由本函数把同一个 `Arc` 挂回
     // 调用方 ctx——工具执行期从那里读。与错误桶同一条路：容器对每个子插件各
     // fork 一份，插件写在自己那份上，收集方与兄弟都看不见，只能靠**共享的可变槽**。
-    symbio_core::agent_perms_init_slot(&traverse_ctx);
+    symbio_sdk::agent::agent_perms_init_slot(&traverse_ctx);
 
     if let Err(e) = parent
         .clone()
@@ -101,8 +102,8 @@ pub async fn collect_capabilities(
     }
     // 权限作用域同理（同一个 Arc，不复制内容）：没有发布 = 本会话没选中 Agent，
     // 工具侧按宿主态处理。
-    if let Some(slot) = traverse_ctx.get(symbio_core::AGENT_PERMS) {
-        ctx.set(symbio_core::AGENT_PERMS, slot);
+    if let Some(slot) = traverse_ctx.get(symbio_sdk::agent::AGENT_PERMS) {
+        ctx.set(symbio_sdk::agent::AGENT_PERMS, slot);
     }
 
     manager
@@ -117,7 +118,7 @@ pub async fn collect_capabilities(
 /// 单独抽出的意义：让"收集"与"挂载"两件事在调用点显式成对出现，
 /// 避免漏挂导致 `Tool not found` 这类只在运行期才暴露的问题。
 pub fn attach_capabilities(ctx: &Arc<dyn PluginInvokeRequest>, manager: Arc<dyn Registry>) {
-    ctx.set(symbio_core::CAPABILITY_VISITOR, manager);
+    ctx.set(symbio_sdk::capability::CAPABILITY_VISITOR, manager);
 }
 
 // 读侧助手 `tool_metas` 的实现住 core（[`symbio_core::tool_metas`]）：loop

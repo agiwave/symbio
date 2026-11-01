@@ -91,20 +91,28 @@
 
 use std::sync::{Arc, Mutex};
 
-use symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
-};
-use symbio_core::{
-    is_stop_fact, llm_short_id, run_ops, ActorSpec, AdapterError, AppendError, CapabilityMeta,
-    ConsolidateRequest, DeltaSink, Entity, Event, ExecAbortSignal, ExecEventSink, FullModel,
-    LatencyTier, LlmAdapter, ModelProvider, Plugin, PluginError, PluginInvokeRequest,
-    ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnOutput, Verb,
-};
+use symbio_kernel::actors::ActorSpec;
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::capability::CapabilityMeta;
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::llm::PromptMessage;
+use symbio_kernel::llm::{ModelProvider, TurnOutput};
+use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest};
+use symbio_kernel::store::{AppendError, Store};
 use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_USER_MESSAGE,
 };
+use symbio_sdk::adapters::{
+    AdapterError, DeltaSink, FullModel, LlmAdapter, ProviderLlmAdapter, TokenIssuer,
+};
+use symbio_sdk::chat::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
+};
+use symbio_sdk::invariants::is_stop_fact;
+use symbio_sdk::llm::turn::llm_short_id;
+use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest};
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
 // 留在持令牌的 session）；本文件只剩轮内调用点，经 [`LoopSession`] 的端口动作发起。
@@ -611,7 +619,10 @@ impl DeltaSink for UiBridge {
 /// 测试直接给闭包，于是能造「只返回一次」这种形状。
 pub(crate) type SupplementFn = Arc<
     dyn Fn() -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Option<symbio_core::DrainedSupplement>> + Send>,
+            Box<
+                dyn std::future::Future<Output = Option<symbio_sdk::turn::facts::DrainedSupplement>>
+                    + Send,
+            >,
         > + Send
         + Sync,
 >;
@@ -628,7 +639,7 @@ pub(crate) struct ExecTurn<'a> {
     /// 插件宿主（工具能力经它路由；无工具轮为 `None`）。
     pub parent: Option<Arc<dyn Plugin>>,
     /// 本轮请求上下文（工具路由与能力注册表都在它上面）。
-    pub ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+    pub ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     /// 会话级系统提示词（取值点 = `chat_loop::inputs::collect_reads`）。
     pub system_prompt: &'a str,
     /// 本轮中止信号（同样由 chat_loop 传入）。
@@ -688,7 +699,7 @@ pub(crate) struct ExecTurn<'a> {
     /// 请求里 v1、v2 必须按同一档建树，否则 live↔存储↔重建三格错位（树形状锁步）。
     /// 由 `chat_loop` 从编排器带入，本函数不读配置（配置在请求生命周期内不变，
     /// 取一次即够）。
-    pub presentation_tree: symbio_core::node_build::PresentationTree,
+    pub presentation_tree: symbio_sdk::turn::node_build::PresentationTree,
 }
 
 /// 一次执行体动作需要的**全部**环境（D-222 裁决 5 的 `Ctx`）：轮内借面 + 轮首借面。
@@ -744,7 +755,7 @@ pub(crate) struct Ctx<'a> {
 /// 一个动作。两片合在 `Ctx` 里只是为了让「这一行借什么」由数据形状说，不由派发点说。
 pub(crate) struct HeadCtx<'a> {
     pub(crate) orchestrator: &'a super::chat_loop::state::ChatOrchestrator,
-    pub(crate) request_ctx: &'a Arc<dyn symbio_core::PluginInvokeRequest>,
+    pub(crate) request_ctx: &'a Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     /// 会话窄句柄：压缩 / 补落寄存 / 工具存档目录这些**会话动作**的入口。
     pub(crate) loop_session: &'a LoopSession,
     pub(crate) context: &'a mut super::chat_loop::state::SessionContext,
@@ -769,7 +780,7 @@ pub(crate) struct HeadCtx<'a> {
 /// 归还之后就没有出借方了。这与 [`Ctx`] 把端口做成 `Arc` 是同一条理由。
 pub(crate) struct HeadParts<'h> {
     pub(crate) orchestrator: Arc<super::chat_loop::state::ChatOrchestrator>,
-    pub(crate) request_ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+    pub(crate) request_ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     pub(crate) loop_session: Arc<LoopSession>,
     pub(crate) context: &'h mut super::chat_loop::state::SessionContext,
     pub(crate) turn: &'h mut super::chat_loop::state::TurnState,
@@ -828,7 +839,7 @@ pub(crate) enum ActorError {
     /// 读失败发生在幕锚之后、任何请求格之前，端口面上没有一笔账可关，因此交回编排层
     /// 走 `finish_turn(TurnExit::Failed)` 的兜底格既有路径（与换成动作通道之前逐字
     /// 同行为）。
-    Read(symbio_core::PluginError),
+    Read(symbio_kernel::plugin::PluginError),
 }
 
 /// 动作的返回：`Ok(())` = 这一步做完了（本轮是否收束由派发器读账本判），`Err` = 失败。
@@ -1170,15 +1181,17 @@ pub(crate) fn run_report<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
         let Some(body) = body else {
             return Ok(());
         };
-        let draft = symbio_core::facts::ReportDraft {
+        let draft = symbio_sdk::turn::facts::ReportDraft {
             text: body,
             tool_rounds,
             quiet_ms,
         };
-        let node = draft.to_message(&symbio_core::principal::Principal::from_legacy(&principal));
+        let node = draft.to_message(&symbio_sdk::chat::principal::Principal::from_legacy(
+            &principal,
+        ));
         ctx.store
             .append(
-                symbio_core::Event::pending(
+                symbio_kernel::event::Event::pending(
                     format!(
                         "rp-{turn_no}-{}",
                         head.report_landing
@@ -1221,9 +1234,9 @@ pub(crate) fn run_continue<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             .map(|_| ())
             .map_err(|exit| match exit {
                 super::chat_loop::state::TurnExit::Failed(e) => ActorError::Read(e),
-                other => ActorError::Read(symbio_core::PluginError::InternalError(format!(
-                    "续幕的开幕交出了非失败结局：{other:?}"
-                ))),
+                other => ActorError::Read(symbio_kernel::plugin::PluginError::InternalError(
+                    format!("续幕的开幕交出了非失败结局：{other:?}"),
+                )),
             })
     })
 }
@@ -1325,7 +1338,7 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             super::loop_rows::turn_slice(&events, turn)
                 .iter()
                 .filter(|e| {
-                    e.kind == symbio_core::EVENT_REQUEST
+                    e.kind == symbio_kernel::event::EVENT_REQUEST
                         && e.payload.get("port").and_then(serde_json::Value::as_str)
                             == Some("model")
                         && e.payload.get("via").and_then(serde_json::Value::as_str)
@@ -1469,7 +1482,7 @@ pub(crate) fn land_retry_branch(
     };
     let seq = store
         .append(
-            symbio_core::Event::pending(
+            symbio_kernel::event::Event::pending(
                 format!("branch-{root_id}"),
                 symbio_plugin_api::events::EVENT_TURN_BRANCH,
                 Entity::Turn,

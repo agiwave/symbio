@@ -21,8 +21,10 @@
 //! 三种幕都落 `session.config`（当轮生效的配置）。配置读的是**这一轮**的活值，
 //! 落成事实之后判决只读事实：回放看到的永远是「那一轮用的配置」，不是进程此刻的值。
 
-use symbio_core::{count_user_messages, Entity, Event, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::Store;
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
+use symbio_sdk::projection::turns::count_user_messages;
 
 use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, MESSAGE_VOCAB};
 
@@ -48,7 +50,7 @@ fn lease_window() -> usize {
 /// `sent` 不会被看护看到，只能由 `waiting` 行挂着——这是窗口选值的边界，不是安全
 /// 保证，失效条件写在 [DE-015 §2.6](../../../../docs/003-design/015-义务环.md "DE-015-义务环")
 /// 的第 7 条边界段里。
-fn lease_tail(snapshot: &[symbio_core::Event]) -> &[symbio_core::Event] {
+fn lease_tail(snapshot: &[symbio_kernel::event::Event]) -> &[symbio_kernel::event::Event] {
     &snapshot[snapshot.len().saturating_sub(lease_window())..]
 }
 
@@ -74,10 +76,10 @@ fn last_user_message(
         .messages
         .iter()
         .rev()
-        .find(|m| m.node_role() == Some(symbio_core::chat_node::NodeRole::User))
+        .find(|m| m.node_role() == Some(symbio_sdk::chat::chat_node::NodeRole::User))
         .map(|m| {
             let text = match &m.content {
-                Some(symbio_core::chat_node::MessageContent::Text(t)) => t.clone(),
+                Some(symbio_sdk::chat::chat_node::MessageContent::Text(t)) => t.clone(),
                 _ => String::new(),
             };
             (Some(m.id.clone()), text, m.meta.clone())
@@ -97,8 +99,8 @@ pub(crate) fn current_user_text(context: &super::state::SessionContext) -> Strin
 ///
 /// 与 `ResumeAction` 的 serde 线格式同值；`RetrySubtree` / `RetryCompaction`
 /// 不落本格（前者按新轮处理，后者在进循环之前就返回了）。
-pub(crate) fn resume_kind(action: &symbio_core::chat_node::ResumeAction) -> &'static str {
-    use symbio_core::chat_node::ResumeAction;
+pub(crate) fn resume_kind(action: &symbio_sdk::chat::chat_node::ResumeAction) -> &'static str {
+    use symbio_sdk::chat::chat_node::ResumeAction;
     match action {
         ResumeAction::Retry => "retry",
         ResumeAction::Approve => "approve",
@@ -166,7 +168,7 @@ fn open_drive(
     wake: Wake<'_>,
 ) -> Result<Drive, super::state::TurnExit> {
     let store = context.session.facts().ok_or_else(|| {
-        super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(
+        super::state::TurnExit::Failed(symbio_kernel::plugin::PluginError::InternalError(
             "执行需要持久会话（临时会话无事实源）".into(),
         ))
     })?;
@@ -184,9 +186,11 @@ fn open_drive(
         Wake::Resume(kind) => {
             let (turn_no, user_seq) = super::super::turn_exec::last_open_turn(&snapshot)
                 .ok_or_else(|| {
-                    super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(
-                        "续写轮找不到未收束的轮次（事实源与恢复路径不一致）".into(),
-                    ))
+                    super::state::TurnExit::Failed(
+                        symbio_kernel::plugin::PluginError::InternalError(
+                            "续写轮找不到未收束的轮次（事实源与恢复路径不一致）".into(),
+                        ),
+                    )
                 })?;
             let ordinal = snapshot
                 .iter()
@@ -209,9 +213,9 @@ fn open_drive(
                 )],
             )
             .map_err(|e| {
-                super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
-                    "恢复阶段事实落格失败：{e:?}"
-                )))
+                super::state::TurnExit::Failed(symbio_kernel::plugin::PluginError::InternalError(
+                    format!("恢复阶段事实落格失败：{e:?}"),
+                ))
             })?;
             let drive_seq = seqs.first().copied().unwrap_or(0);
             (
@@ -231,7 +235,7 @@ fn open_drive(
             }
             let seq = store
                 .append(
-                    symbio_core::Event::pending(
+                    symbio_kernel::event::Event::pending(
                         format!("u-{turn_no}"),
                         EVENT_USER_MESSAGE,
                         Entity::Turn,
@@ -242,9 +246,11 @@ fn open_drive(
                     .with_payload(payload),
                 )
                 .map_err(|e| {
-                    super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(
-                        format!("用户格落格失败：{e:?}"),
-                    ))
+                    super::state::TurnExit::Failed(
+                        symbio_kernel::plugin::PluginError::InternalError(format!(
+                            "用户格落格失败：{e:?}"
+                        )),
+                    )
                 })?;
             (
                 turn_no,
@@ -260,9 +266,11 @@ fn open_drive(
             let round =
                 super::super::loop_rows::next_stage_round(&snapshot, turn.turn_no, turn.now_ms)
                     .ok_or_else(|| {
-                        super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(
-                            "续幕没有下一轮的判据（continue-turn 的前件与事实不一致）".into(),
-                        ))
+                        super::state::TurnExit::Failed(
+                            symbio_kernel::plugin::PluginError::InternalError(
+                                "续幕没有下一轮的判据（continue-turn 的前件与事实不一致）".into(),
+                            ),
+                        )
                     })?;
             (
                 turn.turn_no,
@@ -290,9 +298,9 @@ fn open_drive(
                 &[StageFact::request_round(round, &round.to_string())],
             )
             .map_err(|e| {
-                super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
-                    "轮次阶段事实落格失败：{e:?}"
-                )))
+                super::state::TurnExit::Failed(symbio_kernel::plugin::PluginError::InternalError(
+                    format!("轮次阶段事实落格失败：{e:?}"),
+                ))
             })?;
             (seqs.first().copied().unwrap_or(0), true)
         }
@@ -336,7 +344,7 @@ fn open_drive(
     let settings = context.session.settings();
     store
         .append(
-            symbio_core::Event::pending(
+            symbio_kernel::event::Event::pending(
                 format!("cfg-{turn_no}-{drive_seq}"),
                 EVENT_SESSION_CONFIG,
                 Entity::Turn,
@@ -364,9 +372,9 @@ fn open_drive(
             })),
         )
         .map_err(|e| {
-            super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
-                "配置事实落格失败：{e:?}"
-            )))
+            super::state::TurnExit::Failed(symbio_kernel::plugin::PluginError::InternalError(
+                format!("配置事实落格失败：{e:?}"),
+            ))
         })?;
     // 唤醒幕的轮次格跟在配置之后（与合表之前逐字同序）；续幕那一格已先落——它是锚。
     if !round_landed {
@@ -378,9 +386,9 @@ fn open_drive(
             &[StageFact::request_round(round, &drive_seq.to_string())],
         )
         .map_err(|e| {
-            super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
-                "轮次阶段事实落格失败：{e:?}"
-            )))
+            super::state::TurnExit::Failed(symbio_kernel::plugin::PluginError::InternalError(
+                format!("轮次阶段事实落格失败：{e:?}"),
+            ))
         })?;
     }
     turn.turn_no = turn_no;
@@ -420,9 +428,9 @@ pub(crate) fn land_dispatch(
     turn_no: u64,
     user_seq: u64,
     drive_seq: u64,
-    tier: symbio_core::LatencyTier,
-    actor: &symbio_core::ActorSpec,
-) -> Result<(), symbio_core::AppendError> {
+    tier: symbio_kernel::adapters::LatencyTier,
+    actor: &symbio_kernel::actors::ActorSpec,
+) -> Result<(), symbio_kernel::store::AppendError> {
     store.append(
         Event::pending(
             format!("d-{turn_no}-{drive_seq}"),
@@ -456,13 +464,13 @@ pub(crate) fn land_dispatch(
 /// 只有正文而没有节点身份会让实时面与重建面折出两个不同的节点。
 pub(crate) fn land_opening(
     store: &dyn Store<Event = Event>,
-    sink: &dyn symbio_core::DeltaSink,
+    sink: &dyn symbio_sdk::adapters::DeltaSink,
     turn_no: u64,
     user_seq: u64,
     principal: &str,
     text: Option<&str>,
     dialog: Option<&super::super::turn_runner::DialogFacts>,
-) -> Result<(), symbio_core::AppendError> {
+) -> Result<(), symbio_kernel::store::AppendError> {
     let (Some(opening), Some(dialog)) = (text, dialog) else {
         return Ok(());
     };
@@ -486,11 +494,11 @@ pub(crate) fn land_opening(
             "exclude_from_context": dialog.exclude_from_context,
         })),
     )?;
-    let mut node = symbio_core::node_build::dialog_node(
+    let mut node = symbio_sdk::turn::node_build::dialog_node(
         opening,
         &dialog.reason,
         dialog.exclude_from_context,
-        &symbio_core::principal::Principal::from_legacy(principal),
+        &symbio_sdk::chat::principal::Principal::from_legacy(principal),
     );
     node.id = dialog.id.clone();
     sink.on_tool_frame(&node);

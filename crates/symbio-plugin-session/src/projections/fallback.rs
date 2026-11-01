@@ -13,7 +13,9 @@
 //! - **兜底** = `chat.assistant.fallback`（`turn × closed`）——生成失败也必须有
 //!   输出（I3），fallback 落在哪档就是哪档的兜底。
 
-use symbio_core::{ChatVocab, Entity, Event, Projection, Verb};
+use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::projection::Projection;
+use symbio_sdk::projection::vocab::ChatVocab;
 
 use super::tiers::declared_tier;
 

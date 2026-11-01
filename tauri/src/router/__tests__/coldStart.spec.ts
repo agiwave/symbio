@@ -48,7 +48,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 /** 单独跑 2.4s；全量并发下要留足余量（见文件头） */
-const ROUTER_RELOAD_TIMEOUT = 30_000
+// 门禁的 vitest 带 coverage 且 72 个文件并发：模块图的重载（resetModules + 动态
+// import 整条路由）在这种负载下会远慢于单跑（实测门禁里越过 30s 上限一次）。
+// 这是上限不是预期值，放宽只影响「负载尖峰时算不算失败」。
+const ROUTER_RELOAD_TIMEOUT = 120_000
 
 const hoisted = vi.hoisted(() => ({
   ensureSessionMountDir: vi.fn(async () => '@vfs/session'),

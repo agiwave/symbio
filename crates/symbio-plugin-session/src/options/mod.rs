@@ -39,12 +39,12 @@ use super::capabilities::collect_options;
 use super::plugin::SessionPlugin;
 use serde_json::json;
 use std::sync::Arc;
-use symbio_core::capability_option_fields;
-use symbio_core::PluginInvokeRequest;
-use symbio_core::{
+use symbio_kernel::plugin::PluginInvokeRequest;
+use symbio_kernel::present::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
     DETAIL_PICK_DIRECTORY,
 };
+use symbio_sdk::capability::capability_option_fields;
 
 /// 会话自有选项的展示顺序（号段见模块文档）
 const ORDER_WORKDIR: i32 = 10;
@@ -94,7 +94,7 @@ impl SessionPlugin {
     /// `VdfsProvider` 加「自述可缓存」的通用开关，而不是给会话开特例。
     pub(crate) async fn build_option_definition(&self) -> DetailDefinition {
         let ctx: Arc<dyn PluginInvokeRequest> =
-            Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+            Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
         let parent = self.get_parent();
         let visitor = collect_options(parent.as_ref(), &ctx).await;
         DetailDefinition {

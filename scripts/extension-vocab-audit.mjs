@@ -99,6 +99,16 @@ export const EXEMPTIONS = [
       '一个 `usize` 出厂值。豁免按标识符精确等值，所以它只放过恰好叫 `turn` 的那一段：同文件里' +
       '任何 `TurnSpec` / `turn_root_of` 这类**新出现的形状名**仍是另一个标识符，照旧判红。',
   },
+  {
+    path: 'crates/symbio-plugin-api/src/context.rs',
+    token: 'turn',
+    why:
+      'D-272：这是 `use symbio_sdk::turn::facts::WorkerProgress;` 一行里的**路径段**，与 lib.rs 的' +
+      ' D-259 豁免同形。过去这个符号经 core 根转发到达（`use symbio_core::WorkerProgress;`），' +
+      '容器词被转发藏住了；D-272 撤掉根转发、消费方按真实归属直写后，路径段首次显形。' +
+      '它仍不是形状——`WorkerProgress` 本身不带容器词；符号归属 `turn` 域是 sdk 的域划分，' +
+      '端口形状没有因此认识宿主的容器。',
+  },
 ]
 
 /**

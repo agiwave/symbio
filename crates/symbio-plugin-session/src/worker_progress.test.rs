@@ -14,8 +14,8 @@
 use super::{progress_from_facts, progress_of, STEPS_MAX, STEP_MAX_CHARS};
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: cm::NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -25,12 +25,13 @@ fn principal_for(role: cm::NodeRole) -> symbio_core::principal::Principal {
 }
 use crate::store::{EventWalStore, SessionStore};
 use crate::types::{Session, SessionSummary};
-use symbio_core::chat_node as cm;
-use symbio_core::chat_node::{ChatNode, MessageContent, NodeStatus};
-use symbio_core::{Entity, Event, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::Store;
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeStatus};
 
 /// 会话事实的**值**（生产侧由 `SessionStore::snapshot` 交回）。
 fn facts_of(dir: &std::path::Path) -> Option<Vec<Event>> {

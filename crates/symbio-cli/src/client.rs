@@ -45,19 +45,19 @@ use tokio::sync::mpsc;
 
 use symbio::init::create_root_plugin;
 use symbio::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
-use symbio::symbio_core::chat_node::ChatNode;
-use symbio::symbio_core::{
-    event_bus_resync_of, event_bus_vdfs_change_of, EventBusSubscribeRequest, VdfsChange, VdfsNode,
-    EVENT_BUS_KIND_VDFS, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
+use symbio::symbio_kernel::plugin::{
+    Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest,
 };
-use symbio::symbio_core::{
-    Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest, PATH,
-    SESSION_ID, WORKDIR,
+use symbio::symbio_kernel::vdfs::{VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
+use symbio::symbio_sdk::chat::chat_node::ChatNode;
+use symbio::symbio_sdk::event_bus::{
+    event_bus_resync_of, event_bus_vdfs_change_of, EventBusSubscribeRequest, EVENT_BUS_KIND_VDFS,
 };
+use symbio::symbio_sdk::keys::{PATH, SESSION_ID, WORKDIR};
 // 读数面板方言：后端下发描述、CLI 只渲染。
 //  这三个名字随返回值流动（C-002：插件侧不深引 core 域目录），与 Tauri 前端
 //  `schemas/reading.ts` 是同一份契约的两半。
-use symbio::symbio_core::{ReadingPanel, ReadingTone};
+use symbio::symbio_kernel::present::{ReadingPanel, ReadingTone};
 
 use crate::render::Renderer;
 
@@ -708,7 +708,7 @@ impl SymbioClient {
         if let Err(e) = self
             .root
             .clone()
-            .stop(symbio::symbio_core::PluginStopReason::Shutdown)
+            .stop(symbio::symbio_kernel::plugin::PluginStopReason::Shutdown)
             .await
         {
             eprintln!("收尾插件树失败: {e}");

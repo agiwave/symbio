@@ -34,7 +34,7 @@
 //! 要把它借给两种节奏的 provider、还要在收束时带给贡献者。`String` 而不是 `&str`：
 //! 切片随请求结束，读数随本轮存活。
 
-use symbio_core::Event;
+use symbio_kernel::event::Event;
 
 /// 本轮检索的**输入值包**：控制面取好的两个值，构造一次、各检索者共用。
 #[derive(Debug, Clone, Copy)]

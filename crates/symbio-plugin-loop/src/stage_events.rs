@@ -43,11 +43,12 @@
 //! 缓存与事实是第二份状态（DE-014 §2）。写法也只有这一种（`D-228`）：端口的往返三格
 //! 答的是「在途」，不答「已做」；旧视图 `turn_round` 已随 `turn` 端口删除。
 
-use symbio_core::{AppendError, Entity, Event, Store, Verb};
 use symbio_kernel::dialog::{
     Verdict, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,
     REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
+use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::store::{AppendError, Store};
 
 use crate::control_decl::EVENT_TURN_STAGE;
 
@@ -452,7 +453,7 @@ where
             Ok(seq) => seqs.push(seq.value()),
             Err(AppendError::Duplicate) => {
                 let existing = store
-                    .range(symbio_core::Seq::new(0))
+                    .range(symbio_kernel::event::Seq::new(0))
                     .into_iter()
                     .find(|e| e.turn == turn && e.kind == EVENT_TURN_STAGE && e.event_id == id)
                     .and_then(|e| e.seq.map(|s| s.value()))

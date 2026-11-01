@@ -41,7 +41,7 @@
 //! `plugin_row` 的 `ActorDecl`（装载检查看得见），派发时按**这一行**的名单对账
 //! （运行期账本守卫仍要求「声明 ⊆ 强制」，D-123）。
 
-use symbio_core::Event;
+use symbio_kernel::event::Event;
 
 use crate::effects::FactDraft;
 

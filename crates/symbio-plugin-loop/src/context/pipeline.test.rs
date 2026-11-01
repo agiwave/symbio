@@ -6,8 +6,8 @@
 use super::*;
 
 /// 流式帧的复制面：`assemble` 的发射任务给每帧写会话主体（D-147），夹具照此声明。
-fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),

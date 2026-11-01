@@ -2,7 +2,7 @@
 
 use super::record_effect;
 use serde_json::json;
-use symbio_core::CapabilityMeta;
+use symbio_kernel::capability::CapabilityMeta;
 use symbio_plugin_api::behaviors::{ASSIGN_WORK, DELEGATION_PROMISE};
 
 /// 按行为名构造一份元数据（其余字段走 `Default`）。

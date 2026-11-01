@@ -7,4 +7,8 @@
 //! 本模块只转发，`crate::invariants::…` 与根别名 `crate::check_all` 都不变。
 //! 域目录不删，是因为它是 `core-naming-audit` N-004 的登记面。
 
+// 本域实现已整体搬走（D-258 / D-259），这个文件只剩**登记面**（`core-naming-audit` N-004）：
+// 仓内没有消费者，对外也不再经根转发（D-272）。下面的转出因此是「地址」而不是「依赖」。
+#![allow(unused_imports)]
+
 pub use symbio_sdk::invariants::*;

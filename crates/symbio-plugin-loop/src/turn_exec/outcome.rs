@@ -133,17 +133,17 @@ pub(crate) async fn classify_turn<'b>(
     // （按 id 去重、整条覆盖、孤儿丢弃，见 `persist_failure`）；工具轮已定格的节点
     // （`produced`）同走这条通道——中止出口不再回灌 `ExecTurnResult`，不带上就没了。
     if outcome.aborted {
-        let session_principal = symbio_core::principal::Principal::from_legacy(&principal);
+        let session_principal = symbio_sdk::chat::principal::Principal::from_legacy(&principal);
         let mut partial = produced;
         if !child_text.is_empty() {
-            let mut n = symbio_core::node_build::llm_build_text_node(
+            let mut n = symbio_sdk::turn::node_build::llm_build_text_node(
                 &root_id,
                 &child_text,
                 None,
                 child_id,
                 &session_principal,
             );
-            symbio_core::node_build::detach_if_flat(&mut n, &root_id, presentation_tree);
+            symbio_sdk::turn::node_build::detach_if_flat(&mut n, &root_id, presentation_tree);
             partial.push(n);
         }
         if !reasoning_text.trim().is_empty() {
@@ -154,11 +154,11 @@ pub(crate) async fn classify_turn<'b>(
                 msg_type: Some(NodeKind::Notice),
                 content: Some(MessageContent::Text(reasoning_text.clone())),
                 status: Some(NodeStatus::Completed),
-                timestamp: Some(symbio_core::clock_now_ms()),
+                timestamp: Some(symbio_sdk::clock::clock_now_ms()),
                 ..Default::default()
             }
             .with_style_tag(CHAT_STYLE_TAG_REASONING);
-            symbio_core::node_build::detach_if_flat(&mut n, &root_id, presentation_tree);
+            symbio_sdk::turn::node_build::detach_if_flat(&mut n, &root_id, presentation_tree);
             partial.push(n);
         }
         return Ok(Classified::Finished(Err(TurnExecExit::Aborted(partial))));

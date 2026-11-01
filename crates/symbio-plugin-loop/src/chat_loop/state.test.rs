@@ -5,11 +5,11 @@
 //! （`session/orchestrator/stop.test.rs`）。
 
 use super::*;
-use symbio_core::PluginSimpleRequest;
+use symbio_kernel::plugin::PluginSimpleRequest;
 
 /// 配置标量快照（与 `SessionConfig::default()` 同值；`TurnSettings` 没有
 /// `Default`——字段必须逐项给出，缺省值由会话配置决定）。
-fn default_settings() -> symbio_core::TurnSettings {
+fn default_settings() -> symbio_sdk::turn::dispatch::TurnSettings {
     super::super::super::test_support::default_settings()
 }
 
@@ -65,18 +65,19 @@ fn load_history_false_is_honored() {
 // 硬编码任何一项的后果都是「表授予 A、规格带 B」静默成立——那一行就成了没人读的死记录。
 
 /// 带 `AGENT_ID` 的请求上下文（会话选定了哪个 agent）。
-fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn symbio_core::PluginInvokeRequest> {
+fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
-    req.set(symbio_core::AGENT_ID, agent_id.to_string());
+    req.set(symbio_sdk::keys::AGENT_ID, agent_id.to_string());
     // 绑定登记以会话为持有人：没有会话 id 就没有登记，未部署主体
     // 会 fail-closed——这组用例要钉的是「规格从登记行取」，所以给一个每例独有的 id。
-    req.set(symbio_core::SESSION_ID, format!("t-state-{agent_id}"));
+    req.set(symbio_sdk::keys::SESSION_ID, format!("t-state-{agent_id}"));
     std::sync::Arc::new(req)
 }
 
 #[test]
 fn the_worker_spec_takes_its_registered_row() {
-    use symbio_core::{LatencyTier, Pattern, Scope};
+    use symbio_kernel::actors::{Pattern, Scope};
+    use symbio_kernel::adapters::LatencyTier;
     let spec = request_actor_spec(agent_ctx("worker").as_ref(), Scope::Root);
     assert_eq!(spec.principal, "session/worker");
     assert_eq!(
@@ -97,7 +98,8 @@ fn the_worker_spec_takes_its_registered_row() {
 
 #[test]
 fn the_planner_and_verifier_specs_take_their_registered_rows() {
-    use symbio_core::{LatencyTier, Pattern, Scope};
+    use symbio_kernel::actors::{Pattern, Scope};
+    use symbio_kernel::adapters::LatencyTier;
     let planner = request_actor_spec(agent_ctx("planner").as_ref(), Scope::Root);
     assert_eq!(planner.principal, "session/planner");
     assert_eq!(
@@ -136,7 +138,7 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
 /// 决策 D-079 见 [D-079](../../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类de-041-4-的-actorpattern-是开关参数前者不该做分派点 "D-079")
 #[test]
 fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
-    use symbio_core::{Pattern, Scope};
+    use symbio_kernel::actors::{Pattern, Scope};
     let spec = request_actor_spec(agent_ctx("main").as_ref(), Scope::Root);
     assert_eq!(spec.principal, "session/main");
     assert_eq!(
@@ -153,7 +155,7 @@ fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
 
 #[test]
 fn a_delegated_worker_spec_is_scoped_to_its_parent() {
-    use symbio_core::Scope;
+    use symbio_kernel::actors::Scope;
     // 委派链上（agent_run 派生的子会话）：作用域挂父主体——「委派不放大权威」的
     // 规格侧形态。工人那一行不变，变的是 scope。
     let spec = request_actor_spec(

@@ -24,8 +24,8 @@
 
 use std::sync::Arc;
 
-use symbio_core::chat_node::{ChatNode, NodeKind, NodeRole};
-use symbio_core::PluginInvokeRequest;
+use symbio_kernel::plugin::PluginInvokeRequest;
+use symbio_sdk::chat::chat_node::{ChatNode, NodeKind, NodeRole};
 
 pub(crate) use super::message_build::TurnOutputExt;
 
@@ -216,7 +216,7 @@ pub fn section_budget(
 /// 避免同一轮内对 visitor 注册表重复查询。
 pub fn estimate_overhead_with_tools(
     system_prompt: &str,
-    tools: &[symbio_core::CapabilityMeta],
+    tools: &[symbio_kernel::capability::CapabilityMeta],
 ) -> usize {
     use super::tokenizer::{default_tokenizer, Tokenizer};
 
@@ -238,7 +238,7 @@ pub async fn estimate_request_overhead(
     system_prompt: &str,
     ctx: &Arc<dyn PluginInvokeRequest>,
 ) -> usize {
-    let tools = symbio_core::tool_metas(ctx).await;
+    let tools = symbio_sdk::capability::tool_metas(ctx).await;
     estimate_overhead_with_tools(system_prompt, &tools)
 }
 

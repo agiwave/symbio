@@ -18,11 +18,11 @@
 
 use super::*;
 use crate::stats_reading::present_message;
-use symbio_core::chat_node as cm;
-use symbio_core::{
+use symbio_kernel::vdfs::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsResult, VDFS_STATUS_ACTIVE,
     VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
 };
+use symbio_sdk::chat::chat_node as cm;
 
 /// 会话的**运行态**——非持久化，随进程与当前请求变化。
 ///
@@ -349,7 +349,7 @@ fn cursor_id(before: &str) -> Option<&str> {
 // 转写路径段 [`SEG_MESSAGES`] 与节点逆投影 [`message_of_node`] 已上移到
 // `symbio_core::chat_node`——它们描述的是**跨插件契约**
 // （agent 的子会话转播桥也要用），不是本插件的私事。本模块继续按原名使用。
-use symbio_core::chat_node::SEG_MESSAGES;
+use symbio_sdk::chat::chat_node::SEG_MESSAGES;
 
 /// 转写列表的**展示名**（`title`）。**只影响 UI**，不参与寻址。
 pub(crate) const TITLE_MESSAGES: &str = "消息";
@@ -419,13 +419,13 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     let body = raw.trim();
     if !body.starts_with('{') {
         return Ok(cm::ChatNode {
-            principal: Some(symbio_core::principal::Principal::from_legacy(
+            principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
                 symbio_core::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(raw.to_string())),
             status: Some(cm::NodeStatus::Completed),
-            timestamp: Some(symbio_core::clock_now_ms()),
+            timestamp: Some(symbio_sdk::clock::clock_now_ms()),
             ..Default::default()
         });
     }
@@ -450,7 +450,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     // 身份缺省是 `person/local`（写体没标身份 = 这是一条用户发言）；写体里带
     // `principal` 或存量 `role` 的，按它自己声明的形状走。
     if message.principal.is_none() && message.legacy_role().is_none() {
-        message.principal = Some(symbio_core::principal::Principal::from_legacy(
+        message.principal = Some(symbio_sdk::chat::principal::Principal::from_legacy(
             symbio_core::PRINCIPAL_USER,
         ));
     }
@@ -486,15 +486,15 @@ pub(crate) fn trigger_declaration(message: &cm::ChatNode) -> VdfsResult<Option<i
     let Some(trigger) = message
         .meta
         .as_ref()
-        .and_then(|m| m.get(symbio_core::EVENT_TRIGGER_META_KEY))
+        .and_then(|m| m.get(symbio_kernel::event::EVENT_TRIGGER_META_KEY))
     else {
         return Ok(None);
     };
     let kind = trigger.get("kind").and_then(Value::as_str).unwrap_or("");
-    if !symbio_core::EVENT_TRIGGER_KINDS.contains(&kind) {
+    if !symbio_kernel::event::EVENT_TRIGGER_KINDS.contains(&kind) {
         return Err(VdfsError::invalid(format!(
             "不认识的触发声明 kind：{kind:?}（登记过的：{:?}）",
-            symbio_core::EVENT_TRIGGER_KINDS
+            symbio_kernel::event::EVENT_TRIGGER_KINDS
         )));
     }
     Ok(Some(
@@ -617,11 +617,11 @@ pub(crate) fn parse_session_path(path: &str) -> VdfsResult<VdfsSessionPath<'_>> 
         }),
         // 内部动作段：只认 `<sid>/_run/<op>` 两级，没有更深层级；op 是否合法
         // 由动作面判（不在地址解析里开花名册）。
-        symbio_core::run_ops::SEG => match sub {
+        symbio_sdk::turn::dispatch::run_ops::SEG => match sub {
             Some(op) if !op.is_empty() && !op.contains('/') => Ok(VdfsSessionPath::Run { id, op }),
             _ => Err(VdfsError::not_found(format!(
                 "内部动作段需要 `<sid>/{}/<op>` 形式的动作名：{path}",
-                symbio_core::run_ops::SEG
+                symbio_sdk::turn::dispatch::run_ops::SEG
             ))),
         },
         _ => Err(not_found()),
@@ -840,7 +840,7 @@ pub(crate) fn session_content(
     // 从事件 `turn_id` 一律重derive 成 grouped，`flat` 档在这里升根 + 打 `turn_root`
     // 记号，令 live↔reload↔呈现三格锁步。`overlay_live`/`ordered` 只按 id 重排/
     // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
-    symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
+    symbio_sdk::turn::node_build::flatten_whole_tree(&mut messages, mode);
     // 呈现派生：会话叶子读是前端交互出口，交付前按形状算出 title/icon，
     // 并把压缩 / 记忆那几个数字排成读数行（[D-111](../../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）。
     let messages: Vec<cm::ChatNode> = messages.into_iter().map(present_message).collect();

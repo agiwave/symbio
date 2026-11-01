@@ -13,19 +13,21 @@
 //!
 //! 生产二进制不受影响：那里的协议行来自 loop 的提交，本夹具不参与编译。
 
-use symbio_core::ring::{Decl, Pattern};
-use symbio_core::{LatencyTier, PluginDeclarations};
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::decl::ring::Decl;
+use symbio_kernel::decl::ring::Pattern;
+use symbio_kernel::decl::PluginDeclarations;
 
 use super::{EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();
     for name in [
-        symbio_core::EVENT_REQUEST,
-        symbio_core::EVENT_SENT,
-        symbio_core::EVENT_RESPONSE,
-        symbio_core::EVENT_FAILED,
-        symbio_core::EVENT_RETRY,
+        symbio_kernel::event::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_SENT,
+        symbio_kernel::event::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_FAILED,
+        symbio_kernel::event::EVENT_RETRY,
     ] {
         let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
             source: name,
@@ -67,15 +69,24 @@ fn owned_events_resolve_through_the_process_assembly() {
     let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert_eq!(
         frozen.event_cell(EVENT_SYSTEM_TRIGGERED),
-        Some((symbio_core::Entity::System, symbio_core::Verb::Opened))
+        Some((
+            symbio_kernel::event::Entity::System,
+            symbio_kernel::event::Verb::Opened
+        ))
     );
     assert_eq!(
         frozen.event_cell(EVENT_SYSTEM_HEALTH),
-        Some((symbio_core::Entity::System, symbio_core::Verb::Progressed))
+        Some((
+            symbio_kernel::event::Entity::System,
+            symbio_kernel::event::Verb::Progressed
+        ))
     );
     assert_eq!(
         frozen.event_cell(EVENT_CONATION_EXPRESSED),
-        Some((symbio_core::Entity::Conation, symbio_core::Verb::Opened))
+        Some((
+            symbio_kernel::event::Entity::Conation,
+            symbio_kernel::event::Verb::Opened
+        ))
     );
     assert_eq!(
         frozen.event_owner(EVENT_SYSTEM_TRIGGERED),

@@ -1,6 +1,7 @@
 //! 承诺登记者：立约 / 守约 / 违约 / 宣告都是 `commitment` 实体的一格事件（[DE-038](../../../../docs/003-design/038-多主体与对等承诺.md "DE-038-多主体与对等承诺")）。
 
-use crate::{CommitmentVocab, Event};
+use crate::projection::vocab::CommitmentVocab;
+use symbio_kernel::event::Event;
 
 /// 承诺登记者（[DE-038 §3](../../../../docs/003-design/038-多主体与对等承诺.md "DE-038-多主体与对等承诺")）。
 ///

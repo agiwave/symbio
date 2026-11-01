@@ -10,7 +10,9 @@
 
 use super::*;
 use serde_json::json;
-use symbio_core::{failure_kind, ExecAbortSignal, ExecEventSink, PluginSimpleRequest};
+use symbio_kernel::capability::failure_kind;
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_kernel::plugin::PluginSimpleRequest;
 
 /// 最小可判定的能力桩：固定风险、可选动态覆写、记录是否被真正执行。
 struct StubTool {

@@ -19,18 +19,23 @@ const VERDICT: &str = "verdict.asserted";
 
 use super::*;
 use crate::paths;
-use symbio_core::chat_node as cm;
-use symbio_core::node_build::PresentationTree;
-use symbio_core::{
-    vdfs_context, CapabilityMeta, EliminationDecider, Entity, Event, ExecAbortSignal, ExecEnv,
-    ExecEventSink, ExecTranscriptWriter, ModelProvider, PluginError, PluginInvokeRequest,
-    PluginSimpleRequest, Scope, Store as _, TurnOutput, TurnSettings, TurnSpec, VdfsChange,
-    VdfsChangeSink, VdfsProvider, Verb, TURN_DISPATCH,
-};
+use symbio_core::EliminationDecider;
+use symbio_kernel::actors::Scope;
+use symbio_kernel::capability::CapabilityMeta;
+use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::exec::{ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter};
+use symbio_kernel::llm::{ModelProvider, TurnOutput};
+use symbio_kernel::plugin::{PluginError, PluginInvokeRequest, PluginSimpleRequest};
+use symbio_kernel::store::Store as _;
+use symbio_kernel::vdfs::{VdfsChange, VdfsChangeSink, VdfsProvider};
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::turn::dispatch::{TurnSettings, TurnSpec, TURN_DISPATCH};
+use symbio_sdk::turn::node_build::PresentationTree;
+use symbio_sdk::vdfs::host::vdfs_context;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: cm::NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -130,7 +135,7 @@ fn turn_spec(session_id: &str, persistent: bool) -> TurnSpec {
             worker_force_prefix: String::new(),
             worker_keywords: String::new(),
             worker_min_chars: 0,
-            task_cap: symbio_core::TASK_CAP,
+            task_cap: symbio_sdk::turn::dispatch::TASK_CAP,
         },
     }
 }
@@ -824,13 +829,13 @@ fn append_to_sub_session(root: &std::path::Path, parent_sid: &str, child_sid: &s
 /// 行的形状与 `WalStore::append` 落盘时**逐字相同**：先赋 `seq`（盘上唯一权威的序号），
 /// 再兜底 `ts`，最后一行 JSON。
 fn write_foreign_wal_line(dir: &std::path::Path, mut event: Event) {
-    use symbio_core::EventEnvelope as _;
+    use symbio_kernel::event::EventEnvelope as _;
     let path = dir.join(paths::V2_WAL_FILE);
     let head = std::fs::read_to_string(&path)
         .map(|t| t.lines().filter(|l| !l.trim().is_empty()).count() as u64)
         .unwrap_or(0);
-    event.assign_seq(symbio_core::Seq::new(head));
-    event.fallback_timestamp(symbio_core::clock_now_ms());
+    event.assign_seq(symbio_kernel::event::Seq::new(head));
+    event.fallback_timestamp(symbio_sdk::clock::clock_now_ms());
     let mut line = serde_json::to_vec(&event).expect("事件序列化失败");
     line.push(b'\n');
     let mut f = std::fs::OpenOptions::new()

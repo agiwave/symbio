@@ -22,13 +22,13 @@ use serde_json::json;
 use crate::bound_provider::BoundProvider;
 use crate::model_providers::ModelProviderConfig;
 use crate::protocols::openai_chat::OpenaiChatProtocol;
-use symbio_core::turnstate;
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::ProviderLlmAdapter;
 use symbio_plugin_api::{
     check_all, cost_ledger, transcript, Budget, Entity, Event, EventStore, PromptMessage, Seq,
     Store, Verb,
 };
+use symbio_sdk::projection::turnstate::turnstate;
 
 /// 对话面 / 消息面的词汇表（DE-024 D-203 / D-206）：本插件不是这两面任何名字的
 /// owner，只用它们调 core 的转写 / 轮态投影。拼写一律取清单生成物（D-204）。

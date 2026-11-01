@@ -2,7 +2,7 @@
 //!
 //! ## 它补的是哪一格
 //!
-//! 视图（[`symbio_core::ViewDecl`]）本来就是 owner 自己交的纯函数：入参只有事实切片与
+//! 视图（[`symbio_kernel::decl::ViewDecl`]）本来就是 owner 自己交的纯函数：入参只有事实切片与
 //! 时间戳，出参是 JSON。但过去**只有义务环的行引擎**在读它们（`Frozen::eval`），别的
 //! 插件读不到——于是「会话统计想加一列便签数」只有两条路：在 core 里再写一份折叠
 //! （同一事实两个 owner），或者依赖 notes 插件（跨插件依赖，禁止）。两条都会把
@@ -31,7 +31,8 @@
 //! 没有「静默空值」这一档。
 
 use serde_json::Value;
-use symbio_core::{Event, Frozen};
+use symbio_kernel::decl::Frozen;
+use symbio_kernel::event::Event;
 
 use crate::declarations::sealed_declarations;
 use crate::view_names::{SharedViewDecl, SHARED_VIEWS};
@@ -167,7 +168,10 @@ impl ViewRead {
         self.view(frozen).map(|v| v.ver)
     }
 
-    fn view<'a>(&self, frozen: &'a Frozen) -> Result<&'a symbio_core::ViewDecl, ViewUnavailable> {
+    fn view<'a>(
+        &self,
+        frozen: &'a Frozen,
+    ) -> Result<&'a symbio_kernel::decl::ViewDecl, ViewUnavailable> {
         frozen
             .view(self.name)
             .ok_or_else(|| ViewUnavailable::Unknown {

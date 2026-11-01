@@ -13,12 +13,13 @@ use crate::plugin::SessionConfig;
 use symbio_plugin_api::vocab;
 // 夹具自己开档写一轮事实：`use super::*` 带不过来（生产侧读走存储层句柄）。
 use crate::store::EventWalStore;
-use symbio_core::session_chat;
-use symbio_core::{PluginSimpleRequest, Seq};
+use symbio_kernel::event::Seq;
+use symbio_kernel::plugin::PluginSimpleRequest;
+use symbio_sdk::chat::session_chat;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: cm::NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -286,7 +287,7 @@ fn watch_inbox_paths(p: &SessionPlugin) -> Arc<std::sync::Mutex<Vec<String>>> {
     let sink = seen.clone();
     p.change_subs.watch(
         "",
-        Arc::new(move |c: symbio_core::VdfsChange| sink.lock().unwrap().push(c.path)),
+        Arc::new(move |c: symbio_kernel::vdfs::VdfsChange| sink.lock().unwrap().push(c.path)),
     );
     seen
 }
@@ -341,7 +342,7 @@ fn preempt_plugin() -> (tempfile::TempDir, Arc<SessionPlugin>) {
     let plugin = Arc::new(SessionPlugin::new(
         None,
         SessionConfig::default(),
-        symbio_core::PluginDir::at(dir.path(), "session"),
+        symbio_sdk::plugin::PluginDir::at(dir.path(), "session"),
     ));
     (dir, plugin)
 }
@@ -354,7 +355,7 @@ fn wal_path(p: &SessionPlugin, sid: &str) -> std::path::PathBuf {
 ///
 /// 目录要自己建：`WalStore::open` 是「写方已经就位」的入口，盘上没这层目录属
 /// 存储层灾难、直接 panic（生产里由统一发送链路先落会话目录）。
-fn seed_wal(p: &SessionPlugin, sid: &str, facts: Vec<symbio_core::Event>) {
+fn seed_wal(p: &SessionPlugin, sid: &str, facts: Vec<symbio_kernel::event::Event>) {
     let path = wal_path(p, sid);
     std::fs::create_dir_all(path.parent().expect("WAL 路径必有父目录")).expect("会话目录创建失败");
     let store = EventWalStore::open(&path).expect("打开 WAL");
@@ -363,7 +364,7 @@ fn seed_wal(p: &SessionPlugin, sid: &str, facts: Vec<symbio_core::Event>) {
     }
 }
 
-fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<symbio_core::Event> {
+fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<symbio_kernel::event::Event> {
     EventWalStore::open_readonly(wal_path(p, sid))
         .expect("只读打开 WAL")
         .range(Seq::new(0))
@@ -372,8 +373,8 @@ fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<symbio_core::Event> {
 /// 一轮的事实。`final_first` = 收束发言在 `task.opened` **之前**——这正是
 /// 轮末收束的落笔顺序（收束格先落、派生事实后补；DE-016 §9.1 的判据输入，见那里的
 /// 「顺序是判据」注记）。
-fn turn_facts(final_first: bool) -> Vec<symbio_core::Event> {
-    use symbio_core::{Entity, Event, Verb};
+fn turn_facts(final_first: bool) -> Vec<symbio_kernel::event::Event> {
+    use symbio_kernel::event::{Entity, Event, Verb};
     use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 
     let user = Event::pending(
@@ -414,8 +415,8 @@ fn turn_facts(final_first: bool) -> Vec<symbio_core::Event> {
 /// 当前就绪的任务 id（`readyset` = 模型唯一的调度候选来源）。
 fn ready_ids(p: &SessionPlugin, sid: &str) -> Vec<String> {
     let snapshot = read_wal(p, sid);
-    symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
-        .apply(&snapshot, i64::MAX, symbio_core::Budget::generous())
+    symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
+        .apply(&snapshot, i64::MAX, symbio_kernel::view::Budget::generous())
         .value
         .ready
         .iter()
@@ -427,8 +428,8 @@ fn ready_ids(p: &SessionPlugin, sid: &str) -> Vec<String> {
 fn has_fact(
     p: &SessionPlugin,
     sid: &str,
-    entity: symbio_core::Entity,
-    verb: symbio_core::Verb,
+    entity: symbio_kernel::event::Entity,
+    verb: symbio_kernel::event::Verb,
 ) -> bool {
     read_wal(p, sid)
         .iter()
@@ -438,7 +439,7 @@ fn has_fact(
 /// 插话走完「忙窗判定 → 空闲落格 → 插话轮 → 收恢复」全程。
 #[tokio::test]
 async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
-    use symbio_core::{Entity, Verb};
+    use symbio_kernel::event::{Entity, Verb};
     let (_dir, p) = preempt_plugin();
     let sid = "s-preempt";
     seed_wal(&p, sid, turn_facts(true));
@@ -482,9 +483,9 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
         "挂起的任务退出就绪集——插话轮因此看不见在跑的任务（DE-037 §5）"
     );
     assert!(
-        symbio_core::check_all(vocab(), &read_wal(&p, sid)).is_empty(),
+        symbio_sdk::invariants::check_all(vocab(), &read_wal(&p, sid)).is_empty(),
         "{:?}",
-        symbio_core::check_all(vocab(), &read_wal(&p, sid))
+        symbio_sdk::invariants::check_all(vocab(), &read_wal(&p, sid))
     );
 
     // ③ 插话轮收尾：**批空 ⇒ 收**。挂起不收就是永久挂起——任务从此再也不进
@@ -501,9 +502,9 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
         "恢复之后任务回到就绪集——挂起是临时的"
     );
     assert!(
-        symbio_core::check_all(vocab(), &read_wal(&p, sid)).is_empty(),
+        symbio_sdk::invariants::check_all(vocab(), &read_wal(&p, sid)).is_empty(),
         "{:?}",
-        symbio_core::check_all(vocab(), &read_wal(&p, sid))
+        symbio_sdk::invariants::check_all(vocab(), &read_wal(&p, sid))
     );
     assert_eq!(
         state.inner.read().await.preempt,
@@ -519,7 +520,7 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
 /// 老布局会话走的就是这一支。
 #[tokio::test]
 async fn final_after_the_task_queues_instead_of_holding() {
-    use symbio_core::{Entity, Verb};
+    use symbio_kernel::event::{Entity, Verb};
     let (_dir, p) = preempt_plugin();
     let sid = "s-queue";
     seed_wal(&p, sid, turn_facts(false));
@@ -662,7 +663,9 @@ async fn pending_work_separates_events_from_retries() {
 // 判定表四类结论、预算读的是**行自己的** `budget_ms`，以及挂起 / 恢复对就绪集的
 // 影响。这些用例随策略实现从 core 迁来（D-190）——判据没变，只是落点归 owner。
 
-use symbio_core::{Budget, EventStore, Pattern, Scope};
+use symbio_kernel::actors::{Pattern, Scope};
+use symbio_kernel::store::EventStore;
+use symbio_kernel::view::Budget;
 use symbio_plugin_api::events::EVENT_TASK_PROGRESS;
 
 /// 造一个在跑任务（供插话 / 熔断场景使用）。
@@ -683,7 +686,7 @@ fn running_task(store: &EventStore, id: &str) {
 }
 
 fn facts(store: &EventStore) -> Vec<Event> {
-    store.range(symbio_core::Seq::new(0))
+    store.range(symbio_kernel::event::Seq::new(0))
 }
 
 /// DE-037 §6 验收 1：注入打断事件 → 80ms 内必须产出处置（Suspend ⇒ task.controlled 落库）。
@@ -710,9 +713,9 @@ fn interruption_within_reflex_budget_produces_control_event() {
                 "80ms 内必须有 task.controlled"
             );
             assert!(
-                symbio_core::check_all(vocab(), &snapshot).is_empty(),
+                symbio_sdk::invariants::check_all(vocab(), &snapshot).is_empty(),
                 "{:?}",
-                symbio_core::check_all(vocab(), &snapshot)
+                symbio_sdk::invariants::check_all(vocab(), &snapshot)
             );
         }
         other => panic!("预算内应实质判定，得到 {other:?}"),
@@ -773,11 +776,9 @@ fn interruption_after_final_is_queued_not_preempted() {
 fn suspended_task_leaves_readyset_and_restores() {
     let store = EventStore::new();
     running_task(&store, "t1");
-    let before = symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX).apply(
-        &facts(&store),
-        9_999,
-        Budget::generous(),
-    );
+    let before =
+        symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
+            .apply(&facts(&store), 9_999, Budget::generous());
     assert_eq!(before.value.ready.len(), 1);
 
     // 挂起（锚 T = 挂起前 head；held 事件 ts 在未来——as-of 语义下可被锚排除）。
@@ -786,11 +787,9 @@ fn suspended_task_leaves_readyset_and_restores() {
         .append(PreemptionDecider.held_event("t1", t, 0).with_ts(5_000))
         .unwrap();
     let events = facts(&store);
-    let suspended = symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX).apply(
-        &events,
-        9_999,
-        Budget::generous(),
-    );
+    let suspended =
+        symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
+            .apply(&events, 9_999, Budget::generous());
     assert!(
         suspended.value.ready.is_empty(),
         "挂起期间不得二次调度（DE-037 §6 验收 2）"
@@ -798,11 +797,9 @@ fn suspended_task_leaves_readyset_and_restores() {
 
     // 验收 3：以挂起锚（as-of 排除 held 事件）重放 → 与挂起前一致。
     // 恢复零状态迁移——投影是纯函数，给同一个 T 就得到同一个视图（DE-016 §9.2）。
-    let at_t = symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX).apply(
-        &events,
-        1_000,
-        Budget::generous(),
-    );
+    let at_t =
+        symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
+            .apply(&events, 1_000, Budget::generous());
     assert_eq!(at_t.value, before.value, "as-of=T 重放与挂起前一致");
 
     // 恢复：一条 progressed 事件 → 重新就绪（零状态迁移代码）。
@@ -819,11 +816,9 @@ fn suspended_task_leaves_readyset_and_restores() {
             .with_payload(serde_json::json!({ "task_id": "t1" })),
         )
         .unwrap();
-    let restored = symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX).apply(
-        &facts(&store),
-        9_999,
-        Budget::generous(),
-    );
+    let restored =
+        symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
+            .apply(&facts(&store), 9_999, Budget::generous());
     assert_eq!(restored.value.ready.len(), 1, "恢复后重新进入 readyset");
     assert_eq!(restored.value, before.value, "恢复后视图与挂起前一致");
 }

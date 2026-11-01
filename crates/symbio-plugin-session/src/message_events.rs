@@ -80,9 +80,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use symbio_core::chat_node::ChatNode;
-use symbio_core::{AppendError, Entity, Event, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::{AppendError, Store};
 use symbio_plugin_api::events::{EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
+use symbio_sdk::chat::chat_node::ChatNode;
 
 /// 一条**待寄存**的变更事实（拿不到写者令牌时暂存，由持令牌方补落）。
 ///
@@ -199,7 +200,7 @@ fn park(store_dir: &Path, change: &ParkedChange) -> Result<(), String> {
     let serial = PARK_SERIAL.fetch_add(1, Ordering::Relaxed) % 1_000_000;
     let stem = format!(
         "{:013}-{:07}-{serial:06}",
-        symbio_core::clock_now_ms(),
+        symbio_sdk::clock::clock_now_ms(),
         std::process::id()
     );
     let visible = dir.join(format!("{stem}.{PARKED_SUFFIX}"));
@@ -515,7 +516,9 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
     // `Principal::deserialize` 一次性折到 `.id`，事件层的 actor 键仍是**可路由地址字符串**。
     let principal = msg
         .get("principal")
-        .and_then(|v| serde_json::from_value::<symbio_core::principal::Principal>(v.clone()).ok())
+        .and_then(|v| {
+            serde_json::from_value::<symbio_sdk::chat::principal::Principal>(v.clone()).ok()
+        })
         .map(|p| p.id);
     let actor = principal.unwrap_or_else(|| {
         match msg.get("role").and_then(Value::as_str) {
@@ -536,7 +539,7 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
         .get("timestamp")
         .and_then(Value::as_i64)
         .filter(|t| *t > 0) // 上游把「没填」写成 0，这里一并兜住
-        .unwrap_or_else(symbio_core::clock_now_ms);
+        .unwrap_or_else(symbio_sdk::clock::clock_now_ms);
     (actor, ts)
 }
 

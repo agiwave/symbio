@@ -4,7 +4,7 @@
 //! `orchestrator.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use symbio_core::VdfsChangeSubscriptions;
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 /// 造一个已登记中止信号的会话状态（模拟消费循环入口的登记）。
 async fn armed_state() -> (Arc<ActiveSessionState>, ExecAbortSignal) {
     let state = Arc::new(ActiveSessionState::with_session_id(

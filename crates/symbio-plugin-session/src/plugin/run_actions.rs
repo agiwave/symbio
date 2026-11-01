@@ -53,13 +53,18 @@ use super::super::transcript::supplements::SupplementDrain;
 use super::*;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use symbio_core::{
-    llm_message_frame, llm_removed_frame, llm_state_frame, run_ops, vdfs_from_plugin_error,
-    vdfs_host_ctx, AddNodesRequest, CompressionBeginReply, CompressionBeginRequest,
-    CompressionFinishRequest, CompressionOutcome, ConsolidateRequest, EditFrame, EditNodesRequest,
-    PluginInvokeRequest, RemoveNodesRequest, ReplaceAllRequest, TurnDispatch, VdfsActionResult,
-    VdfsContext, VdfsError, VdfsRequest, VdfsResponse, VdfsResult, TURN_DISPATCH,
+use symbio_kernel::plugin::PluginInvokeRequest;
+use symbio_kernel::vdfs::{
+    VdfsActionResult, VdfsContext, VdfsError, VdfsRequest, VdfsResponse, VdfsResult,
 };
+use symbio_sdk::llm::llm_state_frame;
+use symbio_sdk::llm::turn::{llm_message_frame, llm_removed_frame};
+use symbio_sdk::turn::dispatch::{
+    run_ops, AddNodesRequest, CompressionBeginReply, CompressionBeginRequest,
+    CompressionFinishRequest, CompressionOutcome, ConsolidateRequest, EditFrame, EditNodesRequest,
+    RemoveNodesRequest, ReplaceAllRequest, TurnDispatch, TURN_DISPATCH,
+};
+use symbio_sdk::vdfs::host::{vdfs_from_plugin_error, vdfs_host_ctx};
 use tokio::runtime::RuntimeFlavor;
 
 /// 内部动作的处理函数：收 session 插件（状态的所有者）、宿主 ctx、本轮交付包、
@@ -517,7 +522,7 @@ async fn run_compression_begin(
         emitter
             .begin(
                 &node_id,
-                &symbio_core::principal::Principal::from_legacy(&dispatch.spec.principal),
+                &symbio_sdk::chat::principal::Principal::from_legacy(&dispatch.spec.principal),
             )
             .await;
     }
@@ -553,7 +558,7 @@ async fn run_compression_finish(
             &finish.text,
             finish.failure_kind.as_deref(),
             finish.stats,
-            &symbio_core::principal::Principal::from_legacy(&dispatch.spec.principal),
+            &symbio_sdk::chat::principal::Principal::from_legacy(&dispatch.spec.principal),
         )
         .await;
     // 记录节点落库 + 回包：压缩是会话里真实发生的一步，必须留下记录

@@ -34,13 +34,12 @@ use super::paths::session_id_from_new_path;
 use super::plugin::SessionPlugin;
 use super::types::Session;
 use serde_json::{json, Value};
-use symbio_core::chat_node as cm;
-use symbio_core::clock_now_ms;
-use symbio_core::PluginError;
+use symbio_kernel::plugin::PluginError;
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::clock::clock_now_ms;
 
-use symbio_core::{
-    vdfs_from_plugin_error, VdfsContent, VdfsError, VdfsResponse, VdfsResult, VdfsWriteResponse,
-};
+use symbio_kernel::vdfs::{VdfsContent, VdfsError, VdfsResponse, VdfsResult, VdfsWriteResponse};
+use symbio_sdk::vdfs::host::vdfs_from_plugin_error;
 impl SessionPlugin {
     // ==================== 会话本体：新建 / 覆盖 ====================
 
@@ -213,7 +212,7 @@ impl SessionPlugin {
     pub(crate) async fn new_session_id(&self) -> String {
         let store = self.get_store().await.ok();
         for _ in 0..8 {
-            let id = symbio_core::llm_short_id();
+            let id = symbio_sdk::llm::turn::llm_short_id();
             let taken = match &store {
                 Some(s) => s.session_dir(&id).is_some(),
                 None => false,
@@ -336,7 +335,7 @@ impl SessionPlugin {
         // 与「重启后从 WAL 重建」差一个 `status` 字段。这不是视图差异，是**事实
         // 与视图不一致**：`status` 一旦缺失，重建就再也补不回来（事实源里没有它）。
         // 统一口径：规范化后的那条同时进事实与帧，重建与实时读读的是同一条。
-        let updated = symbio_core::llm_message_frame(&existing.clone());
+        let updated = symbio_sdk::llm::turn::llm_message_frame(&existing.clone());
         // **顺序反转**（[D-054] 决策 2）：变更经唯一写入口 `apply` 落——事实先落、
         // 列表随后折叠写入。旧形态是「先写缓存、再补一条事实」，事实是事后补的，
         // 所以它天然是可选项；收进 `apply` 之后「改了列表却没落事实」表达不出来。
@@ -388,7 +387,7 @@ impl SessionPlugin {
         if !deleted_ids.is_empty() {
             let frames: Vec<cm::ChatNode> = deleted_ids
                 .iter()
-                .map(|id| symbio_core::llm_removed_frame(id))
+                .map(|id| symbio_sdk::llm::turn::llm_removed_frame(id))
                 .collect();
             self.active_mgr
                 .transcript_apply_all(session_id, frames)
@@ -421,10 +420,10 @@ impl SessionPlugin {
         to: &str,
         actor: &str,
     ) -> Result<(), PluginError> {
-        use symbio_core::{
-            branch_candidates, branch_selected, AppendError, Entity, Event, Seq, Store as _, Verb,
-        };
+        use symbio_kernel::event::{Entity, Event, Seq, Verb};
+        use symbio_kernel::store::{AppendError, Store as _};
         use symbio_plugin_api::events::{EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED};
+        use symbio_sdk::projection::branch::{branch_candidates, branch_selected};
         let chat_session = self.open_chat_session(session_id).await?;
         let messages = chat_session.get_messages().await?;
         let target = messages
@@ -507,7 +506,7 @@ impl SessionPlugin {
         let frames: Vec<cm::ChatNode> = candidates
             .iter()
             .filter_map(|c| stamped.iter().find(|m| m.id == *c))
-            .map(symbio_core::llm_message_frame)
+            .map(symbio_sdk::llm::turn::llm_message_frame)
             .collect();
         self.active_mgr
             .transcript_apply_all(session_id, frames)

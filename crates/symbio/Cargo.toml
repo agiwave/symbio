@@ -14,6 +14,8 @@ dead_code = "warn"
 
 [dependencies]
 symbio-core = { path = "../symbio-core" }
+symbio-sdk = { path = "../symbio-sdk" }
+symbio-kernel = { path = "../symbio-kernel" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-deploy = { path = "../symbio-deploy" }
 # 主机装配必须带嵌入臂：语义检索的实现经 `submit_object_creator!` 注册在这里，关掉就等于关掉那条能力（D-254）。

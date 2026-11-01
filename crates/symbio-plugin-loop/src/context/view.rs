@@ -21,8 +21,8 @@
 //! 「新领域走 `Entity::Domain`」是同一种取舍：**闭集保护的是两处拼写，不是名字本身**。
 
 use super::*;
-use symbio_core::chat_node::{MessageContent, NodeStatus};
 use symbio_plugin_api::context::section_meta;
+use symbio_sdk::chat::chat_node::{MessageContent, NodeStatus};
 
 /// 构建本次请求的**注入段**（请求级唯一入口）。
 ///
@@ -47,7 +47,7 @@ pub fn build_request_sections(sections: &[(&'static str, String)]) -> Vec<ChatNo
         .iter()
         .map(|(slot, text)| ChatNode {
             id: uuid::Uuid::new_v4().to_string(),
-            principal: Some(symbio_core::principal::Principal::from_legacy(
+            principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
                 symbio_core::PRINCIPAL_USER,
             )),
             msg_type: Some(NodeKind::Body),

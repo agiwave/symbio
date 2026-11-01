@@ -34,10 +34,10 @@
 //!   本模块是驱动器侧，只消费算好的数）。三处口径与新旧读法的对应见该模块头。
 
 use std::collections::BTreeMap;
-use symbio_core::CapabilityMeta;
+use symbio_kernel::capability::CapabilityMeta;
 
-use symbio_core::WorkerProgress;
 use symbio_plugin_api::context::DelegateVerdict;
+use symbio_sdk::turn::facts::WorkerProgress;
 
 // ── Q1：worker 启动条件 ────────────────────────────────────────────────
 

@@ -31,7 +31,9 @@ use super::*;
 /// 一个 Turn 任务的等待结局。
 enum TurnOutcome {
     /// 任务结束（含 panic / 被取消）：成功时是驱动器交回的结局值。
-    Finished(Result<Result<symbio_core::TurnReport, PluginError>, tokio::task::JoinError>),
+    Finished(
+        Result<Result<symbio_sdk::turn::dispatch::TurnReport, PluginError>, tokio::task::JoinError>,
+    ),
     /// 看门狗：1800s 内既无结束也无状态变化，判定链路挂死。
     Watchdog,
     /// 会话状态被外部复位或请求已更换（新一轮接管），本任务让位。
@@ -40,9 +42,9 @@ enum TurnOutcome {
 
 /// 地址面派发的错误映射：`NotFound`（容器里没有 loop 挂载点）保留原语义，
 /// 由调用方走 `fail_before_loop`；其余一律按内部失败。
-fn dispatch_error(e: symbio_core::VdfsError) -> PluginError {
+fn dispatch_error(e: symbio_kernel::vdfs::VdfsError) -> PluginError {
     match e {
-        symbio_core::VdfsError::NotFound(m) => PluginError::NotFound(m),
+        symbio_kernel::vdfs::VdfsError::NotFound(m) => PluginError::NotFound(m),
         other => PluginError::InternalError(format!("驱动器派发失败：{other}")),
     }
 }
@@ -177,7 +179,7 @@ impl TurnLauncher {
         // ── 进程内直连：解析 provider entry → 限流 → spawn run_chat_loop ──
         // Provider 解析回退链：
         // 精确 id → is_default → 首个已注册（traverse 仅注册 enabled provider）。
-        let manager = match chat_ctx.get(symbio_core::CAPABILITY_VISITOR) {
+        let manager = match chat_ctx.get(symbio_sdk::capability::CAPABILITY_VISITOR) {
             Some(m) => m,
             None => {
                 self.fail_before_loop(
@@ -198,7 +200,7 @@ impl TurnLauncher {
         // provider_id 参数仅为错误文案保留：model 插件 traverse 已按
         // ctx[PROVIDER_ID] > default > 首个 enabled 完成解析并注册唯一生效 Provider，
         // session 侧直接取用，不重复回退链。
-        let provider = match symbio_core::capability_model_active(&*manager).await {
+        let provider = match symbio_sdk::capability::capability_model_active(&*manager).await {
             Some(p) => p,
             None => {
                 self.fail_before_loop(
@@ -279,10 +281,10 @@ impl TurnLauncher {
         // 子会话 ⇒ `Child(父主体)`、顶层 ⇒ `Root`（同一读法，
         // 从驱动器搬到会话侧：这是元数据事实，驱动器不再回头读父会话）。
         let scope = match session.delegating_principal().await {
-            Some(parent) => symbio_core::Scope::Child(parent),
-            None => symbio_core::Scope::Root,
+            Some(parent) => symbio_kernel::actors::Scope::Child(parent),
+            None => symbio_kernel::actors::Scope::Root,
         };
-        let spec = symbio_core::TurnSpec {
+        let spec = symbio_sdk::turn::dispatch::TurnSpec {
             session_id: session_id.clone(),
             tool_archive_dir: super::super::paths::session_subdir(
                 self.dir.dir(),
@@ -298,7 +300,7 @@ impl TurnLauncher {
             scope,
             persistent: session.store_handle().is_persistent(),
             context_window: session.context_window(),
-            settings: symbio_core::TurnSettings {
+            settings: symbio_sdk::turn::dispatch::TurnSettings {
                 auto_compress: cfg.auto_compress,
                 classify_enabled: cfg.classify_enabled,
                 compose_enabled: cfg.compose_enabled,
@@ -317,23 +319,24 @@ impl TurnLauncher {
             },
         };
         // 事实轨端口：临时会话 ⇒ `None`（驱动器沿用「无事实源 ⇒ 不落派生事实」）。
-        let facts: Option<Arc<dyn symbio_core::Store<Event = symbio_core::Event>>> =
-            match session.facts() {
-                Ok(Some(store)) => Some(store),
-                Ok(None) => None,
-                Err(e) => {
-                    self.fail_before_loop(
-                        &state,
-                        &session_id,
-                        &transcript,
-                        &stop,
-                        format!("事实源打不开：{e}"),
-                    )
-                    .await;
-                    guard.done = true;
-                    return;
-                }
-            };
+        let facts: Option<
+            Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
+        > = match session.facts() {
+            Ok(Some(store)) => Some(store),
+            Ok(None) => None,
+            Err(e) => {
+                self.fail_before_loop(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &stop,
+                    format!("事实源打不开：{e}"),
+                )
+                .await;
+                guard.done = true;
+                return;
+            }
+        };
 
         // `UserPromptSubmit` 归会话生命周期（[D-086] §6）：在派发之前触发，
         // 与搬家前「首轮追加用户消息后立即触发」的时点一致。resume 没有
@@ -352,7 +355,7 @@ impl TurnLauncher {
             .await;
         }
 
-        let dispatch = Arc::new(symbio_core::TurnDispatch {
+        let dispatch = Arc::new(symbio_sdk::turn::dispatch::TurnDispatch {
             spec,
             facts,
             sink,
@@ -364,7 +367,7 @@ impl TurnLauncher {
         });
         // 令牌挂在**宿主的 fork** 上：线上不可伪造（WIRE=false），且只对本次派发可见。
         let dispatch_ctx = chat_ctx.fork();
-        dispatch_ctx.set(symbio_core::TURN_DISPATCH, dispatch.clone());
+        dispatch_ctx.set(symbio_sdk::turn::dispatch::TURN_DISPATCH, dispatch.clone());
 
         let provider_view = match parent.get_vfs_provider() {
             Some(p) => p,
@@ -387,16 +390,16 @@ impl TurnLauncher {
         let handle = tokio::spawn(async move {
             let resp = provider_view
                 .dispatch(
-                    &symbio_core::vdfs_context(&dispatch_ctx),
+                    &symbio_sdk::vdfs::host::vdfs_context(&dispatch_ctx),
                     &loop_path,
-                    symbio_core::VdfsRequest::Action {
-                        action: symbio_core::LOOP_RUN_TURN.to_string(),
+                    symbio_kernel::vdfs::VdfsRequest::Action {
+                        action: symbio_sdk::turn::dispatch::LOOP_RUN_TURN.to_string(),
                         payload: Some(serde_json::json!({})),
                     },
                 )
                 .await
                 .map_err(dispatch_error)?;
-            let symbio_core::VdfsResponse::Action(result) = resp else {
+            let symbio_kernel::vdfs::VdfsResponse::Action(result) = resp else {
                 return Err(PluginError::InternalError(format!(
                     "驱动器动作返回了非动作响应：{loop_path}"
                 )));
@@ -410,7 +413,7 @@ impl TurnLauncher {
             let data = result
                 .data
                 .ok_or_else(|| PluginError::InternalError("驱动器动作缺少结局载荷".to_string()))?;
-            serde_json::from_value::<symbio_core::TurnReport>(data)
+            serde_json::from_value::<symbio_sdk::turn::dispatch::TurnReport>(data)
                 .map_err(|e| PluginError::InternalError(format!("驱动器结局载荷不合法：{e}")))
         });
 
@@ -442,14 +445,14 @@ impl TurnLauncher {
                 stop.fire_text(report.last_message.unwrap_or_default())
                     .await;
                 match report.status {
-                    symbio_core::TurnStatus::Completed => {
+                    symbio_sdk::turn::dispatch::TurnStatus::Completed => {
                         symbio_plugin_api::plugin_info!(
                             "session",
                             "[Consume] Turn 任务正常结束（运行时长={}s）",
                             started.elapsed().as_secs()
                         );
                     }
-                    symbio_core::TurnStatus::Aborted => {
+                    symbio_sdk::turn::dispatch::TurnStatus::Aborted => {
                         // 用户手动中止：在途 Turn 落库为 Aborted + error，前端据此渲染
                         // 错误条与重试入口；但**不收敛为「失败」结局**——中止不是错误：
                         // 会话节点回 `active` + `outcome = aborted`（由 handle_abort 收口，
@@ -469,7 +472,7 @@ impl TurnLauncher {
                             .await;
                         exit_state = SessionStateChange::aborted();
                     }
-                    symbio_core::TurnStatus::Failed => {
+                    symbio_sdk::turn::dispatch::TurnStatus::Failed => {
                         // 业务级失败：把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
                         // 这样切回会话时能看到上次失败的终态；随后复位 `is_working` +
                         // 广播 Error + idle（不复位的后果见 `teardown_failed_turn`）。

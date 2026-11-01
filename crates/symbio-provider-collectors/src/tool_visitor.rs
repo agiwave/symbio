@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use symbio_core::{CapabilityFamily, CapabilityRow, Registry};
+use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
 use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存注册表实现，一次会话请求一个实例

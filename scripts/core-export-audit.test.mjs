@@ -416,14 +416,14 @@ test('C-003 口径：仅测试在用 ⇒ 合法根出口（放行，不收窄）
 
 // ==================== C-004：非内核根账本只降不升 ====================
 
-/** A2 之后的形状：根有 `pub use kernel::*`，只有门面里的符号受 C-003 判。 */
+/** D-272 之后的形状：夹具里有内核 crate（`HAS_KERNEL_CRATE` 成立），core 的根**一条内核
+ *  符号都不转发**（C-006）——根上只剩自有域的出口，C-003 判空集（内核符号的公共面
+ *  不在 core 根上），C-004 数的是根账本本身。 */
 function withKernel(extra = {}) {
   return {
-    [CORE_MOD]: 'mod actors;\nmod kernel;\npub use actors::DomainThing;\npub use kernel::*;\n',
+    'crates/symbio-kernel/src/lib.rs': '// 内核 crate 在场（判定前提），core 根不转发它（D-272）\n',
+    [CORE_MOD]: 'mod actors;\npub use actors::DomainThing;\n',
     [ACTORS_MOD]: 'pub struct DomainThing;\npub struct CoreThing;\n',
-    'crates/symbio-core/src/kernel.rs': 'pub use super::actors::{CoreThing};\n',
-    'crates/symbio-plugin-a/src/a.rs': 'use crate::symbio_core::CoreThing;\npub fn f(_: CoreThing) {}\n',
-    'crates/symbio-plugin-b/src/b.rs': 'use crate::symbio_core::CoreThing;\npub fn g(_: CoreThing) {}\n',
     'crates/symbio-plugin-c/src/c.rs':
       'use crate::symbio_core::DomainThing;\npub fn h(_: DomainThing) {}\n',
     ...extra,

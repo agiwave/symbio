@@ -42,7 +42,9 @@
 //! 的文档——巩固要用**刷新后**的快照，它得看得见编码刚写下的那些。
 
 use crate::control_decl::{COMMITMENT_VOCAB, VERDICT};
-use symbio_core::{actor_can_assert_verification, Event, Seq, Store};
+use symbio_core::actor_can_assert_verification;
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::store::Store;
 use symbio_plugin_api::effects::EffectInput;
 
 /// 收束派生事实中的**效果 / 熔断**半边（DE-038 §3）。
@@ -185,7 +187,7 @@ pub(crate) fn record_derived(
 pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, user_seq: u64) {
     // 刷新后的快照：看得见 `record_derived` 同轮写下的承诺（见函数文档）。
     let snapshot = store.range(Seq::new(0));
-    let view = symbio_core::reputation(COMMITMENT_VOCAB)
+    let view = symbio_sdk::projection::reputation::reputation(COMMITMENT_VOCAB)
         .read_all(&snapshot)
         .value;
     // 覆盖层：判「有没有既有淘汰」——不复述载荷 ↔ 变更的映射（它在 core 的

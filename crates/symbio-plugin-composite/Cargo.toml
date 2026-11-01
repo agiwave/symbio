@@ -30,6 +30,7 @@ inventory = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+symbio-sdk = { path = "../symbio-sdk" }
 # 与 `symbio-plugin-agent` 同一处境：这几条用例要的是**一整棵装配树**，而每个插件的
 # 工厂注册（`inventory`）只存在于它自己的 crate 里。crate 化（D-191）之后单 crate 的
 # 测试二进制里没有兄弟插件的注册 ⇒ 装配返回 None。宿主门面把全部插件 `pub use` 进来，

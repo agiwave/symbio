@@ -5,7 +5,7 @@
 
 use super::*;
 
-use symbio_core::capability_option_fields;
+use symbio_sdk::capability::capability_option_fields;
 
 // ==================== 选项收集管线（宿主侧） ====================
 //
@@ -19,7 +19,7 @@ use symbio_core::capability_option_fields;
 #[tokio::test]
 async fn collect_without_parent_returns_empty() {
     let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+        Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
     let v = collect_options(None, &ctx).await;
     assert!(capability_option_fields(&*v).await.is_empty());
 }

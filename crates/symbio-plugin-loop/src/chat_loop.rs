@@ -83,7 +83,7 @@ pub(crate) use self::wake::merge_runner_messages;
 /// 真要那一条时该一起做，别在这里打补丁。
 pub(crate) fn report_port(
     orchestrator: Arc<ChatOrchestrator>,
-    ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+    ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     conversation: Vec<ChatNode>,
 ) -> super::report_exec::ReportPort {
     let text: super::report_exec::ReportTextFn = Arc::new(move |snapshot: RunSnapshot| {
@@ -165,24 +165,23 @@ pub(crate) fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
 pub(crate) use super::context::auto_compress_process;
 
 use std::sync::Arc;
-use symbio_core::chat_request;
-use symbio_core::ModelFinishReason;
-use symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
-    llm_emit_message, llm_short_id, run_ops, TurnOutput, TurnReport, TurnStatus,
-};
-use symbio_core::{
-    ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginInvokeRequest,
-    PluginInvokeRequestExt,
-};
 use symbio_kernel::dialog::RunSnapshot;
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_kernel::llm::ModelFinishReason;
+use symbio_kernel::llm::TurnOutput;
+use symbio_kernel::llm::{ModelProvider, ModelUsage};
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::plugin_info;
 use symbio_plugin_api::plugin_warn;
+use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
+use symbio_sdk::chat::chat_request;
+use symbio_sdk::llm::turn::{llm_emit_message, llm_short_id};
+use symbio_sdk::turn::dispatch::{run_ops, TurnReport, TurnStatus};
 
 use super::context;
 pub(crate) use super::message_build::TurnOutputExt;
-use symbio_core::llm_emit_state;
-use symbio_core::node_build::detach_if_flat;
+use symbio_sdk::llm::llm_emit_state;
+use symbio_sdk::turn::node_build::detach_if_flat;
 
 pub async fn run_chat_loop(
     orchestrator: std::sync::Arc<ChatOrchestrator>,
@@ -344,7 +343,7 @@ pub async fn run_chat_loop(
                     super::turn_exec::land_inputs(store.as_ref(), ctx.as_ref(), &turn, "closed")
                 }
                 None => Err(super::turn_exec::ActorError::Read(
-                    symbio_core::PluginError::InternalError(
+                    symbio_kernel::plugin::PluginError::InternalError(
                         "定稿答话轮需要持久会话（临时会话无事实源）".into(),
                     ),
                 )),
@@ -357,7 +356,9 @@ pub async fn run_chat_loop(
                     TurnExit::Failed(match e {
                         super::turn_exec::ActorError::Read(e) => e,
                         super::turn_exec::ActorError::Append(e) => {
-                            symbio_core::PluginError::InternalError(format!("本幕落格失败：{e:?}"))
+                            symbio_kernel::plugin::PluginError::InternalError(format!(
+                                "本幕落格失败：{e:?}"
+                            ))
                         }
                     }),
                 )
@@ -373,7 +374,7 @@ pub async fn run_chat_loop(
         Ok(super::turn_exec::DriveEnd::Completed) => TurnExit::Completed,
         // 夹具入口的结局只在测试里出现：控制面交下去的一定是 `Control`。
         Ok(super::turn_exec::DriveEnd::Bare(_) | super::turn_exec::DriveEnd::Running(_)) => {
-            TurnExit::Failed(symbio_core::PluginError::InternalError(
+            TurnExit::Failed(symbio_kernel::plugin::PluginError::InternalError(
                 "控制面交下了夹具入口的结局（按构造不可达）".into(),
             ))
         }
@@ -455,7 +456,7 @@ pub(crate) struct AnsweredTurn {
 pub(crate) async fn run_classify(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
-    store: &Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+    store: &Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
     context: &mut SessionContext,
     turn: &mut TurnState,
 ) -> Result<(), super::turn_exec::ActorError> {
@@ -566,7 +567,7 @@ pub(crate) async fn run_classify(
                 let id = r
                     .reasoning_id
                     .clone()
-                    .unwrap_or_else(symbio_core::llm_short_id);
+                    .unwrap_or_else(symbio_sdk::llm::turn::llm_short_id);
                 Some((id, text))
             }),
         });
@@ -785,7 +786,7 @@ async fn republish_branch_group(context: &SessionContext, sink: &ExecEventSink, 
     let Some(candidates) = all
         .iter()
         .find(|m| m.id == member)
-        .and_then(symbio_core::branch_candidates)
+        .and_then(symbio_sdk::projection::branch::branch_candidates)
     else {
         // 组里凑不齐两条现存成员（新支没产出节点就被中止 / 事实没落上）⇒ 没有标注可补，
         // 也没有切换器可画——不是错误，是这一轮确实没开出第二支。
@@ -793,7 +794,7 @@ async fn republish_branch_group(context: &SessionContext, sink: &ExecEventSink, 
     };
     for id in candidates {
         if let Some(n) = all.iter().find(|m| m.id == id) {
-            sink.emit(symbio_core::llm_message_frame(n)).await;
+            sink.emit(symbio_sdk::llm::turn::llm_message_frame(n)).await;
         }
     }
 }

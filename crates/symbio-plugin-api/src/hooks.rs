@@ -3,7 +3,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::routes::ROUTE_HOOK_FIRE;
-use symbio_core::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PATH, SESSION_ID};
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_sdk::keys::{PATH, SESSION_ID};
 
 /// Hook 事件枚举，用于在关键业务节点触发外部通知或拦截
 ///

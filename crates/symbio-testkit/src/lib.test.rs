@@ -10,12 +10,16 @@
 
 use serde_json::{json, Value};
 
-use symbio_core::ring::{Decl, Pattern};
-use symbio_core::{
-    ActorDecl, Builder, CapabilityFamily, CapabilityRow, Entity, Event, EventDecl, FactDecl,
-    LatencyTier, PluginDeclarations, Projection, Verb, ViewDecl, EVENT_FAILED, EVENT_REQUEST,
-    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::capability::{CapabilityFamily, CapabilityRow};
+use symbio_kernel::decl::ring::Decl;
+use symbio_kernel::decl::ring::Pattern;
+use symbio_kernel::decl::{ActorDecl, Builder, FactDecl, PluginDeclarations, ViewDecl};
+use symbio_kernel::event::{
+    Entity, Event, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
+    EVENT_SENT,
 };
+use symbio_kernel::projection::Projection;
 
 const FIXTURE_FACT: &str = "fixture.fact";
 const FIXTURE_VIEW: &str = "fixture.view";

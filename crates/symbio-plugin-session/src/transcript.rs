@@ -44,8 +44,9 @@ use super::plugin::message_path;
 use indexmap::IndexMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use symbio_core::chat_node as cm;
-use symbio_core::{VdfsChange, VdfsChangeSubscriptions};
+use symbio_kernel::vdfs::VdfsChange;
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 use {
     symbio_plugin_api::plugin_debug, symbio_plugin_api::plugin_error,
     symbio_plugin_api::plugin_info,
@@ -75,7 +76,7 @@ use self::deliver::{
 // 域内门面：状态帧 / 删除帧的实现已随 D-086 §7 上移 core（loop 也要发），
 // 这里只留 session 侧调用点的短路径别名。
 pub(crate) use self::publish::append_and_publish;
-pub use symbio_core::llm_state_frame;
+pub use symbio_sdk::llm::llm_state_frame;
 
 /// **在途号段**：转写侧给「还没落库的消息」发的位置序号（四套序号的归一表见本域
 /// `docs/109-vdfs-session-messages.md` §3.3）。
@@ -555,7 +556,7 @@ impl Transcript {
     /// 它是本轮**更早**的正文，而本条变更说的是「这一轮结束了」。顺序反了，
     /// 前端会先收敛为已空闲、再补上一截正文（`sessionNodeSync` 在
     /// `working → 非 working` 迁移时就会清掉活动角标，节点却还在长）。
-    pub fn emit_session_state(&mut self, node: Option<symbio_core::VdfsNode>) {
+    pub fn emit_session_state(&mut self, node: Option<symbio_kernel::vdfs::VdfsNode>) {
         self.frame_no += 1;
         self.flush_pending();
         match &node {
@@ -597,7 +598,7 @@ struct TranscriptWriterBridge {
 }
 
 #[async_trait::async_trait]
-impl symbio_core::ExecTranscriptWriter for TranscriptWriterBridge {
+impl symbio_kernel::exec::ExecTranscriptWriter for TranscriptWriterBridge {
     async fn apply(&self, message: cm::ChatNode) {
         self.transcript.lock().await.apply(message);
     }
@@ -611,7 +612,7 @@ impl symbio_core::ExecTranscriptWriter for TranscriptWriterBridge {
 /// 通道等于把这套收敛逻辑再实现一遍，且必然漂移。锁点留在本域，`Arc` 只作构造实参流走。
 pub(crate) fn compression_writer(
     transcript: Arc<tokio::sync::Mutex<Transcript>>,
-) -> Arc<dyn symbio_core::ExecTranscriptWriter> {
+) -> Arc<dyn symbio_kernel::exec::ExecTranscriptWriter> {
     Arc::new(TranscriptWriterBridge { transcript })
 }
 

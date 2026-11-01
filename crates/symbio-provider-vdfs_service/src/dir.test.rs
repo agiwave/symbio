@@ -252,7 +252,7 @@ async fn watch_and_unwatch_are_paired() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = {
         let seen = seen.clone();
-        std::sync::Arc::new(move |c: symbio_core::VdfsChange| {
+        std::sync::Arc::new(move |c: symbio_kernel::vdfs::VdfsChange| {
             seen.lock().unwrap().push(c.path);
         })
     };

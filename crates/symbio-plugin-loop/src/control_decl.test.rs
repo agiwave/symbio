@@ -6,8 +6,11 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use symbio_core::ring::{Decl, Pattern};
-use symbio_core::{Builder, Entity, Frozen, LatencyTier, PluginDeclarations, Seq, Verb};
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::decl::ring::Decl;
+use symbio_kernel::decl::ring::Pattern;
+use symbio_kernel::decl::{Builder, Frozen, PluginDeclarations};
+use symbio_kernel::event::{Entity, Seq, Verb};
 
 use super::*;
 

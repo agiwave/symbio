@@ -14,7 +14,7 @@ use super::*;
 /// 判定点钉死之后，效果由 T30（e2e）在真实落盘上验。
 #[test]
 fn attributed_fills_by_role_and_never_overwrites() {
-    use symbio_core::principal::Principal;
+    use symbio_sdk::chat::principal::Principal;
     let base = |role| cm::ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role,

@@ -98,7 +98,7 @@
 //! 名字也不是「配置」：宿主不解析内容，只做三件事——**注入**、**限容**、**给地址**。
 
 use std::path::{Path, PathBuf};
-use symbio_core::{VdfsAccess, VdfsNode};
+use symbio_kernel::vdfs::{VdfsAccess, VdfsNode};
 
 /// 注入用正文的产物 —— 「按预算截断」这一步的全部信息。
 ///
@@ -126,7 +126,7 @@ impl MemoryInjection {
     ///
     /// `text_floor_char_boundary`
     pub fn cut(text: &str, budget_bytes: usize) -> Self {
-        let end = symbio_core::text_floor_char_boundary(text, budget_bytes);
+        let end = symbio_sdk::text::text_floor_char_boundary(text, budget_bytes);
         Self {
             text: text[..end].to_string(),
             truncated: end < text.len(),

@@ -31,10 +31,11 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
-use symbio_core::{
-    run_ops, vdfs_context, Plugin, PluginError, PluginInvokeRequest, VdfsRequest, VdfsResponse,
-};
 use symbio_deploy::PLUGIN_ID_SESSION;
+use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest};
+use symbio_kernel::vdfs::{VdfsRequest, VdfsResponse};
+use symbio_sdk::turn::dispatch::run_ops;
+use symbio_sdk::vdfs::host::vdfs_context;
 
 /// 驱动器对会话动作面的**窄端口**：一个方法，op 词表取 [`run_ops`] 常量。
 #[async_trait]
@@ -94,7 +95,7 @@ impl SessionPort for VdfsSessionPort {
             .dispatch(&ctx, &path, req)
             .await
             .map_err(|e| match e {
-                symbio_core::VdfsError::NotFound(m) => PluginError::NotFound(m),
+                symbio_kernel::vdfs::VdfsError::NotFound(m) => PluginError::NotFound(m),
                 other => PluginError::InternalError(format!("会话动作派发失败（{op}）：{other}")),
             })?;
         let VdfsResponse::Action(result) = resp else {

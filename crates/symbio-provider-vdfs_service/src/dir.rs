@@ -18,12 +18,12 @@
 use super::entry;
 use async_trait::async_trait;
 use std::path::PathBuf;
-use symbio_core::{
+use symbio_kernel::vdfs::{
     vdfs_has_parent_segment, VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError,
     VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
     VDFS_ACTION_EXPORT,
 };
-use symbio_core::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
+use symbio_sdk::vdfs::host::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
 
 /// 列目录上限（与物理层同一口径，避免超大目录打爆响应）
 const MAX_LIST_ENTRIES: usize = 2000;

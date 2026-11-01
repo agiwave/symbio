@@ -16,9 +16,10 @@ use dashmap::DashMap;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use symbio_core::PluginError;
-use symbio_core::{VdfsAccess, VdfsNode};
-use symbio_core::{VdfsChange, VdfsChangeSubscriptions};
+use symbio_kernel::plugin::PluginError;
+use symbio_kernel::vdfs::VdfsChange;
+use symbio_kernel::vdfs::{VdfsAccess, VdfsNode};
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 
 use self::fs_watcher::FsWatcher;
 use super::types::Session;
@@ -56,20 +57,23 @@ pub const TITLE_WORKDIR: &str = "工作目录";
 /// **路径段一律 ASCII，中文只出现在 `title` 上**：地址要能安全地进 URL、命令行、
 /// 日志与文件名，不受编码 / 输入法影响。段名与展示名的配对因此与段本身同处——
 /// 新增一类集合不必在两处同步改字符串。
-pub fn sub_sessions_dir_node() -> symbio_core::VdfsNode {
-    let mut n = symbio_core::VdfsNode::dir(
+pub fn sub_sessions_dir_node() -> symbio_kernel::vdfs::VdfsNode {
+    let mut n = symbio_kernel::vdfs::VdfsNode::dir(
         SEG_SUB_SESSIONS,
         TITLE_SUB_SESSIONS,
-        symbio_core::VdfsAccess::LIST,
+        symbio_kernel::vdfs::VdfsAccess::LIST,
     );
     n.kind = KIND_SUB_SESSIONS.to_string();
     n
 }
 
 /// 工作目录树根节点（`list` 与 `stat` 共用同一份形状）。理由同上。
-pub fn workdir_dir_node() -> symbio_core::VdfsNode {
-    let mut n =
-        symbio_core::VdfsNode::dir(SEG_WORKDIR, TITLE_WORKDIR, symbio_core::VdfsAccess::LIST);
+pub fn workdir_dir_node() -> symbio_kernel::vdfs::VdfsNode {
+    let mut n = symbio_kernel::vdfs::VdfsNode::dir(
+        SEG_WORKDIR,
+        TITLE_WORKDIR,
+        symbio_kernel::vdfs::VdfsAccess::LIST,
+    );
     n.kind = KIND_WORKDIR.to_string();
     n
 }

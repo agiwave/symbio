@@ -7,6 +7,9 @@
 //! 召回视图（`RecallView` / `RecallEntry`）不在这里：它的产出方与消费方都在
 //! `crates/symbio-plugin-loop`，形状归那条投影自己持有（[DE-024](../../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-201）。
 
+// `Budget` / `View` 的数据面在 `symbio_kernel`，本模块只做同名转出（登记面，N-004）；
+// 判据（`AGENT_NAMESPACES` / `principal_namespace` / `is_agent_id` / `visible_to`）是 core 的。
+#[allow(unused_imports)]
 pub use symbio_kernel::view::*;
 
 /// **智能体命名空间登记表**（[D-069 §决策 3](../../../../docs/003-design/005-协议规范.md#d-069-principal-三字段kind-与-id-分家id-是可路由地址 "DE-005-协议规范")）。

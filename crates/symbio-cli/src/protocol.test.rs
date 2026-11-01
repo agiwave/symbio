@@ -9,7 +9,7 @@ use serde_json::json;
 fn interaction(status: NodeStatus, meta: Value) -> ChatNode {
     ChatNode {
         id: "res-1".to_string(),
-        msg_type: Some(symbio::symbio_core::chat_node::NodeKind::Interaction),
+        msg_type: Some(symbio::symbio_sdk::chat::chat_node::NodeKind::Interaction),
         content: Some(MessageContent::Text("需要确认：删除文件".to_string())),
         status: Some(status),
         meta: Some(meta),

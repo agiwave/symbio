@@ -30,15 +30,20 @@ use super::tool_executor::{
 use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::node_build::{llm_build_tool_message, tool_call_args_text};
-use symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL},
-    failure_kind, llm_emit_message, llm_emit_state, llm_short_id, Event, ExecAbortSignal,
-    ExecEventSink, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store,
-    TurnToolCallInfo,
-};
+use symbio_kernel::capability::failure_kind;
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_kernel::llm::TurnToolCallInfo;
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_kernel::store::Store;
 use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
+use symbio_sdk::chat::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL,
+};
+use symbio_sdk::llm::llm_emit_state;
+use symbio_sdk::llm::turn::{llm_emit_message, llm_short_id};
+use symbio_sdk::turn::node_build::{llm_build_tool_message, tool_call_args_text};
 use {
     symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
 };

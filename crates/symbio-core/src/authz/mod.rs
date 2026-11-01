@@ -589,9 +589,9 @@ pub fn principal_of(agent_id: Option<&str>) -> String {
 /// 切成独立插件后（[D-082](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")），
 /// 读侧（`session/stats`）与写侧隔着 E-009 的插件墙两头都要用，留在任一侧都会变成
 /// 另一条反向引用。
-pub fn request_principal(ctx: &dyn crate::PluginInvokeRequest) -> String {
-    use crate::PluginInvokeRequestExt;
-    principal_of(ctx.get(crate::AGENT_ID).as_deref())
+pub fn request_principal(ctx: &dyn symbio_kernel::plugin::PluginInvokeRequest) -> String {
+    use crate::plugin::PluginInvokeRequestExt;
+    principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref())
 }
 
 /// 本机授权矩阵——**该主体当次判定的唯一取表口**（行的形状不变：`(主体, 能力名, 可见域)`，

@@ -6,10 +6,11 @@
 //! 转写是事实源的渲染；把两者混在一处，最先被碰坏的是「停了还在不在」这条判据。
 
 use super::*;
-use symbio_core::{
-    vdfs_host_ctx, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest,
-    VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR,
+use symbio_kernel::vdfs::{
+    VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
+    VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR,
 };
+use symbio_sdk::vdfs::host::vdfs_host_ctx;
 
 impl SessionPlugin {
     /// 收件箱（`<id>/inbox[/iid]`）：**待消费**的用户消息。
@@ -131,14 +132,14 @@ impl SessionPlugin {
                         // 会话那一刻的常态。
                         let workdir = vdfs_host_ctx(ctx)
                             .ok()
-                            .and_then(|h| h.get(symbio_core::WORKDIR));
+                            .and_then(|h| h.get(symbio_sdk::keys::WORKDIR));
                         // 来源主体（D-067）：同取**请求上下文**（线上入口 =
                         // `metadata.source_principal`）。随条目寄存进 `params`，消费时经
                         // `run_inbox_turn` 挂回执行 ctx——「这条消息是谁发的」是**数据**，
                         // 轮末 `commitment.*` 的 `to` 据它取值，缺省保持本机用户。
                         let source_principal = vdfs_host_ctx(ctx)
                             .ok()
-                            .and_then(|h| h.get(symbio_core::SOURCE_PRINCIPAL))
+                            .and_then(|h| h.get(symbio_sdk::keys::SOURCE_PRINCIPAL))
                             .filter(|s| !s.trim().is_empty());
                         self.enqueue_inbox(
                             id,

@@ -30,11 +30,12 @@ use super::config::{default_context_messages, SessionConfig};
 use super::store::SessionStore;
 use std::collections::HashSet;
 use std::sync::Arc;
-use symbio_core::chat_node as cm;
-use symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
-use symbio_core::clock_now_ms;
-use symbio_core::{PluginError, SymbioKey};
+use symbio_kernel::keys::SymbioKey;
+use symbio_kernel::plugin::PluginError;
 use symbio_plugin_api::plugin_info;
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeRole};
+use symbio_sdk::clock::clock_now_ms;
 use tokio::sync::RwLock;
 
 mod read;

@@ -36,7 +36,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use symbio_core::{Event, Projection, EVENT_RESPONSE};
+use symbio_kernel::event::{Event, EVENT_RESPONSE};
+use symbio_kernel::projection::Projection;
 
 /// 一个主体在一种币种下的累计金额。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

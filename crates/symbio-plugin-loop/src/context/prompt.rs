@@ -3,7 +3,7 @@
 //! 提示词文本 → 指纹 → 快照 meta，构成「提示词变更可从产物侧观测」的溯源链。
 
 use super::*;
-use symbio_core::chat_node::{MessageContent, NodeStatus};
+use symbio_sdk::chat::chat_node::{MessageContent, NodeStatus};
 
 /// 压缩协议版本：快照 meta 记录此版本，用于从产物侧验证协议演进是否生效。
 /// 语义：v2 = L0 会话目录存档 + 三层统一取回协议 + JSON 语义摘要 + 快照指纹。
@@ -161,7 +161,7 @@ pub fn build_compression_request(history: &[ChatNode]) -> Vec<ChatNode> {
 fn compression_instruction() -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        principal: Some(symbio_core::principal::Principal::from_legacy(
+        principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
             symbio_core::PRINCIPAL_USER,
         )),
         msg_type: Some(NodeKind::Body),

@@ -20,7 +20,7 @@ pub(crate) enum ModelCallError {
     /// 适配器失败——兜底格（`detail` 是适配器的人话，只给人读）。
     Failed(String),
     /// 协议事实落不进去——往上传：事件都记不下来，后面的一切都不可信。
-    Store(symbio_core::AppendError),
+    Store(symbio_kernel::store::AppendError),
     /// 控制面自身不一致（行不欠 / 端口没声明）——模型没跑成，如实当失败报。
     Control(String),
 }
@@ -58,8 +58,8 @@ pub(crate) fn begin_model(
     store: std::sync::Arc<dyn Store<Event = Event>>,
     llm: std::sync::Arc<dyn LlmAdapter>,
     tok: FullModel,
-    sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
-    tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
+    sink: std::sync::Arc<dyn symbio_sdk::adapters::DeltaSink>,
+    tools: std::sync::Arc<[symbio_kernel::capability::CapabilityMeta]>,
 ) -> Result<ModelBegin, ModelCallError> {
     // 没有交接件 ⇒ 这一笔不是本幕宣布的（上一世的遗留）。判死由调用方做
     // （[`kill_dangling_round`]）：那里看得见日志，这里只看得到草稿。
@@ -216,7 +216,7 @@ pub(crate) async fn settle_control<S>(
     store: &S,
     llm: &dyn LlmAdapter,
     why: &str,
-) -> Result<TurnOutcome, symbio_core::AppendError>
+) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -242,7 +242,7 @@ pub(crate) struct ModelFlight {
     /// 这一笔的逻辑 id（写回 `responses` 用）。
     pub(crate) id: String,
     /// 适配器的结论；`Err` 三档与 [`ModelCallError`] 同义。
-    pub(crate) result: Result<symbio_core::LlmTurn, ModelCallError>,
+    pub(crate) result: Result<symbio_sdk::adapters::LlmTurn, ModelCallError>,
     /// 这一次往返的桥读数（`last_output_facts` / `last_answer_id` 的来源）。
     ///
     /// `None` = 没有落输出事实（控制面失败 / 存储失败），此时**不能**把 id 记进
@@ -257,7 +257,7 @@ pub(crate) struct ModelFlight {
 /// 正文载荷、用后者按 `call_id` 关账，而派发器不替它记这两样。
 pub(crate) struct ToolFlight {
     /// 这一批对应的那一次模型往返（唤醒幕是合成的那一份）。
-    pub(crate) rt: symbio_core::LlmTurn,
+    pub(crate) rt: symbio_sdk::adapters::LlmTurn,
     /// 开账过的调用（`sent` 标记在里面，关账按它逐笔判）。
     pub(crate) calls: Vec<super::super::tool_dispatch::ToolPortCall>,
     /// 执行层那一段：`'static` 的框，收尾半 poll 它。
@@ -300,7 +300,7 @@ pub(crate) enum ModelRound {
 pub(crate) async fn announce_round<S>(
     run: &mut Prepared,
     store: &S,
-) -> Result<(), symbio_core::AppendError>
+) -> Result<(), symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -317,7 +317,7 @@ where
 /// 把一笔**没有等待方**的模型请求判死（`failed`，`why = "no_pending_round"`）。
 ///
 /// 判据与取法全在 [`super::super::port::kill_dangling`]：这里只把端口名与理由定死。
-pub fn kill_dangling_round<S>(store: &S) -> Result<bool, symbio_core::AppendError>
+pub fn kill_dangling_round<S>(store: &S) -> Result<bool, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -352,7 +352,7 @@ pub(crate) async fn poll_flight<S>(
     llm: &dyn LlmAdapter,
     inflight: Option<ModelInFlight>,
     has_dispatch: bool,
-) -> Result<PolledRound, symbio_core::AppendError>
+) -> Result<PolledRound, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -393,7 +393,7 @@ pub(crate) async fn settle_flight<S>(
     llm: &dyn LlmAdapter,
     flight: ModelFlight,
     has_dispatch: bool,
-) -> Result<ModelRound, symbio_core::AppendError>
+) -> Result<ModelRound, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -519,8 +519,8 @@ pub(crate) async fn close_round<S>(
     run: &mut Prepared,
     store: &S,
     llm: &dyn LlmAdapter,
-    sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
-) -> Result<Option<TurnOutcome>, symbio_core::AppendError>
+    sink: std::sync::Arc<dyn symbio_sdk::adapters::DeltaSink>,
+) -> Result<Option<TurnOutcome>, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -565,8 +565,8 @@ async fn land_reflex<S>(
     run: &Prepared,
     store: &S,
     text: &str,
-    sink: &std::sync::Arc<dyn symbio_core::DeltaSink>,
-) -> Result<TurnOutcome, symbio_core::AppendError>
+    sink: &std::sync::Arc<dyn symbio_sdk::adapters::DeltaSink>,
+) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -596,7 +596,7 @@ where
             aborted: false,
             awaits_user: false,
             closure_denied: true,
-            finish: symbio_core::ModelFinishReason::Stop,
+            finish: symbio_kernel::llm::ModelFinishReason::Stop,
         });
     }
     settle::land_final(
@@ -619,7 +619,7 @@ where
                 ),
                 "completed",
             ),
-            symbio_core::ClosureReason::Completed,
+            symbio_kernel::event::ClosureReason::Completed,
         ),
     )?;
     Ok(TurnOutcome {
@@ -632,7 +632,7 @@ where
         awaits_user: false,
         closure_denied: false,
         // 快路没有模型轮，长度戳判据对它无意义（技能正文一次写完）。
-        finish: symbio_core::ModelFinishReason::Stop,
+        finish: symbio_kernel::llm::ModelFinishReason::Stop,
     })
 }
 
@@ -733,7 +733,7 @@ pub(crate) async fn land_round(
     store: &std::sync::Arc<dyn Store<Event = Event>>,
     llm: &dyn LlmAdapter,
     dispatch: std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>,
-) -> Result<Option<ToolFlight>, symbio_core::AppendError> {
+) -> Result<Option<ToolFlight>, symbio_kernel::store::AppendError> {
     let Some(flight) = flight else {
         let batch = match (run.pending_model.take(), run.pending_calls.take()) {
             (Some(rt), Some(calls)) => Some((rt, calls)),
@@ -788,7 +788,7 @@ async fn land_batch(
     llm: &dyn LlmAdapter,
     rt: LlmTurn,
     outcomes: Vec<super::super::tool_dispatch::DispatchOutcome>,
-) -> Result<(), symbio_core::AppendError> {
+) -> Result<(), symbio_kernel::store::AppendError> {
     // 产物落格：每条工具结果一格，溯源指向本轮用户格。
     batch::land_artifacts(run, store, &outcomes).await?;
 
@@ -874,7 +874,7 @@ async fn halt<S>(
     llm: &dyn LlmAdapter,
     rt: LlmTurn,
     round_facts: &StreamNodeFacts,
-) -> Result<TurnOutcome, symbio_core::AppendError>
+) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -1004,7 +1004,7 @@ async fn land_aborted<S>(
     cost_ms: u64,
     produced: serde_json::Value,
     partial_text: &str,
-) -> Result<TurnOutcome, symbio_core::AppendError>
+) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -1034,7 +1034,7 @@ where
             awaits_user: false,
             closure_denied: run.artifacts_landed == 0,
             // 中止是「用户按了停止」，不是「模型被截断」：长度戳不得误触发。
-            finish: symbio_core::ModelFinishReason::Stop,
+            finish: symbio_kernel::llm::ModelFinishReason::Stop,
         });
     }
     settle::land_final(
@@ -1045,7 +1045,7 @@ where
         cost_ms,
         with_terminated(with_reason(
             with_status(produced, "aborted"),
-            symbio_core::ClosureReason::Interrupted,
+            symbio_kernel::event::ClosureReason::Interrupted,
         )),
     )?;
     Ok(TurnOutcome {
@@ -1058,7 +1058,7 @@ where
         awaits_user: false,
         closure_denied: false,
         // 中止轮不入续写判据（用户按的停止不是被 max_tokens 掐断）。
-        finish: symbio_core::ModelFinishReason::Stop,
+        finish: symbio_kernel::llm::ModelFinishReason::Stop,
     })
 }
 

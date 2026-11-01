@@ -39,9 +39,12 @@
 //! 用「记不下来」换「答不出来」——与轮中汇报的落格同一条口径。
 
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
-use symbio_core::chat_node::ChatNode;
-use symbio_core::{clock_now_ms, count_user_messages, Entity, Event, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::Store;
 use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
+use symbio_sdk::chat::chat_node::ChatNode;
+use symbio_sdk::clock::clock_now_ms;
+use symbio_sdk::projection::turns::count_user_messages;
 
 use super::super::chat_session::PersistentChatSession;
 use super::super::store::EventWalStore;
@@ -56,7 +59,9 @@ pub(crate) fn consolidate_into_wal(
     principal: &str,
 ) -> Option<Seq> {
     let existing = store.range(Seq::new(0));
-    if let Some((_, prev)) = symbio_core::mutations_latest_snapshot(&existing, &MESSAGE_VOCAB) {
+    if let Some((_, prev)) =
+        symbio_sdk::projection::mutations::mutations_latest_snapshot(&existing, &MESSAGE_VOCAB)
+    {
         if same_message_ids(&prev, messages) {
             return None;
         }

@@ -8,7 +8,7 @@ use super::spawn_forward_pump;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use symbio::symbio_core::PluginFrame;
+use symbio::symbio_kernel::plugin::PluginFrame;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 

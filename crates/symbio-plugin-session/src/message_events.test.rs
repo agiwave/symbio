@@ -13,9 +13,10 @@
 
 use super::{drain_parked, edited, removed, AppendOutcome};
 use crate::store::EventWalStore;
-use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind};
-use symbio_core::{Entity, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Seq, Verb};
+use symbio_kernel::store::Store;
 use symbio_plugin_api::events::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE};
+use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind};
 
 /// 造一个临时会话目录 + 一条 `user.message`（承载节点 `u-1`，正是要被改的那条）。
 ///
@@ -27,7 +28,7 @@ fn seeded_dir(tag: &str) -> (std::path::PathBuf, u64) {
     let store = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("打开事实源");
     let seq = store
         .append(
-            symbio_core::Event::pending(
+            symbio_kernel::event::Event::pending(
                 "u-1",
                 EVENT_USER_MESSAGE,
                 Entity::Turn,
@@ -67,7 +68,7 @@ fn assert_landed(outcome: AppendOutcome, what: &str) {
     );
 }
 
-fn read_facts(dir: &std::path::Path) -> Vec<symbio_core::Event> {
+fn read_facts(dir: &std::path::Path) -> Vec<symbio_kernel::event::Event> {
     let store = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("重开事实源");
     store
         .range(Seq::new(0))
@@ -80,7 +81,7 @@ fn read_facts(dir: &std::path::Path) -> Vec<symbio_core::Event> {
 fn patched_user(id: &str, text: &str) -> ChatNode {
     ChatNode {
         id: id.into(),
-        principal: Some(symbio_core::principal::Principal::from_legacy(
+        principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
             symbio_core::PRINCIPAL_USER,
         )),
         msg_type: Some(NodeKind::Body),
@@ -254,7 +255,7 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
     std::fs::create_dir_all(&dir).expect("临时会话目录");
 
     // 手工写一份「旧版本落下的 WAL」：承载 `u-1` 的那条没有 seq，其后一条有。
-    let legacy = symbio_core::Event::pending(
+    let legacy = symbio_kernel::event::Event::pending(
         "u-1",
         EVENT_USER_MESSAGE,
         Entity::Turn,
@@ -267,7 +268,7 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
     let mut legacy_json = serde_json::to_value(&legacy).expect("序列化旧事件");
     legacy_json["seq"] = serde_json::Value::Null;
 
-    let later = symbio_core::Event::pending(
+    let later = symbio_kernel::event::Event::pending(
         "a-1",
         symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
@@ -461,7 +462,7 @@ fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
     // 落格必须走**持令牌的那个实例**（另开一个拿不到锁）。
     let new_seq = holder
         .append(
-            symbio_core::Event::pending(
+            symbio_kernel::event::Event::pending(
                 "u-2",
                 EVENT_USER_MESSAGE,
                 Entity::Turn,
@@ -829,7 +830,7 @@ fn an_explicit_principal_is_not_rewritten_to_the_session() {
 fn patched_msg(id: &str, text: &str, principal: Option<&str>, ts: i64) -> ChatNode {
     ChatNode {
         id: id.into(),
-        principal: principal.map(symbio_core::principal::Principal::from_legacy),
+        principal: principal.map(symbio_sdk::chat::principal::Principal::from_legacy),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         timestamp: Some(ts),

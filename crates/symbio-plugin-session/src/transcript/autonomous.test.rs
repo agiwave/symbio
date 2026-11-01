@@ -5,9 +5,10 @@
 use super::*;
 use crate::plugin::SessionConfig;
 use std::sync::Arc;
-use symbio_core::{check_all, Entity, Event, Verb};
+use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio_plugin_api::vocab;
+use symbio_sdk::invariants::check_all;
 
 // 这一段钉的不是"触发器会不会开跑一轮"（那要真模型，归 e2e），而是**触发先落事实**
 // 这条链子：`system.triggered` 必须存在且溯源指向更早的格子、健康自检紧随其后、
@@ -23,7 +24,7 @@ fn autonomy_plugin(conation_enabled: bool) -> (tempfile::TempDir, Arc<SessionPlu
             conation_enabled,
             ..SessionConfig::default()
         },
-        symbio_core::PluginDir::at(dir.path(), "session"),
+        symbio_sdk::plugin::PluginDir::at(dir.path(), "session"),
     ));
     (dir, plugin)
 }
@@ -229,9 +230,10 @@ async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
 
 use crate::declarations::EVENT_CONATION_EXPRESSED;
 use crate::declarations::EVENT_SYSTEM_TRIGGERED;
-use symbio_core::{budget_exceeded, EventStore};
 use symbio_core::{PRINCIPAL_AUTONOMOUS, PRINCIPAL_USER, PRINCIPAL_WORKER};
+use symbio_kernel::store::EventStore;
 use symbio_plugin_api::events::EVENT_TASK_PROGRESS;
+use symbio_sdk::invariants::budget_exceeded;
 
 /// 事实源里先放一格：触发是"从当时的状态出发"的，必须先有可指的锚。
 fn seed_root(store: &EventStore) -> u64 {
@@ -301,7 +303,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     // 验收 3：超 86.4M 必须产出兜底（先被看见）。
     let bad = budget_exceeded(
         &snapshot,
-        Some(symbio_core::LatencyTier::Autonomic.budget_ms()),
+        Some(symbio_kernel::adapters::LatencyTier::Autonomic.budget_ms()),
     );
     assert_eq!(bad.len(), 1, "长目标超支必须被看见：{bad:?}");
     // 验收 4（反向）：同一事件 70M ms（预算内）；把预算改成 60000 → 判定改变。

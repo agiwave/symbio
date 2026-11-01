@@ -56,10 +56,12 @@ use std::sync::{Arc, LazyLock};
 
 use serde_json::Value;
 
-use symbio_core::ring::{owed, Decl, Gap, Key, Lit, Pattern, PortDecl};
-use symbio_core::{
-    ActorDecl, Builder, Event, Frozen, LatencyTier, PluginDeclarations, EVENT_FAILED,
-    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::decl::ring::Pattern;
+use symbio_kernel::decl::ring::{owed, Decl, Gap, Key, Lit, PortDecl};
+use symbio_kernel::decl::{ActorDecl, Builder, Frozen, PluginDeclarations};
+use symbio_kernel::event::{
+    Event, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK,
@@ -1430,9 +1432,9 @@ static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| match assemble()
 ///
 /// 装载有任何缺口 ⇒ `Err`：调用方（开幕）带着它退出，不存在「表没装好但轮照常跑」
 /// 这种部分成功。
-pub(crate) fn table() -> Result<Arc<Frozen>, symbio_core::PluginError> {
+pub(crate) fn table() -> Result<Arc<Frozen>, symbio_kernel::plugin::PluginError> {
     frozen().ok_or_else(|| {
-        symbio_core::PluginError::InternalError(
+        symbio_kernel::plugin::PluginError::InternalError(
             "义务环行表装载失败（装载期检查有缺口），本轮拒绝开幕；详见启动日志 [Loop] 行表装载失败".into(),
         )
     })
@@ -1633,7 +1635,7 @@ pub(crate) fn next(
 ) -> Option<Next> {
     let frozen = frozen()?;
     let rows = bound_rows(&frozen, &actor_names(actors));
-    let debt = symbio_core::ring::drive(&rows, &frozen, turn_slice(events, turn), now)?;
+    let debt = symbio_kernel::decl::ring::drive(&rows, &frozen, turn_slice(events, turn), now)?;
     trace(&frozen, &debt);
     // 动作与声明**一次查全**：查不到动作就按「没有可还的债」显形并出声（不猜动作、
     // 也不猜它写了什么）——那是行表与绑定表被改坏的形状，不是第四种可还性。
@@ -1702,7 +1704,7 @@ pub(crate) fn turn_tier(events: &[Event], turn: u64, now: i64) -> LatencyTier {
 ///
 /// 视图版本一并记下（`ViewDecl.ver`）：投影读法一变，同一份事实折出的结论就变，
 /// 回放时「这一轮用了哪一版」必须在日志里有答案。
-fn trace(frozen: &Frozen, debt: &symbio_core::ring::Debt<'_>) {
+fn trace(frozen: &Frozen, debt: &symbio_kernel::decl::ring::Debt<'_>) {
     let decl = debt.decl;
     let key = debt.key.trace();
     let view = frozen.view(decl.owes.source);

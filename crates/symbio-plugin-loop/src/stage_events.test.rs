@@ -9,11 +9,12 @@
 //! 行在这一格上关不关账由 `loop_rows` 的 `until` 负责，用例在那边。
 
 use super::{done, land, source_of, StageFact, StageName, VerdictFact, VerdictSource};
-use symbio_core::{Entity, EventStore, Seq, Store, Verb};
 use symbio_kernel::dialog::{
     Verdict, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,
     REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
+use symbio_kernel::event::{Entity, Seq, Verb};
+use symbio_kernel::store::{EventStore, Store};
 
 use crate::control_decl::EVENT_TURN_STAGE;
 

@@ -9,12 +9,12 @@ use super::*;
 use crate::config::SessionConfig;
 use crate::plugin::{SessionPlugin, OUTCOME_ABORTED};
 use crate::types::Session;
-use symbio_core::PluginDir;
-use symbio_core::VdfsChangeSubscriptions;
+use symbio_sdk::plugin::PluginDir;
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: cm::NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -42,15 +42,15 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
 /// 切主后（D-049）存储里的正文 = 事实投影：空切片上，收口要落的变更事实
 /// （`message_events::append`）连溯源锚都解不出、会按口径被丢弃。
 fn seed_user_message(dir: &std::path::Path) {
-    use symbio_core::Store as _;
+    use symbio_kernel::store::Store as _;
     let wal = dir.join(crate::paths::V2_WAL_FILE);
     let s = crate::store::EventWalStore::open(&wal).expect("打开事实源失败");
     s.append(
-        symbio_core::Event::pending(
+        symbio_kernel::event::Event::pending(
             "u-open",
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
-            symbio_core::Entity::Turn,
-            symbio_core::Verb::Opened,
+            symbio_kernel::event::Entity::Turn,
+            symbio_kernel::event::Verb::Opened,
             1,
             symbio_core::PRINCIPAL_USER,
         )

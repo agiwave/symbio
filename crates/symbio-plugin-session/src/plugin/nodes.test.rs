@@ -3,13 +3,13 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
 
 use super::*;
-use symbio_core::{VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
+use symbio_kernel::vdfs::{VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
 // 目录树场景模块的区段常量（`SEG_SUB_SESSIONS` / `SEG_WORKDIR`）
 use crate::workdir;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库/投递面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: cm::NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -356,7 +356,9 @@ fn vdfs_internal_dirs_conditional() {
     let without = internal_dirs(false, memory());
     assert_eq!(without.len(), 4);
     assert!(
-        without.iter().all(|n| n.name != symbio_core::run_ops::SEG),
+        without
+            .iter()
+            .all(|n| n.name != symbio_sdk::turn::dispatch::run_ops::SEG),
         "内部动作段不是资源，不进清单"
     );
     assert_eq!(without[0].name, SEG_MESSAGES, "转写列表恒在（会话的本体）");
@@ -869,16 +871,16 @@ fn subtree_nodes_refetch_reproduces_released_subtree() {
 fn a_trigger_declaration_is_judged_by_membership_not_equality() {
     let with_kind = |kind: &str| cm::ChatNode {
         meta: Some(serde_json::json!({
-            symbio_core::EVENT_TRIGGER_META_KEY: { "kind": kind, "idle_ms": 4_321_i64 }
+            symbio_kernel::event::EVENT_TRIGGER_META_KEY: { "kind": kind, "idle_ms": 4_321_i64 }
         })),
         ..Default::default()
     };
 
     assert!(
-        !symbio_core::EVENT_TRIGGER_KINDS.is_empty(),
+        !symbio_kernel::event::EVENT_TRIGGER_KINDS.is_empty(),
         "登记表读空了——空表会让所有触发声明被拒（fail-closed，但功能会静默消失）"
     );
-    for kind in symbio_core::EVENT_TRIGGER_KINDS {
+    for kind in symbio_kernel::event::EVENT_TRIGGER_KINDS {
         assert_eq!(
             trigger_declaration(&with_kind(kind)).expect("登记过的 kind 必须放行"),
             Some(4_321),

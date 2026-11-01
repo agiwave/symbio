@@ -26,11 +26,12 @@
 //! 互引被 `plugin-entry-audit` E-009 禁止，故那侧改为本地构造 fixture，形状契约
 //! 由本文件的测试锁定（见 `message_build.test.rs` 里的用例 A / A2 / B / C / D）。
 
-use symbio_core::chat_node::{
+use symbio_kernel::llm::{TurnOutput, TurnToolCallInfo};
+use symbio_sdk::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
 };
-use symbio_core::node_build::{llm_build_text_node, llm_build_tool_call_nodes};
-use symbio_core::{llm_short_id, TurnOutput, TurnToolCallInfo};
+use symbio_sdk::llm::turn::llm_short_id;
+use symbio_sdk::turn::node_build::{llm_build_text_node, llm_build_tool_call_nodes};
 
 // 流式子节点 id 的复用
 
@@ -76,11 +77,11 @@ pub fn llm_build_assistant_messages(
     rid: Option<String>,
     reasoning: Option<String>,
     child_ids: TurnStreamChildIds,
-    principal: &symbio_core::principal::Principal,
+    principal: &symbio_sdk::chat::principal::Principal,
 ) -> Vec<ChatNode> {
     let child_ids = child_ids.normalized();
     let mut msgs = Vec::new();
-    let timestamp = symbio_core::clock_now_ms();
+    let timestamp = symbio_sdk::clock::clock_now_ms();
 
     // ── 骨架（一整轮响应）消息（根级，与 User 互为兄弟）───────────────────
     msgs.push(
@@ -167,7 +168,7 @@ pub trait TurnOutputExt {
     fn into_messages(
         self,
         root_id: &str,
-        principal: &symbio_core::principal::Principal,
+        principal: &symbio_sdk::chat::principal::Principal,
     ) -> Vec<ChatNode>;
 }
 
@@ -187,7 +188,7 @@ impl TurnOutputExt for TurnOutput {
     fn into_messages(
         self,
         root_id: &str,
-        principal: &symbio_core::principal::Principal,
+        principal: &symbio_sdk::chat::principal::Principal,
     ) -> Vec<ChatNode> {
         let effective = self.effective_text().to_owned();
         let reasoning = if self.reasoning.is_empty() {

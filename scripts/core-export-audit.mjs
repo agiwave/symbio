@@ -18,6 +18,7 @@
  * | C-003 | **内核门面**导出的符号，**生产**消费方数必须 ≥2 | D-023 的判据（依赖方数量）此前只有**报告型** `core-surface-audit` 在数、判定权在人手里，于是长期停在 0 消费方 139 / 单消费方 64 上不动。A2 起判定范围 = `kernel.rs` 的公共面（D-185） |
  * | C-004 | 非内核根账本的**条目数**只许降 | C-003 收窄后，其余根出口不再被判「配不配占出口」；不加这一格就会留下一段只长不判的真空。新增共享类型默认插件本地（D-182），要占根出口必须显式改数字，而那一步由 `gate.d/35-baseline.mjs` 按基准版本判 |
  * | C-005 | 根 `lib.rs` 不转发内核符号（`pub use symbio_kernel::…`）| 根上一旦转发，同一个符号就有两个可写名字，消费方一半写 core、一半写 kernel，C-004 的账本里也混进内核语法——「core 的公共面」与「kernel 的公共面」各说一遍，还能各自漂移（D-256 搬完纯契约后，平铺的唯一用处是让控制面的 import 面暂时不动，D-257 撤掉它） |
+ * | C-006 | 根 `lib.rs` 的 `pub use` 只许指向 core 的**自有域**（`actors` / `authz` / `governance` / `view`）| C-005 只拦「直接写 `symbio_kernel::`」这一种写法；经 SDK 域转发桩的两跳（根 → `vdfs` → `symbio_sdk::vdfs` → `symbio_kernel::vdfs`）同样造成两个可写名字，而且更隐蔽——根上那行写的是**域名**，看起来完全合法。D-272 之前根上 324 条出口里 247 条是这么漏出去的（其中 123 条连 SDK 都不是，是两跳的内核符号）。自有域名单独列一个常量，转出一个就红一条 |
  *
  * ## 「消费方」的口径（2026-10-09 修正，C-003 的判据输入）
  *
@@ -79,7 +80,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns C core 出口
-// @codes C-001 C-002 C-003 C-004 C-005
+// @codes C-001 C-002 C-003 C-004 C-005 C-006
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -301,7 +302,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
 // 下沉 crates/symbio-plugin-session（`autonomy` / `AutonomyView` 两条出口退役，−2）
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 324
+  : 34
 
 /**
  * C-004 的**下沉候选**格：域账本里「单消费方」的条目数上限（只许降）。
@@ -396,6 +397,28 @@ rootCodeLines.forEach((line, i) => {
   )
 })
 
+// ==================== C-006 根只出自有域 ====================
+//
+// C-005 拦的是字面量写法；经域转发桩的两跳在根上写的是域名（`pub use vdfs::{…}`），
+// 字面量判据看不见。D-272 之后 core 的根出口**全部**来自四个自有域——机制在 sdk、
+// 语法在 kernel，控制面按符号的真实归属直取。名单单独成常量：新增自有域 = 改这里 +
+// 写一条决策，而不是悄悄加一根转发线。
+const OWN_DOMAINS = new Set(['actors', 'authz', 'governance', 'view'])
+const ROOT_USE_RE = /^\s*pub\s+use\s+([A-Za-z_][A-Za-z0-9_]*)\s*::/
+rootCodeLines.forEach((line, i) => {
+  const m = ROOT_USE_RE.exec(line)
+  if (!m) return
+  if (OWN_DOMAINS.has(m[1])) return
+  if (waived(rootLines, i)) return
+  report(
+    'C-006',
+    `根 lib.rs 从 \`${m[1]}\` 转发符号 —— \`${m[1]}\` 不是 core 的自有域，它的实现住在` +
+      ` kernel / sdk；消费方按真实归属写 \`symbio_kernel::<域>::…\` / \`symbio_sdk::<域>::…\`` +
+      `（自有域 = ${[...OWN_DOMAINS].join(' / ')}，D-272）`,
+    `${CORE_REL}/lib.rs:${i + 1}`,
+  )
+})
+
 // ==================== C-002 core 外无深引 ====================
 
 const deepRefRe = /\bsymbio_core\s*::\s*([a-z_][a-z0-9_]*)\b/
@@ -443,9 +466,18 @@ const rows = [...symbols.keys()]
   }))
   .sort(byName)
 
-// 判定范围 = `kernel.rs` 门面导出的封闭语法（DE-023 A2 / D-185）。没有门面的夹具仓库
-// 退回全表面口径——否则 C-003 会在一个空集上恒绿，夹具与「判据失效」长得一模一样。
-const judgedRows = kernelExports.size > 0 ? rows.filter((r) => kernelExports.has(r.name)) : rows
+// 判定范围 = `kernel.rs` 门面导出的封闭语法（DE-023 A2 / D-185）。
+//
+// 门面本身已随 D-188 搬进 `symbio-kernel` crate；D-272 之后 core 的根**一条内核符号都
+// 不再转发** ⇒ 本仓的 `kernelExports` 是空集，C-003 在 core 上判 0 条。这不是「判据失效」：
+// 它问的是「core 根上的内核符号配不配占出口」，而这类符号已经不存在了；内核自己的
+// 门面（`crates/symbio-kernel/src/lib.rs`，14 条）由 CS-001 的形状棘轮守着。
+//
+// **只有「仓里根本没有内核 crate」的夹具仓库**才退回全表面口径——否则夹具会在空集上恒绿，
+// 与「判据失效」长得一模一样。
+const HAS_KERNEL_CRATE = fs.existsSync(path.join(ROOT, 'crates', 'symbio-kernel', 'src', 'lib.rs'))
+const judgedRows =
+  kernelExports.size > 0 ? rows.filter((r) => kernelExports.has(r.name)) : HAS_KERNEL_CRATE ? [] : rows
 
 const waivedNow = new Set()
 for (const [name, reason] of Object.entries(WAIVERS)) {
@@ -505,7 +537,7 @@ const ledgerCount = ledgerRows.length
 const ledgerZero = ledgerRows.filter((r) => r.unitsAll.length === 0)
 const ledgerOne = ledgerRows.filter((r) => isSinkCandidate(r, coreConsumers))
 
-if (kernelExports.size > 0 && ledgerCount > DOMAIN_LEDGER_BASELINE) {
+if (HAS_KERNEL_CRATE && ledgerCount > DOMAIN_LEDGER_BASELINE) {
   report(
     'C-004',
     `非内核根账本 ${ledgerCount} 条 > 基线 ${DOMAIN_LEDGER_BASELINE} —— 新增共享类型默认插件本地（D-182）；` +
@@ -513,7 +545,7 @@ if (kernelExports.size > 0 && ledgerCount > DOMAIN_LEDGER_BASELINE) {
   )
 }
 
-if (kernelExports.size > 0 && ledgerOne.length > DOMAIN_ONE_BASELINE) {
+if (HAS_KERNEL_CRATE && ledgerOne.length > DOMAIN_ONE_BASELINE) {
   report(
     'C-004',
     `域账本单消费方 ${ledgerOne.length} 条 > 基线 ${DOMAIN_ONE_BASELINE} —— ` +
@@ -532,6 +564,7 @@ if (errors.length === 0) {
   ruleLine(true, 'C-001', '根出口唯一：根 lib.rs 无 `pub mod <域>;`')
   ruleLine(true, 'C-002', `core 外无深引（${domains.size} 个域目录动态取自 core）`)
   ruleLine(true, 'C-005', '根不转发内核符号：根 lib.rs 无 `pub use symbio_kernel::…`（域模块的镜像转发不计）')
+  ruleLine(true, 'C-006', `根只出自有域（${[...OWN_DOMAINS].join(' / ')}）：其余域的转发桩不进根出口（D-272）`)
   ruleLine(
     true,
     'C-003',
@@ -539,7 +572,7 @@ if (errors.length === 0) {
       ` · 单消费方 ${one.length}/${BASELINE.one} · 仅测试在用 ${testOnly.length}` +
       ` · 自引用 ${selfRef.length} · 内核接缝 ${seam.length} · ≥2 ${many.length}`,
   )
-  if (kernelExports.size > 0) {
+  if (HAS_KERNEL_CRATE) {
     ruleLine(
       true,
       'C-004',

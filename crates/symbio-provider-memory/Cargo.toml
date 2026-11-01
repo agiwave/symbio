@@ -13,6 +13,7 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
+symbio-sdk = { path = "../symbio-sdk" }
 symbio-kernel = { path = "../symbio-kernel" }
 symbio-core = { path = "../symbio-core" }
 # 优化 1：从 chrono 迁移到更轻量的 time

@@ -18,12 +18,13 @@ use super::{
 use crate::control_decl::guard_vocab;
 use symbio_core::SKILL_TAG;
 // 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
-use symbio_core::merge_kernel::split_sentences;
 use symbio_core::PRINCIPAL_USER;
-use symbio_core::{
-    check_all, Entity, Event, EventEnvelope as _, EventStore, FleetSnapshot, Seq, Store, Verb,
-};
+use symbio_kernel::event::{Entity, Event, EventEnvelope as _, Seq, Verb};
+use symbio_kernel::store::{EventStore, Store};
 use symbio_plugin_api::retrieval::{Retrieval, Retrieved};
+use symbio_sdk::invariants::check_all;
+use symbio_sdk::text::merge_kernel::split_sentences;
+use symbio_sdk::turn::facts::FleetSnapshot;
 
 use crate::control_decl::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
 

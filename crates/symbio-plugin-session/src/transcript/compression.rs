@@ -22,7 +22,7 @@
 use std::sync::Arc;
 
 use super::super::active::ActiveSessionState;
-use symbio_core::chat_node::{
+use symbio_sdk::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
 };
 
@@ -56,7 +56,11 @@ impl CompressionEmitter {
     /// 进在途图是必要的：会话叶子 `read` 会叠加在途（见 `overlay_live`），
     /// 因此压缩期间切走再切回，这个节点仍然可见——否则用户切回来只看到「什么
     /// 都没有」，又变回最初那个"卡死"观感。
-    pub(crate) async fn begin(&self, node_id: &str, principal: &symbio_core::principal::Principal) {
+    pub(crate) async fn begin(
+        &self,
+        node_id: &str,
+        principal: &symbio_sdk::chat::principal::Principal,
+    ) {
         // 一条完整消息：身份 + 状态 + 占位正文一帧到位。
         self.state.transcript.lock().await.apply(
             ChatNode {
@@ -89,7 +93,7 @@ impl CompressionEmitter {
         text: &str,
         failure_kind: Option<&str>,
         stats: Option<serde_json::Value>,
-        principal: &symbio_core::principal::Principal,
+        principal: &symbio_sdk::chat::principal::Principal,
     ) -> ChatNode {
         let node = {
             let mut tr = self.state.transcript.lock().await;
@@ -118,7 +122,7 @@ impl CompressionEmitter {
             // N → M 条"）是**首次也是唯一**一次上线。用状态帧剥掉正文，前端会一直
             // 停在占位文案上，直到重开会话才从存储读到结果（实测回归）。
             // 状态帧只适用于「正文已由 delta 逐帧上线」的节点。
-            tr.apply(symbio_core::llm_message_frame(&node));
+            tr.apply(symbio_sdk::llm::turn::llm_message_frame(&node));
             tr.persisted(std::slice::from_ref(&node.id));
             node
         };
@@ -129,7 +133,7 @@ impl CompressionEmitter {
     ///
     /// 只服务压缩流水线的过滤桥（摘要帧经白名单改写后从这里进转写）。压缩流水线
     /// 仍在本插件时经此取 writer；驱动器切出后由 `TurnDispatch.writer` 交付。
-    pub(crate) fn transcript_writer(&self) -> Arc<dyn symbio_core::ExecTranscriptWriter> {
+    pub(crate) fn transcript_writer(&self) -> Arc<dyn symbio_kernel::exec::ExecTranscriptWriter> {
         super::compression_writer(self.state.transcript.clone())
     }
 }

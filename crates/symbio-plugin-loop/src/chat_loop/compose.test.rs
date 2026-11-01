@@ -18,11 +18,11 @@
 use super::*;
 // `dialog_node` 本体已归 core，本文件因此不再经 `compose.rs` 的导入面拿到形状词表——
 // 测试自己引（短名，不写全限定路径：S-014 的 role 直写棘轮按短名形状计数）。
-use symbio_core::chat_node::{MessageContent, NodeKind};
+use symbio_sdk::chat::chat_node::{MessageContent, NodeKind};
 
 /// 落库面的主体：本文件模仿落库/投影面，身份写 `principal`（D-147）。
-fn assistant_principal() -> symbio_core::principal::Principal {
-    symbio_core::principal::Principal::from_legacy("session/main")
+fn assistant_principal() -> symbio_sdk::chat::principal::Principal {
+    symbio_sdk::chat::principal::Principal::from_legacy("session/main")
 }
 
 /// 取 `meta` 里某个键（`meta` 缺席时算没有这个键）。

@@ -1017,6 +1017,13 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   // `Scope` 这类跨墙语法与签名类型，没有任何插件实现，也不反向依赖宿主——它是
   // 「内核只装语法、插件声明词汇」的那半边，与 `symbio_core` 同档而非族外实现面。
   'symbio_kernel',
+  // 宿主机制面（D-272 收入）：`symbio_sdk` 只装插件可用的宿主机制（adapters / chat /
+  // turn::dispatch / projection 这类签名与机制），不认容器概念、不反向依赖宿主。
+  // 过去 loop 经 core 根转发拿到同一批符号（`use symbio_core::X`，X 实际住在 sdk）；
+  // D-272 撤掉根转发、消费方按真实归属直写后，这批 import 显形成 `symbio_sdk::…`。
+  // 闭族的成员没有变——变了的是写法——与 `symbio_kernel` 同档列出，而不是「凡 symbio_
+  // 开头都放行」：那样会让新出现的 `symbio-plugin-xxx` 悄悄落进族内。
+  'symbio_sdk',
   // 测试设施（`[dev-dependencies]`，生产构建看不见）：`trivial_actor_spec` 与
   // `StubLlmAdapter` 原住 `symbio_core` 的常开出口，拆 crate 后 `cfg(test)` 对下游
   // 不生效，故搬 `symbio-testkit`。它**不含任何插件实现**，也不携带会话状态——

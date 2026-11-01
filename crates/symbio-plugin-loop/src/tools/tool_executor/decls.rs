@@ -28,7 +28,7 @@
 
 use std::collections::HashMap;
 
-use symbio_core::CapabilityMeta;
+use symbio_kernel::capability::CapabilityMeta;
 
 /// 线上全名 → 声明的行为名（声明闸与效果端口共用的选实现依据，DE-025 §2.1）。
 #[derive(Debug, Default)]

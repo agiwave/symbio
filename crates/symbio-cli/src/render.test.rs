@@ -6,7 +6,7 @@
 use crate::protocol::{is_progress_surface, waiting_card};
 use crate::render::{waiting_lines, Renderer};
 use serde_json::json;
-use symbio::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
+use symbio::symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
 
 fn interaction(status: NodeStatus) -> ChatNode {
     ChatNode {

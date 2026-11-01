@@ -11,11 +11,11 @@
 use super::*;
 // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
 use crate::test_dir;
-use symbio_core::{
-    capability_prompts, Registry, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
-    VDFS_PARENT_ADDR,
-};
+use symbio_kernel::capability::Registry;
 use symbio_providers::DefaultToolVisitor;
+use symbio_sdk::capability::{capability_prompts, CAPABILITY_VISITOR};
+use symbio_sdk::keys::{PATH, VDFS_PARENT_ADDR};
+use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
 
 /// 会话存储根**只**来自构造时父插件经 `PLUGIN_DIR` 告知的插件目录——
 /// **不读全局 homedir**（那在子智能体里会指错作用域）。
@@ -169,7 +169,7 @@ fn collect_ctx(
     session_id: Option<&str>,
 ) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolVisitor>) {
     let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+        Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
     if let Some(sid) = session_id {
         ctx.set(SESSION_ID, sid.to_string());
     }
@@ -310,7 +310,7 @@ async fn session_memory_is_injected_verbatim() {
 
 /// 构造带 payload 的请求上下文（`PluginInvokeRequest::payload` 读的正是 `"payload"` 桶）。
 fn ctx_with(payload: serde_json::Value) -> Arc<dyn PluginInvokeRequest> {
-    let req = symbio_core::PluginSimpleRequest::new(None, None);
+    let req = symbio_kernel::plugin::PluginSimpleRequest::new(None, None);
     req.extensions
         .write()
         .unwrap()

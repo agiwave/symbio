@@ -1,7 +1,7 @@
 //! 收束贡献的判据：次序按 `(prio, owner)`、归属可声明、信封由宿主盖。
 
 use super::*;
-use symbio_core::{Entity, Verb};
+use symbio_kernel::event::{Entity, Verb};
 
 fn draft(key: &str) -> FactDraft {
     FactDraft {

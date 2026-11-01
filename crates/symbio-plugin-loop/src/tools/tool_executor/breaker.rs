@@ -10,7 +10,9 @@
 
 use std::sync::Arc;
 
-use symbio_core::{Event, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::event::Event;
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// 熔断闸门的**判据**（[DE-039 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 ///
@@ -48,7 +50,7 @@ impl BreakerInputs {
     /// 台账读不到 / 还没有事实源 ⇒ **零账**，不是故障——「还没记过账」不等于
     /// 「不许执行」，闸门因为没有账就把工具全拦下才是静默失效。
     pub fn of(snapshot: &[Event], ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
-        let principal = symbio_core::principal_of(ctx.get(symbio_core::AGENT_ID).as_deref());
+        let principal = symbio_core::principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref());
         let authorized = symbio_core::production_matrix()
             .can_write_name(&principal, symbio_core::CAP_EXTERNAL_EXECUTION);
         Self {
@@ -75,7 +77,7 @@ fn session_cost_ms(snapshot: &[Event], principal: &str) -> u64 {
     // 成本台账是**会话累计**口径：被快照取代而移入归档段的花费也在
     // `range(0)` 里 ⇒ 不会**静默**少算压缩前的成本（闸门说「还有余量」而实际已耗尽，
     // D-044 的熔断随之形同虚设）。
-    symbio_core::cost_ledger()
+    symbio_sdk::projection::cost::cost_ledger()
         .read_all(snapshot)
         .value
         .of(principal)

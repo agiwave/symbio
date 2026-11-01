@@ -6,19 +6,21 @@
 //! 收集通道，不复制写闸实现。
 
 use super::*;
-use symbio_core::ring::{Decl, Pattern};
-use symbio_core::{EventDecl, LatencyTier};
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::decl::ring::Decl;
+use symbio_kernel::decl::ring::Pattern;
+use symbio_kernel::event::EventDecl;
 
 /// 协议五格的归宿行：装配表必须能通过 `seal` 的判据 7，否则收集通道的用例
 /// 会先被「没人消费的事实」挡住，测不到收集本身。
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();
     for name in [
-        symbio_core::EVENT_REQUEST,
-        symbio_core::EVENT_SENT,
-        symbio_core::EVENT_RESPONSE,
-        symbio_core::EVENT_FAILED,
-        symbio_core::EVENT_RETRY,
+        symbio_kernel::event::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_SENT,
+        symbio_kernel::event::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_FAILED,
+        symbio_kernel::event::EVENT_RETRY,
     ] {
         let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
             source: name,
@@ -73,5 +75,7 @@ fn assemble_collects_submitted_declarations() {
         Some("fixture/declarations")
     );
     // 内核协议五格始终在表上，不依赖任何插件的提交。
-    assert!(frozen.event_cell(symbio_core::EVENT_REQUEST).is_some());
+    assert!(frozen
+        .event_cell(symbio_kernel::event::EVENT_REQUEST)
+        .is_some());
 }

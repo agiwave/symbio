@@ -38,11 +38,11 @@
 
 use super::super::active::{ActiveSessionState, InboxItem};
 use std::sync::Arc;
-use symbio_core::chat_node as cm;
-use symbio_core::VdfsChangeSubscriptions;
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 
 /// 合并标记的三个键名（唯一真源在 core 词汇表；重建侧与 loop 侧也读它们）。
-pub use symbio_core::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
+pub use symbio_sdk::turn::facts::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
 
 /// 合并 n 条补充时正文之间的连接符。
 ///
@@ -67,7 +67,7 @@ fn merge_many(items: &[InboxItem]) -> cm::ChatNode {
         // （`useChatConnection.ts`：后端沿用调用方给的 id，前端按 id 合并）。
         id: items[0].id.clone(),
         parent_id: None,
-        principal: Some(symbio_core::principal::Principal::from_legacy(
+        principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
             symbio_core::PRINCIPAL_USER,
         )),
         msg_type: Some(cm::NodeKind::Body),
@@ -126,7 +126,7 @@ fn merge_content(items: &[InboxItem]) -> cm::MessageContent {
 
 /// 抽干结果（类型已随 D-086 §7 上移 core：loop 的补充注入与 session 的抽干口
 /// 都要命名它；这里只留 session 侧的短路径别名）。
-pub use symbio_core::DrainedSupplement;
+pub use symbio_sdk::turn::facts::DrainedSupplement;
 
 /// 「取批 + 合并 + 成形」的**同步单一入口**（[D-081](../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决三）。
 ///

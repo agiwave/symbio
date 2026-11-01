@@ -14,10 +14,12 @@ use super::super::super::test_support::{
 };
 use super::super::state::{SessionContext, TurnRequest, TurnState};
 use super::begin_drive;
-use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind};
-use symbio_core::principal::{Principal, PrincipalKind};
-use symbio_core::{count_user_messages, Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::{EventStore, Store};
 use symbio_plugin_api::events::{EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE};
+use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind};
+use symbio_sdk::chat::principal::{Principal, PrincipalKind};
+use symbio_sdk::projection::turns::count_user_messages;
 
 use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, MESSAGE_VOCAB};
 

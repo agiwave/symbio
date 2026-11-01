@@ -1,9 +1,9 @@
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
-use symbio_core::ExecAbortSignal;
-use symbio_core::VdfsChangeSubscriptions;
-use symbio_core::{chat_node as cm, session_chat};
+use symbio_kernel::exec::ExecAbortSignal;
+use symbio_sdk::chat::{chat_node as cm, session_chat};
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 use tokio::sync::{Mutex, Notify, RwLock};
 
 use super::plugin::SessionRuntime;
@@ -537,10 +537,10 @@ impl ActiveSessionManager {
     ) {
         let mut frames: Vec<cm::ChatNode> = dropped
             .iter()
-            .map(|mid| symbio_core::llm_removed_frame(mid))
+            .map(|mid| symbio_sdk::llm::turn::llm_removed_frame(mid))
             .collect();
         // 新的首条（压缩快照）：一条完整消息（身份 + 正文 + 终态同帧）。
-        frames.push(symbio_core::llm_message_frame(head));
+        frames.push(symbio_sdk::llm::turn::llm_message_frame(head));
         self.transcript_apply_all(session_id, frames).await;
     }
 }

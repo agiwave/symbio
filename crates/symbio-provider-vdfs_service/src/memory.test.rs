@@ -4,7 +4,7 @@
 
 use super::*;
 
-use symbio_core::VdfsChange;
+use symbio_kernel::vdfs::VdfsChange;
 
 #[tokio::test]
 async fn ops_mirror_the_disk_shapes() {

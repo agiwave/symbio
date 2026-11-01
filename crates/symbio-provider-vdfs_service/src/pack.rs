@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
-use symbio_core::vdfs_has_parent_segment;
+use symbio_kernel::vdfs::vdfs_has_parent_segment;
 
 /// 整包载荷的**出向**形态（VDFS 动作 `export` 的 `data`）
 ///
@@ -86,7 +86,7 @@ impl std::fmt::Display for PackError {
 
 impl std::error::Error for PackError {}
 
-impl From<PackError> for symbio_core::VdfsError {
+impl From<PackError> for symbio_kernel::vdfs::VdfsError {
     fn from(e: PackError) -> Self {
         Self::Internal(e.0)
     }

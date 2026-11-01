@@ -71,10 +71,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::paths;
-use symbio_core::{
-    closes_turn, is_turn_final, is_turn_open, provenance_violation, AppendError, Event, EventDecl,
-    EventEnvelope as _, Frozen, Seq, Store, StoreInvariant,
-};
+use symbio_kernel::decl::Frozen;
+use symbio_kernel::event::{Event, EventDecl, EventEnvelope as _, Seq};
+use symbio_kernel::store::{AppendError, Store, StoreInvariant};
+use symbio_sdk::invariants::{closes_turn, is_turn_final, is_turn_open, provenance_violation};
 
 /// 判据的**词汇面**：认识某个名字的那张表说了算（DE-024 D-203）。
 ///
@@ -121,7 +121,10 @@ impl<'a> Vocab<'a> {
     }
 
     /// 这个名字落在哪一格（与迁移前的三级 `.or_else` 同序、同结论）。
-    fn cell(&self, kind: &str) -> Option<(symbio_core::Entity, symbio_core::Verb)> {
+    fn cell(
+        &self,
+        kind: &str,
+    ) -> Option<(symbio_kernel::event::Entity, symbio_kernel::event::Verb)> {
         self.table_for(kind)
             .and_then(|table| table.iter().find(|e| e.name == kind))
             .map(|e| e.cell)
@@ -698,7 +701,7 @@ impl WalStore {
 }
 
 impl Store for WalStore {
-    type Event = symbio_core::Event;
+    type Event = symbio_kernel::event::Event;
 
     fn append(&self, mut event: Self::Event) -> Result<Seq, AppendError> {
         let vocab = Vocab::of(self.declarations.as_deref());
@@ -728,7 +731,7 @@ impl Store for WalStore {
         // 与 `assign_seq` 同点收口（且在序列化**之前**——盘上落的是兜底后的形态）：
         // 没带时刻的事件以落格时刻为准，事实源里不出现 `ts = 0` 的事件
         // （`d781a6c7` 号会话 548 个事件全 ts=0 的教训，见 trait 方法文档）。
-        event.fallback_timestamp(symbio_core::clock_now_ms());
+        event.fallback_timestamp(symbio_sdk::clock::clock_now_ms());
         let line = serde_json::to_vec(&event).expect("事件序列化失败（serde 不可能败于自有类型）");
         let mut file = std::fs::OpenOptions::new()
             .create(true)

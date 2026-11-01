@@ -15,6 +15,7 @@ dead_code = "warn"
 [dependencies]
 symbio-kernel = { path = "../symbio-kernel" }
 symbio-core = { path = "../symbio-core" }
+symbio-sdk = { path = "../symbio-sdk" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-deploy = { path = "../symbio-deploy" }
 symbio-providers = { path = "../symbio-providers" }

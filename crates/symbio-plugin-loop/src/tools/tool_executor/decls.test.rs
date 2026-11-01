@@ -13,9 +13,10 @@ use super::ToolDecls;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use symbio_core::{
-    Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginSimpleRequest, Registry,
+use symbio_kernel::capability::{Capability, CapabilityMeta, CapabilityRow, Registry};
+use symbio_kernel::exec::ExecEnv;
+use symbio_kernel::plugin::{
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
 use symbio_plugin_api::behaviors::{ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE};
 use symbio_providers::DefaultToolVisitor;
@@ -62,7 +63,7 @@ async fn ctx_with(metas: Vec<CapabilityMeta>) -> Arc<dyn PluginInvokeRequest> {
             .await;
     }
     ctx.set(
-        symbio_core::CAPABILITY_VISITOR,
+        symbio_sdk::capability::CAPABILITY_VISITOR,
         visitor as Arc<dyn Registry>,
     );
     ctx
@@ -77,7 +78,7 @@ async fn factory_decls() -> ToolDecls {
         meta("shell", &[]),
     ])
     .await;
-    ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await)
+    ToolDecls::of_metas(&symbio_sdk::capability::tool_metas(&ctx).await)
 }
 
 // ==================== 各族只声明自己的工具 ====================
@@ -152,7 +153,7 @@ async fn declarations_travel_into_scoped_projection_names() {
         meta("agent_probe-agent_todo_write", &[TASK_TABLE]),
     ])
     .await;
-    let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
+    let decls = ToolDecls::of_metas(&symbio_sdk::capability::tool_metas(&ctx).await);
 
     assert_eq!(
         decls.behaviors_of("agent_probe-agent_agent_run"),
@@ -173,7 +174,7 @@ async fn declarations_travel_into_scoped_projection_names() {
 #[tokio::test]
 async fn without_a_visitor_nothing_is_declared() {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-    let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
+    let decls = ToolDecls::of_metas(&symbio_sdk::capability::tool_metas(&ctx).await);
 
     assert!(decls.behaviors_of("agent_run").is_empty());
     assert!(decls.behaviors_of("local/todo_write").is_empty());

@@ -5,7 +5,7 @@ use super::*;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Mutex as StdMutex;
-use symbio_core::{PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest};
+use symbio_kernel::plugin::{PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest};
 
 /// 记录收到的 Hook 事件（按 `fire_hook` 的 payload 协议解析）。
 #[derive(Default)]
@@ -41,7 +41,7 @@ impl Plugin for HookRecorder {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        if ctx.get(symbio_core::PATH).as_deref() != Some("hook/fire") {
+        if ctx.get(symbio_sdk::keys::PATH).as_deref() != Some("hook/fire") {
             *self.others.lock().unwrap() += 1;
             return Ok(PluginPayload::new(&Value::Null));
         }

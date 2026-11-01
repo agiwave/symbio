@@ -21,7 +21,7 @@
 //! | 检索事实 | 能力包的 `semantic` 收束贡献（D-264 第 4 条） | ——（写方已迁出，本模块只交 `Settling.recall` 这个值） |
 //! | 巩固 | 本模块（`consolidate::accept` 的调用方） | 按名字读 `memory.live`，合并最旧两条，**过门才入格** |
 //!
-//! 巩固的**算法**（怎么合并、保真度怎么算）仍在 core 的 `merge_kernel` 与
+//! 巩固的**算法**（怎么合并、保真度怎么算）仍在 `symbio_sdk::text::merge_kernel` 与
 //! `projections::consolidate`；**活集折叠**住能力包（一副折叠两个读者，D-268）。
 //!
 //! ## 两种认知内容标签（七类的两个生产写方）
@@ -48,11 +48,12 @@
 // 巩固合并的纯计算内核：生产与 verify 共有同一份源码（立这条纪律，
 // 住址随 [D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三归位 core 文本域）。
 // 本模块续一条原名短路径——调用点一行不动。
-use symbio_core::merge_kernel::merge_with_fidelity;
+use symbio_sdk::text::merge_kernel::merge_with_fidelity;
 
-use symbio_core::FleetSnapshot;
 use symbio_core::PRINCIPAL_USER;
-use symbio_core::{Entity, Event, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::store::Store;
+use symbio_sdk::turn::facts::FleetSnapshot;
 
 use crate::projections::consolidate::{accept, ConsolidateParams, Rejection};
 

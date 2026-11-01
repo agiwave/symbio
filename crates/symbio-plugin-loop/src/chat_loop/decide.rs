@@ -39,16 +39,16 @@
 
 use std::sync::Arc;
 
-use symbio_core::chat_node::ChatNode;
-use symbio_core::{
-    capability_model_resolve, ExecAbortSignal, LlmAdapter, Plugin, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, ProviderLlmAdapter, Registry, SilentDeltas,
-    TokenIssuer, CAPABILITY_VISITOR,
-};
-use symbio_core::{PATH, SESSION_ID};
+use symbio_kernel::capability::Registry;
 use symbio_kernel::dialog::DecideRequest;
 use symbio_kernel::dialog::{DecideOutcome, DecisionPlan, ParseVerdictRequest, Verdict};
+use symbio_kernel::exec::ExecAbortSignal;
+use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::routes::{ROUTE_CLASSIFY_DECIDE, ROUTE_CLASSIFY_PARSE};
+use symbio_sdk::adapters::{LlmAdapter, ProviderLlmAdapter, SilentDeltas, TokenIssuer};
+use symbio_sdk::capability::{capability_model_resolve, CAPABILITY_VISITOR};
+use symbio_sdk::chat::chat_node::ChatNode;
+use symbio_sdk::keys::{PATH, SESSION_ID};
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
 use super::super::port::classify::{classify_round_trip, escalate_unclassified};
@@ -245,7 +245,7 @@ async fn decide_by_model(
 async fn resolve_provider(
     ctx: &Arc<dyn PluginInvokeRequest>,
     model_id: Option<&str>,
-) -> Option<Arc<dyn symbio_core::ModelProvider>> {
+) -> Option<Arc<dyn symbio_kernel::llm::ModelProvider>> {
     let visitor: Arc<dyn Registry> = ctx.get(CAPABILITY_VISITOR)?;
     capability_model_resolve(&*visitor, model_id).await
 }

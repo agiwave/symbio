@@ -5,7 +5,8 @@
 //! `rebuild` / `turns` 同一形态。两个产投影的兄弟都可以导它——`PP-001` 的
 //! 「投影 A 不读投影 B」（L2）因此不需要豁免，也不必把这条判据搬回架构模块。
 
-use symbio_core::{ChatVocab, Entity, Event, Verb};
+use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_sdk::projection::vocab::ChatVocab;
 
 /// 本轮声明的档位：优先读本轮 `turn.dispatch` 载荷的 `tier`，历史切片没有
 /// 这一格时回退读 `user.message` 的 `tier`；缺失/未知 ⇒ `unspecified` 桶
@@ -48,7 +49,7 @@ pub(super) fn declared_tier(
                 })
                 .and_then(|u| u.payload.get("tier").and_then(|v| v.as_str()))
         })
-        .and_then(symbio_core::LatencyTier::from_name)
+        .and_then(symbio_kernel::adapters::LatencyTier::from_name)
         .map(|t| t.name().to_string())
         .unwrap_or_else(|| "unspecified".to_string())
 }

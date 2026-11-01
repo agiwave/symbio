@@ -4,10 +4,13 @@ use super::slo_report;
 use super::{SloLatencyView, TierLatency};
 use crate::declarations::CHAT_VOCAB as CHAT;
 use crate::projections::fallback::{fallback_rate, FallbackRateView, TierStats};
-use symbio_core::{cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::{EventStore, Store};
+use symbio_kernel::view::Budget;
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
+use symbio_sdk::projection::cost::cost_ledger;
 
 fn user_msg(id: &str, turn: u64, tier: &str) -> Event {
     Event::pending(

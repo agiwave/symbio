@@ -5,7 +5,8 @@
 //!
 //! 事实 / 视图 / 端口 / 行都不在这里：它们不属于本插件的控制面。
 
-use symbio_core::{Entity, EventDecl, PluginDeclarations, Verb};
+use symbio_kernel::decl::PluginDeclarations;
+use symbio_kernel::event::{Entity, EventDecl, Verb};
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
 /// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
@@ -41,13 +42,14 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 /// 读 `readyset` / `autonomy` 两列的第二个消费方，所以拼写取自清单生成物
 /// `symbio_plugin_api::events`——不是兄弟插件（E-009 禁那条边），也不是 core 或内核代答。
 /// 交出整族而不是本插件用到的那两格：折叠收的是同一张表，两张各读各的拼写迟早分岔。
-pub(crate) const TASK_VOCAB: symbio_core::TaskVocab<'static> = symbio_core::TaskVocab {
-    opened: symbio_plugin_api::events::EVENT_TASK_OPENED,
-    progressed: symbio_plugin_api::events::EVENT_TASK_PROGRESS,
-    held: symbio_plugin_api::events::EVENT_TASK_HELD,
-    terminal: symbio_plugin_api::events::EVENT_TASK_ASSERTED,
-    lease: symbio_plugin_api::events::EVENT_TASK_ASSIGNED,
-};
+pub(crate) const TASK_VOCAB: symbio_sdk::projection::task_vocab::TaskVocab<'static> =
+    symbio_sdk::projection::task_vocab::TaskVocab {
+        opened: symbio_plugin_api::events::EVENT_TASK_OPENED,
+        progressed: symbio_plugin_api::events::EVENT_TASK_PROGRESS,
+        held: symbio_plugin_api::events::EVENT_TASK_HELD,
+        terminal: symbio_plugin_api::events::EVENT_TASK_ASSERTED,
+        lease: symbio_plugin_api::events::EVENT_TASK_ASSIGNED,
+    };
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
 ///
@@ -62,37 +64,40 @@ pub(crate) const TASK_VOCAB: symbio_core::TaskVocab<'static> = symbio_core::Task
 ///
 /// 按**面**切开，每张表的大小就是那个折叠算法真正的依赖：`reputation` 只认承诺四条，
 /// `changes` 只认产物一条。交一张 20 字段的合并表会把耦合面说宽（DE-024 D-206）。
-pub(crate) const CHAT_VOCAB: symbio_core::ChatVocab = symbio_core::ChatVocab {
-    user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
-    dispatch: symbio_plugin_api::events::EVENT_TURN_DISPATCH,
-    supplemented: symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
-    branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
-    branch_selected: symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED,
-    reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
-    opening: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
-    final_reply: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-    fallback: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK,
-    progress: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_PROGRESS,
-    denied: symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
-};
+pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
+    symbio_sdk::projection::vocab::ChatVocab {
+        user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
+        dispatch: symbio_plugin_api::events::EVENT_TURN_DISPATCH,
+        supplemented: symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
+        branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
+        branch_selected: symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED,
+        reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
+        opening: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
+        final_reply: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
+        fallback: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK,
+        progress: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_PROGRESS,
+        denied: symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
+    };
 
 /// 消息变更面（5 条）：本插件是这五条里四条的 owner（`message.*` 与
 /// `session.consolidated`），`artifact.added` 的 owner 是 `crates/symbio-plugin-loop`。
-pub(crate) const MESSAGE_VOCAB: symbio_core::MessageVocab = symbio_core::MessageVocab {
-    artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
-    message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
-    message_edited: symbio_plugin_api::events::EVENT_MESSAGE_EDITED,
-    message_removed: symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
-    consolidated: symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
-};
+pub(crate) const MESSAGE_VOCAB: symbio_sdk::projection::vocab::MessageVocab =
+    symbio_sdk::projection::vocab::MessageVocab {
+        artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
+        message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
+        message_edited: symbio_plugin_api::events::EVENT_MESSAGE_EDITED,
+        message_removed: symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
+        consolidated: symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
+    };
 
 /// 承诺面（4 条）：`reputation` 与 `commitment_events` 是它仅有的两个消费方。
-pub(crate) const COMMITMENT_VOCAB: symbio_core::CommitmentVocab = symbio_core::CommitmentVocab {
-    opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
-    released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
-    broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,
-    asserted: symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED,
-};
+pub(crate) const COMMITMENT_VOCAB: symbio_sdk::projection::vocab::CommitmentVocab =
+    symbio_sdk::projection::vocab::CommitmentVocab {
+        opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
+        released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
+        broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,
+        asserted: symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED,
+    };
 
 // 装配口的提交：宿主链接本 crate 即生效。装配方按 owner 排序后逐个 `declare`，
 // 本插件不认识也不依赖任何兄弟插件。

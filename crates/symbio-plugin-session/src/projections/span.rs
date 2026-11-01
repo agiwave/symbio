@@ -24,7 +24,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use symbio_core::{Event, Projection};
+use symbio_kernel::event::Event;
+use symbio_kernel::projection::Projection;
 
 /// 会话级时间跨度（无事件 ⇒ 全零——**有据的零**，不是错误）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

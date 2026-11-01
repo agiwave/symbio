@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use symbio_core::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
+use symbio_kernel::vdfs::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
 
 // 注：早先这里有 `category_dir(category)` = `<homedir>/<category>`，按插件名反推
 // 全局落位。homedir 已下沉到 `home` 插件独有，core 不再提供全局根，故删除——

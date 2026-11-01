@@ -31,7 +31,7 @@ use super::plugin::session_node;
 use super::plugin::{OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use super::types::SessionSummary;
 use std::sync::Arc;
-use symbio_core::PluginError;
+use symbio_kernel::plugin::PluginError;
 
 /// 会话运行态的一次变化。
 ///

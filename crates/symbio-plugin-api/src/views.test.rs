@@ -8,10 +8,11 @@ use super::*;
 
 use std::sync::Arc;
 
-use symbio_core::ring::{Decl, Pattern};
-use symbio_core::{
-    Builder, Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
-};
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::decl::ring::Decl;
+use symbio_kernel::decl::ring::Pattern;
+use symbio_kernel::decl::{Builder, FactDecl, PluginDeclarations, ViewDecl};
+use symbio_kernel::event::{Entity, EventDecl, Verb};
 
 const ITEM_ADDED: &str = "test.item.added";
 const RECENT: &str = "test.recent";
@@ -61,11 +62,11 @@ fn protocol_rows() -> &'static [Decl] {
         unless: &[],
     });
     for name in [
-        symbio_core::EVENT_REQUEST,
-        symbio_core::EVENT_SENT,
-        symbio_core::EVENT_RESPONSE,
-        symbio_core::EVENT_FAILED,
-        symbio_core::EVENT_RETRY,
+        symbio_kernel::event::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_SENT,
+        symbio_kernel::event::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_FAILED,
+        symbio_kernel::event::EVENT_RETRY,
     ] {
         let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
             source: name,

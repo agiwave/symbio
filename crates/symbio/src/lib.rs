@@ -10,7 +10,8 @@
 //!    故不住 `symbio_core`（core 只经 `REQUIRED_PLUGINS` 接收装配结果）。
 //! 3. [`init`]：日志初始化与根插件构造。
 //!
-//! `symbio_core` / `symbio_deploy` 在这里重导出，供宿主与 CLI 取契约；
+//! `symbio_kernel` / `symbio_sdk` / `symbio_core` / `symbio_deploy` 在这里重导出，供宿主与
+//! CLI 取契约（三层各归各位：语法 / 机制 / 控制面运行时 / 部署事实）；
 //! **插件之间不许经本门面互相可见**（E-009：插件只依赖 core / plugin-api / kernel / deploy）。
 
 pub mod assembly;
@@ -20,6 +21,8 @@ pub mod init;
 // 宿主与 CLI 从这里取契约；插件自身只依赖 core / plugin-api（E-009）。
 pub use symbio_core;
 pub use symbio_deploy;
+pub use symbio_kernel;
+pub use symbio_sdk;
 
 // 插件 crate 必须**被链接**，否则 `inventory` 里的工厂注册项会被链接器丢掉。
 // `pub use <crate>;` 同时完成两件事：链接 + 门面出口。

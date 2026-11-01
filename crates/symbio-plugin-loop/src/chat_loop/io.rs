@@ -9,7 +9,7 @@
 //! 决策 D-086 见 [D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "D-086")
 
 use super::*;
-use symbio_core::chat_node::CHAT_STYLE_TAG_RUN;
+use symbio_sdk::chat::chat_node::CHAT_STYLE_TAG_RUN;
 
 /// 封根 Turn：广播本轮组合节点的终态（**唯一**发射点）。
 ///
@@ -64,8 +64,8 @@ pub(crate) async fn persist_messages(
     if let Err(e) = context
         .session
         .run_op::<Vec<ChatNode>>(
-            symbio_core::run_ops::ADD_BY_RUNNER,
-            symbio_core::AddNodesRequest {
+            symbio_sdk::turn::dispatch::run_ops::ADD_BY_RUNNER,
+            symbio_sdk::turn::dispatch::AddNodesRequest {
                 messages: new_messages.to_vec(),
             },
         )
@@ -92,7 +92,7 @@ pub(crate) async fn emit_streaming_start(
     root_id: &str,
     turn: Option<usize>,
     watermark: Option<serde_json::Value>,
-    principal: &symbio_core::principal::Principal,
+    principal: &symbio_sdk::chat::principal::Principal,
 ) {
     let meta = match (turn, watermark) {
         (Some(t), Some(w)) => Some(serde_json::json!({ "turn": t, "context": w })),

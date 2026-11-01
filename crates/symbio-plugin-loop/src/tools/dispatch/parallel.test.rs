@@ -1,7 +1,7 @@
 //! `dispatch::parallel` 的单元测试：**策略映射**本身（不跑工具）。
 
 use super::*;
-use symbio_core::CapabilityMeta;
+use symbio_kernel::capability::CapabilityMeta;
 
 fn meta(name: &str, risk: Option<CapabilityRiskLevel>) -> CapabilityMeta {
     CapabilityMeta {

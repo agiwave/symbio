@@ -1,7 +1,7 @@
 //! 行执行体的判据：按行名查实现、写入声明来自实现、纯值入口不碰宿主。
 
 use super::*;
-use symbio_core::{Entity, Verb};
+use symbio_kernel::event::{Entity, Verb};
 
 /// 一个只为测试存在的实现：把债键与事实条数记成一条草稿。
 struct Recorder;

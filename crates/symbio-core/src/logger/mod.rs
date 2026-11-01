@@ -8,4 +8,8 @@
 //! `crates/symbio-core/README.md` 的登记面（N-004），一个域不能因为「实现搬走了」
 //! 就从表里消失——搬的是住址，不是归属。
 
+// 本域实现已整体搬走（D-258 / D-259），这个文件只剩**登记面**（`core-naming-audit` N-004）：
+// 仓内没有消费者，对外也不再经根转发（D-272）。下面的转出因此是「地址」而不是「依赖」。
+#![allow(unused_imports)]
+
 pub use symbio_sdk::logger::*;

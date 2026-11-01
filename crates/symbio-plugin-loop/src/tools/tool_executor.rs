@@ -10,17 +10,16 @@
 //!   （chat_loop）在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
-use symbio_core::TurnToolCallInfo;
+use symbio_kernel::llm::TurnToolCallInfo;
 
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
-    Event, PluginInvokeRequestExt, Store,
-};
-use symbio_core::{
-    ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginPayload,
-};
+use symbio_kernel::event::Event;
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_kernel::plugin::PluginInvokeRequestExt;
+use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest, PluginPayload};
+use symbio_kernel::store::Store;
+use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
 use {
     symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
 };
@@ -54,7 +53,7 @@ fn args_summary(args: &Value, max_chars: usize) -> String {
     if s.len() <= max_chars {
         s
     } else {
-        let end = symbio_core::text_floor_char_boundary(&s, max_chars);
+        let end = symbio_sdk::text::text_floor_char_boundary(&s, max_chars);
         format!("{}…(len={})", &s[..end], s.len())
     }
 }
@@ -176,7 +175,7 @@ pub struct PendingPrompt {
 /// 在启发式上。
 fn pending_prompt_from(data: &Value) -> Option<PendingPrompt> {
     let kind = data.get("failure_kind").and_then(|v| v.as_str())?;
-    if !symbio_core::failure_kind::is_pending(kind) {
+    if !symbio_kernel::capability::failure_kind::is_pending(kind) {
         return None;
     }
     Some(PendingPrompt {
@@ -207,7 +206,9 @@ pub(super) fn build_user_prompt_message(
         // 等待用户的交互卡同样是**工具的结果**：族归工具自己。
         // 身份只写这一份——`role` 那格不再跟着写（D-147：主体在场时折叠读主体，
         // 第二份写了也不生效，只会在改写时留下「名实不符」的机会）。
-        principal: Some(symbio_core::principal::Principal::tool_principal(tool_name)),
+        principal: Some(symbio_sdk::chat::principal::Principal::tool_principal(
+            tool_name,
+        )),
         msg_type: Some(NodeKind::Interaction),
         content: Some(MessageContent::Text(pending.text.clone())),
         status: Some(NodeStatus::WaitingUserAction),
@@ -269,17 +270,19 @@ pub async fn execute_tool_async(
     // 投影函数（`tool_name::capability_to_wire`）在 core，因为**两个模块**依赖它：model 侧
     // 4 个协议要把名字发出去，本处要把它认回来。而「认回来」这一步（下面的
     // 解析）只有本模块需要，故留在本模块，不上 trait、不进 core。
-    let tool_visitor = ctx.get(symbio_core::CAPABILITY_VISITOR);
+    let tool_visitor = ctx.get(symbio_sdk::capability::CAPABILITY_VISITOR);
     // 线上名解析的候选集 = 注册表给出的全名清单（收集管线的读侧助手，与 inputs /
     // context / decls 同一入口——收敛前这里自己写一遍 `list_capability()`）。
-    let known_names: Vec<String> = symbio_core::tool_metas(&ctx)
+    let known_names: Vec<String> = symbio_sdk::capability::tool_metas(&ctx)
         .await
         .into_iter()
         .map(|m| m.name)
         .collect();
-    let resolved_name =
-        symbio_core::capability_resolve(tool_name, known_names.iter().map(String::as_str))
-            .map(str::to_string);
+    let resolved_name = symbio_sdk::capability::capability_resolve(
+        tool_name,
+        known_names.iter().map(String::as_str),
+    )
+    .map(str::to_string);
     // 解析失败**不猜**：按原样交给路由，由它给出诚实的 NotFound。
     // 反演猜错会调起**另一个工具**，那比报错坏得多。
     let invoke_name = resolved_name
@@ -293,28 +296,28 @@ pub async fn execute_tool_async(
         );
     }
 
-    let session_id = ctx.get(symbio_core::SESSION_ID).unwrap_or_default();
-    let agent_id = ctx.get(symbio_core::AGENT_ID).unwrap_or_default();
-    let workdir = ctx.get(symbio_core::WORKDIR).unwrap_or_default();
+    let session_id = ctx.get(symbio_sdk::keys::SESSION_ID).unwrap_or_default();
+    let agent_id = ctx.get(symbio_sdk::keys::AGENT_ID).unwrap_or_default();
+    let workdir = ctx.get(symbio_sdk::keys::WORKDIR).unwrap_or_default();
 
     let tool_ctx = ctx.fork();
-    tool_ctx.set(symbio_core::WORKDIR, workdir);
-    tool_ctx.set(symbio_core::AGENT_ID, agent_id);
-    tool_ctx.set(symbio_core::SESSION_ID, session_id);
+    tool_ctx.set(symbio_sdk::keys::WORKDIR, workdir);
+    tool_ctx.set(symbio_sdk::keys::AGENT_ID, agent_id);
+    tool_ctx.set(symbio_sdk::keys::SESSION_ID, session_id);
     // `AGENT_PERMS`（D-153 的权限作用域）**不在这里显式设**：`fork()` 已把它从轮
     // ctx 复制过来（收集期由 agent 插件发布、`collect_capabilities` 挂回），而
     // 「缺席」与「空作用域」必须原样区分——前者是宿主态（无 manifest 可声明），
     // 后者是被发布过的空声明。上面三行显式重设是因为它们要把 `None` 归一成空串，
     // 这一行没有那种需求。
-    tool_ctx.set(symbio_core::TOOL_CALL_ID, tool_call_id.to_string());
+    tool_ctx.set(symbio_sdk::keys::TOOL_CALL_ID, tool_call_id.to_string());
     // 流式工具（如 shell）据此 id 广播增量帧：与 result_msg_id 占位节点同 id，
     // 前端按 role=tool 全量替换合并；最终哨兵帧被捕获为工具结果。
-    tool_ctx.set(symbio_core::RESULT_MSG_ID, result_msg_id.clone());
+    tool_ctx.set(symbio_sdk::keys::RESULT_MSG_ID, result_msg_id.clone());
     // 执行期双原语注入 —— 工具「把事件写到哪」与「如何感知中止」的唯一来源。
     // 有了它，工具不必再用返回值里的 `PluginPayload::Session` 当事件流
     // （那是跨进程传输原语，见 `symbio_core::exec` 模块头）。
-    tool_ctx.set(symbio_core::EVENT_SINK, sink.clone());
-    tool_ctx.set(symbio_core::ABORT_SIGNAL, abort.clone());
+    tool_ctx.set(symbio_kernel::exec::EVENT_SINK, sink.clone());
+    tool_ctx.set(symbio_kernel::exec::ABORT_SIGNAL, abort.clone());
 
     // 工具调用的发起（三条形态：ToolManager 命中 / 未命中回落 route /
     // 无 ToolManager 直接 route）。包成 `Box<dyn Future>` 是为了下面那个
@@ -325,8 +328,9 @@ pub async fn execute_tool_async(
     // 于是明明注册过也要走一遍 route 回落。
     let mut route_fut: std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = Result<symbio_core::PluginPayload, PluginError>>
-                + Send,
+            dyn std::future::Future<
+                    Output = Result<symbio_kernel::plugin::PluginPayload, PluginError>,
+                > + Send,
         >,
     > = if let Some(tool_visitor) = tool_visitor {
         if resolved_name.is_some() {
@@ -344,7 +348,9 @@ pub async fn execute_tool_async(
             // 诚实的 NotFound（文案与机制化之前逐字一致）。
             Box::pin(async move {
                 match visitor.get(&canonical).await.and_then(|r| r.cap().cloned()) {
-                    Some(cap) => symbio_core::capability_invoke(cap.as_ref(), tool_ctx2).await,
+                    Some(cap) => {
+                        symbio_kernel::capability::capability_invoke(cap.as_ref(), tool_ctx2).await
+                    }
                     None => Err(PluginError::NotFound(format!(
                         "Tool not found: {canonical}"
                     ))),
@@ -356,14 +362,14 @@ pub async fn execute_tool_async(
                 "[Tool] ToolManager does not have tool: {}, falling back to route",
                 tool_name
             );
-            tool_ctx.set(symbio_core::PATH, invoke_name.clone());
+            tool_ctx.set(symbio_sdk::keys::PATH, invoke_name.clone());
             let _ = tool_ctx.set_payload(args.clone());
             let p2 = p.clone();
             let tool_ctx2 = tool_ctx.clone();
             Box::pin(async move { p2.route(tool_ctx2).await })
         }
     } else {
-        tool_ctx.set(symbio_core::PATH, invoke_name.clone());
+        tool_ctx.set(symbio_sdk::keys::PATH, invoke_name.clone());
         let _ = tool_ctx.set_payload(args.clone());
         let p2 = p.clone();
         let tool_ctx2 = tool_ctx.clone();

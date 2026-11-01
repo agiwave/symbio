@@ -1,7 +1,7 @@
 //! `spend_ledger` 的单元测试：分币种、按主体、as-of 与三种「空」。
 
 use super::spend_ledger;
-use symbio_core::{Entity, Event, Verb};
+use symbio_kernel::event::{Entity, Event, Verb};
 
 fn response(id: &str, port: &str, principal: &str, spend: Option<(u64, &str)>, ts: i64) -> Event {
     let mut payload = serde_json::json!({
@@ -79,7 +79,7 @@ fn as_of_hides_later_responses() {
         response("m-1", "model", "session/main", Some((100, "USD")), 10),
         response("m-2", "model", "session/main", Some((200, "USD")), 20),
     ];
-    let view = spend_ledger().apply(&events, 10, symbio_core::Budget::generous());
+    let view = spend_ledger().apply(&events, 10, symbio_kernel::view::Budget::generous());
     assert_eq!(view.value.by_currency["USD"].amount_nano, 100);
 }
 

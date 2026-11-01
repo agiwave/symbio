@@ -29,7 +29,8 @@
 //! 「本会话没有任何一次实测」读成 `measured: 0` + 三个零，与「每次都是零 token」
 //! 由 `measured` 分辨。补 0 会把前者读成后者。
 
-use symbio_core::{Event, Projection, EVENT_RESPONSE};
+use symbio_kernel::event::{Event, EVENT_RESPONSE};
+use symbio_kernel::projection::Projection;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

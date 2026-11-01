@@ -8,7 +8,7 @@
 //! - [`run_compress`]：`policy.compress` 行的执行体（上下文水位的响应，产线住在
 //!   这里，**被选中才跑**）
 
-use symbio_core::CapabilityMeta;
+use symbio_kernel::capability::CapabilityMeta;
 use symbio_plugin_api::context::{Cadence, ContextSection, DelegateVerdict, LiveInputs};
 
 use super::super::port::Compress;
@@ -45,7 +45,7 @@ fn context_request<'a>(
     turn: &TurnState,
     principal: &'a str,
     query: Option<&'a str>,
-    facts: &'a [symbio_core::Event],
+    facts: &'a [symbio_kernel::event::Event],
     recall: Option<&'a symbio_plugin_api::RecallFacts<'a>>,
     live: Option<&'a LiveInputs<'a>>,
 ) -> symbio_plugin_api::ContextRequest<'a> {
@@ -93,8 +93,8 @@ pub(crate) async fn resolve_system_prompt(
         out.push_str(explicit);
     }
 
-    if let Some(visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) {
-        for (_, text) in symbio_core::capability_prompts(&*visitor).await {
+    if let Some(visitor) = ctx.get(symbio_sdk::capability::CAPABILITY_VISITOR) {
+        for (_, text) in symbio_sdk::capability::capability_prompts(&*visitor).await {
             if text.trim().is_empty() {
                 continue;
             }
@@ -155,7 +155,7 @@ pub(crate) async fn collect_reads(
     // ── ① 系统提示词 + 工具：同一函数、同一时刻、同一 Registry ──────
     let system_prompt = resolve_system_prompt(req.system_prompt.as_deref(), ctx).await;
 
-    let tools = symbio_core::tool_metas(ctx).await;
+    let tools = symbio_sdk::capability::tool_metas(ctx).await;
 
     // ── ② 请求级固定开销：一轮只算一次，寄存进本轮状态供压缩行读水位
     //        （收口前两处各算一次，且各自要重新取一遍工具清单）────────────────
@@ -260,7 +260,10 @@ pub(crate) async fn prepare_request_sections(
     // 读失败向上传播——静默降级就是「没有观测 = 静默失效」：看不出是没 worker 还是没读到。
     let workers = context
         .session
-        .run_op::<Vec<symbio_core::WorkerProgress>>(symbio_core::run_ops::WORKER_PROGRESS, ())
+        .run_op::<Vec<symbio_sdk::turn::facts::WorkerProgress>>(
+            symbio_sdk::turn::dispatch::run_ops::WORKER_PROGRESS,
+            (),
+        )
         .await
         .map_err(super::super::turn_exec::ActorError::Read)?;
     let settings = context.session.settings();
@@ -385,7 +388,7 @@ pub(crate) async fn prepare_request_sections(
 /// 不落、结论在事实面消失（规则见 `stage_events` 模块文档）。
 pub(crate) async fn run_recall(
     ctx: &Arc<dyn PluginInvokeRequest>,
-    store: &dyn symbio_core::Store<Event = symbio_core::Event>,
+    store: &dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
     context: &SessionContext,
     turn: &mut TurnState,
 ) -> Result<(), super::super::turn_exec::ActorError> {
@@ -404,7 +407,10 @@ pub(crate) async fn run_recall(
     turn.recall_view = super::super::memory_events::recall_view(
         context
             .session
-            .run_op::<Vec<symbio_core::FleetSnapshot>>(symbio_core::run_ops::RECALL_SNAPSHOTS, ())
+            .run_op::<Vec<symbio_sdk::turn::facts::FleetSnapshot>>(
+                symbio_sdk::turn::dispatch::run_ops::RECALL_SNAPSHOTS,
+                (),
+            )
             .await
             .map_err(super::super::turn_exec::ActorError::Read)?,
         recall_query.as_deref(),
@@ -542,7 +548,7 @@ pub(crate) async fn run_recall(
 pub(crate) async fn run_compress(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
-    store: &Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+    store: &Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
     context: &mut SessionContext,
     turn: &mut TurnState,
 ) -> Result<(), super::super::turn_exec::ActorError> {

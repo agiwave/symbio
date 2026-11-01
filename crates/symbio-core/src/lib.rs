@@ -1,16 +1,42 @@
 //! 核心模块
+//!
+//! ## 根上只出 core 自己定义的东西
+//!
+//! core 的根出口是一份**账本**，不是一条通道：每个名字都必须是 core 自己定义的
+//! （DE-023 D-257 对内核符号立的规矩，D-272 把它推到 SDK 与两跳的内核符号上）。
+//! 三条边界各归各位：
+//!
+//! | 层 | 谁能写 | 长什么样 |
+//! |---|---|---|
+//! | `symbio_kernel` | 任何 crate | 封闭语法（事件信封、`Entity × Verb`、声明容器、五个 trait） |
+//! | `symbio_sdk` | 控制面与宿主壳（插件经门面） | 插件能用的宿主机制（配置 IO、事件总线、地址装配、日志） |
+//! | `symbio_core`（本 crate） | 控制面与宿主壳 | 控制面运行时：主体策略、授权表、履约环、可见域 |
+//!
+//! 同一批符号在 `symbio_core::` 与 `symbio_sdk::` 两处都写得通，后果与 D-257 记的
+//! 一字不差：消费方写哪个前缀取决于当初谁顺手写了哪个，而两份清单可以各自漂移
+//! （SDK 加一个变体、core 根的清单不必动，编译器不会说话）。D-272 之前根上 324 条
+//! 出口里 247 条不属于 core——其中 123 条连 SDK 的都不是，是经 SDK 的域模块两跳的
+//! 内核符号。这条通道因此不是「一次搬家的遗留」，是**持续泄漏**。
+//!
+//! ## 域目录留着，根出口不留
+//!
+//! 子目录一律 `mod <域>;` 私有（C-001 校验，编译器兜底）：一个域不能因为「实现搬走了」
+//! 就从 `core-naming-audit` N-004 的登记表里消失——搬的是住址，不是归属。留下的域模块
+//! 只做同名转出，仓内既有 `crate::<域>::…` 路径因此不变；对外**不再**经根转发，
+//! 调用点按符号的真实归属写 `symbio_kernel::<域>::…` / `symbio_sdk::<域>::…`。
+//!
+//! ## 为什么不再转发
+//!
+//! 控制面（`loop` / `session` / `plugin-api`）本来就允许直接依赖 kernel / sdk
+//! （HS-001 只拦扩展层插件），所以「不转发」不需要任何新权限。C-002 禁的是**深引
+//! core 的域目录**，而 sdk / kernel 的域路径是它们自己的公开面——两者不是一回事。
 
-// Rule-1（架构出口唯一）：core 的代码一律住子目录，但子目录**不对外开模块门**——根一律
-// `mod <域>;` 私有，谁出现在公共面上由下方 `pub use` 逐条显式声明（`scripts/core-export-audit.mjs`
-// C-001 校验，编译器兜底）。外部只写 `symbio_core::<符号>`，不得写 `symbio_core::<域>::…`。
 mod actors;
 mod adapters;
-// **Agent 包的权限声明与它的执行方**（DE-011 §5.3 / D-153）：写侧只有 agent 插件
-// （它扫描 Agent 目录），读侧是一堆互不相认的宿主工具（web 三工具 / vdfs 九工具），
-// 插件之间互相不可见 ⇒ 声明形状与判据必须作共享设施住 core（与 `capability::error`
-// 同一条归属规则）。
+// **Agent 包的权限声明与它的执行方**（DE-011 §5.3 / D-153）：实现已随 D-258 进
+// `symbio-sdk`，本域只剩登记（N-004）。
 mod agent;
-// **本机授权表**（谁持有什么能力 + 可见域）——与下面 `governance` 的机制同住一棵模块树：
+// **本机授权表**（谁持有什么能力 + 可见域）——与 `governance` 的机制同住一棵模块树：
 // 表与判定分家的唯一坏处是「表授予 A、闸门判 B」这种错位**没有任何东西会变红**。
 // 表整块是架构元素，故保留 `authz` 命名空间、`pub(crate)` 开给全 crate（**不开对外
 // 模块门**，故 C-001 不判、C-003 也不数它）：表里写的是部署事实，不是契约。
@@ -22,9 +48,6 @@ mod creator;
 // 事实 / 视图声明层：字段清单与视图读法在装载期可查。
 // 义务环的输入面——行表（`crates/symbio-plugin-loop/src/loop_rows.rs`）用 `Frozen::eval` 求视图值。
 pub(crate) mod decl;
-// 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。它属封闭语法，
-// 经 `kernel` 门面以 `pub` 出根（C-003 只数 `pub use`）：避开与 `actors::Pattern`
-// 重名，插件只经根路径取用（C-002 禁深引域目录）。
 mod embedding;
 mod event;
 mod event_bus;
@@ -42,54 +65,13 @@ mod store;
 // 下存在，不是 core 的词典——生产拼写由各 owner 的清单生成物提供，core 一行都不读。
 // 实体随 `projection` 搬进 `symbio-sdk`（D-259），core 只用不拥有：这里是 `use` 不是
 // `pub use`——用例写 `crate::test_fixtures::…` 照旧能解析（私有绑定对后代模块可见），
-// 但 core 的根公共面不多出一条。多出那一条会被 C-004 记成「新占根出口的共享类型」，
-// 而它不是 core 的出口，只是 core 的用例借了 SDK 的一份拼写。
+// 但 core 的根公共面不多出一条。
 #[cfg(test)]
 use symbio_sdk::test_fixtures;
 mod text;
 mod turn;
 mod vdfs;
 mod view;
-
-// ==================== 内核门面（DE-023 A2） ====================
-// 封闭语法只经 `kernel` 汇合口出根：内核只装语法、插件声明词汇（DE-023 D-177）。
-// `kernel` 是私有模块，根用通配重导出把它的公开项平铺出来；声明仍留在各域，
-// 门面只负责「哪些名字算语法」这一件事。判定范围（文件集）写在 `kernel.rs` 的
-// `core-kernel-files:` 标记里，由 `core-shape-audit` 的 CS-001 / CS-004 读取。
-mod kernel;
-pub use kernel::*;
-pub use kernel::{
-    ring, ActorDecl, Builder, FactDecl, Frozen, PluginDeclarations, Scope, ViewDecl, EVENT_FAILED,
-    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
-};
-
-// ==================== 事件溯源契约 ====================
-// 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
-// 模块依赖纪律见 [DE-018 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
-pub use event::{
-    event_answer_node_id, event_output_text_node_id, event_payload_node_id,
-    event_tool_result_node_id, ClosureReason,
-};
-pub use invariants::{
-    check_all, closes_turn, is_stop_fact, is_turn_final, is_turn_open, provenance_violation,
-};
-// 投影的唯一构造器：**机制**，不是某一本账的词汇。视图类型与实现跟消费方插件走
-// （DE-023 D-180），内核只提供「纯函数 + 预算」这个形状；插件经根出口拿它来建自己的投影。
-pub use present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
-pub use projection::branch::{branch_candidates, branch_hide_unselected, branch_selected};
-pub use projection::calibration::calibration_for;
-pub use projection::cost::cost_ledger;
-pub use projection::mutations::mutations_latest_snapshot;
-pub use projection::transcript::transcript;
-// 结构化 prompt 消息（D-048a）：角色、正文、`tool_call_id`、`tool_calls`。线格式
-// （`ChatNode`）由 adapter 边界翻译，core 内部不认识 provider 的图语义。
-//
-// **它不住 core 的根**：这个形状是 `LlmAdapter::generate(tok, &[PromptMessage])` 的**入参**，
-// 与 `TurnOutput` 是端口出参同一类，所以按 D-256 归 `symbio_kernel` 的 `llm` 模块。
-// core 的根只出「core 自己定义的东西」（D-257）——根上出现内核符号，会让「core 的公开面」
-// 与「kernel 的公开面」在两个地方各说一遍，且两边可以各自漂移。
-pub use projection::turnstate::{turnstate, TurnState};
-pub use store::EventStore;
 
 // ==================== 主体（② actors） ====================
 // 只收类型化输入、只产事件（DE-018 §3.1 ② 行）。
@@ -99,94 +81,22 @@ pub use store::EventStore;
 // （流循环 + 落格顺序），生产消费方只有 session 一个，按 README §4 四问第 1 问归插件；
 // 且它们**不是** F1–F6 冻结锚点（F3 冻的是 `ActorSpec` 字段集 + 档位→令牌映射，不是运行器）。
 //
-// `ActorSpec`（F3 冻结锚点：`DE-001 §4` 的**主体规格五字段**）**留根出口**
-// （经 `kernel` 门面的 `pub use`，不是 `pub`）。F3 冻的是**字段集**，它只能住 core；
-// 而 core 外（`crates/symbio-plugin-session` 的 `turn_exec` 构造与 `transcript/inbox` 的
-// 判定者行）要够得着它、C-002 又禁插件深引域目录 ⇒ 必须显式占根出口。两个生产消费方
-// 都在 session，C-003 的「≥2 消费方」成立；且它是 F3 冻结契约，下沉即等于把它搬出 core。
-// ── Agent 权限声明（DE-011 §5.3 / D-153）──────────────────────────────────
-//
-// 消费方三个：agent 插件（写侧，解析 manifest 发布作用域）、session 的能力收集
-// 管线（建槽 + 把槽挂回轮 ctx）、web / vdfs 两族工具（读侧判定）。跨插件且互不
-// 相认 ⇒ `pub use` 出根（C-002 禁深引域目录）。
-//
-// 出根的只有这五个：glob 的匹配与合法性不出根（经 `AgentPermissions` 的
-// `path_allowed` / `check_globs` 两个方法给出），「发布」也不出根（
-// `AgentScope::publish` 方法）——单消费方的自由函数不占根出口（C-003），
-// 判据与写协议随类型走，不各占一个名字。
-//
-// `AgentScope` 带目录根（文件闸要判物理路径），不可序列化 ⇒ `WIRE = false`，
-// 与 `CAPABILITY_ERRORS` 同一条理由。
-pub use agent::{agent_perms_init_slot, agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
-// 跨域 actor 策略（D-189 / D-190）：`EliminationDecider` 的写侧裁决在 loop 轮末、
-// 读侧翻译（`verdict_grants_changes`）在 session 工具层——配对映射跨两个 owner，
-// 留 core（判据见 D-187 第 1 条 / D-190）。`SKILL_TAG` 是技能能力包写、session 读的
-// 共享词汇（D-177）。
-// 单消费方策略（调度 / 技能编译与路由 / 检索 Translator / 自主层与意欲闸门 /
-// 抢占判定 / 外部执行闸门）归 owner 插件，不再经此处出根。
-// `pub use` 而非 `pub use`：消费方全在本 crate 内，进根公开面只会给
-// C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
-// `EliminationDecider`（淘汰回路的裁决侧）：判定在 core、轮末驱动与
-// 闸门接线都在 `plugins`（derived_facts 的轮末步 + 工具执行层的撤销闸），
-// `pub` 出根，不进公开面。
-pub use actors::{commitment_events, commitment_records};
-pub use actors::{EliminationDecider, SKILL_TAG};
-// 事件名字表（名字是数据，单点定义）。
-//
-// 任务族五格（opened / progressed / held / asserted / assigned）**不在这里**：读它们的
-// 折叠（core 的 `readyset_for`、会话插件的 `autonomy`）在构造期收一张 `TaskVocab`，拼写由调用方交出
-// ——owner 插件交自家常量，第二个消费方交清单生成物（DE-024 D-206 / D-204）。此前这里
-// 写着「core 外的写方只有一个，字典不能在插件里」，那条推论已由 D-204 作废：跨插件共享
-// 的名字有清单登记口，不需要内核或 core 代它们保管。
-//
-// `EVENT_TRIGGER_*` 两条同族：`meta.trigger` 的键名与它的 `kind` 取值。写体标记的
-// 生产方（`crates/symbio-plugin-heartbeat`）与消费方（`crates/symbio-plugin-session` 的收件箱写臂）分属两个
-// 插件，而 `kind` 还被 core 自己的 `system.triggered` 载荷用着——字典因此不能在任一
-// 插件里（否则另一侧复述字面量），判据见 [D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")。
-#[allow(unused_imports)]
-pub use event::{EVENT_TRIGGER_KINDS, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY};
-// 协议族的名字：消费方是 `decl`（声明层）与 loop 插件（端口行与端口
-// 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub` 出根
-// （C-003 数 `pub use`）。
-
-// ==================== 记忆三段 ====================
-// 写方 / 召回注入 / 巩固的消费方只有 `crates/symbio-plugin-session` 的记忆链路**一个**。C-003 的
-// 口径是「单消费方不算架构元素，该下沉」——可下沉的只有消费方，算法不行：
-// `recall` 是 ③ 的投影、`consolidate` 是 DE-001 §9.3 的接受边界、事件名字表是 D-043
-// 的单点定义，都必须留在 core。故按 `symbio_core/README.md §4 四问` 留 core，以
-// **`pub`** 出根：只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`），
-// 与 `lock_read` / `ObjectConstructor` 同一形态。记忆事件名字表同样只对写方可见——
-// 名字是数据，core 内与插件内各写一份字面量就等于两套事件名。
-// `commitment_records` 是 `commitment_events` 的读侧另一半（切片 → 立约记录）：
-// 配对规则（载荷 `id`）是本域的形状知识，写侧读侧各一份就等于两套账（同
-// `EliminationDecider::verdict_grants_changes`）。记录类型随返回值流动，不出根。
-// 主体规格的授权读法（D-188 C2b）：数据面（`ActorSpec` / `Pattern` / `Scope`）住
-// `symbio-kernel`，读法读的是本机**部署表**（`authz` / `governance`），不是语法。
-// 宿主 crate 不能给内核类型写固有 impl（orphan），故以自由函数表达（`actors::spec`）。
-// `pub` 出根：消费方是本 crate 的插件代码，而 C-002 禁深引域目录。
+// `ActorSpec`（F3 冻结锚点：`DE-001 §4` 的**主体规格五字段**）的数据面住 `symbio_kernel`
+// 的 `actors`，读法（`trivial_actor_spec` / `pattern_for_principal` / `actor_can_*`）读的是
+// 本机**部署表**，不是语法 ⇒ 留在这里（D-099 / D-188 C2b）。宿主 crate 不能给内核类型写
+// 固有 impl（orphan），故以自由函数表达。
+// Agent 权限声明（DE-011 §5.3 / D-153）**不出根**：三个消费方里 agent 插件与 web /
+// vdfs 工具走门面的 SDK 臂（`symbio_plugin_api::AgentPermissions`），session 走
+// `symbio_sdk::agent::…`——五个符号都已随 D-258 住进 `symbio-sdk`，再从 core 根出一份
+// 就是 D-272 拦的重复出口。
 pub use actors::{
     actor_can_assert_verification, actor_can_assign_work, actor_can_judge_intent,
     actor_can_land_artifact, actor_can_land_speech, pattern_for_principal,
 };
-// 承诺 / 裁决 / 名字表三组**业务事件名**已随 D-203 从内核迁出，因此也不再从这里
-// 出根。它们现在各有 owner：写方在自己的 `EventDecl` 里声明，需要跨插件共享的走清单
-// `shared_events` → 生成物 `symbio_plugin_api::events`（D-204），core 的折叠经三张
-// 词汇表（[`ChatVocab`] / [`MessageVocab`] / [`CommitmentVocab`]）在构造期收名字
-// （D-205 / D-206）。**core 一行都不读这些拼写**，故没有一条该占根出口。
-// 就绪集出根：生产消费方是 `crates/symbio-plugin-loop` 的调度段与 `crates/symbio-plugin-session` 的 `stats`
-// 列。与 `reputation` 同一形态：`pub` 出根，只在本 crate 内可见、
-// 不进对外公开面（C-003 数 `pub use`）。
-// `TaskVocab` 随它一起出根：折叠的词汇面是构造期形参（DE-024 D-206），两个调用方都要
-// 能**命名**这张表才交得出整族的拼写——它不是 core 里的第二份字典，字段全是调用方给的。
-pub use projection::readyset::{readyset_for, ReadySetView};
-pub use projection::reputation::reputation;
-pub use projection::task_vocab::TaskVocab;
-// 对话面的三张词汇表（DE-024 D-203）：与 `TaskVocab` 同一条通路——折叠要认的
-// 每一条名字由调用方在构造期交进来。`crates/symbio-plugin-loop` 与 `crates/symbio-plugin-session` 各持一份常量
-// （owner 的声明与清单生成物），core 一行都不读这些拼写。
-// 按**面**分三张而不是合成一张：`reputation` 只认承诺四条，`changes` 只认产物一条，
-// 让它们收一张 20 字段的表会把耦合面说宽——表的大小应当等于那个算法真正的依赖。
-pub use projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};
+pub use actors::{commitment_events, commitment_records};
+pub use actors::{EliminationDecider, SKILL_TAG};
+
+// ==================== 可见域 ====================
 // 可见域判据与智能体身份前缀：两处共用**同一条**判定——写视图的 `window_by_turn`
 // （core）与写消息过滤的 `context/view`（插件）。两个判定方 = 两套可见域与两种身份
 // 形状，迟早漂移成「判的是 A、写的是 B」。
@@ -195,60 +105,26 @@ pub use projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};
 pub(crate) use view::principal_namespace;
 pub use view::visible_to;
 
-// ==================== 适配器（⑤ adapters） ====================
-// 时延闸门 = 本包的依赖注入策略（DE-018 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
-// 生成端口 `LlmAdapter` 是 core 的唯一适配器契约；工具分发归 loop 插件本地（D-118）。
-pub use adapters::{
-    DeltaSink, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter, SilentDeltas, TokenIssuer,
-};
-// 执行引擎（`TurnRunner` 族）在 core 外（`crates/symbio-plugin-loop/src/turn_runner.rs`）
-// 但它仍需要的 core 内部面。它们**不能下沉**——core 自己也在用（`TokenIssuer` 铸令牌、`provider_adapter`
-// 实现 trait、`store` 读写、`invariants` 判据、`prompt_fidelity` 复核）；插件又不能深引域
-// 目录（C-002）⇒ 以 `pub` 出根：只在本 crate 内可见、不进对外公开面（C-003 只数
-// `pub use`），与 `visible_to` / `recall` 同一形态。（`ActorSpec` 不在此列——它是 F3 冻结
-// 锚点，另以根 `pub use` 出，见上。）
-pub use adapters::{AdapterError, FullModel};
-// C4 判据（`unresolved_turns`）：`loop` 的 `turn_exec/assemble.rs` 与 `turn_runner.rs`、
-// `session` 的 `store/wal.rs` 都**在生产路径**上调用它（C-002 禁止它们深引
-// `symbio_core::invariants::…`，故必须经根出口）。这里是真·跨插件消费，不是测试面残留。
-pub use invariants::unresolved_turns;
-// 预算判定（I3）：`check_all` 用固定声明预算，而策略用例要
-// 拧预算参数验证「判定随参数变」。core 外消费方只有 `session` 的
-// `transcript/autonomous.test.rs`，但它属于**判据词汇**（与 `unresolved_turns` 同一族），
-// 下游 crate 无法用 `cfg(test)` 只对它们可见，故常开 `pub`。
-pub use invariants::budget_exceeded;
-// 事实网格 → prompt 的双向完整性复核（D-048）：`TurnRunner` 组装 prompt 时调它。
-pub use projection::prompt_fidelity::verify as verify_prompt_fidelity;
-pub use store::{AppendError, StoreInvariant};
-
 // ==================== 权限与可见性（⑥ governance） ====================
 // 读写成对、fail-closed（DE-001 §7）。根出口只出**可见域**一个类型：
 // 判定面（`crates/symbio-plugin-session` 的读侧闸）要指称它，构造面（本根 `authz`）的表行也带它。
 // core 外消费方只有 `crates/symbio-plugin-session` 一个，但它**不能**下沉——core 内 `authz` /
 // `governance` 自己也在用（core 不依赖插件），插件又够不着 `governance` 域目录的深引
 // （C-002）⇒ 必须留根出口；C-003 的「≥2 消费方」由 core 内这两个模块成立。
-// governance::Capability（权限能力，闭集）与 capability::Capability（LLM 工具
-// 描述符）是两个概念，**刻意不进根平铺**：授权表走能力名字符串（由
-// `PermissionMatrix::from_names` 按闭集校验），轮次→能力的映射收在 `can_reply` 里，
-// core 外的调用点既不深引也不与 `Capability` 撞名，见 governance/mod.rs 同名辨析。
 //
 // `PermissionMatrix` **不在根出口**（收窄）：core 外没有一处指称这个类型——
 // `stats.rs` 的读侧闸只经 `authz::production_matrix()` 拿表（返回类型走类型推导，不点名）
-// ⇒ 按 C-003「名字没跨出 core 的符号不许占根出口」收回 core 内
-// （core 内走 `governance::PermissionMatrix` 深引，C-002 只管插件侧）。
+// ⇒ 按 C-003「名字没跨出 core 的符号不许占根出口」收回 core 内。
 //
 // `GrantsOverlay`（淘汰回路的机制半边）：授权表是装配期常量，淘汰是
 // 运行期事实 ⇒ 覆盖层住表旁边（表答「登记过什么」，它答「其中什么被收回了」）。
 // 两个插件侧消费方——`derived_facts` 轮末步（判「有没有既有淘汰」）与工具执行层的
 // 撤销闸（判「现在准不准委派」）⇒ 与 `VisScope` 同形态 `pub` 出根。
-// 只出 `GrantsOverlay` 不出 `GrantsChange`：插件侧拿它经 `fold` 收
-// `verdict_grants_changes` 的返回值（类型推导，不点名），没有第二处指称。
 pub use governance::GrantsOverlay;
 pub use governance::VisScope;
 // 授权表的**外部面**：`authz` 收敛成域目录后，`symbio_core::authz::…`
 // 就是一条深路径（C-002 判红），而插件侧有十几个符号在用。按 §1 的口径，根平铺是
-// 唯一合法路径 ⇒ 表仍住 `authz/`，出口逐个列在这里。`pub` 与
-// `visible_to` / `recall` 同形态：跨插件可见、不进对外公开面（C-003 只数 `pub use`）。
+// 唯一合法路径 ⇒ 表仍住 `authz/`，出口逐个列在这里。
 pub use authz::{
     bind_inheriting, bind_root, content_visible, principal_of, production_matrix,
     request_principal, unbind_session, EffectiveMatrix, CAP_ASSERT_VERIFICATION, CAP_ASSIGN_WORK,
@@ -261,174 +137,4 @@ pub use authz::{
 // - `PRINCIPAL_ARBITER` / `PRINCIPAL_WORKER`：只有 core 外测试点名
 //   （`derived_facts.test.rs` / `autonomous.test.rs`）；
 // - `PRINCIPAL_PEER`：core 内自用。
-// 前两个要真正收回公开面只能搬走消费方；`cfg(test)` 对下游 crate 不生效（见上）。
 pub use authz::{PRINCIPAL_ARBITER, PRINCIPAL_PEER, PRINCIPAL_WORKER, SESSION_OWNER};
-
-// ==================== LLM 契约 ====================
-// 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。
-// 行解析契约与协议事件方言只有 model 插件使用，住在 `crates/symbio-plugin-model/src/protocols/`。
-pub use llm::model_provider::{ModelFinishReason, ModelSpend, ModelUsage};
-pub use llm::turn::{
-    llm_emit_message, llm_message_frame, llm_removed_frame, llm_short_id, TurnOutput,
-    TurnToolCallInfo,
-};
-
-// ==================== VDFS 契约 ====================
-// 统一资源访问面的全部公开符号（定义汇聚于 `vdfs` 模块）。
-// 词表常量：状态 / 基础类型 / 呈现扩展名 / 节点动作 / 调用级参数 / 注册表字段名
-pub use vdfs::{
-    VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
-    VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS,
-    VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TEST, VDFS_ACTION_TRUNCATE, VDFS_EXT_FORM, VDFS_EXT_ZIP,
-    VDFS_KIND_DIR, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR, VDFS_PLUGINS_FIELD,
-    VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
-    VDFS_STATUS_FAILED, VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN, VDFS_STATUS_WORKING,
-};
-// 域类型：节点 / 内容 / 请求响应 / 错误 / 变更
-pub use vdfs::{
-    DynVdfsProvider, VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent,
-    VdfsContext, VdfsError, VdfsItem, VdfsListResponse, VdfsNewType, VdfsNode, VdfsParams,
-    VdfsRequest, VdfsResponse, VdfsResult, VdfsValidationError, VdfsWriteResponse,
-};
-// 契约函数与宿主桥
-pub use vdfs::{
-    vdfs_context, vdfs_derive_ext, vdfs_from_plugin_error, vdfs_has_parent_segment, vdfs_host_ctx,
-    vdfs_notify_change, vdfs_path_within, vdfs_unwatch_changes, vdfs_watch_changes,
-    VdfsChangeSubscriptions,
-};
-// 地址机制（crate 内部装配用，不是公开契约）。`declared_addr_root` 额外出根：
-// 插件的**纯投影**要在不依赖 vdfs 插件的前提下排除虚拟根路径（`session` 的
-// 变更账，D-169 / DE-025 D-221）——它读的是「有没有声明」，对根名字面量零知识。
-pub use vdfs::{absolute_addr, declared_addr_root, descend_addr, join_addr, AddrRootDecl};
-
-// ==================== 跨插件契约（分域，D-087） ====================
-// 这里曾是 `schemas/` 一个目录：协议词与宿主方言混装，一个名字说不清「这是什么」。
-// 2026-10-19 按**它描述什么**拆成四个域（`chat` / `dialog` / `present` / `turn`
-// 与三处搬家：`plugin` 的响应壳、`projection` 的 rebuild、以及后来随 `fire_hook`
-// 迁去宿主的 hook 词与路由常量（D-184））：
-//
-// | 域 | 一句话 | 形态 |
-// |---|---|---|
-// | `chat` | 一条消息、一个主体长什么样 | **叶子模块**（`chat_node` / `session_chat` / `principal` / `chat_request`） |
-// | `dialog` | 判决是枚举、措辞是文本 | **已迁内核**（纯契约，D-256）；core 根不转发，控制面按 D-257 直取 `symbio_kernel::dialog` |
-// | `present` | 后端下发描述、前端零业务知识渲染 | 根平铺符号 |
-// | `turn` | 一轮次怎么交付、怎么造节点、产出什么 | 交付包平铺；`facts`/`node_build` 走叶子模块 |
-//
-// 叶子模块不是「深引豁免」：它们是**主题命名空间**（§1.2 登记），调用点写
-// `symbio_core::node_build::dialog_node` 时仍看得见自己拿的是哪一族的构造器。
-pub use chat::{chat_node, principal, session_chat};
-pub use plugin::{SimpleResponse, SuccessResponse};
-pub use present::{
-    DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
-    DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
-};
-pub use turn::{facts, node_build};
-// 跨墙词表（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §7）：session 与
-// loop 两侧共同命名。全部 `pub` 出根——消费方仍在本 crate 内（C-003 只数
-// `pub use`），而 C-002 禁止插件深引域目录 ⇒ 根别名是唯一合法路径。
-pub use capability::tool_metas;
-pub use chat::chat_request;
-pub use llm::{llm_emit_state, llm_state_frame};
-pub use projection::rebuild::rebuild;
-pub use projection::turns::count_user_messages;
-pub use turn::dispatch::{
-    run_ops, AddNodesRequest, CompressionBeginReply, CompressionBeginRequest,
-    CompressionFinishRequest, CompressionOutcome, ConsolidateRequest, EditFrame, EditNodesRequest,
-    RemoveNodesRequest, ReplaceAllRequest, TurnDispatch, TurnReport, TurnSettings, TurnSpec,
-    TurnStatus, LOOP_RUN_TURN, TASK_CAP, TURN_DISPATCH, WORKER_FORCE_PREFIX, WORKER_KEYWORDS,
-    WORKER_MIN_CHARS,
-};
-pub use turn::facts::{
-    DrainedSupplement, FleetSnapshot, WorkerProgress, META_SUPPLEMENT, META_SUPPLEMENT_COUNT,
-    META_SUPPLEMENT_IDS,
-};
-
-// ==================== 事件总线 ====================
-pub use event_bus::{
-    event_bus_build_envelope, event_bus_register_subscriber, event_bus_resync_of,
-    event_bus_unregister_subscriber, event_bus_vdfs_change_of, EventBus, EventBusSubscribeRequest,
-    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
-};
-
-// ==================== 服务抽象 ====================
-pub use embedding::{EmbeddingError, EmbeddingService, EMBEDDING_LOCAL, EMBEDDING_NOOP};
-
-// ==================== 插件契约 ====================
-pub use capability::{
-    capability_announce_configurable, capability_configurables, capability_entry_of,
-    capability_init_error_bucket, capability_invoke, capability_model_active,
-    capability_model_resolve, capability_option_fields, capability_prompts,
-    capability_report_error, capability_resolve, capability_take_errors, capability_to_wire,
-    capability_vdfs_root, ApprovalBasis, ApprovalGrants, CapabilityCategory, CapabilityFamily,
-    CapabilityMeta, CapabilityRiskLevel, CapabilityRow, CAPABILITY_ERRORS, CAPABILITY_VISITOR,
-    CONFIGURABLE_VISITOR, OPTION_VISITOR,
-};
-// 内置六族常量（`family::TOOL` … `family::CONFIGURABLE`）：与 `failure_kind` 同理，
-// 它是**模块命名空间**而不是单个符号，故单列一行。
-pub use capability::family;
-// 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
-// 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
-pub use capability::failure_kind;
-pub use plugin::{
-    config_mount_dispatch, plugin_dir_from_ctx, plugin_expand_tilde_path, Plugin, PluginChannel,
-    PluginConfigFile, PluginConfigMount, PluginDir, PluginEntry, PluginError, PluginFrame,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMessageWire,
-    PluginMeta, PluginPayload, PluginPayloadWire, PluginSimpleRequest, PluginStopReason,
-    PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
-    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PLUGIN_PARENT,
-    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
-};
-// 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
-
-// ==================== 通用对象创建注册表 ====================
-// 按 id 装配任意类型对象——**不是插件专属**：注册表按 `(id, TypeId)` 索引，
-// 当前服务 `dyn Plugin` / `dyn ModelProtocol` / `dyn EmbeddingService` 三个类型族。
-// 独立成域的理由见 `creator/mod.rs` 的模块文档。
-pub use creator::{creator_create_object, creator_has, creator_ids};
-// 注册表内部结构，供 `submit_object_creator!` 宏展开取用（crate 内可见）
-pub use creator::{ObjectConstructor, Submit};
-
-// ==================== 键面 ====================
-// 只剩机制（`SymbioKey` trait）与值类型为通用词汇（String / Value / Vec<String>）的键——
-// 值类型属某域的键已随值搬去该域（exec / plugin / capability，D-095 根因一）。
-pub use keys::{
-    SymbioKey, AGENT_ID, APPROVAL_GRANTS, CONTENT, ID, MODE, NAME, PATH, PROVIDER_ID,
-    REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, SOURCE_PRINCIPAL, TOOL_CALL_ID,
-    TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
-};
-
-// ==================== 基础设施 / 工具函数 ====================
-pub use clock::clock_now_ms;
-// 锁辅助函数**刻意不进 `pub use plugin::*`**（见 `plugin/error.rs::lock_read` 的说明）：
-// 显式 `pub` 导入，既让全 crate 可用，又保留 `dead_code` 的可见性。
-pub use exec::{
-    ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter, ABORT_SIGNAL, EVENT_SINK,
-};
-// 注：homedir（系统根注册表）**不在 core**——它归 `home` 插件独有。core 只提供
-// 纯路径工具 `plugin_expand_tilde_path`（经 `plugin::dir` 重导出，不读任何全局系统根）。
-// 日志门面：`logger_is_initialized` / `logger_level_enabled` / `LOG_LEVEL_{WARN,ERROR}` 只被
-// logger 的 `plugin_*!` 宏体引用——但宏在**插件**调用点展开，根路径必须可达（`core-export-audit`
-// 的消费方计数认这层，见 `core-surface.mjs` 的 `collectMacroBodies`）。
-// `logger_min_level` 只在 core 内用，故不进根。
-pub use logger::{
-    logger_init, logger_is_initialized, logger_level_enabled, logger_parse_level,
-    logger_set_min_level, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN,
-};
-// 四个日志宏与 `submit_object_creator!` 是 `#[macro_export]`，它们挂在**定义 crate 的根**
-// （`symbio-sdk`，D-258）。core 内部按 `symbio_sdk::plugin_warn!` 写，插件按
-// `symbio_plugin_api::plugin_warn!` 写——core 的根**不**再转发一份：同一个名字两个可写
-// 路径正是 C-005 要拦的形态，宏不因为它是宏就例外。
-// 注：记忆（`MemoryFile` / 两道闸门 / 片段渲染 / 节点形状）**整块不在 core**——
-// 实现不隶属任何单个插件（memory / session 各用一个或多个作用域），故归
-// `providers/memory`（方式 B，不套 `dyn`）。**连文件名也不在 core**：各作用域
-// 定义自己的文件名常量（`memory::memory::MEMORY_FILE` 等），core 不设统一约定。
-pub use plugin::{lock_read, lock_write};
-pub use text::{text_floor_char_boundary, text_truncate_bytes};
-// 巩固合并的纯计算内核：只依赖 `std`，被 `docs/003-design/verify/` 的 standalone
-// 程序以 `#[path]` 包含同一份源码（纪律，住址随 D-082 裁决三上移）。
-// 开**模块命名空间**而不是逐个 `pub use`：函数名（`truncate_chars` / `split_sentences`
-// / `merge_with_fidelity`）不是对外契约，也不该进根公开面。
-pub use text::merge_kernel;
-
-// 重导出 inventory 供 submit_object_creator! 宏使用
-pub use inventory;

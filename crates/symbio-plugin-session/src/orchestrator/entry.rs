@@ -407,7 +407,7 @@ impl TurnLauncher {
             chat_ctx.set(WORKDIR, w_clone.clone());
             chat_ctx.set(SESSION_ID, sid_spawn.clone());
             if let Some(aid) = &agent_id {
-                chat_ctx.set(symbio_core::AGENT_ID, aid.clone());
+                chat_ctx.set(symbio_sdk::keys::AGENT_ID, aid.clone());
             }
 
             // ── 向 model/chat 交付会话引擎句柄（SESSION_HANDLE）──
@@ -558,7 +558,7 @@ impl TurnLauncher {
         if let Some(obj) = session.metadata.as_object_mut() {
             obj.insert("title".to_string(), json!(title));
         }
-        session.updated_at = symbio_core::clock_now_ms();
+        session.updated_at = symbio_sdk::clock::clock_now_ms();
         if self.save_session(&session).await.is_err() {
             return;
         }

@@ -15,13 +15,13 @@
 //! 用例见 `crates/symbio-plugin-session/src/temporal.test.rs`。
 
 use super::*;
-use symbio_core::chat_node::{NodeRole, CHAT_STYLE_TAG_TOOL};
+use symbio_sdk::chat::chat_node::{NodeRole, CHAT_STYLE_TAG_TOOL};
 
 const TURN_ID: &str = "turn-0001";
 
 /// 落库面的主体：本文件的节点模仿**落库形状**，身份因此写 `principal`（D-147）。
-fn assistant_principal() -> symbio_core::principal::Principal {
-    symbio_core::principal::Principal::from_legacy("session/main")
+fn assistant_principal() -> symbio_sdk::chat::principal::Principal {
+    symbio_sdk::chat::principal::Principal::from_legacy("session/main")
 }
 
 fn out(text: &str, reasoning: &str) -> TurnOutput {

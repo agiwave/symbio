@@ -47,11 +47,18 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use symbio_core::{
-    calibration_for, check_all, cost_ledger, readyset_for, transcript, Event, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, ReadingPanel,
-    SESSION_ID, SKILL_TAG,
+use symbio_core::SKILL_TAG;
+use symbio_kernel::event::Event;
+use symbio_kernel::plugin::{
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
 };
+use symbio_kernel::present::ReadingPanel;
+use symbio_sdk::invariants::check_all;
+use symbio_sdk::keys::SESSION_ID;
+use symbio_sdk::projection::calibration::calibration_for;
+use symbio_sdk::projection::cost::cost_ledger;
+use symbio_sdk::projection::readyset::readyset_for;
+use symbio_sdk::projection::transcript::transcript;
 
 use crate::projections::{
     checkpoint::checkpoint, fallback::fallback_rate, slo::slo_report, span::span,
@@ -273,7 +280,7 @@ pub(crate) struct SessionStats {
     /// （`slo-exit-audit` 对的就是这些列）；本字段是**人读**的那一份，同一个数的
     /// 另一种说法。两者由同一个源算出，且判据 `panel_matches_the_columns_it_describes`
     /// 钉住「不脱节」——否则就是两份真相。
-    pub panel: symbio_core::ReadingPanel,
+    pub panel: symbio_kernel::present::ReadingPanel,
     /// 用量那**一格**的读数（`ReadingSection`）：给「地方只有一条、但必须在眼前」的
     /// 位置用（会话头），与 [`Self::panel`] 里那一段**同一次装配**
     /// （`stats_reading::usage_section` 的唯一实现，两处调同一个函数，不是两份口径）。
@@ -289,7 +296,7 @@ pub(crate) struct SessionStats {
     /// `None` = 一次实测都没有（`calls == 0`）⇒ 前端整格不渲染，不画一条空读数
     /// （与 `context_watermark` 缺数整条不出现同一条纪律）。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<symbio_core::ReadingSection>,
+    pub usage: Option<symbio_kernel::present::ReadingSection>,
     /// 技能编译开关（部署配置 `skill_compile_enabled`，**不是**本会话的事实）。
     ///
     /// 与 [`Self::compiled_skills`] 并读才分辨得出两种「零技能」：`false` = 关着
@@ -455,7 +462,7 @@ pub(crate) fn read(
 
     // 声誉列：与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生）。
     // 没有权限时不给零值条目——给零值等于替一个你本来看不到的主体报数。
-    let rep = symbio_core::reputation(COMMITMENT_VOCAB)
+    let rep = symbio_sdk::projection::reputation::reputation(COMMITMENT_VOCAB)
         .read_all(&snapshot)
         .value;
     let reputation = if may_read {

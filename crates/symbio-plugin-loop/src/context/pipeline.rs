@@ -10,14 +10,16 @@
 use super::*;
 
 use super::super::chat_loop::{ChatOrchestrator, SessionContext};
-use symbio_core::chat_node::{MessageContent, NodeStatus};
-use symbio_core::{
-    llm_short_id, run_ops, CompressionBeginRequest, CompressionFinishRequest, CompressionOutcome,
-    ConsolidateRequest, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError, RemoveNodesRequest,
-    ReplaceAllRequest,
-};
+use symbio_kernel::exec::{ExecAbortSignal, ExecEnv, ExecEventSink};
+use symbio_kernel::plugin::PluginError;
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::plugin_warn;
+use symbio_sdk::chat::chat_node::{MessageContent, NodeStatus};
+use symbio_sdk::llm::turn::llm_short_id;
+use symbio_sdk::turn::dispatch::{
+    run_ops, CompressionBeginRequest, CompressionFinishRequest, CompressionOutcome,
+    ConsolidateRequest, RemoveNodesRequest, ReplaceAllRequest,
+};
 
 use super::super::port::Compress;
 
@@ -306,7 +308,7 @@ async fn compress_snapshot_inner(
         // 重试：附纠正指令，要求严格按 XML 结构输出
         let retry_msg = ChatNode {
             id: llm_short_id(),
-            principal: Some(symbio_core::principal::Principal::from_legacy(
+            principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
                 symbio_core::PRINCIPAL_USER,
             )),
             msg_type: Some(NodeKind::Body),
@@ -389,7 +391,7 @@ async fn compress_snapshot_inner(
     let snapshot_message = ChatNode {
         id: root_id.to_string(),
         // 快照作为压缩后的首条消息，必须是 user 角色（多数 provider 要求对话以 user 开头）
-        principal: Some(symbio_core::principal::Principal::from_legacy(
+        principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
             symbio_core::PRINCIPAL_USER,
         )),
         msg_type: Some(NodeKind::Body),
@@ -527,7 +529,7 @@ async fn compress_with_snapshot_core(
     // `skipped` = 冷却中：本次不做压缩，历史保持完整。`force` 绕过冷却。
     match context
         .session
-        .run_op::<symbio_core::CompressionBeginReply>(
+        .run_op::<symbio_sdk::turn::dispatch::CompressionBeginReply>(
             run_ops::COMPRESSION_BEGIN,
             CompressionBeginRequest {
                 node_id: node_id.clone(),
@@ -606,7 +608,7 @@ async fn compress_with_snapshot_core(
     // 失败只 warn——前端已收到终态。
     let node = match context
         .session
-        .run_op::<symbio_core::chat_node::ChatNode>(
+        .run_op::<symbio_sdk::chat::chat_node::ChatNode>(
             run_ops::COMPRESSION_FINISH,
             CompressionFinishRequest {
                 node_id: node_id.clone(),
@@ -685,7 +687,7 @@ pub(crate) async fn retry_compaction(
     target_id: &str,
 ) -> Result<(), PluginError> {
     let messages = session
-        .run_op::<Vec<symbio_core::chat_node::ChatNode>>(run_ops::MESSAGES, ())
+        .run_op::<Vec<symbio_sdk::chat::chat_node::ChatNode>>(run_ops::MESSAGES, ())
         .await?;
     // 只接受**压缩节点**：重试入口长在压缩失败节点上，目标错位说明前端与存储已经
     // 不一致——此时按 NotFound 拒绝，比"顺着 target_id 猜一个节点"安全。
@@ -729,7 +731,7 @@ pub(crate) async fn retry_compaction(
     // 与首次失败对不上（"换个视图再试一次"不是重试）。
     let mut context = SessionContext {
         messages: session
-            .run_op::<Vec<symbio_core::chat_node::ChatNode>>(run_ops::CONTEXT_MESSAGES, ())
+            .run_op::<Vec<symbio_sdk::chat::chat_node::ChatNode>>(run_ops::CONTEXT_MESSAGES, ())
             .await
             .unwrap_or_default(),
         session: session.clone(),

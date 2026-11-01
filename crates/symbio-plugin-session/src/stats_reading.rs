@@ -18,11 +18,11 @@
 //! 而两边都自称是 SLO。
 
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB};
-use symbio_core::chat_node::ChatNodePresentationExt;
-use symbio_core::{
-    chat_node as cm, Event, ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone,
-    VisScope,
-};
+use symbio_core::VisScope;
+use symbio_kernel::event::Event;
+use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::chat::chat_node::ChatNodePresentationExt;
 
 use crate::projections::{
     fallback::{fallback_rate, FallbackRateView},
@@ -53,10 +53,10 @@ pub(super) struct ViewerRequest {
 ///
 /// 缺省（没有任何记忆事件 / 存量事件没有这个字段）= `thread_private`（C10）——
 /// 与旧接线逐字一致，存量事实源不因这次接线改变读数。
-pub(super) fn content_scope_of(snapshot: &[symbio_core::Event]) -> VisScope {
+pub(super) fn content_scope_of(snapshot: &[symbio_kernel::event::Event]) -> VisScope {
     let mut widest = VisScope::ThreadPrivate;
     for e in snapshot {
-        if e.entity != symbio_core::Entity::Memory {
+        if e.entity != symbio_kernel::event::Entity::Memory {
             continue;
         }
         // 取值口径在 core（`VisScope::of_event`：缺字段 / 认不出 = 最窄，C10）；

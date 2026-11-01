@@ -33,10 +33,11 @@ use super::super::tools::{ABORTED, NOT_EXECUTED};
 use super::loop_rows;
 use super::port;
 use super::{DispatchOutcome, ToolPort, ToolPortCall, ToolPortPolicy, WakeIntent, WakeSpec};
-use symbio_core::{
-    ApprovalGrants, CapabilityRiskLevel, Event, EventStore, Seq, Store, EVENT_REQUEST, EVENT_SENT,
-};
+use symbio_kernel::capability::CapabilityRiskLevel;
+use symbio_kernel::event::{Event, Seq, EVENT_REQUEST, EVENT_SENT};
+use symbio_kernel::store::{EventStore, Store};
 use symbio_plugin_api::events::EVENT_AUTHZ_DENIED;
+use symbio_sdk::capability::ApprovalGrants;
 
 use crate::control_decl::EVENT_AUTHZ_GRANTED;
 

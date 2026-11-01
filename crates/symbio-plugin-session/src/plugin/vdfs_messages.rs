@@ -9,12 +9,13 @@
 //! `commands` 的调用，再把变更投进订阅表。
 
 use super::*;
-use symbio_core::chat_node as cm;
-use symbio_core::{
-    vdfs_from_plugin_error, vdfs_host_ctx, VdfsActionResult, VdfsContent, VdfsContext, VdfsError,
-    VdfsNode, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
-    VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE,
+use symbio_kernel::vdfs::{
+    VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
+    VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_SWITCH_BRANCH,
+    VDFS_ACTION_TRUNCATE,
 };
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::vdfs::host::{vdfs_from_plugin_error, vdfs_host_ctx};
 
 impl SessionPlugin {
     /// 转写区段（`<id>/message[/mid]`）：列表与单条消息。

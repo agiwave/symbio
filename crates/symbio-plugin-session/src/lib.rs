@@ -41,6 +41,6 @@ mod workdir;
 /// 单元测试不装配容器，因此没有 `PLUGIN_DIR`；指向临时目录即可——这些用例
 /// 要么只读、要么在校验阶段就被拦下，不会真的写盘。
 #[cfg(test)]
-pub(crate) fn test_dir() -> symbio_core::PluginDir {
-    symbio_core::PluginDir::at(std::env::temp_dir().join("symbio-test-session"), "session")
+pub(crate) fn test_dir() -> symbio_sdk::plugin::PluginDir {
+    symbio_sdk::plugin::PluginDir::at(std::env::temp_dir().join("symbio-test-session"), "session")
 }

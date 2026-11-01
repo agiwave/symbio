@@ -13,7 +13,7 @@
 use super::{runtime_of_state, ActiveSessionManager, ActiveSessionState};
 use crate::plugin::{OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use crate::runtime::{RuntimeFacts, RuntimeOutcome};
-use symbio_core::VdfsChangeSubscriptions;
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 
 fn facts(outcome: Option<RuntimeOutcome>) -> RuntimeFacts {
     RuntimeFacts { outcome }

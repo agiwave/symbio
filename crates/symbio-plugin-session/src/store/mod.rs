@@ -56,7 +56,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
-use symbio_core::{Event, FleetSnapshot, PluginError, Seq, Store};
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::plugin::PluginError;
+use symbio_kernel::store::Store;
+use symbio_sdk::turn::facts::FleetSnapshot;
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 mod facts;
@@ -416,8 +419,10 @@ impl SessionStore {
 /// 窗口由**消费方按事实切**，不是存储层的第二种读法——这正是归一的前提：读法只有一种，
 /// 想要窗口就从「最近一份快照落在第几号」自己切。折叠侧的同类判据（消息列表 / 轮次计数）
 /// 已经内建在 `mutations_latest_snapshot` 的用法里，不需要本函数。
-pub(crate) fn current_window(events: &[symbio_core::Event]) -> &[symbio_core::Event] {
-    match symbio_core::mutations_latest_snapshot(events, &MESSAGE_VOCAB) {
+pub(crate) fn current_window(
+    events: &[symbio_kernel::event::Event],
+) -> &[symbio_kernel::event::Event] {
+    match symbio_sdk::projection::mutations::mutations_latest_snapshot(events, &MESSAGE_VOCAB) {
         Some((i, _)) => &events[i..],
         None => events,
     }

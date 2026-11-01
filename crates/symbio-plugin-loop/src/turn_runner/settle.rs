@@ -26,7 +26,7 @@ pub(crate) async fn append_fallback<S>(
     cost_ms: u64,
     produced: serde_json::Value,
     artifacts_landed: u64,
-) -> Result<TurnOutcome, symbio_core::AppendError>
+) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -39,7 +39,7 @@ where
         cost_ms,
         produced,
         artifacts_landed,
-        symbio_core::ClosureReason::Fallback,
+        symbio_kernel::event::ClosureReason::Fallback,
     )
     .await
 }
@@ -65,7 +65,7 @@ pub(crate) async fn append_exhausted<S>(
     cost_ms: u64,
     produced: serde_json::Value,
     artifacts_landed: u64,
-) -> Result<TurnOutcome, symbio_core::AppendError>
+) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -78,7 +78,7 @@ where
         cost_ms,
         produced,
         artifacts_landed,
-        symbio_core::ClosureReason::Exhausted,
+        symbio_kernel::event::ClosureReason::Exhausted,
     )
     .await
 }
@@ -94,8 +94,8 @@ async fn land_failure<S>(
     cost_ms: u64,
     produced: serde_json::Value,
     artifacts_landed: u64,
-    reason: symbio_core::ClosureReason,
-) -> Result<TurnOutcome, symbio_core::AppendError>
+    reason: symbio_kernel::event::ClosureReason,
+) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -125,7 +125,7 @@ where
             aborted: false,
             awaits_user: false,
             closure_denied: artifacts_landed == 0,
-            finish: symbio_core::ModelFinishReason::Stop,
+            finish: symbio_kernel::llm::ModelFinishReason::Stop,
         });
     }
     // `reason` 是闭集里的那个值（可判，由调用方选：`fallback` / `exhausted`），
@@ -157,7 +157,7 @@ where
         aborted: false,
         awaits_user: false,
         closure_denied: false,
-        finish: symbio_core::ModelFinishReason::Stop,
+        finish: symbio_kernel::llm::ModelFinishReason::Stop,
     })
 }
 
@@ -178,7 +178,7 @@ pub(crate) fn land_final<S>(
     user_seq: u64,
     cost_ms: u64,
     payload: serde_json::Value,
-) -> Result<(), symbio_core::AppendError>
+) -> Result<(), symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -210,7 +210,7 @@ pub(crate) async fn append_aborted<S>(
     user_seq: u64,
     llm: &dyn LlmAdapter,
     turn_root_id: &str,
-) -> Result<TurnOutcome, symbio_core::AppendError>
+) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -238,7 +238,7 @@ where
             aborted: true,
             awaits_user: false,
             closure_denied: true,
-            finish: symbio_core::ModelFinishReason::Stop,
+            finish: symbio_kernel::llm::ModelFinishReason::Stop,
         });
     }
     // 半截产出为空：请求还没发出，模型没产出任何正文 / 思考 / 工具事实。
@@ -258,7 +258,7 @@ where
         0,
         with_terminated(with_reason(
             with_status(produced, "aborted"),
-            symbio_core::ClosureReason::Interrupted,
+            symbio_kernel::event::ClosureReason::Interrupted,
         )),
     )?;
     Ok(TurnOutcome {
@@ -270,6 +270,6 @@ where
         aborted: true,
         awaits_user: false,
         closure_denied: false,
-        finish: symbio_core::ModelFinishReason::Stop,
+        finish: symbio_kernel::llm::ModelFinishReason::Stop,
     })
 }

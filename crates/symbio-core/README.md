@@ -20,14 +20,16 @@ impl: done
 **十七个域的实现住 `symbio-sdk`**（`text` · `clock` · `logger` · `event_bus` · `creator` ·
 `vdfs` · `keys` · `chat` · `capability` · `adapters` · `llm` · `plugin` · `agent` ·
 `embedding` · `turn` · `projection` · `invariants`）：它们有实现，但只碰内核词汇、自己的表
-与**事件信封上的字段**。本目录下这十七个域只剩转发（`pub use symbio_sdk::<域>::*;`）——
-域登记与命名纪律照旧，`symbio_core::<域>::…` 这条路径不变。域目录不删，是因为它是 §1.2 的
-登记面（`core-naming-audit` N-004）：搬的是住址，不是归属。
+与**事件信封上的字段**。本目录下这十七个域只剩转发桩（`pub use symbio_sdk::<域>::*;`），
+但桩**只做登记、不再进根出口**（[DE-023 D-272](../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性")）：
+根 `lib.rs` 的 `pub use` 只许来自四个**自有域**（`actors` / `authz` / `governance` / `view`），
+调用点按符号的真实归属写 `symbio_sdk::<域>::…` / `symbio_kernel::<域>::…`。域目录不删，
+是因为它是 §1.2 的登记面（`core-naming-audit` N-004）：搬的是住址，不是归属。
 
 封闭语法（五个语法 trait 与签名类型）的实现住 `symbio-kernel` crate（[DE-023 D-188](../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性")），
-本目录以同名私有 shim `pub use symbio_kernel::…` 转出——对外路径 `symbio_core::<符号>` 不变。
-本目录**仍然拥有**不属于封闭语法的部分：读本机部署表与义务环的行为（`authz` /
-`governance`、`ActorSpec` 的授权读法自由函数），以及控制面自己的编排状态机。
+它的公共面就是 `crates/symbio-kernel/src/lib.rs` 自己的根，core 不再转发一份。
+本目录**拥有**的是：读本机部署表与义务环的行为（`authz` / `governance`、`ActorSpec` 的
+授权读法自由函数），以及控制面自己的编排状态机——根上的 34 条出口全部来自这四个域。
 
 > 「不放实现」是**方向**而非字面事实：域里既有纯契约（`vdfs` / `capability` / `llm`
 > 的 trait 面），也有共享实现——只是共享实现现在住 `symbio-sdk`（D-258）。
@@ -125,22 +127,20 @@ impl: done
  无人使用的存量，按 [`dead-code-audit`](../../scripts/dead-code-audit.mjs) R-002
  **逐项承认**（`// dead-code-allow R-002: <理由>`，理由必填、数量棘轮只许降）。
  **根 `lib.rs` 里域目录一律 `mod <域>;`（私有）**——
- 子目录不开模块门，谁出现在公共面上由根 `pub use` 逐条声明。协议词按符号
- （`Verdict` / `DetailField`…）与**叶子模块**（`chat_node` / `node_build` / `facts`…）
- 在根导出；**任何深路径**（`symbio_core::plugin::dir::` / `symbio_core::chat::chat_node::`
- 之类）视为不规范，应改为根平铺。叶子模块只有一层，且名字是**主题**（见 §1.2 `chat` /
- `turn` 两行）——它不是「域的内部件也能被引用」的豁免。
+ 子目录不开模块门；根 `pub use` 只列**自有域**的符号（`actors` / `authz` / `governance` /
+ `view`，D-272）。转发桩域（十七个 sdk 域 + kernel shim）的符号一律按真实归属直取
+ `symbio_sdk::<域>::…` / `symbio_kernel::<域>::…`；**任何 core 深路径**
+ （`symbio_core::plugin::dir::` 之类）视为不规范。
  **可执行判据**：[`core-export-audit.mjs`](../../scripts/core-export-audit.mjs)——
- C-001（根出口唯一）/ C-002（无深引）/ C-003（**内核公共面**的符号必须被 ≥2 个模块消费，
- 0 消费方基线已归零、单消费方存量走棘轮，豁免写 §4 四问的理由）/ C-004（内核之外的根
- 账本条数冻结只许降——C-003 收窄后由它拦住「共享类型随手进根出口」，DE-023 D-186）。
+ C-001（根出口唯一）/ C-002（无深引）/ C-005（根不转发内核符号）/ C-006（根只出自有域）/
+ C-003（内核公共面符号 ≥2 消费方；门面已在 `symbio-kernel`，core 上判 0 条）/
+ C-004（根账本条数冻结只许降，基线 34，DE-023 D-272）。
 
-**封闭语法另有一个汇合口 [`kernel.rs`](src/kernel.rs)**（DE-023 A2）：Event 信封 / Entity×Verb /
+**封闭语法没有第二个汇合口**（DE-023 A2 / D-188 / D-272）：Event 信封 / Entity×Verb /
 `ActorSpec` 五字段 / `Pattern`·`Scope` / 声明容器与 `seal` / 环求解器 / 五个封闭语法 trait
-只经它重导出，根用 `pub use kernel::*` 平铺（对外路径不变）。封闭语法的实现与
-CS-001 / CS-004 的**判定范围**（`core-kernel-files:` 标记）都在 `crates/symbio-kernel/src/lib.rs`；
-`kernel.rs` 只剩转出。域行为不进这个文件。
-它不是域——没有目录、不进 §1.2 表。
+的公共面就是 `crates/symbio-kernel/src/lib.rs` 的根（14 条）；CS-001 / CS-004 的
+**判定范围**（`core-kernel-files:` 标记）也在那里。core 里没有它的转发副本（D-272 撤掉了
+转出门面）——同一个符号两个可写名字的形态，内核符号并不因为它「是语法」就例外。
 
 ### 域前缀对照表（全 28 域 —— 新增符号照此取名）
 
@@ -206,11 +206,11 @@ core 的根**不转发**这类符号（C-005，D-257）：内核的公共面只�
 > 判据见 §4 第 1 问（[D-023](../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。两者**不属于**
 > F1–F6 冻结契约名。
 
-> **`ActorSpec` 从根 `pub use` 出根**：它是 **F3 冻结锚点**（[DE-001 §4](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 主体规格
-> 五字段），只能住 core（F3 冻的是字段集）⇒ 必须自己占根出口。D-190 后它有
-> **两个**生产消费方（`crates/symbio-plugin-session` 的 `turn_exec` 与 `transcript/inbox` 的判定者行构造），
-> C-003 的「≥2 消费方」判据自行成立，因此 `core-export-audit.mjs` 的 `WAIVERS` 里**没有**它
-> （内核公共面豁免账本为空）。
+> **`ActorSpec` 的数据面住 `symbio_kernel::actors`**（F3 冻结锚点，[DE-001 §4](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 主体规格
+> 五字段）；core 拥有的是它的**授权读法**（`trivial_actor_spec` / `pattern_for_principal` /
+> `actor_can_*`，读本机部署表，`actors::spec`）。core 根上没有它的第二份出口——
+> 控制面写 `symbio_kernel::actors::ActorSpec`，授权读法写 `symbio_core::pattern_for_principal`
+> 一族（D-272：一个符号只有一个可写名字）。
 
 > 判据始终是「**调用点读不读得出归属**」，表只是把结论固化。所以 `logger` 用 `LOG_`
 > 而不是 `LOGGER_`（多出来的四个字母不增加任何信息）；而 `plugin` 域里 `PLUGIN_ID_*` /

@@ -12,11 +12,11 @@
 use super::entry;
 use async_trait::async_trait;
 use std::path::PathBuf;
-use symbio_core::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
-use symbio_core::{
+use symbio_kernel::vdfs::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
     VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
 };
+use symbio_sdk::vdfs::host::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
 
 /// 单文件型条目存储（同时是一个可直接注册的 `VdfsProvider`）
 #[derive(Debug, Clone)]

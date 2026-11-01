@@ -27,11 +27,14 @@
 //! 对象。
 
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
-use symbio_core::chat_node as cm;
-use symbio_core::PluginError;
+use symbio_kernel::plugin::PluginError;
+use symbio_sdk::chat::chat_node as cm;
 
 // core 的域模块私有（C-002：外部只写 symbio_core::<符号>）⇒ 视图类型经根导出拿
-use symbio_core::{transcript, turnstate, Event, WorkerProgress};
+use symbio_kernel::event::Event;
+use symbio_sdk::projection::transcript::transcript;
+use symbio_sdk::projection::turnstate::turnstate;
+use symbio_sdk::turn::facts::WorkerProgress;
 
 use super::chat_session::PersistentChatSession;
 use super::types::{Session, SessionSummary};

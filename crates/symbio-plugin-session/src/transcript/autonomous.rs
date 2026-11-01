@@ -25,10 +25,11 @@ use super::super::plugin::SessionPlugin;
 use crate::conation::conation;
 use crate::declarations::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 use crate::store::EventWalStore;
-use symbio_core::chat_node as cm;
-use symbio_core::session_chat;
 use symbio_core::{EffectiveMatrix, PRINCIPAL_AUTONOMOUS};
-use symbio_core::{Event, Seq, Store};
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::store::Store;
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::chat::session_chat;
 
 impl SessionPlugin {
     /// 为一次自主触发**开一轮**：先落事实，落成了才带着服务端推导的运行参数入队。
@@ -334,14 +335,14 @@ impl AutonomousInitiator {
         Event::pending(
             format!("sys-{source_seq}"),
             EVENT_SYSTEM_TRIGGERED,
-            symbio_core::Entity::System,
-            symbio_core::Verb::Opened,
+            symbio_kernel::event::Entity::System,
+            symbio_kernel::event::Verb::Opened,
             0,
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({
-            "kind": symbio_core::EVENT_TRIGGER_KIND_SCHEDULED
+            "kind": symbio_kernel::event::EVENT_TRIGGER_KIND_SCHEDULED
         }))
     }
 
@@ -350,8 +351,8 @@ impl AutonomousInitiator {
         Event::pending(
             format!("want-{source_seq}"),
             crate::declarations::EVENT_CONATION_EXPRESSED,
-            symbio_core::Entity::Conation,
-            symbio_core::Verb::Opened,
+            symbio_kernel::event::Entity::Conation,
+            symbio_kernel::event::Verb::Opened,
             0,
             PRINCIPAL_AUTONOMOUS,
         )
@@ -364,8 +365,8 @@ impl AutonomousInitiator {
         Event::pending(
             format!("o-{task_id}"),
             symbio_plugin_api::events::EVENT_TASK_OPENED,
-            symbio_core::Entity::Task,
-            symbio_core::Verb::Opened,
+            symbio_kernel::event::Entity::Task,
+            symbio_kernel::event::Verb::Opened,
             0,
             PRINCIPAL_AUTONOMOUS,
         )
@@ -374,7 +375,7 @@ impl AutonomousInitiator {
             "task_id": task_id,
             "depends_on": [],
             "goal": goal,
-            "budget_ms": symbio_core::LatencyTier::Autonomic.budget_ms(),
+            "budget_ms": symbio_kernel::adapters::LatencyTier::Autonomic.budget_ms(),
         }))
     }
 
@@ -390,8 +391,8 @@ impl AutonomousInitiator {
         Event::pending(
             format!("health-{source_seq}"),
             EVENT_SYSTEM_HEALTH,
-            symbio_core::Entity::System,
-            symbio_core::Verb::Progressed,
+            symbio_kernel::event::Entity::System,
+            symbio_kernel::event::Verb::Progressed,
             0,
             PRINCIPAL_AUTONOMOUS,
         )

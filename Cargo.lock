@@ -4145,6 +4145,7 @@ dependencies = [
  "inventory",
  "symbio-core",
  "symbio-deploy",
+ "symbio-kernel",
  "symbio-plugin-agent",
  "symbio-plugin-api",
  "symbio-plugin-classify",
@@ -4170,6 +4171,7 @@ dependencies = [
  "symbio-plugin-vdfs",
  "symbio-plugin-web",
  "symbio-providers",
+ "symbio-sdk",
  "tempfile",
  "tokio",
 ]
@@ -4180,6 +4182,7 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "symbio",
+ "symbio-sdk",
  "tokio",
 ]
 
@@ -4309,6 +4312,7 @@ dependencies = [
  "symbio-core",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-sdk",
  "tempfile",
  "time",
  "tokio",
@@ -4440,6 +4444,7 @@ dependencies = [
  "symbio-kernel",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-sdk",
  "symbio-testkit",
  "tempfile",
  "time",
@@ -4499,6 +4504,7 @@ dependencies = [
  "symbio-core",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-sdk",
  "tempfile",
  "time",
  "tokio",
@@ -4550,6 +4556,7 @@ dependencies = [
  "symbio-kernel",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-sdk",
  "symbio-testkit",
  "tempfile",
  "time",
@@ -4703,6 +4710,7 @@ version = "0.1.14"
 dependencies = [
  "symbio-core",
  "symbio-kernel",
+ "symbio-sdk",
  "tempfile",
  "time",
  "tokio",
@@ -4791,6 +4799,7 @@ dependencies = [
  "symbio-core",
  "symbio-kernel",
  "symbio-plugin-api",
+ "symbio-sdk",
  "tempfile",
  "time",
  "tokio",

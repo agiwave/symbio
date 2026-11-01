@@ -69,7 +69,8 @@ use super::super::test_support::{default_settings, loop_session, turn_spec, Fake
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
-use symbio_core::{EventStore, ExecTranscriptWriter};
+use symbio_kernel::exec::ExecTranscriptWriter;
+use symbio_kernel::store::EventStore;
 
 /// 帧口：记下每一条发出去的节点 id。
 #[derive(Default)]

@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::hooks::{fire_hook, HookEvent, HOOK_UNAVAILABLE_MARKER};
-use symbio_core::{
+use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
     PluginSimpleRequest,
 };

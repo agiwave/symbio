@@ -23,11 +23,12 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use symbio_core::{
-    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, VdfsContext, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
-};
 use symbio_deploy::PLUGIN_ID_LOOP;
+use symbio_kernel::plugin::{
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload,
+};
+use symbio_kernel::vdfs::{VdfsContext, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult};
 
 /// 单环驱动器。
 ///
@@ -78,7 +79,7 @@ impl Plugin for LoopPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = ctx.get(symbio_sdk::keys::PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!("未知路径: {path}")))
     }
 

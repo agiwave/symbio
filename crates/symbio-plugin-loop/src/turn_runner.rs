@@ -29,15 +29,17 @@
 //! 插件侧**不得**自己补写那两格（否则同轮两份记账的假象会回来）。
 
 use std::borrow::Cow;
-use symbio_core::{
-    actor_can_land_artifact, actor_can_land_speech, visible_to, ActorSpec, AdapterError, Entity,
-    Event, FullModel, LatencyTier, LlmAdapter, LlmTurn, Seq, Store, Verb,
-};
+use symbio_core::{actor_can_land_artifact, actor_can_land_speech, visible_to};
+use symbio_kernel::actors::ActorSpec;
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::llm::PromptToolCall;
+use symbio_kernel::store::Store;
 use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
 };
+use symbio_sdk::adapters::{AdapterError, FullModel, LlmAdapter, LlmTurn};
 
 // ── 阶段分层 ──────────────────────────────────────
 // 逐步过程按阶段切：准备 → 请求 / 流式 → 工具批 → 轮边界 → 收束。
@@ -102,7 +104,7 @@ pub struct TurnInput {
     /// `terminated`）——与 adapter 中途返回 `AdapterError::Aborted` 落的是同一格。
     ///
     /// `None` = 调用方不提供信号（单测 / 无中止语义的路径），行为与接线前逐字一致。
-    pub abort: Option<symbio_core::ExecAbortSignal>,
+    pub abort: Option<symbio_kernel::exec::ExecAbortSignal>,
     // 本轮装配进哪一时延档**不是**本包的字段（`D-223` 订正 1）：档位折自
     // 技能行作答后宿主代落的 `stage:"reflex"` 格（`turn_head.reflex_answered`），
     // 而那是轮首的一行——草稿在幕首就建，那一刻那一格还没有。它的落点是接缝
@@ -337,7 +339,7 @@ pub struct TurnOutcome {
     /// 的分子分母必须**同一次响应**（`chat_loop/turn.rs` 的 `feedback_estimate`）
     /// ——拿多轮的合计用量对最后一轮的文本做分母，观测比会系统性偏高。
     /// 反射档 / 兜底 / 中止没有模型参与，恒 `None`。
-    pub usage: Option<symbio_core::ModelUsage>,
+    pub usage: Option<symbio_kernel::llm::ModelUsage>,
     pub fell_back: bool,
     /// 中止（用户主动停止 / 会话销毁）：**中止照落收束格**（`chat.assistant.final`，
     /// 载荷 `status: "aborted"` + `terminated: { at }` + 顶层 `reason: interrupted`）——模型已产出的半截
@@ -376,7 +378,7 @@ pub struct TurnOutcome {
     /// （上界 [`super::loop_rows::MAX_STAGE_ROUNDS`]）。
     /// 这一格**不得**经 `TurnOutput { ..Default::default() }` 重建：那会恒填 Stop，
     /// 长度截断与自动续写因此不可达。
-    pub finish: symbio_core::ModelFinishReason,
+    pub finish: symbio_kernel::llm::ModelFinishReason,
 }
 
 /// turn 运行器：持令牌的调用方对每个会话轮调用一次。
@@ -420,7 +422,7 @@ impl TurnRunner {
     pub(crate) async fn begin<S>(
         store: &S,
         input: TurnInput,
-    ) -> Result<TurnSessionBegin, symbio_core::AppendError>
+    ) -> Result<TurnSessionBegin, symbio_kernel::store::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
@@ -493,7 +495,7 @@ impl TurnSession {
         &mut self,
         store: &S,
         llm: &dyn LlmAdapter,
-    ) -> Result<Option<TurnOutcome>, symbio_core::AppendError>
+    ) -> Result<Option<TurnOutcome>, symbio_kernel::store::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
@@ -594,7 +596,7 @@ impl TurnSession {
     pub(crate) async fn announce_model<S>(
         &mut self,
         store: &S,
-    ) -> Result<(), symbio_core::AppendError>
+    ) -> Result<(), symbio_kernel::store::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
@@ -617,9 +619,9 @@ impl TurnSession {
         store: std::sync::Arc<dyn Store<Event = Event>>,
         llm: std::sync::Arc<dyn LlmAdapter>,
         tok: FullModel,
-        sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
-        tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
-    ) -> Result<(), symbio_core::AppendError> {
+        sink: std::sync::Arc<dyn symbio_sdk::adapters::DeltaSink>,
+        tools: std::sync::Arc<[symbio_kernel::capability::CapabilityMeta]>,
+    ) -> Result<(), symbio_kernel::store::AppendError> {
         // 步数 = **真打出去的模型往返次数**：没有交接件的那一笔（上一世遗留）不算一步。
         if self.run.pending_round.is_some() {
             self.steps += 1;
@@ -669,7 +671,7 @@ impl TurnSession {
         store: &S,
         llm: &dyn LlmAdapter,
         has_dispatch: bool,
-    ) -> Result<(), symbio_core::AppendError>
+    ) -> Result<(), symbio_kernel::store::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
@@ -706,8 +708,8 @@ impl TurnSession {
         &mut self,
         store: &S,
         llm: &dyn LlmAdapter,
-        sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
-    ) -> Result<(), symbio_core::AppendError>
+        sink: std::sync::Arc<dyn symbio_sdk::adapters::DeltaSink>,
+    ) -> Result<(), symbio_kernel::store::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
@@ -764,7 +766,7 @@ impl TurnSession {
         store: &std::sync::Arc<dyn Store<Event = Event>>,
         llm: &dyn LlmAdapter,
         dispatch: Option<std::sync::Arc<dyn super::tool_dispatch::ToolDispatch>>,
-    ) -> Result<(), symbio_core::AppendError> {
+    ) -> Result<(), symbio_kernel::store::AppendError> {
         if let Some(dispatch) = dispatch {
             let flight = self.tool_flight.take();
             self.tool_flight =
@@ -815,7 +817,7 @@ impl TurnSession {
         store: &S,
         llm: &dyn LlmAdapter,
         detail: &str,
-    ) -> Result<TurnOutcome, symbio_core::AppendError>
+    ) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
@@ -838,7 +840,7 @@ async fn exceed_steps<S>(
     store: &S,
     llm: &dyn LlmAdapter,
     detail: &str,
-) -> Result<TurnOutcome, symbio_core::AppendError>
+) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -1025,13 +1027,13 @@ fn deny<S>(
     .with_payload(serde_json::json!({
         "key": key,
         "kind": kind_name,
-        "reason": symbio_core::ClosureReason::Denied.as_str(),
+        "reason": symbio_kernel::event::ClosureReason::Denied.as_str(),
         "detail": detail,
     }));
     match store.append(event) {
         Ok(_) => {}
         // 同一轮同一格被拒多次：说的是同一件事，落一条就够。
-        Err(symbio_core::AppendError::Duplicate) => {}
+        Err(symbio_kernel::store::AppendError::Duplicate) => {}
         Err(e) => symbio_plugin_api::plugin_warn!(
             "actors",
             "[v2] 拒绝事实未入格（turn={turn} / {kind_name} / {key}）：{e:?}"
@@ -1044,7 +1046,7 @@ fn deny<S>(
 /// 谓词与 [`closure_gate`] 的**同一份**（`can_reply` / `can_produce_artifact`）
 /// ——两处各写一套「这一类格要什么能力」就会让上限与许可分叉。
 fn within_delegation_ceiling(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
-    let symbio_core::Scope::Child(parent) = &actor.scope else {
+    let symbio_kernel::actors::Scope::Child(parent) = &actor.scope else {
         return Ok(());
     };
     let matrix = symbio_core::production_matrix();

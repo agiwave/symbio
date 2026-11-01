@@ -29,7 +29,7 @@ pub(crate) struct Assembled {
     pub(crate) session: Arc<LoopSession>,
     pub(crate) provider: Arc<dyn ModelProvider>,
     pub(crate) parent: Option<Arc<dyn Plugin>>,
-    pub(crate) ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+    pub(crate) ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     pub(crate) system_prompt: String,
     pub(crate) abort: ExecAbortSignal,
     pub(crate) root_id: String,
@@ -42,7 +42,7 @@ pub(crate) struct Assembled {
     pub(crate) supplements: Option<SupplementFn>,
     pub(crate) report: Option<super::super::report_exec::ReportPort>,
     pub(crate) supplemental_no: Arc<std::sync::atomic::AtomicU64>,
-    pub(crate) presentation_tree: symbio_core::node_build::PresentationTree,
+    pub(crate) presentation_tree: symbio_sdk::turn::node_build::PresentationTree,
     // —— 装配的读数与构造 ——
     pub(crate) store: Arc<dyn Store<Event = Event>>,
     pub(crate) turn_no: u64,
@@ -192,7 +192,7 @@ pub(crate) async fn assemble_turn(
     // 当场入日志（D-159 裁决 4）——装配段不是任何一行的出口。
     let principal = symbio_core::request_principal(ctx.as_ref());
     // 节点身份的同一份主体：流式帧与落库副本必须说同一个人（D-147）。
-    let session_principal = symbio_core::principal::Principal::from_legacy(&principal);
+    let session_principal = symbio_sdk::chat::principal::Principal::from_legacy(&principal);
 
     // 轮号与溯源锚由编排层在判决之前定下：用户格先落，这里只收三个
     // seq，不再从切片反推。
@@ -238,7 +238,7 @@ pub(crate) async fn assemble_turn(
                         status: Some(NodeStatus::Streaming),
                         ..Default::default()
                     });
-                    symbio_core::node_build::detach_if_flat(
+                    symbio_sdk::turn::node_build::detach_if_flat(
                         &mut node,
                         &root_id_owned,
                         presentation_tree,
@@ -265,7 +265,7 @@ pub(crate) async fn assemble_turn(
                         status: Some(NodeStatus::Completed),
                         ..Default::default()
                     });
-                    symbio_core::node_build::detach_if_flat(
+                    symbio_sdk::turn::node_build::detach_if_flat(
                         &mut node,
                         &root_id_owned,
                         presentation_tree,

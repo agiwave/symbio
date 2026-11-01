@@ -21,7 +21,7 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
-use symbio_core::chat_node::ChatNode;
+use symbio_sdk::chat::chat_node::ChatNode;
 
 /// 汇报正文的**能力口**：给一份运行现状，交回一句要说的话（`None` = 不说）。
 ///

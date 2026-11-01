@@ -7,7 +7,9 @@
 use super::autonomy_for;
 use crate::autonomy::AutonomyView;
 use crate::declarations::TASK_VOCAB as TASK;
-use symbio_core::{Budget, Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::{EventStore, Store};
+use symbio_kernel::view::Budget;
 
 // 任务族五格的拼写就是**生产那一张表**（`crate::declarations::TASK_VOCAB`，DE-024 D-206）：
 // 本插件既是这条读数的消费方，测试交的表与真实链路交的表就是同一份——写死一份夹具只会

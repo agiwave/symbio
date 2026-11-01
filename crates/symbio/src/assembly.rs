@@ -10,7 +10,7 @@
 //! 本来「够格」留在 core（各有多个消费方）。但那条判据回答的是「两个互不相认的插件
 //! 要不要共享一处**机制**」；这里要共享的不是机制，而是**宿主决定接哪些插件**。
 //! 装配是宿主的事：插件清单、启停状态、出厂 id 与装配结果归装配方持有，容器只经
-//! [`symbio_core::REQUIRED_PLUGINS`] 接收结果（见 `crates/symbio-plugin-composite` 的 README）。
+//! [`symbio_sdk::keys::REQUIRED_PLUGINS`] 接收结果（见 `crates/symbio-plugin-composite` 的 README）。
 //! 因此加一个插件不再需要改 `symbio_core`——这是「加插件不改内核」的判据。
 //!
 //! ## 消费方
@@ -42,7 +42,7 @@
 //! ## 子 Agent 子树清单的事实与边界
 //!
 //! 子 Agent 是一棵 composite 插件树（与系统 Agent 同构，agent-directory-spec §1.1），
-//! 构造时经 ctx 键 [`symbio_core::REQUIRED_PLUGINS`] 告知容器「必须挂哪些插件」。
+//! 构造时经 ctx 键 [`symbio_sdk::keys::REQUIRED_PLUGINS`] 告知容器「必须挂哪些插件」。
 //! 系统树那份（`crates/symbio-plugin-home` 的 `SYSTEM_PLUGINS`）直接别名到本清单，因此不存在需要
 //! 手工同步的第二份字面量。差异**不在清单里**，而在收集期的**作用域**：
 //!

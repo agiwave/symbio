@@ -2,7 +2,8 @@
 
 use super::*;
 
-use symbio_core::{Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::{EventStore, Store};
 
 #[test]
 fn authority_defaults_match_plan_01() {

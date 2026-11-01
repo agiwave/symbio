@@ -60,7 +60,7 @@ const DECL_RE =
   /EventDecl::(with_roles|new)\s*\(\s*(?:"([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"|([A-Z][A-Z0-9_]*))/g
 /**
  * 声明处的格位：`(Entity::Memory, Verb::Opened)`（跨行也认）。
- * 路径限定写法（`(symbio_core::Entity::Memory, …)`——不 `use` 直接全量写）同认：
+ * 路径限定写法（`(symbio_kernel::event::Entity::Memory, …)`——不 `use` 直接全量写）同认：
  * 拼写上两种都对，只认一种会让生成器对同一形状的声明给出两种答案。
  */
 const CELL_RE = /\(\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*Entity::([A-Za-z0-9_]+)\s*,\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*Verb::([A-Z][A-Za-z0-9_]*)\s*\)/
@@ -209,9 +209,11 @@ const constOf = (name) => `EVENT_${name.replace(/\./g, '_').toUpperCase()}`
 /** 纯函数：声明清单 → 文件内容。导出给回归测试（测试不触发写盘）。 */
 export function render(rows) {
   const needsRoles = rows.some((r) => (r.roles ?? []).length > 0)
+  // 事件词汇是内核语法（Entity×Verb / EventDecl / FactRole）：D-272 之后按真实归属直取
+  // `symbio_kernel`，不再经 core 根的第二份出口。
   const coreImports = needsRoles
-    ? 'use symbio_core::{Entity, EventDecl, FactRole, Verb};'
-    : 'use symbio_core::{Entity, EventDecl, Verb};'
+    ? 'use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};'
+    : 'use symbio_kernel::event::{Entity, EventDecl, Verb};'
   const L = [HEADER, '', coreImports, '']
   let current = null
   for (const r of rows) {

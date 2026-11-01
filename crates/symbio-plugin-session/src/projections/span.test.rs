@@ -5,7 +5,9 @@
 
 use super::span;
 use super::{SpanSummary, SpanView};
-use symbio_core::{Budget, Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::{EventStore, Store};
+use symbio_kernel::view::Budget;
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 
 fn msg(id: &str, ts: i64) -> Event {

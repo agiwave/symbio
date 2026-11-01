@@ -14,7 +14,9 @@
 //! 分位数是**读方计算**：视图只携带升序样本（构造即排序，逐字节确定，N1），
 //! `percentile` 是纯查询——投影只报数，SLO 是承诺。
 
-use symbio_core::{ChatVocab, Entity, Event, Projection, Verb};
+use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::projection::Projection;
+use symbio_sdk::projection::vocab::ChatVocab;
 
 use super::tiers::declared_tier;
 

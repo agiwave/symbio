@@ -36,7 +36,9 @@ use super::super::store::SessionStore;
 use super::super::types::Session;
 use super::*;
 use std::sync::Weak;
-use symbio_core::{PluginDir, VdfsChange, VdfsChangeSubscriptions};
+use symbio_kernel::vdfs::VdfsChange;
+use symbio_sdk::plugin::PluginDir;
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 use tokio::sync::RwLock;
 
 /// 「开跑一轮」端口（构造与用途见模块文档）。

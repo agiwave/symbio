@@ -114,17 +114,16 @@ pub use symbio_kernel::exec::{
     ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter, ABORT_SIGNAL, EVENT_SINK,
 };
 pub use symbio_kernel::keys::SymbioKey;
-pub use symbio_kernel::llm::model_provider::{
-    ModelFinishReason, ModelProvider, ModelSpend, ModelUsage,
-};
+pub use symbio_kernel::llm::{ModelFinishReason, ModelProvider, ModelSpend, ModelUsage};
 pub use symbio_kernel::llm::{PromptMessage, TurnOutput, TurnToolCallInfo};
-pub use symbio_kernel::plugin::error::{lock_read, lock_write, PluginError, PluginInvokeResponse};
+pub use symbio_kernel::plugin::error::{lock_read, lock_write};
 pub use symbio_kernel::plugin::{
     Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginMessageWire, PluginMeta, PluginPayload, PluginPayloadWire, PluginSimpleRequest,
     PluginStopReason, SimpleResponse, SuccessResponse,
 };
-pub use symbio_kernel::present::detail::{
+pub use symbio_kernel::plugin::{PluginError, PluginInvokeResponse};
+pub use symbio_kernel::present::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection,
 };
@@ -149,15 +148,16 @@ pub use symbio_kernel::{
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、
 // 对象构造器的链接期登记、日志与协议键。它们与「插件要用一条机制」是同一件事，
 // 与「插件要认识整个宿主」被绑成同一件事。SDK 把这条绑定切开：这一臂只依赖内核。
+pub use symbio_kernel::capability::{capability_invoke, failure_kind};
 pub use symbio_sdk::adapters::{
     DeltaSink, FullModel, LlmAdapter, ProviderLlmAdapter, SilentDeltas, TokenIssuer,
 };
 pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 pub use symbio_sdk::capability::{
     capability_announce_configurable, capability_configurables, capability_entry_of,
-    capability_invoke, capability_model_active, capability_model_resolve, capability_option_fields,
+    capability_model_active, capability_model_resolve, capability_option_fields,
     capability_prompts, capability_report_error, capability_take_errors, capability_to_wire,
-    capability_vdfs_root, failure_kind, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
+    capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
 };
 pub use symbio_sdk::chat::{chat_node, chat_request, principal};
 pub use symbio_sdk::clock::clock_now_ms;
@@ -174,7 +174,7 @@ pub use symbio_sdk::keys::{
     TOOL_CALL_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
 };
 pub use symbio_sdk::keys::{PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER};
-pub use symbio_sdk::llm::{llm_emit_message, llm_removed_frame, llm_short_id};
+pub use symbio_sdk::llm::turn::{llm_emit_message, llm_removed_frame, llm_short_id};
 pub use symbio_sdk::plugin::{
     plugin_dir_from_ctx, plugin_expand_tilde_path, PluginConfigFile, PluginConfigMount, PluginDir,
     PluginEntry, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED,
@@ -191,9 +191,10 @@ pub use symbio_sdk::text::merge_kernel::truncate_chars;
 pub use symbio_sdk::text::{text_floor_char_boundary, text_truncate_bytes};
 pub use symbio_sdk::turn::dispatch::TASK_CAP;
 pub use symbio_sdk::turn::node_build;
-pub use symbio_sdk::vdfs::{
-    absolute_addr, descend_addr, join_addr, vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx,
-    vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, AddrRootDecl,
+pub use symbio_sdk::vdfs::address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
+pub use symbio_sdk::vdfs::host::{
+    vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes,
+    vdfs_watch_changes,
 };
 pub use symbio_sdk::{
     impl_config_mount_vdfs, plugin_debug, plugin_error, plugin_info, plugin_warn,

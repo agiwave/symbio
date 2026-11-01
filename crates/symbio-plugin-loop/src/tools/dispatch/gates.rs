@@ -34,7 +34,8 @@
 //! [`refuse`] 骨架，并显式声明自己的失败语义（[`Refusal::blocked`]）。
 
 use super::*;
-use symbio_core::{Entity, Verb, PRINCIPAL_REFLEX};
+use symbio_core::PRINCIPAL_REFLEX;
+use symbio_kernel::event::{Entity, Verb};
 use symbio_plugin_api::effects::{BeforeReadings, BeforeRefusal};
 
 /// 批首一次读齐的全部闸门读数（批首一次读齐；逐条执行与未执行收口只按值消费，不再回读事实源）。
@@ -74,7 +75,7 @@ pub(crate) struct GateReadings {
 /// 与 `request_principal` 同源：判断与落笔因此指向同一个主体，不会出现「按 A 判、
 /// 以 B 记」的两套主体。
 pub(crate) fn batch_principal(ctx: &Arc<dyn PluginInvokeRequest>) -> String {
-    symbio_core::principal_of(ctx.get(symbio_core::AGENT_ID).as_deref())
+    symbio_core::principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref())
 }
 
 /// 上下文里**本批之外**已出现过的工具调用签名（按出现顺序）。
@@ -106,7 +107,7 @@ pub(crate) async fn read_batch_gates(
     facts: &dyn Store<Event = Event>,
     elimination_revoked: bool,
 ) -> GateReadings {
-    let mode = ctx.get(symbio_core::MODE).unwrap_or_default();
+    let mode = ctx.get(symbio_sdk::keys::MODE).unwrap_or_default();
 
     plugin_info!(
         "session",
@@ -136,12 +137,13 @@ pub(crate) async fn read_batch_gates(
     //
     // 同一份元数据还给出**风险档**（执行策略）：登记表只读一次，两个
     // 消费者按值复用——再遍历一遍收集管线等于把批首读数变成两处时延源。
-    let metas = symbio_core::tool_metas(&ctx).await;
+    let metas = symbio_sdk::capability::tool_metas(&ctx).await;
     let decls = ToolDecls::of_metas(&metas);
     let risks = ToolRisks::of_metas(&metas);
     // 端口声明与元数据同一处读数：批内上界由 `PortDecl` 说，执行层只消费。
-    let concurrency = symbio_core::ring::port_of(super::super::super::loop_rows::PORTS, "tool")
-        .map_or(0, |p| p.concurrency);
+    let concurrency =
+        symbio_kernel::decl::ring::port_of(super::super::super::loop_rows::PORTS, "tool")
+            .map_or(0, |p| p.concurrency);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -390,7 +392,7 @@ fn external_execution(ctx: &GateContext<'_>) -> Option<Refusal> {
         ctx.breaker.budget_ms,
         ctx.gate_started.elapsed().as_millis() as u64,
         // 输入是会话事实源的整段重放 ⇒ 拿深度档的预算，不拿反射档（见 `gate` 文档）。
-        symbio_core::LatencyTier::Deep.budget_ms(),
+        symbio_kernel::adapters::LatencyTier::Deep.budget_ms(),
     );
     match decision {
         GateDecision::Allow => None,

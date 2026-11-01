@@ -11,8 +11,10 @@
 
 use super::super::turn_exec::ActorError;
 use super::{TurnInput, TurnOutcome, TurnRunner};
-use symbio_core::{DeltaSink, Entity, Event, FullModel, LlmAdapter, SilentDeltas, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::store::Store;
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
+use symbio_sdk::adapters::{DeltaSink, FullModel, LlmAdapter, SilentDeltas};
 use symbio_testkit::trivial_actor_spec;
 
 /// 测试侧先落用户格：生产里由 `chat_loop::drive` 在任何判决之前落，
@@ -53,7 +55,9 @@ impl TurnRunner {
     /// 进得来（反射 / 快速档在类型上就到不了这里）。
     pub async fn run(
         &self,
-        store: &std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+        store: &std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        >,
         llm: std::sync::Arc<dyn LlmAdapter>,
         tok: FullModel,
         turn: u64,
@@ -94,7 +98,9 @@ impl TurnRunner {
     /// ——「有工具」与「无工具」不是两条执行路径。
     pub async fn run_streaming(
         &self,
-        store: &std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+        store: &std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        >,
         llm: std::sync::Arc<dyn LlmAdapter>,
         tok: FullModel,
         input: TurnInput,
@@ -119,12 +125,14 @@ impl TurnRunner {
     #[allow(clippy::too_many_arguments)]
     pub async fn drive_with_tools(
         &self,
-        store: &std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+        store: &std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        >,
         llm: std::sync::Arc<dyn LlmAdapter>,
         tok: FullModel,
         input: TurnInput,
         sink: std::sync::Arc<dyn DeltaSink>,
-        tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
+        tools: std::sync::Arc<[symbio_kernel::capability::CapabilityMeta]>,
         dispatch: Option<std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>>,
     ) -> Result<TurnOutcome, ActorError> {
         self.drive_with_actors(
@@ -159,12 +167,14 @@ impl TurnRunner {
     #[allow(clippy::too_many_arguments)]
     pub async fn drive_with_actors(
         &self,
-        store: &std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+        store: &std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        >,
         llm: std::sync::Arc<dyn LlmAdapter>,
         tok: FullModel,
         input: TurnInput,
         sink: std::sync::Arc<dyn DeltaSink>,
-        tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
+        tools: std::sync::Arc<[symbio_kernel::capability::CapabilityMeta]>,
         dispatch: Option<std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>>,
         actors: &'static [super::super::loop_rows::ActorEntry],
         prefix: Option<String>,
@@ -177,7 +187,7 @@ impl TurnRunner {
         // 「同一幕不许跑两次」的那道闸；`inputs` 格是 `turn_head.prepared` 的来源，
         // 没它的话环的第一笔债是 `prepare-turn`（`prio` 52），而那个动作要的是编排层
         // 那一片状态，本夹具没有。
-        let facts = store.range(symbio_core::Seq::new(0));
+        let facts = store.range(symbio_kernel::event::Seq::new(0));
         let now = super::super::loop_rows::wake_now_ms(&facts, input.drive_seq);
         let tier = super::super::loop_rows::turn_tier(&facts, input.turn, now);
         super::super::stage_events::land(
@@ -235,21 +245,23 @@ impl TurnRunner {
         .map_err(|exit| match exit {
             super::super::turn_exec::TurnExecExit::Failed(e) => ActorError::Read(e),
             super::super::turn_exec::TurnExecExit::Aborted(_) => {
-                ActorError::Read(symbio_core::PluginError::InternalError(
+                ActorError::Read(symbio_kernel::plugin::PluginError::InternalError(
                     "环交出了中止出口（本夹具的绑定表里没有中止那一行）".into(),
                 ))
             }
         })?;
         match end {
             super::super::turn_exec::DriveEnd::Bare(outcome) => Ok(outcome),
-            super::super::turn_exec::DriveEnd::Answered => {
-                Err(ActorError::Read(symbio_core::PluginError::InternalError(
+            super::super::turn_exec::DriveEnd::Answered => Err(ActorError::Read(
+                symbio_kernel::plugin::PluginError::InternalError(
                     "夹具没有编排层那一片状态，判不成答话".into(),
-                )))
-            }
-            _ => Err(ActorError::Read(symbio_core::PluginError::InternalError(
-                "裸幕只交出结局（环交回了别的出口）".into(),
-            ))),
+                ),
+            )),
+            _ => Err(ActorError::Read(
+                symbio_kernel::plugin::PluginError::InternalError(
+                    "裸幕只交出结局（环交回了别的出口）".into(),
+                ),
+            )),
         }
     }
 }
@@ -260,21 +272,25 @@ mod turn_runner_tests {
     use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
     use crate::control_decl::{guard_vocab, EVENT_TURN_STAGE};
     use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
-    use symbio_core::{
-        check_all, cost_ledger, transcript, AppendError, Budget, Event, EventStore, Seq,
-        SilentDeltas, Store, TokenIssuer,
-    };
+    use symbio_kernel::event::{Event, Seq};
+    use symbio_kernel::store::{AppendError, EventStore, Store};
+    use symbio_kernel::view::Budget;
     use symbio_plugin_api::events::{
         EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
     };
+    use symbio_sdk::adapters::{SilentDeltas, TokenIssuer};
+    use symbio_sdk::invariants::check_all;
+    use symbio_sdk::projection::cost::cost_ledger;
+    use symbio_sdk::projection::transcript::transcript;
     use symbio_testkit::{trivial_actor_spec, StubLlmAdapter};
 
     /// 成功轮：final 落格、溯源指向本轮用户消息、实测 cost_ms > 0、
     /// 不变量绿、收束投影 settled；成本台账与兜底率同账（D-044）。
     #[tokio::test]
     async fn turn_runner_happy_path_lands_final_with_measured_cost() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(symbio_core::EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
@@ -309,7 +325,11 @@ mod turn_runner_tests {
         );
 
         // turnstate：收束且 final 可见。
-        let view = symbio_core::turnstate(CHAT_VOCAB).apply(&snapshot, 0, Budget::generous());
+        let view = symbio_sdk::projection::turnstate::turnstate(CHAT_VOCAB).apply(
+            &snapshot,
+            0,
+            Budget::generous(),
+        );
         assert!(view.value.settled() && view.value.final_text.is_some());
     }
 
@@ -317,8 +337,9 @@ mod turn_runner_tests {
     /// 不变量照常绿——「失败也是一句话」，不是静默。
     #[tokio::test]
     async fn turn_runner_failure_lands_fallback_not_silence() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(symbio_core::EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::always_fail("模型挂了"));
 
@@ -360,8 +381,9 @@ mod turn_runner_tests {
     async fn turn_runner_events_are_replayable() {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         for turn in 0..3u64 {
             TurnRunner
                 .run(&store, llm.clone(), tok, turn, "问")
@@ -391,8 +413,9 @@ mod turn_runner_tests {
         assert_eq!(snapshot.len(), 28);
 
         // 与一遍直写（不经过重放）的台账一致（N1/N2 家族）。
-        let fresh: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(symbio_core::EventStore::new());
+        let fresh: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
         for turn in 0..4u64 {
             TurnRunner
                 .run(
@@ -415,8 +438,9 @@ mod turn_runner_tests {
     /// 同一 turn 号重复使用被幂等键挡住（事件 id 撞车 ⇒ Duplicate）。
     #[tokio::test]
     async fn turn_runner_reused_turn_number_is_rejected() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(symbio_core::EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
@@ -461,8 +485,9 @@ mod turn_runner_tests {
     /// 答复是 `role: assistant`」）——历史就是消息序列，没有分隔符。
     #[tokio::test]
     async fn multi_turn_transcript_carries_history_from_fact_source() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
@@ -528,10 +553,11 @@ mod turn_runner_tests {
     /// fallback 行进转写（assistant / detail）——兜底话术是用户实际看到的回复。
     #[test]
     fn transcript_includes_fallback_as_assistant_line() {
-        use symbio_core::{Entity, Verb};
+        use symbio_kernel::event::{Entity, Verb};
         use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_USER_MESSAGE};
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         store
             .append(
                 Event::pending(
@@ -576,12 +602,13 @@ mod turn_runner_tests {
     /// 交换（`tool_exchange_messages`）同形。
     #[test]
     fn transcript_includes_artifact_as_tool_line() {
-        use symbio_core::{Entity, Verb};
+        use symbio_kernel::event::{Entity, Verb};
         use symbio_plugin_api::events::{
             EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
         };
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         // 轮 0：用户 → 工具结果 → 收束
         store
             .append(
@@ -680,14 +707,14 @@ mod turn_runner_tests {
     /// 收集口：按序记增量（流式验收用）。
     struct CollectingDeltas(std::sync::Mutex<Vec<String>>);
 
-    impl symbio_core::DeltaSink for CollectingDeltas {
+    impl symbio_sdk::adapters::DeltaSink for CollectingDeltas {
         fn on_delta(&self, text: &str) {
             self.0.lock().unwrap().push(text.to_string());
         }
         // 本组用例的桩不产推理增量；推理通道由
         // `crates/symbio-plugin-model/src/bound_provider.test.rs` 的桥接用例覆盖（那里有 SSE 级 fixture）。
         fn on_reasoning(&self, _text: &str) {}
-        fn on_tool_frame(&self, _frame: &symbio_core::chat_node::ChatNode) {}
+        fn on_tool_frame(&self, _frame: &symbio_sdk::chat::chat_node::ChatNode) {}
     }
 
     /// 流式运行：分片按序进 sink；落格语义与 run() 同一条路径（final 照常、
@@ -695,10 +722,11 @@ mod turn_runner_tests {
     #[tokio::test]
     async fn streaming_run_forwards_deltas_and_writes_final() {
         use std::sync::{Arc, Mutex};
-        use symbio_core::DeltaSink;
+        use symbio_sdk::adapters::DeltaSink;
 
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed_streaming(
             "stub-model",
@@ -750,8 +778,9 @@ mod turn_runner_tests {
         assert_eq!(view.value.entries[1].text, "你好！", "final 落的是全文");
 
         // 默认降级：无分片桩经 run_streaming = 一帧全文（诚实降级，不是静默）。
-        let store2: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store2: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let llm2 = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
         let got2 = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
         let user_seq = super::seed_user(store2.as_ref(), 0, "问");
@@ -791,11 +820,12 @@ mod turn_runner_tests {
     #[tokio::test]
     async fn streaming_frames_do_not_add_facts() {
         use std::sync::{Arc, Mutex};
-        use symbio_core::DeltaSink;
+        use symbio_sdk::adapters::DeltaSink;
 
         // 非流式：一次全文，一条 final。
-        let plain_store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let plain_store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         TurnRunner
             .run(
@@ -809,8 +839,9 @@ mod turn_runner_tests {
             .unwrap();
 
         // 流式：三个分片，同样一次模型往返。
-        let stream_store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let stream_store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
         let user_seq = super::seed_user(stream_store.as_ref(), 0, "问");
         TurnRunner
@@ -876,7 +907,8 @@ mod turn_runner_tests {
     #[tokio::test]
     async fn opening_node_reaches_the_live_surface_at_production_time() {
         use std::sync::{Arc, Mutex};
-        use symbio_core::{chat_node::MessageContent, DeltaSink};
+        use symbio_sdk::adapters::DeltaSink;
+        use symbio_sdk::chat::chat_node::MessageContent;
 
         /// 按序记「实时面上到过的帧」：`(节点 id, 正文)`，增量记为空 id。
         #[derive(Default)]
@@ -890,7 +922,7 @@ mod turn_runner_tests {
                     .push((String::new(), text.to_string()));
             }
             fn on_reasoning(&self, _text: &str) {}
-            fn on_tool_frame(&self, frame: &symbio_core::chat_node::ChatNode) {
+            fn on_tool_frame(&self, frame: &symbio_sdk::chat::chat_node::ChatNode) {
                 self.0.lock().unwrap().push((
                     frame.id.clone(),
                     frame
@@ -902,8 +934,9 @@ mod turn_runner_tests {
             }
         }
 
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let got = Arc::new(Frames::default());
         let user_seq = super::seed_user(store.as_ref(), 0, "问");
 
@@ -986,10 +1019,11 @@ mod turn_runner_tests {
     /// 收束，未收束的缺口才真的合得上（C4）。
     #[tokio::test]
     async fn aborted_run_closes_the_cell_with_aborted_status() {
-        use symbio_core::unresolved_turns;
+        use symbio_sdk::invariants::unresolved_turns;
 
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
@@ -1060,8 +1094,9 @@ mod turn_runner_tests {
     /// 这半句 = 用户追问名词时前置上下文消失，那才是真正的丢事实。
     #[tokio::test]
     async fn abort_keeps_the_half_sentence_in_the_grid() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
@@ -1110,7 +1145,7 @@ mod turn_runner_tests {
             .expect("收束格在");
         let output = snapshot
             .iter()
-            .find(|e| e.kind == symbio_core::EVENT_FAILED)
+            .find(|e| e.kind == symbio_kernel::event::EVENT_FAILED)
             .expect("失败格在");
         // 半截正文属于**那一次模型往返**（`failed`），收束格只引用它的节点身份。
         assert_eq!(
@@ -1152,8 +1187,9 @@ mod turn_runner_tests {
     /// 事实），`reasoning` / `reasoning_id` 入格，重建可查。
     #[tokio::test]
     async fn reasoning_is_queryable_in_the_grid() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
@@ -1181,7 +1217,7 @@ mod turn_runner_tests {
         let snapshot = store.range(Seq::new(0));
         let output = snapshot
             .iter()
-            .find(|e| e.kind == symbio_core::EVENT_FAILED)
+            .find(|e| e.kind == symbio_kernel::event::EVENT_FAILED)
             .expect("失败格在");
         assert_eq!(
             output.payload["reasoning"], "这个名词需要先定义。",
@@ -1200,8 +1236,9 @@ mod turn_runner_tests {
     /// 用户按的停止不是「模型答不出」，两者在格与指标上都要分得开。
     #[tokio::test]
     async fn abort_does_not_pollute_fallback_semantics() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
@@ -1261,12 +1298,13 @@ mod turn_runner_tests {
     ///   「闸把所有人都拒了」的平凡真）。
     #[tokio::test]
     async fn closure_is_withheld_when_the_principal_lacks_the_grant() {
-        use symbio_core::unresolved_turns;
         use symbio_core::PRINCIPAL_AUTONOMOUS;
+        use symbio_sdk::invariants::unresolved_turns;
 
         // ── 拒绝：自主发起者不持 `reply.first` ⇒ 收束格不落 ────────────────
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
         let user_seq = super::seed_user(store.as_ref(), 0, "问");
@@ -1313,8 +1351,9 @@ mod turn_runner_tests {
         );
 
         // ── 放行对照：`agent:main` 持 `reply.first` ⇒ final 照落 ───────────
-        let store2: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store2: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let user_seq = super::seed_user(store2.as_ref(), 0, "问");
         TurnRunner
             .drive_with_tools(
@@ -1364,16 +1403,19 @@ mod tool_round_tests {
     };
     use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnRunner};
     use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_TURN_STAGE};
-    use symbio_core::{
-        check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, Entity, Event,
-        EventStore, FullModel, LlmAdapter, LlmTurn, ModelFinishReason, Seq, SilentDeltas, Store,
-        TokenIssuer, TurnToolCallInfo, Verb,
-    };
+    use symbio_kernel::capability::CapabilityMeta;
+    use symbio_kernel::event::{Entity, Event, Seq, Verb};
     use symbio_kernel::llm::PromptMessage;
+    use symbio_kernel::llm::{ModelFinishReason, TurnToolCallInfo};
+    use symbio_kernel::store::{EventStore, Store};
     use symbio_plugin_api::events::{
         EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_PROGRESS,
         EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
     };
+    use symbio_sdk::adapters::{
+        AdapterError, DeltaSink, FullModel, LlmAdapter, LlmTurn, SilentDeltas, TokenIssuer,
+    };
+    use symbio_sdk::invariants::{check_all, unresolved_turns};
 
     /// 判据：**每一次**模型往返都留下完整的协议事实——
     /// `request` → `sent` → `response` / `failed`，且三者共享同一个逻辑 id。
@@ -1391,8 +1433,9 @@ mod tool_round_tests {
     /// 往返」在日志里长成「一次」——重放时只能发一次，而模型确实收过两次请求。
     #[tokio::test]
     async fn every_model_call_leaves_a_sent_and_an_answer() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let dispatch = std::sync::Arc::new(FakeDispatch {
@@ -1423,18 +1466,19 @@ mod tool_round_tests {
         let id_of = |e: &Event| e.payload["id"].as_str().unwrap_or_default().to_string();
         let requests: Vec<String> = model
             .iter()
-            .filter(|e| e.kind == symbio_core::EVENT_REQUEST)
+            .filter(|e| e.kind == symbio_kernel::event::EVENT_REQUEST)
             .map(|e| id_of(e))
             .collect();
         let sents: Vec<String> = model
             .iter()
-            .filter(|e| e.kind == symbio_core::EVENT_SENT)
+            .filter(|e| e.kind == symbio_kernel::event::EVENT_SENT)
             .map(|e| id_of(e))
             .collect();
         let answers: Vec<String> = model
             .iter()
             .filter(|e| {
-                e.kind == symbio_core::EVENT_RESPONSE || e.kind == symbio_core::EVENT_FAILED
+                e.kind == symbio_kernel::event::EVENT_RESPONSE
+                    || e.kind == symbio_kernel::event::EVENT_FAILED
             })
             .map(|e| id_of(e))
             .collect();
@@ -1482,8 +1526,9 @@ mod tool_round_tests {
     /// 删掉，本用例必红。
     #[tokio::test]
     async fn injected_messages_reach_the_next_request_of_the_same_turn() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let prompts = llm.prompts.clone();
@@ -1602,7 +1647,7 @@ mod tool_round_tests {
                 tool_calls: Vec::new(),
                 finish: ModelFinishReason::Stop,
                 cost_ms: 5,
-                usage: Some(symbio_core::ModelUsage {
+                usage: Some(symbio_kernel::llm::ModelUsage {
                     input: Some(11),
                     output: Some(22),
                 }),
@@ -1818,7 +1863,7 @@ mod tool_round_tests {
     fn model_batch(store: &dyn Store<Event = Event>) -> Option<(u64, u64, Vec<String>)> {
         let facts = store.range(Seq::new(0));
         let e = facts.iter().rev().find(|e| {
-            e.kind == symbio_core::EVENT_RESPONSE
+            e.kind == symbio_kernel::event::EVENT_RESPONSE
                 && e.payload.get("port").and_then(|v| v.as_str()) == Some("model")
         })?;
         let ids = e
@@ -1839,7 +1884,7 @@ mod tool_round_tests {
     /// 替身落协议事实：幂等键命中按「已经落过」处理，其余错误让用例红。
     fn append_fact(store: &dyn Store<Event = Event>, event: Event) {
         match store.append(event) {
-            Ok(_) | Err(symbio_core::AppendError::Duplicate) => {}
+            Ok(_) | Err(symbio_kernel::store::AppendError::Duplicate) => {}
             Err(e) => panic!("替身协议事实落格失败：{e:?}"),
         }
     }
@@ -2029,7 +2074,7 @@ mod tool_round_tests {
                     // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点
                     // （`result_id` 空串 = 无结果子节点）。
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: symbio_core::node_build::tool_call_args_text(tc),
+                    args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
                     annotations: Vec::new(),
                 })
@@ -2053,7 +2098,7 @@ mod tool_round_tests {
     /// 读回那一笔用的是**生产**的读侧（[`ToolPort::wake_batch`]）：唤醒载荷的形状
     /// 不在替身里复述一遍（复述即第二处真相——改了一处，另一处还认旧形状）。
     struct WakeDispatch {
-        store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+        store: std::sync::Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
         turn: u64,
         user_seq: u64,
         rounds: Arc<Mutex<usize>>,
@@ -2152,7 +2197,7 @@ mod tool_round_tests {
                     prompt: None,
                     failure_kind: String::new(),
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: symbio_core::node_build::tool_call_args_text(tc),
+                    args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
                     annotations: Vec::new(),
                 })
@@ -2266,7 +2311,7 @@ mod tool_round_tests {
                     prompt: None,
                     failure_kind: "denied".into(),
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: symbio_core::node_build::tool_call_args_text(tc),
+                    args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
                     annotations: Vec::new(),
                 })
@@ -2341,8 +2386,9 @@ mod tool_round_tests {
     /// **反向自检**：把 `prepare_turn` 里 `final_reply` 那段短路删掉，本用例必红（桩会被调到）。
     #[tokio::test]
     async fn final_reply_lands_both_cells_without_calling_the_model() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let prompts = llm.prompts.clone();
@@ -2410,8 +2456,9 @@ mod tool_round_tests {
     /// **反向自检**：把 `base_prompt` 的前置改成后置（拼到 `exchange` 之后），本用例必须红。
     #[tokio::test]
     async fn request_prefix_precedes_the_baseline_and_is_not_accumulated() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let prompts = llm.prompts.clone();
@@ -2486,8 +2533,9 @@ mod tool_round_tests {
         );
         // `None` / 空串 = 不加（平凡值必须真的什么都不加）
         for empty in [None, Some(String::new()), Some("   \n ".to_string())] {
-            let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-                std::sync::Arc::new(EventStore::new());
+            let store: std::sync::Arc<
+                dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+            > = std::sync::Arc::new(EventStore::new());
             let llm = std::sync::Arc::new(ToolCallingLlm::new());
             let prompts = llm.prompts.clone();
             let i = input(store.as_ref());
@@ -2528,8 +2576,9 @@ mod tool_round_tests {
     /// **反向自检**：把 `keep == 0` 分支改成 `&events[events.len()..]`，本用例必须红。
     #[tokio::test]
     async fn zero_window_means_no_truncation_not_empty_history() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(EchoLlm::new());
         let prompts = llm.prompts.clone();
@@ -2573,8 +2622,9 @@ mod tool_round_tests {
         );
 
         // 对照：`Some(1)` 只留当前轮（窗口**确实**在裁）
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let llm = std::sync::Arc::new(EchoLlm::new());
         let prompts = llm.prompts.clone();
         for turn in 0..3u64 {
@@ -2614,8 +2664,9 @@ mod tool_round_tests {
     /// **反向自检**：把 `window_by_turn` 里 `latest_snapshot_index` 那段拿掉，本用例必红。
     #[tokio::test]
     async fn the_compaction_snapshot_is_always_in_the_window() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(EchoLlm::new());
         let prompts = llm.prompts.clone();
@@ -2695,8 +2746,9 @@ mod tool_round_tests {
     /// **工具结果进了下一次请求**（回读 prompt——不变量与网格都证明不了这条）。
     #[tokio::test]
     async fn tool_round_lands_artifact_and_feeds_next_prompt() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let prompts = llm.prompts.clone();
@@ -2848,7 +2900,9 @@ mod tool_round_tests {
         let output = snapshot
             .iter()
             .rev()
-            .find(|e| e.kind == symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
+            .find(|e| {
+                e.kind == symbio_kernel::event::EVENT_RESPONSE && e.payload["port"] == "model"
+            })
             .expect("末轮应答在");
         assert_eq!(
             output.payload["answer"], "读到了。",
@@ -2865,8 +2919,9 @@ mod tool_round_tests {
     /// 下面的 `failed` 与第二轮请求都消失。
     #[tokio::test]
     async fn a_fully_denied_batch_is_closed_by_deny_tools() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let prompts = llm.prompts.clone();
@@ -2914,7 +2969,7 @@ mod tool_round_tests {
         );
         let failed = snapshot
             .iter()
-            .find(|e| e.kind == symbio_core::EVENT_FAILED)
+            .find(|e| e.kind == symbio_kernel::event::EVENT_FAILED)
             .expect("被拒的一笔以 failed 关账");
         assert_eq!(failed.payload["port"], "tool");
         assert_eq!(failed.payload["why"], "needs_approval");
@@ -2948,8 +3003,9 @@ mod tool_round_tests {
     /// 未收束的缺口必须**可被判出**（C4 看得见它）。
     #[tokio::test]
     async fn pending_tool_lands_progress_cell_without_closing() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let dispatch = std::sync::Arc::new(FakeDispatch {
@@ -3022,7 +3078,9 @@ mod tool_round_tests {
         let output = snapshot
             .iter()
             .rev()
-            .find(|e| e.kind == symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
+            .find(|e| {
+                e.kind == symbio_kernel::event::EVENT_RESPONSE && e.payload["port"] == "model"
+            })
             .expect("本轮应答在");
         assert_eq!(
             output.payload["answer"], "我先查一下。",
@@ -3053,8 +3111,9 @@ mod tool_round_tests {
     /// 不假装成功、也不静默丢工具调用。
     #[tokio::test]
     async fn tool_call_without_dispatch_falls_back() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
 
@@ -3109,8 +3168,9 @@ mod tool_round_tests {
     /// `TurnOutput.usage`）在 `turn_exec` 是两处同名字段直通，不另设旁路。
     #[tokio::test]
     async fn provider_usage_survives_the_run_to_the_outcome() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(AnsweringLlm::new());
         let out = TurnRunner
@@ -3127,7 +3187,7 @@ mod tool_round_tests {
             .expect("桩必答");
         assert_eq!(
             out.usage,
-            Some(symbio_core::ModelUsage {
+            Some(symbio_kernel::llm::ModelUsage {
                 input: Some(11),
                 output: Some(22)
             }),
@@ -3182,8 +3242,9 @@ mod tool_round_tests {
             }
         }
 
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let out = TurnRunner
             .drive_with_tools(
@@ -3226,8 +3287,9 @@ mod tool_round_tests {
     /// （[`ToolPort::wake_batch`]）：载荷形状不在替身里复述一遍。
     #[tokio::test]
     async fn a_wake_continues_the_same_turn_without_reopening_the_user_cell() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
 
         // ① 等待轮：工具报 pending ⇒ 停下、落进展格、不落收束格。
@@ -3346,7 +3408,9 @@ mod tool_round_tests {
         let output = snapshot
             .iter()
             .rev()
-            .find(|e| e.kind == symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
+            .find(|e| {
+                e.kind == symbio_kernel::event::EVENT_RESPONSE && e.payload["port"] == "model"
+            })
             .expect("唤醒幕的应答在");
         assert_eq!(
             output.payload["answer"], "批准后已完成。",
@@ -3378,7 +3442,7 @@ mod tool_round_tests {
         // 端口面：唤醒请求已关账（`sent` → `response`），不留悬着的债。
         assert!(
             snapshot.iter().any(|e| {
-                e.kind == symbio_core::EVENT_RESPONSE
+                e.kind == symbio_kernel::event::EVENT_RESPONSE
                     && e.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
             }),
             "唤醒那一笔必须有应答（端口债关清）：{snapshot:?}"
@@ -3530,7 +3594,7 @@ mod tool_round_tests {
                     prompt: None,
                     failure_kind: String::new(),
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: symbio_core::node_build::tool_call_args_text(tc),
+                    args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
                     annotations: Vec::new(),
                 })
@@ -3550,8 +3614,9 @@ mod tool_round_tests {
 
     #[tokio::test]
     async fn two_tool_rounds_accumulate_every_earlier_result_in_the_next_request() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(TwoRoundToolLlm {
             prompts: Arc::new(Mutex::new(Vec::new())),
@@ -3686,7 +3751,9 @@ mod tool_round_tests {
         // `round_output_rides_…`）；复制一份到收束格则是两个 owner。
         let outputs: Vec<_> = snapshot
             .iter()
-            .filter(|e| e.kind == symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
+            .filter(|e| {
+                e.kind == symbio_kernel::event::EVENT_RESPONSE && e.payload["port"] == "model"
+            })
             .collect();
         assert_eq!(outputs.len(), 3, "三次模型往返各一条应答事实");
         assert_eq!(
@@ -3787,8 +3854,9 @@ mod tool_round_tests {
 
     #[tokio::test]
     async fn reasoning_only_final_round_closes_as_answer_not_fallback() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ReasoningOnlyFinalLlm {
             prompts: Arc::new(Mutex::new(Vec::new())),
@@ -3822,7 +3890,9 @@ mod tool_round_tests {
         let output = snapshot
             .iter()
             .rev()
-            .find(|e| e.kind == symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
+            .find(|e| {
+                e.kind == symbio_kernel::event::EVENT_RESPONSE && e.payload["port"] == "model"
+            })
             .expect("末轮应答在");
         assert_eq!(
             output.payload["answer"], "想清楚了：答案是 42。",
@@ -3892,8 +3962,9 @@ mod tool_round_tests {
             }
         }
 
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(SilentFinalLlm {
             prompts: Arc::new(Mutex::new(Vec::new())),
@@ -3995,8 +4066,9 @@ mod tool_round_tests {
 
     #[tokio::test]
     async fn length_truncated_reasoning_is_not_delivered_as_answer() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(TruncatedReasoningFinalLlm {
             prompts: Arc::new(Mutex::new(Vec::new())),
@@ -4119,8 +4191,9 @@ mod tool_round_tests {
     /// 的轮在测试里表现为永不返回，在生产里表现为一个永远在花钱的会话。
     #[tokio::test]
     async fn a_runaway_adapter_is_stopped_at_the_step_bound() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(RunawayLlm {
             calls: Arc::new(Mutex::new(0)),
@@ -4188,8 +4261,9 @@ mod tool_round_tests {
     /// `waiting` 那一圈读不出来）。
     #[tokio::test]
     async fn a_round_still_in_flight_parks_the_ring_instead_of_killing_it() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let parked = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (open, opened) = tokio::sync::oneshot::channel::<()>();
@@ -4257,15 +4331,17 @@ mod tool_round_tests {
     /// 改回 `None` ⇒ 每一次 `append` 之后都不存在「有 `sent`、无终局」⇒ 本用例红。
     #[tokio::test]
     async fn an_in_flight_round_is_observable_between_selection_rounds() {
-        let inner: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let inner: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(WatchingStore {
-                inner: inner.clone(),
-                seen: seen.clone(),
-                turn: 0,
-            });
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(WatchingStore {
+            inner: inner.clone(),
+            seen: seen.clone(),
+            turn: 0,
+        });
         let llm = std::sync::Arc::new(symbio_testkit::StubLlmAdapter::succeed("stub-model"));
 
         let out = TurnRunner
@@ -4292,7 +4368,7 @@ mod tool_round_tests {
     /// 放在动作前后各读一次都不行——动作是原子的一段，中间那一态只在写入落地的
     /// 瞬间成立。
     struct WatchingStore {
-        inner: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+        inner: std::sync::Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
         seen: Arc<std::sync::atomic::AtomicBool>,
         turn: u64,
     }
@@ -4300,10 +4376,13 @@ mod tool_round_tests {
     impl Store for WatchingStore {
         type Event = Event;
 
-        fn append(&self, event: Event) -> Result<symbio_core::Seq, symbio_core::AppendError> {
+        fn append(
+            &self,
+            event: Event,
+        ) -> Result<symbio_kernel::event::Seq, symbio_kernel::store::AppendError> {
             let seq = self.inner.append(event)?;
             if super::super::super::loop_rows::waiting(
-                &self.inner.range(symbio_core::Seq::new(0)),
+                &self.inner.range(symbio_kernel::event::Seq::new(0)),
                 self.turn,
                 0,
             ) {
@@ -4312,11 +4391,11 @@ mod tool_round_tests {
             Ok(seq)
         }
 
-        fn range(&self, from: symbio_core::Seq) -> Vec<Event> {
+        fn range(&self, from: symbio_kernel::event::Seq) -> Vec<Event> {
             self.inner.range(from)
         }
 
-        fn head(&self) -> symbio_core::Seq {
+        fn head(&self) -> symbio_kernel::event::Seq {
             self.inner.head()
         }
     }
@@ -4346,15 +4425,17 @@ mod tool_round_tests {
     /// 已经关账 ⇒ `has_tool` 全程为假 ⇒ 本用例红。
     #[tokio::test]
     async fn an_in_flight_tool_batch_is_observable_between_selection_rounds() {
-        let inner: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let inner: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let windows = Arc::new(Mutex::new(Vec::new()));
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(BatchWindowStore {
-                inner: inner.clone(),
-                windows: windows.clone(),
-                turn: 0,
-            });
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(BatchWindowStore {
+            inner: inner.clone(),
+            windows: windows.clone(),
+            turn: 0,
+        });
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let dispatch = std::sync::Arc::new(FakeDispatch {
             pending: false,
@@ -4397,7 +4478,7 @@ mod tool_round_tests {
     /// 观察点是 `Store::head()`——派发器每跑一个动作前读它一次（`turn_exec.rs`），
     /// 那一读正落在「上一圈的动作已跑完、这一圈的动作还没跑」之间。
     struct BatchWindowStore {
-        inner: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+        inner: std::sync::Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
         /// 每个边界上的快照：(开着几笔、其中有没有工具端口、`waiting` 是否为真)。
         windows: Arc<Mutex<Vec<(usize, bool, bool)>>>,
         turn: u64,
@@ -4406,17 +4487,20 @@ mod tool_round_tests {
     impl Store for BatchWindowStore {
         type Event = Event;
 
-        fn append(&self, event: Event) -> Result<symbio_core::Seq, symbio_core::AppendError> {
+        fn append(
+            &self,
+            event: Event,
+        ) -> Result<symbio_kernel::event::Seq, symbio_kernel::store::AppendError> {
             self.inner.append(event)
         }
 
-        fn range(&self, from: symbio_core::Seq) -> Vec<Event> {
+        fn range(&self, from: symbio_kernel::event::Seq) -> Vec<Event> {
             self.inner.range(from)
         }
 
-        fn head(&self) -> symbio_core::Seq {
+        fn head(&self) -> symbio_kernel::event::Seq {
             let head = self.inner.head();
-            let facts = self.inner.range(symbio_core::Seq::new(0));
+            let facts = self.inner.range(symbio_kernel::event::Seq::new(0));
             let open = super::super::super::control_decl::open_calls(&facts);
             let has_tool = open
                 .iter()
@@ -4493,13 +4577,14 @@ mod reflex_turn_tests {
 
     use super::super::super::stage_events::{land, StageFact};
     use super::super::{TurnInput, TurnRunner};
-    use symbio_core::{
-        check_all, unresolved_turns, DeltaSink, Entity, EventStore, LatencyTier, Seq, TokenIssuer,
-        Verb,
-    };
+    use symbio_kernel::adapters::LatencyTier;
+    use symbio_kernel::event::{Entity, Seq, Verb};
+    use symbio_kernel::store::EventStore;
     use symbio_plugin_api::events::{
         EVENT_CHAT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE,
     };
+    use symbio_sdk::adapters::{DeltaSink, TokenIssuer};
+    use symbio_sdk::invariants::{check_all, unresolved_turns};
 
     use crate::control_decl::EVENT_TURN_STAGE;
 
@@ -4512,15 +4597,16 @@ mod reflex_turn_tests {
         }
         // 快路不调模型 ⇒ 没有推理增量；通道由 `bound_provider.test.rs` 覆盖。
         fn on_reasoning(&self, _text: &str) {}
-        fn on_tool_frame(&self, _frame: &symbio_core::chat_node::ChatNode) {}
+        fn on_tool_frame(&self, _frame: &symbio_sdk::chat::chat_node::ChatNode) {}
     }
 
     /// 正向：快路已作答的轮**只落开轮 / 阶段 / 派发 / 收束**，收束溯源指向开轮格，
     /// 收束档位 `reflex`、耗时入账、正文经 sink 上线；桩模型一次都没被调到。
     #[tokio::test]
     async fn reflex_answer_closes_with_reflex_payload_and_zero_model_round() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let actor = trivial_actor_spec("session/main");
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
@@ -4655,7 +4741,7 @@ mod reflex_turn_tests {
 ///
 mod scope_ceiling_tests {
     use super::super::{closure_gate, ClosureKind};
-    use symbio_core::Scope;
+    use symbio_kernel::actors::Scope;
     use symbio_testkit::trivial_actor_spec;
 
     /// 反向用例：父主体**不持**该能力 ⇒ 收束被拒；把 `scope` 改回 `Root`（接线前的形状）
@@ -4726,8 +4812,10 @@ mod scope_ceiling_tests {
 mod denial_fact_tests {
     use super::super::{closure_gate, deny, ClosureKind};
     use crate::control_decl::guard_vocab;
-    use symbio_core::{check_all, unresolved_turns, ActorSpec, EventStore, Scope};
+    use symbio_kernel::actors::{ActorSpec, Scope};
+    use symbio_kernel::store::EventStore;
     use symbio_plugin_api::events::{EVENT_AUTHZ_DENIED, EVENT_USER_MESSAGE};
+    use symbio_sdk::invariants::{check_all, unresolved_turns};
     use symbio_testkit::trivial_actor_spec;
 
     /// 造一个「主体自己那一行放行、父主体不放行」的规格——上限那道闸是生产里
@@ -4744,15 +4832,15 @@ mod denial_fact_tests {
 
     /// 种一条本轮用户格（收束格的溯源锚），返回它的 seq。
     fn seed_user_turn(
-        store: &dyn symbio_core::Store<Event = symbio_core::Event>,
+        store: &dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
         turn: u64,
     ) -> u64 {
         store
-            .append(symbio_core::Event::pending(
+            .append(symbio_kernel::event::Event::pending(
                 format!("u-{turn}"),
                 EVENT_USER_MESSAGE,
-                symbio_core::Entity::Turn,
-                symbio_core::Verb::Opened,
+                symbio_kernel::event::Entity::Turn,
+                symbio_kernel::event::Verb::Opened,
                 turn,
                 "user",
             ))
@@ -4763,8 +4851,9 @@ mod denial_fact_tests {
     /// 判据 1：拒绝 ⇒ 日志里有 `authz.denied`，且载荷答得出「拒了什么、为什么」。
     #[test]
     fn a_denied_closure_lands_a_denial_fact() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let user_seq = seed_user_turn(store.as_ref(), 1);
         let spec = child_of_a_principal_without_reply();
         let why = closure_gate(&spec, ClosureKind::Speech).expect_err("上限那道闸必须拒");
@@ -4778,17 +4867,17 @@ mod denial_fact_tests {
             &why,
         );
 
-        let snapshot = store.range(symbio_core::Seq::new(0));
+        let snapshot = store.range(symbio_kernel::event::Seq::new(0));
         let denied: Vec<_> = snapshot
             .iter()
             .filter(|e| e.kind == EVENT_AUTHZ_DENIED)
             .collect();
         assert_eq!(denied.len(), 1, "拒绝必须落一条事实：{denied:?}");
         let d = denied[0];
-        assert_eq!(d.entity, symbio_core::Entity::Turn);
+        assert_eq!(d.entity, symbio_kernel::event::Entity::Turn);
         assert_eq!(
             d.verb,
-            symbio_core::Verb::Asserted,
+            symbio_kernel::event::Verb::Asserted,
             "落在 turn × asserted，**不是** closed"
         );
         assert_eq!(d.turn, 1);
@@ -4830,8 +4919,9 @@ mod denial_fact_tests {
     /// 一个把 `denied` 当收束格的实现照样全绿。
     #[test]
     fn a_denied_turn_stays_unresolved() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let user_seq = seed_user_turn(store.as_ref(), 1);
         let spec = child_of_a_principal_without_reply();
         deny(
@@ -4844,7 +4934,7 @@ mod denial_fact_tests {
             "拒",
         );
 
-        let snapshot = store.range(symbio_core::Seq::new(0));
+        let snapshot = store.range(symbio_kernel::event::Seq::new(0));
         let open = unresolved_turns(&snapshot, false);
         assert_eq!(
             open.len(),
@@ -4852,7 +4942,7 @@ mod denial_fact_tests {
             "拒绝轮必须仍然报未收束（denied 不是收束格）：{open:?}"
         );
         assert!(
-            !symbio_core::closes_turn(
+            !symbio_sdk::invariants::closes_turn(
                 snapshot
                     .iter()
                     .find(|e| e.kind == EVENT_AUTHZ_DENIED)
@@ -4865,8 +4955,9 @@ mod denial_fact_tests {
     /// 幂等：同一轮同一格被拒多次只落一条（产物臂在工具结果循环里，会重复走到闸前）。
     #[test]
     fn a_denial_is_recorded_once_per_turn_and_kind() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let user_seq = seed_user_turn(store.as_ref(), 1);
         let spec = child_of_a_principal_without_reply();
         for _ in 0..3 {
@@ -4880,7 +4971,7 @@ mod denial_fact_tests {
                 "拒",
             );
         }
-        let snapshot = store.range(symbio_core::Seq::new(0));
+        let snapshot = store.range(symbio_kernel::event::Seq::new(0));
         let denied = snapshot
             .iter()
             .filter(|e| e.kind == EVENT_AUTHZ_DENIED)
@@ -4891,8 +4982,9 @@ mod denial_fact_tests {
     /// 两种拒绝落在**两个键**上：一轮里产物被拒、发言也被拒，是两条事实。
     #[test]
     fn speech_and_artifact_denials_do_not_collide() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let user_seq = seed_user_turn(store.as_ref(), 1);
         let spec = child_of_a_principal_without_reply();
         for (kind, key) in [
@@ -4907,7 +4999,7 @@ mod denial_fact_tests {
         ] {
             deny(store.as_ref(), &spec, 1, user_seq, kind, key, "拒");
         }
-        let snapshot = store.range(symbio_core::Seq::new(0));
+        let snapshot = store.range(symbio_kernel::event::Seq::new(0));
         let kinds: Vec<&str> = snapshot
             .iter()
             .filter(|e| e.kind == EVENT_AUTHZ_DENIED)
@@ -4954,7 +5046,8 @@ mod denial_fact_tests {
 
 mod round_decision_tests {
     use super::super::{classify_round, final_answer, RoundDecision, StreamNodeFacts};
-    use symbio_core::{LlmTurn, ModelFinishReason, TurnToolCallInfo};
+    use symbio_kernel::llm::{ModelFinishReason, TurnToolCallInfo};
+    use symbio_sdk::adapters::LlmTurn;
 
     fn one_tool_call() -> TurnToolCallInfo {
         TurnToolCallInfo {
@@ -5071,10 +5164,11 @@ mod actor_ledger_tests {
     use super::super::super::loop_rows::{ActorEntry, ACTOR_EXECUTE};
     use super::super::super::turn_exec::{ActorError, Ctx, StepFuture};
     use super::super::{TurnInput, TurnRunner};
-    use symbio_core::{
-        check_all, Entity, Event, EventStore, Seq, SilentDeltas, Store, TokenIssuer, Verb,
-    };
+    use symbio_kernel::event::{Entity, Event, Seq, Verb};
+    use symbio_kernel::store::{EventStore, Store};
     use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_MESSAGE_ADDED};
+    use symbio_sdk::adapters::{SilentDeltas, TokenIssuer};
+    use symbio_sdk::invariants::check_all;
 
     /// 写**零格**的手法：只记一次模型往返（步数口径归执行体），不落任何事实。
     ///
@@ -5139,8 +5233,9 @@ mod actor_ledger_tests {
     /// 这条用例钉的是「执行体不自报进展」这件事：账本是日志尾段，不是返回值。
     #[tokio::test]
     async fn an_actor_that_writes_nothing_stops_as_no_progress() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
@@ -5180,8 +5275,9 @@ mod actor_ledger_tests {
     /// `exhausted{undeclared-write}`，且那一格**确实在账本里**（对账读的是实际写入）。
     #[tokio::test]
     async fn an_actor_that_writes_off_its_list_stops_as_undeclared_write() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
@@ -5223,18 +5319,19 @@ mod actor_ledger_tests {
 // 那些开账）。没人管它就会一直开着：新的一幕照旧把它选出来，而等它的 future 早就
 // 没了。这条用例钉的是「判死」这一半——不判死，那一笔会永远占着 `dispatch-model`。
 mod dangling_round_tests {
-    use symbio_core::{Entity, Event, Seq, Verb};
+    use symbio_kernel::event::{Entity, Event, Seq, Verb};
 
     /// 一笔**已宣布、没派出**的请求：`kill_dangling_round` 给它落 `failed`。
     #[tokio::test]
     async fn an_undispatched_request_is_killed_with_its_own_identity() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(symbio_core::EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
         store
             .append(
                 Event::pending(
                     "request-model-m-1-1",
-                    symbio_core::EVENT_REQUEST,
+                    symbio_kernel::event::EVENT_REQUEST,
                     Entity::Turn,
                     Verb::Asserted,
                     3,
@@ -5255,7 +5352,7 @@ mod dangling_round_tests {
         let facts = store.range(Seq::new(0));
         let failed = facts
             .iter()
-            .find(|e| e.kind == symbio_core::EVENT_FAILED)
+            .find(|e| e.kind == symbio_kernel::event::EVENT_FAILED)
             .expect("判死要落 failed");
         assert_eq!(failed.payload["id"], "model-3-d5-s0", "身份随原请求走");
         assert_eq!(failed.payload["attempt"], 1);
@@ -5273,15 +5370,16 @@ mod dangling_round_tests {
     /// 派出过的请求**不**归它管：`sent` 之后的失败由租约看护 / 适配器落。
     #[tokio::test]
     async fn a_dispatched_request_is_left_to_the_lease_keeper() {
-        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
-            std::sync::Arc::new(symbio_core::EventStore::new());
+        let store: std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
         for (kind, payload) in [
             (
-                symbio_core::EVENT_REQUEST,
+                symbio_kernel::event::EVENT_REQUEST,
                 serde_json::json!({"port": "model", "id": "model-1-d0-s0", "attempt": 1}),
             ),
             (
-                symbio_core::EVENT_SENT,
+                symbio_kernel::event::EVENT_SENT,
                 serde_json::json!({"port": "model", "id": "model-1-d0-s0", "attempt": 1}),
             ),
         ] {
@@ -5321,16 +5419,16 @@ mod dangling_round_tests {
 #[test]
 fn the_response_payload_carries_the_measured_usage() {
     let facts = super::facts::node_facts(&None);
-    let turn = |usage: Option<symbio_core::ModelUsage>| symbio_core::LlmTurn {
+    let turn = |usage: Option<symbio_kernel::llm::ModelUsage>| symbio_sdk::adapters::LlmTurn {
         text: "答".into(),
         reasoning: String::new(),
         tool_calls: Vec::new(),
-        finish: symbio_core::ModelFinishReason::Stop,
+        finish: symbio_kernel::llm::ModelFinishReason::Stop,
         cost_ms: 1,
         usage,
         spend: None,
     };
-    let fields = |payload: &symbio_core::LlmTurn| {
+    let fields = |payload: &symbio_sdk::adapters::LlmTurn| {
         super::facts::output_fields(
             "model-1-d0-r0",
             "turn-1",
@@ -5340,7 +5438,7 @@ fn the_response_payload_carries_the_measured_usage() {
         )
     };
 
-    let both = fields(&turn(Some(symbio_core::ModelUsage {
+    let both = fields(&turn(Some(symbio_kernel::llm::ModelUsage {
         input: Some(1200),
         output: Some(340),
     })));
@@ -5355,7 +5453,7 @@ fn the_response_payload_carries_the_measured_usage() {
     );
 
     // 只报一侧。
-    let only = fields(&turn(Some(symbio_core::ModelUsage {
+    let only = fields(&turn(Some(symbio_kernel::llm::ModelUsage {
         input: None,
         output: Some(7),
     })));

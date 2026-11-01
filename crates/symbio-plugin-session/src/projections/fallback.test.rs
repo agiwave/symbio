@@ -2,7 +2,9 @@
 
 use super::fallback_rate;
 use crate::declarations::CHAT_VOCAB as CHAT;
-use symbio_core::{Budget, Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::{EventStore, Store};
+use symbio_kernel::view::Budget;
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };

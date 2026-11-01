@@ -65,7 +65,7 @@ pub(crate) struct Prepared {
     pub(crate) actor: ActorSpec,
     /// 本轮中止信号（`D-052` 决策 1）。检查点是环的**第一道守卫**——
     /// [`super::TurnSession::abort_before_first_request`] 在首圈、任何行之前读它。
-    pub(crate) abort: Option<symbio_core::ExecAbortSignal>,
+    pub(crate) abort: Option<symbio_kernel::exec::ExecAbortSignal>,
     pub(crate) user_seq: u64,
     pub(crate) turn_root_id: String,
     pub(crate) started: std::time::Instant,
@@ -204,7 +204,7 @@ impl Prepared {
             None => filter_visible(&self.full_snapshot, viewer),
             Some(keep) => window_by_turn(&self.full_snapshot, self.turn, keep, viewer),
         };
-        let rep = symbio_core::verify_prompt_fidelity(
+        let rep = symbio_sdk::projection::prompt_fidelity::verify(
             &snapshot,
             &self.base_messages,
             Some(p),
@@ -224,7 +224,7 @@ impl Prepared {
 pub(crate) async fn prepare_turn<S>(
     store: &S,
     input: TurnInput,
-) -> Result<PreparedFlow, symbio_core::AppendError>
+) -> Result<PreparedFlow, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -327,7 +327,7 @@ where
                 aborted: false,
                 awaits_user: false,
                 closure_denied: artifacts_landed == 0,
-                finish: symbio_core::ModelFinishReason::Stop,
+                finish: symbio_kernel::llm::ModelFinishReason::Stop,
             }));
         }
         settle::land_final(
@@ -339,7 +339,7 @@ where
             with_dialog(
                 with_reason(
                     with_status(produced, "completed"),
-                    symbio_core::ClosureReason::Completed,
+                    symbio_kernel::event::ClosureReason::Completed,
                 ),
                 dialog.as_ref(),
             ),
@@ -353,7 +353,7 @@ where
             aborted: false,
             awaits_user: false,
             closure_denied: false,
-            finish: symbio_core::ModelFinishReason::Stop,
+            finish: symbio_kernel::llm::ModelFinishReason::Stop,
         }));
     }
     let full_snapshot = store.range(Seq::new(0));
@@ -438,7 +438,7 @@ where
 /// 本轮刚发生的工具交换快照取在它落格**之前**，由调用方就地追加到基线上。
 pub(crate) fn render_messages(events: &[Event]) -> Vec<symbio_kernel::llm::PromptMessage> {
     // `read_all` 说的是**口径**（as-of 一切已发生、不设扫描窗口），不是作用域。
-    symbio_core::transcript(CHAT_VOCAB, MESSAGE_VOCAB)
+    symbio_sdk::projection::transcript::transcript(CHAT_VOCAB, MESSAGE_VOCAB)
         .read_all(events)
         .value
         .to_messages()

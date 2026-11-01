@@ -54,11 +54,12 @@ use std::fmt;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use symbio_core::ring::{self, PortDecl};
-use symbio_core::{
-    AppendError, Entity, Event, Frozen, Store, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
-    EVENT_RETRY, EVENT_SENT,
+use symbio_kernel::decl::ring::{self, PortDecl};
+use symbio_kernel::decl::Frozen;
+use symbio_kernel::event::{
+    Entity, Event, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
+use symbio_kernel::store::{AppendError, Store};
 
 /// 一笔端口调用：端口名 + 逻辑 id + 尝试号。
 ///
@@ -340,7 +341,7 @@ pub(crate) fn begin<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    let facts = store.range(symbio_core::Seq::new(0));
+    let facts = store.range(symbio_kernel::event::Seq::new(0));
     begin_with_facts(store, ports, plan, &facts)
 }
 
@@ -516,7 +517,7 @@ pub(crate) fn kill_dangling<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    let facts = store.range(symbio_core::Seq::new(0));
+    let facts = store.range(symbio_kernel::event::Seq::new(0));
     // 不按 `via` 收窄：能力行与内部往返的请求同样「宣布之后没有等待方」时，处置
     // 逐字相同——它们等的是那一刻的栈帧，栈帧没了就没有可重试的对象。按 `via`
     // 收窄会让这类请求既不进 `reap`（还没有 `sent`）也不被本函数关掉，`dispatch-model`
@@ -576,7 +577,7 @@ pub(crate) fn kill_dangling_sent<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    let facts = store.range(symbio_core::Seq::new(0));
+    let facts = store.range(symbio_kernel::event::Seq::new(0));
     let mut killed = 0usize;
     for sent in facts.iter().filter(|e| {
         e.kind == EVENT_SENT && e.payload.get("port").and_then(|v| v.as_str()) == Some(port)

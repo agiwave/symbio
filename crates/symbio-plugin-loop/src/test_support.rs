@@ -12,14 +12,18 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use symbio_core::chat_node::ChatNode;
-use symbio_core::{
-    count_user_messages, run_ops, AddNodesRequest, CompressionBeginReply, CompressionFinishRequest,
-    ConsolidateRequest, EditNodesRequest, Entity, Event, EventStore, PluginError,
-    RemoveNodesRequest, ReplaceAllRequest, Scope, Seq, Store, TurnSettings, TurnSpec, Verb,
+use symbio_kernel::actors::Scope;
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::plugin::PluginError;
+use symbio_kernel::store::{EventStore, Store};
+use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
+use symbio_sdk::chat::chat_node::ChatNode;
+use symbio_sdk::projection::turns::count_user_messages;
+use symbio_sdk::turn::dispatch::{
+    run_ops, AddNodesRequest, CompressionBeginReply, CompressionFinishRequest, ConsolidateRequest,
+    EditNodesRequest, RemoveNodesRequest, ReplaceAllRequest, TurnSettings, TurnSpec,
     WORKER_FORCE_PREFIX, WORKER_KEYWORDS, WORKER_MIN_CHARS,
 };
-use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
 
 use super::session_port::SessionPort;
 use super::turn_session::LoopSession;
@@ -123,8 +127,12 @@ impl SessionPort for FakeSessionPort {
                 Ok(Value::Null)
             }
             run_ops::TAKE_SUPPLEMENTS => Ok(Value::Null),
-            run_ops::WORKER_PROGRESS => Ok(json!(Vec::<symbio_core::WorkerProgress>::new())),
-            run_ops::RECALL_SNAPSHOTS => Ok(json!(Vec::<symbio_core::FleetSnapshot>::new())),
+            run_ops::WORKER_PROGRESS => {
+                Ok(json!(Vec::<symbio_sdk::turn::facts::WorkerProgress>::new()))
+            }
+            run_ops::RECALL_SNAPSHOTS => {
+                Ok(json!(Vec::<symbio_sdk::turn::facts::FleetSnapshot>::new()))
+            }
             run_ops::ELIMINATION_REVOKED => Ok(json!(false)),
             run_ops::COMPRESSION_BEGIN => Ok(json!(CompressionBeginReply { skipped: false })),
             run_ops::COMPRESSION_FINISH => {
@@ -175,13 +183,13 @@ pub(crate) fn default_settings() -> TurnSettings {
         progress_interval_ms: 60_000,
         progress_min_rounds: 2,
         progress_max_per_turn: 5,
-        presentation_tree: symbio_core::node_build::PresentationTree::Grouped,
+        presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
         skill_compile_enabled: false,
         skill_fast_path: false,
         worker_force_prefix: WORKER_FORCE_PREFIX.to_string(),
         worker_keywords: WORKER_KEYWORDS.join(","),
         worker_min_chars: WORKER_MIN_CHARS,
-        task_cap: symbio_core::TASK_CAP,
+        task_cap: symbio_sdk::turn::dispatch::TASK_CAP,
     }
 }
 
@@ -218,7 +226,7 @@ pub(crate) fn loop_session(
 
 /// 替身视图的求值：与能力包 `recall::live` 同形的折叠（新近在前，排除式遗忘）。
 fn memory_live_fixture(events: &[Event], now: i64) -> Value {
-    use symbio_core::Entity;
+    use symbio_kernel::event::Entity;
     let mut live: Vec<(u64, i64, String, String)> = Vec::new();
     let mut forgotten: Vec<u64> = Vec::new();
     for e in events {

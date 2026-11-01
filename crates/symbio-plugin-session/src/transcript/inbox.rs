@@ -43,13 +43,17 @@ use super::super::active::{ActiveSessionState, InboxItem, PreemptPending};
 use super::super::plugin::{inbox_item_node, inbox_item_path, SessionConfig, SessionPlugin};
 use super::supplements;
 use std::sync::Arc;
-use symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
-use symbio_core::{
-    ActorSpec, Entity, Event, LatencyTier, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, Scope, Store, Verb, PRINCIPAL_REFLEX, SESSION_ID, SOURCE_PRINCIPAL,
-    WORKDIR,
-};
+use symbio_core::PRINCIPAL_REFLEX;
+use symbio_kernel::actors::{ActorSpec, Scope};
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::plugin::{PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_kernel::store::Store;
+use symbio_kernel::vdfs::VdfsChange;
 use symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL;
+use symbio_sdk::chat::{chat_node as cm, session_chat};
+use symbio_sdk::keys::{SESSION_ID, SOURCE_PRINCIPAL, WORKDIR};
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 // 任务族的名字由 owner 插件（`loop`）的清单登记、由生成物投影到这里（DE-024 D-204 / D-206）：
 // 本插件是这一族的**第二个消费方**——它写挂起与恢复两格，也按名字读就绪。
 use symbio_plugin_api::events::{
@@ -348,7 +352,7 @@ impl SessionPlugin {
         let id = id
             .filter(|s| !s.trim().is_empty())
             .or_else(|| (!message.id.trim().is_empty()).then(|| message.id.clone()))
-            .unwrap_or_else(symbio_core::llm_short_id);
+            .unwrap_or_else(symbio_sdk::llm::turn::llm_short_id);
         // 消息 id 与条目 id **是同一个值**：地址末段即身份，两处各生成一个会让
         // 「按地址取消息」在两套 id 之间对不上（见 `message_path` 的同款约定）。
         message.id = id.clone();
@@ -845,7 +849,7 @@ impl SessionPlugin {
         let first = &batch[0];
 
         let ctx: Arc<dyn PluginInvokeRequest> =
-            Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+            Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
         ctx.set(SESSION_ID, session_id.to_string());
         if let Some(w) = &first.workdir {
             ctx.set(WORKDIR, w.clone());

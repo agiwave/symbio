@@ -11,12 +11,12 @@ use super::PersistentChatSession;
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
+use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use tokio::sync::RwLock;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -906,7 +906,8 @@ fn assign_seq_places_trailing_run_after_last_existing() {
 // ── `apply`：唯一写入口（D-054 决策 2 + 3）──────────────
 
 use super::super::paths::V2_WAL_FILE;
-use symbio_core::{Event, Seq, Store};
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::store::Store;
 
 /// 只读读回事实源里的全部事件（与 `resume.test.rs::events_of` 同款）。
 fn events_of(dir: &std::path::Path) -> Vec<Event> {
@@ -928,8 +929,8 @@ fn seed_fact(dir: &std::path::Path) {
         Event::pending(
             "u-seed",
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
-            symbio_core::Entity::Turn,
-            symbio_core::Verb::Opened,
+            symbio_kernel::event::Entity::Turn,
+            symbio_kernel::event::Verb::Opened,
             1,
             "user",
         )

@@ -10,12 +10,11 @@
 
 use super::*;
 use std::sync::Arc;
-use symbio_core::absolute_addr;
-use symbio_core::{
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, VDFS_PARENT_ADDR,
-};
 use symbio_deploy::PLUGIN_ID_SESSION;
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
 use symbio_providers::MemoryFile;
+use symbio_sdk::keys::VDFS_PARENT_ADDR;
+use symbio_sdk::vdfs::address::absolute_addr;
 use tempfile::TempDir;
 
 /// 测试用会话存储根（只算路径，不落盘）

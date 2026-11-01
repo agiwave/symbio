@@ -15,19 +15,24 @@ use crate::control_decl::guard_vocab;
 use std::sync::{Arc, Mutex};
 
 use super::*;
-use symbio_core::chat_node as cm;
-use symbio_core::{
-    check_all, run_ops, CapabilityMeta, ConsolidateRequest, Entity, Event, ExecTranscriptWriter,
-    Frozen, PluginSimpleRequest, Seq, Store, Verb,
-};
-use symbio_core::{
-    Capability, CapabilityRow, EventStore, ExecEnv, PluginError, PluginInvokeRequestExt, Registry,
-    CAPABILITY_VISITOR,
-};
+use symbio_kernel::capability::CapabilityMeta;
+use symbio_kernel::capability::{Capability, CapabilityRow, Registry};
+use symbio_kernel::decl::Frozen;
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::exec::ExecEnv;
+use symbio_kernel::exec::ExecTranscriptWriter;
+use symbio_kernel::plugin::PluginSimpleRequest;
+use symbio_kernel::plugin::{PluginError, PluginInvokeRequestExt};
+use symbio_kernel::store::EventStore;
+use symbio_kernel::store::Store;
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use symbio_providers::DefaultToolVisitor;
+use symbio_sdk::capability::CAPABILITY_VISITOR;
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::invariants::check_all;
+use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest};
 
 use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, MESSAGE_VOCAB};
 
@@ -36,8 +41,8 @@ use super::super::test_support::{default_settings, loop_session, turn_spec, Fake
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**桥之后**的节点面（生产里
 /// `assemble` 的发射任务把会话主体写进每一帧），`role` 只是反序列化落点。
-fn principal_for(role: cm::NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         cm::NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -47,7 +52,7 @@ fn principal_for(role: cm::NodeRole) -> symbio_core::principal::Principal {
 }
 
 /// 测试请求上下文（工具轮才需要能力注册表；无工具轮一个空信封足够）。
-fn test_ctx() -> Arc<dyn symbio_core::PluginInvokeRequest> {
+fn test_ctx() -> Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
 }
 
@@ -57,7 +62,9 @@ fn test_ctx() -> Arc<dyn symbio_core::PluginInvokeRequest> {
 /// ctx 里没有注册面 = 「没有任何工具声明过任何位」。生产里这个注册面由会话
 /// 插件的能力收集装上（`capabilities.rs`），测试照同一形状喂——`tools` 传什么，
 /// 注册面就是什么，两边不会漂。
-async fn test_ctx_declaring(tools: &[CapabilityMeta]) -> Arc<dyn symbio_core::PluginInvokeRequest> {
+async fn test_ctx_declaring(
+    tools: &[CapabilityMeta],
+) -> Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> {
     let ctx = test_ctx();
     let visitor = Arc::new(DefaultToolVisitor::new());
     for t in tools {
@@ -85,7 +92,7 @@ impl Capability for DeclOnlyTool {
         &self,
         _args: serde_json::Value,
         _env: &ExecEnv,
-        _ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+        _ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     ) -> Result<serde_json::Value, PluginError> {
         Ok(serde_json::Value::Null)
     }
@@ -111,8 +118,8 @@ fn turn_facts(e: &Event) -> bool {
 fn tool_free_req<'a>(
     fx: &'a Fixture,
     provider: Arc<dyn ModelProvider>,
-    sink: &'a symbio_core::ExecEventSink,
-    abort: symbio_core::ExecAbortSignal,
+    sink: &'a symbio_kernel::exec::ExecEventSink,
+    abort: symbio_kernel::exec::ExecAbortSignal,
     turn_no: u64,
     user_text: &'a str,
 ) -> ExecTurn<'a> {
@@ -133,8 +140,8 @@ fn tool_free_req<'a>(
 fn open_turn_req<'a>(
     fx: &'a Fixture,
     provider: Arc<dyn ModelProvider>,
-    sink: &'a symbio_core::ExecEventSink,
-    abort: symbio_core::ExecAbortSignal,
+    sink: &'a symbio_kernel::exec::ExecEventSink,
+    abort: symbio_kernel::exec::ExecAbortSignal,
     turn_no: u64,
     user_seq: u64,
 ) -> ExecTurn<'a> {
@@ -177,11 +184,11 @@ struct ExecTurn<'a> {
     session: &'a Arc<LoopSession>,
     provider: Arc<dyn ModelProvider>,
     parent: Option<Arc<dyn Plugin>>,
-    ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+    ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     system_prompt: &'a str,
-    abort: symbio_core::ExecAbortSignal,
+    abort: symbio_kernel::exec::ExecAbortSignal,
     root_id: &'a str,
-    sink: &'a symbio_core::ExecEventSink,
+    sink: &'a symbio_kernel::exec::ExecEventSink,
     user_text: &'a str,
     turn_no: u64,
     user_seq: u64,
@@ -198,14 +205,14 @@ struct ExecTurn<'a> {
     report: Option<super::super::report_exec::ReportPort>,
     opening_text: Option<&'a str>,
     opening_dialog: Option<&'a super::super::turn_runner::DialogFacts>,
-    presentation_tree: symbio_core::node_build::PresentationTree,
+    presentation_tree: symbio_sdk::turn::node_build::PresentationTree,
 }
 
 /// 编排器那份转写写口：本夹具不测压缩改道，交一个丢弃口。
 struct DiscardWriter;
 
 #[async_trait::async_trait]
-impl symbio_core::ExecTranscriptWriter for DiscardWriter {
+impl symbio_kernel::exec::ExecTranscriptWriter for DiscardWriter {
     async fn apply(&self, _m: cm::ChatNode) {}
 }
 
@@ -348,8 +355,8 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
 fn exec_base<'a>(
     session: &'a Arc<LoopSession>,
     provider: Arc<dyn ModelProvider>,
-    sink: &'a symbio_core::ExecEventSink,
-    abort: symbio_core::ExecAbortSignal,
+    sink: &'a symbio_kernel::exec::ExecEventSink,
+    abort: symbio_kernel::exec::ExecAbortSignal,
 ) -> ExecTurn<'a> {
     ExecTurn {
         session,
@@ -375,7 +382,7 @@ fn exec_base<'a>(
         // 开场白：本夹具不产生（`Escalate` 首响由 chat_loop 递入）。
         opening_text: None,
         opening_dialog: None,
-        presentation_tree: symbio_core::node_build::PresentationTree::Grouped,
+        presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     }
 }
 
@@ -461,7 +468,7 @@ impl ExecTranscriptWriter for CollectingFrames {
 async fn supplements_become_facts_visible_next_turn() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
     let (provider, prompts) = FaithfulProvider::new(Behavior::ToolThenAnswer);
 
     // 假的抽干口：第一次返回一批（**2 条合成 1 段**），之后空。
@@ -480,7 +487,7 @@ async fn supplements_become_facts_visible_next_turn() {
                     return None;
                 }
                 *once = true;
-                Some(symbio_core::DrainedSupplement {
+                Some(symbio_sdk::turn::facts::DrainedSupplement {
                     text: "顺便也看看 README".into(),
                     count: 2,
                     id: "sup-1".into(),
@@ -489,8 +496,9 @@ async fn supplements_become_facts_visible_next_turn() {
             })
                 as std::pin::Pin<
                     Box<
-                        dyn std::future::Future<Output = Option<symbio_core::DrainedSupplement>>
-                            + Send,
+                        dyn std::future::Future<
+                                Output = Option<symbio_sdk::turn::facts::DrainedSupplement>,
+                            > + Send,
                     >,
                 >
         }) as super::SupplementFn
@@ -506,7 +514,7 @@ async fn supplements_become_facts_visible_next_turn() {
         parent: None,
         ctx: test_ctx(),
         system_prompt: "system",
-        abort: symbio_core::ExecAbortSignal::new(),
+        abort: symbio_kernel::exec::ExecAbortSignal::new(),
         root_id: "r-1",
         sink: &sink,
         user_text: "读一下 a.md",
@@ -528,7 +536,7 @@ async fn supplements_become_facts_visible_next_turn() {
         // 开场白：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
-        presentation_tree: symbio_core::node_build::PresentationTree::Grouped,
+        presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     })
     .await
     .expect("工具轮执行成功");
@@ -541,8 +549,12 @@ async fn supplements_become_facts_visible_next_turn() {
         .unwrap_or_else(|| {
             panic!("补充必须落成事实（否则下一轮就消失——那正是轮内注入要消掉的失效）：{snap:?}")
         });
-    assert_eq!(sup.entity, symbio_core::Entity::Turn, "落在 Turn 实体上");
-    assert_eq!(sup.verb, symbio_core::Verb::Asserted, "断言类动词");
+    assert_eq!(
+        sup.entity,
+        symbio_kernel::event::Entity::Turn,
+        "落在 Turn 实体上"
+    );
+    assert_eq!(sup.verb, symbio_kernel::event::Verb::Asserted, "断言类动词");
     assert_eq!(
         sup.payload.get("count").and_then(|v| v.as_u64()),
         Some(2),
@@ -574,11 +586,11 @@ async fn supplements_become_facts_visible_next_turn() {
     );
 
     // ── ③ 下一轮可见：从事实轨**整份史**再投影（不拿运行中的内存镜像糊弄） ──
-    let projected = symbio_core::transcript(CHAT_VOCAB, MESSAGE_VOCAB)
+    let projected = symbio_sdk::projection::transcript::transcript(CHAT_VOCAB, MESSAGE_VOCAB)
         .apply(
             &fx.facts.range(Seq::new(0)),
             i64::MAX,
-            symbio_core::Budget::generous(),
+            symbio_kernel::view::Budget::generous(),
         )
         .value;
     assert!(
@@ -660,7 +672,7 @@ impl ModelProvider for FaithfulProvider {
         messages: &[cm::ChatNode],
         _tools: &[CapabilityMeta],
         _root_id: &str,
-        env: &symbio_core::ExecEnv,
+        env: &symbio_kernel::exec::ExecEnv,
     ) -> Result<TurnOutput, PluginError> {
         // 记下本次请求的**全部消息**（角色 + 正文）——工具轮的硬契约是「工具结果
         // 进了下一次请求」，那条断言只能回读请求体（不变量/网格都证明不了）。
@@ -733,7 +745,7 @@ impl ModelProvider for FaithfulProvider {
                         .await;
                     return Ok(TurnOutput {
                         text: "我先查一下。".into(),
-                        tool_calls: vec![symbio_core::TurnToolCallInfo {
+                        tool_calls: vec![symbio_kernel::llm::TurnToolCallInfo {
                             id: Some("tc-1".into()),
                             wire_id: Some("call_1".into()),
                             name: Some("vdfs_read".into()),
@@ -761,7 +773,7 @@ impl ModelProvider for FaithfulProvider {
                         .await;
                     return Ok(TurnOutput {
                         text: "我来委托。".into(),
-                        tool_calls: vec![symbio_core::TurnToolCallInfo {
+                        tool_calls: vec![symbio_kernel::llm::TurnToolCallInfo {
                             id: Some("tc-agent".into()),
                             wire_id: Some("call_agent".into()),
                             name: Some("agent_run".into()),
@@ -840,7 +852,9 @@ fn setup_with_reports() -> Fixture {
 }
 
 /// 同 [`setup_full`]，另可按需改本轮配置快照。
-fn setup_with_settings(tune: impl FnOnce(&mut symbio_core::TurnSettings)) -> Fixture {
+fn setup_with_settings(
+    tune: impl FnOnce(&mut symbio_sdk::turn::dispatch::TurnSettings),
+) -> Fixture {
     let facts = Arc::new(EventStore::new());
     let port = Arc::new(FakeSessionPort::new(Vec::new()).with_facts(facts.clone()));
     let mut settings = default_settings();
@@ -868,8 +882,8 @@ fn setup_with_settings(tune: impl FnOnce(&mut symbio_core::TurnSettings)) -> Fix
 /// 控制面夹具：请求面（编排器 / 上下文 / 本轮状态）+ 待追加的那条用户消息。
 struct ControlHarness {
     facts: Arc<EventStore>,
-    sink: symbio_core::ExecEventSink,
-    ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+    sink: symbio_kernel::exec::ExecEventSink,
+    ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     orchestrator: Arc<super::super::chat_loop::state::ChatOrchestrator>,
     context: super::super::chat_loop::state::SessionContext,
     turn: super::super::chat_loop::state::TurnState,
@@ -892,8 +906,9 @@ fn control_harness() -> ControlHarness {
         settings,
     );
     let session = Arc::new(loop_session(spec, facts.clone(), port));
-    let sink =
-        symbio_core::ExecEventSink::direct(Arc::new(CollectingFrames(Mutex::new(Vec::new()))));
+    let sink = symbio_kernel::exec::ExecEventSink::direct(Arc::new(CollectingFrames(Mutex::new(
+        Vec::new(),
+    ))));
     let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
         provider: Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         parent: None,
@@ -902,7 +917,7 @@ fn control_harness() -> ControlHarness {
         writer: Arc::new(DiscardWriter),
         compose_enabled: false,
         opening_enabled: false,
-        presentation_tree: symbio_core::node_build::PresentationTree::Grouped,
+        presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     });
     ControlHarness {
         facts,
@@ -915,7 +930,7 @@ fn control_harness() -> ControlHarness {
             consolidated: None,
         },
         turn: super::super::chat_loop::state::TurnState {
-            abort: symbio_core::ExecAbortSignal::new(),
+            abort: symbio_kernel::exec::ExecAbortSignal::new(),
             ..Default::default()
         },
         req: super::super::chat_loop::state::TurnRequest {
@@ -925,8 +940,8 @@ fn control_harness() -> ControlHarness {
         },
         message: Some(cm::ChatNode {
             id: "m1".into(),
-            principal: Some(symbio_core::principal::Principal::new(
-                symbio_core::principal::PrincipalKind::Person,
+            principal: Some(symbio_sdk::chat::principal::Principal::new(
+                symbio_sdk::chat::principal::PrincipalKind::Person,
                 "user",
             )),
             msg_type: Some(cm::NodeKind::Body),
@@ -1089,13 +1104,13 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
     let fx = setup_full();
     // 收集口：ExecEventSink::direct 的 writer 不可回读，自持一份 Arc 引用帧。
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
 
     let res = drive_turn(tool_free_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         0,
         "你好",
     ))
@@ -1169,13 +1184,13 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
 async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
 
     let err = drive_turn(tool_free_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Fail).0),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         0,
         "你好",
     ))
@@ -1216,13 +1231,13 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
 async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
 
     let err = drive_turn(tool_free_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Abort).0),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         0,
         "你好",
     ))
@@ -1266,13 +1281,13 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
 async fn aborted_half_sentence_survives_in_partial_and_grid() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
 
     let err = drive_turn(tool_free_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::AbortAfterPartial).0),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         0,
         "你好",
     ))
@@ -1340,7 +1355,7 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
 async fn tool_round_lands_artifact_and_feeds_next_request() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
     let (provider, prompts) = FaithfulProvider::new(Behavior::ToolThenAnswer);
 
     let user_seq = seed_user(&fx, 0, "读一下 a.md");
@@ -1356,7 +1371,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         parent: None,
         ctx: test_ctx(),
         system_prompt: "system",
-        abort: symbio_core::ExecAbortSignal::new(),
+        abort: symbio_kernel::exec::ExecAbortSignal::new(),
         root_id: "r-1",
         sink: &sink,
         user_text: "读一下 a.md",
@@ -1378,7 +1393,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         // 开场白：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
-        presentation_tree: symbio_core::node_build::PresentationTree::Grouped,
+        presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     })
     .await
     .expect("工具轮执行成功");
@@ -1537,7 +1552,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
     // 的返回值——那正是退役的 `RoundHookFn` 掊着的判定。
     let fx = setup_with_reports();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::ToolThenAnswer);
 
     // 措辞能力口：只产一句话（判定与落格都不在这里，D-163）。配额 2 让两个批次
@@ -1559,7 +1574,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         parent: None,
         ctx: test_ctx(),
         system_prompt: "system",
-        abort: symbio_core::ExecAbortSignal::new(),
+        abort: symbio_kernel::exec::ExecAbortSignal::new(),
         root_id: "r-1",
         sink: &sink,
         user_text: "读一下 a.md",
@@ -1580,7 +1595,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         report: Some(super::super::report_exec::ReportPort { text }),
         opening_text: None,
         opening_dialog: None,
-        presentation_tree: symbio_core::node_build::PresentationTree::Grouped,
+        presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     })
     .await
     .expect("带汇报的工具轮执行成功");
@@ -1678,14 +1693,14 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
 async fn full_turn_writes_no_memory_encoding_from_the_host() {
     let fx = setup_full_with(true);
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::Faithful);
 
     let req = tool_free_req(
         &fx,
         Arc::new(provider),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         0,
         "你好",
     );
@@ -1733,7 +1748,7 @@ async fn full_turn_lands_derived_commitment_facts() {
 
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::ToolThenAgentRun);
 
     // 注册面与模型面同一份元数据：`agent_run` 自声明「派活 + 立约」两个行为名，
@@ -1763,7 +1778,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         parent: None,
         ctx: test_ctx_declaring(std::slice::from_ref(&tool_meta)).await,
         system_prompt: "system",
-        abort: symbio_core::ExecAbortSignal::new(),
+        abort: symbio_kernel::exec::ExecAbortSignal::new(),
         root_id: "r-1",
         sink: &sink,
         user_text: "请委托评审",
@@ -1778,7 +1793,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         // 开场白：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
-        presentation_tree: symbio_core::node_build::PresentationTree::Grouped,
+        presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     })
     .await
     .expect("工具轮执行成功");
@@ -1839,7 +1854,7 @@ async fn full_turn_lands_derived_commitment_facts() {
 async fn a_reflex_answer_closes_without_any_model_call() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
     let (provider, prompts) = FaithfulProvider::new(Behavior::Faithful);
 
     // `trigger` 与 `tool_free_req` 的 `user_text`（"你好"）逐字相同 ⇒ 命中。
@@ -1847,7 +1862,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
         &fx,
         Arc::new(provider),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         0,
         "你好",
     );
@@ -2338,13 +2353,13 @@ fn consolidated(ids: &[&str]) -> Vec<cm::ChatNode> {
 }
 
 /// 跑一轮（无工具、成功）。
-async fn run_one_turn(fx: &Fixture, sink: &symbio_core::ExecEventSink, turn: u64) {
+async fn run_one_turn(fx: &Fixture, sink: &symbio_kernel::exec::ExecEventSink, turn: u64) {
     let text = format!("第 {turn} 轮问题");
     drive_turn(tool_free_req(
         fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         turn,
         &text,
     ))
@@ -2368,7 +2383,7 @@ async fn run_one_turn(fx: &Fixture, sink: &symbio_core::ExecEventSink, turn: u64
 async fn consolidation_is_forwarded_before_the_turn_runs() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
 
     // 第一轮：落 user + final——这就是「被取代的前缀」。
     run_one_turn(&fx, &sink, 0).await;
@@ -2379,7 +2394,7 @@ async fn consolidation_is_forwarded_before_the_turn_runs() {
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         1,
         "第二轮",
     );
@@ -2465,7 +2480,7 @@ fn closure_of(all: &[Event], turn: u64) -> &Event {
 async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
 
     // 等待审批的第 0 轮：只有用户格。
     let user_seq = open_turn_without_closure(&fx, 0, "请批准这次写入");
@@ -2505,7 +2520,7 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         0,
         user_seq,
     );
@@ -2545,7 +2560,7 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
 async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
 
     // 等待审批的第 0 轮：只有用户格。
     let user_seq = open_turn_without_closure(&fx, 0, "请批准这次写入");
@@ -2557,7 +2572,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         1,
         "第二轮",
     );
@@ -2589,7 +2604,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         0,
         user_seq,
     );
@@ -2624,7 +2639,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
 async fn the_production_table_owes_the_same_rows_on_a_real_log() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_core::ExecEventSink::direct(frames.clone());
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
 
     // 真实日志由生产写方落格：这一幕只有用户格，`announce-model` 还欠着。
     let anchor = open_turn_without_closure(&fx, 1, "秋天是什么");
@@ -2640,7 +2655,7 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
     let slice = start();
     let now = super::super::loop_rows::wake_now_ms(&slice, anchor);
     let solve = |log: &[Event], frozen: &Arc<Frozen>| {
-        symbio_core::ring::owed(super::super::loop_rows::ROWS, frozen, log, now)
+        symbio_kernel::decl::ring::owed(super::super::loop_rows::ROWS, frozen, log, now)
     };
 
     let once = solve(&slice, &table);
@@ -2670,7 +2685,7 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
-        symbio_core::ExecAbortSignal::new(),
+        symbio_kernel::exec::ExecAbortSignal::new(),
         1,
         anchor,
     ))
@@ -2700,7 +2715,7 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
 #[test]
 fn the_ledger_decides_which_cell_ends_the_drive() {
     use serde_json::Value;
-    use symbio_core::EVENT_SENT;
+    use symbio_kernel::event::EVENT_SENT;
     use symbio_plugin_api::events::{EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED};
 
     let cell = |kind: &'static str, entity: Entity, verb: Verb, turn: u64, payload: Value| {

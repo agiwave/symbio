@@ -31,14 +31,16 @@ pub(crate) use runner::TurnLauncher;
 use serde_json::json;
 use std::sync::atomic::Ordering;
 pub(crate) use stop::StopSignal;
-use symbio_core::chat_request;
-use symbio_core::{
-    capability_take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
-    APPROVAL_GRANTS, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_kernel::plugin::{
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginPayload,
 };
-use symbio_core::{chat_node as cm, session_chat};
 use symbio_plugin_api::plugin_debug;
+use symbio_sdk::capability::capability_take_errors;
+use symbio_sdk::chat::chat_request;
+use symbio_sdk::chat::{chat_node as cm, session_chat};
+use symbio_sdk::keys::{APPROVAL_GRANTS, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR};
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -6,15 +6,15 @@
 //! 判据的业务场景（预算 / 淘汰 / 任务表）仍在 `tool_executor.test.rs` 走整批路径。
 
 use super::*;
-use symbio_core::{PluginInvokeRequestExt, PluginSimpleRequest};
+use symbio_kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
 use symbio_plugin_api::effects::BeforeRefusal;
 
 fn neutral_breaker() -> BreakerInputs {
     BreakerInputs {
         authorized: true,
         spent_ms: 0,
-        requested_ms: symbio_core::LatencyTier::Deep.budget_ms(),
-        budget_ms: symbio_core::LatencyTier::Autonomic.budget_ms(),
+        requested_ms: symbio_kernel::adapters::LatencyTier::Deep.budget_ms(),
+        budget_ms: symbio_kernel::adapters::LatencyTier::Autonomic.budget_ms(),
     }
 }
 
@@ -92,7 +92,7 @@ async fn external_gate_refuse_is_zero_event() {
 async fn external_gate_break_carries_the_reason() {
     let breaker = BreakerInputs {
         authorized: true,
-        budget_ms: symbio_core::LatencyTier::Deep.budget_ms() - 1,
+        budget_ms: symbio_kernel::adapters::LatencyTier::Deep.budget_ms() - 1,
         ..neutral_breaker()
     };
     let ctx = gate_ctx(&breaker);
@@ -149,7 +149,7 @@ fn the_principal_comes_from_the_agent_id() {
     fn with_agent(agent_id: Option<&str>) -> std::sync::Arc<dyn PluginInvokeRequest> {
         let req = PluginSimpleRequest::new(None, None);
         if let Some(id) = agent_id {
-            req.set(symbio_core::AGENT_ID, id.to_string());
+            req.set(symbio_sdk::keys::AGENT_ID, id.to_string());
         }
         std::sync::Arc::new(req)
     }

@@ -44,10 +44,13 @@
 
 use std::sync::Arc;
 
-use symbio_core::chat_node::ChatNode;
-use symbio_core::{
-    CapabilityMeta, Event, ExecEventSink, FullModel, LlmAdapter, PluginError, Seq, Store,
-};
+use symbio_kernel::capability::CapabilityMeta;
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::exec::ExecEventSink;
+use symbio_kernel::plugin::PluginError;
+use symbio_kernel::store::Store;
+use symbio_sdk::adapters::{FullModel, LlmAdapter};
+use symbio_sdk::chat::chat_node::ChatNode;
 
 use super::super::chat_loop::state::{
     ChatOrchestrator, SessionContext, TurnExit, TurnRequest, TurnState,
@@ -80,7 +83,7 @@ pub(crate) enum DriveStart<'a> {
 pub(crate) struct Control<'a> {
     pub(crate) orchestrator: &'a ChatOrchestrator,
     pub(crate) orchestrator_arc: &'a Arc<ChatOrchestrator>,
-    pub(crate) ctx: &'a Arc<dyn symbio_core::PluginInvokeRequest>,
+    pub(crate) ctx: &'a Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     pub(crate) sink: &'a ExecEventSink,
     pub(crate) context: &'a mut SessionContext,
     pub(crate) turn: &'a mut TurnState,
@@ -140,7 +143,7 @@ pub(crate) struct StageRuntime {
     store: Arc<dyn Store<Event = Event>>,
     llm: Arc<dyn LlmAdapter>,
     tok: FullModel,
-    sink: Arc<dyn symbio_core::DeltaSink>,
+    sink: Arc<dyn symbio_sdk::adapters::DeltaSink>,
     tools: Arc<[CapabilityMeta]>,
     dispatch: Option<Arc<dyn ToolDispatch>>,
     /// 生产：收束要的宿主面。夹具为 `None`（收束时按值交回结局）。
@@ -155,7 +158,7 @@ impl StageRuntime {
         store: Arc<dyn Store<Event = Event>>,
         llm: Arc<dyn LlmAdapter>,
         tok: FullModel,
-        sink: Arc<dyn symbio_core::DeltaSink>,
+        sink: Arc<dyn symbio_sdk::adapters::DeltaSink>,
         tools: Arc<[CapabilityMeta]>,
         dispatch: Option<Arc<dyn ToolDispatch>>,
     ) -> Self {
@@ -187,7 +190,7 @@ impl StageRuntime {
     pub(crate) fn head_parts<'h>(
         &self,
         orchestrator: Arc<super::super::chat_loop::state::ChatOrchestrator>,
-        request_ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+        request_ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
         context: &'h mut super::super::chat_loop::state::SessionContext,
         turn: &'h mut super::super::chat_loop::state::TurnState,
         req: &'h super::super::chat_loop::state::TurnRequest,
@@ -521,7 +524,7 @@ async fn open_stage(
     context.messages = if req.load_history {
         context
             .session
-            .run_op::<Vec<ChatNode>>(symbio_core::run_ops::CONTEXT_MESSAGES, ())
+            .run_op::<Vec<ChatNode>>(symbio_sdk::turn::dispatch::run_ops::CONTEXT_MESSAGES, ())
             .await
             .unwrap_or_default()
     } else {
@@ -567,7 +570,7 @@ async fn open_stage(
     // 接缝行（`prepare-turn`，压缩之后：压不动时不该留半截 Turn 根）。
     let (root_id, fresh_root) = match turn.resume_root.take() {
         Some(root) => (root, false),
-        None => (symbio_core::llm_short_id(), true),
+        None => (symbio_sdk::llm::turn::llm_short_id(), true),
     };
     // 轮内注入：把本会话的收件箱抽干口交给工具循环，让「用户中途插话」
     // **折进本轮**。抽干住在 session（队列与配置都在那边），驱动器经端口取。
@@ -577,11 +580,13 @@ async fn open_stage(
             let session = session.clone();
             let fut: std::pin::Pin<
                 Box<
-                    dyn std::future::Future<Output = Option<symbio_core::DrainedSupplement>> + Send,
+                    dyn std::future::Future<
+                            Output = Option<symbio_sdk::turn::facts::DrainedSupplement>,
+                        > + Send,
                 >,
             > = Box::pin(async move {
-                let supplements: Option<symbio_core::DrainedSupplement> = session
-                    .run_op(symbio_core::run_ops::TAKE_SUPPLEMENTS, ())
+                let supplements: Option<symbio_sdk::turn::facts::DrainedSupplement> = session
+                    .run_op(symbio_sdk::turn::dispatch::run_ops::TAKE_SUPPLEMENTS, ())
                     .await
                     .unwrap_or_else(|e| {
                         symbio_plugin_api::plugin_warn!(
@@ -887,7 +892,7 @@ async fn exhausted(st: &mut StageRuntime, detail: &str) -> Result<TurnOutcome, T
 }
 
 /// 落格失败的统一出口（与 [`super::open_turn`] 的同一句话）。
-fn append_exit(e: symbio_core::AppendError) -> TurnExecExit {
+fn append_exit(e: symbio_kernel::store::AppendError) -> TurnExecExit {
     TurnExecExit::Failed(PluginError::InternalError(format!("运行器落格失败：{e:?}")))
 }
 

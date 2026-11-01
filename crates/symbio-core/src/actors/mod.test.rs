@@ -6,9 +6,9 @@
 //! [DE-031 §6](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")。
 
 use super::*;
-use crate::cost_ledger;
 use crate::event::{Entity, Event, EventDecl, FactRole, Verb};
 use crate::invariants::check_all;
+use crate::projection::cost::cost_ledger;
 use crate::projection::turnstate::turnstate;
 use crate::store::{EventStore, Store};
 use crate::test_fixtures::EVENTS;
@@ -432,7 +432,7 @@ async fn rehearse_reasoner_turn(
     let outcome = llm
         .generate(
             &tok,
-            &crate::transcript(CHAT, MESSAGE)
+            &crate::projection::transcript::transcript(CHAT, MESSAGE)
                 .read_all(&snapshot)
                 .value
                 .to_messages(),
@@ -520,7 +520,7 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
     let reply = llm
         .generate(
             &TokenIssuer::issue_deep(),
-            &crate::transcript(CHAT, MESSAGE)
+            &crate::projection::transcript::transcript(CHAT, MESSAGE)
                 .read_all(&snapshot)
                 .value
                 .to_messages(),

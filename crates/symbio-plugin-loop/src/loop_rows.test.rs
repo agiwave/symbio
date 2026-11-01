@@ -13,9 +13,11 @@ use std::sync::Arc;
 
 use super::super::control_decl::{EVENT_AUTHZ_GRANTED, FACTS, VIEWS};
 use super::{load, LOOP_OWNER, PORTS, ROWS};
-use symbio_core::ring::{check_rows, drive, owed, Decl, Gap, Pattern};
-use symbio_core::Frozen;
-use symbio_core::{Entity, Event, EventDecl, FactRole, PluginDeclarations, Seq, Verb};
+use symbio_kernel::decl::ring::Pattern;
+use symbio_kernel::decl::ring::{check_rows, drive, owed, Decl, Gap};
+use symbio_kernel::decl::Frozen;
+use symbio_kernel::decl::PluginDeclarations;
+use symbio_kernel::event::{Entity, Event, EventDecl, FactRole, Seq, Verb};
 
 fn ev(turn: u64, kind: &str, payload: Value) -> Event {
     static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -382,7 +384,7 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
         [
             ev_at(
                 1,
-                symbio_core::EVENT_RESPONSE,
+                symbio_kernel::event::EVENT_RESPONSE,
                 json!({
                     "port": "model",
                     "id": "m-1",
@@ -393,7 +395,7 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
             ),
             ev_at(
                 1,
-                symbio_core::EVENT_RESPONSE,
+                symbio_kernel::event::EVENT_RESPONSE,
                 json!({ "port": "tool", "id": "tool-1-d0-c1", "attempt": 1, "result": "ok" }),
                 40,
             ),
@@ -522,7 +524,7 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
     );
     resumed.push(ev_at(
         1,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({
             "port": "model",
             "id": "m-2",
@@ -533,7 +535,7 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
     ));
     resumed.push(ev_at(
         1,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({ "port": "tool", "id": "tool-1-d1-c1", "attempt": 1, "result": "ok" }),
         3_200,
     ));
@@ -622,7 +624,7 @@ fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
         // 在 v5 的 `due` 里。
         ev_at(
             1,
-            symbio_core::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             json!({
                 "port": "model",
                 "id": "m-1",
@@ -633,7 +635,7 @@ fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
         ),
         ev_at(
             1,
-            symbio_core::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             json!({ "port": "tool", "id": "tool-1-d0-c1", "attempt": 1, "result": "ok" }),
             40,
         ),
@@ -949,29 +951,29 @@ fn rows_are_stable_and_globally_ordered() {
     assert_eq!(
         ROWS.iter().map(|d| d.tier).collect::<Vec<_>>(),
         vec![
-            symbio_core::LatencyTier::Fast,
-            symbio_core::LatencyTier::Fast,
-            symbio_core::LatencyTier::Deep,
-            symbio_core::LatencyTier::Reflex,
+            symbio_kernel::adapters::LatencyTier::Fast,
+            symbio_kernel::adapters::LatencyTier::Fast,
+            symbio_kernel::adapters::LatencyTier::Deep,
+            symbio_kernel::adapters::LatencyTier::Reflex,
             // 接缝只装配、不调模型：快速档。
-            symbio_core::LatencyTier::Fast,
-            symbio_core::LatencyTier::Reflex,
+            symbio_kernel::adapters::LatencyTier::Fast,
+            symbio_kernel::adapters::LatencyTier::Reflex,
             // 收束入格不调模型：反射档。
-            symbio_core::LatencyTier::Reflex,
+            symbio_kernel::adapters::LatencyTier::Reflex,
             // 续幕只落两格（`round` 格与配置），不调模型：快速档。
-            symbio_core::LatencyTier::Fast,
-            symbio_core::LatencyTier::Deep,
+            symbio_kernel::adapters::LatencyTier::Fast,
+            symbio_kernel::adapters::LatencyTier::Deep,
             // 派发是记账，不调模型；`await` 跟的是被等的那一端。
-            symbio_core::LatencyTier::Fast,
-            symbio_core::LatencyTier::Fast,
-            symbio_core::LatencyTier::Fast,
+            symbio_kernel::adapters::LatencyTier::Fast,
+            symbio_kernel::adapters::LatencyTier::Fast,
+            symbio_kernel::adapters::LatencyTier::Fast,
             // 拒绝收尾与派发同一执行体（不调工具）。
-            symbio_core::LatencyTier::Fast,
-            symbio_core::LatencyTier::Deep,
+            symbio_kernel::adapters::LatencyTier::Fast,
+            symbio_kernel::adapters::LatencyTier::Deep,
             // `await-tools`：等的是工具执行层，不调模型 ⇒ 与 `dispatch-tools` 同档。
-            symbio_core::LatencyTier::Fast,
+            symbio_kernel::adapters::LatencyTier::Fast,
             // 归宿行只认产物，不调模型。
-            symbio_core::LatencyTier::Reflex,
+            symbio_kernel::adapters::LatencyTier::Reflex,
         ]
     );
 }
@@ -1013,7 +1015,7 @@ const fn row_by(
         name,
         prio: 1,
         by: Some(by),
-        tier: symbio_core::LatencyTier::Fast,
+        tier: symbio_kernel::adapters::LatencyTier::Fast,
         owes,
         expand,
         until,
@@ -1197,7 +1199,7 @@ fn declared_facts_all_have_a_row_home() {
 fn request(id: &str, attempt: u64) -> Event {
     ev(
         1,
-        symbio_core::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_REQUEST,
         json!({ "port": "model", "id": id, "attempt": attempt }),
     )
 }
@@ -1205,7 +1207,7 @@ fn request(id: &str, attempt: u64) -> Event {
 fn sent(id: &str, attempt: u64, lease_ms: u64, cap: u64, ts: i64) -> Event {
     ev_at(
         1,
-        symbio_core::EVENT_SENT,
+        symbio_kernel::event::EVENT_SENT,
         json!({
             "port": "model",
             "id": id,
@@ -1245,7 +1247,7 @@ fn a_failure_closes_both_the_dispatch_and_the_wait() {
         sent("t-1", 1, 1_000, 1, 0),
         ev(
             1,
-            symbio_core::EVENT_FAILED,
+            symbio_kernel::event::EVENT_FAILED,
             json!({ "port": "model", "id": "t-1", "attempt": 1, "why": "boom" }),
         ),
     ];
@@ -1277,7 +1279,7 @@ fn the_lease_view_goes_stale_only_after_the_deadline() {
     let mut answered = events.clone();
     answered.push(ev(
         1,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({ "port": "model", "id": "t-1", "attempt": 1 }),
     ));
     assert!(!stale_at(&answered, 100_000));
@@ -1302,7 +1304,10 @@ fn waiting_means_a_sent_request_without_a_terminal() {
     // 租约到期也仍然「在等」——那笔往返还在路上，只是卡住了。
     assert!(super::waiting(&out, 1, 100_000));
     // 终态落了 ⇒ 不在等。
-    for terminal in [symbio_core::EVENT_RESPONSE, symbio_core::EVENT_FAILED] {
+    for terminal in [
+        symbio_kernel::event::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_FAILED,
+    ] {
         let mut done = out.clone();
         done.push(ev(
             1,
@@ -1371,9 +1376,9 @@ fn every_await_row_is_the_dual_of_its_dispatch_row() {
             assert!(
                 matches!(
                     exit.source,
-                    symbio_core::EVENT_RESPONSE
-                        | symbio_core::EVENT_FAILED
-                        | symbio_core::EVENT_RETRY
+                    symbio_kernel::event::EVENT_RESPONSE
+                        | symbio_kernel::event::EVENT_FAILED
+                        | symbio_kernel::event::EVENT_RETRY
                 ),
                 "`{}` 的出口 `{}` 不是往返的终态（只认 response / failed / retry）",
                 row.name,
@@ -1415,7 +1420,7 @@ fn the_lease_is_one_view_for_every_port() {
         sent("m-1", 1, 1_000, 1, 0),
         ev_at(
             1,
-            symbio_core::EVENT_SENT,
+            symbio_kernel::event::EVENT_SENT,
             json!({ "port": "tool", "id": "c-1", "attempt": 1, "lease_ms": 1_000, "attempt_cap": 2 }),
             0,
         ),
@@ -1439,7 +1444,7 @@ fn the_lease_is_one_view_for_every_port() {
 fn model_request(id: &str) -> Event {
     ev(
         1,
-        symbio_core::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_REQUEST,
         json!({ "port": "model", "id": id, "attempt": 1 }),
     )
 }
@@ -1447,7 +1452,7 @@ fn model_request(id: &str) -> Event {
 fn model_sent(id: &str) -> Event {
     ev_at(
         1,
-        symbio_core::EVENT_SENT,
+        symbio_kernel::event::EVENT_SENT,
         json!({
             "port": "model",
             "id": id,
@@ -1486,7 +1491,7 @@ fn a_model_failure_closes_both_the_dispatch_and_the_wait() {
         model_sent("m-1"),
         ev(
             1,
-            symbio_core::EVENT_FAILED,
+            symbio_kernel::event::EVENT_FAILED,
             json!({ "port": "model", "id": "m-1", "attempt": 1, "why": "boom" }),
         ),
     ];
@@ -1534,7 +1539,7 @@ fn the_execute_row_steps_aside_until_the_round_is_settled() {
     // 收清之后：执行行的让位理由才消失，模型才能接着说下一句。
     head.push(ev(
         1,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({ "port": "model", "id": "m-1", "attempt": 1, "calls": [] }),
     ));
     assert!(!owes("await-model", &head, 0));
@@ -1574,7 +1579,7 @@ fn the_announce_row_is_keyed_by_the_round_trip() {
     head.push(model_sent(&first));
     head.push(ev(
         1,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({
             "port": "model",
             "id": first,
@@ -1587,12 +1592,12 @@ fn the_announce_row_is_keyed_by_the_round_trip() {
     // 工具批关账 ⇒ 同一幕欠**下一次**往返：同幕、同端口，键却是另一笔。
     head.push(ev(
         1,
-        symbio_core::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_REQUEST,
         json!({ "port": "tool", "id": "tool-1-d0-call-a", "attempt": 1 }),
     ));
     head.push(ev(
         1,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({ "port": "tool", "id": "tool-1-d0-call-a", "attempt": 1 }),
     ));
     let second = format!("model-1-d{anchor}-s1");
@@ -1626,7 +1631,7 @@ fn a_model_response_expands_its_tool_calls_into_one_debt_each() {
     ]);
     let answered = vec![ev(
         1,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({ "port": "model", "id": "m-1", "attempt": 1, "calls": calls }),
     )];
 
@@ -1650,12 +1655,12 @@ fn a_model_response_expands_its_tool_calls_into_one_debt_each() {
         answered[0].clone(),
         ev(
             1,
-            symbio_core::EVENT_REQUEST,
+            symbio_kernel::event::EVENT_REQUEST,
             json!({ "port": "tool", "id": "tool-1-d0-call-a", "attempt": 1 }),
         ),
         ev(
             1,
-            symbio_core::EVENT_REQUEST,
+            symbio_kernel::event::EVENT_REQUEST,
             json!({ "port": "tool", "id": "tool-1-d0-call-b", "attempt": 1 }),
         ),
     ];
@@ -1667,7 +1672,7 @@ fn a_model_response_expands_its_tool_calls_into_one_debt_each() {
     // 空集合 = 不开债：模型答了话、没要工具。
     let no_calls = vec![ev(
         1,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({ "port": "model", "id": "m-2", "attempt": 1, "calls": [] }),
     )];
     assert!(!owes("open-tools", &no_calls, 0));
@@ -1692,7 +1697,7 @@ fn the_same_model_call_id_in_a_later_round_gets_a_distinct_protocol_id() {
 fn tool_request(id: &str) -> Event {
     ev(
         1,
-        symbio_core::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_REQUEST,
         json!({
             "port": "tool",
             "id": id,
@@ -1742,7 +1747,7 @@ fn tool_denied(id: &str) -> Event {
 fn tool_sent(id: &str) -> Event {
     ev_at(
         1,
-        symbio_core::EVENT_SENT,
+        symbio_kernel::event::EVENT_SENT,
         json!({
             "port": "tool",
             "id": id,
@@ -1792,7 +1797,7 @@ fn a_denied_tool_call_owes_a_close_only() {
     let mut closed = refused.clone();
     closed.push(ev(
         1,
-        symbio_core::EVENT_FAILED,
+        symbio_kernel::event::EVENT_FAILED,
         json!({ "port": "tool", "id": "c-1", "attempt": 1, "why": "denied" }),
     ));
     assert!(!owes("deny-tools", &closed, 0), "`failed` 关掉这一笔");
@@ -1825,7 +1830,7 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
         let mut e = dispatched.clone();
         e.push(ev(
             1,
-            symbio_core::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             json!({ "port": "tool", "id": "c-1", "attempt": 1 }),
         ));
         e
@@ -1836,7 +1841,7 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
         let mut e = dispatched.clone();
         e.push(ev(
             1,
-            symbio_core::EVENT_FAILED,
+            symbio_kernel::event::EVENT_FAILED,
             json!({ "port": "tool", "id": "c-1", "attempt": 1, "why": "not_executed" }),
         ));
         e
@@ -1860,12 +1865,12 @@ fn a_retried_request_reopens_authorization_and_dispatch() {
         tool_sent(id),
         ev(
             1,
-            symbio_core::EVENT_RETRY,
+            symbio_kernel::event::EVENT_RETRY,
             json!({ "port": "tool", "id": id, "attempt": 1 }),
         ),
         ev(
             1,
-            symbio_core::EVENT_REQUEST,
+            symbio_kernel::event::EVENT_REQUEST,
             json!({
                 "port": "tool",
                 "id": id,
@@ -1955,7 +1960,7 @@ fn a_resumed_tool_call_is_authorized_and_awaited_like_a_batch_call() {
     let mut done = open;
     done.push(ev(
         1,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({ "port": "tool", "id": id, "attempt": 1 }),
     ));
     assert!(!owes("await-tools", &done, 0));
@@ -1971,8 +1976,10 @@ fn a_resumed_tool_call_does_not_need_a_model_response() {
     let events = vec![tool_request(id), tool_granted(id)];
 
     assert!(
-        events.iter().all(|e| e.kind != symbio_core::EVENT_RESPONSE
-            || e.payload.get("port").and_then(Value::as_str) != Some("model")),
+        events
+            .iter()
+            .all(|e| e.kind != symbio_kernel::event::EVENT_RESPONSE
+                || e.payload.get("port").and_then(Value::as_str) != Some("model")),
         "用例前提：日志里没有模型响应"
     );
     assert!(!owes("authorize-tool", &events, 0), "已放行 ⇒ 授权行关账");
@@ -1990,7 +1997,7 @@ fn an_aborted_tool_closes_the_await_with_its_own_reason() {
         tool_sent("c-1"),
         ev(
             1,
-            symbio_core::EVENT_FAILED,
+            symbio_kernel::event::EVENT_FAILED,
             json!({ "port": "tool", "id": "c-1", "attempt": 1, "why": "aborted" }),
         ),
     ];
@@ -2083,7 +2090,7 @@ fn next_picks_announce_model_while_the_turn_is_open() {
 fn model_answer(turn: u64, id: &str) -> Event {
     ev(
         turn,
-        symbio_core::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_RESPONSE,
         json!({ "port": "model", "id": id, "attempt": 1, "calls": [] }),
     )
 }
@@ -2105,7 +2112,7 @@ fn close_row_owes_only_after_an_answer_without_calls() {
         open[1].clone(),
         ev(
             1,
-            symbio_core::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             json!({
                 "port": "model",
                 "id": "m-1",
@@ -2157,12 +2164,12 @@ fn close_row_owes_when_the_model_round_failed_in_this_drive() {
     let mut failed = open.clone();
     failed.push(ev(
         1,
-        symbio_core::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_REQUEST,
         json!({ "port": "model", "id": "m-1", "attempt": 1 }),
     ));
     failed.push(ev(
         1,
-        symbio_core::EVENT_FAILED,
+        symbio_kernel::event::EVENT_FAILED,
         json!({ "port": "model", "id": "m-1", "why": "adapter error" }),
     ));
     assert!(
@@ -2174,7 +2181,7 @@ fn close_row_owes_when_the_model_round_failed_in_this_drive() {
     let mut stale = open.clone();
     stale.push(ev(
         1,
-        symbio_core::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_REQUEST,
         json!({ "port": "model", "id": "m-1", "attempt": 1 }),
     ));
     stale.push(ev(
@@ -2184,7 +2191,7 @@ fn close_row_owes_when_the_model_round_failed_in_this_drive() {
     ));
     stale.push(ev(
         1,
-        symbio_core::EVENT_FAILED,
+        symbio_kernel::event::EVENT_FAILED,
         json!({ "port": "model", "id": "m-1", "why": "lease_expired" }),
     ));
     assert!(
@@ -2306,7 +2313,7 @@ fn next_selects_the_report_row_only_while_the_interval_is_due() {
         ),
         ev_at(
             1,
-            symbio_core::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             json!({
                 "port": "model",
                 "id": "m-1",
@@ -2319,7 +2326,7 @@ fn next_selects_the_report_row_only_while_the_interval_is_due() {
         // 「说完一句之后环上没有别的账」才是它要读的形状。
         ev_at(
             1,
-            symbio_core::EVENT_REQUEST,
+            symbio_kernel::event::EVENT_REQUEST,
             json!({"port": "tool", "id": "tool-1-d0-c1", "attempt": 1, "tool": "read_file"}),
             31,
         ),
@@ -2339,7 +2346,7 @@ fn next_selects_the_report_row_only_while_the_interval_is_due() {
         ),
         ev_at(
             1,
-            symbio_core::EVENT_SENT,
+            symbio_kernel::event::EVENT_SENT,
             json!({
                 "port": "tool",
                 "id": "tool-1-d0-c1",
@@ -2352,7 +2359,7 @@ fn next_selects_the_report_row_only_while_the_interval_is_due() {
         // 那一笔的终局：批次边界 = 这批调用全部落地。
         ev_at(
             1,
-            symbio_core::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             json!({"port": "tool", "id": "tool-1-d0-c1", "attempt": 1, "result": "ok"}),
             40,
         ),
@@ -2761,7 +2768,7 @@ fn the_overlap_report_on_the_production_table() {
 fn every_declared_port_has_its_answer_exits() {
     // 真表上的第 5 条端口侧：`load` 的 `Ok` 已经包含这一格（检查的出口只有一个），
     // 这里再点名单问一次——它防的是「三个端口的应答出口没人还」这种静默。
-    assert!(symbio_core::ring::check_ports(ROWS, &frozen(), PORTS).is_empty());
+    assert!(symbio_kernel::decl::ring::check_ports(ROWS, &frozen(), PORTS).is_empty());
 }
 
 // ── 三条机制判据的可执行证据（判据 12 / 7 / 8）────────────────────
@@ -2948,7 +2955,7 @@ fn twenty_seven_cells() -> Vec<Event> {
         ),
         ev(
             1,
-            symbio_core::EVENT_FAILED,
+            symbio_kernel::event::EVENT_FAILED,
             json!({
                 "port": "model", "id": "model-0-d0-s0", "attempt": 1, "why": "lease_expired",
             }),
@@ -2973,7 +2980,7 @@ fn twenty_seven_cells() -> Vec<Event> {
         model_request("model-1-d10-s0"),
         ev_at(
             1,
-            symbio_core::EVENT_SENT,
+            symbio_kernel::event::EVENT_SENT,
             json!({
                 "port": "model", "id": "model-1-d10-s0", "attempt": 1,
                 "lease_ms": 600_000, "attempt_cap": 1,
@@ -2982,7 +2989,7 @@ fn twenty_seven_cells() -> Vec<Event> {
         ),
         ev(
             1,
-            symbio_core::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             json!({
                 "port": "model", "id": "model-1-d10-s0", "attempt": 1,
                 "calls": [{ "port": "tool", "id": "tool-1-d10-call-a", "name": "read_file", "arguments": {} }],
@@ -2992,7 +2999,7 @@ fn twenty_seven_cells() -> Vec<Event> {
         tool_granted("tool-1-d10-call-a"),
         ev_at(
             1,
-            symbio_core::EVENT_SENT,
+            symbio_kernel::event::EVENT_SENT,
             json!({
                 "port": "tool", "id": "tool-1-d10-call-a", "attempt": 1,
                 "lease_ms": 600_000, "attempt_cap": 1,
@@ -3001,7 +3008,7 @@ fn twenty_seven_cells() -> Vec<Event> {
         ),
         ev(
             1,
-            symbio_core::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             json!({ "port": "tool", "id": "tool-1-d10-call-a", "attempt": 1 }),
         ),
     ]
@@ -3189,7 +3196,7 @@ fn a_turn_inside_the_bound_is_handed_over_whole() {
 fn only_answering_plugin_rows_may_land_the_host_stage_fact() {
     use super::super::control_decl::EVENT_TURN_STAGE;
     use super::super::turn_exec::run_plugin_row;
-    use symbio_core::ring::Key;
+    use symbio_kernel::decl::ring::Key;
 
     let row = |answers: bool| super::Next {
         row: "test.row",

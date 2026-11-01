@@ -1,7 +1,7 @@
 //! 效果端口的判据：选行为按声明、草稿不碰事实源、宿主面由写口补。
 
 use super::*;
-use symbio_core::{Entity, Verb};
+use symbio_kernel::event::{Entity, Verb};
 
 /// 一个只为测试存在的实现：把调用记成一条 `test × asserted` 的草稿。
 struct Recorder;

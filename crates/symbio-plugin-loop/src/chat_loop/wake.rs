@@ -21,9 +21,12 @@
 use super::ChatOrchestrator;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::chat_node::{ChatNode, NodeStatus, ResumeAction, ResumeRequest};
-use symbio_core::{llm_short_id, run_ops, RemoveNodesRequest, Seq};
-use symbio_core::{ExecAbortSignal, PluginError, PluginInvokeRequest};
+use symbio_kernel::event::Seq;
+use symbio_kernel::exec::ExecAbortSignal;
+use symbio_kernel::plugin::{PluginError, PluginInvokeRequest};
+use symbio_sdk::chat::chat_node::{ChatNode, NodeStatus, ResumeAction, ResumeRequest};
+use symbio_sdk::llm::turn::llm_short_id;
+use symbio_sdk::turn::dispatch::{run_ops, RemoveNodesRequest};
 use {symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn};
 
 use super::super::tool_dispatch::{ToolPort, WakeIntent, WakeSpec};
@@ -144,7 +147,7 @@ async fn land_tool_wake(
     let wire_id = tc.tool_call_id.clone().unwrap_or_default();
     // Turn 根：`flat` 档记在 `meta.turn_root`，`grouped` 档是 `parent_id`。
     // 两处都取不到（老数据 / 手工节点）时现开一个——续写幕必须有一个根可挂。
-    let turn_root = symbio_core::node_build::turn_root_of(tc)
+    let turn_root = symbio_sdk::turn::node_build::turn_root_of(tc)
         .map(str::to_string)
         .or_else(|| tc.parent_id.clone())
         .filter(|s| !s.is_empty())
@@ -223,9 +226,9 @@ pub(crate) async fn merge_runner_messages(
         session
             .run_op::<Vec<ChatNode>>(
                 run_ops::EDIT_NODES,
-                symbio_core::EditNodesRequest {
+                symbio_sdk::turn::dispatch::EditNodesRequest {
                     nodes: edited,
-                    frame: symbio_core::EditFrame::Message,
+                    frame: symbio_sdk::turn::dispatch::EditFrame::Message,
                 },
             )
             .await?;

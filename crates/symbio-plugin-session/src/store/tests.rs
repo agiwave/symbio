@@ -128,8 +128,8 @@ async fn sub_session_routes_into_parent_dir() {
 /// 这是召回读方（`recall_snapshots`）的范围裁决，不是漏扫——改范围先改裁决。
 #[test]
 fn recall_snapshots_scans_one_level_deliberately() {
-    use symbio_core::Store as _;
-    use symbio_core::{Entity, Event, Verb};
+    use symbio_kernel::event::{Entity, Event, Verb};
+    use symbio_kernel::store::Store as _;
 
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
@@ -323,8 +323,8 @@ async fn save_leaves_no_temp_file_behind() {
 
 /// 造一条用户文本消息（标题 / 摘要推导的输入）
 fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
-    use symbio_core::chat_node::MessageContent;
-    use symbio_core::principal::Principal;
+    use symbio_sdk::chat::chat_node::MessageContent;
+    use symbio_sdk::chat::principal::Principal;
     ChatNode {
         id: format!("m{}", text.len()),
         principal: Some(Principal::from_legacy(if role_is_user {
@@ -339,8 +339,8 @@ fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
 
 /// 用户格事件（载荷带节点 id；与 `rebuild.test.rs::user_event` 同形——那边是投影
 /// 判据、这边是存储判据，两处构造一致才能判到同一件事）
-fn user_event(eid: &str, node_id: &str, text: &str, turn: u64) -> symbio_core::Event {
-    use symbio_core::{Entity, Event, Verb};
+fn user_event(eid: &str, node_id: &str, text: &str, turn: u64) -> symbio_kernel::event::Event {
+    use symbio_kernel::event::{Entity, Event, Verb};
     use symbio_plugin_api::events::EVENT_USER_MESSAGE;
     Event::pending(
         eid,
@@ -403,7 +403,7 @@ async fn wal_is_the_source_messages_json_is_ignored() {
     std::fs::create_dir_all(&dir).unwrap();
     {
         let wal = crate::store::EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).unwrap();
-        use symbio_core::Store as _;
+        use symbio_kernel::store::Store as _;
         wal.append(user_event("e1", "n1", "第一问", 1)).unwrap();
         wal.append(user_event("e2", "n2", "第二问", 2)).unwrap();
     }
@@ -685,11 +685,9 @@ async fn concurrent_saves_of_one_session_serialize_via_lock() {
 /// 消费方按**事实**切（最近一份快照在哪），不是存储层再开一个读法。
 #[test]
 fn current_window_starts_at_the_latest_snapshot() {
-    use symbio_core::{
-        chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
-        Entity, Event, Verb,
-    };
+    use symbio_kernel::event::{Entity, Event, Verb};
     use symbio_plugin_api::events::{EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE};
+    use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
     let user = |id: &str, turn: u64| {
         Event::pending(
             id,
@@ -809,7 +807,7 @@ async fn an_unopenable_fact_source_is_an_error_not_none() {
 /// `snapshot()` 读完整史（含归档前缀），且与写句柄看到的切片一致。
 #[tokio::test]
 async fn snapshot_reads_the_same_full_history_as_the_writer() {
-    use symbio_core::{Entity, Event, Verb};
+    use symbio_kernel::event::{Entity, Event, Verb};
     use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 
     let tmp = TempDir::new().unwrap();
@@ -847,12 +845,12 @@ async fn snapshot_reads_the_same_full_history_as_the_writer() {
 
 fn lifecycle_event(
     kind: &str,
-    verb: symbio_core::Verb,
+    verb: symbio_kernel::event::Verb,
     turn: u64,
     payload: serde_json::Value,
 ) -> Event {
     use std::sync::atomic::{AtomicU64, Ordering};
-    use symbio_core::{Entity, Event};
+    use symbio_kernel::event::{Entity, Event};
     // 事件 id 幂等（append 重复即 Duplicate）：同一个测试里可能两次开轮。
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -866,7 +864,7 @@ fn lifecycle_event(
 fn open_turn(turn: u64) -> Event {
     lifecycle_event(
         symbio_plugin_api::events::EVENT_USER_MESSAGE,
-        symbio_core::Verb::Opened,
+        symbio_kernel::event::Verb::Opened,
         turn,
         json!({ "text": "问", "id": "u-1" }),
     )
@@ -875,7 +873,7 @@ fn open_turn(turn: u64) -> Event {
 fn close_completed(turn: u64) -> Event {
     lifecycle_event(
         symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-        symbio_core::Verb::Closed,
+        symbio_kernel::event::Verb::Closed,
         turn,
         json!({ "status": "completed", "text": "答", "id": "a-1" }),
     )
@@ -884,7 +882,7 @@ fn close_completed(turn: u64) -> Event {
 fn close_failed(turn: u64, detail: &str) -> Event {
     lifecycle_event(
         symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-        symbio_core::Verb::Closed,
+        symbio_kernel::event::Verb::Closed,
         turn,
         json!({ "status": "failed", "reason": "fallback", "detail": detail, "text": "答", "id": "a-1" }),
     )
@@ -916,7 +914,7 @@ async fn runtime_facts_is_none_without_a_fact_source() {
 #[tokio::test]
 async fn runtime_facts_tracks_the_writer_and_invalidates_on_append() {
     use crate::runtime::RuntimeOutcome;
-    use symbio_core::Store as _;
+    use symbio_kernel::store::Store as _;
 
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
@@ -946,7 +944,7 @@ async fn runtime_facts_tracks_the_writer_and_invalidates_on_append() {
 #[tokio::test]
 async fn runtime_facts_replays_a_closed_wal_for_a_fresh_process() {
     use crate::runtime::RuntimeOutcome;
-    use symbio_core::Store as _;
+    use symbio_kernel::store::Store as _;
 
     let tmp = TempDir::new().unwrap();
     {
@@ -971,7 +969,7 @@ async fn runtime_facts_replays_a_closed_wal_for_a_fresh_process() {
 #[tokio::test]
 async fn runtime_facts_invalidates_the_read_only_stamp_when_the_wal_grows() {
     use crate::runtime::RuntimeOutcome;
-    use symbio_core::Store as _;
+    use symbio_kernel::store::Store as _;
 
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
@@ -995,7 +993,7 @@ async fn runtime_facts_invalidates_the_read_only_stamp_when_the_wal_grows() {
 #[tokio::test]
 async fn deleting_a_session_evicts_its_runtime_projection() {
     use crate::runtime::RuntimeOutcome;
-    use symbio_core::Store as _;
+    use symbio_kernel::store::Store as _;
 
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());

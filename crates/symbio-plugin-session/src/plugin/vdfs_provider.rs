@@ -15,11 +15,12 @@
 
 use super::*;
 use crate::stats_reading::present_message;
-use symbio_core::chat_node as cm;
-use symbio_core::{
-    vdfs_from_plugin_error, VdfsChangeSink, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
-    VdfsRequest, VdfsResponse, VdfsResult,
+use symbio_kernel::vdfs::{
+    VdfsChangeSink, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse,
+    VdfsResult,
 };
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::vdfs::host::vdfs_from_plugin_error;
 
 #[async_trait]
 impl VdfsProvider for SessionPlugin {
@@ -132,7 +133,7 @@ impl SessionPlugin {
         // 同一棵树——`session_content` 用同一个 `flatten_whole_tree`、同一个档位，
         // 这里跟着投一次，否则流式期间两条路径分叉（`grouped` 档下即时返回、零改动）。
         let mode = self.presentation_mode().await;
-        symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
+        symbio_sdk::turn::node_build::flatten_whole_tree(&mut messages, mode);
         // 呈现派生：列表是前端读到的另一条交互出口（直播走 `Transcript::publish`，
         // 历史/切回走这里）。存储与事件里的节点不含 title/icon 也不含读数行，
         // 交付前按形状统一算出（读数口径见 [D-111](../../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）。

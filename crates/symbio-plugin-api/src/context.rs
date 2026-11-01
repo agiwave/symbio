@@ -53,7 +53,9 @@
 //! （裁了谁、超了多少）；「谁更重要」仍是声明方的判断，本模块不做第二遍。
 
 use serde_json::Value;
-use symbio_core::{CapabilityMeta, Event, WorkerProgress};
+use symbio_kernel::capability::CapabilityMeta;
+use symbio_kernel::event::Event;
+use symbio_sdk::turn::facts::WorkerProgress;
 
 /// 已知的**段身份**（`meta.kind` 的取值）——宿主词汇，与 [`crate::behaviors`] 同层。
 ///

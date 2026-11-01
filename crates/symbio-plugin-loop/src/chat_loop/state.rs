@@ -8,8 +8,8 @@
 //! 只在 `chat_loop` 及其子模块内可见。
 
 use super::*;
-use symbio_core::chat_node::CHAT_STYLE_TAG_REASONING;
-use symbio_core::PluginError;
+use symbio_kernel::plugin::PluginError;
+use symbio_sdk::chat::chat_node::CHAT_STYLE_TAG_REASONING;
 
 // 「本请求所属会话的主体身份」这个取值点已上移 core（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 1 组）：
 // 它是 core 既有键 `AGENT_ID` 的纯派生函数，不属于任何一个切片，会话驱动器切出去后
@@ -27,9 +27,11 @@ use symbio_core::request_principal;
 /// 对方）。两个都从 ctx 取但键不同，混用会把「向谁宣告」错写成「谁在宣告」。
 ///
 /// 决策 D-067 见 [D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "D-067")
-pub(crate) fn request_source_principal(ctx: &dyn symbio_core::PluginInvokeRequest) -> String {
-    use symbio_core::PluginInvokeRequestExt;
-    ctx.get(symbio_core::SOURCE_PRINCIPAL)
+pub(crate) fn request_source_principal(
+    ctx: &dyn symbio_kernel::plugin::PluginInvokeRequest,
+) -> String {
+    use symbio_kernel::plugin::PluginInvokeRequestExt;
+    ctx.get(symbio_sdk::keys::SOURCE_PRINCIPAL)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| symbio_core::PRINCIPAL_USER.to_string())
@@ -59,10 +61,12 @@ pub(crate) fn request_source_principal(ctx: &dyn symbio_core::PluginInvokeReques
 /// 这不是把一条事实拆成两条：**主体的上限**与**本幕的档**本来就是两个量，用档位填规格
 /// 是让「幕的参数」冒充「主体的属性」。
 pub(crate) fn request_actor_spec(
-    ctx: &dyn symbio_core::PluginInvokeRequest,
-    scope: symbio_core::Scope,
-) -> symbio_core::ActorSpec {
-    use symbio_core::{pattern_for_principal, ActorSpec, PluginInvokeRequestExt};
+    ctx: &dyn symbio_kernel::plugin::PluginInvokeRequest,
+    scope: symbio_kernel::actors::Scope,
+) -> symbio_kernel::actors::ActorSpec {
+    use symbio_core::pattern_for_principal;
+    use symbio_kernel::actors::ActorSpec;
+    use symbio_kernel::plugin::PluginInvokeRequestExt;
     let principal = request_principal(ctx);
     // 绑定即登记（[D-100]）：登记的主 owner 是**会话创建点**
     // （`session::commands::session_upsert` 的 create 分支）；这里只在
@@ -72,12 +76,12 @@ pub(crate) fn request_actor_spec(
     // 根与子会话的判据不同——根没有父行，未部署时继承会话面缺省行，已部署时原样
     // 用自己的行；委派子会话取「父行 ∩ 自己的声明行」（委派不放大权威）。登记先于
     // 取数，规格身上的能力集才是「现在准不准」的合流面；未绑定的主体照旧 fail-closed。
-    let session_id = ctx.get(symbio_core::SESSION_ID).unwrap_or_default();
+    let session_id = ctx.get(symbio_sdk::keys::SESSION_ID).unwrap_or_default();
     match &scope {
-        symbio_core::Scope::Child(parent) => {
+        symbio_kernel::actors::Scope::Child(parent) => {
             symbio_core::bind_inheriting(&session_id, &principal, parent)
         }
-        symbio_core::Scope::Root => symbio_core::bind_root(&session_id, &principal),
+        symbio_kernel::actors::Scope::Root => symbio_core::bind_root(&session_id, &principal),
     }
     let matrix = symbio_core::production_matrix();
     // 模式判据住在定义域内（[`symbio_core::pattern_for_principal`]）——
@@ -105,8 +109,9 @@ pub(crate) fn request_actor_spec(
 /// 本幕走哪一档要等轮首四行跑完才知道（快路作答 ⇒ `reflex`，否则 `deep`），落成
 /// `turn.dispatch` 那一格（`chat_loop::land_dispatch`）。主体在幕首就建，所以它只能
 /// 带**自己那一类**的档——两个量，两处，不互相冒充。
-fn declared_budget(pattern: symbio_core::Pattern) -> u64 {
-    use symbio_core::{LatencyTier, Pattern};
+fn declared_budget(pattern: symbio_kernel::actors::Pattern) -> u64 {
+    use symbio_kernel::actors::Pattern;
+    use symbio_kernel::adapters::LatencyTier;
     let tier = match pattern {
         Pattern::Decider => LatencyTier::Reflex,
         Pattern::Translator => LatencyTier::Fast,
@@ -281,7 +286,7 @@ pub(crate) struct TurnState {
     /// 落格的那条事实读回；0 = 尚未开幕（与 `turn_no` 的默认值同义）。
     pub(crate) now_ms: i64,
     /// 本幕读到的事实切片（阶段「已做」与配置快照的唯一输入）。
-    pub(crate) facts: Vec<symbio_core::Event>,
+    pub(crate) facts: Vec<symbio_kernel::event::Event>,
     /// 续写幕复用的 Turn 根节点 id（d）。
     ///
     /// 唤醒请求发生在开幕之前，幕首（`turn_exec::drive` 的 `open_stage`）按它决定
@@ -378,7 +383,7 @@ pub struct ChatOrchestrator {
     /// 驱动器不持 `PersistentChatSession`（E-009）。
     pub session: Arc<super::super::turn_session::LoopSession>,
     /// 压缩增量改道用的转写写口（`TurnDispatch.writer`：session 的转写唯一写入点）。
-    pub writer: Arc<dyn symbio_core::ExecTranscriptWriter>,
+    pub writer: Arc<dyn symbio_kernel::exec::ExecTranscriptWriter>,
     /// 对话面措辞的**请求级开关快照**（`SessionConfig::compose_enabled`）。
     ///
     /// ## 为什么也是一个值
@@ -413,7 +418,7 @@ pub struct ChatOrchestrator {
     /// 与 `classify_enabled` / `compose_enabled` 同一条取值纪律：组树档在一次请求生命周期
     /// 内不变，取一次快照即可。`flat` 下本轮响应骨架的直接子节点升根（见
     /// [`symbio_core::node_build::detach_if_flat`]）；前端只按 `parent_id` 插树、不看本字段。
-    pub presentation_tree: symbio_core::node_build::PresentationTree,
+    pub presentation_tree: symbio_sdk::turn::node_build::PresentationTree,
 }
 
 impl ChatOrchestrator {

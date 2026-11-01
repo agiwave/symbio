@@ -4,20 +4,26 @@
 use super::*;
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use crate::projections::checkpoint::{checkpoint, CheckpointState};
-use symbio_core::ring::{Decl, Pattern};
-use symbio_core::Budget;
-use symbio_core::FactRole;
-use symbio_core::{check_all, unresolved_turns};
-use symbio_core::{
-    transcript, verify_prompt_fidelity, Builder, Entity, Event, EventDecl, LatencyTier,
-    PluginDeclarations, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::decl::ring::Decl;
+use symbio_kernel::decl::ring::Pattern;
+use symbio_kernel::decl::{Builder, PluginDeclarations};
+use symbio_kernel::event::FactRole;
+use symbio_kernel::event::{
+    Entity, Event, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
+    EVENT_SENT,
 };
-use symbio_core::{turnstate, TurnState};
 use symbio_kernel::llm::PromptMessage;
+use symbio_kernel::view::Budget;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::vocab;
+use symbio_sdk::invariants::{check_all, unresolved_turns};
+use symbio_sdk::projection::prompt_fidelity::verify as verify_prompt_fidelity;
+use symbio_sdk::projection::transcript::transcript;
+use symbio_sdk::projection::turnstate::turnstate;
+use symbio_sdk::projection::turnstate::TurnState;
 
 /// 造一条 pending 事件（入库前无 seq；带溯源与正文载荷）。
 fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -> Event {
@@ -194,7 +200,8 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
 /// 验收 3：`store = memory` 平凡值——重启即丢，但系统仍能完成 S01 闭环。
 #[test]
 fn memory_store_trivial_value_still_completes_the_loop() {
-    use symbio_core::{EventStore, Pattern, Store as _};
+    use symbio_kernel::actors::Pattern;
+    use symbio_kernel::store::{EventStore, Store as _};
 
     // 「重启」= 新进程 = 全新 MemoryStore（事件为空）。
     let store = EventStore::new();
@@ -961,12 +968,12 @@ fn gate_rejects_a_declaration_without_provenance() {
         .append(final_without_provenance(0))
         .expect_err("无溯源的 final 必须被拒");
     match err {
-        symbio_core::AppendError::Invariant {
+        symbio_kernel::store::AppendError::Invariant {
             invariant,
             event_id,
             why,
         } => {
-            assert_eq!(invariant, symbio_core::StoreInvariant::I2);
+            assert_eq!(invariant, symbio_kernel::store::StoreInvariant::I2);
             assert_eq!(event_id, "f-0");
             assert!(why.contains("produced_by"), "原因要说清缺什么：{why}");
         }
@@ -1030,8 +1037,8 @@ fn gate_rejects_a_second_final_but_allows_artifact_then_final() {
         ))
         .expect_err("同轮第二条 final 必须被拒");
     match err {
-        symbio_core::AppendError::Invariant { invariant, .. } => {
-            assert_eq!(invariant, symbio_core::StoreInvariant::I1);
+        symbio_kernel::store::AppendError::Invariant { invariant, .. } => {
+            assert_eq!(invariant, symbio_kernel::store::StoreInvariant::I1);
         }
         other => panic!("拒错形态：{other:?}"),
     }
@@ -1065,8 +1072,8 @@ fn gate_rejects_a_second_open_for_the_same_turn() {
         ))
         .expect_err("同轮第二条开轮必须被拒");
     match err {
-        symbio_core::AppendError::Invariant { invariant, .. } => {
-            assert_eq!(invariant, symbio_core::StoreInvariant::I1);
+        symbio_kernel::store::AppendError::Invariant { invariant, .. } => {
+            assert_eq!(invariant, symbio_kernel::store::StoreInvariant::I1);
         }
         other => panic!("拒错形态：{other:?}"),
     }
@@ -1179,8 +1186,8 @@ fn gate_index_is_rebuilt_from_the_wal_on_reopen() {
         ))
         .expect_err("重放必须把「这一轮已有 final」带回来");
     match err {
-        symbio_core::AppendError::Invariant { invariant, .. } => {
-            assert_eq!(invariant, symbio_core::StoreInvariant::I1);
+        symbio_kernel::store::AppendError::Invariant { invariant, .. } => {
+            assert_eq!(invariant, symbio_kernel::store::StoreInvariant::I1);
         }
         other => panic!("拒错形态：{other:?}"),
     }

@@ -41,7 +41,7 @@ pub use approval::approval_gate;
 pub use tool_visitor::DefaultToolVisitor;
 
 use std::sync::Arc;
-use symbio_core::Registry;
+use symbio_kernel::capability::Registry;
 
 /// 三条收集通道的**共用构造点**（/ 04 报告建议 2）。
 ///

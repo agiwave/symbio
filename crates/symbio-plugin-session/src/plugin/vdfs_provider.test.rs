@@ -3,24 +3,24 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
 
 use super::*;
-use symbio_core::{
+use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsRequest,
     VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE, VDFS_EXT_FORM,
     VDFS_STATUS_ACTIVE,
 };
 // dispatch 是 VdfsProvider 的唯一入口（测试经文件尾的 LIST/STAT/… 请求常量调用）
-use symbio_core::VdfsProvider;
+use symbio_kernel::vdfs::VdfsProvider;
 // 地址构造辅助：只被本测试用，故不经 `plugin.rs` 的共享面转出（那里会让
 // `unused_imports` 误报——它看不见「仅经 glob 链使用」的再导出）。
 use crate::plugin::nodes::{message_dir_path, message_path};
-use symbio_core::VdfsChange;
+use symbio_kernel::vdfs::VdfsChange;
 // 每例独占存储根；guard 在插件之后释放，失败时也会清理。
 fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     let dir = tempfile::tempdir().unwrap();
     let plugin = SessionPlugin::new(
         None,
         SessionConfig::default(),
-        symbio_core::PluginDir::at(dir.path(), "session"),
+        symbio_sdk::plugin::PluginDir::at(dir.path(), "session"),
     );
     (dir, plugin)
 }
@@ -34,9 +34,9 @@ fn vctx() -> VdfsContext {
 /// 带**宿主请求**的上下文：`switch_branch` 的 actor 取自请求主体（写事实要知道是谁写的），
 /// 所以这一条动作不能走 [`vctx`] 那个空上下文。
 fn host_vctx() -> VdfsContext {
-    let req: std::sync::Arc<dyn symbio_core::PluginInvokeRequest> =
-        std::sync::Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
-    symbio_core::vdfs_context(&req)
+    let req: std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> =
+        std::sync::Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    symbio_sdk::vdfs::host::vdfs_context(&req)
 }
 
 /// provider 自描述：**不含挂载名**——挂载名由容器按实例表派生
@@ -899,7 +899,7 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
         .enumerate()
         .map(|(i, t)| cm::ChatNode {
             id: format!("m{i}"),
-            principal: Some(symbio_core::principal::Principal::from_legacy(
+            principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
                 symbio_core::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),
@@ -921,7 +921,7 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
         panic!("会话目录未建出（save_session 应已创建）");
     };
     {
-        use symbio_core::Store as _;
+        use symbio_kernel::store::Store as _;
         let payload = match serde_json::to_value(&nodes) {
             Ok(v) => v,
             Err(e) => panic!("序列化种子消息失败：{e}"),
@@ -929,12 +929,12 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
         let wal = dir.join(crate::paths::V2_WAL_FILE);
         let fs = crate::store::EventWalStore::open(&wal).expect("打开事实源失败");
         fs.append(
-            symbio_core::Event::pending(
+            symbio_kernel::event::Event::pending(
                 "m-add-0",
                 symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
-                symbio_core::Entity::Message,
+                symbio_kernel::event::Entity::Message,
                 // `turn = 0`：种子是裸数据，不属于任何一轮（与 message_events::append 同约定）。
-                symbio_core::Verb::Opened,
+                symbio_kernel::event::Verb::Opened,
                 0,
                 symbio_core::PRINCIPAL_USER,
             )
@@ -982,7 +982,8 @@ fn watch_changes(p: &SessionPlugin) -> std::sync::Arc<std::sync::Mutex<Vec<VdfsC
 /// 本文件只需要它的**结果**——事实源上有并列的两支。溯源锚取切片末尾那条的 seq
 /// （I2：断言类事件必须带一个存在且不超前的锚）。
 async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
-    use symbio_core::{Entity, Seq, Store as _, Verb};
+    use symbio_kernel::event::{Entity, Seq, Verb};
+    use symbio_kernel::store::Store as _;
     use symbio_plugin_api::events::EVENT_TURN_BRANCH;
     let dir = p
         .get_store()
@@ -998,7 +999,7 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
         .and_then(|e| e.seq)
         .expect("种分支格前事实源已非空");
     fs.append(
-        symbio_core::Event::pending(
+        symbio_kernel::event::Event::pending(
             format!("branch-{into}"),
             EVENT_TURN_BRANCH,
             Entity::Turn,
@@ -1014,7 +1015,8 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
 
 /// 事实源里出现过哪些事件 kind（分支切换的判据是「多了一条什么、没多出一条什么」）。
 async fn fact_kinds(p: &SessionPlugin, id: &str) -> Vec<String> {
-    use symbio_core::{Seq, Store as _};
+    use symbio_kernel::event::Seq;
+    use symbio_kernel::store::Store as _;
     let dir = p
         .get_store()
         .await
@@ -1054,8 +1056,8 @@ async fn switch_branch(
 /// `turn.branch_selected`（而不是 `message.removed`），进模型的那一份换成另一支。
 #[tokio::test]
 async fn switch_branch_changes_the_reading_not_the_facts() {
-    use symbio_core::branch_selected;
     use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_TURN_BRANCH_SELECTED};
+    use symbio_sdk::projection::branch::branch_selected;
     let (_dir, p) = fixture();
     let id = unique_id("branch-switch");
     // m0 = 问，m1 = 第一次答，m2 = 重试的那一支

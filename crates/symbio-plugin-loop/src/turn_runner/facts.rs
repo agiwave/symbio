@@ -53,7 +53,7 @@ pub(crate) fn answer_id_of(
     facts: &StreamNodeFacts,
     turn_root_id: &str,
 ) -> String {
-    symbio_core::event_output_text_node_id(
+    symbio_kernel::event::event_output_text_node_id(
         answer,
         reasoning,
         facts.text_id.as_deref(),
@@ -73,7 +73,7 @@ pub(crate) fn output_fields(
     turn_root_id: &str,
     principal: &str,
     facts: &StreamNodeFacts,
-    rt: Option<&symbio_core::LlmTurn>,
+    rt: Option<&symbio_sdk::adapters::LlmTurn>,
 ) -> serde_json::Value {
     let text = facts.text.clone().unwrap_or_default();
     let reasoning = facts.reasoning.clone().unwrap_or_default();
@@ -91,7 +91,7 @@ pub(crate) fn output_fields(
         Some(rt) => final_answer(rt, facts),
         None => text.clone(),
     };
-    let answer_id = symbio_core::event_output_text_node_id(
+    let answer_id = symbio_kernel::event::event_output_text_node_id(
         &answer,
         &reasoning,
         text_id.as_deref(),
@@ -142,7 +142,7 @@ pub(crate) fn output_fields(
 /// 从本轮结果里配对出 `tc` 的那条（按 ToolCall 节点 id / wire id；配不上 ⇒ `None`）。
 pub(crate) fn outcome_of<'a>(
     outcomes: &'a [super::super::tool_dispatch::DispatchOutcome],
-    tc: &symbio_core::TurnToolCallInfo,
+    tc: &symbio_kernel::llm::TurnToolCallInfo,
 ) -> Option<&'a super::super::tool_dispatch::DispatchOutcome> {
     outcomes.iter().find(|o| {
         tc.id.as_deref().map(|id| id == o.call_id).unwrap_or(false)
@@ -167,7 +167,7 @@ pub(crate) fn with_status(mut produced: serde_json::Value, status: &str) -> serd
 /// 「被上限掐断」混在一起的原因。
 pub(crate) fn with_reason(
     mut payload: serde_json::Value,
-    reason: symbio_core::ClosureReason,
+    reason: symbio_kernel::event::ClosureReason,
 ) -> serde_json::Value {
     payload["reason"] = serde_json::Value::String(reason.as_str().to_string());
     payload
@@ -180,11 +180,13 @@ pub(crate) fn with_reason(
 /// 也走自然收束——把它们另立取值是发明闭集以外的值，而闭集的意义就在于
 /// 可穷举。
 pub(crate) fn reason_of_finish(
-    finish: &symbio_core::ModelFinishReason,
-) -> symbio_core::ClosureReason {
+    finish: &symbio_kernel::llm::ModelFinishReason,
+) -> symbio_kernel::event::ClosureReason {
     match finish {
-        symbio_core::ModelFinishReason::Length => symbio_core::ClosureReason::Exhausted,
-        _ => symbio_core::ClosureReason::Completed,
+        symbio_kernel::llm::ModelFinishReason::Length => {
+            symbio_kernel::event::ClosureReason::Exhausted
+        }
+        _ => symbio_kernel::event::ClosureReason::Completed,
     }
 }
 
@@ -240,7 +242,7 @@ pub(crate) fn with_reasoning(
 /// 而漂的时候两边都是合法拼写，谁也不报错。
 pub(crate) fn with_terminated(mut payload: serde_json::Value) -> serde_json::Value {
     payload["terminated"] = serde_json::json!({
-        "at": symbio_core::clock_now_ms(),
+        "at": symbio_sdk::clock::clock_now_ms(),
     });
     payload
 }
@@ -345,7 +347,7 @@ pub(crate) fn latest_snapshot_index(events: &[Event]) -> Option<usize> {
 /// id 因此优先取调用自身带得的身份（wire id / 节点 id，二者天然跨轮唯一），
 /// 两者都缺才合成，且合成式里带上轮次（见 [`prompt_call_id`]）。
 pub(crate) fn tool_exchange_messages(
-    turn: &symbio_core::LlmTurn,
+    turn: &symbio_sdk::adapters::LlmTurn,
     outcomes: &[super::super::tool_dispatch::DispatchOutcome],
     round: usize,
 ) -> Vec<symbio_kernel::llm::PromptMessage> {
@@ -425,7 +427,7 @@ pub(crate) fn tool_exchange_messages(
 /// 前缀 `call_` 是**故意的**：它让 id 一眼可辨是合成的（provider 侧回填时若
 /// 与真实调用 id 空间混淆，冲突能被看见而不是静默）。
 pub(crate) fn prompt_call_id(
-    call: &symbio_core::TurnToolCallInfo,
+    call: &symbio_kernel::llm::TurnToolCallInfo,
     round: usize,
     index: usize,
 ) -> String {

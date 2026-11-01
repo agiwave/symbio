@@ -114,7 +114,7 @@ impl PersistentChatSession {
         // 成 grouped（哪怕落库/消息文件写的是 flat）。`flat` 档在这里把本轮响应骨架的
         // 直接子节点升根并打 `turn_root` 记号——与 live 流式帧、`session_content` 呈现
         // 同一个投影，三格锁步。`grouped` 档下 `flatten_whole_tree` 立即返回，零改动。
-        symbio_core::node_build::flatten_whole_tree(
+        symbio_sdk::turn::node_build::flatten_whole_tree(
             &mut messages,
             self.cfg_or_default().presentation_tree(),
         );
@@ -142,7 +142,7 @@ impl PersistentChatSession {
         // 在请求包里出现两个答复，模型读到的是自己没说过的话。
         // 未选中支连同它的整棵子树一起丢弃（工具结果、续写幕都在子树里）。
         let mut messages = messages;
-        symbio_core::branch_hide_unselected(&mut messages);
+        symbio_sdk::projection::branch::branch_hide_unselected(&mut messages);
         // 剔除父节点缺失的孤儿节点（否则会带着不存在的 tool_call_id 进请求包）
         let messages: Vec<ChatNode> = drop_orphan_messages(messages);
         // 对各消息做 content 归一兜底（并跳过 role 为 None 的占位消息），

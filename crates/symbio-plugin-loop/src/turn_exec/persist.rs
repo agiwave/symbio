@@ -51,7 +51,7 @@ fn land_contributions(
         lines: &recall_lines,
     });
     // 同一轮各贡献者共用同一个时刻：收束这一刻就是它们的 `ts`。
-    let now_ms = symbio_core::clock_now_ms();
+    let now_ms = symbio_sdk::clock::clock_now_ms();
     for contributor in symbio_plugin_api::settle::contributors() {
         // 完整史（`range(0)`）：累计口径的贡献者（巩固 / 校准）要看得见归档段。
         let history = store.range(Seq::new(0));
@@ -161,7 +161,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         // 收 `&dyn Store` ⇒ `as_ref()` 一次取到 trait object。
         store.as_ref(),
         turn_no,
-        symbio_core::clock_now_ms(),
+        symbio_sdk::clock::clock_now_ms(),
     );
 
     // 兜底已入格（I3），失败呈现走 Failed 出口 + 重试。
@@ -246,7 +246,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_final_reply_turn(
     session: &LoopSession,
-    ctx: &Arc<dyn symbio_core::PluginInvokeRequest>,
+    ctx: &Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     _provider: Arc<dyn ModelProvider>,
     abort: ExecAbortSignal,
     // 轮号与溯源锚由编排层在判决之前定下：答话轮同样先落用户格，
@@ -400,7 +400,7 @@ pub(crate) async fn execute_final_reply_turn(
             session.session_id(),
             store.as_ref(),
             turn_no,
-            symbio_core::clock_now_ms(),
+            symbio_sdk::clock::clock_now_ms(),
         );
     }
     Ok(())

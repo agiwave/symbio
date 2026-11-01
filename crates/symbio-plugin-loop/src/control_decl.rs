@@ -8,10 +8,12 @@
 //! 不读时钟（D-115 决策 1）。本文件是它们的**所有者**，`symbio_core::decl` 只是类型与
 //! 装载机制的所在。
 
-use symbio_core::{
-    ChatVocab, CommitmentVocab, Entity, Event, EventDecl, FactDecl, FactRole, MessageVocab, Verb,
-    ViewDecl, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+use symbio_kernel::decl::{FactDecl, ViewDecl};
+use symbio_kernel::event::{
+    Entity, Event, EventDecl, FactRole, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
+    EVENT_RETRY, EVENT_SENT,
 };
+use symbio_sdk::projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};
 
 // ── 本插件持有的事件名（DE-024 D-197 / D-201）──
 //
@@ -1031,7 +1033,7 @@ pub(crate) fn has_next_round(round: u64) -> bool {
 fn turn_next_round(events: &[Event], now: i64) -> serde_json::Value {
     let head = turn_head(events, now);
     let exhausted = head.get("closure").and_then(|v| v.as_str())
-        == Some(symbio_core::ClosureReason::Exhausted.as_str());
+        == Some(symbio_kernel::event::ClosureReason::Exhausted.as_str());
     let (Some(turn), Some(round)) = (
         head.get("turn").and_then(|v| v.as_u64()),
         head.get("round").and_then(|v| v.as_u64()),

@@ -10,8 +10,9 @@ use serde_json::json;
 
 use super::super::loop_rows::{load, PORTS, ROWS};
 use super::*;
-use symbio_core::ring::{owed, PortDecl};
-use symbio_core::{EventStore, Seq};
+use symbio_kernel::decl::ring::{owed, PortDecl};
+use symbio_kernel::event::Seq;
+use symbio_kernel::store::EventStore;
 
 use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
@@ -25,7 +26,7 @@ async fn dispatch<S, T, E, F, Fut, W>(
     why: W,
 ) -> Result<T, DispatchError<E>>
 where
-    S: symbio_core::Store<Event = symbio_core::Event> + ?Sized,
+    S: symbio_kernel::store::Store<Event = symbio_kernel::event::Event> + ?Sized,
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
     W: FnOnce(&E) -> String,
@@ -382,7 +383,7 @@ fn stranded(store: &EventStore, id: &str, attempt: u64, lease_ms: u64, cap: u64,
         .append(
             Event::pending(
                 format!("sent-turn-{id}-{attempt}"),
-                symbio_core::EVENT_SENT,
+                symbio_kernel::event::EVENT_SENT,
                 Entity::Turn,
                 Verb::Asserted,
                 1,

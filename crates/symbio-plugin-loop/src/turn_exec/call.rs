@@ -32,7 +32,7 @@ pub(crate) struct Running {
     pub(crate) to: String,
     pub(crate) user_text: String,
     pub(crate) root_id: String,
-    pub(crate) presentation_tree: symbio_core::node_build::PresentationTree,
+    pub(crate) presentation_tree: symbio_sdk::turn::node_build::PresentationTree,
 }
 
 /// [`open_turn`] 的出口：草稿与驱动它要的端口。
@@ -207,7 +207,7 @@ fn injector(supplements: Option<SupplementFn>) -> Option<SupplementFn> {
 /// 都**不消耗任何配额**、不留半截状态，与 `apply_verdict` 拿不到措辞时同一条方向。
 #[allow(clippy::too_many_arguments)] // 抽出来之后参数就是它的全部依赖，多一个都该重新想
 pub(crate) fn supplement_into_request(
-    batch: Option<symbio_core::DrainedSupplement>,
+    batch: Option<symbio_sdk::turn::facts::DrainedSupplement>,
     anchor: Option<u64>,
     store: &dyn Store<Event = Event>,
     actor: &ActorSpec,
@@ -239,11 +239,11 @@ pub(crate) fn supplement_into_request(
     };
     let no = no_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if let Err(e) = store.append(
-        symbio_core::Event::pending(
+        symbio_kernel::event::Event::pending(
             format!("s-{turn_no}-{no}"),
             symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
-            symbio_core::Entity::Turn,
-            symbio_core::Verb::Asserted,
+            symbio_kernel::event::Entity::Turn,
+            symbio_kernel::event::Verb::Asserted,
             turn_no,
             &actor.principal,
         )
@@ -271,14 +271,14 @@ pub(crate) fn supplement_into_request(
     let msg = ChatNode {
         // 沿用第一条补充的 id（见 `DrainedSupplement::id` 的说明）
         id: drained.id.clone(),
-        principal: Some(symbio_core::principal::Principal::from_legacy(
+        principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
             symbio_core::PRINCIPAL_USER,
         )),
         content: Some(MessageContent::Text(text.clone())),
         meta: Some(serde_json::json!({
-            symbio_core::META_SUPPLEMENT: true,
-            symbio_core::META_SUPPLEMENT_COUNT: count,
-            symbio_core::META_SUPPLEMENT_IDS: ids,
+            symbio_sdk::turn::facts::META_SUPPLEMENT: true,
+            symbio_sdk::turn::facts::META_SUPPLEMENT_COUNT: count,
+            symbio_sdk::turn::facts::META_SUPPLEMENT_IDS: ids,
         })),
         ..Default::default()
     };

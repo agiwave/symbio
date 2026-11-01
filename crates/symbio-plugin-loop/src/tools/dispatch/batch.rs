@@ -46,7 +46,7 @@ async fn record_protocol_failure(
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
     context_messages: &[ChatNode],
-    principal: &symbio_core::principal::Principal,
+    principal: &symbio_sdk::chat::principal::Principal,
 ) {
     let result_msg_id = uuid::Uuid::new_v4().to_string();
     let mut tool_msg = llm_build_tool_message(
@@ -146,7 +146,10 @@ async fn emit_tool_running(
     running.status = Some(NodeStatus::Streaming);
     let mut meta = running.meta.clone().unwrap_or_else(|| json!({}));
     if let Some(obj) = meta.as_object_mut() {
-        obj.insert("started_at".into(), json!(symbio_core::clock_now_ms()));
+        obj.insert(
+            "started_at".into(),
+            json!(symbio_sdk::clock::clock_now_ms()),
+        );
     }
     running.meta = Some(meta);
     llm_emit_state(sink, running).await;
@@ -412,7 +415,7 @@ async fn emit_terminal(
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
     breaks: &mut Vec<&'static str>,
-    principal: &symbio_core::principal::Principal,
+    principal: &symbio_sdk::chat::principal::Principal,
 ) {
     match terminal {
         PreTerminal::ProtocolFailure { id, text, promise } => {
@@ -616,7 +619,7 @@ async fn finish_call(
             .as_ref()
             .and_then(|m| m.get("failure_kind"))
             .and_then(|v| v.as_str())
-            .unwrap_or(symbio_core::failure_kind::NEEDS_APPROVAL)
+            .unwrap_or(symbio_kernel::capability::failure_kind::NEEDS_APPROVAL)
             .to_string();
 
         llm_emit_message(sink, tool_msg.clone()).await;
@@ -794,8 +797,8 @@ fn interaction_blocked(parent_updates: &[ChatNode]) -> bool {
                     .and_then(|v| v.as_str())
                     .map(|k| {
                         // pending 两种 + error 都算「本批剩余不要继续跑」
-                        symbio_core::failure_kind::is_pending(k)
-                            || k == symbio_core::failure_kind::ERROR
+                        symbio_kernel::capability::failure_kind::is_pending(k)
+                            || k == symbio_kernel::capability::failure_kind::ERROR
                     })
                     .unwrap_or(false)
         })
@@ -835,7 +838,7 @@ pub(crate) async fn run_batch(
     let mut tool_messages = Vec::new();
     let mut parent_updates: Vec<ChatNode> = Vec::new();
     // 本会话主体：协议失败兜底建出的 ToolCall 父节点也归它（结果子节点归工具自己）。
-    let principal = symbio_core::principal::Principal::from_legacy(
+    let principal = symbio_sdk::chat::principal::Principal::from_legacy(
         &symbio_core::request_principal(ctx.as_ref()),
     );
     // 批首读数按本段变量名接线——判据结构只依赖读数，不依赖读数来自哪一段。

@@ -4,7 +4,7 @@ mod route_connection;
 use route_connection::RouteConnectionManager;
 use std::sync::Arc;
 use symbio::init::create_root_plugin;
-use symbio::symbio_core::Plugin;
+use symbio::symbio_kernel::plugin::Plugin;
 use tauri::{Listener, Manager};
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -119,7 +119,7 @@ fn main() {
                     let root = state.root.clone();
                     tauri::async_runtime::block_on(async move {
                         if let Err(e) = root
-                            .stop(symbio::symbio_core::PluginStopReason::Shutdown)
+                            .stop(symbio::symbio_kernel::plugin::PluginStopReason::Shutdown)
                             .await
                         {
                             tracing::warn!(error = %e, "root plugin stop(Shutdown) failed");

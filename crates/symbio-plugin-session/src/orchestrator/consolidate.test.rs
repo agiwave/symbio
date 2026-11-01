@@ -13,12 +13,15 @@ use crate::chat_session::PersistentChatSession;
 use crate::config::SessionConfig;
 use crate::store::{current_window, EventWalStore, SessionStore};
 use crate::types::Session;
-use symbio_core::chat_node as cm;
-use symbio_core::principal::{Principal, PrincipalKind};
-use symbio_core::{check_all, count_user_messages, Entity, Event, Seq, Store, Verb};
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
+use symbio_kernel::store::Store;
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
+use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::chat::principal::{Principal, PrincipalKind};
+use symbio_sdk::invariants::check_all;
+use symbio_sdk::projection::turns::count_user_messages;
 
 /// 一份「压缩后的整份消息列表」（判据只关心 id 序列——快照的语义是
 /// 「这份列表**取代**了它之前的一切」）。

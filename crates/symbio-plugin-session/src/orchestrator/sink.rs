@@ -27,8 +27,8 @@
 
 use super::*;
 use async_trait::async_trait;
-use symbio_core::chat_node::ChatNode;
-use symbio_core::ExecTranscriptWriter;
+use symbio_kernel::exec::ExecTranscriptWriter;
+use symbio_sdk::chat::chat_node::ChatNode;
 
 /// 执行期事件出口：直连转写唯一写入点 + 会话级状态分派。
 ///

@@ -9,8 +9,8 @@ use super::*;
 use crate::config::SessionConfig;
 use crate::plugin::SessionPlugin;
 use crate::types::Session;
-use symbio_core::PluginDir;
-use symbio_core::VdfsChangeSubscriptions;
+use symbio_sdk::plugin::PluginDir;
+use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 /// 每例独占存储根。
 fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     let dir = tempfile::tempdir().expect("临时目录创建失败");

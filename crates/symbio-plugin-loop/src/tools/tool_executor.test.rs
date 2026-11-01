@@ -7,27 +7,28 @@ use super::*;
 // `NodeRole` 是**测试自己**要的：生产侧写身份只写 `principal`（D-147），
 // `role` 那一格只在「构造期还没标身份的节点」与存量夹具里出现，
 // `use super::*` 因此带不过来。
-use symbio_core::chat_node::NodeRole;
-use symbio_core::PluginSimpleRequest;
+use symbio_kernel::plugin::PluginSimpleRequest;
+use symbio_sdk::chat::chat_node::NodeRole;
 // `Store` 是**测试自己**要的（`store.append` 是 trait 方法；父模块顶层不导入它——
 // 生产侧的读发生在 `tool_executor/breaker.rs` 子模块里）；`use super::*` 因此带不过来。
-use symbio_core::Store;
+use symbio_kernel::store::Store;
 // `failure_kind` 与 `Seq` 同样是**测试自己**要的：批首闸门读数与逐条执行的闸门段
 // 已拆去 `tools/dispatch/`，父模块顶层不再导入它们——测试自己拿。
-use symbio_core::{failure_kind, Seq};
+use symbio_kernel::capability::failure_kind;
+use symbio_kernel::event::Seq;
 // `LatencyTier` 是**测试自己**要的：它只被父模块里的熔断段用到，那段已按域
 // 拆去 `tool_executor/breaker.rs`，
 // 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
-use symbio_core::{
-    Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequestExt,
-    Registry,
-};
-use symbio_core::{EventStore, LatencyTier};
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::capability::{Capability, CapabilityMeta, CapabilityRow, Registry};
+use symbio_kernel::exec::ExecEnv;
+use symbio_kernel::plugin::{PluginError, PluginInvokeRequestExt};
+use symbio_kernel::store::EventStore;
 use symbio_providers::DefaultToolVisitor;
 
 /// 夹具模仿的是**落库/转写面**：身份写 `principal`（D-147），`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -57,7 +58,7 @@ fn test_dir() -> std::path::PathBuf {
 struct DeclTool(CapabilityMeta);
 
 #[async_trait::async_trait]
-impl symbio_core::Capability for DeclTool {
+impl symbio_kernel::capability::Capability for DeclTool {
     fn meta(&self) -> CapabilityMeta {
         self.0.clone()
     }
@@ -98,10 +99,10 @@ async fn factory_decls() -> ToolDecls {
             .await;
     }
     ctx.set(
-        symbio_core::CAPABILITY_VISITOR,
+        symbio_sdk::capability::CAPABILITY_VISITOR,
         visitor as Arc<dyn Registry>,
     );
-    ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await)
+    ToolDecls::of_metas(&symbio_sdk::capability::tool_metas(&ctx).await)
 }
 
 // ── 测试用的声明闸 ────────────────────────────────────────────────
@@ -757,7 +758,7 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
     let abort = ExecAbortSignal::new();
     // 交互模式 + 无 parent：第一个工具必然以失败告终，触发本批 break
     let ctx = test_ctx();
-    ctx.set(symbio_core::MODE, "interactive".to_string());
+    ctx.set(symbio_sdk::keys::MODE, "interactive".to_string());
     let tcs = vec![
         TurnToolCallInfo {
             id: Some("tc1".into()),
@@ -945,7 +946,7 @@ fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
     let pending = PendingPrompt {
         text: "请回答问题以继续".into(),
         prompt: json!({ "kind": "question", "questions": [] }),
-        failure_kind: symbio_core::failure_kind::NEEDS_INTERACTION.into(),
+        failure_kind: symbio_kernel::capability::failure_kind::NEEDS_INTERACTION.into(),
     };
     let msg = build_user_prompt_message("res-1", "tc-1", &pending, "vdfs_write");
 
@@ -984,14 +985,17 @@ fn subagent_pending_payload_is_recognized_as_pending_intent() {
     let payload = json!({
         "content": "需要确认：删除文件",
         "success": false,
-        "failure_kind": symbio_core::failure_kind::NEEDS_APPROVAL,
+        "failure_kind": symbio_kernel::capability::failure_kind::NEEDS_APPROVAL,
         "prompt": { "tool_name": "agent_run", "args": { "session_id": "child-1" } },
     });
     let p = pending_prompt_from(&payload).expect("子会话待审批载荷必须被识别");
 
     assert_eq!(p.text, "需要确认：删除文件");
     assert_eq!(p.prompt["tool_name"], json!("agent_run"));
-    assert_eq!(p.failure_kind, symbio_core::failure_kind::NEEDS_APPROVAL);
+    assert_eq!(
+        p.failure_kind,
+        symbio_kernel::capability::failure_kind::NEEDS_APPROVAL
+    );
     // 载荷里没有身份字段 ⇒ [`PendingPrompt`] 无法承载悬空引用（类型层面成立）
 }
 
@@ -1095,7 +1099,7 @@ async fn record_effect_never_overwrites_an_earlier_judgement() {
 /// （D-084 §1-A）；会话 id 仍随上下文走，因为其余工具面按它归属。
 fn gate_ctx(session_id: &str) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
-    req.set(symbio_core::SESSION_ID, session_id.to_string());
+    req.set(symbio_sdk::keys::SESSION_ID, session_id.to_string());
     Arc::new(req)
 }
 
@@ -1143,11 +1147,11 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
     let facts = EventStore::new();
     facts
         .append(
-            symbio_core::Event::pending(
+            symbio_kernel::event::Event::pending(
                 "v2f-gate",
                 symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-                symbio_core::Entity::Turn,
-                symbio_core::Verb::Closed,
+                symbio_kernel::event::Entity::Turn,
+                symbio_kernel::event::Verb::Closed,
                 0,
                 symbio_core::PRINCIPAL_MAIN,
             )
@@ -1235,7 +1239,7 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
             inputs.requested_ms,
             inputs.spent_ms + inputs.requested_ms - 1,
             0,
-            symbio_core::LatencyTier::Deep.budget_ms(),
+            symbio_kernel::adapters::LatencyTier::Deep.budget_ms(),
         ),
         super::super::GateDecision::Break {
             reason: "budget-exhausted"
@@ -1249,7 +1253,7 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
             inputs.requested_ms,
             inputs.spent_ms + inputs.requested_ms + 1,
             0,
-            symbio_core::LatencyTier::Deep.budget_ms(),
+            symbio_kernel::adapters::LatencyTier::Deep.budget_ms(),
         ),
         super::super::GateDecision::Allow
     );
@@ -1273,11 +1277,11 @@ async fn the_ledger_comes_from_the_facts_value() {
     let facts = EventStore::new();
     facts
         .append(
-            symbio_core::Event::pending(
+            symbio_kernel::event::Event::pending(
                 "v2f-ledger",
                 symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-                symbio_core::Entity::Turn,
-                symbio_core::Verb::Closed,
+                symbio_kernel::event::Entity::Turn,
+                symbio_kernel::event::Verb::Closed,
                 0,
                 symbio_core::PRINCIPAL_MAIN,
             )
@@ -1316,7 +1320,7 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
             })) as Arc<dyn Capability>))
             .await;
         req.set(
-            symbio_core::CAPABILITY_VISITOR,
+            symbio_sdk::capability::CAPABILITY_VISITOR,
             visitor as Arc<dyn Registry>,
         );
         Arc::new(req) as Arc<dyn PluginInvokeRequest>
@@ -1327,7 +1331,7 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
     let parent = ChatNode {
         id: "tc-elim".into(),
         // 身份写 `principal`，不写存量 `role` 格（S-014 棘轮）。
-        principal: Some(symbio_core::principal::Principal::tool_principal(
+        principal: Some(symbio_sdk::chat::principal::Principal::tool_principal(
             "agent_run",
         )),
         msg_type: Some(NodeKind::Skeleton),
@@ -1402,7 +1406,7 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use symbio_core::CapabilityRiskLevel;
+use symbio_kernel::capability::CapabilityRiskLevel;
 
 /// 记录并发窗口的假工具：不进则退，峰值可读。
 struct ProbeTool {
@@ -1453,7 +1457,7 @@ impl ProbeTool {
 }
 
 #[async_trait::async_trait]
-impl symbio_core::Capability for ProbeTool {
+impl symbio_kernel::capability::Capability for ProbeTool {
     fn meta(&self) -> CapabilityMeta {
         self.meta.clone()
     }
@@ -1489,14 +1493,14 @@ struct NopParent;
 
 #[async_trait::async_trait]
 impl Plugin for NopParent {
-    fn meta(&self) -> symbio_core::PluginMeta {
-        symbio_core::PluginMeta::new("nop", "Nop")
+    fn meta(&self) -> symbio_kernel::plugin::PluginMeta {
+        symbio_kernel::plugin::PluginMeta::new("nop", "Nop")
     }
 
     async fn route(
         self: Arc<Self>,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<PluginPayload> {
+    ) -> symbio_kernel::plugin::PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound("nop".into()))
     }
 
@@ -1504,7 +1508,7 @@ impl Plugin for NopParent {
         self: Arc<Self>,
         _path: String,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> symbio_core::PluginInvokeResponse<PluginPayload> {
+    ) -> symbio_kernel::plugin::PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound("nop".into()))
     }
 }
@@ -1518,7 +1522,7 @@ async fn ctx_with_probes(tools: Vec<Arc<ProbeTool>>) -> Arc<dyn PluginInvokeRequ
             .await;
     }
     req.set(
-        symbio_core::CAPABILITY_VISITOR,
+        symbio_sdk::capability::CAPABILITY_VISITOR,
         visitor as Arc<dyn Registry>,
     );
     Arc::new(req) as Arc<dyn PluginInvokeRequest>
@@ -1529,7 +1533,7 @@ fn tool_call_node(id: &str, name: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
         // 身份写 `principal`，不写存量 `role` 格（S-014 棘轮）。
-        principal: Some(symbio_core::principal::Principal::tool_principal(name)),
+        principal: Some(symbio_sdk::chat::principal::Principal::tool_principal(name)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": name})),
         status: Some(NodeStatus::Streaming),
@@ -1562,7 +1566,7 @@ fn msg_text(node: &ChatNode) -> String {
 struct FrameLog(Arc<std::sync::Mutex<Vec<ChatNode>>>);
 
 #[async_trait::async_trait]
-impl symbio_core::ExecTranscriptWriter for FrameLog {
+impl symbio_kernel::exec::ExecTranscriptWriter for FrameLog {
     async fn apply(&self, message: ChatNode) {
         self.0.lock().unwrap().push(message);
     }
@@ -1757,7 +1761,7 @@ async fn interactive_mode_keeps_the_batch_serial() {
         ProbeTool::new("probe_i2", CapabilityRiskLevel::Low, &active, &peak).with_sleep(20),
     );
     let ctx = ctx_with_probes(vec![a, b]).await;
-    ctx.set(symbio_core::MODE, "interactive".to_string());
+    ctx.set(symbio_sdk::keys::MODE, "interactive".to_string());
     let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
     let sink = ExecEventSink::silent();
     let abort = ExecAbortSignal::new();

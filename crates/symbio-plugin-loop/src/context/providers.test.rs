@@ -11,7 +11,7 @@ use super::*;
 use symbio_plugin_api::context::{slots, Cadence};
 use symbio_plugin_api::{ContextProvider, DelegateVerdict, LiveInputs};
 
-fn request<'a>(facts: &'a [symbio_core::Event]) -> ContextRequest<'a> {
+fn request<'a>(facts: &'a [symbio_kernel::event::Event]) -> ContextRequest<'a> {
     ContextRequest {
         request_round: 0,
         principal: "session/main",
@@ -42,7 +42,7 @@ fn only_the_delegate_provider_is_submitted_under_loop() {
 /// 委派段是**请求级**节奏：发言级收集不问它，工具收集完成后才由 `live` 供给输入。
 #[test]
 fn the_delegate_section_waits_for_the_request_cadence() {
-    let tools = [symbio_core::CapabilityMeta {
+    let tools = [symbio_kernel::capability::CapabilityMeta {
         name: "file_read".to_string(),
         ..Default::default()
     }];

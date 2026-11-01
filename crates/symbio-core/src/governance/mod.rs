@@ -188,7 +188,7 @@ impl VisScope {
     /// 悄悄放宽，而两边都是合法值、没有东西会变红（与 [`Self::from_name`] 文档里那条同向判据）。
     ///
     /// 只认载荷，不改判据：产地在情景记忆能力包的收束贡献（`memory::episodic::contributor`）。
-    pub fn of_event(e: &crate::Event) -> VisScope {
+    pub fn of_event(e: &symbio_kernel::event::Event) -> VisScope {
         e.payload
             .get(Self::VIS_SCOPE_KEY)
             .and_then(serde_json::Value::as_str)

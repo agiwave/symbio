@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use symbio_core::chat_node::ChatNode;
+pub use symbio_sdk::chat::chat_node::ChatNode;
 
 /// 会话列表一行摘要：**最新一条助手回复**的首行（压缩空白、限长 60 字符）。
 ///
@@ -26,7 +26,7 @@ pub fn derive_session_summary(messages: &[ChatNode]) -> Option<String> {
         .filter(|m| {
             matches!(
                 m.node_role(),
-                Some(symbio_core::chat_node::NodeRole::Assistant)
+                Some(symbio_sdk::chat::chat_node::NodeRole::Assistant)
             )
         })
         .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
@@ -152,7 +152,7 @@ pub struct Session {
 
 impl Session {
     pub fn new(id: impl Into<String>) -> Self {
-        let now = symbio_core::clock_now_ms();
+        let now = symbio_sdk::clock::clock_now_ms();
         Self {
             id: id.into(),
             messages: Vec::new(),
@@ -242,15 +242,18 @@ impl Session {
 pub(crate) fn derive_session_title(messages: &[ChatNode]) -> Option<String> {
     const SESSION_TITLE_MAX_CHARS: usize = 24;
     for m in messages.iter().rev() {
-        if !matches!(m.node_role(), Some(symbio_core::chat_node::NodeRole::User)) {
+        if !matches!(
+            m.node_role(),
+            Some(symbio_sdk::chat::chat_node::NodeRole::User)
+        ) {
             continue;
         }
         let text = match &m.content {
-            Some(symbio_core::chat_node::MessageContent::Text(s)) => s.clone(),
-            Some(symbio_core::chat_node::MessageContent::Parts(parts)) => parts
+            Some(symbio_sdk::chat::chat_node::MessageContent::Text(s)) => s.clone(),
+            Some(symbio_sdk::chat::chat_node::MessageContent::Parts(parts)) => parts
                 .iter()
                 .filter_map(|p| match p {
-                    symbio_core::chat_node::ContentPart::Text { text } => Some(text.clone()),
+                    symbio_sdk::chat::chat_node::ContentPart::Text { text } => Some(text.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()

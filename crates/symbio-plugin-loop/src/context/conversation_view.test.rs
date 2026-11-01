@@ -13,14 +13,14 @@
 //! 缺任一条都会让分界悄悄偏向一侧。
 
 use super::*;
-use symbio_core::chat_node::{
+use symbio_sdk::chat::chat_node::{
     MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION, CHAT_STYLE_TAG_REASONING,
     CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
 };
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
-    use symbio_core::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_sdk::chat::principal::Principal {
+    use symbio_sdk::chat::principal::Principal;
     match role {
         NodeRole::User => Principal::from_legacy(symbio_core::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),

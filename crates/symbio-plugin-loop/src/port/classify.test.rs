@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use symbio_core::{EventStore, Seq, Store};
 use symbio_kernel::dialog::{DecideOutcome, DecisionPlan, Verdict};
+use symbio_kernel::event::Seq;
+use symbio_kernel::store::{EventStore, Store};
 
 use super::super::Round;
 use super::classify_round_trip;

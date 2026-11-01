@@ -4,7 +4,8 @@
 //! `projections/changes.test.rs` 钉死；本文件只判出口这一半——地址 / 文案 / 空账。
 
 use super::read_changes;
-use symbio_core::{Entity, Event, Verb, PRINCIPAL_MAIN};
+use symbio_core::PRINCIPAL_MAIN;
+use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 
 /// 一条写：载荷形状就是**线上那一格**（`artifact.added` 加上 `file_op` 富化）。

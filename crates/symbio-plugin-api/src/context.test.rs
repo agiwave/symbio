@@ -1,7 +1,7 @@
 //! 上下文端口的判据：按 owner 序收集、空返回不算错、段身份是宿主词汇。
 
 use super::*;
-use symbio_core::{Entity, Verb};
+use symbio_kernel::event::{Entity, Verb};
 
 /// 一个只为测试存在的 provider：贡献一段固定正文。
 struct Fixed;
@@ -145,7 +145,7 @@ fn cadence_selects_which_providers_are_asked() {
 #[test]
 fn live_inputs_carry_the_collected_values() {
     let f = facts();
-    let tools = [symbio_core::CapabilityMeta {
+    let tools = [symbio_kernel::capability::CapabilityMeta {
         name: "file_read".to_string(),
         ..Default::default()
     }];

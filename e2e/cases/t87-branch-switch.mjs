@@ -39,6 +39,7 @@ import {
   readSessionMessages,
   resumeSession,
   waitFor,
+  settledAfterWorking,
   readFileSyncSafe,
   assert,
   assertEq,
@@ -181,18 +182,18 @@ export default defineCase(
         { what: '重试开出的第二支进入转写', timeoutMs: 30_000 },
       );
       // **轮骨架出现 ≠ 那一轮跑完**：骨架在轮首就落格，模型调用与落格还在后面。
-      // `sendAndSettle` 的判据是「水位线之后见过 working、且最后一帧离开 working」——
+      // `sendAndSettle` 的判据是「水位线之后见过 working、且最后一个状态帧已离开
+      // working」（无状态词的中间帧不算收尾，见 helpers 的 `settledAfterWorking`）——
       // 若重试那一轮此刻还在跑，它的收尾帧就会被下一幕的等待当成**自己的**收尾，
       // 于是下一幕在模型还没被叫到时就返回（并发 6 下稳定复现：第三幕实得 2 个请求，
       // 第二幕的请求就是第 2 个）。所以这里按实时面把重试轮等干净，再进下一幕。
+      let retryStatuses = '(等待未通过)';
       await waitFor(
         () => {
           const sc = sub.sessionChanges().slice(retryMark);
-          return (
-            sc.length > 0 &&
-            sc.some((c) => c.data?.status === 'working') &&
-            sc[sc.length - 1]?.data?.status !== 'working'
-          );
+          const ok = settledAfterWorking(sc);
+          if (ok) retryStatuses = sc.map((c) => c.data?.status ?? '?').join('→');
+          return ok;
         },
         { what: '重试那一轮真的跑完（实时面离开 working）', timeoutMs: 60_000 },
       );
@@ -238,9 +239,18 @@ export default defineCase(
       assert(retryPrompt.includes(QUESTION), '共同祖先（用户那句问题）不藏：新支要知道问的是什么');
 
       // ── 证据 ③：读法进了模型 —— 第三幕只读选中支（乙）───────────────────────
+      const mark3 = sub.sessionChanges().length;
       await sendAndSettle(cli, sub, AFTER_B);
       const reqs3 = await llm.requests();
-      assert(reqs3.length >= 3, `第三幕应打了一次模型（实得 ${reqs3.length} 个请求）`);
+      const statuses3 = sub
+        .sessionChanges()
+        .slice(mark3)
+        .map((c) => c.data?.status ?? '?')
+        .join('→');
+      assert(
+        reqs3.length >= 3,
+        `第三幕应打了一次模型（实得 ${reqs3.length} 个请求｜第三幕状态帧: ${statuses3}｜重试等待通过时的帧: ${retryStatuses}｜各幕形状: ${await shapeOf(llm)}）`,
+      );
       const prompt3 = promptOf(reqs3[2].body);
       assert(prompt3.includes(ANSWER_B), '选中支（乙）在请求包里');
       assert(!prompt3.includes(ANSWER_A), '未选中支（甲）连同它的子树不进模型');

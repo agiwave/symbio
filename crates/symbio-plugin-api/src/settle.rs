@@ -45,7 +45,7 @@
 //! 「必须保证推进」不同：这里不是债，空是合法结局）；落格失败由宿主记日志、**不打断**
 //! 下一个贡献者——本轮已收束，附加事实失败不该把成功的一轮说成失败。
 
-use symbio_core::Event;
+use symbio_kernel::event::Event;
 
 use crate::context::RecallFacts;
 use crate::effects::FactDraft;

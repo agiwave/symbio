@@ -50,7 +50,7 @@
 //! 两个调用互相看不见时，第二条声明会把第一条刚开的格再开一次。
 
 use serde_json::Value;
-use symbio_core::{Entity, Event, Verb};
+use symbio_kernel::event::{Entity, Event, Verb};
 
 /// 一次工具调用的**效果输入**：工具执行层交出的纯值。
 ///

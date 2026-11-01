@@ -12,10 +12,12 @@
 
 use std::sync::Arc;
 
-use symbio_core::{
-    vdfs_host_ctx, PluginInvokeRequest, PluginInvokeRequestExt, TurnDispatch, VdfsActionResult,
-    VdfsContext, VdfsError, VdfsRequest, VdfsResponse, VdfsResult, LOOP_RUN_TURN, TURN_DISPATCH,
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_kernel::vdfs::{
+    VdfsActionResult, VdfsContext, VdfsError, VdfsRequest, VdfsResponse, VdfsResult,
 };
+use symbio_sdk::turn::dispatch::{TurnDispatch, LOOP_RUN_TURN, TURN_DISPATCH};
+use symbio_sdk::vdfs::host::vdfs_host_ctx;
 
 use super::chat_loop::{run_chat_loop, ChatOrchestrator};
 use super::session_port::VdfsSessionPort;
@@ -73,7 +75,7 @@ pub(super) async fn dispatch(
 async fn run_turn(
     host: Arc<dyn PluginInvokeRequest>,
     dispatch: Arc<TurnDispatch>,
-) -> symbio_core::TurnReport {
+) -> symbio_sdk::turn::dispatch::TurnReport {
     let sid = dispatch.spec.session_id.clone();
     let port = Arc::new(VdfsSessionPort::new(
         dispatch.parent.clone(),
