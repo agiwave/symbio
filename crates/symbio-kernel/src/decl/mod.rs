@@ -118,6 +118,10 @@ pub struct ViewDecl {
     /// 只证据两格收束格 ⇒ `evidence = [chat.assistant.final, chat.assistant.fallback]`。
     pub evidence: &'static [&'static str],
     /// 扫描成本上界（事件条数）。`owed` 每轮求值，成本必须有上界。
+    ///
+    /// 这一格只约束**环内窗口求值**（[`Frozen::eval`] 超界回 `None`，切片长度由
+    /// [`Frozen::scan_bound`] 回答），不是跨插件读口的许可：读侧按调用方给的切片
+    /// 全量折（`D-284`）。
     pub cost: u32,
     /// 求值函数：**只有事实切片与时间戳**——没有写口、没有别的视图、没有时钟。
     pub eval: fn(&[Event], i64) -> serde_json::Value,

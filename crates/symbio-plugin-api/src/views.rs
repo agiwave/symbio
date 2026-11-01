@@ -19,15 +19,18 @@
 //!
 //! - **只读公开的名字**：[`crate::view_names::SHARED_VIEWS`] 之外的视图不可见（默认私有）。
 //!   公开是 owner 的显式动作，不是读方的猜测。
-//! - **不抄口径**：`ver` / `cost` / 求值函数都从冻结声明表取。本模块不认识任何具体视图名。
-//! - **超界不静默截断**：`events.len() > cost` ⇒ [`ViewUnavailable::OverBudget`]。读方必须
-//!   知道这一格没算出来——返回一个「看起来正常」的旧值比缺一格更坏。
+//! - **不抄口径**：`ver` / 求值函数都从冻结声明表取。本模块不认识任何具体视图名。
+//! - **读侧不设扫描上界**（`D-284`）：调用方给多大切片就折多大，既不截断也不报缺席。
+//!   `ViewDecl::cost` 约束的是**环内窗口求值**（[`symbio_kernel::decl::Frozen::eval`] 超界回
+//!   `None`，切片长度由 [`symbio_kernel::decl::Frozen::scan_bound`] 决定），不是读口的许可。
+//!   把环内的预算搬到读侧，长会话会读成「这一格没算出来」——而折叠本身照样折得动，
+//!   于是「搬家」凭空改变读数。
 //!
-//! ## 失败三态
+//! ## 失败四态
 //!
 //! [`ViewUnavailable::NotSealed`]（装配表没冻结）/ [`ViewUnavailable::NotShared`]
 //! （owner 没公开）/ [`ViewUnavailable::Unknown`]（公开了但没有声明实现）/
-//! [`ViewUnavailable::OverBudget`]（切片超出声明成本）。四种都是**可诊断的缺席**，
+//! [`ViewUnavailable::NotAggregable`]（owner 没交合并那一半）。四种都是**可诊断的缺席**，
 //! 没有「静默空值」这一档。
 
 use serde_json::Value;
@@ -46,15 +49,9 @@ pub enum ViewUnavailable {
     NotShared { name: String },
     /// owner 公开了名字，但冻结表里没有对应的 `ViewDecl`（清单与代码脱节）。
     Unknown { name: String },
-    /// 事件切片超出声明的扫描成本上界——本格没算出来。
-    OverBudget {
-        name: &'static str,
-        events: usize,
-        cost: u32,
-    },
     /// owner 没交「多片合并」那一半（`ViewDecl::agg` 为 `None`）——这一格不参与跨会话汇总。
     ///
-    /// 与 `OverBudget` 同族：**可诊断的缺席**。静默返回「恒等 / 空汇总」会把「这一格
+    /// 与上面三态同族：**可诊断的缺席**。静默返回「恒等 / 空汇总」会把「这一格
     /// 不参与汇总」读成「汇总下来是零」——那是把缺项伪装成读数（`D-281`）。
     NotAggregable { name: &'static str },
 }
@@ -70,7 +67,6 @@ impl ViewUnavailable {
             Self::NotSealed => "not_sealed",
             Self::NotShared { .. } => "not_shared",
             Self::Unknown { .. } => "unknown",
-            Self::OverBudget { .. } => "over_budget",
             Self::NotAggregable { .. } => "not_aggregable",
         }
     }
@@ -84,11 +80,6 @@ impl std::fmt::Display for ViewUnavailable {
                 write!(f, "`{name}` 未在 owner 的 PLUGIN.yml 里登记 shared_views")
             }
             Self::Unknown { name } => write!(f, "`{name}` 已公开，但冻结声明表里没有它"),
-            Self::OverBudget { name, events, cost } => write!(
-                f,
-                "`{name}` 超出声明扫描成本（{} 条事实 / 上界 {cost}）",
-                events
-            ),
             Self::NotAggregable { name } => {
                 write!(
                     f,
@@ -101,8 +92,8 @@ impl std::fmt::Display for ViewUnavailable {
 
 /// 跨插件视图的读句柄：名字 + owner，求值仍走冻结声明表。
 ///
-/// 句柄不持有值，也不缓存：每次 `read` 都以调用方给的切片与时间戳求值，口径与
-/// owner 自己读时逐字一致。
+/// 句柄不持有值，也不缓存：每次 `read` 都以调用方给的切片与时间戳求值，求值函数
+/// 就是 owner 声明里那一个（本模块不复制口径）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewRead {
     name: &'static str,
@@ -132,7 +123,10 @@ impl ViewRead {
         self.ver_in(sealed.as_deref())
     }
 
-    /// 以 `now` 为 as-of 求值。超出声明的 `cost` ⇒ [`ViewUnavailable::OverBudget`]。
+    /// 以 `now` 为 as-of 求值：把调用方给的切片原样交给 owner 的求值函数。
+    ///
+    /// 读侧不查 `cost`（`D-284`）——切片长度是调用方的事，环内的窗口预算由
+    /// [`symbio_kernel::decl::Frozen::scan_bound`] 在调用方那一侧回答。
     pub fn read(&self, events: &[Event], now: i64) -> Result<Value, ViewUnavailable> {
         let sealed = sealed_declarations().ok();
         self.read_in(sealed.as_deref(), events, now)
@@ -240,13 +234,6 @@ impl ViewRead {
     ) -> Result<Value, ViewUnavailable> {
         let frozen = frozen.ok_or(ViewUnavailable::NotSealed)?;
         let view = self.view(frozen)?;
-        if events.len() > view.cost as usize {
-            return Err(ViewUnavailable::OverBudget {
-                name: view.name,
-                events: events.len(),
-                cost: view.cost,
-            });
-        }
         Ok((view.eval)(events, now))
     }
 }

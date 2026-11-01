@@ -1,4 +1,4 @@
-//! 跨插件视图读口的判据：只读公开名、按声明求值、超界不静默。
+//! 跨插件视图读口的判据：只读公开名、按声明求值、读侧不设扫描上界。
 //!
 //! 小世界用 `Builder` 现装一张冻结表——本 crate 的测试二进制不链接任何 owner 插件，
 //! 因此 `named_in` 的 `require_shared` 在「名字公开性」用例里显式传 `true`，其余用例
@@ -210,9 +210,12 @@ fn as_of_is_passed_through_unmodified() {
     );
 }
 
-/// 超界是**可诊断的缺席**，不是静默截断出一个小一点的数。
+/// 读侧没有扫描上界（`D-284`）：给多长的切片就折多长，既不截断也不报缺席。
+///
+/// 同一个 `cost` 声明在环内那一侧照样生效——`Frozen::eval` 对同一片超界切片回 `None`。
+/// 一条用例钉住两半：搬家的读数不变，而环的预算没有被放宽。
 #[test]
-fn over_budget_is_reported_not_truncated() {
+fn the_read_side_has_no_scan_bound_while_the_ring_keeps_it() {
     let frozen = frozen();
     let handle = ViewRead::named_in(Some(&frozen), RECENT, false).unwrap();
     let events = [
@@ -220,13 +223,16 @@ fn over_budget_is_reported_not_truncated() {
         event("b", "乙", 2),
         event("c", "丙", 3),
     ];
+    assert_eq!(frozen.scan_bound(), Some(2), "夹具声明的上界就是 2");
     assert_eq!(
-        handle.read_in(Some(&frozen), &events, i64::MAX),
-        Err(ViewUnavailable::OverBudget {
-            name: RECENT,
-            events: 3,
-            cost: 2,
-        })
+        handle.read_in(Some(&frozen), &events, i64::MAX).unwrap(),
+        serde_json::json!({ "count": 3, "items": ["甲", "乙", "丙"] }),
+        "超出声明 cost 的切片在读口这里照常折完"
+    );
+    assert_eq!(
+        frozen.eval(RECENT, &events, i64::MAX),
+        None,
+        "同一份切片在环内仍然算不出来——`cost` 的判定面没有变宽"
     );
 }
 
@@ -288,17 +294,6 @@ fn each_absence_state_names_itself() {
     };
     assert_eq!(unknown.reason(), "unknown");
     assert!(unknown.to_string().contains("a.b"), "要带名字：{unknown}");
-
-    let over = ViewUnavailable::OverBudget {
-        name: "a.b",
-        events: 3,
-        cost: 2,
-    };
-    assert_eq!(over.reason(), "over_budget");
-    assert!(
-        over.to_string().contains("3 条事实 / 上界 2"),
-        "超界要报出实测条数与上界：{over}"
-    );
 
     let no_agg = ViewUnavailable::NotAggregable { name: "a.b" };
     assert_eq!(no_agg.reason(), "not_aggregable");

@@ -49,7 +49,8 @@ pub(crate) const CONATION_INTENTS: &str = "conation.intents";
 /// owner —— 与目录名同形（`crates/symbio-plugin-conation`），装配表按它排序与报缺口。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-conation";
 
-/// 扫描成本上界（事件条数）。与其余视图同一口径：超界不静默截断，读方拿到 `OverBudget`。
+/// 扫描成本上界（事件条数）。它是环内窗口求值的预算；跨插件读口不查它——读侧按
+/// 调用方给的切片全量折（`D-284`）。
 ///
 /// 声明的上界必须与全仓**同一个值**（`seal` 的 `ViewCostMismatch`：切点只有一个），
 /// 所以这里不按「欲通常很少」调小——调小会改整张表的切点。

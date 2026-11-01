@@ -70,8 +70,8 @@ pub(crate) const COMPILE_LIMIT: usize = 400;
 /// 按 1.0 算（不给新技能判死刑）；一次回退就掉到 0.0 ⇒ 下一轮即被摘掉。
 pub(crate) const CONFIDENCE_THRESHOLD: f64 = 0.8;
 
-/// 扫描成本上界（事件条数）。与义务环的视图同一口径：超界不静默截断，读方拿到
-/// `OverBudget` 后按自己的策略降级（宿主的读口是 fail-open，见 loop 的说明）。
+/// 扫描成本上界（事件条数）。它是环内窗口求值的预算：超界时 `Frozen::eval` 回 `None`，
+/// 环把这一格折成空集。跨插件读口不查它——读侧按调用方给的切片全量折（`D-284`）。
 const COST: u32 = 4096;
 
 pub(crate) const EVENTS: &[EventDecl] = &[
