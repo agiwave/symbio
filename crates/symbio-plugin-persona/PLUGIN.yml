@@ -1,0 +1,8 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: persona
+plugin_comment: 人格：一处定义「我是谁」，两条输出面（轮内正文 / 对话措辞）读同一段
+plugin_assembly: sub_agent
+# 排位取 55：提示词段按**注册序**拼接，而注册序 = 装配序 = 本键。
+# 人格段必须排在记忆（180）与模型人格（80）之前——它是「我是谁」，
+# 排在后面的段只能是它的补充，不能反过来改口吻。
+plugin_order: 55

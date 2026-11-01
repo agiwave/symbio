@@ -4161,6 +4161,7 @@ dependencies = [
  "symbio-plugin-memory",
  "symbio-plugin-model",
  "symbio-plugin-notes",
+ "symbio-plugin-persona",
  "symbio-plugin-plugin_manager",
  "symbio-plugin-session",
  "symbio-plugin-setting",
@@ -4491,6 +4492,19 @@ dependencies = [
  "serde",
  "serde_json",
  "symbio-plugin-api",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "symbio-plugin-persona"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "symbio-plugin-api",
+ "tempfile",
  "tokio",
  "tracing",
 ]

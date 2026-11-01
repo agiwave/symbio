@@ -51,6 +51,9 @@ pub const PLUGIN_ID_MODEL: &str = "model";
 /// 便签扩展夹具：一个工具、一条 Domain 事实、三条轮内行（索引、反思借宿主一次模型往返、答成后压缩）、一个上下文段、一条效果行为
 pub const PLUGIN_ID_NOTES: &str = "notes";
 
+/// 人格：一处定义「我是谁」，两条输出面（轮内正文 / 对话措辞）读同一段
+pub const PLUGIN_ID_PERSONA: &str = "persona";
+
 /// 插件管理与配置入口
 pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 
@@ -84,6 +87,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "loop", // 驱动器：一轮的判决 / 工具循环（经地址面被会话触发，随每棵子树分形）
     "task", // 任务表：清单声明成事实、独立验证与返工、就绪集调度与调度段
     "heartbeat", // 心跳调度：会话空闲后自主开一轮（经地址面写会话收件箱，随每棵子树分形）
+    "persona", // 人格：一处定义「我是谁」，两条输出面（轮内正文 / 对话措辞）读同一段
     "classify", // 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
