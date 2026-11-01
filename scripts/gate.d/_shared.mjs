@@ -262,7 +262,7 @@ export const BASELINE = {
   // 不丢只换了入口；降级那条直接对应包内的 `degraded_is_recorded_instead_of_dropped`。
   // `record_learning_wires_retrieval_and_consolidation` 改名 `…_wires_consolidation`（检索片段
   // 随写口迁走，条数不变）。不是判据退役，是判据随能力搬家。非侵蚀。
-  ciRustTestsTotal: 2510,
+  ciRustTestsTotal: 2512,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

@@ -26,6 +26,7 @@ symbio-plugin-causal = { path = "../symbio-plugin-causal" }
 symbio-plugin-classify = { path = "../symbio-plugin-classify" }
 symbio-plugin-compose = { path = "../symbio-plugin-compose" }
 symbio-plugin-composite = { path = "../symbio-plugin-composite" }
+symbio-plugin-conation = { path = "../symbio-plugin-conation" }
 symbio-plugin-event_bus = { path = "../symbio-plugin-event_bus" }
 symbio-plugin-gateway = { path = "../symbio-plugin-gateway" }
 symbio-plugin-heartbeat = { path = "../symbio-plugin-heartbeat" }

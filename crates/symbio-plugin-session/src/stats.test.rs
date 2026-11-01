@@ -370,126 +370,6 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
 // 把末事件删掉 ⇒ 跨度缩短。**读数口是这两列的全部意义**——没有反向用例的
 // 「效标」只是表格里的一行字。
 
-/// 主动性列：分子（已升格）/ 分母（已表达）同出一列；`may_read = false` 时
-/// 走四列形态（空切片 ⇒ 空视图），不报零值条目。
-#[test]
-fn conation_column_recomputes_and_moves_with_the_wal() {
-    let dir = std::env::temp_dir().join(format!("symbio-stats-conation-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("临时目录");
-    let wal = dir.join(super::super::paths::V2_WAL_FILE);
-    let store = EventWalStore::open(&wal).unwrap();
-
-    // 链路：触发 → 欲 A（升格：task.opened 的 produced_by 指回它）/ 欲 B（未升格）。
-    let trigger = store
-        .append(
-            Event::pending(
-                "sys-0",
-                crate::declarations::EVENT_SYSTEM_TRIGGERED,
-                Entity::System,
-                Verb::Opened,
-                0,
-                symbio_sdk::authz::PRINCIPAL_AUTONOMOUS,
-            )
-            .with_ts(10)
-            .with_payload(serde_json::json!({ "kind": "scheduled" })),
-        )
-        .unwrap()
-        .value();
-    let want_a = store
-        .append(
-            Event::pending(
-                "want-a",
-                crate::declarations::EVENT_CONATION_EXPRESSED,
-                Entity::Conation,
-                Verb::Opened,
-                0,
-                symbio_sdk::authz::PRINCIPAL_AUTONOMOUS,
-            )
-            .with_ts(20)
-            .with_produced_by(trigger)
-            .with_payload(serde_json::json!({ "goal": "目标 A" })),
-        )
-        .unwrap()
-        .value();
-    store
-        .append(
-            Event::pending(
-                "want-b",
-                crate::declarations::EVENT_CONATION_EXPRESSED,
-                Entity::Conation,
-                Verb::Opened,
-                0,
-                symbio_sdk::authz::PRINCIPAL_AUTONOMOUS,
-            )
-            .with_ts(30)
-            .with_produced_by(trigger)
-            .with_payload(serde_json::json!({ "goal": "目标 B" })),
-        )
-        .unwrap();
-    store
-        .append(
-            Event::pending(
-                "task-a",
-                EVENT_TASK_OPENED,
-                Entity::Task,
-                Verb::Opened,
-                0,
-                symbio_sdk::authz::PRINCIPAL_AUTONOMOUS,
-            )
-            .with_ts(40)
-            .with_produced_by(want_a)
-            .with_payload(serde_json::json!({ "task_id": "t-a" })),
-        )
-        .unwrap();
-
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    let intents = got
-        .conation
-        .get("intents")
-        .and_then(|v| v.as_array())
-        .expect("intents 列");
-    assert_eq!(intents.len(), 2, "分母 = 全部已表达");
-    assert_eq!(
-        intents
-            .iter()
-            .filter(|i| i.get("task_id").is_some_and(|t| !t.is_null()))
-            .count(),
-        1,
-        "分子 = 已升格"
-    );
-
-    // 手术刀：删掉升格事件 ⇒ 分子归零（率跟着动，不是死数字）
-    drop_line(&wal, "task-a");
-    let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    let intents = after
-        .conation
-        .get("intents")
-        .and_then(|v| v.as_array())
-        .expect("intents 列");
-    assert!(
-        intents
-            .iter()
-            .all(|i| i.get("task_id").is_none_or(|t| t.is_null())),
-        "删掉 task.opened ⇒ 没有任何欲算已升格"
-    );
-
-    // 读侧闸：非属主 ⇒ 四列形态的空（不是零值条目）
-    let gated = read_path(
-        "s1",
-        &wal,
-        Some(symbio_sdk::authz::PRINCIPAL_MAIN),
-        symbio_sdk::authz::PRINCIPAL_MAIN,
-        &dir,
-    )
-    .expect("读数");
-    assert_eq!(
-        gated.conation,
-        serde_json::json!({ "intents": [], "adoption_rate": 0.0 }),
-        "空切片 ⇒ 流为空且率是有据的零"
-    );
-}
-
 /// 时域跨度列：跨度 = 末事件 ts − 首事件 ts；删末事件 ⇒ 跨度缩短（读数口会动）。
 #[test]
 fn span_column_recomputes_and_moves_with_the_wal() {
@@ -567,10 +447,18 @@ fn fleet_axes_aggregate_across_sessions() {
     )
     .expect("读数");
     let axes = got.fleet.get("axes").expect("axes 族");
-    assert_eq!(
-        axes["conation"]["expressed"].as_u64(),
-        Some(0),
-        "实例里没有欲 ⇒ 有据的零"
+    // 主动性轴**在本测试进程里读不出来**：它的 owner 是能力包 `conation`，本二进制
+    // 不链接它（E-009）⇒ 视图缺席 ⇒ 这一格是 `null`，不是三个零。
+    //
+    // 两个理由让它必须这样断言：① 零是「一个会话都没主动发起过」，`null` 是「读不出来」，
+    // 把后者写成前者就是让装配故障看起来像一次正常的安静；② 若在这里交一份替身把它算成
+    // 零，`capability_views` 那条「本进程没链接 owner ⇒ 必须出声」的用例会变成假绿。
+    // 跨会话合并的**数字**归 e2e（`e2e/cases/t36-autonomous-initiator.mjs` 读真实装配的
+    // `fleet.axes.conation`）。
+    assert!(
+        axes["conation"].is_null(),
+        "视图缺席 ⇒ 主动性轴交 null（不是有据的零；实际: {}）",
+        axes["conation"]
     );
     assert_eq!(
         axes["span"]["sessions"].as_u64(),

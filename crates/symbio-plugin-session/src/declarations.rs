@@ -1,7 +1,11 @@
 //! 会话插件的事件声明（DE-024 D-197 / D-201）。
 //!
-//! 本插件拥有 `system.*`（定时触发与健康自检）与 `conation.expressed`（欲的表达）：
-//! 名字、格位与声明同在这里，写方与读方都从本模块取名字——内核不再为它们保留常量。
+//! 本插件拥有 `system.*`（定时触发与健康自检）：名字、格位与声明同在这里，写方与读方
+//! 都从本模块取名字——内核不再为它们保留常量。
+//!
+//! **`conation.expressed` 的 owner 是能力包**（`crates/symbio-plugin-conation`，站位见 `D-269`）：
+//! 本插件只剩写方（自主触发的落格）。名字因此取自清单生成物
+//! `symbio_plugin_api::events`——与任务族同一条通路，不是兄弟插件、也不是内核代答。
 //!
 //! 事实 / 视图 / 端口 / 行都不在这里：它们不属于本插件的控制面。
 
@@ -13,15 +17,18 @@ use symbio_kernel::event::{Entity, EventDecl, Verb};
 pub(crate) const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
 /// 健康自检。落在 `system × progressed`。
 pub(crate) const EVENT_SYSTEM_HEALTH: &str = "system.health";
-/// 「欲」的表达。落在 `conation × opened`——写方与读方（`conation` 投影）都在本插件。
-pub(crate) const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
+
+/// **读方侧**的视图名：主动性读数由能力包交（`crates/symbio-plugin-conation`），本插件按
+/// 名字读。与 [`TASK_VOCAB`] 同一条通路——拼写只有一个来源（owner 的 `PLUGIN.yml`
+/// `shared_views`），本常量只是让三个读点（`stats` / `stats_reading` / 自主触发）不各写
+/// 一遍字面量。改名由 owner 决定，改完这里跟着改，读口不变。
+pub(crate) const CONATION_INTENTS_VIEW: &str = "conation.intents";
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 
 pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_SYSTEM_TRIGGERED, (Entity::System, Verb::Opened)),
     EventDecl::new(EVENT_SYSTEM_HEALTH, (Entity::System, Verb::Progressed)),
-    EventDecl::new(EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)),
     // ── 消息列表的变更与收束（DE-024 D-203 归零批）──
     //
     // 五条的写方全在本插件（`message_events` 与

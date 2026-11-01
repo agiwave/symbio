@@ -119,15 +119,29 @@ async fn trigger_facts_land_in_order_and_the_gate_stays_closed_by_default() {
     );
 }
 
-/// 闸门打开后长目标**只开一次**：自主触发按间隔周期性表达同一条欲，
-/// 每次都开格会让就绪集无界增长——而 readyset 是模型唯一的调度候选来源，那就等于
-/// 用自己刷爆自己的提示词。而「欲」是流不是状态，照样每次入格。
+/// **能力包不在 ⇒ 升格这一步消失**（T3 形状）：触发与欲照样入格，但不长出任务。
+///
+/// ## 为什么这里断言的是「不开」而不是「只开一次」
+///
+/// 「同一条长目标只开一次」的去重判据**归能力包**（`D-269` 站位表「读侧折叠」行）：`declared` 那一格
+/// 由 `crates/symbio-plugin-conation` 的视图算，「哪些目标算已声明」不再由本插件判。
+/// 本二进制不链接那个包（E-009），所以这里读到的必然是**可诊断的缺席**——本文件因此只能钉
+/// 本插件剩下的那一半：**读不到 ⇒ 不升格**（而不是「读不到 ⇒ 当作没声明过，于是每 tick
+/// 重开一条」，那会拿重复开工掩盖一个装配问题）。
+///
+/// 「只开一次」的**组合**证明在两处，缺一不可：
+/// - 能力包自己的用例：`declared` 只含升格过的那几条（`declaring_one_goal_does_not_declare_another`）；
+/// - e2e：真实装配里跑两个 tick，`readyset.ready` 里始终只有一条心跳任务
+///   （`e2e/cases/t36-autonomous-initiator.mjs`）。
+///
+/// 把这两半拼起来才是原来那条用例，而拼的动作不该发生在「只链接一半」的二进制里。
 #[tokio::test]
-async fn gate_opens_the_long_goal_exactly_once_per_goal() {
+async fn without_the_capability_pack_the_gate_opens_nothing() {
     let (_dir, p) = autonomy_plugin(true);
     let sid = "s-gate";
     seed_one_fact(&p, sid);
 
+    // 触发照常发生（返回 true = 这一轮照常开跑）：能力缺席不该连累开轮。
     assert!(p.record_autonomous_trigger(sid, 60_000, "把周报写了").await);
     assert!(p.record_autonomous_trigger(sid, 60_000, "把周报写了").await);
 
@@ -137,8 +151,8 @@ async fn gate_opens_the_long_goal_exactly_once_per_goal() {
             .iter()
             .filter(|e| e.entity == Entity::Task && e.verb == Verb::Opened)
             .count(),
-        1,
-        "同一条长目标只声明一次"
+        0,
+        "读不到「已声明哪些目标」⇒ 不升格（宁可这一次不开，也不每 tick 重开一条）"
     );
     assert_eq!(
         events
@@ -146,7 +160,7 @@ async fn gate_opens_the_long_goal_exactly_once_per_goal() {
             .filter(|e| e.entity == Entity::Conation && e.verb == Verb::Opened)
             .count(),
         2,
-        "「欲」每次触发照样入格（它是流，不是状态）"
+        "「欲」每次触发照样入格（它是流，不是状态；能力缺席不影响表达）"
     );
     assert!(
         check_all(vocab(), &events).is_empty(),
@@ -228,9 +242,9 @@ async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
 
 // ==================== 发起者与意欲闸门的单元验收（D-189） ====================
 
-use crate::declarations::EVENT_CONATION_EXPRESSED;
 use crate::declarations::EVENT_SYSTEM_TRIGGERED;
 use symbio_kernel::store::EventStore;
+use symbio_plugin_api::events::EVENT_CONATION_EXPRESSED;
 use symbio_plugin_api::events::EVENT_TASK_PROGRESS;
 use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
 use symbio_sdk::authz::PRINCIPAL_USER;

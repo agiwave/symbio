@@ -21,6 +21,9 @@ pub const PLUGIN_ID_COMPOSE: &str = "compose";
 /// 执行容器
 pub const PLUGIN_ID_COMPOSITE: &str = "composite";
 
+/// 目标自生成：把「欲」的表达折成意图视图（单片读数 + 跨会话合并）
+pub const PLUGIN_ID_CONATION: &str = "conation";
+
 /// 事件总线
 pub const PLUGIN_ID_EVENT_BUS: &str = "event_bus";
 
@@ -92,6 +95,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "heartbeat", // 心跳调度：会话空闲后自主开一轮（经地址面写会话收件箱，随每棵子树分形）
     "persona", // 人格：一处定义「我是谁」，两条输出面（轮内正文 / 对话措辞）读同一段
     "causal", // 因果结构：把「A 导致 B」记成事实（工具），再折成可读的因果图（视图）
+    "conation", // 目标自生成：把「欲」的表达折成意图视图（单片读数 + 跨会话合并）
     "classify", // 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）

@@ -82,6 +82,13 @@ import {
  *
  * 代价：换工具链后 `DefaultHasher` 的实现若变，相位跟着变，落回两个 tick——用例
  * **仍然绿**，只是慢 15s（两条 waitFor 各有 100s 兜底）。换名字前先算一遍相位。
+ *
+ * ## 为什么最后还要**主动等第二个 tick**
+ *
+ * 「同一条长目标只开一次」的去重判据归能力包 `conation`（`D-269` 站位表），会话的单测二进制
+ * 里没有 owner ⇒ 那一条在原处**不可能**成立（详见用例里那段的注释）。判据挪到这里：
+ * 第一次表达与第二次表达之间隔着一次调度，只有真跑两轮才看得见「没重开」。
+ * 它给本用例加约 15s（一个 tick），这是判据搬家的价格，不是可以省的余量。
  */
 const SID_OK = 'e2e-t36-gate-pass';
 const SID_BROAD = 'e2e-t36-deny';
@@ -392,6 +399,58 @@ export default defineCase(
         `拒收的目标不得出现在就绪集里（实际: ${JSON.stringify(broadReady)}）`,
       );
 
+      // ── 第二个 tick：同一条长目标**只开一次**（去重判据随能力搬走之后，这里才证得了）
+      // ────────────────────────────────────────────────────────────────
+      //
+      // 「哪些目标算已声明」这个判据已经搬进能力包（`conation.intents` 的 `declared`
+      // 那一格，owner 在能力包），本插件只剩「读它、没声明过就开格」。两个半边**必须同时在场**
+      // 才证得出「只开一次」：
+      //
+      // - 能力包自己的用例钉 `declared` 只含升格过的那几条（它不链接会话）；
+      // - 本条钉**组合**：真跑第二个 tick，`conation.expressed` 会多一条，
+      //   `task.opened` 不许再多一条。
+      //
+      // 这条断言原来在会话的单测里。搬走之后它在那个二进制里**不可能**成立（那里没有
+      // owner，读不到 `declared`），而拿一份「算法一样」的替身让它继续绿，等于把
+      // 「卸载能力包之后系统还完整」这句话变成不可判——替身不是 owner，它只是把红改绿。
+      const okRounds = async () =>
+        (await userTexts(SID_OK)).filter((t) => t.includes(PROMPT_OK)).length;
+      const beforeSecond = await okRounds();
+      try {
+        await waitFor(async () => (await okRounds()) > beforeSecond, {
+          what: 'SID_OK 的第二个心跳轮落进转写（去重要到第二次表达才看得见）',
+          timeoutMs: 90_000,
+        });
+      } catch (e) {
+        throw new Error(`${e.message}${await diagnose()}`);
+      }
+      const afterSecond = (await statsOf(SID_OK))?.readyset?.ready ?? [];
+      assertEq(
+        afterSecond.filter((t) => /^hb-\d+$/.test(t.task_id)).length,
+        1,
+        `第二次表达同一条目标 ⇒ **不得**再开一格（去重判据读的是能力包的 declared；实际: ${JSON.stringify(afterSecond)}）`,
+      );
+
+      // 跨会话合并（`ViewDecl::agg`，D-281）：`fleet.axes.conation` 是能力包交的**汇总**，
+      // 不是本插件算的。这里证两件事——那一格在真实装配里**有值**（agg 接上了），
+      // 且率是从汇总的分子分母重算的（不是把各会话的率再平均一遍：那是第二份口径）。
+      const fleetConation = (await statsOf(SID_OK))?.fleet?.axes?.conation ?? null;
+      assert(
+        fleetConation !== null,
+        `实例级主动性轴必须读得出来（能力包在、视图公开、agg 接上；实际: ${JSON.stringify(fleetConation)}）`,
+      );
+      const expressed = fleetConation.expressed;
+      const escalated = fleetConation.escalated;
+      assert(
+        expressed >= 2 && escalated >= 1 && escalated <= expressed,
+        `汇总的分子分母应可加（两个会话都表达过，只有过闸那条升格；实际: ${JSON.stringify(fleetConation)}）`,
+      );
+      assertEq(
+        fleetConation.adoption_rate,
+        escalated / expressed,
+        `汇总率必须由汇总的分子分母重算（实际: ${JSON.stringify(fleetConation)}）`,
+      );
+
       // ── 「它有多主动」读得出来（SC-012 判据 3）────────────────────────
       //
       // `session/stats.conation` 列（主动性外部效标）在生产里早就有，但在本条用例
@@ -411,8 +470,22 @@ export default defineCase(
         `过闸会话的主动性列应记下至少一条意图（实际: ${JSON.stringify(okConation)}）`,
       );
       assert(
-        okIntents.every((it) => typeof it.task_id === 'string' && it.task_id.length > 0),
-        `该会话的意图都应已升格（task_id 非空；实际: ${JSON.stringify(okIntents)}）`,
+        okIntents.some((it) => typeof it.task_id === 'string' && it.task_id.length > 0),
+        `过闸那条意图必须已升格（task_id 非空；实际: ${JSON.stringify(okIntents)}）`,
+      );
+      // 第二条意图来自**第二个 tick**（上面那一段特意等的）：它照样入列（欲是流），
+      // 但**不得**再升格——「同一条长目标只开一格」在这一列里的形态就是「只有一个非空
+      // task_id，其余全是 null」。这一句与 `readyset.ready` 那条互为两条独立证据：
+      // 前者读意图流，后者读就绪集。
+      const promoted = okIntents.filter((it) => typeof it.task_id === 'string' && it.task_id);
+      assertEq(
+        new Set(promoted.map((it) => it.task_id)).size,
+        1,
+        `第二次表达同一条目标不得再升格（只有一个 task_id；实际: ${JSON.stringify(okIntents)}）`,
+      );
+      assert(
+        okIntents.filter((it) => !it.task_id).length >= 1,
+        `重复表达照样进列（分母要留痕，去重只拦升格；实际: ${JSON.stringify(okIntents)}）`,
       );
       assert(
         okIntents.some((it) => String(it.goal ?? '').includes(PROMPT_OK)),

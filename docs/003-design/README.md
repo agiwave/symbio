@@ -173,7 +173,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 78 · draft 1 · retired 2（共 81）
+**计数**：active 79 · draft 1 · retired 2（共 82）
 
 ## 现行设计（active）
 
@@ -235,6 +235,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-classify/README`](../../crates/symbio-plugin-classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
 | [`crates/symbio-plugin-compose/README`](../../crates/symbio-plugin-compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |
 | [`crates/symbio-plugin-composite/README`](../../crates/symbio-plugin-composite/README.md) | Composite 插件 | 与代码一致 |
+| [`crates/symbio-plugin-conation/README`](../../crates/symbio-plugin-conation/README.md) | 目标自生成能力包 | 与代码一致 |
 | [`crates/symbio-plugin-event_bus/README`](../../crates/symbio-plugin-event_bus/README.md) | Event Bus 插件 | 与代码一致 |
 | [`crates/symbio-plugin-gateway/README`](../../crates/symbio-plugin-gateway/README.md) | Gateway 插件 | 与代码一致 |
 | [`crates/symbio-plugin-heartbeat/README`](../../crates/symbio-plugin-heartbeat/README.md) | Heartbeat 插件（空闲会话的自主开轮调度） | 与代码一致 |

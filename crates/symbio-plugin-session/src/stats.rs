@@ -42,7 +42,7 @@
 //! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——与
 //! `projections/slo.test.rs` 的扫描口同一口径。
 
-use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
+use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, CONATION_INTENTS_VIEW, MESSAGE_VOCAB};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -504,13 +504,10 @@ pub(crate) fn read(
     // 分子分母都是事实源里已有的事件，不加新格子。`may_read = false` 时切片已空
     // ⇒ `{ intents: [], adoption_rate: 0.0 }`（四列形态）。
     //
-    // 率与流同列给出：流是**事实**（不截断，见列定义），率是**读数**（纯查询，
-    // 与 `tiers` 的 `rate()`、跨会话 `ConationSummary::adoption_rate` 同一套算式）。
-    let conation_view = crate::conation::conation().read_all(&snapshot).value;
-    let conation = serde_json::json!({
-        "intents": conation_view.intents,
-        "adoption_rate": conation_view.adoption_rate(),
-    });
+    // **读数由能力包交**（`D-221` 按名字读、`D-281` 折叠两半）：本插件按名字读 `conation.intents`，不认识
+    // 意图流的形状、也不算采纳率——率是 owner 的算式（单片那一半就在视图里，跨会话那一半
+    // 由 `ViewDecl::agg` 交）。本处只挑两格排版，与 `capability_views` 同一纪律。
+    let conation = conation_reading(&snapshot);
 
     // 时域跨度列（同上）：`span` 投影只读事件信封的 `ts`（入库时间，与 `cost_ms`
     // 同源的实测面），as-of 之后的事件一概不见。
@@ -591,6 +588,40 @@ pub(crate) fn read(
         usage,
         ..reading
     })
+}
+
+/// 主动性列：**按名字读**能力包交的视图，挑两格排版（`D-221`）。
+///
+/// ## 为什么只挑两格
+///
+/// 视图交的是 `{ intents, declared, expressed, escalated, adoption_rate }`；本列的历史形状
+/// 是 `{ intents, adoption_rate }`（e2e 与前端都按它读）。多出来的三格是**给别的读方**的：
+/// `declared` 供自主触发去重、两个计数供实例级聚合复算。把整份值原样下发会让「这一列的
+/// 形状」变成「owner 今天交了什么」——那是把出口契约交给 owner 的口径去决定。
+///
+/// ## 读不到 ⇒ 空形状 + 出声
+///
+/// 四种缺席都可诊断（`reason` 在 `capability_views` 那一列里另有完整报告），这里折成
+/// 与 `may_read = false` 同一个空形状，并**出声**一次：静默空形状会让「装配坏了」与
+/// 「没主动发起过」看起来一样，而这两件事一个要修、一个不用。
+fn conation_reading(snapshot: &[Event]) -> serde_json::Value {
+    let empty = || serde_json::json!({ "intents": [], "adoption_rate": 0.0 });
+    match symbio_plugin_api::read_shared_view_all(CONATION_INTENTS_VIEW, snapshot) {
+        Ok(value) => serde_json::json!({
+            "intents": value.get("intents").cloned().unwrap_or_else(|| serde_json::json!([])),
+            "adoption_rate": value
+                .get("adoption_rate")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!(0.0)),
+        }),
+        Err(why) => {
+            symbio_plugin_api::plugin_warn!(
+                symbio_plugin_api::PLUGIN_ID_SESSION,
+                "[stats] 主动性列读不到 `{CONATION_INTENTS_VIEW}`（{why}）：按空读数交"
+            );
+            empty()
+        }
+    }
 }
 
 impl SessionPlugin {

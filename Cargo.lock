@@ -4151,6 +4151,7 @@ dependencies = [
  "symbio-plugin-classify",
  "symbio-plugin-compose",
  "symbio-plugin-composite",
+ "symbio-plugin-conation",
  "symbio-plugin-event_bus",
  "symbio-plugin-gateway",
  "symbio-plugin-heartbeat",
@@ -4301,6 +4302,15 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "symbio-plugin-conation"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
 ]
 
 [[package]]

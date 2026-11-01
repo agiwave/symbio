@@ -17,7 +17,7 @@
 //! （贴标签、定单位、挑语气）。同一份事实长出两套口径，读数与投影就会静默漂移，
 //! 而两边都自称是 SLO。
 
-use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB};
+use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, CONATION_INTENTS_VIEW};
 use symbio_kernel::event::Event;
 use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 use symbio_sdk::chat::chat_node as cm;
@@ -113,7 +113,6 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
     let mut fb_parts = Vec::new();
     // 外部效标两族（DE-008 §3.1.1 · 主动性 / 时域跨度）：与 lat/fb 同批扫描、同一份
     // snapshot——「多扫一遍」不是更彻底，是多一次读错范围的机会。
-    let mut con_parts = Vec::new();
     let mut span_parts = Vec::new();
     let mut aut_parts = Vec::new();
     for snapshot in snapshots {
@@ -121,7 +120,6 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
         // `range(0)` 里，实例聚合不会**静默**少算。
         lat_parts.push(slo_report(CHAT_VOCAB).read_all(snapshot).value);
         fb_parts.push(fallback_rate(CHAT_VOCAB).read_all(snapshot).value);
-        con_parts.push(crate::conation::conation().read_all(snapshot).value);
         span_parts.push(span().read_all(snapshot).value);
         aut_parts.push(
             crate::autonomy::autonomy_for(crate::declarations::TASK_VOCAB)
@@ -135,12 +133,37 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
     let turns: u64 = fallback.by_tier.values().map(|s| s.turns).sum();
     let fallbacks: u64 = fallback.by_tier.values().map(|s| s.fallbacks).sum();
     // 跨会话合并是**统计口径单点**：分子分母可加、率是同一套算式的再应用。
-    // `span` 的「一个事件的会话不进分母」在 core 判，不在这边挑数据；`conation` 与
-    // `autonomy` 的合并住本插件（[`crate::conation`] / [`crate::autonomy`]）——这两条读数的
-    // 读写两端都在这里，投影因此不是共享类型（DE-024 D-200 / D-201）。
-    let conation = crate::conation::ConationView::merge(&con_parts);
+    // `span` 的「一个事件的会话不进分母」在 core 判，不在这边挑数据。
+    //
+    // 主动性族走**能力包的 `agg`**（`D-281`）：单片读数是 owner 的 `eval` 交的，N 片的
+    // 合并是 owner 的 `agg` 交的——本插件只负责「每片求一次值、把值交回去」，不认识
+    // 里面有哪些字段，也不在这里写「率 = 分子 / 分母」。
+    let conation = conation_axis(snapshots);
     let span = SpanView::merge(&span_parts);
     let autonomy = crate::autonomy::AutonomyView::merge(&aut_parts);
+
+    // 外部效标两族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
+    // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
+    let mut axes = serde_json::json!({
+        "span": {
+            "sessions": span.sessions,
+            "median_ms": span.median_ms(),
+        },
+        "autonomy": {
+            "closed": autonomy.closed,
+            "unattended": autonomy.unattended,
+            "unattended_rate": autonomy.unattended_rate(),
+        },
+    });
+    // 主动性那一格是**能力包的 `agg` 原样交出**（`D-281`）：形状归 owner，本插件不在这里
+    // 列它的字段——列了就是第二份口径。读不到 ⇒ `null`（不是三个零：零是「没有主动发起」，
+    // `null` 是「这一格今天读不出来」）。
+    //
+    // 键名也不另抄一份字面量：取视图名的第一段（`conation.intents` ⇒ `conation`）——那一段
+    // 是 owner 给自己能力起的名字，读方再写一遍就是第二份叫法，漂移了没有东西会变红。
+    if let Some(map) = axes.as_object_mut() {
+        map.insert(axis_of(CONATION_INTENTS_VIEW).to_string(), conation);
+    }
 
     serde_json::json!({
         // 交到手里的快照数（打不开的已在存储层跳过并出声）
@@ -164,23 +187,66 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
         // 外部效标两族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
         // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
         // 键名稳定（不随文档改字号）：conation ↔ 主动性、span ↔ 时域跨度。
-        "axes": {
-            "conation": {
-                "expressed": conation.expressed,
-                "escalated": conation.escalated,
-                "adoption_rate": conation.adoption_rate(),
-            },
-            "span": {
-                "sessions": span.sessions,
-                "median_ms": span.median_ms(),
-            },
-            "autonomy": {
-                "closed": autonomy.closed,
-                "unattended": autonomy.unattended,
-                "unattended_rate": autonomy.unattended_rate(),
-            },
-        },
+        "axes": axes,
     })
+}
+
+/// 轴名 = 视图名的第一段（`conation.intents` ⇒ `conation`）。
+///
+/// 视图名的第一段是 owner 给自己的能力起的名字；读方要一个稳定的轴键时取它，而不是
+/// 在出口处再抄一份字面量——两份叫法漂移了没有任何东西会变红。
+fn axis_of(view: &str) -> &str {
+    view.split_once('.').map_or(view, |(head, _)| head)
+}
+
+/// 主动性轴：**逐片求值 + 交回 owner 合并**（`D-281`）。
+///
+/// ## 为什么读方不再有 `merge`
+///
+/// 迁移前这里调的是本插件的 `ConationView::merge`——**同一件事的第二个实现者**：能力包
+/// 已经交了「一片怎么折」，本插件又写了一遍「N 片怎么合」。现在两半都由 owner 交
+/// （`ViewDecl::eval` / `ViewDecl::agg`），本函数只做三件不认识形状的事：逐片 `read`、
+/// 把值攒成数组、把数组交回 `aggregate`。
+///
+/// ## 读不到 ⇒ `null`
+///
+/// 四种缺席都可诊断（`capability_views` 那一列另有完整报告）。这里给 `null` 而不是三个
+/// 零：零是「一个会话都没主动发起过」，`null` 是「这一格今天读不出来」——把后者写成前者
+/// 就是让装配故障看起来像一次正常的安静（`D-281` 理由 3 的同一条）。
+fn conation_axis(snapshots: &[Vec<Event>]) -> serde_json::Value {
+    let view = match symbio_plugin_api::ViewRead::named(CONATION_INTENTS_VIEW) {
+        Ok(view) => view,
+        Err(why) => {
+            symbio_plugin_api::plugin_warn!(
+                symbio_plugin_api::PLUGIN_ID_SESSION,
+                "[stats] 主动性轴读不到 `{CONATION_INTENTS_VIEW}`（{why}）：交 null"
+            );
+            return serde_json::Value::Null;
+        }
+    };
+    let mut parts = Vec::with_capacity(snapshots.len());
+    for snapshot in snapshots {
+        match view.read_all(snapshot) {
+            Ok(value) => parts.push(value),
+            Err(why) => {
+                symbio_plugin_api::plugin_warn!(
+                    symbio_plugin_api::PLUGIN_ID_SESSION,
+                    "[stats] 主动性轴有一片读不出 `{CONATION_INTENTS_VIEW}`（{why}）：交 null"
+                );
+                return serde_json::Value::Null;
+            }
+        }
+    }
+    match view.aggregate(&parts) {
+        Ok(value) => value,
+        Err(why) => {
+            symbio_plugin_api::plugin_warn!(
+                symbio_plugin_api::PLUGIN_ID_SESSION,
+                "[stats] 主动性轴合并失败 `{CONATION_INTENTS_VIEW}`（{why}）：交 null"
+            );
+            serde_json::Value::Null
+        }
+    }
 }
 
 /// 能力视图列：遍历**公开清单**，逐条经 `symbio_plugin_api::views` 求值（DE-025 D-221）。

@@ -22,8 +22,7 @@
 
 use super::super::active::{InboxItem, PreemptPending};
 use super::super::plugin::SessionPlugin;
-use crate::conation::conation;
-use crate::declarations::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
+use crate::declarations::{CONATION_INTENTS_VIEW, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 use crate::store::EventWalStore;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::store::Store;
@@ -261,7 +260,9 @@ impl SessionPlugin {
                 // E2 的**动作点**：`task.opened` 只从闸门批准过的候选长出来
                 //（`ApprovedIntent` 字段私有 = 编译期唯一出口），这一行验的是升格本身
                 // ——少了它，「闸门与自主层同批成对」就退化成一句约定。
-                if candidate.is_approved() && !long_goal_declared(&store, approved.goal()) {
+                if candidate.is_approved()
+                    && !long_goal_declared(&store, approved.goal()).unwrap_or(true)
+                {
                     let task_id = format!("hb-{triggered_seq}");
                     let opened =
                         initiator.open_long_goal(&task_id, approved.goal(), approved.source_seq());
@@ -294,21 +295,40 @@ impl SessionPlugin {
 /// 是模型唯一的调度候选来源，那就等于用自己刷爆自己的提示词。重新发起是 S03 返工机制
 /// （`{id}-r{n}`）的事，不由触发器每 tick 重开；「欲」本身照样每次入格（它是流，不是状态）。
 ///
-/// 判定住 ③ [`conation`](crate::conation)（本插件），这里只**消费**——插件不再自己扫事实源拼一个布尔。
+/// 判定住能力包（`crates/symbio-plugin-conation` 的 `conation.intents` 视图），这里只
+/// **按名字读 `declared` 那一格并查表**——「哪些目标算已声明」（= 升格过的那几条）由
+/// owner 判，本插件不再自己扫事实源拼一个布尔。
 // doc-link-allow D-004: 「曾经声明过吗」问的是事实网格里有无该条记录，属数据语义
 /// as-of 取全量读数口径 `read_all`：问的是「这条目标曾经声明过吗」，与 `session/stats`
 /// 的复算同一写法。升格靠**溯源**认（`task.opened` 的 `produced_by` 指回欲 seq），
-/// 不靠 goal 字符串相等，见 `conation` 模块头的边界一节。
+/// 不靠 goal 字符串相等，见能力包 `decl` 模块头。
 ///
 // doc-link-allow D-004: 「曾经声明过」是累计口径的表述，非版本变更史
 /// 读**完整史**（`range(0)`）：「曾经声明过」是累计口径——被快照取代而移入
 /// 归档段的那次声明也在里面 ⇒ 压缩前声明过的目标不会被读成「没声明过」（每 tick 重开
 /// 一条目标，静默的重复开工）。
-fn long_goal_declared(store: &EventWalStore, goal: &str) -> bool {
-    conation()
-        .read_all(&store.range(Seq::new(0)))
-        .value
-        .is_declared(goal)
+///
+/// ## 读不到 ⇒ `None`（本轮不升格）
+///
+/// 四种缺席（装配表没冻结 / 名字没公开 / 声明表里没有 / 切片超预算）都是**可诊断的缺席**，
+/// 不是「没声明过」。把它读成 `false` 会让每个 tick 都重开一条长目标——那是拿重复开工
+/// 掩盖一个装配问题。退化方向与 `loop` 读 `memory.live` 同款：**跳过这一轮**。
+fn long_goal_declared(store: &EventWalStore, goal: &str) -> Option<bool> {
+    let value = match symbio_plugin_api::read_shared_view_all(
+        CONATION_INTENTS_VIEW,
+        &store.range(Seq::new(0)),
+    ) {
+        Ok(value) => value,
+        Err(why) => {
+            symbio_plugin_api::plugin_warn!(
+                symbio_plugin_api::PLUGIN_ID_SESSION,
+                "[Autonomous] 意图视图 `{CONATION_INTENTS_VIEW}` 本轮读不到（{why}）：本轮不升格"
+            );
+            return None;
+        }
+    };
+    let declared = value.get("declared").and_then(|d| d.as_array())?;
+    Some(declared.iter().any(|g| g.as_str() == Some(goal)))
 }
 
 // ==================== 自主发起者与意欲闸门（D-189：唯一生产消费方在本文件） ====================
@@ -351,7 +371,7 @@ impl AutonomousInitiator {
     fn express_intent(&self, goal: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("want-{source_seq}"),
-            crate::declarations::EVENT_CONATION_EXPRESSED,
+            symbio_plugin_api::events::EVENT_CONATION_EXPRESSED,
             symbio_kernel::event::Entity::Conation,
             symbio_kernel::event::Verb::Opened,
             0,
@@ -435,7 +455,7 @@ struct ConationCandidate {
 impl ConationCandidate {
     /// 唯一构造路径：从欲事件读出候选。**无溯源的欲构造不出候选**（I2 强化）。
     fn from_event(e: &Event) -> Option<Self> {
-        if e.kind != crate::declarations::EVENT_CONATION_EXPRESSED {
+        if e.kind != symbio_plugin_api::events::EVENT_CONATION_EXPRESSED {
             return None;
         }
         // 来路不明的意图混不进来（I2 强化：无溯源即 None）。
