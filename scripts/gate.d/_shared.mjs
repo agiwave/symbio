@@ -272,7 +272,18 @@ export const BASELINE = {
   // 覆盖没有丢：数字在能力包，读方的退化方向由 `unavailable_columns_take_their_documented_
   // empty_shape` 接手，组合由 e2e `t28-session-stats.mjs`（`tiers[0]` 与 `fleet.by_tier` 逐格
   // 对账）守着。非侵蚀。
-  ciRustTestsTotal: 2519,
+  // baseline-allow ciRustTestsTotal: `#22` / `#28` 声誉折叠迁出净 +6（2519 → 2525）——同一次
+  // 搬家的两端：**+9 新增**（`crates/symbio-plugin-reputation/src/decl.test.rs`：账记在承诺方
+  // 名下、自报不动账、收束没有对应开口就跳过、没承诺的主体不成行、as-of、双跑一致、键序与
+  // 空切片、`ViewDecl` 的三条读法、冻结表里 owner 归属 + 断言格读法），**−3 删除**（core 的
+  // `actors/mod.test.rs` 三条：`commitment_lifecycle_feeds_reputation` /
+  // `reputation_double_run_is_identical_and_as_of_safe` /
+  // `self_reported_reputation_never_enters_the_projection`）。逐条归属：三条判的是「折出来的
+  // 数对不对」，被测对象已不在 core ⇒ 断言随折叠进 owner 包，只换了 executor 与测试二进制；
+  // 「读方取的是这个主体的 `score`」改由 `loop/test_support.rs` 的替身视图钉（既有 460 条不变），
+  // 「owner 缺席 ⇒ 空形状 + `own` 仍点得出主体」由 `session/stats.test.rs` 同名替换的那条钉
+  // （477 条不变），生产二进制里的真读数仍由 e2e t30 / t42 / t71 / t74 / t75 钉。非侵蚀。
+  ciRustTestsTotal: 2525,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

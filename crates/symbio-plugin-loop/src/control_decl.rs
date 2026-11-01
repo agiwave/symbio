@@ -13,7 +13,7 @@ use symbio_kernel::event::{
     Entity, Event, EventDecl, FactRole, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
     EVENT_RETRY, EVENT_SENT,
 };
-use symbio_sdk::projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};
+use symbio_sdk::projection::vocab::{ChatVocab, MessageVocab};
 
 // ── 本插件持有的事件名（DE-024 D-197 / D-201）──
 //
@@ -43,18 +43,23 @@ pub(crate) use symbio_plugin_api::events::{
     EVENT_TASK_CONTROLLED, EVENT_TURN_DISPATCH,
 };
 
-/// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
+/// 对话面 / 消息面的两张词汇表（DE-024 D-203 归零批）。
 ///
-/// core 的折叠在构造期收这三张表。拼写全部取自清单生成物 `symbio_plugin_api::events`
+/// core 的折叠在构造期收这两张表。拼写全部取自清单生成物 `symbio_plugin_api::events`
 /// ——本插件是这批名字的 **owner**（`PLUGIN.yml` 的 `shared_events` + 上面 `EVENTS` 的
 /// 格位），但**取用一律走生成物**：同一份拼写若在 owner 里手写一遍、在消费方里生成一遍，
 /// 改名那天就会有一半没跟上。
 ///
-/// ## 为什么是三张而不是一张
+/// ## 为什么按面切开而不是一张合并表
 ///
-/// 按**面**切开，每张表的大小就是那个折叠算法真正的依赖：`reputation` 只认承诺四条，
-/// `changes` 只认产物一条。交一张 20 字段的合并表会把耦合面说宽——读代码的人会以为
-/// 声誉折叠与发言格有关，那不是真的（DE-024 D-206 的同一形状）。
+/// 每张表的大小就是那个折叠算法真正的依赖：`changes` 只认产物一条，`turnstate` 只认
+/// 发言面。交一张 20 字段的合并表会把耦合面说宽——读代码的人会以为发言折叠与消息变更
+/// 有关，那不是真的（DE-024 D-206 的同一形状）。
+///
+/// 承诺面（`commitment.*` 四条）以前也在这里有一张表，因为 `reputation` 折叠住在 core
+/// 并把它当形参（名册 #22/#28）。折叠搬进声誉能力包之后（`D-288`），本插件生产代码里
+/// 没有消费者了，于是那张表跟着折叠走：**留下的表就该是有人调的表**。四格的**格位**
+/// 仍由本插件交（下面 `EVENTS` 那四条），只是不再需要一张参数表替折叠拼名字。
 pub(crate) const CHAT_VOCAB: ChatVocab = ChatVocab {
     user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
     dispatch: symbio_plugin_api::events::EVENT_TURN_DISPATCH,
@@ -77,14 +82,6 @@ pub(crate) const MESSAGE_VOCAB: MessageVocab = MessageVocab {
     message_edited: symbio_plugin_api::events::EVENT_MESSAGE_EDITED,
     message_removed: symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
     consolidated: symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
-};
-
-/// 承诺面（4 条）：`reputation` 与 `commitment_events` 是它仅有的两个消费方。
-pub(crate) const COMMITMENT_VOCAB: CommitmentVocab = CommitmentVocab {
-    opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
-    released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
-    broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,
-    asserted: symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED,
 };
 
 /// 淘汰裁决事件名（`verdict × asserted`）——**本插件持有**，不进共享清单。
@@ -165,7 +162,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     //
     // 下面九条的写方在本插件、读方是 core 的折叠
     // （`rebuild` / `transcript` / `prompt_fidelity` / `branch` / `changes` /
-    // `reputation` / `actors::commitment`），两个插件都调那些折叠 ⇒ 名字的 owner
+    // `actors::commitment`），两个插件都调那些折叠 ⇒ 名字的 owner
     // 是**写方**（本插件），消费面经清单 `shared_events` 投影
     // （`symbio_plugin_api::events`，DE-024 D-204）。
     //

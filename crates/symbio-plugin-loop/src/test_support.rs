@@ -16,7 +16,10 @@ use symbio_kernel::actors::Scope;
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::plugin::PluginError;
 use symbio_kernel::store::{EventStore, Store};
-use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
+use symbio_plugin_api::events::{
+    EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OPENED, EVENT_COMMITMENT_RELEASED,
+    EVENT_SESSION_CONSOLIDATED,
+};
 use symbio_sdk::chat::chat_node::ChatNode;
 use symbio_sdk::projection::turns::count_user_messages;
 use symbio_sdk::turn::dispatch::{
@@ -461,4 +464,102 @@ fn cost_capability_fixture() -> symbio_plugin_api::PluginDeclarations<'static> {
 symbio_plugin_api::submit_declarations!(
     "crates/symbio-plugin-loop-test-harness-cost",
     cost_capability_fixture
+);
+
+// ==================== 能力包替身：`reputation.ledger`（名册 #22/#28）====================
+//
+// 淘汰回路读的是**声誉能力包交的声明视图**（折叠只有一份，住在 owner 那一侧）。
+// 与上面两个替身同一条理由：本插件的单测二进制不链接那个包（`E-009`），于是
+// `read_shared_view_all("reputation.ledger")` 会返回 `Unknown`，而「分数低于阈值 ⇒ 收回
+// 派活权」那四条判据整条不可达——缺席时的处置（不淘汰 + 出声）反而成了唯一可达的路径，
+// 那是把兜底当成主路来测。
+//
+// 替身只保证**形状对、读数对得上**，让回路的读路径可跑；折叠本身的数字由能力包自己的
+// 用例钉（`crates/symbio-plugin-reputation/src/decl.test.rs`），两处若漂移 e2e 会红。
+
+/// 替身视图的求值：立约按 `from` 计 `offered`，收束经载荷 `id` 找回立约方计
+/// `kept` / `broken`，`score = 守约 − 违约`（as-of 之后不算）。
+fn reputation_ledger_fixture(events: &[Event], now: i64) -> Value {
+    let mut offered_of: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    let mut open: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut kept_of: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    let mut broken_of: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    for e in events {
+        if e.ts > now {
+            continue;
+        }
+        let id = e
+            .payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if e.kind == EVENT_COMMITMENT_OPENED {
+            let from = e
+                .payload
+                .get("from")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            *offered_of.entry(from.clone()).or_insert(0) += 1;
+            open.insert(id, from);
+        } else if e.kind == EVENT_COMMITMENT_RELEASED || e.kind == EVENT_COMMITMENT_BROKEN {
+            let Some(from) = open.get(&id) else { continue };
+            *if e.kind == EVENT_COMMITMENT_BROKEN {
+                &mut broken_of
+            } else {
+                &mut kept_of
+            }
+            .entry(from.clone())
+            .or_insert(0) += 1;
+        }
+    }
+    let by_principal: serde_json::Map<String, Value> = offered_of
+        .into_iter()
+        .map(|(principal, offered)| {
+            let kept = *kept_of.get(&principal).unwrap_or(&0);
+            let broken = *broken_of.get(&principal).unwrap_or(&0);
+            (
+                principal.clone(),
+                json!({
+                    "principal": principal,
+                    "offered": offered,
+                    "kept": kept,
+                    "broken": broken,
+                    "score": kept as i64 - broken as i64,
+                }),
+            )
+        })
+        .collect();
+    json!({ "by_principal": Value::Object(by_principal) })
+}
+
+fn reputation_capability_fixture() -> symbio_plugin_api::PluginDeclarations<'static> {
+    const VIEWS: &[symbio_plugin_api::ViewDecl] = &[symbio_plugin_api::ViewDecl {
+        name: "reputation.ledger",
+        ver: 1,
+        reads: &[
+            (EVENT_COMMITMENT_OPENED, "id"),
+            (EVENT_COMMITMENT_OPENED, "from"),
+            (EVENT_COMMITMENT_RELEASED, "id"),
+            (EVENT_COMMITMENT_BROKEN, "id"),
+        ],
+        evidence: &[],
+        cost: 4096,
+        eval: reputation_ledger_fixture,
+        agg: None,
+    }];
+    symbio_plugin_api::PluginDeclarations {
+        events: &[],
+        facts: &[],
+        views: VIEWS,
+        ports: &[],
+        actors: Vec::new(),
+        rows: &[],
+    }
+}
+
+symbio_plugin_api::submit_declarations!(
+    "crates/symbio-plugin-loop-test-harness-reputation",
+    reputation_capability_fixture
 );

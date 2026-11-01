@@ -12,7 +12,6 @@ pub mod mutations;
 pub mod prompt_fidelity;
 pub mod readyset;
 pub mod rebuild;
-pub mod reputation;
 pub mod task_vocab;
 pub mod transcript;
 pub mod turns;

@@ -17,28 +17,12 @@ use crate::actors::*;
 use crate::authz::{production_matrix, PRINCIPAL_MAIN, PRINCIPAL_PEER};
 use crate::governance::{Capability, PermissionMatrix, PrincipalPolicy, VisScope};
 use crate::invariants::check_all;
-use crate::projection::reputation::reputation;
 use crate::projection::turnstate::turnstate;
 use crate::test_fixtures::{
     CHAT, COMMITMENT, EVENTS, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED, MESSAGE,
 };
 use symbio_kernel::view::Budget;
-
-/// 种一条**根事件**（用户发言），返回它的 seq——给"溯源锚"参数用。
-fn seed_root(store: &EventStore) -> u64 {
-    store
-        .append(Event::pending(
-            "root-u0",
-            EVENT_USER_MESSAGE,
-            Entity::Turn,
-            Verb::Opened,
-            0,
-            "user",
-        ))
-        .expect("根事件入格")
-        .value()
-}
 
 // ── ActorSpec / Pattern（DE-001 §4 契约形状） ──────────────────────────────
 
@@ -222,103 +206,6 @@ fn principals_are_isolated_until_scope_widened() {
         2,
         "public ⇒ 隔离消失：断言 1 的实现若在 public 下仍红，说明可见域没在生效"
     );
-}
-
-/// 立约 → 守约 / 违约 → 声誉投影。违约可观测（broken 必带 why），
-/// 声誉记在承诺方（from）头上。
-#[test]
-fn commitment_lifecycle_feeds_reputation() {
-    let keeper = CommitmentKeeper::new(COMMITMENT);
-    let store = EventStore::new();
-    let src = seed_root(&store);
-    // B 立约两条：一条守约、一条违约；A 立约一条守约。
-    store
-        .append(keeper.offer("k1", "session/b", "session/a", "整理周报", src))
-        .unwrap();
-    store
-        .append(keeper.release("k1", "session/b", src))
-        .unwrap();
-    store
-        .append(keeper.offer("k2", "session/b", "session/a", "压测报告", src))
-        .unwrap();
-    store
-        .append(keeper.breach("k2", "session/b", "上游数据没到", src))
-        .unwrap();
-    // 对等宣告：违约状态告知协作方（普通事件，不是新通道）。
-    store
-        .append(keeper.declare("k2", "session/b", "违约已告知 agent:a", src))
-        .unwrap();
-    store
-        .append(keeper.offer("k3", "session/a", "session/b", "评审", src))
-        .unwrap();
-    store
-        .append(keeper.release("k3", "session/a", src))
-        .unwrap();
-
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let view = reputation(COMMITMENT)
-        .apply(&snapshot, 9_999, Budget::generous())
-        .value;
-    let b = view.of("session/b");
-    assert_eq!((b.offered, b.kept, b.broken), (2, 1, 1));
-    assert_eq!(b.score, 0, "平凡打分：守约 − 违约");
-    assert_eq!(view.of("session/a").score, 1);
-    // 未立约的主体：空条目，不是错误。
-    assert_eq!(view.of("session/ghost").offered, 0);
-
-    // 全链路不变量仍绿（承诺也是普通事件，永远逃不出审计）。
-    assert!(
-        check_all(EVENTS, &snapshot).is_empty(),
-        "{:?}",
-        check_all(EVENTS, &snapshot)
-    );
-}
-
-/// 出口判据「声誉双跑一致」（N1 在声誉面上的形状）：同一份切片双跑逐字节相同；
-/// as-of 锚前的违约不影响当时已算出的声誉。
-#[test]
-fn reputation_double_run_is_identical_and_as_of_safe() {
-    let keeper = CommitmentKeeper::new(COMMITMENT);
-    let store = EventStore::new();
-    store
-        .append(keeper.offer("k1", "session/b", "session/a", "整理周报", 0))
-        .unwrap();
-    store
-        .append(keeper.release("k1", "session/b", 0).with_ts(1_000))
-        .unwrap();
-    let before = {
-        let snapshot = store.range(crate::event::Seq::new(0));
-        reputation(COMMITMENT)
-            .apply(&snapshot, 2_000, Budget::generous())
-            .value
-    };
-    assert_eq!(before.of("session/b").score, 1);
-
-    // 后台追加违约（ts 在 as-of 之后）。
-    store
-        .append(
-            keeper
-                .offer("k2", "session/b", "session/a", "压测报告", 0)
-                .with_ts(5_000),
-        )
-        .unwrap();
-    store
-        .append(
-            keeper
-                .breach("k2", "session/b", "上游数据没到", 0)
-                .with_ts(6_000),
-        )
-        .unwrap();
-
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let after_as_of = reputation(COMMITMENT)
-        .apply(&snapshot, 2_000, Budget::generous())
-        .value;
-    assert_eq!(before, after_as_of, "as-of=T 的声誉不受其后追加污染");
-    let now = reputation(COMMITMENT)
-        .apply(&snapshot, 9_999, Budget::generous())
-        .value;
-    assert_eq!(now.of("session/b").score, 0, "违约计入后声誉下降");
 }
 
 /// 读侧翻译（`commitment_records`）：
@@ -865,80 +752,6 @@ use crate::actors::EliminationDecider;
 use crate::authz::PRINCIPAL_ARBITER;
 use crate::event::Entity as VEntity;
 use crate::governance::{GrantsChange, GrantsOverlay};
-
-/// DE-043 §6 断言 2 + 4（反向用例）：主体**自报**的声誉事件进不了投影。
-///
-/// 投影只认 `commitment` 实体的事件派生（`from` = 立约方），一条自称
-/// 「我声誉 99」的事件（无论落在哪个格子上）对 `reputation()` 的输出毫无影响——
-/// 「自己报个好分数免于淘汰」在构造上不成立，不是靠纪律拦住。
-#[test]
-fn self_reported_reputation_never_enters_the_projection() {
-    let store = EventStore::new();
-    // 真实事实：一次违约 ⇒ 净分 −1。
-    store
-        .append(
-            Event::pending(
-                "k1",
-                crate::test_fixtures::EVENT_COMMITMENT_OPENED,
-                Entity::Commitment,
-                Verb::Opened,
-                0,
-                "session/b",
-            )
-            .with_payload(serde_json::json!({ "id": "k1", "from": "session/b", "to": "session/a", "promise": "x" })),
-        )
-        .unwrap();
-    store
-        .append(
-            Event::pending(
-                "k1c",
-                crate::test_fixtures::EVENT_COMMITMENT_BROKEN,
-                Entity::Commitment,
-                Verb::Closed,
-                0,
-                "session/b",
-            )
-            .with_payload(serde_json::json!({ "id": "k1", "why": "没交" })),
-        )
-        .unwrap();
-    // 自报：换个格子、换个实体都没用——投影的输入闭集是 commitment 事件。
-    store
-        .append(
-            Event::pending(
-                "self1",
-                "reputation.reported",
-                Entity::Verdict,
-                Verb::Asserted,
-                0,
-                "session/b",
-            )
-            .with_payload(serde_json::json!({ "principal": "session/b", "score": 99 })),
-        )
-        .unwrap();
-    store
-        .append(
-            Event::pending(
-                "self2",
-                MEMORY_ENCODED,
-                Entity::Memory,
-                Verb::Opened,
-                0,
-                "session/b",
-            )
-            .with_payload(serde_json::json!({ "content": "我声誉 99", "tag": "声誉" })),
-        )
-        .unwrap();
-
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let view = reputation(COMMITMENT)
-        .apply(&snapshot, 9_999, Budget::generous())
-        .value;
-    assert_eq!(
-        view.of("session/b").score,
-        -1,
-        "只认派生：自报的 99 分一丝不进投影（断言 2/4）"
-    );
-}
 
 /// 仲裁者行（exit ① 的表半边）：`spec` 五字段全部**取实**——
 /// principal / capabilities 同源于授权表窄行，pattern 按 `for_principal` 派生。

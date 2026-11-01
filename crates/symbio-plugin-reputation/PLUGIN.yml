@@ -1,0 +1,11 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: reputation
+plugin_comment: 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰回路与出口共用的那一个口径）
+# 读数能力包：没有工具、没有路由、没有行为——只交一条视图。实例仍然要有（与 `cost` 同一
+# 条理由）：装配清单按插件目录挂载，停用插件 ⇒ 实例不构造 ⇒ 这条视图从插件树里消失。
+plugin_assembly: sub_agent
+plugin_order: 61
+# 它**不产事实**：`commitment.*` 四格的 owner 是 `loop`（格位由它交），写方是效果通路与
+# `agent` 的立约效果。本包只折别人的格，所以这里没有 `shared_events`。
+# 对外可读的视图（scripts/facts/views-rs.mjs 读取 → crates/symbio-plugin-api/src/view_names.rs）。
+shared_views: reputation.ledger

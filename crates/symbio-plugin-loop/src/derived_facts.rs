@@ -41,11 +41,25 @@
 //! 记忆侧另有顺序（编码[经验 + 判断] → 检索锚 → 巩固），见 [`record_learning`]
 //! 的文档——巩固要用**刷新后**的快照，它得看得见编码刚写下的那些。
 
-use crate::control_decl::{COMMITMENT_VOCAB, VERDICT};
+use crate::control_decl::VERDICT;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::effects::EffectInput;
 use symbio_sdk::actors::actor_can_assert_verification;
+
+/// 声誉台账的**声明视图名**（owner = 声誉能力包，名册 #22/#28）。
+///
+/// 淘汰回路按名字读，不抄口径：折叠住在 owner 那一侧，与出口 `session/stats` 的声誉列
+/// 读的是**同一条算式**（D-044：判据与读数同源，两处各折一遍迟早一个是负的、一个是守约）。
+pub(crate) const REPUTATION_LEDGER_VIEW: &str = "reputation.ledger";
+
+/// 日志通道名（`plugin_*!` 宏的 `plugin` 字段），口径同 `memory_events.rs` 与
+/// `tools/tool_executor/breaker.rs` 里各自的那条 `LOG_CHANNEL`。
+///
+/// **这是运维侧的过滤键，不是本插件的 `PLUGIN.yml` id**（那是 `loop`）：本模块落的
+/// 事实都挂在会话的墙上，日志一直归会话通道。写成常量而不是散落的字面量，是为了
+/// 让「读一张搬走的能力台账」这类改动在控制面**只删名字、不加名字**。
+const LOG_CHANNEL: &str = symbio_deploy::PLUGIN_ID_SESSION;
 
 /// 收束派生事实中的**效果 / 熔断**半边（DE-038 §3）。
 ///
@@ -128,7 +142,7 @@ pub(crate) fn record_derived(
             match store.append(event.clone()) {
                 Ok(_) => applied.push(event),
                 Err(e) => symbio_plugin_api::plugin_warn!(
-                    "session",
+                    LOG_CHANNEL,
                     "[v2] 效果入格失败（会话 {session_id}，事件 {event_id}）：{e:?}"
                 ),
             }
@@ -142,15 +156,16 @@ pub(crate) fn record_derived(
     if let Some(&reason) = breaks.first() {
         if let Err(e) = store.append(super::tools::CircuitBreaker.break_event(reason, user_seq)) {
             symbio_plugin_api::plugin_warn!(
-                "session",
+                LOG_CHANNEL,
                 "[v2] 熔断事件入格失败（会话 {session_id}）：{e:?}"
             );
         }
     }
 }
 
-/// 收束派生事实中的**淘汰回路**半边（DE-043 §3）：轮末按**刷新后**的声誉投影
-/// 裁决「谁不再被授予 `assign.work`」，落成一条 `verdict.asserted`（可审计、可撤销
+/// 收束派生事实中的**淘汰回路**半边（DE-043 §3）：轮末读**刷新后**的声誉台账
+/// （声明视图 `reputation.ledger`，折叠归声誉能力包，名册 #22/#28）裁决
+/// 「谁不再被授予 `assign.work`」，落成一条 `verdict.asserted`（可审计、可撤销
 /// 的 grants 变更事件，`governance::GrantsOverlay` 的读侧半边）。
 ///
 /// ## 为什么在轮末、为什么用刷新后的快照
@@ -187,9 +202,31 @@ pub(crate) fn record_derived(
 pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, user_seq: u64) {
     // 刷新后的快照：看得见 `record_derived` 同轮写下的承诺（见函数文档）。
     let snapshot = store.range(Seq::new(0));
-    let view = symbio_sdk::projection::reputation::reputation(COMMITMENT_VOCAB)
-        .read_all(&snapshot)
-        .value;
+    // 声誉台账按名字读（名册 #22/#28：折叠住在声誉能力包，与出口 `stats.reputation`
+    // 是同一条算式）。读不出来 ⇒ **本轮不淘汰**并出声：淘汰是收回权威的动作，它必须
+    // 建立在一份读得到的账上——缺席时的默认值是「不动 grants」，与熔断闸门「按零账
+    // 继续」同向（那里读不到账就放行，这里读不到账就收手）。
+    let ledger = match symbio_plugin_api::read_shared_view_all(REPUTATION_LEDGER_VIEW, &snapshot) {
+        Ok(value) => value,
+        Err(why) => {
+            symbio_plugin_api::plugin_warn!(
+                LOG_CHANNEL,
+                "[v2] 声誉台账 `{REPUTATION_LEDGER_VIEW}` 读不到（{why}）：本轮不淘汰（turn={turn}）"
+            );
+            return;
+        }
+    };
+    let Some(rows) = ledger
+        .get("by_principal")
+        .and_then(serde_json::Value::as_object)
+    else {
+        // 形状读不出 = 版本对不上，那是装配问题：出声，不拿一份读不懂的账去裁决。
+        symbio_plugin_api::plugin_warn!(
+            LOG_CHANNEL,
+            "[v2] 声誉台账 `{REPUTATION_LEDGER_VIEW}` 的读数没有 `by_principal` 这张表：本轮不淘汰（turn={turn}）"
+        );
+        return;
+    };
     // 覆盖层：判「有没有既有淘汰」——不复述载荷 ↔ 变更的映射（它在 core 的
     // `EliminationDecider::verdict_grants_changes`，单点定义）。
     let overlay = symbio_sdk::governance::GrantsOverlay::fold(
@@ -202,38 +239,47 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
     let spec = decider.spec();
     if !actor_can_assert_verification(&spec) {
         symbio_plugin_api::plugin_warn!(
-            "session",
+            LOG_CHANNEL,
             "[v2] 仲裁者缺 assert.verification，本轮淘汰判定不落格（turn={turn}）"
         );
         return;
     }
     let matrix = symbio_sdk::authz::production_matrix();
-    for (principal, entry) in &view.by_principal {
+    for (principal, entry) in rows {
+        // 分数读不出 = 那一行不合形状（与 owner 的版本对不上）：出声并跳过它，
+        // 不动这个主体的 grants。「没有这一行」与「有一行读不懂」在日志里分得开。
+        let Some(score) = entry.get("score").and_then(serde_json::Value::as_i64) else {
+            symbio_plugin_api::plugin_warn!(
+                LOG_CHANNEL,
+                "[v2] 声誉台账 `{REPUTATION_LEDGER_VIEW}` 里主体 {principal} 那行读不出 `score`：不淘汰它（turn={turn}）"
+            );
+            continue;
+        };
         // 条件 2：持 assign.work 的**部署**主体（淘汰面只认部署表：绑定登记
         // （[D-100]）是运行期身份事实，不构成「部署授予过 assign.work」——
         // 未部署的 `agent:<id>` 不在表里 ⇒ 不淘汰，边界同函数文档）。
         if !matrix.deployed_can_write_name(principal, symbio_sdk::authz::CAP_ASSIGN_WORK) {
             continue;
         }
-        if !decider.should_eliminate(entry.score) {
+        if !decider.should_eliminate(score) {
             continue;
         }
         // 条件 3：已有生效撤销 ⇒ 不重复落格（审计面不缺、幂等键不撞）。
         if overlay.is_revoked(principal, symbio_sdk::authz::CAP_ASSIGN_WORK) {
             continue;
         }
-        let ev = decider.elimination_event(VERDICT, principal, entry.score, user_seq);
+        let ev = decider.elimination_event(VERDICT, principal, score, user_seq);
         if let Err(e) = store.append(ev) {
             symbio_plugin_api::plugin_warn!(
-                "session",
+                LOG_CHANNEL,
                 "[v2] 淘汰裁决入格失败（turn={turn}，subject={principal}）：{e:?}"
             );
         } else {
             symbio_plugin_api::plugin_info!(
-                "session",
+                LOG_CHANNEL,
                 "[v2] 落格 {}：主体 {principal} 收回 assign.work（声誉分 {} 低于阈值 {}）",
                 crate::control_decl::EVENT_VERDICT_ASSERTED,
-                entry.score,
+                score,
                 symbio_sdk::actors::EliminationDecider::THRESHOLD,
             );
         }
@@ -279,7 +325,7 @@ pub(crate) fn record_learning(
 ) {
     let remember = |step: &str, why: String| {
         symbio_plugin_api::plugin_warn!(
-            "session",
+            LOG_CHANNEL,
             "[memory] {step} 失败（会话 {session_id}）：{why}"
         );
     };

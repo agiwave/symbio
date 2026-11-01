@@ -1355,11 +1355,22 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 声誉列（的读侧）：
-/// `own` 取**本会话主体**，`by_principal` 把这份事实源里的主体原样摊开（`own` 在其中，
-/// 不另造口径）；判据只有一处——core 的 `reputation` 投影，本处只取数 + 排版。
+/// 声誉列的**读侧契约**：折叠归声誉能力包（名册 #22/#28，`D-221` 按名字读），本插件只
+/// 保证读不出来时交**文档写的空形状**并出声，且 `own` 恒有一行可读。
+///
+/// 这里刻意不复算、不跟反向：本测试二进制不链接 `crates/symbio-plugin-reputation`（E-009）⇒
+/// `reputation.ledger` 不在冻结表里 ⇒ 账只能是 `{ by_principal: {} }`。在这里补一份替身 owner
+/// 只会让两条真判据变成假绿——**数字**归 owner 的单测
+/// （`crates/symbio-plugin-reputation/src/decl.rs::tests`：账记在立约方、配对靠 `id`、
+/// 自报不进账、as-of、同切片同账），**生产二进制里读得到真数**归 e2e
+/// （`t30-multi-principal.mjs` / `t42-full-derives-commitment-task.mjs` 钉 `own` 的
+/// `offered` / `kept`，`t71-peer-commitment.mjs` 钉对等主体的条目，`t74-elimination-loop.mjs`
+/// 钉同一张账喂给淘汰回路）。
+///
+/// 本插件只钉自己那一半：`own` 的**主体**是目标会话的（不是请求方的），没立过约时那是一行
+/// 零而不是缺席；读侧闸关掉时**整列为空对象**——零值等于替一个你看不见的主体报数。
 #[test]
-fn reputation_column_reports_own_and_by_principal() {
+fn reputation_column_degrades_but_still_names_its_principal() {
     let wal = seed("rep");
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     let store = EventWalStore::open(&wal).unwrap();
@@ -1372,6 +1383,7 @@ fn reputation_column_reports_own_and_by_principal() {
         .map(|s| s.value())
         .expect("已入格");
     // 一次守约的代际立约（写方 `derived_facts::record_derived` 落的就是这三格）。
+    // 格子照写：本插件不认识它们，带着它们才试得出「不认识」是不是真的。
     for e in symbio_sdk::actors::commitment_events(
         COMMITMENT_VOCAB,
         "c-rep",
@@ -1389,18 +1401,19 @@ fn reputation_column_reports_own_and_by_principal() {
         got.reputation["own"],
         serde_json::json!({
             "principal": symbio_sdk::authz::PRINCIPAL_MAIN,
-            "offered": 1,
-            "kept": 1,
+            "offered": 0,
+            "kept": 0,
             "broken": 0,
-            "score": 1,
+            "score": 0,
         }),
-        "own = 本会话主体的条目；score = 平凡打分（守约 − 违约）"
+        "owner 不在 ⇒ 折不出账，但 `own` 仍指得对本会话主体（缺席的账不是缺席的格）"
     );
     assert_eq!(
-        got.reputation["by_principal"][symbio_sdk::authz::PRINCIPAL_MAIN],
-        got.reputation["own"],
-        "own 就在 by_principal 里——同一张表的两个视角，不是两套数"
+        got.reputation["by_principal"],
+        serde_json::json!({}),
+        "台账本体交文档写的空形状：列读得出，只是这一格今天没有算式（缺席的原因在 capability_views 列里）"
     );
+    assert!(got.has_wal, "事实源在，账算不出来不改变这件事");
     assert!(
         got.invariants.as_array().is_some_and(|l| l.is_empty()),
         "承诺四格不新增违规：{:?}",

@@ -41,6 +41,7 @@ symbio-plugin-model = { path = "../symbio-plugin-model" }
 symbio-plugin-notes = { path = "../symbio-plugin-notes" }
 symbio-plugin-persona = { path = "../symbio-plugin-persona" }
 symbio-plugin-plugin_manager = { path = "../symbio-plugin-plugin_manager" }
+symbio-plugin-reputation = { path = "../symbio-plugin-reputation" }
 symbio-plugin-session = { path = "../symbio-plugin-session" }
 symbio-plugin-setting = { path = "../symbio-plugin-setting" }
 symbio-plugin-skill = { path = "../symbio-plugin-skill" }

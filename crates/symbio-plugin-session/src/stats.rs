@@ -44,7 +44,7 @@
 //! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{
-    CHAT_VOCAB, COMMITMENT_VOCAB, CONATION_INTENTS_VIEW, COST_LEDGER_VIEW, MESSAGE_VOCAB,
+    CHAT_VOCAB, CONATION_INTENTS_VIEW, COST_LEDGER_VIEW, MESSAGE_VOCAB, REPUTATION_LEDGER_VIEW,
     SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
 };
 use std::sync::Arc;
@@ -141,6 +141,36 @@ fn empty_ledger() -> serde_json::Value {
 /// 由 `capability_views` 那一列的可诊断缺席承担（与 [`empty_ledger`] 同一条分工）。
 fn empty_calibration() -> serde_json::Value {
     serde_json::json!({ "by_skill": {} })
+}
+
+/// 声誉台账的**空形状**：`{ by_principal: {} }`（与 owner 交的形状同键）。
+///
+/// 与 [`empty_ledger`] 同一条纪律：读方不替 owner 猜形状。
+fn empty_reputation() -> serde_json::Value {
+    serde_json::json!({ "by_principal": {} })
+}
+
+/// 声誉列的**排版**：把台账里本会话主体那一行单独提出来，另附整本账。
+///
+/// 本函数不加总、不打分——「守约 − 违约」的算式住在声誉能力包那一侧（`D-221`），
+/// 这里只做两件事：按名字取一行，以及没立过约时补一行零。那一行零不是重算，是让
+/// 出口恒有一格 `own` 可读（t75 判的正是它的 `principal` 必须是**目标会话**的主体，
+/// 不是请求方的——跨会话查数时两者不同）。
+fn reputation_reading(ledger: serde_json::Value, principal: &str) -> serde_json::Value {
+    let rows = ledger
+        .get("by_principal")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let own = rows.get(principal).cloned().unwrap_or_else(|| {
+        serde_json::json!({
+            "principal": principal,
+            "offered": 0,
+            "kept": 0,
+            "broken": 0,
+            "score": 0,
+        })
+    });
+    serde_json::json!({ "own": own, "by_principal": rows })
 }
 
 /// 一条视图交的档位名。形状归 owner（`D-281`），本处只做**查表**。
@@ -554,14 +584,15 @@ pub(crate) fn read(
     let invariants = serde_json::to_value(check_all(vocab, &snapshot))
         .map_err(|e| PluginError::InternalError(format!("不变量清单序列化失败：{e}")))?;
 
-    // 声誉列：与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生）。
+    // 声誉列：折叠归声誉能力包（名册 #22/#28，`D-221` 按名字读），本插件只取数 + 排版。
+    // 与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生），也与 `loop` 的淘汰
+    // 回路读的是**同一条算式**（D-044：两处各折一遍，迟早一个是负的、一个是守约）。
     // 没有权限时不给零值条目——给零值等于替一个你本来看不到的主体报数。
-    let rep = symbio_sdk::projection::reputation::reputation(COMMITMENT_VOCAB)
-        .read_all(&snapshot)
-        .value;
     let reputation = if may_read {
-        let own = rep.of(session_principal);
-        serde_json::json!({ "own": own, "by_principal": rep.by_principal })
+        reputation_reading(
+            read_view_or(REPUTATION_LEDGER_VIEW, &snapshot, empty_reputation),
+            session_principal,
+        )
     } else {
         serde_json::json!({})
     };

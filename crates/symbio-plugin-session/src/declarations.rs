@@ -45,6 +45,14 @@ pub(crate) const COST_LEDGER_VIEW: &str = "cost.ledger";
 /// `confidence = 1 − 回退率` 的算式也不在本插件重算一遍。
 pub(crate) const SKILL_CALIBRATION_VIEW: &str = "skill.calibration";
 
+/// 声誉台账列的名字：账由声誉能力包 `crates/symbio-plugin-reputation` 折（承诺三格的
+/// 读法住在那一侧），本插件按名字读。
+///
+/// 与上面几条同一条纪律：拼写只有一个来源（owner 的 `PLUGIN.yml` `shared_views`），
+/// 「守约 − 违约」的算式也不在本插件重算一遍。它同时也是 `loop` 那侧淘汰回路读的名字
+/// ——两个读者一个 owner（D-044）。
+pub(crate) const REPUTATION_LEDGER_VIEW: &str = "reputation.ledger";
+
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 
 pub(crate) const EVENTS: &[EventDecl] = &[
@@ -90,8 +98,8 @@ pub(crate) const TASK_VOCAB: symbio_sdk::projection::task_vocab::TaskVocab<'stat
 ///
 /// ## 为什么是三张而不是一张
 ///
-/// 按**面**切开，每张表的大小就是那个折叠算法真正的依赖：`reputation` 只认承诺四条，
-/// `changes` 只认产物一条。交一张 20 字段的合并表会把耦合面说宽（DE-024 D-206）。
+/// 按**面**切开，每张表的大小就是那个折叠算法真正的依赖：`commitment_records` 只认承诺
+/// 四条，`changes` 只认产物一条。交一张 20 字段的合并表会把耦合面说宽（DE-024 D-206）。
 pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
     symbio_sdk::projection::vocab::ChatVocab {
         user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
@@ -118,7 +126,8 @@ pub(crate) const MESSAGE_VOCAB: symbio_sdk::projection::vocab::MessageVocab =
         consolidated: symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
     };
 
-/// 承诺面（4 条）：`reputation` 与 `commitment_events` 是它仅有的两个消费方。
+/// 承诺面（4 条）：本插件只剩 `commitment_records`（承诺列）一个消费方——声誉列改按
+/// 名字读台账后，那条折叠搬进了声誉能力包，它的词汇面也跟着走（`D-288`）。
 pub(crate) const COMMITMENT_VOCAB: symbio_sdk::projection::vocab::CommitmentVocab =
     symbio_sdk::projection::vocab::CommitmentVocab {
         opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,

@@ -26,7 +26,18 @@ use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_sdk::invariants::check_all;
 
-use crate::control_decl::{COMMITMENT_VOCAB, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
+use crate::control_decl::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
+
+/// 承诺面四条拼写的**夹具**：本文件只造承诺格（写侧的形状由 `commitment_events` 定），
+/// 不折它们。折叠与它的词汇面一起搬进了声誉能力包（`D-288`）——控制面留一份没人折的
+/// 词汇表，读的人会以为淘汰回路的账是在这里折的，而它住在
+/// `crates/symbio-plugin-reputation/src/decl.rs`。
+const COMMITMENT_VOCAB: symbio_plugin_api::CommitmentVocab = symbio_plugin_api::CommitmentVocab {
+    opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
+    released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
+    broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,
+    asserted: symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED,
+};
 
 /// 播下「本轮开口 + 收束」两格，返回 `(snapshot, user_seq)`。
 ///

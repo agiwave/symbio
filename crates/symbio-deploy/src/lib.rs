@@ -66,6 +66,9 @@ pub const PLUGIN_ID_PERSONA: &str = "persona";
 /// 插件管理与配置入口
 pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 
+/// 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰回路与出口共用的那一个口径）
+pub const PLUGIN_ID_REPUTATION: &str = "reputation";
+
 /// 会话
 pub const PLUGIN_ID_SESSION: &str = "session";
 
@@ -105,6 +108,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "slo", // 时延分层：按派发档折叠时延 / 兜底 / 跨度三列（单片读数 + 跨会话合并）
     "cost", // 成本台账：把事件自带的实测耗时按主体折成一本书（熔断与出口共用的那一个口径）
     "classify", // 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
+    "reputation", // 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰回路与出口共用的那一个口径）
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "local", // 本地文件
