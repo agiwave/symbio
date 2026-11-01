@@ -142,6 +142,36 @@ pub struct ViewDecl {
     pub agg: Option<fn(&[serde_json::Value]) -> serde_json::Value>,
 }
 
+/// 视图读了一条**只有事件格位、没有事实声明**的断言格（DE-024 D-282）。
+///
+/// ## 为什么这是报告而不是缺口
+///
+/// 判据 3「字段都在声明里」的输入是 [`FactDecl::fields`]。一条事实若只有
+/// [`EventDecl`]（名字与格位）而没有 `FactDecl`（载荷形状），这条判据**没有输入**——
+/// 它既不能说「字段错了」，也不能说「字段对了」。原来的处理是判
+/// [`Gap::UnknownFact`]，把两种完全不同的情况混成一个红：
+///
+/// - 名字根本不存在（真拼错）⇒ 必须红；
+/// - 名字存在、格位也登记了，只是没有声明表 ⇒ 读法合法，只是**无从校验字段**。
+///
+/// 后者是审计 / 读数视图的常态：`turn.dispatch` 的 `tier` 就是现例——它没有义务环
+/// 归宿（不该有），却必须能被 SLO 三列按名字读。判红会把读数能力永久钉在控制面。
+///
+/// ## 为什么不静默跳过
+///
+/// 「无从校验」是一个可诊断的空白，不是一个可以忘掉的事实：名单随表冻结一次，装载
+/// 入口把它打成人读的日志，用例可以钉住它。静默跳过等于让「字段声明缺席」变成不可
+/// 观测——下次真拼错一个字段时，没有任何东西会变红。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssertionRead {
+    /// 读它的视图名。
+    pub view: &'static str,
+    /// 被读的事实名（有 `EventDecl`，没有 `FactDecl`）。
+    pub fact: &'static str,
+    /// 被读的字段名（无声明可校验）。
+    pub field: &'static str,
+}
+
 /// 一个**执行体**的声明（DE-015 §2.3）。
 ///
 /// ## 为什么四个字段都不是装饰
@@ -408,9 +438,22 @@ impl Builder {
             }
         }
 
+        // 视图读了「只有事件格位、没有事实声明」的断言格：报告项，随表冻结一次
+        // （`D-282`）。它不是缺口——名字由 `EventDecl` 保证拼对，只是字段无从校验。
+        let mut assertion_reads: Vec<AssertionRead> = Vec::new();
         for v in &self.views {
             for &(fact, field) in v.reads {
                 match self.facts.iter().find(|f| f.name == fact) {
+                    // 名字在事件表上、只是没有事实声明 ⇒ **报告**，不是缺口（`D-282`）：
+                    // 判据 3 的输入（`FactDecl.fields`）缺席，不是它说「字段错了」。
+                    None if event_names.contains(fact) => {
+                        assertion_reads.push(AssertionRead {
+                            view: v.name,
+                            fact,
+                            field,
+                        })
+                    }
+                    // 名字连事件格位都没有 ⇒ 真拼错，照旧红。
                     None => gaps.push(Gap::UnknownFact { view: v.name, fact }),
                     Some(f) if !f.fields.contains(&field) => gaps.push(Gap::UndeclaredField {
                         view: v.name,
@@ -442,6 +485,8 @@ impl Builder {
             view_owners: self.view_owners,
             // 报告要到缺口清空才算得（第 4 条读的是**这张**表），检查阶段先留空。
             overlaps: Vec::new(),
+            // 这份名单在视图那一步就算完了，不依赖缺口清空。
+            assertion_reads,
         };
         // §3.4 的七道检查查的是**这张表**，所以它住在这里而不是插件里：行与端口
         // 已经进了注册口，再让调用方自己想起来跑一遍，就是「半张表继续跑」的入口。
@@ -469,6 +514,7 @@ impl Builder {
             fact_owners: frozen.fact_owners,
             view_owners: frozen.view_owners,
             overlaps,
+            assertion_reads: frozen.assertion_reads,
         }))
     }
 }
@@ -494,6 +540,9 @@ pub struct Frozen {
     /// §3.4 第 4 条的报告（可能同时命中的行对）。**不是缺口**——冻结成功才存在，
     /// 装载入口把它打成人读的日志，用例钉住名单。
     overlaps: Vec<Overlap>,
+    /// 视图读了「只有事件格位、没有事实声明」的断言格（`D-282`）。**不是缺口**，
+    /// 同一条通道：装载入口打日志，用例钉住名单。
+    assertion_reads: Vec<AssertionRead>,
 }
 
 impl Frozen {
@@ -553,6 +602,14 @@ impl Frozen {
 
     pub fn overlaps(&self) -> &[Overlap] {
         &self.overlaps
+    }
+
+    /// 视图读了「只有事件格位、没有事实声明」的断言格（`D-282`）。
+    ///
+    /// 报告项，不是缺口：名字由 [`EventDecl`] 保证拼对，字段却无 `FactDecl` 可校验。
+    /// 装载入口把它打成人读的日志；用例拿它钉住「哪几条读法今天没有声明可查」。
+    pub fn assertion_reads(&self) -> &[AssertionRead] {
+        &self.assertion_reads
     }
 
     pub fn fact(&self, name: &str) -> Option<&FactDecl> {

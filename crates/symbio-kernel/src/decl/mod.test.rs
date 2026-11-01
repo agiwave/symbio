@@ -301,6 +301,54 @@ fn view_cannot_read_an_undeclared_fact() {
     );
 }
 
+/// D-282：视图读一条**只有事件格位、没有事实声明**的断言格 ⇒ **报告**，不是缺口。
+///
+/// 判据 3 的输入是 `FactDecl.fields`，而这条事实没有 `FactDecl`——那意味着「无从校验」，
+/// 不是「字段错了」。原来的 `UnknownFact` 把两种完全不同的情况混成一个红：名字真拼错
+/// （必须红）与名字存在、只是没有声明表（读法合法）。后者是审计 / 读数视图的常态，
+/// 判红会把这类能力永久钉在控制面。
+///
+/// 同时钉住另一半：它进的是**名单**而不是「静默跳过」——名单随表冻结一次，装载入口
+/// 打日志、用例可查。静默跳过会让「字段声明缺席」变成不可观测，下次真拼错也没人发现。
+#[test]
+fn reading_a_cell_with_a_slot_but_no_fact_decl_is_reported_not_rejected() {
+    const CELL: &str = "probe.cell";
+    // `PluginDeclarations` 要 `'static` 切片：`EventDecl::new` 是函数调用，不能靠常量提升，
+    // 所以先落成常量。
+    const CELL_EVENTS: &[EventDecl] = &[EventDecl::new(CELL, (Entity::Turn, Verb::Asserted))];
+    let mut b = Builder::empty();
+    b.declare(
+        "probe-owner",
+        PluginDeclarations {
+            events: CELL_EVENTS,
+            // 关键：这条事实**没有** `FactDecl`。
+            facts: &[],
+            views: &[ViewDecl {
+                name: "probe.audit",
+                ver: 1,
+                reads: &[(CELL, "tier")],
+                evidence: &[],
+                cost: 1,
+                eval: probe,
+                agg: None,
+            }],
+            ports: &[],
+            actors: Vec::new(),
+            rows: &[],
+        },
+    );
+    let frozen = b.seal(&[]).expect("报告项不该把装载判红");
+    assert_eq!(
+        frozen.assertion_reads(),
+        &[AssertionRead {
+            view: "probe.audit",
+            fact: CELL,
+            field: "tier",
+        }],
+        "无声明可校验的读法必须进名单——静默跳过等于让这一格不可观测"
+    );
+}
+
 /// D-160：`evidence` 只能引用这个视图**读过**的事实——「它替谁关门」是「它读什么」的子集。
 ///
 /// 这条包含关系拦的是**静默**的那一半：`evidence` 里写一个没读过的名字，依赖图就少

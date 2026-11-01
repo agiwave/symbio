@@ -1387,6 +1387,22 @@ fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
     if !unmanned.is_empty() {
         return Err(unmanned);
     }
+    let assertion_reads = frozen.assertion_reads();
+    if !assertion_reads.is_empty() {
+        // 报告项，不是缺口（`D-282`）：这些读法**名字拼对了**（事件格位在表上），
+        // 只是那条事实没有 `FactDecl`，于是「字段都在声明里」这一条对它们没有输入。
+        // 打出来是为了让「无从校验」可观测——静默跳过会让它下次真拼错时也没人发现。
+        symbio_plugin_api::plugin_info!(
+            "session",
+            "[Loop] 视图读了 {} 处无事实声明的断言格（名字有格位、字段无声明可校验）：{}",
+            assertion_reads.len(),
+            assertion_reads
+                .iter()
+                .map(|a| format!("{}@{}::{}", a.view, a.fact, a.field))
+                .collect::<Vec<_>>()
+                .join(" / ")
+        );
+    }
     let overlapping = frozen.overlaps();
     if !overlapping.is_empty() {
         symbio_plugin_api::plugin_info!(
