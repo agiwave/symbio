@@ -90,7 +90,10 @@ impl std::fmt::Display for ViewUnavailable {
                 events
             ),
             Self::NotAggregable { name } => {
-                write!(f, "`{name}` 的 owner 没交「多片合并」，这一格不参与跨会话汇总")
+                write!(
+                    f,
+                    "`{name}` 的 owner 没交「多片合并」，这一格不参与跨会话汇总"
+                )
             }
         }
     }
