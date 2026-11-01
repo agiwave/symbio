@@ -128,6 +128,7 @@ export function lastUserOf(req) {
 export const FACTORY_TOOLS = Object.freeze([
   'agent_run',
   'ask_user',
+  'causal_assert',
   'codebase_search',
   'content_search',
   'todo_write',

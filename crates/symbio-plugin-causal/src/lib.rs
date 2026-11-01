@@ -1,0 +1,25 @@
+//! 因果结构插件 —— **因果结构 + 因果表征工具**（名册 #33 / #39，DE-026 §2.3）。
+//!
+//! 本 crate 是「新增能力不需要改架构」的第二次正向验证，与 `symbio-plugin-persona`
+//! 用**不同的**扩展面组合：
+//!
+//! | 面 | 用在哪 | 谁读 |
+//! |---|---|---|
+//! | 工具（`Capability`） | `causal_assert` | 模型（经工具面调用） |
+//! | 行为（`ToolBehavior`） | 一次成功断言 ⇒ 一条 `causal.link` 草稿 | 宿主唯一的写口（I-1） |
+//! | 事实（`EventDecl` / `FactDecl` / 归宿行） | `causal.link` 落在 `domain × asserted` | 写闸按声明校验名字与格位 |
+//! | 视图（`ViewDecl` + `shared_views`） | `causal.links` 折出邻接表与根因 | 任何按名字读的插件（D-221） |
+//!
+//! 没有新路由、没有配置、没有新端口——`kernel` / `sdk` / `loop` / `session` 一行都不动。
+//!
+//! ## 依赖面
+//!
+//! `[dependencies]` 只有 `symbio-plugin-api`（加 `serde_json` / `tokio` / `async-trait`
+//! 这些通用库），HS-001 判的 `kernel` / `sdk` / `deploy` 一个都不列。
+
+pub mod behavior;
+pub mod decl;
+pub mod plugin;
+pub mod tool;
+
+pub use plugin::{CausalPlugin, PLUGIN_TITLE};

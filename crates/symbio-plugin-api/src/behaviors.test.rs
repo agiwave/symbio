@@ -15,6 +15,7 @@ fn known_names_are_unique_and_snake_case() {
         names,
         [
             ASSIGN_WORK,
+            CAUSAL_LINK,
             DELEGATION_PROMISE,
             FILE_CHANGE,
             NOTE_CAPTURE,

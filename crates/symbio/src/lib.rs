@@ -29,6 +29,7 @@ pub use symbio_plugin_api::{hooks, routes};
 // >>> plugin-links:begin
 // 以下链接行由 `scripts/facts/plugin-links-rs.mjs` 从 `crates/symbio-plugin-<id>/` 目录投影，请勿手改；漏一行的后果是那个插件的 inventory 注册项被链接器丢掉（不报错，只少功能）。
 pub use symbio_plugin_agent;
+pub use symbio_plugin_causal;
 pub use symbio_plugin_classify;
 pub use symbio_plugin_compose;
 pub use symbio_plugin_composite;

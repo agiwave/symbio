@@ -65,6 +65,7 @@ const DEFAULT_BASELINE = [
   'agent_run',
   'ask_user',
   'codebase_search',
+  'causal_assert',
   'content_search',
   'heartbeat',
   'http_request',

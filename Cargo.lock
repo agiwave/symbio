@@ -4147,6 +4147,7 @@ dependencies = [
  "symbio-kernel",
  "symbio-plugin-agent",
  "symbio-plugin-api",
+ "symbio-plugin-causal",
  "symbio-plugin-classify",
  "symbio-plugin-compose",
  "symbio-plugin-composite",
@@ -4240,6 +4241,17 @@ dependencies = [
  "symbio-kernel",
  "symbio-sdk",
  "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "symbio-plugin-causal"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
  "tokio",
  "tracing",
 ]
