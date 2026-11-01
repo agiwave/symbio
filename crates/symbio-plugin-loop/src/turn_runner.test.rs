@@ -4275,12 +4275,28 @@ mod tool_round_tests {
         // 放行方：等适配器确实停在「已进入、还没等到」的那一刻才发信号。
         // 适配器在同一个 poll 里先置位、再去 poll 通道（中间不让出执行权），
         // 所以看到置位就等于**第一次 poll 已经返回过 `Pending`**。
+        //
+        // ## 这个等待必须有上界
+        //
+        // 置位只在「这一轮真的走到模型」时发生。若这一轮在那之前就退出（行表装载
+        // 失败、被某道守卫拒、幕根本没开），置位永远不会来——无界的忙等会让整条
+        // 用例**挂死**而不是变红。挂死的测试比红的测试坏得多：它不出结论，还占住
+        // 门禁的并发额度，现场只留下一句「has been running for over 60 seconds」。
+        // 所以这里给一个上界，超界就**不发送**、把结果交回外面断言——红要红在
+        // 断言上，红在「为什么这一轮没走到模型」上。
         let flag = parked.clone();
         let releaser = tokio::spawn(async move {
-            while !flag.load(std::sync::atomic::Ordering::SeqCst) {
-                tokio::task::yield_now().await;
+            let parked_in_time = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                while !flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .is_ok();
+            if parked_in_time {
+                let _ = open.send(());
             }
-            let _ = open.send(());
+            parked_in_time
         });
 
         let out = TurnRunner
@@ -4288,7 +4304,12 @@ mod tool_round_tests {
             .await
             .expect("停在路上不等于失败：放行之后这一轮照常答完");
 
-        releaser.await.expect("放行方跑完");
+        let parked_in_time = releaser.await.expect("放行方跑完");
+        assert!(
+            parked_in_time,
+            "适配器在 10s 内从未停住 ⇒ 这一轮没走到模型（多半是开幕就被拒了；本轮 fell_back = {}）",
+            out.fell_back
+        );
         assert!(
             parked.load(std::sync::atomic::Ordering::SeqCst),
             "适配器没停过 ⇒ 这条用例什么都没验（夹具退化成同步适配器）"
