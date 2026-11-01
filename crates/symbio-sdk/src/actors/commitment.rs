@@ -159,7 +159,8 @@ pub struct CommitmentRecord {
 /// - **认不出的了结 ⇒ 跳过**：载荷 `id` 找不到对应立约（切片被截断、或写方漏了
 ///   `opened`）时不猜「大概履行了吧」——与 `verdict_grants_changes` 同一条 fail-closed；
 /// - **按 `id` 字典序输出**（`BTreeMap` 折叠）：同一份事实源永远读出同一个清单，
-///   与 `reputation` / `readyset` 的确定性口径同族（N1 双跑一致）。
+///   与声誉台账（`reputation.ledger`，owner 在 `crates/symbio-plugin-reputation`）、
+///   `readyset` 的确定性口径同族（N1 双跑一致）。
 pub fn commitment_records(events: &[Event], v: &CommitmentVocab) -> Vec<CommitmentRecord> {
     let mut by_id: std::collections::BTreeMap<String, CommitmentRecord> =
         std::collections::BTreeMap::new();

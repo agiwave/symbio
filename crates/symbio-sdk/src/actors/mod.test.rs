@@ -142,7 +142,8 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
 //
 // principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/no-direct-call-audit.mjs，
 // 出口判据「直连调用 0」；成对性拒绝 = DE-038 §6 验收 3，已在 governance 测试区覆盖）。
-// commitment 立约 + 声誉投影（出口判据「声誉双跑一致」）。
+// commitment 立约成格与配对判在这里；声誉台账的读数与「双跑一致」随折叠归它的 owner 包
+// （`crates/symbio-plugin-reputation/src/decl.test.rs`，DE-045 D-288），本区只留淘汰裁决那一侧。
 
 /// DE-038 §6 验收 1 + 4：thread_private 互不可见；内容可见域放宽成 public 后，
 /// 同一主体、同一份事件切片立刻可见——证明「可见域是参数在生效」，不是投影写死。

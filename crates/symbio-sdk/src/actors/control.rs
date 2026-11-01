@@ -38,8 +38,9 @@ use symbio_kernel::event::{Entity, Event, Verb};
 ///
 /// ## 判据的输入是投影不是自报
 ///
-/// `score` 来自 `reputation` 投影（从 `commitment.*` 事件派生），主体**自报**的
-/// 声誉事件进不了投影（断言 2：只认派生）——于是「自己报个好分数免于淘汰」
+/// `score` 来自声誉台账（声明视图 `reputation.ledger`，由声誉能力包从 `commitment.*`
+/// 三条名字折出，`crates/symbio-plugin-reputation/src/decl.rs`）；主体**自报**的那一格
+/// （`commitment.asserted`）不在账的输入闭集里（断言 2：只认派生）——于是「自己报个好分数免于淘汰」
 /// 在构造上不成立，不是靠纪律拦住。
 ///
 /// ## 结构性的诚实缺口：自动恢复不可能

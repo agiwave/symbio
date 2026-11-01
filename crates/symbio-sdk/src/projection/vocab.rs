@@ -3,7 +3,7 @@
 //! ## 它替掉了什么
 //!
 //! core 的折叠（`rebuild` / `transcript` / `prompt_fidelity` / `branch` / `mutations` /
-//! `reputation` / `turns` / `turnstate` /
+//! `turns` / `turnstate` /
 //! `actors::commitment` / `actors::control`）此前**按名字**认事件：`e.kind ==
 //! EVENT_ASSISTANT_FINAL`。名字住内核 ⇒「加一条对话面事件」= 改内核两张表 + 一条
 //! `core-shape-allow`，那正是 DE-024 要拆掉的那条边。
@@ -15,15 +15,15 @@
 //!
 //! ## 为什么是三张表，不是一张
 //!
-//! 一张表交整面最省事，但它会让 `reputation`（只认承诺四条）也收到「开场白叫什么」。
-//! 耦合面比算法实际需要的宽，读代码的人会以为声誉折叠与发言格有关——那不是真的。
+//! 一张表交整面最省事，但它会让 `actors::commitment`（只认承诺四条）也收到「开场白叫什么」。
+//! 耦合面比算法实际需要的宽，读代码的人会以为承诺折叠与发言格有关——那不是真的。
 //! 按**面**切开之后，每张表的大小就是那个算法真正的依赖：
 //!
 //! | 表 | 字段 | 消费方 |
 //! |---|---|---|
 //! | [`ChatVocab`] | 11：开轮 / 派发 / 补充 / 分支两支 / 汇报 / 开场 / 定稿 / 兜底 / 进展 / 被拒 | `turns` `turnstate` `branch` `rebuild` `transcript` `prompt_fidelity` |
 //! | [`MessageVocab`] | 5：产物 / 增 / 改 / 删 / 巩固 | `mutations` `rebuild` `transcript` `prompt_fidelity` |
-//! | [`CommitmentVocab`] | 4：立约 / 履约 / 违约 / 断言 | `reputation` `actors::commitment` |
+//! | [`CommitmentVocab`] | 4：立约 / 履约 / 违约 / 断言 | `actors::commitment` |
 //!
 //! 三个折叠（`rebuild` / `transcript` / `prompt_fidelity`）确实要两张表——它们折的
 //! 就是「对话 + 消息」这一整片，两个形参比一张 16 字段的合并表更诚实。
