@@ -401,3 +401,64 @@ symbio_plugin_api::submit_declarations!(
     "crates/symbio-plugin-loop-test-harness-memory",
     memory_capability_fixture
 );
+
+// ==================== 能力包替身：`cost.ledger`（名册 #18）====================
+//
+// 熔断的 `spent_ms` 读的是**成本能力包交的声明视图**（折叠只有一份，住在 owner 那一侧）。
+// 与上面的记忆替身同一条理由：本插件的单测二进制不链接那个包（`E-009`），于是
+// `read_shared_view_all("cost.ledger")` 会返回 `Unknown`，「值里的账必须被读出来」那条
+// 判据（DE-039 §6.4 的反向用例）整条不可达。
+//
+// 替身只保证**形状对、读数对得上**，让闸门的读路径可跑；折叠本身的数字由能力包自己的
+// 用例钉（`crates/symbio-plugin-cost/src/decl.test.rs`），两处若漂移 e2e 会红。
+
+/// 替身视图的求值：按主体累计信封 `cost_ms`（as-of 之后不算、`cost_ms == 0` 不进账）。
+fn cost_ledger_fixture(events: &[Event], now: i64) -> Value {
+    let mut rows: std::collections::BTreeMap<String, (u64, u64)> =
+        std::collections::BTreeMap::new();
+    let mut total_ms = 0u64;
+    for e in events {
+        if e.ts > now || e.cost_ms == 0 {
+            continue;
+        }
+        let row = rows.entry(e.actor.clone()).or_default();
+        row.0 += e.cost_ms;
+        row.1 += 1;
+        total_ms += e.cost_ms;
+    }
+    let by_principal: serde_json::Map<String, Value> = rows
+        .into_iter()
+        .map(|(principal, (spent_ms, entries))| {
+            (
+                principal.clone(),
+                json!({ "principal": principal, "spent_ms": spent_ms, "entries": entries }),
+            )
+        })
+        .collect();
+    json!({ "by_principal": Value::Object(by_principal), "total_ms": total_ms })
+}
+
+fn cost_capability_fixture() -> symbio_plugin_api::PluginDeclarations<'static> {
+    const VIEWS: &[symbio_plugin_api::ViewDecl] = &[symbio_plugin_api::ViewDecl {
+        name: "cost.ledger",
+        ver: 1,
+        reads: &[],
+        evidence: &[],
+        cost: 4096,
+        eval: cost_ledger_fixture,
+        agg: None,
+    }];
+    symbio_plugin_api::PluginDeclarations {
+        events: &[],
+        facts: &[],
+        views: VIEWS,
+        ports: &[],
+        actors: Vec::new(),
+        rows: &[],
+    }
+}
+
+symbio_plugin_api::submit_declarations!(
+    "crates/symbio-plugin-loop-test-harness-cost",
+    cost_capability_fixture
+);

@@ -1140,7 +1140,7 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
 
-    // 台账：一条已耗超过会话累计上限的收束事件（`cost_ledger` 按 actor 归账，
+    // 台账：一条已耗超过会话累计上限的收束事件（`cost.ledger` 按 actor 归账，
     // D-044：闸门读台账，不读运行时计数器）。事实轨以**值**交给执行层
     // （D-084 §1-A）——夹具直接造这份切片，不摆存储目录。
     let sid = "gate-sess";

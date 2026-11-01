@@ -343,7 +343,7 @@ function auditRosterAnchors () {
  * D-014：`projection` 取值的**两套名字**必须对得上。
  *
  * 同一层存在两套名字：§8 的取值是**事件里能写的视图名**，`projection/*.rs` 是**实现文件**。
- * 二者不是一一对应（`budget` → `cost.rs`、`replay` → `rebuild.rs`），对应关系此前只写在
+ * 二者不是一一对应（`budget` → 成本能力包的 `ledger`、`replay` → `rebuild.rs`），对应关系此前只写在
  * 各自文件头的散文注释里：读得到、机器读不到，所以没人能证明它没漂。
  *
  * 三方对账（任一侧单独改都会红）：

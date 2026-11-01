@@ -1,0 +1,30 @@
+//! 成本台账能力包 —— **按主体折叠的实测耗时**（名册 #18，DE-039 §3 的 `projection = budget`）。
+//!
+//! | 面 | 用在哪 | 谁读 |
+//! |---|---|---|
+//! | 视图（`ViewDecl` + `shared_views`） | `cost.ledger`：各主体的 `spent_ms` / `entries` 与全局 `total_ms` | `loop` 的外部执行熔断（「已耗多少」的唯一真源）、`session` 的成本列 |
+//!
+//! 一条折叠、两个读者——搬出 `sdk` 之后，两处读的是**同一条算式**：闸门与出口各自算一遍
+//! 迟早漂移成「闸门说还有余量、出口说已耗尽」（D-044），而错的若是台账，熔断就形同虚设。
+//!
+//! 它**不产事实**：`cost_ms` 是收束事件信封上的字段，写方在适配器边界（`sdk::adapters`）。
+//! 所以 `PLUGIN.yml` 里没有 `shared_events`，`reads` 也是空表——只读信封，不读载荷。
+//!
+//! 没有工具、没有路由、没有行为、没有新端口——`kernel` / `sdk` / `loop` / `session` 一行
+//! 都不动，两处读者只是把「类型读 core 的折叠」换成「按名字读 owner 的折叠」（`D-221`）。
+//!
+//! ## 为什么它有 `Plugin` 实现却没有工具与路由
+//!
+//! 扩展面都走链接期收集，实例不参与任何判断；实例存在只为**挂载**——装配清单按插件目录
+//! 挂载，停用插件 ⇒ 实例不构造。`route` 恒 `NotFound`、`traverse` 恒空数组，两者都不是
+//! 占位符而是答案（与 `symbio-plugin-task` 同一形状、同一理由）。
+//!
+//! ## 依赖面
+//!
+//! `[dependencies]` 只有 `symbio-plugin-api` 与 `serde_json`。`kernel` / `sdk` / `deploy`
+//! 一个都不列，也不认识任何兄弟插件（`E-009`）。
+
+pub mod decl;
+pub mod plugin;
+
+pub use plugin::{CostPlugin, PLUGIN_TITLE};

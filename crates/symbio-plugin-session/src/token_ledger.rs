@@ -7,9 +7,9 @@
 //! 内核只提供 [`Projection`] 这个构造器（机制），一本账的口径归读它的插件。
 //! 与 [`super::spend_ledger`] 同一次裁决：单消费方、无协议语义 ⇒ 下沉。
 //!
-//! ## 为什么与 `cost_ledger` 分开
+//! ## 为什么与成本台账分开
 //!
-//! `cost_ledger` 读的是**事件的 `cost_ms`**（adapter 边界的耗时，按 `actor` 归组），
+//! 成本台账（能力包交的 `cost.ledger` 视图）读的是**事件的 `cost_ms`**（adapter 边界的耗时，按 `actor` 归组），
 //! 它回答「这一轮花了多久」。本投影读的是**载荷里的 `usage`**（provider 实测的
 //! token，按内容的 `principal` 归组），回答「这一次往返用了多少 token」。
 //!

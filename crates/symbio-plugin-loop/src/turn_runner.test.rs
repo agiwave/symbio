@@ -280,7 +280,6 @@ mod turn_runner_tests {
     };
     use symbio_sdk::adapters::{SilentDeltas, TokenIssuer};
     use symbio_sdk::invariants::check_all;
-    use symbio_sdk::projection::cost::cost_ledger;
     use symbio_sdk::projection::transcript::transcript;
     use symbio_testkit::{trivial_actor_spec, StubLlmAdapter};
 
@@ -310,9 +309,18 @@ mod turn_runner_tests {
             check_all(guard_vocab(), &snapshot)
         );
 
-        // 成本台账：实测值入账（agent:main 一笔）。
-        let ledger = cost_ledger().apply(&snapshot, i64::MAX, Budget::generous());
-        assert_eq!(ledger.value.of("session/main").spent_ms, out.cost_ms);
+        // 台账的原料在**信封**上：final 格的 `cost_ms` / `actor` 就是折叠读的两列
+        // （数字归 owner 的用例，这里钉写侧交出它们——D-044「实测与判据同源」）。
+        let finals: Vec<&Event> = snapshot
+            .iter()
+            .filter(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
+            .collect();
+        assert_eq!(finals.len(), 1, "一轮一条 final");
+        assert_eq!(
+            finals[0].cost_ms, out.cost_ms,
+            "运行器报的实测值如实落进信封"
+        );
+        assert_eq!(finals[0].actor, "session/main", "归账的主体 = 事件写出方");
 
         // 兜底格：成功轮不落兜底（兜底率是 session 的读数，本处只钉驱动器产出）。
         assert_eq!(
@@ -412,7 +420,10 @@ mod turn_runner_tests {
         );
         assert_eq!(snapshot.len(), 28);
 
-        // 与一遍直写（不经过重放）的台账一致（N1/N2 家族）。
+        // 与一遍直写（不经过重放）的**入账原料**逐笔一致（N1/N2 家族）。
+        //
+        // 折叠本身归 owner 的用例（`crates/symbio-plugin-cost/src/decl.test.rs`）；这里钉的是
+        // 「重放不改变写侧交出的那两列」——台账读的就是它们。
         let fresh: std::sync::Arc<
             dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
         > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
@@ -428,10 +439,18 @@ mod turn_runner_tests {
                 .await
                 .unwrap();
         }
-        let a = cost_ledger().apply(&snapshot, i64::MAX, Budget::generous());
-        let b = cost_ledger().apply(&fresh.range(Seq::new(0)), i64::MAX, Budget::generous());
-        assert_eq!(a.value.total_ms, b.value.total_ms, "重放后的台账与直写一致");
-        assert_eq!(a.value.by_principal, b.value.by_principal);
+        let billed = |snap: &[Event]| -> Vec<(String, u64)> {
+            snap.iter()
+                .filter(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
+                .map(|e| (e.actor.clone(), e.cost_ms))
+                .collect()
+        };
+        let fresh_slice = fresh.range(Seq::new(0));
+        assert_eq!(
+            billed(&snapshot),
+            billed(&fresh_slice),
+            "重放后的成本原料与直写逐笔一致"
+        );
     }
 
     /// 多轮 turn 号单调：N3（每 turn ≤ 1 条 final）由构造成立——

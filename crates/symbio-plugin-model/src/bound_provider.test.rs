@@ -25,8 +25,7 @@ use crate::protocols::openai_chat::OpenaiChatProtocol;
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::ProviderLlmAdapter;
 use symbio_plugin_api::{
-    check_all, cost_ledger, transcript, Budget, Entity, Event, EventStore, PromptMessage, Seq,
-    Store, Verb,
+    check_all, transcript, Budget, Entity, Event, EventStore, PromptMessage, Seq, Store, Verb,
 };
 use symbio_sdk::projection::turnstate::turnstate;
 
@@ -483,15 +482,14 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
     let view = turnstate(CHAT_VOCAB).apply(&snapshot, 0, Budget::generous());
     assert!(view.value.settled() && view.value.final_text.is_some());
 
-    // 成本台账闭环（G3）：熔断判据「已耗多少」现在读的是**实测值**——
-    // final 事件带的 cost_ms 经 ③ cost_ledger 累计，同一份事实源。
-    let ledger = cost_ledger().apply(&snapshot, i64::MAX, Budget::generous());
-    let spent = ledger
-        .value
-        .by_principal
-        .get("session/main")
-        .expect("台账里有发言主体");
-    assert_eq!(spent.spent_ms, cost_ms, "台账累计 == 实测耗时");
+    // 入账原料（G3）：熔断判据「已耗多少」读的是**实测值**——final 信封上的 `cost_ms`
+    // 就是适配器边界量出来的那一个。按它归账的折叠住在成本能力包（名册 #18），
+    // 它的数字由那边的用例钉；本处只钉「实测如实落进信封」。
+    let billed = snapshot
+        .iter()
+        .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
+        .expect("final 已入格");
+    assert_eq!(billed.cost_ms, cost_ms, "信封上的成本 == 边界实测耗时");
 
     // 真实边界证据：mock 收到的 HTTP 请求走了 /chat/completions，且带着 prompt。
     let request = captured.lock().unwrap().clone();

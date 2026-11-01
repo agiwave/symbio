@@ -34,6 +34,7 @@ pub use symbio_plugin_classify;
 pub use symbio_plugin_compose;
 pub use symbio_plugin_composite;
 pub use symbio_plugin_conation;
+pub use symbio_plugin_cost;
 pub use symbio_plugin_event_bus;
 pub use symbio_plugin_gateway;
 pub use symbio_plugin_heartbeat;

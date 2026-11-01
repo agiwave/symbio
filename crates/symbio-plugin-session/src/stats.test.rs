@@ -34,7 +34,6 @@ use symbio_kernel::view::Budget;
 use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
 use symbio_sdk::projection::calibration::calibration_for;
-use symbio_sdk::projection::cost::cost_ledger;
 use symbio_sdk::projection::transcript::transcript;
 
 use crate::projections::checkpoint::checkpoint;
@@ -929,9 +928,6 @@ fn stats_recompute_equals_direct_apply() {
     // 读方复算：同一份切片、同一个 as-of，各列各自直接 apply。
     let store = EventWalStore::open_readonly(&wal).unwrap();
     let snap = store.range(Seq::new(0));
-    let cost = cost_ledger()
-        .apply(&snap, i64::MAX, Budget::generous())
-        .value;
     let ck = checkpoint()
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
@@ -957,45 +953,57 @@ fn stats_recompute_equals_direct_apply() {
         got.tiers
     );
 
-    assert_eq!(got.cost, serde_json::to_value(&cost).unwrap());
+    // 成本列的口径归能力包 `cost`（名册 #18，`D-221` 按名字读）：本测试进程不链接它 ⇒
+    // 交**文档写的空形状**并出声。**数字**归 owner 的单测
+    // （`crates/symbio-plugin-cost/src/decl.test.rs`：按主体 500ms 两笔 / 全局 550），
+    // **组合**归 e2e `t28-session-stats.mjs`（它读生产二进制的 `cost.total_ms`）。
+    assert_eq!(
+        got.cost,
+        serde_json::json!({ "by_principal": {}, "total_ms": 0 }),
+        "owner 不在 ⇒ 编不出账：空台账是可诊断的缺席，不是「这个会话没花时间」"
+    );
     assert_eq!(got.checkpoint, serde_json::to_value(&ck).unwrap());
 
     // 复算还得**算对**：期望值直接写在这里，不从出口自己身上取。
+    // 成本 / 时延两列没有「算对」的期望值可写在这里——它们的数归 owner 的单测，
+    // 本进程只复算仍由本插件折叠的列。
     assert_eq!(got.checkpoint["event_count"], 4);
-    assert_eq!(got.cost["total_ms"], 4200, "两轮的 cost_ms 都入账");
 }
 
 /// 反向用例：删一格 ⇒ 对应那一列必须变（不是常数）。
 ///
-/// 这里的手术刀落在**本插件仍拥有的列**上：断点列数格子、成本列累 `cost_ms`。
+/// 这里的手术刀落在**本插件仍自己折叠的列**上：断点列数格子、转写列按事件顺序排条目。
 /// 时延 / 兜底两列的反向判据归 owner（`crates/symbio-plugin-slo/src/decl.test.rs`
-/// 用同一把刀：删掉 `chat.assistant.final` ⇒ 样本 1 → 0）。
+/// 用同一把刀：删掉 `chat.assistant.final` ⇒ 样本 1 → 0），成本列同理归
+/// `crates/symbio-plugin-cost/src/decl.test.rs`。
 #[test]
 fn reverse_case_the_readout_moves_when_the_wal_changes() {
     let wal = seed("reverse");
     let before = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(before.checkpoint["event_count"], 4, "种子四格");
     assert_eq!(
-        before.cost["total_ms"], 4200,
-        "1200（成功轮）+ 3000（兜底轮）"
+        before.transcript["entries"].as_array().map_or(0, Vec::len),
+        4,
+        "转写列把四格都排出来（不是常数）"
     );
 
-    // 删收束格（成功轮 1200ms）⇒ 断点少一条、成本少那一笔
+    // 删收束格（成功轮 1200ms）⇒ 断点少一条、转写少一行
     drop_line(&wal, "f0");
     let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(after.checkpoint["event_count"], 3, "断点是事实计数");
     assert_eq!(
-        after.cost["total_ms"], 3000,
-        "删掉 1200ms 那一笔 ⇒ 成本 4200 → 3000（不是常数）"
+        after.transcript["entries"].as_array().map_or(0, Vec::len),
+        3,
+        "删掉那一格 ⇒ 转写跟着少一行（口径同源，不是各列各扫一遍）"
     );
 
-    // 删开轮格（不带 `cost_ms`）⇒ 断点再少一条，成本不变
+    // 删开轮格 ⇒ 两列再各少一条
     drop_line(&wal, "u0");
     let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(after.checkpoint["event_count"], 2);
     assert_eq!(
-        after.cost["total_ms"], 3000,
-        "开轮格没有 `cost_ms` ⇒ 成本列只认带耗时的事件"
+        after.transcript["entries"].as_array().map_or(0, Vec::len),
+        2
     );
 }
 
@@ -1103,9 +1111,10 @@ fn archival_does_not_shrink_the_readout() {
     );
     // 转写列**有意**在压缩点另起一段（读的是「当前这段历史」，不是全史），所以这里
     // 不比它——拿它当「没缩水」的证据会读反：压缩后它本来就该只剩快照之后的部分。
-    assert_eq!(after.cost, before.cost, "成本台账看的是完整史");
-    // 时延 / 兜底两列同样读 `range(0)`（owner 的视图走同一个口），判据在 e2e `t28`：
-    // 本进程不链接 `slo`，两列在这里恒为空表，比不出「缩水」。
+    // 成本 / 时延 / 兜底三列走同一个跨插件读口（`read_shared_view_all` ⇒ `range(0)`），
+    // 扫描范围因此与断点列同源：断点列这条判据一旦守住，读口就不会只交窗口那段。
+    // 三列各自的**数**归 owner 的单测，组合归 e2e `t28-session-stats.mjs`——本进程
+    // 不链接它们，在这里比不出「缩水」。
 }
 
 /// 没有事实源 = 有据的零，且读方不许创建文件（真·只读）。
@@ -1285,7 +1294,13 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
         as_member.checkpoint["event_count"], 3,
         "矩阵内主体读得到他人共享内容（三格全见）"
     );
-    assert_eq!(as_member.cost["total_ms"], 1200, "成本列同见");
+    assert_eq!(
+        as_member.transcript["entries"]
+            .as_array()
+            .map_or(0, Vec::len),
+        2,
+        "转写列同见：闸翻的是切片，不是只有断点列"
+    );
 
     // ② 矩阵外主体：照旧空切片（fail-closed 不因共享内容松动）。
     let as_outsider = read_path("s1", &wal, Some("session/ghost"), session_principal, &root)
@@ -1295,7 +1310,13 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
         as_outsider.checkpoint["event_count"], 0,
         "矩阵外主体断点列为空"
     );
-    assert_eq!(as_outsider.cost["total_ms"], 0);
+    assert_eq!(
+        as_outsider.transcript["entries"]
+            .as_array()
+            .map_or(0, Vec::len),
+        0,
+        "转写列同空：闸门落在切片上，各列一起没"
+    );
 
     // ③ 属主本人：与不声明时逐字一致（闸不是为了把属主挡在外面）。
     let plain = read_path("s1", &wal, None, session_principal, &root).expect("本机默认读数");

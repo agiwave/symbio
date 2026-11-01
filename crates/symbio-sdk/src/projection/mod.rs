@@ -8,7 +8,6 @@ pub use symbio_kernel::Projection;
 
 pub mod branch;
 pub mod calibration;
-pub mod cost;
 pub(crate) mod elision;
 pub mod mutations;
 pub mod prompt_fidelity;

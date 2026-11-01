@@ -190,7 +190,7 @@ pub struct TurnInput {
     /// 往返的产线为 `0`）。
     ///
     /// 定稿答话轮不进驱动循环，本轮唯一的模型往返发生在 `compose/wording` 里。
-    /// 收束格由运行器就地落，若这里恒记 `0`，`cost_ledger` 与 SLO 的台账会把
+    /// 收束格由运行器就地落，若这里恒记 `0`，`cost.ledger` 与 SLO 的台账会把
     /// 整类 `Answered` 轮次的模型成本漏掉（成本台账的唯一输入仍是落格事件，
     /// 但这次往返的代价属于这一轮的收束格）。取值链：
     /// `ProviderLlmAdapter::generate_turn` 实测 → `WordingReply.cost_ms` →

@@ -31,10 +31,11 @@
 //!   不截断撕裂尾行——截断是**写方**的恢复语义，读方顺手做会与正在落行的写方
 //!   撞车（append 模式下截断后剩下的字节接在新 EOF ⇒ 那一行静默损坏）
 //!   （[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
-//! - **不重写视图类型**：口径住在 owner 那里——时延 / 兜底 / 跨度三列归能力包 `slo`
-//!   （`ViewDecl::eval` 与 `agg`），本插件按名字读（`D-221`）并把值原样装进出口
-//!   （`D-281`）；自主程度等仍是本插件 `projections/` 里的纯折叠。core 只留协议自身的
-//!   投影（转写 / 轮状态 / 任务词表等），不再为会话读数占根出口（DE-025 D-221）。
+//! - **不重写视图类型**：口径住在 owner 那里——时延 / 兜底 / 跨度三列归能力包 `slo`、
+//!   成本列归能力包 `cost`（各自 `ViewDecl::eval`，`slo` 另有 `agg`），本插件按名字读
+//!   （`D-221`）并把值原样装进出口（`D-281`）；自主程度等仍是本插件 `projections/` 里的
+//!   纯折叠。core 只留协议自身的投影（转写 / 轮状态 / 任务词表等），不再为会话读数占根
+//!   出口（DE-025 D-221）。
 //!
 //! ## as-of 口径
 //!
@@ -43,8 +44,8 @@
 //! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{
-    CHAT_VOCAB, COMMITMENT_VOCAB, CONATION_INTENTS_VIEW, MESSAGE_VOCAB, SLO_FALLBACK_VIEW,
-    SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
+    CHAT_VOCAB, COMMITMENT_VOCAB, CONATION_INTENTS_VIEW, COST_LEDGER_VIEW, MESSAGE_VOCAB,
+    SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
 };
 use std::sync::Arc;
 
@@ -59,7 +60,6 @@ use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
 use symbio_sdk::keys::SESSION_ID;
 use symbio_sdk::projection::calibration::calibration_for;
-use symbio_sdk::projection::cost::cost_ledger;
 use symbio_sdk::projection::readyset::readyset_for;
 use symbio_sdk::projection::transcript::transcript;
 
@@ -128,6 +128,14 @@ pub(super) fn empty_by_tier() -> serde_json::Value {
     serde_json::json!({ "by_tier": [] })
 }
 
+/// 成本台账的**空形状**：`{ by_principal: {}, total_ms: 0 }`（与 owner 交的形状同键）。
+///
+/// 与 [`empty_by_tier`] 同一条纪律：读方不替 owner 猜形状——猜错一次，出口就长出
+/// 一份 nobody 认识的读数。
+fn empty_ledger() -> serde_json::Value {
+    serde_json::json!({ "by_principal": {}, "total_ms": 0 })
+}
+
 /// 一条视图交的档位名。形状归 owner（`D-281`），本处只做**查表**。
 fn tier_names(view: &serde_json::Value) -> Vec<String> {
     view.get("by_tier")
@@ -163,7 +171,8 @@ pub(crate) struct SessionStats {
     pub has_wal: bool,
     /// 按档位的时延 / 兜底两列。
     pub tiers: Vec<TierRow>,
-    /// 成本台账（`cost_ledger` 视图原样序列化）。
+    /// 成本台账（能力包交的 `cost.ledger` 视图读数原样交出）：`{ by_principal: { <主体>: {
+    /// principal, spent_ms, entries } }, total_ms }`，按主体字典序。
     pub cost: serde_json::Value,
     /// 用量台账（`token_ledger` 视图原样序列化）：`{ by_principal: { <主体>: {
     /// principal, input, output, measured } }, input, output, calls }`，按主体字典序。
@@ -458,12 +467,14 @@ pub(crate) fn read(
 
     // 四列全部来自同一份事件切片（D-044：实测与判据同源）。
     //
-    // 时延与兜底两列由能力包 `slo` 交（`D-221` 按名字读、`D-281` 折叠两半）：本插件不认识
-    // 这两列的形状，也不在这里算分位数或率——那是 owner 的算式。读不到 ⇒ 空表（可诊断的
+    // 时延、兜底与成本三列由能力包交（`D-221` 按名字读、`D-281` 折叠两半）：本插件不认识
+    // 这些列的形状，也不在这里算分位数、率或累计——那是 owner 的算式。读不到 ⇒ 空表（可诊断的
     // 缺席，不是「这一档没有数」）。
     let latency = read_view_or(SLO_LATENCY_VIEW, &snapshot, empty_by_tier);
     let fallback = read_view_or(SLO_FALLBACK_VIEW, &snapshot, empty_by_tier);
-    let cost = cost_ledger().read_all(&snapshot).value;
+    // 成本列与 `loop` 的熔断闸门读的是**同一个视图名**：两处各折一遍必然漂移成
+    // 「闸门说还有余量、出口说已耗尽」（D-044）。
+    let cost = read_view_or(COST_LEDGER_VIEW, &snapshot, empty_ledger);
     // 用量列：与四列同一份切片、同一个 as-of。它读的是应答载荷的 `usage`
     // （`token_ledger` 的模块文档说明为什么不能与 `cost` 合成一列）。
     let tokens = token_ledger().read_all(&snapshot).value;
@@ -527,8 +538,6 @@ pub(crate) fn read(
         })
         .collect();
 
-    let cost = serde_json::to_value(&cost)
-        .map_err(|e| PluginError::InternalError(format!("成本台账序列化失败：{e}")))?;
     let tokens = serde_json::to_value(&tokens)
         .map_err(|e| PluginError::InternalError(format!("用量台账序列化失败：{e}")))?;
     let spend = serde_json::to_value(&spend)

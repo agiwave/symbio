@@ -272,7 +272,7 @@ export const BASELINE = {
   // 覆盖没有丢：数字在能力包，读方的退化方向由 `unavailable_columns_take_their_documented_
   // empty_shape` 接手，组合由 e2e `t28-session-stats.mjs`（`tiers[0]` 与 `fleet.by_tier` 逐格
   // 对账）守着。非侵蚀。
-  ciRustTestsTotal: 2511,
+  ciRustTestsTotal: 2517,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

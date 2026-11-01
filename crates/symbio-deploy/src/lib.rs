@@ -24,6 +24,9 @@ pub const PLUGIN_ID_COMPOSITE: &str = "composite";
 /// 目标自生成：把「欲」的表达折成意图视图（单片读数 + 跨会话合并）
 pub const PLUGIN_ID_CONATION: &str = "conation";
 
+/// 成本台账：把事件自带的实测耗时按主体折成一本书（熔断与出口共用的那一个口径）
+pub const PLUGIN_ID_COST: &str = "cost";
+
 /// 事件总线
 pub const PLUGIN_ID_EVENT_BUS: &str = "event_bus";
 
@@ -100,6 +103,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "causal", // 因果结构：把「A 导致 B」记成事实（工具），再折成可读的因果图（视图）
     "conation", // 目标自生成：把「欲」的表达折成意图视图（单片读数 + 跨会话合并）
     "slo", // 时延分层：按派发档折叠时延 / 兜底 / 跨度三列（单片读数 + 跨会话合并）
+    "cost", // 成本台账：把事件自带的实测耗时按主体折成一本书（熔断与出口共用的那一个口径）
     "classify", // 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）

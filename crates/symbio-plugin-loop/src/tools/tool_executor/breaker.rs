@@ -3,10 +3,10 @@
 //! ## 为什么它留在这里（[DE-039 D-271](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）
 //!
 //! 名册第 8「副作用分级」判过「拆」，裁决是**不迁**：判据的两个输入一个在 E 类
-//! （`production_matrix()` 的封闭语法，能力包读不到）、一个随名册 #18 进
-//! `symbio-plugin-cost`（S8），而熔断要的两个出口——拒绝且**零事件**、熔断**必须**
-//! 入格 `control × opened`——在 I-3 的 `BeforeRefusal` 形状之外（它只说得出「可审计
-//! 拒绝」）。迁它等于新开一格，不是迁移。
+//! （`production_matrix()` 的封闭语法，能力包读不到）、一个是一条**声明视图**（名册 #18
+//! 的 `cost.ledger`，折叠住成本能力包，本模块按名字读），而熔断要的两个出口——拒绝且
+//! **零事件**、熔断**必须**入格 `control × opened`——在 I-3 的 `BeforeRefusal`
+//! 形状之外（它只说得出「可审计拒绝」）。迁它等于新开一格，不是迁移。
 
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 /// | 形参 | 取值 | 为什么是它 |
 /// |---|---|---|
 /// | `authorized` | 授权矩阵按能力名判 `produce.artifact` | 未持外部执行能力 ⇒ `Refuse`（**零事件**，验收 1） |
-/// | `spent_ms` | `cost_ledger` 按主体累计（读**会话目录**的 WAL） | 「已耗多少」的唯一真源，与 `session/stats` 的成本列同一份切片 |
+/// | `spent_ms` | 声明视图 `cost.ledger` 按主体累计（读**会话目录**的 WAL） | 「已耗多少」的唯一真源，与 `session/stats` 的成本列同一份切片 |
 /// | `requested_ms` | 深度档预算 | 工具循环所在档，本轮**申请**这么多 |
 /// | `budget_ms` | 自主层预算 | 会话累计成本**总预算**——四层时延的第四个取值复用为天花板 |
 ///
@@ -36,7 +36,7 @@ use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 pub struct BreakerInputs {
     /// 主体是否持外部执行能力（读路径判定）。
     pub authorized: bool,
-    /// 已耗（会话累计，`cost_ledger` 台账）。
+    /// 已耗（会话累计，`cost.ledger` 台账）。
     pub spent_ms: u64,
     /// 本次申请（工具循环所在档的额度）。
     pub requested_ms: u64,
@@ -63,24 +63,59 @@ impl BreakerInputs {
     }
 }
 
-/// 会话累计已耗（毫秒）：`cost_ledger` 台账按主体取数。
+/// 成本台账的**声明视图名**（owner = 成本能力包，名册 #18）。
 ///
-/// 与 `session/stats` 的成本列**同一切片同一投影**——两处各算一遍必然漂移成
-/// 「闸门说还有余量、出口说已耗尽」，而错的若是台账，熔断就形同虚设（D-044）。
+/// 闸门按名字读，不抄口径：折叠住在 owner 那一侧，与出口 `stats.cost` 读的是**同一条算式**。
+pub(crate) const COST_LEDGER_VIEW: &str = "cost.ledger";
+
+/// 日志通道：本闸门跑在会话子树里，读数落在会话那条通道（与 `memory_events` 同一口径）。
+const LOG_CHANNEL: &str = symbio_deploy::PLUGIN_ID_SESSION;
+
+/// 会话累计已耗（毫秒）：读 `cost.ledger` 里这个主体的 `spent_ms`。
+///
+/// ## 与出口同一条算式
+///
+/// `session/stats` 的成本列读的是**同一个视图名**——两处各折一遍必然漂移成「闸门说还有
+/// 余量、出口说已耗尽」，而错的若是台账，熔断就形同虚设（D-044）。折叠因此只有一个
+/// owner（名册 #18 搬进能力包），两个读者。
 ///
 /// ## 从切片取账，不再自己开档
 ///
 /// 切片由会话存储层交回（D-084 §1-A）：读方拿的是事实的值，不是路径。
 /// 历史教训：曾按 `<插件目录>/v2-events.wal` 直接 join（漏了会话 id 那层），
 /// `open_readonly` 失败即返回 0 ⇒ `spent_ms` 恒 0 ⇒ 闸门的预算分支永远走不到，
-/// 而**没有任何东西会变红**。把「读哪份事实」收进存储层后，这类错位在类型上消失。
+/// 而**没有任何东西会变红**。把「读哪份事实」收进存储层后，这类错位在类型上消失；
+/// 今天的「读不到」只剩读口的四种缺席态，每一条都落一行 warn——零账不再是静默的。
 fn session_cost_ms(snapshot: &[Event], principal: &str) -> u64 {
     // 成本台账是**会话累计**口径：被快照取代而移入归档段的花费也在
     // `range(0)` 里 ⇒ 不会**静默**少算压缩前的成本（闸门说「还有余量」而实际已耗尽，
     // D-044 的熔断随之形同虚设）。
-    symbio_sdk::projection::cost::cost_ledger()
-        .read_all(snapshot)
-        .value
-        .of(principal)
-        .spent_ms
+    // `value` 必须是**函数作用域的局部**：下面按主体取的那一行是它借出来的切片。
+    let value = match symbio_plugin_api::read_shared_view_all(COST_LEDGER_VIEW, snapshot) {
+        Ok(value) => value,
+        Err(why) => {
+            // 读不到 ⇒ 零账，但**必须出声**：静默的 0 就是上面那条历史事故换了个来源。
+            symbio_plugin_api::plugin_warn!(
+                LOG_CHANNEL,
+                "[Breaker] 成本台账 `{COST_LEDGER_VIEW}` 读不到（{why}）：本轮按零账判定"
+            );
+            return 0;
+        }
+    };
+    let Some(rows) = value
+        .get("by_principal")
+        .and_then(serde_json::Value::as_object)
+    else {
+        // 形状读不出 = 版本对不上，那是装配问题：出声，不假装「没有账」。
+        symbio_plugin_api::plugin_warn!(
+            LOG_CHANNEL,
+            "[Breaker] 成本台账 `{COST_LEDGER_VIEW}` 的读数没有 `by_principal` 这张表：本轮按零账判定"
+        );
+        return 0;
+    };
+    // 书里没有这一行 = 这个主体还没记过账，**正常路径**（空会话、别的主体单独花的钱）。
+    rows.get(principal)
+        .and_then(|row| row.get("spent_ms"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
 }

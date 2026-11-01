@@ -20,9 +20,9 @@ deps: [DE-016-工程落地与验证]
 | `LlmAdapter::generate_timed` | `crates/symbio-sdk/src/adapters` | trait 默认方法：adapter 边界 `Instant` 计时，返回 `(文本, 实测毫秒)`。桩与真实适配器零改动共享 |
 | `Reasoner::reply_timed` | `crates/symbio-sdk/src/actors` | 埋点版 reply；`reply` 委托它 |
 | `cost_ms` 入事件 | final 事件字段 | 调用方把实测值写到 `chat.assistant.final` 的 `cost_ms` |
-| ③ `cost_ledger` | `symbio_sdk/projection/cost` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（接上真实来源） |
+| ③ `cost.ledger` | `crates/symbio-plugin-cost/src/decl.rs` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（接上真实来源） |
 
-闭环：**adapter 边界实测 → final 事件 `cost_ms` → cost_ledger 累计 → CircuitBreaker 判据**——
+闭环：**adapter 边界实测 → final 事件 `cost_ms` → `cost.ledger` 累计 → CircuitBreaker 判据**——
 成本是同一份事实源算出来的，不是旁路统计（N1 同口径）。
 
 ## 2. 实测方法
@@ -51,7 +51,7 @@ CI 每轮重测，数字回归会被当场抓住）。
 - **硬实时预算**：反射档 80ms 预算中，系统自身开销 ≈ 1ms——**98% 以上留给模型**。
  「预算断言」有了实测背书：预算约束模型为主，链路自身不是瓶颈。SLO 初值 80/300/60s/24h
  **在本机实证下无需下调**。
-- **成本模型**：`cost_ms` 从声明值变为实测值，cost_ledger 与熔断判据的输入
+- **成本模型**：`cost_ms` 从声明值变为实测值，`cost.ledger` 与熔断判据的输入
  从此是真实测量。成本 SLO（兜底率 < 1%/3%/5%/5%）的**分母有了可信来源**；
  兜底率统计仍待真实模型流量（跑量后出 P99）。
 

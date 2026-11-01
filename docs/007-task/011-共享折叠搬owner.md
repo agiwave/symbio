@@ -2,7 +2,7 @@
 kind: task
 id: T-011-共享折叠搬owner
 title: S8：共享折叠搬 owner——第二读者改名字读
-status: todo
+status: doing
 track: arch
 prio: next
 created: 2026-10-29
@@ -23,6 +23,15 @@ exit: 成本 / 校准 / 声誉 / 凸显四条构造器（覆盖名册 18/19/20/2
 
 搬的是**折叠**，不是事实：事实仍由各自的写口落格，折叠函数跟着声明它的能力包走。
 第二读者看到的值必须逐字不变——这是本段唯一的正确性判据。
+
+### 进度
+
+| 行 | 状态 | 落点 |
+|---|---|---|
+| #18 成本控制 | 已落（S8a） | `crates/symbio-plugin-cost/src/decl.rs::ledger` 以 `ViewDecl` 交 `cost.ledger`；读者 `loop/breaker.rs::session_cost_ms` 与 `session/stats.rs` 的成本列同批改名字读，`sdk/src/projection/cost.rs` 随批删除（D-284 去掉扫描上界、D-285 落地）。`PP-004` 两格 6/6 → 5/5 |
+| #19 / #20 自我模型与校准 | 未起 | 两行同包 ⇒ 一个提交（`symbio-plugin-calibration`）；读者是 `session` 的自我模型列与 `skill` 的观测 |
+| #22 / #28 信任账本与互信 | 未起 | 两行同包 ⇒ 一个提交（`symbio-plugin-reputation`）；`session/stats.rs` 按 `may_read` 分叉那处要一起改 |
+| #23 凸显仲裁 | 未起 | `symbio-plugin-readyset`；调度（`loop` 候选集）与读数（`session` 的 `readyset` 列）两个读者都在，改完 `readyset_for` 才离开 core |
 
 ## 处理过程
 

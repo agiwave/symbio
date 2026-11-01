@@ -54,7 +54,7 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 | `projections/fallback.rs`（144） | 每档位的兜底率 | 与 #13 同族（SLO §1.2 两列共用 `tiers`） | **已搬** → 随 #13 同包 | 无——与 `slo` 共用 `declared_tier`，同包搬走，那条唯一判据没有跨包 |
 | `autonomy.rs`（122） | 无人干预完成率 | 名册无此行（DE-008 §3.1 外部效标） | 随 #31/#32 同包（自主层的读数） | 唯一读方是 `stats`；与 `conation` 同一条迁移面 |
 | `projections/span.rs`（110） | 会话级时域跨度 | 名册无此行 | **已搬** → 随 #13 同包 | 无——同族读数，跟着时延列一起进包 |
-| `token_ledger.rs`（107）+ `spend_ledger.rs`（133） | 用量 / 金额台账（按主体、按币种） | #18 成本控制 | S8 的 `symbio-plugin-cost`（与 core 的 `cost` 折叠同包） | 归 S8 不归本段：它要等「熔断与 stats 改名字读」那一批一起动 |
+| `token_ledger.rs`（107）+ `spend_ledger.rs`（133） | 用量 / 金额台账（按主体、按币种） | #18 成本控制 | **不随 #18**：两条折叠只有 `stats` 一个读方，按 D-221「只被 owner 自己在读 ⇒ 住 owner 的 `projections/`」它们已在正确位置；`cost.ledger` 读的是信封字段 `cost_ms`，这两本读的是载荷里的 `usage` / `spend`——搬进成本包要先让那两个字段成为声明过的事实形状，那是另一条机制补件 | 无——归 S8 的那一半（core 的 `cost` 折叠）已落 `crates/symbio-plugin-cost` |
 | `projections/changes.rs`（161）+ `changes.rs`（160） | 工作目录变更账 + 它的只读出口 | 名册无此行 | 随工作目录能力（`symbio-plugin-vdfs` / `local`） | 出口是 VDFS 地址面的一段，与 `workdir` 的读写同属一域；搬它要连出口一起搬，那是另一段的事 |
 | `transcript/autonomous.rs`（539） | 自主触发的**落格与开轮**（四格事实 + 入队） | #15 主动开口 | 拆（受限）：**触发时机已在 `symbio-plugin-heartbeat`**；本文件剩下的「谁有资格在什么时刻写这个会话的事实源」是存储所有者的写窗口纪律，留基底（`D-076` 裁决一 #5/#6） | 无——这一条的拆分已经完成，剩下的半边按裁决**不是能力** |
 | `transcript/compression.rs`（158） | 压缩节点的发射器（前端可见的「正在压缩」） | L5 的落点 | 随 L5 的补件走 | 压缩帧要先进 `plugin-api`，本段不动 |

@@ -186,7 +186,6 @@ pub use symbio_sdk::plugin::{
     TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 pub use symbio_sdk::projection::calibration::calibration_for;
-pub use symbio_sdk::projection::cost::cost_ledger;
 pub use symbio_sdk::projection::readyset::{readyset_for, ReadySetView};
 pub use symbio_sdk::projection::task_vocab::TaskVocab;
 pub use symbio_sdk::projection::transcript::transcript;

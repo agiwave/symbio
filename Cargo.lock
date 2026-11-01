@@ -4152,6 +4152,7 @@ dependencies = [
  "symbio-plugin-compose",
  "symbio-plugin-composite",
  "symbio-plugin-conation",
+ "symbio-plugin-cost",
  "symbio-plugin-event_bus",
  "symbio-plugin-gateway",
  "symbio-plugin-heartbeat",
@@ -4307,6 +4308,15 @@ dependencies = [
 
 [[package]]
 name = "symbio-plugin-conation"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
+]
+
+[[package]]
+name = "symbio-plugin-cost"
 version = "0.1.14"
 dependencies = [
  "async-trait",

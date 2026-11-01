@@ -32,6 +32,12 @@ pub(crate) const SLO_LATENCY_VIEW: &str = "slo.latency";
 pub(crate) const SLO_FALLBACK_VIEW: &str = "slo.fallback";
 pub(crate) const SLO_SPAN_VIEW: &str = "slo.span";
 
+/// 成本台账列的名字：折叠由能力包 `crates/symbio-plugin-cost` 交，本插件按名字读。
+///
+/// 与上面三条同一条纪律。它同时也是 `loop` 那侧熔断闸门读的名字——两个读者一个 owner，
+/// 「闸门说还有余量、出口说已耗尽」这类漂移就没有立足点（D-044）。
+pub(crate) const COST_LEDGER_VIEW: &str = "cost.ledger";
+
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 
 pub(crate) const EVENTS: &[EventDecl] = &[

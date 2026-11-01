@@ -17,7 +17,6 @@ use crate::actors::*;
 use crate::authz::{production_matrix, PRINCIPAL_MAIN, PRINCIPAL_PEER};
 use crate::governance::{Capability, PermissionMatrix, PrincipalPolicy, VisScope};
 use crate::invariants::check_all;
-use crate::projection::cost::cost_ledger;
 use crate::projection::reputation::reputation;
 use crate::projection::turnstate::turnstate;
 use crate::test_fixtures::{
@@ -1452,68 +1451,6 @@ fn high_risk_grant_combo_is_rejected() {
         risky,
         Err(crate::governance::PairingViolation::SelfVerifier { .. })
     ));
-}
-
-/// ③ 成本台账：按主体累计 cost_ms；双跑一致（N1）；as-of 同口径。
-#[test]
-fn cost_ledger_accumulates_per_principal() {
-    let store = EventStore::new();
-    store
-        .append(
-            Event::pending(
-                "e0",
-                TASK.progressed,
-                Entity::Task,
-                Verb::Progressed,
-                0,
-                "session/a",
-            )
-            .with_cost_ms(300)
-            .with_payload(serde_json::json!({ "task_id": "t0" })),
-        )
-        .unwrap();
-    store
-        .append(
-            Event::pending(
-                "e1",
-                TASK.progressed,
-                Entity::Task,
-                Verb::Progressed,
-                0,
-                "session/a",
-            )
-            .with_cost_ms(200)
-            .with_payload(serde_json::json!({ "task_id": "t0" })),
-        )
-        .unwrap();
-    store
-        .append(
-            Event::pending(
-                "e2",
-                TASK.progressed,
-                Entity::Task,
-                Verb::Progressed,
-                0,
-                "session/b",
-            )
-            .with_cost_ms(50)
-            .with_payload(serde_json::json!({ "task_id": "t1" })),
-        )
-        .unwrap();
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let ledger = cost_ledger().apply(&snapshot, 9_999, Budget::generous());
-    assert_eq!(ledger.value.of("session/a").spent_ms, 500);
-    assert_eq!(ledger.value.of("session/a").entries, 2);
-    assert_eq!(ledger.value.total_ms, 550);
-    // N1 双跑一致。
-    assert_eq!(
-        ledger.value,
-        cost_ledger()
-            .apply(&snapshot, 9_999, Budget::generous())
-            .value
-    );
-    // 未记账主体零账。
-    assert_eq!(ledger.value.of("session/ghost"), Default::default());
 }
 
 // ── 彩排：自治与学习 ──

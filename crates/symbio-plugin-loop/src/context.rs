@@ -269,7 +269,7 @@ fn compression_threshold_tokens(context_limit: usize) -> usize {
 ///
 /// ⚠️ **估算，不是实测**：`CalibratedTokenizer` 的启发式 × provider 用量反馈校准，
 /// 与真实计费 token 有偏差。所以读数该说的是「够不够、离自动整理还差多少」，
-/// 不是「花了多少」——后者归成本台账（`cost_ledger`）。
+/// 不是「花了多少」——后者归成本台账（`cost.ledger` 视图）。
 pub fn context_watermark(
     messages: &[ChatNode],
     overhead_tokens: usize,
