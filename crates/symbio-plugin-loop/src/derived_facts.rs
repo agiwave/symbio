@@ -215,7 +215,7 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
         if !matrix.deployed_can_write_name(principal, symbio_sdk::authz::CAP_ASSIGN_WORK) {
             continue;
         }
-        if !decider.should_eliminate(entry) {
+        if !decider.should_eliminate(entry.score) {
             continue;
         }
         // 条件 3：已有生效撤销 ⇒ 不重复落格（审计面不缺、幂等键不撞）。

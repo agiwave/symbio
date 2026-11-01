@@ -865,7 +865,6 @@ use crate::actors::EliminationDecider;
 use crate::authz::PRINCIPAL_ARBITER;
 use crate::event::Entity as VEntity;
 use crate::governance::{GrantsChange, GrantsOverlay};
-use crate::projection::reputation::{plain_score, ReputationEntry};
 
 /// DE-043 §6 断言 2 + 4（反向用例）：主体**自报**的声誉事件进不了投影。
 ///
@@ -970,31 +969,19 @@ fn the_arbiter_row_is_the_documented_five_fields() {
 
 /// 判定半边：低于阈值才淘汰；**恰好等于阈值不淘汰**（边界值）。
 ///
-/// 平凡打分 = 守约 − 违约、阈值 0 ⇒ 任何未配平的违约即淘汰；从没立约的主体
-/// （空条目 score 0）**不**被淘汰——没承诺过就没有可违约的东西。
+/// 平凡打分 = 守约 − 违约、阈值 0 ⇒ 任何未配平的违约即淘汰；从没立约的主体算出 0 分，
+/// 与「恰好抵平」同一个边界值 ⇒ 同样**不**淘汰（没承诺过就没有可违约的东西）。
+/// 入参是一个分数而不是投影的行型（`D-287`），所以这里只喂数、不造条目：判定者与
+/// 「这一行怎么折出来」之间没有类型依赖，那条算式归声誉的 owner。
 #[test]
 fn should_eliminate_flips_only_below_the_threshold() {
-    let entry = |score: i64| ReputationEntry {
-        principal: "session/b".to_string(),
-        offered: 3,
-        kept: 1,
-        broken: 2,
-        score,
-    };
     let d = EliminationDecider;
-    assert!(d.should_eliminate(&entry(-1)), "净违约 ⇒ 淘汰");
-    assert!(!d.should_eliminate(&entry(0)), "恰好抵平 ⇒ 不淘汰（边界）");
-    assert!(!d.should_eliminate(&entry(1)), "净守约 ⇒ 不淘汰");
-    let fresh = ReputationEntry {
-        principal: "session/ghost".to_string(),
-        offered: 0,
-        kept: 0,
-        broken: 0,
-        score: plain_score(0, 0, 0),
-    };
+    assert!(d.should_eliminate(-1), "净违约 ⇒ 淘汰");
+    assert!(!d.should_eliminate(0), "恰好抵平 ⇒ 不淘汰（边界）");
+    assert!(!d.should_eliminate(1), "净守约 ⇒ 不淘汰");
     assert!(
-        !d.should_eliminate(&fresh),
-        "从没立约的主体（空条目）不被淘汰"
+        !d.should_eliminate(0),
+        "从没立约的主体（空条目算出 0 分）不被淘汰——与边界同值，判据也只有一条"
     );
 }
 

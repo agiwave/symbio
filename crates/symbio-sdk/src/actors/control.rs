@@ -14,7 +14,6 @@
 use crate::actors::pattern_for_principal;
 use crate::authz::PRINCIPAL_ARBITER;
 use crate::governance::GrantsChange;
-use crate::projection::reputation::ReputationEntry;
 use symbio_kernel::actors::{ActorSpec, Scope};
 use symbio_kernel::event::{Entity, Event, Verb};
 
@@ -88,14 +87,18 @@ impl EliminationDecider {
         }
     }
 
-    /// 纯判定：该主体的声誉条目是否低于淘汰阈值。
+    /// 纯判定：声誉分是否低于淘汰阈值。
+    ///
+    /// 入参是**一个分数**，不是投影的行型（`D-287`）：判定者只问「这个值够不够」，
+    /// 「这一行有哪些计数列、怎么折出来的」归声誉的 owner。折叠因此可以在不动本判定的
+    /// 情况下离开机制面——core 不再认识那条行的形状。
     ///
     /// 只问分数——「对谁判」（持 `assign.work` 的主体）、「判过没有」（无既有
     /// verdict）都由调用方定：判定者不持有授权表以外的任何判据（与
     /// `crates/symbio-plugin-loop/src/tools/dispatch/gates::CircuitBreaker::gate` 的 `authorized`
     /// 出参同一条纪律）。
-    pub fn should_eliminate(&self, entry: &ReputationEntry) -> bool {
-        entry.score < Self::THRESHOLD
+    pub fn should_eliminate(&self, score: i64) -> bool {
+        score < Self::THRESHOLD
     }
 
     /// 淘汰事件（`verdict × asserted`，`change = "revoke"`）——可审计可撤销的那一格。
