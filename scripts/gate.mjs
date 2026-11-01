@@ -63,7 +63,9 @@
  * 文件里的信息量之间，不该隔一次七分钟的重跑。
  *
  * ctx：{ repoRoot, scriptDir, logDir, ci, profile, run(o), log(name, text) }
- *   run(o) 执行命令：实时逐行转发（echo: filtered|all|none）+ 全文落日志 + 只信退出码。
+ *   run(o) 执行命令：输出全文落日志 + 只信退出码；**默认统计式输出**——通过的
+ *   任务不往控制台刷输出（阶段尾一行统计、汇总一张阶段表），失败的任务把攒下的
+ *   输出随条目名当场印出；`GATE_VERBOSE=1` 恢复逐条实时转发。
  *   logDir = **本轮**的日志目录（`.workbuddy-ai/gate-logs/<runId>/`；每轮一个，
  *     保留最近 KEEP_RUNS 轮，见 gate.d/_logs.mjs）。
  *
@@ -214,6 +216,17 @@ const valOf = (p) => {
 const splitIds = (s) => s.split(',').map((x) => x.trim()).filter(Boolean)
 const CI = hasFlag('--ci')
 const profile = valOf('--profile=')
+/**
+ * 输出粒度开关：`GATE_VERBOSE=1` 恢复「逐条目实时刷输出」的旧行为。
+ *
+ * 默认（2026-11-01 起）是**统计式输出**：通过的任务不逐条打印（条目级明细全部
+ * 落在各任务日志与本轮 `_summary.md`），控制台在阶段尾给一行统计、汇总给一张
+ * 阶段统计表；**失败项不受影响**——攒下的输出与条目名、日志路径一起当场印出。
+ * 理由：172 项全绿时逐条 `✓` 刷屏，真正要找的那一行红反而被淹没；而「成功了
+ * 不需要看过程，失败了必须看现场」是两种不同的阅读需求，用同一个输出流伺候
+ * 只会两头都不好读。
+ */
+const VERBOSE = process.env.GATE_VERBOSE === '1'
 // `--only=` 给空值时解析成 `[]`（而不是 null）——**空清单与「没给开关」是两件事**，
 // 前者是「一个阶段都不要跑」，必须被下面的校验拦下，不能静默退化成「跑全部」。
 const onlyRaw = valOf('--only=')
@@ -233,6 +246,10 @@ const USAGE = `用法：node scripts/gate.mjs [选项]
   --full                强制全跑，不看变更范围（范围不可得时本来就全跑）
   --list                只列出阶段与任务，不执行
   --help, -h            打印本用法并退出（**不跑任何阶段**）
+
+  输出粒度：默认**统计式**——通过的任务不逐条打印（阶段尾一行统计，汇总一张
+  阶段表；条目级明细在每份任务日志与本轮 _summary.md 里），失败项当场印出条目名、
+  攒下的输出与日志路径。环境变量 GATE_VERBOSE=1 恢复逐条目实时刷输出。
 
   默认行为是「按本次改动收窄」：只有 crates/ 变了才跑 cargo，只有 tauri/ 变了才跑前端，
   只有 scripts/ 变了才跑那些**检查器自己的回归测试**。范围求不出（浅克隆 / 无上游 /
@@ -399,7 +416,9 @@ function run(o) {
   // `quiet`：并发批里**不往 stdout 写任何东西**——多个任务同时 echo 会交错成
   // 不可读的乱码（`▸ a … ▸ b … ok (1s) ok (2s)`）。详情仍完整落在各自的日志
   // 文件里，批跑完由调用方按原顺序打印一行结论。单任务（非并行）行为不变。
-  if (!quiet) process.stdout.write(`  ▸ ${label} … `)
+  // 统计式输出（默认）下串行任务也不再印起跑标记——通过的任务连一行都不占，
+  // 「现在在跑什么」由心跳行（带任务名）与阶段统计行回答。
+  if (!quiet && VERBOSE) process.stdout.write(`  ▸ ${label} … `)
 
   return new Promise((resolve) => {
     const started = Date.now()
@@ -466,6 +485,10 @@ function run(o) {
     // 并发批里也照打：行首带任务名，交错也能对上号。
     let lastLine = ''
     let lastActivity = Date.now()
+    // **echo 攒下不刷**（统计式输出）：通过的任务不需要它的输出（全文在日志里），
+    // 失败的任务需要它的**现场**——失败那一刻把攒下的行随条目名一起印出，让人
+    // 不用开日志文件就能看到正文（`GATE_VERBOSE=1` 恢复实时逐行）。
+    const echoed = []
     const beat =
       HEARTBEAT_MS > 0
         ? setInterval(() => {
@@ -499,7 +522,8 @@ function run(o) {
         if (!line) continue
         lastLine = line
         if (echo !== 'none' && !(echo === 'filtered' && NOISE.test(line))) {
-          console.log(`      ${dim(line)}`)
+          echoed.push(line)
+          if (VERBOSE) console.log(`      ${dim(line)}`)
         }
       }
     }
@@ -534,9 +558,15 @@ function run(o) {
       const ok = code === 0 && signal === null && !timedOut
       const ms = Date.now() - started
       if (!quiet) {
-        if (timedOut) console.log(yellow(`超时（已 kill，${fmtDuration(ms)}）`))
-        else if (ok) console.log(green(`ok (${fmtDuration(ms)})`))
-        else console.log(red(`失败 (exit=${code}${signal ? `, ${signal}` : ''}, ${fmtDuration(ms)})`))
+        if (ok) {
+          if (VERBOSE) console.log(green(`ok (${fmtDuration(ms)})`))
+        } else {
+          // 失败现场随条目走：攒下的输出先印（VERBOSE 下已实时刷过，不重复），
+          // 紧跟结果行——不必开日志文件就能看到正文。
+          if (!VERBOSE) for (const l of echoed) console.log(`      ${dim(l)}`)
+          if (timedOut) console.log(yellow(`超时（已 kill，${fmtDuration(ms)}）`))
+          else console.log(red(`失败 (exit=${code}${signal ? `, ${signal}` : ''}, ${fmtDuration(ms)})`))
+        }
       }
       settle({ ok, code, signal, get output() { return fullOutput() }, timedOut, logFile, ms })
     })
@@ -818,12 +848,13 @@ console.log(dim(`  本轮日志：${relLog}/（每轮一个目录，留最近 ${
  * 顺序都不同，对比就白费力气）。
  *
  * 批内强制 `quiet`：多个子进程同时往 stdout 写会交错成乱码，详情改由各自日志
- * 承载（失败时汇总会直接列出文件名），控制台只保留一行结论。
+ * 承载（失败时当场点名条目 + 日志路径），控制台只保留一行结论。
  *
- * **`summary: true` 的任务补印结论行**（见 `lastLogLine`）：批内静音是为了不交错，
- * 不是为了丢掉结论——「N 条规则全部通过」这类最后一行本来就在日志里，批结束后按
- * 声明序补印即可。此前守卫本体因为要保住这一行而被排除在并发之外，整段串行 32s；
- * 「结论行」与「并发」从来不是二选一。
+ * **`summary: true` 的任务只在失败时补印结论行**（见 `lastLogLine`）：「N 条规则
+ * 全部通过」这类最后一行在统计式输出下不逐条占行（通过的看阶段统计行即可）；
+ * 失败时它就是那条判据自己的结论，印在条目名下面。批内静音是为了不交错，
+ * 不是为了丢掉结论——此前守卫本体因为要保住这一行而被排除在并发之外，整段串行
+ * 32s；「结论行」与「并发」从来不是二选一。
  *
  * **`long: true` 的任务先起**（LPT：最长者先做）。并发池按声明序发任务，于是长杆
  * 排在第 38 位就得等前几波短任务跑完才开工——而它的时长往往比其余全部任务加起来
@@ -890,15 +921,42 @@ async function runConcurrent(stageId, tasks, limit) {
 
   for (const [i, r] of out.entries()) {
     record(stageId, r)
-    const mark = r.pass === true ? green('✓') : r.pass === 'skipped' ? yellow('⊘') : red('✗')
-    const took = r.ms != null ? dim(` (${fmtDuration(r.ms)})`) : ''
-    console.log(`  ${mark} ${r.label}${took}${r.note ? yellow(` — ${r.note}`) : ''}`)
-    if (tasks[i].summary) {
+    // 统计式输出：通过的只计数（阶段尾一行统计），不逐条占行；失败 / 跳过
+    // 当场点名（条目名 + 理由 + 日志路径），失败现场的正文由两处承载：
+    // 此刻的失败详情段（末 N 行）与那份完整日志。
+    if (r.pass === true) continue
+    printResult(r)
+    if (tasks[i].summary && r.pass !== 'skipped') {
       const file = Array.isArray(r.logFile) ? r.logFile[0] : r.logFile
       const line = lastLogLine(file)
       if (line) console.log(dim(`      ${line}`))
     }
   }
+}
+
+/**
+ * 一个**非通过**结果的当场点名：条目名、耗时、理由、日志路径。
+ * 串行分支与并发批共用同一形状——失败在阶段段里就能定位到条目，不必等汇总。
+ */
+function printResult(r) {
+  const mark = r.pass === 'skipped' ? yellow('⊘') : red('✗')
+  const took = r.ms != null ? dim(` (${fmtDuration(r.ms)})`) : ''
+  console.log(`  ${mark} ${r.label}${took}${r.note ? yellow(` — ${r.note}`) : ''}`)
+  const list = Array.isArray(r.logFile) ? r.logFile : r.logFile ? [r.logFile] : []
+  const logs = list.map((f) => path.relative(repoRoot, f).replace(/\\/g, '/')).join(', ')
+  if (logs) console.log(dim(`      日志：${logs}`))
+}
+
+/** 一个阶段的统计行：全绿时 `✓ N/N（墙钟）`，有失败 / 跳过时三分项都列出来。 */
+function stageStatsLine(rows, wallMs) {
+  const fail = rows.filter((r) => r.pass === false).length
+  const skip = rows.filter((r) => r.pass === 'skipped').length
+  const ok = rows.length - fail - skip
+  const wall = wallMs != null ? dim(`（${fmtDuration(wallMs)}）`) : ''
+  if (fail === 0 && skip === 0) return console.log(green(`  ✓ ${ok}/${rows.length}${wall}`))
+  console.log(
+    `  ${green(`✓ ${ok}`)}${fail ? ` · ${red(`✗ ${fail}`)}` : ''}${skip ? ` · ${yellow(`⊘ ${skip}`)}` : ''}${wall}`,
+  )
 }
 
 /**
@@ -952,6 +1010,7 @@ async function runStage(s, index) {
         ms: 0,
       })
       stageMs.set(s.id, (stageMs.get(s.id) ?? 0) + (Date.now() - stageStart))
+      stageStatsLine(bufferOf(s.id), Date.now() - stageStart)
       return
     }
   }
@@ -973,6 +1032,7 @@ async function runStage(s, index) {
       ms: 0,
     })
     stageMs.set(s.id, (stageMs.get(s.id) ?? 0) + (Date.now() - stageStart))
+    stageStatsLine(bufferOf(s.id), Date.now() - stageStart)
     return
   }
   const limit = resolveConcurrency(s)
@@ -985,12 +1045,17 @@ async function runStage(s, index) {
       while (i < tasks.length && tasks[i].parallel) batch.push(tasks[i++])
       await runConcurrent(s.id, batch, limit)
     } else {
-      record(s.id, await executeTask(s.id, tasks[i++]))
+      const r = await executeTask(s.id, tasks[i++])
+      record(s.id, r)
+      // 统计式输出：失败 / 跳过当场点名，不等到汇总（失败现场与条目同屏）。
+      if (r.pass !== true) printResult(r)
     }
   }
   // 阶段**墙钟**耗时（不是任务耗时之和）：瓶颈定位要的是「这一阶段占了多少墙钟」。
   // 并发批下逐任务耗时是相互争用后的数，加起来没有意义；阶段墙钟才是可比的量。
   stageMs.set(s.id, (stageMs.get(s.id) ?? 0) + (Date.now() - stageStart))
+  // 阶段统计行：通过的任务不逐条占行，这一行是本阶段的全部结论。
+  stageStatsLine(bufferOf(s.id), Date.now() - stageStart)
 }
 
 /**
@@ -1138,10 +1203,29 @@ function report(interrupted = false) {
 
   console.log()
   console.log(bold('══ 汇总 ══'))
-  for (const r of results) {
-    const mark = r.pass === true ? green('✓') : r.pass === 'skipped' ? yellow('⊘') : red('✗')
-    const took = r.ms != null ? dim(` (${fmtDuration(r.ms)})`) : ''
-    console.log(`  ${mark} ${r.label}${took}${r.note ? yellow(` — ${r.note}`) : ''}`)
+  // 统计式汇总：每阶段一行统计（通过的条目不逐条占行——条目级明细全部在
+  // `_summary.md`，那里逐项带耗时与日志路径）。失败 / 跳过随后逐条点名。
+  for (const s of stages) {
+    if (!stageBuffers.has(s.id)) continue
+    const rows = stageBuffers.get(s.id)
+    const fail = rows.filter((r) => r.pass === false).length
+    const skip = rows.filter((r) => r.pass === 'skipped').length
+    const ok = rows.length - fail - skip
+    const wall = stageMs.get(s.id)
+    const mark = fail > 0 ? red('✗') : ok === 0 ? yellow('⊘') : green('✓')
+    const counts =
+      fail === 0 && skip === 0 ? `${ok}/${rows.length}` : `${green(`✓ ${ok}`)}${fail ? ` · ${red(`✗ ${fail}`)}` : ''}${skip ? ` · ${yellow(`⊘ ${skip}`)}` : ''}`
+    console.log(`  ${mark} ${s.id}：${counts}${wall != null ? dim(`（${fmtDuration(wall)}）`) : ''}`)
+  }
+  // 失败项逐条点名：阶段 + 条目 + 理由 + 日志路径——确切定位，不必重跑也不必翻目录。
+  if (failed.length) {
+    console.log()
+    console.log(red(`  失败 ${failed.length} 项：`))
+    for (const r of failed) printResult(r)
+  }
+  if (skipped.length) {
+    console.log()
+    for (const r of skipped) printResult(r)
   }
   console.log()
   console.log(
@@ -1178,6 +1262,11 @@ function report(interrupted = false) {
   }
 
   console.log(dim(`  本轮日志目录：${path.relative(repoRoot, logDir).replace(/\\/g, '/') || '.'}/`))
+  console.log(
+    dim(
+      `  完整清单（逐项耗时、日志路径与失败详情，无需重跑）：${relLog}/_summary.md（GATE_VERBOSE=1 可恢复逐条输出）`,
+    ),
+  )
   if (interrupted) {
     console.log(yellow('  已中断——以上为已跑完部分；本次运行日志已落盘，无需重跑即可查看。'))
     process.exit(130)
