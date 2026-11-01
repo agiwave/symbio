@@ -1186,6 +1186,15 @@ function report(interrupted = false) {
     console.log(red(`  失败 ${failed.length} 项。`))
     process.exit(1)
   }
+  // **「全部跳过」不是「全部通过」。** 范围收窄（D-273）之后，一轮门禁完全可能
+  // 一个检查项都没跑（`--base=HEAD`、或改动只落在没有任何阶段声明输入面的路径上）。
+  // 那时打「全部通过」与 D-224 判的是同一个病：`通过 0 / 5（5 项未判定）` 的下一行
+  // 写着「全部通过」，读者记住的是后一行。这里改成如实说「没判定」，退出码仍是 0
+  // ——没跑不是失败，但它也不是绿。
+  if (passed === 0 && skipped.length > 0) {
+    console.log(yellow(`  本轮没有执行任何检查项（${skipped.length} 项全部跳过）⇒ 未判定，不是「通过」`))
+    process.exit(0)
+  }
   console.log(green('  全部通过'))
   process.exit(0)
 }
