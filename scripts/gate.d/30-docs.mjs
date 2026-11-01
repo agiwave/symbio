@@ -486,6 +486,10 @@ export const TEST_ONLY = [
   // 子日志、日志已被删）断言预期表现。
   'gate.d/_logs',
   'cli-binary',
+  // `e2e-order`：起跑顺序（LPT）与逐例耗时缓存。判据只有两条方向要钉——「慢的先跑」
+  // 与「`index` 仍是原序号」（端口号段必须跟着用例走、不跟着顺序走）；外加缓存读写
+  // 的脏数据处理（排期坏掉只能让门禁变慢，不许让它变红）。
+  'e2e-order',
   'tauri-binary',
   'schema-audit',
   'core-surface-audit',

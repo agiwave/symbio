@@ -25,6 +25,8 @@ import { machine } from './_machine.mjs'
 // 逐例耗时的取数实现与门外复核（`scripts/e2e-concurrency.mjs`）共用一份：
 // 同一段逻辑曾在这里与那里各写一份，而日志目录一改就两边同时失明。
 import { latestE2ELogs } from './_logs.mjs'
+// 起跑顺序（LPT）与耗时缓存：与 `e2e/run-tests.mjs` 共用同一份实现与同一个文件。
+import { orderForStart, loadTimes, recordTimes, suggestConcurrency } from '../e2e-order.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -156,8 +158,8 @@ export default {
       label: 'e2e 用例集',
       // 自定义任务：用例子进程隔离运行（与 run-tests.mjs 同构），聚合判定。
       //
-      // **默认并发 6**（`GATE_E2E_CONCURRENCY` 可覆盖）。并行有**两个**前提，
-      // 缺一个就不能开：
+      // **并发度与起跑顺序都由上一轮实测推到**（`GATE_E2E_CONCURRENCY` 可覆盖）。
+      // 并行有**两个**前提，缺一个就不能开：
       //
       // ① **端口分段**已生效——`E2E_PORT_BASE` 按**用例序号**注入（不是按 worker
       // 序号），所以每个用例的 mock LLM / MCP / gateway 各占一段。少了它，40+ 个
@@ -165,37 +167,47 @@ export default {
       // 比串行更难排查，因为失败点随机漂。
       // ② **并发度已到收益拐点**（见下）。
       //
-      // ## 为什么是 6：墙钟下界由**单个慢例**决定，不由总工作量决定
+      // ## 墙钟由两件事决定：最慢的那一例，和它什么时候**开始**
       //
-      // 实测（本机 20 核，`.workbuddy-ai/gate-logs/` 逐例耗时）：
+      // 实测（本机 20 核，88 例，2026-11-01 那一轮）：
       //
       // ```
-      // 总工作量（串行等效）= 88.1s
-      // 最慢的单个用例      = 15.5s（t36-autonomous-initiator）
-      // ⇒ 任何并发度的墙钟下界 = 15.5s；理论最优并发度 = 88.1 / 15.5 ≈ 5.7 → 取 6
+      // 总工作量（串行等效）= 219s
+      // 最慢的单个用例      = 20.4s（t53-llm-4xx-unreachable：一次退避阶梯）
+      // ⇒ 墙钟下界 = max(219/并发, 20.4)；理论最优并发 = 219/20.4 ≈ 10.7
       //
-      // 实测墙钟：并发 1 → 88s    4 → 22s    6 → 19s    16 → 17.2s
+      // 实测墙钟：并发 6 → 36.8s    10 → 22.5s    14 → 20.7s
       // ```
       //
-      // 读法：**并发吃不掉慢例**。下界由 `t36` 一个用例决定（15.5s），不看总量——
-      // 再往上加，门禁耗时由它说了算。6 到 16 只差 1.8s（9%），而进程数翻 2.7 倍、
-      // 抢同一份 CPU。**继续加并发买到的是调度抖动，卖出去的是判定稳定性。**
+      // 两条读法，缺一条都会走错方向：
       //
-      // ⚠️ 「更高并发会不会改变结论」**实测过**：6 与 16 **各连跑 3 轮，失败集逐轮完全
-      // 相同**（32/42，同 10 个红）。所以上限不是「怕它不稳」——**是不值**。选 6 是
-      // 贴着理论最优，不是贴着实测上限。
+      // 1. **并发吃不掉最慢的那一例**——超过「总工作量 / 最慢单例」的并发只买到调度
+      //    jitter（14 路相对 10 路只省 1.8s，进程数却抬 40%）⇒ 封顶 12
+      //    （`scripts/e2e-order.mjs::CONCURRENCY_CEILING`）。
+      // 2. **但 6 这个旧默认已经偏低**：那时最慢单例是 `t36` 的 15.5s、理论最优 5.7，
+      //    现在慢例被削平（`t36` 45.5→15.4、`t90` 65.3→18.6、`t53` 38.0→20.3），
+      //    理论最优翻到 10.7 ——**旧数字是被旧用例结构顶住的，不是被机器顶住的**。
       //
-      // ⚠️ 这里换过一次判据。原来写的是「最慢通过例 15.5s vs 最小内层 `waitFor` 10s，
-      // 余量 5.5s」——**那是错的**：`t36` 的整例耗时是很多次等待之和，跟 `t11` 的
-      // 单次预算不是一回事，跨用例比预算算出 −5.5s 这种没有意义的负数。判据换成
-      // 「总工作量 / 最慢单例」后**不依赖「哪个用例最慢」**，只依赖两个总和。
+      // ⚠️ 「更高并发会不会改变结论」**实测过**：6 与 16 各连跑 3 轮、失败集逐轮完全
+      // 相同；这一轮 6 / 10 / 14 三档也都是 88/88。所以上限不是「怕它不稳」——**是不值**。
+      //
+      // ⚠️ 判据换过一次，别再换回去：原来写「最慢通过例 15.5s vs 最小内层 `waitFor`
+      // 10s，余量 5.5s」——**那是错的**，`t36` 的整例耗时是很多次等待之和，与 `t11` 的
+      // 单次预算不是一回事，跨用例比预算能算出 −5.5s 这种没有意义的负数。
+      //
+      // ## 起跑顺序：按上一轮耗时降序（LPT），不按文件名序
+      //
+      // 墙钟是「最后完成的那条泳道」，而用例耗时极端长尾（前 10 例占 72% 的工作量）。
+      // 按文件名序起跑，慢例要到序号 36/53/90 才被捞起来，别的泳道空转等它们——
+      // 实测 FIFO 50.7s vs LPT 36.8s，**一个用例都没少跑**。实现与判据在
+      // `scripts/e2e-order.mjs`（`index` 仍是原序号 ⇒ 端口号段不随顺序变）。
       //
       // ## 若要重算：跑 `node scripts/e2e-concurrency.mjs`
       //
       // 它从上一轮 `.workbuddy-ai/gate-logs/e2e-*.log` 读逐例耗时，算出
-      // `总工作量 / 最慢单例` 并与本文件的默认值对照；不一致时按「上调要验失败集
-      // 三轮稳定 / 下调直接照办」给处置。**慢用例被优化掉时它自己会给出更小的建议值**
-      // ——所以别在这里硬写一个「感觉够用」的数字。
+      // `总工作量 / 最慢单例` 与本文件**实际采用的值**对照。这里的默认值已经改为
+      // 「从实测推导」（`suggestConcurrency`），所以它现在主要用来复核推导是否合理，
+      // 不再是「该不该改常量」的决策点——慢例被优化掉时推导自己会跟上。
       //
       // 另外：单个用例失败要走满它自己的超时（实测 3s–120s，`t2` 一轮 120s），
       // 所以**失败多的时候**门禁会显著变慢——那是用例失败的表现，不是门禁的锅。
@@ -203,26 +215,38 @@ export default {
         const cases = discoverCases()
         if (cases.length === 0) return { ok: false, note: '未发现任何用例（e2e/cases/）' }
 
-        // 默认 6，理由见上方注释（理论最优 = 总工作量/最慢单例 ≈ 5.7，实测三轮稳定）。
-        // **核数少时往下收，核多时不往上加**：6 这个上限来自**用例结构**（最慢单例
-        // 决定下限工作量），不是机器能力——机器再强也不该超过它。所以这里取
-        // 机器档案的 `slots.e2e`（它已按逻辑核/内存/启动负载收过一轮，上限仍是 6），
-        // 而不是「核数」本身。原先直接拿核数算，在 4 核机器上给到 4 路还行，
-        // 在 2 核机器上给 2 路但没算内存与负载，遇到同时开着的 IDE/浏览器就会假红。
+        // 并发的两个来源，各管一头，缺一不可：
+        // - `machine().slots.e2e`：**这台机器**开得动几路（已按逻辑核/内存/启动负载
+        //   收过一轮，上限是 `CONCURRENCY_CEILING`）。原先是直接拿核数算，在 2 核机器
+        //   上给 2 路却没算内存与负载，遇到同时开着的 IDE/浏览器就会假红。
+        // - `suggestConcurrency`：**这批用例**需要几路（总工作量/最慢单例）。尾部长例
+        //   回归时它自己收缩，慢例被优化掉时自己上调——不需要谁记得回来改常量。
         const m = await machine()
-        const limit = Math.max(1, Number(process.env.GATE_E2E_CONCURRENCY) || m.slots.e2e)
+        // 起跑顺序与耗时表都来自**上一轮**实测（`scripts/e2e-order.mjs`）。
+        const prevTimes = loadTimes(repoRoot)
+        const limit = Math.max(
+          1,
+          Number(process.env.GATE_E2E_CONCURRENCY) ||
+            suggestConcurrency({ cases, times: prevTimes, machineSlots: m.slots.e2e }),
+        )
         // 单个用例的兜底预算。实测最慢用例（`t2`）在本机要 120s ⇒ 静态 180s 只有
         // 1.5 倍余量，是**余量不足**的那一档，必须随机器放大：慢 2 倍的机器上
         // 120s 会变成 240s，而 180s 的兜底会先到——报出来的是「超时」，
         // 看上去像用例坏了。用例内部自己的 `waitFor` 仍是真正的判据，这里只防挂死。
         const caseTimeoutMs = Math.round(180_000 * Math.max(1, m.cpuScale))
         const results = new Array(cases.length)
+        // 起跑顺序按上一轮实测耗时降序（LPT），**不是**文件名序：墙钟由最后完成的那条
+        // 泳道决定，而耗时是极端长尾（前 10 例占 72% 的工作量）。按文件名序跑，那几条
+        // 慢例要到序号 36/53/90 才被捞起来，别的泳道就空转着等它们——同一批用例实测
+        // FIFO 50.7s / LPT 36.8s（并发 6），一个用例都没少跑。判据与端口分段见
+        // `scripts/e2e-order.mjs`（`index` 仍是原序号 ⇒ 端口号段不随顺序变）。
+        const plan = orderForStart(cases, prevTimes)
         let cursor = 0
         const worker = async () => {
           for (;;) {
-            const i = cursor++
-            if (i >= cases.length) return
-            const c = cases[i]
+            const p = cursor++
+            if (p >= plan.length) return
+            const { case: c, index: i } = plan[p]
             const r = await ctx.run({
               label: `e2e: ${c.name}`,
               cmd: process.execPath,
@@ -241,7 +265,12 @@ export default {
             console.log(r.ok ? `      ✓ ${c.name}` : `      ✗ ${c.name}（详见日志）`)
           }
         }
-        await Promise.all(Array.from({ length: Math.min(limit, cases.length) }, worker))
+        await Promise.all(Array.from({ length: Math.min(limit, plan.length) }, worker))
+        // 本轮实测写回，供下一轮排期（同一个文件，`e2e/run-tests.mjs` 也读它）。
+        recordTimes(
+          repoRoot,
+          Object.fromEntries(results.filter(Boolean).map((r) => [r.caseName, r.caseMs])),
+        )
 
         let pass = 0
         const failures = []

@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { stripAnsi } from './color.mjs'
 import { derive, fingerprintOf, describe, budget, machine, setBatchLanes, pruneStaleTaskKeys } from './gate.d/_machine.mjs'
+import { CONCURRENCY_CEILING } from './e2e-order.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 const gateScript = path.join(repoRoot, 'scripts', 'gate.mjs')
@@ -573,8 +574,20 @@ test('★ 32 核机器上不许仍然只开 8 路', () => {
   const big = derive({ logicalCores: 32, memGB: 64, freeMemGB: 50, cpuMs: 20, busy: 0.1 })
   assert.ok(big.cpu > 8, `32 核机器 cpu 并发只有 ${big.cpu}——上限 8 是旧机器的核数，不是性质`)
   assert.ok(big.io > 8, `32 核机器 io 并发只有 ${big.io}`)
-  // 但 e2e 的上限是**用例结构**决定的（最慢单例 ≈ 总工作量/5.7），不随核数涨
-  assert.equal(big.e2e, 6, 'e2e 并发不该超过 6——那是用例结构，不是机器能力')
+  // 但 e2e 的上限是**用例结构**决定的（要真等生产定时器的那几条，见
+  // `e2e-order.mjs::CONCURRENCY_CEILING`），**不随核数涨**：32 核与 20 核拿到同一个数。
+  // 判据钉的是「结构常量」这件事本身，不是某个具体值——那个值随用例耗时变，写在
+  // 一处（`CONCURRENCY_CEILING`），改的时候不必再来这里。
+  assert.equal(big.e2e, CONCURRENCY_CEILING, 'e2e 上限必须是结构常量，不是核数')
+  assert.equal(
+    derive({ logicalCores: 20, memGB: 32, freeMemGB: 24, cpuMs: 40, busy: 0.1 }).e2e,
+    big.e2e,
+    '核数从 20 涨到 32 不该改变这个上限',
+  )
+  assert.ok(
+    derive({ logicalCores: 4, memGB: 8, freeMemGB: 6, cpuMs: 60, busy: 0.1 }).e2e < big.e2e,
+    '低配机器仍然必须往下收',
+  )
 })
 
 test('★ 换机器必须换指纹（否则另一台机器的耗时会被当成本机的预算）', () => {

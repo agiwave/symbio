@@ -55,6 +55,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { CONCURRENCY_CEILING } from '../e2e-order.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '..', '..')
@@ -107,7 +108,9 @@ const MEM_USABLE_RATIO = 0.6
 /** 各类并发度的上限。理由见 `derive()` 里逐条注释。 */
 const MAX_CPU_SLOTS = 16
 const MAX_IO_SLOTS = 16
-const MAX_E2E_SLOTS = 6
+// e2e 的上限不在这里定：它由**用例结构**决定（要真等生产定时器的那几条），
+// 与机器无关，所以与 `e2e-order.mjs` 共用同一个常量（那里也用它推导建议并发度）。
+const MAX_E2E_SLOTS = CONCURRENCY_CEILING
 const MAX_PROCESS_SLOTS = 3
 
 /** 校准历史保留多少轮（中位数窗口）。太少被一次异常拖走，太多记不住机器的变化。 */
@@ -271,9 +274,13 @@ export function derive({ logicalCores, memGB, freeMemGB, cpuMs, busy }) {
   // 单个占用远小于一次 cargo 编译，原实现 `min(6, 核数)` 在本机实测 6 路稳定。
   // 若跟着 `cpu`（按 rustc 的胃口算）走，本机会被压到 3 路，e2e 阶段直接慢一倍
   // ——那是把「按最重的任务定并发」这个错误又犯一遍。
-  // 所以它有自己的内存口径（每路 ~0.8GB），且上限 6 是**用例结构**决定的
-  // （理论最优 = 总工作量/最慢单例 ≈ 5.7，见 `scripts/e2e-concurrency.mjs`），
-  // 不是机器决定的：机器再强也不该超过它，只做「低配往下收」。
+  // 所以它有自己的内存口径（每路 ~0.8GB），且上限是**用例结构**决定的
+  // （`CONCURRENCY_CEILING`，理由在 `e2e-order.mjs`），不是机器决定的：
+  // 机器再强也不该超过它，只做「低配往下收」。
+  //
+  // ⚠️ 这里只回答「这台机器开得动几路」。**这一批用例需要几路**是另一个问题
+  // （`总工作量/最慢单例`），由 `58-e2e.mjs` 用 `suggestConcurrency` 从实测耗时算，
+  // 两者取小。别把这个常量当成并发度的最终答案。
   const e2e = clamp(Math.min(MAX_E2E_SLOTS, logicalCores - 1, availableMemGB / 0.8) * loadFactor, 1, MAX_E2E_SLOTS)
 
   // process：进程创建拐点。强机（探针快 + 核多）能到 3，中档 2，弱机 1。

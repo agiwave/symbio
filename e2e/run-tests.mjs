@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { red, green, dim, bold } from '../scripts/color.mjs';
 import { ensureCliBinary } from '../scripts/cli-binary.mjs';
+import { orderForStart, loadTimes, recordTimes, suggestConcurrency } from '../scripts/e2e-order.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
@@ -130,23 +131,35 @@ async function main() {
     }
   }
 
-  // 并发度：与门禁 `58-e2e.mjs` 同一口径——默认 6，核数不足往下收，
-  // `E2E_CONCURRENCY` 覆盖（与之前串行时的 `for` 循环等价性：并发 1 即串行）。
-  const cpuCap = Math.max(1, Math.min(6, os.availableParallelism?.() ?? os.cpus().length));
-  const limit = Math.max(1, Number(process.env.E2E_CONCURRENCY) || cpuCap);
+  // 并发度：与门禁 `58-e2e.mjs` 同一口径（`scripts/e2e-order.mjs::suggestConcurrency`）
+  // ——`min(机器槽位, ⌈总工作量/最慢单例⌉)`，数据来自上一轮实测；没有数据时退回 6。
+  // 这里没有机器档案，拿核数当槽位上界（门禁那边用的是 `machine().slots.e2e`）。
+  const cores = Math.max(1, (os.availableParallelism?.() ?? os.cpus().length) - 1);
+  const prevTimes = loadTimes(repoRoot);
+  const limit = Math.max(
+    1,
+    Number(process.env.E2E_CONCURRENCY) ||
+      suggestConcurrency({ cases, times: prevTimes, machineSlots: cores }),
+  );
 
   // 按**用例序号**注入端口基址（不是按 worker 序号）：每个用例的 mock LLM / MCP /
   // gateway 各占一段，与门禁同一条前提。过滤器命中时序号以**过滤后**的列表为准
   // （单独跑几例时不必去撞远处那段）。
+  //
+  // **起跑顺序**与端口基址是两件事：顺序按上一轮实测耗时降序（LPT），序号仍是
+  // 过滤后列表里的位置。理由与判据在 `scripts/e2e-order.mjs`。
+  const plan = orderForStart(cases, loadTimes(repoRoot));
   const results = new Array(cases.length);
+  const measured = {};
   let cursor = 0;
   const worker = async () => {
     for (;;) {
-      const i = cursor++;
-      if (i >= cases.length) return;
-      const c = cases[i];
+      const p = cursor++;
+      if (p >= plan.length) return;
+      const { case: c, index: i } = plan[p];
       const r = await runCase(c, 18080 + i * 100);
       results[i] = r;
+      measured[c.name] = r.ms;
       const tag = r.ok ? green('✓') : red('✗');
       console.log(`  ${tag} ${c.name} ${dim(`(${r.ms}ms)`)}`);
       if (!r.ok) {
@@ -155,7 +168,8 @@ async function main() {
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(limit, cases.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(limit, plan.length) }, worker));
+  recordTimes(repoRoot, measured);
 
   let pass = 0;
   const failures = [];
