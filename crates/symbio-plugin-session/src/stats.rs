@@ -45,7 +45,7 @@
 
 use crate::declarations::{
     CHAT_VOCAB, CONATION_INTENTS_VIEW, COST_LEDGER_VIEW, MESSAGE_VOCAB, REPUTATION_LEDGER_VIEW,
-    SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
+    SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW, TASK_READYSET_VIEW,
 };
 use std::sync::Arc;
 
@@ -59,7 +59,6 @@ use symbio_kernel::present::ReadingPanel;
 use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
 use symbio_sdk::keys::SESSION_ID;
-use symbio_sdk::projection::readyset::readyset_for;
 use symbio_sdk::projection::transcript::transcript;
 
 use crate::projections::checkpoint::checkpoint;
@@ -148,6 +147,28 @@ fn empty_calibration() -> serde_json::Value {
 /// 与 [`empty_ledger`] 同一条纪律：读方不替 owner 猜形状。
 fn empty_reputation() -> serde_json::Value {
     serde_json::json!({ "by_principal": {} })
+}
+
+/// 就绪集列的**排版**：owner 交的是「谁就绪、按什么序」（`task.readyset`，`D-289`），
+/// 本函数只套上本轮的容量——`cap` 是读者的预算，不是折叠的一格。
+///
+/// `cap = 0` 按 1 处理，与 owner 那侧的调度器同一条口径（容量为零的调度器不是「更保守」，
+/// 是「永不动」）。视图读不出来时 [`empty_readyset`] 先给一份空表，这里因此仍产出
+/// `{ ready: [], cap }` 这一份**文档写的形状**，与迁移前的列逐字相同。
+fn readyset_column(value: serde_json::Value, cap: usize) -> serde_json::Value {
+    let cap = cap.max(1);
+    let mut ready = value
+        .get("ready")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    ready.truncate(cap);
+    serde_json::json!({ "ready": ready, "cap": cap })
+}
+
+/// 就绪集的**空形状**：`{ ready: [] }`（owner 交的那一份去掉容量之后的键）。
+fn empty_readyset() -> serde_json::Value {
+    serde_json::json!({ "ready": [] })
 }
 
 /// 声誉列的**排版**：把台账里本会话主体那一行单独提出来，另附整本账。
@@ -304,8 +325,15 @@ pub(crate) struct SessionStats {
     /// `{ items: [], total: 0, … }`，两种「零条」由 `has_wal` 分辨。
     pub commitments: serde_json::Value,
     /// 就绪任务集（的**读侧**）：
-    /// `readyset` 投影原样序列化（`{ ready: [ { task_id, seq, depends_on } ] }`），
+    /// 共享视图 `task.readyset` 原样序列化（`{ ready: [ { task_id, seq, depends_on } ] }`），
     /// 按 `task_id` 字典序——同一份事实源永远读出同一个集合。
+    ///
+    /// ## 折叠不在本插件，本插件只交本轮的容量
+    ///
+    /// 「谁就绪」由任务能力包算（owner：`crates/symbio-plugin-task`，`D-289`），本插件按
+    /// 名字读——与 `cost.ledger` / `reputation.ledger` 同一条通路。容量是本会话配置里的
+    /// `task_cap`：它是**读者的预算**，视图交的是无界的候选集，`cap` 在这里套上
+    /// （`cap.max(1)` 后截断），所以这一列的读数与折叠搬出 core 之前逐字节相同。
     ///
     /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒ `{ready: []}`），
     /// 不归声誉那一族（那列不给的是「有数但不给你看」的空对象）：就绪集为空在语义上
@@ -603,14 +631,13 @@ pub(crate) fn read(
 
     // 就绪集列：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
     // 已被换成空的 ⇒ 本列是 `{ready: []}`（四列的形态），不是声誉那列的空对象。
-    // 名字交进投影（DE-024 D-206）：这一族的 owner 是 `loop`，本插件经清单生成物交出
-    // 整族的拼写——不引用兄弟插件（E-009），也不由 core 或内核代答。
-    let readyset = serde_json::to_value(
-        readyset_for(crate::declarations::TASK_VOCAB, task_cap)
-            .read_all(&snapshot)
-            .value,
-    )
-    .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
+    // **折叠归任务能力包**（名册 #23，`D-289`）：本插件按名字读 owner 交的候选集，
+    // 只把自己的容量套上去——不引用兄弟插件（E-009），也不再链 core 的投影目录，
+    // 更不由本插件重算「谁就绪、什么序」。
+    let readyset = readyset_column(
+        read_view_or(TASK_READYSET_VIEW, &snapshot, empty_readyset),
+        task_cap,
+    );
 
     // 转写列（对话面读侧）：
     // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造

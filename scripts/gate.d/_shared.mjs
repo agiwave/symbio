@@ -283,7 +283,26 @@ export const BASELINE = {
   // 「读方取的是这个主体的 `score`」改由 `loop/test_support.rs` 的替身视图钉（既有 460 条不变），
   // 「owner 缺席 ⇒ 空形状 + `own` 仍点得出主体」由 `session/stats.test.rs` 同名替换的那条钉
   // （477 条不变），生产二进制里的真读数仍由 e2e t30 / t42 / t71 / t74 / t75 钉。非侵蚀。
-  ciRustTestsTotal: 2525,
+  // baseline-allow ciRustTestsTotal: `#23` 就绪集折叠迁出净 +5（2525 → 2530）——同一次搬家的
+  // 两端：**+9 新增**（`crates/symbio-plugin-task/src/readyset.test.rs`：依赖闭合与逐笔推进、
+  // `cap` 是读者的预算（无界视图 vs 截断读数）、活租约排除与到期即回、缺 `until_ms` 按无租约、
+  // 挂起排除与恢复（含 as-of 重放逐字节相等）、返工开新节点不复活旧节点、N 步链一次一笔、
+  // 按名字读共享视图且视图不含 `cap`、读者套容量而视图无界），**−4 删除**（core 的
+  // `actors/mod.test.rs` 四条：`readyset_contains_only_dependency_closed_tasks` /
+  // `rework_creates_new_node_instead_of_rollback` /
+  // `the_ready_set_capacity_is_a_parameter_not_a_structure` /
+  // `a_live_lease_leaves_the_ready_set_and_expiry_returns_it`）。逐条归属：四条判的都是
+  // 「折出来是哪几笔」，被测对象已不在机制面 ⇒ 断言随折叠进 owner 包，只换了 executor 与
+  // 测试二进制；环与悬空依赖仍由 core 的 `acyclic_deps` 判据与
+  // `docs/003-design/verify/termination.rs` 钉（条数不变）。`session` 一侧两条**改名不增减**：
+  // `suspended_task_leaves_readyset_and_restores` →
+  // `preemption_events_land_on_the_cells_the_owner_fold_reads`（只判写侧落的那两格，折叠那半
+  // 归 owner），`readyset_column_lists_candidates_and_obeys_the_read_gate` →
+  // `readyset_column_degrades_to_the_documented_empty_shape`（本测试进程不链接 owner，E-009
+  // ⇒ 列只能是文档写的空形状；在这里复算折叠就是造一个替身 owner）。组合判据在 e2e
+  // `t31-task-table.mjs` / `t34-preemption.mjs` / `t36-autonomous-initiator.mjs` /
+  // `t42-full-derives-commitment-task.mjs`（读生产二进制的 `readyset.ready`）。非侵蚀。
+  ciRustTestsTotal: 2530,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

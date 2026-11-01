@@ -49,7 +49,7 @@ impl: done
 ## 关联
 
 - 逐行处置账（#22 / #28）：`docs/003-design/026-能力拆分与影响类.md` §2.3
-- 迁移段与进度：`docs/007-task/011-共享折叠搬owner.md`
+- 折叠搬 owner 的裁决：`docs/003-design/045-能力包迁出与落地裁决.md`（`D-287` 判定先收纯分数、`D-288` 本包落地）
 - 只读折叠包的合法性（先例）：`../symbio-plugin-cost/README.md`
 - 承诺域的形状来源：`docs/003-design/038-多主体与对等承诺.md`
 - 视图的跨插件读口：`crates/symbio-plugin-api/src/views.rs`

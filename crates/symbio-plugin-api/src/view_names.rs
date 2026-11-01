@@ -32,5 +32,6 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: "slo.fallback", owner: "slo" },
     SharedViewDecl { name: "slo.latency", owner: "slo" },
     SharedViewDecl { name: "slo.span", owner: "slo" },
+    SharedViewDecl { name: "task.readyset", owner: "task" },
     SharedViewDecl { name: "turn.recalled", owner: "loop" },
 ];

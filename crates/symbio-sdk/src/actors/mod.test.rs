@@ -921,7 +921,6 @@ fn elimination_event_keeps_invariants_green() {
 // 返工闭环（返工那格，返工次数有界 = 终止性前提 2）。
 
 use crate::invariants::{acyclic_deps, rework_bounded};
-use crate::projection::readyset::readyset_for;
 use crate::projection::task_vocab::TaskVocab;
 
 /// 任务族五格的**夹具拼写**（DE-024 D-206）：名字与格位都在 owner 插件
@@ -1057,124 +1056,6 @@ fn self_verifier_is_rejected_at_construction() {
     assert!(split.is_ok(), "分工后必须通过：{split:?}");
 }
 
-/// readyset 就绪集 = 非终态 ∧ 依赖闭合；双跑一致（N1）。
-#[test]
-fn readyset_contains_only_dependency_closed_tasks() {
-    let store = EventStore::new();
-    open_task(&store, "a", &[], "session/main");
-    open_task(&store, "b", &["a"], "session/main");
-    open_task(&store, "c", &["b"], "session/main");
-    let snapshot = store.range(crate::event::Seq::new(0));
-
-    let rs = readyset_for(TASK, usize::MAX).apply(&snapshot, 9_999, Budget::generous());
-    assert_eq!(rs.value.ready.len(), 1, "只有 a 就绪：{:?}", rs.value.ready);
-    assert_eq!(rs.value.ready[0].task_id, "a");
-
-    // a 终态 → 就绪集挪到 b；链式推进，调度器零内部状态。
-    assert_task(&store, "a", "session/verifier");
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let rs = readyset_for(TASK, usize::MAX).apply(&snapshot, 9_999, Budget::generous());
-    assert_eq!(
-        rs.value
-            .ready
-            .iter()
-            .map(|t| t.task_id.as_str())
-            .collect::<Vec<_>>(),
-        ["b"]
-    );
-
-    // N1：双跑逐字节一致。
-    let again = readyset_for(TASK, usize::MAX).apply(&snapshot, 9_999, Budget::generous());
-    assert_eq!(rs.value, again.value);
-}
-
-/// 返工闭环——验证判不合格 ⇒ 新增返工节点（不是回滚）⇒ 旧节点不再就绪。
-#[test]
-fn rework_creates_new_node_instead_of_rollback() {
-    let store = EventStore::new();
-    open_task(&store, "a", &[], "session/planner");
-    open_task(&store, "b", &["a"], "session/planner");
-    // 验证者判 a 不合格 → 返工（新增一条事件，append-only）。
-    store
-        .append(
-            Event::pending(
-                "rw-a1",
-                REWORK,
-                Entity::Task,
-                Verb::Asserted,
-                0,
-                "session/verifier",
-            )
-            .with_produced_by(0)
-            .with_payload(serde_json::json!({ "task_id": "a-r1", "replaces": "a", "round": 1 })),
-        )
-        .unwrap();
-    open_task(&store, "a-r1", &[], "session/planner");
-
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let rs = readyset_for(TASK, usize::MAX)
-        .apply(&snapshot, 9_999, Budget::generous())
-        .value;
-    let ids: Vec<_> = rs.ready.iter().map(|t| t.task_id.as_str()).collect();
-    assert!(ids.contains(&"a-r1"), "返工节点就绪：{ids:?}");
-    assert!(
-        ids.contains(&"a"),
-        "旧节点仍未终态（Log 永不改——被取代靠新节点表达）"
-    );
-
-    // 返工节点过验 → b 的依赖由终态的 a-r1 之外仍卡住（a 未终态）→ b 不就绪。
-    assert_task(&store, "a-r1", "session/verifier");
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let rs = readyset_for(TASK, usize::MAX)
-        .apply(&snapshot, 9_999, Budget::generous())
-        .value;
-    let ids: Vec<_> = rs.ready.iter().map(|t| t.task_id.as_str()).collect();
-    assert!(
-        !ids.contains(&"b"),
-        "b 依赖 a（不是 a-r1），依旧不就绪：{ids:?}"
-    );
-
-    // 终止性：返工 1 轮在上界内；第 3 轮超上界（max=2）→ 被看见。
-    store
-        .append(
-            Event::pending(
-                "rw-a2",
-                REWORK,
-                Entity::Task,
-                Verb::Asserted,
-                0,
-                "session/verifier",
-            )
-            .with_produced_by(0)
-            .with_payload(serde_json::json!({ "task_id": "a-r2", "replaces": "a", "round": 2 })),
-        )
-        .unwrap();
-    store
-        .append(
-            Event::pending(
-                "rw-a3",
-                REWORK,
-                Entity::Task,
-                Verb::Asserted,
-                0,
-                "session/verifier",
-            )
-            .with_produced_by(0)
-            .with_payload(serde_json::json!({ "task_id": "a-r3", "replaces": "a", "round": 3 })),
-        )
-        .unwrap();
-    let snapshot = store.range(crate::event::Seq::new(0));
-    assert!(
-        rework_bounded(REWORK_VOCAB, &snapshot, 3).is_empty(),
-        "3 轮对上界 3 恰好合规"
-    );
-    let bad = rework_bounded(REWORK_VOCAB, &snapshot, 2);
-    assert_eq!(bad.len(), 1, "上界 2 时第 3 轮违规：{bad:?}");
-    assert!(bad[0].why.contains("超过上界"), "{}", bad[0].why);
-    let bad = rework_bounded(REWORK_VOCAB, &snapshot, 1);
-    assert_eq!(bad.len(), 2, "上界 1 时第 2、3 轮都违规：{bad:?}");
-}
-
 /// DE-033 §6 验收 3：注入 N 步任务链 → 在 rework 上界内终止（全链跑完、检查全绿）。
 #[test]
 fn n_step_chain_terminates_within_rework_bound() {
@@ -1194,19 +1075,7 @@ fn n_step_chain_terminates_within_rework_bound() {
             "session/planner",
         );
     }
-    // 全链推进：一次就绪一个，终态后下一个就绪（终止性前提 1/3 由 store 与 C14 保证）。
     for i in 0..n {
-        let snapshot = store.range(crate::event::Seq::new(0));
-        let rs = readyset_for(TASK, usize::MAX)
-            .apply(&snapshot, 9_999, Budget::generous())
-            .value;
-        assert_eq!(
-            rs.ready.len(),
-            1,
-            "链式调度任意时刻恰一个就绪：{:?}",
-            rs.ready
-        );
-        assert_eq!(rs.ready[0].task_id, format!("t{i}"));
         store
             .append(
                 Event::pending(
@@ -1223,14 +1092,6 @@ fn n_step_chain_terminates_within_rework_bound() {
         assert_task(&store, &format!("t{i}"), "session/verifier");
     }
     let snapshot = store.range(crate::event::Seq::new(0));
-    assert!(
-        readyset_for(TASK, usize::MAX)
-            .apply(&snapshot, 9_999, Budget::generous())
-            .value
-            .ready
-            .is_empty(),
-        "全链终态"
-    );
     assert!(acyclic_deps(&snapshot).is_empty());
     assert!(rework_bounded(REWORK_VOCAB, &snapshot, 1).is_empty());
     assert!(
@@ -1319,97 +1180,3 @@ fn latency_tier_name_round_trip() {
     assert_eq!(LatencyTier::from_name("gpu"), None);
     assert_eq!(LatencyTier::from_name(""), None);
 }
-
-// ── S04：调度者与租约（`D-139` 裁决 1–3 的判据面）──────────────────────
-
-/// 落一条租约（`task.assigned` 的当前拼写由 owner 交出）——只在测试里手写，生产写方是调度者。
-fn assign_task(store: &EventStore, id: &str, owner: &str, until_ms: i64) {
-    store
-        .append(
-            Event::pending(
-                format!("as-{id}-{until_ms}"),
-                TASK.lease,
-                Entity::Task,
-                Verb::Asserted,
-                0,
-                "scheduler/main",
-            )
-            .with_produced_by(0)
-            .with_payload(serde_json::json!({
-                "task_id": id,
-                "owner": owner,
-                "lease_ms": until_ms,
-                "until_ms": until_ms,
-            })),
-        )
-        .expect("租约入格");
-}
-
-/// `cap` 是参数不是结构：`cap=1` 退化为串行，`cap=4` 用同一套逻辑放开四条。
-#[test]
-fn the_ready_set_capacity_is_a_parameter_not_a_structure() {
-    let store = EventStore::new();
-    for id in ["a", "b", "c", "d"] {
-        open_task(&store, id, &[], "session/planner");
-    }
-    let snap = store.range(crate::event::Seq::new(0));
-
-    let one = readyset_for(TASK, 1)
-        .apply(&snap, 9_999, Budget::generous())
-        .value;
-    assert_eq!(one.ready.len(), 1, "cap=1 ⇒ 候选集只给一笔（串行 FIFO）");
-    assert_eq!(one.cap, 1);
-    assert_eq!(one.ready[0].task_id, "a", "先开的先派");
-
-    let four = readyset_for(TASK, 4)
-        .apply(&snap, 9_999, Budget::generous())
-        .value;
-    assert_eq!(
-        four.ready
-            .iter()
-            .map(|t| t.task_id.as_str())
-            .collect::<Vec<_>>(),
-        ["a", "b", "c", "d"],
-        "cap=4 ⇒ 同一套判据放开四条"
-    );
-
-    // 0 与 1 同义（容量为零不是「更保守」，是「永不动」）。
-    assert_eq!(
-        readyset_for(TASK, 0)
-            .apply(&snap, 9_999, Budget::generous())
-            .value
-            .ready
-            .len(),
-        1
-    );
-}
-
-/// 活租约让任务离开候选集；到点即回（**判死的事实**由调度者补落，投影只认时间戳）。
-#[test]
-fn a_live_lease_leaves_the_ready_set_and_expiry_returns_it() {
-    let store = EventStore::new();
-    open_task(&store, "a", &[], "session/planner");
-    assign_task(&store, "a", "session/main", 1_000);
-    let snap = store.range(crate::event::Seq::new(0));
-
-    assert!(
-        readyset_for(TASK, 1)
-            .apply(&snap, 999, Budget::generous())
-            .value
-            .ready
-            .is_empty(),
-        "租约未到期 ⇒ 被派出去的活不再进候选（不重复派）"
-    );
-    assert_eq!(
-        readyset_for(TASK, 1)
-            .apply(&snap, 1_000, Budget::generous())
-            .value
-            .ready
-            .len(),
-        1,
-        "到点即回候选集"
-    );
-}
-
-// 调度者的策略与租约判据随唯一消费方住 `crates/symbio-plugin-loop/src/task_events`（D-189）；
-// 本文件只留候选集投影的判据（`readyset`）。

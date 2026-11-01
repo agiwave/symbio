@@ -42,6 +42,6 @@ impl: done
 ## 关联
 
 - 逐行处置账（#18）：`docs/003-design/026-能力拆分与影响类.md` §2.3
-- 迁移段与进度：`docs/007-task/011-共享折叠搬owner.md`
+- 折叠搬 owner 的裁决：`docs/003-design/045-能力包迁出与落地裁决.md`（`D-284` 读口不设扫描上界、`D-285` 本包落地）
 - 能力包的形状来源（夹具）：`../symbio-plugin-notes/README.md`
 - 视图的跨插件读口：`crates/symbio-plugin-api/src/views.rs`

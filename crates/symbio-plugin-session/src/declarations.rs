@@ -53,6 +53,14 @@ pub(crate) const SKILL_CALIBRATION_VIEW: &str = "skill.calibration";
 /// ——两个读者一个 owner（D-044）。
 pub(crate) const REPUTATION_LEDGER_VIEW: &str = "reputation.ledger";
 
+/// 就绪集列的名字：折叠由任务能力包 `crates/symbio-plugin-task` 交（`task.*` 五格的
+/// owner 与调度者就是它），本插件按名字读。
+///
+/// 与上面几条同一条纪律：拼写只有一个来源（owner 的 `PLUGIN.yml` `shared_views`），
+/// 「谁就绪、什么序」的算式也不在本插件重算一遍。本插件只交**本轮的容量**——那是读者
+/// 的预算，不是折叠的一格（`D-289`）。
+pub(crate) const TASK_READYSET_VIEW: &str = "task.readyset";
+
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 
 pub(crate) const EVENTS: &[EventDecl] = &[

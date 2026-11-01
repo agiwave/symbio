@@ -7,6 +7,11 @@ plugin_order: 45
 # crates/symbio-plugin-api/src/events.rs）。格位仍住 decl::EVENTS。
 shared_events: task.asserted, task.assigned, task.held, task.opened, task.progress
 
+# 对外可读的视图（scripts/facts/views-rs.mjs 读取 → crates/symbio-plugin-api/src/view_names.rs）。
+# 就绪集折叠的 owner 就是它的写方与调度者（名册 #23，`D-289`）：第二个读者（`session` 的
+# 统计列）按名字读，不再链 core 的投影目录。
+shared_views: task.readyset
+
 # 授权行：调度者只持 `assign.work`——发放的权威动作是派活，
 # 不立任务（`define.work`）、不发言（`reply`）。
 principal_scheduler: scheduler/main|assign.work|thread_private

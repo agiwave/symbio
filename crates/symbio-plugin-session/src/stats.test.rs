@@ -935,16 +935,17 @@ fn stats_recompute_equals_direct_apply() {
     let ck = checkpoint()
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
-    let rs = serde_json::to_value(
-        symbio_sdk::projection::readyset::readyset_for(
-            crate::declarations::TASK_VOCAB,
-            symbio_sdk::turn::dispatch::TASK_CAP,
-        )
-        .apply(&snap, i64::MAX, Budget::generous())
-        .value,
-    )
-    .expect("就绪集序列化");
-    assert_eq!(got.readyset, rs, "就绪集列同样复算（同切片、同 as-of）");
+
+    // 就绪集列的口径归任务能力包（名册 #23，`D-289` 按名字读）：本测试进程不链接它 ⇒
+    // 交**文档写的空形状**（`cap` 那一格仍是本插件的读者预算，不随 owner 缺席而消失）。
+    // **谁就绪**归 owner 的单测
+    // （`crates/symbio-plugin-task/src/readyset.test.rs`），**出口读得到真数**归 e2e
+    // （`t31-task-table.mjs` / `t42-full-derives-commitment-task.mjs` 钉 `ready` 的成员）。
+    assert_eq!(
+        got.readyset,
+        serde_json::json!({ "ready": [], "cap": symbio_sdk::turn::dispatch::TASK_CAP }),
+        "owner 不在 ⇒ 编不出候选集：空集合是可诊断的缺席，不是「这个会话没有任务」"
+    );
 
     // 时延 / 兜底两列的口径归能力包 `slo`（`D-221` 按名字读、`D-281` 折叠两半）：
     // 本测试进程不链接它 ⇒ 两列交空表、`tiers` 为空。**数字**归 owner 的单测
@@ -1557,12 +1558,23 @@ fn commitments_column_exposes_each_delegation_record() {
     assert_eq!(denied.commitments["total"], 0);
 }
 
-/// 就绪集列：候选集入列 + **复算同源** + 读侧闸（反向）。
+/// 就绪集列的**读侧契约**：折叠归任务能力包（名册 #23，`D-289`），本插件只保证两件事——
+/// 读不出来时交**文档写的空形状**，以及**读者的预算随列报出**（视图交的是无界候选集，
+/// `task_cap` 在这里套上，所以 `cap` 这一格永远是 session 的，不是 owner 的）。
 ///
-/// `may_read = false ⇒ {ready: []}` 与四列同款（空切片 = 有源但不给你看），
-/// 不是声誉那列的空对象——「没有任务」与「不给你看」由 `has_wal` 与列的上下游分辨。
+/// 这里刻意不复算、不跟反向：本测试二进制不链接 `crates/symbio-plugin-task`（E-009）⇒
+/// `task.readyset` 不在冻结表里 ⇒ 列只能是 `{ready: [], cap: TASK_CAP}`。在这里补一份替身
+/// owner 只会把两条真判据变成假绿——**谁就绪、什么序、租约与挂起怎么算**归 owner 的单测
+/// （`crates/symbio-plugin-task/src/readyset.test.rs`：依赖闭包 / 一次一个 / 活租约出局 /
+/// 挂起与恢复 / 返工开新节点 / `cap` 只截长度不改成员），**出口读得到真数**归 e2e
+/// （`t31-task-table.mjs` 钉成员与 `deniedReady.cap`，`t34-preemption.mjs` 钉抢占时的进出）。
+/// 读侧闸对本列的作用与四列那一族同款，由断点 / 转写列的闸用例共同承担。
+///
+/// 载荷仍按**写方落下的真实形状**造（`task × opened`、`depends_on` 数组）：本插件不认识
+/// 这些字段，带着它们才试得出「不认识」是不是真的。格位由 `declarations.test.rs` 的夹具交
+/// （写闸 fail-closed，没声明的名字落不进环），**视图名不交** ⇒ 这一列读得出、算不出。
 #[test]
-fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
+fn readyset_column_degrades_to_the_documented_empty_shape() {
     let dir = std::env::temp_dir().join(format!("symbio-stats-rs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时目录");
@@ -1590,31 +1602,20 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
             .expect("任务开格");
     }
 
+    let empty_column = serde_json::json!({
+        "ready": [],
+        "cap": symbio_sdk::turn::dispatch::TASK_CAP
+    });
     let got =
         read_path("s-rs", &wal, None, symbio_sdk::authz::PRINCIPAL_MAIN, &root).expect("读数");
     assert_eq!(
-        got.readyset["ready"].as_array().map(|a| a.len()),
-        Some(1),
-        "t1 无依赖（就绪）、t2 等 t1（未终态）：{}",
-        got.readyset
+        got.readyset, empty_column,
+        "owner 不在 ⇒ 折不出候选集：列读得出，只是这一族今天没有算式（原因在 capability_views 列里）"
     );
-    assert_eq!(got.readyset["ready"][0]["task_id"], "t1");
-
-    // 复算：同切片、同一个 as-of——出口只能调投影，不许另写一份统计。
-    let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
-    let snap = ro.range(Seq::new(0));
-    let direct = serde_json::to_value(
-        symbio_sdk::projection::readyset::readyset_for(
-            crate::declarations::TASK_VOCAB,
-            symbio_sdk::turn::dispatch::TASK_CAP,
-        )
-        .apply(&snap, i64::MAX, Budget::generous())
-        .value,
-    )
-    .expect("序列化");
-    assert_eq!(got.readyset, direct, "就绪集列必须复算相等");
+    assert!(got.has_wal, "事实源在，账算不出来不改变这件事");
 
     // 反向：读侧闸关 ⇒ 空切片 ⇒ 连不变量列也空（有源但不给你看）。
+    // 「没有任务」与「不给你看」在这一列同形，由 `has_wal` 与上下游分辨（四列那一族）。
     let denied = read_path(
         "s-rs",
         &wal,
@@ -1623,10 +1624,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
         &root,
     )
     .expect("读数");
-    assert_eq!(
-        denied.readyset,
-        serde_json::json!({ "ready": [], "cap": symbio_sdk::turn::dispatch::TASK_CAP })
-    );
+    assert_eq!(denied.readyset, empty_column);
     assert_eq!(denied.invariants, serde_json::json!([]));
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }

@@ -1,15 +1,18 @@
-//! 任务族的事件声明（DE-024 D-197 / D-204 / D-206）。
+//! 任务族的事件声明（DE-024 D-197 / D-204 / D-206）与对外的那条视图（`D-289`）。
 //!
 //! 名字、格位与角色都在这里：写方（[`crate::task::TaskTable`] / 调度者）与读方
-//! （core 的 `readyset` / `autonomy` / `rework_bounded`，以及 `session` 的两个读数
-//! 列）都从同一张声明表取；跨插件消费的名字经 `PLUGIN.yml` 的 `shared_events:` 投影
-//! 进 `symbio_plugin_api::events`，本插件**不要求别的插件链进来**。
+//! （本包的 [`crate::readyset`] 折叠、core 的不变量判据 `acyclic_deps` / `rework_bounded`，
+//! 以及 `session` 的 `autonomy` 与统计列）都从同一张声明表取；跨插件消费的名字经
+//! `PLUGIN.yml` 的 `shared_events:` 投影进 `symbio_plugin_api::events`，
+//! 本插件**不要求别的插件链进来**。
 //!
-//! 本插件不认识任何兄弟插件：`readyset_for` 在构造期收 [`TASK_VOCAB`]，
-//! core 的折叠只按这张表认名字——所以任务族的 owner 从 `loop` 移到本插件时，
-//! 消费方一个字都不用改。
+//! 就绪集折叠也在这里交出（`PLUGIN.yml` 的 `shared_views:` → `task.readyset`）：
+//! 算式住 owner，第二个读者按名字读（`D-221`），本插件不认识任何兄弟插件。
+//! 折叠不认端口形参，也不认识别人交来的表：[`TASK_VOCAB`] 就是它读的那五格。
 
-use symbio_plugin_api::{Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb};
+use symbio_plugin_api::{
+    Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb, ViewDecl,
+};
 // 跨插件共享的五条走清单生成物（`PLUGIN.yml` 的 `shared_events` → `events.rs`）。
 // `pub(crate) use` 是**转手**不是复制：本插件的写方 / 读方从 `crate::decl` 取名字，
 // 拼写的唯一出处仍是生成物。
@@ -43,6 +46,45 @@ pub(crate) const TASK_VOCAB: TaskVocab<'static> = TaskVocab {
 
 /// owner —— 与目录名同形（`crates/symbio-plugin-task`），装配表按它排序与报缺口。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-task";
+
+/// 对外可读的那条视图：就绪集（名册 #23，`D-289`）。
+///
+/// 名字经 `PLUGIN.yml` 的 `shared_views:` 投影进 `symbio_plugin_api::view_names`；
+/// 读方按名字读、不认识形状（`D-221`）——`session` 的统计列因此不再链 core 的投影。
+pub(crate) const READYSET_VIEW: &str = "task.readyset";
+
+/// 扫描成本上界（事件条数）。它是环内窗口求值的预算；跨插件读口不查它——读侧按
+/// 调用方给的切片全量折（`D-284`）。
+///
+/// 声明的上界必须与全仓**同一个值**（`seal` 的 `ViewCostMismatch`：切点只有一个），
+/// 所以这里不按「任务通常没几条」调小——调小会改整张表的切点。
+const COST: u32 = 4096;
+
+pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
+    name: READYSET_VIEW,
+    ver: 1,
+    // 折叠读的就是上面那五格的 `task_id`，外加开节点那条的 `depends_on` 与租约那条的
+    // `until_ms`。任务族有 `EventDecl` 但没有 `FactDecl`（这一族不属于义务环），所以这
+    // 七对按 `D-282` 的第二种读法登记：名字由 `EventDecl` 保证拼对，字段无从校验——
+    // 装载期进 `Frozen::assertion_reads()` 的名单，不是静默跳过。
+    reads: &[
+        (EVENT_TASK_OPENED, "task_id"),
+        (EVENT_TASK_OPENED, "depends_on"),
+        (EVENT_TASK_PROGRESS, "task_id"),
+        (EVENT_TASK_HELD, "task_id"),
+        (EVENT_TASK_ASSERTED, "task_id"),
+        (EVENT_TASK_ASSIGNED, "task_id"),
+        (EVENT_TASK_ASSIGNED, "until_ms"),
+    ],
+    // 就绪集是读数，不替任何事实关门：调度者落的 `task.ready` / `task.assigned` 由
+    // 写侧的 [`crate::task::ScheduleDecider`] 自己负责。
+    evidence: &[],
+    cost: COST,
+    eval: crate::readyset::readyset_value,
+    // 没有跨会话合并的那一半：就绪集是**当前**候选集，把两个会话的候选集并起来不是
+    // 任何一个读数的口径（与 `memory.live` 同一族判断）。
+    agg: None,
+}];
 
 pub(crate) const EVENTS: &[EventDecl] = &[
     // ── 任务族 ──
@@ -84,7 +126,7 @@ fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: EVENTS,
         facts: &[],
-        views: &[],
+        views: VIEWS,
         ports: &[],
         actors: Vec::new(),
         rows: &[],

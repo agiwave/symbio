@@ -412,15 +412,23 @@ fn turn_facts(final_first: bool) -> Vec<symbio_kernel::event::Event> {
     }
 }
 
-/// 当前就绪的任务 id（`readyset` = 模型唯一的调度候选来源）。
-fn ready_ids(p: &SessionPlugin, sid: &str) -> Vec<String> {
-    let snapshot = read_wal(p, sid);
-    symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
-        .apply(&snapshot, i64::MAX, symbio_kernel::view::Budget::generous())
-        .value
-        .ready
+/// 某一格上落了哪些任务 id（**事实层**的读法，不是就绪集）。
+///
+/// 就绪集是任务能力包的折叠（名册 #23，`D-289`），本测试二进制不链接它（E-009）——
+/// 这里只判 session 这一支**写了什么**：挂起与恢复各自落成哪一格的哪条任务。
+/// 「这两格真的让模型看不见 / 重新看见那条任务」归 owner 的单测
+/// （`crates/symbio-plugin-task/src/readyset.test.rs`）与 e2e `t34-preemption.mjs`
+/// （它读生产二进制的 `readyset.ready`）。在这里复算一份折叠就是替身 owner。
+fn task_ids_in(p: &SessionPlugin, sid: &str, verb: symbio_kernel::event::Verb) -> Vec<String> {
+    read_wal(p, sid)
         .iter()
-        .map(|t| t.task_id.clone())
+        .filter(|e| e.entity == symbio_kernel::event::Entity::Task && e.verb == verb)
+        .filter_map(|e| {
+            e.payload
+                .get("task_id")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
         .collect()
 }
 
@@ -458,10 +466,9 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
     state.inner.write().await.set_working_for_test(true);
     assert!(!p.clone().drain_inbox_once().await, "忙则一趟不启动");
     assert_eq!(p.inbox_items(sid).await.len(), 1, "忙则排队（ADR-026）不变");
-    assert_eq!(
-        ready_ids(&p, sid),
-        vec!["x1".to_string()],
-        "忙窗不动事实：就绪集不变，挂起还没落格"
+    assert!(
+        task_ids_in(&p, sid, Verb::Held).is_empty(),
+        "忙窗不动事实：挂起还没落格（就绪集因此不变，那是折叠那一侧的事）"
     );
 
     // ② 空闲：**先落挂起，再开轮**——顺序反了就是「插话轮开跑时任务还在就绪集里」。
@@ -478,9 +485,10 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
         has_fact(&p, sid, Entity::Control, Verb::Opened),
         "打断处置必须留一条 `control × opened`（DE-037 §6.1 验收 1）"
     );
-    assert!(
-        ready_ids(&p, sid).is_empty(),
-        "挂起的任务退出就绪集——插话轮因此看不见在跑的任务（DE-037 §5）"
+    assert_eq!(
+        task_ids_in(&p, sid, Verb::Held),
+        ["x1".to_string()],
+        "挂起钉的是**在跑的那条任务**（不是随便一格）——插话轮因此看不见它（DE-037 §5；「看不见」由 owner 的折叠算出）"
     );
     assert!(
         symbio_sdk::invariants::check_all(vocab(), &read_wal(&p, sid)).is_empty(),
@@ -497,9 +505,9 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
         "恢复必须落成 `task × progressed` 事实（DE-016 §9.2）"
     );
     assert_eq!(
-        ready_ids(&p, sid),
-        vec!["x1".to_string()],
-        "恢复之后任务回到就绪集——挂起是临时的"
+        task_ids_in(&p, sid, Verb::Progressed),
+        ["x1".to_string()],
+        "恢复钉回同一条任务——挂起是临时的（重新进就绪集归 owner 的折叠）"
     );
     assert!(
         symbio_sdk::invariants::check_all(vocab(), &read_wal(&p, sid)).is_empty(),
@@ -547,10 +555,10 @@ async fn final_after_the_task_queues_instead_of_holding() {
         !has_fact(&p, sid, Entity::Control, Verb::Opened),
         "排队不产生打断处置"
     );
-    assert_eq!(
-        ready_ids(&p, sid),
-        vec!["x1".to_string()],
-        "没挂起 ⇒ 就绪集原样"
+    assert!(
+        task_ids_in(&p, sid, Verb::Held).is_empty()
+            && task_ids_in(&p, sid, Verb::Progressed).is_empty(),
+        "排队一支**不动任务格**：既没挂起也没恢复 ⇒ 就绪集原样（原样与否由 owner 的折叠判）"
     );
     assert_eq!(
         state.inner.read().await.preempt,
@@ -660,13 +668,13 @@ async fn pending_work_separates_events_from_retries() {
 
 // ==================== S07 抢占判定（纯函数 + 行，D-190） ====================
 //
-// 判定表四类结论、预算读的是**行自己的** `budget_ms`，以及挂起 / 恢复对就绪集的
-// 影响。这些用例随策略实现从 core 迁来（D-190）——判据没变，只是落点归 owner。
+// 判定表四类结论、预算读的是**行自己的** `budget_ms`，以及挂起 / 恢复**落了哪一格**。
+// 这些用例随策略实现从 core 迁来（D-190）——判据没变，只是落点归 owner。
+// 「落了这一格之后任务离开就绪集」不是本文件的判据：那是折叠，随它一起归任务能力包
+// （名册 #23，`D-289`；组合判据在 e2e `t34-preemption.mjs`）。
 
 use symbio_kernel::actors::{Pattern, Scope};
 use symbio_kernel::store::EventStore;
-use symbio_kernel::view::Budget;
-use symbio_plugin_api::events::EVENT_TASK_PROGRESS;
 
 /// 造一个在跑任务（供插话 / 熔断场景使用）。
 fn running_task(store: &EventStore, id: &str) {
@@ -770,57 +778,55 @@ fn interruption_after_final_is_queued_not_preempted() {
     );
 }
 
-/// DE-037 §6 验收 2 + 3：挂起期间任务不在 readyset（二次调度 0）；以挂起锚 as-of 重放
-/// 与挂起前一致（恢复零状态迁移）；恢复事件让任务重新就绪。
+/// DE-037 §6 验收 2 的**写侧半边**：抢占留下的挂起 / 恢复必须落在 owner 折叠认的那两格
+/// （`task × held` 与 `task × progressed`，载荷都带 `task_id`，挂起那条还带 as-of 锚）。
+///
+/// 「落了这一格 ⇒ 任务离开就绪集」「as-of 重放与挂起前一致」是**折叠**的判断，归
+/// `crates/symbio-plugin-task`（名册 #23，`D-289`）：本测试二进制不链接它（E-009），
+/// 在这里复算一份就绪集就是替身 owner，只会把那条真判据变成假绿。插话链上「有没有落格」
+/// 仍在本文件判（`interjection_holds_the_running_task_and_releases_it_when_idle`）。
 #[test]
-fn suspended_task_leaves_readyset_and_restores() {
+fn preemption_events_land_on_the_cells_the_owner_fold_reads() {
     let store = EventStore::new();
     running_task(&store, "t1");
-    let before =
-        symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
-            .apply(&facts(&store), 9_999, Budget::generous());
-    assert_eq!(before.value.ready.len(), 1);
-
-    // 挂起（锚 T = 挂起前 head；held 事件 ts 在未来——as-of 语义下可被锚排除）。
     let t = store.head().value();
-    store
-        .append(PreemptionDecider.held_event("t1", t, 0).with_ts(5_000))
-        .unwrap();
-    let events = facts(&store);
-    let suspended =
-        symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
-            .apply(&events, 9_999, Budget::generous());
-    assert!(
-        suspended.value.ready.is_empty(),
-        "挂起期间不得二次调度（DE-037 §6 验收 2）"
+
+    let held = PreemptionDecider.held_event("t1", t, 0).with_ts(5_000);
+    assert_eq!(held.kind, EVENT_TASK_HELD, "名字就是声明表里那一格");
+    assert_eq!(held.entity, Entity::Task);
+    assert_eq!(
+        held.verb,
+        Verb::Held,
+        "挂起是 `held` 那一格，不是 `asserted`"
     );
+    assert_eq!(
+        held.payload.get("task_id").and_then(|v| v.as_str()),
+        Some("t1"),
+        "折叠按 `task_id` 认挂起的是哪条活"
+    );
+    store.append(held).expect("挂起入格");
 
-    // 验收 3：以挂起锚（as-of 排除 held 事件）重放 → 与挂起前一致。
-    // 恢复零状态迁移——投影是纯函数，给同一个 T 就得到同一个视图（DE-016 §9.2）。
-    let at_t =
-        symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
-            .apply(&events, 1_000, Budget::generous());
-    assert_eq!(at_t.value, before.value, "as-of=T 重放与挂起前一致");
+    let resumed = PreemptionDecider.resume_event("t1", t);
+    assert_eq!(resumed.entity, Entity::Task);
+    assert_eq!(
+        resumed.verb,
+        Verb::Progressed,
+        "恢复也是一条事件，不是改历史"
+    );
+    assert_eq!(
+        resumed.payload.get("task_id").and_then(|v| v.as_str()),
+        Some("t1"),
+        "与挂起成对：同一任务的第二次挂起要有第二次恢复"
+    );
+    store.append(resumed).expect("恢复入格");
 
-    // 恢复：一条 progressed 事件 → 重新就绪（零状态迁移代码）。
-    store
-        .append(
-            Event::pending(
-                "resume-t1",
-                EVENT_TASK_PROGRESS,
-                Entity::Task,
-                Verb::Progressed,
-                0,
-                "session/main",
-            )
-            .with_payload(serde_json::json!({ "task_id": "t1" })),
-        )
-        .unwrap();
-    let restored =
-        symbio_sdk::projection::readyset::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
-            .apply(&facts(&store), 9_999, Budget::generous());
-    assert_eq!(restored.value.ready.len(), 1, "恢复后重新进入 readyset");
-    assert_eq!(restored.value, before.value, "恢复后视图与挂起前一致");
+    // 挂起与恢复都只是**多一格**：事实源里没有一处状态被搬动（append-only）。
+    let events = facts(&store);
+    assert_eq!(events.len(), 3, "开格 + 挂起 + 恢复，三条都是新增");
+    assert!(
+        events.iter().all(|e| e.verb != Verb::Asserted),
+        "抢占一支不碰终态：{events:?}"
+    );
 }
 
 /// DE-037 §5：判定者的生产行只授予 `judge.intent`——无 `reply.*` 写权（不得直接发言）。

@@ -17,16 +17,19 @@
 //!
 //! | 文件 | 职责 |
 //! |---|---|
-//! | [`decl`] | 任务族的事件声明、角色（`CountsRework`）与词汇表 |
+//! | [`decl`] | 任务族的事件声明、角色（`CountsRework`）、词汇表与对外的 `task.readyset` 视图 |
+//! | [`readyset`] | 就绪集折叠：谁就绪、什么序（名册 #23，`D-289`）；容量是读者套上的预算 |
 //! | [`task`] | 声明 → 事实的折叠（开 / 推进 / 终态 / 返工）、调度判据、调度段排版、收束贡献 |
 //! | [`context`] | 把调度段交给请求视图（段身份 `READYSET`，prio 70） |
 //! | [`plugin`] | 插件本体：无工具、无路由，只是装配挂载点 |
 //!
-//! 内部依赖是单向的：`context` / `task` 只读 [`decl`] 的名字；`plugin` 不认识其余模块。
+//! 内部依赖是单向的：`context` / `task` / `readyset` 只读 [`decl`] 的名字；`plugin`
+//! 不认识其余模块。
 
 mod context;
 mod decl;
 mod plugin;
+mod readyset;
 mod task;
 
 pub use plugin::TaskPlugin;

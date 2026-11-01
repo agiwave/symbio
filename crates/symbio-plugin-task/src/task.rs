@@ -4,7 +4,7 @@
 //!
 //! | 消费方 | 形态 | 扩展面 |
 //! |---|---|---|
-//! | 读出口 `session/stats` 的 `readyset` 列 | 事实源读什么算什么 | 共享声明（`TASK_VOCAB`） |
+//! | 读出口 `session/stats` 的 `readyset` 列 | 事实源读什么算什么 | 共享声明视图（`task.readyset`，`D-289`） |
 //! | 调度段 [`prompt_section`] | 请求视图置顶一段 `role=user` 的提示 | 上下文 provider（`context`） |
 //! | 收束调度 | 就绪集 → `task.ready` / `task.assigned` | 收束贡献（[`ScheduleContributor`]，D-250） |
 //!
@@ -56,14 +56,14 @@ use symbio_plugin_api::effects::{
 };
 use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
 use symbio_plugin_api::settle::{Contribution, Contributor, SettleFace, Settling};
-use symbio_plugin_api::ReadySetView;
 use symbio_plugin_api::PRINCIPAL_SCHEDULER;
-use symbio_plugin_api::{actor_can_assign_work, readyset_for, Entity, Event, Verb};
+use symbio_plugin_api::{actor_can_assign_work, Entity, Event, Verb};
 
 use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
-    EVENT_TASK_PROGRESS, EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED, TASK_VOCAB,
+    EVENT_TASK_PROGRESS, EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED,
 };
+use crate::readyset::{ready_view, ReadySetView};
 
 // ==================== 声明态：任务表的输入形状 ====================
 //
@@ -363,7 +363,7 @@ fn declared_items(args: &serde_json::Value) -> Vec<TaskItem> {
 /// ## 为什么实现住这里，而不是工具所在的那个插件
 ///
 /// 行为名 [`behaviors::TASK_TABLE`] 的 owner 是**任务词族**的 owner：格位、角色与
-/// 折叠（[`step`] / [`rebuild`] / [`TASK_VOCAB`]）都在本插件。工具那边只声明「我写
+/// 折叠（[`step`] / [`rebuild`] / [`crate::readyset`]）都在本插件。工具那边只声明「我写
 /// 任务表」，不需要也不应该知道 `task.*` 有几格。两侧各自声明，中间没有中心映射表。
 ///
 /// ## 参数形状是契约的一部分
@@ -438,7 +438,7 @@ symbio_plugin_api::submit_behavior!(TaskTable);
 /// `snapshot` 是本会话事实的**值**（[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
 /// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
 pub(crate) fn prompt_section(snapshot: &[Event], cap: usize) -> Option<String> {
-    let ready = readyset_for(TASK_VOCAB, cap).read_all(snapshot).value.ready;
+    let ready = ready_view(snapshot, i64::MAX, cap).ready;
     if ready.is_empty() {
         return None;
     }
@@ -723,9 +723,7 @@ impl Contributor for ScheduleContributor {
         }
         let spec = ScheduleDecider::spec();
         let started = symbio_plugin_api::clock_now_ms();
-        let view = readyset_for(TASK_VOCAB, readyset_cap(at.history))
-            .read_all(at.history)
-            .value;
+        let view = ready_view(at.history, i64::MAX, readyset_cap(at.history));
         let facts = ScheduleDecider.decide(&spec, &view, at.history, at.principal, at.now_ms);
         let elapsed = symbio_plugin_api::clock_now_ms() - started;
         if elapsed > SCHEDULE_BUDGET_MS as i64 {

@@ -13,14 +13,15 @@ use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
 use symbio_plugin_api::settle::{Contributor, SettleFace, Settling};
 use symbio_plugin_api::PRINCIPAL_SCHEDULER;
 use symbio_plugin_api::{
-    actor_can_assign_work, check_all, readyset_for, Budget, Entity, Event, EventDecl, EventStore,
-    Pattern, Scope, Seq, Store, Verb, PRINCIPAL_MAIN,
+    actor_can_assign_work, check_all, Entity, Event, EventDecl, EventStore, Pattern, Scope, Seq,
+    Store, Verb, PRINCIPAL_MAIN,
 };
 
 use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
-    EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED, TASK_VOCAB,
+    EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED,
 };
+use crate::readyset::{ready_all, ready_view};
 use symbio_testkit::trivial_actor_spec;
 
 /// 判据的词汇面：本 crate 的声明表（`submit_declarations!`）链接进来即生效。
@@ -210,10 +211,7 @@ fn readyset_lists_dependency_closed_tasks_only() {
     );
 
     let snapshot = store.range(Seq::new(0));
-    let ready = readyset_for(TASK_VOCAB, usize::MAX)
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value
-        .ready;
+    let ready = ready_all(&snapshot, i64::MAX);
     let ids: Vec<&str> = ready.iter().map(|t| t.task_id.as_str()).collect();
     assert_eq!(ids, vec!["t1", "t3"], "t2 依赖 t1（未终态）⇒ 不就绪");
 
@@ -245,10 +243,7 @@ fn a_dependency_cycle_is_flagged_and_yields_an_empty_readyset() {
         violations.iter().any(|v| v.why.contains("依赖环")),
         "成环必须被断言抓到：{violations:?}"
     );
-    let ready = readyset_for(TASK_VOCAB, usize::MAX)
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value
-        .ready;
+    let ready = ready_all(&snapshot, i64::MAX);
     assert!(ready.is_empty(), "环 ⇒ 依赖永不闭合 ⇒ 无就绪任务");
 }
 
@@ -559,9 +554,7 @@ fn a_hundred_injections_yield_exactly_one_lease() {
     let mut now = 1_000i64;
     for _ in 0..100 {
         let snap = store.range(Seq::new(0));
-        let view = readyset_for(TASK_VOCAB, 1)
-            .apply(&snap, now, Budget::generous())
-            .value;
+        let view = ready_view(&snap, now, 1);
         let facts = ScheduleDecider.decide(&spec, &view, &snap, PRINCIPAL_SCHEDULER, now);
         for f in &facts {
             if f.kind == EVENT_TASK_ASSIGNED {
@@ -608,9 +601,7 @@ fn an_expired_lease_is_judged_dead_and_reassigned() {
     let snap = store.range(Seq::new(0));
 
     // 到点：候选集回来了，调度者先判死、再发放。
-    let view = readyset_for(TASK_VOCAB, 1)
-        .apply(&snap, 1_000, Budget::generous())
-        .value;
+    let view = ready_view(&snap, 1_000, 1);
     let facts = ScheduleDecider.decide(&spec, &view, &snap, PRINCIPAL_SCHEDULER, 1_000);
     let death = facts
         .iter()
@@ -630,9 +621,7 @@ fn a_spec_without_assign_work_writes_nothing() {
     let store = EventStore::new();
     open_task(&store, "a", &[], PRINCIPAL_SCHEDULER);
     let snap = store.range(Seq::new(0));
-    let view = readyset_for(TASK_VOCAB, 1)
-        .apply(&snap, 9_999, Budget::generous())
-        .value;
+    let view = ready_view(&snap, 9_999, 1);
 
     // 只持 `produce.artifact` 的工人主体：能产物，不能派活。
     let speaker = trivial_actor_spec("session/worker");
