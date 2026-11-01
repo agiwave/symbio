@@ -360,8 +360,9 @@ impl ClosureReason {
 // ── 任务格子（[DE-033 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）──
 //
 // 这一节现在是空的。五格（开任务 / 推进 / 暂挂 / 终态 / 发放）与 `task.ready` /
-// `task.rework_created` 同属一个 owner：写方与调度者都在 `crates/symbio-plugin-loop`，`session` 只作为
-// **第二个消费方**读它们——名字因此登记进 owner 清单（`shared_events`，判据 CS-007），
+// `task.rework_created` 同属一个 owner：写方与调度者都在 `crates/symbio-plugin-task`，`session` 只作为
+// **第二个消费方**读它们（就绪集那条折叠也住在 owner 那一侧，跨插件的读数按名字读
+// `task.readyset`，DE-045 `D-289`）——名字因此登记进 owner 清单（`shared_events`，判据 CS-007），
 // 格子与租约纪律随 owner 的 `EventDecl` 走（DE-024 D-204 / D-206）。
 //
 // 领域形状是载荷数据，不在语法里：任务图是事件的 `depends_on` 载荷字段（**数据不是

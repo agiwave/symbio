@@ -28,7 +28,7 @@
  * | 源码写法 | 归属 |
  * |---|---|
  * | `crate::chat::ChatNode` | `chat` |
- * | `crate::projection::readyset::…` | `projection` |
+ * | `crate::projection::transcript::…` | `projection` |
  * | `use super::…` / `use self::…` | 域内，不计 |
  * | `crate::keys::PATH` | `keys`（域间边，即使只取一个键） |
  *

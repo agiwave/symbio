@@ -83,7 +83,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 ];
 
 /// **消费方**侧的任务族词汇表（DE-024 D-206）：这一族的 owner 是 `crates/symbio-plugin-task`，本插件只是
-/// 读 `readyset` / `autonomy` 两列的第二个消费方，所以拼写取自清单生成物
+/// 消费者——自己的 `autonomy` 折叠用这张表，就绪集列则按名字读 owner 的 `task.readyset`
+/// （`D-289`）。拼写因此取自清单生成物
 /// `symbio_plugin_api::events`——不是兄弟插件（E-009 禁那条边），也不是 core 或内核代答。
 /// 交出整族而不是本插件用到的那两格：折叠收的是同一张表，两张各读各的拼写迟早分岔。
 pub(crate) const TASK_VOCAB: symbio_sdk::projection::task_vocab::TaskVocab<'static> =

@@ -65,7 +65,8 @@ pub struct TurnSettings {
     pub worker_force_prefix: String,
     pub worker_keywords: String,
     pub worker_min_chars: usize,
-    /// 调度容量（`readyset` 的 `cap`）：就绪集最多这么多笔。
+    /// 调度容量：就绪集一轮最多派这么多笔。`cap` 不在折叠里——它是**读者这一轮的预算**
+    /// （`task.readyset` 交的是未截断的候选集，DE-045 `D-289`）。
     ///
     /// 写方是**会话配置**（`PLUGIN.yml` 的 `task_cap`），不是行常量——并发度是参数
     /// 不是结构（[DE-034](../../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约") §4）。

@@ -39,8 +39,9 @@ use symbio_sdk::chat::chat_node::{MessageContent, NodeStatus};
 /// 1. `slots::RECALL`：记忆是**背景事实**。置顶而不是置尾——置尾会把「最后一条 user
 ///    消息」从用户的问题换成记忆，mock 场景匹配与轮次窗口都会读错；也不进系统提示词
 ///    ——那里有「唯一真源 = 注册段」的纪律（`crates/symbio-plugin-session/README.md`）。
-/// 2. `slots::READYSET`：`readyset` 投影的**候选集**，不是替模型决定做哪件事
-///    （`projection::readyset` 模块头的边界）。
+/// 2. `slots::READYSET`：任务能力包（`crates/symbio-plugin-task::context`）交上来的就绪集
+///    **候选集**，不是替模型决定做哪件事（`task.readyset` 那条折叠的模块头划了这个界，
+///    容量截在读者这一侧，`D-289`）。
 /// 3. `slots::DELEGATE`：委派者的身份目录。
 pub fn build_request_sections(sections: &[(&'static str, String)]) -> Vec<ChatNode> {
     sections

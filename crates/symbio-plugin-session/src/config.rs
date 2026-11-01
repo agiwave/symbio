@@ -340,7 +340,7 @@ pub struct SessionConfig {
     /// 改造在 149-ii 接线。
     #[serde(default = "default_presentation_tree")]
     pub presentation_tree: String,
-    /// 调度容量（`readyset` 的 `cap`）：**同时**是「一轮最多派几笔活」。
+    /// 调度容量（`cap`）：**同时**是「一轮最多派几笔活」。
     ///
     /// ## 它是 `cap` 的写方
     ///
@@ -348,6 +348,10 @@ pub struct SessionConfig {
     /// `cap = 1`：调度器、租约、仲裁的逻辑**一行不改**，系统退化为串行 FIFO。
     /// 这个数不是行常量、也不是调度器自己的字段——它是**会话**的旋钮，因为「同时
     /// 能推进几件事」是这台机器上这个会话的配置。
+    ///
+    /// `cap` 不喂给折叠：`task.readyset` 交的是**未截断**的候选集（owner 在
+    /// `crates/symbio-plugin-task`，`D-289`），截断发生在读者这一侧——调度段（owner 经
+    /// 事实读到同一个数）与本插件的 `stats.readyset` 列各按它截。
     ///
     /// `0` 与 `1` 同义（容量为零的调度器不是「更保守」，是「永不动」）：
     /// 读侧按 `cap.max(1)` 归一，不把「写错一个数」变成「系统停摆」。

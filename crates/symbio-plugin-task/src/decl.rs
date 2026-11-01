@@ -34,8 +34,9 @@ pub(crate) const EVENT_TASK_READY: &str = "task.ready";
 /// 取这一格，不抄名字（DE-024 D-203）。
 pub(crate) const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 
-/// 本插件交出**任务族**的拼写（DE-024 D-206）：core 的 `readyset_for` 在构造期收这张表，
-/// 字段是它们在算法里的角色——终态与租约同落 `Task × Asserted`，所以按格子命不出这五个名字。
+/// 本插件交出**任务族**的拼写（DE-024 D-206）：字段是它们在算法里的角色——终态与租约同落
+/// `Task × Asserted`，所以按格子命不出这五个名字。就绪集折叠读的正是这张表，同包直接引用，
+/// 不必再走构造期形参（DE-045 `D-289`）。
 pub(crate) const TASK_VOCAB: TaskVocab<'static> = TaskVocab {
     opened: EVENT_TASK_OPENED,
     progressed: EVENT_TASK_PROGRESS,
@@ -90,8 +91,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // ── 任务族 ──
     //
     // 这一族的写方与调度者都在本插件，读数被 `session` 的 `stats` 列消费——名字随
-    // owner 登记进清单（DE-024 D-204），折叠在构造期收 [`TASK_VOCAB`] 的拼写
-    // （D-206）。领域形状：任务图是 `depends_on` 载荷字段（数据不是机制，C14 判无环），
+    // owner 登记进清单（DE-024 D-204），折叠在本包里直接引用 [`TASK_VOCAB`] 的拼写
+    // （D-206 的构造期形参通道在 owner 这里退场，DE-045 `D-289`）。领域形状：任务图是
+    // `depends_on` 载荷字段（数据不是机制，C14 判无环），
     // 返工是新增一条事件而不是改历史（append-only 已提供撤销语义）。
     // 开任务：载荷 `{ task_id, depends_on, goal }`。
     EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)),

@@ -26,9 +26,12 @@
  *
  * 它数的是**core 这一侧的投影面**，不是「core 有多少 `.rs`」：`vocab.rs` / `task_vocab.rs`
  * 是折叠的**参数表**（不产 `Projection`），`mod.rs` 是 trait 本身——它们长宽都不判。
- * 目标是把两格继续往下推：今天还留在 core 的三个构造器（`readyset_for` / `transcript`
- * / `turnstate`）各有 ≥2 个非 core 的 crate 在读（`loop` / `session`），
- * 读者迁完它们就该跟着走。跨插件想读别人的折叠，走
+ * 目标是把两格继续往下推：今天还留在 core 的两个构造器（`transcript` / `turnstate`）
+ * 各有 ≥2 个非 core 的 crate 在读（`loop` / `session`），读者迁完它们就该跟着走。
+ * `readyset` 已在 `D-289` 随它的 owner 搬进 `crates/symbio-plugin-task`——搬过去之后它是
+ * 声明视图的 `eval`（`ViewDecl`），不再是 `Projection::new` 的构造器，因此**不在本脚本的
+ * 判定面上**：这条口径写在这里是免得把 PP 的绿灯读成「折叠都还在判」——那条算式的确定性
+ * 由 owner 包内的双跑用例与 e2e 守。跨插件想读别人的折叠，走
  * `symbio_plugin_api::views` 的按名字读口，**不要**在 core 里再写一份。
  *
  * 环境变量 `CORE_PROJECTION_BASELINE=<files>:<ctors>` **只给回归测试用**（真仓门禁不设）；

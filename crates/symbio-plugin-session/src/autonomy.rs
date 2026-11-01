@@ -13,13 +13,15 @@
 //!
 //! 判据是消费方分布：这条折叠的**唯一**生产消费方是本插件（[`crate::stats`] 与
 //! [`crate::stats_reading`]），core 里没有第二个模块在生产用它 ⇒ 它不是共享类型，
-//! 占根出口只会让「读数口径」住在没人读的地方。同族的 `readyset` 由
-//! `crates/symbio-plugin-task` 与本插件**两方**消费，因此留在 core——两条不同的处置
-//! 来自同一条判据，不是两份口径。
+//! 占根出口只会让「读数口径」住在没人读的地方。同族的 `readyset` 是**另一种**分布：
+//! 任务能力包（owner 兼调度者）与本插件两方都读它 ⇒ 折叠跟着 owner 住进
+//! `crates/symbio-plugin-task`，本插件按名字读 `task.readyset`（`D-289`）。两条不同的
+//! 处置来自同一条判据，不是两份口径。
 //!
 //! 词汇仍是 [`symbio_sdk::projection::task_vocab::TaskVocab`]（D-206）：本折叠只用 `held` 与 `terminal` 两格，
-//! 但收的是整张表——与 core 的 `readyset_for` 拿到的是**同一份**拼写
-//! （`crate::declarations::TASK_VOCAB`），两个折叠不可能各读各的拼写而漂移。
+//! 但收的是整张表——`crate::declarations::TASK_VOCAB` 取自清单生成物
+//! `symbio_plugin_api::events`，与 owner 交给它自己那条折叠的是**同一份**拼写（都来自它
+//! `PLUGIN.yml` 的 `shared_events`），两个折叠不可能各读各的拼写而漂移。
 //!
 //! ## 为什么用「曾 held」而不是「当前 held」
 //!

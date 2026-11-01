@@ -917,15 +917,19 @@ fn elimination_event_keeps_invariants_green() {
 
 // ── 彩排：任务树与返工 ──
 //
-// DAG 调度 + readyset（C14 无环）；独立验证者（C15 不自验，构造期拒绝）；
+// DAG 无环（C14）；独立验证者（C15 不自验，构造期拒绝）；
 // 返工闭环（返工那格，返工次数有界 = 终止性前提 2）。
+//
+// 就绪集不在这里：那条折叠随它的 owner 进了 `crates/symbio-plugin-task`（DE-045 `D-289`），
+// 本节的三条判据都是**守门**（`invariants`），不是读数。
 
 use crate::invariants::{acyclic_deps, rework_bounded};
 use crate::projection::task_vocab::TaskVocab;
 
 /// 任务族五格的**夹具拼写**（DE-024 D-206）：名字与格位都在 owner 插件
-/// （`crates/symbio-plugin-loop::control_decl` + 清单 `shared_events`），core 与内核都不认识它们。
-/// core 的夹具因此自己交一张表给折叠的构造口——与 `REWORK_VOCAB` 同一形状：词汇是数据。
+/// （`crates/symbio-plugin-task` 的 `EventDecl` + 清单 `shared_events`），core 与内核都不认识它们。
+/// core 的夹具因此自己写一遍这一族的拼写，交给落格的辅助函数——与 `REWORK_VOCAB` 同一形状：
+/// 词汇是数据。
 const TASK: TaskVocab<'static> = TaskVocab {
     opened: "task.opened",
     progressed: "task.progress",
@@ -939,7 +943,7 @@ const TASK: TaskVocab<'static> = TaskVocab {
 /// 与 `REWORK` 同一形状：词汇是数据，不是 core 的常量。
 const MEMORY_ENCODED: &str = "memory.encoded";
 
-/// 返工那一格：名字与角色随 owner 插件（`crates/symbio-plugin-loop::control_decl`），core 不认识它。
+/// 返工那一格：名字与角色随 owner 插件（`crates/symbio-plugin-task::decl` 的 `EventDecl`），core 不认识它。
 ///
 /// core 的判据只认角色（DE-024 D-203），所以这里自己声明一行当词汇面——生产环境里
 /// 这张表由 owner 在装配期交来（`Frozen::vocab`）。
