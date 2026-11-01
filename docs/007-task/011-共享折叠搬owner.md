@@ -9,7 +9,7 @@ created: 2026-10-29
 parent: T-001-能力全面拆分
 deps: []
 where: `docs/003-design/026-能力拆分与影响类.md` §2.3, `crates/symbio-sdk/src/projection`, `crates/symbio-plugin-api/src/views.rs`, `crates/symbio-plugin-loop/src`, `crates/symbio-plugin-session/src/stats.rs`
-exit: 成本 / 校准 / 声誉 / 凸显四条构造器（覆盖名册 18/19/20/22/23/28 六行）离开 `symbio-sdk`，各归 owner 能力包；第二个读者改 `ViewRead::named`；迁移前后读数逐字不变；`PP-004` 的 files / ctors 两格只降不升；每一批都是「包内声明 + 读者改名字 + `sdk` 删除」同一提交（`EX-007`：机制面新增行为 0，删除行不限——`D-283`）
+exit: 成本 / 校准 / 声誉 / 凸显四条构造器（覆盖名册 18/19/20/22/23/28 六行）离开 `symbio-sdk`，各归 owner 能力包；第二个读者改 `ViewRead::named`；迁移前后读数逐字不变（唯一例外是 `skill.retreat` 的 as-of 半边，按 `DE-026` D-286 改判随视图收到的 `now`）；`PP-004` 的 files / ctors 两格只降不升；每一批都是「包内声明 + 读者改名字 + `sdk` 删除」同一提交（`EX-007`：机制面新增行为 0，删除行不限——`D-283`）
 ---
 
 # S8：共享折叠搬 owner——第二读者改名字读
@@ -29,7 +29,7 @@ exit: 成本 / 校准 / 声誉 / 凸显四条构造器（覆盖名册 18/19/20/2
 | 行 | 状态 | 落点 |
 |---|---|---|
 | #18 成本控制 | 已落（S8a） | `crates/symbio-plugin-cost/src/decl.rs::ledger` 以 `ViewDecl` 交 `cost.ledger`；读者 `loop/breaker.rs::session_cost_ms` 与 `session/stats.rs` 的成本列同批改名字读，`sdk/src/projection/cost.rs` 随批删除（D-284 去掉扫描上界、D-285 落地）。`PP-004` 两格 6/6 → 5/5 |
-| #19 / #20 自我模型与校准 | 未起 | 两行同包 ⇒ 一个提交（`symbio-plugin-calibration`）；读者是 `session` 的自我模型列与 `skill` 的观测 |
+| #19 / #20 自我模型与校准 | 已落（S8b） | 两行是同一条折叠 ⇒ 一个提交，落点是词汇 owner `crates/symbio-plugin-skill/src/decl.rs::calibration_ledger`，以 `ViewDecl` 交 `skill.calibration`（`D-286` 改判：不立 `symbio-plugin-calibration`——校准没有自己的事实与行为）。读者 `session/stats.rs` 的校准列改名字读，`sdk/src/projection/calibration.rs` 与 `plugin-api` 的 `pub use calibration_for` 随批删除 ⇒ `PP-004` 两格 5/5 → 4/4 |
 | #22 / #28 信任账本与互信 | 未起 | 两行同包 ⇒ 一个提交（`symbio-plugin-reputation`）；`session/stats.rs` 按 `may_read` 分叉那处要一起改 |
 | #23 凸显仲裁 | 未起 | `symbio-plugin-readyset`；调度（`loop` 候选集）与读数（`session` 的 `readyset` 列）两个读者都在，改完 `readyset_for` 才离开 core |
 

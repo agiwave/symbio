@@ -1718,9 +1718,7 @@ async fn full_turn_writes_no_memory_encoding_from_the_host() {
         "编码不归本插件写（D-263：情景记忆能力包的收束贡献）：{encoded:?}"
     );
     assert!(
-        !events
-            .iter()
-            .any(|e| e.kind == symbio_plugin_api::events::EVENT_MEMORY_CALIBRATED),
+        !events.iter().any(|e| e.kind == "memory.calibrated"),
         "技能观测不归本插件写（D-262：交接缝贡献）：{kinds:?}"
     );
 }

@@ -45,7 +45,7 @@
 
 use crate::declarations::{
     CHAT_VOCAB, COMMITMENT_VOCAB, CONATION_INTENTS_VIEW, COST_LEDGER_VIEW, MESSAGE_VOCAB,
-    SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
+    SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
 };
 use std::sync::Arc;
 
@@ -59,7 +59,6 @@ use symbio_kernel::present::ReadingPanel;
 use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
 use symbio_sdk::keys::SESSION_ID;
-use symbio_sdk::projection::calibration::calibration_for;
 use symbio_sdk::projection::readyset::readyset_for;
 use symbio_sdk::projection::transcript::transcript;
 
@@ -134,6 +133,14 @@ pub(super) fn empty_by_tier() -> serde_json::Value {
 /// 一份 nobody 认识的读数。
 fn empty_ledger() -> serde_json::Value {
     serde_json::json!({ "by_principal": {}, "total_ms": 0 })
+}
+
+/// 校准账的**空形状**：`{ by_skill: {} }`（与 owner 交的形状同键）。
+///
+/// 「本会话没判过技能」与「这条视图今天读不出来」在出口上都读成这一份空表；两者的区别
+/// 由 `capability_views` 那一列的可诊断缺席承担（与 [`empty_ledger`] 同一条分工）。
+fn empty_calibration() -> serde_json::Value {
+    serde_json::json!({ "by_skill": {} })
 }
 
 /// 一条视图交的档位名。形状归 owner（`D-281`），本处只做**查表**。
@@ -214,15 +221,15 @@ pub(crate) struct SessionStats {
     ///
     /// 不同币种**不相加**：金额只在同一币种内可加，汇率不是事实源里的东西。
     pub spend: serde_json::Value,
-    /// 校准（的**读侧**）：
-    /// `calibration` 投影原样序列化（`{ by_skill: { <skill_id>: { skill_id, uses,
+    /// 校准（的**读侧**）：能力包 `crates/symbio-plugin-skill` 交的 `skill.calibration`
+    /// 视图读数原样交出（`{ by_skill: { <skill_id>: { skill_id, uses,
     /// fallbacks } } }`，按 `skill_id` 字典序）——`confidence = 1 − 回退率` 的口径活在
-    /// core 的投影里，本处不重算。
+    /// owner 的折叠里，本处不重算。
     ///
-    /// 观测面是路由落下的 `memory.recalled{skill_id, fallback}`（数据，不加新格子），
-    /// 所以「本会话没编过技能」与「编了但一次没判过」都读成 `{ by_skill: {} }`——
-    /// **有据的空**，不是缺列。与四列同一份切片、同一个 as-of，`may_read = false`
-    /// 时同样走空切片（与就绪集列同族，不取声誉列的空对象形态）。
+    /// 观测面是技能召回行落下的 `memory.calibrated{skill_id, fallback}`，所以「本会话
+    /// 没编过技能」与「编了但一次没判过」都读成 `{ by_skill: {} }`——**有据的空**，不是
+    /// 缺列。与四列同一份切片、同一个 as-of，`may_read = false` 时同样走空切片
+    /// （与就绪集列同族，不取声誉列的空对象形态）。
     pub calibration: serde_json::Value,
     /// 断点（`checkpoint` 视图原样序列化：`last_seq` / `event_count` /
     /// `kind_counts`——末两项就是「这一格里到底有多少事实」）。
@@ -481,12 +488,9 @@ pub(crate) fn read(
     // 金额列：同一个切片、同一个 as-of，读应答载荷的 `spend`（价格 × 用量，
     // 写方在 adapter 边界折好）。它不重算价格——配置改了也只影响之后的事实。
     let spend = spend_ledger().read_all(&snapshot).value;
-    // 校准列：与四列同一份
-    // 切片、同一个 as-of。名字交进投影（DE-024 D-205）：写方是 `loop`，本插件经清单
-    // 生成物取它——不引用兄弟插件（E-009），也不由 core 代答。
-    let cal = calibration_for(symbio_plugin_api::events::EVENT_MEMORY_CALIBRATED)
-        .read_all(&snapshot)
-        .value;
+    // 校准列：折叠与阈值口径归技能能力包（名册 #19/#20，`D-221` 按名字读），本插件
+    // 不重算回退率。读不到 ⇒ 有据的空形状并出声，与成本列同一条纪律。
+    let calibration = read_view_or(SKILL_CALIBRATION_VIEW, &snapshot, empty_calibration);
     let ck = checkpoint().read_all(&snapshot).value;
 
     // 档位取两列的并集：只开轮没收束的档位（时延列无样本）与只有兜底样本的
@@ -542,8 +546,6 @@ pub(crate) fn read(
         .map_err(|e| PluginError::InternalError(format!("用量台账序列化失败：{e}")))?;
     let spend = serde_json::to_value(&spend)
         .map_err(|e| PluginError::InternalError(format!("金额台账序列化失败：{e}")))?;
-    let calibration = serde_json::to_value(&cal)
-        .map_err(|e| PluginError::InternalError(format!("校准序列化失败：{e}")))?;
     let checkpoint = serde_json::to_value(&ck)
         .map_err(|e| PluginError::InternalError(format!("断点序列化失败：{e}")))?;
     // 不变量清单的词汇面（DE-024 D-203）：判据问「这个名字扮演什么角色」，答案取自

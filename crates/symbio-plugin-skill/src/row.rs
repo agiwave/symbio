@@ -16,7 +16,7 @@
 //! - 债键 `(recall, stage)` 来自宿主公开的 `turn.recalled` 视图（`recall` = 技能事件的
 //!   seq，`stage` = 召回阶段格的 seq）；
 //! - 技能正文 / 触发串 / id 从 `history` 里同 seq 的 `memory.encoded` 取；
-//! - 置信度从 `memory.calibrated` 折（`calibration_for`，与回退视图同一份实现）；
+//! - 置信度从 `memory.calibrated` 折（`decl::calibration_ledger`，与回退视图同一份账）；
 //! - 开关从最后一条 `session.config` 读（D-252：能力面不拿配置包）；
 //! - 本幕是否续写幕从召回阶段格的 `resumed` 读（续写幕不走快路：落格形状会撞幂等键）。
 //!
@@ -27,14 +27,13 @@
 //! 但债必须关：落一条 `hit = false` 的判定，环才不会在同一笔债上空转。
 
 use serde_json::{json, Value};
-use symbio_plugin_api::events::{
-    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
-};
+use symbio_plugin_api::events::{EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::rows::{AnswerStep, RowHandler, RowRequest, RowStep};
-use symbio_plugin_api::{calibration_for, truncate_chars, Entity, Event, FactDraft, Verb};
+use symbio_plugin_api::{truncate_chars, Entity, Event, FactDraft, Verb};
 
 use super::decl::{
-    COMPILE_LIMIT, CONFIDENCE_THRESHOLD, OWNER, SKILL_ANSWERED, SKILL_RECALL, SKILL_TAG,
+    confidence_of, COMPILE_LIMIT, CONFIDENCE_THRESHOLD, EVENT_MEMORY_CALIBRATED, OWNER,
+    SKILL_ANSWERED, SKILL_RECALL, SKILL_TAG,
 };
 
 pub(crate) struct SkillRecall;
@@ -86,12 +85,9 @@ impl RowHandler for SkillRecall {
             return RowStep::Facts(vec![answered(req, recall, stage, "", false)]);
         };
 
-        // 置信度与回退视图同一份折叠（`calibration_for`）：阈值只有一处。
-        let confidence = calibration_for(EVENT_MEMORY_CALIBRATED)
-            .read_all(req.history)
-            .value
-            .of(skill_id)
-            .confidence();
+        // 置信度与回退视图同一份账（`decl::calibration_ledger`）：阈值只有一处。
+        // 读整段历史 ⇒ 不裁 as-of（落盘的每一条都已发生）。
+        let confidence = confidence_of(req.history, i64::MAX, skill_id);
         let fallback = confidence < CONFIDENCE_THRESHOLD;
 
         let mut drafts = vec![FactDraft {

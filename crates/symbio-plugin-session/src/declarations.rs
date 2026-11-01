@@ -38,6 +38,13 @@ pub(crate) const SLO_SPAN_VIEW: &str = "slo.span";
 /// 「闸门说还有余量、出口说已耗尽」这类漂移就没有立足点（D-044）。
 pub(crate) const COST_LEDGER_VIEW: &str = "cost.ledger";
 
+/// 校准列的名字：账由技能能力包 `crates/symbio-plugin-skill` 折（`memory.calibrated`
+/// 的 owner 就是它），本插件按名字读。
+///
+/// 与上面几条同一条纪律：拼写只有一个来源（owner 的 `PLUGIN.yml` `shared_views`），
+/// `confidence = 1 − 回退率` 的算式也不在本插件重算一遍。
+pub(crate) const SKILL_CALIBRATION_VIEW: &str = "skill.calibration";
+
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 
 pub(crate) const EVENTS: &[EventDecl] = &[

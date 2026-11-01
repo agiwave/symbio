@@ -26,9 +26,9 @@
  *
  * 它数的是**core 这一侧的投影面**，不是「core 有多少 `.rs`」：`vocab.rs` / `task_vocab.rs`
  * 是折叠的**参数表**（不产 `Projection`），`mod.rs` 是 trait 本身——它们长宽都不判。
- * 目标是把两格继续往下推：今天还留在 core 的五个构造器（`calibration_for`
- * / `readyset_for` / `reputation` / `transcript` / `turnstate`）各有 ≥2 个非 core 的 crate
- * 在读（`loop` / `session`），读者迁完它们就该跟着走。跨插件想读别人的折叠，走
+ * 目标是把两格继续往下推：今天还留在 core 的四个构造器（`readyset_for` / `reputation`
+ * / `transcript` / `turnstate`）各有 ≥2 个非 core 的 crate 在读（`loop` / `session`），
+ * 读者迁完它们就该跟着走。跨插件想读别人的折叠，走
  * `symbio_plugin_api::views` 的按名字读口，**不要**在 core 里再写一份。
  *
  * 环境变量 `CORE_PROJECTION_BASELINE=<files>:<ctors>` **只给回归测试用**（真仓门禁不设）；
@@ -243,7 +243,7 @@ const PROJ_BASELINE = process.env.CORE_PROJECTION_BASELINE
       const [files, ctors] = process.env.CORE_PROJECTION_BASELINE.split(':').map((n) => Number(n))
       return { files, ctors }
     })()
-  : { files: 5, ctors: 5 }
+  : { files: 4, ctors: 4 }
 
 const PROJ_CELL_LABEL = {
   files: 'core 产投影文件数',

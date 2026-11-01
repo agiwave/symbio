@@ -72,9 +72,6 @@ pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
 // ============ memory ============
 
-/// memory.calibrated — owner `symbio-plugin-skill`，格位 `(Memory, Asserted)`
-pub const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
-
 /// memory.consolidated — owner `symbio-plugin-loop`，格位 `(Memory, Progressed)`
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 
@@ -164,7 +161,6 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← loop
     EventDecl::new(EVENT_COMMITMENT_RELEASED, (Entity::Commitment, Verb::Closed)), // commitment.released ← loop
     EventDecl::new(EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)), // conation.expressed ← conation
-    EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)), // memory.calibrated ← skill
     EventDecl::new(EVENT_MEMORY_CONSOLIDATED, (Entity::Memory, Verb::Progressed)), // memory.consolidated ← loop
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← loop
     EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)), // memory.forgotten ← loop

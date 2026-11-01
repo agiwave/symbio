@@ -11,10 +11,11 @@
 //! 的声明。它与 notes 的同名夹具同形，只在 `cfg(test)` 生效。
 
 use super::{
-    retreating_skills, EVENTS, FACTS, OWNER, ROWS, SKILL_ANSWERED, SKILL_RECALL, SKILL_RETREAT,
-    SKILL_TAG, VIEWS,
+    calibration_ledger, calibration_ledger_view, confidence_of, retreating_skills, SkillStat,
+    EVENTS, EVENT_MEMORY_CALIBRATED, FACTS, OWNER, ROWS, SKILL_ANSWERED, SKILL_CALIBRATION,
+    SKILL_RECALL, SKILL_RETREAT, SKILL_TAG, VIEWS,
 };
-use symbio_plugin_api::events::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED};
+use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
 use symbio_plugin_api::ring::{Decl, Lit, Pattern};
 use symbio_plugin_api::{
     ActorDecl, Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
@@ -299,4 +300,151 @@ fn only_low_confidence_skills_retreat() {
         serde_json::json!([{ "recall": 12, "skill_id": "sk-broken" }]),
         "只有回退过的技能进回退集合"
     );
+}
+
+// ── 校准账的算式（数归 owner）──────────────────────────────────────────
+//
+// 这段判据钉的是折叠**最容易走样的三个地方**，它们都只在算式这一侧可判：
+//
+// ① 只认这条名字。按载荷字段认输入（「带 `skill_id` + `fallback` 就算一条观测」）把
+//    正确性押在一个巧合上——别的格子恰好不带这两个字段。巧合被打破后**没有任何东西会红**：
+//    一个新格子带同名字段，置信度就凭空被算歪。
+// ② 名字对了但字段缺 ⇒ 不参与统计，而不是记成「未回退」——后者让 `uses` 涨而
+//    `fallbacks` 不涨，凭空造出高置信度，正是回退机制失效的形态。
+// ③ 回退率、置信度与 as-of 各钉一个已知期望值。
+
+/// 一条 `memory × asserted` 的校准观测（这一族格子是共享的，见判据 ①）。
+fn observed_event(id: &str, kind: &str, payload: serde_json::Value, ts: i64) -> Event {
+    Event::pending(
+        id.to_string(),
+        kind,
+        Entity::Memory,
+        Verb::Asserted,
+        0,
+        "session/main",
+    )
+    .with_ts(ts)
+    .with_payload(payload)
+}
+
+/// 一条正常形状的技能校准观测。
+fn observed(seq: i64, skill_id: &str, fallback: bool) -> Event {
+    observed_event(
+        &format!("c-{seq}"),
+        EVENT_MEMORY_CALIBRATED,
+        serde_json::json!({ "skill_id": skill_id, "fallback": fallback }),
+        seq,
+    )
+}
+
+#[test]
+fn only_the_calibration_cell_feeds_the_ledger() {
+    let events = [
+        observed(1, "sk-1", false),
+        // 两个「长得像」的别的格子：一个带全两个字段，一个只带 `skill_id`。
+        // 名字按线上拼法造，不从别的插件借常量（跨插件零依赖）。
+        observed_event(
+            "r-2",
+            "memory.recalled",
+            serde_json::json!({ "skill_id": "sk-2", "fallback": true }),
+            2,
+        ),
+        observed_event(
+            "e-3",
+            "memory.consolidated",
+            serde_json::json!({ "skill_id": "sk-3" }),
+            3,
+        ),
+    ];
+    let ledger = calibration_ledger(&events, i64::MAX);
+    assert_eq!(
+        ledger.keys().cloned().collect::<Vec<_>>(),
+        vec!["sk-1".to_string()],
+        "只有 `memory.calibrated` 进统计；带同名字段的 `memory.recalled` 不算"
+    );
+    assert_eq!(
+        ledger["sk-1"],
+        SkillStat {
+            uses: 1,
+            fallbacks: 0
+        }
+    );
+}
+
+#[test]
+fn an_observation_missing_a_field_is_not_counted_as_no_fallback() {
+    let events = [
+        observed(1, "sk-1", false),
+        observed_event(
+            "c-2",
+            EVENT_MEMORY_CALIBRATED,
+            serde_json::json!({ "skill_id": "sk-1" }),
+            2,
+        ),
+    ];
+    let ledger = calibration_ledger(&events, i64::MAX);
+    assert_eq!(ledger["sk-1"].uses, 1, "缺字段的事件不得让 uses 增长");
+    assert_eq!(ledger["sk-1"].fallbacks, 0);
+}
+
+#[test]
+fn confidence_follows_the_known_actions() {
+    let events = [
+        observed(1, "sk-1", false),
+        observed(2, "sk-1", true),
+        observed(3, "sk-1", true),
+    ];
+    assert!(
+        (confidence_of(&events, i64::MAX, "sk-1") - (1.0 - 2.0 / 3.0)).abs() < 1e-12,
+        "三次里回退两次 ⇒ 置信度 1/3"
+    );
+    // 账里没有这条技能 ⇒ 零使用 ⇒ 1.0（不给新技能判死刑）。
+    assert_eq!(confidence_of(&events, i64::MAX, "never-used"), 1.0);
+}
+
+#[test]
+fn the_ledger_honours_as_of() {
+    let events = [observed(5, "sk-1", true)];
+    assert!(
+        calibration_ledger(&events, 4).is_empty(),
+        "as-of 之前的观测不得计入"
+    );
+    assert_eq!(calibration_ledger(&events, 5)["sk-1"].fallbacks, 1);
+}
+
+/// 视图交出的形状（会话统计的校准列按它排版）：键字典序、每条带 `skill_id`，
+/// 没判过任何技能 ⇒ `{ by_skill: {} }` 而不是缺列。
+#[test]
+fn the_calibration_view_emits_the_ledger_in_key_order() {
+    let events = [
+        observed(1, "sk-b", false),
+        observed(2, "sk-a", true),
+        observed(3, "sk-a", false),
+    ];
+    assert_eq!(
+        calibration_ledger_view(&events, i64::MAX),
+        serde_json::json!({
+            "by_skill": {
+                "sk-a": { "skill_id": "sk-a", "uses": 2, "fallbacks": 1 },
+                "sk-b": { "skill_id": "sk-b", "uses": 1, "fallbacks": 0 },
+            }
+        }),
+    );
+    assert_eq!(
+        calibration_ledger_view(&[], i64::MAX),
+        serde_json::json!({ "by_skill": {} }),
+        "没编过技能的会话读成有据的空"
+    );
+}
+
+/// 账对外可读：名字在冻结表里，owner 是本插件。
+///
+/// 读方是 `crates/symbio-plugin-session` 的校准列（跨插件读口按名字取）；
+/// 数字判据在上面的 owner 用例，「名字在装配表里」由这条钉，
+/// 「生产二进制里读得到真数」由 e2e `t35` / `t41` 钉。
+#[test]
+fn the_calibration_view_is_sealed_under_this_owner() {
+    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
+    assert!(frozen.view(SKILL_CALIBRATION).is_some());
+    assert_eq!(frozen.view_owner(SKILL_CALIBRATION), Some(OWNER));
 }

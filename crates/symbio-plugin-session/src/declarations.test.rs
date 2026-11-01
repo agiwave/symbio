@@ -27,8 +27,21 @@ use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::decl::ring::Decl;
 use symbio_kernel::decl::ring::Pattern;
 use symbio_kernel::decl::PluginDeclarations;
+use symbio_kernel::event::{Entity, EventDecl, Verb};
 
 use super::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
+
+/// 技能观测的**格位**夹具：owner 是 `crates/symbio-plugin-skill`（`D-262`），它的折叠也住
+/// 在那里（`D-286`），而这条名字除 owner 之外没有生产读方 ⇒ 不在清单生成物里（`CS-007`）。
+///
+/// 写闸只认声明过的格位（fail-closed：三份表都不认识的名字答 `OffGrid`），而 `stats` 的
+/// 校准列用例要**把真实观测写进环里**才试得出「owner 不在本进程」这一种缺席。所以这里补
+/// 一条与 owner 同构的 `EventDecl`——**只补格位，不补视图**：`skill.calibration` 保持读
+/// 不到，那正是被测的形状（数字归 owner 的单测与 e2e）。
+const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
+    "memory.calibrated",
+    (Entity::Memory, Verb::Asserted),
+)];
 
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();
@@ -60,7 +73,7 @@ fn protocol_rows() -> &'static [Decl] {
 
 fn harness_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
-        events: &[],
+        events: HARNESS_EVENTS,
         facts: &[],
         views: &[],
         ports: &[],

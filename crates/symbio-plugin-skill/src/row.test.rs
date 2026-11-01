@@ -2,14 +2,12 @@
 //! 续写幕不走近路、判不了只关账。
 
 use serde_json::json;
-use symbio_plugin_api::events::{
-    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
-};
+use symbio_plugin_api::events::{EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep};
 use symbio_plugin_api::{Entity, Event, Seq, Verb};
 
 use super::SkillRecall;
-use crate::decl::{SKILL_ANSWERED, SKILL_RECALL, SKILL_TAG};
+use crate::decl::{EVENT_MEMORY_CALIBRATED, SKILL_ANSWERED, SKILL_RECALL, SKILL_TAG};
 
 fn ev(seq: u64, kind: &str, payload: serde_json::Value) -> Event {
     let mut e = Event::pending(

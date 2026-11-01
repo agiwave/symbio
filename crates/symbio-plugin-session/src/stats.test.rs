@@ -33,7 +33,6 @@ use symbio_kernel::store::Store;
 use symbio_kernel::view::Budget;
 use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
-use symbio_sdk::projection::calibration::calibration_for;
 use symbio_sdk::projection::transcript::transcript;
 
 use crate::projections::checkpoint::checkpoint;
@@ -41,12 +40,17 @@ use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
-// 校准观测与任务族的名字都走清单生成物（写方是 loop，本插件只是第二个消费方，
-// DE-024 D-204 / D-205 / D-206）。
-use symbio_plugin_api::events::{
-    EVENT_MEMORY_CALIBRATED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
-};
+// 任务族的名字走清单生成物（写方在各自能力包，本插件只是读方，DE-024 D-204）。
+use symbio_plugin_api::events::{EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED};
 use symbio_plugin_api::vocab;
+
+/// 校准观测的名字：**本测试二进制按线上字面量造它**。
+///
+/// 这条事实归技能能力包（`D-262`），而它的折叠也住在那里（`D-286`）——本插件不链接兄弟
+/// 插件（E-009），名字也不在清单生成物里（除 owner 之外没有生产读方，`CS-007`）。写闸要的
+/// 格位由 `declarations.test.rs` 的夹具补（只补格位、不补视图），夹具带着真实形状，试的
+/// 正是「不认识这一格的插件读不出账」。
+const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
 
 /// 一个会话的事实**值**（生产侧由 `SessionStore::snapshot` 交回）。
 fn facts_of(wal: &Path) -> Option<Vec<Event>> {
@@ -1614,16 +1618,24 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 校准列（的读侧）：
-/// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
+/// 校准列的**读侧契约**：折叠归技能能力包（名册 #19/#20，`D-221` 按名字读），本插件只
+/// 保证读不出来时交**文档写的空形状**并出声，而不是报错或凭空造一行账。
 ///
-/// 观测面 = 技能召回行收束时落的 `memory.calibrated{skill_id, fallback}`（技能包的
-/// `row::SkillRecall` 产物）——本处按**写方落下的真实形状**造（`Memory × Asserted`、`turn = 0`、
-/// `produced_by` 指向本轮用户格），只把载荷换成校准认的那两把钥匙。
+/// 这里刻意不复算、不跟反向：本测试二进制不链接 `crates/symbio-plugin-skill`（E-009）⇒
+/// `skill.calibration` 不在冻结表里 ⇒ 列只能是 `{ by_skill: {} }`。在这里补一份替身 owner
+/// 只会让两条真判据变成假绿——**数字**归 owner 的单测（`crates/symbio-plugin-skill/src/decl.test.rs`：
+/// 三次里回退两次 ⇒ 置信度 1/3、缺字段的观测不计数、as-of 之后的观测不进账），
+/// **生产二进制里读得到真数**归 e2e（`t35-skill-compile.mjs` / `t41-skill-fast-path.mjs`
+/// 按已知轮次钉 `by_skill` 的 `uses`）。读侧闸对本列的作用与其余列同族，由 `capability_views`
+/// 那一列的「本进程没链接 owner ⇒ 必须出声」用例与断点 / 转写列的闸用例共同承担。
+///
+/// 观测仍按**写方落下的真实形状**造（`Memory × Asserted`、`turn = 0`、`produced_by` 指向本轮
+/// 用户格）：本插件不认识这些字段，带着它们才试得出「不认识」是不是真的。格位由
+/// `declarations.test.rs` 的夹具交（写闸 fail-closed，没声明的名字落不进环），**视图名不交**
+/// ⇒ 这一列读得出、算不出。
 #[test]
-fn calibration_column_recomputes_and_moves_with_the_wal() {
+fn calibration_column_degrades_to_the_documented_empty_shape() {
     let wal = seed("calibration");
-    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     {
         let store = EventWalStore::open(&wal).expect("WAL");
         for (id, fallback) in [("calib-1", false), ("calib-2", true)] {
@@ -1631,9 +1643,8 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
                 .append(
                     Event::pending(
                         id,
-                        // 校准观测走**自己的格子**。旧写法把它写在
-                        // `memory.recalled` 上、靠载荷字段认——那正是读侧赌「别的格子
-                        // 恰好不带这两个字段」的那段。
+                        // 校准观测走**自己的格子**：`memory × asserted` 是共享的，
+                        // 按格子或按载荷字段认输入都会把别的断言算进技能置信度。
                         EVENT_MEMORY_CALIBRATED,
                         Entity::Memory,
                         Verb::Asserted,
@@ -1651,38 +1662,12 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
     }
 
     let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-
-    // 复算：出口的校准列与直接 `apply` 逐字相等（口径只活在 core，出口不复判）。
-    let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
-    let snap = ro.range(Seq::new(0));
-    let direct = serde_json::to_value(
-        calibration_for(EVENT_MEMORY_CALIBRATED)
-            .apply(&snap, i64::MAX, Budget::generous())
-            .value,
-    )
-    .expect("序列化");
-    assert_eq!(got.calibration, direct, "校准列必须复算相等");
-    // 口径：sk-a 用了 2 次、其中回退 1 次（`confidence = 1 − 回退率` 由 core 算）。
-    assert_eq!(got.calibration["by_skill"]["sk-a"]["uses"], 2);
-    assert_eq!(got.calibration["by_skill"]["sk-a"]["fallbacks"], 1);
-
-    // 反向：删掉回退那条 ⇒ 回退数 1 → 0（读数跟着事实源动）。
-    drop_line(&wal, "calib-2");
-    let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(after.calibration["by_skill"]["sk-a"]["uses"], 1);
-    assert_eq!(after.calibration["by_skill"]["sk-a"]["fallbacks"], 0);
-
-    // 读侧闸：非属主 ⇒ 空切片 ⇒ `{ by_skill: {} }`（与就绪集列同族，不是声誉的空对象）。
-    let denied = read_path(
-        "s1",
-        &wal,
-        Some(symbio_sdk::authz::PRINCIPAL_MAIN),
-        symbio_sdk::authz::PRINCIPAL_MAIN,
-        &root,
-    )
-    .expect("读数");
-    assert_eq!(denied.calibration, serde_json::json!({ "by_skill": {} }));
-    assert!(denied.has_wal, "has_wal 独立于可见域");
+    assert_eq!(
+        got.calibration,
+        serde_json::json!({ "by_skill": {} }),
+        "owner 不在 ⇒ 折不出账：列读得出，只是这一格今天没有算式（缺席的原因在 capability_views 列里）"
+    );
+    assert!(got.has_wal, "事实源在，账算不出来不改变这件事");
 }
 
 /// 技能编译两列：`skill_compile_enabled`（部署开关）与 `compiled_skills`（本会话

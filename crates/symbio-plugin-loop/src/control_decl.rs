@@ -24,7 +24,7 @@ pub(crate) const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 // 跨插件共享的名字（DE-024 D-204 / D-205 / D-206 / DE-026 D-263）：常量的**事实源是本插件清单的
 // `shared_events:` 行**，由 `scripts/facts/events-rs.mjs` 投影进
 // `symbio-plugin-api::events`，读侧（`session` 的 `stats` / `inbox` / `conation`，情景记忆
-// 能力包的编码去重，以及它调 `calibration_for` 时交进去的那张表）从这里取名字，
+// 能力包的编码去重，以及技能包 `decl.rs::calibration_ledger` 筛出的那一条观测名）从这里取名字，
 // 而不是内核替它们命名。
 //
 // `memory.consolidated` / `memory.forgotten` 自 D-263 起进来：写方与投影读方仍都在
