@@ -203,8 +203,15 @@ export default defineCase(
         );
 
         // ── ③ 等对等轮收尾：承诺族入格 = 收束族执行过 = 产物收束成立 ─────────
-        await waitFor(() => readFileSyncSafe(peerWalPath).includes('commitment.opened'), {
-          what: '对等轮的承诺族入格（产物收束 ⇒ 派生事实照写）',
+        //
+        // 等的是**本用例断言的最后一格**（`asserted`），不是第一格（`opened`）。
+        // 承诺族三格出自同一次 `commitment_events`，但落盘是 `derived_facts` 里
+        // `for draft … store.append()` 的**逐格追加**——一次 append 一行，没有批原子性。
+        // 等第一格等于赌刷盘时序：轮询正好落在两行之间时，`opened` 已在文件里而
+        // `broken` 还没落，用例读到的是一份**没写完的账**（并发阶段实测偶发，单跑不复现）。
+        // 三格按 `opened → broken → asserted` 的顺序追加，所以等到最后一格 ⇒ 前三格齐。
+        await waitFor(() => readFileSyncSafe(peerWalPath).includes('commitment.asserted'), {
+          what: '对等轮的承诺族入格（产物收束 ⇒ 派生事实照写；等的是这一族追加的最后一格）',
           timeoutMs: 30_000,
         });
 
@@ -253,9 +260,15 @@ export default defineCase(
         );
         assertEq(offered.produced_by, userCell.seq, '立约锚在本轮开口格（I2）');
         const broken = peerEvents.find((e) => e.kind === 'commitment.broken');
-        assert(broken, '工具失败 ⇒ 违约必须成格（DE-038 §5：违约可被观测）');
+        assert(
+          broken,
+          `工具失败 ⇒ 违约必须成格（DE-038 §5：违约可被观测；实际 kinds: ${JSON.stringify(kinds)}）`,
+        );
         const declared = peerEvents.find((e) => e.kind === 'commitment.asserted');
-        assert(declared, '违约宣告必须成格');
+        assert(
+          declared,
+          `违约宣告必须成格（实际 kinds: ${JSON.stringify(kinds)}）`,
+        );
         assert(
           JSON.stringify(declared.payload).includes('session/main'),
           `宣告文案「已告知 <to>」带上来源主体（实际: ${JSON.stringify(declared.payload)?.slice(0, 200)}）`,
