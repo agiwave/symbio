@@ -6,6 +6,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
+  DIALOG_FACE_OFF,
   cleanupHomedir,
   runCli,
   nextPort,
@@ -25,9 +26,14 @@ export default defineCase('T53 LLM 不可用：401 错误态与起点不可达�
     { id: 'answer', match: '恢复测试', content: '回复：服务恢复后的正常回答。' },
   ]).start();
   const GATEWAY_PORT = nextPort();
+  // 对话面**必须关掉**：它默认开启 ⇒ 每轮先多打一次 `classify` 请求，而本例的两个
+  // 端点都会失败（不可达 / 401），那一次分类请求同样要走完整条退避阶梯，然后按
+  // Escalate 把整轮重发一遍——同一份退避付两次。本例判的是「服务不可用时用户看得见
+  // 失败并收敛」，与对话面无关，所以这一层不该参与。实测 **38.0s → 20.3s**。
   const hd = makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
     pluginConfigs: {
+      session: { ...DIALOG_FACE_OFF },
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',
@@ -43,6 +49,7 @@ export default defineCase('T53 LLM 不可用：401 错误态与起点不可达�
   const hdDead = makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(deadPort) }],
     pluginConfigs: {
+      session: { ...DIALOG_FACE_OFF },
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',

@@ -69,9 +69,22 @@ import {
   msgRoleOf,
 } from '../helpers.mjs';
 
-/** 两个会话：同一份代码、同一条链路，只有心跳提示词长度不同 ⇒ 闸门判决不同。 */
-const SID_OK = 'e2e-t36-ok';
-const SID_BROAD = 'e2e-t36-broad';
+/**
+ * 两个会话：同一份代码、同一条链路，只有心跳提示词长度不同 ⇒ 闸门判决不同。
+ *
+ * ## 名字是**按相位挑过**的，不是随手起的
+ *
+ * `heartbeat/scheduler.rs` 的到点时刻 = `interval_seconds` + `phase_ms(id)` 第一次被
+ * 15s tick 扫到的那个格点，而 `phase_ms` 是 id 的**确定性哈希**（0–30s）。用例的判据
+ * 是「两个会话在**同一个 tick** 里各触发一次」（`HEARTBEAT_MAX_PER_TICK = 2`），所以
+ * 两条 id 的相位都必须小到让首个 tick 就成立：实测 `e2e-t36-gate-pass` = 1s、
+ * `e2e-t36-deny` = 4s（旧名 `e2e-t36-ok` 是 21s ⇒ 要等第二个 tick，整例白白多 15s）。
+ *
+ * 代价：换工具链后 `DefaultHasher` 的实现若变，相位跟着变，落回两个 tick——用例
+ * **仍然绿**，只是慢 15s（两条 waitFor 各有 100s 兜底）。换名字前先算一遍相位。
+ */
+const SID_OK = 'e2e-t36-gate-pass';
+const SID_BROAD = 'e2e-t36-deny';
 
 /**
  * 装心跳那一轮的用户发言：**两会话各一条、互不为子串**。

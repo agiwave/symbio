@@ -43,8 +43,22 @@ import {
   msgRoleOf,
 } from '../helpers.mjs';
 
-/** 两侧同用一个会话 id：相位（抖动）因此相同，触发时刻才可对照。 */
-const SID = 'e2e-t90-heartbeat';
+/**
+ * 两侧同用一个会话 id：相位（抖动）因此相同，触发时刻才可对照。
+ *
+ * ## 结尾那个 `-2` 不是笔误
+ *
+ * 到点时刻 = `interval_seconds` + `phase_ms(id)` 第一次被 15s tick 扫到的那个格点
+ * （`heartbeat/scheduler.rs`），而 `phase_ms` 是 id 的**确定性哈希**（0–30s）。
+ * `-2` 这个后缀让相位落在 0ms ⇒ 首个 tick（启动后 15s）就触发；不带后缀的 id
+ * 相位是 22s ⇒ 要等到第二个 tick（30s），整例凭空多 15s。
+ *
+ * 代价：换工具链后 `DefaultHasher` 的实现若变，相位跟着变，本例会回落成多等一两个
+ * tick。**那时它仍然绿，只是慢 15–30s**（`FIRE_TIMEOUT_MS` 兜底），不会假红——
+ * 所以这是一次无害的提速，不是一条新的判据。想换 id 前先用
+ * `heartbeat::scheduler::phase_ms` 算一遍相位。
+ */
+const SID = 'e2e-t90-heartbeat-2';
 
 /** 普通一轮的用户发言：证明系统在能力缺席时照常工作。 */
 const MSG = '开始工作（T90）';
@@ -55,6 +69,14 @@ const PROMPT = '自主推进（T90）';
 
 /** 心跳间隔取 1s：到点只由 tick（15s）与相位（≤30s）决定，不再叠一个长间隔。 */
 const INTERVAL = 1;
+
+/**
+ * 停用侧断言前等的毫秒数：只够吸收「两侧启动 / 回合结束」的百毫秒级偏差。
+ *
+ * 不是调度器的扫描周期（`heartbeat/scheduler.rs::TICK_SECS` = 15s）——理由见调用点的
+ * 长注释：两侧同 id ⇒ 同相位 ⇒ 到点条件落在同一个格点上。
+ */
+const FIRE_SETTLE_MS = 3_000;
 
 /** 启用侧等触发的上限：15s tick + 30s 相位 + 余量。 */
 const FIRE_TIMEOUT_MS = 90_000;
@@ -188,8 +210,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export default defineCase(
   'T90 主动开口是插件能力：停用 heartbeat 后工具面消失、一个触发窗内不产生提示词事实，系统完整运行',
   async () => {
-    const enabled = await bootSide('on', { heartbeatEnabled: true });
-    const disabled = await bootSide('off', { heartbeatEnabled: false });
+    // 两侧互不依赖，一起起：串行起会把「两个 mock + 两个 CLI」的启动时间相加，而它们
+    // 本来可以重叠（`nextPort()` 是同步游标，两边的号段照样分开）。
+    const [enabled, disabled] = await Promise.all([
+      bootSide('on', { heartbeatEnabled: true }),
+      bootSide('off', { heartbeatEnabled: false }),
+    ]);
     try {
       await Promise.all([
         enabled.cli.waitGatewayReady(20_000, 'T90 启用侧'),
@@ -208,9 +234,6 @@ export default defineCase(
           timeoutMs: 30_000,
         });
       }
-
-      // 空闲计时起点：两侧普通轮都结束之后。相位相同，到点时刻只差这段起点。
-      const startedAt = Date.now();
 
       // ── 工具面：这是「能力在不在」最直接的一条读数 ─────────────────────
       const onTools = await enabled.toolsOfTurn(MSG);
@@ -239,12 +262,23 @@ export default defineCase(
       }
       const firedAt = Date.now();
 
-      // ── 停用侧：等过「同窗 + 余量」再断言什么都没有 ─────────────────────
+      // ── 停用侧：确认那一格点真的被扫过之后，再断言什么都没有 ─────────────
       //
-      // 两侧同 id、同时起步 ⇒ 停用侧的到点时刻与启用侧相同。这里不猜超时，而是用
-      // 启用侧**实测**的等待时间加一点余量当窗口：窗口之内若有能力，它必然已经触发过
-      // （启用侧就是在这个窗口里触发的，两侧唯一的差别是有没有那个插件）。
-      await sleep(Math.max(0, firedAt - startedAt) + 5_000);
+      // 判据链：两侧同 id ⇒ **同相位** ⇒ 到点条件落在同一个格点上。启用侧在
+      // `firedAt` 触发，就已经证明停用侧那一格点的到点条件同样成立；剩下要确认的只有
+      // 「它的扫描确实发生在这个格点之后」。
+      //
+      // 所以要跨过的偏差只有**两侧启动与回合结束的差**（都来自同一条 `Promise.all`，
+      // 实测 100ms 量级），而不是一个 tick：到点条件的余量是
+      // `idle(≈10s) − (INTERVAL + phase)(≈1s) ≈ 9s`，比那点偏差大两个数量级。
+      //
+      // 这里原先是 `sleep(firedAt - startedAt) + 5s`——那段时间在 `firedAt` **之前**
+      // 就已经流过了，从 `firedAt` 起再睡一遍等于把同一扇窗等两次（实测多睡 26s），
+      // 多证明的东西是零。
+      //
+      // ⚠️ 这条余量的前提是 `INTERVAL` 远小于 tick（本用例取 1s vs 15s）。把间隔调大到
+      // 接近 tick 时，「同一个格点」的余量就没了，那时必须退回「跨一个扫描周期」那种保守下界。
+      await sleep(FIRE_SETTLE_MS);
 
       const offTexts = await disabled.userTexts();
       assert(
