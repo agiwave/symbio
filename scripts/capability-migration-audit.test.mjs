@@ -29,6 +29,7 @@ import {
   isCapabilitySource,
   isGenerated,
   migrationErrors,
+  movedLines,
   parsePatch,
   supplementErrors,
   validateBeforeGuard,
@@ -89,9 +90,11 @@ test('parsePatch：新增文件的行记在自己名下，不挂到上一个文�
   assert.equal(p.find((f) => f.path === CORE).added.length, 1)
 })
 
-test('parsePatch：删除文件按旧路径记账', () => {
+test('parsePatch：删除文件按旧路径记账，并带 `deleted` 标记', () => {
+  // `deleted` 是「搬家行」判据（`movedLines`）的唯一依据：只有整份文件消失，
+  // 它的行才轮不到继续当通道。少了这个标记，`+++ /dev/null` 与「清空文件」长得一样。
   const p = patchOf([{ path: LOOP, deleted: true, removed: ['row!();'] }])
-  assert.deepEqual(p, [{ path: LOOP, added: [], removed: ['row!();'] }])
+  assert.deepEqual(p, [{ path: LOOP, deleted: true, added: [], removed: ['row!();'] }])
 })
 
 test('parsePatch：hunk 里以 `--- ` 开头的删除行不是文件头', () => {
@@ -236,7 +239,7 @@ test('migrationErrors：迁移中改测试与 .gen.rs 不判（断言与镜像�
 
 // ── 补件 ──────────────────────────────────────────────────────────────────
 
-const supp = (message, files) =>
+const supp = (message, files, { moved } = {}) =>
   supplementErrors({
     sha: 'x',
     message,
@@ -244,6 +247,7 @@ const supp = (message, files) =>
     decisions,
     pluginIds: ['notes', 'local'],
     toolNames: ['todo_write', 'content_search'],
+    moved,
   }).errors
 
 test('supplementErrors：决策号存在且新增面通用 ⇒ 绿', () => {
@@ -302,6 +306,50 @@ test('supplementErrors：生成物里的插件 id 不算补件定制', () => {
     ]),
     [],
   )
+})
+
+test('supplementErrors：搬家行不算补件定制（D-279）', () => {
+  // 机制面收缩时的真实形状：一条带插件 id 的常量（本仓是 `SKILL_TAG = "skill"`）
+  // 从 core 搬进 sdk。`--no-renames` 的 diff 说「旧文件全删 + 新文件全增」，
+  // 那一行字没变、面也没变宽。夹具里把 id 换成本文件的 `notes`，道理相同。
+  const line = 'pub const NOTES_TAG: &str = "notes";'
+  const moved = movedLines(
+    patchOf([{ path: 'crates/symbio-core/src/actors/skill.rs', deleted: true, removed: [line] }]),
+  )
+  assert.deepEqual(supp('feat: 搬迁\n\nCore-Change: D-219', [{ path: CORE, added: [line], removed: [] }], { moved }), [])
+})
+
+test('supplementErrors：搬家豁免只抵一次（同一行新增两处仍红）', () => {
+  const line = 'pub const NOTES_TAG: &str = "notes";'
+  const moved = movedLines(
+    patchOf([{ path: 'crates/symbio-core/src/actors/skill.rs', deleted: true, removed: [line] }]),
+  )
+  const errors = supp(
+    'feat: 搬迁\n\nCore-Change: D-219',
+    [{ path: CORE, added: [line, line], removed: [] }],
+    { moved },
+  )
+  assert.equal(errors.length, 1)
+  assert.match(errors[0], /不是通用的/)
+})
+
+test('supplementErrors：从 loop 删掉同一行再加进 sdk ⇒ 仍红（反向拆分，D-247）', () => {
+  // 文件没被删掉，只是删了一行：那不是搬家，是把定制通道塞进机制面。
+  const line = 'if meta == "notes" { return }'
+  const moved = movedLines(patchOf([{ path: LOOP, added: [], removed: [line] }]))
+  const [e] = supp('feat: 端口\n\nCore-Change: D-219', [{ path: CORE, added: [line], removed: [] }], { moved })
+  assert.match(e, /不是通用的/)
+})
+
+test('movedLines：只收「整份文件被删掉」的那些行', () => {
+  const moved = movedLines(
+    patchOf([
+      { path: 'crates/symbio-core/src/a.rs', deleted: true, removed: ['pub fn a() {}', ''] },
+      { path: LOOP, added: [], removed: ['pub fn b() {}'] },
+    ]),
+  )
+  assert.deepEqual([...moved.keys()], ['pub fn a() {}'])
+  assert.equal(moved.get('pub fn a() {}'), 1)
 })
 
 // ── 判据起点 ──────────────────────────────────────────────────────────────

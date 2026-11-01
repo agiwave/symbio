@@ -35,6 +35,17 @@
  *   与「夹带」的机械面；补件的决策号与通用性判「定制」。语义是否真的通用（不是把
  *   一条能力改名成 trait）由 review 判，脚本只保证「写着能力名 / 工具名」无法通过。
  *
+ * ## 搬家不算新增面（D-279）
+ *
+ * 机制面**收缩**时（把一个 crate 并进另一棵树），`--no-renames` 的 diff 会说「旧文件全删
+ * + 新文件全增」，于是「补件不许带能力名」把本来就在机制面上的行判成新通道：一行
+ * `pub const SKILL_TAG: &str = "skill";` 从 core 搬进 sdk，字没变、面没宽，却要按
+ * 「为 `skill` 定制」处理。判据要判的是**面变宽了没有**，不是这一行出现在哪一侧——
+ * 所以同一行若来自本提交**删掉的文件**，它是搬家（`movedLines`）。
+ *
+ * 限定「文件被删掉」而不是「提交里出现过同样的删除行」：后者会把「从 `loop` 删掉一条
+ * 定制分支、同一行加进 `sdk`」也算搬家，而那是 D-247 反向拆分要拦的形态。
+ *
  * ## 失效形态（回归测试钉的是这几条）
  *
  * - 把「有 `Migration:`」当成「不用判」⇒ 只要写上 trailer 就能夹带，判据变装饰；
@@ -192,8 +203,9 @@ export function parsePatch(text) {
     }
     if (header && line.startsWith('+++ ')) {
       const p = line.slice(4).trim()
-      const path = p === '/dev/null' ? oldPath : p.replace(/^b\//, '')
-      cur = path ? { path, added: [], removed: [] } : null
+      const deleted = p === '/dev/null'
+      const path = deleted ? oldPath : p.replace(/^b\//, '')
+      cur = path ? { path, deleted, added: [], removed: [] } : null
       if (cur) files.push(cur)
       header = false
       oldPath = null
@@ -208,6 +220,32 @@ export function parsePatch(text) {
     else if (line.startsWith('-')) cur.removed.push(line.slice(1))
   }
   return files
+}
+
+/**
+ * 搬家行（D-279 的教训）：本提交里**整份文件被删掉**的那些行。
+ *
+ * 机制面收缩——把一个 crate 并进另一棵树——在 `--no-renames` 的 diff 里是「旧文件全删
+ * + 新文件全增」。这时 EX-007 的「补件不许带能力名」会把**本来就在机制面上的那几行**
+ * 判成新通道：`pub const SKILL_TAG: &str = "skill";` 从 core 搬进 sdk，行一个字没变，
+ * 面也一分没宽，却要按「为 `skill` 定制」处理。判据要判的是「面变宽了没有」，不是
+ * 「这一行有没有出现在新增侧」——所以同一行若来自本次提交删掉的文件，它是搬家。
+ *
+ * 为什么限定「文件被删掉」，而不是「提交里出现过同样的删除行」：后者会把「从 `loop`
+ * 删掉一条定制分支、同一行加进 `sdk`」也算搬家，而那是 D-247 反向拆分要拦的形态
+ * （把定制通道塞进机制面）。只有文件整体消失，那一行才轮不到继续当通道。
+ */
+export function movedLines(patch) {
+  const out = new Map()
+  for (const file of patch) {
+    if (!file.deleted) continue
+    for (const raw of file.removed) {
+      const key = raw.trim()
+      if (!key) continue
+      out.set(key, (out.get(key) ?? 0) + 1)
+    }
+  }
+  return out
 }
 
 /**
@@ -301,7 +339,15 @@ export function migrationErrors({ sha, patch, pluginIds: ids = [], toolNames = [
  * 决策号取 `Core-Change:` 段；没有这一段（只动 `plugin-api` 的补件不要求它）则取
  * 整条信息里任意一个 `D-NNN`。**必须能打开**：拼一个不存在的号等于没写。
  */
-export function supplementErrors({ sha, message, patch, decisions, pluginIds: ids = [], toolNames = [] }) {
+export function supplementErrors({
+  sha,
+  message,
+  patch,
+  decisions,
+  pluginIds: ids = [],
+  toolNames = [],
+  moved = new Map(),
+}) {
   const errors = []
   const text = String(message ?? '')
   const trailer = text.match(CORE_CHANGE_RE)
@@ -318,9 +364,18 @@ export function supplementErrors({ sha, message, patch, decisions, pluginIds: id
   }
 
   const offenders = []
+  const movedLeft = new Map(moved)
   for (const file of patch) {
     if (!inTrees(file.path, ARCH_TREES) || !isCapabilitySource(file.path)) continue
-    offenders.push(...capabilityNameHits(file, ids, toolNames))
+    for (const hit of capabilityNameHits(file, ids, toolNames)) {
+      // 搬家行不是新通道（`movedLines`）：同一条已删除文件里的行，按搬家消耗掉。
+      const n = movedLeft.get(hit.line) ?? 0
+      if (n > 0) {
+        movedLeft.set(hit.line, n - 1)
+        continue
+      }
+      offenders.push(hit)
+    }
   }
   if (offenders.length) {
     errors.push(
@@ -473,11 +528,15 @@ function judgeCommit({ sha, message, patch, decisions, ids, tools }) {
     }
   }
   if (kind === 'supplement') {
+    // 搬家行只看**被删掉的文件**，故单独取一次 diff（`patch` 收窄在机制面 + 控制面两棵树，
+    // 达不到 `crates/symbio-core` 这种已经消失的路径上）。
+    const moved = movedLines(parsePatch(git(['show', '--format=', '--unified=0', '--no-renames', '--diff-filter=D', sha]) ?? ''))
     return {
       sha,
       subject: subjectOf(message),
       kind,
-      errors: supplementErrors({ sha, message, patch, decisions, pluginIds: ids, toolNames: tools }).errors,
+      errors: supplementErrors({ sha, message, patch, decisions, pluginIds: ids, toolNames: tools, moved })
+        .errors,
     }
   }
   return { sha, subject: subjectOf(message), kind, errors: [] }
@@ -560,16 +619,23 @@ function main() {
   const bad = []
   /**
    * 不追溯名单：`ARCH_TREES` 从 `symbio-core` 扩到 `symbio-sdk` 之后（D-279），
-   * 那三批把域搬进 SDK 的迁移提交会被**按新范围重新判一遍**——它们当年在旧范围下
-   * 通过，而现在「新增的 sdk 文件」看起来像架构补件。
+   * 那几批把域搬进 SDK 的提交会被**按新范围重新判一遍**——它们当年在旧范围下通过，
+   * 而现在「新增的 sdk 文件」看起来像架构补件。
    *
-   * 判据不追溯历史（`BEFORE_GUARD` 同一条纪律），所以这三条显式列出来，各自写明理由。
+   * 判据不追溯历史（`BEFORE_GUARD` 同一条纪律），所以逐条列出来，各自写明理由。
    * 这张表**只增不减地老去**：新提交不许进来，进来就等于「我不打算守这条」。
+   *
+   * 为什么 `movedLines` 接不住这两条：那是**复制式**搬迁——原文件没有消失，而是被改成
+   * 一行转发（`pub use symbio_sdk::<域>::*;`）。diff 里它既不是删除、也不是同一行搬家，
+   * 所以 sdk 侧看起来是全新的面。D-279 那种「整份文件搬走」由 `movedLines` 接住，
+   * 这一种只能靠名单——两种形状的区别就是「旧文件还在不在」。
+   *
+   * `72fb57af`（D-259）在本轮复核里**已不再被命中**（那三域搬的行不带插件 id / 工具名），
+   * 故删除：一条打不中的豁免不是保险，是多一条没人复核的后门（D-280）。
    */
   const GRANDFATHERED = new Map([
-    ['7d2811b9', 'D-258 第一批：7 个域搬进 SDK，新增的是搬来的实现而不是新机制面'],
-    ['09906cbb', 'D-258 第三批：agent / embedding 两域搬迁，同上'],
-    ['72fb57af', 'D-259：turn / projection / invariants 三域下沉，同上'],
+    ['7d2811b9', 'D-258 第一批：7 个域搬进 SDK，原文件留转发桩（复制式搬迁，不是搬家）'],
+    ['09906cbb', 'D-258 第三批：agent / embedding 两域，同上'],
   ])
   let migrations = 0
   let supplements = 0
