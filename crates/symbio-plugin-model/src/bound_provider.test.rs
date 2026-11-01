@@ -567,7 +567,13 @@ async fn truncated_reasoning_only_stream_is_not_returned_as_answer() {
 }
 
 /// 连不上（真实网络错误）⇒ `GenerationFailed`——兜底路径的演练素材。
-#[tokio::test]
+///
+/// `start_paused`：这条判的是「网络错误最终变成 `GenerationFailed`」，**不是**退避曲线
+/// 本身（曲线由 `http` 里的 `backoff_delay` 单测钉）。真实时钟下它要走完请求级重试的
+/// 整条退避 0.5+1+2+4+8 = **15.5s**，实测占 `cargo test --workspace` 全部执行时间
+/// （40s）的四成——一条用例比其余 118 条加起来还贵 200 倍。暂停时钟后 `tokio::time::sleep`
+/// 由运行时自动推进，同一条断言在 **~0.1s** 内成立。
+#[tokio::test(start_paused = true)]
 async fn unreachable_endpoint_maps_to_generation_failed() {
     // 端口 1（tcpmux）几乎必然无人监听；即便个别环境有，也是真实边界行为。
     let adapter = ProviderLlmAdapter::new(mock_provider(1));

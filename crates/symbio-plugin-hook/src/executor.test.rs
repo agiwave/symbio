@@ -223,12 +223,18 @@ async fn timeout_is_enforced_and_reported() {
     let dir = tempfile::tempdir().unwrap();
     // `ping` 到不可路由地址（RFC 5737 TEST-NET-1）会一直等超时，够长且确定；
     // 末尾 `& rem` / `; :` 吃掉执行器追加的路径参数。
+    //
+    // 次数只有 2（2026-11-01 改，原是 8）：**这条判据的成本由命令自己的寿命决定，不由
+    // timeout_ms 决定**。`kill_on_drop` 杀掉的是 `cmd.exe`，它起的 `ping` 仍持有继承来的
+    // 管道句柄，于是 `output()` 那次阻塞等待要等到管道 EOF——`-n 8 -w 1000` 实测 **14.6s**，
+    // 一条用例占 `cargo test --workspace` 全部执行时间的三成。`-n 2 -w 500` 仍是
+    // `timeout_ms`(300ms) 的 3 倍以上，「命令活得比超时长」这个前提不变，实测 ~1.2s。
     let cfg = HookConfigEntry {
         timeout_ms: Some(300),
         ..cmd_hook(if cfg!(target_os = "windows") {
-            "ping -n 8 -w 1000 192.0.2.1 & rem".to_string()
+            "ping -n 2 -w 500 192.0.2.1 & rem".to_string()
         } else {
-            "sleep 8 ; :".to_string()
+            "sleep 1 ; :".to_string()
         })
     };
 
