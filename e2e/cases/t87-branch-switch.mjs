@@ -167,6 +167,9 @@ export default defineCase(
       );
 
       // ── 重试：落点在**那一支的轮骨架自身**，载荷没有新内容 ──────────────────
+      // 水位线要在受理**之前**取：重试是 spawn 执行，它的「在跑」帧可能在 `resumeSession`
+      // 返回前就到（见下方等它跑完的那段）。
+      const retryMark = sub.sessionChanges().length;
       const retry = await resumeSession(cli, SID, rootA, 'retry_subtree', {}, { session_id: SID });
       assert(
         retry.status === 200 && retry.body?.data?.ok === true,
@@ -176,6 +179,22 @@ export default defineCase(
       await waitFor(
         async () => runsOf(await readSessionMessages(cli, SID)).length >= 2,
         { what: '重试开出的第二支进入转写', timeoutMs: 30_000 },
+      );
+      // **轮骨架出现 ≠ 那一轮跑完**：骨架在轮首就落格，模型调用与落格还在后面。
+      // `sendAndSettle` 的判据是「水位线之后见过 working、且最后一帧离开 working」——
+      // 若重试那一轮此刻还在跑，它的收尾帧就会被下一幕的等待当成**自己的**收尾，
+      // 于是下一幕在模型还没被叫到时就返回（并发 6 下稳定复现：第三幕实得 2 个请求，
+      // 第二幕的请求就是第 2 个）。所以这里按实时面把重试轮等干净，再进下一幕。
+      await waitFor(
+        () => {
+          const sc = sub.sessionChanges().slice(retryMark);
+          return (
+            sc.length > 0 &&
+            sc.some((c) => c.data?.status === 'working') &&
+            sc[sc.length - 1]?.data?.status !== 'working'
+          );
+        },
+        { what: '重试那一轮真的跑完（实时面离开 working）', timeoutMs: 60_000 },
       );
 
       // ── 证据 ①：两支**都在树里**，标注把它们成对说出来 ─────────────────────
