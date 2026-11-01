@@ -1285,8 +1285,17 @@ pub(crate) static ROWS: &[Decl] = &[
     },
     // 产物格的**归宿行**：`artifact.added` 落了载荷字段（见 `control_decl::FACTS`），
     // 于是它要有一行认领（`OrphanFact`）。它是自读行：`owes` 与 `until` 同源，产物一
-    // 落格就已闭合，永远不会被选中。`by` 挂收尾半（`await-tools` 的执行体正是落产物
-    // 的那一半），只为满足「整张行表都在同一张绑定表里」——不是给它派活。
+    // 落格就已闭合，永远不会被选中。
+    //
+    // 归宿跟着声明走：这一格的载荷声明在控制面，是为了让能力包能按 `tool` /
+    // `success` / `tool_call_id` 开自己的行（notes 的索引行就是那样的行）；认领若挂到
+    // 那种行上，卸载一个可选插件就成了装载期 `OrphanFact`。视图也顶不掉——`OrphanFact`
+    // 的视图那一跳要求「有一条行以该视图为源」，单加一条视图不算认领。
+    //
+    // `by` 挂收尾半（`await-tools` 的执行体正是落产物那一半）是 `D-222` 裁决 5 要求的：
+    // 整张行表都要在绑定表里，判据 `the_single_binding_table_binds_every_row` 钉的就是
+    // 这一条。写 `None` 会把一行「永不欠账」的归宿行归进「未接线 = 调度旁路」那一格
+    // （`D-158` 的归零对象）——不是给它派活，是别把它归错类。
     Decl {
         name: EVENT_ARTIFACT_ADDED,
         prio: 200,
