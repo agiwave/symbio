@@ -8,21 +8,21 @@
 //! 插件停用后条目仍在（实例不构造不等于链接期条目消失），「停用即缺席」当场判红。
 //! 这正是 `submit_port_provider!` 案被否的原因（D-298「为什么不是 (b)」）。
 //!
-//! ## 提供者随能力表走
+//! ## 提供者随能力表走（单一 `port` 族，D-299）
 //!
 //! 提供者行由**活插件**在自己的 `traverse` 里 `put`（与工具 / 模型目录 / 挂载同一广播
 //! 机制）：停用的插件不参与装配、不 traverse、不写行；收集器每次装配重建，旧行不残留。
-//! 行族**每端口一个单槽**（`port.model` / `port.tool`）——`single` 是族级策略（`put`
-//! 按族降位），两个端口挤同一个族会互相顶掉。
+//! 全部端口共用**一个 `multi` 族**，每（端口, 提供者）一行——注册层的族声明不认识端口名，
+//! 加端口不加族；端口级唯一由读数与装载期检查裁（[`capability_port_of`] 按行名前缀
+//! 分组），不靠表侧 `demote`。
 //!
 //! ## 判重与缺席
 //!
 //! - `0` 行 = 缺席（合法装配态：没装提供者插件）；响亮失败发生在调用点（消费方拿到
 //!   [`PortReading::Absent`] 自行落事实并中止）。
-//! - `>1` 行 = 判重（表侧 `demote` 保证一活一降）：[`capability_port_check`] 落一条错误
-//!   进 `CAPABILITY_ERRORS`（装载期判红），保留先注册行（与挂载 / 模型的先注册槽位
-//!   语义一致），**不静默顶掉**。不做显式优先级——单 provider 场景没有挑选判据，
-//!   「挑一个」正是要消灭的静默形态。
+//! - `>1` 行 = 判重：两行俱在（谁都没被顶掉），[`capability_port_check`] 落一条错误
+//!   进 `CAPABILITY_ERRORS`（装载期判红）并指名两者，**不静默顶掉**。不做显式
+//!   优先级——单 provider 场景没有挑选判据，「挑一个」正是要消灭的静默形态。
 //! - 闭集外端口名 = [`PortReading::Unknown`]（漏声明，不是默认值）。
 //!
 //! ## 不出现在消费面
@@ -68,7 +68,7 @@ pub mod ports {
 pub trait PortProvider: Send + Sync + 'static {
     /// 端口名（必须是 [`ports::KNOWN`] 闭集之一）。
     fn port(&self) -> &'static str;
-    /// 提供者 id（行名后缀；判重读数里指认谁被顶掉）。
+    /// 提供者 id（行名后缀；判重读数里指名参与判重的各方）。
     fn provider_id(&self) -> &str;
 
     /// model 端口的消费合同：按首选 id 解析并构造**本次往返**的适配器。
@@ -109,13 +109,13 @@ impl PortPayload {
     }
 }
 
-/// 每端口一个单槽族。闭集外 ⇒ `None`（漏声明，不是默认值）。
+/// 全部端口共用的唯一 `multi` 族（D-299）：族不区分端口，端口级分组由行名前缀
+/// （[`port_row_name`]）在读数里做——加端口不加族。
+pub const PORT_FAMILY: CapabilityFamily = CapabilityFamily::multi("port");
+
+/// 闭集内的端口 ⇒ 唯一族；闭集外 ⇒ `None`（漏声明，不是默认值）。
 pub fn port_family(port: &str) -> Option<CapabilityFamily> {
-    match port {
-        ports::MODEL => Some(CapabilityFamily::single("port.model")),
-        ports::TOOL => Some(CapabilityFamily::single("port.tool")),
-        _ => None,
-    }
+    ports::KNOWN.contains(&port).then_some(PORT_FAMILY)
 }
 
 /// port 行的行名：保留前缀，撞不上任何线上工具名。
@@ -126,7 +126,8 @@ pub fn port_row_name(port: &str, provider_id: &str) -> String {
     format!("<port:{port}>:{provider_id}")
 }
 
-/// 提供者行：单槽族的占位行（`active = true`）。
+/// 提供者行：`multi` 族的一行（`active = false`，不参与表侧降位——端口级唯一由
+/// 读数与装载期检查裁，D-299）。
 ///
 /// 闭集外端口 ⇒ `None`——调用方（提供者插件的 traverse 分支）应当跳过注册而不是
 /// 猜一个族。
@@ -136,7 +137,7 @@ pub fn port_row(provider: &Arc<dyn PortProvider>) -> Option<CapabilityRow> {
         family,
         port_row_name(provider.port(), provider.provider_id()),
         PortPayload::new(provider.clone()),
-        true,
+        false,
     ))
 }
 
@@ -148,7 +149,8 @@ pub enum PortReading {
     Absent,
     /// 1 行：就绪。
     Ready(Arc<CapabilityRow>),
-    /// `>1` 行：判重——保留先注册行，被顶掉的名字在 `dropped` 里。
+    /// `>1` 行：判重——同端口的多个提供者**两行俱在**（单族不降位），`dropped` 是
+    /// 其余提供者的行名。
     ///
     /// 装载期已由 [`capability_port_check`] 落错误（不静默顶掉）；调用方拿到本读数
     /// 同样必须响亮处理，不许当作 [`PortReading::Ready`] 用。
@@ -177,13 +179,20 @@ impl fmt::Debug for PortReading {
 
 /// 读一个端口的提供者行（纯读数，不落错误）。
 ///
-/// 判定的全部输入是族内行数：`0` 缺席、`1` 就绪、`>1` 判重。表侧 `demote` 保证
-/// 「两个生效者」不可表达，行数让「静默被顶掉」可判——读数不猜、不回落。
+/// 判定的全部输入是**按行名前缀分组**后的行数（单一 `port` 族里其他端口的行不可
+/// 见）：`0` 缺席、`1` 就绪、`>1` 判重。行不降位（`active = false`），行数让
+/// 「多提供者」可判——读数不猜、不回落。
 pub async fn capability_port_of(visitor: &dyn Registry, port: &str) -> PortReading {
     let Some(family) = port_family(port) else {
         return PortReading::Unknown(port.to_string());
     };
-    let rows = visitor.list(family).await;
+    let prefix = port_row_name(port, "");
+    let rows: Vec<_> = visitor
+        .list(family)
+        .await
+        .into_iter()
+        .filter(|r| r.name().starts_with(&prefix))
+        .collect();
     match rows.len() {
         0 => PortReading::Absent,
         // panic-allow crates/symbio-plugin-api/src/port.rs::capability_port_of: 行数已判定为 1，next() 取不到说明 list 与 len 之间表被改写（同一次调用内不会发生），属代码缺陷。
@@ -198,8 +207,8 @@ pub async fn capability_port_of(visitor: &dyn Registry, port: &str) -> PortReadi
     }
 }
 
-/// 装配期判重检查（D-298）：闭集每个端口读一次族内行数；判重 ⇒ 落一条错误进
-/// `CAPABILITY_ERRORS`（装载期判红，session 读桶即红）。
+/// 装配期判重检查（D-298 / D-299）：闭集每个端口按行名前缀读一次分组行数；
+/// 判重 ⇒ 落一条错误进 `CAPABILITY_ERRORS`（装载期判红，session 读桶即红）。
 ///
 /// 缺席**不报错**——「没装提供者插件」是合法装配态（不装 model 插件的部署存在），
 /// 响亮失败发生在调用点。没有 `CAPABILITY_VISITOR` 的 ctx 上本函数静默跳过：
@@ -215,7 +224,7 @@ pub async fn capability_port_check(ctx: &Arc<dyn PluginInvokeRequest>) {
                 ctx,
                 "core",
                 format!(
-                    "世界端口 `{port}` 注册了多个提供者：保留先注册的 `{}`，被顶掉的 {dropped:?}",
+                    "世界端口 `{port}` 注册了多个提供者：`{}` 与 {dropped:?} 两行俱在",
                     kept.name(),
                 ),
             )

@@ -29,9 +29,9 @@ T-025 暂停处置。审计正文即本文档其余各节。
 2. loop 的 1.4 万行里，**真环机制（D 类）约占四成**且形状基本正确（单一行表、协议五事实、
    幂等键、租约）；其余是三类债——命名耦合（A，改字符串即可）、世界语义（B，该下沉）、
    turn/session 骨架（C，该搬走）。
-3. `port.model` / `port.tool` 两族**确认应改为单族按名唯一**：`Registry` 的 `single` 是
-   族级单槽（`put` 降同族全部旧行），表达不了按名唯一，需要一处**最小通用增强**
-   （槽位策略加「按名」一档，不新开静态表）。
+3. `port.model` / `port.tool` 两族**确认应改为单族按名唯一**：施工前机制核查订正了初稿
+   两案（行名去 provider_id 会让判重不可判；「按名」槽位档在同名覆盖语义下空转），最小
+   实现是**单一 `multi` 族 + 行名前缀分组，内核零改动**（§三）。
 4. **turn 生命周期归 session**，不归端口：turn 的身份键、收束格、18 格状态全是会话轴；
    端口的生命周期单位是 `Call`（attempt + 租约），归环记账。
 5. 分批：T-023 / T-024 **保留**（T-023 的读数面随修订跟进）；T-025 **重做**为 T-029
@@ -55,17 +55,30 @@ T-025 暂停处置。审计正文即本文档其余各节。
 
 ### B 世界语义，必须下沉到 provider / 能力包
 
-| 位置 | 是什么 | 下沉去向 |
-|---|---|---|
-| `tools/tool_executor.rs:260-297` | **线上名解析**：`mcp__fs__read` → 能力名（`tool_metas` + `capability_resolve`，失败不猜按原样路由交 NotFound） | tool 端口的 PortProvider 合同 |
-| `tools/tool_executor.rs:379-446` | **空闲超时**：`TOOL_EXEC_IDLE_TIMEOUT_SECS=600`，进展判据 `sink.progress().emitted()`，`biased` select 三出口 | 同上 |
-| `tools/tool_executor.rs:61-131` + `:154-190` + `:448-496` | **结果契约**：`extract_result` / `PendingPrompt` / `RESULT_CONTENT`·`RESULT_OUTPUT` 解码 | 同上 |
-| `tools/tool_executor/decls.rs:33-68` | `ToolDecls` / `behaviors_of`：模型可见工具清单构造，名字匹配先等值再取末段 | tool 端口合同（清单即端口的请求形状） |
-| `tools/tool_executor/effects.rs:31-60` | `record_effect`：工具效果落格 | tool 端口合同的效果面 |
-| `context.rs:294-376`（`should_start_compression` / `prepare_compression`）+ `chat_loop/inputs.rs:548`（`run_compress`）+ `context/pipeline.rs:996`（`run_compression_llm`）+ `turn_exec.rs:1047` | **压缩链**：阈值判定、迟滞、切分、摘要请求 | 压缩是模型使用策略（世界语义）——判定与摘要构造下沉；内部往返的 `via` 记账（`Call::with_via("compress/summary")`）留环（D） |
-| `tokenizer.rs`（318 行）+ `context.rs` 水位计算 | token 计数与请求水位 | 模型世界语义，随压缩链一并评估 |
-| `context/prompt.rs` / `conversation_view.rs` / `providers.rs` / `view.rs` | 对话视图与 prompt 段构造 | 模型对话面语义；`build_user_prompt_message`（工具结果节点，`tool_executor.rs` 内）同属此层 |
-| `memory_events.rs` | 记忆召回读数落格 | 读数已住能力包（D-264），loop 只带读数——**已基本就位**，仅登记 |
+**归属表（逐项有 owner，不悬空；两处口径裁定见表后）**：
+
+| # | 位置 | 是什么 | owner 任务 | 落点 |
+|---|---|---|---|---|
+| B1 | `tools/tool_executor.rs:260-297` | **线上名解析**：`mcp__fs__read` → 能力名（`tool_metas` + `capability_resolve`，失败不猜按原样路由交 NotFound） | T-029 | tool 端口的 `PortProvider` 合同 |
+| B2 | `tools/tool_executor.rs:379-446` | **空闲超时**：`TOOL_EXEC_IDLE_TIMEOUT_SECS=600`，进展判据 `sink.progress().emitted()`，`biased` select 三出口 | T-029 | 同上 |
+| B3 | `tools/tool_executor.rs:61-131` + `:154-190` + `:448-496` | **结果契约**：`extract_result` / `PendingPrompt` / `RESULT_CONTENT`·`RESULT_OUTPUT` 解码 | T-029 | 同上 |
+| B4 | `tools/tool_executor/decls.rs:33-68` | `ToolDecls` / `behaviors_of`：模型可见工具清单构造，名字匹配先等值再取末段 | T-029 | tool 端口合同（清单即端口的请求形状） |
+| B5 | `tools/tool_executor/effects.rs:31-60` | `record_effect`：工具效果落格 | T-029 | tool 端口合同的效果面 |
+| B6 | `context.rs:294-376` + `chat_loop/inputs.rs:548` + `context/pipeline.rs:996` + `turn_exec.rs:1047` | 压缩链（阈值 / 迟滞 / 切分 / 摘要请求） | **改判：留环（D-297 终态），不下沉** | 见口径裁定一 |
+| B7 | `tokenizer.rs` + `context.rs` 水位计算 | token 计数与请求水位 | **改判：D 类留环（预算计量），不下沉** | 见口径裁定二 |
+| B8 | `context/prompt.rs` / `conversation_view.rs` / `providers.rs` / `view.rs` + `tool_executor.rs` 内 `build_user_prompt_message` | 对话视图与 prompt 段构造 | T-030（复核点） | 搬 session 骨架时一并裁决：随 C 搬走，或另立 B 下沉批；届时落点 = model 端口合同扩展或对话面草稿（D-293 形状） |
+
+`memory_events.rs`（记忆召回读数）已基本就位（读数住能力包，D-264），不占 B 编号。
+
+**口径裁定一（压缩链）**：`D-297` 已裁「压缩执行体留控制面——触发与呈现」，判据「`loop`
+内不出现按能力名的压缩分支」原样有效。本审计初稿把「判定与摘要构造」列 B「须下沉」与
+`D-297` 冲突——**以 D-297 为源**：压缩链整链留环（与 D 类同层），B 表移出。谁改：改的是
+本审计的归类（本条），不是 D-297。若 T-030 的「loop 纯度」门禁与它冲突，合法动作是发起
+架构讨论重开 D-297（推翻条件：①第二个长过程消费者；②触发改成事件等值），不在迁移批顺手下沉。
+
+**口径裁定二（tokenizer）**：早前账记「预算计量」，本审计初稿列 B「模型世界语义」——两账
+统一为 **D 类**：预算 / 租约本就是 D 类条目，计量是其输入；`D-297` 裁压缩触发留控制面 ⇒
+水位计算同留。B 表移出。联动条件同裁定一（D-297 重开则随迁）。
 
 ### C turn / session 骨架，应从 loop 搬出到 session
 
@@ -120,20 +133,20 @@ T-025 暂停处置。审计正文即本文档其余各节。
 把世界类型留在注册层：加端口 = 加族，且 `single` 的槽位语义（`put` 降**同族全部**旧行，
 `capability/mod.rs:377-382`）意味着单族装不下两个端口。
 
-修订案（最小通用增强，不新开静态表）：
+**机制订正（施工前核查，`D-299` 按订正后的形状落）**：初稿两案经不起 `Registry` 的机制
+核查——①「行名固定 `<port:{port}>`（去 provider_id）」不成立：表键是全表唯一名字空间
+（`IndexMap` 同名覆盖，`Registry::put` 文档），同端口第二提供者会**静默覆盖**第一行，
+判重从此不可判；②「槽位策略加『按名』一档」在同名覆盖语义下是空转（降位副本随即被
+新行覆盖），机械上 ≡ `multi`。**订正后的最小实现（内核零改动，`CS-001` 不动）**：
 
-1. **单一 `port` 族**；`CapabilityFamily` 的槽位策略从 `single: bool` 增一档
-   「按名单槽」——`put` 收到生效行时降位范围从「同族全部」收窄为「同族**同名**」。
-   `multi` / `single` 语义不动（`row.rs:62-94`）。这是槽位策略的通用化，不是端口特例。
-2. **行名固定 `<port:{port}>`**：`provider_id` 退出表键（判重文案仍从
-   `PortProvider::provider_id()` 取，指认谁被顶掉）。尖括号防撞工具名，手法不变。
-3. **`capability_port_of` 改按名分组**：`list(port 族)` 后按行名归组——每组 1 行
-   `Ready`、>1 行 `Duplicate`（demote 保先注册）；`Absent` = 无该名行。闭集判定
-   （`ports::KNOWN`）仍在消费侧。
-4. **门禁影响**：kernel `CapabilityFamily` 加一个 `pub const fn` ⇒ `CS-001` 的
-   `symbio_kernel` 形状变宽，需挂 `core-shape-allow <格>: D-NNN`（决策号 = 本修订条目，
-   落 DE-045「关键决策」节，先裁后动）。结构性用例（port 行在表 ⇒ 六消费族看不见）
-   随行名改跟进。
+1. **单一 `multi("port")` 族**装全部端口，每（端口, 提供者）一行；行名保留
+   `<port:{port}>:{provider_id}`（provider_id 留在键里，判重文案才有名字可指）。
+2. port 行 `active = false`（`multi` 族无槽位语义；`put` 的降位块只对带生效位的行触发，
+   active 位不设即互不顶）。
+3. **`capability_port_of` 改按行名前缀分组**：`list(port 族)` 后按 `<port:{port}>:` 前缀
+   滤出本端口的行——0 缺席、1 就绪、>1 判重。判重不再依赖 demote 的「一活一降」：
+   两行俱在（更诚实：谁都没被顶掉），装载期 `capability_port_check` 报红指名两者。
+4. 闭集判定（`ports::KNOWN`）与消费面隔离（结构性用例）不变。
 
 ## 四、分批计划
 
@@ -151,10 +164,10 @@ T-025 暂停处置。审计正文即本文档其余各节。
 | 批 | 内容 | 验证读数 |
 |---|---|---|
 | T-026（本文档） | 审计落档，零代码 | registry-audit 绿 |
-| T-027 | DE-045 落 `### D-NNN`（单族按名唯一）+ kernel 槽位策略增强 + plugin-api 单族改写 + model 插件行名跟进 | 门禁 11 阶段；`CS-001` 变宽挂 `core-shape-allow`；`CC-001` 挂 `Core-Change:`；结构性用例绿 |
-| T-028 | A 类清耦：常量替字面量、id 前缀参数化、`control_decl` 配对参数化；**行名统一（`dispatch-{port}` / `await-{port}`）在本批裁**——若裁「改」，事实 payload、`PTS` / e2e 基线同提交重生成（`EL-001` 仍 16 行，只换名） | 门禁全绿；`EL-001…003` 只降；`EX-003` 净删 loop 非测试行 |
-| T-029（原 T-025 重做） | tool 三样 glue + `ToolDecls` + `record_effect` 下沉为 tool 端口 `PortProvider` 合同；**落点 = session 插件**（顶层收集宿主，`capabilities.rs` 的 `collect_capabilities` 在彼处；不新建 `symbio-plugin-tool`，agent 只是 traverse 参与者）；压缩链（判定 + 摘要构造）是否同批，裁于 T-028 之后 | 装 / 不装 / 缺失三路径 e2e 等价；缺失响亮失败并落事实；`EL-003` 11 读点只降 |
-| T-030 | C 类搬出：`SessionContext` / `TurnState` / `LoopSession` / 轮次收束从 loop 搬 session；loop 只剩 D + 端口派发面 | `CS-010` 读数随归属变（18 格不删，搬家）；`EX-003` 净删 loop 行；e2e 全绿 |
+| T-027 | DE-045 落 `### D-299`（单族按名唯一，按 §三订正后的形状：单 `multi` 族 + 前缀分组）+ plugin-api `port.rs` 改写 + model 插件行 active 位跟进 | 门禁 11 阶段；**内核零改动**（`CS-001` 不动，无 `core-shape-allow`）；结构性用例绿 |
+| T-028 | A 类清耦：常量替字面量、id 前缀参数化、`control_decl` 配对走常量；行名统一（`dispatch-tools`→`dispatch-tool`、`await-tools`→`await-tool`，行名在 e2e/PTS 无读点，行为逐字不变） | 门禁全绿；`EL-001` 仍 16 行；e2e 逐字不变 |
+| T-029（原 T-025 重做） | B1–B5 下沉为 tool 端口 `PortProvider` 合同；**落点 = session 插件**（顶层收集宿主，`capabilities.rs` 的 `collect_capabilities` 在彼处；不新建 `symbio-plugin-tool`，agent 只是 traverse 参与者）；压缩链 / tokenizer 不随批（口径裁定一 / 二） | 装 / 不装 / 缺失三路径 e2e 等价；缺失响亮失败并落事实；`EL-003` 11 读点只降 |
+| T-030 | C 类搬出：`SessionContext` / `TurnState` / `LoopSession` / 轮次收束从 loop 搬 session；loop 只剩 D + 端口派发面；B8（prompt / 对话视图归属）在本批复核。**exit 含「loop 纯度」结构审计（常设门禁，非一次性清理）**：loop 非测试源码禁止 `Model` / `Tool` / `Turn` 类型名、硬编码端口行名、按端口名的分支再进 loop——形态与 `EL` / `CS` 棘轮同构，变宽即红 | `CS-010` 读数随归属变（18 格不删，搬家）；`EX-003` 净删 loop 行；e2e 全绿 |
 
 **与 T-014 对齐**：本审计四类映射五类残留——D↔环、B↔过程体、C↔会话基底、A↔命名债；
 `EL-001`（16 行）/ `EL-002`（1 通道）/ `EL-003`（11 读点）全程只降；步 3 合流

@@ -302,7 +302,7 @@ export const BASELINE = {
   // ⇒ 列只能是文档写的空形状；在这里复算折叠就是造一个替身 owner）。组合判据在 e2e
   // `t31-task-table.mjs` / `t34-preemption.mjs` / `t36-autonomous-initiator.mjs` /
   // `t42-full-derives-commitment-task.mjs`（读生产二进制的 `readyset.ready`）。非侵蚀。
-  ciRustTestsTotal: 2611,
+  ciRustTestsTotal: 2612,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

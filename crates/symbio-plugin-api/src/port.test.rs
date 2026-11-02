@@ -87,6 +87,16 @@ fn contract_defaults_are_absent() {
     assert!(p.model().is_none());
 }
 
+/// 单族（D-299）：全部端口共用一个 `multi` 族——加端口不加族，端口级分组只靠
+/// 行名前缀。
+#[test]
+fn all_ports_share_one_family() {
+    let model = port_family(ports::MODEL).expect("闭集内有族");
+    let tool = port_family(ports::TOOL).expect("闭集内有族");
+    assert_eq!(model.name(), tool.name());
+    assert_eq!(model.name(), "port");
+}
+
 /// 活插件注册一个 provider：行的族 / 行名 / 生效位 / 载荷四样都对。
 #[tokio::test]
 async fn port_row_builds_the_declared_shape() {
@@ -94,7 +104,10 @@ async fn port_row_builds_the_declared_shape() {
     let row = port_row(&p).expect("闭集内的端口必须能造行");
     assert_eq!(row.family(), port_family(ports::MODEL).expect("model 有族"));
     assert_eq!(row.name(), "<port:model>:fixture-a");
-    assert!(row.active(), "port 行是单槽族的占位行");
+    assert!(
+        !row.active(),
+        "port 行不参与表侧降位（端口级唯一由读数裁，D-299）"
+    );
     let payload = row
         .payload::<PortPayload>()
         .expect("载荷必须能下转型回 PortPayload");
@@ -139,7 +152,8 @@ async fn absent_plugin_reads_absent() {
     ));
 }
 
-/// 两个端口互不干扰：各一个 provider ⇒ 各自 Ready（单槽是族级的，不互相顶）。
+/// 两个端口互不干扰：单族内按行名前缀分组，各一个 provider ⇒ 各自 Ready
+/// （`<port:model>:` 与 `<port:tool>:` 前缀互不可见，D-299）。
 #[tokio::test]
 async fn two_ports_do_not_demote_each_other() {
     let visitor = FakeRegistry::new();
@@ -159,7 +173,7 @@ async fn two_ports_do_not_demote_each_other() {
     ));
 }
 
-/// 判重不静默：同端口两个 provider ⇒ Duplicate（保留先注册行），且
+/// 判重不静默：同端口两个 provider ⇒ Duplicate（两行俱在，读数指名两者），且
 /// `capability_port_check` 落一条错误进错误桶（装载期判红）。
 #[tokio::test]
 async fn duplicate_provider_is_loud() {
@@ -173,7 +187,7 @@ async fn duplicate_provider_is_loud() {
 
     match capability_port_of(&visitor, ports::MODEL).await {
         PortReading::Duplicate { kept, dropped } => {
-            assert_eq!(kept.name(), "<port:model>:fixture-a", "保留先注册行");
+            assert_eq!(kept.name(), "<port:model>:fixture-a");
             assert_eq!(dropped, ["<port:model>:fixture-b"]);
         }
         other => panic!("判重必须读出 Duplicate，读到 {other:?}"),
@@ -195,7 +209,7 @@ async fn duplicate_provider_is_loud() {
     assert_eq!(errors.len(), 1, "判重必须落一条错误（不静默顶掉）");
     assert!(
         errors[0].message.contains("fixture-b"),
-        "错误要指名被顶掉的提供者：{}",
+        "错误要指名参与判重的提供者：{}",
         errors[0].message
     );
 }
@@ -247,14 +261,7 @@ async fn port_rows_never_reach_consumption_families() {
             fam.name()
         );
     }
-    // 表里确实有行（不是空表假绿）：两个端口各一行。
-    let port_rows = visitor
-        .list(port_family(ports::MODEL).expect("model 有族"))
-        .await
-        .len()
-        + visitor
-            .list(port_family(ports::TOOL).expect("tool 有族"))
-            .await
-            .len();
+    // 表里确实有行（不是空表假绿）：单族里两个端口各一行。
+    let port_rows = visitor.list(PORT_FAMILY).await.len();
     assert_eq!(port_rows, 2, "隔离用例的前提是表里真的有 port 行");
 }
