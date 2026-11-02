@@ -208,11 +208,14 @@ pub async fn capability_port_of(visitor: &dyn Registry, port: &str) -> PortReadi
 }
 
 /// 装配期判重检查（D-298 / D-299）：闭集每个端口按行名前缀读一次分组行数；
-/// 判重 ⇒ 落一条错误进 `CAPABILITY_ERRORS`（装载期判红，session 读桶即红）。
+/// 判重 ⇒ 落一条错误进 `CAPABILITY_ERRORS`。
 ///
-/// 缺席**不报错**——「没装提供者插件」是合法装配态（不装 model 插件的部署存在），
-/// 响亮失败发生在调用点。没有 `CAPABILITY_VISITOR` 的 ctx 上本函数静默跳过：
-/// 收集尚未开始时没有表可读，检查由编排方在收集结束后调用。
+/// **时点契约**：必须在能力收集结束、编排方读错误桶（`capability_take_errors`）
+/// 裁决**之前**调用——判重错误与收集期错误同桶同路，裁决即中止会话（装载期硬红）。
+/// 落桶之后才裁决 ⇒ 错误留在桶里无人读，判重退化为「照常跑」，那是本检查要消灭的
+/// 形态。缺席**不报错**——「没装提供者插件」是合法装配态（不装 model 插件的部署
+/// 存在），响亮失败发生在调用点。没有 `CAPABILITY_VISITOR` 的 ctx 上本函数静默跳过：
+/// 收集尚未开始时没有表可读。
 pub async fn capability_port_check(ctx: &Arc<dyn PluginInvokeRequest>) {
     let Some(visitor) = ctx.get(CAPABILITY_VISITOR) else {
         return;

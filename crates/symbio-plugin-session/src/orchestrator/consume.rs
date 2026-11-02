@@ -234,10 +234,9 @@ impl TurnLauncher {
         }
         // ── 本轮交付包（[D-086] §2/§3）：纯值 + 事实轨端口 + 世界端口 ──────
         //
-        // 世界端口判重检查（D-298）：能力收集已结束，读一次闭集每端口的族内行数——
-        // 判重 ⇒ 落错误进能力错误桶（装载期判红）。模型服务本体不在交付包里：
+        // 世界端口判重检查不在这里：装载期（entry 收集后、错误桶裁决前）已硬红，
+        // 两行俱在的表走不到本行。模型服务本体不在交付包里：
         // loop 按 `port.model` 从能力表现取。
-        symbio_plugin_api::capability_port_check(&chat_ctx).await;
         symbio_plugin_api::plugin_info!(
             symbio_deploy::PLUGIN_ID_SESSION,
             "[Session] 新会话开始（协议 {:?}）",

@@ -435,9 +435,17 @@ impl TurnLauncher {
             }
 
             let tool_visitor = collect_capabilities(Some(&parent_spawn), &chat_ctx).await;
+            // 先挂载再检查：`capability_port_check` 读 `ctx[CAPABILITY_VISITOR]`，
+            // 收集器只把错误桶回写到调用方 ctx，visitor 要等 `attach_capabilities`。
+            attach_capabilities(&chat_ctx, tool_visitor);
 
-            // 收集期硬错误（如会话绑定了不存在的智能体）→ 中止并明确报错，
-            // 绝不静默降级成"没有人格的通用助手"。
+            // 世界端口判重检查（D-298 / D-299）：必须在错误桶裁决**之前**跑——
+            // 同端口多提供者 ⇒ 落错误进桶，随下面的裁决一起中止会话（装载期硬红，
+            // 不许带着两行俱在的表进 loop）。
+            symbio_plugin_api::capability_port_check(&chat_ctx).await;
+
+            // 收集期硬错误（如会话绑定了不存在的智能体、同端口注册多个提供者）→
+            // 中止并明确报错，绝不静默降级成"没有人格的通用助手"。
             if let Some(first) = capability_take_errors(&chat_ctx).await.into_iter().next() {
                 let msg = format!("[{}] {}", first.plugin, first.message);
                 symbio_plugin_api::plugin_error!("session", "能力收集失败: {}", &msg);
@@ -447,8 +455,6 @@ impl TurnLauncher {
                     .await;
                 return;
             }
-
-            attach_capabilities(&chat_ctx, tool_visitor);
 
             // ── 基础提示词：**不在这里拼** ──
             // 各层指令与记忆（智能体自身与工作区两腿归 `memory`，会话腿归本插件）
