@@ -51,6 +51,7 @@ symbio-plugin-skill = { path = "../symbio-plugin-skill" }
 symbio-plugin-slo = { path = "../symbio-plugin-slo" }
 symbio-plugin-task = { path = "../symbio-plugin-task" }
 symbio-plugin-telegram = { path = "../symbio-plugin-telegram" }
+symbio-plugin-tool = { path = "../symbio-plugin-tool" }
 symbio-plugin-vdfs = { path = "../symbio-plugin-vdfs" }
 symbio-plugin-web = { path = "../symbio-plugin-web" }
 # <<< plugin-links:end

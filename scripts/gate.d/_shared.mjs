@@ -310,7 +310,12 @@ export const BASELINE = {
   // pending 意图穿过结果），loop 一侧另补 1 条 `a_missing_tool_port_fails_loudly_
   // on_the_result` 钉「端口行缺席 ⇒ 结果响亮失败」。环侧组合判据（batch / gates /
   // breaker）条数不变。非侵蚀。
-  ciRustTestsTotal: 2624,
+  // baseline-allow ciRustTestsTotal: 工具端口宿主插件化净 +1（2624 → 2625）——同一次搬家的
+  // 两端：session 的 `port.test.rs` 20 条判据随执行体迁入 `symbio-plugin-tool`（只换测试
+  // 二进制，条数不变），另补 1 条 `tool_port_registers_one_row_and_exposes_an_executor`
+  // 钉「端口申报、`port_rows` 单行、`capability_port_of` 就绪且执行面可取」。清白树实跑
+  // `cargo test --workspace`：2625 passed / 0 failed（90 个目标）。非侵蚀。
+  ciRustTestsTotal: 2625,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

@@ -10,6 +10,8 @@
 //! 意味着 id 不再可路由（"谁的 main"没人说得出），加一族就要动判据；kind 独立之后
 //! `is_agent_id` 用命名空间登记表分派（`AGENT_NAMESPACES`），加一族只是登记多一条。
 
+// arch-shape-allow CS-004 tool ×2: 用途=wire 词汇（PrincipalKind::Tool 的序列化词与 legacy 前缀 "tool"）；不是插件引用=这是主体地址协议的既有词汇，与插件目录名无关，内核不因此认识任何插件实现；依据=D-303；登记=2026-11-03
+
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 

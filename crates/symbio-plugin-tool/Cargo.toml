@@ -1,0 +1,20 @@
+[package]
+name = "symbio-plugin-tool"
+version = "0.1.14"
+description = "Symbio plugin: tool（工具世界的 port.tool 提供者）"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+symbio-plugin-api = { path = "../symbio-plugin-api" }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+async-trait = { workspace = true }
+tracing = { workspace = true }

@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use symbio_kernel::actors::Scope;
+use symbio_kernel::capability::Registry;
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::plugin::PluginError;
 use symbio_kernel::store::{EventStore, Store};
@@ -20,6 +21,7 @@ use symbio_plugin_api::events::{
     EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OPENED, EVENT_COMMITMENT_RELEASED,
     EVENT_SESSION_CONSOLIDATED,
 };
+use symbio_plugin_api::PluginInvokeRequestExt;
 use symbio_sdk::chat::chat_node::ChatNode;
 use symbio_sdk::projection::turns::count_user_messages;
 use symbio_sdk::turn::dispatch::{
@@ -578,13 +580,9 @@ symbio_plugin_api::submit_declarations!(
 // 文本形状与生产一致」；线上名解析 / 空闲超时 / 结果契约的行为判据由 session 一侧
 // 的测试电池钉（`crates/symbio-plugin-session/src/port.test.rs`），两处若漂移 e2e 会红。
 
-use symbio_kernel::capability::Registry;
-use symbio_kernel::plugin::PluginInvokeRequestExt;
-use symbio_plugin_api::port::{
-    port_rows, PortProvider, ToolCallExecutor, ToolCallOutcome, ToolCallRequest,
-};
+use symbio_plugin_api::port::{port_rows, PortExecContext, PortExecutor, PortInput, PortOutcome};
 use symbio_plugin_api::ports;
-use symbio_plugin_api::CAPABILITY_VISITOR;
+use symbio_plugin_api::{PortProvider, CAPABILITY_VISITOR};
 
 /// 工具端口替身：执行体与生产 `ToolPort` 同形的最小子集（见上方注释）。
 pub(crate) struct FixtureToolPort;
@@ -598,23 +596,49 @@ impl PortProvider for FixtureToolPort {
         "tests/tool-port"
     }
 
-    fn tool_execute(&self) -> Option<Arc<dyn ToolCallExecutor>> {
+    fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
         Some(Arc::new(FixtureToolPort))
     }
 }
 
+fn fixture_outcome(result_text: String, success: bool, pending: Option<Value>) -> PortOutcome {
+    PortOutcome {
+        facts: vec![serde_json::json!({
+            "result_text": result_text,
+            "success": success,
+            "pending": pending,
+        })],
+        error: None,
+    }
+}
+
 #[async_trait]
-impl ToolCallExecutor for FixtureToolPort {
-    async fn execute(&self, req: ToolCallRequest) -> ToolCallOutcome {
-        let name = req.tool_name.clone();
+impl PortExecutor for FixtureToolPort {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let payload = input.payload;
+        let name = payload
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let args = payload.get("args").cloned().unwrap_or(Value::Null);
+        let tool_call_id = payload
+            .get("tool_call_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let result_msg_id = payload
+            .get("result_msg_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let Some(ctx) = exec.ctx.clone() else {
+            return fixture_outcome("Error: No request context".into(), false, None);
+        };
         // 宿主检查在最前（与生产逐字同形）：无 parent 的调用诚实失败，
         // 不查表、不回落——「无宿主 ⇒ No parent plugin」是既有用例钉住的形状。
-        let Some(parent) = req.parent.clone() else {
-            return ToolCallOutcome {
-                result_text: "Error: No parent plugin".into(),
-                success: false,
-                pending: None,
-            };
+        let Some(parent) = ctx.parent().and_then(|w| w.upgrade()) else {
+            return fixture_outcome("Error: No parent plugin".into(), false, None);
         };
         // 「等待用户」意图：与生产同判据（`failure_kind` 闭集），节点仍由环构造。
         let pending_of = |data: &Value| {
@@ -622,15 +646,11 @@ impl ToolCallExecutor for FixtureToolPort {
             if !symbio_kernel::capability::failure_kind::is_pending(kind) {
                 return None;
             }
-            Some(symbio_plugin_api::port::PendingPrompt {
-                text: data
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .unwrap_or("需要用户操作")
-                    .to_string(),
-                prompt: data.get("prompt").cloned().unwrap_or(Value::Null),
-                failure_kind: kind.to_string(),
-            })
+            Some(serde_json::json!({
+                "text": data.get("content").and_then(Value::as_str).unwrap_or("需要用户操作"),
+                "prompt": data.get("prompt").cloned().unwrap_or(Value::Null),
+                "failure_kind": kind,
+            }))
         };
         // 结果文本：content/output 字符串优先，兜底整包 JSON（生产 `extract_result`
         // 的前两条判据——批用例只消费这两种形状）。
@@ -642,13 +662,13 @@ impl ToolCallExecutor for FixtureToolPort {
                 .unwrap_or_else(|| data.to_string())
         };
 
-        let visitor: Option<Arc<dyn Registry>> = req.ctx.get(CAPABILITY_VISITOR);
-        let tool_ctx = req.ctx.fork();
-        let _ = tool_ctx.set_payload(req.args.clone());
-        tool_ctx.set(symbio_sdk::keys::TOOL_CALL_ID, req.tool_call_id.clone());
-        tool_ctx.set(symbio_sdk::keys::RESULT_MSG_ID, req.result_msg_id.clone());
-        tool_ctx.set(symbio_kernel::exec::EVENT_SINK, req.sink.clone());
-        tool_ctx.set(symbio_kernel::exec::ABORT_SIGNAL, req.abort.clone());
+        let visitor: Option<Arc<dyn Registry>> = ctx.get(CAPABILITY_VISITOR);
+        let tool_ctx = ctx.fork();
+        let _ = tool_ctx.set_payload(args);
+        tool_ctx.set(symbio_sdk::keys::TOOL_CALL_ID, tool_call_id);
+        tool_ctx.set(symbio_sdk::keys::RESULT_MSG_ID, result_msg_id);
+        tool_ctx.set(symbio_kernel::exec::EVENT_SINK, exec.sink.clone());
+        tool_ctx.set(symbio_kernel::exec::ABORT_SIGNAL, exec.abort.clone());
 
         // 与生产同序的三条形态：表命中（字面名——夹具工具都是 canonical 名）/
         // 未命中回落 route / 无表直接 route。
@@ -668,11 +688,11 @@ impl ToolCallExecutor for FixtureToolPort {
                         })
                     }
                     None => {
-                        return ToolCallOutcome {
-                            result_text: format!("Error: Tool not found: {name}"),
-                            success: false,
-                            pending: None,
-                        }
+                        return fixture_outcome(
+                            format!("Error: Tool not found: {name}"),
+                            false,
+                            None,
+                        )
                     }
                 }
             } else {
@@ -690,34 +710,27 @@ impl ToolCallExecutor for FixtureToolPort {
         let result = tokio::select! {
             biased;
             r = fut => r,
-            _ = req.abort.cancelled() => {
-                return ToolCallOutcome {
-                    result_text: format!("Error: 工具 {name} 被用户中止，未返回结果"),
-                    success: false,
-                    pending: None,
-                };
+            _ = exec.abort.cancelled() => {
+                return fixture_outcome(
+                    format!("Error: 工具 {name} 被用户中止，未返回结果"),
+                    false,
+                    None,
+                );
             }
         };
         match result {
             Ok(resp) => {
                 let Ok(data) = resp.get::<Value>() else {
-                    return ToolCallOutcome {
-                        result_text: "Error: Failed to deserialize payload".into(),
-                        success: false,
-                        pending: None,
-                    };
+                    return fixture_outcome(
+                        "Error: Failed to deserialize payload".into(),
+                        false,
+                        None,
+                    );
                 };
-                ToolCallOutcome {
-                    result_text: text_of(&data),
-                    success: true,
-                    pending: pending_of(&data),
-                }
+                let pending = pending_of(&data);
+                fixture_outcome(text_of(&data), true, pending)
             }
-            Err(e) => ToolCallOutcome {
-                result_text: format!("Error: {e}"),
-                success: false,
-                pending: None,
-            },
+            Err(e) => fixture_outcome(format!("Error: {e}"), false, None),
         }
     }
 }

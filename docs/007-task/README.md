@@ -88,7 +88,7 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 |---|---|---|---|---|
 | `T-023-世界端口注册面` | 世界端口注册面：port 族、动态收集、装配期判重与缺席读数 | next | arch | — |
 | `T-024-model端口迁出` | model 端口迁出：provider 由 model 插件注册，loop 只按端口名调用 | next | arch | T-023-世界端口注册面 |
-| `T-025-tool端口迁出` | tool 端口迁出：只搬线上名解析 / 超时 / 结果契约，不建代理 | next | arch | T-023-世界端口注册面 |
+| `T-025-tool端口迁出` | tool 端口迁出：声明与提供者归 `symbio-plugin-tool`，工具仍由各工具插件执行 | next | arch | T-023-世界端口注册面 |
 | `T-021-度量补齐` | D：度量补齐——EX-001 扩到首次落地、补件比进门禁、验收映射与 21 统一 | later | arch | — |
 | `T-022-第二条读数型能力或骨架移除` | C2 接棒：第二条读数型能力进入 S9，或按期限撤掉 forecast 骨架 | later | arch | — |
 | `T-009-拆分终态验收` | S11：终态验收——基线清空、账本收口与判据全绿 | later | arch | T-007-loop存量能力迁移、T-008-session存量能力迁移、T-012-A类能力插件化、T-014-引擎收口、T-022-第二条读数型能力或骨架移除 |
@@ -124,7 +124,7 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
   - [`T-022-第二条读数型能力或骨架移除`](022-第二条读数型能力或骨架移除.md) C2 接棒：第二条读数型能力进入 S9，或按期限撤掉 forecast 骨架（todo）
   - [`T-023-世界端口注册面`](023-世界端口注册面.md) 世界端口注册面：port 族、动态收集、装配期判重与缺席读数（todo）
   - [`T-024-model端口迁出`](024-model端口迁出.md) model 端口迁出：provider 由 model 插件注册，loop 只按端口名调用（todo）
-  - [`T-025-tool端口迁出`](025-tool端口迁出.md) tool 端口迁出：只搬线上名解析 / 超时 / 结果契约，不建代理（todo）
+  - [`T-025-tool端口迁出`](025-tool端口迁出.md) tool 端口迁出：声明与提供者归 `symbio-plugin-tool`，工具仍由各工具插件执行（todo）
   - [`T-026-loop耦合审计`](026-loop耦合审计.md) loop 耦合审计：端口名统一、世界语义下沉与 turn 骨架归属（doing） · 子项 doing 3
     - [`T-029-tool端口合同下沉`](029-tool端口合同下沉.md) tool 端口合同下沉：B1–B5 迁 session，环只认端口（doing）
     - [`T-030-turn骨架搬出与loop纯度`](030-turn骨架搬出与loop纯度.md) turn 骨架搬出 session + loop 纯度常设门禁（含 B4/B5 补迁）（doing）

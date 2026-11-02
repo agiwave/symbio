@@ -1,0 +1,453 @@
+//! `port.tool` 提供者的单元测试：线上名解析 / 空闲超时 / 结果契约的行为判据
+//! 随执行体一起搬到本插件（代码搬家，钉住行为的用例跟着搬，不在原处留副本）。
+//!
+//! 注册面那一半与 `notify` 端口同款：`port_rows` 产行、`capability_port_of` 读到
+//! `Ready`、执行面可取。
+
+use super::*;
+use async_trait::async_trait;
+use std::sync::{Arc, Weak};
+use tokio::sync::RwLock;
+
+use symbio_plugin_api::{
+    Capability, CapabilityFamily, CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv,
+    ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta,
+    PluginPayload, PluginSimpleRequest, PortPayload, PortReading, Registry, CAPABILITY_VISITOR,
+};
+
+// ==================== extract_result：判定顺序即约定 ====================
+//
+// 这组用例的作用是**钉住判定顺序**——它现在是 `extract_result` 文档里的表，
+// 不再是「读源码才知道」的实现细节。顺序变了这里会红。
+
+#[test]
+fn content_wins_over_output() {
+    assert_eq!(
+        extract_result(&serde_json::json!({"content": "正文", "output": "命令输出"})),
+        "正文"
+    );
+}
+
+#[test]
+fn output_is_read_when_content_absent() {
+    assert_eq!(
+        extract_result(&serde_json::json!({"output": "ls 结果"})),
+        "ls 结果"
+    );
+}
+
+#[test]
+fn success_true_falls_back_to_the_whole_payload() {
+    assert_eq!(
+        extract_result(&serde_json::json!({"success": true, "n": 3})),
+        r#"{"n":3,"success":true}"#
+    );
+}
+
+#[test]
+fn success_false_renders_the_error_field() {
+    assert_eq!(
+        extract_result(&serde_json::json!({"success": false, "error": "权限不足"})),
+        "Error: 权限不足"
+    );
+}
+
+#[test]
+fn success_false_without_error_says_unknown() {
+    assert_eq!(
+        extract_result(&serde_json::json!({"success": false})),
+        "Error: unknown error"
+    );
+}
+
+#[test]
+fn bare_string_is_taken_as_is() {
+    assert_eq!(
+        extract_result(&serde_json::json!("直接给一段文本")),
+        "直接给一段文本"
+    );
+}
+
+#[test]
+fn opaque_payload_is_stringified() {
+    assert_eq!(
+        extract_result(&serde_json::json!({"path": "a.txt", "lines": 12})),
+        r#"{"lines":12,"path":"a.txt"}"#
+    );
+    assert_eq!(extract_result(&serde_json::json!(null)), "null");
+    assert_eq!(extract_result(&serde_json::json!(42)), "42");
+}
+
+#[test]
+fn non_string_content_does_not_hijack_the_read() {
+    assert_eq!(
+        extract_result(&serde_json::json!({"content": [1, 2], "output": "真正的输出"})),
+        "真正的输出"
+    );
+}
+
+#[test]
+fn empty_content_string_is_a_hit() {
+    assert_eq!(
+        extract_result(&serde_json::json!({"content": "", "output": "x"})),
+        ""
+    );
+}
+
+#[test]
+fn result_field_constants_match_the_documented_order() {
+    assert_eq!((RESULT_CONTENT, RESULT_OUTPUT), ("content", "output"));
+}
+
+/// 回归（真实事故）：中文参数摘要不得在字节边界上 panic。
+#[test]
+fn args_summary_handles_multibyte_args() {
+    use serde_json::json;
+
+    let payload = "参数摘要：截断到 max_chars，用于日志打印（避免超长参数刷屏）。".repeat(8);
+    let args = json!({ "path": "a.rs", "content": payload });
+
+    for max in [1usize, 2, 3, 199, 200, 201, 512] {
+        let s = args_summary(&args, max);
+        assert!(
+            s.chars().count() <= max + 32,
+            "max={max} 摘要过长：{} 字节",
+            s.len()
+        );
+    }
+
+    let long = args_summary(&args, 200);
+    assert!(long.ends_with(&format!("(len={})", args.to_string().len())));
+    assert!(long.contains('…'));
+
+    assert_eq!(args_summary(&json!({"a": 1}), 200), "{\"a\":1}");
+}
+
+// ==================== 工具执行期间的中止感知 ====================
+//
+// 非流式工具在执行期间是**单次 await**，没有任何帧可观测。若不与中止信号 select，
+// 用户按下停止后工具照跑（最长硬超时 600s）。契约一句：**只有 `abort()` 能让等待返回**。
+
+#[tokio::test]
+async fn wait_tool_abort_returns_when_signalled() {
+    let abort = ExecAbortSignal::new();
+    let waiter = abort.clone();
+
+    let handle = tokio::spawn(async move { wait_tool_abort(&waiter).await });
+
+    abort.abort();
+    tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+        .await
+        .expect("中止置位后应立即返回，而不是继续等工具")
+        .expect("等待任务不应 panic");
+}
+
+#[tokio::test]
+async fn wait_tool_abort_returns_immediately_when_already_aborted() {
+    let abort = ExecAbortSignal::new();
+    abort.abort();
+    tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        wait_tool_abort(&abort),
+    )
+    .await
+    .expect("信号已置位时应立即返回");
+}
+
+#[tokio::test]
+async fn wait_tool_abort_stays_pending_without_signal() {
+    let abort = ExecAbortSignal::new();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_millis(300),
+        wait_tool_abort(&abort),
+    )
+    .await;
+    assert!(
+        r.is_err(),
+        "无中止来源时提前返回：正在跑的工具会被无故丢弃并报成「用户中止」"
+    );
+    assert!(!abort.is_aborted(), "未中止时信号不得被置位");
+}
+
+// ── 工具结果的「等待用户」意图 ────────────────────────────────────────────────
+
+#[test]
+fn pending_prompt_from_only_accepts_the_pending_kinds() {
+    for kind in ["needs_approval", "needs_interaction"] {
+        let data = serde_json::json!({
+            "content": "需要确认：执行 cmd",
+            "prompt": { "kind": "confirm" },
+            "failure_kind": kind,
+        });
+        let p = pending_prompt_from(&data).unwrap_or_else(|| panic!("{kind} 应判为等待用户"));
+        assert_eq!(p["failure_kind"], serde_json::json!(kind));
+        assert_eq!(p["text"], serde_json::json!("需要确认：执行 cmd"));
+        assert_eq!(p["prompt"]["kind"], serde_json::json!("confirm"));
+    }
+
+    for kind in ["error", "permission_denied", "tool_unavailable"] {
+        let data = serde_json::json!({ "content": "x", "failure_kind": kind });
+        assert!(
+            pending_prompt_from(&data).is_none(),
+            "{kind} 是信息性标记，不得收口为等待用户（会让会话永久挂起）"
+        );
+    }
+
+    assert!(pending_prompt_from(&serde_json::json!({ "content": "ok" })).is_none());
+}
+
+#[test]
+fn subagent_pending_payload_is_recognized_as_pending_intent() {
+    let payload = serde_json::json!({
+        "content": "需要确认：删除文件",
+        "success": false,
+        "failure_kind": symbio_plugin_api::failure_kind::NEEDS_APPROVAL,
+        "prompt": { "tool_name": "agent_run", "args": { "session_id": "child-1" } },
+    });
+    let p = pending_prompt_from(&payload).expect("子会话待审批载荷必须被识别");
+
+    assert_eq!(p["text"], serde_json::json!("需要确认：删除文件"));
+    assert_eq!(p["prompt"]["tool_name"], serde_json::json!("agent_run"));
+    assert_eq!(
+        p["failure_kind"],
+        serde_json::json!(symbio_plugin_api::failure_kind::NEEDS_APPROVAL)
+    );
+}
+
+// ==================== 注册面 ====================
+
+/// 最小登记表（与 `plugin-api` 的 port.test 同款夹具）。
+struct FakeRegistry {
+    rows: RwLock<Vec<Arc<CapabilityRow>>>,
+}
+
+impl FakeRegistry {
+    fn new() -> Self {
+        Self {
+            rows: RwLock::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl Registry for FakeRegistry {
+    async fn put(&self, row: CapabilityRow) {
+        self.rows.write().await.push(Arc::new(row));
+    }
+
+    async fn get(&self, name: &str) -> Option<Arc<CapabilityRow>> {
+        self.rows
+            .read()
+            .await
+            .iter()
+            .rev()
+            .find(|r| r.name() == name)
+            .cloned()
+    }
+
+    async fn list(&self, fam: CapabilityFamily) -> Vec<Arc<CapabilityRow>> {
+        self.rows
+            .read()
+            .await
+            .iter()
+            .filter(|r| r.family() == fam)
+            .cloned()
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn tool_port_registers_one_row_and_exposes_an_executor() {
+    let provider: Arc<dyn PortProvider> = Arc::new(ToolPort);
+    assert_eq!(provider.ports(), &[TOOL], "提供者只申报 `tool` 一个端口");
+    assert_eq!(provider.provider_id(), PLUGIN_ID_TOOL);
+
+    let rows = symbio_plugin_api::port_rows(&provider);
+    assert_eq!(rows.len(), 1, "单端口提供者只产一行");
+    assert_eq!(rows[0].name(), "<port:tool>:tool");
+
+    let registry = FakeRegistry::new();
+    for row in rows {
+        registry.put(row).await;
+    }
+    let PortReading::Ready(row) = symbio_plugin_api::capability_port_of(&registry, TOOL).await
+    else {
+        panic!("端口 `{TOOL}` 应就绪");
+    };
+    let provider = row
+        .payload::<PortPayload>()
+        .expect("端口行应带提供者")
+        .provider()
+        .clone();
+    assert!(
+        provider.executor().is_some(),
+        "提供者必须交出执行面（DE-047 I-6.4）"
+    );
+}
+
+// ==================== 执行面（经 `PortExecutor`）====================
+
+/// 夹具能力：按 canonical 名注册，返回固定 JSON。
+struct EchoTool {
+    meta: CapabilityMeta,
+    data: serde_json::Value,
+}
+
+#[async_trait]
+impl Capability for EchoTool {
+    fn meta(&self) -> CapabilityMeta {
+        self.meta.clone()
+    }
+
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _env: &ExecEnv,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Ok(self.data.clone())
+    }
+}
+
+/// 无路由的宿主插件：命中的调用不需要 route；未名回落由它给出诚实 NotFound。
+struct NopPlugin;
+
+#[async_trait]
+impl Plugin for NopPlugin {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("nop", "Nop")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound("nop".into()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound("nop".into()))
+    }
+}
+
+/// 带一条工具行的请求上下文（`CAPABILITY_VISITOR` 是执行期的数据源）。
+async fn ctx_with_tool(
+    parent: &Arc<dyn Plugin>,
+    name: &str,
+    data: serde_json::Value,
+) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(Some(Weak::clone(&Arc::downgrade(parent))), None);
+    let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
+    registry
+        .put(CapabilityRow::tool(Arc::new(EchoTool {
+            meta: CapabilityMeta {
+                name: name.to_string(),
+                ..Default::default()
+            },
+            data,
+        }) as Arc<dyn Capability>))
+        .await;
+    req.set(CAPABILITY_VISITOR, registry);
+    Arc::new(req)
+}
+
+/// 一次执行的最小现场（parent 在场——提供者最先查宿主）。
+fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext, PortInput) {
+    (
+        PortExecContext {
+            deadline_ms: None,
+            abort: ExecAbortSignal::new(),
+            idempotency_key: "tc-1".to_string(),
+            sink: ExecEventSink::silent(),
+            ctx: Some(ctx),
+        },
+        PortInput {
+            port: TOOL,
+            payload: serde_json::json!({
+                "tool_name": tool_name,
+                "args": {},
+                "tool_call_id": "tc-1",
+                "result_msg_id": "res-1",
+            }),
+        },
+    )
+}
+
+/// 产出三格。
+fn decode(out: &PortOutcome) -> (String, bool, Option<serde_json::Value>) {
+    assert!(out.error.is_none(), "工具失败是信息性事实：{out:?}");
+    let fact = out.facts.first().expect("产出必须带一格事实");
+    (
+        fact["result_text"].as_str().unwrap_or_default().to_string(),
+        fact["success"].as_bool().unwrap_or(false),
+        fact["pending"].as_object().map(|_| fact["pending"].clone()),
+    )
+}
+
+#[tokio::test]
+async fn executes_through_the_capability_table() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let (exec, input) = call("echo", ctx);
+    let out = ToolPort.execute(exec, input).await;
+    let (text, success, pending) = decode(&out);
+    assert_eq!(text, "done");
+    assert!(success);
+    assert!(pending.is_none());
+}
+
+#[tokio::test]
+async fn wire_names_resolve_to_canonical_capabilities() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(
+        &parent,
+        "mcp.fs.read",
+        serde_json::json!({ "content": "ok" }),
+    )
+    .await;
+    let (exec, input) = call("mcp__fs__read", ctx);
+    let out = ToolPort.execute(exec, input).await;
+    let (text, success, _) = decode(&out);
+    assert_eq!(
+        text, "ok",
+        "线上名必须解析到 canonical 名并命中表（而不是回落 route 的 NotFound）"
+    );
+    assert!(success);
+}
+
+#[tokio::test]
+async fn unknown_names_do_not_get_guessed() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let (exec, input) = call("totally_unknown", ctx);
+    let out = ToolPort.execute(exec, input).await;
+    let (text, success, _) = decode(&out);
+    assert!(!success, "未知名不得被解析成别的工具");
+    assert!(text.starts_with("Error:"), "诚实失败（实际: {text}）");
+}
+
+#[tokio::test]
+async fn pending_intent_travels_through_the_outcome() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(
+        &parent,
+        "confirm_tool",
+        serde_json::json!({
+            "content": "需要确认：删除文件",
+            "failure_kind": "needs_approval",
+            "prompt": { "kind": "confirm" },
+        }),
+    )
+    .await;
+    let (exec, input) = call("confirm_tool", ctx);
+    let out = ToolPort.execute(exec, input).await;
+    let (_, _, pending) = decode(&out);
+    let pending = pending.expect("pending 闭集内的 failure_kind 必须被认出");
+    assert_eq!(pending["failure_kind"], serde_json::json!("needs_approval"));
+    assert_eq!(pending["text"], serde_json::json!("需要确认：删除文件"));
+    assert_eq!(pending["prompt"]["kind"], serde_json::json!("confirm"));
+}

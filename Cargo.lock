@@ -4177,6 +4177,7 @@ dependencies = [
  "symbio-plugin-slo",
  "symbio-plugin-task",
  "symbio-plugin-telegram",
+ "symbio-plugin-tool",
  "symbio-plugin-vdfs",
  "symbio-plugin-web",
  "symbio-providers",
@@ -4695,6 +4696,17 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "symbio-plugin-tool"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
+ "tokio",
  "tracing",
 ]
 

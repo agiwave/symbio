@@ -60,6 +60,7 @@ pub use symbio_plugin_skill;
 pub use symbio_plugin_slo;
 pub use symbio_plugin_task;
 pub use symbio_plugin_telegram;
+pub use symbio_plugin_tool;
 pub use symbio_plugin_vdfs;
 pub use symbio_plugin_web;
 // <<< plugin-links:end

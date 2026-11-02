@@ -24,14 +24,11 @@
 //! 读数的**数字**归能力包自己的用例与 e2e——真实装配里跑的是 owner 那一份。
 
 use symbio_kernel::adapters::LatencyTier;
-use symbio_kernel::decl::ring::Decl;
-use symbio_kernel::decl::ring::Lit;
-use symbio_kernel::decl::ring::Pattern;
+use symbio_kernel::decl::ring::{Decl, Pattern};
 use symbio_kernel::decl::PluginDeclarations;
 use symbio_kernel::event::{
-    Entity, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_SENT,
+    Entity, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
-use symbio_plugin_api::port::ports;
 
 use super::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 
@@ -47,14 +44,18 @@ const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
     (Entity::Memory, Verb::Asserted),
 )];
 
+/// 协议五格的**覆盖行**：内核无条件声明协议事实（`PROTOCOL_EVENTS` /
+/// `PROTOCOL_FACTS`），而 `seal` 要求每个被声明的事实至少有一行读到它——否则报
+/// `OrphanFact`。本插件的单测二进制不链接 `loop`，那五行生产读者不在场，夹具因此
+/// 补五行同名的自读行（`by: None`：动作归环，这里只补「这一格有人读」）。
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();
     for name in [
-        symbio_kernel::event::EVENT_REQUEST,
-        symbio_kernel::event::EVENT_SENT,
-        symbio_kernel::event::EVENT_RESPONSE,
-        symbio_kernel::event::EVENT_FAILED,
-        symbio_kernel::event::EVENT_RETRY,
+        EVENT_REQUEST,
+        EVENT_SENT,
+        EVENT_RESPONSE,
+        EVENT_FAILED,
+        EVENT_RETRY,
     ] {
         let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
             source: name,
@@ -70,56 +71,6 @@ fn protocol_rows() -> &'static [Decl] {
             expand: None,
             owes: pattern[0],
             until: pattern,
-            unless: &[],
-        });
-    }
-    // 本插件交的是 `tool` 端口的**声明**（DE-047 不变量 6），它的应答出口行住在
-    // `symbio-plugin-loop`——测试二进制不链接那个 crate，`check_ports` 会报
-    // `PortWithoutAnswerExit`。夹具因此补两条与生产同形的行（`by: None`：动作归环，
-    // 这里只补「谁收这一笔账」）。
-    let eq: &'static [(&'static str, Lit)] = Box::leak(Box::new([("port", Lit::Str(ports::TOOL))]));
-    let key: &'static [&'static str] = &["port", "id", "attempt"];
-    for (name, phase, anchor, owes, until) in [
-        (
-            "dispatch-tool",
-            6_u8,
-            68_u8,
-            EVENT_REQUEST,
-            [EVENT_SENT, EVENT_FAILED],
-        ),
-        (
-            "await-tool",
-            7_u8,
-            72_u8,
-            EVENT_SENT,
-            [EVENT_RESPONSE, EVENT_FAILED],
-        ),
-    ] {
-        let until: &'static [Pattern] = Box::leak(Box::new([
-            Pattern {
-                source: until[0],
-                key,
-                eq,
-            },
-            Pattern {
-                source: until[1],
-                key,
-                eq,
-            },
-        ]));
-        out.push(Decl {
-            name,
-            phase,
-            anchor,
-            by: None,
-            tier: LatencyTier::Fast,
-            expand: None,
-            owes: Pattern {
-                source: owes,
-                key,
-                eq,
-            },
-            until,
             unless: &[],
         });
     }

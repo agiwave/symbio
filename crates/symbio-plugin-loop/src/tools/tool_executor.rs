@@ -13,12 +13,13 @@
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
 use symbio_kernel::llm::TurnToolCallInfo;
+use symbio_kernel::plugin::PLUGIN_PARENT;
 
 use serde_json::{json, Value};
 use std::sync::Arc;
 use symbio_kernel::event::Event;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
-use symbio_kernel::plugin::{Plugin, PluginInvokeRequest};
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::plugin_error;
 use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
@@ -34,7 +35,8 @@ use symbio_plugin_api::effects::EffectInput;
 // tool 端口的合同类型（下沉到 plugin-api）：`PendingPrompt` 经本模块 re-export，
 // dispatch 一系（`dispatch.rs` / `dispatch/batch.rs`）与测试的导入面不变。
 pub use symbio_plugin_api::port::PendingPrompt;
-use symbio_plugin_api::port::ToolCallRequest;
+use symbio_plugin_api::port::{PortExecContext, PortInput};
+use symbio_plugin_api::ports;
 
 /// 同参重复调用的判据键：`(工具名, 参数文本)`。
 ///
@@ -107,22 +109,73 @@ pub async fn execute_tool_async(
     let Some(provider) = super::super::port::tool_port(&ctx).await else {
         return absent("没有可用的工具提供者");
     };
-    let Some(executor) = provider.tool_execute() else {
-        return absent("提供者不实现工具执行合同");
+    let Some(executor) = provider.executor() else {
+        return absent("提供者不实现执行合同");
     };
+
+    // 宿主插件必须让提供者拿得到：`ctx.parent()` 是提供者解析失败时的回落面。
+    // 在 fork 上写 `PLUGIN_PARENT`，不改调用方共享的那份 ctx。
+    let exec_ctx = ctx.fork();
+    if let Some(p) = parent {
+        exec_ctx.set(PLUGIN_PARENT, Some(Arc::downgrade(p)));
+    }
     let out = executor
-        .execute(ToolCallRequest {
-            parent: parent.clone(),
-            tool_name: tool_name.to_string(),
-            args,
-            tool_call_id: tool_call_id.to_string(),
-            sink: sink.clone(),
-            abort: abort.clone(),
-            result_msg_id,
-            ctx,
-        })
+        .execute(
+            PortExecContext {
+                deadline_ms: None,
+                abort: abort.clone(),
+                idempotency_key: tool_call_id.to_string(),
+                sink: sink.clone(),
+                ctx: Some(exec_ctx),
+            },
+            PortInput {
+                port: ports::TOOL,
+                payload: json!({
+                    "tool_name": tool_name,
+                    "args": args,
+                    "tool_call_id": tool_call_id,
+                    "result_msg_id": result_msg_id,
+                }),
+            },
+        )
         .await;
-    (out.result_text, out.success, out.pending)
+
+    // 端口协议失败与工具自身失败是两件事：前者由 `error` 交回，后者住在
+    // `facts` 的 `success=false` 里（工具失败是信息性事实，模型据此自我纠正）。
+    if let Some((class, why)) = out.error {
+        plugin_error!(
+            "session",
+            format!("[Tool] 端口执行失败（{class:?}）：{why}")
+        );
+        return (format!("Error: {why}"), false, None);
+    }
+    let fact = out.facts.first().cloned().unwrap_or(Value::Null);
+    let result_text = fact
+        .get("result_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let success = fact
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let pending = fact
+        .get("pending")
+        .filter(|v| !v.is_null())
+        .map(|v| PendingPrompt {
+            text: v
+                .get("text")
+                .and_then(|t| t.as_str())
+                .unwrap_or("需要用户操作")
+                .to_string(),
+            prompt: v.get("prompt").cloned().unwrap_or(Value::Null),
+            failure_kind: v
+                .get("failure_kind")
+                .and_then(|k| k.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        });
+    (result_text, success, pending)
 }
 
 // 批量工具调用处理

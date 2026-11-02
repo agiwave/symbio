@@ -1,3 +1,5 @@
+// arch-shape-allow CS-004 tool ×1: 用途=wire 词汇（chat 样式标签 "tool"，标记一次工具调用）；不是插件引用=它是消息节点的展示协议词，与插件目录名无关，内核不因此认识任何插件实现；依据=D-303；登记=2026-11-03
+
 use crate::chat::principal::Principal;
 use crate::present::ReadingSection;
 use serde::{Deserialize, Serialize};

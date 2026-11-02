@@ -3,7 +3,7 @@
   "lp001PayloadImports": {
     "port.rs": 2,
     "tools/dispatch.rs": 2,
-    "tools/tool_executor.rs": 3
+    "tools/tool_executor.rs": 2
   },
   "lp002ForbiddenDeps": [
     "dev-dependencies:symbio-providers"
@@ -60,6 +60,6 @@
     "turn_runner.rs": 94,
     "turn_session.rs": 8
   },
-  "lp004WorldNamedContracts": 6,
-  "lp005WorldPayloadSig": 3
+  "lp004WorldNamedContracts": 2,
+  "lp005WorldPayloadSig": 2
 }

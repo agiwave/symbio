@@ -96,6 +96,9 @@ pub const PLUGIN_ID_TASK: &str = "task";
 /// 消息渠道
 pub const PLUGIN_ID_TELEGRAM: &str = "telegram";
 
+/// 工具世界（执行 / 路由 / 结果提取）
+pub const PLUGIN_ID_TOOL: &str = "tool";
+
 /// VDFS 根（单槽归系统 Agent）
 pub const PLUGIN_ID_VDFS: &str = "vdfs";
 
@@ -124,6 +127,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "local", // 本地文件
+    "tool", // 工具世界（执行 / 路由 / 结果提取）
     "web", // 网络访问
     "mcp", // 工具
     "telegram", // 消息渠道
