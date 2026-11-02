@@ -1303,6 +1303,26 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             symbio_plugin_api::rows::RowStep::Facts(drafts) => {
                 return land_drafts(ctx.store.as_ref(), drafts, turn, &principal);
             }
+            // 事实 + 效果（D-293）：事实仍走同一个写口；效果交给**本文件的**唯一
+            // 效果写口，形状与声明在这里复核。
+            symbio_plugin_api::rows::RowStep::FactsWithEffects(facts, effects) => {
+                land_drafts(ctx.store.as_ref(), facts, turn, &principal)?;
+                let round = ctx
+                    .head
+                    .as_ref()
+                    .map(|head| head.turn.request_round)
+                    .unwrap_or(0);
+                return land_effects(
+                    ctx.store.as_ref(),
+                    handler.effects(),
+                    effects,
+                    turn,
+                    user_seq,
+                    &principal,
+                    &anchor,
+                    round,
+                );
+            }
             // 零往返作答（D-260）：草稿按同一份名单落，随后由**宿主**代落「已答」阶段格
             // 并把正文寄给收束行。收束格仍归 `close-turn`（D-163），这一行只答不落定稿。
             symbio_plugin_api::rows::RowStep::Answer(answer) => {
@@ -1437,6 +1457,70 @@ fn land_drafts(
         let mut event = draft.into_event(principal);
         event.turn = turn;
         store.append(event).map_err(ActorError::Append)?;
+    }
+    Ok(())
+}
+
+/// 三类效果面的**唯一写口**（D-293）：形状由声明复核，幂等键在落格一处拒绝重复。
+///
+/// 能力交的是纯值草稿；轮号、主体、时刻与节点 id 都在这里盖章。`Duplicate` 不是
+/// 失败——重试与续写幕会重复投递同一份草稿，吸收它正是幂等键的用处。
+fn land_effects(
+    store: &dyn Store<Event = Event>,
+    declared: &'static [symbio_plugin_api::effects::EffectFace],
+    effects: Vec<symbio_plugin_api::effects::EffectDraft>,
+    turn: u64,
+    user_seq: u64,
+    principal: &str,
+    anchor: &str,
+    round: usize,
+) -> Result<(), ActorError> {
+    use symbio_plugin_api::effects::EffectDraft;
+    let mut sorted = effects;
+    // 宿主按 `(key)` 定序（同一行的一次调用里 owner 不变）：能力交的次序不参与裁决。
+    sorted.sort_by(|a, b| a.key().cmp(b.key()));
+    for effect in sorted {
+        let face = effect.face();
+        if !declared.contains(&face) {
+            return Err(ActorError::Read(PluginError::InternalError(format!(
+                "行交出了未声明的效果面 {face:?}"
+            ))));
+        }
+        match effect {
+            EffectDraft::Stage(draft) => {
+                let expected = format!("st-{anchor}-{}", draft.stage);
+                if draft.key != expected {
+                    return Err(ActorError::Read(PluginError::InternalError(format!(
+                        "阶段草稿的幂等键 `{}` 与约定 `{expected}` 不符",
+                        draft.key
+                    ))));
+                }
+                let event = Event::pending(
+                    draft.key,
+                    super::control_decl::EVENT_TURN_STAGE,
+                    Entity::Turn,
+                    Verb::Asserted,
+                    turn,
+                    principal,
+                )
+                .with_produced_by(user_seq)
+                .with_payload(serde_json::json!({
+                    "stage": draft.stage,
+                    "round": round,
+                }));
+                match store.append(event) {
+                    Ok(_) | Err(AppendError::Duplicate) => {}
+                    Err(e) => return Err(ActorError::Append(e)),
+                }
+            }
+            // 对话面与实时上线尚未接线：声明可以先行，草稿在这两面上会被明确拒绝，
+            // 不静默丢弃（静默丢弃正是「效果丢了」与「这件事没发生」不可分的来源）。
+            EffectDraft::Dialog(_) | EffectDraft::Live(_) => {
+                return Err(ActorError::Read(PluginError::InternalError(
+                    "该效果面尚未接线".into(),
+                )))
+            }
+        }
     }
     Ok(())
 }

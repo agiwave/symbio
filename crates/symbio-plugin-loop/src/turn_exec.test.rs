@@ -2803,3 +2803,140 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
         serde_json::json!({ "port": "model", "id": "m-1" })
     )));
 }
+
+// ── 效果写口（D-293）─────────────────────────────────────────────────────
+//
+// 三类效果面的**唯一写口**由宿主持有：能力只交纯值草稿，轮号 / 主体 / 时刻在
+// [`super::land_effects`] 一处盖章；声明之外的面在那里被拒，同一幂等键的第二次
+// 投递被吸收（`Duplicate`）而事实面上仍只有一格。本组先在阶段格这一面钉住出现 /
+// 重复幂等 / 未声明面 / 键不符四条判据。
+
+use symbio_plugin_api::effects::{EffectDraft, EffectFace, StageDraft};
+
+/// 开一轮用户格：效果写口的溯源锚（I2——效果落格必须指回这一轮）。
+fn seed_effect_turn(store: &EventStore, turn: u64) -> u64 {
+    store
+        .append(
+            Event::pending(
+                format!("u-{turn}"),
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                turn,
+                "user",
+            )
+            .with_payload(serde_json::json!({ "text": "你好" })),
+        )
+        .expect("开轮格入格")
+        .value()
+}
+
+/// 事实面上的阶段格（效果写口唯一会产出的那一类）。
+fn landed_stages(store: &EventStore) -> Vec<Event> {
+    store
+        .range(Seq::new(0))
+        .into_iter()
+        .filter(|e| e.kind == super::super::control_decl::EVENT_TURN_STAGE)
+        .collect()
+}
+
+#[test]
+fn a_stage_effect_lands_through_the_single_write_port() {
+    let store = EventStore::new();
+    let user_seq = seed_effect_turn(&store, 3);
+
+    super::land_effects(
+        &store,
+        &[EffectFace::Stage],
+        vec![EffectDraft::Stage(StageDraft::new("d3", "skill.compiled"))],
+        3,
+        user_seq,
+        "session/main",
+        "d3",
+        0,
+    )
+    .expect("阶段效果落格");
+
+    let stages = landed_stages(&store);
+    assert_eq!(stages.len(), 1, "一条草稿只落一格：{stages:?}");
+    assert_eq!(
+        stages[0].event_id, "st-d3-skill.compiled",
+        "幂等键由宿主复核后原样入格"
+    );
+    assert_eq!(stages[0].payload["stage"], "skill.compiled");
+    assert_eq!(stages[0].payload["round"], 0, "轮号由宿主盖章");
+    assert_eq!(stages[0].produced_by, Some(user_seq), "溯源锚指回本轮");
+    assert_eq!(stages[0].actor, "session/main", "主体由宿主盖章");
+}
+
+#[test]
+fn a_duplicate_effect_is_absorbed_by_the_idempotency_key() {
+    let store = EventStore::new();
+    let user_seq = seed_effect_turn(&store, 3);
+    let draft = || EffectDraft::Stage(StageDraft::new("d3", "skill.compiled"));
+    let land = |drafts: Vec<EffectDraft>| {
+        super::land_effects(
+            &store,
+            &[EffectFace::Stage],
+            drafts,
+            3,
+            user_seq,
+            "session/main",
+            "d3",
+            0,
+        )
+        .expect("重复投递不是失败")
+    };
+
+    land(vec![draft()]);
+    land(vec![draft()]);
+
+    assert_eq!(
+        landed_stages(&store).len(),
+        1,
+        "同一幂等键只落一次（重试 / 续写幕会重复投递同一份草稿）"
+    );
+}
+
+#[test]
+fn an_undeclared_face_is_rejected_at_the_write_port() {
+    let store = EventStore::new();
+    let user_seq = seed_effect_turn(&store, 3);
+
+    let err = super::land_effects(
+        &store,
+        &[],
+        vec![EffectDraft::Stage(StageDraft::new("d3", "skill.compiled"))],
+        3,
+        user_seq,
+        "session/main",
+        "d3",
+        0,
+    )
+    .expect_err("未声明的效果面必须被拒");
+    assert!(matches!(err, super::ActorError::Read(_)), "{err:?}");
+    assert!(landed_stages(&store).is_empty(), "被拒的草稿不得落格");
+}
+
+#[test]
+fn a_stage_key_that_breaks_the_convention_is_rejected() {
+    let store = EventStore::new();
+    let user_seq = seed_effect_turn(&store, 3);
+
+    let err = super::land_effects(
+        &store,
+        &[EffectFace::Stage],
+        vec![EffectDraft::Stage(StageDraft {
+            key: "st-other-skill.compiled".to_string(),
+            stage: "skill.compiled".to_string(),
+        })],
+        3,
+        user_seq,
+        "session/main",
+        "d3",
+        0,
+    )
+    .expect_err("能力拼错幂等键必须在写口一处被拒");
+    assert!(matches!(err, super::ActorError::Read(_)), "{err:?}");
+    assert!(landed_stages(&store).is_empty(), "键不符的草稿不得落格");
+}

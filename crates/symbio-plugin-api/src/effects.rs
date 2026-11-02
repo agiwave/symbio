@@ -367,6 +367,20 @@ pub struct StageDraft {
     pub stage: String,
 }
 
+impl StageDraft {
+    /// 按 `D-293` 的约定拼幂等键：`st-{anchor}-{stage}`。
+    ///
+    /// 能力拿不到轮号，只能拿宿主给的不透明词干；写口按同一形状复核，拼错的键
+    /// 在写口一处被拒。
+    pub fn new(anchor: &str, stage: impl Into<String>) -> Self {
+        let stage = stage.into();
+        Self {
+            key: format!("st-{anchor}-{stage}"),
+            stage,
+        }
+    }
+}
+
 /// 一帧实时上线草稿：呈现场景的纯值，不是事实。
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveDraft {

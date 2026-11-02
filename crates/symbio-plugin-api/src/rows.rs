@@ -91,6 +91,11 @@ impl RowRequest<'_> {
 pub enum RowStep {
     /// 本步直接落格（不需要往返）：中间产物，落完继续欠下一步。
     Facts(Vec<FactDraft>),
+    /// 本步落事实**并交效果草稿**（D-293）：事实先由写口落，效果再交三个宿主写口。
+    ///
+    /// 只有声明了对应 [`RowHandler::effects`] 的行才能走这一档：写口按声明复核形状，
+    /// 未声明的效果在写口一处被拒。
+    FactsWithEffects(Vec<FactDraft>, Vec<crate::effects::EffectDraft>),
     /// 本步**就是这一轮的答复**：落 `facts`，宿主再落「已答」阶段格并把正文交给收束行
     /// （零模型往返，D-260）。
     Answer(AnswerStep),
