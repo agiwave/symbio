@@ -10,9 +10,13 @@ use serde_json::json;
 
 use super::super::loop_rows::{load, PORTS, ROWS};
 use super::*;
-use symbio_kernel::decl::ring::{owed, PortDecl};
+use symbio_kernel::decl::ring::{owed, Decl, Lit, Pattern, PortDecl};
+use symbio_kernel::decl::{ActorDecl, Builder, PluginDeclarations};
 use symbio_kernel::event::Seq;
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::store::EventStore;
+use symbio_kernel::LatencyTier;
+use symbio_plugin_api::port::{PortErrorClass, PortProvider};
 
 use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
@@ -36,6 +40,18 @@ where
 
 fn boot() -> EventStore {
     EventStore::new()
+}
+
+/// 测试里的派发计划：轮号固定为 1（存量数据），溯源固定为 7。
+fn plan<'a>(call: &'a Call, row: &'a str, awaited: bool) -> Dispatch<'a> {
+    Dispatch {
+        call,
+        turn: 1,
+        produced_by: 7,
+        row,
+        now: 0,
+        awaited,
+    }
 }
 
 fn kinds(store: &EventStore) -> Vec<String> {
@@ -96,14 +112,7 @@ async fn dispatch_writes_before_and_the_answer_itself() {
     let out = dispatch(
         &store,
         PORTS,
-        Dispatch {
-            call: &call,
-            turn: 1,
-            produced_by: 7,
-            row: "dispatch-model",
-            now: 0,
-            awaited: false,
-        },
+        plan(&call, "dispatch-model", false),
         || async { Ok("答完了") },
         |_: &()| unreachable!("成功路径不该问 why"),
     )
@@ -992,5 +1001,310 @@ fn a_replay_makes_up_only_the_call_that_never_came_back() {
     assert!(
         !kinds(&store).iter().any(|k| k == "retry"),
         "`model` 的 `max_attempts = 1`：到期即判死，不写 `retry`"
+    );
+}
+
+// ==================== 两人世界端口：环零改动就能跑完一笔债 ====================
+//
+// `DE-047` I-6 的验收：`echo` 与 `store` 两个**与 Model / Tool 无关**的世界端口，
+// 各由自己的 provider 实现**同一套**通用接口（`PortProvider` + `PortExecutor`）。
+//
+// 环这一侧只用了 [`execute_one`]——**没有为这两个端口加任何一行**：行表由用例
+// 自己搭（`Builder::declare`），端口声明按名字现取，载荷原样交给执行体。这条用例
+// 是「注册即扩展」的可执行判据（I-6.7）：新增世界端口不改环、不改注册面、不改接口。
+//
+// 两个端口的差别只住在 provider 里：`echo` 把载荷原样交回（成功），`store` 报
+// 「可重试」失败。环对这两件事**一律不知情**——它只看见 `response` / `failed`。
+
+static ECHO_NAMES: &[&str] = &["echo"];
+static STORE_NAMES: &[&str] = &["store"];
+
+static ECHO_PORTS: &[PortDecl] = &[PortDecl {
+    port: "echo",
+    before: EVENT_SENT,
+    lease_ms: 1_000,
+    max_attempts: 1,
+    concurrency: 0,
+}];
+
+static STORE_PORTS: &[PortDecl] = &[PortDecl {
+    port: "store",
+    before: EVENT_SENT,
+    lease_ms: 1_000,
+    max_attempts: 1,
+    concurrency: 0,
+}];
+
+/// 每个端口两行：派发半（`request → sent`）与等待半（`sent → response | failed`）。
+/// 行名带端口名只是**数据**——环按 `Dispatch::row` 查账，不按世界解释它。
+macro_rules! port_rows {
+    ($port:literal, $dispatch:literal, $await:literal) => {
+        [
+            Decl {
+                name: $dispatch,
+                phase: 0,
+                anchor: 0,
+                by: Some(concat!($port, "-dispatch-fixture")),
+                tier: LatencyTier::Fast,
+                expand: None,
+                owes: Pattern {
+                    source: EVENT_REQUEST,
+                    key: &["id", "attempt"],
+                    eq: &[("port", Lit::Str($port))],
+                },
+                until: &[Pattern {
+                    source: EVENT_SENT,
+                    key: &["id", "attempt"],
+                    eq: &[("port", Lit::Str($port))],
+                }],
+                unless: &[],
+            },
+            Decl {
+                name: $await,
+                phase: 1,
+                anchor: 0,
+                by: Some(concat!($port, "-await-fixture")),
+                tier: LatencyTier::Fast,
+                expand: None,
+                owes: Pattern {
+                    source: EVENT_SENT,
+                    key: &["id", "attempt"],
+                    eq: &[("port", Lit::Str($port))],
+                },
+                until: &[
+                    Pattern {
+                        source: EVENT_RESPONSE,
+                        key: &["id", "attempt"],
+                        eq: &[("port", Lit::Str($port))],
+                    },
+                    Pattern {
+                        source: EVENT_FAILED,
+                        key: &["id", "attempt"],
+                        eq: &[("port", Lit::Str($port))],
+                    },
+                    // 这一次尝试作废（租约看护写了 `retry`）也算这一笔关账。
+                    Pattern {
+                        source: EVENT_RETRY,
+                        key: &["id", "attempt"],
+                        eq: &[("port", Lit::Str($port))],
+                    },
+                ],
+                unless: &[],
+            },
+        ]
+    };
+}
+
+static ECHO_ROWS: [Decl; 2] = port_rows!("echo", "dispatch-echo", "await-echo");
+static STORE_ROWS: [Decl; 2] = port_rows!("store", "dispatch-store", "await-store");
+
+/// 派发执行体声明交出去的那一格（`request`）；等待执行体声明自己收口用的领域格。
+/// 环不认识这两个名字，只按行表的 `port` 字段与协议事实判定。
+static ECHO_ACTORS: &[ActorDecl] = &[
+    ActorDecl {
+        name: "echo-dispatch-fixture",
+        mode: LatencyTier::Fast,
+        reads: &[],
+        writes: &[EVENT_REQUEST],
+    },
+    ActorDecl {
+        name: "echo-await-fixture",
+        mode: LatencyTier::Fast,
+        reads: &[],
+        writes: &["echo.done"],
+    },
+];
+
+static STORE_ACTORS: &[ActorDecl] = &[
+    ActorDecl {
+        name: "store-dispatch-fixture",
+        mode: LatencyTier::Fast,
+        reads: &[],
+        writes: &[EVENT_REQUEST],
+    },
+    ActorDecl {
+        name: "store-await-fixture",
+        mode: LatencyTier::Fast,
+        reads: &[],
+        writes: &["store.done"],
+    },
+];
+
+fn load_fixture(
+    ports: &'static [PortDecl],
+    rows: &'static [Decl],
+    actors: &[ActorDecl],
+) -> Arc<symbio_kernel::decl::Frozen> {
+    let mut b = Builder::new();
+    b.declare(
+        "crates/symbio-plugin-loop-port-fixture",
+        PluginDeclarations {
+            events: &[],
+            facts: &[],
+            views: &[],
+            ports,
+            actors: actors.to_vec(),
+            rows,
+        },
+    );
+    b.seal(&[]).expect("两人端口的行表与声明装载")
+}
+
+/// `echo` 世界端口的提供者：与具体世界无关的通用接口，载荷原样交回。
+struct EchoProvider(Arc<EchoExecutor>);
+
+struct EchoExecutor;
+
+#[async_trait::async_trait]
+impl PortProvider for EchoProvider {
+    fn ports(&self) -> &'static [&'static str] {
+        ECHO_NAMES
+    }
+
+    fn provider_id(&self) -> &str {
+        "echo-provider"
+    }
+
+    fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
+        Some(self.0.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl PortExecutor for EchoExecutor {
+    async fn execute(&self, _exec: PortExecContext, input: PortInput) -> PortOutcome {
+        assert_eq!(input.port, "echo", "提供者只服务自己申报的端口名");
+        PortOutcome {
+            facts: vec![input.payload],
+            error: None,
+        }
+    }
+}
+
+/// `store` 世界端口的提供者：同一套接口，但这一笔以「可重试」失败收场。
+struct StoreProvider(Arc<StoreExecutor>);
+
+struct StoreExecutor;
+
+#[async_trait::async_trait]
+impl PortProvider for StoreProvider {
+    fn ports(&self) -> &'static [&'static str] {
+        STORE_NAMES
+    }
+
+    fn provider_id(&self) -> &str {
+        "store-provider"
+    }
+
+    fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
+        Some(self.0.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl PortExecutor for StoreExecutor {
+    async fn execute(&self, _exec: PortExecContext, input: PortInput) -> PortOutcome {
+        assert_eq!(input.port, "store");
+        PortOutcome::failed(PortErrorClass::Retryable, "store offline")
+    }
+}
+
+fn exec_context(port: &'static str, id: &str) -> PortExecContext {
+    PortExecContext {
+        deadline_ms: None,
+        abort: ExecAbortSignal::default(),
+        idempotency_key: format!("{port}-{id}-1"),
+        sink: ExecEventSink::Null,
+        ctx: None,
+    }
+}
+
+/// 把 `ids` 里每一笔调用各欠一笔债、各还一笔——**N 次调用 = N 笔债**，
+/// 环上不存在「批」这种单元（`DE-047` I-1 的裁决）。
+async fn execute_chain(
+    provider: &dyn PortProvider,
+    frozen: &symbio_kernel::decl::Frozen,
+    ports: &[PortDecl],
+    port: &'static str,
+    row: &'static str,
+    ids: &[&str],
+) -> (EventStore, Vec<PortOutcome>) {
+    let store = EventStore::new();
+    let executor = provider.executor().expect("provider 必须交执行体");
+    let mut outcomes = Vec::new();
+    for id in ids {
+        let call = Call::new(port, format!("{port}-{id}"), 1);
+        announce(&store, &call, 1, 7).unwrap();
+        let outcome = execute_one(
+            &store,
+            frozen,
+            ports,
+            &*executor,
+            plan(&call, row, true),
+            PortInput {
+                port,
+                payload: json!({ "id": id, "text": format!("{port} 世界的载荷") }),
+            },
+            exec_context(port, id),
+        )
+        .await
+        .expect("行欠 ⇒ 这一笔应当跑通");
+        outcomes.push(outcome);
+    }
+    (store, outcomes)
+}
+
+/// 第三人端口（`echo`）：完整债链路跑通，环零改动。
+#[tokio::test]
+async fn echo_world_port_runs_the_full_debt_chain_without_loop_knowledge() {
+    let frozen = load_fixture(ECHO_PORTS, &ECHO_ROWS, ECHO_ACTORS);
+    let provider = EchoProvider(Arc::new(EchoExecutor));
+    let (store, outcomes) = execute_chain(
+        &provider,
+        &frozen,
+        ECHO_PORTS,
+        "echo",
+        "dispatch-echo",
+        &["a", "b"],
+    )
+    .await;
+
+    assert_eq!(
+        kinds(&store),
+        vec!["request", "sent", "response", "request", "sent", "response"],
+        "两次调用 = 两笔债，各走 request → sent → response"
+    );
+    assert!(outcomes.iter().all(|o| o.success()), "echo 两笔都成功");
+    let first = payload_of(&store, "response");
+    assert_eq!(
+        first["facts"][0]["id"],
+        json!("a"),
+        "载荷由端口原样交回：环没有解析它"
+    );
+}
+
+/// 第四人端口（`store`）：同一套通用接口、另一个独立 provider，失败也走完整链路。
+#[tokio::test]
+async fn store_world_port_shares_the_same_interface_and_its_failure_is_a_fact() {
+    let frozen = load_fixture(STORE_PORTS, &STORE_ROWS, STORE_ACTORS);
+    let provider = StoreProvider(Arc::new(StoreExecutor));
+    let (store, outcomes) = execute_chain(
+        &provider,
+        &frozen,
+        STORE_PORTS,
+        "store",
+        "dispatch-store",
+        &["a"],
+    )
+    .await;
+
+    assert_eq!(kinds(&store), vec!["request", "sent", "failed"]);
+    assert!(!outcomes[0].success(), "provider 报错 ⇒ 这一笔失败");
+    let failed = payload_of(&store, "failed");
+    assert_eq!(failed["why"], json!("store offline"));
+    assert_eq!(
+        failed["error_class"],
+        json!("Retryable"),
+        "失败只带通用分类，不带世界语义"
     );
 }

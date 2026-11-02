@@ -17,7 +17,6 @@ symbio-kernel = { path = "../symbio-kernel" }
 symbio-sdk = { path = "../symbio-sdk" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-deploy = { path = "../symbio-deploy" }
-symbio-providers = { path = "../symbio-providers" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续
 # `derive(Deserialize)`——Tauri 命令参数与 gateway 的 WS 入帧都依赖它。
@@ -48,6 +47,9 @@ tracing = { workspace = true }
 # 测试替身（`StubLlmAdapter` / `trivial_actor_spec`）—— 原住 core 的常开出口，
 # 拆 crate 后 `#[cfg(test)]` 对下游不可见，故搬 `symbio-testkit`，只以 dev 形态进来。
 symbio-testkit = { path = "../symbio-testkit" }
+# `DefaultToolVisitor` 只被 `.test.rs` 用作工具注册夹具（生产源码零引用，`DE-047` LP-002）：
+# 它是 provider 收集层的类型，生产面不得依赖——这条边只留在测试面，基线只许降。
+symbio-providers = { path = "../symbio-providers" }
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { workspace = true, features = ["test-util"] }

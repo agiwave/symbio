@@ -61,6 +61,8 @@ use symbio_kernel::event::{
 };
 use symbio_kernel::store::{AppendError, Store};
 use symbio_plugin_api::port::ports;
+#[cfg(test)]
+use symbio_plugin_api::port::{PortExecContext, PortExecutor, PortInput, PortOutcome};
 
 /// 一笔端口调用：端口名 + 逻辑 id + 尝试号。
 ///
@@ -364,17 +366,27 @@ pub(crate) fn begin_with_facts<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    let Dispatch {
-        call,
-        turn,
-        produced_by,
-        row,
-        ..
-    } = plan;
-    let decl = ring::port_of(ports, call.port).ok_or(DispatchError::NoPort(call.port))?;
+    let decl = ring::port_of(ports, plan.call.port).ok_or(DispatchError::NoPort(plan.call.port))?;
     if !plan.row_owed(facts) {
-        return Err(DispatchError::NotOwed(row.to_string()));
+        return Err(DispatchError::NotOwed(plan.row.to_string()));
     }
+    write_before(store, decl, plan)
+}
+
+/// 落派发事实（`PortDecl::before`）。门（行欠不欠）由调用方先判——两条入口各有各的
+/// 判门方式（〔`begin_with_facts`〕读本插件的表，〔`execute_one`〕读调用方交来的表），
+/// 而「写哪一条、载荷长什么」只有这一处。
+fn write_before<S>(
+    store: &S,
+    decl: &PortDecl,
+    plan: Dispatch<'_>,
+) -> Result<(), DispatchError<std::convert::Infallible>>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let Dispatch {
+        call, produced_by, ..
+    } = plan;
     append(
         store,
         Event::pending(
@@ -382,7 +394,7 @@ where
             decl.before,
             Entity::Turn,
             Verb::Asserted,
-            turn,
+            plan.turn,
             "system",
         )
         // 协议事实是断言类（`turn × asserted`）：I2 要求带溯源。
@@ -405,6 +417,67 @@ where
         }),
     )
     .map_err(DispatchError::Store)
+}
+
+/// 通用的一笔债：查行 → 落 `before` → 调端口执行体 → 按结果落 `response` / `failed`。
+///
+/// 这是环上唯一一处「执行一笔债」的入口（`DE-047` I-5 / I-6）。它与世界无关：
+/// - 行表由调用方交来（不读本插件那张静态表），端口声明按端口名现取；
+/// - 载荷原样交给 [`PortExecutor`]——环不解析它，也不认识它；
+/// - 一次只跑一笔债：并发、熔断、guard、广播都是 provider 内部的事（I-6.4）。
+///
+/// 与 [`dispatch_full`] 的差别只在「跑什么」：那一条跑一个闭包（本插件自己的动作），
+/// 这一条跑端口合同。两者记账的口径逐字相同（`before` 由引擎落，`response` / `failed`
+/// 也由引擎落），所以「谁写哪一条」没有第二套答案。
+// 生产接线排在 `tools/**` 迁移步；本批只有 `port.test.rs` 的两人端口验收驱动它，
+// 故只在测试档编译（不留 `allow(dead_code)`：新死码要么接上、要么不编进来）。
+#[cfg(test)]
+pub(crate) async fn execute_one<S>(
+    store: &S,
+    frozen: &Frozen,
+    ports: &[PortDecl],
+    executor: &dyn PortExecutor,
+    plan: Dispatch<'_>,
+    input: PortInput,
+    exec: PortExecContext,
+) -> Result<PortOutcome, DispatchError<std::convert::Infallible>>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let call = plan.call;
+    let decl = ring::port_of(ports, call.port).ok_or(DispatchError::NoPort(call.port))?;
+    let facts = store.range(symbio_kernel::event::Seq::new(0));
+    let at = plan.turn;
+    let owed_now = super::loop_rows::owes_in(plan.row, frozen.rows(), frozen, &facts, at, plan.now);
+    if !owed_now {
+        return Err(DispatchError::NotOwed(plan.row.to_string()));
+    }
+    write_before(store, decl, plan)?;
+
+    let outcome = executor.execute(exec, input).await;
+    match &outcome.error {
+        None => succeed_with(
+            store,
+            call,
+            at,
+            plan.produced_by,
+            serde_json::json!({ "facts": outcome.facts.clone() }),
+        )
+        .map_err(DispatchError::Store)?,
+        Some((class, why)) => {
+            // 失败不掩盖执行体自己的说法：`failed` 已落，调用方拿 `PortOutcome` 自决。
+            failed_with_extra(
+                store,
+                call,
+                at,
+                plan.produced_by,
+                why,
+                serde_json::json!({ "facts": outcome.facts.clone(), "error_class": format!("{class:?}") }),
+            )
+            .map_err(DispatchError::Store)?;
+        }
+    }
+    Ok(outcome)
 }
 
 /// 派发的**后半段**：执行体正常返回 ⇒ 落 `response`（同一次尝试）。

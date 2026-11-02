@@ -310,7 +310,7 @@ export const BASELINE = {
   // pending 意图穿过结果），loop 一侧另补 1 条 `a_missing_tool_port_fails_loudly_
   // on_the_result` 钉「端口行缺席 ⇒ 结果响亮失败」。环侧组合判据（batch / gates /
   // breaker）条数不变。非侵蚀。
-  ciRustTestsTotal: 2617,
+  ciRustTestsTotal: 2621,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

@@ -1619,11 +1619,27 @@ pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
     let Some(frozen) = frozen() else {
         return false;
     };
-    let debt = owed(frozen.rows(), &frozen, turn_slice(events, turn), now)
+    owes_in(name, frozen.rows(), &frozen, events, turn, now)
+}
+
+/// 与 [`owes`] 同一问，但行表与冻结声明由调用方交来（`DE-047` I-6：通用执行入口不读
+/// 本插件那张静态表，端口与行表随调用方走）。
+///
+/// 求解器仍然只在这个文件里被问（`CP-002`）：调用点只拿到「欠不欠」的结论，拿不到
+/// 自己点问求解器的口子。
+pub(crate) fn owes_in(
+    name: &str,
+    rows: &[Decl],
+    frozen: &Frozen,
+    events: &[Event],
+    at: u64,
+    now: i64,
+) -> bool {
+    let debt = owed(rows, frozen, turn_slice(events, at), now)
         .into_iter()
         .find(|d| d.decl.name == name);
     if let Some(debt) = &debt {
-        trace(&frozen, debt);
+        trace(frozen, debt);
     }
     debt.is_some()
 }
