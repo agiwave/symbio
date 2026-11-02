@@ -12,6 +12,9 @@
 //!
 //! 提供者行由**活插件**在自己的 `traverse` 里 `put`（与工具 / 模型目录 / 挂载同一广播
 //! 机制）：停用的插件不参与装配、不 traverse、不写行；收集器每次装配重建，旧行不残留。
+//! 例外是**收集宿主自己提供的端口**（tool 端口，session）：宿主在广播**之后**按收集
+//! 结果装行——条件（表里有没有工具行）只有收集完了才可判，traverse 中途读表会看见
+//! 未完成的装配。生命周期同一条：收集器每次装配重建，宿主行不残留。
 //! 全部端口共用**一个 `multi` 族**，每（端口, 提供者）一行——注册层的族声明不认识端口名，
 //! 加端口不加族；端口级唯一由读数与装载期检查裁（[`capability_port_of`] 按行名前缀
 //! 分组），不靠表侧 `demote`。
@@ -32,12 +35,13 @@
 //! 结构性用例钉住这条事实：port 行在表 ⇒ 六个消费族（工具 / 模型 / 提示词 / 挂载 /
 //! 选项 / 可配置）仍然看不到它。
 
+use serde_json::Value;
 use std::fmt;
 use std::sync::Arc;
 use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
-use symbio_kernel::exec::ExecAbortSignal;
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::llm::ModelProvider;
-use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_sdk::adapters::LlmAdapter;
 use symbio_sdk::capability::{capability_report_error, CAPABILITY_VISITOR};
 
@@ -60,9 +64,10 @@ pub mod ports {
 /// 一个世界端口的提供者：声明「我服务哪个端口、我叫什么」+ 端口的消费合同。
 ///
 /// 声明位（`port` / `provider_id`）供表造行、消费方判缺席与判重；消费合同
-/// （[`llm_round_trip`](PortProvider::llm_round_trip) / [`model`](PortProvider::model)）是
-/// model 端口的两条取用形态——`Arc<dyn PortProvider>` 在 Rust 里跨转型不出去，执行面
-/// 必须以方法形式落在这里，提供者一侧才能把解析与适配器构造都收走（D-298 M1）。
+/// （[`llm_round_trip`](PortProvider::llm_round_trip) / [`model`](PortProvider::model) /
+/// [`tool_execute`](PortProvider::tool_execute)）是各端口的取用形态——
+/// `Arc<dyn PortProvider>` 在 Rust 里跨转型不出去，执行面
+/// 必须以方法形式落在这里，提供者一侧才能把解析与适配器构造都收走（D-298）。
 /// 合同带默认体：非该端口的提供者不实现，默认 `None` 表示「本端口没有这条合同」，
 /// 不是缺席的默认值。
 pub trait PortProvider: Send + Sync + 'static {
@@ -90,6 +95,84 @@ pub trait PortProvider: Send + Sync + 'static {
     fn model(&self) -> Option<Arc<dyn ModelProvider>> {
         None
     }
+
+    /// tool 端口的消费合同：一次工具调用的执行器（D-298）。
+    ///
+    /// 线上名解析（模型给的线上名 → 能力名）、空闲超时（有进展就不算挂死）、结果契约
+    /// （任意 JSON → 一段文本 + 可选的「等待用户」意图）都在提供者一侧——环只拿到
+    /// [`ToolCallOutcome`]，不知道工具怎么路由、怎么判挂死。默认 `None` 同
+    /// [`Self::llm_round_trip`]：非该端口的提供者不实现。
+    fn tool_execute(&self) -> Option<Arc<dyn ToolCallExecutor>> {
+        None
+    }
+}
+
+// ── tool 端口的合同类型（环 ↔ 提供者的私有约定，表不参与校验）──────────────
+
+/// 一次工具调用以「等待用户动作」结束时的载荷。
+///
+/// 工具只声明**意图与内容**（`failure_kind` + `prompt`），**不构造节点**：
+/// user_prompt 节点的身份是 `result_msg_id`，而那个 id 由编排层持有
+/// （占位节点也是它建的）。让工具去猜 id 正是历史上「同一逻辑节点两个 id」
+/// 的成因——前端出现重复审批卡，resume 只删得掉一个，另一个永远不消失。
+#[derive(Debug, Clone)]
+pub struct PendingPrompt {
+    /// 节点正文（审批卡 / 提问卡显示的那句话）
+    pub text: String,
+    /// 写进 `meta.prompt` 的载荷——卡片形状由**工具**决定（审批卡 / 提问卡不同）
+    pub prompt: Value,
+    /// [`symbio_kernel::capability::failure_kind`] 里的 pending 取值
+    pub failure_kind: String,
+}
+
+/// 一次工具调用的执行请求（环 → tool 端口提供者）。
+///
+/// 字段全部**按值**（名字 / 参数 / 上下文各一份）：执行器拿到的是完整的调用现场，
+/// 不与环共享借用——执行可能跨多个 await 点、进并发档，借用会把批编排钉死在
+/// 本调用的栈帧上。
+pub struct ToolCallRequest {
+    /// 环的宿主插件：解析失败时按原样路由的回落面（由它给出诚实的 NotFound）。
+    pub parent: Option<Arc<dyn Plugin>>,
+    /// 模型给的**线上名**（`mcp__fs__read` 一类；解析在提供者一侧）。
+    pub tool_name: String,
+    /// 调用参数（模型发的原样 JSON）。
+    pub args: Value,
+    /// 本次调用的 id（幂等键与父节点的挂靠都靠它）。
+    pub tool_call_id: String,
+    /// 流式增量出口：工具执行期间直接写增量；空闲超时的进展判据也读它。
+    pub sink: ExecEventSink,
+    /// 中止信号：用户按下停止时执行器必须尽快放弃工具。
+    pub abort: ExecAbortSignal,
+    /// 工具结果占位节点 id（流式工具按它广播增量帧，与占位节点同 id）。
+    pub result_msg_id: String,
+    /// 轮次 ctx：提供者从这里读能力表（`CAPABILITY_VISITOR`）。
+    pub ctx: Arc<dyn PluginInvokeRequest>,
+}
+
+/// 一次工具调用的结果契约（提供者 → 环）。
+///
+/// 「把任意 JSON 压成一段文本」的适配住提供者一侧；环只消费这三格：
+/// 失败属信息性，`result_text` 照样回传给模型（它据此自我纠正）。
+#[derive(Debug, Clone)]
+pub struct ToolCallOutcome {
+    /// 回传给 LLM 的结果正文（失败时是错误说明，不是空串）。
+    pub result_text: String,
+    /// 执行成败（只影响节点终态与效果记账，不影响回传）。
+    pub success: bool,
+    /// `Some` ⇒ 本轮结束于「等待用户动作」（审批 / 提问）；节点由环构造。
+    pub pending: Option<PendingPrompt>,
+}
+
+/// tool 端口的执行合同（[`PortProvider::tool_execute`] 的返回面）。
+///
+/// 与 [`LlmAdapter`] 同形：合同方法是异步的，跨 `dyn` 边界走
+/// `Arc<dyn ToolCallExecutor>`——`Arc<dyn PortProvider>` 在 Rust 里转型不出去，
+/// 执行面必须以方法形式落在合同对象上。
+#[async_trait::async_trait]
+pub trait ToolCallExecutor: Send + Sync + 'static {
+    /// 执行一次工具调用（不阻塞等待用户）：解析线上名、经能力表调用、
+    /// 空闲超时看护、按结果契约解码。
+    async fn execute(&self, req: ToolCallRequest) -> ToolCallOutcome;
 }
 
 /// port 行的载荷。
