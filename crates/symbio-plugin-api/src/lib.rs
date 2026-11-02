@@ -52,6 +52,7 @@ pub mod retrieval;
 pub mod routes;
 pub mod rows;
 pub mod settle;
+pub mod tool_batch;
 pub mod view_names;
 pub mod views;
 
