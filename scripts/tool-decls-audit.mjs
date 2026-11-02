@@ -67,6 +67,7 @@ const DEFAULT_BASELINE = [
   'codebase_search',
   'causal_assert',
   'content_search',
+  'explain_record',
   'heartbeat',
   'http_request',
   'notes_add',

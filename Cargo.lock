@@ -4154,6 +4154,7 @@ dependencies = [
  "symbio-plugin-conation",
  "symbio-plugin-cost",
  "symbio-plugin-event_bus",
+ "symbio-plugin-explain",
  "symbio-plugin-gateway",
  "symbio-plugin-heartbeat",
  "symbio-plugin-home",
@@ -4337,6 +4338,17 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "symbio-plugin-explain"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -22,6 +22,7 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: "causal.links", owner: "causal" },
     SharedViewDecl { name: "conation.intents", owner: "conation" },
     SharedViewDecl { name: "cost.ledger", owner: "cost" },
+    SharedViewDecl { name: "explain.rationales", owner: "explain" },
     SharedViewDecl { name: "memory.live", owner: "memory" },
     SharedViewDecl { name: "notes.digest", owner: "notes" },
     SharedViewDecl { name: "notes.insights", owner: "notes" },

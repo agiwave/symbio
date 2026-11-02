@@ -130,6 +130,7 @@ export const FACTORY_TOOLS = Object.freeze([
   'ask_user',
   'causal_assert',
   'codebase_search',
+  'explain_record',
   'content_search',
   'todo_write',
   'heartbeat',

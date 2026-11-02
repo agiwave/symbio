@@ -19,6 +19,7 @@
 //! | [`FILE_CHANGE`] | `file_change` | 工作目录变更账：产物格的 `file_op` 富化 |
 //! | [`NOTE_CAPTURE`] | `note_capture` | 便签记账（DE-025 `EX-001` 的夹具实例） |
 //! | [`CAUSAL_LINK`] | `causal_link` | 因果断言记账（名册 #33 / #39 的能力包实例） |
+//! | [`EXPLAIN_RATIONALE`] | `explain_rationale` | 理由记录记账（名册 #49 的能力包实例） |
 //!
 //! 名字是**跨进程的**（工具元数据随插件通道走），改名等于改协议；只在语义真的要
 //! 变的时候改，并在 `DE-025` 留一条决策。
@@ -52,6 +53,13 @@ pub const NOTE_CAPTURE: &str = "note_capture";
 /// 也不认识 `causal.link` 这条领域事实。
 pub const CAUSAL_LINK: &str = "causal_link";
 
+/// 记下一次决定的理由——`symbio-plugin-explain` 的行为实例。
+///
+/// 与 [`CAUSAL_LINK`] 同一档：判断种类仍由宿主给出（写口、幂等、审批），这里只是
+/// 又一个能力包声明自己的名字并注册 handler。宿主不认识 `explain_record` 这个工具名，
+/// 也不认识 `explain.rationale` 这条领域事实。
+pub const EXPLAIN_RATIONALE: &str = "explain_rationale";
+
 /// 宿主认识的**全部**行为名。
 ///
 /// 只用于两件事：装配期/收集期的显式校验，以及判据脚本的读取面。闸门自己按
@@ -63,6 +71,7 @@ pub const KNOWN: &[&str] = &[
     FILE_CHANGE,
     NOTE_CAPTURE,
     CAUSAL_LINK,
+    EXPLAIN_RATIONALE,
 ];
 
 /// 这个名字是不是宿主已知的行为。
