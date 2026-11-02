@@ -600,6 +600,37 @@ fn the_request_cell_belongs_to_the_decider() {
     assert_eq!(gaps_of(b), vec![]);
 }
 
+/// 宿主写口是事件声明的一格：装载期问得到，普通事件格与未登记名不冒充（D-296）。
+#[test]
+fn host_write_is_one_event_cell() {
+    const EVENTS: &[EventDecl] = &[
+        EventDecl::host("fixture.host", (Entity::Turn, Verb::Opened)),
+        EventDecl::new("fixture.row", (Entity::Turn, Verb::Asserted)),
+    ];
+    let mut b = Builder::empty();
+    b.declare(
+        "plugins/fixture",
+        PluginDeclarations {
+            events: EVENTS,
+            facts: &[],
+            views: &[],
+            ports: &[],
+            actors: Vec::new(),
+            rows: &[],
+        },
+    );
+    let frozen = b.seal(&[]).expect("宿主写口不改变装载形状");
+    assert!(frozen.host_written("fixture.host"));
+    assert!(
+        !frozen.host_written("fixture.row"),
+        "普通事件格不是宿主写口"
+    );
+    assert!(
+        !frozen.host_written("fixture.absent"),
+        "表上没有的名字不算宿主写口"
+    );
+}
+
 /// 每一档守卫角色都要有人居住：装配口把「判据空转」报成缺口（DE-024 D-203）。
 ///
 /// 这条用例钉的是**方向**——owner 删掉一行 `roles`，表现不是拒绝而是「看不见」

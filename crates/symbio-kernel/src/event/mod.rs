@@ -109,6 +109,12 @@ pub struct EventDecl {
     pub cell: Cell,
     /// 名字扮演的守卫角色。绝大多数事件不扮演任何角色（`&[]`）。
     pub roles: &'static [FactRole],
+    /// 宿主写口：这条事实由**宿主代码**落格，不由行表里的执行体落
+    /// （例如开轮那条 `user.message`，它在循环开始之前就已经写进事实源）。
+    ///
+    /// 装载期的「前件有生产者」判据把这一档算作已生产；没有它，宿主事实只能被
+    /// 误报成孤儿前件。它是**事件的声明格**，不是能力名——加一条宿主事实不改内核。
+    pub host: bool,
 }
 
 impl EventDecl {
@@ -118,12 +124,42 @@ impl EventDecl {
             name,
             cell,
             roles: &[],
+            host: false,
         }
     }
 
     /// 同时登记格位与角色：core 的守卫判据要靠这一行找到它。
     pub const fn with_roles(name: &'static str, cell: Cell, roles: &'static [FactRole]) -> Self {
-        EventDecl { name, cell, roles }
+        EventDecl {
+            name,
+            cell,
+            roles,
+            host: false,
+        }
+    }
+
+    /// 登记「由宿主写」的格位：装载期的生产者判据要认出它。
+    pub const fn host(name: &'static str, cell: Cell) -> Self {
+        EventDecl {
+            name,
+            cell,
+            roles: &[],
+            host: true,
+        }
+    }
+
+    /// 同时登记格位、角色与宿主写口。
+    pub const fn host_with_roles(
+        name: &'static str,
+        cell: Cell,
+        roles: &'static [FactRole],
+    ) -> Self {
+        EventDecl {
+            name,
+            cell,
+            roles,
+            host: true,
+        }
     }
 }
 

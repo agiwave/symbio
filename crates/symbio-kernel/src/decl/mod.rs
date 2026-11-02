@@ -566,6 +566,14 @@ impl Frozen {
         crate::event::holds_role(&self.events, name, role)
     }
 
+    /// 这个名字是不是**宿主写口**：行表之外、由宿主代码直接落格的事实。
+    ///
+    /// 装载期的「前件有生产者」判据把它与执行体的 `writes`、引擎独占格算作同一档；
+    /// 没有这一格，`user.message` 这类开轮事实会被误报成孤儿前件（D-296）。
+    pub fn host_written(&self, name: &str) -> bool {
+        self.events.iter().any(|e| e.name == name && e.host)
+    }
+
     /// 每一档角色都有人住吗（装配口的整体检查，DE-024 D-203）。
     ///
     /// 为什么这条必须存在：判据读角色，而角色来自声明。owner 删掉一行 `roles` 的
