@@ -4155,6 +4155,7 @@ dependencies = [
  "symbio-plugin-cost",
  "symbio-plugin-event_bus",
  "symbio-plugin-explain",
+ "symbio-plugin-forecast",
  "symbio-plugin-gateway",
  "symbio-plugin-heartbeat",
  "symbio-plugin-home",
@@ -4348,6 +4349,16 @@ dependencies = [
  "serde_json",
  "symbio-plugin-api",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "symbio-plugin-forecast"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
  "tracing",
 ]
 

@@ -30,6 +30,7 @@ symbio-plugin-conation = { path = "../symbio-plugin-conation" }
 symbio-plugin-cost = { path = "../symbio-plugin-cost" }
 symbio-plugin-event_bus = { path = "../symbio-plugin-event_bus" }
 symbio-plugin-explain = { path = "../symbio-plugin-explain" }
+symbio-plugin-forecast = { path = "../symbio-plugin-forecast" }
 symbio-plugin-gateway = { path = "../symbio-plugin-gateway" }
 symbio-plugin-heartbeat = { path = "../symbio-plugin-heartbeat" }
 symbio-plugin-home = { path = "../symbio-plugin-home" }

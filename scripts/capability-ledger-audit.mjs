@@ -52,6 +52,7 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 
 const ROSTER_REL = 'docs/003-design/008-能力注册表与能力坐标系.md'
 const LEDGER_REL = 'docs/003-design/026-能力拆分与影响类.md'
+const TASKS_REL = 'docs/007-task'
 
 /** 处置闭集：`拆` 的三种限定与 `留` 的五个残留类，外加「待裁决」。 */
 const DISPOSITIONS = [
@@ -73,6 +74,89 @@ const PENDING_STAGE = 'S10'
 
 /** D-246 明确否掉的留守理由：出现即红，不论后面接了什么。 */
 const EXCUSES = /难拆|拆不动|今天没有端口|没有端口可|实现困难|先放着/
+
+/**
+ * D-294 的移除计划：`骨架（T-NNN）：期限 YYYY-MM-DD；触发 <一句话>；承接 T-NNN`。
+ *
+ * 四处都必填：骨架由哪个任务开出、期限、触发条件、承接任务。分隔符是中文分号与
+ * 全角括号——写错一格就是「无计划」，不做宽松兜底（否则三样齐全会变成「能认出
+ * 一部分就算」）。
+ */
+const PLAN_RE = /骨架（(T-\d{3})）：期限 (\d{4}-\d{2}-\d{2})；触发 ([^；|\n]+)；承接 (T-\d{3})/
+
+/** 触发条件里的空话：出现即红。它们不可判定，等于没有触发条件。 */
+const PLAN_VACUOUS = /待定|以后|将来|看情况|再说|未定|适时|择机/
+
+/** 触发条件必须带一个可观测谓词；只有名词短语不算「何时发生」。 */
+const PLAN_PREDICATE = /新增|出现|落地|进入|完成|达到|超过|至少|≥|<=|<|>/
+
+/** 已收口的状态：承接任务若是这两档，等于没人接。 */
+const CLOSED_TASK_STATUS = ['done', 'wont']
+
+/** 编号条目的短号：`T-<三位>-名字` → `T-<三位>`。 */
+function shortRef(id) {
+  return id.match(/T-\d{3}/)?.[0] ?? null
+}
+
+/** front-matter 的键值对（只取首块，够读 `created` / `deps` / `status`）。 */
+function frontMatter(text) {
+  if (!text) return null
+  const m = text.match(/^---\n([\s\S]*?)\n---/)
+  if (!m) return null
+  const fm = {}
+  for (const line of m[1].split('\n')) {
+    const i = line.indexOf(':')
+    if (i > 0) fm[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+  }
+  return fm
+}
+
+/** `deps: [T-<三位>-…, …]` → 每项的 `T-<三位>` 前缀。 */
+function depsOf(fm) {
+  if (!fm || !fm.deps) return []
+  const inner = fm.deps.replace(/^\[/, '').replace(/\]$/, '')
+  return [...inner.matchAll(/T-\d{3}/g)].map((m) => m[0])
+}
+
+/**
+ * 任务表：只收编号条目（`projection: true` 的汇总页不算）。
+ * `docs/007-task` 读不出时返回 null —— 有骨架行却没任务表 = 判据没有一半输入。
+ */
+function readTasks() {
+  const dir = path.join(ROOT, TASKS_REL)
+  if (!fs.existsSync(dir)) return null
+  const tasks = []
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.md')) continue
+    const rel = `${TASKS_REL}/${name}`
+    const fm = frontMatter(readRel(rel))
+    if (!fm || fm.projection === 'true') continue
+    const short = shortRef(fm.id ?? '')
+    if (!short) continue
+    tasks.push({ rel, id: fm.id, short, status: fm.status ?? '', deps: depsOf(fm) })
+  }
+  return tasks
+}
+
+/** `start` 沿 `deps` 闭包能否走到 `target`（含 start 自身）。 */
+function reaches(start, target, tasks) {
+  const seen = new Set()
+  const stack = [start]
+  while (stack.length) {
+    const cur = stack.pop()
+    if (cur === target) return true
+    if (seen.has(cur)) continue
+    seen.add(cur)
+    const task = tasks.find((t) => t.short === cur)
+    if (!task) continue
+    for (const dep of task.deps) stack.push(dep)
+  }
+  return false
+}
+
+function findTask(ref, tasks) {
+  return tasks.find((t) => t.short === ref) ?? null
+}
 
 function readRel(rel) {
   const file = path.join(ROOT, rel)
@@ -120,9 +204,10 @@ function report(rel, msg) {
   errors.push({ rel, msg })
 }
 
+const ledgerText = readRel(LEDGER_REL)
 const rosterRows = tableAfter(readRel(ROSTER_REL), '| 能力 | 维 | 轴 |')
-const ledgerRows = tableAfter(readRel(LEDGER_REL), '| # | 能力 | 今天 |')
-const totalRows = tableAfter(readRel(LEDGER_REL), '| 处置 | 条数 | 组成 |')
+const ledgerRows = tableAfter(ledgerText, '| # | 能力 | 今天 |')
+const totalRows = tableAfter(ledgerText, '| 处置 | 条数 | 组成 |')
 
 let roster = []
 let ledger = []
@@ -227,6 +312,92 @@ for (const row of ledger) {
     }
     if (row.reason.trim().length < 4) {
       report(at, `#${row.num}「${row.name}」记为待裁决，但没写为什么悬着 —— 下一步无从裁决`)
+    }
+  }
+}
+
+// ── D-294 移除计划 ───────────────────────────────────────────────────
+
+const plannedRows = ledger.filter((row) => row.reason.includes('骨架'))
+if (plannedRows.length) {
+  const fm = frontMatter(ledgerText)
+  const created = fm?.created ?? ''
+  const tasks = readTasks()
+  if (!created) {
+    report(LEDGER_REL, 'D-294 的骨架计划要对比期限，但账本 front-matter 读不出 `created` —— 期限无从判「还来不来得及」')
+  }
+  if (tasks === null) {
+    report(LEDGER_REL, 'D-294 的骨架计划要接任务，但 `docs/007-task` 读不出 —— 计划没有承接面')
+  }
+  for (const row of plannedRows) {
+    const at = `${LEDGER_REL}:${row.line}`
+    if (categoryOf(row.disposition) !== '拆') {
+      report(
+        at,
+        `#${row.num}「${row.name}」写了骨架计划，处置却是 \`${row.disposition}\` —— ` +
+          '骨架是「先留一层、到期拆掉」的拆法，不是留守',
+      )
+    }
+    const m = PLAN_RE.exec(row.reason)
+    if (!m) {
+      report(
+        at,
+        `#${row.num}「${row.name}」写了骨架但没有可判计划 —— 格式必须是 ` +
+          '`骨架（T-NNN）：期限 YYYY-MM-DD；触发 <一句话>；承接 T-NNN`，四处缺一即「无计划」',
+      )
+      continue
+    }
+    const [, owner, deadline, trigger, successor] = m
+    if (Number.isNaN(Date.parse(deadline))) {
+      report(at, `#${row.num}「${row.name}」的期限 \`${deadline}\` 不是合法日期`)
+    } else if (created && deadline <= created) {
+      report(
+        at,
+        `#${row.num}「${row.name}」的期限 ${deadline} 不晚于账本登记日 ${created} —— ` +
+          '期限已经或当场到期，等于没有期限',
+      )
+    }
+    const t = trigger.trim()
+    if (t.length < 4) {
+      report(at, `#${row.num}「${row.name}」的骨架没有触发条件 —— 没有「何时必须拆」就没有移除计划`)
+    } else if (PLAN_VACUOUS.test(t)) {
+      report(
+        at,
+        `#${row.num}「${row.name}」的触发条件用了不可判定的词（\`${t.match(PLAN_VACUOUS)[0]}\`）—— ` +
+          '「以后」「看情况」不是触发条件',
+      )
+    } else if (!PLAN_PREDICATE.test(t)) {
+      report(
+        at,
+        `#${row.num}「${row.name}」的触发条件没有可观测谓词 —— 要写成「出现/新增/进入/达到…」的事实形状`,
+      )
+    }
+    if (successor === owner) {
+      report(at, `#${row.num}「${row.name}」的承接任务就是骨架宿主 ${owner} —— 自己接自己等于没人接`)
+    }
+    if (tasks !== null) {
+      const ownerTask = findTask(owner, tasks)
+      const successorTask = findTask(successor, tasks)
+      if (!ownerTask) {
+        report(at, `#${row.num}「${row.name}」的骨架宿主 ${owner} 不在 \`docs/007-task\` 里`)
+      } else if (CLOSED_TASK_STATUS.includes(ownerTask.status)) {
+        report(at, `#${row.num}「${row.name}」的骨架宿主 ${owner} 已是 \`${ownerTask.status}\` —— 收口的任务不再承接计划`)
+      }
+      if (!successorTask) {
+        report(at, `#${row.num}「${row.name}」的承接任务 ${successor} 不在 \`docs/007-task\` 里 —— 计划没有接棒的人`)
+      } else if (CLOSED_TASK_STATUS.includes(successorTask.status)) {
+        report(
+          at,
+          `#${row.num}「${row.name}」的承接任务 ${successor} 已是 \`${successorTask.status}\` —— ` +
+            '「以后删」的承诺落在一条已收口的任务上',
+        )
+      } else if (ownerTask && !reaches(successor, owner, tasks)) {
+        report(
+          at,
+          `#${row.num}「${row.name}」的承接任务 ${successor} 的 \`deps\` 闭包到不了骨架宿主 ${owner} —— ` +
+            '承接任务必须声明它接的是这份骨架',
+        )
+      }
     }
   }
 }

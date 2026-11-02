@@ -40,6 +40,12 @@ const ROSTER_TEXT = [
 ].join('\n')
 
 const LEDGER_TEXT = [
+  '---',
+  'kind: design',
+  'id: DE-026-能力拆分与影响类',
+  'created: 2026-10-29',
+  '---',
+  '',
   '# 处置账（夹具）',
   '',
   '### 账本（3/3）',
@@ -94,6 +100,37 @@ function audit(files) {
 
 function cleanTree() {
   return { [ROSTER]: ROSTER_TEXT, [LEDGER]: LEDGER_TEXT }
+}
+
+const PLAN_ROW =
+  '| 3 | 丙能力 | 未落地 | 拆 | `symbio-plugin-c`：读数视图；骨架（T-090）：期限 2026-12-31；触发 第二条读数型能力进入 S9；承接 T-091 | S9 |'
+
+function taskFile(id, title, status, deps) {
+  return [
+    '---',
+    'kind: task',
+    `id: ${id}`,
+    `title: ${title}`,
+    `status: ${status}`,
+    'created: 2026-10-29',
+    `deps: [${deps.join(', ')}]`,
+    '---',
+    '',
+    `# ${title}`,
+    '',
+  ].join('\n')
+}
+
+/** 干净夹具 + 一条骨架计划：宿主任务与承接任务（后者的 `deps` 指向宿主）。 */
+function planTree() {
+  const files = cleanTree()
+  files[LEDGER] = files[LEDGER]
+    .replace('| 3 | 丙能力 | 未落地 | 待裁决 | 载荷形状未定 | S10 |', PLAN_ROW)
+    .replace('| 拆 | 1 | 1 |', '| 拆 | 2 | 1/3 |')
+    .replace('| 待裁决 | 1 | 3 |', '| 待裁决 | 0 | |')
+  files['docs/007-task/090-骨架宿主.md'] = taskFile('T-090-骨架宿主', '骨架宿主', 'todo', [])
+  files['docs/007-task/091-承接任务.md'] = taskFile('T-091-承接任务', '承接任务', 'todo', ['T-090-骨架宿主'])
+  return files
 }
 
 function assertRed(r, needle) {
@@ -228,4 +265,82 @@ test('账本表读不出 ⇒ 红', () => {
   const files = cleanTree()
   delete files[LEDGER]
   assertRed(audit(files), /处置账表读不出/)
+})
+
+// ── D-294 移除计划 ───────────────────────────────────────────────────
+
+test('骨架计划四处齐全、承接任务可经 deps 到达宿主 ⇒ 绿', () => {
+  const r = audit(planTree())
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+})
+
+test('写了骨架但格式不齐 ⇒ 红（没有可判计划）', () => {
+  const files = planTree()
+  files[LEDGER] = files[LEDGER].replace('；触发 第二条读数型能力进入 S9；承接 T-091', '；以后再说')
+  assertRed(audit(files), /没有可判计划/)
+})
+
+test('骨架宿主任务不存在 ⇒ 红', () => {
+  const files = planTree()
+  files[LEDGER] = files[LEDGER].replace('骨架（T-090）', '骨架（T-099）')
+  assertRed(audit(files), /骨架宿主 T-099 不在/)
+})
+
+test('承接任务不存在 ⇒ 红（计划没有接棒的人）', () => {
+  const files = planTree()
+  files[LEDGER] = files[LEDGER].replace('承接 T-091', '承接 T-999')
+  assertRed(audit(files), /承接任务 T-999 不在/)
+})
+
+test('承接任务的 deps 闭包到不了骨架宿主 ⇒ 红', () => {
+  const files = planTree()
+  files['docs/007-task/091-承接任务.md'] = taskFile('T-091-承接任务', '承接任务', 'todo', [])
+  assertRed(audit(files), /闭包到不了骨架宿主/)
+})
+
+test('承接任务已收口 ⇒ 红（承诺落在一条不会再动的任务上）', () => {
+  const files = planTree()
+  files['docs/007-task/091-承接任务.md'] = taskFile('T-091-承接任务', '承接任务', 'done', ['T-090-骨架宿主'])
+  assertRed(audit(files), /承诺落在一条已收口的任务上/)
+})
+
+test('期限不晚于账本登记日 ⇒ 红（等于没有期限）', () => {
+  const files = planTree()
+  files[LEDGER] = files[LEDGER].replace('期限 2026-12-31', '期限 2026-01-01')
+  assertRed(audit(files), /不晚于账本登记日/)
+})
+
+test('触发条件用空话 ⇒ 红（不可判定的词不是触发）', () => {
+  const files = planTree()
+  files[LEDGER] = files[LEDGER].replace('触发 第二条读数型能力进入 S9', '触发 以后再说')
+  assertRed(audit(files), /不可判定的词/)
+})
+
+test('触发条件没有可观测谓词 ⇒ 红', () => {
+  const files = planTree()
+  files[LEDGER] = files[LEDGER].replace('触发 第二条读数型能力进入 S9', '触发 第二条读数型能力')
+  assertRed(audit(files), /没有可观测谓词/)
+})
+
+test('承接任务就是骨架宿主 ⇒ 红（自己接自己等于没人接）', () => {
+  const files = planTree()
+  files[LEDGER] = files[LEDGER].replace('承接 T-091', '承接 T-090')
+  assertRed(audit(files), /自己接自己等于没人接/)
+})
+
+test('骨架行不写拆 ⇒ 红（骨架不是留守的别名）', () => {
+  const files = planTree()
+  files[LEDGER] = files[LEDGER].replace(
+    '| 3 | 丙能力 | 未落地 | 拆 | `symbio-plugin-c`：读数视图；骨架（T-090）：期限 2026-12-31；触发 第二条读数型能力进入 S9；承接 T-091 | S9 |',
+    '| 3 | 丙能力 | 未落地 | 留 守门 | 骨架（T-090）：期限 2026-12-31；触发 第二条读数型能力进入 S9；承接 T-091 | — |',
+  )
+  assertRed(audit(files), /骨架是「先留一层、到期拆掉」的拆法/)
+})
+
+test('有骨架但任务表里没有宿主 ⇒ 红（计划没有承接面）', () => {
+  const files = planTree()
+  delete files['docs/007-task/090-骨架宿主.md']
+  delete files['docs/007-task/091-承接任务.md']
+  files['docs/007-task/000-占位.md'] = taskFile('T-000-占位', '占位', 'todo', [])
+  assertRed(audit(files), /骨架宿主 T-090 不在/)
 })

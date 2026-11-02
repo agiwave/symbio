@@ -33,6 +33,9 @@ pub const PLUGIN_ID_EVENT_BUS: &str = "event_bus";
 /// 可解释：把一次决定的理由记成事实（工具），再折成可读的理由台账（视图）
 pub const PLUGIN_ID_EXPLAIN: &str = "explain";
 
+/// 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
+pub const PLUGIN_ID_FORECAST: &str = "forecast";
+
 /// 外部 API 网关
 pub const PLUGIN_ID_GATEWAY: &str = "gateway";
 
@@ -113,6 +116,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "classify", // 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
     "reputation", // 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰回路与出口共用的那一个口径）
     "explain", // 可解释：把一次决定的理由记成事实（工具），再折成可读的理由台账（视图）
+    "forecast", // 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "local", // 本地文件
