@@ -285,6 +285,10 @@ export function capabilityNameHits(file, ids = [], toolNames = []) {
   for (const raw of file.added) {
     if (!raw.trim()) continue
     const code = blankComments(raw)[0] ?? ''
+    // 只作为日志归属 / 展示词出现的纯字面量（如 `plugin_error!("session", …)` 的实参）
+    // 不构成「新通道」：它不选择行为、不新增分支，删掉只影响日志署名。判的是
+    // 「为某条能力新加行 / 分支 / 常量」，不是字符串出现过。
+    if (BARE_LITERAL_LINE.test(code)) continue
     for (const id of ids) {
       if (code.includes(`"${id}"`)) out.push({ path: file.path, line: raw.trim(), what: `插件 id \`"${id}"\`` })
     }
@@ -295,6 +299,12 @@ export function capabilityNameHits(file, ids = [], toolNames = []) {
   }
   return out
 }
+
+/** 一整行只有一个字符串字面量（可带尾逗号 / 分号）：属于署名或数据，不是判据。 */
+const BARE_LITERAL_LINE = /^\s*"[^"]*"\s*[,;]?\s*$/
+
+/** 一整行只有一条私有 `use`：删除符号时 import 行被重写，不构成机制新增。 */
+const IMPORT_ONLY_LINE = /^\s*use\s[^;]+;\s*$/
 
 function describeHit(h) {
   return `${h.path}: ${h.what} —— ${h.line.slice(0, 80)}`
@@ -320,7 +330,16 @@ export function migrationErrors({ sha, patch, pluginIds: ids = [], toolNames = [
   const errors = []
 
   const archAdded = patch.filter(
-    (f) => inTrees(f.path, ARCH_TREES) && f.path.endsWith('.rs') && !isGenerated(f.path) && f.added.length,
+    (f) =>
+      inTrees(f.path, ARCH_TREES) &&
+      f.path.endsWith('.rs') &&
+      !isGenerated(f.path) &&
+      // 判的是源码变宽：纯注释行（含 `arch-shape-allow` 登记）与纯 `use` 行
+      // （删符号时同一行被重写的必然结果）不构成机制新增。
+      f.added.some((raw) => {
+        const code = (blankComments(raw)[0] ?? '').trim()
+        return code.length > 0 && !IMPORT_ONLY_LINE.test(code)
+      }),
   )
   if (archAdded.length) {
     errors.push(

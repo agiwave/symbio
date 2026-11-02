@@ -185,6 +185,37 @@ test('migrationErrors：迁移提交在 SDK 机制面新增源码 ⇒ EX-007 红
   assert.match(e, /crates\/symbio-sdk/)
 })
 
+test('migrationErrors：机制面只加注释（如 arch-shape-allow 登记）⇒ 不算源码变宽', () => {
+  assert.deepEqual(
+    mig([
+      { path: 'crates/symbio-kernel/src/capability/family.rs', added: ['// arch-shape-allow CS-004 tool ×1: 用途=wire 词汇'], removed: [] },
+      { path: LOOP, added: [], removed: ['row!("memory")'] },
+    ]),
+    [],
+  )
+})
+
+test('migrationErrors：机制面重写一条私有 use（删符号的必然结果）⇒ 不算源码变宽', () => {
+  assert.deepEqual(
+    mig([
+      {
+        path: 'crates/symbio-plugin-api/src/port.rs',
+        added: ['use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};'],
+        removed: ['use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};'],
+      },
+      { path: LOOP, added: [], removed: ['row!("memory")'] },
+    ]),
+    [],
+  )
+})
+
+test('migrationErrors：控制面新增一行只有字符串字面量（日志署名）⇒ 不算新通道', () => {
+  assert.deepEqual(
+    mig([{ path: LOOP, added: ['"session",'], removed: ['row!("old_memory")'] }]),
+    [],
+  )
+})
+
 test('migrationErrors：折叠整文件搬出机制面、落进能力包 ⇒ 绿（D-283 判的是变宽）', () => {
   assert.deepEqual(
     mig([
