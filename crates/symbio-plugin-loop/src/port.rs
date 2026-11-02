@@ -59,10 +59,13 @@ use symbio_kernel::decl::Frozen;
 use symbio_kernel::event::{
     Entity, Event, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
+use symbio_kernel::exec::ExecEventSink;
+use symbio_kernel::plugin::PluginError;
 use symbio_kernel::store::{AppendError, Store};
 use symbio_plugin_api::port::ports;
-#[cfg(test)]
 use symbio_plugin_api::port::{PortExecContext, PortExecutor, PortInput, PortOutcome};
+
+use super::turn_exec::{ActorError, Ctx, StepFuture};
 
 /// 一笔端口调用：端口名 + 逻辑 id + 尝试号。
 ///
@@ -429,9 +432,11 @@ where
 /// 与 [`dispatch_full`] 的差别只在「跑什么」：那一条跑一个闭包（本插件自己的动作），
 /// 这一条跑端口合同。两者记账的口径逐字相同（`before` 由引擎落，`response` / `failed`
 /// 也由引擎落），所以「谁写哪一条」没有第二套答案。
-// 生产接线排在 `tools/**` 迁移步；本批只有 `port.test.rs` 的两人端口验收驱动它，
-// 故只在测试档编译（不留 `allow(dead_code)`：新死码要么接上、要么不编进来）。
-#[cfg(test)]
+///
+/// 生产接线只有一处：绑定表里的 [`run_port`] 动作。它从行表给的债键取端口名与债务，
+/// 从 `request` 事实取载荷，然后调本函数——环不为任何端口加分支，也不为存量端口写
+/// 特例路径。这是环为「端口集开放」付的**一次性**固定成本（`DE-047` D-301），
+/// 之后每加一个端口都不再改环。
 pub(crate) async fn execute_one<S>(
     store: &S,
     frozen: &Frozen,
@@ -478,6 +483,153 @@ where
         }
     }
     Ok(outcome)
+}
+
+/// 绑定表里的**唯一通用受理入口**：一笔债 → 端口名 + 行 + 债键（`DE-047` D-301）。
+///
+/// 它只读三样东西，且都不带世界语义：
+/// - **端口名**取自行表声明的债键（`port` 字段）——不按行名或动作名分支；
+/// - **行**就是派发器写在 [`crate::turn_exec::Ctx::row`] 上的那一行；
+/// - **债**（`id` / `attempt`）同样来自债键，载荷从同名 `request` 事实原样取。
+///
+/// 执行面一律经 [`PortProvider::executor`](symbio_plugin_api::port::PortProvider::executor)：
+/// 环不认识端口的世界，也不为存量端口留特例路径。提供者缺席或没有执行面时落 `failed`
+/// （账上说得清「这一笔想要、没打成」），不静默回退。
+///
+/// 这是环为开放端口付的一次性固定成本；新增端口只由所属插件声明行与端口，
+/// 不修改本文件、绑定表或行映射（`DE-047` I-6.7）。
+pub(crate) fn run_port<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        // 债键原样保存：后面要按端口名取静态声明，而 `ctx` 全程被可变借用。
+        let key = ctx.key.clone();
+        let field = |name: &str| key.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+        let port_name = field("port").ok_or_else(|| {
+            ActorError::Read(PluginError::InternalError(format!(
+                "行 {} 的债键没有 `port` 字段",
+                ctx.row
+            )))
+        })?;
+        let id = field("id").ok_or_else(|| {
+            ActorError::Read(PluginError::InternalError(format!(
+                "行 {} 的债键没有 `id` 字段",
+                ctx.row
+            )))
+        })?;
+        let attempt = field("attempt")
+            .and_then(|v| v.parse::<u64>().ok())
+            .ok_or_else(|| {
+                ActorError::Read(PluginError::InternalError(format!(
+                    "行 {} 的债键没有可读的 `attempt`",
+                    ctx.row
+                )))
+            })?;
+
+        let frozen = crate::loop_rows::table().map_err(ActorError::Read)?;
+        let ports = frozen.ports();
+        let decl = ring::port_of(ports, port_name).ok_or_else(|| {
+            ActorError::Read(PluginError::InternalError(format!(
+                "端口 `{port_name}` 没有 `PortDecl`（行 {}）",
+                ctx.row
+            )))
+        })?;
+        // 静态端口名随声明走：`PortDecl::port` 才是可跨 `async` 保存的那一份。
+        let port = decl.port;
+        let id = id.to_string();
+        let round_no = ctx.session.turn();
+        let produced_by = ctx.session.user_seq();
+        let now = ctx.session.now_ms();
+        let call = Call::new(port, id.clone(), attempt);
+
+        let request_ctx = ctx.request_ctx.clone().ok_or_else(|| {
+            ActorError::Read(PluginError::InternalError(format!(
+                "行 {} 需要请求句柄（端口提供者要读能力表），而本次驱动没有宿主面",
+                ctx.row
+            )))
+        })?;
+        let Some(provider) = provider_of(&request_ctx, port_name).await else {
+            return failed_with(
+                ctx.store.as_ref(),
+                &call,
+                round_no,
+                produced_by,
+                "端口没有提供者（装配缺席）",
+            )
+            .map_err(ActorError::Append);
+        };
+        let Some(executor) = provider.executor() else {
+            return failed_with(
+                ctx.store.as_ref(),
+                &call,
+                round_no,
+                produced_by,
+                "端口提供者没有交执行面",
+            )
+            .map_err(ActorError::Append);
+        };
+
+        // 载荷从同名 `request` 事实取：环不解析它，只搬运它（I-6.2）。
+        let facts = ctx.store.range(symbio_kernel::event::Seq::new(0));
+        let request = facts
+            .iter()
+            .rev()
+            .find(|e| {
+                e.kind == EVENT_REQUEST
+                    && e.payload.get("port").and_then(|v| v.as_str()) == Some(port_name)
+                    && e.payload.get("id").and_then(|v| v.as_str()) == Some(id.as_str())
+                    && e.payload.get("attempt").and_then(|v| v.as_u64()) == Some(attempt)
+            })
+            .ok_or_else(|| {
+                ActorError::Read(PluginError::InternalError(format!(
+                    "行 {} 的 `request` 事实不在日志里（端口 `{port_name}` / `{id}` / {attempt}）",
+                    ctx.row
+                )))
+            })?;
+
+        let plan = Dispatch {
+            call: &call,
+            turn: round_no,
+            produced_by,
+            row: ctx.row,
+            now,
+            // 执行体与本动作在同一个栈帧里：这一笔有活着的等待方。
+            awaited: true,
+        };
+        let input = PortInput {
+            port,
+            payload: request.payload.clone(),
+        };
+        let exec = PortExecContext {
+            // 租约是跨崩溃重试的账期，不是执行截止；执行体按行契约自己管超时。
+            deadline_ms: None,
+            abort: ctx.session.abort_signal(),
+            idempotency_key: request.event_id.clone(),
+            sink: ctx.event_sink.clone().unwrap_or(ExecEventSink::Null),
+            ctx: Some(request_ctx),
+        };
+
+        execute_one(
+            ctx.store.as_ref(),
+            &frozen,
+            ports,
+            &*executor,
+            plan,
+            input,
+            exec,
+        )
+        .await
+        .map_err(|e| match e {
+            DispatchError::Store(e) => ActorError::Append(e),
+            // `execute_one` 不跑执行体失败路径以外的东西，构造不出 `Actor`。
+            DispatchError::Actor(never) => match never {},
+            DispatchError::NotOwed(row) => ActorError::Read(PluginError::InternalError(format!(
+                "行 `{row}` 不欠——通用受理入口拒绝跑一笔没有账的债"
+            ))),
+            DispatchError::NoPort(port) => ActorError::Read(PluginError::InternalError(format!(
+                "端口 `{port}` 没有声明（缺少 `PortDecl`）"
+            ))),
+        })?;
+        Ok(())
+    })
 }
 
 /// 派发的**后半段**：执行体正常返回 ⇒ 落 `response`（同一次尝试）。
@@ -1135,6 +1287,40 @@ impl Compress {
 /// 不在源码里写第二份字面量。
 const LOG_CHANNEL: &str = symbio_deploy::PLUGIN_ID_SESSION;
 
+/// 取**任一端口名**的提供者（`DE-047` I-6）：能力表按端口名读，环不认识端口的世界。
+///
+/// 与 [`model_port`] / [`tool_port`] 同一把尺子（缺席 / 判重 / 闭集外 / 载荷下转型
+/// 失败都出声并返回 `None`），但**没有任何世界名**：端口名由调用方给，函数体里没有
+/// 一条分支依赖它。通用受理入口 [`run_port`] 只经这一条路取提供者。
+pub(crate) async fn provider_of(
+    ctx: &Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
+    port: &str,
+) -> Option<Arc<dyn symbio_plugin_api::port::PortProvider>> {
+    use symbio_plugin_api::port::{capability_port_of, PortPayload, PortReading};
+    use symbio_plugin_api::{PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR};
+
+    let Some(visitor): Option<Arc<dyn Registry>> = ctx.get(CAPABILITY_VISITOR) else {
+        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] ctx 没有能力表，端口 `{port}` 读不到");
+        return None;
+    };
+    let reading = capability_port_of(&*visitor, port).await;
+    let row = match &reading {
+        PortReading::Ready(row) => row.clone(),
+        other => {
+            symbio_plugin_api::plugin_warn!(
+                LOG_CHANNEL,
+                "[Loop] 端口 `{port}` 不可用（{other:?}）——调用方将响亮失败"
+            );
+            return None;
+        }
+    };
+    let Some(payload) = row.payload::<PortPayload>() else {
+        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] 端口 `{port}` 的行载荷不是端口载荷");
+        return None;
+    };
+    Some(payload.provider().clone())
+}
+
 /// 取 model 端口的提供者（D-298）：能力表按**端口名**读——provider 怎么解析、
 /// 适配器怎么构造，都是提供者一侧的私事（`llm_round_trip` / `model`）。
 ///
@@ -1144,30 +1330,7 @@ const LOG_CHANNEL: &str = symbio_deploy::PLUGIN_ID_SESSION;
 pub(crate) async fn model_port(
     ctx: &Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
 ) -> Option<Arc<dyn symbio_plugin_api::port::PortProvider>> {
-    use symbio_plugin_api::port::{capability_port_of, PortPayload, PortReading};
-    use symbio_plugin_api::ports;
-    use symbio_plugin_api::{PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR};
-
-    let Some(visitor): Option<Arc<dyn Registry>> = ctx.get(CAPABILITY_VISITOR) else {
-        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] ctx 没有能力表，`port.model` 读不到");
-        return None;
-    };
-    let reading = capability_port_of(&*visitor, ports::MODEL).await;
-    let row = match &reading {
-        PortReading::Ready(row) => row.clone(),
-        other => {
-            symbio_plugin_api::plugin_warn!(
-                LOG_CHANNEL,
-                "[Loop] `port.model` 不可用（{other:?}）——调用方将响亮失败"
-            );
-            return None;
-        }
-    };
-    let Some(payload) = row.payload::<PortPayload>() else {
-        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] `port.model` 行载荷不是端口载荷");
-        return None;
-    };
-    Some(payload.provider().clone())
+    provider_of(ctx, symbio_plugin_api::ports::MODEL).await
 }
 
 /// 取 tool 端口的提供者（D-298）：能力表按**端口名**读——线上名怎么解析、
@@ -1181,30 +1344,7 @@ pub(crate) async fn model_port(
 pub(crate) async fn tool_port(
     ctx: &Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
 ) -> Option<Arc<dyn symbio_plugin_api::port::PortProvider>> {
-    use symbio_plugin_api::port::{capability_port_of, PortPayload, PortReading};
-    use symbio_plugin_api::ports;
-    use symbio_plugin_api::{PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR};
-
-    let Some(visitor): Option<Arc<dyn Registry>> = ctx.get(CAPABILITY_VISITOR) else {
-        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] ctx 没有能力表，`port.tool` 读不到");
-        return None;
-    };
-    let reading = capability_port_of(&*visitor, ports::TOOL).await;
-    let row = match &reading {
-        PortReading::Ready(row) => row.clone(),
-        other => {
-            symbio_plugin_api::plugin_warn!(
-                LOG_CHANNEL,
-                "[Loop] `port.tool` 不可用（{other:?}）——调用方将响亮失败"
-            );
-            return None;
-        }
-    };
-    let Some(payload) = row.payload::<PortPayload>() else {
-        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] `port.tool` 行载荷不是端口载荷");
-        return None;
-    };
-    Some(payload.provider().clone())
+    provider_of(ctx, symbio_plugin_api::ports::TOOL).await
 }
 
 /// 端口缺席时的响亮失败（D-298）：**欠了、立刻失败**——`request` 与 `failed`

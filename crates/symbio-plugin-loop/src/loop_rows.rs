@@ -70,6 +70,8 @@ use symbio_plugin_api::events::{
 use symbio_plugin_api::port::ports;
 
 use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
+// 绑定表只把行名指到动作上：`actions::run_*` 是同一张表的短名，避免每条都写全路径。
+use crate::turn_exec as actions;
 
 /// 这张表里**接了线的执行体**：`execute`（宣布一次模型往返）、`close`（收束）、
 /// `opener` / `authorizer` / `courier`（工具批三笔债）、`relay` / `waiter`
@@ -164,6 +166,12 @@ const CONTINUE: &str = "continue";
 /// 名字来自 `plugin-api` 的**宿主词汇**：能力包写同一个常量，两边不需要认识对方。
 /// 它没有按能力名注册的邻居——加一行能力只加 `Decl` + `RowHandler` 提交，不改本表。
 const PLUGIN_ROW: &str = symbio_plugin_api::rows::PLUGIN_ROW;
+/// 通用受理入口的动作名（`DE-047` D-301）。
+///
+/// 属于**开放端口**的行把 `by` 写成它：派发器只按名字找动作，不按端口名 / 业务语义
+/// 分支。名字是机制词（`port`），不是任何世界名——新增端口由所属插件声明端口与行，
+/// 绑定表不随端口数增长。
+const PORT: &str = symbio_plugin_api::rows::PORT_ACTOR;
 
 /// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
 ///
@@ -441,6 +449,18 @@ const ACTOR_PLUGIN_ROW: ActorDecl = ActorDecl {
     writes: &[],
 };
 
+/// 通用受理入口的声明（`DE-047` D-301）：名单为空。
+///
+/// 它只写协议格（`before` / `response` / `failed`，引擎写、运行期豁免），领域格一格
+/// 都不写——端口的世界由执行体写，环不替它声明。装载期的端口契约（行的 `until`
+/// 含该端口的 `before`）放行这一条，`EmptyActor` / `ActorCannotClose` 不会误伤。
+const ACTOR_PORT: ActorDecl = ActorDecl {
+    name: PORT,
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[],
+};
+
 /// **执行体绑定表**（DE-015 §3.2 的 `actor` 口 + D-118 决策 2）：一条 = 一个 `by`。
 ///
 /// 声明与动作在**同一条**里：装载期查得到的名字（[`actor_decls`] 是这张表的 `decl`
@@ -461,69 +481,73 @@ const ACTOR_PLUGIN_ROW: ActorDecl = ActorDecl {
 /// 那条分支「按构造不可达」。
 pub(crate) struct ActorEntry {
     pub(crate) decl: ActorDecl,
-    pub(crate) run: super::turn_exec::Action,
+    pub(crate) run: actions::Action,
 }
 
 pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_EXECUTE,
-        run: super::turn_exec::run_execute,
+        run: actions::run_execute,
     },
     ActorEntry {
         decl: ACTOR_CLOSE,
-        run: super::turn_exec::run_close,
+        run: actions::run_close,
     },
     ActorEntry {
         decl: ACTOR_OPENER,
-        run: super::turn_exec::run_open,
+        run: actions::run_open,
     },
     ActorEntry {
         decl: ACTOR_AUTHORIZER,
-        run: super::turn_exec::run_authorize,
+        run: actions::run_authorize,
     },
     ActorEntry {
         decl: ACTOR_COURIER,
-        run: super::turn_exec::run_begin_tools,
+        run: actions::run_begin_tools,
     },
     ActorEntry {
         decl: ACTOR_WAITER_TOOLS,
-        run: super::turn_exec::run_finish_tools,
+        run: actions::run_finish_tools,
     },
     ActorEntry {
         decl: ACTOR_WAITER,
-        run: super::turn_exec::run_await,
+        run: actions::run_await,
     },
     ActorEntry {
         decl: ACTOR_RELAY,
-        run: super::turn_exec::run_model,
+        run: actions::run_model,
     },
     ActorEntry {
         decl: ACTOR_CLASSIFY,
-        run: super::turn_exec::run_classify,
+        run: actions::run_classify,
     },
     ActorEntry {
         decl: ACTOR_COMPRESS,
-        run: super::turn_exec::run_compress,
+        run: actions::run_compress,
     },
     ActorEntry {
         decl: ACTOR_RECALL,
-        run: super::turn_exec::run_recall,
+        run: actions::run_recall,
     },
     ActorEntry {
         decl: ACTOR_SEAM,
-        run: super::turn_exec::run_seam,
+        run: actions::run_seam,
     },
     ActorEntry {
         decl: ACTOR_REPORT,
-        run: super::turn_exec::run_report,
+        run: actions::run_report,
     },
     ActorEntry {
         decl: ACTOR_CONTINUE,
-        run: super::turn_exec::run_continue,
+        run: actions::run_continue,
     },
     ActorEntry {
         decl: ACTOR_PLUGIN_ROW,
-        run: super::turn_exec::run_plugin_row,
+        run: actions::run_plugin_row,
+    },
+    ActorEntry {
+        decl: ACTOR_PORT,
+        run: actions::run_port,
     },
 ];
 
@@ -664,7 +688,22 @@ pub(crate) fn actor_decls() -> Vec<ActorDecl> {
             }
         }
     }
+    // 通用端口执行体同理：没有任何行绑到它时留在**绑定表**（派发动作在那儿），
+    // 但不进**声明投影**——否则 `OrphanActor` 会让一个端口都没有的装配装不上表。
+    if !port_row_bound() {
+        decls.retain(|d| d.name != PORT);
+    }
     decls
+}
+
+/// 装配清单里有没有行绑到通用端口执行体（`DE-047` D-301）。
+///
+/// 只读各插件**声明的行投影**，不看端口叫什么名字：答案是「有没有人用这张通用
+/// 受理入口」，与端口的世界语义无关。本插件自己的行不参与（它的行里没有 `by=port`）。
+fn port_row_bound() -> bool {
+    symbio_plugin_api::inventory::iter::<symbio_plugin_api::DeclarationsDecl>()
+        .filter(|d| d.owner != LOOP_OWNER)
+        .any(|d| (d.make)().rows.iter().any(|row| row.by == Some(PORT)))
 }
 
 /// `by` → 绑定表里的那一条。`None` = 表里没有这个名字（装载期的 `UnmannedRow` 已拦，
@@ -1672,7 +1711,7 @@ pub(crate) struct Next {
     /// （`plugin_row` 的实现按字段名取值，不猜顺序）。
     pub(crate) key: Key,
     /// 按 `by` 在绑定表里查出的动作。查不到就不会有这一项（见 [`next`] 的 `None`）。
-    pub(crate) action: super::turn_exec::Action,
+    pub(crate) action: actions::Action,
     /// 同一个动作的**声明面**：它登记过会写哪些领域格。
     ///
     /// 派发器拿账本（日志尾段）对它对账（[`Next::writes_closed`]）。放在 `Next` 上而不是

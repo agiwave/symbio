@@ -141,6 +141,9 @@ pub(crate) use self::drive::{drive, Control, DriveEnd, DriveStart};
 pub(crate) use self::drive::{stage_runtime, ReadyStage, StageRuntime};
 pub(crate) use self::outcome::{classify_turn, Classified, ExecTurnResult, Settled, TurnExecExit};
 pub(crate) use self::persist::{execute_final_reply_turn, persist_turn};
+// 端口通用受理入口（与「一笔债」同一件事）：本文件只把它挂进绑定表，
+// 实现住在 `port.rs`，因为它与 `execute_one` 共用同一份记账口径。
+pub(crate) use super::port::run_port;
 
 /// UI 桥承载的节点类型：正文与推理**分属两条流**，各自一个节点，不合并。
 ///
@@ -739,6 +742,13 @@ pub(crate) struct Ctx<'a> {
     pub(crate) row: &'static str,
     /// 债键：`Decl.owes.key` 各字段的 `(名字, 值)`。[`run_plugin_row`] 原样转交。
     pub(crate) key: Vec<(String, String)>,
+    /// 端口执行体要的请求句柄（读能力表）。`None` = 本次驱动没有宿主面。
+    ///
+    /// 与 [`HeadCtx::request_ctx`] 同一份句柄：轮首行从 `head` 取，轮内通用端口行
+    /// 从这一格取——两处取的是**同一条**能力表的入口，不是第二份。
+    pub(crate) request_ctx: Option<Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
+    /// 端口执行体要的增量出口。`None` = 没有宿主面（执行体按自己的合同决定要不要增量）。
+    pub(crate) event_sink: Option<ExecEventSink>,
     /// 轮首借面：`Some` = 这一幕有编排层那一片状态（判决 / 压缩 / 召回 / 接缝 / 汇报
     /// 可用）。轮内那几行不读它，`None` 对它们没有影响。
     pub(crate) head: Option<HeadCtx<'a>>,

@@ -489,6 +489,17 @@ pub(crate) struct TurnSession {
 }
 
 impl TurnSession {
+    /// 本幕的中止信号（端口执行体据此在长调用里退出）。
+    ///
+    /// 缺席 ⇒ `new()`（永不中止的独立信号）：与 [`symbio_kernel::exec::ExecAbortSignalKey`]
+    /// 的读法逐字同义——没有编排层就没有中止来源，这是诚实表达而非兜底。
+    pub(crate) fn abort_signal(&self) -> symbio_kernel::exec::ExecAbortSignal {
+        self.run
+            .abort
+            .clone()
+            .unwrap_or_else(symbio_kernel::exec::ExecAbortSignal::new)
+    }
+
     /// **中止守卫**：闸门与首请求之间那一段（`D-052` 决策 1）——环的第一圈问一次。
     ///
     /// 检查点从 `prepare_turn` 的 1c 搬到这里，因为它本来就是「环还没起、环的守卫
