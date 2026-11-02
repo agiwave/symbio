@@ -57,10 +57,12 @@ impl Registry for FakeRegistry {
 }
 
 fn provider(api_base: &str, token: &str, chat_id: Option<&str>) -> Arc<dyn PortProvider> {
-    let mut cfg = TelegramConfig::default();
-    cfg.bot_token = token.to_string();
-    cfg.api_base = api_base.to_string();
-    cfg.chat_id = chat_id.map(str::to_owned);
+    let cfg = TelegramConfig {
+        bot_token: token.to_string(),
+        api_base: api_base.to_string(),
+        chat_id: chat_id.map(str::to_owned),
+        ..TelegramConfig::default()
+    };
     Arc::new(NotifyPort::new(
         reqwest::Client::builder().no_proxy().build().unwrap(),
         Arc::new(RwLock::new(cfg)),

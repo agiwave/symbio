@@ -1,5 +1,4 @@
-//! 第三端口验收（DE-047 D-302）：**真实插件端口**（`symbio-plugin-telegram` 的
-//! `notify`）接入生产绑定表。
+//! 第三端口验收的断言（DE-047 D-302）。
 //!
 //! 验收的判据不是「测试夹具能跑」，而是三件事同时成立：
 //! 1. 生产冻结表（链接 loop 与全部插件，经 `sealed_declarations`）接纳该端口的
@@ -20,9 +19,9 @@ const NOTIFY: &str = "notify";
 
 #[test]
 fn production_table_accepts_the_third_port() {
-    // 必须经 `symbio` 门面触达一次，lib 里的 `pub use <插件 crate>;` 链接行才会把
+    // 必须经本 crate 的门面触达一次，`lib.rs` 里的 `pub use <插件 crate>;` 链接行才会把
     // 全部插件 crate 拉进最终链接；否则本二进制里 inventory 为空，验收退化成空跑。
-    let _ = symbio::assembly::PLUGIN_ID_HOME;
+    let _ = crate::assembly::PLUGIN_ID_HOME;
 
     let frozen: std::sync::Arc<Frozen> =
         sealed_declarations().expect("生产声明表应能冻结（含 loop + 全部插件）");
@@ -59,7 +58,7 @@ fn production_table_accepts_the_third_port() {
     let request = Event::pending(
         "request-notify-n1-1",
         EVENT_REQUEST,
-        Entity::Turn,
+        Entity::System,
         Verb::Asserted,
         7,
         "system",

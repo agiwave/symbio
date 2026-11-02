@@ -742,15 +742,11 @@ pub(crate) struct Ctx<'a> {
     pub(crate) row: &'static str,
     /// 债键：`Decl.owes.key` 各字段的 `(名字, 值)`。[`run_plugin_row`] 原样转交。
     pub(crate) key: Vec<(String, String)>,
-    /// 端口执行体要的请求句柄（读能力表）。`None` = 本次驱动没有宿主面。
-    ///
-    /// 与 [`HeadCtx::request_ctx`] 同一份句柄：轮首行从 `head` 取，轮内通用端口行
-    /// 从这一格取——两处取的是**同一条**能力表的入口，不是第二份。
-    pub(crate) request_ctx: Option<Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
-    /// 端口执行体要的增量出口。`None` = 没有宿主面（执行体按自己的合同决定要不要增量）。
-    pub(crate) event_sink: Option<ExecEventSink>,
     /// 轮首借面：`Some` = 这一幕有编排层那一片状态（判决 / 压缩 / 召回 / 接缝 / 汇报
     /// 可用）。轮内那几行不读它，`None` 对它们没有影响。
+    ///
+    /// 通用端口行要的请求句柄与增量出口也从这一片取（[`HeadCtx::request_ctx`] /
+    /// [`HeadCtx::event_sink`]）——不多存第二份。
     pub(crate) head: Option<HeadCtx<'a>>,
 }
 

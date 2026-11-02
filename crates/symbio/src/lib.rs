@@ -16,6 +16,8 @@
 
 pub mod assembly;
 pub mod init;
+#[cfg(test)]
+mod notify_port_acceptance;
 
 // ── 门面出口 ──────────────────────────────────────────────────────────────
 // 宿主与 CLI 从这里取契约；插件自身只依赖插件门面（E-009）。

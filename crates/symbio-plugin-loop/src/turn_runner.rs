@@ -494,10 +494,7 @@ impl TurnSession {
     /// 缺席 ⇒ `new()`（永不中止的独立信号）：与 [`symbio_kernel::exec::ExecAbortSignalKey`]
     /// 的读法逐字同义——没有编排层就没有中止来源，这是诚实表达而非兜底。
     pub(crate) fn abort_signal(&self) -> symbio_kernel::exec::ExecAbortSignal {
-        self.run
-            .abort
-            .clone()
-            .unwrap_or_else(symbio_kernel::exec::ExecAbortSignal::new)
+        self.run.abort.clone().unwrap_or_default()
     }
 
     /// **中止守卫**：闸门与首请求之间那一段（`D-052` 决策 1）——环的第一圈问一次。

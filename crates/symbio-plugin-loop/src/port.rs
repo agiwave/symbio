@@ -524,7 +524,7 @@ pub(crate) fn run_port<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 )))
             })?;
 
-        let frozen = crate::loop_rows::table().map_err(ActorError::Read)?;
+        let frozen = super::loop_rows::table().map_err(ActorError::Read)?;
         let ports = frozen.ports();
         let decl = ring::port_of(ports, port_name).ok_or_else(|| {
             ActorError::Read(PluginError::InternalError(format!(
@@ -540,12 +540,22 @@ pub(crate) fn run_port<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
         let now = ctx.session.now_ms();
         let call = Call::new(port, id.clone(), attempt);
 
-        let request_ctx = ctx.request_ctx.clone().ok_or_else(|| {
-            ActorError::Read(PluginError::InternalError(format!(
-                "行 {} 需要请求句柄（端口提供者要读能力表），而本次驱动没有宿主面",
-                ctx.row
-            )))
-        })?;
+        // 端口要的两份句柄都从轮首借面取：不另存第二份，也不改驱动循环的构造点。
+        let request_ctx = ctx
+            .head
+            .as_ref()
+            .map(|h| (*h.request_ctx).clone())
+            .ok_or_else(|| {
+                ActorError::Read(PluginError::InternalError(format!(
+                    "行 {} 需要请求句柄（端口提供者要读能力表），而本次驱动没有宿主面",
+                    ctx.row
+                )))
+            })?;
+        let event_sink = ctx
+            .head
+            .as_ref()
+            .map(|h| (*h.event_sink).clone())
+            .unwrap_or(ExecEventSink::Null);
         let Some(provider) = provider_of(&request_ctx, port_name).await else {
             return failed_with(
                 ctx.store.as_ref(),
@@ -603,7 +613,7 @@ pub(crate) fn run_port<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             deadline_ms: None,
             abort: ctx.session.abort_signal(),
             idempotency_key: request.event_id.clone(),
-            sink: ctx.event_sink.clone().unwrap_or(ExecEventSink::Null),
+            sink: event_sink,
             ctx: Some(request_ctx),
         };
 

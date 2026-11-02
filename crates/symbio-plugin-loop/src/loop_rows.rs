@@ -71,7 +71,7 @@ use symbio_plugin_api::port::ports;
 
 use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
 // 绑定表只把行名指到动作上：`actions::run_*` 是同一张表的短名，避免每条都写全路径。
-use crate::turn_exec as actions;
+use super::turn_exec as actions;
 
 /// 这张表里**接了线的执行体**：`execute`（宣布一次模型往返）、`close`（收束）、
 /// `opener` / `authorizer` / `courier`（工具批三笔债）、`relay` / `waiter`

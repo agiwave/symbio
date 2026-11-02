@@ -385,8 +385,6 @@ pub(crate) async fn drive(
                     }
                     Driver::Ready(ready) => ready.head.as_mut().map(HeadParts::as_ctx),
                 };
-                let request_ctx = head.as_ref().map(|h| (*h.request_ctx).clone());
-                let event_sink = head.as_ref().map(|h| (*h.event_sink).clone());
                 let mut ctx = Ctx {
                     session: &mut st.draft,
                     store: &st.store,
@@ -399,10 +397,6 @@ pub(crate) async fn drive(
                     // 只能由派发器写在环境上（见 `Ctx::row`）。
                     row: next.row,
                     key: next.key.clone().0,
-                    // 端口执行面与轮首借面同源：`head` 在时取它的两份句柄，
-                    // 不在时留 `None`（通用端口行会因此响亮失败，不会拿到空替身）。
-                    request_ctx,
-                    event_sink,
                     head,
                 };
                 // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判
