@@ -209,7 +209,7 @@ const LEGACY_TYPE_TO_NODE_KIND: Record<string, NodeKind> = {
   text: NODE_KIND_BODY,
   reasoning: NODE_KIND_NOTICE,
   compression: NODE_KIND_NOTICE,
-  turn: NODE_KIND_SKELETON,
+  turn: NODE_KIND_SKELETON, // turn-migration-allow T-032: 存量清迁后删
   tool_call: NODE_KIND_SKELETON,
   sub_agent: NODE_KIND_SKELETON,
   user_prompt: NODE_KIND_INTERACTION,

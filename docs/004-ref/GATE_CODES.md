@@ -57,6 +57,7 @@ lists: [gate-codes=owner]
 | **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
+| **TR** | turn 词根冻结（废弃概念的存量棘轮） | `scripts/turn-root-audit.mjs` | TR-001–004 | `TR-005` |
 | **V** | 分域形状 | `scripts/domain-vocab-audit.mjs` | V-001–002 | `V-003` |
 
 ## 2. 逐码归属
@@ -277,5 +278,9 @@ lists: [gate-codes=owner]
 | **SX-003** | `scripts/slo-exit-audit.mjs` |
 | **TD-001** | `scripts/tool-decls-audit.mjs` |
 | **TD-002** | `scripts/tool-decls-audit.mjs` |
+| **TR-001** | `scripts/turn-root-audit.mjs` |
+| **TR-002** | `scripts/turn-root-audit.mjs` |
+| **TR-003** | `scripts/turn-root-audit.mjs` |
+| **TR-004** | `scripts/turn-root-audit.mjs` |
 | **V-001** | `scripts/domain-vocab-audit.mjs` |
 | **V-002** | `scripts/domain-vocab-audit.mjs` |

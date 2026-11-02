@@ -80,7 +80,7 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：☐ todo 6 · 🟡 doing 9 · done 0 · wont 0（共 15）
+**计数**：☐ todo 6 · 🟡 doing 12 · done 0 · wont 0（共 18）
 
 ## 待处理（按依赖顺序）
 
@@ -102,6 +102,9 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 | `T-027-端口单族按名唯一` | 端口单族按名唯一：注册层不再按端口分族 | now | arch | — |
 | `T-028-loop命名清耦` | loop A 类命名清耦：端口词走常量、行名单数化 | now | arch | — |
 | `T-029-tool端口合同下沉` | tool 端口合同下沉：B1–B5 迁 session，环只认端口 | now | arch | — |
+| `T-030-turn骨架搬出与loop纯度` | turn 骨架搬出 session + loop 纯度常设门禁（含 B4/B5 补迁） | now | arch | — |
+| `T-031-loop文件级审计与世界语义重分批` | loop 文件级审计：工具域 / turn 骨架全面归属重审与 T-030 分批修订案 | now | arch | — |
+| `T-032-turn废弃审计与替代映射` | turn 废弃审计：全量清单、逐项替代映射与分批拆除计划（含展示层） | now | arch | — |
 | `T-007-loop存量能力迁移` | S6：loop 存量能力逐批迁出 | next | arch | — |
 | `T-008-session存量能力迁移` | S7：session 存量能力逐批迁出 | next | arch | — |
 | `T-014-引擎收口` | 引擎收口：账本、三条收窄与求解器表达力裁决 | next | arch | — |
@@ -122,8 +125,11 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
   - [`T-023-世界端口注册面`](023-世界端口注册面.md) 世界端口注册面：port 族、动态收集、装配期判重与缺席读数（todo）
   - [`T-024-model端口迁出`](024-model端口迁出.md) model 端口迁出：provider 由 model 插件注册，loop 只按端口名调用（todo）
   - [`T-025-tool端口迁出`](025-tool端口迁出.md) tool 端口迁出：只搬线上名解析 / 超时 / 结果契约，不建代理（todo）
-  - [`T-026-loop耦合审计`](026-loop耦合审计.md) loop 耦合审计：端口名统一、世界语义下沉与 turn 骨架归属（doing） · 子项 doing 1
+  - [`T-026-loop耦合审计`](026-loop耦合审计.md) loop 耦合审计：端口名统一、世界语义下沉与 turn 骨架归属（doing） · 子项 doing 3
     - [`T-029-tool端口合同下沉`](029-tool端口合同下沉.md) tool 端口合同下沉：B1–B5 迁 session，环只认端口（doing）
+    - [`T-030-turn骨架搬出与loop纯度`](030-turn骨架搬出与loop纯度.md) turn 骨架搬出 session + loop 纯度常设门禁（含 B4/B5 补迁）（doing）
+    - [`T-031-loop文件级审计与世界语义重分批`](031-loop文件级审计与世界语义重分批.md) loop 文件级审计：工具域 / turn 骨架全面归属重审与 T-030 分批修订案（doing） · 子项 doing 1
+      - [`T-032-turn废弃审计与替代映射`](032-turn废弃审计与替代映射.md) turn 废弃审计：全量清单、逐项替代映射与分批拆除计划（含展示层）（doing）
   - [`T-027-端口单族按名唯一`](027-端口单族按名唯一.md) 端口单族按名唯一：注册层不再按端口分族（doing）
   - [`T-028-loop命名清耦`](028-loop命名清耦.md) loop A 类命名清耦：端口词走常量、行名单数化（doing）
 - [`T-014-引擎收口`](014-引擎收口.md) 引擎收口：账本、三条收窄与求解器表达力裁决（doing）

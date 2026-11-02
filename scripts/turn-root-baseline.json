@@ -1,0 +1,56 @@
+{
+  "faces": {
+    "F1": {
+      "prod": 1508,
+      "test": 1303
+    },
+    "F2": {
+      "prod": 193,
+      "test": 564
+    },
+    "F3": {
+      "prod": 0,
+      "test": 0
+    },
+    "F4": {
+      "prod": 4,
+      "test": 12
+    },
+    "F5": {
+      "prod": 1,
+      "test": 0
+    }
+  },
+  "allow": [
+    {
+      "face": "F5",
+      "file": "tauri/src/schemas/chat_node.ts",
+      "pattern": "turn:\\s*NODE_KIND_SKELETON",
+      "reason": "存量快照/旧转写的读边界折叠（数据迁移通道，不是展示保留）；存量清迁后基线降 0 并删本条",
+      "until": "B3 后存量清迁"
+    }
+  ],
+  "pending": [
+    {
+      "face": "F2",
+      "file": "crates/symbio-kernel/src/decl/mod.rs",
+      "pattern": "Entity::Turn",
+      "reason": "内核协议五格的实体格；Entity::Turn → Entity::Scope 属内核语法面，待 T-032 §二裁决",
+      "until": "Entity 裁决落地"
+    },
+    {
+      "face": "F2",
+      "file": "crates/symbio-kernel/src/event/mod.rs",
+      "pattern": "FinalizesTurn",
+      "reason": "内核角色名，随 Entity 裁决一并改名",
+      "until": "Entity 裁决落地"
+    },
+    {
+      "face": "F2",
+      "file": "crates/symbio-kernel/src/event/mod.rs",
+      "pattern": "StopsTurn",
+      "reason": "内核角色名，随 Entity 裁决一并改名",
+      "until": "Entity 裁决落地"
+    }
+  ]
+}
