@@ -96,9 +96,18 @@ async fn 空批交回空出参() {
 
 #[test]
 fn 风险档映射只有低风险并行() {
-    assert_eq!(policy_for_risk(CapabilityRiskLevel::Low), ExecPolicy::Parallel);
-    assert_eq!(policy_for_risk(CapabilityRiskLevel::Medium), ExecPolicy::Serial);
-    assert_eq!(policy_for_risk(CapabilityRiskLevel::High), ExecPolicy::Serial);
+    assert_eq!(
+        policy_for_risk(CapabilityRiskLevel::Low),
+        ExecPolicy::Parallel
+    );
+    assert_eq!(
+        policy_for_risk(CapabilityRiskLevel::Medium),
+        ExecPolicy::Serial
+    );
+    assert_eq!(
+        policy_for_risk(CapabilityRiskLevel::High),
+        ExecPolicy::Serial
+    );
 }
 
 #[test]
@@ -129,9 +138,9 @@ fn 未声明风险按中档兜底() {
         ..CapabilityMeta::default()
     }];
     let risks = ToolRisks::of_metas(&metas[..]);
-    assert_eq!(risks.effective_risk("read_only"), CapabilityRiskLevel::Medium);
     assert_eq!(
-        risks.policy_for_call("read_only"),
-        ExecPolicy::Serial
+        risks.effective_risk("read_only"),
+        CapabilityRiskLevel::Medium
     );
+    assert_eq!(risks.policy_for_call("read_only"), ExecPolicy::Serial);
 }
