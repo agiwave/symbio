@@ -446,6 +446,19 @@ export const GUARDS = [
   // 失效形态：① 范围读不出（缺 `crates/`、一个文件都没扫到）⇒ 退 2，不亮绿灯（D-280）；
   // ② `dead-path-allow:` 空理由不算承认。回归测试十条各钉一头。
   'dead-path-audit',
+  // `loop-purity-audit`（LP-001…005）判**环有没有把世界语义拿回来**。`DE-047` 把「什么
+  // 属于环」写成六条不变量与一条判定式，但那半边此前只有判定表（散文）：下一批顺手把
+  // gate 读数、批遍历或端口载荷类型加回 loop 时，没有一条判据会说话。
+  // LP-001 判 loop 生产源码 import 端口载荷类型（只许端口名 / 事实行 / 债）；
+  // LP-002 判 Cargo 清单不得依赖 provider / 插件 crate（`symbio-plugin-api` 是机制门面，放行）；
+  // LP-003 判世界语义词根（`batch` / `gate` / `llm` / `tool` / `model` / `Tool*` / `Model*` /
+  //   `Turn*`）与硬编码端口行名；
+  // LP-004 判端口受理面（`plugin-api/src/port.rs`）的 trait / 类型 / 方法名不得含世界词根；
+  // LP-005 判 `PortProvider` / `PortExecutor` 签名只许通用行 / 值类型（具名载荷入签名即红）。
+  //
+  // 五面都是只许降的棘轮：实测高于基线（新增）与实测低于基线（收窄未同批下调基线）各红一头。
+  // 失效形态是这一族的老病——读不出 ⇒ 没什么可判 ⇒ 通过，故源目录 / 端口受理面 / 基线读不出直接 exit 2。
+  'loop-purity-audit',
 ]
 // 不是**判定型**审计脚本，只跑回归测试（共享库 / 门禁原语 / 报告型脚本）：
 //   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；

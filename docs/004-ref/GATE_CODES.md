@@ -40,7 +40,7 @@ lists: [gate-codes=owner]
 | **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
 | **INJ** | 异常注入矩阵 | `scripts/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
 | **KB** | 前端分支（形态 / 资源类型） | `scripts/kind-branch-audit.mjs` | KB-001–002 | `KB-003` |
-| **LP** | 义务环纯度（类型 / 依赖 / 世界语义词根） | `scripts/loop-purity-audit.mjs` | LP-001–003 | `LP-004` |
+| **LP** | 义务环纯度（类型 / 依赖 / 世界语义词根 / 端口受理面） | `scripts/loop-purity-audit.mjs` | LP-001–005 | `LP-006` |
 | **LWF** | 列表写入口事实 | `scripts/list-write-fact-audit.mjs` | LWF-001–002 | `LWF-003` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–010 | `M-011` |
 | **ME** | 机制强制等级清单 | `scripts/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
@@ -174,6 +174,8 @@ lists: [gate-codes=owner]
 | **LP-001** | `scripts/loop-purity-audit.mjs` |
 | **LP-002** | `scripts/loop-purity-audit.mjs` |
 | **LP-003** | `scripts/loop-purity-audit.mjs` |
+| **LP-004** | `scripts/loop-purity-audit.mjs` |
+| **LP-005** | `scripts/loop-purity-audit.mjs` |
 | **LWF-001** | `scripts/list-write-fact-audit.mjs` |
 | **LWF-002** | `scripts/list-write-fact-audit.mjs` |
 | **M-001** | `scripts/mechanism-audit.mjs` |
