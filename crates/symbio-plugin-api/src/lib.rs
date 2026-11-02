@@ -11,6 +11,7 @@
 //! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）
 //! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份
+//! - [`port`]：世界端口的注册面（`PortProvider` 与 port 族——名字与契约静态，提供者随活插件的能力行动态收集）
 //! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）
 //! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
@@ -46,6 +47,7 @@ pub mod declarations;
 pub mod effects;
 pub mod events;
 pub mod hooks;
+pub mod port;
 pub mod retrieval;
 pub mod routes;
 pub mod rows;
@@ -68,6 +70,10 @@ pub use effects::{
 };
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
+pub use port::{
+    capability_port_check, capability_port_of, port_family, port_row, port_row_name, ports,
+    PortPayload, PortProvider, PortReading,
+};
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};
 pub use settle::{Contribution, Contributor, SettleFace, Settling};
 pub use view_names::SharedViewDecl;
