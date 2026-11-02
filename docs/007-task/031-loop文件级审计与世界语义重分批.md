@@ -9,7 +9,7 @@ created: 2026-11-02
 parent: T-026-loop耦合审计
 deps: []
 where: "零代码改动；审计对象 crates/symbio-plugin-loop/src/{tool_dispatch.rs,tools.rs,tools/**,turn_exec.rs,turn_exec/**,turn_runner.rs,turn_runner/**,turn_session.rs}，联动 chat_loop/**、context/**、stage_events.rs、provider.rs；对照 crates/symbio-plugin-session/src/{port.rs,capabilities.rs,orchestrator/consume.rs}"
-exit: 六项输出（清单 / 为什么在 loop / 目标落点 / T-029 重审与 M3 评估 / T-030 修订与新分批 / ≤30 行结论）全部落本文档并经用户裁决；A 批边界清单暂停未落（用户裁决：turn 为废弃概念、不搬 session，turn 全量审计优先，见 [T-032]）；裁决前不动任何代码；T-030 Step 1 未提交改动（B4/B5 改名）保留工作区不回退不入库
+exit: 六项输出（清单 / 为什么在 loop / 目标落点 / T-029 重审与 M3 评估 / T-030 修订与新分批 / ≤30 行结论）全部落本文档并经用户裁决；A 批边界（M3 合同「不做什么」/ `tools/**` 迁出清单 / exit / 回退点）已落 §六，等 M3 裁决（turn 为废弃概念、不搬 session，turn 全量审计优先，见 [T-032]）；裁决前不动工具域代码、不入库；T-030 Step 1 未提交改动（B4/B5 改名）保留工作区不回退不入库，已另存命名 stash 与补丁备份（§6.5）
 ---
 
 # loop 文件级审计：工具域 / turn 骨架全面归属重审与 T-030 分批修订案
@@ -118,6 +118,10 @@ compose 346, turn 136, io 113}`——`SessionContext`（state.rs:123-150）、`T
 
 ## 三、目标落点（三标：tool-specific / turn-specific / 真环）
 
+> **口径失效提示**：`[DE-047]` 生效后，下表中凡出现「批形状合同」「按模型响应配批」
+> 「批执行循环 → 环」的措辞均**作废**（X-1 / X-5 / X-6 / X-7）。归属按 `[DE-047]` §2 判定表，
+> 本文只保留审计事实（file:line 与行数）。
+
 | 文件 / 模块 | 标 | 去向 |
 |---|---|---|
 | `tool_dispatch.rs`：ToolDispatch trait、批不变量、wake/finish 记账 | 真环（参数化后） | 留环，统一 `await-{port}` 批 join |
@@ -141,6 +145,11 @@ compose 346, turn 136, io 113}`——`SessionContext`（state.rs:123-150）、`T
 | `loop_rows.rs`、`port.rs`、control_decl 求解器主体、`tokenizer.rs`、`report_exec.rs` | 真环 | 留 |
 
 ## 四、T-029 重审与 M3 薄 tool 端口 provider 评估
+
+> **M3 整体作废 → `[DE-047]` X-1 / X-9**：下面第 151–159 行的「批形状合同 + 推荐 ③」不再成立。
+> 批不是环概念，模型响应不带调用，调用由 decl 依据事实逐笔欠出；工具端口只保留单笔
+> `ToolCallExecutor`。M1 / M2 的结论（合同下沉、每工具插件仍是执行者、不建代理、
+> 缺失响亮失败）原样有效。
 
 - **不判错的部分**：合同下沉方向、每工具插件仍是执行者（`Capability::execute`）、不建
   `symbio-plugin-tool` 代理、缺失响亮失败——与 D-298 判据一致，不回退。
@@ -175,6 +184,8 @@ compose 346, turn 136, io 113}`——`SessionContext`（state.rs:123-150）、`T
 |---|---|---|
 | T-031（本档） | 审计落档，零代码 | registry-audit 绿 |
 | 批 A（M3 补件） | plugin-api 批形状合同 + `tools/**` 与 `tool_dispatch` 工具特例半边迁出（落点按 §三）+ BehaviorDecls 迁 model 合同 + B4/B5 改名入库 | e2e 96/96 逐字不变；EL-003 8 只降；EX-003 净删 loop 行；`Core-Change: D-298` |
+<!-- 作废 → [DE-047] X-1 / X-9：批 A 的「plugin-api 批形状合同」不成立；批合同整体收回（单独一笔），
+     `tools/**` 迁移按 `[DE-047]` §2.1 判定表重排，不与合同处置混笔。 -->
 | 批 B（C 类扩容搬家） | turn_exec/{call,assemble,persist,outcome}、turn_runner/{prepare,facts,batch,settle,boundary}、stream 拆分（poll 骨架留环）、chat_loop/**、stage_events、context（B8 复核）迁 session | e2e 96/96；CS-010 重指向格数只降；EX-007 零新增行；EX-003 净删 |
 | 批 C（泛化收口） | PORTS 迁出注入、ROWS 六行参数化、`port_of(name)`、await-{port} 统一、纯度门禁落地（字面量面基线 0、类型面基线归零） | e2e 96/96；EL-001 16→14；EL-002 1 不变；EL-003 只降 |
 
@@ -183,6 +194,90 @@ compose 346, turn 136, io 113}`——`SessionContext`（state.rs:123-150）、`T
   （回退单位是 git 提交）。
 - 每批一批一提交、`Migration:` trailer、门禁 `node scripts/gate.mjs --full` 全绿、
   e2e 逐字不变。
+
+## 六、批 A 边界（M3 合同草案，待裁决）
+
+> **§6 裁决（2026-11-02，`[DE-047]`，覆盖本节原草案）**：
+>
+> 1. **批不是环概念。** 环的单位只有债——一次端口调用一笔债（`request` / `sent` / `response` /
+>    `failed` / `retry` + 配对、幂等键、重放、预算租约）；不存在「批循环」，也不存在
+>    「一个模型响应包一批调用」。
+> 2. **模型响应不带调用。** 模型端口只产事实，响应行的形状由模型端口自己的契约定。
+> 3. **调用由 decl 欠出。** 声明方（行为 / 能力插件里的 decl）依据事实欠 `request(port=<工具端口>)`；
+>    N 次调用 = N 笔债，由 `ring::drive` 逐步推进。
+> 4. **世界语义归 provider。** 执行、并发、gate 读数、熔断、结果守卫、广播、超时全部是工具端口
+>    provider 的内部实现；环不读 gate，也不解析任何模型输出形状。
+>
+> 因此：§6.1「M3 批形状合同」**作废**（X-1 / X-9）；§6.3 的按批归属表**作废**，改按
+> `[DE-047]` §2.1 判定表执行；§6.2 第 5 条**作废**（见下）。
+
+本节只备裁决用，**不动代码、不入库**。
+
+### 6.1 M3 合同「做什么」
+
+> **作废 → `[DE-047]` X-1 / X-9。** 下列四条（open 批输入、批首闸门读数、并发策略、结果守卫）
+> 都不构成合同：其中 gate 读数与并发策略属 provider 内部，批输入/出参随批合同整体收回。
+> 工具端口只保留单笔 `ToolCallRequest → ToolCallOutcome`。
+
+批形状合同落机制侧（plugin-api），实现由工具收集宿主装配：
+
+- open 批输入：`TurnToolCallInfo` 列表 + 风险读数口 + 结果广播回调（经 `ExecEventSink` 回 session）；
+- 批首闸门读数：熔断状态 / 同参台账；
+- 并发策略：风险档 → 并行 / 串行；
+- 结果守卫：体积上限与归档滚动。
+
+### 6.2 M3 合同「不做什么」
+
+1. 不建 `symbio-plugin-tool` 执行代理，也不让每个工具插件重复批 glue（D-298 已否）。
+2. 不接管选债：`authorize` / `dispatch` / `await-{port}` 行留环。
+3. 不接管授权判据：风险 vs 阈值比较留环 authorizer。
+4. 不接管重试：租约 / attempt 留环 `port.rs`。
+5. ~~不扩 session 现有 `ToolPort` 去持有 ChatNode 广播（越装配宿主之界）；广播经 sink 回调回 session。~~
+   <!-- 作废 → [DE-047] X-2：广播是 provider 内部执行策略，既不必「扩 ToolPort 持有」，
+        也不经 sink 回调回 session；环不接触广播形状（I-5）。 -->
+6. 不搬 turn 骨架（批 B / [T-032] 的事）。
+7. 不动压缩链 / tokenizer（D-297）。
+8. 不新增生产面 DTO / 前端展示；turn 词根只许降（T0 基线）。
+9. 不为实现困难改合同形状（AGENTS：架构只认方案为源）。
+
+### 6.3 `tools/**` 迁出清单（批 A）
+
+> **作废 → `[DE-047]` §2.1。** 下表按「批」归属（批形状 / 批尾收口 / 按响应配批），与 I-1 / I-4
+> 冲突；`tools/**` 的处置以判定表为准：`tool_executor` / `result_guard` / `decls` / `effects`
+> 移交 provider，`dispatch/{batch,gates,parallel,unfinished}` 与 `breaker` 作废，
+> `dispatch.rs` 作废，`tools.rs` 删除，`tool_dispatch.rs` 改写为三笔单笔债。
+
+| 文件 | 行 | 处置 | 去向 |
+|---|---|---|---|
+| `tools/tool_executor.rs` | 223 | 迁出 | 环内消失（薄壳随批形状下沉） |
+| `tools/tool_executor/decls.rs` | 66 | 迁出 | model 合同（T-024 形状）或 plugin-api（实为 model 请求形状） |
+| `tools/tool_executor/effects.rs` | 62 | 迁出 | plugin-api 合同面（`EffectInput` 已在彼处） |
+| `tools/tool_executor/breaker.rs` | 114 | 迁出 | tool 批形状（熔断读数） |
+| `tools/tool_result_guard.rs` | 170 | 迁出 | tool 批形状（或 session 存档面，随裁决） |
+| `tools/dispatch/gates.rs` | 488 | 拆 | mode / 自声明位 / 主体结论 → session；熔断 / 同参台账 → 批形状；`port_of(name)` 参数化留环 |
+| `tools/dispatch/batch.rs` | 1011 | 拆 | ChatNode 广播 / 父终态 → session（经 sink）；批执行循环 → 环 |
+| `tools/dispatch/parallel.rs` | 109 | 迁出 | tool 批形状（风险档读数） |
+| `tools/dispatch/unfinished.rs` | 135 | 迁出 | session（结果子节点落法） |
+| `tools/dispatch.rs` | 95 | 拆 | `emit_parent_finalized` → session；三段分层留环 |
+| `tools.rs` | 43 | 随迁 | 门面 re-export 随子模块走，迁完只剩环侧或删 |
+| `tool_dispatch.rs` | 1621 | 拆 | `ToolDispatch` / 批不变量 / wake·finish 记账留环（参数化）；助手轮补建 / `DispatchOutcome` 映射 / 按模型响应配批 → 批形状 |
+
+留环：`loop_rows.rs`、`port.rs`、`control_decl` 求解器主体、`tokenizer.rs`、`report_exec.rs`。
+
+### 6.4 exit（批 A 验收）
+
+1. e2e 96/96 逐字不变。
+2. EL-003 8 只降；EL-001 16 / EL-002 1 不变。
+3. `capability-migration-audit` 绿：补件笔带 `Core-Change: D-298`；迁移笔带 `Migration:`，机制面零新增、控制面净删旧实现。
+4. `turn-root-audit` 五面只降不增（T0 基线）。
+5. `gate --full` 174/174；`cargo fmt --check` 干净。
+6. loop 的工具世界词根随迁出净减，读数落档。
+
+### 6.5 回退点与保护
+
+- **回退单位 = git 提交**：批 A 首提交的父提交（当前 `1082d1e0`，T0）即整批回退点；批内补件 / 迁移各一笔，回退到父提交即整批撤销。
+- **B4/B5 WIP 备份**：命名 stash `B4B5-WIP-backup 2026-11-02`（保留工作区不动）+ 补丁 `%TEMP%\b4b5-wip-20261102.patch`；批 A 开工前不改 `tools/**`。
+- **裁决前冻结**：A 批不入库；M3 裁决落地后才开第一笔。
 
 ## 边界
 
