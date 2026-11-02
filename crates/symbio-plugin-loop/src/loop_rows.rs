@@ -581,19 +581,66 @@ fn actor_names(actors: &[ActorEntry]) -> Vec<&'static str> {
     actors.iter().map(|e| e.decl.name).collect()
 }
 
+/// 效果面折成宿主事实（D-293）：阶段格 → `turn.stage`，对话面 → `message.added`；
+/// 实时上线不是事实（失败只记读数，不回写）。
+fn effect_facts(face: symbio_plugin_api::effects::EffectFace) -> &'static [&'static str] {
+    use symbio_plugin_api::effects::EffectFace;
+    match face {
+        EffectFace::Dialog => &[EVENT_MESSAGE_ADDED],
+        EffectFace::Stage => &[EVENT_TURN_STAGE],
+        EffectFace::Live => &[],
+    }
+}
+
 /// 全部行实现声明的写入并集（`plugin_row` 的 `ActorDecl.writes`）。
 ///
 /// 并集是**保守方向**：`ActorDecl` 只回答「这个执行体可能写哪些格」，装载期第 6 条
 /// 与依赖图读的正是这个量；逐行名单在派发时按 [`next`] 的对账收窄。
 fn plugin_row_writes() -> &'static [&'static str] {
     static WRITES: LazyLock<&'static [&'static str]> = LazyLock::new(|| {
-        let writes = symbio_plugin_api::rows::declared_writes();
+        let mut writes = symbio_plugin_api::rows::declared_writes();
+        for face in symbio_plugin_api::rows::declared_effects() {
+            writes.extend(effect_facts(face));
+        }
         if writes.is_empty() {
             return &[];
         }
+        writes.sort_unstable();
+        writes.dedup();
         Box::leak(writes.into_boxed_slice())
     });
     *WRITES
+}
+
+/// 逐行的写入面：实现的 `writes()` + 该行声明效果面折成的事实（D-293）。
+///
+/// 效果的行级归属只能在这里补：`turn.stage` / `message.added` 是宿主事实名，
+/// 住 `plugin-api` 的行实现不该自己拼；而装载期判「这一行的前件有没有生产者」
+/// 必须看得见它们（否则声明了阶段格的行反而被判成断链）。
+fn row_writes_with_effects() -> &'static [(&'static str, &'static [&'static str])] {
+    static ROWS: LazyLock<&'static [(&'static str, &'static [&'static str])]> =
+        LazyLock::new(|| {
+            let rows: Vec<(&'static str, &'static [&'static str])> =
+                symbio_plugin_api::rows::row_writes()
+                    .into_iter()
+                    .map(|(row, writes)| {
+                        let mut all: Vec<&'static str> = writes.to_vec();
+                        if let Some(faces) = symbio_plugin_api::rows::effects_of(row) {
+                            for face in faces {
+                                all.extend(effect_facts(*face));
+                            }
+                        }
+                        if all.is_empty() {
+                            return (row, &[] as &'static [&'static str]);
+                        }
+                        all.sort_unstable();
+                        all.dedup();
+                        (row, &*Box::leak(all.into_boxed_slice()))
+                    })
+                    .collect();
+            Box::leak(rows.into_boxed_slice())
+        });
+    *ROWS
 }
 
 /// 交给装载期冻结的执行体声明（`loop_rows::assemble` 的唯一用处）。
@@ -1350,7 +1397,7 @@ pub(crate) const LOOP_OWNER: &str = "crates/symbio-plugin-loop";
 pub(crate) fn load(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<Gap>> {
     let mut b = Builder::new();
     b.declare(LOOP_OWNER, declarations(rows));
-    let row_writes = symbio_plugin_api::rows::row_writes();
+    let row_writes = row_writes_with_effects();
     b.seal(&row_writes)
 }
 

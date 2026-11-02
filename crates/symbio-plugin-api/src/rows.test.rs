@@ -48,6 +48,14 @@ fn writes_come_from_the_implementation() {
     assert!(declared_writes().contains(&"test.indexed"));
 }
 
+/// 效果面是**按行**声明的：未声明 ⇒ 空（平凡值），不会因为别的行声明而被认领。
+#[test]
+fn effects_come_from_the_implementation_per_row() {
+    assert_eq!(effects_of("test.row"), Some(&[][..]));
+    assert_eq!(effects_of("test.absent"), None);
+    assert!(declared_effects().is_empty());
+}
+
 #[test]
 fn request_is_pure_values() {
     let key = vec![("id".to_string(), "call-1".to_string())];

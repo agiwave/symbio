@@ -156,6 +156,14 @@ pub trait RowHandler: Sync {
     /// 排除（用 `eq` 收窄），而不是在实现里返回空。
     fn run(&self, req: &RowRequest<'_>) -> RowStep;
 
+    /// 本行声明产出的**效果面**（D-293）：默认空 = 这一行不交任何效果。
+    ///
+    /// 声明只用于装配期把面折成事实生产者（阶段格 / 对话面各对应一条宿主事实），
+    /// 以及运行期对草稿形状的校验；它不给出写句柄——落格仍在宿主唯一写口。
+    fn effects(&self) -> &'static [crate::effects::EffectFace] {
+        &[]
+    }
+
     /// 本行是否可能返回 [`RowStep::Answer`]（零往返作答，D-260）。
     ///
     /// 默认 `false`。声明为 `true` 的行，宿主会在它作答时代落一条
@@ -232,6 +240,22 @@ pub fn declared_writes() -> Vec<&'static str> {
     let mut all: Vec<&'static str> = handlers()
         .iter()
         .flat_map(|h| h.writes().iter().copied())
+        .collect();
+    all.sort_unstable();
+    all.dedup();
+    all
+}
+
+/// 这一行声明的效果面（未登记的行 = 空，`None` 与空在判据上同义）。
+pub fn effects_of(row: &str) -> Option<&'static [crate::effects::EffectFace]> {
+    handler_for(row).map(|h| h.effects())
+}
+
+/// 全部行实现声明的效果面并集（装配期折成宿主事实的生产者面，D-293）。
+pub fn declared_effects() -> Vec<crate::effects::EffectFace> {
+    let mut all: Vec<crate::effects::EffectFace> = handlers()
+        .iter()
+        .flat_map(|h| h.effects().iter().copied())
         .collect();
     all.sort_unstable();
     all.dedup();

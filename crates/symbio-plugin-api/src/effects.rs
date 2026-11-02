@@ -329,6 +329,83 @@ impl FactDraft {
     }
 }
 
+// ── 三类效果面（DE-045 D-293）──────────────────────────────────────────
+
+/// 能力可以声明的三类效果面。
+///
+/// 声明是**能力侧**的事，落格仍是宿主唯一写口：声明只回答「这一行的草稿可能落在
+/// 哪一面」，不给出任何写句柄（D-293 的「被否」第四条）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum EffectFace {
+    /// 对话面节点：宿主定节点 id 与轮号，写转写并实时上线。
+    Dialog,
+    /// 阶段格：宿主折成 `turn.stage`，幂等键 `st-{anchor}-{stage}`。
+    Stage,
+    /// 实时上线：宿主经既有帧出口发出；失败只记读数，不回写事实。
+    Live,
+}
+
+/// 一条对话面节点草稿：**没有轮号、没有节点 id**（那是宿主的容器身份）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct DialogDraft {
+    /// 幂等键（能力用宿主给的词干拼出；重复投递在写口一处拒绝）。
+    pub key: String,
+    /// 节点角色（`"user"` / `"assistant"` / `"system"`）。
+    pub role: &'static str,
+    /// 节点正文。
+    pub text: String,
+    /// 节点的卡片呈现（纯值）；`None` = 只有正文。
+    pub card: Option<Value>,
+}
+
+/// 一格阶段草稿：**没有轮号**（宿主按词干与阶段名折成幂等键）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StageDraft {
+    /// 幂等键（`st-{anchor}-{stage}`；同键重复投递被写口吸收）。
+    pub key: String,
+    /// 阶段名。
+    pub stage: String,
+}
+
+/// 一帧实时上线草稿：呈现场景的纯值，不是事实。
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveDraft {
+    /// 幂等键（同键重复投递只发一次）。
+    pub key: String,
+    /// 呈现场景的纯值。
+    pub frame: Value,
+}
+
+/// 一次效果：形状判别词 + 那一面自己的草稿。
+///
+/// 能力交的就是它；宿主按 `(owner, key)` 定序、校验形状、盖章并落格。
+#[derive(Debug, Clone, PartialEq)]
+pub enum EffectDraft {
+    Dialog(DialogDraft),
+    Stage(StageDraft),
+    Live(LiveDraft),
+}
+
+impl EffectDraft {
+    /// 这条草稿落在哪一面。
+    pub fn face(&self) -> EffectFace {
+        match self {
+            Self::Dialog(_) => EffectFace::Dialog,
+            Self::Stage(_) => EffectFace::Stage,
+            Self::Live(_) => EffectFace::Live,
+        }
+    }
+
+    /// 这个能力的幂等键——写口按 `(owner, key)` 拒绝重复投递。
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Dialog(d) => &d.key,
+            Self::Stage(d) => &d.key,
+            Self::Live(d) => &d.key,
+        }
+    }
+}
+
 /// 能力对**自己的效果**的实现。
 ///
 /// 一个行为实例 = 一个实现 + 一次 `submit_behavior!`；加一个实例只改能力包。

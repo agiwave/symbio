@@ -1,6 +1,7 @@
 //! 效果端口的判据：选行为按声明、草稿不碰事实源、宿主面由写口补。
 
 use super::*;
+use crate::rows::declared_effects;
 use symbio_kernel::event::{Entity, Verb};
 
 /// 一个只为测试存在的实现：把调用记成一条 `test × asserted` 的草稿。
@@ -241,4 +242,41 @@ fn a_declared_judgement_refuses_with_its_own_semantics() {
     assert_eq!(refusal.gate, "测试闸");
     assert_eq!(refusal.reason, "session/a 已被收回");
     assert!(!refusal.notes_delegation);
+}
+
+// ── 三类效果面（D-293）──────────────────────────────────────────────
+
+/// 草稿带上自己的面与幂等键：宿主只按这两个值排序与去重，不再猜形状。
+#[test]
+fn effect_drafts_carry_face_and_key() {
+    let dialog = EffectDraft::Dialog(DialogDraft {
+        key: "dlg-t3-1".into(),
+        role: "assistant",
+        text: "手册已编译".into(),
+        card: Some(serde_json::json!({ "kind": "note" })),
+    });
+    let stage = EffectDraft::Stage(StageDraft {
+        key: "st-t3-recall".into(),
+        stage: "recall".into(),
+    });
+    let live = EffectDraft::Live(LiveDraft {
+        key: "live-t3-1".into(),
+        frame: serde_json::json!({ "node": "n-1" }),
+    });
+
+    assert_eq!(dialog.face(), EffectFace::Dialog);
+    assert_eq!(stage.face(), EffectFace::Stage);
+    assert_eq!(live.face(), EffectFace::Live);
+    assert_eq!(dialog.key(), "dlg-t3-1");
+    assert_eq!(stage.key(), "st-t3-recall");
+    assert_eq!(live.key(), "live-t3-1");
+}
+
+/// 平凡值：没有行实现声明效果面时，并集为空——宿主不会调任何写口（D-293 判据 4）。
+///
+/// 本 crate 的判据进程里只有测试自带的 `Recorder` 行（它不交草稿），
+/// 因此这里的空是**可断言**的，不是「恰好没人用」。
+#[test]
+fn no_declared_effects_is_the_trivial_value() {
+    assert!(declared_effects().is_empty());
 }
