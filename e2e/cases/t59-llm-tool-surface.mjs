@@ -64,7 +64,7 @@ function makeSkill(homedir, id) {
 }
 
 export default defineCase(
-  'T59 工具面契约：出厂 21 + 条件工具 + MCP 桥接 + 内部面黑名单 + agent 对偶（LC-005）',
+  'T59 工具面契约：出厂 22 + 条件工具 + MCP 桥接 + 内部面黑名单 + agent 对偶（LC-005）',
   async () => {
     const llm = await new MockLlm([{ id: 'rest', content: '收到。' }]).start();
 

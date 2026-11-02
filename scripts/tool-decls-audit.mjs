@@ -70,6 +70,7 @@ const DEFAULT_BASELINE = [
   'explain_record',
   'heartbeat',
   'http_request',
+  'idempotent_record',
   'notes_add',
   'read_skill',
   'todo_write',

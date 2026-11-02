@@ -42,6 +42,7 @@ pub use symbio_plugin_gateway;
 pub use symbio_plugin_heartbeat;
 pub use symbio_plugin_home;
 pub use symbio_plugin_hook;
+pub use symbio_plugin_idempotency;
 pub use symbio_plugin_local;
 pub use symbio_plugin_loop;
 pub use symbio_plugin_mcp;

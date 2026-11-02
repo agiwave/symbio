@@ -19,6 +19,7 @@ fn known_names_are_unique_and_snake_case() {
             DELEGATION_PROMISE,
             EXPLAIN_RATIONALE,
             FILE_CHANGE,
+            IDEMPOTENCY_RECORD,
             NOTE_CAPTURE,
             TASK_TABLE,
         ],

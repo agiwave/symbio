@@ -4160,6 +4160,7 @@ dependencies = [
  "symbio-plugin-heartbeat",
  "symbio-plugin-home",
  "symbio-plugin-hook",
+ "symbio-plugin-idempotency",
  "symbio-plugin-local",
  "symbio-plugin-loop",
  "symbio-plugin-mcp",
@@ -4428,6 +4429,16 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "symbio-plugin-idempotency"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
+ "tokio",
 ]
 
 [[package]]

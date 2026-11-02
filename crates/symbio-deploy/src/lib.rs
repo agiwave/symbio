@@ -48,6 +48,9 @@ pub const PLUGIN_ID_HOME: &str = "home";
 /// 钩子
 pub const PLUGIN_ID_HOOK: &str = "hook";
 
+/// 幂等台账：一个工具、一条 Domain 事实、一张共享视图；同一个键在同一会话里只记一次
+pub const PLUGIN_ID_IDEMPOTENCY: &str = "idempotency";
+
 /// 本地文件
 pub const PLUGIN_ID_LOCAL: &str = "local";
 
@@ -117,6 +120,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "reputation", // 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰回路与出口共用的那一个口径）
     "explain", // 可解释：把一次决定的理由记成事实（工具），再折成可读的理由台账（视图）
     "forecast", // 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
+    "idempotency", // 幂等台账：一个工具、一条 Domain 事实、一张共享视图；同一个键在同一会话里只记一次
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "local", // 本地文件

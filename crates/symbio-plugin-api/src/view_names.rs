@@ -25,6 +25,7 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: "cost.ledger", owner: "cost" },
     SharedViewDecl { name: "explain.rationales", owner: "explain" },
     SharedViewDecl { name: "forecast.remaining", owner: "forecast" },
+    SharedViewDecl { name: "idempotency.ledger", owner: "idempotency" },
     SharedViewDecl { name: "memory.live", owner: "memory" },
     SharedViewDecl { name: "notes.digest", owner: "notes" },
     SharedViewDecl { name: "notes.insights", owner: "notes" },
