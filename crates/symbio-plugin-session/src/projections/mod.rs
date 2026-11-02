@@ -12,7 +12,8 @@
 //! `slo.rs` / `fallback.rs` / `span.rs` / `tiers.rs` 是同一件事的第二份实现——
 //! 留着就会长出两套「P99 是什么」。
 //!
-//! 自主程度（`autonomy`）**没有**搬：它不是时延族的口径，读的也不是派发格。
+//! 自主程度（`autonomy`）也搬走了：它与时延族不是同一条口径，但读方形状一样——折叠住在
+//! `crates/symbio-plugin-conation`（`conation.autonomy`），本插件按名字读（`D-221` / `D-281`）。
 
 pub(crate) mod changes;
 pub(crate) mod checkpoint;
