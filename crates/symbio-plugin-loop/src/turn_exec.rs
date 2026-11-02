@@ -1526,23 +1526,10 @@ fn land_effects(
                         draft.key
                     ))));
                 }
-                let event = Event::pending(
-                    draft.key,
-                    super::control_decl::EVENT_TURN_STAGE,
-                    Entity::Turn,
-                    Verb::Asserted,
-                    turn,
-                    principal,
+                super::stage_events::land_effect(
+                    store, turn, user_seq, principal, anchor, &draft.stage, round,
                 )
-                .with_produced_by(user_seq)
-                .with_payload(serde_json::json!({
-                    "stage": draft.stage,
-                    "round": round,
-                }));
-                match store.append(event) {
-                    Ok(_) | Err(AppendError::Duplicate) => {}
-                    Err(e) => return Err(ActorError::Append(e)),
-                }
+                .map_err(ActorError::Append)?;
             }
             // 对话面：节点 id 与轮号由宿主定，能力只给角色 / 正文 / 卡片。
             // 节点身份由幂等键派生 ⇒ 重复投递撞同一事件 id，`Duplicate` 吸收；

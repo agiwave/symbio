@@ -466,6 +466,40 @@ where
     Ok(seqs)
 }
 
+/// 能力交来的阶段效果（`D-293`）：名字由能力给，身份由宿主按
+/// `st-{anchor}-{stage}` 定。
+///
+/// 它仍住在**本模块**：`turn.stage` 的写法只有一处（`D-228`），效果面只是换了
+/// 身份的拼法（能力拿不到轮号，只能拿宿主给的不透明词干）。`Duplicate` 与
+/// [`land`] 同一条口径——重试 / 续写幕重复投递同一份草稿不算失败。
+pub(crate) fn land_effect<S>(
+    store: &S,
+    turn: u64,
+    user_seq: u64,
+    actor: &str,
+    anchor: &str,
+    stage: &str,
+    round: usize,
+) -> Result<(), AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let event = Event::pending(
+        format!("st-{anchor}-{stage}"),
+        EVENT_TURN_STAGE,
+        Entity::Turn,
+        Verb::Asserted,
+        turn,
+        actor,
+    )
+    .with_produced_by(user_seq)
+    .with_payload(serde_json::json!({ "stage": stage, "round": round }));
+    match store.append(event) {
+        Ok(_) | Err(AppendError::Duplicate) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 /// 🔴 这一步在事实面上是否**已经做过**（按轮折叠，测试用）。
 ///
 /// ⚠️ 它扫全史：续写幕复用同一轮号，首幕落过的格会被判成"已做"，而续写幕的语义
