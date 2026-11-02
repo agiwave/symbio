@@ -43,8 +43,14 @@ pub(crate) use symbio_plugin_api::events::EVENT_CONATION_EXPRESSED;
 /// `reads` 会被 `seal` 判 `UnknownFact`——那才是真正的撒谎。
 pub(crate) use symbio_plugin_api::events::EVENT_TASK_OPENED;
 
+/// 自主程度折叠读的两格（任务族，`D-282` 第二种读法）：挂起与闭环。
+pub(crate) use symbio_plugin_api::events::{EVENT_TASK_ASSERTED, EVENT_TASK_HELD};
+
 /// 对外可读的视图：表达过的欲及其升格状态。
 pub(crate) const CONATION_INTENTS: &str = "conation.intents";
+
+/// 对外可读的第二条视图：无人干预完成率（DE-008 §3.1 自主程度）。
+pub(crate) const CONATION_AUTONOMY: &str = "conation.autonomy";
 
 /// owner —— 与目录名同形（`crates/symbio-plugin-conation`），装配表按它排序与报缺口。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-conation";
@@ -94,18 +100,35 @@ pub(crate) const ROWS: &[Decl] = &[Decl {
     unless: &[],
 }];
 
-pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
-    name: CONATION_INTENTS,
-    ver: 1,
-    // 只声明载荷字段。升格那一半读的是 `task.opened` 的**信封**（`produced_by`），
-    // 见 [`EVENT_TASK_OPENED`] 的注释：信封不是事实面，`reads` 表达不了也不该表达。
-    reads: &[(EVENT_CONATION_EXPRESSED, "goal")],
-    // 读出口径不是收束判据：本视图不替任何事实关门。
-    evidence: &[],
-    cost: COST,
-    eval: intents,
-    agg: Some(merge),
-}];
+pub(crate) const VIEWS: &[ViewDecl] = &[
+    ViewDecl {
+        name: CONATION_INTENTS,
+        ver: 1,
+        // 只声明载荷字段。升格那一半读的是 `task.opened` 的**信封**（`produced_by`），
+        // 见 [`EVENT_TASK_OPENED`] 的注释：信封不是事实面，`reads` 表达不了也不该表达。
+        reads: &[(EVENT_CONATION_EXPRESSED, "goal")],
+        // 读出口径不是收束判据：本视图不替任何事实关门。
+        evidence: &[],
+        cost: COST,
+        eval: intents,
+        agg: Some(merge),
+    },
+    ViewDecl {
+        name: CONATION_AUTONOMY,
+        ver: 1,
+        // 任务族只有 `EventDecl`、没有 `FactDecl`：这两对按 `D-282` 的第二种读法登记
+        // （名字由 `EventDecl` 保证拼对，字段无从校验），与 `task.readyset` 同形。
+        reads: &[
+            (EVENT_TASK_HELD, "task_id"),
+            (EVENT_TASK_ASSERTED, "task_id"),
+        ],
+        // 读数不替任何事实关门。
+        evidence: &[],
+        cost: COST,
+        eval: crate::autonomy::autonomy,
+        agg: Some(crate::autonomy::merge),
+    },
+];
 
 /// 采纳率：**一条算式**，单片与 N 片都调它。
 ///

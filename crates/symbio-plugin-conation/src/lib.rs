@@ -24,6 +24,7 @@
 //! `[dependencies]` 只有 `symbio-plugin-api` 与 `serde_json`。HS-001 判的
 //! `kernel` / `sdk` / `deploy` 一个都不列，也不认识任何兄弟插件。
 
+mod autonomy;
 pub mod decl;
 pub mod plugin;
 

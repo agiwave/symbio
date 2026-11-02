@@ -216,26 +216,42 @@ fn merging_nothing_is_a_zero_not_a_division() {
     assert_eq!(sum["adoption_rate"], 0.0);
 }
 
-/// 声明自检：两半都交了，且 `reads` 只指向**自己声明过的事实与字段**。
+/// 声明自检：每条视图都交了多片合并那一半，且 `reads` 指向已声明的名字。
 ///
 /// 后半条不是形式主义：`reads` 里写一条没声明的名字，`seal` 会判 `UnknownFact`；写一条
 /// 有事实没字段的，会判 `UndeclaredField`。两者都在装配期红，而这里让它们在**单测**里先红。
+///
+/// 两种合法读法：本包的事实走 `FactDecl`（名字 + 字段都校验）；兄弟插件的事实族（任务族
+/// 没有 `FactDecl`）走 `D-282` 的第二种读法——名字必须在清单生成物 `SHARED_EVENTS` 里。
 #[test]
-fn the_view_declares_both_halves_and_reads_only_its_own_fact() {
-    let view = &VIEWS[0];
-    assert!(view.agg.is_some(), "多片合并那一半必须交（D-281）");
-    for (fact, field) in view.reads {
-        let decl = FACTS
-            .iter()
-            .find(|f| f.name == *fact)
-            .unwrap_or_else(|| panic!("reads 里的 {fact} 没有 FactDecl"));
+fn every_view_ships_both_halves_and_its_reads_are_declared() {
+    for view in VIEWS {
         assert!(
-            decl.fields.contains(field),
-            "reads 里的 {fact}.{field} 没有在 FactDecl.fields 里声明"
+            view.agg.is_some(),
+            "{}: 多片合并那一半必须交（D-281）",
+            view.name
+        );
+        for (fact, field) in view.reads {
+            if let Some(decl) = FACTS.iter().find(|f| f.name == *fact) {
+                assert!(
+                    decl.fields.contains(field),
+                    "{}: reads 里的 {fact}.{field} 没有在 FactDecl.fields 里声明",
+                    view.name
+                );
+            } else {
+                assert!(
+                    symbio_plugin_api::events::SHARED_EVENTS
+                        .iter()
+                        .any(|e| e.name == *fact),
+                    "{}: reads 里的 {fact} 既不是本包事实，也不在共享事件表（D-282）",
+                    view.name
+                );
+            }
+        }
+        assert_eq!(
+            view.cost, COST,
+            "{}: 扫描上界与全仓同一个值（seal 的 ViewCostMismatch：切点只有一个）",
+            view.name
         );
     }
-    assert_eq!(
-        view.cost, COST,
-        "扫描上界与全仓同一个值（seal 的 ViewCostMismatch：切点只有一个）"
-    );
 }

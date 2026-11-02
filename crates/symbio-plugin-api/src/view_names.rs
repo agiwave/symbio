@@ -20,6 +20,7 @@ pub struct SharedViewDecl {
 #[rustfmt::skip]
 pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: "causal.links", owner: "causal" },
+    SharedViewDecl { name: "conation.autonomy", owner: "conation" },
     SharedViewDecl { name: "conation.intents", owner: "conation" },
     SharedViewDecl { name: "cost.ledger", owner: "cost" },
     SharedViewDecl { name: "explain.rationales", owner: "explain" },

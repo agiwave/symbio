@@ -10,4 +10,4 @@ plugin_order: 57
 shared_events: conation.expressed
 # 对外可读的视图（scripts/facts/views-rs.mjs 读取 → crates/symbio-plugin-api/src/view_names.rs）。
 # 名字与求值仍住 `decl::VIEWS`；读方按名字读，不依赖本 crate（D-221）。
-shared_views: conation.intents
+shared_views: conation.intents, conation.autonomy
