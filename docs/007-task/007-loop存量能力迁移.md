@@ -31,7 +31,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的**能力策略**清零
 | L3b | 24 / 25 / 4 | 技能编译 + 反自动化回退 + 程序记忆 | `SkillCompiler` / `SkillRouter`（原 `skill_events`） | 已落 `symbio-plugin-skill`（D-262）：`skill.recall` 行执行体（命中交 `RowStep::Answer`，摘行走 `skill.retreat` 名字读）+ 轮末收束贡献（编译）；两行同一实现、同包 |
 | L4 | 8 | 副作用分级 | `breaker` | **不迁（DE-039 D-271）**：判据的两个输入一个在 E 类（授权矩阵）、一个随 #18 进 `symbio-plugin-cost`（S8），且熔断的两个出口（零事件 / 入格）在 I-3 的形状之外；名册改判 `留 守门` |
 | L5 | — | 语义压缩 | `COMPRESS` 执行体 + 轮首那一行 | 模型往返端口 + 通用省略事实（`Message` 摘要） |
-| L6 | — | 判决 / 措辞与汇报 | `CLASSIFY` / `REPORT` 执行体 | **不成批（`D-291`，`D-293` 复核）**：判据已在 `classify` / `compose` 两个包里（经路由，`D-240`）；阶段格与对话面由 `D-293` 开放为纯值草稿（`StageDraft` / `DialogDraft`，宿主唯一写口），两次往返可走 `RowStep::Ask` / `parse`（`D-235` 只禁止拆成两行）；余下前置是**对话线读面**——`conversation_view` 读 `context.messages`，不是事实也不是共享视图，能力包拿不到 |
+| L6 | — | 判决 / 措辞与汇报 | `CLASSIFY` / `REPORT` 执行体 | **不成批（`D-291`，`D-293` 复核）**：判据已在 `classify` / `compose` 两个包里（经路由，`D-240`）；阶段格与对话面由 `D-293` 开放为纯值草稿（`StageDraft` / `DialogDraft`，宿主唯一写口）（`D-235` 只禁止把往返拆成两行）；读面**已判可行**：`context.messages` 是 `Session.messages` 的 WAL 折叠（`transcript` 已证明同一批事实可折成对话线，两个读方只用 `role` / `text`），可由 `session` 以 owner-local 视图交出，不开端口、不开格。仍不成批的是**行面**：`ModelAsk` 只有一段 `prompt`（装不下 `system_prompt` + 消息数组），`parse` 只交事实、不交效果（回执后的阶段格 / 对话面落不了）；两项只被 classify / compose 需要，够不上补件准入，行按环步保留 |
 | L7 | — | 续幕 / 装配 | `CONTINUE` / `SEAM` | 先判归属：只留「环的一步」；超出五类残留的搬走 |
 | L8 | 11 | 多轮对话 | `chat_loop` 整轮循环 | 留环（D-222）；不迁，账里写明 |
 
@@ -56,7 +56,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的**能力策略**清零
 | L1 工作记忆 / 规划 | 不成批（勘察已出） | 段已随 L2b / L3a 迁出，压缩归 L5；窗口是投影参数（DE-001 §9.1）、装配是环的一步；规划没有判定生产者（#16 改判 `留 环`） |
 | L7 续幕 / 装配 | 不成批（勘察已出） | 两条执行体都落在「环」这一格：`continue` 是 I-6 的宿主侧、`seam` 是装配本身；名册里没有这两行（折在 #11，D-222 已裁 `留 环`）。见下方「L7 起手前勘察」 |
 | L5 语义压缩 | 未起（前置是补件，勘察已出） | 建在 core 的 `run_ops` 上 ⇒ 先补三样进 `plugin-api`，再搬代码 |
-| L6 判决 / 措辞与汇报 | 不成批（`D-293` 后复核，理由收窄） | 留 环 + 过程体：判据与措辞住 `symbio-plugin-classify` / `symbio-plugin-compose`；`D-293` 已解开阶段格与对话面（纯值草稿 + 宿主唯一写口），`RowStep::Ask` / `parse` 已解开单行内往返。剩余前置是**对话线读面**（`conversation_view` 读 `context.messages`，没有事实 / 视图形状）——先开一条通用补件再谈成批 |
+| L6 判决 / 措辞与汇报 | 不成批（`D-293` 后复核，读面解、行面未解） | 留 环 + 过程体：判据与措辞住 `symbio-plugin-classify` / `symbio-plugin-compose`。对话线读面**可行**：`context.messages` 由 message 事实折成，`session` 可 owner-local 声明 `session.dialog`（字段 `{seq, role, text}`、按 `seq` 序取末 12 条；读方 classify / compose；缺席为 `{entries: []}`）。行面仍缺两样——`ModelAsk` 单段 `prompt`、`parse` 不交效果；因只被这两条能力需要，记等待第二条，不立补件、不改代码 |
 | L8 多轮对话 | 不迁（D-222 留环） | — |
 
 **L2b 起手前勘察出的六条约束**（省下一次重复勘察，都是这次实际踩到的；第 4 / 5 / 6 条
