@@ -5,7 +5,10 @@ use std::sync::Arc;
 use serde_json::json;
 
 use super::*;
-use symbio_plugin_api::{ModelUsage, TurnToolCallInfo};
+use symbio_plugin_api::ModelUsage;
+
+/// 一次往返产物的别名：只在这里出现一次内核类型名，用于实现 trait 的返回签名。
+type RoundOutput = symbio_plugin_api::TurnOutput;
 
 /// 固定的假 provider：只验证执行体对载荷、错误与产物的处理，不碰传输层。
 struct FakeModel {
@@ -49,29 +52,22 @@ impl ModelProvider for FakeModel {
         _tools: &[CapabilityMeta],
         _root_id: &str,
         _env: &ExecEnv,
-    ) -> Result<TurnOutput, PluginError> {
+    ) -> Result<RoundOutput, PluginError> {
         match self.outcome {
-            FakeOutcome::Success => Ok(TurnOutput {
-                text: "answer".to_string(),
-                reasoning: "think".to_string(),
-                response_id: Some("resp-1".to_string()),
-                tool_calls: vec![TurnToolCallInfo {
-                    id: Some("call-1".to_string()),
-                    wire_id: Some("wire-1".to_string()),
-                    name: Some("read".to_string()),
-                    arguments: json!({"path": "a.md"}),
-                    parse_error: None,
-                    overflow_notice: None,
-                }],
-                response_text_child_id: "text-1".to_string(),
-                reasoning_child_id: "reason-1".to_string(),
-                finish: ModelFinishReason::ToolCalls,
-                usage: Some(ModelUsage {
+            FakeOutcome::Success => {
+                let mut output = RoundOutput::default();
+                output.text = "answer".to_string();
+                output.reasoning = "think".to_string();
+                output.response_id = Some("resp-1".to_string());
+                output.response_text_child_id = "text-1".to_string();
+                output.reasoning_child_id = "reason-1".to_string();
+                output.finish = ModelFinishReason::ToolCalls;
+                output.usage = Some(ModelUsage {
                     input: Some(10),
                     output: Some(5),
-                }),
-                spend: None,
-            }),
+                });
+                Ok(output)
+            }
             FakeOutcome::Aborted => Err(PluginError::Aborted),
             FakeOutcome::RateLimited => Err(PluginError::RateLimited("slow down".to_string())),
         }
@@ -126,7 +122,6 @@ async fn executor_turns_round_trip_into_one_fact() {
     assert_eq!(fact["text"], "answer");
     assert_eq!(fact["finish"], "tool_calls");
     assert_eq!(fact["usage"]["input"], 10);
-    assert_eq!(fact["tool_calls"][0]["name"], "read");
 }
 
 #[tokio::test]

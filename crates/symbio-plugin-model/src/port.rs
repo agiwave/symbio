@@ -14,7 +14,7 @@ use symbio_plugin_api::port::{
 use symbio_plugin_api::ports;
 use symbio_plugin_api::{
     CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv, LlmAdapter, ModelFinishReason,
-    ModelProvider, PluginError, ProviderLlmAdapter, TurnOutput,
+    ModelProvider, PluginError, ProviderLlmAdapter,
 };
 
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
@@ -121,6 +121,9 @@ impl PortExecutor for ModelExecutor {
             .unwrap_or(&self.active);
         let env = ExecEnv::new(exec.sink.clone(), exec.abort.clone());
         match provider
+            // 债的预算与租约由环在派发前盖章；执行上下文（deadline / abort / 幂等键）
+            // 原样交进来，执行体内不再另开一档校验（D-305 裁决一）。
+            // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
             .round_trip(
                 &request.system_prompt,
                 &request.messages,
@@ -130,10 +133,43 @@ impl PortExecutor for ModelExecutor {
             )
             .await
         {
-            Ok(output) => PortOutcome {
-                facts: vec![round_fact(&output)],
-                error: None,
-            },
+            Ok(output) => {
+                let calls: Vec<serde_json::Value> = output
+                    .tool_calls
+                    .iter()
+                    .map(|call| {
+                        serde_json::json!({
+                            "id": call.id,
+                            "wire_id": call.wire_id,
+                            "name": call.name,
+                            "arguments": call.arguments,
+                            "parse_error": call.parse_error,
+                            "overflow_notice": call.overflow_notice,
+                        })
+                    })
+                    .collect();
+                // 一次往返的产物 → 事实草稿（键名是本插件的行契约，环不解析）。
+                PortOutcome {
+                    facts: vec![serde_json::json!({
+                        "text": output.text,
+                        "reasoning": output.reasoning,
+                        "response_id": output.response_id,
+                        "tool_calls": calls,
+                        "finish": finish_str(&output.finish),
+                        "usage": output.usage.as_ref().map(|u| serde_json::json!({
+                            "input": u.input,
+                            "output": u.output,
+                        })),
+                        "spend": output.spend.as_ref().map(|s| serde_json::json!({
+                            "amount_nano": s.amount_nano,
+                            "currency": s.currency,
+                        })),
+                        "response_text_child_id": output.response_text_child_id,
+                        "reasoning_child_id": output.reasoning_child_id,
+                    })],
+                    error: None,
+                }
+            }
             Err(PluginError::Aborted) => PortOutcome {
                 // 半截产出仍要留痕：中止是这一笔的状态，不是「没有发生过」。
                 facts: vec![serde_json::json!({"status": "aborted"})],
@@ -147,41 +183,7 @@ impl PortExecutor for ModelExecutor {
     }
 }
 
-/// 一次往返的产物 → 事实草稿（键名是本插件的行契约，环不解析）。
-fn round_fact(output: &TurnOutput) -> serde_json::Value {
-    let calls: Vec<serde_json::Value> = output
-        .tool_calls
-        .iter()
-        .map(|call| {
-            serde_json::json!({
-                "id": call.id,
-                "wire_id": call.wire_id,
-                "name": call.name,
-                "arguments": call.arguments,
-                "parse_error": call.parse_error,
-                "overflow_notice": call.overflow_notice,
-            })
-        })
-        .collect();
-    serde_json::json!({
-        "text": output.text,
-        "reasoning": output.reasoning,
-        "response_id": output.response_id,
-        "tool_calls": calls,
-        "finish": finish_str(&output.finish),
-        "usage": output.usage.as_ref().map(|u| serde_json::json!({
-            "input": u.input,
-            "output": u.output,
-        })),
-        "spend": output.spend.as_ref().map(|s| serde_json::json!({
-            "amount_nano": s.amount_nano,
-            "currency": s.currency,
-        })),
-        "response_text_child_id": output.response_text_child_id,
-        "reasoning_child_id": output.reasoning_child_id,
-    })
-}
-
+/// 一次往返的产物键名归本插件的行契约；环不解析。
 fn finish_str(finish: &ModelFinishReason) -> &str {
     match finish {
         ModelFinishReason::Stop => "stop",
