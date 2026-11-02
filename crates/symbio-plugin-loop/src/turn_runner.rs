@@ -1032,7 +1032,7 @@ fn deny<S>(
     let event = Event::pending(
         format!("deny-{turn}-{kind_name}"),
         EVENT_AUTHZ_DENIED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         turn,
         &actor.principal,

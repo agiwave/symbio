@@ -134,10 +134,10 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 被拒不产生收束格，但它回答「这一轮为什么停」——C6 的停机角色。
     EventDecl::with_roles(
         "authz.denied",
-        (Entity::Turn, Verb::Asserted),
+        (Entity::Scope, Verb::Asserted),
         &[FactRole::StopsTurn],
     ),
-    EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)),
     // 记忆找回（`memory.recalled`）的格位已随写方迁进能力包（`symbio-plugin-memory` 的
     // `semantic` 子模块，DE-026 D-264 第 4 条）：那条事实没有第二个读方 ⇒ 不是共同读面
     // ⇒ 格位随写方走（D-263 第 2 条的反面分支）。本插件不再持有这个名字。

@@ -195,7 +195,7 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
     FactDraft {
         key: format!("{idempotency_key}.authz"),
         kind: kind.to_string(),
-        entity: Entity::Turn,
+        entity: Entity::Scope,
         verb,
         payload,
         produced_by: None,

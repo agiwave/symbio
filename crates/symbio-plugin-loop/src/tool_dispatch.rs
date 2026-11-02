@@ -1370,7 +1370,7 @@ fn granted_event(
     Event::pending(
         format!("grant-{turn}-{id}-{attempt}"),
         EVENT_AUTHZ_GRANTED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         turn,
         "authorizer",
@@ -1385,7 +1385,7 @@ fn denied_event(turn: u64, produced_by: u64, call: &port::Call, tool: &str, why:
     Event::pending(
         format!("deny-tool-{turn}-{id}-{attempt}"),
         EVENT_AUTHZ_DENIED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         turn,
         "authorizer",

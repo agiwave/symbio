@@ -31,10 +31,10 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
 // ============ authz ============
 
-/// authz.denied — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
+/// authz.denied — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
 
-/// authz.granted — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
+/// authz.granted — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 
 // ============ chat ============
@@ -150,8 +150,8 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 #[rustfmt::skip]
 pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← loop
-    EventDecl::with_roles(EVENT_AUTHZ_DENIED, (Entity::Turn, Verb::Asserted), &[FactRole::StopsTurn]), // authz.denied ← loop
-    EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Turn, Verb::Asserted)), // authz.granted ← loop
+    EventDecl::with_roles(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]), // authz.denied ← loop
+    EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)), // authz.granted ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Turn, Verb::Closed)), // chat.assistant.fallback ← loop
     EventDecl::with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Turn, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_OPENING, (Entity::Turn, Verb::Asserted)), // chat.assistant.opening ← loop

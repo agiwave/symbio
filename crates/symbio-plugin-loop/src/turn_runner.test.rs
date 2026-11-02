@@ -4914,11 +4914,11 @@ mod denial_fact_tests {
             .collect();
         assert_eq!(denied.len(), 1, "拒绝必须落一条事实：{denied:?}");
         let d = denied[0];
-        assert_eq!(d.entity, symbio_kernel::event::Entity::Turn);
+        assert_eq!(d.entity, symbio_kernel::event::Entity::Scope);
         assert_eq!(
             d.verb,
             symbio_kernel::event::Verb::Asserted,
-            "落在 turn × asserted，**不是** closed"
+            "落在 scope × asserted，**不是** closed"
         );
         assert_eq!(d.turn, 1);
         assert_eq!(d.actor, spec.principal, "谁");

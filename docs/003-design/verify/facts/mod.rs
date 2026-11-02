@@ -78,7 +78,7 @@ pub const DOMAINS: &[Domain] = &[
     },
     Domain {
         key: "event.entity",
-        forms: &["turn", "task", "artifact", "verdict", "memory", "commitment", "conation", "thread", "control", "system", "message", "domain"],
+        forms: &["turn", "task", "artifact", "verdict", "memory", "commitment", "conation", "thread", "control", "scope", "system", "message", "domain"],
         open: false,
     },
     Domain {
