@@ -30,7 +30,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的**能力策略**清零
 | L3a | 26 | 独立验证与返工 | `task_events` + 任务表写侧判断 + 收束时调度 + 就绪段 | `symbio-plugin-task`：写侧走 I-1（效果端口 + `before`），就绪段走 I-2（provider），收束时调度走收束贡献（D-250）；`rework_bounded` 不变量留核 |
 | L3b | 24 / 25 / 4 | 技能编译 + 反自动化回退 + 程序记忆 | `SkillCompiler` / `SkillRouter`（原 `skill_events`） | 已落 `symbio-plugin-skill`（D-262）：`skill.recall` 行执行体（命中交 `RowStep::Answer`，摘行走 `skill.retreat` 名字读）+ 轮末收束贡献（编译）；两行同一实现、同包 |
 | L4 | 8 | 副作用分级 | `breaker` | **不迁（DE-039 D-271）**：判据的两个输入一个在 E 类（授权矩阵）、一个随 #18 进 `symbio-plugin-cost`（S8），且熔断的两个出口（零事件 / 入格）在 I-3 的形状之外；名册改判 `留 守门` |
-| L5 | — | 语义压缩 | `COMPRESS` 执行体 + 轮首那一行 | 模型往返端口 + 通用省略事实（`Message` 摘要） |
+| L5 | — | 语义压缩 | **不成批**：`D-297` 选 A——省略事实（`D-249`）与摘要往返（`D-242`）已有，压缩节点只有「上线」半面且仅压缩一个消费者；触发是状态条件 | 留控制面——触发与呈现（再复议条件见 `D-297`） |
 | L6 | — | 判决 / 措辞与汇报 | `CLASSIFY` / `REPORT` 执行体 | **不成批（`D-291`，`D-293` 复核）**：判据已在 `classify` / `compose` 两个包里（经路由，`D-240`）；阶段格与对话面由 `D-293` 开放为纯值草稿（`StageDraft` / `DialogDraft`，宿主唯一写口）（`D-235` 只禁止把往返拆成两行）；读面**已判可行**：`context.messages` 是 `Session.messages` 的 WAL 折叠（`transcript` 已证明同一批事实可折成对话线，两个读方只用 `role` / `text`），可由 `session` 以 owner-local 视图交出，不开端口、不开格。仍不成批的是**行面**：`ModelAsk` 只有一段 `prompt`（装不下 `system_prompt` + 消息数组），`parse` 只交事实、不交效果（回执后的阶段格 / 对话面落不了）；两处是**形状缺口**（位置就在闭表：`轮内某步` 的产出列已含「提问 / 作答」，「事实草稿」的效果面由 `D-293` 开出；装不下的是同一位置的产出形状），不是位置缺失 ⇒ `D-294` 不适用；形状按 `D-269` §5.2 / §5.3 走，见「缺口复核」。行按环步保留 |
 | L7 | — | 续幕 / 装配 | `CONTINUE` / `SEAM` | 先判归属：只留「环的一步」；超出五类残留的搬走 |
 | L8 | 11 | 多轮对话 | `chat_loop` 整轮循环 | 留环（D-222）；不迁，账里写明 |
@@ -55,7 +55,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的**能力策略**清零
 | L4 副作用分级 | 不迁（裁决已出） | 留 守门（DE-039 D-271）：判据的输入一个在 E 类（授权矩阵）、一个随 #18 进 `symbio-plugin-cost`（S8），且熔断的两个出口在 I-3 的形状之外；前置条件是「I-3 先长得出 `ZeroEvent` / `Recorded`」 |
 | L1 工作记忆 / 规划 | 不成批（勘察已出） | 段已随 L2b / L3a 迁出，压缩归 L5；窗口是投影参数（DE-001 §9.1）、装配是环的一步；规划没有判定生产者（#16 改判 `留 环`） |
 | L7 续幕 / 装配 | 不成批（勘察已出） | 两条执行体都落在「环」这一格：`continue` 是 I-6 的宿主侧、`seam` 是装配本身；名册里没有这两行（折在 #11，D-222 已裁 `留 环`）。见下方「L7 起手前勘察」 |
-| L5 语义压缩 | 未起（前置是补件，勘察已出） | 建在 core 的 `run_ops` 上 ⇒ 先补三样进 `plugin-api`，再搬代码 |
+| L5 语义压缩 | 不成批（`D-297` 选 A） | 留控制面——触发与呈现：`run_ops` 的 `ReplaceAll` / `CompressionBegin` / `Finish` 与压缩节点只有压缩一个消费者；触发读阈值 / 冷却，属状态条件 |
 | L6 判决 / 措辞与汇报 | 不成批（`D-293` 后复核，读面解、行面未解） | 留 环 + 过程体：判据与措辞住 `symbio-plugin-classify` / `symbio-plugin-compose`。对话线读面**可行**：`context.messages` 由 message 事实折成，`session` 可 owner-local 声明 `session.dialog`（字段 `{seq, role, text}`、按 `seq` 序取末 12 条；读方 classify / compose；缺席为 `{entries: []}`）。行面仍缺两样——`ModelAsk` 单段 `prompt`（装不下 `system_prompt` + 消息数组）、`parse` 不交效果（回执后的草稿落不了）；两处是**形状缺口**（位置在闭表，缺的是同一位置的产出形状）⇒ `D-294` 只裁「新开一格」，不适用；形状按 `D-269` §5.2 / §5.3 判。故仍不成批，不立补件、不改代码 |
 | L8 多轮对话 | 不迁（D-222 留环） | — |
 
@@ -120,13 +120,13 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的**能力策略**清零
    将来真要做「≈4 槽」的工作记忆策略（DE-031 已记今天没有这个语义），那是**新增能力**
    ——读已记录的事实、交 I-2 段——走准入（DE-026 §2.2），不是一次迁移。
 
-**L5 起手前勘察**（下一步的入口，省一次重复勘察）：压缩整条**建在 `core` 的 ops 上**
-——`run_ops` 的 `CompressionBegin` / `CompressionFinish` / `Consolidate` /
-`ReplaceAll` / `RemoveNodes`，外加流式帧（`CompressionEmitter`）与前端广播。能力包只链接
-`plugin-api`（DE-025 D-258）⇒ **L5 的前置是一次补件**，不是搬代码：省略面（I-5 的
-`elision` 事实已有，D-249）、摘要往返（I-4 的 `RowStep::Ask` 已有）、压缩帧（前端可见的
-那一段）三样得先落进 `plugin-api`，压缩才可能只交「一条省略事实 + 一次往返」。这与批次表
-给 L5 写的目标形状（「模型往返端口 + 通用省略事实」）是同一件事——顺序是补件在前。
+**L5 起手前勘察**（`D-297` 已收口）：压缩整条建在 `core` 的 ops 上——`run_ops` 的
+`CompressionBegin` / `CompressionFinish` / `Consolidate` / `ReplaceAll` / `RemoveNodes`，
+外加流式帧（`CompressionEmitter`）与前端广播。复核结果：省略面（`D-249`）与摘要往返
+（`D-242`）**已有**；压缩帧只有上线半面，`DialogDraft` 缺 `Notice` / `Streaming` / `stats`、
+`LiveDraft` 不持久；`CompressionBegin` / `Finish` 含熔断等状态条件（§5.2 第 2 行不开），
+`ReplaceAll` 只有压缩一个调用点。⇒ **不成批，不补件**：触发与呈现留环，判据与再复议条件见
+`D-297`。
 
 **L7 起手前勘察**（续幕 / 装配两条都不成批，理由与 L1 同族：**没有可搬的判定**）：
 
