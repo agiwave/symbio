@@ -27,6 +27,7 @@
 //! 但债必须关：落一条 `hit = false` 的判定，环才不会在同一笔债上空转。
 
 use serde_json::{json, Value};
+use symbio_plugin_api::effects::{EffectDraft, EffectFace, StageDraft};
 use symbio_plugin_api::events::{EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::rows::{AnswerStep, RowHandler, RowRequest, RowStep};
 use symbio_plugin_api::{truncate_chars, Entity, Event, FactDraft, Verb};
@@ -57,6 +58,12 @@ impl RowHandler for SkillRecall {
         true
     }
 
+    fn effects(&self) -> &'static [EffectFace] {
+        // 未命中时把「这一步判过、没有命中」落成一格阶段事实（D-293）：命中侧由宿主的
+        // `Answer` 出口代落，两侧因此都有本幕的判据。
+        &[EffectFace::Stage]
+    }
+
     fn run(&self, req: &RowRequest<'_>) -> RowStep {
         let (Some(recall), Some(stage)) = (
             req.key_of("recall").and_then(|v| v.parse::<u64>().ok()),
@@ -82,7 +89,7 @@ impl RowHandler for SkillRecall {
                 e.payload.get("content").and_then(Value::as_str)?,
             ))
         }) else {
-            return RowStep::Facts(vec![answered(req, recall, stage, "", false)]);
+            return missed(req, vec![answered(req, recall, stage, "", false)]);
         };
 
         // 置信度与回退视图同一份账（`decl::calibration_ledger`）：阈值只有一处。
@@ -111,8 +118,22 @@ impl RowHandler for SkillRecall {
             });
         }
         drafts.push(answered(req, recall, stage, skill_id, false));
-        RowStep::Facts(drafts)
+        missed(req, drafts)
     }
+}
+
+/// 未命中侧：事实照旧，另交一格阶段事实（`skill.recall` 这一行本幕判过）。
+///
+/// 阶段名就是行名——它是本能力自己的格子，引擎的阶段名闭集里没有它，也不该有：
+/// 能力只声明「自己这一步做过」，不冒充 `decide` / `recall` / `compress`。
+fn missed(req: &RowRequest<'_>, facts: Vec<FactDraft>) -> RowStep {
+    RowStep::FactsWithEffects(
+        facts,
+        vec![EffectDraft::Stage(StageDraft::new(
+            &req.anchor,
+            "skill.recall",
+        ))],
+    )
 }
 
 // 链接期提交：本实现随本 crate 进入二进制，宿主按行名选它。

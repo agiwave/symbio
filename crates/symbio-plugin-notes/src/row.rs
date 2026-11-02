@@ -17,6 +17,7 @@
 
 use serde_json::{json, Value};
 use symbio_plugin_api::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
+use symbio_plugin_api::effects::{DialogDraft, EffectDraft, EffectFace};
 use symbio_plugin_api::events::{EVENT_ARTIFACT_ADDED, EVENT_MESSAGE_ADDED};
 use symbio_plugin_api::principal::Principal;
 use symbio_plugin_api::rows::{ModelAsk, ModelReply, RowHandler, RowRequest, RowStep};
@@ -42,6 +43,11 @@ impl RowHandler for NoteIndex {
         &[NOTES_INDEXED]
     }
 
+    fn effects(&self) -> &'static [EffectFace] {
+        // 索引一入格就在对话面回一张卡片（D-293）：宿主定节点 id 与轮号、写转写并上线。
+        &[EffectFace::Dialog]
+    }
+
     fn run(&self, req: &RowRequest<'_>) -> RowStep {
         let Some(call_id) = req.key_of("tool_call_id") else {
             return RowStep::Facts(Vec::new());
@@ -54,14 +60,26 @@ impl RowHandler for NoteIndex {
             return RowStep::Facts(Vec::new());
         };
         let text = note_text(&artifact.payload);
-        RowStep::Facts(vec![FactDraft {
+        let facts = vec![FactDraft {
             key: format!("ni-{}-{call_id}", req.anchor),
             kind: NOTES_INDEXED.to_string(),
             entity: Entity::Domain,
             verb: Verb::Asserted,
             payload: json!({ "tool_call_id": call_id, "text": text }),
             produced_by: Some(req.user_seq),
-        }])
+        }];
+        // 对话面是一张纯值卡片：正文由宿主写、身份（节点 id / 轮号）由宿主给。
+        let effects = vec![EffectDraft::Dialog(DialogDraft {
+            key: format!("note-{call_id}"),
+            role: "assistant",
+            text: format!("已记下：{text}"),
+            card: Some(json!({
+                "kind": "note",
+                "tool_call_id": call_id,
+                "text": text,
+            })),
+        })];
+        RowStep::FactsWithEffects(facts, effects)
     }
 }
 

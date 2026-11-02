@@ -2,6 +2,7 @@
 //! 续写幕不走近路、判不了只关账。
 
 use serde_json::json;
+use symbio_plugin_api::effects::EffectDraft;
 use symbio_plugin_api::events::{EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep};
 use symbio_plugin_api::{Entity, Event, Seq, Verb};
@@ -122,10 +123,15 @@ fn low_confidence_skill_retreats_and_falls_back() {
         stage(20, false),
         calibrated(40, "sk-abc", true),
     ];
-    let RowStep::Facts(drafts) = SkillRecall.run(&request(&key, &facts, &history)) else {
+    let RowStep::FactsWithEffects(drafts, effects) = SkillRecall.run(&request(&key, &facts, &history))
+    else {
         panic!("低置信技能不该作答");
     };
     assert_eq!(drafts.len(), 2);
+    let EffectDraft::Stage(stage) = &effects[0] else {
+        panic!("未命中侧只交阶段格");
+    };
+    assert_eq!(stage.stage, "skill.recall");
     assert_eq!(drafts[0].payload["fallback"], json!(true), "这次判定记回退");
     assert_eq!(drafts[1].payload["hit"], json!(false));
 }
@@ -140,10 +146,12 @@ fn resumed_stage_never_answers() {
         skill(10, "sk-abc", "把周报整理成摘要", "先列要点。"),
         stage(20, true),
     ];
-    let RowStep::Facts(drafts) = SkillRecall.run(&request(&key, &facts, &history)) else {
+    let RowStep::FactsWithEffects(drafts, effects) = SkillRecall.run(&request(&key, &facts, &history))
+    else {
         panic!("续写幕不该作答");
     };
     assert_eq!(drafts.len(), 2);
+    assert_eq!(effects.len(), 1);
     assert_eq!(drafts[1].payload["hit"], json!(false));
     assert_eq!(
         drafts[0].payload["fallback"],
@@ -166,10 +174,12 @@ fn entries_without_skill_id_only_close_the_debt() {
         ),
         stage(20, false),
     ];
-    let RowStep::Facts(drafts) = SkillRecall.run(&request(&key, &facts, &history)) else {
+    let RowStep::FactsWithEffects(drafts, effects) = SkillRecall.run(&request(&key, &facts, &history))
+    else {
         panic!("判不了不该作答");
     };
     assert_eq!(drafts.len(), 1, "只落判定、不落观测");
+    assert_eq!(effects.len(), 1);
     assert_eq!(drafts[0].kind, SKILL_ANSWERED);
     assert_eq!(drafts[0].payload["hit"], json!(false));
     assert_eq!(drafts[0].payload["skill_id"], json!(""));
