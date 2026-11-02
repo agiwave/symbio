@@ -452,3 +452,160 @@ async fn pending_intent_travels_through_the_outcome() {
     assert_eq!(pending["text"], serde_json::json!("需要确认：删除文件"));
     assert_eq!(pending["prompt"]["kind"], serde_json::json!("confirm"));
 }
+
+// ==================== 授权判定：执行体先判，再执行（D-306 裁决一） ====================
+//
+// 载荷带 `threshold`（开账行写的判定输入）时，执行体先落一条授权事实，再决定是否
+// 进入能力调用。拒绝必须是**判死**，不能静默放行；旧路径载荷不带 `threshold`，
+// 保持旁路（双路径到期点：P4）。
+
+/// 捕获 `emit` 的事实草稿（只验证「落了哪条」，去处由宿主决定）。
+struct CapturedFacts(Arc<std::sync::Mutex<Vec<FactDraft>>>);
+
+#[async_trait]
+impl symbio_plugin_api::port::PortFactWriter for CapturedFacts {
+    async fn emit(&self, facts: Vec<FactDraft>) {
+        self.0.lock().unwrap().extend(facts);
+    }
+}
+
+/// 一笔带判定输入的债（无宿主 ctx：授权之后的执行会诚实失败，不影响授权事实）。
+fn authz_call(
+    payload: serde_json::Value,
+) -> (
+    PortExecContext,
+    PortInput,
+    Arc<std::sync::Mutex<Vec<FactDraft>>>,
+) {
+    let captured: Arc<std::sync::Mutex<Vec<FactDraft>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let emit =
+        symbio_plugin_api::port::PortFactEmit::new(Arc::new(CapturedFacts(captured.clone())));
+    (
+        PortExecContext {
+            deadline_ms: None,
+            abort: ExecAbortSignal::new(),
+            idempotency_key: "req-1".to_string(),
+            sink: ExecEventSink::silent(),
+            emit,
+            ctx: None,
+        },
+        PortInput {
+            port: TOOL,
+            payload,
+        },
+        captured,
+    )
+}
+
+fn debt_input(risk: &str, threshold: &str, approved: bool) -> serde_json::Value {
+    serde_json::json!({
+        "tool": "shell.exec",
+        "id": "tool-1",
+        "attempt": 1,
+        "risk": risk,
+        "threshold": threshold,
+        "approved": approved,
+    })
+}
+
+#[tokio::test]
+async fn low_risk_within_threshold_is_granted_by_the_threshold() {
+    let (exec, input, captured) = authz_call(debt_input("low", "medium", false));
+    let _ = ToolPort.execute(exec, input).await;
+    let facts = captured.lock().unwrap();
+    assert_eq!(facts.len(), 1, "一次判定只落一条授权事实");
+    assert_eq!(facts[0].kind, "authz.granted");
+    assert_eq!(facts[0].payload["port"], serde_json::json!("tool"));
+    assert_eq!(facts[0].payload["id"], serde_json::json!("tool-1"));
+    assert_eq!(facts[0].payload["attempt"], serde_json::json!(1));
+    assert_eq!(facts[0].payload["risk"], serde_json::json!("low"));
+    assert_eq!(facts[0].payload["basis"], serde_json::json!("threshold"));
+    assert_eq!(facts[0].payload["deferred"], serde_json::json!(false));
+}
+
+#[tokio::test]
+async fn high_risk_without_basis_is_denied_and_the_debt_fails() {
+    let (exec, input, captured) = authz_call(debt_input("high", "low", false));
+    let out = ToolPort.execute(exec, input).await;
+    assert!(
+        matches!(out.error, Some((PortErrorClass::NonRetryable, _))),
+        "拒绝必须判死，不能静默放行：{out:?}"
+    );
+    let facts = captured.lock().unwrap();
+    assert_eq!(facts[0].kind, "authz.denied");
+    assert_eq!(
+        facts[0].payload["why"],
+        serde_json::json!("approval_required")
+    );
+}
+
+#[tokio::test]
+async fn approval_or_permanent_grant_grants_high_risk() {
+    let mut payload = debt_input("high", "low", true);
+    let (exec, input, captured) = authz_call(payload.clone());
+    let _ = ToolPort.execute(exec, input).await;
+    assert_eq!(
+        captured.lock().unwrap()[0].payload["basis"],
+        serde_json::json!("approved")
+    );
+
+    // 永久上限（grant）写在载荷里——开账行按授权清单算定，执行体不读清单。
+    payload["approved"] = serde_json::json!(false);
+    payload["grant"] = serde_json::json!("high");
+    let (exec, input, captured) = authz_call(payload);
+    let _ = ToolPort.execute(exec, input).await;
+    assert_eq!(
+        captured.lock().unwrap()[0].payload["basis"],
+        serde_json::json!("grant")
+    );
+}
+
+#[tokio::test]
+async fn route_only_tools_are_deferred_not_granted() {
+    let (exec, input, captured) = authz_call(serde_json::json!({
+        "tool": "mcp.unknown",
+        "id": "tool-2",
+        "attempt": 1,
+        "risk": "unknown",
+        "threshold": "medium",
+    }));
+    let _ = ToolPort.execute(exec, input).await;
+    let facts = captured.lock().unwrap();
+    assert_eq!(facts[0].kind, "authz.granted");
+    assert_eq!(facts[0].payload["deferred"], serde_json::json!(true));
+    assert_eq!(facts[0].payload["risk"], serde_json::json!("unknown"));
+}
+
+#[tokio::test]
+async fn invalid_calls_are_denied_before_any_approval_reading() {
+    let mut payload = debt_input("low", "medium", true);
+    payload["invalid"] = serde_json::json!(true);
+    let (exec, input, captured) = authz_call(payload);
+    let out = ToolPort.execute(exec, input).await;
+    assert!(out.error.is_some());
+    assert_eq!(
+        captured.lock().unwrap()[0].payload["why"],
+        serde_json::json!("invalid_call")
+    );
+}
+
+#[tokio::test]
+async fn legacy_payload_without_threshold_stays_on_the_old_path() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let (exec, input) = call("echo", ctx);
+    let captured: Arc<std::sync::Mutex<Vec<FactDraft>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut exec = exec;
+    exec.emit =
+        symbio_plugin_api::port::PortFactEmit::new(Arc::new(CapturedFacts(captured.clone())));
+    let out = ToolPort.execute(exec, input).await;
+    let (text, success, _) = decode(&out);
+    assert_eq!(text, "done");
+    assert!(success);
+    assert!(
+        captured.lock().unwrap().is_empty(),
+        "旧载荷不得被新授权路径判一次（否则双路径会落两份授权）"
+    );
+}

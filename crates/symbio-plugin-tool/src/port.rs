@@ -28,11 +28,12 @@
 use std::sync::Arc;
 
 use symbio_plugin_api::{
-    capability_invoke, capability_to_wire, failure_kind, family, plugin_error, plugin_info,
-    plugin_warn, ports, ExecAbortSignal, PluginError, PluginInvokeRequestExt, PluginPayload,
-    PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider, ABORT_SIGNAL, AGENT_ID,
-    CAPABILITY_VISITOR, EVENT_SINK, PATH, PLUGIN_ID_TOOL, RESULT_MSG_ID, SESSION_ID, TOOL_CALL_ID,
-    WORKDIR,
+    capability_invoke, capability_to_wire, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
+    failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
+    Entity, ExecAbortSignal, FactDraft, PluginError, PluginInvokeRequestExt, PluginPayload,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider, Verb,
+    ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_SINK, PATH, PLUGIN_ID_TOOL, RESULT_MSG_ID,
+    SESSION_ID, TOOL_CALL_ID, WORKDIR,
 };
 
 /// 端口名（唯一来源：本插件）。
@@ -48,6 +49,158 @@ const KEY_RESULT_MSG_ID: &str = "result_msg_id";
 const FACT_RESULT_TEXT: &str = "result_text";
 const FACT_SUCCESS: &str = "success";
 const FACT_PENDING: &str = "pending";
+
+/// 授权输入键（`open-tools` 在开账时写进请求载荷，`D-306` 的「载荷装配留在行」）。
+///
+/// 与执行键（`tool_name` / `tool_call_id`）分开：授权只看判定输入，执行才解析线上名。
+const KEY_TOOL: &str = "tool";
+const KEY_RISK: &str = "risk";
+const KEY_THRESHOLD: &str = "threshold";
+const KEY_APPROVED: &str = "approved";
+const KEY_GRANT: &str = "grant";
+const KEY_DEFERRED: &str = "deferred";
+const KEY_INVALID: &str = "invalid";
+/// 债键字段（与环的 `request` 事实同形，授权事实按它可被行认领）。
+const KEY_ID: &str = "id";
+const KEY_ATTEMPT: &str = "attempt";
+
+/// 一次授权判定（`D-306` 裁决一：由端口执行体判，不再由环的动作判）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Authz {
+    /// 放行；`basis` / `grant` 只用于记账，不参与执行。
+    Granted {
+        risk: &'static str,
+        basis: Option<&'static str>,
+        grant: Option<&'static str>,
+    },
+    /// route-only 工具（注册表里没有可判的风险）：放行延迟给下游路由闸门。
+    Deferred,
+    /// 拒绝：`why` 是模型与转写看得到的原因。
+    Denied { why: &'static str },
+}
+
+/// 从请求载荷判一次授权；载荷里没有 `threshold` 就是**不由本执行体判**（`None`）。
+///
+/// `None` 是兼容位，不是放行位：旧路径的授权事实由环自己的动作写，这里的执行体
+/// 只负责执行（P1 的双路径到期点见 `P4`）。
+fn authorize(payload: &serde_json::Value) -> Option<Authz> {
+    let threshold = payload
+        .get(KEY_THRESHOLD)
+        .and_then(|v| v.as_str())
+        .map(CapabilityRiskLevel::from_name)?;
+    if payload
+        .get(KEY_INVALID)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return Some(Authz::Denied {
+            why: "invalid_call",
+        });
+    }
+    let risk = payload
+        .get(KEY_RISK)
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let deferred = payload
+        .get(KEY_DEFERRED)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(risk == "unknown");
+    if risk == "unknown" || deferred {
+        return Some(Authz::Deferred);
+    }
+    // 载荷里的风险档由开账行按注册表算定；认不出就是装配漂移，不能静默认成某一档。
+    let Some(risk) = CapabilityRiskLevel::parse(risk) else {
+        return Some(Authz::Denied {
+            why: "unknown_risk",
+        });
+    };
+    let approved = payload
+        .get(KEY_APPROVED)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let grant = payload
+        .get(KEY_GRANT)
+        .and_then(|v| v.as_str())
+        .and_then(CapabilityRiskLevel::parse);
+    match risk.approval_basis(threshold, approved, grant) {
+        Some(basis) => Some(Authz::Granted {
+            risk: risk.as_str(),
+            basis: Some(basis.as_str()),
+            grant: grant.map(CapabilityRiskLevel::as_str),
+        }),
+        None => Some(Authz::Denied {
+            why: "approval_required",
+        }),
+    }
+}
+
+/// 授权结论 → 一条授权事实草稿（`authz.granted` / `authz.denied`）。
+///
+/// 幂等键从这一笔债的 `idempotency_key` 派生：同一笔债重放两次只落一条授权，
+/// 与宿主写口的重复吸收同一条口径。
+fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz) -> FactDraft {
+    let tool = payload
+        .get(KEY_TOOL)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let id = payload
+        .get(KEY_ID)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let attempt = payload
+        .get(KEY_ATTEMPT)
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1);
+    let (kind, verb, payload) = match authz {
+        Authz::Granted { risk, basis, grant } => (
+            EVENT_AUTHZ_GRANTED,
+            Verb::Asserted,
+            serde_json::json!({
+                "port": TOOL,
+                "id": id,
+                "attempt": attempt,
+                "tool": tool,
+                "risk": risk,
+                "basis": basis,
+                "grant": grant,
+                "deferred": false,
+            }),
+        ),
+        Authz::Deferred => (
+            EVENT_AUTHZ_GRANTED,
+            Verb::Asserted,
+            serde_json::json!({
+                "port": TOOL,
+                "id": id,
+                "attempt": attempt,
+                "tool": tool,
+                "risk": "unknown",
+                "basis": serde_json::Value::Null,
+                "grant": serde_json::Value::Null,
+                "deferred": true,
+            }),
+        ),
+        Authz::Denied { why } => (
+            EVENT_AUTHZ_DENIED,
+            Verb::Asserted,
+            serde_json::json!({
+                "port": TOOL,
+                "id": id,
+                "attempt": attempt,
+                "tool": tool,
+                "why": why,
+            }),
+        ),
+    };
+    FactDraft {
+        key: format!("{idempotency_key}.authz"),
+        kind: kind.to_string(),
+        entity: Entity::Turn,
+        verb,
+        payload,
+        produced_by: None,
+    }
+}
 
 /// `port.tool` 的提供者：无状态前端（执行期从调用方 ctx 读能力表）。
 pub(crate) struct ToolPort;
@@ -71,6 +224,19 @@ impl PortProvider for ToolPort {
 impl PortExecutor for ToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let payload = input.payload;
+        // 授权判定先行（`D-306` 裁决一）：载荷带判定输入时由本执行体判，结论经写口落事实；
+        // 拒绝即判死这一笔，不再进入能力调用。旧路径的载荷不带 `threshold`，这里保持旁路。
+        if let Some(authz) = authorize(&payload) {
+            exec.emit
+                .emit(vec![authz_draft(&exec.idempotency_key, &payload, authz)])
+                .await;
+            if let Authz::Denied { why } = authz {
+                return PortOutcome::failed(
+                    PortErrorClass::NonRetryable,
+                    format!("Error: authorization denied ({why})"),
+                );
+            }
+        }
         let tool_name = match payload.get(KEY_TOOL_NAME).and_then(|v| v.as_str()) {
             Some(name) => name.to_string(),
             None => return error_outcome("Error: Missing tool_name"),

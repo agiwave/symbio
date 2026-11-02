@@ -1,11 +1,11 @@
 {
   "faces": {
     "F1": {
-      "prod": 1495,
+      "prod": 1497,
       "test": 1305
     },
     "F2": {
-      "prod": 193,
+      "prod": 195,
       "test": 564
     },
     "F3": {
@@ -31,6 +31,20 @@
     }
   ],
   "pending": [
+    {
+      "face": "F1/F2",
+      "file": "crates/symbio-plugin-tool/src/port.rs",
+      "pattern": "Entity::Turn",
+      "reason": "P1a 承接体：授权事实的写方随 D-306 从环移到端口执行体，事实格位仍是内核既有的 (Turn, Asserted)；这是写方计数 +1，不是新增事实名。与内核 Entity 裁决同步收敛",
+      "until": "Entity 裁决落地"
+    },
+    {
+      "face": "F1/F2",
+      "file": "crates/symbio-plugin-api/src/events.rs",
+      "pattern": "Entity::Turn",
+      "reason": "生成物：authz.granted 进共享臂后随行投影 owner 的格位 (Turn, Asserted)（D-306 迁移期，写方在端口执行体）。与内核 Entity 裁决同步收敛",
+      "until": "Entity 裁决落地"
+    },
     {
       "face": "F2",
       "file": "crates/symbio-kernel/src/decl/mod.rs",
