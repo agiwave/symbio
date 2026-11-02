@@ -240,3 +240,9 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
 4. 每批跑端到端与 `EX-003` 反向用例，`SC-006` 基线只减不增；核对 `EX-007`（机制面新增行为 0，删除行不限——`D-283`；`session` 只含删除与绑定切换）。
 5. 全部搬完后核对：session 的 `lib.rs` 导出面只剩基底接口，能力名的读写为零。
 6. 与 S6 的终态合并检查，再进 S8。
+
+### 进度
+
+| 项 | 状态 | 读数 |
+|---|---|---|
+| #31 目标自生成 | **已落**（`a675118e`） | `crates/symbio-plugin-conation` 交出投影 + 两半折叠（`eval` / `agg`）；`session` 三处读方（`stats` 列 / 实例级 `aggregate` / 自主触发）全部按名字读；`conation.rs` 已删，`conation.expressed` 的格位随包走。验证：`cargo test -p symbio-plugin-conation` 9 条通过，`t36-autonomous-initiator` e2e 通过（30.4s）。**本片剩余 diff = 0**（工作区两次核对为空），无新增机制行 |
