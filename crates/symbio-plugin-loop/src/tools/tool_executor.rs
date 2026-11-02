@@ -20,6 +20,7 @@ use symbio_kernel::event::Event;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::{Plugin, PluginInvokeRequest};
 use symbio_kernel::store::Store;
+use symbio_plugin_api::plugin_error;
 use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
 
 mod breaker;
@@ -100,6 +101,7 @@ pub async fn execute_tool_async(
 ) -> (String, bool, Option<PendingPrompt>) {
     let absent = |why: &str| {
         let text = format!("Error: `port.tool` 缺席：{why}（工具 {tool_name} 未执行）");
+        plugin_error!("session", "[Tool] {text}");
         (text, false, None)
     };
     let Some(provider) = super::super::port::tool_port(&ctx).await else {
