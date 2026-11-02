@@ -435,6 +435,7 @@ impl TurnRunner {
                 steps: 0,
                 inflight: None,
                 tool_flight: None,
+                live_effect_keys: std::collections::HashSet::new(),
             })),
         }
     }
@@ -482,6 +483,9 @@ pub(crate) struct TurnSession {
     /// `inflight` 逐字相同——`Prepared` 被 `&` 借给若干异步读口，槽里的
     /// `dyn Future` 只 `Send` 不 `Sync`，进草稿会让那些读口集体失去 `Send`。
     tool_flight: Option<stream::ToolFlight>,
+    /// 本幕已经发出的**实时上线**效果键（`owner/anchor/key`）：上线的幂等由宿主守，
+    /// 事实面没有可撞的格（`D-293`）。
+    pub(crate) live_effect_keys: std::collections::HashSet<String>,
 }
 
 impl TurnSession {

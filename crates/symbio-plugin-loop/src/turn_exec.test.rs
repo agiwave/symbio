@@ -2811,7 +2811,7 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
 // 投递被吸收（`Duplicate`）而事实面上仍只有一格。本组先在阶段格这一面钉住出现 /
 // 重复幂等 / 未声明面 / 键不符四条判据。
 
-use symbio_plugin_api::effects::{EffectDraft, EffectFace, StageDraft};
+use symbio_plugin_api::effects::{DialogDraft, EffectDraft, EffectFace, LiveDraft, StageDraft};
 
 /// 开一轮用户格：效果写口的溯源锚（I2——效果落格必须指回这一轮）。
 fn seed_effect_turn(store: &EventStore, turn: u64) -> u64 {
@@ -2840,20 +2840,31 @@ fn landed_stages(store: &EventStore) -> Vec<Event> {
         .collect()
 }
 
+/// 写口盖章的测试形状（owner / 锚 / 轮号都由夹具给定，生产里由宿主从上下文取）。
+fn effect_stamp<'a>(user_seq: u64, principal: &'a str, anchor: &'a str) -> super::EffectStamp<'a> {
+    super::EffectStamp {
+        turn: 3,
+        user_seq,
+        principal,
+        owner: "test.row",
+        anchor,
+        round: 0,
+    }
+}
+
 #[test]
 fn a_stage_effect_lands_through_the_single_write_port() {
     let store = EventStore::new();
     let user_seq = seed_effect_turn(&store, 3);
+    let mut live_keys = std::collections::HashSet::new();
 
     super::land_effects(
+        &mut live_keys,
         &store,
+        None,
         &[EffectFace::Stage],
         vec![EffectDraft::Stage(StageDraft::new("d3", "skill.compiled"))],
-        3,
-        user_seq,
-        "session/main",
-        "d3",
-        0,
+        effect_stamp(user_seq, "session/main", "d3"),
     )
     .expect("阶段效果落格");
 
@@ -2874,16 +2885,15 @@ fn a_duplicate_effect_is_absorbed_by_the_idempotency_key() {
     let store = EventStore::new();
     let user_seq = seed_effect_turn(&store, 3);
     let draft = || EffectDraft::Stage(StageDraft::new("d3", "skill.compiled"));
-    let land = |drafts: Vec<EffectDraft>| {
+    let mut live_keys = std::collections::HashSet::new();
+    let mut land = |drafts: Vec<EffectDraft>| {
         super::land_effects(
+            &mut live_keys,
             &store,
+            None,
             &[EffectFace::Stage],
             drafts,
-            3,
-            user_seq,
-            "session/main",
-            "d3",
-            0,
+            effect_stamp(user_seq, "session/main", "d3"),
         )
         .expect("重复投递不是失败")
     };
@@ -2902,16 +2912,15 @@ fn a_duplicate_effect_is_absorbed_by_the_idempotency_key() {
 fn an_undeclared_face_is_rejected_at_the_write_port() {
     let store = EventStore::new();
     let user_seq = seed_effect_turn(&store, 3);
+    let mut live_keys = std::collections::HashSet::new();
 
     let err = super::land_effects(
+        &mut live_keys,
         &store,
+        None,
         &[],
         vec![EffectDraft::Stage(StageDraft::new("d3", "skill.compiled"))],
-        3,
-        user_seq,
-        "session/main",
-        "d3",
-        0,
+        effect_stamp(user_seq, "session/main", "d3"),
     )
     .expect_err("未声明的效果面必须被拒");
     assert!(matches!(err, super::ActorError::Read(_)), "{err:?}");
@@ -2922,21 +2931,98 @@ fn an_undeclared_face_is_rejected_at_the_write_port() {
 fn a_stage_key_that_breaks_the_convention_is_rejected() {
     let store = EventStore::new();
     let user_seq = seed_effect_turn(&store, 3);
+    let mut live_keys = std::collections::HashSet::new();
 
     let err = super::land_effects(
+        &mut live_keys,
         &store,
+        None,
         &[EffectFace::Stage],
         vec![EffectDraft::Stage(StageDraft {
             key: "st-other-skill.compiled".to_string(),
             stage: "skill.compiled".to_string(),
         })],
-        3,
-        user_seq,
-        "session/main",
-        "d3",
-        0,
+        effect_stamp(user_seq, "session/main", "d3"),
     )
     .expect_err("能力拼错幂等键必须在写口一处被拒");
     assert!(matches!(err, super::ActorError::Read(_)), "{err:?}");
     assert!(landed_stages(&store).is_empty(), "键不符的草稿不得落格");
+}
+
+#[test]
+fn a_dialog_effect_lands_a_message_with_a_host_assigned_id() {
+    let store = EventStore::new();
+    let user_seq = seed_effect_turn(&store, 3);
+    let mut live_keys = std::collections::HashSet::new();
+    let draft = || {
+        EffectDraft::Dialog(DialogDraft {
+            key: "note-1".to_string(),
+            role: "assistant",
+            text: "已记下".to_string(),
+            card: Some(serde_json::json!({ "kind": "note" })),
+        })
+    };
+    let mut land = |drafts: Vec<EffectDraft>| {
+        super::land_effects(
+            &mut live_keys,
+            &store,
+            None,
+            &[EffectFace::Dialog],
+            drafts,
+            effect_stamp(user_seq, "session/main", "d3"),
+        )
+        .expect("对话面效果落格")
+    };
+
+    land(vec![draft()]);
+    land(vec![draft()]);
+
+    let added: Vec<Event> = store
+        .range(Seq::new(0))
+        .into_iter()
+        .filter(|e| e.kind == EVENT_MESSAGE_ADDED)
+        .collect();
+    assert_eq!(added.len(), 1, "同一幂等键只诞生一条消息：{added:?}");
+    assert_eq!(
+        added[0].event_id, "dlg-test.row-d3-note-1",
+        "节点身份由宿主按 (owner, anchor, key) 派生"
+    );
+    let node = &added[0].payload["messages"][0];
+    assert_eq!(node["id"], "dlg-test.row-d3-note-1", "事实与节点同一身份");
+    assert_eq!(node["content"], "已记下");
+    assert_eq!(node["meta"]["card"]["kind"], "note");
+    assert_eq!(
+        added[0].produced_by,
+        Some(user_seq),
+        "对话面效果的溯源锚指回本轮"
+    );
+}
+
+#[test]
+fn a_live_effect_is_sent_once_per_owner_and_key() {
+    let store = EventStore::new();
+    let user_seq = seed_effect_turn(&store, 3);
+    let mut live_keys = std::collections::HashSet::new();
+    let frame = serde_json::json!({ "id": "live-1", "content": "做个样子" });
+
+    for _ in 0..2 {
+        super::land_effects(
+            &mut live_keys,
+            &store,
+            None,
+            &[EffectFace::Live],
+            vec![EffectDraft::Live(LiveDraft {
+                key: "live-1".to_string(),
+                frame: frame.clone(),
+            })],
+            effect_stamp(user_seq, "session/main", "d3"),
+        )
+        .expect("上线草稿不因重复投递而失败");
+    }
+
+    assert_eq!(live_keys.len(), 1, "同一 (owner, anchor, key) 只登记一次");
+    assert!(
+        store.range(Seq::new(0)).iter().all(|e| e.kind != EVENT_MESSAGE_ADDED),
+        "实时上线是呈现，不是事实（D-293）"
+    );
 }

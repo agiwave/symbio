@@ -102,7 +102,7 @@ use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest};
 use symbio_kernel::store::{AppendError, Store};
 use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
-    EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_USER_MESSAGE,
+    EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_MESSAGE_ADDED, EVENT_USER_MESSAGE,
 };
 use symbio_sdk::adapters::{
     AdapterError, DeltaSink, FullModel, LlmAdapter, ProviderLlmAdapter, TokenIssuer,
@@ -1312,15 +1312,21 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                     .as_ref()
                     .map(|head| head.turn.request_round)
                     .unwrap_or(0);
+                let head = ctx.head.as_ref();
                 return land_effects(
+                    &mut ctx.session.live_effect_keys,
                     ctx.store.as_ref(),
+                    head,
                     handler.effects(),
                     effects,
-                    turn,
-                    user_seq,
-                    &principal,
-                    &anchor,
-                    round,
+                    EffectStamp {
+                        turn,
+                        user_seq,
+                        principal: &principal,
+                        owner: ctx.row,
+                        anchor: &anchor,
+                        round,
+                    },
                 );
             }
             // 零往返作答（D-260）：草稿按同一份名单落，随后由**宿主**代落「已答」阶段格
@@ -1461,25 +1467,50 @@ fn land_drafts(
     Ok(())
 }
 
+/// 写口替能力盖的那几样章：轮号、主体、归属、幕锚与请求轮次。
+///
+/// 打包成一项而不是摊成长参数表（`too_many_arguments` 的根因是“函数管太多件事”，
+/// 而这一组恰好只回答“宿主替草稿补什么”）。
+struct EffectStamp<'a> {
+    turn: u64,
+    user_seq: u64,
+    principal: &'a str,
+    owner: &'a str,
+    anchor: &'a str,
+    round: usize,
+}
+
 /// 三类效果面的**唯一写口**（D-293）：形状由声明复核，幂等键在落格一处拒绝重复。
 ///
 /// 能力交的是纯值草稿；轮号、主体、时刻与节点 id 都在这里盖章。`Duplicate` 不是
 /// 失败——重试与续写幕会重复投递同一份草稿，吸收它正是幂等键的用处。
 fn land_effects(
+    live_keys: &mut std::collections::HashSet<String>,
     store: &dyn Store<Event = Event>,
+    head: Option<&HeadCtx<'_>>,
     declared: &'static [symbio_plugin_api::effects::EffectFace],
     effects: Vec<symbio_plugin_api::effects::EffectDraft>,
-    turn: u64,
-    user_seq: u64,
-    principal: &str,
-    anchor: &str,
-    round: usize,
+    stamp: EffectStamp<'_>,
 ) -> Result<(), ActorError> {
+    let EffectStamp {
+        turn,
+        user_seq,
+        principal,
+        owner,
+        anchor,
+        round,
+    } = stamp;
     use symbio_plugin_api::effects::EffectDraft;
     let mut sorted = effects;
-    // 宿主按 `(key)` 定序（同一行的一次调用里 owner 不变）：能力交的次序不参与裁决。
+    // 宿主按 `(key)` 定序（同一行的一次调用里 owner / anchor 不变）：能力交的次序
+    // 不参与裁决。
     sorted.sort_by(|a, b| a.key().cmp(b.key()));
     for effect in sorted {
+        if effect.key().trim().is_empty() {
+            return Err(ActorError::Read(PluginError::InternalError(
+                "效果草稿缺少幂等键".into(),
+            )));
+        }
         let face = effect.face();
         if !declared.contains(&face) {
             return Err(ActorError::Read(PluginError::InternalError(format!(
@@ -1513,12 +1544,74 @@ fn land_effects(
                     Err(e) => return Err(ActorError::Append(e)),
                 }
             }
-            // 对话面与实时上线尚未接线：声明可以先行，草稿在这两面上会被明确拒绝，
-            // 不静默丢弃（静默丢弃正是「效果丢了」与「这件事没发生」不可分的来源）。
-            EffectDraft::Dialog(_) | EffectDraft::Live(_) => {
-                return Err(ActorError::Read(PluginError::InternalError(
-                    "该效果面尚未接线".into(),
-                )))
+            // 对话面：节点 id 与轮号由宿主定，能力只给角色 / 正文 / 卡片。
+            // 节点身份由幂等键派生 ⇒ 重复投递撞同一事件 id，`Duplicate` 吸收；
+            // 只有**首次**落格才上线，重复投递不会在实时面多出一张卡。
+            EffectDraft::Dialog(draft) => {
+                let id = format!("dlg-{owner}-{anchor}-{}", draft.key);
+                let who = match draft.role {
+                    "user" => symbio_sdk::authz::PRINCIPAL_USER,
+                    "system" => "system/local",
+                    _ => principal,
+                };
+                let mut node = symbio_sdk::turn::node_build::dialog_node(
+                    &draft.text,
+                    "effect",
+                    false,
+                    &symbio_sdk::chat::principal::Principal::from_legacy(who),
+                );
+                node.id = id.clone();
+                if let Some(card) = &draft.card {
+                    if let Some(meta) = node.meta.as_mut() {
+                        meta["card"] = card.clone();
+                    }
+                }
+                let event = Event::pending(
+                    id,
+                    EVENT_MESSAGE_ADDED,
+                    Entity::Message,
+                    Verb::Opened,
+                    turn,
+                    principal,
+                )
+                .with_produced_by(user_seq)
+                .with_payload(serde_json::json!({ "messages": [node.clone()] }));
+                match store.append(event) {
+                    Ok(_) => {
+                        if let Some(head) = head {
+                            if let Ok(mut sink) = head.report_landing.collected.lock() {
+                                sink.push(node.clone());
+                            }
+                            head.report_landing.live.on_tool_frame(&node);
+                        }
+                    }
+                    Err(AppendError::Duplicate) => {}
+                    Err(e) => return Err(ActorError::Append(e)),
+                }
+            }
+            // 实时上线：纯值帧经既有帧出口发出；同一 `(owner, anchor, key)` 只发一次。
+            // 发行失败**只记读数**、不回写事实——「帧丢了」与「这件事没发生」必须可分。
+            EffectDraft::Live(draft) => {
+                let seen_key = format!("{owner}/{anchor}/{}", draft.key);
+                if !live_keys.insert(seen_key) {
+                    continue;
+                }
+                let Some(head) = head else {
+                    symbio_plugin_api::plugin_warn!(
+                        "session",
+                        "[v2] 实时上线草稿无处发出（本幕没有 UI 桥）：key={}",
+                        draft.key
+                    );
+                    continue;
+                };
+                match serde_json::from_value::<ChatNode>(draft.frame) {
+                    Ok(node) => head.report_landing.live.on_tool_frame(&node),
+                    Err(e) => symbio_plugin_api::plugin_warn!(
+                        "session",
+                        "[v2] 实时上线草稿不是可发出的帧：key={} err={e}",
+                        draft.key
+                    ),
+                }
             }
         }
     }
