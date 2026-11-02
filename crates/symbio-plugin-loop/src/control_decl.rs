@@ -13,6 +13,7 @@ use symbio_kernel::event::{
     Entity, Event, EventDecl, FactRole, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
     EVENT_RETRY, EVENT_SENT,
 };
+use symbio_plugin_api::port::ports;
 use symbio_sdk::projection::vocab::{ChatVocab, MessageVocab};
 
 // ── 本插件持有的事件名（DE-024 D-197 / D-201）──
@@ -733,7 +734,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         .filter(|e| {
             e.turn == turn
                 && e.kind == EVENT_RESPONSE
-                && str_field(e, "port") == Some("model")
+                && str_field(e, "port") == Some(ports::MODEL)
                 && str_field(e, "via").is_none()
                 && after_anchor(e, anchor_seq)
         })
@@ -772,7 +773,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         .filter(|e| {
             e.turn == turn
                 && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
-                && str_field(e, "port") == Some("model")
+                && str_field(e, "port") == Some(ports::MODEL)
                 && str_field(e, "via").is_none()
                 && after_anchor(e, anchor_seq)
         })
@@ -782,7 +783,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
                 && events.iter().any(|r| {
                     r.turn == turn
                         && r.kind == EVENT_REQUEST
-                        && str_field(r, "port") == Some("model")
+                        && str_field(r, "port") == Some(ports::MODEL)
                         && str_field(r, "via").is_none()
                         && after_anchor(r, anchor_seq)
                         && str_field(r, "id") == str_field(e, "id")
@@ -806,11 +807,11 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         && events.iter().any(|req| {
             req.turn == turn
                 && req.kind == EVENT_REQUEST
-                && str_field(req, "port") == Some("tool")
+                && str_field(req, "port") == Some(ports::TOOL)
                 && !events.iter().any(|e| {
                     e.turn == turn
                         && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
-                        && str_field(e, "port") == Some("tool")
+                        && str_field(e, "port") == Some(ports::TOOL)
                         && str_field(e, "id") == str_field(req, "id")
                         && seq_of(e) > seq_of(req)
                 })
@@ -835,13 +836,13 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let model_open = events.iter().any(|req| {
         req.turn == turn
             && req.kind == EVENT_REQUEST
-            && str_field(req, "port") == Some("model")
+            && str_field(req, "port") == Some(ports::MODEL)
             && str_field(req, "via").is_none()
             && after_anchor(req, anchor_seq)
             && !events.iter().any(|e| {
                 e.turn == turn
                     && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED | EVENT_RETRY)
-                    && str_field(e, "port") == Some("model")
+                    && str_field(e, "port") == Some(ports::MODEL)
                     && str_field(e, "id") == str_field(req, "id")
                     && u64_field(e, "attempt") == u64_field(req, "attempt")
             })
@@ -854,7 +855,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
                     !events.iter().any(|e| {
                         e.turn == turn
                             && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
-                            && str_field(e, "port") == Some("tool")
+                            && str_field(e, "port") == Some(ports::TOOL)
                             && str_field(e, "id") == Some(id)
                             && after_anchor(e, anchor_seq)
                     })
@@ -1084,14 +1085,14 @@ fn next_round_trip(events: &[Event], now: i64) -> serde_json::Value {
         .filter(|e| {
             e.turn == turn
                 && e.kind == EVENT_REQUEST
-                && str_field(e, "port") == Some("model")
+                && str_field(e, "port") == Some(ports::MODEL)
                 && str_field(e, "via").is_none()
                 && after_anchor(e, anchor)
         })
         .count();
     serde_json::json!({
-        "port": "model",
-        "id": format!("model-{turn}-d{anchor}-s{step}"),
+        "port": ports::MODEL,
+        "id": format!("{}-{turn}-d{anchor}-s{step}", ports::MODEL),
         "attempt": 1,
     })
 }
@@ -1169,7 +1170,7 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
                 events.iter().any(|r| {
                     r.turn == turn
                         && matches!(r.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
-                        && str_field(r, "port") == Some("tool")
+                        && str_field(r, "port") == Some(ports::TOOL)
                         && str_field(r, "id") == Some(id)
                         && after_anchor(r, drive_seq)
                 })
@@ -1180,7 +1181,7 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
         .filter(|e| {
             e.turn == turn
                 && e.kind == EVENT_RESPONSE
-                && str_field(e, "port") == Some("model")
+                && str_field(e, "port") == Some(ports::MODEL)
                 && str_field(e, "via").is_none()
                 && after_anchor(e, drive_seq)
         })

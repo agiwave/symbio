@@ -18,8 +18,8 @@
 //! phase 3  报告      53  report：静默到期 ∧ 配额未满 ∧ 停在已关闭的批次边界
 //! phase 4  收束      55  close-turn / 56 continue-turn
 //! phase 5  模型派发  60  announce-model / 66 dispatch-model
-//! phase 6  工具派发  67  open-tools / 68 dispatch-tools / 69 deny-tools
-//! phase 7  等待      71  await-model / 72  await-tools
+//! phase 6  工具派发  67  open-tools / 68 dispatch-tool / 69 deny-tools
+//! phase 7  等待      71  await-model / 72  await-tool
 //! phase 8  归宿      200+ artifact.added 等
 //! ```
 //!
@@ -67,6 +67,7 @@ use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_SESSION_CONSOLIDATED,
     EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH, EVENT_TURN_SUPPLEMENTED,
 };
+use symbio_plugin_api::port::ports;
 
 use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
 
@@ -101,7 +102,7 @@ const OPENER: &str = "opener";
 const AUTHORIZER: &str = "authorizer";
 /// 派发执行体（b）：放行的落 `sent` 交给执行层（只交出去，不等结果——`D-124` 订正 1）。
 const COURIER: &str = "courier";
-/// 派发的收尾执行体（`D-124` 订正 1）：`await-tools` / `deny-tools` 两行选中的动作——
+/// 派发的收尾执行体（`D-124` 订正 1）：`await-tool` / `deny-tools` 两行选中的动作——
 /// 收这一批的结果、关账，被拒的落 `failed`。
 ///
 /// 与 [`COURIER`] 分开是「一个 `by` 一个动作」的同一条理由（D-118 决策 1–2）：
@@ -211,7 +212,7 @@ const ACTOR_AUTHORIZER: ActorDecl = ActorDecl {
     writes: &[EVENT_AUTHZ_GRANTED, EVENT_AUTHZ_DENIED],
 };
 
-/// 派发执行体（b）：`dispatch-tools` 行选中的动作——已放行的落 `sent` 并交给执行层。
+/// 派发执行体（b）：`dispatch-tool` 行选中的动作——已放行的落 `sent` 并交给执行层。
 ///
 /// ## 它为什么一条领域格都不写（`D-124` 订正 1）
 ///
@@ -231,7 +232,7 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
     writes: &[],
 };
 
-/// 派发的**收尾半**（`D-124` 订正 1）：`await-tools` / `deny-tools` 两行选中的动作——
+/// 派发的**收尾半**（`D-124` 订正 1）：`await-tool` / `deny-tools` 两行选中的动作——
 /// 收这一批的结果、关账、落产物与等待格。
 ///
 /// 与 [`ACTOR_COURIER`] 分开是「一个 `by` 一个动作」的直接后果（D-118 决策 1–2）：
@@ -743,7 +744,7 @@ impl Next {
 /// 一次**模型往返**。它在轮内发起（`D-115` 决策 5：两者之间没有双调度器）。
 pub(crate) static PORTS: &[PortDecl] = &[
     PortDecl {
-        port: "model",
+        port: ports::MODEL,
         before: EVENT_SENT,
         lease_ms: 600_000,
         max_attempts: 1,
@@ -765,7 +766,7 @@ pub(crate) static PORTS: &[PortDecl] = &[
     //
     // 上限 2 = 首次 + 一次重试；再抬就需要新的等待方形态，而不是改数字。
     PortDecl {
-        port: "tool",
+        port: ports::TOOL,
         before: EVENT_SENT,
         lease_ms: 600_000,
         max_attempts: 2,
@@ -783,7 +784,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // 两行，不是一行：
     //
     //   authorize-tool   owes: request(port=tool)      until: granted | denied
-    //   dispatch-tools   owes: granted(port=tool)      until: sent | failed
+    //   dispatch-tool   owes: granted(port=tool)      until: sent | failed
     //
     // ## 为什么派发行 `owes` 写 `granted` 而不是 `request ∧ granted`
     //
@@ -792,7 +793,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // **裁过：不补**（`D-290`）——补合取省不出一行，行数欠的是出口格的种数，不是
     // 前件的复杂度；两行形状因此是终态，不是待合一的过渡。这里用
     // **蕴含**代替合取：`granted` 只可能由 `authorize-tool` 从一笔 `request`
-    // 派生，所以 `granted ⇒ request` 在数据上成立；`dispatch-tools` 只欠
+    // 派生，所以 `granted ⇒ request` 在数据上成立；`dispatch-tool` 只欠
     // `granted`，与 `request ∧ granted` 的可达债集合相同。
     //
     // 蕴含成立的前提要有人守：`authz.granted` **只有 `granted_event` 一个构造点**，
@@ -800,12 +801,12 @@ pub(crate) static ROWS: &[Decl] = &[
     // 蕴含在数据上断掉而门禁全绿，那是 `D-290` 重开条件第 1 条。
     //
     // 这不是近似：`denied` ⇒ 没有 `granted` ⇒ 派发行**永不**成立（fail-closed），
-    // 而「还没判」⇒ `authorize-tool` 仍开着、`dispatch-tools` 不欠——两种状态在
+    // 而「还没判」⇒ `authorize-tool` 仍开着、`dispatch-tool` 不欠——两种状态在
     // 匹配上可分，正是判据 8b 要的那条区分。全程没有否定原子。
     //
     // ## 为什么两行的 `key` 都是 `(port, id, attempt)`
     //
-    // `authorize-tool` 的出口是 `authz.granted` / `authz.denied`，`dispatch-tools`
+    // `authorize-tool` 的出口是 `authz.granted` / `authz.denied`，`dispatch-tool`
     // 的出口是 `sent` / `failed`：它们必须与协议事实关同一**次尝试**（D-138）。
     // 逻辑键会让上一 attempt 的出口把行提前关掉，重试出来的 `request{attempt+1}`
     // 就再也欠不动授权与派发。`authz.denied` 的**收束格拒绝**那条载荷只有 `key`
@@ -823,18 +824,18 @@ pub(crate) static ROWS: &[Decl] = &[
         owes: Pattern {
             source: EVENT_REQUEST,
             key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str("tool"))],
+            eq: &[("port", Lit::Str(ports::TOOL))],
         },
         until: &[
             Pattern {
                 source: EVENT_AUTHZ_GRANTED,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("tool"))],
+                eq: &[("port", Lit::Str(ports::TOOL))],
             },
             Pattern {
                 source: EVENT_AUTHZ_DENIED,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("tool"))],
+                eq: &[("port", Lit::Str(ports::TOOL))],
             },
         ],
         unless: &[],
@@ -1109,7 +1110,7 @@ pub(crate) static ROWS: &[Decl] = &[
         until: &[Pattern {
             source: EVENT_REQUEST,
             key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str("model"))],
+            eq: &[("port", Lit::Str(ports::MODEL))],
         }],
         unless: &[],
     },
@@ -1137,7 +1138,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // 宣布之后那一笔在日志上是一笔**开着**的债，派发由选债触发（不是执行体内部
     // 顺手调一次往返），所以「这一笔该谁跑」在事实面上可判、在崩溃后可接。
     //
-    // 与 `dispatch-tools` 不共用一个执行体名：一个 `by` 一个动作（D-118 决策 1–2），
+    // 与 `dispatch-tool` 不共用一个执行体名：一个 `by` 一个动作（D-118 决策 1–2），
     // 而 `courier` 的动作派发的是**一批**（批尾关账、落等待格与轮内注入），
     // 与「跑一次往返」不是同一件事——共名会让动作只能按行名分支。
     Decl {
@@ -1151,7 +1152,7 @@ pub(crate) static ROWS: &[Decl] = &[
         owes: Pattern {
             source: EVENT_REQUEST,
             key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str("model"))],
+            eq: &[("port", Lit::Str(ports::MODEL))],
         },
         // 出口**只有 `sent`**（`D-222` 订正 2）：落完它这一行的账就还清了，「在等」
         // 由 `await-model` 认领。此前出口是 `response|failed`，于是派出与收应答在同一个
@@ -1159,7 +1160,7 @@ pub(crate) static ROWS: &[Decl] = &[
         until: &[Pattern {
             source: EVENT_SENT,
             key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str("model"))],
+            eq: &[("port", Lit::Str(ports::MODEL))],
         }],
         unless: &[],
     },
@@ -1182,18 +1183,18 @@ pub(crate) static ROWS: &[Decl] = &[
         owes: Pattern {
             source: EVENT_RESPONSE,
             key: &["port", "id"],
-            eq: &[("port", Lit::Str("model"))],
+            eq: &[("port", Lit::Str(ports::MODEL))],
         },
         until: &[
             Pattern {
                 source: EVENT_REQUEST,
                 key: &["port", "id"],
-                eq: &[("port", Lit::Str("tool"))],
+                eq: &[("port", Lit::Str(ports::TOOL))],
             },
             Pattern {
                 source: EVENT_FAILED,
                 key: &["port", "id"],
-                eq: &[("port", Lit::Str("tool"))],
+                eq: &[("port", Lit::Str(ports::TOOL))],
             },
         ],
         unless: &[],
@@ -1201,11 +1202,11 @@ pub(crate) static ROWS: &[Decl] = &[
     // 授权级联的第二行（第一行 `authorize-tool` 在表首）：只对已放行的那笔
     // 落 `sent`。`granted` 已蕴含 `request`，所以这里不再复写请求前件。
     //
-    // **本行只到 `sent` 为止**（`D-124` 订正 1）：交出去就关账，收应答是 `await-tools`。
+    // **本行只到 `sent` 为止**（`D-124` 订正 1）：交出去就关账，收应答是 `await-tool`。
     // 第二格 `failed` 是控制面失败的出口（`port::begin` 拒了这一笔：行不欠 / 端口没声明）
     // ——那条路上没有可等的往返，就地判死；留着它才不会让这一行永远开账。
     Decl {
-        name: "dispatch-tools",
+        name: "dispatch-tool",
         phase: 6,
         anchor: 68,
         // 派发动作（b）：放行的落 `sent` 交给执行层。批尾关账归 `waiter-tools`。
@@ -1216,27 +1217,27 @@ pub(crate) static ROWS: &[Decl] = &[
         owes: Pattern {
             source: EVENT_AUTHZ_GRANTED,
             key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str("tool"))],
+            eq: &[("port", Lit::Str(ports::TOOL))],
         },
         until: &[
             Pattern {
                 source: EVENT_SENT,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("tool"))],
+                eq: &[("port", Lit::Str(ports::TOOL))],
             },
             Pattern {
                 source: EVENT_FAILED,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("tool"))],
+                eq: &[("port", Lit::Str(ports::TOOL))],
             },
         ],
         unless: &[],
     },
     // 被拒的调用也要有人收尾（b）：`authz.denied` 关掉了授权行，但
-    // `dispatch-tools` 只欠 `granted`——一批**全被拒**（或全是非法调用）时它不欠，
+    // `dispatch-tool` 只欠 `granted`——一批**全被拒**（或全是非法调用）时它不欠，
     // 执行层就永远跑不到，`failed{why}` 也永远不落。这一行把「拒绝之后还必须做一次
     // 收尾」说成债务：出口与派发行同一格（`failed`），动作归**收尾半**
-    // （混合批次里那一笔由 68 起批、由本行与 `await-tools` 一起收掉，收完本行自然不欠）。
+    // （混合批次里那一笔由 68 起批、由本行与 `await-tool` 一起收掉，收完本行自然不欠）。
     //
     // 为什么 `by` 是 `waiter-tools` 而不是 `courier`（`D-124` 订正 1）：这一格是
     // 批尾关账写出来的，而批尾在收尾半；派发半在拒绝路径上一格都不落
@@ -1254,12 +1255,12 @@ pub(crate) static ROWS: &[Decl] = &[
         owes: Pattern {
             source: EVENT_AUTHZ_DENIED,
             key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str("tool"))],
+            eq: &[("port", Lit::Str(ports::TOOL))],
         },
         until: &[Pattern {
             source: EVENT_FAILED,
             key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str("tool"))],
+            eq: &[("port", Lit::Str(ports::TOOL))],
         }],
         unless: &[],
     },
@@ -1280,28 +1281,28 @@ pub(crate) static ROWS: &[Decl] = &[
         owes: Pattern {
             source: EVENT_SENT,
             key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str("model"))],
+            eq: &[("port", Lit::Str(ports::MODEL))],
         },
         until: &[
             Pattern {
                 source: EVENT_RESPONSE,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("model"))],
+                eq: &[("port", Lit::Str(ports::MODEL))],
             },
             Pattern {
                 source: EVENT_FAILED,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("model"))],
+                eq: &[("port", Lit::Str(ports::MODEL))],
             },
             Pattern {
                 source: EVENT_RETRY,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("model"))],
+                eq: &[("port", Lit::Str(ports::MODEL))],
             },
         ],
         unless: &[],
     },
-    // 一批 N 笔，一笔一条 `sent`；`await-tools` 与其它端口的 await 同形。
+    // 一批 N 笔，一笔一条 `sent`；`await-tool` 与其它端口的 await 同形。
     //
     // 键取 `(port, id, attempt)`：重试后新 attempt 的 `sent` 要重新开一笔等待，
     // 而不是被旧 attempt 的应答关掉（D-138）。
@@ -1311,34 +1312,34 @@ pub(crate) static ROWS: &[Decl] = &[
     // 「在等」只在崩溃恢复的输入上才有值；接上执行体之后，派出与应答分处两个环步，
     // 中间那一圈「`sent` 有、终局无」在**正常跑**里读得到。
     Decl {
-        name: "await-tools",
+        name: "await-tool",
         phase: 7,
         anchor: 72,
         by: Some(WAITER_TOOLS),
-        // 等的是工具执行层，不调模型：这一行的时延档与 `dispatch-tools` 同档
+        // 等的是工具执行层，不调模型：这一行的时延档与 `dispatch-tool` 同档
         // （`tier` 判的是「这一行要不要模型句柄」，不是「会占多久」）。
         tier: LatencyTier::Fast,
         expand: None,
         owes: Pattern {
             source: EVENT_SENT,
             key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str("tool"))],
+            eq: &[("port", Lit::Str(ports::TOOL))],
         },
         until: &[
             Pattern {
                 source: EVENT_RESPONSE,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("tool"))],
+                eq: &[("port", Lit::Str(ports::TOOL))],
             },
             Pattern {
                 source: EVENT_FAILED,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("tool"))],
+                eq: &[("port", Lit::Str(ports::TOOL))],
             },
             Pattern {
                 source: EVENT_RETRY,
                 key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("tool"))],
+                eq: &[("port", Lit::Str(ports::TOOL))],
             },
         ],
         unless: &[],
@@ -1352,7 +1353,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // 那种行上，卸载一个可选插件就成了装载期 `OrphanFact`。视图也顶不掉——`OrphanFact`
     // 的视图那一跳要求「有一条行以该视图为源」，单加一条视图不算认领。
     //
-    // `by` 挂收尾半（`await-tools` 的执行体正是落产物那一半）是 `D-222` 裁决 5 要求的：
+    // `by` 挂收尾半（`await-tool` 的执行体正是落产物那一半）是 `D-222` 裁决 5 要求的：
     // 整张行表都要在绑定表里，判据 `the_single_binding_table_binds_every_row` 钉的就是
     // 这一条。写 `None` 会把一行「永不欠账」的归宿行归进「未接线 = 调度旁路」那一格
     // （`D-158` 的归零对象）——不是给它派活，是别把它归错类。

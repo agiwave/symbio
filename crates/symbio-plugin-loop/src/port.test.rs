@@ -57,7 +57,7 @@ fn payload_of(store: &EventStore, kind: &str) -> serde_json::Value {
 
 /// 一笔放行的前提事实 `authz.granted(port=tool)`。
 ///
-/// 引擎在落 `sent` **之前**自己读授权行（D-136），而 `dispatch-tools` 的开账条件
+/// 引擎在落 `sent` **之前**自己读授权行（D-136），而 `dispatch-tool` 的开账条件
 /// 就是这条事实——工具端口的用例必须有它，否则派发会被拒。谁写它、载荷长什么
 /// 样归 `tool_dispatch.test.rs` 的写方用例；这里只补前提。
 fn grant(store: &EventStore, call: &Call) {
@@ -77,7 +77,7 @@ fn grant(store: &EventStore, call: &Call) {
             "port": "tool",
             "id": call.id,
             // 授权级联与派发关同一**次尝试**（D-138）：载荷带 `attempt`，
-            // 缺了它 `authorize-tool` / `dispatch-tools` 的三元组键取不到实例。
+            // 缺了它 `authorize-tool` / `dispatch-tool` 的三元组键取不到实例。
             "attempt": call.attempt
         })),
     )
@@ -169,7 +169,7 @@ async fn begin_and_succeed_can_bracket_a_whole_batch() {
                 call,
                 turn: 1,
                 produced_by: 7,
-                row: "dispatch-tools",
+                row: "dispatch-tool",
                 now: 0,
                 awaited: false,
             },
@@ -538,10 +538,9 @@ fn every_port_row_is_in_the_table() {
     // 加一个端口 = 1 条 `PortDecl` + 2 行模板（dispatch / await）。租约**不在表上**：
     // 看护读 `stale_sent` 视图（`port::reap`），所以这里只需两行。
     for p in PORTS {
-        // 工具端口的行名沿用方案里的复数（`dispatch-tools` / `await-tools`）：
-        // 一个工具端口的债单位是**单次调用**，但一次模型响应是一批；行名读的是
-        // 批次语义。模板仍是两条（dispatch / await），不是第三条。
-        let stem = if p.port == "tool" { "tools" } else { p.port };
+        // 行名统一单数 `dispatch-{port}` / `await-{port}`：行名读的是端口，
+        // 不是批次——一个工具端口的债单位虽是单次调用，行模板仍按端口各两条。
+        let stem = p.port;
         for row in [format!("dispatch-{stem}"), format!("await-{stem}")] {
             assert!(
                 ROWS.iter().any(|d| d.name == row),
@@ -954,8 +953,8 @@ fn a_replay_makes_up_only_the_call_that_never_came_back() {
         "dispatch-model",
         "open-tools",
         "authorize-tool",
-        "dispatch-tools",
-        "await-tools",
+        "dispatch-tool",
+        "await-tool",
     ] {
         assert!(
             !debts.iter().any(|d| d.decl.name == paid),

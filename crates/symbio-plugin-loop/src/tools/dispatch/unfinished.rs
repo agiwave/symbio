@@ -22,7 +22,7 @@ pub const NOT_EXECUTED: &str = "not_executed";
 /// 「本批没定稿父节点的那几笔」，而它把成因写在结果节点的 `meta.failure_kind` 上。
 /// 占位结果是**框架的交代**（给模型一句话、给前端一张卡），不是工具的应答：
 /// 端口若按「`outcomes` 里有这个 id 就算应答」关账，中止的调用会落成 `response`——
-/// 日志说「回来了」，而它从未执行，`await-tools` 的 `failed` 出口于是只有 resume
+/// 日志说「回来了」，而它从未执行，`await-tool` 的 `failed` 出口于是只有 resume
 /// 一条路径走过（DE-015 判据 6 的「中止唤醒」在事实面上等于没接）。
 ///
 /// 反过来，工具**跑完而失败**（`error` / `overflow_dropped` / 闸门拒绝的

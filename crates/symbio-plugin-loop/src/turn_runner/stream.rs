@@ -668,15 +668,15 @@ pub(crate) async fn authorize_round(
     }
 }
 
-/// 派发（`dispatch-tools` / `deny-tools` 两行的动作）：落 `sent`、
+/// 派发（`dispatch-tool` / `deny-tools` 两行的动作）：落 `sent`、
 /// 跑执行层、关账，落产物 / 等待 / 交换。
 ///
 /// `Ok(None)` = 继续下一轮；`Ok(Some)` = 本轮收束（等待用户）。
 ///
-/// 两行共用这一个动作：混合批次里 `dispatch-tools` 先被选中，它顺手把被拒的那几笔
-/// 也收尾（`close_batch`）；一批全被拒时 `dispatch-tools` 不欠，`deny-tools` 选中
+/// 两行共用这一个动作：混合批次里 `dispatch-tool` 先被选中，它顺手把被拒的那几笔
+/// 也收尾（`close_batch`）；一批全被拒时 `dispatch-tool` 不欠，`deny-tools` 选中
 /// 本动作，仍然要走执行层（审批卡 / 拒绝反馈由它唯一构造）。
-/// 派出半（`dispatch-tools` 行的动作，`D-124` 订正 1）：落 `sent`、
+/// 派出半（`dispatch-tool` 行的动作，`D-124` 订正 1）：落 `sent`、
 /// 把「跑执行层 + 收结果」整段寄存进草稿的 in-flight 槽。
 ///
 /// 与 [`land_round`] 成对（与 `model` 端口的 [`begin_model`] / [`poll_flight`] 逐字同形）：
@@ -710,7 +710,7 @@ pub(crate) async fn begin_round(
     }
 }
 
-/// 收尾半（`await-tools` / `deny-tools` 两行的动作）：poll 一次在飞的
+/// 收尾半（`await-tool` / `deny-tools` 两行的动作）：poll 一次在飞的
 /// 那一批，落地了就关账并落产物 / 等待格。
 ///
 /// ## 为什么只 poll 一次
@@ -781,7 +781,7 @@ pub(crate) async fn land_round(
 /// 一批工具的结果**落地**：产物格、等待进展、交换累加、轮内注入。
 ///
 /// 四段的写点都在「结果已经在手上」之后，与「派出去」那一刻无关，所以归收尾半
-/// （`await-tools` 那一行的动作，§4.1）。
+/// （`await-tool` 那一行的动作，§4.1）。
 async fn land_batch(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,

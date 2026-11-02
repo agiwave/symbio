@@ -937,11 +937,11 @@ fn rows_are_stable_and_globally_ordered() {
             // `open-tools` 是工具调用的创建行（D-117），不与派发合并。
             "dispatch-model",
             "open-tools",
-            "dispatch-tools",
+            "dispatch-tool",
             // 拒绝之后还得有人收尾（否则全被拒的一批永远跑不到 `failed`）。
             "deny-tools",
             "await-model",
-            "await-tools",
+            "await-tool",
             // 产物格的归宿行（自读）：认得下这笔事实即可，不欠后续步骤。
             "artifact.added",
         ]
@@ -973,7 +973,7 @@ fn rows_are_stable_and_globally_ordered() {
             // 拒绝收尾与派发同一执行体（不调工具）。
             symbio_kernel::adapters::LatencyTier::Fast,
             symbio_kernel::adapters::LatencyTier::Deep,
-            // `await-tools`：等的是工具执行层，不调模型 ⇒ 与 `dispatch-tools` 同档。
+            // `await-tool`：等的是工具执行层，不调模型 ⇒ 与 `dispatch-tool` 同档。
             symbio_kernel::adapters::LatencyTier::Fast,
             // 归宿行只认产物，不调模型。
             symbio_kernel::adapters::LatencyTier::Reflex,
@@ -1618,7 +1618,7 @@ fn the_model_rows_do_not_disturb_the_tool_rows() {
     let events = vec![request("t-1", 1)];
     assert!(owes("dispatch-model", &events, 0));
     assert!(
-        !owes("dispatch-tools", &events, 0),
+        !owes("dispatch-tool", &events, 0),
         "端口是债键的一部分：`model` 的账不能开 `tool` 的行"
     );
     assert!(!owes("authorize-tool", &events, 0));
@@ -1771,32 +1771,32 @@ fn a_tool_request_opens_authorization_and_both_answers_close_it() {
         "请求落了、还没判 ⇒ 欠一次授权"
     );
     assert!(
-        !owes("dispatch-tools", &asked, 0),
+        !owes("dispatch-tool", &asked, 0),
         "没放行 ⇒ 派发行不成立（fail-closed）"
     );
 
     let allowed = vec![tool_request("c-1"), tool_granted("c-1")];
     assert!(!owes("authorize-tool", &allowed, 0));
-    assert!(owes("dispatch-tools", &allowed, 0));
+    assert!(owes("dispatch-tool", &allowed, 0));
 
     let refused = vec![tool_request("c-1"), tool_denied("c-1")];
     assert!(!owes("authorize-tool", &refused, 0));
     assert!(
-        !owes("dispatch-tools", &refused, 0),
+        !owes("dispatch-tool", &refused, 0),
         "拒绝 ⇒ 没有 granted ⇒ 派发行永不成立"
     );
 }
 
 #[test]
 fn a_denied_tool_call_owes_a_close_only() {
-    // `dispatch-tools` 只欠 `granted`——一批全被拒时它不欠，若不另立
+    // `dispatch-tool` 只欠 `granted`——一批全被拒时它不欠，若不另立
     // 一行，`failed{why}` 永不落，`request` 那笔账也永远不关。
     let refused = vec![tool_request("c-1"), tool_denied("c-1")];
     assert!(
         owes("deny-tools", &refused, 0),
         "被拒的一笔仍欠一次收尾（落 `failed`）"
     );
-    assert!(!owes("dispatch-tools", &refused, 0));
+    assert!(!owes("dispatch-tool", &refused, 0));
 
     let mut closed = refused.clone();
     closed.push(ev(
@@ -1818,11 +1818,11 @@ fn a_denied_tool_call_owes_a_close_only() {
 #[test]
 fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
     let dispatched = vec![tool_request("c-1"), tool_granted("c-1"), tool_sent("c-1")];
-    assert!(!owes("dispatch-tools", &dispatched, 0));
+    assert!(!owes("dispatch-tool", &dispatched, 0));
     let debts = owed(ROWS, &frozen(), &dispatched, 0);
     let wait = debts
         .iter()
-        .find(|d| d.decl.name == "await-tools")
+        .find(|d| d.decl.name == "await-tool")
         .expect("等工具应答的行在");
     // 接上执行体之后（`D-124` 订正 1）「在等」不再折成 `Wait`：它还是一条可还的债，
     // 只是这一圈 poll 一次就回来——「在等」的唯一表达是 `loop_rows::waiting`
@@ -1839,7 +1839,7 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
         ));
         e
     };
-    assert!(!owes("await-tools", &answered, 0));
+    assert!(!owes("await-tool", &answered, 0));
 
     let failed = {
         let mut e = dispatched.clone();
@@ -1850,8 +1850,8 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
         ));
         e
     };
-    assert!(!owes("dispatch-tools", &failed, 0));
-    assert!(!owes("await-tools", &failed, 0));
+    assert!(!owes("dispatch-tool", &failed, 0));
+    assert!(!owes("await-tool", &failed, 0));
 }
 
 /// 判据 1：重试写出的 `request{attempt+1}` **重新打开**授权与派发两行（D-138）。
@@ -1892,12 +1892,12 @@ fn a_retried_request_reopens_authorization_and_dispatch() {
         "第二次尝试还没判 ⇒ 授权行重新开账"
     );
     assert!(
-        !owes("dispatch-tools", &sliced, 0),
+        !owes("dispatch-tool", &sliced, 0),
         "第二次尝试还没放行 ⇒ 派发行不成立（fail-closed）"
     );
 
     let f = frozen();
-    let rows = wired(&["authorize-tool", "dispatch-tools"]);
+    let rows = wired(&["authorize-tool", "dispatch-tool"]);
     assert_eq!(
         drive(&rows, &f, &sliced, 0).map(|d| d.decl.name),
         Some("authorize-tool"),
@@ -1920,12 +1920,12 @@ fn a_retried_request_reopens_authorization_and_dispatch() {
     ));
     assert!(!owes("authorize-tool", &sliced, 0));
     assert!(
-        owes("dispatch-tools", &sliced, 0),
+        owes("dispatch-tool", &sliced, 0),
         "第二次尝试已放行 ⇒ 欠一次派发"
     );
     assert_eq!(
         drive(&rows, &f, &sliced, 0).map(|d| d.decl.name),
-        Some("dispatch-tools"),
+        Some("dispatch-tool"),
         "派发器选中第二次尝试的派发"
     );
 
@@ -1952,12 +1952,12 @@ fn a_resumed_tool_call_is_authorized_and_awaited_like_a_batch_call() {
     let id = "tool-resume-1-tc-1-1";
     let open = vec![tool_request(id), tool_granted(id), tool_sent(id)];
     assert!(!owes("authorize-tool", &open, 0));
-    assert!(!owes("dispatch-tools", &open, 0));
+    assert!(!owes("dispatch-tool", &open, 0));
     let wait = owed(ROWS, &frozen(), &open, 0)
         .into_iter()
-        .find(|d| d.decl.name == "await-tools")
+        .find(|d| d.decl.name == "await-tool")
         .expect("恢复的那一笔派出后同样在等应答");
-    // 同上：`await-tools` 接上执行体之后不再是 `Wait`，仍是可还的债。
+    // 同上：`await-tool` 接上执行体之后不再是 `Wait`，仍是可还的债。
     assert!(!wait.blocked);
     assert!(wait.decl.by.is_some());
 
@@ -1967,12 +1967,12 @@ fn a_resumed_tool_call_is_authorized_and_awaited_like_a_batch_call() {
         symbio_kernel::event::EVENT_RESPONSE,
         json!({ "port": "tool", "id": id, "attempt": 1 }),
     ));
-    assert!(!owes("await-tools", &done, 0));
+    assert!(!owes("await-tool", &done, 0));
 }
 
 /// D-117：恢复调用的债前件是审批动作写下的 `request`，不是模型响应。
 ///
-/// 这一条钉住「`dispatch-tools` 不欠模型响应」这个决定：事实切片里**没有**
+/// 这一条钉住「`dispatch-tool` 不欠模型响应」这个决定：事实切片里**没有**
 /// `response(port=model)`，恢复的那一笔仍照常走「授权 → 派发」两行。
 #[test]
 fn a_resumed_tool_call_does_not_need_a_model_response() {
@@ -1988,7 +1988,7 @@ fn a_resumed_tool_call_does_not_need_a_model_response() {
     );
     assert!(!owes("authorize-tool", &events, 0), "已放行 ⇒ 授权行关账");
     assert!(
-        owes("dispatch-tools", &events, 0),
+        owes("dispatch-tool", &events, 0),
         "恢复的那一笔照样欠派发：债前件是它自己的 request，与模型响应无关"
     );
 }
@@ -2005,8 +2005,8 @@ fn an_aborted_tool_closes_the_await_with_its_own_reason() {
             json!({ "port": "tool", "id": "c-1", "attempt": 1, "why": "aborted" }),
         ),
     ];
-    assert!(!owes("dispatch-tools", &events, 0));
-    assert!(!owes("await-tools", &events, 0));
+    assert!(!owes("dispatch-tool", &events, 0));
+    assert!(!owes("await-tool", &events, 0));
     assert_eq!(
         events.last().and_then(|e| e.payload.get("why")),
         Some(&json!("aborted")),
@@ -2023,10 +2023,10 @@ fn a_supplement_does_not_answer_the_in_flight_tool() {
         tool_sent("c-1"),
         ev(1, "user.message", json!({ "text": "等一下", "id": "u-2" })),
     ];
-    assert!(!owes("dispatch-tools", &events, 0));
+    assert!(!owes("dispatch-tool", &events, 0));
     let wait = owed(ROWS, &frozen(), &events, 0)
         .into_iter()
-        .find(|d| d.decl.name == "await-tools")
+        .find(|d| d.decl.name == "await-tool")
         .expect("工具仍未被应答");
     // 形状跟着 `D-124` 订正 1 改：这一行接上了执行体，所以「还在等」由
     // `waiting`（`sent` 有、终局无）表达，而不是由 `Wait` 表达。补一句
@@ -2054,7 +2054,7 @@ fn a_closure_denial_does_not_close_a_tool_authorization() {
     );
     let events = vec![tool_request("c-1"), closure_denial];
     assert!(owes("authorize-tool", &events, 0));
-    assert!(!owes("dispatch-tools", &events, 0));
+    assert!(!owes("dispatch-tool", &events, 0));
 }
 
 #[test]
@@ -2062,7 +2062,7 @@ fn tool_rows_do_not_disturb_the_model_rows() {
     // 授权级联只认 `port = tool`：一条模型的 `request` 不开授权行。
     let events = vec![model_request("m-1")];
     assert!(!owes("authorize-tool", &events, 0));
-    assert!(!owes("dispatch-tools", &events, 0));
+    assert!(!owes("dispatch-tool", &events, 0));
 }
 
 // ── 派发器的选债口────────────────────────────────────────────
@@ -2761,7 +2761,7 @@ fn the_overlap_report_on_the_production_table() {
             // 派发行欠、宣布行不欠；派出之后等待行欠、宣布行仍不欠。
             ("announce-model", "dispatch-model", request),
             ("announce-model", "await-model", sent),
-            ("announce-model", "await-tools", sent),
+            ("announce-model", "await-tool", sent),
         ]
     );
 }

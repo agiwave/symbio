@@ -33,7 +33,7 @@ impl: done
 由同一个环按 `prio` 选中；那一行的出口（新落的 `round` 格）同时就是下一幕的锚与 `now`
 （判据 12：一幕一个锚）。控制面因此只有一个 `loop {`（`D-222` 裁决 5 / 判据 8）。
 模型往返与工具批次**也是这张表上的行**（`announce-model` → `dispatch-model` → `await-model`，
-`open-tools` → `authorize-tool` → `dispatch-tools` → `await-tools`），幕内没有第二段小循环（§4.1）。
+`open-tools` → `authorize-tool` → `dispatch-tool` → `await-tool`），幕内没有第二段小循环（§4.1）。
 
 五个收口点 + 一个状态容器（§2）：
 
@@ -170,7 +170,7 @@ fn gate_turn(turn: &TurnState) -> Gate
 [D-073](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
 
 「不完整不唤醒」没有废弃，它换了承担者：**结果接进 `exchange` 之后才可能开出下一笔
-`announce-model`**（`await-tools` 那一行的出口，§4.1）。因此——
+`announce-model`**（`await-tool` 那一行的出口，§4.1）。因此——
 
 > ⚠️ **「历史中所有 ToolCall 都有结果子节点」从来不是判据**：**「ToolCall 无结果」在本代码库是
 > 合法状态**（交互模式审批中断时本批剩余 ToolCall 有意留空，由请求视图层 `flatten_chat_messages`
@@ -189,7 +189,7 @@ fn gate_turn(turn: &TurnState) -> Gate
 
 > 闸门**不判工具轮数**：`max_tool_rounds` 那条软上限整条退役——它判的是 `TurnState` 上一个
 > 恒 0 的计数（§4.1；裁决与逐符号名册见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。**真要这道上限，
-> 位置在 `await-tools` 收尾之后、下一次 `announce-model` 开账之前**：那里有真实的 `tool_round`，
+> 位置在 `await-tool` 收尾之后、下一次 `announce-model` 开账之前**：那里有真实的 `tool_round`，
 > 而要新写的不只是判定，还有「到上限时这一批怎么收」的收束语义。
 
 ### 2.2 收口 ②：提示词 / 工具 / 请求视图 → `collect_reads` + `prepare_request_sections`
@@ -408,13 +408,13 @@ dispatch-model  66  relay 执行体派出这一笔，落 sent
 await-model     71  waiter 执行体等应答，落 response / failed
 open-tools      67  按响应里的 calls 逐条落 request(port=tool)
 authorize-tool   0  逐笔判权限：落 authz.granted / authz.denied
-dispatch-tools  68  courier 执行体放行的落 sent
+dispatch-tool    68  courier 执行体放行的落 sent
 deny-tools      69  被拒的落 failed（收束格拒绝）
-await-tools     72  批次收尾：产物格 / 等待进展格 / 交换累加 / 轮内注入
+await-tool       72  批次收尾：产物格 / 等待进展格 / 交换累加 / 轮内注入
 ```
 
 **「不完整不唤醒」由表本身守住**：下一笔 `announce-model` 的前件是视图 `next_round_trip`，
-而它只在上一批的交换都接进 `exchange` 之后才成立（`await-tools` 的出口）——结果没接进
+而它只在上一批的交换都接进 `exchange` 之后才成立（`await-tool` 的出口）——结果没接进
 `exchange` 就没有下一次请求，主循环侧因此不需要一份在途工具集合（§2.1）。
 
 阶段实现按 `turn_runner/` 切六件：`prepare`（草稿与提示词）→ `stream`（一次往返、批次收尾）→
@@ -431,7 +431,7 @@ await-tools     72  批次收尾：产物格 / 等待进展格 / 交换累加 / 
 
 `persist_turn` 里**没有**工具分发路径：v1 外壳那段 `process_tool_calls_async` 分支的进入条件
 （`TurnOutput.tool_calls` 非空）在 v2 恒不成立，随 [DE-014 步骤 5](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 删除；
-`persist_turn` 只读 `ModelFinishReason`，工具的真实执行点只有 `await-tools` 那一行接的批次。
+`persist_turn` 只读 `ModelFinishReason`，工具的真实执行点只有 `await-tool` 那一行接的批次。
 
 ### 4.2 必须保留的语义
 

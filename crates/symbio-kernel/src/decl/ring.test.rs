@@ -454,7 +454,7 @@ fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
 /// 第 6 条的第二档（`D-124` 订正 1）：出口**全是**引擎独占格的行——派发行的形状。
 ///
 /// 交集判不了它：那等于要求执行体声明一条第 5 条禁止它声明的格，两条检查互斥，
-/// 这一行当年只能 `by: None`（`dispatch-model` / `dispatch-tools` 曾是或正是这个形状）。
+/// 这一行当年只能 `by: None`（`dispatch-model` / `dispatch-tool` 曾是或正是这个形状）。
 /// 这一档判「有没有交出去的凭据」，两种形态都算：
 ///
 /// 1. 名单非空（旧口径）——它自己写得出领域格；

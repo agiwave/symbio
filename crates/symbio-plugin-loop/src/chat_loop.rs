@@ -246,7 +246,7 @@ pub async fn run_chat_loop(
     // - `RetryCompaction`：重跑一次压缩，不进对话轮次；
     // - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：在原轮上落一笔
     //   `request(port=tool)`（载荷带 `resume` 标记）。之后的授权 / 派发由行表
-    //   自己的 `authorize-tool` / `dispatch-tools` / `deny-tools` 承担——恢复路径
+    //   自己的 `authorize-tool` / `dispatch-tool` / `deny-tools` 承担——恢复路径
     // 不再自己写协议事实、不再自己跑执行层（d）。
     //
     // 唤醒请求落在幕锚之前，但 `turn_head` 的请求面按 seq 判终局，照样看得见它；

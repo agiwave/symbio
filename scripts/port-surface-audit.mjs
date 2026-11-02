@@ -310,12 +310,22 @@ for (const f of portFacts) {
 // ───────────────────────── 求解器：指纹与端口字段 ─────────────────────────
 
 /**
- * 端口**取值**名单：谁声明端口，谁的 `PortDecl` 就是名单来源——扫 `symbio/src` 下
+ * 端口**取值**名单：谁声明端口，谁的 `PortDecl` 就是名单来源——扫 `crates` 下
  * 含 `PortDecl {` 的 `.rs`，不钉某一张表。钉住文件会把插件路径写进这条 core 侧
  * 判据，而「再加一张端口表」就判不到了。
+ *
+ * 端口词可以走常量（`port: ports::MODEL`，端口词单点拼写后生产表就是这么写的）：
+ * 常量链解析到字面值为止——`CapabilityFamily::(multi|single)("词")` 给出族词，
+ * `pub const X: &str = <路径>::Y.name()` 把族词借成端口词。带 `::` 的路径解析
+ * 不出时**报红**而不是跳过：跳过会让取值一侧静默变窄（宁红不静默）；不带 `::`
+ * 的裸标识（`None` / `Some` / 结构名）不是端口词，照旧忽略。
  */
 function portValueLiterals() {
   const out = new Set()
+  const unresolved = []
+  const family = new Map()
+  const strRefs = []
+  const portExprs = []
   const skip = new Set(['target', 'node_modules', '.git', '.symbio', '.workbuddy-ai'])
   const walk = (dir) => {
     if (!fs.existsSync(dir)) return
@@ -328,17 +338,49 @@ function portValueLiterals() {
       const text = fs
         .readFileSync(path.join(dir, entry.name), 'utf8')
         .replace(/\r\n/g, '\n')
+      const code = blankComments(text).join('\n')
+      for (const m of code.matchAll(
+        /pub\s+const\s+([A-Z0-9_]+)\s*:\s*CapabilityFamily\s*=\s*CapabilityFamily::(?:multi|single)\s*\(\s*"([^"]+)"\s*\)/g,
+      )) {
+        family.set(m[1], m[2])
+      }
+      for (const m of code.matchAll(
+        /pub\s+const\s+([A-Z0-9_]+)\s*:\s*&str\s*=\s*(?:[A-Za-z0-9_]+::)+([A-Z0-9_]+)\.name\s*\(\s*\)/g,
+      )) {
+        strRefs.push([m[1], m[2]])
+      }
       if (!text.includes('PortDecl {')) continue
-      for (const m of blankComments(text).join('\n').matchAll(/\bport\s*:\s*"([^"]+)"/g)) {
-        out.add(m[1])
+      for (const m of code.matchAll(/\bport\s*:\s*("([^"]+)"|[A-Za-z0-9_][A-Za-z0-9_:]*)/g)) {
+        portExprs.push(m[1])
       }
     }
   }
   walk(path.join(ROOT, 'crates'))
-  return out
+  const strConst = new Map()
+  for (const [name, ref] of strRefs) {
+    if (family.has(ref)) strConst.set(name, family.get(ref))
+  }
+  for (const expr of portExprs) {
+    if (expr.startsWith('"')) {
+      out.add(expr.slice(1, -1))
+      continue
+    }
+    if (!expr.includes('::')) continue
+    const last = expr.split('::').pop()
+    if (strConst.has(last)) out.add(strConst.get(last))
+    else if (family.has(last)) out.add(family.get(last))
+    else unresolved.push(expr)
+  }
+  return { values: out, unresolved }
 }
 
-const portValues = portValueLiterals()
+const { values: portValues, unresolved: portUnresolved } = portValueLiterals()
+for (const expr of portUnresolved) {
+  report(
+    'PTS-002',
+    `端口表里的 \`${expr}\` 解析不出取值 —— 常量链断在半路，取值一侧会静默变窄；要么把常量定义写成可解析的形状（\`CapabilityFamily::…("词")\` / \`…::NAME.name()\`），要么回字面量`,
+  )
+}
 
 const baseline = readBaseline()
 const solverRel = baseline?.solver?.file ?? 'crates/symbio-kernel/src/decl/ring.rs'

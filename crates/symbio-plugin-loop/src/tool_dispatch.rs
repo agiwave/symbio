@@ -50,6 +50,7 @@ use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt}
 use symbio_kernel::store::Store;
 use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::events::EVENT_AUTHZ_DENIED;
+use symbio_plugin_api::port::ports;
 use symbio_sdk::adapters::LlmTurn;
 use symbio_sdk::capability::{capability_resolve, tool_metas, ApprovalGrants, CAPABILITY_VISITOR};
 use symbio_sdk::chat::chat_node::{
@@ -363,7 +364,7 @@ pub(crate) enum ToolBegin {
     /// 派发器的空账本守卫会把这种形态显形（`exhausted{no_progress}`）——不猜一个
     /// 空批次去掩盖它。
     None,
-    /// 已在飞：`sent` 落了，`await-tools` 行会来收。
+    /// 已在飞：`sent` 落了，`await-tool` 行会来收。
     InFlight(ToolInFlight),
 }
 
@@ -400,8 +401,8 @@ pub(crate) fn batch_call_id(
     round: &str,
 ) -> String {
     match model_id.filter(|s| !s.trim().is_empty()) {
-        Some(id) => format!("tool-{turn}-d{drive}-{round}-{id}"),
-        None => format!("tool-{turn}-d{drive}-{round}-c{idx}"),
+        Some(id) => format!("{}-{turn}-d{drive}-{round}-{id}", ports::TOOL),
+        None => format!("{}-{turn}-d{drive}-{round}-c{idx}", ports::TOOL),
     }
 }
 
@@ -411,11 +412,11 @@ pub(crate) fn batch_call_id(
 /// `turn.tool_calls` 的顺序。重算只能靠再次猜「这一轮是哪一轮」，而猜错一次的
 /// 后果是创建债被旧事实提前关掉。
 fn latest_model_response(facts: &[Event], turn: u64, drive: u64) -> Option<&Event> {
-    let prefix = format!("model-{turn}-d{drive}-");
+    let prefix = format!("{}-{turn}-d{drive}-", ports::MODEL);
     facts.iter().rev().find(|e| {
         e.turn == turn
             && e.kind == symbio_kernel::event::EVENT_RESPONSE
-            && e.payload.get("port").and_then(|v| v.as_str()) == Some("model")
+            && e.payload.get("port").and_then(|v| v.as_str()) == Some(ports::MODEL)
             && e.payload
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -473,7 +474,7 @@ impl ToolPort {
     /// 本次 drive 的 `now`：幕锚那条唤醒事实的 `ts`（判据 12）。
     ///
     /// 恢复幕在 `begin_drive` **之前**执行，`drive_seq` 填的是占位 0 ⇒ 这里得 0；
-    /// 本行的三笔工具债（`open-tools` / `authorize-tool` / `dispatch-tools`）不读
+    /// 本行的三笔工具债（`open-tools` / `authorize-tool` / `dispatch-tool`）不读
     /// 带时间的视图，`now` 参与不了判据。要新增读时间的行，得先把真实幕锚传进来。
     fn now_ms(&self, facts: &[Event]) -> i64 {
         loop_rows::wake_now_ms(facts, self.drive_seq)
@@ -526,7 +527,7 @@ impl ToolPort {
                 .unwrap_or_else(|| {
                     batch_call_id(self.turn, self.drive_seq, idx, tc.id.as_deref(), round)
                 });
-            let call = port::Call::new("tool", id, 1);
+            let call = port::Call::new(ports::TOOL, id, 1);
             let model_id = tc.id.as_deref().filter(|s| !s.trim().is_empty());
             let name = tc.name.as_deref().filter(|s| !s.trim().is_empty());
             // 不可派发的调用**也开账**：创建行的集合里有这个元素，跳过它那一笔
@@ -745,7 +746,7 @@ impl ToolPort {
                     call: &call.call,
                     turn: self.turn,
                     produced_by: self.user_seq,
-                    row: "dispatch-tools",
+                    row: "dispatch-tool",
                     now,
                     // 唤醒调用能由 `wake_batch` 从事实重建（有活着的等待方）；
                     // 普通批次把结果等在当前草稿里，进程一死就没人接了。
@@ -804,7 +805,7 @@ impl ToolPort {
     /// ## 为什么只落 `request`，不顺便落授权
     ///
     /// 唤醒之后要走的是**同一条**债链：`authorize-tool`（0）判放行 / 拒绝，
-    /// `dispatch-tools` / `deny-tools`（68 / 69）落 `sent` 并收尾。在这里把三笔
+    /// `dispatch-tool` / `deny-tools`（68 / 69）落 `sent` 并收尾。在这里把三笔
     /// 一起写掉，等于让恢复路径又长出一条绕过行表的旁路——那正是本步要退役的东西。
     ///
     /// ## 旧账先关
@@ -891,7 +892,7 @@ impl ToolPort {
         let intent = WakeIntent::from_payload(payload)?;
         let authz = facts.iter().find_map(|e| {
             // 授权事实按**同一次尝试**取（D-138）：重试后的 attempt 2 不能复用
-            // attempt 1 的放行，否则 `dispatch-tools` 的新账永远不欠。
+            // attempt 1 的放行，否则 `dispatch-tool` 的新账永远不欠。
             // 旧日志里的授权没有 `attempt`：只对首次尝试按缺席兼容。
             let authz_attempt = e.payload.get("attempt").and_then(|v| v.as_u64());
             let same = e.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
@@ -1012,7 +1013,7 @@ impl ToolPort {
     /// 「有结果节点」≠「工具回了话」：批尾收口给没跑到的调用补的是**框架的交代**
     /// （一句话占位），它的成因写在 `meta.failure_kind` 上。占位按成因落
     /// `failed{why}` 而不是 `response`——否则中止的调用在日志里说「回来了」，而它
-    /// 从未执行，`await-tools` 的 `failed` 出口就只剩 resume 一条路（[D-121](../../../docs/003-design/015-义务环.md#d-121-唤醒事实的行语义await-行的收清走协议格审批与补充重新开账 "DE-015-义务环")
+    /// 从未执行，`await-tool` 的 `failed` 出口就只剩 resume 一条路（[D-121](../../../docs/003-design/015-义务环.md#d-121-唤醒事实的行语义await-行的收清走协议格审批与补充重新开账 "DE-015-义务环")
     /// 的中止作用、DE-015 判据 6 场景三）。词表与判据同源：[`super::tools`] 门面的
     /// `is_unanswered` / `ABORTED` / `NOT_EXECUTED`。
     pub(crate) fn close_batch(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
@@ -1551,7 +1552,7 @@ impl SessionDispatchPort {
     /// 派发的**收尾窗口**：跑执行层、收派生事实、把结果映射成运行器的事实形状。
     ///
     /// 它就是 [`ToolDispatch::begin`] 交出的那个 future 的本体。为什么这一段必须是
-    /// `'static` 的：它在**下一个环步**才被 poll（`await-tools` 行的动作），中间那一圈
+    /// `'static` 的：它在**下一个环步**才被 poll（`await-tool` 行的动作），中间那一圈
     /// 「`sent` 有、终局无」正是 `waiting` 读的形状。所以它只带走**已经建好的东西**
     /// （`Arc<Self>`、模型交回的调用、广播过的节点），不带走任何借用。
     async fn run_batch(
@@ -1673,7 +1674,7 @@ impl SessionDispatchPort {
             })
             .collect();
         // 关账不在这里（`D-124` 订正 1）：它是**下一个环步**的事
-        // （`await-tools` → [`ToolDispatch::finish`]），放进去就等于把派出与收应答
+        // （`await-tool` → [`ToolDispatch::finish`]），放进去就等于把派出与收应答
         // 又合回一个动作窗口。结果映射仍在这一侧：`call_id` 是执行层交回的权威 id，
         // 关账要用它。
         outcomes

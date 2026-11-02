@@ -148,7 +148,7 @@ pub struct TurnInput {
     /// **为什么是回调而不是「调用方开跑前把补充全取出来传进来」**：补充是**轮内**到达的
     /// ——工具跑到一半用户才说话。调用方若只在开跑前取一次，之后到达的那些仍然丢，
     /// 而那恰恰是补充最常见的形态（用户在等结果时插话）。回调把「什么时候问」放在
-    /// **工具批收尾那一步**（`await-tools` 的 `stream::land_batch`），插件侧不必把
+    /// **工具批收尾那一步**（`await-tool` 的 `stream::land_batch`），插件侧不必把
     /// 循环搬到外面。
     ///
     /// 但 core **不该**知道那是「收件箱补充」——那是插件侧的概念（收件箱、
@@ -457,7 +457,7 @@ pub(crate) enum TurnSessionBegin {
 ///   草稿里，不派发；该收束时把**结局**留在 [`prepare::Prepared::closing`]，不收束；
 /// - [`Self::open`]：为模型交回的调用逐条开账（`open-tools` 行的执行体）；
 /// - [`Self::authorize`]：对已开账的调用判放行 / 拒绝（`authorize-tool` 行）；
-/// - [`Self::dispatch`]：派发那一批工具，落产物 / 等待 / 交换（`dispatch-tools` /
+/// - [`Self::dispatch`]：派发那一批工具，落产物 / 等待 / 交换（`dispatch-tool` /
 ///   `deny-tools` 两行）；
 /// - [`Self::close`]：落寄存的那份结局（`close-turn` 行的执行体）。
 ///
@@ -748,7 +748,7 @@ impl TurnSession {
         }
     }
 
-    /// 派发动作的**派出半**（`dispatch-tools` 行的执行体）：落 `sent`、把批次寄存成
+    /// 派发动作的**派出半**（`dispatch-tool` 行的执行体）：落 `sent`、把批次寄存成
     /// 在飞的 future；收应答归 [`Self::finish_tools`]。
     ///
     /// 没有草稿 / 没有分发通道时不做任何事——同上，防御而不是选择路径。
@@ -762,7 +762,7 @@ impl TurnSession {
         }
     }
 
-    /// 派发动作的**收尾半**（`await-tools` / `deny-tools` 两行的执行体）：poll 一次在飞的
+    /// 派发动作的**收尾半**（`await-tool` / `deny-tools` 两行的执行体）：poll 一次在飞的
     /// 那一批，落地了就把结果归位（产物 / 等待格 / 下一轮交换），收束的产出寄存进草稿。
     ///
     /// 与 [`Self::await_model`] 同一条「只 poll 一次」：派出去与收回来分处两个环步，

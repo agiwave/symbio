@@ -36,7 +36,7 @@
 //! 形状拼出，重复派发撞上 `AppendError::Duplicate` 即「这一格已经落过了」，不算失败。
 //!
 //! 行层因此能按尝试开账：重试写出的 `request{attempt+1}` 会重新打开
-//! `dispatch-<port>` / `await-<port>` / `authorize-tool` / `dispatch-tools`，而不是
+//! `dispatch-model` / `await-model` / `authorize-tool` / `dispatch-tool`，而不是
 //! 被上一 attempt 的出口格提前关掉。
 //!
 //! ## 租约看护为什么在「开一幕」时跑
@@ -60,6 +60,7 @@ use symbio_kernel::event::{
     Entity, Event, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 use symbio_kernel::store::{AppendError, Store};
+use symbio_plugin_api::port::ports;
 
 /// 一笔端口调用：端口名 + 逻辑 id + 尝试号。
 ///
@@ -867,7 +868,7 @@ pub(crate) struct Round<'a> {
     pub(crate) drive_seq: u64,
     /// 本幕的 `now`（唤醒事实的 `ts`，判据 12）：问表要用它。
     pub(crate) now: i64,
-    /// 逻辑 id 的步名段：`model-{turn}-d{drive}-{step}`。
+    /// 逻辑 id 的步名段：`{port}-{turn}-d{drive}-{step}`（端口词取 [`ports::MODEL`]）。
     pub(crate) step: &'a str,
     /// 这一笔是谁的往返（并进 `request` / `response` 载荷，让日志说得出用途）。
     pub(crate) via: &'a str,
@@ -875,7 +876,13 @@ pub(crate) struct Round<'a> {
 
 impl Round<'_> {
     fn id(&self) -> String {
-        format!("model-{}-d{}-{}", self.turn, self.drive_seq, self.step)
+        format!(
+            "{}-{}-d{}-{}",
+            ports::MODEL,
+            self.turn,
+            self.drive_seq,
+            self.step
+        )
     }
 }
 
@@ -930,7 +937,7 @@ where
     Fut: std::future::Future<Output = Result<T, E>>,
     E: fmt::Debug,
 {
-    let call = Call::with_via("model", round.id(), 1, round.via);
+    let call = Call::with_via(ports::MODEL, round.id(), 1, round.via);
     announce_with(
         store,
         &call,
@@ -1098,7 +1105,7 @@ pub(crate) fn abort_round_trip<S>(store: &S, round: Round<'_>, why: &str) -> Res
 where
     S: Store<Event = Event> + ?Sized,
 {
-    let call = Call::with_via(symbio_plugin_api::ports::MODEL, round.id(), 1, round.via);
+    let call = Call::with_via(ports::MODEL, round.id(), 1, round.via);
     announce_with(
         store,
         &call,

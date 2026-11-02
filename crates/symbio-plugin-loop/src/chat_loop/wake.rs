@@ -5,7 +5,7 @@
 //! 旧路径在这里**代替行表**走完了授权与派发：它自己调执行层、自己写结果节点、
 //! 自己关 `request` 的账——一条绕开义务环的旁路。本模块只做一件事：把用户的
 //! 动作翻译成一笔**唤醒请求**（`request(port=tool)`，载荷带 `resume` 标记），
-//! 之后由行表自己的 `authorize-tool` / `dispatch-tools` / `deny-tools` 各行其责。
+//! 之后由行表自己的 `authorize-tool` / `dispatch-tool` / `deny-tools` 各行其责。
 //!
 //! 请求落在幕锚**之前**（开幕在 `begin_drive`，本模块跑在它前面）：`turn_head`
 //! 的请求面按 seq 判「有没有终局」，不看幕锚，所以它照样看得见这一笔。

@@ -1991,7 +1991,7 @@ mod tool_round_tests {
         }
     }
 
-    /// 替身逐条落 `sent`（`port::begin` 派发前自己读 `dispatch-tools` 这一行）。
+    /// 替身逐条落 `sent`（`port::begin` 派发前自己读 `dispatch-tool` 这一行）。
     fn begin_batch(
         store: &dyn Store<Event = Event>,
         calls: &mut [ToolPortCall],
@@ -2005,7 +2005,7 @@ mod tool_round_tests {
                     call: &call.call,
                     turn: turn_no,
                     produced_by,
-                    row: "dispatch-tools",
+                    row: "dispatch-tool",
                     now: 0,
                     awaited: call.wake.is_some(),
                 },
@@ -2194,7 +2194,7 @@ mod tool_round_tests {
                         call: &call.call,
                         turn: self.turn,
                         produced_by: self.user_seq,
-                        row: "dispatch-tools",
+                        row: "dispatch-tool",
                         now: 0,
                         awaited: call.wake.is_some(),
                     },
@@ -2931,7 +2931,7 @@ mod tool_round_tests {
         assert_eq!(cell.payload["text"], "", "收束格不复制正文");
     }
 
-    /// 一批**全被拒**的调用：`dispatch-tools` 不欠（没有 `granted`），收尾归
+    /// 一批**全被拒**的调用：`dispatch-tool` 不欠（没有 `granted`），收尾归
     /// `deny-tools`——它把同一动作选出来，落 `failed{why}` 关掉每一笔 `request`。
     ///
     /// 反向自检：删掉 `deny-tools` 行，派发器在授权之后直接 `no_progress`，
@@ -3301,7 +3301,7 @@ mod tool_round_tests {
     /// ## 唤醒身份在**事实**上，不在入参里（d）
     ///
     /// 用户动作先落成 `request(port=tool)`（载荷带 `resume` 标记），行表的
-    /// `authorize-tool`（0）与 `dispatch-tools`（68）两行自己认领它——恢复路径不再
+    /// `authorize-tool`（0）与 `dispatch-tool`（68）两行自己认领它——恢复路径不再
     /// 自己写协议事实、也不再自己跑执行层。派发方读回那一笔用的是**生产**的读侧
     /// （[`ToolPort::wake_batch`]）：载荷形状不在替身里复述一遍。
     #[tokio::test]
@@ -4444,7 +4444,7 @@ mod tool_round_tests {
     ///
     /// ## 它钉的是什么
     ///
-    /// `dispatch-tools` 落 `sent`、`await-tools` 落 `response`，两个动作分处两个环步。
+    /// `dispatch-tool` 落 `sent`、`await-tool` 落 `response`，两个动作分处两个环步。
     /// 那么在**两次选债之间**那一圈，事实源上「工具这一笔开着、别的都关着」必须读得到：
     /// `open_calls` 里有一笔 `port=tool`，且 [`super::super::super::loop_rows::waiting`]
     /// 为**真**。`waiting` 视图、`stale_sent`（租约看护）与 `reap` 读的都是它——

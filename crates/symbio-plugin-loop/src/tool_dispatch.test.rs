@@ -6,7 +6,7 @@
 //! 一条 `sent` 之后只有两种收场：工具回了话（`response`），或执行层没跑到它
 //! （`failed{why}`）。判据是「日志说的与发生的事一致」——批尾收口给没跑到的调用
 //! 补的那条占位结果是**框架的交代**（给模型一句话、给前端一张卡），不是工具的
-//! 应答；把它算成应答，中止的调用就在日志里写成「回来了」，`await-tools` 的
+//! 应答；把它算成应答，中止的调用就在日志里写成「回来了」，`await-tool` 的
 //! `failed` 出口永远等不到人（DE-015 §5 判据 6 的中止场景就是这么空的）。
 //!
 //! 反向的那一半同样在本文件钉住：工具**跑完而失败**（`error`）、闸门交回审批卡
@@ -15,12 +15,12 @@
 //!
 //! ## 场景一（审批唤醒）：`authz.granted` 重新开账
 //!
-//! 授权动作落下 `authz.granted(port=tool)` 那一刻，`dispatch-tools` 必须**再次欠着**
+//! 授权动作落下 `authz.granted(port=tool)` 那一刻，`dispatch-tool` 必须**再次欠着**
 //! ——「用户批了」在事实面上的全部含义就是「这笔派发重新成为一笔待还的账」。
 //! 行层那几条合成用例（`loop_rows.test.rs`）对的是声明；这里对的是写方：
 //! `ToolPort::authorize_calls` / `begin_calls` 真的产出那种载荷、真的换一笔债。
 //!
-//! 场景二（补充插话）不在这里：补充不产生任何端口事实，它的判据是「`await-tools`
+//! 场景二（补充插话）不在这里：补充不产生任何端口事实，它的判据是「`await-tool`
 //! 的 `until` 没有多一个出口」，归行表用例（`a_supplement_does_not_answer_the_in_flight_tool`）。
 //!
 //! 行不欠、幂等键这些引擎纪律已由 `port.test.rs` 覆盖，本文件只验「哪一种动作落
@@ -66,9 +66,9 @@ fn owes(row: &str, store: &EventStore) -> bool {
     loop_rows::owes(row, &events(store), TURN, 0)
 }
 
-/// `await-tools` 此刻是否还欠着这笔 `sent`。
+/// `await-tool` 此刻是否还欠着这笔 `sent`。
 fn awaits(store: &EventStore) -> bool {
-    owes("await-tools", store)
+    owes("await-tool", store)
 }
 
 /// 只落了 `request` 的一笔调用：还没判、还没派（授权行的前件）。
@@ -96,7 +96,7 @@ fn requested(store: &EventStore, id: &str) -> ToolPortCall {
 /// 两个旗标在这里直接补齐——本函数服务**关账**用例，「派出后欠一次应答」是前提
 /// 不是被测点；派发这一步真的换债由场景一那条用例对。
 ///
-/// 前提要用**生产的写方**落（`granted_event`）：引擎派发前自己读 `dispatch-tools`
+/// 前提要用**生产的写方**落（`granted_event`）：引擎派发前自己读 `dispatch-tool`
 /// 这一行（D-136），而它只认 `authz.granted`——少这一条事实，`sent` 就落不下来。
 fn opened(store: &EventStore, id: &str) -> ToolPortCall {
     let mut call = requested(store, id);
@@ -124,7 +124,7 @@ fn opened(store: &EventStore, id: &str) -> ToolPortCall {
             call: &call.call,
             turn: TURN,
             produced_by: USER_SEQ,
-            row: "dispatch-tools",
+            row: "dispatch-tool",
             now: 0,
             awaited: call.wake.is_some(),
         },
@@ -151,7 +151,7 @@ fn tool_port(store: &Arc<EventStore>) -> ToolPort {
 }
 
 /// **中止**：占位结果不是应答 ⇒ `failed{why:"aborted"}`，且这条调用**没有**
-/// `response`；`await-tools` 由 `failed` 出口收清（判据 6 场景三的事实面）。
+/// `response`；`await-tool` 由 `failed` 出口收清（判据 6 场景三的事实面）。
 #[test]
 fn an_aborted_call_closes_as_failed_not_as_an_answer() {
     let store = Arc::new(EventStore::new());
@@ -408,8 +408,8 @@ fn a_per_tool_grant_authorizes_only_that_tool() {
     );
 }
 
-/// **场景一（审批唤醒）**：`authz.granted(port=tool)` 一落，`dispatch-tools` 就
-/// 重新欠着；`begin_calls` 落 `sent` 后债位换到 `await-tools`。
+/// **场景一（审批唤醒）**：`authz.granted(port=tool)` 一落，`dispatch-tool` 就
+/// 重新欠着；`begin_calls` 落 `sent` 后债位换到 `await-tool`。
 ///
 /// 对的是**写方**（`ToolPort::authorize_calls` / `begin_calls`）而不是行声明：
 /// 行层那几条合成用例（`loop_rows.test.rs`）只能证明「表认得 granted」，证明不了
@@ -422,7 +422,7 @@ fn an_authorization_reopens_the_dispatch_debt_and_a_send_moves_to_the_await() {
 
     assert!(owes("authorize-tool", &store), "请求落了、还没判");
     assert!(
-        !owes("dispatch-tools", &store),
+        !owes("dispatch-tool", &store),
         "还没判 ⇒ 派发行不成立（fail-closed）"
     );
 
@@ -436,14 +436,14 @@ fn an_authorization_reopens_the_dispatch_debt_and_a_send_moves_to_the_await() {
     );
     assert!(!owes("authorize-tool", &store), "判过了 ⇒ 授权行关账");
     assert!(
-        owes("dispatch-tools", &store),
+        owes("dispatch-tool", &store),
         "审批落 granted ⇒ 派发重新成为一笔待还的账（判据 6 场景一）"
     );
 
     port.begin_calls(&mut calls);
 
     assert!(calls[0].sent, "派发行欠 ⇒ `sent` 落格并回报旗标");
-    assert!(!owes("dispatch-tools", &store), "派出 ⇒ 派发行关账");
+    assert!(!owes("dispatch-tool", &store), "派出 ⇒ 派发行关账");
     assert!(awaits(&store), "换一笔债在等应答");
 }
 
@@ -456,7 +456,7 @@ fn an_authorization_reopens_the_dispatch_debt_and_a_send_moves_to_the_await() {
 
 /// 用户动作落成的那一笔：`request(port=tool)`，**只有**这一笔。
 ///
-/// 关键在「只有」：授权与派发由行表的 `authorize-tool` / `dispatch-tools` 两行
+/// 关键在「只有」：授权与派发由行表的 `authorize-tool` / `dispatch-tool` 两行
 /// 承担，写方在这里一并落掉就等于恢复路径又长出一条绕过行表的旁路。
 #[test]
 fn a_wake_request_lands_as_a_port_request_carrying_the_resume_marker() {

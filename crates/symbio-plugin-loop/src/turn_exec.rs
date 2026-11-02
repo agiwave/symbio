@@ -946,7 +946,7 @@ pub(crate) fn run_authorize<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `courier` 执行体（b）：`dispatch-tools` 行选中的动作——把放行的每一笔**交出去**
+/// `courier` 执行体（b）：`dispatch-tool` 行选中的动作——把放行的每一笔**交出去**
 /// （落 `sent`），批次的收尾归 [`run_finish_tools`]。
 ///
 /// 与 [`run_finish_tools`] 分开是 `D-124` 订正 1 的那一刀：派出与收应答分处两个环步，
@@ -960,7 +960,7 @@ pub(crate) fn run_begin_tools<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `waiter-tools` 执行体（`D-124` 订正 1）：`await-tools` / `deny-tools` 两行选中的
+/// `waiter-tools` 执行体（`D-124` 订正 1）：`await-tool` / `deny-tools` 两行选中的
 /// 动作——收这一批的结果并关账。
 pub(crate) fn run_finish_tools<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
