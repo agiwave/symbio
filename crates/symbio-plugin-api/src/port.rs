@@ -105,16 +105,6 @@ pub trait PortProvider: Send + Sync + 'static {
     fn tool_execute(&self) -> Option<Arc<dyn ToolCallExecutor>> {
         None
     }
-
-    /// tool 端口的**批形状**合同：一批工具调用的执行器（D-298 的 M3 修订）。
-    ///
-    /// 与 [`Self::tool_execute`] 的分界：单笔合同只管「一次调用的三样 glue」（线上名
-    /// 解析 / 空闲超时 / 结果契约），批形状管批首读数、并发策略与结果守卫——那些
-    /// 消费工具与模型世界的词汇，留在环里就等于环继续认识工具域。默认 `None` 同前：
-    /// 非该端口的提供者不实现。
-    fn tool_batch(&self) -> Option<Arc<dyn crate::tool_batch::ToolBatchExecutor>> {
-        None
-    }
 }
 
 // ── tool 端口的合同类型（环 ↔ 提供者的私有约定，表不参与校验）──────────────
