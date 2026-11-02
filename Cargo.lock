@@ -4143,6 +4143,7 @@ name = "symbio"
 version = "0.1.14"
 dependencies = [
  "inventory",
+ "serde_json",
  "symbio-deploy",
  "symbio-kernel",
  "symbio-plugin-agent",

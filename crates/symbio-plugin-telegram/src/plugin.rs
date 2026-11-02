@@ -183,41 +183,12 @@ impl TelegramPlugin {
 
     fn api_url(&self) -> Option<String> {
         let config = self.config.try_read().ok()?;
-        if config.bot_token.is_empty() {
-            None
-        } else {
-            // 基址可配（缺省官方端点）：网络受限环境走自建 / 代理端点，e2e 也能打
-            // 本地靶子。剥尾随 `/`——调用方拼 `{api_url}/sendMessage`，双斜杠会 404。
-            Some(format!(
-                "{}/bot{}",
-                config.api_base.trim_end_matches('/'),
-                config.bot_token
-            ))
-        }
+        api_url_from(&config)
     }
 
     fn get_chat_id(&self) -> Option<String> {
         let config = self.config.try_read().ok()?;
         config.chat_id.clone()
-    }
-
-    /// 找到最佳分割点
-    fn find_best_split_point(text: &str, max_len: usize) -> usize {
-        if text.len() <= max_len {
-            return text.len();
-        }
-        let mut end = max_len;
-        while end > 0 && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        let search_region = &text[..end];
-        if let Some(pos) = search_region.rfind('\n') {
-            return pos + 1;
-        }
-        if let Some(pos) = search_region.rfind(' ') {
-            return pos;
-        }
-        end
     }
 
     /// 发送消息到 Telegram
@@ -228,37 +199,7 @@ impl TelegramPlugin {
         parse_mode: Option<&str>,
     ) -> Result<i32, String> {
         let api_url = self.api_url().ok_or("未配置 bot_token")?;
-
-        let mut remaining = text;
-        let mut sent = 0;
-
-        while !remaining.is_empty() {
-            let split_point = Self::find_best_split_point(remaining, TELEGRAM_MAX_MESSAGE_LENGTH);
-            let chunk = &remaining[..split_point];
-            remaining = &remaining[split_point..];
-
-            let msg = TelegramMessage {
-                chat_id: chat_id.to_string(),
-                text: chunk.to_string(),
-                parse_mode: parse_mode.map(|s| s.to_string()),
-                reply_to_message_id: None,
-            };
-
-            let resp = self
-                .client
-                .post(format!("{api_url}/sendMessage"))
-                .json(&msg)
-                .send()
-                .await
-                .map_err(|e| format!("发送失败: {e}"))?;
-
-            if !resp.status().is_success() {
-                return Err(format!("Telegram API 错误: {}", resp.status()));
-            }
-            sent += 1;
-        }
-
-        Ok(sent)
+        send_text(&self.client, &api_url, chat_id, text, parse_mode).await
     }
 
     /// 处理发送消息
@@ -556,8 +497,7 @@ impl TelegramPlugin {
 
             let mut remaining = response.as_str();
             while !remaining.is_empty() {
-                let split_point =
-                    Self::find_best_split_point(remaining, TELEGRAM_MAX_MESSAGE_LENGTH);
+                let split_point = find_best_split_point(remaining, TELEGRAM_MAX_MESSAGE_LENGTH);
                 let chunk = &remaining[..split_point];
                 remaining = &remaining[split_point..];
 
@@ -578,6 +518,82 @@ impl TelegramPlugin {
 
         Ok(())
     }
+}
+
+/// Bot API 基址：`{api_base}/bot{token}`。配置可缺省（即官方端点）。
+///
+/// 剥尾随 `/`——调用方拼 `{api_url}/sendMessage`，双斜杠会 404。
+pub(super) fn api_url_from(config: &TelegramConfig) -> Option<String> {
+    if config.bot_token.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "{}/bot{}",
+            config.api_base.trim_end_matches('/'),
+            config.bot_token
+        ))
+    }
+}
+
+/// 找到最佳分割点
+pub(super) fn find_best_split_point(text: &str, max_len: usize) -> usize {
+    if text.len() <= max_len {
+        return text.len();
+    }
+    let mut end = max_len;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let search_region = &text[..end];
+    if let Some(pos) = search_region.rfind('\n') {
+        return pos + 1;
+    }
+    if let Some(pos) = search_region.rfind(' ') {
+        return pos;
+    }
+    end
+}
+
+/// 按 Bot API 上限切块并逐条发送，返回发出条数。
+///
+/// 路由臂（`send`）与 `notify` 端口执行体共用这一份——两处各写一遍，切块边界或
+/// 错误分流迟早会漂移。
+pub(super) async fn send_text(
+    client: &reqwest::Client,
+    api_url: &str,
+    chat_id: &str,
+    text: &str,
+    parse_mode: Option<&str>,
+) -> Result<i32, String> {
+    let mut remaining = text;
+    let mut sent = 0;
+
+    while !remaining.is_empty() {
+        let split_point = find_best_split_point(remaining, TELEGRAM_MAX_MESSAGE_LENGTH);
+        let chunk = &remaining[..split_point];
+        remaining = &remaining[split_point..];
+
+        let msg = TelegramMessage {
+            chat_id: chat_id.to_string(),
+            text: chunk.to_string(),
+            parse_mode: parse_mode.map(|s| s.to_string()),
+            reply_to_message_id: None,
+        };
+
+        let resp = client
+            .post(format!("{api_url}/sendMessage"))
+            .json(&msg)
+            .send()
+            .await
+            .map_err(|e| format!("发送失败: {e}"))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Telegram API 错误: {}", resp.status()));
+        }
+        sent += 1;
+    }
+
+    Ok(sent)
 }
 
 /// 无装配上下文的实例（仅测试）。目录给临时目录——**不读全局系统根**。
@@ -627,6 +643,18 @@ impl Plugin for TelegramPlugin {
 
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
+
+        // 世界端口（DE-047 D-302）：把 `notify` 的执行面挂进能力表。端口行由
+        // `port_rows` 按提供者申报的端口名产出——加端口只改提供者的 `ports()`，
+        // 不改注册面、不改环。
+        if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
+            let provider: Arc<dyn symbio_plugin_api::PortProvider> = Arc::new(
+                super::port::NotifyPort::new(self.client.clone(), Arc::clone(&self.config)),
+            );
+            for row in symbio_plugin_api::port::port_rows(&provider) {
+                visitor.put(row).await;
+            }
+        }
 
         Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()))
     }

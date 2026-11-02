@@ -60,3 +60,5 @@ inventory = { workspace = true }
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { workspace = true, features = ["test-util"] }
+# 第三端口验收（DE-047 D-302）：构造 `request` 事实载荷
+serde_json = { workspace = true }
