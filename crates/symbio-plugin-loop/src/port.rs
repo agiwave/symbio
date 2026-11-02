@@ -1095,6 +1095,43 @@ pub(crate) async fn model_port(
     Some(payload.provider().clone())
 }
 
+/// 取 tool 端口的提供者（D-298）：能力表按**端口名**读——线上名怎么解析、
+/// 挂死怎么判（空闲而不是总时长）、结果怎么压成一段文本，都是提供者一侧的私事
+/// （session 的 `ToolPort`）。
+///
+/// 与 [`model_port`] 同一把尺子：缺席（0 行——零工具的装配没有工具世界的提供者）、
+/// 判重（>1 行）、闭集外、载荷下转型失败——四种读数都**出声并返回 `None`**：调用方
+/// 必须响亮失败（错误文本回传模型 + `success = false`，与既有 route 错误同形），
+/// 不许静默回退、不许按「判不出来」继续。
+pub(crate) async fn tool_port(
+    ctx: &Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
+) -> Option<Arc<dyn symbio_plugin_api::port::PortProvider>> {
+    use symbio_plugin_api::port::{capability_port_of, PortPayload, PortReading};
+    use symbio_plugin_api::ports;
+    use symbio_plugin_api::{PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR};
+
+    let Some(visitor): Option<Arc<dyn Registry>> = ctx.get(CAPABILITY_VISITOR) else {
+        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] ctx 没有能力表，`port.tool` 读不到");
+        return None;
+    };
+    let reading = capability_port_of(&*visitor, ports::TOOL).await;
+    let row = match &reading {
+        PortReading::Ready(row) => row.clone(),
+        other => {
+            symbio_plugin_api::plugin_warn!(
+                LOG_CHANNEL,
+                "[Loop] `port.tool` 不可用（{other:?}）——调用方将响亮失败"
+            );
+            return None;
+        }
+    };
+    let Some(payload) = row.payload::<PortPayload>() else {
+        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] `port.tool` 行载荷不是端口载荷");
+        return None;
+    };
+    Some(payload.provider().clone())
+}
+
 /// 端口缺席时的响亮失败（D-298）：**欠了、立刻失败**——`request` 与 `failed`
 /// 两格同落（账上说得清「这次往返想要、没打成」），`why` 进失败载荷。
 ///

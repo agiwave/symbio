@@ -298,6 +298,9 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         .get(CAPABILITY_VISITOR)
         .unwrap_or_else(|| Arc::new(DefaultToolVisitor::new()));
     let port = Arc::new(PortModel(provider));
+    // `port.tool` 的替身行：真执行经端口合同取——替身执行器与生产
+    // `ToolPort` 同形的最小子集，见 `test_support.rs`。
+    super::super::test_support::put_tool_port_row(&visitor).await;
     if let Some(row) =
         symbio_plugin_api::port::port_row(&(port as Arc<dyn symbio_plugin_api::port::PortProvider>))
     {

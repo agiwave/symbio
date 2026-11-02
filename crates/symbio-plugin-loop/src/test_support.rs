@@ -566,3 +566,165 @@ symbio_plugin_api::submit_declarations!(
     "crates/symbio-plugin-loop-test-harness-reputation",
     reputation_capability_fixture
 );
+
+// ==================== 工具端口替身 ====================
+//
+// `execute_tool_async` 薄壳化之后，真实执行住 session 的 `ToolPort`（工具端口
+// 提供者）。loop 的单测二进制不链接兄弟插件（E-009，与上面三个替身同一条理由），
+// 于是走真执行的批处理用例（并行 / 中止传播 / 部分失败……）需要一个**同形**的
+// 端口行，否则薄壳拿到缺席读数、整批响亮失败，批语义用例全部不可达。
+//
+// 替身只保证「字面名 + 表取 + `capability_invoke`、中止经 select、错误与结果的
+// 文本形状与生产一致」；线上名解析 / 空闲超时 / 结果契约的行为判据由 session 一侧
+// 的测试电池钉（`crates/symbio-plugin-session/src/port.test.rs`），两处若漂移 e2e 会红。
+
+use symbio_kernel::capability::Registry;
+use symbio_kernel::plugin::PluginInvokeRequestExt;
+use symbio_plugin_api::port::{
+    port_row, PortProvider, ToolCallExecutor, ToolCallOutcome, ToolCallRequest,
+};
+use symbio_plugin_api::ports;
+use symbio_plugin_api::CAPABILITY_VISITOR;
+
+/// 工具端口替身：执行体与生产 `ToolPort` 同形的最小子集（见上方注释）。
+pub(crate) struct FixtureToolPort;
+
+impl PortProvider for FixtureToolPort {
+    fn port(&self) -> &'static str {
+        ports::TOOL
+    }
+
+    fn provider_id(&self) -> &str {
+        "tests/tool-port"
+    }
+
+    fn tool_execute(&self) -> Option<Arc<dyn ToolCallExecutor>> {
+        Some(Arc::new(FixtureToolPort))
+    }
+}
+
+#[async_trait]
+impl ToolCallExecutor for FixtureToolPort {
+    async fn execute(&self, req: ToolCallRequest) -> ToolCallOutcome {
+        let name = req.tool_name.clone();
+        // 宿主检查在最前（与生产逐字同形）：无 parent 的调用诚实失败，
+        // 不查表、不回落——「无宿主 ⇒ No parent plugin」是既有用例钉住的形状。
+        let Some(parent) = req.parent.clone() else {
+            return ToolCallOutcome {
+                result_text: "Error: No parent plugin".into(),
+                success: false,
+                pending: None,
+            };
+        };
+        // 「等待用户」意图：与生产同判据（`failure_kind` 闭集），节点仍由环构造。
+        let pending_of = |data: &Value| {
+            let kind = data.get("failure_kind").and_then(Value::as_str)?;
+            if !symbio_kernel::capability::failure_kind::is_pending(kind) {
+                return None;
+            }
+            Some(symbio_plugin_api::port::PendingPrompt {
+                text: data
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or("需要用户操作")
+                    .to_string(),
+                prompt: data.get("prompt").cloned().unwrap_or(Value::Null),
+                failure_kind: kind.to_string(),
+            })
+        };
+        // 结果文本：content/output 字符串优先，兜底整包 JSON（生产 `extract_result`
+        // 的前两条判据——批用例只消费这两种形状）。
+        let text_of = |data: &Value| {
+            data.get("content")
+                .and_then(Value::as_str)
+                .or_else(|| data.get("output").and_then(Value::as_str))
+                .map(str::to_string)
+                .unwrap_or_else(|| data.to_string())
+        };
+
+        let visitor: Option<Arc<dyn Registry>> = req.ctx.get(CAPABILITY_VISITOR);
+        let tool_ctx = req.ctx.fork();
+        let _ = tool_ctx.set_payload(req.args.clone());
+        tool_ctx.set(symbio_sdk::keys::TOOL_CALL_ID, req.tool_call_id.clone());
+        tool_ctx.set(symbio_sdk::keys::RESULT_MSG_ID, req.result_msg_id.clone());
+        tool_ctx.set(symbio_kernel::exec::EVENT_SINK, req.sink.clone());
+        tool_ctx.set(symbio_kernel::exec::ABORT_SIGNAL, req.abort.clone());
+
+        // 与生产同序的三条形态：表命中（字面名——夹具工具都是 canonical 名）/
+        // 未命中回落 route / 无表直接 route。
+        let fut: std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<symbio_kernel::plugin::PluginPayload, PluginError>,
+                    > + Send,
+            >,
+        > = if let Some(visitor) = visitor {
+            if let Some(row) = visitor.get(&name).await {
+                match row.cap().cloned() {
+                    Some(cap) => {
+                        let ctx2 = tool_ctx.clone();
+                        Box::pin(async move {
+                            symbio_kernel::capability::capability_invoke(cap.as_ref(), ctx2).await
+                        })
+                    }
+                    None => {
+                        return ToolCallOutcome {
+                            result_text: format!("Error: Tool not found: {name}"),
+                            success: false,
+                            pending: None,
+                        }
+                    }
+                }
+            } else {
+                tool_ctx.set(symbio_sdk::keys::PATH, name.clone());
+                let ctx2 = tool_ctx.clone();
+                Box::pin(async move { parent.route(ctx2).await })
+            }
+        } else {
+            tool_ctx.set(symbio_sdk::keys::PATH, name.clone());
+            let ctx2 = tool_ctx.clone();
+            Box::pin(async move { parent.route(ctx2).await })
+        };
+
+        // 中止是第二出口（与生产同形）：用户按下停止 ⇒ 放弃工具、如实报「被中止」。
+        let result = tokio::select! {
+            biased;
+            r = fut => r,
+            _ = req.abort.cancelled() => {
+                return ToolCallOutcome {
+                    result_text: format!("Error: 工具 {name} 被用户中止，未返回结果"),
+                    success: false,
+                    pending: None,
+                };
+            }
+        };
+        match result {
+            Ok(resp) => {
+                let Ok(data) = resp.get::<Value>() else {
+                    return ToolCallOutcome {
+                        result_text: "Error: Failed to deserialize payload".into(),
+                        success: false,
+                        pending: None,
+                    };
+                };
+                ToolCallOutcome {
+                    result_text: text_of(&data),
+                    success: true,
+                    pending: pending_of(&data),
+                }
+            }
+            Err(e) => ToolCallOutcome {
+                result_text: format!("Error: {e}"),
+                success: false,
+                pending: None,
+            },
+        }
+    }
+}
+
+/// 给夹具的能力表装上工具端口行（`port.tool` 就绪，替身执行器见上）。
+pub(crate) async fn put_tool_port_row<T: Registry + ?Sized>(visitor: &Arc<T>) {
+    let port = Arc::new(FixtureToolPort) as Arc<dyn PortProvider>;
+    let row = port_row(&port).expect("夹具端口名在闭集内");
+    visitor.put(row).await;
+}

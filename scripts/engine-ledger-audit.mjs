@@ -59,9 +59,10 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
  *
  * `rows = 16`：15 条字符串命名的固定行 + 1 条以常量命名的归宿行（`EVENT_ARTIFACT_ADDED`）。
  * `channels = 1`：`produced` 与 `derived` 合成 `PortOutput` 之后只剩一条。
- * `fullScans = 11`：`tool_dispatch` 7 + `gates` 1 + `port` 3。
+ * `fullScans = 8`：`tool_dispatch` 7 + `gates` 1（B1–B3 下沉 session 后 `port` 三处
+ * 全量读随执行体迁走）。
  */
-const BASELINE = { rows: 16, channels: 1, fullScans: 11 }
+const BASELINE = { rows: 16, channels: 1, fullScans: 8 }
 
 const LOOP_ROWS = 'crates/symbio-plugin-loop/src/loop_rows.rs'
 const DISPATCH = 'crates/symbio-plugin-loop/src/tool_dispatch.rs'

@@ -7,6 +7,7 @@ use super::*;
 // `NodeRole` 是**测试自己**要的：生产侧写身份只写 `principal`（D-147），
 // `role` 那一格只在「构造期还没标身份的节点」与存量夹具里出现，
 // `use super::*` 因此带不过来。
+use symbio_kernel::plugin::PluginPayload;
 use symbio_kernel::plugin::PluginSimpleRequest;
 use symbio_sdk::chat::chat_node::NodeRole;
 // `Store` 是**测试自己**要的（`store.append` 是 trait 方法；父模块顶层不导入它——
@@ -141,91 +142,6 @@ impl symbio_plugin_api::effects::ToolBehavior for RevokedGate {
 }
 
 symbio_plugin_api::submit_behavior!(RevokedGate);
-
-// ==================== extract_result：判定顺序即约定 ====================
-//
-// 这组用例的作用是**钉住判定顺序**——它现在是 `extract_result` 文档里的表，
-// 不再是「读源码才知道」的实现细节。顺序变了这里会红。
-
-#[test]
-fn content_wins_over_output() {
-    // 1 优先于 2：两个都在时取 content
-    assert_eq!(
-        extract_result(&json!({"content": "正文", "output": "命令输出"})),
-        "正文"
-    );
-}
-
-#[test]
-fn output_is_read_when_content_absent() {
-    // `shell` 的返回形状（字段名约定见 `local/shell.rs::execute_streaming`）
-    assert_eq!(extract_result(&json!({"output": "ls 结果"})), "ls 结果");
-}
-
-#[test]
-fn success_true_falls_back_to_the_whole_payload() {
-    // 3：既无 content 也无 output、但 success=true → 整包 JSON
-    // （形状不透明时宁可把结构给模型看，也不要凭空造一段文本）
-    assert_eq!(
-        extract_result(&json!({"success": true, "n": 3})),
-        r#"{"n":3,"success":true}"#
-    );
-}
-
-#[test]
-fn success_false_renders_the_error_field() {
-    assert_eq!(
-        extract_result(&json!({"success": false, "error": "权限不足"})),
-        "Error: 权限不足"
-    );
-}
-
-#[test]
-fn success_false_without_error_says_unknown() {
-    assert_eq!(
-        extract_result(&json!({"success": false})),
-        "Error: unknown error"
-    );
-}
-
-#[test]
-fn bare_string_is_taken_as_is() {
-    assert_eq!(extract_result(&json!("直接给一段文本")), "直接给一段文本");
-}
-
-#[test]
-fn opaque_payload_is_stringified() {
-    // 5：兜底——形状完全不认识时整包 JSON（含 `VdfsContent` 这类结构体序列化）
-    assert_eq!(
-        extract_result(&json!({"path": "a.txt", "lines": 12})),
-        r#"{"lines":12,"path":"a.txt"}"#
-    );
-    assert_eq!(extract_result(&json!(null)), "null");
-    assert_eq!(extract_result(&json!(42)), "42");
-}
-
-#[test]
-fn non_string_content_does_not_hijack_the_read() {
-    // `content` 不是字符串 ⇒ 第 1 条不成立，继续往下走（不是「命中即返回」）。
-    // 这是顺序判定与「取第一个存在的键」的分水岭：后者会把数组
-    // 原样丢给模型。
-    assert_eq!(
-        extract_result(&json!({"content": [1, 2], "output": "真正的输出"})),
-        "真正的输出"
-    );
-}
-
-#[test]
-fn empty_content_string_is_a_hit() {
-    // 空串是**合法**的正文（工具确实没有内容可说），不跳到 output
-    assert_eq!(extract_result(&json!({"content": "", "output": "x"})), "");
-}
-
-#[test]
-fn result_field_constants_match_the_documented_order() {
-    // 常量与文档表里的字段名一致（改常量就得改文档，反之亦然）
-    assert_eq!((RESULT_CONTENT, RESULT_OUTPUT), ("content", "output"));
-}
 
 /// 需求 2 回归：工具调用 id 缺失/非法时不得跳过，必须作为工具调用失败处理——
 /// 生成错误结果子节点（喂回 LLM）+ 父节点失败补丁，保证已落库的 ToolCall
@@ -540,38 +456,6 @@ fn call_signature_normalizes_key_order() {
     );
 }
 
-/// 回归（真实事故）：中文参数摘要不得在字节边界上 panic。
-///
-/// 事故现场：`write_file` 传入含中文的 `content`，`args_summary(.., 200)`
-/// 的 `&s[..200]` 落在 `'的'`（bytes 199..202）内部 →
-/// `tokio-rt-worker` panic → ChatLoop join 失败 → 会话异常终止。
-#[test]
-fn args_summary_handles_multibyte_args() {
-    use serde_json::json;
-
-    // 构造必然跨越 200 字节边界的中文参数（'的' 3 字节）
-    let payload = "参数摘要：截断到 max_chars，用于日志打印（避免超长参数刷屏）。".repeat(8);
-    let args = json!({ "path": "a.rs", "content": payload });
-
-    // 任意 max 都必须安全返回（旧实现会在部分 max 上 panic）
-    for max in [1usize, 2, 3, 199, 200, 201, 512] {
-        let s = args_summary(&args, max);
-        assert!(
-            s.chars().count() <= max + 32,
-            "max={max} 摘要过长：{} 字节",
-            s.len()
-        );
-    }
-
-    // 超长时带长度标注，便于日志排查
-    let long = args_summary(&args, 200);
-    assert!(long.ends_with(&format!("(len={})", args.to_string().len())));
-    assert!(long.contains('…'));
-
-    // 短参数原样返回
-    assert_eq!(args_summary(&json!({"a": 1}), 200), "{\"a\":1}");
-}
-
 /// 造两个已广播的 ToolCall 父节点（模拟 settle_reasoning 之后的权威转写形态——
 /// ToolCallDelta 必然先广播过完整节点，`context.messages` 里一定有它们）。
 fn tc_context(ids: &[&str]) -> Vec<ChatNode> {
@@ -840,102 +724,14 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
     );
 }
 
-// ==================== 工具执行期间的中止感知 ====================
-
-/// 中止置位 → 等待立即结束。
-///
-/// 非流式工具（`read_file` / `web_search` / MCP / `codebase_search` …，即绝大多数
-/// 工具）在执行期间是**单次 await**，没有任何帧可观测。若不与中止信号 select，
-/// 用户按下停止后工具照跑（最长硬超时 600s），整个 Turn 继续推进——用户以为停了，
-/// 其实没停。
-///
-/// 收口前这条语义由「`handle_abort` 往通道投一帧 `{"type":"abort"}`」承载，
-/// 因此测试要造帧、造通道、还要覆盖 cancel_token 与「通道关闭不算中止」两条边界。
-/// 现在中止只有一个原语（[`ExecAbortSignal`]），一个用例即可锁死契约。
-#[tokio::test]
-async fn wait_tool_abort_returns_when_signalled() {
-    let abort = ExecAbortSignal::new();
-    let waiter = abort.clone();
-
-    let handle = tokio::spawn(async move { wait_tool_abort(&waiter).await });
-
-    abort.abort();
-    tokio::time::timeout(std::time::Duration::from_secs(2), handle)
-        .await
-        .expect("中止置位后应立即返回，而不是继续等工具")
-        .expect("等待任务不应 panic");
-}
-
-/// 已置位的信号（上游已判定）→ 立即返回，不挂起。
-#[tokio::test]
-async fn wait_tool_abort_returns_immediately_when_already_aborted() {
-    let abort = ExecAbortSignal::new();
-    abort.abort();
-    tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        wait_tool_abort(&abort),
-    )
-    .await
-    .expect("信号已置位时应立即返回");
-}
-
-/// **未被中止就不得返回**——回归测试。
-///
-/// 这是「工具照跑但用户以为停了」的反面：若等待函数在没有任何中止来源时提前返回，
-/// `select!` 会立刻 drop 掉仍在运行的工具 future，把它误报成「被用户中止」。
-/// 收口前这条由「通道关闭不算中止」的用例守着；现在通道不在执行期了，
-/// 契约变成更直接的一句：**只有 `abort()` 能让它返回**。
-#[tokio::test]
-async fn wait_tool_abort_stays_pending_without_signal() {
-    let abort = ExecAbortSignal::new();
-    let r = tokio::time::timeout(
-        std::time::Duration::from_millis(300),
-        wait_tool_abort(&abort),
-    )
-    .await;
-    assert!(
-        r.is_err(),
-        "无中止来源时提前返回：正在跑的工具会被无故丢弃并报成「用户中止」"
-    );
-    assert!(!abort.is_aborted(), "未中止时信号不得被置位");
-}
-
 // ── 工具结果的「等待用户」意图 ────────────────────────────────────────────────
 //
 // 契约**工具只声明意图与载荷，节点归编排层构造**。工具不自建 Session 通道、
 // 发一个随机 id 的节点，由消费方解回来改 id 再重播一次——同一个逻辑节点因此有两个
 // id，前端出现重复审批卡，且 resume 只删得掉一个。
-
-/// `failure_kind` 是**控制流**判据，因此只认闭集里的两个 pending 取值。
-///
-/// 反面同样重要：`error` / `permission_denied` / `tool_unavailable` 都是**信息性**
-/// 标记。把它们当成「等待用户」会让自动模式下**无人可授权**的工具把会话永久挂起
-/// ——本该让 LLM 换条路继续，却变成等一个永远不会来的回答。
-#[test]
-fn pending_prompt_from_only_accepts_the_pending_kinds() {
-    for kind in ["needs_approval", "needs_interaction"] {
-        let data = json!({
-            "content": "需要确认：执行 cmd",
-            "prompt": { "kind": "confirm" },
-            "failure_kind": kind,
-        });
-        let p = pending_prompt_from(&data).unwrap_or_else(|| panic!("{kind} 应判为等待用户"));
-        assert_eq!(p.failure_kind, kind);
-        assert_eq!(p.text, "需要确认：执行 cmd");
-        assert_eq!(p.prompt["kind"], json!("confirm"));
-    }
-
-    for kind in ["error", "permission_denied", "tool_unavailable"] {
-        let data = json!({ "content": "x", "failure_kind": kind });
-        assert!(
-            pending_prompt_from(&data).is_none(),
-            "{kind} 是信息性标记，不得收口为等待用户（会让会话永久挂起）"
-        );
-    }
-
-    // 没有 failure_kind ⇒ 普通结果
-    assert!(pending_prompt_from(&json!({ "content": "ok" })).is_none());
-}
+//
+// `failure_kind` 判据与解码（B3 的 pending 半边）已迁 session 的
+// `port.test.rs`；这里留的是**节点构造**那一半——它属于环。
 
 /// user_prompt 节点的身份归编排层：`id = result_msg_id`、`parent_id = tool_call_id`。
 ///
@@ -973,30 +769,6 @@ fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
     assert_eq!(meta["failure_kind"], json!("needs_interaction"));
     assert_eq!(meta["prompt"]["kind"], json!("question"));
     assert_eq!(meta["tool_name"], json!("vdfs_write"));
-}
-
-/// **跨工具契约**：`agent_run` 把子会话审批转成载荷回传时，本层必须认出它。
-///
-/// 两个文件各自演化时这条契约最容易静默断掉：工具改了字段名，编排层就再也识别
-/// 不出「待用户动作」，审批卡直接消失（且不报错）。形状与
-/// `agent/host/subagent.rs::RelayOutcome::Pending` 的序列化逐字对应。
-#[test]
-fn subagent_pending_payload_is_recognized_as_pending_intent() {
-    let payload = json!({
-        "content": "需要确认：删除文件",
-        "success": false,
-        "failure_kind": symbio_kernel::capability::failure_kind::NEEDS_APPROVAL,
-        "prompt": { "tool_name": "agent_run", "args": { "session_id": "child-1" } },
-    });
-    let p = pending_prompt_from(&payload).expect("子会话待审批载荷必须被识别");
-
-    assert_eq!(p.text, "需要确认：删除文件");
-    assert_eq!(p.prompt["tool_name"], json!("agent_run"));
-    assert_eq!(
-        p.failure_kind,
-        symbio_kernel::capability::failure_kind::NEEDS_APPROVAL
-    );
-    // 载荷里没有身份字段 ⇒ [`PendingPrompt`] 无法承载悬空引用（类型层面成立）
 }
 
 // ==================== record_effect：效果出参的唯一观察点 ====================
@@ -1521,11 +1293,81 @@ async fn ctx_with_probes(tools: Vec<Arc<ProbeTool>>) -> Arc<dyn PluginInvokeRequ
             .put(CapabilityRow::tool(tool as Arc<dyn Capability>))
             .await;
     }
+    // `port.tool` 行：真执行经端口合同取——替身执行器见 `test_support.rs`。
+    super::super::super::test_support::put_tool_port_row(&visitor).await;
     req.set(
         symbio_sdk::capability::CAPABILITY_VISITOR,
         visitor as Arc<dyn Registry>,
     );
     Arc::new(req) as Arc<dyn PluginInvokeRequest>
+}
+
+/// 端口缺席的响亮失败：表里有工具但没有 `port.tool` 行（零工具装配的
+/// 读数形态）⇒ 调用以**错误文本回传模型**收场（失败属信息性，模型据此改道），
+/// 不许静默跳过、不许伪造结果。
+#[tokio::test]
+async fn a_missing_tool_port_fails_loudly_on_the_result() {
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    // 表里有工具（能命中）但**不装端口行**——薄壳在读端口那一步就该失败。
+    let ctx = {
+        let req = PluginSimpleRequest::new(None, None);
+        let visitor = Arc::new(DefaultToolVisitor::new());
+        visitor
+            .put(CapabilityRow::tool(Arc::new(ProbeTool::new(
+                "probe_x",
+                CapabilityRiskLevel::Low,
+                &Arc::new(AtomicUsize::new(0)),
+                &Arc::new(AtomicUsize::new(0)),
+            )) as Arc<dyn Capability>))
+            .await;
+        req.set(
+            symbio_sdk::capability::CAPABILITY_VISITOR,
+            visitor as Arc<dyn Registry>,
+        );
+        Arc::new(req) as Arc<dyn PluginInvokeRequest>
+    };
+    let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
+    let tcs = vec![TurnToolCallInfo {
+        id: Some("tc-missing-port".into()),
+        wire_id: None,
+        name: Some("probe_x".into()),
+        arguments: json!({}),
+        parse_error: None,
+        overflow_notice: None,
+    }];
+
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &parent,
+        &sink,
+        &abort,
+        ctx,
+        &[tool_call_node("tc-missing-port", "probe_x")],
+        &test_dir(),
+        &EventStore::new(),
+        false,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .await;
+
+    assert_eq!(msgs.len(), 1, "缺席也必须有结果子节点（工具终态不变量）");
+    let text = msg_text(&msgs[0]);
+    assert!(
+        text.contains("`port.tool` 缺席") && text.contains("未执行"),
+        "结果要写明端口缺席且工具未执行（实际: {text}）"
+    );
+    assert_eq!(updates.len(), 1, "父节点必须同步收敛");
+    assert_eq!(
+        updates[0]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("success"))
+            .and_then(|v| v.as_bool()),
+        Some(false),
+        "缺席是失败（success=false），不是伪造的成功"
+    );
 }
 
 /// 父 ToolCall 的权威副本（执行层从 `context_messages` 取它做终态快照）。

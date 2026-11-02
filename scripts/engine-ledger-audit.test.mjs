@@ -26,7 +26,7 @@ const DISPATCH = 'crates/symbio-plugin-loop/src/tool_dispatch.rs'
 const GATES = 'crates/symbio-plugin-loop/src/tools/dispatch/gates.rs'
 const PORT = 'crates/symbio-plugin-loop/src/port.rs'
 
-/** 与基线等量的干净夹具：16 行 / 1 通道 / 11 处全量读。 */
+/** 与基线等量的干净夹具：16 行 / 1 通道 / 8 处全量读（B1–B3 下沉后 `port` 无读点）。 */
 function cleanFiles() {
   const decl = `    Decl {\n        name: "row",\n        prio: 1,\n    },\n`
   const rows = `pub(crate) const TABLE: &[Decl] = &[\n${decl.repeat(16)}];\n`
@@ -36,7 +36,7 @@ function cleanFiles() {
     [LOOP_ROWS]: rows,
     [DISPATCH]: dispatch + scan.repeat(7),
     [GATES]: scan,
-    [PORT]: `fn g() { let _ = store.range(symbio_sdk::Seq::new(0)); }\n`.repeat(3),
+    [PORT]: `fn g() { let _ = 0u8; }\n`,
   }
 }
 
@@ -110,7 +110,7 @@ test('EL-003：多一处全量读 ⇒ 红（两种写法都算）', () => {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /EL-003/)
-    assert.match(r.out, /11 → 12/)
+    assert.match(r.out, /8 → 9/)
   } finally {
     box.cleanup()
   }

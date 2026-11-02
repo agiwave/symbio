@@ -106,6 +106,25 @@ pub async fn collect_capabilities(
         ctx.set(symbio_sdk::agent::AGENT_PERMS, slot);
     }
 
+    // tool 端口提供者行（D-298）：本插件是收集宿主，能力表就是工具世界——`ToolPort`
+    // 经 `tool_metas` + `capability_invoke` 调各工具插件的 `Capability`（执行提供者是
+    // 它们，不新建工具代理插件）。**广播之后**装行而不是在 traverse 里：条件（表里
+    // 有没有工具行）只有收集完了才可判，traverse 中途读表会看见未完成的装配。零工具
+    // ⇒ 不注册——镜像 model 端口的「生效者缺席 ⇒ 不注册」：环在调用点拿到缺席读数，
+    // 响亮失败并落事实。
+    if !manager
+        .list(symbio_kernel::capability::family::TOOL)
+        .await
+        .is_empty()
+    {
+        let port = Arc::new(super::port::ToolPort);
+        if let Some(row) = symbio_plugin_api::port::port_row(
+            &(port as Arc<dyn symbio_plugin_api::port::PortProvider>),
+        ) {
+            manager.put(row).await;
+        }
+    }
+
     manager
 }
 
