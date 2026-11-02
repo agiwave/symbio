@@ -123,7 +123,8 @@ fn low_confidence_skill_retreats_and_falls_back() {
         stage(20, false),
         calibrated(40, "sk-abc", true),
     ];
-    let RowStep::FactsWithEffects(drafts, effects) = SkillRecall.run(&request(&key, &facts, &history))
+    let RowStep::FactsWithEffects(drafts, effects) =
+        SkillRecall.run(&request(&key, &facts, &history))
     else {
         panic!("低置信技能不该作答");
     };
@@ -146,7 +147,8 @@ fn resumed_stage_never_answers() {
         skill(10, "sk-abc", "把周报整理成摘要", "先列要点。"),
         stage(20, true),
     ];
-    let RowStep::FactsWithEffects(drafts, effects) = SkillRecall.run(&request(&key, &facts, &history))
+    let RowStep::FactsWithEffects(drafts, effects) =
+        SkillRecall.run(&request(&key, &facts, &history))
     else {
         panic!("续写幕不该作答");
     };
@@ -174,7 +176,8 @@ fn entries_without_skill_id_only_close_the_debt() {
         ),
         stage(20, false),
     ];
-    let RowStep::FactsWithEffects(drafts, effects) = SkillRecall.run(&request(&key, &facts, &history))
+    let RowStep::FactsWithEffects(drafts, effects) =
+        SkillRecall.run(&request(&key, &facts, &history))
     else {
         panic!("判不了不该作答");
     };

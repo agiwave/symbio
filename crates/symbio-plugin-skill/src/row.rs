@@ -130,7 +130,7 @@ fn missed(req: &RowRequest<'_>, facts: Vec<FactDraft>) -> RowStep {
     RowStep::FactsWithEffects(
         facts,
         vec![EffectDraft::Stage(StageDraft::new(
-            &req.anchor,
+            req.anchor,
             "skill.recall",
         ))],
     )

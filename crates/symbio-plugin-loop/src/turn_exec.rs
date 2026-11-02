@@ -1527,7 +1527,13 @@ fn land_effects(
                     ))));
                 }
                 super::stage_events::land_effect(
-                    store, turn, user_seq, principal, anchor, &draft.stage, round,
+                    store,
+                    turn,
+                    user_seq,
+                    principal,
+                    anchor,
+                    &draft.stage,
+                    round,
                 )
                 .map_err(ActorError::Append)?;
             }

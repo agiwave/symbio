@@ -1398,7 +1398,7 @@ pub(crate) fn load(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<Gap>> {
     let mut b = Builder::new();
     b.declare(LOOP_OWNER, declarations(rows));
     let row_writes = row_writes_with_effects();
-    b.seal(&row_writes)
+    b.seal(row_writes)
 }
 
 /// 本插件交给装配口的完整声明（DE-024 D-198）。`load` 与链接期提交共用这一份，

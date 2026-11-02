@@ -3022,7 +3022,10 @@ fn a_live_effect_is_sent_once_per_owner_and_key() {
 
     assert_eq!(live_keys.len(), 1, "同一 (owner, anchor, key) 只登记一次");
     assert!(
-        store.range(Seq::new(0)).iter().all(|e| e.kind != EVENT_MESSAGE_ADDED),
+        store
+            .range(Seq::new(0))
+            .iter()
+            .all(|e| e.kind != EVENT_MESSAGE_ADDED),
         "实时上线是呈现，不是事实（D-293）"
     );
 }
