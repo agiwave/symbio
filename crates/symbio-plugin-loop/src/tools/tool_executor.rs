@@ -126,6 +126,7 @@ pub async fn execute_tool_async(
                 abort: abort.clone(),
                 idempotency_key: tool_call_id.to_string(),
                 sink: sink.clone(),
+                emit: symbio_plugin_api::port::PortFactEmit::silent(),
                 ctx: Some(exec_ctx),
             },
             PortInput {

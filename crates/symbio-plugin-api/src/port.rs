@@ -39,6 +39,7 @@
 //! 结构性用例钉住这条事实：port 行在表 ⇒ 六个消费族（工具 / 模型 / 提示词 / 挂载 /
 //! 选项 / 可配置）仍然看不到它。
 
+use crate::effects::FactDraft;
 use serde_json::Value;
 use std::fmt;
 use std::sync::Arc;
@@ -126,7 +127,7 @@ pub struct PortInput {
     pub payload: Value,
 }
 
-/// 一笔债的执行上下文（`DE-047` I-6.5）：命名不带世界词。
+/// 一笔债的执行上下文（`DE-047` I-6.5 / D-305 裁决一）：命名不带世界词。
 #[derive(Clone)]
 pub struct PortExecContext {
     /// 截止时刻（毫秒，相对时间轴）；`None` = 无截止。
@@ -137,8 +138,54 @@ pub struct PortExecContext {
     pub idempotency_key: String,
     /// 增量出口（`capabilities.streaming` 为真时使用）。
     pub sink: ExecEventSink,
+    /// 事实草稿出口（D-305 裁决一）：provider 执行期间可追加事实，宿主唯一写口按
+    /// 幂等键落行；环不解析、不识别落下的行。
+    pub emit: PortFactEmit,
     /// 调用方 ctx（提供者据此读能力表）；`None` = 无。
     pub ctx: Option<Arc<dyn PluginInvokeRequest>>,
+}
+
+/// provider 执行一笔债期间追加事实草稿的通用出口（`DE-047` D-305 裁决一）。
+///
+/// 形状与 [`ExecEventSink`] 同族：**生产者只写，去处由宿主决定**。命名的「事实」
+/// 是通用的记账单位（[`FactDraft`]），不是某个世界的事件词。
+#[async_trait::async_trait]
+pub trait PortFactWriter: Send + Sync + 'static {
+    /// 追加一组事实草稿。宿主的唯一写口按草稿给的幂等键落行（重复投递被吸收）；
+    /// provider 拿不到写句柄，也无权指定轮号 / 主体 / 时刻。
+    async fn emit(&self, facts: Vec<FactDraft>);
+}
+
+/// 事实草稿出口的值形态（与 [`ExecEventSink`] 的 `Null` 同一套语义）。
+#[derive(Clone, Default)]
+pub struct PortFactEmit(Option<Arc<dyn PortFactWriter>>);
+
+impl PortFactEmit {
+    /// 静默出口：没有宿主写口时 `emit` 是 no-op（夹具 / 内部请求）。
+    pub fn silent() -> Self {
+        Self(None)
+    }
+
+    /// 宿主写口。
+    pub fn new(writer: Arc<dyn PortFactWriter>) -> Self {
+        Self(Some(writer))
+    }
+
+    /// 追加一组事实草稿。
+    pub async fn emit(&self, facts: Vec<FactDraft>) {
+        if let Some(writer) = &self.0 {
+            writer.emit(facts).await;
+        }
+    }
+}
+
+impl fmt::Debug for PortFactEmit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(_) => f.write_str("PortFactEmit(Host)"),
+            None => f.write_str("PortFactEmit::Silent"),
+        }
+    }
 }
 
 /// 通用错误分类（`DE-047` I-6.2）：只有三档，不带世界语义。

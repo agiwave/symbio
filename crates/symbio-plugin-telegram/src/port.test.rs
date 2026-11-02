@@ -161,6 +161,7 @@ async fn notify_port_registers_and_executes_for_real() {
     let outcome = executor
         .execute(
             PortExecContext {
+                emit: symbio_plugin_api::port::PortFactEmit::silent(),
                 deadline_ms: None,
                 abort: ExecAbortSignal::new(),
                 idempotency_key: "request-notify-1".to_string(),
@@ -196,6 +197,7 @@ async fn notify_port_without_token_fails_without_network() {
         .expect("执行面与配置无关，始终交出")
         .execute(
             PortExecContext {
+                emit: symbio_plugin_api::port::PortFactEmit::silent(),
                 deadline_ms: None,
                 abort: ExecAbortSignal::new(),
                 idempotency_key: "request-notify-2".to_string(),

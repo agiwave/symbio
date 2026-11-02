@@ -485,6 +485,42 @@ where
     Ok(outcome)
 }
 
+/// provider 追加事实草稿的**宿主唯一写口**（`DE-047` D-305 裁决一）。
+///
+/// 轮号、主体与归属由宿主盖章（provider 无权指定记账信封）；幂等键由草稿自带，
+/// `Duplicate` 是正常的重复投递（重试 / 续写幕），吸收而不是报错。其余错误同样
+/// 不向 provider 冒泡——`emit` 的合同没有错误通道，写口失败会以「这一笔的
+/// `response` 缺失」在下游显形，而不是被 provider 吞成另一个世界错误。
+struct HostFactWriter {
+    store: Arc<dyn Store<Event = Event>>,
+    round: u64,
+    actor: String,
+    now: i64,
+}
+
+#[async_trait::async_trait]
+impl symbio_plugin_api::port::PortFactWriter for HostFactWriter {
+    async fn emit(&self, facts: Vec<symbio_plugin_api::FactDraft>) {
+        for draft in facts {
+            let mut event = Event::pending(
+                draft.key,
+                draft.kind,
+                draft.entity,
+                draft.verb,
+                self.round,
+                &self.actor,
+            );
+            event.produced_by = draft.produced_by;
+            event.payload = draft.payload;
+            event.ts = self.now;
+            match self.store.append(event) {
+                Ok(_) | Err(AppendError::Duplicate) => {}
+                Err(_) => {}
+            }
+        }
+    }
+}
+
 /// 绑定表里的**唯一通用受理入口**：一笔债 → 端口名 + 行 + 债键（`DE-047` D-301）。
 ///
 /// 它只读三样东西，且都不带世界语义：
@@ -614,6 +650,12 @@ pub(crate) fn run_port<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             abort: ctx.session.abort_signal(),
             idempotency_key: request.event_id.clone(),
             sink: event_sink,
+            emit: symbio_plugin_api::port::PortFactEmit::new(Arc::new(HostFactWriter {
+                store: ctx.store.clone(),
+                round: round_no,
+                actor: ctx.session.principal().to_string(),
+                now,
+            })),
             ctx: Some(request_ctx),
         };
 

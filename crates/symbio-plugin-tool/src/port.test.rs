@@ -363,6 +363,7 @@ fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext,
             abort: ExecAbortSignal::new(),
             idempotency_key: "tc-1".to_string(),
             sink: ExecEventSink::silent(),
+            emit: symbio_plugin_api::port::PortFactEmit::silent(),
             ctx: Some(ctx),
         },
         PortInput {

@@ -7,10 +7,14 @@
 
 use std::sync::Arc;
 
-use symbio_plugin_api::port::PortProvider;
+use symbio_plugin_api::chat_node::ChatNode;
+use symbio_plugin_api::port::{
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
+};
 use symbio_plugin_api::ports;
 use symbio_plugin_api::{
-    CapabilityRow, ExecAbortSignal, LlmAdapter, ModelProvider, ProviderLlmAdapter,
+    CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv, LlmAdapter, ModelFinishReason,
+    ModelProvider, PluginError, ProviderLlmAdapter, TurnOutput,
 };
 
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
@@ -65,4 +69,129 @@ impl PortProvider for ModelPort {
     fn model(&self) -> Option<Arc<dyn ModelProvider>> {
         Some(self.active.clone())
     }
+
+    /// 通用执行面（`DE-047` D-305 裁决一）：一次往返的请求构造、流式帧、工具调用
+    /// 累计、用量与计价、终止判定都在执行体里；环只把 `request` 载荷原样交进来。
+    fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
+        Some(Arc::new(ModelExecutor {
+            active: self.active.clone(),
+            catalog: self.catalog.clone(),
+        }))
+    }
 }
+
+/// `request(port=model)` 的载荷（行契约由 model 插件自己持有，环不认识这些键）。
+#[derive(Debug, serde::Deserialize)]
+struct RoundTripRequest {
+    /// 首选 provider id；不在目录 ⇒ 落回当次生效者（与 `llm_round_trip` 同一条规则）。
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    system_prompt: String,
+    #[serde(default)]
+    messages: Vec<ChatNode>,
+    #[serde(default)]
+    tools: Vec<CapabilityMeta>,
+    #[serde(default)]
+    root_id: String,
+}
+
+/// 一次模型往返的执行体。
+struct ModelExecutor {
+    active: Arc<dyn ModelProvider>,
+    catalog: Vec<Arc<dyn ModelProvider>>,
+}
+
+#[async_trait::async_trait]
+impl PortExecutor for ModelExecutor {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let request: RoundTripRequest = match serde_json::from_value(input.payload) {
+            Ok(request) => request,
+            Err(error) => {
+                return PortOutcome::failed(
+                    PortErrorClass::NonRetryable,
+                    format!("模型请求载荷不可读：{error}"),
+                )
+            }
+        };
+        let provider = request
+            .provider
+            .as_deref()
+            .and_then(|id| self.catalog.iter().find(|p| p.provider_id() == id))
+            .unwrap_or(&self.active);
+        let env = ExecEnv::new(exec.sink.clone(), exec.abort.clone());
+        match provider
+            .round_trip(
+                &request.system_prompt,
+                &request.messages,
+                &request.tools,
+                &request.root_id,
+                &env,
+            )
+            .await
+        {
+            Ok(output) => PortOutcome {
+                facts: vec![round_fact(&output)],
+                error: None,
+            },
+            Err(PluginError::Aborted) => PortOutcome {
+                // 半截产出仍要留痕：中止是这一笔的状态，不是「没有发生过」。
+                facts: vec![serde_json::json!({"status": "aborted"})],
+                error: Some((PortErrorClass::NonRetryable, "aborted".to_string())),
+            },
+            Err(PluginError::RateLimited(why)) => {
+                PortOutcome::failed(PortErrorClass::Retryable, why)
+            }
+            Err(error) => PortOutcome::failed(PortErrorClass::NonRetryable, error.to_string()),
+        }
+    }
+}
+
+/// 一次往返的产物 → 事实草稿（键名是本插件的行契约，环不解析）。
+fn round_fact(output: &TurnOutput) -> serde_json::Value {
+    let calls: Vec<serde_json::Value> = output
+        .tool_calls
+        .iter()
+        .map(|call| {
+            serde_json::json!({
+                "id": call.id,
+                "wire_id": call.wire_id,
+                "name": call.name,
+                "arguments": call.arguments,
+                "parse_error": call.parse_error,
+                "overflow_notice": call.overflow_notice,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "text": output.text,
+        "reasoning": output.reasoning,
+        "response_id": output.response_id,
+        "tool_calls": calls,
+        "finish": finish_str(&output.finish),
+        "usage": output.usage.as_ref().map(|u| serde_json::json!({
+            "input": u.input,
+            "output": u.output,
+        })),
+        "spend": output.spend.as_ref().map(|s| serde_json::json!({
+            "amount_nano": s.amount_nano,
+            "currency": s.currency,
+        })),
+        "response_text_child_id": output.response_text_child_id,
+        "reasoning_child_id": output.reasoning_child_id,
+    })
+}
+
+fn finish_str(finish: &ModelFinishReason) -> &str {
+    match finish {
+        ModelFinishReason::Stop => "stop",
+        ModelFinishReason::Length => "length",
+        ModelFinishReason::ToolCalls => "tool_calls",
+        ModelFinishReason::ContentFilter => "content_filter",
+        ModelFinishReason::Other(_) => "other",
+    }
+}
+
+#[cfg(test)]
+#[path = "port.test.rs"]
+mod tests;

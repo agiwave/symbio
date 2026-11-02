@@ -1215,8 +1215,43 @@ fn exec_context(port: &'static str, id: &str) -> PortExecContext {
         abort: ExecAbortSignal::default(),
         idempotency_key: format!("{port}-{id}-1"),
         sink: ExecEventSink::Null,
+        emit: symbio_plugin_api::port::PortFactEmit::silent(),
         ctx: None,
     }
+}
+
+/// D-305 裁决一：provider 经 `emit` 追加的事实在宿主唯一写口落行——轮号 / 主体 /
+/// 时刻由宿主盖章，重复投递按草稿自带的幂等键被吸收。
+#[tokio::test]
+async fn emit_lands_with_host_stamp_and_absorbs_duplicates() {
+    use symbio_kernel::event::{Entity, Verb};
+    use symbio_plugin_api::port::PortFactEmit;
+
+    let store = Arc::new(boot());
+    let emit = PortFactEmit::new(Arc::new(super::HostFactWriter {
+        store: store.clone(),
+        round: 7,
+        actor: "brain/agent".to_string(),
+        now: 1_700_000_000_000_i64,
+    }));
+    let draft = || symbio_plugin_api::FactDraft {
+        key: "emit-1".to_string(),
+        kind: "test.progress".to_string(),
+        entity: Entity::Control,
+        verb: Verb::Progressed,
+        payload: json!({"n": 1}),
+        produced_by: None,
+    };
+
+    emit.emit(vec![draft()]).await;
+    emit.emit(vec![draft()]).await;
+
+    let landed = store.range(Seq::new(0));
+    assert_eq!(landed.len(), 1, "重复投递必须被幂等键吸收");
+    assert_eq!(landed[0].turn, 7, "宿主盖的轮号原样落行");
+    assert_eq!(landed[0].actor, "brain/agent");
+    assert_eq!(landed[0].ts, 1_700_000_000_000);
+    assert_eq!(landed[0].kind, "test.progress");
 }
 
 /// 把 `ids` 里每一笔调用各欠一笔债、各还一笔——**N 次调用 = N 笔债**，
