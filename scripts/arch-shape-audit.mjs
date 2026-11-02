@@ -334,7 +334,7 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 550, enumVariants: 240 }
+  : { structFields: 532, enumVariants: 236 }
 
 /**
  * CS-010 控制面草稿的字段棘轮（[DE-022](../docs/003-design/022-行表与派发面.md "DE-022-行表与派发面") D-226）。
