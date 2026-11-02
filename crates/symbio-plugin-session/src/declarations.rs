@@ -19,10 +19,16 @@ pub(crate) const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
 pub(crate) const EVENT_SYSTEM_HEALTH: &str = "system.health";
 
 /// **读方侧**的视图名：主动性读数由能力包交（`crates/symbio-plugin-conation`），本插件按
-/// 名字读。与 [`TASK_VOCAB`] 同一条通路——拼写只有一个来源（owner 的 `PLUGIN.yml`
+/// 名字读。与 [`TASK_READYSET_VIEW`] 同一条通路——拼写只有一个来源（owner 的 `PLUGIN.yml`
 /// `shared_views`），本常量只是让三个读点（`stats` / `stats_reading` / 自主触发）不各写
 /// 一遍字面量。改名由 owner 决定，改完这里跟着改，读口不变。
 pub(crate) const CONATION_INTENTS_VIEW: &str = "conation.intents";
+
+/// 自主程度轴的名字：折叠由同一个能力包交（`conation.autonomy`），本插件按名字读。
+///
+/// 与 [`CONATION_INTENTS_VIEW`] 同一条通路：owner 的 `PLUGIN.yml` `shared_views` 是
+/// 唯一来源，读点（`stats` 列 / `stats_reading` 实例级聚合）不各写一遍字面量。
+pub(crate) const CONATION_AUTONOMY_VIEW: &str = "conation.autonomy";
 
 /// 时延分层三列的名字：三条视图都由能力包 `crates/symbio-plugin-slo` 交，本插件按名字读。
 ///
@@ -82,23 +88,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("turn.branch_selected", (Entity::Turn, Verb::Asserted)),
 ];
 
-/// **消费方**侧的任务族词汇表（DE-024 D-206）：这一族的 owner 是 `crates/symbio-plugin-task`，本插件只是
-/// 消费者——自己的 `autonomy` 折叠用这张表，就绪集列则按名字读 owner 的 `task.readyset`
-/// （`D-289`）。拼写因此取自清单生成物
-/// `symbio_plugin_api::events`——不是兄弟插件（E-009 禁那条边），也不是 core 或内核代答。
-/// 交出整族而不是本插件用到的那两格：折叠收的是同一张表，两张各读各的拼写迟早分岔。
-pub(crate) const TASK_VOCAB: symbio_sdk::projection::task_vocab::TaskVocab<'static> =
-    symbio_sdk::projection::task_vocab::TaskVocab {
-        opened: symbio_plugin_api::events::EVENT_TASK_OPENED,
-        progressed: symbio_plugin_api::events::EVENT_TASK_PROGRESS,
-        held: symbio_plugin_api::events::EVENT_TASK_HELD,
-        terminal: symbio_plugin_api::events::EVENT_TASK_ASSERTED,
-        lease: symbio_plugin_api::events::EVENT_TASK_ASSIGNED,
-    };
-
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
 ///
-/// 与 [`TASK_VOCAB`] 同一条通路、同一个理由：折叠（`transcript` / `rebuild` /
+/// 与 [`CONATION_INTENTS_VIEW`] 同一条通路、同一个理由：折叠（`transcript` / `rebuild` /
 /// `prompt_fidelity` / `branch` / `mutations` / `slo` / `commitment_records` …）住在
 /// core，两个插件都调它，所以拼写只能来自**清单生成物**——本插件是 `message.*` 与
 /// `session.consolidated` / `turn.branch_selected` 五条的 owner，其余十一条的 owner 是

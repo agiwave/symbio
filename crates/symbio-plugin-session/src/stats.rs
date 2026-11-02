@@ -44,8 +44,9 @@
 //! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{
-    CHAT_VOCAB, CONATION_INTENTS_VIEW, COST_LEDGER_VIEW, MESSAGE_VOCAB, REPUTATION_LEDGER_VIEW,
-    SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW, TASK_READYSET_VIEW,
+    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, COST_LEDGER_VIEW, MESSAGE_VOCAB,
+    REPUTATION_LEDGER_VIEW, SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW,
+    SLO_SPAN_VIEW, TASK_READYSET_VIEW,
 };
 use std::sync::Arc;
 
@@ -63,7 +64,6 @@ use symbio_sdk::projection::transcript::transcript;
 
 use crate::projections::checkpoint::checkpoint;
 
-use super::autonomy::autonomy_for;
 use super::spend_ledger::spend_ledger;
 use super::token_ledger::token_ledger;
 
@@ -371,12 +371,11 @@ pub(crate) struct SessionStats {
     /// 实例级「任务级时长中位数」在 `fleet` 的 `axes.span` 族（单会话一个跨度没有
     /// 中位数可言，见 `crates/symbio-plugin-slo/src/decl.rs::span_merged` 的「为什么」）。
     pub span: serde_json::Value,
-    /// 自主程度（同上 · 自主程度）：`autonomy` 投影序列化
-    /// （`{ closed, unattended }`——已闭环任务数与其中全程未被 `task.held` 挂起的数量）。
+    /// 自主程度（DE-008 §3.1 外部效标）：**读数由能力包交**（`conation.autonomy`，
+    /// `D-221` 按名字读、`D-281` 折叠两半），本插件原样装一格，不算率、不认识形状。
     ///
-    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ { closed: 0, unattended: 0 }`）。
-    /// 率是**纯查询**（`AutonomyView::unattended_rate`），不落第二个数——与 `tiers` 的
-    /// `rate()` 同款：存分子分母，读时再除。
+    /// 归**四列**那一族（同切片、同 as-of）。读不到 ⇒ `null`（不是三个零：零是
+    /// 「没有闭环任务」，`null` 是「这一格今天读不出来」）。
     pub autonomy: serde_json::Value,
     /// **能力视图**（DE-025 D-221）：别的插件公开的视图，按名字读出来的原样值。
     ///
@@ -670,14 +669,12 @@ pub(crate) fn read(
         || serde_json::json!({ "events": 0, "span_ms": 0 }),
     );
 
-    // 自主程度列（同上）：`autonomy` 认挂起格与终态格（插话抢占 = 外部介入在事实源
-    // 里唯一的痕迹；闭环 = 验收通过）。率是纯查询，此处只落分子分母。
-    let autonomy = serde_json::to_value(
-        autonomy_for(crate::declarations::TASK_VOCAB)
-            .read_all(&snapshot)
-            .value,
-    )
-    .map_err(|e| PluginError::InternalError(format!("自主程度序列化失败：{e}")))?;
+    // 自主程度列（同上）：**折叠归能力包**（`conation.autonomy`）——本插件按名字读，
+    // 不认识分子分母是怎么数的，也不再自己算率。读不到 ⇒ `null`，与 `may_read = false`
+    // 的零形状分开：后者是「不给你看」，前者是「装配里没有 owner」。
+    let autonomy = read_view_or(CONATION_AUTONOMY_VIEW, &snapshot, || {
+        serde_json::Value::Null
+    });
 
     // 实例级聚合列。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
     // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（axes 两族给有据的

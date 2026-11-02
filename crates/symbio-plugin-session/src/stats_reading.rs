@@ -19,7 +19,8 @@
 //! （`D-281`）。同一份事实长出两套口径，读数与投影就会静默漂移，而两边都自称是 SLO。
 
 use crate::declarations::{
-    COMMITMENT_VOCAB, CONATION_INTENTS_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
+    COMMITMENT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, SLO_FALLBACK_VIEW,
+    SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
 };
 use symbio_kernel::event::Event;
 use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
@@ -118,31 +119,20 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
         || serde_json::json!({ "sessions": 0, "median_ms": serde_json::Value::Null }),
     );
     let conation = shared_axis(CONATION_INTENTS_VIEW, snapshots).unwrap_or(serde_json::Value::Null);
+    // 自主程度轴同样归能力包：逐片求值 + 交回 `agg`，本处不认识分子分母。
+    // 读不到 ⇒ `null`（与主动性的缺席同一条：零是读数，`null` 是读不出来）。
+    let autonomy =
+        shared_axis(CONATION_AUTONOMY_VIEW, snapshots).unwrap_or(serde_json::Value::Null);
 
     // 合计两格读 owner 交的汇总值（形状归 owner，本处只挑两格）。
     let (turns, fallbacks) = totals_of(&fallback);
 
-    // 自主程度列仍是本插件的投影（名册 #13 不搬它）：它与三列同批扫描、同一份 snapshot
-    // ——「多扫一遍」不是更彻底，是多一次读错范围的机会。
-    let mut aut_parts = Vec::with_capacity(snapshots.len());
-    for snapshot in snapshots {
-        aut_parts.push(
-            crate::autonomy::autonomy_for(crate::declarations::TASK_VOCAB)
-                .read_all(snapshot)
-                .value,
-        );
-    }
-    let autonomy = crate::autonomy::AutonomyView::merge(&aut_parts);
-
     // 外部效标两族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
     // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
+    // 两族都是能力包的 `agg` 原样交出（`D-281`）：本插件不列它们的字段。
     let mut axes = serde_json::json!({
         "span": span,
-        "autonomy": {
-            "closed": autonomy.closed,
-            "unattended": autonomy.unattended,
-            "unattended_rate": autonomy.unattended_rate(),
-        },
+        "autonomy": autonomy,
     });
     // 主动性那一格是**能力包的 `agg` 原样交出**（`D-281`）：形状归 owner，本插件不在这里
     // 列它的字段——列了就是第二份口径。读不到 ⇒ `null`（不是三个零：零是「没有主动发起」，

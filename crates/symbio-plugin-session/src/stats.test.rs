@@ -41,7 +41,7 @@ use symbio_plugin_api::events::{
     EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 // 任务族的名字走清单生成物（写方在各自能力包，本插件只是读方，DE-024 D-204）。
-use symbio_plugin_api::events::{EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED};
+use symbio_plugin_api::events::EVENT_TASK_OPENED;
 use symbio_plugin_api::vocab;
 
 /// 校准观测的名字：**本测试二进制按线上字面量造它**。
@@ -428,12 +428,10 @@ fn the_exit_rows_carry_the_owner_shape() {
 //
 // ## 这两列今天归谁
 //
-// 主动性（`conation.intents`）与跨度（`slo.span`）的折叠都在各自的能力包里；本插件
-// 只按名字读、把值装进出口。于是这里能验的是**读方那一半**：缺席时交什么形状、
-// 形状的键是不是那一列自己的。数字（分子分母、中位数）归 owner 的单测与 e2e。
-//
-// 自主程度列**没有**搬（名册 #13 不搬它）：它仍是本插件的投影，跨会话合并也是本插件
-// 的代码，因此它的数仍在这里判。
+// 主动性（`conation.intents`）、自主程度（`conation.autonomy`）与跨度（`slo.span`）的
+// 折叠都在各自的能力包里；本插件只按名字读、把值装进出口。于是这里能验的是**读方
+// 那一半**：缺席时交什么形状、形状的键是不是那一列自己的。数字（分子分母、中位数）
+// 归 owner 的单测与 e2e。
 
 /// 三列读不到时交**文档写的空形状**，而不是编一个数。
 ///
@@ -460,6 +458,11 @@ fn unavailable_columns_take_their_documented_empty_shape() {
         serde_json::json!({ "events": 0, "span_ms": 0 }),
         "跨度列的空形状是它自己的键（不是逐档视图的 by_tier）"
     );
+    assert_eq!(
+        got.autonomy,
+        serde_json::Value::Null,
+        "自主程度列归能力包（`conation.autonomy`）：本进程没链接 ⇒ null，不是零形状冒充读数"
+    );
     // 缺席必须**可诊断**：能力视图那一列按名字报出原因词与人话。
     let absent = got.capability_views.as_object().expect("能力视图列是对象");
     assert!(
@@ -481,32 +484,14 @@ fn unavailable_columns_take_their_documented_empty_shape() {
 
 /// 实例级 `axes` 三族：形状恒在，各自归各自的 owner。
 ///
-/// - `span` / `conation` 归能力包（`slo` / `conation`）：本进程不链接它们 ⇒ `span` 是有据
-///   的空、`conation` 是 `null`（零是「一个会话都没主动发起过」，`null` 是「读不出来」）；
-/// - `autonomy` 仍是**本插件**的投影（名册 #13 不搬它）⇒ 跨会话合并是本插件的事，
-///   这里用两个会话各一笔闭环任务证明它真的跨会话累加。
+/// - `span` / `conation` / `autonomy` 都归能力包（`slo` / `conation`）：本进程不链接它们
+///   ⇒ `span` 是有据的空，`conation` / `autonomy` 是 `null`（零是「一个会话都没发生过」，
+///   `null` 是「读不出来」）；
+/// - 跨会话合并的**数字**归 owner 的单测与 e2e（`e2e/cases/t36-autonomous-initiator.mjs`
+///   读真实装配的 `fleet.axes.conation`），不在这里造替身。
 #[test]
-fn fleet_axes_are_shaped_and_the_autonomy_family_still_aggregates_here() {
+fn fleet_axes_report_owner_absence_as_null_not_zero() {
     let (root, wals) = seed_instance("axes", 2);
-    // 两个会话各落一笔闭环任务：跨会话合并的分子因此可判（0 还是 2）。
-    for (i, wal) in wals.iter().enumerate() {
-        EventWalStore::open(wal)
-            .unwrap()
-            .append(
-                Event::pending(
-                    format!("a-{i}"),
-                    EVENT_TASK_ASSERTED,
-                    Entity::Task,
-                    Verb::Asserted,
-                    0,
-                    symbio_sdk::authz::PRINCIPAL_MAIN,
-                )
-                // 任务断言是 I2 的声明类事件：没有上游就没有可撤销的溯源。
-                .with_produced_by(0)
-                .with_payload(serde_json::json!({ "task_id": format!("t{i}") })),
-            )
-            .unwrap();
-    }
     let got = read_path(
         "session-0",
         &wals[0],
@@ -516,96 +501,23 @@ fn fleet_axes_are_shaped_and_the_autonomy_family_still_aggregates_here() {
     )
     .expect("读数");
     let axes = got.fleet.get("axes").expect("axes 族");
-    // 主动性轴**在本测试进程里读不出来**：它的 owner 是能力包 `conation`，本二进制
-    // 不链接它（E-009）⇒ 视图缺席 ⇒ 这一格是 `null`，不是三个零。
-    //
-    // 两个理由让它必须这样断言：① 零是「一个会话都没主动发起过」，`null` 是「读不出来」，
-    // 把后者写成前者就是让装配故障看起来像一次正常的安静；② 若在这里交一份替身把它算成
-    // 零，`capability_views` 那条「本进程没链接 owner ⇒ 必须出声」的用例会变成假绿。
-    // 跨会话合并的**数字**归 e2e（`e2e/cases/t36-autonomous-initiator.mjs` 读真实装配的
-    // `fleet.axes.conation`）。
+    // 缺席的两轴交 `null`，不是零或三个零字段：把「读不出来」写成「有据的零」就是让
+    // 装配故障看起来像一次正常的安静；若在这里交替身把它算成零，`capability_views` 那条
+    // 「本进程没链接 owner ⇒ 必须出声」的用例也会变成假绿。
     assert!(
         axes["conation"].is_null(),
         "视图缺席 ⇒ 主动性轴交 null（不是有据的零；实际: {}）",
         axes["conation"]
     );
+    assert!(
+        axes["autonomy"].is_null(),
+        "视图缺席 ⇒ 自主程度轴交 null（不是零形状；实际: {}）",
+        axes["autonomy"]
+    );
     assert_eq!(
         axes["span"],
         serde_json::json!({ "sessions": 0, "median_ms": null }),
         "跨度轴缺席 ⇒ 有据的空（`null` 不是 0：没有样本与中位数 0ms 是两件事）"
-    );
-    assert_eq!(
-        axes["autonomy"]["closed"].as_u64(),
-        Some(2),
-        "自主程度列仍是本插件的投影 ⇒ 两个会话各一笔闭环 = 2（跨会话真的合并了）"
-    );
-    assert_eq!(
-        axes["autonomy"]["unattended_rate"].as_f64(),
-        Some(1.0),
-        "两笔都没被挂起 ⇒ 率 = 1.0（率是纯查询，不落第二个数）"
-    );
-}
-
-/// 自主程度列：闭环且未挂起 / 闭环；删掉那条 `task.held` ⇒ 率从 0.5 升到 1.0
-/// （读数口会动，不是表格里的一行字）。
-#[test]
-fn autonomy_column_recomputes_and_moves_with_the_wal() {
-    let dir = std::env::temp_dir().join(format!("symbio-stats-autonomy-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("临时目录");
-    let wal = dir.join(super::super::paths::V2_WAL_FILE);
-    let store = EventWalStore::open(&wal).unwrap();
-    let task_ev = |id: &str, kind: &str, verb: Verb, task: &str, ts: i64| {
-        Event::pending(
-            id,
-            kind,
-            Entity::Task,
-            verb,
-            0,
-            symbio_sdk::authz::PRINCIPAL_AUTONOMOUS,
-        )
-        .with_ts(ts)
-        // 任务断言是 I2 的声明类事件：没有上游就没有可撤销的溯源。
-        .with_produced_by(0)
-        .with_payload(serde_json::json!({ "task_id": task }))
-    };
-    // t1 全程自主闭环；t2 被挂起过再闭环 ⇒ 不进分子
-    store
-        .append(task_ev("h-2", EVENT_TASK_HELD, Verb::Held, "t2", 100))
-        .unwrap();
-    store
-        .append(task_ev(
-            "a-1",
-            EVENT_TASK_ASSERTED,
-            Verb::Asserted,
-            "t1",
-            200,
-        ))
-        .unwrap();
-    store
-        .append(task_ev(
-            "a-2",
-            EVENT_TASK_ASSERTED,
-            Verb::Asserted,
-            "t2",
-            300,
-        ))
-        .unwrap();
-
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(got.autonomy.get("closed").and_then(|v| v.as_u64()), Some(2));
-    assert_eq!(
-        got.autonomy.get("unattended").and_then(|v| v.as_u64()),
-        Some(1)
-    );
-
-    // 手术刀：删掉挂起事件 ⇒ t2 也算全程自主（率从 0.5 升到 1.0）
-    drop_line(&wal, "h-2");
-    let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(
-        after.autonomy.get("unattended").and_then(|v| v.as_u64()),
-        Some(2),
-        "删掉 task.held ⇒ 干预事实消失，分子跟着动"
     );
 }
 
