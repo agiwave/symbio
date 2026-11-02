@@ -172,6 +172,9 @@
  *   D-013 **不给豁免**，且扫描范围包含 `docs/` 的登记条目（任务记录引用的是当时撞上的
  *   路径，同样不该带本机盘符——用 `<仓库根>` / `<盘符>` 占位）；只有 `docs/archive/`
  *   这类整体排除的历史归档不判（同文件头）。
+ *   D-016 的豁免只有**行内档**（`doc-link-allow D-016: 理由`，本行或前一行），且只对
+ *   **机器读的字段**成立——另有判据每轮解析该引用的存在性与可达性，理由须写明是谁。
+ *   散文与源码注释里的指路不给豁免（任务收口即删，那里没有机械复核，D-295）。
  *
  * 与仓库约定一致：纯 Node 实现，不依赖 bash / ripgrep，Windows / macOS / Linux 通用。
  */
@@ -1237,6 +1240,30 @@ if (machinePaths.length > 0) {
 }
 
 // ---- D-016：过程文档引用（非 task 文档 / 源码注释不得出现 T-NNN） ----
+/**
+ * 行内豁免：`doc-link-allow D-016: 理由`（本行或前一行，理由不可为空）。
+ *
+ * **为什么 D-016 需要豁免出口**：它的默认理由是「task 收口即删 ⇒ 引用必然悬空」。
+ * 当引用它的判据**每轮门禁都重新解析**（存在性 + 可达性）时，那条引用不会静默悬空——
+ * 悬空会在同一次门禁里变红。这类引用是**机器读的字段**，不是散文里的人名指路；
+ * 豁免理由必须写明「由哪条判据复核」，散文引用照旧判红（`D-295`）。
+ */
+const WAIVER_D016_RE = /doc-link-allow\s+D-016\s*:(.*)$/m
+
+/** 剥掉注释壳后取理由；空理由 = 没豁免（同 D-004 的口径）。 */
+function d016Reason(text) {
+  const m = WAIVER_D016_RE.exec(text)
+  if (!m) return null
+  const reason = m[1].replace(/-->\s*$/, '').replace(/^<!--\s*/, '').trim()
+  return reason.length > 0 ? reason : null
+}
+
+/** 本行或**前一行**带豁免即放行该行。 */
+function waivedD016(lines, i) {
+  if (d016Reason(lines[i])) return true
+  return i > 0 && d016Reason(lines[i - 1])
+}
+
 const taskRefs = []
 {
   const walk = (dir) => {
@@ -1257,6 +1284,7 @@ const taskRefs = []
       if (!e.name.endsWith('.md')) continue
       const lines = fs.readFileSync(abs, 'utf8').split(String.fromCharCode(10))
       for (let i = 0; i < lines.length; i++) {
+        if (waivedD016(lines, i)) continue
         const m = /T-(\d{3})/.exec(lines[i])
         // `T-000` 是 task kind 的**汇总页**自身（投影页，不是过程记录），不判
         if (m && m[1] !== '000') taskRefs.push({ rel, line: i + 1, token: m[0] })
@@ -1268,6 +1296,7 @@ const taskRefs = []
     const lines = fs.readFileSync(file, 'utf8').split(String.fromCharCode(10))
     for (let i = 0; i < lines.length; i++) {
       if (!isSourceCommentLine(lines[i], ext)) continue
+      if (waivedD016(lines, i)) continue
       const m = /T-(\d{3})/.exec(lines[i])
       if (m && m[1] !== '000') taskRefs.push({ rel, line: i + 1, token: m[0] })
     }
@@ -1278,7 +1307,9 @@ for (const { rel, line, token } of taskRefs) console.log(`  ✗ ${rel}:${line}  
 if (taskRefs.length > 0) {
   console.log('提示：task 是唯一允许保留过程信息的 kind，且收口即删——引用它等于引用一个随时会消失的东西。')
   console.log('      要指「为什么这样设计」，指设计文档的 `### D-NNN`；要指「这块怎么设计的」，指设计文档的章节。')
-  console.log('      本条**不给豁免**：任务已经删了，豁免等于留一个悬空引用。')
+  console.log('      **机器读的字段**（另一条判据每轮解析其存在性与可达性）可写行内豁免')
+  console.log('      `doc-link-allow D-016: 由 <判据> 每轮复核存在性与可达性`（本行或前一行）。')
+  console.log('      散文与源码注释里的指路不给豁免：任务收口即删，那里没有机械复核。')
 }
 
 // ---- D-010：源码注释里的站内连接 ----

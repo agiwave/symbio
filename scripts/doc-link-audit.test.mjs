@@ -670,6 +670,52 @@ test('D-013：docs/archive/ 历史归档不判（同整体豁免）', () => {
   assert.equal(r.status, 0, r.stdout)
 })
 
+// ── D-016：非 task 文档 / 源码注释不得引用 T- 编号（机器读字段可豁免）──────
+test('D-016：非 task 文档正文出现 T- 编号 → 失败', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n见 T-123 的处理过程。\n' })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /docs\/a\.md:3/)
+})
+
+test('D-016：机器读字段的行内豁免（写在上一行，理由写明复核判据）→ 通过', () => {
+  const r = audit({
+    'docs/a.md': [
+      '# A',
+      '',
+      '| # | 处置 | 计划 |',
+      '|---|------|------|',
+      '<!-- doc-link-allow D-016: 该字段由 EX-006 每轮复核承接任务存在性与 deps 可达性 -->',
+      '| 34 | 拆 | 骨架（T-123）：期限 2027-06-30；触发 新能力进入 S9；承接 T-124 |',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-016：豁免理由为空 → 仍失败（同 D-002 / D-004 的口径）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n<!-- doc-link-allow D-016:   -->\n见 T-123 的处理过程。\n',
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /docs\/a\.md:4/)
+})
+
+test('D-016：豁免只免本行 / 前一行，不整篇豁免（散文引用照旧红）', () => {
+  const r = audit({
+    'docs/a.md': [
+      '# A',
+      '',
+      '<!-- doc-link-allow D-016: 该行由 EX-006 复核 -->',
+      '这条是机器读字段：T-123。',
+      '这条是散文指路：T-124。',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /docs\/a\.md:5/)
+  assert.doesNotMatch(r.stdout, /docs\/a\.md:4/)
+})
+
 // ── D-018：方括号里有仓内路径、却没有目标地址 ────────────────────────────
 // 现场：`scripts/gen-verify-facts.mjs` 的注释里写着 `[|docs/007-task/048.md]`，
 // 那个文档早就删了。D-001 要 `](` 才算链接，D-006 只认反引号，D-010 只扫源码注释
