@@ -184,11 +184,14 @@ test('⑧ 扫描根没有 .rs ⇒ 判据失效，exit 1', () => {
   }
 })
 
-test('⑨ 真仓库：两处存量全部登记，且正好两处', () => {
+test('⑨ 真仓库：三处存量全部登记，且正好三处', () => {
+  // 第三处是 `symbio-plugin-model` 的端口执行体（D-305 裁决一）：它与闸门本体同形，
+  // 透传调用方给的工具集，因此挂 `/gate`；登记条数随「新增一处就多写一条」增长，
+  // 但每一处仍必须在代码旁写明理由（本审计不提供集中豁免表）。
   const r = spawnSync(process.execPath, [script], { encoding: 'utf8' })
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /直调 round_trip 的 2 处全部登记过理由/)
-  assert.match(r.stdout, /存量豁免 2 处/)
+  assert.match(r.stdout, /直调 round_trip 的 3 处全部登记过理由/)
+  assert.match(r.stdout, /存量豁免 3 处/)
 })
 
 // ── IM-004 形状判据 ────────────────────────────────────────────────
