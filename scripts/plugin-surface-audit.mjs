@@ -96,7 +96,7 @@ export const WHITELIST_BASELINE = 0
  * 准入（D-269 §5.1 的两条判据）：与容器概念无关 ∧ ≥2 条能力要用。一条能力撑不起
  * 一次架构改动——要加一条就把理由写成决策，并同步上调本基线。
  */
-export const SDK_BASELINE = 114
+export const SDK_BASELINE = 110
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。
