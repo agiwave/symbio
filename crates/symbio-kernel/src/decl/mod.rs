@@ -610,6 +610,14 @@ impl Frozen {
         &self.rows
     }
 
+    /// 端口声明表：派发适配器与租约看护者按端口名取用，**不持有端口清单**。
+    ///
+    /// 端口由它所属的插件经 `submit_declarations!` 提交；环只按端口名问这张表
+    /// （`PortProvider` 是世界端口通向环的唯一入口，DE-047 不变量 6）。
+    pub fn ports(&self) -> &[PortDecl] {
+        &self.ports
+    }
+
     pub fn overlaps(&self) -> &[Overlap] {
         &self.overlaps
     }

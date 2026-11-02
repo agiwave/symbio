@@ -331,7 +331,7 @@ fn open_drive(
         if let Err(e) = super::super::port::reap(
             store.as_ref(),
             &frozen,
-            super::super::loop_rows::PORTS,
+            frozen.ports(),
             tail,
             stale_turn,
             anchor,

@@ -1019,11 +1019,13 @@ where
         serde_json::Value::Null,
     )
     .map_err(DispatchError::Store)?;
+    // 端口声明从冻结表按端口名取——环不持有端口清单（DE-047 不变量 6）。
+    let ports = super::loop_rows::ports();
     // 派发前切片必须是**刚写完 `request`** 的那一份：行欠不欠看它。结论由引擎现读
     // （`Dispatch::row_owed`），调用点只声明站在 `dispatch-model` 这一行上。
     dispatch_with(
         store,
-        super::loop_rows::PORTS,
+        &ports,
         Dispatch {
             call: &call,
             turn: round.turn,

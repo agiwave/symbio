@@ -715,67 +715,18 @@ impl Next {
     }
 }
 
-/// 端口声明——**加一个端口只加这一条**，不加事实名、不改求解器。
+/// 端口声明**不属于环**：每一端口的 `PortDecl` 由它所属插件经 `submit_declarations!`
+/// 提交（DE-047 不变量 6），环只按端口名问冻结表。
 ///
-/// 当前两个端口：`model`（一次模型往返）、`tool`（批次里的单次工具调用）。
+/// 端口是「跨边界往返」的机制数据（`D-222` §一）：谁提供这一往返还，谁就声明租约
+/// 与尝试上限。环自己留一张清单，等于加一个端口要改环；删掉它之后，加端口只改
+/// 所属插件（`model` 在 `symbio-plugin-model`、`tool` 在 `symbio-plugin-session`）。
 ///
-/// ## 这一张表凭什么叫「端口」（`D-222` §一）
-///
-/// 端口是**跨边界往返**：控制面在 `sent` 与 `response` 之间不持有对方的状态。这个
-/// 定义是可判的，也因此砍掉了此前那条 `turn` 声明——它三条都不成立：应答载荷为空
-/// （`extra = |_| Null`）、适配器就是内环自己（`execute` 行由 `turn_exec::drive`
-/// 自己派发）、`awaited = false` 且 `max_attempts = 1`（没有任何等待方）。
-/// 那是**重入**，不是往返；为它造的 `request` / `sent` / `response` 三格事实，
-/// 三格都不带信息。删掉之后控制面只剩两个真端口。
-///
-/// ## 租约与尝试上限怎么定的
-///
-/// `lease_ms` 是「派出去多久没应答算卡住」。`max_attempts = 1` 是今天的实测值：
-/// 租约到期只发生在进程重启之后（时间只在事件上推进），而等这笔应答的 future
-/// 已经随进程一起没了。重试只会留下一条**永不派发**的 `request`，让「欠一次
-/// 派发」变成一句谎。到顶即判死（`failed{why:"lease_expired"}`），恢复走 resume
-/// 幕（新的逻辑 id，旧那笔作为「没回来」留在日志里）。
-///
-/// `retry` 因此只给**有活着的等待方**的尝试用（`D-138`）。上限是端口级的天花板，
-/// 逐次尝试是否真能重试由 `sent.awaited` 决定（见 [`super::port::reap`]）。
-///
-/// ## `model` 端口
-///
-/// 一次**模型往返**。它在轮内发起（`D-115` 决策 5：两者之间没有双调度器）。
-pub(crate) static PORTS: &[PortDecl] = &[
-    PortDecl {
-        port: ports::MODEL,
-        before: EVENT_SENT,
-        lease_ms: 600_000,
-        max_attempts: 1,
-        // 一次模型往返是一条调用；同批并发在它下面的工具端口。
-        concurrency: 0,
-    },
-    // 工具批次里的**单次调用**。一次模型响应可带 N 个调用 ⇒
-    // 同一批写 N 条 `request`，各自一个 id。
-    //
-    // ## 为什么上限是 2，而普通批次仍然不重试
-    //
-    // 上限是端口级的天花板，**不是**「每个调用都会重试」的承诺（D-138）。工具端口
-    // 里有两类尝试：
-    //
-    // - 普通批次调用：结果等在当前草稿里，进程重启后等待方随草稿消失 ⇒
-    //   `sent.awaited = false` ⇒ 到顶/到期即判死，恢复走 `resume` 幕（新 id）；
-    // - 唤醒调用：`wake_batch` 能从事实重建那一笔（`resume` / `tool` / `args` 都在
-    //   `request` 载荷里）⇒ `awaited = true` ⇒ 租约看护可以重试一次。
-    //
-    // 上限 2 = 首次 + 一次重试；再抬就需要新的等待方形态，而不是改数字。
-    PortDecl {
-        port: ports::TOOL,
-        before: EVENT_SENT,
-        lease_ms: 600_000,
-        max_attempts: 2,
-        // 一次模型响应可带 N 个工具调用：同批至多四条在飞。四不是调优参数，
-        // 而是「有上限」的最小值；具体哪几条同时在途仍由风险档决定
-        // （`tools/dispatch/parallel.rs`）。
-        concurrency: 4,
-    },
-];
+/// [`ports`] 是环唯一的取用口：表没装好就回空切片，端口查询因此 fail-closed
+/// （`DispatchError::NoPort`），不会静默跑一笔没有租约参数的调用。
+pub(crate) fn ports() -> Vec<PortDecl> {
+    frozen().map(|f| f.ports().to_vec()).unwrap_or_default()
+}
 
 /// 内建行表。注册顺序**不参与**裁决——同 `(phase, anchor)` 由 `(name, key)` 决出。
 pub(crate) static ROWS: &[Decl] = &[
@@ -1409,9 +1360,22 @@ pub(crate) fn declarations<'a>(rows: &'a [Decl]) -> PluginDeclarations<'a> {
         events: super::control_decl::EVENTS,
         facts: super::control_decl::FACTS,
         views: super::control_decl::VIEWS,
-        ports: PORTS,
+        ports: fixture_ports(),
         actors: actor_decls(),
         rows,
+    }
+}
+
+/// 本插件提交的端口声明：**生产为空**（端口由所属插件交，DE-047 不变量 6），
+/// 单元测试用夹具（测试二进制没有链接 model / session 插件，见 `loop_rows.test.rs` 的 `PORTS`）。
+fn fixture_ports() -> &'static [PortDecl] {
+    #[cfg(test)]
+    {
+        self::tests::PORTS
+    }
+    #[cfg(not(test))]
+    {
+        &[]
     }
 }
 
@@ -1840,3 +1804,8 @@ fn trace(frozen: &Frozen, debt: &symbio_kernel::decl::ring::Debt<'_>) {
 #[cfg(test)]
 #[path = "loop_rows.test.rs"]
 mod tests;
+
+// 测试夹具：生产代码不再持有端口清单（`ports()` 从冻结表取），但夹具要一份稳定的
+// 「当年的两个端口」来钉租约参数。夹具住在 `*.test.rs`，不参与 LP-003 计数。
+#[cfg(test)]
+pub(crate) use self::tests::PORTS;

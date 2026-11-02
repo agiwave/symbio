@@ -76,9 +76,12 @@ pub(crate) fn begin_model(
     // 派出这一步的**唯一出口**是 `sent`（`D-222` 订正 2）：落完它，这一行的账就还清了，
     // 「在等」从下一圈起由 `await-model` 认领——于是两次选债之间「已派出、未收清」
     // 在事实面上读得到（`waiting` 视图 + `stale_sent`），而不是只在崩溃恢复的输入上才有值。
+    // 端口声明从冻结表按端口名取——环不持有端口清单（DE-047 不变量 6）。
+    // 表没装好 ⇒ 空切片 ⇒ `NoPort`，由下面同一条控制面错误通道响亮失败。
+    let ports = super::super::loop_rows::ports();
     super::super::port::begin(
         store.as_ref(),
-        super::super::loop_rows::PORTS,
+        &ports,
         super::super::port::Dispatch {
             call: &call,
             turn,

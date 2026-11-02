@@ -738,10 +738,12 @@ impl ToolPort {
         }
         let facts = self.facts.range(Seq::new(0));
         let now = self.now_ms(&facts);
+        // 端口声明从冻结表按端口名取——环不持有端口清单（DE-047 不变量 6）。
+        let ports = loop_rows::ports();
         for call in calls.iter_mut().filter(|c| c.granted) {
             match port::begin_with_facts(
                 self.facts.as_ref(),
-                loop_rows::PORTS,
+                &ports,
                 port::Dispatch {
                     call: &call.call,
                     turn: self.turn,

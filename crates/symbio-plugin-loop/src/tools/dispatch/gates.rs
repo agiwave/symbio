@@ -141,9 +141,10 @@ pub(crate) async fn read_batch_gates(
     let decls = ToolDecls::of_metas(&metas);
     let risks = ToolRisks::of_metas(&metas);
     // 端口声明与元数据同一处读数：批内上界由 `PortDecl` 说，执行层只消费。
+    // 端口清单不在环里（DE-047 不变量 6）：按端口名从冻结表取。
+    let ports = super::super::super::loop_rows::ports();
     let concurrency =
-        symbio_kernel::decl::ring::port_of(super::super::super::loop_rows::PORTS, "tool")
-            .map_or(0, |p| p.concurrency);
+        symbio_kernel::decl::ring::port_of(&ports, "tool").map_or(0, |p| p.concurrency);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把

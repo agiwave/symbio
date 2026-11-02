@@ -25,9 +25,13 @@
 
 use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::decl::ring::Decl;
+use symbio_kernel::decl::ring::Lit;
 use symbio_kernel::decl::ring::Pattern;
 use symbio_kernel::decl::PluginDeclarations;
-use symbio_kernel::event::{Entity, EventDecl, Verb};
+use symbio_kernel::event::{
+    Entity, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_SENT,
+};
+use symbio_plugin_api::port::ports;
 
 use super::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 
@@ -66,6 +70,56 @@ fn protocol_rows() -> &'static [Decl] {
             expand: None,
             owes: pattern[0],
             until: pattern,
+            unless: &[],
+        });
+    }
+    // 本插件交的是 `tool` 端口的**声明**（DE-047 不变量 6），它的应答出口行住在
+    // `symbio-plugin-loop`——测试二进制不链接那个 crate，`check_ports` 会报
+    // `PortWithoutAnswerExit`。夹具因此补两条与生产同形的行（`by: None`：动作归环，
+    // 这里只补「谁收这一笔账」）。
+    let eq: &'static [(&'static str, Lit)] = Box::leak(Box::new([("port", Lit::Str(ports::TOOL))]));
+    let key: &'static [&'static str] = &["port", "id", "attempt"];
+    for (name, phase, anchor, owes, until) in [
+        (
+            "dispatch-tool",
+            6_u8,
+            68_u8,
+            EVENT_REQUEST,
+            [EVENT_SENT, EVENT_FAILED],
+        ),
+        (
+            "await-tool",
+            7_u8,
+            72_u8,
+            EVENT_SENT,
+            [EVENT_RESPONSE, EVENT_FAILED],
+        ),
+    ] {
+        let until: &'static [Pattern] = Box::leak(Box::new([
+            Pattern {
+                source: until[0],
+                key,
+                eq,
+            },
+            Pattern {
+                source: until[1],
+                key,
+                eq,
+            },
+        ]));
+        out.push(Decl {
+            name,
+            phase,
+            anchor,
+            by: None,
+            tier: LatencyTier::Fast,
+            expand: None,
+            owes: Pattern {
+                source: owes,
+                key,
+                eq,
+            },
+            until,
             unless: &[],
         });
     }

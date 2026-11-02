@@ -7,10 +7,13 @@
 //! 本插件只剩写方（自主触发的落格）。名字因此取自清单生成物
 //! `symbio_plugin_api::events`——与任务族同一条通路，不是兄弟插件、也不是内核代答。
 //!
-//! 事实 / 视图 / 端口 / 行都不在这里：它们不属于本插件的控制面。
+//! 事实 / 视图 / 行都不在这里：它们不属于本插件的控制面；**端口声明**例外——
+//! 本插件是 `port.tool` 的世界提供者，端口名与租约参数随本文件提交（DE-047 不变量 6）。
 
+use symbio_kernel::decl::ring::PortDecl;
 use symbio_kernel::decl::PluginDeclarations;
-use symbio_kernel::event::{Entity, EventDecl, Verb};
+use symbio_kernel::event::{Entity, EventDecl, Verb, EVENT_SENT};
+use symbio_plugin_api::port::ports;
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
 /// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
@@ -141,12 +144,25 @@ pub(crate) const COMMITMENT_VOCAB: symbio_sdk::projection::vocab::CommitmentVoca
 // 本插件不认识也不依赖任何兄弟插件。
 symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 
+/// 本插件服务的端口：工具批次里的**单次调用**。
+///
+/// 上限是端口级的天花板，不是「每个调用都会重试」的承诺（D-138）：普通批次调用
+/// 的等待方随草稿消失（`awaited = false`），只有唤醒调用能从事实重建等待方。
+pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
+    port: ports::TOOL,
+    before: EVENT_SENT,
+    lease_ms: 600_000,
+    max_attempts: 2,
+    // 一次模型响应可带 N 个工具调用：同批至多四条在飞，具体哪几条仍由风险档决定。
+    concurrency: 4,
+}];
+
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: EVENTS,
         facts: &[],
         views: &[],
-        ports: &[],
+        ports: PORTS,
         actors: Vec::new(),
         rows: &[],
     }

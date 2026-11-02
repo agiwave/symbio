@@ -12,12 +12,35 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use super::super::control_decl::{EVENT_AUTHZ_GRANTED, FACTS, VIEWS};
-use super::{load, LOOP_OWNER, PORTS, ROWS};
+use super::{load, LOOP_OWNER, ROWS};
 use symbio_kernel::decl::ring::Pattern;
-use symbio_kernel::decl::ring::{check_rows, drive, owed, Decl, Gap};
+use symbio_kernel::decl::ring::{check_rows, drive, owed, Decl, Gap, PortDecl};
 use symbio_kernel::decl::Frozen;
 use symbio_kernel::decl::PluginDeclarations;
-use symbio_kernel::event::{Entity, Event, EventDecl, FactRole, Seq, Verb};
+use symbio_kernel::event::{Entity, Event, EventDecl, FactRole, Seq, Verb, EVENT_SENT};
+use symbio_plugin_api::port::ports;
+
+/// 测试夹具：`model` / `tool` 两个端口的声明。
+///
+/// 生产代码里这条表由端口所属插件提交（`symbio-plugin-model` / `symbio-plugin-session`），
+/// 环不再持有端口清单。夹具钉的是「当年那份租约参数」，供 `begin` / `reap` 与装载
+/// 检查在单元测试里用；生产装配从 `Frozen::ports()` 取。
+pub(crate) static PORTS: &[PortDecl] = &[
+    PortDecl {
+        port: ports::MODEL,
+        before: EVENT_SENT,
+        lease_ms: 600_000,
+        max_attempts: 1,
+        concurrency: 0,
+    },
+    PortDecl {
+        port: ports::TOOL,
+        before: EVENT_SENT,
+        lease_ms: 600_000,
+        max_attempts: 2,
+        concurrency: 4,
+    },
+];
 
 fn ev(turn: u64, kind: &str, payload: Value) -> Event {
     static NEXT: AtomicU64 = AtomicU64::new(1);
