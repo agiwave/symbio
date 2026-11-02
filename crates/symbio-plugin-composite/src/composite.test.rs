@@ -663,8 +663,8 @@ impl ExecTranscriptWriter for SilentWriter {
 struct PortModel(Arc<dyn ModelProvider>);
 
 impl symbio_plugin_api::port::PortProvider for PortModel {
-    fn port(&self) -> &'static str {
-        symbio_plugin_api::ports::MODEL
+    fn ports(&self) -> &'static [&'static str] {
+        &[symbio_plugin_api::ports::MODEL]
     }
 
     fn provider_id(&self) -> &str {
@@ -883,9 +883,9 @@ async fn an_inflight_turn_converges_after_loop_is_disabled() {
         entered: Arc::clone(&entered),
         release: Arc::clone(&release),
     })));
-    if let Some(row) =
-        symbio_plugin_api::port::port_row(&(port as Arc<dyn symbio_plugin_api::port::PortProvider>))
-    {
+    for row in symbio_plugin_api::port::port_rows(
+        &(port as Arc<dyn symbio_plugin_api::port::PortProvider>),
+    ) {
         visitor.put(row).await;
     }
     host_ctx.set(CAPABILITY_VISITOR, visitor);

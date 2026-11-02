@@ -71,7 +71,8 @@ pub use effects::{
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
 pub use port::{
-    capability_port_check, capability_port_of, port_family, port_row, port_row_name, ports,
+    capability_port_check, capability_port_of, port_family, port_row_name, port_rows, ports,
+    PortCapabilities, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
     PortPayload, PortProvider, PortReading,
 };
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};

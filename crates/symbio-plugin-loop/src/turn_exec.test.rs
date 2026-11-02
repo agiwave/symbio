@@ -107,8 +107,8 @@ impl Capability for DeclOnlyTool {
 struct PortModel(Arc<dyn ModelProvider>);
 
 impl symbio_plugin_api::port::PortProvider for PortModel {
-    fn port(&self) -> &'static str {
-        symbio_plugin_api::ports::MODEL
+    fn ports(&self) -> &'static [&'static str] {
+        &[symbio_plugin_api::ports::MODEL]
     }
 
     fn provider_id(&self) -> &str {
@@ -301,9 +301,9 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     // `port.tool` 的替身行：真执行经端口合同取——替身执行器与生产
     // `ToolPort` 同形的最小子集，见 `test_support.rs`。
     super::super::test_support::put_tool_port_row(&visitor).await;
-    if let Some(row) =
-        symbio_plugin_api::port::port_row(&(port as Arc<dyn symbio_plugin_api::port::PortProvider>))
-    {
+    for row in symbio_plugin_api::port::port_rows(
+        &(port as Arc<dyn symbio_plugin_api::port::PortProvider>),
+    ) {
         visitor.put(row).await;
     }
     ctx.set(CAPABILITY_VISITOR, visitor);
@@ -976,9 +976,9 @@ async fn control_harness() -> ControlHarness {
     let port = Arc::new(PortModel(Arc::new(
         FaithfulProvider::new(Behavior::Faithful).0,
     )));
-    if let Some(row) =
-        symbio_plugin_api::port::port_row(&(port as Arc<dyn symbio_plugin_api::port::PortProvider>))
-    {
+    for row in symbio_plugin_api::port::port_rows(
+        &(port as Arc<dyn symbio_plugin_api::port::PortProvider>),
+    ) {
         visitor.put(row).await;
     }
     ctx.set(CAPABILITY_VISITOR, visitor);

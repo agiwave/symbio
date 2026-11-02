@@ -905,7 +905,7 @@ impl Plugin for ModelPlugin {
                 .cloned()
             {
                 let port = Arc::new(super::port::ModelPort::new(active, available));
-                if let Some(row) = port.row() {
+                for row in port.rows() {
                     tool_visitor.put(row).await;
                 }
             }

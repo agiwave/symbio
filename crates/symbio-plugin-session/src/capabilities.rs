@@ -118,7 +118,7 @@ pub async fn collect_capabilities(
         .is_empty()
     {
         let port = Arc::new(super::port::ToolPort);
-        if let Some(row) = symbio_plugin_api::port::port_row(
+        for row in symbio_plugin_api::port::port_rows(
             &(port as Arc<dyn symbio_plugin_api::port::PortProvider>),
         ) {
             manager.put(row).await;

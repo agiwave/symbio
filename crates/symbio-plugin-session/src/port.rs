@@ -26,8 +26,8 @@ use symbio_sdk::capability::{capability_resolve, tool_metas, CAPABILITY_VISITOR}
 pub(crate) struct ToolPort;
 
 impl PortProvider for ToolPort {
-    fn port(&self) -> &'static str {
-        ports::TOOL
+    fn ports(&self) -> &'static [&'static str] {
+        &[ports::TOOL]
     }
 
     fn provider_id(&self) -> &str {

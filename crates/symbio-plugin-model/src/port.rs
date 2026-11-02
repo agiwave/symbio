@@ -31,15 +31,15 @@ impl ModelPort {
         Self { active, catalog }
     }
 
-    /// 注册行（`None` = 端口名不在闭集——本插件的端口名在，恒为 `Some`）。
-    pub(crate) fn row(self: Arc<Self>) -> Option<CapabilityRow> {
-        symbio_plugin_api::port::port_row(&(self as Arc<dyn PortProvider>))
+    /// 注册行（本提供者只服务一个端口，行数恒为 1）。
+    pub(crate) fn rows(self: Arc<Self>) -> Vec<CapabilityRow> {
+        symbio_plugin_api::port::port_rows(&(self as Arc<dyn PortProvider>))
     }
 }
 
 impl PortProvider for ModelPort {
-    fn port(&self) -> &'static str {
-        ports::MODEL
+    fn ports(&self) -> &'static [&'static str] {
+        &[ports::MODEL]
     }
 
     fn provider_id(&self) -> &str {

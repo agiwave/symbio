@@ -1,8 +1,12 @@
 //! 世界端口的注册面 —— 端口名字与契约静态，提供者随活插件的能力行动态收集（D-298）。
 //!
-//! ## 静态的只有名字与契约
+//! ## 端口集开放（`DE-047` I-6）
 //!
-//! 端口名是闭集（[`ports::MODEL`] / [`ports::TOOL`]）；`PortDecl`、派发 / 等待两行模板、
+//! 世界端口种类是**开放**的：提供者申报自己服务的端口名（可多个），环只按端口名解析
+//! provider；注册面（族 `multi("port")` + 行名 `<port:{port}>:{provider_id}`）不因新增
+//! 端口而变。端口名是**数据**，不是类型——本文件不出现 `ModelProvider` / `ToolProvider`
+//! 一类按世界命名的 trait，执行面只有通用的 [`PortExecutor`] / [`PortInput`] /
+//! [`PortOutcome`]（I-6.2）。`PortDecl`、派发 / 等待两行模板、
 //! `Call{port,id,attempt,via}` 的幂等键与记账住 `loop`。**提供者不静态注册**：
 //! `submit_*!` 一类的编译期收集器在这里没有位置——它们链接期生效、没有启用过滤，
 //! 插件停用后条目仍在（实例不构造不等于链接期条目消失），「停用即缺席」当场判红。
@@ -26,7 +30,7 @@
 //! - `>1` 行 = 判重：两行俱在（谁都没被顶掉），[`capability_port_check`] 落一条错误
 //!   进 `CAPABILITY_ERRORS`（装载期判红）并指名两者，**不静默顶掉**。不做显式
 //!   优先级——单 provider 场景没有挑选判据，「挑一个」正是要消灭的静默形态。
-//! - 闭集外端口名 = [`PortReading::Unknown`]（漏声明，不是默认值）。
+//! - 端口集开放：任何已注册的行名前缀就是一个合法端口名；0 行即 [`PortReading::Absent`]。
 //!
 //! ## 不出现在消费面
 //!
@@ -45,42 +49,44 @@ use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt}
 use symbio_sdk::adapters::LlmAdapter;
 use symbio_sdk::capability::{capability_report_error, CAPABILITY_VISITOR};
 
-/// 端口名闭集（宿主词汇，与 [`crate::behaviors`] / [`crate::context::slots`] 同层）。
+/// 两个**已落地**世界的端口名（数据，不是闭集）。
+///
+/// 名字从内核族派生：端口词与族词是同一个词，写第二份拼写早晚会漂（字面量还会与
+/// 插件 id 撞审计红线）。新增世界端口由提供者自报字符串，不需要往这里加常量
+/// （`DE-047` I-6.7）。
 pub mod ports {
-    /// 模型往返端口（一次 LLM 调用）。名字从内核模型族派生：端口词与族词是同一个
-    /// 词，写第二份拼写早晚会漂（字面量还会与插件 id 撞审计红线）。
+    /// 模型往返端口（一次模型调用）。
     pub const MODEL: &str = symbio_kernel::capability::family::MODEL.name();
-    /// 工具调用端口（一批工具调用里的一次）。同 [`MODEL`]，从内核工具族派生。
+    /// 工具调用端口（一次工具调用）。
     pub const TOOL: &str = symbio_kernel::capability::family::TOOL.name();
-
-    /// 宿主**当前**认识的端口名。
-    ///
-    /// 闭集：加端口是设计裁决（`PortDecl` + 两行模板 + 端口族三样一起动），不是
-    /// 声明方自带新名字的事——这与行为名 / 段身份的开放集合不同，因为端口连着
-    /// 环的记账与租约，环必须先认识它。
-    pub const KNOWN: &[&str] = &[MODEL, TOOL];
 }
 
-/// 一个世界端口的提供者：声明「我服务哪个端口、我叫什么」+ 端口的消费合同。
+/// 一个世界端口的提供者：申报端口名与提供者 id，并交出通用执行面。
 ///
-/// 声明位（`port` / `provider_id`）供表造行、消费方判缺席与判重；消费合同
-/// （[`llm_round_trip`](PortProvider::llm_round_trip) / [`model`](PortProvider::model) /
-/// [`tool_execute`](PortProvider::tool_execute)）是各端口的取用形态——
-/// `Arc<dyn PortProvider>` 在 Rust 里跨转型不出去，执行面
-/// 必须以方法形式落在这里，提供者一侧才能把解析与适配器构造都收走（D-298）。
-/// 合同带默认体：非该端口的提供者不实现，默认 `None` 表示「本端口没有这条合同」，
-/// 不是缺席的默认值。
+/// 声明位（`ports` / `provider_id`）供表造行、消费方判缺席与判重；执行面
+/// （[`Self::executor`]）是**唯一**的环 ↔ provider 合同——`Arc<dyn PortProvider>`
+/// 在 Rust 里跨转型不出去，执行面必须以方法形式落在这里（D-298 的形式成立）。
+///
+/// 方法名与类型都**不具名任何世界**（`DE-047` I-6.2）：端口名是数据，载荷是通用的
+/// [`PortInput`] / [`PortOutcome`]，能力位是 [`PortCapabilities`]。
 pub trait PortProvider: Send + Sync + 'static {
-    /// 端口名（必须是 [`ports::KNOWN`] 闭集之一）。
-    fn port(&self) -> &'static str;
+    /// 本提供者服务的端口名（可多个，`DE-047` I-6.1）。环只按端口名解析 provider。
+    fn ports(&self) -> &'static [&'static str];
     /// 提供者 id（行名后缀；判重读数里指名参与判重的各方）。
     fn provider_id(&self) -> &str;
 
-    /// model 端口的消费合同：按首选 id 解析并构造**本次往返**的适配器。
-    ///
-    /// 解析（严格查 `preferred` → 落回当次生效者，降级方向只有提供者这一处定义）与
-    /// 适配器构造都在提供者一侧——环只按端口名取，不知道 provider 怎么来。
-    /// `None` = 无生效者：调用方必须响亮失败，不许静默回退。
+    /// 可选能力位（`DE-047` I-6.6）：只允许通用词，默认全无。
+    fn capabilities(&self) -> PortCapabilities {
+        PortCapabilities::default()
+    }
+
+    /// 一笔债的执行合同（`DE-047` I-6.2 / I-6.4）。`None` = 本提供者没有执行面。
+    fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
+        None
+    }
+
+    /// **冻结债** → `DE-047` X-11：模型往返的具名取用面。已判作废，删除随
+    /// `tools/**` / 模型路径迁移完成；在此之前 loop 侧取用按 LP-003 / LP-004 只许降。
     fn llm_round_trip(
         &self,
         _preferred: Option<&str>,
@@ -90,21 +96,106 @@ pub trait PortProvider: Send + Sync + 'static {
         None
     }
 
-    /// model 端口的原始模型面：内部请求（压缩摘要一类，IM-001 登记在调用方）直调
-    /// `round_trip` 用的提供者。
+    /// **冻结债** → `DE-047` X-11：模型原始面（内部请求用）。
     fn model(&self) -> Option<Arc<dyn ModelProvider>> {
         None
     }
 
-    /// tool 端口的消费合同：一次工具调用的执行器（D-298）。
-    ///
-    /// 线上名解析（模型给的线上名 → 能力名）、空闲超时（有进展就不算挂死）、结果契约
-    /// （任意 JSON → 一段文本 + 可选的「等待用户」意图）都在提供者一侧——环只拿到
-    /// [`ToolCallOutcome`]，不知道工具怎么路由、怎么判挂死。默认 `None` 同
-    /// [`Self::llm_round_trip`]：非该端口的提供者不实现。
+    /// **冻结债** → `DE-047` X-11 / X-13：单笔工具执行器。新端口只用 [`Self::executor`]。
     fn tool_execute(&self) -> Option<Arc<dyn ToolCallExecutor>> {
         None
     }
+}
+
+/// 端口提供者的可选能力位（`DE-047` I-6.6）：词表只允许 `streaming` / `cancel` /
+/// `idempotent` 这类通用词，不许出现某个世界的策略名。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PortCapabilities {
+    /// 能按增量输出（帧经 [`PortExecContext::sink`] 写出）。
+    pub streaming: bool,
+    /// 能被 [`PortExecContext::abort`] 取消。
+    pub cancel: bool,
+    /// 同一 `idempotency_key` 重放安全。
+    pub idempotent: bool,
+}
+
+/// 一笔债的输入（`DE-047` I-6.2）：**端口名 + 行 / 值草稿**。
+///
+/// 载荷是值不是类型：某端口有哪些行、字段如何校验，由该端口所属插件声明，
+/// provider 执行时按行契约自校验（I-6.3）。接口不承载世界契约细节。
+#[derive(Debug, Clone)]
+pub struct PortInput {
+    /// 端口名（与 `request` 事实载荷里的 `port` 同一个值）。
+    pub port: &'static str,
+    /// 载荷草稿：调用点的行 / 值。
+    pub payload: Value,
+}
+
+/// 一笔债的执行上下文（`DE-047` I-6.5）：命名不带世界词。
+#[derive(Clone)]
+pub struct PortExecContext {
+    /// 截止时刻（毫秒，相对时间轴）；`None` = 无截止。
+    pub deadline_ms: Option<u64>,
+    /// 取消信号。
+    pub abort: ExecAbortSignal,
+    /// 幂等键：同一笔债的重放按它去重。
+    pub idempotency_key: String,
+    /// 增量出口（`capabilities.streaming` 为真时使用）。
+    pub sink: ExecEventSink,
+    /// 调用方 ctx（提供者据此读能力表）；`None` = 无。
+    pub ctx: Option<Arc<dyn PluginInvokeRequest>>,
+}
+
+/// 通用错误分类（`DE-047` I-6.2）：只有三档，不带世界语义。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortErrorClass {
+    /// 可重试（租约看护可再举一次 `request`）。
+    Retryable,
+    /// 不可重试（判死）。
+    NonRetryable,
+    /// 需人介入（挂起等用户动作）。
+    NeedsHuman,
+}
+
+/// 一笔债的产出（`DE-047` I-6.2）：事实草稿或错误。
+#[derive(Debug, Clone, Default)]
+pub struct PortOutcome {
+    /// 要写到行上的事实草稿（每项是一个 JSON 对象，字段由端口插件声明）。
+    pub facts: Vec<Value>,
+    /// `Some` ⇒ 这一笔失败；`facts` 仍可携带半截产物。
+    pub error: Option<(PortErrorClass, String)>,
+}
+
+impl PortOutcome {
+    /// 成功且无额外事实。
+    pub fn ok() -> Self {
+        Self::default()
+    }
+
+    /// 失败。
+    pub fn failed(class: PortErrorClass, why: impl Into<String>) -> Self {
+        Self {
+            facts: Vec::new(),
+            error: Some((class, why.into())),
+        }
+    }
+
+    /// 这一笔成功与否。
+    pub fn success(&self) -> bool {
+        self.error.is_none()
+    }
+}
+
+/// 一笔债的执行合同（`DE-047` I-6.2 / I-6.4）。
+///
+/// 与 [`LlmAdapter`] 同形：合同方法是异步的，跨 `dyn` 边界走 `Arc<dyn PortExecutor>`。
+/// **只承诺执行一笔债**：并发由宿主调度多笔债或 provider 内部自理；接口不出现批、
+/// 并发度、熔断、gate 读数等策略参数。
+#[async_trait::async_trait]
+pub trait PortExecutor: Send + Sync + 'static {
+    /// 执行一笔债：读 [`PortInput`] 的载荷，按端口插件声明的行契约自校验，
+    /// 写 [`PortOutcome`] 的事实草稿。
+    async fn execute(&self, ctx: PortExecContext, input: PortInput) -> PortOutcome;
 }
 
 // ── tool 端口的合同类型（环 ↔ 提供者的私有约定，表不参与校验）──────────────
@@ -196,9 +287,10 @@ impl PortPayload {
 /// （[`port_row_name`]）在读数里做——加端口不加族。
 pub const PORT_FAMILY: CapabilityFamily = CapabilityFamily::multi("port");
 
-/// 闭集内的端口 ⇒ 唯一族；闭集外 ⇒ `None`（漏声明，不是默认值）。
-pub fn port_family(port: &str) -> Option<CapabilityFamily> {
-    ports::KNOWN.contains(&port).then_some(PORT_FAMILY)
+/// 任何端口都落在唯一族里（端口集开放，`DE-047` I-6.7）：族不区分端口，端口级
+/// 分组由行名前缀（[`port_row_name`]）在读数里做——加端口不加族。
+pub fn port_family(_port: &str) -> Option<CapabilityFamily> {
+    Some(PORT_FAMILY)
 }
 
 /// port 行的行名：保留前缀，撞不上任何线上工具名。
@@ -209,25 +301,28 @@ pub fn port_row_name(port: &str, provider_id: &str) -> String {
     format!("<port:{port}>:{provider_id}")
 }
 
-/// 提供者行：`multi` 族的一行（`active = false`，不参与表侧降位——端口级唯一由
-/// 读数与装载期检查裁，D-299）。
+/// 提供者行：本提供者申报的**每个端口**一行（`multi` 族，`active = false`，不参与
+/// 表侧降位——端口级唯一由读数与装载期检查裁，D-299）。
 ///
-/// 闭集外端口 ⇒ `None`——调用方（提供者插件的 traverse 分支）应当跳过注册而不是
-/// 猜一个族。
-pub fn port_row(provider: &Arc<dyn PortProvider>) -> Option<CapabilityRow> {
-    let family = port_family(provider.port())?;
-    Some(CapabilityRow::new(
-        family,
-        port_row_name(provider.port(), provider.provider_id()),
-        PortPayload::new(provider.clone()),
-        false,
-    ))
+/// 一个 provider 申报 N 个端口就产生 N 行（`DE-047` I-6.1）：端口身份是数据，行数随
+/// 数据走；新增端口只改提供者的 `ports()` 返回值，不改注册面、不改族。
+pub fn port_rows(provider: &Arc<dyn PortProvider>) -> Vec<CapabilityRow> {
+    provider
+        .ports()
+        .iter()
+        .map(|port| {
+            CapabilityRow::new(
+                PORT_FAMILY,
+                port_row_name(port, provider.provider_id()),
+                PortPayload::new(provider.clone()),
+                false,
+            )
+        })
+        .collect()
 }
 
 /// 一个端口的装配期读数。
 pub enum PortReading {
-    /// 端口名不在闭集（漏声明，不是默认值）。
-    Unknown(String),
     /// 0 行：端口缺席（没装提供者插件——合法装配态，响亮失败在调用点）。
     Absent,
     /// 1 行：就绪。
@@ -246,7 +341,6 @@ pub enum PortReading {
 impl fmt::Debug for PortReading {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unknown(port) => write!(f, "Unknown({port})"),
             Self::Absent => write!(f, "Absent"),
             Self::Ready(row) => write!(f, "Ready({})", row.name()),
             Self::Duplicate { kept, dropped } => {
@@ -266,12 +360,9 @@ impl fmt::Debug for PortReading {
 /// 见）：`0` 缺席、`1` 就绪、`>1` 判重。行不降位（`active = false`），行数让
 /// 「多提供者」可判——读数不猜、不回落。
 pub async fn capability_port_of(visitor: &dyn Registry, port: &str) -> PortReading {
-    let Some(family) = port_family(port) else {
-        return PortReading::Unknown(port.to_string());
-    };
     let prefix = port_row_name(port, "");
     let rows: Vec<_> = visitor
-        .list(family)
+        .list(PORT_FAMILY)
         .await
         .into_iter()
         .filter(|r| r.name().starts_with(&prefix))
@@ -290,8 +381,30 @@ pub async fn capability_port_of(visitor: &dyn Registry, port: &str) -> PortReadi
     }
 }
 
-/// 装配期判重检查（D-298 / D-299）：闭集每个端口按行名前缀读一次分组行数；
-/// 判重 ⇒ 落一条错误进 `CAPABILITY_ERRORS`。
+/// 从 `port` 族里已注册的行名派生端口集（`DE-047` I-6.7）。
+///
+/// 行名形状唯一来源是 [`port_row_name`]：`<port:{port}>:{provider_id}`。解析不出的行
+/// （不是本族造的）由 `filter_map` 跳过——它们本来就不可见（`Registry::list` 按族取）。
+async fn registered_ports(visitor: &dyn Registry) -> Vec<String> {
+    let mut out = Vec::new();
+    for row in visitor.list(PORT_FAMILY).await {
+        let Some(rest) = row.name().strip_prefix("<port:") else {
+            continue;
+        };
+        let Some((port, _)) = rest.split_once(">:") else {
+            continue;
+        };
+        let port = port.to_string();
+        if !out.contains(&port) {
+            out.push(port);
+        }
+    }
+    out
+}
+
+/// 装配期判重检查（D-298 / D-299 / `DE-047` I-6.7）：端口集从**已注册行**派生
+/// （`<port:{port}>:` 前缀），每个端口按行名前缀读一次分组行数；判重 ⇒ 落一条错误
+/// 进 `CAPABILITY_ERRORS`。
 ///
 /// **时点契约**：必须在能力收集结束、编排方读错误桶（`capability_take_errors`）
 /// 裁决**之前**调用——判重错误与收集期错误同桶同路，裁决即中止会话（装载期硬红）。
@@ -303,8 +416,8 @@ pub async fn capability_port_check(ctx: &Arc<dyn PluginInvokeRequest>) {
     let Some(visitor) = ctx.get(CAPABILITY_VISITOR) else {
         return;
     };
-    for port in ports::KNOWN {
-        if let PortReading::Duplicate { kept, dropped } = capability_port_of(&*visitor, port).await
+    for port in registered_ports(&*visitor).await {
+        if let PortReading::Duplicate { kept, dropped } = capability_port_of(&*visitor, &port).await
         {
             capability_report_error(
                 ctx,

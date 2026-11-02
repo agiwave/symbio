@@ -581,7 +581,7 @@ symbio_plugin_api::submit_declarations!(
 use symbio_kernel::capability::Registry;
 use symbio_kernel::plugin::PluginInvokeRequestExt;
 use symbio_plugin_api::port::{
-    port_row, PortProvider, ToolCallExecutor, ToolCallOutcome, ToolCallRequest,
+    port_rows, PortProvider, ToolCallExecutor, ToolCallOutcome, ToolCallRequest,
 };
 use symbio_plugin_api::ports;
 use symbio_plugin_api::CAPABILITY_VISITOR;
@@ -590,8 +590,8 @@ use symbio_plugin_api::CAPABILITY_VISITOR;
 pub(crate) struct FixtureToolPort;
 
 impl PortProvider for FixtureToolPort {
-    fn port(&self) -> &'static str {
-        ports::TOOL
+    fn ports(&self) -> &'static [&'static str] {
+        &[ports::TOOL]
     }
 
     fn provider_id(&self) -> &str {
@@ -725,6 +725,7 @@ impl ToolCallExecutor for FixtureToolPort {
 /// 给夹具的能力表装上工具端口行（`port.tool` 就绪，替身执行器见上）。
 pub(crate) async fn put_tool_port_row<T: Registry + ?Sized>(visitor: &Arc<T>) {
     let port = Arc::new(FixtureToolPort) as Arc<dyn PortProvider>;
-    let row = port_row(&port).expect("夹具端口名在闭集内");
-    visitor.put(row).await;
+    for row in port_rows(&port) {
+        visitor.put(row).await;
+    }
 }
