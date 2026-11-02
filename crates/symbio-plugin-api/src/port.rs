@@ -186,9 +186,11 @@ pub async fn capability_port_of(visitor: &dyn Registry, port: &str) -> PortReadi
     let rows = visitor.list(family).await;
     match rows.len() {
         0 => PortReading::Absent,
+        // panic-allow crates/symbio-plugin-api/src/port.rs::capability_port_of: 行数已判定为 1，next() 取不到说明 list 与 len 之间表被改写（同一次调用内不会发生），属代码缺陷。
         1 => PortReading::Ready(rows.into_iter().next().expect("len == 1")),
         _ => {
             let mut it = rows.into_iter();
+            // panic-allow crates/symbio-plugin-api/src/port.rs::capability_port_of: 行数已判定为 >1，next() 取不到说明 list 与 len 之间表被改写（同一次调用内不会发生），属代码缺陷。
             let kept = it.next().expect("len > 1");
             let dropped = it.map(|r| r.name().to_string()).collect();
             PortReading::Duplicate { kept, dropped }

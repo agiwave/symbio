@@ -1,9 +1,12 @@
 //! 一次轮次的**进程内交付包**：session → loop 的唯一输入面（D-086 §2/§3）。
 //!
 //! 它只装三类东西：纯值输入（[`TurnSpec`]）、本会话事实轨端口（`Arc<dyn Store>`）、
-//! 世界端口（sink / writer / abort / provider / 作用域容器）。这些对象都不跨进程，
+//! 世界端口（sink / writer / abort / 作用域容器）。这些对象都不跨进程，
 //! 故 [`TURN_DISPATCH`] 是 `WIRE = false` 的 typed ctx 键——与 `SESSION_HANDLE`
 //! 同一条纪律；它也不是线上协议，`payload` 仍只放 `session_chat::Request`。
+//!
+//! 模型服务不在交付包里（D-298）：loop 按 `port.model` 从能力表现取，提供者行由
+//! 活插件在 traverse 里注册。
 //!
 //! 结局方向走 [`TurnReport`]（序列化进 `session/<sid>/_run/<op>` 的动作响应），
 //! 不在这里开回调面：loop 不接触 `SessionStateChange` / `OUTCOME_*`，那些留守 session。

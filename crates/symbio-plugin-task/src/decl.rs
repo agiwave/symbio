@@ -13,12 +13,11 @@
 use symbio_plugin_api::{
     Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb, ViewDecl,
 };
-// 跨插件共享的五条走清单生成物（`PLUGIN.yml` 的 `shared_events` → `events.rs`）。
+// 跨插件共享的四条走清单生成物（`PLUGIN.yml` 的 `shared_events` → `events.rs`）。
 // `pub(crate) use` 是**转手**不是复制：本插件的写方 / 读方从 `crate::decl` 取名字，
 // 拼写的唯一出处仍是生成物。
 pub(crate) use symbio_plugin_api::events::{
-    EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
-    EVENT_TASK_PROGRESS,
+    EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
 };
 
 /// 就绪判死（调度者写，`reason: "lease_expired"`）：名字随 owner 声明入库——写闸
@@ -26,6 +25,11 @@ pub(crate) use symbio_plugin_api::events::{
 ///
 /// 单消费方（调度者自己判死、自己读），不进共享表。
 pub(crate) const EVENT_TASK_READY: &str = "task.ready";
+
+/// 租约（调度者写）：与终态同落 `Task × Asserted`。原本经共享表供 `session` 的
+/// 自主程度列引用；`D-281` 之后外部消费方清零，名字随 owner 走（CS-007），
+/// `EventDecl` 仍住 [`EVENTS`]。
+pub(crate) const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 
 /// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。落在
 /// `task × asserted`（返工本身是一次质量判定的事实）。

@@ -105,9 +105,6 @@ pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 /// task.asserted — owner `symbio-plugin-task`，格位 `(Task, Asserted)`
 pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 
-/// task.assigned — owner `symbio-plugin-task`，格位 `(Task, Asserted)`
-pub const EVENT_TASK_ASSIGNED: &str = "task.assigned";
-
 /// task.controlled — owner `symbio-plugin-loop`，格位 `(Control, Opened)`
 pub const EVENT_TASK_CONTROLLED: &str = "task.controlled";
 
@@ -170,7 +167,6 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Turn, Verb::Asserted)), // session.config ← loop
     EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task
-    EventDecl::new(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted)), // task.assigned ← task
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task
     EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← task
