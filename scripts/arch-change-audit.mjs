@@ -244,6 +244,19 @@ function commitsWithFiles(range) {
   return parseCommitRecords(out)
 }
 
+/** 一段 `git show --unified=0` 的输出里，改动是否只有注释 / 空行（无内核语义）。 */
+export function commentsOnlyPatch(patch) {
+  if (patch === null) return false
+  for (const line of String(patch).split('\n')) {
+    if (!/^[+-]/.test(line)) continue
+    if (line.startsWith('+++') || line.startsWith('---')) continue
+    const code = line.slice(1)
+    const stripped = code.replace(/\/\/.*$/, '').trim()
+    if (stripped.length > 0) return false
+  }
+  return true
+}
+
 const inDirs = (files, dirs) => files.some((f) => dirs.some((d) => f.startsWith(d)))
 
 /**
@@ -360,10 +373,18 @@ function main() {
   const bad = []
   let coreTouching = 0
   let skipped = 0
-  for (const { sha, message, files } of commits) {
+  for (const { sha, message, files: rawFiles } of commits) {
     if (BASELINE_SHAS.has(sha.slice(0, 8))) {
       skipped += 1
       continue
+    }
+    let files = rawFiles
+    // 只加注释的内核改动（如 `arch-shape-allow` 登记）不构成「改内核」：判据要判的是
+    // 内核语义与形状的变更，不是文件被打开过。逐内核文件看真实 diff，注释行一律不计。
+    if (inDirs(files, ARCH_DIRS)) {
+      const core = files.filter((f) => ARCH_DIRS.some((d) => f.startsWith(d)))
+      const patch = git(['show', '--format=', '--unified=0', sha, '--', ...core])
+      if (commentsOnlyPatch(patch)) files = files.filter((f) => !core.includes(f))
     }
     if (inDirs(files, ARCH_DIRS)) coreTouching += 1
     const r = judge(sha, files, message)
