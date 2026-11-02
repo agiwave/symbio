@@ -25,7 +25,8 @@ use symbio_plugin_api::{
 const HARNESS_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
     EventDecl::new("turn.stage", (Entity::Turn, Verb::Asserted)),
-    EventDecl::new("user.message", (Entity::Turn, Verb::Opened)),
+    // 真实进程里开轮事实由宿主写口落格（D-296），环里没有行生产它。
+    EventDecl::host("user.message", (Entity::Turn, Verb::Opened)),
 ];
 
 const HARNESS_FACTS: &[FactDecl] = &[
@@ -97,7 +98,9 @@ fn harness_declarations() -> PluginDeclarations<'static> {
             name: symbio_plugin_api::rows::PLUGIN_ROW,
             mode: LatencyTier::Deep,
             reads: &[],
-            writes: &[EVENT_MEMORY_CALIBRATED, SKILL_ANSWERED],
+            // `turn.stage` 在真实进程由 loop 的筑阶段格写；本二进制不链接它 ⇒
+            // 夹具把这一格补进生产面（D-296）。
+            writes: &[EVENT_MEMORY_CALIBRATED, SKILL_ANSWERED, "turn.stage"],
         }],
         rows: harness_rows(),
     }
@@ -113,7 +116,8 @@ fn harness_encoded_sink_row() -> Decl {
     }]));
     Decl {
         name: EVENT_MEMORY_ENCODED,
-        prio: 200,
+        phase: 8,
+        anchor: 200,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -154,7 +158,8 @@ fn harness_protocol_rows() -> &'static [Decl] {
             }]));
             Decl {
                 name: Box::leak(format!("sink.{name}").into_boxed_str()),
-                prio: 200,
+                phase: 8,
+                anchor: 200,
                 by: None,
                 tier: LatencyTier::Reflex,
                 expand: None,

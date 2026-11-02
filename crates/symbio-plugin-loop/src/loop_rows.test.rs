@@ -87,7 +87,8 @@ fn owes(name: &str, events: &[Event], now: i64) -> bool {
 fn copy(decl: &Decl) -> Decl {
     Decl {
         name: decl.name,
-        prio: decl.prio,
+        phase: decl.phase,
+        anchor: decl.anchor,
         by: decl.by,
         tier: decl.tier,
         expand: decl.expand,
@@ -100,13 +101,13 @@ fn copy(decl: &Decl) -> Decl {
 /// 把指定几行接到真实动作上，其余照抄整张表。
 ///
 /// 只在验**裁决序**时用：未接线的行 `by = None` ⇒ `blocked`，`drive` 不选它。
-/// 造出一张「同时可还」的表才能看出 `prio` 的相对顺序。
+/// 造出一张「同时可还」的表才能看出 `(phase, anchor)` 的相对顺序。
 fn wired(names: &[&str]) -> Vec<Decl> {
     ROWS.iter()
         .map(|d| {
             let mut c = copy(d);
             // 点名的接上执行体，**其余的一律断开**：不这样做，任何一行原本 `by`
-            // 非空的（端口派发行、外环的宣布行）都会按自己的 `prio` 抢在前面，
+            // 非空的（端口派发行、外环的宣布行）都会按自己的次序抢在前面，
             // 夹具就成了「全表的最小债」而不是「这几行之间的次序」。
             c.by = names.contains(&c.name).then_some(super::EXECUTE);
             c
@@ -138,7 +139,8 @@ fn logical_keys(rows: &[Decl]) -> Vec<Decl> {
     rows.iter()
         .map(|d| Decl {
             name: d.name,
-            prio: d.prio,
+            phase: d.phase,
+            anchor: d.anchor,
             by: d.by,
             tier: d.tier,
             expand: d.expand,
@@ -859,8 +861,8 @@ fn a_drafted_turns_closing_row_is_owed_but_the_driver_never_asks() {
 }
 
 #[test]
-fn prio_is_global_and_registration_order_does_not_matter() {
-    // 判决 / 召回 / 执行同时可还：`prio` 最小者胜，而不是表里先出现的那行。
+fn order_is_global_and_registration_order_does_not_matter() {
+    // 判决 / 召回 / 执行同时可还：`(phase, anchor)` 最小者胜，而不是表里先出现的那行。
     //
     // 本用例验的是**裁决序**，不是接线面，所以把这三行都接到同一个动作上：
     // 未接线的行 `by = None` ⇒ `blocked`，会被 `drive` 滤掉（D-118 订正 1）。
@@ -945,8 +947,9 @@ fn rows_are_stable_and_globally_ordered() {
         ]
     );
     assert!(
-        ROWS.windows(2).all(|w| w[0].prio < w[1].prio),
-        "`prio` 是全局裁决序：表里的先后必须严格递增"
+        ROWS.windows(2)
+            .all(|w| (w[0].phase, w[0].anchor) < (w[1].phase, w[1].anchor)),
+        "`(phase, anchor)` 是裁决序：表里的先后必须严格递增"
     );
     assert_eq!(
         ROWS.iter().map(|d| d.tier).collect::<Vec<_>>(),
@@ -1013,7 +1016,8 @@ const fn row_by(
 ) -> Decl {
     Decl {
         name,
-        prio: 1,
+        phase: 1,
+        anchor: 1,
         by: Some(by),
         tier: symbio_kernel::adapters::LatencyTier::Fast,
         owes,
@@ -1501,7 +1505,7 @@ fn a_model_failure_closes_both_the_dispatch_and_the_wait() {
 
 /// D-166 + `D-222` 订正 2：执行行的让位窗口是**整次往返**，不是「派出之前」。
 ///
-/// 两个数字（60 / 66 / 71）本身**不是**判据——`prio` 一改次序就变，而「这一步有没有
+/// 两个数字（60 / 66 / 71）本身**不是**判据——顺序一改读数就变，而「这一步有没有
 /// 活可干」是事实问题。让位由 `turn_head.model_open` 说；它的关账格是往返的终局
 /// （`response` / `failed` / `retry`），所以执行行在「已宣布」与「已派出」两段都让位，
 /// 等应答收清才重新开账。
@@ -2279,7 +2283,7 @@ fn next_selects_the_recall_row_before_the_seam() {
     assert!(next.writes_closed("turn.stage"));
 }
 
-/// 轮首两台债的**序**与**档位**：压缩（prio 30）先于召回（40），而两者的出口同族不同档。
+/// 轮首两台债的**序**与**档位**：压缩（anchor 30）先于召回（40），而两者的出口同族不同档。
 ///
 /// 这一条同时钉住 D-160 的运行期那一半：`turn.stage{stage=compress}` 关不了召回行，
 /// `…{stage=recall}` 也关不了压缩行——若出口按事实名配图，两行会互相当对方的关门方
@@ -2403,7 +2407,7 @@ fn the_sweep_runs_compress_before_recall() {
     let next = super::next(&ready, 1, 0, super::ACTORS).expect("水位过了就欠一次压缩");
     assert_eq!(
         next.row, "policy.compress",
-        "同幕两笔债按 `prio` 排，不由派发器行序排"
+        "同幕两笔债按 `(phase, anchor)` 排，不由派发器行序排"
     );
     assert_eq!(next.by, super::COMPRESS);
     let run: super::super::turn_exec::Action = super::super::turn_exec::run_compress;
@@ -2487,7 +2491,7 @@ fn an_answered_verdict_opens_neither_compress_nor_recall() {
 /// 轮首那几行的格落地 ⇒ 环接着选**接缝**那一行；接缝的格再落地 ⇒ 环上没有轮首的债。
 ///
 /// 这条是 `D-159` 把「草稿交运行器落」那处寄存去掉的全部理由，也是合表之后
-/// 「两批行由同一个环按 `prio` 选中」的读法：`prio` 52 排在这些行之后，
+/// 「两批行由同一个环按 `(phase, anchor)` 选中」的读法：`anchor` 52 排在这些行之后，
 /// 于是它天然只在它们都还完时才成为最小债。
 #[test]
 fn the_seam_row_follows_the_head_rows_and_closes_their_debts() {
@@ -2545,7 +2549,7 @@ fn the_single_binding_table_binds_every_row() {
     expected.sort();
     assert_eq!(sorted_bound, expected, "绑定表漏了行：整张表必须进同一个环");
 
-    // 生产派发点的读数：同一个求解器、同一张表，最小债按 `prio` 落在轮首那几行。
+    // 生产派发点的读数：同一个求解器、同一张表，最小债按 `(phase, anchor)` 落在轮首那几行。
     let ready = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
@@ -2698,7 +2702,7 @@ fn the_same_log_owes_the_same_rows_whatever_the_clock_says() {
 ///
 /// 钉住名单而不是钉住「非空」：新增一对相交必须在名单里显形，否则它今天就是一次
 /// 静默遮蔽。名单本身不是错误——`lease` 与三行 `await-*` 同时开账是设计如此
-/// （卡住的调用既在等应答，又该有人管），裁决由 `prio` 决出。
+/// （卡住的调用既在等应答，又该有人管），裁决由 `(phase, anchor)` 决出。
 #[test]
 fn the_overlap_report_on_the_production_table() {
     // 名单随表冻结一次（`seal` 通过才算得出），读侧只问表、不再自己算第二遍。
@@ -2738,7 +2742,7 @@ fn the_overlap_report_on_the_production_table() {
             // 只在没有在飞往返时才开账——报告不知道 `via` / `port` 这一层。
             ("authorize-tool", "announce-model", request),
             // 四行策略都读同一个幕头（`turn_head` 折出的格），键同为 `(turn, round)`。
-            // 它们今天由 `prio`（10/30/40/50）决出，报告不知道这些。
+            // 它们今天由 `anchor`（10/30/40/50）决出，报告不知道这些。
             //
             // `continue-turn` 也在这个键上：它读 `turn_next_round`（与幕头同一份折叠），
             // 只有本幕收束为 `exhausted` 时才开账——那一刻四行策略都已经是旧幕的

@@ -173,7 +173,7 @@ fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> 
 /// 测试侧的交付包：**一幕的幕首入参**（形状与生产 [`super::ExecTurn`] 同一份）。
 ///
 /// 生产里幕首之后只有**一个环**（`D-222` 裁决 5）：轮首四行、接缝、汇报与轮内各行
-/// 同住一张绑定表，先后由 `prio` 说。接缝读的寄存物因此不再另开一条通道递进来——
+/// 同住一张绑定表，先后由 `(phase, anchor)` 说。接缝读的寄存物因此不再另开一条通道递进来——
 /// 它们住在**本轮状态**与**会话上下文**上（`recall_view` / `opening_text` /
 /// `consolidated`），由环上的动作自己取走。本夹具
 /// 替幕首把那一片备好，于是轮首那几行没开账时这些寄存是 `None`，开账时由执行体覆盖。
@@ -221,7 +221,7 @@ impl symbio_kernel::exec::ExecTranscriptWriter for DiscardWriter {
 /// 与生产 [`super::drive`] 的 `Control` 入口只差两处：**幕首**那几行（用户格 /
 /// 配置格 / 轮次格由本文件的 `seed_*` 直给）与**幕末**的落库与镜像回灌。环里那一段
 /// 是同一个 `drive`、同一张绑定表——轮首四行与接缝不再由夹具代跑，而是照旧欠账、
-/// 照旧由 `prio` 选中（没开账的行不会被选中，判据因此仍落在本文件那几条契约上）。
+/// 照旧由 `(phase, anchor)` 选中（没开账的行不会被选中，判据因此仍落在本文件那几条契约上）。
 async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let ExecTurn {
         session,

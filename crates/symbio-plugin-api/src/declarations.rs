@@ -68,7 +68,7 @@ macro_rules! submit_declarations {
 
 /// 把链接进来的全部声明表装成一张冻结表。
 ///
-/// 顺序按 owner 排序：行的裁决只看 `(prio, name, key)`，注册顺序不参与；排序只是让
+/// 顺序按 owner 排序：行的裁决只看 `(phase, anchor, name, key)`，注册顺序不参与；排序只是让
 /// 缺口报告的条目顺序稳定。同一 owner 的多次提交保持 inventory 的顺序。
 pub fn assemble_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
     let mut submissions: Vec<&DeclarationsDecl> = inventory::iter::<DeclarationsDecl>().collect();

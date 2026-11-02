@@ -37,7 +37,8 @@ fn cover(source: &'static str, by: Option<&'static str>) -> Decl {
     let exits: &'static [Pattern] = Box::leak(Box::new([pattern(source)]));
     Decl {
         name: Box::leak(format!("cover-{source}-{}", by.unwrap_or("none")).into_boxed_str()),
-        prio: 99,
+        phase: 8,
+        anchor: 99,
         by,
         tier: LatencyTier::Reflex,
         expand: None,

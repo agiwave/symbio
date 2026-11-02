@@ -59,7 +59,8 @@ fn protocol_rows() -> &'static [Decl] {
         }]));
         out.push(Decl {
             name,
-            prio: 99,
+            phase: 8,
+            anchor: 99,
             by: None,
             tier: LatencyTier::Reflex,
             expand: None,

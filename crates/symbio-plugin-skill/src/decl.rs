@@ -159,7 +159,8 @@ pub(crate) const ROWS: &[Decl] = &[
     // 校准观测的归宿行（同上）。
     Decl {
         name: EVENT_MEMORY_CALIBRATED,
-        prio: 200,
+        phase: 8,
+        anchor: 200,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -186,7 +187,8 @@ pub(crate) const ROWS: &[Decl] = &[
     //   命中都关同一笔账，不存在「判了但不落格」的第三态。
     Decl {
         name: SKILL_RECALL,
-        prio: 50,
+        phase: 1,
+        anchor: 50,
         by: Some(symbio_plugin_api::rows::PLUGIN_ROW),
         // 这条行不调模型（命中即零往返作答）：反射档。
         tier: LatencyTier::Reflex,

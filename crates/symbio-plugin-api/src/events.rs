@@ -179,5 +179,5 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Turn, Verb::Asserted)), // turn.branch_selected ← session
     EventDecl::with_roles(EVENT_TURN_DISPATCH, (Entity::Turn, Verb::Asserted), &[FactRole::DeclaresBudget]), // turn.dispatch ← loop
     EventDecl::new(EVENT_TURN_SUPPLEMENTED, (Entity::Turn, Verb::Asserted)), // turn.supplemented ← loop
-    EventDecl::with_roles(EVENT_USER_MESSAGE, (Entity::Turn, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop
+    EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Turn, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop
 ];

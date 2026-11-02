@@ -64,7 +64,8 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
 /// 会把 `causal.link` 判成 `OrphanFact`（每条事实都要有归宿行）。
 pub(crate) const ROWS: &[Decl] = &[Decl {
     name: CAUSAL_LINK,
-    prio: 210,
+    phase: 8,
+    anchor: 210,
     by: None,
     tier: LatencyTier::Reflex,
     expand: None,

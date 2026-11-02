@@ -56,7 +56,8 @@ const ACT: ActorDecl = ActorDecl {
     name: "act",
     mode: LatencyTier::Deep,
     reads: &[],
-    writes: &["g", "h", "done"],
+    // `f` / `batch` 也是它写的：D-296 的前件生产者判据要求 `owes` 的源有人落格。
+    writes: &["f", "g", "h", "done", "batch"],
 };
 
 /// 用例世界的**声明集**：`f` / `g` / `h` 三个事实与两个视图，加上这一用例的执行体。
@@ -104,7 +105,8 @@ fn home(fact: &'static str) -> Decl {
     let exit: &'static [Pattern] = Box::leak(Box::new([pattern(fact, &[], &[])]));
     Decl {
         name: fact,
-        prio: 99,
+        phase: 8,
+        anchor: 99,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -149,9 +151,26 @@ fn pattern(
     Pattern { source, key, eq }
 }
 
+/// D-292 的阶段分段：旧全局序的读数折成 `phase`，读数本身留在 `anchor`。
+///
+/// 只服务本文件的夹具；生产行各自写自己的 `phase` / `anchor`。
+fn phase_of(band: u8) -> u8 {
+    match band {
+        0 => 0,
+        1..=51 => 1,
+        52 => 2,
+        53..=54 => 3,
+        55..=56 => 4,
+        57..=66 => 5,
+        67..=69 => 6,
+        70..=72 => 7,
+        _ => 8,
+    }
+}
+
 fn row(
     name: &'static str,
-    prio: u8,
+    band: u8,
     by: Option<&'static str>,
     owes: Pattern,
     until: &[Pattern],
@@ -161,7 +180,9 @@ fn row(
     let leak = |p: &[Pattern]| Box::leak(p.to_vec().into_boxed_slice()) as &'static [Pattern];
     Decl {
         name,
-        prio,
+        // `band` 是夹具里的旧全局序读数，按 D-292 的分段表折成 `(phase, anchor)`。
+        phase: phase_of(band),
+        anchor: band,
         by,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -718,7 +739,8 @@ fn row_exp(
     let leak = |p: &[Pattern]| Box::leak(p.to_vec().into_boxed_slice()) as &'static [Pattern];
     Decl {
         name,
-        prio: 10,
+        phase: 1,
+        anchor: 10,
         by: Some("act"),
         tier: LatencyTier::Reflex,
         expand,
@@ -896,6 +918,76 @@ fn the_envelope_fields_need_no_declaration() {
     );
 }
 
+/// 前件生产者判据的反向用例（`D-296`）：唯一的生产者被删掉 ⇒ 装载期红。
+///
+/// `act` 的 `writes` 不含 `f`，而 `r` 的前件正是 `f`——这一笔账在环里永远开不起来，
+/// 只能由 `seal` 说出来。
+#[test]
+fn a_precondition_without_any_producer_is_a_gap() {
+    const NO_F: ActorDecl = ActorDecl {
+        name: "act",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &["g", "h"],
+    };
+    let rows = [row(
+        "r",
+        10,
+        Some("act"),
+        pattern("f", &["id"], &[]),
+        &[pattern("g", &["id"], &[])],
+        &[],
+    )];
+    assert!(
+        seal_gaps(&rows, &[NO_F]).contains(&Gap::UnproducedPrecondition {
+            row: "r",
+            fact: "f",
+        })
+    );
+}
+
+/// 同一判据的**合法反向依赖**（用户裁决 A）：前件由后阶段的行写，装载期仍然绿。
+///
+/// `early`（phase 1）读 `f`，而 `f` 只由排在它后面的 `late`（phase 5）写；判据只问
+/// 「有没有生产者」，不问阶段先后，这种反向依赖由环的反复回访接上。
+#[test]
+fn a_later_phase_producer_is_not_a_gap() {
+    const NO_F: ActorDecl = ActorDecl {
+        name: "act",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &["g", "h"],
+    };
+    let rows = [
+        row(
+            "early",
+            10,
+            Some("act"),
+            pattern("f", &["id"], &[]),
+            &[pattern("g", &["id"], &[])],
+            &[],
+        ),
+        row(
+            "late",
+            60,
+            Some("act"),
+            pattern("g", &["id"], &[]),
+            &[pattern("h", &["id"], &[])],
+            &[],
+        ),
+    ];
+    let writes: &'static RowWrites = Box::leak(vec![("late", &["f", "h"][..])].into_boxed_slice());
+    let mut b = declare(&[NO_F]);
+    for r in &rows {
+        b.row(r.clone());
+    }
+    let gaps = b.seal(writes).err().unwrap_or_default();
+    assert!(
+        gaps.is_empty(),
+        "阶段先后不参与前件判据：后阶段写、前阶段读是合法反向依赖：{gaps:?}"
+    );
+}
+
 /// 第 1 条：两行互相等对方先跑——保守依赖图上有环。
 ///
 /// `one` 写 `g`（`r2` 的出口），`two` 写 `h`（`r1` 的出口）：每一行都「开着等另一行」，
@@ -906,13 +998,13 @@ fn a_cycle_in_the_who_settles_whom_graph_is_a_gap() {
         name: "one",
         mode: LatencyTier::Deep,
         reads: &[],
-        writes: &["g", "h"],
+        writes: &["f", "g", "h"],
     };
     const TWO: ActorDecl = ActorDecl {
         name: "two",
         mode: LatencyTier::Deep,
         reads: &[],
-        writes: &["g", "h"],
+        writes: &["f", "g", "h"],
     };
     let rows = [
         row(
@@ -974,13 +1066,13 @@ fn same_family_different_cell_is_not_an_edge() {
         name: "one",
         mode: LatencyTier::Deep,
         reads: &[],
-        writes: &["g"],
+        writes: &["f", "g"],
     };
     const TWO: ActorDecl = ActorDecl {
         name: "two",
         mode: LatencyTier::Deep,
         reads: &[],
-        writes: &["g"],
+        writes: &["f", "g"],
     };
     let rows = [
         row(
@@ -1022,13 +1114,13 @@ fn same_cell_or_uncovered_family_still_makes_an_edge() {
         name: "one",
         mode: LatencyTier::Deep,
         reads: &[],
-        writes: &["g", "h"],
+        writes: &["f", "g", "h"],
     };
     const TWO: ActorDecl = ActorDecl {
         name: "two",
         mode: LatencyTier::Deep,
         reads: &[],
-        writes: &["g", "h"],
+        writes: &["f", "g", "h"],
     };
     // 同一格：两边出口都含 `g{x=a}`（另带 `h` 只为把夹具的三个事实都覆盖到）。
     let same_cell = [
@@ -1101,13 +1193,14 @@ const WRITER_G: ActorDecl = ActorDecl {
     name: "one",
     mode: LatencyTier::Deep,
     reads: &[],
-    writes: &["g"],
+    // `h` 是两行的前件；`g` 是它的出口证据。
+    writes: &["g", "h"],
 };
 const WRITER_F: ActorDecl = ActorDecl {
     name: "two",
     mode: LatencyTier::Deep,
     reads: &[],
-    writes: &["f"],
+    writes: &["f", "h"],
 };
 
 /// 「`r_a` 的出口是一个视图」那两份行：行形状固定，只有视图的 `evidence` 随用例变。

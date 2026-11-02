@@ -45,7 +45,8 @@ fn cover(fact: &'static str, by: Option<&'static str>) -> Decl {
     }]));
     Decl {
         name: fact,
-        prio: 99,
+        phase: 8,
+        anchor: 99,
         by,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -178,7 +179,7 @@ fn control_plane_loads_and_freezes() {
     // v13 的 `closure`（本幕最近一条收束格的 `reason`）是幕间判据「还开不开下一幕」的
     // 数据面；v12 的 `prepared`（本幕落过 `inputs` 阶段格没有）是接缝行的前件
     // （`prepare-turn` 以它为开账条件）；v11 的 `model_open`（D-166，本幕已宣布、没派出的模型往返）让执行行的让位
-    // 从「`prio` 碰巧排对」变成事实前件；
+    // 从「次序碰巧排对」变成事实前件；
     // 而 `reflex_answered`（D-163）、`answered`（D-162 裁决 1）与 `has_final` /
     // `closeable` / `tools_open` 的读面自 v8 起只看「这一轮自己的模型往返」
     // （内部往返带 `via`，D-122 决策 2）。

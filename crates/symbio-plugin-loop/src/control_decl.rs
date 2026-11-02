@@ -115,8 +115,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("chat.assistant.progress", (Entity::Turn, Verb::Progressed)),
     EventDecl::new(EVENT_TURN_STAGE, (Entity::Turn, Verb::Asserted)),
     // 开轮：格位本身答得出「这是开轮」；它同时是**历史切片**的预算声明来源
-    // （派发档落格之前的形态），所以带 `declares_budget`。
-    EventDecl::with_roles(
+    // （派发档落格之前的形态），所以带 `declares_budget`。**宿主写口**：这条事实
+    // 在任何判决之前由运行器落格，环里没有哪一行生产它（D-296）。
+    EventDecl::host_with_roles(
         "user.message",
         (Entity::Turn, Verb::Opened),
         &[FactRole::DeclaresBudget],
@@ -610,7 +611,7 @@ fn close_mark(events: &[Event], turn: u64, anchor_seq: u64) -> Option<&Event> {
 /// 的应答 `calls` 为空，混进来会让一条判决往返被读成「这一轮答完了」。
 ///
 /// v11（D-166）加 `model_open`：本幕已宣布、还没派出的模型往返。执行行与派发行
-/// 因此按**事实**分工，而不是靠 `prio` 60 < 66 碰巧排对。
+/// 因此按**事实**分工，而不是靠 `anchor` 60 < 66 碰巧排对。
 ///
 /// v14（`D-222` 订正 2）把 `model_open` 的关账格从 `sent` 挪到 `response` / `failed` /
 /// `retry`：一次模型往返此后占**两个**环步（`dispatch-model` 落 `sent`、
@@ -825,7 +826,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // `an_actor_that_writes_nothing_stops_as_no_progress` 与各轮用例都钉着它）。
     //
     // 执行行要这一格——一次模型往返的「宣布」与「派出」是两个环步，宣布之后
-    // 派发行（66）还没轮到，执行行（60）按 `prio` 会抢先再宣布一笔；同一幕两条
+    // 派发行（66）还没轮到，执行行（60）按 `(phase, anchor)` 会抢先再宣布一笔；同一幕两条
     // `request(port=model)` 并存，模型就不再有「一次往返」这个粒度。
     //
     // 收窄按幕锚（`after_anchor`）：续写幕复用轮号，首幕那笔已关闭的请求不算「本幕
@@ -874,7 +875,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "recall_done": stage_since("recall"),
         "reflex_answered": reflex_answered,
         // 本幕的请求输入已备好：接缝行的出口（`stage:"inputs"`，`result: ready`）。
-        // 接缝行以 `false` 开账、以它为出口；它的 `prio`（52）排在收束与执行之前，
+        // 接缝行以 `false` 开账、以它为出口；它的 `anchor`（52）排在收束与执行之前，
         // 于是「轮首那几行 → 接缝 → 轮内开账」由同一个循环里的一个数字说，不必把
         // `prepared: true` 复写进每一行的前件（那会是这条次序的第二个 owner）。
         "prepared": stage_since("inputs"),

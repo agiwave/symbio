@@ -76,7 +76,8 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
 /// `conation.expressed` 判成 `OrphanFact`（每条事实都要有归宿行）。
 pub(crate) const ROWS: &[Decl] = &[Decl {
     name: EVENT_CONATION_EXPRESSED,
-    prio: 220,
+    phase: 8,
+    anchor: 220,
     by: None,
     tier: LatencyTier::Reflex,
     expand: None,

@@ -57,7 +57,7 @@ const HEADER = `//! 跨插件事件名常量 —— **由 \`scripts/facts/events
 
 const NAME_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/
 const DECL_RE =
-  /EventDecl::(with_roles|new)\s*\(\s*(?:"([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"|([A-Z][A-Z0-9_]*))/g
+  /EventDecl::(host_with_roles|host|with_roles|new)\s*\(\s*(?:"([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"|([A-Z][A-Z0-9_]*))/g
 /**
  * 声明处的格位：`(Entity::Memory, Verb::Opened)`（跨行也认）。
  * 路径限定写法（`(symbio_kernel::event::Entity::Memory, …)`——不 `use` 直接全量写）同认：
@@ -145,12 +145,16 @@ function ownerDeclarations(texts) {
         cells.set(value, null)
         continue
       }
-      // 角色只从 `with_roles` 的第三实参里取：`new` 形态没有角色这一维。
-      const rolesText = kind === 'with_roles' ? window.slice(cell.index + cell[0].length).match(ROLES_RE) : null
+      // 角色只从带角色的形态（`with_roles` / `host_with_roles`）第三实参里取。
+      const rolesText =
+        kind === 'with_roles' || kind === 'host_with_roles'
+          ? window.slice(cell.index + cell[0].length).match(ROLES_RE)
+          : null
       const roles = rolesText
         ? [...rolesText[1].matchAll(/FactRole::([A-Za-z0-9_]+)/g)].map((r) => r[1])
         : []
-      cells.set(value, { entity: cell[1], verb: cell[2], roles })
+      const host = kind === 'host' || kind === 'host_with_roles'
+      cells.set(value, { entity: cell[1], verb: cell[2], roles, host })
     }
   }
   return cells
@@ -245,8 +249,14 @@ export function render(rows) {
   L.push('pub const SHARED_EVENTS: &[EventDecl] = &[')
   for (const r of rows) {
     const roles = r.roles ?? []
-    const decl =
-      roles.length > 0
+    // 宿主写口必须随行投影：装载期的前件生产者判据靠这个标记认出「这条事实在环外落格」。
+    const decl = r.host
+      ? roles.length > 0
+        ? `EventDecl::host_with_roles(${constOf(r.name)}, (Entity::${r.entity}, Verb::${r.verb}), &[${roles
+            .map((x) => `FactRole::${x}`)
+            .join(', ')}])`
+        : `EventDecl::host(${constOf(r.name)}, (Entity::${r.entity}, Verb::${r.verb}))`
+      : roles.length > 0
         ? `EventDecl::with_roles(${constOf(r.name)}, (Entity::${r.entity}, Verb::${r.verb}), &[${roles
             .map((x) => `FactRole::${x}`)
             .join(', ')}])`

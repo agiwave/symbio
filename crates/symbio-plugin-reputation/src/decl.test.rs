@@ -69,7 +69,8 @@ fn harness_protocol_rows() -> &'static [Decl] {
             }]));
             Decl {
                 name: Box::leak(format!("sink.{name}").into_boxed_str()),
-                prio: 200,
+                phase: 8,
+                anchor: 200,
                 by: None,
                 tier: LatencyTier::Reflex,
                 expand: None,

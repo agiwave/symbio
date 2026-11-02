@@ -5,7 +5,7 @@
 //!
 //! **本模块不再驱动环**（`D-222` 裁决 5）：控制面只有**一个**环，它住在
 //! [`super::drive`]；幕首开轮只是那个环的一步（幕与幕在同一次调用里接续）。
-//! 轮首四行、接缝、内环是同一张绑定表上的行，先后由 `prio` 表达。
+//! 轮首四行、接缝、内环是同一张绑定表上的行，先后由 `(phase, anchor)` 表达。
 
 use super::*;
 
@@ -81,7 +81,7 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
         // 本函数自己就开着 `store`。
         //
         // 轮中汇报**不在这里**：批次边界那件事成了 `policy.report` 行，
-        // 由同一个环按 `prio` 选中、由它自己的执行体落格上线（D-163）。闭包只留
+        // 由同一个环按 `(phase, anchor)` 选中、由它自己的执行体落格上线（D-163）。闭包只留
         // 「抽干」这一件事——它仍然是 core 唯一的轮边界挂点。
         inject: injector(a.supplements.clone()).map(|drain| {
             let store = a.store.clone();

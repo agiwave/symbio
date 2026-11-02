@@ -281,7 +281,8 @@ const MEMORY_SINK_ROWS: &[symbio_plugin_api::ring::Decl] = &[
     // 三行同形：有即闭合（`owes` 与 `until` 同一个源、空键、空 eq）。
     symbio_plugin_api::ring::Decl {
         name: symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
-        prio: 200,
+        phase: 8,
+        anchor: 200,
         by: None,
         tier: symbio_plugin_api::LatencyTier::Reflex,
         expand: None,
@@ -299,7 +300,8 @@ const MEMORY_SINK_ROWS: &[symbio_plugin_api::ring::Decl] = &[
     },
     symbio_plugin_api::ring::Decl {
         name: symbio_plugin_api::events::EVENT_MEMORY_CONSOLIDATED,
-        prio: 200,
+        phase: 8,
+        anchor: 200,
         by: None,
         tier: symbio_plugin_api::LatencyTier::Reflex,
         expand: None,
@@ -317,7 +319,8 @@ const MEMORY_SINK_ROWS: &[symbio_plugin_api::ring::Decl] = &[
     },
     symbio_plugin_api::ring::Decl {
         name: symbio_plugin_api::events::EVENT_MEMORY_FORGOTTEN,
-        prio: 200,
+        phase: 8,
+        anchor: 200,
         by: None,
         tier: symbio_plugin_api::LatencyTier::Reflex,
         expand: None,

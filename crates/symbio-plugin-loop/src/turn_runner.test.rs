@@ -185,7 +185,7 @@ impl TurnRunner {
         //
         // 派发格不只是审计——`turn.dispatch` 的幂等键（`d-{turn}-{drive_seq}`）还兼着
         // 「同一幕不许跑两次」的那道闸；`inputs` 格是 `turn_head.prepared` 的来源，
-        // 没它的话环的第一笔债是 `prepare-turn`（`prio` 52），而那个动作要的是编排层
+        // 没它的话环的第一笔债是 `prepare-turn`（`anchor` 52），而那个动作要的是编排层
         // 那一片状态，本夹具没有。
         let facts = store.range(symbio_kernel::event::Seq::new(0));
         let now = super::super::loop_rows::wake_now_ms(&facts, input.drive_seq);

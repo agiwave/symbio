@@ -46,7 +46,8 @@ fn protocol_rows() -> &'static [Decl] {
         }]));
         out.push(Decl {
             name,
-            prio: 99,
+            phase: 8,
+            anchor: 99,
             by: None,
             tier: LatencyTier::Reflex,
             expand: None,
@@ -77,6 +78,9 @@ fn harness_declarations() -> PluginDeclarations<'static> {
                 NOTES_INSIGHT,
                 NOTES_SUMMARY,
                 symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
+                // 真实进程里 `plugin_row` 的实现也会落 `artifact.added`（`notes.index`
+                // 的前件）；本二进制不链接 loop ⇒ 夹具把这一格补进生产面（D-296）。
+                symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
             ],
         }],
         rows: protocol_rows(),

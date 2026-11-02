@@ -4,7 +4,8 @@
 //!
 //! 旧策略表（`loop_registry`，已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
 //! ——判断住在函数体里。这里的一行是 [`Decl`]：`owes` / `until` / `unless` 三个
-//! [`Pattern`] 加 `by` / `prio`。判断因此可 diff、可装载期检查；执行体只拿到一笔 [`Debt`]。
+//! [`Pattern`] 加 `by` / `phase` / `anchor`。判断因此可 diff、可装载期检查；执行体只拿到一笔
+//! [`Debt`]。
 //!
 //! ## 欠账公式
 //!
@@ -12,7 +13,7 @@
 //! open(d,key)      := ∃ f ⊨ d.owes ∧ key = bind(f) ∧ ¬∃ g ⊨ d.until ∧ key(g) = key
 //! blocked(d,key)   := d.by = None ∨ ∃ h ⊨ d.unless ∧ key(h) = key
 //! actionable(d,key) := open ∧ ¬blocked
-//! next(now)        := min { (d,key) | actionable } 按 (prio, name, key)
+//! next(now)        := min { (d,key) | actionable } 按 (phase, anchor, name, key)
 //! ```
 //!
 //! 时间不进公式：需要时间的条件由视图把 `now` 折成布尔字段（[`Frozen::eval`]
@@ -97,10 +98,16 @@ pub struct Pattern {
 pub struct Decl {
     /// 行的身份：日志、冲突报错、对拍都按它指认。
     pub name: &'static str,
-    /// **全局**裁决顺序：`(prio, name, key)` 升序，先小者胜。
+    /// **阶段**身份：环按它升序取债，同一阶段内做不动点（D-292）。
     ///
-    /// 与旧表的格内 `prio` 不同：义务环只有一个环、一次取最小，跨行必须可比。
-    pub prio: u8,
+    /// 它是行的值、不是内核词汇：新增时机只在**自己所属的阶段**里挑次序
+    /// （`anchor`），不再在一条 0→72 的全局序列里挑位置。
+    pub phase: u8,
+    /// 阶段内的次序：`(phase, anchor, name, key)` 升序，先小者胜（D-292）。
+    ///
+    /// `phase` 回答「在哪一段」，`anchor` 回答「这一段里谁先」——两者仍是全序，
+    /// 所以 `D-093` 的「跨行竞争有全序」原样成立。
+    pub anchor: u8,
     /// 执行体名。`None` ⇒ 恒 blocked、永不选中（「在等」的唯一声明位）。
     pub by: Option<&'static str>,
     /// 这一行动作允许的时延档。
@@ -210,8 +217,8 @@ impl Ord for Debt<'_> {
 }
 
 impl Debt<'_> {
-    fn order(&self) -> (u8, &'static str, &Key) {
-        (self.decl.prio, self.decl.name, &self.key)
+    fn order(&self) -> (u8, u8, &'static str, &Key) {
+        (self.decl.phase, self.decl.anchor, self.decl.name, &self.key)
     }
 }
 
@@ -242,7 +249,7 @@ pub fn owed<'a>(rows: &'a [Decl], frozen: &Frozen, events: &[Event], now: i64) -
 /// 接线时与 `ActorDecl` 注册同批改回 `Some`（DE-015 §2.2 / D-118 订正 1）。
 ///
 /// 按行点问（`crates/symbio-plugin-loop/src/loop_rows.rs::owes`）仍留给「刚写完 request，这一行
-/// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `prio` 裁决）是
+/// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `(phase, anchor)` 裁决）是
 /// 调度器唯一的选债口（D-118 决策 1–2）。
 pub fn drive<'a>(
     rows: &'a [Decl],
@@ -415,7 +422,10 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::UndeclaredPatternField`]：模式引用了一个不在那条事实载荷声明里的字段
 ///   （§3.4 第 3 条）——它与「字段这次没带」在求值时同形，只能装载期拦；
 /// - [`Gap::DependencyCycle`]：两行以上的「谁还清谁」成环（§3.4 第 1 条）——
-///   类型级互相等待，运行期没有任何一步走得动。
+///   类型级互相等待，运行期没有任何一步走得动；
+/// - [`Gap::UnproducedPrecondition`]：`owes` 展开出的某个事实没有任何生产者
+///   （执行体名单、行级名单、引擎独占格、宿主写口四档都够不到它，D-296）——
+///   那一行永远不会开账，而运行期只表现为「这一步没发生」。
 ///
 /// 后两条不在 `check_rows` 的输入面上，由 [`check_ports`] 报（§3.4 第 5 条的
 /// 端口侧）：
@@ -460,6 +470,16 @@ pub enum Gap {
     },
     DuplicateName {
         row: &'static str,
+    },
+    /// 前件里的事实**没有任何生产者**：没有执行体声明写它、不是引擎独占格、
+    /// 也没有标成宿主写口（D-296）。
+    ///
+    /// 判据只问「有没有人写」，不问「谁先谁后」：后阶段写、前阶段读是合法的反向
+    /// 依赖（`continue-turn` 读的轮次格就比它晚写）。按阶段判先后会误伤这类形态，
+    /// 并逼实现去改行的阶段划分。
+    UnproducedPrecondition {
+        row: &'static str,
+        fact: &'static str,
     },
     OrphanFact {
         fact: &'static str,
@@ -603,8 +623,31 @@ fn exit_fact_names(source: &'static str, frozen: &Frozen) -> Vec<&'static str> {
     }
 }
 
+/// 前件的生产者集合：四档都算写出（D-296）。
+///
+/// - 行执行体：全部 `ActorDecl.writes` + 逐行名单（`seal(row_writes)`）；
+/// - 引擎独占格：`sent` / `response` / `failed` / `retry`；
+/// - 宿主写口：`EventDecl.host` 标记的格（开轮事实在循环之前就落格）；
+/// - 效果的写入声明：它今天与宿主写口同义，落在同一张事件表上。
+///
+/// 故意**不**收窄成「有没有行写」：`session.config` / `message.added` 一类宿主事实
+/// 会被误红，判据就从「断链可见」退化成「全部红」。
+fn producer_surface(frozen: &Frozen, row_writes: &RowWrites) -> HashSet<&'static str> {
+    let mut producers: HashSet<&'static str> = HashSet::new();
+    for actor in frozen.actors() {
+        producers.extend(actor.writes.iter().copied());
+    }
+    for (_, writes) in row_writes.iter() {
+        producers.extend(writes.iter().copied());
+    }
+    producers.extend(super::ENGINE_ONLY_CELLS.iter().copied());
+    producers.extend(frozen.events().iter().filter(|e| e.host).map(|e| e.name));
+    producers
+}
+
 pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec<Gap> {
     let mut gaps = Vec::new();
+    let producers = producer_surface(frozen, row_writes);
     let mut names = HashSet::new();
     for decl in rows {
         if !names.insert(decl.name) {
@@ -675,6 +718,25 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
                             });
                         }
                     }
+                }
+            }
+        }
+        // 前件有生产者（D-296）：`owes` 的源展开成事实，逐个问四档里有没有人写。
+        // 源本身未声明时已经报了 `UnknownSource`，这里不重复报。
+        //
+        // 只查**会派发**的行：`by = None` 的行在 `owed` 里恒为 blocked，永远不会
+        // 开账——它是「尚未接线」的声明位（DE-015 §2.2），不是可还的债。对它判红
+        // 等于把「未接线」当成「断链」，而归宿行恰恰整张表都是 `by = None`。
+        if decl.by.is_some()
+            && (frozen.fact(decl.owes.source).is_some() || frozen.view(decl.owes.source).is_some())
+        {
+            let mut seen = HashSet::new();
+            for fact in fact_names_of(decl.owes.source, frozen) {
+                if seen.insert(fact) && !producers.contains(fact) {
+                    gaps.push(Gap::UnproducedPrecondition {
+                        row: decl.name,
+                        fact,
+                    });
                 }
             }
         }
@@ -895,7 +957,8 @@ fn walk(
 /// 一对**可能同时开账**的行（§3.4 第 4 条的报告单元）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Overlap {
-    /// 表内先后，不带裁决意味——谁先被派发由 `(prio, name, key)` 决，这里不判。
+    /// 表内先后，不带裁决意味——谁先被派发由 `(phase, anchor, name, key)` 决，
+    /// 这里不判。
     pub rows: [&'static str; 2],
     /// 两边都当作前件的那些事实名（字典序，一对只列一条）。
     pub facts: Vec<&'static str>,

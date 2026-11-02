@@ -2,36 +2,34 @@
 //!
 //! ## 一行只写「什么时候欠、什么算还」
 //!
-//! 判据全部是数据：`owes` / `until` / `unless` 三个模式，`prio` 是**全局**裁决序
-//! （`(prio, name, key)` 升序）。执行体只拿到一笔 `Debt`，不读任何请求作用域状态——
+//! 判据全部是数据：`owes` / `until` / `unless` 三个模式，`phase` / `anchor` 是裁决序
+//! （`(phase, anchor, name, key)` 升序）。执行体只拿到一笔 `Debt`，不读任何请求作用域状态——
 //! 「什么时候欠」对应的是一份视图读出的事实，不是内存里的阶段枚举。
 //!
-//! ## 一表一行序（`D-222` 裁决 5）
+//! ## 一表一行序（`D-292`）
+//!
+//! 列在 `phase` / `anchor` 两格：环按 `(phase, anchor, name, key)` 取最小，同一阶段内
+//! 做不动点。阶段是 D-292 的九段，锚点保留旧全局序的读数：
 //!
 //! ```text
-//! 0  authorize-tool─ 授权级联：一笔工具请求先判「放行 / 拒绝」
-//! 10 classify       ── 轮首判决（本幕 round=0 且有发言）
-//! 30 compress      ── 自动压缩（开关开着且本幕还没压过）
-//! 40 recall        ── 记忆 / 任务段（有持久事实源且本幕还没召回）
-//! 50 skill.recall  ── 技能判定（能力包的行：过闸 / 作答 / 落观测，D-262）
-//! 52 prepare-turn  ── 接缝：轮首那几行跑完、任何请求之前的一次性装配
-//! 53 report        ── 中途汇报（静默到期 ∧ 配额未满 ∧ 停在已关闭的批次边界）
-//! 55 close-turn ── 收束：本幕最近一次模型应答没有工具调用
-//! 60 execute       ── 执行决策：本幕未收束且手上没有开着的工具批 ⇒ 宣布一次模型往返
-//! 66 dispatch-model─ 端口派发：模型往返（在轮内发起）
-//! 67 open-tools ── 创建：模型响应的 `calls` 集合展开成 N 笔工具调用（D-117）
-//! 68 dispatch-tools─ 端口派发：工具批次里已放行的单次调用（只交出去，出口 `sent`）
-//! 69 deny-tools ── 拒绝收尾：被拒的那几笔按原因落 `failed`（b）
-//! 71 await-model   ── 等应答（模型端口）
-//! 72 await-tools   ── 等应答（工具端口）
+//! phase 0  入站授权   0  authorize-tool：一笔工具请求先判「放行 / 拒绝」
+//! phase 1  轮首判决  10  classify / 30 compress / 40 recall / 45-47 notes / 50 skill
+//! phase 2  装配      52  prepare-turn：轮首那几行跑完、任何请求之前的一次性装配
+//! phase 3  报告      53  report：静默到期 ∧ 配额未满 ∧ 停在已关闭的批次边界
+//! phase 4  收束      55  close-turn / 56 continue-turn
+//! phase 5  模型派发  60  announce-model / 66 dispatch-model
+//! phase 6  工具派发  67  open-tools / 68 dispatch-tools / 69 deny-tools
+//! phase 7  等待      71  await-model / 72  await-tools
+//! phase 8  归宿      200+ artifact.added 等
 //! ```
 //!
 //! `await-*` 与它的 `dispatch-*` 成对（`D-222` 订正 2 / `D-124` 订正 1）：派出与收应答
 //! 分处两个环步，两个动作之间那一圈「已派出、未收清」就是 `waiting` 视图读的形状。
 //!
-//! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。`prio` 是跨行
-//! 可比的**全局**序，不是格内序（判据 10）。轮首那几行、批次边界那一行与轮内各行
-//! 在同一张表上竞争，同处一个 `loop`——`prio` 因此是唯一的先后（`D-222` 裁决 5）。
+//! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。`phase` 是跨行
+//! 可比的裁决段、`anchor` 是段内次序；两者仍是全序，所以「跨行竞争有全序」原样成立。
+//! 跨阶段不设闸门：后阶段写出、前阶段读到是合法的反向依赖，环每圈重新取最小，回访
+//! 语义不变（`D-296`）。
 //!
 //! ## 汇报的轮次前提也在表里
 //!
@@ -245,7 +243,7 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
 /// 它们的写点在批尾。
 ///
 /// 批次边界汇报（`chat.assistant.reported`）不在名单上：它的写点归 [`ACTOR_REPORT`]，
-/// 因为那一行由同一个环按 `prio` 选中、在自己的动作窗口里落格——名单与写点因此一一对上。
+/// 因为那一行由同一个环按 `(phase, anchor)` 选中、在自己的动作窗口里落格——名单与写点因此一一对上。
 ///
 /// `deny-tools` 为什么也归它：被拒的那几笔的终局（`failed{why}`）由批尾关账写出，
 /// 而批尾就在这一半。派发半在那条路上什么都不落（`begin_calls` 只写放行的那些），
@@ -534,7 +532,7 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
 /// 里，它照旧由外层代码直问 [`owes`]（调度旁路，归零对象），而 [`owes`] 读的是**整张**
 /// 冻结表，两者互不影响。
 ///
-/// [`super::turn_exec::drive`] 因此拿的是整张 [`ACTORS`]：`prio` 是全局序，一个循环
+/// [`super::turn_exec::drive`] 因此拿的是整张 [`ACTORS`]：`phase` / `anchor` 是跨行序，一个循环
 /// 看得见全部行才是它的目的（`D-222` 裁决 5）。
 ///
 /// 过滤器本身不再承担「静默丢弃」：冻结表里每一条 `by` 都由 [`dispatch_gaps`] 在装载期
@@ -731,7 +729,7 @@ pub(crate) static PORTS: &[PortDecl] = &[
     },
 ];
 
-/// 内建行表。注册顺序**不参与**裁决——同 `prio` 由 `(name, key)` 决出。
+/// 内建行表。注册顺序**不参与**裁决——同 `(phase, anchor)` 由 `(name, key)` 决出。
 pub(crate) static ROWS: &[Decl] = &[
     // ── 授权级联 ────────────────────────────────
     //
@@ -769,7 +767,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "authorize-tool",
         // 的口径：判在派发之前。0 是这一环里最早的一档。
-        prio: 0,
+        phase: 0,
+        anchor: 0,
         // 判定是纯比较（风险档 vs 会话阈值），不调模型（b 接线）。
         by: Some(AUTHORIZER),
         tier: LatencyTier::Fast,
@@ -796,8 +795,9 @@ pub(crate) static ROWS: &[Decl] = &[
     // ── 轮首判决 ─────────────────────────────────────────────────────────
     Decl {
         name: "policy.classify",
-        prio: 10,
-        // `prio` 10 让它排在压缩 / 召回之前——它落的 `result` 正是那两条的
+        phase: 1,
+        anchor: 10,
+        // `anchor` 10 让它排在压缩 / 召回之前——它落的 `result` 正是那两条的
         // 前件（[D-162] 裁决 1）。
         by: Some(CLASSIFY),
         // 判决可能落到模型，但不生成：快速档（与旧行 `effects.tier` 同值）。
@@ -823,7 +823,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // ── 自动语义压缩 ─────────────────────────────────────────────────────
     Decl {
         name: "policy.compress",
-        prio: 30,
+        phase: 1,
+        anchor: 30,
         // 水位要的那份请求级开销寄存进本轮状态，产线本身不动；它的入格归接缝行。
         by: Some(COMPRESS),
         // 语义压缩调模型：深度档。
@@ -851,7 +852,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // ── 轮首准备（记忆 / 技能 / 任务段）─────────────────────────────────
     Decl {
         name: "policy.recall",
-        prio: 40,
+        phase: 1,
+        anchor: 40,
         // 出口那一格由执行体自己落——它不交回产出，但「已做」这件事照旧只写在日志上。
         by: Some(RECALL),
         // 事实投影的纯读 + 技能路由，不调模型。
@@ -882,12 +884,13 @@ pub(crate) static ROWS: &[Decl] = &[
     // 它们又不是四次模型往返，所以也不必拆成四行。一行 = 一笔债，出口 = 那一格
     // `turn.stage{stage:"inputs"}`（它同时翻转 `turn_head.prepared`）。
     //
-    // `prio` 52：轮首四行之后（它们的产物是它的前件）、收束与执行之前（还没定档、
+    // `anchor` 52：轮首四行之后（它们的产物是它的前件）、收束与执行之前（还没定档、
     // 没渲染 prompt 的幕不欠一次往返）。轮内各行因此在 `owes` 上都带 `prepared: true`
     // ——让「接缝没跑」在事实面上是**开着的债**，而不是一个靠行序维持的假设。
     Decl {
         name: "prepare-turn",
-        prio: 52,
+        phase: 2,
+        anchor: 52,
         by: Some(SEAM),
         // 装配不调模型：快速档。
         tier: LatencyTier::Fast,
@@ -909,12 +912,13 @@ pub(crate) static ROWS: &[Decl] = &[
     // 一段静默 = 一个 `(turn, anchor)`。汇报事实落格后静默锚前移，下一段静默
     // 是另一笔账——配额之内可以汇报多次，逐段关账而不是「一说就全关」。
     //
-    // `prio` 53 把它排在接缝之后、收束之前：`report_due` 的 `at_boundary` 要求最近
+    // `anchor` 53 把它排在接缝之后、收束之前：`report_due` 的 `at_boundary` 要求最近
     // 一条模型应答是一批**已关闭**的工具调用，那正是「下一笔债是再跑一次往返」的
-    // 时刻——先报一句，再出发。它与其余行同处一个循环，先后只由 `prio` 说。
+    // 时刻——先报一句，再出发。它与其余行同处一个循环，先后只由 `(phase, anchor)` 说。
     Decl {
         name: "policy.report",
-        prio: 53,
+        phase: 3,
+        anchor: 53,
         by: Some(REPORT),
         // 模板产线，零模型往返。
         tier: LatencyTier::Reflex,
@@ -959,7 +963,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // 不同族，兜底格因此进得了 `decl.writes`（「声明不了的写出」没有豁免槽位，D-238）。
     Decl {
         name: "close-turn",
-        prio: 55,
+        phase: 4,
+        anchor: 55,
         by: Some(CLOSE),
         // 入格不调模型：反射档（比执行体的 `mode` 更慢就装载红，第 6 条的 mode 闸门）。
         tier: LatencyTier::Reflex,
@@ -993,12 +998,13 @@ pub(crate) static ROWS: &[Decl] = &[
     // （按 `(turn, round)` 关账），也是**新幕的锚**（判据 12：一幕一个锚）——债还清的
     // 那一刻即新幕的时刻，`now` 因此跟着它走，不必请墙钟。
     //
-    // `prio` 56：收束（55）之后、宣布下一次往返（60）之前。收束格一落，本行与
+    // `anchor` 56：收束（55）之后、宣布下一次往返（60）之前。收束格一落，本行与
     // `announce-model` 在同一个切片上竞争，「再开一幕」必须先于「在新幕之外再发一次
     // 请求」——否则续幕会在旧幕的请求视图上跑。
     Decl {
         name: "continue-turn",
-        prio: 56,
+        phase: 4,
+        anchor: 56,
         by: Some(CONTINUE),
         // 落一格阶段事实，不调模型：快速档。
         tier: LatencyTier::Fast,
@@ -1042,7 +1048,8 @@ pub(crate) static ROWS: &[Decl] = &[
     //   这条前件替代了「按优先级让 close 先跑」的时序约定。
     Decl {
         name: "announce-model",
-        prio: 60,
+        phase: 5,
+        anchor: 60,
         by: Some(EXECUTE),
         tier: LatencyTier::Deep,
         expand: None,
@@ -1088,7 +1095,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // 与「跑一次往返」不是同一件事——共名会让动作只能按行名分支。
     Decl {
         name: "dispatch-model",
-        prio: 66,
+        phase: 5,
+        anchor: 66,
         by: Some(RELAY),
         // 派发本身不调模型（模型在 [`ACTOR_RELAY`] 的动作里，协议格仍由引擎写）。
         tier: LatencyTier::Fast,
@@ -1118,7 +1126,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // （`tool-{turn}-d{drive}-{模型调用 id}`），与随后的 `request(port=tool)` 同 id。
     Decl {
         name: "open-tools",
-        prio: 67,
+        phase: 6,
+        anchor: 67,
         // 创建动作（b）：逐条落 `request(port=tool)`，不调模型、不跑工具。
         by: Some(OPENER),
         tier: LatencyTier::Fast,
@@ -1150,7 +1159,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // ——那条路上没有可等的往返，就地判死；留着它才不会让这一行永远开账。
     Decl {
         name: "dispatch-tools",
-        prio: 68,
+        phase: 6,
+        anchor: 68,
         // 派发动作（b）：放行的落 `sent` 交给执行层。批尾关账归 `waiter-tools`。
         by: Some(COURIER),
         // 派发本身不调工具（执行在批次里）。
@@ -1189,7 +1199,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // 的收束格拒绝（`deny()` 写的那一条）按 eq 取不到实例，不会误开一笔工具债。
     Decl {
         name: "deny-tools",
-        prio: 69,
+        phase: 6,
+        anchor: 69,
         by: Some(WAITER_TOOLS),
         tier: LatencyTier::Fast,
         expand: None,
@@ -1214,7 +1225,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // 都是同一次尝试的事实。
     Decl {
         name: "await-model",
-        prio: 71,
+        phase: 7,
+        anchor: 71,
         by: Some(WAITER),
         tier: LatencyTier::Deep,
         expand: None,
@@ -1253,7 +1265,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // 中间那一圈「`sent` 有、终局无」在**正常跑**里读得到。
     Decl {
         name: "await-tools",
-        prio: 72,
+        phase: 7,
+        anchor: 72,
         by: Some(WAITER_TOOLS),
         // 等的是工具执行层，不调模型：这一行的时延档与 `dispatch-tools` 同档
         // （`tier` 判的是「这一行要不要模型句柄」，不是「会占多久」）。
@@ -1298,7 +1311,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // （`D-158` 的归零对象）——不是给它派活，是别把它归错类。
     Decl {
         name: EVENT_ARTIFACT_ADDED,
-        prio: 200,
+        phase: 8,
+        anchor: 200,
         by: Some(WAITER_TOOLS),
         tier: LatencyTier::Reflex,
         expand: None,
@@ -1365,7 +1379,7 @@ fn submitted_declarations() -> PluginDeclarations<'static> {
 /// 真表装载，并把 §3.4 第 4 条的报告打出来。
 ///
 /// 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，谁先派发归 `drive` 的
-/// `(prio, name, key)`。名单随表冻结（[`Frozen::overlaps`]），这里只负责让人看见。
+/// `(phase, anchor, name, key)`。名单随表冻结（[`Frozen::overlaps`]），这里只负责让人看见。
 fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
     // 装配期冻结表（DE-024 D-198）：本插件经 `submit_declarations!` 交表，兄弟插件
     // 的事实 / 事件也在这张表里。只剩「链接期提交没生效」这一种情况会得到缺行表
@@ -1422,7 +1436,7 @@ fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
     if !overlapping.is_empty() {
         symbio_plugin_api::plugin_info!(
             "session",
-            "[Loop] 相交行对 {} 组（可能同时开账，裁决归 prio）：{}",
+            "[Loop] 相交行对 {} 组（可能同时开账，裁决归 phase/anchor）：{}",
             overlapping.len(),
             overlapping
                 .iter()

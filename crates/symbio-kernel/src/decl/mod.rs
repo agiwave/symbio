@@ -605,7 +605,7 @@ impl Frozen {
         &self.actors
     }
 
-    /// 行表（注册顺序不参与裁决，`(prio, name, key)` 才参与）。
+    /// 行表（注册顺序不参与裁决，`(phase, anchor, name, key)` 才参与）。
     pub fn rows(&self) -> &[Decl] {
         &self.rows
     }

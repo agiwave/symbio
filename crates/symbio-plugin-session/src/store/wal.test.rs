@@ -1320,7 +1320,8 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
             }]));
             out.push(Decl {
                 name,
-                prio: 99,
+                phase: 8,
+                anchor: 99,
                 by: None,
                 tier: LatencyTier::Reflex,
                 expand: None,
@@ -1501,7 +1502,8 @@ fn a_domain_cell_is_gated_like_any_other_declared_cell() {
             }]));
             out.push(Decl {
                 name,
-                prio: 99,
+                phase: 8,
+                anchor: 99,
                 by: None,
                 tier: LatencyTier::Reflex,
                 expand: None,
