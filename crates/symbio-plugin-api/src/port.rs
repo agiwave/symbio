@@ -165,7 +165,11 @@ impl fmt::Debug for PortReading {
             Self::Absent => write!(f, "Absent"),
             Self::Ready(row) => write!(f, "Ready({})", row.name()),
             Self::Duplicate { kept, dropped } => {
-                write!(f, "Duplicate {{ kept: {}, dropped: {dropped:?} }}", kept.name())
+                write!(
+                    f,
+                    "Duplicate {{ kept: {}, dropped: {dropped:?} }}",
+                    kept.name()
+                )
             }
         }
     }

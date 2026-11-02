@@ -160,9 +160,7 @@ fn malformed_payloads_are_skipped() {
 /// 超出上限只截**输出长度**，保留最新的记录。
 #[test]
 fn the_output_is_capped_but_keeps_the_latest() {
-    let events: Vec<Event> = (0..60)
-        .map(|i| recorded(&format!("k{i}"), "v"))
-        .collect();
+    let events: Vec<Event> = (0..60).map(|i| recorded(&format!("k{i}"), "v")).collect();
     let v = idempotency_ledger(&events, i64::MAX);
     assert_eq!(v["count"], LIMIT);
     assert_eq!(v["entries"][0]["key"], "k10", "留下的是最后 50 条");

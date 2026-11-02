@@ -82,7 +82,10 @@ pub(crate) const ROWS: &[Decl] = &[Decl {
 pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
     name: IDEMPOTENCY_LEDGER,
     ver: 1,
-    reads: &[(IDEMPOTENCY_RECORDED, "key"), (IDEMPOTENCY_RECORDED, "value")],
+    reads: &[
+        (IDEMPOTENCY_RECORDED, "key"),
+        (IDEMPOTENCY_RECORDED, "value"),
+    ],
     // 读出口径不是收束判据：本视图不替任何事实关门。
     evidence: &[],
     cost: COST,

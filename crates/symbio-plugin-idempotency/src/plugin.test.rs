@@ -49,7 +49,10 @@ fn ctx() -> (Arc<dyn PluginInvokeRequest>, Arc<FakeRegistry>) {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     let visitor = Arc::new(FakeRegistry::new());
-    ctx.set(CAPABILITY_VISITOR, Arc::clone(&visitor) as Arc<dyn Registry>);
+    ctx.set(
+        CAPABILITY_VISITOR,
+        Arc::clone(&visitor) as Arc<dyn Registry>,
+    );
     (ctx, visitor)
 }
 
@@ -97,7 +100,9 @@ async fn traverse_rejects_unknown_path() {
 /// 没有 VDFS 挂载点：本插件不带配置，也就不该在 VDFS 上多占一个目录。
 #[tokio::test]
 async fn has_no_vdfs_mount() {
-    assert!(Arc::new(IdempotencyPlugin::new()).get_vfs_provider().is_none());
+    assert!(Arc::new(IdempotencyPlugin::new())
+        .get_vfs_provider()
+        .is_none());
 }
 
 /// 元数据里 id 必须等于目录名（E-001 的现场形态）；`name` 是挂载点标题，不是 id。

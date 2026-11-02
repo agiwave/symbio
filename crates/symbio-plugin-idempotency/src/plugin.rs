@@ -35,10 +35,9 @@ impl IdempotencyPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_ID_IDEMPOTENCY, PLUGIN_TITLE).with_description(
-            "幂等台账：同一个键在同一会话里只记一次，重复的调用在执行前被拒。",
-        )
-        .with_version("0.1.0")
+        PluginMeta::new(PLUGIN_ID_IDEMPOTENCY, PLUGIN_TITLE)
+            .with_description("幂等台账：同一个键在同一会话里只记一次，重复的调用在执行前被拒。")
+            .with_version("0.1.0")
     }
 }
 
@@ -87,7 +86,11 @@ impl Plugin for IdempotencyPlugin {
     }
 }
 
-symbio_plugin_api::submit_object_creator!(PLUGIN_ID_IDEMPOTENCY, IdempotencyPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(
+    PLUGIN_ID_IDEMPOTENCY,
+    IdempotencyPlugin::build,
+    dyn Plugin
+);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

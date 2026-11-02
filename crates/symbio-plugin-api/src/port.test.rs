@@ -180,14 +180,16 @@ async fn duplicate_provider_is_loud() {
     }
 
     // 装载期判红：错误桶里必须有一条指名道姓的错误。
-    let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(crate::PluginSimpleRequest::new(None, None));
-    ctx.set(CAPABILITY_VISITOR, Arc::new(FakeRegistry {
-        rows: RwLock::new(vec![
-            Arc::new(port_row(&provider(ports::MODEL, "fixture-a")).expect("造行")),
-            Arc::new(port_row(&provider(ports::MODEL, "fixture-b")).expect("造行")),
-        ]),
-    }) as Arc<dyn Registry>);
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(crate::PluginSimpleRequest::new(None, None));
+    ctx.set(
+        CAPABILITY_VISITOR,
+        Arc::new(FakeRegistry {
+            rows: RwLock::new(vec![
+                Arc::new(port_row(&provider(ports::MODEL, "fixture-a")).expect("造行")),
+                Arc::new(port_row(&provider(ports::MODEL, "fixture-b")).expect("造行")),
+            ]),
+        }) as Arc<dyn Registry>,
+    );
     capability_port_check(&ctx).await;
     let errors = capability_take_errors(&ctx).await;
     assert_eq!(errors.len(), 1, "判重必须落一条错误（不静默顶掉）");
@@ -201,13 +203,15 @@ async fn duplicate_provider_is_loud() {
 /// 单 provider 时检查不落错误（缺席与就绪都不是错误）。
 #[tokio::test]
 async fn check_passes_when_no_duplicate() {
-    let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(crate::PluginSimpleRequest::new(None, None));
-    ctx.set(CAPABILITY_VISITOR, Arc::new(FakeRegistry {
-        rows: RwLock::new(vec![
-            Arc::new(port_row(&provider(ports::MODEL, "fixture-a")).expect("造行")),
-        ]),
-    }) as Arc<dyn Registry>);
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(crate::PluginSimpleRequest::new(None, None));
+    ctx.set(
+        CAPABILITY_VISITOR,
+        Arc::new(FakeRegistry {
+            rows: RwLock::new(vec![Arc::new(
+                port_row(&provider(ports::MODEL, "fixture-a")).expect("造行"),
+            )]),
+        }) as Arc<dyn Registry>,
+    );
     capability_port_check(&ctx).await;
     assert!(
         capability_take_errors(&ctx).await.is_empty(),

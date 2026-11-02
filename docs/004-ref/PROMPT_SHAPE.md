@@ -11,9 +11,9 @@
 
 | 请求 | 消息数 | 消息序列（role + 结构载体） | system 小节标签序列 | 工具数 |
 |---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】【能力目录】  | 24 |
-| req1 | 5 | system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】【能力目录】     | 24 |
-| req2 | 5 | system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】【能力目录】     | 24 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】【能力目录】  | 25 |
+| req1 | 5 | system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】【能力目录】     | 25 |
+| req2 | 5 | system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】【能力目录】     | 25 |
 
 ## 规模观测（**不进判据**：同一列里既有装配代码的字，也有负载的字）
 
@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】【能力目录】  | 24 | 1171 | 24108 | 25495 |
-| req1 | 5 | system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】【能力目录】     | 24 | 1227 | 24108 | 25823 |
-| req2 | 5 | system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】【能力目录】     | 24 | 1694 | 24108 | 26123 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】【能力目录】  | 25 | 1190 | 24644 | 26051 |
+| req1 | 5 | system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】【能力目录】     | 25 | 1246 | 24644 | 26379 |
+| req2 | 5 | system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】【能力目录】     | 25 | 1713 | 24644 | 26679 |
 
 ## 基线（判据本体）
 
@@ -68,18 +68,19 @@
           },
           {
             "tag": "能力目录",
-            "chars": 401
+            "chars": 420
           }
         ],
         []
       ],
       "tools": {
-        "count": 24,
+        "count": 25,
         "names": [
           "agent_run",
           "causal_assert",
           "explain_record",
           "heartbeat",
+          "idempotent_record",
           "<shell>",
           "content_search",
           "todo_write",
@@ -101,7 +102,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 24108
+        "schema_bytes": 24644
       }
     },
     {
@@ -157,7 +158,7 @@
           },
           {
             "tag": "能力目录",
-            "chars": 401
+            "chars": 420
           }
         ],
         [],
@@ -166,12 +167,13 @@
         []
       ],
       "tools": {
-        "count": 24,
+        "count": 25,
         "names": [
           "agent_run",
           "causal_assert",
           "explain_record",
           "heartbeat",
+          "idempotent_record",
           "<shell>",
           "content_search",
           "todo_write",
@@ -193,7 +195,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 24108
+        "schema_bytes": 24644
       }
     },
     {
@@ -253,7 +255,7 @@
           },
           {
             "tag": "能力目录",
-            "chars": 401
+            "chars": 420
           }
         ],
         [],
@@ -262,12 +264,13 @@
         []
       ],
       "tools": {
-        "count": 24,
+        "count": 25,
         "names": [
           "agent_run",
           "causal_assert",
           "explain_record",
           "heartbeat",
+          "idempotent_record",
           "<shell>",
           "content_search",
           "todo_write",
@@ -289,7 +292,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 24108
+        "schema_bytes": 24644
       }
     }
   ]
