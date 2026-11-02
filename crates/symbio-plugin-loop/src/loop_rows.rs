@@ -1744,8 +1744,16 @@ pub(crate) fn next(
     // 写入名单的声明位：`plugin_row` 的每一行由它自己的实现声明，其余执行体是
     // `ActorDecl.writes`。派发器对账用的始终是「这一笔债的执行者声明写什么」，
     // 而不是「这个名字平均写什么」——D-123 决策 2 的名单必须与动作同源。
+    //
+    // 效果面折成的事实（`turn.stage` / `message.added`）也要算进来（D-293）：它们
+    // 由宿主写口按能力交的草稿落格，但**写的那一笔是这一行的动作**——名单只认
+    // `writes()` 就会把一条合法的效果判成越界（行 `notes.index` 的卡片就是这个形状）。
     let writes = if by == PLUGIN_ROW {
-        symbio_plugin_api::rows::writes_of(debt.decl.name).unwrap_or(&[])
+        row_writes_with_effects()
+            .iter()
+            .find(|(row, _)| *row == debt.decl.name)
+            .map(|(_, writes)| *writes)
+            .unwrap_or(&[])
     } else {
         entry.decl.writes
     };

@@ -59,7 +59,11 @@ import {
   defineCase,
   providerConfig,
   PROVIDER_ID,
+  readSessionMessages,
+  readFileSyncSafe,
+  textOf,
 } from '../helpers.mjs';
+import { join } from 'node:path';
 
 const NOTE_TEXT = '周五交报告';
 /** provider 的开场白（`notes_context` 段的首行）——历史里不会出现这串字 */
@@ -301,6 +305,21 @@ export default defineCase(
           '行执行体从 artifact.added 的定稿参数里取出的正文应与原调用一致',
         );
 
+        // ── 第九面：行交出的对话面草稿真的变成转写里的一张卡（D-293）──────
+        // `notes.index` 交的是 `DialogDraft`（纯值），节点 id / 轮号由宿主盖；用户
+        // 看见的是转写里的一个节点，不是 WAL 里的一条草稿。重复那条便签被 `before`
+        // 拒、行根本没开，所以这张卡**恰好一张**。
+        const msgs = await readSessionMessages(api, 'e2e-t89');
+        assert(msgs, '跑过三轮 ⇒ 生产读出口应读回转写');
+        const cards = msgs.filter((m) => m.meta?.card?.kind === 'note');
+        assertEq(
+          cards.length,
+          1,
+          `只有一次成功索引会落一张卡（实际: ${JSON.stringify(cards.map((m) => m.meta?.card))}）`,
+        );
+        assertEq(textOf(cards[0]), `已记下：${NOTE_TEXT}`, '卡的正文字面');
+        assertEq(cards[0].meta.card.text, NOTE_TEXT, '卡的载荷带原文（纯值原样透传）');
+
         // ── 第八面：能力行借宿主一次模型往返，落下的洞察被同一读口读到 ─────
         // `notes.reflect` 读 `notes.indexed`、交一条提示；宿主调模型、落四格协议事实，
         // 回执交回 `parse`，落一条 `notes.insight`。`status = ok` 说明这次往返答成了；
@@ -372,6 +391,27 @@ export default defineCase(
         `停用 notes 后工具面不该含 notes_add（实际: ${tools.join(',')}）`,
       );
       assert(tools.length > 0, '停用 notes 只该拿掉它的工具，其余插件的能力应仍在');
+
+      // 效果面同样消失：停用侧既没有行（`notes.indexed`），也没有对话面上的卡。
+      // 这一格与启用侧的**同一份夹具**对照——两边只差一个装配位。
+      const offEvents = readFileSyncSafe(
+        join(offHd.homedir, 'session', 'e2e-t89-off', 'v2-events.wal'),
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      assert(
+        !offEvents.some((e) => e.kind === 'notes.indexed'),
+        `停用 notes 后不该有行执行体落格（实际 kinds: ${JSON.stringify(offEvents.map((e) => e.kind))}）`,
+      );
+      assert(
+        !offEvents.some(
+          (e) =>
+            e.kind === 'message.added' &&
+            e.payload?.messages?.[0]?.meta?.card?.kind === 'note',
+        ),
+        `停用 notes 后对话面不该出现便签卡（实际: ${JSON.stringify(offEvents.filter((e) => e.kind === 'message.added').map((e) => e.payload))}）`,
+      );
     } finally {
       offLlm.stop();
       cleanupHomedir(offHd);
