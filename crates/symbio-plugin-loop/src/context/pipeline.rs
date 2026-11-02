@@ -263,6 +263,7 @@ async fn compress_snapshot_inner(
     let root_id = llm_short_id();
     let summary = match send_compression_request(
         orchestrator,
+        ctx,
         &compression_prompt,
         &context.messages,
         &root_id,
@@ -325,6 +326,7 @@ async fn compress_snapshot_inner(
         // 与「这是一次压缩、重试是它的一部分」的观感一致。
         let retry = send_compression_request(
             orchestrator,
+            ctx,
             &compression_prompt,
             &context.messages,
             &llm_short_id(),
@@ -848,8 +850,10 @@ fn save_transcript_archive(messages: &[ChatNode], dir: &std::path::Path) -> Opti
     path.to_str().map(|s| s.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_compression_request(
     orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     system_prompt: &str,
     messages: &[ChatNode],
     root_id: &str,
@@ -902,14 +906,18 @@ async fn send_compression_request(
         // 有入账面 ⇒ 这一次模型往返走端口 `model`（三格带 `via = "compress/summary"`，
         // D-122 决策 2）。协议事实由端口层落，插件侧只交出「这次往返长什么样」。
         Some(c) => c
-            .summary(|| run_compression_llm(orchestrator, system_prompt, messages, root_id, &env))
+            .summary(|| {
+                run_compression_llm(orchestrator, ctx, system_prompt, messages, root_id, &env)
+            })
             .await
             .map_err(|e| match e {
                 super::super::port::DispatchError::Actor(err) => err,
                 other => PluginError::InternalError(format!("压缩摘要的端口记账失败：{other}")),
             }),
         // 轮外路径（用户主动重试）：没有轮可挂 ⇒ 本次不入账。
-        None => run_compression_llm(orchestrator, system_prompt, messages, root_id, &env).await,
+        None => {
+            run_compression_llm(orchestrator, ctx, system_prompt, messages, root_id, &env).await
+        }
     };
 
     match &result {
@@ -987,6 +995,7 @@ fn compression_delta_gate(node_id: &str) -> impl Fn(&mut ChatNode) -> bool + Sen
 /// 场景静默，有前端场景走过滤桥（摘要增量改道到压缩节点，骨架帧仍被吞）。
 async fn run_compression_llm(
     orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     system_prompt: &str,
     messages: &[ChatNode],
     root_id: &str,
@@ -994,10 +1003,19 @@ async fn run_compression_llm(
 ) -> Result<ChatNode, PluginError> {
     let abort = env.abort();
 
-    // 压缩路径与对话轮次共用同一模型契约：provider.round_trip（tools 为空）。
-    // 出口静默、中止共享；协议细节（请求构造 / 重试 / SSE 解析）由 model 插件实现承担。
-    let out = orchestrator
-        .provider
+    // 压缩路径与对话轮次共用同一模型契约：端口 `model` 的原始模型面（tools 为空）。
+    // 模型面只按端口名取（D-298）；缺席按内部错误报出（生产里 session 在进环前
+    // 已保证生效模型，压缩与主轮共用那份保证）。出口静默、中止共享；协议细节
+    // （请求构造 / 重试 / SSE 解析）由 model 插件实现承担。
+    let provider = super::super::port::model_port(ctx)
+        .await
+        .and_then(|port| port.model())
+        .ok_or_else(|| {
+            PluginError::InternalError(
+                "`port.model` 缺席：没有可用的模型提供者（压缩摘要无法发出）".into(),
+            )
+        })?;
+    let out = provider
         // internal-model-allow IM-001: 压缩摘要是内部请求（tools 空 / 出口按前端场景静默或过滤桥），不是对话轮次；档位归属另裁 A/B
         .round_trip(system_prompt, messages, &[], root_id, env)
         .await?;

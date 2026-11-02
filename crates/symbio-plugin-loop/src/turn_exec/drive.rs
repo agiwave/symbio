@@ -613,7 +613,6 @@ async fn open_stage(
 
     let (assembled, emitter) = super::assemble_turn(super::ExecTurn {
         session: &context.session,
-        provider: orchestrator.provider.clone(),
         parent: orchestrator.parent.clone(),
         ctx: ctx.clone(),
         system_prompt: &reads.system_prompt,

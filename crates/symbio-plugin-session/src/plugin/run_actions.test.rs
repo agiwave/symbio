@@ -20,11 +20,9 @@ const VERDICT: &str = "verdict.asserted";
 use super::*;
 use crate::paths;
 use symbio_kernel::actors::Scope;
-use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::event::{Entity, Event, Verb};
-use symbio_kernel::exec::{ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter};
-use symbio_kernel::llm::{ModelProvider, TurnOutput};
-use symbio_kernel::plugin::{PluginError, PluginInvokeRequest, PluginSimpleRequest};
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink, ExecTranscriptWriter};
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginSimpleRequest};
 use symbio_kernel::store::Store as _;
 use symbio_kernel::vdfs::{VdfsChange, VdfsChangeSink, VdfsProvider};
 use symbio_sdk::actors::EliminationDecider;
@@ -47,40 +45,6 @@ use async_trait::async_trait;
 use std::sync::{Arc, Mutex as StdMutex};
 
 const SID: &str = "sid";
-
-/// 动作面不调模型：实现体只要满足 trait（构造 `TurnDispatch` 需要实例）。
-struct NoopProvider;
-
-#[async_trait]
-impl ModelProvider for NoopProvider {
-    fn provider_id(&self) -> &str {
-        "run-actions-test"
-    }
-    fn api_protocol(&self) -> &str {
-        "openai_chat"
-    }
-    fn rate_limit_ms(&self) -> u64 {
-        0
-    }
-    fn max_context_tokens(&self) -> u32 {
-        8192
-    }
-    async fn effective_context_tokens(&self) -> u32 {
-        8192
-    }
-    async fn round_trip(
-        &self,
-        _system_prompt: &str,
-        _messages: &[cm::ChatNode],
-        _tools: &[CapabilityMeta],
-        _root_id: &str,
-        _env: &ExecEnv,
-    ) -> Result<TurnOutput, PluginError> {
-        Err(PluginError::InternalError(
-            "测试提供者不参与动作面".to_string(),
-        ))
-    }
-}
 
 struct NoopWriter;
 
@@ -153,7 +117,6 @@ fn dispatch_as(session_id: &str, persistent: bool, principal: &str) -> Arc<TurnD
         sink: ExecEventSink::silent(),
         writer: Arc::new(NoopWriter),
         abort: ExecAbortSignal::new(),
-        provider: Arc::new(NoopProvider),
         parent: None,
         context_limit: 8192,
     })

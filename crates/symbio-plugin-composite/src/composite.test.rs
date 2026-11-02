@@ -597,7 +597,7 @@ use symbio_plugin_api::chat_node as cm;
 use symbio_plugin_api::node_build::PresentationTree;
 use symbio_plugin_api::{
     chat_request, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter,
-    ModelProvider, Scope, TurnOutput, VdfsError,
+    LlmAdapter, ModelProvider, ProviderLlmAdapter, Scope, TurnOutput, VdfsError,
 };
 use symbio_sdk::turn::dispatch::{
     TurnDispatch, TurnReport, TurnSettings, TurnSpec, TurnStatus, LOOP_RUN_TURN, TURN_DISPATCH,
@@ -657,6 +657,38 @@ impl ExecTranscriptWriter for SilentWriter {
     async fn apply(&self, _message: cm::ChatNode) {}
 }
 
+/// `port.model` 的测试夹具：把可闸门假模型包成世界端口提供者（D-298）。生产里
+/// 这一行的真身是 model 插件的 traverse 注册；本用例直发 loop 起始地址、不过
+/// 会话编排，夹具在宿主 ctx 上装同一个形状。
+struct PortModel(Arc<dyn ModelProvider>);
+
+impl symbio_plugin_api::port::PortProvider for PortModel {
+    fn port(&self) -> &'static str {
+        symbio_plugin_api::ports::MODEL
+    }
+
+    fn provider_id(&self) -> &str {
+        self.0.provider_id()
+    }
+
+    fn llm_round_trip(
+        &self,
+        _preferred: Option<&str>,
+        system_prompt: &str,
+        abort: ExecAbortSignal,
+    ) -> Option<Arc<dyn LlmAdapter>> {
+        Some(Arc::new(ProviderLlmAdapter::for_turn(
+            self.0.clone(),
+            system_prompt,
+            abort,
+        )))
+    }
+
+    fn model(&self) -> Option<Arc<dyn ModelProvider>> {
+        Some(self.0.clone())
+    }
+}
+
 fn guard_turn_spec(sid: &str, root: &Path) -> TurnSpec {
     TurnSpec {
         session_id: sid.to_string(),
@@ -686,12 +718,7 @@ fn guard_turn_spec(sid: &str, root: &Path) -> TurnSpec {
     }
 }
 
-fn guard_dispatch(
-    sid: &str,
-    root: &Path,
-    provider: Arc<dyn ModelProvider>,
-    parent: Arc<dyn Plugin>,
-) -> Arc<TurnDispatch> {
+fn guard_dispatch(sid: &str, root: &Path, parent: Arc<dyn Plugin>) -> Arc<TurnDispatch> {
     Arc::new(TurnDispatch {
         spec: guard_turn_spec(sid, root),
         // 持久会话的判据是「有事实源」：驱动器不碰磁盘实现，只拿 core 的 Store 对象
@@ -700,7 +727,6 @@ fn guard_dispatch(
         sink: ExecEventSink::silent(),
         writer: Arc::new(SilentWriter),
         abort: ExecAbortSignal::new(),
-        provider,
         parent: Some(parent),
         context_limit: 8192,
     })
@@ -845,18 +871,24 @@ async fn an_inflight_turn_converges_after_loop_is_disabled() {
     let entered = Arc::new(tokio::sync::Semaphore::new(0));
     let release = Arc::new(tokio::sync::Semaphore::new(0));
     let parent: Arc<dyn Plugin> = composite.clone();
-    let dispatch = guard_dispatch(
-        sid,
-        &root,
-        Arc::new(GatedProvider {
-            entered: Arc::clone(&entered),
-            release: Arc::clone(&release),
-        }),
-        parent,
-    );
+    let dispatch = guard_dispatch(sid, &root, parent);
 
     // 宿主 ctx：本轮交付包 + 请求体（生产由编排入口设置，落到 fork 后的 chat_ctx）。
     let host_ctx = Arc::new(PluginSimpleRequest::new(None, None));
+    // `port.model` 的提供者行（D-298）：loop 按 `port.model` 从能力表现取——本用例
+    // 不过会话编排，夹具自己把可闸门假模型装成端口行挂上（生产是 model 插件
+    // traverse 注册、session 收集装上）。
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+    let port = Arc::new(PortModel(Arc::new(GatedProvider {
+        entered: Arc::clone(&entered),
+        release: Arc::clone(&release),
+    })));
+    if let Some(row) =
+        symbio_plugin_api::port::port_row(&(port as Arc<dyn symbio_plugin_api::port::PortProvider>))
+    {
+        visitor.put(row).await;
+    }
+    host_ctx.set(CAPABILITY_VISITOR, visitor);
     host_ctx.set(TURN_DISPATCH, dispatch);
     host_ctx
         .set_payload(chat_request::Request {

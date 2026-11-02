@@ -1049,6 +1049,66 @@ impl Compress {
     }
 }
 
+/// 日志通道（与 `derived_facts` 等同一形状）：id 走 `symbio_deploy` 常量，
+/// 不在源码里写第二份字面量。
+const LOG_CHANNEL: &str = symbio_deploy::PLUGIN_ID_SESSION;
+
+/// 取 model 端口的提供者（D-298）：能力表按**端口名**读——provider 怎么解析、
+/// 适配器怎么构造，都是提供者一侧的私事（`llm_round_trip` / `model`）。
+///
+/// 缺席（0 行，没装提供者插件）、判重（>1 行）、闭集外、载荷下转型失败——四种
+/// 读数都**出声并返回 `None`**：调用方必须响亮失败（[`abort_round_trip`] 落失败
+/// 事实并中止那次往返），不许静默回退、不许按「判不出来」继续。
+pub(crate) async fn model_port(
+    ctx: &Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
+) -> Option<Arc<dyn symbio_plugin_api::port::PortProvider>> {
+    use symbio_plugin_api::port::{capability_port_of, PortPayload, PortReading};
+    use symbio_plugin_api::ports;
+    use symbio_plugin_api::{PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR};
+
+    let Some(visitor): Option<Arc<dyn Registry>> = ctx.get(CAPABILITY_VISITOR) else {
+        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] ctx 没有能力表，`port.model` 读不到");
+        return None;
+    };
+    let reading = capability_port_of(&*visitor, ports::MODEL).await;
+    let row = match &reading {
+        PortReading::Ready(row) => row.clone(),
+        other => {
+            symbio_plugin_api::plugin_warn!(
+                LOG_CHANNEL,
+                "[Loop] `port.model` 不可用（{other:?}）——调用方将响亮失败"
+            );
+            return None;
+        }
+    };
+    let Some(payload) = row.payload::<PortPayload>() else {
+        symbio_plugin_api::plugin_warn!(LOG_CHANNEL, "[Loop] `port.model` 行载荷不是端口载荷");
+        return None;
+    };
+    Some(payload.provider().clone())
+}
+
+/// 端口缺席时的响亮失败（D-298）：**欠了、立刻失败**——`request` 与 `failed`
+/// 两格同落（账上说得清「这次往返想要、没打成」），`why` 进失败载荷。
+///
+/// 与 `escalate_unclassified` 的静默零格路径互斥：世界端口缺席不是「判不出来」，
+/// 是装配缺了提供者——继续转只会把缺失往后推。落格失败只记日志（调用方拿
+/// `Result` 自决中止形态）。
+pub(crate) fn abort_round_trip<S>(store: &S, round: Round<'_>, why: &str) -> Result<(), AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let call = Call::with_via(symbio_plugin_api::ports::MODEL, round.id(), 1, round.via);
+    announce_with(
+        store,
+        &call,
+        round.turn,
+        round.produced_by,
+        serde_json::Value::Null,
+    )?;
+    failed_with(store, &call, round.turn, round.produced_by, why)
+}
+
 /// 判决往返的派发点（D-122 决策 2 / 4）——住在端口层，因为这一段的**全部**
 /// 内容就是「一次模型往返怎么入账」。
 pub(crate) mod classify;

@@ -89,7 +89,6 @@ async fn run_turn(
     ));
     let settings = &dispatch.spec.settings;
     let orchestrator = Arc::new(ChatOrchestrator {
-        provider: dispatch.provider.clone(),
         parent: dispatch.parent.clone(),
         context_limit: dispatch.context_limit,
         session,

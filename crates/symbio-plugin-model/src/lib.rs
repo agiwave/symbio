@@ -11,6 +11,8 @@
 //!   + `resolve_protocol_id` 与 `MODEL_PROTOCOL_*` 注册常量
 //! - `bound_provider`:  `BoundProvider`——绑定配置与协议实现，实现 core 纯
 //!   `ModelProvider` trait（session 的唯一模型契约）
+//! - `port`:            `ModelPort`——`port.model` 的世界提供者（D-298）：解析与
+//!   适配器构造收在本插件，环只按端口名取
 //! - `http`:            HTTP 重试机器（客户端单例 + 带中止的 POST，五态 `PostResult`）
 //! - `stream`:          SSE 流循环（字节流 → `TurnOutput`，流式子节点实时下发）
 //! - `tool_accumulator`: 工具调用增量累积（分片 → 完整调用的状态机，收口为 `TurnOutput.tool_calls`）
@@ -28,6 +30,7 @@ mod http;
 pub mod message_builder;
 mod model_providers;
 mod plugin;
+mod port;
 mod protocols;
 mod stream;
 mod tool_accumulator;

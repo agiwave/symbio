@@ -234,11 +234,10 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 ///    （`dialog_node`，`exclude_from_context = false`），由 `finish_turn` 落库 ⇒ 这里用
 ///    [`SilentDeltas`]；再发一次就是同一条答话重复上屏。
 ///
-/// ## `llm` / `tok` 是 `drive` 的端口，不是本路的依赖
+/// ## 模型面不是本路的依赖
 ///
-/// 短路发生在**用到它们之前**（`turn_exec::drive` 的答话守卫）——这一轮一次模型
-/// 往返都不发。仍然照签名传，是因为「工具轮入口」只有那一个：另开一个入口就得把
-/// 「用户格 + 收束格」的落格逻辑写第二遍，那才是真正的重复。
+/// 短路发生在**用到它之前**（`turn_exec::drive` 的答话守卫）——这一轮一次模型
+/// 往返都不发，因此不取 `port.model`。
 ///
 /// 形参宽（`consolidation` 与三个 seq 都是这一轮的**事实端口**）：与
 /// [`super::open_turn`] 同一条口径——「一轮的全部输入」本就是
@@ -247,7 +246,6 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 pub(crate) async fn execute_final_reply_turn(
     session: &LoopSession,
     ctx: &Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
-    _provider: Arc<dyn ModelProvider>,
     abort: ExecAbortSignal,
     // 轮号与溯源锚由编排层在判决之前定下：答话轮同样先落用户格，
     // 这里只收三个 seq（`drive_seq` 供派发格幂等键）。
@@ -323,8 +321,6 @@ pub(crate) async fn execute_final_reply_turn(
     )
     .map_err(|e| PluginError::InternalError(format!("派发档落格失败：{e:?}")))?;
     // 本入口不开环 ⇒ 不需要模型端口与令牌（那两者只由 [`super::drive`] 的动作读）。
-    // `provider` 仍照签名收下（`_provider`）：答话轮的调用点与工具轮同形，删参数只会
-    // 让两侧漂。
     let input = TurnInput {
         turn: turn_no,
         user_seq,

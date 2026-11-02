@@ -21,6 +21,7 @@ use symbio_kernel::decl::Frozen;
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::exec::ExecEnv;
 use symbio_kernel::exec::ExecTranscriptWriter;
+use symbio_kernel::llm::ModelProvider;
 use symbio_kernel::plugin::PluginSimpleRequest;
 use symbio_kernel::plugin::{PluginError, PluginInvokeRequestExt};
 use symbio_kernel::store::EventStore;
@@ -29,6 +30,7 @@ use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use symbio_providers::DefaultToolVisitor;
+use symbio_sdk::adapters::{LlmAdapter, ProviderLlmAdapter};
 use symbio_sdk::capability::CAPABILITY_VISITOR;
 use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::invariants::check_all;
@@ -95,6 +97,39 @@ impl Capability for DeclOnlyTool {
         _ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     ) -> Result<serde_json::Value, PluginError> {
         Ok(serde_json::Value::Null)
+    }
+}
+
+/// `port.model` 的测试夹具：把假 provider 包成世界端口提供者（D-298）。生产里
+/// 这一行的真身是 `symbio-plugin-model` 的 `ModelPort`（traverse 注册）；夹具与它
+/// 同一条消费合同——`llm_round_trip` 构造本次往返的适配器，`model()` 给压缩
+/// 一类的内部请求直调。
+struct PortModel(Arc<dyn ModelProvider>);
+
+impl symbio_plugin_api::port::PortProvider for PortModel {
+    fn port(&self) -> &'static str {
+        symbio_plugin_api::ports::MODEL
+    }
+
+    fn provider_id(&self) -> &str {
+        self.0.provider_id()
+    }
+
+    fn llm_round_trip(
+        &self,
+        _preferred: Option<&str>,
+        system_prompt: &str,
+        abort: symbio_kernel::exec::ExecAbortSignal,
+    ) -> Option<Arc<dyn LlmAdapter>> {
+        Some(Arc::new(ProviderLlmAdapter::for_turn(
+            self.0.clone(),
+            system_prompt,
+            abort,
+        )))
+    }
+
+    fn model(&self) -> Option<Arc<dyn ModelProvider>> {
+        Some(self.0.clone())
     }
 }
 
@@ -255,10 +290,24 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         .unwrap_or_default();
     let now_ms = super::super::loop_rows::wake_now_ms(&facts, drive_seq);
 
+    // `port.model` 的提供者行（D-298）：生产里由 model 插件的 traverse 注册、随
+    // session 的能力收集装上；夹具在同一处模拟——把交付包里的假 provider 包成
+    // 端口行装进 ctx 的注册面。已有注册面（`test_ctx_declaring` 装的工具行）不被
+    // 顶掉：端口行并进同一张表。
+    let visitor: Arc<dyn Registry> = ctx
+        .get(CAPABILITY_VISITOR)
+        .unwrap_or_else(|| Arc::new(DefaultToolVisitor::new()));
+    let port = Arc::new(PortModel(provider));
+    if let Some(row) =
+        symbio_plugin_api::port::port_row(&(port as Arc<dyn symbio_plugin_api::port::PortProvider>))
+    {
+        visitor.put(row).await;
+    }
+    ctx.set(CAPABILITY_VISITOR, visitor);
+
     // 环要借的那一片可控状态：生产由 `turn_exec::drive` 的幕首备好，这里同一形状。
     // `input_utterance` 留 `None`：Q1 的委派判定因此不下结论（与退役前那条旁路同形）。
     let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
-        provider: provider.clone(),
         parent: parent.clone(),
         context_limit: 8192,
         session: session.clone(),
@@ -293,7 +342,6 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let request_ctx = ctx.clone();
     let (assembled, emitter) = super::assemble_turn(super::ExecTurn {
         session,
-        provider,
         parent,
         ctx,
         system_prompt,
@@ -892,7 +940,7 @@ struct ControlHarness {
 }
 
 /// 判决 / 措辞 / 压缩**都关掉**：本组问的是幕的骨架，不是判决判成什么。
-fn control_harness() -> ControlHarness {
+async fn control_harness() -> ControlHarness {
     let facts = Arc::new(EventStore::new());
     let port = Arc::new(FakeSessionPort::new(Vec::new()).with_facts(facts.clone()));
     let mut settings = default_settings();
@@ -910,7 +958,6 @@ fn control_harness() -> ControlHarness {
         Vec::new(),
     ))));
     let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
-        provider: Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         parent: None,
         context_limit: 8192,
         session: session.clone(),
@@ -919,10 +966,24 @@ fn control_harness() -> ControlHarness {
         opening_enabled: false,
         presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     });
+    // `port.model` 的提供者行（D-298）：控制面入口也经端口取模型——与
+    // `drive_turn` 的幕首注册同一形状（生产里是 model 插件 traverse 注册）。
+    let ctx = test_ctx();
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+    let port = Arc::new(PortModel(Arc::new(
+        FaithfulProvider::new(Behavior::Faithful).0,
+    )));
+    if let Some(row) =
+        symbio_plugin_api::port::port_row(&(port as Arc<dyn symbio_plugin_api::port::PortProvider>))
+    {
+        visitor.put(row).await;
+    }
+    ctx.set(CAPABILITY_VISITOR, visitor);
+
     ControlHarness {
         facts,
         sink,
-        ctx: test_ctx(),
+        ctx,
         orchestrator,
         context: super::super::chat_loop::state::SessionContext {
             messages: Vec::new(),
@@ -982,7 +1043,7 @@ fn inputs_fact(facts: &[Event]) -> Option<&Event> {
 async fn drive_lands_the_inputs_stage_and_runs_the_turn() {
     use symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL;
 
-    let mut h = control_harness();
+    let mut h = control_harness().await;
     let end = drive_control(&mut h).await.expect("幕跑得完");
     assert!(
         matches!(end, super::DriveEnd::Completed),
@@ -1013,7 +1074,7 @@ async fn drive_lands_the_inputs_stage_and_runs_the_turn() {
 async fn drive_lands_one_branch_fact_for_a_retry_and_consumes_the_registration() {
     use symbio_plugin_api::events::EVENT_TURN_BRANCH;
 
-    let mut h = control_harness();
+    let mut h = control_harness().await;
     h.turn.retry_of = Some("t-old".to_string());
     let end = drive_control(&mut h).await.expect("幕跑得完");
     assert!(matches!(end, super::DriveEnd::Completed));
@@ -1062,7 +1123,7 @@ async fn drive_lands_one_branch_fact_for_a_retry_and_consumes_the_registration()
 /// 收束的那一幕在事实面上与「正常跑完」同形——一个已经答完的轮会再答一次。
 #[tokio::test]
 async fn drive_stops_at_an_in_place_answer_and_lands_closed_without_a_model_request() {
-    let mut h = control_harness();
+    let mut h = control_harness().await;
     // 判决执行体寄存下来的那体答话（`run_classify` 的产出形态）。
     h.turn.head_answer = Some(super::super::chat_loop::AnsweredTurn {
         utterance: "你好".into(),

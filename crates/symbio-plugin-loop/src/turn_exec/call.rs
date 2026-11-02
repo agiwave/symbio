@@ -61,11 +61,21 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
     // `skill.recall` 行（能力包）选中，出口格（`stage:"reflex"`）由宿主代落、正文由
     // 宿主经 `set_reflex` 寄进草稿；本侧只把正文交给收束动作，不自己落 `final`
     // （D-260 / D-262）。
-    let llm: std::sync::Arc<dyn LlmAdapter> = std::sync::Arc::new(ProviderLlmAdapter::for_turn(
-        a.provider.clone(),
-        &a.system_prompt,
-        a.abort.clone(),
-    ));
+    //
+    // 模型面只按端口名取（D-298）：解析与适配器构造在提供者一侧。端口缺席在生产
+    // 不可达（session 在进环之前已保证生效模型存在，限流 / 上下文上限那一排闸
+    // 都读它）——真缺席就是装配错了，按内部错误响亮报出。
+    let llm: std::sync::Arc<dyn LlmAdapter> = match super::super::port::model_port(&a.ctx)
+        .await
+        .and_then(|provider| provider.llm_round_trip(None, &a.system_prompt, a.abort.clone()))
+    {
+        Some(llm) => llm,
+        None => {
+            return Err(TurnExecExit::Failed(PluginError::InternalError(
+                "`port.model` 缺席：没有可用的模型提供者（session 应在进环前保证生效模型）".into(),
+            )))
+        }
+    };
     let tok = TokenIssuer::issue_deep();
     let input = TurnInput {
         turn: a.turn_no,

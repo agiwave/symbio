@@ -39,21 +39,23 @@
 
 use std::sync::Arc;
 
-use symbio_kernel::capability::Registry;
 use symbio_kernel::dialog::DecideRequest;
 use symbio_kernel::dialog::{DecideOutcome, DecisionPlan, ParseVerdictRequest, Verdict};
 use symbio_kernel::exec::ExecAbortSignal;
 use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::routes::{ROUTE_CLASSIFY_DECIDE, ROUTE_CLASSIFY_PARSE};
-use symbio_sdk::adapters::{LlmAdapter, ProviderLlmAdapter, SilentDeltas, TokenIssuer};
-use symbio_sdk::capability::{capability_model_resolve, CAPABILITY_VISITOR};
+use symbio_sdk::adapters::{SilentDeltas, TokenIssuer};
 use symbio_sdk::chat::chat_node::ChatNode;
 use symbio_sdk::keys::{PATH, SESSION_ID};
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
 use super::super::port::classify::{classify_round_trip, escalate_unclassified};
-use super::super::port::Round;
+use super::super::port::{abort_round_trip, model_port, Round};
 use super::state::{ChatOrchestrator, SessionContext, TurnState};
+
+#[cfg(test)]
+#[path = "decide.test.rs"]
+mod tests;
 
 /// 一次轮首判决的**结果**：判决（可缺省）+ 它打了几次模型。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,18 +174,7 @@ async fn decide_by_model(
     session_id: String,
     plan: DecisionPlan,
 ) -> Decision {
-    // ① 模型服务：找服务在派发**之前**——找不到就没有这次往返，也就没有账。
-    let Some(provider) = resolve_provider(ctx, plan.model_id.as_deref()).await else {
-        symbio_plugin_api::plugin_warn!(
-            "session",
-            "[Classify] 没有可用的模型服务，本轮按「判不出来」处理"
-        );
-        return Decision {
-            verdict: Some(escalate_unclassified()),
-            model_calls: 0,
-        };
-    };
-    // ② 事实源：没有它就没有账可记。持久轮的事实源由 `begin_drive` 保证（临时会话
+    // ① 事实源：没有它就没有账可记。持久轮的事实源由 `begin_drive` 保证（临时会话
     //    在那里就被拦下），这一段只是把「拦下之前」的形态说清楚。
     let Some(store) = context.session.facts() else {
         symbio_plugin_api::plugin_warn!("session", "[Classify] 本会话没有事实源，判决往返不入账");
@@ -193,7 +184,7 @@ async fn decide_by_model(
         };
     };
 
-    // ③ 派发：逻辑 id 与端口 `model` 的 id 同一口径（`model-{turn}-d{drive}-{step}`）。
+    // ② 派发身份：逻辑 id 与端口 `model` 的 id 同一口径（`model-{turn}-d{drive}-{step}`）。
     let step = format!("c{}", turn.request_round);
     let round = Round {
         turn: turn.turn_no,
@@ -203,8 +194,34 @@ async fn decide_by_model(
         step: &step,
         via: "classify/decide",
     };
-    let llm =
-        ProviderLlmAdapter::for_turn(provider, &plan.system_prompt, ExecAbortSignal::of(&**ctx));
+    // ③ 模型服务：只按端口名取（解析与适配器构造在提供者一侧，D-298）。端口缺席
+    //    不是「判不出来」——落 `request` + `failed` 两格（账上说得清这次往返想要、
+    //    没打成），按无判决中止，不许静默滑进工具循环。
+    let llm = match model_port(ctx).await.and_then(|provider| {
+        provider.llm_round_trip(
+            plan.model_id.as_deref(),
+            &plan.system_prompt,
+            ExecAbortSignal::of(&**ctx),
+        )
+    }) {
+        Some(llm) => llm,
+        None => {
+            if let Err(e) = abort_round_trip(
+                store.as_ref(),
+                round,
+                "`port.model` 缺席：没有可用的模型提供者",
+            ) {
+                symbio_plugin_api::plugin_warn!(
+                    symbio_deploy::PLUGIN_ID_SESSION,
+                    "[Classify] 缺席失败格落格失败：{e:?}"
+                );
+            }
+            return Decision {
+                verdict: None,
+                model_calls: 0,
+            };
+        }
+    };
     let tok = TokenIssuer::issue_deep();
     let parse_parent = parent.clone();
     let parse_ctx = ctx.clone();
@@ -236,18 +253,6 @@ async fn decide_by_model(
         verdict: Some(decision.verdict),
         model_calls: decision.model_calls,
     }
-}
-
-/// 取这次判决要用的模型服务。
-///
-/// 优先**计划里配的那个** provider id（严格查找），取不到落回当次生效者——
-/// 降级方向只有一处定义（`capability_model_resolve`）。找不到 ⇒ `None` ⇒ 零格。
-async fn resolve_provider(
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    model_id: Option<&str>,
-) -> Option<Arc<dyn symbio_kernel::llm::ModelProvider>> {
-    let visitor: Arc<dyn Registry> = ctx.get(CAPABILITY_VISITOR)?;
-    capability_model_resolve(&*visitor, model_id).await
 }
 
 /// 把一次判决往返的**应答**解析成判决（`classify/parse`）。

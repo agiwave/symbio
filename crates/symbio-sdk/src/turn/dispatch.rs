@@ -14,7 +14,6 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::chat::chat_node::{ChatNode, NodeStatus};
-use crate::llm::model_provider::ModelProvider;
 use crate::plugin::Plugin;
 use crate::turn::node_build::PresentationTree;
 
@@ -98,8 +97,6 @@ pub struct TurnDispatch {
     pub writer: Arc<dyn ExecTranscriptWriter>,
     /// 中止信号（今日 `run_chat_loop` 的入参）。
     pub abort: ExecAbortSignal,
-    /// 本轮唯一生效模型服务（既有 core trait）。
-    pub provider: Arc<dyn ModelProvider>,
     /// 作用域容器：loop 经它取 VDFS 视图回到 session（不持兄弟插件实例）。
     pub parent: Option<Arc<dyn Plugin>>,
     /// 本轮生效上下文上限（session 在派发前已解析）。

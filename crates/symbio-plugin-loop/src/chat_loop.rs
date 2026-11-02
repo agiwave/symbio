@@ -168,8 +168,8 @@ use std::sync::Arc;
 use symbio_kernel::dialog::RunSnapshot;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::llm::ModelFinishReason;
+use symbio_kernel::llm::ModelUsage;
 use symbio_kernel::llm::TurnOutput;
-use symbio_kernel::llm::{ModelProvider, ModelUsage};
 use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::plugin_info;
 use symbio_plugin_api::plugin_warn;
@@ -211,12 +211,6 @@ pub async fn run_chat_loop(
     // `round_report_hook` 的文档）。所以这里留一个借用、另clone 一份给回调。
     let orchestrator_arc = orchestrator.clone();
     let orchestrator = orchestrator.as_ref();
-
-    plugin_info!(
-        "session",
-        "[Session] 新会话开始（协议 {:?}）",
-        orchestrator.provider.api_protocol()
-    );
 
     // ── 前步骤 ②：会话句柄（随交付包进来，不在这里开会话）──────────────────
     let session = orchestrator.session.clone();
@@ -336,7 +330,7 @@ pub async fn run_chat_loop(
         // 状态，环里没有它们。
         Ok(super::turn_exec::DriveEnd::Answered) => {
             if let Some(answer) = turn.head_answer.take() {
-                land_answered_turn(orchestrator, &ctx, &mut context, &mut turn, answer).await;
+                land_answered_turn(&ctx, &mut context, &mut turn, answer).await;
             }
             let landed = match context.session.facts() {
                 Some(store) => {
@@ -629,7 +623,6 @@ pub(crate) async fn run_classify(
 /// 答话已在 `context.messages` 里，用户照旧收得到。把它升级成整轮失败，等于用
 /// 「记不下来」换「答不出来」——与中途汇报的落格同一条口径。
 pub(crate) async fn land_answered_turn(
-    orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
     turn: &mut TurnState,
@@ -638,7 +631,6 @@ pub(crate) async fn land_answered_turn(
     if let Err(e) = super::turn_exec::execute_final_reply_turn(
         &context.session,
         ctx,
-        orchestrator.provider.clone(),
         turn.abort.clone(),
         turn.turn_no,
         turn.user_seq,

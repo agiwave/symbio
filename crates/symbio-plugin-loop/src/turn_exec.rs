@@ -97,16 +97,14 @@ use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::llm::PromptMessage;
-use symbio_kernel::llm::{ModelProvider, TurnOutput};
+use symbio_kernel::llm::TurnOutput;
 use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest};
 use symbio_kernel::store::{AppendError, Store};
 use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_MESSAGE_ADDED, EVENT_USER_MESSAGE,
 };
-use symbio_sdk::adapters::{
-    AdapterError, DeltaSink, FullModel, LlmAdapter, ProviderLlmAdapter, TokenIssuer,
-};
+use symbio_sdk::adapters::{AdapterError, DeltaSink, FullModel, LlmAdapter, TokenIssuer};
 use symbio_sdk::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
@@ -634,8 +632,6 @@ pub(crate) struct ExecTurn<'a> {
     /// （控制面只有一个环，幕与幕在同一次调用里接续），借来的引用活不到那一刻；
     /// 而 `Arc` 只是句柄的克隆，仍然是同一个实例。
     pub session: &'a Arc<LoopSession>,
-    /// 本轮生效的模型服务（core trait 的 trait object）。
-    pub provider: Arc<dyn ModelProvider>,
     /// 插件宿主（工具能力经它路由；无工具轮为 `None`）。
     pub parent: Option<Arc<dyn Plugin>>,
     /// 本轮请求上下文（工具路由与能力注册表都在它上面）。

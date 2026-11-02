@@ -370,9 +370,6 @@ pub(crate) enum Gate {
 /// 结构体字面量把"谁是谁"写在字段名上，**字段增删由编译器在唯一构造点报错**，
 /// 比位置参数强。这里不再补 `new()`。
 pub struct ChatOrchestrator {
-    /// 唯一生效的模型服务（model 插件按上下文解析后经 CAPABILITY_VISITOR 注册；
-    /// core 纯 trait 的 trait object——loop 对协议实现零依赖）
-    pub provider: Arc<dyn ModelProvider>,
     pub parent: Option<Arc<dyn Plugin>>,
     /// 预计算的生效上下文上限（`provider.effective_context_tokens()` 结果，
     /// session 在派发前已解析）。

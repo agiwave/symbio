@@ -889,11 +889,25 @@ impl Plugin for ModelPlugin {
             // 「生效者必然是目录里的一员」由此是结构而不是纪律——生效位长在目录行上：
             // 生效 provider 不在目录里（未启用 / 协议工厂不可用）⇒ 没有任何行带位
             // ⇒ 会话报「未找到可用的 Model Provider」，而不是替它挑一个别的。
-            for provider in available {
+            for provider in &available {
                 let is_active = active_id.as_deref() == Some(provider.provider_id());
                 tool_visitor
-                    .put(CapabilityRow::model(provider, is_active))
+                    .put(CapabilityRow::model(provider.clone(), is_active))
                     .await;
+            }
+
+            // 世界端口（D-298）：生效者在目录里 ⇒ 注册 `port.model` 提供者行（解析与
+            // 适配器构造收进 `ModelPort`，环只按端口名取）。生效者缺席 ⇒ 不注册——
+            // 环在调用点拿到缺席读数，落失败事实并中止，不在这里猜一个别的。
+            if let Some(active) = available
+                .iter()
+                .find(|p| active_id.as_deref() == Some(p.provider_id()))
+                .cloned()
+            {
+                let port = Arc::new(super::port::ModelPort::new(active, available));
+                if let Some(row) = port.row() {
+                    tool_visitor.put(row).await;
+                }
             }
 
             // 人格在**注册期**就已选定（上面按 `PROVIDER_ID` 解析出生效 provider），

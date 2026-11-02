@@ -27,7 +27,6 @@ use super::*;
 pub(crate) struct Assembled {
     // —— 交付包直通（幕内每一步消费）——
     pub(crate) session: Arc<LoopSession>,
-    pub(crate) provider: Arc<dyn ModelProvider>,
     pub(crate) parent: Option<Arc<dyn Plugin>>,
     pub(crate) ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     pub(crate) system_prompt: String,
@@ -153,7 +152,6 @@ pub(crate) async fn assemble_turn(
 ) -> Result<(Assembled, tokio::task::JoinHandle<()>), TurnExecExit> {
     let ExecTurn {
         session,
-        provider,
         parent,
         ctx,
         system_prompt,
@@ -314,7 +312,6 @@ pub(crate) async fn assemble_turn(
     Ok((
         Assembled {
             session: session.clone(),
-            provider,
             parent,
             ctx,
             system_prompt: system_prompt.to_string(),

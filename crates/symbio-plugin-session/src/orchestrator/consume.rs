@@ -234,6 +234,16 @@ impl TurnLauncher {
         }
         // ── 本轮交付包（[D-086] §2/§3）：纯值 + 事实轨端口 + 世界端口 ──────
         //
+        // 世界端口判重检查（D-298）：能力收集已结束，读一次闭集每端口的族内行数——
+        // 判重 ⇒ 落错误进能力错误桶（装载期判红）。模型服务本体不在交付包里：
+        // loop 按 `port.model` 从能力表现取。
+        symbio_plugin_api::capability_port_check(&chat_ctx).await;
+        symbio_plugin_api::plugin_info!(
+            symbio_deploy::PLUGIN_ID_SESSION,
+            "[Session] 新会话开始（协议 {:?}）",
+            provider.api_protocol()
+        );
+        //
         // 出口：进程内直连转写唯一写入点（会话侧持有），随包交给驱动器；
         // 驱动器的每一次节点变更仍直接落进这张转写（不经「序列化 → 反序列化」）。
         let sink = ExecEventSink::direct(Arc::new(TranscriptSink::new(
@@ -361,7 +371,6 @@ impl TurnLauncher {
             sink,
             writer,
             abort,
-            provider,
             parent: Some(parent.clone()),
             context_limit,
         });
