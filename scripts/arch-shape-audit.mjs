@@ -13,7 +13,7 @@
  * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 2） | **接口上长实现**：行为代码住进架构模块 |
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0（**全 core**） | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作。依赖方向不随内核边界变化，故不收窄 |
- * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里插件 id 字面量数只许降 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179） |
+ * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里**新引入的**插件 id 引用数只许降；与内核既有 wire 词同名的字面量可按同文件 `arch-shape-allow` 登记抵扣 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179）。判的是**耦合**而不是**字符串相同**（2026-11-03 收窄，D-303） |
  * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200）；这两格的**目标是零**（D-203 裁决三）——没到零的每一条都是待迁存量，CS-006 逐名点出它该随谁走 |
  * | CS-006 | —— | 逐条内核业务事件名核**消费方分布**：报出「≥2 crate 消费」与「core 读者」两类各几条，第三种（恰好一个消费方且 core 不读）判红 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是当批可迁的形状。这条把判据逐名落到代码；`core 读者` 那一类**不是**归属证据，是待迁存量——名字随那条读者一起迁出（DE-024 D-203） |
  * | CS-008 | —— | core / kernel 的**生产代码**里事件名字面量数 = 0（首段闭集 = `Entity` 的变体；`#[cfg(test)] mod x;` 的夹具文件剔出判据面） | **名字从第二条路回来**：CS-005 / CS-006 的输入都是内核那张表，表归零之后两者都没有输入，而 `match e.kind.as_str() { "chat.assistant.final" => … }` 照样能让「加一条事件」变成改架构模块。这条是 D-203 承诺的翻转，落成独立一格而不是翻转 CS-006（那会让判据在归零后空转） |
@@ -800,13 +800,15 @@ const pluginIds = fs.existsSync(pluginsDir)
       .sort()
   : []
 
-/** 生产侧（core + kernel，剔测试模块 / 注释）的全文；CS-003 / CS-004 的输入。 */
+/** 生产侧（core + kernel，剔测试模块 / 注释）的全文；CS-003 / CS-004 的输入。
+ *  `raw` 保留注释原文：CS-004 的豁免登记就写在注释里，判据要从原文里读它。 */
 const coreTexts = []
 for (const dir of scanDirs) {
   for (const file of walk(dir)) {
     if (!file.endsWith('.rs') || isTestFile(file)) continue
-    const text = blankTestModules(blankComments(fs.readFileSync(file, 'utf8')).join('\n'))
-    coreTexts.push({ rel: path.relative(ROOT, file).split(path.sep).join('/'), text })
+    const raw = fs.readFileSync(file, 'utf8')
+    const text = blankTestModules(blankComments(raw).join('\n'))
+    coreTexts.push({ rel: path.relative(ROOT, file).split(path.sep).join('/'), text, raw })
   }
 }
 
@@ -832,13 +834,23 @@ if (pluginRefs.length > 0) {
   )
 }
 
-// ── CS-004 插件 id 字面量只许降 ──
+// ── CS-004 插件 id 字面量只许降（判「耦合」，不判「字符串相同」）──
 /**
  * 逐文件冻结存量（2026-10-26 实测值）。**只许降**：数字变小就同步改这里，
  * 变大 = 内核又认了一个插件名字。整张表的目标是空表。
  *
- * 口径：`"<id>"` / `"<id>:` / `"<id>/` 三种字面量起点，逐个插件目录名匹配；
+ * 口径：`"<id>"` / `"<id>:"` / `"<id>/"` 三种字面量起点，逐个插件目录名匹配；
  * 测试模块与注释已剥离（测试里按名造插件是对的）。
+ *
+ * **2026-11-03 收窄（依据 D-303）**：这条判的是「内核是否**新引入**对插件 id 的
+ * 耦合」，不是「字符串是否相同」。内核早已存在的 wire 词（能力家族名、chat 样式
+ * 标签、principal 序列化词与 legacy 前缀）与新插件目录同名时，按**同文件登记**
+ * 抵扣，基线数字不动：
+ *
+ *   // arch-shape-allow CS-004 <id> ×<N>: 用途=…；不是插件引用=…；依据=D-NNN；登记=YYYY-MM-DD
+ *
+ * `<N>` 必须等于该文件该字面量的**实测处数**（多登记 = 空豁免，判红）；扣除后仍有
+ * 超出才是真红。登记只认内核文件集里的注释，判据面之外登记无效。
  */
 const NOUN_BASELINE = {
   // 2026-10-26（DE-023 C2b）：判定范围随语法整份迁到 `crates/symbio-kernel/src`（标记在
@@ -853,15 +865,84 @@ const NOUN_BASELINE = {
   'crates/symbio-kernel/src/chat/principal.rs': 7,
 }
 
+const NOUN_ALLOW_RE =
+  /^ {0,2}\/\/\s*arch-shape-allow\s+CS-004\s+([A-Za-z0-9_-]+)\s+×\s*(\d+)\s*:\s*(\S[^\n]*)$/gm
+const nounAllowField = (reason, name) => {
+  const m = reason.match(new RegExp(`${name}=([^；;]*)`))
+  return m ? m[1].trim() : ''
+}
+const nounAllowKey = (rel, id) => `${rel}\u0000${id}`
+
 const nounCounts = new Map()
 const purityRels = new Set(purityTexts.map((f) => f.rel))
+const nounAllows = new Map()
 let domainNounTotal = 0
 if (hasPlugins && pluginIds.length > 0) {
+  // 先读登记（写在注释里，不占计数），再逐文件扣除。
+  for (const f of coreTexts) {
+    for (const m of f.raw.matchAll(NOUN_ALLOW_RE)) {
+      const [, id, rawCount, reason] = m
+      const where = `${f.rel}（CS-004 登记）`
+      if (!purityRels.has(f.rel)) {
+        report('CS-004', `${where}：豁免只能登记在 CS-004 判定的内核文件集里`)
+        continue
+      }
+      if (!pluginIds.includes(id)) {
+        report(
+          'CS-004',
+          `${where}：\`${id}\` 不是现存的插件 id（词表来自 crates/symbio-plugin-<id>）`,
+        )
+        continue
+      }
+      const count = Number(rawCount)
+      if (!Number.isInteger(count) || count < 1) {
+        report('CS-004', `${where}：\`${id} ×${rawCount}\` 的处数不是正整数`)
+        continue
+      }
+      if (!nounAllowField(reason, '用途')) {
+        report('CS-004', `${where}：\`${id}\` 的登记缺 \`用途=\`（写清这处字面量的 wire 用途）`)
+      }
+      if (!nounAllowField(reason, '不是插件引用')) {
+        report(
+          'CS-004',
+          `${where}：\`${id}\` 的登记缺 \`不是插件引用=\`（写清内核为何不因此认插件实现）`,
+        )
+      }
+      const refs = [...nounAllowField(reason, '依据').matchAll(ADR_REF_RE)].map((r) => r[1])
+      if (refs.length === 0) {
+        report('CS-004', `${where}：\`${id}\` 的 \`依据=\` 没有 ADR 编号——豁免必须挂一条决策`)
+      }
+      for (const ref of refs) {
+        if (!hasDecisionAnchor(ref)) {
+          report(
+            'CS-004',
+            `${where}：\`${id}\` 的 \`依据=\` 指向 \`D-${ref}\`，但设计文档里没有该决策`,
+          )
+        }
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(nounAllowField(reason, '登记'))) {
+        report('CS-004', `${where}：\`${id}\` 的 \`登记=\` 缺日期（YYYY-MM-DD）`)
+      }
+      const key = nounAllowKey(f.rel, id)
+      if (nounAllows.has(key)) {
+        report('CS-004', `${where}：\`${id}\` 在同一文件里重复登记`)
+        continue
+      }
+      nounAllows.set(key, { id, count })
+    }
+  }
   for (const f of purityTexts) {
     let n = 0
     for (const id of pluginIds) {
-      const re = new RegExp(`"${id}"|"${id}[:/]`, 'g')
-      n += (f.text.match(re) || []).length
+      const actual = (f.text.match(new RegExp(`"${id}"|"${id}[:/]`, 'g')) || []).length
+      const allowed = nounAllows.get(nounAllowKey(f.rel, id))?.count ?? 0
+      if (allowed > actual) {
+        report(
+          'CS-004',
+          `${f.rel}：\`${id} ×${allowed}\` 登记超过实测 ${actual} 处——登记了却没有的代码是空豁免`,
+        )
+      }
+      n += Math.max(actual - allowed, 0)
     }
     if (n > 0) nounCounts.set(f.rel, n)
   }

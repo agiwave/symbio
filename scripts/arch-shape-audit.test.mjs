@@ -178,6 +178,91 @@ test('内核文件集指向不存在的文件 ⇒ 红（边界失焦不许静默
   assert.match(r.stderr, /不存在的文件/)
 })
 
+// ==================== CS-004：登记抵扣（2026-11-03 收窄） ====================
+
+/** 五格齐全 + 宿主侧插件域 + 一张草稿，是 CS-004 夹具的最小合法形状。 */
+const FIVE_TRAITS =
+  ONE +
+  'pub trait Capability {\n    fn c(&self);\n}\n' +
+  'pub trait ModelProvider {\n    fn m(&self);\n}\n' +
+  'pub trait VdfsProvider {\n    fn v(&self);\n}\n' +
+  'pub trait Registry {\n    fn r(&self);\n}\n'
+
+const NOUN_ALLOW_OK =
+  '// arch-shape-allow CS-004 tool ×1: 用途=wire 词汇（家族名）；不是插件引用=内核不认插件实现；依据=D-303；登记=2026-11-03\n'
+
+/** CS-004 夹具：内核文件 `alpha` 里可以放字面量；插件词表 = `tool`。 */
+const nounFiles = (alphaSrc, extra = {}) => ({
+  [CORE_MOD]: 'mod alpha;\nmod kernel;\n',
+  [ALPHA]: alphaSrc,
+  [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
+  'crates/symbio-sdk/src/plugin/mod.rs': '',
+  'crates/symbio-plugin-tool/src/.keep': '',
+  'docs/003-design/047-义务环判据与归属推导.md': '# DE-047\n\n### D-303 夹具决策\n\n理由。\n',
+  [TURN_STATE]: draft(['a']),
+  ...extra,
+})
+
+test('CS-004：与内核既有 wire 词同名的字面量可按登记抵扣（判耦合，不判字符串相同）', () => {
+  const r = audit(nounFiles(FIVE_TRAITS + 'pub const T: &str = "tool";\n' + NOUN_ALLOW_OK), {
+    baseline: '5:5:0',
+    turnState: '1',
+  })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('CS-004：登记处数超过实测 ⇒ 红（登记了却没有的代码是空豁免）', () => {
+  const r = audit(
+    nounFiles(FIVE_TRAITS + 'pub const T: &str = "tool";\n' + NOUN_ALLOW_OK.replace('×1', '×2')),
+    { baseline: '5:5:0', turnState: '1' },
+  )
+  assert.equal(r.status, 1, '多登记必须红，否则登记表可以拿来预先囤额度')
+  assert.match(r.stderr, /登记超过实测 1 处/)
+})
+
+test('CS-004：登记缺 `依据=` ⇒ 红（豁免必须挂一条决策）', () => {
+  const r = audit(
+    nounFiles(
+      FIVE_TRAITS + 'pub const T: &str = "tool";\n' + NOUN_ALLOW_OK.replace('依据=D-303；', ''),
+    ),
+    { baseline: '5:5:0', turnState: '1' },
+  )
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /没有 ADR 编号/)
+})
+
+test('CS-004：登记缺 `登记=` 日期 ⇒ 红', () => {
+  const r = audit(
+    nounFiles(
+      FIVE_TRAITS + 'pub const T: &str = "tool";\n' + NOUN_ALLOW_OK.replace('登记=2026-11-03', ''),
+    ),
+    { baseline: '5:5:0', turnState: '1' },
+  )
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /缺日期/)
+})
+
+test('CS-004：登记写在内核文件集之外 ⇒ 红（判据面之外没有豁免权）', () => {
+  const r = audit(
+    nounFiles(FIVE_TRAITS, {
+      [CORE_MOD]: 'mod alpha;\nmod gamma;\nmod kernel;\n',
+      'crates/symbio-sdk/src/gamma/mod.rs': 'pub const G: &str = "tool";\n' + NOUN_ALLOW_OK,
+    }),
+    { baseline: '5:5:0', turnState: '1' },
+  )
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /豁免只能登记在 CS-004 判定的内核文件集里/)
+})
+
+test('CS-004：登记扣不完的部分仍是真红', () => {
+  const r = audit(
+    nounFiles(FIVE_TRAITS + 'pub const A: &str = "tool";\npub const B: &str = "tool";\n' + NOUN_ALLOW_OK),
+    { baseline: '5:5:0', turnState: '1' },
+  )
+  assert.equal(r.status, 1, '扣 1 处后仍有 1 处，必须按回流判红')
+  assert.match(r.stderr, /有 1 处 > 冻结 0/)
+})
+
 test('CS-004 只量内核文件集：域文件里的插件 id 字面量不判红（报告账）', () => {
   // 宿主侧插件域（`symbio-sdk/src/plugin/mod.rs`）存在 ⇒ 五格齐全检查生效，
   // 夹具把五个内核 trait 都造出来。
