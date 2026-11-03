@@ -59,6 +59,8 @@ use super::super::loop_rows;
 use super::super::report_exec::ReportLanding;
 use super::super::tool_dispatch::{DerivedFacts, PortOutput, SessionDispatchPort, ToolDispatch};
 use super::super::turn_runner::{artifact_verdict, TurnOutcome, TurnSession};
+
+use crate::session_port;
 use super::{
     classify_turn, open_turn, persist_turn, ActorError, Assembled, Ctx, HeadParts, Running,
     StepFuture, TurnExecExit,
@@ -523,11 +525,13 @@ async fn open_stage(
     // 每幕重新读：上一幕的原生产出已在收幕时并入落库镜像，这一幕的 prompt 要从
     // 那份镜像出（事实源是同一份，视图每幕刷新）。
     context.messages = if req.load_history {
-        context
-            .session
-            .run_op::<Vec<ChatNode>>(symbio_sdk::turn::dispatch::run_ops::CONTEXT_MESSAGES, ())
-            .await
-            .unwrap_or_default()
+        session_port::call::<Vec<ChatNode>>(
+            context.session.as_ref(),
+            symbio_sdk::turn::dispatch::run_ops::CONTEXT_MESSAGES,
+            (),
+        )
+        .await
+        .unwrap_or_default()
     } else {
         // 心跳等无上下文场景：从空上下文开始，仅携带本轮新消息。
         Vec::new()
@@ -609,8 +613,12 @@ async fn open_stage(
                         > + Send,
                 >,
             > = Box::pin(async move {
-                let supplements: Option<symbio_sdk::turn::facts::DrainedSupplement> = session
-                    .run_op(symbio_sdk::turn::dispatch::run_ops::TAKE_SUPPLEMENTS, ())
+                let supplements: Option<symbio_sdk::turn::facts::DrainedSupplement> =
+                    session_port::call(
+                        session.as_ref(),
+                        symbio_sdk::turn::dispatch::run_ops::TAKE_SUPPLEMENTS,
+                        (),
+                    )
                     .await
                     .unwrap_or_else(|e| {
                         symbio_plugin_api::plugin_warn!(
@@ -636,7 +644,7 @@ async fn open_stage(
     });
 
     let (assembled, emitter) = super::assemble_turn(super::ExecTurn {
-        session: &context.session,
+        session: context.session.clone(),
         view: context.view.clone(),
         facts: context.facts.clone(),
         parent: orchestrator.parent.clone(),
@@ -680,7 +688,7 @@ pub(crate) fn stage_runtime(
         assembled.parent.clone(),
         assembled.ctx.clone(),
         assembled.sink.clone(),
-        assembled.session.tool_archive_dir().to_path_buf(),
+        assembled.view.tool_archive_dir.clone(),
         assembled.store.clone(),
         assembled.abort.clone(),
         assembled.root_id.clone(),

@@ -9,6 +9,8 @@
 //! 决策 D-086 见 [D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "D-086")
 
 use super::*;
+
+use crate::session_port;
 use symbio_sdk::chat::chat_node::CHAT_STYLE_TAG_RUN;
 
 /// 封根 Turn：广播本轮组合节点的终态（**唯一**发射点）。
@@ -61,15 +63,14 @@ pub(crate) async fn persist_messages(
     // 落**（助手正文走 `turn_exec` 的 `assistant.progressed`、工具结果走
     // `turn_runner` 的 `artifact.added`），此处再落一条 `message.added` 就是第二个
     // owner。本处只做「落库 + 回包」。
-    if let Err(e) = context
-        .session
-        .run_op::<Vec<ChatNode>>(
-            symbio_sdk::turn::dispatch::run_ops::ADD_BY_RUNNER,
-            symbio_sdk::turn::dispatch::AddNodesRequest {
-                messages: new_messages.to_vec(),
-            },
-        )
-        .await
+    if let Err(e) = session_port::call::<Vec<ChatNode>>(
+        context.session.as_ref(),
+        symbio_sdk::turn::dispatch::run_ops::ADD_BY_RUNNER,
+        symbio_sdk::turn::dispatch::AddNodesRequest {
+            messages: new_messages.to_vec(),
+        },
+    )
+    .await
     {
         // 持久化失败（可恢复）：不静默吃错误，也不中断对话（消息仍在内存中，
         // chat_loop 继续）。错误是**状态**不是事件——发 `Warn` 由消费循环写入

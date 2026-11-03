@@ -45,7 +45,8 @@ mod wake;
 
 pub use self::state::ChatOrchestrator;
 
-// 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
+// 模块内共享面：子模块经 `use super::*` 取用，测试亦同（`gate_tests` 等）。
+use crate::session_port;
 // 对话面节点构造器已上移 core `node_build`（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三），
 // 消费方（`compose` / `rebuild` / `turn_runner`）各自直连 core——本模块不再续发短路径，
 // 留守侧因此不必经驱动器拿构造器。
@@ -517,10 +518,12 @@ async fn finish_turn(
 /// `CONTEXT_MESSAGES`（那条会先把未选中支藏掉——拿它补发等于把「藏」当成了「没发生」）。
 /// 发不出去也没什么可修的：`sink` 缺席（内部请求）时本来就是静默出口。
 async fn republish_branch_group(context: &SessionContext, sink: &ExecEventSink, member: &str) {
-    let all = match context
-        .session
-        .run_op::<Vec<ChatNode>>(run_ops::MESSAGES, ())
-        .await
+    let all = match session_port::call::<Vec<ChatNode>>(
+        context.session.as_ref(),
+        run_ops::MESSAGES,
+        (),
+    )
+    .await
     {
         Ok(v) => v,
         Err(e) => {

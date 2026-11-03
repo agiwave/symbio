@@ -2,7 +2,7 @@
 //!
 //! 一轮对话的执行引擎：上下文装配、轮首判决、工具循环、收束与派生事实。
 //! 它**不拥有**会话状态——转写、事实源、压缩熔断、用户补充队列都在 session；
-//! 驱动器经 [`session_port`]（VDFS 地址面 `session/<sid>/_run/<op>`）读写它们。
+//! 驱动器经 [`session_port`]（`port=session` 的 `session-call` / `session-call-unit` 行）读写它们。
 //!
 //! 入口只有一个：session 派发 `loop/<sid>` 的 `run_turn`（见 [`provider`]）。
 //!
@@ -35,7 +35,6 @@ mod tool_dispatch;
 mod tools;
 mod turn_exec;
 mod turn_runner;
-mod turn_session;
 
 #[cfg(test)]
 mod test_support;

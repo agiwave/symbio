@@ -64,7 +64,9 @@ fn abort_wins_over_request_count() {
 // 补发的是**一组**的成员，不是「新支那一条」。少发旧支那条，界面上就是「一支有
 // `‹ ›`、另一支没有」——而切换器要两支都能点才算存在。
 
-use super::super::test_support::{default_settings, loop_session, turn_spec, FakeSessionPort};
+use super::super::test_support::{
+    default_settings, session_port_of, turn_spec, FakeSessionPort,
+};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -106,7 +108,7 @@ async fn context_with(messages: Vec<ChatNode>) -> SessionContext {
         default_settings(),
     );
     let view = spec.view();
-    let session = Arc::new(loop_session(spec, port));
+    let session = session_port_of(port);
     SessionContext {
         messages,
         view,

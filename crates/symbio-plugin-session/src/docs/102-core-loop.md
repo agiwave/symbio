@@ -59,7 +59,7 @@ impl: done
  collect_capabilities(traverse) → CAPABILITY_VISITOR（本层**不**拼提示词）
  派发 loop/<sid> run_turn，结局由 session: orchestrator/consume.rs 等处消费
 ② 宿主层 run_turn（动作体） loop: provider.rs
- 取 TURN_DISPATCH（授权三条）→ LoopSession + ChatOrchestrator；sink / abort 随交付包传入 → await ③
+ 取 TURN_DISPATCH（授权三条）→ 会话动作端口 + ChatOrchestrator；sink / abort 随交付包传入 → await ③
  结局序列化为 TurnReport 交回；session 侧 select! 看门狗 / 接管三臂在 ①
 ③ 循环层 run_chat_loop + gate_turn / finish_turn chat_loop.rs（本层没有环）
  + turn_exec::drive（唯一的环：幕首 open_stage → 循环体 → 收幕 close_stage → 接幕）turn_exec/drive.rs

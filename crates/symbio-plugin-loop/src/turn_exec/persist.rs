@@ -278,7 +278,8 @@ pub(crate) async fn execute_final_reply_turn(
         .ok_or_else(|| PluginError::InternalError("执行需要持久会话（临时会话无事实源）".into()))?;
     // **补落寄存的变更**：答话轮同样是会话侧的落格窗口，经端口动作发起。
     // 与 [`super::assemble_turn`] 同序（在运行器落格之前——本轮的用户格已由编排层先落）。
-    if let Err(e) = context.session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
+    if let Err(e) = session_port::call_unit(context.session.as_ref(), run_ops::DRAIN_PARKED, ()).await
+    {
         symbio_plugin_api::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
     // 身份与档位取值点同 [`super::assemble_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
@@ -293,15 +294,14 @@ pub(crate) async fn execute_final_reply_turn(
     // 压缩入格 + 归档：与接缝同序（`D-223` 订正 1：压缩必须早于派发格）。归档之后才
     // 落派发格，本幕的 `turn.dispatch` 才不会随「本轮之前的一切」一起被移进归档段。
     if let Some(msgs) = consolidation {
-        if let Err(e) = context
-            .session
-            .run_op_unit(
-                run_ops::CONSOLIDATE,
-                ConsolidateRequest {
-                    messages: msgs.to_vec(),
-                },
-            )
-            .await
+        if let Err(e) = session_port::call_unit(
+            context.session.as_ref(),
+            run_ops::CONSOLIDATE,
+            ConsolidateRequest {
+                messages: msgs.to_vec(),
+            },
+        )
+        .await
         {
             symbio_plugin_api::plugin_warn!(
                 "session",

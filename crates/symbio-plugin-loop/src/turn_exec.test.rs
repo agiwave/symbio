@@ -39,7 +39,9 @@ use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest};
 use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, MESSAGE_VOCAB};
 
 use super::super::session_port::SessionPort;
-use super::super::test_support::{default_settings, loop_session, turn_spec, FakeSessionPort};
+use super::super::test_support::{
+    default_settings, session_port_of, turn_spec, FakeSessionPort,
+};
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**桥之后**的节点面（生产里
 /// `assemble` 的发射任务把会话主体写进每一帧），`role` 只是反序列化落点。
@@ -215,7 +217,7 @@ fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> 
 /// **本地同名结构遮蔽了 `super::*` 里的 `ExecTurn`**——五个 struct 字面量因此
 /// 一字不改（`SP-033` §1：改用例，不改形状）。
 struct ExecTurn<'a> {
-    session: &'a Arc<LoopSession>,
+    session: Arc<dyn SessionPort>,
     view: SessionView,
     facts: Option<Arc<dyn Store<Event = Event>>>,
     provider: Arc<dyn ModelProvider>,
@@ -411,7 +413,7 @@ fn exec_base<'a>(
     abort: symbio_kernel::exec::ExecAbortSignal,
 ) -> ExecTurn<'a> {
     ExecTurn {
-        session: &fx.session,
+        session: fx.session.clone(),
         view: fx.view.clone(),
         facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider,
@@ -560,7 +562,7 @@ async fn supplements_become_facts_visible_next_turn() {
         turn_no: 0,
         user_seq,
         drive_seq: user_seq,
-        session: &fx.session,
+        session: fx.session.clone(),
         view: fx.view.clone(),
         facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider: Arc::new(provider),
@@ -873,7 +875,7 @@ impl ModelProvider for FaithfulProvider {
 /// `Store` 契约落格，与生产同一 trait；WAL 重开 / 归档语义由 session 的存储层
 /// 用例覆盖（D-084 §1-A：事实以值交给执行层）。
 struct Fixture {
-    session: Arc<LoopSession>,
+    session: Arc<dyn SessionPort>,
     facts: Arc<EventStore>,
     port: Arc<FakeSessionPort>,
     view: SessionView,
@@ -917,7 +919,7 @@ fn setup_with_settings(
         settings,
     );
     let view = spec.view();
-    let session = Arc::new(loop_session(spec, port.clone()));
+    let session = session_port_of(port.clone());
     Fixture {
         session,
         facts,
@@ -959,7 +961,7 @@ async fn control_harness() -> ControlHarness {
         settings,
     );
     let view = spec.view();
-    let session = Arc::new(loop_session(spec, port));
+    let session = session_port_of(port);
     let sink = symbio_kernel::exec::ExecEventSink::direct(Arc::new(CollectingFrames(Mutex::new(
         Vec::new(),
     ))));
@@ -1398,7 +1400,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         turn_no: 0,
         user_seq,
         drive_seq: user_seq,
-        session: &fx.session,
+        session: fx.session.clone(),
         view: fx.view.clone(),
         facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider: Arc::new(provider),
@@ -1603,7 +1605,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         turn_no: 0,
         user_seq,
         drive_seq: user_seq,
-        session: &fx.session,
+        session: fx.session.clone(),
         view: fx.view.clone(),
         facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider: Arc::new(provider),
@@ -1802,7 +1804,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         turn_no: 0,
         user_seq,
         drive_seq: user_seq,
-        session: &fx.session,
+        session: fx.session.clone(),
         view: fx.view.clone(),
         facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider: Arc::new(provider),

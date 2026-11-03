@@ -14,6 +14,8 @@ use symbio_plugin_api::context::{Cadence, ContextSection, DelegateVerdict, LiveI
 
 use super::*;
 
+use crate::session_port;
+
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
 ///
 /// **取值点与 `turn_exec` 的 `user_text` 同源**（该处晚于 `prepare_request_sections`，
@@ -256,13 +258,12 @@ pub(crate) async fn prepare_request_sections(
     // Q3：worker 进展现读磁盘（无子会话 ⇒ 零额外 IO）。整条读链住在
     // `session::worker_progress`（D-081 裁决一第 4 条），驱动器只调这一个入口。
     // 读失败向上传播——静默降级就是「没有观测 = 静默失效」：看不出是没 worker 还是没读到。
-    let workers = context
-        .session
-        .run_op::<Vec<symbio_sdk::turn::facts::WorkerProgress>>(
-            symbio_sdk::turn::dispatch::run_ops::WORKER_PROGRESS,
-            (),
-        )
-        .await
+    let workers = session_port::call::<Vec<symbio_sdk::turn::facts::WorkerProgress>>(
+        context.session.as_ref(),
+        symbio_sdk::turn::dispatch::run_ops::WORKER_PROGRESS,
+        (),
+    )
+    .await
         .map_err(super::super::turn_exec::ActorError::Read)?;
     let settings = &context.view.settings;
     let delegate_verdict = match turn.user_text().filter(|_| req.new_input) {

@@ -26,7 +26,7 @@ use super::*;
 /// 那一幕的局部变量。借来的话，它们活不到环把它交给下一个动作的那一刻。
 pub(crate) struct Assembled {
     // —— 交付包直通（幕内每一步消费）——
-    pub(crate) session: Arc<LoopSession>,
+    pub(crate) session: Arc<dyn SessionPort>,
     /// 会话配置八格（`session-config` 回体的同一个投影）。
     pub(crate) view: SessionView,
     pub(crate) parent: Option<Arc<dyn Plugin>>,
@@ -64,7 +64,10 @@ pub(crate) struct Assembled {
 ///
 /// 落格失败只出声不升级：「压缩已生效」——这一步关系到的是事实面是否记下它，
 /// 记不下也不该让整轮失败。
-pub(crate) async fn land_consolidation(session: &LoopSession, consolidation: Option<&[ChatNode]>) {
+pub(crate) async fn land_consolidation(
+    session: &dyn SessionPort,
+    consolidation: Option<&[ChatNode]>,
+) {
     // 必须在派发格**之前**：本轮的用户格已由编排层先落，先归档才能让「本轮之前的
     // 一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的旧事件，现行窗口
     // 不再自洽）。
@@ -74,14 +77,14 @@ pub(crate) async fn land_consolidation(session: &LoopSession, consolidation: Opt
     let Some(msgs) = consolidation else {
         return;
     };
-    if let Err(e) = session
-        .run_op_unit(
-            run_ops::CONSOLIDATE,
-            ConsolidateRequest {
-                messages: msgs.to_vec(),
-            },
-        )
-        .await
+    if let Err(e) = session_port::call_unit(
+        session,
+        run_ops::CONSOLIDATE,
+        ConsolidateRequest {
+            messages: msgs.to_vec(),
+        },
+    )
+    .await
     {
         symbio_plugin_api::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
     }
@@ -103,7 +106,7 @@ pub(crate) async fn land_consolidation(session: &LoopSession, consolidation: Opt
 /// ## 为什么不在这里渲染 prompt
 ///
 /// 渲染要往草稿里写（`TurnSession::render_base`），而草稿在本函数调用点的
-/// [`Ctx::session`] 上——本函数只收一个 `&LoopSession`（它只需要会话动作面）。
+/// [`Ctx::session`] 上——本函数只收一个会话动作面（它只需要 `port=session` 的行）。
 /// 渲染因此留在执行体里、紧随本函数；「压缩先落、prompt 后渲染」由同一个动作的
 /// 行序保证，不需要把草稿传进来。
 pub(crate) async fn land_seam(
@@ -186,7 +189,7 @@ pub(crate) async fn assemble_turn(
     //
     // 位置在运行器落格之前：补落改的就是运行器即将读的那份切片（prompt 窗口 /
     // 产物编号），不先落完，本轮会站在一份**缺了那次编辑**的状态上做判断。
-    if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
+    if let Err(e) = session_port::call_unit(session.as_ref(), run_ops::DRAIN_PARKED, ()).await {
         symbio_plugin_api::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
 

@@ -2,7 +2,7 @@
 //!
 //! ## 动作体就是整轮 future
 //!
-//! 本模块不维护任务表、不记轮次、不开通道：装配 `LoopSession` 与
+//! 本模块不维护任务表、不记轮次、不开通道：装配会话动作端口与
 //! [`ChatOrchestrator`] 之后直接 `await run_chat_loop`，结局以
 //! `TurnReport` 序列化进动作响应。session 侧
 //! 拿到的是「这一轮怎么结束的」，不是一串帧——帧已经经 `TurnDispatch.sink` 与
@@ -20,8 +20,7 @@ use symbio_sdk::turn::dispatch::{TurnDispatch, LOOP_RUN_TURN, TURN_DISPATCH};
 use symbio_sdk::vdfs::host::vdfs_host_ctx;
 
 use super::chat_loop::{run_chat_loop, ChatOrchestrator};
-use super::session_port::VdfsSessionPort;
-use super::turn_session::LoopSession;
+use super::session_port::{PortSession, SessionPort};
 
 /// 唯一入口（授权三条见 `plugin.rs` 的模块文档）。
 pub(super) async fn dispatch(
@@ -76,14 +75,9 @@ async fn run_turn(
     host: Arc<dyn PluginInvokeRequest>,
     dispatch: Arc<TurnDispatch>,
 ) -> symbio_sdk::turn::dispatch::TurnReport {
-    let sid = dispatch.spec.session_id.clone();
-    let port = Arc::new(VdfsSessionPort::new(
-        dispatch.parent.clone(),
-        host.clone(),
-        sid.clone(),
-    ));
+    let port: Arc<dyn SessionPort> = Arc::new(PortSession::new(host.clone()));
     let view = dispatch.spec.view();
-    let session = Arc::new(LoopSession::new(dispatch.spec.clone(), port));
+    let session = port;
     let settings = view.settings.clone();
     let orchestrator = Arc::new(ChatOrchestrator {
         parent: dispatch.parent.clone(),

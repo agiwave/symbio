@@ -24,13 +24,13 @@
 //!
 //! 环**不解释**端口载荷与产出（`I-6.2`）：`PortOutcome::facts` 里的每一项由引擎原样
 //! 搬进 `response` 的载荷（`{"facts": [...]}`）。本端口约定 **`facts` 的第一项就是
-//! 回体**，且只回纯值（标量 / 数组 / 事件），不回环类型、不回 `LoopSession` 概念。
+//! 回体**，且只回纯值（标量 / 数组 / 事件），不回环类型、不回驱动器的会话句柄概念。
 //!
 //! ## 执行体不读环状态
 //!
 //! 执行体只读 [`PortExecContext`] 的两个只读面：`ctx`（本轮交付包 `TURN_DISPATCH` 与
 //! 会话句柄）和 `emit`。它不回调环、不读环的在途债，也不持有 `Store` 句柄——历史
-//! 切片从交付包里的 `facts` 取（`LoopSession::facts_snapshot` 的同一条来源）。
+//! 切片从交付包里的 `facts` 取（与 `session-facts` 行同一条来源）。
 
 use std::sync::{Arc, Weak};
 

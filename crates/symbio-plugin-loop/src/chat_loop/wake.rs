@@ -30,7 +30,9 @@ use symbio_sdk::turn::dispatch::{run_ops, RemoveNodesRequest};
 use {symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn};
 
 use super::super::tool_dispatch::{ToolPort, Wake, WakeSpec};
-use super::super::turn_session::LoopSession;
+use super::super::session_port::SessionPort;
+
+use crate::session_port;
 
 /// 唤醒请求已入格：续写幕要复用的一切。
 pub(crate) struct Woken {
@@ -54,12 +56,11 @@ pub(crate) struct Woken {
 /// 「藏起来不读」归[分支投影](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，
 /// 一处是 [`symbio_sdk::projection::branch::branch_hide_unselected`]——只有进模型的那条路调它。
 pub(crate) async fn retry_subtree(
-    session: &LoopSession,
+    session: &Arc<dyn SessionPort>,
     target_id: &str,
 ) -> Result<(), PluginError> {
-    let messages = session
-        .run_op::<Vec<ChatNode>>(run_ops::MESSAGES, ())
-        .await?;
+    let messages =
+        session_port::call::<Vec<ChatNode>>(session.as_ref(), run_ops::MESSAGES, ()).await?;
 
     let turn_exists = messages.iter().any(|m| m.id == target_id && m.is_run());
     if !turn_exists {
@@ -76,13 +77,12 @@ pub(crate) async fn retry_subtree(
 ///
 /// 不在这里执行工具、不写授权 / 结果——那些归行表的授权行与派发行（d）。
 pub(crate) async fn land_tool_wake(
-    session: &LoopSession,
+    session: &Arc<dyn SessionPort>,
     facts: Option<Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>>,
     req: ResumeRequest,
 ) -> Result<Woken, PluginError> {
-    let messages = session
-        .run_op::<Vec<ChatNode>>(run_ops::MESSAGES, ())
-        .await?;
+    let messages =
+        session_port::call::<Vec<ChatNode>>(session.as_ref(), run_ops::MESSAGES, ()).await?;
 
     let tc_idx = messages
         .iter()
@@ -153,7 +153,7 @@ pub(crate) async fn land_tool_wake(
 /// 返回后 `turn.last_saved` 指向**新增消息的起点**：替换过的节点已由 `edit-nodes`
 /// 落过，`persist_messages` 的尾部增量只该包含真正新增的那几条。
 pub(crate) async fn merge_runner_messages(
-    session: &LoopSession,
+    session: &Arc<dyn SessionPort>,
     context: &mut super::state::SessionContext,
     turn: &mut super::state::TurnState,
     messages: Vec<ChatNode>,
@@ -166,9 +166,12 @@ pub(crate) async fn merge_runner_messages(
         let superseded = messages.iter().any(|m| m.id == old);
         if !superseded && context.messages.iter().any(|m| m.id == old) {
             context.messages.retain(|m| m.id != old);
-            session
-                .run_op_unit(run_ops::REMOVE_NODES, RemoveNodesRequest { ids: vec![old] })
-                .await?;
+            session_port::call_unit(
+                session.as_ref(),
+                run_ops::REMOVE_NODES,
+                RemoveNodesRequest { ids: vec![old] },
+            )
+            .await?;
         }
     }
 
@@ -184,15 +187,15 @@ pub(crate) async fn merge_runner_messages(
         }
     }
     if !edited.is_empty() {
-        session
-            .run_op::<Vec<ChatNode>>(
-                run_ops::EDIT_NODES,
-                symbio_sdk::turn::dispatch::EditNodesRequest {
-                    nodes: edited,
-                    frame: symbio_sdk::turn::dispatch::EditFrame::Message,
-                },
-            )
-            .await?;
+        session_port::call::<Vec<ChatNode>>(
+            session.as_ref(),
+            run_ops::EDIT_NODES,
+            symbio_sdk::turn::dispatch::EditNodesRequest {
+                nodes: edited,
+                frame: symbio_sdk::turn::dispatch::EditFrame::Message,
+            },
+        )
+        .await?;
     }
     turn.last_saved = tail_start;
     Ok(())

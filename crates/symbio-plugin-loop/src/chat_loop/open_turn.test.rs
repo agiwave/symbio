@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use super::super::super::test_support::{
-    default_settings, loop_session, turn_spec, FakeSessionPort,
+    default_settings, session_port_of, turn_spec, FakeSessionPort,
 };
 use super::super::state::{SessionContext, TurnRequest, TurnState};
 use super::{continue_stage, open, Anchor, OpeningKind};
@@ -44,7 +44,7 @@ fn context(messages: Vec<ChatNode>) -> (Arc<EventStore>, SessionContext) {
         default_settings(),
     );
     let view = spec.view();
-    let session = Arc::new(loop_session(spec, port));
+    let session = session_port_of(port);
     (
         facts.clone(),
         SessionContext {

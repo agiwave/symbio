@@ -169,12 +169,14 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
     };
     // 淘汰闸的部署级判据：取失败按「未收回」继续并出声——与「读不出的 WAL 跳过」的
     // 既有口径一致。取值点与接线前一致：开轮之前（轮首那几行不参加这个判断）。
-    let elimination_revoked = a
-        .session
-        .run_op::<bool>(run_ops::ELIMINATION_REVOKED, ())
-        .await
-        .unwrap_or_else(|e| {
-            symbio_plugin_api::plugin_warn!(
+    let elimination_revoked = session_port::call::<bool>(
+        a.session.as_ref(),
+        run_ops::ELIMINATION_REVOKED,
+        (),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        symbio_plugin_api::plugin_warn!(
                 "session",
                 "[Turn] 淘汰闸判据读取失败（按未收回处理，本轮继续）: {e}"
             );

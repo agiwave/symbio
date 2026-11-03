@@ -1,114 +1,141 @@
-//! 驱动器 → 会话的**动作面端口**（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4；
-//! 收窄见 [D-094](../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
+//! 驱动器 → 会话的**动作面客户端**（`port=session` 的 `session-call` / `session-call-unit` 行）。
 //!
-//! 驱动器切成独立插件后仍要读写**本会话**的转写、事实与压缩状态——那些状态的
-//! owner 全是 session。E-009 禁止 `use symbio_plugin_session`，于是这一侧只认
-//! 一个 trait，调用一律经统一地址面 `session/<sid>/_run/<op>` 派发（与 vdfs/route
-//! 同款「主动发起流程走端口/协议」的纪律）。
+//! 会话动作（转写 / 压缩 / 补充）的 owner 全是 session。驱动器不持会话引擎、也不认识
+//! 它的实现，只按端口名解析提供者，把「一次动作」包成两行契约之一：
 //!
-//! ## 为什么只有一个方法
+//! | 行 | 载荷（中性键） | 回体 |
+//! |---|---|---|
+//! | `session-call` | `{ row, op, payload }` | `{ data }` |
+//! | `session-call-unit` | `{ row, op, payload }` | `{}` |
 //!
-//! 它是一个 `call`（[D-094](../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）：op 名词表与
-//! 请求结构体都住 core（**载荷构造仍是编译期类型化的**），回体类型由调用点在
-//! `LoopSession::run_op<T>` 上标注。分派机制不按动作复制——加一个 loop→session
-//! 交互不用在这里加方法；丢的只有回体的编译期检查，而那会红，是响声
-//! （D-094「代价」1）。
+//! `op` 仍取 [`run_ops`] 那个装配期冻结的闭集（`D-094`）：端口不为每个动作加一行。
+//! 授权、载荷校验、回体装配都在提供者一侧（session 的 `run_at` / 端口执行体）。
 //!
-//! ## 为什么 trait 在本插件内
-//!
-//! 消费方只有 loop 一家，生产实现也只有 VDFS 一家。把 trait 提到 core 会把
-//! 「驱动器恰好需要这 15 个动作」冻结成机制层契约——而动作集随驱动器演化
-//! （D-083 §4：新增跨墙面要有论证，不是随手加一格）。
-//!
-//! 测试实现（fake port）同样在本插件内：E-009 连测试一起判，测试路径里的
-//! `symbio_plugin_session` 同样是墙外引用。
-//!
-//! ## 授权不在这里
-//!
-//! 本端口只是**客户端**。三条授权判据（`TURN_DISPATCH` 存在 / 令牌会话相符 /
-//! op 在闭集内）全在 session 的 `run_at`——端口不做、也无法做第二遍判定。
+//! 本模块只是**客户端**：取提供者、构造通用执行上下文、搬载荷与回体。端口缺席或
+//! 提供者没有执行面都**响亮失败**（不 panic、不退回第二份读法）。
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::Value;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use serde_json::{json, Value};
 
-use symbio_deploy::PLUGIN_ID_SESSION;
-use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest};
-use symbio_kernel::vdfs::{VdfsRequest, VdfsResponse};
-use symbio_sdk::turn::dispatch::run_ops;
-use symbio_sdk::vdfs::host::vdfs_context;
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_kernel::plugin::{PluginError, PluginInvokeRequest};
+use symbio_plugin_api::port::{
+    PortExecContext, PortFactEmit, PortInput, PortOutcome, PortProvider,
+};
 
-/// 驱动器对会话动作面的**窄端口**：一个方法，op 词表取 [`run_ops`] 常量。
+/// 端口名（与 `request` 事实载荷里的 `port` 同一个值，`DE-047` I-6.1）。
+const PORT: &str = "session";
+/// 行判别键（中性键）。
+const ROW_KEY: &str = "row";
+/// 有回体的动作行。
+const ROW_CALL: &str = "session-call";
+/// 只回执的动作行。
+const ROW_CALL_UNIT: &str = "session-call-unit";
+
+/// 驱动器对会话动作面的**窄端口**：两条行契约各一个方法。
 #[async_trait]
 pub(crate) trait SessionPort: Send + Sync {
-    /// 发一个内部动作：`op` 取 [`run_ops`] 常量，载荷与回体的形状由 core 的
-    /// 请求结构体定（两侧共用的词汇，不在本插件内私有）；无回体的动作
-    /// （session 侧 `data: None`）返回 [`Value::Null`]。
+    /// `session-call`：载荷与回体都按 `run_ops` 词表的请求结构体定。
     async fn call(&self, op: &str, payload: Value) -> Result<Value, PluginError>;
+
+    /// `session-call-unit`：只回执。
+    async fn call_unit(&self, op: &str, payload: Value) -> Result<(), PluginError>;
 }
 
-/// 经 VDFS 地址面调 session 的实现。
+/// 发一个**有回体**的动作（`session-call` 行）。
+pub(crate) async fn call<T: DeserializeOwned>(
+    port: &dyn SessionPort,
+    op: &str,
+    payload: impl Serialize,
+) -> Result<T, PluginError> {
+    let data = port.call(op, to_payload(op, payload)?).await?;
+    serde_json::from_value(data)
+        .map_err(|e| PluginError::InternalError(format!("会话动作回体不合法（{op}）：{e}")))
+}
+
+/// 发一个**无回体**的动作（`session-call-unit` 行）。
+pub(crate) async fn call_unit(
+    port: &dyn SessionPort,
+    op: &str,
+    payload: impl Serialize,
+) -> Result<(), PluginError> {
+    port.call_unit(op, to_payload(op, payload)?).await
+}
+
+/// 载荷序列化：失败只能是调用点传了不可序列化的值，按 `Internal` 出声。
+fn to_payload(op: &str, payload: impl Serialize) -> Result<Value, PluginError> {
+    serde_json::to_value(payload)
+        .map_err(|e| PluginError::InternalError(format!("动作载荷序列化失败（{op}）：{e}")))
+}
+
+/// 经能力表解析 `port=session` 提供者、按行契约派发的实现。
 ///
-/// 每次调用都现场取一次 provider（`parent.get_vfs_provider()`）：插件可能在运行期
-/// 重新装配，缓存 `Arc<dyn VdfsProvider>` 会钉住旧实例；而取 provider 本身是
-/// 一次读，不是热路径。
-pub(crate) struct VdfsSessionPort {
-    parent: Option<std::sync::Arc<dyn Plugin>>,
-    host_ctx: std::sync::Arc<dyn PluginInvokeRequest>,
-    session_id: String,
+/// 每次调用都现场取一次提供者（插件可能在运行期重新装配）：取提供者是一次读，
+/// 不是热路径。
+pub(crate) struct PortSession {
+    host_ctx: Arc<dyn PluginInvokeRequest>,
 }
 
-impl VdfsSessionPort {
-    pub(crate) fn new(
-        parent: Option<std::sync::Arc<dyn Plugin>>,
-        host_ctx: std::sync::Arc<dyn PluginInvokeRequest>,
-        session_id: String,
-    ) -> Self {
-        Self {
-            parent,
-            host_ctx,
-            session_id,
+impl PortSession {
+    pub(crate) fn new(host_ctx: Arc<dyn PluginInvokeRequest>) -> Self {
+        Self { host_ctx }
+    }
+
+    async fn invoke(
+        &self,
+        row: &'static str,
+        op: &str,
+        payload: Value,
+    ) -> Result<PortOutcome, PluginError> {
+        let provider = self.provider().await?;
+        let executor = provider.executor().ok_or_else(|| {
+            PluginError::NotFound("会话端口提供者没有交执行面".to_string())
+        })?;
+        let exec = PortExecContext {
+            deadline_ms: None,
+            abort: ExecAbortSignal::new(),
+            idempotency_key: format!("{row}:{op}"),
+            sink: ExecEventSink::Null,
+            emit: PortFactEmit::silent(),
+            ctx: Some(self.host_ctx.clone()),
+        };
+        let input = PortInput {
+            port: PORT,
+            payload: json!({ ROW_KEY: row, "op": op, "payload": payload }),
+        };
+        let outcome = executor.execute(exec, input).await;
+        if let Some((_, why)) = outcome.error {
+            return Err(PluginError::InternalError(format!(
+                "会话动作失败（{op}）：{why}"
+            )));
         }
+        Ok(outcome)
+    }
+
+    async fn provider(&self) -> Result<Arc<dyn PortProvider>, PluginError> {
+        super::port::provider_of(&self.host_ctx, PORT)
+            .await
+            .ok_or_else(|| PluginError::NotFound("会话端口没有可用提供者".to_string()))
     }
 }
 
 #[async_trait]
-impl SessionPort for VdfsSessionPort {
+impl SessionPort for PortSession {
     async fn call(&self, op: &str, payload: Value) -> Result<Value, PluginError> {
-        let parent = self.parent.as_ref().ok_or_else(|| {
-            PluginError::NotFound("会话插件不可达（驱动器没有父插件）".to_string())
-        })?;
-        let provider = parent.clone().get_vfs_provider().ok_or_else(|| {
-            PluginError::NotFound("会话插件不可达（父插件未提供 VDFS 面）".to_string())
-        })?;
-        let path = format!(
-            "{PLUGIN_ID_SESSION}/{}/{}/{}",
-            self.session_id,
-            run_ops::SEG,
-            op
-        );
-        let ctx = vdfs_context(&self.host_ctx);
-        let req = VdfsRequest::Action {
-            action: op.to_string(),
-            payload: Some(payload),
-        };
-        let resp = provider
-            .dispatch(&ctx, &path, req)
-            .await
-            .map_err(|e| match e {
-                symbio_kernel::vdfs::VdfsError::NotFound(m) => PluginError::NotFound(m),
-                other => PluginError::InternalError(format!("会话动作派发失败（{op}）：{other}")),
-            })?;
-        let VdfsResponse::Action(result) = resp else {
-            return Err(PluginError::InternalError(format!(
-                "动作面返回了非动作响应：{path}"
-            )));
-        };
-        if !result.ok {
-            return Err(PluginError::InternalError(format!(
-                "会话动作失败（{op}）：{}",
-                result.message
-            )));
-        }
-        Ok(result.data.unwrap_or(Value::Null))
+        let outcome = self.invoke(ROW_CALL, op, payload).await?;
+        Ok(outcome
+            .facts
+            .first()
+            .and_then(|reply| reply.get("data"))
+            .cloned()
+            .unwrap_or(Value::Null))
+    }
+
+    async fn call_unit(&self, op: &str, payload: Value) -> Result<(), PluginError> {
+        self.invoke(ROW_CALL_UNIT, op, payload).await.map(|_| ())
     }
 }

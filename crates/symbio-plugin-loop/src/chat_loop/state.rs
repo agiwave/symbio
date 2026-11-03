@@ -47,7 +47,7 @@ pub(crate) fn request_source_principal(
 /// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。它有**真读方**：写侧收束闸 `turn_runner::closure_gate` 读规格自己的这份集合（`actor_can_land_speech` / `actor_can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`pattern_for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
 /// | `budget_ms` | 主体的**声明档**：由 `pattern` 派生（[`declared_budget`]——模式三值本来就按时延分）。它**不是**本幕的预算——本幕的档位要等轮首四行跑完才折得出来（`D-223` 订正 1），而主体在幕首就建（`D-222` 订正 3）。本幕实际用的档与预算归 `turn.dispatch` 那一格（`chat_loop::land_dispatch` 由档位直接折 `budget_ms`），`I3` 读的永远是那一格 |
-/// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算） |
+/// | `scope` | `SessionView.scope`（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算） |
 ///
 /// 决策 D-065 见 [D-065](../../../../docs/003-design/011-Agent目录规范.md#d-065-对等侧收束commitmentasserted-缺的不是写方而是对等-offerassert②-与-③-同一批收束格按种类判 "D-065")
 ///
@@ -132,8 +132,8 @@ pub(crate) struct SessionContext {
     pub view: symbio_sdk::turn::dispatch::SessionView,
     /// 本会话事实轨（`session-facts` 回体的同一个来源；`None` = 临时会话）。
     pub facts: Option<Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>>,
-    /// 会话动作入口（b2-2 之后这里只剩 `run_op` / `run_op_unit`）。
-    pub session: Arc<super::super::turn_session::LoopSession>,
+    /// 会话动作入口（`port=session` 的 `session-call` / `session-call-unit` 行）。
+    pub session: Arc<dyn super::super::session_port::SessionPort>,
     /// **本轮发生过的压缩**（压缩后的整份消息列表）。
     ///
     /// ## 为什么不在压缩现场直接落格
@@ -340,11 +340,11 @@ pub struct ChatOrchestrator {
     pub view: symbio_sdk::turn::dispatch::SessionView,
     /// 本会话事实轨（`session-facts` 回体的同一个来源；`None` = 临时会话）。
     pub facts: Option<Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>>,
-    /// 本轮会话动作入口（见 `LoopSession`）——b2-2 只剩 `run_op` / `run_op_unit`。
+    /// 本轮会话动作入口：`port=session` 的 `session-call` / `session-call-unit` 行。
     ///
     /// 转写、压缩熔断、用户补充队列都在 session 墙内，这里只经端口读写——
     /// 驱动器不持 `PersistentChatSession`（E-009）。
-    pub session: Arc<super::super::turn_session::LoopSession>,
+    pub session: Arc<dyn super::super::session_port::SessionPort>,
     /// 压缩增量改道用的转写写口（`TurnDispatch.writer`：session 的转写唯一写入点）。
     pub writer: Arc<dyn symbio_kernel::exec::ExecTranscriptWriter>,
     /// 对话面措辞的**请求级开关快照**（`SessionConfig::compose_enabled`）。

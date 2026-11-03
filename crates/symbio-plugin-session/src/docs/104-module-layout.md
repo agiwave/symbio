@@ -81,7 +81,7 @@ impl: done
 | 层 | 落点 | 职责 |
 |---|---|---|
 | 入口 | `plugin.rs` · `provider.rs` · `mod.rs` | 插件的唯一入口：`loop/<sid>` 的 `Action("run_turn")`（授权三条见 `plugin.rs` 模块文档）。**没有 `route` 臂、没有能力行、没有常驻任务**——它贡献 1 条 Mount 行，停用即 `NotFound` |
-| 跨墙面 | `session_port.rs` · `turn_session.rs` | 数据面经 `TurnDispatch`（`TurnSpec` 纯值 + 闭族对象）；会话侧读写只走地址面 `session/<sid>/_run/<op>`（`SessionPort`），不 import 会话模块（E-009 / E-013） |
+| 跨墙面 | `session_port.rs` | 数据面经 `TurnDispatch`（`TurnSpec` 纯值 + 闭族对象）；会话侧读写只走 `port=session` 的 `session-config` / `session-facts` / `session-call` / `session-call-unit` 四行，不 import 会话模块（E-009 / E-013） |
 | 主循环 | `chat_loop.rs` + `chat_loop/{state,inputs,turn,compose,delegate,drive}.rs` · `loop_rows.rs` · `report_exec.rs` · `stage_events.rs` · `turn_runner.rs` · `turn_exec.rs` | 环骨架、状态与契约、输入准备、**行表**、汇报的落点与能力口、阶段事实、执行引擎与单环派发器。`loop_rows.rs` 每行 = `Decl` 数据（`owes` / `until` / `unless` + 全局 `prio`）；**只有一张绑定表**，派发器 `turn_exec::drive` 向 `ring::drive` 传全表，结论由引擎现读；声明与视图在 `symbio_kernel::decl`（DE-015） |
 | 上下文与请求 | `context.rs` + `context/{pipeline,view,prompt}.rs` · `message_build.rs` · `tokenizer.rs` · `model_chat.rs` | 压缩 / 注入 / 请求视图、助手轮装配、Token 估算与头尾切分、Model 推理请求协议 |
 | 工具与分派 | `tools.rs` + `tools/{tool_executor,tool_result_guard}.rs` · `tool_dispatch.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档 |

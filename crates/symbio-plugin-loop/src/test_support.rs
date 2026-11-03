@@ -31,7 +31,6 @@ use symbio_sdk::turn::dispatch::{
 };
 
 use super::session_port::SessionPort;
-use super::turn_session::LoopSession;
 
 /// 内存版会话动作面：消息列表 + 动作记录 + 一份共享事实轨。
 pub(crate) struct FakeSessionPort {
@@ -156,6 +155,10 @@ impl SessionPort for FakeSessionPort {
             ))),
         }
     }
+
+    async fn call_unit(&self, op: &str, payload: Value) -> Result<(), PluginError> {
+        self.call(op, payload).await.map(|_| ())
+    }
 }
 
 /// 交付包的出厂形状（路径取临时目录，测试不读写会话存储）。
@@ -198,9 +201,9 @@ pub(crate) fn default_settings() -> TurnSettings {
     }
 }
 
-/// 会话句柄：事实轨与端口共持同一份内存事实。
-pub(crate) fn loop_session(spec: TurnSpec, port: Arc<FakeSessionPort>) -> LoopSession {
-    LoopSession::new(spec, port)
+/// 把假件收成驱动器唯一的会话动作面。
+pub(crate) fn session_port_of(port: Arc<FakeSessionPort>) -> Arc<dyn SessionPort> {
+    port
 }
 
 // ==================== 能力包替身：`memory.live`（DE-026 D-268）====================

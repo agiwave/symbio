@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use crate::session_port;
+
 use symbio_kernel::dialog::{DecideRequest, DecideOutcome, DecisionPlan, ParseVerdictRequest, Verdict};
 use symbio_kernel::exec::ExecAbortSignal;
 use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
@@ -424,14 +426,13 @@ pub(crate) async fn recall(
     let recall_viewer = symbio_sdk::authz::request_principal(ctx.as_ref());
     let facts = context.facts_snapshot();
     let mut view = super::super::memory_events::recall_view(
-        context
-            .session
-            .run_op::<Vec<symbio_sdk::turn::facts::FleetSnapshot>>(
-                symbio_sdk::turn::dispatch::run_ops::RECALL_SNAPSHOTS,
-                (),
-            )
-            .await
-            .map_err(ActorError::Read)?,
+        session_port::call::<Vec<symbio_sdk::turn::facts::FleetSnapshot>>(
+            context.session.as_ref(),
+            symbio_sdk::turn::dispatch::run_ops::RECALL_SNAPSHOTS,
+            (),
+        )
+        .await
+        .map_err(ActorError::Read)?,
         recall_query.as_deref(),
         &recall_viewer,
     )

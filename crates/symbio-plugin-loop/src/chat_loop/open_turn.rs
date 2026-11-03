@@ -28,6 +28,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use symbio_kernel::event::{Entity, Event, Seq, Verb, EVENT_REQUEST};
 use symbio_kernel::plugin::PluginError;
@@ -38,7 +39,7 @@ use symbio_sdk::projection::turns::count_user_messages;
 use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, MESSAGE_VOCAB};
 
 use super::super::stage_events::{self, StageFact};
-use super::super::turn_session::LoopSession;
+use super::super::session_port::SessionPort;
 use super::state::{SessionContext, TurnExit, TurnRequest, TurnState};
 
 /// 一行幕锚：名字、写格、动作。
@@ -58,7 +59,7 @@ pub(crate) struct OpeningCtx<'a> {
     pub(crate) context: &'a SessionContext,
     pub(crate) turn: &'a mut TurnState,
     pub(crate) req: &'a TurnRequest,
-    pub(crate) session: &'a LoopSession,
+    pub(crate) session: &'a Arc<dyn SessionPort>,
     /// 本轮的调用面：分支事实的 actor 取自它的授权主体。
     pub(crate) request_ctx: &'a std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     /// 本次请求的恢复动作（`None` = 新轮 / 再接一幕）。

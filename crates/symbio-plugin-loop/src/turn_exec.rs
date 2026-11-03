@@ -112,11 +112,11 @@ use symbio_sdk::invariants::is_stop_fact;
 use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest, SessionView};
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
-// 留在持令牌的 session）；本文件只剩轮内调用点，经 [`LoopSession`] 的端口动作发起。
+// 留在持令牌的 session）；本文件只剩轮内调用点，经 `port=session` 的动作行发起。
 use super::turn_runner::{TurnInput, TurnRunner, TurnSession, TurnSessionBegin};
 // 运行器一族**已下沉到本插件**（2026-10-09，见 `turn_runner.rs` 的头注）：它们不是 core 的
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
-use super::turn_session::LoopSession;
+use super::session_port::{self, SessionPort};
 
 // —— 阶段分层 ——
 // 四个处理阶段各自成文件；再导出保持 `turn_exec::*` 的既有路径不变
@@ -630,12 +630,11 @@ pub(crate) type SupplementFn = Arc<
 >;
 
 pub(crate) struct ExecTurn<'a> {
-    /// 会话窄句柄（交付包 + 动作面端口；不持有会话存储实现）。
+    /// 会话动作面（`port=session` 的两行契约；不持有会话存储实现）。
     ///
-    /// 借的是 `Arc` 而不是 `&LoopSession`：幕首之后装配结果要**按值**活过整幕
-    /// （控制面只有一个环，幕与幕在同一次调用里接续），借来的引用活不到那一刻；
-    /// 而 `Arc` 只是句柄的克隆，仍然是同一个实例。
-    pub session: &'a Arc<LoopSession>,
+    /// 按值带着：幕首之后装配结果要**按值**活过整幕（控制面只有一个环，幕与幕在同一次
+    /// 调用里接续），借来的引用活不到那一刻；`Arc` 只是端口句柄的克隆。
+    pub session: Arc<dyn SessionPort>,
     /// 会话配置八格（`session-config` 回体的同一个投影，owned 以便装配束带走）。
     pub view: SessionView,
     /// 本会话事实轨（`session-facts` 回体的同一个来源；`None` = 临时会话）。
@@ -763,8 +762,8 @@ pub(crate) struct Ctx<'a> {
 pub(crate) struct HeadCtx<'a> {
     pub(crate) orchestrator: &'a super::chat_loop::state::ChatOrchestrator,
     pub(crate) request_ctx: &'a Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
-    /// 会话窄句柄：压缩 / 补落寄存 / 工具存档目录这些**会话动作**的入口。
-    pub(crate) loop_session: &'a LoopSession,
+    /// 会话动作面：压缩 / 补落寄存这些**会话动作**的入口。
+    pub(crate) loop_session: &'a Arc<dyn SessionPort>,
     pub(crate) context: &'a mut super::chat_loop::state::SessionContext,
     pub(crate) turn: &'a mut super::chat_loop::state::TurnState,
     /// 请求级配置快照：续幕要按同一份配置重落 `session.config`。
@@ -790,7 +789,7 @@ pub(crate) struct HeadCtx<'a> {
 pub(crate) struct HeadParts<'h> {
     pub(crate) orchestrator: Arc<super::chat_loop::state::ChatOrchestrator>,
     pub(crate) request_ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
-    pub(crate) loop_session: Arc<LoopSession>,
+    pub(crate) loop_session: Arc<dyn SessionPort>,
     pub(crate) context: &'h mut super::chat_loop::state::SessionContext,
     pub(crate) turn: &'h mut super::chat_loop::state::TurnState,
     pub(crate) req: &'h super::chat_loop::state::TurnRequest,
@@ -811,7 +810,7 @@ impl<'h> HeadParts<'h> {
         HeadCtx {
             orchestrator: self.orchestrator.as_ref(),
             request_ctx: &self.request_ctx,
-            loop_session: self.loop_session.as_ref(),
+            loop_session: &self.loop_session,
             context: &mut *self.context,
             turn: &mut *self.turn,
             req: self.req,
@@ -1116,7 +1115,8 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             reason: o.dialog_reason,
             exclude_from_context: true,
         });
-        self::assemble::land_consolidation(head.loop_session, consolidation.as_deref()).await;
+        self::assemble::land_consolidation(head.loop_session.as_ref(), consolidation.as_deref())
+            .await;
         let sections = super::chat_loop::inputs::prepare_request_sections(
             head.orchestrator,
             head.request_ctx,
