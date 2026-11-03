@@ -183,7 +183,7 @@ fn run_open_turn<'a, 'b>(
 /// 落一幕的锚。同步：只有事实写入与纯读，没有跨边界往返。
 pub(crate) fn open(
     context: &SessionContext,
-    turn: &mut TurnState,
+    state: &mut TurnState,
     req: &TurnRequest,
     kind: OpeningKind,
     anchor: Anchor,
@@ -202,9 +202,9 @@ pub(crate) fn open(
     // ── 行表是开幕的前提（DE-015 §3.4：装载失败即拒绝启动，不许部分成功）──────
     let frozen = super::super::loop_rows::table().map_err(TurnExit::Failed)?;
     let snapshot = store.range(Seq::new(0));
-    let (turn_no, user_seq, user_text, round, anchor) = match kind {
+    let (stage_no, user_seq, user_text, round, anchor) = match kind {
         OpeningKind::Resume(kind) => {
-            let (turn_no, user_seq) = super::super::turn_exec::last_open_turn(&snapshot)
+            let (stage_no, user_seq) = super::super::turn_exec::last_open_turn(&snapshot)
                 .ok_or_else(|| {
                     TurnExit::Failed(PluginError::InternalError(
                         "续写轮找不到未收束的轮次（事实源与恢复路径不一致）".into(),
@@ -213,32 +213,37 @@ pub(crate) fn open(
             let ordinal = snapshot
                 .iter()
                 .filter(|e| {
-                    e.turn == turn_no
+                    e.turn == stage_no
                         && e.kind == EVENT_TURN_STAGE
                         && e.payload.get("stage").and_then(|v| v.as_str()) == Some("resume")
                 })
                 .count()
                 + 1;
-            let stage =
-                StageFact::resume(turn.round(), kind, &ordinal.to_string()).with_replaces(replaces);
-            let seqs =
-                stage_events::land_with_seqs(store.as_ref(), turn_no, user_seq, "system", &[stage])
-                    .map_err(|e| {
-                        TurnExit::Failed(PluginError::InternalError(format!(
-                            "恢复阶段事实落格失败：{e:?}"
-                        )))
-                    })?;
+            let stage = StageFact::resume(state.round(), kind, &ordinal.to_string())
+                .with_replaces(replaces);
+            let seqs = stage_events::land_with_seqs(
+                store.as_ref(),
+                stage_no,
+                user_seq,
+                "system",
+                &[stage],
+            )
+            .map_err(|e| {
+                TurnExit::Failed(PluginError::InternalError(format!(
+                    "恢复阶段事实落格失败：{e:?}"
+                )))
+            })?;
             let drive_seq = seqs.first().copied().unwrap_or(0);
             (
-                turn_no,
+                stage_no,
                 user_seq,
                 last_user_message(context).1,
-                turn.round(),
+                state.round(),
                 Some(drive_seq),
             )
         }
         OpeningKind::NewTurn => {
-            let turn_no = count_user_messages(&snapshot, &CHAT_VOCAB, &MESSAGE_VOCAB);
+            let stage_no = count_user_messages(&snapshot, &CHAT_VOCAB, &MESSAGE_VOCAB);
             let (node_id, text, meta) = last_user_message(context);
             let mut payload = serde_json::json!({ "text": text, "id": node_id });
             if let Some(meta) = meta.filter(|m| !m.is_null()) {
@@ -247,11 +252,11 @@ pub(crate) fn open(
             let seq = store
                 .append(
                     Event::pending(
-                        format!("u-{turn_no}"),
+                        format!("u-{stage_no}"),
                         EVENT_USER_MESSAGE,
                         Entity::Turn,
                         Verb::Opened,
-                        turn_no,
+                        stage_no,
                         "user",
                     )
                     .with_payload(payload),
@@ -259,21 +264,27 @@ pub(crate) fn open(
                 .map_err(|e| {
                     TurnExit::Failed(PluginError::InternalError(format!("用户格落格失败：{e:?}")))
                 })?;
-            (turn_no, seq.value(), text, turn.round(), Some(seq.value()))
+            (
+                stage_no,
+                seq.value(),
+                text,
+                state.round(),
+                Some(seq.value()),
+            )
         }
         OpeningKind::Continue => {
             // 轮次由**那一格**回答（`turn_next_round`）：`continue-turn` 的前件与
             // 这里读的是同一个视图，不在这里按「当前轮次 + 1」再数一遍。
             let round =
-                super::super::loop_rows::next_stage_round(&snapshot, turn.turn_no, turn.now_ms)
+                super::super::loop_rows::next_stage_round(&snapshot, state.turn_no, state.now_ms)
                     .ok_or_else(|| {
-                        TurnExit::Failed(PluginError::InternalError(
-                            "续幕没有下一轮的判据（continue-turn 的前件与事实不一致）".into(),
-                        ))
-                    })?;
+                    TurnExit::Failed(PluginError::InternalError(
+                        "续幕没有下一轮的判据（continue-turn 的前件与事实不一致）".into(),
+                    ))
+                })?;
             (
-                turn.turn_no,
-                turn.user_seq,
+                state.turn_no,
+                state.user_seq,
                 last_user_message(context).1,
                 usize::try_from(round).unwrap_or(usize::MAX),
                 None,
@@ -296,7 +307,7 @@ pub(crate) fn open(
                     symbio_plugin_api::events::EVENT_TURN_BRANCH,
                     Entity::Turn,
                     Verb::Asserted,
-                    turn_no,
+                    stage_no,
                     actor,
                 )
                 .with_produced_by(user_seq)
@@ -314,7 +325,7 @@ pub(crate) fn open(
         None => {
             let seqs = stage_events::land_with_seqs(
                 store.as_ref(),
-                turn_no,
+                stage_no,
                 user_seq,
                 "system",
                 &[StageFact::request_round(round, &round.to_string())],
@@ -354,11 +365,11 @@ pub(crate) fn open(
     store
         .append(
             Event::pending(
-                format!("cfg-{turn_no}-{drive_seq}"),
+                format!("cfg-{stage_no}-{drive_seq}"),
                 EVENT_SESSION_CONFIG,
                 Entity::Turn,
                 Verb::Asserted,
-                turn_no,
+                stage_no,
                 "system",
             )
             .with_produced_by(user_seq)
@@ -384,7 +395,7 @@ pub(crate) fn open(
     if !round_landed {
         stage_events::land(
             store.as_ref(),
-            turn_no,
+            stage_no,
             user_seq,
             "system",
             &[StageFact::request_round(round, &drive_seq.to_string())],
@@ -395,11 +406,11 @@ pub(crate) fn open(
             )))
         })?;
     }
-    turn.turn_no = turn_no;
-    turn.user_seq = user_seq;
-    turn.drive_seq = drive_seq;
-    turn.now_ms = now_ms;
-    turn.facts = store.range(Seq::new(0));
+    state.turn_no = stage_no;
+    state.user_seq = user_seq;
+    state.drive_seq = drive_seq;
+    state.now_ms = now_ms;
+    state.facts = store.range(Seq::new(0));
     Ok(Opened {
         user_text,
         root_id: Some(root_id),
@@ -419,12 +430,12 @@ pub(crate) enum OpeningKind {
 /// 再接一幕（`continue-turn` 行的动作）：只落 `round` 格与配置，不碰用户格。
 pub(crate) fn continue_stage(
     context: &SessionContext,
-    turn: &mut TurnState,
+    state: &mut TurnState,
     req: &TurnRequest,
 ) -> Result<(), TurnExit> {
     open(
         context,
-        turn,
+        state,
         req,
         OpeningKind::Continue,
         Anchor::default(),
@@ -458,9 +469,10 @@ pub(crate) fn current_user_text(context: &SessionContext) -> String {
 }
 
 /// 续写幕要替换的旧结果子节点——**从恢复格读回**（不再在 `TurnState` 上存一份）。
-pub(crate) fn resume_replaces(turn: &TurnState) -> Option<String> {
-    let anchor = Seq::new(turn.drive_seq);
-    turn.facts
+pub(crate) fn resume_replaces(state: &TurnState) -> Option<String> {
+    let anchor = Seq::new(state.drive_seq);
+    state
+        .facts
         .iter()
         .rev()
         .find(|e| {

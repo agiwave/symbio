@@ -40,23 +40,23 @@ pub(crate) async fn classify(
     ctx: &Arc<dyn PluginInvokeRequest>,
     store: &Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
     context: &mut SessionContext,
-    turn: &mut TurnState,
+    state: &mut TurnState,
 ) -> Result<(), ActorError> {
-    let Some(utterance) = turn.user_text() else {
+    let Some(utterance) = state.user_text() else {
         return Ok(());
     };
-    let round = turn.round();
+    let round = state.round();
 
     // 模型服务缺席不是「判不出来」：落失败格并中止，不许静默滑进工具循环
     // （D-298；此前那条路径在这里被折叠成了「无判决」）。
-    let decision = match decide(orchestrator, ctx, context, turn, &utterance).await {
+    let decision = match decide(orchestrator, ctx, context, state, &utterance).await {
         Ok(decision) => decision,
         Err(e) => {
             let fact = StageFact::classify(round, None, 0).with_result("failed");
             super::super::stage_events::land(
                 &**store,
-                turn.turn_no,
-                turn.user_seq,
+                state.turn_no,
+                state.user_seq,
                 &symbio_sdk::authz::request_principal(ctx.as_ref()),
                 &[fact],
             )
@@ -69,7 +69,7 @@ pub(crate) async fn classify(
     let snapshot = symbio_kernel::dialog::RunSnapshot::default();
     let (result, answer, opening) = match verdict.clone() {
         Some(verdict) => {
-            execute_verdict(orchestrator, ctx, context, turn, verdict, &snapshot).await
+            execute_verdict(orchestrator, ctx, context, state, verdict, &snapshot).await
         }
         None => ("proceed".to_string(), None, None),
     };
@@ -84,8 +84,8 @@ pub(crate) async fn classify(
     }
     super::super::stage_events::land(
         &**store,
-        turn.turn_no,
-        turn.user_seq,
+        state.turn_no,
+        state.user_seq,
         &symbio_sdk::authz::request_principal(ctx.as_ref()),
         &[fact],
     )
@@ -102,7 +102,7 @@ async fn execute_verdict(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
-    turn: &TurnState,
+    state: &TurnState,
     verdict: Verdict,
     snapshot: &symbio_kernel::dialog::RunSnapshot,
 ) -> (String, Option<AnswerFact>, Option<OpeningFact>) {
@@ -114,7 +114,7 @@ async fn execute_verdict(
     match &verdict {
         Verdict::Answered { reason } => {
             let reply = if verdict.needs_wording_generation() {
-                wording_round_trip(orchestrator, ctx, context, turn, &verdict, snapshot).await
+                wording_round_trip(orchestrator, ctx, context, state, &verdict, snapshot).await
             } else {
                 compose_text(orchestrator, ctx, context, &verdict, snapshot).await
             };
@@ -141,7 +141,7 @@ async fn execute_verdict(
             (
                 "answered".to_string(),
                 Some(AnswerFact {
-                    utterance: turn.user_text().unwrap_or_default(),
+                    utterance: state.user_text().unwrap_or_default(),
                     reply: reply.text,
                     cost_ms: reply.cost_ms,
                     dialog_id,
@@ -214,7 +214,7 @@ async fn decide(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &SessionContext,
-    turn: &TurnState,
+    state: &TurnState,
     utterance: &str,
 ) -> Result<Decision, PluginError> {
     let Some(parent) = orchestrator.parent.as_ref() else {
@@ -293,13 +293,13 @@ async fn decide(
         DecideOutcome::NeedsModel { plan } => plan,
     };
 
-    decide_by_model(ctx, context, turn, parent, session_id, plan).await
+    decide_by_model(ctx, context, state, parent, session_id, plan).await
 }
 
 async fn decide_by_model(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &SessionContext,
-    turn: &TurnState,
+    state: &TurnState,
     parent: &Arc<dyn Plugin>,
     session_id: String,
     plan: DecisionPlan,
@@ -310,12 +310,12 @@ async fn decide_by_model(
         ));
     };
 
-    let step = format!("c{}", turn.round());
+    let step = format!("c{}", state.round());
     let round = Round {
-        turn: turn.turn_no,
-        produced_by: turn.user_seq,
-        drive_seq: turn.drive_seq,
-        now: turn.now_ms,
+        turn: state.turn_no,
+        produced_by: state.user_seq,
+        drive_seq: state.drive_seq,
+        now: state.now_ms,
         step: &step,
         via: "classify/decide",
     };
@@ -424,7 +424,7 @@ pub(crate) async fn recall(
     ctx: &Arc<dyn PluginInvokeRequest>,
     store: &dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
     context: &SessionContext,
-    turn: &mut TurnState,
+    state: &mut TurnState,
 ) -> Result<(), ActorError> {
     let recall_query = last_user_text(context);
     let recall_viewer = symbio_sdk::authz::request_principal(ctx.as_ref());
@@ -458,7 +458,7 @@ pub(crate) async fn recall(
 
     let resumed = facts
         .iter()
-        .find(|e| e.seq.map(|s| s.value()) == Some(turn.drive_seq))
+        .find(|e| e.seq.map(|s| s.value()) == Some(state.drive_seq))
         .is_some_and(|e| {
             e.kind == super::super::control_decl::EVENT_TURN_STAGE
                 && e.payload.get("stage").and_then(serde_json::Value::as_str) == Some("resume")
@@ -471,12 +471,12 @@ pub(crate) async fn recall(
         .collect();
     super::super::stage_events::land(
         store,
-        turn.turn_no,
-        turn.user_seq,
+        state.turn_no,
+        state.user_seq,
         &recall_viewer,
         &[StageFact::recall(
-            turn.round(),
-            turn.drive_seq,
+            state.round(),
+            state.drive_seq,
             &entries,
             resumed,
             view.degraded,
@@ -492,24 +492,24 @@ pub(crate) async fn compress(
     ctx: &Arc<dyn PluginInvokeRequest>,
     store: &Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
     context: &mut SessionContext,
-    turn: &mut TurnState,
+    state: &mut TurnState,
     system_prompt: &str,
     tools: &[symbio_kernel::capability::CapabilityMeta],
 ) -> Result<(), ActorError> {
     let overhead_tokens = super::super::context::estimate_overhead_with_tools(system_prompt, tools);
     let compress = Compress::new(
         store.clone(),
-        turn.turn_no,
-        turn.user_seq,
-        turn.drive_seq,
-        turn.now_ms,
-        turn.round(),
+        state.turn_no,
+        state.user_seq,
+        state.drive_seq,
+        state.now_ms,
+        state.round(),
     );
     match super::super::context::auto_compress_process(
         orchestrator,
         context,
         ctx,
-        &turn.abort,
+        &state.abort,
         overhead_tokens,
         false,
         Some(&compress),
@@ -522,7 +522,7 @@ pub(crate) async fn compress(
                 "[Compress] 上下文已压缩：{} 条消息 → 1 条摘要",
                 history_count
             );
-            turn.last_saved = context.messages.len();
+            state.last_saved = context.messages.len();
         }
         Ok(None) => {}
         Err(e) => {
@@ -531,13 +531,13 @@ pub(crate) async fn compress(
     }
     super::super::stage_events::land(
         store.as_ref(),
-        turn.turn_no,
-        turn.user_seq,
+        state.turn_no,
+        state.user_seq,
         &symbio_sdk::authz::request_principal(ctx.as_ref()),
         &[StageFact::compress(
-            turn.round(),
+            state.round(),
             compress.calls(),
-            turn.drive_seq,
+            state.drive_seq,
         )],
     )
     .map_err(ActorError::Append)?;

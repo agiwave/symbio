@@ -190,7 +190,7 @@ impl StageRuntime {
         orchestrator: Arc<ChatOrchestrator>,
         request_ctx: Arc<dyn PluginInvokeRequest>,
         context: &'h mut SessionContext,
-        turn: &'h mut TurnState,
+        state: &'h mut TurnState,
         req: &'h TurnRequest,
     ) -> Option<HeadParts<'h>> {
         let host = self.host.as_ref()?;
@@ -199,7 +199,7 @@ impl StageRuntime {
             request_ctx,
             loop_session: host.assembled.session.clone(),
             context,
-            turn,
+            turn: state,
             req,
             bridge: host.assembled.bridge.clone(),
             event_sink: host.assembled.sink.clone(),
@@ -373,15 +373,15 @@ async fn run_loop<'a>(
             // 业务语义分支（`D-118` 决策 2）。
             let facts = st.store.range(Seq::new(0));
             let now = st.draft.now_ms();
-            let turn_no = st.draft.turn();
-            let next = match loop_rows::next(&facts, turn_no, now, actors) {
+            let stage_no = st.draft.turn();
+            let next = match loop_rows::next(&facts, stage_no, now, actors) {
                 Some(next) => next,
                 // 没有可还的债：要么已经收束，要么表装载失败 / 只剩 blocked 行。
                 // 「只剩 blocked 行」有两种处境（`D-126`）：有一笔已派出未收清的往返
                 // 时这一轮不是「没事」，是「在等」——混成一个值会让「为什么停」在
                 // 事实面上不可判，而恢复路径恰恰要认这一种。
                 None => {
-                    let detail = if loop_rows::waiting(&facts, turn_no, now) {
+                    let detail = if loop_rows::waiting(&facts, stage_no, now) {
                         "waiting"
                     } else {
                         "no_progress"
@@ -404,12 +404,12 @@ async fn run_loop<'a>(
             // 工作），而上界约束的是**一幕之内**的往返。
             if retiring.is_none()
                 && st.draft.over_step_limit(&facts)
-                && !loop_rows::waiting(&facts, turn_no, now)
+                && !loop_rows::waiting(&facts, stage_no, now)
             {
                 symbio_plugin_api::plugin_warn!(
                     "actors",
                     "[v2] 轮内步数超过上限（turn={}），收束为 exhausted（step_limit）",
-                    turn_no
+                    stage_no
                 );
                 break 'step StepEnd::Settled(exhausted(st, "step_limit").await?);
             }
@@ -484,14 +484,14 @@ async fn run_loop<'a>(
                     next.by,
                     offender,
                     next.row,
-                    turn_no
+                    stage_no
                 );
                 break 'step StepEnd::Settled(exhausted(st, "undeclared-write").await?);
             }
             // 收束判断读账本（`D-123` 决策 5）：产出是收束那一步寄存进草稿的。
             if let Some(closing) = ledger
                 .iter()
-                .find(|e| crate::turn_exec::ends_the_drive(e, turn_no))
+                .find(|e| crate::turn_exec::ends_the_drive(e, stage_no))
             {
                 let Some(outcome) = st.draft.take_settled() else {
                     // 账本说收了工、草稿里没有产出 = 有一条收束路径写了停机格却没寄存
@@ -502,7 +502,7 @@ async fn run_loop<'a>(
                         next.by,
                         closing.kind,
                         next.row,
-                        turn_no
+                        stage_no
                     );
                     break 'step StepEnd::Settled(exhausted(st, "unrecorded-outcome").await?);
                 };
@@ -511,7 +511,7 @@ async fn run_loop<'a>(
             // 守卫五：空账本（`D-118` 决策 7 + `D-123` 决策 1）。「没写」有两种
             // （`D-222` 订正 2）：一次动作把在飞的 future poll 了一次、它还没好——
             // 那不是没账可还，是环**合法地不前进**（等 I/O）。判据靠形状。
-            if ledger.is_empty() && !loop_rows::waiting(&facts, turn_no, now) {
+            if ledger.is_empty() && !loop_rows::waiting(&facts, stage_no, now) {
                 break 'step StepEnd::Settled(exhausted(st, "no_progress").await?);
             }
             StepEnd::Continue
@@ -576,7 +576,7 @@ pub(crate) async fn open_stage(
         ctx,
         sink,
         context,
-        turn,
+        turn: state,
         req,
         single_message,
         resume,
@@ -605,7 +605,7 @@ pub(crate) async fn open_stage(
             }
         }
     }
-    turn.last_saved = context.messages.len();
+    state.last_saved = context.messages.len();
 
     // ── 幕首 ②：开一幕的格（用户格 / 恢复格 / 轮次格），定下三个身份 ──────
     //
@@ -618,7 +618,7 @@ pub(crate) async fn open_stage(
         for row in rows {
             let mut octx = chat_loop::open_turn::OpeningCtx {
                 context,
-                turn,
+                turn: state,
                 req,
                 session: &context.session,
                 request_ctx: ctx,
@@ -628,7 +628,7 @@ pub(crate) async fn open_stage(
             (row.action)(&mut octx).await.map_err(to_exit)?;
             symbio_plugin_api::plugin_info!(
                 "session",
-                "[Turn] 幕锚行 {} 落格 [{}] (turn={})",
+                "[Turn] 幕锚行 {} 落格 [{}] (stage={})",
                 row.name,
                 row.writes.join(","),
                 opened.root_id.as_deref().unwrap_or("-")
@@ -638,14 +638,14 @@ pub(crate) async fn open_stage(
     let user_text = if first_stage {
         opened.user_text
     } else {
-        // 本幕的锚与轮次都在 `turn` 上（`continue-turn` 的执行体刚写完）；用户发言
+        // 本幕的锚与轮次都在 `state` 上（`continue-turn` 的执行体刚写完）；用户发言
         // 从同一份镜像取（与首幕同一个判据：最近一条用户消息）。
         chat_loop::open_turn::current_user_text(context)
     };
     symbio_plugin_api::plugin_info!(
         "session",
         "[Turn] 第 {} 次请求开始 (msgs={})",
-        turn.round() + 1,
+        state.round() + 1,
         context.messages.len()
     );
 
@@ -711,14 +711,14 @@ pub(crate) async fn open_stage(
         parent: orchestrator.parent.clone(),
         ctx: ctx.clone(),
         system_prompt: &reads.system_prompt,
-        abort: turn.abort.clone(),
+        abort: state.abort.clone(),
         root_id: &root_id,
         fresh_root,
         sink,
         user_text: &user_text,
-        turn_no: turn.turn_no,
-        user_seq: turn.user_seq,
-        drive_seq: turn.drive_seq,
+        turn_no: state.turn_no,
+        user_seq: state.user_seq,
+        drive_seq: state.drive_seq,
         window_turns: orchestrator.view.context_window,
         tools: &reads.tools,
         supplements: Some(supplements),
@@ -1121,7 +1121,7 @@ pub(crate) async fn land_consolidation(
 pub(crate) async fn land_seam(
     store: &dyn Store<Event = Event>,
     bridge: &UiBridge,
-    turn: &TurnState,
+    state: &TurnState,
     actor: &symbio_kernel::actors::ActorSpec,
     opening_text: Option<&str>,
     opening_dialog: Option<&DialogFacts>,
@@ -1131,13 +1131,13 @@ pub(crate) async fn land_seam(
     // 读**视图**而不是执行侧的副本（`reflex.is_some()`）：视图与那一行的判定同源，
     // 而「命中集为空、行自己关账」那一支（`result = miss`）只有视图分得出来。
     let facts_now = store.range(Seq::new(0));
-    let now = loop_rows::wake_now_ms(&facts_now, turn.drive_seq);
-    let tier = loop_rows::turn_tier(&facts_now, turn.turn_no, now);
+    let now = loop_rows::wake_now_ms(&facts_now, state.drive_seq);
+    let tier = loop_rows::turn_tier(&facts_now, state.turn_no, now);
     chat_loop::land_dispatch(
         store,
-        turn.turn_no,
-        turn.user_seq,
-        turn.drive_seq,
+        state.turn_no,
+        state.user_seq,
+        state.drive_seq,
         tier,
         actor,
     )
@@ -1146,8 +1146,8 @@ pub(crate) async fn land_seam(
     chat_loop::land_opening(
         store,
         bridge,
-        turn.turn_no,
-        turn.user_seq,
+        state.turn_no,
+        state.user_seq,
         &actor.principal,
         opening_text,
         opening_dialog,
@@ -1391,7 +1391,7 @@ pub(crate) fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
                 EVENT_CHAT_ASSISTANT_FINAL | EVENT_CHAT_ASSISTANT_FALLBACK
             )
         {
-            open.retain(|(turn, _)| *turn != e.turn);
+            open.retain(|(stage, _)| *stage != e.turn);
         }
     }
     open.last().copied()
@@ -1607,7 +1607,7 @@ pub(crate) fn supplement_into_request(
     anchor: Option<u64>,
     store: &dyn Store<Event = Event>,
     actor: &symbio_kernel::actors::ActorSpec,
-    turn_no: u64,
+    stage_no: u64,
     sink_msgs: &Arc<std::sync::Mutex<Vec<ChatNode>>>,
     no_counter: &std::sync::atomic::AtomicU64,
 ) -> Vec<symbio_kernel::llm::PromptMessage> {
@@ -1636,11 +1636,11 @@ pub(crate) fn supplement_into_request(
     let no = no_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if let Err(e) = store.append(
         symbio_kernel::event::Event::pending(
-            format!("s-{turn_no}-{no}"),
+            format!("s-{stage_no}-{no}"),
             symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
             symbio_kernel::event::Entity::Turn,
             symbio_kernel::event::Verb::Asserted,
-            turn_no,
+            stage_no,
             &actor.principal,
         )
         .with_produced_by(anchor)
@@ -1944,14 +1944,14 @@ fn stage_output(
 fn land_contributions(
     store: &dyn Store<Event = Event>,
     face: symbio_plugin_api::SettleFace,
-    turn: u64,
+    stage_no: u64,
     user_seq: u64,
     principal: &str,
     user_text: &str,
     response: Option<&str>,
     recalled: Option<&symbio_plugin_api::retrieval::Retrieval>,
 ) {
-    let anchor = format!("t{turn}");
+    let anchor = format!("t{stage_no}");
     // 本轮的检索读数（DE-026 D-264 第 2 条）：与宿主读侧排版、`record_learning`
     // 同一个值形——摘除之后的条目在这里交给贡献者，而不是让能力自己反查。
     let recall_lines: Vec<symbio_plugin_api::RecallLine<'_>> = recalled
@@ -1990,12 +1990,12 @@ fn land_contributions(
             let event_id = contribution.fact.key.clone();
             let actor = contribution.actor.unwrap_or(principal);
             let mut event = contribution.fact.into_event(actor);
-            event.turn = turn;
+            event.turn = stage_no;
             event.ts = now_ms;
             if let Err(e) = store.append(event) {
                 symbio_plugin_api::plugin_warn!(
                     "session",
-                    "[turn] 收束贡献入格失败（owner {}，事件 {event_id}，轮 {turn}）：{e:?}",
+                    "[turn] 收束贡献入格失败（owner {}，事件 {event_id}，轮 {stage_no}）：{e:?}",
                     contributor.owner()
                 );
             }
@@ -2157,7 +2157,7 @@ pub(crate) async fn execute_final_reply_turn(
     abort: symbio_kernel::exec::ExecAbortSignal,
     // 轮号与溯源锚由编排层在判决之前定下：答话轮同样先落用户格，
     // 这里只收三个 seq（`drive_seq` 供派发格幂等键）。
-    turn_no: u64,
+    stage_no: u64,
     user_seq: u64,
     drive_seq: u64,
     // 本轮用户发言：记忆编码的**内容**（`record_learning`）。答话轮同样
@@ -2208,7 +2208,7 @@ pub(crate) async fn execute_final_reply_turn(
     // 档位恒为深度档。它与工具轮那一格同一条纪律——落在这里而不是草稿的构造里。
     chat_loop::land_dispatch(
         store.as_ref(),
-        turn_no,
+        stage_no,
         user_seq,
         drive_seq,
         LatencyTier::Deep,
@@ -2217,7 +2217,7 @@ pub(crate) async fn execute_final_reply_turn(
     .map_err(|e| PluginError::InternalError(format!("派发档落格失败：{e:?}")))?;
     // 本入口不开环 ⇒ 不需要模型端口与令牌（那两者只由 [`drive`] 的动作读）。
     let input = TurnInput {
-        turn: turn_no,
+        turn: stage_no,
         user_seq,
         drive_seq,
         // 不生成 ⇒ 没有 prompt，也就没有窗口可裁。
@@ -2278,7 +2278,7 @@ pub(crate) async fn execute_final_reply_turn(
         land_contributions(
             store.as_ref(),
             symbio_plugin_api::SettleFace::Answered,
-            turn_no,
+            stage_no,
             user_seq,
             &principal,
             user_text,
@@ -2290,7 +2290,7 @@ pub(crate) async fn execute_final_reply_turn(
         derived_facts::record_learning(
             context.view.session_id.as_str(),
             store.as_ref(),
-            turn_no,
+            stage_no,
             symbio_sdk::clock::clock_now_ms(),
         );
     }
