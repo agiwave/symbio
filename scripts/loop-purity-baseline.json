@@ -24,7 +24,7 @@
     "control_decl.rs": 156,
     "derived_facts.rs": 17,
     "lib.rs": 5,
-    "loop_rows.rs": 83,
+    "loop_rows.rs": 89,
     "memory_events.rs": 5,
     "message_build.rs": 29,
     "port/classify.rs": 3,
@@ -42,13 +42,13 @@
     "tool_exec.rs": 2,
     "turn_driver.rs": 223,
     "turn_exec/policy.rs": 50,
-    "turn_exec.rs": 108,
+    "turn_exec.rs": 106,
     "turn_runner/boundary.rs": 1,
     "turn_runner/facts.rs": 48,
     "turn_runner/prepare.rs": 43,
     "turn_runner/settle.rs": 48,
-    "turn_runner/stream.rs": 220,
-    "turn_runner.rs": 96
+    "turn_runner/stream.rs": 208,
+    "turn_runner.rs": 92
   },
   "lp004WorldNamedContracts": 2,
   "lp005WorldPayloadSig": 2

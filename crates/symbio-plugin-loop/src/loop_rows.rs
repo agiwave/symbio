@@ -23,8 +23,10 @@
 //! phase 8  归宿      200+ artifact.added 等
 //! ```
 //!
-//! `await-*` 与它的 `dispatch-*` 成对（`D-222` 订正 2 / `D-124` 订正 1）：派出与收应答
-//! 分处两个环步，两个动作之间那一圈「已派出、未收清」就是 `waiting` 视图读的形状。
+//! `await-tool` 与 `dispatch-tool` 成对（`D-124` 订正 1）：派出与收应答分处两个环步，
+//! 两个动作之间那一圈「已派出、未收清」就是 `waiting` 视图读的形状。模型侧
+//! （`await-model`）**只剩恢复口**：派出与终局在 `dispatch-model` 的同一个动作窗口内
+//! 落地，正常跑里没有中间空档可等。
 //!
 //! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。`phase` 是跨行
 //! 可比的裁决段、`anchor` 是段内次序；两者仍是全序，所以「跨行竞争有全序」原样成立。
@@ -122,12 +124,12 @@ const WAITER_TOOLS: &str = "waiter-tools";
 /// 注入、批次边界还借它的窗口落汇报格），这一条只是「把手上那一笔模型往返发出去」。
 /// 共用一个名字，动作就只能按行名分支，那正是绑定表要消灭的东西。
 const RELAY: &str = "relay";
-/// 等待执行体（`D-222` 订正 2）：`await-model` 行选中的动作——取走寄存的那一次往返、
-/// 等它落地、落 `response` / `failed`。
+/// 等待执行体：`await-model` 行选中的动作——**恢复输入**上才轮得到它：
+/// 日志上有 `sent`、等待方随上一段生命没了，判死把账关上。
 ///
-/// 与 [`RELAY`] 分开是同一个理由（一个 `by` 一个动作）：`relay` 把这一笔**发出去**
-/// （出口 `sent`），`waiter` 把它**收回来**（出口 `response` / `failed`）。共名就等于
-/// 让一个动作按「现在是第几个环步」分支——那正是绑定表要消灭的东西。
+/// 与 [`RELAY`] 分开是「一个 `by` 一个动作」的同一条纪律：正常跑里派出与终局在 [`RELAY`]
+/// 的同一个动作窗口内落地，这一行不参与；恢复时它的判死是一次独立处置，不是
+/// 「现在是第几个环步」的分支。
 const WAITER: &str = "waiter";
 /// 轮首准备执行体：`policy.recall` 行选中的动作。
 ///
@@ -1144,9 +1146,10 @@ pub(crate) static ROWS: &[Decl] = &[
             key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str(ports::MODEL))],
         },
-        // 出口**只有 `sent`**（`D-222` 订正 2）：落完它这一行的账就还清了，「在等」
-        // 由 `await-model` 认领。此前出口是 `response|failed`，于是派出与收应答在同一个
-        // 动作窗口里，两次选债之间「已派出、未收清」在正常跑里读不出来。
+        // 出口**只有 `sent`**：`relay` 动作在同一个窗口里把 `response` / `failed`
+        // 也落成协议格（引擎写，不入执行体名单）。本行「派人发出去」这一半的账
+        // 落完 `sent` 就还清；正常跑里下一圈看到的是终局格，`await-model` 不参与。
+        // 崩溃恢复留下的 `sent` 无终局由 `await-model` 或租约看护判死。
         until: &[Pattern {
             source: EVENT_SENT,
             key: &["port", "id", "attempt"],
@@ -1297,10 +1300,10 @@ pub(crate) static ROWS: &[Decl] = &[
     // 键取 `(port, id, attempt)`：重试后新 attempt 的 `sent` 要重新开一笔等待，
     // 而不是被旧 attempt 的应答关掉（D-138）。
     //
-    // `by` 从 `None` 变成 `waiter-tools`（`D-124` 订正 1）：与 `D-222` 订正 2 对
-    // `await-model` 做的事逐字相同——`by = None` 时代它恒 blocked、永不选中，
-    // 「在等」只在崩溃恢复的输入上才有值；接上执行体之后，派出与应答分处两个环步，
-    // 中间那一圈「`sent` 有、终局无」在**正常跑**里读得到。
+    // `by` 从 `None` 变成 `waiter-tools`（`D-124` 订正 1）：`by = None` 时代它恒
+    // blocked、永不选中，「在等」只在崩溃恢复的输入上才有值；接上执行体之后，
+    // 派出与应答分处两个环步，中间那一圈「`sent` 有、终局无」在**正常跑**里读得到。
+    // 模型侧没有这一刀：`await-model` 只剩恢复口（终局与派出同一个动作窗口内落地）。
     Decl {
         name: "await-tool",
         phase: 7,
@@ -1695,6 +1698,30 @@ pub(crate) fn next_stage_round(events: &[Event], turn: u64, now: i64) -> Option<
 /// `reap` 要判死一笔**其实已经答了**的往返。
 pub(crate) fn waiting(events: &[Event], turn: u64, _now: i64) -> bool {
     !super::control_decl::open_calls(turn_slice(events, turn)).is_empty()
+}
+
+/// 本幕已经派出的模型往返笔数（`D-115` 决策 3 的步数口径）：从 `sent` 事实派生。
+///
+/// 判据是日志上的**派出**，不是内存里的计数器：一条 `sent(port=model)` 就是一次
+/// 真打出去的模型往返，能力行的内部往返也走同一条协议格，因此同样计入——
+/// 不计数就等于给能力开一条绕过步数上界的花钱通道。
+///
+/// 逻辑 id 以 `model-{turn}-d{drive_seq}-` 开头（幕锚在名字里，见
+/// `stream::begin_model` 的头注），所以按这个前缀就把**本幕**的派出与上一幕、
+/// 工具端口的账分开；不按 `via` 收窄，因为能力行往返也要算。
+pub(crate) fn model_rounds(events: &[Event], turn: u64, drive_seq: u64) -> usize {
+    let prefix = format!("model-{turn}-d{drive_seq}-");
+    events
+        .iter()
+        .filter(|e| {
+            e.kind == EVENT_SENT
+                && e.payload.get("port").and_then(Value::as_str) == Some("model")
+                && e.payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| id.starts_with(&prefix))
+        })
+        .count()
 }
 
 /// 引擎的**选债口**：本幕当前最小的一笔可还债，连带它的动作。

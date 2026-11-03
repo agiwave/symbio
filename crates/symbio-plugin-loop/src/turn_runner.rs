@@ -427,8 +427,6 @@ where
         prepare::PreparedFlow::Done(outcome) => Ok(TurnSessionBegin::Done(outcome)),
         prepare::PreparedFlow::Run(run) => Ok(TurnSessionBegin::Run(TurnSession {
             run,
-            steps: 0,
-            inflight: None,
             tool_flights: std::collections::HashMap::new(),
             live_effect_keys: std::collections::HashSet::new(),
             model_executor: None,
@@ -460,29 +458,22 @@ pub(crate) enum TurnSessionBegin {
 /// 本类型的 [`Self::exhausted`] 只是那三格收束事实的**唯一写方**。
 pub(crate) struct TurnSession {
     run: Box<prepare::Prepared>,
-    steps: usize,
-    /// 已经派出、还没收清的那一次模型往返（`D-222` 订正 2 的 in-flight 槽）。
-    ///
-    /// 它在两次选债之间一直挂着——这就是「已派出、未收清」在正常跑里可读的那一格
-    /// （`waiting` 视图读 `sent` 无 `response`，与本字段无关；本字段是**执行侧**的
-    /// 那一半：应答由谁取走）。槽空且日志上有 `sent` = 那一笔的等待方随进程没了，
-    /// 由 `stream::settle_round` 判死。
-    ///
-    /// 类型是 `'static` 的框（理由见 `stream::ModelInFlight`）：草稿不带生命周期参数，
-    /// 否则 `Action` 的 `for<'a>` 要对两个生命周期成立，而绑定表要求它 `'static`。
-    inflight: Option<stream::ModelInFlight>,
     /// 已经派出、还没收尾的那一批工具调用（`D-124` 订正 1）。
     ///
-    /// 与 [`Self::inflight`] 同一条寿命：两次选债之间它在草稿旁的这一格里挂着，
-    /// `sent` 与终局之间那一圈因此横跨两个环步。放在会话上而不是草稿里，理由与
-    /// `inflight` 逐字相同——`Prepared` 被 `&` 借给若干异步读口，槽里的
-    /// `dyn Future` 只 `Send` 不 `Sync`，进草稿会让那些读口集体失去 `Send`。
+    /// 两次选债之间它在草稿旁的这一格里挂着，`sent` 与终局之间那一圈因此横跨
+    /// 两个环步。放在会话上而不是草稿里：`Prepared` 被 `&` 借给若干异步读口，
+    /// 槽里的 `dyn Future` 只 `Send` 不 `Sync`，进草稿会让那些读口集体失去 `Send`。
     /// 在飞的工具调用：**一笔一个槽**（键是端口账的调用标识）。
     ///
     /// 没有「批」这个对象：N 笔独立在途，收尾按各自的键取走（DE-048 D-311）。
     tool_flights: std::collections::HashMap<String, stream::ToolFlight>,
     /// 本幕已经发出的**实时上线**效果键（`owner/anchor/key`）：上线的幂等由宿主守，
     /// 事实面没有可撞的格（`D-293`）。
+    ///
+    /// 它**不能**由幂等事实派生：效果的上线判定发生在写事实之前（「先上线、再落格」
+    /// 才让拒绝可说），而事实面没有任何一格记录「这次上线被宿主拒了」。因此本刀
+    /// 保留这个字段，归 **P2-6c-2b**（与工具往返/效果写口一并处置），不在这里改名
+    /// 或挪位糊弄。
     pub(crate) live_effect_keys: std::collections::HashSet<String>,
     /// 模型端口执行体（`DE-048` D-305 裁决一）：一次往返的请求构造、流式帧、
     /// 工具调用累计、用量与计价、终止判定都在它那一侧；本会话只派发与记账。
@@ -600,50 +591,47 @@ impl TurnSession {
         self.model_executor = executor;
     }
 
-    /// 记一次模型往返：生产路径在 [`Self::announce_model`] 与能力行往返
-    /// （`turn_exec::run_plugin_row`，D-242）里记；夹具也用它造可控的步数序列。
-    ///
-    /// 派发器的「无进展」与「步数上界」两条守卫要靠它造出可控的步数序列：夹具在同一
-    /// 个 `by` 上换动作时，那一步不落格，只能自己把步数推上去（否则永不返回）。
-    ///
-    /// **能力行往返也计一步**：它同样是一次真实的模型调用，不计数就等于给能力开一条
-    /// 绕过步数上界的花钱通道。
-    pub(crate) fn record_model_step(&mut self) {
-        self.steps += 1;
-    }
     /// 模型往返步数是否已到上界（派发器每步前问一次，到顶即 `exhausted{step_limit}`）。
-    pub(crate) fn over_step_limit(&self) -> bool {
-        self.steps >= MAX_STEPS_PER_DRIVE
+    ///
+    /// 步数**不是内存计数器**：它就是本幕日志上已经派出的模型往返笔数
+    /// （[`super::loop_rows::model_rounds`]）。派出的那一刻落 `sent`，于是「打了几次」
+    /// 在事实面上有答案，崩了也不用重数——能力行的内部往返（`via = row/…`）走同一条
+    /// 协议格，因此同样计入。
+    pub(crate) fn over_step_limit(&self, events: &[Event]) -> bool {
+        super::loop_rows::model_rounds(events, self.run.turn, self.run.drive_seq)
+            >= MAX_STEPS_PER_DRIVE
     }
 
     /// 宣布**一次**模型往返（`announce-model` 行的动作，D-166）：落 `request(port=model)`。
     ///
-    /// 派出归 [`Self::model`]（`dispatch-model` 行）——两个环步之间唯一的交接件是
-    /// 草稿里的 [`prepare::Prepared::pending_round`]。步数**不在这里**记：口径是
-    /// 「真打了几次模型」，而宣布之后那一笔可能压根没派出（上一世遗留的请求由
-    /// [`Self::model`] 判死，那次不算一步）。
+    /// `id` 来自这一行的债键（`next_round_trip` 从事实算出的下一个 id）：步号因此
+    /// 不在草稿里，宣布与派出读的是同一份日志。派出归 [`Self::model`]
+    /// （`dispatch-model` 行）——两个环步之间唯一的交接件是草稿里的
+    /// [`prepare::Prepared::pending_round`]。
     pub(crate) async fn announce_model<S>(
         &mut self,
         store: &S,
         tools: &[symbio_kernel::capability::CapabilityMeta],
+        id: &str,
     ) -> Result<(), symbio_kernel::store::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        stream::announce_round(&mut self.run, store, tools).await
+        stream::announce_round(&mut self.run, store, tools, id).await
     }
 
-    /// **派出**一次模型往返：落 `sent`，把「跑 + 收应答」整段寄存进 [`Self::inflight`]。
+    /// **派出并收清**一次模型往返：落 `sent`、跑执行体、把应答或失败落成事实、分类。
     ///
-    /// 与 [`Self::await_model`] 成对（`D-222` 订正 2）：两个环步之间那一圈
-    /// 「`sent` 有、`response` 无」就是在等，`waiting` 视图与 `stale_sent` 读的正是它。
-    /// 拆之前两者在同一个动作窗口里，于是「已派出、未收清」只在崩溃恢复的输入上才有值。
+    /// 两次选债之间不再有第二个动作窗口（`D-222` 订正 2 的 in-flight 槽已退役）：
+    /// 将来的「在飞」只由日志上的 `sent` 无所终局表达，`waiting` 与 `stale_sent`
+    /// 读的是同一份事实。进程在这一段里死掉 ⇒ 那条 `sent` 由租约看护（`reap`）或
+    /// [`Self::await_model`] 判死，不猜、不重放。
     ///
-    /// 只有一条路就地收口：**控制面**失败（`port::begin` 拒了这一笔：行不欠 / 端口没
-    /// 声明）——它在日志上没有模型的终局事实，收束行开不出账，兜底格只能由这一步落
+    /// 只有一条路把结局就地落成兜底格：**控制面**失败（`port::begin` 拒了这一笔：
+    /// 行不欠 / 端口没声明）——它在日志上没有模型的终局事实，收束行开不出账
     /// （`relay` 执行体的名单上有它，D-166）。
     ///
-    /// 它**不交回**产出（D-123 决策 5）：「本轮结束了没有」由派发器读账本判。
+    /// 它**不交回**产出（D-123 决策 5）：结局寄存在草稿，收束归 `close-turn` 行。
     pub(crate) async fn begin_model(
         &mut self,
         store: std::sync::Arc<dyn Store<Event = Event>>,
@@ -651,13 +639,10 @@ impl TurnSession {
         tok: FullModel,
         sink: std::sync::Arc<dyn symbio_sdk::adapters::DeltaSink>,
         tools: std::sync::Arc<[symbio_kernel::capability::CapabilityMeta]>,
+        has_dispatch: bool,
     ) -> Result<(), symbio_kernel::store::AppendError> {
-        // 步数 = **真打出去的模型往返次数**：没有交接件的那一笔（上一世遗留）不算一步。
-        if self.run.pending_round.is_some() {
-            self.steps += 1;
-        }
         let executor = self.model_executor.clone();
-        match stream::begin_model(
+        let flight = match stream::begin_model(
             &mut self.run,
             store.clone(),
             executor,
@@ -665,74 +650,56 @@ impl TurnSession {
             tok,
             sink,
             tools,
-        ) {
-            Ok(stream::ModelBegin::InFlight(fut)) => {
-                self.inflight = Some(fut);
-                Ok(())
-            }
+        )
+        .await
+        {
+            Ok(Some(flight)) => flight,
             // 这一笔不是本幕宣布的：判死，让那笔账关上（否则它会一直被选出来）。
-            Ok(stream::ModelBegin::NoPending) => {
+            Ok(None) => {
                 stream::kill_dangling_round(store.as_ref())?;
-                Ok(())
+                return Ok(());
             }
-            Err(stream::ModelCallError::Store(e)) => Err(e),
+            Err(stream::ModelCallError::Store(e)) => return Err(e),
             // 控制面失败（`port::begin` 拒了这一笔）：兜底格就地落，产出寄存进草稿。
             Err(stream::ModelCallError::Control(why)) => {
                 let outcome =
                     stream::settle_control(&mut self.run, store.as_ref(), llm.as_ref(), &why)
                         .await?;
                 self.run.settled = Some(outcome);
-                Ok(())
-            }
-            // 适配器的两种停法只在**收应答**那一步出现（`poll_flight`）：派出这一步
-            // 压根还没调模型。接住它们是「加变体必须在这里回答一次」的落点。
-            Err(stream::ModelCallError::Aborted) | Err(stream::ModelCallError::Failed(_)) => Ok(()),
-        }
-    }
-
-    /// **收**已派出的那一次模型往返：poll 一次在飞的 future。
-    ///
-    /// ## 为什么只 poll 一次（`D-222` 订正 2）
-    ///
-    /// 「等」这一步返回的那一刻，环要能回到选债口——往返在飞的时候别的行才轮得到
-    /// （中途汇报就是一条）。`await` 到底等于把这一段又塞回一个动作窗口，只是把窗口
-    /// 挪了个位置：「汇报在往返**进行中**落地」反过来做不到了。
-    ///
-    /// 还在路上就把 future 原样放回槽里、让出执行权；派发器的空账本守卫据
-    /// 「`sent` 无所终局」认出这一圈是**合法地不前进**，不判 `no_progress`。
-    ///
-    /// 槽空 ⇒ 这一笔的等待方随进程没了（上一段生命在 `sent` 与 `response` 之间结束），
-    /// 由 [`stream::poll_flight`] 判死——不猜、不重放。
-    ///
-    /// 它**不交回**产出（D-123 决策 5）：结局寄存在草稿，收束归 `close-turn` 行。
-    pub(crate) async fn await_model<S>(
-        &mut self,
-        store: &S,
-        llm: &dyn LlmAdapter,
-        has_dispatch: bool,
-    ) -> Result<(), symbio_kernel::store::AppendError>
-    where
-        S: Store<Event = Event> + ?Sized,
-    {
-        let inflight = self.inflight.take();
-        let polled = stream::poll_flight(&mut self.run, store, llm, inflight, has_dispatch).await?;
-        let settled = match polled {
-            stream::PolledRound::Parked(fut) => {
-                // 还在路上：原样放回槽里，下一圈接着 poll。这一圈没写任何格，
-                // 派发器的「空账本」守卫据 `sent` 无所终局认出这是**合法地不前进**。
-                self.inflight = Some(fut);
                 return Ok(());
             }
-            stream::PolledRound::Settled(round) => round,
+            // 适配器的两种停法由 future 自己交回（见下），这里接住它们是
+            // 「加变体必须在这里回答一次」的落点。
+            Err(stream::ModelCallError::Aborted) | Err(stream::ModelCallError::Failed(_)) => {
+                return Ok(())
+            }
         };
-        match settled {
+        match stream::settle_flight(&mut self.run, store.as_ref(), llm.as_ref(), flight, has_dispatch)
+            .await?
+        {
             stream::ModelRound::Done(outcome) => self.run.settled = Some(outcome),
             stream::ModelRound::Tools => {}
             // 应答已寄存，收束这一步归 `close-turn` 行的执行体（[`Self::close`]）。
             stream::ModelRound::Close => {}
-            // 槽空那一支已在 `poll_flight` 里判死，这里没有第二件事要做。
-            stream::ModelRound::NoPending => {}
         }
+        Ok(())
+    }
+
+    /// **收**上一段生命留下的那一笔：日志上有 `sent`、等待方随进程没了。
+    ///
+    /// 正常跑里轮不到它：派出与终局在同一个动作窗口内落地（[`Self::begin_model`]），
+    /// 所以「已派出、未收清」只在崩溃恢复的输入上存在。这里的处置与租约看护同一结论：
+    /// 落 `failed` 把账关上——等待方是那一刻的栈帧，它已经不存在了。
+    ///
+    /// 它**不交回**产出（D-123 决策 5）：没有产出可交，收束归日志上的收束行。
+    pub(crate) async fn await_model<S>(
+        &mut self,
+        store: &S,
+    ) -> Result<(), symbio_kernel::store::AppendError>
+    where
+        S: Store<Event = Event> + ?Sized,
+    {
+        stream::kill_dangling_sent_round(store)?;
         Ok(())
     }
 
@@ -804,8 +771,9 @@ impl TurnSession {
     /// 派发动作的**收尾半**（`await-tool` / `deny-tools` 两行的执行体）：poll 一次
     /// **这一笔**在飞的调用，落地了就把结果归位（产物 / 等待格 / 下一轮交换）。
     ///
-    /// 与 [`Self::await_model`] 同一条「只 poll 一次」：派出去与收回来分处两个环步，
-    /// 中间那一圈「已派出、未收清」在正常跑里读得到。逐笔 ⇒ 槽按键取，不取整批。
+    /// 工具批仍分两半（`D-124` 订正 1）：派出去与收回来分处两个环步，中间那一圈
+    /// 「已派出、未收清」在正常跑里读得到。逐笔 ⇒ 槽按键取，不取整批。模型侧那条
+    /// in-flight 槽已在 `D-222` 订正 2 的后续收口中退役（终局与派出同一个窗口）。
     pub(crate) async fn finish_tools(
         &mut self,
         store: &std::sync::Arc<dyn Store<Event = Event>>,

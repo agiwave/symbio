@@ -5142,15 +5142,13 @@ mod actor_ledger_tests {
     use symbio_sdk::adapters::{SilentDeltas, TokenIssuer};
     use symbio_sdk::invariants::check_all;
 
-    /// 写**零格**的手法：只记一次模型往返（步数口径归执行体），不落任何事实。
+    /// 写**零格**的手法：不落任何事实。
     ///
-    /// 那一步 `record_model_step()` 是为反向自检留的：守卫一旦被删，派发器会继续选同一笔债，
-    /// 记步数让它收在 `step_limit`（用例红），不记就永不返回（用例挂）。
-    fn writes_nothing<'a>(step: &'a mut Ctx<'a>) -> StepFuture<'a> {
-        Box::pin(async move {
-            step.session.record_model_step();
-            Ok(())
-        })
+    /// 步数上界读的是**日志上已派出的模型往返**（`loop_rows::model_rounds`），
+    /// 零写入的动作改不动它——所以这里没有「记一步」的自检网：守卫一旦被删，
+    /// 派发器会原地空转（用例挂，而不是改判成 `step_limit`）。
+    fn writes_nothing<'a>(_step: &'a mut Ctx<'a>) -> StepFuture<'a> {
+        Box::pin(async move { Ok(()) })
     }
 
     /// 写**名单外**格的手法：`message.added` 既不在 `execute` 的 `writes` 里，也不是协议格。

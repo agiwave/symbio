@@ -403,7 +403,7 @@ async fn run_loop<'a>(
             // 已收束那一幕不再数步：本圈要跑的是 `continue-turn`（它不属于谁的
             // 工作），而上界约束的是**一幕之内**的往返。
             if retiring.is_none()
-                && st.draft.over_step_limit()
+                && st.draft.over_step_limit(&facts)
                 && !loop_rows::waiting(&facts, turn_no, now)
             {
                 symbio_plugin_api::plugin_warn!(

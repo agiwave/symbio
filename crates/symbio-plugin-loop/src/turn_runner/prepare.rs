@@ -67,9 +67,6 @@ pub(crate) struct Prepared {
     /// 接缝上定下的**系统提示**（`prepare_request_sections` 的同一份值）：模型请求
     /// 载荷由 `announce-model` 行按事实装配（`DE-048` D-306 裁决二）。
     pub(crate) system_prompt: String,
-    /// 轮内**步号**（1 起）：第几次模型往返。模型端口的逻辑 id 带它——
-    /// 一次往返一个 id，否则第二次的 `sent` 撞第一次的幂等键。
-    pub(crate) step: u64,
     pub(crate) actor: ActorSpec,
     /// 本轮中止信号（`D-052` 决策 1）。检查点是环的**第一道守卫**——
     /// [`super::TurnSession::abort_before_first_request`] 在首圈、任何行之前读它。
@@ -404,7 +401,6 @@ where
         turn,
         drive_seq,
         system_prompt: String::new(),
-        step: 0,
         actor,
         abort,
         user_seq,

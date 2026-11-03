@@ -708,13 +708,12 @@ pub(crate) struct ExecTurn<'a> {
 ///
 /// ## 端口为什么是 `Arc` 而不是 `&`
 ///
-/// 一次模型往返的 future 要能**离开它诞生的那一层栈帧**——派出与收应答分处两个环步
-/// （`DE-015` 的 `D-222` 订正 2），future 得寄存进本轮草稿。future 捕获的每一样都必须是
-/// owned，否则它的类型里会带一个只在那层栈帧里成立的生命周期，寄存进草稿就成了自引用
-/// （而带生命周期的草稿会撞上 `Action` 的 `for<'a>`——绑定表要求动作是 `'static`）。
-/// 于是这一层把「一次派发要用的端口」全部变成可克隆的句柄：`Arc<dyn Store>` /
-/// `Arc<dyn LlmAdapter>` / `Arc<[CapabilityMeta]>` / `Arc<dyn DeltaSink>`，以及零大小的
-/// [`FullModel`]（`Copy`）。
+/// 动作的类型是 `for<'a> fn(&'a mut Ctx<'a>)`（[`Action`]），端口句柄因此以
+/// 可克隆的形态随环境进出：`Arc<dyn Store>` / `Arc<dyn LlmAdapter>` /
+/// `Arc<[CapabilityMeta]>` / `Arc<dyn DeltaSink>`，以及零大小的 [`FullModel`]（`Copy`）。
+/// 模型往返的 future 现在在同一段动作栈里 `await` 到底（`D-222` 订正 2 的 in-flight
+/// 槽已退役），不再要求 `'static` 的框；这层 `Arc` 保留是因为工具派发与收尾同样要
+/// 在动作之间共享同一批句柄，克隆是自增而不是复制。
 ///
 /// 仍借的只有三样：`session`（本轮草稿，派发器持有）、`dispatch`（工具分发方，它自己
 /// 就在派发动作的栈上——工具批的等与收本来就在同一个动作里，不进 future），以及
@@ -886,20 +885,21 @@ pub(crate) type Action = for<'a> fn(&'a mut Ctx<'a>) -> StepFuture<'a>;
 /// 归 `close` 执行体。审批 / 问答恢复也不再旁路收束（d）：唤醒请求进
 /// 行表之后，恢复幕与普通幕走同一组行。
 ///
-/// 步数在 [`TurnSession::announce_model`] 里**记**（口径 = 模型往返次数，
-/// 与拆分前「一步 = 一轮往返」同），上界判断在派发器——停机判据不搬进执行体
+/// 步数由事实派生（本幕已派出的 `sent(port=model)` 笔数，
+/// `loop_rows::model_rounds`），上界判断在派发器——停机判据不搬进执行体
 /// （D-118 决策 7）。
 pub(crate) fn run_execute<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
+        let id = key_id(ctx);
         ctx.session
-            .announce_model(ctx.store.as_ref(), ctx.tools.as_ref())
+            .announce_model(ctx.store.as_ref(), ctx.tools.as_ref(), &id)
             .await
             .map_err(ActorError::Append)
     })
 }
 
 /// `relay` 执行体（D-166）：`dispatch-model` 行选中的动作——把**已宣布**的那一次
-/// 模型往返发出去，并把结局归位。
+/// 模型往返发出去，落终局并分类。
 ///
 /// 它不判断「该不该发」：那一半由行表的债说（`request` 开着才轮得到它）；
 /// 它也不判断「这一轮结束没有」：结局寄存进草稿，收束归 `close` 执行体
@@ -913,23 +913,20 @@ pub(crate) fn run_model<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 ctx.tok,
                 ctx.sink.clone(),
                 ctx.tools.clone(),
+                ctx.dispatch.is_some(),
             )
             .await
             .map_err(ActorError::Append)
     })
 }
 
-/// `waiter` 执行体（`D-222` 订正 2）：`await-model` 行选中的动作——取走寄存的那一次
-/// 往返，等它落地，落 `response` / `failed`。
-///
-/// 与 [`run_model`] 成对：派出（`dispatch-model`，出口是 `sent`）与收应答
-/// （`await-model`，出口是 `response` / `failed`）分处两个环步。两次选债之间那一圈
-/// 「已派出、未收清」因此在事实面上可见——`waiting` 视图与 `reap` 的 `stale_sent`
-/// 读的都是它，而不是只在崩溃恢复的输入上才有值。
+/// `waiter` 执行体：`await-model` 行选中的动作——**恢复输入**上才轮得到它：
+/// 日志上有 `sent`、等待方随上一段生命没了。派出与终局在 [`run_model`] 的同一个
+/// 动作窗口内落地，所以正常跑里没有「已派出、未收清」的空档留给这一行。
 pub(crate) fn run_await<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         ctx.session
-            .await_model(ctx.store.as_ref(), ctx.llm.as_ref(), ctx.dispatch.is_some())
+            .await_model(ctx.store.as_ref())
             .await
             .map_err(ActorError::Append)
     })
@@ -1395,7 +1392,6 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
         };
 
         // ── 第二相位：宿主代付一次模型往返（四格协议事实归端口层）──────────
-        ctx.session.record_model_step();
         let via = format!("row/{}", ctx.row);
         // 逻辑 id 带「本行在本轮已请求过几次」：一次失败重来不会撞上一笔的幂等键。
         let prior = {

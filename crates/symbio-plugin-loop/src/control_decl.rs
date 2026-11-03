@@ -613,12 +613,12 @@ fn close_mark(events: &[Event], turn: u64, anchor_seq: u64) -> Option<&Event> {
 /// 因此按**事实**分工，而不是靠 `anchor` 60 < 66 碰巧排对。
 ///
 /// v14（`D-222` 订正 2）把 `model_open` 的关账格从 `sent` 挪到 `response` / `failed` /
-/// `retry`：一次模型往返此后占**两个**环步（`dispatch-model` 落 `sent`、
-/// `await-model` 落终局），`sent` 只说明「发出去了」，不说明「这一圈结束了」。
-/// 按旧口径，派出一落 `sent` 本格就变假，执行行（60）立刻重新欠账、抢在 `await-model`
-/// （71）之前再宣布一笔——同一步号的幂等键撞上，那一圈什么也没写，环读成
-/// `exhausted{no_progress}`。关账口径与 [`open_calls`] 同源（`(id, attempt)` 上
-/// 三条终局格），所以「在等」在派生面上只有一份定义。
+/// `retry`：`sent` 只说明「发出去了」，不说明「这一笔收清了」。此后派出与终局回到
+/// 同一个动作窗口（`relay` 动作内），这一格只在**恢复输入**上起作用：上一段生命
+/// 留下一条无终局的 `request` / `sent` 时，执行行（60）不得抢在派发行之前再宣布一笔
+/// ——同一步号的幂等键撞上，那一圈什么也没写，环读成 `exhausted{no_progress}`。
+/// 关账口径与 [`open_calls`] 同源（`(id, attempt)` 上三条终局格），所以「有没有
+/// 未收清的往返」在派生面上只有一份定义。
 ///
 /// v12 加 `prepared`：本幕落过 `inputs` 阶段格没有。它是 `prepare-turn` 行的
 /// 开账条件（`owes turn_head.prepared:false`）。
@@ -814,19 +814,23 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
                         && seq_of(e) > seq_of(req)
                 })
         });
-    // 本幕有没有一笔**宣布之后还没收清**的模型往返（D-166，`D-222` 订正 2 改口径）。
+    // 本幕有没有一笔**宣布之后还没收清**的模型往返（D-166）。
     //
-    // 一次模型往返现在占两个环步：`dispatch-model`（落 `sent`）与 `await-model`
-    // （落 `response` / `failed`）。所以「这一圈过去了没有」的判据不是 `sent`，是
-    // **终局格**——与 [`open_calls`] 逐字同源（`(id, attempt)` 上 `response` /
-    // `failed` / `retry` 三条关账）。`sent` 只说明「发出去了」，此时应答还在路上，
-    // 执行行若按 `sent` 让位就会在 `await-model` 之前再宣布一笔：同一步号的幂等键撞上，
-    // 那一圈零写入，环读成 `exhausted{no_progress}`（`turn_exec` 的
+    // 正常跑里一次模型往返在 `dispatch-model` 的同一个动作窗口内走完
+    // `sent` → `response` / `failed`，环看不到中间空档；这一格因此只在**恢复输入**
+    // 上有值：上一次生命留下一条 `request` 或 `sent` 而没有终局，本幕的执行行不能
+    // 抢先再宣布一笔（同一步号的幂等键会撞上，那一圈零写入，环读成
+    // `exhausted{no_progress}`——`turn_exec` 的
     // `an_actor_that_writes_nothing_stops_as_no_progress` 与各轮用例都钉着它）。
     //
-    // 执行行要这一格——一次模型往返的「宣布」与「派出」是两个环步，宣布之后
-    // 派发行（66）还没轮到，执行行（60）按 `(phase, anchor)` 会抢先再宣布一笔；同一幕两条
-    // `request(port=model)` 并存，模型就不再有「一次往返」这个粒度。
+    // 判据不是 `sent`，是**终局格**——与 [`open_calls`] 逐字同源（`(id, attempt)` 上
+    // `response` / `failed` / `retry` 三条关账）。`sent` 只说明「发出去了」，
+    // 终局缺席就意味着这一笔还欠着收口（由 `dispatch-model` 的判死或 `await-model`
+    // 的租约收口处置）。
+    //
+    // 执行行要这一格——宣布之后派发行还没轮到，执行行（60）按 `(phase, anchor)`
+    // 会抢先再宣布一笔；同一幕两条 `request(port=model)` 并存，模型就不再有
+    // 「一次往返」这个粒度。
     //
     // 收窄按幕锚（`after_anchor`）：续写幕复用轮号，首幕那笔已关闭的请求不算「本幕
     // 还开着」；上一世遗留、本幕没宣布过的请求也不该把本幕的执行行堵住（它由派发
@@ -1379,7 +1383,8 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     // v12 → v13 加 `closure`（`D-222` 裁决 2）：读面补收束两格的 `reason`——这一格是
     // 「为什么停下」的原始事实，折进视图之后「还开不开下一幕」不再靠返回值。
     // v13 → v14（`D-222` 订正 2）：`model_open` 的关账格从 `sent` 挪到 `response` /
-    // `failed` / `retry`（一次往返占两个环步）。读面补 `retry` 的 `port` / `id` /
+    // `failed` / `retry`（终局才算收清；正常跑里派出与终局同一个动作窗口，这一格只剩
+    // 恢复判据）。读面补 `retry` 的 `port` / `id` /
     // `attempt`——判「这笔账关没关」的三个关账格里先前只有两个在面上。
     // v16 → v17（`D-262`）：`skill_hit` 随技能能力退出读面（命中判定搬回技能包）。
     // `turn.stage` 的 `result` 仍在读面里——`reflex_answered` 与 `answered` 都读它。
