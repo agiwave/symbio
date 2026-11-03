@@ -670,6 +670,7 @@ function main() {
   const GRANDFATHERED = new Map([
     ['7d2811b9', 'D-258 第一批：7 个域搬进 SDK，原文件留转发桩（复制式搬迁，不是搬家）'],
     ['09906cbb', 'D-258 第三批：agent / embedding 两域，同上'],
+    ['1069f346', 'D-313 P2-3b2-1：配置 / facts 读点切到 session 端口同源投影（补件随 P2 批次绿点，缺 Core-Change 行；不追改历史）'],
   ])
   let migrations = 0
   let supplements = 0

@@ -875,10 +875,13 @@ async fn an_inflight_turn_converges_after_loop_is_disabled() {
 
     // 宿主 ctx：本轮交付包 + 请求体（生产由编排入口设置，落到 fork 后的 chat_ctx）。
     let host_ctx = Arc::new(PluginSimpleRequest::new(None, None));
+    // 能力表先按生产同一条路径收集一次（`traverse` 广播）：`port=session` 的提供者行
+    // 由 session 插件在 traverse 里挂上（D-315），夹具不复制它的实现，只走同一个收集面。
+    // 少了这一行，驱动器在取会话动作时报「会话端口没有可用提供者」（P2-3b2 之后）。
+    let visitor = collect_at(&composite, TRAVERSE_AVAILABLE_TOOLS).await;
     // `port.model` 的提供者行（D-298）：loop 按 `port.model` 从能力表现取——本用例
     // 不过会话编排，夹具自己把可闸门假模型装成端口行挂上（生产是 model 插件
     // traverse 注册、session 收集装上）。
-    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     let port = Arc::new(PortModel(Arc::new(GatedProvider {
         entered: Arc::clone(&entered),
         release: Arc::clone(&release),
