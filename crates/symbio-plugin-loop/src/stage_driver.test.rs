@@ -10,7 +10,7 @@ use super::aborts_at_a_stage_boundary;
 
 /// 闲着的轮次不是幕界：没有「已收束的上一幕」，中止判据不成立。
 #[test]
-fn an_idle_turn_does_not_stop_at_a_boundary() {
+fn an_idle_drive_does_not_stop_at_a_boundary() {
     assert!(!aborts_at_a_stage_boundary(None, false));
 }
 

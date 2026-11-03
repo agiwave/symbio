@@ -16,10 +16,12 @@ use symbio_kernel::plugin::{
 use symbio_kernel::store::EventStore;
 use symbio_kernel::store::Store;
 
+use super::super::super::test_support::{
+    default_settings, session_port_of, turn_spec as view_of, FakeSessionPort,
+};
 use super::classify;
-use crate::chat_loop::state::{ChatOrchestrator, SessionContext, TurnState};
+use crate::chat_loop::state::{ChatOrchestrator, SessionContext, TurnState as DraftState};
 use crate::control_decl::EVENT_TURN_STAGE;
-use crate::test_support::{default_settings, session_port_of, turn_spec, FakeSessionPort};
 
 /// 判决插件替身：不判规则，一律要一次模型往返（`NeedsModel`）。
 ///
@@ -87,7 +89,7 @@ async fn a_missing_model_port_lands_a_failed_stage_and_stops_the_turn() {
 
     let port = Arc::new(FakeSessionPort::new(Vec::new()).with_facts(raw.clone()));
     let session = session_port_of(port);
-    let spec = turn_spec(
+    let spec = view_of(
         "policy-classify",
         std::env::temp_dir().join("symbio-test/tool-archives"),
         std::env::temp_dir().join("symbio-test/transcripts"),
@@ -104,7 +106,7 @@ async fn a_missing_model_port_lands_a_failed_stage_and_stops_the_turn() {
         writer: Arc::new(DiscardWriter),
         compose_enabled: false,
         opening_enabled: false,
-        presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
+        presentation_tree: default_settings().presentation_tree,
     };
     let mut context = SessionContext {
         messages: Vec::new(),
@@ -113,14 +115,13 @@ async fn a_missing_model_port_lands_a_failed_stage_and_stops_the_turn() {
         session,
         consolidated: None,
     };
-    let mut state = TurnState {
-        turn_no: 1,
+    let mut state = DraftState {
         user_seq: user_seq.value(),
         drive_seq: user_seq.value(),
         now_ms: 1,
+        facts: raw.range(Seq::new(0)),
         ..Default::default()
     };
-    state.facts = raw.range(Seq::new(0));
 
     // 没有 `CAPABILITY_VISITOR` ⇒ `port.model` 读不到提供者；判决插件照常要往返。
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
@@ -129,13 +130,13 @@ async fn a_missing_model_port_lands_a_failed_stage_and_stops_the_turn() {
         .await
         .expect_err("缺模型端口必须中止本轮");
     match err {
-        crate::turn_exec::ActorError::Read(e) => {
+        super::ActorError::Read(e) => {
             assert!(
                 format!("{e:?}").contains("port.model"),
                 "中止原因要说得出是端口缺席（实得 {e:?}）"
             );
         }
-        crate::turn_exec::ActorError::Append(e) => {
+        super::ActorError::Append(e) => {
             panic!("本用例不该走到落格失败：{e:?}")
         }
     }

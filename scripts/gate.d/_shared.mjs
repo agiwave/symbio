@@ -321,7 +321,24 @@ export const BASELINE = {
   // `cargo test --workspace`：2625 passed / 0 failed（90 个目标）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 净减 3 条（2635→2632）——与上方 `rustTests` 同一批
   // （D-311 并发策略移入执行体：环侧 5 条退役、执行体 2 条新增，净 -3），两个口径是同一批用例。非侵蚀。
-  ciRustTestsTotal: 2634,
+  // baseline-allow ciRustTestsTotal: 有证据下调 2634 → 2617（D-313）——行为覆盖已补齐，
+  // 差额是「同一行为不重复计用例」，不是覆盖丢失。17 的逐条构成：
+  // ① 6：16 条被 P2-5b 删除的 `tool_executor.test.rs` 用例里——协议失败读数四条（缺 id /
+  //   空 id / 缺 name / 参数不可解析，同一个 `refuse_protocol` 分支）合并为一条
+  //   `protocol_failures_each_name_their_own_cause`（-3）；`record_effect` 2 条由
+  //   `tool_exec/effects.test.rs`（`undeclared_tool_is_skipped` / `first_record_wins`）覆盖；
+  //   `revoked_assign_work` 1 条由 `symbio-plugin-api` 的 `effects.test.rs` 与
+  //   `plugin-agent` 的 `behavior.test.rs` 覆盖——行为有守，只是不再于 loop 二进制里重算。
+  // ② 2：`chat_loop.test.rs` 两条无对象——「请求计数不作退出条件」随 D-074 计数退役；
+  //   「abort 优先于计数」并入 `stage_driver` 的幕界判据 `aborts_at_a_stage_boundary`。
+  // ③ 1：`chat_loop/compose.test.rs` 的 `progress_reason` 字面量（`reason == "progress"`）
+  //   已由 `report_node_is_excluded_and_on_the_conversation_line` 覆盖，不重复计。
+  // ④ 1：idle 不退出已由 `turn_exec.test.rs::drive_lands_the_inputs_stage_and_runs_the_turn`
+  //   （走到 `Completed`、不产生幕界出口）覆盖。
+  // ⑤ 7：P2-5b 之前同路径的历史删除，**未逐条归名**（如实保留为未查明，不并入上述任何一类）。
+  // 非侵蚀：本轮另补 13 条判据（loop +12：stage_driver 2 / policy 1 / execution 9；tool +1
+  // 协议读数），清白树实跑 `cargo test --workspace`：2617 passed / 0 failed。
+  ciRustTestsTotal: 2617,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

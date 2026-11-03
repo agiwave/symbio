@@ -6,11 +6,16 @@
 //! 主体派生与落笔同源；批处理只验「登记了、说了、没多写」三条（D-311 / D-312）。
 
 use super::*;
+use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::capability::failure_kind;
 use symbio_kernel::capability::Registry;
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::plugin::PluginInvokeRequest;
+use symbio_kernel::store::Store;
+
+use super::super::gate_inputs::GateInputs;
 use symbio_kernel::exec::ExecAbortSignal;
 use symbio_kernel::exec::ExecEventSink;
-use symbio_kernel::llm::TurnToolCallInfo;
 use symbio_kernel::plugin::PluginInvokeRequestExt;
 use symbio_kernel::plugin::PluginSimpleRequest;
 use symbio_kernel::store::EventStore;
@@ -79,8 +84,10 @@ fn the_principal_comes_from_the_agent_id() {
 
 // ── 批处理夹具（原 `tool_executor.test.rs` 的最小形态）────────────────────────
 
-fn tc(id: &str, name: &str, args: Value) -> TurnToolCallInfo {
-    TurnToolCallInfo {
+type Call = TurnToolCallInfo;
+
+fn tc(id: &str, name: &str, args: Value) -> Call {
+    Call {
         id: Some(id.into()),
         wire_id: None,
         name: Some(name.into()),
@@ -119,7 +126,7 @@ fn test_ctx() -> Arc<dyn PluginInvokeRequest> {
 async fn ctx_with_tool_port() -> Arc<dyn PluginInvokeRequest> {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
-    crate::test_support::put_tool_port_row(&visitor).await;
+    super::super::super::test_support::put_tool_port_row(&visitor).await;
     ctx.set(CAPABILITY_VISITOR, visitor);
     ctx
 }
@@ -310,7 +317,7 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
     let notice =
         "本次调用未执行：本条响应内的工具调用数超过上限（32），超出上限的调用已被系统丢弃。"
             .to_string();
-    let tcs = vec![TurnToolCallInfo {
+    let tcs = vec![Call {
         id: Some("tc-overflow".into()),
         wire_id: None,
         name: Some("vdfs_list".into()),
@@ -418,6 +425,86 @@ async fn a_missing_tool_port_fails_loudly_on_the_result() {
     );
     assert_eq!(updates.len(), 1, "父节点必须同步收敛");
     assert_eq!(updates[0].status, Some(NodeStatus::Completed));
+}
+
+// ── `GateInputs::of` 的四格中性读数（原 `gate_inputs.test.rs`）──────────────
+// 测试与宿主同住 `execution.test.rs`：`gate_inputs.rs` 是本模块的子文件，单独开
+// 测试宿主会在机制文件里添一行 `#[path]` 路径串，给世界词根判据凭空记一笔。
+
+fn gate_ctx() -> Arc<dyn PluginInvokeRequest> {
+    Arc::new(PluginSimpleRequest::new(None, None))
+}
+
+fn gate_ctx_with_agent(agent_id: &str) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(None, None);
+    req.set(symbio_sdk::keys::AGENT_ID, agent_id.to_string());
+    Arc::new(req)
+}
+
+/// 判据那一半：授权是**读矩阵**得来的（fail-closed），不是默认放行。
+#[test]
+fn external_execution_capability_is_read_from_the_matrix() {
+    assert!(
+        symbio_sdk::authz::production_matrix().can_write_name(
+            symbio_sdk::authz::PRINCIPAL_MAIN,
+            symbio_sdk::authz::CAP_EXTERNAL_EXECUTION
+        ),
+        "agent:main 持外部执行能力（本机部署事实）"
+    );
+    assert!(
+        !symbio_sdk::authz::production_matrix().can_write_name(
+            symbio_sdk::authz::PRINCIPAL_USER,
+            symbio_sdk::authz::CAP_EXTERNAL_EXECUTION
+        ),
+        "非 agent 主体不持外部执行能力 ⇒ 判据 false ⇒ Refuse（fail-closed）"
+    );
+
+    assert!(
+        GateInputs::of(&[], &gate_ctx()).authorized,
+        "未绑智能体 ⇒ 会话主主体 ⇒ 持能力"
+    );
+    assert!(
+        !GateInputs::of(&[], &gate_ctx_with_agent("person/local")).authorized,
+        "非 agent 主体经 `of` 读出来必须是 false，而不是默认放行"
+    );
+}
+
+/// 台账读的是**交给执行体的事实值**，两档预算按 D-044 的口径取静态表。
+#[tokio::test]
+async fn the_ledger_comes_from_the_facts_value() {
+    let empty: Vec<Event> = Vec::new();
+    let none = GateInputs::of(&empty, &gate_ctx());
+    assert_eq!(none.spent_ms, 0, "还没记过账 ⇒ 零账（不是「不许执行」）");
+    assert_eq!(
+        none.requested_ms,
+        LatencyTier::Deep.budget_ms(),
+        "本次申请 = 工具循环所在档的额度"
+    );
+    assert_eq!(
+        none.budget_ms,
+        LatencyTier::Autonomic.budget_ms(),
+        "总预算 = 会话累计成本天花板"
+    );
+
+    let facts = EventStore::new();
+    facts
+        .append(
+            Event::pending(
+                "v2f-ledger",
+                symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
+                symbio_kernel::event::Entity::Message,
+                symbio_kernel::event::Verb::Closed,
+                0,
+                symbio_sdk::authz::PRINCIPAL_MAIN,
+            )
+            .with_cost_ms(LatencyTier::Autonomic.budget_ms() + 1),
+        )
+        .expect("入格");
+    assert_eq!(
+        GateInputs::of(&facts.range(Seq::new(0)), &gate_ctx()).spent_ms,
+        LatencyTier::Autonomic.budget_ms() + 1,
+        "值里的账必须被读出来（否则预算分支永远走不到）"
+    );
 }
 
 /// 等待用户的交互卡也是**工具的结果**：与普通结果共享同一套 id 约定

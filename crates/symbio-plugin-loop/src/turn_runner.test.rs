@@ -318,7 +318,7 @@ mod turn_runner_tests {
     /// 成功轮：final 落格、溯源指向本轮用户消息、实测 cost_ms > 0、
     /// 不变量绿、收束投影 settled；成本台账与兜底率同账（D-044）。
     #[tokio::test]
-    async fn turn_runner_happy_path_lands_final_with_measured_cost() {
+    async fn runner_happy_path_lands_final_with_measured_cost() {
         let store: std::sync::Arc<
             dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
         > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
@@ -376,7 +376,7 @@ mod turn_runner_tests {
     /// 失败轮（I3）：兜底事件落格（`turn × closed` + `reason`），`fell_back = true`，
     /// 不变量照常绿——「失败也是一句话」，不是静默。
     #[tokio::test]
-    async fn turn_runner_failure_lands_fallback_not_silence() {
+    async fn runner_failure_lands_fallback_not_silence() {
         let store: std::sync::Arc<
             dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
         > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
@@ -418,7 +418,7 @@ mod turn_runner_tests {
     /// 持久化介质（WAL 文件的重开）由 session 的存储层用例覆盖；驱动器只依赖
     /// [`Store`] 契约，故这里用平凡 `EventStore` 钉住「写进去的事件可完整重放」。
     #[tokio::test]
-    async fn turn_runner_events_are_replayable() {
+    async fn runner_events_are_replayable() {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
         let store: std::sync::Arc<
