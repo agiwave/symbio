@@ -321,7 +321,7 @@ export const BASELINE = {
   // `cargo test --workspace`：2625 passed / 0 failed（90 个目标）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 净减 3 条（2635→2632）——与上方 `rustTests` 同一批
   // （D-311 并发策略移入执行体：环侧 5 条退役、执行体 2 条新增，净 -3），两个口径是同一批用例。非侵蚀。
-  ciRustTestsTotal: 2632,
+  ciRustTestsTotal: 2634,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

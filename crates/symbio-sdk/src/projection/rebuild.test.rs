@@ -98,32 +98,42 @@ fn shapes(msgs: &[crate::chat::chat_node::ChatNode]) -> Vec<Shape> {
     msgs.iter().map(shape).collect()
 }
 
+/// 一条轮级事实的公共壳（用户格 / 收束格 / 补充格的形状都从它出发）。
+fn frame_event(
+    id: &str,
+    kind: &str,
+    verb: Verb,
+    ts: i64,
+    origin: &str,
+    payload: serde_json::Value,
+) -> Event {
+    Event::pending(id, kind, Entity::Turn, verb, 1, origin)
+        .with_ts(ts)
+        .with_payload(payload)
+}
+
 /// 用户格（载荷带节点 id）。
 fn user_event(id: &str, text: &str) -> Event {
-    Event::pending(
+    frame_event(
         "u-1",
         EVENT_USER_MESSAGE,
-        Entity::Turn,
         Verb::Opened,
-        1,
+        1_000,
         "user",
+        serde_json::json!({ "text": text, "tier": "full", "id": id }),
     )
-    .with_ts(1_000)
-    .with_payload(serde_json::json!({ "text": text, "tier": "full", "id": id }))
 }
 
 /// 收束格（产出形状见 `turn_runner::produced_payload`）。
 fn final_event(payload: serde_json::Value) -> Event {
-    Event::pending(
+    frame_event(
         "f-1",
         EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
         Verb::Closed,
-        1,
+        2_000,
         "session/main",
+        payload,
     )
-    .with_ts(2_000)
-    .with_payload(payload)
 }
 
 // ── ① 一轮对话的树 ────────────────────────────────────────────────────
@@ -1071,4 +1081,130 @@ fn a_second_birth_for_a_known_id_does_not_duplicate() {
     let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 1, "同 id 只认首次：{got:?}");
     assert_eq!(got[0].text, "首次出生", "留下的是先到的那条");
+}
+
+// ── ⑧ 未执行调用：由事实投影，不由写侧补节点（P1c-4 前置）────────────
+
+/// 一条工具端口的协议事实（`request` / `failed` 形状相同，合一个 helper）：
+/// 调用事实自带名称与参数（与 `open_one` 同形状），失败事实自带 `why`（与执行体词表同源）。
+fn tool_fact_event(kind: &str, id: &str, payload: serde_json::Value) -> Event {
+    Event::pending(
+        format!("{kind}-{id}-1"),
+        kind,
+        Entity::Turn,
+        Verb::Asserted,
+        1,
+        "system",
+    )
+    .with_ts(1_500)
+    .with_payload(payload)
+}
+
+/// 一笔债只有 `failed{not_executed}` 事实时，投影器按事实渲染调用卡与「未执行」
+/// 结果子项——写侧不再写节点。父节点的终态由子事实齐备给出。
+#[test]
+fn a_not_executed_call_is_projected_from_its_failure_fact() {
+    let events = vec![
+        user_event("u-node", "读文件"),
+        model_output_event(
+            crate::event::EVENT_RESPONSE,
+            "response-model-1",
+            1_500,
+            serde_json::json!({
+                "port": "model", "id": "model-1", "attempt": 1,
+                "calls": [{ "port": "tool", "id": "c-1", "name": "read", "arguments": {} }],
+            }),
+        ),
+        tool_fact_event(
+            crate::event::EVENT_REQUEST,
+            "c-1",
+            serde_json::json!({
+                "port": "tool", "id": "c-1", "attempt": 1,
+                "name": "read", "args": { "path": "a.md" },
+            }),
+        ),
+        tool_fact_event(
+            crate::event::EVENT_FAILED,
+            "c-1",
+            serde_json::json!({
+                "port": "tool", "id": "c-1", "attempt": 1, "why": "not_executed",
+            }),
+        ),
+    ];
+
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
+    let at = |id: &str| got.iter().position(|s| s.id == id);
+    let call = at("c-1").expect("调用卡由 request 事实投影");
+    assert_eq!(got[call].ty, NodeForm::Tool);
+    assert_eq!(
+        got[call].status,
+        Some(NodeStatus::Completed),
+        "父项终态由子事实给出"
+    );
+    assert!(got[call].text.contains("a.md"), "参数取 request 事实");
+
+    let result = at("failed-c-1-1-result").expect("「未执行」结果子项按 failed 事实渲染");
+    assert_eq!(got[result].parent.as_deref(), Some("c-1"));
+    assert_eq!(got[result].ty, NodeForm::Body);
+    assert_eq!(
+        got[result].status,
+        Some(NodeStatus::Completed),
+        "没跑到不是跑失败"
+    );
+    assert!(got[result].text.contains("未执行"), "{}", got[result].text);
+}
+
+/// 真正跑过的调用已有结果子节点：一条同 id 的 `failed` 不得再画第二张结果卡。
+#[test]
+fn an_executed_call_does_not_get_a_projected_placeholder() {
+    // 结果子节点由既有节点表达；投影器只判「这通调用有没有子节点」，与它由谁落格无关。
+    let child = crate::chat::chat_node::ChatNode {
+        id: "res-1".into(),
+        parent_id: Some("c-1".into()),
+        principal: Some(principal_for(NodeRole::Assistant)),
+        msg_type: Some(NodeKind::Body),
+        content: Some(MessageContent::Text("内容".into())),
+        ..Default::default()
+    };
+    let events = vec![
+        user_event("u-node", "读文件"),
+        model_output_event(
+            crate::event::EVENT_RESPONSE,
+            "response-model-1",
+            1_500,
+            serde_json::json!({
+                "port": "model", "id": "model-1", "attempt": 1,
+                "calls": [{ "port": "tool", "id": "c-1", "name": "read", "arguments": {} }],
+            }),
+        ),
+        tool_fact_event(
+            crate::event::EVENT_REQUEST,
+            "c-1",
+            serde_json::json!({
+                "port": "tool", "id": "c-1", "attempt": 1,
+                "name": "read", "args": { "path": "a.md" },
+            }),
+        ),
+        added_event(vec![child]),
+        tool_fact_event(
+            crate::event::EVENT_FAILED,
+            "c-1",
+            serde_json::json!({
+                "port": "tool", "id": "c-1", "attempt": 1, "why": "lease_expired",
+            }),
+        ),
+    ];
+
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
+    assert_eq!(
+        got.iter()
+            .filter(|s| s.parent.as_deref() == Some("c-1"))
+            .count(),
+        1,
+        "已执行调用只有一张结果卡：{got:?}"
+    );
+    assert!(
+        got.iter().all(|s| s.id != "failed-c-1-1-result"),
+        "不得补第二张「未执行」卡"
+    );
 }

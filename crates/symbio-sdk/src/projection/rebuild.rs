@@ -80,7 +80,8 @@ use crate::chat::chat_node::{
 };
 use crate::event::event_payload_node_id;
 use crate::event::{
-    event_produced_text_node_id, event_tool_result_node_id, EVENT_FAILED, EVENT_RESPONSE,
+    event_produced_text_node_id, event_tool_result_node_id, EVENT_FAILED, EVENT_REQUEST,
+    EVENT_RESPONSE,
 };
 use crate::projection::vocab::{slot_of, ChatSlot};
 use crate::projection::vocab::{ChatVocab, MessageVocab};
@@ -246,6 +247,22 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     if !gone.is_empty() {
         out.retain(|m| !gone.contains(&m.id));
     }
+
+    // ── 未执行调用的投影补位（P1c-4 前置：节点是投影，不是可写对象）──────────
+    //
+    // 一笔工具债「没跑到」时只剩 `failed(port=tool)` 事实，没有结果子节点——调用卡
+    // 与「未执行」结果子项因此都由投影器按事实渲染。真正跑过的调用已有
+    // `artifact.added` 产出的两张卡，这里一条都不补；父节点终态由子事实齐备自然给出。
+    let existing: HashSet<String> = out.iter().map(|n| n.id.clone()).collect();
+    for mut node in unfinished_nodes(events, &existing, &out) {
+        if existing.contains(&node.id) {
+            continue;
+        }
+        seq.assign(&mut node);
+        at.insert(node.id.clone(), out.len());
+        out.push(node);
+    }
+
     // 分支标注（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：重试留下的几支折成成员根节点上的 `meta.branch`。
     // 在这里做而不是在读口做，是因为**两个读出口必须是同一棵树**（转写列表与会话叶子
     // 是同一份数据的两个地址）——标注属节点形状，随重建出格一次就够；
@@ -680,7 +697,7 @@ fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
     if e.payload.get("via").is_some() {
         return Vec::new();
     }
-    let Some(turn_id) = str_of(e, "turn_id") else {
+    let Some(root) = str_of(e, "turn_id") else {
         return Vec::new();
     };
     let principal = str_of(e, "principal")
@@ -710,7 +727,7 @@ fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
     let mut nodes = Vec::new();
     push_round_nodes(
         &mut nodes,
-        &turn_id,
+        &root,
         0,
         &serde_json::Value::Object(round),
         &status_of(e),
@@ -718,6 +735,198 @@ fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
         &principal,
     );
     nodes
+}
+
+/// 端口债键 / 应答 `calls[].id` → **模型交回的调用 id**（节点身份）。
+///
+/// 应答里的 `calls[].id` 一律是 `call_key` 合成键（`…-c{idx:03}-{model_id}`），
+/// 与模型 id 不相等；节点面只认模型 id：那才是流式面上用户看到、下一轮请求
+/// 要原样回灌的身份。端口没给 id 时合成键没有尾段，此时原样返回合成键。
+fn call_identity(id: &str) -> &str {
+    if let Some((_, tail)) = id.rsplit_once("-c") {
+        if let Some((digits, model)) = tail.split_once('-') {
+            if digits.len() == 3 && digits.chars().all(|c| c.is_ascii_digit()) && !model.is_empty()
+            {
+                return model;
+            }
+        }
+    }
+    id
+}
+
+/// 把端口债键对回某次模型应答交回的调用；对不回的债（环侧另行开账的合成键）
+/// 返回 `None`——投影面不从合成键里凭空造节点。
+fn issued_call_id(events: &[Event], debt: &str) -> Option<String> {
+    let id = call_identity(debt);
+    events
+        .iter()
+        .rev()
+        .any(|e| {
+            e.kind == EVENT_RESPONSE
+                && e.payload.get("port").and_then(|v| v.as_str()) == Some("model")
+                && e.payload.get("via").is_none()
+                && e.payload
+                    .get("calls")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter().any(|c| {
+                            c.get("id")
+                                .and_then(|x| x.as_str())
+                                .is_some_and(|x| call_identity(x) == id)
+                        })
+                    })
+                    .unwrap_or(false)
+        })
+        .then(|| id.to_string())
+}
+
+/// 未执行工具调用的投影补位：`failed(port=tool)` 事实 → `[ToolCall 父?, 结果子]`。
+///
+/// ## 为什么需要它
+///
+/// 一笔工具债只按事实记账：`request(port=tool)` 说「这里有一次调用」，
+/// `failed{why}` 说「它没跑到」。节点是事实的投影，因此调用卡与「未执行」结果子项
+/// 都必须能由读侧折出来——写侧不再补占位（父节点、子节点都不是可写对象）。
+///
+/// ## 只补没有子节点的调用
+///
+/// 真正跑过的调用已由 `artifact.added` 产出调用卡与结果子节点（`existing` 里已有），
+/// 这里不重复渲染。判据是**子节点**而不是「结果 id 在不在」：结果 id 由失败事实的
+/// 事件 id 合成，与 `artifact.added` 的 `result_id` 不必相同，只按 id 判会把同一笔
+/// 调用画出两张结果卡。
+///
+/// `why` 与端口执行体 `failed{why}` 同一份词表（`not_executed` / `aborted` / …），
+/// 文案按**单笔**口径（环不引入批概念，也不再声称「同批前序」）。
+fn unfinished_nodes(
+    events: &[Event],
+    existing: &HashSet<String>,
+    projected: &[ChatNode],
+) -> Vec<ChatNode> {
+    let mut nodes = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for e in events {
+        // 时序上「没跑到」只会以 `failed(port=tool)` 出现；实体格位由事实自身带，
+        // 这里不再重甄别（甄别写在 `nodes_of` 的格位判据里，避免同一判据两处）。
+        if e.kind != EVENT_FAILED {
+            continue;
+        }
+        if e.payload.get("port").and_then(|v| v.as_str()) != Some("tool") {
+            continue;
+        }
+        let Some(call_id) = str_of(e, "id") else {
+            continue;
+        };
+        // 同一笔的多次尝试各有 `failed`：只认首次出现的终局（与「同 id 只认首次」
+        // 同一条纪律），重试链不该在投影面上画出多张结果卡。
+        if !seen.insert(call_id.clone()) {
+            continue;
+        }
+        // 端口债键 → **模型交回的调用 id**（节点身份）。开账兜底键是环侧合成的
+        // （`…-c{idx:03}-{model_id}`），它与模型 id 不相等；节点面只认模型 id，
+        // 因为那才是用户在流式面看到、并且下一轮请求要原样回灌的那一个。
+        let Some(node_id) = issued_call_id(events, &call_id) else {
+            continue;
+        };
+        // 已有子节点（真正跑过）⇒ 调用卡与结果卡都归 `artifact.added`，这里不补。
+        let has_child = projected
+            .iter()
+            .any(|n| n.parent_id.as_deref() == Some(node_id.as_str()));
+        if has_child {
+            continue;
+        }
+        let why = text_of(e, "why");
+        let req = events.iter().rev().find(|r| {
+            r.kind == EVENT_REQUEST
+                && r.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
+                && r.payload.get("id").and_then(|v| v.as_str()) == Some(call_id.as_str())
+        });
+        let name = req
+            .and_then(|r| {
+                r.payload
+                    .get("name")
+                    .or_else(|| r.payload.get("tool"))
+                    .and_then(|v| v.as_str())
+            })
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string);
+        let args_text = req
+            .and_then(|r| r.payload.get("args"))
+            .map(|v| match v {
+                serde_json::Value::String(s) => s.clone(),
+                other => serde_json::to_string(other).unwrap_or_default(),
+            })
+            .unwrap_or_default();
+
+        if !existing.contains(&node_id) {
+            // 调用卡的父节点是**产生这批调用的那一次模型应答**的 `turn_id`；
+            // 按调用标识在 `calls[]` 里回找，才能把失败事实对回它所属的那一轮。
+            // 回找不到 ⇒ 这不是一次模型发起的调用，不投影（见 `issued_call_id`）。
+            let Some(resp) = events.iter().rev().find(|r| {
+                r.kind == EVENT_RESPONSE
+                    && r.payload.get("port").and_then(|v| v.as_str()) == Some("model")
+                    && r.payload.get("via").is_none()
+                    && r.payload
+                        .get("calls")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter().any(|c| {
+                                c.get("id")
+                                    .and_then(|x| x.as_str())
+                                    .is_some_and(|x| call_identity(x) == node_id.as_str())
+                            })
+                        })
+                        .unwrap_or(false)
+            }) else {
+                continue;
+            };
+            let root = str_of(resp, "turn_id").unwrap_or_else(|| format!("root-{node_id}"));
+            let mut call = llm_build_tool_call_node(
+                &root,
+                node_id.clone(),
+                name.clone(),
+                args_text,
+                None,
+                &actor_principal(e),
+            );
+            call.timestamp = Some(e.ts);
+            call.status = Some(NodeStatus::Completed);
+            let mut meta = call.meta.clone().unwrap_or_else(|| serde_json::json!({}));
+            if let Some(obj) = meta.as_object_mut() {
+                obj.insert("success".into(), serde_json::json!(false));
+                obj.insert("failure_kind".into(), serde_json::json!(why));
+            }
+            call.meta = Some(meta);
+            nodes.push(call);
+        }
+
+        let result_id = event_tool_result_node_id(e);
+        if !existing.contains(&result_id) {
+            let mut result = llm_build_tool_message(
+                &node_id,
+                &unfinished_text(&why),
+                Some(false),
+                Some(result_id),
+                name.as_deref(),
+            );
+            result.timestamp = Some(e.ts);
+            // 「没跑到」不是「跑失败」：标 Failed 会被上下文过滤并多渲染一条 ⚠，
+            // 与写侧占位同口径地以 Completed 交代（成因在 `meta.failure_kind`）。
+            result.status = Some(NodeStatus::Completed);
+            if let Some(obj) = result.meta.as_mut().and_then(|m| m.as_object_mut()) {
+                obj.insert("failure_kind".into(), serde_json::json!(why));
+            }
+            nodes.push(result);
+        }
+    }
+    nodes
+}
+
+/// 「没跑到」的人读文案（单笔口径）：成因码留在 `meta.failure_kind`，正文不重复批语义。
+fn unfinished_text(why: &str) -> String {
+    match why {
+        "aborted" => "本次调用已中止（用户终止），未执行，未产生结果。".to_string(),
+        other => format!("本次调用未执行（{other}），未产生结果。需要时请重新发起这一次调用。"),
+    }
 }
 
 /// 工具格（`artifact × asserted`）→ `[本轮中途产出子（可选）, ToolCall 子, 结果子]`。
