@@ -11,13 +11,15 @@ use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
 };
 use symbio_plugin_api::port::{
-    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
+    PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortInput, PortOutcome,
+    PortProvider,
 };
 use symbio_plugin_api::ports;
 use symbio_plugin_api::{
-    llm_short_id, CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv, ExecEventSink,
-    ExecTranscriptWriter, LlmAdapter, ModelFinishReason, ModelProvider, PluginError, PromptMessage,
-    ProviderLlmAdapter, TurnOutput, TurnToolCallInfo,
+    llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecAbortSignal, ExecEnv, ExecEventSink,
+    ExecTranscriptWriter, FactDraft, LlmAdapter, ModelFinishReason, ModelProvider, PluginError,
+    PromptMessage, ProviderLlmAdapter, TurnOutput, TurnToolCallInfo, Verb, EVENT_FAILED,
+    EVENT_RESPONSE,
 };
 
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
@@ -122,10 +124,15 @@ impl PortExecutor for ModelExecutor {
         let request: RoundTripRequest = match serde_json::from_value(input.payload) {
             Ok(request) => request,
             Err(error) => {
-                return PortOutcome::failed(
-                    PortErrorClass::NonRetryable,
-                    format!("模型请求载荷不可读：{error}"),
+                let why = format!("模型请求载荷不可读：{error}");
+                // 连载荷都读不出来，这一笔也必须收口（`failed` 由执行体落格，`D-314`）。
+                emit_outcome(
+                    &exec.emit,
+                    EVENT_FAILED,
+                    serde_json::json!({ "status": "failed", "why": &why }),
                 )
+                .await;
+                return PortOutcome::failed(PortErrorClass::NonRetryable, why);
             }
         };
         let provider = request
@@ -142,7 +149,7 @@ impl PortExecutor for ModelExecutor {
         // 再原样转发给展示出口。丢帧不影响正确性——终稿以 `response` 为准。
         let rows = Arc::new(StreamRows::new(exec.sink.clone()));
         let env = ExecEnv::new(ExecEventSink::direct(rows.clone()), exec.abort.clone());
-        match provider
+        let outcome = match provider
             // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
             .round_trip(
                 &request.system_prompt,
@@ -199,8 +206,35 @@ impl PortExecutor for ModelExecutor {
                     error: Some((PortErrorClass::NonRetryable, why)),
                 }
             }
+        };
+        // 账：`response` / `failed` 由执行体经宿主写口落格（`D-314`）；
+        // 键与信封（`port` / `id` / `attempt` / `via`）由宿主按本笔债身份盖章。
+        if let Some(payload) = outcome.facts.first() {
+            let kind = if outcome.error.is_none() {
+                EVENT_RESPONSE
+            } else {
+                EVENT_FAILED
+            };
+            emit_outcome(&exec.emit, kind, payload.clone()).await;
         }
+        outcome
     }
+}
+
+/// 执行体落协议事实的统一出口（`D-314`）：只交载荷，键与信封由宿主盖章。
+///
+/// `key` 只是无信封宿主的兜底——模型往返的宿主写口带着本笔债身份，
+/// 会把 `response` / `failed` 的键改写成 `<kind>-<port>-<id>-<attempt>`。
+async fn emit_outcome(emit: &PortFactEmit, kind: &str, payload: serde_json::Value) {
+    emit.emit(vec![FactDraft {
+        key: format!("{kind}-outcome"),
+        kind: kind.to_string(),
+        entity: Entity::Turn,
+        verb: Verb::Asserted,
+        payload,
+        produced_by: None,
+    }])
+    .await;
 }
 
 /// 一次往返写进 `response` / `failed` 的载荷（行契约归本插件，`D-314`）。

@@ -136,6 +136,7 @@ pub(crate) fn begin_model(
             principal.clone(),
             run.now_ms(),
             Some(produced_by),
+            Some(super::super::port::CallEnvelope::of(&call)),
         ),
         ctx: None,
     };
@@ -189,7 +190,8 @@ pub(crate) fn begin_model(
                     None => node_facts(&nodes_ok),
                 };
                 // 执行体路径：载荷（终答折叠、节点身份、`calls` 的 `call_key`）已由
-                // `symbio-plugin-model` 装配好，环只把这份草稿落库（`D-314`）。
+                // `symbio-plugin-model` 装配，并由它经宿主写口落 `response`（`D-314`）；
+                // 环只取读数，不写第二份。
                 let fields = if by_executor {
                     let fact = round_fact
                         .clone()
@@ -197,7 +199,7 @@ pub(crate) fn begin_model(
                         .unwrap_or_else(|| serde_json::json!({}));
                     let answer_id = fact["answer_id"].as_str().unwrap_or_default().to_string();
                     *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
-                    fact
+                    None
                 } else {
                     let mut fields =
                         output_fields(&call_id, &turn_root_id, &principal, &facts, Some(&rt));
@@ -219,17 +221,20 @@ pub(crate) fn begin_model(
                         })
                         .collect();
                     fields["calls"] = serde_json::Value::Array(calls);
-                    fields
+                    Some(fields)
                 };
-                match super::super::port::succeed_with(
-                    store.as_ref(),
-                    &call,
-                    turn,
-                    produced_by,
-                    fields,
-                ) {
-                    Ok(()) => Ok(rt),
-                    Err(e) => Err(ModelCallError::Store(e)),
+                match fields {
+                    None => Ok(rt),
+                    Some(fields) => match super::super::port::succeed_with(
+                        store.as_ref(),
+                        &call,
+                        turn,
+                        produced_by,
+                        fields,
+                    ) {
+                        Ok(()) => Ok(rt),
+                        Err(e) => Err(ModelCallError::Store(e)),
+                    },
                 }
             }
             Err(stop) => {
@@ -244,8 +249,8 @@ pub(crate) fn begin_model(
                     EngineStop::Failed(why) => (false, why),
                 };
                 let fields = if by_executor {
-                    // 执行体已把半截正文、停法与 `status` 装进载荷（`D-314`）；
-                    // 环只落库。
+                    // 执行体已把半截正文、停法与 `status` 装进载荷，并由它自己落
+                    // `failed`（`D-314`）；环只取读数，不写第二份。
                     let fact = round_fact
                         .clone()
                         .filter(|v| v.is_object())
@@ -253,7 +258,7 @@ pub(crate) fn begin_model(
                     let answer_id = fact["answer_id"].as_str().unwrap_or_default().to_string();
                     *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) =
                         Some((facts, answer_id));
-                    fact
+                    None
                 } else {
                     let mut fields =
                         output_fields(&call_id, &turn_root_id, &principal, &facts, None);
@@ -264,17 +269,19 @@ pub(crate) fn begin_model(
                     fields["status"] = serde_json::Value::String(
                         if aborted { "aborted" } else { "failed" }.to_string(),
                     );
-                    fields
+                    Some(fields)
                 };
                 // 失败也要留痕：写不进去不掩盖执行体自己的错误（它更有信息量）。
-                let _ = super::super::port::failed_with_extra(
-                    store.as_ref(),
-                    &call,
-                    turn,
-                    produced_by,
-                    &why,
-                    fields,
-                );
+                if let Some(fields) = fields {
+                    let _ = super::super::port::failed_with_extra(
+                        store.as_ref(),
+                        &call,
+                        turn,
+                        produced_by,
+                        &why,
+                        fields,
+                    );
+                }
                 Err(if aborted {
                     ModelCallError::Aborted
                 } else {

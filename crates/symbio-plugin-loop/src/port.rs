@@ -496,6 +496,7 @@ pub(crate) fn host_fact_emit(
     actor: impl Into<String>,
     now: i64,
     produced_by: Option<u64>,
+    envelope: Option<CallEnvelope>,
 ) -> symbio_plugin_api::port::PortFactEmit {
     symbio_plugin_api::port::PortFactEmit::new(Arc::new(HostFactWriter {
         store,
@@ -503,7 +504,32 @@ pub(crate) fn host_fact_emit(
         actor: actor.into(),
         now,
         produced_by,
+        envelope,
     }))
+}
+
+/// 协议事实的**记账信封**（`D-314`）：本笔债的 `port` / `id` / `attempt` / `via`。
+///
+/// 执行体只交载荷；幂等键（`<kind>-<port>-<id>-<attempt>`）、信封字段与
+/// `produced_by` 由宿主按这一份身份盖章——信封是记账（`I-3` 七职），执行体
+/// 不持有 `attempt` / `via`。
+#[derive(Clone)]
+pub(crate) struct CallEnvelope {
+    pub(crate) port: &'static str,
+    pub(crate) id: String,
+    pub(crate) attempt: u64,
+    pub(crate) via: Option<String>,
+}
+
+impl CallEnvelope {
+    pub(crate) fn of(call: &Call) -> Self {
+        Self {
+            port: call.port,
+            id: call.id.clone(),
+            attempt: call.attempt,
+            via: call.via.clone(),
+        }
+    }
 }
 
 /// provider 追加事实草稿的**宿主唯一写口**（`DE-047` D-305 裁决一）。
@@ -520,22 +546,50 @@ struct HostFactWriter {
     /// 宿主默认的 `produced_by`：草稿自带时以草稿为准，缺席时用它盖章
     /// ——归属属记账信封（`D-305`），执行体不必为此读环的结论。
     produced_by: Option<u64>,
+    /// 本笔债的记账信封：只对协议五格（`response` / `failed`）生效，
+    /// 其余事实仍按草稿自带的键落格。
+    envelope: Option<CallEnvelope>,
 }
 
 #[async_trait::async_trait]
 impl symbio_plugin_api::port::PortFactWriter for HostFactWriter {
     async fn emit(&self, facts: Vec<symbio_plugin_api::FactDraft>) {
         for draft in facts {
+            // 协议事实的键与信封由宿主盖章（`D-314`）：执行体只交载荷。
+            let protocol = self.envelope.as_ref().filter(|_| {
+                matches!(
+                    draft.kind.as_str(),
+                    symbio_plugin_api::EVENT_RESPONSE | symbio_plugin_api::EVENT_FAILED
+                )
+            });
+            let (key, actor) = match protocol {
+                Some(env) => (
+                    format!("{}-{}-{}-{}", draft.kind, env.port, env.id, env.attempt),
+                    "system".to_string(),
+                ),
+                None => (draft.key.clone(), self.actor.clone()),
+            };
+            let mut payload = draft.payload;
+            if let Some(env) = protocol {
+                if let Some(object) = payload.as_object_mut() {
+                    object.insert("port".into(), serde_json::json!(env.port));
+                    object.insert("id".into(), serde_json::json!(env.id));
+                    object.insert("attempt".into(), serde_json::json!(env.attempt));
+                    if let Some(via) = env.via.as_ref() {
+                        object.insert("via".into(), serde_json::json!(via));
+                    }
+                }
+            }
             let mut event = Event::pending(
-                draft.key,
+                key,
                 draft.kind,
                 draft.entity,
                 draft.verb,
                 self.round,
-                &self.actor,
+                actor.as_str(),
             );
             event.produced_by = draft.produced_by.or(self.produced_by);
-            event.payload = draft.payload;
+            event.payload = payload;
             event.ts = self.now;
             match self.store.append(event) {
                 Ok(_) | Err(AppendError::Duplicate) => {}
@@ -680,6 +734,7 @@ pub(crate) fn run_port<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 ctx.session.principal().to_string(),
                 now,
                 Some(produced_by),
+                None,
             ),
             ctx: Some(request_ctx),
         };
