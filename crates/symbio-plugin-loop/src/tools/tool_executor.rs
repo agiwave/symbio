@@ -335,16 +335,17 @@ pub(crate) async fn land_outcome_async(
 ///    「没跑到」的调用由环写 `failed{why}` 事实，投影器按事实渲染调用卡终态与
 ///    「未执行」结果子项，环不再补节点（DE-047 D-312）。
 ///
-/// 2. **外部执行闸门在每个调用点各判一次**：判据批首读一次
+/// 2. **外部执行闸门在每个调用点各判一次**：判据按这一笔债现读
 ///    （[`BreakerInputs`]），结论按调用点出——`Refuse` 零事件、`Break` 走出参
 ///    随收束入格、`Allow` 照旧开窗。
 /// 3. **声明闸由能力包自己判**（DE-025 D-219）：工具在 `CapabilityMeta.behaviors`
 ///    上声明「我受哪项管辖」，对应实现从
-///    `ToolBehavior::before` 回答能不能跑（淘汰 / 任务表写侧即此类）。宿主只交批首
-///    读好的结论（主体 / 控制面撤销值 / 会话事实切片），本层不含任何「哪个工具名
+///    `ToolBehavior::before` 回答能不能跑（淘汰 / 任务表写侧即此类）。宿主只交这一笔
+///    的结论（主体 / 控制面撤销值 / 会话事实切片），本层不含任何「哪个工具名
 ///    受什么管辖」的分支。
 ///
-/// 阶段分层见 `dispatch/{gates,batch}`；编排顺序（空批早退 → ① → ②）与读数语义不变。
+/// 阶段分层见 `dispatch/{gates,batch}`；**没有批首读数**——编排顺序（空批早退 →
+/// 逐条准备 → 逐条执行）不变。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn process_tool_calls_in_env(
     tool_calls: Vec<TurnToolCallInfo>,
@@ -359,21 +360,12 @@ pub(crate) async fn process_tool_calls_in_env(
     effects: &mut Vec<EffectInput>,
     breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
-    // ① 批首闸门读数（阶段见 `dispatch/{gates,batch}`）。
-    //    空批不读闸门、不发日志——与拆分前的早退位置逐字一致。
+    // 空批不读闸门、不发日志——与拆分前的早退位置逐字一致。
     if tool_calls.is_empty() {
         return (Vec::new(), Vec::new());
     }
-    let mut readings = super::dispatch::gates::read_batch_gates(
-        &tool_calls,
-        ctx.clone(),
-        context_messages,
-        facts,
-        elimination_revoked,
-    )
-    .await;
 
-    // ② 逐条执行：批内顺序流程（协议失败 / 闸门拒止 / 钩子拦下 / 正常执行四条出口）。
+    // 逐条执行：批内顺序流程（协议失败 / 闸门拒止 / 钩子拦下 / 正常执行四条出口）。
     // - `tool_messages`：工具结果子节点（用于追加到对话历史）
     // - `parent_updates`：ToolCall 父节点的**完整终态快照**（发射端从
     //   `context_messages` 取权威副本应用终态），供调用方做内存镜像整条替换并随
@@ -386,7 +378,8 @@ pub(crate) async fn process_tool_calls_in_env(
         ctx,
         context_messages,
         env,
-        &mut readings,
+        facts,
+        elimination_revoked,
         effects,
         breaks,
     )

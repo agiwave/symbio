@@ -2,20 +2,20 @@
 //!
 //! 两个函数按**处理阶段**（不按职责）分开：
 //!
-//! - [`gates`] —— ① 批首闸门读数：`mode` / 熔断 / 自声明位 / 主体与控制面结论 /
-//!   本批留底 / 同参台账，一次读齐给整批复用（产出 [`gates::GateReadings`]）。
-//! - [`batch`] —— ② 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、宿主闸 /
+//! - [`gates`] —— 拒止骨架与宿主闸（外部执行）：**没有批首读数**，判据按每一笔债
+//!   在准备点现取。
+//! - [`batch`] —— 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、宿主闸 /
 //!   声明闸拒止、钩子拦下与正常执行四条出口。
 //!
 //! 「没跑到」的占位结果子节点不在这里收口：节点是事实的投影，环只写
 //! `failed{why}`，展示由投影器渲染（DE-047 D-312）。
 //!
 //! 编排入口是 [`crate::tools::tool_executor::process_tool_calls_in_env`]：
-//! 空批早退 → ① → ②。段间只传值（[`gates::GateReadings`] 与出参 `effects` / `breaks`）。
+//! 空批早退 → 逐条准备 → 逐条执行。段间只传出参 `effects` / `breaks`。
 //!
 //! 每段一条判据（纪律 3，「这段错了谁会红」）：
-//! - ① 错 ⇒ 闸门判据读数用例红（`breaker` 的批首读场景、`batch_principal` 的派生用例）；
-//! - ② 错 ⇒ 批内事件与父节点终态用例红（`tool_executor.test.rs` 的
+//! - `gates` 错 ⇒ 拒止出口语义 / 外部执行闸用例红（`gates.test.rs`）；
+//! - `batch` 错 ⇒ 批内事件与父节点终态用例红（`tool_executor.test.rs` 的
 //!   `process_tool_calls_in_env` 组：中止、交互 break、闸门拒止、协议失败）。
 
 pub(crate) mod batch;
@@ -56,9 +56,8 @@ use {
     symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
 };
 
-pub(crate) use self::gates::GateReadings;
 // 闸门表与拒止骨架：逐条执行段按 `first_refusal` 判、经 `refuse` 收口。
-pub(crate) use self::gates::{first_refusal, refuse, GateContext, Refusal};
+pub(crate) use self::gates::{batch_principal, first_refusal, refuse, GateContext, Refusal};
 
 // ── 共用收口原语（逐字来自拆分前的 tool_executor.rs）────────────────────────
 /// 把父 ToolCall 的**完整副本**定稿为终态并广播。

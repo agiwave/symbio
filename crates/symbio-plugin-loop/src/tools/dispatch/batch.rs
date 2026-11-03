@@ -1,9 +1,9 @@
 //! ②「逐条执行」。
 //!
-//! 一条顺序流程的中间段：对批内每条调用依序过「协议校验 → 同参台账 → 参数解析 →
+//! 一条顺序流程的中间段：对批内每条调用依序过「协议校验 → 同参提示 → 参数解析 →
 //! 超限丢弃 → 宿主闸（外部执行）→ 声明闸（能力包自己的 `before`）→ Pre 钩子 →
-//! 执行 → Post 钩子 → 记账 → 结果与父终态广播」。批首读数经 [`GateReadings`] 传入，
-//! 台账（`seen_calls`）在本段逐条登记。
+//! 执行 → Post 钩子 → 记账 → 结果与父终态广播」。**没有批首读数**：闸门判据、声明位、
+//! 主体、会话事实切片都在这一笔债的准备点现取；同参提示现读转写与本批前缀，不养台账。
 //!
 //! ## 批内执行策略
 //!
@@ -204,20 +204,61 @@ enum PreTerminal {
     },
 }
 
+/// 同一签名在此前出现过的**会话内序号**（1 基），没有则 `None`。
+///
+/// 台账有且只有两处**事实来源**：转写里已有的工具调用请求节点（骨架 + tag `tool`，
+/// 正文即定稿参数文本），以及本批在这一次调用之前的调用。环**不养**可变台账——
+/// 批首预读删掉后，判据按这一笔债现读（DE-047 D-311）。
+///
+/// `current_ids` 是本批调用的节点 id：转写在执行前**就已含**这一批 ToolCall 节点，
+/// 不排除的话每条调用都会把自己数成「重复」。
+fn prior_call_signatures(context_messages: &[ChatNode], current_ids: &[String]) -> Vec<String> {
+    context_messages
+        .iter()
+        .filter(|m| m.is_tool_call() && !current_ids.contains(&m.id))
+        .filter_map(|m| {
+            let name = m.tool_name()?;
+            let args = match m.content.as_ref()? {
+                MessageContent::Text(s) => s.as_str(),
+                MessageContent::Parts(_) => return None,
+            };
+            Some(call_signature(name, args))
+        })
+        .collect()
+}
+
+fn repeat_ordinal(
+    context_messages: &[ChatNode],
+    batch: &[TurnToolCallInfo],
+    index: usize,
+    current_ids: &[String],
+    signature: &str,
+) -> Option<usize> {
+    let mut ledger = prior_call_signatures(context_messages, current_ids);
+    ledger.extend(batch[..index].iter().filter_map(|tc| {
+        let name = tc.name.as_deref()?;
+        Some(call_signature(name, &tool_call_args_text(tc)))
+    }));
+    ledger.iter().position(|seen| seen == signature).map(|p| p + 1)
+}
+
 /// 一条调用的**准备**：逐字沿用拆分前循环体的前段，只把「发事件」的部分换成
 /// [`PreTerminal`]（谁发、什么时候发由调用方按批序决定）。
+///
+/// 闸门判据在这一笔债自己的派发点上读（不预读整批）：熔断的授权 / 成本台账、
+/// 自声明行为位、主体、会话事实切片都只属于这一次判定（DE-047 D-311）。
 #[allow(clippy::too_many_arguments)]
 async fn prepare_call(
     tc: &TurnToolCallInfo,
+    batch: &[TurnToolCallInfo],
+    index: usize,
+    current_ids: &[String],
     parent: &Option<Arc<dyn Plugin>>,
     ctx: Arc<dyn PluginInvokeRequest>,
-    gate_started: std::time::Instant,
-    breaker: &BreakerInputs,
+    context_messages: &[ChatNode],
+    facts: &dyn Store<Event = Event>,
+    elimination_revoked: bool,
     decls: &ToolDecls,
-    principal: &str,
-    session_facts: &[Event],
-    before: symbio_plugin_api::effects::BeforeReadings,
-    seen_calls: &mut Vec<String>,
 ) -> PreCheck {
     // 工具调用 id 缺失/非法 → 作为工具调用失败处理（不跳过）。
     // 正常情况下 TurnToolCallAccumulator 已保证 id 非空；此分支为兜底防御。
@@ -256,19 +297,16 @@ async fn prepare_call(
 
     // 同参重复调用的判据：签名与落库节点里的参数文本同源
     // （[`tool_call_args_text`]），于是「上下文里的那一次」与「这一次」可比。
-    // 只登记、只回报——不拦截、不改执行结果。
+    // **不养可变台账**：此前出现过的调用现读转写节点 + 本批在本次调用之前的调用，
+    // 只回报——不拦截、不改执行结果。
     let signature = call_signature(&name, &tool_call_args_text(tc));
-    let repeat_note = seen_calls
-        .iter()
-        .position(|seen| *seen == signature)
+    let repeat_note = repeat_ordinal(context_messages, batch, index, current_ids, &signature)
         .map(|first| {
             format!(
-                "[重复调用] 与本次会话第 {} 次工具调用同工具同参数（{name}），结果相同。原样重发不会带来新信息：\
-                 需要后续结果请用 offset 翻页，需要缩小范围请换 pattern 或限定目录。",
-                first + 1
+                "[重复调用] 与本次会话第 {first} 次工具调用同工具同参数（{name}），结果相同。原样重发不会带来新信息：\
+                 需要后续结果请用 offset 翻页，需要缩小范围请换 pattern 或限定目录。"
             )
         });
-    seen_calls.push(signature);
     if repeat_note.is_some() {
         // 「要不要真的拦」留给实际数据判，先把绕圈的次数记进日志。
         plugin_warn!("session", "[Tool] 同参重复调用：{name}（调用 id={id}）");
@@ -325,9 +363,15 @@ async fn prepare_call(
     // 判定紧贴执行窗口之前、**先于 PreToolUse 钩子**：钩子是给「要执行的调用」
     // 准备的用户策略，对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付一次
     // 钩子往返（还可能触发钩子自己的副作用）。
+    //
+    // 判据**按这一笔债现读**（不再批首一次读齐）：`gate_started` 从读判据之前
+    // 起算——熔断的 `gate-timeout` 量的是「这份输入已经读了多久」。
+    let gate_started = std::time::Instant::now();
+    let session_facts = facts.range(Seq::new(0));
+    let breaker = BreakerInputs::of(&session_facts, &ctx);
     let gate_ctx = GateContext {
         gate_started,
-        breaker,
+        breaker: &breaker,
     };
     if let Some(refusal) = first_refusal(&gate_ctx) {
         return PreCheck::Terminal(PreTerminal::Refused {
@@ -342,16 +386,19 @@ async fn prepare_call(
     //
     // 淘汰 / 任务表写侧这类**按能力判**的闸不在宿主：它们各自是能力包的
     // `ToolBehavior::before`，按 `CapabilityMeta.behaviors` 选实现（DE-025 D-219）。
-    // 宿主只交出批首读好的结论——主体、控制面撤销值、会话事实切片——不解释
+    // 宿主只交出这一笔的结论——主体、控制面撤销值、会话事实切片——不解释
     // 「谁该被拒」。
+    let principal = batch_principal(&ctx);
     let before_req = BeforeRequest {
         tool: &name,
         call_id: &id,
         args: &tc.arguments,
-        principal,
+        principal: &principal,
         declared: decls.behaviors_of(&name),
-        facts: session_facts,
-        readings: before,
+        facts: &session_facts,
+        readings: symbio_plugin_api::effects::BeforeReadings {
+            assign_work_revoked: elimination_revoked,
+        },
     };
     if let Some(judged) = symbio_plugin_api::effects::apply_before(&before_req) {
         return PreCheck::Terminal(PreTerminal::Refused {
@@ -701,14 +748,13 @@ fn start_execution<'a>(
 async fn flush_one<'a>(
     inflight: &mut FuturesUnordered<ExecFuture<'a>>,
     order: &mut VecDeque<u64>,
-    started: &mut HashMap<u64, Ready>,
+    started: &mut HashMap<u64, (Ready, ToolDecls)>,
     done: &mut HashMap<u64, ExecOutcome>,
     sink: &ExecEventSink,
     parent: &Option<Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
     effects: &mut Vec<EffectInput>,
-    decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
 ) {
@@ -728,7 +774,8 @@ async fn flush_one<'a>(
     let Some(out) = done.remove(&target) else {
         return;
     };
-    let Some(ready) = started.remove(&target) else {
+    // 声明位随这一笔债走（按债现读，不再整批复用一份）。
+    let Some((ready, decls)) = started.remove(&target) else {
         return;
     };
     order.pop_front();
@@ -740,7 +787,7 @@ async fn flush_one<'a>(
         ctx,
         context_messages,
         effects,
-        decls,
+        &decls,
         tool_messages,
         parent_updates,
     )
@@ -752,14 +799,13 @@ async fn flush_one<'a>(
 async fn flush_all<'a>(
     inflight: &mut FuturesUnordered<ExecFuture<'a>>,
     order: &mut VecDeque<u64>,
-    started: &mut HashMap<u64, Ready>,
+    started: &mut HashMap<u64, (Ready, ToolDecls)>,
     done: &mut HashMap<u64, ExecOutcome>,
     sink: &ExecEventSink,
     parent: &Option<Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
     effects: &mut Vec<EffectInput>,
-    decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
 ) {
@@ -774,7 +820,6 @@ async fn flush_all<'a>(
             ctx,
             context_messages,
             effects,
-            decls,
             tool_messages,
             parent_updates,
         )
@@ -815,10 +860,9 @@ fn interaction_blocked(parent_updates: &[ChatNode]) -> bool {
 ///
 /// 父 ToolCall 终态——**完整消息**（发射端从权威转写取副本应用终态）。
 /// 返回给调用方做内存镜像整条替换 + 随 persist_messages 落库。
-// 拆分段以局部绑定沿用拆分前的变量名（`decls` 等），循环体逐字未动——
-// `&decls` 这类取放在拆分前是 `&Vec`/`&T`、现在是 `&&T`，语义同一，clippy 的
-// needless_borrow 在这里是对「纯结构拆分」的误报（判据 1：不动代码行）。
-#[allow(clippy::needless_borrow)]
+///
+/// 闸门判据**按这一笔债现读**（不预读整批）：声明位随债走，熔断 / 主体 / 会话
+/// 事实切片在 [`prepare_call`] 里现取（DE-047 D-311）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_batch(
     tool_calls: Vec<TurnToolCallInfo>,
@@ -828,7 +872,8 @@ pub(crate) async fn run_batch(
     ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
     env: &RoundEnv,
-    readings: &mut GateReadings,
+    facts: &dyn Store<Event = Event>,
+    elimination_revoked: bool,
     effects: &mut Vec<EffectInput>,
     breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
@@ -838,20 +883,14 @@ pub(crate) async fn run_batch(
     let principal = symbio_sdk::chat::principal::Principal::from_legacy(
         &symbio_sdk::authz::request_principal(ctx.as_ref()),
     );
-    // 批首读数按本段变量名接线——判据结构只依赖读数，不依赖读数来自哪一段。
-    let mode = readings.mode.as_str();
-    let gate_started = readings.gate_started;
-    let breaker = &readings.breaker;
-    let decls = &readings.decls;
-    let judge_principal = readings.principal.as_str();
-    let session_facts = readings.session_facts.as_slice();
-    let before = readings.before;
-    let seen_calls = &mut readings.seen_calls;
+    // 本批调用的节点 id：转写里已含它们，同参判定要把自己排除（见
+    // [`prior_call_signatures`]）。
+    let current_ids: Vec<String> = tool_calls.iter().filter_map(|tc| tc.id.clone()).collect();
 
     // 在途执行（启动顺序 = 调用顺序）、待收口队列与已完成产出。
     let mut inflight: FuturesUnordered<ExecFuture<'_>> = FuturesUnordered::new();
     let mut order: VecDeque<u64> = VecDeque::new();
-    let mut started: HashMap<u64, Ready> = HashMap::new();
+    let mut started: HashMap<u64, (Ready, ToolDecls)> = HashMap::new();
     let mut done: HashMap<u64, ExecOutcome> = HashMap::new();
     let mut seq: u64 = 0;
     // 交互模式中止 / 用户中止：不再启动新调用，先把在途的按序收完。
@@ -860,11 +899,13 @@ pub(crate) async fn run_batch(
 
     while i < tool_calls.len() || !order.is_empty() {
         if !stop_starting && !abort.is_aborted() && i < tool_calls.len() {
+            // 交互语义留环：模式取**当前交互上下文**，不再由批首一次性读出。
+            let interactive = ctx
+                .get(symbio_sdk::keys::MODE)
+                .map(|mode| mode == "interactive")
+                .unwrap_or(false);
             // 交互模式下，前一个工具待审批/失败 → 中止本批剩余（用户需逐个处理）
-            if mode == "interactive"
-                && !parent_updates.is_empty()
-                && interaction_blocked(&parent_updates)
-            {
+            if interactive && !parent_updates.is_empty() && interaction_blocked(&parent_updates) {
                 plugin_info!(
                     "session",
                     "[Tool] 交互模式下前一个工具待用户恢复，中止本批剩余工具"
@@ -873,17 +914,20 @@ pub(crate) async fn run_batch(
                 continue;
             }
 
+            // 声明位按这一笔债现读：没有 visitor ⇒ 声明为空 ⇒ 声明闸都不命中、
+            // 效果端口也无事可做（缺声明与漏声明同形，e2e 兜行为）。
+            let decls = ToolDecls::of_metas(&symbio_sdk::capability::tool_metas(&ctx).await);
             match prepare_call(
                 &tool_calls[i],
+                &tool_calls,
+                i,
+                &current_ids,
                 parent,
                 ctx.clone(),
-                gate_started,
-                breaker,
-                decls,
-                judge_principal,
-                session_facts,
-                before,
-                seen_calls,
+                context_messages,
+                facts,
+                elimination_revoked,
+                &decls,
             )
             .await
             {
@@ -900,7 +944,6 @@ pub(crate) async fn run_batch(
                         &ctx,
                         context_messages,
                         effects,
-                        decls,
                         &mut tool_messages,
                         &mut parent_updates,
                     )
@@ -912,7 +955,7 @@ pub(crate) async fn run_batch(
                         &mut tool_messages,
                         &mut parent_updates,
                         effects,
-                        decls,
+                        &decls,
                         breaks,
                         &principal,
                     )
@@ -923,7 +966,7 @@ pub(crate) async fn run_batch(
                     i += 1;
                     // 交互模式整批压成串行（审批 / 提问一次只处理一张卡）——这是
                     // 交互语义，不是并发策略；其余模式由执行体自己限流（D-311）。
-                    if mode == "interactive" {
+                    if interactive {
                         // 串行边界：在途先全部按序收口，本调用独占执行窗口。
                         flush_all(
                             &mut inflight,
@@ -935,7 +978,6 @@ pub(crate) async fn run_batch(
                             &ctx,
                             context_messages,
                             effects,
-                            decls,
                             &mut tool_messages,
                             &mut parent_updates,
                         )
@@ -961,7 +1003,7 @@ pub(crate) async fn run_batch(
                             &ctx,
                             context_messages,
                             effects,
-                            decls,
+                            &decls,
                             &mut tool_messages,
                             &mut parent_updates,
                         )
@@ -975,7 +1017,7 @@ pub(crate) async fn run_batch(
                         seq += 1;
                         inflight.push(start_execution(env, seq, &ready, parent, sink, abort, &ctx));
                         order.push_back(seq);
-                        started.insert(seq, ready);
+                        started.insert(seq, (ready, decls));
                     }
                 }
             }
@@ -993,7 +1035,6 @@ pub(crate) async fn run_batch(
                 &ctx,
                 context_messages,
                 effects,
-                decls,
                 &mut tool_messages,
                 &mut parent_updates,
             )
@@ -1015,7 +1056,6 @@ pub(crate) async fn run_batch(
         &ctx,
         context_messages,
         effects,
-        decls,
         &mut tool_messages,
         &mut parent_updates,
     )

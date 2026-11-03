@@ -1,8 +1,8 @@
-//! ①「批首闸门读数」。
+//! 拒止骨架与宿主闸（外部执行）。
 //!
-//! 判据（「这段错了谁会红」）：闸门判据**只在批首读一次**、整批复用的读数用例红
-//! （`breaker` 的批首读场景、`batch_principal` 的派生用例与 `tool_executor.test.rs`
-//! 的闸门组）。读数顺序固定：`gate_started` 从读判据之前起算。
+//! **没有批首读数**：每条债在自己的派发点上读判据（`batch::prepare_call`），环不预读
+//! 整批的 `mode` / 熔断 / 声明位 / 主体 / 会话事实切片 / 同参台账。判据错 ⇒ 拒止骨架
+//! 的出口语义用例红（`gates.test.rs`）与整批路径的闸门组红（`tool_executor.test.rs`）。
 //!
 //! ## 宿主闸与声明闸
 //!
@@ -13,7 +13,7 @@
 //! 淘汰与任务表写侧这两道**按能力判**的闸已随 owner 迁出宿主：它们各自是
 //! `ToolBehavior::before`（agent 的 `DelegationGate`、loop 的 `TaskTable`），由
 //! `symbio_plugin_api::effects::apply_before` 按工具**自己声明的行为名**选实现。
-//! 宿主在这里只负责把批首读好的结论交出去（主体 / 控制面撤销值 / 会话事实切片），
+//! 宿主只把这一笔债的结论交出去（主体 / 控制面撤销值 / 会话事实切片），
 //! 并在 [`Refusal::from_before`] 里把实现的判定映射回拒止骨架。
 
 //! ## 闸门表
@@ -35,114 +35,15 @@
 
 use super::*;
 use symbio_kernel::event::{Entity, Verb};
-use symbio_plugin_api::effects::{BeforeReadings, BeforeRefusal};
+use symbio_plugin_api::effects::BeforeRefusal;
 use symbio_sdk::authz::PRINCIPAL_REFLEX;
 
-/// 批首一次读齐的全部闸门读数（批首一次读齐；逐条执行与未执行收口只按值消费，不再回读事实源）。
-pub(crate) struct GateReadings {
-    /// `MODE` 配置读数（`interactive` 下本批可在前序待用户时中止）。
-    pub(crate) mode: String,
-    /// 熔断 `gate-timeout` 的起算时刻（量「这份输入已经读了多久」）。
-    pub(crate) gate_started: std::time::Instant,
-    /// 外部执行闸门判据。
-    pub(crate) breaker: BreakerInputs,
-    /// 工具自声明的行为位。
-    pub(crate) decls: ToolDecls,
-    /// 前置判断的控制面读数：声明闸在批首拿到同一份结论，逐个调用只做纯判定。
-    pub(crate) before: BeforeReadings,
-    /// 本条批的主体：声明闸都按它问（`AGENT_ID` ⇒ 会话族地址）。
-    pub(crate) principal: String,
-    /// 批首的会话事实切片——声明闸读历史用（例如「这条便签是不是记过」）。
-    ///
-    /// 持有到批尾的代价是一份 `Vec<Event>`；换来的是判断只读**值**、不在执行
-    /// 窗口里回放事实源（D-084 的口径）。
-    pub(crate) session_facts: Vec<Event>,
-    /// 同参重复调用台账；逐条执行时登记，故为可变读数。
-    pub(crate) seen_calls: Vec<String>,
-}
-
-/// 本条批的**主体**：声明闸按它问（`AGENT_ID` 的会话族地址，未绑定即 `session/main`）。
+/// 本条债的**主体**：声明闸按它问（`AGENT_ID` 的会话族地址，未绑定即 `session/main`）。
 ///
 /// 与 `request_principal` 同源：判断与落笔因此指向同一个主体，不会出现「按 A 判、
 /// 以 B 记」的两套主体。
 pub(crate) fn batch_principal(ctx: &Arc<dyn PluginInvokeRequest>) -> String {
     symbio_sdk::authz::principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref())
-}
-
-/// 上下文里**本批之外**已出现过的工具调用签名（按出现顺序）。
-///
-/// 读的是**工具调用请求节点**（骨架 + tag `tool`，正文即定稿参数文本）：
-/// 长跑里模型跨请求原样重发同一条调用时，前一次就在这些节点里。
-/// `current_ids` 是本批调用的节点 id——转写在执行前**就已含**本轮这一批 ToolCall
-/// 节点，不排除的话每条调用都会把自己数成「重复」。
-fn prior_call_signatures(context_messages: &[ChatNode], current_ids: &[String]) -> Vec<String> {
-    context_messages
-        .iter()
-        .filter(|m| m.is_tool_call() && !current_ids.contains(&m.id))
-        .filter_map(|m| {
-            let name = m.tool_name()?;
-            let args = match m.content.as_ref()? {
-                MessageContent::Text(s) => s.as_str(),
-                MessageContent::Parts(_) => return None,
-            };
-            Some(call_signature(name, args))
-        })
-        .collect()
-}
-
-/// 批首闸门读数：`mode` / 熔断 / 自声明位 / 主体与控制面结论 / 本批留底 / 同参台账。
-pub(crate) async fn read_batch_gates(
-    tool_calls: &[TurnToolCallInfo],
-    ctx: Arc<dyn PluginInvokeRequest>,
-    context_messages: &[ChatNode],
-    facts: &dyn Store<Event = Event>,
-    elimination_revoked: bool,
-) -> GateReadings {
-    let mode = ctx.get(symbio_sdk::keys::MODE).unwrap_or_default();
-
-    plugin_info!(
-        "session",
-        "[Tool] 处理 {} 个工具调用（mode={}）",
-        tool_calls.len(),
-        mode
-    );
-
-    // 熔断闸门的判据批首读一次（见 `BreakerInputs`）：授权表与成本台账都是只读的，
-    // 读一次给整批复用——每个调用点各重放一次事实源，闸门自己就变成时延源了。
-    //
-    // `gate_started` 从**读判据之前**起算：熔断的 `gate-timeout` 量的是「这份输入
-    // 已经读了多久」。
-    // 从前它在 `gate()` 前一刻才起算，`elapsed_ms` 恒为 0，判据永不触发。
-    let gate_started = std::time::Instant::now();
-    let session_facts = facts.range(Seq::new(0));
-    let breaker = BreakerInputs::of(&session_facts, &ctx);
-    // 声明闸的结论同批首读一次：部署级覆盖层由 session 折叠成**一个值**（它持有
-    // 全部会话的事实源），主体从 `AGENT_ID` 派生——loop 只把这些值交给能力包的实现。
-    let before = BeforeReadings {
-        assign_work_revoked: elimination_revoked,
-    };
-    let principal = batch_principal(&ctx);
-    // 工具自声明的行为位同批首读一次（见 `ToolDecls`）：声明闸的管辖对象与效果
-    // 端口的选实现依据都是它，按工具名判的那份副本因此不再存在。没有 visitor ⇒
-    // 声明为空 ⇒ 声明闸都不命中、效果端口也无事可做（缺声明与漏声明同形，e2e 兜行为）。
-    let metas = symbio_sdk::capability::tool_metas(&ctx).await;
-    let decls = ToolDecls::of_metas(&metas);
-
-    // 同参重复调用的**台账**：收进此前已出现过的调用签名，
-    // 之后每处理一条调用就登记一条。登记以**模型发出的调用**为准，被闸门拒掉的也算
-    // ——「绕圈」是模型侧的事实，与本次执行成败无关。
-    let current_call_ids: Vec<String> = tool_calls.iter().filter_map(|tc| tc.id.clone()).collect();
-    let seen_calls: Vec<String> = prior_call_signatures(context_messages, &current_call_ids);
-    GateReadings {
-        mode,
-        gate_started,
-        breaker,
-        decls,
-        before,
-        principal,
-        session_facts,
-        seen_calls,
-    }
 }
 
 // ── 闸门表与拒止骨架──────────────────────────────────────────────
