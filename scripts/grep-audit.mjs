@@ -18,12 +18,13 @@
  *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
  *   - S-011:        补充注入点的位置（两处行序断言：`turn_runner/stream.rs` 的结果/注入次序、
- *                   `turn_exec/call.rs` 的抽干点/运行器开轮次序；位置错了不会有任何测试变红）
+ *                   `stage_driver.rs` 的抽干口/运行器开轮次序；位置错了不会有任何测试变红）
  *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 批次号）
  *   - S-013:        `WalkBuilder` 构造点必须钉遍历序（默认序是文件系统返回序 ⇒
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
  *   - S-014:        ChatNode 存量 `role` 格的直写只许降（棘轮；身份写 `principal`，
- *                   读走 `node_role()` / `legacy_role()`，字段已退出 wire）
+ *                   读走 `node_role()` / `legacy_role()`，字段已退出 wire）；
+ *                   判据面不含 provider 请求构造（`wire_messages` 的瞬时线格式）
  *   - S-015:        收束闸只有一个 owner（`closure_gate`），且每次调用当场处理 `Err`
  *                   （布尔壳 `closure_granted` 零出现）——否则「拒绝」又变成「没写」，
  *                   日志里与「没跑完」同形
@@ -447,13 +448,14 @@ console.log()
 //
 // 抽干点在 v2 搬了家（5b-2：改到运行器的批次边界，见 D-074），约束一条没少，
 // 而且**违反时依然没有测试会变红**——所以判据换成搬家后的**两处行序断言**：
-//   ① `turn_runner.rs`：2f 的 `inject` 必须排在 2e 的 `tool_exchange_messages` **之后**。
-//      反过来写 = 用户那句补充插进 `assistant(tool_calls)` 与它的 `tool` 结果之间——
-//      部分协议直接 400（三种错法里唯一会响的那种），而且时间序颠倒（工具结果先发生，
-//      用户随后才插话）。
-//   ② `turn_exec/call.rs`：抽干点（`supplement_into_request`）必须排在运行器开轮点
-//      （`TurnRunner::begin`）**之前**——它随 `TurnInput` 装进运行器，运行器才会在
-//      批次边界调它。
+//   ① `turn_runner/stream.rs`：2e 的「工具结果接进 exchange」必须排在 2f 的
+//      「轮内注入接进 exchange」**之前**。反过来写 = 用户那句补充插进
+//      `assistant(tool_calls)` 与它的 `tool` 结果之间——部分协议直接 400
+//      （三种错法里唯一会响的那种），而且时间序颠倒（工具结果先发生，用户随后才插话）。
+//      落点按搬家后的写法：`land_one` 逐笔 `exchange.push(message)`，最后一笔关账后
+//      `exchange.extend(injected)`。
+//   ② `stage_driver.rs`：抽干口（`inject: injector(…)`）必须随 `TurnInput` 在运行器
+//      开轮点（`begin_turn`）**之前**装上——运行器才会在批次边界调它。
 //      「先抽干、后判定」本身已经不在这一处行序里：汇报判定成了 `policy.report` 行
 //      （`prio` 53），只在**已关闭的批次边界**到期（`report_due` 的 `at_boundary`）；
 //      抽干发生在收束那一批的模型往返动作内部（`turn_runner/stream.rs` 2e → 2f），
@@ -475,7 +477,7 @@ const WAIVER_S011_RE = /\/\/\s*grep-audit-allow S-011:[^\n]*[A-Za-z0-9\u4e00-\u9
 
 // 锚点文件只认 `src/<子路径>` 这一段后缀，不写完整路径：D-191 把插件平铺成
 // `crates/symbio-plugin-<id>` 的同时**也改变了归属**（这两个落点从 session 搬到 loop，
-// 并从单文件拆成目录：`turn_runner/stream.rs`、`turn_exec/call.rs`）。写死完整路径的
+// 并从单文件拆成目录：`turn_runner/stream.rs`、`stage_driver.rs`）。写死完整路径的
 // 后果不是报错而是**静默跳过**——`endsWith` 匹配不上 ⇒ 真仓里 S-011 长期以「跳过」的
 // 绿灯存在。锚点形态也随之下沉一层：`run.exchange\n  .extend(…)` 的链式写法让
 // `exchange\.extend\(` 这种紧凑正则匹配不上，故改为只认 `.extend(<目标>` 本身。
@@ -483,7 +485,7 @@ const S011_PAIRS = [
   {
     file: 'turn_runner/stream.rs',
     before: {
-      re: /\.extend\(\s*tool_exchange_messages\(/,
+      re: /\.exchange\.push\(\s*message\b/,
       name: '2e 工具结果接进请求',
     },
     after: {
@@ -493,15 +495,14 @@ const S011_PAIRS = [
     why: '补充必须排在工具结果**之后**（插进 `assistant(tool_calls)` 与它的 `tool` 结果之间是协议级 400，且时间序颠倒）',
   },
   {
-    file: 'turn_exec/call.rs',
+    file: 'stage_driver.rs',
     before: {
-      re: /supplement_into_request\(/,
-      ex: /\bfn\s+supplement_into_request\(/,
-      name: '`supplement_into_request` 抽干点',
+      re: /inject:\s*injector\(/,
+      name: '`TurnInput::inject` 抽干口挂载点',
     },
     after: {
-      re: /\bTurnRunner::begin\(/,
-      name: '运行器开轮点（`TurnRunner::begin`）',
+      re: /\bmatch\s+begin_turn\(/,
+      name: '运行器开轮点（`begin_turn`）',
     },
     why: '抽干口必须随 `TurnInput` 装进运行器、在开轮之前——挪到开轮之后（或删掉）用户中途说的话就进不了本轮，而日志上一切照常',
   },
@@ -708,6 +709,11 @@ console.log()
 //   · `with_role(…)` / `set_legacy_role(…)`（命名过渡入口）
 // 范围：`.rs` 源码根（同 S-012），测试文件同样参与；**不含** `chat_node.rs`
 // （字段定义、折叠与入口的本体在那里）。注释行不判（doc 示例会复述被禁形状）。
+// 也**不含** provider 请求构造：`crates/symbio-plugin-model/src/port.rs` 的
+// `wire_messages` 把 `PromptMessage` 翻成发往 provider 的瞬时线格式（D-305 裁决一：
+// 请求构造归执行体）。那些 `ChatNode` 不落库、没有 `attributed` 落点，`role` 是这条
+// 通道的线协议值（`NativeMessage::from` 经 `node_role()` 折出）——它不是「存量格直写」
+// 的判据面，逐行豁免会让这条棘轮靠豁免活着。
 // 豁免：`// grep-audit-allow S-014: 理由`（本行或紧邻上一行，理由不可为空，同 S-010）。
 // 单测跑在临时 fixture 树里：那里没有真实仓库这么多存量债务，棘轮一比就报「基线该收紧」，
 // 把每条无关用例一起拖红。`LEGACY_ROLE_WRITE_BASELINE` 把基线搬到 fixture 上；扫描根
@@ -725,6 +731,30 @@ const S014_IS_REPO = path.resolve(S014_BASE) === path.resolve(repoRoot)
 const S014_WRITE_RE =
   /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(/
 const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
+
+/**
+ * provider 请求构造的函数体行区间（`[start, end]`，0 基）——S-014 不判这一段（见上）。
+ * 只认 `fn wire_messages(` 的名字：线格式只有这一处入口，改名时这条判据会跟着在
+ * 代码评审里被看见，而不是悄悄把整段放回去。
+ */
+function providerWireSpan(lines) {
+  const start = lines.findIndex((l) => /^fn\s+wire_messages\s*\(/.test(l))
+  if (start < 0) return null
+  let depth = 0
+  let opened = false
+  for (let i = start; i < lines.length; i++) {
+    for (const ch of lines[i]) {
+      if (ch === '{') {
+        depth++
+        opened = true
+      } else if (ch === '}') {
+        depth--
+        if (opened && depth === 0) return [start, i]
+      }
+    }
+  }
+  return null
+}
 // 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
 // 151 → 146（d）：`resume.rs` 及其用例整份退役，5 处存量 role 直写随之消失。
 // 146 → 143（D-147 档 1）：三处**真双写**清零——`tool_executor::build_user_prompt_message` /
@@ -749,7 +779,11 @@ const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
     } catch {
       continue
     }
+    const wireSpan = file.split(path.sep).join('/').endsWith('symbio-plugin-model/src/port.rs')
+      ? providerWireSpan(lines)
+      : null
     lines.forEach((l, i) => {
+      if (wireSpan && i >= wireSpan[0] && i <= wireSpan[1]) return
       if (/^\s*(?:\/\/|\/\*|\*)/.test(l)) return
       if (!S014_WRITE_RE.test(l)) return
       if (WAIVER_S014_RE.test(l) || (i > 0 && WAIVER_S014_RE.test(lines[i - 1]))) return
@@ -942,11 +976,14 @@ console.log()
 // 代价不是风格问题——恢复路径会**绕过行表**写事实，于是「这一轮欠了什么」
 // 与「这一轮做了什么」对不上账，而没有任何东西会变红。
 //
-// 扫三样：
+// 扫两样：
 //   · `resume.rs` / `resume.test.rs` 两个文件不许存在；
-//   · 生产代码里 `resume_anchor`（旁路的选债口）零出现；
-//   · `turn_exec.rs` / `turn_exec/` 里 `resumed` 分支零出现（该词在
-//     `loop_rows.rs` 里是视图字段名 `turn_head.resumed`，不在本规则范围内）。
+//   · 生产代码里 `resume_anchor`（旁路的选债口）零出现。
+//
+// 第三样 `resumed` 已从判据面移除（射程修正）：它如今是召回阶段格的**载荷键**
+// （`StageFact::recall` 自报「本幕是不是续写幕」，`turn_exec/policy.rs` 从事实面
+// 派生、技能行据此不重答），不是旁路分支的名字。旁路本身由上面两样守住——真旁路
+// 要自己写协议事实、自己跑执行体，绕不过 `resume_anchor` / `resume.rs` 这两个载体。
 console.log('--- S-017: 恢复路径不许再有旁路 ---')
 {
   const S017_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
@@ -954,12 +991,6 @@ console.log('--- S-017: 恢复路径不许再有旁路 ---')
   const RETIRED_FILES = [
     'crates/symbio-plugin-loop/src/resume.rs',
     'crates/symbio-plugin-loop/src/resume.test.rs',
-  ]
-  // `resumed` 只在执行体那两处判——`loop_rows.rs` 里的 `turn_head.resumed` 是
-  // 视图字段名，不是旁路分支。
-  const RESUMED_FILES = [
-    'crates/symbio-plugin-loop/src/turn_exec.rs',
-    'crates/symbio-plugin-loop/src/turn_exec',
   ]
   let s017 = 0
   const s017List = []
@@ -992,16 +1023,6 @@ console.log('--- S-017: 恢复路径不许再有旁路 ---')
     if (path.basename(file).endsWith('.test.rs')) continue
     scan(path.relative(S017_BASE, file), /\bresume_anchor\b/)
   }
-  // `resumed` 分支：只在执行体那两处判。
-  for (const rel of RESUMED_FILES) {
-    const abs = path.join(S017_BASE, rel)
-    if (!fs.existsSync(abs)) continue
-    const files = fs.statSync(abs).isDirectory() ? walk(abs) : [abs]
-    for (const file of files) {
-      if (path.basename(file).endsWith('.test.rs')) continue
-      scan(path.relative(S017_BASE, file), /\bresumed\b/)
-    }
-  }
   if (s017 > 0) {
     err(
       `S-017 违例：恢复路径的私有旁路回来了（${s017} 处）——` +
@@ -1012,7 +1033,7 @@ console.log('--- S-017: 恢复路径不许再有旁路 ---')
   } else {
     ok(
       S017_IS_REPO
-        ? 'S-017 通过：恢复路径零旁路（`resume.rs` 已退役、`resume_anchor` 与 `resumed` 分支零出现）'
+        ? 'S-017 通过：恢复路径零旁路（`resume.rs` 已退役、`resume_anchor` 零出现）'
         : 'S-017 跳过：当前树不是真实仓库（临时 fixture）',
     )
   }

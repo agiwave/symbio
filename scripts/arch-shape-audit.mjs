@@ -323,19 +323,22 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields: D-281 折叠的第二半只有 owner 知道——`ViewDecl::agg` 补的是「N 份读数怎么合成一个数」（分位数取法 / 率的可加性 / 合计的重排）；读方自己折是两份口径（D-251）、跨插件调 owner 是 E-009、反序列化成同名类型是两个形状 owner，三条都堵死。可选字段而非新面：六条读数折叠共用，`None` 报 `NotAggregable` 不静默恒等，见 DE-025
 // core-shape-allow structFields: D-282 读数视图读的断言格没有格子可站——`AssertionRead`（3 格）+ `Frozen.assertion_reads`（1 格）是「有事件格位、没有事实声明」这一种读法的**报告名单**，与既有的 `overlaps` 同一条通道：冻结成功才存在、装载入口打日志、用例可查，不产生缺口。它补的是判据 3 的输入缺席（`FactDecl.fields` 不存在），不是放宽它——名字真拼错仍判 `UnknownFact`；被否候选（放宽 `OrphanFact` 会让可卸载的能力包变成 loop 的硬依赖，违反 T3）见 DE-024
 // core-shape-allow enumVariants: D-307 授权事实的域必须能说「跨轮」——`authz.granted/denied` 随 D-306 的写方迁移进端口执行体后，不再是轮内事实；挂 `Turn` 会逼新写方引用即将拆除的词根，turn-root 棘轮也会把写方迁移误判成新增 turn。`Scope` 只换这一族事实的格位（载荷 / 幂等键 / 行认领都不动）；被否候选（复用 `Control` / `Thread`）会让读侧靠载荷猜域，且 `authz.denied` 的 `StopsTurn` 角色会被误读成控制面事实
+// core-shape-allow structFields: D-315 `SessionView` 是 `session-config` 回体八格的唯一投影（端口交给环的交付值），八格逐字对应回体键名、改动即协议改动；它不是新增的数据面——随 P2-3b2-1（1069f346）从会话插件的请求构造搬进 sdk，正是 `port=session` 世界端口要求的那份「值」。既不能降 `pub(crate)`（消费方 loop 是另一个 crate），也不能合并进既有结构（八格只该有这一处形状，见 DE-048 / D-315）
 //
 // 330:193 → 545:240 不是放宽，是**换了一把尺子的量程**（D-279）：本判据原扫
 // `crates/symbio-sdk/src`，D-258…D-279 把 20 个域搬进 `symbio-sdk` 之后，core 只剩
 // 322 行、量的是残余；被搬走的每一格数据面都还在，只是换了地址。改指 sdk 之后
 // 第一次实测 = 545 / 240，此后照旧只许降。545 → 546 是 `D-281` 的 `ViewDecl::agg`
 // 一格；546 → 550 是 `D-282` 的报告名单（`AssertionRead` 3 格 + `Frozen` 1 格）
-// ——两笔都各自有放宽行在上面，不是余量。
+// ——两笔都各自有放宽行在上面，不是余量。531 → 539 是 `SessionView` 的八格随
+// P2-3b2-1 搬进 sdk（放宽行在上面，D-315）；它此前住在会话插件的请求构造里，
+// 不在本判据的扫描面内，搬进来的是同一份回体契约而不是新长出的数据面。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 531, enumVariants: 237 }
+  : { structFields: 539, enumVariants: 237 }
 
 /**
  * CS-010 控制面草稿的字段棘轮（[DE-022](../docs/003-design/022-行表与派发面.md "DE-022-行表与派发面") D-226）。

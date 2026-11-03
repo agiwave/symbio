@@ -300,24 +300,25 @@ test('S-010 waiver requires a reason (same line or the line above)', () => {
 
 // ── S-011：补充注入点的位置（两处行序断言）──────────────────────────────
 // 夹具与 S-010 共用（`s010Audit` 建的就是「cwd 下有 crates/ 的仓库树」），
-// 落点由文件相对路径决定——S-011 认 `turn_runner/stream.rs` 与 `turn_exec/call.rs` 两处
-// （D-191 后注入点从 session 的单个 `turn_runner.rs` 搬到 loop 的这两个子文件）。
+// 落点由文件相对路径决定——S-011 认 `turn_runner/stream.rs` 与 `stage_driver.rs`
+// 两处（D-191 拆插件、P2 拆模块之后，注入点落在 loop 的这两个文件里）。
 const s011Audit = s010Audit
 const S011_RUNNER = 'crates/symbio-plugin-loop/src/turn_runner/stream.rs'
-const S011_EXEC = 'crates/symbio-plugin-loop/src/turn_exec/call.rs'
+const S011_EXEC = 'crates/symbio-plugin-loop/src/stage_driver.rs'
 
 /** 位置正确的形态：2e 结果接进请求 → 2f 补充接进请求 */
 const S011_RUNNER_OK = `fn run() {
-    run.exchange.extend(tool_exchange_messages(&rt, &outcomes, run.tool_round));
+    run.exchange.push(message);
     run.tool_round += 1;
     run.exchange.extend(injected);
 }
 `
-/** 位置正确的形态：先抽干并随 `TurnInput` 装进运行器 → 再开轮 */
-const S011_EXEC_OK = `fn run() {
-    let injected = supplement_into_request(batch, anchor, store.as_ref());
-    let input = TurnInput { inject: Some(injected) };
-    let begin = TurnRunner::begin(store.as_ref(), input);
+/** 位置正确的形态：抽干口随 `TurnInput` 装上 → 再开轮 */
+const S011_EXEC_OK = `fn open_turn() {
+    let input = TurnInput { inject: injector(store.clone()) };
+    let ready = 1;
+    match begin_turn(a.store.as_ref(), input).await {
+    }
 }
 `
 const s011Ok = (runner = S011_RUNNER_OK, exec = S011_EXEC_OK) => ({
@@ -331,7 +332,7 @@ test('S-011 passes when both orderings hold', () => {
   assert.match(r.stdout, /S-011 通过：.*stream\.rs 2e 工具结果接进请求\(2\) 在 2f 轮内补充接进请求\(4\) 之前/)
   assert.match(
     r.stdout,
-    /call\.rs `supplement_into_request` 抽干点\(2\) 在 运行器开轮点（`TurnRunner::begin`）\(4\) 之前/,
+    /stage_driver\.rs `TurnInput::inject` 抽干口挂载点\(2\) 在 运行器开轮点（`begin_turn`）\(4\) 之前/,
   )
 })
 
@@ -341,7 +342,7 @@ test('S-011 fires when the supplement is injected before the tool results land',
   const r = s011Audit(
     s011Ok(`fn run() {
     run.exchange.extend(injected);
-    run.exchange.extend(tool_exchange_messages(&rt, &outcomes, run.tool_round));
+    run.exchange.push(message);
 }
 `),
   )
@@ -350,12 +351,13 @@ test('S-011 fires when the supplement is injected before the tool results land',
 })
 
 test('S-011 fires when the runner opens the turn before the drain', () => {
-  // 反了 ⇒ 抽干口在开轮之后才跑：`TurnInput.inject` 装的是旧值，用户中途说的
+  // 反了 ⇒ 抽干口在开轮之后才挂上：`TurnInput.inject` 装的是旧值，用户中途说的
   // 那句话这一轮进不去——而日志上一切照常，没有任何测试会因此变红。
   const r = s011Audit(
-    s011Ok(S011_RUNNER_OK, `fn run() {
-    let begin = TurnRunner::begin(store.as_ref(), input);
-    let injected = supplement_into_request(batch, anchor, store.as_ref());
+    s011Ok(S011_RUNNER_OK, `fn open_turn() {
+    match begin_turn(a.store.as_ref(), input).await {
+    }
+    let input = TurnInput { inject: injector(store.clone()) };
 }
 `),
   )
@@ -368,15 +370,15 @@ test('S-011 errors when an anchor disappears (guard must not silently no-op)', (
   // 它会以绿灯的形式提供虚假保证——比没有守卫更糟。故"锚点缺失"不接受豁免。
   const renamed = s011Audit({
     ...s011Ok(),
-    [S011_RUNNER]: S011_RUNNER_OK.replace('tool_exchange_messages', 'round_exchange_messages'),
+    [S011_RUNNER]: S011_RUNNER_OK.replace('.push(message)', '.push(entry)'),
   })
   assert.equal(renamed.status, 1)
   assert.match(renamed.stdout, /S-011 锚点缺失/)
 
   const runnerGone = s011Audit({
     ...s011Ok(),
-    [S011_EXEC]: `fn run() {
-    let injected = supplement_into_request(batch, anchor, store.as_ref());
+    [S011_EXEC]: `fn open_turn() {
+    let input = TurnInput { inject: injector(store.clone()) };
 }
 `,
   })
@@ -386,8 +388,9 @@ test('S-011 errors when an anchor disappears (guard must not silently no-op)', (
   // 豁免通道对"锚点缺失"无效——无从判断的事不能靠签名放行
   const waivedButMissing = s011Audit({
     ...s011Ok(),
-    [S011_EXEC]: `fn run() {
-    let begin = TurnRunner::begin(store.as_ref(), input); // grep-audit-allow S-011: 已确认
+    [S011_EXEC]: `fn open_turn() {
+    match begin_turn(a.store.as_ref(), input).await { // grep-audit-allow S-011: 已确认
+    }
 }
 `,
   })
@@ -398,7 +401,7 @@ test('S-011 counts only code lines (a commented-out inject is "missing", not "fi
   const r = s011Audit({
     ...s011Ok(),
     [S011_RUNNER]: `fn run() {
-    run.exchange.extend(tool_exchange_messages(&rt, &outcomes, run.tool_round));
+    run.exchange.push(message);
     // run.exchange.extend(injected);  ← 注释掉注入调用
 }
 `,
@@ -407,25 +410,27 @@ test('S-011 counts only code lines (a commented-out inject is "missing", not "fi
   assert.match(r.stdout, /S-011 锚点缺失/)
 })
 
-test('S-011 ignores the `fn supplement_into_request` definition (only the call site anchors)', () => {
-  // 真实文件里函数定义在**调用点之后**，但规则不能依赖这个巧合：
-  // 若把定义当成锚点就会误判成"位置错"。
+test('S-011 anchors only on the `TurnInput::inject` field, not on `inject: None`', () => {
+  // 真实文件里还有不带注入的 `TurnInput`（`inject: None`）构造点：把那种写法当成
+  // 抽干口会把「本轮没有补充」误判成「抽干口在这儿」。
   const r = s011Audit({
     ...s011Ok(),
-    [S011_EXEC]: `fn run() {
-    let injected = supplement_into_request(batch, anchor, store.as_ref());
-    let begin = TurnRunner::begin(store.as_ref(), input);
+    [S011_EXEC]: `fn open_turn() {
+    let input = TurnInput { inject: None };
+    match begin_turn(a.store.as_ref(), input).await {
+    }
 }
-fn supplement_into_request(store: &Store, batch: &Batch) -> Vec<Msg> { Vec::new() }
 `,
   })
-  assert.equal(r.status, 0)
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /S-011 锚点缺失/)
 })
 
 test('S-011 waiver requires a reason', () => {
-  const bad = `fn run() {
-    let begin = TurnRunner::begin(store.as_ref(), input); WAIVER
-    let injected = supplement_into_request(batch, anchor, store.as_ref());
+  const bad = `fn open_turn() {
+    match begin_turn(a.store.as_ref(), input).await { WAIVER
+    }
+    let input = TurnInput { inject: injector(store.clone()) };
 }
 `
   const withReason = s011Audit({
@@ -444,13 +449,13 @@ test('S-011 is skipped (not failed) when either file is outside the scope', () =
   const none = audit('fn unrelated() {}\n')
   assert.equal(none.status, 0)
   assert.match(none.stdout, /S-011 跳过：scope 内没有 turn_runner\/stream\.rs/)
-  assert.match(none.stdout, /S-011 跳过：scope 内没有 turn_exec\/call\.rs/)
+  assert.match(none.stdout, /S-011 跳过：scope 内没有 stage_driver\.rs/)
 
   // 只布一个文件：另一个跳过，布下的那个照常判
   const one = s011Audit({ [S011_RUNNER]: S011_RUNNER_OK })
   assert.equal(one.status, 0)
   assert.match(one.stdout, /S-011 通过：.*stream\.rs/)
-  assert.match(one.stdout, /S-011 跳过：scope 内没有 turn_exec\/call\.rs/)
+  assert.match(one.stdout, /S-011 跳过：scope 内没有 stage_driver\.rs/)
 })
 
 // ── S-012: 代码注释里的实施排期指认 ────────────────────────────────────
@@ -893,19 +898,13 @@ function gateAudit17(files) {
   }
 }
 
-test('S-017 `resume_anchor` 与 `resumed` 分支回来即红', () => {
+test('S-017 `resume_anchor` 回来即红', () => {
   const anchor = gateAudit17({
     [`${S017_LOOP}/loop_rows.rs`]: 'fn pick() -> u64 {\n    resume_anchor(&facts, 0)\n}\n',
   })
   assert.equal(anchor.status, 1, anchor.stdout)
   assert.match(anchor.stdout, /S-017 违例：恢复路径的私有旁路回来了/)
   assert.match(anchor.stdout, /loop_rows\.rs:2/)
-
-  const resumed = gateAudit17({
-    [`${S017_LOOP}/turn_exec.rs`]: 'fn f() {\n    if resumed {\n        return;\n    }\n}\n',
-  })
-  assert.equal(resumed.status, 1, resumed.stdout)
-  assert.match(resumed.stdout, /turn_exec\.rs:2/)
 })
 
 test('S-017 `resume.rs` 回来即红（文件存在本身就是违例）', () => {
@@ -917,15 +916,15 @@ test('S-017 `resume.rs` 回来即红（文件存在本身就是违例）', () =>
   assert.match(r.stdout, /resume\.rs/)
 })
 
-test('S-017 注释行不判；视图字段名 `turn_head.resumed` 不在本规则范围内', () => {
+test('S-017 注释行不判；`resumed` 载荷键不在判据面', () => {
   const asComment = gateAudit17({
     [`${S017_LOOP}/turn_exec.rs`]: '/// 旧形状（反例）：if resumed { … }\n',
   })
   assert.equal(asComment.status, 0, asComment.stdout)
-  // `loop_rows.rs` 里的 `resumed` 是**视图字段名**（`turn_head.resumed`），
-  // 不是旁路分支——范围写大了的规则比没有规则更糟。
+  // `resumed` 如今是召回阶段格的**载荷键**（本幕是不是续写幕），由事实面派生：
+  // 它不是旁路载体，判据面只认 `resume.rs` 与 `resume_anchor`。
   const field = gateAudit17({
-    [`${S017_LOOP}/loop_rows.rs`]: 'fn cond() {\n    ("resumed", Lit::Bool(false))\n}\n',
+    [`${S017_LOOP}/turn_exec.rs`]: 'fn f() {\n    if resumed {\n    }\n}\n',
   })
   assert.equal(field.status, 0, field.stdout)
 })
