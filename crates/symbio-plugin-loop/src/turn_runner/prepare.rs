@@ -11,6 +11,7 @@
 //! 早退（定稿答话 / 空答兜底 / 首请求前中止）经 [`PreparedFlow::Done`] 交回结局，
 //! 不把半备好的草稿交出去——幕首之后只有一种状态在流转（[`Prepared`]）。
 
+use super::super::tool_dispatch::{CallOutcome as Outcome, ToolPortCall as PortCall};
 use super::*;
 use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
 
@@ -114,9 +115,19 @@ pub(crate) struct Prepared {
     /// 另一个执行体跑，所以交接件只能放在草稿里——它就是那两个动作之间唯一的凭据。
     pub(crate) pending_round: Option<super::super::port::Call>,
     /// 创建动作开出的端口账（b）：创建 → 授权 → 派发三个动作之间**唯一**
-    /// 的交接件。放在草稿里而不是各自重开：`ToolPortCall` 的 `granted` / `sent` /
-    /// `deny_why` 是三个动作依次写入的同一份判定结果，分两次构造就会各说一套。
-    pub(crate) pending_calls: Option<Vec<super::super::tool_dispatch::ToolPortCall>>,
+    /// 的交接件，**按调用标识逐笔寄存**（不按批聚合）。
+    ///
+    /// `ToolPortCall` 的 `granted` / `sent` / `deny_why` 是三个动作依次写入的同一份
+    /// 判定结果，分两次构造就会各说一套；行键就是这里的键，一笔一个条目。
+    pub(crate) calls: std::collections::HashMap<String, PortCall>,
+    /// 这一轮模型往返的调用顺序（端口账 id）。逐笔收尾时按它判定「整轮是否都结了」。
+    pub(crate) round_calls: Vec<String>,
+    /// 这一轮已经收口的结果（端口账 id → 结果），供整轮结束时拼回填 prompt。
+    pub(crate) round_outcomes: std::collections::HashMap<String, Outcome>,
+    /// 这一轮模型往返（正文 / wiring id）：逐笔派发共用一份。
+    pub(crate) round_turn: Option<LlmTurn>,
+    /// 本轮的正文是否已经定格（`prepare` 只做一次）。
+    pub(crate) round_prepared: bool,
     /// 应答已落、**收束还没发生**时的寄存位。
     ///
     /// 与上面两格分开放是刻意的：这一格的形状是「本轮没有工具调用」，而
@@ -409,7 +420,11 @@ where
         nodes,
         pending_model: None,
         pending_round: None,
-        pending_calls: None,
+        calls: std::collections::HashMap::new(),
+        round_calls: Vec::new(),
+        round_outcomes: std::collections::HashMap::new(),
+        round_turn: None,
+        round_prepared: false,
         // 快路：正文由技能行作答后宿主经 [`super::TurnSession::set_reflex`] 寄存
         // （`D-260`：那一行是环的债，它的产物在草稿建好之后才到）。
         // 零模型往返时驱动环的第一个债就是 `close-turn`（55 < 60）——本段照常备好

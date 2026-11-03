@@ -141,9 +141,9 @@ pub(crate) fn output_fields(
 
 /// 从本轮结果里配对出 `tc` 的那条（按 ToolCall 节点 id / wire id；配不上 ⇒ `None`）。
 pub(crate) fn outcome_of<'a>(
-    outcomes: &'a [super::super::tool_dispatch::DispatchOutcome],
+    outcomes: &'a [super::super::tool_dispatch::CallOutcome],
     tc: &symbio_kernel::llm::TurnToolCallInfo,
-) -> Option<&'a super::super::tool_dispatch::DispatchOutcome> {
+) -> Option<&'a super::super::tool_dispatch::CallOutcome> {
     outcomes.iter().find(|o| {
         tc.id.as_deref().map(|id| id == o.call_id).unwrap_or(false)
             || (!o.wire_id.is_empty() && tc.wire_id.as_deref() == Some(o.wire_id.as_str()))
@@ -348,7 +348,7 @@ pub(crate) fn latest_snapshot_index(events: &[Event]) -> Option<usize> {
 /// 两者都缺才合成，且合成式里带上轮次（见 [`prompt_call_id`]）。
 pub(crate) fn tool_exchange_messages(
     turn: &symbio_sdk::adapters::LlmTurn,
-    outcomes: &[super::super::tool_dispatch::DispatchOutcome],
+    outcomes: &[super::super::tool_dispatch::CallOutcome],
     round: usize,
 ) -> Vec<symbio_kernel::llm::PromptMessage> {
     let mut out: Vec<symbio_kernel::llm::PromptMessage> = Vec::new();

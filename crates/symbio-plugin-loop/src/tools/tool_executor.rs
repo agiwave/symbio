@@ -265,7 +265,7 @@ pub(crate) async fn land_outcome_async(
     sink: &ExecEventSink,
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
-    outcome: &super::super::tool_dispatch::DispatchOutcome,
+    outcome: &super::super::tool_dispatch::CallOutcome,
 ) {
     let Some(provider) = super::super::port::provider_of(&ctx, ports::TOOL).await else {
         return;

@@ -1418,7 +1418,7 @@ mod tool_round_tests {
     use symbio_testkit::trivial_actor_spec;
 
     use super::super::super::tool_dispatch::{
-        DispatchOutcome, ToolBegin, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
+        CallOutcome, ToolBegin, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
     };
     use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnRunner};
     use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_TURN_STAGE};
@@ -2021,7 +2021,7 @@ mod tool_round_tests {
     /// 替身落产物格：生产里这一步由执行体的 `land_only` 出口做（P1b），替身没有
     /// 执行体，按同一载荷形状直接写——测试断言的是环的账，不是替身的装配。
     /// 重建用的根 id 不在本夹具的断言范围内，故不写。
-    fn land_for_test(store: &dyn Store<Event = Event>, outcomes: &[DispatchOutcome]) {
+    fn land_for_test(store: &dyn Store<Event = Event>, outcomes: &[CallOutcome]) {
         let Some((round, produced_by, _)) = model_batch(store) else {
             return;
         };
@@ -2093,60 +2093,63 @@ mod tool_round_tests {
             open_batch(store, turn)
         }
 
-        async fn authorize(&self, store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
-            authorize_batch(store, calls);
+        async fn authorize(&self, store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
+            authorize_batch(store, std::slice::from_mut(call));
         }
 
         async fn begin(
             self: Arc<Self>,
             store: Arc<dyn Store<Event = Event>>,
-            turn: &LlmTurn,
-            calls: &mut [ToolPortCall],
+            rt: &LlmTurn,
+            call: &mut ToolPortCall,
         ) -> ToolBegin {
             *self.rounds.lock().unwrap() += 1;
-            if begin_batch(store.as_ref(), calls).is_none() {
+            if begin_batch(store.as_ref(), std::slice::from_mut(call)).is_none() {
                 return ToolBegin::None;
             }
-            let outcomes: Vec<DispatchOutcome> = turn
-                .tool_calls
-                .iter()
-                .map(|tc| DispatchOutcome {
-                    call_id: tc.id.clone().unwrap_or_default(),
-                    name: tc.name.clone().unwrap_or_default(),
-                    text: "文件内容：hello".into(),
-                    ok: true,
-                    needs_user_action: self.pending,
-                    // 等待用户时的卡片载荷与原因码：假分发方建的是 `user_prompt` 节点，
-                    // 这里给一份最小可辨形状（真值由 `tool_dispatch` 从节点 `meta` 取）。
-                    prompt: if self.pending {
-                        Some(serde_json::json!({ "question": "选哪个" }))
-                    } else {
-                        None
-                    },
-                    failure_kind: if self.pending {
-                        "needs_interaction".into()
-                    } else {
-                        String::new()
-                    },
-                    // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点
-                    // （`result_id` 空串 = 无结果子节点）。
-                    wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
-                    result_id: String::new(),
-                })
-                .collect();
-            ToolBegin::InFlight(Box::pin(async move { outcomes }))
+            let (tc_id, tc_name, tc_wire, tc_args) = one_call_meta(rt);
+            let outcome = CallOutcome {
+                call: call.call.clone(),
+                call_id: tc_id,
+                name: tc_name,
+                text: "文件内容：hello".into(),
+                ok: true,
+                needs_user_action: self.pending,
+                // 等待用户时的卡片载荷与原因码：假分发方建的是 `user_prompt` 节点，
+                // 这里给一份最小可辨形状（真值由 `tool_dispatch` 从节点 `meta` 取）。
+                prompt: if self.pending {
+                    Some(serde_json::json!({ "question": "选哪个" }))
+                } else {
+                    None
+                },
+                failure_kind: if self.pending {
+                    "needs_interaction".into()
+                } else {
+                    String::new()
+                },
+                // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点
+                // （`result_id` 空串 = 无结果子节点）。
+                wire_id: tc_wire,
+                args: tc_args,
+                result_id: String::new(),
+                effects: Vec::new(),
+                breaks: Vec::new(),
+            };
+            ToolBegin::InFlight(Box::pin(async move { outcome }))
         }
 
         fn finish<'a>(
             &'a self,
             store: &'a dyn Store<Event = Event>,
-            calls: &'a [ToolPortCall],
-            outcomes: &'a [DispatchOutcome],
+            call: &'a ToolPortCall,
+            outcome: Option<&'a CallOutcome>,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
             Box::pin(async move {
-                succeed_batch(store, calls);
-                land_for_test(store, outcomes);
+                let mut one = call.clone();
+                succeed_batch(store, std::slice::from_mut(&mut one));
+                if let Some(outcome) = outcome {
+                    land_for_test(store, std::slice::from_ref(outcome));
+                }
             })
         }
     }
@@ -2181,53 +2184,44 @@ mod tool_round_tests {
             Vec::new()
         }
 
-        async fn authorize(&self, _store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
-            if !calls.is_empty() {
-                return;
-            }
-            // 草稿里没有模型批次 ⇒ 认领开幕前列队的那一笔唤醒请求。
-            let Some(mut batch) = self.port().wake_batch() else {
-                return;
-            };
+        async fn authorize(&self, _store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
+            let id = call.call.id.clone();
             // 用户已经做过判断 ⇒ 放行（授权事实按 `(port, id)` 绑定，与生产同键）。
-            for call in batch.calls.iter_mut() {
-                let id = call.call.id.clone();
-                append_fact(
-                    self.store.as_ref(),
-                    Event::pending(
-                        format!("grant-{}-{}", self.turn, id),
-                        EVENT_AUTHZ_GRANTED,
-                        Entity::Turn,
-                        Verb::Asserted,
-                        self.turn,
-                        "authorizer",
-                    )
-                    .with_produced_by(self.user_seq)
-                    .with_payload(serde_json::json!({
-                        "key": id,
-                        "port": "tool",
-                        "id": id,
-                        // 与生产同键（D-138）：授权关同一**次尝试**。
-                        "attempt": call.call.attempt,
-                        "tool": call.name,
-                        "risk": "unknown",
-                        "deferred": true,
-                    })),
-                );
-                call.granted = true;
-            }
+            append_fact(
+                self.store.as_ref(),
+                Event::pending(
+                    format!("grant-{}-{}", self.turn, id),
+                    EVENT_AUTHZ_GRANTED,
+                    Entity::Turn,
+                    Verb::Asserted,
+                    self.turn,
+                    "authorizer",
+                )
+                .with_produced_by(self.user_seq)
+                .with_payload(serde_json::json!({
+                    "key": id,
+                    "port": "tool",
+                    "id": id,
+                    // 与生产同键（D-138）：授权关同一**次尝试**。
+                    "attempt": call.call.attempt,
+                    "tool": call.name,
+                    "risk": "unknown",
+                    "deferred": true,
+                })),
+            );
+            call.granted = true;
         }
 
         async fn begin(
             self: Arc<Self>,
             _store: Arc<dyn Store<Event = Event>>,
-            turn: &LlmTurn,
-            calls: &mut [ToolPortCall],
+            rt: &LlmTurn,
+            call: &mut ToolPortCall,
         ) -> ToolBegin {
             *self.rounds.lock().unwrap() += 1;
             // 派发前落 `sent`（端口账第三笔：派出）。
-            for call in calls.iter_mut().filter(|c| c.granted) {
-                if super::super::super::port::begin(
+            if call.granted
+                && super::super::super::port::begin(
                     self.store.as_ref(),
                     super::super::super::loop_rows::PORTS,
                     super::super::super::port::Dispatch {
@@ -2240,38 +2234,37 @@ mod tool_round_tests {
                     },
                 )
                 .is_ok()
-                {
-                    call.sent = true;
-                }
+            {
+                call.sent = true;
             }
-            let outcomes: Vec<DispatchOutcome> = turn
-                .tool_calls
-                .iter()
-                .map(|tc| DispatchOutcome {
-                    call_id: tc.id.clone().unwrap_or_default(),
-                    name: tc.name.clone().unwrap_or_default(),
-                    text: "文件内容：hello（已批准）".into(),
-                    ok: true,
-                    needs_user_action: false,
-                    prompt: None,
-                    failure_kind: String::new(),
-                    wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
-                    result_id: String::new(),
-                })
-                .collect();
-            ToolBegin::InFlight(Box::pin(async move { outcomes }))
+            let (tc_id, tc_name, tc_wire, tc_args) = one_call_meta(rt);
+            let outcome = CallOutcome {
+                call: call.call.clone(),
+                call_id: tc_id,
+                name: tc_name,
+                text: "文件内容：hello（已批准）".into(),
+                ok: true,
+                needs_user_action: false,
+                prompt: None,
+                failure_kind: String::new(),
+                wire_id: tc_wire,
+                args: tc_args,
+                result_id: String::new(),
+                effects: Vec::new(),
+                breaks: Vec::new(),
+            };
+            ToolBegin::InFlight(Box::pin(async move { outcome }))
         }
 
         fn finish<'a>(
             &'a self,
             _store: &'a dyn Store<Event = Event>,
-            calls: &'a [ToolPortCall],
-            outcomes: &'a [DispatchOutcome],
+            call: &'a ToolPortCall,
+            outcome: Option<&'a CallOutcome>,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
             Box::pin(async move {
                 // 关账：工具回了话 ⇒ `response`。
-                for call in calls.iter().filter(|c| c.granted && c.sent) {
+                if call.granted && call.sent {
                     super::super::super::port::succeed(
                         self.store.as_ref(),
                         &call.call,
@@ -2280,7 +2273,9 @@ mod tool_round_tests {
                     )
                     .expect("唤醒应答落格");
                 }
-                land_for_test(self.store.as_ref(), outcomes);
+                if let Some(outcome) = outcome {
+                    land_for_test(self.store.as_ref(), std::slice::from_ref(outcome));
+                }
             })
         }
 
@@ -2305,50 +2300,48 @@ mod tool_round_tests {
             open_batch(store, turn)
         }
 
-        async fn authorize(&self, store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
+        async fn authorize(&self, store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
             let Some((turn_no, produced_by, _)) = model_batch(store) else {
                 return;
             };
-            for call in calls.iter_mut() {
-                let id = call.call.id.clone();
-                append_fact(
-                    store,
-                    Event::pending(
-                        format!("deny-{turn_no}-{id}"),
-                        symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
-                        Entity::Turn,
-                        Verb::Asserted,
-                        turn_no,
-                        "authorizer",
-                    )
-                    .with_produced_by(produced_by)
-                    .with_payload(serde_json::json!({
-                        "key": id,
-                        "port": "tool",
-                        "id": id,
-                        // 与生产同键（D-138）：拒绝也关同一**次尝试**。
-                        "attempt": call.call.attempt,
-                        "tool": call.name,
-                        "kind": "tool",
-                        "reason": "denied",
-                        "detail": "needs_approval",
-                    })),
-                );
-                call.deny_why = Some("needs_approval");
-            }
+            let id = call.call.id.clone();
+            append_fact(
+                store,
+                Event::pending(
+                    format!("deny-{turn_no}-{id}"),
+                    symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
+                    Entity::Turn,
+                    Verb::Asserted,
+                    turn_no,
+                    "authorizer",
+                )
+                .with_produced_by(produced_by)
+                .with_payload(serde_json::json!({
+                    "key": id,
+                    "port": "tool",
+                    "id": id,
+                    // 与生产同键（D-138）：拒绝也关同一**次尝试**。
+                    "attempt": call.call.attempt,
+                    "tool": call.name,
+                    "kind": "tool",
+                    "reason": "denied",
+                    "detail": "needs_approval",
+                })),
+            );
+            call.deny_why = Some("needs_approval");
         }
 
         async fn begin(
             self: Arc<Self>,
             store: Arc<dyn Store<Event = Event>>,
-            turn: &LlmTurn,
-            calls: &mut [ToolPortCall],
+            rt: &LlmTurn,
+            call: &mut ToolPortCall,
         ) -> ToolBegin {
             *self.rounds.lock().unwrap() += 1;
             let Some((turn_no, produced_by, _)) = model_batch(store.as_ref()) else {
                 return ToolBegin::None;
             };
-            for call in calls.iter().filter(|c| !c.granted) {
+            if !call.granted {
                 let why = call.deny_why.unwrap_or("denied");
                 if let Err(e) = super::super::super::port::failed(
                     store.as_ref(),
@@ -2360,36 +2353,51 @@ mod tool_round_tests {
                     panic!("替身拒绝落格失败：{e:?}");
                 }
             }
-            let outcomes: Vec<DispatchOutcome> = turn
-                .tool_calls
-                .iter()
-                .map(|tc| DispatchOutcome {
-                    call_id: tc.id.clone().unwrap_or_default(),
-                    name: tc.name.clone().unwrap_or_default(),
-                    text: "工具被拒绝：needs_approval".into(),
-                    ok: false,
-                    needs_user_action: false,
-                    prompt: None,
-                    failure_kind: "denied".into(),
-                    wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
-                    result_id: String::new(),
-                })
-                .collect();
-            ToolBegin::InFlight(Box::pin(async move { outcomes }))
+            let (tc_id, tc_name, tc_wire, tc_args) = one_call_meta(rt);
+            let outcome = CallOutcome {
+                call: call.call.clone(),
+                call_id: tc_id,
+                name: tc_name,
+                text: "工具被拒绝：needs_approval".into(),
+                ok: false,
+                needs_user_action: false,
+                prompt: None,
+                failure_kind: "denied".into(),
+                wire_id: tc_wire,
+                args: tc_args,
+                result_id: String::new(),
+                effects: Vec::new(),
+                breaks: Vec::new(),
+            };
+            ToolBegin::InFlight(Box::pin(async move { outcome }))
         }
 
         fn finish<'a>(
             &'a self,
             store: &'a dyn Store<Event = Event>,
-            _calls: &'a [ToolPortCall],
-            outcomes: &'a [DispatchOutcome],
+            _call: &'a ToolPortCall,
+            outcome: Option<&'a CallOutcome>,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-            // 拒绝的 `failed` 在派出半就落了（那一批没有 `sent` 要等，`deny-tools`
+            // 拒绝的 `failed` 在派出半就落了（这一笔没有 `sent` 要等，`deny-tools`
             // 的出口也就是它）；产物格照落——工具被拒与产物闸是两道闸。
             Box::pin(async move {
-                land_for_test(store, outcomes);
+                if let Some(outcome) = outcome {
+                    land_for_test(store, std::slice::from_ref(outcome));
+                }
             })
+        }
+    }
+
+    /// 逐笔派发时这一笔的节点身份（假分发方的结果只带一笔）。
+    fn one_call_meta(rt: &LlmTurn) -> (String, String, String, String) {
+        match rt.tool_calls.first() {
+            Some(tc) => (
+                tc.id.clone().unwrap_or_default(),
+                tc.name.clone().unwrap_or_default(),
+                tc.wire_id.clone().unwrap_or_default(),
+                symbio_sdk::turn::node_build::tool_call_args_text(tc),
+            ),
+            None => Default::default(),
         }
     }
 
@@ -3626,53 +3634,57 @@ mod tool_round_tests {
             open_batch(store, turn)
         }
 
-        async fn authorize(&self, store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
-            authorize_batch(store, calls);
+        async fn authorize(&self, store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
+            authorize_batch(store, std::slice::from_mut(call));
         }
 
         async fn begin(
             self: Arc<Self>,
             store: Arc<dyn Store<Event = Event>>,
-            turn: &LlmTurn,
-            calls: &mut [ToolPortCall],
+            rt: &LlmTurn,
+            call: &mut ToolPortCall,
         ) -> ToolBegin {
-            if begin_batch(store.as_ref(), calls).is_none() {
+            if begin_batch(store.as_ref(), std::slice::from_mut(call)).is_none() {
                 return ToolBegin::None;
             }
-            let outcomes: Vec<DispatchOutcome> = turn
-                .tool_calls
-                .iter()
-                .map(|tc| DispatchOutcome {
-                    call_id: tc.id.clone().unwrap_or_default(),
-                    name: tc.name.clone().unwrap_or_default(),
-                    text: format!(
-                        "结果({})",
-                        tc.arguments
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("?")
-                    ),
-                    ok: true,
-                    needs_user_action: false,
-                    prompt: None,
-                    failure_kind: String::new(),
-                    wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
-                    result_id: String::new(),
-                })
-                .collect();
-            ToolBegin::InFlight(Box::pin(async move { outcomes }))
+            let (tc_id, tc_name, tc_wire, tc_args) = one_call_meta(rt);
+            let outcome = CallOutcome {
+                call: call.call.clone(),
+                call_id: tc_id,
+                name: tc_name,
+                text: format!(
+                    "结果({})",
+                    rt.tool_calls
+                        .first()
+                        .and_then(|tc| tc.arguments.get("path"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                ),
+                ok: true,
+                needs_user_action: false,
+                prompt: None,
+                failure_kind: String::new(),
+                wire_id: tc_wire,
+                args: tc_args,
+                result_id: String::new(),
+                effects: Vec::new(),
+                breaks: Vec::new(),
+            };
+            ToolBegin::InFlight(Box::pin(async move { outcome }))
         }
 
         fn finish<'a>(
             &'a self,
             store: &'a dyn Store<Event = Event>,
-            calls: &'a [ToolPortCall],
-            outcomes: &'a [DispatchOutcome],
+            call: &'a ToolPortCall,
+            outcome: Option<&'a CallOutcome>,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
             Box::pin(async move {
-                succeed_batch(store, calls);
-                land_for_test(store, outcomes);
+                let mut one = call.clone();
+                succeed_batch(store, std::slice::from_mut(&mut one));
+                if let Some(outcome) = outcome {
+                    land_for_test(store, std::slice::from_ref(outcome));
+                }
             })
         }
     }

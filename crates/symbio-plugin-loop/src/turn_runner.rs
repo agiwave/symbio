@@ -433,7 +433,7 @@ impl TurnRunner {
                 run,
                 steps: 0,
                 inflight: None,
-                tool_flight: None,
+                tool_flights: std::collections::HashMap::new(),
                 live_effect_keys: std::collections::HashSet::new(),
             })),
         }
@@ -481,7 +481,10 @@ pub(crate) struct TurnSession {
     /// `sent` 与终局之间那一圈因此横跨两个环步。放在会话上而不是草稿里，理由与
     /// `inflight` 逐字相同——`Prepared` 被 `&` 借给若干异步读口，槽里的
     /// `dyn Future` 只 `Send` 不 `Sync`，进草稿会让那些读口集体失去 `Send`。
-    tool_flight: Option<stream::ToolFlight>,
+    /// 在飞的工具调用：**一笔一个槽**（键是端口账的调用标识）。
+    ///
+    /// 没有「批」这个对象：N 笔独立在途，收尾按各自的键取走（DE-047 D-311）。
+    tool_flights: std::collections::HashMap<String, stream::ToolFlight>,
     /// 本幕已经发出的**实时上线**效果键（`owner/anchor/key`）：上线的幂等由宿主守，
     /// 事实面没有可撞的格（`D-293`）。
     pub(crate) live_effect_keys: std::collections::HashSet<String>,
@@ -744,46 +747,54 @@ impl TurnSession {
         }
     }
 
-    /// 授权动作（`authorize-tool` 行的执行体）：对已开账的调用落放行 / 拒绝。
+    /// 授权动作（`authorize-tool` 行的执行体）：为**这一笔**已开账的调用落放行 / 拒绝。
     pub(crate) async fn authorize(
         &mut self,
         store: &dyn Store<Event = Event>,
         dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
+        id: &str,
     ) {
         if let Some(dispatch) = dispatch {
-            stream::authorize_round(&mut self.run, store, dispatch).await;
+            stream::authorize_round(&mut self.run, store, dispatch, id).await;
         }
     }
 
-    /// 派发动作的**派出半**（`dispatch-tool` 行的执行体）：落 `sent`、把批次寄存成
-    /// 在飞的 future；收应答归 [`Self::finish_tools`]。
+    /// 派发动作的**派出半**（`dispatch-tool` 行的执行体）：为**这一笔**落 `sent`、
+    /// 把这一笔寄存成在飞的 future；收应答归 [`Self::finish_tools`]。
     ///
     /// 没有草稿 / 没有分发通道时不做任何事——同上，防御而不是选择路径。
     pub(crate) async fn begin_tools(
         &mut self,
         store: &std::sync::Arc<dyn Store<Event = Event>>,
         dispatch: Option<std::sync::Arc<dyn super::tool_dispatch::ToolDispatch>>,
+        id: &str,
     ) {
         if let Some(dispatch) = dispatch {
-            self.tool_flight = stream::begin_round(&mut self.run, store, dispatch).await;
+            if let Some(flight) = stream::begin_round(&mut self.run, store, dispatch, id).await {
+                self.tool_flights.insert(id.to_string(), flight);
+            }
         }
     }
 
-    /// 派发动作的**收尾半**（`await-tool` / `deny-tools` 两行的执行体）：poll 一次在飞的
-    /// 那一批，落地了就把结果归位（产物 / 等待格 / 下一轮交换），收束的产出寄存进草稿。
+    /// 派发动作的**收尾半**（`await-tool` / `deny-tools` 两行的执行体）：poll 一次
+    /// **这一笔**在飞的调用，落地了就把结果归位（产物 / 等待格 / 下一轮交换）。
     ///
     /// 与 [`Self::await_model`] 同一条「只 poll 一次」：派出去与收回来分处两个环步，
-    /// 中间那一圈「已派出、未收清」在正常跑里读得到。
+    /// 中间那一圈「已派出、未收清」在正常跑里读得到。逐笔 ⇒ 槽按键取，不取整批。
     pub(crate) async fn finish_tools(
         &mut self,
         store: &std::sync::Arc<dyn Store<Event = Event>>,
         llm: &dyn LlmAdapter,
         dispatch: Option<std::sync::Arc<dyn super::tool_dispatch::ToolDispatch>>,
+        id: &str,
     ) -> Result<(), symbio_kernel::store::AppendError> {
         if let Some(dispatch) = dispatch {
-            let flight = self.tool_flight.take();
-            self.tool_flight =
-                stream::land_round(&mut self.run, flight, store, llm, dispatch).await?;
+            let flight = self.tool_flights.remove(id);
+            if let Some(flight) =
+                stream::land_round(&mut self.run, flight, store, llm, dispatch, id).await?
+            {
+                self.tool_flights.insert(id.to_string(), flight);
+            }
         }
         Ok(())
     }

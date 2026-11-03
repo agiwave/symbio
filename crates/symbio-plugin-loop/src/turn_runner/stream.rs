@@ -7,6 +7,10 @@
 //! 状态只经 [`Prepared`] 在阶段间传递：每个动作写自己的那一半事实，派发器按行表
 //! 决定下一个动作（`D-222` 裁决 5）。
 
+use super::super::tool_dispatch::{
+    batch_call_id as call_id_of, CallOutcome as Outcome, ToolBegin as Begin,
+    ToolDispatch as Dispatcher, ToolInFlight as Flight, ToolPortCall as PortCall,
+};
 use super::*;
 
 /// 一次模型往返的失败：三类，各有各的收口。
@@ -129,7 +133,7 @@ pub(crate) fn begin_model(
                     .map(|(idx, tc)| {
                         serde_json::json!({
                             "port": "tool",
-                            "id": super::super::tool_dispatch::batch_call_id(
+                            "id": call_id_of(
                                 turn,
                                 drive,
                                 idx,
@@ -253,18 +257,15 @@ pub(crate) struct ModelFlight {
     pub(crate) output: Option<(StreamNodeFacts, String)>,
 }
 
-/// 在飞的一批工具调用（`D-124` 订正 1）：派出与收尾两半之间的**唯一**交接件。
+/// 在飞的一笔工具调用（`D-124` 订正 1 + DE-047 D-311）：派出与收尾两半之间的**唯一**
+/// 交接件。
 ///
 /// 与 [`ModelInFlight`] 同一条理由活着：两次选债之间它在草稿里挂着，`sent` 与终局
-/// 之间那一圈因此可以横跨两个环步。`rt` 与 `calls` 一并寄存——收尾半要用前者算
-/// 正文载荷、用后者按 `call_id` 关账，而派发器不替它记这两样。
+/// 之间那一圈因此可以横跨两个环步。**一笔一个框**——没有「批」这个对象；模型往返
+/// 与账本由草稿按轮保存（[`Prepared::round_turn`]），不在这个框里复述。
 pub(crate) struct ToolFlight {
-    /// 这一批对应的那一次模型往返（唤醒幕是合成的那一份）。
-    pub(crate) rt: symbio_sdk::adapters::LlmTurn,
-    /// 开账过的调用（`sent` 标记在里面，关账按它逐笔判）。
-    pub(crate) calls: Vec<super::super::tool_dispatch::ToolPortCall>,
     /// 执行层那一段：`'static` 的框，收尾半 poll 它。
-    pub(crate) fut: super::super::tool_dispatch::ToolInFlight,
+    pub(crate) fut: Flight,
 }
 
 /// 派出的结果：三态。
@@ -641,144 +642,258 @@ where
 
 /// 开账（`open-tools` 行的动作）：把模型交回的调用逐条开成 `request(port=tool)`。
 ///
-/// 把模型交回的调用逐条开成 `request(port=tool)`，开出的账寄存在草稿里交给授权步。
+/// 开出的账**按调用标识逐笔**寄存在草稿里（一笔一个条目，不是一个批），交给
+/// 授权步；正文 / 推理的定格属于这一轮往返，同在这里做一次。
 /// 没有寄存的模型应答 ⇒ 引擎选错了行：不写任何格，派发器的「无进展」判据会显形。
 pub(crate) async fn open_round(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,
-    dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
+    dispatch: &dyn Dispatcher,
 ) {
     let Some(rt) = run.pending_model.as_ref() else {
         return;
     };
-    let calls = dispatch.open(store, rt).await;
-    run.pending_calls = Some(calls);
+    let rt = rt.clone();
+    if !run.round_prepared {
+        dispatch.prepare(store, &rt).await;
+        run.round_prepared = true;
+    }
+    let calls = dispatch.open(store, &rt).await;
+    run.round_turn = Some(rt);
+    run.round_calls = calls.iter().map(|c| c.call.id.clone()).collect();
+    run.round_outcomes.clear();
+    for call in calls {
+        run.calls.insert(call.call.id.clone(), call);
+    }
 }
 
-/// 授权（`authorize-tool` 行的动作）：为已开账的调用落放行 / 拒绝。
+/// 授权（`authorize-tool` 行的动作，**一行一笔**）：为这一笔已开账的调用落放行 / 拒绝。
+///
+/// 行键就是调用标识；草稿里没有这一笔时，恢复幕的唤醒请求是唯一来源。
 pub(crate) async fn authorize_round(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,
-    dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
+    dispatch: &dyn Dispatcher,
+    id: &str,
 ) {
-    match run.pending_calls.as_mut() {
-        Some(calls) => dispatch.authorize(store, calls).await,
-        None => {
-            // 恢复幕：草稿里没有模型批次，动作自己去读开幕前列队的唤醒请求。
-            let mut none: Vec<super::super::tool_dispatch::ToolPortCall> = Vec::new();
-            dispatch.authorize(store, &mut none).await;
-        }
+    if let Some(call) = run.calls.get_mut(id) {
+        dispatch.authorize(store, call).await;
+        return;
+    }
+    if let Some(mut call) = take_wake_call(run, store, dispatch, id).await {
+        dispatch.authorize(store, &mut call).await;
+        run.calls.insert(id.to_string(), call);
     }
 }
 
-/// 派发（`dispatch-tool` / `deny-tools` 两行的动作）：落 `sent`、
-/// 跑执行层、关账，落产物 / 等待 / 交换。
+/// 从唤醒请求里取回**这一笔**（按调用标识；不拿第一批）。
+async fn take_wake_call(
+    run: &mut Prepared,
+    store: &dyn Store<Event = Event>,
+    dispatch: &dyn Dispatcher,
+    id: &str,
+) -> Option<PortCall> {
+    let batch = dispatch.wake(store).await?;
+    let call = batch
+        .calls
+        .iter()
+        .find(|c| c.call.id == id)
+        .cloned()
+        .or_else(|| batch.calls.into_iter().next())?;
+    run.round_turn = Some(batch.turn);
+    if !run.round_calls.iter().any(|known| known == &call.call.id) {
+        run.round_calls.push(call.call.id.clone());
+    }
+    Some(call)
+}
+
+/// 派出半（`dispatch-tool` 行的动作，**一行一笔**）：落 `sent`、
+/// 把这一笔「跑执行层 + 收结果」寄存进草稿的在飞槽。
 ///
-/// `Ok(None)` = 继续下一轮；`Ok(Some)` = 本轮收束（等待用户）。
-///
-/// 两行共用这一个动作：混合批次里 `dispatch-tool` 先被选中，它顺手把被拒的那几笔
-/// 也收尾（`close_batch`）；一批全被拒时 `dispatch-tool` 不欠，`deny-tools` 选中
-/// 本动作，仍然要走执行层（审批卡 / 拒绝反馈由它唯一构造）。
-/// 派出半（`dispatch-tool` 行的动作，`D-124` 订正 1）：落 `sent`、
-/// 把「跑执行层 + 收结果」整段寄存进草稿的 in-flight 槽。
-///
-/// 与 [`land_round`] 成对（与 `model` 端口的 [`begin_model`] / [`poll_flight`] 逐字同形）：
-/// 派出与收应答分处两个环步，中间那一圈「`sent` 有、终局无」在**正常跑**里可见——
-/// `waiting` 视图、`stale_sent` 与 `reap` 读的都是它。
-///
-/// 这一半只做「交出去」：定格正文、广播工具节点、落 `sent`。批次真正落地的东西
-/// （产物 / 等待进展 / 轮内注入 / 批次边界汇报）全在 [`land_batch`]。
+/// 一笔一个环步 ⇒ N 笔可以同时在途；环里没有「批」这个对象（DE-047 D-311）。
+/// 交互模式是例外：审批 / 提问一次只处理一张卡，前一笔记还在等时不再派出下一笔
+/// （这是**交互语义**，不是并发策略）。
 pub(crate) async fn begin_round(
     run: &mut Prepared,
     store: &std::sync::Arc<dyn Store<Event = Event>>,
-    dispatch: std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>,
+    dispatch: std::sync::Arc<dyn Dispatcher>,
+    id: &str,
 ) -> Option<ToolFlight> {
-    // 两格齐 ⇒ 正常批次；两格皆空 ⇒ 可能是一笔唤醒（恢复幕没有模型应答）。
-    // 只缺一格是草稿错位，不拿唤醒兜底掩盖它。
-    let batch = match (run.pending_model.take(), run.pending_calls.take()) {
-        (Some(rt), Some(calls)) => Some((rt, calls)),
-        _ => dispatch
-            .wake(store.as_ref())
-            .await
-            .map(|batch| (batch.turn, batch.calls)),
-    };
-    // 没有寄存、也没有唤醒请求 = 引擎没有可派的工具批；不空转。
-    let (rt, mut calls) = batch?;
-    match dispatch.clone().begin(store.clone(), &rt, &mut calls).await {
-        // 草稿错位（`begin` 没找到可派的批次）：一格没落，派发器的空账本守卫会显形。
-        super::super::tool_dispatch::ToolBegin::None => None,
-        super::super::tool_dispatch::ToolBegin::InFlight(fut) => {
-            Some(ToolFlight { rt, calls, fut })
-        }
+    if dispatch.interactive() && !run.round_outcomes.is_empty() {
+        // 上一笔还没收口（交互语义下一次一张卡）：不在这一圈派出下一笔。
+        return None;
+    }
+    // 正常轮：模型应答已在草稿里；恢复幕：从唤醒请求取回这一笔。
+    if run.round_turn.is_none() {
+        take_wake_call(run, store.as_ref(), dispatch.as_ref(), id).await?;
+    }
+    run.pending_model.take();
+    let rt = run.round_turn.clone()?;
+    let call = run.calls.get_mut(id)?;
+    // 逐笔：执行层与窗口都只看**这一笔**对应的那次调用，不重放整轮。
+    let one_turn = per_call_turn(&rt, call);
+    match dispatch.clone().begin(store.clone(), &one_turn, call).await {
+        // 草稿错位（`begin` 没找到可派的一笔）：一格没落，派发器的空账本守卫会显形。
+        Begin::None => None,
+        Begin::InFlight(fut) => Some(ToolFlight { fut }),
     }
 }
 
-/// 收尾半（`await-tool` / `deny-tools` 两行的动作）：poll 一次在飞的
-/// 那一批，落地了就关账并落产物 / 等待格。
+/// 收尾半（`await-tool` / `deny-tools` 两行的动作，**一行一笔**）：poll 一次这一笔，
+/// 落地了就关账、落产物 / 等待格；整轮的每一笔都结了才拼下一轮交换。
 ///
-/// ## 为什么只 poll 一次
+/// 与 `model` 端口同一个理由（`D-222` 订正 2）：只 poll 一次，返回的那一刻环要能
+/// 回到选债口。还在跑就把 future 原样放回槽里、**让出执行权**（不 yield 就是自旋）。
 ///
-/// 与 `model` 端口同一个理由（`D-222` 订正 2）：返回的那一刻环要能回到选债口，
-/// 往返在飞的时候别的行才轮得到。`await` 到底等于把派出与收应答又合回一个动作窗口。
-///
-/// 还在跑就把 future 原样放回槽里、**让出执行权**（不 yield 就是自旋：那一圈在同一个
-/// 任务里同步转完，执行层的 I/O 永远等不到驱动）。
-///
-/// ## 槽空的两种处境
-///
-/// 1. **这一批没有跨边界的往返**（一批全被拒 / 唤醒的用户结果）：结论本地可算，
-///    起批之后跑到完——那一条路上没有「在等」这一圈可言；
-/// 2. **等待方随进程没了**（日志上有 `sent`、草稿里没有批次）：按与
-///    [`kill_dangling_round`] 同一条处置判死，不猜、不重放。
+/// 没有在飞 future 的两种处境：
+/// 1. **被拒 / 未派出**：这一笔仍要过执行层（审批卡与拒绝反馈由它构造）；
+/// 2. **派出过、future 随进程没了**（日志上有 `sent`）：环按「没收到应答的债」
+///    写 `failed{NOT_EXECUTED}`——租约 / 未执行的终局归环。
 pub(crate) async fn land_round(
     run: &mut Prepared,
     flight: Option<ToolFlight>,
     store: &std::sync::Arc<dyn Store<Event = Event>>,
     llm: &dyn LlmAdapter,
-    dispatch: std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>,
+    dispatch: std::sync::Arc<dyn Dispatcher>,
+    id: &str,
 ) -> Result<Option<ToolFlight>, symbio_kernel::store::AppendError> {
     let Some(flight) = flight else {
-        let batch = match (run.pending_model.take(), run.pending_calls.take()) {
-            (Some(rt), Some(calls)) => Some((rt, calls)),
-            _ => dispatch
-                .wake(store.as_ref())
-                .await
-                .map(|batch| (batch.turn, batch.calls)),
-        };
-        let Some((rt, mut calls)) = batch else {
-            // 没有批次可起、也没有在飞的 future：等待方随进程没了。
-            super::super::port::kill_dangling_sent(store.as_ref(), "tool", "no_pending_batch")?;
+        let Some(call) = run.calls.get(id).cloned() else {
+            // 账本里没有这一笔：等待方随进程没了（日志上有 `sent`、草稿里没有）。
+            super::super::port::kill_dangling_sent(store.as_ref(), "tool", "no_pending_call")?;
             return Ok(None);
         };
-        let super::super::tool_dispatch::ToolBegin::InFlight(fut) =
-            dispatch.clone().begin(store.clone(), &rt, &mut calls).await
+        if call.sent {
+            // 派出过、future 却没了：环按「没收到应答的债」写 `failed`（租约出口）。
+            dispatch.finish(store.as_ref(), &call, None).await;
+            run.calls.remove(id);
+            finalize_round(run, store, llm, dispatch.clone(), id, None).await?;
+            return Ok(None);
+        }
+        // 被拒 / 未派出：起这一笔并跑到完（结论本地可算，没有真正的等待）。
+        let Some(mut call) = run.calls.remove(id) else {
+            return Ok(None);
+        };
+        let Some(rt) = run.round_turn.clone() else {
+            return Ok(None);
+        };
+        let one_turn = per_call_turn(&rt, &call);
+        let Begin::InFlight(fut) = dispatch
+            .clone()
+            .begin(store.clone(), &one_turn, &mut call)
+            .await
         else {
+            dispatch.finish(store.as_ref(), &call, None).await;
+            finalize_round(run, store, llm, dispatch.clone(), id, None).await?;
             return Ok(None);
         };
-        // 这一条路没有真正的等待：起批之后直接跑到完（结论本地可算）。
-        let outcomes = fut.await;
-        dispatch.finish(store.as_ref(), &calls, &outcomes).await;
-        land_batch(run, store.as_ref(), llm, rt, outcomes).await?;
+        let outcome = fut.await;
+        dispatch.finish(store.as_ref(), &call, Some(&outcome)).await;
+        finalize_round(run, store, llm, dispatch.clone(), id, Some(outcome)).await?;
         return Ok(None);
     };
 
-    let ToolFlight { rt, calls, mut fut } = flight;
+    let ToolFlight { mut fut } = flight;
     let ready = std::future::poll_fn(|cx| std::task::Poll::Ready(fut.as_mut().poll(cx))).await;
     match ready {
         std::task::Poll::Pending => {
             // 让出执行权：这一圈没写任何格，派发器的空账本守卫据 `sent` 无所终局
             // 认出这是**合法地不前进**，不判 `no_progress`。
             tokio::task::yield_now().await;
-            Ok(Some(ToolFlight { rt, calls, fut }))
+            Ok(Some(ToolFlight { fut }))
         }
-        std::task::Poll::Ready(outcomes) => {
+        std::task::Poll::Ready(outcome) => {
+            let Some(call) = run.calls.get(id).cloned() else {
+                return Ok(None);
+            };
             // 关账先于落格：`response` / `failed` 是端口账的终局，产物与等待格是业务
             // 事实——两者在同一圈里落，次序按「账先关，事再写」。
-            dispatch.finish(store.as_ref(), &calls, &outcomes).await;
-            land_batch(run, store.as_ref(), llm, rt, outcomes).await?;
+            dispatch.finish(store.as_ref(), &call, Some(&outcome)).await;
+            run.calls.remove(id);
+            finalize_round(run, store, llm, dispatch.clone(), id, Some(outcome)).await?;
             Ok(None)
         }
     }
+}
+
+/// 这一笔对应的模型往返切片：`tool_calls` 里只剩它自己。
+///
+/// 执行层与派发窗口都按「一次调用」工作：把整轮交进去会让每一笔各跑一遍全部
+/// 调用，也会把同一条工具卡广播 N 次。唤醒合成的往返本来就只有一笔，原样返回。
+fn per_call_turn(
+    rt: &symbio_sdk::adapters::LlmTurn,
+    call: &PortCall,
+) -> symbio_sdk::adapters::LlmTurn {
+    let mut one = rt.clone();
+    if let Some(tc) = rt
+        .tool_calls
+        .iter()
+        .find(|tc| tc.id.as_deref() == Some(call.model_id.as_str()))
+    {
+        one.tool_calls = vec![tc.clone()];
+    }
+    one
+}
+
+/// 把**这一笔**结果登记进本轮；整轮都结了（或有一笔要等用户）时落一次批次事实。
+///
+/// 「一轮」不是「一批」：它只是同一轮模型往返的 N 笔独立债的集合，用来决定
+/// 何时拼回填 prompt。逐笔的终局各自落格，聚合只发生在**读**这一侧。
+async fn finalize_round(
+    run: &mut Prepared,
+    store: &std::sync::Arc<dyn Store<Event = Event>>,
+    llm: &dyn LlmAdapter,
+    dispatch: std::sync::Arc<dyn Dispatcher>,
+    id: &str,
+    outcome: Option<Outcome>,
+) -> Result<(), symbio_kernel::store::AppendError> {
+    if let Some(outcome) = outcome {
+        run.round_outcomes.insert(id.to_string(), outcome);
+    }
+    let waiting = run.round_outcomes.values().any(|o| o.needs_user_action);
+    let all_done = run
+        .round_calls
+        .iter()
+        .all(|call| run.round_outcomes.contains_key(call) || !run.calls.contains_key(call));
+    if !waiting && !all_done {
+        return Ok(());
+    }
+
+    // 等待用户：还没派出的一笔由**环**写 `failed{NOT_EXECUTED}`（不让它空转，
+    // 也不重跑），然后按「这一轮停在等用户」落一次进展格。
+    if waiting {
+        for call_id in run.round_calls.clone() {
+            if run.round_outcomes.contains_key(&call_id) {
+                continue;
+            }
+            if let Some(call) = run.calls.remove(&call_id) {
+                dispatch.finish(store.as_ref(), &call, None).await;
+            }
+        }
+    }
+
+    let rt = match run.round_turn.clone() {
+        Some(rt) => rt,
+        None => return Ok(()),
+    };
+    let outcomes: Vec<_> = run
+        .round_calls
+        .iter()
+        .filter_map(|call| run.round_outcomes.remove(call))
+        .collect();
+    // 效果 / 熔断按**调用顺序**交回（各笔完成的先后不改变事实次序）。
+    let mut effects = Vec::new();
+    let mut breaks = Vec::new();
+    for outcome in &outcomes {
+        effects.extend(outcome.effects.iter().cloned());
+        breaks.extend(outcome.breaks.iter().copied());
+    }
+    dispatch.land_derived(effects, breaks);
+    land_batch(run, store.as_ref(), llm, rt, outcomes).await?;
+    run.round_calls.clear();
+    run.round_turn = None;
+    run.round_prepared = false;
+    Ok(())
 }
 
 /// 一批工具的结果**落地**：产物格、等待进展、交换累加、轮内注入。
@@ -790,7 +905,7 @@ async fn land_batch(
     store: &dyn Store<Event = Event>,
     llm: &dyn LlmAdapter,
     rt: LlmTurn,
-    outcomes: Vec<super::super::tool_dispatch::DispatchOutcome>,
+    outcomes: Vec<Outcome>,
 ) -> Result<(), symbio_kernel::store::AppendError> {
     // 产物落格已由执行体在 `finish` 的 `land_only` 出口完成（P1b / DE-047 D-308）；
     // 这里只读回本轮的产物数，供收束判定「这一轮到底有没有产出」。判据按

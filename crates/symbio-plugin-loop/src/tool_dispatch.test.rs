@@ -32,7 +32,7 @@ use std::sync::Arc;
 use super::super::tools::{ABORTED, NOT_EXECUTED};
 use super::loop_rows;
 use super::port;
-use super::{DispatchOutcome, ToolPort, ToolPortCall, ToolPortPolicy, WakeIntent, WakeSpec};
+use super::{CallOutcome, ToolPort, ToolPortCall, ToolPortPolicy, WakeIntent, WakeSpec};
 use symbio_kernel::capability::CapabilityRiskLevel;
 use symbio_kernel::event::{Event, Seq, EVENT_REQUEST, EVENT_SENT};
 use symbio_kernel::store::{EventStore, Store};
@@ -134,14 +134,21 @@ fn opened(store: &EventStore, id: &str) -> ToolPortCall {
     call
 }
 
-fn outcome(model_id: &str, failure_kind: &str) -> DispatchOutcome {
-    DispatchOutcome {
-        call_id: model_id.into(),
+fn outcome(call: &ToolPortCall, failure_kind: &str) -> CallOutcome {
+    CallOutcome {
+        call: call.call.clone(),
+        call_id: call.model_id.clone(),
         name: "shell".into(),
         text: "占位".into(),
         ok: false,
+        needs_user_action: false,
+        prompt: None,
         failure_kind: failure_kind.into(),
-        ..Default::default()
+        wire_id: String::new(),
+        args: String::new(),
+        result_id: String::new(),
+        effects: Vec::new(),
+        breaks: Vec::new(),
     }
 }
 
@@ -158,10 +165,7 @@ fn an_aborted_call_closes_as_failed_not_as_an_answer() {
     let call = opened(&store, "tool-1-d1-b0-c0");
     assert!(awaits(&store), "落了 sent 就该欠一次应答");
 
-    tool_port(&store).close_batch(
-        std::slice::from_ref(&call),
-        &[outcome(&call.model_id, ABORTED)],
-    );
+    tool_port(&store).close_call(&call, Some(&outcome(&call, ABORTED)));
 
     assert_eq!(
         payload_of(&store, "failed"),
@@ -183,10 +187,7 @@ fn a_skipped_call_closes_as_not_executed() {
     let store = Arc::new(EventStore::new());
     let call = opened(&store, "tool-1-d1-b0-c1");
 
-    tool_port(&store).close_batch(
-        std::slice::from_ref(&call),
-        &[outcome(&call.model_id, NOT_EXECUTED)],
-    );
+    tool_port(&store).close_call(&call, Some(&outcome(&call, NOT_EXECUTED)));
 
     assert_eq!(payload_of(&store, "failed")["why"], json!(NOT_EXECUTED));
     assert!(!kinds(&store).contains(&"response".to_string()));
@@ -199,7 +200,7 @@ fn a_missing_outcome_closes_as_not_executed() {
     let store = Arc::new(EventStore::new());
     let call = opened(&store, "tool-1-d1-b0-c2");
 
-    tool_port(&store).close_batch(std::slice::from_ref(&call), &[]);
+    tool_port(&store).close_call(&call, None);
 
     assert_eq!(payload_of(&store, "failed")["why"], json!(NOT_EXECUTED));
     assert!(!awaits(&store), "没有结果也不能让这一笔永远欠着");
@@ -212,10 +213,7 @@ fn a_tool_that_ran_and_errored_is_still_an_answer() {
     let store = Arc::new(EventStore::new());
     let call = opened(&store, "tool-1-d1-b0-c3");
 
-    tool_port(&store).close_batch(
-        std::slice::from_ref(&call),
-        &[outcome(&call.model_id, "error")],
-    );
+    tool_port(&store).close_call(&call, Some(&outcome(&call, "error")));
 
     assert_eq!(
         payload_of(&store, "response")["id"],
@@ -237,10 +235,7 @@ fn a_call_that_returned_an_approval_card_is_an_answer() {
     let store = Arc::new(EventStore::new());
     let call = opened(&store, "tool-1-d1-b0-c4");
 
-    tool_port(&store).close_batch(
-        std::slice::from_ref(&call),
-        &[outcome(&call.model_id, "needs_approval")],
-    );
+    tool_port(&store).close_call(&call, Some(&outcome(&call, "needs_approval")));
 
     assert!(kinds(&store).contains(&"response".to_string()));
     assert!(!kinds(&store).contains(&"failed".to_string()));
@@ -256,13 +251,9 @@ fn a_denied_or_unsent_call_lands_nothing() {
     let mut unsent = opened(&store, "tool-1-d1-b0-c6");
     unsent.sent = false;
 
-    tool_port(&store).close_batch(
-        &[denied.clone(), unsent.clone()],
-        &[
-            outcome(&denied.model_id, ABORTED),
-            outcome(&unsent.model_id, NOT_EXECUTED),
-        ],
-    );
+    let port = tool_port(&store);
+    port.close_call(&denied, Some(&outcome(&denied, ABORTED)));
+    port.close_call(&unsent, Some(&outcome(&unsent, NOT_EXECUTED)));
 
     let kinds = kinds(&store);
     assert!(
@@ -578,7 +569,7 @@ fn a_wake_that_the_user_rejected_reads_back_as_a_denial() {
         other => panic!("唤醒意图还原错了：{other:?}"),
     }
 
-    port.authorize_wake(&mut batch.calls);
+    port.authorize_wake(&mut batch.calls[0]);
     assert!(!batch.calls[0].granted, "拒绝不放行：执行层不会跑它");
     assert_eq!(batch.calls[0].deny_why, Some("user_rejected"));
     assert!(
@@ -604,7 +595,7 @@ fn a_closed_wake_request_is_not_read_back() {
     .expect("唤醒请求落格");
 
     let mut batch = port.wake_batch().expect("唤醒请求读得回");
-    port.authorize_wake(&mut batch.calls);
+    port.authorize_wake(&mut batch.calls[0]);
     assert!(batch.calls[0].granted, "批准 ⇒ 放行");
     port.begin_calls(&mut batch.calls);
     assert!(batch.calls[0].sent, "派发行欠 ⇒ 落 `sent`");

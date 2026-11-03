@@ -942,11 +942,21 @@ pub(crate) fn run_open<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `authorizer` 执行体（b）：`authorize-tool` 行选中的动作——判放行 / 拒绝。
+/// 债键里的调用标识（逐笔动作按它取**这一笔**，不取整批）。
+fn key_id(ctx: &Ctx<'_>) -> String {
+    ctx.key
+        .iter()
+        .find(|(name, _)| name == "id")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_default()
+}
+
+/// `authorizer` 执行体（b）：`authorize-tool` 行选中的动作——判**这一笔**放行 / 拒绝。
 pub(crate) fn run_authorize<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
+        let id = key_id(ctx);
         ctx.session
-            .authorize(ctx.store.as_ref(), ctx.dispatch.as_deref())
+            .authorize(ctx.store.as_ref(), ctx.dispatch.as_deref(), &id)
             .await;
         Ok(())
     })
@@ -959,8 +969,9 @@ pub(crate) fn run_authorize<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 /// 两次选债之间那一圈「已派出、未收清」才是 `waiting` 视图在**正常跑**里读得到的形状。
 pub(crate) fn run_begin_tools<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
+        let id = key_id(ctx);
         ctx.session
-            .begin_tools(ctx.store, ctx.dispatch.clone())
+            .begin_tools(ctx.store, ctx.dispatch.clone(), &id)
             .await;
         Ok(())
     })
@@ -970,8 +981,9 @@ pub(crate) fn run_begin_tools<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 /// 动作——收这一批的结果并关账。
 pub(crate) fn run_finish_tools<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
+        let id = key_id(ctx);
         ctx.session
-            .finish_tools(ctx.store, ctx.llm.as_ref(), ctx.dispatch.clone())
+            .finish_tools(ctx.store, ctx.llm.as_ref(), ctx.dispatch.clone(), &id)
             .await
             .map_err(ActorError::Append)
     })

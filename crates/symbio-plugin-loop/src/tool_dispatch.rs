@@ -28,7 +28,7 @@
 //!    （`LlmAdapter` 交回的是收口后的 `LlmTurn`，没有那条帧流），由本处补建。
 //!    节点形状与其余对话节点**同一份**（前端读同一套字段），
 //!    因此复用 `llm_build_tool_call_nodes` / `llm_build_text_node`。
-//! 2. **把结果映射成运行器的事实形状**（[`DispatchOutcome`]），供运行器拼下一轮
+//! 2. **把结果映射成运行器的事实形状**（[`CallOutcome`]），供运行器拼下一轮
 //!    prompt；`artifact.added` 由执行体在收尾时落（P1b / DE-047 D-308）。
 //!
 //! ## 正文节点的定格
@@ -100,7 +100,7 @@ pub(crate) struct DerivedFacts {
 /// 分层（一个来自 UI 桥、一个来自执行层），不是两种语义；合成一处后取用点只有
 /// 一次加锁，也不会出现「取了一条忘了另一条」。
 ///
-/// [`DispatchOutcome`] 不在本结构里：它是**同步返回值**，一次调用即交齐，
+/// [`CallOutcome`] 不在本结构里：它是**同步返回值**，一次调用即交齐，
 /// 没有跨 `await` 累积的问题——把它塞进 `Mutex` 只会把返回值变成第二条通道。
 #[derive(Default)]
 pub(crate) struct PortOutput {
@@ -248,8 +248,13 @@ pub(crate) struct WakeBatch {
 /// `ChatNode` 的图语义（那在 `crates/symbio-plugin-session`），只认识这段文本。
 ///
 /// 它住在插件里而不是 core：生产消费方只有本插件的运行器（README §4 四问第 1 问）。
-#[derive(Debug, Clone, Default)]
-pub struct DispatchOutcome {
+#[derive(Debug, Clone)]
+pub struct CallOutcome {
+    /// 这笔结果对应的**端口账**（`request` / `sent` / 终局同 id）。
+    ///
+    /// 配对按它做（DE-047 D-311）：日志里 `request(port=tool)`、`response` / `failed`
+    /// 的键就是这一个 id；`call_id` 是节点身份，不参与配对。
+    pub call: port::Call,
     /// 对应的工具调用 id（回填给模型时锚定 ToolCall；取 `TurnToolCallInfo::id`）。
     pub call_id: String,
     /// 工具名（LLM 可见名）。
@@ -279,6 +284,39 @@ pub struct DispatchOutcome {
     pub args: String,
     /// 结果子节点（`role=Tool`）的节点 id——落库时由分发方分配，记进载荷供重建复用。
     pub result_id: String,
+    /// 这一笔执行层交回的效果出参（DE-025 D-207）。
+    ///
+    /// 随结果携带而不是当场写进共用的取件面：并发执行时落地顺序由 provider 决定，
+    /// 而效果事实的顺序必须等于**调用顺序**——由环在整轮收口时按序交回。
+    pub effects: Vec<EffectInput>,
+    /// 这一笔触发的熔断理由（外部执行闸门判 `Break`）。
+    pub breaks: Vec<&'static str>,
+}
+
+impl CallOutcome {
+    /// 空结果（仅在执行层没交回任何结果节点时兜底；`failure_kind` 由调用点补）。
+    fn empty() -> Self {
+        Self {
+            call: port::Call {
+                port: "tool",
+                id: String::new(),
+                attempt: 0,
+                via: None,
+            },
+            call_id: String::new(),
+            name: String::new(),
+            text: String::new(),
+            ok: false,
+            needs_user_action: false,
+            prompt: None,
+            failure_kind: String::new(),
+            wire_id: String::new(),
+            args: String::new(),
+            result_id: String::new(),
+            effects: Vec::new(),
+            breaks: Vec::new(),
+        }
+    }
 }
 
 /// 工具派发的**四个动作**（D-118 决策 5 + `D-124` 订正 1）：创建 / 授权 / 派出 / 收尾。
@@ -304,38 +342,58 @@ pub struct DispatchOutcome {
 /// （寄存进草稿、下一圈才 poll），引用进不去 `'static` 的框。
 #[async_trait]
 pub(crate) trait ToolDispatch: Send + Sync {
+    /// 幕内**一次**的正文定格（正文 / 推理收口并切节点）。
+    ///
+    /// 逐笔派发之后，每笔调用各走一次 [`Self::begin`]；正文只属于那一轮模型往返，
+    /// 因此把「定格 + 排空」提成独立入口，由运行器在开账之后调一次。默认空实现：
+    /// 测试替身没有流式桥。
+    async fn prepare(&self, _store: &dyn Store<Event = Event>, _turn: &LlmTurn) {}
+
     /// 创建：为模型响应里交回的调用逐条写 `request(port=tool)`。
+    ///
+    /// 交回的是 N 笔**互相独立**的债（`request` 各有一个调用标识），不是一个批。
     async fn open(&self, store: &dyn Store<Event = Event>, turn: &LlmTurn) -> Vec<ToolPortCall>;
 
-    /// 授权：为已开账的调用写 `authz.granted` / `authz.denied`。
+    /// 授权：为**一笔**已开账的调用写 `authz.granted` / `authz.denied`。
     ///
     /// 拒绝即止：`granted` 保持 `false`，派出动作不会为它落 `sent`。
-    async fn authorize(&self, store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]);
+    async fn authorize(&self, store: &dyn Store<Event = Event>, call: &mut ToolPortCall);
 
-    /// **派出半**：为放行的调用落 `sent`，把「跑执行层 + 收结果」整段寄存成一个 future。
+    /// **派出半**：为这一笔落 `sent`，把「跑执行层 + 收结果」寄存成一个 future。
     ///
-    /// 这一半只做「交出去」这件事：定格本轮正文、广播工具节点、落 `sent`。批次落地的
-    /// 东西（产物 / 等待进展 / 轮内注入 / 批次边界汇报）全在 [`Self::finish`] 那一侧。
-    ///
-    /// 收 `self: Arc<Self>` 是因为交回的 future 要带着分发方一起活到下一圈
-    /// （它跑执行层时要用插件宿主、事件出口、事实源）。
+    /// 每笔调用一个环步（`dispatch-tool` 行的键就是这一笔）：N 笔可以同时在途，
+    /// 但环里没有「批」这个对象（DE-047 D-311）。
     async fn begin(
         self: Arc<Self>,
         store: Arc<dyn Store<Event = Event>>,
         turn: &LlmTurn,
-        calls: &mut [ToolPortCall],
+        call: &mut ToolPortCall,
     ) -> ToolBegin;
 
-    /// **收尾半**：把 future 交回的结论落成端口账的终局格（应答 / 没跑到 / 被拒）。
+    /// **收尾半**：把这一笔的结论落成端口账的终局格。
     ///
-    /// 收尾本身要 await：产物格由执行体落（P1b / DE-047 D-308），关账后要对每条
-    /// 结果再调一次执行体的 `land_only` 出口。返回 boxed future 以保持 `dyn` 可用。
+    /// `outcome = None` ⇒ 执行层没交出结果：环按「没收到应答的债」写
+    /// `failed{NOT_EXECUTED}`——租约超时 / 未执行的终局由环负责。
     fn finish<'a>(
         &'a self,
         store: &'a dyn Store<Event = Event>,
-        calls: &'a [ToolPortCall],
-        outcomes: &'a [DispatchOutcome],
+        call: &'a ToolPortCall,
+        outcome: Option<&'a CallOutcome>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+
+    /// 把整轮的效果 / 熔断出参按**调用顺序**交回取件面（轮末写口从这里取）。
+    ///
+    /// 逐笔派发时各笔完成次序由 provider 决定；环只在整轮收口时按调用顺序交回，
+    /// 世界事实的次序因此与调用顺序一致。
+    fn land_derived(&self, _effects: Vec<EffectInput>, _breaks: Vec<&'static str>) {}
+
+    /// 相互作用语义：审批 / 提问是否「一次只处理一张卡」。
+    ///
+    /// 环据此决定**什么时候**派下一笔，但这不是并发策略：并发上限、顺序与熔断
+    /// 归 provider 内部（DE-047 D-311）。默认 `false`。
+    fn interactive(&self) -> bool {
+        false
+    }
 
     /// 读一笔**唤醒调用**（d）。
     ///
@@ -347,13 +405,13 @@ pub(crate) trait ToolDispatch: Send + Sync {
     }
 }
 
-/// 在飞的一批工具调用：`sent` 已落、结果还没回来。
+/// 在飞的一笔工具调用：`sent` 已落、结果还没回来。
 ///
 /// `'static` 是硬要求（与 `stream::ModelInFlight` 同一条）：它寄存在本轮草稿里，跨两次
 /// 选债活着；草稿不带生命周期参数，否则 `Action` 的 `for<'a>` 要对两个生命周期成立，
 /// 而绑定表要求它 `'static`。
 pub(crate) type ToolInFlight =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Vec<DispatchOutcome>> + Send + 'static>>;
+    std::pin::Pin<Box<dyn std::future::Future<Output = CallOutcome> + Send + 'static>>;
 
 /// [`ToolDispatch::begin`] 的两种结论。
 pub(crate) enum ToolBegin {
@@ -379,18 +437,25 @@ pub(crate) struct ToolPort {
     drive_seq: u64,
 }
 
-/// 批次调用的**协议 id**：轮 + 幕 + 本次模型往返 + 模型交回的调用 id。
+/// 批次调用的**协议 id**：轮 + 幕 + 本次模型往返 + 调用序号 + 模型交回的调用 id。
 ///
 /// ## 为什么要带「本次模型往返」
 ///
 /// 创建行 `open-tools` 的集合展开（D-117）从 `response.calls` 的元素里取 id，
 /// 而 `response` 在派发**之前**就写好了——那时还没有「第几批」。要让展开出的键
 /// 与随后的 `request` 同 id，id 必须只由**模型响应里已有的东西**决定：轮、幕、
-/// 模型往返（`model-…-s{step}`）、模型调用 id。
+/// 模型往返（`model-…-s{step}`）、调用序号、模型调用 id。
 ///
 /// 只带 `tc.id` 不够：本地模型常用 `call_0` / `call_1` 这种按回合重来的短 id，
 /// 同一幕的下一轮就会撞上上一轮的键——创建债被旧 `request` 提前关掉，新调用根本
 /// 不会派发。`round` 把「同一幕的不同轮」分开；缺失模型 id 的调用用序号兜底。
+///
+/// ## 为什么序号要**定宽**前置
+///
+/// 逐笔派发后环按债键 `(port, id, attempt)` 选最小的一笔（`loop_rows` 的行序），
+/// 键的字典序就是派发序。模型交回的 id 是任意字符串，按它排序会把调用次序打乱
+/// （同一轮两笔写盘的产物次序因此随模型 id 变）；定宽序号放在前面，键序就等于
+/// 模型响应里 `calls` 的次序——事实次序不随调用标识的字面量漂移。
 pub(crate) fn batch_call_id(
     turn: u64,
     drive: u64,
@@ -399,8 +464,8 @@ pub(crate) fn batch_call_id(
     round: &str,
 ) -> String {
     match model_id.filter(|s| !s.trim().is_empty()) {
-        Some(id) => format!("{}-{turn}-d{drive}-{round}-{id}", ports::TOOL),
-        None => format!("{}-{turn}-d{drive}-{round}-c{idx}", ports::TOOL),
+        Some(id) => format!("{}-{turn}-d{drive}-{round}-c{idx:03}-{id}", ports::TOOL),
+        None => format!("{}-{turn}-d{drive}-{round}-c{idx:03}", ports::TOOL),
     }
 }
 
@@ -617,17 +682,68 @@ impl ToolPort {
         })
     }
 
-    /// 授权动作：为已开账的调用写 `authz.granted` / `authz.denied`（第二笔债）。
+    /// 授权动作：为**这一笔**已开账的调用写 `authz.granted` / `authz.denied`（第二笔债）。
+    ///
+    /// 行表的键就是调用标识：一次动作只判一笔，`owes` 复核因此仍按行整体判
+    /// （还有别的调用没判时这一行仍欠，逐笔进入各判各的）。
     pub(crate) async fn authorize(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
-        calls: &mut [ToolPortCall],
+        call: &mut ToolPortCall,
     ) {
-        if calls.is_empty() {
+        let policy = ToolPortPolicy::read(ctx).await;
+        self.authorize_calls(&policy, std::slice::from_mut(call));
+    }
+
+    /// 授权**一笔**唤醒调用。
+    ///
+    /// 用户动作是授权本身：批准 / 重试 / 补充 / 回答一律放行；拒绝落
+    /// `authz.denied{user_rejected}`。风险档比较不参与——用户已经做过这一次判断，
+    /// 再按阈值拒一次会让审批卡永远点不动。
+    pub(crate) fn authorize_wake(&self, call: &mut ToolPortCall) {
+        let denied = matches!(call.wake, Some(WakeIntent::Result { denied: true, .. }));
+        let written = if denied {
+            append_authz(
+                self.facts.as_ref(),
+                denied_event(
+                    self.turn,
+                    self.user_seq,
+                    &call.call,
+                    &call.name,
+                    "user_rejected",
+                ),
+            )
+        } else {
+            append_authz(
+                self.facts.as_ref(),
+                granted_event(
+                    self.turn,
+                    self.user_seq,
+                    &call.call,
+                    &call.name,
+                    GrantFacts {
+                        risk: "unknown",
+                        deferred: true,
+                        basis: Some(ApprovalBasis::Approved.as_str()),
+                        grant: None,
+                    },
+                ),
+            )
+        };
+        if let Err(e) = written {
+            symbio_plugin_api::plugin_warn!(
+                "session",
+                "[Tool] 唤醒授权事实未落格（turn={} / {}）：{e:?}",
+                self.turn,
+                call.model_id
+            );
             return;
         }
-        let policy = ToolPortPolicy::read(ctx).await;
-        self.authorize_calls(&policy, calls);
+        if denied {
+            call.deny_why = Some("user_rejected");
+        } else {
+            call.granted = true;
+        }
     }
 
     /// 授权动作的实体（策略由调用方读出，resume 路径复用同一份）。
@@ -643,6 +759,11 @@ impl ToolPort {
             return;
         }
         for call in calls.iter_mut() {
+            // 唤醒由用户动作裁决，不参与风险档比较。
+            if call.wake.is_some() {
+                self.authorize_wake(call);
+                continue;
+            }
             // 非法调用先判：它没有可执行的名字 / 参数，风险档再低也不能放行。
             //
             // 放行依据只问 `approval_basis`（与执行闸门同一份判据）：三档分别是
@@ -945,98 +1066,40 @@ impl ToolPort {
         })
     }
 
-    /// 授权唤醒调用（`authorize-tool` 行的动作在草稿里没有批次时的入口）。
+    /// 一笔调用返回后关账：**这一笔**的终局。
     ///
-    /// 用户动作是**授权本身**：批准 / 重试 / 补充 / 回答一律放行；拒绝落
-    /// `authz.denied{user_rejected}`。风险档比较不参与——用户已经做过这一次判断，
-    /// 再按阈值拒一次会让审批卡永远点不动。
-    pub(crate) fn authorize_wake(&self, calls: &mut [ToolPortCall]) {
-        let facts = self.facts.range(Seq::new(0));
-        // obligation-precheck OB-004: 执行体（AUTHORIZER）动手前的复核——唤醒路径与批内授权是两个入口进同一次判定，行已不欠说明这轮的放行落过事实，早退避免重复写授权格
-        if !loop_rows::owes("authorize-tool", &facts, self.turn, self.now_ms(&facts)) {
-            symbio_plugin_api::plugin_warn!(
-                "session",
-                "[Tool] 授权行不欠（turn={}），不判唤醒放行",
-                self.turn
-            );
-            return;
-        }
-        for call in calls.iter_mut() {
-            let denied = matches!(call.wake, Some(WakeIntent::Result { denied: true, .. }));
-            let written = if denied {
-                append_authz(
-                    self.facts.as_ref(),
-                    denied_event(
-                        self.turn,
-                        self.user_seq,
-                        &call.call,
-                        &call.name,
-                        "user_rejected",
-                    ),
-                )
-            } else {
-                append_authz(
-                    self.facts.as_ref(),
-                    granted_event(
-                        self.turn,
-                        self.user_seq,
-                        &call.call,
-                        &call.name,
-                        GrantFacts {
-                            risk: "unknown",
-                            deferred: true,
-                            basis: Some(ApprovalBasis::Approved.as_str()),
-                            grant: None,
-                        },
-                    ),
-                )
-            };
-            if let Err(e) = written {
-                symbio_plugin_api::plugin_warn!(
-                    "session",
-                    "[Tool] 唤醒授权事实未落格（turn={} / {}）：{e:?}",
-                    self.turn,
-                    call.model_id
-                );
-                continue;
-            }
-            if denied {
-                call.deny_why = Some("user_rejected");
-            } else {
-                call.granted = true;
-            }
-        }
-    }
-
-    /// 批次返回后关账：**每一笔**都要有终局。
+    /// 配对按**调用标识**（`outcome.call` 与 `call.call` 同一个端口账）：日志里
+    /// `request` / `response` / `failed` 共享的键就是它，不存在按批按下标的配对。
     ///
     /// - 放行且已派发：`response`（工具回了话）或 `failed`（执行层没跑到它）；
     /// - 被拒（`deny_why` 有值）：`failed{why}`——授权行已由 `authz.denied` 关掉，
     ///   但创建行的集合债与「拒绝收尾」这一笔债务（`deny-tools`）还等着终局；
-    /// - 放行但没落 `sent`：`begin_calls` 已经替它落过 `failed`，这里不重复。
+    /// - 放行但没落 `sent`：`begin_calls` 已经替它落过 `failed`，这里不重复；
+    /// - **没有结果**（`outcome = None`）：环写 `failed{NOT_EXECUTED}`——「未收到
+    ///   `response` 的债」本身就是终局判据，不需要一个专门的未执行模块。
     ///
-    /// 「有结果节点」≠「工具回了话」：批尾收口给没跑到的调用补的是**框架的交代**
+    /// 「有结果节点」≠「工具回了话」：收口给没跑到的调用补的是**框架的交代**
     /// （一句话占位），它的成因写在 `meta.failure_kind` 上。占位按成因落
     /// `failed{why}` 而不是 `response`——否则中止的调用在日志里说「回来了」，而它
     /// 从未执行，`await-tool` 的 `failed` 出口就只剩 resume 一条路（[D-121](../../../docs/003-design/015-义务环.md#d-121-唤醒事实的行语义await-行的收清走协议格审批与补充重新开账 "DE-015-义务环")
     /// 的中止作用、DE-015 判据 6 场景三）。词表与判据同源：[`super::tools`] 门面的
     /// `is_unanswered` / `ABORTED` / `NOT_EXECUTED`。
-    pub(crate) fn close_batch(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
-        for call in calls {
-            if !call.granted {
-                if let Some(why) = call.deny_why {
-                    self.fail(call, why);
-                }
-                continue;
+    pub(crate) fn close_call(&self, call: &ToolPortCall, outcome: Option<&CallOutcome>) {
+        if !call.granted {
+            if let Some(why) = call.deny_why {
+                self.fail(call, why);
             }
-            if !call.sent {
-                continue;
-            }
-            match outcomes.iter().find(|o| o.call_id == call.model_id) {
-                Some(o) if is_unanswered(&o.failure_kind) => self.fail(call, &o.failure_kind),
-                Some(_) => self.close(call, true),
-                None => self.close(call, false),
-            }
+            return;
+        }
+        if !call.sent {
+            return;
+        }
+        // 配对键：结果自带的端口账与这一笔同一个 id。对不上 = 执行层答的
+        // 不是这一笔，按「没收到应答」收口（不猜另一个名字）。
+        match outcome.filter(|o| o.call.id == call.call.id) {
+            Some(o) if is_unanswered(&o.failure_kind) => self.fail(call, &o.failure_kind),
+            Some(_) => self.close(call, true),
+            None => self.fail(call, NOT_EXECUTED),
         }
     }
 
@@ -1062,7 +1125,7 @@ impl ToolPort {
 
     /// 单笔失败关账：落 `failed{why}`，与「应答」区分。
     ///
-    /// 三个调用方：批尾关账（[`Self::close_batch`]，`why` 取结果节点的成因或被拒
+    /// 三个调用方：逐笔关账（[`Self::close_call`]，`why` 取结果节点的成因或被拒
     /// 原因）、resume 的中止路径（`why = ABORTED`）、以及「放行但没派出去」那几笔
     /// （`begin_calls` 自己落 `failed{dispatch_row_not_owed}`）。
     pub(crate) fn fail(&self, call: &ToolPortCall, why: &str) {
@@ -1200,8 +1263,8 @@ impl SessionDispatchPort {
     }
 
     /// 三动作契约的授权步（实体在 [`ToolPort::authorize`]）。
-    async fn authorize_action(&self, calls: &mut [ToolPortCall]) {
-        self.port.authorize(&self.ctx, calls).await;
+    async fn authorize_action(&self, call: &mut ToolPortCall) {
+        self.port.authorize(&self.ctx, call).await;
     }
 
     /// 本轮的通用执行信封：轮号 / 轮根 / 归属 / 产物闸结论 / 宿主写口。
@@ -1226,30 +1289,25 @@ impl SessionDispatchPort {
         }
     }
 
-    /// 批次返回后关账（实体在 [`ToolPort::close_batch`]）。
-    fn close_tool_calls(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
-        self.port.close_batch(calls, outcomes);
+    /// 一笔返回后关账（实体在 [`ToolPort::close_call`]）。
+    fn close_tool_calls(&self, call: &ToolPortCall, outcome: Option<&CallOutcome>) {
+        self.port.close_call(call, outcome);
     }
 
     /// 用户结果（answer / reject）的**派出半**：不跑执行层，直接合成调用卡与结果卡。
     ///
     /// 与正常派发共用**同一条关账**（`begin_calls` 在调用方 + `finish` 的
-    /// `close_batch`）：回答是 `sent → response`，拒绝是 `denied → failed`（授权行已落
-    /// `authz.denied`，`close_batch` 按 `deny_why` 收尾）。
+    /// `close_call`）：回答是 `sent → response`，拒绝是 `denied → failed`（授权行已落
+    /// `authz.denied`，`close_call` 按 `deny_why` 收尾）。
     ///
-    /// 交回的是**结论**而不是节点：收尾半只认 `DispatchOutcome`（它按 `call_id` 关账），
+    /// 交回的是**结论**而不是节点：收尾半只认 `CallOutcome`（它按端口账配对），
     /// 而这一条路上的结论在用户点按钮那一刻就已经定了——没有执行层要等，所以
     /// [`ToolDispatch::begin`] 交出的 future 第一次 poll 就 Ready。
     ///
     /// 调用卡沿用原节点 id（`turn.tool_calls[0].id == target`）：重建面按
     /// `artifact.added` 的 `tool_call_id` 复刻同一张卡，实时面这里发的是**终态
     /// 整条**——两面的 id、参数文本与状态因此一致。
-    async fn wake_result_begin(
-        &self,
-        turn: &LlmTurn,
-        port_calls: &[ToolPortCall],
-    ) -> Option<DispatchOutcome> {
-        let call = port_calls.first()?;
+    async fn wake_result_begin(&self, turn: &LlmTurn, call: &ToolPortCall) -> Option<CallOutcome> {
         let (text, ok) = match &call.wake {
             Some(WakeIntent::Result { text, ok, .. }) => (text.clone(), *ok),
             _ => (String::new(), false),
@@ -1319,7 +1377,8 @@ impl SessionDispatchPort {
         for node in call_nodes.iter().chain(std::iter::once(&result)) {
             llm_emit_message(&self.sink, node.clone()).await;
         }
-        let outcome = DispatchOutcome {
+        let outcome = CallOutcome {
+            call: call.call.clone(),
             call_id,
             name,
             text,
@@ -1330,6 +1389,8 @@ impl SessionDispatchPort {
             wire_id,
             args,
             result_id,
+            effects: Vec::new(),
+            breaks: Vec::new(),
         };
         let mut produced = call_nodes;
         produced.push(result);
@@ -1460,15 +1521,14 @@ impl ToolDispatch for SessionDispatchPort {
         self.open_action(turn).await
     }
 
-    async fn authorize(&self, _store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
-        if calls.is_empty() {
-            // 恢复幕：草稿里没有批次，判断的是开幕前列队的那一笔唤醒调用。
-            if let Some(mut batch) = self.port.wake_batch() {
-                self.port.authorize_wake(&mut batch.calls);
-            }
-            return;
-        }
-        self.authorize_action(calls).await;
+    async fn prepare(&self, _store: &dyn Store<Event = Event>, turn: &LlmTurn) {
+        self.finalize_turn(turn).await;
+    }
+
+    async fn authorize(&self, _store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
+        // 恢复幕的唤醒调用由调用方从 [`ToolDispatch::wake`] 取回后放进草稿，与
+        // 模型交回的调用走同一条授权路径（行键就是这一笔的调用标识）。
+        self.authorize_action(call).await;
     }
 
     async fn wake(&self, _store: &dyn Store<Event = Event>) -> Option<WakeBatch> {
@@ -1479,52 +1539,67 @@ impl ToolDispatch for SessionDispatchPort {
         self: Arc<Self>,
         _store: Arc<dyn Store<Event = Event>>,
         turn: &LlmTurn,
-        port_calls: &mut [ToolPortCall],
+        call: &mut ToolPortCall,
     ) -> ToolBegin {
         // 唤醒的用户结果（回答 / 拒绝）不跑工具：节点与事实在这里合成。
         // 批准 / 重试 / 补充仍然走下面的正常派发路径——执行层只知道
         // 「有一次调用要跑」，不关心它是模型要的，还是用户点的。
-        if port_calls
-            .iter()
-            .any(|c| matches!(c.wake, Some(WakeIntent::Result { .. })))
-        {
-            self.port.begin_calls(port_calls);
+        if matches!(call.wake, Some(WakeIntent::Result { .. })) {
+            self.port.begin_calls(std::slice::from_mut(call));
             // 结论已经在手上：这个 future 第一次 poll 就 Ready（没有跨边界的往返，
             // 也就没有真正「在等」的那一圈）。
-            return match self.wake_result_begin(turn, port_calls).await {
-                Some(outcome) => ToolBegin::InFlight(Box::pin(async move { vec![outcome] })),
-                // 空批次：一格没落，也不登记在飞槽（派发器会把它显形）。
+            return match self.wake_result_begin(turn, call).await {
+                Some(outcome) => ToolBegin::InFlight(Box::pin(async move { outcome })),
+                // 空：一格没落，也不登记在飞槽（派发器会把它显形）。
                 None => ToolBegin::None,
             };
         }
 
-        // ⓪ 第三笔债的前半：为放行的调用落 `sent`。必须在执行层之前——
+        // ⓪ 第三笔债的前半：为这一笔落 `sent`。必须在执行层之前——
         //    `sent` 的语义是「已交给执行层」，而不是「工具已经开始跑」。
-        self.port.begin_calls(port_calls);
+        self.port.begin_calls(std::slice::from_mut(call));
 
-        // ①② 定格本轮正文、广播工具节点。**在派出这一侧**：它们在执行层之前就该
-        //    出现在界面上（卡片显示「运行中」），而不是等结果回来才补。
+        // ① 广播**这一笔**的工具节点。在派出这一侧：它在执行层之前就该出现在
+        //    界面上（卡片显示「运行中」），而不是等结果回来才补。正文定格是一次
+        //    每轮的（[`ToolDispatch::prepare`]），不在这里重复。
         let call_nodes = self.dispatch_window(turn).await;
 
         let this = self;
         let tool_calls = turn.tool_calls.clone();
+        let outcome_call = call.call.clone();
         ToolBegin::InFlight(Box::pin(async move {
-            this.run_batch(tool_calls, call_nodes).await
+            this.run_batch(tool_calls, call_nodes, outcome_call).await
         }))
+    }
+
+    fn land_derived(&self, effects: Vec<EffectInput>, breaks: Vec<&'static str>) {
+        let mut out = match self.out.lock() {
+            Ok(out) => out,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        out.derived.effects.extend(effects);
+        out.derived.breaks.extend(breaks);
+    }
+
+    fn interactive(&self) -> bool {
+        self.ctx
+            .get(symbio_sdk::keys::MODE)
+            .map(|mode| mode == "interactive")
+            .unwrap_or(false)
     }
 
     fn finish<'a>(
         &'a self,
         _store: &'a dyn Store<Event = Event>,
-        calls: &'a [ToolPortCall],
-        outcomes: &'a [DispatchOutcome],
+        call: &'a ToolPortCall,
+        outcome: Option<&'a CallOutcome>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            self.close_tool_calls(calls, outcomes);
-            // 产物落格：逐条结果交回执行体的 `land_only` 出口（含唤醒结果与没跑到的
+            self.close_tool_calls(call, outcome);
+            // 产物落格：这一笔结果交回执行体的 `land_only` 出口（含唤醒结果与没跑到的
             // 占位结果）——环不再自己装配产物载荷（P1b / DE-047 D-308）。
-            let env = self.round_env();
-            for outcome in outcomes {
+            if let Some(outcome) = outcome {
+                let env = self.round_env();
                 super::tools::land_outcome_async(
                     &env,
                     &self.parent,
@@ -1545,14 +1620,18 @@ impl ToolDispatch for SessionDispatchPort {
 /// 都是异步），而 `begin` 返回的那个 future 必须是 `'static`——把 `&self` 与 `&LlmTurn`
 /// 的借用留在窗口里，future 只带走**已经建好的节点**。
 impl SessionDispatchPort {
-    async fn dispatch_window(&self, turn: &LlmTurn) -> Vec<ChatNode> {
+    /// 一轮**一次**的正文收口：把本轮正文 / 推理定格并切节点。
+    ///
+    /// 逐笔派发让 [`Self::dispatch_window`] 每笔调用跑一次；正文属于那一轮模型往返，
+    /// 只能收口一次，因此单独的入口由 [`ToolDispatch::prepare`] 在开账之后调。
+    async fn finalize_turn(&self, turn: &LlmTurn) {
         let mut produced: Vec<ChatNode> = Vec::new();
 
-        // ① 定格本轮正文与推理（若有）：节点已由 UI 桥逐片广播，这里只迁状态并切节点。
-        //    没有正文（纯工具调用轮）就不建节点——空节点是噪声。
+        // 定格本轮正文与推理（若有）：节点已由 UI 桥逐片广播，这里只迁状态并切节点。
+        // 没有正文（纯工具调用轮）就不建节点——空节点是噪声。
         //
-        //    两条流**一起定格**：都由桥建节点、都在本轮结束时收口，分两处做只是把同一个
-        //    动作写两遍，且漏一处就有一条流永远转「流式中」（界面上表现为思考块卡住）。
+        // 两条流**一起定格**：都由桥建节点、都在本轮结束时收口，分两处做只是把同一个
+        // 动作写两遍，且漏一处就有一条流永远转「流式中」（界面上表现为思考块卡住）。
         let text_node = if turn.text.trim().is_empty() {
             None
         } else {
@@ -1587,14 +1666,22 @@ impl SessionDispatchPort {
             llm_emit_state(&self.sink, msg.clone()).await;
             produced.push(msg);
         }
+        self.out
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .nodes
+            .extend(produced);
+    }
 
-        // ② 工具调用节点：这条路径没有流式工具帧，由本处补建。
-        //    先以 `Streaming` 广播（工具还没跑，卡片应显示运行中），落库副本用终态。
-        let mut call_nodes =
-            llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls, &self.principal());
+    /// 广播**这一笔**的工具调用节点（这条路径没有流式工具帧，由本处补建）。
+    ///
+    /// 先以 `Streaming` 广播（工具还没跑，卡片应显示运行中），落库副本用终态。
+    async fn dispatch_window(&self, turn: &LlmTurn) -> Vec<ChatNode> {
         // 就地 detach：下面三处用同一份 `call_nodes`——广播帧、传给执行器作父查询源
         // （`process_tool_calls_in_env` 从它 clone 出运行态/终态帧，继承 detach 后的
         // parent_id），以及落库副本。一处收口，live↔存储自动锁步。
+        let mut call_nodes =
+            llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls, &self.principal());
         for n in call_nodes.iter_mut() {
             detach_if_flat(n, &self.root_id, self.presentation_tree);
         }
@@ -1603,7 +1690,6 @@ impl SessionDispatchPort {
             frame.status = Some(NodeStatus::Streaming);
             llm_emit_message(&self.sink, frame).await;
         }
-        self.out.lock().unwrap().nodes.extend(produced);
         call_nodes
     }
 
@@ -1617,7 +1703,8 @@ impl SessionDispatchPort {
         &self,
         tool_calls: Vec<symbio_kernel::llm::TurnToolCallInfo>,
         call_nodes: Vec<ChatNode>,
-    ) -> Vec<DispatchOutcome> {
+        call: port::Call,
+    ) -> CallOutcome {
         // ③ 分发（工具执行层：存档 / 钩子 / 审批 / 批尾收口全在里面）。
         //    父节点查询用刚广播的这批节点——它们与执行器要求的形状同源。
         //
@@ -1656,74 +1743,94 @@ impl SessionDispatchPort {
         }
         produced.extend(tool_msgs.iter().cloned());
         self.out.lock().unwrap().nodes.extend(produced);
-        // 三份收束派生事实出参收进取件面（`take_output`）——调用方在桥释放前取走。
-        {
-            let mut o = self.out.lock().unwrap();
-            o.derived.effects.extend(effects);
-            o.derived.breaks.extend(breaks);
-        }
 
         // ④ 映射为 core 的事实形状（运行器据此拼下一轮 prompt；`finish` 再交回执行体
-        //    落 `artifact.added`）。
-        let outcomes: Vec<DispatchOutcome> = tool_msgs
-            .iter()
-            .map(|m| {
-                let call_id = m.parent_id.clone().unwrap_or_default();
-                let name = m
-                    .tool_name()
-                    .map(str::to_string)
-                    .or_else(|| {
-                        tool_calls
-                            .iter()
-                            .find(|tc| tc.id.as_deref() == Some(call_id.as_str()))
-                            .and_then(|tc| tc.name.clone())
-                    })
-                    .unwrap_or_default();
-                // 节点结构三字段（载荷补全）：`wire_id` / `args` 从 ToolCall 节点取
-                //（结果子节点的 `parent_id` 就是它的节点 id；wire id 存 `tool_call_id`
-                // 字段、定稿参数存 `content`），`result_id` 是结果子节点自己的 id——
-                // 重建按这三个 id 复刻同一个工具卡片（与落库视图同源）。
-                let call_node = call_nodes
+        //    落 `artifact.added`）。逐笔执行 ⇒ 这一笔只有一条结果节点；执行层没交回
+        //    结果（理论上由未执行收口补占位）时按 `NOT_EXECUTED` 收口，环据此写
+        //    `failed`——「未收到 response 的债」就是终局判据。
+        let mut outcome = match tool_msgs.iter().find(|m| {
+            m.parent_id.as_deref() == Some(call.id.as_str())
+                || tool_calls
                     .iter()
-                    .chain(parent_updates.iter())
-                    .find(|n| n.id == call_id && n.is_tool_call());
-                DispatchOutcome {
-                    call_id,
-                    name,
-                    text: m.content.as_ref().map(|c| c.to_text()).unwrap_or_default(),
-                    ok: m
-                        .meta
-                        .as_ref()
-                        .and_then(|meta| meta.get("success"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(true),
-                    needs_user_action: m.is_interaction()
-                        && m.status == Some(NodeStatus::WaitingUserAction),
-                    // 卡片载荷与原因码：随事实入格，恢复（`resume`）据它复现那张卡。
-                    // 只有等待用户的结果节点才带（其余为 `None` / 空串）。
-                    prompt: m.meta.as_ref().and_then(|meta| meta.get("prompt")).cloned(),
-                    failure_kind: m
-                        .meta
-                        .as_ref()
-                        .and_then(|meta| meta.get("failure_kind"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    wire_id: call_node
-                        .and_then(|n| n.tool_call_id.clone())
-                        .unwrap_or_default(),
-                    args: call_node
-                        .and_then(|n| n.content.as_ref().map(|c| c.to_text()))
-                        .unwrap_or_default(),
-                    result_id: m.id.clone(),
-                }
-            })
-            .collect();
-        // 关账不在这里（`D-124` 订正 1）：它是**下一个环步**的事
-        // （`await-tool` → [`ToolDispatch::finish`]），放进去就等于把派出与收应答
-        // 又合回一个动作窗口。结果映射仍在这一侧：`call_id` 是执行层交回的权威 id，
-        // 关账要用它。
-        outcomes
+                    .any(|tc| tc.id.as_deref() == m.parent_id.as_deref())
+        }) {
+            Some(m) => map_outcome(m, &call, &tool_calls, &call_nodes, &parent_updates),
+            None => CallOutcome {
+                call,
+                failure_kind: NOT_EXECUTED.to_string(),
+                call_id: tool_calls
+                    .first()
+                    .and_then(|tc| tc.id.clone())
+                    .unwrap_or_default(),
+                ..CallOutcome::empty()
+            },
+        };
+        // 效果 / 熔断出参随这一笔走（不写进共用取件面）：环在整轮收口时按**调用顺序**
+        // 交回，并发完成的次序因此不会改变事实顺序。
+        outcome.effects = effects;
+        outcome.breaks = breaks;
+        outcome
+    }
+}
+
+/// 结果节点 → 运行器事实形状（逐笔：一笔一条）。
+fn map_outcome(
+    m: &ChatNode,
+    call: &port::Call,
+    tool_calls: &[symbio_kernel::llm::TurnToolCallInfo],
+    call_nodes: &[ChatNode],
+    parent_updates: &[ChatNode],
+) -> CallOutcome {
+    let call_id = m.parent_id.clone().unwrap_or_default();
+    let name = m
+        .tool_name()
+        .map(str::to_string)
+        .or_else(|| {
+            tool_calls
+                .iter()
+                .find(|tc| tc.id.as_deref() == Some(call_id.as_str()))
+                .and_then(|tc| tc.name.clone())
+        })
+        .unwrap_or_default();
+    // 节点结构三字段（载荷补全）：`wire_id` / `args` 从 ToolCall 节点取
+    //（结果子节点的 `parent_id` 就是它的节点 id；wire id 存 `tool_call_id`
+    // 字段、定稿参数存 `content`），`result_id` 是结果子节点自己的 id——
+    // 重建按这三个 id 复刻同一个工具卡片（与落库视图同源）。
+    let call_node = call_nodes
+        .iter()
+        .chain(parent_updates.iter())
+        .find(|n| n.id == call_id && n.is_tool_call());
+    CallOutcome {
+        call: call.clone(),
+        call_id,
+        name,
+        text: m.content.as_ref().map(|c| c.to_text()).unwrap_or_default(),
+        ok: m
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("success"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        needs_user_action: m.is_interaction() && m.status == Some(NodeStatus::WaitingUserAction),
+        // 卡片载荷与原因码：随事实入格，恢复（`resume`）据它复现那张卡。
+        // 只有等待用户的结果节点才带（其余为 `None` / 空串）。
+        prompt: m.meta.as_ref().and_then(|meta| meta.get("prompt")).cloned(),
+        failure_kind: m
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("failure_kind"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        wire_id: call_node
+            .and_then(|n| n.tool_call_id.clone())
+            .unwrap_or_default(),
+        args: call_node
+            .and_then(|n| n.content.as_ref().map(|c| c.to_text()))
+            .unwrap_or_default(),
+        result_id: m.id.clone(),
+        effects: Vec::new(),
+        breaks: Vec::new(),
     }
 }
 
@@ -1732,7 +1839,6 @@ impl SessionDispatchPort {
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
 // panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::take_output: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::dispatch_window: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::run_batch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::wake_result_begin: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 
