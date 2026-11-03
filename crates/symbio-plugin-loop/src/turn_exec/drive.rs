@@ -239,14 +239,6 @@ pub(crate) enum CloseEnd {
     Settled,
 }
 
-/// 旧入口：只转发到 [`crate::turn_driver::drive`]（本文件不再自己决定步骤）。
-pub(crate) async fn drive(
-    start: DriveStart<'_>,
-    actors: &'static [crate::loop_rows::ActorEntry],
-) -> Result<DriveEnd, TurnExecExit> {
-    crate::turn_driver::drive(start, actors).await
-}
-
 // ── 幕的被动机制（选择与收束判定在 `turn_driver`）──────────────────────
 
 

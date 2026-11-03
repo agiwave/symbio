@@ -5,8 +5,8 @@
 //!
 //! ```text
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
-//! 步骤1 gate_turn              ← 退出条件（唯一判定点）
-//! 步骤2 turn_exec::drive       ← 薄转发到 turn_driver::drive（外层环，P2-6a）
+//! 步骤1 中止边界检查        ← 事实判据，不再是决策函数
+//! 步骤2 turn_driver::drive    ← 外层环：选债 / 派发 / 收束判定（P2-6a）
 //! 后步骤 无（直路只能由 return 离开，全部经 finish_turn 收尾）
 //! ```
 //!
@@ -53,7 +53,7 @@ use crate::session_port;
 pub(crate) use self::drive::{land_dispatch, land_opening};
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{
-    request_actor_spec, request_source_principal, Gate, SessionContext, TurnExit, TurnRequest,
+    request_actor_spec, request_source_principal, SessionContext, TurnExit, TurnRequest,
     TurnState,
 };
 pub(crate) use self::turn::{persist_turn, settle_reasoning};
@@ -258,17 +258,17 @@ pub async fn run_chat_loop(
         }
     }
 
-    // ── 步骤 1：闸门（退出条件，唯一判定点）───────────────────────────
-    //
-    // 收口前，这里散落 4 处 `if abort_flag { ... return }`（其中两处相邻重复），
-    // 各自重写收尾三件套。
-    if let Gate::Exit(exit) = gate_turn(&turn) {
-        return finish_turn(&context, &sink, &turn, exit).await;
+    // ── 步骤 1：退出条件（事实 / 租约判据，不再是决策函数）──────────────────
+    // 不冒泡：上一轮 Turn 已定稿落库，冒泡会让消费循环的 `persist_failure` 把成功
+    // 的 Turn 误回滚为 Failed。推理前后（在途 Turn 尚未定稿）的中止才走
+    // [`TurnExit::Aborted`]。
+    if turn.abort.is_aborted() {
+        return finish_turn(&context, &sink, &turn, TurnExit::AbortedAtBoundary).await;
     }
 
     // ── 步骤 2：唯一一个环（`D-222` 裁决 5）─────────────────────────────
     //
-    // 开幕、轮首四行、接缝、内环、收幕与幕间接续全在 [`super::turn_exec::drive`]
+    // 开幕、轮首四行、接缝、内环、收幕与幕间接续全在 [`super::turn_driver::drive`]
     // 里：它读事实选最小可还债，五道守卫各只有一份，幕与幕在同一次调用里接续。
     // 本文件不判「下一步是哪一步」，只把环的结局映射成 [`TurnExit`]。
     //
@@ -281,7 +281,7 @@ pub async fn run_chat_loop(
     //
     // 结果先落成变量再 `match`：`Control` 里装的是 `&mut context` / `&mut turn`，
     // 作为 scrutinee 的临时值会活到整个 `match`——答话那一臂要再借它们一次。
-    let driven = super::turn_exec::drive(
+    let driven = super::turn_driver::drive(
         super::turn_exec::DriveStart::Control(Box::new(super::turn_exec::Control {
             orchestrator,
             orchestrator_arc: &orchestrator_arc,
@@ -407,46 +407,6 @@ pub(crate) async fn land_answered_turn(
     }
 }
 
-/// 主循环顶部的**唯一闸门**：退出条件。
-///
-/// 收口前，循环顶部与推理前后散落 4 处 `if abort_flag { ... return }`（其中两处
-/// 相邻重复，中间只隔一行日志），每处各自重写收尾三件套。
-/// 现在：**退出条件只在本函数判定一次**，收尾动作只在 [`finish_turn`] 出现一次。
-///
-/// ## 「启动条件」这一态为什么没了
-///
-/// 形状上闸门原本三态：放行 / **等工具齐** / 退出。「等工具齐」判的是本轮
-/// 「已派发、尚未产出结果」的工具调用 id 集合，语义是「多个工具调用全部结束后才唤醒
-/// 主循环，不完整不唤醒」。工具现在在 `turn_exec::drive` **内部**跑完
-/// （`SessionDispatchPort` 同步分发、批批接上），没有任何代码路径会往一个恒空的集合里
-/// 登记 id——判它只会得到一条恒不命中的分支。
-/// 「不完整不唤醒」这条不变量换了承担者：**运行器的环体只在把本批
-/// 结果接进 `exchange` 之后才发下一次请求**（`turn_runner::stream`），
-/// 结构上不可能带着半个批次出门。
-///
-/// ## 工具轮软上限为什么也不在这里判
-///
-/// 闸门能读的只有本轮的请求数，而**工具轮数在运行器的环体里**（`turn_runner.rs` 的
-/// `tool_round`）。挂在这里判的是一个恒 0 的字段，v2 下永不命中——那条配置项与它的
-/// 退役裁决见 [D-074](../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")；将来真要这道上限，位置在「结果接进 `exchange`」与
-/// 「轮内注入」之间。
-///
-/// ⚠️ 顺带记下：**「历史中所有 ToolCall 都有结果子节点」从来不是判据**——
-/// 「ToolCall 无结果」是**合法状态**（交互模式下工具批被用户审批中断时，本批剩余
-/// ToolCall 会被有意留空，由请求视图层 `flatten_chat_messages`
-/// （`crates/symbio-plugin-model/src/message_builder.rs`）合成占位 tool 结果喂回模型）。
-/// 按历史判定会让 approve/reject 恢复后的续写被永久挡住。
-fn gate_turn(turn: &TurnState) -> Gate {
-    // ── 退出条件：用户中止（边界检查点）─────────────────────────────────
-    // 循环顶部的中止检查点**不冒泡**：上一轮 Turn 已定稿落库，
-    // 冒泡会让消费循环的 `persist_failure` 把成功的 Turn 误回滚为 Failed。
-    // 推理前后（在途 Turn 尚未定稿）的中止才走 [`TurnExit::Aborted`]。
-    if turn.abort.is_aborted() {
-        return Gate::Exit(TurnExit::AbortedAtBoundary);
-    }
-
-    Gate::Proceed
-}
 
 /// 主循环的**唯一收尾点**：增量落库 → 结局值。
 ///

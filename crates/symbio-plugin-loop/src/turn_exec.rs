@@ -133,7 +133,7 @@ pub(crate) use self::assemble::{assemble_turn, Assembled};
 // 这里的收束口径（只认 final / fallback）与 C4（兼认产物）刻意不同，见函数文档。
 pub(crate) use self::assemble::last_open_turn;
 pub(crate) use self::call::{open_turn, OpenRun, Running};
-pub(crate) use self::drive::{drive, Control, DriveEnd, DriveStart};
+pub(crate) use self::drive::{Control, DriveEnd, DriveStart};
 // 夹具入口（幕已开好，只驱动）：生产不用它，只有测试的两个夹具从 crate 外借道。
 // `stage_runtime` 是幕首之后那一半的同形入口——夹具自己备幕首，不该另抄一份
 // 「分发方与汇报落地面怎么从装配束里造」。

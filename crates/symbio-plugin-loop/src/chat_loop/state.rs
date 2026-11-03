@@ -309,17 +309,7 @@ pub(crate) enum TurnExit {
     ResumeDone,
 }
 
-/// 主循环顶部的唯一闸门：**退出条件**。
-///
-/// 形状原本是三态（放行 / 等工具 / 退出），"等工具"那一态随 v1 外壳的簿记一起坍缩：
-/// 见 [`gate_turn`] 的文档。
-#[derive(Debug)]
-pub(crate) enum Gate {
-    /// 条件齐备 → 进入本轮准备与推理。
-    Proceed,
-    /// 必须退出，携带原因。
-    Exit(TurnExit),
-}
+
 
 /// ## 为什么没有 `new()`
 ///

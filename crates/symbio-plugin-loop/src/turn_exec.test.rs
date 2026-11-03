@@ -379,7 +379,7 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         &mut turn,
         &turn_req,
     );
-    match super::drive(
+    match crate::turn_driver::drive(
         super::DriveStart::Ready(Box::new(super::ReadyStage {
             stage,
             head,
@@ -1032,7 +1032,7 @@ async fn control_harness() -> ControlHarness {
 
 /// 走生产入口跑这一幕（开幕 / 选债 / 收幕都在环里）。
 async fn drive_control(h: &mut ControlHarness) -> Result<super::DriveEnd, super::TurnExecExit> {
-    super::drive(
+    crate::turn_driver::drive(
         super::DriveStart::Control(Box::new(super::Control {
             orchestrator: &h.orchestrator,
             orchestrator_arc: &h.orchestrator,
