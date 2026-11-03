@@ -174,7 +174,7 @@ async fn decide_by_model(
     session_id: String,
     plan: DecisionPlan,
 ) -> Decision {
-    // ① 事实源：没有它就没有账可记。持久轮的事实源由 `begin_drive` 保证（临时会话
+    // ① 事实源：没有它就没有账可记。持久轮的事实源由 `open-turn` 保证（临时会话
     //    在那里就被拦下），这一段只是把「拦下之前」的形态说清楚。
     let Some(store) = context.session.facts() else {
         symbio_plugin_api::plugin_warn!("session", "[Classify] 本会话没有事实源，判决往返不入账");

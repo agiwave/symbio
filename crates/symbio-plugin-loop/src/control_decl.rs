@@ -800,7 +800,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // 唤醒请求本身——不看请求面，执行行会在派发之前抢先跑一次模型往返。
     //
     // 判据按请求的 `seq` 取「之后有没有终局」，不按幕锚：唤醒请求落在幕锚
-    // **之前**（恢复幕的锚是 `begin_drive` 才落的那条阶段事实）。
+    // **之前**（恢复幕的锚是 `resume-turn` 才落的那条阶段事实）。
     let request_open = !closed
         && events.iter().any(|req| {
             req.turn == turn
@@ -1000,7 +1000,7 @@ pub(crate) const MAX_STAGE_ROUNDS: u64 = 3;
 ///
 /// 两个读者：幕间判据（[`turn_next_round`]）与 `chat_loop::turn::persist_turn`
 /// （截断告警该说自动续写还是该说已耗尽）。两处读的是同一个数——本幕的轮次由
-/// `begin_drive` 落成事实、由 `turn_head` 折成一格、由 `TurnState::request_round`
+/// `open-turn` 落成事实、由 `turn_head` 折成一格、由 `TurnState::request_round`
 /// 拿着用，三处同一个值（不是三份计数）。
 pub(crate) fn has_next_round(round: u64) -> bool {
     round < MAX_STAGE_ROUNDS

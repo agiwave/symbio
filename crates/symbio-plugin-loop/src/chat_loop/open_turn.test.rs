@@ -13,7 +13,7 @@ use super::super::super::test_support::{
     default_settings, loop_session, turn_spec, FakeSessionPort,
 };
 use super::super::state::{SessionContext, TurnRequest, TurnState};
-use super::begin_drive;
+use super::{continue_stage, open, Anchor, OpeningKind};
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::store::{EventStore, Store};
 use symbio_plugin_api::events::{EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE};
@@ -59,6 +59,8 @@ fn request() -> TurnRequest {
         // 请求级覆盖：配置事实记的是**生效值**，不是配置默认值。
         auto_compress: false,
         load_history: true,
+        // 本请求带一条新用户发言（`open-turn` 的 `last_user_message` 读的是同一份）。
+        new_input: true,
         system_prompt: None,
     }
 }
@@ -76,10 +78,18 @@ fn a_new_drive_lands_user_config_and_round_before_any_decision() {
     let (facts, context) = context(vec![user_node("m1", "你好")]);
     let mut turn = TurnState::default();
 
-    let drive = begin_drive(&context, &mut turn, &request(), None).expect("新轮开得了");
+    let opened = open(
+        &context,
+        &mut turn,
+        &request(),
+        OpeningKind::NewTurn,
+        Anchor::default(),
+        "user",
+    )
+    .expect("新轮开得了");
 
     assert_eq!(turn.turn_no, 0);
-    assert_eq!(drive.user_text, "你好");
+    assert_eq!(opened.user_text, "你好");
     assert_eq!(turn.drive_seq, turn.user_seq, "新轮的幕锚就是用户格 seq");
 
     let all = facts.range(Seq::new(0));
@@ -148,7 +158,15 @@ fn the_turn_number_continues_across_a_snapshot() {
         .expect("快照");
 
     let mut turn = TurnState::default();
-    begin_drive(&context, &mut turn, &request(), None).expect("新轮开得了");
+    open(
+        &context,
+        &mut turn,
+        &request(),
+        OpeningKind::NewTurn,
+        Anchor::default(),
+        "user",
+    )
+    .expect("新轮开得了");
 
     assert_eq!(turn.turn_no, 1, "轮号接着水位走");
     assert!(
@@ -183,7 +201,15 @@ fn a_resume_drive_reuses_the_open_turn_without_a_new_user_fact() {
         .expect("等待轮的用户格");
 
     let mut turn = TurnState::default();
-    begin_drive(&context, &mut turn, &request(), Some("approve")).expect("续写幕开得了");
+    open(
+        &context,
+        &mut turn,
+        &request(),
+        OpeningKind::Resume("approve"),
+        Anchor::default(),
+        "system",
+    )
+    .expect("续写幕开得了");
 
     assert_eq!(turn.turn_no, 0, "续写记在原轮上");
     assert_eq!(
@@ -232,9 +258,25 @@ fn a_second_resume_in_the_same_turn_gets_its_own_anchor() {
         .expect("等待轮的用户格");
 
     let mut turn = TurnState::default();
-    begin_drive(&context, &mut turn, &request(), Some("approve")).expect("第一幕");
+    open(
+        &context,
+        &mut turn,
+        &request(),
+        OpeningKind::Resume("approve"),
+        Anchor::default(),
+        "system",
+    )
+    .expect("第一幕");
     let first_anchor = turn.drive_seq;
-    begin_drive(&context, &mut turn, &request(), Some("answer")).expect("第二幕");
+    open(
+        &context,
+        &mut turn,
+        &request(),
+        OpeningKind::Resume("answer"),
+        Anchor::default(),
+        "system",
+    )
+    .expect("第二幕");
     let second_anchor = turn.drive_seq;
 
     assert_ne!(first_anchor, second_anchor, "两幕的锚不同");
@@ -276,7 +318,15 @@ fn a_second_new_drive_gets_the_next_turn_number() {
         .expect("先开一轮");
 
     let mut turn = TurnState::default();
-    begin_drive(&context, &mut turn, &request(), None).expect("第二轮开得了");
+    open(
+        &context,
+        &mut turn,
+        &request(),
+        OpeningKind::NewTurn,
+        Anchor::default(),
+        "user",
+    )
+    .expect("第二轮开得了");
     assert_eq!(turn.turn_no, 1, "轮号接着已有用户格数走");
     assert_eq!(
         count_user_messages(&facts.range(Seq::new(0)), &CHAT_VOCAB, &MESSAGE_VOCAB),
@@ -286,6 +336,50 @@ fn a_second_new_drive_gets_the_next_turn_number() {
         facts.range(Seq::new(0)).iter().any(|e| e.event_id == "u-1"),
         "第二次开轮落 u-1，不撞 u-0"
     );
+}
+
+/// 重试子支（`RetrySubtree`）：开新轮，但把旧根登记成本幕新根的另一支。
+///
+/// 钉三件事：`into` 是**本幕新开的根**（旧根只是 `of`）；分支格是断言类，溯源
+/// 指向本轮用户格（I2）；actor 取本轮主体。分支事实由 `open-turn` 行落格，不再
+/// 由驱动在接缝处按一份寄存的旧根补落（P2-1 删掉了那份寄存）。
+#[test]
+fn a_retry_subtree_lands_one_branch_fact_for_the_new_root() {
+    use symbio_plugin_api::events::EVENT_TURN_BRANCH;
+
+    let (facts, context) = context(vec![user_node("m1", "再来一次")]);
+    let mut turn = TurnState::default();
+
+    open(
+        &context,
+        &mut turn,
+        &request(),
+        OpeningKind::NewTurn,
+        Anchor {
+            branch_of: Some("t-old".to_string()),
+            ..Default::default()
+        },
+        "user",
+    )
+    .expect("重试开得了");
+
+    let root_id = turn
+        .branch_root()
+        .expect("事实切片里有本幕的根（组内标注要用）");
+    let branch: Vec<Event> = facts
+        .range(Seq::new(0))
+        .into_iter()
+        .filter(|e| e.kind == EVENT_TURN_BRANCH)
+        .collect();
+    assert_eq!(branch.len(), 1, "一次重试只开一支：{branch:?}");
+    assert_eq!(branch[0].payload["of"], "t-old");
+    assert_eq!(branch[0].payload["into"], root_id.as_str());
+    assert_eq!(
+        branch[0].produced_by,
+        Some(turn.user_seq),
+        "分支格是断言类：溯源必须指向本轮用户格"
+    );
+    assert!(!branch[0].actor.is_empty(), "actor 取本轮主体，不留空");
 }
 
 /// 续幕（`D-222` 裁决 2）：不新开用户格、不换轮号；本幕的锚是它自己的 `round` 格。
@@ -346,11 +440,15 @@ fn a_continuation_stage_reuses_the_turn_and_anchors_on_its_own_round_fact() {
         ..TurnState::default()
     };
 
-    let drive = super::continue_drive(&context, &mut turn, &request()).expect("续幕开得了");
+    continue_stage(&context, &mut turn, &request()).expect("续幕开得了");
 
     assert_eq!(turn.turn_no, 0, "续幕记在原轮上");
     assert_eq!(turn.request_round, 1, "轮次从事实读：下一幕是第 1 轮");
-    assert_eq!(drive.user_text, "写长一点", "用户发言沿用本轮那一句");
+    assert_eq!(
+        super::current_user_text(&context),
+        "写长一点",
+        "用户发言沿用本轮那一句"
+    );
 
     let all = facts.range(Seq::new(0));
     assert_eq!(

@@ -223,7 +223,7 @@ async fn wording_round_trip(
     snapshot: &RunSnapshot,
 ) -> Option<WordingReply> {
     let Some(store) = context.session.facts() else {
-        // 临时会话没有事实源 ⇒ 没有账可记，照旧说话（持久轮已由 `begin_drive` 拦过）。
+        // 临时会话没有事实源 ⇒ 没有账可记，照旧说话（持久轮已由 `open-turn` 拦过）。
         return compose_text(orchestrator, ctx, context, verdict, snapshot).await;
     };
     // 步名带**请求轮次**：一幕可以有多次往返（auto 续写），每次是一笔独立的账

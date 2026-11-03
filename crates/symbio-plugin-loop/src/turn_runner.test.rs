@@ -3397,7 +3397,7 @@ mod tool_round_tests {
             tool: "vdfs_read",
             args: &serde_json::json!({ "path": "a.md", "approved": true }),
             turn_root: "root-1",
-            intent: &super::super::super::tool_dispatch::WakeIntent::Execute,
+            wake: &super::super::super::tool_dispatch::Wake::Execute,
         })
         .expect("唤醒请求落格");
         assert!(

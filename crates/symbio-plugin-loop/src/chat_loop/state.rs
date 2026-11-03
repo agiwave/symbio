@@ -162,6 +162,11 @@ pub(crate) struct SessionContext {
 pub(crate) struct TurnRequest {
     pub(crate) auto_compress: bool,
     pub(crate) load_history: bool,
+    /// 本请求是否带**新的用户发言**（`single_message` 是否在请求里）。
+    ///
+    /// 判决与委派 Q1 的开关：`resume` / `retry` 重跑只有旧用户格，没有新发言，
+    /// Q1 不下结论。
+    pub(crate) new_input: bool,
     /// 请求显式给的系统提示词（`None` = 只有注册段；不吞掉注册段，见
     /// `chat_loop::inputs::resolve_system_prompt`）
     pub(crate) system_prompt: Option<String>,
@@ -175,6 +180,7 @@ impl TurnRequest {
             auto_compress: req.auto_compress.unwrap_or(auto_compress_default),
             // 请求级默认（该字段无配置对应项），语义为"缺省即加载历史"。
             load_history: req.load_history.unwrap_or(true),
+            new_input: req.single_message.is_some(),
             system_prompt: req.system_prompt.clone(),
         }
     }
@@ -209,16 +215,6 @@ pub(crate) struct TurnState {
     pub(crate) request_round: usize,
     /// 增量落库锚点：本轮已落库到的下标（每轮开始时重置为本轮起始消息数）
     pub(crate) last_saved: usize,
-    /// 本轮**输入**（消息 id + 正文），在 `single_message` 被消费之前锚定。
-    ///
-    /// 锚定而不现取，是因为 `context.messages` 装着**整段历史**（`load_history = true`
-    /// 时每轮都重新加载）：从里面找「本轮用户发言」找到的永远是首轮那句。消费方是
-    /// 判决（`first_utterance`）与委派段的 Q1（`inputs.rs`）——共用同一份锚，
-    /// 两处才不会各读各的。
-    ///
-    /// `None` = 本请求没有用户新发言（`resume` 重跑等）——判决无从谈起，
-    /// Q1 也不下结论（见 `delegate.rs`）。
-    pub(crate) input_utterance: Option<(String, String)>,
     /// 本轮的**长期记忆检索读数**（`memory_events::recall_view` → 能力包的检索面）。
     ///
     /// 类型是检索面自己的结构值（`symbio_plugin_api::retrieval::Retrieval`）而不是
@@ -282,31 +278,11 @@ pub(crate) struct TurnState {
     /// 本幕的 `now`：**唤醒事实的 `ts`**（判据 12 / DE-015 §2.1）。
     ///
     /// 幕内所有 `owed` / `next` / 带时间的视图都用它，不再各读一次墙钟——否则
-    /// 同一个日志重放两次会走两条路。幕首由 [`super::drive::begin_drive`] 从刚
+    /// 同一个日志重放两次会走两条路。幕首由 [`super::open_turn`] 从刚
     /// 落格的那条事实读回；0 = 尚未开幕（与 `turn_no` 的默认值同义）。
     pub(crate) now_ms: i64,
     /// 本幕读到的事实切片（阶段「已做」与配置快照的唯一输入）。
     pub(crate) facts: Vec<symbio_kernel::event::Event>,
-    /// 续写幕复用的 Turn 根节点 id（d）。
-    ///
-    /// 唤醒请求发生在开幕之前，幕首（`turn_exec::drive` 的 `open_stage`）按它决定
-    /// 「要不要新开一个根」：
-    /// 有值 ⇒ 复用被续写轮的根（结果卡挂回原来那棵树），并且**不重发**流式占位
-    /// ——那个骨架早在本轮首幕就发过了。`None` = 新轮，照常新开。
-    pub(crate) resume_root: Option<String>,
-    /// 续写幕要**替换**的旧结果子节点（失败结果 / 等待用户的结果）。
-    ///
-    /// 新结果随执行器交回，落库之前把旧的删掉：留着会让同一笔调用出现两条结果，
-    /// 重建面（只按 `artifact.added` 复刻新结果）与实时面因此各说一套。删除放在
-    /// 派发**成功之后**（`chat_loop` 的并入处），派发失败时旧卡仍在。
-    pub(crate) resume_old_child: Option<String>,
-    /// `RetrySubtree` 交回来的**被重试那一支的 Turn 根 id**（其余动作为 `None`）。
-    ///
-    /// 它是「这一幕是新支」的唯一记号：`prepare-turn` 备好输入、因而握着新根 id 时，
-    /// 按它落一条 `turn.branch`（`{of, into}`）。旧支当场从「当前读的那一支」降成候选——
-    /// 实时面由收尾按那一格补发标注帧，不必等整份重读。
-    /// 取走（`take()`）即消费：幕间续写的第二幕不再另开一支。
-    pub(crate) retry_of: Option<String>,
 }
 
 impl TurnState {
@@ -324,6 +300,21 @@ impl TurnState {
             })
             .filter_map(|e| e.payload.get("into").and_then(|v| v.as_str()))
             .next_back()
+            .map(str::to_string)
+    }
+
+    /// 本轮用户格（`user_seq`）的正文——判决与委派 Q1 的唯一输入。
+    ///
+    /// 这是**事实**上的那一句，不是一份锚：`load_history = true` 时模型消息列表
+    /// 装着整段历史，按 `user_seq` 取回才逐轮指向本轮那句（e2e t29）。
+    pub(crate) fn user_text(&self) -> Option<String> {
+        self.facts
+            .iter()
+            .find(|e| {
+                e.seq.map(|s| s.value() == self.user_seq).unwrap_or(false)
+                    && e.kind == symbio_plugin_api::events::EVENT_USER_MESSAGE
+            })
+            .and_then(|e| e.payload.get("text").and_then(|v| v.as_str()))
             .map(str::to_string)
     }
 }

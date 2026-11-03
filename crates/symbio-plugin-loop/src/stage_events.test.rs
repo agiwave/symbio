@@ -62,6 +62,7 @@ fn classify_fact_carries_reason_and_source() {
             model_calls: 0,
             recalled: Vec::new(),
             resumed: false,
+            replaces: None,
         }
     );
 
@@ -91,6 +92,7 @@ fn classify_fact_carries_reason_and_source() {
             model_calls: 0,
             recalled: Vec::new(),
             resumed: false,
+            replaces: None,
         }
     );
 }

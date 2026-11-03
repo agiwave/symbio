@@ -47,7 +47,7 @@
 //!
 //! 首次查询时经 [`load`] 把六张注册表经 `Builder::declare` 一次交齐并 `seal`，**任何缺口都是
 //! 拒绝**（DE-015 §3.4 末句「装载失败即拒绝启动，不许部分成功」）：缺口逐条记 error 后
-//! 装载返回 `None`，[`table`] 随之恒 `Err`。开幕（`chat_loop::drive::begin_drive`）先要
+//! 装载返回 `None`，[`table`] 随之恒 `Err`。开幕（`chat_loop::open_turn`）先要
 //! 表再干活，拿不到表就带着错误退出——不存在「半张表继续跑」的形态。
 
 use std::sync::{Arc, LazyLock};
@@ -420,7 +420,7 @@ const ACTOR_SEAM: ActorDecl = ActorDecl {
 ///
 /// 两格都是**开一幕**那一套的写点：`turn.stage` 是新幕的 `round` 格（它是 `until`，
 /// 同时是新幕的锚），`session.config` 是当轮生效配置的重落（与新幕开幕逐字同形）。
-/// 它不写任何领域格——续幕要做的事在动作里（`chat_loop::drive::continue_drive`）。
+/// 它不写任何领域格——续幕要做的事在动作里（`chat_loop::open_turn::continue_stage`）。
 const ACTOR_CONTINUE: ActorDecl = ActorDecl {
     name: CONTINUE,
     // 只落两格，不调模型：快速档。

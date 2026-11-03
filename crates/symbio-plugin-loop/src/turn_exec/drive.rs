@@ -90,8 +90,8 @@ pub(crate) struct Control<'a> {
     pub(crate) req: &'a TurnRequest,
     /// 本请求带的那条用户消息（首幕追加进上下文；续幕为 `None`）。
     pub(crate) single_message: Option<ChatNode>,
-    /// 唤醒动作名（`None` = 新开一轮）。
-    pub(crate) resume_kind: Option<&'a str>,
+    /// 本次请求的恢复动作（`None` = 新开一轮）。
+    pub(crate) resume: Option<symbio_sdk::chat::chat_node::ResumeRequest>,
 }
 
 /// 夹具交下来的**已经开好的幕**（`begin` 之后、驱动之前的那一刻）。
@@ -515,7 +515,7 @@ async fn open_stage(
         turn,
         req,
         single_message,
-        resume_kind,
+        resume,
     } = control;
     // ── 幕首 ①：本轮上下文（窗口生效；心跳可关历史）──────────────────────
     //
@@ -543,15 +543,38 @@ async fn open_stage(
 
     // ── 幕首 ②：开一幕的格（用户格 / 恢复格 / 轮次格），定下三个身份 ──────
     //
-    // 格先于任何判决入格：判决只读事实，配置、轮号、幕锚都在这一处定下，后续阶段
-    // 不再各自数一遍。续幕不在这里落格——它那一条已由 `continue-turn` 落过。
+    // 幕锚交给 `open-turn` / `resume-turn` 两行（D-313 P2-1）：驱动只选行、收
+    // [`Opened`]，不按分支写事实。续幕不在这里落格——它那一条已由 `continue-turn`
+    // 的执行体落过。
+    let mut opened = super::super::chat_loop::open_turn::Opened::default();
+    if first_stage {
+        let rows = super::super::chat_loop::open_turn::select(resume.as_ref(), true);
+        for row in rows {
+            let mut octx = super::super::chat_loop::open_turn::OpeningCtx {
+                context,
+                turn,
+                req,
+                session: &context.session,
+                request_ctx: ctx,
+                resume: resume.as_ref(),
+                out: &mut opened,
+            };
+            (row.action)(&mut octx).await.map_err(to_exit)?;
+            symbio_plugin_api::plugin_info!(
+                "session",
+                "[Turn] 幕锚行 {} 落格 [{}] (turn={})",
+                row.name,
+                row.writes.join(","),
+                opened.root_id.as_deref().unwrap_or("-")
+            );
+        }
+    }
     let user_text = if first_stage {
-        let opened = super::super::chat_loop::begin_drive(context, turn, req, resume_kind.take());
-        to_exit(opened)?.user_text
+        opened.user_text
     } else {
         // 本幕的锚与轮次都在 `turn` 上（`continue-turn` 的执行体刚写完）；用户发言
         // 从同一份镜像取（与首幕同一个判据：最近一条用户消息）。
-        super::super::chat_loop::drive::current_user_text(context)
+        super::super::chat_loop::open_turn::current_user_text(context)
     };
     symbio_plugin_api::plugin_info!(
         "session",
@@ -568,8 +591,8 @@ async fn open_stage(
     // 续写幕复用被续写轮的根（骨架已经发过，再发会把已完成的卡打回运行态）；
     // 新幕现分配。「定 id」在幕首（`begin` 的输入），「把骨架发给流式桥」仍在
     // 接缝行（`prepare-turn`，压缩之后：压不动时不该留半截 Turn 根）。
-    let (root_id, fresh_root) = match turn.resume_root.take() {
-        Some(root) => (root, false),
+    let (root_id, fresh_root) = match opened.root_id.take() {
+        Some(root) => (root, opened.fresh_root),
         None => (symbio_sdk::llm::turn::llm_short_id(), true),
     };
     // 轮内注入：把本会话的收件箱抽干口交给工具循环，让「用户中途插话」
@@ -639,7 +662,7 @@ async fn open_stage(
 /// 幕首之后的那一半：装配束 + 发射任务 + 已开的草稿 → 一幕的运行时。
 ///
 /// 单列出来是给夹具一条**同形**的入口：夹具的幕首可以自己备（它不需要
-/// `collect_reads` / 定根 / `begin_drive` 那几行），但「分发方与汇报落地面怎么从
+/// `collect_reads` / 定根 / `open-turn` 那几行），但「分发方与汇报落地面怎么从
 /// 装配束里造」只该有一处写法——照抄一遍就是第二个读数点。
 pub(crate) fn stage_runtime(
     assembled: Assembled,
@@ -910,16 +933,14 @@ fn actor_exit(e: ActorError) -> TurnExecExit {
     }
 }
 
-/// 开一幕失败（`begin_drive` / `continue_drive` 的出口）：失败原样，其余按内部错误。
-fn to_exit(
-    opened: Result<super::super::chat_loop::drive::Drive, TurnExit>,
-) -> Result<super::super::chat_loop::drive::Drive, TurnExecExit> {
-    opened.map_err(|exit| match exit {
+/// 开一幕失败（`open-turn` / `resume-turn` 两行的出口）：失败原样，其余按内部错误。
+fn to_exit(err: TurnExit) -> TurnExecExit {
+    match err {
         TurnExit::Failed(e) => TurnExecExit::Failed(e),
         other => TurnExecExit::Failed(PluginError::InternalError(format!(
             "开一幕交出了非失败结局：{other:?}"
         ))),
-    })
+    }
 }
 
 fn no_stage() -> TurnExecExit {

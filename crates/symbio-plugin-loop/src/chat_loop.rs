@@ -39,6 +39,7 @@ pub(crate) mod delegate;
 pub(crate) mod drive;
 pub(crate) mod inputs;
 mod io;
+pub(crate) mod open_turn;
 pub(crate) mod state;
 mod turn;
 mod wake;
@@ -51,7 +52,7 @@ pub(crate) use self::compose::{apply_verdict, VerdictEffect};
 // 消费方（`compose` / `rebuild` / `turn_runner`）各自直连 core——本模块不再续发短路径，
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
-pub(crate) use self::drive::{begin_drive, continue_drive, land_dispatch, land_opening};
+pub(crate) use self::drive::{land_dispatch, land_opening};
 pub(crate) use self::inputs::{run_compress, run_recall};
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{
@@ -173,7 +174,9 @@ use symbio_kernel::llm::TurnOutput;
 use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::plugin_info;
 use symbio_plugin_api::plugin_warn;
-use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
+use symbio_sdk::chat::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction,
+};
 use symbio_sdk::chat::chat_request;
 use symbio_sdk::llm::turn::{llm_emit_message, llm_short_id};
 use symbio_sdk::turn::dispatch::{run_ops, TurnReport, TurnStatus};
@@ -228,18 +231,7 @@ pub async fn run_chat_loop(
         consolidated: None,
     };
 
-    // 本轮输入（消息 id + 正文）：锚定在 `single_message` 被消费**之前**。
-    //
-    // 这是「本请求带了什么输入」这一事实，而不是「第几轮」的函数；两处消费它——
-    // 轮首判决执行体的输入（[`run_classify`]），以及委派段 Q1 的输入（`inputs.rs` 取
-    // `turn.input_utterance`）。锚定的那一份不能改从 `context.messages` 现取：
-    // `load_history = true` 时那份列表装着整段历史，
-    // 「第一条用户发言」逐轮都指回首轮那句（e2e t29 钉住这条）。
-    turn.input_utterance = single_message.as_ref().and_then(|m| {
-        let text = m.content.as_ref()?.to_text();
-        Some((m.id.clone(), text))
-    });
-    // ── 会话恢复（resume）：在 turn 循环前把用户动作落成唤醒请求 ─────────────
+    // ── 会话恢复（resume）：动作在幕锚行里落成事实 ─────────────────────────
     //
     // `req.resume` 存在时，本调用是用户的恢复操作：
     // - `RetrySubtree`：按普通新轮重来，被重试那一支不删（成为另一支候选）；
@@ -249,40 +241,22 @@ pub async fn run_chat_loop(
     //   自己的 `authorize-tool` / `dispatch-tool` / `deny-tools` 承担——恢复路径
     // 不再自己写协议事实、不再自己跑执行层（d）。
     //
-    // 唤醒请求落在幕锚之前，但 `turn_head` 的请求面按 seq 判终局，照样看得见它；
-    // 本幕因此从「工具批没关」开始，执行行让位给授权 / 派发行。
-    let mut next_drive_resume: Option<&'static str> = None;
-    if let Some(tr) = req.resume.take() {
-        match super::chat_loop::wake::process_wake(
-            orchestrator,
-            &ctx,
-            &turn.abort,
-            &context.session,
-            tr,
-        )
-        .await
-        {
-            Ok(super::chat_loop::wake::WakeOutcome::Woken {
-                kind,
-                root_id,
-                old_child,
-            }) => {
-                turn.resume_root = Some(root_id);
-                turn.resume_old_child = old_child;
-                next_drive_resume = Some(kind);
-            }
-            Ok(super::chat_loop::wake::WakeOutcome::NewTurn { retried_root }) => {
-                // 新支的根 id 要到备输入那一步才有（一幕一个根），所以这里只寄存
-                // 「这是哪一支的另一版本」，登记那一格由接缝（`prepare-turn`）落。
-                turn.retry_of = Some(retried_root);
-            }
-            Ok(super::chat_loop::wake::WakeOutcome::Done) => {
-                return finish_turn(&context, &sink, &turn, TurnExit::ResumeDone).await;
-            }
-            Err(e) => {
-                plugin_warn!("session", "[Wake] process_wake failed: {}", e);
+    let resume = req.resume.take();
+    if let Some(tr) = resume.as_ref() {
+        if matches!(tr.action, ResumeAction::RetryCompaction) {
+            if let Err(e) = super::context::retry_compaction(
+                orchestrator,
+                &ctx,
+                &turn.abort,
+                &context.session,
+                &tr.target_id,
+            )
+            .await
+            {
+                plugin_warn!("session", "[Wake] RetryCompaction failed: {}", e);
                 return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
             }
+            return finish_turn(&context, &sink, &turn, TurnExit::ResumeDone).await;
         }
     }
 
@@ -319,7 +293,7 @@ pub async fn run_chat_loop(
             turn: &mut turn,
             req: &turn_req,
             single_message: single_message.take(),
-            resume_kind: next_drive_resume.take(),
+            resume,
         })),
         super::loop_rows::ACTORS,
     )
@@ -358,8 +332,6 @@ pub async fn run_chat_loop(
                 )
                 .await;
             }
-            // 取走即消费：这一幕没有新根，续写幕不该再开一支。
-            turn.retry_of.take();
             TurnExit::Completed
         }
         // 幕间中止：上一幕已收束，下一幕没开（同一轮不落第二格收束）。
@@ -454,10 +426,10 @@ pub(crate) async fn run_classify(
     context: &mut SessionContext,
     turn: &mut TurnState,
 ) -> Result<(), super::turn_exec::ActorError> {
-    // 判决的输入：本轮锚定那份发言（取值点见 `run_chat_loop` 顶部）。
+    // 判决的输入：本轮用户格（`turn.user_seq`）的正文——从事实读回，不在环上留副本。
     // 行前件的 `has_utterance` 说了它此刻在；取不到就是视图与本轮状态不同源——
     // 不猜、不落格，派发点会因「这一动作落了零格」停驱并出声。
-    let Some((_, utterance)) = turn.input_utterance.clone() else {
+    let Some(utterance) = turn.user_text() else {
         return Ok(());
     };
     // 先落成变量再进 `if let`：`decide_turn` 借的是 `&context`，而 `apply_verdict`
@@ -515,7 +487,7 @@ pub(crate) async fn run_classify(
         // ── 这一轮的**轮次事实仍须入格**──────────────────────
         //
         // 答话在轮首就短路收尾，**不进** `turn_exec::drive` ⇒ 收束格必须由
-        // 轮首准备补落（用户格已在 `begin_drive` 落过）：[`land_answered_turn`]。
+        // 轮首准备补落（用户格已在 `open-turn` 落过）：[`land_answered_turn`]。
         // 答话 = `apply_verdict` 刚 push 的那条对话面文本（末尾一条 assistant）。
         // 取它而不是再算一遍：措辞归 `compose` 所有，这里只搬运（`dialog` 同）。
         let reply = context

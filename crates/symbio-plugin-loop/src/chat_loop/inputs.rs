@@ -201,6 +201,7 @@ pub(crate) async fn prepare_request_sections(
     context: &mut SessionContext,
     sink: &ExecEventSink,
     turn: &mut TurnState,
+    req: &super::state::TurnRequest,
     root_id: &str,
     fresh_root: bool,
     tools: &[CapabilityMeta],
@@ -250,8 +251,8 @@ pub(crate) async fn prepare_request_sections(
     // 次次不同）。这里取的是本轮**最终**发给模型的同一份 `tools`（中间没有任何
     // push）⇒ 同源，不构成第二份真相。
     //
-    // Q1 判定仍在本函数（控制面）：`turn.input_utterance` 是循环**前**锚定的
-    // `(消息 id, 正文)`，同一请求内不随工具轮变化；判定读的是**本会话当前配置**
+    // Q1 判定仍在本函数（控制面）：`turn.user_text()` 从本轮用户格（`user_seq`）
+    // 读回正文，同一请求内不随工具轮变化；判定读的是**本会话当前配置**
     // （`worker_*` 三字段，出厂值真源在 core）。provider 只接到判完的
     // `DelegateVerdict`——判断闭集（D-208）。
     //
@@ -267,13 +268,13 @@ pub(crate) async fn prepare_request_sections(
         .await
         .map_err(super::super::turn_exec::ActorError::Read)?;
     let settings = context.session.settings();
-    let delegate_verdict = match turn.input_utterance.as_ref().map(|(_, text)| text.as_str()) {
+    let delegate_verdict = match turn.user_text().filter(|_| req.new_input) {
         Some(text) => {
             // 关键词存**逗号串**（面板无数组控件），切开即用；空串由
             // `worker_start_reason` 的「空关键词跳过」处理 ⇒ 空串 = 空集 = 本层关闭。
             let keywords: Vec<&str> = settings.worker_keywords.split(',').collect();
             match delegate::worker_start_reason(
-                text,
+                text.as_str(),
                 &settings.worker_force_prefix,
                 &keywords,
                 settings.worker_min_chars,
@@ -378,7 +379,7 @@ pub(crate) async fn prepare_request_sections(
 ///
 /// 派发器在两次动作之间重读日志，而 `turn_stages` 视图只折叠**已落**的 `turn.stage`
 /// 格。动作做完却不入日志，本幕的第二次选债照样读到「没做过」⇒ 环走不动。
-/// 落格能力此刻就在本层（与 `begin_drive` 落用户格 / 配置 / 轮次格同一条路、同一个句柄）。
+/// 落格能力此刻就在本层（与 `open_turn::open` 落用户格 / 配置 / 轮次格同一条路、同一个句柄）。
 ///
 /// 召回阶段格带的是**逐条结果**（`(seq, tag)` + 本幕是不是续写幕）——`turn.recalled`
 /// 视图把它摊成能力包的债键面（D-262）：技能行按 `eq tag = "skill"` 取自己那一批，

@@ -190,7 +190,7 @@ fn open_turn_req<'a>(
 
 /// 落**恢复阶段事实**（唤醒幕的锚），交回它的 seq。
 ///
-/// 生产里这一格由 `chat_loop::begin_drive` 落（d 之后）：续写的身份
+/// 生产里这一格由 `chat_loop::open_turn` 的 `resume-turn` 行落（d 之后）：续写的身份
 /// 在**事实**上，不在入参里。幕锚从用户格挪到这一条 ⇒ 幕锚轮号回到被续写的那
 /// 一轮（哪怕它已被后来的轮次归档），`turn_head.resumed = true`。
 fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> u64 {
@@ -309,7 +309,7 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     ctx.set(CAPABILITY_VISITOR, visitor);
 
     // 环要借的那一片可控状态：生产由 `turn_exec::drive` 的幕首备好，这里同一形状。
-    // `input_utterance` 留 `None`：Q1 的委派判定因此不下结论（与退役前那条旁路同形）。
+    // 没有事实里的用户格：Q1 的委派判定因此不下结论（`TurnState::user_text` 回 `None`）。
     let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
         parent: parent.clone(),
         context_limit: 8192,
@@ -337,6 +337,7 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     };
 
     let turn_req = super::super::chat_loop::state::TurnRequest {
+        new_input: true,
         auto_compress: false,
         load_history: true,
         system_prompt: None,
@@ -455,7 +456,7 @@ fn seed_user(fx: &Fixture, turn: u64, text: &str) -> u64 {
         .value()
 }
 
-/// 生产形状的配置格（`chat_loop/drive.rs` 的 `begin_drive` 落的那一份）。
+/// 生产形状的配置格（`chat_loop::open_turn` 的 `open-turn` 行落的那一份）。
 ///
 /// 本文件的用例大多直调 `drive_turn`，绕过了开幕那一步；只要有一行读
 /// `session.config`（如 `report_due` 的开头），配置格就得自己落——否则那个开关
@@ -998,6 +999,7 @@ async fn control_harness() -> ControlHarness {
             ..Default::default()
         },
         req: super::super::chat_loop::state::TurnRequest {
+            new_input: true,
             auto_compress: false,
             load_history: true,
             system_prompt: None,
@@ -1027,7 +1029,7 @@ async fn drive_control(h: &mut ControlHarness) -> Result<super::DriveEnd, super:
             turn: &mut h.turn,
             req: &h.req,
             single_message: h.message.take(),
-            resume_kind: None,
+            resume: None,
         })),
         super::super::loop_rows::ACTORS,
     )
@@ -1063,60 +1065,6 @@ async fn drive_lands_the_inputs_stage_and_runs_the_turn() {
         all.iter().any(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL),
         "这一幕跑到了收束：收束格在"
     );
-}
-
-/// 重试开出的**新支在备输入之后登记**（[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
-///
-/// 钉三件事，缺一件整套分支就读不对：
-/// - `into` 用的是**这一幕才存在的新根 id**（`retry_of` 只是寄存的旧根，新根要到幕首
-///   定下才有；早一格落它就只能按轮号归组，而一幕一个根、幕间续写会让同轮开出多个根）；
-/// - 它是断言类事实 ⇒ 溯源指向本轮用户格（I2，缺了它整条 WAL 重放会被判违规）；
-/// - `take()` 即消费 ⇒ **第二幕不再另开一支**（否则幕间续写会凭空多出一个候选，
-///   用户看到 `2/3` 却只重试过一次）。
-#[tokio::test]
-async fn drive_lands_one_branch_fact_for_a_retry_and_consumes_the_registration() {
-    use symbio_plugin_api::events::EVENT_TURN_BRANCH;
-
-    let mut h = control_harness().await;
-    h.turn.retry_of = Some("t-old".to_string());
-    let end = drive_control(&mut h).await.expect("幕跑得完");
-    assert!(matches!(end, super::DriveEnd::Completed));
-
-    assert!(
-        h.turn.retry_of.is_none(),
-        "寄存的旧根被取走：同一幕不会落两条分支格"
-    );
-    let root_id = h
-        .turn
-        .branch_root()
-        .expect("收尾能从事实切片读回本幕的根（组内标注要用）");
-
-    let branch_facts = |h: &ControlHarness| -> Vec<Event> {
-        h.facts
-            .range(Seq::new(0))
-            .into_iter()
-            .filter(|e| e.kind == EVENT_TURN_BRANCH)
-            .collect()
-    };
-    let landed = branch_facts(&h);
-    assert_eq!(landed.len(), 1, "一次重试只开一支：{landed:?}");
-    assert_eq!(landed[0].payload["of"], "t-old");
-    assert_eq!(landed[0].payload["into"], root_id.as_str());
-    assert_eq!(
-        landed[0].produced_by,
-        Some(h.turn.user_seq),
-        "分支格是断言类：溯源必须指向本轮用户格"
-    );
-    assert!(!landed[0].actor.is_empty(), "actor 取本轮主体，不留空");
-
-    // 续写幕：`retry_of` 已被取走 ⇒ 再走一次登记是空操作，事实面不多第二支。
-    // 不真跑第二幕：同一轮已经收束，运行器不会再收束第二条；这里直接问那个登记口
-    // ——它正是每一幕都会调的那一处。
-    h.turn.drive_seq += 100;
-    let store: Arc<dyn Store<Event = Event>> = h.facts.clone();
-    super::land_retry_branch(store.as_ref(), h.ctx.as_ref(), &mut h.turn, "r-next")
-        .expect("登记是空操作");
-    assert_eq!(branch_facts(&h).len(), 1, "幕间续写不再开第二支");
 }
 
 /// 定稿答话轮：轮首就地收束 ⇒ 环**不进**轮内环，一次模型往返都不发。
@@ -2024,7 +1972,7 @@ fn the_recall_list_carries_the_resumed_flag() {
         .expect("开轮格")
         .value();
 
-    // 本幕锚 = 恢复阶段事实（`chat_loop::begin_drive` 在生产里落它）：它把幕锚从
+    // 本幕锚 = 恢复阶段事实（`chat_loop::open_turn` 在生产里落它）：它把幕锚从
     // 用户格挪到这一条 ⇒ `turn_head.resumed = true`。
     let resume_seq = super::super::stage_events::land_with_seqs(
         &store,
@@ -2586,7 +2534,7 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
         0,
         user_seq,
     );
-    // 续写幕的锚 = 恢复阶段事实（生产由 `chat_loop::begin_drive` 落）：它把幕锚
+    // 续写幕的锚 = 恢复阶段事实（生产由 `chat_loop::open_turn` 落）：它把幕锚
     // 从「归档段里的用户格」挪到这一条 ⇒ 幕锚轮号回到第 0 轮。
     req.drive_seq = land_resume_anchor(&fx, 0, user_seq, "approve");
     drive_turn(req)
@@ -2670,7 +2618,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         0,
         user_seq,
     );
-    // 续写幕的锚 = 恢复阶段事实（生产由 `chat_loop::begin_drive` 落）：第 1 轮的
+    // 续写幕的锚 = 恢复阶段事实（生产由 `chat_loop::open_turn` 落）：第 1 轮的
     // 用户格更晚，但幕锚看的是**恢复格**⇒ 幕锚轮号回到被续写的第 0 轮。
     req.drive_seq = land_resume_anchor(&fx, 0, user_seq, "approve");
     drive_turn(req)

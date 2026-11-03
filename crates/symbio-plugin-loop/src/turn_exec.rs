@@ -1100,6 +1100,7 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             head.context,
             head.event_sink,
             head.turn,
+            head.req,
             head.root_id,
             head.fresh_root,
             ctx.tools.as_ref(),
@@ -1110,12 +1111,6 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             head.request_ctx.as_ref(),
             head.turn,
             "ready",
-        )?;
-        land_retry_branch(
-            ctx.store.as_ref(),
-            head.request_ctx.as_ref(),
-            head.turn,
-            head.root_id,
         )?;
         self::assemble::land_seam(
             ctx.store.as_ref(),
@@ -1244,7 +1239,7 @@ pub(crate) fn run_report<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 pub(crate) fn run_continue<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let head = take_head(ctx)?;
-        super::chat_loop::continue_drive(head.context, head.turn, head.req)
+        super::chat_loop::open_turn::continue_stage(head.context, head.turn, head.req)
             .map(|_| ())
             .map_err(|exit| match exit {
                 super::chat_loop::state::TurnExit::Failed(e) => ActorError::Read(e),
@@ -1647,47 +1642,6 @@ pub(crate) fn land_inputs(
         )],
     )
     .map_err(ActorError::Append)
-}
-
-/// 重试开出的**新支在这里登记**（[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
-///
-/// 为什么是这一格而不是唤醒那一处：`turn.branch` 的 `into` 是**新支的 Turn 根
-/// id**，而那个 id 到本幕的根定下才存在（一幕一个根，幕首是它唯一的创建点）。
-/// `retry_of` 由 `RetrySubtree` 寄存、`take()` 即消费，幕间续写的第二幕
-/// 因此不会再开一支。
-pub(crate) fn land_retry_branch(
-    store: &dyn Store<Event = Event>,
-    ctx: &dyn PluginInvokeRequest,
-    turn: &mut super::chat_loop::state::TurnState,
-    root_id: &str,
-) -> Result<(), ActorError> {
-    let Some(of) = turn.retry_of.take() else {
-        return Ok(());
-    };
-    let seq = store
-        .append(
-            symbio_kernel::event::Event::pending(
-                format!("branch-{root_id}"),
-                symbio_plugin_api::events::EVENT_TURN_BRANCH,
-                Entity::Turn,
-                Verb::Asserted,
-                turn.turn_no,
-                symbio_sdk::authz::request_principal(ctx),
-            )
-            .with_payload(serde_json::json!({ "of": of, "into": root_id }))
-            .with_produced_by(turn.user_seq),
-        )
-        .map_err(ActorError::Append)?;
-    symbio_plugin_api::plugin_info!(
-        "session",
-        "[Branch] 新支 {} 挂到 {} 之下（seq={}）",
-        root_id,
-        of,
-        seq.value()
-    );
-    // 收尾时按**这一格**补发组内的标注帧（`finish_turn` 从本幕的事实切片读回
-    // `into`）：新支的根 id 不再在草稿上另存一份。
-    Ok(())
 }
 
 /// 账本上的这一格是否让**本轮收工**（D-123 决策 5 的收束判据）。

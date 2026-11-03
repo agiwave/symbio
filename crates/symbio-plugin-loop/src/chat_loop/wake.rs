@@ -1,84 +1,41 @@
 //! 唤醒（d）：用户动作在开幕之前落成一条**工具调用请求**。
 //!
-//! ## 与旧 `resume.rs` 的区别
+//! ## 只把动作翻译成债
 //!
 //! 旧路径在这里**代替行表**走完了授权与派发：它自己调执行层、自己写结果节点、
 //! 自己关 `request` 的账——一条绕开义务环的旁路。本模块只做一件事：把用户的
 //! 动作翻译成一笔**唤醒请求**（`request(port=tool)`，载荷带 `resume` 标记），
 //! 之后由行表自己的 `authorize-tool` / `dispatch-tool` / `deny-tools` 各行其责。
 //!
-//! 请求落在幕锚**之前**（开幕在 `begin_drive`，本模块跑在它前面）：`turn_head`
-//! 的请求面按 seq 判「有没有终局」，不看幕锚，所以它照样看得见这一笔。
+//! 请求落在幕锚**之前**：`resume-turn` 这一行先落请求，`open-turn` 再落恢复格
+//! （D-313 P2-1）。`turn_head` 的请求面按 seq 判「有没有终局」，不看幕锚，
+//! 所以它照样看得见这一笔。
 //!
-//! ## 三种出口
+//! ## 三种出口（现在是数据，不是分派）
 //!
-//! - [`WakeOutcome::Woken`]：唤醒请求已入格，本次请求是**续写幕**（复用原轮号、
-//!   复用原 Turn 根节点）；
-//! - [`WakeOutcome::NewTurn`]：`RetrySubtree`——按普通新轮重来，被重试的那一支
-//!   **不删**，它成为同一问题的另一个候选（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）；
-//! - [`WakeOutcome::Done`]：`RetryCompaction` 等不产生对话轮次的动作，直接收尾。
+//! - [`Woken`]：唤醒请求已入格，本次请求是**续写幕**（复用原轮号、复用原 Turn
+//!   根节点）；
+//! - [`retry_subtree`]：`RetrySubtree`——按普通新轮重来，被重试的那一支**不删**，
+//!   它成为同一问题的另一个候选（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）；
+//! - `RetryCompaction` 不是对话轮次，直接由编排层收尾（不经本模块）。
 
-use super::ChatOrchestrator;
 use serde_json::{json, Value};
-use std::sync::Arc;
 use symbio_kernel::event::Seq;
-use symbio_kernel::exec::ExecAbortSignal;
-use symbio_kernel::plugin::{PluginError, PluginInvokeRequest};
+use symbio_kernel::plugin::PluginError;
 use symbio_sdk::chat::chat_node::{ChatNode, NodeStatus, ResumeAction, ResumeRequest};
 use symbio_sdk::llm::turn::llm_short_id;
 use symbio_sdk::turn::dispatch::{run_ops, RemoveNodesRequest};
 use {symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn};
 
-use super::super::tool_dispatch::{ToolPort, WakeIntent, WakeSpec};
+use super::super::tool_dispatch::{ToolPort, Wake, WakeSpec};
 use super::super::turn_session::LoopSession;
 
-/// 恢复请求的处理结果。
-pub(crate) enum WakeOutcome {
-    /// 唤醒请求已入格：续写同一轮，复用原 Turn 根节点。
-    Woken {
-        /// 续写幕的事实名（`turn.stage{stage:"resume"}` 的 `result`）。
-        kind: &'static str,
-        /// 被续写轮的 Turn 根节点 id（流式帧与结果节点都挂在它下面）。
-        root_id: String,
-        /// 被替换的旧结果子节点：新结果落格后删除，避免同一笔调用出现两条结果。
-        old_child: Option<String>,
-    },
-    /// 按普通新轮重来（`RetrySubtree`）：被重试的那一支**不删**，它成为同一问题的
-    /// 另一个候选（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
-    NewTurn {
-        /// 被重试那一支的 Turn 根节点 id——新支开出来时按它登记「是哪一支的另一版本」
-        /// （`turn.branch` 的 `of`）。
-        retried_root: String,
-    },
-    /// 本请求不产生对话轮次（`RetryCompaction`），直接收尾。
-    Done,
-}
-
-/// 处理会话恢复请求。
-pub(crate) async fn process_wake(
-    orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    abort: &ExecAbortSignal,
-    session: &Arc<LoopSession>,
-    req: ResumeRequest,
-) -> Result<WakeOutcome, PluginError> {
-    match req.action {
-        ResumeAction::RetrySubtree => retry_subtree(session, &req.target_id).await,
-        // 压缩不是对话轮次：执行体在压缩流水线所在模块（那里才有切分 / 内核的私有面），
-        // 完成后一律 `Done`。
-        ResumeAction::RetryCompaction => {
-            super::super::context::retry_compaction(
-                orchestrator,
-                ctx,
-                abort,
-                session,
-                &req.target_id,
-            )
-            .await?;
-            Ok(WakeOutcome::Done)
-        }
-        _ => land_tool_wake(session, req).await,
-    }
+/// 唤醒请求已入格：续写幕要复用的一切。
+pub(crate) struct Woken {
+    /// 被续写轮的 Turn 根节点 id（流式帧与结果节点都挂在它下面）。
+    pub(crate) root_id: String,
+    /// 被替换的旧结果子节点：新结果落格后删除，避免同一笔调用出现两条结果。
+    pub(crate) old_child: Option<String>,
 }
 
 /// `RetrySubtree`：按普通新轮重来，**被重试的那一支留在树里**。
@@ -94,7 +51,10 @@ pub(crate) async fn process_wake(
 /// （`prepare-turn` 那一行：那里才有新支的根 id）。
 /// 「藏起来不读」归[分支投影](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，
 /// 一处是 [`symbio_sdk::projection::branch::branch_hide_unselected`]——只有进模型的那条路调它。
-async fn retry_subtree(session: &LoopSession, target_id: &str) -> Result<WakeOutcome, PluginError> {
+pub(crate) async fn retry_subtree(
+    session: &LoopSession,
+    target_id: &str,
+) -> Result<(), PluginError> {
     let messages = session
         .run_op::<Vec<ChatNode>>(run_ops::MESSAGES, ())
         .await?;
@@ -107,18 +67,16 @@ async fn retry_subtree(session: &LoopSession, target_id: &str) -> Result<WakeOut
     }
 
     plugin_info!("session", "[Wake] RetrySubtree: {target_id} 另开一支");
-    Ok(WakeOutcome::NewTurn {
-        retried_root: target_id.to_string(),
-    })
+    Ok(())
 }
 
 /// 工具调用的唤醒：把用户动作落成一笔 `request(port=tool)`。
 ///
 /// 不在这里执行工具、不写授权 / 结果——那些归行表的授权行与派发行（d）。
-async fn land_tool_wake(
+pub(crate) async fn land_tool_wake(
     session: &LoopSession,
     req: ResumeRequest,
-) -> Result<WakeOutcome, PluginError> {
+) -> Result<Woken, PluginError> {
     let messages = session
         .run_op::<Vec<ChatNode>>(run_ops::MESSAGES, ())
         .await?;
@@ -153,7 +111,7 @@ async fn land_tool_wake(
         .unwrap_or_else(llm_short_id);
 
     let kind = super::drive::resume_kind(&req.action);
-    let (args, intent) = wake_intent(&req, base_args);
+    let (args, wake) = wake_intent(&req, base_args);
 
     let facts = session
         .facts()
@@ -161,7 +119,7 @@ async fn land_tool_wake(
     let snapshot = facts.range(Seq::new(0));
     let (turn_no, user_seq) = super::super::turn_exec::last_open_turn(&snapshot)
         .ok_or_else(|| PluginError::NotFound("恢复找不到未收束的轮次".into()))?;
-    // 幕锚此时还没落（`begin_drive` 在本次请求里才跑）⇒ 占位 0。三笔工具债不读
+    // 幕锚此时还没落（`open-turn` 在本请求里随后才跑）⇒ 占位 0。三笔工具债不读
     // 带时间的视图，`now` 参与不了判据。
     let port = ToolPort::new(facts, turn_no, user_seq, 0);
     port.land_wake(&WakeSpec {
@@ -170,7 +128,7 @@ async fn land_tool_wake(
         tool: &tool_name,
         args: &args,
         turn_root: &turn_root,
-        intent: &intent,
+        wake: &wake,
     })
     .map_err(|e| PluginError::InternalError(format!("唤醒请求落格失败：{e:?}")))?;
 
@@ -178,8 +136,7 @@ async fn land_tool_wake(
         "session",
         "[Wake] {kind}: tool `{tool_name}` queued as request(port=tool) for turn {turn_no}"
     );
-    Ok(WakeOutcome::Woken {
-        kind,
+    Ok(Woken {
         root_id: turn_root,
         old_child,
     })
@@ -200,7 +157,7 @@ pub(crate) async fn merge_runner_messages(
     turn: &mut super::state::TurnState,
     messages: Vec<ChatNode>,
 ) -> Result<(), PluginError> {
-    if let Some(old) = turn.resume_old_child.take() {
+    if let Some(old) = super::open_turn::resume_replaces(turn) {
         // 旧交互卡与新结果卡是**同一个节点身份**（结果 id 由调用 id 派生，D-312）：
         // 新结果覆盖它时不能再落 `remove-nodes`，否则被删的是刚写下的答复，
         // 重建面按 `message.removed` 把它当成永久消失（T27 的「有请求无响应」）。
@@ -241,7 +198,7 @@ pub(crate) async fn merge_runner_messages(
 }
 
 /// 用户动作 ⇒ 派发参数与语义（执行 / 直接产结果）。
-fn wake_intent(req: &ResumeRequest, base_args: Value) -> (Value, WakeIntent) {
+fn wake_intent(req: &ResumeRequest, base_args: Value) -> (Value, Wake) {
     match req.action {
         // 这三个动作真正重跑工具；参数按动作改写，执行层只知道「有一次调用要跑」。
         ResumeAction::Approve => {
@@ -249,9 +206,9 @@ fn wake_intent(req: &ResumeRequest, base_args: Value) -> (Value, WakeIntent) {
             if let Some(obj) = args.as_object_mut() {
                 obj.insert("approved".into(), json!(true));
             }
-            (args, WakeIntent::Execute)
+            (args, Wake::Execute)
         }
-        ResumeAction::Retry => (base_args, WakeIntent::Execute),
+        ResumeAction::Retry => (base_args, Wake::Execute),
         ResumeAction::Supply => {
             let mut args = base_args;
             if let (Some(obj), Some(supplied)) = (args.as_object_mut(), req.args.clone()) {
@@ -261,14 +218,14 @@ fn wake_intent(req: &ResumeRequest, base_args: Value) -> (Value, WakeIntent) {
                     }
                 }
             }
-            (args, WakeIntent::Execute)
+            (args, Wake::Execute)
         }
         // 拒绝 / 回答不执行工具，就地合成结果。
         ResumeAction::Reject => {
             let text = format!("用户拒绝执行: {}", req.reason.clone().unwrap_or_default());
             (
                 base_args,
-                WakeIntent::Result {
+                Wake::Result {
                     text,
                     ok: false,
                     denied: true,
@@ -280,7 +237,7 @@ fn wake_intent(req: &ResumeRequest, base_args: Value) -> (Value, WakeIntent) {
                 .unwrap_or_default();
             (
                 base_args,
-                WakeIntent::Result {
+                Wake::Result {
                     text,
                     ok: true,
                     denied: false,
@@ -292,7 +249,7 @@ fn wake_intent(req: &ResumeRequest, base_args: Value) -> (Value, WakeIntent) {
                 "session",
                 "[Wake] 不可达：RetrySubtree / RetryCompaction 已在顶层分发"
             );
-            (base_args, WakeIntent::Execute)
+            (base_args, Wake::Execute)
         }
     }
 }

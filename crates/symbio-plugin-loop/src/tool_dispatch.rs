@@ -151,7 +151,7 @@ pub(crate) struct ToolPortCall {
     ///
     /// 派发动作据它决定「跑工具」还是「只合成结果」——两者的事实完全一样
     /// （`request → authz → sent → response / failed`），差别只在读侧。
-    pub(crate) wake: Option<WakeIntent>,
+    pub(crate) wake: Option<Wake>,
 }
 
 /// 唤醒调用的种类（d）。
@@ -160,7 +160,7 @@ pub(crate) struct ToolPortCall {
 /// `request(port=tool)`（[`ToolPort::land_wake`]），之后与批次走同一条授权 / 派发
 /// 链；本枚举只说明那一笔要不要真正跑工具。
 #[derive(Debug, Clone)]
-pub(crate) enum WakeIntent {
+pub(crate) enum Wake {
     /// approve / retry / supply：用户要求重跑一次工具。
     Execute,
     /// answer / reject：用户给出了结果（答案或拒绝理由），工具不再执行。
@@ -174,7 +174,7 @@ pub(crate) enum WakeIntent {
     },
 }
 
-impl WakeIntent {
+impl Wake {
     /// 从 `request` 载荷的 `resume` 字段还原（[`Self::kind`] 的反函数）。
     fn from_payload(payload: &serde_json::Value) -> Option<Self> {
         match payload.get("resume").and_then(|v| v.as_str())? {
@@ -208,7 +208,7 @@ impl WakeIntent {
 /// `target` 与 `turn_root` 互换的后果是结果挂错卡片。
 pub(crate) struct WakeSpec<'a> {
     /// 用户动作的种类（`approve` / `retry` / `supply` / `answer` / `reject`）——
-    /// 落进载荷的 `resume` 标记，读侧据此还原意图。
+    /// 落进载荷的 `resume` 标记，读侧据此还原唤醒数据。
     pub(crate) kind: &'static str,
     /// 被唤醒的那张卡（ToolCall 节点 id）：结果挂回它。
     pub(crate) target: &'a str,
@@ -219,7 +219,7 @@ pub(crate) struct WakeSpec<'a> {
     /// 本轮 Turn 根节点 id（UI 帧挂载的父节点）。
     pub(crate) turn_root: &'a str,
     /// 这一笔要不要真跑工具。
-    pub(crate) intent: &'a WakeIntent,
+    pub(crate) wake: &'a Wake,
 }
 
 /// 一次唤醒的**读侧形状**：把 `request` 载荷还原成派发 / 授权动作要的那份调用。
@@ -232,7 +232,7 @@ pub(crate) struct WakeBatch {
     /// 还原出的「模型往返」：`tool_calls` 里只有被唤醒的那一笔，节点 id 就是原
     /// ToolCall（结果因此挂回原来那张卡，而不是新长一张）。
     pub(crate) turn: LlmTurn,
-    /// 还原出的端口账（一笔）。**意图与目标节点都在这一笔里**
+    /// 还原出的端口账（一笔）。**唤醒数据与目标节点都在这一笔里**
     /// （`calls[0].wake` / `calls[0].model_id`）——不另立第二份形状。
     pub(crate) calls: Vec<ToolPortCall>,
 }
@@ -522,7 +522,7 @@ impl ToolPort {
 
     /// 本次 drive 的 `now`：幕锚那条唤醒事实的 `ts`（判据 12）。
     ///
-    /// 恢复幕在 `begin_drive` **之前**执行，`drive_seq` 填的是占位 0 ⇒ 这里得 0；
+    /// 恢复幕在 `resume-turn` **之前**执行，`drive_seq` 填的是占位 0 ⇒ 这里得 0；
     /// 本行的三笔工具债（`open-tools` / `authorize-tool` / `dispatch-tool`）不读
     /// 带时间的视图，`now` 参与不了判据。要新增读时间的行，得先把真实幕锚传进来。
     fn now_ms(&self, facts: &[Event]) -> i64 {
@@ -687,7 +687,7 @@ impl ToolPort {
     /// `authz.denied{user_rejected}`。风险档比较不参与——用户已经做过这一次判断，
     /// 再按阈值拒一次会让审批卡永远点不动。
     pub(crate) fn authorize_wake(&self, call: &mut ToolPortCall) {
-        let denied = matches!(call.wake, Some(WakeIntent::Result { denied: true, .. }));
+        let denied = matches!(call.wake, Some(Wake::Result { denied: true, .. }));
         let written = if denied {
             append_authz(
                 self.facts.as_ref(),
@@ -965,7 +965,7 @@ impl ToolPort {
             "target": spec.target,
             "resume": spec.kind,
         });
-        if let WakeIntent::Result { text, ok, .. } = spec.intent {
+        if let Wake::Result { text, ok, .. } = spec.wake {
             extra["result_text"] = serde_json::json!(text);
             extra["result_ok"] = serde_json::json!(ok);
         }
@@ -995,7 +995,7 @@ impl ToolPort {
             .unwrap_or_else(|| serde_json::json!({}));
         let id = payload.get("id").and_then(|v| v.as_str())?.to_string();
         let attempt = payload.get("attempt").and_then(|v| v.as_u64()).unwrap_or(1);
-        let intent = WakeIntent::from_payload(payload)?;
+        let intent = Wake::from_payload(payload)?;
         let authz = facts.iter().find_map(|e| {
             // 授权事实按**同一次尝试**取（D-138）：重试后的 attempt 2 不能复用
             // attempt 1 的放行，否则 `dispatch-tool` 的新账永远不欠。
@@ -1289,7 +1289,7 @@ impl SessionDispatchPort {
     /// 整条**——两面的 id、参数文本与状态因此一致。
     async fn wake_result_begin(&self, turn: &LlmTurn, call: &ToolPortCall) -> Option<CallOutcome> {
         let (text, ok) = match &call.wake {
-            Some(WakeIntent::Result { text, ok, .. }) => (text.clone(), *ok),
+            Some(Wake::Result { text, ok, .. }) => (text.clone(), *ok),
             _ => (String::new(), false),
         };
         let failure_kind = if ok { "" } else { "error" };
@@ -1517,7 +1517,7 @@ impl ToolDispatch for SessionDispatchPort {
         // 唤醒的用户结果（回答 / 拒绝）不跑工具：节点与事实在这里合成。
         // 批准 / 重试 / 补充仍然走下面的正常派发路径——执行层只知道
         // 「有一次调用要跑」，不关心它是模型要的，还是用户点的。
-        if matches!(call.wake, Some(WakeIntent::Result { .. })) {
+        if matches!(call.wake, Some(Wake::Result { .. })) {
             self.port.begin_calls(std::slice::from_mut(call));
             // 结论已经在手上：这个 future 第一次 poll 就 Ready（没有跨边界的往返，
             // 也就没有真正「在等」的那一圈）。

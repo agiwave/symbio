@@ -189,6 +189,8 @@ pub(crate) struct StageFact {
     /// 续写幕里「命中技能就快路作答」不成立（D-260 的行作答要新开轮），能力包的
     /// 行读这一格自己把快路关掉——宿主不替它判。
     pub(crate) resumed: bool,
+    /// 续写幕要替换的旧子节点（仅 `resume` 携带）：新结果落格后由收幕删除。
+    pub(crate) replaces: Option<String>,
 }
 
 impl StageFact {
@@ -203,12 +205,19 @@ impl StageFact {
             model_calls: 0,
             recalled: Vec::new(),
             resumed: false,
+            replaces: None,
         }
     }
 
     /// 带结论的一段（`recall` 的命中 / `resume` 的种类）。
     pub(crate) fn with_result(mut self, result: &str) -> Self {
         self.result = Some(result.to_string());
+        self
+    }
+
+    /// 续写幕要替换的旧子节点（`resume` 专用；`None` = 无需删除）。
+    pub(crate) fn with_replaces(mut self, replaces: Option<String>) -> Self {
+        self.replaces = replaces;
         self
     }
 
@@ -256,6 +265,7 @@ impl StageFact {
             model_calls,
             recalled: Vec::new(),
             resumed: false,
+            replaces: None,
         }
     }
 
@@ -383,6 +393,10 @@ impl StageFact {
                     .collect(),
             );
             payload["resumed"] = serde_json::Value::Bool(self.resumed);
+        }
+        // 续写幕的旧子节点：收幕按它删除被替换的旧卡（`None` = 不写这一格）。
+        if let Some(replaces) = &self.replaces {
+            payload["replaces"] = serde_json::Value::String(replaces.clone());
         }
         payload
     }

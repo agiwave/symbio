@@ -32,7 +32,7 @@ use std::sync::Arc;
 use super::super::tools::{ABORTED, NOT_EXECUTED};
 use super::loop_rows;
 use super::port;
-use super::{CallOutcome, ToolPort, ToolPortCall, ToolPortPolicy, WakeIntent, WakeSpec};
+use super::{CallOutcome, ToolPort, ToolPortCall, ToolPortPolicy, Wake, WakeSpec};
 use symbio_kernel::capability::CapabilityRiskLevel;
 use symbio_kernel::event::{Event, Seq, EVENT_REQUEST, EVENT_SENT};
 use symbio_kernel::store::{EventStore, Store};
@@ -457,7 +457,7 @@ fn a_wake_request_lands_as_a_port_request_carrying_the_resume_marker() {
         tool: "vdfs_read",
         args: &json!({ "path": "a.md", "approved": true }),
         turn_root: "root-1",
-        intent: &WakeIntent::Execute,
+        wake: &Wake::Execute,
     })
     .expect("唤醒请求落格");
 
@@ -508,7 +508,7 @@ fn the_wake_read_side_restores_the_intent_and_the_target() {
         tool: "vdfs_read",
         args: &json!({ "path": "a.md", "approved": true }),
         turn_root: "root-1",
-        intent: &WakeIntent::Execute,
+        wake: &Wake::Execute,
     })
     .expect("唤醒请求落格");
 
@@ -520,7 +520,7 @@ fn the_wake_read_side_restores_the_intent_and_the_target() {
     assert_eq!(call.call.id, "tool-resume-1-tc-1-1");
     assert!(call.approved, "参数里带 `approved: true` ⇒ 已由人工确认过");
     assert!(
-        matches!(call.wake, Some(WakeIntent::Execute)),
+        matches!(call.wake, Some(Wake::Execute)),
         "唤醒意图从载荷还原：{:?}",
         call.wake
     );
@@ -544,7 +544,7 @@ fn the_wake_read_side_restores_the_intent_and_the_target() {
 fn a_wake_that_the_user_rejected_reads_back_as_a_denial() {
     let store = Arc::new(EventStore::new());
     let port = tool_port(&store);
-    let intent = WakeIntent::Result {
+    let intent = Wake::Result {
         text: "用户拒绝执行: 有风险".into(),
         ok: false,
         denied: true,
@@ -555,13 +555,13 @@ fn a_wake_that_the_user_rejected_reads_back_as_a_denial() {
         tool: "shell",
         args: &json!({ "cmd": "rm -rf /" }),
         turn_root: "root-1",
-        intent: &intent,
+        wake: &intent,
     })
     .expect("唤醒请求落格");
 
     let mut batch = port.wake_batch().expect("唤醒请求读得回");
     match &batch.calls[0].wake {
-        Some(WakeIntent::Result { text, ok, denied }) => {
+        Some(Wake::Result { text, ok, denied }) => {
             assert_eq!(text, "用户拒绝执行: 有风险");
             assert!(!ok);
             assert!(denied);
@@ -589,7 +589,7 @@ fn a_closed_wake_request_is_not_read_back() {
         tool: "vdfs_read",
         args: &json!({ "path": "a.md" }),
         turn_root: "root-1",
-        intent: &WakeIntent::Execute,
+        wake: &Wake::Execute,
     })
     .expect("唤醒请求落格");
 

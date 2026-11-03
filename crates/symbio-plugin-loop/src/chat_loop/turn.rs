@@ -74,7 +74,7 @@ pub(crate) async fn settle_reasoning(
 /// （[`super::super::loop_rows::next_stage_round`]）：`closure == exhausted` ∧ 本幕
 /// 轮次未到 [`super::super::loop_rows::MAX_STAGE_ROUNDS`]。本函数手里的
 /// `turn.request_round` 就是本幕开账时落下的 `turn.stage{stage:"round"}` 值
-/// （`begin_drive` 落的，`turn_head.round` 读的也是它）——两个读法同一个数，
+/// （`open-turn` 落的，`turn_head.round` 读的也是它）——两个读法同一个数，
 /// 上界那一条因此共用 [`super::super::loop_rows::has_next_round`]。
 ///
 /// ## 工具执行与主动压缩拦截不在这里
