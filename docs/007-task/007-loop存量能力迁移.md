@@ -130,7 +130,7 @@ exit: `crates/symbio-plugin-loop` 里按能力名存在的**能力策略**清零
 
 **L7 起手前勘察**（续幕 / 装配两条都不成批，理由与 L1 同族：**没有可搬的判定**）：
 
-1. **`continue` 是环的续幕动作**，不是能力。`chat_loop::drive::continue_drive` 的全部内容
+1. **`continue` 是环的续幕动作**，不是能力。`chat_loop::open_turn::continue_stage` 的全部内容
    是「用新幕的锚把环再开一次」：复用轮号与用户格、落一格
    `turn.stage{stage:"round", round:N+1}` 作新幕锚、重落当轮生效配置。动作体里没有一条
    分支读别人的名字，`ACTOR_CONTINUE` 的名单也只有那两格。它是 `D-222` 裁决 2 的宿主侧

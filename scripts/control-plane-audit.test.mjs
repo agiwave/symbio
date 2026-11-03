@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./control-plane-audit.mjs', import.meta.url))
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
 const LOOP = 'crates/symbio-plugin-loop/src'
-const DRIVE = `${LOOP}/turn_exec/drive.rs`
+const DRIVE = `${LOOP}/stage_driver.rs`
 const ROWS = `${LOOP}/loop_rows.rs`
 const TURN_EXEC = `${LOOP}/turn_exec.rs`
 const SETTLE = `${LOOP}/turn_runner/settle.rs`
@@ -174,7 +174,7 @@ pub async fn drive(
 ) -> u32 {
     let mut steps = 0;
     loop {
-        if retiring.is_some() && driver_aborted(driver) {
+        if retiring.is_some() && aborted(driver) {
             break;
         }
         if abort_before_first_request(driver).await {
@@ -195,7 +195,7 @@ pub async fn drive(
     steps
 }
 
-fn driver_aborted(driver: &Driver) -> bool {
+fn aborted(driver: &Driver) -> bool {
     driver.aborted
 }
 

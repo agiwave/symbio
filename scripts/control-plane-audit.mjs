@@ -98,7 +98,7 @@ const PRINT_BASELINE = argv.includes('--print-baseline')
 const LOOP = 'crates/symbio-plugin-loop/src'
 const KERNEL = 'crates/symbio-kernel/src'
 const CORE = 'crates/symbio-sdk/src'
-const DRIVE_REL = `${LOOP}/turn_exec/drive.rs`
+const DRIVE_REL = `${LOOP}/stage_driver.rs`
 const ROWS_REL = `${LOOP}/loop_rows.rs`
 const TURN_EXEC_REL = `${LOOP}/turn_exec.rs`
 const SETTLE_REL = `${LOOP}/turn_runner/settle.rs`
@@ -580,7 +580,7 @@ for (const rel of prodFiles(LOOP)) {
   for (const s of sitesOf(code, /\bowes\s*\(/g)) pointQueries.push({ rel, index: s.index })
 }
 for (const q of pointQueries) {
-  if (q.rel.startsWith(`${LOOP}/turn_exec/`)) {
+  if (q.rel === DRIVE_REL || q.rel.startsWith(`${LOOP}/turn_exec/`)) {
     report(
       'CP-003',
       q.rel,
@@ -593,7 +593,7 @@ for (const q of pointQueries) {
 // ───────────────────── CP-003：五道守卫同处（TC-1c） ─────────────────────
 
 const GUARD_FNS = [
-  'driver_aborted',
+  'aborted',
   'abort_before_first_request',
   'over_step_limit',
   'waiting',
@@ -622,7 +622,7 @@ for (const name of GUARD_FNS) {
 
 /** 五道守卫的**调用点**标记：各一次，且都在驱动文件里 */
 const GUARD_MARKERS = [
-  ['driver_aborted', 'driver_aborted'],
+  ['aborted', 'aborted'],
   ['abort_before_first_request', 'abort_before_first_request'],
   ['over_step_limit', 'over_step_limit'],
   ['writes_closed', 'writes_closed'],

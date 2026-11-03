@@ -62,7 +62,7 @@ const CAPABILITY_FILES = [
   'crates/symbio-plugin-task/src/task.rs',
   'crates/symbio-plugin-loop/src/memory_events.rs',
   'crates/symbio-plugin-session/src/worker_progress.rs',
-  'crates/symbio-plugin-loop/src/tools/tool_executor/breaker.rs',
+  'crates/symbio-plugin-tool/src/breaker.rs',
   'crates/symbio-plugin-session/src/stats.rs',
   'crates/symbio-sdk/src/projection/rebuild.rs',
   'crates/symbio-plugin-session/src/transcript/inbox.rs',

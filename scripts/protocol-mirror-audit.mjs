@@ -526,17 +526,17 @@ const META_KEYS = [
   },
   {
     key: 'error',
-    owner: 'crates/symbio-plugin-loop/src/tools/dispatch/batch.rs',
+    owner: 'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
     what: '失败原因（旧路径的兜底读点；今天的失败文本由本文件写进父节点顶层 `error`）',
   },
   {
     key: 'failure_kind',
-    owner: 'crates/symbio-plugin-loop/src/tools/tool_executor.rs',
+    owner: 'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
     what: '失败类别（决定可恢复动作）',
   },
   {
     key: 'started_at',
-    owner: 'crates/symbio-plugin-loop/src/tools/dispatch/batch.rs',
+    owner: 'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
     what: '工具开始执行的时刻（运行时长锚点）',
   },
   {
@@ -551,7 +551,7 @@ const META_KEYS = [
   },
   {
     key: 'prompt',
-    owner: 'crates/symbio-plugin-loop/src/tools/tool_executor.rs',
+    owner: 'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
     what: '待用户响应的载荷（提问 / 工具确认）',
   },
   {

@@ -59,16 +59,17 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
  *
  * `rows = 16`：15 条字符串命名的固定行 + 1 条以常量命名的归宿行（`EVENT_ARTIFACT_ADDED`）。
  * `channels = 1`：`produced` 与 `derived` 合成 `PortOutput` 之后只剩一条。
- * `fullScans = 8`：`tool_dispatch` 7 + `gates` 1（B1–B3 下沉 session 后 `port` 三处
- * 全量读随执行体迁走）。
+ * `fullScans = 7`：`tool_dispatch` 6 + 执行体 1（原 `gates` 那处的全量读随执行体
+ * 并入 `tool_exec/execution.rs`；B1–B3 下沉 session 后 `port` 三处全量读随执行体迁走，
+ * 另一处随派发收敛，故比原基线收窄 1）。
  */
-const BASELINE = { rows: 16, channels: 1, fullScans: 8 }
+const BASELINE = { rows: 16, channels: 1, fullScans: 7 }
 
 const LOOP_ROWS = 'crates/symbio-plugin-loop/src/loop_rows.rs'
 const DISPATCH = 'crates/symbio-plugin-loop/src/tool_dispatch.rs'
 const SCAN_FILES = [
   'crates/symbio-plugin-loop/src/tool_dispatch.rs',
-  'crates/symbio-plugin-loop/src/tools/dispatch/gates.rs',
+  'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
   'crates/symbio-plugin-loop/src/port.rs',
 ]
 

@@ -247,7 +247,7 @@ session:
  }
  ```
 
- * 调用点参数（[`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs)）：发言级段取 `TurnState::context_sections`（`run_recall` 里经 `context_sections(&request, Cadence::Utterance)` 收集一次，`request_round == 0` 口径；**段数由 provider 决定**，宿主不假设几段）；请求级段在工具收集完成后经 `context_sections(&request, Cadence::Request)` 收集，两批按「发言级段在前、请求级段在后」拼成一个数组。
+ * 调用点参数（[`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs)）：发言级段取 `symbio_plugin_api::context_sections`（`run_recall` 里经 `context_sections(&request, Cadence::Utterance)` 收集一次，`request_round == 0` 口径；**段数由 provider 决定**，宿主不假设几段）；请求级段在工具收集完成后经 `context_sections(&request, Cadence::Request)` 收集，两批按「发言级段在前、请求级段在后」拼成一个数组。
 
 ---
 
