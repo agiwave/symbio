@@ -64,8 +64,8 @@ use symbio_kernel::event::{
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK,
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_OPENING, EVENT_CHAT_ASSISTANT_PROGRESS,
-    EVENT_CHAT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_SESSION_CONSOLIDATED,
-    EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH, EVENT_TURN_SUPPLEMENTED,
+    EVENT_CHAT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MODEL_STREAM,
+    EVENT_SESSION_CONSOLIDATED, EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH, EVENT_TURN_SUPPLEMENTED,
 };
 use symbio_plugin_api::port::ports;
 
@@ -319,7 +319,13 @@ const ACTOR_WAITER: ActorDecl = ActorDecl {
     // 等的是模型往返的应答：与那次往返同档。
     mode: LatencyTier::Deep,
     reads: &[],
-    writes: &[EVENT_CHAT_ASSISTANT_FALLBACK],
+    writes: &[
+        EVENT_CHAT_ASSISTANT_FALLBACK,
+        // 一次往返的流式增量（`D-306` 裁决三）：增量就是 provider 经 `emit` 落下的
+        // 自有事实行，而那段 future **在本执行体的动作窗口里被 poll**——帧因此落在这里，
+        // 名单也必须写在这里（运行期写入封闭，`D-123` 决策 2）。
+        EVENT_MODEL_STREAM,
+    ],
 };
 
 const ACTOR_CLOSE: ActorDecl = ActorDecl {

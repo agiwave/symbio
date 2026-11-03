@@ -95,6 +95,11 @@ pub const EVENT_MESSAGE_EDITED: &str = "message.edited";
 /// message.removed — owner `symbio-plugin-session`，格位 `(Message, Closed)`
 pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 
+// ============ model ============
+
+/// model.stream — owner `symbio-plugin-model`，格位 `(Turn, Progressed)`
+pub const EVENT_MODEL_STREAM: &str = "model.stream";
+
 // ============ session ============
 
 /// session.config — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
@@ -168,6 +173,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
     EventDecl::new(EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)), // message.edited ← session
     EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
+    EventDecl::new(EVENT_MODEL_STREAM, (Entity::Turn, Verb::Progressed)), // model.stream ← model
     EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Turn, Verb::Asserted)), // session.config ← loop
     EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task

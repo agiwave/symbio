@@ -5,18 +5,22 @@
 //! 目录一起装：生效者缺席 ⇒ 不注册端口行 ⇒ 环在调用点响亮失败（落失败事实
 //! 并中止），而不是在这里猜一个别的模型。
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
 };
+use symbio_plugin_api::events::EVENT_MODEL_STREAM;
 use symbio_plugin_api::port::{
-    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
+    PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortInput, PortOutcome,
+    PortProvider,
 };
 use symbio_plugin_api::ports;
 use symbio_plugin_api::{
-    llm_short_id, CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv, LlmAdapter,
-    ModelFinishReason, ModelProvider, PluginError, PromptMessage, ProviderLlmAdapter,
+    llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecAbortSignal, ExecEnv, ExecEventSink,
+    ExecTranscriptWriter, FactDraft, LlmAdapter, ModelFinishReason, ModelProvider, PluginError,
+    PromptMessage, ProviderLlmAdapter, Verb,
 };
 
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
@@ -125,7 +129,16 @@ impl PortExecutor for ModelExecutor {
         // （`PromptMessage`），线格式在这里收口。
         let wire = wire_messages(&request.messages);
         let started = std::time::Instant::now();
-        let env = ExecEnv::new(exec.sink.clone(), exec.abort.clone());
+        // 流式增量归执行体（`D-306` 裁决三）：provider 仍只往 `env.sink()` 写帧，
+        // 但这一出口先把每帧落成 `model.stream` 事实行，再按行名投影给展示出口。
+        // 于是节点 id 与半截正文随事实入格，执行体自己持有 `text_id` / `reasoning_id`
+        // ——环不必再替它记账（`D-314`）。
+        let rows = Arc::new(StreamRows::new(
+            exec.emit.clone(),
+            exec.sink.clone(),
+            exec.idempotency_key.clone(),
+        ));
+        let env = ExecEnv::new(ExecEventSink::direct(rows.clone()), exec.abort.clone());
         match provider
             // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
             .round_trip(
@@ -174,21 +187,146 @@ impl PortExecutor for ModelExecutor {
                         })),
                         "response_text_child_id": output.response_text_child_id,
                         "reasoning_child_id": output.reasoning_child_id,
+                        // 执行体自己持有的流式读数：节点 id 与半截正文。成功时可与
+                        // `output.*` 对上；中止时它就是唯一来源（环不再从桥取）。
+                        "stream": rows.snapshot(),
                     })],
                     error: None,
                 }
             }
             Err(PluginError::Aborted) => PortOutcome {
                 // 半截产出仍要留痕：中止是这一笔的状态，不是「没有发生过」。
-                facts: vec![serde_json::json!({"status": "aborted"})],
+                facts: vec![serde_json::json!({
+                    "status": "aborted",
+                    "stream": rows.snapshot(),
+                })],
                 error: Some((PortErrorClass::NonRetryable, "aborted".to_string())),
             },
             Err(PluginError::RateLimited(why)) => {
-                PortOutcome::failed(PortErrorClass::Retryable, why)
+                with_stream(PortOutcome::failed(PortErrorClass::Retryable, why), &rows)
             }
-            Err(error) => PortOutcome::failed(PortErrorClass::NonRetryable, error.to_string()),
+            Err(error) => with_stream(
+                PortOutcome::failed(PortErrorClass::NonRetryable, error.to_string()),
+                &rows,
+            ),
         }
     }
+}
+
+/// 执行体自己的流式记账（`D-306` 裁决三 / `D-314`）。
+///
+/// provider 写出的每一帧先落成 `model.stream` 事实行，再由本写口按行名投影给
+/// 展示出口。本写口同时记下正文 / 推理的节点 id 与（可能半截的）正文——成功与
+/// 中止都以 `stream` 读数交出，环不再从 `StreamNodeFacts` 桥取这一份账。
+struct StreamRows {
+    emit: PortFactEmit,
+    display: ExecEventSink,
+    call_id: String,
+    seq: AtomicU64,
+    state: Mutex<StreamState>,
+}
+
+#[derive(Default)]
+struct StreamState {
+    text_id: Option<String>,
+    text: String,
+    reasoning_id: Option<String>,
+    reasoning: String,
+}
+
+impl StreamRows {
+    fn new(emit: PortFactEmit, display: ExecEventSink, call_id: String) -> Self {
+        Self {
+            emit,
+            display,
+            call_id,
+            seq: AtomicU64::new(0),
+            state: Mutex::new(StreamState::default()),
+        }
+    }
+
+    /// 一次读、两处共用：`response` 载荷里的读数与中止时的半截正文。
+    fn snapshot(&self) -> serde_json::Value {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        serde_json::json!({
+            "text": state.text,
+            "reasoning": state.reasoning,
+            "response_text_child_id": state.text_id,
+            "reasoning_child_id": state.reasoning_id,
+        })
+    }
+
+    /// 按帧形状记账：快照（`content`）替换正文并登记 id，增量（`delta`）按 id
+    /// 对上正文或推理。工具骨架帧不进这两格。
+    ///
+    /// 增量帧**不带 `msg_type`**（`llm_emit_delta` 只写 `id` + `delta`），因此
+    /// 不能照快照那样按类型分派——否则推理增量会被记进正文格。判据改成「谁登记
+    /// 过这个 id」：快照先建身份，增量按 id 找到它那一路。
+    fn observe(&self, node: &ChatNode) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let StreamState {
+            text_id,
+            text,
+            reasoning_id,
+            reasoning,
+        } = &mut *state;
+        if let Some(delta) = node.delta.as_deref() {
+            if reasoning_id.as_deref() == Some(node.id.as_str()) {
+                reasoning.push_str(delta);
+            } else if text_id.as_deref() == Some(node.id.as_str()) {
+                text.push_str(delta);
+            }
+            return;
+        }
+        match node.msg_type {
+            Some(NodeKind::Notice) => Self::snapshot_into(reasoning_id, reasoning, node),
+            Some(NodeKind::Skeleton) => {}
+            _ => Self::snapshot_into(text_id, text, node),
+        }
+    }
+
+    fn snapshot_into(id: &mut Option<String>, body: &mut String, node: &ChatNode) {
+        if let Some(MessageContent::Text(text)) = node.content.as_ref() {
+            *id = Some(node.id.clone());
+            *body = text.clone();
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ExecTranscriptWriter for StreamRows {
+    async fn apply(&self, message: ChatNode) {
+        self.observe(&message);
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        self.emit
+            .emit(vec![FactDraft {
+                key: format!("model-stream-{}-{seq}", self.call_id),
+                kind: EVENT_MODEL_STREAM.to_string(),
+                entity: Entity::Turn,
+                verb: Verb::Progressed,
+                payload: serde_json::json!({ "node": &message }),
+                produced_by: None,
+            }])
+            .await;
+        // 展示出口收到的是这条事实行的投影（帧本身），不是另一条通道。
+        self.display.emit(message).await;
+    }
+}
+
+/// 失败载荷也带上流式读数：中止 / 限流之后那段半截正文只活在这里。
+fn with_stream(mut outcome: PortOutcome, rows: &StreamRows) -> PortOutcome {
+    let stream = rows.snapshot();
+    match outcome.facts.first_mut() {
+        Some(first) => {
+            if let Some(object) = first.as_object_mut() {
+                object.insert("stream".to_string(), stream);
+            }
+        }
+        None => outcome
+            .facts
+            .push(serde_json::json!({ "stream": stream })),
+    }
+    outcome
 }
 
 /// 把最小消息形态翻成 provider 线格式（`D-305` 裁决一：请求构造归执行体）。

@@ -495,12 +495,14 @@ pub(crate) fn host_fact_emit(
     round: u64,
     actor: impl Into<String>,
     now: i64,
+    produced_by: Option<u64>,
 ) -> symbio_plugin_api::port::PortFactEmit {
     symbio_plugin_api::port::PortFactEmit::new(Arc::new(HostFactWriter {
         store,
         round,
         actor: actor.into(),
         now,
+        produced_by,
     }))
 }
 
@@ -515,6 +517,9 @@ struct HostFactWriter {
     round: u64,
     actor: String,
     now: i64,
+    /// 宿主默认的 `produced_by`：草稿自带时以草稿为准，缺席时用它盖章
+    /// ——归属属记账信封（`D-305`），执行体不必为此读环的结论。
+    produced_by: Option<u64>,
 }
 
 #[async_trait::async_trait]
@@ -529,7 +534,7 @@ impl symbio_plugin_api::port::PortFactWriter for HostFactWriter {
                 self.round,
                 &self.actor,
             );
-            event.produced_by = draft.produced_by;
+            event.produced_by = draft.produced_by.or(self.produced_by);
             event.payload = draft.payload;
             event.ts = self.now;
             match self.store.append(event) {
@@ -674,6 +679,7 @@ pub(crate) fn run_port<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 round_no,
                 ctx.session.principal().to_string(),
                 now,
+                Some(produced_by),
             ),
             ctx: Some(request_ctx),
         };

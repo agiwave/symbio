@@ -126,10 +126,11 @@ impl LlmAdapter for StubLlmAdapter {
         if let Some(msg) = self.fail_with {
             return Err(AdapterError::GenerationFailed(msg.to_string()));
         }
+        let node_id = symbio_sdk::llm::turn::llm_short_id();
         let text = match &self.chunks {
             Some(chunks) => {
                 for c in chunks {
-                    sink.on_delta(c);
+                    sink.on_delta(&node_id, c);
                 }
                 chunks.concat()
             }
@@ -139,7 +140,7 @@ impl LlmAdapter for StubLlmAdapter {
                     self.model,
                     messages.last().map(|m| m.text.as_str()).unwrap_or("")
                 );
-                sink.on_delta(&text);
+                sink.on_delta(&node_id, &text);
                 text
             }
         };
@@ -201,8 +202,10 @@ impl LlmAdapter for StubLlmAdapter {
         if let Some(msg) = self.fail_with {
             return Err(AdapterError::GenerationFailed(msg.to_string()));
         }
+        // 分片同属**一条**流：节点身份只铸一次，各片按同一 id 追加。
+        let node_id = symbio_sdk::llm::turn::llm_short_id();
         for c in chunks {
-            sink.on_delta(c);
+            sink.on_delta(&node_id, c);
         }
         let full = chunks.concat();
         Ok((full, 0))

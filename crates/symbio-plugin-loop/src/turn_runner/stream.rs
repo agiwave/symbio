@@ -135,6 +135,7 @@ pub(crate) fn begin_model(
             turn,
             principal.clone(),
             run.now_ms(),
+            Some(produced_by),
         ),
         ctx: None,
     };
@@ -147,17 +148,16 @@ pub(crate) fn begin_model(
     let fut = async move {
         // 有执行体就走执行体（生产路径，`D-305` 裁决一）；没有则仍走适配器
         // （过渡期的测试夹具/旧宿主），两条路**互斥**，不写第二份事实。
+        // 执行体交回的读数（`stream` 段）：节点 id 与半截正文由执行体持有
+        // （`D-306` 裁决三 / `D-314`），环不再从 `StreamNodeFacts` 桥取这一份账。
+        let mut round_fact: Option<serde_json::Value> = None;
         let engine: Result<symbio_sdk::adapters::LlmTurn, EngineStop> = match executor {
             Some(executor) => {
                 let outcome = executor.execute(exec, input).await;
+                round_fact = outcome.facts.first().cloned();
                 match outcome.error {
-                    None => turn_from_fact(
-                        outcome
-                            .facts
-                            .first()
-                            .unwrap_or(&serde_json::Value::Null),
-                    )
-                    .map_err(EngineStop::Failed),
+                    None => turn_from_fact(round_fact.as_ref().unwrap_or(&serde_json::Value::Null))
+                        .map_err(EngineStop::Failed),
                     Some((_, why)) => {
                         let aborted = outcome
                             .facts
@@ -181,7 +181,10 @@ pub(crate) fn begin_model(
         };
         let result = match engine {
             Ok(rt) => {
-                let facts = node_facts(&nodes_ok);
+                let facts = match round_fact.as_ref() {
+                    Some(fact) => round_stream_facts(fact),
+                    None => node_facts(&nodes_ok),
+                };
                 let mut fields =
                     output_fields(&call_id, &turn_root_id, &principal, &facts, Some(&rt));
                 let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
@@ -213,7 +216,10 @@ pub(crate) fn begin_model(
                 }
             }
             Err(stop) => {
-                let facts = node_facts(&nodes_failed);
+                let facts = match round_fact.as_ref() {
+                    Some(fact) => round_stream_facts(fact),
+                    None => node_facts(&nodes_failed),
+                };
                 let mut fields = output_fields(&call_id, &turn_root_id, &principal, &facts, None);
                 let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
                 *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
@@ -250,6 +256,21 @@ pub(crate) fn begin_model(
         }
     };
     Ok(ModelBegin::InFlight(Box::pin(fut)))
+}
+
+/// 执行体交回的 `stream` 读数 → 环内的 [`StreamNodeFacts`]。
+///
+/// 键名由 `symbio-plugin-model` 的行契约持有（环只按约定取值，不解释内容）；
+/// 缺 `stream` 段时落回顶层同名字段，让过渡期的执行体也读得出来。
+fn round_stream_facts(fact: &serde_json::Value) -> StreamNodeFacts {
+    let stream = fact.get("stream").unwrap_or(fact);
+    let text_of = |key: &str| stream.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    StreamNodeFacts {
+        text_id: text_of("response_text_child_id"),
+        text: text_of("text"),
+        reasoning_id: text_of("reasoning_child_id"),
+        reasoning: text_of("reasoning"),
+    }
 }
 
 /// 执行体交回的**值** → 环内消费的 [`LlmTurn`]。
@@ -697,7 +718,7 @@ async fn land_reflex<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    sink.on_delta(text);
+    sink.on_delta(&symbio_sdk::llm::turn::llm_short_id(), text);
     let cost_ms = run.started.elapsed().as_millis() as u64;
     if let Err(why) = closure_gate(&run.actor, ClosureKind::Speech) {
         deny(

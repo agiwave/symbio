@@ -727,12 +727,12 @@ mod turn_runner_tests {
     struct CollectingDeltas(std::sync::Mutex<Vec<String>>);
 
     impl symbio_sdk::adapters::DeltaSink for CollectingDeltas {
-        fn on_delta(&self, text: &str) {
+        fn on_delta(&self, _id: &str, text: &str) {
             self.0.lock().unwrap().push(text.to_string());
         }
         // 本组用例的桩不产推理增量；推理通道由
         // `crates/symbio-plugin-model/src/bound_provider.test.rs` 的桥接用例覆盖（那里有 SSE 级 fixture）。
-        fn on_reasoning(&self, _text: &str) {}
+        fn on_reasoning(&self, _id: &str, _text: &str) {}
         fn on_tool_frame(&self, _frame: &symbio_sdk::chat::chat_node::ChatNode) {}
     }
 
@@ -934,13 +934,13 @@ mod turn_runner_tests {
         struct Frames(Mutex<Vec<(String, String)>>);
 
         impl DeltaSink for Frames {
-            fn on_delta(&self, text: &str) {
+            fn on_delta(&self, _id: &str, text: &str) {
                 self.0
                     .lock()
                     .unwrap()
                     .push((String::new(), text.to_string()));
             }
-            fn on_reasoning(&self, _text: &str) {}
+            fn on_reasoning(&self, _id: &str, _text: &str) {}
             fn on_tool_frame(&self, frame: &symbio_sdk::chat::chat_node::ChatNode) {
                 self.0.lock().unwrap().push((
                     frame.id.clone(),
@@ -4673,11 +4673,11 @@ mod reflex_turn_tests {
     struct CollectingDeltas(Mutex<Vec<String>>);
 
     impl DeltaSink for CollectingDeltas {
-        fn on_delta(&self, text: &str) {
+        fn on_delta(&self, _id: &str, text: &str) {
             self.0.lock().unwrap().push(text.to_string());
         }
         // 快路不调模型 ⇒ 没有推理增量；通道由 `bound_provider.test.rs` 覆盖。
-        fn on_reasoning(&self, _text: &str) {}
+        fn on_reasoning(&self, _id: &str, _text: &str) {}
         fn on_tool_frame(&self, _frame: &symbio_sdk::chat::chat_node::ChatNode) {}
     }
 

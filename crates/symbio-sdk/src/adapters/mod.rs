@@ -170,7 +170,11 @@ pub struct LlmTurn {
 /// 跨线程投递（如 [`crate::exec::ExecEventSink`] 的桥接实现）。
 pub trait DeltaSink: Send + Sync + 'static {
     /// 正文增量（按序追加；适配器保证语义为「追加到正文尾部」）。
-    fn on_delta(&self, text: &str);
+    ///
+    /// `id` 是 provider 自有的节点身份（`D-306` 裁决三：增量就是 provider 经
+    /// `emit` 落下的事实行，展示层按行名投影 item）——展示层据此建节点，
+    /// **不得另铸**一个 id，否则事实面与界面会是两个节点。
+    fn on_delta(&self, id: &str, text: &str);
     /// 推理增量（`reasoning_content`——模型在正文之前的思考）。
     ///
     /// 与 [`Self::on_delta`] **分属两条流**：消费端各自建节点（`msg_type` 不同），
@@ -180,7 +184,7 @@ pub trait DeltaSink: Send + Sync + 'static {
     ///
     /// **必填而不是给个空默认实现**：漏实现的表现是「推理静默消失」——没有编译错误、
     /// 没有告警，只是界面上永远少一块。本仓对这类「静默失效」一律要求显式表态。
-    fn on_reasoning(&self, text: &str);
+    fn on_reasoning(&self, id: &str, text: &str);
 
     /// 工具调用帧——**消息形状**的第三条出口。
     ///
@@ -204,8 +208,8 @@ pub trait DeltaSink: Send + Sync + 'static {
 pub struct SilentDeltas;
 
 impl DeltaSink for SilentDeltas {
-    fn on_delta(&self, _text: &str) {}
-    fn on_reasoning(&self, _text: &str) {}
+    fn on_delta(&self, _id: &str, _text: &str) {}
+    fn on_reasoning(&self, _id: &str, _text: &str) {}
     fn on_tool_frame(&self, _frame: &ChatNode) {}
 }
 
@@ -258,7 +262,9 @@ pub trait LlmAdapter: Send + Sync {
         sink: std::sync::Arc<dyn DeltaSink>,
     ) -> Result<(String, u64), AdapterError> {
         let out = self.generate_timed(tok, messages).await?;
-        sink.on_delta(&out.0);
+        // 一次性全文也是**一帧**：节点身份仍由「产出方」给出（本默认实现即产出
+        // 方，故在此铸造）；展示层只按它建节点，不另铸。
+        sink.on_delta(&crate::llm::turn::llm_short_id(), &out.0);
         Ok(out)
     }
 

@@ -97,8 +97,8 @@ impl ExecTranscriptWriter for DeltaBridge {
             if !d.is_empty() {
                 // 窄帧不带 `msg_type` ⇒ 归属只能查登记表。
                 match self.nodes.lock().unwrap().get(&m.id) {
-                    Some(TextStream::Body) => self.sink.on_delta(d),
-                    Some(TextStream::Reasoning) => self.sink.on_reasoning(d),
+                    Some(TextStream::Body) => self.sink.on_delta(&m.id, d),
+                    Some(TextStream::Reasoning) => self.sink.on_reasoning(&m.id, d),
                     // 没登记的窄帧 = **工具参数增量**：快照帧不走登记表（它自带
                     // 全量身份），消息形状原样递给消费端——工具节点的构造权在
                     // 分发方，这里只递帧不建节点（见 [`DeltaSink::on_tool_frame`]）。
@@ -133,8 +133,8 @@ impl ExecTranscriptWriter for DeltaBridge {
         };
         self.nodes.lock().unwrap().insert(m.id.clone(), stream);
         match stream {
-            TextStream::Body => self.sink.on_delta(t),
-            TextStream::Reasoning => self.sink.on_reasoning(t),
+            TextStream::Body => self.sink.on_delta(&m.id, t),
+            TextStream::Reasoning => self.sink.on_reasoning(&m.id, t),
         }
     }
 }

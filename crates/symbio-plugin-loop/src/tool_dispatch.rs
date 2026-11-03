@@ -1260,6 +1260,7 @@ impl SessionDispatchPort {
                 self.round,
                 self.actor.principal.clone(),
                 clock_now_ms(),
+                Some(self.user_seq),
             ),
             round: self.round,
             round_id: self.root_id.clone(),

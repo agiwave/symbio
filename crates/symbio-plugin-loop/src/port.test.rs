@@ -1233,6 +1233,7 @@ async fn emit_lands_with_host_stamp_and_absorbs_duplicates() {
         round: 7,
         actor: "brain/agent".to_string(),
         now: 1_700_000_000_000_i64,
+        produced_by: None,
     }));
     let draft = || symbio_plugin_api::FactDraft {
         key: "emit-1".to_string(),

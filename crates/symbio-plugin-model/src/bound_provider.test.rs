@@ -244,10 +244,10 @@ impl Collecting {
 }
 
 impl symbio_plugin_api::DeltaSink for Collecting {
-    fn on_delta(&self, text: &str) {
+    fn on_delta(&self, _id: &str, text: &str) {
         self.text.lock().unwrap().push(text.to_string());
     }
-    fn on_reasoning(&self, text: &str) {
+    fn on_reasoning(&self, _id: &str, text: &str) {
         self.reasoning.lock().unwrap().push(text.to_string());
     }
     fn on_tool_frame(&self, frame: &symbio_plugin_api::chat_node::ChatNode) {

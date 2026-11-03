@@ -109,7 +109,6 @@ use symbio_sdk::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use symbio_sdk::invariants::is_stop_fact;
-use symbio_sdk::llm::turn::llm_short_id;
 use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest};
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
@@ -514,28 +513,31 @@ impl UiBridge {
 }
 
 impl DeltaSink for UiBridge {
-    fn on_delta(&self, text: &str) {
+    fn on_delta(&self, id: &str, text: &str) {
         if text.is_empty() {
             return;
         }
-        // 取 id、累积与建帧**一次锁内做完**（与 [`Self::on_reasoning`] 同形、同理由：
-        // 三个动作必须原子，分两次锁会让「首片」的判定与累积不同步）。帧在锁内
+        // 累积与建帧**一次锁内做完**（与 [`Self::on_reasoning`] 同形、同理由：
+        // 两个动作必须原子，分两次锁会让「首片」的判定与累积不同步）。帧在锁内
         // 建好、`send` 在锁外——`send` 会去开队列自己的锁，没必要叠着。
+        //
+        // id **不由本桥铸造**：它是 provider 经 `emit` 落下的事实行名（`D-306`
+        // 裁决三）。自铸会让事实面与界面成为两个节点，收口时按事实的 id 定格
+        // 就成了「移除一个从未出现过的节点」。
         let frame = {
             let mut guard = self.node.lock().unwrap();
             match guard.as_mut() {
-                Some((id, acc)) => {
+                Some((cur, acc)) if cur == id => {
                     acc.push_str(text);
                     UiFrame::Delta {
-                        id: id.clone(),
+                        id: id.to_string(),
                         text: text.to_string(),
                     }
                 }
-                None => {
-                    let id = llm_short_id();
-                    *guard = Some((id.clone(), text.to_string()));
+                _ => {
+                    *guard = Some((id.to_string(), text.to_string()));
                     UiFrame::Snapshot {
-                        id,
+                        id: id.to_string(),
                         parent: self.root_id.clone(),
                         text: text.to_string(),
                         kind: UiNodeKind::Text,
@@ -550,29 +552,27 @@ impl DeltaSink for UiBridge {
 
     /// 推理增量：与 [`Self::on_delta`] **同形**（首片建节点、此后窄追加 + 累积正文），
     /// 只差节点类型是 `Reasoning`。
-    fn on_reasoning(&self, text: &str) {
+    fn on_reasoning(&self, id: &str, text: &str) {
         if text.is_empty() {
             return;
         }
-        // 取 id、累积与建帧**一次锁内做完**：三个动作必须原子（同一片既进累积
-        // 又定帧序）。分两次锁会让「首片」的判定与累积不同步，且首片那侧还得
-        // 再锁一次把刚写进去的 id 取回来（`as_ref().unwrap()` 那种写法）。
-        // 帧在锁内建好、`send` 在锁外——`send` 会去开队列自己的锁，没必要叠着。
+        // 累积与建帧**一次锁内做完**：两个动作必须原子（同一片既进累积
+        // 又定帧序）。帧在锁内建好、`send` 在锁外——`send` 会去开队列自己的锁，
+        // 没必要叠着。id 同 [`Self::on_delta`]：provider 自有，本桥不铸。
         let frame = {
             let mut guard = self.reasoning.lock().unwrap();
             match guard.as_mut() {
-                Some((id, acc)) => {
+                Some((cur, acc)) if cur == id => {
                     acc.push_str(text);
                     UiFrame::Delta {
-                        id: id.clone(),
+                        id: id.to_string(),
                         text: text.to_string(),
                     }
                 }
-                None => {
-                    let id = llm_short_id();
-                    *guard = Some((id.clone(), text.to_string()));
+                _ => {
+                    *guard = Some((id.to_string(), text.to_string()));
                     UiFrame::Snapshot {
-                        id,
+                        id: id.to_string(),
                         parent: self.root_id.clone(),
                         text: text.to_string(),
                         kind: UiNodeKind::Reasoning,
