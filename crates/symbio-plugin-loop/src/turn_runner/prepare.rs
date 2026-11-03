@@ -60,6 +60,9 @@ pub(crate) struct Prepared {
     /// 它同时是**本次 drive 的时间锚**：幕首落的那条唤醒事实就在这个 seq 上
     /// （见 [`Prepared::now_ms`]）。
     pub(crate) drive_seq: u64,
+    /// 接缝上定下的**系统提示**（`prepare_request_sections` 的同一份值）：模型请求
+    /// 载荷由 `announce-model` 行按事实装配（`DE-047` D-306 裁决二）。
+    pub(crate) system_prompt: String,
     /// 轮内**步号**（1 起）：第几次模型往返。模型端口的逻辑 id 带它——
     /// 一次往返一个 id，否则第二次的 `sent` 撞第一次的幂等键。
     pub(crate) step: u64,
@@ -114,6 +117,9 @@ pub(crate) struct Prepared {
     /// 这一格是「请求已落、模型还没打」。两格之间的那一步（`dispatch-model` 行）由
     /// 另一个执行体跑，所以交接件只能放在草稿里——它就是那两个动作之间唯一的凭据。
     pub(crate) pending_round: Option<super::super::port::Call>,
+    /// 与 [`Self::pending_round`] 同一笔的请求载荷（`announce-model` 行装配，
+    /// `D-306` 裁决二）：派出那一步原样交给模型端口执行体。
+    pub(crate) pending_round_payload: Option<serde_json::Value>,
     /// 创建动作开出的端口账（b）：创建 → 授权 → 派发三个动作之间**唯一**
     /// 的交接件，**按调用标识逐笔寄存**（不按批聚合）。
     ///
@@ -399,6 +405,7 @@ where
     Ok(PreparedFlow::Run(Box::new(Prepared {
         turn,
         drive_seq,
+        system_prompt: String::new(),
         step: 0,
         actor,
         abort,
@@ -420,6 +427,7 @@ where
         nodes,
         pending_model: None,
         pending_round: None,
+        pending_round_payload: None,
         calls: std::collections::HashMap::new(),
         round_calls: Vec::new(),
         round_outcomes: std::collections::HashMap::new(),

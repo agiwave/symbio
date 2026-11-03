@@ -7,14 +7,16 @@
 
 use std::sync::Arc;
 
-use symbio_plugin_api::chat_node::ChatNode;
+use symbio_plugin_api::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
+};
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
 };
 use symbio_plugin_api::ports;
 use symbio_plugin_api::{
-    CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv, LlmAdapter, ModelFinishReason,
-    ModelProvider, PluginError, ProviderLlmAdapter,
+    llm_short_id, CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv, LlmAdapter,
+    ModelFinishReason, ModelProvider, PluginError, PromptMessage, ProviderLlmAdapter,
 };
 
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
@@ -89,7 +91,7 @@ struct RoundTripRequest {
     #[serde(default)]
     system_prompt: String,
     #[serde(default)]
-    messages: Vec<ChatNode>,
+    messages: Vec<PromptMessage>,
     #[serde(default)]
     tools: Vec<CapabilityMeta>,
     #[serde(default)]
@@ -119,14 +121,16 @@ impl PortExecutor for ModelExecutor {
             .as_deref()
             .and_then(|id| self.catalog.iter().find(|p| p.provider_id() == id))
             .unwrap_or(&self.active);
+        // 请求构造归执行体（D-305 裁决一 / D-306 裁决二）：环交进的是**值**
+        // （`PromptMessage`），线格式在这里收口。
+        let wire = wire_messages(&request.messages);
+        let started = std::time::Instant::now();
         let env = ExecEnv::new(exec.sink.clone(), exec.abort.clone());
         match provider
-            // 债的预算与租约由环在派发前盖章；执行上下文（deadline / abort / 幂等键）
-            // 原样交进来，执行体内不再另开一档校验（D-305 裁决一）。
             // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
             .round_trip(
                 &request.system_prompt,
-                &request.messages,
+                &wire,
                 &request.tools,
                 &request.root_id,
                 &env,
@@ -156,6 +160,10 @@ impl PortExecutor for ModelExecutor {
                         "response_id": output.response_id,
                         "tool_calls": calls,
                         "finish": finish_str(&output.finish),
+                        // 终止判定归执行体（D-305 裁决一）：有工具调用 ⇒ 还要再派一批；
+                        // 没有 ⇒ 这一轮答完了。环只照抄，不再按世界分支。
+                        "decision": if output.tool_calls.is_empty() { "halt" } else { "tools" },
+                        "cost_ms": started.elapsed().as_millis() as u64,
                         "usage": output.usage.as_ref().map(|u| serde_json::json!({
                             "input": u.input,
                             "output": u.output,
@@ -181,6 +189,151 @@ impl PortExecutor for ModelExecutor {
             Err(error) => PortOutcome::failed(PortErrorClass::NonRetryable, error.to_string()),
         }
     }
+}
+
+/// 把最小消息形态翻成 provider 线格式（`D-305` 裁决一：请求构造归执行体）。
+///
+/// 规则与 `ProviderLlmAdapter::generate_turn` 的线格式段落逐条同义：
+/// 同一次工具调用只发**最终**那条结果；本次请求里声明过的调用用树形骨架
+/// （run 根 + tool 子节点），跨轮结果降级成 assistant 文本，其余按角色直译。
+fn wire_messages(messages: &[PromptMessage]) -> Vec<ChatNode> {
+    // 同一次调用只把**最终**那条结果发给模型（协议侧「一次调用一条结果」）。
+    let last_result_of: Vec<(String, usize)> = {
+        let mut last: Vec<(String, usize)> = Vec::new();
+        for (i, m) in messages.iter().enumerate() {
+            if m.role != "tool" {
+                continue;
+            }
+            if let Some(id) = &m.tool_call_id {
+                match last.iter_mut().find(|(k, _)| k == id) {
+                    Some(slot) => slot.1 = i,
+                    None => last.push((id.clone(), i)),
+                }
+            }
+        }
+        last
+    };
+
+    let declared_call_ids: Vec<String> = messages
+        .iter()
+        .filter_map(|m| m.tool_calls.as_ref())
+        .flat_map(|cs| cs.iter().map(|c| c.id.clone()))
+        .collect();
+
+    let mut wire: Vec<ChatNode> = Vec::with_capacity(messages.len() * 2);
+    for (idx, m) in messages.iter().enumerate() {
+        if m.role == "tool"
+            && m.tool_call_id.as_ref().is_some_and(|id| {
+                last_result_of
+                    .iter()
+                    .find(|(k, _)| k == id)
+                    .is_some_and(|(_, at)| *at != idx)
+            })
+        {
+            continue;
+        }
+        match (&m.role[..], &m.tool_calls) {
+            ("assistant", Some(calls)) if !calls.is_empty() => {
+                let root_id = llm_short_id();
+                let root = ChatNode {
+                    id: root_id.clone(),
+                    role: Some(NodeRole::Assistant),
+                    msg_type: Some(NodeKind::Skeleton),
+                    content: Some(MessageContent::Text(m.text.clone())),
+                    ..Default::default()
+                }
+                .with_style_tag(CHAT_STYLE_TAG_RUN);
+                let mut nodes: Vec<ChatNode> = vec![root];
+                for c in calls {
+                    nodes.push(
+                        ChatNode {
+                            id: llm_short_id(),
+                            parent_id: Some(root_id.clone()),
+                            role: Some(NodeRole::Assistant),
+                            msg_type: Some(NodeKind::Skeleton),
+                            // 参数走 content（展平时从这里 re-parse）。
+                            content: Some(MessageContent::Text(c.arguments.to_string())),
+                            tool_call_id: Some(c.id.clone()),
+                            ..Default::default()
+                        }
+                        .with_style_tag(CHAT_STYLE_TAG_TOOL)
+                        .with_tool_name(Some(c.name.clone())),
+                    );
+                }
+                for r in messages
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, x)| x.role == "tool")
+                    .filter(|(_, x)| calls.iter().any(|c| Some(&c.id) == x.tool_call_id.as_ref()))
+                    .filter(|(at, x)| {
+                        x.tool_call_id.as_ref().is_some_and(|id| {
+                            last_result_of
+                                .iter()
+                                .find(|(k, _)| k == id)
+                                .is_some_and(|(_, last)| last == at)
+                        })
+                    })
+                    .map(|(_, r)| r)
+                {
+                    nodes.push(ChatNode {
+                        id: llm_short_id(),
+                        parent_id: nodes
+                            .iter()
+                            .find(|n| n.tool_call_id == r.tool_call_id)
+                            .map(|n| n.id.clone()),
+                        role: Some(NodeRole::Tool),
+                        msg_type: Some(NodeKind::Body),
+                        content: Some(MessageContent::Text(r.text.clone())),
+                        tool_call_id: r.tool_call_id.clone(),
+                        ..Default::default()
+                    });
+                }
+                wire.extend(nodes);
+            }
+            // 历史工具结果（跨轮）：降级成 assistant 文本（协议要求 tool_call_id 必须
+            // 匹配本次请求里的声明，跨轮结果没有那份声明）。
+            ("tool", _) if m.tool_calls.is_none() => {
+                let already_nested = wire.iter().any(|n| {
+                    n.is_text()
+                        && n.tool_call_id == m.tool_call_id
+                        && n.node_role() == Some(NodeRole::Tool)
+                        && n.content.as_ref().map(|c| c.to_text()) == Some(m.text.clone())
+                });
+                let declared_here = m
+                    .tool_call_id
+                    .as_ref()
+                    .is_some_and(|id| declared_call_ids.contains(id));
+                if !already_nested && !declared_here {
+                    wire.push(ChatNode {
+                        id: llm_short_id(),
+                        role: Some(NodeRole::Assistant),
+                        content: Some(MessageContent::Text(format!(
+                            "（此前调用工具 {} 的结果）{}",
+                            m.tool.as_deref().unwrap_or("<unnamed>"),
+                            m.text
+                        ))),
+                        ..Default::default()
+                    });
+                }
+            }
+            _ => {
+                wire.push(ChatNode {
+                    id: llm_short_id(),
+                    role: Some(match m.role.as_str() {
+                        "assistant" => NodeRole::Assistant,
+                        "tool" => NodeRole::Tool,
+                        "system" => NodeRole::System,
+                        // 未知角色不默认成 user：那会把「不知道」伪装成「用户说的」。
+                        _ => NodeRole::User,
+                    }),
+                    content: Some(MessageContent::Text(m.text.clone())),
+                    tool_call_id: m.tool_call_id.clone(),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+    wire
 }
 
 /// 一次往返的产物键名归本插件的行契约；环不解析。

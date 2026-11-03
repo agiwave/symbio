@@ -29,6 +29,12 @@ pub(crate) enum ModelCallError {
     Control(String),
 }
 
+/// 一次往返的停法（两条引擎路径共用）：中止 vs 报错。
+enum EngineStop {
+    Aborted,
+    Failed(String),
+}
+
 /// 一次模型往返 = 端口 `model` 的一次调用。
 ///
 /// 协议事实由 `port` 模块写（**唯一写方**）：
@@ -56,10 +62,10 @@ pub(crate) enum ModelCallError {
 // 八个入参是「七个端口 + 这一笔的身份」：前七个各是一个不同的端口（草稿 / 事实源 /
 // 适配器 / 令牌 / 消息 / 工具清单 / 流式出口），第八个是**这一笔往返的键**——它在
 // 宣布那一步就定了（D-166），所以不能在这里重新生成。
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn begin_model(
     run: &mut Prepared,
     store: std::sync::Arc<dyn Store<Event = Event>>,
+    executor: Option<std::sync::Arc<dyn symbio_plugin_api::port::PortExecutor>>,
     llm: std::sync::Arc<dyn LlmAdapter>,
     tok: FullModel,
     sink: std::sync::Arc<dyn symbio_sdk::adapters::DeltaSink>,
@@ -70,13 +76,17 @@ pub(crate) fn begin_model(
     let Some(call) = run.pending_round.take() else {
         return Ok(ModelBegin::NoPending);
     };
+    let Some(payload) = run.pending_round_payload.take() else {
+        return Err(ModelCallError::Control("模型请求载荷缺席".into()));
+    };
     let turn = run.turn;
     let drive = run.drive_seq;
     let produced_by = run.user_seq;
     // 基线 + 本轮交换。**拼接消息数组**：拼字符串会把角色拍平、丢掉 `tool_call_id`。
+    // 端口执行体在场时这份数组已经随请求载荷交出（`announce-model` 行装配）；
+    // 过渡期的适配器路径仍按原位消费它。
     let mut messages = run.base_messages.clone();
     messages.extend(run.exchange.iter().cloned());
-
     // 派出这一步的**唯一出口**是 `sent`（`D-222` 订正 2）：落完它，这一行的账就还清了，
     // 「在等」从下一圈起由 `await-model` 认领——于是两次选债之间「已派出、未收清」
     // 在事实面上读得到（`waiting` 视图 + `stale_sent`），而不是只在崩溃恢复的输入上才有值。
@@ -113,12 +123,63 @@ pub(crate) fn begin_model(
     let call_id = call.id.clone();
     let round_id = call.id.clone();
 
+    // 执行上下文：abort 与幂等键原样交出去；增量仍走既有的桥（不新开通道），
+    // 事实草稿口按宿主唯一写口（`emit`）。
+    let exec = symbio_plugin_api::port::PortExecContext {
+        deadline_ms: None,
+        abort: run.abort.clone().unwrap_or_default(),
+        idempotency_key: call.id.clone(),
+        sink: symbio_sdk::adapters::delta_event_sink(sink.clone()),
+        emit: super::super::port::host_fact_emit(
+            store.clone(),
+            turn,
+            principal.clone(),
+            run.now_ms(),
+        ),
+        ctx: None,
+    };
+    let input = symbio_plugin_api::port::PortInput {
+        port: "model",
+        payload,
+    };
+
     // future 捕获的每一样都是 owned：槽不带生命周期参数（见 [`ModelInFlight`]）。
     let fut = async move {
-        let answer = llm
-            .generate_turn(&tok, &messages, tools.as_ref(), sink)
-            .await;
-        let result = match answer {
+        // 有执行体就走执行体（生产路径，`D-305` 裁决一）；没有则仍走适配器
+        // （过渡期的测试夹具/旧宿主），两条路**互斥**，不写第二份事实。
+        let engine: Result<symbio_sdk::adapters::LlmTurn, EngineStop> = match executor {
+            Some(executor) => {
+                let outcome = executor.execute(exec, input).await;
+                match outcome.error {
+                    None => turn_from_fact(
+                        outcome
+                            .facts
+                            .first()
+                            .unwrap_or(&serde_json::Value::Null),
+                    )
+                    .map_err(EngineStop::Failed),
+                    Some((_, why)) => {
+                        let aborted = outcome
+                            .facts
+                            .first()
+                            .and_then(|f| f.get("status"))
+                            .and_then(|s| s.as_str())
+                            == Some("aborted");
+                        Err(if aborted {
+                            EngineStop::Aborted
+                        } else {
+                            EngineStop::Failed(why)
+                        })
+                    }
+                }
+            }
+            None => match llm.generate_turn(&tok, &messages, tools.as_ref(), sink).await {
+                Ok(rt) => Ok(rt),
+                Err(AdapterError::Aborted) => Err(EngineStop::Aborted),
+                Err(e) => Err(EngineStop::Failed(e.to_string())),
+            },
+        };
+        let result = match engine {
             Ok(rt) => {
                 let facts = node_facts(&nodes_ok);
                 let mut fields =
@@ -133,13 +194,7 @@ pub(crate) fn begin_model(
                     .map(|(idx, tc)| {
                         serde_json::json!({
                             "port": "tool",
-                            "id": call_id_of(
-                                turn,
-                                drive,
-                                idx,
-                                tc.id.as_deref(),
-                                &round_id,
-                            ),
+                            "id": call_id_of(turn, drive, idx, tc.id.as_deref(), &round_id),
                             "name": tc.name.clone().unwrap_or_default(),
                             "arguments": tc.arguments.clone(),
                         })
@@ -157,33 +212,33 @@ pub(crate) fn begin_model(
                     Err(e) => Err(ModelCallError::Store(e)),
                 }
             }
-            Err(e) => {
+            Err(stop) => {
                 let facts = node_facts(&nodes_failed);
                 let mut fields = output_fields(&call_id, &turn_root_id, &principal, &facts, None);
                 let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
                 *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
                 // 停法进载荷：重建按它定节点状态，而 `failed` 本身不区分「用户按停」
-                // 与「适配器报错」——那条区分只在这一格。
+                // 与「执行体报错」——那条区分只在这一格。
+                let (aborted, why) = match stop {
+                    EngineStop::Aborted => (true, String::from("aborted")),
+                    EngineStop::Failed(why) => (false, why),
+                };
                 fields["status"] = serde_json::Value::String(
-                    if matches!(e, AdapterError::Aborted) {
-                        "aborted"
-                    } else {
-                        "failed"
-                    }
-                    .to_string(),
+                    if aborted { "aborted" } else { "failed" }.to_string(),
                 );
-                // 失败也要留痕：写不进去不掩盖适配器自己的错误（它更有信息量）。
+                // 失败也要留痕：写不进去不掩盖执行体自己的错误（它更有信息量）。
                 let _ = super::super::port::failed_with_extra(
                     store.as_ref(),
                     &call,
                     turn,
                     produced_by,
-                    &e.to_string(),
+                    &why,
                     fields,
                 );
-                Err(match e {
-                    AdapterError::Aborted => ModelCallError::Aborted,
-                    other => ModelCallError::Failed(other.to_string()),
+                Err(if aborted {
+                    ModelCallError::Aborted
+                } else {
+                    ModelCallError::Failed(why)
                 })
             }
         };
@@ -195,6 +250,62 @@ pub(crate) fn begin_model(
         }
     };
     Ok(ModelBegin::InFlight(Box::pin(fut)))
+}
+
+/// 执行体交回的**值** → 环内消费的 [`LlmTurn`]。
+///
+/// 一次往返的语义键（`text` / `reasoning` / `tool_calls` / `finish` / `usage` /
+/// `spend` / `cost_ms`）在 `symbio-plugin-model` 的执行体里已经成形；这里只做形状
+/// 转写，不重判任何一条（`D-305` 裁决一）。
+fn turn_from_fact(fact: &serde_json::Value) -> Result<symbio_sdk::adapters::LlmTurn, String> {
+    use symbio_plugin_api::{ModelFinishReason, ModelSpend, ModelUsage, TurnToolCallInfo};
+    let opt_str = |key: &str| fact.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    let tool_calls: Vec<TurnToolCallInfo> = fact
+        .get("tool_calls")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|v| TurnToolCallInfo {
+                    id: v.get("id").and_then(|x| x.as_str()).map(str::to_string),
+                    wire_id: v.get("wire_id").and_then(|x| x.as_str()).map(str::to_string),
+                    name: v.get("name").and_then(|x| x.as_str()).map(str::to_string),
+                    arguments: v
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or(serde_json::json!({})),
+                    parse_error: v
+                        .get("parse_error")
+                        .and_then(|x| x.as_str())
+                        .map(str::to_string),
+                    overflow_notice: v
+                        .get("overflow_notice")
+                        .and_then(|x| x.as_str())
+                        .map(str::to_string),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(symbio_sdk::adapters::LlmTurn {
+        text: opt_str("text").unwrap_or_default(),
+        reasoning: opt_str("reasoning").unwrap_or_default(),
+        tool_calls,
+        finish: ModelFinishReason::from_provider(fact.get("finish").and_then(|v| v.as_str())),
+        cost_ms: fact.get("cost_ms").and_then(|v| v.as_u64()).unwrap_or(0),
+        usage: fact.get("usage").and_then(|v| {
+            let input = v.get("input").and_then(|x| x.as_u64()).map(|x| x as u32);
+            let output = v.get("output").and_then(|x| x.as_u64()).map(|x| x as u32);
+            (input.is_some() || output.is_some()).then_some(ModelUsage { input, output })
+        }),
+        spend: fact.get("spend").and_then(|v| {
+            v.get("currency").and_then(|c| c.as_str()).map(|currency| ModelSpend {
+                amount_nano: v
+                    .get("amount_nano")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0),
+                currency: currency.to_string(),
+            })
+        }),
+    })
 }
 
 /// 一次**已派出、还没收清**的模型往返（`DE-015` 的 `D-222` 订正 2）。
@@ -304,6 +415,7 @@ pub(crate) enum ModelRound {
 pub(crate) async fn announce_round<S>(
     run: &mut Prepared,
     store: &S,
+    tools: &[symbio_kernel::capability::CapabilityMeta],
 ) -> Result<(), symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
@@ -313,8 +425,19 @@ where
         format!("model-{}-d{}-s{}", run.turn, run.drive_seq, run.step),
         1,
     );
-    super::super::port::announce(store, &call, run.turn, run.user_seq)?;
+    // 载荷装配留在行（D-306 裁决二）：消息数组从这里**原样**交出去，线格式由
+    // `symbio-plugin-model` 的执行体收口——中间没有第二处拼装。
+    let mut messages = run.base_messages.clone();
+    messages.extend(run.exchange.iter().cloned());
+    let payload = serde_json::json!({
+        "system_prompt": run.system_prompt,
+        "messages": messages,
+        "tools": tools,
+        "root_id": run.turn_root_id,
+    });
+    super::super::port::announce_with(store, &call, run.turn, run.user_seq, payload.clone())?;
     run.pending_round = Some(call);
+    run.pending_round_payload = Some(payload);
     Ok(())
 }
 

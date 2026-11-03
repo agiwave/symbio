@@ -769,6 +769,8 @@ pub(crate) struct HeadCtx<'a> {
     pub(crate) event_sink: &'a ExecEventSink,
     pub(crate) root_id: &'a str,
     pub(crate) fresh_root: bool,
+    /// 会话系统提示（接缝与压缩的请求级开销都要它；`D-306` 裁决四）。
+    pub(crate) system_prompt: &'a str,
     /// 本幕主体（幕首已定）：接缝的派发格与首响格都要它，重算就是第二个取值点。
     pub(crate) actor: &'a ActorSpec,
     pub(crate) report_port: Option<&'a super::report_exec::ReportPort>,
@@ -792,6 +794,7 @@ pub(crate) struct HeadParts<'h> {
     pub(crate) event_sink: ExecEventSink,
     pub(crate) root_id: String,
     pub(crate) fresh_root: bool,
+    pub(crate) system_prompt: String,
     pub(crate) actor: ActorSpec,
     pub(crate) report_port: Option<super::report_exec::ReportPort>,
     pub(crate) report_landing: super::report_exec::ReportLanding,
@@ -812,6 +815,7 @@ impl<'h> HeadParts<'h> {
             event_sink: &self.event_sink,
             root_id: &self.root_id,
             fresh_root: self.fresh_root,
+            system_prompt: &self.system_prompt,
             actor: &self.actor,
             report_port: self.report_port.as_ref(),
             report_landing: &self.report_landing,
@@ -890,7 +894,7 @@ pub(crate) type Action = for<'a> fn(&'a mut Ctx<'a>) -> StepFuture<'a>;
 pub(crate) fn run_execute<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         ctx.session
-            .announce_model(ctx.store.as_ref())
+            .announce_model(ctx.store.as_ref(), ctx.tools.as_ref())
             .await
             .map_err(ActorError::Append)
     })
@@ -1060,8 +1064,8 @@ pub(crate) fn recall_action<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 
 /// `compress` 执行体：`policy.compress` 行选中的动作。
 ///
-/// 本体住在 [`policy::compress`]；水位要的那份请求级开销读本轮状态的
-/// `request_overhead`（其事实化归 P2-3 的预算租约）。
+/// 本体住在 [`policy::compress`]；水位要的那份请求级开销在行内按
+/// `system_prompt + tools` 就地算（`D-306` 裁决四：预算/租约的入格归行）。
 pub(crate) fn compress_action<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let head = take_head(ctx)?;
@@ -1071,6 +1075,8 @@ pub(crate) fn compress_action<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             ctx.store,
             head.context,
             head.turn,
+            head.system_prompt,
+            ctx.tools.as_ref(),
         )
         .await
     })
@@ -1090,6 +1096,13 @@ pub(crate) fn compress_action<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let head = take_head(ctx)?;
+        // 模型往返的承接体在接缝上定：执行体只拿 `emit` + 只读事实面（D-305 裁决一），
+        // 环不把任何模型语义再搬进来。
+        let executor = super::port::provider_of(head.request_ctx, "model")
+            .await
+            .and_then(|provider| provider.executor());
+        ctx.session.set_system_prompt(head.system_prompt.to_string());
+        ctx.session.set_model_executor(executor);
         let consolidation = head.context.consolidated.take();
         let facts = head.loop_session.facts_snapshot();
         let opening = super::stage_events::opening_of(&facts, head.turn.turn_no, head.turn.drive_seq);
@@ -1109,6 +1122,7 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             head.req,
             head.root_id,
             head.fresh_root,
+            head.system_prompt,
             ctx.tools.as_ref(),
         )
         .await?;

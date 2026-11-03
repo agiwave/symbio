@@ -207,6 +207,7 @@ impl StageRuntime {
             event_sink: host.assembled.sink.clone(),
             root_id: host.assembled.root_id.clone(),
             fresh_root: host.assembled.fresh_root,
+            system_prompt: host.assembled.system_prompt.clone(),
             actor: host.assembled.actor.clone(),
             report_port: host.assembled.report.clone(),
             report_landing: host.report_landing.clone(),
@@ -584,7 +585,7 @@ async fn open_stage(
     );
 
     // ── 幕首 ③：环前纯读（提示词 / 工具 / 开销）────────────────────────────
-    let reads = super::super::chat_loop::inputs::collect_reads(ctx, req, turn).await;
+    let reads = super::super::chat_loop::inputs::collect_reads(ctx, req).await;
 
     // ── 幕首 ④：定根（一幕一个根）────────────────────────────────────────
     //

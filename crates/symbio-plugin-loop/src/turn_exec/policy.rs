@@ -488,7 +488,10 @@ pub(crate) async fn compress(
     store: &Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
     context: &mut SessionContext,
     turn: &mut TurnState,
+    system_prompt: &str,
+    tools: &[symbio_kernel::capability::CapabilityMeta],
 ) -> Result<(), ActorError> {
+    let overhead_tokens = super::super::context::estimate_overhead_with_tools(system_prompt, tools);
     let compress = Compress::new(
         store.clone(),
         turn.turn_no,
@@ -502,7 +505,7 @@ pub(crate) async fn compress(
         context,
         ctx,
         &turn.abort,
-        turn.request_overhead,
+        overhead_tokens,
         false,
         Some(&compress),
     )

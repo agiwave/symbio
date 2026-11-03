@@ -46,6 +46,15 @@ use symbio_kernel::llm::ModelProvider;
 use symbio_kernel::llm::PromptMessage;
 use symbio_kernel::plugin::PluginError;
 
+/// 用现有 [`DeltaSink`] 搭一个执行流出口：端口执行体与对话链路共用同一条展示通道，
+/// 不新开第二条（`DE-047` D-306 裁决三）。
+pub fn delta_event_sink(sink: Arc<dyn DeltaSink>) -> ExecEventSink {
+    ExecEventSink::direct(Arc::new(DeltaBridge {
+        sink,
+        nodes: Default::default(),
+    }))
+}
+
 /// 流式帧桥：把 `round_trip` 的转写帧**择要**转成增量——三条出口各管一类：
 /// - **正文 / 推理**（[`DeltaSink::on_delta`] / [`DeltaSink::on_reasoning`]）：
 ///   快照帧（[`ChatNode::is_text`] / [`ChatNode::is_reasoning`] 且 `status = Streaming`）登记节点 id
@@ -505,13 +514,7 @@ impl LlmAdapter for ProviderLlmAdapter {
         // 中止信号直通调用方（会话轮的中止语义不因换执行路径而丢）。
         // 工具调用帧不进 v2 文本面：工具节点的构造权在分发方（loop 插件），
         // 由它按**同一份** `tool_calls` 建节点——两处各建一份必然出现重复卡片。
-        let env = ExecEnv::new(
-            ExecEventSink::direct(Arc::new(DeltaBridge {
-                sink,
-                nodes: Default::default(),
-            })),
-            self.abort_signal(),
-        );
+        let env = ExecEnv::new(delta_event_sink(sink), self.abort_signal());
         let output = self
             .provider
             // internal-model-allow IM-001/gate: 这里是闸门自己的方法体——`LlmAdapter::generate` 拿到 `&FullModel` 之后才走到这一步，它要守的正是这一处；`tools` 是**转发**调用方的形参，不是这里造的空切片（IM-004 的形状因此与内部请求相反）

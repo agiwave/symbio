@@ -189,6 +189,7 @@ impl<E: fmt::Debug> fmt::Display for DispatchError<E> {
 /// 决策者写 `request`：这一轮欠一次 `<port>` 调用。
 ///
 /// 幂等：同 `(port, id, attempt)` 重跑 ⇒ `Duplicate`，视为已记录。
+#[cfg(test)]
 pub(crate) fn announce<S>(
     store: &S,
     call: &Call,

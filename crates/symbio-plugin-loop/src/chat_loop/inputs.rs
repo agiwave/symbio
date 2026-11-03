@@ -149,17 +149,11 @@ pub(crate) struct TurnReads {
 pub(crate) async fn collect_reads(
     ctx: &Arc<dyn PluginInvokeRequest>,
     req: &TurnRequest,
-    turn: &mut TurnState,
 ) -> TurnReads {
     // ── ① 系统提示词 + 工具：同一函数、同一时刻、同一 Registry ──────
     let system_prompt = resolve_system_prompt(req.system_prompt.as_deref(), ctx).await;
 
     let tools = symbio_sdk::capability::tool_metas(ctx).await;
-
-    // ── ② 请求级固定开销：一轮只算一次，寄存进本轮状态供压缩行读水位
-    //        （收口前两处各算一次，且各自要重新取一遍工具清单）────────────────
-    let overhead_tokens = context::estimate_overhead_with_tools(&system_prompt, &tools);
-    turn.request_overhead = overhead_tokens;
 
     TurnReads {
         system_prompt,
@@ -203,15 +197,19 @@ pub(crate) async fn prepare_request_sections(
     req: &super::state::TurnRequest,
     root_id: &str,
     fresh_root: bool,
+    system_prompt: &str,
     tools: &[CapabilityMeta],
 ) -> Result<Vec<ChatNode>, super::super::turn_exec::ActorError> {
+    // 请求级固定开销（system prompt + 工具清单）：水位与预算共用同一把尺，
+    // 就地算一次——不再寄存进 `TurnState`（`D-306` 裁决四：预算/租约的入格归行）。
+    let overhead = context::estimate_overhead_with_tools(system_prompt, tools);
     // ── ③″ 取本轮的上下文水位（压缩**之后**：量的是这一轮真正发出去的那一体）──
     // 只在这里算一次，随 ④ 的骨架挂进 `meta.context`；判据是「一个请求级事实挂在
     // 它所属的那一轮上」，不是「前端要轮询」。取不到也不算异常：没有水位
     // ⇒ 前端不渲染水位条，而不是补一个 0。
     let watermark = context::context_watermark(
         &context.messages,
-        turn.request_overhead,
+        overhead,
         orchestrator.context_limit as usize,
     );
 
@@ -335,7 +333,7 @@ pub(crate) async fn prepare_request_sections(
     ));
     let budget = context::section_budget(
         &context.messages,
-        turn.request_overhead,
+        overhead,
         orchestrator.context_limit as usize,
     );
     let (kept, fit) = {

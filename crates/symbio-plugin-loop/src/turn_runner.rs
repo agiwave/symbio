@@ -435,6 +435,7 @@ impl TurnRunner {
                 inflight: None,
                 tool_flights: std::collections::HashMap::new(),
                 live_effect_keys: std::collections::HashSet::new(),
+                model_executor: None,
             })),
         }
     }
@@ -488,6 +489,9 @@ pub(crate) struct TurnSession {
     /// 本幕已经发出的**实时上线**效果键（`owner/anchor/key`）：上线的幂等由宿主守，
     /// 事实面没有可撞的格（`D-293`）。
     pub(crate) live_effect_keys: std::collections::HashSet<String>,
+    /// 模型端口执行体（`DE-047` D-305 裁决一）：一次往返的请求构造、流式帧、
+    /// 工具调用累计、用量与计价、终止判定都在它那一侧；本会话只派发与记账。
+    model_executor: Option<std::sync::Arc<dyn symbio_plugin_api::port::PortExecutor>>,
 }
 
 impl TurnSession {
@@ -587,6 +591,20 @@ impl TurnSession {
         }
     }
 
+    /// 接缝上把定下的系统提示交给草稿：`announce-model` 用它装配请求载荷
+    /// （`DE-047` D-306 裁决二）。
+    pub(crate) fn set_system_prompt(&mut self, prompt: String) {
+        self.run.system_prompt = prompt;
+    }
+
+    /// 接缝上取到的模型端口执行体（`D-305` 裁决一）：派发那一步只把它交给 future。
+    pub(crate) fn set_model_executor(
+        &mut self,
+        executor: Option<std::sync::Arc<dyn symbio_plugin_api::port::PortExecutor>>,
+    ) {
+        self.model_executor = executor;
+    }
+
     /// 记一次模型往返：生产路径在 [`Self::announce_model`] 与能力行往返
     /// （`turn_exec::run_plugin_row`，D-242）里记；夹具也用它造可控的步数序列。
     ///
@@ -612,11 +630,12 @@ impl TurnSession {
     pub(crate) async fn announce_model<S>(
         &mut self,
         store: &S,
+        tools: &[symbio_kernel::capability::CapabilityMeta],
     ) -> Result<(), symbio_kernel::store::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        stream::announce_round(&mut self.run, store).await
+        stream::announce_round(&mut self.run, store, tools).await
     }
 
     /// **派出**一次模型往返：落 `sent`，把「跑 + 收应答」整段寄存进 [`Self::inflight`]。
@@ -642,7 +661,16 @@ impl TurnSession {
         if self.run.pending_round.is_some() {
             self.steps += 1;
         }
-        match stream::begin_model(&mut self.run, store.clone(), llm.clone(), tok, sink, tools) {
+        let executor = self.model_executor.clone();
+        match stream::begin_model(
+            &mut self.run,
+            store.clone(),
+            executor,
+            llm.clone(),
+            tok,
+            sink,
+            tools,
+        ) {
             Ok(stream::ModelBegin::InFlight(fut)) => {
                 self.inflight = Some(fut);
                 Ok(())
