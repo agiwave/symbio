@@ -18,7 +18,8 @@ use super::*;
 /// 信号，必须正好剩最后一个强引用——所以幕内所有 `bridge.clone()` 都随注入闭包与
 /// 分发方在收幕时死去，最后一个原样搬进这里、由归类消费。
 pub(crate) struct Running {
-    pub(crate) session: Arc<LoopSession>,
+    /// 会话配置八格（`session-config` 回体的同一个投影）：落库只需要身份一格。
+    pub(crate) view: Arc<SessionView>,
     pub(crate) store: Arc<dyn Store<Event = Event>>,
     pub(crate) bridge: Arc<UiBridge>,
     pub(crate) emitter: tokio::task::JoinHandle<()>,

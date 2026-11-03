@@ -199,12 +199,8 @@ pub(crate) fn default_settings() -> TurnSettings {
 }
 
 /// 会话句柄：事实轨与端口共持同一份内存事实。
-pub(crate) fn loop_session(
-    spec: TurnSpec,
-    facts: Arc<EventStore>,
-    port: Arc<FakeSessionPort>,
-) -> LoopSession {
-    LoopSession::new(spec, Some(facts as Arc<dyn Store<Event = Event>>), port)
+pub(crate) fn loop_session(spec: TurnSpec, port: Arc<FakeSessionPort>) -> LoopSession {
+    LoopSession::new(spec, port)
 }
 
 // ==================== 能力包替身：`memory.live`（DE-026 D-268）====================

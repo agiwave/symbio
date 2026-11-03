@@ -109,7 +109,7 @@ use symbio_sdk::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use symbio_sdk::invariants::is_stop_fact;
-use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest};
+use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest, SessionView};
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
 // 留在持令牌的 session）；本文件只剩轮内调用点，经 [`LoopSession`] 的端口动作发起。
@@ -636,6 +636,10 @@ pub(crate) struct ExecTurn<'a> {
     /// （控制面只有一个环，幕与幕在同一次调用里接续），借来的引用活不到那一刻；
     /// 而 `Arc` 只是句柄的克隆，仍然是同一个实例。
     pub session: &'a Arc<LoopSession>,
+    /// 会话配置八格（`session-config` 回体的同一个投影，owned 以便装配束带走）。
+    pub view: SessionView,
+    /// 本会话事实轨（`session-facts` 回体的同一个来源；`None` = 临时会话）。
+    pub facts: Option<Arc<dyn Store<Event = Event>>>,
     /// 插件宿主（工具能力经它路由；无工具轮为 `None`）。
     pub parent: Option<Arc<dyn Plugin>>,
     /// 本轮请求上下文（工具路由与能力注册表都在它上面）。
@@ -1104,7 +1108,7 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
         ctx.session.set_system_prompt(head.system_prompt.to_string());
         ctx.session.set_model_executor(executor);
         let consolidation = head.context.consolidated.take();
-        let facts = head.loop_session.facts_snapshot();
+        let facts = head.context.facts_snapshot();
         let opening = super::stage_events::opening_of(&facts, head.turn.turn_no, head.turn.drive_seq);
         let opening_text = opening.as_ref().map(|o| o.text.clone());
         let opening_dialog = opening.map(|o| super::turn_runner::DialogFacts {

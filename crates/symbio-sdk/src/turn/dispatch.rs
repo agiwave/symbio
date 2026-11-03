@@ -17,6 +17,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::chat::chat_node::{ChatNode, NodeStatus};
+use crate::chat::principal::Principal;
 use crate::plugin::Plugin;
 use crate::turn::node_build::PresentationTree;
 
@@ -88,6 +89,63 @@ pub const WORKER_FORCE_PREFIX: &str = "/work ";
 pub const WORKER_KEYWORDS: &[&str] = &[];
 /// 出厂值：worker 主题长度阈值（字符数）。**0 = 本层关闭**。
 pub const WORKER_MIN_CHARS: usize = 0;
+
+/// 本轮会话的**只读视图**：`session-config` 回体八格的唯一投影。
+///
+/// 端口行（session 侧）与驱动器（loop 侧）读的是同一个 [`TurnSpec::view`] 产物——
+/// 八格只有这一处形状，不在两侧各写一份键表。字段名与回体键名逐字对应，
+/// 改动即协议改动。
+#[derive(Debug, Clone)]
+pub struct SessionView {
+    pub session_id: String,
+    pub principal: Principal,
+    pub scope: Scope,
+    pub context_window: u64,
+    pub persistent: bool,
+    pub settings: TurnSettings,
+    pub tool_archive_dir: PathBuf,
+    pub transcript_archive_dir: PathBuf,
+}
+
+impl SessionView {
+    /// 八格回体（`session-config` 行契约）。
+    pub fn to_payload(&self) -> serde_json::Value {
+        serde_json::json!({
+            "session_id": self.session_id,
+            "principal": self.principal,
+            "scope": scope_value(&self.scope),
+            "context_window": self.context_window,
+            "persistent": self.persistent,
+            "settings": self.settings,
+            "tool_archive_dir": self.tool_archive_dir.to_string_lossy(),
+            "transcript_archive_dir": self.transcript_archive_dir.to_string_lossy(),
+        })
+    }
+}
+
+/// 作用域纯值：`{"root": true}` 或 `{"root": false, "parent": <父主体>}`。
+fn scope_value(scope: &Scope) -> serde_json::Value {
+    match scope {
+        Scope::Root => serde_json::json!({ "root": true }),
+        Scope::Child(parent) => serde_json::json!({ "root": false, "parent": parent }),
+    }
+}
+
+impl TurnSpec {
+    /// 把交付值投影成会话视图（八格的唯一来源）。
+    pub fn view(&self) -> SessionView {
+        SessionView {
+            session_id: self.session_id.clone(),
+            principal: Principal::from_legacy(&self.principal),
+            scope: self.scope.clone(),
+            context_window: self.context_window,
+            persistent: self.persistent,
+            settings: self.settings.clone(),
+            tool_archive_dir: self.tool_archive_dir.clone(),
+            transcript_archive_dir: self.transcript_archive_dir.clone(),
+        }
+    }
+}
 
 /// 一次轮次的进程内交付包。
 ///

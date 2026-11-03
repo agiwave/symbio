@@ -86,7 +86,7 @@ fn land_contributions(
 /// 一轮的执行之末：落格——消费 [`Settled`]，产本轮的最终结果。
 pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let Settled {
-        session,
+        view,
         store,
         outcome,
         produced,
@@ -123,7 +123,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     // 本机用户——本机路径与接线前一致（取值点见 `request_source_principal`，
     // 在 `ctx` 被移进分发口之前取好）。
     super::super::derived_facts::record_derived(
-        session.session_id(),
+        view.session_id.as_str(),
         store.as_ref(),
         &all,
         turn_no,
@@ -155,7 +155,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     // D-263 / D-264），上面那一步已把编码与 `memory.recalled` 落格，本函数读的是
     // **含新格**的史。
     super::super::derived_facts::record_learning(
-        session.session_id(),
+        view.session_id.as_str(),
         // `store` 是 `Arc<dyn Store>`（轮内注入闭包要 `'static`），而本函数
         // 收 `&dyn Store` ⇒ `as_ref()` 一次取到 trait object。
         store.as_ref(),
@@ -243,7 +243,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 /// 一个宽签名，收成结构体只会把同一次调用拆成两处。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_final_reply_turn(
-    session: &LoopSession,
+    context: &super::super::chat_loop::state::SessionContext,
     ctx: &Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     abort: ExecAbortSignal,
     // 轮号与溯源锚由编排层在判决之前定下：答话轮同样先落用户格，
@@ -273,12 +273,12 @@ pub(crate) async fn execute_final_reply_turn(
     consolidation: Option<&[ChatNode]>,
 ) -> Result<(), PluginError> {
     // 事实源：与 [`super::assemble_turn`] 同一条路径——交付包构造的唯一句柄（D-084 §2）。
-    let store = session
+    let store = context
         .facts()
         .ok_or_else(|| PluginError::InternalError("执行需要持久会话（临时会话无事实源）".into()))?;
     // **补落寄存的变更**：答话轮同样是会话侧的落格窗口，经端口动作发起。
     // 与 [`super::assemble_turn`] 同序（在运行器落格之前——本轮的用户格已由编排层先落）。
-    if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
+    if let Err(e) = context.session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
         symbio_plugin_api::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
     // 身份与档位取值点同 [`super::assemble_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
@@ -288,12 +288,13 @@ pub(crate) async fn execute_final_reply_turn(
     // 主体**不吃档位**（`D-223` 订正 2）：规格里那一格是主体的声明档，本幕的档与预算
     // 归 `turn.dispatch`（下面那次 `land_dispatch` 直接折 `tier.budget_ms()`）。
     // 作用域与身份同批取：子会话挂父主体，顶层会话恒 `Root`。
-    let scope = session.scope();
+    let scope = context.view.scope.clone();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), scope);
     // 压缩入格 + 归档：与接缝同序（`D-223` 订正 1：压缩必须早于派发格）。归档之后才
     // 落派发格，本幕的 `turn.dispatch` 才不会随「本轮之前的一切」一起被移进归档段。
     if let Some(msgs) = consolidation {
-        if let Err(e) = session
+        if let Err(e) = context
+            .session
             .run_op_unit(
                 run_ops::CONSOLIDATE,
                 ConsolidateRequest {
@@ -392,7 +393,7 @@ pub(crate) async fn execute_final_reply_turn(
             None,
         );
         super::super::derived_facts::record_learning(
-            session.session_id(),
+            context.view.session_id.as_str(),
             store.as_ref(),
             turn_no,
             symbio_sdk::clock::clock_now_ms(),

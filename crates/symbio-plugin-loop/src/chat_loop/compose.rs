@@ -96,7 +96,7 @@ pub(crate) async fn wording_round_trip(
     verdict: &Verdict,
     snapshot: &RunSnapshot,
 ) -> Option<WordingReply> {
-    let Some(store) = context.session.facts() else {
+    let Some(store) = context.facts() else {
         // 临时会话没有事实源 ⇒ 没有账可记，照旧说话（持久轮已由 `open-turn` 拦过）。
         return compose_text(orchestrator, ctx, context, verdict, snapshot).await;
     };

@@ -736,6 +736,8 @@ pub(crate) async fn retry_compaction(
             .run_op::<Vec<symbio_sdk::chat::chat_node::ChatNode>>(run_ops::CONTEXT_MESSAGES, ())
             .await
             .unwrap_or_default(),
+        view: orchestrator.view.clone(),
+        facts: orchestrator.facts.clone(),
         session: session.clone(),
         // 重试路径是**独立的**压缩会话（`retry_compaction`）：它的产出在这里就地落格
         // （见本函数末尾的 `consolidate`）——轮外没有「下一幕接缝」
@@ -1036,7 +1038,7 @@ async fn run_compression_llm(
 
     Ok(ChatNode {
         id: root_id.to_string(),
-        principal: Some(orchestrator.session.principal()),
+        principal: Some(orchestrator.view.principal.clone()),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(effective)),
         status: Some(NodeStatus::Completed),

@@ -164,7 +164,7 @@ fn tool_free_req<'a>(
         user_seq,
         drive_seq: user_seq,
         user_text,
-        ..exec_base(&fx.session, provider, sink, abort)
+        ..exec_base(fx, provider, sink, abort)
     }
 }
 
@@ -184,7 +184,7 @@ fn open_turn_req<'a>(
         turn_no,
         user_seq,
         drive_seq: user_seq,
-        ..exec_base(&fx.session, provider, sink, abort)
+        ..exec_base(fx, provider, sink, abort)
     }
 }
 
@@ -216,6 +216,8 @@ fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> 
 /// 一字不改（`SP-033` §1：改用例，不改形状）。
 struct ExecTurn<'a> {
     session: &'a Arc<LoopSession>,
+    view: SessionView,
+    facts: Option<Arc<dyn Store<Event = Event>>>,
     provider: Arc<dyn ModelProvider>,
     parent: Option<Arc<dyn Plugin>>,
     ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
@@ -256,6 +258,8 @@ impl symbio_kernel::exec::ExecTranscriptWriter for DiscardWriter {
 async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let ExecTurn {
         session,
+        view,
+        facts,
         provider,
         parent,
         ctx,
@@ -277,11 +281,11 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         presentation_tree,
     } = req;
     // 幕锚的「现在」与生产同一个读数口（派发器与视图都读它，不是夹具编的一个数）。
-    let facts = session
-        .facts()
+    let snapshot = facts
+        .as_ref()
         .map(|store| store.range(Seq::new(0)))
         .unwrap_or_default();
-    let now_ms = super::super::loop_rows::wake_now_ms(&facts, drive_seq);
+    let now_ms = super::super::loop_rows::wake_now_ms(&snapshot, drive_seq);
 
     // `port.model` 的提供者行（D-298）：生产里由 model 插件的 traverse 注册、随
     // session 的能力收集装上；夹具在同一处模拟——把交付包里的假 provider 包成
@@ -306,6 +310,8 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
         parent: parent.clone(),
         context_limit: 8192,
+        view: view.clone(),
+        facts: facts.clone(),
         session: session.clone(),
         writer: Arc::new(DiscardWriter),
         compose_enabled: false,
@@ -314,6 +320,8 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     });
     let mut context = super::super::chat_loop::state::SessionContext {
         messages: Vec::new(),
+        view: view.clone(),
+        facts: facts.clone(),
         session: session.clone(),
         consolidated: consolidation.map(|c| c.to_vec()),
     };
@@ -336,6 +344,8 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let request_ctx = ctx.clone();
     let (assembled, emitter) = super::assemble_turn(super::ExecTurn {
         session,
+        view,
+        facts,
         parent,
         ctx,
         system_prompt,
@@ -395,13 +405,15 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
 }
 
 fn exec_base<'a>(
-    session: &'a Arc<LoopSession>,
+    fx: &'a Fixture,
     provider: Arc<dyn ModelProvider>,
     sink: &'a symbio_kernel::exec::ExecEventSink,
     abort: symbio_kernel::exec::ExecAbortSignal,
 ) -> ExecTurn<'a> {
     ExecTurn {
-        session,
+        session: &fx.session,
+        view: fx.view.clone(),
+        facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider,
         parent: None,
         ctx: test_ctx(),
@@ -549,6 +561,8 @@ async fn supplements_become_facts_visible_next_turn() {
         user_seq,
         drive_seq: user_seq,
         session: &fx.session,
+        view: fx.view.clone(),
+        facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider: Arc::new(provider),
         parent: None,
         ctx: test_ctx(),
@@ -862,6 +876,7 @@ struct Fixture {
     session: Arc<LoopSession>,
     facts: Arc<EventStore>,
     port: Arc<FakeSessionPort>,
+    view: SessionView,
 }
 
 fn setup_full() -> Fixture {
@@ -901,11 +916,13 @@ fn setup_with_settings(
         std::env::temp_dir().join("symbio-test/transcripts"),
         settings,
     );
-    let session = Arc::new(loop_session(spec, facts.clone(), port.clone()));
+    let view = spec.view();
+    let session = Arc::new(loop_session(spec, port.clone()));
     Fixture {
         session,
         facts,
         port,
+        view,
     }
 }
 
@@ -941,13 +958,16 @@ async fn control_harness() -> ControlHarness {
         std::env::temp_dir().join("symbio-test/transcripts"),
         settings,
     );
-    let session = Arc::new(loop_session(spec, facts.clone(), port));
+    let view = spec.view();
+    let session = Arc::new(loop_session(spec, port));
     let sink = symbio_kernel::exec::ExecEventSink::direct(Arc::new(CollectingFrames(Mutex::new(
         Vec::new(),
     ))));
     let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
         parent: None,
         context_limit: 8192,
+        view: view.clone(),
+        facts: Some(facts.clone() as Arc<dyn Store<Event = Event>>),
         session: session.clone(),
         writer: Arc::new(DiscardWriter),
         compose_enabled: false,
@@ -968,16 +988,19 @@ async fn control_harness() -> ControlHarness {
     }
     ctx.set(CAPABILITY_VISITOR, visitor);
 
+    let context = super::super::chat_loop::state::SessionContext {
+        messages: Vec::new(),
+        view: view.clone(),
+        facts: Some(facts.clone() as Arc<dyn Store<Event = Event>>),
+        session,
+        consolidated: None,
+    };
     ControlHarness {
         facts,
         sink,
         ctx,
         orchestrator,
-        context: super::super::chat_loop::state::SessionContext {
-            messages: Vec::new(),
-            session,
-            consolidated: None,
-        },
+        context,
         turn: super::super::chat_loop::state::TurnState {
             abort: symbio_kernel::exec::ExecAbortSignal::new(),
             ..Default::default()
@@ -1376,6 +1399,8 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         user_seq,
         drive_seq: user_seq,
         session: &fx.session,
+        view: fx.view.clone(),
+        facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider: Arc::new(provider),
         // 无插件宿主 ⇒ 工具分发按「没有父插件」诚实失败——本用例验的是**链路**
         // （落格 / 帧 / 回灌），工具真正跑起来由 e2e 覆盖。失败是信息性的：
@@ -1579,6 +1604,8 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         user_seq,
         drive_seq: user_seq,
         session: &fx.session,
+        view: fx.view.clone(),
+        facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider: Arc::new(provider),
         parent: None,
         ctx: test_ctx(),
@@ -1776,6 +1803,8 @@ async fn full_turn_lands_derived_commitment_facts() {
         user_seq,
         drive_seq: user_seq,
         session: &fx.session,
+        view: fx.view.clone(),
+        facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
         provider: Arc::new(provider),
         // 无插件宿主 ⇒ `agent_run` 诚实失败（"No parent plugin"）。失败同样是
         // **没履约**——立约与违约都要入格（DE-038 §5：违约可被观测是 T5 的前提）。

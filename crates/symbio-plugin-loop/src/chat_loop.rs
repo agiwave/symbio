@@ -202,7 +202,7 @@ pub async fn run_chat_loop(
     };
     // 请求体未给出的字段一律回落到**本轮配置快照**（`TurnSettings`），本函数不再
     // 自带魔法数——默认值的唯一真源在配置层（审计 C2）。
-    let turn_req = TurnRequest::new(&req, orchestrator.session.settings().auto_compress);
+    let turn_req = TurnRequest::new(&req, orchestrator.view.settings.auto_compress);
 
     // 编排器本体：下面多处按引用传（`&ChatOrchestrator`），而轮边界回调要
     // **自己持有一份**（回调是 `Fn + Send + Sync + 'static`，见
@@ -221,6 +221,8 @@ pub async fn run_chat_loop(
     let mut single_message = req.single_message.take();
     let mut context = SessionContext {
         messages: Vec::new(),
+        view: orchestrator.view.clone(),
+        facts: orchestrator.facts.clone(),
         session,
         // 本轮压缩的寄存位：压缩内核压成之后写这里，由本轮的 `turn_exec::drive` 落格。
         consolidated: None,
@@ -298,13 +300,13 @@ pub async fn run_chat_loop(
         // （[`land_answered_turn`] / D-125）——它要的是编排器、会话上下文与本轮
         // 状态，环里没有它们。
         Ok(super::turn_exec::DriveEnd::Answered) => {
-            let facts = context.session.facts_snapshot();
+            let facts = context.facts_snapshot();
             if let Some(answer) =
                 super::stage_events::answer_of(&facts, turn.turn_no, turn.drive_seq)
             {
                 land_answered_turn(&ctx, &mut context, &mut turn, answer).await;
             }
-            let landed = match context.session.facts() {
+            let landed = match context.facts() {
                 Some(store) => {
                     super::turn_exec::land_inputs(store.as_ref(), ctx.as_ref(), &turn, "closed")
                 }
@@ -373,8 +375,10 @@ pub(crate) async fn land_answered_turn(
     turn: &mut TurnState,
     answer: super::stage_events::AnswerFact,
 ) {
+    // 先把寄存的压缩取走：后面按引用传上下文（落库读配置与事实）。
+    let consolidation = context.consolidated.take();
     if let Err(e) = super::turn_exec::execute_final_reply_turn(
-        &context.session,
+        context,
         ctx,
         turn.abort.clone(),
         turn.turn_no,
@@ -391,7 +395,7 @@ pub(crate) async fn land_answered_turn(
         answer.reasoning,
         // 答话轮同样要落「本轮之前那次压缩」这一格——它不进 `turn_exec::drive`，
         // 不带上就漏了（见该函数的入参文档）。
-        context.consolidated.take().as_deref(),
+        consolidation.as_deref(),
     )
     .await
     {

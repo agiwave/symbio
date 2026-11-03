@@ -105,9 +105,12 @@ async fn context_with(messages: Vec<ChatNode>) -> SessionContext {
         std::env::temp_dir(),
         default_settings(),
     );
-    let session = Arc::new(loop_session(spec, facts, port));
+    let view = spec.view();
+    let session = Arc::new(loop_session(spec, port));
     SessionContext {
         messages,
+        view,
+        facts: Some(facts as Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::Event>>),
         session,
         consolidated: None,
     }

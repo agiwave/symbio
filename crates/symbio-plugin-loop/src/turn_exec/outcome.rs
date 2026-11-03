@@ -59,7 +59,8 @@ pub(crate) enum Classified<'b> {
 
 /// 归类 → 落库的交付束：收束结局 + 桥上取下的节点身份 + 落库还要用的一切。
 pub(crate) struct Settled<'b> {
-    pub(crate) session: Arc<LoopSession>,
+    /// 会话配置八格（`session-config` 回体的同一个投影）：落库只需要身份一格。
+    pub(crate) view: Arc<SessionView>,
     pub(crate) store: Arc<dyn Store<Event = Event>>,
     pub(crate) outcome: super::super::turn_runner::TurnOutcome,
     pub(crate) produced: Vec<ChatNode>,
@@ -87,7 +88,7 @@ pub(crate) async fn classify_turn<'b>(
     recalled: Option<&'b symbio_plugin_api::retrieval::Retrieval>,
 ) -> Result<Classified<'b>, TurnExecExit> {
     let Running {
-        session,
+        view,
         store,
         bridge,
         emitter,
@@ -209,7 +210,7 @@ pub(crate) async fn classify_turn<'b>(
         })));
     }
     Ok(Classified::Settled(Settled {
-        session,
+        view,
         store,
         outcome,
         produced,

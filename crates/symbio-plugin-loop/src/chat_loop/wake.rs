@@ -19,6 +19,8 @@
 //!   它成为同一问题的另一个候选（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）；
 //! - `RetryCompaction` 不是对话轮次，直接由编排层收尾（不经本模块）。
 
+use std::sync::Arc;
+
 use serde_json::{json, Value};
 use symbio_kernel::event::Seq;
 use symbio_kernel::plugin::PluginError;
@@ -75,6 +77,7 @@ pub(crate) async fn retry_subtree(
 /// 不在这里执行工具、不写授权 / 结果——那些归行表的授权行与派发行（d）。
 pub(crate) async fn land_tool_wake(
     session: &LoopSession,
+    facts: Option<Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>>,
     req: ResumeRequest,
 ) -> Result<Woken, PluginError> {
     let messages = session
@@ -113,9 +116,7 @@ pub(crate) async fn land_tool_wake(
     let kind = super::drive::resume_kind(&req.action);
     let (args, wake) = wake_intent(&req, base_args);
 
-    let facts = session
-        .facts()
-        .ok_or_else(|| PluginError::InternalError("工具恢复缺少事实轨".into()))?;
+    let facts = facts.ok_or_else(|| PluginError::InternalError("工具恢复缺少事实轨".into()))?;
     let snapshot = facts.range(Seq::new(0));
     let (turn_no, user_seq) = super::super::turn_exec::last_open_turn(&snapshot)
         .ok_or_else(|| PluginError::NotFound("恢复找不到未收束的轮次".into()))?;

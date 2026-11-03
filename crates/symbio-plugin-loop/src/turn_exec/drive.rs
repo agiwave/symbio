@@ -637,6 +637,8 @@ async fn open_stage(
 
     let (assembled, emitter) = super::assemble_turn(super::ExecTurn {
         session: &context.session,
+        view: context.view.clone(),
+        facts: context.facts.clone(),
         parent: orchestrator.parent.clone(),
         ctx: ctx.clone(),
         system_prompt: &reads.system_prompt,
@@ -648,7 +650,7 @@ async fn open_stage(
         turn_no: turn.turn_no,
         user_seq: turn.user_seq,
         drive_seq: turn.drive_seq,
-        window_turns: orchestrator.session.context_window(),
+        window_turns: orchestrator.view.context_window,
         tools: &reads.tools,
         supplements: Some(supplements),
         report,
@@ -752,7 +754,7 @@ async fn close_stage(
     };
     // 归类（中止 / 授权拒 / 正常）与派生事实落格。召回读数从 `policy.recall`
     // 落下的那一格重建（DE-048 D-306），不再寄存于本轮状态。
-    let facts = control.context.session.facts_snapshot();
+    let facts = control.context.facts_snapshot();
     let recall = super::super::stage_events::recall_of(
         &facts,
         control.turn.turn_no,
@@ -872,7 +874,7 @@ fn into_running(
     derived: DerivedFacts,
 ) -> Running {
     let Assembled {
-        session,
+        view,
         store,
         bridge,
         collected,
@@ -886,7 +888,7 @@ fn into_running(
         ..
     } = assembled;
     Running {
-        session,
+        view: Arc::new(view),
         store,
         bridge,
         emitter,
@@ -925,7 +927,7 @@ fn driver_aborted(driver: &Driver<'_>) -> bool {
 fn driver_answered(driver: &Driver<'_>) -> bool {
     match driver {
         Driver::Control(control) => super::super::stage_events::answered(
-            &control.context.session.facts_snapshot(),
+            &control.context.facts_snapshot(),
             control.turn.turn_no,
             control.turn.drive_seq,
         ),

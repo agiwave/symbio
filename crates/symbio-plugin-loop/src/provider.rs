@@ -82,15 +82,14 @@ async fn run_turn(
         host.clone(),
         sid.clone(),
     ));
-    let session = Arc::new(LoopSession::new(
-        dispatch.spec.clone(),
-        dispatch.facts.clone(),
-        port,
-    ));
-    let settings = &dispatch.spec.settings;
+    let view = dispatch.spec.view();
+    let session = Arc::new(LoopSession::new(dispatch.spec.clone(), port));
+    let settings = view.settings.clone();
     let orchestrator = Arc::new(ChatOrchestrator {
         parent: dispatch.parent.clone(),
         context_limit: dispatch.context_limit,
+        view,
+        facts: dispatch.facts.clone(),
         session,
         writer: dispatch.writer.clone(),
         compose_enabled: settings.compose_enabled,

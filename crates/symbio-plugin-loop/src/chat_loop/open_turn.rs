@@ -135,7 +135,8 @@ fn run_resume_turn<'a, 'b>(
         let Some(req) = ctx.resume.cloned() else {
             return Ok(());
         };
-        let woken = super::wake::land_tool_wake(ctx.session, req)
+        let facts = ctx.context.facts();
+        let woken = super::wake::land_tool_wake(ctx.session, facts, req)
             .await
             .map_err(TurnExit::Failed)?;
         ctx.out.root_id = Some(woken.root_id);
@@ -192,7 +193,7 @@ pub(crate) fn open(
         replaces,
         branch_of,
     } = anchor;
-    let store = context.session.facts().ok_or_else(|| {
+    let store = context.facts().ok_or_else(|| {
         TurnExit::Failed(PluginError::InternalError(
             "执行需要持久会话（临时会话无事实源）".into(),
         ))
@@ -354,7 +355,7 @@ pub(crate) fn open(
             symbio_plugin_api::plugin_warn!("session", "[Loop] 租约看护失败（继续开新幕）: {e:?}");
         }
     }
-    let settings = context.session.settings();
+    let settings = &context.view.settings;
     store
         .append(
             Event::pending(
@@ -377,7 +378,7 @@ pub(crate) fn open(
                 "readyset_cap": settings.task_cap,
                 "skill_compile_enabled": settings.skill_compile_enabled,
                 "skill_fast_path": settings.skill_fast_path,
-                "is_persistent": context.session.is_persistent(),
+                "is_persistent": context.view.persistent,
             })),
         )
         .map_err(|e| {

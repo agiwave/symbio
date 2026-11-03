@@ -43,11 +43,14 @@ fn context(messages: Vec<ChatNode>) -> (Arc<EventStore>, SessionContext) {
         std::env::temp_dir(),
         default_settings(),
     );
-    let session = Arc::new(loop_session(spec, facts.clone(), port));
+    let view = spec.view();
+    let session = Arc::new(loop_session(spec, port));
     (
-        facts,
+        facts.clone(),
         SessionContext {
             messages,
+            view,
+            facts: Some(facts as Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::Event>>),
             session,
             consolidated: None,
         },

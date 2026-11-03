@@ -226,7 +226,7 @@ pub(crate) async fn prepare_request_sections(
             root_id,
             Some(turn.round()),
             Some(watermark),
-            &orchestrator.session.principal(),
+            &orchestrator.view.principal,
         )
         .await;
     }
@@ -264,7 +264,7 @@ pub(crate) async fn prepare_request_sections(
         )
         .await
         .map_err(super::super::turn_exec::ActorError::Read)?;
-    let settings = context.session.settings();
+    let settings = &context.view.settings;
     let delegate_verdict = match turn.user_text().filter(|_| req.new_input) {
         Some(text) => {
             // 关键词存**逗号串**（面板无数组控件），切开即用；空串由
@@ -285,7 +285,7 @@ pub(crate) async fn prepare_request_sections(
 
     // 段的**次序**在这里声明（= 模型读到的上下文次序）：发言级段在前、请求级段在后。
     // 加一段 provider 只需提交一条实现，本数组不动。
-    let facts = context.session.facts_snapshot();
+    let facts = context.facts_snapshot();
     let recall = recall_from_stage(&facts, turn);
     let live_lines: Vec<symbio_plugin_api::RecallLine<'_>> = recall
         .as_ref()

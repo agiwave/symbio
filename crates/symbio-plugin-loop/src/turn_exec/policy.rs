@@ -123,7 +123,7 @@ async fn execute_verdict(
                 &reply.text,
                 reason,
                 false,
-                &orchestrator.session.principal(),
+                &orchestrator.view.principal,
             ));
             let (dialog_id, dialog_reason, exclude_from_context) = last_assistant_node(context);
             let reasoning = reply.reasoning.map(|text| {
@@ -162,7 +162,7 @@ async fn execute_verdict(
                 &reply.text,
                 reason,
                 true,
-                &orchestrator.session.principal(),
+                &orchestrator.view.principal,
             ));
             let (dialog_id, dialog_reason, _) = last_assistant_node(context);
             (
@@ -298,7 +298,7 @@ async fn decide_by_model(
     session_id: String,
     plan: DecisionPlan,
 ) -> Result<Decision, PluginError> {
-    let Some(store) = context.session.facts() else {
+    let Some(store) = context.facts() else {
         return Err(PluginError::InternalError(
             "本会话没有事实源，判决往返不入账".into(),
         ));
@@ -422,7 +422,7 @@ pub(crate) async fn recall(
 ) -> Result<(), ActorError> {
     let recall_query = last_user_text(context);
     let recall_viewer = symbio_sdk::authz::request_principal(ctx.as_ref());
-    let facts = context.session.facts_snapshot();
+    let facts = context.facts_snapshot();
     let mut view = super::super::memory_events::recall_view(
         context
             .session

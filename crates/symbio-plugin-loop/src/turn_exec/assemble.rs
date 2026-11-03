@@ -27,6 +27,8 @@ use super::*;
 pub(crate) struct Assembled {
     // —— 交付包直通（幕内每一步消费）——
     pub(crate) session: Arc<LoopSession>,
+    /// 会话配置八格（`session-config` 回体的同一个投影）。
+    pub(crate) view: SessionView,
     pub(crate) parent: Option<Arc<dyn Plugin>>,
     pub(crate) ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     pub(crate) system_prompt: String,
@@ -152,6 +154,8 @@ pub(crate) async fn assemble_turn(
 ) -> Result<(Assembled, tokio::task::JoinHandle<()>), TurnExecExit> {
     let ExecTurn {
         session,
+        view,
+        facts,
         parent,
         ctx,
         system_prompt,
@@ -173,9 +177,9 @@ pub(crate) async fn assemble_turn(
     // 事实源：本会话的**唯一句柄**（由交付包按值带来、按引用分发）。
     // 与运行器落格、收件箱补落、轮外压缩进的是同一份实例——进程内不存在
     // 第二个各自 replay 的写者（D-084 §2）。
-    let store = session
-        .facts()
-        .ok_or_else(|| PluginError::InternalError("执行需要持久会话（临时会话无事实源）".into()))?;
+    let store = facts.ok_or_else(|| {
+        PluginError::InternalError("执行需要持久会话（临时会话无事实源）".into())
+    })?;
     // **补落寄存的变更**：跨进程另一写者持令牌时，本进程的编辑 / 截断
     // 会得到 `NotTheWriter` ⇒ 该变更被寄存在会话侧。本函数是持有交付包的时刻，
     // 经端口动作让 session 在**它自己的令牌窗口**里补落。
@@ -303,7 +307,7 @@ pub(crate) async fn assemble_turn(
     // 仍要以它为主体——先取字符串，不依赖 `actor` 的存活。
     // 作用域：`agent_run` 派生的子会话挂父主体，顶层会话恒 `Root`。
     // 与身份同批取——两者都经 `ctx` / 元数据解析，分开取会让「主体是 A、作用域按 B 算」。
-    let scope = session.scope();
+    let scope = view.scope.clone();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), scope);
     // 来源主体（D-067）：`commitment.*` 的 `to`。在此刻取而不是轮末——`ctx` 会被
     // 移进工具分发口（`SessionDispatchPort`），轮末已经拿不到它。
@@ -312,6 +316,7 @@ pub(crate) async fn assemble_turn(
     Ok((
         Assembled {
             session: session.clone(),
+            view: view.clone(),
             parent,
             ctx,
             system_prompt: system_prompt.to_string(),

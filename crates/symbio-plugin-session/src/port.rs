@@ -37,14 +37,12 @@ use std::sync::{Arc, Weak};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use symbio_kernel::actors::Scope;
 use symbio_kernel::event::Seq;
 use symbio_kernel::plugin::PluginInvokeRequestExt;
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
 };
-use symbio_sdk::chat::principal::Principal;
-use symbio_sdk::turn::dispatch::{TurnDispatch, TurnSpec, TURN_DISPATCH};
+use symbio_sdk::turn::dispatch::{TurnDispatch, TURN_DISPATCH};
 
 use crate::plugin::SessionPlugin;
 
@@ -155,7 +153,7 @@ impl SessionPortExecutor {
 /// 投影而非转交：`TurnSpec` 是宿主→session 的交付值，环不再持它；回体只带环会读的
 /// 那八格（`D-315` 行表第一行）。
 fn config_reply(ctx: &PortExecContext) -> Result<Value, String> {
-    Ok(config_value(&dispatch_of(ctx)?.spec))
+    Ok(dispatch_of(ctx)?.spec.view().to_payload())
 }
 
 /// `session-facts`：本会话事实史的纯值投影（`Store::range(Seq::new(0))`）。
@@ -180,28 +178,6 @@ fn dispatch_of(ctx: &PortExecContext) -> Result<Arc<TurnDispatch>, String> {
         .ok_or_else(|| "缺少宿主上下文（端口执行体读不到本轮交付包）".to_string())?;
     host.get(TURN_DISPATCH)
         .ok_or_else(|| "宿主上下文没有本轮交付包（`TURN_DISPATCH`）".to_string())
-}
-
-/// `TurnSpec` → 回体。键与 `LoopSession` 的八个读面逐条对应。
-fn config_value(spec: &TurnSpec) -> Value {
-    json!({
-        "session_id": spec.session_id,
-        "principal": Principal::from_legacy(&spec.principal),
-        "scope": scope_value(&spec.scope),
-        "context_window": spec.context_window,
-        "persistent": spec.persistent,
-        "settings": spec.settings,
-        "tool_archive_dir": spec.tool_archive_dir.to_string_lossy(),
-        "transcript_archive_dir": spec.transcript_archive_dir.to_string_lossy(),
-    })
-}
-
-/// 作用域纯值：`{"root": true}` 或 `{"root": false, "parent": <父主体>}`。
-fn scope_value(scope: &Scope) -> Value {
-    match scope {
-        Scope::Root => json!({ "root": true }),
-        Scope::Child(parent) => json!({ "root": false, "parent": parent }),
-    }
 }
 
 #[cfg(test)]

@@ -128,6 +128,11 @@ fn declared_budget(pattern: symbio_kernel::actors::Pattern) -> u64 {
 /// - session 用于管理会话历史（滑动窗口/自动截断/持久化）
 pub(crate) struct SessionContext {
     pub messages: Vec<ChatNode>,
+    /// 会话配置的**唯一读面**（`session-config` 回体的同一个投影）。
+    pub view: symbio_sdk::turn::dispatch::SessionView,
+    /// 本会话事实轨（`session-facts` 回体的同一个来源；`None` = 临时会话）。
+    pub facts: Option<Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>>,
+    /// 会话动作入口（b2-2 之后这里只剩 `run_op` / `run_op_unit`）。
     pub session: Arc<super::super::turn_session::LoopSession>,
     /// **本轮发生过的压缩**（压缩后的整份消息列表）。
     ///
@@ -147,6 +152,25 @@ pub(crate) struct SessionContext {
     /// 幂等由落格那一侧保证（与 WAL 里最近一份快照逐 id 比对）：同一轮里
     /// `drive` 可能被调多次，而压缩只发生一次。
     pub consolidated: Option<Vec<ChatNode>>,
+}
+
+impl SessionContext {
+    /// 本会话事实轨（`None` = 临时会话：不落派生事实）。
+    pub(crate) fn facts(
+        &self,
+    ) -> Option<Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>> {
+        self.facts.clone()
+    }
+
+    /// 完整事实史（`facts = None` ⇒ 空）。
+    ///
+    /// 与「读会话消息」不是同一件事：这份是**事件网格**，派生事实与重建都读它。
+    pub(crate) fn facts_snapshot(&self) -> Vec<symbio_kernel::event::Event> {
+        self.facts
+            .as_ref()
+            .map(|s| s.range(symbio_kernel::event::Seq::new(0)))
+            .unwrap_or_default()
+    }
 }
 
 /// 请求级不可变配置（`chat_request::Request` 的取值快照，全程只读）。
@@ -309,9 +333,16 @@ pub struct ChatOrchestrator {
     /// 预计算的生效上下文上限（`provider.effective_context_tokens()` 结果，
     /// session 在派发前已解析）。
     pub context_limit: u32,
-    /// 本轮会话句柄：纯值输入 + 事实轨 + 动作面端口（见 `LoopSession`）。
+    /// 本轮会话的**配置读面**（`session-config` 回体的同一个投影）。
     ///
-    /// 转写、压缩熔断、用户补充队列与配置当前值都在 session 墙内，这里只经端口读写——
+    /// 八格（身份 / 主体 / 作用域 / 上下文窗 / 持久化 / 设置 / 两个存档目录）只从
+    /// 这一格读，与端口回体同源（`TurnSpec::view()`）。
+    pub view: symbio_sdk::turn::dispatch::SessionView,
+    /// 本会话事实轨（`session-facts` 回体的同一个来源；`None` = 临时会话）。
+    pub facts: Option<Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>>,
+    /// 本轮会话动作入口（见 `LoopSession`）——b2-2 只剩 `run_op` / `run_op_unit`。
+    ///
+    /// 转写、压缩熔断、用户补充队列都在 session 墙内，这里只经端口读写——
     /// 驱动器不持 `PersistentChatSession`（E-009）。
     pub session: Arc<super::super::turn_session::LoopSession>,
     /// 压缩增量改道用的转写写口（`TurnDispatch.writer`：session 的转写唯一写入点）。
@@ -361,7 +392,7 @@ impl ChatOrchestrator {
         out: &TurnOutput,
         sink: &ExecEventSink,
     ) {
-        let principal = self.session.principal();
+        let principal = self.view.principal.clone();
         if out.is_reasoning_only() {
             // reasoning-only：模型只产生了 reasoning，没有独立的文本回复。
             //
