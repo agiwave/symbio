@@ -382,11 +382,7 @@ pub struct TurnOutcome {
     pub finish: symbio_kernel::llm::ModelFinishReason,
 }
 
-/// turn 运行器：持令牌的调用方对每个会话轮调用一次。
-pub struct TurnRunner;
-
-impl TurnRunner {
-    /// **一轮的入口**：准备轮首（定稿答话 / 空答兜底可能直接收束）；其余交给派发器。
+/// **一轮的入口**：准备轮首（定稿答话 / 空答兜底可能直接收束）；其余交给派发器。
     /// 工具清单下行、工具调用上行、产物落格都在**本入口交回的会话**上按行发生。
     ///
     /// ## 网格记账
@@ -420,24 +416,23 @@ impl TurnRunner {
     /// **没有流式出口**：这个入口只落事实与备 prompt，不上任何节点。开场白要经流式桥
     /// 上实时面，而它是判决行的产物、落点在接缝（`D-223` 订正 1）——幕首建草稿时那句
     /// 话还没说出来，桥也在接缝那一侧。
-    pub(crate) async fn begin<S>(
-        store: &S,
-        input: TurnInput,
-    ) -> Result<TurnSessionBegin, symbio_kernel::store::AppendError>
-    where
-        S: Store<Event = Event> + ?Sized,
-    {
-        match prepare::prepare_turn(store, input).await? {
-            prepare::PreparedFlow::Done(outcome) => Ok(TurnSessionBegin::Done(outcome)),
-            prepare::PreparedFlow::Run(run) => Ok(TurnSessionBegin::Run(TurnSession {
-                run,
-                steps: 0,
-                inflight: None,
-                tool_flights: std::collections::HashMap::new(),
-                live_effect_keys: std::collections::HashSet::new(),
-                model_executor: None,
-            })),
-        }
+pub(crate) async fn begin_turn<S>(
+    store: &S,
+    input: TurnInput,
+) -> Result<TurnSessionBegin, symbio_kernel::store::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    match prepare::prepare_turn(store, input).await? {
+        prepare::PreparedFlow::Done(outcome) => Ok(TurnSessionBegin::Done(outcome)),
+        prepare::PreparedFlow::Run(run) => Ok(TurnSessionBegin::Run(TurnSession {
+            run,
+            steps: 0,
+            inflight: None,
+            tool_flights: std::collections::HashMap::new(),
+            live_effect_keys: std::collections::HashSet::new(),
+            model_executor: None,
+        })),
     }
 }
 

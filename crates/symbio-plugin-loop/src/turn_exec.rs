@@ -113,7 +113,7 @@ use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest, SessionView};
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
 // 留在持令牌的 session）；本文件只剩轮内调用点，经 `port=session` 的动作行发起。
-use super::turn_runner::{TurnInput, TurnRunner, TurnSession, TurnSessionBegin};
+use super::turn_runner::{begin_turn, TurnInput, TurnSession, TurnSessionBegin};
 // 运行器一族**已下沉到本插件**（2026-10-09，见 `turn_runner.rs` 的头注）：它们不是 core 的
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::session_port::{self, SessionPort};

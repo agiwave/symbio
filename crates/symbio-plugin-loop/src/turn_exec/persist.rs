@@ -357,7 +357,7 @@ pub(crate) async fn execute_final_reply_turn(
     // 定稿答话分支就地收束、返回 `Done`）。本入口**不开环**（`D-222` 裁决 5：环只住在
     // [`super::drive`]，而它要的那一片编排层状态这一轮根本没有）——真到了这里说明
     // 收束路径与交付包对不上，出声。
-    let outcome = match TurnRunner::begin(store.as_ref(), input)
+    let outcome = match begin_turn(store.as_ref(), input)
         .await
         .map_err(|e| PluginError::InternalError(format!("运行器落格失败：{e:?}")))?
     {

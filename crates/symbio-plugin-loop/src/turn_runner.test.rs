@@ -5,12 +5,12 @@
 //! `reflex_turn_tests`（反射档落格）。
 //!
 //! 另附 `run` / `run_streaming` / `drive_with_tools` 三个**测试专用**入口：生产入口是
-//! `TurnRunner::begin` 与派发器 `turn_exec::drive`（`turn_exec` 自己构造 `ActorSpec`），
+//! `turn_runner::begin_turn` 与派发器 `turn_exec::drive`（`turn_exec` 自己构造 `ActorSpec`），
 //! 无工具轮的简单路径与「固定绑定表整轮驱动」只有本文件的用例用得到 ⇒ 按「测试消费的
 //! 代码住测试模块」就地定义，**不占生产文件的表面**。
 
 use super::super::turn_exec::ActorError;
-use super::{TurnInput, TurnOutcome, TurnRunner};
+use super::{TurnInput, TurnOutcome};
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
@@ -47,7 +47,10 @@ fn kinds(snapshot: &[Event]) -> Vec<&str> {
     snapshot.iter().map(|e| e.kind.as_str()).collect()
 }
 
-impl TurnRunner {
+/// 测试侧的运行入口集合（生产侧只有自由函数 `turn_runner::begin_turn`，没有具名运行器类型）。
+struct RunnerFixture;
+
+impl RunnerFixture {
     /// 跑一轮（测试侧）：用户消息（声明档位）→ 生成 → 收束事件落格。
     ///
     /// `turn` 是本轮的 turn 号（调用方保证单调递增——N3 的轮次锚）；`tier` 是本轮装配进
@@ -211,7 +214,7 @@ impl TurnRunner {
             &input.actor,
         )
         .map_err(ActorError::Append)?;
-        let mut session = match super::super::turn_runner::TurnRunner::begin(store.as_ref(), input)
+        let mut session = match super::super::turn_runner::begin_turn(store.as_ref(), input)
             .await
             .map_err(ActorError::Append)?
         {
@@ -266,10 +269,10 @@ impl TurnRunner {
     }
 }
 
-// ── v2 会话运行时：TurnRunner 验收（不变量靠构造成立 + WAL 持久 + 兜底联动）──
+// ── v2 会话运行时：turn_runner 验收（不变量靠构造成立 + WAL 持久 + 兜底联动）──
 
 mod turn_runner_tests {
-    use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
+    use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput};
     use crate::control_decl::{guard_vocab, EVENT_TURN_STAGE};
     use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
     use symbio_kernel::event::{Event, Seq};
@@ -293,7 +296,7 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .run(&store, llm.clone(), tok, 0, "你好")
             .await
             .expect("桩必答");
@@ -351,7 +354,7 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::always_fail("模型挂了"));
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .run(&store, llm.clone(), tok, 0, "你好")
             .await
             .expect("兜底路径仍返回 Ok（轮次本身收束了）");
@@ -393,7 +396,7 @@ mod turn_runner_tests {
             dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
         > = std::sync::Arc::new(EventStore::new());
         for turn in 0..3u64 {
-            TurnRunner
+            super::RunnerFixture
                 .run(&store, llm.clone(), tok, turn, "问")
                 .await
                 .expect("桩必答");
@@ -406,7 +409,7 @@ mod turn_runner_tests {
         );
 
         // 恢复后直接续排（turn 号接续）——N3 由 turn 号单调保证。
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .run(&store, llm.clone(), tok, 3, "再问")
             .await
             .expect("桩必答");
@@ -428,7 +431,7 @@ mod turn_runner_tests {
             dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
         > = std::sync::Arc::new(symbio_kernel::store::EventStore::new());
         for turn in 0..4u64 {
-            TurnRunner
+            super::RunnerFixture
                 .run(
                     &fresh,
                     llm.clone(),
@@ -463,13 +466,13 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
-        TurnRunner
+        super::RunnerFixture
             .run(&store, llm.clone(), tok, 0, "第一轮")
             .await
             .unwrap();
         // 第二轮沿用同一轮号：用户格已落（`seed_user` 会先撞），故直接用同一份
         // 输入再跑一遍——派发格 / 收束格的幂等键同样必须挡住重号。
-        let err = TurnRunner
+        let err = super::RunnerFixture
             .run_streaming(
                 &store,
                 llm.clone(),
@@ -511,7 +514,7 @@ mod turn_runner_tests {
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
         // 第一轮：单轮 = 只有当前那条 user 消息。
-        let r1 = TurnRunner
+        let r1 = super::RunnerFixture
             .run(&store, llm.clone(), tok, 0, "第一轮问题")
             .await
             .unwrap();
@@ -519,7 +522,7 @@ mod turn_runner_tests {
 
         // 第二轮：历史在场，且**角色正确**——模型看得见自己上一轮的答复，
         // 并且知道那句答复是自己说的（不是用户说的）。
-        let r2 = TurnRunner
+        let r2 = super::RunnerFixture
             .run(&store, llm.clone(), tok, 1, "第二轮问题")
             .await
             .unwrap();
@@ -754,7 +757,7 @@ mod turn_runner_tests {
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
         let user_seq = super::seed_user(store.as_ref(), 0, "问");
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .run_streaming(
                 &store,
                 llm.clone(),
@@ -803,7 +806,7 @@ mod turn_runner_tests {
         let llm2 = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
         let got2 = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
         let user_seq = super::seed_user(store2.as_ref(), 0, "问");
-        TurnRunner
+        super::RunnerFixture
             .run_streaming(
                 &store2,
                 llm2.clone(),
@@ -846,7 +849,7 @@ mod turn_runner_tests {
             dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
         > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
-        TurnRunner
+        super::RunnerFixture
             .run(
                 &plain_store,
                 std::sync::Arc::new(StubLlmAdapter::succeed("stub-model")),
@@ -863,7 +866,7 @@ mod turn_runner_tests {
         > = std::sync::Arc::new(EventStore::new());
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
         let user_seq = super::seed_user(stream_store.as_ref(), 0, "问");
-        TurnRunner
+        super::RunnerFixture
             .run_streaming(
                 &stream_store,
                 std::sync::Arc::new(StubLlmAdapter::succeed_streaming(
@@ -1046,7 +1049,7 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .run(&store, llm.clone(), tok, 0, "问")
             .await
             .unwrap();
@@ -1119,7 +1122,7 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -1212,7 +1215,7 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
-        TurnRunner
+        super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -1261,7 +1264,7 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -1327,7 +1330,7 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
         let user_seq = super::seed_user(store.as_ref(), 0, "问");
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -1374,7 +1377,7 @@ mod turn_runner_tests {
             dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
         > = std::sync::Arc::new(EventStore::new());
         let user_seq = super::seed_user(store2.as_ref(), 0, "问");
-        TurnRunner
+        super::RunnerFixture
             .drive_with_tools(
                 &store2,
                 llm.clone(),
@@ -1420,7 +1423,7 @@ mod tool_round_tests {
     use super::super::super::tool_dispatch::{
         CallOutcome, ToolBegin, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
     };
-    use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnRunner};
+    use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput};
     use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_TURN_STAGE};
     use symbio_kernel::capability::CapabilityMeta;
     use symbio_kernel::event::{Entity, Event, Seq, Verb};
@@ -1462,7 +1465,7 @@ mod tool_round_tests {
             rounds: Arc::new(Mutex::new(0)),
         });
 
-        TurnRunner
+        super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -1585,7 +1588,7 @@ mod tool_round_tests {
 
         let mut i = input(store.as_ref());
         i.inject = Some(inject);
-        TurnRunner
+        super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -2453,7 +2456,7 @@ mod tool_round_tests {
         let mut i = input(store.as_ref());
         i.final_reply = Some("北京今天晴。".into());
         i.final_cost_ms = 1234;
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -2526,7 +2529,7 @@ mod tool_round_tests {
         });
         let i = input(store.as_ref());
 
-        TurnRunner
+        super::RunnerFixture
             .drive_with_actors(
                 &store,
                 llm.clone(),
@@ -2597,7 +2600,7 @@ mod tool_round_tests {
             let llm = std::sync::Arc::new(ToolCallingLlm::new());
             let prompts = llm.prompts.clone();
             let i = input(store.as_ref());
-            TurnRunner
+            super::RunnerFixture
                 .drive_with_actors(
                     &store,
                     llm.clone(),
@@ -2644,7 +2647,7 @@ mod tool_round_tests {
         for turn in 0..3u64 {
             let mut i = input_at(store.as_ref(), turn, &format!("第 {turn} 轮问题"));
             i.window_turns = Some(0);
-            TurnRunner
+            super::RunnerFixture
                 .drive_with_tools(
                     &store,
                     llm.clone(),
@@ -2688,7 +2691,7 @@ mod tool_round_tests {
         for turn in 0..3u64 {
             let mut i = input_at(store.as_ref(), turn, &format!("第 {turn} 轮问题"));
             i.window_turns = Some(1);
-            TurnRunner
+            super::RunnerFixture
                 .drive_with_tools(
                     &store,
                     llm.clone(),
@@ -2755,7 +2758,7 @@ mod tool_round_tests {
         for turn in 0..2u64 {
             let mut i = input_at(store.as_ref(), turn, &format!("第 {turn} 轮问题"));
             i.window_turns = Some(0);
-            TurnRunner
+            super::RunnerFixture
                 .drive_with_tools(
                     &store,
                     llm.clone(),
@@ -2772,7 +2775,7 @@ mod tool_round_tests {
         // ③ 第 3 轮：窗口只留最近 1 轮（快照的 turn 不在窗口内）。
         let mut i = input_at(store.as_ref(), 2, "压缩之后的问题");
         i.window_turns = Some(1);
-        TurnRunner
+        super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -2815,7 +2818,7 @@ mod tool_round_tests {
             rounds: Arc::new(Mutex::new(0)),
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -2987,7 +2990,7 @@ mod tool_round_tests {
             rounds: Arc::new(Mutex::new(0)),
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -3071,7 +3074,7 @@ mod tool_round_tests {
             rounds: Arc::new(Mutex::new(0)),
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -3175,7 +3178,7 @@ mod tool_round_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -3231,7 +3234,7 @@ mod tool_round_tests {
         > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(AnsweringLlm::new());
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -3304,7 +3307,7 @@ mod tool_round_tests {
             dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
         > = std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 std::sync::Arc::new(TruncatedLlm),
@@ -3358,7 +3361,7 @@ mod tool_round_tests {
             pending: true,
             rounds: Arc::new(Mutex::new(0)),
         });
-        let first = TurnRunner
+        let first = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 std::sync::Arc::new(pending_llm),
@@ -3414,7 +3417,7 @@ mod tool_round_tests {
             user_seq,
             rounds: Arc::new(Mutex::new(0)),
         });
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 std::sync::Arc::new(answer_llm),
@@ -3698,7 +3701,7 @@ mod tool_round_tests {
             }
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -3922,7 +3925,7 @@ mod tool_round_tests {
             prompts: Arc::new(Mutex::new(Vec::new())),
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -4030,7 +4033,7 @@ mod tool_round_tests {
             prompts: Arc::new(Mutex::new(Vec::new())),
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -4134,7 +4137,7 @@ mod tool_round_tests {
             prompts: Arc::new(Mutex::new(Vec::new())),
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -4263,7 +4266,7 @@ mod tool_round_tests {
             rounds: Arc::new(Mutex::new(0)),
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -4359,7 +4362,7 @@ mod tool_round_tests {
             parked_in_time
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .run(&store, llm, tok, 0, "路上慢一点没关系")
             .await
             .expect("停在路上不等于失败：放行之后这一轮照常答完");
@@ -4425,7 +4428,7 @@ mod tool_round_tests {
         });
         let llm = std::sync::Arc::new(symbio_testkit::StubLlmAdapter::succeed("stub-model"));
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .run(
                 &store,
                 llm,
@@ -4523,7 +4526,7 @@ mod tool_round_tests {
             rounds: Arc::new(Mutex::new(0)),
         });
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_tools(
                 &store,
                 llm.clone(),
@@ -4657,7 +4660,7 @@ mod reflex_turn_tests {
     use symbio_testkit::{trivial_actor_spec, StubLlmAdapter};
 
     use super::super::super::stage_events::{land, StageFact};
-    use super::super::{TurnInput, TurnRunner};
+    use super::super::TurnInput;
     use symbio_kernel::adapters::LatencyTier;
     use symbio_kernel::event::{Entity, Seq, Verb};
     use symbio_kernel::store::EventStore;
@@ -4705,7 +4708,7 @@ mod reflex_turn_tests {
 
         // 桩只在**不该发生**的模型往返里失败：它若失败，说明收束行没抢到第一笔债。
         let llm = std::sync::Arc::new(StubLlmAdapter::always_fail("快路轮不该发模型请求"));
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_actors(
                 &store,
                 llm.clone(),
@@ -5244,7 +5247,7 @@ mod actor_ledger_tests {
 
     use super::super::super::loop_rows::{ActorEntry, ACTOR_EXECUTE};
     use super::super::super::turn_exec::{ActorError, Ctx, StepFuture};
-    use super::super::{TurnInput, TurnRunner};
+    use super::super::TurnInput;
     use symbio_kernel::event::{Entity, Event, Seq, Verb};
     use symbio_kernel::store::{EventStore, Store};
     use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_MESSAGE_ADDED};
@@ -5320,7 +5323,7 @@ mod actor_ledger_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_actors(
                 &store,
                 llm.clone(),
@@ -5362,7 +5365,7 @@ mod actor_ledger_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
-        let out = TurnRunner
+        let out = super::RunnerFixture
             .drive_with_actors(
                 &store,
                 llm.clone(),
