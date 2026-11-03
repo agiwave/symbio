@@ -1,8 +1,9 @@
 //! 拒止骨架的单元测试（原 `gates.test.rs`）。
 //!
-//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。开窗判据（时延 / 预算）已搬进
-//! `symbio-plugin-tool` 的执行体，本文件只钉**映射不猜**：声明闸（能力包的 `before`）
-//! 与 PreToolUse 钩子的出口经 [`Refusal`] 如实交回，主体派生与落笔同源。
+//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。开窗判据（时延 / 预算）、
+//! 协议判定与 Pre/PostToolUse 钩子都已搬进 `symbio-plugin-tool` 的执行体，本文件
+//! 只钉**映射不猜**：声明闸（能力包的 `before`）的出口经 [`Refusal`] 如实交回，
+//! 主体派生与落笔同源。
 
 use super::*;
 use symbio_kernel::capability::failure_kind;
@@ -60,19 +61,5 @@ fn the_principal_comes_from_the_agent_id() {
     assert_eq!(
         batch_principal(&with_agent(Some("person/local"))),
         "person/local"
-    );
-}
-
-/// PreToolUse 钩子共用同一套失败语义：`Blocked:` + `blocked` + 违约理由保留钩子原措辞。
-#[test]
-fn blocked_refusal_keeps_hook_wording_and_semantics() {
-    let refusal = Refusal::blocked("策略不允许".to_string());
-    assert_eq!(refusal.gate, "PreToolUse");
-    assert_eq!(refusal.prefix, "Blocked");
-    assert_eq!(refusal.kind, "blocked");
-    assert!(refusal.notes_delegation);
-    assert_eq!(
-        refusal.note_why.as_deref(),
-        Some("被 PreToolUse 钩子拦下：策略不允许")
     );
 }

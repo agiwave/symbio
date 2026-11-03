@@ -99,7 +99,10 @@ mod tests {
                 reason: "budget-exhausted"
             }
         );
-        assert_eq!(gate.gate(true, 900, 500, 10_000, 10, 80), GateDecision::Allow);
+        assert_eq!(
+            gate.gate(true, 900, 500, 10_000, 10, 80),
+            GateDecision::Allow
+        );
         assert_eq!(
             gate.gate(true, 0, 500, 10_000, 200, 80),
             GateDecision::Break {

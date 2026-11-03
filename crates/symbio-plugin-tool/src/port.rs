@@ -37,15 +37,15 @@ use std::sync::Arc;
 
 use crate::breaker::{CircuitBreaker, GateDecision};
 use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
+use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
     capability_invoke, capability_to_wire, effects::annotations, effects::EffectInput,
     events::EVENT_ARTIFACT_ADDED, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
     failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
-    Entity, ExecAbortSignal, FactDraft, LatencyTier, PluginError, PluginInvokeRequestExt,
-    PluginPayload, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
-    PortProvider, Verb,
-    ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID,
-    TOOL_CALL_ID, WORKDIR,
+    Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext, PortExecutor,
+    PortInput, PortOutcome, PortProvider, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR,
+    EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
 };
 
 /// 端口名（唯一来源：本插件）。
@@ -72,6 +72,11 @@ const KEY_LAND_ONLY: &str = "land_only";
 /// 环的授权矩阵与成本台账只把结论交给执行体；快慢、开窗与熔断事实都由本执行体判
 /// （DE-039 §6，DE-047 D-311）。缺省 = 不判（通用端口调用不带这一格）。
 const KEY_GATE: &str = "gate";
+/// 调用信封的协议读数（环只搬原始值，判在本次执行体）：
+/// `{ id_missing, name_missing, parse_error }`。
+const KEY_PROTOCOL: &str = "protocol";
+/// 没成功的原因（环只把它交给能力包的效果端口，不解释）。
+const FACT_WHY: &str = "why";
 
 /// 产出键（与环的通用受理入口共用同一份形状）。
 const FACT_RESULT_TEXT: &str = "result_text";
@@ -476,6 +481,130 @@ async fn finish(
     }
 }
 
+/// [`finish`] 的失败变体：额外带上失败种类与「为什么没履约」。
+///
+/// 两者都是**事实值**，环只读；`failure_kind` 进父节点元数据，`why` 交给能力包的
+/// 效果端口（DE-025 D-207）。
+async fn finish_with(
+    raw: String,
+    success: bool,
+    pending: Option<serde_json::Value>,
+    archive_dir: &Path,
+    failure_kind: Option<&str>,
+    why: &str,
+) -> PortOutcome {
+    let mut out = finish(raw, success, pending, archive_dir).await;
+    if let Some(fact) = out.facts.first_mut().and_then(|f| f.as_object_mut()) {
+        if let Some(kind) = failure_kind {
+            fact.insert("failure_kind".into(), serde_json::json!(kind));
+        }
+        if !why.is_empty() {
+            fact.insert(FACT_WHY.into(), serde_json::json!(why));
+        }
+    }
+    out
+}
+
+/// 调用信封的协议读数。缺这一格 = 不是协议级调用（通用端口调用）。
+struct ProtocolInput<'a> {
+    id_missing: bool,
+    name_missing: bool,
+    parse_error: Option<&'a str>,
+}
+
+fn protocol_input(payload: &serde_json::Value) -> Option<ProtocolInput<'_>> {
+    let p = payload.get(KEY_PROTOCOL)?;
+    Some(ProtocolInput {
+        id_missing: p
+            .get("id_missing")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        name_missing: p
+            .get("name_missing")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        parse_error: p.get("parse_error").and_then(serde_json::Value::as_str),
+    })
+}
+
+/// 协议失败的结果：判定与措辞都在执行体（DE-047 D-312）。
+///
+/// 环只把原始协议读数搬进来，并给一个兜底 id 以便结果有落点；它不再判断
+/// 「缺 id / 缺 name / 参数解析失败」。
+async fn refuse_protocol(protocol: ProtocolInput<'_>, archive_dir: &Path) -> Option<PortOutcome> {
+    if protocol.id_missing {
+        plugin_error!("tool", "[Tool] 协议失败：模型未返回工具调用 id");
+        return Some(
+            finish_with(
+                "Error: 模型未返回有效的工具调用 ID（协议错误）".to_string(),
+                false,
+                None,
+                archive_dir,
+                Some(failure_kind::ERROR),
+                "",
+            )
+            .await,
+        );
+    }
+    if protocol.name_missing {
+        plugin_error!("tool", "[Tool] 协议失败：模型未返回工具名称");
+        return Some(
+            finish_with(
+                "Error: 模型未返回有效的工具名称（协议错误）".to_string(),
+                false,
+                None,
+                archive_dir,
+                Some(failure_kind::ERROR),
+                "",
+            )
+            .await,
+        );
+    }
+    let raw = protocol.parse_error?;
+    plugin_error!("tool", "[Tool] 协议失败：工具参数 JSON 解析失败");
+    let preview: String = raw.chars().take(400).collect();
+    let truncated = raw.chars().count() > 400;
+    let text = format!(
+        "Error: 工具参数 JSON 解析失败（可能被长度上限截断），本次调用未执行。\
+         只有完整且可解析的 JSON 参数才会被执行，请勿以相同内容重试。\n\
+         参数原文（{} 字符{}）：{preview}",
+        raw.chars().count(),
+        if truncated { "，已截断展示" } else { "" }
+    );
+    Some(
+        finish_with(
+            text,
+            false,
+            None,
+            archive_dir,
+            Some(failure_kind::ERROR),
+            "参数 JSON 解析失败，未执行",
+        )
+        .await,
+    )
+}
+
+/// 工具生命周期钩子（Pre/PostToolUse）由**执行体**触发：环不按事件名调钩子，
+/// 只搬工具名与参数（DE-047 D-312）。
+async fn fire_post_hook(
+    parent: &Arc<dyn Plugin>,
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+    tool_output: serde_json::Value,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) {
+    let _ = fire_hook(
+        &Some(parent.clone()),
+        HookEvent::PostToolUse {
+            tool_name: tool_name.to_string(),
+            tool_input: tool_input.clone(),
+            tool_output,
+        },
+        ctx.clone(),
+    )
+    .await;
+}
+
 /// 只落产物格、不执行：唤醒结果与没跑到的占位结果走这一形态。
 ///
 /// 载荷里的 `land_only` 是**结果纯值**（`text` / `success` / `needs_user_action` /
@@ -654,6 +783,48 @@ impl PortExecutor for ToolPort {
                 error: None,
             };
         }
+        // 协议失败：判定与措辞都在执行体（DE-047 D-312）。环只搬原始读数与兜底 id。
+        if let Some(protocol) = protocol_input(&payload) {
+            if let Some(out) = refuse_protocol(protocol, &archive_dir).await {
+                return out;
+            }
+        }
+
+        // 上下文在旧端口单测里可能缺席；授权 / 闸门的拒绝事实不该因缺上下文而丢失，
+        // 所以先把上下文解析成 Option，钩子只在有上下文时触发；走到能力调用前再
+        // 按原口径响亮失败。
+        let request = exec.ctx.clone();
+        let hook_parent = request
+            .as_ref()
+            .and_then(|ctx| ctx.parent())
+            .and_then(|w| w.upgrade());
+        if let (Some(ctx), Some(parent)) = (request.as_ref(), hook_parent.as_ref()) {
+            plugin_info!(
+                "tool",
+                "[Tool] 请求发起: {} args={}",
+                tool_name,
+                args_summary(&args, 200)
+            );
+            // 工具生命周期钩子的入方向：由执行体触发，环不按事件名调钩子（DE-047 D-312）。
+            let pre = fire_hook(
+                &Some(parent.clone()),
+                HookEvent::PreToolUse {
+                    tool_name: tool_name.clone(),
+                    tool_input: args.clone(),
+                },
+                ctx.clone(),
+            )
+            .await;
+            if !pre.should_proceed {
+                let reason = pre
+                    .block_reason
+                    .unwrap_or_else(|| "Blocked by pre hook".to_string());
+                let text = format!("Blocked: {reason}");
+                let why = format!("被 PreToolUse 钩子拦下：{reason}");
+                return finish_with(text, false, None, &archive_dir, Some("blocked"), &why).await;
+            }
+        }
+
         // 授权判定先行（`D-306` 裁决一）：载荷带判定输入时由本执行体判，结论经写口落事实；
         // 拒绝即判死这一笔，不再进入能力调用。旧路径的载荷不带 `threshold`，这里保持旁路。
         if let Some(authz) = authorize(&payload) {
@@ -664,16 +835,28 @@ impl PortExecutor for ToolPort {
                 // 与环侧 `DispatchOutcome` 的映射同形：`PortOutcome.error` →
                 // `Error: {why}`。产物格正文用同一句话。
                 let text = format!("authorization denied ({why})");
-                finish(format!("Error: {text}"), false, None, &archive_dir).await;
+                if let (Some(ctx), Some(parent)) = (request.as_ref(), hook_parent.as_ref()) {
+                    fire_post_hook(
+                        parent,
+                        &tool_name,
+                        &args,
+                        serde_json::json!({ "error": format!("Error: {text}") }),
+                        ctx,
+                    )
+                    .await;
+                }
                 return PortOutcome::failed(PortErrorClass::NonRetryable, text);
             }
         }
+        // 通用端口调用可能不带协议读数；名字仍为空时按协议失败拒绝。
         if tool_name.trim().is_empty() {
-            return finish(
-                "Error: Missing tool_name".to_string(),
+            return finish_with(
+                "Error: 模型未返回有效的工具名称（协议错误）".to_string(),
                 false,
                 None,
                 &archive_dir,
+                Some(failure_kind::ERROR),
+                "",
             )
             .await;
         }
@@ -693,25 +876,43 @@ impl PortExecutor for ToolPort {
                 GateDecision::Allow => {}
                 GateDecision::Refuse => {
                     // 验收 1：拒绝**零事件**——只回结果，不落事实。
-                    return refused(
-                        "Refused: 未持外部执行能力（produce.artifact），本次调用未执行",
-                        failure_kind::PERMISSION_DENIED,
-                    );
+                    let text = "Refused: 未持外部执行能力（produce.artifact），本次调用未执行";
+                    if let (Some(ctx), Some(parent)) = (request.as_ref(), hook_parent.as_ref()) {
+                        fire_post_hook(
+                            parent,
+                            &tool_name,
+                            &args,
+                            serde_json::json!({ "error": text }),
+                            ctx,
+                        )
+                        .await;
+                    }
+                    return refused(text, failure_kind::PERMISSION_DENIED);
                 }
                 GateDecision::Break { reason } => {
                     // 验收 2：熔断必须入格，不允许静默继续。
                     exec.emit
-                        .emit(vec![CircuitBreaker.break_fact(&exec.idempotency_key, reason)])
+                        .emit(vec![
+                            CircuitBreaker.break_fact(&exec.idempotency_key, reason)
+                        ])
                         .await;
-                    return refused(
-                        &format!("Refused: 外部执行闸门熔断（{reason}），本次调用未执行"),
-                        failure_kind::TOOL_UNAVAILABLE,
-                    );
+                    let text = format!("Refused: 外部执行闸门熔断（{reason}），本次调用未执行");
+                    if let (Some(ctx), Some(parent)) = (request.as_ref(), hook_parent.as_ref()) {
+                        fire_post_hook(
+                            parent,
+                            &tool_name,
+                            &args,
+                            serde_json::json!({ "error": text }),
+                            ctx,
+                        )
+                        .await;
+                    }
+                    return refused(&text, failure_kind::TOOL_UNAVAILABLE);
                 }
             }
         }
 
-        let Some(ctx) = exec.ctx.clone() else {
+        let Some(ctx) = request else {
             return finish(
                 "Error: No request context".to_string(),
                 false,
@@ -720,14 +921,7 @@ impl PortExecutor for ToolPort {
             )
             .await;
         };
-        plugin_info!(
-            "tool",
-            "[Tool] 请求发起: {} args={}",
-            tool_name,
-            args_summary(&args, 200)
-        );
-
-        let parent = match ctx.parent().and_then(|w| w.upgrade()) {
+        let parent = match hook_parent {
             Some(p) => p,
             None => {
                 return finish(
@@ -867,13 +1061,16 @@ impl PortExecutor for ToolPort {
                         started_at.elapsed().as_millis(),
                         tool_call_id
                     );
-                    return finish(
-                                                format!("Error: 工具 {} 被用户中止，未返回结果", tool_name),
-                        false,
-                        None,
-                        &archive_dir,
+                    let text = format!("Error: 工具 {} 被用户中止，未返回结果", tool_name);
+                    fire_post_hook(
+                        &parent,
+                        &tool_name,
+                        &args,
+                        serde_json::json!({ "error": text }),
+                        &ctx,
                     )
                     .await;
+                    return finish(text, false, None, &archive_dir).await;
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_secs(TOOL_EXEC_IDLE_TIMEOUT_SECS)) => {
                     let now = progress.emitted();
@@ -888,16 +1085,19 @@ impl PortExecutor for ToolPort {
                             TOOL_EXEC_IDLE_TIMEOUT_SECS, tool_name, tool_call_id
                         )
                     );
-                    return finish(
-                                                format!(
-                            "Error: 工具 {} 已 {} 秒无任何进展，已强制中断（疑似挂死）",
-                            tool_name, TOOL_EXEC_IDLE_TIMEOUT_SECS
-                        ),
-                        false,
-                        None,
-                        &archive_dir,
+                    let text = format!(
+                        "Error: 工具 {} 已 {} 秒无任何进展，已强制中断（疑似挂死）",
+                        tool_name, TOOL_EXEC_IDLE_TIMEOUT_SECS
+                    );
+                    fire_post_hook(
+                        &parent,
+                        &tool_name,
+                        &args,
+                        serde_json::json!({ "error": text }),
+                        &ctx,
                     )
                     .await;
+                    return finish(text, false, None, &archive_dir).await;
                 }
             }
         };
@@ -908,13 +1108,16 @@ impl PortExecutor for ToolPort {
                     let data = match resp.get::<serde_json::Value>() {
                         Ok(d) => d,
                         Err(_) => {
-                            return finish(
-                                "Error: Failed to deserialize payload".to_string(),
-                                false,
-                                None,
-                                &archive_dir,
+                            let text = "Error: Failed to deserialize payload".to_string();
+                            fire_post_hook(
+                                &parent,
+                                &tool_name,
+                                &args,
+                                serde_json::json!({ "error": text }),
+                                &ctx,
                             )
-                            .await
+                            .await;
+                            return finish(text, false, None, &archive_dir).await;
                         }
                     };
                     let pending = pending_prompt_from(&data);
@@ -931,16 +1134,27 @@ impl PortExecutor for ToolPort {
                             .and_then(|v| v.as_str())
                             .unwrap_or("-")
                     );
+                    fire_post_hook(
+                        &parent,
+                        &tool_name,
+                        &args,
+                        serde_json::json!({ "content": res.clone() }),
+                        &ctx,
+                    )
+                    .await;
                     finish(res, true, pending, &archive_dir).await
                 }
                 _ => {
-                    finish(
-                        "Error: Unexpected payload type".to_string(),
-                        false,
-                        None,
-                        &archive_dir,
+                    let text = "Error: Unexpected payload type".to_string();
+                    fire_post_hook(
+                        &parent,
+                        &tool_name,
+                        &args,
+                        serde_json::json!({ "error": text }),
+                        &ctx,
                     )
-                    .await
+                    .await;
+                    finish(text, false, None, &archive_dir).await
                 }
             },
             Err(e) => {
@@ -952,7 +1166,16 @@ impl PortExecutor for ToolPort {
                         started_at.elapsed().as_millis()
                     )
                 );
-                finish(format!("Error: {e}"), false, None, &archive_dir).await
+                let text = format!("Error: {e}");
+                fire_post_hook(
+                    &parent,
+                    &tool_name,
+                    &args,
+                    serde_json::json!({ "error": text }),
+                    &ctx,
+                )
+                .await;
+                finish(text, false, None, &archive_dir).await
             }
         }
     }

@@ -1,16 +1,16 @@
-//! 工具批执行的**阶段分层**。
+//! 工具**逐笔债**执行的阶段分层。
 //!
-//! [`batch`] —— 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、声明闸
-//! 拒止、钩子拦下与正常执行四条出口；外部执行的**中性输入**（`GateInputs`）在
-//! 准备点现取，判定（快慢 / 预算 / 开窗）在执行体。
+//! [`batch`] —— 按调用顺序逐笔驱动：准备 → 运行态 → 单笔执行 → 收口。环只保留
+//! 两个职务：超限丢弃的预算反馈与交互模式下「前一笔待用户/失败 ⇒ 后续不再启动」；
+//! 协议失败、钩子与快慢判定都在执行体（DE-047 D-311 / D-312）。
 //!
 //! 「没跑到」的占位结果子节点不在这里收口：节点是事实的投影，环只写
-//! `failed{why}`，展示由投影器渲染（DE-047 D-312）。
+//! `failed{why}`，展示由投影器渲染。
 //!
 //! 编排入口是 [`crate::tools::tool_executor::process_tool_calls_in_env`]：
-//! 空批早退 → 逐条准备 → 逐条执行。段间只传出参 `effects`。
+//! 空批早退 → 逐笔准备 → 逐笔执行。段间只传出参 `effects`。
 //!
-//! 判据（纪律 3，「这段错了谁会红」）：批内事件与父节点终态用例红——
+//! 判据（纪律 3，「这段错了谁会红」）：父节点终态与逐笔语义用例红——
 //! `tool_executor.test.rs` 的 `process_tool_calls_in_env` 组（中止、交互 break、
 //! 拒止、协议失败）。
 
@@ -29,7 +29,7 @@ pub fn is_unanswered(failure_kind: &str) -> bool {
 
 use super::tool_executor::{
     build_user_prompt_message, call_signature, execute_one, record_effect, ExecResult, GateInputs,
-    RoundEnv, ToolDecls,
+    ProtocolInput, RoundEnv, ToolDecls,
 };
 use serde_json::{json, Value};
 use symbio_kernel::event::{Event, Seq};
@@ -38,7 +38,6 @@ use symbio_kernel::llm::TurnToolCallInfo;
 use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::effects::EffectInput;
-use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_sdk::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL,
 };

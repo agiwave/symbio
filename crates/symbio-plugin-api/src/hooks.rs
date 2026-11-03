@@ -142,8 +142,9 @@ pub const HOOK_UNAVAILABLE_MARKER: &str = "[hook-unavailable]";
 /// **丢的不是错误**（没有错误可丢），只是不需要那份输出。
 ///
 /// [D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6 上移宿主：session 在派发前
-/// 触发 `UserPromptSubmit`，loop 在轮内触发 `PreCompact` / `PreToolUse` / `PostToolUse`，
-/// 两个插件共用这一条路由助手（不是新机制）。
+/// 触发 `UserPromptSubmit`，loop 在轮内触发 `PreCompact`，工具端口执行体在调用前后
+/// 触发 `PreToolUse` / `PostToolUse`（DE-047 D-312）；各插件共用这一条路由助手
+/// （不是新机制）。
 pub async fn fire_hook(
     parent: &Option<Arc<dyn Plugin>>,
     event: HookEvent,

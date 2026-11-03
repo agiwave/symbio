@@ -28,9 +28,9 @@ mod decls;
 mod effects;
 mod gate_inputs;
 
-pub use self::gate_inputs::GateInputs;
 pub use self::decls::ToolDecls;
 pub use self::effects::record_effect;
+pub use self::gate_inputs::GateInputs;
 use symbio_plugin_api::effects::EffectInput;
 // tool 端口的合同类型（下沉到 plugin-api）：`PendingPrompt` 经本模块 re-export，
 // dispatch 一系（`dispatch.rs` / `dispatch/batch.rs`）与测试的导入面不变。
@@ -112,6 +112,23 @@ pub struct ExecResult {
     pub origin_tokens: usize,
     /// 执行体在结果事实里交回的 `failure_kind`（中性词；环不解释原因）。
     pub failure_kind: Option<String>,
+    /// 执行体交回的「为什么没履约」（中性文本；环只交给能力包的效果端口）。
+    pub why: String,
+}
+
+/// 调用信封的协议读数：环只搬原始值，判定在端口执行体（DE-047 D-312）。
+#[derive(Debug, Clone, Default)]
+pub struct ProtocolInput {
+    pub id_missing: bool,
+    pub name_missing: bool,
+    pub parse_error: Option<String>,
+}
+
+impl ProtocolInput {
+    /// 是否已构成协议失败：是则环不再做任何世界判断，直接交给执行体裁决。
+    pub(crate) fn is_failure(&self) -> bool {
+        self.id_missing || self.name_missing || self.parse_error.is_some()
+    }
 }
 
 /// 执行**一笔债**（不阻塞等待用户）：按端口名取提供者，交给端口执行合同跑。
@@ -137,6 +154,7 @@ pub async fn execute_one(
     name: &str,
     args: Value,
     call_id: &str,
+    protocol: &ProtocolInput,
     sink: &ExecEventSink,
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
@@ -180,6 +198,13 @@ pub async fn execute_one(
                     "name": name,
                     "args": args,
                     "call_id": call_id,
+                    // 协议读数也是纯值：判「缺 id / 缺 name / 解析失败」在执行体，
+                    // 环不判格式（DE-047 D-312）。
+                    "protocol": {
+                        "id_missing": protocol.id_missing,
+                        "name_missing": protocol.name_missing,
+                        "parse_error": protocol.parse_error,
+                    },
                     "archive_dir": env.archive_dir.to_string_lossy(),
                     // 中性输入：开窗判据与熔断事实归执行体（DE-039 §6，D-311）。
                     "gate": {
@@ -262,6 +287,11 @@ pub async fn execute_one(
             .and_then(|v| v.as_str())
             .filter(|k| !k.is_empty())
             .map(str::to_string),
+        why: fact
+            .get("why")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
     }
 }
 
@@ -384,7 +414,7 @@ pub(crate) async fn process_tool_calls_in_env(
     // - `parent_updates`：ToolCall 父节点的**完整终态快照**（发射端从
     //   `context_messages` 取权威副本应用终态），供调用方做内存镜像整条替换并随
     //   `persist_messages` 落库。
-    let (tool_messages, parent_updates) = super::dispatch::batch::run_batch(
+    let (tool_messages, parent_updates) = super::dispatch::batch::run_calls(
         tool_calls,
         parent,
         sink,

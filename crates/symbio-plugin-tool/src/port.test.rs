@@ -851,4 +851,3 @@ async fn exhausted_budget_breaks_and_lands_a_control_event() {
         serde_json::json!("budget-exhausted")
     );
 }
-

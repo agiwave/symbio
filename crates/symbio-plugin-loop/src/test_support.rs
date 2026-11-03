@@ -680,6 +680,47 @@ impl PortExecutor for FixtureToolPort {
             }
             return fixture_outcome(String::new(), true, None);
         }
+        // 协议读数：与生产 `ToolPort` 同形的最小子集——判与措辞都在执行体，
+        // 环测试只验证「结果被如实收口」。
+        if let Some(protocol) = payload.get("protocol") {
+            if protocol
+                .get("id_missing")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                return fixture_outcome(
+                    "Error: 模型未返回有效的工具调用 ID（协议错误）".into(),
+                    false,
+                    None,
+                );
+            }
+            if protocol
+                .get("name_missing")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                return fixture_outcome(
+                    "Error: 模型未返回有效的工具名称（协议错误）".into(),
+                    false,
+                    None,
+                );
+            }
+            if let Some(raw) = protocol.get("parse_error").and_then(Value::as_str) {
+                let preview: String = raw.chars().take(400).collect();
+                let truncated = raw.chars().count() > 400;
+                return fixture_outcome(
+                    format!(
+                        "Error: 工具参数 JSON 解析失败（可能被长度上限截断），本次调用未执行。\
+                         只有完整且可解析的 JSON 参数才会被执行，请勿以相同内容重试。\n\
+                         参数原文（{} 字符{}）：{preview}",
+                        raw.chars().count(),
+                        if truncated { "，已截断展示" } else { "" }
+                    ),
+                    false,
+                    None,
+                );
+            }
+        }
         let name = payload
             .get("name")
             .and_then(Value::as_str)
