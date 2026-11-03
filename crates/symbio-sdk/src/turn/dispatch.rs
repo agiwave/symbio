@@ -51,7 +51,10 @@ pub struct TurnSpec {
 ///
 /// worker 三旋钮的**出厂值**与 session 配置面共用下面三个 core 常量：
 /// 判定侧（loop）与配置面（session）不得各持一份字面量。
-#[derive(Debug, Clone)]
+///
+/// `Serialize` 只为端口回体（`session-config`）：这些标量要作为**纯值**过端口，
+/// 端口不搬类型。字段名就是载荷键，改动即协议改动。
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TurnSettings {
     pub auto_compress: bool,
     pub classify_enabled: bool,

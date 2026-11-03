@@ -248,7 +248,10 @@ pub fn llm_build_tool_message(
 /// `deep`（子智能体递归嵌套）随子会话转播桥在 149-ii 接线：子会话的节点早已由
 /// `relay_bridge` 无条件挂到发起它的父工具卡下，本档只是让读侧投影**保留**那棵嵌套树
 /// （与 `grouped` 同样不升根），语义差异全在前端如何展开。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Serialize` 只为端口回体（`session-config` 的 `settings.presentation_tree`）：
+/// 变体名即载荷值，改名 = 协议改动。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum PresentationTree {
     /// 本轮所有节点挂会话根（与用户发言互为兄弟）；只有工具调用内部保留自己的骨架。
     Flat,

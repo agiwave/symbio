@@ -208,6 +208,33 @@ impl SessionPlugin {
         (row.run)(self, &host, &dispatch, row.op, payload).await
     }
 
+    /// 端口执行体的动作入口（`session-call` / `session-call-unit`）。
+    ///
+    /// 与 [`Self::run_at`] 共用同一张装配期冻结的行表（`D-094`）：闭集之外的 `op`
+    /// 直接拒；回体是动作响应里的 `data`（无产物动作 ⇒ `Value::Null`）。
+    /// 调用方不是 VDFS 地址，因此这里没有「地址末段 = 动作名」这一条校验。
+    pub(crate) async fn run_op_row(
+        &self,
+        host: &Arc<dyn PluginInvokeRequest>,
+        dispatch: &TurnDispatch,
+        op: &str,
+        payload: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        let Some(row) = RUN_OPS.iter().find(|r| r.op == op) else {
+            return Err(format!("动作不在闭集内（{op}）"));
+        };
+        let resp = (row.run)(self, host, dispatch, row.op, payload)
+            .await
+            .map_err(|e| e.to_string())?;
+        let VdfsResponse::Action(result) = resp else {
+            return Err(format!("动作面返回了非动作响应（{op}）"));
+        };
+        if !result.ok {
+            return Err(format!("会话动作失败（{op}）：{}", result.message));
+        }
+        Ok(result.data.unwrap_or(serde_json::Value::Null))
+    }
+
     /// 本轮会话引擎：优先复用编排入口交付的句柄（临时会话的唯一正确来源）。
     ///
     /// 临时会话的存储是**实例级**的（`PersistentChatSession::ephemeral` 里的

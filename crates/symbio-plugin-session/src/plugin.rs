@@ -510,6 +510,16 @@ impl Plugin for SessionPlugin {
             // 有两道容量闸门——因此它归共享实现那套机制，本插件只负责「落位 + 标题 + 地址」。
             // 作用域闸门在 `contribute_memory` 内一处收口（无 `ctx[SESSION_ID]` 即不注入）。
             self.contribute_memory(&ctx, &visitor).await;
+
+            // 会话端口（`DE-048` D-315）：四条行契约交给收集宿主；执行体持本插件的
+            // 弱引用——插件不在时 fail-closed，不退回第二份读法。
+            let provider: std::sync::Arc<dyn symbio_plugin_api::port::PortProvider> =
+                std::sync::Arc::new(crate::port::SessionPortProvider::new(
+                    std::sync::Arc::downgrade(&self),
+                ));
+            for row in symbio_plugin_api::port::port_rows(&provider) {
+                visitor.put(row).await;
+            }
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         symbio_sdk::capability::capability_announce_configurable(&ctx, &self.config_file).await;

@@ -705,7 +705,11 @@ impl Frozen {
 // 它，判决 / 措辞 / 摘要那些内部往返带它。判据侧靠「有没有 `via`」把两类分开——
 // 内部往返的应答 `calls` 为空（它不带工具），若混进「本轮最近一次模型应答」的口径，
 // 一条判决往返就会被读成「这一轮答完了」。
-const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt", "via"];
+//
+// `row` 是**这一笔债走该端口的哪一条行契约**（D-315）：一个端口可以有多条行
+// （`session-config` / `session-call` / `session-call-unit` / `session-facts`），
+// 环只按行名配对，不解释行名属于哪个世界；行名由端口所属插件声明（I-6.3）。
+const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt", "via", "row"];
 
 /// **引擎独占的格子**（§3.4 第 5 条「决策者伪造 `response`」那一档的名单）。
 ///
