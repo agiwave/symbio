@@ -763,10 +763,11 @@ impl TurnSession {
     pub(crate) async fn open(
         &mut self,
         store: &dyn Store<Event = Event>,
+        ctx: Option<&std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
         dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
     ) {
         if let Some(dispatch) = dispatch {
-            stream::open_round(&mut self.run, store, dispatch).await;
+            stream::open_round(&mut self.run, store, ctx, dispatch).await;
         }
     }
 
@@ -774,11 +775,12 @@ impl TurnSession {
     pub(crate) async fn authorize(
         &mut self,
         store: &dyn Store<Event = Event>,
+        ctx: Option<&std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
         dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
         id: &str,
     ) {
         if let Some(dispatch) = dispatch {
-            stream::authorize_round(&mut self.run, store, dispatch, id).await;
+            stream::authorize_round(&mut self.run, store, ctx, dispatch, id).await;
         }
     }
 

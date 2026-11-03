@@ -305,10 +305,11 @@ impl CallOutcome {
     }
 }
 
-/// 工具派发的**四个动作**（D-118 决策 5 + `D-124` 订正 1）：创建 / 授权 / 派出 / 收尾。
+/// 工具派发的**两个动作**（`D-124` 订正 1）：派出 / 收尾。
 ///
-/// 四笔债不再由一次调用代劳——运行器按行各调一次，每一步只写自己那一行的
-/// 领域事实。契约住插件本地，core 不认识工具分发（E-009）。
+/// 创建（`open-tools`）与授权（`authorize-tool`）两段已是**行承接体**：写方是
+/// [`open_calls`] / [`authorize_call`]，由行动作直接调用，不经本契约（P2-4）。
+/// 契约住插件本地，core 不认识工具分发（E-009）。
 ///
 /// ## 为什么派出与收尾是两半
 ///
@@ -334,16 +335,6 @@ pub(crate) trait ToolDispatch: Send + Sync {
     /// 因此把「定格 + 排空」提成独立入口，由运行器在开账之后调一次。默认空实现：
     /// 测试替身没有流式桥。
     async fn prepare(&self, _store: &dyn Store<Event = Event>, _turn: &LlmTurn) {}
-
-    /// 创建：为模型响应里交回的调用逐条写 `request(port=tool)`。
-    ///
-    /// 交回的是 N 笔**互相独立**的债（`request` 各有一个调用标识），不是一个批。
-    async fn open(&self, store: &dyn Store<Event = Event>, turn: &LlmTurn) -> Vec<ToolPortCall>;
-
-    /// 授权：为**一笔**已开账的调用写 `authz.granted` / `authz.denied`。
-    ///
-    /// 拒绝即止：`granted` 保持 `false`，派出动作不会为它落 `sent`。
-    async fn authorize(&self, store: &dyn Store<Event = Event>, call: &mut ToolPortCall);
 
     /// **派出半**：为这一笔落 `sent`，把「跑执行层 + 收结果」寄存成一个 future。
     ///
@@ -483,6 +474,28 @@ struct ToolPortPolicy {
 }
 
 impl ToolPortPolicy {
+    /// 行动作入口：有宿主面就读真策略，裸幕夹具没有就按 [`Self::fallback`]。
+    async fn read_opt(ctx: Option<&Arc<dyn PluginInvokeRequest>>) -> Self {
+        match ctx {
+            Some(ctx) => Self::read(ctx).await,
+            None => Self::fallback(),
+        }
+    }
+
+    /// 裸幕夹具（`head = None`）没有请求上下文：按「无注册面、默认阈值、无放行清单」读。
+    ///
+    /// 生产控制面的每一幕都有宿主面（`drive::no_host` 守着），这条只服务
+    /// `ReadyStage { head: None }` 的夹具——它的工具都是 route-only（`risk = None`）
+    /// ⇒ 授权一律按 `deferred` 放行。
+    fn fallback() -> Self {
+        Self {
+            known: Vec::new(),
+            threshold: CapabilityRiskLevel::default(),
+            grants: ApprovalGrants::default(),
+            mode: String::new(),
+        }
+    }
+
     async fn read(ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
         let known: Vec<String> = tool_metas(ctx).await.into_iter().map(|m| m.name).collect();
         // 阈值读法与执行闸门同一处口径：`ctx[RISK_LEVEL]`，缺席 = `Medium`。
@@ -528,310 +541,346 @@ impl ToolPort {
     fn now_ms(&self, facts: &[Event]) -> i64 {
         loop_rows::wake_now_ms(facts, self.drive_seq)
     }
+}
 
-    /// 创建行 prepass：为每个真正可派发的调用开一笔工具账。
-    ///
-    /// 入口先问创建行 `open-tools` 欠不欠（D-117）：一个模型响应是一笔集合债，
-    /// 逐元素展开成 N 笔调用；全部 `request` 落完之后它就不再欠。这里不自己数
-    /// 「第几轮」——id 只由模型响应里已有的东西决定（[`call_key`]），
-    /// 否则创建行展开出的键与 `request` 的键对不上。
-    pub(crate) async fn open_batch(
-        &self,
-        ctx: &Arc<dyn PluginInvokeRequest>,
-        turn: &LlmTurn,
-    ) -> Vec<ToolPortCall> {
-        let facts = self.facts.range(Seq::new(0));
-        let latest = latest_model_response(&facts, self.turn, self.drive_seq);
-        // 旧存档里的模型应答没有 `calls`（D-117 之前写的）：没有创建债可言，
-        // 按旧路径继续派发，不能因为升级把在飞的会话卡死。带 `calls` 的应答
-        // 则必须由创建行先开账——它不欠就说明这一批已经落过 `request`。
-        let has_calls = latest.is_some_and(|e| e.payload.get("calls").is_some());
-        // obligation-precheck OB-004: 执行体（OPENER）动手前的复核——同一批被 resume / 重放第二次带进来时，创建行已由 `until` 关掉，早退避免重复落 `request`（不是第二套调度：这里不选行、不排行，只问本行还欠不欠）
-        if has_calls && !loop_rows::owes("open-tools", &facts, self.turn, self.now_ms(&facts)) {
-            symbio_plugin_api::plugin_warn!(
-                "session",
-                "[Tool] 创建行不欠（turn={}），不落 request",
-                self.turn
-            );
-            return Vec::new();
-        }
-        let policy = ToolPortPolicy::read(ctx).await;
-        let round = latest
-            .and_then(|e| e.payload.get("id"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("r0");
-        let created: &[serde_json::Value] = latest
-            .and_then(|e| e.payload.get("calls"))
-            .and_then(|v| v.as_array())
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let mut out = Vec::new();
-        for (idx, tc) in turn.tool_calls.iter().enumerate() {
-            let id = created
-                .get(idx)
-                .and_then(|c| c.get("id"))
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .unwrap_or_else(|| {
-                    call_key(self.turn, self.drive_seq, idx, tc.id.as_deref(), round)
-                });
-            let call = port::Call::new(ports::TOOL, id, 1);
-            let model_id = tc.id.as_deref().filter(|s| !s.trim().is_empty());
-            let name = tc.name.as_deref().filter(|s| !s.trim().is_empty());
-            // 不可派发的调用**也开账**：创建行的集合里有这个元素，跳过它那一笔
-            // 集合债就永远欠着。它的终局是「授权拒绝 + 批尾 failed」，不是「不存在」。
-            let invalid = model_id.is_none()
-                || name.is_none()
-                || tc.parse_error.is_some()
-                || tc.overflow_notice.is_some();
-            if let Some(mut open) = self
-                .open_one(
-                    ctx,
-                    &policy,
-                    &call,
-                    model_id.unwrap_or_default(),
-                    name.unwrap_or_default(),
-                    &tc.arguments,
-                )
-                .await
-            {
-                open.invalid = invalid;
-                out.push(open);
-            }
-        }
-        out
+// ── 行承接体：创建 / 授权（P2-4） ────────────────────────────────
+// 两段从 `ToolDispatch` 契约搬到行动作直接调用：它们只写自己那一行的领域事实，
+// 不再借道分发包。派出与收尾仍在 `impl ToolDispatch`（P2-5 的边界）。
+
+/// 创建行 prepass：为每个真正可派发的调用开一笔工具账。
+///
+/// 入口先问创建行 `open-tools` 欠不欠（D-117）：一个模型响应是一笔集合债，
+/// 逐元素展开成 N 笔调用；全部 `request` 落完之后它就不再欠。这里不自己数
+/// 「第几轮」——id 只由模型响应里已有的东西决定（[`call_key`]），
+/// 否则创建行展开出的键与 `request` 的键对不上。
+pub(crate) async fn open_calls(
+    store: &dyn Store<Event = Event>,
+    ctx: Option<&Arc<dyn PluginInvokeRequest>>,
+    turn: u64,
+    user_seq: u64,
+    drive_seq: u64,
+    model_turn: &LlmTurn,
+) -> Vec<ToolPortCall> {
+    let facts = store.range(Seq::new(0));
+    let latest = latest_model_response(&facts, turn, drive_seq);
+    // 旧存档里的模型应答没有 `calls`（D-117 之前写的）：没有创建债可言，
+    // 按旧路径继续派发，不能因为升级把在飞的会话卡死。带 `calls` 的应答
+    // 则必须由创建行先开账——它不欠就说明这一批已经落过 `request`。
+    let has_calls = latest.is_some_and(|e| e.payload.get("calls").is_some());
+    // obligation-precheck OB-004: 执行体（OPENER）动手前的复核——同一批被 resume / 重放第二次带进来时，创建行已由 `until` 关掉，早退避免重复落 `request`（不是第二套调度：这里不选行、不排行，只问本行还欠不欠）
+    if has_calls
+        && !loop_rows::owes(
+            "open-tools",
+            &facts,
+            turn,
+            loop_rows::wake_now_ms(&facts, drive_seq),
+        )
+    {
+        symbio_plugin_api::plugin_warn!(
+            "session",
+            "[Tool] 创建行不欠（turn={}），不落 request",
+            turn
+        );
+        return Vec::new();
     }
+    let policy = ToolPortPolicy::read_opt(ctx).await;
+    let round = latest
+        .and_then(|e| e.payload.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("r0");
+    let created: &[serde_json::Value] = latest
+        .and_then(|e| e.payload.get("calls"))
+        .and_then(|v| v.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let mut out = Vec::new();
+    for (idx, tc) in model_turn.tool_calls.iter().enumerate() {
+        let id = created
+            .get(idx)
+            .and_then(|c| c.get("id"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| call_key(turn, drive_seq, idx, tc.id.as_deref(), round));
+        let call = port::Call::new(ports::TOOL, id, 1);
+        let model_id = tc.id.as_deref().filter(|s| !s.trim().is_empty());
+        let name = tc.name.as_deref().filter(|s| !s.trim().is_empty());
+        // 不可派发的调用**也开账**：创建行的集合里有这个元素，跳过它那一笔
+        // 集合债就永远欠着。它的终局是「授权拒绝 + 批尾 failed」，不是「不存在」。
+        let invalid = model_id.is_none()
+            || name.is_none()
+            || tc.parse_error.is_some()
+            || tc.overflow_notice.is_some();
+        if let Some(mut open) = open_one(
+            store,
+            ctx,
+            &policy,
+            turn,
+            user_seq,
+            &call,
+            model_id.unwrap_or_default(),
+            name.unwrap_or_default(),
+            &tc.arguments,
+        )
+        .await
+        {
+            open.invalid = invalid;
+            out.push(open);
+        }
+    }
+    out
+}
 
-    /// 创建动作的单笔实体：只写 `request`（D-118 决策 5 的第一笔债）。
-    ///
-    /// 风险档在这里算定并写进请求载荷（`risk` / `threshold` / `approved` /
-    /// `deferred`），授权动作只按它判放行——两处读的是**同一个判定输入**，
-    /// 不各算一遍。
-    async fn open_one(
-        &self,
-        ctx: &Arc<dyn PluginInvokeRequest>,
-        policy: &ToolPortPolicy,
-        call: &port::Call,
-        model_id: &str,
-        name: &str,
-        args: &serde_json::Value,
-    ) -> Option<ToolPortCall> {
-        let approved = args
-            .get("approved")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let resolved = risk_of(ctx, name, args, &policy.known).await;
-        let risk = resolved.as_ref().map(|r| r.risk);
-        // 注册表里没有能力可判（route-only 工具）⇒ 放行是**交给下游路由闸门**
-        // 的延迟判定；不能在这里凭一个猜出来的风险档拒绝它。
-        let deferred = risk.is_none();
-        let risk_name = risk.map(CapabilityRiskLevel::as_str).unwrap_or("unknown");
+/// 创建动作的单笔实体：只写 `request`（D-118 决策 5 的第一笔债）。
+///
+/// 风险档在这里算定并写进请求载荷（`risk` / `threshold` / `approved` /
+/// `deferred`），授权动作只按它判放行——两处读的是**同一个判定输入**，
+/// 不各算一遍。
+#[allow(clippy::too_many_arguments)]
+async fn open_one(
+    store: &dyn Store<Event = Event>,
+    ctx: Option<&Arc<dyn PluginInvokeRequest>>,
+    policy: &ToolPortPolicy,
+    turn: u64,
+    user_seq: u64,
+    call: &port::Call,
+    model_id: &str,
+    name: &str,
+    args: &serde_json::Value,
+) -> Option<ToolPortCall> {
+    let approved = args
+        .get("approved")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    // 裸幕夹具（`head = None`）没有注册面：调用一律 route-only（`risk = None`），
+    // 授权按 `deferred` 放行——与生产「注册表里没有可判的能力」同一档。
+    let resolved = match ctx {
+        Some(ctx) => risk_of(ctx, name, args, &policy.known).await,
+        None => None,
+    };
+    let risk = resolved.as_ref().map(|r| r.risk);
+    // 注册表里没有能力可判（route-only 工具）⇒ 放行是**交给下游路由闸门**
+    // 的延迟判定；不能在这里凭一个猜出来的风险档拒绝它。
+    let deferred = risk.is_none();
+    let risk_name = risk.map(CapabilityRiskLevel::as_str).unwrap_or("unknown");
 
-        if let Err(e) = port::announce_with(
-            self.facts.as_ref(),
-            call,
-            self.turn,
-            self.user_seq,
-            serde_json::json!({
-                // 中性键（DE-048 D-311）：调用标识 / 名称 / 参数值，加上授权结论的引用。
-                // 世界类型（线上名解析、风险档语义、参数含义）留在提供者一侧。
-                "name": name,
-                "args": args,
-                "authz": {
-                    "risk": risk_name,
-                    "threshold": policy.threshold.as_str(),
-                    "approved": approved,
-                    "deferred": deferred,
+    if let Err(e) = port::announce_with(
+        store,
+        call,
+        turn,
+        user_seq,
+        serde_json::json!({
+            // 中性键（DE-048 D-311）：调用标识 / 名称 / 参数值，加上授权结论的引用。
+            // 世界类型（线上名解析、风险档语义、参数含义）留在提供者一侧。
+            "name": name,
+            "args": args,
+            "authz": {
+                "risk": risk_name,
+                "threshold": policy.threshold.as_str(),
+                "approved": approved,
+                "deferred": deferred,
+            },
+        }),
+    ) {
+        symbio_plugin_api::plugin_warn!(
+            "session",
+            "[Tool] 工具请求事实未落格（turn={} / {model_id}）：{e:?}",
+            turn
+        );
+        return None;
+    }
+    Some(ToolPortCall {
+        model_id: model_id.to_string(),
+        call: call.clone(),
+        name: name.to_string(),
+        canonical: resolved.map(|r| r.canonical),
+        risk,
+        approved,
+        invalid: false,
+        granted: false,
+        deny_why: None,
+        sent: false,
+        wake: None,
+    })
+}
+
+/// 授权动作：为**这一笔**已开账的调用写 `authz.granted` / `authz.denied`（第二笔债）。
+///
+/// 行表的键就是调用标识：一次动作只判一笔，`owes` 复核因此仍按行整体判
+/// （还有别的调用没判时这一行仍欠，逐笔进入各判各的）。
+pub(crate) async fn authorize_call(
+    store: &dyn Store<Event = Event>,
+    ctx: Option<&Arc<dyn PluginInvokeRequest>>,
+    turn: u64,
+    user_seq: u64,
+    drive_seq: u64,
+    call: &mut ToolPortCall,
+) {
+    let policy = ToolPortPolicy::read_opt(ctx).await;
+    let facts = store.range(Seq::new(0));
+    // obligation-precheck OB-004: 执行体（AUTHORIZER）动手前的复核——第二次进入时
+    // 授权行已落事实、不再欠，早退避免重复判放行
+    if !loop_rows::owes(
+        "authorize-tool",
+        &facts,
+        turn,
+        loop_rows::wake_now_ms(&facts, drive_seq),
+    ) {
+        symbio_plugin_api::plugin_warn!(
+            "session",
+            "[Tool] 授权行不欠（turn={}），不判放行",
+            turn
+        );
+        return;
+    }
+    authorize_one(store, turn, user_seq, &policy, call);
+}
+
+/// 授权**一笔**唤醒调用。
+///
+/// 用户动作是授权本身：批准 / 重试 / 补充 / 回答一律放行；拒绝落
+/// `authz.denied{user_rejected}`。风险档比较不参与——用户已经做过这一次判断，
+/// 再按阈值拒一次会让审批卡永远点不动。
+fn authorize_wake(
+    store: &dyn Store<Event = Event>,
+    turn: u64,
+    user_seq: u64,
+    call: &mut ToolPortCall,
+) {
+    let denied = matches!(call.wake, Some(Wake::Result { denied: true, .. }));
+    let written = if denied {
+        append_authz(
+            store,
+            denied_event(turn, user_seq, &call.call, &call.name, "user_rejected"),
+        )
+    } else {
+        append_authz(
+            store,
+            granted_event(
+                turn,
+                user_seq,
+                &call.call,
+                &call.name,
+                GrantFacts {
+                    risk: "unknown",
+                    deferred: true,
+                    basis: Some(ApprovalBasis::Approved.as_str()),
+                    grant: None,
                 },
-            }),
+            ),
+        )
+    };
+    if let Err(e) = written {
+        symbio_plugin_api::plugin_warn!(
+            "session",
+            "[Tool] 唤醒授权事实未落格（turn={} / {}）：{e:?}",
+            turn,
+            call.model_id
+        );
+        return;
+    }
+    if denied {
+        call.deny_why = Some("user_rejected");
+    } else {
+        call.granted = true;
+    }
+}
+
+/// 授权动作的实体（策略由调用方读出，resume 路径复用同一份）。
+fn authorize_one(
+    store: &dyn Store<Event = Event>,
+    turn: u64,
+    user_seq: u64,
+    policy: &ToolPortPolicy,
+    call: &mut ToolPortCall,
+) {
+    // 唤醒由用户动作裁决，不参与风险档比较。
+    if call.wake.is_some() {
+        authorize_wake(store, turn, user_seq, call);
+        return;
+    }
+    // 非法调用先判：它没有可执行的名字 / 参数，风险档再低也不能放行。
+    //
+    // 放行依据只问 `approval_basis`（与执行闸门同一份判据）：三档分别是
+    // 本次批准 / 会话阈值 / 该工具的永久放行上限。route-only 工具没有可判
+    // 的风险（`None`），放行延迟给下游路由闸门。
+    let (basis, grant) = match call.risk {
+        Some(risk) => {
+            let grant = call
+                .canonical
+                .as_deref()
+                .and_then(|tool| policy.grants.ceiling(tool));
+            (
+                risk.approval_basis(policy.threshold, call.approved, grant),
+                grant,
+            )
+        }
+        None => (None, None),
+    };
+    let granted = !call.invalid && (call.risk.is_none() || basis.is_some());
+    let risk_name = call
+        .risk
+        .map(CapabilityRiskLevel::as_str)
+        .unwrap_or("unknown");
+    if granted {
+        // `grant` 只记生效的那一次上限：依据是会话阈值时，清单里有没有
+        // 这一条与本次放行无关，写进去会让事后读日志的人以为靠的是它。
+        let applied_grant = match basis {
+            Some(ApprovalBasis::Grant) => grant,
+            _ => None,
+        };
+        if let Err(e) = append_authz(
+            store,
+            granted_event(
+                turn,
+                user_seq,
+                &call.call,
+                &call.name,
+                GrantFacts {
+                    risk: risk_name,
+                    deferred: call.risk.is_none(),
+                    basis: basis.map(ApprovalBasis::as_str),
+                    grant: applied_grant,
+                },
+            ),
         ) {
             symbio_plugin_api::plugin_warn!(
                 "session",
-                "[Tool] 工具请求事实未落格（turn={} / {model_id}）：{e:?}",
-                self.turn
-            );
-            return None;
-        }
-        Some(ToolPortCall {
-            model_id: model_id.to_string(),
-            call: call.clone(),
-            name: name.to_string(),
-            canonical: resolved.map(|r| r.canonical),
-            risk,
-            approved,
-            invalid: false,
-            granted: false,
-            deny_why: None,
-            sent: false,
-            wake: None,
-        })
-    }
-
-    /// 授权动作：为**这一笔**已开账的调用写 `authz.granted` / `authz.denied`（第二笔债）。
-    ///
-    /// 行表的键就是调用标识：一次动作只判一笔，`owes` 复核因此仍按行整体判
-    /// （还有别的调用没判时这一行仍欠，逐笔进入各判各的）。
-    pub(crate) async fn authorize(
-        &self,
-        ctx: &Arc<dyn PluginInvokeRequest>,
-        call: &mut ToolPortCall,
-    ) {
-        let policy = ToolPortPolicy::read(ctx).await;
-        self.authorize_calls(&policy, std::slice::from_mut(call));
-    }
-
-    /// 授权**一笔**唤醒调用。
-    ///
-    /// 用户动作是授权本身：批准 / 重试 / 补充 / 回答一律放行；拒绝落
-    /// `authz.denied{user_rejected}`。风险档比较不参与——用户已经做过这一次判断，
-    /// 再按阈值拒一次会让审批卡永远点不动。
-    pub(crate) fn authorize_wake(&self, call: &mut ToolPortCall) {
-        let denied = matches!(call.wake, Some(Wake::Result { denied: true, .. }));
-        let written = if denied {
-            append_authz(
-                self.facts.as_ref(),
-                denied_event(
-                    self.turn,
-                    self.user_seq,
-                    &call.call,
-                    &call.name,
-                    "user_rejected",
-                ),
-            )
-        } else {
-            append_authz(
-                self.facts.as_ref(),
-                granted_event(
-                    self.turn,
-                    self.user_seq,
-                    &call.call,
-                    &call.name,
-                    GrantFacts {
-                        risk: "unknown",
-                        deferred: true,
-                        basis: Some(ApprovalBasis::Approved.as_str()),
-                        grant: None,
-                    },
-                ),
-            )
-        };
-        if let Err(e) = written {
-            symbio_plugin_api::plugin_warn!(
-                "session",
-                "[Tool] 唤醒授权事实未落格（turn={} / {}）：{e:?}",
-                self.turn,
+                "[Tool] 放行事实未落格（turn={} / {}）：{e:?}",
+                turn,
                 call.model_id
             );
             return;
         }
-        if denied {
-            call.deny_why = Some("user_rejected");
+        call.granted = true;
+    } else {
+        // 交互模式 ⇒ 执行层会建审批卡；auto ⇒ 执行层会回 `permission_denied`。
+        // 两种都不是「已派发」，所以只有 `denied`、没有 `sent`。非法调用
+        // 不分模式：执行层会回一条协议错误，原因码独立。
+        let why: &'static str = if call.invalid {
+            "invalid_tool_call"
+        } else if policy.mode == "auto" {
+            "permission_denied"
         } else {
-            call.granted = true;
-        }
-    }
-
-    /// 授权动作的实体（策略由调用方读出，resume 路径复用同一份）。
-    fn authorize_calls(&self, policy: &ToolPortPolicy, calls: &mut [ToolPortCall]) {
-        let facts = self.facts.range(Seq::new(0));
-        // obligation-precheck OB-004: 执行体（AUTHORIZER）动手前的复核——批内授权与策略变更后的续跑共用这份实体，第二次进入时授权行已落事实、不再欠，早退避免重复判放行
-        if !loop_rows::owes("authorize-tool", &facts, self.turn, self.now_ms(&facts)) {
+            "needs_approval"
+        };
+        if let Err(e) = append_authz(
+            store,
+            denied_event(turn, user_seq, &call.call, &call.name, why),
+        ) {
             symbio_plugin_api::plugin_warn!(
                 "session",
-                "[Tool] 授权行不欠（turn={}），不判放行",
-                self.turn
+                "[Tool] 拒绝事实未落格（turn={} / {}）：{e:?}",
+                turn,
+                call.model_id
             );
             return;
         }
-        for call in calls.iter_mut() {
-            // 唤醒由用户动作裁决，不参与风险档比较。
-            if call.wake.is_some() {
-                self.authorize_wake(call);
-                continue;
-            }
-            // 非法调用先判：它没有可执行的名字 / 参数，风险档再低也不能放行。
-            //
-            // 放行依据只问 `approval_basis`（与执行闸门同一份判据）：三档分别是
-            // 本次批准 / 会话阈值 / 该工具的永久放行上限。route-only 工具没有可判
-            // 的风险（`None`），放行延迟给下游路由闸门。
-            let (basis, grant) = match call.risk {
-                Some(risk) => {
-                    let grant = call
-                        .canonical
-                        .as_deref()
-                        .and_then(|tool| policy.grants.ceiling(tool));
-                    (
-                        risk.approval_basis(policy.threshold, call.approved, grant),
-                        grant,
-                    )
-                }
-                None => (None, None),
-            };
-            let granted = !call.invalid && (call.risk.is_none() || basis.is_some());
-            let risk_name = call
-                .risk
-                .map(CapabilityRiskLevel::as_str)
-                .unwrap_or("unknown");
-            if granted {
-                // `grant` 只记生效的那一次上限：依据是会话阈值时，清单里有没有
-                // 这一条与本次放行无关，写进去会让事后读日志的人以为靠的是它。
-                let applied_grant = match basis {
-                    Some(ApprovalBasis::Grant) => grant,
-                    _ => None,
-                };
-                if let Err(e) = append_authz(
-                    self.facts.as_ref(),
-                    granted_event(
-                        self.turn,
-                        self.user_seq,
-                        &call.call,
-                        &call.name,
-                        GrantFacts {
-                            risk: risk_name,
-                            deferred: call.risk.is_none(),
-                            basis: basis.map(ApprovalBasis::as_str),
-                            grant: applied_grant,
-                        },
-                    ),
-                ) {
-                    symbio_plugin_api::plugin_warn!(
-                        "session",
-                        "[Tool] 放行事实未落格（turn={} / {}）：{e:?}",
-                        self.turn,
-                        call.model_id
-                    );
-                    continue;
-                }
-                call.granted = true;
-            } else {
-                // 交互模式 ⇒ 执行层会建审批卡；auto ⇒ 执行层会回 `permission_denied`。
-                // 两种都不是「已派发」，所以只有 `denied`、没有 `sent`。非法调用
-                // 不分模式：执行层会回一条协议错误，原因码独立。
-                let why: &'static str = if call.invalid {
-                    "invalid_tool_call"
-                } else if policy.mode == "auto" {
-                    "permission_denied"
-                } else {
-                    "needs_approval"
-                };
-                if let Err(e) = append_authz(
-                    self.facts.as_ref(),
-                    denied_event(self.turn, self.user_seq, &call.call, &call.name, why),
-                ) {
-                    symbio_plugin_api::plugin_warn!(
-                        "session",
-                        "[Tool] 拒绝事实未落格（turn={} / {}）：{e:?}",
-                        self.turn,
-                        call.model_id
-                    );
-                    continue;
-                }
-                call.deny_why = Some(why);
-            }
-        }
+        call.deny_why = Some(why);
     }
+}
 
+impl ToolPort {
     /// 派发动作的前半（第三笔债）：为放行的调用落 `sent`。
     ///
     /// 执行层由调用方跑（`SessionDispatchPort::dispatch`）——`sent` 的语义是
@@ -1237,16 +1286,6 @@ impl SessionDispatchPort {
         std::mem::take(&mut self.out.lock().unwrap())
     }
 
-    /// 三动作契约的创建步（实体在 [`ToolPort::open_batch`]）。
-    async fn open_action(&self, turn: &LlmTurn) -> Vec<ToolPortCall> {
-        self.port.open_batch(&self.ctx, turn).await
-    }
-
-    /// 三动作契约的授权步（实体在 [`ToolPort::authorize`]）。
-    async fn authorize_action(&self, call: &mut ToolPortCall) {
-        self.port.authorize(&self.ctx, call).await;
-    }
-
     /// 本轮的通用执行信封：轮号 / 轮根 / 归属 / 产物闸结论 / 宿主写口。
     ///
     /// 闸在轮首由环判一次（只认 actor，见 `turn_runner::artifact_verdict`）；执行体
@@ -1492,18 +1531,8 @@ where
 
 #[async_trait]
 impl ToolDispatch for SessionDispatchPort {
-    async fn open(&self, _store: &dyn Store<Event = Event>, turn: &LlmTurn) -> Vec<ToolPortCall> {
-        self.open_action(turn).await
-    }
-
     async fn prepare(&self, _store: &dyn Store<Event = Event>, turn: &LlmTurn) {
         self.finalize_turn(turn).await;
-    }
-
-    async fn authorize(&self, _store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
-        // 恢复幕的唤醒调用由调用方从 [`ToolDispatch::wake`] 取回后放进草稿，与
-        // 模型交回的调用走同一条授权路径（行键就是这一笔的调用标识）。
-        self.authorize_action(call).await;
     }
 
     async fn wake(&self, _store: &dyn Store<Event = Event>) -> Option<WakeBatch> {

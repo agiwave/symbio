@@ -752,6 +752,12 @@ pub(crate) struct Ctx<'a> {
     /// 通用端口行要的请求句柄与增量出口也从这一片取（[`HeadCtx::request_ctx`] /
     /// [`HeadCtx::event_sink`]）——不多存第二份。
     pub(crate) head: Option<HeadCtx<'a>>,
+    /// 请求级宿主面（能力注册表 / 会话 id / 工作区）：创建与授权两行要用它判风险档。
+    ///
+    /// 控制面取自轮首那一片（与 [`HeadCtx::request_ctx`] 同一份）；裸幕夹具
+    /// （`head = None`）没有轮首片，由 [`super::turn_exec::ReadyStage::request_ctx`]
+    /// 直给——两条来源在派发点合成一个字段，行内不再二次判断。
+    pub(crate) request_ctx: Option<Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
 }
 
 /// 轮首那一片可控状态（一个动作之内借出、还回）。
@@ -943,8 +949,13 @@ pub(crate) fn run_await<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 /// `opener` 执行体（b）：`open-tools` 行选中的动作——逐条开账。
 pub(crate) fn run_open<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
+        let request_ctx = ctx.request_ctx.clone();
         ctx.session
-            .open(ctx.store.as_ref(), ctx.dispatch.as_deref())
+            .open(
+                ctx.store.as_ref(),
+                request_ctx.as_ref(),
+                ctx.dispatch.as_deref(),
+            )
             .await;
         Ok(())
     })
@@ -963,8 +974,14 @@ fn key_id(ctx: &Ctx<'_>) -> String {
 pub(crate) fn run_authorize<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let id = key_id(ctx);
+        let request_ctx = ctx.request_ctx.clone();
         ctx.session
-            .authorize(ctx.store.as_ref(), ctx.dispatch.as_deref(), &id)
+            .authorize(
+                ctx.store.as_ref(),
+                request_ctx.as_ref(),
+                ctx.dispatch.as_deref(),
+                &id,
+            )
             .await;
         Ok(())
     })

@@ -32,7 +32,10 @@ use std::sync::Arc;
 use super::super::tools::{ABORTED, NOT_EXECUTED};
 use super::loop_rows;
 use super::port;
-use super::{CallOutcome, ToolPort, ToolPortCall, ToolPortPolicy, Wake, WakeSpec};
+use super::{
+    authorize_one, authorize_wake, CallOutcome, ToolPort, ToolPortCall, ToolPortPolicy, Wake,
+    WakeSpec,
+};
 use symbio_kernel::capability::CapabilityRiskLevel;
 use symbio_kernel::event::{Event, Seq, EVENT_REQUEST, EVENT_SENT};
 use symbio_kernel::store::{EventStore, Store};
@@ -291,11 +294,10 @@ fn policy_at(threshold: CapabilityRiskLevel) -> ToolPortPolicy {
 fn the_session_threshold_decides_whether_a_call_is_asked_about() {
     // ① 默认阈值（Medium）：High 调用 ⇒ 问一次。
     let store = Arc::new(EventStore::new());
-    let port = tool_port(&store);
     let mut calls = [requested(&store, "tool-s1-tc-1-1")];
     calls[0].risk = Some(CapabilityRiskLevel::High);
 
-    port.authorize_calls(&policy(), &mut calls);
+    authorize_one(store.as_ref(), TURN, USER_SEQ, &policy(), &mut calls[0]);
 
     assert!(!calls[0].granted, "High 高于默认阈值 ⇒ 不放行");
     assert_eq!(calls[0].deny_why, Some("needs_approval"));
@@ -307,11 +309,16 @@ fn the_session_threshold_decides_whether_a_call_is_asked_about() {
 
     // ② 阈值抬到 High（= 用户点了「本会话放行」）：同一次调用直接放行。
     let store = Arc::new(EventStore::new());
-    let port = tool_port(&store);
     let mut calls = [requested(&store, "tool-s2-tc-1-1")];
     calls[0].risk = Some(CapabilityRiskLevel::High);
 
-    port.authorize_calls(&policy_at(CapabilityRiskLevel::High), &mut calls);
+    authorize_one(
+        store.as_ref(),
+        TURN,
+        USER_SEQ,
+        &policy_at(CapabilityRiskLevel::High),
+        &mut calls[0],
+    );
 
     assert!(calls[0].granted, "阈值抬到这一档 ⇒ 不再问");
     assert_eq!(calls[0].deny_why, None);
@@ -328,11 +335,10 @@ fn the_session_threshold_decides_whether_a_call_is_asked_about() {
 
     // ③ 基线不变：Medium 阈值下 Medium 调用本来就放行。
     let store = Arc::new(EventStore::new());
-    let port = tool_port(&store);
     let mut calls = [requested(&store, "tool-s3-tc-1-1")];
     calls[0].risk = Some(CapabilityRiskLevel::Medium);
 
-    port.authorize_calls(&policy(), &mut calls);
+    authorize_one(store.as_ref(), TURN, USER_SEQ, &policy(), &mut calls[0]);
 
     assert!(calls[0].granted, "不比阈值更危险 ⇒ 不问");
 }
@@ -349,12 +355,11 @@ fn a_per_tool_grant_authorizes_only_that_tool() {
 
     // ① 被授权的工具：High > Medium 阈值，但 ≤ 工具上限 ⇒ 放行。
     let store = Arc::new(EventStore::new());
-    let port = tool_port(&store);
     let mut calls = [requested(&store, "tool-g1-tc-1-1")];
     calls[0].risk = Some(CapabilityRiskLevel::High);
     calls[0].canonical = Some("shell".into());
 
-    port.authorize_calls(&granted, &mut calls);
+    authorize_one(store.as_ref(), TURN, USER_SEQ, &granted, &mut calls[0]);
 
     assert!(calls[0].granted, "上限覆盖本次风险档 ⇒ 不问");
     let payload = payload_of(&store, EVENT_AUTHZ_GRANTED);
@@ -367,12 +372,11 @@ fn a_per_tool_grant_authorizes_only_that_tool() {
 
     // ② 同档的另一个工具：授权只管自己那一行，仍然要审批。
     let store = Arc::new(EventStore::new());
-    let port = tool_port(&store);
     let mut calls = [requested(&store, "tool-g2-tc-1-1")];
     calls[0].risk = Some(CapabilityRiskLevel::High);
     calls[0].canonical = Some("shell_other".into());
 
-    port.authorize_calls(&granted, &mut calls);
+    authorize_one(store.as_ref(), TURN, USER_SEQ, &granted, &mut calls[0]);
 
     assert!(!calls[0].granted, "别的工具不继承这一行授权");
     assert_eq!(calls[0].deny_why, Some("needs_approval"));
@@ -380,13 +384,12 @@ fn a_per_tool_grant_authorizes_only_that_tool() {
     // ③ 这次调用显式带 `approved` ⇒ 依据是 approved，授权字段不入格
     //    （两档都可能成立时，事实记**最直接的那个理由**）。
     let store = Arc::new(EventStore::new());
-    let port = tool_port(&store);
     let mut calls = [requested(&store, "tool-g3-tc-1-1")];
     calls[0].risk = Some(CapabilityRiskLevel::High);
     calls[0].canonical = Some("shell".into());
     calls[0].approved = true;
 
-    port.authorize_calls(&granted, &mut calls);
+    authorize_one(store.as_ref(), TURN, USER_SEQ, &granted, &mut calls[0]);
 
     let payload = payload_of(&store, EVENT_AUTHZ_GRANTED);
     assert_eq!(payload["basis"], json!("approved"));
@@ -414,7 +417,7 @@ fn an_authorization_reopens_the_dispatch_debt_and_a_send_moves_to_the_await() {
         "还没判 ⇒ 派发行不成立（fail-closed）"
     );
 
-    port.authorize_calls(&policy(), &mut calls);
+    authorize_one(store.as_ref(), TURN, USER_SEQ, &policy(), &mut calls[0]);
 
     assert!(calls[0].granted, "deferred 的调用交给下游路由闸门");
     assert_eq!(
@@ -569,7 +572,7 @@ fn a_wake_that_the_user_rejected_reads_back_as_a_denial() {
         other => panic!("唤醒意图还原错了：{other:?}"),
     }
 
-    port.authorize_wake(&mut batch.calls[0]);
+    authorize_wake(store.as_ref(), TURN, USER_SEQ, &mut batch.calls[0]);
     assert!(!batch.calls[0].granted, "拒绝不放行：执行层不会跑它");
     assert_eq!(batch.calls[0].deny_why, Some("user_rejected"));
     assert!(
@@ -594,7 +597,7 @@ fn a_closed_wake_request_is_not_read_back() {
     .expect("唤醒请求落格");
 
     let mut batch = port.wake_batch().expect("唤醒请求读得回");
-    port.authorize_wake(&mut batch.calls[0]);
+    authorize_wake(store.as_ref(), TURN, USER_SEQ, &mut batch.calls[0]);
     assert!(batch.calls[0].granted, "批准 ⇒ 放行");
     port.begin_calls(&mut batch.calls);
     assert!(batch.calls[0].sent, "派发行欠 ⇒ 落 `sent`");

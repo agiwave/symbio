@@ -106,6 +106,9 @@ pub(crate) struct ReadyStage<'a> {
     pub(crate) stage: StageRuntime,
     /// 轮首那一片（`None` = 夹具不跑轮首行）。
     pub(crate) head: Option<HeadParts<'a>>,
+    /// 裸幕夹具的请求句柄（`head = None` 时创建 / 授权行要它判风险档）。
+    pub(crate) request_ctx:
+        Option<std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
 }
 
 /// 一次驱动的结局（流向不在这里：`D-222` 裁决 3）。
@@ -137,6 +140,7 @@ enum Driver<'a> {
 struct ReadyDriver<'a> {
     stage: Option<StageRuntime>,
     head: Option<HeadParts<'a>>,
+    request_ctx: Option<std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
 }
 
 /// 一幕的运行时：草稿 + 驱动它要的端口 + 收束要的宿主面。
@@ -255,6 +259,7 @@ pub(crate) async fn drive(
         DriveStart::Ready(ready) => Driver::Ready(Box::new(ReadyDriver {
             stage: Some(ready.stage),
             head: ready.head,
+            request_ctx: ready.request_ctx,
         })),
     };
     let mut stage: Option<StageRuntime> = None;
@@ -367,6 +372,14 @@ pub(crate) async fn drive(
 
             let head_before = st.store.head();
             {
+                // 请求句柄：控制面在轮首片里，裸幕夹具由入口直给（`head = None`）。
+                let request_ctx = match &mut driver {
+                    Driver::Control(control) => Some(control.ctx.clone()),
+                    Driver::Ready(ready) => ready
+                        .request_ctx
+                        .clone()
+                        .or_else(|| ready.head.as_ref().map(|h| h.request_ctx.clone())),
+                };
                 // 草稿与端口逐圈再借：动作结束即还（`D-222` 裁决 5 的「按步获取
                 // 按步释放」）。`head` 那一片同样每圈重借一次。
                 let mut control_parts;
@@ -401,6 +414,7 @@ pub(crate) async fn drive(
                     row: next.row,
                     key: next.key.clone().0,
                     head,
+                    request_ctx,
                 };
                 // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判
                 // （`D-123` 决策 5）。

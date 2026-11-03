@@ -150,6 +150,38 @@ impl RunnerFixture {
             // 夹具不跑轮首那几行 ⇒ 备输入的两样都是空（`D-222` 订正 3）。
             None,
             None,
+            None,
+        )
+        .await
+    }
+
+    /// 带**请求机关**的同一条驱动（授权拒绝要用它判风险档）。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn drive_with_tools_ctx(
+        &self,
+        store: &std::sync::Arc<
+            dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
+        >,
+        llm: std::sync::Arc<dyn LlmAdapter>,
+        tok: FullModel,
+        input: TurnInput,
+        sink: std::sync::Arc<dyn DeltaSink>,
+        tools: std::sync::Arc<[symbio_kernel::capability::CapabilityMeta]>,
+        dispatch: Option<std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>>,
+        request_ctx: std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
+    ) -> Result<TurnOutcome, ActorError> {
+        self.drive_with_actors(
+            store,
+            llm,
+            tok,
+            input,
+            sink,
+            tools,
+            dispatch,
+            super::super::loop_rows::ACTORS,
+            None,
+            None,
+            Some(request_ctx),
         )
         .await
     }
@@ -182,6 +214,9 @@ impl RunnerFixture {
         actors: &'static [super::super::loop_rows::ActorEntry],
         prefix: Option<String>,
         reflex: Option<super::super::turn_runner::ReflexAnswer>,
+        request_ctx: Option<
+            std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
+        >,
     ) -> Result<TurnOutcome, ActorError> {
         // 接缝那一行的两格出口由夹具自己落（`D-222` 裁决 5：轮首四行、接缝、汇报与
         // 轮内各行现在同住一张绑定表，本夹具不跑前三者 ⇒ 它们的账要提前关好）。
@@ -240,7 +275,11 @@ impl RunnerFixture {
         );
         let end = super::super::turn_exec::drive(
             super::super::turn_exec::DriveStart::Ready(Box::new(
-                super::super::turn_exec::ReadyStage { stage, head: None },
+                super::super::turn_exec::ReadyStage {
+                    stage,
+                    head: None,
+                    request_ctx,
+                },
             )),
             actors,
         )
@@ -1424,7 +1463,7 @@ mod tool_round_tests {
         CallOutcome, ToolBegin, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
     };
     use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput};
-    use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_TURN_STAGE};
+    use crate::control_decl::EVENT_TURN_STAGE;
     use symbio_kernel::capability::CapabilityMeta;
     use symbio_kernel::event::{Entity, Event, Seq, Verb};
     use symbio_kernel::llm::PromptMessage;
@@ -1903,97 +1942,6 @@ mod tool_round_tests {
         Some((e.turn, e.produced_by.unwrap_or(0), ids))
     }
 
-    /// 替身落协议事实：幂等键命中按「已经落过」处理，其余错误让用例红。
-    fn append_fact(store: &dyn Store<Event = Event>, event: Event) {
-        match store.append(event) {
-            Ok(_) | Err(symbio_kernel::store::AppendError::Duplicate) => {}
-            Err(e) => panic!("替身协议事实落格失败：{e:?}"),
-        }
-    }
-
-    /// 替身按生产口径开账：逐条落 `request(port=tool)`，id 取模型应答 `calls` 里那一笔。
-    ///
-    /// 行表按事实判欠不欠：替身不落账，`open-tools` 就永远挨不到派发（b）。
-    fn open_batch(store: &dyn Store<Event = Event>, turn: &LlmTurn) -> Vec<ToolPortCall> {
-        let Some((turn_no, produced_by, ids)) = model_batch(store) else {
-            return Vec::new();
-        };
-        turn.tool_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, tc)| {
-                let id = ids
-                    .get(idx)
-                    .cloned()
-                    .unwrap_or_else(|| format!("tool-{turn_no}-c{idx}"));
-                let call = super::super::super::port::Call::new("tool", id, 1);
-                append_fact(
-                    store,
-                    Event::pending(
-                        format!("request-tool-{}-{}", call.id, call.attempt),
-                        "request",
-                        Entity::Turn,
-                        Verb::Asserted,
-                        turn_no,
-                        "system",
-                    )
-                    .with_produced_by(produced_by)
-                    .with_payload(serde_json::json!({
-                        "port": "tool",
-                        "id": call.id,
-                        "attempt": call.attempt,
-                    })),
-                );
-                ToolPortCall {
-                    model_id: tc.id.clone().unwrap_or_default(),
-                    call,
-                    name: tc.name.clone().unwrap_or_default(),
-                    canonical: None,
-                    risk: None,
-                    approved: false,
-                    invalid: false,
-                    granted: false,
-                    deny_why: None,
-                    sent: false,
-                    wake: None,
-                }
-            })
-            .collect()
-    }
-
-    /// 替身把一批调用全部放行，并落 `authz.granted`。
-    fn authorize_batch(store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
-        let Some((turn_no, produced_by, _)) = model_batch(store) else {
-            return;
-        };
-        for call in calls.iter_mut() {
-            let id = call.call.id.clone();
-            append_fact(
-                store,
-                Event::pending(
-                    format!("grant-{turn_no}-{id}"),
-                    EVENT_AUTHZ_GRANTED,
-                    Entity::Turn,
-                    Verb::Asserted,
-                    turn_no,
-                    "authorizer",
-                )
-                .with_produced_by(produced_by)
-                .with_payload(serde_json::json!({
-                    "key": id,
-                    "port": "tool",
-                    "id": id,
-                    // 与生产同键（D-138）：授权关同一**次尝试**。
-                    "attempt": call.call.attempt,
-                    "tool": call.name,
-                    "risk": "unknown",
-                    "deferred": true,
-                })),
-            );
-            call.granted = true;
-        }
-    }
-
     /// 替身逐条落 `sent`（`port::begin` 派发前自己读 `dispatch-tool` 这一行）。
     fn begin_batch(
         store: &dyn Store<Event = Event>,
@@ -2086,18 +2034,6 @@ mod tool_round_tests {
 
     #[async_trait::async_trait]
     impl ToolDispatch for FakeDispatch {
-        async fn open(
-            &self,
-            store: &dyn Store<Event = Event>,
-            turn: &LlmTurn,
-        ) -> Vec<ToolPortCall> {
-            open_batch(store, turn)
-        }
-
-        async fn authorize(&self, store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
-            authorize_batch(store, std::slice::from_mut(call));
-        }
-
         async fn begin(
             self: Arc<Self>,
             store: Arc<dyn Store<Event = Event>>,
@@ -2172,43 +2108,6 @@ mod tool_round_tests {
 
     #[async_trait::async_trait]
     impl ToolDispatch for WakeDispatch {
-        async fn open(
-            &self,
-            _store: &dyn Store<Event = Event>,
-            _turn: &LlmTurn,
-        ) -> Vec<ToolPortCall> {
-            // 唤醒幕没有模型应答可寄存。
-            Vec::new()
-        }
-
-        async fn authorize(&self, _store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
-            let id = call.call.id.clone();
-            // 用户已经做过判断 ⇒ 放行（授权事实按 `(port, id)` 绑定，与生产同键）。
-            append_fact(
-                self.store.as_ref(),
-                Event::pending(
-                    format!("grant-{}-{}", self.turn, id),
-                    EVENT_AUTHZ_GRANTED,
-                    Entity::Turn,
-                    Verb::Asserted,
-                    self.turn,
-                    "authorizer",
-                )
-                .with_produced_by(self.user_seq)
-                .with_payload(serde_json::json!({
-                    "key": id,
-                    "port": "tool",
-                    "id": id,
-                    // 与生产同键（D-138）：授权关同一**次尝试**。
-                    "attempt": call.call.attempt,
-                    "tool": call.name,
-                    "risk": "unknown",
-                    "deferred": true,
-                })),
-            );
-            call.granted = true;
-        }
-
         async fn begin(
             self: Arc<Self>,
             _store: Arc<dyn Store<Event = Event>>,
@@ -2286,45 +2185,6 @@ mod tool_round_tests {
 
     #[async_trait::async_trait]
     impl ToolDispatch for DenyDispatch {
-        async fn open(
-            &self,
-            store: &dyn Store<Event = Event>,
-            turn: &LlmTurn,
-        ) -> Vec<ToolPortCall> {
-            open_batch(store, turn)
-        }
-
-        async fn authorize(&self, store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
-            let Some((turn_no, produced_by, _)) = model_batch(store) else {
-                return;
-            };
-            let id = call.call.id.clone();
-            append_fact(
-                store,
-                Event::pending(
-                    format!("deny-{turn_no}-{id}"),
-                    symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
-                    Entity::Turn,
-                    Verb::Asserted,
-                    turn_no,
-                    "authorizer",
-                )
-                .with_produced_by(produced_by)
-                .with_payload(serde_json::json!({
-                    "key": id,
-                    "port": "tool",
-                    "id": id,
-                    // 与生产同键（D-138）：拒绝也关同一**次尝试**。
-                    "attempt": call.call.attempt,
-                    "tool": call.name,
-                    "kind": "tool",
-                    "reason": "denied",
-                    "detail": "needs_approval",
-                })),
-            );
-            call.deny_why = Some("needs_approval");
-        }
-
         async fn begin(
             self: Arc<Self>,
             store: Arc<dyn Store<Event = Event>>,
@@ -2396,6 +2256,50 @@ mod tool_round_tests {
             name: "vdfs_read".into(),
             ..Default::default()
         }]
+    }
+
+    /// 只带元数据的假工具：注册面只读 `meta()`；拒绝在授权判定处就停，不会执行。
+    struct DeclOnlyTool(CapabilityMeta);
+
+    #[async_trait::async_trait]
+    impl symbio_kernel::capability::Capability for DeclOnlyTool {
+        fn meta(&self) -> CapabilityMeta {
+            self.0.clone()
+        }
+
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _env: &symbio_kernel::exec::ExecEnv,
+            _ctx: std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
+        ) -> Result<serde_json::Value, symbio_kernel::plugin::PluginError> {
+            Ok(serde_json::Value::Null)
+        }
+    }
+
+    /// 带注册面的请求机：`vdfs_read` 风险档 `High`、会话阈值 `low` ⇒ 授权按策略拒绝。
+    async fn deny_ctx() -> std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> {
+        use symbio_kernel::capability::{
+            Capability, CapabilityRiskLevel, CapabilityRow, Registry,
+        };
+        use symbio_kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
+        use symbio_sdk::capability::CAPABILITY_VISITOR;
+        use symbio_sdk::keys::RISK_LEVEL;
+
+        let ctx = std::sync::Arc::new(PluginSimpleRequest::new(None, None));
+        let visitor = std::sync::Arc::new(symbio_providers::DefaultToolVisitor::new());
+        visitor
+            .put(CapabilityRow::tool(std::sync::Arc::new(DeclOnlyTool(
+                CapabilityMeta {
+                    name: "vdfs_read".into(),
+                    ..Default::default()
+                }
+                .with_risk(CapabilityRiskLevel::High),
+            )) as std::sync::Arc<dyn Capability>))
+            .await;
+        ctx.set(CAPABILITY_VISITOR, visitor as std::sync::Arc<dyn Registry>);
+        ctx.set(RISK_LEVEL, "low".to_string());
+        ctx
     }
 
     fn input(store: &dyn Store<Event = Event>) -> TurnInput {
@@ -2543,6 +2447,7 @@ mod tool_round_tests {
                 // `prepare_request_sections` 的 ⑥ 收集，草稿建好之后填。
                 Some("【长期记忆】\n- 偏好：简洁".to_string()),
                 None,
+                None,
             )
             .await
             .expect("必答");
@@ -2611,6 +2516,7 @@ mod tool_round_tests {
                     None,
                     super::super::super::loop_rows::ACTORS,
                     empty,
+                    None,
                     None,
                 )
                 .await
@@ -2991,7 +2897,7 @@ mod tool_round_tests {
         });
 
         let out = super::RunnerFixture
-            .drive_with_tools(
+            .drive_with_tools_ctx(
                 &store,
                 llm.clone(),
                 tok,
@@ -2999,6 +2905,7 @@ mod tool_round_tests {
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
                 Some(dispatch.clone()),
+                deny_ctx().await,
             )
             .await
             .expect("拒绝不中止本轮");
@@ -3615,18 +3522,6 @@ mod tool_round_tests {
 
     #[async_trait::async_trait]
     impl ToolDispatch for PathEchoDispatch {
-        async fn open(
-            &self,
-            store: &dyn Store<Event = Event>,
-            turn: &LlmTurn,
-        ) -> Vec<ToolPortCall> {
-            open_batch(store, turn)
-        }
-
-        async fn authorize(&self, store: &dyn Store<Event = Event>, call: &mut ToolPortCall) {
-            authorize_batch(store, std::slice::from_mut(call));
-        }
-
         async fn begin(
             self: Arc<Self>,
             store: Arc<dyn Store<Event = Event>>,
@@ -4737,6 +4632,7 @@ mod reflex_turn_tests {
                 Some(super::super::super::turn_runner::ReflexAnswer {
                     text: "先列要点；再合并同类项。".to_string(),
                 }),
+                None,
             )
             .await
             .expect("快路必答（不生成也要有产物）");
@@ -5335,6 +5231,7 @@ mod actor_ledger_tests {
                 ACTORS_WRITE_NOTHING,
                 None,
                 None,
+                None,
             )
             .await
             .expect("到点必答：停机也是一句话");
@@ -5375,6 +5272,7 @@ mod actor_ledger_tests {
                 std::sync::Arc::from(Vec::new()),
                 None,
                 ACTORS_WRITE_OFF_LIST,
+                None,
                 None,
                 None,
             )

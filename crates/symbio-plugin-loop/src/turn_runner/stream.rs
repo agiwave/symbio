@@ -7,9 +7,13 @@
 //! 状态只经 [`Prepared`] 在阶段间传递：每个动作写自己的那一半事实，派发器按行表
 //! 决定下一个动作（`D-222` 裁决 5）。
 
+use std::sync::Arc;
+
+use symbio_kernel::plugin::PluginInvokeRequest;
+
 use super::super::tool_dispatch::{
-    call_key as call_id_of, CallOutcome as Outcome, ToolBegin as Begin, ToolDispatch as Dispatcher,
-    ToolInFlight as Flight, ToolPortCall as PortCall,
+    authorize_call, call_key as call_id_of, open_calls, CallOutcome as Outcome, ToolBegin as Begin,
+    ToolDispatch as Dispatcher, ToolInFlight as Flight, ToolPortCall as PortCall,
 };
 use super::*;
 
@@ -822,6 +826,7 @@ where
 pub(crate) async fn open_round(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,
+    ctx: Option<&Arc<dyn PluginInvokeRequest>>,
     dispatch: &dyn Dispatcher,
 ) {
     let Some(rt) = run.pending_model.as_ref() else {
@@ -832,7 +837,15 @@ pub(crate) async fn open_round(
         dispatch.prepare(store, &rt).await;
         run.round_prepared = true;
     }
-    let calls = dispatch.open(store, &rt).await;
+    let calls = open_calls(
+        store,
+        ctx,
+        run.turn,
+        run.user_seq,
+        run.drive_seq,
+        &rt,
+    )
+    .await;
     run.round_turn = Some(rt);
     run.round_calls = calls.iter().map(|c| c.call.id.clone()).collect();
     run.round_outcomes.clear();
@@ -847,15 +860,19 @@ pub(crate) async fn open_round(
 pub(crate) async fn authorize_round(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,
+    ctx: Option<&Arc<dyn PluginInvokeRequest>>,
     dispatch: &dyn Dispatcher,
     id: &str,
 ) {
+    let turn = run.turn;
+    let user_seq = run.user_seq;
+    let drive_seq = run.drive_seq;
     if let Some(call) = run.calls.get_mut(id) {
-        dispatch.authorize(store, call).await;
+        authorize_call(store, ctx, turn, user_seq, drive_seq, call).await;
         return;
     }
     if let Some(mut call) = take_wake_call(run, store, dispatch, id).await {
-        dispatch.authorize(store, &mut call).await;
+        authorize_call(store, ctx, turn, user_seq, drive_seq, &mut call).await;
         run.calls.insert(id.to_string(), call);
     }
 }

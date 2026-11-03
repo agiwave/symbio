@@ -380,7 +380,11 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         &turn_req,
     );
     match super::drive(
-        super::DriveStart::Ready(Box::new(super::ReadyStage { stage, head })),
+        super::DriveStart::Ready(Box::new(super::ReadyStage {
+            stage,
+            head,
+            request_ctx: None,
+        })),
         super::super::loop_rows::ACTORS,
     )
     .await?
