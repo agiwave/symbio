@@ -9,7 +9,7 @@ created: 2026-11-02
 parent: T-001-能力全面拆分
 deps: [T-023-世界端口注册面]
 where: `crates/symbio-plugin-tool/**`, `crates/symbio-plugin-loop/src/tools/tool_executor.rs`, `crates/symbio-plugin-loop/src/tools/dispatch`, `crates/symbio-sdk/src/capability`, `crates/symbio-plugin-agent/src/host`
-exit: `tool` 端口的声明与提供者归独立插件 `symbio-plugin-tool`（端口名 `tool`、单行 `<port:tool>:tool`，不持有任何工具）；线上名解析、空闲超时、结果契约（`RESULT_CONTENT` / `RESULT_OUTPUT` / `PendingPrompt` 的返回形状）住在该插件；每个工具插件仍是执行者（`Capability::execute`）；`loop` 的执行缝只认通用 `PortInput` / `PortOutcome` / `PortExecutor`；装 / 不装工具插件时端到端行为逐字不变；停用工具插件 ⇒ 该工具 NotFound、不静默回退；`EL-003` 的 11 个工具路径全量读点只许降（低于 11 时同提交改基线），`EL-001` 的 16 行不变；迁移提交挂 `Migration: tool-port`，机制面新增行为 0（`docs/003-design/047-义务环判据与归属推导.md` D-303）
+exit: `tool` 端口的声明与提供者归独立插件 `symbio-plugin-tool`（端口名 `tool`、单行 `<port:tool>:tool`，不持有任何工具）；线上名解析、空闲超时、结果契约（`RESULT_CONTENT` / `RESULT_OUTPUT` / `PendingPrompt` 的返回形状）住在该插件；每个工具插件仍是执行者（`Capability::execute`）；`loop` 的执行缝只认通用 `PortInput` / `PortOutcome` / `PortExecutor`；装 / 不装工具插件时端到端行为逐字不变；停用工具插件 ⇒ 该工具 NotFound、不静默回退；`EL-003` 的 11 个工具路径全量读点只许降（低于 11 时同提交改基线），`EL-001` 的 16 行不变；迁移提交挂 `Migration: tool-port`，机制面新增行为 0（[DE-048](../003-design/048-端口机制裁决.md "DE-048-端口机制裁决") D-303）
 ---
 
 # tool 端口迁出：声明与提供者归 `symbio-plugin-tool`，工具仍由各工具插件执行
@@ -25,7 +25,7 @@ exit: `tool` 端口的声明与提供者归独立插件 `symbio-plugin-tool`（�
    `PendingPrompt`（审批 / 交互）。
 
 这三样与端口声明一起归独立插件 `symbio-plugin-tool`（裁决见
-`docs/003-design/047-义务环判据与归属推导.md` D-303）。插件只做 glue / 适配，
+[DE-048](../003-design/048-端口机制裁决.md "DE-048-端口机制裁决") D-303）。插件只做 glue / 适配，
 **不拥有任何工具**：每个工具仍是各工具插件的能力行，经能力表动态执行；它不依赖任何
 兄弟插件（`E-009`），停用它只让 `tool` 端口缺席、不改变工具执行者。
 

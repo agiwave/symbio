@@ -35,7 +35,7 @@ use symbio_kernel::llm::TurnToolCallInfo;
 /// [`symbio_kernel::event::result_node_id`]）。
 ///
 /// 执行体（流式增量帧的落点）经门面的 `node_build` 模块取它——写侧 / 读侧 / 执行体
-/// 共用一份派生，三处各算一遍必然漂移（DE-047 D-312）。
+/// 共用一份派生，三处各算一遍必然漂移（DE-048 D-312）。
 pub use symbio_kernel::event::result_node_id;
 
 // ==================== 节点构造族 ====================

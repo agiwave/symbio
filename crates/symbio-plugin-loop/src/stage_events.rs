@@ -214,7 +214,7 @@ pub(crate) struct StageFact {
     /// 本幕召回的逐条正文（仅 `recall` 携带）：`(seq, 标签, 正文)`。
     ///
     /// 召回读数不再寄存在 `TurnState` 里——它是这一格的载荷，`prepare-turn` 与收束
-    /// 都从事实重建（DE-047 D-306）。
+    /// 都从事实重建（DE-048 D-306）。
     pub(crate) recalled_content: Vec<(u64, String, String)>,
     /// 召回是否降级（仅 `recall` 携带；与 `Retrieval::degraded` 同一格语义）。
     pub(crate) degraded: bool,
@@ -483,7 +483,7 @@ impl StageFact {
 
 /// 本幕锚之后最近落下的一格某阶段事实（`None` = 还没做过）。
 ///
-/// 读侧只认**事实**：`TurnState` 里不再寄存这些阶段值（DE-047 D-306）。
+/// 读侧只认**事实**：`TurnState` 里不再寄存这些阶段值（DE-048 D-306）。
 pub(crate) fn latest_stage<'a>(
     events: &'a [Event],
     turn: u64,

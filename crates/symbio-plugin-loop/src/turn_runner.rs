@@ -484,12 +484,12 @@ pub(crate) struct TurnSession {
     /// `dyn Future` 只 `Send` 不 `Sync`，进草稿会让那些读口集体失去 `Send`。
     /// 在飞的工具调用：**一笔一个槽**（键是端口账的调用标识）。
     ///
-    /// 没有「批」这个对象：N 笔独立在途，收尾按各自的键取走（DE-047 D-311）。
+    /// 没有「批」这个对象：N 笔独立在途，收尾按各自的键取走（DE-048 D-311）。
     tool_flights: std::collections::HashMap<String, stream::ToolFlight>,
     /// 本幕已经发出的**实时上线**效果键（`owner/anchor/key`）：上线的幂等由宿主守，
     /// 事实面没有可撞的格（`D-293`）。
     pub(crate) live_effect_keys: std::collections::HashSet<String>,
-    /// 模型端口执行体（`DE-047` D-305 裁决一）：一次往返的请求构造、流式帧、
+    /// 模型端口执行体（`DE-048` D-305 裁决一）：一次往返的请求构造、流式帧、
     /// 工具调用累计、用量与计价、终止判定都在它那一侧；本会话只派发与记账。
     model_executor: Option<std::sync::Arc<dyn symbio_plugin_api::port::PortExecutor>>,
 }
@@ -592,7 +592,7 @@ impl TurnSession {
     }
 
     /// 接缝上把定下的系统提示交给草稿：`announce-model` 用它装配请求载荷
-    /// （`DE-047` D-306 裁决二）。
+    /// （`DE-048` D-306 裁决二）。
     pub(crate) fn set_system_prompt(&mut self, prompt: String) {
         self.run.system_prompt = prompt;
     }

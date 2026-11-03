@@ -29,7 +29,7 @@
 //!    节点形状与其余对话节点**同一份**（前端读同一套字段），
 //!    因此复用 `llm_build_tool_call_nodes` / `llm_build_text_node`。
 //! 2. **把结果映射成运行器的事实形状**（[`CallOutcome`]），供运行器拼下一轮
-//!    prompt；`artifact.added` 由执行体在收尾时落（P1b / DE-047 D-308）。
+//!    prompt；`artifact.added` 由执行体在收尾时落（P1b / DE-048 D-308）。
 //!
 //! ## 正文节点的定格
 //!
@@ -248,7 +248,7 @@ pub(crate) struct WakeBatch {
 pub struct CallOutcome {
     /// 这笔结果对应的**端口账**（`request` / `sent` / 终局同 id）。
     ///
-    /// 配对按它做（DE-047 D-311）：日志里 `request(port=tool)`、`response` / `failed`
+    /// 配对按它做（DE-048 D-311）：日志里 `request(port=tool)`、`response` / `failed`
     /// 的键就是这一个 id；`call_id` 是节点身份，不参与配对。
     pub call: port::Call,
     /// 对应的工具调用 id（回填给模型时锚定 ToolCall；取 `TurnToolCallInfo::id`）。
@@ -348,7 +348,7 @@ pub(crate) trait ToolDispatch: Send + Sync {
     /// **派出半**：为这一笔落 `sent`，把「跑执行层 + 收结果」寄存成一个 future。
     ///
     /// 每笔调用一个环步（`dispatch-tool` 行的键就是这一笔）：N 笔可以同时在途，
-    /// 但环里没有「批」这个对象（DE-047 D-311）。
+    /// 但环里没有「批」这个对象（DE-048 D-311）。
     async fn begin(
         self: Arc<Self>,
         store: Arc<dyn Store<Event = Event>>,
@@ -376,7 +376,7 @@ pub(crate) trait ToolDispatch: Send + Sync {
     /// 相互作用语义：审批 / 提问是否「一次只处理一张卡」。
     ///
     /// 环据此决定**什么时候**派下一笔，但这不是并发策略：并发上限、顺序与熔断
-    /// 归 provider 内部（DE-047 D-311）。默认 `false`。
+    /// 归 provider 内部（DE-048 D-311）。默认 `false`。
     fn interactive(&self) -> bool {
         false
     }
@@ -634,7 +634,7 @@ impl ToolPort {
             self.turn,
             self.user_seq,
             serde_json::json!({
-                // 中性键（DE-047 D-311）：调用标识 / 名称 / 参数值，加上授权结论的引用。
+                // 中性键（DE-048 D-311）：调用标识 / 名称 / 参数值，加上授权结论的引用。
                 // 世界类型（线上名解析、风险档语义、参数含义）留在提供者一侧。
                 "name": name,
                 "args": args,
@@ -1571,7 +1571,7 @@ impl ToolDispatch for SessionDispatchPort {
         Box::pin(async move {
             self.close_tool_calls(call, outcome);
             // 产物落格：这一笔结果交回执行体的 `land_only` 出口（含唤醒结果与没跑到的
-            // 占位结果）——环不再自己装配产物载荷（P1b / DE-047 D-308）。
+            // 占位结果）——环不再自己装配产物载荷（P1b / DE-048 D-308）。
             if let Some(outcome) = outcome {
                 let env = self.round_env();
                 super::tools::land_outcome_async(
@@ -1682,7 +1682,7 @@ impl SessionDispatchPort {
         // ③ 分发（工具执行层：存档 / 钩子 / 审批 / 批尾收口全在里面）。
         //    父节点查询用刚广播的这批节点——它们与执行器要求的形状同源。
         //
-        // 执行信封（P1b / DE-047 D-308）：产物格与授权事实的**宿主写口**随批走。
+        // 执行信封（P1b / DE-048 D-308）：产物格与授权事实的**宿主写口**随批走。
         // 产物闸在轮首判一次（`turn_runner::artifact_verdict`），结论以 `allowed` 交给执行体；
         // 落格本身由执行体的 `land_only` 出口做，环不装配产物载荷。
         let env = self.round_env();

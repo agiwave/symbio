@@ -1,7 +1,7 @@
 //! 「逐条执行」。
 //!
 //! **按债逐笔驱动**：一笔准备 → 运行态 → 执行 → 收口，再走下一笔。没有批结构，
-//! 也没有并行的在途表——并发、顺序、熔断全在端口 provider 内部（DE-047 D-311）。
+//! 也没有并行的在途表——并发、顺序、熔断全在端口 provider 内部（DE-048 D-311）。
 //!
 //! 环只留两个职务：
 //! - **超限丢弃**：模型一次交回调用数超过上限时，按「本笔债是否在预算内」反馈，
@@ -188,7 +188,7 @@ struct Ready {
     repeat_note: Option<String>,
     /// 授权 / 成本的中性输入：随这笔债交给执行体，环不据此拒发。
     gate: GateInputs,
-    /// 协议读数：环只搬原始值，判与措辞在执行体（DE-047 D-312）。
+    /// 协议读数：环只搬原始值，判与措辞在执行体（DE-048 D-312）。
     protocol: ProtocolInput,
 }
 
@@ -214,7 +214,7 @@ enum PreTerminal {
 ///
 /// 台账有且只有两处**事实来源**：转写里已有的工具调用请求节点（骨架 + tag `tool`，
 /// 正文即定稿参数文本），以及本批在这一次调用之前的调用。环**不养**可变台账——
-/// 批首预读删掉后，判据按这一笔债现读（DE-047 D-311）。
+/// 批首预读删掉后，判据按这一笔债现读（DE-048 D-311）。
 ///
 /// `current_ids` 是本批调用的节点 id：转写在执行前**就已含**这一批 ToolCall 节点，
 /// 不排除的话每条调用都会把自己数成「重复」。
@@ -254,7 +254,7 @@ fn repeat_ordinal(
 /// 一条调用的**准备**：协议读数与超限守卫在这里收，世界判定在执行体。
 ///
 /// 授权 / 成本的中性输入在这一笔债自己的派发点上读（不预读整批）：自声明行为位、
-/// 主体、会话事实切片都只属于这一次判定（DE-047 D-311）；开窗判定在执行体。
+/// 主体、会话事实切片都只属于这一次判定（DE-048 D-311）；开窗判定在执行体。
 #[allow(clippy::too_many_arguments)]
 async fn prepare_call(
     tc: &TurnToolCallInfo,
@@ -330,7 +330,7 @@ async fn prepare_call(
     //
     // 授权矩阵与成本台账是环的职务（能力包读不到的 E 类语法 + 声明视图），但它们
     // 只折成**中性输入**；快慢、开窗与「熔断中不发」的事实归执行体（DE-039 §6，
-    // DE-047 D-311）。环按端口名派发，不预判、不拒发。
+    // DE-048 D-311）。环按端口名派发，不预判、不拒发。
     let session_facts = facts.range(Seq::new(0));
     let gate = GateInputs::of(&session_facts, &ctx);
 
@@ -480,7 +480,7 @@ async fn finish_call(
     } = ready;
     let result_node_id = symbio_kernel::event::result_node_id(&id);
     // 执行体交回的已是「节点正文 / 记账原文 / 守卫元数据」三份，本层不再裁剪
-    // 结果（L0 守卫随执行体迁出，P1b / DE-047 D-308）。
+    // 结果（L0 守卫随执行体迁出，P1b / DE-048 D-308）。
     let ExecResult {
         text: guarded_text,
         raw: final_res,
@@ -693,7 +693,7 @@ fn interaction_blocked(parent_updates: &[ChatNode]) -> bool {
 /// 逐笔驱动这批工具调用：准备 → 运行态 → 执行 → 收口，一笔收完再走下一笔。
 ///
 /// 没有在途表、没有批首读数：并发、顺序、快照都在端口 provider 内部
-/// （DE-047 D-311）。环只留两个职务：超限丢弃的预算反馈（[`PreTerminal::Overflow`]）
+/// （DE-048 D-311）。环只留两个职务：超限丢弃的预算反馈（[`PreTerminal::Overflow`]）
 /// 与交互模式下「前一笔待用户 / 失败 ⇒ 后续不再启动」的逐笔语义
 /// （[`interaction_blocked`]）。
 ///
@@ -701,7 +701,7 @@ fn interaction_blocked(parent_updates: &[ChatNode]) -> bool {
 /// 返回给调用方做内存镜像整条替换 + 随 persist_messages 落库。
 ///
 /// 读数**按这一笔债现取**（不预读整批）：声明位随债走，授权 / 成本的中性输入、
-/// 主体、会话事实切片在 [`prepare_call`] 里现取（DE-047 D-311）。
+/// 主体、会话事实切片在 [`prepare_call`] 里现取（DE-048 D-311）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_calls(
     tool_calls: Vec<TurnToolCallInfo>,

@@ -202,7 +202,7 @@ fn plain() -> Value {
 // ── 端口声明 ─────────────────────────────────────────────────────────────
 
 /// 并发上限是**插件自声明**的一部分：`tool` 自报 4，`model` 自报串行（0）。
-/// 环只做声明搬运，不读这个值、不据此调度（DE-047 `D-311` / X-15）。
+/// 环只做声明搬运，不读这个值、不据此调度（DE-048 `D-311` / X-15）。
 #[test]
 fn tool_port_declares_its_own_concurrency() {
     let of = |port: &str| PORTS.iter().find(|p| p.port == port).map(|p| p.concurrency);

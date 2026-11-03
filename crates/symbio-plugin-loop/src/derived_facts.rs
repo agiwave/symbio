@@ -1,7 +1,7 @@
 //! v2 派生事实写入——效果（承诺 / 任务表 / 文件变更…）+ 记忆。
 //!
 //! 熔断事实**不在这里**：开窗判据与那条 `control × opened` 由执行体自己落
-//! （DE-039 §6，DE-047 D-311）。
+//! （DE-039 §6，DE-048 D-311）。
 //!
 //! `turn_exec` 在轮末调用本模块的两个写方，把本轮的**派生副作用**落进同一份持久事实源
 //! （<会话目录>/`v2-events.wal`，`paths::V2_WAL_FILE` 单源）。
@@ -90,7 +90,7 @@ const LOG_CHANNEL: &str = symbio_deploy::PLUGIN_ID_SESSION;
 /// 那是 `?` 的副作用，不是设计意图。现在两条路都走同一个形状。
 ///
 /// 熔断事件**不在这里**：开窗判据已搬进执行体，熔断事实由执行体自己写
-/// （DE-039 §6，DE-047 D-311）；本函数只收效果草稿。
+/// （DE-039 §6，DE-048 D-311）；本函数只收效果草稿。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_derived(
     session_id: &str,

@@ -47,7 +47,7 @@ use symbio_kernel::llm::PromptMessage;
 use symbio_kernel::plugin::PluginError;
 
 /// 用现有 [`DeltaSink`] 搭一个执行流出口：端口执行体与对话链路共用同一条展示通道，
-/// 不新开第二条（`DE-047` D-306 裁决三）。
+/// 不新开第二条（`DE-048` D-306 裁决三）。
 pub fn delta_event_sink(sink: Arc<dyn DeltaSink>) -> ExecEventSink {
     ExecEventSink::direct(Arc::new(DeltaBridge {
         sink,

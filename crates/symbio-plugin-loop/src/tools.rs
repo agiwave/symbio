@@ -13,7 +13,7 @@
 //!
 //! 单条结果的体积上限（守卫与归档滚动）与**产物格落格**都随执行体迁到
 //! `symbio-plugin-tool`；本域只消费执行体交回的**已守卫文本**与守卫元数据
-//! （P1b，DE-047 D-308）。
+//! （P1b，DE-048 D-308）。
 //!
 //! 生命周期钩子（`fire_hook`）住宿主 `symbio_plugin_api::hooks`：session 派发前与 loop 轮内都触发它，
 //! 两边共用同一条路由助手（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
@@ -38,7 +38,7 @@ pub use self::dispatch::{is_unanswered, NOT_EXECUTED};
 #[allow(unused_imports)]
 pub use self::dispatch::ABORTED;
 // 外部执行闸门的判据已搬进 `symbio-plugin-tool` 的执行体；环只留授权 / 成本的中性
-// 输入（`GateInputs`），不预判、不拒发（DE-039 §6，DE-047 D-311）。
+// 输入（`GateInputs`），不预判、不拒发（DE-039 §6，DE-048 D-311）。
 // 生产入口（带执行信封）：分发方在派发时把轮号 / 根节点 / 产物闸结论 / 写口
-// 装进 [`RoundEnv`]，执行体据此落产物格（P1b，DE-047 D-308）。
+// 装进 [`RoundEnv`]，执行体据此落产物格（P1b，DE-048 D-308）。
 pub(crate) use self::tool_executor::{land_outcome_async, process_tool_calls_in_env, RoundEnv};

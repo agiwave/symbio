@@ -27,7 +27,7 @@
 //! `PortOutcome.facts` 只有一项，键为 `result_text`（已守卫正文）/ `raw_text`
 //! （未裁剪原文，环侧记账与钩子用）/ `success` / `pending` / `guard`
 //! （`{ truncated, archive_path, origin_tokens }`）。产物格（`artifact.added`）由
-//! 本执行体在 `land_only` 出口经写口直落（P1b / DE-047 D-308）；环只交回结果纯值，
+//! 本执行体在 `land_only` 出口经写口直落（P1b / DE-048 D-308）；环只交回结果纯值，
 //! 不装配产物载荷、不写产物格。
 //! 工具失败**不**映射成 `PortOutcome.error`——失败是信息性事实（模型据此自我纠正），
 //! 与「这一笔协议失败」是两件事。
@@ -60,7 +60,7 @@ const KEY_TOOL_CALL_ID: &str = "call_id";
 const KEY_ARCHIVE_DIR: &str = "archive_dir";
 /// 产物格上下文：`{ key, round, round_id, produced_by, allowed, denied_reason }`。
 ///
-/// 落格这件事在**执行体**里做（P1b，DE-047 D-308）：产物是这次结果的产物，不是环的
+/// 落格这件事在**执行体**里做（P1b，DE-048 D-308）：产物是这次结果的产物，不是环的
 /// 派生产物。`key` 由环按「轮 + 债务 id」给出（一笔债一个键），拒绝时按
 /// `deny-{round}-artifact` 落一条幂等的否定事实；`allowed` 是环侧产物闸的结论
 /// （执行体不自判权限）。
@@ -70,7 +70,7 @@ const KEY_LAND_ONLY: &str = "land_only";
 /// 外部执行闸门的中性输入：`{ authorized, spent_ms, requested_ms, budget_ms }`。
 ///
 /// 环的授权矩阵与成本台账只把结论交给执行体；快慢、开窗与熔断事实都由本执行体判
-/// （DE-039 §6，DE-047 D-311）。缺省 = 不判（通用端口调用不带这一格）。
+/// （DE-039 §6，DE-048 D-311）。缺省 = 不判（通用端口调用不带这一格）。
 const KEY_GATE: &str = "gate";
 /// 调用信封的协议读数（环只搬原始值，判在本次执行体）：
 /// `{ id_missing, name_missing, parse_error }`。
@@ -346,7 +346,7 @@ fn refused(text: &str, failure_kind: &'static str) -> PortOutcome {
 /// 载荷字段（`tool` / `text` / `tool_call_id` / `args` / `success` /
 /// `needs_user_action` / `prompt` / `failure_kind` / `turn_id` + 能力交出的
 /// 富化字段）全在这一处装配。结果节点 id 由 `tool_call_id` 派生，不作为载荷键
-/// （DE-047 D-312）。`allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时
+/// （DE-048 D-312）。`allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时
 /// 按 `deny-{round}-artifact` 落一条幂等否定事实（同一轮多条结果说的是同一件事）。
 async fn land_artifact(
     exec: &PortExecContext,
@@ -527,7 +527,7 @@ fn protocol_input(payload: &serde_json::Value) -> Option<ProtocolInput<'_>> {
     })
 }
 
-/// 协议失败的结果：判定与措辞都在执行体（DE-047 D-312）。
+/// 协议失败的结果：判定与措辞都在执行体（DE-048 D-312）。
 ///
 /// 环只把原始协议读数搬进来，并给一个兜底 id 以便结果有落点；它不再判断
 /// 「缺 id / 缺 name / 参数解析失败」。
@@ -585,7 +585,7 @@ async fn refuse_protocol(protocol: ProtocolInput<'_>, archive_dir: &Path) -> Opt
 }
 
 /// 工具生命周期钩子（Pre/PostToolUse）由**执行体**触发：环不按事件名调钩子，
-/// 只搬工具名与参数（DE-047 D-312）。
+/// 只搬工具名与参数（DE-048 D-312）。
 async fn fire_post_hook(
     parent: &Arc<dyn Plugin>,
     tool_name: &str,
@@ -694,7 +694,7 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
 
 /// 端口声明的同批在飞上限（`PortDecl.concurrency`）——**执行体自己的**并发策略。
 ///
-/// 环不再做风险档 → 并行/串行映射，也不持上限（DE-047 D-311）：它只把每笔债交过来；
+/// 环不再做风险档 → 并行/串行映射，也不持上限（DE-048 D-311）：它只把每笔债交过来；
 /// 限流在这里，因为「同批最多几笔在飞」是这个端口的能力，不是环的判定。
 fn tool_concurrency() -> usize {
     crate::declarations::PORTS
@@ -709,7 +709,7 @@ struct ExecWindow {
     slots: tokio::sync::Semaphore,
 }
 
-/// 执行窗口按**会话**分格（DE-047 D-311）。
+/// 执行窗口按**会话**分格（DE-048 D-311）。
 ///
 /// 不分格会在委派时死锁：父会话的 `agent_run` 持写侧窗口、等子会话跑完，而子会话的
 /// 工具调用又来抢同一把锁。子会话有独立的 `SESSION_ID`，格子因此天然不互相等待；
@@ -783,7 +783,7 @@ impl PortExecutor for ToolPort {
                 error: None,
             };
         }
-        // 协议失败：判定与措辞都在执行体（DE-047 D-312）。环只搬原始读数与兜底 id。
+        // 协议失败：判定与措辞都在执行体（DE-048 D-312）。环只搬原始读数与兜底 id。
         if let Some(protocol) = protocol_input(&payload) {
             if let Some(out) = refuse_protocol(protocol, &archive_dir).await {
                 return out;
@@ -805,7 +805,7 @@ impl PortExecutor for ToolPort {
                 tool_name,
                 args_summary(&args, 200)
             );
-            // 工具生命周期钩子的入方向：由执行体触发，环不按事件名调钩子（DE-047 D-312）。
+            // 工具生命周期钩子的入方向：由执行体触发，环不按事件名调钩子（DE-048 D-312）。
             let pre = fire_hook(
                 &Some(parent.clone()),
                 HookEvent::PreToolUse {
@@ -863,7 +863,7 @@ impl PortExecutor for ToolPort {
 
         // 外部执行闸门：环**不判快慢、不据此拒发**，只把中性输入随债交过来。
         // 「熔断中不发」在这里落地——本执行体自己不开窗，并把拒绝事实写进事实源；
-        // 环只认结果事实，不解释原因（DE-039 §6，DE-047 D-311）。
+        // 环只认结果事实，不解释原因（DE-039 §6，DE-048 D-311）。
         if let Some(gate) = gate_inputs(&payload) {
             match CircuitBreaker.gate(
                 gate.authorized,
@@ -947,7 +947,7 @@ impl PortExecutor for ToolPort {
         };
         let known_names: Vec<String> = tool_rows.iter().map(|row| row.name().to_string()).collect();
         let resolved_name = resolve(&tool_name, known_names.iter().map(String::as_str));
-        // 并发策略在本执行体（DE-047 D-311）：只读档（`Low`）可同时在途，受端口声明的
+        // 并发策略在本执行体（DE-048 D-311）：只读档（`Low`）可同时在途，受端口声明的
         // 上界约束；写侧档（`Medium` / `High`）与查不到风险档的调用独占**本会话**的
         // 执行窗口——写文件、改配置、发消息这类并行会引入顺序不确定。环不再替这里
         // 做任何判定；窗口按会话分格，委派链不会父子互等。

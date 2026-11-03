@@ -1,6 +1,6 @@
 //! 环上三条 `policy.*` 行动作：判决 / 召回 / 压缩。
 //!
-//! 三者的共同纪律：**只产出事实，不往 `TurnState` 寄存读侧**（DE-047 D-306 /
+//! 三者的共同纪律：**只产出事实，不往 `TurnState` 寄存读侧**（DE-048 D-306 /
 //! D-313 P2-2）。动作做完就落格；下一步要读的是日志，不是本轮的字段。
 
 use std::sync::Arc;
@@ -413,7 +413,7 @@ async fn parse_reply(
 /// `policy.recall` 行：召回 → 摘行 → 落召回格。
 ///
 /// 召回读数（逐条正文 + 降级标记）是这一格的载荷：`prepare-turn` 与收束都从事实
-/// 重建，不再寄存在 `TurnState`（DE-047 D-306）。
+/// 重建，不再寄存在 `TurnState`（DE-048 D-306）。
 pub(crate) async fn recall(
     ctx: &Arc<dyn PluginInvokeRequest>,
     store: &dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,

@@ -365,7 +365,7 @@ pub(crate) async fn prepare_request_sections(
 
 /// 从 `policy.recall` 落下的召回格重建检索读数。
 ///
-/// 宿主不再把读数寄存在 `TurnState`（DE-047 D-306）：这一格是事实，读侧与写侧
+/// 宿主不再把读数寄存在 `TurnState`（DE-048 D-306）：这一格是事实，读侧与写侧
 /// 都回到日志。逐条正文随格入载荷，重建不依赖再次检索。
 fn recall_from_stage(
     facts: &[symbio_kernel::event::Event],

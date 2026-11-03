@@ -75,7 +75,7 @@ impl PortProvider for ModelPort {
         Some(self.active.clone())
     }
 
-    /// 通用执行面（`DE-047` D-305 裁决一）：一次往返的请求构造、流式帧、工具调用
+    /// 通用执行面（`DE-048` D-305 裁决一）：一次往返的请求构造、流式帧、工具调用
     /// 累计、用量与计价、终止判定都在执行体里；环只把 `request` 载荷原样交进来。
     fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
         Some(Arc::new(ModelExecutor {

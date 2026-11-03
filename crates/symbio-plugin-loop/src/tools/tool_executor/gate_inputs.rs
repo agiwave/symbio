@@ -3,7 +3,7 @@
 //! 判据本身（快慢、预算、开窗与熔断事实）在执行体
 //! （[`crate::tools::tool_executor`] 的对侧：`symbio-plugin-tool` 的 `breaker`），
 //! 环**不读、不据此拒发**（[DE-039 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")，
-//! DE-047 D-311）。
+//! DE-048 D-311）。
 //!
 //! 本模块只剩两个**职务**（环不能外包给能力包的）：授权矩阵在 E 类封闭语法里
 //! （`production_matrix()`，能力包读不到），成本台账是一条声明视图（名册 #18 的
@@ -15,7 +15,7 @@ use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::event::Event;
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 
-/// 外部执行闸门的**中性输入**（DE-039 §6，DE-047 D-311）。
+/// 外部执行闸门的**中性输入**（DE-039 §6，DE-048 D-311）。
 ///
 /// 本结构只负责**读账**并把结论交给执行体；快慢与开窗由执行体判。三个毫秒数的
 /// 口径（D-044：实测与判据同源，**读台账不读运行时计数器**）：

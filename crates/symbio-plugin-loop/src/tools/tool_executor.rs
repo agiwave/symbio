@@ -81,7 +81,7 @@ pub(super) fn build_user_prompt_message(
 /// 一批工具调用的执行信封（环侧每次派发建一份，逐调用共享）。
 ///
 /// 字段都是环的**通用形式**：轮号 / 根节点 / 归属 / 产物闸结论 / 宿主写口。执行体
-/// 不认识世界，只按这些值记账与落格（P1b，DE-047 D-308）。
+/// 不认识世界，只按这些值记账与落格（P1b，DE-048 D-308）。
 #[derive(Clone, Default)]
 pub struct RoundEnv {
     /// L0 存档目录（超预算结果写全文）。
@@ -116,7 +116,7 @@ pub struct ExecResult {
     pub why: String,
 }
 
-/// 调用信封的协议读数：环只搬原始值，判定在端口执行体（DE-047 D-312）。
+/// 调用信封的协议读数：环只搬原始值，判定在端口执行体（DE-048 D-312）。
 #[derive(Debug, Clone, Default)]
 pub struct ProtocolInput {
     pub id_missing: bool,
@@ -133,7 +133,7 @@ impl ProtocolInput {
 
 /// 执行**一笔债**（不阻塞等待用户）：按端口名取提供者，交给端口执行合同跑。
 ///
-/// 这是环与执行体之间的**通用单笔入口**（DE-047 D-311）：一笔调用一笔债，入参只有
+/// 这是环与执行体之间的**通用单笔入口**（DE-048 D-311）：一笔调用一笔债，入参只有
 /// 端口名与这笔债的载荷；并发、顺序、熔断全在 provider 内部，本函数不认识它们。
 ///
 /// 本函数只是**端口取用面**：按端口名从能力表读提供者，把调用现场整份交给
@@ -199,7 +199,7 @@ pub async fn execute_one(
                     "args": args,
                     "call_id": call_id,
                     // 协议读数也是纯值：判「缺 id / 缺 name / 解析失败」在执行体，
-                    // 环不判格式（DE-047 D-312）。
+                    // 环不判格式（DE-048 D-312）。
                     "protocol": {
                         "id_missing": protocol.id_missing,
                         "name_missing": protocol.name_missing,
@@ -299,7 +299,7 @@ pub async fn execute_one(
 ///
 /// 唤醒结果与没跑到的占位结果没有一次「执行」可挂，但它们同样是产物；环把结果字段
 /// 按通用载荷给出，执行体负责装配产物载荷、富化字段与幂等的拒绝事实（P1b /
-/// DE-047 D-308）。环不按世界分支，也不在环里留第二条落格路径。
+/// DE-048 D-308）。环不按世界分支，也不在环里留第二条落格路径。
 pub(crate) async fn land_outcome_async(
     env: &RoundEnv,
     parent: &Option<Arc<dyn Plugin>>,
@@ -378,7 +378,7 @@ pub(crate) async fn land_outcome_async(
 /// 1. **本批每一个工具调用都必须以终态收场**（`Completed` / `WaitingUserAction`）：
 ///    调用前广播 `Streaming`（`dispatch::batch::emit_tool_running`），调用后广播终态。
 ///    「没跑到」的调用由环写 `failed{why}` 事实，投影器按事实渲染调用卡终态与
-///    「未执行」结果子项，环不再补节点（DE-047 D-312）。
+///    「未执行」结果子项，环不再补节点（DE-048 D-312）。
 ///
 /// 2. **外部执行的授权 / 成本读数在每个调用点各取一次**（[`GateInputs`]），随债交给
 ///    执行体：判据与开窗不在环——`Refuse` 零事件、`Break` 由执行体自己 `emit`

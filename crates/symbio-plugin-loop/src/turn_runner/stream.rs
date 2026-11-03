@@ -411,7 +411,7 @@ pub(crate) struct ModelFlight {
     pub(crate) output: Option<(serde_json::Value, String)>,
 }
 
-/// 在飞的一笔工具调用（`D-124` 订正 1 + DE-047 D-311）：派出与收尾两半之间的**唯一**
+/// 在飞的一笔工具调用（`D-124` 订正 1 + DE-048 D-311）：派出与收尾两半之间的**唯一**
 /// 交接件。
 ///
 /// 与 [`ModelInFlight`] 同一条理由活着：两次选债之间它在草稿里挂着，`sent` 与终局
@@ -884,7 +884,7 @@ async fn take_wake_call(
 /// 派出半（`dispatch-tool` 行的动作，**一行一笔**）：落 `sent`、
 /// 把这一笔「跑执行层 + 收结果」寄存进草稿的在飞槽。
 ///
-/// 一笔一个环步 ⇒ N 笔可以同时在途；环里没有「批」这个对象（DE-047 D-311）。
+/// 一笔一个环步 ⇒ N 笔可以同时在途；环里没有「批」这个对象（DE-048 D-311）。
 /// 交互模式是例外：审批 / 提问一次只处理一张卡，前一笔记还在等时不再派出下一笔
 /// （这是**交互语义**，不是并发策略）。
 pub(crate) async fn begin_round(
@@ -1079,7 +1079,7 @@ async fn land_batch(
     rt: LlmTurn,
     outcomes: Vec<Outcome>,
 ) -> Result<(), symbio_kernel::store::AppendError> {
-    // 产物落格已由执行体在 `finish` 的 `land_only` 出口完成（P1b / DE-047 D-308）；
+    // 产物落格已由执行体在 `finish` 的 `land_only` 出口完成（P1b / DE-048 D-308）；
     // 这里只读回本轮的产物数，供收束判定「这一轮到底有没有产出」。判据按
     // `produced_by`（本轮用户格 seq，即环的归属锚）认领：产物格是执行体落的，
     // 轮号是它的载荷字段而不是事实信封的（D-309 之后信封里没有轮号）。

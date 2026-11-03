@@ -644,7 +644,7 @@ impl Plugin for TelegramPlugin {
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
 
-        // 世界端口（DE-047 D-302）：把 `notify` 的执行面挂进能力表。端口行由
+        // 世界端口（DE-048 D-302）：把 `notify` 的执行面挂进能力表。端口行由
         // `port_rows` 按提供者申报的端口名产出——加端口只改提供者的 `ports()`，
         // 不改注册面、不改环。
         if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {

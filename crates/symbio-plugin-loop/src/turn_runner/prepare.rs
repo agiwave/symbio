@@ -65,7 +65,7 @@ pub(crate) struct Prepared {
     /// （见 [`Prepared::now_ms`]）。
     pub(crate) drive_seq: u64,
     /// 接缝上定下的**系统提示**（`prepare_request_sections` 的同一份值）：模型请求
-    /// 载荷由 `announce-model` 行按事实装配（`DE-047` D-306 裁决二）。
+    /// 载荷由 `announce-model` 行按事实装配（`DE-048` D-306 裁决二）。
     pub(crate) system_prompt: String,
     /// 轮内**步号**（1 起）：第几次模型往返。模型端口的逻辑 id 带它——
     /// 一次往返一个 id，否则第二次的 `sent` 撞第一次的幂等键。

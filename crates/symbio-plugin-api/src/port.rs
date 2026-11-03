@@ -145,7 +145,7 @@ pub struct PortExecContext {
     pub ctx: Option<Arc<dyn PluginInvokeRequest>>,
 }
 
-/// provider 执行一笔债期间追加事实草稿的通用出口（`DE-047` D-305 裁决一）。
+/// provider 执行一笔债期间追加事实草稿的通用出口（`DE-048` D-305 裁决一）。
 ///
 /// 形状与 [`ExecEventSink`] 同族：**生产者只写，去处由宿主决定**。命名的「事实」
 /// 是通用的记账单位（[`FactDraft`]），不是某个世界的事件词。

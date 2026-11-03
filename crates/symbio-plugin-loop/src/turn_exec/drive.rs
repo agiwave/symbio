@@ -751,7 +751,7 @@ async fn close_stage(
         return Ok(CloseEnd::Running(Box::new(running)));
     };
     // 归类（中止 / 授权拒 / 正常）与派生事实落格。召回读数从 `policy.recall`
-    // 落下的那一格重建（DE-047 D-306），不再寄存于本轮状态。
+    // 落下的那一格重建（DE-048 D-306），不再寄存于本轮状态。
     let facts = control.context.session.facts_snapshot();
     let recall = super::super::stage_events::recall_of(
         &facts,

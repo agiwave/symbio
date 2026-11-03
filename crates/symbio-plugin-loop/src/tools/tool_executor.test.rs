@@ -494,7 +494,7 @@ fn tc_context(ids: &[&str]) -> Vec<ChatNode> {
         .collect()
 }
 
-/// 节点是投影（DE-047 D-312）：中止批的未启动调用**不由执行体补节点**。
+/// 节点是投影（DE-048 D-312）：中止批的未启动调用**不由执行体补节点**。
 ///
 /// 执行体只落事实（`failed{why}`，由环侧关账时写），「未执行」的调用卡 / 结果子项
 /// 由投影器按事实渲染（`rebuild.test.rs` 的
@@ -813,7 +813,7 @@ async fn record_effect_never_overwrites_an_earlier_judgement() {
 // ==================== 外部执行闸门的中性输入 ====================
 //
 // 开窗判据（时延 / 预算 / 熔断事实）已搬进 `symbio-plugin-tool` 的执行体，本层只
-// 读账并把四个中性值交出去（DE-039 §6，DE-047 D-311）；熔断端到端用例住在
+// 读账并把四个中性值交出去（DE-039 §6，DE-048 D-311）；熔断端到端用例住在
 // `symbio-plugin-tool/src/port.test.rs`。
 
 /// 判据那一半：授权是**读矩阵**得来的（fail-closed），不是默认放行。
@@ -975,7 +975,7 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
 
 // ==================== 端口缺席的响亮失败（逐笔驱动仍要有结果） ====================
 //
-// 批内并行已移除：并发、顺序、熔断都在端口 provider 内部（DE-047 D-311）。
+// 批内并行已移除：并发、顺序、熔断都在端口 provider 内部（DE-048 D-311）。
 // 这里只保留「表里有工具但没有 `port.tool` 行」这一条读数形态的用例。
 
 use symbio_kernel::capability::CapabilityRiskLevel;

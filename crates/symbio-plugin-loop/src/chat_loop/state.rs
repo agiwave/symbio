@@ -256,7 +256,7 @@ impl TurnState {
 
     /// 本幕的请求轮次：读本幕锚之后的 `turn.stage{stage:"round"}` 那格事实。
     ///
-    /// 轮次不再寄存为字段（DE-047 D-306）；它在事实面上的唯一形态就是那一格。
+    /// 轮次不再寄存为字段（DE-048 D-306）；它在事实面上的唯一形态就是那一格。
     pub(crate) fn round(&self) -> usize {
         super::super::stage_events::round_of(&self.facts, self.turn_no, self.drive_seq)
             .unwrap_or(0)
