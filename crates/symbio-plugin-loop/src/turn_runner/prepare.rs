@@ -11,7 +11,7 @@
 //! 早退（定稿答话 / 空答兜底 / 首请求前中止）经 [`PreparedFlow::Done`] 交回结局，
 //! 不把半备好的草稿交出去——幕首之后只有一种状态在流转（[`Prepared`]）。
 
-use super::super::tool_dispatch::{CallOutcome as Outcome, ToolPortCall as PortCall};
+use super::super::tool_dispatch::ToolPortCall as PortCall;
 use super::*;
 use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
 
@@ -128,10 +128,6 @@ pub(crate) struct Prepared {
     /// `ToolPortCall` 的 `granted` / `sent` / `deny_why` 是三个动作依次写入的同一份
     /// 判定结果，分两次构造就会各说一套；行键就是这里的键，一笔一个条目。
     pub(crate) calls: std::collections::HashMap<String, PortCall>,
-    /// 这一轮模型往返的调用顺序（端口账 id）。逐笔收尾时按它判定「整轮是否都结了」。
-    pub(crate) round_calls: Vec<String>,
-    /// 这一轮已经收口的结果（端口账 id → 结果），供整轮结束时拼回填 prompt。
-    pub(crate) round_outcomes: std::collections::HashMap<String, Outcome>,
     /// 这一轮模型往返（正文 / wiring id）：逐笔派发共用一份。
     pub(crate) round_turn: Option<LlmTurn>,
     /// 本轮的正文是否已经定格（`prepare` 只做一次）。
@@ -396,8 +392,8 @@ where
     let last_answer_id = String::new();
 
     // 唤醒幕（审批 / 问答恢复）**不在这里续写交换**：用户动作落成唤醒请求
-    // （`chat_loop::wake`），授权与派发由行表承担，工具交换由批尾收尾自己产生
-    // （`stream::land_batch`）——本段不再私自拼一段 prompt。
+    // （`chat_loop::wake`），授权与派发由行表承担，工具交换由逐笔落地自己产生
+    // （`stream::land_one`）——本段不再私自拼一段 prompt。
 
     // 1c. **闸门与首请求之间的中止**（D-052 决策 1）不在这里判：它成了环的第一道守卫
     // （`turn_exec::drive` 首圈）。草稿先建好、把信号存进去，**被中止的幕因此也不再跑
@@ -431,8 +427,6 @@ where
         pending_round: None,
         pending_round_payload: None,
         calls: std::collections::HashMap::new(),
-        round_calls: Vec::new(),
-        round_outcomes: std::collections::HashMap::new(),
         round_turn: None,
         round_prepared: false,
         // 快路：正文由技能行作答后宿主经 [`super::TurnSession::set_reflex`] 寄存

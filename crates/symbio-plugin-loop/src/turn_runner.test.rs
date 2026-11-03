@@ -4400,7 +4400,7 @@ mod tool_round_tests {
     /// ## 反向自检
     ///
     /// 把 `ToolDispatch` 的 `begin` / `finish` 合回同一个动作窗口（老形状：
-    /// 一个动作里 `begin_calls` → 跑执行层 → `close_batch`）⇒ 边界上工具这一笔永远
+    /// 一个动作里 `begin_call` → 跑执行层 → `close_batch`）⇒ 边界上工具这一笔永远
     /// 已经关账 ⇒ `has_tool` 全程为假 ⇒ 本用例红。
     #[tokio::test]
     async fn an_in_flight_tool_batch_is_observable_between_selection_rounds() {

@@ -364,14 +364,6 @@ pub(crate) trait ToolDispatch: Send + Sync {
     /// 世界事实的次序因此与调用顺序一致。
     fn land_derived(&self, _effects: Vec<EffectInput>) {}
 
-    /// 相互作用语义：审批 / 提问是否「一次只处理一张卡」。
-    ///
-    /// 环据此决定**什么时候**派下一笔，但这不是并发策略：并发上限、顺序与熔断
-    /// 归 provider 内部（DE-048 D-311）。默认 `false`。
-    fn interactive(&self) -> bool {
-        false
-    }
-
     /// 读一笔**唤醒调用**（d）。
     ///
     /// 恢复幕没有模型应答可寄存：用户在等待卡上点了按钮，唤醒请求已在开幕之前
@@ -881,63 +873,58 @@ fn authorize_one(
 }
 
 impl ToolPort {
-    /// 派发动作的前半（第三笔债）：为放行的调用落 `sent`。
+    /// 派发动作的前半（第三笔债）：为这一笔放行的调用落 `sent`。
     ///
     /// 执行层由调用方跑（`SessionDispatchPort::dispatch`）——`sent` 的语义是
     /// 「已交给执行层」，所以它必须先于执行。
     ///
     /// 派发行欠不欠由引擎现读（D-136）：这里只交出授权行与读账的 `now`，
     /// 引擎回 [`port::DispatchError::NotOwed`] 就是「没有这笔账」，如实落 `failed`。
-    ///
-    /// 事实面**批首读一次**（`begin_with_facts`）：批内每笔落的 `sent` 只关自己那一笔，
-    /// 而行的欠状态在批内恒真（见那条函数的说明）——每笔现读是同一份日志扫 N 遍。
-    pub(crate) fn begin_calls(&self, calls: &mut [ToolPortCall]) {
-        if !calls.iter().any(|c| c.granted) {
+    pub(crate) fn begin_call(&self, call: &mut ToolPortCall) {
+        if !call.granted {
             return;
         }
         let facts = self.facts.range(Seq::new(0));
         let now = self.now_ms(&facts);
         // 端口声明从冻结表按端口名取——环不持有端口清单（DE-047 不变量 6）。
         let ports = loop_rows::ports();
-        for call in calls.iter_mut().filter(|c| c.granted) {
-            match port::begin_with_facts(
-                self.facts.as_ref(),
-                &ports,
-                port::Dispatch {
-                    call: &call.call,
-                    turn: self.turn,
-                    produced_by: self.user_seq,
-                    row: "dispatch-tool",
-                    now,
-                    // 唤醒调用能由 `wake_batch` 从事实重建（有活着的等待方）；
-                    // 普通批次把结果等在当前草稿里，进程一死就没人接了。
-                    awaited: call.wake.is_some(),
-                },
-                &facts,
-            ) {
-                Ok(()) => call.sent = true,
-                Err(port::DispatchError::NotOwed(row)) => {
-                    symbio_plugin_api::plugin_warn!(
-                        "session",
-                        "[Tool] 派发行 `{row}` 不欠（turn={} / {}），不落 sent",
-                        self.turn,
-                        call.model_id
-                    );
-                    let _ = port::failed(
-                        self.facts.as_ref(),
-                        &call.call,
-                        self.turn,
-                        self.user_seq,
-                        "dispatch_row_not_owed",
-                    );
-                }
-                Err(e) => symbio_plugin_api::plugin_warn!(
+        match port::begin_with_facts(
+            self.facts.as_ref(),
+            &ports,
+            port::Dispatch {
+                call: &call.call,
+                turn: self.turn,
+                produced_by: self.user_seq,
+                row: "dispatch-tool",
+                now,
+                // 唤醒调用能由 `wake_batch` 从事实重建（有活着的等待方）；
+                // 普通调用把结果等在当前草稿里，进程一死就没人接了。
+                awaited: call.wake.is_some(),
+            },
+            &facts,
+        ) {
+            Ok(()) => call.sent = true,
+            Err(port::DispatchError::NotOwed(row)) => {
+                symbio_plugin_api::plugin_warn!(
                     "session",
-                    "[Tool] 工具 sent 未落格（turn={} / {}）：{e:?}",
+                    "[Tool] 派发行 `{row}` 不欠（turn={} / {}），不落 sent",
                     self.turn,
                     call.model_id
-                ),
+                );
+                let _ = port::failed(
+                    self.facts.as_ref(),
+                    &call.call,
+                    self.turn,
+                    self.user_seq,
+                    "dispatch_row_not_owed",
+                );
             }
+            Err(e) => symbio_plugin_api::plugin_warn!(
+                "session",
+                "[Tool] 工具 sent 未落格（turn={} / {}）：{e:?}",
+                self.turn,
+                call.model_id
+            ),
         }
     }
 
@@ -1103,7 +1090,7 @@ impl ToolPort {
     /// - 放行且已派发：`response`（工具回了话）或 `failed`（执行层没跑到它）；
     /// - 被拒（`deny_why` 有值）：`failed{why}`——授权行已由 `authz.denied` 关掉，
     ///   但创建行的集合债与「拒绝收尾」这一笔债务（`deny-tools`）还等着终局；
-    /// - 放行但没落 `sent`：`begin_calls` 已经替它落过 `failed`，这里不重复；
+    /// - 放行但没落 `sent`：`begin_call` 已经替它落过 `failed`，这里不重复；
     /// - **没有结果**（`outcome = None`）：环写 `failed{NOT_EXECUTED}`——「未收到
     ///   `response` 的债」本身就是终局判据，不需要一个专门的未执行模块。
     ///
@@ -1156,7 +1143,7 @@ impl ToolPort {
     ///
     /// 三个调用方：逐笔关账（[`Self::close_call`]，`why` 取结果节点的成因或被拒
     /// 原因）、resume 的中止路径（`why = ABORTED`）、以及「放行但没派出去」那几笔
-    /// （`begin_calls` 自己落 `failed{dispatch_row_not_owed}`）。
+    /// （`begin_call` 自己落 `failed{dispatch_row_not_owed}`）。
     pub(crate) fn fail(&self, call: &ToolPortCall, why: &str) {
         if let Err(e) = port::failed(
             self.facts.as_ref(),
@@ -1317,7 +1304,7 @@ impl SessionDispatchPort {
 
     /// 用户结果（answer / reject）的**派出半**：不跑执行层，直接合成调用卡与结果卡。
     ///
-    /// 与正常派发共用**同一条关账**（`begin_calls` 在调用方 + `finish` 的
+    /// 与正常派发共用**同一条关账**（`begin_call` 在调用方 + `finish` 的
     /// `close_call`）：回答是 `sent → response`，拒绝是 `denied → failed`（授权行已落
     /// `authz.denied`，`close_call` 按 `deny_why` 收尾）。
     ///
@@ -1549,7 +1536,7 @@ impl ToolDispatch for SessionDispatchPort {
         // 批准 / 重试 / 补充仍然走下面的正常派发路径——执行层只知道
         // 「有一次调用要跑」，不关心它是模型要的，还是用户点的。
         if matches!(call.wake, Some(Wake::Result { .. })) {
-            self.port.begin_calls(std::slice::from_mut(call));
+            self.port.begin_call(call);
             // 结论已经在手上：这个 future 第一次 poll 就 Ready（没有跨边界的往返，
             // 也就没有真正「在等」的那一圈）。
             return match self.wake_result_begin(turn, call).await {
@@ -1561,7 +1548,7 @@ impl ToolDispatch for SessionDispatchPort {
 
         // ⓪ 第三笔债的前半：为这一笔落 `sent`。必须在执行层之前——
         //    `sent` 的语义是「已交给执行层」，而不是「工具已经开始跑」。
-        self.port.begin_calls(std::slice::from_mut(call));
+        self.port.begin_call(call);
 
         // ① 广播**这一笔**的工具节点。在派出这一侧：它在执行层之前就该出现在
         //    界面上（卡片显示「运行中」），而不是等结果回来才补。正文定格是一次
@@ -1572,7 +1559,7 @@ impl ToolDispatch for SessionDispatchPort {
         let tool_calls = turn.tool_calls.clone();
         let outcome_call = call.call.clone();
         ToolBegin::InFlight(Box::pin(async move {
-            this.run_batch(tool_calls, call_nodes, outcome_call).await
+            this.execute_one(tool_calls, call_nodes, outcome_call).await
         }))
     }
 
@@ -1582,13 +1569,6 @@ impl ToolDispatch for SessionDispatchPort {
             Err(poisoned) => poisoned.into_inner(),
         };
         out.derived.effects.extend(effects);
-    }
-
-    fn interactive(&self) -> bool {
-        self.ctx
-            .get(symbio_sdk::keys::MODE)
-            .map(|mode| mode == "interactive")
-            .unwrap_or(false)
     }
 
     fn finish<'a>(
@@ -1702,13 +1682,13 @@ impl SessionDispatchPort {
     /// `'static` 的：它在**下一个环步**才被 poll（`await-tool` 行的动作），中间那一圈
     /// 「`sent` 有、终局无」正是 `waiting` 读的形状。所以它只带走**已经建好的东西**
     /// （`Arc<Self>`、模型交回的调用、广播过的节点），不带走任何借用。
-    async fn run_batch(
+    async fn execute_one(
         &self,
         tool_calls: Vec<symbio_kernel::llm::TurnToolCallInfo>,
         call_nodes: Vec<ChatNode>,
         call: port::Call,
     ) -> CallOutcome {
-        // ③ 分发（工具执行层：存档 / 钩子 / 审批 / 批尾收口全在里面）。
+        // ③ 分发（工具执行层：存档 / 钩子 / 审批 / 未执行收口全在里面）。
         //    父节点查询用刚广播的这批节点——它们与执行器要求的形状同源。
         //
         // 执行信封（P1b / DE-048 D-308）：产物格与授权事实的**宿主写口**随批走。
@@ -1833,7 +1813,7 @@ fn map_outcome(
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
 // panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::take_output: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::run_batch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::execute_one: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-plugin-loop/src/tool_dispatch.rs::wake_result_begin: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 
 #[cfg(test)]

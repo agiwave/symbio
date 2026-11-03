@@ -1158,7 +1158,7 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
     // v5 把「每一笔都已终局」写进口径：一轮工具调用的结束是**批次边界**（旧触发点
     // 就挂在边界上）。只看 `calls` 非空会把「工具刚交回、还在跑」的那一轮也算完成，
     // 于是汇报句里的「已经完成 N 轮」在工具还没回来时就成了假话。
-    let closed_batch = |e: &Event| -> bool {
+    let closed_tool_round = |e: &Event| -> bool {
         let Some(calls) = e.payload.get("calls").and_then(|v| v.as_array()) else {
             return false;
         };
@@ -1184,13 +1184,13 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
                 && after_anchor(e, drive_seq)
         })
         .collect();
-    let tool_rounds = model_responses.iter().filter(|e| closed_batch(e)).count() as u64;
+    let tool_rounds = model_responses.iter().filter(|e| closed_tool_round(e)).count() as u64;
     // 只有**停在批次边界**才报：最近一条模型应答是一批已关闭的工具调用。
     //
     // 这一格管住另一端：模型答完最后一句（`calls` 空）之后不再汇报——那一刻没有
     // 「还在继续」可报，而收束格马上就到；工具还在跑的时候也不报，那时的「完成 N 轮」
     // 会把手上这一批算漏。
-    let at_boundary = model_responses.last().is_some_and(|e| closed_batch(e));
+    let at_boundary = model_responses.last().is_some_and(|e| closed_tool_round(e));
     // **一次边界只派发一次**（[D-163] 裁决 4）：最近一批已关闭的工具调用必须在
     // 静默锚**之后**。锚是最近一次用户看得见的动静，汇报事实自己也在其中——所以
     // 报过一句之后，锚前移到那句，同一批的账就是「已关过」；要再报，得等下一批
@@ -1202,7 +1202,7 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
         let anchor_seq = seq_of(a);
         model_responses
             .iter()
-            .any(|e| seq_of(e) > anchor_seq && closed_batch(e))
+            .any(|e| seq_of(e) > anchor_seq && closed_tool_round(e))
     });
     // 这一段静默**已经试过**：锚之后落过一格汇报尝试（`turn.stage{stage:"report"}`）。
     //

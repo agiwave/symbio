@@ -254,8 +254,8 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
 /// 批次边界汇报（`chat.assistant.reported`）不在名单上：它的写点归 [`ACTOR_REPORT`]，
 /// 因为那一行由同一个环按 `(phase, anchor)` 选中、在自己的动作窗口里落格——名单与写点因此一一对上。
 ///
-/// `deny-tools` 为什么也归它：被拒的那几笔的终局（`failed{why}`）由批尾关账写出，
-/// 而批尾就在这一半。派发半在那条路上什么都不落（`begin_calls` 只写放行的那些），
+/// `deny-tools` 为什么也归它：被拒的那几笔的终局（`failed{why}`）由逐笔关账写出，
+/// 而关账就在这一半。派发半在那条路上什么都不落（`begin_call` 只写放行的那些），
 /// 把它挂在收尾半才与「谁写的」对得上。
 const ACTOR_WAITER_TOOLS: ActorDecl = ActorDecl {
     name: WAITER_TOOLS,
@@ -1227,11 +1227,11 @@ pub(crate) static ROWS: &[Decl] = &[
     // `dispatch-tool` 只欠 `granted`——一批**全被拒**（或全是非法调用）时它不欠，
     // 执行层就永远跑不到，`failed{why}` 也永远不落。这一行把「拒绝之后还必须做一次
     // 收尾」说成债务：出口与派发行同一格（`failed`），动作归**收尾半**
-    // （混合批次里那一笔由 68 起批、由本行与 `await-tool` 一起收掉，收完本行自然不欠）。
+    // （混合的一轮里那一笔由 68 起派、由本行与 `await-tool` 一起收掉，收完本行自然不欠）。
     //
     // 为什么 `by` 是 `waiter-tools` 而不是 `courier`（`D-124` 订正 1）：这一格是
-    // 批尾关账写出来的，而批尾在收尾半；派发半在拒绝路径上一格都不落
-    // （`begin_calls` 只写放行的那些），把它挂在派发半，名单与写点就对不上。
+    // 逐笔关账写出来的，而关账在收尾半；派发半在拒绝路径上一格都不落
+    // （`begin_call` 只写放行的那些），把它挂在派发半，名单与写点就对不上。
     //
     // 键取 `(port, id, attempt)` 与 `authz.denied` 同形（D-138）；不带 `port`
     // 的收束格拒绝（`deny()` 写的那一条）按 eq 取不到实例，不会误开一笔工具债。

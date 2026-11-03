@@ -1,8 +1,8 @@
-//! 模型往返与工具批的各个动作。
+//! 模型往返与工具调用的各个动作。
 //!
 //! 一次工具循环迭代：拼请求消息 → 调模型 → 按 [`classify_round`] 分流。
 //! 收束（`Halt`）与配置缺口（`ConfigGap`）在这里就地落格；派发（`Act`）把
-//! 工具批交给 [`super::batch`]，等待用户的落进展格，其余继续下一轮。
+//! 每一笔调用逐笔交给 [`super::batch`]（P2-5b 迁移中），等待用户的落进展格，其余继续下一轮。
 //!
 //! 状态只经 [`Prepared`] 在阶段间传递：每个动作写自己的那一半事实，派发器按行表
 //! 决定下一个动作（`D-222` 裁决 5）。
@@ -837,18 +837,17 @@ pub(crate) async fn open_round(
         dispatch.prepare(store, &rt).await;
         run.round_prepared = true;
     }
-    let calls = open_calls(
-        store,
-        ctx,
-        run.turn,
-        run.user_seq,
-        run.drive_seq,
-        &rt,
-    )
-    .await;
-    run.round_turn = Some(rt);
-    run.round_calls = calls.iter().map(|c| c.call.id.clone()).collect();
-    run.round_outcomes.clear();
+    let calls = open_calls(store, ctx, run.turn, run.user_seq, run.drive_seq, &rt).await;
+    // 创建行已经开过账（同一响应的第二个展开实例）：这一圈没有新的调用可寄存。
+    if calls.is_empty() {
+        return;
+    }
+    run.round_turn = Some(rt.clone());
+    // 这一轮的请求半**一次**推进 `exchange`：结果半按笔随到随推
+    // （[`land_round`]），消息顺序因此是「一次声明、N 条结果」。
+    let round = run.tool_round;
+    run.tool_round += 1;
+    run.exchange.extend(assistant_exchange(&rt, round));
     for call in calls {
         run.calls.insert(call.call.id.clone(), call);
     }
@@ -884,17 +883,20 @@ async fn take_wake_call(
     dispatch: &dyn Dispatcher,
     id: &str,
 ) -> Option<PortCall> {
-    let batch = dispatch.wake(store).await?;
-    let call = batch
+    let woken = dispatch.wake(store).await?;
+    let call = woken
         .calls
         .iter()
         .find(|c| c.call.id == id)
         .cloned()
-        .or_else(|| batch.calls.into_iter().next())?;
-    run.round_turn = Some(batch.turn);
-    if !run.round_calls.iter().any(|known| known == &call.call.id) {
-        run.round_calls.push(call.call.id.clone());
+        .or_else(|| woken.calls.into_iter().next())?;
+    // 唤醒幕的请求半同样推进 `exchange`（一次；同一唤醒批被再次取出时不重复）。
+    if run.round_turn.is_none() {
+        let round = run.tool_round;
+        run.tool_round += 1;
+        run.exchange.extend(assistant_exchange(&woken.turn, round));
     }
+    run.round_turn = Some(woken.turn);
     Some(call)
 }
 
@@ -902,18 +904,13 @@ async fn take_wake_call(
 /// 把这一笔「跑执行层 + 收结果」寄存进草稿的在飞槽。
 ///
 /// 一笔一个环步 ⇒ N 笔可以同时在途；环里没有「批」这个对象（DE-048 D-311）。
-/// 交互模式是例外：审批 / 提问一次只处理一张卡，前一笔记还在等时不再派出下一笔
-/// （这是**交互语义**，不是并发策略）。
+/// 同时派几笔、按什么顺序、跑到第几笔停，都归 provider 内部——环只选下一笔债。
 pub(crate) async fn begin_round(
     run: &mut Prepared,
     store: &std::sync::Arc<dyn Store<Event = Event>>,
     dispatch: std::sync::Arc<dyn Dispatcher>,
     id: &str,
 ) -> Option<ToolFlight> {
-    if dispatch.interactive() && !run.round_outcomes.is_empty() {
-        // 上一笔还没收口（交互语义下一次一张卡）：不在这一圈派出下一笔。
-        return None;
-    }
     // 正常轮：模型应答已在草稿里；恢复幕：从唤醒请求取回这一笔。
     if run.round_turn.is_none() {
         take_wake_call(run, store.as_ref(), dispatch.as_ref(), id).await?;
@@ -958,7 +955,7 @@ pub(crate) async fn land_round(
             // 派出过、future 却没了：环按「没收到应答的债」写 `failed`（租约出口）。
             dispatch.finish(store.as_ref(), &call, None).await;
             run.calls.remove(id);
-            finalize_round(run, store, llm, dispatch.clone(), id, None).await?;
+            land_one(run, store.as_ref(), llm, dispatch.clone(), None).await?;
             return Ok(None);
         }
         // 被拒 / 未派出：起这一笔并跑到完（结论本地可算，没有真正的等待）。
@@ -975,12 +972,12 @@ pub(crate) async fn land_round(
             .await
         else {
             dispatch.finish(store.as_ref(), &call, None).await;
-            finalize_round(run, store, llm, dispatch.clone(), id, None).await?;
+            land_one(run, store.as_ref(), llm, dispatch.clone(), None).await?;
             return Ok(None);
         };
         let outcome = fut.await;
         dispatch.finish(store.as_ref(), &call, Some(&outcome)).await;
-        finalize_round(run, store, llm, dispatch.clone(), id, Some(outcome)).await?;
+        land_one(run, store.as_ref(), llm, dispatch.clone(), Some(outcome)).await?;
         return Ok(None);
     };
 
@@ -1001,7 +998,7 @@ pub(crate) async fn land_round(
             // 事实——两者在同一圈里落，次序按「账先关，事再写」。
             dispatch.finish(store.as_ref(), &call, Some(&outcome)).await;
             run.calls.remove(id);
-            finalize_round(run, store, llm, dispatch.clone(), id, Some(outcome)).await?;
+            land_one(run, store.as_ref(), llm, dispatch.clone(), Some(outcome)).await?;
             Ok(None)
         }
     }
@@ -1026,75 +1023,17 @@ fn per_call_turn(
     one
 }
 
-/// 把**这一笔**结果登记进本轮；整轮都结了（或有一笔要等用户）时落一次批次事实。
+/// 一笔结果的**落地**（`await-tool` / `deny-tools` 那一行的动作，§4.1）：产物读数、
+/// 等待格、交换累加、轮内注入。
 ///
-/// 「一轮」不是「一批」：它只是同一轮模型往返的 N 笔独立债的集合，用来决定
-/// 何时拼回填 prompt。逐笔的终局各自落格，聚合只发生在**读**这一侧。
-async fn finalize_round(
-    run: &mut Prepared,
-    store: &std::sync::Arc<dyn Store<Event = Event>>,
-    llm: &dyn LlmAdapter,
-    dispatch: std::sync::Arc<dyn Dispatcher>,
-    id: &str,
-    outcome: Option<Outcome>,
-) -> Result<(), symbio_kernel::store::AppendError> {
-    if let Some(outcome) = outcome {
-        run.round_outcomes.insert(id.to_string(), outcome);
-    }
-    let waiting = run.round_outcomes.values().any(|o| o.needs_user_action);
-    let all_done = run
-        .round_calls
-        .iter()
-        .all(|call| run.round_outcomes.contains_key(call) || !run.calls.contains_key(call));
-    if !waiting && !all_done {
-        return Ok(());
-    }
-
-    // 等待用户：还没派出的一笔由**环**写 `failed{NOT_EXECUTED}`（不让它空转，
-    // 也不重跑），然后按「这一轮停在等用户」落一次进展格。
-    if waiting {
-        for call_id in run.round_calls.clone() {
-            if run.round_outcomes.contains_key(&call_id) {
-                continue;
-            }
-            if let Some(call) = run.calls.remove(&call_id) {
-                dispatch.finish(store.as_ref(), &call, None).await;
-            }
-        }
-    }
-
-    let rt = match run.round_turn.clone() {
-        Some(rt) => rt,
-        None => return Ok(()),
-    };
-    let outcomes: Vec<_> = run
-        .round_calls
-        .iter()
-        .filter_map(|call| run.round_outcomes.remove(call))
-        .collect();
-    // 效果按**调用顺序**交回（各笔完成的先后不改变事实次序）。
-    let mut effects = Vec::new();
-    for outcome in &outcomes {
-        effects.extend(outcome.effects.iter().cloned());
-    }
-    dispatch.land_derived(effects);
-    land_batch(run, store.as_ref(), llm, rt, outcomes).await?;
-    run.round_calls.clear();
-    run.round_turn = None;
-    run.round_prepared = false;
-    Ok(())
-}
-
-/// 一批工具的结果**落地**：产物格、等待进展、交换累加、轮内注入。
-///
-/// 四段的写点都在「结果已经在手上」之后，与「派出去」那一刻无关，所以归收尾半
-/// （`await-tool` 那一行的动作，§4.1）。
-async fn land_batch(
+/// 逐笔进行，环不按「批」决定任何东西：这一笔要不要等用户只看它自己的结果；
+/// 交换按笔追加；注入只在**最后一笔**关账后做一次（时间序在工具结果之后）。
+async fn land_one(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,
     llm: &dyn LlmAdapter,
-    rt: LlmTurn,
-    outcomes: Vec<Outcome>,
+    dispatch: std::sync::Arc<dyn Dispatcher>,
+    outcome: Option<Outcome>,
 ) -> Result<(), symbio_kernel::store::AppendError> {
     // 产物落格已由执行体在 `finish` 的 `land_only` 出口完成（P1b / DE-048 D-308）；
     // 这里只读回本轮的产物数，供收束判定「这一轮到底有没有产出」。判据按
@@ -1109,78 +1048,109 @@ async fn land_batch(
         })
         .count() as u64;
 
-    // 收束于等待用户 ⇒ 落**进展格**（`status: "pending"`：模型已
-    //     说过的话照样是事实，等待是状态），不收束轮次。
-    if outcomes.iter().any(|o| o.needs_user_action) {
-        // 模型轮：正文归那一轮的 `response` 事实（`responses` 回溯得到），这里只
-        // 记结局。唤醒幕（草稿里没有模型往返）没有可回溯的事实，正文取唤醒批自带的。
-        let produced = if run.responses.is_empty() {
-            let facts = StreamNodeFacts::default();
-            let answer_id = answer_id_of(&rt.text, "", &facts, &run.turn_root_id);
-            produced_payload(
-                &rt.text,
-                llm.model_id(),
-                &run.turn_root_id,
-                None,
-                &answer_id,
-                &run.responses,
-            )
-        } else {
-            produced_payload(
-                "",
-                llm.model_id(),
-                &run.turn_root_id,
-                None,
-                &run.last_answer_id,
-                &run.responses,
-            )
-        };
-        // 进展格的事件 id 按**本轮已有进展格数**编号（同产物格的幂等
-        // 模式）：等待轮可能已落过进展格，从 0 起会撞幂等键。
-        let progress_no = run
-            .full_snapshot
-            .iter()
-            .filter(|e| e.turn == run.turn && e.kind == EVENT_CHAT_ASSISTANT_PROGRESS)
-            .count() as u64;
-        store.append(
-            Event::pending(
-                format!("p-{}-{progress_no}", run.turn),
-                EVENT_CHAT_ASSISTANT_PROGRESS,
-                Entity::Turn,
-                Verb::Progressed,
-                run.turn,
-                &run.actor.principal,
-            )
-            .with_produced_by(run.user_seq)
-            .with_cost_ms(run.cost_ms)
-            .with_payload(with_status(produced, "pending")),
-        )?;
-        run.settled = Some(TurnOutcome {
-            turn: run.turn,
-            text: rt.text,
-            cost_ms: run.cost_ms,
-            usage: rt.usage,
-            fell_back: false,
-            aborted: false,
-            awaits_user: true,
-            closure_denied: false,
-            // 等待轮的收束留给恢复幕，但**本轮已产出的正文**照样带真原因。
-            finish: rt.finish.clone(),
-        });
-        return Ok(());
+    if let Some(outcome) = &outcome {
+        // 效果出参随这一笔交回（顺序 = 到达顺序，由 provider 决定）。
+        dispatch.land_derived(outcome.effects.clone());
     }
 
-    // 把这一轮交换**累加**进 prompt，继续下一轮。
-    run.exchange
-        .extend(tool_exchange_messages(&rt, &outcomes, run.tool_round));
-    run.tool_round += 1;
-
-    // 轮内注入（生产里是「用户中途补充」）。挂在交换之后：工具交换
-    // 先接上，注入的内容排在它之后——时间序。
-    if let Some(inject) = &run.inject {
-        let injected = inject(Some(run.user_seq)).await;
-        run.exchange.extend(injected);
+    // 收束于等待用户 ⇒ 落**进展格**，并让尚未关账的其余调用按「没收到应答」收口
+    // （不让它们空转，也不重跑）。
+    if outcome.as_ref().is_some_and(|o| o.needs_user_action) {
+        let remaining: Vec<String> = run.calls.keys().cloned().collect();
+        for call_id in remaining {
+            if let Some(call) = run.calls.remove(&call_id) {
+                dispatch.finish(store, &call, None).await;
+            }
+        }
+        return land_pending(run, store, llm).await;
     }
+
+    // 把这一笔的**结果半**累加进 prompt，继续下一轮；请求半在开账时已经推进。
+    if let Some(outcome) = &outcome {
+        if let Some(rt) = run.round_turn.as_ref() {
+            let round = run.tool_round.saturating_sub(1);
+            let message = tool_exchange_message(rt, outcome, round);
+            run.exchange.push(message);
+        }
+    }
+
+    // 轮内注入（生产里是「用户中途补充」）：最后一笔关账之后接上——工具交换
+    // 先接上，注入的内容排在它之后（时间序）。
+    if run.calls.is_empty() {
+        run.round_prepared = false;
+        if let Some(inject) = &run.inject {
+            let injected = inject(Some(run.user_seq)).await;
+            run.exchange.extend(injected);
+        }
+    }
+    Ok(())
+}
+
+/// 「这一轮停在等用户」的落地：进展格（`status: "pending"`）与等待结局。
+async fn land_pending(
+    run: &mut Prepared,
+    store: &dyn Store<Event = Event>,
+    llm: &dyn LlmAdapter,
+) -> Result<(), symbio_kernel::store::AppendError> {
+    let rt = match run.round_turn.clone() {
+        Some(rt) => rt,
+        None => return Ok(()),
+    };
+    // 模型轮：正文归那一轮的 `response` 事实（`responses` 回溯得到），这里只
+    // 记结局。唤醒幕（草稿里没有模型往返）没有可回溯的事实，正文取唤醒批自带的。
+    let produced = if run.responses.is_empty() {
+        let facts = StreamNodeFacts::default();
+        let answer_id = answer_id_of(&rt.text, "", &facts, &run.turn_root_id);
+        produced_payload(
+            &rt.text,
+            llm.model_id(),
+            &run.turn_root_id,
+            None,
+            &answer_id,
+            &run.responses,
+        )
+    } else {
+        produced_payload(
+            "",
+            llm.model_id(),
+            &run.turn_root_id,
+            None,
+            &run.last_answer_id,
+            &run.responses,
+        )
+    };
+    // 进展格的事件 id 按**本轮已有进展格数**编号（同产物格的幂等
+    // 模式）：等待轮可能已落过进展格，从 0 起会撞幂等键。
+    let progress_no = run
+        .full_snapshot
+        .iter()
+        .filter(|e| e.turn == run.turn && e.kind == EVENT_CHAT_ASSISTANT_PROGRESS)
+        .count() as u64;
+    store.append(
+        Event::pending(
+            format!("p-{}-{progress_no}", run.turn),
+            EVENT_CHAT_ASSISTANT_PROGRESS,
+            Entity::Turn,
+            Verb::Progressed,
+            run.turn,
+            &run.actor.principal,
+        )
+        .with_produced_by(run.user_seq)
+        .with_cost_ms(run.cost_ms)
+        .with_payload(with_status(produced, "pending")),
+    )?;
+    run.settled = Some(TurnOutcome {
+        turn: run.turn,
+        text: rt.text,
+        cost_ms: run.cost_ms,
+        usage: rt.usage,
+        fell_back: false,
+        aborted: false,
+        awaits_user: true,
+        closure_denied: false,
+        // 等待轮的收束留给恢复幕，但**本轮已产出的正文**照样带真原因。
+        finish: rt.finish.clone(),
+    });
     Ok(())
 }
 

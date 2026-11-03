@@ -431,7 +431,7 @@ fn an_authorization_reopens_the_dispatch_debt_and_a_send_moves_to_the_await() {
         "审批落 granted ⇒ 派发重新成为一笔待还的账（判据 6 场景一）"
     );
 
-    port.begin_calls(&mut calls);
+    port.begin_call(&mut calls[0]);
 
     assert!(calls[0].sent, "派发行欠 ⇒ `sent` 落格并回报旗标");
     assert!(!owes("dispatch-tool", &store), "派出 ⇒ 派发行关账");
@@ -599,7 +599,7 @@ fn a_closed_wake_request_is_not_read_back() {
     let mut batch = port.wake_batch().expect("唤醒请求读得回");
     authorize_wake(store.as_ref(), TURN, USER_SEQ, &mut batch.calls[0]);
     assert!(batch.calls[0].granted, "批准 ⇒ 放行");
-    port.begin_calls(&mut batch.calls);
+    port.begin_call(&mut batch.calls[0]);
     assert!(batch.calls[0].sent, "派发行欠 ⇒ 落 `sent`");
     port.close(&batch.calls[0], true);
 

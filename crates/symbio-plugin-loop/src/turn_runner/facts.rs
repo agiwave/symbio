@@ -139,16 +139,6 @@ pub(crate) fn output_fields(
     payload
 }
 
-/// 从本轮结果里配对出 `tc` 的那条（按 ToolCall 节点 id；配不上 ⇒ `None`）。
-pub(crate) fn outcome_of<'a>(
-    outcomes: &'a [super::super::tool_dispatch::CallOutcome],
-    tc: &symbio_kernel::llm::TurnToolCallInfo,
-) -> Option<&'a super::super::tool_dispatch::CallOutcome> {
-    outcomes
-        .iter()
-        .find(|o| tc.id.as_deref().map(|id| id == o.call_id).unwrap_or(false))
-}
-
 /// 给产出载荷补**状态**字段（完成 / 终止 / 等待是事实的状态，不进产出形状本身）。
 pub(crate) fn with_status(mut produced: serde_json::Value, status: &str) -> serde_json::Value {
     produced["status"] = serde_json::Value::String(status.to_string());
@@ -330,24 +320,26 @@ pub(crate) fn latest_snapshot_index(events: &[Event]) -> Option<usize> {
     })
 }
 
-/// 一轮工具交换 → **结构化**消息（D-048a）。
+/// 一轮模型往返的**请求半**：assistant 正文 + 逐条 `tool_calls` 声明。
 ///
-/// 出的是真消息：assistant（带 `tool_calls` 摘要）/ tool（带 `tool_call_id`）。
-/// 拍成散文（`助手请求工具: … / 工具结果(x): …`）会同时坏三件事——把工具调用当成
-/// **assistant 说的话**、把结果做成**没有角色的文本**、**丢掉 `tool_call_id`**
+/// 出的是真消息：assistant（带 `tool_calls` 结构）。拍成散文
+/// （`助手请求工具: …`）会同时坏三件事——把工具调用当成 **assistant 说的话**、
+/// 把结果做成**没有角色的文本**、**丢掉 `tool_call_id`**
 /// （provider 侧协议要求 `tool` 消息关联到具体那次调用，否则多工具并发时无法配对）。
+///
+/// 这一段在**开账**时就推进 `exchange`（`stream::open_round`），结果半按笔随到随推
+/// （[`tool_exchange_message`]）——消息顺序因此是「一次声明、N 条结果」，与协议一致。
 ///
 /// ## `round` 参数的存在理由：这一批消息要**跨轮累加**
 ///
-/// 交换是**累加**进下一次请求的（见 `stream::land_batch`：模型必须看见本回合此前每一次调用与
-/// 结果，否则重复调用同一个工具）。于是 id 的唯一性域也从「一次请求」扩到「整个
-/// 回合」——同一工具在两个工具轮各调一次，若两侧的 id 相同，adapter 的 `last_result_of`
-/// 会把它当成**同一次调用的两条结果**而只留最后那条（第一次的结果凭空消失）。
+/// 交换是**累加**进下一次请求的（模型必须看见本回合此前每一次调用与结果，否则重复
+/// 调用同一个工具）。于是 id 的唯一性域也从「一次请求」扩到「整个回合」——同一工具
+/// 在两个工具轮各调一次，若两侧的 id 相同，adapter 的 `last_result_of` 会把它当成
+/// **同一次调用的两条结果**而只留最后那条（第一次的结果凭空消失）。
 /// id 因此优先取调用自身带得的身份（wire id / 节点 id，二者天然跨轮唯一），
 /// 两者都缺才合成，且合成式里带上轮次（见 [`prompt_call_id`]）。
-pub(crate) fn tool_exchange_messages(
+pub(crate) fn assistant_exchange(
     turn: &symbio_sdk::adapters::LlmTurn,
-    outcomes: &[super::super::tool_dispatch::CallOutcome],
     round: usize,
 ) -> Vec<symbio_kernel::llm::PromptMessage> {
     let mut out: Vec<symbio_kernel::llm::PromptMessage> = Vec::new();
@@ -384,37 +376,42 @@ pub(crate) fn tool_exchange_messages(
             }]),
         });
     }
-    // 结果：逐条 tool 消息，**按调用配对**取 id（不是按工具名）。
-    //
-    // ⚠️ 为什么不能按名字配：同一次响应里调用同一个工具两次时，按名配对会把**两条结果
-    // 都挂到第一次调用**的 id 上。而 adapter 侧 `last_result_of` 按 id 取「同一次调用的
-    // 最终那条结果」——两条同 id 的结果在模型眼里就是一次调用的两条，第一次的真实
-    // 结果被吃掉，第二次拿到别人的正文。**结果与调用错配比缺一结果更坏**：模型据此
-    // 改道，而它改的是凭据不足的道。
-    //
-    // 配不上调用时（无对照物）退回结果自己的 `call_id`：它在本次请求里没有对应的
-    // 调用声明，adapter 会把它降级成上下文（`declared_here` 为假那条路）。
-    for outcome in outcomes {
-        let at = turn
-            .tool_calls
-            .iter()
-            .position(|c| outcome_of(outcomes, c).is_some_and(|o| o.call_id == outcome.call_id));
-        let id = match at {
-            Some(i) => prompt_call_id(&turn.tool_calls[i], round, i),
-            None => outcome.call_id.clone(),
-        };
-        out.push(symbio_kernel::llm::PromptMessage {
-            role: "tool".into(),
-            text: outcome.text.clone(),
-            tool_call_id: Some(id),
-            tool: Some(outcome.name.clone()),
-            tool_calls: None,
-        });
-    }
     out
 }
 
-/// 合成 / 选取 `tool_call_id`（跨轮唯一，见 [`tool_exchange_messages`] 的 `round`）。
+/// 一笔工具结果的**结果半**：`tool` 消息，按调用配对取 id（不是按工具名）。
+///
+/// ⚠️ 为什么不能按名字配：同一次响应里调用同一个工具两次时，按名配对会把**两条结果
+/// 都挂到第一次调用**的 id 上。而 adapter 侧 `last_result_of` 按 id 取「同一次调用的
+/// 最终那条结果」——两条同 id 的结果在模型眼里就是一次调用的两条，第一次的真实
+/// 结果被吃掉，第二次拿到别人的正文。**结果与调用错配比缺一结果更坏**：模型据此
+/// 改道，而它改的是凭据不足的道。
+///
+/// 配不上调用时（无对照物）退回结果自己的 `call_id`：它在本次请求里没有对应的
+/// 调用声明，adapter 会把它降级成上下文（`declared_here` 为假那条路）。
+pub(crate) fn tool_exchange_message(
+    turn: &symbio_sdk::adapters::LlmTurn,
+    outcome: &super::super::tool_dispatch::CallOutcome,
+    round: usize,
+) -> symbio_kernel::llm::PromptMessage {
+    let at = turn
+        .tool_calls
+        .iter()
+        .position(|c| c.id.as_deref() == Some(outcome.call_id.as_str()));
+    let id = match at {
+        Some(i) => prompt_call_id(&turn.tool_calls[i], round, i),
+        None => outcome.call_id.clone(),
+    };
+    symbio_kernel::llm::PromptMessage {
+        role: "tool".into(),
+        text: outcome.text.clone(),
+        tool_call_id: Some(id),
+        tool: Some(outcome.name.clone()),
+        tool_calls: None,
+    }
+}
+
+/// 合成 / 选取 `tool_call_id`（跨轮唯一，见 [`assistant_exchange`] 的 `round`）。
 ///
 /// 优先级与 v1 的请求构建**同一口径**（`crates/symbio-plugin-model/src/message_builder.rs`：wire id
 /// 优先、历史数据回退节点 id）：
