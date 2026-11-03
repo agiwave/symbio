@@ -543,3 +543,7 @@ pub(crate) async fn compress(
     .map_err(ActorError::Append)?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "policy.test.rs"]
+mod tests;

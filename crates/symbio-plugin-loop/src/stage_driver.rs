@@ -299,6 +299,12 @@ pub(crate) async fn drive_prepared(
     .await
 }
 
+/// 幕界中止的判据（`D-052` 决策 1）：只有「上一幕已收束、下一幕未开」这一圈才
+/// 是幕界；幕内（含首幕）的中止不在这里判。
+fn aborts_at_a_stage_boundary(retiring: Option<u64>, aborted: bool) -> bool {
+    retiring.is_some() && aborted
+}
+
 async fn run_loop<'a>(
     mut state: DriveState<'a>,
     actors: &'static [loop_rows::ActorEntry],
@@ -321,7 +327,7 @@ async fn run_loop<'a>(
         //
         // 排在让位与选债**之前**：被中止的幕连 `continue-turn` 都不跑——那一行会在
         // 事实面上留下一格「还有下一轮」的轮次格，而这一轮其实已经收工。
-        if retiring.is_some() && state.aborted() {
+        if aborts_at_a_stage_boundary(retiring, state.aborted()) {
             return Ok(DriveEnd::Boundary);
         }
         // ── 幕间：旧幕让位 ───────────────────────────────────────────────
@@ -2296,3 +2302,7 @@ pub(crate) async fn execute_final_reply_turn(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "stage_driver.test.rs"]
+mod tests;

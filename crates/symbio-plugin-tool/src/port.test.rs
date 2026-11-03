@@ -592,6 +592,62 @@ async fn invalid_calls_are_denied_before_any_approval_reading() {
     );
 }
 
+/// 协议失败的三条读数各说各的：缺 id / 缺 name / 参数不可解析（D-312 的措辞在
+/// 执行体，环不解释）。三者一律**不执行**、落一条失败结果，且成因可指认。
+#[tokio::test]
+async fn protocol_failures_each_name_their_own_cause() {
+    let dir = std::path::Path::new(".");
+
+    let missing_id = refuse_protocol(
+        ProtocolInput {
+            id_missing: true,
+            name_missing: false,
+            parse_error: None,
+        },
+        dir,
+    )
+    .await
+    .expect("缺 id 必有结果");
+    let (text, success, pending) = decode(&missing_id);
+    assert!(!success);
+    assert!(pending.is_none());
+    assert!(text.contains("工具调用 ID"), "实得：{text}");
+    assert_eq!(
+        missing_id.facts[0]["failure_kind"],
+        serde_json::json!("error")
+    );
+
+    let missing_name = refuse_protocol(
+        ProtocolInput {
+            id_missing: false,
+            name_missing: true,
+            parse_error: None,
+        },
+        dir,
+    )
+    .await
+    .expect("缺 name 必有结果");
+    let (text, success, _) = decode(&missing_name);
+    assert!(!success);
+    assert!(text.contains("工具名称"), "实得：{text}");
+
+    let unparseable = refuse_protocol(
+        ProtocolInput {
+            id_missing: false,
+            name_missing: false,
+            parse_error: Some(r#"{"command": "cargo test"#),
+        },
+        dir,
+    )
+    .await
+    .expect("参数不可解析必有结果");
+    let (text, success, _) = decode(&unparseable);
+    assert!(!success);
+    assert!(text.contains("参数 JSON 解析失败"), "实得：{text}");
+    assert!(text.contains("本次调用未执行"), "实得：{text}");
+    assert!(text.contains("参数原文"), "实得：{text}");
+}
+
 #[tokio::test]
 async fn legacy_payload_without_threshold_stays_on_the_old_path() {
     let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
