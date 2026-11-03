@@ -117,3 +117,7 @@ fn session_cost_ms(snapshot: &[Event], principal: &str) -> u64 {
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+#[path = "gate_inputs.test.rs"]
+mod tests;

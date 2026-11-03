@@ -1208,3 +1208,7 @@ pub(crate) async fn process_tool_calls_in_env(
 
     (tool_messages, parent_updates)
 }
+
+#[cfg(test)]
+#[path = "execution.test.rs"]
+mod tests;

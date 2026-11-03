@@ -67,4 +67,8 @@ impl ToolDecls {
     }
 }
 
+#[cfg(test)]
+#[path = "decls.test.rs"]
+mod tests;
+
 //

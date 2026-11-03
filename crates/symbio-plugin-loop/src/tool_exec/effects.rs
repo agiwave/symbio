@@ -60,4 +60,8 @@ pub fn record_effect(
     });
 }
 
+#[cfg(test)]
+#[path = "effects.test.rs"]
+mod tests;
+
 //
