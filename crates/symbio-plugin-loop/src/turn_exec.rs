@@ -913,20 +913,26 @@ pub(crate) fn run_model<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 ctx.tok,
                 ctx.sink.clone(),
                 ctx.tools.clone(),
-                ctx.dispatch.is_some(),
             )
             .await
             .map_err(ActorError::Append)
     })
 }
 
-/// `waiter` 执行体：`await-model` 行选中的动作——**恢复输入**上才轮得到它：
-/// 日志上有 `sent`、等待方随上一段生命没了。派出与终局在 [`run_model`] 的同一个
-/// 动作窗口内落地，所以正常跑里没有「已派出、未收清」的空档留给这一行。
+/// `waiter` 执行体（`D-222` 订正 2）：`await-model` 行选中的动作——取走寄存的那一次
+/// 往返，等它落地，落 `response` / `failed`。
+///
+/// 与 [`run_model`] 成对：派出（`dispatch-model`，出口是 `sent`）与收应答
+/// （`await-model`，出口是 `response` / `failed`）分处两个环步。两次选债之间那一圈
+/// 「已派出、未收清」因此在事实面上可见——`waiting` 视图与 `reap` 的 `stale_sent`
+/// 读的都是它，而不是只在崩溃恢复的输入上才有值。
+///
+/// 句柄不在（本幕的 future 随上一段生命没了）⇒ 动作走事实口：按 `stale_sent` 的
+/// 租约线收口，与 `port::reap` 同一套判据（见 `TurnSession::await_model`）。
 pub(crate) fn run_await<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         ctx.session
-            .await_model(ctx.store.as_ref())
+            .await_model(ctx.store.as_ref(), ctx.llm.as_ref(), ctx.dispatch.is_some())
             .await
             .map_err(ActorError::Append)
     })

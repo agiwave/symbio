@@ -66,7 +66,7 @@ enum EngineStop {
 // 八个入参是「七个端口 + 这一笔的身份」：前七个各是一个不同的端口（草稿 / 事实源 /
 // 适配器 / 令牌 / 消息 / 工具清单 / 流式出口），第八个是**这一笔往返的键**——它在
 // 宣布那一步就定了（D-166），所以不能在这里重新生成。
-pub(crate) async fn begin_model(
+pub(crate) fn begin_model(
     run: &mut Prepared,
     store: std::sync::Arc<dyn Store<Event = Event>>,
     executor: Option<std::sync::Arc<dyn symbio_plugin_api::port::PortExecutor>>,
@@ -74,11 +74,11 @@ pub(crate) async fn begin_model(
     tok: FullModel,
     sink: std::sync::Arc<dyn symbio_sdk::adapters::DeltaSink>,
     tools: std::sync::Arc<[symbio_kernel::capability::CapabilityMeta]>,
-) -> Result<Option<ModelFlight>, ModelCallError> {
+) -> Result<ModelBegin, ModelCallError> {
     // 没有交接件 ⇒ 这一笔不是本幕宣布的（上一世的遗留）。判死由调用方做
     // （[`kill_dangling_round`]）：那里看得见日志，这里只看得到草稿。
     let Some(call) = run.pending_round.take() else {
-        return Ok(None);
+        return Ok(ModelBegin::NoPending);
     };
     let Some(payload) = run.pending_round_payload.take() else {
         return Err(ModelCallError::Control("模型请求载荷缺席".into()));
@@ -152,8 +152,8 @@ pub(crate) async fn begin_model(
     // 两条路互斥（`D-313`）：有执行体时 `response` / `failed` 载荷由它装配（`D-314`），
     // 环只落库；没有执行体时（测试夹具 / 旧宿主）环仍按旧口径自己装配。
     let by_executor = executor.is_some();
-    // 这一笔的所有输入都是 owned：future 在本动作的同一段栈帧里 `await` 到底，
-    // 不再寄存到下一次选债（`D-222` 订正 2 的 in-flight 槽已退役）。
+    // future 的每一笔输入都是 owned：句柄要离开这一层栈帧、寄存进在飞表
+    // （[`ModelInFlight`]），下一次选债再由 `await-model` 取走。
     let fut = async move {
         // 有执行体就走执行体（生产路径，`D-305` 裁决一）；没有则仍走适配器
         // （过渡期的测试夹具/旧宿主），两条路**互斥**，不写第二份事实。
@@ -297,7 +297,7 @@ pub(crate) async fn begin_model(
             output,
         }
     };
-    Ok(Some(fut.await))
+    Ok(ModelBegin::InFlight(Box::pin(fut)))
 }
 
 /// 执行体交回的**值** → 环内消费的 [`LlmTurn`]。
@@ -384,10 +384,41 @@ where
     .await
 }
 
+/// 一次**已派出、还没收清**的模型往返的句柄。
+///
+/// ## 它不是状态的真相
+///
+/// 真相是事实面的 `sent` 与它的终局（`response` / `failed` / `retry`）：哪些往返
+/// 还欠着、哪一笔过期了，全部由事实派生（`open_calls` / `stale_sent` / `waiting`）。
+/// 这个框只是**future 的句柄**——执行体在做活的那一段无法从日志重建（进程内），
+/// 所以本幕把句柄放在这里，`await-model` 下一圈取走它 poll 一次。
+///
+/// 句柄掉了（进程重启、上一段生命的本幕结束）== 这一笔没有等待方：`await-model`
+/// 改走**事实口**（`settle_recovered`），按 `stale_sent` 的租约判据收口，与
+/// `port::reap` 同一套判据。所以这个框不进任何「该还哪一笔」的判定，也不跨幕充当
+/// 状态机寄存位。
+///
+/// ## 为什么是 `'static`
+///
+/// 它寄存进 [`super::TurnSession::inflight`]，而会话**没有生命周期参数**：`Action`
+/// 是 `for<'a> fn(&'a mut Ctx<'a>)`，绑定表要求这些函数指针 `'static`，全量化的只有
+/// `'a` 一个。所以路只有一条：future 不借任何只在派出那一层栈帧里成立的引用。
+/// [`begin_model`] 因此把端口与消息全部搬成 owned（`Arc` 句柄 + `Vec<PromptMessage>`）。
+pub(crate) type ModelInFlight =
+    std::pin::Pin<Box<dyn std::future::Future<Output = ModelFlight> + Send + 'static>>;
+
+/// 派出的结果：三态。
+pub(crate) enum ModelBegin {
+    /// 已派出（`sent` 落了），future 在这里，交给在飞表。
+    InFlight(ModelInFlight),
+    /// 草稿里没有交接件：这一笔不是本幕宣布的（上一段生命在宣布与派出之间结束）。
+    NoPending,
+}
+
 /// 一次往返落地时交回的两样。
 ///
-/// future 在 [`begin_model`] 的同一段栈帧里 `await` 到底，不再寄存进会话——所以
-/// 它不必是 `'static` 的框，写回草稿的活也仍在持有草稿的那一方（[`settle_flight`]）。
+/// future 跑完时已经回到持有会话的那一方手里（[`await_model`]），写回草稿的活
+/// 在 [`settle_flight`]；这个结构只承载「结论 + 产出」。
 pub(crate) struct ModelFlight {
     /// 这一笔的逻辑 id（写回 `responses` 用）。
     pub(crate) id: String,
@@ -424,6 +455,9 @@ pub(crate) enum ModelRound {
     /// 三次收法共用这一个出口：答完了、模型没答成、中止——它们落的格子不同，
     /// 但**都是「这一轮该收了」**，而收束格只由 `close` 执行体写。
     Close,
+    /// 没有可收的句柄：事实口已按租约判过（可能落了 `failed{lease_expired}`），
+    /// 也可能还没过期——两种都是「这一圈没有草稿要写」。
+    NoPending,
 }
 
 /// 开账：为**下一次**模型往返落 `request(port=model)`，把这一笔留在草稿里。
@@ -476,16 +510,104 @@ where
     super::super::port::kill_dangling(store, "model", "no_pending_round")
 }
 
-/// 把一笔**已派出、没有等待方**的模型往返判死（`failed`，`why = "no_pending_round"`）。
+/// 恢复口：句柄不在时，只按**事实**判这一笔（与正常口共用同一套判据）。
 ///
-/// 只可能在恢复输入上出现：正常跑里派出与终局在同一个动作窗口内落地
-/// （[`begin_model`]），`sent` 与 `response` 之间没有可被环看见的空档。进程死在那一段
-/// 里 ⇒ 等待方（那一刻的栈帧）没了，重放没有对象，判死是唯一如实的处置。
-pub fn kill_dangling_sent_round<S>(store: &S) -> Result<usize, symbio_kernel::store::AppendError>
+/// 判据是 `stale_sent`——`sent` + 租约的一份投影，`port::reap` 读的正是它。这里只取
+/// `port = model` 且 `stale = true` 的那一笔，按 `reap` 对 `awaited = false` 的口径
+/// 判死（`failed{why:"lease_expired"}`）：模型往返的等待方就是本幕的 future 句柄，
+/// 句柄不在 ⇒ 没有可重试的对象，重试只会造出一条没人派发的 `request`。
+///
+/// 未过期 ⇒ **什么也不写**：这一圈是合法地不前进（`waiting` 为真），下一圈再问；
+/// 时间一到，本函数会按同一判据收口。这与「恢复口另立一套」相反：两处读同一份
+/// 事实、同一条租约线（`stale_sent`），没有第二套判据。
+pub(crate) fn settle_recovered<S>(
+    run: &Prepared,
+    store: &S,
+    now: i64,
+) -> Result<bool, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
-    super::super::port::kill_dangling_sent(store, "model", "no_pending_round")
+    let facts = store.range(symbio_kernel::event::Seq::new(0));
+    let Some(value) = super::super::loop_rows::view("stale_sent", &facts, run.turn, now) else {
+        return Ok(false);
+    };
+    let Some(item) = value.as_array().and_then(|arr| {
+        arr.iter().find(|i| {
+            i.get("port").and_then(|v| v.as_str()) == Some("model")
+                && i.get("stale").and_then(|v| v.as_bool()) == Some(true)
+        })
+    }) else {
+        return Ok(false);
+    };
+    let Some(id) = item.get("id").and_then(|v| v.as_str()) else {
+        return Ok(false);
+    };
+    let attempt = item.get("attempt").and_then(|v| v.as_u64()).unwrap_or(1);
+    let via = item
+        .get("via")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let call = super::super::port::Call::new("model", id, attempt).with_via_opt(via);
+    super::super::port::failed_with(store, &call, run.turn, run.user_seq, "lease_expired")?;
+    Ok(true)
+}
+
+/// 收**已派出**的那一次模型往返：poll 一次在飞的句柄。
+///
+/// 与 [`begin_model`] 成对（`D-222` 订正 2）：派出与收应答分处两个环步，中间那一圈
+/// 「`sent` 有、终局无」就是**在等**——`waiting` 视图与 `stale_sent` 读的正是它。
+///
+/// ## 为什么是 poll 一次，不是 `await` 到底
+///
+/// 「等」这个动作返回的那一刻，环要能回到**选债口**：往返在飞的时候别的行（中途汇报
+/// 就是一条）才轮得到。`await` 到底等于把这一段重新塞回一个动作窗口，只是把窗口挪了
+/// 个位置——`D-163` 要的「汇报在往返**进行中**落地」反过来又做不到了。
+///
+/// 于是这里只推进一次：`Ready` ⇒ 落账并分类（[`settle_flight`]）；`Pending` ⇒ 原样放回
+/// 句柄表、让出执行权。**「让出」不是客套**：poll 一次之后那一圈在同一个任务里同步
+/// 转完，不 `yield` 就永远不会把控制权还给执行器，在飞的 I/O 因此永远等不到被驱动
+/// ——那不是「在等」，是自旋。
+///
+/// ## 句柄不在 ⇒ 走事实口
+///
+/// 进程在 `sent` 与终局之间死过、或本幕的句柄随上一段生命结束而丢了：这一笔没有
+/// 等待方。处置归 [`settle_recovered`]（读 `stale_sent` 的租约线，过期即判死），
+/// 与 `port::reap` 同一套判据。
+pub(crate) async fn poll_flight<S>(
+    run: &mut Prepared,
+    store: &S,
+    llm: &dyn LlmAdapter,
+    inflight: Option<ModelInFlight>,
+    has_dispatch: bool,
+    now: i64,
+) -> Result<PolledRound, symbio_kernel::store::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let Some(mut fut) = inflight else {
+        settle_recovered(run, store, now)?;
+        return Ok(PolledRound::Settled(ModelRound::NoPending));
+    };
+    let ready = std::future::poll_fn(|cx| std::task::Poll::Ready(fut.as_mut().poll(cx))).await;
+    match ready {
+        std::task::Poll::Ready(flight) => Ok(PolledRound::Settled(
+            settle_flight(run, store, llm, flight, has_dispatch).await?,
+        )),
+        // 还没好：原样放回句柄表，并且让出执行权（理由见上）。
+        std::task::Poll::Pending => {
+            tokio::task::yield_now().await;
+            Ok(PolledRound::Parked(fut))
+        }
+    }
+}
+
+/// 一次 poll 的结果：落地了，还是「还在等」。
+pub(crate) enum PolledRound {
+    /// 这一笔已经有结论（或事实口已按租约处置），附分类结果。
+    Settled(ModelRound),
+    /// 还在路上：句柄原样交回，下一圈接着 poll。
+    Parked(ModelInFlight),
 }
 
 /// 一次往返落地：写回草稿 → 分类。

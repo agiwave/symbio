@@ -427,6 +427,7 @@ where
         prepare::PreparedFlow::Done(outcome) => Ok(TurnSessionBegin::Done(outcome)),
         prepare::PreparedFlow::Run(run) => Ok(TurnSessionBegin::Run(TurnSession {
             run,
+            inflight: None,
             tool_flights: std::collections::HashMap::new(),
             live_effect_keys: std::collections::HashSet::new(),
             model_executor: None,
@@ -458,6 +459,16 @@ pub(crate) enum TurnSessionBegin {
 /// 本类型的 [`Self::exhausted`] 只是那三格收束事实的**唯一写方**。
 pub(crate) struct TurnSession {
     run: Box<prepare::Prepared>,
+    /// 已派出、还没收清的那一次模型往返的**句柄**（`D-222` 订正 2）。
+    ///
+    /// **它不是状态的真相**：真相是事实面的 `sent` 与它的终局（`response` /
+    /// `failed` / `retry`）——「还有没有在飞」「过期没有」全部由事实派生
+    /// （`open_calls` / `stale_sent` / `waiting`），本字段只装那个**无法从日志重建**
+    /// 的东西：执行体正在做活的 future。句柄丢了（进程重启 / 上一段生命的本幕结束）
+    /// ⇒ `await-model` 改走事实口（`stream::settle_recovered`），按租约线收口，与
+    /// `port::reap` 同一套判据。它因此不进任何「该还哪一笔」的判定，也不跨幕充当
+    /// 状态机寄存位——只做下一圈 `poll` 的把手。
+    inflight: Option<stream::ModelInFlight>,
     /// 已经派出、还没收尾的那一批工具调用（`D-124` 订正 1）。
     ///
     /// 两次选债之间它在草稿旁的这一格里挂着，`sent` 与终局之间那一圈因此横跨
@@ -620,12 +631,11 @@ impl TurnSession {
         stream::announce_round(&mut self.run, store, tools, id).await
     }
 
-    /// **派出并收清**一次模型往返：落 `sent`、跑执行体、把应答或失败落成事实、分类。
+    /// **派出**一次模型往返：落 `sent`，把执行体的 future 交给在飞表，**立即返回**。
     ///
-    /// 两次选债之间不再有第二个动作窗口（`D-222` 订正 2 的 in-flight 槽已退役）：
-    /// 将来的「在飞」只由日志上的 `sent` 无所终局表达，`waiting` 与 `stale_sent`
-    /// 读的是同一份事实。进程在这一段里死掉 ⇒ 那条 `sent` 由租约看护（`reap`）或
-    /// [`Self::await_model`] 判死，不猜、不重放。
+    /// 与 [`Self::await_model`] 成对（`D-222` 订正 2）：两个环步之间那一圈
+    /// 「`sent` 有、终局无」就是在等，`waiting` 与 `stale_sent` 读的正是它。
+    /// 在飞表只装 future 的句柄，不是状态真相（见 `TurnSession::inflight` 的头注）。
     ///
     /// 只有一条路把结局就地落成兜底格：**控制面**失败（`port::begin` 拒了这一笔：
     /// 行不欠 / 端口没声明）——它在日志上没有模型的终局事实，收束行开不出账
@@ -639,10 +649,9 @@ impl TurnSession {
         tok: FullModel,
         sink: std::sync::Arc<dyn symbio_sdk::adapters::DeltaSink>,
         tools: std::sync::Arc<[symbio_kernel::capability::CapabilityMeta]>,
-        has_dispatch: bool,
     ) -> Result<(), symbio_kernel::store::AppendError> {
         let executor = self.model_executor.clone();
-        let flight = match stream::begin_model(
+        match stream::begin_model(
             &mut self.run,
             store.clone(),
             executor,
@@ -650,56 +659,82 @@ impl TurnSession {
             tok,
             sink,
             tools,
-        )
-        .await
-        {
-            Ok(Some(flight)) => flight,
-            // 这一笔不是本幕宣布的：判死，让那笔账关上（否则它会一直被选出来）。
-            Ok(None) => {
-                stream::kill_dangling_round(store.as_ref())?;
-                return Ok(());
+        ) {
+            Ok(stream::ModelBegin::InFlight(fut)) => {
+                self.inflight = Some(fut);
+                Ok(())
             }
-            Err(stream::ModelCallError::Store(e)) => return Err(e),
+            // 这一笔不是本幕宣布的：判死，让那笔账关上（否则它会一直被选出来）。
+            Ok(stream::ModelBegin::NoPending) => {
+                stream::kill_dangling_round(store.as_ref())?;
+                Ok(())
+            }
+            Err(stream::ModelCallError::Store(e)) => Err(e),
             // 控制面失败（`port::begin` 拒了这一笔）：兜底格就地落，产出寄存进草稿。
             Err(stream::ModelCallError::Control(why)) => {
                 let outcome =
                     stream::settle_control(&mut self.run, store.as_ref(), llm.as_ref(), &why)
                         .await?;
                 self.run.settled = Some(outcome);
-                return Ok(());
+                Ok(())
             }
-            // 适配器的两种停法由 future 自己交回（见下），这里接住它们是
-            // 「加变体必须在这里回答一次」的落点。
-            Err(stream::ModelCallError::Aborted) | Err(stream::ModelCallError::Failed(_)) => {
-                return Ok(())
-            }
-        };
-        match stream::settle_flight(&mut self.run, store.as_ref(), llm.as_ref(), flight, has_dispatch)
-            .await?
-        {
-            stream::ModelRound::Done(outcome) => self.run.settled = Some(outcome),
-            stream::ModelRound::Tools => {}
-            // 应答已寄存，收束这一步归 `close-turn` 行的执行体（[`Self::close`]）。
-            stream::ModelRound::Close => {}
+            // 适配器的两种停法只在**收应答**那一步出现（`poll_flight`）：派出这一步
+            // 压根还没调模型。接住它们是「加变体必须在这里回答一次」的落点。
+            Err(stream::ModelCallError::Aborted) | Err(stream::ModelCallError::Failed(_)) => Ok(()),
         }
-        Ok(())
     }
 
-    /// **收**上一段生命留下的那一笔：日志上有 `sent`、等待方随进程没了。
+    /// **收**已派出的那一次模型往返：poll 一次在飞的句柄。
     ///
-    /// 正常跑里轮不到它：派出与终局在同一个动作窗口内落地（[`Self::begin_model`]），
-    /// 所以「已派出、未收清」只在崩溃恢复的输入上存在。这里的处置与租约看护同一结论：
-    /// 落 `failed` 把账关上——等待方是那一刻的栈帧，它已经不存在了。
+    /// 判据分两半，但只有**一套**事实口径：
+    /// - 句柄在 ⇒ poll 一次；`Ready` 就按 future 交回的结论写回草稿并分类，
+    ///   `Pending` 就原样放回、让出执行权（`D-222` 订正 2 的「只 poll 一次」）。
+    /// - 句柄不在 ⇒ 走事实口 [`stream::settle_recovered`]：读 `stale_sent` 的租约线
+    ///   （与 `port::reap` 同一份投影），过期即落 `failed{lease_expired}`，未过期
+    ///   就什么也不写（这一圈合法地不前进）。
     ///
-    /// 它**不交回**产出（D-123 决策 5）：没有产出可交，收束归日志上的收束行。
+    /// 正常口与恢复口的**配对判据**是同一个：`sent` 与它的终局（`response` /
+    /// `failed` / `retry`）。句柄只决定「能不能顺手把那段执行体推进一步」，
+    /// 不决定「这一笔还欠不欠」——后者只读事实。
+    ///
+    /// 它**不交回**产出（D-123 决策 5）：结局寄存在草稿，收束归 `close-turn` 行。
     pub(crate) async fn await_model<S>(
         &mut self,
         store: &S,
+        llm: &dyn LlmAdapter,
+        has_dispatch: bool,
     ) -> Result<(), symbio_kernel::store::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        stream::kill_dangling_sent_round(store)?;
+        let inflight = self.inflight.take();
+        let now = self.run.now_ms();
+        let polled = stream::poll_flight(
+            &mut self.run,
+            store,
+            llm,
+            inflight,
+            has_dispatch,
+            now,
+        )
+        .await?;
+        let settled = match polled {
+            stream::PolledRound::Parked(fut) => {
+                // 还在路上：句柄原样放回，下一圈接着 poll。这一圈没写任何格，
+                // 派发器的「空账本」守卫据 `sent` 无所终局认出这是**合法地不前进**。
+                self.inflight = Some(fut);
+                return Ok(());
+            }
+            stream::PolledRound::Settled(round) => round,
+        };
+        match settled {
+            stream::ModelRound::Done(outcome) => self.run.settled = Some(outcome),
+            stream::ModelRound::Tools => {}
+            // 应答已寄存，收束这一步归 `close-turn` 行的执行体（[`Self::close`]）。
+            stream::ModelRound::Close => {}
+            // 事实口已经判过（可能落了 `failed`），这里没有第二件事要做。
+            stream::ModelRound::NoPending => {}
+        }
         Ok(())
     }
 
