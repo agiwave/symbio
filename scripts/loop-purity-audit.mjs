@@ -94,6 +94,9 @@ const WORLD_ROOTS = [
   [/\bturn\b(?!\s*\.)/g, 'turn'],
   [/\bTURN_[A-Z0-9_]+/g, 'TURN_*'],
   [/"(?:tool|model)"/g, '端口行名'],
+  // `"session"` 在 loop 里多数是日志 target，不是端口名；只有端口客户端这一个常量
+  // 是真正的**端口名字面量**。并入上一条字面量正则会把日志当债（宽判据），故单列。
+  [/\bconst\s+PORT:\s*&str\s*=\s*"session"/g, '端口名常量'],
 ]
 
 /** 端口受理面（`plugin-api/src/port.rs`）里的世界词根（`DE-047` I-6.1 / I-6.2）。
