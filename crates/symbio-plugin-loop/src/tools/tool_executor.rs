@@ -24,11 +24,11 @@ use symbio_kernel::store::Store;
 use symbio_plugin_api::plugin_error;
 use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
 
-mod breaker;
 mod decls;
 mod effects;
+mod gate_inputs;
 
-pub use self::breaker::BreakerInputs;
+pub use self::gate_inputs::GateInputs;
 pub use self::decls::ToolDecls;
 pub use self::effects::record_effect;
 use symbio_plugin_api::effects::EffectInput;
@@ -110,6 +110,8 @@ pub struct ExecResult {
     pub truncated: bool,
     pub archive_path: Option<String>,
     pub origin_tokens: usize,
+    /// 执行体在结果事实里交回的 `failure_kind`（中性词；环不解释原因）。
+    pub failure_kind: Option<String>,
 }
 
 /// 执行**一笔债**（不阻塞等待用户）：按端口名取提供者，交给端口执行合同跑。
@@ -130,6 +132,7 @@ pub struct ExecResult {
 pub async fn execute_one(
     port: &'static str,
     env: &RoundEnv,
+    gate: &GateInputs,
     parent: &Option<Arc<dyn Plugin>>,
     name: &str,
     args: Value,
@@ -178,6 +181,13 @@ pub async fn execute_one(
                     "args": args,
                     "call_id": call_id,
                     "archive_dir": env.archive_dir.to_string_lossy(),
+                    // 中性输入：开窗判据与熔断事实归执行体（DE-039 §6，D-311）。
+                    "gate": {
+                        "authorized": gate.authorized,
+                        "spent_ms": gate.spent_ms,
+                        "requested_ms": gate.requested_ms,
+                        "budget_ms": gate.budget_ms,
+                    },
                 }),
             },
         )
@@ -247,6 +257,11 @@ pub async fn execute_one(
             .get("origin_tokens")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize,
+        failure_kind: fact
+            .get("failure_kind")
+            .and_then(|v| v.as_str())
+            .filter(|k| !k.is_empty())
+            .map(str::to_string),
     }
 }
 
@@ -335,9 +350,9 @@ pub(crate) async fn land_outcome_async(
 ///    「没跑到」的调用由环写 `failed{why}` 事实，投影器按事实渲染调用卡终态与
 ///    「未执行」结果子项，环不再补节点（DE-047 D-312）。
 ///
-/// 2. **外部执行闸门在每个调用点各判一次**：判据按这一笔债现读
-///    （[`BreakerInputs`]），结论按调用点出——`Refuse` 零事件、`Break` 走出参
-///    随收束入格、`Allow` 照旧开窗。
+/// 2. **外部执行的授权 / 成本读数在每个调用点各取一次**（[`GateInputs`]），随债交给
+///    执行体：判据与开窗不在环——`Refuse` 零事件、`Break` 由执行体自己 `emit`
+///    `control × opened`、`Allow` 照旧开窗（DE-039 §6，D-311）。
 /// 3. **声明闸由能力包自己判**（DE-025 D-219）：工具在 `CapabilityMeta.behaviors`
 ///    上声明「我受哪项管辖」，对应实现从
 ///    `ToolBehavior::before` 回答能不能跑（淘汰 / 任务表写侧即此类）。宿主只交这一笔

@@ -1,9 +1,10 @@
-//! ②「逐条执行」。
+//! 「逐条执行」。
 //!
 //! 一条顺序流程的中间段：对批内每条调用依序过「协议校验 → 同参提示 → 参数解析 →
-//! 超限丢弃 → 宿主闸（外部执行）→ 声明闸（能力包自己的 `before`）→ Pre 钩子 →
-//! 执行 → Post 钩子 → 记账 → 结果与父终态广播」。**没有批首读数**：闸门判据、声明位、
-//! 主体、会话事实切片都在这一笔债的准备点现取；同参提示现读转写与本批前缀，不养台账。
+//! 超限丢弃 → 授权 / 成本的中性输入 → 声明闸（能力包自己的 `before`）→ Pre 钩子 →
+//! 执行 → Post 钩子 → 记账 → 结果与父终态广播」。**没有批首读数**：授权 / 成本、
+//! 声明位、主体、会话事实切片都在这一笔债的准备点现取；同参提示现读转写与本批前缀，
+//! 不养台账。开窗判定不在这里——中性输入随债交给执行体，环不预判、不拒发。
 //!
 //! ## 批内执行策略
 //!
@@ -174,6 +175,8 @@ struct Ready {
     name: String,
     args: Value,
     repeat_note: Option<String>,
+    /// 授权 / 成本的中性输入：随这笔债交给执行体，环不据此拒发。
+    gate: GateInputs,
 }
 
 /// 执行前就终结的出口。
@@ -245,8 +248,8 @@ fn repeat_ordinal(
 /// 一条调用的**准备**：逐字沿用拆分前循环体的前段，只把「发事件」的部分换成
 /// [`PreTerminal`]（谁发、什么时候发由调用方按批序决定）。
 ///
-/// 闸门判据在这一笔债自己的派发点上读（不预读整批）：熔断的授权 / 成本台账、
-/// 自声明行为位、主体、会话事实切片都只属于这一次判定（DE-047 D-311）。
+/// 授权 / 成本的中性输入在这一笔债自己的派发点上读（不预读整批）：自声明行为位、
+/// 主体、会话事实切片都只属于这一次判定（DE-047 D-311）；开窗判定在执行体。
 #[allow(clippy::too_many_arguments)]
 async fn prepare_call(
     tc: &TurnToolCallInfo,
@@ -358,29 +361,13 @@ async fn prepare_call(
         });
     }
 
-    // ── 宿主闸：能不能开窗（外部执行） ───────────────────────────────
+    // ── 开窗判据：环只读账，不下判 ───────────────────────────────────
     //
-    // 判定紧贴执行窗口之前、**先于 PreToolUse 钩子**：钩子是给「要执行的调用」
-    // 准备的用户策略，对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付一次
-    // 钩子往返（还可能触发钩子自己的副作用）。
-    //
-    // 判据**按这一笔债现读**（不再批首一次读齐）：`gate_started` 从读判据之前
-    // 起算——熔断的 `gate-timeout` 量的是「这份输入已经读了多久」。
-    let gate_started = std::time::Instant::now();
+    // 授权矩阵与成本台账是环的职务（能力包读不到的 E 类语法 + 声明视图），但它们
+    // 只折成**中性输入**；快慢、开窗与「熔断中不发」的事实归执行体（DE-039 §6，
+    // DE-047 D-311）。环按端口名派发，不预判、不拒发。
     let session_facts = facts.range(Seq::new(0));
-    let breaker = BreakerInputs::of(&session_facts, &ctx);
-    let gate_ctx = GateContext {
-        gate_started,
-        breaker: &breaker,
-    };
-    if let Some(refusal) = first_refusal(&gate_ctx) {
-        return PreCheck::Terminal(PreTerminal::Refused {
-            id,
-            name,
-            args: tc.arguments.clone(),
-            refusal,
-        });
-    }
+    let gate = GateInputs::of(&session_facts, &ctx);
 
     // ── 声明闸：这个工具自己声明「我受什么管辖」 ─────────────────────
     //
@@ -435,6 +422,7 @@ async fn prepare_call(
         name,
         args: tc.arguments.clone(),
         repeat_note,
+        gate,
     })
 }
 
@@ -563,6 +551,7 @@ async fn finish_call(
         name,
         args,
         repeat_note,
+        gate: _,
     } = ready;
     let result_node_id = symbio_kernel::event::result_node_id(&id);
     // 执行体交回的已是「节点正文 / 记账原文 / 守卫元数据」三份，本层不再裁剪
@@ -575,6 +564,7 @@ async fn finish_call(
         truncated,
         archive_path,
         origin_tokens,
+        failure_kind: fail_kind,
     } = out;
 
     // 代际立约的了结：跑完即知履约与否。**待用户审批的不记**——
@@ -695,7 +685,10 @@ async fn finish_call(
                 NodeStatus::Completed,
                 json!({
                     "success": false,
-                    "failure_kind": "error",
+                    // 成因由执行体交回（中性词）；环不解释原因，缺省仍是通用失败。
+                    "failure_kind": fail_kind.as_deref().unwrap_or(
+                        symbio_kernel::capability::failure_kind::ERROR
+                    ),
                     "tool_name": name,
                     "args": args,
                 }),
@@ -725,11 +718,13 @@ fn start_execution<'a>(
     let name = ready.name.clone();
     let id = ready.id.clone();
     let args = ready.args.clone();
+    let gate = ready.gate;
     let ctx = ctx.clone();
     Box::pin(async move {
         let out = execute_one(
             symbio_plugin_api::ports::TOOL,
             env,
+            &gate,
             parent,
             &name,
             args,
@@ -861,8 +856,8 @@ fn interaction_blocked(parent_updates: &[ChatNode]) -> bool {
 /// 父 ToolCall 终态——**完整消息**（发射端从权威转写取副本应用终态）。
 /// 返回给调用方做内存镜像整条替换 + 随 persist_messages 落库。
 ///
-/// 闸门判据**按这一笔债现读**（不预读整批）：声明位随债走，熔断 / 主体 / 会话
-/// 事实切片在 [`prepare_call`] 里现取（DE-047 D-311）。
+/// 读数**按这一笔债现取**（不预读整批）：声明位随债走，授权 / 成本的中性输入、
+/// 主体、会话事实切片在 [`prepare_call`] 里现取（DE-047 D-311）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_batch(
     tool_calls: Vec<TurnToolCallInfo>,
@@ -986,6 +981,7 @@ pub(crate) async fn run_batch(
                         let out = execute_one(
                             symbio_plugin_api::ports::TOOL,
                             env,
+                            &ready.gate,
                             parent,
                             &ready.name,
                             ready.args.clone(),

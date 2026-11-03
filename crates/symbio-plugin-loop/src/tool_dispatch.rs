@@ -73,12 +73,12 @@ use symbio_sdk::turn::node_build::{
     detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes, PresentationTree,
 };
 
-/// 工具执行层交回的**收束派生事实**（效果 / 熔断）。
+/// 工具执行层交回的**收束派生事实**（效果）。
 ///
-/// 两者的数据来源都在工具执行层（`EffectInput` / 熔断理由），而写方（落格）在
-/// 轮末——`turn_exec` 调 [`super::derived_facts::record_derived`] 写。本结构是那份
-/// 出参从分发点回到运行器的**唯一通道**：不收集它，这两样就静默全丢
-/// （与记忆 / 学习同一个坑——出参不交回，写方就无从落格）。
+/// 数据来源在工具执行层（`EffectInput`），而写方（落格）在轮末——`turn_exec` 调
+/// [`super::derived_facts::record_derived`] 写。本结构是那份出参从分发点回到运行器的
+/// **唯一通道**：不收集它，效果就静默全丢（与记忆 / 学习同一个坑——出参不交回，
+/// 写方就无从落格）。`breaks` 是下一刀待清的残管：熔断事实已由执行体自己落。
 ///
 /// 任务表**不在这里**：它是一条效果（`symbio-plugin-task` 的 `TaskTable`），走
 /// `effects` 那一条通路（DE-025 D-207）。
@@ -89,7 +89,7 @@ use symbio_sdk::turn::node_build::{
 pub(crate) struct DerivedFacts {
     /// 效果出参（DE-025 D-207）：每次终态调用一条，轮末由写口问能力包要草稿。
     pub(crate) effects: Vec<EffectInput>,
-    /// 熔断出参：外部执行闸门判 `Break` 的理由。
+    /// 熔断出参（残管）：已无写入方——熔断事实由执行体自己落（DE-039 §6）。
     pub(crate) breaks: Vec<&'static str>,
 }
 
@@ -282,7 +282,7 @@ pub struct CallOutcome {
     /// 随结果携带而不是当场写进共用的取件面：并发执行时落地顺序由 provider 决定，
     /// 而效果事实的顺序必须等于**调用顺序**——由环在整轮收口时按序交回。
     pub effects: Vec<EffectInput>,
-    /// 这一笔触发的熔断理由（外部执行闸门判 `Break`）。
+    /// 这一笔触发的熔断理由（残管；写入方已随判据搬进执行体）。
     pub breaks: Vec<&'static str>,
 }
 

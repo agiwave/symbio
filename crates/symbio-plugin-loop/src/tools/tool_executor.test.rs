@@ -807,15 +807,11 @@ async fn record_effect_never_overwrites_an_earlier_judgement() {
     assert_eq!(out[1].why, "被 PreToolUse 钩子拦下");
 }
 
-// ==================== 外部执行闸门 ====================
-
-/// 带会话 id 的请求上下文。成本台账不再按它定位——事实轨以**值**交给执行层
-/// （D-084 §1-A）；会话 id 仍随上下文走，因为其余工具面按它归属。
-fn gate_ctx(session_id: &str) -> Arc<dyn PluginInvokeRequest> {
-    let req = PluginSimpleRequest::new(None, None);
-    req.set(symbio_sdk::keys::SESSION_ID, session_id.to_string());
-    Arc::new(req)
-}
+// ==================== 外部执行闸门的中性输入 ====================
+//
+// 开窗判据（时延 / 预算 / 熔断事实）已搬进 `symbio-plugin-tool` 的执行体，本层只
+// 读账并把四个中性值交出去（DE-039 §6，DE-047 D-311）；熔断端到端用例住在
+// `symbio-plugin-tool/src/port.test.rs`。
 
 /// 判据那一半：授权是**读矩阵**得来的（fail-closed），不是默认放行。
 ///
@@ -841,139 +837,7 @@ fn external_execution_capability_is_read_from_the_matrix() {
     );
 }
 
-/// 事实源那一半：台账累计把预算吃满 ⇒ 工具**不执行**，且 `Break` 走出参。
-///
-/// 这条用例钉的是 [DE-039 §6](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
-/// 验收 2 的前半句（预算耗尽必须判得出来，不允许静默继续）；后半句——
-/// 理由真的落成一条 `control × opened` 事件——钉在事实源入格那一侧的用例里
-/// （写方是 `derived_facts::record_derived`，由 v2 运行器在轮末收束调用）；工具执行层
-/// 没有事实源，入格要到轮末收束那一步才发生。
-#[tokio::test]
-async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
-    let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-gate");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
-
-    // 台账：一条已耗超过会话累计上限的收束事件（`cost.ledger` 按 actor 归账，
-    // D-044：闸门读台账，不读运行时计数器）。事实轨以**值**交给执行层
-    // （D-084 §1-A）——夹具直接造这份切片，不摆存储目录。
-    let sid = "gate-sess";
-    let facts = EventStore::new();
-    facts
-        .append(
-            symbio_kernel::event::Event::pending(
-                "v2f-gate",
-                symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-                symbio_kernel::event::Entity::Turn,
-                symbio_kernel::event::Verb::Closed,
-                0,
-                symbio_sdk::authz::PRINCIPAL_MAIN,
-            )
-            .with_cost_ms(LatencyTier::Autonomic.budget_ms() + 1),
-        )
-        .expect("入格");
-
-    let sink = ExecEventSink::silent();
-    let abort = ExecAbortSignal::new();
-    // 父 ToolCall 节点：参数流式阶段已广播过（生产里它就在 `context.messages`），
-    // 终态定稿要从这份权威转写取副本——不给它，`emit_parent_finalized` 会判协议违例。
-    let parent = ChatNode {
-        id: "tc-gate".into(),
-        principal: Some(principal_for(NodeRole::Assistant)),
-        msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "vdfs_list"})),
-        status: Some(NodeStatus::Streaming),
-        ..Default::default()
-    };
-    let tcs = vec![TurnToolCallInfo {
-        id: Some("tc-gate".into()),
-        wire_id: None,
-        name: Some("vdfs_list".into()),
-        arguments: json!({ "path": "." }),
-        parse_error: None,
-        overflow_notice: None,
-    }];
-    let mut breaks: Vec<&'static str> = Vec::new();
-    let (msgs, updates) = process_tool_calls_in_env(
-        tcs,
-        &None,
-        &sink,
-        &abort,
-        gate_ctx(sid),
-        std::slice::from_ref(&parent),
-        &env_for(&dir),
-        &facts,
-        false,
-        &mut Vec::new(),
-        &mut breaks,
-    )
-    .await;
-
-    assert_eq!(msgs.len(), 1, "被闸门拦下的调用也必须有结果子节点");
-    assert!(
-        msgs[0]
-            .content
-            .as_ref()
-            .map(|c| c.to_text().contains("Refused:"))
-            .unwrap_or(false),
-        "结果要写明是被拒的，不是照常执行后的输出"
-    );
-    assert_eq!(updates.len(), 1, "父节点必须收到终态（否则永远转下去）");
-    assert_eq!(
-        updates[0]
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("failure_kind"))
-            .and_then(|v| v.as_str()),
-        Some(failure_kind::TOOL_UNAVAILABLE),
-        "熔断不是「等待用户」，是让模型改走别的路"
-    );
-    assert_eq!(
-        breaks,
-        vec!["budget-exhausted"],
-        "Break 必须经出参交回调用方——它没有这一格就是静默继续（DE-039 §6 验收 2）"
-    );
-
-    std::fs::remove_dir_all(&dir).ok();
-}
-
-/// 预算在生效而非常量（DE-039 §6.4 的反向用例在生产判据上的形状）：
-/// 同一份事实源，预算放得比已耗宽 ⇒ 同一次判定翻成放行、出参为空。
-#[tokio::test]
-async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
-    let inputs = BreakerInputs::of(&[], &gate_ctx("gate-open"));
-    assert_eq!(inputs.spent_ms, 0, "空事实切片 ⇒ 零账，不是故障");
-    assert!(inputs.authorized, "agent:main 持外部执行能力");
-
-    // 预算收紧到「已耗 + 申请」之下 ⇒ 熔断；放宽到之上 ⇒ 放行。
-    assert_eq!(
-        super::super::CircuitBreaker.gate(
-            inputs.authorized,
-            inputs.spent_ms,
-            inputs.requested_ms,
-            inputs.spent_ms + inputs.requested_ms - 1,
-            0,
-            symbio_kernel::adapters::LatencyTier::Deep.budget_ms(),
-        ),
-        super::super::GateDecision::Break {
-            reason: "budget-exhausted"
-        },
-        "预算真的在参与判定（常量判定拿不出这一对相反的结论）"
-    );
-    assert_eq!(
-        super::super::CircuitBreaker.gate(
-            inputs.authorized,
-            inputs.spent_ms,
-            inputs.requested_ms,
-            inputs.spent_ms + inputs.requested_ms + 1,
-            0,
-            symbio_kernel::adapters::LatencyTier::Deep.budget_ms(),
-        ),
-        super::super::GateDecision::Allow
-    );
-}
-
-/// 台账读的是**交给闸门的事实值**。
+/// 台账读的是**交给执行体的事实值**。
 ///
 /// 历史事故：曾有实现按 `<插件目录>/v2-events.wal` 取账（漏了会话 id 那层）⇒
 /// `spent_ms` 恒 0 ⇒ 预算分支永远走不到，且没有任何东西会变红。D-084 §1-A
@@ -983,7 +847,7 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
 async fn the_ledger_comes_from_the_facts_value() {
     let empty: Vec<Event> = Vec::new();
     assert_eq!(
-        BreakerInputs::of(&empty, &test_ctx()).spent_ms,
+        GateInputs::of(&empty, &test_ctx()).spent_ms,
         0,
         "还没记过账 ⇒ 零账（不是「不许执行」）"
     );
@@ -1003,7 +867,7 @@ async fn the_ledger_comes_from_the_facts_value() {
         )
         .expect("入格");
     assert_eq!(
-        BreakerInputs::of(&facts.range(Seq::new(0)), &test_ctx()).spent_ms,
+        GateInputs::of(&facts.range(Seq::new(0)), &test_ctx()).spent_ms,
         LatencyTier::Autonomic.budget_ms() + 1,
         "值里的账必须被读出来（否则预算分支永远走不到）"
     );

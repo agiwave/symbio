@@ -734,3 +734,121 @@ async fn read_only_calls_run_concurrently() {
         "只读档应可同时在途（端口上界允许 2 条）"
     );
 }
+
+// ==================== 外部执行闸门：判据与开窗事实都在执行体 ====================
+//
+// 环只交中性输入（`gate` 四个值）；这里的用例钉 [DE-039 §6] 的两条验收：
+// 拒绝**零事件**，熔断**必须**落 `control × opened`。
+
+/// 带闸门输入的一笔债：捕获写口，其余与 [`call`] 同形。
+fn gated_call(
+    tool: &str,
+    gate: serde_json::Value,
+    ctx: Arc<dyn PluginInvokeRequest>,
+) -> (
+    PortExecContext,
+    PortInput,
+    Arc<std::sync::Mutex<Vec<FactDraft>>>,
+) {
+    let captured: Arc<std::sync::Mutex<Vec<FactDraft>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (mut exec, mut input) = call(tool, ctx);
+    exec.emit =
+        symbio_plugin_api::port::PortFactEmit::new(Arc::new(CapturedFacts(captured.clone())));
+    input.payload["gate"] = gate;
+    (exec, input, captured)
+}
+
+/// 预算之内：工具照常执行，写口不落任何事实。
+#[tokio::test]
+async fn affordable_calls_run_without_any_event() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let (exec, input, captured) = gated_call(
+        "echo",
+        serde_json::json!({
+            "authorized": true,
+            "spent_ms": 0,
+            "requested_ms": 500,
+            "budget_ms": 1_000,
+        }),
+        ctx,
+    );
+    let out = ToolPort.execute(exec, input).await;
+    let (text, success, _) = decode(&out);
+    assert_eq!(text, "done");
+    assert!(success);
+    assert_eq!(
+        captured.lock().unwrap().len(),
+        0,
+        "放行不是事实——没有开窗就没有事件"
+    );
+}
+
+/// 验收 1：未授权 ⇒ 拒绝且**零事件**，工具不执行。
+#[tokio::test]
+async fn unauthorized_calls_are_refused_with_zero_events() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let (exec, input, captured) = gated_call(
+        "echo",
+        serde_json::json!({
+            "authorized": false,
+            "spent_ms": 0,
+            "requested_ms": 500,
+            "budget_ms": 1_000,
+        }),
+        ctx,
+    );
+    let out = ToolPort.execute(exec, input).await;
+    let (text, success, _) = decode(&out);
+    assert!(text.starts_with("Refused:"), "实际: {text}");
+    assert!(!success, "拒绝不是「照常执行后的输出」");
+    assert_eq!(
+        captured.lock().unwrap().len(),
+        0,
+        "拒绝**零事件**（DE-039 §6 验收 1）"
+    );
+}
+
+/// 验收 2：预算耗尽 ⇒ 不开窗，且熔断事实落进事实源；结果交回 `tool_unavailable`。
+#[tokio::test]
+async fn exhausted_budget_breaks_and_lands_a_control_event() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let (exec, input, captured) = gated_call(
+        "echo",
+        serde_json::json!({
+            "authorized": true,
+            "spent_ms": 900,
+            "requested_ms": 500,
+            "budget_ms": 1_000,
+        }),
+        ctx,
+    );
+    let out = ToolPort.execute(exec, input).await;
+    let (text, success, _) = decode(&out);
+    assert!(text.starts_with("Refused:"), "实际: {text}");
+    assert!(!success);
+    let fact = out.facts.first().expect("拒绝也要有结果事实");
+    assert_eq!(
+        fact["failure_kind"],
+        serde_json::json!("tool_unavailable"),
+        "熔断不是「等待用户」，是让模型改走别的路"
+    );
+
+    let facts = captured.lock().unwrap();
+    assert_eq!(facts.len(), 1, "一笔熔断只落一条事实");
+    assert_eq!(facts[0].key, "cb-tc-1");
+    assert_eq!(
+        facts[0].kind,
+        symbio_plugin_api::events::EVENT_TASK_CONTROLLED
+    );
+    assert_eq!(facts[0].entity, Entity::Control);
+    assert_eq!(facts[0].verb, Verb::Opened);
+    assert_eq!(
+        facts[0].payload["reason"],
+        serde_json::json!("budget-exhausted")
+    );
+}
+

@@ -1,42 +1,26 @@
-//! 拒止骨架与宿主闸（外部执行）。
+//! 拒止骨架与外部执行的**中性输入**。
 //!
-//! **没有批首读数**：每条债在自己的派发点上读判据（`batch::prepare_call`），环不预读
-//! 整批的 `mode` / 熔断 / 声明位 / 主体 / 会话事实切片 / 同参台账。判据错 ⇒ 拒止骨架
-//! 的出口语义用例红（`gates.test.rs`）与整批路径的闸门组红（`tool_executor.test.rs`）。
+//! **没有批首读数**：每条债在自己的派发点上取读数（`batch::prepare_call`），环不预读
+//! 整批的 `mode` / 声明位 / 主体 / 会话事实切片 / 同参台账。
 //!
-//! ## 宿主闸与声明闸
+//! ## 开窗判据已搬进执行体
 //!
-//! 本文件只剩**一道宿主闸**：[`GATES`] 里的外部执行。它判的不是「哪个工具受什么
-//! 管辖」，而是「这通调用能不能开窗」——输入是执行窗口的授权与预算，与工具行为
-//! 无关，因此不挂在声明上（DE-025 D-219）。
+//! 外部执行那道宿主闸不再在这里：授权矩阵与成本台账只产出**中性输入**
+//! （`GateInputs`），时延 / 预算的判定与「熔断中不发」的事实由 `symbio-plugin-tool`
+//! 的执行体自己落（DE-039 §6，DE-047 D-311）。环按端口名派发，不预判、不拒发。
 //!
-//! 淘汰与任务表写侧这两道**按能力判**的闸已随 owner 迁出宿主：它们各自是
+//! 淘汰与任务表写侧这两道**按能力判**的闸也已随 owner 迁出宿主：它们各自是
 //! `ToolBehavior::before`（agent 的 `DelegationGate`、loop 的 `TaskTable`），由
 //! `symbio_plugin_api::effects::apply_before` 按工具**自己声明的行为名**选实现。
 //! 宿主只把这一笔债的结论交出去（主体 / 控制面撤销值 / 会话事实切片），
 //! 并在 [`Refusal::from_before`] 里把实现的判定映射回拒止骨架。
-
-//! ## 闸门表
 //!
-//! [`GATES`] 一行 = 一个宿主闸名 + 一个纯判据，外加该闸可能产出的失败语义。批内
-//! 执行点只有一个（`batch::prepare_call` 的 [`first_refusal`]），于是「宿主还有几道
-//! 闸、各自什么出口」读这张表即可。
-//!
-//! **出口不对称是表的一列，不是被抹平的差异**（DE-039 §6）：
-//! - [`RefusalTrace::ZeroEvent`]：拒止**不产事件**（外部执行 `Refuse`，验收 1）；
-//! - [`RefusalTrace::Recorded`]：拒因**入格**，经出参交回随收束落 `task.controlled`
-//!   （外部执行 `Break`，验收 2）；
-//! - [`RefusalTrace::Audited`]：可审计拒绝——拒因进结果、违约承诺照记（声明闸的默认出口）；
-//! - [`RefusalTrace::AuditedNoDelegation`]：可审计拒绝但**不记承诺**（声明闸显式去掉
-//!   承诺记账时：工具没跑，「声明过什么」无从说起）。
-//!
-//! PreToolUse 钩子仍是异步的，因此不进 [`GATES`] 的同步判据表；它走同一个
-//! [`refuse`] 骨架，并显式声明自己的失败语义（[`Refusal::blocked`]）。
+//! 本文件只剩**拒止骨架**：声明闸与 PreToolUse 钩子的出口都经 [`refuse`] 收口，
+//! 拒因与是否记违约理由由实现自报。`breaks` 出参仍由环的收束段持有，
+//! 但本文件已无写入方——熔断事实随执行体落，下一刀清掉这条空管线。
 
 use super::*;
-use symbio_kernel::event::{Entity, Verb};
 use symbio_plugin_api::effects::BeforeRefusal;
-use symbio_sdk::authz::PRINCIPAL_REFLEX;
 
 /// 本条债的**主体**：声明闸按它问（`AGENT_ID` 的会话族地址，未绑定即 `session/main`）。
 ///
@@ -46,60 +30,7 @@ pub(crate) fn batch_principal(ctx: &Arc<dyn PluginInvokeRequest>) -> String {
     symbio_sdk::authz::principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref())
 }
 
-// ── 闸门表与拒止骨架──────────────────────────────────────────────
-
-/// 一次拒止的失败语义——**出口不对称的登记处**（DE-039 §6）。
-///
-/// 四个变体不是四份实现，而是四种**事实出口**：它们决定 [`refuse`] 是否把理由
-/// 交回入格、是否记违约承诺。把差异收进类型而不是抹平，是为了让「哪类拒止留下
-/// 什么痕迹」成为可读的，而不是靠读每个分支的注释。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RefusalTraceKind {
-    /// 零事件：拒止不产任何领域事件（外部执行 `Refuse`）。
-    ZeroEvent,
-    /// 入格：拒因经出参交回，收束时落 `task.controlled`（外部执行 `Break`）。
-    Recorded,
-    /// 可审计拒绝：结果节点 + 父节点收敛 + 违约承诺记账（淘汰 / PreToolUse）。
-    Audited,
-    /// 可审计拒绝但不记承诺（任务表：工具没跑，声明无从说起）。
-    AuditedNoDelegation,
-}
-
-/// 一次拒止的具体失败语义。与 [`RefusalTraceKind`] 同构，`Recorded` 额外携带
-/// 入格理由（去重键与事件载荷都用它）。
-#[derive(Debug, Clone)]
-pub(crate) enum RefusalTrace {
-    ZeroEvent,
-    Recorded(&'static str),
-    Audited,
-    AuditedNoDelegation,
-}
-
-impl RefusalTrace {
-    /// 登记表里对应的列值（测试用它核对「判据返回的语义必在所属行声明内」）。
-    pub(crate) fn kind(&self) -> RefusalTraceKind {
-        match self {
-            Self::ZeroEvent => RefusalTraceKind::ZeroEvent,
-            Self::Recorded(_) => RefusalTraceKind::Recorded,
-            Self::Audited => RefusalTraceKind::Audited,
-            Self::AuditedNoDelegation => RefusalTraceKind::AuditedNoDelegation,
-        }
-    }
-
-    /// 入格理由（只有 `Break` 有）。调用方按理由去重：同一轮熔断两次会拿到同一个
-    /// 事件号，第二条撞幂等键被丢——那条静默失效正是验收 2 要禁的。
-    fn break_reason(&self) -> Option<&'static str> {
-        match self {
-            Self::Recorded(reason) => Some(reason),
-            _ => None,
-        }
-    }
-
-    /// 是否记违约承诺（`agent_run` 的约没履约，拒止同样是事实）。
-    fn notes_delegation(&self) -> bool {
-        !matches!(self, Self::AuditedNoDelegation)
-    }
-}
+// ── 拒止骨架──────────────────────────────────────────────────────
 
 /// 一道闸的拒因：放行是 `None`，拒止是这里的一整份交代。
 #[derive(Debug, Clone)]
@@ -112,24 +43,13 @@ pub(crate) struct Refusal {
     pub(crate) prefix: &'static str,
     /// `meta.failure_kind`（约定字段，控制流不靠猜正文）。
     pub(crate) kind: &'static str,
-    /// 本闸这一次的失败语义。
-    pub(crate) trace: RefusalTrace,
+    /// 是否记违约承诺（任务表闸明确不记：工具没跑，声明无从说起）。
+    pub(crate) notes_delegation: bool,
     /// 违约承诺的记账理由；`None` = 用拒因本身。钩子保留自己的原措辞。
     pub(crate) note_why: Option<String>,
 }
 
 impl Refusal {
-    fn new(gate: &'static str, reason: String, kind: &'static str, trace: RefusalTrace) -> Self {
-        Self {
-            gate,
-            reason,
-            prefix: "Refused",
-            kind,
-            trace,
-            note_why: None,
-        }
-    }
-
     /// PreToolUse 钩子拦下的拒止：形如闸门拒止，但正文前缀是 `Blocked`，
     /// `failure_kind = "blocked"`，且违约理由保留钩子的原措辞。
     pub(crate) fn blocked(reason: String) -> Self {
@@ -139,145 +59,13 @@ impl Refusal {
             reason,
             prefix: "Blocked",
             kind: "blocked",
-            trace: RefusalTrace::Audited,
+            notes_delegation: true,
         }
-    }
-}
-
-/// 一次宿主闸判据需要的全部输入：批首读数（只读）。
-///
-/// 判据是**纯函数**——不读事实源、不发事件、不记账；副作用全部收在 [`refuse`]。
-pub(crate) struct GateContext<'a> {
-    pub(crate) gate_started: std::time::Instant,
-    pub(crate) breaker: &'a BreakerInputs,
-}
-
-/// 闸门表的一行：闸名 / 判据 / 本闸可能产出的失败语义。
-pub(crate) struct GateRow {
-    /// 闸名（唯一、稳定；改名 = 改事实）。
-    pub(crate) name: &'static str,
-    /// 判据 fn：`None` = 放行。
-    pub(crate) decide: fn(&GateContext<'_>) -> Option<Refusal>,
-    /// 本闸**可能**产出的出口语义。具体一次取 [`Refusal::trace`]；本列是登记面，
-    /// 测试钉「返回的 trace 必在所属行声明之内」。
-    pub(crate) traces: &'static [RefusalTraceKind],
-}
-
-/// 宿主闸的唯一登记表：顺序即判据顺序（先命中者胜）。
-///
-/// 外部执行闸是**唯一**留在宿主的同步闸：它问的是「这通调用能不能开窗」（授权 /
-/// 预算 / 时延），不是「哪个工具受什么管辖」——后者是能力包自己的判断，见模块文档。
-pub(crate) const GATES: &[GateRow] = &[GateRow {
-    name: "外部执行",
-    decide: external_execution,
-    traces: &[RefusalTraceKind::ZeroEvent, RefusalTraceKind::Recorded],
-}];
-
-/// 闸门结论（[DE-039 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GateDecision {
-    /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
-    Refuse,
-    /// 熔断（预算耗尽 / 判定超时）——调用方**必须**写 `task.controlled` 事件
-    /// （载荷 `reason`），不允许静默继续（验收 2）。
-    Break { reason: &'static str },
-    /// 放行执行。
-    Allow,
-}
-
-/// 熔断闸门（[DE-039](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
-///
-/// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
-/// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。
-///
-/// 唯一生产消费方是本文件的 [`external_execution`] 与 `derived_facts::record_derived`
-/// 的 `break_event`（同属 loop 插件，D-190）。
-pub struct CircuitBreaker;
-
-impl CircuitBreaker {
-    /// 外部执行闸门。
-    ///
-    /// - `authorized`：主体是否持外部执行能力（`ProduceArtifact`，读路径判定）；
-    /// - `spent_ms` / `requested_ms` / `budget_ms`：已耗 / 本次申请 / 总预算；
-    /// - `elapsed_ms`：**判据输入已耗的时长**（从批首开始读事实源到调用点，
-    ///   不是「调用本函数前那几条指令」）；超过 `elapsed_budget_ms` 即熔断
-    ///   （**有事件**的超时，不是静默失效；I3）；
-    /// - `elapsed_budget_ms`：这份输入的时延预算。**由调用方给**，因为它的正确取值
-    ///   取决于输入是什么：纯查表可以用反射档（80ms），而本闸门的输入是**会话事实源
-    ///   的整段重放**（O(事件数)），那是深度档的操作——此前硬编码反射档，
-    ///   于是判据只在「重放不到 80ms」时可达，长会话下反而永远不触发。
-    pub fn gate(
-        &self,
-        authorized: bool,
-        spent_ms: u64,
-        requested_ms: u64,
-        budget_ms: u64,
-        elapsed_ms: u64,
-        elapsed_budget_ms: u64,
-    ) -> GateDecision {
-        if elapsed_ms > elapsed_budget_ms {
-            return GateDecision::Break {
-                reason: "gate-timeout",
-            };
-        }
-        if !authorized {
-            return GateDecision::Refuse;
-        }
-        if spent_ms.saturating_add(requested_ms) > budget_ms {
-            return GateDecision::Break {
-                reason: "budget-exhausted",
-            };
-        }
-        GateDecision::Allow
-    }
-
-    /// 熔断事件（复用 `control/opened` 格，载荷 `reason` 区分打断与熔断）。
-    pub fn break_event(&self, reason: &str, source_seq: u64) -> Event {
-        Event::pending(
-            format!("cb-{source_seq}"),
-            crate::control_decl::EVENT_TASK_CONTROLLED,
-            Entity::Control,
-            Verb::Opened,
-            0,
-            PRINCIPAL_REFLEX,
-        )
-        .with_produced_by(source_seq)
-        .with_payload(serde_json::json!({ "reason": reason }))
-    }
-}
-
-/// 外部执行闸：授权 + 时延 / 预算。判据紧贴执行窗口之前、
-/// **先于 PreToolUse 钩子**——对一通马上要被拒的调用先跑钩子，等于让拒绝白白
-/// 付一次钩子往返。
-fn external_execution(ctx: &GateContext<'_>) -> Option<Refusal> {
-    let decision = CircuitBreaker.gate(
-        ctx.breaker.authorized,
-        ctx.breaker.spent_ms,
-        ctx.breaker.requested_ms,
-        ctx.breaker.budget_ms,
-        ctx.gate_started.elapsed().as_millis() as u64,
-        // 输入是会话事实源的整段重放 ⇒ 拿深度档的预算，不拿反射档（见 `gate` 文档）。
-        symbio_kernel::adapters::LatencyTier::Deep.budget_ms(),
-    );
-    match decision {
-        GateDecision::Allow => None,
-        GateDecision::Break { reason } => Some(Refusal::new(
-            "外部执行",
-            format!("外部执行闸门熔断（{reason}），本轮工具调用未执行"),
-            failure_kind::TOOL_UNAVAILABLE,
-            RefusalTrace::Recorded(reason),
-        )),
-        GateDecision::Refuse => Some(Refusal::new(
-            "外部执行",
-            "未持外部执行能力（produce.artifact），本次调用未执行".to_string(),
-            failure_kind::PERMISSION_DENIED,
-            RefusalTrace::ZeroEvent,
-        )),
     }
 }
 
 /// 声明闸的判定 → 拒止骨架。实现的判定只说「拒 / 为什么 / 记不记承诺」，
-/// 骨架要的 `prefix` / 入格理由 / 钩子措辞都由宿主按自己的口径补。
+/// 骨架要的 `prefix` / 钩子措辞都由宿主按自己的口径补。
 ///
 /// 出口语义由实现自报（`notes_delegation`）：这一位不是宿主对某道闸的特判，而是
 /// 实现对自己这次拒绝**知道多少**的交代——先说「约没见过」的工具，拒了也不该记
@@ -289,39 +77,19 @@ impl Refusal {
             reason: refusal.reason,
             prefix: "Refused",
             kind: refusal.kind,
-            trace: if refusal.notes_delegation {
-                RefusalTrace::Audited
-            } else {
-                RefusalTrace::AuditedNoDelegation
-            },
+            notes_delegation: refusal.notes_delegation,
             note_why: None,
         }
     }
 }
 
-/// 判据的唯一执行点：按 [`GATES`] 顺序问，先命中者胜。
-pub(crate) fn first_refusal(ctx: &GateContext<'_>) -> Option<Refusal> {
-    GATES
-        .iter()
-        .find_map(|row| (row.decide)(ctx).map(|refusal| (row, refusal)))
-        .map(|(row, refusal)| {
-            // 登记表与判据的漂移检查：一次拒止的失败语义必须在该行声明过。新增出口
-            // （例如给某道闸加 `Recorded`）却忘了登记 `traces` 时，这里当场报——
-            // 否则表会退化成「一列谁也不读的注释」，审计面重新变成口头约定。
-            debug_assert!(
-                row.traces.contains(&refusal.trace.kind()),
-                "闸「{}」产出了未声明的失败语义 {:?}",
-                row.name,
-                refusal.trace.kind()
-            );
-            refusal
-        })
-}
-
 /// 拒止骨架（**唯一实现**）：拒因 → 结果子节点 → 父节点收敛 → 记账 → 调用方 continue。
 ///
-/// 四条既有出口的全部不变量都在这里兑现一次（不变量 1「每个调用以终态收场」、
-/// 不变量 2「有调用必有结果」）；各闸的差异只经 [`RefusalTrace`] 表达，不再各写一遍。
+/// 不变量 1「每个调用以终态收场」与不变量 2「有调用必有结果」在这里兑现一次；
+/// 各闸的差异只经 [`Refusal::notes_delegation`] 表达。
+///
+/// 开窗判据搬进执行体后，本文件不再产生入格理由；`_breaks` 是环收束段的既有出参，
+/// 留到下一刀随空管线一起摘（本切点不动 `batch.rs` 的逐条执行段）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn refuse(
     sink: &ExecEventSink,
@@ -334,7 +102,7 @@ pub(crate) async fn refuse(
     parent_updates: &mut Vec<ChatNode>,
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
-    breaks: &mut Vec<&'static str>,
+    _breaks: &mut Vec<&'static str>,
 ) {
     plugin_warn!(
         "session",
@@ -342,13 +110,6 @@ pub(crate) async fn refuse(
         refusal.gate,
         reason = refusal.reason
     );
-
-    // `Break` 才入格：`Refuse` 按 DE-039 §6 验收 1 不得产生任何事件。
-    if let Some(reason) = refusal.trace.break_reason() {
-        if !breaks.contains(&reason) {
-            breaks.push(reason);
-        }
-    }
 
     let tool_msg = llm_build_tool_message(
         id,
@@ -376,7 +137,7 @@ pub(crate) async fn refuse(
 
     // 没跑 = 没履约（效果输入由 [`record_effect`] 交出，实现住能力包）；任务表闸
     // 明确不记——工具没跑，声明无从说起。
-    if refusal.trace.notes_delegation() {
+    if refusal.notes_delegation {
         let why = refusal.note_why.as_deref().unwrap_or(&refusal.reason);
         record_effect(effects, decls, id, name, args, false, "", why);
     }

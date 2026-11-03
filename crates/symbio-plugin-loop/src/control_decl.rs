@@ -154,12 +154,12 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 编码进记忆（写方 `memory_events`，读方还有 `session` 的 `stats`）：
     // 跨插件消费 ⇒ 名字登记进清单、格位由本插件交出（DE-024 D-204）。
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
-    // 控制面的一格（写方两个插件各一处：工具闸的熔断 / 拒因在本插件，打断处置在
+    // 控制面的一格（写方：熔断事实在 `symbio-plugin-tool` 的执行体，打断处置在
     // `session` 的 inbox）：owner 是本插件，名字走清单生成，不回内核。
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
     // 任务族七格已随能力迁出（`symbio-plugin-task`）——名字、格位与角色都在那个
-    // 能力包的声明表里。本插件只留 `task.controlled`：它是**控制面**的格子（工具闸
-    // 的熔断与拒因在本插件），与任务语义无关。
+    // 能力包的声明表里。本插件只留 `task.controlled`：它是**控制面**的格子（熔断
+    // 事实由执行体写），与任务语义无关。
     // ── 对话面补登（DE-024 D-203 归零批）──
     //
     // 下面九条的写方在本插件、读方是 core 的折叠

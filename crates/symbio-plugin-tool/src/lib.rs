@@ -10,6 +10,7 @@
 //! [`PortInput`]: symbio_plugin_api::PortInput
 //! [`PortOutcome`]: symbio_plugin_api::PortOutcome
 
+mod breaker;
 mod declarations;
 mod plugin;
 mod port;

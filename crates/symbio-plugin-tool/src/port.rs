@@ -17,6 +17,7 @@
 //! | `archive_dir` | L0 存档目录（结果超预算时写全文） |
 //! | `artifact` | `{ key, round, round_id, produced_by, allowed, denied_reason }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
 //! | `land_only` | `{ text, success, needs_user_action, prompt, failure_kind }`：只落产物格、不再执行（唤醒结果与没跑到的结果走这一形态） |
+//! | `gate` | `{ authorized, spent_ms, requested_ms, budget_ms }`：外部执行闸门的中性输入；快慢与开窗由执行体判 |
 //!
 //! 环侧的宿主插件（`parent`）经 `ctx.parent()` 取得：解析失败时按原样走到它，由它给出
 //! 诚实的 NotFound。
@@ -34,13 +35,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::breaker::{CircuitBreaker, GateDecision};
 use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::{
     capability_invoke, capability_to_wire, effects::annotations, effects::EffectInput,
     events::EVENT_ARTIFACT_ADDED, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
     failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
-    Entity, ExecAbortSignal, FactDraft, PluginError, PluginInvokeRequestExt, PluginPayload,
-    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider, Verb,
+    Entity, ExecAbortSignal, FactDraft, LatencyTier, PluginError, PluginInvokeRequestExt,
+    PluginPayload, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
+    PortProvider, Verb,
     ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID,
     TOOL_CALL_ID, WORKDIR,
 };
@@ -64,6 +67,11 @@ const KEY_ARCHIVE_DIR: &str = "archive_dir";
 const KEY_ARTIFACT: &str = "artifact";
 /// 只落格、不执行：唤醒结果与没跑到的占位结果用这一形态交回执行体。
 const KEY_LAND_ONLY: &str = "land_only";
+/// 外部执行闸门的中性输入：`{ authorized, spent_ms, requested_ms, budget_ms }`。
+///
+/// 环的授权矩阵与成本台账只把结论交给执行体；快慢、开窗与熔断事实都由本执行体判
+/// （DE-039 §6，DE-047 D-311）。缺省 = 不判（通用端口调用不带这一格）。
+const KEY_GATE: &str = "gate";
 
 /// 产出键（与环的通用受理入口共用同一份形状）。
 const FACT_RESULT_TEXT: &str = "result_text";
@@ -279,6 +287,53 @@ struct LandedResult<'a> {
     /// 成因码（等待用户的原因是 `needs_approval` 等，没跑到的是 `overflow_dropped` 等）。
     failure_kind: &'a str,
     raw: &'a str,
+}
+
+/// 外部执行闸门的中性输入（环读授权矩阵与成本台账后交过来的四个值）。
+#[derive(Debug, Clone, Copy)]
+struct GateInput {
+    authorized: bool,
+    spent_ms: u64,
+    requested_ms: u64,
+    budget_ms: u64,
+}
+
+/// 载荷里有没有闸门输入：**没有 = 不判**（通用端口调用不带这一格）。
+fn gate_inputs(payload: &serde_json::Value) -> Option<GateInput> {
+    let gate = payload.get(KEY_GATE)?;
+    Some(GateInput {
+        authorized: gate
+            .get("authorized")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true),
+        spent_ms: gate
+            .get("spent_ms")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        requested_ms: gate
+            .get("requested_ms")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        budget_ms: gate
+            .get("budget_ms")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(u64::MAX),
+    })
+}
+
+/// 前置闸拒绝的出口：结果事实带上中性的 `failure_kind`，环据此渲染、不解释原因。
+fn refused(text: &str, failure_kind: &'static str) -> PortOutcome {
+    PortOutcome {
+        facts: vec![serde_json::json!({
+            FACT_RESULT_TEXT: text,
+            FACT_RAW_TEXT: text,
+            FACT_SUCCESS: false,
+            FACT_PENDING: serde_json::Value::Null,
+            FACT_GUARD: serde_json::Value::Null,
+            "failure_kind": failure_kind,
+        })],
+        error: None,
+    }
 }
 
 /// 落一条 `artifact.added`：产物是**这次结果的产物**，所以由执行体写（P1b / D-308）。
@@ -569,6 +624,8 @@ impl PortProvider for ToolPort {
 #[async_trait::async_trait]
 impl PortExecutor for ToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        // 受理即起算：闸门的 `elapsed` 量的是**本执行体**从拿到这笔债到判定的时长。
+        let started_at = std::time::Instant::now();
         let payload = input.payload;
         let tool_name = payload
             .get(KEY_TOOL_NAME)
@@ -621,6 +678,39 @@ impl PortExecutor for ToolPort {
             .await;
         }
 
+        // 外部执行闸门：环**不判快慢、不据此拒发**，只把中性输入随债交过来。
+        // 「熔断中不发」在这里落地——本执行体自己不开窗，并把拒绝事实写进事实源；
+        // 环只认结果事实，不解释原因（DE-039 §6，DE-047 D-311）。
+        if let Some(gate) = gate_inputs(&payload) {
+            match CircuitBreaker.gate(
+                gate.authorized,
+                gate.spent_ms,
+                gate.requested_ms,
+                gate.budget_ms,
+                started_at.elapsed().as_millis() as u64,
+                LatencyTier::Reflex.budget_ms(),
+            ) {
+                GateDecision::Allow => {}
+                GateDecision::Refuse => {
+                    // 验收 1：拒绝**零事件**——只回结果，不落事实。
+                    return refused(
+                        "Refused: 未持外部执行能力（produce.artifact），本次调用未执行",
+                        failure_kind::PERMISSION_DENIED,
+                    );
+                }
+                GateDecision::Break { reason } => {
+                    // 验收 2：熔断必须入格，不允许静默继续。
+                    exec.emit
+                        .emit(vec![CircuitBreaker.break_fact(&exec.idempotency_key, reason)])
+                        .await;
+                    return refused(
+                        &format!("Refused: 外部执行闸门熔断（{reason}），本次调用未执行"),
+                        failure_kind::TOOL_UNAVAILABLE,
+                    );
+                }
+            }
+        }
+
         let Some(ctx) = exec.ctx.clone() else {
             return finish(
                 "Error: No request context".to_string(),
@@ -630,7 +720,6 @@ impl PortExecutor for ToolPort {
             )
             .await;
         };
-        let started_at = std::time::Instant::now();
         plugin_info!(
             "tool",
             "[Tool] 请求发起: {} args={}",

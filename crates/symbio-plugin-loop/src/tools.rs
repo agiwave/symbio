@@ -6,9 +6,10 @@
 //!   批量分发与结果广播（`process_tool_calls_in_env`）。它是工具结果节点的
 //!   **唯一写入者**，也是编排层与上下文治理层取用工具机制的入口。
 //! - `dispatch` —— `process_tool_calls_in_env` 的**执行阶段分层**：
-//!   ① 批首闸门读数 ② 逐条执行 ③ 未执行收口；编排入口仍是 `tool_executor` 里同名函数，
-//!   本层只是它的三段落点，不改门面。收口段（`unfinished`）同时是「没跑到」的
-//!   **成因词表**（`ABORTED` / `NOT_EXECUTED`）与结果子节点的落法所在。
+//!   `batch` 逐条准备 / 执行 / 收口，`gates` 只留拒止骨架与外部执行的中性输入；
+//!   编排入口仍是 `tool_executor` 里同名函数，本层只是它的落点，不改门面。
+//!   「没跑到」的**成因词表**（`ABORTED` / `NOT_EXECUTED`）也经这条门面交回，
+//!   收口由 `tool_dispatch` 写 `failed{why}`。
 //!
 //! 单条结果的体积上限（守卫与归档滚动）与**产物格落格**都随执行体迁到
 //! `symbio-plugin-tool`；本域只消费执行体交回的**已守卫文本**与守卫元数据
@@ -36,12 +37,8 @@ pub use self::dispatch::{is_unanswered, NOT_EXECUTED};
 // 非测试构建下允许无引用——同 core 事件字典的做法（见 `symbio_sdk` 的 `lib.rs`）。
 #[allow(unused_imports)]
 pub use self::dispatch::ABORTED;
-// 外部执行闸门：判据住在 `gates`（唯一生产消费方是本域的 `external_execution`，
-// D-190）；`derived_facts` 的熔断写方经本门面取用，不深潜子模块。
-pub(crate) use self::dispatch::gates::CircuitBreaker;
-// 测试面（`tool_executor.test.rs`）要按结论比对；生产侧只问「是不是 Allow」。
-#[cfg(test)]
-pub(crate) use self::dispatch::gates::GateDecision;
+// 外部执行闸门的判据已搬进 `symbio-plugin-tool` 的执行体；环只留授权 / 成本的中性
+// 输入（`GateInputs`），不预判、不拒发（DE-039 §6，DE-047 D-311）。
 // 生产入口（带执行信封）：分发方在派发时把轮号 / 根节点 / 产物闸结论 / 写口
 // 装进 [`RoundEnv`]，执行体据此落产物格（P1b，DE-047 D-308）。
 pub(crate) use self::tool_executor::{land_outcome_async, process_tool_calls_in_env, RoundEnv};

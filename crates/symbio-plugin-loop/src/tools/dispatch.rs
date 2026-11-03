@@ -2,10 +2,10 @@
 //!
 //! 两个函数按**处理阶段**（不按职责）分开：
 //!
-//! - [`gates`] —— 拒止骨架与宿主闸（外部执行）：**没有批首读数**，判据按每一笔债
-//!   在准备点现取。
-//! - [`batch`] —— 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、宿主闸 /
-//!   声明闸拒止、钩子拦下与正常执行四条出口。
+//! - [`gates`] —— 拒止骨架与外部执行的**中性输入**（`GateInputs`）：没有批首读数，
+//!   读数按每一笔债在准备点现取；判定（快慢 / 预算 / 开窗）在执行体。
+//! - [`batch`] —— 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、声明闸
+//!   拒止、钩子拦下与正常执行四条出口。
 //!
 //! 「没跑到」的占位结果子节点不在这里收口：节点是事实的投影，环只写
 //! `failed{why}`，展示由投影器渲染（DE-047 D-312）。
@@ -33,12 +33,11 @@ pub fn is_unanswered(failure_kind: &str) -> bool {
 }
 
 use super::tool_executor::{
-    build_user_prompt_message, call_signature, execute_one, record_effect, BreakerInputs,
-    ExecResult, RoundEnv, ToolDecls,
+    build_user_prompt_message, call_signature, execute_one, record_effect, ExecResult, GateInputs,
+    RoundEnv, ToolDecls,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_kernel::capability::failure_kind;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::llm::TurnToolCallInfo;
@@ -56,8 +55,8 @@ use {
     symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
 };
 
-// 闸门表与拒止骨架：逐条执行段按 `first_refusal` 判、经 `refuse` 收口。
-pub(crate) use self::gates::{batch_principal, first_refusal, refuse, GateContext, Refusal};
+// 拒止骨架：声明闸与 PreToolUse 钩子经 `refuse` 收口。
+pub(crate) use self::gates::{batch_principal, refuse, Refusal};
 
 // ── 共用收口原语（逐字来自拆分前的 tool_executor.rs）────────────────────────
 /// 把父 ToolCall 的**完整副本**定稿为终态并广播。
