@@ -11,7 +11,7 @@
 //! ```
 //!
 //! 本文件**没有环**：`D-222` 裁决 5 把控制面收成**一个**环，它住在
-//! [`super::turn_driver::drive`]（`turn_exec::drive` 只是薄转发）。幕首、轮首四行、接缝、汇报、轮内各行与幕间接续
+//! [`super::turn_driver::drive`]。幕首、轮首四行、接缝、汇报、轮内各行与幕间接续
 //! 都是那张绑定表上的行，由 `(phase, anchor)` 决出先后；本文件只做三件事——备好本轮状态、
 //! 过闸门、把结局映射成 [`TurnExit`]。
 //!
@@ -282,7 +282,7 @@ pub async fn run_chat_loop(
     // 结果先落成变量再 `match`：`Control` 里装的是 `&mut context` / `&mut turn`，
     // 作为 scrutinee 的临时值会活到整个 `match`——答话那一臂要再借它们一次。
     let driven = super::turn_driver::drive(
-        super::turn_exec::DriveStart::Control(Box::new(super::turn_exec::Control {
+        super::turn_exec::Control {
             orchestrator,
             orchestrator_arc: &orchestrator_arc,
             ctx: &ctx,
@@ -292,7 +292,7 @@ pub async fn run_chat_loop(
             req: &turn_req,
             single_message: single_message.take(),
             resume,
-        })),
+        },
         super::loop_rows::ACTORS,
     )
     .await;

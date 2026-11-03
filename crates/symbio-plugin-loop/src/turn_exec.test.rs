@@ -14,6 +14,8 @@
 use crate::control_decl::guard_vocab;
 use std::sync::{Arc, Mutex};
 
+use symbio_kernel::adapters::LatencyTier;
+use symbio_kernel::llm::TurnOutput;
 use super::*;
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::capability::{Capability, CapabilityRow, Registry};
@@ -371,7 +373,11 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     // 幕首之后那一半（分发方 / 汇报落地面 / 宿主面）与生产同一个构造点：夹具自己备的
     // 只是幕首（用户格 / 配置格由本文件的 `seed_*` 直给）。
     let mut stage = super::stage_runtime(assembled, emitter, open);
-    stage.set_reflex_for_test(reflex_text.map(str::to_string));
+    stage
+        .draft
+        .set_reflex(reflex_text.map(|text| super::super::turn_runner::ReflexAnswer {
+            text: text.to_string(),
+        }));
     let head = stage.head_parts(
         orchestrator.clone(),
         request_ctx,
@@ -379,12 +385,10 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         &mut turn,
         &turn_req,
     );
-    match crate::turn_driver::drive(
-        super::DriveStart::Ready(Box::new(super::ReadyStage {
-            stage,
-            head,
-            request_ctx: None,
-        })),
+    match crate::turn_driver::drive_prepared(
+        stage,
+        head,
+        None,
         super::super::loop_rows::ACTORS,
     )
     .await?
@@ -932,7 +936,7 @@ fn setup_with_settings(
     }
 }
 
-// ==================== 一幕的直线（生产入口 `DriveStart::Control`）====================
+// ==================== 一幕的直线（生产入口 `Control`）====================
 //
 // 三条判据各钉一环幕落的一格：备输入的出口（`result:"ready"`）、重试分支的登记、
 // 定稿答话轮就地收束（`result:"closed"`）。入口取**生产那一个**：控制面交一幕，
@@ -1033,7 +1037,7 @@ async fn control_harness() -> ControlHarness {
 /// 走生产入口跑这一幕（开幕 / 选债 / 收幕都在环里）。
 async fn drive_control(h: &mut ControlHarness) -> Result<super::DriveEnd, super::TurnExecExit> {
     crate::turn_driver::drive(
-        super::DriveStart::Control(Box::new(super::Control {
+        super::Control {
             orchestrator: &h.orchestrator,
             orchestrator_arc: &h.orchestrator,
             ctx: &h.ctx,
@@ -1043,7 +1047,7 @@ async fn drive_control(h: &mut ControlHarness) -> Result<super::DriveEnd, super:
             req: &h.req,
             single_message: h.message.take(),
             resume: None,
-        })),
+        },
         super::super::loop_rows::ACTORS,
     )
     .await

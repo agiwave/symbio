@@ -92,55 +92,44 @@
 use std::sync::{Arc, Mutex};
 
 use symbio_kernel::actors::ActorSpec;
-use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::llm::PromptMessage;
-use symbio_kernel::llm::TurnOutput;
 use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest};
 use symbio_kernel::store::{AppendError, Store};
 use symbio_plugin_api::events::{
-    EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
-    EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_MESSAGE_ADDED, EVENT_USER_MESSAGE,
+    EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_MESSAGE_ADDED,
 };
-use symbio_sdk::adapters::{AdapterError, DeltaSink, FullModel, LlmAdapter, TokenIssuer};
-use symbio_sdk::chat::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
-};
+use symbio_sdk::adapters::{AdapterError, DeltaSink, FullModel, LlmAdapter};
+use symbio_sdk::chat::chat_node::{ChatNode, NodeKind, CHAT_STYLE_TAG_REASONING};
 use symbio_sdk::invariants::is_stop_fact;
-use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest, SessionView};
+use symbio_sdk::turn::dispatch::SessionView;
 
-// 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
-// 留在持令牌的 session）；本文件只剩轮内调用点，经 `port=session` 的动作行发起。
-use super::turn_runner::{begin_turn, TurnInput, TurnSession, TurnSessionBegin};
+use super::turn_runner::TurnSession;
 // 运行器一族**已下沉到本插件**（2026-10-09，见 `turn_runner.rs` 的头注）：它们不是 core 的
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
-use super::session_port::{self, SessionPort};
+use super::session_port::SessionPort;
 
 // —— 阶段分层 ——
-// 四个处理阶段各自成文件；再导出保持 `turn_exec::*` 的既有路径不变
-// （消费方与本文件测试都不必改引用）。本文件只留调度与共享状态。
-mod assemble;
-mod call;
-pub(crate) mod drive;
-mod outcome;
-mod persist;
+// 处理阶段收进轮次驱动器（`turn_driver`）；再导出保持 `turn_exec::*` 的既有路径不变
+// （消费方与本文件测试都不必改引用）。本文件只留行执行体与共享状态。
 mod policy;
 
-pub(crate) use self::assemble::{assemble_turn, Assembled};
-// 续写幕的开幕方（`chat_loop::drive`）要用同一个「已开未收束」判据：
-// 这里的收束口径（只认 final / fallback）与 C4（兼认产物）刻意不同，见函数文档。
-pub(crate) use self::assemble::last_open_turn;
-pub(crate) use self::call::{open_turn, OpenRun, Running};
-pub(crate) use self::drive::{Control, DriveEnd, DriveStart};
+// 驱动面（幕首 / 收幕 / 环 / 装配 / 落格）现在与驱动器同住：路径经此再导出，消费方
+// 与本文件测试的 `turn_exec::*` 引用不变。多数名字只被测试借道，非测试构建里因此
+// 允许「未使用」。
+#[allow(unused_imports)]
+pub(crate) use crate::turn_driver::{
+    assemble_turn, classify_turn, execute_final_reply_turn, last_open_turn, open_turn,
+    persist_turn, Assembled, Classified, Control, DriveEnd, ExecTurnResult, OpenRun, Running,
+    Settled, TurnExecExit,
+};
 // 夹具入口（幕已开好，只驱动）：生产不用它，只有测试的两个夹具从 crate 外借道。
 // `stage_runtime` 是幕首之后那一半的同形入口——夹具自己备幕首，不该另抄一份
 // 「分发方与汇报落地面怎么从装配束里造」。
 #[cfg(test)]
-pub(crate) use self::drive::{stage_runtime, ReadyStage, StageRuntime};
-pub(crate) use self::outcome::{classify_turn, Classified, ExecTurnResult, Settled, TurnExecExit};
-pub(crate) use self::persist::{execute_final_reply_turn, persist_turn};
+pub(crate) use crate::turn_driver::{stage_runtime, StageRuntime};
 // 端口通用受理入口（与「一笔债」同一件事）：本文件只把它挂进绑定表，
 // 实现住在 `port.rs`，因为它与 `execute_one` 共用同一份记账口径。
 pub(crate) use super::port::run_port;
@@ -150,7 +139,7 @@ pub(crate) use super::port::run_port;
 /// 只有建节点（`Snapshot`）与定格（`Finalize`）需要它——窄追加（`Delta`）只带
 /// `id + text`，归属由节点 id 决定（与 model 插件的帧面同一形状）。
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum UiNodeKind {
+pub(crate) enum UiNodeKind {
     Text,
     Reasoning,
 }
@@ -158,7 +147,7 @@ enum UiNodeKind {
 impl UiNodeKind {
     /// 给这一帧的节点定形状：正文是 `Body`，推理是 `Notice`（折叠叶，[D-070 §决策 3]
     /// ——reasoning 与 compression 同格，前端渲染二者一样，业务区分只在 `style_tag`）。
-    fn shape(self, node: ChatNode) -> ChatNode {
+    pub(crate) fn shape(self, node: ChatNode) -> ChatNode {
         match self {
             UiNodeKind::Text => node,
             UiNodeKind::Reasoning => {
@@ -171,7 +160,7 @@ impl UiNodeKind {
 }
 
 /// UI 桥的帧：首片建节点（快照），后续窄追加，收束定格。语义与 model 插件的流式帧同构。
-enum UiFrame {
+pub(crate) enum UiFrame {
     Snapshot {
         id: String,
         parent: String,
@@ -215,7 +204,7 @@ enum UiFrame {
 /// 取值不是性能参数而是**内存上界**：`on_delta` 是同步回调（不能 await），所以生产者
 /// 不能被背压——慢消费者下唯一能让内存有界的办法是**给队列设界**，并在满了的时候
 /// **合并增量**而不是丢帧（丢增量 = 丢正文，界面会少一截）。
-const UI_FRAME_CAPACITY: usize = 64;
+pub(crate) const UI_FRAME_CAPACITY: usize = 64;
 
 /// 有界 UI 帧队列：容量上限 + 增量合并。
 ///
@@ -242,7 +231,7 @@ const UI_FRAME_CAPACITY: usize = 64;
 ///
 /// `UiBridge` drop 时关闭队列，接收端 `pop` 返回 `None` 自然退出——与原先
 /// `UnboundedSender` drop 后 `recv` 返回 `None` 同形。
-struct FrameQueue {
+pub(crate) struct FrameQueue {
     inner: std::sync::Mutex<FrameQueueInner>,
     cap: usize,
     notify: tokio::sync::Notify,
@@ -257,7 +246,7 @@ struct FrameQueueInner {
 }
 
 impl FrameQueue {
-    fn new(cap: usize) -> Self {
+    pub(crate) fn new(cap: usize) -> Self {
         Self {
             inner: std::sync::Mutex::new(FrameQueueInner::default()),
             cap,
@@ -330,7 +319,7 @@ impl FrameQueue {
         self.notify.notify_waiters();
     }
 
-    async fn pop(&self) -> Option<UiFrame> {
+    pub(crate) async fn pop(&self) -> Option<UiFrame> {
         loop {
             // ⚠️ **必须先注册兴趣，再检查条件**——否则丢唤醒。
             //
@@ -387,8 +376,8 @@ impl FrameQueue {
 /// [`UiBridge::finalize_node`] 定格本轮正文——它必须与增量帧走**同一条通道**，
 /// 否则定格帧会越过队列里未消化的增量先到，正文被追加到已定格的副本之后。
 pub(crate) struct UiBridge {
-    tx: Arc<FrameQueue>,
-    root_id: String,
+    pub(crate) tx: Arc<FrameQueue>,
+    pub(crate) root_id: String,
     /// 正文节点 `(id, 累积正文)`：首片分配 id、此后稳定；`finalize_node` 交还并置空
     /// （下一轮另开）。
     ///
@@ -397,11 +386,11 @@ pub(crate) struct UiBridge {
     /// 用户中断后那半句话消失（追问名词就没了前置上下文）。累积是无损的：
     /// 每一片都先经这里再进队列，队列满了是**合并**同节点增量（见 `FrameQueue`），
     /// 不丢。
-    node: Arc<Mutex<Option<(String, String)>>>,
+    pub(crate) node: Arc<Mutex<Option<(String, String)>>>,
     /// 推理节点 `(id, 累积正文)`：与正文同形。推理正文**没有别的持有者**——
     /// `LlmTurn` 只装 `text` 与 `tool_calls`，不在这里攒，收束帧就只能写
     /// 「推理到此为止」而不带内容，网格里也查不到 reasoning。
-    reasoning: Arc<Mutex<Option<(String, String)>>>,
+    pub(crate) reasoning: Arc<Mutex<Option<(String, String)>>>,
 }
 
 /// `UiBridge` drop 时**关闭队列**：接收端的 `pop` 因此返回 `None` 而退出。
@@ -755,8 +744,8 @@ pub(crate) struct Ctx<'a> {
     /// 请求级宿主面（能力注册表 / 会话 id / 工作区）：创建与授权两行要用它判风险档。
     ///
     /// 控制面取自轮首那一片（与 [`HeadCtx::request_ctx`] 同一份）；裸幕夹具
-    /// （`head = None`）没有轮首片，由 [`super::turn_exec::ReadyStage::request_ctx`]
-    /// 直给——两条来源在派发点合成一个字段，行内不再二次判断。
+    /// （`head = None`）没有轮首片，由 [`crate::turn_driver::drive_prepared`] 的
+    /// `request_ctx` 直给——两条来源在派发点合成一个字段，行内不再二次判断。
     pub(crate) request_ctx: Option<Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
 }
 
@@ -1132,7 +1121,7 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             reason: o.dialog_reason,
             exclude_from_context: true,
         });
-        self::assemble::land_consolidation(head.loop_session.as_ref(), consolidation.as_deref())
+        crate::turn_driver::land_consolidation(head.loop_session.as_ref(), consolidation.as_deref())
             .await;
         let sections = super::chat_loop::inputs::prepare_request_sections(
             head.orchestrator,
@@ -1153,7 +1142,7 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             head.turn,
             "ready",
         )?;
-        self::assemble::land_seam(
+        crate::turn_driver::land_seam(
             ctx.store.as_ref(),
             head.bridge,
             head.turn,

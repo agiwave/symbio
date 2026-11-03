@@ -264,26 +264,18 @@ impl RunnerFixture {
         // `head` 恒 `None`：本夹具没有编排层那一片状态，而它选到的行也不读它。
         // 幕按裸形交进去（没有装配束 ⇒ 没有宿主面）：收幕把结局按值交回
         // （`DriveEnd::Bare`），归类与落库本夹具不做。
-        let stage = super::super::turn_exec::StageRuntime::bare(
-            session,
-            store.clone(),
+        let stage = super::super::turn_exec::StageRuntime {
+            draft: session,
+            store: store.clone(),
             llm,
             tok,
             sink,
             tools,
             dispatch,
-        );
-        let end = super::super::turn_driver::drive(
-            super::super::turn_exec::DriveStart::Ready(Box::new(
-                super::super::turn_exec::ReadyStage {
-                    stage,
-                    head: None,
-                    request_ctx,
-                },
-            )),
-            actors,
-        )
-        .await
+            host: None,
+        };
+        let end = super::super::turn_driver::drive_prepared(stage, None, request_ctx, actors)
+            .await
         .map_err(|exit| match exit {
             super::super::turn_exec::TurnExecExit::Failed(e) => ActorError::Read(e),
             super::super::turn_exec::TurnExecExit::Aborted(_) => {
