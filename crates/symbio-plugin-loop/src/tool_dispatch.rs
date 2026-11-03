@@ -583,11 +583,16 @@ impl ToolPort {
             self.turn,
             self.user_seq,
             serde_json::json!({
-                "tool": name,
-                "risk": risk_name,
-                "threshold": policy.threshold.as_str(),
-                "approved": approved,
-                "deferred": deferred,
+                // 中性键（DE-047 D-311）：调用标识 / 名称 / 参数值，加上授权结论的引用。
+                // 世界类型（线上名解析、风险档语义、参数含义）留在提供者一侧。
+                "name": name,
+                "args": args,
+                "authz": {
+                    "risk": risk_name,
+                    "threshold": policy.threshold.as_str(),
+                    "approved": approved,
+                    "deferred": deferred,
+                },
             }),
         ) {
             symbio_plugin_api::plugin_warn!(
