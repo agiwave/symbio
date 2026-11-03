@@ -691,8 +691,6 @@ impl PortExecutor for FixtureToolPort {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        // 结果节点身份由调用 id 派生（与生产同一份规则，载荷不再带这个键）。
-        let result_msg_id = symbio_kernel::event::result_node_id(&tool_call_id);
         let Some(ctx) = exec.ctx.clone() else {
             return fixture_outcome("Error: No request context".into(), false, None);
         };
@@ -727,7 +725,6 @@ impl PortExecutor for FixtureToolPort {
         let tool_ctx = ctx.fork();
         let _ = tool_ctx.set_payload(args);
         tool_ctx.set(symbio_sdk::keys::TOOL_CALL_ID, tool_call_id);
-        tool_ctx.set(symbio_sdk::keys::RESULT_MSG_ID, result_msg_id);
         tool_ctx.set(symbio_kernel::exec::EVENT_SINK, exec.sink.clone());
         tool_ctx.set(symbio_kernel::exec::ABORT_SIGNAL, exec.abort.clone());
 

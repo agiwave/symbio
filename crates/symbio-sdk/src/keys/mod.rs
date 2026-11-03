@@ -102,9 +102,6 @@ define_string_key!(TraceIdKey, TRACE_ID, "trace_id");
 // 缺省（顶层请求 / 无 vdfs 装配）为空。
 define_string_key!(VdfsParentAddrKey, VDFS_PARENT_ADDR, "vdfs_parent_addr");
 define_string_key!(ToolCallIdKey, TOOL_CALL_ID, "tool_call_id");
-// 流式工具的结果消息 id：工具据此以该 id 广播消息帧（增量走 `delta`）。
-// 它就是结果节点 id（由调用 id 派生，`event::result_node_id`），不再作为载荷键传递。
-define_string_key!(ResultMsgIdKey, RESULT_MSG_ID, "result_msg_id");
 // 会话运行模式：auto（无人值守，失败不弹交互）| interactive（人在环，失败可交互，但 confirm/ask_user 仍不弹框）
 define_string_key!(ModeKey, MODE, "mode");
 // 会话选定的 Model Provider ID（与 agent_id 同级别：随 chat_send 传输 + session.metadata 持久化）

@@ -675,7 +675,7 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
 // `failure_kind` 判据与解码（B3 的 pending 半边）已迁 session 的
 // `port.test.rs`；这里留的是**节点构造**那一半——它属于环。
 
-/// user_prompt 节点的身份归编排层：`id = result_msg_id`、`parent_id = tool_call_id`。
+/// user_prompt 节点的身份归编排层：`id = result_node_id`、`parent_id = tool_call_id`。
 ///
 /// 这两个 id 正是「同一逻辑节点两个 id」事故的正反面。工具侧现在**拿不到**它们
 /// （[`PendingPrompt`] 里没有 id 字段），所以那类 bug 在类型层面不成立。

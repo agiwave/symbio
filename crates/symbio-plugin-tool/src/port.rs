@@ -41,8 +41,8 @@ use symbio_plugin_api::{
     failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
     Entity, ExecAbortSignal, FactDraft, PluginError, PluginInvokeRequestExt, PluginPayload,
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider, Verb,
-    ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_SINK, PATH, PLUGIN_ID_TOOL, RESULT_MSG_ID,
-    SESSION_ID, TOOL_CALL_ID, WORKDIR,
+    ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID,
+    TOOL_CALL_ID, WORKDIR,
 };
 
 /// 端口名（唯一来源：本插件）。
@@ -580,9 +580,6 @@ impl PortExecutor for ToolPort {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        // 结果节点身份由调用 id 派生（写侧 / 读侧 / 执行体同一份规则，D-312）：
-        // 流式增量帧按它广播，最终结果卡也挂在它下面。
-        let result_msg_id = symbio_plugin_api::node_build::result_node_id(&tool_call_id);
         let args = payload
             .get(KEY_ARGS)
             .cloned()
@@ -714,8 +711,6 @@ impl PortExecutor for ToolPort {
         tool_ctx.set(AGENT_ID, agent_id);
         tool_ctx.set(SESSION_ID, session_id);
         tool_ctx.set(TOOL_CALL_ID, tool_call_id.clone());
-        // 流式工具（如 shell）据此 id 广播增量帧：它就是结果节点 id（由调用 id 派生）。
-        tool_ctx.set(RESULT_MSG_ID, result_msg_id);
         // 执行期双原语注入：工具「把事件写到哪」与「如何感知中止」的唯一来源。
         tool_ctx.set(EVENT_SINK, exec.sink.clone());
         tool_ctx.set(ABORT_SIGNAL, exec.abort.clone());

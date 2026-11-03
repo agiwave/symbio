@@ -332,7 +332,7 @@ pub mod failure_kind {
     ///
     /// 编排层凭这**一个**判据决定：构造 user_prompt 节点 + 把父 ToolCall 收口为
     /// `WaitingUserAction`。工具侧只声明意图（返回该 kind + `prompt` 载荷），
-    /// 不构造节点——节点身份（`result_msg_id`）归编排层。
+    /// 不构造节点——节点身份（由调用 id派生）归编排层。
     pub fn is_pending(kind: &str) -> bool {
         matches!(kind, NEEDS_APPROVAL | NEEDS_INTERACTION)
     }

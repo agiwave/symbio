@@ -49,12 +49,12 @@ async fn record_protocol_failure(
     context_messages: &[ChatNode],
     principal: &symbio_sdk::chat::principal::Principal,
 ) {
-    let result_msg_id = symbio_kernel::event::result_node_id(call_id);
+    let result_node_id = symbio_kernel::event::result_node_id(call_id);
     let mut tool_msg = llm_build_tool_message(
         call_id,
         &format!("Error: {error_text}"),
         Some(false),
-        Some(result_msg_id),
+        Some(result_node_id),
         // 协议级失败：调用本身的 id/name 就非法，工具名**无从说起**——主体由
         // `attributed` 按会话主体兜底。
         None,
@@ -435,9 +435,9 @@ async fn emit_terminal(
             args,
             notice,
         } => {
-            let result_msg_id = symbio_kernel::event::result_node_id(&id);
+            let result_node_id = symbio_kernel::event::result_node_id(&id);
             let mut tool_msg =
-                llm_build_tool_message(&id, &notice, Some(false), Some(result_msg_id), Some(&name));
+                llm_build_tool_message(&id, &notice, Some(false), Some(result_node_id), Some(&name));
             // 与 `not_executed_result` 同口径：「没跑」不是「跑失败」，以 Completed
             // 留在上下文；成因由 `failure_kind` 承载（**并入**，不盖掉 tool_name）。
             tool_msg.status = Some(NodeStatus::Completed);
@@ -517,7 +517,7 @@ async fn finish_call(
         args,
         repeat_note,
     } = ready;
-    let result_msg_id = symbio_kernel::event::result_node_id(&id);
+    let result_node_id = symbio_kernel::event::result_node_id(&id);
     // 执行体交回的已是「节点正文 / 记账原文 / 守卫元数据」三份，本层不再裁剪
     // 结果（L0 守卫随执行体迁出，P1b / DE-047 D-308）。
     let ExecResult {
@@ -557,10 +557,10 @@ async fn finish_call(
     .await;
 
     // 工具以「等待用户动作」结束时，**节点在这里构造**：本函数是工具结果节点的
-    // 唯一写入者（它持有 `result_msg_id` 与父 ToolCall 的终态）。工具只给载荷
+    // 唯一写入者（它持有 `result_node_id` 与父 ToolCall 的终态）。工具只给载荷
     // （`PendingPrompt`），因此不存在"工具造一个节点、这里再造一个"的双 id 问题。
     let mut tool_msg = if let Some(pending) = pending_user_prompt.take() {
-        build_user_prompt_message(&result_msg_id, &id, &pending, &name)
+        build_user_prompt_message(&result_node_id, &id, &pending, &name)
     } else {
         // 正文用执行体交回的**已守卫文本**（超长结果由执行体存档 + head/tail 摘要，
         // 存档目录跟随会话生命周期）。
@@ -568,7 +568,7 @@ async fn finish_call(
             &id,
             &guarded_text,
             Some(success),
-            Some(result_msg_id),
+            Some(result_node_id),
             Some(&name),
         );
         if truncated {

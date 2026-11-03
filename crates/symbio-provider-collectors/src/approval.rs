@@ -103,8 +103,8 @@ pub fn approval_gate(
 /// 构造 confirm 类型 prompt 的**返回值**（不构造节点、不发事件）。
 ///
 /// 职责边界：工具只回答「需要用户确认什么」——`prompt` 载荷 + `failure_kind`。
-/// **user_prompt 节点由编排层构造**（`session/tools/tool_executor.rs`）：它才拥有
-/// `result_msg_id`（节点身份）与父 ToolCall 的终态。
+/// **user_prompt 节点由编排层构造**（`session/tools/tool_executor.rs`）：它拥有
+/// 结果节点 id（由调用 id 派生）与父 ToolCall 的终态。
 fn confirm_prompt_payload(
     tool_name: &str,
     tool_description: &str,

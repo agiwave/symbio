@@ -552,7 +552,7 @@ Ok(PluginPayload::new(&json!({
 ```
 
 节点由 `process_tool_calls_async` 用 `build_user_prompt_message` 构造
-（`id = result_msg_id`、`parent_id = tool_call_id`）——**本文件是工具结果节点的
+（`id = result_node_id`、`parent_id = tool_call_id`）——**本文件是工具结果节点的
 唯一写入者**，普通结果与等待用户都出自它。
 
 **这条规则消灭的是一类 bug**：工具自造节点会让同一逻辑节点在前端有两个 id（重复审批卡、
@@ -622,7 +622,7 @@ capability_invoke(cap, ctx) ← 唯一「拆信封」点（§9）
  ├─ args = ctx.payload::<Value> ?? Null
  ├─ env = ExecEnv::from_request(&*ctx) ← 出口 + 中止，缺席 ⇒ 静默 / 永不中止
  └─ cap.execute(args, &env, ctx)
- ├─ 读 ctx：RESULT_MSG_ID / TOOL_CALL_ID / WORKDIR…（只读真正需要的）
+ ├─ 读 ctx：TOOL_CALL_ID / WORKDIR…（只读真正需要的；结果节点 id 由调用 id 派生）
  ├─ env.sink.apply(message) ─► 转写唯一写入点（进程内，零 serde）
  └─ 返回 Value ────────────────► PluginPayload::Data
  └─ execute_tool_async

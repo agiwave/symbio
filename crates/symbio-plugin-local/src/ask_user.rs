@@ -238,7 +238,7 @@ impl Capability for AskUserTool {
 
         // 只回答「要问用户什么」——`prompt` 载荷 + `failure_kind`。
         // **user_prompt 节点由编排层构造**（`session/tools/tool_executor.rs`）：它拥有
-        // `result_msg_id`（节点身份）与父 ToolCall 终态，是工具结果节点的唯一写入者。
+        // 结果节点 id（由调用 id 派生）与父 ToolCall 终态，是工具结果节点的唯一写入者。
         //
         // 历史上这里建一条 Session 通道、发一个 Upsert 帧、drop tx 再返回 rx，
         // 由消费方解回来、把 parent_id 锚到 tool_call_id、改 id 后重新播一遍——

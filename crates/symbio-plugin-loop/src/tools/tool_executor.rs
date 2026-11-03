@@ -50,15 +50,15 @@ pub(super) fn call_signature(name: &str, args: &str) -> String {
 ///
 /// **本文件是工具结果节点的唯一写入者**：普通结果（`llm_build_tool_message`）与
 /// 等待用户（本函数）都出自这里，两者共享同一套 id 约定
-/// （`id = result_msg_id`、`parent_id = tool_call_id`）。
+/// （`id = result_node_id`、`parent_id = tool_call_id`）。
 pub(super) fn build_user_prompt_message(
-    result_msg_id: &str,
+    result_node_id: &str,
     tool_call_id: &str,
     pending: &PendingPrompt,
     tool_name: &str,
 ) -> ChatNode {
     ChatNode {
-        id: result_msg_id.to_string(),
+        id: result_node_id.to_string(),
         parent_id: Some(tool_call_id.to_string()),
         // 等待用户的交互卡同样是**工具的结果**：族归工具自己。
         // 身份只写这一份——`role` 那格不再跟着写（D-147：主体在场时折叠读主体，

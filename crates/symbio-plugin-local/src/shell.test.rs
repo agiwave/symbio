@@ -28,16 +28,15 @@ fn recording_sink() -> (ExecEventSink, Arc<std::sync::Mutex<Vec<ChatNode>>>) {
     )
 }
 
-/// 构造执行期上下文。`target` 为 `None` ⇒ 模拟 `route()` 直连调用（无占位节点）。
+/// 构造执行期上下文。`target` 为 `None` ⇒ 模拟 `route()` 直连调用（无结果节点）。
 fn make_ctx(
     command: &str,
     sink: ExecEventSink,
-    target: Option<(&str, &str)>,
+    target: Option<&str>,
 ) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
     req.set(symbio_plugin_api::WORKDIR, ".".to_string());
-    if let Some((msg_id, tool_call_id)) = target {
-        req.set(symbio_plugin_api::RESULT_MSG_ID, msg_id.to_string());
+    if let Some(tool_call_id) = target {
         req.set(symbio_plugin_api::TOOL_CALL_ID, tool_call_id.to_string());
     }
     req.set(symbio_plugin_api::EVENT_SINK, sink);
@@ -50,10 +49,10 @@ fn make_ctx(
     Arc::new(req)
 }
 
-/// 断言一组帧全是「按编排层 id 写的流式帧」。
-fn assert_all_snapshots_use_orchestrator_ids(ops: &[ChatNode], msg_id: &str, tool_call_id: &str) {
+/// 断言一组帧全是「按派生结果节点 id 写的流式帧」。
+fn assert_all_snapshots_use_derived_ids(ops: &[ChatNode], msg_id: &str, tool_call_id: &str) {
     for message in ops {
-        assert_eq!(message.id, msg_id, "帧 id 必须是编排层预留的结果节点 id");
+        assert_eq!(message.id, msg_id, "帧 id 必须是调用 id 派生的结果节点 id");
         assert_eq!(message.parent_id.as_deref(), Some(tool_call_id));
         // 帧不再手写 `role` 格——分派读法经 `node_role` 折叠，
         // shell 流式帧的 Tool 角色由 `principal.kind=tool` 承担。
@@ -100,7 +99,7 @@ async fn pump_emits_snapshot_with_orchestrator_ids() {
     assert_eq!(own.lock().unwrap().as_str(), "hello\n", "累积缓冲必须完整");
     let ops = ops.lock().unwrap();
     assert_eq!(ops.len(), 1, "首行必须立即成帧");
-    assert_all_snapshots_use_orchestrator_ids(&ops, "res-1", "tc-1");
+    assert_all_snapshots_use_derived_ids(&ops, "res-1", "tc-1");
     assert_eq!(
         ops[0].delta.as_deref(),
         Some("hello\n"),
@@ -158,7 +157,7 @@ async fn pump_with_silent_sink_emits_nothing() {
 async fn execute_returns_data_payload_with_full_output() {
     let tool = ShellTool::new(Arc::new(SecurityPolicy::default()), 60);
     let (sink, ops) = recording_sink();
-    let ctx = make_ctx("echo hello_stream", sink, Some(("res-1", "tc-1")));
+    let ctx = make_ctx("echo hello_stream", sink, Some("tc-1"));
 
     let v = exec(&tool, ctx).await.unwrap();
     let out = v["output"].as_str().unwrap();
@@ -166,9 +165,9 @@ async fn execute_returns_data_payload_with_full_output() {
     assert!(out.contains("[exit code: 0]"), "退出码缺失: {out}");
     assert_eq!(v["exit_code"].as_i64(), Some(0));
 
-    // 快照帧（若有）必须只认编排层的 id——工具不得自造节点身份。
+    // 快照帧（若有）必须只认派生结果节点 id——工具不得自造节点身份。
     let ops = ops.lock().unwrap();
-    assert_all_snapshots_use_orchestrator_ids(&ops, "res-1", "tc-1");
+    assert_all_snapshots_use_derived_ids(&ops, "tc-1-result", "tc-1");
 }
 
 /// 直连调用（无快照身份）：同一份代码照跑，静默返回。
@@ -192,7 +191,7 @@ async fn execute_many_lines_completes_without_backpressure() {
     let ctx = make_ctx(
         "echo line1 & echo line2 & echo line3 & echo line4",
         sink,
-        Some(("res-1", "tc-1")),
+        Some("tc-1"),
     );
 
     let v = exec(&tool, ctx).await.unwrap();
@@ -200,7 +199,7 @@ async fn execute_many_lines_completes_without_backpressure() {
     assert!(out.contains("line1"), "输出缺失: {out}");
     assert!(out.contains("line4"), "输出缺失: {out}");
     let ops = ops.lock().unwrap();
-    assert_all_snapshots_use_orchestrator_ids(&ops, "res-1", "tc-1");
+    assert_all_snapshots_use_derived_ids(&ops, "tc-1-result", "tc-1");
 }
 
 /// 参数非法 ⇒ `Err`（不再是「错误哨兵帧」）：错误由 `tool_executor` 统一收敛。
@@ -208,7 +207,7 @@ async fn execute_many_lines_completes_without_backpressure() {
 async fn execute_rejects_empty_command() {
     let tool = ShellTool::new(Arc::new(SecurityPolicy::default()), 60);
     let (sink, ops) = recording_sink();
-    let ctx = make_ctx("", sink, Some(("res-1", "tc-1")));
+    let ctx = make_ctx("", sink, Some("tc-1"));
 
     let err = exec(&tool, ctx).await.unwrap_err();
     assert!(
@@ -220,24 +219,16 @@ async fn execute_rejects_empty_command() {
 
 // ── ctx 读取口径 ──────────────────────────────────────────────────────
 
-/// 两个 id 必须同行：缺任一即视为「直连调用」。
+/// 只认调用 id：缺它即视为「直连调用」，节点 id 由它派生。
 #[tokio::test]
-async fn snapshot_target_requires_both_ids() {
+async fn snapshot_target_requires_call_id() {
     let bare = PluginSimpleRequest::new(None, None);
     assert!(SnapshotTarget::from_ctx(&bare).is_none());
 
-    let half = PluginSimpleRequest::new(None, None);
-    half.set(symbio_plugin_api::RESULT_MSG_ID, "res-1".to_string());
-    assert!(
-        SnapshotTarget::from_ctx(&half).is_none(),
-        "只有 msg_id 不足以定位快照"
-    );
-
     let full = PluginSimpleRequest::new(None, None);
-    full.set(symbio_plugin_api::RESULT_MSG_ID, "res-1".to_string());
     full.set(symbio_plugin_api::TOOL_CALL_ID, "tc-1".to_string());
-    let t = SnapshotTarget::from_ctx(&full).expect("两个 id 齐备");
-    assert_eq!(t.msg_id, "res-1");
+    let t = SnapshotTarget::from_ctx(&full).expect("调用 id 在场");
+    assert_eq!(t.msg_id, "tc-1-result");
     assert_eq!(t.tool_call_id, "tc-1");
 }
 

@@ -57,13 +57,12 @@ pub struct Response {
     pub risk_level: String,
 }
 
-/// 增量快照的**节点身份**（编排层提供）。
+/// 增量快照的**节点身份**（由调用 id 派生）。
 ///
-/// 两个 id 必须同行：`msg_id` 是编排层为本次调用预留的结果节点（占位节点也是它建的），
-/// `tool_call_id` 是父 ToolCall。工具自己猜 id 正是历史上「同一逻辑节点两个 id」的成因，
-/// 因此这里只接受编排层给的一对值。
+/// `tool_call_id` 与模型交回的调用 id；结果节点 id 由它派生（`result_node_id`）——
+/// 工具自己猜 id 正是历史上「同一逻辑节点两个 id」的成因，因此两者只有一份来源。
 ///
-/// **缺席 = 直连调用**（`route()`，如 MCP 网关）：没有占位节点，也就不发增量快照——
+/// **调用 id 缺席 = 直连调用**（`route()`，如 MCP 网关）：没有结果节点，也就不发增量快照——
 /// 与 [`ExecEventSink::Null`] 是同一件事的两个面（都由「编排层是否在场」决定）。
 #[derive(Debug, Clone)]
 struct SnapshotTarget {
@@ -72,15 +71,14 @@ struct SnapshotTarget {
 }
 
 impl SnapshotTarget {
-    /// 从 ctx 读；任一 id 缺失 ⇒ `None`。
+    /// 从 ctx 读调用 id再派生节点 id（`result_node_id`，同一份规则：写侧 / 读侧 / 执行体）。
+    /// 调用 id 缺失 ⇒ `None`。
     fn from_ctx(ctx: &dyn PluginInvokeRequest) -> Option<Self> {
-        let msg_id = ctx
-            .get(symbio_plugin_api::RESULT_MSG_ID)
-            .unwrap_or_default();
         let tool_call_id = ctx.get(symbio_plugin_api::TOOL_CALL_ID).unwrap_or_default();
-        if msg_id.is_empty() || tool_call_id.is_empty() {
+        if tool_call_id.is_empty() {
             return None;
         }
+        let msg_id = symbio_plugin_api::node_build::result_node_id(&tool_call_id);
         Some(Self {
             msg_id,
             tool_call_id,

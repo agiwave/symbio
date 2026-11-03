@@ -751,7 +751,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
     let mut records: HashMap<String, ChatNode> = HashMap::new();
     let mut relay_error: Option<String> = None;
     // 子会话内的待用户动作：只**捕获载荷**，不落出口——节点由 `tool_executor`
-    // 以统一 id（`result_msg_id`）构造。若此处也落一个（子会话自己的 id），前端
+    // 以派生 id（调用 id → 结果节点 id）构造。若此处也落一个（子会话自己的 id），前端
     // 会收到两个 id 但同 parent_id 的审批卡：重复 UI，且 resume 只删得掉一个。
     let mut pending: Option<RelayOutcome> = None;
 
@@ -948,8 +948,8 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
 /// `meta.failure_kind` 分家）+ `status = WaitingUserAction`（同一条 Interaction 在
 /// 别的状态下只是**过去**的交互，再弹一次卡等于让用户回答已经回答过的问题）。
 ///
-/// 冒出去的是**载荷**不是节点：节点身份由 `tool_executor` 以统一 id（`result_msg_id`）
-/// 构造。本桥若也落一个（子会话自己的 id），前端会得到两张同 `parent_id` 的审批卡，
+/// 冒出去的是**载荷**不是节点：节点身份由 `tool_executor` 以派生 id（调用 id →
+/// 结果节点 id）构造。本桥若也落一个（子会话自己的 id），前端会得到两张同 `parent_id` 的审批卡，
 /// 而 resume 只删得掉一张。`prompt.args` 是**本工具的续跑参数**——`session/resume`
 /// 重执行 `agent_run` 时据此续跑那条子会话；`failure_kind` 原样带上（驱动前端审批 UI）。
 fn pending_bubble_of(
