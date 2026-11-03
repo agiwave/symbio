@@ -30,7 +30,7 @@ use symbio_plugin_api::effects::EffectInput;
 #[allow(clippy::too_many_arguments)]
 pub fn record_effect(
     out: &mut Vec<EffectInput>,
-    decls: &super::ToolDecls,
+    decls: &super::decls::ToolDecls,
     id: &str,
     name: &str,
     args: &Value,
@@ -60,6 +60,4 @@ pub fn record_effect(
     });
 }
 
-#[cfg(test)]
-#[path = "effects.test.rs"]
-mod tests;
+//

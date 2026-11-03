@@ -14,7 +14,7 @@
 //! | `name` | 模型给的**线上名**（解析在本插件；环只当不具名纯值搬运） |
 //! | `args` | 调用参数（模型发的原样 JSON） |
 //! | `call_id` | 本次调用的 id（幂等与节点挂靠；结果节点 id 由它派生） |
-//! | `archive_dir` | L0 存档目录（结果超预算时写全文） |
+//! | `scratch_dir` | 宿主为本轮准备的可写目录（结果超预算时在此写全文；子布局归本插件） |
 //! | `artifact` | `{ key, round, round_id, produced_by, allowed, denied_reason }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
 //! | `land_only` | `{ text, success, needs_user_action, prompt, failure_kind }`：只落产物格、不再执行（唤醒结果与没跑到的结果走这一形态） |
 //! | `gate` | `{ authorized, spent_ms, requested_ms, budget_ms }`：外部执行闸门的中性输入；快慢与开窗由执行体判 |
@@ -56,8 +56,10 @@ pub(crate) const TOOL: &str = ports::TOOL;
 const KEY_TOOL_NAME: &str = "name";
 const KEY_ARGS: &str = "args";
 const KEY_TOOL_CALL_ID: &str = "call_id";
-/// L0 存档目录（会话子目录；缺省时守卫回退到系统临时目录）。
-const KEY_ARCHIVE_DIR: &str = "archive_dir";
+/// 宿主可写目录（会话子目录；缺省时守卫回退到系统临时目录）。
+///
+/// 键名是中性值（DE-048 D-316）：环只给路径，存档子布局由本插件自取。
+const KEY_SCRATCH_DIR: &str = "scratch_dir";
 /// 产物格上下文：`{ key, round, round_id, produced_by, allowed, denied_reason }`。
 ///
 /// 落格这件事在**执行体**里做（P1b，DE-048 D-308）：产物是这次结果的产物，不是环的
@@ -771,7 +773,7 @@ impl PortExecutor for ToolPort {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
         let archive_dir = payload
-            .get(KEY_ARCHIVE_DIR)
+            .get(KEY_SCRATCH_DIR)
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
             .unwrap_or_default();

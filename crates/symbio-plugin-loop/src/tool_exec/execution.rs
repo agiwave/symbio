@@ -1,30 +1,93 @@
-//! 「逐条执行」。
+//! 工具**逐笔债**执行：准备 → 运行态 → 单笔执行 → 收口。
 //!
-//! **按债逐笔驱动**：一笔准备 → 运行态 → 执行 → 收口，再走下一笔。没有批结构，
-//! 也没有并行的在途表——并发、顺序、熔断全在端口 provider 内部（DE-048 D-311）。
+//! 环只保留两个职务：超限丢弃的预算反馈与交互模式下「前一笔待用户/失败 ⇒ 后续
+//! 不再启动」；协议失败、钩子与快慢判定都在执行体（DE-048 D-311 / D-312）。
+//! 「没跑到」的占位结果子节点不在这里收口：节点是事实的投影，环只写
+//! `failed{why}`，展示由投影器渲染。
 //!
-//! 环只留两个职务：
-//! - **超限丢弃**：模型一次交回调用数超过上限时，按「本笔债是否在预算内」反馈，
-//!   在准备点现取 `overflow_notice`，不按世界分支；
-//! - **交互 break**：`interactive` 下前一笔待用户 / 失败 ⇒ 本笔之后的调用不再启动，
-//!   但判定只作用于**具体某一笔**（[`interaction_blocked`]）。
-//!
-//! 其余都在执行体：协议失败（缺 id / 缺 name / 参数解析失败）由执行体判定并交回
-//! 失败事实；`ToolBehavior::before` 由能力包实现、宿主只按声明调；Pre/Post 钩子由
-//! 执行体触发；效果输入仍由能力包声明、这里只按 `decls` 收集（DE-025 D-207 / D-312）。
-//!
-//! 判据（「这段错了谁会红」）：父节点终态与逐笔语义用例红——`tool_executor.test.rs`
-//! 的 `process_tool_calls_in_env` 组（中止、交互 break、拒止、协议失败、
-//! 待用户审批的 `WaitingUserAction`）。
+//! 信封与载荷装配住在 [`super::envelope`]，本模块只驱动。
 
 use std::sync::Arc;
-use symbio_plugin_api::effects::BeforeRequest;
 
-use super::*;
+use serde_json::{json, Value};
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_kernel::llm::TurnToolCallInfo;
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PLUGIN_PARENT};
+use symbio_kernel::store::Store;
+use symbio_plugin_api::effects::{BeforeRefusal, BeforeRequest, EffectInput};
+use symbio_plugin_api::port::{PendingPrompt, PortExecContext, PortInput};
+use symbio_plugin_api::ports;
+use symbio_sdk::chat::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL,
+};
+use symbio_sdk::llm::llm_emit_state;
+use symbio_sdk::llm::turn::{llm_emit_message, llm_short_id};
+use symbio_sdk::turn::node_build::{llm_build_tool_message, tool_call_args_text};
+use {
+    symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
+};
+
+use super::decls::ToolDecls;
+use super::effects::record_effect;
+use super::envelope::{tool_payload, ProtocolInput, RoundEnv};
+use super::gate_inputs::GateInputs;
+
+/// 中止的成因词：与 [`NOT_EXECUTED`] 同属「没跑到」的词表。
+pub(crate) const ABORTED: &str = "aborted";
+/// 未执行的成因词：租约超时 / 等待用户前没派到的调用由环写这条 `failed` 事实。
+pub(crate) const NOT_EXECUTED: &str = "not_executed";
+
+/// 这笔结果是否属于「没跑到」（中止 / 未执行）——决定关账写 `failed` 还是 `response`。
+pub(crate) fn is_unanswered(failure_kind: &str) -> bool {
+    failure_kind == ABORTED || failure_kind == NOT_EXECUTED
+}
+
+// ── 共用收口原语（逐字来自拆分前的 tool_executor.rs）────────────────────────
+/// 把父 ToolCall 的**完整副本**定稿为终态并广播。
+///
+/// 完整快照纪律：从权威转写取副本（id / 父子关系 / name / 参数都在）→
+/// 应用状态、合并 meta、设置 error → 整条广播。找不到 = 协议违例
+/// （ToolCallDelta 必然先广播过完整节点），报错并返回 `None`——调用方跳过
+/// 父状态帧，结果子节点照常给出。返回值是已广播的完整消息，调用方把它
+/// 收进 `parent_updates` 供内存镜像同步与落库（整条替换，非补丁合并）。
+async fn emit_parent_finalized(
+    sink: &ExecEventSink,
+    context_messages: &[ChatNode],
+    tool_call_id: &str,
+    status: NodeStatus,
+    meta_extra: Value,
+    error: Option<String>,
+) -> Option<ChatNode> {
+    let Some(parent) = context_messages.iter().find(|m| m.id == tool_call_id) else {
+        plugin_error!(
+            "session",
+            "[Tool] 终态广播: 转写中不存在工具调用 {}（协议违例），跳过父状态帧",
+            tool_call_id
+        );
+        return None;
+    };
+    let mut full = parent.clone();
+    full.status = Some(status);
+    // meta 在**发射端**并入权威副本（读-改-写发生在状态所有者处），
+    // 广出去的 meta 因此是完整对象，接收端只做整条替换。
+    let mut meta = full.meta.clone().unwrap_or_else(|| json!({}));
+    if let (Some(obj), Some(new)) = (meta.as_object_mut(), meta_extra.as_object()) {
+        for (k, v) in new {
+            obj.insert(k.clone(), v.clone());
+        }
+    } else {
+        meta = meta_extra;
+    }
+    full.meta = Some(meta);
+    full.error = error;
+    // 终态帧只带状态 / 元数据 / 错误，**不带正文**：ToolCall 的参数正文已在
+    // 流式阶段以 delta 逐帧上线。
+    llm_emit_state(sink, full.clone()).await;
+    Some(full)
+}
 
 // ── 拒止骨架（原 `gates.rs`；能力包 `before` 的出口）─────────────────────
-use symbio_plugin_api::effects::BeforeRefusal;
-
 /// 本条债的**主体**：声明闸按它问（`AGENT_ID` 的会话族地址，未绑定即 `session/main`）。
 ///
 /// 与 `request_principal` 同源：判断与落笔因此指向同一个主体，不会出现「按 A 判、
@@ -809,6 +872,339 @@ pub(crate) async fn run_calls(
     (tool_messages, parent_updates)
 }
 
-#[cfg(test)]
-#[path = "batch.test.rs"]
-mod tests;
+/// 同参重复调用的判据键：`(工具名, 参数文本)`。
+///
+/// 参数取 `Value::to_string()`（serde_json 对象按键序规范化），于是模型两次发出
+/// 的同一调用——空白与键序不同也无妨——落到同一个键上。
+pub(super) fn call_signature(name: &str, args: &str) -> String {
+    format!("{name}\u{1}{args}")
+}
+
+/// 由载荷构造 user_prompt 节点（`WaitingUserAction`）。
+///
+/// **本文件是工具结果节点的唯一写入者**：普通结果（`llm_build_tool_message`）与
+/// 等待用户（本函数）都出自这里，两者共享同一套 id 约定
+/// （`id = result_node_id`、`parent_id = tool_call_id`）。
+pub(super) fn build_user_prompt_message(
+    result_node_id: &str,
+    tool_call_id: &str,
+    pending: &PendingPrompt,
+    tool_name: &str,
+) -> ChatNode {
+    ChatNode {
+        id: result_node_id.to_string(),
+        parent_id: Some(tool_call_id.to_string()),
+        // 等待用户的交互卡同样是**工具的结果**：族归工具自己。
+        // 身份只写这一份——`role` 那格不再跟着写（D-147：主体在场时折叠读主体，
+        // 第二份写了也不生效，只会在改写时留下「名实不符」的机会）。
+        principal: Some(symbio_sdk::chat::principal::Principal::tool_principal(
+            tool_name,
+        )),
+        msg_type: Some(NodeKind::Interaction),
+        content: Some(MessageContent::Text(pending.text.clone())),
+        status: Some(NodeStatus::WaitingUserAction),
+        meta: Some(json!({
+            "prompt": pending.prompt,
+            "failure_kind": pending.failure_kind,
+            "tool_name": tool_name,
+        })),
+        ..Default::default()
+    }
+}
+
+/// 执行体交回的结果：节点正文用已守卫的 [`Self::text`]，记账与钩子用 [`Self::raw`]。
+#[derive(Debug, Clone, Default)]
+pub struct ExecResult {
+    pub text: String,
+    pub raw: String,
+    pub success: bool,
+    pub pending: Option<PendingPrompt>,
+    pub truncated: bool,
+    pub archive_path: Option<String>,
+    pub origin_tokens: usize,
+    /// 执行体在结果事实里交回的 `failure_kind`（中性词；环不解释原因）。
+    pub failure_kind: Option<String>,
+    /// 执行体交回的「为什么没履约」（中性文本；环只交给能力包的效果端口）。
+    pub why: String,
+}
+
+/// 执行**一笔债**（不阻塞等待用户）：按端口名取提供者，交给端口执行合同跑。
+///
+/// 这是环与执行体之间的**通用单笔入口**（DE-048 D-311）：一笔调用一笔债，入参只有
+/// 端口名与这笔债的载荷；并发、顺序、熔断全在 provider 内部，本函数不认识它们。
+///
+/// 本函数只是**端口取用面**：按端口名从能力表读提供者，把调用现场整份交给
+/// 端口执行合同，收回文本 + 守卫元数据——线上名怎么解析、挂死怎么判（空闲而不是
+/// 总时长）、任意 JSON 怎么压成一段文本、超预算结果怎么裁剪与存档、产物格怎么落，
+/// 都是提供者一侧的私事，行为等价由 e2e 全量守着。
+///
+/// 端口缺席（没装提供者插件——零工具的装配没有工具世界的提供者）或合同缺席
+/// （提供者不实现该端口的合同）都**响亮失败**：错误文本回传给模型（失败属信息性，
+/// 模型据此改道）、`success = false`、日志出声——与既有 route 错误同形。不许
+/// 静默回退、不许按「判不出来」继续：装配缺了提供者，继续转只会把缺失往后推。
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_one(
+    port: &'static str,
+    env: &RoundEnv,
+    gate: &GateInputs,
+    parent: &Option<Arc<dyn Plugin>>,
+    name: &str,
+    args: Value,
+    call_id: &str,
+    protocol: &ProtocolInput,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
+    ctx: Arc<dyn PluginInvokeRequest>,
+) -> ExecResult {
+    let absent = |why: &str| {
+        let text = format!("Error: `port.{port}` 缺席：{why}（{name} 未执行）");
+        plugin_error!("session", "[Tool] {text}");
+        ExecResult {
+            text: text.clone(),
+            raw: text,
+            success: false,
+            ..Default::default()
+        }
+    };
+    let Some(provider) = crate::port::provider_of(&ctx, port).await else {
+        return absent("没有可用的端口提供者");
+    };
+    let Some(executor) = provider.executor() else {
+        return absent("提供者不实现执行合同");
+    };
+
+    // 宿主插件必须让提供者拿得到：`ctx.parent()` 是提供者解析失败时的回落面。
+    // 在 fork 上写 `PLUGIN_PARENT`，不改调用方共享的那份 ctx。
+    let exec_ctx = ctx.fork();
+    if let Some(p) = parent {
+        exec_ctx.set(PLUGIN_PARENT, Some(Arc::downgrade(p)));
+    }
+    let out = executor
+        .execute(
+            PortExecContext {
+                deadline_ms: None,
+                abort: abort.clone(),
+                idempotency_key: call_id.to_string(),
+                sink: sink.clone(),
+                emit: env.emit.clone(),
+                ctx: Some(exec_ctx),
+            },
+            PortInput {
+                port,
+                payload: tool_payload(name, args, call_id, protocol, env, gate),
+            },
+        )
+        .await;
+
+    // 端口协议失败与工具自身失败是两件事：前者由 `error` 交回，后者住在
+    // `facts` 的 `success=false` 里（工具失败是信息性事实，模型据此自我纠正）。
+    if let Some((class, why)) = out.error {
+        plugin_error!(
+            "session",
+            format!("[Tool] 端口执行失败（{class:?}）：{why}")
+        );
+        let text = format!("Error: {why}");
+        return ExecResult {
+            text: text.clone(),
+            raw: text,
+            success: false,
+            ..Default::default()
+        };
+    }
+    let fact = out.facts.first().cloned().unwrap_or(Value::Null);
+    let result_text = fact
+        .get("result_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let raw = fact
+        .get("raw_text")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| result_text.clone());
+    let success = fact
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let pending = fact
+        .get("pending")
+        .filter(|v| !v.is_null())
+        .map(|v| PendingPrompt {
+            text: v
+                .get("text")
+                .and_then(|t| t.as_str())
+                .unwrap_or("需要用户操作")
+                .to_string(),
+            prompt: v.get("prompt").cloned().unwrap_or(Value::Null),
+            failure_kind: v
+                .get("failure_kind")
+                .and_then(|k| k.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        });
+    let guard = fact.get("guard").cloned().unwrap_or(Value::Null);
+    ExecResult {
+        text: result_text,
+        raw,
+        success,
+        pending,
+        truncated: guard
+            .get("truncated")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        archive_path: guard
+            .get("archive_path")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        origin_tokens: guard
+            .get("origin_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize,
+        failure_kind: fact
+            .get("failure_kind")
+            .and_then(|v| v.as_str())
+            .filter(|k| !k.is_empty())
+            .map(str::to_string),
+        why: fact
+            .get("why")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    }
+}
+
+/// 产物落格的执行体出口：只交回**结果纯值**，不再执行工具。
+///
+/// 唤醒结果与没跑到的占位结果没有一次「执行」可挂，但它们同样是产物；环把结果字段
+/// 按通用载荷给出，执行体负责装配产物载荷、富化字段与幂等的拒绝事实（P1b /
+/// DE-048 D-308）。环不按世界分支，也不在环里留第二条落格路径。
+pub(crate) async fn land_outcome_async(
+    env: &RoundEnv,
+    parent: &Option<Arc<dyn Plugin>>,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
+    ctx: Arc<dyn PluginInvokeRequest>,
+    outcome: &crate::tool_dispatch::CallOutcome,
+) {
+    let Some(provider) = crate::port::provider_of(&ctx, ports::TOOL).await else {
+        return;
+    };
+    let Some(executor) = provider.executor() else {
+        return;
+    };
+    let exec_ctx = ctx.fork();
+    if let Some(p) = parent {
+        exec_ctx.set(PLUGIN_PARENT, Some(Arc::downgrade(p)));
+    }
+    let args = serde_json::from_str(&outcome.args).unwrap_or(Value::Null);
+    let _ = executor
+        .execute(
+            PortExecContext {
+                deadline_ms: None,
+                abort: abort.clone(),
+                idempotency_key: outcome.call_id.clone(),
+                sink: sink.clone(),
+                emit: env.emit.clone(),
+                ctx: Some(exec_ctx),
+            },
+            PortInput {
+                port: ports::TOOL,
+                payload: json!({
+                    "name": outcome.name,
+                    "args": args,
+                    "call_id": outcome.call_id,
+                    "scratch_dir": env.scratch_dir.to_string_lossy(),
+                    "artifact": {
+                        // 键按**这一笔债务**而不是节点身份生成：同一张调用卡的等待态与
+                        // 答复态是两笔债（`…-resume-…-1`），各有一次产物；按节点身份
+                        // 生成会让后一条因幂等被吞掉（答复卡凭空消失）。
+                        "key": format!("a-{}-{}", env.round, outcome.call.id),
+                        "round": env.round,
+                        "round_id": env.round_id,
+                        "produced_by": env.produced_by,
+                        "allowed": env.allowed,
+                        "denied_reason": env.denied_reason,
+                    },
+                    "land_only": {
+                        "text": outcome.text,
+                        "success": outcome.ok,
+                        "needs_user_action": outcome.needs_user_action,
+                        "prompt": outcome.prompt,
+                        "failure_kind": outcome.failure_kind,
+                    },
+                }),
+            },
+        )
+        .await;
+}
+
+// 批量工具调用处理
+
+/// 带执行信封的批量入口：顺序处理一批工具调用（产物格 / 宿主写口 / 轮归属随
+/// [`RoundEnv`] 走），向 channel 广播每个工具的结果，
+/// 并返回 `(tool_messages, parent_updates)`：
+/// - `tool_messages`：工具结果子节点（用于追加到对话历史）
+/// - `parent_updates`：ToolCall 父节点的**完整终态快照**（发射端从
+///   `context_messages` 取权威副本应用终态，整条广播），供调用方做内存镜像
+///   整条替换并随 `persist_messages` 落库。
+///
+/// 交互模式（interactive）下，若前一个工具产出 user_prompt（待审批/询问）或失败，
+/// 则中止本批剩余工具（用户需逐个处理）；auto 模式不中止，失败结果传 LLM 继续。
+///
+/// ## 四条不变量（本函数负责保证）
+///
+/// 1. **本批每一个工具调用都必须以终态收场**（`Completed` / `WaitingUserAction`）：
+///    调用前广播 `Streaming`（`dispatch::batch::emit_tool_running`），调用后广播终态。
+///    「没跑到」的调用由环写 `failed{why}` 事实，投影器按事实渲染调用卡终态与
+///    「未执行」结果子项，环不再补节点（DE-048 D-312）。
+///
+/// 2. **外部执行的授权 / 成本读数在每个调用点各取一次**（[`GateInputs`]），随债交给
+///    执行体：判据与开窗不在环——`Refuse` 零事件、`Break` 由执行体自己 `emit`
+///    `control × opened`、`Allow` 照旧开窗（DE-039 §6，D-311）。
+/// 3. **声明闸由能力包自己判**（DE-025 D-219）：工具在 `CapabilityMeta.behaviors`
+///    上声明「我受哪项管辖」，对应实现从
+///    `ToolBehavior::before` 回答能不能跑（淘汰 / 任务表写侧即此类）。宿主只交这一笔
+///    的结论（主体 / 控制面撤销值 / 会话事实切片），本层不含任何「哪个工具名
+///    受什么管辖」的分支。
+///
+/// 阶段分层见 `dispatch::batch`；**没有批首读数**——编排顺序（空批早退 →
+/// 逐条准备 → 逐条执行）不变。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn process_tool_calls_in_env(
+    tool_calls: Vec<TurnToolCallInfo>,
+    parent: &Option<Arc<dyn Plugin>>,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
+    ctx: Arc<dyn PluginInvokeRequest>,
+    context_messages: &[ChatNode],
+    env: &RoundEnv,
+    facts: &dyn Store<Event = Event>,
+    elimination_revoked: bool,
+    effects: &mut Vec<EffectInput>,
+) -> (Vec<ChatNode>, Vec<ChatNode>) {
+    // 空批不读闸门、不发日志——与拆分前的早退位置逐字一致。
+    if tool_calls.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    // 逐条执行：批内顺序流程（协议失败 / 闸门拒止 / 钩子拦下 / 正常执行四条出口）。
+    // - `tool_messages`：工具结果子节点（用于追加到对话历史）
+    // - `parent_updates`：ToolCall 父节点的**完整终态快照**（发射端从
+    //   `context_messages` 取权威副本应用终态），供调用方做内存镜像整条替换并随
+    //   `persist_messages` 落库。
+    let (tool_messages, parent_updates) = run_calls(
+        tool_calls,
+        parent,
+        sink,
+        abort,
+        ctx,
+        context_messages,
+        env,
+        facts,
+        elimination_revoked,
+        effects,
+    )
+    .await;
+
+    (tool_messages, parent_updates)
+}

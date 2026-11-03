@@ -2,7 +2,7 @@
   "note": "LP-001…005 的存量棘轮（只许降）。目标：LP-001 / LP-002 / LP-004 / LP-005 归零，LP-003 随 tools/** 迁出与 turn 拆除递减。",
   "lp001PayloadImports": {
     "port.rs": 2,
-    "tools/tool_executor.rs": 1
+    "tool_exec/execution.rs": 1
   },
   "lp002ForbiddenDeps": [
     "dev-dependencies:symbio-providers"
@@ -23,7 +23,7 @@
     "context.rs": 9,
     "control_decl.rs": 156,
     "derived_facts.rs": 17,
-    "lib.rs": 3,
+    "lib.rs": 4,
     "loop_rows.rs": 83,
     "memory_events.rs": 5,
     "message_build.rs": 29,
@@ -33,14 +33,13 @@
     "report_exec.rs": 1,
     "session_port.rs": 1,
     "stage_events.rs": 43,
-    "tools/dispatch/batch.rs": 91,
-    "tools/dispatch.rs": 22,
-    "tools/tool_executor/decls.rs": 2,
-    "tools/tool_executor/effects.rs": 2,
-    "tools/tool_executor/gate_inputs.rs": 2,
-    "tools/tool_executor.rs": 34,
-    "tools.rs": 3,
-    "tool_dispatch.rs": 272,
+    "tool_dispatch.rs": 274,
+    "tool_exec/decls.rs": 2,
+    "tool_exec/effects.rs": 2,
+    "tool_exec/envelope.rs": 10,
+    "tool_exec/execution.rs": 135,
+    "tool_exec/gate_inputs.rs": 2,
+    "tool_exec.rs": 2,
     "turn_exec/assemble.rs": 23,
     "turn_exec/call.rs": 51,
     "turn_exec/drive.rs": 98,

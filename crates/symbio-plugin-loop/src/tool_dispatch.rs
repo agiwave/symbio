@@ -66,7 +66,7 @@ use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
 use super::loop_rows;
 use super::port;
-use super::tools::{is_unanswered, process_tool_calls_in_env, RoundEnv, NOT_EXECUTED};
+use super::tool_exec::{is_unanswered, process_tool_calls_in_env, RoundEnv, NOT_EXECUTED};
 use super::turn_exec::UiBridge;
 use symbio_kernel::actors::ActorSpec;
 use symbio_sdk::turn::node_build::{
@@ -1098,7 +1098,7 @@ impl ToolPort {
     /// （一句话占位），它的成因写在 `meta.failure_kind` 上。占位按成因落
     /// `failed{why}` 而不是 `response`——否则中止的调用在日志里说「回来了」，而它
     /// 从未执行，`await-tool` 的 `failed` 出口就只剩 resume 一条路（[D-121](../../../docs/003-design/015-义务环.md#d-121-唤醒事实的行语义await-行的收清走协议格审批与补充重新开账 "DE-015-义务环")
-    /// 的中止作用、DE-015 判据 6 场景三）。词表与判据同源：[`super::tools`] 门面的
+    /// 的中止作用、DE-015 判据 6 场景三）。词表与判据同源：[`super::tool_exec`] 门面的
     /// `is_unanswered` / `ABORTED` / `NOT_EXECUTED`。
     pub(crate) fn close_call(&self, call: &ToolPortCall, outcome: Option<&CallOutcome>) {
         if !call.granted {
@@ -1280,7 +1280,7 @@ impl SessionDispatchPort {
     /// （P1b / D-308）。
     fn round_env(&self) -> RoundEnv {
         RoundEnv {
-            archive_dir: self.tool_archive_dir.clone(),
+            scratch_dir: self.tool_archive_dir.clone(),
             emit: port::host_fact_emit(
                 self.facts.clone(),
                 self.round,
@@ -1583,7 +1583,7 @@ impl ToolDispatch for SessionDispatchPort {
             // 占位结果）——环不再自己装配产物载荷（P1b / DE-048 D-308）。
             if let Some(outcome) = outcome {
                 let env = self.round_env();
-                super::tools::land_outcome_async(
+                super::tool_exec::land_outcome_async(
                     &env,
                     &self.parent,
                     &self.sink,
