@@ -62,28 +62,6 @@ fn test_ctx() -> Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
 }
 
-/// 带**注册面**的请求上下文：把 `tools` 注册进 `CAPABILITY_VISITOR`。
-///
-/// 三道按名闸门（淘汰 / 承诺记账 / 任务表）的管辖判据现在从注册面读自声明位，
-/// ctx 里没有注册面 = 「没有任何工具声明过任何位」。生产里这个注册面由会话
-/// 插件的能力收集装上（`capabilities.rs`），测试照同一形状喂——`tools` 传什么，
-/// 注册面就是什么，两边不会漂。
-async fn test_ctx_declaring(
-    tools: &[CapabilityMeta],
-) -> Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> {
-    let ctx = test_ctx();
-    let visitor = Arc::new(DefaultToolVisitor::new());
-    for t in tools {
-        visitor
-            .put(CapabilityRow::tool(
-                Arc::new(DeclOnlyTool(t.clone())) as Arc<dyn Capability>
-            ))
-            .await;
-    }
-    ctx.set(CAPABILITY_VISITOR, visitor as Arc<dyn Registry>);
-    ctx
-}
-
 /// 只带元数据的假工具：注册面只读 `meta()`，执行永不到达（这些用例的调用都
 /// 止步于闸门 / 诚实失败，不真的 invoke）。
 struct DeclOnlyTool(CapabilityMeta);
@@ -945,6 +923,8 @@ fn setup_with_settings(
 /// 控制面夹具：请求面（编排器 / 上下文 / 本轮状态）+ 待追加的那条用户消息。
 struct ControlHarness {
     facts: Arc<EventStore>,
+    port: Arc<FakeSessionPort>,
+    frames: Arc<CollectingFrames>,
     sink: symbio_kernel::exec::ExecEventSink,
     ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
     orchestrator: Arc<super::super::chat_loop::state::ChatOrchestrator>,
@@ -969,10 +949,9 @@ async fn control_harness() -> ControlHarness {
         settings,
     );
     let view = spec.view();
-    let session = session_port_of(port);
-    let sink = symbio_kernel::exec::ExecEventSink::direct(Arc::new(CollectingFrames(Mutex::new(
-        Vec::new(),
-    ))));
+    let session = session_port_of(port.clone());
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
     let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
         parent: None,
         context_limit: 8192,
@@ -988,11 +967,11 @@ async fn control_harness() -> ControlHarness {
     // `drive_turn` 的幕首注册同一形状（生产里是 model 插件 traverse 注册）。
     let ctx = test_ctx();
     let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
-    let port = Arc::new(PortModel(Arc::new(
+    let model_port = Arc::new(PortModel(Arc::new(
         FaithfulProvider::new(Behavior::Faithful).0,
     )));
     for row in symbio_plugin_api::port::port_rows(
-        &(port as Arc<dyn symbio_plugin_api::port::PortProvider>),
+        &(model_port as Arc<dyn symbio_plugin_api::port::PortProvider>),
     ) {
         visitor.put(row).await;
     }
@@ -1007,6 +986,8 @@ async fn control_harness() -> ControlHarness {
     };
     ControlHarness {
         facts,
+        port,
+        frames,
         sink,
         ctx,
         orchestrator,
@@ -1051,6 +1032,46 @@ async fn drive_control(h: &mut ControlHarness) -> Result<super::DriveEnd, super:
         super::super::loop_rows::ACTORS,
     )
     .await
+}
+
+/// 同 [`control_harness`]，换 `port.model` 的提供者与本条用户消息。
+///
+/// 只有两处不同（提供者行 + 消息），其余请求面逐字相同：入口仍是生产
+/// [`crate::turn_driver::drive`]，开幕 / 选债 / 收幕都在环里。
+async fn control_harness_with(
+    provider: Arc<dyn ModelProvider>,
+    tools: &[CapabilityMeta],
+    text: &str,
+) -> ControlHarness {
+    let mut h = control_harness().await;
+    let ctx = test_ctx();
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+    for t in tools {
+        visitor
+            .put(CapabilityRow::tool(
+                Arc::new(DeclOnlyTool(t.clone())) as Arc<dyn Capability>
+            ))
+            .await;
+    }
+    let port = Arc::new(PortModel(provider));
+    for row in symbio_plugin_api::port::port_rows(
+        &(port as Arc<dyn symbio_plugin_api::port::PortProvider>),
+    ) {
+        visitor.put(row).await;
+    }
+    h.ctx = ctx;
+    h.ctx.set(CAPABILITY_VISITOR, visitor);
+    h.message = Some(cm::ChatNode {
+        id: "m1".into(),
+        principal: Some(symbio_sdk::chat::principal::Principal::new(
+            symbio_sdk::chat::principal::PrincipalKind::Person,
+            "user",
+        )),
+        msg_type: Some(cm::NodeKind::Body),
+        content: Some(cm::MessageContent::Text(text.into())),
+        ..Default::default()
+    });
+    h
 }
 
 /// 本幕的 `inputs` 阶段格。
@@ -1146,60 +1167,73 @@ async fn drive_stops_at_an_in_place_answer_and_lands_closed_without_a_model_requ
 /// 全文与分片拼接一致、正文节点 id 稳定。
 #[tokio::test]
 async fn tool_free_turn_writes_grid_and_streams_ui() {
-    let fx = setup_full();
-    // 收集口：ExecEventSink::direct 的 writer 不可回读，自持一份 Arc 引用帧。
-    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
-
-    let res = drive_turn(tool_free_req(
-        &fx,
+    let mut h = control_harness_with(
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
-        &sink,
-        symbio_kernel::exec::ExecAbortSignal::new(),
-        0,
+        &[],
         "你好",
-    ))
-    .await
-    .expect("v2 执行成功");
-    let out = res.output;
+    )
+    .await;
+    drive_control(&mut h).await.expect("v2 执行成功");
+
+    // 原观察点 `res.messages`（运行器额外产出的消息）→ 落库镜像里的工具节点：
+    // 无工具轮一个都不该有（助手收束节点由收幕落，不算「额外」）。
+    let added: Vec<cm::ChatNode> = h
+        .port
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|m| {
+            m.msg_type == Some(cm::NodeKind::Skeleton)
+                && m.title.as_deref() == Some("tool_call")
+        })
+        .cloned()
+        .collect();
     assert!(
-        res.messages.is_empty(),
-        "无工具轮不额外产生消息（助手轮消息由步骤 5 的 into_messages 落）：{:?}",
-        res.messages
+        added.is_empty(),
+        "无工具轮不额外产生消息：{added:?}"
     );
 
-    // 聚合全文 + 收口用的正文节点 id（步骤 5-7 靠它定格子节点）。节点 id 由
-    // **v2 侧分配**（UiBridge 首片）——模型插件的内部节点 id 是插件内务，
-    // 不过桥；两处 id 必须同一个，否则终态帧会落在不存在的节点上。
-    assert_eq!(out.text, "秋天好");
-    assert!(
-        !out.response_text_child_id.is_empty(),
-        "正文节点 id 必须已分配"
-    );
+    // 聚合全文归那一次模型往返（`response.answer`），与 final 只存结局相对。
+    let all = h.facts.range(Seq::new(0));
+    let output = all
+        .iter()
+        .rev()
+        .find(|e| e.kind == "response" && e.payload["port"] == "model")
+        .expect("模型应答在");
+    assert_eq!(output.payload["answer"], "秋天好");
 
     // UI 帧：接缝先发 Turn 根骨架（新幕 `fresh_root`），其后是首片快照建节点
     // （Streaming）与窄帧追加——与 model 插件直发同构。
-    let got = frames.0.lock().unwrap();
-    assert_eq!(got.len(), 3, "根骨架 + 快照 + 窄帧，不多不少：{got:?}");
-    assert_eq!(got[0].id, "r-1", "新幕的根节点先上线");
+    let got = h.frames.0.lock().unwrap().clone();
+    assert_eq!(
+        got.len(),
+        5,
+        "根骨架 + 快照 + 窄帧 + 收口子/根两帧：{got:?}"
+    );
+    let root = got[0].id.clone();
+    assert!(!root.is_empty(), "新幕的根节点先上线（id 由接缝分配）");
     assert_eq!(got[0].msg_type, Some(cm::NodeKind::Skeleton));
     assert_eq!(got[0].status, Some(cm::NodeStatus::Streaming));
-    assert_eq!(
-        got[1].id, out.response_text_child_id,
-        "收口用的 id 就是首片建的节点"
-    );
+    // 原观察点 `out.response_text_child_id`（运行器返回值）→ 首片帧的 id
+    // （同一分配点 `UiBridge`，收口与帧必须同一个）。
+    let child_id = got[1].id.clone();
+    assert!(!child_id.is_empty(), "正文节点 id 必须已分配");
     assert_eq!(got[1].status, Some(cm::NodeStatus::Streaming));
-    assert_eq!(got[1].parent_id.as_deref(), Some("r-1"));
+    assert_eq!(got[1].parent_id.as_deref(), Some(root.as_str()));
     assert!(
         matches!(&got[1].content, Some(cm::MessageContent::Text(t)) if t == "秋"),
         "快照帧带首片全文：{:?}",
         got[1].content
     );
-    assert_eq!(got[2].id, out.response_text_child_id, "窄帧同一节点");
+    assert_eq!(got[2].id, child_id, "窄帧同一节点");
     assert_eq!(got[2].delta.as_deref(), Some("天好"), "窄帧只带增量");
+    assert_eq!(got[3].id, child_id, "收口帧仍是同一个正文子节点");
+    assert_eq!(got[3].status, Some(cm::NodeStatus::Completed));
+    assert_eq!(got[4].id, root, "根骨架收口帧同一节点");
+    assert_eq!(got[4].status, Some(cm::NodeStatus::Completed));
 
     // 事实网格：user 格 + final 格，不变量全绿，final 溯源指向本轮用户格。
-    let all = fx.facts.range(Seq::new(0));
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + final 格：{snap:?}");
     assert!(
@@ -1211,15 +1245,6 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
     assert_eq!(snap[0].turn, 0, "turn 号 = WAL 内 user.message 计数");
     assert_eq!(snap[1].kind, EVENT_CHAT_ASSISTANT_FINAL);
     assert_eq!(snap[1].payload["text"], "", "final 只存结局");
-    let output = all
-        .iter()
-        .rev()
-        .find(|e| e.kind == "response" && e.payload["port"] == "model")
-        .expect("模型应答在");
-    assert_eq!(
-        output.payload["answer"], "秋天好",
-        "聚合全文归那一次模型往返"
-    );
     assert!(snap[1].produced_by.is_some(), "final 溯源指向用户格");
 }
 
@@ -1227,21 +1252,17 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
 /// Failed 出口。
 #[tokio::test]
 async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
-    let fx = setup_full();
-    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
-
-    let err = drive_turn(tool_free_req(
-        &fx,
+    let mut h = control_harness_with(
         Arc::new(FaithfulProvider::new(Behavior::Fail).0),
-        &sink,
-        symbio_kernel::exec::ExecAbortSignal::new(),
-        0,
+        &[],
         "你好",
-    ))
-    .await
-    .err()
-    .expect("失败必须上抛（Failed 出口）");
+    )
+    .await;
+
+    let err = drive_control(&mut h)
+        .await
+        .err()
+        .expect("失败必须上抛（Failed 出口）");
 
     assert!(
         matches!(
@@ -1252,7 +1273,7 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     );
 
     // 网格里用户格 + fallback 格都在——失败也是一句话，不是静默。
-    let all = fx.facts.range(Seq::new(0));
+    let all = h.facts.range(Seq::new(0));
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + fallback 格：{snap:?}");
     assert!(
@@ -1274,21 +1295,17 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
 /// 重试入口，也不进兜底分子；本轮无半截产出时 `partial` 为空。
 #[tokio::test]
 async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
-    let fx = setup_full();
-    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
-
-    let err = drive_turn(tool_free_req(
-        &fx,
+    let mut h = control_harness_with(
         Arc::new(FaithfulProvider::new(Behavior::Abort).0),
-        &sink,
-        symbio_kernel::exec::ExecAbortSignal::new(),
-        0,
+        &[],
         "你好",
-    ))
-    .await
-    .err()
-    .expect("中止必须上抛（Aborted 出口，不是 Failed）");
+    )
+    .await;
+
+    let err = drive_control(&mut h)
+        .await
+        .err()
+        .expect("中止必须上抛（Aborted 出口，不是 Failed）");
 
     let TurnExecExit::Aborted(partial) = &err else {
         panic!("上抛的是中止本体，不被压成失败：{err:?}");
@@ -1296,7 +1313,7 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     assert!(partial.is_empty(), "本轮没有半截产出：{partial:?}");
 
     // 网格：用户格 + 收束格——中止照落收束格（kind 不换），绝不落兜底格。
-    let all = fx.facts.range(Seq::new(0));
+    let all = h.facts.range(Seq::new(0));
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + 收束格：{snap:?}");
     assert_eq!(snap[1].kind, EVENT_CHAT_ASSISTANT_FINAL, "中止照落收束格");
@@ -1324,21 +1341,17 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
 /// （那半句 + 半截思考）在重建的历史里都在。
 #[tokio::test]
 async fn aborted_half_sentence_survives_in_partial_and_grid() {
-    let fx = setup_full();
-    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
-
-    let err = drive_turn(tool_free_req(
-        &fx,
+    let mut h = control_harness_with(
         Arc::new(FaithfulProvider::new(Behavior::AbortAfterPartial).0),
-        &sink,
-        symbio_kernel::exec::ExecAbortSignal::new(),
-        0,
+        &[],
         "你好",
-    ))
-    .await
-    .err()
-    .expect("中止必须上抛（Aborted 出口）");
+    )
+    .await;
+
+    let err = drive_control(&mut h)
+        .await
+        .err()
+        .expect("中止必须上抛（Aborted 出口）");
 
     // ① 随出口带走：正文节点 + 推理节点都进 `partial`（落库镜像的来源）。
     let TurnExecExit::Aborted(partial) = &err else {
@@ -1359,7 +1372,7 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
     );
 
     // ② 入格：半截正文 / 思考归那一次模型往返（`failed`），收束格只引用结局。
-    let all = fx.facts.range(Seq::new(0));
+    let all = h.facts.range(Seq::new(0));
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + 收束格：{snap:?}");
     let cell = snap[1];
@@ -1787,9 +1800,6 @@ async fn full_turn_writes_no_memory_encoding_from_the_host() {
 async fn full_turn_lands_derived_commitment_facts() {
     use symbio_plugin_api::events::{EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OPENED};
 
-    let fx = setup_full();
-    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = symbio_kernel::exec::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::ToolThenAgentRun);
 
     // 注册面与模型面同一份元数据：`agent_run` 自声明「派活 + 立约」两个行为名，
@@ -1807,39 +1817,22 @@ async fn full_turn_lands_derived_commitment_facts() {
         ..Default::default()
     };
 
-    let user_seq = seed_user(&fx, 0, "请委托评审");
-    let res = drive_turn(ExecTurn {
-        turn_no: 0,
-        user_seq,
-        drive_seq: user_seq,
-        session: fx.session.clone(),
-        view: fx.view.clone(),
-        facts: Some(fx.facts.clone() as Arc<dyn Store<Event = Event>>),
-        provider: Arc::new(provider),
-        // 无插件宿主 ⇒ `agent_run` 诚实失败（"No parent plugin"）。失败同样是
-        // **没履约**——立约与违约都要入格（DE-038 §5：违约可被观测是 T5 的前提）。
-        parent: None,
-        ctx: test_ctx_declaring(std::slice::from_ref(&tool_meta)).await,
-        system_prompt: "system",
-        abort: symbio_kernel::exec::ExecAbortSignal::new(),
-        root_id: "r-1",
-        sink: &sink,
-        user_text: "请委托评审",
-        window_turns: 6,
-        tools: std::slice::from_ref(&tool_meta),
-        reflex_text: None,
-        consolidation: None,
-        supplements: None,
-        supplemental_no: Default::default(),
-        report: None,
-        // 开场白：本夹具不产生。
-        presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
-    })
-    .await
-    .expect("工具轮执行成功");
-    assert_eq!(res.output.text, "秋天好", "收尾轮的正文");
+    let mut h = control_harness_with(
+        Arc::new(provider),
+        std::slice::from_ref(&tool_meta),
+        "请委托评审",
+    )
+    .await;
+    drive_control(&mut h).await.expect("工具轮执行成功");
 
-    let events = fx.facts.range(Seq::new(0));
+    let events = h.facts.range(Seq::new(0));
+    let answer = events
+        .iter()
+        .rev()
+        .find(|e| e.kind == "response" && e.payload["port"] == "model")
+        .and_then(|e| e.payload["answer"].as_str())
+        .unwrap_or_default();
+    assert_eq!(answer, "秋天好", "收尾轮的正文");
     let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
 
     let user_seq = events
