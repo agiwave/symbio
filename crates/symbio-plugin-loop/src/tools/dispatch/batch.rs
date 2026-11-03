@@ -5,15 +5,16 @@
 //! 执行 → Post 钩子 → 记账 → 结果与父终态广播」。批首读数经 [`GateReadings`] 传入，
 //! 台账（`seen_calls`）在本段逐条登记。
 //!
-//! ## 批内并行
+//! ## 批内执行策略
 //!
-//! 判据只看**风险档**（[`ToolRisks`]，映射单点在 `dispatch::parallel`）：`Low`
-//! （只读）可与其它只读调用**同时在途**，`Medium` / `High` 与交互模式一律独占执行
-//! 窗口。并行的是**执行**，不是收口：结果子节点、父节点终态、承诺 / 任务记账全部
-//! 按**调用顺序**逐条收口（[`flush_one`]），所以「工具结果顺序 = 调用顺序」与串行
-//! 时逐项相同。每条调用的 `Streaming`（运行中）仍在本条开跑前广播，故「running
-//! 先于本条结果」这条关系也不变；变化只在跨调用的交错——一组只读调用会先各自
-//! 亮起运行态，再按序收到结果，这是并行的代价，不是顺序的漂移。
+//! 环**不做**风险档 → 并行/串行的映射（DE-047 D-311）：一条调用准备完就交给执行体，
+//! 多笔可在途；并发上限与顺序归 provider 内部。环只保留**配对**职责——结果子节点、
+//! 父节点终态、承诺 / 任务记账全部按**调用顺序**逐条收口（[`flush_one`]），所以
+//! 「工具结果顺序 = 调用顺序」不变。每条调用的 `Streaming`（运行中）仍在本条开跑前
+//! 广播，故「running 先于本条结果」这条关系也不变。
+//!
+//! 交互模式（`interactive`）例外：审批 / 提问是「一次只处理一张卡」的语义，前一条
+//! 待用户动作时本批剩余不得启动——这是**交互语义**，不是并发策略，因此留环。
 //!
 //! 执行前就终结的出口（协议失败 / 超限丢弃 / 闸门或钩子拒止）**不在准备阶段发
 //! 事件**：先 flush 掉此前的在途调用，再按调用顺序发（[`PreTerminal`]）。
@@ -701,7 +702,8 @@ fn start_execution<'a>(
     let wire_id = ready.wire_id.clone();
     let ctx = ctx.clone();
     Box::pin(async move {
-        let out = execute_tool_async(
+        let out = execute_one(
+            symbio_plugin_api::ports::TOOL,
             env,
             parent,
             &name,
@@ -868,10 +870,6 @@ pub(crate) async fn run_batch(
     let judge_principal = readings.principal.as_str();
     let session_facts = readings.session_facts.as_slice();
     let before = readings.before;
-    let risks = &readings.risks;
-    // 同批在飞上限来自端口声明（`0` / `1` = 串行）；执行层只消费，不持有常量。
-    let concurrency = readings.concurrency;
-    let cap = usize::from(concurrency).max(1);
     let seen_calls = &mut readings.seen_calls;
 
     // 在途执行（启动顺序 = 调用顺序）、待收口队列与已完成产出。
@@ -947,11 +945,9 @@ pub(crate) async fn run_batch(
                 }
                 PreCheck::Ready(ready) => {
                     i += 1;
-                    // 分流：风险档映射（唯一映射在 `parallel::policy_for_risk`），
-                    // 交互模式整批压成串行（审批 / 提问一次只处理一张卡）。
-                    let policy =
-                        policy_for_port(concurrency, mode, risks.policy_for_call(&ready.name));
-                    if policy == ExecPolicy::Serial {
+                    // 交互模式整批压成串行（审批 / 提问一次只处理一张卡）——这是
+                    // 交互语义，不是并发策略；其余模式由执行体自己限流（D-311）。
+                    if mode == "interactive" {
                         // 串行边界：在途先全部按序收口，本调用独占执行窗口。
                         flush_all(
                             &mut inflight,
@@ -969,7 +965,8 @@ pub(crate) async fn run_batch(
                         )
                         .await;
                         emit_tool_running(sink, context_messages, &ready.id).await;
-                        let out = execute_tool_async(
+                        let out = execute_one(
+                            symbio_plugin_api::ports::TOOL,
                             env,
                             parent,
                             &ready.name,
@@ -996,24 +993,8 @@ pub(crate) async fn run_batch(
                         )
                         .await;
                     } else {
-                        // 只读调用：攒到并发上限就先收口最早的一条，再继续启动。
-                        if order.len() >= cap {
-                            flush_one(
-                                &mut inflight,
-                                &mut order,
-                                &mut started,
-                                &mut done,
-                                sink,
-                                parent,
-                                &ctx,
-                                context_messages,
-                                effects,
-                                decls,
-                                &mut tool_messages,
-                                &mut parent_updates,
-                            )
-                            .await;
-                        }
+                        // 非交互模式：准备完就交给执行体，多笔可在途；上限由
+                        // provider 内部（端口声明的并发度）自己收（D-311）。
                         // 工具即将真正执行 → 父 ToolCall 置「运行中」。这是整段执行
                         // 窗口的**唯一**运行中信号来源，必须紧贴执行之前。
                         emit_tool_running(sink, context_messages, &ready.id).await;
@@ -1048,7 +1029,7 @@ pub(crate) async fn run_batch(
         break;
     }
 
-    // 中止 / 交互中断时仍在途的调用：按序收口（它们各自经 [`execute_tool_async`]
+    // 中止 / 交互中断时仍在途的调用：按序收口（它们各自经 [`execute_one`]
     // 的中止臂返回「被用户中止」的结果），未启动的由未执行收口补终态。
     flush_all(
         &mut inflight,

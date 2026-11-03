@@ -9,10 +9,13 @@ use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use symbio_plugin_api::{
-    Capability, CapabilityFamily, CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv,
-    ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta,
-    PluginPayload, PluginSimpleRequest, PortPayload, PortReading, Registry, CAPABILITY_VISITOR,
+    Capability, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel, CapabilityRow,
+    ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginInvokeRequest,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PortPayload, PortReading,
+    Registry, CAPABILITY_VISITOR,
 };
 
 // ==================== extract_result：判定顺序即约定 ====================
@@ -607,5 +610,128 @@ async fn legacy_payload_without_threshold_stays_on_the_old_path() {
     assert!(
         captured.lock().unwrap().is_empty(),
         "旧载荷不得被新授权路径判一次（否则双路径会落两份授权）"
+    );
+}
+
+// ==================== 并发策略：写侧独占、只读并行（D-311）====================
+
+/// 并发探针：`execute` 期间计数同时在跑的条数，返回前睡一会儿拉长执行窗口。
+struct ProbeTool {
+    meta: CapabilityMeta,
+    active: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
+    sleep_ms: u64,
+}
+
+#[async_trait]
+impl Capability for ProbeTool {
+    fn meta(&self) -> CapabilityMeta {
+        self.meta.clone()
+    }
+
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _env: &ExecEnv,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> Result<serde_json::Value, PluginError> {
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(self.sleep_ms)).await;
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        Ok(serde_json::json!({ "content": format!("done:{}", self.meta.name) }))
+    }
+}
+
+fn probe(
+    name: &str,
+    risk: CapabilityRiskLevel,
+    active: &Arc<AtomicUsize>,
+    peak: &Arc<AtomicUsize>,
+    sleep_ms: u64,
+) -> Arc<dyn Capability> {
+    Arc::new(ProbeTool {
+        meta: CapabilityMeta {
+            name: name.to_string(),
+            risk: Some(risk),
+            ..Default::default()
+        },
+        active: active.clone(),
+        peak: peak.clone(),
+        sleep_ms,
+    })
+}
+
+async fn ctx_with_probes(
+    parent: &Arc<dyn Plugin>,
+    session: &str,
+    tools: Vec<Arc<dyn Capability>>,
+) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(Some(Weak::clone(&Arc::downgrade(parent))), None);
+    // 执行窗口按会话分格：每个用例用自己的会话 id，避免并行跑的单测共用一格。
+    req.set(SESSION_ID, session.to_string());
+    let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
+    for tool in tools {
+        registry.put(CapabilityRow::tool(tool)).await;
+    }
+    req.set(CAPABILITY_VISITOR, registry);
+    Arc::new(req)
+}
+
+/// 写侧档（`Medium`）与只读档同时到达：写侧独占执行窗口，峰值并发必须 = 1。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn side_effect_calls_never_overlap_with_another_call() {
+    for write_first in [true, false] {
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let write = probe(
+            "probe_write",
+            CapabilityRiskLevel::Medium,
+            &active,
+            &peak,
+            40,
+        );
+        let read = probe("probe_read", CapabilityRiskLevel::Low, &active, &peak, 20);
+        let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+        let ctx = ctx_with_probes(&parent, "test-exec-window-write", vec![write, read]).await;
+        let (first, second) = if write_first {
+            ("probe_write", "probe_read")
+        } else {
+            ("probe_read", "probe_write")
+        };
+        let (a, b) = tokio::join!(
+            ToolPort.execute(call(first, ctx.clone()).0, call(first, ctx.clone()).1),
+            ToolPort.execute(call(second, ctx.clone()).0, call(second, ctx).1),
+        );
+        assert!(a.error.is_none() && b.error.is_none());
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            1,
+            "写侧档不得与任何调用重叠（write_first={write_first}）"
+        );
+    }
+}
+
+/// 两条只读档同时到达：允许并行（受端口声明上界约束）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn read_only_calls_run_concurrently() {
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let a = probe("probe_a", CapabilityRiskLevel::Low, &active, &peak, 40);
+    let b = probe("probe_b", CapabilityRiskLevel::Low, &active, &peak, 40);
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_probes(&parent, "test-exec-window-read", vec![a, b]).await;
+    let (x, y) = tokio::join!(
+        ToolPort.execute(
+            call("probe_a", ctx.clone()).0,
+            call("probe_a", ctx.clone()).1
+        ),
+        ToolPort.execute(call("probe_b", ctx.clone()).0, call("probe_b", ctx).1),
+    );
+    assert!(x.error.is_none() && y.error.is_none());
+    assert_eq!(
+        peak.load(Ordering::SeqCst),
+        2,
+        "只读档应可同时在途（端口上界允许 2 条）"
     );
 }

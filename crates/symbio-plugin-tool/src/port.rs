@@ -524,6 +524,46 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
     .await;
 }
 
+/// 端口声明的同批在飞上限（`PortDecl.concurrency`）——**执行体自己的**并发策略。
+///
+/// 环不再做风险档 → 并行/串行映射，也不持上限（DE-047 D-311）：它只把每笔债交过来；
+/// 限流在这里，因为「同批最多几笔在飞」是这个端口的能力，不是环的判定。
+fn tool_concurrency() -> usize {
+    crate::declarations::PORTS
+        .iter()
+        .find(|p| p.port == TOOL)
+        .map_or(1, |p| usize::from(p.concurrency).max(1))
+}
+
+/// 一个会话的执行窗口：写侧档独占，只读档共享，只读还受端口声明的在飞上界约束。
+struct ExecWindow {
+    gate: tokio::sync::RwLock<()>,
+    slots: tokio::sync::Semaphore,
+}
+
+/// 执行窗口按**会话**分格（DE-047 D-311）。
+///
+/// 不分格会在委派时死锁：父会话的 `agent_run` 持写侧窗口、等子会话跑完，而子会话的
+/// 工具调用又来抢同一把锁。子会话有独立的 `SESSION_ID`，格子因此天然不互相等待；
+/// 同会话内部的写侧独占则保持不变。
+static WINDOWS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, Arc<ExecWindow>>>,
+> = std::sync::OnceLock::new();
+
+fn window_for(session_id: &str) -> Arc<ExecWindow> {
+    let map = WINDOWS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut guard = map.lock().unwrap_or_else(|e| e.into_inner());
+    guard
+        .entry(session_id.to_string())
+        .or_insert_with(|| {
+            Arc::new(ExecWindow {
+                gate: tokio::sync::RwLock::new(()),
+                slots: tokio::sync::Semaphore::new(tool_concurrency()),
+            })
+        })
+        .clone()
+}
+
 /// `port.tool` 的提供者：无状态前端（执行期从调用方 ctx 读能力表）。
 pub(crate) struct ToolPort;
 
@@ -639,16 +679,22 @@ impl PortExecutor for ToolPort {
         // `mcp__fs__read`——字符串分不出这两种，集合可以。
         let tool_visitor = ctx.get(CAPABILITY_VISITOR);
         // 线上名解析用的名字集合（产物富化的行为声明表在 `land_only` 出口另取）。
-        let known_names: Vec<String> = match tool_visitor.as_ref() {
-            Some(visitor) => visitor
-                .list(family::TOOL)
-                .await
-                .iter()
-                .map(|row| row.name().to_string())
-                .collect(),
+        let tool_rows = match tool_visitor.as_ref() {
+            Some(visitor) => visitor.list(family::TOOL).await,
             None => Vec::new(),
         };
+        let known_names: Vec<String> = tool_rows.iter().map(|row| row.name().to_string()).collect();
         let resolved_name = resolve(&tool_name, known_names.iter().map(String::as_str));
+        // 并发策略在本执行体（DE-047 D-311）：只读档（`Low`）可同时在途，受端口声明的
+        // 上界约束；写侧档（`Medium` / `High`）与查不到风险档的调用独占**本会话**的
+        // 执行窗口——写文件、改配置、发消息这类并行会引入顺序不确定。环不再替这里
+        // 做任何判定；窗口按会话分格，委派链不会父子互等。
+        let risk = resolved_name.as_deref().and_then(|canon| {
+            tool_rows
+                .iter()
+                .find(|r| r.name() == canon)
+                .map(|r| r.meta().effective_risk())
+        });
         // 解析失败**不猜**：按原样交给路由，由它给出诚实的 NotFound。
         // 反演猜错会调起**另一个工具**，那比报错坏得多。
         let invoke_name = resolved_name.clone().unwrap_or_else(|| tool_name.clone());
@@ -661,6 +707,23 @@ impl PortExecutor for ToolPort {
         }
 
         let session_id = ctx.get(SESSION_ID).unwrap_or_default();
+        let window = window_for(&session_id);
+        let read_only = matches!(risk, Some(CapabilityRiskLevel::Low));
+        let _shared = if read_only {
+            Some(window.gate.read().await)
+        } else {
+            None
+        };
+        let _exclusive = if read_only {
+            None
+        } else {
+            Some(window.gate.write().await)
+        };
+        let _slot = if read_only {
+            window.slots.acquire().await.ok()
+        } else {
+            None
+        };
         let agent_id = ctx.get(AGENT_ID).unwrap_or_default();
         let workdir = ctx.get(WORKDIR).unwrap_or_default();
 

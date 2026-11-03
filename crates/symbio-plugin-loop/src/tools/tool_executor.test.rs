@@ -1536,70 +1536,55 @@ async fn read_only_calls_run_concurrently_and_report_in_call_order() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 写侧调用（`Medium`）独占执行窗口：与只读调用一前一后都不得重叠。
+// 写侧档独占执行窗口的判据已随并发策略移入执行体（`symbio-plugin-tool::port`，
+// DE-047 D-311）；环侧只钉「不再替执行体做策略」：一笔债准备完就交出去。
+/// 环不按风险档串行：两条调用一起在途，由执行体自己决定并发（D-311）。
 #[tokio::test]
-async fn side_effect_calls_never_overlap_with_another_call() {
-    let dir = test_dir().join("t190-serial");
+async fn the_loop_does_not_serialize_calls_by_risk() {
+    let dir = test_dir().join("t190-no-policy");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
 
-    for (first_is_side_effect, label) in [(true, "写侧在前"), (false, "写侧在后")] {
-        let active = Arc::new(AtomicUsize::new(0));
-        let peak = Arc::new(AtomicUsize::new(0));
-        let side = Arc::new(ProbeTool::new(
-            "probe_write",
-            CapabilityRiskLevel::Medium,
-            &active,
-            &peak,
-        ));
-        let read = Arc::new(
-            ProbeTool::new("probe_read", CapabilityRiskLevel::Low, &active, &peak).with_sleep(20),
-        );
-        let (calls, nodes) = if first_is_side_effect {
-            (
-                probe_calls(&[("tc-w", "probe_write"), ("tc-r", "probe_read")]),
-                vec![
-                    tool_call_node("tc-w", "probe_write"),
-                    tool_call_node("tc-r", "probe_read"),
-                ],
-            )
-        } else {
-            (
-                probe_calls(&[("tc-r", "probe_read"), ("tc-w", "probe_write")]),
-                vec![
-                    tool_call_node("tc-r", "probe_read"),
-                    tool_call_node("tc-w", "probe_write"),
-                ],
-            )
-        };
-        let ctx = ctx_with_probes(vec![side, read]).await;
-        let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
-        let sink = ExecEventSink::silent();
-        let abort = ExecAbortSignal::new();
-        let mut effects = Vec::new();
-        let mut breaks = Vec::new();
-        let (msgs, _updates) = process_tool_calls_in_env(
-            calls,
-            &parent,
-            &sink,
-            &abort,
-            ctx,
-            &nodes,
-            &env_for(&dir),
-            &EventStore::new(),
-            false,
-            &mut effects,
-            &mut breaks,
-        )
-        .await;
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let side = Arc::new(
+        ProbeTool::new("probe_write", CapabilityRiskLevel::Medium, &active, &peak).with_sleep(20),
+    );
+    let read = Arc::new(
+        ProbeTool::new("probe_read", CapabilityRiskLevel::Low, &active, &peak).with_sleep(20),
+    );
+    let calls = probe_calls(&[("tc-w", "probe_write"), ("tc-r", "probe_read")]);
+    let nodes = vec![
+        tool_call_node("tc-w", "probe_write"),
+        tool_call_node("tc-r", "probe_read"),
+    ];
+    let ctx = ctx_with_probes(vec![side, read]).await;
+    let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let mut effects = Vec::new();
+    let mut breaks = Vec::new();
+    let (msgs, _updates) = process_tool_calls_in_env(
+        calls,
+        &parent,
+        &sink,
+        &abort,
+        ctx,
+        &nodes,
+        &env_for(&dir),
+        &EventStore::new(),
+        false,
+        &mut effects,
+        &mut breaks,
+    )
+    .await;
 
-        assert_eq!(msgs.len(), 2, "{label}：两条都必须有结果");
-        assert_eq!(
-            peak.load(Ordering::SeqCst),
-            1,
-            "{label}：`Medium` 调用不得与任何调用重叠（峰值并发必须 = 1）"
-        );
-    }
+    assert_eq!(msgs.len(), 2, "两条都必须有结果");
+    assert_eq!(
+        peak.load(Ordering::SeqCst),
+        2,
+        "环不再按风险档串行：两条调用应一起在途（策略归执行体）"
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }

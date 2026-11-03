@@ -185,7 +185,11 @@ export const BASELINE = {
   // （`ChatNode` / `Principal` / `ExecEnv` / VDFS 全族 / `Plugin` 信封 / `TurnOutput` /
   // `CapabilityMeta` / `ReadingSection`）搬进 `symbio-kernel` crate，它们的单元用例随类型一起
   // 搬过去（一并 67 条，落在 `kernelRustTests`），不是被测对象退役。非侵蚀。
-  rustTests: 2175,
+  // baseline-allow rustTests: 净减 3 条（2175→2172）——D-311 把风险档 → 并行/串行策略
+  // 从环移入执行体：环侧 `tools/dispatch/parallel.test.rs` 整文件退役（5 条判据），
+  // 执行体补 2 条（写侧档独占 / 只读档并行，`port.test.rs`），环侧另把 1 条旧策略判据
+  // 换成钉「环不再做策略」的同数判据。不是丢掉覆盖，是换承担者。非侵蚀。
+  rustTests: 2172,
   kernelRustTests: 131,
 
   // baseline-allow ciRustTestsTotal: 同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
@@ -315,7 +319,9 @@ export const BASELINE = {
   // 二进制，条数不变），另补 1 条 `tool_port_registers_one_row_and_exposes_an_executor`
   // 钉「端口申报、`port_rows` 单行、`capability_port_of` 就绪且执行面可取」。清白树实跑
   // `cargo test --workspace`：2625 passed / 0 failed（90 个目标）。非侵蚀。
-  ciRustTestsTotal: 2635,
+  // baseline-allow ciRustTestsTotal: 净减 3 条（2635→2632）——与上方 `rustTests` 同一批
+  // （D-311 并发策略移入执行体：环侧 5 条退役、执行体 2 条新增，净 -3），两个口径是同一批用例。非侵蚀。
+  ciRustTestsTotal: 2632,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

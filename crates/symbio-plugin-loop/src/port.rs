@@ -488,7 +488,7 @@ where
 /// 宿主写口的值形态（`DE-047` D-305 裁决一）。
 ///
 /// 环内两处使用点：通用受理入口（`run_port`）与工具批执行体的执行窗口
-/// （`tools::execute_tool_async` 为产物落格挂它，P1b / D-308）。
+/// （`tools::execute_one` 为产物落格挂它，P1b / D-308）。
 pub(crate) fn host_fact_emit(
     store: Arc<dyn Store<Event = Event>>,
     round: u64,

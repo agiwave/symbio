@@ -57,13 +57,6 @@ pub(crate) struct GateReadings {
     /// 持有到批尾的代价是一份 `Vec<Event>`；换来的是判断只读**值**、不在执行
     /// 窗口里回放事实源（D-084 的口径）。
     pub(crate) session_facts: Vec<Event>,
-    /// 工具自声明的风险档：批内执行策略的分流依据，与 `decls` 同一份元数据。
-    pub(crate) risks: ToolRisks,
-    /// `tool` 端口的同批在飞上限（`PortDecl.concurrency`，`0` / `1` = 串行）。
-    ///
-    /// 批首读一次，逐条执行阶段只消费这个数。上限是声明的一部分：新端口自带自己的上界，
-    /// 执行层不需要为它改一个常量。
-    pub(crate) concurrency: u16,
     /// 本批留底 `(id, name, args)`——未执行收口的依据。
     pub(crate) batch_meta: Vec<(String, String, serde_json::Value)>,
     /// 同参重复调用台账；逐条执行时登记，故为可变读数。
@@ -134,17 +127,8 @@ pub(crate) async fn read_batch_gates(
     // 工具自声明的行为位同批首读一次（见 `ToolDecls`）：声明闸的管辖对象与效果
     // 端口的选实现依据都是它，按工具名判的那份副本因此不再存在。没有 visitor ⇒
     // 声明为空 ⇒ 声明闸都不命中、效果端口也无事可做（缺声明与漏声明同形，e2e 兜行为）。
-    //
-    // 同一份元数据还给出**风险档**（执行策略）：登记表只读一次，两个
-    // 消费者按值复用——再遍历一遍收集管线等于把批首读数变成两处时延源。
     let metas = symbio_sdk::capability::tool_metas(&ctx).await;
     let decls = ToolDecls::of_metas(&metas);
-    let risks = ToolRisks::of_metas(&metas);
-    // 端口声明与元数据同一处读数：批内上界由 `PortDecl` 说，执行层只消费。
-    // 端口清单不在环里（DE-047 不变量 6）：按端口名从冻结表取。
-    let ports = super::super::super::loop_rows::ports();
-    let concurrency =
-        symbio_kernel::decl::ring::port_of(&ports, "tool").map_or(0, |p| p.concurrency);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -175,8 +159,6 @@ pub(crate) async fn read_batch_gates(
         before,
         principal,
         session_facts,
-        risks,
-        concurrency,
         batch_meta,
         seen_calls,
     }

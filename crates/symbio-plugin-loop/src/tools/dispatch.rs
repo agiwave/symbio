@@ -20,11 +20,10 @@
 
 pub(crate) mod batch;
 pub(crate) mod gates;
-pub(crate) mod parallel;
 pub(crate) mod unfinished;
 
 use super::tool_executor::{
-    build_user_prompt_message, call_signature, execute_tool_async, record_effect, BreakerInputs,
+    build_user_prompt_message, call_signature, execute_one, record_effect, BreakerInputs,
     ExecResult, RoundEnv, ToolDecls,
 };
 use serde_json::{json, Value};
@@ -50,8 +49,6 @@ use {
 pub(crate) use self::gates::GateReadings;
 // 闸门表与拒止骨架：逐条执行段按 `first_refusal` 判、经 `refuse` 收口。
 pub(crate) use self::gates::{first_refusal, refuse, GateContext, Refusal};
-// 批内执行策略：风险档 → 并行/串行，映射单点在 `parallel::policy_for_risk`。
-pub(crate) use self::parallel::{policy_for_port, ExecPolicy, ToolRisks};
 
 // ── 共用收口原语（逐字来自拆分前的 tool_executor.rs）────────────────────────
 /// 把父 ToolCall 的**完整副本**定稿为终态并广播。

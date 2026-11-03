@@ -2,7 +2,7 @@
 //!
 //! 域内三个子模块：
 //!
-//! - `tool_executor` —— 执行编排：单工具路由与执行（`execute_tool_async`）、
+//! - `tool_executor` —— 执行编排：单笔债的通用入口（`execute_one`）、
 //!   批量分发与结果广播（`process_tool_calls_in_env`）。它是工具结果节点的
 //!   **唯一写入者**，也是编排层与上下文治理层取用工具机制的入口。
 //! - `dispatch` —— `process_tool_calls_in_env` 的**执行阶段分层**：

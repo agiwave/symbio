@@ -1,7 +1,7 @@
 //! 工具执行层
 //!
 //! 负责：
-//! - 单个工具调用的端口取用（`execute_tool_async`：经 `port.tool` 拿执行合同——
+//! - 单笔债的端口取用（`execute_one`：按端口名拿执行合同——
 //!   线上名解析、空闲超时、结果守卫、产物格都住提供者一侧（session 的 `ToolPort`），
 //!   本层不再认识它们）
 //! - 批量工具调用处理与结果广播（`process_tool_calls_in_env`）
@@ -112,7 +112,10 @@ pub struct ExecResult {
     pub origin_tokens: usize,
 }
 
-/// 执行单个工具调用（不阻塞等待用户）：经 `port.tool` 的执行合同跑。
+/// 执行**一笔债**（不阻塞等待用户）：按端口名取提供者，交给端口执行合同跑。
+///
+/// 这是环与执行体之间的**通用单笔入口**（DE-047 D-311）：一笔调用一笔债，入参只有
+/// 端口名与这笔债的载荷；并发、顺序、熔断全在 provider 内部，本函数不认识它们。
 ///
 /// 本函数只是**端口取用面**：按端口名从能力表读提供者，把调用现场整份交给
 /// 端口执行合同，收回文本 + 守卫元数据——线上名怎么解析、挂死怎么判（空闲而不是
@@ -120,11 +123,12 @@ pub struct ExecResult {
 /// 都是提供者一侧的私事，行为等价由 e2e 全量守着。
 ///
 /// 端口缺席（没装提供者插件——零工具的装配没有工具世界的提供者）或合同缺席
-/// （提供者不实现 tool 合同）都**响亮失败**：错误文本回传给模型（失败属信息性，
+/// （提供者不实现该端口的合同）都**响亮失败**：错误文本回传给模型（失败属信息性，
 /// 模型据此改道）、`success = false`、日志出声——与既有 route 错误同形。不许
 /// 静默回退、不许按「判不出来」继续：装配缺了提供者，继续转只会把缺失往后推。
 #[allow(clippy::too_many_arguments)]
-pub async fn execute_tool_async(
+pub async fn execute_one(
+    port: &'static str,
     env: &RoundEnv,
     parent: &Option<Arc<dyn Plugin>>,
     name: &str,
@@ -137,7 +141,7 @@ pub async fn execute_tool_async(
     ctx: Arc<dyn PluginInvokeRequest>,
 ) -> ExecResult {
     let absent = |why: &str| {
-        let text = format!("Error: `port.tool` 缺席：{why}（工具 {name} 未执行）");
+        let text = format!("Error: `port.{port}` 缺席：{why}（{name} 未执行）");
         plugin_error!("session", "[Tool] {text}");
         ExecResult {
             text: text.clone(),
@@ -146,8 +150,8 @@ pub async fn execute_tool_async(
             ..Default::default()
         }
     };
-    let Some(provider) = super::super::port::provider_of(&ctx, ports::TOOL).await else {
-        return absent("没有可用的工具提供者");
+    let Some(provider) = super::super::port::provider_of(&ctx, port).await else {
+        return absent("没有可用的端口提供者");
     };
     let Some(executor) = provider.executor() else {
         return absent("提供者不实现执行合同");
@@ -170,7 +174,7 @@ pub async fn execute_tool_async(
                 ctx: Some(exec_ctx),
             },
             PortInput {
-                port: ports::TOOL,
+                port,
                 payload: json!({
                     "name": name,
                     "args": args,
