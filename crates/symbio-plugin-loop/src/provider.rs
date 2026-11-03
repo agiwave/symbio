@@ -2,25 +2,21 @@
 //!
 //! ## 动作体就是整轮 future
 //!
-//! 本模块不维护任务表、不记轮次、不开通道：装配会话动作端口与
-//! [`ChatOrchestrator`] 之后直接 `await run_chat_loop`，结局以
-//! `TurnReport` 序列化进动作响应。session 侧
+//! 本模块不维护任务表、不记轮次、不开通道：授权与令牌校验之后把交付包交给
+//! [`turn_driver::run_turn`]，结局以 `TurnReport` 序列化进动作响应。session 侧
 //! 拿到的是「这一轮怎么结束的」，不是一串帧——帧已经经 `TurnDispatch.sink` 与
 //! 动作面写回会话转写了。
 //!
 //! 决策 D-086 见 [D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "D-086")
 
-use std::sync::Arc;
-
-use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_kernel::plugin::PluginInvokeRequestExt;
 use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContext, VdfsError, VdfsRequest, VdfsResponse, VdfsResult,
 };
-use symbio_sdk::turn::dispatch::{TurnDispatch, LOOP_RUN_TURN, TURN_DISPATCH};
+use symbio_sdk::turn::dispatch::{TURN_DISPATCH, LOOP_RUN_TURN};
 use symbio_sdk::vdfs::host::vdfs_host_ctx;
 
-use super::chat_loop::{run_chat_loop, ChatOrchestrator};
-use super::session_port::{PortSession, SessionPort};
+use super::turn_driver;
 
 /// 唯一入口（授权三条见 `plugin.rs` 的模块文档）。
 pub(super) async fn dispatch(
@@ -55,7 +51,7 @@ pub(super) async fn dispatch(
         )));
     }
 
-    let report = run_turn(host, dispatch).await;
+    let report = turn_driver::run_turn(host, dispatch).await;
     let data = serde_json::to_value(&report)
         .map_err(|e| VdfsError::internal(format!("轮次结局序列化失败：{e}")))?;
     Ok(VdfsResponse::Action(VdfsActionResult {
@@ -66,35 +62,3 @@ pub(super) async fn dispatch(
     }))
 }
 
-/// 装配一轮的会话句柄与编排器，跑到收尾。
-///
-/// `dispatch.sink` / `dispatch.abort` 是**同一次**执行的对象：一次 `run_turn`
-/// 只消费一次交付包，因此把它们移进编排器（`TurnDispatch` 是 `Arc`，clone 出
-/// 来的是同一份引用）。
-async fn run_turn(
-    host: Arc<dyn PluginInvokeRequest>,
-    dispatch: Arc<TurnDispatch>,
-) -> symbio_sdk::turn::dispatch::TurnReport {
-    let port: Arc<dyn SessionPort> = Arc::new(PortSession::new(host.clone()));
-    let view = dispatch.spec.view();
-    let session = port;
-    let settings = view.settings.clone();
-    let orchestrator = Arc::new(ChatOrchestrator {
-        parent: dispatch.parent.clone(),
-        context_limit: dispatch.context_limit,
-        view,
-        facts: dispatch.facts.clone(),
-        session,
-        writer: dispatch.writer.clone(),
-        compose_enabled: settings.compose_enabled,
-        opening_enabled: settings.opening_enabled,
-        presentation_tree: settings.presentation_tree,
-    });
-    run_chat_loop(
-        orchestrator,
-        host,
-        dispatch.sink.clone(),
-        dispatch.abort.clone(),
-    )
-    .await
-}

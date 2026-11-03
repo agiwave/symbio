@@ -6,12 +6,12 @@
 //! ```text
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
 //! 步骤1 gate_turn              ← 退出条件（唯一判定点）
-//! 步骤2 turn_exec::drive       ← 唯一一个环：开幕 → 跑幕 → 收幕 → 接幕
+//! 步骤2 turn_exec::drive       ← 薄转发到 turn_driver::drive（外层环，P2-6a）
 //! 后步骤 无（直路只能由 return 离开，全部经 finish_turn 收尾）
 //! ```
 //!
 //! 本文件**没有环**：`D-222` 裁决 5 把控制面收成**一个**环，它住在
-//! [`super::turn_exec::drive`]。幕首、轮首四行、接缝、汇报、轮内各行与幕间接续
+//! [`super::turn_driver::drive`]（`turn_exec::drive` 只是薄转发）。幕首、轮首四行、接缝、汇报、轮内各行与幕间接续
 //! 都是那张绑定表上的行，由 `(phase, anchor)` 决出先后；本文件只做三件事——备好本轮状态、
 //! 过闸门、把结局映射成 [`TurnExit`]。
 //!

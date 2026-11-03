@@ -123,7 +123,7 @@ use super::session_port::{self, SessionPort};
 // （消费方与本文件测试都不必改引用）。本文件只留调度与共享状态。
 mod assemble;
 mod call;
-mod drive;
+pub(crate) mod drive;
 mod outcome;
 mod persist;
 mod policy;
@@ -1697,7 +1697,7 @@ pub(crate) fn land_inputs(
 /// - 收束于**等待用户**那一格进展（`status: "pending"`）：它不是停机格（本轮尚未了结，
 ///   收束格留给恢复幕），但它是本轮的最后一步——继续选债就会再跑一次模型往返，
 ///   把「等你回答」跑成「又答了一轮」。字面口径与这里的差异记在 D-123。
-fn ends_the_drive(e: &Event, turn: u64) -> bool {
+pub(crate) fn ends_the_drive(e: &Event, turn: u64) -> bool {
     if e.turn != turn {
         return false;
     }
