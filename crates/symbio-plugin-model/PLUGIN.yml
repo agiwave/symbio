@@ -3,8 +3,3 @@ plugin_id: model
 plugin_comment: 模型服务（子智能体自己的模型；子树会话自行解析）
 plugin_assembly: sub_agent
 plugin_order: 80
-
-# 本插件导出给别的插件按名字读的事件（scripts/facts/events-rs.mjs 读取 →
-# crates/symbio-plugin-api/src/events.rs）。
-# 一次往返的流式增量（D-306 裁决三）：写方是 model 的执行体，读方是展示层投影。
-shared_events: model.stream

@@ -5,22 +5,19 @@
 //! 目录一起装：生效者缺席 ⇒ 不注册端口行 ⇒ 环在调用点响亮失败（落失败事实
 //! 并中止），而不是在这里猜一个别的模型。
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
 };
-use symbio_plugin_api::events::EVENT_MODEL_STREAM;
 use symbio_plugin_api::port::{
-    PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortInput, PortOutcome,
-    PortProvider,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
 };
 use symbio_plugin_api::ports;
 use symbio_plugin_api::{
-    llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecAbortSignal, ExecEnv, ExecEventSink,
-    ExecTranscriptWriter, FactDraft, LlmAdapter, ModelFinishReason, ModelProvider, PluginError,
-    PromptMessage, ProviderLlmAdapter, Verb,
+    llm_short_id, CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv, ExecEventSink,
+    ExecTranscriptWriter, LlmAdapter, ModelFinishReason, ModelProvider, PluginError, PromptMessage,
+    ProviderLlmAdapter,
 };
 
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
@@ -129,15 +126,10 @@ impl PortExecutor for ModelExecutor {
         // （`PromptMessage`），线格式在这里收口。
         let wire = wire_messages(&request.messages);
         let started = std::time::Instant::now();
-        // 流式增量归执行体（`D-306` 裁决三）：provider 仍只往 `env.sink()` 写帧，
-        // 但这一出口先把每帧落成 `model.stream` 事实行，再按行名投影给展示出口。
-        // 于是节点 id 与半截正文随事实入格，执行体自己持有 `text_id` / `reasoning_id`
-        // ——环不必再替它记账（`D-314`）。
-        let rows = Arc::new(StreamRows::new(
-            exec.emit.clone(),
-            exec.sink.clone(),
-            exec.idempotency_key.clone(),
-        ));
+        // 流式增量是**瞬时帧**，不进事实表（`D-314` 两条通道）：provider 往 `env.sink()`
+        // 写帧，这一出口记下节点 id 与半截正文（供 `response` / `failed` 载荷使用），
+        // 再原样转发给展示出口。丢帧不影响正确性——终稿以 `response` 为准。
+        let rows = Arc::new(StreamRows::new(exec.sink.clone()));
         let env = ExecEnv::new(ExecEventSink::direct(rows.clone()), exec.abort.clone());
         match provider
             // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
@@ -213,16 +205,13 @@ impl PortExecutor for ModelExecutor {
     }
 }
 
-/// 执行体自己的流式记账（`D-306` 裁决三 / `D-314`）。
+/// 执行体的流式读数与转发口（`D-314` 的「流」通道）。
 ///
-/// provider 写出的每一帧先落成 `model.stream` 事实行，再由本写口按行名投影给
-/// 展示出口。本写口同时记下正文 / 推理的节点 id 与（可能半截的）正文——成功与
-/// 中止都以 `stream` 读数交出，环不再从 `StreamNodeFacts` 桥取这一份账。
+/// provider 写出的每一帧是**瞬时帧**：本口记下正文 / 推理的节点 id 与（可能半截的）
+/// 正文，然后原样转发给展示出口——不进事实表、不参与重放、不写幂等键。记下的读数
+/// 随 `response` / `failed` 载荷交出，环不再从 `StreamNodeFacts` 桥取这一份账。
 struct StreamRows {
-    emit: PortFactEmit,
     display: ExecEventSink,
-    call_id: String,
-    seq: AtomicU64,
     state: Mutex<StreamState>,
 }
 
@@ -235,12 +224,9 @@ struct StreamState {
 }
 
 impl StreamRows {
-    fn new(emit: PortFactEmit, display: ExecEventSink, call_id: String) -> Self {
+    fn new(display: ExecEventSink) -> Self {
         Self {
-            emit,
             display,
-            call_id,
-            seq: AtomicU64::new(0),
             state: Mutex::new(StreamState::default()),
         }
     }
@@ -297,18 +283,6 @@ impl StreamRows {
 impl ExecTranscriptWriter for StreamRows {
     async fn apply(&self, message: ChatNode) {
         self.observe(&message);
-        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
-        self.emit
-            .emit(vec![FactDraft {
-                key: format!("model-stream-{}-{seq}", self.call_id),
-                kind: EVENT_MODEL_STREAM.to_string(),
-                entity: Entity::Turn,
-                verb: Verb::Progressed,
-                payload: serde_json::json!({ "node": &message }),
-                produced_by: None,
-            }])
-            .await;
-        // 展示出口收到的是这条事实行的投影（帧本身），不是另一条通道。
         self.display.emit(message).await;
     }
 }
