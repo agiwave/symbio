@@ -201,10 +201,10 @@ fn plain() -> Value {
 
 // ── 端口声明 ─────────────────────────────────────────────────────────────
 
-/// 批次并发是端口声明的一部分：只有 `tool` 允许同批并发；`model`
-/// 是一次调用，没有「同批子债」。
+/// 并发上限是**插件自声明**的一部分：`tool` 自报 4，`model` 自报串行（0）。
+/// 环只做声明搬运，不读这个值、不据此调度（DE-047 `D-311` / X-15）。
 #[test]
-fn only_the_tool_port_declares_batch_concurrency() {
+fn tool_port_declares_its_own_concurrency() {
     let of = |port: &str| PORTS.iter().find(|p| p.port == port).map(|p| p.concurrency);
     assert_eq!(of("tool"), Some(4));
     assert_eq!(of("model"), Some(0));
