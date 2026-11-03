@@ -59,7 +59,7 @@ M=model、T=tool。「状态所有权」指 TurnState / LoopSession / SessionCon
 | `tools/tool_executor/decls.rs` | 66 | `BehaviorDecls`：模型可见工具清单构造（名字等值再末段）——**model 请求形状** | `BehaviorDecls`、`of_metas`、`behaviors_of` | K（CapabilityMeta） | — | chat_loop/inputs（清单进请求） | decls.test.rs 159 |
 | `tools/tool_executor/effects.rs` | 62 | `record_effect`：工具效果落格 | `record_effect` | A（`EffectInput`） | 写事实轨 | batch.rs | effects.test.rs 100 |
 | `tools/tool_executor/breaker.rs` | 114 | 熔断（同参连续失败阈值 / 冷却） | `CircuitBreaker` | — | — | gates.rs | （gates.test.rs 覆盖） |
-| `tools/tool_result_guard.rs` | 170 | 结果体积上限与归档滚动（`guard_tool_result`） | `guard_tool_result`、`DEFAULT_TOOL_RESULT_TOKEN_CAP` | — | 读 LoopSession.tool_archive_dir | batch.rs | tool_result_guard.test.rs 125 |
+| `tools/tool_result_guard.rs`（已迁出 → `crates/symbio-plugin-tool/src/result_guard.rs`） | 175 | 结果体积上限与归档滚动（`guard_result`） | `guard_result`、`DEFAULT_TOKEN_CAP` | — | 执行体持有存档目录（P1b / D-308） | tool 端口 `finish` | result_guard.test.rs 134 |
 
 ### turn 骨架
 

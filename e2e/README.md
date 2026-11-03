@@ -181,7 +181,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs # 失败时输出错误堆栈
  所以按 `times` 的名额会被一次用光 ⇒ 循环停不下来（实测 3400+ 次请求）。反过来说：
  需要「这条场景只被选 N 次」就用 `times`，别拿 `failTimes` 的口径去想它。
 12. **压缩水位线要跟估算器对表，不是跟字节数**。mock 每轮恒报 `prompt_tokens: 64`，
- 校准比值被压到下限 `0.2`（`tokenizer.rs::feedback` 的 clamp），于是估算 token 只有
+ 校准比值被压到下限 `0.2`（`text.rs::feedback` 的 clamp），于是估算 token 只有
  真实体量的两成——按字节算「该压了」的窗口值会让压缩**永不触发**，再小一档则顶到
  「摘要请求本身超上限」的注定失败分支并触发熔断。取值靠实测矩阵（见 `t47` 的
  `CONTEXT_WINDOW_TOKENS` 文档），而窗口大小本身**不是**判据。

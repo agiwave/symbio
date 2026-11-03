@@ -161,7 +161,7 @@ fn find_compress_split_point(messages: &[ChatNode], fraction: f64) -> usize {
 /// 实际请求文本并由 provider 计费）+ ToolCall 节点参数（content 即 JSON 文本）
 /// + 每消息固定结构开销。
 pub fn estimate_message_tokens(m: &ChatNode) -> usize {
-    use super::tokenizer::{default_tokenizer, Tokenizer};
+    use symbio_plugin_api::text::{default_tokenizer, Tokenizer};
 
     const PER_MESSAGE_OVERHEAD: usize = 8; // role / 框架 / 分隔符等固定开销
     let tok = default_tokenizer();
@@ -218,7 +218,7 @@ pub fn estimate_overhead_with_tools(
     system_prompt: &str,
     tools: &[symbio_kernel::capability::CapabilityMeta],
 ) -> usize {
-    use super::tokenizer::{default_tokenizer, Tokenizer};
+    use symbio_plugin_api::text::{default_tokenizer, Tokenizer};
 
     let tok = default_tokenizer();
     let mut total = tok.count(system_prompt);

@@ -12,6 +12,7 @@
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）
 //! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份
 //! - [`port`]：世界端口的注册面（`PortProvider` 与 port 族——名字与契约静态，提供者随活插件的能力行动态收集）
+//! - [`text`]：Token 计量与头尾切分（预算算术，环与世界共用）
 //! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）
 //! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
@@ -52,6 +53,7 @@ pub mod retrieval;
 pub mod routes;
 pub mod rows;
 pub mod settle;
+pub mod text;
 pub mod view_names;
 pub mod views;
 

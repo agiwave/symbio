@@ -341,7 +341,7 @@ pub(crate) async fn prepare_request_sections(
         orchestrator.context_limit as usize,
     );
     let (kept, fit) = {
-        use super::super::tokenizer::{default_tokenizer, Tokenizer};
+        use symbio_plugin_api::text::{default_tokenizer, Tokenizer};
         let tok = default_tokenizer();
         symbio_plugin_api::context::fit_sections(sections, budget, |text| tok.count(text))
     };

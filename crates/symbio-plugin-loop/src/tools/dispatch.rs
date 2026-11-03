@@ -25,9 +25,8 @@ pub(crate) mod unfinished;
 
 use super::tool_executor::{
     build_user_prompt_message, call_signature, execute_tool_async, record_effect, BreakerInputs,
-    PendingPrompt, ToolDecls,
+    ExecResult, ToolDecls,
 };
-use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use symbio_kernel::capability::failure_kind;

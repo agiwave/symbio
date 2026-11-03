@@ -1,39 +1,40 @@
-//! L0：单次工具结果守卫
+//! L0：单次工具结果守卫（执行体侧）
 //!
 //! 工具结果往往很长（shell 输出、文件全文、网页抓取…），单条即可撑爆上下文窗口。
-//! 本模块在工具结果写进上下文**之前**按 token 预算裁剪：
+//! 本模块在结果交回环**之前**按 token 预算裁剪：
 //!
 //! 1. 估算 token 数 ≤ 预算 → 原样返回；
-//! 2. 否则：把全文存档到**会话存档目录**（由 session 在派发前算好的
-//!    `tool_archive_dir`，可经 `local/file_read` 取回），并对正文做
+//! 2. 否则：把全文存档到**会话存档目录**（由调用方在载荷里给出的
+//!    `archive_dir`，可经 `local/file_read` 取回），并对正文做
 //!    **head/tail 摘要**（保留前 60% + 后 40% 预算，尾部通常是结论/错误，更关键），
 //!    中间插入占位说明。
 //!
-//! 存档位置：工具结果语义上是会话资产，历史上写入系统临时目录会被
-//! OS 清理造成历史提示死链；现跟随会话目录持久化。文件名 = 毫秒时间戳 + token 数 + 内容 FNV 指纹，杜绝旧实现"同秒同 token 数互相覆盖"的碰撞；目录按修改时间
-//! 保留最新 [`TOOL_ARCHIVE_KEEP`] 个文件，防止无限累积。
+//! 存档位置跟随会话目录持久化（历史提示不会因临时目录被清理而变成死链）。
+//! 文件名 = 毫秒时间戳 + token 数 + 内容 FNV 指纹，杜绝「同秒同 token 数互相覆盖」
+//! 的碰撞；目录按修改时间保留最新 [`ARCHIVE_KEEP`] 个文件，防止无限累积。
 //!
-//! 与既有压缩层（L2 自动摘要 / L3 请求视图骨架化）的边界：本层只处理**单条**结果，是"语义上限"；
-//! 物理字节上限（shell/fetch 1MB 等）是最后一道防线，二者不冲突。
+//! 计量与头尾切分机制住在 `symbio_plugin_api::text`（环与世界共用同一套预算算术）；
+//! 本模块只管**工具结果这一种策略**：触发条件、60/40 配比、占位符文案与存档布局。
 
-use super::super::tokenizer::{default_tokenizer, Tokenizer};
-use super::super::tokenizer::{split_head_tail, HeadTailSplit};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use symbio_plugin_api::clock_now_ms;
+use symbio_plugin_api::text::{default_tokenizer, split_head_tail, HeadTailSplit, Tokenizer};
 
 /// 单条工具结果 token 预算（默认 ≈ 32KB 文本），可由调用方按需覆盖。
-pub const DEFAULT_TOOL_RESULT_TOKEN_CAP: usize = 8192;
+pub const DEFAULT_TOKEN_CAP: usize = 8192;
 
 /// 每个会话的 L0 存档目录保留的最新文件数（防无限累积；超出按修改时间淘汰最旧）。
-pub const TOOL_ARCHIVE_KEEP: usize = 20;
+pub const ARCHIVE_KEEP: usize = 20;
 
 /// 取回指引文案（三层压缩占位符共用同一格式；随驱动器走，因为写占位符的是这里）。
 ///
 /// 与 `session/paths.rs` 的取回协议同义——它描述的是**用户可见的取回入口**，
-/// 不是会话存储布局；跟着写文案的一侧住，避免 loop 为了一个字符串去认识 session。
+/// 不是会话存储布局；跟着写文案的一侧住，避免环为了一个字符串去认识会话。
 pub const RETRIEVAL_HINT: &str = "（取回：vdfs_read 该路径，按 offset/limit 分段读取）";
 
 /// 守卫结果
+#[derive(Default)]
 pub struct GuardedResult {
     /// 裁剪后的文本（已可安全放进上下文）
     pub text: String,
@@ -71,9 +72,7 @@ fn content_fingerprint(text: &str) -> String {
 
 /// 把全文写入存档目录（best-effort）。失败返回 None，不阻断主流程。
 ///
-/// 文件名 = `tool_{毫秒ts}_{token数}_{内容指纹}.txt`：毫秒 + 指纹双保险，
-/// 修复旧实现"秒级时间戳 + token 数"在同秒同 token 数时互相覆盖的碰撞缺陷。
-/// 写入成功后按修改时间保留最新 [`TOOL_ARCHIVE_KEEP`] 个存档。
+/// 文件名 = `tool_{毫秒ts}_{token数}_{内容指纹}.txt`：毫秒 + 指纹双保险。
 fn archive_full_text(text: &str, token_count: usize, archive_dir: &Path) -> Option<String> {
     let dir = resolve_archive_dir(archive_dir)?;
     archive_into_dir(text, token_count, &dir)
@@ -81,7 +80,7 @@ fn archive_full_text(text: &str, token_count: usize, archive_dir: &Path) -> Opti
 
 /// 写入指定目录并执行清理（目录由调用方解析；拆出便于测试注入目录）。
 fn archive_into_dir(text: &str, token_count: usize, dir: &std::path::Path) -> Option<String> {
-    let now = symbio_sdk::clock::clock_now_ms();
+    let now = clock_now_ms();
     let file_name = format!(
         "tool_{}_{}_{}.txt",
         now,
@@ -91,7 +90,7 @@ fn archive_into_dir(text: &str, token_count: usize, dir: &std::path::Path) -> Op
     let path: PathBuf = dir.join(file_name);
     match std::fs::write(&path, text) {
         Ok(_) => {
-            prune_archive_dir(dir, TOOL_ARCHIVE_KEEP);
+            prune_archive_dir(dir, ARCHIVE_KEEP);
             path.to_str().map(|s| s.to_string())
         }
         Err(_) => None,
@@ -120,38 +119,16 @@ fn prune_archive_dir(dir: &std::path::Path, keep: usize) {
     }
 }
 
-/// guard / summarize 共用的 head/tail 摘要拼装核心。
-///
-/// 两者唯一的差异是占位符文案（guard 附带存档取回指引，summarize 提示重跑工具），
-/// 预算切分（60%/40%）、omit 计算、三段拼接逻辑完全一致 —— 收敛于此，防止漂移。
-/// 切分机制本体在 `tokenizer::split_head_tail`（头偏 60/40 的策略在此处选择）。
-fn assemble_head_tail_summary(text: &str, budget_tokens: usize, placeholder: String) -> String {
-    let head_budget = ((budget_tokens as f64) * 0.6) as usize;
-    let tail_budget = budget_tokens.saturating_sub(head_budget);
-    let HeadTailSplit { head, tail } = split_head_tail(
-        text,
-        head_budget,
-        tail_budget,
-        super::super::tokenizer::default_tokenizer(),
-    );
-
-    let mut out = String::with_capacity(head.len() + tail.len() + placeholder.len());
-    out.push_str(&head);
-    out.push_str(&placeholder);
-    out.push_str(&tail);
-    out
-}
-
-/// guard / summarize 共用的占位符前缀：omit 统计口径保持一致。
+/// 占位符前缀：omit 统计口径保持一致。
 fn omit_placeholder_prefix(omit: usize) -> String {
     format!("\n[... 已省略约 {omit} tokens 的中间内容。")
 }
 
 /// 守卫工具结果：超过预算则存档 + head/tail 摘要，否则原样返回。
 ///
-/// `archive_dir`：会话的 L0 存档目录（session 在派发前按会话算好）。
+/// `archive_dir`：会话的 L0 存档目录（环在载荷里给出）。
 /// 目录不可写时退回系统临时目录兜底。
-pub fn guard_tool_result(text: &str, budget_tokens: usize, archive_dir: &Path) -> GuardedResult {
+pub fn guard_result(text: &str, budget_tokens: usize, archive_dir: &Path) -> GuardedResult {
     let tok = default_tokenizer();
     let n = tok.count(text);
     if n <= budget_tokens {
@@ -166,15 +143,24 @@ pub fn guard_tool_result(text: &str, budget_tokens: usize, archive_dir: &Path) -
     let archive_path = archive_full_text(text, n, archive_dir);
 
     let omit = n.saturating_sub(budget_tokens);
-    // 统一取回协议：三层压缩占位符共用同一格式 —— 「已存档至: <路径> +
-    // 统一取回入口 local/file_read + 统一分段参数 offset/limit」。
+    // 统一取回协议：占位符含存档路径与 vdfs_read 取回入口。
     let archive_hint = match &archive_path {
         Some(p) => format!("完整输出已存档至: {p}{RETRIEVAL_HINT}"),
         None => "完整输出未存档（存档目录不可写）".to_string(),
     };
     let placeholder = format!("{} {archive_hint} ...]", omit_placeholder_prefix(omit));
 
-    let out = assemble_head_tail_summary(text, budget_tokens, placeholder);
+    let HeadTailSplit { head, tail } = split_head_tail(
+        text,
+        ((budget_tokens as f64) * 0.6) as usize,
+        budget_tokens - ((budget_tokens as f64) * 0.6) as usize,
+        tok,
+    );
+
+    let mut out = String::with_capacity(head.len() + tail.len() + placeholder.len());
+    out.push_str(&head);
+    out.push_str(&placeholder);
+    out.push_str(&tail);
 
     GuardedResult {
         text: out,
@@ -185,5 +171,5 @@ pub fn guard_tool_result(text: &str, budget_tokens: usize, archive_dir: &Path) -
 }
 
 #[cfg(test)]
-#[path = "tool_result_guard.test.rs"]
+#[path = "result_guard.test.rs"]
 mod tests;

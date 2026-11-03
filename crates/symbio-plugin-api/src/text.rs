@@ -1,18 +1,11 @@
-//! Token 估算与头尾切分：上下文预算的计量基础与超预算的文本切分机制
+//! Token 估算与头尾切分：预算的计量基础与超预算的文本切分机制。
 //!
-//! ## 计量与切分为什么住在同一个文件
+//! ## 为什么在共享合同层
 //!
-//! [`split_head_tail`] 的签名里就有 `&dyn Tokenizer`——切分由 token 计量驱动，
-//! 两者是同一件「预算怎么花」的两半；切分若另起一文件，就只能反向引用本文件的
-//! 计量器，凭空多出一层。分工见 [`split_head_tail`] 上方的注释。
-//!
-//! ## 为什么需要独立模块
-//!
-//! 上下文裁剪（轮次窗口 / 工具结果窗口 / 自动摘要）的所有判据最终都要落到
-//! "这段内容占多少 token"。此前 `crates/symbio-plugin-session/src/transcript/compression.rs` 用
-//! `text.len() / 4` 估算——`len()` 是 **UTF-8 字节数**，
-//! 中文 1 字 = 3 字节被估成 0.75 token（实际约 1.0~1.5），
-//! 低估约 2 倍，导致压缩触发时上下文早已超限。
+//! 计量（[`Tokenizer`]）与切分（[`split_head_tail`]）原本随唯一消费者住在 session 插件内。
+//! 工具执行体成为第二个消费者之后，任何一侧独占都会把同一套预算算术复制成两份——
+//! 一份在环、一份在世界，阈值迟早分叉。这里只放**纯机制**：不读世界、不碰存储；
+//! 「结果怎么存、占位符写什么」仍归各消费方自己的策略。
 //!
 //! ## 设计取向
 //!
@@ -22,12 +15,6 @@
 //!   调用方只依赖 trait，无需改动。
 //! - **可校准**：[`CalibratedTokenizer`] 用 provider 返回的真实 `usage` 反馈
 //!   做滑动校正，把启发式的系统偏差逐步拉回 1.0（对中文场景收益最大）。
-//!
-//! ## Phase sink
-//!
-//! 自 `symbio_core/tokenizer.rs` 下沉至 session 插件——E-② 后唯一消费者
-//! （compression / chat_loop / tool_result_guard）全部位于 session 模块内，
-//! 属单一模块私有设施，不再置于 core 共享层。
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -36,9 +23,8 @@ const SAMPLE_CHARS: usize = 32_768;
 
 /// token 计数抽象
 ///
-/// 体检结论（audit-4）：trait 收敛为单一方法 `count`——纯文本计量归本模块；
-/// 消息级 / 工具级聚合（结构开销、ToolCall 参数、prompt 前缀等语义）
-/// 由 compression.rs 的 estimate_* 系列负责，避免两处重复定义。
+/// trait 收敛为单一方法 `count`——纯文本计量归本模块；消息级 / 工具级聚合由消费方
+/// 的 `estimate_*` 系列负责，避免两处重复定义。
 pub trait Tokenizer: Send + Sync {
     /// 估算单段文本的 token 数
     fn count(&self, text: &str) -> usize;
@@ -156,7 +142,6 @@ fn is_code_char(ch: char) -> bool {
 ///
 /// 存一个滑动平均比值 `actual / estimate`（放大 10000 倍）。
 /// 初值 1.0；每次拿到真实用量就按 `alpha` 混合更新。
-/// 这样即便启发式对某类文本（如中文、代码）系统性偏差，几轮之后也能收敛。
 #[derive(Debug)]
 pub struct CalibratedTokenizer {
     inner: HeuristicTokenizer,
@@ -215,9 +200,6 @@ impl CalibratedTokenizer {
 }
 
 /// 全局默认估算器（进程内单例）。
-///
-/// 用 `CalibratedTokenizer` 而非裸 `HeuristicTokenizer`：这样任何一次 provider 真实用量
-/// 反馈（`report_provider_usage`）都会滚动修正全局估算，对中文 / 代码等系统性偏差收敛最快。
 static DEFAULT: std::sync::OnceLock<CalibratedTokenizer> = std::sync::OnceLock::new();
 
 pub fn default_tokenizer() -> &'static CalibratedTokenizer {
@@ -245,17 +227,12 @@ pub fn report_provider_usage(estimated: usize, actual: Option<u32>) {
 // - **策略**（各调用方）：触发条件（token 预算 vs 行数阈值）、头尾配比
 //   （约 60/40 偏头部 vs 约 1/4:3/4 偏尾部）、占位符文案（字符兜底的
 //   `…` 截断标记属机制契约，由 [`split_head_tail`] 统一添加）。
-//
-// 策略分歧是有依据的设计（L0 面对工具 dump，结论/错误常在头部自报家门；
-// 会话消息尾部离当前对话点更近），不得以"去重"为名强行统一；
-// 机制收敛于此，保证策略族无法各自漂移（历史教训：曾有一处内联
-// 重写同型逻辑，注释声称"对齐 L0 策略"实则已静默分叉）。
 
 /// 字符换算系数：字符预算 ≈ token 预算 × 2（CJK 友好的粗略口径，全库统一）。
 const CHARS_PER_TOKEN: usize = 2;
 
 /// [`split_head_tail`] 的切分结果。
-pub(crate) struct HeadTailSplit {
+pub struct HeadTailSplit {
     /// 头部保留文本（每行自带换行；首行字符兜底时以 `…\n` 结尾）。
     pub head: String,
     /// 尾部保留文本（行间以 `\n` 连接，无尾换行；尾行字符兜底时以 `…` 开头）。
@@ -267,19 +244,19 @@ pub(crate) struct HeadTailSplit {
 /// 供单行超预算时使用——按行截断会"首行整行放行"导致压缩失效
 /// （真实会话实证：12k token 的单行 glob 结果只省略了 1/3）。
 /// 按字符而非字节截取，多字节 CJK 安全。
-pub(crate) fn truncate_head_chars(text: &str, token_budget: usize) -> String {
+pub fn truncate_head_chars(text: &str, token_budget: usize) -> String {
     let char_cap = token_budget.saturating_mul(CHARS_PER_TOKEN);
     text.chars().take(char_cap).collect()
 }
 
 /// 尾部字符兜底：保留**行尾** `token_budget × 2` 个字符（结论/错误多在尾部）。
-pub(crate) fn truncate_tail_chars(text: &str, token_budget: usize) -> String {
+pub fn truncate_tail_chars(text: &str, token_budget: usize) -> String {
     let char_cap = token_budget.saturating_mul(CHARS_PER_TOKEN);
     let skip = text.chars().count().saturating_sub(char_cap);
     text.chars().skip(skip).collect()
 }
 
-/// token 预算驱动的头尾切分（机制本体，原 L0 `tool_result_guard::split_head_tail`）。
+/// token 预算驱动的头尾切分（机制本体）。
 ///
 /// 优先按**行**贪心累加（结构化输出友好，不会切断 JSON/表格行）；单行超预算
 /// 退化为按字符截断（头保行首 / 尾保行尾）。字符兜底的 `…` 截断标记由本函数
@@ -289,7 +266,7 @@ pub(crate) fn truncate_tail_chars(text: &str, token_budget: usize) -> String {
 /// 校准口径）；本函数因此是**纯函数**——不读进程级校准状态，测试可用
 /// 确定性的 [`HeuristicTokenizer`] 复现任意切分结果（否则测试会因其他用例
 /// 的 usage 反馈漂移而 flaky，实测踩坑）。
-pub(crate) fn split_head_tail(
+pub fn split_head_tail(
     text: &str,
     head_budget: usize,
     tail_budget: usize,
@@ -343,5 +320,5 @@ pub(crate) fn split_head_tail(
 }
 
 #[cfg(test)]
-#[path = "tokenizer.test.rs"]
+#[path = "text.test.rs"]
 mod tests;

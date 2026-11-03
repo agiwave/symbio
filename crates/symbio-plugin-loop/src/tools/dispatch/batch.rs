@@ -157,8 +157,8 @@ async fn emit_tool_running(
 
 // ── 准备 / 执行 / 收口的三个阶段──────────────────────────────────
 
-/// 一次执行的产出：`(结果正文, 成功, 待用户动作)`。
-type ExecOutcome = (String, bool, Option<PendingPrompt>);
+/// 一次执行的产出（执行体交回的文本 + 守卫元数据，P1b）。
+type ExecOutcome = ExecResult;
 
 /// 在途执行的 future。返回 `(seq, 产出)`——`seq` 是**启动顺序**，收口按它排队。
 type ExecFuture<'a> =
@@ -521,7 +521,6 @@ async fn finish_call(
     sink: &ExecEventSink,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
-    tool_archive_dir: &std::path::Path,
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
@@ -534,7 +533,17 @@ async fn finish_call(
         result_msg_id,
         repeat_note,
     } = ready;
-    let (final_res, success, mut pending_user_prompt) = out;
+    // 执行体交回的已是「节点正文 / 记账原文 / 守卫元数据」三份，本层不再裁剪
+    // 结果（L0 守卫随执行体迁出，P1b / DE-047 D-308）。
+    let ExecResult {
+        text: guarded_text,
+        raw: final_res,
+        success,
+        pending: mut pending_user_prompt,
+        truncated,
+        archive_path,
+        origin_tokens,
+    } = out;
 
     // 代际立约的了结：跑完即知履约与否。**待用户审批的不记**——
     // 承诺还没到可判时刻，抢跑记成履约或违约都是假事实（审批结束后随
@@ -568,25 +577,22 @@ async fn finish_call(
     let mut tool_msg = if let Some(pending) = pending_user_prompt.take() {
         build_user_prompt_message(&result_msg_id, &id, &pending, &name)
     } else {
-        // L0 守卫：超长工具结果存档 + head/tail 摘要，避免单条撑爆上下文窗口
-        // （对应"单次工具调用内容太长"的压缩诉求；物理字节上限不再是唯一防线）。
-        // 存档目录由 session 预计算（跟随会话生命周期，历史可取回不被 OS 清理）。
-        let guarded =
-            guard_tool_result(&final_res, DEFAULT_TOOL_RESULT_TOKEN_CAP, tool_archive_dir);
+        // 正文用执行体交回的**已守卫文本**（超长结果由执行体存档 + head/tail 摘要，
+        // 存档目录跟随会话生命周期）。
         let mut tool_msg = llm_build_tool_message(
             &id,
-            &guarded.text,
+            &guarded_text,
             Some(success),
             Some(result_msg_id),
             Some(&name),
         );
-        if guarded.truncated {
+        if truncated {
             let mut meta = tool_msg.meta.clone().unwrap_or_else(|| json!({}));
             meta["tool_result_truncated"] = json!(true);
-            if let Some(p) = guarded.archive_path {
+            if let Some(p) = archive_path {
                 meta["archive_path"] = json!(p);
             }
-            meta["origin_tokens"] = json!(guarded.original_tokens);
+            meta["origin_tokens"] = json!(origin_tokens);
             tool_msg.meta = Some(meta);
         }
         tool_msg
@@ -676,6 +682,7 @@ async fn finish_call(
 
 /// 启动一条执行（`seq` = 启动顺序，收口按它排队）。
 fn start_execution<'a>(
+    tool_archive_dir: &'a std::path::Path,
     seq: u64,
     ready: &Ready,
     parent: &'a Option<Arc<dyn Plugin>>,
@@ -689,8 +696,18 @@ fn start_execution<'a>(
     let result_msg_id = ready.result_msg_id.clone();
     let ctx = ctx.clone();
     Box::pin(async move {
-        let out =
-            execute_tool_async(parent, &name, args, &id, sink, abort, result_msg_id, ctx).await;
+        let out = execute_tool_async(
+            tool_archive_dir,
+            parent,
+            &name,
+            args,
+            &id,
+            sink,
+            abort,
+            result_msg_id,
+            ctx,
+        )
+        .await;
         (seq, out)
     })
 }
@@ -706,7 +723,6 @@ async fn flush_one<'a>(
     parent: &Option<Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
-    tool_archive_dir: &std::path::Path,
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
@@ -739,7 +755,6 @@ async fn flush_one<'a>(
         sink,
         ctx,
         context_messages,
-        tool_archive_dir,
         effects,
         decls,
         tool_messages,
@@ -759,7 +774,6 @@ async fn flush_all<'a>(
     parent: &Option<Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
-    tool_archive_dir: &std::path::Path,
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
@@ -775,7 +789,6 @@ async fn flush_all<'a>(
             parent,
             ctx,
             context_messages,
-            tool_archive_dir,
             effects,
             decls,
             tool_messages,
@@ -906,7 +919,6 @@ pub(crate) async fn run_batch(
                         parent,
                         &ctx,
                         context_messages,
-                        tool_archive_dir,
                         effects,
                         decls,
                         &mut tool_messages,
@@ -944,7 +956,6 @@ pub(crate) async fn run_batch(
                             parent,
                             &ctx,
                             context_messages,
-                            tool_archive_dir,
                             effects,
                             decls,
                             &mut tool_messages,
@@ -953,6 +964,7 @@ pub(crate) async fn run_batch(
                         .await;
                         emit_tool_running(sink, context_messages, &ready.id).await;
                         let out = execute_tool_async(
+                            tool_archive_dir,
                             parent,
                             &ready.name,
                             ready.args.clone(),
@@ -970,7 +982,6 @@ pub(crate) async fn run_batch(
                             sink,
                             &ctx,
                             context_messages,
-                            tool_archive_dir,
                             effects,
                             decls,
                             &mut tool_messages,
@@ -989,7 +1000,6 @@ pub(crate) async fn run_batch(
                                 parent,
                                 &ctx,
                                 context_messages,
-                                tool_archive_dir,
                                 effects,
                                 decls,
                                 &mut tool_messages,
@@ -1001,7 +1011,15 @@ pub(crate) async fn run_batch(
                         // 窗口的**唯一**运行中信号来源，必须紧贴执行之前。
                         emit_tool_running(sink, context_messages, &ready.id).await;
                         seq += 1;
-                        inflight.push(start_execution(seq, &ready, parent, sink, abort, &ctx));
+                        inflight.push(start_execution(
+                            tool_archive_dir,
+                            seq,
+                            &ready,
+                            parent,
+                            sink,
+                            abort,
+                            &ctx,
+                        ));
                         order.push_back(seq);
                         started.insert(seq, ready);
                     }
@@ -1020,7 +1038,6 @@ pub(crate) async fn run_batch(
                 parent,
                 &ctx,
                 context_messages,
-                tool_archive_dir,
                 effects,
                 decls,
                 &mut tool_messages,
@@ -1043,7 +1060,6 @@ pub(crate) async fn run_batch(
         parent,
         &ctx,
         context_messages,
-        tool_archive_dir,
         effects,
         decls,
         &mut tool_messages,

@@ -133,7 +133,7 @@ pub(crate) async fn persist_turn(
 ///    → 水位提前越过阈值 → 压缩被频繁触发。
 fn feedback_estimate(usage: Option<ModelUsage>, out: &TurnOutput) {
     let Some(u) = usage else { return };
-    let tok = super::super::tokenizer::default_tokenizer();
+    let tok = symbio_plugin_api::text::default_tokenizer();
     let mut estimated = tok.count_raw(&out.text) + tok.count_raw(&out.reasoning);
     for tc in &out.tool_calls {
         if let Some(name) = tc.name.as_ref().filter(|n| !n.is_empty()) {
@@ -141,5 +141,5 @@ fn feedback_estimate(usage: Option<ModelUsage>, out: &TurnOutput) {
         }
         estimated += tok.count_raw(&tc.arguments.to_string());
     }
-    super::super::tokenizer::report_provider_usage(estimated, u.output);
+    symbio_plugin_api::text::report_provider_usage(estimated, u.output);
 }

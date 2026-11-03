@@ -78,13 +78,28 @@ pub(super) fn build_user_prompt_message(
     }
 }
 
+/// 一批工具调用的执行信封（环侧每次派发建一份，逐调用共享）。
+///
+/// 字段都是环的**通用形式**：存档目录。执行体不认识世界，只按这个值做守卫。
+/// 执行体交回的结果：节点正文用已守卫的 [`Self::text`]，记账与钩子用 [`Self::raw`]。
+#[derive(Debug, Clone, Default)]
+pub struct ExecResult {
+    pub text: String,
+    pub raw: String,
+    pub success: bool,
+    pub pending: Option<PendingPrompt>,
+    pub truncated: bool,
+    pub archive_path: Option<String>,
+    pub origin_tokens: usize,
+}
+
 /// 执行单个工具调用（不阻塞等待用户）：经 `port.tool` 的执行合同跑。
 ///
 /// 本函数只是**端口取用面**：按端口名从能力表读提供者，把调用现场整份交给
-/// [`ToolCallExecutor`](symbio_plugin_api::port::ToolCallExecutor)，收回
-/// `(result_text, success, pending)` 三格——线上名怎么解析、挂死怎么判（空闲而不是
-/// 总时长）、任意 JSON 怎么压成一段文本，都是提供者一侧的私事，行为等价由 e2e
-/// 全量守着。
+/// [`ToolCallExecutor`](symbio_plugin_api::port::ToolCallExecutor)，收回文本 +
+/// 守卫元数据——线上名怎么解析、挂死怎么判（空闲而不是总时长）、任意 JSON 怎么
+/// 压成一段文本、超预算结果怎么裁剪与存档，都是提供者一侧的私事，
+/// 行为等价由 e2e 全量守着。
 ///
 /// 端口缺席（没装提供者插件——零工具的装配没有工具世界的提供者）或合同缺席
 /// （提供者不实现 tool 合同）都**响亮失败**：错误文本回传给模型（失败属信息性，
@@ -92,6 +107,7 @@ pub(super) fn build_user_prompt_message(
 /// 静默回退、不许按「判不出来」继续：装配缺了提供者，继续转只会把缺失往后推。
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_tool_async(
+    archive_dir: &std::path::Path,
     parent: &Option<Arc<dyn Plugin>>,
     tool_name: &str,
     args: Value,
@@ -100,11 +116,16 @@ pub async fn execute_tool_async(
     abort: &ExecAbortSignal,
     result_msg_id: String,
     ctx: Arc<dyn PluginInvokeRequest>,
-) -> (String, bool, Option<PendingPrompt>) {
+) -> ExecResult {
     let absent = |why: &str| {
         let text = format!("Error: `port.tool` 缺席：{why}（工具 {tool_name} 未执行）");
         plugin_error!("session", "[Tool] {text}");
-        (text, false, None)
+        ExecResult {
+            text: text.clone(),
+            raw: text,
+            success: false,
+            ..Default::default()
+        }
     };
     let Some(provider) = super::super::port::tool_port(&ctx).await else {
         return absent("没有可用的工具提供者");
@@ -136,6 +157,7 @@ pub async fn execute_tool_async(
                     "args": args,
                     "tool_call_id": tool_call_id,
                     "result_msg_id": result_msg_id,
+                    "archive_dir": archive_dir.to_string_lossy(),
                 }),
             },
         )
@@ -148,7 +170,13 @@ pub async fn execute_tool_async(
             "session",
             format!("[Tool] 端口执行失败（{class:?}）：{why}")
         );
-        return (format!("Error: {why}"), false, None);
+        let text = format!("Error: {why}");
+        return ExecResult {
+            text: text.clone(),
+            raw: text,
+            success: false,
+            ..Default::default()
+        };
     }
     let fact = out.facts.first().cloned().unwrap_or(Value::Null);
     let result_text = fact
@@ -156,6 +184,11 @@ pub async fn execute_tool_async(
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
+    let raw = fact
+        .get("raw_text")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| result_text.clone());
     let success = fact
         .get("success")
         .and_then(|v| v.as_bool())
@@ -176,7 +209,25 @@ pub async fn execute_tool_async(
                 .unwrap_or_default()
                 .to_string(),
         });
-    (result_text, success, pending)
+    let guard = fact.get("guard").cloned().unwrap_or(Value::Null);
+    ExecResult {
+        text: result_text,
+        raw,
+        success,
+        pending,
+        truncated: guard
+            .get("truncated")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        archive_path: guard
+            .get("archive_path")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        origin_tokens: guard
+            .get("origin_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize,
+    }
 }
 
 // 批量工具调用处理
@@ -219,9 +270,9 @@ pub async fn process_tool_calls_async(
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
-    // `tool_archive_dir` = 会话的 L0 存档目录（session 在派发前算好）。不从请求
+    // `archive_dir` = 会话的 L0 存档目录（session 在派发前算好）。不从请求
     // 上下文反推插件目录——请求上下文不带 `PLUGIN_DIR`，子智能体下会指到父作用域。
-    tool_archive_dir: &std::path::Path,
+    archive_dir: &std::path::Path,
     // 本会话事实轨：闸门判据以**值**读（本会话完整史），本函数不拼路径、不开 WAL
     // （D-084 §1-A）。
     facts: &dyn Store<Event = Event>,
@@ -263,7 +314,7 @@ pub async fn process_tool_calls_async(
         abort,
         ctx,
         context_messages,
-        tool_archive_dir,
+        archive_dir,
         &mut readings,
         effects,
         breaks,

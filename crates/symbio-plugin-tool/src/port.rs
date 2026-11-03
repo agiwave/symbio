@@ -15,6 +15,9 @@
 //! | `args` | 调用参数（模型发的原样 JSON） |
 //! | `tool_call_id` | 本次调用的 id（幂等与节点挂靠） |
 //! | `result_msg_id` | 结果占位节点 id（流式增量按它广播） |
+//! | `wire_id` | provider wire id（产物格的 `wire_id` 字段） |
+//! | `archive_dir` | L0 存档目录（结果超预算时写全文） |
+//! | `artifact` | `{ key, turn_id, produced_by, allowed }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
 //!
 //! 环侧的宿主插件（`parent`）经 `ctx.parent()` 取得：解析失败时按原样走到它，由它给出
 //! 诚实的 NotFound。
@@ -25,8 +28,10 @@
 //! 工具失败**不**映射成 `PortOutcome.error`——失败是信息性事实（模型据此自我纠正），
 //! 与「这一笔协议失败」是两件事。
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::{
     capability_invoke, capability_to_wire, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
     failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
@@ -44,11 +49,17 @@ const KEY_TOOL_NAME: &str = "tool_name";
 const KEY_ARGS: &str = "args";
 const KEY_TOOL_CALL_ID: &str = "tool_call_id";
 const KEY_RESULT_MSG_ID: &str = "result_msg_id";
+/// L0 存档目录（会话子目录；缺省时守卫回退到系统临时目录）。
+const KEY_ARCHIVE_DIR: &str = "archive_dir";
 
 /// 产出键（与环的通用受理入口共用同一份形状）。
 const FACT_RESULT_TEXT: &str = "result_text";
 const FACT_SUCCESS: &str = "success";
 const FACT_PENDING: &str = "pending";
+/// 未裁剪的原始结果（环侧记账 / 钩子用它，节点正文用已守卫的 `result_text`）。
+const FACT_RAW_TEXT: &str = "raw_text";
+/// 守卫元数据：`{ truncated, archive_path, origin_tokens }`。
+const FACT_GUARD: &str = "guard";
 
 /// 授权输入键（`open-tools` 在开账时写进请求载荷，`D-306` 的「载荷装配留在行」）。
 ///
@@ -202,6 +213,49 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
     }
 }
 
+/// 统一出口：L0 守卫 → 交回事实。
+///
+/// 守卫在**执行体**里做（P1b）：环只消费「已守卫文本 + 守卫元数据」，不再认识
+/// token 预算或存档布局。待用户动作的结果不裁剪（它是卡片正文，不是工具结果）。
+async fn finish(
+    raw: String,
+    success: bool,
+    pending: Option<serde_json::Value>,
+    archive_dir: &Path,
+) -> PortOutcome {
+    let (text, guard) = match &pending {
+        Some(_) => (
+            raw.clone(),
+            serde_json::json!({
+                "truncated": false,
+                "archive_path": serde_json::Value::Null,
+                "origin_tokens": 0,
+            }),
+        ),
+        None => {
+            let guarded = guard_result(&raw, DEFAULT_TOKEN_CAP, archive_dir);
+            (
+                guarded.text,
+                serde_json::json!({
+                    "truncated": guarded.truncated,
+                    "archive_path": guarded.archive_path,
+                    "origin_tokens": guarded.original_tokens,
+                }),
+            )
+        }
+    };
+    PortOutcome {
+        facts: vec![serde_json::json!({
+            FACT_RESULT_TEXT: text,
+            FACT_RAW_TEXT: raw,
+            FACT_SUCCESS: success,
+            FACT_PENDING: pending,
+            FACT_GUARD: guard,
+        })],
+        error: None,
+    }
+}
+
 /// `port.tool` 的提供者：无状态前端（执行期从调用方 ctx 读能力表）。
 pub(crate) struct ToolPort;
 
@@ -224,27 +278,11 @@ impl PortProvider for ToolPort {
 impl PortExecutor for ToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let payload = input.payload;
-        // 授权判定先行（`D-306` 裁决一）：载荷带判定输入时由本执行体判，结论经写口落事实；
-        // 拒绝即判死这一笔，不再进入能力调用。旧路径的载荷不带 `threshold`，这里保持旁路。
-        if let Some(authz) = authorize(&payload) {
-            exec.emit
-                .emit(vec![authz_draft(&exec.idempotency_key, &payload, authz)])
-                .await;
-            if let Authz::Denied { why } = authz {
-                return PortOutcome::failed(
-                    PortErrorClass::NonRetryable,
-                    format!("Error: authorization denied ({why})"),
-                );
-            }
-        }
-        let tool_name = match payload.get(KEY_TOOL_NAME).and_then(|v| v.as_str()) {
-            Some(name) => name.to_string(),
-            None => return error_outcome("Error: Missing tool_name"),
-        };
-        let args = payload
-            .get(KEY_ARGS)
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
+        let tool_name = payload
+            .get(KEY_TOOL_NAME)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         let tool_call_id = payload
             .get(KEY_TOOL_CALL_ID)
             .and_then(|v| v.as_str())
@@ -255,9 +293,46 @@ impl PortExecutor for ToolPort {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
+        let args = payload
+            .get(KEY_ARGS)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let archive_dir = payload
+            .get(KEY_ARCHIVE_DIR)
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        // 授权判定先行（`D-306` 裁决一）：载荷带判定输入时由本执行体判，结论经写口落事实；
+        // 拒绝即判死这一笔，不再进入能力调用。旧路径的载荷不带 `threshold`，这里保持旁路。
+        if let Some(authz) = authorize(&payload) {
+            exec.emit
+                .emit(vec![authz_draft(&exec.idempotency_key, &payload, authz)])
+                .await;
+            if let Authz::Denied { why } = authz {
+                let text = format!("Error: authorization denied ({why})");
+                // 环把 `PortOutcome.error` 映射成 `Error: {why}`。
+                finish(format!("Error: {text}"), false, None, &archive_dir).await;
+                return PortOutcome::failed(PortErrorClass::NonRetryable, text);
+            }
+        }
+        if tool_name.trim().is_empty() {
+            return finish(
+                "Error: Missing tool_name".to_string(),
+                false,
+                None,
+                &archive_dir,
+            )
+            .await;
+        }
 
         let Some(ctx) = exec.ctx.clone() else {
-            return error_outcome("Error: No request context");
+            return finish(
+                "Error: No request context".to_string(),
+                false,
+                None,
+                &archive_dir,
+            )
+            .await;
         };
         let started_at = std::time::Instant::now();
         plugin_info!(
@@ -269,7 +344,15 @@ impl PortExecutor for ToolPort {
 
         let parent = match ctx.parent().and_then(|w| w.upgrade()) {
             Some(p) => p,
-            None => return error_outcome("Error: No parent plugin"),
+            None => {
+                return finish(
+                    "Error: No parent plugin".to_string(),
+                    false,
+                    None,
+                    &archive_dir,
+                )
+                .await
+            }
         };
 
         // 入方向：模型给的**线上名** → 能力名。
@@ -278,6 +361,7 @@ impl PortExecutor for ToolPort {
         // `mcp__fs__read` 既可能是 `mcp.fs.read` 的线上形态，也可能本身就是
         // `mcp__fs__read`——字符串分不出这两种，集合可以。
         let tool_visitor = ctx.get(CAPABILITY_VISITOR);
+        // 线上名解析用的名字集合。
         let known_names: Vec<String> = match tool_visitor.as_ref() {
             Some(visitor) => visitor
                 .list(family::TOOL)
@@ -377,10 +461,13 @@ impl PortExecutor for ToolPort {
                         started_at.elapsed().as_millis(),
                         tool_call_id
                     );
-                    return error_outcome(format!(
-                        "Error: 工具 {} 被用户中止，未返回结果",
-                        tool_name
-                    ));
+                    return finish(
+                        format!("Error: 工具 {} 被用户中止，未返回结果", tool_name),
+                        false,
+                        None,
+                        &archive_dir,
+                    )
+                    .await;
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_secs(TOOL_EXEC_IDLE_TIMEOUT_SECS)) => {
                     let now = progress.emitted();
@@ -395,10 +482,16 @@ impl PortExecutor for ToolPort {
                             TOOL_EXEC_IDLE_TIMEOUT_SECS, tool_name, tool_call_id
                         )
                     );
-                    return error_outcome(format!(
-                        "Error: 工具 {} 已 {} 秒无任何进展，已强制中断（疑似挂死）",
-                        tool_name, TOOL_EXEC_IDLE_TIMEOUT_SECS
-                    ));
+                    return finish(
+                        format!(
+                            "Error: 工具 {} 已 {} 秒无任何进展，已强制中断（疑似挂死）",
+                            tool_name, TOOL_EXEC_IDLE_TIMEOUT_SECS
+                        ),
+                        false,
+                        None,
+                        &archive_dir,
+                    )
+                    .await;
                 }
             }
         };
@@ -408,7 +501,15 @@ impl PortExecutor for ToolPort {
                 PluginPayload::Data(_) => {
                     let data = match resp.get::<serde_json::Value>() {
                         Ok(d) => d,
-                        Err(_) => return error_outcome("Error: Failed to deserialize payload"),
+                        Err(_) => {
+                            return finish(
+                                "Error: Failed to deserialize payload".to_string(),
+                                false,
+                                None,
+                                &archive_dir,
+                            )
+                            .await
+                        }
                     };
                     let pending = pending_prompt_from(&data);
                     let res = extract_result(&data);
@@ -424,9 +525,17 @@ impl PortExecutor for ToolPort {
                             .and_then(|v| v.as_str())
                             .unwrap_or("-")
                     );
-                    outcome(res, true, pending)
+                    finish(res, true, pending, &archive_dir).await
                 }
-                _ => error_outcome("Error: Unexpected payload type"),
+                _ => {
+                    finish(
+                        "Error: Unexpected payload type".to_string(),
+                        false,
+                        None,
+                        &archive_dir,
+                    )
+                    .await
+                }
             },
             Err(e) => {
                 plugin_error!(
@@ -437,26 +546,10 @@ impl PortExecutor for ToolPort {
                         started_at.elapsed().as_millis()
                     )
                 );
-                error_outcome(format!("Error: {e}"))
+                finish(format!("Error: {e}"), false, None, &archive_dir).await
             }
         }
     }
-}
-
-/// 一次结果是**协议上的成功**（工具失败也是信息性事实，见模块文档）。
-fn outcome(result_text: String, success: bool, pending: Option<serde_json::Value>) -> PortOutcome {
-    PortOutcome {
-        facts: vec![serde_json::json!({
-            FACT_RESULT_TEXT: result_text,
-            FACT_SUCCESS: success,
-            FACT_PENDING: pending,
-        })],
-        error: None,
-    }
-}
-
-fn error_outcome(result_text: impl Into<String>) -> PortOutcome {
-    outcome(result_text.into(), false, None)
 }
 
 /// 线上名 → 能力名（精确命中优先，其后按投影函数比较）。

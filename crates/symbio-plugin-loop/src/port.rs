@@ -485,6 +485,24 @@ where
     Ok(outcome)
 }
 
+/// 宿主写口的值形态（`DE-047` D-305 裁决一）。
+///
+/// 环内两处使用点：通用受理入口（`run_port`）与工具批执行体的执行窗口
+/// （`tools::execute_tool_async` 为产物落格挂它，P1b / D-308）。
+pub(crate) fn host_fact_emit(
+    store: Arc<dyn Store<Event = Event>>,
+    round: u64,
+    actor: impl Into<String>,
+    now: i64,
+) -> symbio_plugin_api::port::PortFactEmit {
+    symbio_plugin_api::port::PortFactEmit::new(Arc::new(HostFactWriter {
+        store,
+        round,
+        actor: actor.into(),
+        now,
+    }))
+}
+
 /// provider 追加事实草稿的**宿主唯一写口**（`DE-047` D-305 裁决一）。
 ///
 /// 轮号、主体与归属由宿主盖章（provider 无权指定记账信封）；幂等键由草稿自带，
@@ -650,12 +668,12 @@ pub(crate) fn run_port<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             abort: ctx.session.abort_signal(),
             idempotency_key: request.event_id.clone(),
             sink: event_sink,
-            emit: symbio_plugin_api::port::PortFactEmit::new(Arc::new(HostFactWriter {
-                store: ctx.store.clone(),
-                round: round_no,
-                actor: ctx.session.principal().to_string(),
+            emit: host_fact_emit(
+                ctx.store.clone(),
+                round_no,
+                ctx.session.principal().to_string(),
                 now,
-            })),
+            ),
             ctx: Some(request_ctx),
         };
 

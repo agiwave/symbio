@@ -1,7 +1,7 @@
-//! `tool_result_guard` 模块的单元测试。
+//! `result_guard` 模块的单元测试。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
-//! `tools/tool_result_guard.rs` 只保留生产代码，测试全部放本文件。
+//! `result_guard.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
 
@@ -15,7 +15,7 @@ fn root() -> std::path::PathBuf {
 
 #[test]
 fn short_text_passes_through() {
-    let g = guard_tool_result("hello world", 8192, &root());
+    let g = guard_result("hello world", 8192, &root());
     assert!(!g.truncated);
     assert_eq!(g.text, "hello world");
 }
@@ -25,7 +25,7 @@ fn long_text_is_truncated_and_keeps_head_tail() {
     // 构造远超预算的多行文本
     let line = "fn main() {\n    println!(\"line\");\n}\n";
     let big = line.repeat(2000);
-    let g = guard_tool_result(&big, 500, &root());
+    let g = guard_result(&big, 500, &root());
     assert!(g.truncated);
     assert!(g.text.contains("[... 已省略"));
     // 统一取回协议：占位符含存档路径与 vdfs_read 取回入口
@@ -42,7 +42,7 @@ fn long_text_is_truncated_and_keeps_head_tail() {
 #[test]
 fn single_long_line_is_char_truncated() {
     let huge = format!("{{\"entries\":[\"{}\"]}}", "x".repeat(10_000));
-    let g = guard_tool_result(&huge, 300, &root());
+    let g = guard_result(&huge, 300, &root());
     assert!(g.truncated, "单行超预算应触发存档截断");
     assert!(g.text.contains("vdfs_read"), "占位提示应存在");
     assert!(
@@ -109,13 +109,13 @@ fn prune_keeps_only_latest_files() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// 存档位置：session 派发前算好的 `tool_archive_dir` 原样使用
+/// 存档位置：环在载荷里给出的 `archive_dir` 原样使用
 ///（跟随会话生命周期），而非系统临时目录。
 #[test]
 fn archive_prefers_session_dir_when_session_id_given() {
     let sid = "test_session_guard_01";
     let archive = root().join(sid).join("tool_archives");
-    let g = guard_tool_result(&"line\n".repeat(3000), 500, &archive);
+    let g = guard_result(&"line\n".repeat(3000), 500, &archive);
     assert!(g.truncated);
     let p = g.archive_path.expect("会话目录可写时应产出存档路径");
     let expected_frag = format!(

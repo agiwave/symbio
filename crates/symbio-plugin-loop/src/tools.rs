@@ -9,9 +9,9 @@
 //!   ① 批首闸门读数 ② 逐条执行 ③ 未执行收口；编排入口仍是 `tool_executor` 里同名函数，
 //!   本层只是它的三段落点，不改门面。收口段（`unfinished`）同时是「没跑到」的
 //!   **成因词表**（`ABORTED` / `NOT_EXECUTED`）与结果子节点的落法所在。
-//! - `tool_result_guard` —— 结果守卫：单条结果进存储前的体积上限（`guard_tool_result`
-//!   与归档滚动）。它是**唯一**的体积裁剪点：请求体不再做淡化 / 骨架化改写
-//!   （[D-078](../../symbio-plugin-session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README")）。
+//!
+//! 单条结果的体积上限（守卫与归档滚动）随执行体迁到 `symbio-plugin-tool`；
+//! 本域只消费执行体交回的**已守卫文本**与守卫元数据（P1b，DE-047 D-308）。
 //!
 //! 生命周期钩子（`fire_hook`）住宿主 `symbio_plugin_api::hooks`：session 派发前与 loop 轮内都触发它，
 //! 两边共用同一条路由助手（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
@@ -28,7 +28,6 @@
 
 mod dispatch;
 mod tool_executor;
-mod tool_result_guard;
 
 pub use self::dispatch::unfinished::{is_unanswered, NOT_EXECUTED};
 // 中止的成因词：与 `NOT_EXECUTED` 同属「没跑到」的词表，跨域取值只经这条门面。
