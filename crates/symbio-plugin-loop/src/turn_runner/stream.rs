@@ -881,14 +881,12 @@ async fn finalize_round(
         .iter()
         .filter_map(|call| run.round_outcomes.remove(call))
         .collect();
-    // 效果 / 熔断按**调用顺序**交回（各笔完成的先后不改变事实次序）。
+    // 效果按**调用顺序**交回（各笔完成的先后不改变事实次序）。
     let mut effects = Vec::new();
-    let mut breaks = Vec::new();
     for outcome in &outcomes {
         effects.extend(outcome.effects.iter().cloned());
-        breaks.extend(outcome.breaks.iter().copied());
     }
-    dispatch.land_derived(effects, breaks);
+    dispatch.land_derived(effects);
     land_batch(run, store.as_ref(), llm, rt, outcomes).await?;
     run.round_calls.clear();
     run.round_turn = None;

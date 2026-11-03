@@ -1,25 +1,20 @@
 //! 工具批执行的**阶段分层**。
 //!
-//! 两个函数按**处理阶段**（不按职责）分开：
-//!
-//! - [`gates`] —— 拒止骨架与外部执行的**中性输入**（`GateInputs`）：没有批首读数，
-//!   读数按每一笔债在准备点现取；判定（快慢 / 预算 / 开窗）在执行体。
-//! - [`batch`] —— 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、声明闸
-//!   拒止、钩子拦下与正常执行四条出口。
+//! [`batch`] —— 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、声明闸
+//! 拒止、钩子拦下与正常执行四条出口；外部执行的**中性输入**（`GateInputs`）在
+//! 准备点现取，判定（快慢 / 预算 / 开窗）在执行体。
 //!
 //! 「没跑到」的占位结果子节点不在这里收口：节点是事实的投影，环只写
 //! `failed{why}`，展示由投影器渲染（DE-047 D-312）。
 //!
 //! 编排入口是 [`crate::tools::tool_executor::process_tool_calls_in_env`]：
-//! 空批早退 → 逐条准备 → 逐条执行。段间只传出参 `effects` / `breaks`。
+//! 空批早退 → 逐条准备 → 逐条执行。段间只传出参 `effects`。
 //!
-//! 每段一条判据（纪律 3，「这段错了谁会红」）：
-//! - `gates` 错 ⇒ 拒止出口语义 / 外部执行闸用例红（`gates.test.rs`）；
-//! - `batch` 错 ⇒ 批内事件与父节点终态用例红（`tool_executor.test.rs` 的
-//!   `process_tool_calls_in_env` 组：中止、交互 break、闸门拒止、协议失败）。
+//! 判据（纪律 3，「这段错了谁会红」）：批内事件与父节点终态用例红——
+//! `tool_executor.test.rs` 的 `process_tool_calls_in_env` 组（中止、交互 break、
+//! 拒止、协议失败）。
 
 pub(crate) mod batch;
-pub(crate) mod gates;
 
 /// 中止的成因词：与 [`NOT_EXECUTED`] 同属「没跑到」的词表。
 pub const ABORTED: &str = "aborted";
@@ -37,7 +32,6 @@ use super::tool_executor::{
     RoundEnv, ToolDecls,
 };
 use serde_json::{json, Value};
-use std::sync::Arc;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::llm::TurnToolCallInfo;
@@ -54,9 +48,6 @@ use symbio_sdk::turn::node_build::{llm_build_tool_message, tool_call_args_text};
 use {
     symbio_plugin_api::plugin_error, symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn,
 };
-
-// 拒止骨架：声明闸与 PreToolUse 钩子经 `refuse` 收口。
-pub(crate) use self::gates::{batch_principal, refuse, Refusal};
 
 // ── 共用收口原语（逐字来自拆分前的 tool_executor.rs）────────────────────────
 /// 把父 ToolCall 的**完整副本**定稿为终态并广播。

@@ -146,7 +146,6 @@ fn outcome(call: &ToolPortCall, failure_kind: &str) -> CallOutcome {
         failure_kind: failure_kind.into(),
         args: String::new(),
         effects: Vec::new(),
-        breaks: Vec::new(),
     }
 }
 

@@ -1,4 +1,4 @@
-//! 拒止骨架与声明闸映射的单元测试。
+//! 拒止骨架的单元测试（原 `gates.test.rs`）。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。开窗判据（时延 / 预算）已搬进
 //! `symbio-plugin-tool` 的执行体，本文件只钉**映射不猜**：声明闸（能力包的 `before`）
@@ -44,12 +44,12 @@ fn from_before_honours_the_implementations_trace() {
 /// 声明闸与落笔读的是**同一个主体**——派生点因此留在环侧，而不是各闸自算。
 #[test]
 fn the_principal_comes_from_the_agent_id() {
-    fn with_agent(agent_id: Option<&str>) -> std::sync::Arc<dyn PluginInvokeRequest> {
+    fn with_agent(agent_id: Option<&str>) -> Arc<dyn PluginInvokeRequest> {
         let req = PluginSimpleRequest::new(None, None);
         if let Some(id) = agent_id {
             req.set(symbio_sdk::keys::AGENT_ID, id.to_string());
         }
-        std::sync::Arc::new(req)
+        Arc::new(req)
     }
 
     assert_eq!(

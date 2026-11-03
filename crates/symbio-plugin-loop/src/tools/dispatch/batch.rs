@@ -31,6 +31,123 @@ use symbio_plugin_api::effects::BeforeRequest;
 
 use super::*;
 
+// ── 拒止骨架（原 `gates.rs`；声明闸 / PreToolUse 钩子的出口）───────────────
+use symbio_plugin_api::effects::BeforeRefusal;
+
+/// 本条债的**主体**：声明闸按它问（`AGENT_ID` 的会话族地址，未绑定即 `session/main`）。
+///
+/// 与 `request_principal` 同源：判断与落笔因此指向同一个主体，不会出现「按 A 判、
+/// 以 B 记」的两套主体。
+pub(crate) fn batch_principal(ctx: &Arc<dyn PluginInvokeRequest>) -> String {
+    symbio_sdk::authz::principal_of(ctx.get(symbio_sdk::keys::AGENT_ID).as_deref())
+}
+
+/// 一道闸的拒因：放行是 `None`，拒止是这里的一整份交代。
+#[derive(Debug, Clone)]
+pub(crate) struct Refusal {
+    /// 闸名（日志与测试的稳定标识）。
+    pub(crate) gate: &'static str,
+    /// 回灌模型的完整拒因（结果正文 = `"{prefix}: {reason}"`）。
+    pub(crate) reason: String,
+    /// 结果正文前缀：`Refused`（闸门）或 `Blocked`（钩子）。
+    pub(crate) prefix: &'static str,
+    /// `meta.failure_kind`（约定字段，控制流不靠猜正文）。
+    pub(crate) kind: &'static str,
+    /// 是否记违约承诺（任务表闸明确不记：工具没跑，声明无从说起）。
+    pub(crate) notes_delegation: bool,
+    /// 违约承诺的记账理由；`None` = 用拒因本身。钩子保留自己的原措辞。
+    pub(crate) note_why: Option<String>,
+}
+
+impl Refusal {
+    /// PreToolUse 钩子拦下的拒止：形如闸门拒止，但正文前缀是 `Blocked`，
+    /// `failure_kind = "blocked"`，且违约理由保留钩子的原措辞。
+    pub(crate) fn blocked(reason: String) -> Self {
+        Self {
+            note_why: Some(format!("被 PreToolUse 钩子拦下：{reason}")),
+            gate: "PreToolUse",
+            reason,
+            prefix: "Blocked",
+            kind: "blocked",
+            notes_delegation: true,
+        }
+    }
+
+    /// 声明闸的判定 → 拒止骨架。实现的判定只说「拒 / 为什么 / 记不记承诺」，
+    /// 骨架要的 `prefix` 都由宿主按自己的口径补。
+    ///
+    /// 出口语义由实现自报（`notes_delegation`）：这一位不是宿主对某道闸的特判，
+    /// 而是实现对自己这次拒绝**知道多少**的交代——先说「约没见过」的工具，拒了
+    /// 也不该记一笔没履约的承诺（DE-025 D-219）。
+    pub(crate) fn from_before(refusal: BeforeRefusal) -> Self {
+        Self {
+            gate: refusal.gate,
+            reason: refusal.reason,
+            prefix: "Refused",
+            kind: refusal.kind,
+            notes_delegation: refusal.notes_delegation,
+            note_why: None,
+        }
+    }
+}
+
+/// 拒止骨架（**唯一实现**）：拒因 → 结果子节点 → 父节点收敛 → 记账 → 调用方 continue。
+///
+/// 不变量 1「每个调用以终态收场」与不变量 2「有调用必有结果」在这里兑现一次；
+/// 各闸的差异只经 [`Refusal::notes_delegation`] 表达。开窗判据搬进执行体后，
+/// 本函数不产生任何入格理由（熔断事实由执行体自己落）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn refuse(
+    sink: &ExecEventSink,
+    context_messages: &[ChatNode],
+    id: &str,
+    name: &str,
+    args: &Value,
+    refusal: Refusal,
+    tool_messages: &mut Vec<ChatNode>,
+    parent_updates: &mut Vec<ChatNode>,
+    effects: &mut Vec<EffectInput>,
+    decls: &ToolDecls,
+) {
+    plugin_warn!(
+        "session",
+        "[Tool] {}：{id} / {name}——{reason}",
+        refusal.gate,
+        reason = refusal.reason
+    );
+
+    let tool_msg = llm_build_tool_message(
+        id,
+        &format!("{}: {}", refusal.prefix, refusal.reason),
+        Some(false),
+        Some(symbio_kernel::event::result_node_id(id)),
+        Some(name),
+    );
+    tool_messages.push(tool_msg);
+
+    // 拒掉的调用同样必须收敛父节点：只推结果子节点，父节点就永远停在
+    // 「运行中」（那条兜底 `finalize_assistant_turn` 已移除）。
+    if let Some(parent_update) = emit_parent_finalized(
+        sink,
+        context_messages,
+        id,
+        NodeStatus::Completed,
+        json!({ "success": false, "failure_kind": refusal.kind }),
+        None,
+    )
+    .await
+    {
+        parent_updates.push(parent_update);
+    }
+
+    // 没跑 = 没履约（效果输入由 [`record_effect`] 交出，实现住能力包）；任务表闸
+    // 明确不记——工具没跑，声明无从说起。
+    if refusal.notes_delegation {
+        let why = refusal.note_why.as_deref().unwrap_or(&refusal.reason);
+        record_effect(effects, decls, id, name, args, false, "", why);
+    }
+}
+
 // ── 本段私有的广播/记账原语（逐字来自拆分前的 tool_executor.rs）──────────────
 /// 记录协议级工具调用失败（工具调用 id/name 缺失或非法）。
 ///
@@ -436,7 +553,6 @@ async fn emit_terminal(
     parent_updates: &mut Vec<ChatNode>,
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
-    breaks: &mut Vec<&'static str>,
     principal: &symbio_sdk::chat::principal::Principal,
 ) {
     match terminal {
@@ -522,7 +638,6 @@ async fn emit_terminal(
                 parent_updates,
                 effects,
                 decls,
-                breaks,
             )
             .await;
         }
@@ -870,7 +985,6 @@ pub(crate) async fn run_batch(
     facts: &dyn Store<Event = Event>,
     elimination_revoked: bool,
     effects: &mut Vec<EffectInput>,
-    breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
     let mut tool_messages = Vec::new();
     let mut parent_updates: Vec<ChatNode> = Vec::new();
@@ -951,7 +1065,6 @@ pub(crate) async fn run_batch(
                         &mut parent_updates,
                         effects,
                         &decls,
-                        breaks,
                         &principal,
                     )
                     .await;
@@ -1059,3 +1172,7 @@ pub(crate) async fn run_batch(
 
     (tool_messages, parent_updates)
 }
+
+#[cfg(test)]
+#[path = "batch.test.rs"]
+mod tests;

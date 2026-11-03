@@ -187,7 +187,6 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
         &EventStore::new(),
         false,
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -241,7 +240,6 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
         &EventStore::new(),
         false,
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -273,7 +271,6 @@ async fn missing_tool_name_is_recorded_as_failure() {
         &test_env(),
         &EventStore::new(),
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
     )
     .await;
@@ -310,7 +307,6 @@ async fn unparseable_arguments_are_refused_not_executed() {
         &test_env(),
         &EventStore::new(),
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
     )
     .await;
@@ -377,7 +373,6 @@ async fn a_repeat_in_the_same_batch_says_so_on_the_result() {
         &EventStore::new(),
         false,
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -414,7 +409,6 @@ async fn a_repeat_from_the_transcript_says_so_on_the_result() {
         &EventStore::new(),
         false,
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -443,7 +437,6 @@ async fn a_different_argument_is_not_a_repeat() {
         &test_env(),
         &EventStore::new(),
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
     )
     .await;
@@ -529,7 +522,6 @@ async fn aborted_batch_terminates_every_tool_call() {
         &EventStore::new(),
         false,
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -575,7 +567,6 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
         &test_env(),
         &EventStore::new(),
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
     )
     .await;
@@ -651,7 +642,6 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         &test_env(),
         &EventStore::new(),
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
     )
     .await;
@@ -937,7 +927,6 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
         &EventStore::new(),
         true,
         &mut effects,
-        &mut Vec::new(),
     )
     .await;
 
@@ -1154,7 +1143,6 @@ async fn a_missing_tool_port_fails_loudly_on_the_result() {
         &EventStore::new(),
         false,
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -1252,7 +1240,6 @@ async fn read_only_calls_run_concurrently_and_report_in_call_order() {
         tool_call_node("tc-b", "probe_b"),
     ];
     let mut effects = Vec::new();
-    let mut breaks = Vec::new();
 
     let (msgs, updates) = tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -1267,7 +1254,6 @@ async fn read_only_calls_run_concurrently_and_report_in_call_order() {
             &EventStore::new(),
             false,
             &mut effects,
-            &mut breaks,
         ),
     )
     .await
@@ -1352,7 +1338,6 @@ async fn the_loop_does_not_serialize_calls_by_risk() {
     let sink = ExecEventSink::silent();
     let abort = ExecAbortSignal::new();
     let mut effects = Vec::new();
-    let mut breaks = Vec::new();
     let (msgs, _updates) = process_tool_calls_in_env(
         calls,
         &parent,
@@ -1364,7 +1349,6 @@ async fn the_loop_does_not_serialize_calls_by_risk() {
         &EventStore::new(),
         false,
         &mut effects,
-        &mut breaks,
     )
     .await;
 
@@ -1403,7 +1387,6 @@ async fn interactive_mode_keeps_the_batch_serial() {
         tool_call_node("tc-i2", "probe_i2"),
     ];
     let mut effects = Vec::new();
-    let mut breaks = Vec::new();
 
     let (msgs, _updates) = process_tool_calls_in_env(
         probe_calls(&[("tc-i1", "probe_i1"), ("tc-i2", "probe_i2")]),
@@ -1416,7 +1399,6 @@ async fn interactive_mode_keeps_the_batch_serial() {
         &EventStore::new(),
         false,
         &mut effects,
-        &mut breaks,
     )
     .await;
 
@@ -1459,7 +1441,6 @@ async fn a_failed_sibling_does_not_cancel_the_rest_of_the_batch() {
         tool_call_node("tc-good", "probe_good"),
     ];
     let mut effects = Vec::new();
-    let mut breaks = Vec::new();
 
     let (msgs, updates) = process_tool_calls_in_env(
         probe_calls(&[("tc-bad", "probe_bad"), ("tc-good", "probe_good")]),
@@ -1472,7 +1453,6 @@ async fn a_failed_sibling_does_not_cancel_the_rest_of_the_batch() {
         &EventStore::new(),
         false,
         &mut effects,
-        &mut breaks,
     )
     .await;
 
@@ -1539,7 +1519,6 @@ async fn abort_reaches_every_in_flight_call() {
         tool_call_node("tc-ab", "probe_abort_b"),
     ];
     let mut effects = Vec::new();
-    let mut breaks = Vec::new();
 
     // 等两条都真正开跑再中止——中止发生在启动之前测的是另一条路径。
     let started = active.clone();
@@ -1567,7 +1546,6 @@ async fn abort_reaches_every_in_flight_call() {
             &EventStore::new(),
             false,
             &mut effects,
-            &mut breaks,
         ),
     )
     .await

@@ -78,7 +78,7 @@ use symbio_sdk::turn::node_build::{
 /// 数据来源在工具执行层（`EffectInput`），而写方（落格）在轮末——`turn_exec` 调
 /// [`super::derived_facts::record_derived`] 写。本结构是那份出参从分发点回到运行器的
 /// **唯一通道**：不收集它，效果就静默全丢（与记忆 / 学习同一个坑——出参不交回，
-/// 写方就无从落格）。`breaks` 是下一刀待清的残管：熔断事实已由执行体自己落。
+/// 写方就无从落格）。熔断事实由执行体随债自己落（DE-039 §6），不在这条通路。
 ///
 /// 任务表**不在这里**：它是一条效果（`symbio-plugin-task` 的 `TaskTable`），走
 /// `effects` 那一条通路（DE-025 D-207）。
@@ -89,8 +89,6 @@ use symbio_sdk::turn::node_build::{
 pub(crate) struct DerivedFacts {
     /// 效果出参（DE-025 D-207）：每次终态调用一条，轮末由写口问能力包要草稿。
     pub(crate) effects: Vec<EffectInput>,
-    /// 熔断出参（残管）：已无写入方——熔断事实由执行体自己落（DE-039 §6）。
-    pub(crate) breaks: Vec<&'static str>,
 }
 
 /// 一次工具批次交回运行器的**全部出参**（DE-044 `E-3`）。
@@ -282,8 +280,6 @@ pub struct CallOutcome {
     /// 随结果携带而不是当场写进共用的取件面：并发执行时落地顺序由 provider 决定，
     /// 而效果事实的顺序必须等于**调用顺序**——由环在整轮收口时按序交回。
     pub effects: Vec<EffectInput>,
-    /// 这一笔触发的熔断理由（残管；写入方已随判据搬进执行体）。
-    pub breaks: Vec<&'static str>,
 }
 
 impl CallOutcome {
@@ -305,7 +301,6 @@ impl CallOutcome {
             failure_kind: String::new(),
             args: String::new(),
             effects: Vec::new(),
-            breaks: Vec::new(),
         }
     }
 }
@@ -372,11 +367,11 @@ pub(crate) trait ToolDispatch: Send + Sync {
         outcome: Option<&'a CallOutcome>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
-    /// 把整轮的效果 / 熔断出参按**调用顺序**交回取件面（轮末写口从这里取）。
+    /// 把整轮的效果出参按**调用顺序**交回取件面（轮末写口从这里取）。
     ///
     /// 逐笔派发时各笔完成次序由 provider 决定；环只在整轮收口时按调用顺序交回，
     /// 世界事实的次序因此与调用顺序一致。
-    fn land_derived(&self, _effects: Vec<EffectInput>, _breaks: Vec<&'static str>) {}
+    fn land_derived(&self, _effects: Vec<EffectInput>) {}
 
     /// 相互作用语义：审批 / 提问是否「一次只处理一张卡」。
     ///
@@ -1369,7 +1364,6 @@ impl SessionDispatchPort {
             failure_kind: failure_kind.to_string(),
             args,
             effects: Vec::new(),
-            breaks: Vec::new(),
         };
         let mut produced = call_nodes;
         produced.push(result);
@@ -1551,13 +1545,12 @@ impl ToolDispatch for SessionDispatchPort {
         }))
     }
 
-    fn land_derived(&self, effects: Vec<EffectInput>, breaks: Vec<&'static str>) {
+    fn land_derived(&self, effects: Vec<EffectInput>) {
         let mut out = match self.out.lock() {
             Ok(out) => out,
             Err(poisoned) => poisoned.into_inner(),
         };
         out.derived.effects.extend(effects);
-        out.derived.breaks.extend(breaks);
     }
 
     fn interactive(&self) -> bool {
@@ -1692,7 +1685,6 @@ impl SessionDispatchPort {
         // 落格本身由执行体的 `land_only` 出口做，环不装配产物载荷。
         let env = self.round_env();
         let mut effects: Vec<EffectInput> = Vec::new();
-        let mut breaks: Vec<&'static str> = Vec::new();
         let (tool_msgs, parent_updates) = process_tool_calls_in_env(
             tool_calls.clone(),
             &self.parent,
@@ -1705,8 +1697,6 @@ impl SessionDispatchPort {
             self.elimination_revoked,
             // 效果出参（DE-025 D-207）：每次终态调用一条。
             &mut effects,
-            // 熔断出参：外部执行闸门判 `Break` 的理由。
-            &mut breaks,
         )
         .await;
 
@@ -1744,10 +1734,9 @@ impl SessionDispatchPort {
                 ..CallOutcome::empty()
             },
         };
-        // 效果 / 熔断出参随这一笔走（不写进共用取件面）：环在整轮收口时按**调用顺序**
+        // 效果出参随这一笔走（不写进共用取件面）：环在整轮收口时按**调用顺序**
         // 交回，并发完成的次序因此不会改变事实顺序。
         outcome.effects = effects;
-        outcome.breaks = breaks;
         outcome
     }
 }
@@ -1805,7 +1794,6 @@ fn map_outcome(
             .and_then(|n| n.content.as_ref().map(|c| c.to_text()))
             .unwrap_or_default(),
         effects: Vec::new(),
-        breaks: Vec::new(),
     }
 }
 

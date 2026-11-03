@@ -96,7 +96,7 @@ impl EliminationDecider {
     ///
     /// 只问分数——「对谁判」（持 `assign.work` 的主体）、「判过没有」（无既有
     /// verdict）都由调用方定：判定者不持有授权表以外的任何判据（与
-    /// `crates/symbio-plugin-loop/src/tools/dispatch/gates::CircuitBreaker::gate` 的 `authorized`
+    /// `crates/symbio-plugin-tool/src/breaker.rs::CircuitBreaker::gate` 的 `authorized`
     /// 出参同一条纪律）。
     pub fn should_eliminate(&self, score: i64) -> bool {
         score < Self::THRESHOLD

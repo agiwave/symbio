@@ -131,7 +131,6 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &principal,
         &to,
         &derived.effects,
-        &derived.breaks,
     );
     // 收束贡献（DE-025 D-250）：能力在这一刻交出本轮的派生事实（记忆 / 技能 / 调度…）。
     // 排在效果之后：贡献者要看得见本轮刚落的工具效果（调度的输入就是本轮刚开的任务，

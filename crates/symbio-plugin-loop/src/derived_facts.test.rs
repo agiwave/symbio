@@ -1,4 +1,4 @@
-//! v2 派生事实写入的验收——承诺 / 任务表 / 熔断 + 记忆与学习落进同一份事实源后，
+//! v2 派生事实写入的验收——承诺 / 任务表 + 记忆与学习落进同一份事实源后，
 //! 不变量全绿、溯源（N5）到位。
 //!
 //! ## 与「轮次事实」的关系
@@ -160,7 +160,6 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         symbio_sdk::authz::PRINCIPAL_MAIN,
         symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
-        &[],
     );
 
     let snap = store.range(Seq::new(0));
@@ -238,7 +237,6 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
         symbio_sdk::authz::PRINCIPAL_PEER,
         symbio_sdk::authz::PRINCIPAL_MAIN,
         &effects,
-        &[],
     );
 
     let snap = store.range(Seq::new(0));
@@ -291,7 +289,6 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         symbio_sdk::authz::PRINCIPAL_MAIN,
         symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
-        &[],
     );
 
     let snap = store.range(Seq::new(0));
@@ -456,7 +453,6 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
         symbio_sdk::authz::PRINCIPAL_MAIN,
         symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
-        &[],
     );
 
     // 轮末淘汰步（顺序即判据：排在承诺落格之后）。
@@ -513,7 +509,6 @@ fn a_kept_delegation_never_eliminates() {
         symbio_sdk::authz::PRINCIPAL_MAIN,
         symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
-        &[],
     );
     record_elimination(&store, 0, user_seq);
 
@@ -555,7 +550,6 @@ fn elimination_does_not_write_a_second_verdict() {
         symbio_sdk::authz::PRINCIPAL_MAIN,
         symbio_sdk::authz::PRINCIPAL_USER,
         &effects,
-        &[],
     );
     record_elimination(&store, 0, user_seq);
     // 第二轮再判一次（覆盖层里已经有那条撤销了）。
@@ -598,7 +592,6 @@ fn a_principal_without_assign_work_is_never_eliminated() {
         symbio_sdk::authz::PRINCIPAL_PEER,
         symbio_sdk::authz::PRINCIPAL_MAIN,
         &effects,
-        &[],
     );
     record_elimination(&store, 0, user_seq);
 

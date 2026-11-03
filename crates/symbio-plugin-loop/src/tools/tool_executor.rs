@@ -359,7 +359,7 @@ pub(crate) async fn land_outcome_async(
 ///    的结论（主体 / 控制面撤销值 / 会话事实切片），本层不含任何「哪个工具名
 ///    受什么管辖」的分支。
 ///
-/// 阶段分层见 `dispatch/{gates,batch}`；**没有批首读数**——编排顺序（空批早退 →
+/// 阶段分层见 `dispatch::batch`；**没有批首读数**——编排顺序（空批早退 →
 /// 逐条准备 → 逐条执行）不变。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn process_tool_calls_in_env(
@@ -373,7 +373,6 @@ pub(crate) async fn process_tool_calls_in_env(
     facts: &dyn Store<Event = Event>,
     elimination_revoked: bool,
     effects: &mut Vec<EffectInput>,
-    breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
     // 空批不读闸门、不发日志——与拆分前的早退位置逐字一致。
     if tool_calls.is_empty() {
@@ -396,7 +395,6 @@ pub(crate) async fn process_tool_calls_in_env(
         facts,
         elimination_revoked,
         effects,
-        breaks,
     )
     .await;
 

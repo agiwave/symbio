@@ -101,7 +101,6 @@ pub(crate) fn record_derived(
     principal: &str,
     to: &str,
     effects: &[EffectInput],
-    _breaks: &[&'static str],
 ) {
     // ── 效果（DE-025 D-207）──────────────────────────────────────────────
     // 工具执行层交出的是**纯值**（这次调用发生了什么），这里补上宿主面（词干 /
