@@ -437,14 +437,14 @@ pub(crate) struct ToolPort {
     drive_seq: u64,
 }
 
-/// 批次调用的**协议 id**：轮 + 幕 + 本次模型往返 + 调用序号 + 模型交回的调用 id。
+/// 一次工具调用的**协议 id**：轮 + 幕 + 本次模型往返 + 响应内序号 + 模型交回的调用 id。
 ///
 /// ## 为什么要带「本次模型往返」
 ///
 /// 创建行 `open-tools` 的集合展开（D-117）从 `response.calls` 的元素里取 id，
-/// 而 `response` 在派发**之前**就写好了——那时还没有「第几批」。要让展开出的键
-/// 与随后的 `request` 同 id，id 必须只由**模型响应里已有的东西**决定：轮、幕、
-/// 模型往返（`model-…-s{step}`）、调用序号、模型调用 id。
+/// 而 `response` 在派发**之前**就写好了。要让展开出的键与随后的 `request` 同 id，
+/// id 必须只由**模型响应里已有的东西**决定：轮、幕、模型往返（`model-…-s{step}`）、
+/// 响应内序号、模型调用 id。
 ///
 /// 只带 `tc.id` 不够：本地模型常用 `call_0` / `call_1` 这种按回合重来的短 id，
 /// 同一幕的下一轮就会撞上上一轮的键——创建债被旧 `request` 提前关掉，新调用根本
@@ -453,10 +453,10 @@ pub(crate) struct ToolPort {
 /// ## 为什么序号要**定宽**前置
 ///
 /// 逐笔派发后环按债键 `(port, id, attempt)` 选最小的一笔（`loop_rows` 的行序），
-/// 键的字典序就是派发序。模型交回的 id 是任意字符串，按它排序会把调用次序打乱
-/// （同一轮两笔写盘的产物次序因此随模型 id 变）；定宽序号放在前面，键序就等于
-/// 模型响应里 `calls` 的次序——事实次序不随调用标识的字面量漂移。
-pub(crate) fn batch_call_id(
+/// 键的字典序就是派发序。模型交回的 id 是任意字符串，按它排序会把调用次序打乱；
+/// 定宽序号放在前面，键序就等于模型响应里 `calls` 的次序。这个次序**只来自响应
+/// 自身**，环不引入「批」的概念，也不据此决定同时派发几笔（并发在 provider 内部）。
+pub(crate) fn call_key(
     turn: u64,
     drive: u64,
     idx: usize,
@@ -543,11 +543,11 @@ impl ToolPort {
         loop_rows::wake_now_ms(facts, self.drive_seq)
     }
 
-    /// 批次级 prepass：为每个真正可派发的调用开一笔工具账。
+    /// 创建行 prepass：为每个真正可派发的调用开一笔工具账。
     ///
     /// 入口先问创建行 `open-tools` 欠不欠（D-117）：一个模型响应是一笔集合债，
     /// 逐元素展开成 N 笔调用；全部 `request` 落完之后它就不再欠。这里不自己数
-    /// 「第几批」——id 只由模型响应里已有的东西决定（[`batch_call_id`]），
+    /// 「第几轮」——id 只由模型响应里已有的东西决定（[`call_key`]），
     /// 否则创建行展开出的键与 `request` 的键对不上。
     pub(crate) async fn open_batch(
         &self,
@@ -588,7 +588,7 @@ impl ToolPort {
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned)
                 .unwrap_or_else(|| {
-                    batch_call_id(self.turn, self.drive_seq, idx, tc.id.as_deref(), round)
+                    call_key(self.turn, self.drive_seq, idx, tc.id.as_deref(), round)
                 });
             let call = port::Call::new(ports::TOOL, id, 1);
             let model_id = tc.id.as_deref().filter(|s| !s.trim().is_empty());

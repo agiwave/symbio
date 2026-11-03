@@ -1709,14 +1709,12 @@ fn a_model_response_expands_its_tool_calls_into_one_debt_each() {
 /// 否则下一轮的创建债会被上一轮的 `request` 提前关掉。
 #[test]
 fn the_same_model_call_id_in_a_later_round_gets_a_distinct_protocol_id() {
-    let first =
-        super::super::tool_dispatch::batch_call_id(1, 0, 0, Some("call_0"), "model-1-d0-s1");
-    let second =
-        super::super::tool_dispatch::batch_call_id(1, 0, 0, Some("call_0"), "model-1-d0-s2");
+    let first = super::super::tool_dispatch::call_key(1, 0, 0, Some("call_0"), "model-1-d0-s1");
+    let second = super::super::tool_dispatch::call_key(1, 0, 0, Some("call_0"), "model-1-d0-s2");
     assert_ne!(first, second);
     assert_ne!(
-        super::super::tool_dispatch::batch_call_id(1, 0, 0, None, "model-1-d0-s1"),
-        super::super::tool_dispatch::batch_call_id(1, 0, 0, None, "model-1-d0-s2"),
+        super::super::tool_dispatch::call_key(1, 0, 0, None, "model-1-d0-s1"),
+        super::super::tool_dispatch::call_key(1, 0, 0, None, "model-1-d0-s2"),
         "缺少模型 id 时也不能撞键"
     );
 }

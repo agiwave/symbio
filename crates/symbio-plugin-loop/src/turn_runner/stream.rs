@@ -8,8 +8,8 @@
 //! 决定下一个动作（`D-222` 裁决 5）。
 
 use super::super::tool_dispatch::{
-    batch_call_id as call_id_of, CallOutcome as Outcome, ToolBegin as Begin,
-    ToolDispatch as Dispatcher, ToolInFlight as Flight, ToolPortCall as PortCall,
+    call_key as call_id_of, CallOutcome as Outcome, ToolBegin as Begin, ToolDispatch as Dispatcher,
+    ToolInFlight as Flight, ToolPortCall as PortCall,
 };
 use super::*;
 
