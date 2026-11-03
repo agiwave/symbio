@@ -42,6 +42,7 @@
 use crate::effects::FactDraft;
 use serde_json::Value;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
@@ -143,6 +144,18 @@ pub struct PortExecContext {
     pub emit: PortFactEmit,
     /// 调用方 ctx（提供者据此读能力表）；`None` = 无。
     pub ctx: Option<Arc<dyn PluginInvokeRequest>>,
+    /// 产物主体（宿主原样交值；工具端口用作轮号）。
+    pub subject: u64,
+    /// 应答组（宿主原样交值；工具端口用作轮根节点 id）。
+    pub group: String,
+    /// 产生方（归属序号）；`None` = 无归属。
+    pub origin: Option<u64>,
+    /// 放行位（宿主侧的产物闸结论）；执行体只按结论记账，不自判。
+    pub permitted: bool,
+    /// 拒绝因（放行位为假时的整份交代）。
+    pub deny_reason: String,
+    /// 工作目录（宿主为本轮准备的可写目录）；`None` = 无。
+    pub scratch_dir: Option<PathBuf>,
 }
 
 /// provider 执行一笔债期间追加事实草稿的通用出口（`DE-048` D-305 裁决一）。

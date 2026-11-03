@@ -37,8 +37,7 @@
     "tool_dispatch.rs": 270,
     "tool_exec/decls.rs": 2,
     "tool_exec/effects.rs": 2,
-    "tool_exec/envelope.rs": 10,
-    "tool_exec/execution.rs": 135,
+    "tool_exec/execution.rs": 137,
     "tool_exec/gate_inputs.rs": 2,
     "tool_exec.rs": 2,
     "turn_exec/policy.rs": 40,
@@ -47,7 +46,7 @@
     "turn_runner/facts.rs": 46,
     "turn_runner/prepare.rs": 43,
     "turn_runner/settle.rs": 46,
-    "turn_runner/stream.rs": 216,
+    "turn_runner/stream.rs": 217,
     "turn_runner.rs": 97
   },
   "lp004WorldNamedContracts": 2,

@@ -84,6 +84,12 @@ fn exec_context(with_dispatch: bool) -> PortExecContext {
         sink: ExecEventSink::silent(),
         emit: PortFactEmit::silent(),
         ctx: Some(host(with_dispatch)),
+        subject: 0,
+        group: String::new(),
+        origin: None,
+        permitted: true,
+        deny_reason: String::new(),
+        scratch_dir: None,
     }
 }
 

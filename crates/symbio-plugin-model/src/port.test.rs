@@ -98,6 +98,12 @@ fn exec_context() -> symbio_plugin_api::port::PortExecContext {
         sink: symbio_plugin_api::ExecEventSink::Null,
         emit: symbio_plugin_api::port::PortFactEmit::silent(),
         ctx: None,
+        subject: 0,
+        group: String::new(),
+        origin: None,
+        permitted: true,
+        deny_reason: String::new(),
+        scratch_dir: None,
     }
 }
 

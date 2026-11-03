@@ -144,6 +144,12 @@ pub(crate) fn begin_model(
             Some(super::super::port::CallEnvelope::of(&call)),
         ),
         ctx: None,
+        subject: turn,
+        group: round_id.clone(),
+        origin: Some(produced_by),
+        permitted: true,
+        deny_reason: String::new(),
+        scratch_dir: None,
     };
     let input = symbio_plugin_api::port::PortInput {
         port: ports::MODEL,

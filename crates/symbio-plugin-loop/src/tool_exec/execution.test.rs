@@ -26,7 +26,7 @@ use symbio_sdk::capability::CAPABILITY_VISITOR;
 use symbio_sdk::chat::chat_node::{MessageContent, NodeStatus};
 use symbio_sdk::chat::principal::Principal;
 
-use super::super::envelope::RoundEnv;
+use symbio_plugin_api::port::PortExecContext;
 
 /// 声明闸的默认出口是**可审计拒绝**：拒因进结果，违约承诺照记（淘汰即此类）。
 #[test]
@@ -132,15 +132,20 @@ async fn ctx_with_tool_port() -> Arc<dyn PluginInvokeRequest> {
 }
 
 /// 测试用执行信封：写口静默、产物闸结论默认放行（D-316 的中性路径值）。
-fn test_env() -> RoundEnv {
-    RoundEnv {
-        scratch_dir: std::env::temp_dir().join("symbio-test/session-tool-execution"),
+fn test_env() -> PortExecContext {
+    PortExecContext {
+        deadline_ms: None,
+        abort: ExecAbortSignal::default(),
+        idempotency_key: String::new(),
+        sink: ExecEventSink::Null,
         emit: PortFactEmit::silent(),
-        round: 1,
-        round_id: "round-1".into(),
-        produced_by: 1,
-        allowed: true,
-        denied_reason: String::new(),
+        ctx: None,
+        subject: 1,
+        group: "round-1".into(),
+        origin: Some(1),
+        permitted: true,
+        deny_reason: String::new(),
+        scratch_dir: Some(std::env::temp_dir().join("symbio-test/session-tool-execution")),
     }
 }
 

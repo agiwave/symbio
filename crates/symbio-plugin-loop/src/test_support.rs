@@ -618,65 +618,52 @@ impl PortExecutor for FixtureToolPort {
         // 只落格、不执行：与生产 `ToolPort` 的 `land_only` 出口同形。替身必须在，
         // 否则「环只交结果纯值」这条链路在单测里会静默地少一格产物。
         if payload.get("land_only").is_some() {
-            if let Some(art) = payload.get("artifact") {
-                let allowed = art.get("allowed").and_then(Value::as_bool).unwrap_or(false);
-                let key = art
-                    .get("key")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                let draft = if allowed {
-                    let lo = payload.get("land_only").cloned().unwrap_or(Value::Null);
-                    symbio_plugin_api::effects::FactDraft {
-                        key,
-                        kind: EVENT_ARTIFACT_ADDED.to_string(),
-                        entity: Entity::Artifact,
-                        verb: Verb::Asserted,
-                        payload: json!({
-                            "tool": payload.get("name").cloned().unwrap_or(Value::Null),
-                            "text": lo.get("text").cloned().unwrap_or(Value::Null),
-                            "tool_call_id": payload
-                                .get("call_id")
-                                .cloned()
-                                .unwrap_or(Value::Null),
-                            "args": payload.get("args").cloned().unwrap_or(Value::Null),
-                            "success": lo.get("success").cloned().unwrap_or(Value::Null),
-                            "needs_user_action": lo
-                                .get("needs_user_action")
-                                .cloned()
-                                .unwrap_or(Value::Null),
-                            "prompt": lo.get("prompt").cloned().unwrap_or(Value::Null),
-                            "failure_kind": lo
-                                .get("failure_kind")
-                                .cloned()
-                                .unwrap_or(Value::Null),
-                            "turn_id": art.get("round_id").cloned().unwrap_or(Value::Null),
-                        }),
-                        produced_by: art.get("produced_by").and_then(Value::as_u64),
-                    }
-                } else {
-                    symbio_plugin_api::effects::FactDraft {
-                        key: format!(
-                            "deny-{}-artifact",
-                            art.get("round").and_then(Value::as_u64).unwrap_or_default()
-                        ),
-                        kind: EVENT_AUTHZ_DENIED.to_string(),
-                        entity: Entity::Scope,
-                        verb: Verb::Asserted,
-                        payload: json!({
-                            "key": EVENT_ARTIFACT_ADDED,
-                            "kind": "artifact",
-                            "reason": "denied",
-                            "detail": art
-                                .get("denied_reason")
-                                .cloned()
-                                .unwrap_or(Value::Null),
-                        }),
-                        produced_by: art.get("produced_by").and_then(Value::as_u64),
-                    }
-                };
-                exec.emit.emit(vec![draft]).await;
-            }
+            let key = format!("a-{}-{}", exec.subject, exec.idempotency_key);
+            let draft = if exec.permitted {
+                let lo = payload.get("land_only").cloned().unwrap_or(Value::Null);
+                symbio_plugin_api::effects::FactDraft {
+                    key,
+                    kind: EVENT_ARTIFACT_ADDED.to_string(),
+                    entity: Entity::Artifact,
+                    verb: Verb::Asserted,
+                    payload: json!({
+                        "tool": payload.get("name").cloned().unwrap_or(Value::Null),
+                        "text": lo.get("text").cloned().unwrap_or(Value::Null),
+                        "tool_call_id": payload
+                            .get("call_id")
+                            .cloned()
+                            .unwrap_or(Value::Null),
+                        "args": payload.get("args").cloned().unwrap_or(Value::Null),
+                        "success": lo.get("success").cloned().unwrap_or(Value::Null),
+                        "needs_user_action": lo
+                            .get("needs_user_action")
+                            .cloned()
+                            .unwrap_or(Value::Null),
+                        "prompt": lo.get("prompt").cloned().unwrap_or(Value::Null),
+                        "failure_kind": lo
+                            .get("failure_kind")
+                            .cloned()
+                            .unwrap_or(Value::Null),
+                        "turn_id": exec.group.clone(),
+                    }),
+                    produced_by: exec.origin,
+                }
+            } else {
+                symbio_plugin_api::effects::FactDraft {
+                    key: format!("deny-{}-artifact", exec.subject),
+                    kind: EVENT_AUTHZ_DENIED.to_string(),
+                    entity: Entity::Scope,
+                    verb: Verb::Asserted,
+                    payload: json!({
+                        "key": EVENT_ARTIFACT_ADDED,
+                        "kind": "artifact",
+                        "reason": "denied",
+                        "detail": exec.deny_reason,
+                    }),
+                    produced_by: exec.origin,
+                }
+            };
+            exec.emit.emit(vec![draft]).await;
             return fixture_outcome(String::new(), true, None);
         }
         // 协议读数：与生产 `ToolPort` 同形的最小子集——判与措辞都在执行体，

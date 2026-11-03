@@ -737,6 +737,12 @@ pub(crate) fn run_port<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 None,
             ),
             ctx: Some(request_ctx),
+            subject: round_no,
+            group: String::new(),
+            origin: Some(produced_by),
+            permitted: true,
+            deny_reason: String::new(),
+            scratch_dir: None,
         };
 
         execute_one(

@@ -51,7 +51,7 @@ use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt}
 use symbio_kernel::store::Store;
 use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::events::EVENT_AUTHZ_DENIED;
-use symbio_plugin_api::port::ports;
+use symbio_plugin_api::port::{ports, PortExecContext};
 use symbio_sdk::adapters::LlmTurn;
 use symbio_sdk::capability::{capability_resolve, tool_metas, ApprovalGrants, CAPABILITY_VISITOR};
 use symbio_sdk::chat::chat_node::{
@@ -66,7 +66,7 @@ use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
 use super::loop_rows;
 use super::port;
-use super::tool_exec::{is_unanswered, process_tool_calls_in_env, RoundEnv, NOT_EXECUTED};
+use super::tool_exec::{is_unanswered, process_tool_calls_in_env, NOT_EXECUTED};
 use super::turn_exec::UiBridge;
 use symbio_kernel::actors::ActorSpec;
 use symbio_sdk::turn::node_build::{
@@ -1274,9 +1274,12 @@ impl SessionDispatchPort {
     /// 闸在轮首由环判一次（只认 actor，见 `turn_runner::artifact_verdict`）；执行体
     /// 只按结论记账，拒绝理由随信封下发，由它在 `land_only` 出口落幂等的否定事实
     /// （P1b / D-308）。
-    fn round_env(&self) -> RoundEnv {
-        RoundEnv {
-            scratch_dir: self.tool_archive_dir.clone(),
+    fn round_exec(&self) -> PortExecContext {
+        PortExecContext {
+            deadline_ms: None,
+            abort: ExecAbortSignal::default(),
+            idempotency_key: String::new(),
+            sink: ExecEventSink::Null,
             emit: port::host_fact_emit(
                 self.facts.clone(),
                 self.round,
@@ -1285,11 +1288,13 @@ impl SessionDispatchPort {
                 Some(self.user_seq),
                 None,
             ),
-            round: self.round,
-            round_id: self.root_id.clone(),
-            produced_by: self.user_seq,
-            denied_reason: self.artifact_denied_reason.clone(),
-            allowed: self.artifact_allowed,
+            ctx: None,
+            subject: self.round,
+            group: self.root_id.clone(),
+            origin: Some(self.user_seq),
+            permitted: self.artifact_allowed,
+            deny_reason: self.artifact_denied_reason.clone(),
+            scratch_dir: Some(self.tool_archive_dir.clone()),
         }
     }
 
@@ -1578,7 +1583,7 @@ impl ToolDispatch for SessionDispatchPort {
             // 产物落格：这一笔结果交回执行体的 `land_only` 出口（含唤醒结果与没跑到的
             // 占位结果）——环不再自己装配产物载荷（P1b / DE-048 D-308）。
             if let Some(outcome) = outcome {
-                let env = self.round_env();
+                let env = self.round_exec();
                 super::tool_exec::land_outcome_async(
                     &env,
                     &self.parent,
@@ -1690,7 +1695,7 @@ impl SessionDispatchPort {
         // 执行信封（P1b / DE-048 D-308）：产物格与授权事实的**宿主写口**随批走。
         // 产物闸在轮首判一次（`turn_runner::artifact_verdict`），结论以 `allowed` 交给执行体；
         // 落格本身由执行体的 `land_only` 出口做，环不装配产物载荷。
-        let env = self.round_env();
+        let env = self.round_exec();
         let mut effects: Vec<EffectInput> = Vec::new();
         let (tool_msgs, parent_updates) = process_tool_calls_in_env(
             tool_calls.clone(),

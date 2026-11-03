@@ -32,7 +32,7 @@
 //! 工具失败**不**映射成 `PortOutcome.error`——失败是信息性事实（模型据此自我纠正），
 //! 与「这一笔协议失败」是两件事。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::breaker::{CircuitBreaker, GateDecision};
@@ -56,17 +56,6 @@ pub(crate) const TOOL: &str = ports::TOOL;
 const KEY_TOOL_NAME: &str = "name";
 const KEY_ARGS: &str = "args";
 const KEY_TOOL_CALL_ID: &str = "call_id";
-/// 宿主可写目录（会话子目录；缺省时守卫回退到系统临时目录）。
-///
-/// 键名是中性值（DE-048 D-316）：环只给路径，存档子布局由本插件自取。
-const KEY_SCRATCH_DIR: &str = "scratch_dir";
-/// 产物格上下文：`{ key, round, round_id, produced_by, allowed, denied_reason }`。
-///
-/// 落格这件事在**执行体**里做（P1b，DE-048 D-308）：产物是这次结果的产物，不是环的
-/// 派生产物。`key` 由环按「轮 + 债务 id」给出（一笔债一个键），拒绝时按
-/// `deny-{round}-artifact` 落一条幂等的否定事实；`allowed` 是环侧产物闸的结论
-/// （执行体不自判权限）。
-const KEY_ARTIFACT: &str = "artifact";
 /// 只落格、不执行：唤醒结果与没跑到的占位结果用这一形态交回执行体。
 const KEY_LAND_ONLY: &str = "land_only";
 /// 外部执行闸门的中性输入：`{ authorized, spent_ms, requested_ms, budget_ms }`。
@@ -250,7 +239,7 @@ struct CallMeta<'a> {
     declared: &'static [&'static str],
 }
 
-/// 产物格上下文（环侧在载荷里给出）。
+/// 产物格上下文（宿主在 [`PortExecContext`] 里给出，字段一律中性）。
 struct ArtifactCtx {
     key: String,
     round: u64,
@@ -260,29 +249,17 @@ struct ArtifactCtx {
     denied_reason: String,
 }
 
-fn artifact_ctx(payload: &serde_json::Value) -> Option<ArtifactCtx> {
-    let art = payload.get(KEY_ARTIFACT)?;
+fn artifact_ctx(exec: &PortExecContext) -> Option<ArtifactCtx> {
     Some(ArtifactCtx {
-        key: art.get("key")?.as_str()?.to_string(),
-        round: art
-            .get("round")
-            .and_then(|v| v.as_u64())
-            .unwrap_or_default(),
-        round_id: art
-            .get("round_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-        produced_by: art.get("produced_by").and_then(|v| v.as_u64()),
-        allowed: art
-            .get("allowed")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-        denied_reason: art
-            .get("denied_reason")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
+        // 键按**这一笔债务**（幂等键）而不是节点身份生成：同一张调用卡的等待态与
+        // 答复态是两笔债（`…-resume-…-1`），各有一次产物；按节点身份生成会让后一条
+        // 因幂等被吞掉（答复卡凭空消失）。
+        key: format!("a-{}-{}", exec.subject, exec.idempotency_key),
+        round: exec.subject,
+        round_id: exec.group.clone(),
+        produced_by: exec.origin,
+        allowed: exec.permitted,
+        denied_reason: exec.deny_reason.clone(),
     })
 }
 
@@ -350,13 +327,8 @@ fn refused(text: &str, failure_kind: &'static str) -> PortOutcome {
 /// 富化字段）全在这一处装配。结果节点 id 由 `tool_call_id` 派生，不作为载荷键
 /// （DE-048 D-312）。`allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时
 /// 按 `deny-{round}-artifact` 落一条幂等否定事实（同一轮多条结果说的是同一件事）。
-async fn land_artifact(
-    exec: &PortExecContext,
-    payload: &serde_json::Value,
-    meta: &CallMeta<'_>,
-    landed: &LandedResult<'_>,
-) {
-    let Some(art) = artifact_ctx(payload) else {
+async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &LandedResult<'_>) {
+    let Some(art) = artifact_ctx(exec) else {
         return;
     };
     if !art.allowed {
@@ -681,7 +653,6 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
     };
     land_artifact(
         exec,
-        payload,
         &meta,
         &LandedResult {
             text: &text,
@@ -772,11 +743,7 @@ impl PortExecutor for ToolPort {
             .get(KEY_ARGS)
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        let archive_dir = payload
-            .get(KEY_SCRATCH_DIR)
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_default();
+        let archive_dir = exec.scratch_dir.clone().unwrap_or_default();
         // 只落格、不执行：唤醒结果与没跑到的占位结果。
         if payload.get(KEY_LAND_ONLY).is_some() {
             land_only(&exec, &payload).await;

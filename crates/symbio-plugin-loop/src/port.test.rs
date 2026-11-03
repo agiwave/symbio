@@ -1217,6 +1217,12 @@ fn exec_context(port: &'static str, id: &str) -> PortExecContext {
         sink: ExecEventSink::Null,
         emit: symbio_plugin_api::port::PortFactEmit::silent(),
         ctx: None,
+        subject: 0,
+        group: String::new(),
+        origin: None,
+        permitted: true,
+        deny_reason: String::new(),
+        scratch_dir: None,
     }
 }
 

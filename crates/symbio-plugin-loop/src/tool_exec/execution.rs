@@ -5,7 +5,7 @@
 //! 「没跑到」的占位结果子节点不在这里收口：节点是事实的投影，环只写
 //! `failed{why}`，展示由投影器渲染。
 //!
-//! 信封与载荷装配住在 [`super::envelope`]，本模块只驱动。
+//! 载荷装配也住在本模块（环只交值，不拼世界信封键）。
 
 use std::sync::Arc;
 
@@ -30,8 +30,21 @@ use {
 
 use super::decls::ToolDecls;
 use super::effects::record_effect;
-use super::envelope::{tool_payload, ProtocolInput, RoundEnv};
 use super::gate_inputs::GateInputs;
+
+/// 调用信封的协议读数：环只搬原始值，判定在执行体（D-312）。
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProtocolInput {
+    pub(crate) id_missing: bool,
+    pub(crate) name_missing: bool,
+    pub(crate) parse_error: Option<String>,
+}
+
+impl ProtocolInput {
+    pub(crate) fn is_failure(&self) -> bool {
+        self.id_missing || self.name_missing || self.parse_error.is_some()
+    }
+}
 
 /// 中止的成因词：与 [`NOT_EXECUTED`] 同属「没跑到」的词表。
 pub(crate) const ABORTED: &str = "aborted";
@@ -773,7 +786,7 @@ pub(crate) async fn run_calls(
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
-    env: &RoundEnv,
+    env: &PortExecContext,
     facts: &dyn Store<Event = Event>,
     elimination_revoked: bool,
     effects: &mut Vec<EffectInput>,
@@ -945,7 +958,7 @@ pub struct ExecResult {
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_one(
     port: &'static str,
-    env: &RoundEnv,
+    env: &PortExecContext,
     gate: &GateInputs,
     parent: &Option<Arc<dyn Plugin>>,
     name: &str,
@@ -979,19 +992,34 @@ pub async fn execute_one(
     if let Some(p) = parent {
         exec_ctx.set(PLUGIN_PARENT, Some(Arc::downgrade(p)));
     }
+    // 模板只承载本轮不变的六值；每笔各自覆盖执行期句柄与幂等键。
+    let mut per_call = env.clone();
+    per_call.deadline_ms = None;
+    per_call.abort = abort.clone();
+    per_call.idempotency_key = call_id.to_string();
+    per_call.sink = sink.clone();
+    per_call.ctx = Some(exec_ctx);
     let out = executor
         .execute(
-            PortExecContext {
-                deadline_ms: None,
-                abort: abort.clone(),
-                idempotency_key: call_id.to_string(),
-                sink: sink.clone(),
-                emit: env.emit.clone(),
-                ctx: Some(exec_ctx),
-            },
+            per_call,
             PortInput {
                 port,
-                payload: tool_payload(name, args, call_id, protocol, env, gate),
+                payload: json!({
+                    "name": name,
+                    "args": args,
+                    "call_id": call_id,
+                    "protocol": {
+                        "id_missing": protocol.id_missing,
+                        "name_missing": protocol.name_missing,
+                        "parse_error": protocol.parse_error,
+                    },
+                    "gate": {
+                        "authorized": gate.authorized,
+                        "spent_ms": gate.spent_ms,
+                        "requested_ms": gate.requested_ms,
+                        "budget_ms": gate.budget_ms,
+                    },
+                }),
             },
         )
         .await;
@@ -1079,7 +1107,7 @@ pub async fn execute_one(
 /// 按通用载荷给出，执行体负责装配产物载荷、富化字段与幂等的拒绝事实（P1b /
 /// DE-048 D-308）。环不按世界分支，也不在环里留第二条落格路径。
 pub(crate) async fn land_outcome_async(
-    env: &RoundEnv,
+    env: &PortExecContext,
     parent: &Option<Arc<dyn Plugin>>,
     sink: &ExecEventSink,
     abort: &ExecAbortSignal,
@@ -1097,34 +1125,23 @@ pub(crate) async fn land_outcome_async(
         exec_ctx.set(PLUGIN_PARENT, Some(Arc::downgrade(p)));
     }
     let args = serde_json::from_str(&outcome.args).unwrap_or(Value::Null);
+    // 落格出口的幂等键必须按**债务 id**：同一张调用卡的等待态与答复态是两笔债，
+    // 按节点 id（`call_id`）去重会把后一笔吞掉。`call_id` 只供结果锚定 `tool_call_id`。
+    let mut per_call = env.clone();
+    per_call.deadline_ms = None;
+    per_call.abort = abort.clone();
+    per_call.idempotency_key = outcome.call.id.clone();
+    per_call.sink = sink.clone();
+    per_call.ctx = Some(exec_ctx);
     let _ = executor
         .execute(
-            PortExecContext {
-                deadline_ms: None,
-                abort: abort.clone(),
-                idempotency_key: outcome.call_id.clone(),
-                sink: sink.clone(),
-                emit: env.emit.clone(),
-                ctx: Some(exec_ctx),
-            },
+            per_call,
             PortInput {
                 port: ports::TOOL,
                 payload: json!({
                     "name": outcome.name,
                     "args": args,
                     "call_id": outcome.call_id,
-                    "scratch_dir": env.scratch_dir.to_string_lossy(),
-                    "artifact": {
-                        // 键按**这一笔债务**而不是节点身份生成：同一张调用卡的等待态与
-                        // 答复态是两笔债（`…-resume-…-1`），各有一次产物；按节点身份
-                        // 生成会让后一条因幂等被吞掉（答复卡凭空消失）。
-                        "key": format!("a-{}-{}", env.round, outcome.call.id),
-                        "round": env.round,
-                        "round_id": env.round_id,
-                        "produced_by": env.produced_by,
-                        "allowed": env.allowed,
-                        "denied_reason": env.denied_reason,
-                    },
                     "land_only": {
                         "text": outcome.text,
                         "success": outcome.ok,
@@ -1141,7 +1158,7 @@ pub(crate) async fn land_outcome_async(
 // 批量工具调用处理
 
 /// 带执行信封的批量入口：顺序处理一批工具调用（产物格 / 宿主写口 / 轮归属随
-/// [`RoundEnv`] 走），向 channel 广播每个工具的结果，
+/// [`PortExecContext`] 走），向 channel 广播每个工具的结果，
 /// 并返回 `(tool_messages, parent_updates)`：
 /// - `tool_messages`：工具结果子节点（用于追加到对话历史）
 /// - `parent_updates`：ToolCall 父节点的**完整终态快照**（发射端从
@@ -1177,7 +1194,7 @@ pub(crate) async fn process_tool_calls_in_env(
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
-    env: &RoundEnv,
+    env: &PortExecContext,
     facts: &dyn Store<Event = Event>,
     elimination_revoked: bool,
     effects: &mut Vec<EffectInput>,

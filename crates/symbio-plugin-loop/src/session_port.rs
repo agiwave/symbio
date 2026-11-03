@@ -102,6 +102,12 @@ impl PortSession {
             sink: ExecEventSink::Null,
             emit: PortFactEmit::silent(),
             ctx: Some(self.host_ctx.clone()),
+            subject: 0,
+            group: String::new(),
+            origin: None,
+            permitted: true,
+            deny_reason: String::new(),
+            scratch_dir: None,
         };
         let input = PortInput {
             port: PORT,
