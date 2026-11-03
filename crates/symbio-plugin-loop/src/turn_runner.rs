@@ -46,7 +46,6 @@ use symbio_sdk::view::visible_to;
 // ── 阶段分层 ──────────────────────────────────────
 // 逐步过程按阶段切：准备 → 请求 / 流式 → 工具批 → 轮边界 → 收束。
 // 阶段之间只传 [`prepare::Prepared`]，不传第二份事实。
-mod batch;
 mod boundary;
 mod facts;
 mod prepare;
@@ -898,7 +897,7 @@ where
 /// 决策 D-065 见 [D-065](../../../docs/003-design/011-Agent目录规范.md#d-065-对等侧收束commitmentasserted-缺的不是写方而是对等-offerassert②-与-③-同一批收束格按种类判 "D-065")
 /// 决策 D-067 见 [D-067](../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "D-067")
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ClosureKind {
+pub(crate) enum ClosureKind {
     /// 发言收束：答话 / 兜底 / 中止的那一格。
     Speech,
     /// 产物收束：工具结果的那一格（`artifact.added`）。
@@ -973,7 +972,7 @@ impl ClosureKind {
 /// 拒绝原因（`authz.denied` 的 `detail`）答的是「缺哪项能力」——判据与判据
 /// 同源，只多带一句人话。布尔形态（`is_ok()` 壳）已删：生产面七处收束落格
 /// 都要原因，没人再取「过没过」这个形状。
-fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
+pub(crate) fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
     // 八个收束调用点全在「本轮尚无收束格」的位置，因此发言只问一个 `Capability::Reply`
     // ——名住 core，授权读法（`actor_can_*` 自由函数）与表谓词共用它（D-103：不按轮次位置分能力）。
     let own = match kind {
@@ -988,6 +987,27 @@ fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
         ));
     }
     within_delegation_ceiling(actor, kind)
+}
+
+/// 产物闸的一次裁决：`allowed` 与拒绝理由一起给出。
+///
+/// 判定留在环里（它只认 actor），结论以纯值交给执行体：执行体按结论记账，
+/// 拒绝理由随执行信封下发、由它在 `land_only` 出口落幂等的否定事实（P1b / D-308）。
+pub(crate) struct ArtifactVerdict {
+    pub allowed: bool,
+    pub denied_reason: String,
+}
+
+pub(crate) fn artifact_verdict(actor: &ActorSpec) -> ArtifactVerdict {
+    let mut verdict = ArtifactVerdict {
+        allowed: true,
+        denied_reason: String::new(),
+    };
+    if let Err(why) = closure_gate(actor, ClosureKind::Artifact) {
+        verdict.allowed = false;
+        verdict.denied_reason = why;
+    }
+    verdict
 }
 
 /// 落一条**否定事实**（[`EVENT_AUTHZ_DENIED`]）。

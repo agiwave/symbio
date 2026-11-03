@@ -1403,20 +1403,6 @@ pub(crate) async fn model_port(
     provider_of(ctx, symbio_plugin_api::ports::MODEL).await
 }
 
-/// 取 tool 端口的提供者（D-298）：能力表按**端口名**读——线上名怎么解析、
-/// 挂死怎么判（空闲而不是总时长）、结果怎么压成一段文本，都是提供者一侧的私事
-/// （session 的 `ToolPort`）。
-///
-/// 与 [`model_port`] 同一把尺子：缺席（0 行——零工具的装配没有工具世界的提供者）、
-/// 判重（>1 行）、闭集外、载荷下转型失败——四种读数都**出声并返回 `None`**：调用方
-/// 必须响亮失败（错误文本回传模型 + `success = false`，与既有 route 错误同形），
-/// 不许静默回退、不许按「判不出来」继续。
-pub(crate) async fn tool_port(
-    ctx: &Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
-) -> Option<Arc<dyn symbio_plugin_api::port::PortProvider>> {
-    provider_of(ctx, symbio_plugin_api::ports::TOOL).await
-}
-
 /// 端口缺席时的响亮失败（D-298）：**欠了、立刻失败**——`request` 与 `failed`
 /// 两格同落（账上说得清「这次往返想要、没打成」），`why` 进失败载荷。
 ///

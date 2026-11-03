@@ -76,7 +76,6 @@ pub(crate) struct Prepared {
     pub(crate) exchange: Vec<symbio_kernel::llm::PromptMessage>,
     pub(crate) tool_round: usize,
     pub(crate) cost_ms: u64,
-    pub(crate) artifact_no: u64,
     pub(crate) artifacts_landed: u64,
     /// 本轮已经落格的**模型输出事实**的逻辑 id（`response` / `failed`，不含内部 `via`）。
     ///
@@ -373,12 +372,6 @@ where
     let tool_round: usize = 0;
     // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，D-044 的实测口径）。
     let cost_ms = 0u64;
-    // 产物格的事件 id 需要在本轮内唯一（同一工具可被调用多次）。续写轮从**该轮
-    // 已有产物数**起编号——等待轮可能已落过产物格，从 0 起会撞幂等键。
-    let artifact_no = full_snapshot
-        .iter()
-        .filter(|e| e.turn == turn && e.kind == symbio_plugin_api::events::EVENT_ARTIFACT_ADDED)
-        .count() as u64;
     let responses: Vec<String> = Vec::new();
     let last_output_facts = StreamNodeFacts::default();
     let last_answer_id = String::new();
@@ -406,7 +399,6 @@ where
         exchange,
         tool_round,
         cost_ms,
-        artifact_no,
         artifacts_landed,
         responses,
         last_output_facts,

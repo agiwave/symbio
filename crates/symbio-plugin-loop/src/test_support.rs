@@ -18,8 +18,8 @@ use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::plugin::PluginError;
 use symbio_kernel::store::{EventStore, Store};
 use symbio_plugin_api::events::{
-    EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OPENED, EVENT_COMMITMENT_RELEASED,
-    EVENT_SESSION_CONSOLIDATED,
+    EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OPENED,
+    EVENT_COMMITMENT_RELEASED, EVENT_SESSION_CONSOLIDATED,
 };
 use symbio_plugin_api::PluginInvokeRequestExt;
 use symbio_sdk::chat::chat_node::ChatNode;
@@ -616,14 +616,83 @@ fn fixture_outcome(result_text: String, success: bool, pending: Option<Value>) -
 impl PortExecutor for FixtureToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let payload = input.payload;
+        // 只落格、不执行：与生产 `ToolPort` 的 `land_only` 出口同形。替身必须在，
+        // 否则「环只交结果纯值」这条链路在单测里会静默地少一格产物。
+        if payload.get("land_only").is_some() {
+            if let Some(art) = payload.get("artifact") {
+                let allowed = art.get("allowed").and_then(Value::as_bool).unwrap_or(false);
+                let key = art
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let draft = if allowed {
+                    let lo = payload.get("land_only").cloned().unwrap_or(Value::Null);
+                    symbio_plugin_api::effects::FactDraft {
+                        key,
+                        kind: EVENT_ARTIFACT_ADDED.to_string(),
+                        entity: Entity::Artifact,
+                        verb: Verb::Asserted,
+                        payload: json!({
+                            "tool": payload.get("name").cloned().unwrap_or(Value::Null),
+                            "text": lo.get("text").cloned().unwrap_or(Value::Null),
+                            "tool_call_id": payload
+                                .get("call_id")
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                            "wire_id": payload.get("wire_id").cloned().unwrap_or(Value::Null),
+                            "args": payload.get("args").cloned().unwrap_or(Value::Null),
+                            "result_id": payload
+                                .get("result_msg_id")
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                            "success": lo.get("success").cloned().unwrap_or(Value::Null),
+                            "needs_user_action": lo
+                                .get("needs_user_action")
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                            "prompt": lo.get("prompt").cloned().unwrap_or(Value::Null),
+                            "failure_kind": lo
+                                .get("failure_kind")
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                            "turn_id": art.get("round_id").cloned().unwrap_or(Value::Null),
+                        }),
+                        produced_by: art.get("produced_by").and_then(Value::as_u64),
+                    }
+                } else {
+                    symbio_plugin_api::effects::FactDraft {
+                        key: format!(
+                            "deny-{}-artifact",
+                            art.get("round").and_then(Value::as_u64).unwrap_or_default()
+                        ),
+                        kind: EVENT_AUTHZ_DENIED.to_string(),
+                        entity: Entity::Scope,
+                        verb: Verb::Asserted,
+                        payload: json!({
+                            "key": EVENT_ARTIFACT_ADDED,
+                            "kind": "artifact",
+                            "reason": "denied",
+                            "detail": art
+                                .get("denied_reason")
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                        }),
+                        produced_by: art.get("produced_by").and_then(Value::as_u64),
+                    }
+                };
+                exec.emit.emit(vec![draft]).await;
+            }
+            return fixture_outcome(String::new(), true, None);
+        }
         let name = payload
-            .get("tool_name")
+            .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
         let args = payload.get("args").cloned().unwrap_or(Value::Null);
         let tool_call_id = payload
-            .get("tool_call_id")
+            .get("call_id")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();

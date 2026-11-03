@@ -369,9 +369,9 @@ fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext,
         PortInput {
             port: TOOL,
             payload: serde_json::json!({
-                "tool_name": tool_name,
+                "name": tool_name,
                 "args": {},
-                "tool_call_id": "tc-1",
+                "call_id": "tc-1",
                 "result_msg_id": "res-1",
             }),
         },

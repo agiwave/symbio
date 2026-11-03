@@ -3,15 +3,16 @@
 //! 域内三个子模块：
 //!
 //! - `tool_executor` —— 执行编排：单工具路由与执行（`execute_tool_async`）、
-//!   批量分发与结果广播（`process_tool_calls_async`）。它是工具结果节点的
+//!   批量分发与结果广播（`process_tool_calls_in_env`）。它是工具结果节点的
 //!   **唯一写入者**，也是编排层与上下文治理层取用工具机制的入口。
-//! - `dispatch` —— `process_tool_calls_async` 的**执行阶段分层**：
+//! - `dispatch` —— `process_tool_calls_in_env` 的**执行阶段分层**：
 //!   ① 批首闸门读数 ② 逐条执行 ③ 未执行收口；编排入口仍是 `tool_executor` 里同名函数，
 //!   本层只是它的三段落点，不改门面。收口段（`unfinished`）同时是「没跑到」的
 //!   **成因词表**（`ABORTED` / `NOT_EXECUTED`）与结果子节点的落法所在。
 //!
-//! 单条结果的体积上限（守卫与归档滚动）随执行体迁到 `symbio-plugin-tool`；
-//! 本域只消费执行体交回的**已守卫文本**与守卫元数据（P1b，DE-047 D-308）。
+//! 单条结果的体积上限（守卫与归档滚动）与**产物格落格**都随执行体迁到
+//! `symbio-plugin-tool`；本域只消费执行体交回的**已守卫文本**与守卫元数据
+//! （P1b，DE-047 D-308）。
 //!
 //! 生命周期钩子（`fire_hook`）住宿主 `symbio_plugin_api::hooks`：session 派发前与 loop 轮内都触发它，
 //! 两边共用同一条路由助手（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
@@ -41,4 +42,6 @@ pub(crate) use self::dispatch::gates::CircuitBreaker;
 // 测试面（`tool_executor.test.rs`）要按结论比对；生产侧只问「是不是 Allow」。
 #[cfg(test)]
 pub(crate) use self::dispatch::gates::GateDecision;
-pub use self::tool_executor::process_tool_calls_async;
+// 生产入口（带执行信封）：分发方在派发时把轮号 / 根节点 / 产物闸结论 / 写口
+// 装进 [`RoundEnv`]，执行体据此落产物格（P1b，DE-047 D-308）。
+pub(crate) use self::tool_executor::{land_outcome_async, process_tool_calls_in_env, RoundEnv};

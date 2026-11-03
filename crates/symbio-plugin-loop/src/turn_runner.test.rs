@@ -2018,6 +2018,44 @@ mod tool_round_tests {
         Some((turn_no, produced_by))
     }
 
+    /// 替身落产物格：生产里这一步由执行体的 `land_only` 出口做（P1b），替身没有
+    /// 执行体，按同一载荷形状直接写——测试断言的是环的账，不是替身的装配。
+    /// 重建用的根 id 不在本夹具的断言范围内，故不写。
+    fn land_for_test(store: &dyn Store<Event = Event>, outcomes: &[DispatchOutcome]) {
+        let Some((round, produced_by, _)) = model_batch(store) else {
+            return;
+        };
+        let next = store
+            .range(symbio_kernel::event::Seq::new(0))
+            .iter()
+            .filter(|e| e.kind == EVENT_ARTIFACT_ADDED)
+            .count();
+        for (i, o) in outcomes.iter().enumerate() {
+            let event = Event::pending(
+                format!("a-{round}-{}", next + i),
+                EVENT_ARTIFACT_ADDED,
+                Entity::Artifact,
+                Verb::Asserted,
+                round,
+                "system",
+            )
+            .with_produced_by(produced_by)
+            .with_payload(serde_json::json!({
+                "tool": o.name,
+                "text": o.text,
+                "tool_call_id": o.call_id,
+                "wire_id": o.wire_id,
+                "args": o.args,
+                "result_id": o.result_id,
+                "success": o.ok,
+                "needs_user_action": o.needs_user_action,
+                "prompt": o.prompt,
+                "failure_kind": o.failure_kind,
+            }));
+            store.append(event).expect("替身产物落格");
+        }
+    }
+
     /// 替身逐条落 `response`（`port::succeed`）。
     ///
     /// 轮号与溯源从**日志**取（`model_batch`）：收尾半与派出半分处两个动作，拿不到
@@ -2095,19 +2133,21 @@ mod tool_round_tests {
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
                     args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
-                    annotations: Vec::new(),
                 })
                 .collect();
             ToolBegin::InFlight(Box::pin(async move { outcomes }))
         }
 
-        fn finish(
-            &self,
-            store: &dyn Store<Event = Event>,
-            calls: &[ToolPortCall],
-            _outcomes: &[DispatchOutcome],
-        ) {
-            succeed_batch(store, calls);
+        fn finish<'a>(
+            &'a self,
+            store: &'a dyn Store<Event = Event>,
+            calls: &'a [ToolPortCall],
+            outcomes: &'a [DispatchOutcome],
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                succeed_batch(store, calls);
+                land_for_test(store, outcomes);
+            })
         }
     }
 
@@ -2218,28 +2258,30 @@ mod tool_round_tests {
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
                     args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
-                    annotations: Vec::new(),
                 })
                 .collect();
             ToolBegin::InFlight(Box::pin(async move { outcomes }))
         }
 
-        fn finish(
-            &self,
-            _store: &dyn Store<Event = Event>,
-            calls: &[ToolPortCall],
-            _outcomes: &[DispatchOutcome],
-        ) {
-            // 关账：工具回了话 ⇒ `response`。
-            for call in calls.iter().filter(|c| c.granted && c.sent) {
-                super::super::super::port::succeed(
-                    self.store.as_ref(),
-                    &call.call,
-                    self.turn,
-                    self.user_seq,
-                )
-                .expect("唤醒应答落格");
-            }
+        fn finish<'a>(
+            &'a self,
+            _store: &'a dyn Store<Event = Event>,
+            calls: &'a [ToolPortCall],
+            outcomes: &'a [DispatchOutcome],
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                // 关账：工具回了话 ⇒ `response`。
+                for call in calls.iter().filter(|c| c.granted && c.sent) {
+                    super::super::super::port::succeed(
+                        self.store.as_ref(),
+                        &call.call,
+                        self.turn,
+                        self.user_seq,
+                    )
+                    .expect("唤醒应答落格");
+                }
+                land_for_test(self.store.as_ref(), outcomes);
+            })
         }
 
         async fn wake(&self, _store: &dyn Store<Event = Event>) -> Option<WakeBatch> {
@@ -2332,20 +2374,22 @@ mod tool_round_tests {
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
                     args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
-                    annotations: Vec::new(),
                 })
                 .collect();
             ToolBegin::InFlight(Box::pin(async move { outcomes }))
         }
 
-        fn finish(
-            &self,
-            _store: &dyn Store<Event = Event>,
-            _calls: &[ToolPortCall],
-            _outcomes: &[DispatchOutcome],
-        ) {
+        fn finish<'a>(
+            &'a self,
+            store: &'a dyn Store<Event = Event>,
+            _calls: &'a [ToolPortCall],
+            outcomes: &'a [DispatchOutcome],
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
             // 拒绝的 `failed` 在派出半就落了（那一批没有 `sent` 要等，`deny-tools`
-            // 的出口也就是它）；收尾半没有第二件事。
+            // 的出口也就是它）；产物格照落——工具被拒与产物闸是两道闸。
+            Box::pin(async move {
+                land_for_test(store, outcomes);
+            })
         }
     }
 
@@ -3615,19 +3659,21 @@ mod tool_round_tests {
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
                     args: symbio_sdk::turn::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
-                    annotations: Vec::new(),
                 })
                 .collect();
             ToolBegin::InFlight(Box::pin(async move { outcomes }))
         }
 
-        fn finish(
-            &self,
-            store: &dyn Store<Event = Event>,
-            calls: &[ToolPortCall],
-            _outcomes: &[DispatchOutcome],
-        ) {
-            succeed_batch(store, calls);
+        fn finish<'a>(
+            &'a self,
+            store: &'a dyn Store<Event = Event>,
+            calls: &'a [ToolPortCall],
+            outcomes: &'a [DispatchOutcome],
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                succeed_batch(store, calls);
+                land_for_test(store, outcomes);
+            })
         }
     }
 

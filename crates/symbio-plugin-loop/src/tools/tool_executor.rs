@@ -2,9 +2,9 @@
 //!
 //! 负责：
 //! - 单个工具调用的端口取用（`execute_tool_async`：经 `port.tool` 拿执行合同——
-//!   线上名解析、空闲超时、结果契约都住提供者一侧（session 的 `ToolPort`），
+//!   线上名解析、空闲超时、结果守卫、产物格都住提供者一侧（session 的 `ToolPort`），
 //!   本层不再认识它们）
-//! - 批量工具调用处理与结果广播（`process_tool_calls_async`）
+//! - 批量工具调用处理与结果广播（`process_tool_calls_in_env`）
 //!
 //! 设计说明（会话激活/恢复状态机）：
 //! - 本层**不阻塞**等待任何用户输入。需要用户确认（confirm）或主动询问（ask_user）
@@ -80,7 +80,26 @@ pub(super) fn build_user_prompt_message(
 
 /// 一批工具调用的执行信封（环侧每次派发建一份，逐调用共享）。
 ///
-/// 字段都是环的**通用形式**：存档目录。执行体不认识世界，只按这个值做守卫。
+/// 字段都是环的**通用形式**：轮号 / 根节点 / 归属 / 产物闸结论 / 宿主写口。执行体
+/// 不认识世界，只按这些值记账与落格（P1b，DE-047 D-308）。
+#[derive(Clone, Default)]
+pub struct RoundEnv {
+    /// L0 存档目录（超预算结果写全文）。
+    pub archive_dir: std::path::PathBuf,
+    /// 宿主写口（产物格 / 授权事实都经它落，`D-305` 裁决一）。
+    pub emit: symbio_plugin_api::port::PortFactEmit,
+    /// 轮号（产物格幂等键的一部分）。
+    pub round: u64,
+    /// 轮根节点 id（随产物格载荷下发，见 [`Self::allowed`] 的上下文）。
+    pub round_id: String,
+    /// 归属序号（事实的 `produced_by`）。
+    pub produced_by: u64,
+    /// 环侧产物闸（`closure_gate`）的结论；执行体据此决定要不要落产物格。
+    pub allowed: bool,
+    /// 产物闸拒绝的理由（放行时为空）；执行体把它写进幂等的 `authz.denied`。
+    pub denied_reason: String,
+}
+
 /// 执行体交回的结果：节点正文用已守卫的 [`Self::text`]，记账与钩子用 [`Self::raw`]。
 #[derive(Debug, Clone, Default)]
 pub struct ExecResult {
@@ -96,10 +115,9 @@ pub struct ExecResult {
 /// 执行单个工具调用（不阻塞等待用户）：经 `port.tool` 的执行合同跑。
 ///
 /// 本函数只是**端口取用面**：按端口名从能力表读提供者，把调用现场整份交给
-/// [`ToolCallExecutor`](symbio_plugin_api::port::ToolCallExecutor)，收回文本 +
-/// 守卫元数据——线上名怎么解析、挂死怎么判（空闲而不是总时长）、任意 JSON 怎么
-/// 压成一段文本、超预算结果怎么裁剪与存档，都是提供者一侧的私事，
-/// 行为等价由 e2e 全量守着。
+/// 端口执行合同，收回文本 + 守卫元数据——线上名怎么解析、挂死怎么判（空闲而不是
+/// 总时长）、任意 JSON 怎么压成一段文本、超预算结果怎么裁剪与存档、产物格怎么落，
+/// 都是提供者一侧的私事，行为等价由 e2e 全量守着。
 ///
 /// 端口缺席（没装提供者插件——零工具的装配没有工具世界的提供者）或合同缺席
 /// （提供者不实现 tool 合同）都**响亮失败**：错误文本回传给模型（失败属信息性，
@@ -107,18 +125,19 @@ pub struct ExecResult {
 /// 静默回退、不许按「判不出来」继续：装配缺了提供者，继续转只会把缺失往后推。
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_tool_async(
-    archive_dir: &std::path::Path,
+    env: &RoundEnv,
     parent: &Option<Arc<dyn Plugin>>,
-    tool_name: &str,
+    name: &str,
     args: Value,
-    tool_call_id: &str,
+    call_id: &str,
+    wire_id: &str,
     sink: &ExecEventSink,
     abort: &ExecAbortSignal,
     result_msg_id: String,
     ctx: Arc<dyn PluginInvokeRequest>,
 ) -> ExecResult {
     let absent = |why: &str| {
-        let text = format!("Error: `port.tool` 缺席：{why}（工具 {tool_name} 未执行）");
+        let text = format!("Error: `port.tool` 缺席：{why}（工具 {name} 未执行）");
         plugin_error!("session", "[Tool] {text}");
         ExecResult {
             text: text.clone(),
@@ -127,7 +146,7 @@ pub async fn execute_tool_async(
             ..Default::default()
         }
     };
-    let Some(provider) = super::super::port::tool_port(&ctx).await else {
+    let Some(provider) = super::super::port::provider_of(&ctx, ports::TOOL).await else {
         return absent("没有可用的工具提供者");
     };
     let Some(executor) = provider.executor() else {
@@ -145,19 +164,20 @@ pub async fn execute_tool_async(
             PortExecContext {
                 deadline_ms: None,
                 abort: abort.clone(),
-                idempotency_key: tool_call_id.to_string(),
+                idempotency_key: call_id.to_string(),
                 sink: sink.clone(),
-                emit: symbio_plugin_api::port::PortFactEmit::silent(),
+                emit: env.emit.clone(),
                 ctx: Some(exec_ctx),
             },
             PortInput {
                 port: ports::TOOL,
                 payload: json!({
-                    "tool_name": tool_name,
+                    "name": name,
                     "args": args,
-                    "tool_call_id": tool_call_id,
+                    "call_id": call_id,
                     "result_msg_id": result_msg_id,
-                    "archive_dir": archive_dir.to_string_lossy(),
+                    "wire_id": wire_id,
+                    "archive_dir": env.archive_dir.to_string_lossy(),
                 }),
             },
         )
@@ -230,9 +250,79 @@ pub async fn execute_tool_async(
     }
 }
 
+/// 产物落格的执行体出口：只交回**结果纯值**，不再执行工具。
+///
+/// 唤醒结果与没跑到的占位结果没有一次「执行」可挂，但它们同样是产物；环把结果字段
+/// 按通用载荷给出，执行体负责装配产物载荷、富化字段与幂等的拒绝事实（P1b /
+/// DE-047 D-308）。环不按世界分支，也不在环里留第二条落格路径。
+pub(crate) async fn land_outcome_async(
+    env: &RoundEnv,
+    parent: &Option<Arc<dyn Plugin>>,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
+    ctx: Arc<dyn PluginInvokeRequest>,
+    outcome: &super::super::tool_dispatch::DispatchOutcome,
+) {
+    let Some(provider) = super::super::port::provider_of(&ctx, ports::TOOL).await else {
+        return;
+    };
+    let Some(executor) = provider.executor() else {
+        return;
+    };
+    let exec_ctx = ctx.fork();
+    if let Some(p) = parent {
+        exec_ctx.set(PLUGIN_PARENT, Some(Arc::downgrade(p)));
+    }
+    let args = serde_json::from_str(&outcome.args).unwrap_or(Value::Null);
+    let result_key = if outcome.result_id.is_empty() {
+        &outcome.call_id
+    } else {
+        &outcome.result_id
+    };
+    let _ = executor
+        .execute(
+            PortExecContext {
+                deadline_ms: None,
+                abort: abort.clone(),
+                idempotency_key: outcome.call_id.clone(),
+                sink: sink.clone(),
+                emit: env.emit.clone(),
+                ctx: Some(exec_ctx),
+            },
+            PortInput {
+                port: ports::TOOL,
+                payload: json!({
+                    "name": outcome.name,
+                    "args": args,
+                    "call_id": outcome.call_id,
+                    "result_msg_id": outcome.result_id,
+                    "wire_id": outcome.wire_id,
+                    "archive_dir": env.archive_dir.to_string_lossy(),
+                    "artifact": {
+                        "key": format!("a-{}-{}", env.round, result_key),
+                        "round": env.round,
+                        "round_id": env.round_id,
+                        "produced_by": env.produced_by,
+                        "allowed": env.allowed,
+                        "denied_reason": env.denied_reason,
+                    },
+                    "land_only": {
+                        "text": outcome.text,
+                        "success": outcome.ok,
+                        "needs_user_action": outcome.needs_user_action,
+                        "prompt": outcome.prompt,
+                        "failure_kind": outcome.failure_kind,
+                    },
+                }),
+            },
+        )
+        .await;
+}
+
 // 批量工具调用处理
 
-/// 顺序处理一批工具调用，向 channel 广播每个工具的结果，
+/// 带执行信封的批量入口：顺序处理一批工具调用（产物格 / 宿主写口 / 轮归属随
+/// [`RoundEnv`] 走），向 channel 广播每个工具的结果，
 /// 并返回 `(tool_messages, parent_updates)`：
 /// - `tool_messages`：工具结果子节点（用于追加到对话历史）
 /// - `parent_updates`：ToolCall 父节点的**完整终态快照**（发射端从
@@ -262,30 +352,21 @@ pub async fn execute_tool_async(
 ///    `ToolBehavior::before` 回答能不能跑（淘汰 / 任务表写侧即此类）。宿主只交批首
 ///    读好的结论（主体 / 控制面撤销值 / 会话事实切片），本层不含任何「哪个工具名
 ///    受什么管辖」的分支。
+///
+/// 阶段分层见 `dispatch/{gates,batch,unfinished}`；编排顺序（空批早退 → ① → ② → ③）
+/// 与读数语义不变。
 #[allow(clippy::too_many_arguments)]
-pub async fn process_tool_calls_async(
+pub(crate) async fn process_tool_calls_in_env(
     tool_calls: Vec<TurnToolCallInfo>,
     parent: &Option<Arc<dyn Plugin>>,
     sink: &ExecEventSink,
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
-    // `archive_dir` = 会话的 L0 存档目录（session 在派发前算好）。不从请求
-    // 上下文反推插件目录——请求上下文不带 `PLUGIN_DIR`，子智能体下会指到父作用域。
-    archive_dir: &std::path::Path,
-    // 本会话事实轨：闸门判据以**值**读（本会话完整史），本函数不拼路径、不开 WAL
-    // （D-084 §1-A）。
+    env: &RoundEnv,
     facts: &dyn Store<Event = Event>,
-    // 淘汰闸的部署级判据（session 已折成一个值，见 D-086 §4）。
     elimination_revoked: bool,
-    // 效果出参（承诺与后续效果族共用一条通路，DE-025 D-207）：每次终态调用
-    // 交出一条 `EffectInput`，轮末由写口问能力包的行为要草稿并落格。
-    // out-param 而不是返回值：本函数的返回值是节点对（消费方三处都在用），
-    // 再加一个只会逼着每个调用方都写 `let _ = `。
     effects: &mut Vec<EffectInput>,
-    // 熔断出参：外部执行闸门判 `Break` 的**理由**，同一条口径交回
-    // 调用方随收束入格。**只记 `Break`**——`Refuse`（未授权）按 DE-039 §6 验收 1
-    // 不得产生任何事件，两种拒绝在事件面上必须分得开。
     breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
     // ① 批首闸门读数（阶段见 `dispatch/{gates,batch,unfinished}`）。
@@ -314,7 +395,7 @@ pub async fn process_tool_calls_async(
         abort,
         ctx,
         context_messages,
-        archive_dir,
+        env,
         &mut readings,
         effects,
         breaks,

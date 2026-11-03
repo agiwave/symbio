@@ -550,7 +550,7 @@ impl ChatOrchestrator {
         // 判断是"还在跑"还是"卡死了"。
         //
         // 因此 ToolCall 的终态只由**执行方**给出，且恰好一处：
-        // `tool_executor::process_tool_calls_async`（执行前 `Streaming`，执行后
+        // `tool_executor::process_tool_calls_in_env`（执行前 `Streaming`，执行后
         // `Completed` / `WaitingUserAction`；未执行的批尾统一收口）。审批恢复不再
         // 另走一条执行路径——它把用户动作落成唤醒请求，仍由同一执行方收口。
         //

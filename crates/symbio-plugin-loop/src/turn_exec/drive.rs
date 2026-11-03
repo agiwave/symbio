@@ -58,7 +58,7 @@ use super::super::chat_loop::state::{
 use super::super::loop_rows;
 use super::super::report_exec::ReportLanding;
 use super::super::tool_dispatch::{DerivedFacts, PortOutput, SessionDispatchPort, ToolDispatch};
-use super::super::turn_runner::{TurnOutcome, TurnSession};
+use super::super::turn_runner::{artifact_verdict, TurnOutcome, TurnSession};
 use super::{
     classify_turn, open_turn, persist_turn, ActorError, Assembled, Ctx, HeadParts, Running,
     StepFuture, TurnExecExit,
@@ -648,6 +648,8 @@ pub(crate) fn stage_runtime(
 ) -> StageRuntime {
     // 工具分发：契约与实现都在插件侧——它持插件宿主、请求上下文、转写出口与
     // 工具存档目录（core 认识这些即违 E-009）。
+    // 产物闸在轮首判一次：只认 actor，结论（放行 + 拒绝理由）随分发方带给执行体。
+    let verdict = artifact_verdict(&assembled.actor);
     let port = Arc::new(SessionDispatchPort::new(
         assembled.parent.clone(),
         assembled.ctx.clone(),
@@ -659,6 +661,9 @@ pub(crate) fn stage_runtime(
         assembled.turn_no,
         assembled.user_seq,
         assembled.drive_seq,
+        assembled.actor.clone(),
+        verdict.allowed,
+        verdict.denied_reason,
         assembled.bridge.clone(),
         assembled.presentation_tree,
         open.elimination_revoked,

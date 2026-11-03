@@ -315,7 +315,7 @@ export const BASELINE = {
   // 二进制，条数不变），另补 1 条 `tool_port_registers_one_row_and_exposes_an_executor`
   // 钉「端口申报、`port_rows` 单行、`capability_port_of` 就绪且执行面可取」。清白树实跑
   // `cargo test --workspace`：2625 passed / 0 failed（90 个目标）。非侵蚀。
-  ciRustTestsTotal: 2629,
+  ciRustTestsTotal: 2635,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

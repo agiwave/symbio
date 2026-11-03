@@ -757,7 +757,7 @@ pub(crate) async fn land_round(
         };
         // 这一条路没有真正的等待：起批之后直接跑到完（结论本地可算）。
         let outcomes = fut.await;
-        dispatch.finish(store.as_ref(), &calls, &outcomes);
+        dispatch.finish(store.as_ref(), &calls, &outcomes).await;
         land_batch(run, store.as_ref(), llm, rt, outcomes).await?;
         return Ok(None);
     };
@@ -774,7 +774,7 @@ pub(crate) async fn land_round(
         std::task::Poll::Ready(outcomes) => {
             // 关账先于落格：`response` / `failed` 是端口账的终局，产物与等待格是业务
             // 事实——两者在同一圈里落，次序按「账先关，事再写」。
-            dispatch.finish(store.as_ref(), &calls, &outcomes);
+            dispatch.finish(store.as_ref(), &calls, &outcomes).await;
             land_batch(run, store.as_ref(), llm, rt, outcomes).await?;
             Ok(None)
         }
@@ -792,8 +792,18 @@ async fn land_batch(
     rt: LlmTurn,
     outcomes: Vec<super::super::tool_dispatch::DispatchOutcome>,
 ) -> Result<(), symbio_kernel::store::AppendError> {
-    // 产物落格：每条工具结果一格，溯源指向本轮用户格。
-    batch::land_artifacts(run, store, &outcomes).await?;
+    // 产物落格已由执行体在 `finish` 的 `land_only` 出口完成（P1b / DE-047 D-308）；
+    // 这里只读回本轮的产物数，供收束判定「这一轮到底有没有产出」。判据按
+    // `produced_by`（本轮用户格 seq，即环的归属锚）认领：产物格是执行体落的，
+    // 轮号是它的载荷字段而不是事实信封的（D-309 之后信封里没有轮号）。
+    run.artifacts_landed = store
+        .range(symbio_kernel::event::Seq::new(0))
+        .iter()
+        .filter(|e| {
+            e.kind == symbio_plugin_api::events::EVENT_ARTIFACT_ADDED
+                && e.produced_by == Some(run.user_seq)
+        })
+        .count() as u64;
 
     // 收束于等待用户 ⇒ 落**进展格**（`status: "pending"`：模型已
     //     说过的话照样是事实，等待是状态），不收束轮次。

@@ -6,7 +6,7 @@
 //! 回到事件出口（用户看到的仍是逐字上屏的对话面）。
 //!
 //! 覆盖面（诚实划界）：**无工具轮与工具轮**。工具分发走工具执行层
-//! （`process_tool_calls_async`：超长结果存档、生命周期钩子、审批与恢复都在里面），
+//! （`process_tool_calls_in_env`：超长结果存档、生命周期钩子、审批与恢复都在里面），
 //! 由 [`super::tool_dispatch::SessionDispatchPort`] 经插件本地的
 //! [`super::tool_dispatch::ToolDispatch`] 三动作契约接入——**分发是插件侧的实现细节，
 //! 不是第二条执行链**。
@@ -192,7 +192,7 @@ enum UiFrame {
     },
     /// 屏障：收到即回执。给「通道外的发射方」一个**同步点**——
     /// 分发方（[`super::tool_dispatch::SessionDispatchPort`]）既走通道（定格正文）
-    /// 又直接写出口（工具节点，`process_tool_calls_async` 只认 `ExecEventSink`），
+    /// 又直接写出口（工具节点，`process_tool_calls_in_env` 只认 `ExecEventSink`），
     /// 两条路不排序就会让工具卡片跑到正文之前。
     Barrier(tokio::sync::oneshot::Sender<()>),
     /// 工具调用快照（身份帧）：**原样透传**的 `ChatNode`。
@@ -486,7 +486,7 @@ impl UiBridge {
     /// 等通道里**已排队**的帧全部落到出口（屏障）。
     ///
     /// 分发方在定格正文之后要直接写出口（工具调用节点、工具结果节点——它们由
-    /// `process_tool_calls_async` 发出，那个函数只认 `ExecEventSink`）。通道里的
+    /// `process_tool_calls_in_env` 发出，那个函数只认 `ExecEventSink`）。通道里的
     /// 定格帧此刻可能还没被发射任务消化，不设同步点就会**倒序**：工具卡片先到，
     /// 正文后到，前端按到达顺序排出来的时间线是错的。
     pub(crate) async fn flush(&self) {

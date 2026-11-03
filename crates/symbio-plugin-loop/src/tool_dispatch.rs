@@ -20,7 +20,7 @@
 //!
 //! ## 与工具执行层的关系：**不是第二条执行链**
 //!
-//! 实际执行走 `process_tool_calls_async`——超长结果存档、生命周期钩子、
+//! 实际执行走 `process_tool_calls_in_env`——超长结果存档、生命周期钩子、
 //! 审批/问答的「待用户动作」、批尾未执行收口、中止提前收口全在里面。本模块只补
 //! 两件事：
 //!
@@ -28,8 +28,8 @@
 //!    （`LlmAdapter` 交回的是收口后的 `LlmTurn`，没有那条帧流），由本处补建。
 //!    节点形状与其余对话节点**同一份**（前端读同一套字段），
 //!    因此复用 `llm_build_tool_call_nodes` / `llm_build_text_node`。
-//! 2. **把结果映射成运行器的事实形状**（[`DispatchOutcome`]），供运行器落
-//!    `artifact.added` 格与拼下一轮 prompt。
+//! 2. **把结果映射成运行器的事实形状**（[`DispatchOutcome`]），供运行器拼下一轮
+//!    prompt；`artifact.added` 由执行体在收尾时落（P1b / DE-047 D-308）。
 //!
 //! ## 正文节点的定格
 //!
@@ -37,8 +37,9 @@
 //! **定格**（`Completed`）并切节点（[`super::turn_exec::UiBridge::finalize_node`]）——
 //! 不定格它永远转「流式中」，不切节点多轮正文会粘成一条。
 
-use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -56,6 +57,7 @@ use symbio_sdk::capability::{capability_resolve, tool_metas, ApprovalGrants, CAP
 use symbio_sdk::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
+use symbio_sdk::clock::clock_now_ms;
 use symbio_sdk::keys::{APPROVAL_GRANTS, MODE, RISK_LEVEL};
 use symbio_sdk::llm::llm_emit_state;
 use symbio_sdk::llm::turn::llm_emit_message;
@@ -64,8 +66,9 @@ use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
 use super::loop_rows;
 use super::port;
-use super::tools::{is_unanswered, process_tool_calls_async, NOT_EXECUTED};
+use super::tools::{is_unanswered, process_tool_calls_in_env, RoundEnv, NOT_EXECUTED};
 use super::turn_exec::UiBridge;
+use symbio_kernel::actors::ActorSpec;
 use symbio_sdk::turn::node_build::{
     detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes, PresentationTree,
 };
@@ -276,12 +279,6 @@ pub struct DispatchOutcome {
     pub args: String,
     /// 结果子节点（`role=Tool`）的节点 id——落库时由分发方分配，记进载荷供重建复用。
     pub result_id: String,
-    /// 能力对**产物格**的补充字段（DE-025 D-207 的富化面）。
-    ///
-    /// 由工具声明的行为交出（今天唯一的生产者是 vdfs 写族的 `file_op`），随
-    /// `artifact.added` 的载荷入格。运行器只负责把它们并进载荷——**不认识任何键名**；
-    /// 读侧（工作目录变更账）认字段不认工具名，所以改一个工具名不影响任何读方。
-    pub annotations: Vec<(&'static str, serde_json::Value)>,
 }
 
 /// 工具派发的**四个动作**（D-118 决策 5 + `D-124` 订正 1）：创建 / 授权 / 派出 / 收尾。
@@ -331,13 +328,14 @@ pub(crate) trait ToolDispatch: Send + Sync {
 
     /// **收尾半**：把 future 交回的结论落成端口账的终局格（应答 / 没跑到 / 被拒）。
     ///
-    /// 同步：它只写事实，不跑执行层——执行层已经在 `begin` 交出的那个 future 里跑完了。
-    fn finish(
-        &self,
-        store: &dyn Store<Event = Event>,
-        calls: &[ToolPortCall],
-        outcomes: &[DispatchOutcome],
-    );
+    /// 收尾本身要 await：产物格由执行体落（P1b / DE-047 D-308），关账后要对每条
+    /// 结果再调一次执行体的 `land_only` 出口。返回 boxed future 以保持 `dyn` 可用。
+    fn finish<'a>(
+        &'a self,
+        store: &'a dyn Store<Event = Event>,
+        calls: &'a [ToolPortCall],
+        outcomes: &'a [DispatchOutcome],
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
     /// 读一笔**唤醒调用**（d）。
     ///
@@ -1116,6 +1114,15 @@ pub(crate) struct SessionDispatchPort {
     abort: ExecAbortSignal,
     /// 本轮 Turn 根节点 id（助手轮消息的父节点）。
     root_id: String,
+    /// 轮号（产物格幂等键的一部分，随执行信封下发）。
+    round: u64,
+    /// 归属序号（事实的 `produced_by`）。
+    user_seq: u64,
+    /// 本轮主体规格（宿主写口的 actor 用它）。
+    actor: ActorSpec,
+    /// 产物闸的结论（轮首由环判定，执行体只按结论记账；P1b / D-308）。
+    artifact_allowed: bool,
+    artifact_denied_reason: String,
     /// 工具端口账的写方（批次与 resume 共用同一套开账 / 关账）。
     port: ToolPort,
     /// 流式桥：交出本轮正文节点并切下一轮。
@@ -1138,9 +1145,12 @@ impl SessionDispatchPort {
         facts: Arc<dyn Store<Event = Event>>,
         abort: ExecAbortSignal,
         root_id: String,
-        turn: u64,
+        round: u64,
         user_seq: u64,
         drive_seq: u64,
+        actor: ActorSpec,
+        artifact_allowed: bool,
+        artifact_denied_reason: String,
         bridge: Arc<UiBridge>,
         presentation_tree: PresentationTree,
         elimination_revoked: bool,
@@ -1154,7 +1164,12 @@ impl SessionDispatchPort {
             facts,
             abort,
             root_id,
-            port: ToolPort::new(facts_for_port, turn, user_seq, drive_seq),
+            round,
+            user_seq,
+            actor,
+            artifact_allowed,
+            artifact_denied_reason,
+            port: ToolPort::new(facts_for_port, round, user_seq, drive_seq),
             bridge,
             out: Mutex::new(PortOutput::default()),
             presentation_tree,
@@ -1182,6 +1197,28 @@ impl SessionDispatchPort {
     /// 三动作契约的授权步（实体在 [`ToolPort::authorize`]）。
     async fn authorize_action(&self, calls: &mut [ToolPortCall]) {
         self.port.authorize(&self.ctx, calls).await;
+    }
+
+    /// 本轮的通用执行信封：轮号 / 轮根 / 归属 / 产物闸结论 / 宿主写口。
+    ///
+    /// 闸在轮首由环判一次（只认 actor，见 `turn_runner::artifact_verdict`）；执行体
+    /// 只按结论记账，拒绝理由随信封下发，由它在 `land_only` 出口落幂等的否定事实
+    /// （P1b / D-308）。
+    fn round_env(&self) -> RoundEnv {
+        RoundEnv {
+            archive_dir: self.tool_archive_dir.clone(),
+            emit: port::host_fact_emit(
+                self.facts.clone(),
+                self.round,
+                self.actor.principal.clone(),
+                clock_now_ms(),
+            ),
+            round: self.round,
+            round_id: self.root_id.clone(),
+            produced_by: self.user_seq,
+            denied_reason: self.artifact_denied_reason.clone(),
+            allowed: self.artifact_allowed,
+        }
     }
 
     /// 批次返回后关账（实体在 [`ToolPort::close_batch`]）。
@@ -1288,8 +1325,6 @@ impl SessionDispatchPort {
             wire_id,
             args,
             result_id,
-            // 唤醒路径不跑工具（结果由调用方给），因此没有任何行为参与。
-            annotations: Vec::new(),
         };
         let mut produced = call_nodes;
         produced.push(result);
@@ -1473,13 +1508,29 @@ impl ToolDispatch for SessionDispatchPort {
         }))
     }
 
-    fn finish(
-        &self,
-        _store: &dyn Store<Event = Event>,
-        calls: &[ToolPortCall],
-        outcomes: &[DispatchOutcome],
-    ) {
-        self.close_tool_calls(calls, outcomes);
+    fn finish<'a>(
+        &'a self,
+        _store: &'a dyn Store<Event = Event>,
+        calls: &'a [ToolPortCall],
+        outcomes: &'a [DispatchOutcome],
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            self.close_tool_calls(calls, outcomes);
+            // 产物落格：逐条结果交回执行体的 `land_only` 出口（含唤醒结果与没跑到的
+            // 占位结果）——环不再自己装配产物载荷（P1b / DE-047 D-308）。
+            let env = self.round_env();
+            for outcome in outcomes {
+                super::tools::land_outcome_async(
+                    &env,
+                    &self.parent,
+                    &self.sink,
+                    &self.abort,
+                    self.ctx.clone(),
+                    outcome,
+                )
+                .await;
+            }
+        })
     }
 }
 
@@ -1504,7 +1555,7 @@ impl SessionDispatchPort {
         };
         let reason_node = self.bridge.finalize_reasoning_node();
         // 同步点：定格帧在桥的通道里排队，而下面的工具节点**直接**写出口
-        // （`process_tool_calls_async` 只认 `ExecEventSink`）。不先排空队列，
+        // （`process_tool_calls_in_env` 只认 `ExecEventSink`）。不先排空队列，
         // 工具卡片会跑到正文之前。
         self.bridge.flush().await;
         if let Some(node_id) = text_node {
@@ -1537,7 +1588,7 @@ impl SessionDispatchPort {
         let mut call_nodes =
             llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls, &self.principal());
         // 就地 detach：下面三处用同一份 `call_nodes`——广播帧、传给执行器作父查询源
-        // （`process_tool_calls_async` 从它 clone 出运行态/终态帧，继承 detach 后的
+        // （`process_tool_calls_in_env` 从它 clone 出运行态/终态帧，继承 detach 后的
         // parent_id），以及落库副本。一处收口，live↔存储自动锁步。
         for n in call_nodes.iter_mut() {
             detach_if_flat(n, &self.root_id, self.presentation_tree);
@@ -1565,19 +1616,20 @@ impl SessionDispatchPort {
         // ③ 分发（工具执行层：存档 / 钩子 / 审批 / 批尾收口全在里面）。
         //    父节点查询用刚广播的这批节点——它们与执行器要求的形状同源。
         //
-        // 收束派生事实出参（效果 / 熔断）：数据来源在工具执行层，写方在轮末——
-        // 由本分发方收下、`turn_exec` 轮末调 `derived_facts::record_derived` 落格。
-        // 不收这两份，代际立约 / 任务表 / 文件变更 / 熔断就静默全丢（见 [`DerivedFacts`]）。
+        // 执行信封（P1b / DE-047 D-308）：产物格与授权事实的**宿主写口**随批走。
+        // 产物闸在轮首判一次（`turn_runner::artifact_verdict`），结论以 `allowed` 交给执行体；
+        // 落格本身由执行体的 `land_only` 出口做，环不装配产物载荷。
+        let env = self.round_env();
         let mut effects: Vec<EffectInput> = Vec::new();
         let mut breaks: Vec<&'static str> = Vec::new();
-        let (tool_msgs, parent_updates) = process_tool_calls_async(
+        let (tool_msgs, parent_updates) = process_tool_calls_in_env(
             tool_calls.clone(),
             &self.parent,
             &self.sink,
             &self.abort,
             self.ctx.clone(),
             &call_nodes,
-            &self.tool_archive_dir,
+            &env,
             self.facts.as_ref(),
             self.elimination_revoked,
             // 效果出参（DE-025 D-207）：每次终态调用一条。
@@ -1599,19 +1651,6 @@ impl SessionDispatchPort {
         }
         produced.extend(tool_msgs.iter().cloned());
         self.out.lock().unwrap().nodes.extend(produced);
-        // 产物格的富化字段（DE-025 D-207）：按**调用 id** 归户，随 `artifact.added`
-        // 入格。在这里算而不是在运行器里算，是因为「这个工具声明了什么行为」只有
-        // 执行层读过（批首那份元数据），运行器没有注册表也没有 `declared`。
-        let annotations: HashMap<String, Vec<(&'static str, serde_json::Value)>> = effects
-            .iter()
-            .map(|e| {
-                (
-                    e.call_id.clone(),
-                    symbio_plugin_api::effects::annotations(e),
-                )
-            })
-            .filter(|(_, a)| !a.is_empty())
-            .collect();
         // 三份收束派生事实出参收进取件面（`take_output`）——调用方在桥释放前取走。
         {
             let mut o = self.out.lock().unwrap();
@@ -1619,7 +1658,8 @@ impl SessionDispatchPort {
             o.derived.breaks.extend(breaks);
         }
 
-        // ④ 映射为 core 的事实形状（运行器据此落 `artifact.added` 并拼下一轮 prompt）。
+        // ④ 映射为 core 的事实形状（运行器据此拼下一轮 prompt；`finish` 再交回执行体
+        //    落 `artifact.added`）。
         let outcomes: Vec<DispatchOutcome> = tool_msgs
             .iter()
             .map(|m| {
@@ -1643,7 +1683,6 @@ impl SessionDispatchPort {
                     .chain(parent_updates.iter())
                     .find(|n| n.id == call_id && n.is_tool_call());
                 DispatchOutcome {
-                    annotations: annotations.get(&call_id).cloned().unwrap_or_default(),
                     call_id,
                     name,
                     text: m.content.as_ref().map(|c| c.to_text()).unwrap_or_default(),

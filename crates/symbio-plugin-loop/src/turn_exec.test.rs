@@ -1793,7 +1793,7 @@ async fn full_turn_writes_no_memory_encoding_from_the_host() {
 ///
 /// ## 这个用例挡的是什么
 ///
-/// 承诺的数据来源在工具执行层（`EffectInput`，`process_tool_calls_async` 的出参），
+/// 承诺的数据来源在工具执行层（`EffectInput`，`process_tool_calls_in_env` 的出参），
 /// 写方是 `derived_facts::record_derived`（`turn_exec` 轮末调）。若分发方不把出参交回
 /// （`SessionDispatchPort` 的三个出参收在本地 `Vec`、经 `take_derived` 交回，
 /// 不收不交就等于丢），承诺就**静默全丢**——代际立约整体失效。

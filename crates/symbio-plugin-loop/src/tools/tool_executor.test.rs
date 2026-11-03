@@ -48,6 +48,23 @@ fn test_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("symbio-test/session-tool-executor")
 }
 
+/// 测试用执行信封：写口静默、产物闸结论默认放行；存档目录随 [`test_dir`]。
+/// 产物格由执行体在 `land_only` 出口落（P1b），本夹具不单独断言它。
+fn test_env() -> RoundEnv {
+    RoundEnv {
+        archive_dir: test_dir(),
+        ..Default::default()
+    }
+}
+
+/// 同 [`test_env`]，存档目录用调用方给的（个别用例要对存档文件做断言）。
+fn env_for(dir: &std::path::Path) -> RoundEnv {
+    RoundEnv {
+        archive_dir: dir.to_path_buf(),
+        ..Default::default()
+    }
+}
+
 // ── 注册面：闸门问声明，测试喂一份与生产同形的声明 ────────────────
 //
 // 机制化之前这些用例直接写工具名调 `note_*`；判据搬到 `CapabilityMeta` 的
@@ -159,14 +176,14 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
         overflow_notice: None,
     }];
 
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         test_ctx(),
         &[],
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -213,14 +230,14 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
         overflow_notice: None,
     }];
 
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         test_ctx(),
         &[],
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -246,14 +263,14 @@ async fn missing_tool_name_is_recorded_as_failure() {
         overflow_notice: None,
     }];
 
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         test_ctx(),
         &[],
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -283,14 +300,14 @@ async fn unparseable_arguments_are_refused_not_executed() {
         overflow_notice: None,
     }];
 
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         test_ctx(),
         &[],
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -349,14 +366,14 @@ async fn a_repeat_in_the_same_batch_says_so_on_the_result() {
         tc("tc-b", "vdfs_list", json!({ "path": "." })),
     ];
 
-    let (msgs, _updates) = process_tool_calls_async(
+    let (msgs, _updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         test_ctx(),
         &tc_context(&["tc-a", "tc-b"]),
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -386,14 +403,14 @@ async fn a_repeat_from_the_transcript_says_so_on_the_result() {
     let mut context = tc_context(&["tc-old"]);
     context[0].content = Some(MessageContent::Text(r#"{"path":"."}"#.into()));
 
-    let (msgs, _updates) = process_tool_calls_async(
+    let (msgs, _updates) = process_tool_calls_in_env(
         vec![tc("tc-new", "vdfs_list", json!({ "path": "." }))],
         &None,
         &sink,
         &abort,
         test_ctx(),
         &context,
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -416,14 +433,14 @@ async fn a_different_argument_is_not_a_repeat() {
     let mut context = tc_context(&["tc-old"]);
     context[0].content = Some(MessageContent::Text(r#"{"path":"a"}"#.into()));
 
-    let (msgs, _updates) = process_tool_calls_async(
+    let (msgs, _updates) = process_tool_calls_in_env(
         vec![tc("tc-new", "vdfs_list", json!({ "path": "b" }))],
         &None,
         &sink,
         &abort,
         test_ctx(),
         &context,
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -505,14 +522,14 @@ async fn aborted_batch_terminates_every_tool_call() {
         },
     ];
 
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         test_ctx(),
         &tc_context(&["tc1", "tc2"]),
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -584,14 +601,14 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
         overflow_notice: Some(notice.clone()),
     }];
 
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         test_ctx(),
         &tc_context(&["tc-overflow"]),
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -662,14 +679,14 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         },
     ];
 
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         ctx,
         &tc_context(&["tc1", "tc2"]),
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -952,14 +969,14 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
         overflow_notice: None,
     }];
     let mut breaks: Vec<&'static str> = Vec::new();
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         gate_ctx(sid),
         std::slice::from_ref(&parent),
-        &dir,
+        &env_for(&dir),
         &facts,
         false,
         &mut Vec::new(),
@@ -1120,14 +1137,14 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
         overflow_notice: None,
     }];
     let mut effects = Vec::new();
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &None,
         &sink,
         &abort,
         ctx,
         std::slice::from_ref(&parent),
-        &dir,
+        &env_for(&dir),
         &EventStore::new(),
         true,
         &mut effects,
@@ -1337,14 +1354,14 @@ async fn a_missing_tool_port_fails_loudly_on_the_result() {
         overflow_notice: None,
     }];
 
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         tcs,
         &parent,
         &sink,
         &abort,
         ctx,
         &[tool_call_node("tc-missing-port", "probe_x")],
-        &test_dir(),
+        &test_env(),
         &EventStore::new(),
         false,
         &mut Vec::new(),
@@ -1450,14 +1467,14 @@ async fn read_only_calls_run_concurrently_and_report_in_call_order() {
 
     let (msgs, updates) = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        process_tool_calls_async(
+        process_tool_calls_in_env(
             probe_calls(&[("tc-a", "probe_a"), ("tc-b", "probe_b")]),
             &parent,
             &sink,
             &abort,
             ctx,
             &nodes,
-            &dir,
+            &env_for(&dir),
             &EventStore::new(),
             false,
             &mut effects,
@@ -1561,14 +1578,14 @@ async fn side_effect_calls_never_overlap_with_another_call() {
         let abort = ExecAbortSignal::new();
         let mut effects = Vec::new();
         let mut breaks = Vec::new();
-        let (msgs, _updates) = process_tool_calls_async(
+        let (msgs, _updates) = process_tool_calls_in_env(
             calls,
             &parent,
             &sink,
             &abort,
             ctx,
             &nodes,
-            &dir,
+            &env_for(&dir),
             &EventStore::new(),
             false,
             &mut effects,
@@ -1614,14 +1631,14 @@ async fn interactive_mode_keeps_the_batch_serial() {
     let mut effects = Vec::new();
     let mut breaks = Vec::new();
 
-    let (msgs, _updates) = process_tool_calls_async(
+    let (msgs, _updates) = process_tool_calls_in_env(
         probe_calls(&[("tc-i1", "probe_i1"), ("tc-i2", "probe_i2")]),
         &parent,
         &sink,
         &abort,
         ctx,
         &nodes,
-        &dir,
+        &env_for(&dir),
         &EventStore::new(),
         false,
         &mut effects,
@@ -1670,14 +1687,14 @@ async fn a_failed_sibling_does_not_cancel_the_rest_of_the_batch() {
     let mut effects = Vec::new();
     let mut breaks = Vec::new();
 
-    let (msgs, updates) = process_tool_calls_async(
+    let (msgs, updates) = process_tool_calls_in_env(
         probe_calls(&[("tc-bad", "probe_bad"), ("tc-good", "probe_good")]),
         &parent,
         &sink,
         &abort,
         ctx,
         &nodes,
-        &dir,
+        &env_for(&dir),
         &EventStore::new(),
         false,
         &mut effects,
@@ -1765,14 +1782,14 @@ async fn abort_reaches_every_in_flight_call() {
 
     let (msgs, updates) = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        process_tool_calls_async(
+        process_tool_calls_in_env(
             probe_calls(&[("tc-aa", "probe_abort_a"), ("tc-ab", "probe_abort_b")]),
             &parent,
             &sink,
             &abort,
             ctx,
             &nodes,
-            &dir,
+            &env_for(&dir),
             &EventStore::new(),
             false,
             &mut effects,

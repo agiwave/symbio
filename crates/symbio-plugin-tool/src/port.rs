@@ -11,20 +11,25 @@
 //!
 //! | 键 | 含义 |
 //! |---|---|
-//! | `tool_name` | 模型给的**线上名**（解析在本插件） |
+//! | `name` | 模型给的**线上名**（解析在本插件；环只当不具名纯值搬运） |
 //! | `args` | 调用参数（模型发的原样 JSON） |
-//! | `tool_call_id` | 本次调用的 id（幂等与节点挂靠） |
+//! | `call_id` | 本次调用的 id（幂等与节点挂靠） |
 //! | `result_msg_id` | 结果占位节点 id（流式增量按它广播） |
 //! | `wire_id` | provider wire id（产物格的 `wire_id` 字段） |
 //! | `archive_dir` | L0 存档目录（结果超预算时写全文） |
-//! | `artifact` | `{ key, turn_id, produced_by, allowed }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
+//! | `artifact` | `{ key, round, round_id, produced_by, allowed, denied_reason }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
+//! | `land_only` | `{ text, success, needs_user_action, prompt, failure_kind }`：只落产物格、不再执行（唤醒结果与没跑到的结果走这一形态） |
 //!
 //! 环侧的宿主插件（`parent`）经 `ctx.parent()` 取得：解析失败时按原样走到它，由它给出
 //! 诚实的 NotFound。
 //!
 //! ## 产出契约（本插件 → 环）
 //!
-//! `PortOutcome.facts` 只有一项，键为 `result_text` / `success` / `pending`。
+//! `PortOutcome.facts` 只有一项，键为 `result_text`（已守卫正文）/ `raw_text`
+//! （未裁剪原文，环侧记账与钩子用）/ `success` / `pending` / `guard`
+//! （`{ truncated, archive_path, origin_tokens }`）。产物格（`artifact.added`）由
+//! 本执行体在 `land_only` 出口经写口直落（P1b / DE-047 D-308）；环只交回结果纯值，
+//! 不装配产物载荷、不写产物格。
 //! 工具失败**不**映射成 `PortOutcome.error`——失败是信息性事实（模型据此自我纠正），
 //! 与「这一笔协议失败」是两件事。
 
@@ -33,7 +38,8 @@ use std::sync::Arc;
 
 use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::{
-    capability_invoke, capability_to_wire, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
+    capability_invoke, capability_to_wire, effects::annotations, effects::EffectInput,
+    events::EVENT_ARTIFACT_ADDED, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
     failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
     Entity, ExecAbortSignal, FactDraft, PluginError, PluginInvokeRequestExt, PluginPayload,
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider, Verb,
@@ -44,13 +50,25 @@ use symbio_plugin_api::{
 /// 端口名（唯一来源：本插件）。
 pub(crate) const TOOL: &str = ports::TOOL;
 
-/// 载荷键（环与提供者之间的私有约定，随 [`PortInput`] 走）。
-const KEY_TOOL_NAME: &str = "tool_name";
+/// 载荷键（环与提供者之间的私有约定，随 [`PortInput`] 走）。环不认识世界：
+/// 线上名与调用 id 到这里只是两个**不具名的纯值**，语义由本插件给。
+const KEY_TOOL_NAME: &str = "name";
 const KEY_ARGS: &str = "args";
-const KEY_TOOL_CALL_ID: &str = "tool_call_id";
+const KEY_TOOL_CALL_ID: &str = "call_id";
 const KEY_RESULT_MSG_ID: &str = "result_msg_id";
+/// 模型给的 provider wire id（产物格字段，关账由环侧管）。
+const KEY_WIRE_ID: &str = "wire_id";
 /// L0 存档目录（会话子目录；缺省时守卫回退到系统临时目录）。
 const KEY_ARCHIVE_DIR: &str = "archive_dir";
+/// 产物格上下文：`{ key, round, round_id, produced_by, allowed, denied_reason }`。
+///
+/// 落格这件事在**执行体**里做（P1b，DE-047 D-308）：产物是这次结果的产物，不是环的
+/// 派生产物。`key` 由环按「轮 + 结果节点」给出（一次结果一个键），拒绝时按
+/// `deny-{round}-artifact` 落一条幂等的否定事实；`allowed` 是环侧产物闸的结论
+/// （执行体不自判权限）。
+const KEY_ARTIFACT: &str = "artifact";
+/// 只落格、不执行：唤醒结果与没跑到的占位结果用这一形态交回执行体。
+const KEY_LAND_ONLY: &str = "land_only";
 
 /// 产出键（与环的通用受理入口共用同一份形状）。
 const FACT_RESULT_TEXT: &str = "result_text";
@@ -213,10 +231,168 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
     }
 }
 
-/// 统一出口：L0 守卫 → 交回事实。
+/// 一次调用在落产物格时需要的结构身份（都是环侧传来的纯值，不含判定）。
+struct CallMeta<'a> {
+    tool_name: &'a str,
+    tool_call_id: &'a str,
+    wire_id: &'a str,
+    args: &'a serde_json::Value,
+    /// 本工具声明的行为名（从注册表元数据抄来；`annotations` 按它选实现）。
+    declared: &'static [&'static str],
+}
+
+/// 产物格上下文（环侧在载荷里给出）。
+struct ArtifactCtx {
+    key: String,
+    round: u64,
+    round_id: String,
+    produced_by: Option<u64>,
+    allowed: bool,
+    denied_reason: String,
+}
+
+fn artifact_ctx(payload: &serde_json::Value) -> Option<ArtifactCtx> {
+    let art = payload.get(KEY_ARTIFACT)?;
+    Some(ArtifactCtx {
+        key: art.get("key")?.as_str()?.to_string(),
+        round: art
+            .get("round")
+            .and_then(|v| v.as_u64())
+            .unwrap_or_default(),
+        round_id: art
+            .get("round_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        produced_by: art.get("produced_by").and_then(|v| v.as_u64()),
+        allowed: art
+            .get("allowed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        denied_reason: art
+            .get("denied_reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    })
+}
+
+/// 一条结果的纯值（执行体落格所需）：环只搬数据，不解释。
+struct LandedResult<'a> {
+    text: &'a str,
+    success: bool,
+    pending: Option<&'a serde_json::Value>,
+    /// 成因码（等待用户的原因是 `needs_approval` 等，没跑到的是 `overflow_dropped` 等）。
+    failure_kind: &'a str,
+    raw: &'a str,
+}
+
+/// 落一条 `artifact.added`：产物是**这次结果的产物**，所以由执行体写（P1b / D-308）。
 ///
-/// 守卫在**执行体**里做（P1b）：环只消费「已守卫文本 + 守卫元数据」，不再认识
-/// token 预算或存档布局。待用户动作的结果不裁剪（它是卡片正文，不是工具结果）。
+/// 载荷字段（`tool` / `text` / `tool_call_id` / `wire_id` / `args` / `result_id` /
+/// `success` / `needs_user_action` / `prompt` / `failure_kind` / `turn_id` + 能力交出的
+/// 富化字段）全在这一处装配。`allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时
+/// 按 `deny-{round}-artifact` 落一条幂等否定事实（同一轮多条结果说的是同一件事）。
+async fn land_artifact(
+    exec: &PortExecContext,
+    payload: &serde_json::Value,
+    meta: &CallMeta<'_>,
+    landed: &LandedResult<'_>,
+) {
+    let Some(art) = artifact_ctx(payload) else {
+        return;
+    };
+    if !art.allowed {
+        // 产物闸拒绝：只落一条否定事实；幂等键让它对同一轮的多条结果只存在一条。
+        // `reason` 的取值与环侧 `ClosureReason::Denied::as_str()` 同字面。
+        exec.emit
+            .emit(vec![FactDraft {
+                key: format!("deny-{}-artifact", art.round),
+                kind: EVENT_AUTHZ_DENIED.to_string(),
+                entity: Entity::Scope,
+                verb: Verb::Asserted,
+                payload: serde_json::json!({
+                    "key": EVENT_ARTIFACT_ADDED,
+                    "kind": "artifact",
+                    "reason": "denied",
+                    "detail": art.denied_reason,
+                }),
+                produced_by: art.produced_by,
+            }])
+            .await;
+        return;
+    }
+    let result_id = payload
+        .get(KEY_RESULT_MSG_ID)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let mut artifact_payload = serde_json::json!({
+        "tool": meta.tool_name,
+        "text": landed.text,
+        "tool_call_id": meta.tool_call_id,
+        "wire_id": meta.wire_id,
+        "args": meta.args.to_string(),
+        "result_id": result_id,
+        "success": landed.success,
+        // 等待用户：结果节点是一张**待用户动作的卡**（`user_prompt` +
+        // `waiting_user_action`），不是普通结果文本。
+        "needs_user_action": landed.pending.is_some(),
+        "prompt": landed.pending
+            .and_then(|p| p.get("prompt"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        "failure_kind": landed.failure_kind,
+        "turn_id": art.round_id,
+    });
+    // 能力交出的富化字段（DE-025 D-207）：执行体算，环侧只落（读侧认字段不认工具名）。
+    // 待用户动作的调用不记账——「审批没到可判时刻」，与环侧记账同一条口径。
+    if landed.pending.is_none() && !meta.declared.is_empty() {
+        let input = EffectInput {
+            tool: meta.tool_name.to_string(),
+            call_id: meta.tool_call_id.to_string(),
+            args: meta.args.clone(),
+            success: landed.success,
+            result: landed.raw.to_string(),
+            why: String::new(),
+            declared: meta.declared,
+        };
+        if let Some(obj) = artifact_payload.as_object_mut() {
+            for (key, value) in annotations(&input) {
+                obj.insert(key.to_string(), value);
+            }
+        }
+    }
+    exec.emit
+        .emit(vec![FactDraft {
+            key: art.key,
+            kind: EVENT_ARTIFACT_ADDED.to_string(),
+            entity: Entity::Artifact,
+            verb: Verb::Asserted,
+            payload: artifact_payload,
+            produced_by: art.produced_by,
+        }])
+        .await;
+}
+
+/// 本工具声明的行为名：与环侧 `ToolDecls::behaviors_of` 同一匹配口径
+/// （注册表键先等值、再取线上名的末段投影）。表只作查找，返回值拷贝切片本体。
+fn declared_of(table: &[(String, &'static [&'static str])], wire: &str) -> &'static [&'static str] {
+    let wire = wire.trim();
+    if let Some((_, declared)) = table.iter().find(|(name, _)| name == wire) {
+        return declared;
+    }
+    let short = wire.rsplit('/').next().unwrap_or_default();
+    table
+        .iter()
+        .find(|(name, _)| name == short)
+        .map(|(_, declared)| *declared)
+        .unwrap_or(&[])
+}
+
+/// 统一出口：L0 守卫 → 交回事实（产物格由 [`land_only`] 出口另落）。
+///
+/// 守卫在**执行体**里做（P1b / D-308）：环只消费「已守卫文本 + 守卫元数据」，不再
+/// 认识 token 预算或存档布局。待用户动作的结果不裁剪（它是卡片正文，不是工具结果）。
 async fn finish(
     raw: String,
     success: bool,
@@ -254,6 +430,98 @@ async fn finish(
         })],
         error: None,
     }
+}
+
+/// 只落产物格、不执行：唤醒结果与没跑到的占位结果走这一形态。
+///
+/// 载荷里的 `land_only` 是**结果纯值**（`text` / `success` / `needs_user_action` /
+/// `prompt` / `failure_kind`）；结构身份（`tool_name` / `wire_id` / `args` /
+/// `result_msg_id`）与执行形态共用同一组键。行为声明仍从能力表取——富化字段由执行体
+/// 算，环不复制各工具的行为名（DE-025 D-207）。
+async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
+    let Some(lo) = payload.get(KEY_LAND_ONLY) else {
+        return;
+    };
+    let tool_name = payload
+        .get(KEY_TOOL_NAME)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let tool_call_id = payload
+        .get(KEY_TOOL_CALL_ID)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let wire_id = payload
+        .get(KEY_WIRE_ID)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let args = payload
+        .get(KEY_ARGS)
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let pending = if lo
+        .get("needs_user_action")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        Some(serde_json::json!({
+            "text": lo.get("text").cloned().unwrap_or(serde_json::Value::Null),
+            "prompt": lo.get("prompt").cloned().unwrap_or(serde_json::Value::Null),
+            "failure_kind": lo
+                .get("failure_kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
+        }))
+    } else {
+        None
+    };
+    let text = pending
+        .as_ref()
+        .and_then(|p| p.get("text"))
+        .and_then(|v| v.as_str())
+        .or_else(|| lo.get("text").and_then(|v| v.as_str()))
+        .unwrap_or_default()
+        .to_string();
+    let success = lo.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    let failure_kind = lo
+        .get("failure_kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    // 行为声明表：与执行形态同一匹配口径（注册表显示名）。
+    let declared_table: Vec<(String, &'static [&'static str])> = match exec.ctx.as_ref() {
+        Some(ctx) => match ctx.get(CAPABILITY_VISITOR) {
+            Some(visitor) => visitor
+                .list(family::TOOL)
+                .await
+                .iter()
+                .map(|row| {
+                    let m = row.meta();
+                    (m.name.to_string(), m.behaviors)
+                })
+                .collect(),
+            None => Vec::new(),
+        },
+        None => Vec::new(),
+    };
+    let meta = CallMeta {
+        tool_name,
+        tool_call_id,
+        wire_id,
+        args: &args,
+        declared: declared_of(&declared_table, tool_name),
+    };
+    land_artifact(
+        exec,
+        payload,
+        &meta,
+        &LandedResult {
+            text: &text,
+            success,
+            pending: pending.as_ref(),
+            failure_kind,
+            raw: &text,
+        },
+    )
+    .await;
 }
 
 /// `port.tool` 的提供者：无状态前端（执行期从调用方 ctx 读能力表）。
@@ -302,6 +570,14 @@ impl PortExecutor for ToolPort {
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
             .unwrap_or_default();
+        // 只落格、不执行：唤醒结果与没跑到的占位结果。
+        if payload.get(KEY_LAND_ONLY).is_some() {
+            land_only(&exec, &payload).await;
+            return PortOutcome {
+                facts: Vec::new(),
+                error: None,
+            };
+        }
         // 授权判定先行（`D-306` 裁决一）：载荷带判定输入时由本执行体判，结论经写口落事实；
         // 拒绝即判死这一笔，不再进入能力调用。旧路径的载荷不带 `threshold`，这里保持旁路。
         if let Some(authz) = authorize(&payload) {
@@ -309,8 +585,9 @@ impl PortExecutor for ToolPort {
                 .emit(vec![authz_draft(&exec.idempotency_key, &payload, authz)])
                 .await;
             if let Authz::Denied { why } = authz {
-                let text = format!("Error: authorization denied ({why})");
-                // 环把 `PortOutcome.error` 映射成 `Error: {why}`。
+                // 与环侧 `DispatchOutcome` 的映射同形：`PortOutcome.error` →
+                // `Error: {why}`。产物格正文用同一句话。
+                let text = format!("authorization denied ({why})");
                 finish(format!("Error: {text}"), false, None, &archive_dir).await;
                 return PortOutcome::failed(PortErrorClass::NonRetryable, text);
             }
@@ -361,7 +638,7 @@ impl PortExecutor for ToolPort {
         // `mcp__fs__read` 既可能是 `mcp.fs.read` 的线上形态，也可能本身就是
         // `mcp__fs__read`——字符串分不出这两种，集合可以。
         let tool_visitor = ctx.get(CAPABILITY_VISITOR);
-        // 线上名解析用的名字集合。
+        // 线上名解析用的名字集合（产物富化的行为声明表在 `land_only` 出口另取）。
         let known_names: Vec<String> = match tool_visitor.as_ref() {
             Some(visitor) => visitor
                 .list(family::TOOL)
@@ -462,7 +739,7 @@ impl PortExecutor for ToolPort {
                         tool_call_id
                     );
                     return finish(
-                        format!("Error: 工具 {} 被用户中止，未返回结果", tool_name),
+                                                format!("Error: 工具 {} 被用户中止，未返回结果", tool_name),
                         false,
                         None,
                         &archive_dir,
@@ -483,7 +760,7 @@ impl PortExecutor for ToolPort {
                         )
                     );
                     return finish(
-                        format!(
+                                                format!(
                             "Error: 工具 {} 已 {} 秒无任何进展，已强制中断（疑似挂死）",
                             tool_name, TOOL_EXEC_IDLE_TIMEOUT_SECS
                         ),

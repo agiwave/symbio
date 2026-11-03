@@ -19,7 +19,7 @@
 //! 事件**：先 flush 掉此前的在途调用，再按调用顺序发（[`PreTerminal`]）。
 //!
 //! 判据（「这段错了谁会红」）：批内事件与父节点终态用例红——`tool_executor.test.rs`
-//! 的 `process_tool_calls_async` 组（中止、交互 break、闸门拒止、协议失败、
+//! 的 `process_tool_calls_in_env` 组（中止、交互 break、闸门拒止、协议失败、
 //! 待用户审批的 `WaitingUserAction`）、事件批序断言，以及并行执行的用例组。
 
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -177,6 +177,8 @@ struct Ready {
     name: String,
     args: Value,
     result_msg_id: String,
+    /// 模型给的 provider wire id（产物格字段，P1b）。
+    wire_id: String,
     repeat_note: Option<String>,
 }
 
@@ -400,6 +402,7 @@ async fn prepare_call(
         name,
         args: tc.arguments.clone(),
         result_msg_id,
+        wire_id: tc.wire_id.clone().unwrap_or_default(),
         repeat_note,
     })
 }
@@ -531,6 +534,7 @@ async fn finish_call(
         name,
         args,
         result_msg_id,
+        wire_id: _,
         repeat_note,
     } = ready;
     // 执行体交回的已是「节点正文 / 记账原文 / 守卫元数据」三份，本层不再裁剪
@@ -682,7 +686,7 @@ async fn finish_call(
 
 /// 启动一条执行（`seq` = 启动顺序，收口按它排队）。
 fn start_execution<'a>(
-    tool_archive_dir: &'a std::path::Path,
+    env: &'a RoundEnv,
     seq: u64,
     ready: &Ready,
     parent: &'a Option<Arc<dyn Plugin>>,
@@ -694,14 +698,16 @@ fn start_execution<'a>(
     let id = ready.id.clone();
     let args = ready.args.clone();
     let result_msg_id = ready.result_msg_id.clone();
+    let wire_id = ready.wire_id.clone();
     let ctx = ctx.clone();
     Box::pin(async move {
         let out = execute_tool_async(
-            tool_archive_dir,
+            env,
             parent,
             &name,
             args,
             &id,
+            &wire_id,
             sink,
             abort,
             result_msg_id,
@@ -843,7 +849,7 @@ pub(crate) async fn run_batch(
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
-    tool_archive_dir: &std::path::Path,
+    env: &RoundEnv,
     readings: &mut GateReadings,
     effects: &mut Vec<EffectInput>,
     breaks: &mut Vec<&'static str>,
@@ -964,11 +970,12 @@ pub(crate) async fn run_batch(
                         .await;
                         emit_tool_running(sink, context_messages, &ready.id).await;
                         let out = execute_tool_async(
-                            tool_archive_dir,
+                            env,
                             parent,
                             &ready.name,
                             ready.args.clone(),
                             &ready.id,
+                            &ready.wire_id,
                             sink,
                             abort,
                             ready.result_msg_id.clone(),
@@ -1011,15 +1018,7 @@ pub(crate) async fn run_batch(
                         // 窗口的**唯一**运行中信号来源，必须紧贴执行之前。
                         emit_tool_running(sink, context_messages, &ready.id).await;
                         seq += 1;
-                        inflight.push(start_execution(
-                            tool_archive_dir,
-                            seq,
-                            &ready,
-                            parent,
-                            sink,
-                            abort,
-                            &ctx,
-                        ));
+                        inflight.push(start_execution(env, seq, &ready, parent, sink, abort, &ctx));
                         order.push_back(seq);
                         started.insert(seq, ready);
                     }
