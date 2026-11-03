@@ -112,11 +112,10 @@ pub(crate) fn begin_model(
     let nodes_failed = run.nodes.clone();
     let principal = run.actor.principal.clone();
     let turn_root_id = run.turn_root_id.clone();
-    // 产出事实的**寄存槽**：桥的一次读只换一份读数，而这条事实要写进
-    // `response` / `failed` 载荷，又要回到草稿的 `last_output_facts` /
-    // `last_answer_id`。两处各取一次就是两次读数，取数口的消费方（测试的计数式
-    // 假桥）会因此看到两倍的消耗——槽位让「读一次、存一次、两处共用」。
-    let output_slot: std::sync::Arc<std::sync::Mutex<Option<(StreamNodeFacts, String)>>> =
+    // 产出事实的**寄存槽**：执行体交回的 `response` / `failed` 载荷（节点身份与终答
+    // 都在里面）要回到草稿的 `last_output_payload` / `last_answer_id`；同一次往返只
+    // 取一份读数，槽位让「读一次、存一次、两处共用」。
+    let output_slot: std::sync::Arc<std::sync::Mutex<Option<(serde_json::Value, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
     let slot_ok = output_slot.clone();
     let slot_failed = output_slot.clone();
@@ -152,8 +151,8 @@ pub(crate) fn begin_model(
     let fut = async move {
         // 有执行体就走执行体（生产路径，`D-305` 裁决一）；没有则仍走适配器
         // （过渡期的测试夹具/旧宿主），两条路**互斥**，不写第二份事实。
-        // 执行体交回的读数（`stream` 段）：节点 id 与半截正文由执行体持有
-        // （`D-306` 裁决三 / `D-314`），环不再从 `StreamNodeFacts` 桥取这一份账。
+        // 执行体交回的 `response` / `failed` 载荷：节点 id、半截正文与终答都由
+        // 执行体持有（`D-314`），环不再从 `StreamNodeFacts` 桥取这一份账。
         let mut round_fact: Option<serde_json::Value> = None;
         let engine: Result<symbio_sdk::adapters::LlmTurn, EngineStop> = match executor {
             Some(executor) => {
@@ -185,27 +184,26 @@ pub(crate) fn begin_model(
         };
         let result = match engine {
             Ok(rt) => {
-                let facts = match round_fact.as_ref() {
-                    Some(fact) => round_stream_facts(fact),
-                    None => node_facts(&nodes_ok),
-                };
                 // 执行体路径：载荷（终答折叠、节点身份、`calls` 的 `call_key`）已由
                 // `symbio-plugin-model` 装配，并由它经宿主写口落 `response`（`D-314`）；
-                // 环只取读数，不写第二份。
+                // 环只寄存这份载荷，不再从桥取节点事实、也不写第二份。
                 let fields = if by_executor {
                     let fact = round_fact
                         .clone()
                         .filter(|v| v.is_object())
                         .unwrap_or_else(|| serde_json::json!({}));
                     let answer_id = fact["answer_id"].as_str().unwrap_or_default().to_string();
-                    *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
+                    *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some((fact, answer_id));
                     None
                 } else {
+                    let facts = node_facts(&nodes_ok);
                     let mut fields =
                         output_fields(&call_id, &turn_root_id, &principal, &facts, Some(&rt));
                     let answer_id =
                         fields["answer_id"].as_str().unwrap_or_default().to_string();
-                    *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
+                    *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some((fields.clone(), answer_id));
                     // 这一轮交回的工具调用（集合展开读 `calls` 的 `id` / `name` / `arguments`）。
                     let calls: Vec<serde_json::Value> = rt
                         .tool_calls
@@ -238,10 +236,6 @@ pub(crate) fn begin_model(
                 }
             }
             Err(stop) => {
-                let facts = match round_fact.as_ref() {
-                    Some(fact) => round_stream_facts(fact),
-                    None => node_facts(&nodes_failed),
-                };
                 // 停法进载荷：重建按它定节点状态，而 `failed` 本身不区分「用户按停」
                 // 与「执行体报错」——那条区分只在这一格。
                 let (aborted, why) = match stop {
@@ -250,25 +244,26 @@ pub(crate) fn begin_model(
                 };
                 let fields = if by_executor {
                     // 执行体已把半截正文、停法与 `status` 装进载荷，并由它自己落
-                    // `failed`（`D-314`）；环只取读数，不写第二份。
+                    // `failed`（`D-314`）；环只寄存这份载荷，不写第二份。
                     let fact = round_fact
                         .clone()
                         .filter(|v| v.is_object())
                         .unwrap_or_else(|| serde_json::json!({}));
                     let answer_id = fact["answer_id"].as_str().unwrap_or_default().to_string();
                     *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) =
-                        Some((facts, answer_id));
+                        Some((fact, answer_id));
                     None
                 } else {
+                    let facts = node_facts(&nodes_failed);
                     let mut fields =
                         output_fields(&call_id, &turn_root_id, &principal, &facts, None);
                     let answer_id =
                         fields["answer_id"].as_str().unwrap_or_default().to_string();
-                    *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) =
-                        Some((facts, answer_id));
                     fields["status"] = serde_json::Value::String(
                         if aborted { "aborted" } else { "failed" }.to_string(),
                     );
+                    *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some((fields.clone(), answer_id));
                     Some(fields)
                 };
                 // 失败也要留痕：写不进去不掩盖执行体自己的错误（它更有信息量）。
@@ -297,27 +292,6 @@ pub(crate) fn begin_model(
         }
     };
     Ok(ModelBegin::InFlight(Box::pin(fut)))
-}
-
-/// 执行体交回的 `stream` 读数 → 环内的 [`StreamNodeFacts`]。
-///
-/// 键名由 `symbio-plugin-model` 的行契约持有（环只按约定取值，不解释内容）；
-/// 缺 `stream` 段时落回顶层同名字段，让过渡期的执行体也读得出来。
-fn round_stream_facts(fact: &serde_json::Value) -> StreamNodeFacts {
-    let stream = fact.get("stream").unwrap_or(fact);
-    let pick = |new: &str, old: &str| {
-        stream
-            .get(new)
-            .or_else(|| stream.get(old))
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-    };
-    StreamNodeFacts {
-        text_id: pick("text_id", "response_text_child_id"),
-        text: pick("text", "text"),
-        reasoning_id: pick("reasoning_id", "reasoning_child_id"),
-        reasoning: pick("reasoning", "reasoning"),
-    }
 }
 
 /// 执行体交回的**值** → 环内消费的 [`LlmTurn`]。
@@ -390,7 +364,7 @@ fn turn_from_fact(fact: &serde_json::Value) -> Result<symbio_sdk::adapters::LlmT
 /// ## 它交出什么
 ///
 /// [`ModelFlight`]：结论 + 这次往返的桥读数。**写回草稿的活不在这里**——future 跑完时
-/// 已经回到 [`super::TurnSession`] 手里，`responses` / `last_output_facts` /
+/// 已经回到 [`super::TurnSession`] 手里，`responses` / `last_output_payload` /
 /// `last_answer_id` 由那一侧写（草稿的唯一写方仍是持有它的人）。
 /// 控制面失败的兜底：模型**压根没派发**（行不欠 / 端口没声明）⇒ 日志上没有模型的终局
 /// 事实，收束行开不出账，兜底格只能由手上拿着这一笔往返的那一方就地落（D-166）。
@@ -429,11 +403,12 @@ pub(crate) struct ModelFlight {
     pub(crate) id: String,
     /// 适配器的结论；`Err` 三档与 [`ModelCallError`] 同义。
     pub(crate) result: Result<symbio_sdk::adapters::LlmTurn, ModelCallError>,
-    /// 这一次往返的桥读数（`last_output_facts` / `last_answer_id` 的来源）。
+    /// 这一次往返的产出载荷与 `answer_id`（`last_output_payload` / `last_answer_id`
+    /// 的来源）：载荷由执行体装配，环只寄存（`D-314`）。
     ///
     /// `None` = 没有落输出事实（控制面失败 / 存储失败），此时**不能**把 id 记进
     /// `responses`——读侧会去查一条不存在的正文。
-    pub(crate) output: Option<(StreamNodeFacts, String)>,
+    pub(crate) output: Option<(serde_json::Value, String)>,
 }
 
 /// 在飞的一笔工具调用（`D-124` 订正 1 + DE-047 D-311）：派出与收尾两半之间的**唯一**
@@ -586,7 +561,7 @@ pub(crate) enum PolledRound {
 ///
 /// ## 写回草稿的活在这里
 ///
-/// future 里只跑适配器与落协议格；`responses` / `last_output_facts` /
+/// future 里只跑适配器与落协议格；`responses` / `last_output_payload` /
 /// `last_answer_id` 由**持有草稿的这一方**写——草稿的写方仍只有一个人。
 pub(crate) async fn settle_flight<S>(
     run: &mut Prepared,
@@ -608,8 +583,8 @@ where
         );
     if has_output {
         run.responses.push(flight.id);
-        if let Some((facts, answer_id)) = flight.output {
-            run.last_output_facts = facts;
+        if let Some((payload, answer_id)) = flight.output {
+            run.last_output_payload = Some(payload);
             run.last_answer_id = answer_id;
         }
     }
@@ -658,11 +633,11 @@ where
     run.cost_ms += rt.cost_ms;
     // 步号 +1：下一次模型往返换一个逻辑 id（否则第二次的 `sent` 撞第一次的幂等键）。
     run.step += 1;
-    // 每轮的流式节点事实在**分发之前**取定：工具分发的定稿会重置桥，
-    // 之后再取只拿得到下一轮的节点——本轮的中途正文 / 思考就静默丢了。
+    // 每轮的产出载荷在**分发之前**取定：工具分发的定稿会改写它，
+    // 之后再取只拿得到下一轮的产出——本轮的中途正文 / 思考就静默丢了。
     //
-    // 取数已经发生在应答那一侧（[`begin_model`] 的寄存槽）：桥只读一次。
-    let round_facts = run.last_output_facts.clone();
+    // 载荷来自执行体（[`begin_model`] 的寄存槽），环不解释内容（`D-314`）。
+    let round_payload = run.last_output_payload.clone().unwrap_or_default();
 
     // 本轮不再请求工具 ⇒ 该收束了。**不在这里落收束格**：
     //     `close-turn` 行的前件（`turn.closeable`）此刻已经在日志上，派发器下一步
@@ -670,7 +645,7 @@ where
     if classify_round(&rt, has_dispatch) == RoundDecision::Halt {
         run.closing = Some(PendingClose::Answer {
             rt,
-            facts: round_facts,
+            payload: round_payload,
         });
         return Ok(ModelRound::Close);
     }
@@ -729,7 +704,9 @@ where
         return Ok(None);
     };
     match pending {
-        PendingClose::Answer { rt, facts } => halt(run, store, llm, rt, &facts).await.map(Some),
+        PendingClose::Answer { rt, payload } => halt(run, store, llm, rt, &payload)
+            .await
+            .map(Some),
         PendingClose::Failed {
             detail,
             cost_ms,
@@ -1196,15 +1173,20 @@ async fn halt<S>(
     store: &S,
     llm: &dyn LlmAdapter,
     rt: LlmTurn,
-    round_facts: &StreamNodeFacts,
+    payload: &serde_json::Value,
 ) -> Result<TurnOutcome, symbio_kernel::store::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
-    // 答话取值（正文 / 截断 / 端口思考 / 桥上思考）见 [`final_answer`]。
+    // 答话取值归执行体（`D-314`）：`response` 载荷里的 `answer` 已是折好的终答，
+    // 环照取；无执行体的回退路径由 [`output_fields`] 在载荷里放同一个键。
     // `truncated` 另有用处：兜底话术要说清「是截断」还是「空答」。
     let truncated = rt.finish.is_length();
-    let answer = final_answer(&rt, round_facts);
+    let answer = payload
+        .get("answer")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
     if answer.trim().is_empty() {
         // 正文与思考**都**空 + 无工具调用 = 模型什么也没答。这是**失败**：
         // 落成 final 会把「没答」记成「答了空话」。
@@ -1304,9 +1286,14 @@ where
 /// 载荷与落格分开：收束格只由 `close` 执行体写，中止那一步只负责把结局寄存下来。
 fn aborted_payload(run: &Prepared, llm: &dyn LlmAdapter) -> (u64, serde_json::Value, String) {
     let cost_ms = run.started.elapsed().as_millis() as u64;
-    // 半截正文取自那一轮的寄存读数——桥已在 `failed` 载荷那一侧读过一次，
-    // 这里不再重读（重读会拿到同一份，只让取数口多算一次）。
-    let text = run.last_output_facts.text.clone().unwrap_or_default();
+    // 半截正文取自那一轮的寄存载荷（`failed` 的同一份，`D-314`），不再从桥重读。
+    let text = run
+        .last_output_payload
+        .as_ref()
+        .and_then(|p| p.get("text"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
     // 半截正文 / 思考已随 `failed(port=model)` 入格（`output_fields`），收束格只记结局。
     let produced = produced_payload(
         "",

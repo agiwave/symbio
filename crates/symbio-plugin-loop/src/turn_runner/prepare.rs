@@ -32,8 +32,12 @@ pub(crate) enum PreparedFlow {
 /// [`Self::Failed`] 落 `chat.assistant.fallback`（模型没答成），
 /// [`Self::Aborted`] 也落 `chat.assistant.final`（中止是**状态**，不是另一种事实）。
 pub(crate) enum PendingClose {
-    /// 答完了：应答与本轮的流式节点事实（收束动作据此落 `chat.assistant.final`）。
-    Answer { rt: LlmTurn, facts: StreamNodeFacts },
+    /// 答完了：应答与本轮的**产出载荷**（`response` 事实的载荷，含正文 / 思考、
+    /// 节点身份与执行体折好的终答）——收束动作据此落 `chat.assistant.final`。
+    Answer {
+        rt: LlmTurn,
+        payload: serde_json::Value,
+    },
     /// 模型没答成：失败原因（人话，只给人读）与失败前已产出的半截产出。
     Failed {
         detail: String,
@@ -86,12 +90,10 @@ pub(crate) struct Prepared {
     /// 收束 / 进展 / 兜底格只存**轮级结局**：正文 / 思考归那一次往返自己的事实，
     /// 这里记的是「本轮有哪些往返」——重建与转写按它把正文折回来。
     pub(crate) responses: Vec<String>,
-    /// 最近一次模型往返的**产出事实**（正文 / 思考与节点 id），由应答 / 失败载荷
-    /// 那一侧**取一次**之后寄存。
-    ///
-    /// 取数口是桥的只读快照，但它的读数是「这一次往返的固定形状」——每轮多读一次
-    /// 只会读到同一份，却让取数口的消费方（测试的计数式假桥）多算一次。
-    pub(crate) last_output_facts: StreamNodeFacts,
+    /// 最近一次模型往返的**产出载荷**（`response` / `failed` 的同一份）：
+    /// 正文 / 思考、节点身份与终答都由执行体装配，环只寄存、不再自己组一份
+    /// （`D-314`）。
+    pub(crate) last_output_payload: Option<serde_json::Value>,
     /// 最近一次模型往返「说了什么」的节点身份（`answer_id`）。
     ///
     /// 收束 / 进展格要写它，而它必须与那一次 `response` 事实里算出的**同一个**
@@ -390,7 +392,7 @@ where
     // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，D-044 的实测口径）。
     let cost_ms = 0u64;
     let responses: Vec<String> = Vec::new();
-    let last_output_facts = StreamNodeFacts::default();
+    let last_output_payload = None;
     let last_answer_id = String::new();
 
     // 唤醒幕（审批 / 问答恢复）**不在这里续写交换**：用户动作落成唤醒请求
@@ -419,7 +421,7 @@ where
         cost_ms,
         artifacts_landed,
         responses,
-        last_output_facts,
+        last_output_payload,
         last_answer_id,
         full_snapshot,
         window_turns,

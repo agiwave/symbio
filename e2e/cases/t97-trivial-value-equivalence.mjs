@@ -40,14 +40,25 @@ import { join } from 'node:path';
 
 const SID = 'e2e-t97';
 
-/** 把运行期生成的随机身份抹成占位符（只抹 `id` / `*_id`，其余逐字保留）。 */
+/**
+ * 把运行期生成的身份与**计时读数**抹成占位符（`id` / `*_id` / `cost_ms`），其余逐字保留。
+ *
+ * `cost_ms` 是 `std::time::Instant` 的实测毫秒，两侧各跑一次 CLI 时会被调度噪声
+ * 拉出 1ms 差——它不是「值等价」判据的一部分（判据看的是载荷里的语义字段）。
+ */
+const VOLATILE_KEYS = new Set(['cost_ms']);
+
 function maskIds(value) {
   if (Array.isArray(value)) return value.map(maskIds);
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(
     Object.entries(value).map(([k, v]) => [
       k,
-      k === 'id' || k.endsWith('_id') ? '<id>' : maskIds(v),
+      k === 'id' || k.endsWith('_id')
+        ? '<id>'
+        : VOLATILE_KEYS.has(k)
+          ? '<volatile>'
+          : maskIds(v),
     ]),
   );
 }
