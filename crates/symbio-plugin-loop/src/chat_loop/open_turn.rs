@@ -38,8 +38,8 @@ use symbio_sdk::projection::turns::count_user_messages;
 
 use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, MESSAGE_VOCAB};
 
-use super::super::stage_events::{self, StageFact};
 use super::super::session_port::SessionPort;
+use super::super::stage_events::{self, StageFact};
 use super::state::{SessionContext, TurnExit, TurnRequest, TurnState};
 
 /// 一行幕锚：名字、写格、动作。
@@ -219,8 +219,8 @@ pub(crate) fn open(
                 })
                 .count()
                 + 1;
-            let stage = StageFact::resume(turn.round(), kind, &ordinal.to_string())
-                .with_replaces(replaces);
+            let stage =
+                StageFact::resume(turn.round(), kind, &ordinal.to_string()).with_replaces(replaces);
             let seqs =
                 stage_events::land_with_seqs(store.as_ref(), turn_no, user_seq, "system", &[stage])
                     .map_err(|e| {
@@ -259,13 +259,7 @@ pub(crate) fn open(
                 .map_err(|e| {
                     TurnExit::Failed(PluginError::InternalError(format!("用户格落格失败：{e:?}")))
                 })?;
-            (
-                turn_no,
-                seq.value(),
-                text,
-                turn.round(),
-                Some(seq.value()),
-            )
+            (turn_no, seq.value(), text, turn.round(), Some(seq.value()))
         }
         OpeningKind::Continue => {
             // 轮次由**那一格**回答（`turn_next_round`）：`continue-turn` 的前件与

@@ -1188,7 +1188,10 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
                 && after_anchor(e, drive_seq)
         })
         .collect();
-    let tool_rounds = model_responses.iter().filter(|e| closed_tool_round(e)).count() as u64;
+    let tool_rounds = model_responses
+        .iter()
+        .filter(|e| closed_tool_round(e))
+        .count() as u64;
     // 只有**停在批次边界**才报：最近一条模型应答是一批已关闭的工具调用。
     //
     // 这一格管住另一端：模型答完最后一句（`calls` 空）之后不再汇报——那一刻没有

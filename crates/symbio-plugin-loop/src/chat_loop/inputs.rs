@@ -11,7 +11,6 @@
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_plugin_api::context::{Cadence, ContextSection, DelegateVerdict, LiveInputs};
 
-
 use super::*;
 
 use crate::session_port;
@@ -264,7 +263,7 @@ pub(crate) async fn prepare_request_sections(
         (),
     )
     .await
-        .map_err(super::super::turn_exec::ActorError::Read)?;
+    .map_err(super::super::turn_exec::ActorError::Read)?;
     let settings = &context.view.settings;
     let delegate_verdict = match turn.user_text().filter(|_| req.new_input) {
         Some(text) => {
@@ -378,11 +377,9 @@ fn recall_from_stage(
         entries: record
             .entries
             .into_iter()
-            .map(|(seq, tag, content)| symbio_plugin_api::retrieval::Retrieved {
-                seq,
-                content,
-                tag,
-            })
+            .map(
+                |(seq, tag, content)| symbio_plugin_api::retrieval::Retrieved { seq, content, tag },
+            )
             .collect(),
     })
 }

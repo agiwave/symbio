@@ -383,39 +383,39 @@ pub struct TurnOutcome {
 }
 
 /// **一轮的入口**：准备轮首（定稿答话 / 空答兜底可能直接收束）；其余交给派发器。
-    /// 工具清单下行、工具调用上行、产物落格都在**本入口交回的会话**上按行发生。
-    ///
-    /// ## 网格记账
-    ///
-    /// - 用户消息：`turn × opened`（`user.message`），一次；
-    /// - 每轮工具调用：**不单独占格**——工具结果才是产物事实，落
-    ///   `artifact × asserted`（`artifact.added`，载荷 `{ tool, text }`），
-    ///   `produced_by` 指向**本轮用户格**（DE-032 §3 的 `produced_by` 断言）；
-    /// - 收束：`chat.assistant.final`（或失败的兜底格）——**只落一次**。
-    ///
-    /// ## prompt 的两段
-    ///
-    /// 基线由 `prepare::render_messages` 从转写投影出（历史来自事实源，含**往轮**的
-    /// 工具结果）；
-    /// 而**本轮**刚发生的交换，投影里当然还没有（快照取在它落格之前），故由本函数
-    /// **就地累积**追加——模型必须看到自己请求过什么、拿到了什么，否则会重复调用
-    /// 同一个工具。
-    ///
-    /// ## 中止 / 等待用户
-    ///
-    /// 两者都照落一格事实——**思考 / 正文 / 工具是事实，完成 / 终止 / 等待是状态**：
-    /// 中止落收束格（`chat.assistant.final`，载荷 `status: "aborted"` +
-    /// `terminated: { at }` + 顶层 `reason: interrupted`，半截正文 / 半截思考一并入格），绝不复用兜底格
-    /// （那是**失败**的形状，且会污染兜底率）；等待用户落进展格
-    /// （`chat.assistant.progress`，`turn × progressed`，载荷 `status: "pending"`），
-    /// 不收束轮次（恢复后续写同一轮、以收束格了结）。「一轮至多一条收束格」不变。
-    ///
-    /// 起一轮：准备阶段可能直接收束（定稿答话 / 空答兜底），否则交回一个
-    /// [`TurnSession`]。**这里不再有循环**——步的推进归调用方。
-    ///
-    /// **没有流式出口**：这个入口只落事实与备 prompt，不上任何节点。开场白要经流式桥
-    /// 上实时面，而它是判决行的产物、落点在接缝（`D-223` 订正 1）——幕首建草稿时那句
-    /// 话还没说出来，桥也在接缝那一侧。
+/// 工具清单下行、工具调用上行、产物落格都在**本入口交回的会话**上按行发生。
+///
+/// ## 网格记账
+///
+/// - 用户消息：`turn × opened`（`user.message`），一次；
+/// - 每轮工具调用：**不单独占格**——工具结果才是产物事实，落
+///   `artifact × asserted`（`artifact.added`，载荷 `{ tool, text }`），
+///   `produced_by` 指向**本轮用户格**（DE-032 §3 的 `produced_by` 断言）；
+/// - 收束：`chat.assistant.final`（或失败的兜底格）——**只落一次**。
+///
+/// ## prompt 的两段
+///
+/// 基线由 `prepare::render_messages` 从转写投影出（历史来自事实源，含**往轮**的
+/// 工具结果）；
+/// 而**本轮**刚发生的交换，投影里当然还没有（快照取在它落格之前），故由本函数
+/// **就地累积**追加——模型必须看到自己请求过什么、拿到了什么，否则会重复调用
+/// 同一个工具。
+///
+/// ## 中止 / 等待用户
+///
+/// 两者都照落一格事实——**思考 / 正文 / 工具是事实，完成 / 终止 / 等待是状态**：
+/// 中止落收束格（`chat.assistant.final`，载荷 `status: "aborted"` +
+/// `terminated: { at }` + 顶层 `reason: interrupted`，半截正文 / 半截思考一并入格），绝不复用兜底格
+/// （那是**失败**的形状，且会污染兜底率）；等待用户落进展格
+/// （`chat.assistant.progress`，`turn × progressed`，载荷 `status: "pending"`），
+/// 不收束轮次（恢复后续写同一轮、以收束格了结）。「一轮至多一条收束格」不变。
+///
+/// 起一轮：准备阶段可能直接收束（定稿答话 / 空答兜底），否则交回一个
+/// [`TurnSession`]。**这里不再有循环**——步的推进归调用方。
+///
+/// **没有流式出口**：这个入口只落事实与备 prompt，不上任何节点。开场白要经流式桥
+/// 上实时面，而它是判决行的产物、落点在接缝（`D-223` 订正 1）——幕首建草稿时那句
+/// 话还没说出来，桥也在接缝那一侧。
 pub(crate) async fn begin_turn<S>(
     store: &S,
     input: TurnInput,
@@ -723,15 +723,8 @@ impl TurnSession {
     {
         let inflight = self.inflight.take();
         let now = self.run.now_ms();
-        let polled = stream::poll_flight(
-            &mut self.run,
-            store,
-            llm,
-            inflight,
-            has_dispatch,
-            now,
-        )
-        .await?;
+        let polled =
+            stream::poll_flight(&mut self.run, store, llm, inflight, has_dispatch, now).await?;
         let settled = match polled {
             stream::PolledRound::Parked(fut) => {
                 // 还在路上：句柄原样放回，下一圈接着 poll。这一圈没写任何格，

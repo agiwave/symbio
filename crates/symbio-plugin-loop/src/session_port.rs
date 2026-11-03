@@ -92,9 +92,9 @@ impl PortSession {
         payload: Value,
     ) -> Result<PortOutcome, PluginError> {
         let provider = self.provider().await?;
-        let executor = provider.executor().ok_or_else(|| {
-            PluginError::NotFound("会话端口提供者没有交执行面".to_string())
-        })?;
+        let executor = provider
+            .executor()
+            .ok_or_else(|| PluginError::NotFound("会话端口提供者没有交执行面".to_string()))?;
         let exec = PortExecContext {
             deadline_ms: None,
             abort: ExecAbortSignal::new(),

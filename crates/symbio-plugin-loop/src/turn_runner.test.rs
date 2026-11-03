@@ -214,9 +214,7 @@ impl RunnerFixture {
         actors: &'static [super::super::loop_rows::ActorEntry],
         prefix: Option<String>,
         reflex: Option<super::super::turn_runner::ReflexAnswer>,
-        request_ctx: Option<
-            std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
-        >,
+        request_ctx: Option<std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
     ) -> Result<TurnOutcome, ActorError> {
         // 接缝那一行的两格出口由夹具自己落（`D-222` 裁决 5：轮首四行、接缝、汇报与
         // 轮内各行现在同住一张绑定表，本夹具不跑前三者 ⇒ 它们的账要提前关好）。
@@ -276,14 +274,14 @@ impl RunnerFixture {
         };
         let end = super::super::turn_driver::drive_prepared(stage, None, request_ctx, actors)
             .await
-        .map_err(|exit| match exit {
-            super::super::turn_exec::TurnExecExit::Failed(e) => ActorError::Read(e),
-            super::super::turn_exec::TurnExecExit::Aborted(_) => {
-                ActorError::Read(symbio_kernel::plugin::PluginError::InternalError(
-                    "环交出了中止出口（本夹具的绑定表里没有中止那一行）".into(),
-                ))
-            }
-        })?;
+            .map_err(|exit| match exit {
+                super::super::turn_exec::TurnExecExit::Failed(e) => ActorError::Read(e),
+                super::super::turn_exec::TurnExecExit::Aborted(_) => {
+                    ActorError::Read(symbio_kernel::plugin::PluginError::InternalError(
+                        "环交出了中止出口（本夹具的绑定表里没有中止那一行）".into(),
+                    ))
+                }
+            })?;
         match end {
             super::super::turn_exec::DriveEnd::Bare(outcome) => Ok(outcome),
             super::super::turn_exec::DriveEnd::Answered => Err(ActorError::Read(
@@ -2271,9 +2269,7 @@ mod tool_round_tests {
 
     /// 带注册面的请求机：`vdfs_read` 风险档 `High`、会话阈值 `low` ⇒ 授权按策略拒绝。
     async fn deny_ctx() -> std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> {
-        use symbio_kernel::capability::{
-            Capability, CapabilityRiskLevel, CapabilityRow, Registry,
-        };
+        use symbio_kernel::capability::{Capability, CapabilityRiskLevel, CapabilityRow, Registry};
         use symbio_kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
         use symbio_sdk::capability::CAPABILITY_VISITOR;
         use symbio_sdk::keys::RISK_LEVEL;
@@ -2287,7 +2283,8 @@ mod tool_round_tests {
                     ..Default::default()
                 }
                 .with_risk(CapabilityRiskLevel::High),
-            )) as std::sync::Arc<dyn Capability>))
+            ))
+                as std::sync::Arc<dyn Capability>))
             .await;
         ctx.set(CAPABILITY_VISITOR, visitor as std::sync::Arc<dyn Registry>);
         ctx.set(RISK_LEVEL, "low".to_string());

@@ -282,8 +282,7 @@ impl TurnState {
     ///
     /// 轮次不再寄存为字段（DE-048 D-306）；它在事实面上的唯一形态就是那一格。
     pub(crate) fn round(&self) -> usize {
-        super::super::stage_events::round_of(&self.facts, self.turn_no, self.drive_seq)
-            .unwrap_or(0)
+        super::super::stage_events::round_of(&self.facts, self.turn_no, self.drive_seq).unwrap_or(0)
     }
 }
 
@@ -308,8 +307,6 @@ pub(crate) enum TurnExit {
     /// resume 已完成，无需进入主循环。
     ResumeDone,
 }
-
-
 
 /// ## 为什么没有 `new()`
 ///

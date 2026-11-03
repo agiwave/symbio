@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use crate::session_port;
 
-use symbio_kernel::dialog::{DecideRequest, DecideOutcome, DecisionPlan, ParseVerdictRequest, Verdict};
+use symbio_kernel::dialog::{
+    DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, Verdict,
+};
 use symbio_kernel::exec::ExecAbortSignal;
 use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::routes::{ROUTE_CLASSIFY_DECIDE, ROUTE_CLASSIFY_PARSE};
@@ -66,12 +68,14 @@ pub(crate) async fn classify(
     let verdict = decision.verdict.clone();
     let snapshot = symbio_kernel::dialog::RunSnapshot::default();
     let (result, answer, opening) = match verdict.clone() {
-        Some(verdict) => execute_verdict(orchestrator, ctx, context, turn, verdict, &snapshot).await,
+        Some(verdict) => {
+            execute_verdict(orchestrator, ctx, context, turn, verdict, &snapshot).await
+        }
         None => ("proceed".to_string(), None, None),
     };
 
-    let mut fact = StageFact::classify(round, verdict.as_ref(), decision.model_calls)
-        .with_result(&result);
+    let mut fact =
+        StageFact::classify(round, verdict.as_ref(), decision.model_calls).with_result(&result);
     if let Some(answer) = answer {
         fact = fact.with_answer(answer);
     }

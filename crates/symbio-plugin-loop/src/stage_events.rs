@@ -551,7 +551,10 @@ pub(crate) fn recall_of(events: &[Event], turn: u64, anchor: u64) -> Option<Reca
 /// 再续一幕；按锚过滤反而会把「先落决定格、后开用户格」的测试替身挡在外面。
 pub(crate) fn answered(events: &[Event], turn: u64, _anchor: u64) -> bool {
     latest_stage(events, turn, 0, StageName::Decide.name()).is_some_and(|fact| {
-        fact.payload.get("result").and_then(serde_json::Value::as_str) == Some("answered")
+        fact.payload
+            .get("result")
+            .and_then(serde_json::Value::as_str)
+            == Some("answered")
     })
 }
 
@@ -560,7 +563,9 @@ pub(crate) fn answer_of(events: &[Event], turn: u64, _anchor: u64) -> Option<Ans
     let fact = latest_stage(events, turn, 0, StageName::Decide.name())?;
     let answer = fact.payload.get("answer")?;
     let reasoning = match (
-        answer.get("reasoning_id").and_then(serde_json::Value::as_str),
+        answer
+            .get("reasoning_id")
+            .and_then(serde_json::Value::as_str),
         answer.get("reasoning").and_then(serde_json::Value::as_str),
     ) {
         (Some(id), Some(text)) => Some((id.to_string(), text.to_string())),

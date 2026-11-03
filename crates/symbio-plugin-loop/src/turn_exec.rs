@@ -1113,19 +1113,24 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
         let executor = super::port::provider_of(head.request_ctx, "model")
             .await
             .and_then(|provider| provider.executor());
-        ctx.session.set_system_prompt(head.system_prompt.to_string());
+        ctx.session
+            .set_system_prompt(head.system_prompt.to_string());
         ctx.session.set_model_executor(executor);
         let consolidation = head.context.consolidated.take();
         let facts = head.context.facts_snapshot();
-        let opening = super::stage_events::opening_of(&facts, head.turn.turn_no, head.turn.drive_seq);
+        let opening =
+            super::stage_events::opening_of(&facts, head.turn.turn_no, head.turn.drive_seq);
         let opening_text = opening.as_ref().map(|o| o.text.clone());
         let opening_dialog = opening.map(|o| super::turn_runner::DialogFacts {
             id: o.dialog_id,
             reason: o.dialog_reason,
             exclude_from_context: true,
         });
-        crate::turn_driver::land_consolidation(head.loop_session.as_ref(), consolidation.as_deref())
-            .await;
+        crate::turn_driver::land_consolidation(
+            head.loop_session.as_ref(),
+            consolidation.as_deref(),
+        )
+        .await;
         let sections = super::chat_loop::inputs::prepare_request_sections(
             head.orchestrator,
             head.request_ctx,
@@ -1349,11 +1354,7 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             // 效果写口，形状与声明在这里复核。
             symbio_plugin_api::rows::RowStep::FactsWithEffects(facts, effects) => {
                 land_drafts(ctx.store.as_ref(), facts, turn, &principal)?;
-                let round = ctx
-                    .head
-                    .as_ref()
-                    .map(|head| head.turn.round())
-                    .unwrap_or(0);
+                let round = ctx.head.as_ref().map(|head| head.turn.round()).unwrap_or(0);
                 let head = ctx.head.as_ref();
                 return land_effects(
                     &mut ctx.session.live_effect_keys,
@@ -1375,11 +1376,7 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             // 并把正文寄给收束行。收束格仍归 `close-turn`（D-163），这一行只答不落定稿。
             symbio_plugin_api::rows::RowStep::Answer(answer) => {
                 land_drafts(ctx.store.as_ref(), answer.facts, turn, &principal)?;
-                let round = ctx
-                    .head
-                    .as_ref()
-                    .map(|head| head.turn.round())
-                    .unwrap_or(0);
+                let round = ctx.head.as_ref().map(|head| head.turn.round()).unwrap_or(0);
                 super::stage_events::land(
                     ctx.store.as_ref(),
                     turn,

@@ -14,9 +14,8 @@
 use crate::control_decl::guard_vocab;
 use std::sync::{Arc, Mutex};
 
-use symbio_kernel::adapters::LatencyTier;
-use symbio_kernel::llm::TurnOutput;
 use super::*;
+use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::capability::{Capability, CapabilityRow, Registry};
 use symbio_kernel::decl::Frozen;
@@ -24,6 +23,7 @@ use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::exec::ExecEnv;
 use symbio_kernel::exec::ExecTranscriptWriter;
 use symbio_kernel::llm::ModelProvider;
+use symbio_kernel::llm::TurnOutput;
 use symbio_kernel::plugin::PluginSimpleRequest;
 use symbio_kernel::plugin::{PluginError, PluginInvokeRequestExt};
 use symbio_kernel::store::EventStore;
@@ -41,9 +41,7 @@ use symbio_sdk::turn::dispatch::{run_ops, ConsolidateRequest};
 use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, MESSAGE_VOCAB};
 
 use super::super::session_port::SessionPort;
-use super::super::test_support::{
-    default_settings, session_port_of, turn_spec, FakeSessionPort,
-};
+use super::super::test_support::{default_settings, session_port_of, turn_spec, FakeSessionPort};
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**桥之后**的节点面（生产里
 /// `assemble` 的发射任务把会话主体写进每一帧），`role` 只是反序列化落点。
@@ -351,11 +349,11 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     // 幕首之后那一半（分发方 / 汇报落地面 / 宿主面）与生产同一个构造点：夹具自己备的
     // 只是幕首（用户格 / 配置格由本文件的 `seed_*` 直给）。
     let mut stage = super::stage_runtime(assembled, emitter, open);
-    stage
-        .draft
-        .set_reflex(reflex_text.map(|text| super::super::turn_runner::ReflexAnswer {
+    stage.draft.set_reflex(
+        reflex_text.map(|text| super::super::turn_runner::ReflexAnswer {
             text: text.to_string(),
-        }));
+        }),
+    );
     let head = stage.head_parts(
         orchestrator.clone(),
         request_ctx,
@@ -363,22 +361,15 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         &mut turn,
         &turn_req,
     );
-    match crate::turn_driver::drive_prepared(
-        stage,
-        head,
-        None,
-        super::super::loop_rows::ACTORS,
-    )
-    .await?
+    match crate::turn_driver::drive_prepared(stage, head, None, super::super::loop_rows::ACTORS)
+        .await?
     {
         // 环跑到收束格出现：归类（中止 / 授权拒 / 正常）与落格按本文件要验的
         // 那几条契约做——生产的镜像并入与封根不在夹具里（`stage.test.rs` 钉）。
-        super::DriveEnd::Running(running) => {
-            match super::classify_turn(*running, None).await? {
-                super::Classified::Finished(v) => v,
-                super::Classified::Settled(settled) => super::persist_turn(settled),
-            }
-        }
+        super::DriveEnd::Running(running) => match super::classify_turn(*running, None).await? {
+            super::Classified::Finished(v) => v,
+            super::Classified::Settled(settled) => super::persist_turn(settled),
+        },
         // 判成「就此答话」/ 幕间中止都是控制面才有的两路：本夹具的一轮不会走到
         // （它不带裁决寄存、也没有第二幕）。按失败报出，不静默交回一个空结果。
         super::DriveEnd::Answered => Err(TurnExecExit::Failed(PluginError::InternalError(
@@ -1184,15 +1175,11 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
         .unwrap()
         .iter()
         .filter(|m| {
-            m.msg_type == Some(cm::NodeKind::Skeleton)
-                && m.title.as_deref() == Some("tool_call")
+            m.msg_type == Some(cm::NodeKind::Skeleton) && m.title.as_deref() == Some("tool_call")
         })
         .cloned()
         .collect();
-    assert!(
-        added.is_empty(),
-        "无工具轮不额外产生消息：{added:?}"
-    );
+    assert!(added.is_empty(), "无工具轮不额外产生消息：{added:?}");
 
     // 聚合全文归那一次模型往返（`response.answer`），与 final 只存结局相对。
     let all = h.facts.range(Seq::new(0));

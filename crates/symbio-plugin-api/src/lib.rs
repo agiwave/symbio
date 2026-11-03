@@ -120,8 +120,8 @@ pub use symbio_kernel::dialog::{
     REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
 pub use symbio_kernel::event::{
-    event_output_text_node_id, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
-    EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
+    event_output_text_node_id, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
+    EVENT_SENT, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
 pub use symbio_kernel::exec::{
     ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter, ABORT_SIGNAL, EVENT_SINK,

@@ -53,8 +53,7 @@ use crate::session_port;
 pub(crate) use self::drive::{land_dispatch, land_opening};
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{
-    request_actor_spec, request_source_principal, SessionContext, TurnExit, TurnRequest,
-    TurnState,
+    request_actor_spec, request_source_principal, SessionContext, TurnExit, TurnRequest, TurnState,
 };
 pub(crate) use self::turn::{persist_turn, settle_reasoning};
 // 一幕第三步（收好产出）要用它（镜像并入是落库的前一步）：`stage` 是兄弟模块，
@@ -159,7 +158,6 @@ pub(crate) fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
     );
     Some(parts.join("\n\n"))
 }
-
 
 use std::sync::Arc;
 use symbio_kernel::dialog::RunSnapshot;
@@ -351,7 +349,6 @@ pub async fn run_chat_loop(
     finish_turn(&context, &sink, &turn, exit).await
 }
 
-
 /// 定稿答话轮的**收束**：两条收束格由**轮首准备**落（§5.1 / [D-125]）——它经
 /// `settle::land_final` 的同一构造点写出去（`SP-033` `TC-4`），本函数只是**调用方**。
 ///
@@ -406,7 +403,6 @@ pub(crate) async fn land_answered_turn(
         );
     }
 }
-
 
 /// 主循环的**唯一收尾点**：增量落库 → 结局值。
 ///
@@ -478,19 +474,16 @@ async fn finish_turn(
 /// `CONTEXT_MESSAGES`（那条会先把未选中支藏掉——拿它补发等于把「藏」当成了「没发生」）。
 /// 发不出去也没什么可修的：`sink` 缺席（内部请求）时本来就是静默出口。
 async fn republish_branch_group(context: &SessionContext, sink: &ExecEventSink, member: &str) {
-    let all = match session_port::call::<Vec<ChatNode>>(
-        context.session.as_ref(),
-        run_ops::MESSAGES,
-        (),
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            plugin_warn!("session", "[Branch] 补发标注帧前读投影失败：{e}");
-            return;
-        }
-    };
+    let all =
+        match session_port::call::<Vec<ChatNode>>(context.session.as_ref(), run_ops::MESSAGES, ())
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                plugin_warn!("session", "[Branch] 补发标注帧前读投影失败：{e}");
+                return;
+            }
+        };
     let Some(candidates) = all
         .iter()
         .find(|m| m.id == member)

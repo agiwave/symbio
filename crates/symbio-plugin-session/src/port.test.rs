@@ -105,7 +105,11 @@ async fn session_config_reads_eight_fields_from_the_delivery_packet() {
     let outcome = executor()
         .execute(exec_context(true), input(json!({ ROW_KEY: ROW_CONFIG })))
         .await;
-    assert!(outcome.error.is_none(), "正常读取不应失败：{:?}", outcome.error);
+    assert!(
+        outcome.error.is_none(),
+        "正常读取不应失败：{:?}",
+        outcome.error
+    );
     let value = outcome.facts.first().expect("回体应在 facts 的第一项");
     let obj = value.as_object().expect("回体是纯值对象");
     let mut keys = obj.keys().map(String::as_str).collect::<Vec<_>>();
@@ -151,17 +155,16 @@ async fn missing_provider_fails_closed_instead_of_panicking() {
 #[tokio::test]
 async fn malformed_payload_fails_without_panicking() {
     // 缺行判别键。
-    let outcome = executor().execute(exec_context(true), input(json!({}))).await;
+    let outcome = executor()
+        .execute(exec_context(true), input(json!({})))
+        .await;
     let error = outcome.error.expect("缺 `row` ⇒ 必须失败");
     assert_eq!(error.0, PortErrorClass::NonRetryable);
     assert!(error.1.contains("缺 `row` 字段"), "{}", error.1);
 
     // `session-call` 缺 `op`：失败在插件升级之前，载荷校验先于一切副作用。
     let outcome = executor()
-        .execute(
-            exec_context(true),
-            input(json!({ ROW_KEY: ROW_CALL })),
-        )
+        .execute(exec_context(true), input(json!({ ROW_KEY: ROW_CALL })))
         .await;
     let error = outcome.error.expect("缺 `op` ⇒ 必须失败");
     assert_eq!(error.0, PortErrorClass::NonRetryable);

@@ -183,7 +183,10 @@ pub(crate) fn begin_model(
                     }
                 }
             }
-            None => match llm.generate_turn(&tok, &messages, tools.as_ref(), sink).await {
+            None => match llm
+                .generate_turn(&tok, &messages, tools.as_ref(), sink)
+                .await
+            {
                 Ok(rt) => Ok(rt),
                 Err(AdapterError::Aborted) => Err(EngineStop::Aborted),
                 Err(e) => Err(EngineStop::Failed(e.to_string())),
@@ -200,15 +203,13 @@ pub(crate) fn begin_model(
                         .filter(|v| v.is_object())
                         .unwrap_or_else(|| serde_json::json!({}));
                     let answer_id = fact["answer_id"].as_str().unwrap_or_default().to_string();
-                    *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) =
-                        Some((fact, answer_id));
+                    *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((fact, answer_id));
                     None
                 } else {
                     let facts = node_facts(&nodes_ok);
                     let mut fields =
                         output_fields(&call_id, &turn_root_id, &principal, &facts, Some(&rt));
-                    let answer_id =
-                        fields["answer_id"].as_str().unwrap_or_default().to_string();
+                    let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
                     *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) =
                         Some((fields.clone(), answer_id));
                     // 这一轮交回的工具调用（集合展开读 `calls` 的 `id` / `name` / `arguments`）。
@@ -264,8 +265,7 @@ pub(crate) fn begin_model(
                     let facts = node_facts(&nodes_failed);
                     let mut fields =
                         output_fields(&call_id, &turn_root_id, &principal, &facts, None);
-                    let answer_id =
-                        fields["answer_id"].as_str().unwrap_or_default().to_string();
+                    let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
                     fields["status"] = serde_json::Value::String(
                         if aborted { "aborted" } else { "failed" }.to_string(),
                     );
@@ -316,12 +316,12 @@ fn turn_from_fact(fact: &serde_json::Value) -> Result<symbio_sdk::adapters::LlmT
             arr.iter()
                 .map(|v| TurnToolCallInfo {
                     id: v.get("id").and_then(|x| x.as_str()).map(str::to_string),
-                    wire_id: v.get("wire_id").and_then(|x| x.as_str()).map(str::to_string),
+                    wire_id: v
+                        .get("wire_id")
+                        .and_then(|x| x.as_str())
+                        .map(str::to_string),
                     name: v.get("name").and_then(|x| x.as_str()).map(str::to_string),
-                    arguments: v
-                        .get("arguments")
-                        .cloned()
-                        .unwrap_or(serde_json::json!({})),
+                    arguments: v.get("arguments").cloned().unwrap_or(serde_json::json!({})),
                     parse_error: v
                         .get("parse_error")
                         .and_then(|x| x.as_str())
@@ -346,13 +346,12 @@ fn turn_from_fact(fact: &serde_json::Value) -> Result<symbio_sdk::adapters::LlmT
             (input.is_some() || output.is_some()).then_some(ModelUsage { input, output })
         }),
         spend: fact.get("spend").and_then(|v| {
-            v.get("currency").and_then(|c| c.as_str()).map(|currency| ModelSpend {
-                amount_nano: v
-                    .get("amount_nano")
-                    .and_then(|x| x.as_u64())
-                    .unwrap_or(0),
-                currency: currency.to_string(),
-            })
+            v.get("currency")
+                .and_then(|c| c.as_str())
+                .map(|currency| ModelSpend {
+                    amount_nano: v.get("amount_nano").and_then(|x| x.as_u64()).unwrap_or(0),
+                    currency: currency.to_string(),
+                })
         }),
     })
 }
@@ -546,10 +545,7 @@ where
         return Ok(false);
     };
     let attempt = item.get("attempt").and_then(|v| v.as_u64()).unwrap_or(1);
-    let via = item
-        .get("via")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
+    let via = item.get("via").and_then(|v| v.as_str()).map(str::to_string);
     let call = super::super::port::Call::new(ports::MODEL, id, attempt).with_via_opt(via);
     super::super::port::failed_with(store, &call, run.turn, run.user_seq, "lease_expired")?;
     Ok(true)
@@ -757,9 +753,7 @@ where
         return Ok(None);
     };
     match pending {
-        PendingClose::Answer { rt, payload } => halt(run, store, llm, rt, &payload)
-            .await
-            .map(Some),
+        PendingClose::Answer { rt, payload } => halt(run, store, llm, rt, &payload).await.map(Some),
         PendingClose::Failed {
             detail,
             cost_ms,
@@ -1001,14 +995,8 @@ pub(crate) async fn land_round(
             // 账本里没有这一笔：等待方随进程没了（日志上有 `sent`、草稿里没有）。
             // 与模型侧同一套租约判据：**未过期就先不动**（这一圈合法地不前进，
             // `waiting` 为真），过期才判死——句柄表只是把手，过没过期只问事实。
-            if super::super::loop_rows::stale_sent_hit(
-                &facts,
-                run.turn,
-                ports::TOOL,
-                id,
-                None,
-                now,
-            ) {
+            if super::super::loop_rows::stale_sent_hit(&facts, run.turn, ports::TOOL, id, None, now)
+            {
                 super::super::port::kill_dangling_sent(
                     store.as_ref(),
                     ports::TOOL,

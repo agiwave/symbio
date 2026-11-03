@@ -718,11 +718,7 @@ pub(crate) async fn authorize_call(
         turn,
         loop_rows::wake_now_ms(&facts, drive_seq),
     ) {
-        symbio_plugin_api::plugin_warn!(
-            "session",
-            "[Tool] 授权行不欠（turn={}），不判放行",
-            turn
-        );
+        symbio_plugin_api::plugin_warn!("session", "[Tool] 授权行不欠（turn={}），不判放行", turn);
         return;
     }
     authorize_one(store, turn, user_seq, &policy, call);

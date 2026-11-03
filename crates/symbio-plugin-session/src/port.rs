@@ -102,10 +102,7 @@ impl PortExecutor for SessionPortExecutor {
             Some(ROW_CALL) => self.call_reply(&ctx, &input.payload, false).await,
             Some(ROW_CALL_UNIT) => self.call_reply(&ctx, &input.payload, true).await,
             Some(other) => Err(format!("未知端口行：`{other}`")),
-            None => Err(format!(
-                "载荷缺 `{ROW_KEY}` 字段（端口 `{}`）",
-                input.port
-            )),
+            None => Err(format!("载荷缺 `{ROW_KEY}` 字段（端口 `{}`）", input.port)),
         };
         match reply {
             Ok(value) => PortOutcome {
@@ -144,7 +141,11 @@ impl SessionPortExecutor {
             .as_ref()
             .ok_or_else(|| "缺少宿主上下文".to_string())?;
         let data = plugin.run_op_row(host, &dispatch, op, Some(body)).await?;
-        Ok(if unit { json!({}) } else { json!({ "data": data }) })
+        Ok(if unit {
+            json!({})
+        } else {
+            json!({ "data": data })
+        })
     }
 }
 

@@ -9,8 +9,8 @@
 
 use super::*;
 
-use crate::session_port;
 use super::super::chat_loop::{ChatOrchestrator, SessionContext};
+use crate::session_port;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEnv, ExecEventSink};
 use symbio_kernel::plugin::PluginError;
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};

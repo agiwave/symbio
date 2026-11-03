@@ -73,8 +73,8 @@ use crate::report_exec::{ReportLanding, ReportPort};
 use crate::session_port::{self, SessionPort};
 use crate::tool_dispatch::{DerivedFacts, PortOutput, SessionDispatchPort, ToolDispatch};
 use crate::turn_exec::{
-    ActorError, Ctx, ExecTurn, FrameQueue, HeadParts, StepFuture, SupplementFn, UI_FRAME_CAPACITY,
-    UiBridge, UiFrame,
+    ActorError, Ctx, ExecTurn, FrameQueue, HeadParts, StepFuture, SupplementFn, UiBridge, UiFrame,
+    UI_FRAME_CAPACITY,
 };
 use crate::turn_runner::{
     artifact_verdict, begin_turn, DialogFacts, NodeFactsFn, RoundInjector, StreamNodeFacts,
@@ -697,7 +697,11 @@ pub(crate) async fn open_stage(
     // `None` = compose 产线关着：那一行到期时执行体交不回话，只落一格
     // `result:"silent"` 的尝试，这一段静默因此不再重复到期。
     let report = orchestrator.compose_enabled.then(|| {
-        chat_loop::report_port(orchestrator_arc.clone(), ctx.clone(), context.messages.clone())
+        chat_loop::report_port(
+            orchestrator_arc.clone(),
+            ctx.clone(),
+            context.messages.clone(),
+        )
     });
 
     let (assembled, emitter) = assemble_turn(ExecTurn {
@@ -830,11 +834,9 @@ pub(crate) async fn close_stage(
         entries: record
             .entries
             .into_iter()
-            .map(|(seq, tag, content)| symbio_plugin_api::retrieval::Retrieved {
-                seq,
-                content,
-                tag,
-            })
+            .map(
+                |(seq, tag, content)| symbio_plugin_api::retrieval::Retrieved { seq, content, tag },
+            )
             .collect(),
     });
     let res = classify_and_persist(running, recall.as_ref()).await?;
@@ -851,9 +853,14 @@ pub(crate) async fn close_stage(
         // 落库写入），没有半截要补 ⇒ `partial` 空。
         return Err(TurnExecExit::Aborted(Vec::new()));
     }
-    let finish =
-        chat_loop::settle_reasoning(control.orchestrator, control.context, control.sink, &root_id, res.output)
-            .await;
+    let finish = chat_loop::settle_reasoning(
+        control.orchestrator,
+        control.context,
+        control.sink,
+        &root_id,
+        res.output,
+    )
+    .await;
     chat_loop::persist_turn(control.sink, control.context, control.turn, finish).await;
     chat_loop::finalize_turn_root(control.sink, control.context, &root_id).await;
     // 幕间判据与这一轮的收尾都读最新切片：本幕落的格必须在 `turn.facts` 里看得见。
@@ -1182,9 +1189,8 @@ pub(crate) async fn assemble_turn(
     // 事实源：本会话的**唯一句柄**（由交付包按值带来、按引用分发）。
     // 与运行器落格、收件箱补落、轮外压缩进的是同一份实例——进程内不存在
     // 第二个各自 replay 的写者（D-084 §2）。
-    let store = facts.ok_or_else(|| {
-        PluginError::InternalError("执行需要持久会话（临时会话无事实源）".into())
-    })?;
+    let store = facts
+        .ok_or_else(|| PluginError::InternalError("执行需要持久会话（临时会话无事实源）".into()))?;
     // **补落寄存的变更**：跨进程另一写者持令牌时，本进程的编辑 / 截断
     // 会得到 `NotTheWriter` ⇒ 该变更被寄存在会话侧。本函数是持有交付包的时刻，
     // 经端口动作让 session 在**它自己的令牌窗口**里补落。
@@ -1551,30 +1557,25 @@ pub(crate) async fn open_turn(a: &Assembled) -> Result<OpenRun, TurnExecExit> {
     };
     // 淘汰闸的部署级判据：取失败按「未收回」继续并出声——与「读不出的 WAL 跳过」的
     // 既有口径一致。取值点与接线前一致：开轮之前（轮首那几行不参加这个判断）。
-    let elimination_revoked = session_port::call::<bool>(
-        a.session.as_ref(),
-        run_ops::ELIMINATION_REVOKED,
-        (),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        symbio_plugin_api::plugin_warn!(
-                "session",
-                "[Turn] 淘汰闸判据读取失败（按未收回处理，本轮继续）: {e}"
-            );
-            false
-        });
+    let elimination_revoked =
+        session_port::call::<bool>(a.session.as_ref(), run_ops::ELIMINATION_REVOKED, ())
+            .await
+            .unwrap_or_else(|e| {
+                symbio_plugin_api::plugin_warn!(
+                    "session",
+                    "[Turn] 淘汰闸判据读取失败（按未收回处理，本轮继续）: {e}"
+                );
+                false
+            });
     match begin_turn(a.store.as_ref(), input).await {
         // 落格失败与动作失败走**同一个出口**（`ActorError` 的语义，这里折成
         // `TurnExecExit::Failed`）：调用方只认这一条通道，不为「开轮」单开一条。
         Err(e) => Err(TurnExecExit::Failed(PluginError::InternalError(format!(
             "运行器落格失败：{e:?}"
         )))),
-        Ok(TurnSessionBegin::Done(_)) => {
-            Err(TurnExecExit::Failed(PluginError::InternalError(
-                "生成路径的开轮被判成「已收束」（定稿答话轮才走那一条）".into(),
-            )))
-        }
+        Ok(TurnSessionBegin::Done(_)) => Err(TurnExecExit::Failed(PluginError::InternalError(
+            "生成路径的开轮被判成「已收束」（定稿答话轮才走那一条）".into(),
+        ))),
         Ok(TurnSessionBegin::Run(session)) => Ok(OpenRun {
             session,
             llm,
@@ -2186,7 +2187,8 @@ pub(crate) async fn execute_final_reply_turn(
         .ok_or_else(|| PluginError::InternalError("执行需要持久会话（临时会话无事实源）".into()))?;
     // **补落寄存的变更**：答话轮同样是会话侧的落格窗口，经端口动作发起。
     // 与 [`assemble_turn`] 同序（在运行器落格之前——本轮的用户格已由编排层先落）。
-    if let Err(e) = session_port::call_unit(context.session.as_ref(), run_ops::DRAIN_PARKED, ()).await
+    if let Err(e) =
+        session_port::call_unit(context.session.as_ref(), run_ops::DRAIN_PARKED, ()).await
     {
         symbio_plugin_api::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }

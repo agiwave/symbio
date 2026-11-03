@@ -50,7 +50,9 @@ fn context(messages: Vec<ChatNode>) -> (Arc<EventStore>, SessionContext) {
         SessionContext {
             messages,
             view,
-            facts: Some(facts as Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::Event>>),
+            facts: Some(
+                facts as Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::Event>>,
+            ),
             session,
             consolidated: None,
         },
