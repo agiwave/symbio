@@ -1,26 +1,36 @@
 //! 工具批执行的**阶段分层**。
 //!
-//! 三个函数按**处理阶段**（不按职责）分开：
+//! 两个函数按**处理阶段**（不按职责）分开：
 //!
 //! - [`gates`] —— ① 批首闸门读数：`mode` / 熔断 / 自声明位 / 主体与控制面结论 /
 //!   本批留底 / 同参台账，一次读齐给整批复用（产出 [`gates::GateReadings`]）。
 //! - [`batch`] —— ② 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、宿主闸 /
 //!   声明闸拒止、钩子拦下与正常执行四条出口。
-//! - [`unfinished`] —— ③ 未执行收口：本批没跑到的调用统一补父节点终态与结果子节点。
+//!
+//! 「没跑到」的占位结果子节点不在这里收口：节点是事实的投影，环只写
+//! `failed{why}`，展示由投影器渲染（DE-047 D-312）。
 //!
 //! 编排入口是 [`crate::tools::tool_executor::process_tool_calls_in_env`]：
-//! 空批早退 → ① → ② → ③。段间只传值（[`gates::GateReadings`] 与出参
-//! `effects` / `breaks`）。
+//! 空批早退 → ① → ②。段间只传值（[`gates::GateReadings`] 与出参 `effects` / `breaks`）。
 //!
 //! 每段一条判据（纪律 3，「这段错了谁会红」）：
 //! - ① 错 ⇒ 闸门判据读数用例红（`breaker` 的批首读场景、`batch_principal` 的派生用例）；
 //! - ② 错 ⇒ 批内事件与父节点终态用例红（`tool_executor.test.rs` 的
-//!   `process_tool_calls_in_env` 组：中止、交互 break、闸门拒止、协议失败）；
-//! - ③ 错 ⇒ 未执行收口用例红（`not_executed` / `aborted` 结果子节点与父终态断言）。
+//!   `process_tool_calls_in_env` 组：中止、交互 break、闸门拒止、协议失败）。
 
 pub(crate) mod batch;
 pub(crate) mod gates;
-pub(crate) mod unfinished;
+
+/// 中止的成因词：与 [`NOT_EXECUTED`] 同属「没跑到」的词表。
+pub const ABORTED: &str = "aborted";
+/// 未执行的成因词：租约超时 / 等待用户前没派到的调用由环写这条 `failed` 事实。
+/// 占位结果子项由投影器按该事实渲染，环不再写节点（DE-047 D-312）。
+pub const NOT_EXECUTED: &str = "not_executed";
+
+/// 这笔结果是否属于「没跑到」（中止 / 未执行）——决定关账写 `failed` 还是 `response`。
+pub fn is_unanswered(failure_kind: &str) -> bool {
+    failure_kind == ABORTED || failure_kind == NOT_EXECUTED
+}
 
 use super::tool_executor::{
     build_user_prompt_message, call_signature, execute_one, record_effect, BreakerInputs,

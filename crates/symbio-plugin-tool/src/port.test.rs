@@ -375,7 +375,6 @@ fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext,
                 "name": tool_name,
                 "args": {},
                 "call_id": "tc-1",
-                "result_msg_id": "res-1",
             }),
         },
     )

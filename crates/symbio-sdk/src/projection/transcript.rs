@@ -29,7 +29,7 @@
 //! 见 [`PromptMessage`]）——与轮内交换（`tool_exchange_messages`）**同一形态**，
 //! 于是「历史里的工具轮」与「本轮的工具轮」在 prompt 里长得一样。
 
-use super::super::event::{event_payload_node_id, event_tool_result_node_id, Event};
+use super::super::event::{event_payload_node_id, event_result_node_id, Event};
 use super::vocab::{slot_node_of, slot_of, ChatSlot};
 use super::Projection;
 use crate::projection::vocab::{ChatVocab, MessageVocab};
@@ -380,7 +380,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                             tool: Some(tool.to_string()),
                             exclude_from_context: elisions.elides(e),
                         },
-                        event_tool_result_node_id(e),
+                        event_result_node_id(e),
                         false,
                     );
                 }

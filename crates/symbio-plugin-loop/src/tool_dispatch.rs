@@ -207,7 +207,7 @@ impl WakeIntent {
 ///
 /// 打包成一个形状而不是七个位置参数：这些字段同属「用户动作」这一件事，分成
 /// 位置参数时调用点要靠顺序记住谁是谁，而顺序错了编译器不报错——载荷里
-/// `wire_id` 与 `turn_id` 互换的后果是结果挂错卡片。
+/// `target` 与 `turn_root` 互换的后果是结果挂错卡片。
 pub(crate) struct WakeSpec<'a> {
     /// 用户动作的种类（`approve` / `retry` / `supply` / `answer` / `reject`）——
     /// 落进载荷的 `resume` 标记，读侧据此还原意图。
@@ -218,8 +218,6 @@ pub(crate) struct WakeSpec<'a> {
     pub(crate) tool: &'a str,
     /// 这次调用的参数。
     pub(crate) args: &'a serde_json::Value,
-    /// ToolCall 节点的 provider wire id。
-    pub(crate) wire_id: &'a str,
     /// 本轮 Turn 根节点 id（UI 帧挂载的父节点）。
     pub(crate) turn_root: &'a str,
     /// 这一笔要不要真跑工具。
@@ -276,14 +274,9 @@ pub struct CallOutcome {
     /// 等待用户的原因码（`failure_kind` 里的 pending 取值：`needs_approval` /
     /// `needs_interaction`……）。与 [`Self::prompt`] 同批入库、同批复现。
     pub failure_kind: String,
-    /// ToolCall 节点的 provider wire id（`tool_call_id` 字段）。节点身份的一部分：
-    /// 事件载荷记录它，重建才能复刻同一个工具卡片（`call_id` 只是节点 id）。
-    pub wire_id: String,
     /// ToolCall 节点的**定稿参数文本**（JSON 文本 / 解析失败的残破原文）。
     /// 重建直接回放这段文本，不经 `Value` 重序列化（键序漂移即失真）。
     pub args: String,
-    /// 结果子节点（`role=Tool`）的节点 id——落库时由分发方分配，记进载荷供重建复用。
-    pub result_id: String,
     /// 这一笔执行层交回的效果出参（DE-025 D-207）。
     ///
     /// 随结果携带而不是当场写进共用的取件面：并发执行时落地顺序由 provider 决定，
@@ -310,9 +303,7 @@ impl CallOutcome {
             needs_user_action: false,
             prompt: None,
             failure_kind: String::new(),
-            wire_id: String::new(),
             args: String::new(),
-            result_id: String::new(),
             effects: Vec::new(),
             breaks: Vec::new(),
         }
@@ -975,7 +966,6 @@ impl ToolPort {
         let mut extra = serde_json::json!({
             "tool": spec.tool,
             "args": spec.args,
-            "wire_id": spec.wire_id,
             "turn_id": spec.turn_root,
             "target": spec.target,
             "resume": spec.kind,
@@ -1008,11 +998,6 @@ impl ToolPort {
             .get("args")
             .cloned()
             .unwrap_or_else(|| serde_json::json!({}));
-        let wire_id = payload
-            .get("wire_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
         let id = payload.get("id").and_then(|v| v.as_str())?.to_string();
         let attempt = payload.get("attempt").and_then(|v| v.as_u64()).unwrap_or(1);
         let intent = WakeIntent::from_payload(payload)?;
@@ -1037,7 +1022,7 @@ impl ToolPort {
         let turn = LlmTurn {
             tool_calls: vec![symbio_kernel::llm::TurnToolCallInfo {
                 id: Some(target.clone()),
-                wire_id: (!wire_id.is_empty()).then(|| wire_id.clone()),
+                wire_id: None,
                 name: Some(tool.clone()),
                 arguments: args.clone(),
                 parse_error: None,
@@ -1345,15 +1330,11 @@ impl SessionDispatchPort {
             .first()
             .map(|n| n.id.clone())
             .unwrap_or_else(|| call.model_id.clone());
-        let wire_id = call_nodes
-            .first()
-            .and_then(|n| n.tool_call_id.clone())
-            .unwrap_or_default();
         let args = call_nodes
             .first()
             .and_then(|n| n.content.as_ref().map(|c| c.to_text()))
             .unwrap_or_default();
-        let result_id = symbio_sdk::llm::turn::llm_short_id();
+        let result_id = symbio_kernel::event::result_node_id(&call_id);
         let mut result_meta = serde_json::json!({ "success": ok, "tool_name": name });
         if !ok {
             result_meta["failure_kind"] = serde_json::json!("error");
@@ -1386,9 +1367,7 @@ impl SessionDispatchPort {
             needs_user_action: false,
             prompt: None,
             failure_kind: failure_kind.to_string(),
-            wire_id,
             args,
-            result_id,
             effects: Vec::new(),
             breaks: Vec::new(),
         };
@@ -1822,13 +1801,9 @@ fn map_outcome(
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string(),
-        wire_id: call_node
-            .and_then(|n| n.tool_call_id.clone())
-            .unwrap_or_default(),
         args: call_node
             .and_then(|n| n.content.as_ref().map(|c| c.to_text()))
             .unwrap_or_default(),
-        result_id: m.id.clone(),
         effects: Vec::new(),
         breaks: Vec::new(),
     }

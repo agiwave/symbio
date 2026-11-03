@@ -657,12 +657,20 @@ pub fn event_output_text_node_id(
     })
 }
 
-/// 工具**结果**节点的 id（`artifact.added` 载荷 `result_id`）。
+/// 工具结果子节点的身份：**由调用 id 派生**（一次调用只有一个结果节点）。
 ///
-/// 恢复路记 `null`（那一轮没有流式结果节点）⇒ 按**事件 id** 合成。合成用的**不是**
-/// `tool_call_id`：结果与调用是两张卡，共用 id 会让前端把它们合成一条。
-pub fn event_tool_result_node_id(e: &Event) -> String {
-    payload_str(e, "result_id").unwrap_or_else(|| format!("{}-result", e.event_id))
+/// 调用 id 是节点身份的唯一来源：`result_id` / `result_msg_id` 这类另记的结果节点
+/// 键在「节点是投影」之后没有意义（DE-047 D-312）。写侧（环）与读侧（投影器）、
+/// 执行体（流式增量帧的落点）共用这一份派生，避免三处各算一遍而静默漂移。
+pub fn result_node_id(call_id: &str) -> String {
+    format!("{call_id}-result")
+}
+
+/// 工具产物格的结果子节点 id：载荷 `tool_call_id` 派生；缺失时按事件 id 稳定合成。
+pub fn event_result_node_id(e: &Event) -> String {
+    payload_str(e, "tool_call_id")
+        .map(|call| result_node_id(&call))
+        .unwrap_or_else(|| format!("{}-result", e.event_id))
 }
 
 /// 收束 / 进展 / 兜底格的**正文节点** id：载荷 `answer_id` 优先，缺失时按同一轮

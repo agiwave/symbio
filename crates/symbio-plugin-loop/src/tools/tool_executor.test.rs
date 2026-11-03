@@ -488,16 +488,12 @@ fn tc_context(ids: &[&str]) -> Vec<ChatNode> {
         .collect()
 }
 
-/// 工具终态不变量：**本批每个 ToolCall 都必须以终态收场，且必须有结果子节点**。
+/// 节点是投影（DE-047 D-312）：中止批的未启动调用**不由执行体补节点**。
 ///
-/// 中止（`is_aborted`）时循环在第一个工具之前就 `break`，本批一个都没执行——
-/// 若不收口，这些节点会停在参数流式阶段广播出的 `Streaming` 上：
-/// 前端永远转「运行中」（把"卡住"伪装成"在跑"）。`Streaming` 是瞬态状态
-/// （只广播、不落盘），停在 Streaming 是**广播层**的收口缺口，不是持久层问题。
-///
-/// **只补父节点是不够的**（实测事故）：前端 `ToolCallNode` 的「结果」段按**子节点**
-/// 渲染，缺子节点就是「有请求、无响应」，而请求视图那边有 `flatten_chat_messages`
-/// 的占位兜底 ⇒ 模型看得见、用户看不见，于是它长期潜伏。两条断言必须同时在。
+/// 执行体只落事实（`failed{why}`，由环侧关账时写），「未执行」的调用卡 / 结果子项
+/// 由投影器按事实渲染（`rebuild.test.rs` 的
+/// `a_not_executed_call_is_projected_from_its_failure_fact` 覆盖）。执行体若在此处
+/// 写节点，写侧与投影器会各造一份，同一笔调用出现两张结果卡。
 #[tokio::test]
 async fn aborted_batch_terminates_every_tool_call() {
     let sink = ExecEventSink::silent();
@@ -537,46 +533,14 @@ async fn aborted_batch_terminates_every_tool_call() {
     )
     .await;
 
-    assert_eq!(
-        msgs.len(),
-        2,
-        "未执行的调用同样必须有结果子节点，否则前端卡片有请求、无响应"
+    assert!(
+        msgs.is_empty(),
+        "执行体不写节点：未执行的两笔都不产生结果卡"
     );
-    for m in &msgs {
-        assert_eq!(m.node_role(), Some(NodeRole::Tool));
-        assert_eq!(m.status, Some(NodeStatus::Completed));
-        assert!(
-            m.content
-                .as_ref()
-                .map(|c| c.to_text().contains("未执行"))
-                .unwrap_or(false),
-            "结果必须说明「没跑」，而不是伪造一份看起来像工具返回的文本"
-        );
-    }
-    assert_eq!(updates.len(), 2, "两个未执行的调用都必须收到终态快照");
-    for (u, id) in updates.iter().zip(["tc1", "tc2"]) {
-        // 完整快照语义：id / role / type 保留，终态字段如实应用
-        assert_eq!(u.id, id, "快照必须对应它自己的调用");
-        assert_eq!(
-            u.node_role(),
-            Some(NodeRole::Assistant),
-            "完整快照保留节点身份"
-        );
-        assert!(u.is_tool_call(), "快照必须保持工具骨架形态");
-        assert_eq!(u.status, Some(NodeStatus::Completed));
-        assert_eq!(
-            u.meta
-                .as_ref()
-                .and_then(|m| m.get("failure_kind"))
-                .and_then(|v| v.as_str()),
-            Some("aborted"),
-            "中止批的未执行必须如实标 aborted（`6cf9520d` 教训：全写成 not_executed 是成因谎报）"
-        );
-        assert!(u.error.is_none(), "未执行不是错误：挂 error 会让前端渲染 ⚠");
-    }
-    // 结果子节点必须挂在**它自己那一次调用**上（挂错父节点 = 另一个工具的结果）
-    let parents: Vec<&str> = msgs.iter().filter_map(|m| m.parent_id.as_deref()).collect();
-    assert_eq!(parents, vec!["tc1", "tc2"]);
+    assert!(
+        updates.is_empty(),
+        "执行体不写节点：父调用卡的终态由投影器按 `failed{{why}}` 渲染"
+    );
 }
 
 /// megabatch 守卫的**反馈面**：带 `overflow_notice` 的调用不执行、直接落反馈结果。
@@ -648,11 +612,9 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
     );
 }
 
-/// 实测事故（本地会话 `3ea6e4d0`）的机制回归：**交互模式下**前一个工具失败 ⇒
-/// 本批剩余被跳过 ⇒ 跳过的那些同样必须留下结果子节点。
-///
-/// 这条路径是用户报告的现场：4 个 `vdfs_read` 只留下 `failure_kind=not_executed`
-/// 的父节点、没有任何子节点，UI 上表现为「工具没有响应，会话却继续往后」。
+/// 交互模式下前一个工具失败 ⇒ 本批剩余被跳过。**跳过的那些不由执行体补节点**：
+/// 节点是事实的投影（D-312），「未执行」由环侧关账落 `failed{not_executed}`，
+/// 调用卡与结果子项由投影器渲染。执行体再写一份就是同一笔的两张结果卡。
 #[tokio::test]
 async fn interactive_break_leaves_result_for_skipped_calls() {
     let sink = ExecEventSink::silent();
@@ -694,50 +656,13 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
     )
     .await;
 
-    assert_eq!(
-        msgs.len(),
-        2,
-        "被跳过的那一次调用必须有其结果子节点（否则前端只有请求、没有响应）"
+    assert!(
+        msgs.iter().all(|m| m.parent_id.as_deref() != Some("tc2")),
+        "被跳过的调用不产生结果卡：投影器按 `failed{{not_executed}}` 渲染"
     );
-    let skipped = msgs
-        .iter()
-        .find(|m| m.parent_id.as_deref() == Some("tc2"))
-        .expect("tc2 的结果子节点缺失");
-    assert_eq!(skipped.status, Some(NodeStatus::Completed));
-    assert_eq!(
-        skipped
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("failure_kind"))
-            .and_then(|v| v.as_str()),
-        Some("not_executed")
-    );
-    assert_eq!(updates.len(), 2, "两次调用都必须有终态");
-    // 父节点的终态补丁：**没跑到**的成因写进 `meta.failure_kind`，且状态是
-    // `Completed` 而不是 `Failed`——`Failed` 会让 `get_context_messages` 过滤掉
-    // 父 ToolCall 节点，留下「孤儿 tool 结果」→ 下一轮请求携带非法 `tool_call_id`。
-    // 工具失败属**信息性**，差异由 `failure_kind` 承载。
-    let skipped_parent = updates
-        .iter()
-        .find(|u| u.id == "tc2")
-        .expect("tc2 的父节点终态缺失");
-    assert_eq!(skipped_parent.status, Some(NodeStatus::Completed));
-    assert!(skipped_parent.error.is_none());
-    assert_eq!(
-        skipped_parent
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("success"))
-            .and_then(|v| v.as_bool()),
-        Some(false)
-    );
-    assert_eq!(
-        skipped_parent
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("failure_kind"))
-            .and_then(|v| v.as_str()),
-        Some("not_executed")
+    assert!(
+        updates.iter().all(|u| u.id != "tc2"),
+        "被跳过的调用不产生父卡终态：终态同样由投影器渲染"
     );
 }
 

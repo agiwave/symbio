@@ -61,8 +61,9 @@
 //!
 //! 收束 / 进展 / 兜底三种格子共用一份产出形状（`turn_runner::produced_payload`），
 //! 载荷里带 `turn_id` / `text_id` / `reasoning_id` / `reasoning` / `tool_calls[]` /
-//! `rounds[]`；`artifact.added` 带 `tool_call_id` / `wire_id` / `args` / `result_id` /
-//! `success` / `turn_id`；`turn.supplemented` 带 `id` / `ids`。**节点身份因此是
+//! `rounds[]`；`artifact.added` 带 `tool_call_id` / `args` / `success` / `turn_id`；
+//! `turn.supplemented` 带 `id` / `ids`。结果节点 id 由调用 id 派生
+//! （[`crate::event::result_node_id`]），不作为载荷键。**节点身份因此是
 //! 事实的一部分**，重建不必凭空造号——只有「载荷确实没记的」（旧事件的补充格、
 //! 恢复路的结果节点）才由事件 id 稳定合成（合成必须**稳定**，见
 //! [`crate::event::event_payload_node_id`]）。
@@ -80,8 +81,7 @@ use crate::chat::chat_node::{
 };
 use crate::event::event_payload_node_id;
 use crate::event::{
-    event_produced_text_node_id, event_tool_result_node_id, EVENT_FAILED, EVENT_REQUEST,
-    EVENT_RESPONSE,
+    event_produced_text_node_id, event_result_node_id, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
 };
 use crate::projection::vocab::{slot_of, ChatSlot};
 use crate::projection::vocab::{ChatVocab, MessageVocab};
@@ -230,11 +230,20 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                 continue;
             }
         }
+        // 产物格是**同一逻辑节点的新状态**（待用户动作的卡 → 恢复后的答复）：
+        // 后来的事实覆盖先前的，位置与顺序锚保留。其余格子仍是「同 id 只认首次」
+        // ——那里的重复是**引用**（收束的 `tool_calls[]`），不是状态推进。
+        let carries_state = slot_of(e, c, m) == Some(ChatSlot::ArtifactAdded);
         for mut node in nodes_of(e, &denied_speech, c, m) {
-            // 同 id 只认首次：同一批调用在两个载荷里各记一次（收束的 `tool_calls[]`
-            // 是**引用**，结果正文归 `artifact.added`）。丢后者不丢信息——先到的那条
-            // 已经带着结果节点 id。
-            if gone.contains(&node.id) || at.contains_key(&node.id) {
+            if gone.contains(&node.id) {
+                continue;
+            }
+            if let Some(&i) = at.get(&node.id) {
+                if carries_state {
+                    let kept = out[i].seq;
+                    out[i] = node;
+                    out[i].seq = kept;
+                }
                 continue;
             }
             seq.assign(&mut node);
@@ -791,9 +800,8 @@ fn issued_call_id(events: &[Event], debt: &str) -> Option<String> {
 /// ## 只补没有子节点的调用
 ///
 /// 真正跑过的调用已由 `artifact.added` 产出调用卡与结果子节点（`existing` 里已有），
-/// 这里不重复渲染。判据是**子节点**而不是「结果 id 在不在」：结果 id 由失败事实的
-/// 事件 id 合成，与 `artifact.added` 的 `result_id` 不必相同，只按 id 判会把同一笔
-/// 调用画出两张结果卡。
+/// 这里不重复渲染。判据是**子节点**而不是「结果 id 在不在」：结果 id 由调用 id
+/// 派生，而失败事实的债键可能另有形态，只按 id 判会把同一笔调用画出两张结果卡。
 ///
 /// `why` 与端口执行体 `failed{why}` 同一份词表（`not_executed` / `aborted` / …），
 /// 文案按**单笔**口径（环不引入批概念，也不再声称「同批前序」）。
@@ -899,7 +907,7 @@ fn unfinished_nodes(
             nodes.push(call);
         }
 
-        let result_id = event_tool_result_node_id(e);
+        let result_id = crate::event::result_node_id(&node_id);
         if !existing.contains(&result_id) {
             let mut result = llm_build_tool_message(
                 &node_id,
@@ -931,10 +939,11 @@ fn unfinished_text(why: &str) -> String {
 
 /// 工具格（`artifact × asserted`）→ `[本轮中途产出子（可选）, ToolCall 子, 结果子]`。
 ///
-/// 载荷自带两张卡的全部身份：`tool_call_id`（ToolCall 节点 id）/ `wire_id`
-/// （provider 的调用 id）/ `args`（**已定稿的参数文本**）/ `result_id`（结果节点 id）/
-/// `success`。参数走 `llm_build_tool_call_node` 的文本入口——**不经 `Value` 重序列化**
-/// （键序一变，同一次调用在重建前后就是两个内容，见该函数的文档）。
+/// 载荷自带两张卡的身份：`tool_call_id`（ToolCall 节点 id；结果节点 id 由它派生）/
+/// `args`（**已定稿的参数文本**）/ `success`。参数走 `llm_build_tool_call_node` 的
+/// 文本入口——**不经 `Value` 重序列化**（键序一变，同一次调用在重建前后就是两个
+/// 内容，见该函数的文档）。provider 的 wire id 不落载荷：重建后的调用与结果用
+/// 同一个节点 id 自洽配对。
 fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
     let Some(turn_id) = str_of(e, "turn_id") else {
         return Vec::new();
@@ -972,7 +981,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         call_id.clone(),
         Some(tool.clone()),
         text_of(e, "args"),
-        str_of(e, "wire_id"),
+        None,
         &actor_principal(e),
     );
     call.timestamp = Some(e.ts);
@@ -1001,10 +1010,9 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         call.meta = Some(meta);
     }
 
-    // 结果节点 id 由 core 的 [`event_tool_result_node_id`] 给（载荷有就用；恢复路记 `null`
-    // ⇒ 按事件 id 稳定合成）。合成用的**不是** call_id——结果与调用是两张卡，
-    // 共用 id 会让前端把它们合成一条。
-    let result_id = event_tool_result_node_id(e);
+    // 结果节点 id 由 core 按调用 id 派生（`{call}-result`），与写侧同一份规则：
+    // 结果与调用是两张卡，共用 id 会让前端把它们合成一条。
+    let result_id = event_result_node_id(e);
     // 等待用户的结果节点是**待用户动作的卡**（`user_prompt` + `waiting_user_action`），
     // 不是普通结果文本：它的形状（`msg_type` / `status` / `meta.prompt`）随载荷入格，
     // 重建照复刻——否则实时面看得见的审批卡，重启后会变成一条普通工具结果

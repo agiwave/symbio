@@ -243,9 +243,9 @@ pub trait PortExecutor: Send + Sync + 'static {
 /// 一次工具调用以「等待用户动作」结束时的载荷。
 ///
 /// 工具只声明**意图与内容**（`failure_kind` + `prompt`），**不构造节点**：
-/// user_prompt 节点的身份是 `result_msg_id`，而那个 id 由编排层持有
-/// （占位节点也是它建的）。让工具去猜 id 正是历史上「同一逻辑节点两个 id」
-/// 的成因——前端出现重复审批卡，resume 只删得掉一个，另一个永远不消失。
+/// user_prompt 节点的身份由调用 id派生（`{call_id}-result`），能力包不另立 id。
+/// 让工具自己编 id 正是历史上「同一逻辑节点两个 id」的成因——前端出现重复审批卡，
+/// resume 只删得掉一个，另一个永远不消失。
 #[derive(Debug, Clone)]
 pub struct PendingPrompt {
     /// 节点正文（审批卡 / 提问卡显示的那句话）

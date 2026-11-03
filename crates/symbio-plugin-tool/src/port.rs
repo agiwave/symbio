@@ -13,9 +13,7 @@
 //! |---|---|
 //! | `name` | 模型给的**线上名**（解析在本插件；环只当不具名纯值搬运） |
 //! | `args` | 调用参数（模型发的原样 JSON） |
-//! | `call_id` | 本次调用的 id（幂等与节点挂靠） |
-//! | `result_msg_id` | 结果占位节点 id（流式增量按它广播） |
-//! | `wire_id` | provider wire id（产物格的 `wire_id` 字段） |
+//! | `call_id` | 本次调用的 id（幂等与节点挂靠；结果节点 id 由它派生） |
 //! | `archive_dir` | L0 存档目录（结果超预算时写全文） |
 //! | `artifact` | `{ key, round, round_id, produced_by, allowed, denied_reason }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
 //! | `land_only` | `{ text, success, needs_user_action, prompt, failure_kind }`：只落产物格、不再执行（唤醒结果与没跑到的结果走这一形态） |
@@ -55,15 +53,12 @@ pub(crate) const TOOL: &str = ports::TOOL;
 const KEY_TOOL_NAME: &str = "name";
 const KEY_ARGS: &str = "args";
 const KEY_TOOL_CALL_ID: &str = "call_id";
-const KEY_RESULT_MSG_ID: &str = "result_msg_id";
-/// 模型给的 provider wire id（产物格字段，关账由环侧管）。
-const KEY_WIRE_ID: &str = "wire_id";
 /// L0 存档目录（会话子目录；缺省时守卫回退到系统临时目录）。
 const KEY_ARCHIVE_DIR: &str = "archive_dir";
 /// 产物格上下文：`{ key, round, round_id, produced_by, allowed, denied_reason }`。
 ///
 /// 落格这件事在**执行体**里做（P1b，DE-047 D-308）：产物是这次结果的产物，不是环的
-/// 派生产物。`key` 由环按「轮 + 结果节点」给出（一次结果一个键），拒绝时按
+/// 派生产物。`key` 由环按「轮 + 债务 id」给出（一笔债一个键），拒绝时按
 /// `deny-{round}-artifact` 落一条幂等的否定事实；`allowed` 是环侧产物闸的结论
 /// （执行体不自判权限）。
 const KEY_ARTIFACT: &str = "artifact";
@@ -235,7 +230,6 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
 struct CallMeta<'a> {
     tool_name: &'a str,
     tool_call_id: &'a str,
-    wire_id: &'a str,
     args: &'a serde_json::Value,
     /// 本工具声明的行为名（从注册表元数据抄来；`annotations` 按它选实现）。
     declared: &'static [&'static str],
@@ -289,9 +283,10 @@ struct LandedResult<'a> {
 
 /// 落一条 `artifact.added`：产物是**这次结果的产物**，所以由执行体写（P1b / D-308）。
 ///
-/// 载荷字段（`tool` / `text` / `tool_call_id` / `wire_id` / `args` / `result_id` /
-/// `success` / `needs_user_action` / `prompt` / `failure_kind` / `turn_id` + 能力交出的
-/// 富化字段）全在这一处装配。`allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时
+/// 载荷字段（`tool` / `text` / `tool_call_id` / `args` / `success` /
+/// `needs_user_action` / `prompt` / `failure_kind` / `turn_id` + 能力交出的
+/// 富化字段）全在这一处装配。结果节点 id 由 `tool_call_id` 派生，不作为载荷键
+/// （DE-047 D-312）。`allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时
 /// 按 `deny-{round}-artifact` 落一条幂等否定事实（同一轮多条结果说的是同一件事）。
 async fn land_artifact(
     exec: &PortExecContext,
@@ -322,17 +317,11 @@ async fn land_artifact(
             .await;
         return;
     }
-    let result_id = payload
-        .get(KEY_RESULT_MSG_ID)
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
     let mut artifact_payload = serde_json::json!({
         "tool": meta.tool_name,
         "text": landed.text,
         "tool_call_id": meta.tool_call_id,
-        "wire_id": meta.wire_id,
         "args": meta.args.to_string(),
-        "result_id": result_id,
         "success": landed.success,
         // 等待用户：结果节点是一张**待用户动作的卡**（`user_prompt` +
         // `waiting_user_action`），不是普通结果文本。
@@ -435,9 +424,9 @@ async fn finish(
 /// 只落产物格、不执行：唤醒结果与没跑到的占位结果走这一形态。
 ///
 /// 载荷里的 `land_only` 是**结果纯值**（`text` / `success` / `needs_user_action` /
-/// `prompt` / `failure_kind`）；结构身份（`tool_name` / `wire_id` / `args` /
-/// `result_msg_id`）与执行形态共用同一组键。行为声明仍从能力表取——富化字段由执行体
-/// 算，环不复制各工具的行为名（DE-025 D-207）。
+/// `prompt` / `failure_kind`）；结构身份（`tool_name` / `args` / `tool_call_id`）与
+/// 执行形态共用同一组键。行为声明仍从能力表取——富化字段由执行体算，环不复制各
+/// 工具的行为名（DE-025 D-207）。
 async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
     let Some(lo) = payload.get(KEY_LAND_ONLY) else {
         return;
@@ -448,10 +437,6 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
         .unwrap_or_default();
     let tool_call_id = payload
         .get(KEY_TOOL_CALL_ID)
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-    let wire_id = payload
-        .get(KEY_WIRE_ID)
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     let args = payload
@@ -505,7 +490,6 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
     let meta = CallMeta {
         tool_name,
         tool_call_id,
-        wire_id,
         args: &args,
         declared: declared_of(&declared_table, tool_name),
     };
@@ -596,11 +580,9 @@ impl PortExecutor for ToolPort {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        let result_msg_id = payload
-            .get(KEY_RESULT_MSG_ID)
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
+        // 结果节点身份由调用 id 派生（写侧 / 读侧 / 执行体同一份规则，D-312）：
+        // 流式增量帧按它广播，最终结果卡也挂在它下面。
+        let result_msg_id = symbio_plugin_api::node_build::result_node_id(&tool_call_id);
         let args = payload
             .get(KEY_ARGS)
             .cloned()
@@ -732,8 +714,8 @@ impl PortExecutor for ToolPort {
         tool_ctx.set(AGENT_ID, agent_id);
         tool_ctx.set(SESSION_ID, session_id);
         tool_ctx.set(TOOL_CALL_ID, tool_call_id.clone());
-        // 流式工具（如 shell）据此 id 广播增量帧：与 result_msg_id 占位节点同 id。
-        tool_ctx.set(RESULT_MSG_ID, result_msg_id.clone());
+        // 流式工具（如 shell）据此 id 广播增量帧：它就是结果节点 id（由调用 id 派生）。
+        tool_ctx.set(RESULT_MSG_ID, result_msg_id);
         // 执行期双原语注入：工具「把事件写到哪」与「如何感知中止」的唯一来源。
         tool_ctx.set(EVENT_SINK, exec.sink.clone());
         tool_ctx.set(ABORT_SIGNAL, exec.abort.clone());

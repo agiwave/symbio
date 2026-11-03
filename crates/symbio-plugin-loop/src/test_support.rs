@@ -640,12 +640,7 @@ impl PortExecutor for FixtureToolPort {
                                 .get("call_id")
                                 .cloned()
                                 .unwrap_or(Value::Null),
-                            "wire_id": payload.get("wire_id").cloned().unwrap_or(Value::Null),
                             "args": payload.get("args").cloned().unwrap_or(Value::Null),
-                            "result_id": payload
-                                .get("result_msg_id")
-                                .cloned()
-                                .unwrap_or(Value::Null),
                             "success": lo.get("success").cloned().unwrap_or(Value::Null),
                             "needs_user_action": lo
                                 .get("needs_user_action")
@@ -696,11 +691,8 @@ impl PortExecutor for FixtureToolPort {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let result_msg_id = payload
-            .get("result_msg_id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        // 结果节点身份由调用 id 派生（与生产同一份规则，载荷不再带这个键）。
+        let result_msg_id = symbio_kernel::event::result_node_id(&tool_call_id);
         let Some(ctx) = exec.ctx.clone() else {
             return fixture_outcome("Error: No request context".into(), false, None);
         };

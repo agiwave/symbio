@@ -30,12 +30,12 @@
 mod dispatch;
 mod tool_executor;
 
-pub use self::dispatch::unfinished::{is_unanswered, NOT_EXECUTED};
+pub use self::dispatch::{is_unanswered, NOT_EXECUTED};
 // 中止的成因词：与 `NOT_EXECUTED` 同属「没跑到」的词表，跨域取值只经这条门面。
 // 生产面没有引用点（端口关账读的是结果节点上的 `failure_kind` 本身），
 // 非测试构建下允许无引用——同 core 事件字典的做法（见 `symbio_sdk` 的 `lib.rs`）。
 #[allow(unused_imports)]
-pub use self::dispatch::unfinished::ABORTED;
+pub use self::dispatch::ABORTED;
 // 外部执行闸门：判据住在 `gates`（唯一生产消费方是本域的 `external_execution`，
 // D-190）；`derived_facts` 的熔断写方经本门面取用，不深潜子模块。
 pub(crate) use self::dispatch::gates::CircuitBreaker;

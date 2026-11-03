@@ -144,9 +144,7 @@ fn outcome(call: &ToolPortCall, failure_kind: &str) -> CallOutcome {
         needs_user_action: false,
         prompt: None,
         failure_kind: failure_kind.into(),
-        wire_id: String::new(),
         args: String::new(),
-        result_id: String::new(),
         effects: Vec::new(),
         breaks: Vec::new(),
     }
@@ -459,7 +457,6 @@ fn a_wake_request_lands_as_a_port_request_carrying_the_resume_marker() {
         target: "tc-1",
         tool: "vdfs_read",
         args: &json!({ "path": "a.md", "approved": true }),
-        wire_id: "w-1",
         turn_root: "root-1",
         intent: &WakeIntent::Execute,
     })
@@ -480,7 +477,10 @@ fn a_wake_request_lands_as_a_port_request_carrying_the_resume_marker() {
     assert_eq!(req.payload["resume"], json!("approve"), "唤醒标记在载荷上");
     assert_eq!(req.payload["target"], json!("tc-1"), "目标节点 id 在载荷上");
     assert_eq!(req.payload["tool"], json!("vdfs_read"));
-    assert_eq!(req.payload["wire_id"], json!("w-1"));
+    assert!(
+        req.payload.get("wire_id").is_none(),
+        "节点身份不落载荷：结果节点 id 由 `call_id` 派生（D-312）"
+    );
 
     assert!(
         !facts.iter().any(|e| e.kind == EVENT_AUTHZ_GRANTED),
@@ -508,7 +508,6 @@ fn the_wake_read_side_restores_the_intent_and_the_target() {
         target: "tc-1",
         tool: "vdfs_read",
         args: &json!({ "path": "a.md", "approved": true }),
-        wire_id: "w-1",
         turn_root: "root-1",
         intent: &WakeIntent::Execute,
     })
@@ -531,7 +530,10 @@ fn the_wake_read_side_restores_the_intent_and_the_target() {
     let tc = &batch.turn.tool_calls[0];
     assert_eq!(tc.id.as_deref(), Some("tc-1"), "结果挂回原来那张卡");
     assert_eq!(tc.name.as_deref(), Some("vdfs_read"));
-    assert_eq!(tc.wire_id.as_deref(), Some("w-1"));
+    assert!(
+        tc.wire_id.is_none(),
+        "唤醒不是模型应答，没有 provider wire id"
+    );
     assert_eq!(tc.arguments["path"], json!("a.md"));
 }
 
@@ -553,7 +555,6 @@ fn a_wake_that_the_user_rejected_reads_back_as_a_denial() {
         target: "tc-1",
         tool: "shell",
         args: &json!({ "cmd": "rm -rf /" }),
-        wire_id: "w-1",
         turn_root: "root-1",
         intent: &intent,
     })
@@ -588,7 +589,6 @@ fn a_closed_wake_request_is_not_read_back() {
         target: "tc-1",
         tool: "vdfs_read",
         args: &json!({ "path": "a.md" }),
-        wire_id: "w-1",
         turn_root: "root-1",
         intent: &WakeIntent::Execute,
     })

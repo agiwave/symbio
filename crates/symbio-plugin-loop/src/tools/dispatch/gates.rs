@@ -57,8 +57,6 @@ pub(crate) struct GateReadings {
     /// 持有到批尾的代价是一份 `Vec<Event>`；换来的是判断只读**值**、不在执行
     /// 窗口里回放事实源（D-084 的口径）。
     pub(crate) session_facts: Vec<Event>,
-    /// 本批留底 `(id, name, args)`——未执行收口的依据。
-    pub(crate) batch_meta: Vec<(String, String, serde_json::Value)>,
     /// 同参重复调用台账；逐条执行时登记，故为可变读数。
     pub(crate) seen_calls: Vec<String>,
 }
@@ -130,22 +128,6 @@ pub(crate) async fn read_batch_gates(
     let metas = symbio_sdk::capability::tool_metas(&ctx).await;
     let decls = ToolDecls::of_metas(&metas);
 
-    // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
-    // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
-    // **没跑到的委托**记成没履约的承诺（见 [`record_effect`]）。
-    // id 或 name 缺失的不进表：它们走协议失败分支，父节点已入 `parent_updates`。
-    let batch_meta: Vec<(String, String, serde_json::Value)> = tool_calls
-        .iter()
-        .filter_map(|tc| {
-            let id = tc.id.as_deref()?;
-            let name = tc.name.as_deref()?;
-            if id.trim().is_empty() || name.trim().is_empty() {
-                return None;
-            }
-            Some((id.to_string(), name.to_string(), tc.arguments.clone()))
-        })
-        .collect();
-
     // 同参重复调用的**台账**：收进此前已出现过的调用签名，
     // 之后每处理一条调用就登记一条。登记以**模型发出的调用**为准，被闸门拒掉的也算
     // ——「绕圈」是模型侧的事实，与本次执行成败无关。
@@ -159,7 +141,6 @@ pub(crate) async fn read_batch_gates(
         before,
         principal,
         session_facts,
-        batch_meta,
         seen_calls,
     }
 }
@@ -447,7 +428,6 @@ pub(crate) async fn refuse(
     id: &str,
     name: &str,
     args: &Value,
-    result_msg_id: &str,
     refusal: Refusal,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
@@ -473,7 +453,7 @@ pub(crate) async fn refuse(
         id,
         &format!("{}: {}", refusal.prefix, refusal.reason),
         Some(false),
-        Some(result_msg_id.to_string()),
+        Some(symbio_kernel::event::result_node_id(id)),
         Some(name),
     );
     tool_messages.push(tool_msg);

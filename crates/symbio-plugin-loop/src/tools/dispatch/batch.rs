@@ -42,16 +42,16 @@ use super::*;
 /// 两条消息分别加入 tool_messages / parent_updates，由调用方统一持久化。
 async fn record_protocol_failure(
     sink: &ExecEventSink,
-    tool_call_id: &str,
+    call_id: &str,
     error_text: &str,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
     context_messages: &[ChatNode],
     principal: &symbio_sdk::chat::principal::Principal,
 ) {
-    let result_msg_id = uuid::Uuid::new_v4().to_string();
+    let result_msg_id = symbio_kernel::event::result_node_id(call_id);
     let mut tool_msg = llm_build_tool_message(
-        tool_call_id,
+        call_id,
         &format!("Error: {error_text}"),
         Some(false),
         Some(result_msg_id),
@@ -71,7 +71,7 @@ async fn record_protocol_failure(
     // - id 本身缺失（兜底 llm_short_id）：不存在任何父节点——构造**完整**的 ToolCall
     //   终态节点（name/参数为 None 是诚实表达），收束那一格会把它补进转写并
     //   落库，结果子节点因此有真实的父节点，不再悬空。
-    let parent_update = match context_messages.iter().find(|m| m.id == tool_call_id) {
+    let parent_update = match context_messages.iter().find(|m| m.id == call_id) {
         Some(p) => {
             let mut full = p.clone();
             full.status = Some(NodeStatus::Completed);
@@ -85,7 +85,7 @@ async fn record_protocol_failure(
             full
         }
         None => ChatNode {
-            id: tool_call_id.to_string(),
+            id: call_id.to_string(),
             principal: Some(principal.clone()),
             msg_type: Some(NodeKind::Skeleton),
             status: Some(NodeStatus::Completed),
@@ -127,19 +127,15 @@ async fn record_protocol_failure(
 /// 同时写入 `meta.started_at`（毫秒）：前端据此显示"已运行 47s"——「运行中」是断言，
 /// 时长才是**判据**，用户靠它区分"还在跑"与"卡住了"。用节点属性承载而不是前端
 /// 自己计时，切会话/重连后时长仍然连续（前端计时会从零重来）。
-async fn emit_tool_running(
-    sink: &ExecEventSink,
-    context_messages: &[ChatNode],
-    tool_call_id: &str,
-) {
+async fn emit_tool_running(sink: &ExecEventSink, context_messages: &[ChatNode], call_id: &str) {
     // 完整快照：从权威转写取父 ToolCall 副本（id / 父子关系 / name / 参数都在），
     // 应用「运行中」状态与 meta.started_at 后整条广播。找不到 = 协议违例
     // （ToolCallDelta 必然先广播过完整节点），报错并跳过——不造半截节点。
-    let Some(parent) = context_messages.iter().find(|m| m.id == tool_call_id) else {
+    let Some(parent) = context_messages.iter().find(|m| m.id == call_id) else {
         plugin_error!(
             "session",
             "[Tool] emit_tool_running: 转写中不存在工具调用 {}（协议违例），跳过运行态广播",
-            tool_call_id
+            call_id
         );
         return;
     };
@@ -177,9 +173,6 @@ struct Ready {
     id: String,
     name: String,
     args: Value,
-    result_msg_id: String,
-    /// 模型给的 provider wire id（产物格字段，P1b）。
-    wire_id: String,
     repeat_note: Option<String>,
 }
 
@@ -201,14 +194,12 @@ enum PreTerminal {
         name: String,
         args: Value,
         notice: String,
-        result_msg_id: String,
     },
     /// 闸门或 PreToolUse 钩子的拒止。
     Refused {
         id: String,
         name: String,
         args: Value,
-        result_msg_id: String,
         refusal: Refusal,
     },
 }
@@ -309,8 +300,6 @@ async fn prepare_call(
         });
     }
 
-    let result_msg_id = uuid::Uuid::new_v4().to_string();
-
     // ── 单响应超限丢弃（megabatch 守卫的**反馈面**）────────────────────
     //
     // 上限判在流的源头（model 插件 stream.rs），但处置是反馈而不是失败：
@@ -328,7 +317,6 @@ async fn prepare_call(
             name,
             args: tc.arguments.clone(),
             notice: notice.clone(),
-            result_msg_id,
         });
     }
 
@@ -346,7 +334,6 @@ async fn prepare_call(
             id,
             name,
             args: tc.arguments.clone(),
-            result_msg_id,
             refusal,
         });
     }
@@ -371,7 +358,6 @@ async fn prepare_call(
             id,
             name,
             args: tc.arguments.clone(),
-            result_msg_id,
             refusal: Refusal::from_before(judged),
         });
     }
@@ -393,7 +379,6 @@ async fn prepare_call(
             id,
             name,
             args: tc.arguments.clone(),
-            result_msg_id,
             refusal: Refusal::blocked(block_msg),
         });
     }
@@ -402,8 +387,6 @@ async fn prepare_call(
         id,
         name,
         args: tc.arguments.clone(),
-        result_msg_id,
-        wire_id: tc.wire_id.clone().unwrap_or_default(),
         repeat_note,
     })
 }
@@ -451,8 +434,8 @@ async fn emit_terminal(
             name,
             args,
             notice,
-            result_msg_id,
         } => {
+            let result_msg_id = symbio_kernel::event::result_node_id(&id);
             let mut tool_msg =
                 llm_build_tool_message(&id, &notice, Some(false), Some(result_msg_id), Some(&name));
             // 与 `not_executed_result` 同口径：「没跑」不是「跑失败」，以 Completed
@@ -491,7 +474,6 @@ async fn emit_terminal(
             id,
             name,
             args,
-            result_msg_id,
             refusal,
         } => {
             refuse(
@@ -500,7 +482,6 @@ async fn emit_terminal(
                 &id,
                 &name,
                 &args,
-                &result_msg_id,
                 refusal,
                 tool_messages,
                 parent_updates,
@@ -534,10 +515,9 @@ async fn finish_call(
         id,
         name,
         args,
-        result_msg_id,
-        wire_id: _,
         repeat_note,
     } = ready;
+    let result_msg_id = symbio_kernel::event::result_node_id(&id);
     // 执行体交回的已是「节点正文 / 记账原文 / 守卫元数据」三份，本层不再裁剪
     // 结果（L0 守卫随执行体迁出，P1b / DE-047 D-308）。
     let ExecResult {
@@ -698,8 +678,6 @@ fn start_execution<'a>(
     let name = ready.name.clone();
     let id = ready.id.clone();
     let args = ready.args.clone();
-    let result_msg_id = ready.result_msg_id.clone();
-    let wire_id = ready.wire_id.clone();
     let ctx = ctx.clone();
     Box::pin(async move {
         let out = execute_one(
@@ -709,10 +687,8 @@ fn start_execution<'a>(
             &name,
             args,
             &id,
-            &wire_id,
             sink,
             abort,
-            result_msg_id,
             ctx,
         )
         .await;
@@ -972,10 +948,8 @@ pub(crate) async fn run_batch(
                             &ready.name,
                             ready.args.clone(),
                             &ready.id,
-                            &ready.wire_id,
                             sink,
                             abort,
-                            ready.result_msg_id.clone(),
                             ctx.clone(),
                         )
                         .await;

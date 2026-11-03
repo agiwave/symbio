@@ -139,15 +139,14 @@ pub(crate) fn output_fields(
     payload
 }
 
-/// 从本轮结果里配对出 `tc` 的那条（按 ToolCall 节点 id / wire id；配不上 ⇒ `None`）。
+/// 从本轮结果里配对出 `tc` 的那条（按 ToolCall 节点 id；配不上 ⇒ `None`）。
 pub(crate) fn outcome_of<'a>(
     outcomes: &'a [super::super::tool_dispatch::CallOutcome],
     tc: &symbio_kernel::llm::TurnToolCallInfo,
 ) -> Option<&'a super::super::tool_dispatch::CallOutcome> {
-    outcomes.iter().find(|o| {
-        tc.id.as_deref().map(|id| id == o.call_id).unwrap_or(false)
-            || (!o.wire_id.is_empty() && tc.wire_id.as_deref() == Some(o.wire_id.as_str()))
-    })
+    outcomes
+        .iter()
+        .find(|o| tc.id.as_deref().map(|id| id == o.call_id).unwrap_or(false))
 }
 
 /// 给产出载荷补**状态**字段（完成 / 终止 / 等待是事实的状态，不进产出形状本身）。

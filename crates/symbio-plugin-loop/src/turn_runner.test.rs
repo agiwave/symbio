@@ -2044,9 +2044,7 @@ mod tool_round_tests {
                 "tool": o.name,
                 "text": o.text,
                 "tool_call_id": o.call_id,
-                "wire_id": o.wire_id,
                 "args": o.args,
-                "result_id": o.result_id,
                 "success": o.ok,
                 "needs_user_action": o.needs_user_action,
                 "prompt": o.prompt,
@@ -2107,7 +2105,7 @@ mod tool_round_tests {
             if begin_batch(store.as_ref(), std::slice::from_mut(call)).is_none() {
                 return ToolBegin::None;
             }
-            let (tc_id, tc_name, tc_wire, tc_args) = one_call_meta(rt);
+            let (tc_id, tc_name, tc_args) = one_call_meta(rt);
             let outcome = CallOutcome {
                 call: call.call.clone(),
                 call_id: tc_id,
@@ -2127,11 +2125,8 @@ mod tool_round_tests {
                 } else {
                     String::new()
                 },
-                // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点
-                // （`result_id` 空串 = 无结果子节点）。
-                wire_id: tc_wire,
+                // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点。
                 args: tc_args,
-                result_id: String::new(),
                 effects: Vec::new(),
                 breaks: Vec::new(),
             };
@@ -2237,7 +2232,7 @@ mod tool_round_tests {
             {
                 call.sent = true;
             }
-            let (tc_id, tc_name, tc_wire, tc_args) = one_call_meta(rt);
+            let (tc_id, tc_name, tc_args) = one_call_meta(rt);
             let outcome = CallOutcome {
                 call: call.call.clone(),
                 call_id: tc_id,
@@ -2247,9 +2242,7 @@ mod tool_round_tests {
                 needs_user_action: false,
                 prompt: None,
                 failure_kind: String::new(),
-                wire_id: tc_wire,
                 args: tc_args,
-                result_id: String::new(),
                 effects: Vec::new(),
                 breaks: Vec::new(),
             };
@@ -2353,7 +2346,7 @@ mod tool_round_tests {
                     panic!("替身拒绝落格失败：{e:?}");
                 }
             }
-            let (tc_id, tc_name, tc_wire, tc_args) = one_call_meta(rt);
+            let (tc_id, tc_name, tc_args) = one_call_meta(rt);
             let outcome = CallOutcome {
                 call: call.call.clone(),
                 call_id: tc_id,
@@ -2363,9 +2356,7 @@ mod tool_round_tests {
                 needs_user_action: false,
                 prompt: None,
                 failure_kind: "denied".into(),
-                wire_id: tc_wire,
                 args: tc_args,
-                result_id: String::new(),
                 effects: Vec::new(),
                 breaks: Vec::new(),
             };
@@ -2389,12 +2380,11 @@ mod tool_round_tests {
     }
 
     /// 逐笔派发时这一笔的节点身份（假分发方的结果只带一笔）。
-    fn one_call_meta(rt: &LlmTurn) -> (String, String, String, String) {
+    fn one_call_meta(rt: &LlmTurn) -> (String, String, String) {
         match rt.tool_calls.first() {
             Some(tc) => (
                 tc.id.clone().unwrap_or_default(),
                 tc.name.clone().unwrap_or_default(),
-                tc.wire_id.clone().unwrap_or_default(),
                 symbio_sdk::turn::node_build::tool_call_args_text(tc),
             ),
             None => Default::default(),
@@ -3409,7 +3399,6 @@ mod tool_round_tests {
             target: "tc-1",
             tool: "vdfs_read",
             args: &serde_json::json!({ "path": "a.md", "approved": true }),
-            wire_id: "w-1",
             turn_root: "root-1",
             intent: &super::super::super::tool_dispatch::WakeIntent::Execute,
         })
@@ -3530,8 +3519,8 @@ mod tool_round_tests {
         let tool_msgs = s.tools();
         assert_eq!(
             tool_msgs.last(),
-            Some(&("文件内容：hello（已批准）", Some("vdfs_read"), Some("w-1"))),
-            "唤醒的结果带自己的调用 id 进 prompt：{s:?}"
+            Some(&("文件内容：hello（已批准）", Some("vdfs_read"), Some("tc-1"))),
+            "唤醒的结果按调用节点 id 与调用卡配对：{s:?}"
         );
         assert_eq!(tool_msgs.len(), 2, "首幕那次的结果仍在（跨轮累加）：{s:?}");
     }
@@ -3647,7 +3636,7 @@ mod tool_round_tests {
             if begin_batch(store.as_ref(), std::slice::from_mut(call)).is_none() {
                 return ToolBegin::None;
             }
-            let (tc_id, tc_name, tc_wire, tc_args) = one_call_meta(rt);
+            let (tc_id, tc_name, tc_args) = one_call_meta(rt);
             let outcome = CallOutcome {
                 call: call.call.clone(),
                 call_id: tc_id,
@@ -3664,9 +3653,7 @@ mod tool_round_tests {
                 needs_user_action: false,
                 prompt: None,
                 failure_kind: String::new(),
-                wire_id: tc_wire,
                 args: tc_args,
-                result_id: String::new(),
                 effects: Vec::new(),
                 breaks: Vec::new(),
             };

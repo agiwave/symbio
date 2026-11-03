@@ -247,7 +247,7 @@ pub fn slot_node_of(e: &crate::Event, c: &ChatVocab, m: &MessageVocab) -> Option
             Some(crate::event::event_answer_node_id(e))
         }
         // 产物格：一格一张工具结果卡。
-        ChatSlot::ArtifactAdded => Some(crate::event::event_tool_result_node_id(e)),
+        ChatSlot::ArtifactAdded => Some(crate::event::event_result_node_id(e)),
         ChatSlot::MessageAdded
         | ChatSlot::MessageEdited
         | ChatSlot::MessageRemoved

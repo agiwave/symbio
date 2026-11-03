@@ -144,7 +144,6 @@ async fn land_tool_wake(
     let tc = &messages[tc_idx];
     let (tool_name, base_args) = extract_tool_context(&messages, tc_idx, child_idx);
     let old_child = Some(messages[child_idx].id.clone());
-    let wire_id = tc.tool_call_id.clone().unwrap_or_default();
     // Turn 根：`flat` 档记在 `meta.turn_root`，`grouped` 档是 `parent_id`。
     // 两处都取不到（老数据 / 手工节点）时现开一个——续写幕必须有一个根可挂。
     let turn_root = symbio_sdk::turn::node_build::turn_root_of(tc)
@@ -170,7 +169,6 @@ async fn land_tool_wake(
         target: &req.target_id,
         tool: &tool_name,
         args: &args,
-        wire_id: &wire_id,
         turn_root: &turn_root,
         intent: &intent,
     })
@@ -203,7 +201,12 @@ pub(crate) async fn merge_runner_messages(
     messages: Vec<ChatNode>,
 ) -> Result<(), PluginError> {
     if let Some(old) = turn.resume_old_child.take() {
-        if context.messages.iter().any(|m| m.id == old) {
+        // 旧交互卡与新结果卡是**同一个节点身份**（结果 id 由调用 id 派生，D-312）：
+        // 新结果覆盖它时不能再落 `remove-nodes`，否则被删的是刚写下的答复，
+        // 重建面按 `message.removed` 把它当成永久消失（T27 的「有请求无响应」）。
+        // 仅当新结果没有接管这个 id（确实没有替换节点）时才删旧卡。
+        let superseded = messages.iter().any(|m| m.id == old);
+        if !superseded && context.messages.iter().any(|m| m.id == old) {
             context.messages.retain(|m| m.id != old);
             session
                 .run_op_unit(run_ops::REMOVE_NODES, RemoveNodesRequest { ids: vec![old] })

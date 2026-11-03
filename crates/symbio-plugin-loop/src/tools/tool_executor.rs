@@ -134,10 +134,8 @@ pub async fn execute_one(
     name: &str,
     args: Value,
     call_id: &str,
-    wire_id: &str,
     sink: &ExecEventSink,
     abort: &ExecAbortSignal,
-    result_msg_id: String,
     ctx: Arc<dyn PluginInvokeRequest>,
 ) -> ExecResult {
     let absent = |why: &str| {
@@ -179,8 +177,6 @@ pub async fn execute_one(
                     "name": name,
                     "args": args,
                     "call_id": call_id,
-                    "result_msg_id": result_msg_id,
-                    "wire_id": wire_id,
                     "archive_dir": env.archive_dir.to_string_lossy(),
                 }),
             },
@@ -278,11 +274,6 @@ pub(crate) async fn land_outcome_async(
         exec_ctx.set(PLUGIN_PARENT, Some(Arc::downgrade(p)));
     }
     let args = serde_json::from_str(&outcome.args).unwrap_or(Value::Null);
-    let result_key = if outcome.result_id.is_empty() {
-        &outcome.call_id
-    } else {
-        &outcome.result_id
-    };
     let _ = executor
         .execute(
             PortExecContext {
@@ -299,11 +290,12 @@ pub(crate) async fn land_outcome_async(
                     "name": outcome.name,
                     "args": args,
                     "call_id": outcome.call_id,
-                    "result_msg_id": outcome.result_id,
-                    "wire_id": outcome.wire_id,
                     "archive_dir": env.archive_dir.to_string_lossy(),
                     "artifact": {
-                        "key": format!("a-{}-{}", env.round, result_key),
+                        // 键按**这一笔债务**而不是节点身份生成：同一张调用卡的等待态与
+                        // 答复态是两笔债（`…-resume-…-1`），各有一次产物；按节点身份
+                        // 生成会让后一条因幂等被吞掉（答复卡凭空消失）。
+                        "key": format!("a-{}-{}", env.round, outcome.call.id),
                         "round": env.round,
                         "round_id": env.round_id,
                         "produced_by": env.produced_by,
@@ -339,26 +331,20 @@ pub(crate) async fn land_outcome_async(
 /// ## 四条不变量（本函数负责保证）
 ///
 /// 1. **本批每一个工具调用都必须以终态收场**（`Completed` / `WaitingUserAction`）：
-///    调用前广播 `Streaming`（`dispatch::batch::emit_tool_running`），调用后广播终态；未执行的
-///    （阻塞 / 中止 / 交互中断）在函数末尾统一收口（`failure_kind = "not_executed"`）。
-///    漏掉任何一条，前端就会有一个永远转下去的「运行中」。
-/// 2. **每一个工具调用都必须有结果子节点**（`tool_messages` 里一条 role=Tool）——
-///    「结果」在树里是子节点，前端按它渲染响应段。任何一条 return 分支
-///    （参数解析失败 / 未执行 / 中止 / 被钩子拦下 / 闸门拒绝）都必须在给出父节点
-///    终态的同时给出结果：只有父状态没有结果，用户看到的就是「调用凭空消失、
-///    会话照旧往下走」。见 `dispatch::unfinished::not_executed_result`。
+///    调用前广播 `Streaming`（`dispatch::batch::emit_tool_running`），调用后广播终态。
+///    「没跑到」的调用由环写 `failed{why}` 事实，投影器按事实渲染调用卡终态与
+///    「未执行」结果子项，环不再补节点（DE-047 D-312）。
 ///
-/// 3. **外部执行闸门在每个调用点各判一次**：判据批首读一次
+/// 2. **外部执行闸门在每个调用点各判一次**：判据批首读一次
 ///    （[`BreakerInputs`]），结论按调用点出——`Refuse` 零事件、`Break` 走出参
 ///    随收束入格、`Allow` 照旧开窗。
-/// 4. **声明闸由能力包自己判**（DE-025 D-219）：工具在 `CapabilityMeta.behaviors`
+/// 3. **声明闸由能力包自己判**（DE-025 D-219）：工具在 `CapabilityMeta.behaviors`
 ///    上声明「我受哪项管辖」，对应实现从
 ///    `ToolBehavior::before` 回答能不能跑（淘汰 / 任务表写侧即此类）。宿主只交批首
 ///    读好的结论（主体 / 控制面撤销值 / 会话事实切片），本层不含任何「哪个工具名
 ///    受什么管辖」的分支。
 ///
-/// 阶段分层见 `dispatch/{gates,batch,unfinished}`；编排顺序（空批早退 → ① → ② → ③）
-/// 与读数语义不变。
+/// 阶段分层见 `dispatch/{gates,batch}`；编排顺序（空批早退 → ① → ②）与读数语义不变。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn process_tool_calls_in_env(
     tool_calls: Vec<TurnToolCallInfo>,
@@ -373,7 +359,7 @@ pub(crate) async fn process_tool_calls_in_env(
     effects: &mut Vec<EffectInput>,
     breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
-    // ① 批首闸门读数（阶段见 `dispatch/{gates,batch,unfinished}`）。
+    // ① 批首闸门读数（阶段见 `dispatch/{gates,batch}`）。
     //    空批不读闸门、不发日志——与拆分前的早退位置逐字一致。
     if tool_calls.is_empty() {
         return (Vec::new(), Vec::new());
@@ -392,7 +378,7 @@ pub(crate) async fn process_tool_calls_in_env(
     // - `parent_updates`：ToolCall 父节点的**完整终态快照**（发射端从
     //   `context_messages` 取权威副本应用终态），供调用方做内存镜像整条替换并随
     //   `persist_messages` 落库。
-    let (mut tool_messages, mut parent_updates) = super::dispatch::batch::run_batch(
+    let (tool_messages, parent_updates) = super::dispatch::batch::run_batch(
         tool_calls,
         parent,
         sink,
@@ -403,18 +389,6 @@ pub(crate) async fn process_tool_calls_in_env(
         &mut readings,
         effects,
         breaks,
-    )
-    .await;
-
-    // ③ 未执行收口：本批没跑到的调用（中止 / 交互 break）统一补终态与结果子节点。
-    super::dispatch::unfinished::close_unfinished(
-        &readings,
-        abort,
-        sink,
-        context_messages,
-        &mut tool_messages,
-        &mut parent_updates,
-        effects,
     )
     .await;
 

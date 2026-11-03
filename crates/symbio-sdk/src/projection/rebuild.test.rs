@@ -294,7 +294,7 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
     let round = serde_json::json!({
         "text_id": null, "text": null, "reasoning_id": "R0", "reasoning": "先读 a.md 再说",
     });
-    let artifact = |no: u64, call: &str, res: &str, path: &str, body: &str, round: _| {
+    let artifact = |no: u64, call: &str, path: &str, body: &str, round: _| {
         Event::pending(
             format!("a-1-{no}"),
             EVENT_ARTIFACT_ADDED,
@@ -305,15 +305,15 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
         )
         .with_ts(1_500)
         .with_payload(serde_json::json!({
-            "tool": "read", "text": body, "tool_call_id": call, "wire_id": call,
-            "args": format!("{{\"path\":\"{path}\"}}"), "result_id": res,
+            "tool": "read", "text": body, "tool_call_id": call,
+            "args": format!("{{\"path\":\"{path}\"}}"),
             "success": true, "turn_id": "T1", "round": round,
         }))
     };
     let events = vec![
         user_event("u-node", "读两个文件"),
-        artifact(0, "c0", "r0", "a.md", "a 的内容", round.clone()),
-        artifact(1, "c1", "r1", "b.md", "b 的内容", serde_json::Value::Null),
+        artifact(0, "c0", "a.md", "a 的内容", round.clone()),
+        artifact(1, "c1", "b.md", "b 的内容", serde_json::Value::Null),
         final_event(serde_json::json!({
             "text": "都读完了", "model": "m", "turn_id": "T1", "text_id": "T1-text",
             "reasoning_id": null, "reasoning": null, "tool_calls": [],
@@ -339,7 +339,7 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
     // 第二格没有 `round`（同一轮只挂第一格）⇒ 一个节点都不多发。
     let c1 = at("c1").expect("第二张卡在");
     assert_eq!(
-        at("r1").expect("第二条结果在"),
+        at("c1-result").expect("第二条结果在"),
         c1 + 1,
         "第二格只建调用与结果两张卡"
     );
@@ -363,9 +363,7 @@ fn artifact_builds_call_and_result_under_the_call() {
             "tool": "read",
             "text": "文件内容",
             "tool_call_id": "T-016",
-            "wire_id": "call_wire_1",
             "args": "{\"path\":\"a.md\"}",
-            "result_id": "C1-res",
             "success": true,
             "turn_id": "T1",
         })),
@@ -380,7 +378,7 @@ fn artifact_builds_call_and_result_under_the_call() {
     assert_eq!(got[1].identity, Some(NodeRole::Assistant));
     assert_eq!(got[1].text, "{\"path\":\"a.md\"}");
     // 结果卡：role=Tool，挂在**调用**下（不是 Turn 根）
-    assert_eq!(got[2].id, "C1-res");
+    assert_eq!(got[2].id, "T-016-result", "结果 id 由调用 id 派生");
     assert_eq!(got[2].parent, Some("T-016".into()));
     assert_eq!(got[2].identity, Some(NodeRole::Tool));
     assert_eq!(got[2].text, "文件内容");
@@ -401,14 +399,14 @@ fn tool_calls_reference_does_not_duplicate_the_card() {
             "session/main",
         )
         .with_payload(serde_json::json!({
-            "tool": "read", "text": "内容", "tool_call_id": "T-016", "wire_id": "w1",
-            "args": "{}", "result_id": "C1-res", "success": true, "turn_id": "T1",
+            "tool": "read", "text": "内容", "tool_call_id": "T-016",
+            "args": "{}", "success": true, "turn_id": "T1",
         })),
         final_event(serde_json::json!({
             "text": "读完了",
             "turn_id": "T1",
             "text_id": "T1-text",
-            "tool_calls": [{ "id": "T-016", "name": "read", "args": "{}", "wire_id": "w1", "result_id": "C1-res" }],
+            "tool_calls": [{ "id": "T-016", "name": "read", "args": "{}" }],
             "status": "completed",
         })),
     ];
@@ -1143,7 +1141,7 @@ fn a_not_executed_call_is_projected_from_its_failure_fact() {
     );
     assert!(got[call].text.contains("a.md"), "参数取 request 事实");
 
-    let result = at("failed-c-1-1-result").expect("「未执行」结果子项按 failed 事实渲染");
+    let result = at("c-1-result").expect("「未执行」结果子项按 failed 事实渲染");
     assert_eq!(got[result].parent.as_deref(), Some("c-1"));
     assert_eq!(got[result].ty, NodeForm::Body);
     assert_eq!(
@@ -1204,7 +1202,7 @@ fn an_executed_call_does_not_get_a_projected_placeholder() {
         "已执行调用只有一张结果卡：{got:?}"
     );
     assert!(
-        got.iter().all(|s| s.id != "failed-c-1-1-result"),
+        got.iter().all(|s| s.id != "c-1-result"),
         "不得补第二张「未执行」卡"
     );
 }
