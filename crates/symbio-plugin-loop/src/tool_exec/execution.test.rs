@@ -492,7 +492,7 @@ async fn the_ledger_comes_from_the_facts_value() {
             Event::pending(
                 "v2f-ledger",
                 symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-                symbio_kernel::event::Entity::Message,
+                symbio_kernel::event::Entity::Turn,
                 symbio_kernel::event::Verb::Closed,
                 0,
                 symbio_sdk::authz::PRINCIPAL_MAIN,

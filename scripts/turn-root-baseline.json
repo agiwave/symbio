@@ -2,11 +2,11 @@
   "faces": {
     "F1": {
       "prod": 1454,
-      "test": 1206
+      "test": 1208
     },
     "F2": {
       "prod": 188,
-      "test": 558
+      "test": 560
     },
     "F3": {
       "prod": 0,
@@ -21,6 +21,13 @@
       "test": 0
     }
   },
+  "adjustments": [
+    {
+      "date": "2026-11-04",
+      "faces": "F1.test / F2.test",
+      "reason": "既有项位移，非新事实名：`execution.test.rs` 的 `chat.assistant.final` 与 `policy.test.rs` 的 `user.message` 夹具回滚到生产声明格（`Entity::Turn`，在 F1/F2 两面各计一次），生产面未变。B1（D-317）时随 `Entity::Scope` 一并清零。"
+    }
+  ],
   "allow": [
     {
       "face": "F5",

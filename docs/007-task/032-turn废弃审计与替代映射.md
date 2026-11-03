@@ -148,6 +148,11 @@ t11:116 注释级「本轮终态」表述。
 | `WorkerProgress.rounds` | **删** | 投影字段删（不展示轮计数）；worker_progress.rs 投影口径随之收窄 |
 | `progress_max_per_turn` / `progress_min_rounds` | B3 复核 | 行为参数（每 scope 进展上限 / 最少模型往返数才汇报），语义保留、名字去 turn/round 词根（如 progress_min_responses） |
 
+- **B1 夹具登记（`D-317`）。** `tool_exec/execution.test.rs` 的 `chat.assistant.final`
+  夹具与 `turn_exec/policy.test.rs` 的 `user.message` 夹具已回滚到生产声明格
+  （`(Turn, Closed)` / `(Turn, Opened)`），**不再作为范式**；B1 时随 `D-317` 一并改挂
+  `Scope`。
+
 ## 三、行为保持
 
 - **e2e**：断言 `chat.assistant.final/fallback`（helpers.mjs:950）与节点终态集的用例

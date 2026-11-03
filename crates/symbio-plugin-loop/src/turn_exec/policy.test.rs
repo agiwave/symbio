@@ -77,8 +77,8 @@ async fn a_missing_model_port_lands_a_failed_stage_and_stops_the_turn() {
             Event::pending(
                 "u-1",
                 symbio_plugin_api::events::EVENT_USER_MESSAGE,
-                Entity::Message,
-                Verb::Asserted,
+                Entity::Turn,
+                Verb::Opened,
                 1,
                 "user",
             )
