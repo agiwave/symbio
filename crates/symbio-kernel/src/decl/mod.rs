@@ -780,11 +780,11 @@ const SENT_FIELDS: &[&str] = &[
 // 五条都落 `turn × asserted`：它们是「关于这一轮的断言」，不是开轮 / 收束。业务事件
 // 名全部由 owner 声明；本表是内核唯一的名字→格位表。
 const PROTOCOL_EVENTS: &[EventDecl] = &[
-    EventDecl::new(EVENT_REQUEST, (Entity::Turn, Verb::Asserted)),
-    EventDecl::new(EVENT_SENT, (Entity::Turn, Verb::Asserted)),
-    EventDecl::new(EVENT_RESPONSE, (Entity::Turn, Verb::Asserted)),
-    EventDecl::new(EVENT_FAILED, (Entity::Turn, Verb::Asserted)),
-    EventDecl::new(EVENT_RETRY, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_REQUEST, (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_SENT, (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_RESPONSE, (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_FAILED, (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_RETRY, (Entity::Scope, Verb::Asserted)),
 ];
 
 const PROTOCOL_FACTS: &[FactDecl] = &[

@@ -155,7 +155,7 @@ fn ignores_non_task_events() {
             Event::pending(
                 "x1",
                 EVENT_TASK_HELD,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Held,
                 0,
                 INITIATOR,

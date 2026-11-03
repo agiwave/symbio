@@ -32,9 +32,9 @@ fn stored(events: Vec<Event>) -> Vec<Event> {
 #[test]
 fn seq_monotonic_passes_on_store_output() {
     let events = stored(vec![
-        pending("e0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("e1", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
-        pending("e2", "user.message", Entity::Turn, Verb::Opened, 1),
+        pending("e0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("e1", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
+        pending("e2", "user.message", Entity::Scope, Verb::Opened, 1),
     ]);
     assert!(
         seq_monotonic(&events).is_empty(),
@@ -46,13 +46,13 @@ fn seq_monotonic_passes_on_store_output() {
 #[test]
 fn seq_gap_is_detected() {
     let mut events = stored(vec![
-        pending("e0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("e1", "user.message", Entity::Turn, Verb::Opened, 1),
+        pending("e0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("e1", "user.message", Entity::Scope, Verb::Opened, 1),
     ]);
     // 模拟「中间丢了一条」：删除 seq=1 后，后一条应接 seq=1 却是 seq=2。
     events.remove(1);
     // 重新造：seq 0 与 seq 2 相邻（跳号）。
-    let mut e2 = pending("e2", "user.message", Entity::Turn, Verb::Opened, 2);
+    let mut e2 = pending("e2", "user.message", Entity::Scope, Verb::Opened, 2);
     e2.assign_seq(crate::event::Seq::new(2));
     events.push(e2);
     let bad = seq_monotonic(&events);
@@ -64,7 +64,13 @@ fn seq_gap_is_detected() {
 #[test]
 fn pending_events_are_skipped_by_seq_check() {
     // pending（未入库）事件没有 seq，不参与单调性检查——它们还不是事实。
-    let events = vec![pending("p0", "user.message", Entity::Turn, Verb::Opened, 0)];
+    let events = vec![pending(
+        "p0",
+        "user.message",
+        Entity::Scope,
+        Verb::Opened,
+        0,
+    )];
     assert!(seq_monotonic(&events).is_empty());
 }
 
@@ -73,10 +79,10 @@ fn pending_events_are_skipped_by_seq_check() {
 #[test]
 fn one_final_per_turn_passes() {
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
-        pending("u1", "user.message", Entity::Turn, Verb::Opened, 1),
-        pending("f1", "chat.assistant.final", Entity::Turn, Verb::Closed, 1),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
+        pending("u1", "user.message", Entity::Scope, Verb::Opened, 1),
+        pending("f1", "chat.assistant.final", Entity::Scope, Verb::Closed, 1),
     ]);
     assert!(final_unique_per_turn(EVENTS, &events).is_empty());
 }
@@ -84,10 +90,16 @@ fn one_final_per_turn_passes() {
 #[test]
 fn two_finals_in_one_turn_is_detected() {
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
         // 同一 turn 的第二条 final——转写收敛性被破坏。
-        pending("f0b", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
+        pending(
+            "f0b",
+            "chat.assistant.final",
+            Entity::Scope,
+            Verb::Closed,
+            0,
+        ),
     ]);
     let bad = final_unique_per_turn(EVENTS, &events);
     assert_eq!(bad.len(), 1, "一轮两条 final 必须被看见");
@@ -114,10 +126,10 @@ fn closed_tasks_do_not_count_as_final() {
 #[test]
 fn one_open_per_turn_passes() {
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
-        pending("u1", "user.message", Entity::Turn, Verb::Opened, 1),
-        pending("f1", "chat.assistant.final", Entity::Turn, Verb::Closed, 1),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
+        pending("u1", "user.message", Entity::Scope, Verb::Opened, 1),
+        pending("f1", "chat.assistant.final", Entity::Scope, Verb::Closed, 1),
     ]);
     assert!(
         open_unique_per_turn(&events).is_empty(),
@@ -130,8 +142,8 @@ fn one_open_per_turn_passes() {
 fn two_opens_in_one_turn_is_detected() {
     // 同一个 `u-{turn}` 落两回——单写者被绕过的痕迹。
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("u0-again", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("u0-again", "user.message", Entity::Scope, Verb::Opened, 0),
     ]);
     let bad = open_unique_per_turn(&events);
     assert_eq!(bad.len(), 1, "一轮两条开轮必须被看见");
@@ -151,8 +163,8 @@ fn two_opens_in_one_turn_is_detected() {
 #[test]
 fn any_kind_on_the_opened_coordinate_opens_the_turn() {
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("x0", "turn.reopened", Entity::Turn, Verb::Opened, 0),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("x0", "turn.reopened", Entity::Scope, Verb::Opened, 0),
     ]);
     let bad = open_unique_per_turn(&events);
     assert_eq!(
@@ -195,7 +207,13 @@ fn asserted_without_provenance_is_detected() {
 fn non_asserted_events_need_no_provenance() {
     // 普通过程事件（opened 等）不是声明，不要求 produced_by——
     // 收束类（chat.assistant.final/fallback）例外，见下。
-    let events = vec![pending("u0", "user.message", Entity::Turn, Verb::Opened, 0)];
+    let events = vec![pending(
+        "u0",
+        "user.message",
+        Entity::Scope,
+        Verb::Opened,
+        0,
+    )];
     assert!(produced_by_coverage(&events).is_empty());
 }
 
@@ -204,7 +222,7 @@ fn reply_without_provenance_is_detected() {
     // DE-031 §5：回复必须有 produced_by——用户收到的话必须可追溯。
     let bare = Event {
         produced_by: None,
-        ..pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0)
+        ..pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0)
     };
     let bad = produced_by_coverage(std::slice::from_ref(&bare));
     assert_eq!(bad.len(), 1, "无溯源的答复必须被看见（I2）");
@@ -219,7 +237,7 @@ fn fallback_without_provenance_is_detected() {
         ..pending(
             "fb0",
             "chat.assistant.fallback",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             0,
         )
@@ -230,8 +248,8 @@ fn fallback_without_provenance_is_detected() {
 #[test]
 fn reply_with_provenance_passes() {
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0).with_produced_by(0),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0).with_produced_by(0),
     ]);
     assert!(produced_by_coverage(&events).is_empty());
 }
@@ -351,7 +369,7 @@ fn closed(id: &str, kind: &str, reason: Option<&str>) -> Event {
         Some(r) => serde_json::json!({ "reason": r }),
         None => serde_json::json!({}),
     };
-    Event::pending(id, kind, Entity::Turn, Verb::Closed, 0, "main").with_payload(payload)
+    Event::pending(id, kind, Entity::Scope, Verb::Closed, 0, "main").with_payload(payload)
 }
 
 #[test]
@@ -463,7 +481,7 @@ fn closure_reason_covers_both_closure_cells_and_the_denial_fact() {
         Event::pending(
             "d0",
             "authz.denied",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             0,
             "main",
@@ -481,7 +499,7 @@ fn closure_reason_denied_on_a_denial_fact_passes() {
     let e = Event::pending(
         "d0",
         "authz.denied",
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         0,
         "main",
@@ -496,7 +514,7 @@ fn non_closure_cells_are_not_asked_for_a_reason() {
     let events = vec![Event::pending(
         "p0",
         "chat.assistant.progress",
-        Entity::Turn,
+        Entity::Scope,
         Verb::Progressed,
         0,
         "main",
@@ -535,9 +553,9 @@ fn an_artifact_is_settled_but_not_a_stop_so_it_is_not_asked_for_a_reason() {
 #[test]
 fn check_all_on_clean_sequence_is_empty() {
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
         // 收束类**必须有**溯源（I2）：指向开轮那条。
-        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0).with_produced_by(0),
+        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0).with_produced_by(0),
         pending("v0", "classify.verdict", Entity::Verdict, Verb::Asserted, 0).with_produced_by(0),
     ]);
     assert!(check_all(EVENTS, &events).is_empty(), "合规序列九查全绿");
@@ -553,7 +571,7 @@ fn fault_timeout_turn_never_settles_is_caught() {
     let events = stored(vec![pending(
         "u0",
         "user.message",
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
     )]);
@@ -574,11 +592,11 @@ fn fault_timeout_turn_never_settles_is_caught() {
 fn fault_timeout_avoided_by_fallback_event() {
     // 反向：超时后**写了** fallback → turn 收束，检查放行（兜底是普通事件）。
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
         pending(
             "fb0",
             "chat.assistant.fallback",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             0,
         ),
@@ -592,7 +610,7 @@ fn fault_timeout_avoided_by_artifact_event() {
     // 同样算收束——工具结果是说给用户的话，没有发言权的主体（对等主体）以它收束。
     // 没有这条，对等主体每跑一轮都永久留一条违规，e2e 的「不变量清单为空」无从谈起。
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
         pending(
             "a0",
             crate::test_fixtures::EVENT_ARTIFACT_ADDED,
@@ -609,8 +627,8 @@ fn fault_timeout_avoided_by_artifact_event() {
     );
     // 边界：**别的轮**的产物不算本轮的收束（按 turn 号配对，与 final 同一纪律）。
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("u1", "user.message", Entity::Turn, Verb::Opened, 1),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("u1", "user.message", Entity::Scope, Verb::Opened, 1),
         pending(
             "a1",
             crate::test_fixtures::EVENT_ARTIFACT_ADDED,
@@ -653,9 +671,9 @@ fn fault_out_of_order_seq_regression_is_caught() {
 fn fault_double_final_is_caught_by_check_all() {
     // 重复 final 经 check_all 合跑也必须红（CI 形态下无漏网）。
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
-        pending("f1", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
+        pending("f1", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
     ]);
     let violations = check_all(EVENTS, &events);
     assert!(
@@ -669,9 +687,9 @@ fn fault_double_final_is_caught_by_check_all() {
 fn fault_double_open_is_caught_by_check_all() {
     // 重复开轮经 check_all 合跑也必须红，且是**唯一**那条（该轮正常收束 ⇒ 不牵连 C4）。
     let events = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("u0-again", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0).with_produced_by(0),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("u0-again", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0).with_produced_by(0),
     ]);
     let violations = check_all(EVENTS, &events);
     assert_eq!(violations.len(), 1, "只有开轮这一条红：{violations:?}");
@@ -718,9 +736,9 @@ fn read_side_graces_the_trailing_open_turn_but_flags_the_overtaken_one() {
     // 轮 0 开了没收束，轮 1 随后开轮并正常收束——会话已经往前走，轮 0 是确凿的
     // 静默中断（不是"还在生成"），读侧必须报。
     let overtaken = stored(vec![
-        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("u1", "user.message", Entity::Turn, Verb::Opened, 1),
-        pending("f1", "chat.assistant.final", Entity::Turn, Verb::Closed, 1),
+        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
+        pending("u1", "user.message", Entity::Scope, Verb::Opened, 1),
+        pending("f1", "chat.assistant.final", Entity::Scope, Verb::Closed, 1),
     ]);
     let bad = unresolved_turns(&overtaken, true);
     assert_eq!(bad.len(), 1, "被后续轮越过的未收束轮必须报");
@@ -738,7 +756,7 @@ fn read_side_graces_the_trailing_open_turn_but_flags_the_overtaken_one() {
 fn read_side_budget_follows_declared_tiers_and_skips_when_none_declared() {
     // 声明了 reflex 档（80ms）⇒ 预算有值，2000ms 的事件必须被看见。
     let declared = stored(vec![
-        Event::pending("u0", "user.message", Entity::Turn, Verb::Opened, 0, "user")
+        Event::pending("u0", "user.message", Entity::Scope, Verb::Opened, 0, "user")
             .with_payload(serde_json::json!({ "text": "问", "tier": "reflex" })),
         Event::pending(
             "s0",
@@ -789,7 +807,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
     // ① 数值优先：档位 reflex(80) 会判超，但载荷声明了规格派生的 5000ms，
     //    2000ms 的事件必须**不被**报——若读的是档位就会误红。
     let numeric_wins = stored(vec![
-        Event::pending("u0", "user.message", Entity::Turn, Verb::Opened, 0, "user").with_payload(
+        Event::pending("u0", "user.message", Entity::Scope, Verb::Opened, 0, "user").with_payload(
             serde_json::json!({ "text": "问", "tier": "reflex", "budget_ms": 5_000 }),
         ),
         Event::pending(
@@ -818,7 +836,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
 
     // ② 数值更严时照样红（证明它不是「只取更宽」，而是「数值说了算」）。
     let numeric_strict = stored(vec![
-        Event::pending("u0", "user.message", Entity::Turn, Verb::Opened, 0, "user")
+        Event::pending("u0", "user.message", Entity::Scope, Verb::Opened, 0, "user")
             .with_payload(serde_json::json!({ "text": "问", "tier": "deep", "budget_ms": 50 })),
         Event::pending(
             "s0",
@@ -844,7 +862,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
     let tier_fallback = stored(vec![Event::pending(
         "u0",
         "user.message",
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",
@@ -860,7 +878,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
     let neither = stored(vec![Event::pending(
         "u0",
         "user.message",
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",
@@ -881,13 +899,13 @@ fn a_final_is_counted_because_it_declares_the_role_not_because_of_its_name() {
     const VOCAB: &[EventDecl] = &[
         EventDecl::with_roles(
             "fixture.my_final",
-            (Entity::Turn, Verb::Closed),
+            (Entity::Scope, Verb::Closed),
             &[FactRole::FinalizesTurn],
         ),
-        EventDecl::new("fixture.my_silent", (Entity::Turn, Verb::Closed)),
+        EventDecl::new("fixture.my_silent", (Entity::Scope, Verb::Closed)),
     ];
     let closed_at = |id: &str, kind: &str, turn: u64| {
-        pending(id, kind, Entity::Turn, Verb::Closed, turn).with_produced_by(0)
+        pending(id, kind, Entity::Scope, Verb::Closed, turn).with_produced_by(0)
     };
 
     // 声明了角色的名字：同轮两条 ⇒ 违规（正向，拦得住）。
@@ -921,10 +939,10 @@ fn a_final_is_counted_because_it_declares_the_role_not_because_of_its_name() {
 fn a_stop_fact_is_a_grid_cell_or_a_declared_role() {
     const VOCAB: &[EventDecl] = &[EventDecl::with_roles(
         "fixture.denied",
-        (Entity::Turn, Verb::Asserted),
+        (Entity::Scope, Verb::Asserted),
         &[FactRole::StopsTurn],
     )];
-    let denied = pending("d-1", "fixture.denied", Entity::Turn, Verb::Asserted, 1);
+    let denied = pending("d-1", "fixture.denied", Entity::Scope, Verb::Asserted, 1);
     assert!(
         is_stop_fact(VOCAB, &denied),
         "声明了 stops_turn 的新名字就是停机事实"
@@ -932,7 +950,7 @@ fn a_stop_fact_is_a_grid_cell_or_a_declared_role() {
     // 收束格整格算，不看名字（第一臂与词汇无关）。
     assert!(is_stop_fact(
         VOCAB,
-        &pending("c-1", "fixture.any", Entity::Turn, Verb::Closed, 1)
+        &pending("c-1", "fixture.any", Entity::Scope, Verb::Closed, 1)
     ));
     // 既不在收束格、又没声明角色 ⇒ 不是停（产物格落在这里，与 `closes_turn` 分歧）。
     assert!(!is_stop_fact(
@@ -942,7 +960,7 @@ fn a_stop_fact_is_a_grid_cell_or_a_declared_role() {
     assert!(
         !is_stop_fact(
             VOCAB,
-            &pending("u-1", "fixture.other", Entity::Turn, Verb::Asserted, 1)
+            &pending("u-1", "fixture.other", Entity::Scope, Verb::Asserted, 1)
         ),
         "没声明角色的 `turn × asserted` 不是停机事实——角色表就是这一臂的唯一入口"
     );

@@ -493,7 +493,7 @@ pub(crate) fn latest_stage<'a>(
     events
         .iter()
         .filter(|e| {
-            e.turn == turn
+            e.scope == turn
                 && e.kind == EVENT_TURN_STAGE
                 && e.seq.map(|s| s.value()).is_some_and(|seq| seq >= anchor)
                 && e.payload.get("stage").and_then(serde_json::Value::as_str) == Some(stage)
@@ -669,7 +669,7 @@ where
         let event = Event::pending(
             id.clone(),
             EVENT_TURN_STAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             turn,
             actor,
@@ -682,7 +682,7 @@ where
                 let existing = store
                     .range(symbio_kernel::event::Seq::new(0))
                     .into_iter()
-                    .find(|e| e.turn == turn && e.kind == EVENT_TURN_STAGE && e.event_id == id)
+                    .find(|e| e.scope == turn && e.kind == EVENT_TURN_STAGE && e.event_id == id)
                     .and_then(|e| e.seq.map(|s| s.value()))
                     .unwrap_or(0);
                 seqs.push(existing);
@@ -714,7 +714,7 @@ where
     let event = Event::pending(
         format!("st-{anchor}-{stage}"),
         EVENT_TURN_STAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         turn,
         actor,
@@ -736,7 +736,7 @@ where
 pub(crate) fn done(events: &[Event], turn: u64, stage: StageName, round: usize) -> bool {
     events.iter().any(|e| {
         e.kind == EVENT_TURN_STAGE
-            && e.turn == turn
+            && e.scope == turn
             && e.verb == Verb::Asserted
             && e.payload.get("stage").and_then(|v| v.as_str()) == Some(stage.name())
             && e.payload.get("round").and_then(|v| v.as_u64()) == Some(round as u64)

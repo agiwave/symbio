@@ -28,7 +28,7 @@ fn user(turn: u64, node: &str, text: &str) -> Event {
     Event::pending(
         format!("u-{turn}"),
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         turn,
         "user",
@@ -41,7 +41,7 @@ fn assistant(turn: u64, text_id: &str, text: &str) -> Event {
     Event::pending(
         format!("f-{turn}"),
         EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         turn,
         "session/main",
@@ -437,7 +437,7 @@ fn branch(of: &str, into: &str) -> Event {
     Event::pending(
         format!("branch-{into}"),
         crate::test_fixtures::EVENT_TURN_BRANCH,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         2,
         "person/local",
@@ -490,7 +490,7 @@ fn switching_back_moves_the_request_package_back() {
         Event::pending(
             "sel-1",
             crate::test_fixtures::EVENT_TURN_BRANCH_SELECTED,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             3,
             "person/local",

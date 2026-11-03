@@ -271,7 +271,7 @@ fn recent_notes(events: &[Event], now: i64) -> Value {
         let Some(text) = e.payload.get("text").and_then(Value::as_str) else {
             continue;
         };
-        texts.push(json!({ "text": text, "turn": e.turn, "ts": e.ts }));
+        texts.push(json!({ "text": text, "turn": e.scope, "ts": e.ts }));
     }
     if texts.len() > RECENT_LIMIT {
         texts.drain(..texts.len() - RECENT_LIMIT);

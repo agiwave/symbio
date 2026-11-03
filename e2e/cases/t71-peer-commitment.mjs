@@ -221,7 +221,7 @@ export default defineCase(
 
         const userCell = peerEvents.find((e) => e.kind === 'user.message');
         assert(userCell, `对等轮应有开轮格（实际 kinds: ${JSON.stringify(kinds)}）`);
-        assertEq(userCell.turn, 0, '对等轮 = turn 0');
+        assertEq(userCell.scope, 0, '对等轮 = turn 0');
         assert(
           JSON.stringify(userCell.payload).includes(PEER_Q),
           '开轮格的正文 = 收件箱那条消息',
@@ -231,7 +231,7 @@ export default defineCase(
         const artifact = peerEvents.find((e) => e.kind === 'artifact.added');
         assert(artifact, `产物格必须存在（实际 kinds: ${JSON.stringify(kinds)}）`);
         assertEq(artifact.actor, 'session/peer-b', '产物格的作者 = 对等主体');
-        assertEq(artifact.turn, 0, '产物格记在本轮');
+        assertEq(artifact.scope, 0, '产物格记在本轮');
         assertEq(
           artifact.produced_by,
           userCell.seq,

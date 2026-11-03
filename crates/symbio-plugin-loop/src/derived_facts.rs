@@ -136,7 +136,7 @@ pub(crate) fn record_derived(
         for draft in symbio_plugin_api::apply_effects(&input.call(&env)) {
             let event_id = draft.key.clone();
             let mut event = draft.into_event(principal);
-            event.turn = turn;
+            event.scope = turn;
             match store.append(event.clone()) {
                 Ok(_) => applied.push(event),
                 Err(e) => symbio_plugin_api::plugin_warn!(

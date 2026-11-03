@@ -49,7 +49,7 @@ fn seed_user_message(dir: &std::path::Path) {
         symbio_kernel::event::Event::pending(
             "u-open",
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
-            symbio_kernel::event::Entity::Turn,
+            symbio_kernel::event::Entity::Scope,
             symbio_kernel::event::Verb::Opened,
             1,
             symbio_sdk::authz::PRINCIPAL_USER,

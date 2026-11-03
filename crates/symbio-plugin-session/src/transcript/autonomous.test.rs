@@ -42,7 +42,7 @@ fn seed_one_fact(p: &SessionPlugin, sid: &str) {
         .append(Event::pending(
             "u1",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "user:t",
@@ -257,7 +257,7 @@ fn seed_root(store: &EventStore) -> u64 {
         .append(Event::pending(
             "u0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             PRINCIPAL_USER,

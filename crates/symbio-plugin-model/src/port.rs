@@ -229,7 +229,7 @@ async fn emit_outcome(emit: &PortFactEmit, kind: &str, payload: serde_json::Valu
     emit.emit(vec![FactDraft {
         key: format!("{kind}-outcome"),
         kind: kind.to_string(),
-        entity: Entity::Turn,
+        entity: Entity::Scope,
         verb: Verb::Asserted,
         payload,
         produced_by: None,

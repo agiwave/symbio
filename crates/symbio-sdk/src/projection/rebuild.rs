@@ -191,7 +191,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
             e.kind == c.denied
                 && e.payload.get("key").and_then(|v| v.as_str()) == Some(c.final_reply)
         })
-        .map(|e| e.turn)
+        .map(|e| e.scope)
         .collect();
 
     // ── 压缩快照：先收下它那份列表，再从其下标之后接着折（见函数文档）────────
@@ -343,11 +343,11 @@ fn nodes_of(
     // 正文 / 思考节点落在**应答落格的位置**，顺序因此是实时的
     // 「思考→卡片→思考→卡片」。内部往返（措辞 / 裁判 / 摘要）不是这一轮对
     // 读者说的话，一个节点都不发。
-    if e.entity == Entity::Turn
+    if e.entity == Entity::Scope
         && e.verb == Verb::Asserted
         && (e.kind == EVENT_RESPONSE || e.kind == EVENT_FAILED)
     {
-        return output_nodes(e, denied_speech.contains(&e.turn));
+        return output_nodes(e, denied_speech.contains(&e.scope));
     }
     match slot_of(e, c, m) {
         Some(ChatSlot::UserMessage) => vec![user_node(e)],

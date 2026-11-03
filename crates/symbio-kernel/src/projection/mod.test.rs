@@ -8,7 +8,7 @@ use crate::store::Store;
 use crate::view::Budget;
 
 fn ev(id: &str, kind: &str, verb: Verb, turn: u64) -> Event {
-    Event::pending(id, kind, Entity::Turn, verb, turn, "main").with_ts(1_000)
+    Event::pending(id, kind, Entity::Scope, verb, turn, "main").with_ts(1_000)
 }
 
 /// 骨架投影：统计**交给它的事件**里某 kind 的条数（起的 `turnstate` 视图从

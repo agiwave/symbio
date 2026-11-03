@@ -202,7 +202,7 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
         .append(Event::pending(
             "u0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             crate::event::Verb::Opened,
             0,
             "user",
@@ -213,7 +213,7 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
             Event::pending(
                 "f0",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 crate::event::Verb::Closed,
                 0,
                 "session/main",

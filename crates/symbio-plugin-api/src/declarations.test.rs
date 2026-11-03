@@ -45,7 +45,7 @@ fn protocol_rows() -> &'static [Decl] {
 fn fixture() -> PluginDeclarations<'static> {
     const EVENTS: &[EventDecl] = &[EventDecl::new(
         "fixture.declared",
-        (Entity::Turn, Verb::Asserted),
+        (Entity::Scope, Verb::Asserted),
     )];
     PluginDeclarations {
         events: EVENTS,
@@ -69,7 +69,7 @@ fn assemble_collects_submitted_declarations() {
     let frozen = assemble_declarations().expect("夹具声明应能冻结");
     assert_eq!(
         frozen.event_cell("fixture.declared"),
-        Some((Entity::Turn, Verb::Asserted))
+        Some((Entity::Scope, Verb::Asserted))
     );
     assert_eq!(
         frozen.event_owner("fixture.declared"),

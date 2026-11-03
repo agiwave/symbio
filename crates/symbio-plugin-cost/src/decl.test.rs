@@ -21,7 +21,7 @@ fn billed(id: &str, principal: &str, cost_ms: u64, ts: i64) -> Event {
     Event::pending(
         id,
         EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         1,
         principal,

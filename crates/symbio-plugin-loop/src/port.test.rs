@@ -82,7 +82,7 @@ fn grant(store: &EventStore, call: &Call) {
         Event::pending(
             format!("grant-1-{}", call.id),
             EVENT_AUTHZ_GRANTED,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             1,
             "authorizer",
@@ -393,7 +393,7 @@ fn stranded(store: &EventStore, id: &str, attempt: u64, lease_ms: u64, cap: u64,
             Event::pending(
                 format!("sent-turn-{id}-{attempt}"),
                 symbio_kernel::event::EVENT_SENT,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Asserted,
                 1,
                 "system",
@@ -762,7 +762,7 @@ fn reap_only_sees_the_facts_it_is_handed() {
                 Event::pending(
                     format!("filler-{i}"),
                     *kind,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Asserted,
                     1,
                     "system",
@@ -818,7 +818,7 @@ fn request_cell(store: &EventStore, port: &str, id: &str, extra: serde_json::Val
         Event::pending(
             format!("{port}-{id}-request"),
             "request",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             1,
             "executor",
@@ -836,7 +836,7 @@ fn granted_cell(store: &EventStore, id: &str) {
         Event::pending(
             format!("tool-{id}-granted"),
             EVENT_AUTHZ_GRANTED,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             1,
             "authorizer",
@@ -862,7 +862,7 @@ fn sent_cell(store: &EventStore, port: &str, id: &str) {
         Event::pending(
             format!("{port}-{id}-sent"),
             "sent",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             1,
             "system",
@@ -886,7 +886,7 @@ fn response_cell(store: &EventStore, port: &str, id: &str, calls: serde_json::Va
         Event::pending(
             format!("{port}-{id}-response"),
             "response",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             1,
             "executor",
@@ -1250,7 +1250,7 @@ async fn emit_lands_with_host_stamp_and_absorbs_duplicates() {
 
     let landed = store.range(Seq::new(0));
     assert_eq!(landed.len(), 1, "重复投递必须被幂等键吸收");
-    assert_eq!(landed[0].turn, 7, "宿主盖的轮号原样落行");
+    assert_eq!(landed[0].scope, 7, "宿主盖的轮号原样落行");
     assert_eq!(landed[0].actor, "brain/agent");
     assert_eq!(landed[0].ts, 1_700_000_000_000);
     assert_eq!(landed[0].kind, "test.progress");

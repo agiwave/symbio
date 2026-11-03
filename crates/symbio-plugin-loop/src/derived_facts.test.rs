@@ -55,7 +55,7 @@ fn seed_turn(
             Event::pending(
                 format!("u-{turn}"),
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 turn,
                 symbio_sdk::authz::PRINCIPAL_USER,
@@ -69,7 +69,7 @@ fn seed_turn(
             Event::pending(
                 format!("f-{turn}"),
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 turn,
                 principal,

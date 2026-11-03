@@ -118,7 +118,7 @@ fn only_mutation_cells_are_collected() {
     let lookalike = Event::pending(
         "u-0",
         crate::test_fixtures::EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",

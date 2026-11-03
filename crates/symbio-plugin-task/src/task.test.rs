@@ -99,7 +99,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
             .append(Event::pending(
                 format!("u-{turn}"),
                 symbio_plugin_api::events::EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 turn,
                 symbio_plugin_api::PRINCIPAL_MAIN,
@@ -129,7 +129,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
     };
     for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
         let mut event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
-        event.turn = turn;
+        event.scope = turn;
         store.append(event).expect("任务事件入格");
     }
 }
@@ -680,7 +680,7 @@ fn apply_effects(
         for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
             kinds.push(draft.kind.clone());
             let mut event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
-            event.turn = turn;
+            event.scope = turn;
             store.append(event.clone()).expect("任务事件入格");
             applied.push(event);
         }
@@ -694,7 +694,7 @@ fn seed_anchor(store: &EventStore) -> u64 {
         .append(Event::pending(
             "u-0",
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             symbio_plugin_api::PRINCIPAL_MAIN,
@@ -1010,7 +1010,7 @@ fn the_draft_carries_no_envelope() {
         .fact
         .clone()
         .into_event(PRINCIPAL_SCHEDULER);
-    assert_eq!(event.turn, 0, "草稿不带轮号：信封由写口盖（D-252）");
+    assert_eq!(event.scope, 0, "草稿不带轮号：信封由写口盖（D-252）");
     assert_eq!(event.ts, 0, "草稿不带时刻：信封由写口盖（D-252）");
     assert_eq!(event.actor, PRINCIPAL_SCHEDULER);
 }

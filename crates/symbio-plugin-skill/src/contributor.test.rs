@@ -12,7 +12,7 @@ fn ev(seq: u64, kind: &str, payload: serde_json::Value) -> Event {
     let mut e = Event::pending(
         format!("e-{seq}"),
         kind,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         0,
         "session/main",

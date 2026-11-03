@@ -256,7 +256,7 @@ impl TurnState {
         self.facts
             .iter()
             .filter(|e| {
-                e.turn == self.turn_no && e.kind == symbio_plugin_api::events::EVENT_TURN_BRANCH
+                e.scope == self.turn_no && e.kind == symbio_plugin_api::events::EVENT_TURN_BRANCH
             })
             .filter_map(|e| e.payload.get("into").and_then(|v| v.as_str()))
             .next_back()

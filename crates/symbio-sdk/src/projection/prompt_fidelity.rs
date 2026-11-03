@@ -450,7 +450,7 @@ pub fn verify(
                         msgs,
                         &mutations,
                         e.kind.as_str(),
-                        e.turn,
+                        e.scope,
                     );
                 }
             }
@@ -472,7 +472,7 @@ pub fn verify(
                     &super::mutations::added_messages(e),
                     &mutations,
                     e.kind.as_str(),
-                    e.turn,
+                    e.scope,
                 );
             }
             continue;
@@ -489,7 +489,7 @@ pub fn verify(
             if messages.iter().any(|m| m.text == text) {
                 rep.gaps.push(PromptGap::ExcludedLeakedIntoPrompt {
                     kind: e.kind.as_str().to_string(),
-                    turn: e.turn,
+                    turn: e.scope,
                 });
             }
             continue;
@@ -534,7 +534,7 @@ pub fn verify(
             &text,
             &role,
             e.kind.as_str(),
-            e.turn,
+            e.scope,
         );
     }
 

@@ -440,7 +440,7 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
             Event::pending(
                 "u0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -463,7 +463,7 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
             Event::pending(
                 "f0",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 0,
                 "session/main",
@@ -604,7 +604,7 @@ async fn reflex_tier_system_overhead_is_measured_and_bounded() {
                 Event::pending(
                     "u0",
                     EVENT_USER_MESSAGE,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     0,
                     "user",
@@ -688,7 +688,7 @@ async fn real_provider_full_calibration() {
                 Event::pending(
                     "u0",
                     EVENT_USER_MESSAGE,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     0,
                     "user",

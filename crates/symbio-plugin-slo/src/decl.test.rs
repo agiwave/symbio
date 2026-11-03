@@ -19,7 +19,7 @@ fn dispatch(id: &str, turn: u64, tier: &str, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
         EVENT_TURN_DISPATCH,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         turn,
         PRINCIPAL,
@@ -39,7 +39,7 @@ fn user_message(id: &str, turn: u64, legacy_tier: Option<&str>, seq: u64, ts: i6
     let mut e = Event::pending(
         id,
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         turn,
         PRINCIPAL,
@@ -55,7 +55,7 @@ fn final_reply(id: &str, turn: u64, cost_ms: u64, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
         EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         turn,
         PRINCIPAL,
@@ -72,7 +72,7 @@ fn fallback_reply(id: &str, turn: u64, cost_ms: u64, seq: u64, ts: i64) -> Event
     let mut e = Event::pending(
         id,
         EVENT_CHAT_ASSISTANT_FALLBACK,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         turn,
         PRINCIPAL,

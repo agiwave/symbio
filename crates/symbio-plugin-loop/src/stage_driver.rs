@@ -1385,19 +1385,19 @@ pub(crate) async fn assemble_turn(
 pub(crate) fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
     let mut open: Vec<(u64, u64)> = Vec::new();
     for e in events {
-        if e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == EVENT_USER_MESSAGE {
+        if e.entity == Entity::Scope && e.verb == Verb::Opened && e.kind == EVENT_USER_MESSAGE {
             if let Some(seq) = e.seq {
-                open.push((e.turn, seq.value()));
+                open.push((e.scope, seq.value()));
             }
         }
-        if e.entity == Entity::Turn
+        if e.entity == Entity::Scope
             && e.verb == Verb::Closed
             && matches!(
                 e.kind.as_str(),
                 EVENT_CHAT_ASSISTANT_FINAL | EVENT_CHAT_ASSISTANT_FALLBACK
             )
         {
-            open.retain(|(stage, _)| *stage != e.turn);
+            open.retain(|(stage, _)| *stage != e.scope);
         }
     }
     open.last().copied()
@@ -1644,7 +1644,7 @@ pub(crate) fn supplement_into_request(
         symbio_kernel::event::Event::pending(
             format!("s-{stage_no}-{no}"),
             symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
-            symbio_kernel::event::Entity::Turn,
+            symbio_kernel::event::Entity::Scope,
             symbio_kernel::event::Verb::Asserted,
             stage_no,
             &actor.principal,
@@ -1996,7 +1996,7 @@ fn land_contributions(
             let event_id = contribution.fact.key.clone();
             let actor = contribution.actor.unwrap_or(principal);
             let mut event = contribution.fact.into_event(actor);
-            event.turn = stage_no;
+            event.scope = stage_no;
             event.ts = now_ms;
             if let Err(e) = store.append(event) {
                 symbio_plugin_api::plugin_warn!(

@@ -199,13 +199,13 @@ impl WalInner {
     /// 把一条事件记进两份索引（重放与入库共用）。
     fn note(&mut self, vocab: &Vocab, event: &Event) {
         if is_turn_open(event) {
-            self.opened.insert(event.turn);
+            self.opened.insert(event.scope);
         }
         if closes_turn(event) {
-            self.closed.insert(event.turn);
+            self.closed.insert(event.scope);
         }
         if vocab.is_final(event) {
-            self.finals.insert(event.turn);
+            self.finals.insert(event.scope);
         }
     }
 
@@ -268,34 +268,34 @@ impl WalInner {
                 why: v.why,
             });
         }
-        if vocab.is_final(event) && self.finals.contains(&event.turn) {
+        if vocab.is_final(event) && self.finals.contains(&event.scope) {
             return Err(AppendError::Invariant {
                 invariant: StoreInvariant::I1,
                 event_id: event.event_id.clone(),
                 why: format!(
                     "turn {} 已有收束格，又出现一条 final——每轮至多 1 条（I1 单通道）",
-                    event.turn
+                    event.scope
                 ),
             });
         }
         if is_turn_open(event) {
-            if self.opened.contains(&event.turn) {
+            if self.opened.contains(&event.scope) {
                 return Err(AppendError::Invariant {
                     invariant: StoreInvariant::I1,
                     event_id: event.event_id.clone(),
                     why: format!(
                         "turn {} 已有开轮事件，又出现一条（I1 单通道：每轮至多 1 条开轮）",
-                        event.turn
+                        event.scope
                     ),
                 });
             }
-            if let Some(missing) = self.unresolved_before(event.turn) {
+            if let Some(missing) = self.unresolved_before(event.scope) {
                 self.degraded_i3 += 1;
                 symbio_plugin_api::plugin_warn!(
                     "session",
                     "[invariant-I3] 新开轮 turn {} 越过了未收束的 turn {}（本轮照常入格；\
                      读侧 session/stats 的 unresolved_turns 会报同一条）",
-                    event.turn,
+                    event.scope,
                     missing
                 );
             }
@@ -461,17 +461,17 @@ impl WalStore {
         let opened = events
             .iter()
             .filter(|e| is_turn_open(e))
-            .map(|e| e.turn)
+            .map(|e| e.scope)
             .collect();
         let closed = events
             .iter()
             .filter(|e| closes_turn(e))
-            .map(|e| e.turn)
+            .map(|e| e.scope)
             .collect();
         let finals = events
             .iter()
             .filter(|e| vocab.is_final(e))
-            .map(|e| e.turn)
+            .map(|e| e.scope)
             .collect();
         WalStore {
             path,

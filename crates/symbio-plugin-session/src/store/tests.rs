@@ -345,7 +345,7 @@ fn user_event(eid: &str, node_id: &str, text: &str, turn: u64) -> symbio_kernel:
     Event::pending(
         eid,
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         turn,
         "user",
@@ -692,7 +692,7 @@ fn current_window_starts_at_the_latest_snapshot() {
         Event::pending(
             id,
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             turn,
             "session/main",
@@ -820,7 +820,7 @@ async fn snapshot_reads_the_same_full_history_as_the_writer() {
             Event::pending(
                 "u-1",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -856,7 +856,7 @@ fn lifecycle_event(
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
     // `produced_by` 不是装饰：收束格是 I2 的声明类事件，写侧闸门会拒收无溯源的答复
     // 。测试夹具按真实生产者的形态造事件，而不是造一个闸门刚好放行的形状。
-    Event::pending(format!("e-{n}"), kind, Entity::Turn, verb, turn, "user")
+    Event::pending(format!("e-{n}"), kind, Entity::Scope, verb, turn, "user")
         .with_produced_by(0)
         .with_payload(payload)
 }

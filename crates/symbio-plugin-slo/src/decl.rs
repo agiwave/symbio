@@ -95,10 +95,10 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
 fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>) -> String {
     let before = |e: &Event| before_seq.is_none_or(|b| e.seq.is_some_and(|s| s.value() < b));
     let is_dispatch = |e: &Event| {
-        e.entity == Entity::Turn
+        e.entity == Entity::Scope
             && e.verb == Verb::Asserted
             && e.kind.as_str() == EVENT_TURN_DISPATCH
-            && e.turn == turn
+            && e.scope == turn
     };
     let dispatch = match before_seq {
         None => events.iter().find(|e| is_dispatch(e) && before(e)),
@@ -112,9 +112,9 @@ fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>) -> String
                 .iter()
                 .rev()
                 .find(|u| {
-                    u.entity == Entity::Turn
+                    u.entity == Entity::Scope
                         && u.verb == Verb::Opened
-                        && u.turn == turn
+                        && u.scope == turn
                         && u.kind.as_str() == EVENT_USER_MESSAGE
                         && before(u)
                 })
@@ -168,13 +168,13 @@ fn latency(events: &[Event], now: i64) -> Value {
         if e.ts > now {
             continue;
         }
-        if e.entity != Entity::Turn
+        if e.entity != Entity::Scope
             || e.verb != Verb::Closed
             || e.kind.as_str() != EVENT_CHAT_ASSISTANT_FINAL
         {
             continue;
         }
-        let tier = declared_tier(events, e.turn, e.seq.map(|s| s.value()));
+        let tier = declared_tier(events, e.scope, e.seq.map(|s| s.value()));
         by_tier.entry(tier).or_default().push(e.cost_ms);
     }
     json!({ "by_tier": latency_rows(by_tier) })
@@ -236,7 +236,7 @@ fn rate(turns: u64, fallbacks: u64) -> f64 {
 fn fallback(events: &[Event], now: i64) -> Value {
     let mut by_tier: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     for e in events {
-        if e.ts > now || e.entity != Entity::Turn {
+        if e.ts > now || e.entity != Entity::Scope {
             continue;
         }
         match e.verb {
@@ -245,14 +245,14 @@ fn fallback(events: &[Event], now: i64) -> Value {
                     continue;
                 }
                 // 分母按整条史取**最早**一幕的派发档。
-                let tier = declared_tier(events, e.turn, None);
+                let tier = declared_tier(events, e.scope, None);
                 by_tier.entry(tier).or_default().0 += 1;
             }
             Verb::Closed => {
                 if e.kind.as_str() != EVENT_CHAT_ASSISTANT_FALLBACK {
                     continue;
                 }
-                let tier = declared_tier(events, e.turn, e.seq.map(|s| s.value()));
+                let tier = declared_tier(events, e.scope, e.seq.map(|s| s.value()));
                 by_tier.entry(tier).or_default().1 += 1;
             }
             _ => {}

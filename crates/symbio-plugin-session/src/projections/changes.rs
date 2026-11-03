@@ -76,14 +76,14 @@ pub fn workdir_changes(v: MessageVocab) -> Projection<Vec<FileChange>> {
                     FileChange {
                         path,
                         op,
-                        turn: e.turn,
+                        turn: e.scope,
                         changes: 0,
                     },
                 )
             });
             entry.0 = idx;
             entry.1.op = op;
-            entry.1.turn = e.turn;
+            entry.1.turn = e.scope;
             entry.1.changes += 1;
         }
         let mut rows: Vec<(usize, FileChange)> = by_path.into_values().collect();

@@ -38,7 +38,7 @@ fn branch(id: &str, of: &str, into: &str) -> Event {
     Event::pending(
         format!("branch-{id}"),
         EVENT_TURN_BRANCH,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         1,
         "person/local",
@@ -51,7 +51,7 @@ fn picked(id: &str, selected: &str) -> Event {
     Event::pending(
         format!("branch-selected-{id}"),
         EVENT_TURN_BRANCH_SELECTED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         1,
         "person/local",
@@ -192,7 +192,7 @@ fn 一条分支格都没有时列表零改动() {
         &[Event::pending(
             "x",
             "assistant.final",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             1,
             "session/main",

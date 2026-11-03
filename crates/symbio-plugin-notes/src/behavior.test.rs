@@ -127,7 +127,7 @@ fn a_fact_of_another_kind_does_not_count_as_a_note() {
     let other = Event::pending(
         "x-1",
         "chat.assistant.final",
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         3,
         "session/a",

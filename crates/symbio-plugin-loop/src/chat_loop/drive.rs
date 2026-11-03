@@ -50,7 +50,7 @@ pub(crate) fn land_dispatch(
         Event::pending(
             format!("d-{turn_no}-{drive_seq}"),
             crate::control_decl::EVENT_TURN_DISPATCH,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             turn_no,
             &actor.principal,
@@ -96,7 +96,7 @@ pub(crate) fn land_opening(
         Event::pending(
             format!("op-{turn_no}"),
             symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             turn_no,
             principal,

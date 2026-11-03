@@ -185,13 +185,13 @@ pub enum ChatSlot {
 pub fn slot_of(e: &crate::Event, c: &ChatVocab, m: &MessageVocab) -> Option<ChatSlot> {
     use crate::event::{Entity, Verb};
     match (e.entity, e.verb) {
-        (Entity::Turn, Verb::Opened) if e.kind == c.user_message => Some(ChatSlot::UserMessage),
-        (Entity::Turn, Verb::Closed) if e.kind == c.final_reply => Some(ChatSlot::FinalReply),
-        (Entity::Turn, Verb::Closed) if e.kind == c.fallback => Some(ChatSlot::Fallback),
-        (Entity::Turn, Verb::Progressed) if e.kind == c.progress => Some(ChatSlot::Progress),
-        (Entity::Turn, Verb::Asserted) if e.kind == c.supplemented => Some(ChatSlot::Supplemented),
-        (Entity::Turn, Verb::Asserted) if e.kind == c.reported => Some(ChatSlot::Reported),
-        (Entity::Turn, Verb::Asserted) if e.kind == c.opening => Some(ChatSlot::Opening),
+        (Entity::Scope, Verb::Opened) if e.kind == c.user_message => Some(ChatSlot::UserMessage),
+        (Entity::Scope, Verb::Closed) if e.kind == c.final_reply => Some(ChatSlot::FinalReply),
+        (Entity::Scope, Verb::Closed) if e.kind == c.fallback => Some(ChatSlot::Fallback),
+        (Entity::Scope, Verb::Progressed) if e.kind == c.progress => Some(ChatSlot::Progress),
+        (Entity::Scope, Verb::Asserted) if e.kind == c.supplemented => Some(ChatSlot::Supplemented),
+        (Entity::Scope, Verb::Asserted) if e.kind == c.reported => Some(ChatSlot::Reported),
+        (Entity::Scope, Verb::Asserted) if e.kind == c.opening => Some(ChatSlot::Opening),
         (Entity::Artifact, Verb::Asserted) if e.kind == m.artifact_added => {
             Some(ChatSlot::ArtifactAdded)
         }

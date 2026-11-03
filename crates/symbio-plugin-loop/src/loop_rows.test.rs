@@ -47,7 +47,7 @@ fn ev(turn: u64, kind: &str, payload: Value) -> Event {
     let mut e = Event::pending(
         format!("{kind}-{turn}-{}", payload.to_string().len()),
         kind,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         turn,
         "test",

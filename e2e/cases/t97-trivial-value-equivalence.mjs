@@ -69,7 +69,7 @@ const stable = (e) =>
     kind: e.kind,
     entity: e.entity,
     verb: e.verb,
-    turn: e.turn,
+    scope: e.scope,
     payload: maskIds(e.payload),
   });
 

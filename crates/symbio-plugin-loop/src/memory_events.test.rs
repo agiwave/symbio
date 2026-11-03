@@ -59,7 +59,7 @@ fn root_of(store: &EventStore) -> u64 {
             .append(Event::pending(
                 "root-u0",
                 "user.message",
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 PRINCIPAL_USER,
@@ -294,7 +294,7 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
     assert_eq!(c.seq().map(|s| s.value()), Some(merged_seq));
     assert_eq!(c.entity, Entity::Memory);
     assert_eq!(c.verb, Verb::Progressed, "落在 memory × progressed");
-    assert_eq!(c.turn, 7);
+    assert_eq!(c.scope, 7);
     assert_eq!(
         c.payload.get("generation").and_then(|v| v.as_u64()),
         Some(1)
@@ -546,7 +546,7 @@ fn consolidate_reads_generation_from_the_source_payload() {
     let snap = store.range(Seq::new(0));
     let c = snap
         .iter()
-        .find(|e| e.kind == EVENT_MEMORY_CONSOLIDATED && e.turn == 1)
+        .find(|e| e.kind == EVENT_MEMORY_CONSOLIDATED && e.scope == 1)
         .expect("写出第二代合并产物（种子那两条 turn=0）");
     assert_eq!(
         c.payload.get("generation").and_then(|v| v.as_u64()),
@@ -865,7 +865,7 @@ fn the_history_window_keeps_only_the_newest_facts() {
             .append(Event::pending(
                 format!("f-{i}"),
                 "turn.stage",
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Asserted,
                 0,
                 PRINCIPAL_USER,
@@ -913,7 +913,7 @@ fn memories_older_than_the_window_wait_for_a_later_round() {
             .append(Event::pending(
                 format!("pad-{i}"),
                 "turn.stage",
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Asserted,
                 0,
                 PRINCIPAL_USER,

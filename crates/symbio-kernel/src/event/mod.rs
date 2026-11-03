@@ -454,7 +454,6 @@ pub use trigger_kinds_gen::EVENT_TRIGGER_KINDS;
 /// 能力数量增长——`CS-009` 把这条钉成棘轮（变体总数只许降）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Entity {
-    Turn,
     Task,
     Artifact,
     Verdict,
@@ -466,8 +465,15 @@ pub enum Entity {
     /// **可见域**：一条事实说的不是「这一轮说了什么」，而是「在这个域里某个动作被
     /// 放行 / 拒绝」。它跨轮、跨包，写方不持轮状态（`D-307`）。
     ///
-    /// 与 `Turn` 的分界：授权结论不随轮次结束而失效，也不开始任何一轮；挂 `Turn`
-    /// 会让写方为了落一条与轮无关的事实去引用即将拆除的 turn 词根。
+    /// 与已删除的 `Turn` 变体的分界：进这条事实的不是「这一轮说了什么」，而是
+    /// 「在会话可见域里哪个动作被放行 / 拒绝 / 开始 / 结束」。授权结论不随轮次结束而
+    /// 失效；对话格、协议五格、会话配置同挂这里（`D-317`）。
+    ///
+    /// ## 反序列化兼容
+    ///
+    /// 历史事实里的实体词是旧变体名（`"Turn"`，以及小写化的 `"turn"`）：删变体后
+    /// 这两种写法都必须仍能读回来（`D-317` 的迁移验收）。写侧仍用变体名 `"Scope"`。
+    #[serde(alias = "Turn", alias = "turn")]
     Scope,
     System,
     /// 消息列表上的一次**变更**（编辑 / 删除 / 压缩快照）。名字由 owner 声明
@@ -524,8 +530,11 @@ pub struct Event {
     pub kind: String,
     pub entity: Entity,
     pub verb: Verb,
-    /// 所属回合。N3（每 turn 至多一条 final）按它分桶。
-    pub turn: u64,
+    /// 所属可见域（会话内一贯的域编号）。收束格按它分桶。
+    ///
+    /// 历史 WAL 里这一格叫 `turn`（`D-317` 之前）：读侧靠别名词兼容，写侧只写 `scope`。
+    #[serde(rename = "scope", alias = "turn")]
+    pub scope: u64,
     /// 产生者（Principal，数据：字符串 ID）。
     pub actor: String,
     /// 溯源：产生本事件的上游事件 seq（I2——断言类事件必须非空）。
@@ -547,7 +556,7 @@ impl Event {
         kind: impl Into<String>,
         entity: Entity,
         verb: Verb,
-        turn: u64,
+        scope: u64,
         actor: impl Into<String>,
     ) -> Self {
         Event {
@@ -555,7 +564,7 @@ impl Event {
             kind: kind.into(),
             entity,
             verb,
-            turn,
+            scope,
             actor: actor.into(),
             produced_by: None,
             cost_ms: 0,
@@ -741,3 +750,7 @@ impl EventEnvelope for Event {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "mod.test.rs"]
+mod tests;

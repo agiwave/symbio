@@ -39,19 +39,19 @@ pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 
 // ============ chat ============
 
-/// chat.assistant.fallback — owner `symbio-plugin-loop`，格位 `(Turn, Closed)`
+/// chat.assistant.fallback — owner `symbio-plugin-loop`，格位 `(Scope, Closed)`
 pub const EVENT_CHAT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 
-/// chat.assistant.final — owner `symbio-plugin-loop`，格位 `(Turn, Closed)`
+/// chat.assistant.final — owner `symbio-plugin-loop`，格位 `(Scope, Closed)`
 pub const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 
-/// chat.assistant.opening — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
+/// chat.assistant.opening — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_CHAT_ASSISTANT_OPENING: &str = "chat.assistant.opening";
 
-/// chat.assistant.progress — owner `symbio-plugin-loop`，格位 `(Turn, Progressed)`
+/// chat.assistant.progress — owner `symbio-plugin-loop`，格位 `(Scope, Progressed)`
 pub const EVENT_CHAT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 
-/// chat.assistant.reported — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
+/// chat.assistant.reported — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 
 // ============ commitment ============
@@ -97,7 +97,7 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 
 // ============ session ============
 
-/// session.config — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
+/// session.config — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_SESSION_CONFIG: &str = "session.config";
 
 /// session.consolidated — owner `symbio-plugin-session`，格位 `(Message, Progressed)`
@@ -122,21 +122,21 @@ pub const EVENT_TASK_PROGRESS: &str = "task.progress";
 
 // ============ turn ============
 
-/// turn.branch — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
+/// turn.branch — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_TURN_BRANCH: &str = "turn.branch";
 
-/// turn.branch_selected — owner `symbio-plugin-session`，格位 `(Turn, Asserted)`
+/// turn.branch_selected — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
 pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
 
-/// turn.dispatch — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
+/// turn.dispatch — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
 
-/// turn.supplemented — owner `symbio-plugin-loop`，格位 `(Turn, Asserted)`
+/// turn.supplemented — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 
 // ============ user ============
 
-/// user.message — owner `symbio-plugin-loop`，格位 `(Turn, Opened)`
+/// user.message — owner `symbio-plugin-loop`，格位 `(Scope, Opened)`
 pub const EVENT_USER_MESSAGE: &str = "user.message";
 
 /// 跨插件共享的事件行（名字 + 格位 + 角色）——写闸的**共享臂**。
@@ -152,11 +152,11 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← loop
     EventDecl::with_roles(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]), // authz.denied ← loop
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)), // authz.granted ← loop
-    EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Turn, Verb::Closed)), // chat.assistant.fallback ← loop
-    EventDecl::with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Turn, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← loop
-    EventDecl::new(EVENT_CHAT_ASSISTANT_OPENING, (Entity::Turn, Verb::Asserted)), // chat.assistant.opening ← loop
-    EventDecl::new(EVENT_CHAT_ASSISTANT_PROGRESS, (Entity::Turn, Verb::Progressed)), // chat.assistant.progress ← loop
-    EventDecl::new(EVENT_CHAT_ASSISTANT_REPORTED, (Entity::Turn, Verb::Asserted)), // chat.assistant.reported ← loop
+    EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Scope, Verb::Closed)), // chat.assistant.fallback ← loop
+    EventDecl::with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← loop
+    EventDecl::new(EVENT_CHAT_ASSISTANT_OPENING, (Entity::Scope, Verb::Asserted)), // chat.assistant.opening ← loop
+    EventDecl::new(EVENT_CHAT_ASSISTANT_PROGRESS, (Entity::Scope, Verb::Progressed)), // chat.assistant.progress ← loop
+    EventDecl::new(EVENT_CHAT_ASSISTANT_REPORTED, (Entity::Scope, Verb::Asserted)), // chat.assistant.reported ← loop
     EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← loop
     EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← loop
     EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← loop
@@ -168,16 +168,16 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
     EventDecl::new(EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)), // message.edited ← session
     EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
-    EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Turn, Verb::Asserted)), // session.config ← loop
+    EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)), // session.config ← loop
     EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task
     EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← task
     EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← task
-    EventDecl::new(EVENT_TURN_BRANCH, (Entity::Turn, Verb::Asserted)), // turn.branch ← loop
-    EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Turn, Verb::Asserted)), // turn.branch_selected ← session
-    EventDecl::with_roles(EVENT_TURN_DISPATCH, (Entity::Turn, Verb::Asserted), &[FactRole::DeclaresBudget]), // turn.dispatch ← loop
-    EventDecl::new(EVENT_TURN_SUPPLEMENTED, (Entity::Turn, Verb::Asserted)), // turn.supplemented ← loop
-    EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Turn, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop
+    EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← loop
+    EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // turn.branch_selected ← session
+    EventDecl::with_roles(EVENT_TURN_DISPATCH, (Entity::Scope, Verb::Asserted), &[FactRole::DeclaresBudget]), // turn.dispatch ← loop
+    EventDecl::new(EVENT_TURN_SUPPLEMENTED, (Entity::Scope, Verb::Asserted)), // turn.supplemented ← loop
+    EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop
 ];

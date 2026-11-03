@@ -306,7 +306,7 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
             Event::pending(
                 "u0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -322,7 +322,7 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
                     Event::pending(
                         "f0",
                         EVENT_CHAT_ASSISTANT_FINAL,
-                        Entity::Turn,
+                        Entity::Scope,
                         Verb::Closed,
                         0,
                         "session/main",
@@ -340,7 +340,7 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
                     Event::pending(
                         "fb0",
                         EVENT_CHAT_ASSISTANT_FALLBACK,
-                        Entity::Turn,
+                        Entity::Scope,
                         Verb::Closed,
                         0,
                         "session/main",
@@ -420,7 +420,7 @@ fn two_finals_are_caught_by_n3() {
         .append(Event::pending(
             "u0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "user",
@@ -431,7 +431,7 @@ fn two_finals_are_caught_by_n3() {
             Event::pending(
                 "f0",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 0,
                 "session/main",
@@ -444,7 +444,7 @@ fn two_finals_are_caught_by_n3() {
             Event::pending(
                 "f1",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 0,
                 "session/main",
@@ -556,7 +556,7 @@ async fn rehearse_reasoner_turn(
             Event::pending(
                 "u0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -583,7 +583,7 @@ async fn rehearse_reasoner_turn(
                     Event::pending(
                         "f0",
                         EVENT_CHAT_ASSISTANT_FINAL,
-                        Entity::Turn,
+                        Entity::Scope,
                         Verb::Closed,
                         0,
                         "session/main",
@@ -598,7 +598,7 @@ async fn rehearse_reasoner_turn(
         Err(e) => {
             store
                 .append(
-                    Event::pending("fb0", EVENT_CHAT_ASSISTANT_FALLBACK, Entity::Turn, Verb::Closed, 0, "session/main")
+                    Event::pending("fb0", EVENT_CHAT_ASSISTANT_FALLBACK, Entity::Scope, Verb::Closed, 0, "session/main")
                         .with_produced_by(seq.value())
                         .with_cost_ms(cost_ms)
                         .with_payload(serde_json::json!({ "text": "抱歉，我暂时答不上来。", "error": format!("{e:?}") })),
@@ -644,7 +644,7 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
             Event::pending(
                 "u0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -898,7 +898,7 @@ fn elimination_event_keeps_invariants_green() {
         .append(Event::pending(
             "u0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "user",

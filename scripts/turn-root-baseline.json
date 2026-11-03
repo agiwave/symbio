@@ -1,12 +1,12 @@
 {
   "faces": {
     "F1": {
-      "prod": 1454,
-      "test": 1208
+      "prod": 1271,
+      "test": 870
     },
     "F2": {
-      "prod": 188,
-      "test": 560
+      "prod": 114,
+      "test": 264
     },
     "F3": {
       "prod": 0,
@@ -26,6 +26,11 @@
       "date": "2026-11-04",
       "faces": "F1.test / F2.test",
       "reason": "既有项位移，非新事实名：`execution.test.rs` 的 `chat.assistant.final` 与 `policy.test.rs` 的 `user.message` 夹具回滚到生产声明格（`Entity::Turn`，在 F1/F2 两面各计一次），生产面未变。B1（D-317）时随 `Entity::Scope` 一并清零。"
+    },
+    {
+      "date": "2026-11-04",
+      "faces": "F1.prod / F1.test / F2.prod / F2.test",
+      "reason": "D-317（B1a）落地：`Entity::Turn` 变体删除、全仓改挂 `Entity::Scope`，信封 `turn` 字段改名 `scope`，行判据键随视图改 `scope`。F1 1454/1208 → 1271/870、F2 188/560 → 114/264 全部为实测收窄；F2 余量不是实体词（`Entity::Turn` 实测 0），而是内核角色名（`FinalizesTurn` / `StopsTurn`）与老层视图名（`turn_head` / `turn_stages` / `turn_closed` 等），归 B2。"
     }
   ],
   "allow": [
@@ -38,13 +43,6 @@
     }
   ],
   "pending": [
-    {
-      "face": "F2",
-      "file": "crates/symbio-kernel/src/decl/mod.rs",
-      "pattern": "Entity::Turn",
-      "reason": "内核协议五格的实体格；Entity::Turn → Entity::Scope 属内核语法面，待 T-032 §二裁决",
-      "until": "Entity 裁决落地"
-    },
     {
       "face": "F2",
       "file": "crates/symbio-kernel/src/event/mod.rs",

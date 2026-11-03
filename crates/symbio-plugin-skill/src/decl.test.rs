@@ -24,9 +24,9 @@ use symbio_plugin_api::{
 /// loop 拥有的两条事实格（本二进制不链接它 ⇒ 夹具补格位与载荷字段）。
 const HARNESS_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
-    EventDecl::new("turn.stage", (Entity::Turn, Verb::Asserted)),
+    EventDecl::new("turn.stage", (Entity::Scope, Verb::Asserted)),
     // 真实进程里开轮事实由宿主写口落格（D-296），环里没有行生产它。
-    EventDecl::host("user.message", (Entity::Turn, Verb::Opened)),
+    EventDecl::host("user.message", (Entity::Scope, Verb::Opened)),
 ];
 
 const HARNESS_FACTS: &[FactDecl] = &[

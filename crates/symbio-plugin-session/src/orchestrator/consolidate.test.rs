@@ -52,7 +52,7 @@ fn seed_turn(store: &EventWalStore, turn: u64) {
             Event::pending(
                 format!("u-{turn}"),
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 turn,
                 "user",
@@ -65,7 +65,7 @@ fn seed_turn(store: &EventWalStore, turn: u64) {
             Event::pending(
                 format!("f-{turn}"),
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 turn,
                 "user",
@@ -100,7 +100,7 @@ fn a_consolidation_lands_a_snapshot_and_archives_the_prefix() {
     assert_eq!(snaps.len(), 1, "恰一条快照：{snaps:?}");
     assert_eq!(snaps[0].entity, Entity::Message);
     assert_eq!(snaps[0].verb, Verb::Progressed);
-    assert_eq!(snaps[0].turn, 0, "压缩不属于任何一轮（跨轮边界）");
+    assert_eq!(snaps[0].scope, 0, "压缩不属于任何一轮（跨轮边界）");
     assert_eq!(snaps[0].payload["messages"][0]["id"], "snap-1");
     assert_eq!(snaps[0].payload["turns"], 2, "水位 = 被取代前缀里的轮数");
     assert_eq!(
@@ -276,7 +276,7 @@ fn the_turn_number_continues_across_archival() {
             Event::pending(
                 "u-1",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 1,
                 "user",
@@ -288,7 +288,7 @@ fn the_turn_number_continues_across_archival() {
         .range(Seq::new(0))
         .iter()
         .filter(|e| e.kind == EVENT_USER_MESSAGE)
-        .map(|e| e.turn)
+        .map(|e| e.scope)
         .collect();
     assert_eq!(turns, vec![0, 1], "两轮不重号");
 }

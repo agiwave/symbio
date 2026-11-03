@@ -380,7 +380,7 @@ fn turn_facts(final_first: bool) -> Vec<symbio_kernel::event::Event> {
     let user = Event::pending(
         "u1",
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user:t",
@@ -388,7 +388,7 @@ fn turn_facts(final_first: bool) -> Vec<symbio_kernel::event::Event> {
     let final_msg = Event::pending(
         "f1",
         EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         0,
         "session/t",
@@ -764,7 +764,7 @@ fn interruption_after_final_is_queued_not_preempted() {
             Event::pending(
                 "f0",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 0,
                 "session/main",

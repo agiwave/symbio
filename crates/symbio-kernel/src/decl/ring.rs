@@ -72,7 +72,7 @@ fn row_writes_of<'a>(
 
 /// 信封三格：每条事实都带，因此**不**要求写进 `FactDecl.fields`（模块文档 §「模式
 /// 只做等值」）。第 3 条检查对它们放行，其余字段名一律要在声明里。
-const ENVELOPE_FIELDS: &[&str] = &["turn", "seq", "ts"];
+const ENVELOPE_FIELDS: &[&str] = &["scope", "seq", "ts"];
 
 /// 模式里的一个字面量。只覆盖 JSON 的三个标量型——键绑定也只认它们。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -353,7 +353,7 @@ fn eq_matches(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> bool
 
 fn fact_field(e: &Event, name: &str) -> Option<Value> {
     match name {
-        "turn" => Some(Value::from(e.turn)),
+        "scope" => Some(Value::from(e.scope)),
         "seq" => e.seq.map(|s| Value::from(s.value())),
         "ts" => Some(Value::from(e.ts)),
         _ => e.payload.get(name).cloned(),

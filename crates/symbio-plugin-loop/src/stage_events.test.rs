@@ -243,9 +243,9 @@ fn land_writes_the_turn_stage_cell() {
     let e = &events[0];
     assert_eq!(e.event_id, "st-7-0-decide");
     assert_eq!(e.kind, EVENT_TURN_STAGE);
-    assert_eq!(e.entity, Entity::Turn);
+    assert_eq!(e.entity, Entity::Scope);
     assert_eq!(e.verb, Verb::Asserted);
-    assert_eq!(e.turn, 7);
+    assert_eq!(e.scope, 7);
     assert_eq!(e.actor, "user-1");
     // I2：断言类事件必须带溯源（用户格 seq）。
     assert_eq!(e.produced_by, Some(4));

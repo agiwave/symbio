@@ -93,7 +93,7 @@ impl Violation {
 /// 格位之外再比一次名字，拦的就不是「谁开了轮」而是「谁的名字在表上」——新名字落进
 /// 开轮格时开轮闸静默不拦。
 pub fn is_turn_open(e: &Event) -> bool {
-    e.entity == Entity::Turn && e.verb == Verb::Opened
+    e.entity == Entity::Scope && e.verb == Verb::Opened
 }
 
 /// 这一条是本轮的**定稿发言**吗（收束格上扮演 `finalizes_turn` 角色那一个）？
@@ -102,7 +102,7 @@ pub fn is_turn_open(e: &Event) -> bool {
 /// 也算进来，就成了比读侧更严的第二套规则。同格两个名字要分辨，靠的是 owner 声明里
 /// 的角色而不是这里抄一个名字——角色缺失时装配口报 `Gap::UnmannedRole`，不会空转。
 pub fn is_turn_final(vocab: &[EventDecl], e: &Event) -> bool {
-    e.entity == Entity::Turn
+    e.entity == Entity::Scope
         && e.verb == Verb::Closed
         && holds_role(vocab, &e.kind, FactRole::FinalizesTurn)
 }
@@ -113,7 +113,7 @@ pub fn is_turn_final(vocab: &[EventDecl], e: &Event) -> bool {
 /// 写侧判「新开轮是否越过了未收束的旧轮」必须与读侧同口径，否则会出现
 /// 「写侧说越界、读侧说没事」的两套绿。两格整格算数，不看名字（DE-024 D-203）。
 pub fn closes_turn(e: &Event) -> bool {
-    (e.entity == Entity::Turn && e.verb == Verb::Closed)
+    (e.entity == Entity::Scope && e.verb == Verb::Closed)
         || (e.entity == Entity::Artifact && e.verb == Verb::Asserted)
 }
 
@@ -126,7 +126,7 @@ pub fn closes_turn(e: &Event) -> bool {
 /// （DE-015 §4.3 判据 10 点名的就是这两种格）。拿结算尺去问停机，
 /// 就会向生产要一个它永远写不出的字段。
 pub fn is_stop_fact(vocab: &[EventDecl], e: &Event) -> bool {
-    (e.entity == Entity::Turn && e.verb == Verb::Closed)
+    (e.entity == Entity::Scope && e.verb == Verb::Closed)
         || holds_role(vocab, &e.kind, FactRole::StopsTurn)
 }
 
@@ -185,7 +185,7 @@ pub fn final_unique_per_turn(vocab: &[EventDecl], events: &[Event]) -> Vec<Viola
     // 哪些事件算数（定稿的判据）是本模块的解析层；「每 turn 至多一条」
     // 的判定走 kernel::unique_per_turn_core——可执行论证程序包含的是同一份内核。
     let finals = events.iter().filter(|e| is_turn_final(vocab, e));
-    kernel::unique_per_turn_core(finals.map(|e| (e.turn, e.event_id.as_str())))
+    kernel::unique_per_turn_core(finals.map(|e| (e.scope, e.event_id.as_str())))
         .into_iter()
         .map(|(dup, first, turn)| {
             let e = events
@@ -212,7 +212,7 @@ pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
     // 与 final_unique_per_turn 同一内核：
     // 「哪些事件算数」在解析层，「每 turn 至多一条」在 kernel。
     let opens = events.iter().filter(|e| is_turn_open(e));
-    kernel::unique_per_turn_core(opens.map(|e| (e.turn, e.event_id.as_str())))
+    kernel::unique_per_turn_core(opens.map(|e| (e.scope, e.event_id.as_str())))
         .into_iter()
         .map(|(dup, first, turn)| {
             let e = events
@@ -250,7 +250,7 @@ pub fn produced_by_coverage(events: &[Event]) -> Vec<Violation> {
 fn needs_provenance(e: &Event) -> bool {
     e.verb == Verb::Asserted
         || e.entity == Entity::Memory
-        || (e.entity == Entity::Turn && (e.verb == Verb::Closed || e.verb == Verb::Progressed))
+        || (e.entity == Entity::Scope && (e.verb == Verb::Closed || e.verb == Verb::Progressed))
 }
 
 /// I2 的另一半：溯源边**不悬空**。
@@ -392,7 +392,7 @@ fn declared_budget_ms(vocab: &[EventDecl], events: &[Event]) -> Option<u64> {
         events
             .iter()
             .filter(|e| {
-                e.entity == Entity::Turn
+                e.entity == Entity::Scope
                     && e.verb == verb
                     && holds_role(vocab, &e.kind, FactRole::DeclaresBudget)
             })
@@ -450,13 +450,13 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
     let mut last_open_pos: Option<usize> = None;
     for (i, e) in events.iter().enumerate() {
         if is_turn_open(e) {
-            opened.push((i, e.turn, e));
+            opened.push((i, e.scope, e));
             last_open_pos = Some(i);
         }
         // 收束 = 发言收束（final / fallback）或产物收束（D-067，落过工具结果）。
         // 判据与写侧闸门共用 [`closes_turn`]：两处各写一份必然漂移。
         if closes_turn(e) {
-            opened.retain(|(_, turn, _)| *turn != e.turn);
+            opened.retain(|(_, turn, _)| *turn != e.scope);
         }
     }
     let mut bad = Vec::new();

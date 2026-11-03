@@ -1246,7 +1246,7 @@ pub(crate) fn run_report<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                     ),
                     symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Asserted,
                     turn_no,
                     &principal,
@@ -1499,7 +1499,7 @@ fn land_drafts(
 ) -> Result<(), ActorError> {
     for draft in drafts {
         let mut event = draft.into_event(principal);
-        event.turn = turn;
+        event.scope = turn;
         store.append(event).map_err(ActorError::Append)?;
     }
     Ok(())
@@ -1686,7 +1686,7 @@ pub(crate) fn land_inputs(
 ///   收束格留给恢复幕），但它是本轮的最后一步——继续选债就会再跑一次模型往返，
 ///   把「等你回答」跑成「又答了一轮」。字面口径与这里的差异记在 D-123。
 pub(crate) fn ends_the_drive(e: &Event, turn: u64) -> bool {
-    if e.turn != turn {
+    if e.scope != turn {
         return false;
     }
     if is_stop_fact(super::control_decl::guard_vocab(), e) {

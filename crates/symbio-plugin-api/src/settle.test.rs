@@ -81,13 +81,13 @@ fn draft_carries_no_envelope_and_the_host_stamps_it() {
     let contributed = Contribution::new(draft("d-1"));
     assert_eq!(contributed.actor, None);
     let mut event = contributed.fact.into_event(at.principal);
-    event.turn = 3;
+    event.scope = 3;
     event.ts = at.now_ms;
     assert_eq!(event.actor, "session/a");
     assert_eq!(event.event_id, "d-1");
     assert_eq!(event.kind, "test.contributed");
     assert_eq!(event.produced_by, Some(7));
-    assert_eq!(event.turn, 3);
+    assert_eq!(event.scope, 3);
     assert_eq!(event.ts, 1_700);
 }
 
@@ -99,10 +99,10 @@ fn actor_can_be_declared_by_the_capability() {
     let mut event = contributed
         .fact
         .into_event(contributed.actor.unwrap_or(at.principal));
-    event.turn = 3;
+    event.scope = 3;
     event.ts = at.now_ms;
     assert_eq!(event.actor, "person/local");
-    assert_eq!(event.turn, 3);
+    assert_eq!(event.scope, 3);
     assert_eq!(event.ts, 1_700);
 }
 

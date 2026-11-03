@@ -19,7 +19,7 @@ fn ev(turn: u64, kind: &str, payload: Value) -> Event {
     let mut e = Event::pending(
         format!("{kind}-{turn}-{}", payload.to_string().len()),
         kind,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         turn,
         "test",
@@ -316,7 +316,7 @@ fn reading_a_cell_with_a_slot_but_no_fact_decl_is_reported_not_rejected() {
     const CELL: &str = "probe.cell";
     // `PluginDeclarations` 要 `'static` 切片：`EventDecl::new` 是函数调用，不能靠常量提升，
     // 所以先落成常量。
-    const CELL_EVENTS: &[EventDecl] = &[EventDecl::new(CELL, (Entity::Turn, Verb::Asserted))];
+    const CELL_EVENTS: &[EventDecl] = &[EventDecl::new(CELL, (Entity::Scope, Verb::Asserted))];
     let mut b = Builder::empty();
     b.declare(
         "probe-owner",
@@ -605,8 +605,8 @@ fn the_request_cell_belongs_to_the_decider() {
 #[test]
 fn host_write_is_one_event_cell() {
     const EVENTS: &[EventDecl] = &[
-        EventDecl::host("fixture.host", (Entity::Turn, Verb::Opened)),
-        EventDecl::new("fixture.row", (Entity::Turn, Verb::Asserted)),
+        EventDecl::host("fixture.host", (Entity::Scope, Verb::Opened)),
+        EventDecl::new("fixture.row", (Entity::Scope, Verb::Asserted)),
     ];
     let mut b = Builder::empty();
     b.declare(
@@ -641,7 +641,7 @@ fn unmanned_roles_are_reported_per_variant() {
     // 只住一档：其余三档在表上无人。
     const PARTIAL: &[EventDecl] = &[EventDecl::with_roles(
         "fixture.final",
-        (Entity::Turn, Verb::Closed),
+        (Entity::Scope, Verb::Closed),
         &[FactRole::FinalizesTurn],
     )];
     let mut b = Builder::empty();
@@ -680,12 +680,12 @@ fn unmanned_roles_are_reported_per_variant() {
     const FULL: &[EventDecl] = &[
         EventDecl::with_roles(
             "fixture.a",
-            (Entity::Turn, Verb::Closed),
+            (Entity::Scope, Verb::Closed),
             &[FactRole::FinalizesTurn],
         ),
         EventDecl::with_roles(
             "fixture.b",
-            (Entity::Turn, Verb::Asserted),
+            (Entity::Scope, Verb::Asserted),
             &[FactRole::StopsTurn, FactRole::DeclaresBudget],
         ),
         EventDecl::new("fixture.c", (Entity::Task, Verb::Asserted)),

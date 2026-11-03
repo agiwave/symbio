@@ -107,28 +107,28 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // `Gap::UnmannedRole`。
     EventDecl::with_roles(
         "chat.assistant.final",
-        (Entity::Turn, Verb::Closed),
+        (Entity::Scope, Verb::Closed),
         &[FactRole::FinalizesTurn],
     ),
-    EventDecl::new("chat.assistant.fallback", (Entity::Turn, Verb::Closed)),
-    EventDecl::new("chat.assistant.reported", (Entity::Turn, Verb::Asserted)),
-    EventDecl::new("chat.assistant.opening", (Entity::Turn, Verb::Asserted)),
-    EventDecl::new("chat.assistant.progress", (Entity::Turn, Verb::Progressed)),
-    EventDecl::new(EVENT_TURN_STAGE, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new("chat.assistant.fallback", (Entity::Scope, Verb::Closed)),
+    EventDecl::new("chat.assistant.reported", (Entity::Scope, Verb::Asserted)),
+    EventDecl::new("chat.assistant.opening", (Entity::Scope, Verb::Asserted)),
+    EventDecl::new("chat.assistant.progress", (Entity::Scope, Verb::Progressed)),
+    EventDecl::new(EVENT_TURN_STAGE, (Entity::Scope, Verb::Asserted)),
     // 开轮：格位本身答得出「这是开轮」；它同时是**历史切片**的预算声明来源
     // （派发档落格之前的形态），所以带 `declares_budget`。**宿主写口**：这条事实
     // 在任何判决之前由运行器落格，环里没有哪一行生产它（D-296）。
     EventDecl::host_with_roles(
         "user.message",
-        (Entity::Turn, Verb::Opened),
+        (Entity::Scope, Verb::Opened),
         &[FactRole::DeclaresBudget],
     ),
-    EventDecl::new("turn.supplemented", (Entity::Turn, Verb::Asserted)),
-    EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new("turn.supplemented", (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)),
     // 本轮派发档：现行预算声明（`turn × asserted` 上只有它带这一档角色）。
     EventDecl::with_roles(
         EVENT_TURN_DISPATCH,
-        (Entity::Turn, Verb::Asserted),
+        (Entity::Scope, Verb::Asserted),
         &[FactRole::DeclaresBudget],
     ),
     // 被拒不产生收束格，但它回答「这一轮为什么停」——C6 的停机角色。
@@ -172,7 +172,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("artifact.added", (Entity::Artifact, Verb::Asserted)),
     // 分支族两支都**不删任何东西**，所以不是 `closed`（那一格是「这一轮的产出定稿」）；
     // 它们是「关于这一轮的断言」，且靠 `produced_by` 才能被验真（I2 的断言类）。
-    EventDecl::new("turn.branch", (Entity::Turn, Verb::Asserted)),
+    EventDecl::new("turn.branch", (Entity::Scope, Verb::Asserted)),
     // 淘汰裁决：写方在本插件轮末，读侧翻译在 `session`（两个生产消费方）。
     EventDecl::new(EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)),
     // 承诺四格：写方是轮末的立约 / 履约步（`derived_facts`）与 `agent` 插件的
@@ -493,7 +493,7 @@ fn stale_sent(events: &[Event], now: i64) -> serde_json::Value {
 fn config_of(events: &[Event], turn: u64) -> Option<&Event> {
     events
         .iter()
-        .rfind(|e| e.turn == turn && e.kind == EVENT_SESSION_CONFIG)
+        .rfind(|e| e.scope == turn && e.kind == EVENT_SESSION_CONFIG)
 }
 
 /// 当前这一幕的身份：轮号 + 幕锚（最新一条用户格 / 恢复格）。
@@ -515,7 +515,7 @@ fn drive_of(events: &[Event]) -> Option<(u64, Option<&Event>)> {
         .filter(|e| is_drive_anchor(e))
         .max_by_key(|e| (e.ts, seq_of(e)))
     {
-        return Some((anchor.turn, Some(anchor)));
+        return Some((anchor.scope, Some(anchor)));
     }
     const HEAD_KINDS: &[&str] = &[
         "user.message",
@@ -527,7 +527,7 @@ fn drive_of(events: &[Event]) -> Option<(u64, Option<&Event>)> {
     let turn = events
         .iter()
         .filter(|e| HEAD_KINDS.contains(&e.kind.as_str()))
-        .map(|e| e.turn)
+        .map(|e| e.scope)
         .max()?;
     Some((turn, None))
 }
@@ -580,7 +580,7 @@ fn close_mark(events: &[Event], turn: u64, anchor_seq: u64) -> Option<&Event> {
     events
         .iter()
         .filter(|e| {
-            e.turn == turn
+            e.scope == turn
                 && matches!(
                     e.kind.as_str(),
                     "chat.assistant.final" | "chat.assistant.fallback"
@@ -654,7 +654,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let round = events
         .iter()
         .filter(|e| {
-            e.turn == turn
+            e.scope == turn
                 && e.kind == "turn.stage"
                 && str_field(e, "stage") == Some("round")
                 && after_anchor(e, anchor_seq)
@@ -671,7 +671,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     };
     let stage_since = |stage: &str| {
         events.iter().any(|e| {
-            e.turn == turn
+            e.scope == turn
                 && e.kind == "turn.stage"
                 && str_field(e, "stage") == Some(stage)
                 && u64_field(e, "round") == Some(round)
@@ -686,7 +686,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // `result:"miss"` 不算「已答」：那是宿主在命中集为空时用来关账的结局
     // （命中判定在技能行里、开账条件由 `turn.recalled` 给出），这一轮该照常进模型往返。
     let reflex_answered = events.iter().any(|e| {
-        e.turn == turn
+        e.scope == turn
             && e.kind == "turn.stage"
             && str_field(e, "stage") == Some("reflex")
             && u64_field(e, "round") == Some(round)
@@ -699,7 +699,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // `result`：判决那一步的**结论**说的就是「这一轮往下走还是就此答话」。
     // 压缩与召回的前件读它——定稿答话轮不进驱动循环（§5.1），这两行因此不该开账。
     let answered = events.iter().any(|e| {
-        e.turn == turn
+        e.scope == turn
             && e.kind == "turn.stage"
             && str_field(e, "stage") == Some("decide")
             && u64_field(e, "round") == Some(round)
@@ -730,7 +730,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let model_calls = events
         .iter()
         .filter(|e| {
-            e.turn == turn
+            e.scope == turn
                 && e.kind == EVENT_RESPONSE
                 && str_field(e, "port") == Some(ports::MODEL)
                 && str_field(e, "via").is_none()
@@ -769,7 +769,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let model_outcome_failed = events
         .iter()
         .filter(|e| {
-            e.turn == turn
+            e.scope == turn
                 && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
                 && str_field(e, "port") == Some(ports::MODEL)
                 && str_field(e, "via").is_none()
@@ -779,7 +779,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         .is_some_and(|e| {
             e.kind == EVENT_FAILED
                 && events.iter().any(|r| {
-                    r.turn == turn
+                    r.scope == turn
                         && r.kind == EVENT_REQUEST
                         && str_field(r, "port") == Some(ports::MODEL)
                         && str_field(r, "via").is_none()
@@ -803,11 +803,11 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // **之前**（恢复幕的锚是 `resume-turn` 才落的那条阶段事实）。
     let request_open = !closed
         && events.iter().any(|req| {
-            req.turn == turn
+            req.scope == turn
                 && req.kind == EVENT_REQUEST
                 && str_field(req, "port") == Some(ports::TOOL)
                 && !events.iter().any(|e| {
-                    e.turn == turn
+                    e.scope == turn
                         && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
                         && str_field(e, "port") == Some(ports::TOOL)
                         && str_field(e, "id") == str_field(req, "id")
@@ -836,13 +836,13 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // 还开着」；上一世遗留、本幕没宣布过的请求也不该把本幕的执行行堵住（它由派发
     // 行自己判死，见 `turn_exec::run_model`）。
     let model_open = events.iter().any(|req| {
-        req.turn == turn
+        req.scope == turn
             && req.kind == EVENT_REQUEST
             && str_field(req, "port") == Some(ports::MODEL)
             && str_field(req, "via").is_none()
             && after_anchor(req, anchor_seq)
             && !events.iter().any(|e| {
-                e.turn == turn
+                e.scope == turn
                     && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED | EVENT_RETRY)
                     && str_field(e, "port") == Some(ports::MODEL)
                     && str_field(e, "id") == str_field(req, "id")
@@ -855,7 +855,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
                 calls.iter().any(|c| {
                     let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     !events.iter().any(|e| {
-                        e.turn == turn
+                        e.scope == turn
                             && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
                             && str_field(e, "port") == Some(ports::TOOL)
                             && str_field(e, "id") == Some(id)
@@ -864,7 +864,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
                 })
             }));
     serde_json::json!({
-        "turn": turn,
+        "scope": turn,
         "round": round,
         "anchor": anchor_seq,
         "has_utterance": has_utterance,
@@ -907,10 +907,10 @@ fn turn_stages(events: &[Event], _now: i64) -> serde_json::Value {
     serde_json::Value::Array(
         events
             .iter()
-            .filter(|e| e.turn == turn && e.kind == "turn.stage" && after_anchor(e, anchor_seq))
+            .filter(|e| e.scope == turn && e.kind == "turn.stage" && after_anchor(e, anchor_seq))
             .map(|e| {
                 serde_json::json!({
-                    "turn": e.turn,
+                    "scope": e.scope,
                     "stage": str_field(e, "stage"),
                     "round": u64_field(e, "round").unwrap_or(0),
                 })
@@ -938,7 +938,7 @@ fn turn_recalled(events: &[Event], _now: i64) -> serde_json::Value {
     let Some(stage) = events
         .iter()
         .filter(|e| {
-            e.turn == turn
+            e.scope == turn
                 && e.kind == "turn.stage"
                 && str_field(e, "stage") == Some("recall")
                 && after_anchor(e, anchor_seq)
@@ -985,7 +985,7 @@ fn turn_closed(events: &[Event], _now: i64) -> serde_json::Value {
     };
     let anchor_seq = anchor.map(seq_of).unwrap_or(0);
     if close_mark(events, turn, anchor_seq).is_some() {
-        serde_json::json!([{ "turn": turn }])
+        serde_json::json!([{ "scope": turn }])
     } else {
         serde_json::Value::Array(Vec::new())
     }
@@ -1036,7 +1036,7 @@ fn turn_next_round(events: &[Event], now: i64) -> serde_json::Value {
     let exhausted = head.get("closure").and_then(|v| v.as_str())
         == Some(symbio_kernel::event::ClosureReason::Exhausted.as_str());
     let (Some(turn), Some(round)) = (
-        head.get("turn").and_then(|v| v.as_u64()),
+        head.get("scope").and_then(|v| v.as_u64()),
         head.get("round").and_then(|v| v.as_u64()),
     ) else {
         return serde_json::Value::Array(Vec::new());
@@ -1044,7 +1044,7 @@ fn turn_next_round(events: &[Event], now: i64) -> serde_json::Value {
     if !exhausted || !has_next_round(round) {
         return serde_json::Value::Array(Vec::new());
     }
-    serde_json::json!([{ "turn": turn, "round": round + 1 }])
+    serde_json::json!([{ "scope": turn, "round": round + 1 }])
 }
 
 /// **本幕的下一次模型往返**（`D-225`）：该不该宣布，以及要还的那一格的身份。
@@ -1077,7 +1077,7 @@ fn next_round_trip(events: &[Event], now: i64) -> serde_json::Value {
         return serde_json::Value::Null;
     }
     let (Some(turn), Some(anchor)) = (
-        head.get("turn").and_then(|v| v.as_u64()),
+        head.get("scope").and_then(|v| v.as_u64()),
         head.get("anchor").and_then(|v| v.as_u64()),
     ) else {
         return serde_json::Value::Null;
@@ -1085,7 +1085,7 @@ fn next_round_trip(events: &[Event], now: i64) -> serde_json::Value {
     let step = events
         .iter()
         .filter(|e| {
-            e.turn == turn
+            e.scope == turn
                 && e.kind == EVENT_REQUEST
                 && str_field(e, "port") == Some(ports::MODEL)
                 && str_field(e, "via").is_none()
@@ -1144,12 +1144,12 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
     let reports = events
         .iter()
         .filter(|e| {
-            e.turn == turn && e.kind == "chat.assistant.reported" && after_anchor(e, drive_seq)
+            e.scope == turn && e.kind == "chat.assistant.reported" && after_anchor(e, drive_seq)
         })
         .count() as u64;
     let anchor = events
         .iter()
-        .filter(|e| e.turn == turn && is_report_anchor(e))
+        .filter(|e| e.scope == turn && is_report_anchor(e))
         .max_by_key(|e| (e.ts, seq_of(e)));
     let quiet_ms = anchor.map(|e| (now - e.ts).max(0)).unwrap_or(0);
     // 本幕**已完成几轮工具调用** = 幕锚之后、`calls` 非空且**每一笔都已终局**的
@@ -1170,7 +1170,7 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
             && calls.iter().all(|c| {
                 let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 events.iter().any(|r| {
-                    r.turn == turn
+                    r.scope == turn
                         && matches!(r.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
                         && str_field(r, "port") == Some(ports::TOOL)
                         && str_field(r, "id") == Some(id)
@@ -1181,7 +1181,7 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
     let model_responses: Vec<&Event> = events
         .iter()
         .filter(|e| {
-            e.turn == turn
+            e.scope == turn
                 && e.kind == EVENT_RESPONSE
                 && str_field(e, "port") == Some(ports::MODEL)
                 && str_field(e, "via").is_none()
@@ -1219,7 +1219,7 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
     let attempted = anchor.is_some_and(|a| {
         let anchor_seq = seq_of(a);
         events.iter().any(|e| {
-            e.turn == turn
+            e.scope == turn
                 && e.kind == "turn.stage"
                 && str_field(e, "stage") == Some("report")
                 && seq_of(e) > anchor_seq
@@ -1235,7 +1235,7 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
         && fresh_progress
         && !attempted;
     serde_json::json!({
-        "turn": turn,
+        "scope": turn,
         // 静默区间的身份 = 区间起点那一格的 seq。汇报事实落格后，本视图的锚
         // 前移，下一段静默是新的一笔账（配额之外还要能逐段关账）。
         "anchor": anchor.map(seq_of).unwrap_or(0),
@@ -1269,13 +1269,13 @@ fn reported_anchors(events: &[Event], _now: i64) -> serde_json::Value {
                 let anchor = events
                     .iter()
                     .filter(|e| {
-                        e.turn == report.turn
+                        e.scope == report.scope
                             && e.seq.is_some_and(|s| s.value() < report_seq)
                             && is_report_anchor(e)
                     })
                     .max_by_key(|e| (e.ts, seq_of(e)));
                 Some(serde_json::json!({
-                    "turn": report.turn,
+                    "scope": report.scope,
                     "anchor": anchor.map(seq_of).unwrap_or(0),
                 }))
             })

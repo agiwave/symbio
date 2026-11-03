@@ -6,7 +6,7 @@ use symbio_kernel::event::{Entity, Verb};
 
 /// 一条生命周期事件（`turn` 分桶与投影无关，取 1）。
 fn ev(kind: &str, verb: Verb, payload: serde_json::Value) -> Event {
-    Event::pending("e", kind, Entity::Turn, verb, 1, "test").with_payload(payload)
+    Event::pending("e", kind, Entity::Scope, verb, 1, "test").with_payload(payload)
 }
 
 fn opened() -> Event {

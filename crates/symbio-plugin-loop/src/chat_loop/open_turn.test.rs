@@ -73,7 +73,7 @@ fn request() -> TurnRequest {
 fn fact<'a>(events: &'a [Event], kind: &str, turn: u64) -> &'a Event {
     events
         .iter()
-        .find(|e| e.kind == kind && e.turn == turn)
+        .find(|e| e.kind == kind && e.scope == turn)
         .unwrap_or_else(|| panic!("缺 {kind}（turn={turn}）：{events:?}"))
 }
 
@@ -140,7 +140,7 @@ fn the_turn_number_continues_across_a_snapshot() {
             Event::pending(
                 "u-0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -196,7 +196,7 @@ fn a_resume_drive_reuses_the_open_turn_without_a_new_user_fact() {
             Event::pending(
                 "u-0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -253,7 +253,7 @@ fn a_second_resume_in_the_same_turn_gets_its_own_anchor() {
             Event::pending(
                 "u-0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -313,7 +313,7 @@ fn a_second_new_drive_gets_the_next_turn_number() {
             Event::pending(
                 "u-0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -399,7 +399,7 @@ fn a_continuation_stage_reuses_the_turn_and_anchors_on_its_own_round_fact() {
             Event::pending(
                 "u-0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -413,7 +413,7 @@ fn a_continuation_stage_reuses_the_turn_and_anchors_on_its_own_round_fact() {
             Event::pending(
                 "st-0-0-round-0",
                 EVENT_TURN_STAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Asserted,
                 0,
                 "system",
@@ -426,7 +426,7 @@ fn a_continuation_stage_reuses_the_turn_and_anchors_on_its_own_round_fact() {
             Event::pending(
                 "final-0",
                 symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 0,
                 "assistant",
@@ -498,7 +498,7 @@ fn the_lease_window_keeps_only_the_newest_facts() {
             .append(Event::pending(
                 format!("f-{i}"),
                 EVENT_TURN_STAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Asserted,
                 0,
                 "system",
@@ -531,7 +531,7 @@ fn a_short_snapshot_is_handed_over_whole() {
             .append(Event::pending(
                 format!("s-{i}"),
                 EVENT_TURN_STAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Asserted,
                 0,
                 "system",

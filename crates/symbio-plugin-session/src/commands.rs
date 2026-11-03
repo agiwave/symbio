@@ -481,9 +481,9 @@ impl SessionPlugin {
         let event = Event::pending(
             format!("branch-selected-{member}-{n}"),
             EVENT_TURN_BRANCH_SELECTED,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
-            carrier.map(|e| e.turn).unwrap_or_default(),
+            carrier.map(|e| e.scope).unwrap_or_default(),
             actor,
         )
         .with_produced_by(anchor)

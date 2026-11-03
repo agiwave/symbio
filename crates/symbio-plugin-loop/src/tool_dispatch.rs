@@ -446,7 +446,7 @@ pub(crate) fn call_key(
 fn latest_model_response(facts: &[Event], turn: u64, drive: u64) -> Option<&Event> {
     let prefix = format!("{}-{turn}-d{drive}-", ports::MODEL);
     facts.iter().rev().find(|e| {
-        e.turn == turn
+        e.scope == turn
             && e.kind == symbio_kernel::event::EVENT_RESPONSE
             && e.payload.get("port").and_then(|v| v.as_str()) == Some(ports::MODEL)
             && e.payload
@@ -961,7 +961,7 @@ impl ToolPort {
     pub fn land_wake(&self, spec: &WakeSpec<'_>) -> Result<(), symbio_kernel::store::AppendError> {
         let facts = self.facts.range(Seq::new(0));
         for stale in facts.iter().filter(|e| {
-            e.turn == self.turn && is_wake_request(e) && !wake_terminal(&facts, self.turn, e)
+            e.scope == self.turn && is_wake_request(e) && !wake_terminal(&facts, self.turn, e)
         }) {
             let call = port::Call::new(
                 "tool",
@@ -1012,7 +1012,7 @@ impl ToolPort {
     pub(crate) fn wake_batch(&self) -> Option<WakeBatch> {
         let facts = self.facts.range(Seq::new(0));
         let req = facts.iter().rev().find(|e| {
-            e.turn == self.turn && is_wake_request(e) && !wake_terminal(&facts, self.turn, e)
+            e.scope == self.turn && is_wake_request(e) && !wake_terminal(&facts, self.turn, e)
         })?;
         let payload = &req.payload;
         let target = payload.get("target")?.as_str()?.to_string();
@@ -1170,7 +1170,7 @@ fn wake_terminal(facts: &[Event], turn: u64, req: &Event) -> bool {
     let id = req.payload.get("id").and_then(|v| v.as_str()).unwrap_or("");
     let at = req.seq.map(|s| s.value()).unwrap_or(0);
     facts.iter().any(|e| {
-        e.turn == turn
+        e.scope == turn
             && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
             && e.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
             && e.payload.get("id").and_then(|v| v.as_str()) == Some(id)

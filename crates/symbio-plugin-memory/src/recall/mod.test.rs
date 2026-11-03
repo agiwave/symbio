@@ -216,7 +216,7 @@ fn no_live_memory_means_no_retrieval() {
         .append(Event::pending(
             "u-1".to_string(),
             "user.message",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             PRINCIPAL_USER,

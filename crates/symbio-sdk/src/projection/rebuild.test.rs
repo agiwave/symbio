@@ -107,7 +107,7 @@ fn frame_event(
     origin: &str,
     payload: serde_json::Value,
 ) -> Event {
-    Event::pending(id, kind, Entity::Turn, verb, 1, origin)
+    Event::pending(id, kind, Entity::Scope, verb, 1, origin)
         .with_ts(ts)
         .with_payload(payload)
 }
@@ -231,7 +231,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
         Event::pending(
             "fb-1",
             EVENT_CHAT_ASSISTANT_FALLBACK,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             1,
             "session/main",
@@ -438,7 +438,7 @@ fn supplement_gets_a_stable_synthetic_id() {
     let ev = Event::pending(
         "s-1-0",
         EVENT_TURN_SUPPLEMENTED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         1,
         "user",
@@ -462,7 +462,7 @@ fn supplement_mirrors_the_persisted_shape() {
     let ev = Event::pending(
         "s-1-0",
         EVENT_TURN_SUPPLEMENTED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         1,
         "user",
@@ -548,7 +548,7 @@ fn reported_mirrors_the_persisted_shape() {
     let ev = Event::pending(
         "rp-1-0",
         EVENT_CHAT_ASSISTANT_REPORTED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         1,
         "session/main",
@@ -592,7 +592,7 @@ fn aborted_status_lands_on_the_turn_and_its_text() {
 
 /// 一条模型端口的协议事实（`response` / `failed` 走同一形状）。
 fn model_output_event(kind: &str, id: &str, ts: i64, payload: serde_json::Value) -> Event {
-    Event::pending(id, kind, Entity::Turn, Verb::Asserted, 1, "system")
+    Event::pending(id, kind, Entity::Scope, Verb::Asserted, 1, "system")
         .with_ts(ts)
         .with_produced_by(1)
         .with_payload(payload)
@@ -634,7 +634,7 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
     let denied = Event::pending(
         "deny-1-speech",
         crate::test_fixtures::EVENT_AUTHZ_DENIED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         1,
         "session/peer-b",
@@ -1089,7 +1089,7 @@ fn tool_fact_event(kind: &str, id: &str, payload: serde_json::Value) -> Event {
     Event::pending(
         format!("{kind}-{id}-1"),
         kind,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         1,
         "system",

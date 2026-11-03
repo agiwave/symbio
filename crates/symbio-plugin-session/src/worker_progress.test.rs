@@ -62,7 +62,7 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
                 Event::pending(
                     format!("u-{tag}-{t}"),
                     EVENT_USER_MESSAGE,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     t,
                     "user",
@@ -78,7 +78,7 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
                         Event::pending(
                             format!("f-{tag}-{t}"),
                             EVENT_CHAT_ASSISTANT_FINAL,
-                            Entity::Turn,
+                            Entity::Scope,
                             Verb::Closed,
                             t,
                             "session/main",
@@ -94,7 +94,7 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
                         Event::pending(
                             format!("fb-{tag}-{t}"),
                             EVENT_CHAT_ASSISTANT_FALLBACK,
-                            Entity::Turn,
+                            Entity::Scope,
                             Verb::Closed,
                             t,
                             "session/main",
@@ -156,7 +156,7 @@ fn an_open_last_turn_reads_as_in_flight() {
             Event::pending(
                 "u-open-2",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 2,
                 "user",
@@ -231,7 +231,7 @@ fn empty_placeholder_nodes_produce_no_steps() {
             Event::pending(
                 "p-empty",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 // 另一个轮：同一轮的第二条 final 会被写侧闸门拒掉（I1），而本测试要
                 // 验的是「空正文不产出步骤」，不是「重复收束」。

@@ -29,7 +29,7 @@ pub fn count_user_messages(events: &[Event], c: &ChatVocab, m: &MessageVocab) ->
     };
     base + events[start..]
         .iter()
-        .filter(|e| e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == c.user_message)
+        .filter(|e| e.entity == Entity::Scope && e.verb == Verb::Opened && e.kind == c.user_message)
         .count() as u64
 }
 

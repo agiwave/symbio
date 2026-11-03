@@ -238,7 +238,7 @@ where
         Event::pending(
             call.attempt_key(EVENT_REQUEST),
             EVENT_REQUEST,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             turn,
             "system",
@@ -396,7 +396,7 @@ where
         Event::pending(
             call.attempt_key(decl.before),
             decl.before,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             plan.turn,
             "system",
@@ -807,7 +807,7 @@ where
         Event::pending(
             call.attempt_key(EVENT_RESPONSE),
             EVENT_RESPONSE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             turn,
             "system",
@@ -905,8 +905,8 @@ where
     failed_with(
         store,
         &call,
-        request.turn,
-        request.produced_by.unwrap_or(request.turn),
+        request.scope,
+        request.produced_by.unwrap_or(request.scope),
         why,
     )?;
     symbio_plugin_api::plugin_warn!(
@@ -961,8 +961,8 @@ where
         failed_with(
             store,
             &call,
-            sent.turn,
-            sent.produced_by.unwrap_or(sent.turn),
+            sent.scope,
+            sent.produced_by.unwrap_or(sent.scope),
             why,
         )?;
         killed += 1;
@@ -1005,7 +1005,7 @@ where
         Event::pending(
             call.attempt_key(EVENT_FAILED),
             EVENT_FAILED,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             turn,
             "system",
@@ -1113,7 +1113,7 @@ where
                 Event::pending(
                     next.attempt_key(EVENT_REQUEST),
                     EVENT_REQUEST,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Asserted,
                     turn,
                     "system",
@@ -1127,7 +1127,7 @@ where
             Event::pending(
                 call.attempt_key(EVENT_RETRY),
                 EVENT_RETRY,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Asserted,
                 turn,
                 "lease_keeper",

@@ -19,7 +19,7 @@ fn ev(turn: u64, kind: &str, payload: Value) -> Event {
     let mut e = Event::pending(
         format!("{kind}-{turn}-{}", payload.to_string().len()),
         kind,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         turn,
         "test",
@@ -479,7 +479,7 @@ fn turn_head_reads_round_and_done_from_facts() {
     assert_eq!(
         turn_head(&events, 0),
         json!({
-            "turn": 1,
+            "scope": 1,
             "round": 0,
             "anchor": seq(&events[0]),
             "has_utterance": true,
@@ -541,7 +541,7 @@ fn turn_head_reads_round_and_done_from_facts() {
         ev(2, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
     let head = turn_head(&events, 0);
-    assert_eq!(head["turn"], json!(2));
+    assert_eq!(head["scope"], json!(2));
     assert_eq!(head["round"], json!(0));
     assert_eq!(head["anchor"], json!(seq(&events[3])));
     assert_eq!(head["has_utterance"], json!(true));
@@ -657,7 +657,7 @@ fn turn_head_resume_drive_starts_from_the_resume_anchor() {
 
     let mut closed = events.clone();
     closed.push(ev(1, "chat.assistant.final", json!({"text": "resumed"})));
-    assert_eq!(turn_closed(&closed, 0), json!([{"turn": 1}]));
+    assert_eq!(turn_closed(&closed, 0), json!([{"scope": 1}]));
 }
 
 /// 续幕（`D-222` 裁决 2）：本幕的锚是它自己的 `round > 0` 那一格。
@@ -726,8 +726,8 @@ fn turn_stages_only_sees_the_current_drive() {
     assert_eq!(
         turn_stages(&events, 0),
         json!([
-            {"turn": 1, "stage": "resume", "round": 0},
-            {"turn": 1, "stage": "round", "round": 0},
+            {"scope": 1, "stage": "resume", "round": 0},
+            {"scope": 1, "stage": "round", "round": 0},
         ])
     );
 }
@@ -1030,7 +1030,7 @@ fn turn_head_follows_a_resume_anchor_back_to_an_archived_turn() {
         ),
     ];
     let head = turn_head(&events, 0);
-    assert_eq!(head["turn"], json!(1), "表头回到被续写的旧轮");
+    assert_eq!(head["scope"], json!(1), "表头回到被续写的旧轮");
     assert_eq!(head["resumed"], json!(true));
     assert_eq!(
         head["has_utterance"],
@@ -1140,7 +1140,7 @@ fn report_due_needs_log_and_now_only() {
     assert_eq!(
         report_due(&events, 1520),
         json!({
-            "turn": 1,
+            "scope": 1,
             "anchor": seq(&events[1]),
             "due": true,
             "quiet_ms": 1500,
@@ -1154,7 +1154,7 @@ fn report_due_needs_log_and_now_only() {
     assert_eq!(
         report_due(&events, 1000),
         json!({
-            "turn": 1,
+            "scope": 1,
             "anchor": seq(&events[1]),
             "due": false,
             "quiet_ms": 980,
@@ -1189,7 +1189,7 @@ fn report_due_resets_quiet_on_assistant_speech() {
     assert_eq!(
         report_due(&events, 1100),
         json!({
-            "turn": 1,
+            "scope": 1,
             "anchor": seq(&events[4]),
             "due": false,
             "quiet_ms": 200,
@@ -1235,8 +1235,8 @@ fn reported_anchors_close_one_quiet_interval_each() {
     assert_eq!(
         reported_anchors(&events, 0),
         json!([
-            {"turn": 1, "anchor": seq(&events[1])},
-            {"turn": 1, "anchor": seq(&events[2])},
+            {"scope": 1, "anchor": seq(&events[1])},
+            {"scope": 1, "anchor": seq(&events[2])},
         ])
     );
     // 第二段已关；第三段自第二条汇报起算，到期时是一笔新账。

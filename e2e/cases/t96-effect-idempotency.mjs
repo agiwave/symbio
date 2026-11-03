@@ -88,9 +88,9 @@ export default defineCase(
         .filter(Boolean)
         .map((l) => JSON.parse(l));
       // 轮号是「已有用户格数」⇒ 终点轮就是最后一轮的号，不靠文件名猜。
-      const lastTurn = Math.max(...events.map((e) => e.turn ?? 0));
+      const lastTurn = Math.max(...events.map((e) => e.scope ?? 0));
       const inTurn = (turnNo, kind) =>
-        events.filter((e) => e.turn === turnNo && e.kind === kind);
+        events.filter((e) => e.scope === turnNo && e.kind === kind);
 
       // ── 前置：第二次投递确实是**新的一笔债** ─────────────────────────────
       // 倒数第二轮只有前一条技能可召回 ⇒ 一行、一格。
@@ -110,7 +110,7 @@ export default defineCase(
 
       // ── 读数 ②：两次投递只落一格阶段事实 ────────────────────────────────
       const stages = events.filter(
-        (e) => e.turn === lastTurn && e.kind === 'turn.stage' && e.payload?.stage === 'skill.recall',
+        (e) => e.scope === lastTurn && e.kind === 'turn.stage' && e.payload?.stage === 'skill.recall',
       );
       assertEq(
         stages.length,

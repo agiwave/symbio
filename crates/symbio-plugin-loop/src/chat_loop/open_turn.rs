@@ -213,7 +213,7 @@ pub(crate) fn open(
             let ordinal = snapshot
                 .iter()
                 .filter(|e| {
-                    e.turn == stage_no
+                    e.scope == stage_no
                         && e.kind == EVENT_TURN_STAGE
                         && e.payload.get("stage").and_then(|v| v.as_str()) == Some("resume")
                 })
@@ -254,7 +254,7 @@ pub(crate) fn open(
                     Event::pending(
                         format!("u-{stage_no}"),
                         EVENT_USER_MESSAGE,
-                        Entity::Turn,
+                        Entity::Scope,
                         Verb::Opened,
                         stage_no,
                         "user",
@@ -305,7 +305,7 @@ pub(crate) fn open(
                 Event::pending(
                     format!("branch-{root_id}"),
                     symbio_plugin_api::events::EVENT_TURN_BRANCH,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Asserted,
                     stage_no,
                     actor,
@@ -343,7 +343,7 @@ pub(crate) fn open(
     // ── 收租：上一段生命里派出去、没回来的调用 ─────────────────
     {
         let tail = lease_tail(&snapshot);
-        let stale_turn = tail.last().map(|e| e.turn).unwrap_or(0);
+        let stale_turn = tail.last().map(|e| e.scope).unwrap_or(0);
         let anchor = tail
             .last()
             .and_then(|e| e.seq)
@@ -367,7 +367,7 @@ pub(crate) fn open(
             Event::pending(
                 format!("cfg-{stage_no}-{drive_seq}"),
                 EVENT_SESSION_CONFIG,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Asserted,
                 stage_no,
                 "system",

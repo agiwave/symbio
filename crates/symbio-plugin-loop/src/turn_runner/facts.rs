@@ -294,7 +294,7 @@ pub(crate) fn window_by_turn<'a>(
     let oldest = current_turn.saturating_sub(keep - 1);
     let cut = events
         .iter()
-        .position(|e| e.entity == Entity::Turn && e.turn >= oldest)
+        .position(|e| e.entity == Entity::Scope && e.scope >= oldest)
         .unwrap_or(events.len());
     match latest_snapshot_index(events) {
         // 快照在窗口外 ⇒ 单独把它拎到最前（见函数文档）。

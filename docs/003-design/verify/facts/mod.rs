@@ -78,7 +78,7 @@ pub const DOMAINS: &[Domain] = &[
     },
     Domain {
         key: "event.entity",
-        forms: &["turn", "task", "artifact", "verdict", "memory", "commitment", "conation", "thread", "control", "scope", "system", "message", "domain"],
+        forms: &["task", "artifact", "verdict", "memory", "commitment", "conation", "thread", "control", "scope", "system", "message", "domain"],
         open: false,
     },
     Domain {
@@ -913,7 +913,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
         id: "S01",
         file: "031-最小闭环.md",
         assigns: &[
-            ("event.entity", "turn"),
+            ("event.entity", "scope"),
             ("event.verb", "closed"),
             ("actor.pattern", "reasoner"),
             ("actor.capability", "reply"),
@@ -986,7 +986,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
             ("actor.budget_ms", "80"),
             ("projection", "turnstate"),
         ],
-        fallback: ("event.entity", "turn"),
+        fallback: ("event.entity", "scope"),
     },
     StageDoc {
         id: "S08",
@@ -1043,7 +1043,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
             ("actor.pattern", "decider"),
             ("actor.budget_ms", "86400000"),
         ],
-        fallback: ("event.entity", "turn"),
+        fallback: ("event.entity", "scope"),
     },
     StageDoc {
         id: "S13",

@@ -138,7 +138,7 @@ where
         Event::pending(
             format!("fb-{turn}"),
             EVENT_CHAT_ASSISTANT_FALLBACK,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             turn,
             &actor.principal,
@@ -186,7 +186,7 @@ where
         Event::pending(
             format!("f-{turn}"),
             EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             turn,
             &actor.principal,

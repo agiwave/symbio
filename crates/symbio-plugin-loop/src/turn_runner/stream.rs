@@ -1191,13 +1191,13 @@ async fn land_pending(
     let progress_no = run
         .full_snapshot
         .iter()
-        .filter(|e| e.turn == run.turn && e.kind == EVENT_CHAT_ASSISTANT_PROGRESS)
+        .filter(|e| e.scope == run.turn && e.kind == EVENT_CHAT_ASSISTANT_PROGRESS)
         .count() as u64;
     store.append(
         Event::pending(
             format!("p-{}-{progress_no}", run.turn),
             EVENT_CHAT_ASSISTANT_PROGRESS,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Progressed,
             run.turn,
             &run.actor.principal,

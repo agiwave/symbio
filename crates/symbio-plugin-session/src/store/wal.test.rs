@@ -54,7 +54,7 @@ fn crash_recovery_head_matches_last_committed_event() {
                 .append(ev(
                     &format!("e{i}"),
                     "user.message",
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     i as u64,
                     "hi",
@@ -80,7 +80,7 @@ fn torn_tail_line_is_not_committed() {
                 .append(ev(
                     &format!("e{i}"),
                     "user.message",
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     i as u64,
                     "hi",
@@ -104,7 +104,7 @@ fn torn_tail_line_is_not_committed() {
         .append(ev(
             "e3",
             "user.message",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             3,
             "hi",
@@ -127,7 +127,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
             .append(ev_root(
                 "u0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "你好",
@@ -137,7 +137,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
             .append(ev(
                 "f0",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 0,
                 "你好，我能做什么？",
@@ -147,7 +147,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
             .append(ev(
                 "u1",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 1,
                 "帮我查天气",
@@ -157,7 +157,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
             .append(ev(
                 "f1",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 1,
                 "今天晴，25 度。",
@@ -211,7 +211,7 @@ fn memory_store_trivial_value_still_completes_the_loop() {
         .append(ev_root(
             "u0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "你好，帮我看看",
@@ -221,7 +221,7 @@ fn memory_store_trivial_value_still_completes_the_loop() {
         .append(ev(
             "f0",
             EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             0,
             "我可以帮你查资料、跑任务、写东西。",
@@ -251,7 +251,7 @@ fn dropping_last_committed_event_changes_head() {
                 .append(ev(
                     &format!("e{i}"),
                     "user.message",
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     i as u64,
                     "hi",
@@ -283,7 +283,7 @@ fn duplicate_is_rejected_after_recovery() {
             .append(ev(
                 "e0",
                 "user.message",
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "hi",
@@ -295,7 +295,7 @@ fn duplicate_is_rejected_after_recovery() {
         recovered.append(ev(
             "e0",
             "user.message",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "hi"
@@ -322,7 +322,7 @@ fn checkpoint_state_round_trips_through_json() {
         .append(ev(
             "u0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "hi",
@@ -352,7 +352,7 @@ fn open_readonly_drops_a_torn_tail_without_truncating_the_file() {
                 .append(ev(
                     &format!("e{i}"),
                     "user.message",
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     i as u64,
                     "hi",
@@ -412,7 +412,7 @@ fn second_writer_gets_not_the_writer_and_nothing_is_lost() {
         .append(ev(
             "u0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "hi",
@@ -425,7 +425,7 @@ fn second_writer_gets_not_the_writer_and_nothing_is_lost() {
         intruder.append(ev(
             "u1",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             1,
             "hi"
@@ -441,7 +441,7 @@ fn second_writer_gets_not_the_writer_and_nothing_is_lost() {
         .append(ev(
             "f0",
             EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             0,
             "yo",
@@ -473,7 +473,7 @@ fn readonly_store_refuses_to_write() {
             .append(ev(
                 "u0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "hi",
@@ -486,7 +486,7 @@ fn readonly_store_refuses_to_write() {
         ro.append(ev(
             "u1",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             1,
             "hi"
@@ -508,7 +508,7 @@ fn writer_token_is_released_when_the_store_drops() {
         .append(ev(
             "u0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "hi",
@@ -519,7 +519,7 @@ fn writer_token_is_released_when_the_store_drops() {
         EventWalStore::open(&path).unwrap().append(ev(
             "u1",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             1,
             "hi"
@@ -540,7 +540,7 @@ fn writer_token_is_released_when_the_store_drops() {
         .append(ev(
             "u1",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             1,
             "hi",
@@ -561,7 +561,7 @@ fn seeded(n: usize) -> (tempfile::TempDir, std::path::PathBuf, EventWalStore) {
             .append(ev(
                 &format!("e{i}"),
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 i as u64,
                 &format!("t{i}"),
@@ -617,7 +617,7 @@ fn appending_after_archival_continues_the_number_space() {
         .append(ev(
             "e12",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             12,
             "t12",
@@ -873,7 +873,7 @@ fn an_artifact_round_is_complete_after_reopen() {
     let user = Event::pending(
         "u-0",
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",
@@ -891,7 +891,7 @@ fn an_artifact_round_is_complete_after_reopen() {
     let assistant = Event::pending(
         "f-0",
         EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         0,
         "session/main",
@@ -949,7 +949,7 @@ fn final_without_provenance(turn: u64) -> Event {
     Event::pending(
         format!("f-{turn}"),
         symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         turn,
         "session/main",
@@ -994,7 +994,7 @@ fn gate_rejects_a_second_final_but_allows_artifact_then_final() {
         .append(ev(
             "u-0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "问",
@@ -1019,7 +1019,7 @@ fn gate_rejects_a_second_final_but_allows_artifact_then_final() {
         .append(ev(
             "f-0",
             EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             0,
             "答",
@@ -1030,7 +1030,7 @@ fn gate_rejects_a_second_final_but_allows_artifact_then_final() {
         .append(ev(
             "f-0-again",
             EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             0,
             "答二",
@@ -1055,7 +1055,7 @@ fn gate_rejects_a_second_open_for_the_same_turn() {
         .append(ev(
             "u-0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "问",
@@ -1065,7 +1065,7 @@ fn gate_rejects_a_second_open_for_the_same_turn() {
         .append(ev(
             "u-0-retry",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "又问",
@@ -1090,7 +1090,7 @@ fn gate_degrades_instead_of_blocking_a_new_turn_over_an_open_one() {
         .append(ev(
             "u-0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "问",
@@ -1101,7 +1101,7 @@ fn gate_degrades_instead_of_blocking_a_new_turn_over_an_open_one() {
         .append(ev(
             "u-1",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             1,
             "第二个问题",
@@ -1116,7 +1116,7 @@ fn gate_degrades_instead_of_blocking_a_new_turn_over_an_open_one() {
         .append(ev(
             "f-0",
             EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             0,
             "补上的收束",
@@ -1126,7 +1126,7 @@ fn gate_degrades_instead_of_blocking_a_new_turn_over_an_open_one() {
         .append(ev(
             "f-1",
             EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             1,
             "答",
@@ -1136,7 +1136,7 @@ fn gate_degrades_instead_of_blocking_a_new_turn_over_an_open_one() {
         .append(ev(
             "u-2",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             2,
             "第三个问题",
@@ -1156,7 +1156,7 @@ fn gate_index_is_rebuilt_from_the_wal_on_reopen() {
             .append(ev(
                 "u-0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "问",
@@ -1166,7 +1166,7 @@ fn gate_index_is_rebuilt_from_the_wal_on_reopen() {
             .append(ev(
                 "f-0",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 0,
                 "答",
@@ -1179,7 +1179,7 @@ fn gate_index_is_rebuilt_from_the_wal_on_reopen() {
         .append(ev(
             "f-0-late",
             EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             0,
             "迟到的第二条",
@@ -1206,7 +1206,7 @@ fn the_grid_gate_rejects_a_name_that_is_not_on_the_table() {
         .append(ev(
             "u-0",
             "user.messag",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             "拼错的名字",
@@ -1222,7 +1222,7 @@ fn the_grid_gate_rejects_a_name_that_is_not_on_the_table() {
             assert_eq!(event_id, "u-0");
             assert_eq!(kind, "user.messag");
             assert_eq!(declared, None, "不在表上 = 没有格位，不是猜一格");
-            assert_eq!(given, (Entity::Turn, Verb::Opened));
+            assert_eq!(given, (Entity::Scope, Verb::Opened));
         }
         other => panic!("拒错形态：{other:?}"),
     }
@@ -1238,7 +1238,7 @@ fn the_grid_gate_rejects_a_name_that_is_not_on_the_table() {
 fn the_grid_gate_rejects_a_name_claiming_another_cell() {
     let dir = tempfile::tempdir().unwrap();
     let store = EventWalStore::open(dir.path().join("events.jsonl")).unwrap();
-    let given = (Entity::Turn, Verb::Opened);
+    let given = (Entity::Scope, Verb::Opened);
     let e = Event::pending(
         "f-0",
         EVENT_CHAT_ASSISTANT_FINAL,
@@ -1258,8 +1258,8 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
             ..
         } => {
             assert_eq!(kind, EVENT_CHAT_ASSISTANT_FINAL);
-            assert_eq!(declared, Some((Entity::Turn, Verb::Closed)));
-            assert_eq!(given, (Entity::Turn, Verb::Opened));
+            assert_eq!(declared, Some((Entity::Scope, Verb::Closed)));
+            assert_eq!(given, (Entity::Scope, Verb::Opened));
         }
         other => panic!("拒错形态：{other:?}"),
     }
@@ -1269,7 +1269,7 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
     let ok = Event::pending(
         "f-1",
         EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         1,
         "session/main",
@@ -1295,13 +1295,13 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
     const FIXTURE_FINAL: &str = "fixture.wal.final";
     const FIXTURE_SILENT: &str = "fixture.wal.silent";
     const FIXTURE_EVENTS: &[EventDecl] = &[
-        EventDecl::new(FIXTURE, (Entity::Turn, Verb::Progressed)),
+        EventDecl::new(FIXTURE, (Entity::Scope, Verb::Progressed)),
         EventDecl::with_roles(
             FIXTURE_FINAL,
-            (Entity::Turn, Verb::Closed),
+            (Entity::Scope, Verb::Closed),
             &[FactRole::FinalizesTurn],
         ),
-        EventDecl::new(FIXTURE_SILENT, (Entity::Turn, Verb::Closed)),
+        EventDecl::new(FIXTURE_SILENT, (Entity::Scope, Verb::Closed)),
     ];
 
     fn protocol_rows() -> &'static [Decl] {
@@ -1356,7 +1356,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         .append(ev(
             "fixture-0",
             FIXTURE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Progressed,
             0,
             "正文",
@@ -1368,7 +1368,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
     assert_eq!(back[0].kind, FIXTURE);
     assert_eq!(
         (back[0].entity, back[0].verb),
-        (Entity::Turn, Verb::Progressed)
+        (Entity::Scope, Verb::Progressed)
     );
 
     // 第二个方向：名字在表上，但事件自述挪了一格 ⇒ 仍拒，且报出表上的格位。
@@ -1376,7 +1376,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         .append(Event::pending(
             "fixture-wrong",
             FIXTURE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             1,
             "session/main",
@@ -1386,8 +1386,8 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         matches!(
             err,
             AppendError::OffGrid {
-                declared: Some((Entity::Turn, Verb::Progressed)),
-                given: (Entity::Turn, Verb::Closed),
+                declared: Some((Entity::Scope, Verb::Progressed)),
+                given: (Entity::Scope, Verb::Closed),
                 ..
             }
         ),
@@ -1401,7 +1401,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         .append(ev(
             "role-1",
             FIXTURE_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             5,
             "一",
@@ -1411,7 +1411,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         .append(ev(
             "role-2",
             FIXTURE_FINAL,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             5,
             "二",
@@ -1432,7 +1432,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         .append(ev(
             "silent-1",
             FIXTURE_SILENT,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             6,
             "一",
@@ -1442,7 +1442,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         .append(ev(
             "silent-2",
             FIXTURE_SILENT,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Closed,
             6,
             "二",
@@ -1456,7 +1456,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         .append(Event::pending(
             "fixture-1",
             FIXTURE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Progressed,
             1,
             "session/main",

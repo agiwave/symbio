@@ -131,7 +131,7 @@ fn a_second_settle_of_the_same_turn_does_not_duplicate() {
 
     // 落格（宿主的那一步：信封由它盖）。
     let mut event = first[0].fact.clone().into_event(PRINCIPAL_USER);
-    event.turn = 1;
+    event.scope = 1;
     event.ts = 9_000;
     store.append(event).expect("入格");
 
@@ -152,7 +152,7 @@ fn the_fact_keeps_the_invariants_green() {
         .append(Event::pending(
             "u0",
             EVENT_USER_MESSAGE,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             0,
             PRINCIPAL_USER,
@@ -173,7 +173,7 @@ fn the_fact_keeps_the_invariants_green() {
     let recall = facts(&lines, false);
     let out = SemanticRecall.contribute(&settling(Some(&recall), user_seq, &[]));
     let mut event = out[0].fact.clone().into_event(PRINCIPAL_USER);
-    event.turn = 1;
+    event.scope = 1;
     event.ts = 9_000;
     store.append(event).expect("入格");
 

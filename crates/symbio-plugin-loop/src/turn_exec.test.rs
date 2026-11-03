@@ -423,7 +423,7 @@ fn seed_user(fx: &Fixture, turn: u64, text: &str) -> u64 {
             Event::pending(
                 format!("u-{turn}"),
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 turn,
                 "user",
@@ -445,7 +445,7 @@ fn seed_config(fx: &Fixture, turn: u64, user_seq: u64) {
             Event::pending(
                 format!("cfg-{turn}-{user_seq}"),
                 EVENT_SESSION_CONFIG,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Asserted,
                 turn,
                 "system",
@@ -580,7 +580,7 @@ async fn supplements_become_facts_visible_next_turn() {
         });
     assert_eq!(
         sup.entity,
-        symbio_kernel::event::Entity::Turn,
+        symbio_kernel::event::Entity::Scope,
         "落在 Turn 实体上"
     );
     assert_eq!(sup.verb, symbio_kernel::event::Verb::Asserted, "断言类动词");
@@ -1088,7 +1088,7 @@ async fn drive_lands_the_inputs_stage_and_runs_the_turn() {
     let landed = inputs_fact(&all).expect("备输入的出口进了日志");
     assert_eq!(landed.payload["result"], "ready");
     assert_eq!(landed.payload["round"], 0);
-    assert_eq!(landed.turn, h.turn.turn_no);
+    assert_eq!(landed.scope, h.turn.turn_no);
 
     assert!(
         all.iter().any(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL),
@@ -1111,7 +1111,7 @@ async fn drive_stops_at_an_in_place_answer_and_lands_closed_without_a_model_requ
             Event::pending(
                 "st-0-0-decide",
                 super::super::control_decl::EVENT_TURN_STAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 h.turn.turn_no,
                 "session",
@@ -1229,7 +1229,7 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
         check_all(guard_vocab(), &all)
     );
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
-    assert_eq!(snap[0].turn, 0, "turn 号 = WAL 内 user.message 计数");
+    assert_eq!(snap[0].scope, 0, "turn 号 = WAL 内 user.message 计数");
     assert_eq!(snap[1].kind, EVENT_CHAT_ASSISTANT_FINAL);
     assert_eq!(snap[1].payload["text"], "", "final 只存结局");
     assert!(snap[1].produced_by.is_some(), "final 溯源指向用户格");
@@ -1928,7 +1928,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
     let dispatch = all
         .iter()
-        .find(|e| e.kind == symbio_plugin_api::events::EVENT_TURN_DISPATCH && e.turn == 0)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_TURN_DISPATCH && e.scope == 0)
         .expect("反射档同样要有派发格");
     assert_eq!(
         dispatch.payload["tier"], "reflex",
@@ -1972,7 +1972,7 @@ fn the_recall_list_carries_the_resumed_flag() {
             Event::pending(
                 "u-0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -2030,7 +2030,7 @@ fn the_recall_list_carries_the_resumed_flag() {
             Event::pending(
                 "u-0",
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 0,
                 "user",
@@ -2435,11 +2435,11 @@ async fn consolidation_is_forwarded_before_the_turn_runs() {
         .expect("快照应已由会话动作落格");
     let second_user_at = all
         .iter()
-        .position(|e| e.kind == EVENT_USER_MESSAGE && e.turn == 1)
+        .position(|e| e.kind == EVENT_USER_MESSAGE && e.scope == 1)
         .expect("第二轮的用户格应已落");
     let dispatch_at = all
         .iter()
-        .position(|e| e.kind == symbio_plugin_api::events::EVENT_TURN_DISPATCH && e.turn == 1)
+        .position(|e| e.kind == symbio_plugin_api::events::EVENT_TURN_DISPATCH && e.scope == 1)
         .expect("第二轮的派发格应已落");
     assert!(
         second_user_at < snap_at,
@@ -2467,7 +2467,7 @@ fn open_turn_without_closure(fx: &Fixture, turn: u64, text: &str) -> u64 {
             Event::pending(
                 format!("u-{turn}"),
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 turn,
                 "user",
@@ -2482,7 +2482,7 @@ fn open_turn_without_closure(fx: &Fixture, turn: u64, text: &str) -> u64 {
 fn closure_of(all: &[Event], turn: u64) -> &Event {
     all.iter()
         .find(|e| {
-            e.turn == turn
+            e.scope == turn
                 && matches!(
                     e.kind.as_str(),
                     EVENT_CHAT_ASSISTANT_FINAL | EVENT_CHAT_ASSISTANT_FALLBACK
@@ -2524,7 +2524,7 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
         .expect("快照应已落格");
     let u0_at = all
         .iter()
-        .position(|e| e.kind == EVENT_USER_MESSAGE && e.turn == 0)
+        .position(|e| e.kind == EVENT_USER_MESSAGE && e.scope == 0)
         .expect("u-0 应在完整史里");
     assert!(
         u0_at < snapshot_at,
@@ -2559,7 +2559,7 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
     );
     assert_eq!(
         all.iter()
-            .filter(|e| e.turn == 0 && e.kind == EVENT_USER_MESSAGE)
+            .filter(|e| e.scope == 0 && e.kind == EVENT_USER_MESSAGE)
             .count(),
         1,
         "续写不重开用户格"
@@ -2602,7 +2602,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
     let all = fx.facts.range(Seq::new(0));
     assert!(
         all.iter()
-            .any(|e| e.turn == 1 && e.kind == EVENT_USER_MESSAGE),
+            .any(|e| e.scope == 1 && e.kind == EVENT_USER_MESSAGE),
         "第 1 轮的轮号接着水位走（不是从 0 重号）"
     );
     let snapshot_at = all
@@ -2611,7 +2611,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         .expect("快照应已落格");
     let u0_at = all
         .iter()
-        .position(|e| e.turn == 0 && e.kind == EVENT_USER_MESSAGE)
+        .position(|e| e.scope == 0 && e.kind == EVENT_USER_MESSAGE)
         .expect("u-0 应在完整史里");
     assert!(u0_at < snapshot_at, "前提：u-0 已被第 1 轮落下的快照取代");
     assert_eq!(
@@ -2668,7 +2668,7 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
         let log = fx.facts.range(Seq::new(0));
         let at = log
             .iter()
-            .position(|e| e.turn == 1)
+            .position(|e| e.scope == 1)
             .expect("本轮应有事实格");
         log[at..].to_vec()
     };
@@ -2754,14 +2754,14 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
     // 收束格 / 兜底格：本轮了结。
     assert!(ends(&cell(
         EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         7,
         Value::Null
     )));
     assert!(ends(&cell(
         EVENT_CHAT_ASSISTANT_FALLBACK,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         7,
         Value::Null
@@ -2769,7 +2769,7 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
     // 别的轮的收束格不算本轮的工（切片按轮，但判据自己也得站得住）。
     assert!(!ends(&cell(
         EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Closed,
         6,
         Value::Null
@@ -2778,7 +2778,7 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
     // 收束闸被拒：不落收束格，但它就是本轮的停。
     assert!(ends(&cell(
         EVENT_AUTHZ_DENIED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         7,
         serde_json::json!({ "kind": "speech", "reason": "denied" })
@@ -2786,7 +2786,7 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
     // 端口面被拒：那一笔工具没放行，**轮还在走**——这条就是回归现场。
     assert!(!ends(&cell(
         EVENT_AUTHZ_DENIED,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         7,
         serde_json::json!({ "port": "tool", "id": "call_1", "reason": "denied" })
@@ -2795,7 +2795,7 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
     // 等待用户：不是停机格，但是本轮最后一步。
     assert!(ends(&cell(
         EVENT_CHAT_ASSISTANT_PROGRESS,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Progressed,
         7,
         serde_json::json!({ "status": "pending" })
@@ -2803,7 +2803,7 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
     // 中途汇报 / 开场白那类进展格：轮还在走。
     assert!(!ends(&cell(
         EVENT_CHAT_ASSISTANT_PROGRESS,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Progressed,
         7,
         serde_json::json!({ "status": "running" })
@@ -2842,7 +2842,7 @@ fn seed_effect_turn(store: &EventStore, turn: u64) -> u64 {
             Event::pending(
                 format!("u-{turn}"),
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 turn,
                 "user",

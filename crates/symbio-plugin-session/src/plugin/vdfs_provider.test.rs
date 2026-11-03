@@ -1002,7 +1002,7 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
         symbio_kernel::event::Event::pending(
             format!("branch-{into}"),
             EVENT_TURN_BRANCH,
-            Entity::Turn,
+            Entity::Scope,
             Verb::Asserted,
             0,
             symbio_sdk::authz::PRINCIPAL_USER,

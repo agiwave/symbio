@@ -845,7 +845,7 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[
                 ("round", Lit::Uint(0)),
                 ("has_utterance", Lit::Bool(true)),
@@ -855,7 +855,7 @@ pub(crate) static ROWS: &[Decl] = &[
         },
         until: &[Pattern {
             source: "turn_stages",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[("stage", Lit::Str("decide"))],
         }],
         unless: &[],
@@ -872,7 +872,7 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[
                 ("auto_compress", Lit::Bool(true)),
                 ("compress_done", Lit::Bool(false)),
@@ -884,7 +884,7 @@ pub(crate) static ROWS: &[Decl] = &[
         },
         until: &[Pattern {
             source: "turn_stages",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[("stage", Lit::Str("compress"))],
         }],
         unless: &[],
@@ -901,7 +901,7 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[
                 ("round", Lit::Uint(0)),
                 ("is_persistent", Lit::Bool(true)),
@@ -912,7 +912,7 @@ pub(crate) static ROWS: &[Decl] = &[
         },
         until: &[Pattern {
             source: "turn_stages",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[("stage", Lit::Str("recall"))],
         }],
         unless: &[],
@@ -937,12 +937,12 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[("prepared", Lit::Bool(false))],
         },
         until: &[Pattern {
             source: "turn_stages",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[("stage", Lit::Str("inputs"))],
         }],
         unless: &[],
@@ -965,12 +965,12 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "report_due",
-            key: &["turn", "anchor"],
+            key: &["scope", "anchor"],
             eq: &[("due", Lit::Bool(true))],
         },
         until: &[Pattern {
             source: "reported_anchors",
-            key: &["turn", "anchor"],
+            key: &["scope", "anchor"],
             eq: &[],
         }],
         unless: &[],
@@ -1011,18 +1011,18 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["turn"],
+            key: &["scope"],
             eq: &[("closeable", Lit::Bool(true))],
         },
         until: &[
             Pattern {
                 source: EVENT_CHAT_ASSISTANT_FINAL,
-                key: &["turn"],
+                key: &["scope"],
                 eq: &[],
             },
             Pattern {
                 source: EVENT_CHAT_ASSISTANT_FALLBACK,
-                key: &["turn"],
+                key: &["scope"],
                 eq: &[],
             },
         ],
@@ -1051,12 +1051,12 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_next_round",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[],
         },
         until: &[Pattern {
             source: "turn_stages",
-            key: &["turn", "round"],
+            key: &["scope", "round"],
             eq: &[("stage", Lit::Str("round"))],
         }],
         unless: &[],
@@ -1573,7 +1573,7 @@ pub(crate) fn scan_bound() -> Option<usize> {
 /// `scan_bound` 为 `None`（表还没装好）时原样交出：这一轮的打开本来就会先被
 /// [`table`] 拦下，这里不替它判。
 pub(crate) fn turn_slice(events: &[Event], turn: u64) -> &[Event] {
-    let slice = match events.iter().position(|e| e.turn == turn) {
+    let slice = match events.iter().position(|e| e.scope == turn) {
         Some(start) => &events[start..],
         None => &[],
     };

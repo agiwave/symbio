@@ -151,7 +151,7 @@ export default defineCase(
       assert(snaps.length >= 1, `压缩必须落一条事实（现有 kind: ${JSON.stringify([...new Set(live.map((e) => e.kind))])}）`);
       assertEq(snaps[0].entity, 'Message', '快照实体的格子 = message');
       assertEq(snaps[0].verb, 'Progressed', '快照动词的格子 = progressed');
-      assertEq(snaps[0].turn, 0, '压缩不属于任何一轮（turn = 0）');
+      assertEq(snaps[0].scope, 0, '压缩不属于任何一轮（turn = 0）');
       assert(
         Array.isArray(snaps[0].payload?.messages) && snaps[0].payload.messages.length > 0,
         `快照载荷应带压缩后的消息列表（实际: ${JSON.stringify(snaps[0].payload)?.slice(0, 300)}）`,

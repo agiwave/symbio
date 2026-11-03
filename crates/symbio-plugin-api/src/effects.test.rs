@@ -80,7 +80,7 @@ fn declared_tool_produces_draft_with_anchor() {
     assert_eq!(d.produced_by, Some(42));
 
     let event = d.clone().into_event("session/a");
-    assert_eq!(event.turn, 0, "草稿不带轮号：信封由写口盖（D-252）");
+    assert_eq!(event.scope, 0, "草稿不带轮号：信封由写口盖（D-252）");
     assert_eq!(event.actor, "session/a");
     assert_eq!(event.event_id, "r-t3-call-1");
     assert_eq!(event.kind, "test.recorded");

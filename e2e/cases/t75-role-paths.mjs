@@ -225,7 +225,7 @@ export default defineCase(
       assert(artifact, `工人子会话必须落产物格（实际 kinds: ${JSON.stringify(kinds)}）`);
       assertEq(artifact.actor, 'session/worker', '产物格的作者 = 工人（委派链上的登记窄行主体）');
       assertEq(artifact.payload?.tool, 'vdfs_read', '产物来自工人真调的那个工具');
-      assertEq(artifact.turn, userCell.turn, '产物格记在本轮');
+      assertEq(artifact.scope, userCell.scope, '产物格记在本轮');
       assertEq(artifact.produced_by, userCell.seq, '产物格溯源指向本轮开口格（I2）');
 
       // 收窄生效（vs 派生整套）：工人无发言权 ⇒ 不落发言格。未登记的 `worker`

@@ -28,7 +28,7 @@ where
             Event::pending(
                 format!("u-{turn}"),
                 EVENT_USER_MESSAGE,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Opened,
                 turn,
                 "user",
@@ -559,7 +559,7 @@ mod turn_runner_tests {
             &store
                 .range(Seq::new(0))
                 .into_iter()
-                .filter(|e| e.turn <= 1)
+                .filter(|e| e.scope <= 1)
                 .collect::<Vec<_>>(),
         );
         assert!(
@@ -614,7 +614,7 @@ mod turn_runner_tests {
                 Event::pending(
                     "u-0",
                     EVENT_USER_MESSAGE,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     0,
                     "user",
@@ -627,7 +627,7 @@ mod turn_runner_tests {
                 Event::pending(
                     "fb-0",
                     EVENT_CHAT_ASSISTANT_FALLBACK,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Closed,
                     0,
                     "session/main",
@@ -666,7 +666,7 @@ mod turn_runner_tests {
                 Event::pending(
                     "u-0",
                     EVENT_USER_MESSAGE,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     0,
                     "user",
@@ -695,7 +695,7 @@ mod turn_runner_tests {
                 Event::pending(
                     "f-0",
                     EVENT_CHAT_ASSISTANT_FINAL,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Closed,
                     0,
                     "session/main",
@@ -710,7 +710,7 @@ mod turn_runner_tests {
                 Event::pending(
                     "u-1",
                     EVENT_USER_MESSAGE,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     1,
                     "user",
@@ -1550,7 +1550,7 @@ mod tool_round_tests {
         assert_eq!(requests, answers, "应答与 `request` 同 id（同一笔账）");
         assert_ne!(requests[0], requests[1], "两次往返两个 id（撞了就是一次）");
         assert!(
-            model.iter().all(|e| e.turn == 0),
+            model.iter().all(|e| e.scope == 0),
             "模型端口的事实记在**本轮**上（不是全局）：{model:?}"
         );
         assert!(
@@ -1929,7 +1929,7 @@ mod tool_round_tests {
                     .to_string()
             })
             .collect();
-        Some((e.turn, e.produced_by.unwrap_or(0), ids))
+        Some((e.scope, e.produced_by.unwrap_or(0), ids))
     }
 
     /// 替身逐条落 `sent`（`port::begin` 派发前自己读 `dispatch-tool` 这一行）。
@@ -3025,7 +3025,7 @@ mod tool_round_tests {
             .iter()
             .find(|e| e.kind == EVENT_CHAT_ASSISTANT_PROGRESS)
             .expect("进展格在");
-        assert_eq!(progress.entity, Entity::Turn);
+        assert_eq!(progress.entity, Entity::Scope);
         assert_eq!(progress.verb, Verb::Progressed);
         assert_eq!(progress.payload["status"], "pending", "等待是状态字段");
         assert_eq!(
@@ -3360,7 +3360,7 @@ mod tool_round_tests {
             .iter()
             .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
             .expect("收束格在");
-        assert_eq!(cell.turn, 0, "收束格记在原轮号上");
+        assert_eq!(cell.scope, 0, "收束格记在原轮号上");
         let output = snapshot
             .iter()
             .rev()
@@ -4648,7 +4648,7 @@ mod reflex_turn_tests {
             "快路轮落开轮 / 两格阶段 / 派发 / 收束（没有产物格，也没有模型往返）：{snapshot:?}"
         );
         let open = &snapshot[0];
-        assert_eq!(open.entity, Entity::Turn);
+        assert_eq!(open.entity, Entity::Scope);
         assert_eq!(open.verb, Verb::Opened);
         assert_eq!(
             open.payload["text"], "把周报整理成摘要",
@@ -4668,7 +4668,7 @@ mod reflex_turn_tests {
         );
         let close = &snapshot[4];
         assert_eq!(close.verb, Verb::Closed);
-        assert_eq!(close.turn, 0);
+        assert_eq!(close.scope, 0);
         assert_eq!(close.payload["text"], "先列要点；再合并同类项。");
         assert_eq!(
             close.payload["model"], "reflex",
@@ -4808,7 +4808,7 @@ mod denial_fact_tests {
             .append(symbio_kernel::event::Event::pending(
                 format!("u-{turn}"),
                 EVENT_USER_MESSAGE,
-                symbio_kernel::event::Entity::Turn,
+                symbio_kernel::event::Entity::Scope,
                 symbio_kernel::event::Verb::Opened,
                 turn,
                 "user",
@@ -4849,7 +4849,7 @@ mod denial_fact_tests {
             symbio_kernel::event::Verb::Asserted,
             "落在 scope × asserted，**不是** closed"
         );
-        assert_eq!(d.turn, 1);
+        assert_eq!(d.scope, 1);
         assert_eq!(d.actor, spec.principal, "谁");
         assert_eq!(
             d.produced_by,
@@ -5301,7 +5301,7 @@ mod dangling_round_tests {
                 Event::pending(
                     "request-model-m-1-1",
                     symbio_kernel::event::EVENT_REQUEST,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Asserted,
                     3,
                     "system",
@@ -5326,7 +5326,7 @@ mod dangling_round_tests {
         assert_eq!(failed.payload["id"], "model-3-d5-s0", "身份随原请求走");
         assert_eq!(failed.payload["attempt"], 1);
         assert_eq!(failed.payload["why"], "no_pending_round");
-        assert_eq!(failed.turn, 3, "判死落在**那一笔**所属的轮上，不是当前轮");
+        assert_eq!(failed.scope, 3, "判死落在**那一笔**所属的轮上，不是当前轮");
         assert_eq!(failed.produced_by, Some(7), "溯源随原请求走");
 
         // 第二遍没有可判的：不能重复落 `failed`（幂等键会撞，但更该什么都不写）。
@@ -5357,7 +5357,7 @@ mod dangling_round_tests {
                     Event::pending(
                         format!("{kind}-fixture"),
                         kind,
-                        Entity::Turn,
+                        Entity::Scope,
                         Verb::Asserted,
                         1,
                         "system",

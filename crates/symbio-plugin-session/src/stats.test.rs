@@ -117,7 +117,7 @@ fn seed(tag: &str) -> PathBuf {
     let u0 = Event::pending(
         "u0",
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",
@@ -129,7 +129,7 @@ fn seed(tag: &str) -> PathBuf {
             Event::pending(
                 "f0",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 0,
                 "session/main",
@@ -144,7 +144,7 @@ fn seed(tag: &str) -> PathBuf {
     let u1 = Event::pending(
         "u1",
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         1,
         "user",
@@ -156,7 +156,7 @@ fn seed(tag: &str) -> PathBuf {
             Event::pending(
                 "fb1",
                 EVENT_CHAT_ASSISTANT_FALLBACK,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 1,
                 "session/main",
@@ -215,7 +215,7 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
                 Event::pending(
                     format!("u{i}"),
                     EVENT_USER_MESSAGE,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Opened,
                     0,
                     "user",
@@ -229,7 +229,7 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
                 Event::pending(
                     format!("f{i}"),
                     EVENT_CHAT_ASSISTANT_FINAL,
-                    Entity::Turn,
+                    Entity::Scope,
                     Verb::Closed,
                     0,
                     "session/main",
@@ -1156,7 +1156,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     let u0 = Event::pending(
         "u0",
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",
@@ -1168,7 +1168,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
             Event::pending(
                 "f0",
                 EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
+                Entity::Scope,
                 Verb::Closed,
                 0,
                 "session/main",
@@ -1777,7 +1777,7 @@ fn resp_event(id: &str, port: &str, principal: &str, usage: Option<(u64, Option<
         }
         payload["usage"] = u;
     }
-    Event::pending(id, "response", Entity::Turn, Verb::Asserted, 0, "system")
+    Event::pending(id, "response", Entity::Scope, Verb::Asserted, 0, "system")
         .with_produced_by(1)
         .with_payload(payload)
 }

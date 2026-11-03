@@ -10,7 +10,7 @@ fn sequenced(kind: &str, seq: u64) -> Event {
     let mut e = Event::pending(
         format!("e-{seq}"),
         kind,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",
@@ -86,7 +86,7 @@ fn an_event_without_a_seq_is_never_inside_a_range() {
     let mut pending = Event::pending(
         "no-seq",
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",
@@ -113,7 +113,7 @@ fn an_unselected_branch_still_elides_through_the_same_judgement() {
     let branch = Event::pending(
         "b-1",
         EVENT_TURN_BRANCH,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Asserted,
         0,
         "user",
@@ -122,7 +122,7 @@ fn an_unselected_branch_still_elides_through_the_same_judgement() {
     let old = Event::pending(
         "old",
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",
@@ -131,7 +131,7 @@ fn an_unselected_branch_still_elides_through_the_same_judgement() {
     let new = Event::pending(
         "new",
         EVENT_USER_MESSAGE,
-        Entity::Turn,
+        Entity::Scope,
         Verb::Opened,
         0,
         "user",

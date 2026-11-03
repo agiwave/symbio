@@ -20,7 +20,7 @@ fn seq_is_strictly_monotonic_without_gaps() {
         let e = ev(
             &format!("e{i}"),
             "user.message",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             i as u64,
         );
@@ -41,7 +41,7 @@ fn head_equals_event_count_and_range_reads_prefix_window() {
         let e = ev(
             &format!("e{i}"),
             "user.message",
-            Entity::Turn,
+            Entity::Scope,
             Verb::Opened,
             i as u64,
         );
@@ -67,8 +67,8 @@ fn head_equals_event_count_and_range_reads_prefix_window() {
 #[test]
 fn duplicate_event_id_returns_duplicate_and_consumes_no_seq() {
     let store = EventStore::new();
-    let e1 = ev("same-id", "user.message", Entity::Turn, Verb::Opened, 1);
-    let dup = ev("same-id", "user.message", Entity::Turn, Verb::Opened, 1);
+    let e1 = ev("same-id", "user.message", Entity::Scope, Verb::Opened, 1);
+    let dup = ev("same-id", "user.message", Entity::Scope, Verb::Opened, 1);
     store.append(e1).expect("首插必成");
     assert_eq!(store.append(dup), Err(AppendError::Duplicate));
     assert_eq!(
@@ -81,7 +81,7 @@ fn duplicate_event_id_returns_duplicate_and_consumes_no_seq() {
     let e2 = ev(
         "other-id",
         "turn.state_changed",
-        Entity::Turn,
+        Entity::Scope,
         Verb::Progressed,
         1,
     );
@@ -94,7 +94,7 @@ fn duplicate_event_id_returns_duplicate_and_consumes_no_seq() {
 #[test]
 fn caller_cannot_forge_or_reassign_seq() {
     let store = EventStore::new();
-    let e = ev("e0", "user.message", Entity::Turn, Verb::Opened, 0);
+    let e = ev("e0", "user.message", Entity::Scope, Verb::Opened, 0);
     let s = store.append(e).expect("首插必成");
     let stored = &store.range(Seq::new(0))[0];
     assert_eq!(stored.seq(), Some(s));
@@ -112,6 +112,6 @@ fn caller_cannot_forge_or_reassign_seq() {
 
 #[test]
 fn pending_event_has_no_seq_until_appended() {
-    let e = ev("e0", "user.message", Entity::Turn, Verb::Opened, 0);
+    let e = ev("e0", "user.message", Entity::Scope, Verb::Opened, 0);
     assert_eq!(e.seq(), None, "未入库事件不得自带 seq（由 Store 分配）");
 }
