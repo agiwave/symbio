@@ -24,7 +24,7 @@
     "control_decl.rs": 156,
     "derived_facts.rs": 17,
     "lib.rs": 5,
-    "loop_rows.rs": 89,
+    "loop_rows.rs": 91,
     "memory_events.rs": 5,
     "message_build.rs": 29,
     "port/classify.rs": 3,
@@ -47,7 +47,7 @@
     "turn_runner/facts.rs": 48,
     "turn_runner/prepare.rs": 43,
     "turn_runner/settle.rs": 48,
-    "turn_runner/stream.rs": 224,
+    "turn_runner/stream.rs": 220,
     "turn_runner.rs": 97
   },
   "lp004WorldNamedContracts": 2,

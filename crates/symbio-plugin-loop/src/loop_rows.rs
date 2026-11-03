@@ -1700,6 +1700,36 @@ pub(crate) fn waiting(events: &[Event], turn: u64, _now: i64) -> bool {
     !super::control_decl::open_calls(turn_slice(events, turn)).is_empty()
 }
 
+/// 某一笔已派出的调用此刻是否已过租约线（`stale_sent` 的同一份投影）。
+///
+/// 句柄表（模型的 `TurnSession::inflight`、工具的 `TurnSession::tool_flights`）只装
+/// future，不装真相；「过没过期」必须回到 `stale_sent` 问。恢复口的两种处置
+/// （`stream::settle_recovered` / `stream::land_round`）都读这一格，判据只有一份。
+///
+/// `attempt = None` ⇒ 只按 `(port, id)` 判——账本里那一笔的尝试号已丢时用；
+/// `Some(n)` ⇒ 再核对尝试号（同一 id 的旧尝试不该替新尝试作证）。
+pub(crate) fn stale_sent_hit(
+    events: &[Event],
+    turn: u64,
+    port: &str,
+    id: &str,
+    attempt: Option<u64>,
+    now: i64,
+) -> bool {
+    let Some(value) = view("stale_sent", events, turn, now) else {
+        return false;
+    };
+    let Some(arr) = value.as_array() else {
+        return false;
+    };
+    arr.iter().any(|i| {
+        i.get("port").and_then(Value::as_str) == Some(port)
+            && i.get("id").and_then(Value::as_str) == Some(id)
+            && attempt.is_none_or(|a| i.get("attempt").and_then(Value::as_u64) == Some(a))
+            && i.get("stale").and_then(Value::as_bool) == Some(true)
+    })
+}
+
 /// 本幕已经派出的模型往返笔数（`D-115` 决策 3 的步数口径）：从 `sent` 事实派生。
 ///
 /// 判据是日志上的**派出**，不是内存里的计数器：一条 `sent(port=model)` 就是一次

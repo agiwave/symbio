@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use symbio_kernel::plugin::PluginInvokeRequest;
+use symbio_plugin_api::port::ports;
 
 use super::super::tool_dispatch::{
     authorize_call, call_key as call_id_of, open_calls, CallOutcome as Outcome, ToolBegin as Begin,
@@ -145,7 +146,7 @@ pub(crate) fn begin_model(
         ctx: None,
     };
     let input = symbio_plugin_api::port::PortInput {
-        port: "model",
+        port: ports::MODEL,
         payload,
     };
 
@@ -217,7 +218,7 @@ pub(crate) fn begin_model(
                         .enumerate()
                         .map(|(idx, tc)| {
                             serde_json::json!({
-                                "port": "tool",
+                                "port": ports::TOOL,
                                 "id": call_id_of(turn, drive, idx, tc.id.as_deref(), &round_id),
                                 "name": tc.name.clone().unwrap_or_default(),
                                 "arguments": tc.arguments.clone(),
@@ -432,12 +433,13 @@ pub(crate) struct ModelFlight {
     pub(crate) output: Option<(serde_json::Value, String)>,
 }
 
-/// 在飞的一笔工具调用（`D-124` 订正 1 + DE-048 D-311）：派出与收尾两半之间的**唯一**
-/// 交接件。
+/// 在飞的一笔工具调用的**句柄**（`D-124` 订正 1 + DE-048 D-311）：派出与收尾两半
+/// 之间的把手，**不是状态的真相**。
 ///
-/// 与 [`ModelFlight`] 同一条理由活着：两次选债之间它在草稿里挂着，`sent` 与终局
-/// 之间那一圈因此可以横跨两个环步。**一笔一个框**——没有「批」这个对象；模型往返
-/// 与账本由草稿按轮保存（[`Prepared::round_turn`]），不在这个框里复述。
+/// 真相是 `sent(port=tool)` 与终局；本框只装执行体那段无法从日志重建的 future。
+/// 句柄丢了 ⇒ [`land_round`] 的租约分支读 `stale_sent` 收口（与 `reap` 同一判据）。
+/// **一笔一个框**——没有「批」这个对象；模型往返与账本由草稿按轮保存
+/// （[`Prepared::round_turn`]），不在这个框里复述。
 pub(crate) struct ToolFlight {
     /// 执行层那一段：`'static` 的框，收尾半 poll 它。
     pub(crate) fut: Flight,
@@ -477,7 +479,7 @@ pub(crate) async fn announce_round<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    let call = super::super::port::Call::new("model", id, 1);
+    let call = super::super::port::Call::new(ports::MODEL, id, 1);
     // 载荷装配留在行（D-306 裁决二）：消息数组从这里**原样**交出去，线格式由
     // `symbio-plugin-model` 的执行体收口——中间没有第二处拼装。
     let mut messages = run.base_messages.clone();
@@ -507,7 +509,7 @@ pub fn kill_dangling_round<S>(store: &S) -> Result<bool, symbio_kernel::store::A
 where
     S: Store<Event = Event> + ?Sized,
 {
-    super::super::port::kill_dangling(store, "model", "no_pending_round")
+    super::super::port::kill_dangling(store, ports::MODEL, "no_pending_round")
 }
 
 /// 恢复口：句柄不在时，只按**事实**判这一笔（与正常口共用同一套判据）。
@@ -534,7 +536,7 @@ where
     };
     let Some(item) = value.as_array().and_then(|arr| {
         arr.iter().find(|i| {
-            i.get("port").and_then(|v| v.as_str()) == Some("model")
+            i.get("port").and_then(|v| v.as_str()) == Some(ports::MODEL)
                 && i.get("stale").and_then(|v| v.as_bool()) == Some(true)
         })
     }) else {
@@ -548,7 +550,7 @@ where
         .get("via")
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    let call = super::super::port::Call::new("model", id, attempt).with_via_opt(via);
+    let call = super::super::port::Call::new(ports::MODEL, id, attempt).with_via_opt(via);
     super::super::port::failed_with(store, &call, run.turn, run.user_seq, "lease_expired")?;
     Ok(true)
 }
@@ -993,13 +995,41 @@ pub(crate) async fn land_round(
     id: &str,
 ) -> Result<Option<ToolFlight>, symbio_kernel::store::AppendError> {
     let Some(flight) = flight else {
+        let facts = store.range(symbio_kernel::event::Seq::new(0));
+        let now = run.now_ms();
         let Some(call) = run.calls.get(id).cloned() else {
             // 账本里没有这一笔：等待方随进程没了（日志上有 `sent`、草稿里没有）。
-            super::super::port::kill_dangling_sent(store.as_ref(), "tool", "no_pending_call")?;
+            // 与模型侧同一套租约判据：**未过期就先不动**（这一圈合法地不前进，
+            // `waiting` 为真），过期才判死——句柄表只是把手，过没过期只问事实。
+            if super::super::loop_rows::stale_sent_hit(
+                &facts,
+                run.turn,
+                ports::TOOL,
+                id,
+                None,
+                now,
+            ) {
+                super::super::port::kill_dangling_sent(
+                    store.as_ref(),
+                    ports::TOOL,
+                    "no_pending_call",
+                )?;
+            }
             return Ok(None);
         };
         if call.sent {
-            // 派出过、future 却没了：环按「没收到应答的债」写 `failed`（租约出口）。
+            // 派出过、future 却没了：先问租约线，过期才按「没收到应答的债」写
+            // `failed`（与 `reap` / `settle_recovered` 同一份 `stale_sent`）。
+            if !super::super::loop_rows::stale_sent_hit(
+                &facts,
+                run.turn,
+                call.call.port,
+                &call.call.id,
+                Some(call.call.attempt),
+                now,
+            ) {
+                return Ok(None);
+            }
             dispatch.finish(store.as_ref(), &call, None).await;
             run.calls.remove(id);
             land_one(run, store.as_ref(), llm, dispatch.clone(), None).await?;
