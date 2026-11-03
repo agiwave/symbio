@@ -519,15 +519,15 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     },
     ActorEntry {
         decl: ACTOR_CLASSIFY,
-        run: actions::run_classify,
+        run: actions::classify_action,
     },
     ActorEntry {
         decl: ACTOR_COMPRESS,
-        run: actions::run_compress,
+        run: actions::compress_action,
     },
     ActorEntry {
         decl: ACTOR_RECALL,
-        run: actions::run_recall,
+        run: actions::recall_action,
     },
     ActorEntry {
         decl: ACTOR_SEAM,

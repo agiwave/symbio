@@ -16,14 +16,13 @@
 
 use super::*;
 
-fn state(request_round: usize, aborted: bool) -> TurnState {
+fn state(_request_round: usize, aborted: bool) -> TurnState {
     let abort = ExecAbortSignal::new();
     if aborted {
         abort.abort();
     }
     TurnState {
         abort,
-        request_round,
         ..Default::default()
     }
 }

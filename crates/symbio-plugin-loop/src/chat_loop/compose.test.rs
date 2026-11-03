@@ -11,14 +11,14 @@
 //! 只有在这里才测得到。两条合起来才是完整的判据：形状对了但投影不认（或反之），
 //! 前端「对话」面板都看不到它，且都没有错误信号。
 //!
-//! `apply_verdict` / `compose_text` 都要 `Arc<dyn PluginInvokeRequest>` 与容器路由，
-//! 属 e2e 的射程（`e2e/cases/t22-compose.mjs`）——单测在这里重复一遍只会得到一份
-//! 会漂移的假副本。
+//! `compose_text` 要 `Arc<dyn PluginInvokeRequest>` 与容器路由，属 e2e 的射程
+//! （`e2e/cases/t22-compose.mjs`）——单测在这里重复一遍只会得到一份会漂移的假副本。
 
 use super::*;
-// `dialog_node` 本体已归 core，本文件因此不再经 `compose.rs` 的导入面拿到形状词表——
-// 测试自己引（短名，不写全限定路径：S-014 的 role 直写棘轮按短名形状计数）。
+// `dialog_node` 本体已归 core，本文件因此自己引（短名，不写全限定路径：
+// S-014 的 role 直写棘轮按短名形状计数）。
 use symbio_sdk::chat::chat_node::{MessageContent, NodeKind};
+use symbio_sdk::turn::node_build::dialog_node;
 
 /// 落库面的主体：本文件模仿落库/投影面，身份写 `principal`（D-147）。
 fn assistant_principal() -> symbio_sdk::chat::principal::Principal {
@@ -96,7 +96,7 @@ fn a_turn_child_text_is_on_the_conversation_line() {
 fn report_node_is_excluded_and_on_the_conversation_line() {
     let node = dialog_node(
         "已经完成 3 轮工具调用，用时约 2 分钟，还在继续。",
-        REASON_PROGRESS,
+        "progress",
         true,
         &assistant_principal(),
     );
@@ -117,13 +117,4 @@ fn report_node_is_excluded_and_on_the_conversation_line() {
         1,
         "汇报必须被对话线投影认出来——否则它落在工作面板里，用户看不到"
     );
-}
-
-/// `Report` 的理由码是**跨端契约**（前端按它区分"这是汇报不是首响"）。
-///
-/// 与 `surface`（契约在 core `node_build.test.rs` 钉）同一条：改名不会报错，
-/// 只会让前端静默失配。这一格的 owner 是 session（`compose` 侧自产，见实现处注释）。
-#[test]
-fn progress_reason_literal_is_the_wire_contract() {
-    assert_eq!(REASON_PROGRESS, "progress");
 }

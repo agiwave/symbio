@@ -217,7 +217,7 @@ pub(crate) fn open(
                 })
                 .count()
                 + 1;
-            let stage = StageFact::resume(turn.request_round, kind, &ordinal.to_string())
+            let stage = StageFact::resume(turn.round(), kind, &ordinal.to_string())
                 .with_replaces(replaces);
             let seqs =
                 stage_events::land_with_seqs(store.as_ref(), turn_no, user_seq, "system", &[stage])
@@ -231,7 +231,7 @@ pub(crate) fn open(
                 turn_no,
                 user_seq,
                 last_user_message(context).1,
-                turn.request_round,
+                turn.round(),
                 Some(drive_seq),
             )
         }
@@ -261,7 +261,7 @@ pub(crate) fn open(
                 turn_no,
                 seq.value(),
                 text,
-                turn.request_round,
+                turn.round(),
                 Some(seq.value()),
             )
         }
@@ -402,7 +402,6 @@ pub(crate) fn open(
     turn.turn_no = turn_no;
     turn.user_seq = user_seq;
     turn.drive_seq = drive_seq;
-    turn.request_round = round;
     turn.now_ms = now_ms;
     turn.facts = store.range(Seq::new(0));
     Ok(Opened {

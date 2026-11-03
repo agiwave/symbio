@@ -434,7 +434,6 @@ fn a_continuation_stage_reuses_the_turn_and_anchors_on_its_own_round_fact() {
         turn_no: 0,
         user_seq,
         drive_seq: user_seq,
-        request_round: 0,
         now_ms: 0,
         facts: facts.range(Seq::new(0)),
         ..TurnState::default()
@@ -443,7 +442,7 @@ fn a_continuation_stage_reuses_the_turn_and_anchors_on_its_own_round_fact() {
     continue_stage(&context, &mut turn, &request()).expect("续幕开得了");
 
     assert_eq!(turn.turn_no, 0, "续幕记在原轮上");
-    assert_eq!(turn.request_round, 1, "轮次从事实读：下一幕是第 1 轮");
+    assert_eq!(turn.round(), 1, "轮次从事实读：下一幕是第 1 轮");
     assert_eq!(
         super::current_user_text(&context),
         "写长一点",

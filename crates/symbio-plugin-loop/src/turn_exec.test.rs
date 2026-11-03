@@ -208,10 +208,9 @@ fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> 
 /// 测试侧的交付包：**一幕的幕首入参**（形状与生产 [`super::ExecTurn`] 同一份）。
 ///
 /// 生产里幕首之后只有**一个环**（`D-222` 裁决 5）：轮首四行、接缝、汇报与轮内各行
-/// 同住一张绑定表，先后由 `(phase, anchor)` 说。接缝读的寄存物因此不再另开一条通道递进来——
-/// 它们住在**本轮状态**与**会话上下文**上（`recall_view` / `opening_text` /
-/// `consolidated`），由环上的动作自己取走。本夹具
-/// 替幕首把那一片备好，于是轮首那几行没开账时这些寄存是 `None`，开账时由执行体覆盖。
+/// 同住一张绑定表，先后由 `(phase, anchor)` 说。接缝读的读数因此不再另开一条通道递进来——
+/// 它们住在**事实切片**上（`turn.stage{recall|decide}` 的载荷），由环上的动作自己取走。
+/// 本夹具替幕首把那一片备好，于是轮首那几行没开账时事实切片里没有这些格。
 ///
 /// **本地同名结构遮蔽了 `super::*` 里的 `ExecTurn`**——五个 struct 字面量因此
 /// 一字不改（`SP-033` §1：改用例，不改形状）。
@@ -230,7 +229,6 @@ struct ExecTurn<'a> {
     drive_seq: u64,
     window_turns: u64,
     tools: &'a [CapabilityMeta],
-    recalled: Option<&'a symbio_plugin_api::retrieval::Retrieval>,
     /// 快路作答的正文：生产里由技能行的 `RowStep::Answer` 让宿主经
     /// `TurnSession::set_reflex` 寄进草稿（D-260）。夹具在同一处模拟那一半。
     reflex_text: Option<&'a str>,
@@ -238,8 +236,6 @@ struct ExecTurn<'a> {
     supplements: Option<super::SupplementFn>,
     supplemental_no: Arc<std::sync::atomic::AtomicU64>,
     report: Option<super::super::report_exec::ReportPort>,
-    opening_text: Option<&'a str>,
-    opening_dialog: Option<&'a super::super::turn_runner::DialogFacts>,
     presentation_tree: symbio_sdk::turn::node_build::PresentationTree,
 }
 
@@ -273,14 +269,11 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         drive_seq,
         window_turns,
         tools,
-        recalled,
         reflex_text,
         consolidation,
         supplements,
         supplemental_no,
         report,
-        opening_text,
-        opening_dialog,
         presentation_tree,
     } = req;
     // 幕锚的「现在」与生产同一个读数口（派发器与视图都读它，不是夹具编的一个数）。
@@ -330,9 +323,6 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         user_seq,
         drive_seq,
         now_ms,
-        recall_view: recalled.cloned(),
-        opening_text: opening_text.map(String::from),
-        opening_dialog: opening_dialog.cloned(),
         ..Default::default()
     };
 
@@ -386,7 +376,7 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         // 环跑到收束格出现：归类（中止 / 授权拒 / 正常）与落格按本文件要验的
         // 那几条契约做——生产的镜像并入与封根不在夹具里（`stage.test.rs` 钉）。
         super::DriveEnd::Running(running) => {
-            match super::classify_turn(*running, turn.recall_view.as_ref()).await? {
+            match super::classify_turn(*running, None).await? {
                 super::Classified::Finished(v) => v,
                 super::Classified::Settled(settled) => super::persist_turn(settled),
             }
@@ -425,15 +415,12 @@ fn exec_base<'a>(
         drive_seq: 0,
         window_turns: 6,
         tools: &[],
-        recalled: None,
         reflex_text: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
         report: None,
         // 开场白：本夹具不产生（`Escalate` 首响由 chat_loop 递入）。
-        opening_text: None,
-        opening_dialog: None,
         presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     }
 }
@@ -579,15 +566,12 @@ async fn supplements_become_facts_visible_next_turn() {
             examples: None,
             ..Default::default()
         }],
-        recalled: None,
         reflex_text: None,
         consolidation: None,
         supplements: Some(supplements),
         supplemental_no: Default::default(),
         report: None,
         // 开场白：本夹具不产生。
-        opening_text: None,
-        opening_dialog: None,
         presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     })
     .await
@@ -1075,18 +1059,34 @@ async fn drive_lands_the_inputs_stage_and_runs_the_turn() {
 #[tokio::test]
 async fn drive_stops_at_an_in_place_answer_and_lands_closed_without_a_model_request() {
     let mut h = control_harness().await;
-    // 判决执行体寄存下来的那体答话（`run_classify` 的产出形态）。
-    h.turn.head_answer = Some(super::super::chat_loop::AnsweredTurn {
-        utterance: "你好".into(),
-        reply: "你好，有什么可以帮你？".into(),
-        cost_ms: 0,
-        dialog: super::super::turn_runner::DialogFacts {
-            id: "a-1".into(),
-            reason: "answered".into(),
-            exclude_from_context: false,
-        },
-        reasoning: None,
-    });
+    // 判决执行体落下的决定格（`policy.classify` 的产出形态）：只在事实面上，
+    // 不再经 `TurnState` 寄存。
+    h.facts
+        .append(
+            Event::pending(
+                "st-0-0-decide",
+                super::super::control_decl::EVENT_TURN_STAGE,
+                Entity::Turn,
+                Verb::Opened,
+                h.turn.turn_no,
+                "session",
+            )
+            .with_payload(
+                super::super::stage_events::StageFact::classify(0, None, 0)
+                    .with_result("answered")
+                    .with_answer(super::super::stage_events::AnswerFact {
+                        utterance: "你好".into(),
+                        reply: "你好，有什么可以帮你？".into(),
+                        cost_ms: 0,
+                        dialog_id: "a-1".into(),
+                        dialog_reason: "answered".into(),
+                        exclude_from_context: false,
+                        reasoning: None,
+                    })
+                    .payload(),
+            ),
+        )
+        .expect("落决定格");
 
     let end = drive_control(&mut h).await.expect("收束不是失败");
     assert!(
@@ -1396,15 +1396,12 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
             examples: None,
             ..Default::default()
         }],
-        recalled: None,
         reflex_text: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
         report: None,
         // 开场白：本夹具不产生。
-        opening_text: None,
-        opening_dialog: None,
         presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     })
     .await
@@ -1599,14 +1596,11 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
             examples: None,
             ..Default::default()
         }],
-        recalled: None,
         reflex_text: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
         report: Some(super::super::report_exec::ReportPort { text }),
-        opening_text: None,
-        opening_dialog: None,
         presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     })
     .await
@@ -1794,15 +1788,12 @@ async fn full_turn_lands_derived_commitment_facts() {
         user_text: "请委托评审",
         window_turns: 6,
         tools: std::slice::from_ref(&tool_meta),
-        recalled: None,
         reflex_text: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
         report: None,
         // 开场白：本夹具不产生。
-        opening_text: None,
-        opening_dialog: None,
         presentation_tree: symbio_sdk::turn::node_build::PresentationTree::Grouped,
     })
     .await
@@ -1988,14 +1979,14 @@ fn the_recall_list_carries_the_resumed_flag() {
     .copied()
     .expect("恢复阶段有 seq");
 
-    let recalled = [(user_seq + 1, "skill".to_string())];
+    let recalled = [(user_seq + 1, "skill".to_string(), "正文".to_string())];
     super::super::stage_events::land(
         &store,
         0,
         resume_seq,
         "system",
         &[super::super::stage_events::StageFact::recall(
-            0, resume_seq, &recalled, true,
+            0, resume_seq, &recalled, true, false,
         )],
     )
     .expect("召回阶段事实落格");
@@ -2035,7 +2026,7 @@ fn the_recall_list_carries_the_resumed_flag() {
         fresh_seq,
         "system",
         &[super::super::stage_events::StageFact::recall(
-            0, fresh_seq, &recalled, false,
+            0, fresh_seq, &recalled, false, false,
         )],
     )
     .expect("召回阶段事实落格");

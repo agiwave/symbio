@@ -361,21 +361,24 @@ fn the_recall_list_is_the_latest_recall_stage_after_the_anchor() {
     let before = ev(
         1,
         "turn.stage",
-        StageFact::recall(0, 0, &[(99, "经验".into())], false).payload(),
+        StageFact::recall(0, 0, &[(99, "经验".into(), "旧正文".into())], false, false).payload(),
     );
     let user = ev(1, "user.message", json!({"text": "hi", "id": "u-1"}));
-    let live = [(5u64, "经验".to_string()), (6u64, "skill".to_string())];
+    let live = [
+        (5u64, "经验".to_string(), "正文一".to_string()),
+        (6u64, "skill".to_string(), "正文二".to_string()),
+    ];
     let stage = ev(
         1,
         "turn.stage",
-        StageFact::recall(0, 0, &live, true).payload(),
+        StageFact::recall(0, 0, &live, true, false).payload(),
     );
     // 更后一格（同一幕重跑召回）覆盖前一格：清单只留最新的那一次。
-    let later = [(7u64, "skill".to_string())];
+    let later = [(7u64, "skill".to_string(), "正文三".to_string())];
     let newest = ev(
         1,
         "turn.stage",
-        StageFact::recall(0, 0, &later, false).payload(),
+        StageFact::recall(0, 0, &later, false, false).payload(),
     );
     let stage_seq = stage.seq.map(|s| s.value()).unwrap_or(0);
     let newest_seq = newest.seq.map(|s| s.value()).unwrap_or(0);
@@ -2298,7 +2301,7 @@ fn next_selects_the_recall_row_before_the_seam() {
     let next = super::next(&ready, 1, 0, super::ACTORS).expect("本幕欠一次召回准备");
     assert_eq!(next.row, "policy.recall");
     assert_eq!(next.by, super::RECALL);
-    let run: super::super::turn_exec::Action = super::super::turn_exec::run_recall;
+    let run: super::super::turn_exec::Action = super::super::turn_exec::recall_action;
     assert!(std::ptr::fn_addr_eq(next.action, run));
     // 出口那一格在它自己的名单里：执行体不落它 ⇒ 下一次选债读不到「做过」（下条钉这个）。
     assert!(next.writes_closed("turn.stage"));
@@ -2431,7 +2434,7 @@ fn the_sweep_runs_compress_before_recall() {
         "同幕两笔债按 `(phase, anchor)` 排，不由派发器行序排"
     );
     assert_eq!(next.by, super::COMPRESS);
-    let run: super::super::turn_exec::Action = super::super::turn_exec::run_compress;
+    let run: super::super::turn_exec::Action = super::super::turn_exec::compress_action;
     assert!(std::ptr::fn_addr_eq(next.action, run));
 
     // 压缩格落地 ⇒ 压缩行关掉，召回行照旧欠：同族不同档互不关账。

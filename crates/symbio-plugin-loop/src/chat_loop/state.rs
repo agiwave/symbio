@@ -197,66 +197,8 @@ pub(crate) struct TurnState {
     /// 收口前是一个裸 `Arc<AtomicBool>`，外部置位要靠「往执行期通道投 Abort 帧」；
     /// 现在是 [`ExecAbortSignal`]——置位与唤醒是同一个动作，不再需要帧与轮询。
     pub(crate) abort: ExecAbortSignal,
-    /// 本轮**已发出的 LLM 请求数**，也就是「这是第几幕」（`D-222` §二：幕是环的身份）。
-    ///
-    /// 唯一写方是主循环的**幕间**那一步，而它的取值来自事实
-    /// （`loop_rows::next_stage_round` 读 `turn_head.round` 给出下一幕的轮次）——
-    /// 不是一份自己往上加的计数。续写次数因此不再需要独立的内存量
-    /// （`continuation_count` 已随幕的迭代器退场，`D-222` §二），一次请求加一格，
-    /// 绝大多数轮就是 0 或 1。
-    ///
-    /// ⚠️ 它**不是**工具轮数。v2 的工具循环在 `turn_exec::drive` 的环体里
-    /// 一批批跑完，那里有唯一的真实计数（`tool_round`）；本层一次请求就是一个整体，
-    /// 看不到第几轮工具。于是这一层的判据只能是「这是不是本轮**第一次请求**」——
-    /// 轮首判决、长期记忆召回、`user_prompt_submit` 钩子、流式起始的轮次标注都是它。
-    /// 把请求数当工具轮数用会**静默失效**（判据恒假而默认值看起来像「没配」），
-    /// 那条病灶与它三个读方各自的去处见
-    /// [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")。
-    pub(crate) request_round: usize,
     /// 增量落库锚点：本轮已落库到的下标（每轮开始时重置为本轮起始消息数）
     pub(crate) last_saved: usize,
-    /// 本轮的**长期记忆检索读数**（`memory_events::recall_view` → 能力包的检索面）。
-    ///
-    /// 类型是检索面自己的结构值（`symbio_plugin_api::retrieval::Retrieval`）而不是
-    /// 控制面的一份视图：折叠与排序自 L2b 起住能力包（DE-026 D-264），宿主只带读数。
-    ///
-    /// 只在本轮**第一次请求**取一次（与 classify / history 同一条 `request_round == 0`
-    /// 口径）：同一轮内记忆不该漂移，事实源也只扫一遍；后续工具轮复用同一份视图，
-    /// 渲染 [`chat_loop::inputs`] 每次调用现算（纯内存，零 I/O）。
-    ///
-    /// 落 `memory.recalled` 的时机在**轮末收束**（能力包 `semantic` 的收束贡献，宿主在
-    /// `land_contributions` 里把这个值交进 `Settling.recall`）而不是取视图那一刻：
-    /// 溯源锚是本轮 `user.message` 格，那时它才在事实源里。
-    pub recall_view: Option<symbio_plugin_api::retrieval::Retrieval>,
-    /// 本轮**已收集的上下文段**（DE-025 D-215）：由 `run_recall` 一次收集、本轮各
-    /// 工具轮复用。
-    ///
-    /// 与 [`TurnState::recall_view`] 同一条取用口径（`request_round == 0` 取一次、
-    /// 本轮各工具轮复用）：同一轮内上下文不该漂移，也省得每个工具轮都重跑一遍
-    /// provider。它**只读不写**——某段算不出来（没召回 / 就绪集空）就是没有那一段，
-    /// 请求视图里少一段，不存在「空占位」。
-    ///
-    /// 为什么是「一整份段」而不是逐段一个字段：段的数量由 provider 决定，本轮代码
-    /// 不该知道有哪几段——逐段字段就是「加一类上下文要改 `TurnState`」。
-    pub(crate) context_sections: Vec<symbio_plugin_api::ContextSection>,
-    /// 本轮**对话面开场白**正文：`Escalate` 首响。
-    ///
-    /// 由轮首判决执行体的 `apply_verdict`（`VerdictEffect::Spoke`）填充，交 `turn_exec::drive`
-    /// 落成 `chat.assistant.opening` 格。**落格不在本文件**——写者令牌只在执行口，
-    /// 与答话同一条分割（判定与措辞在 chat_loop，落格在 turn_exec）。
-    /// `None` = 本轮没有开场白（常态）。
-    pub(crate) opening_text: Option<String>,
-    /// 开场白**对话面节点**的身份与标记（仅 [`TurnState::opening_text`] 有值时消费）。
-    ///
-    /// 三样（`id` / `reason` / `exclude_from_context`）是节点形状的一部分，必须随
-    /// 事实入格，否则重建折出的节点与实时面是两个身份（见 `TurnInput::opening_dialog`）。
-    pub(crate) opening_dialog: Option<super::super::turn_runner::DialogFacts>,
-    /// **本幕判决判成的定稿答话**（`policy.classify` 执行体的产出，D-162 裁决 3）。
-    ///
-    /// 判决执行体在轮首把这一轮判成「不用再发请求」时，把答话正文连同对话面事实寄
-    /// 存在这里：执行体不交回产出（D-123 决策 5），而收束格要由**派发点**在两个动作
-    /// 之间落——只有派发点知道判决是否已经问完。`None` = 本轮照常进工具循环。
-    pub(crate) head_answer: Option<super::super::chat_loop::AnsweredTurn>,
     /// 本轮请求的**固定开销**（系统提示词 + 工具清单折算的 token 数）。
     ///
     /// 由准备段（`collect_reads`）算出后写在这里，供压缩行的执行体
@@ -316,6 +258,14 @@ impl TurnState {
             })
             .and_then(|e| e.payload.get("text").and_then(|v| v.as_str()))
             .map(str::to_string)
+    }
+
+    /// 本幕的请求轮次：读本幕锚之后的 `turn.stage{stage:"round"}` 那格事实。
+    ///
+    /// 轮次不再寄存为字段（DE-047 D-306）；它在事实面上的唯一形态就是那一格。
+    pub(crate) fn round(&self) -> usize {
+        super::super::stage_events::round_of(&self.facts, self.turn_no, self.drive_seq)
+            .unwrap_or(0)
     }
 }
 
@@ -397,7 +347,8 @@ pub struct ChatOrchestrator {
     /// 对话面开场白（`Escalate` 首响）的**请求级开关快照**（`SessionConfig::opening_enabled`）。
     ///
     /// 与 `classify_enabled` / `compose_enabled` 同一条取值纪律（一次请求生命周期内不变，
-    /// 取一个布尔）。`false` ⇒ [`super::compose::apply_verdict`] 的 `Escalate` 分支**不写**
+    /// 取一个布尔）。`false` ⇒ 判决执行体（`turn_exec::policy::execute_verdict`）的
+    /// `Escalate` 分支**不写**
     /// 那句开场白（本轮照旧进工具循环），真实答复（`Answered`）不受影响。为什么独立于
     /// `compose_enabled`：后者关掉会连答复一起没，本开关只削派活前的旁白。
     pub opening_enabled: bool,

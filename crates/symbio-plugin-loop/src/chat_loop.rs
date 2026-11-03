@@ -33,8 +33,7 @@
 //! - 具体协议实现层决定如何使用这些历史（有状态协议可能只使用部分或不使用）
 //! - 请求中只包含当前要发送的单条消息（single_message）
 
-mod compose;
-mod decide;
+pub(crate) mod compose;
 pub(crate) mod delegate;
 pub(crate) mod drive;
 pub(crate) mod inputs;
@@ -47,13 +46,10 @@ mod wake;
 pub use self::state::ChatOrchestrator;
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
-pub(crate) use self::compose::{apply_verdict, VerdictEffect};
 // 对话面节点构造器已上移 core `node_build`（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三），
 // 消费方（`compose` / `rebuild` / `turn_runner`）各自直连 core——本模块不再续发短路径，
 // 留守侧因此不必经驱动器拿构造器。
-pub(crate) use self::decide::decide_turn;
 pub(crate) use self::drive::{land_dispatch, land_opening};
-pub(crate) use self::inputs::{run_compress, run_recall};
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{
     request_actor_spec, request_source_principal, Gate, SessionContext, TurnExit, TurnRequest,
@@ -163,7 +159,6 @@ pub(crate) fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
     Some(parts.join("\n\n"))
 }
 
-pub(crate) use super::context::auto_compress_process;
 
 use std::sync::Arc;
 use symbio_kernel::dialog::RunSnapshot;
@@ -303,7 +298,10 @@ pub async fn run_chat_loop(
         // （[`land_answered_turn`] / D-125）——它要的是编排器、会话上下文与本轮
         // 状态，环里没有它们。
         Ok(super::turn_exec::DriveEnd::Answered) => {
-            if let Some(answer) = turn.head_answer.take() {
+            let facts = context.session.facts_snapshot();
+            if let Some(answer) =
+                super::stage_events::answer_of(&facts, turn.turn_no, turn.drive_seq)
+            {
                 land_answered_turn(&ctx, &mut context, &mut turn, answer).await;
             }
             let landed = match context.session.facts() {
@@ -350,231 +348,6 @@ pub async fn run_chat_loop(
     finish_turn(&context, &sink, &turn, exit).await
 }
 
-/// 判决判成「就此答话」时寄存的那一体答话（[`run_classify`] 的产出，[`land_answered_turn`] 的输入）。
-///
-/// 执行体不交回产出（D-159 裁决 4）：这一体答话连同它的措辞开销、节点身份与思考事实
-/// 寄存在本轮状态里，由轮首准备取走落收束格。
-pub(crate) struct AnsweredTurn {
-    /// 本轮的用户发言（记忆编码的**内容**：答话轮同样是「用户说了什么」的一轮）。
-    pub(crate) utterance: String,
-    /// 答话正文（`apply_verdict` 刚推进对话面的那一条）。
-    pub(crate) reply: String,
-    /// 生成它的那次措辞往返的实测耗时（`WordingReply.cost_ms`；模板产线给 0）。
-    pub(crate) cost_ms: u64,
-    /// 答话**对话面节点**的身份与标记：收束格据它复刻那条根级节点。
-    pub(crate) dialog: super::turn_runner::DialogFacts,
-    /// 生成这次答话的思考事实（`(reasoning_id, reasoning)`）：措辞产线是这条轮次里
-    /// 唯一一次真实模型推理，不入格则 `Reason` 节点对普通答话轮从未存在。
-    pub(crate) reasoning: Option<(String, String)>,
-}
-
-/// **轮首判决**执行体（`policy.classify` 行的动作）：问 `classify` → 执行判决 →
-/// 出口那一格自己落。
-///
-/// ## 它判什么
-///
-/// 「这一轮该直接回答、还是派给工具循环」。`classify` 只输出**枚举**（`Verdict`），
-/// 本执行体负责**执行**它——判决与措辞分开（`compose` 不做判决），执行权归编排层。
-/// 揉进一次调用等于让「这轮走哪条路」取决于一段文本长什么样（理由见
-/// `dialog/mod.rs` 的模块文档）。
-///
-/// ## 判据在哪
-///
-/// 不在这个函数里，在 [`super::loop_rows`] 的 `policy.classify` 行：「本幕轮首 ∧
-/// 有用户发言 ∧ 开关开着 ∧ 没判过」四条写在数据里，可单测、可增删；加一条新策略
-/// = 一条声明，本文件不改（DE-014 §6 判据 1）。
-///
-/// 前件那两条的事实面：
-///
-/// - `round == 0`：判决的对象是**用户这一轮说了什么**，只在轮首成立。工具轮次里
-///   循环回顶部时用户没再说话，再判一次就是拿同一句话重判。
-/// - `has_utterance`：`resume`（重试 / 审批 / 回填答案）**没有** `single_message` ⇒
-///   不是用户的新发言，不该被判（那些请求的语义由 `resume.rs` 决定）；心跳同理。
-///   `None`（没有发言）与 `Some("")`（发言是空的）是两件事——后者由规则表判成
-///   `Answered{empty}`，前者根本不进判决。
-///
-/// ## 出口那一格带**结论**
-///
-/// `turn.stage{stage=decide}` 的 `result` 记的不是「判成了哪个枚举」，而是「判决
-/// 执行完之后这一轮还往下走不走」（`answered` / `proceed`）。分开的理由是
-/// `Answered` **不一定**收尾（下一条）；这一格是 `turn_head` 折出 `answered` 的
-/// 唯一来源，压缩与召回的前件读它（[D-162] 裁决 1）。
-///
-/// ## `Answered` 什么时候收尾
-///
-/// 只有 `apply_verdict` 给出 `Finish` 才收尾——即「判决说能直接答，**且**答话真的
-/// 写出来了」。措辞拿不到时（未挂载 `compose` / `compose_enabled = false`）本轮
-/// **照旧进工具循环**：沉默是最坏的失败形态（用户什么都收不到，且没有任何错误
-/// 信号），降级进工具循环则退化成「引入判决之前的行为」——慢一点，但有答案。
-/// 判据与兜底方向见 `chat_loop/compose.rs`。
-///
-/// `Escalate` / `Report` 恒不收尾：前者本来就要干活（首响只是开场白），后者只是
-/// 「中途说一句」（触发点在轮边界回调，不在轮首）。
-///
-/// 卸载 `classify`（或 `classify_enabled = false`）时这一行根本不开账，
-/// 行为与引入判决之前逐字一致。
-///
-/// ## 它**不**落收束格
-///
-/// 收尾那一轮的收束格由轮首准备就地落（[`land_answered_turn`]，§5.1 与 D-125）：
-/// 那一次动作入格的是一整轮的派生事实（答话节点、记忆编码、压缩入格），不是一行
-/// 执行体的出口格。塞进来会让账本对账把那些格判成名单外（[D-162] 裁决 2）。
-pub(crate) async fn run_classify(
-    orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    store: &Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
-    context: &mut SessionContext,
-    turn: &mut TurnState,
-) -> Result<(), super::turn_exec::ActorError> {
-    // 判决的输入：本轮用户格（`turn.user_seq`）的正文——从事实读回，不在环上留副本。
-    // 行前件的 `has_utterance` 说了它此刻在；取不到就是视图与本轮状态不同源——
-    // 不猜、不落格，派发点会因「这一动作落了零格」停驱并出声。
-    let Some(utterance) = turn.user_text() else {
-        return Ok(());
-    };
-    // 先落成变量再进 `if let`：`decide_turn` 借的是 `&context`，而 `apply_verdict`
-    // 要 `&mut context`——把两次借用放进同一个表达式会让不可变借用活到整个
-    // `if let` 体（Rust 2021 的临时值规则）。
-    let decision = decide_turn(orchestrator, ctx, context, turn, &utterance).await;
-    let verdict = decision.verdict;
-    // 轮首判决不带运行现状：`Answered` / `Escalate` 说的是「这一轮怎么办」，而
-    // `RunSnapshot` 说的是「干到哪一步」——只有 `Report` 读它，而 `Report` 不在轮首产生。
-    let (effect, composed) = match verdict.clone() {
-        Some(verdict) => {
-            apply_verdict(
-                orchestrator,
-                ctx,
-                context,
-                turn,
-                verdict,
-                &RunSnapshot::default(),
-            )
-            .await
-        }
-        None => (VerdictEffect::Silent, None),
-    };
-    // ── 出口那一格当场入日志（D-159 裁决 4）──────────────────────────────
-    //
-    // `reason` / `source` 是这次走了哪条路的唯一事实面记录，`result` 是判决执行完的
-    // 结论，`model_calls` 是这次判决打了几次模型（D-122 决策 4：它是那次往返在事实层
-    // 唯一的**数**——模型调了而应答不可解析时 `source` 落 `fallback`，读不出「调过」）。
-    //
-    // 派发点在本幕的第二次选债读的就是这一格：不入日志 ⇒ 它照样读到「没判过」，
-    // 环在这一台上一步都走不动。
-    let fact = super::stage_events::StageFact::classify(
-        turn.request_round,
-        verdict.as_ref(),
-        decision.model_calls,
-    )
-    .with_result(if effect == VerdictEffect::Finish {
-        "answered"
-    } else {
-        "proceed"
-    });
-    super::stage_events::land(
-        &**store,
-        turn.turn_no,
-        turn.user_seq,
-        &symbio_sdk::authz::request_principal(ctx.as_ref()),
-        &[fact],
-    )
-    .map_err(super::turn_exec::ActorError::Append)?;
-    if effect == VerdictEffect::Finish {
-        plugin_info!(
-            "session",
-            "[Classify] 本轮不进工具循环（verdict={verdict:?}）"
-        );
-        // ── 这一轮的**轮次事实仍须入格**──────────────────────
-        //
-        // 答话在轮首就短路收尾，**不进** `turn_exec::drive` ⇒ 收束格必须由
-        // 轮首准备补落（用户格已在 `open-turn` 落过）：[`land_answered_turn`]。
-        // 答话 = `apply_verdict` 刚 push 的那条对话面文本（末尾一条 assistant）。
-        // 取它而不是再算一遍：措辞归 `compose` 所有，这里只搬运（`dialog` 同）。
-        let reply = context
-            .messages
-            .iter()
-            .rev()
-            .find(|m| m.node_role() == Some(NodeRole::Assistant))
-            .and_then(|m| match &m.content {
-                Some(MessageContent::Text(t)) => Some(t.clone()),
-                _ => None,
-            })
-            .unwrap_or_default();
-        let dialog = context
-            .messages
-            .iter()
-            .rev()
-            .find(|m| m.node_role() == Some(NodeRole::Assistant))
-            .map(|m| {
-                let meta = m.meta.as_ref();
-                super::turn_runner::DialogFacts {
-                    id: m.id.clone(),
-                    reason: meta
-                        .and_then(|v| v.get("reason"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    exclude_from_context: meta
-                        .and_then(|v| v.get("exclude_from_context"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                }
-            })
-            .unwrap_or_default();
-        turn.head_answer = Some(AnsweredTurn {
-            utterance,
-            reply,
-            // 这次措辞往返的实测耗时：答话轮唯一的模型调用在这条产线里，不带给
-            // 运行器，收束格就恒记 0（成本台账整类漏记）。
-            cost_ms: composed.as_ref().map(|r| r.cost_ms).unwrap_or(0),
-            dialog,
-            reasoning: composed.as_ref().and_then(|r| {
-                let text = r.reasoning.clone()?;
-                let id = r
-                    .reasoning_id
-                    .clone()
-                    .unwrap_or_else(symbio_sdk::llm::turn::llm_short_id);
-                Some((id, text))
-            }),
-        });
-    }
-    // ── `Escalate` 首响必须入格 ────────────────────────────────────────
-    //
-    // `Escalate` 的效应是 `Spoke`（不是 `Silent` / `Finish`）：本轮**继续**进工具
-    // 循环，开场白只是干活前说的一句话。轮首这里唯一能产出 `Spoke` 的判决就是它
-    // （`Report` 不在轮首产生，见轮边界汇报回调）。
-    //
-    // 这句开场白是事实：随收束格入格（WAL 为唯一事实源，D-049），不入格则重建折不出
-    // 这条根级对话面节点 ⇒ t20 / t22 的「恰有一条对话面节点」全部落空。落格在
-    // `turn_exec::run_seam`（唯一持写者令牌处）——这里只把「说了什么 / 节点身份」递过去。
-    if effect == VerdictEffect::Spoke {
-        let node = context
-            .messages
-            .iter()
-            .rev()
-            .find(|m| m.meta.as_ref().is_some_and(|v| v.get("surface").is_some()));
-        if let Some(m) = node {
-            let meta = m.meta.as_ref();
-            turn.opening_dialog = Some(super::turn_runner::DialogFacts {
-                id: m.id.clone(),
-                reason: meta
-                    .and_then(|v| v.get("reason"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                exclude_from_context: meta
-                    .and_then(|v| v.get("exclude_from_context"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true),
-            });
-            turn.opening_text = Some(match &m.content {
-                Some(MessageContent::Text(t)) => t.clone(),
-                _ => String::new(),
-            });
-        }
-    }
-    Ok(())
-}
 
 /// 定稿答话轮的**收束**：两条收束格由**轮首准备**落（§5.1 / [D-125]）——它经
 /// `settle::land_final` 的同一构造点写出去（`SP-033` `TC-4`），本函数只是**调用方**。
@@ -598,7 +371,7 @@ pub(crate) async fn land_answered_turn(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
     turn: &mut TurnState,
-    answer: AnsweredTurn,
+    answer: super::stage_events::AnswerFact,
 ) {
     if let Err(e) = super::turn_exec::execute_final_reply_turn(
         &context.session,
@@ -610,7 +383,11 @@ pub(crate) async fn land_answered_turn(
         &answer.utterance,
         &answer.reply,
         answer.cost_ms,
-        answer.dialog,
+        super::turn_runner::DialogFacts {
+            id: answer.dialog_id,
+            reason: answer.dialog_reason,
+            exclude_from_context: answer.exclude_from_context,
+        },
         answer.reasoning,
         // 答话轮同样要落「本轮之前那次压缩」这一格——它不进 `turn_exec::drive`，
         // 不带上就漏了（见该函数的入参文档）。

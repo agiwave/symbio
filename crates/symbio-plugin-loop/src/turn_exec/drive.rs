@@ -579,7 +579,7 @@ async fn open_stage(
     symbio_plugin_api::plugin_info!(
         "session",
         "[Turn] 第 {} 次请求开始 (msgs={})",
-        turn.request_round + 1,
+        turn.round() + 1,
         context.messages.len()
     );
 
@@ -749,9 +749,27 @@ async fn close_stage(
     let Driver::Control(control) = driver else {
         return Ok(CloseEnd::Running(Box::new(running)));
     };
-    // 归类（中止 / 授权拒 / 正常）与派生事实落格。借的是本轮状态里的
-    // 召回视图，它在幕内被填好、环收工之后才交得出来。
-    let res = classify_and_persist(running, control.turn.recall_view.as_ref()).await?;
+    // 归类（中止 / 授权拒 / 正常）与派生事实落格。召回读数从 `policy.recall`
+    // 落下的那一格重建（DE-047 D-306），不再寄存于本轮状态。
+    let facts = control.context.session.facts_snapshot();
+    let recall = super::super::stage_events::recall_of(
+        &facts,
+        control.turn.turn_no,
+        control.turn.drive_seq,
+    )
+    .map(|record| symbio_plugin_api::retrieval::Retrieval {
+        degraded: record.degraded,
+        entries: record
+            .entries
+            .into_iter()
+            .map(|(seq, tag, content)| symbio_plugin_api::retrieval::Retrieved {
+                seq,
+                content,
+                tag,
+            })
+            .collect(),
+    });
+    let res = classify_and_persist(running, recall.as_ref()).await?;
     // 收口：镜像并入（v2 原生产生的消息）→ 中止复查 → 定格 → 落库 → 封根。
     //
     // 次序与 `stage` 拆出去之前逐字一致：`finalize_turn_root` 必须晚于定格（Turn 是
@@ -902,10 +920,14 @@ fn driver_aborted(driver: &Driver<'_>) -> bool {
     }
 }
 
-/// 判决已判成「就此答话」（`head_answer` 由 `policy.classify` 的执行体寄存）。
+/// 判决已判成「就此答话」（读 `policy.classify` 落下的决定格）。
 fn driver_answered(driver: &Driver<'_>) -> bool {
     match driver {
-        Driver::Control(control) => control.turn.head_answer.is_some(),
+        Driver::Control(control) => super::super::stage_events::answered(
+            &control.context.session.facts_snapshot(),
+            control.turn.turn_no,
+            control.turn.drive_seq,
+        ),
         Driver::Ready(_) => false,
     }
 }

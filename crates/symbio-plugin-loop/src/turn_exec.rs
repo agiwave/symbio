@@ -127,6 +127,7 @@ mod call;
 mod drive;
 mod outcome;
 mod persist;
+mod policy;
 
 pub(crate) use self::assemble::{assemble_turn, Assembled};
 // 续写幕的开幕方（`chat_loop::drive`）要用同一个「已开未收束」判据：
@@ -1026,11 +1027,11 @@ fn take_head<'a>(ctx: &mut Ctx<'a>) -> Result<HeadCtx<'a>, ActorError> {
 
 /// `classify` 执行体：`policy.classify` 行选中的动作。
 ///
-/// 本体留在它的领域层（[`super::chat_loop::run_classify`]），这里只把它指到名字上。
-pub(crate) fn run_classify<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
+/// 本体住在 [`policy::classify`]：只落事实，不寄存读侧。
+pub(crate) fn classify_action<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let head = take_head(ctx)?;
-        super::chat_loop::run_classify(
+        policy::classify(
             head.orchestrator,
             head.request_ctx,
             ctx.store,
@@ -1043,12 +1044,11 @@ pub(crate) fn run_classify<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 
 /// `recall` 执行体：`policy.recall` 行选中的动作。
 ///
-/// 本体留在它的领域层（[`super::chat_loop::run_recall`]——记忆 / 技能 / 调度段
-/// 三段读视图都住在那里），这里只把它指到名字上并交出出口那一格。
-pub(crate) fn run_recall<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
+/// 本体住在 [`policy::recall`]：召回读数随格入载荷，读侧从事实重建。
+pub(crate) fn recall_action<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let head = take_head(ctx)?;
-        super::chat_loop::run_recall(
+        policy::recall(
             head.request_ctx,
             ctx.store.as_ref(),
             head.context,
@@ -1060,12 +1060,12 @@ pub(crate) fn run_recall<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
 
 /// `compress` 执行体：`policy.compress` 行选中的动作。
 ///
-/// 本体留在它的领域层（[`super::chat_loop::run_compress`]），水位要的那份请求级
-/// 开销读本轮状态的 `request_overhead`。
-pub(crate) fn run_compress<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
+/// 本体住在 [`policy::compress`]；水位要的那份请求级开销读本轮状态的
+/// `request_overhead`（其事实化归 P2-3 的预算租约）。
+pub(crate) fn compress_action<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let head = take_head(ctx)?;
-        super::chat_loop::run_compress(
+        policy::compress(
             head.orchestrator,
             head.request_ctx,
             ctx.store,
@@ -1091,8 +1091,14 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let head = take_head(ctx)?;
         let consolidation = head.context.consolidated.take();
-        let opening_text = head.turn.opening_text.take();
-        let opening_dialog = head.turn.opening_dialog.take();
+        let facts = head.loop_session.facts_snapshot();
+        let opening = super::stage_events::opening_of(&facts, head.turn.turn_no, head.turn.drive_seq);
+        let opening_text = opening.as_ref().map(|o| o.text.clone());
+        let opening_dialog = opening.map(|o| super::turn_runner::DialogFacts {
+            id: o.dialog_id,
+            reason: o.dialog_reason,
+            exclude_from_context: true,
+        });
         self::assemble::land_consolidation(head.loop_session, consolidation.as_deref()).await;
         let sections = super::chat_loop::inputs::prepare_request_sections(
             head.orchestrator,
@@ -1181,7 +1187,7 @@ pub(crate) fn run_report<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             head.turn.user_seq,
             &principal,
             &[super::stage_events::StageFact::report(
-                head.turn.request_round,
+                head.turn.round(),
                 anchor,
                 result,
             )],
@@ -1319,7 +1325,7 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 let round = ctx
                     .head
                     .as_ref()
-                    .map(|head| head.turn.request_round)
+                    .map(|head| head.turn.round())
                     .unwrap_or(0);
                 let head = ctx.head.as_ref();
                 return land_effects(
@@ -1345,7 +1351,7 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                 let round = ctx
                     .head
                     .as_ref()
-                    .map(|head| head.turn.request_round)
+                    .map(|head| head.turn.round())
                     .unwrap_or(0);
                 super::stage_events::land(
                     ctx.store.as_ref(),
@@ -1636,7 +1642,7 @@ pub(crate) fn land_inputs(
         turn.user_seq,
         &symbio_sdk::authz::request_principal(ctx),
         &[super::stage_events::StageFact::inputs(
-            turn.request_round,
+            turn.round(),
             turn.drive_seq,
             result,
         )],

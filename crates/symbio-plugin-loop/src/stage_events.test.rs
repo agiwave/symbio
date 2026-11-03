@@ -63,6 +63,10 @@ fn classify_fact_carries_reason_and_source() {
             recalled: Vec::new(),
             resumed: false,
             replaces: None,
+            recalled_content: Vec::new(),
+            degraded: false,
+            answer: None,
+            opening: None,
         }
     );
 
@@ -93,6 +97,10 @@ fn classify_fact_carries_reason_and_source() {
             recalled: Vec::new(),
             resumed: false,
             replaces: None,
+            recalled_content: Vec::new(),
+            degraded: false,
+            answer: None,
+            opening: None,
         }
     );
 }
@@ -106,12 +114,26 @@ fn payload_carries_only_what_the_fact_has() {
     );
     // 召回阶段例外：它的载荷还带逐条结果与 `resumed`（`turn.recalled` 的数据面）。
     assert_eq!(
-        StageFact::recall(2, 9, &[(3, "经验".into()), (7, "skill".into())], false).payload(),
+        StageFact::recall(
+            2,
+            9,
+            &[
+                (3, "经验".into(), "正文一".into()),
+                (7, "skill".into(), "正文二".into()),
+            ],
+            false,
+            false,
+        )
+        .payload(),
         serde_json::json!({
             "stage": "recall",
             "round": 2,
-            "recalled": [{ "seq": 3, "tag": "经验" }, { "seq": 7, "tag": "skill" }],
+            "recalled": [
+                { "seq": 3, "tag": "经验", "content": "正文一" },
+                { "seq": 7, "tag": "skill", "content": "正文二" }
+            ],
             "resumed": false,
+            "degraded": false,
         })
     );
 

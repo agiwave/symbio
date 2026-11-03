@@ -61,7 +61,8 @@ async fn the_judgment_round_trip_is_accounted_as_three_cells_with_its_via() {
             }
         },
     )
-    .await;
+    .await
+    .expect("判决往返应成功入账");
 
     assert_eq!(decision.model_calls, 1, "打了一次模型，次数就是 1");
     assert_eq!(
@@ -112,7 +113,8 @@ async fn the_rule_shortcut_leaves_no_accounting_cell_at_all() {
         },
         |_| async { unreachable!("规则短路没有应答可解析") },
     )
-    .await;
+    .await
+    .expect("规则短路不应失败");
 
     assert!(!called.load(Ordering::SeqCst), "规则短路不许打模型");
     assert_eq!(decision.model_calls, 0);

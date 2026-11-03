@@ -11,8 +11,7 @@
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_plugin_api::context::{Cadence, ContextSection, DelegateVerdict, LiveInputs};
 
-use super::super::port::Compress;
-use super::super::stage_events::StageFact;
+
 use super::*;
 
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
@@ -22,7 +21,7 @@ use super::*;
 /// 的语义维由它驱动；取不到 ⇒ `None` = 「本轮没有问题」，投影退化为纯 ts 降序
 /// （平凡值，J2）。用类型区分「没有问题」与「问题恰好是空串」：前者是事实，
 /// 后者得写出来才成立。
-fn last_user_text(context: &SessionContext) -> Option<String> {
+pub(crate) fn last_user_text(context: &SessionContext) -> Option<String> {
     context
         .messages
         .iter()
@@ -50,7 +49,7 @@ fn context_request<'a>(
     live: Option<&'a LiveInputs<'a>>,
 ) -> symbio_plugin_api::ContextRequest<'a> {
     symbio_plugin_api::ContextRequest {
-        request_round: u32::try_from(turn.request_round).unwrap_or(u32::MAX),
+        request_round: u32::try_from(turn.round()).unwrap_or(u32::MAX),
         principal,
         query,
         facts,
@@ -227,7 +226,7 @@ pub(crate) async fn prepare_request_sections(
         emit_streaming_start(
             sink,
             root_id,
-            Some(turn.request_round),
+            Some(turn.round()),
             Some(watermark),
             &orchestrator.session.principal(),
         )
@@ -289,8 +288,8 @@ pub(crate) async fn prepare_request_sections(
     // 段的**次序**在这里声明（= 模型读到的上下文次序）：发言级段在前、请求级段在后。
     // 加一段 provider 只需提交一条实现，本数组不动。
     let facts = context.session.facts_snapshot();
-    let live_lines: Vec<symbio_plugin_api::RecallLine<'_>> = turn
-        .recall_view
+    let recall = recall_from_stage(&facts, turn);
+    let live_lines: Vec<symbio_plugin_api::RecallLine<'_>> = recall
         .as_ref()
         .map(|view| {
             view.entries
@@ -303,13 +302,10 @@ pub(crate) async fn prepare_request_sections(
                 .collect()
         })
         .unwrap_or_default();
-    let live_recall = turn
-        .recall_view
-        .as_ref()
-        .map(|view| symbio_plugin_api::RecallFacts {
-            degraded: view.degraded,
-            lines: &live_lines,
-        });
+    let live_recall = recall.as_ref().map(|view| symbio_plugin_api::RecallFacts {
+        degraded: view.degraded,
+        lines: &live_lines,
+    });
     let query = last_user_text(context);
     let principal = symbio_sdk::authz::request_principal(ctx.as_ref());
     let live = LiveInputs {
@@ -331,7 +327,8 @@ pub(crate) async fn prepare_request_sections(
     // `fit_sections` 里回填——provider 侧不声明成本（那会变成第二套计量），只声明
     // 优先级。裁剪规则只认段自己声明的 `prio` 与收集次序，宿主不按插件名 / 段名特判：
     // 「谁先走」是声明方的判断，宿主只执行。
-    let mut sections: Vec<ContextSection> = turn.context_sections.clone();
+    let mut sections: Vec<ContextSection> =
+        symbio_plugin_api::context_sections(&request, Cadence::Utterance);
     sections.extend(symbio_plugin_api::context_sections(
         &request,
         Cadence::Request,
@@ -368,251 +365,27 @@ pub(crate) async fn prepare_request_sections(
     Ok(context::build_request_sections(&sections))
 }
 
-/// `recall` 执行体（`policy.recall`）：长期记忆召回 + 调度段。
+/// 从 `policy.recall` 落下的召回格重建检索读数。
 ///
-/// 它是环上 `policy.recall` 那一行的动作（[`super::super::turn_exec::run_recall`]
-/// 转过来），入参由 `Ctx` 的轮首借面给出：请求句柄 + 事实源 + 会话上下文 + 本轮状态。
-/// 账在表上、动作也在表上，调用点不再按名问这一行欠不欠（DE-015 的 D-159 + `D-222`
-/// 裁决 5）。
-///
-/// ## 出口那一格在这里落
-///
-/// 派发器在两次动作之间重读日志，而 `turn_stages` 视图只折叠**已落**的 `turn.stage`
-/// 格。动作做完却不入日志，本幕的第二次选债照样读到「没做过」⇒ 环走不动。
-/// 落格能力此刻就在本层（与 `open_turn::open` 落用户格 / 配置 / 轮次格同一条路、同一个句柄）。
-///
-/// 召回阶段格带的是**逐条结果**（`(seq, tag)` + 本幕是不是续写幕）——`turn.recalled`
-/// 视图把它摊成能力包的债键面（D-262）：技能行按 `eq tag = "skill"` 取自己那一批，
-/// 命中判定与观测都住那个能力包。宿主不认识「哪条记忆是技能」。
-///
-/// 同一性缀本幕锚（`drive_seq`）：续写幕照常重跑召回，撞首幕的幂等键会让那一格的载荷
-/// 不落、结论在事实面消失（规则见 `stage_events` 模块文档）。
-pub(crate) async fn run_recall(
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    store: &dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>,
-    context: &SessionContext,
-    turn: &mut TurnState,
-) -> Result<(), super::super::turn_exec::ActorError> {
-    // `query` = 本轮用户发言（混合打分的语义维）——与 `turn_exec`
-    // 取 `user_text` 同一取值点（轮首入列的最后一条 user 消息；该处晚于本步，
-    // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
-    let recall_query = last_user_text(context);
-    // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
-    // 召回的可见切片按它收放——判断记忆只给自己会话看，共享记忆只
-    // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
-    let recall_viewer = symbio_sdk::authz::request_principal(ctx.as_ref());
-    // 事实是**值**（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
-    // 本会话切片取一次，召回 / 调度段 / 技能路由三个读方共用——同一轮内
-    // 它们看到的是同一刻的事实，不各开各的文件。
-    let facts = context.session.facts_snapshot();
-    turn.recall_view = super::super::memory_events::recall_view(
-        context
-            .session
-            .run_op::<Vec<symbio_sdk::turn::facts::FleetSnapshot>>(
-                symbio_sdk::turn::dispatch::run_ops::RECALL_SNAPSHOTS,
-                (),
-            )
-            .await
-            .map_err(super::super::turn_exec::ActorError::Read)?,
-        recall_query.as_deref(),
-        &recall_viewer,
-    );
-    // 调度段的**数据**：就绪任务集只读一次、本轮各工具轮复用
-    // ——与召回同一条口径（同一轮内集合不漂移）。
-    //
-    // 这里不再直接渲染：渲染搬进 `context::providers::ReadySetProvider`（DE-025 D-215），
-    // 本函数只把「本轮的事实切片 + 容量」交给端口。于是「有哪几段」不再写在这里。
-    // 本幕的召回名单（债键面）：逐条 `(seq, tag)` 进召回阶段格，能力包的行从
-    // `turn.recalled` 视图按标签取自己的那一批（D-262）。取**摘除之前**的名单——
-    // 回退的判定也是能力包的事（它要给低置信技能落 `fallback = true` 的观测），
-    // 宿主若先摘掉，观测就永远没有数据源。
-    let recalled: Vec<(u64, String)> = turn
-        .recall_view
-        .as_ref()
-        .map(|view| {
-            view.entries
-                .iter()
-                .map(|e| (e.seq, e.tag.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // 反自动化回退（DE-041 §5）：低置信的技能**不进本轮提示词**。
-    //
-    // 判据住能力包：`skill.retreat` 是它公开的共享视图（按 `memory.calibrated`
-    // 折出的 `{recall}` 名单）。宿主只按名字读、按 seq 摘——不认识阈值，也不认识
-    // 「技能」这个词。读不到（能力包没装 / 快照超预算）时**不摘**：退化方向是
-    // 「原样留着当背景事实」，不是「静默删掉一条记忆」（D-262）。
-    let retreat: Vec<u64> = symbio_plugin_api::read_shared_view_all("skill.retreat", &facts)
-        .ok()
-        .and_then(|value| value.as_array().cloned())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("recall").and_then(serde_json::Value::as_u64))
-                .collect()
-        })
-        .unwrap_or_default();
-    if !retreat.is_empty() {
-        if let Some(view) = turn.recall_view.as_mut() {
-            view.entries.retain(|entry| !retreat.contains(&entry.seq));
-        }
-    }
-
-    // ── 上下文段：判断在上面，渲染在端口后面（DE-025 D-208 / D-215）──────────
-    //
-    // 上面几步是**判断**（召回哪些条目、哪些技能过闸），它们住控制面；这里只把判完的
-    // 值交成 `ContextRequest`，由 provider 自己决定「我这一段长什么样」。
-    //
-    // 于是「加一类每轮上下文」= 加一个 provider，本函数一行不动。两段现存贡献
-    // （召回 / 调度）的渲染已搬到 `context::providers`，与端口化之前的输出逐字一致。
-    //
-    // `RecallLine` 借用 `turn.recall_view`：先把段收集进局部量，再写回 `turn`
-    // ——否则「借视图」与「改本轮状态」会撞在同一处。
-    let recall_lines: Vec<symbio_plugin_api::RecallLine<'_>> = turn
-        .recall_view
-        .as_ref()
-        .map(|view| {
-            view.entries
-                .iter()
-                .map(|e| symbio_plugin_api::RecallLine {
-                    seq: e.seq,
-                    content: &e.content,
-                    tag: &e.tag,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let recall_facts = turn
-        .recall_view
-        .as_ref()
-        .map(|view| symbio_plugin_api::RecallFacts {
-            degraded: view.degraded,
-            lines: &recall_lines,
-        });
-    let request = context_request(
-        turn,
-        &recall_viewer,
-        recall_query.as_deref(),
-        &facts,
-        recall_facts.as_ref(),
-        None,
-    );
-    let sections = symbio_plugin_api::context_sections(&request, Cadence::Utterance);
-    turn.context_sections = sections;
-
-    // 本幕是不是续写幕：能力包的行读这一格自己决定快路开不开（续写幕不走快路，
-    // D-260 的作答要新开轮）。判据与 `turn_head.resumed` 同源——幕锚是不是恢复格。
-    let resumed = facts
-        .iter()
-        .find(|e| e.seq.map(|s| s.value()) == Some(turn.drive_seq))
-        .is_some_and(|e| {
-            e.kind == super::super::control_decl::EVENT_TURN_STAGE
-                && e.payload.get("stage").and_then(serde_json::Value::as_str) == Some("resume")
-        });
-
-    // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，故必须就地
-    // 入日志（见本函数文档）。
-    super::super::stage_events::land(
-        store,
-        turn.turn_no,
-        turn.user_seq,
-        &symbio_sdk::authz::request_principal(ctx.as_ref()),
-        &[StageFact::recall(
-            turn.request_round,
-            turn.drive_seq,
-            &recalled,
-            resumed,
-        )],
-    )
-    .map_err(super::super::turn_exec::ActorError::Append)?;
-    Ok(())
-}
-
-/// 压缩格的执行体（环上的 `policy.compress` 行）：进一次压缩产线并**自己落**「已做」。
-///
-/// ## 它是执行体，不是点问
-///
-/// 「欠不欠」由环向求解器要，本函数只在被选中时跑；出口那一格当场入日志
-/// （与 [`run_recall`] 同一条理由：不入日志的账在下一次选债里照样是「没做过」）。
-///
-/// ## 顺序仍在产线里，不在调用点
-///
-/// 水位阈值读 [`TurnState::request_overhead`]（准备段 ①② 算出后寄存的那个数）。
-/// 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行；失败**不失败
-/// 整轮**——压缩是优化项，理由见函数体内的注释。
-///
-/// 55% 水位提醒（nudge）已随 `context_compact` 一并退役
-/// （[D-072](../../../symbio-plugin-session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "crates/symbio-plugin-session/src/README")）：它存在的唯一理由是引导模型主动调用那个工具，工具没了，提醒就是
-/// 一条指向空处的指令。将来若要恢复「模型主动压」：注册成能力行走 v2 分发，再评估
-/// 是否恢复提醒——不再回 v1 的 `close_turn` 拦截形态。
-pub(crate) async fn run_compress(
-    orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    store: &Arc<dyn symbio_kernel::store::Store<Event = symbio_kernel::event::Event>>,
-    context: &mut SessionContext,
-    turn: &mut TurnState,
-) -> Result<(), super::super::turn_exec::ActorError> {
-    // `done` 的口径是**本请求轮**：内核每轮重新取水位（未过水位返回 `Ok(None)`），
-    // 下一轮照常再试；但同一幕内不重复进产线（D-107 判据 2）。
-    //
-    // 入账面：摘要那次模型往返走端口 `model`（D-122 决策 2）——三格由端口层落，
-    // 这一次往返在账上看得见。没有事实源就没有账可记（临时会话连一幕都开不了，
-    // 见 `assemble_turn`），本函数因此只在有事实源时跑。
-    let compress = Compress::new(
-        store.clone(),
-        turn.turn_no,
-        turn.user_seq,
-        turn.drive_seq,
-        turn.now_ms,
-        turn.request_round,
-    );
-    match auto_compress_process(
-        orchestrator,
-        context,
-        ctx,
-        &turn.abort,
-        turn.request_overhead,
-        false,
-        Some(&compress),
-    )
-    .await
-    {
-        Ok(Some(history_count)) => {
-            plugin_info!(
-                "session",
-                "[Compress] 上下文已压缩：{} 条消息 → 1 条摘要",
-                history_count
-            );
-            turn.last_saved = context.messages.len();
-        }
-        Ok(None) => {}
-        // 压缩失败**不失败整轮**：压缩是优化项，失败已就地回滚、历史完整，
-        // 本轮仍应正常回复用户。失败原因已写入压缩节点（meta.failure_kind +
-        // error），连续失败会触发熔断（跳过后续自动压缩）。
-        Err(e) => {
-            plugin_warn!("session", "[Compress] 自动压缩失败: {e}");
-        }
-    }
-    // 「已做」= 本请求轮进过产线，不是「压成了」：水位未过 / 内核失败时
-    // 下一轮仍会再试（判据按 `request_round` 计），同一轮内不重复调用。
-    //
-    // `model_calls` 是这一压打了几次模型（摘要 + 纠正重试）：它是那次往返在事实层
-    // 唯一的数，判据侧拿它对账「观测 ⇔ 三格」。同一性带上本幕的锚——续写幕会重跑
-    // 压缩（恢复后事实源变了），不带上就撞首幕的幂等键，这一格连同它的数一起不落。
-    super::super::stage_events::land(
-        store.as_ref(),
-        turn.turn_no,
-        turn.user_seq,
-        &symbio_sdk::authz::request_principal(ctx.as_ref()),
-        &[StageFact::compress(
-            turn.request_round,
-            compress.calls(),
-            turn.drive_seq,
-        )],
-    )
-    .map_err(super::super::turn_exec::ActorError::Append)?;
-    Ok(())
+/// 宿主不再把读数寄存在 `TurnState`（DE-047 D-306）：这一格是事实，读侧与写侧
+/// 都回到日志。逐条正文随格入载荷，重建不依赖再次检索。
+fn recall_from_stage(
+    facts: &[symbio_kernel::event::Event],
+    turn: &TurnState,
+) -> Option<symbio_plugin_api::retrieval::Retrieval> {
+    let record = super::super::stage_events::recall_of(facts, turn.turn_no, turn.drive_seq)?;
+    Some(symbio_plugin_api::retrieval::Retrieval {
+        degraded: record.degraded,
+        entries: record
+            .entries
+            .into_iter()
+            .map(|(seq, tag, content)| symbio_plugin_api::retrieval::Retrieved {
+                seq,
+                content,
+                tag,
+            })
+            .collect(),
+    })
 }
 
 #[cfg(test)]

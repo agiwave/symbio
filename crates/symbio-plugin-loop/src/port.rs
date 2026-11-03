@@ -1284,7 +1284,7 @@ pub(crate) struct Compress {
     produced_by: u64,
     drive_seq: u64,
     now: i64,
-    /// 本请求轮：压缩按轮号计「本轮一次」（`turn.request_round`）。
+    /// 本请求轮：压缩按轮号计「本轮一次」（`turn.round()`）。
     round: usize,
     /// 第几次摘要往返（纠正重试是第 1 次）——它进逻辑 id，两笔账因此不撞。
     attempt: AtomicU32,

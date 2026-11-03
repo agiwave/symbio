@@ -49,11 +49,10 @@
 //! `Report` 拿不到措辞则只是"这次没说"，且**不消耗汇报配额**（见 `progress.rs`）——
 //! 下一次轮边界会再试一次。
 //!
-//! ## 返回值：**说没说**与**收不收尾**是两个问题
+//! ## 返回值：只交措辞
 //!
-//! [`VerdictEffect`] 把它们分开编码，而不是一个 `bool`。两个 `bool` 会多出一个
-//! 不可达组合（"收尾了但没说话"不存在），而一个 `bool` 根本答不了"说没说"——
-//! 那正是中途汇报要读的量（说了一句才消耗配额）。
+//! 判决执行（哪种判决要落什么事实 / 是否收尾）已上移到行动作
+//! （`turn_exec::policy`）；本模块只负责**问 compose 要一段文本**。
 
 use std::sync::Arc;
 
@@ -63,135 +62,10 @@ use symbio_sdk::chat::chat_node::ChatNode;
 use symbio_kernel::plugin::{PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
 use symbio_sdk::keys::{PATH, SESSION_ID};
-// 对话面节点的构造器已上移 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）
-use symbio_sdk::turn::node_build::dialog_node;
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
 use super::super::port::{round_trip, Round};
 use super::state::{ChatOrchestrator, SessionContext, TurnState};
-
-/// 汇报节点的理由码（`meta.reason`）。
-///
-/// ## 为什么它由 `session` 拥有，而不是共享词表里的一行
-///
-/// 对话面的理由码词表在 内核的 `dialog` 模块（`crates/symbio-kernel/src/dialog/`），因为它的生产方（`classify`）与消费方
-/// （`compose`）分处两个插件。而汇报的理由码是**本侧自己产的**：判决 `Report` 由
-/// `session` 判出（见 `crates/symbio-kernel/src/dialog/mod.rs` 的变体表），措辞只是执行它——`compose`
-/// 按判决分派，不看这个码。它没有第二个生产方，因此不进那份共享词表。
-const REASON_PROGRESS: &str = "progress";
-
-/// 判决的**执行点**：措辞 + 落点。
-///
-/// `snapshot` 是**运行现状**（只有 `Report` 读它，见 [`RunSnapshot`]）。轮首的两个变体
-/// 不看运行现状——它们说的是"这一轮怎么办"，而现状说的是"干到哪一步了"。
-///
-/// `turn` 带来这笔往返的账目位置（轮号 / 溯源锚 / 幕锚 / 本幕的 `now`）：只有
-/// `Answered{from_context}` 用到，那条产线**必然**含一次模型调用，因此它按端口
-/// `model` 记账（见 [`wording_round_trip`]）。
-///
-/// 收尾动作由调用方做（`finish_turn` 是主循环的唯一收尾点）——本函数只负责
-/// "说什么"与"写下来"，不负责"怎么结束"。
-pub(crate) async fn apply_verdict(
-    orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    context: &mut SessionContext,
-    turn: &TurnState,
-    verdict: Verdict,
-    snapshot: &RunSnapshot,
-) -> (VerdictEffect, Option<WordingReply>) {
-    // 调用方关掉了措辞（或压根没挂 `compose`）⇒ 与"未挂载 compose"逐字一致：
-    // `Answered` 降级进工具循环，`Escalate` 没有首响，`Report` 什么都没说。
-    // 三条都在下面自然成立。
-    if !orchestrator.compose_enabled {
-        symbio_plugin_api::plugin_debug!("session", "[Compose] 措辞未启用，本轮不产出对话面文本");
-        return (VerdictEffect::Silent, None);
-    }
-
-    match &verdict {
-        Verdict::Answered { reason } => {
-            // 生成产线那一条要经端口，模板那一条不经——判据是契约上的
-            // [`Verdict::needs_wording_generation`]，与 `compose` 分派措辞用的是同一条。
-            let reply = if verdict.needs_wording_generation() {
-                wording_round_trip(orchestrator, ctx, context, turn, &verdict, snapshot).await
-            } else {
-                compose_text(orchestrator, ctx, context, &verdict, snapshot).await
-            };
-            let Some(reply) = reply else {
-                // 判决说能直接答，但没人能说话 ⇒ **降级进工具循环**（不沉默）。
-                symbio_plugin_api::plugin_warn!(
-                    "session",
-                    "[Compose] 判决为 Answered（reason={reason}）但取不到措辞，本轮降级进工具循环"
-                );
-                return (VerdictEffect::Silent, None);
-            };
-            context.messages.push(dialog_node(
-                &reply.text,
-                reason,
-                false,
-                &orchestrator.session.principal(),
-            ));
-            // 思考事实随答话交给调用方：`Answered` 收束格是**事实层**里这条
-            // 模型往回的唯一去处（见 `execute_final_reply_turn` 的入参）。
-            (VerdictEffect::Finish, Some(reply))
-        }
-        Verdict::Escalate { reason } => {
-            // 首响开关关掉 ⇒ 不写那句开场白，本轮照旧进工具循环干活。
-            // 与 `compose_enabled` 关掉的区别：那个连真实答复（`Answered`）一起没，
-            // 本开关只削派活前的这一句旁白（机制化前端的 Typing 占位已接管"有动静"
-            // 的职责，这句模板话与执行过程信息重复）。
-            if !orchestrator.opening_enabled {
-                symbio_plugin_api::plugin_debug!(
-                    "session",
-                    "[Compose] 开场白未启用，Escalate 本轮不写首响"
-                );
-                return (VerdictEffect::Silent, None);
-            }
-            // 首响：拿不到就只是少一句开场白，本轮照旧干活。
-            match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
-                Some(reply) => {
-                    context.messages.push(dialog_node(
-                        &reply.text,
-                        reason,
-                        true,
-                        &orchestrator.session.principal(),
-                    ));
-                    (VerdictEffect::Spoke, None)
-                }
-                None => (VerdictEffect::Silent, None),
-            }
-        }
-        // 汇报：措辞从**运行现状**组织（`compose` 的模板产线，零 LLM 往返）。
-        // 拿不到就不说——本轮照旧干活，且不消耗配额（调用方按 [`VerdictEffect`] 判）。
-        Verdict::Report => {
-            match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
-                Some(reply) => {
-                    context.messages.push(dialog_node(
-                        &reply.text,
-                        REASON_PROGRESS,
-                        true,
-                        &orchestrator.session.principal(),
-                    ));
-                    (VerdictEffect::Spoke, None)
-                }
-                None => (VerdictEffect::Silent, None),
-            }
-        }
-    }
-}
-
-/// [`apply_verdict`] 的产物：**说没说**一句话，以及**要不要收尾**。
-///
-/// 合成一个枚举而不是两个 `bool`：`Finish` 必然包含"说了话"（收尾的前提就是答话
-/// 已写下），两个 `bool` 会多出一个不可达组合。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum VerdictEffect {
-    /// `Answered` 且答话已写下：本轮**到此收尾**（调用方据此 `finish_turn`）。
-    Finish,
-    /// 说了一句话，本轮继续（`Escalate` 首响 / `Report` 汇报）。
-    Spoke,
-    /// 一句话都没说，本轮继续（措辞未启用 / 取不到措辞 / 措辞为空）。
-    Silent,
-}
 
 /// 生成产线那一次措辞调用，**按端口 `model` 记账**。
 ///
@@ -214,7 +88,7 @@ pub(crate) enum VerdictEffect {
 /// 派发被拒时执行体没跑、应答落格失败时它已经跑完，两种 `Err` 都不能靠重跑来救。
 /// 交回 `None` 走的是既有那条「无措辞 ⇒ `Answered` 降级进工具循环」的路（本轮仍然
 /// 会答，只是不再短路）。
-async fn wording_round_trip(
+pub(crate) async fn wording_round_trip(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &SessionContext,
@@ -228,7 +102,7 @@ async fn wording_round_trip(
     };
     // 步名带**请求轮次**：一幕可以有多次往返（auto 续写），每次是一笔独立的账
     // （与端口 `turn` 的 id 同一口径，见主循环的 `turn-{turn}-d{drive}-r{round}`）。
-    let step = format!("w{}", turn.request_round);
+    let step = format!("w{}", turn.round());
     let round = Round {
         turn: turn.turn_no,
         produced_by: turn.user_seq,
@@ -261,7 +135,7 @@ async fn wording_round_trip(
 /// 返回 `None` = 没有措辞可用（未挂载 `compose` / 路由失败 / 出参为空）。
 /// 与 `decide.rs` 同一条处置原则：**「没有这个插件」是一个正常状态**，
 /// `NotFound` 静默放行，其它错误告警但**仍然放行**——措辞是增强，不是正确性的前提。
-async fn compose_text(
+pub(crate) async fn compose_text(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &SessionContext,
@@ -333,7 +207,7 @@ async fn compose_text_from(
 
 /// 只取措辞、不落点（轮边界汇报路径）。
 ///
-/// 与 [`apply_verdict`] 的差别有两条，都是接线逼出来的：
+/// 与判决执行体（`policy::execute_verdict`）的差别有两条，都是接线逼出来的：
 /// 1. **不拿 `&mut SessionContext`**：轮边界回调是 `Fn + Send + Sync + 'static`，
 ///    捕获不了 `run_chat_loop` 的栈局部 `context`。
 /// 2. **拿会话视图而不是整个 context**：`ComposeRequest` 里那一段就是

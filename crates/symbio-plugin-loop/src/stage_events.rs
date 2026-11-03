@@ -3,7 +3,7 @@
 //! ## 它解决什么
 //!
 //! `policy.classify` / `policy.recall` / `policy.compress` 的判据在一轮内恒真：
-//! `turn.request_round` 只在收轮后 +1，`auto_compress` 是开关不是水位。于是
+//! `turn.round()` 只在收轮后 +1，`auto_compress` 是开关不是水位。于是
 //! 「这一步做完没有」若没有来源，外环 `drive` 的第二次迭代就会再执行一遍
 //! （答话重复、召回重复、压缩反复调用 no-op）——D-107 §3 的整条推理。
 //!
@@ -25,7 +25,7 @@
 //! ## 同一性 = `(turn, round, stage)` + **附加段**
 //!
 //! 事件 id 是 `st-{turn}-{round}-{stage}`，必要时再缀一段 `identity`（不进载荷）。
-//! 续写幕（审批 / 问答恢复）**复用同一轮号**且 `request_round` 从 0 重新开始，
+//! 续写幕（审批 / 问答恢复）**复用同一轮号**且 `round()` 从 0 重新开始，
 //! 于是召回 / 压缩会重跑（这是既有行为：恢复后的事实源已经变了，本轮视图应当重取）。
 //! 重跑时若还撞幂等键 ⇒ [`land`] 按「已做过」处理，既不重复落格也不失败——
 //! 但那一格**载荷里的数就没了**（压缩那格带着 `model_calls`：它是一次模型往返在
@@ -152,6 +152,26 @@ pub(crate) struct VerdictFact {
     pub(crate) source: VerdictSource,
 }
 
+/// `Answered` 答话的全部入格内容——收束格（`chat.assistant.final`）的输入。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AnswerFact {
+    pub(crate) utterance: String,
+    pub(crate) reply: String,
+    pub(crate) cost_ms: u64,
+    pub(crate) dialog_id: String,
+    pub(crate) dialog_reason: String,
+    pub(crate) exclude_from_context: bool,
+    pub(crate) reasoning: Option<(String, String)>,
+}
+
+/// `Escalate` 首响的落格内容（根级对话面节点）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OpeningFact {
+    pub(crate) text: String,
+    pub(crate) dialog_id: String,
+    pub(crate) dialog_reason: String,
+}
+
 /// 一格待落 `turn.stage` 的草稿。
 ///
 /// 由阶段执行点（`chat_loop` / `chat_loop::inputs`）产出，落格在持写者令牌的
@@ -160,7 +180,7 @@ pub(crate) struct VerdictFact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StageFact {
     pub(crate) stage: StageName,
-    /// `TurnState::request_round`（压缩 / 召回的「本轮一次」就是按它计的口径）。
+    /// 本幕轮次（`turn.stage{stage:"round"}` 的值；`TurnState::round()` 现读事实）。
     pub(crate) round: usize,
     /// 仅 `classify` 携带；其余阶段 `None`（载荷不带 `reason` / `source`）。
     pub(crate) verdict: Option<VerdictFact>,
@@ -191,6 +211,17 @@ pub(crate) struct StageFact {
     pub(crate) resumed: bool,
     /// 续写幕要替换的旧子节点（仅 `resume` 携带）：新结果落格后由收幕删除。
     pub(crate) replaces: Option<String>,
+    /// 本幕召回的逐条正文（仅 `recall` 携带）：`(seq, 标签, 正文)`。
+    ///
+    /// 召回读数不再寄存在 `TurnState` 里——它是这一格的载荷，`prepare-turn` 与收束
+    /// 都从事实重建（DE-047 D-306）。
+    pub(crate) recalled_content: Vec<(u64, String, String)>,
+    /// 召回是否降级（仅 `recall` 携带；与 `Retrieval::degraded` 同一格语义）。
+    pub(crate) degraded: bool,
+    /// `Answered` 的答话（仅 `decide` 携带）：收束格的输入。
+    pub(crate) answer: Option<AnswerFact>,
+    /// `Escalate` 的首响（仅 `decide` 携带）：接缝落根级对话面节点。
+    pub(crate) opening: Option<OpeningFact>,
 }
 
 impl StageFact {
@@ -206,6 +237,10 @@ impl StageFact {
             recalled: Vec::new(),
             resumed: false,
             replaces: None,
+            recalled_content: Vec::new(),
+            degraded: false,
+            answer: None,
+            opening: None,
         }
     }
 
@@ -218,6 +253,18 @@ impl StageFact {
     /// 续写幕要替换的旧子节点（`resume` 专用；`None` = 无需删除）。
     pub(crate) fn with_replaces(mut self, replaces: Option<String>) -> Self {
         self.replaces = replaces;
+        self
+    }
+
+    /// 记下 `Answered` 的答话（收束格的全部输入）。
+    pub(crate) fn with_answer(mut self, answer: AnswerFact) -> Self {
+        self.answer = Some(answer);
+        self
+    }
+
+    /// 记下 `Escalate` 的首响（接缝要落的根级节点）。
+    pub(crate) fn with_opening(mut self, opening: OpeningFact) -> Self {
+        self.opening = Some(opening);
         self
     }
 
@@ -266,6 +313,10 @@ impl StageFact {
             recalled: Vec::new(),
             resumed: false,
             replaces: None,
+            recalled_content: Vec::new(),
+            degraded: false,
+            answer: None,
+            opening: None,
         }
     }
 
@@ -295,13 +346,19 @@ impl StageFact {
     pub(crate) fn recall(
         round: usize,
         drive_seq: u64,
-        recalled: &[(u64, String)],
+        entries: &[(u64, String, String)],
         resumed: bool,
+        degraded: bool,
     ) -> Self {
         let mut fact = Self::ran(StageName::Recall, round);
         fact.identity = Some(drive_seq.to_string());
-        fact.recalled = recalled.to_vec();
+        fact.recalled = entries
+            .iter()
+            .map(|(seq, tag, _)| (*seq, tag.clone()))
+            .collect();
+        fact.recalled_content = entries.to_vec();
         fact.resumed = resumed;
+        fact.degraded = degraded;
         fact
     }
 
@@ -387,12 +444,34 @@ impl StageFact {
         // 它们是 `turn.recalled` 的数据面，别的阶段不写这两格。
         if self.stage == StageName::Recall {
             payload["recalled"] = serde_json::Value::Array(
-                self.recalled
+                self.recalled_content
                     .iter()
-                    .map(|(seq, tag)| serde_json::json!({ "seq": seq, "tag": tag }))
+                    .map(|(seq, tag, content)| {
+                        serde_json::json!({ "seq": seq, "tag": tag, "content": content })
+                    })
                     .collect(),
             );
             payload["resumed"] = serde_json::Value::Bool(self.resumed);
+            payload["degraded"] = serde_json::Value::Bool(self.degraded);
+        }
+        if let Some(answer) = &self.answer {
+            payload["answer"] = serde_json::json!({
+                "utterance": answer.utterance,
+                "reply": answer.reply,
+                "cost_ms": answer.cost_ms,
+                "dialog_id": answer.dialog_id,
+                "dialog_reason": answer.dialog_reason,
+                "exclude_from_context": answer.exclude_from_context,
+                "reasoning_id": answer.reasoning.as_ref().map(|(id, _)| id),
+                "reasoning": answer.reasoning.as_ref().map(|(_, text)| text),
+            });
+        }
+        if let Some(opening) = &self.opening {
+            payload["opening"] = serde_json::json!({
+                "text": opening.text,
+                "dialog_id": opening.dialog_id,
+                "dialog_reason": opening.dialog_reason,
+            });
         }
         // 续写幕的旧子节点：收幕按它删除被替换的旧卡（`None` = 不写这一格）。
         if let Some(replaces) = &self.replaces {
@@ -400,6 +479,135 @@ impl StageFact {
         }
         payload
     }
+}
+
+/// 本幕锚之后最近落下的一格某阶段事实（`None` = 还没做过）。
+///
+/// 读侧只认**事实**：`TurnState` 里不再寄存这些阶段值（DE-047 D-306）。
+pub(crate) fn latest_stage<'a>(
+    events: &'a [Event],
+    turn: u64,
+    anchor: u64,
+    stage: &str,
+) -> Option<&'a Event> {
+    events
+        .iter()
+        .filter(|e| {
+            e.turn == turn
+                && e.kind == EVENT_TURN_STAGE
+                && e.seq.map(|s| s.value()).is_some_and(|seq| seq >= anchor)
+                && e.payload.get("stage").and_then(serde_json::Value::as_str) == Some(stage)
+        })
+        .max_by_key(|e| e.seq.map(|s| s.value()))
+}
+
+/// 本幕的请求轮次（`turn.stage{stage:"round"}` 的值；取不到 = 首幕尚未落格）。
+pub(crate) fn round_of(events: &[Event], turn: u64, anchor: u64) -> Option<usize> {
+    latest_stage(events, turn, anchor, StageName::Round.name())?
+        .payload
+        .get("round")
+        .and_then(serde_json::Value::as_u64)
+        .map(|round| usize::try_from(round).unwrap_or(usize::MAX))
+}
+
+/// 召回格的读数：逐条正文 + 降级标记。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct RecallRecord {
+    pub(crate) entries: Vec<(u64, String, String)>,
+    pub(crate) degraded: bool,
+}
+
+/// 本幕的召回读数。
+pub(crate) fn recall_of(events: &[Event], turn: u64, anchor: u64) -> Option<RecallRecord> {
+    let fact = latest_stage(events, turn, anchor, StageName::Recall.name())?;
+    let entries = fact
+        .payload
+        .get("recalled")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    Some((
+                        item.get("seq")?.as_u64()?,
+                        item.get("tag")?.as_str()?.to_string(),
+                        item.get("content")?.as_str()?.to_string(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let degraded = fact
+        .payload
+        .get("degraded")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    Some(RecallRecord { entries, degraded })
+}
+
+/// 判决的结论是不是「本轮就此收尾」（`turn.stage{stage:"decide"}` 的 `result`）。
+///
+/// **不按幕锚过滤**：同一个轮里出现一格 `answered` 就意味着该轮已经收束，后面不可能
+/// 再续一幕；按锚过滤反而会把「先落决定格、后开用户格」的测试替身挡在外面。
+pub(crate) fn answered(events: &[Event], turn: u64, _anchor: u64) -> bool {
+    latest_stage(events, turn, 0, StageName::Decide.name()).is_some_and(|fact| {
+        fact.payload.get("result").and_then(serde_json::Value::as_str) == Some("answered")
+    })
+}
+
+/// `Answered` 答话的事实内容（收束格输入）。
+pub(crate) fn answer_of(events: &[Event], turn: u64, _anchor: u64) -> Option<AnswerFact> {
+    let fact = latest_stage(events, turn, 0, StageName::Decide.name())?;
+    let answer = fact.payload.get("answer")?;
+    let reasoning = match (
+        answer.get("reasoning_id").and_then(serde_json::Value::as_str),
+        answer.get("reasoning").and_then(serde_json::Value::as_str),
+    ) {
+        (Some(id), Some(text)) => Some((id.to_string(), text.to_string())),
+        _ => None,
+    };
+    Some(AnswerFact {
+        utterance: answer.get("utterance")?.as_str()?.to_string(),
+        reply: answer.get("reply")?.as_str()?.to_string(),
+        cost_ms: answer
+            .get("cost_ms")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        dialog_id: answer
+            .get("dialog_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        dialog_reason: answer
+            .get("dialog_reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        exclude_from_context: answer
+            .get("exclude_from_context")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        reasoning,
+    })
+}
+
+/// `Escalate` 首响的事实内容（接缝落根级节点）。
+pub(crate) fn opening_of(events: &[Event], turn: u64, anchor: u64) -> Option<OpeningFact> {
+    let fact = latest_stage(events, turn, anchor, StageName::Decide.name())?;
+    let opening = fact.payload.get("opening")?;
+    Some(OpeningFact {
+        text: opening.get("text")?.as_str()?.to_string(),
+        dialog_id: opening
+            .get("dialog_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        dialog_reason: opening
+            .get("dialog_reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    })
 }
 
 /// 理由码 → 来源。划分依据是 `classify` 的产出路径（规则短路 / 模型），见

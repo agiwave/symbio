@@ -1000,8 +1000,8 @@ pub(crate) const MAX_STAGE_ROUNDS: u64 = 3;
 ///
 /// 两个读者：幕间判据（[`turn_next_round`]）与 `chat_loop::turn::persist_turn`
 /// （截断告警该说自动续写还是该说已耗尽）。两处读的是同一个数——本幕的轮次由
-/// `open-turn` 落成事实、由 `turn_head` 折成一格、由 `TurnState::request_round`
-/// 拿着用，三处同一个值（不是三份计数）。
+/// `open-turn` 落成事实、由 `turn_head` 折成一格、由 `TurnState::round()` 现读事实
+/// ——同一个值，不是两份计数。
 pub(crate) fn has_next_round(round: u64) -> bool {
     round < MAX_STAGE_ROUNDS
 }

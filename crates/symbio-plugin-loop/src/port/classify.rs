@@ -64,7 +64,7 @@ pub(crate) async fn classify_round_trip<S, F, Fut, P, PFut>(
     outcome: DecideOutcome,
     run: F,
     parse: P,
-) -> Decision
+) -> Result<Decision, String>
 where
     S: Store<Event = Event> + ?Sized,
     F: FnOnce(DecisionPlan) -> Fut,
@@ -75,10 +75,10 @@ where
     let plan = match outcome {
         // 规则短路（判据 2 的一半）：判决已定，**一条格都不落**。
         DecideOutcome::Decided { verdict } => {
-            return Decision {
+            return Ok(Decision {
                 verdict,
                 model_calls: 0,
-            };
+            });
         }
         DecideOutcome::NeedsModel { plan } => plan,
     };
@@ -94,22 +94,14 @@ where
         }
     };
     match round_trip(store, round, counted).await {
-        Ok(reply) => Decision {
+        Ok(reply) => Ok(Decision {
             verdict: parse(&reply).await,
             model_calls: calls.load(Ordering::SeqCst),
-        },
-        Err(e) => {
-            // 派发没成（模型没答成 / 行不欠 / 落格失败）：判决退回 `Escalate`——
-            // **沉默是最坏的失败形态**（用户什么都收不到，且没有错误信号）。
-            symbio_plugin_api::plugin_warn!(
-                "session",
-                "[Classify] 判决往返未成，按 Escalate 处理：{e}"
-            );
-            Decision {
-                verdict: escalate_unclassified(),
-                model_calls: calls.load(Ordering::SeqCst),
-            }
-        }
+        }),
+        // 派发没成（模型没答成 / 行不欠 / 落格失败）：**失败**，不再静默退回
+        // `Escalate{unclassified}`。静默升格会让「模型没有提供者」看起来像
+        // 「判不出来」，而用户收到的是一条模板话而不是失败信号（D-298）。
+        Err(e) => Err(format!("判决往返未成：{e}")),
     }
 }
 
