@@ -96,7 +96,7 @@ export const WHITELIST_BASELINE = 0
  * 准入（D-269 §5.1 的两条判据）：与容器概念无关 ∧ ≥2 条能力要用。一条能力撑不起
  * 一次架构改动——要加一条就把理由写成决策，并同步上调本基线。
  */
-export const SDK_BASELINE = 110
+export const SDK_BASELINE = 109
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。
@@ -105,7 +105,10 @@ export const SDK_BASELINE = 110
  * 让 136 条（门面里最大的一臂）成了唯一没有任何数字约束的通道：加一条语法符号不需要过
  * 任何棘轮。不计**债**与不计**数**是两件事，后者改起来一分钱不花。
  */
-export const GRAMMAR_BASELINE = 136
+// 136 → 137（`D-314`）：`response` 载荷的写方移入执行体后，`answer_id` 必须与读侧
+// 共用内核那一份派生（`event_output_text_node_id`）；两处各算一遍会静默漂移。
+// 消费方是 `symbio-plugin-model`，不是控制面缺口。
+export const GRAMMAR_BASELINE = 137
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。

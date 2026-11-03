@@ -144,6 +144,9 @@ pub(crate) fn begin_model(
         payload,
     };
 
+    // 两条路互斥（`D-313`）：有执行体时 `response` / `failed` 载荷由它装配（`D-314`），
+    // 环只落库；没有执行体时（测试夹具 / 旧宿主）环仍按旧口径自己装配。
+    let by_executor = executor.is_some();
     // future 捕获的每一样都是 owned：槽不带生命周期参数（见 [`ModelInFlight`]）。
     let fut = async move {
         // 有执行体就走执行体（生产路径，`D-305` 裁决一）；没有则仍走适配器
@@ -185,25 +188,39 @@ pub(crate) fn begin_model(
                     Some(fact) => round_stream_facts(fact),
                     None => node_facts(&nodes_ok),
                 };
-                let mut fields =
-                    output_fields(&call_id, &turn_root_id, &principal, &facts, Some(&rt));
-                let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
-                *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
-                // 这一轮交回的工具调用（集合展开读 `calls` 的 `id` / `name` / `arguments`）。
-                let calls: Vec<serde_json::Value> = rt
-                    .tool_calls
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, tc)| {
-                        serde_json::json!({
-                            "port": "tool",
-                            "id": call_id_of(turn, drive, idx, tc.id.as_deref(), &round_id),
-                            "name": tc.name.clone().unwrap_or_default(),
-                            "arguments": tc.arguments.clone(),
+                // 执行体路径：载荷（终答折叠、节点身份、`calls` 的 `call_key`）已由
+                // `symbio-plugin-model` 装配好，环只把这份草稿落库（`D-314`）。
+                let fields = if by_executor {
+                    let fact = round_fact
+                        .clone()
+                        .filter(|v| v.is_object())
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    let answer_id = fact["answer_id"].as_str().unwrap_or_default().to_string();
+                    *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
+                    fact
+                } else {
+                    let mut fields =
+                        output_fields(&call_id, &turn_root_id, &principal, &facts, Some(&rt));
+                    let answer_id =
+                        fields["answer_id"].as_str().unwrap_or_default().to_string();
+                    *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
+                    // 这一轮交回的工具调用（集合展开读 `calls` 的 `id` / `name` / `arguments`）。
+                    let calls: Vec<serde_json::Value> = rt
+                        .tool_calls
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, tc)| {
+                            serde_json::json!({
+                                "port": "tool",
+                                "id": call_id_of(turn, drive, idx, tc.id.as_deref(), &round_id),
+                                "name": tc.name.clone().unwrap_or_default(),
+                                "arguments": tc.arguments.clone(),
+                            })
                         })
-                    })
-                    .collect();
-                fields["calls"] = serde_json::Value::Array(calls);
+                        .collect();
+                    fields["calls"] = serde_json::Value::Array(calls);
+                    fields
+                };
                 match super::super::port::succeed_with(
                     store.as_ref(),
                     &call,
@@ -220,18 +237,35 @@ pub(crate) fn begin_model(
                     Some(fact) => round_stream_facts(fact),
                     None => node_facts(&nodes_failed),
                 };
-                let mut fields = output_fields(&call_id, &turn_root_id, &principal, &facts, None);
-                let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
-                *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
                 // 停法进载荷：重建按它定节点状态，而 `failed` 本身不区分「用户按停」
                 // 与「执行体报错」——那条区分只在这一格。
                 let (aborted, why) = match stop {
                     EngineStop::Aborted => (true, String::from("aborted")),
                     EngineStop::Failed(why) => (false, why),
                 };
-                fields["status"] = serde_json::Value::String(
-                    if aborted { "aborted" } else { "failed" }.to_string(),
-                );
+                let fields = if by_executor {
+                    // 执行体已把半截正文、停法与 `status` 装进载荷（`D-314`）；
+                    // 环只落库。
+                    let fact = round_fact
+                        .clone()
+                        .filter(|v| v.is_object())
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    let answer_id = fact["answer_id"].as_str().unwrap_or_default().to_string();
+                    *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some((facts, answer_id));
+                    fact
+                } else {
+                    let mut fields =
+                        output_fields(&call_id, &turn_root_id, &principal, &facts, None);
+                    let answer_id =
+                        fields["answer_id"].as_str().unwrap_or_default().to_string();
+                    *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some((facts, answer_id));
+                    fields["status"] = serde_json::Value::String(
+                        if aborted { "aborted" } else { "failed" }.to_string(),
+                    );
+                    fields
+                };
                 // 失败也要留痕：写不进去不掩盖执行体自己的错误（它更有信息量）。
                 let _ = super::super::port::failed_with_extra(
                     store.as_ref(),
@@ -264,12 +298,18 @@ pub(crate) fn begin_model(
 /// 缺 `stream` 段时落回顶层同名字段，让过渡期的执行体也读得出来。
 fn round_stream_facts(fact: &serde_json::Value) -> StreamNodeFacts {
     let stream = fact.get("stream").unwrap_or(fact);
-    let text_of = |key: &str| stream.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    let pick = |new: &str, old: &str| {
+        stream
+            .get(new)
+            .or_else(|| stream.get(old))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    };
     StreamNodeFacts {
-        text_id: text_of("response_text_child_id"),
-        text: text_of("text"),
-        reasoning_id: text_of("reasoning_child_id"),
-        reasoning: text_of("reasoning"),
+        text_id: pick("text_id", "response_text_child_id"),
+        text: pick("text", "text"),
+        reasoning_id: pick("reasoning_id", "reasoning_child_id"),
+        reasoning: pick("reasoning", "reasoning"),
     }
 }
 
@@ -455,6 +495,12 @@ where
         "messages": messages,
         "tools": tools,
         "root_id": run.turn_root_id,
+        // 记账与装配用的容器事实（`D-314`）：`response` 载荷的 `turn_id` / `principal`、
+        // `calls` 的 `call_key` 都由执行体从这几个值装配，环不再代劳。
+        "principal": run.actor.principal.clone(),
+        "turn": run.turn,
+        "drive": run.drive_seq,
+        "round_id": call.id.clone(),
     });
     super::super::port::announce_with(store, &call, run.turn, run.user_seq, payload.clone())?;
     run.pending_round = Some(call);

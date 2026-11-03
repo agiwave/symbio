@@ -17,7 +17,7 @@ use symbio_plugin_api::ports;
 use symbio_plugin_api::{
     llm_short_id, CapabilityMeta, CapabilityRow, ExecAbortSignal, ExecEnv, ExecEventSink,
     ExecTranscriptWriter, LlmAdapter, ModelFinishReason, ModelProvider, PluginError, PromptMessage,
-    ProviderLlmAdapter,
+    ProviderLlmAdapter, TurnOutput, TurnToolCallInfo,
 };
 
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
@@ -97,6 +97,17 @@ struct RoundTripRequest {
     tools: Vec<CapabilityMeta>,
     #[serde(default)]
     root_id: String,
+    /// 记账与装配用的容器事实（`D-314`）：`response` 载荷的 `turn_id` / `principal`、
+    /// `calls` 的 `call_key` 都从这里取，环不再代装配。
+    #[serde(default)]
+    principal: String,
+    #[serde(default)]
+    turn: u64,
+    #[serde(default)]
+    drive: u64,
+    /// 这一笔债的逻辑 id（与 `sent` / `response` 的幂等键同源）。
+    #[serde(default)]
+    round_id: String,
 }
 
 /// 一次模型往返的执行体。
@@ -142,67 +153,225 @@ impl PortExecutor for ModelExecutor {
             )
             .await
         {
-            Ok(output) => {
-                let calls: Vec<serde_json::Value> = output
-                    .tool_calls
-                    .iter()
-                    .map(|call| {
-                        serde_json::json!({
-                            "id": call.id,
-                            "wire_id": call.wire_id,
-                            "name": call.name,
-                            "arguments": call.arguments,
-                            "parse_error": call.parse_error,
-                            "overflow_notice": call.overflow_notice,
-                        })
-                    })
-                    .collect();
-                // 一次往返的产物 → 事实草稿（键名是本插件的行契约，环不解析）。
-                PortOutcome {
-                    facts: vec![serde_json::json!({
-                        "text": output.text,
-                        "reasoning": output.reasoning,
-                        "response_id": output.response_id,
-                        "tool_calls": calls,
-                        "finish": finish_str(&output.finish),
-                        // 终止判定归执行体（D-305 裁决一）：有工具调用 ⇒ 还要再派一批；
-                        // 没有 ⇒ 这一轮答完了。环只照抄，不再按世界分支。
-                        "decision": if output.tool_calls.is_empty() { "halt" } else { "tools" },
-                        "cost_ms": started.elapsed().as_millis() as u64,
-                        "usage": output.usage.as_ref().map(|u| serde_json::json!({
-                            "input": u.input,
-                            "output": u.output,
-                        })),
-                        "spend": output.spend.as_ref().map(|s| serde_json::json!({
-                            "amount_nano": s.amount_nano,
-                            "currency": s.currency,
-                        })),
-                        "response_text_child_id": output.response_text_child_id,
-                        "reasoning_child_id": output.reasoning_child_id,
-                        // 执行体自己持有的流式读数：节点 id 与半截正文。成功时可与
-                        // `output.*` 对上；中止时它就是唯一来源（环不再从桥取）。
-                        "stream": rows.snapshot(),
-                    })],
-                    error: None,
-                }
-            }
+            Ok(output) => PortOutcome {
+                // 一次往返的终稿 → `response` 载荷：正文 / 思考、节点身份、终答折叠、
+                // 用量与工具调用集合展开都由执行体装配（`D-314`）。
+                facts: vec![outcome_payload(
+                    &request,
+                    Some(&output),
+                    &rows.snapshot(),
+                    started,
+                    None,
+                )],
+                error: None,
+            },
             Err(PluginError::Aborted) => PortOutcome {
                 // 半截产出仍要留痕：中止是这一笔的状态，不是「没有发生过」。
-                facts: vec![serde_json::json!({
-                    "status": "aborted",
-                    "stream": rows.snapshot(),
-                })],
+                facts: vec![outcome_payload(
+                    &request,
+                    None,
+                    &rows.snapshot(),
+                    started,
+                    Some(("aborted", "aborted")),
+                )],
                 error: Some((PortErrorClass::NonRetryable, "aborted".to_string())),
             },
-            Err(PluginError::RateLimited(why)) => {
-                with_stream(PortOutcome::failed(PortErrorClass::Retryable, why), &rows)
+            Err(PluginError::RateLimited(why)) => PortOutcome {
+                facts: vec![outcome_payload(
+                    &request,
+                    None,
+                    &rows.snapshot(),
+                    started,
+                    Some(("failed", &why)),
+                )],
+                error: Some((PortErrorClass::Retryable, why)),
+            },
+            Err(error) => {
+                let why = error.to_string();
+                PortOutcome {
+                    facts: vec![outcome_payload(
+                        &request,
+                        None,
+                        &rows.snapshot(),
+                        started,
+                        Some(("failed", &why)),
+                    )],
+                    error: Some((PortErrorClass::NonRetryable, why)),
+                }
             }
-            Err(error) => with_stream(
-                PortOutcome::failed(PortErrorClass::NonRetryable, error.to_string()),
-                &rows,
-            ),
         }
     }
+}
+
+/// 一次往返写进 `response` / `failed` 的载荷（行契约归本插件，`D-314`）。
+///
+/// 键名与环侧 `output_fields` 同义：`text` / `text_id` / `reasoning` / `reasoning_id` /
+/// `answer` / `answer_id` / `truncated` / `principal` / `turn_id`，外加本轮的工具调用
+/// 集合展开（`tool_calls` 是给环折 `LlmTurn` 的原始值，`calls` 是派发侧读的调用键）。
+fn outcome_payload(
+    request: &RoundTripRequest,
+    output: Option<&TurnOutput>,
+    stream: &serde_json::Value,
+    started: std::time::Instant,
+    stopped: Option<(&str, &str)>,
+) -> serde_json::Value {
+    let of = |key: &str| {
+        stream
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    // 终稿优先取 provider 交回的全文；中止 / 未流式时落回执行体自己观测到的半截。
+    let text = match output {
+        Some(o) if !o.text.trim().is_empty() => o.text.clone(),
+        _ => of("text"),
+    };
+    let reasoning = match output {
+        Some(o) if !o.reasoning.trim().is_empty() => o.reasoning.clone(),
+        _ => of("reasoning"),
+    };
+    // 节点身份由执行体持有：观测到的帧 id 优先，其次 provider 声明的子节点 id，
+    // 都没有才按这一笔债的逻辑 id 合成（随事实入格，读侧不再猜）。
+    let stream_id = |key: &str| stream.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    let text_id = stream_id("text_id")
+        .or_else(|| {
+            output
+                .map(|o| o.response_text_child_id.clone())
+                .filter(|s| !s.trim().is_empty())
+        })
+        .or_else(|| (!text.trim().is_empty()).then(|| format!("{}-text", request.round_id)));
+    let reasoning_id = stream_id("reasoning_id")
+        .or_else(|| {
+            output
+                .map(|o| o.reasoning_child_id.clone())
+                .filter(|s| !s.trim().is_empty())
+        })
+        .or_else(|| {
+            (!reasoning.trim().is_empty()).then(|| format!("{}-reasoning", request.round_id))
+        });
+    // 终答折叠归执行体（`D-314`）：有工具调用的轮次交付正文；收束轮按
+    // 正文 → 截断则空 → 端口思考 → 流上思考 的顺序取值；失败轮交付半截正文。
+    let answer = match output {
+        Some(o) if !o.tool_calls.is_empty() => text.clone(),
+        Some(o) => fold_answer(o, &reasoning),
+        None => text.clone(),
+    };
+    let answer_id = symbio_plugin_api::event_output_text_node_id(
+        &answer,
+        &reasoning,
+        text_id.as_deref(),
+        reasoning_id.as_deref(),
+        Some(&request.root_id),
+    );
+    let mut payload = serde_json::json!({
+        "turn_id": request.root_id,
+        "text": text,
+        "text_id": text_id,
+        "reasoning": reasoning,
+        "reasoning_id": reasoning_id,
+        "answer": answer,
+        "answer_id": answer_id,
+        "truncated": output.is_some_and(|o| o.finish.is_length()),
+        "principal": request.principal,
+        "cost_ms": started.elapsed().as_millis() as u64,
+    });
+    if let Some(o) = output {
+        payload["response_id"] = serde_json::json!(o.response_id);
+        payload["finish"] = serde_json::json!(finish_str(&o.finish));
+        payload["decision"] = serde_json::json!(if o.tool_calls.is_empty() {
+            "halt"
+        } else {
+            "tools"
+        });
+        payload["tool_calls"] = serde_json::json!(o
+            .tool_calls
+            .iter()
+            .map(|call| serde_json::json!({
+                "id": call.id,
+                "wire_id": call.wire_id,
+                "name": call.name,
+                "arguments": call.arguments,
+                "parse_error": call.parse_error,
+                "overflow_notice": call.overflow_notice,
+            }))
+            .collect::<Vec<_>>());
+        payload["calls"] = serde_json::json!(dispatch_calls(request, &o.tool_calls));
+        // 实测用量：只写测到的那一侧；缺席不写 `usage: null`（与环侧 `output_fields`
+        // 同一口径，`token_ledger` 按 `measured` 数条数）。
+        if let Some(usage) = o.usage.as_ref() {
+            if usage.input.is_some() || usage.output.is_some() {
+                let mut measured = serde_json::Map::new();
+                if let Some(v) = usage.input {
+                    measured.insert("input".into(), serde_json::json!(v));
+                }
+                if let Some(v) = usage.output {
+                    measured.insert("output".into(), serde_json::json!(v));
+                }
+                payload["usage"] = serde_json::Value::Object(measured);
+            }
+        }
+        if let Some(spend) = o.spend.as_ref() {
+            payload["spend"] = serde_json::json!({
+                "amount_nano": spend.amount_nano,
+                "currency": spend.currency,
+            });
+        }
+    }
+    if let Some((status, why)) = stopped {
+        // 停法进载荷：重建按它定节点状态，而 `failed` 本身不区分「用户按停」
+        // 与「执行体报错」——那条区分只在这一格。
+        payload["status"] = serde_json::json!(status);
+        payload["why"] = serde_json::json!(why);
+    }
+    payload
+}
+
+/// 末轮答话的取值（`final_answer` 迁入执行体，`D-314`）：正文 → 截断则空 →
+/// 端口思考 → 流上思考。四条顺序都是判据，不是偏好。
+fn fold_answer(output: &TurnOutput, stream_reasoning: &str) -> String {
+    if !output.text.trim().is_empty() {
+        output.text.clone()
+    } else if output.finish.is_length() {
+        String::new()
+    } else if !output.reasoning.trim().is_empty() {
+        output.reasoning.clone()
+    } else {
+        stream_reasoning.to_string()
+    }
+}
+
+/// 本轮工具调用 → 派发侧读的调用键（`response.calls`）。
+///
+/// 格式与环侧 `tool_dispatch::call_key` 逐字相同：`call_key` 的写方从此是执行体，
+/// 派发侧只读这份事实（缺失时才回退到旧式重算）。
+fn dispatch_calls(
+    request: &RoundTripRequest,
+    tool_calls: &[TurnToolCallInfo],
+) -> Vec<serde_json::Value> {
+    tool_calls
+        .iter()
+        .enumerate()
+        .map(|(idx, call)| {
+            let mut id = format!(
+                "{}-{}-d{}-{}-c{idx:03}",
+                ports::TOOL,
+                request.turn,
+                request.drive,
+                request.round_id
+            );
+            if let Some(wire) = call.id.as_deref().filter(|s| !s.trim().is_empty()) {
+                id.push('-');
+                id.push_str(wire);
+            }
+            serde_json::json!({
+                "port": ports::TOOL,
+                "id": id,
+                "name": call.name.clone().unwrap_or_default(),
+                "arguments": call.arguments.clone(),
+            })
+        })
+        .collect()
 }
 
 /// 执行体的流式读数与转发口（`D-314` 的「流」通道）。
@@ -237,8 +406,8 @@ impl StreamRows {
         serde_json::json!({
             "text": state.text,
             "reasoning": state.reasoning,
-            "response_text_child_id": state.text_id,
-            "reasoning_child_id": state.reasoning_id,
+            "text_id": state.text_id,
+            "reasoning_id": state.reasoning_id,
         })
     }
 
@@ -285,22 +454,6 @@ impl ExecTranscriptWriter for StreamRows {
         self.observe(&message);
         self.display.emit(message).await;
     }
-}
-
-/// 失败载荷也带上流式读数：中止 / 限流之后那段半截正文只活在这里。
-fn with_stream(mut outcome: PortOutcome, rows: &StreamRows) -> PortOutcome {
-    let stream = rows.snapshot();
-    match outcome.facts.first_mut() {
-        Some(first) => {
-            if let Some(object) = first.as_object_mut() {
-                object.insert("stream".to_string(), stream);
-            }
-        }
-        None => outcome
-            .facts
-            .push(serde_json::json!({ "stream": stream })),
-    }
-    outcome
 }
 
 /// 把最小消息形态翻成 provider 线格式（`D-305` 裁决一：请求构造归执行体）。
