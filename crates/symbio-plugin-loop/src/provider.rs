@@ -3,7 +3,7 @@
 //! ## 动作体就是整轮 future
 //!
 //! 本模块不维护任务表、不记轮次、不开通道：授权与令牌校验之后把交付包交给
-//! [`turn_driver::run_turn`]，结局以 `TurnReport` 序列化进动作响应。session 侧
+//! [`stage_driver::run_turn`]，结局以 `TurnReport` 序列化进动作响应。session 侧
 //! 拿到的是「这一轮怎么结束的」，不是一串帧——帧已经经 `TurnDispatch.sink` 与
 //! 动作面写回会话转写了。
 //!
@@ -16,7 +16,7 @@ use symbio_kernel::vdfs::{
 use symbio_sdk::turn::dispatch::{LOOP_RUN_TURN, TURN_DISPATCH};
 use symbio_sdk::vdfs::host::vdfs_host_ctx;
 
-use super::turn_driver;
+use super::stage_driver;
 
 /// 唯一入口（授权三条见 `plugin.rs` 的模块文档）。
 pub(super) async fn dispatch(
@@ -51,7 +51,7 @@ pub(super) async fn dispatch(
         )));
     }
 
-    let report = turn_driver::run_turn(host, dispatch).await;
+    let report = stage_driver::run_turn(host, dispatch).await;
     let data = serde_json::to_value(&report)
         .map_err(|e| VdfsError::internal(format!("轮次结局序列化失败：{e}")))?;
     Ok(VdfsResponse::Action(VdfsActionResult {

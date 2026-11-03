@@ -6,12 +6,12 @@
 //! ```text
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
 //! 步骤1 中止边界检查        ← 事实判据，不再是决策函数
-//! 步骤2 turn_driver::drive    ← 外层环：选债 / 派发 / 收束判定（P2-6a）
+//! 步骤2 stage_driver::drive   ← 外层环：选债 / 派发 / 收束判定（P2-6a）
 //! 后步骤 无（直路只能由 return 离开，全部经 finish_turn 收尾）
 //! ```
 //!
 //! 本文件**没有环**：`D-222` 裁决 5 把控制面收成**一个**环，它住在
-//! [`super::turn_driver::drive`]。幕首、轮首四行、接缝、汇报、轮内各行与幕间接续
+//! [`super::stage_driver::drive`]。幕首、轮首四行、接缝、汇报、轮内各行与幕间接续
 //! 都是那张绑定表上的行，由 `(phase, anchor)` 决出先后；本文件只做三件事——备好本轮状态、
 //! 过闸门、把结局映射成 [`TurnExit`]。
 //!
@@ -266,7 +266,7 @@ pub async fn run_chat_loop(
 
     // ── 步骤 2：唯一一个环（`D-222` 裁决 5）─────────────────────────────
     //
-    // 开幕、轮首四行、接缝、内环、收幕与幕间接续全在 [`super::turn_driver::drive`]
+    // 开幕、轮首四行、接缝、内环、收幕与幕间接续全在 [`super::stage_driver::drive`]
     // 里：它读事实选最小可还债，五道守卫各只有一份，幕与幕在同一次调用里接续。
     // 本文件不判「下一步是哪一步」，只把环的结局映射成 [`TurnExit`]。
     //
@@ -279,7 +279,7 @@ pub async fn run_chat_loop(
     //
     // 结果先落成变量再 `match`：`Control` 里装的是 `&mut context` / `&mut turn`，
     // 作为 scrutinee 的临时值会活到整个 `match`——答话那一臂要再借它们一次。
-    let driven = super::turn_driver::drive(
+    let driven = super::stage_driver::drive(
         super::turn_exec::Control {
             orchestrator,
             orchestrator_arc: &orchestrator_arc,

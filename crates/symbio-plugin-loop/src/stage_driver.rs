@@ -1,4 +1,4 @@
-//! 轮次驱动器（`turn_driver`）：生产入口、外层环与一次轮的全部机制（P2-6a）。
+//! 阶段驱动器（`stage_driver`）：生产入口、外层环与一次债驱动的全部机制（P2-6a）。
 //!
 //! 本模块做三件事：
 //!
@@ -1879,7 +1879,7 @@ pub(crate) async fn classify_turn<'b>(
             ))));
         }
         return Ok(Classified::Finished(Ok(ExecTurnResult {
-            output: turn_output(outcome, reasoning_text, child_id, reasoning_child_id),
+            output: stage_output(outcome, reasoning_text, child_id, reasoning_child_id),
             messages: produced,
         })));
     }
@@ -1907,7 +1907,7 @@ pub(crate) async fn classify_turn<'b>(
 /// 实测用量与末轮原因都是**直通**格：这一格若丢，校准比冻结在初值 1.0；换成
 /// `..Default::default` 会把 finish 静默填成 Stop，长度截断与自动续写因此不可达。
 /// 反射档 / 兜底 / 中止没有模型轮 ⇒ Stop 就是诚实值。
-fn turn_output(
+fn stage_output(
     outcome: TurnOutcome,
     reasoning: String,
     response_text_child_id: String,
@@ -2106,7 +2106,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     all_messages.extend(produced);
 
     Ok(ExecTurnResult {
-        output: turn_output(outcome, reasoning_text, child_id, reasoning_child_id),
+        output: stage_output(outcome, reasoning_text, child_id, reasoning_child_id),
         messages: all_messages,
     })
 }

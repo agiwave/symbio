@@ -272,7 +272,7 @@ impl RunnerFixture {
             dispatch,
             host: None,
         };
-        let end = super::super::turn_driver::drive_prepared(stage, None, request_ctx, actors)
+        let end = super::super::stage_driver::drive_prepared(stage, None, request_ctx, actors)
             .await
             .map_err(|exit| match exit {
                 super::super::turn_exec::TurnExecExit::Failed(e) => ActorError::Read(e),

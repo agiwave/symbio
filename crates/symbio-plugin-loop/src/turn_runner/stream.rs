@@ -166,8 +166,10 @@ pub(crate) fn begin_model(
                 let outcome = executor.execute(exec, input).await;
                 round_fact = outcome.facts.first().cloned();
                 match outcome.error {
-                    None => turn_from_fact(round_fact.as_ref().unwrap_or(&serde_json::Value::Null))
-                        .map_err(EngineStop::Failed),
+                    None => {
+                        stage_from_fact(round_fact.as_ref().unwrap_or(&serde_json::Value::Null))
+                            .map_err(EngineStop::Failed)
+                    }
                     Some((_, why)) => {
                         let aborted = outcome
                             .facts
@@ -306,7 +308,7 @@ pub(crate) fn begin_model(
 /// 一次往返的语义键（`text` / `reasoning` / `tool_calls` / `finish` / `usage` /
 /// `spend` / `cost_ms`）在 `symbio-plugin-model` 的执行体里已经成形；这里只做形状
 /// 转写，不重判任何一条（`D-305` 裁决一）。
-fn turn_from_fact(fact: &serde_json::Value) -> Result<symbio_sdk::adapters::LlmTurn, String> {
+fn stage_from_fact(fact: &serde_json::Value) -> Result<symbio_sdk::adapters::LlmTurn, String> {
     use symbio_plugin_api::{ModelFinishReason, ModelSpend, ModelUsage, TurnToolCallInfo};
     let opt_str = |key: &str| fact.get(key).and_then(|v| v.as_str()).map(str::to_string);
     let tool_calls: Vec<TurnToolCallInfo> = fact

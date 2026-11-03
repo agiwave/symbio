@@ -112,7 +112,7 @@ use super::turn_runner::TurnSession;
 use super::session_port::SessionPort;
 
 // —— 阶段分层 ——
-// 处理阶段收进轮次驱动器（`turn_driver`）；再导出保持 `turn_exec::*` 的既有路径不变
+// 处理阶段收进阶段驱动器（`stage_driver`）；再导出保持 `turn_exec::*` 的既有路径不变
 // （消费方与本文件测试都不必改引用）。本文件只留行执行体与共享状态。
 mod policy;
 
@@ -120,7 +120,7 @@ mod policy;
 // 与本文件测试的 `turn_exec::*` 引用不变。多数名字只被测试借道，非测试构建里因此
 // 允许「未使用」。
 #[allow(unused_imports)]
-pub(crate) use crate::turn_driver::{
+pub(crate) use crate::stage_driver::{
     assemble_turn, classify_turn, execute_final_reply_turn, last_open_turn, open_turn,
     persist_turn, Assembled, Classified, Control, DriveEnd, ExecTurnResult, OpenRun, Running,
     Settled, TurnExecExit,
@@ -129,7 +129,7 @@ pub(crate) use crate::turn_driver::{
 // `stage_runtime` 是幕首之后那一半的同形入口——夹具自己备幕首，不该另抄一份
 // 「分发方与汇报落地面怎么从装配束里造」。
 #[cfg(test)]
-pub(crate) use crate::turn_driver::{stage_runtime, StageRuntime};
+pub(crate) use crate::stage_driver::{stage_runtime, StageRuntime};
 // 端口通用受理入口（与「一笔债」同一件事）：本文件只把它挂进绑定表，
 // 实现住在 `port.rs`，因为它与 `execute_one` 共用同一份记账口径。
 pub(crate) use super::port::run_port;
@@ -743,7 +743,7 @@ pub(crate) struct Ctx<'a> {
     /// 请求级宿主面（能力注册表 / 会话 id / 工作区）：创建与授权两行要用它判风险档。
     ///
     /// 控制面取自轮首那一片（与 [`HeadCtx::request_ctx`] 同一份）；裸幕夹具
-    /// （`head = None`）没有轮首片，由 [`crate::turn_driver::drive_prepared`] 的
+    /// （`head = None`）没有轮首片，由 [`crate::stage_driver::drive_prepared`] 的
     /// `request_ctx` 直给——两条来源在派发点合成一个字段，行内不再二次判断。
     pub(crate) request_ctx: Option<Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
 }
@@ -1126,7 +1126,7 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             reason: o.dialog_reason,
             exclude_from_context: true,
         });
-        crate::turn_driver::land_consolidation(
+        crate::stage_driver::land_consolidation(
             head.loop_session.as_ref(),
             consolidation.as_deref(),
         )
@@ -1150,7 +1150,7 @@ pub(crate) fn run_seam<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             head.turn,
             "ready",
         )?;
-        crate::turn_driver::land_seam(
+        crate::stage_driver::land_seam(
             ctx.store.as_ref(),
             head.bridge,
             head.turn,
