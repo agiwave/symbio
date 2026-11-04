@@ -1,0 +1,16 @@
+[package]
+name = "symbio-host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+symbio-kernel = { path = "../symbio-kernel" }
+symbio-plugin-api = { path = "../symbio-plugin-api" }
+symbio-plugin-loop = { path = "../symbio-plugin-loop" }
+symbio-providers = { path = "../symbio-providers" }
+symbio-sdk = { path = "../symbio-sdk" }
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -1,0 +1,152 @@
+//! 债表契约：端口插件自报债行；宿主收集，环只读。
+//!
+//! 这里的类型是**数据**：端口名与债身份都由申报方给出，契约本身不认识任何端口。
+
+use std::sync::Arc;
+
+use serde_json::Value;
+use symbio_kernel::capability::{CapabilityFamily, CapabilityRow};
+
+/// 债行所在的 `multi` 族。加一个端口 = 由该插件往本族报到，不改族。
+pub const DEBT_FAMILY: CapabilityFamily = CapabilityFamily::multi("debt");
+
+/// 一次驱动的应用侧输入：可见域、会话地址与选定的 provider。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriveRequest {
+    /// 可见域身份（实体 id，不用哨兵值）。
+    pub scope: u64,
+    /// 会话地址里的 id（应用数据）。
+    pub session_id: String,
+    /// 选定的 provider 标识（可为空）。
+    pub provider: Option<String>,
+}
+
+/// 一笔债在五事实里的结局。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Closing {
+    /// 应答落账。
+    Ok,
+    /// 判死落账。
+    Failed,
+}
+
+/// 五事实的只读视图（按债 id 归并；同一可见域内 id 唯一，跨端口也不得重名）。
+#[derive(Debug, Clone, Default)]
+pub struct DebtFacts {
+    closings: Vec<(String, Closing, Value)>,
+    attempts: Vec<(String, u32)>,
+}
+
+impl DebtFacts {
+    /// 记一笔尝试号（取最大值）。
+    pub fn note_attempt(&mut self, id: &str, attempt: u32) {
+        match self.attempts.iter_mut().find(|(key, _)| key == id) {
+            Some((_, current)) if *current >= attempt => {}
+            Some((_, current)) => *current = attempt,
+            None => self.attempts.push((id.to_string(), attempt)),
+        }
+    }
+
+    /// 记一笔结局。
+    pub fn note_closing(&mut self, id: &str, closing: Closing, payload: Value) {
+        if let Some(slot) = self.closings.iter_mut().find(|(key, _, _)| key == id) {
+            *slot = (id.to_string(), closing, payload);
+        } else {
+            self.closings.push((id.to_string(), closing, payload));
+        }
+    }
+
+    /// 某笔债的结局与载荷。
+    pub fn closing(&self, id: &str) -> Option<(Closing, &Value)> {
+        self.closings
+            .iter()
+            .find(|(key, _, _)| key == id)
+            .map(|(_, closing, payload)| (*closing, payload))
+    }
+
+    /// 某笔债的最大尝试号；从未出现 ⇒ 0。
+    pub fn attempt(&self, id: &str) -> u32 {
+        self.attempts
+            .iter()
+            .find(|(key, _)| key == id)
+            .map(|(_, attempt)| *attempt)
+            .unwrap_or(0)
+    }
+}
+
+/// 一行债：申报方给出的数据，宿主原样转给环。
+#[derive(Debug, Clone)]
+pub struct DebtSpec {
+    /// 行名（申报方的标签）。
+    pub name: &'static str,
+    /// 欠哪个端口——申报方自己的端口名，契约不解释。
+    pub port: &'static str,
+    /// 债身份，由申报方从事实派生（禁计数）。
+    pub id: String,
+    /// 交给执行体的载荷。
+    pub payload: Value,
+    /// 前置债 id：它收束之前本行不可还（跨端口时只写 id，不写端口名）。
+    pub after: Option<String>,
+    /// 单次派发租约（毫秒）。
+    pub lease_ms: u64,
+    /// 最多尝试次数（含首次）。
+    pub max_attempts: u32,
+}
+
+impl DebtSpec {
+    /// 无前置的一行债；租约 60s、最多 3 次。
+    pub fn new(name: &'static str, port: &'static str, id: impl Into<String>, payload: Value) -> Self {
+        Self {
+            name,
+            port,
+            id: id.into(),
+            payload,
+            after: None,
+            lease_ms: 60_000,
+            max_attempts: 3,
+        }
+    }
+
+    /// 声明前置债 id。
+    pub fn after(mut self, id: impl Into<String>) -> Self {
+        self.after = Some(id.into());
+        self
+    }
+
+    /// 调整租约与尝试上限。
+    pub fn lease(mut self, lease_ms: u64, max_attempts: u32) -> Self {
+        self.lease_ms = lease_ms;
+        self.max_attempts = max_attempts.max(1);
+        self
+    }
+}
+
+/// 一个插件申报的债表（数据源）。
+pub trait DebtSource: Send + Sync {
+    /// 当前可见域该还的债。
+    fn rows(&self, request: &DriveRequest, facts: &DebtFacts) -> Vec<DebtSpec>;
+}
+
+/// 注册载荷：把债表挂进 [`DEBT_FAMILY`]。
+#[derive(Clone)]
+pub struct DebtTable(pub Arc<dyn DebtSource>);
+
+impl std::fmt::Debug for DebtTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DebtTable")
+    }
+}
+
+/// 造一行 `debt` 族登记（`active = false`，与 port 族同一手法）。
+pub fn debt_row(name: &str, source: Arc<dyn DebtSource>) -> CapabilityRow {
+    CapabilityRow::new(
+        DEBT_FAMILY,
+        format!("<debt>{name}"),
+        DebtTable(source),
+        false,
+    )
+}
+
+#[cfg(test)]
+#[path = "debt.test.rs"]
+mod tests;

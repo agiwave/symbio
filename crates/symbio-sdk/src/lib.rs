@@ -45,6 +45,7 @@ pub mod capability;
 pub mod chat;
 pub mod clock;
 pub mod creator;
+pub mod debt;
 pub mod embedding;
 pub mod event_bus;
 pub mod governance;

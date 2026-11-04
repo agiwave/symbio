@@ -14,13 +14,15 @@ use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortInput, PortOutcome,
     PortProvider, PortReply,
 };
-use symbio_plugin_api::ports;
 use symbio_plugin_api::{
-    llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecAbortSignal, ExecEnv, ExecEventSink,
-    ExecTranscriptWriter, FactDraft, LlmAdapter, ModelFinishReason, ModelProvider, PluginError,
-    PromptMessage, ProviderLlmAdapter, TurnOutput, TurnToolCallInfo, Verb, EVENT_FAILED,
+    llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecEnv, ExecEventSink,
+    ExecTranscriptWriter, FactDraft, ModelFinishReason, ModelProvider, PluginError,
+    PromptMessage, TurnOutput, TurnToolCallInfo, Verb, EVENT_FAILED,
     EVENT_RESPONSE,
 };
+
+/// 本插件服务的端口名（提供者自己定义；契约层不认识它）。
+pub(crate) const MODEL_PORT: &str = "model";
 
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
 ///
@@ -48,31 +50,11 @@ impl ModelPort {
 
 impl PortProvider for ModelPort {
     fn ports(&self) -> &'static [&'static str] {
-        &[ports::MODEL]
+        &[MODEL_PORT]
     }
 
     fn provider_id(&self) -> &str {
         self.active.provider_id()
-    }
-
-    fn llm_round_trip(
-        &self,
-        preferred: Option<&str>,
-        system_prompt: &str,
-        abort: ExecAbortSignal,
-    ) -> Option<Arc<dyn LlmAdapter>> {
-        let provider = preferred
-            .and_then(|id| self.catalog.iter().find(|p| p.provider_id() == id))
-            .unwrap_or(&self.active);
-        Some(Arc::new(ProviderLlmAdapter::for_turn(
-            provider.clone(),
-            system_prompt,
-            abort,
-        )))
-    }
-
-    fn model(&self) -> Option<Arc<dyn ModelProvider>> {
-        Some(self.active.clone())
     }
 
     /// 通用执行面（`DE-048` D-305 裁决一）：一次往返的请求构造、流式帧、工具调用
@@ -103,16 +85,9 @@ struct RoundTripRequest {
     /// `calls` 的 `call_key` 都从这里取，环不再代装配。
     #[serde(default)]
     principal: String,
+    /// 本笔债所属的可见域（实体身份；行契约里是数据，不是序号）。
     #[serde(default)]
-    turn: u64,
-    #[serde(default)]
-    drive: u64,
-    /// 这一笔债的逻辑 id（与 `sent` / `response` 的幂等键同源）。
-    #[serde(default)]
-    round_id: String,
-    /// 工具轮序号（环的纯值；只用于应答承载里合成 id 的跨轮唯一性）。
-    #[serde(default)]
-    round: usize,
+    scope: u64,
 }
 
 /// 一次模型往返的执行体。
@@ -183,7 +158,7 @@ impl PortExecutor for ModelExecutor {
                     let name = call.name.as_deref().unwrap_or("<unnamed>");
                     let id = present(&call.wire_id)
                         .or_else(|| present(&call.id))
-                        .unwrap_or_else(|| format!("call_{}_{}_{}", name, request.round, index));
+                        .unwrap_or_else(|| format!("call_{}_{}_{}", name, request.root_id, index));
                     if let Some(key) = call.id.clone().filter(|s| !s.trim().is_empty()) {
                         links.push((key, id.clone()));
                     }
@@ -318,7 +293,7 @@ fn outcome_payload(
                 .map(|o| o.response_text_child_id.clone())
                 .filter(|s| !s.trim().is_empty())
         })
-        .or_else(|| (!text.trim().is_empty()).then(|| format!("{}-text", request.round_id)));
+        .or_else(|| (!text.trim().is_empty()).then(|| format!("{}-text", request.root_id)));
     let reasoning_id = stream_id("reasoning_id")
         .or_else(|| {
             output
@@ -326,7 +301,7 @@ fn outcome_payload(
                 .filter(|s| !s.trim().is_empty())
         })
         .or_else(|| {
-            (!reasoning.trim().is_empty()).then(|| format!("{}-reasoning", request.round_id))
+            (!reasoning.trim().is_empty()).then(|| format!("{}-reasoning", request.root_id))
         });
     // 终答折叠归执行体（`D-314`）：有工具调用的轮次交付正文；收束轮按
     // 正文 → 截断则空 → 端口思考 → 流上思考 的顺序取值；失败轮交付半截正文。
@@ -431,19 +406,17 @@ fn dispatch_calls(
         .iter()
         .enumerate()
         .map(|(idx, call)| {
-            let mut id = format!(
-                "{}-{}-d{}-{}-c{idx:03}",
-                ports::TOOL,
-                request.turn,
-                request.drive,
-                request.round_id
-            );
+            let anchor = if request.root_id.trim().is_empty() {
+                format!("scope{}", request.scope)
+            } else {
+                request.root_id.clone()
+            };
+            let mut id = format!("call-{}-{}-c{idx:03}", request.scope, anchor);
             if let Some(wire) = call.id.as_deref().filter(|s| !s.trim().is_empty()) {
                 id.push('-');
                 id.push_str(wire);
             }
             serde_json::json!({
-                "port": ports::TOOL,
                 "id": id,
                 "name": call.name.clone().unwrap_or_default(),
                 "arguments": call.arguments.clone(),

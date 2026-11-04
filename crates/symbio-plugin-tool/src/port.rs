@@ -41,7 +41,7 @@ use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
     capability_invoke, capability_to_wire, effects::annotations, effects::EffectInput,
     events::EVENT_ARTIFACT_ADDED, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
-    failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
+    failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel,
     Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor, PortInput, PortOutcome,
     PortProvider, PromptMessage, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_REQUEST,
@@ -49,7 +49,7 @@ use symbio_plugin_api::{
 };
 
 /// 端口名（唯一来源：本插件）。
-pub(crate) const TOOL: &str = ports::TOOL;
+pub(crate) const TOOL: &str = "tool";
 
 /// 载荷键（环与提供者之间的私有约定，随 [`PortInput`] 走）。环不认识世界：
 /// 线上名与调用 id 到这里只是两个**不具名的纯值**，语义由本插件给。

@@ -85,7 +85,7 @@ fn executor(outcome: FakeOutcome) -> Arc<dyn PortExecutor> {
 
 fn input(payload: serde_json::Value) -> PortInput {
     PortInput {
-        port: ports::MODEL,
+        port: crate::port::MODEL_PORT,
         payload,
     }
 }
@@ -93,7 +93,7 @@ fn input(payload: serde_json::Value) -> PortInput {
 fn exec_context() -> symbio_plugin_api::port::PortExecContext {
     symbio_plugin_api::port::PortExecContext {
         deadline_ms: None,
-        abort: ExecAbortSignal::new(),
+        abort: symbio_plugin_api::ExecAbortSignal::new(),
         idempotency_key: "model-1-1".to_string(),
         sink: symbio_plugin_api::ExecEventSink::Null,
         emit: symbio_plugin_api::port::PortFactEmit::silent(),
