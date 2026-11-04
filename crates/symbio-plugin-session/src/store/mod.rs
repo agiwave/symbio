@@ -475,16 +475,12 @@ fn shared_entry(dir: &Path) -> Arc<SharedEntry> {
     let mut entries = shared_entries()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Arc::clone(
-        entries
-            .entry(dir.to_path_buf())
-            .or_insert_with(|| {
-                Arc::new(SharedEntry {
-                    store: Arc::new(SessionStore::new(dir.to_path_buf())),
-                    migrated: tokio::sync::OnceCell::new(),
-                })
-            }),
-    )
+    Arc::clone(entries.entry(dir.to_path_buf()).or_insert_with(|| {
+        Arc::new(SharedEntry {
+            store: Arc::new(SessionStore::new(dir.to_path_buf())),
+            migrated: tokio::sync::OnceCell::new(),
+        })
+    }))
 }
 
 async fn ready_shared_store(dir: &Path) -> Arc<SessionStore> {
@@ -494,7 +490,11 @@ async fn ready_shared_store(dir: &Path) -> Arc<SessionStore> {
         .migrated
         .get_or_init(|| async move {
             if let Err(e) = store.migrate_split_messages().await {
-                symbio_plugin_api::plugin_warn!("session", "会话存储迁移失败（读路径有兜底）: {}", e);
+                symbio_plugin_api::plugin_warn!(
+                    "session",
+                    "会话存储迁移失败（读路径有兜底）: {}",
+                    e
+                );
             }
         })
         .await;

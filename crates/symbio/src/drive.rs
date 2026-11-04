@@ -17,10 +17,10 @@
 
 use std::sync::Arc;
 
+use symbio_host::{DriveReport, Host};
 use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
-use symbio_host::{DriveReport, Host};
 use symbio_plugin_api::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
 use symbio_sdk::keys::WORKDIR;
 

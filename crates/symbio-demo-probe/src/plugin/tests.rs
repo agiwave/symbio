@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use super::*;
 // 只做链接：环经 creator 注册被这个根构造，测试二进制必须把它的注册项带进来。
-use symbio_plugin_loop as _;
 use symbio_host::{base_context, DriveOutcome, Host};
+use symbio_plugin_loop as _;
 
 /// 夹具根：先收假插件的端口/债行，再挂上系统环的 `drive` 行。
 ///

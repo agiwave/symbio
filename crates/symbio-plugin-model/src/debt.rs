@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use serde_json::json;
-use symbio_plugin_api::debt::{DebtFacts, DebtSpec, DebtSource, DriveRequest};
+use symbio_plugin_api::debt::{DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
 };

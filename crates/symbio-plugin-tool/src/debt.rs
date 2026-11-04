@@ -21,14 +21,11 @@ impl DebtSource for ToolDebts {
         let Some(request_id) = facts.latest_fact_id(EVENT_TOOL_REQUESTED) else {
             return Vec::new();
         };
-        vec![DebtSpec::new(
-            "tool-calls",
-            TOOL,
-            format!("tool:{request_id}"),
-            json!({}),
-        )
-        .when(EVENT_TOOL_REQUESTED)
-        .lease(600_000, 2)]
+        vec![
+            DebtSpec::new("tool-calls", TOOL, format!("tool:{request_id}"), json!({}))
+                .when(EVENT_TOOL_REQUESTED)
+                .lease(600_000, 2),
+        ]
     }
 }
 

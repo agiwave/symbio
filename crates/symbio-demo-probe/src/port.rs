@@ -3,9 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use symbio_plugin_api::{
-    PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
-};
+use symbio_plugin_api::{PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider};
 
 /// 端口名（唯一来源：本插件）。
 pub(crate) const DEMO_PORT: &str = "demo";

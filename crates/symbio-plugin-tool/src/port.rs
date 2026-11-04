@@ -41,14 +41,12 @@ use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
     capability_invoke, capability_to_wire, effects::annotations, effects::EffectInput,
     events::EVENT_ARTIFACT_ADDED, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
-    events::EVENT_TOOL_REQUESTED,
-    failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel,
-    Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError,
-    PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext, PortExecutor,
-    PortInput, PortOutcome,
-    PortProvider, PromptMessage, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_REQUEST,
-    EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
+    events::EVENT_TOOL_REQUESTED, failure_kind, family, plugin_error, plugin_info, plugin_warn,
+    CapabilityRiskLevel, Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext,
+    PortExecutor, PortInput, PortOutcome, PortProvider, PromptMessage, Verb, ABORT_SIGNAL,
+    AGENT_ID, CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID,
+    TOOL_CALL_ID, WORKDIR,
 };
 
 /// 端口名（唯一来源：本插件）。
@@ -1056,7 +1054,11 @@ impl PortExecutor for ToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         // 新表达：债行载荷为空，调用清单在 `tool.requested` 这条世界事实里 ——
         // 由执行体自己去读面取，**不是**协议错误（债表永不读载荷）。
-        if input.payload.as_object().is_some_and(|object| object.is_empty()) {
+        if input
+            .payload
+            .as_object()
+            .is_some_and(|object| object.is_empty())
+        {
             return self.run_requested(exec).await;
         }
         let payload = input.payload.clone();
@@ -1119,9 +1121,7 @@ impl ToolPort {
                 };
             }
             if let Some(result) = result {
-                exec.emit
-                    .emit(vec![artifact_draft(call, &result)])
-                    .await;
+                exec.emit.emit(vec![artifact_draft(call, &result)]).await;
             }
         }
         exec.emit

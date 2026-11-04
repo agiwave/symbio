@@ -29,8 +29,15 @@ fn the_debt_id_derives_from_the_latest_requested_fact() {
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
     assert_eq!(row.port, TOOL);
-    assert_eq!(row.id, "tool:tool.requested:latest", "身份来自事实，不靠计数");
-    assert_eq!(row.payload, serde_json::json!({}), "载荷留空：清单由执行体自读");
+    assert_eq!(
+        row.id, "tool:tool.requested:latest",
+        "身份来自事实，不靠计数"
+    );
+    assert_eq!(
+        row.payload,
+        serde_json::json!({}),
+        "载荷留空：清单由执行体自读"
+    );
     assert_eq!(row.when.as_deref(), Some(EVENT_TOOL_REQUESTED));
     assert!(row.unless.is_none());
     assert!(row.when_no_open.is_none());

@@ -316,10 +316,7 @@ impl SymbioClient {
             ctx.set(SESSION_ID, sid.to_string());
         }
         if let Some(source) = source {
-            ctx.set(
-                symbio::symbio_plugin_api::fact_source::FACT_SOURCE,
-                source,
-            );
+            ctx.set(symbio::symbio_plugin_api::fact_source::FACT_SOURCE, source);
         }
         ctx.set_payload(payload)
             .map_err(|e| format!("构造 {path} 载荷失败: {e}"))?;

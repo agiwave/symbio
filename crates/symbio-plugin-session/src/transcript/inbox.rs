@@ -423,7 +423,11 @@ impl SessionPlugin {
             inner.inbox.pop_front()
         };
         if let Some(item) = &item {
-            announce_drained(&self.change_subs, &state.session_id, std::slice::from_ref(item));
+            announce_drained(
+                &self.change_subs,
+                &state.session_id,
+                std::slice::from_ref(item),
+            );
         }
         item
     }

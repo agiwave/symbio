@@ -35,8 +35,8 @@ use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
 use symbio_sdk::projection::transcript::transcript;
 
-use crate::projections::checkpoint::checkpoint;
 use crate::declarations::EVENT_SESSION_CONSOLIDATED;
+use crate::projections::checkpoint::checkpoint;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE,

@@ -420,10 +420,10 @@ impl SessionPlugin {
         to: &str,
         actor: &str,
     ) -> Result<(), PluginError> {
-        use symbio_kernel::event::{Entity, Verb};
-        use symbio_plugin_api::FactDraft;
         use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
+        use symbio_kernel::event::{Entity, Verb};
         use symbio_plugin_api::events::EVENT_TURN_BRANCH;
+        use symbio_plugin_api::FactDraft;
         use symbio_sdk::projection::branch::{branch_candidates, branch_selected};
         let chat_session = self.open_chat_session(session_id).await?;
         let messages = chat_session.get_messages().await?;

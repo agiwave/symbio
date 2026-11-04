@@ -72,7 +72,6 @@ pub trait PortProvider: Send + Sync + 'static {
     fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
         None
     }
-
 }
 
 /// 端口提供者的可选能力位（`DE-047` I-6.6）：词表只允许 `streaming` / `cancel` /

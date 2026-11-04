@@ -133,7 +133,12 @@ pub struct DebtSpec {
 
 impl DebtSpec {
     /// 无前置的一行债；租约 60s、最多 3 次。
-    pub fn new(name: &'static str, port: &'static str, id: impl Into<String>, payload: Value) -> Self {
+    pub fn new(
+        name: &'static str,
+        port: &'static str,
+        id: impl Into<String>,
+        payload: Value,
+    ) -> Self {
         Self {
             name,
             port,

@@ -16,16 +16,16 @@ use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
 use symbio_kernel::store::MemoryStore;
-use symbio_plugin_api::drive::{
-    DriveFact, DrivePayload, DriveRow, DriveRunner, DriveSupport, DRIVE_FAMILY,
-};
-use symbio_plugin_api::port::{
-    PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter, PortPayload, PORT_FAMILY,
-};
 use symbio_plugin_api::debt::{
     Closing, DebtFacts, DebtSource as DeclaredDebtSource, DebtTable, DriveRequest, DEBT_FAMILY,
 };
+use symbio_plugin_api::drive::{
+    DriveFact, DrivePayload, DriveRow, DriveRunner, DriveSupport, DRIVE_FAMILY,
+};
 use symbio_plugin_api::fact_source::FactSource;
+use symbio_plugin_api::port::{
+    PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter, PortPayload, PORT_FAMILY,
+};
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::capability::CAPABILITY_VISITOR;
 use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_ID, WORKDIR};
@@ -74,11 +74,7 @@ impl Host {
 
     /// 指定同轮并发派发上限（配置数据，来自调用方的限额；环不写死）。
     pub fn with_concurrency(root: Arc<dyn Plugin>, concurrency: usize) -> Self {
-        Self::with_store_and_concurrency(
-            root,
-            Arc::new(MemoryStore::<Event>::new()),
-            concurrency,
-        )
+        Self::with_store_and_concurrency(root, Arc::new(MemoryStore::<Event>::new()), concurrency)
     }
 
     /// 指定事实源（持久化实现替换时调用方零改动）。
@@ -413,11 +409,7 @@ impl PortFactWriter for WorldWriter {
 }
 
 /// 五事实与全种类事实身份 → 申报方读的窄视图（只取本可见域）。
-fn declared_facts(
-    facts: &[DriveFact],
-    source: &dyn FactSource,
-    scope: u64,
-) -> DebtFacts {
+fn declared_facts(facts: &[DriveFact], source: &dyn FactSource, scope: u64) -> DebtFacts {
     let mut out = DebtFacts::default();
     for fact in facts {
         if fact.key.scope != scope {

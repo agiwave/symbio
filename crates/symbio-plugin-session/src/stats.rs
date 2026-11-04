@@ -797,7 +797,9 @@ impl SessionPlugin {
         let store = self.get_store().await?;
         // 本会话快照立即取（读侧闸要它算可见域）；部署级扫描推迟到闸判之后——
         // `read` 只在 `may_read` 时调用 `deep_facts`（不给看就不扫）。
-        let source = store.fact_source(&sid).map_err(PluginError::InternalError)?;
+        let source = store
+            .fact_source(&sid)
+            .map_err(PluginError::InternalError)?;
         let snapshot = source.map(|s| s.range(0));
         // 载荷 = **读方身份声明**（可选）：不带 `principal` = 本机默认，与读侧闸
         // 引入之前逐字一致；带了却读不出身份（类型不对）⇒ 声明了却判不了 ⇒ 拒绝

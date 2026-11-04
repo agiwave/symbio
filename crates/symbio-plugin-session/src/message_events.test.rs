@@ -12,10 +12,10 @@
 //! （`docs/104-module-layout.md` §2）。本文件只钉「事实本身」。
 
 use super::{drain_parked, edited, removed, AppendOutcome};
+use crate::declarations::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
 use crate::store::EventWalStore;
 use symbio_kernel::event::{Entity, Seq, Verb};
 use symbio_kernel::store::Store;
-use crate::declarations::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind};
 

@@ -3,19 +3,19 @@
 use super::*;
 // 只做链接：环经 creator 注册被这个根构造，测试二进制必须把它的注册项带进来。
 use symbio_deploy::PLUGIN_ID_LOOP;
-use symbio_plugin_api::port::{
-    port_rows, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
-};
-use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
-use symbio_plugin_api::FactDraft;
-use symbio_plugin_loop as _;
-use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSpec, DebtSource, DriveRequest};
+use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
     PluginSimpleRequest,
 };
-use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::store::Store;
+use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
+use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use symbio_plugin_api::port::{
+    port_rows, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
+};
+use symbio_plugin_api::FactDraft;
+use symbio_plugin_loop as _;
 
 /// 没有业务行、只把系统环挂进来的根：用来把驱动走到「无债」。
 struct EmptyRoot;
@@ -134,12 +134,21 @@ impl DebtSource for SmokeDebts {
             payload.clone(),
         )
         .when(EVENT_USER_MESSAGE)
-        .unless_id(EVENT_CHAT_ASSISTANT_FINAL, format!("chat.assistant.final:{user_id}"))];
-        if let Some(tool_id) = facts.latest_fact_id(symbio_plugin_api::events::EVENT_ARTIFACT_ADDED) {
+        .unless_id(
+            EVENT_CHAT_ASSISTANT_FINAL,
+            format!("chat.assistant.final:{user_id}"),
+        )];
+        if let Some(tool_id) = facts.latest_fact_id(symbio_plugin_api::events::EVENT_ARTIFACT_ADDED)
+        {
             rows.push(
-                DebtSpec::new("model-after-tools", "model", format!("model:after:{tool_id}"), payload)
-                    .when(symbio_plugin_api::events::EVENT_TOOL_REQUESTED)
-                    .when_no_open("tool"),
+                DebtSpec::new(
+                    "model-after-tools",
+                    "model",
+                    format!("model:after:{tool_id}"),
+                    payload,
+                )
+                .when(symbio_plugin_api::events::EVENT_TOOL_REQUESTED)
+                .when_no_open("tool"),
             );
         }
         rows
@@ -412,10 +421,13 @@ impl DebtSource for LoopToolDebts {
         let Some(request_id) = facts.latest_fact_id(EVENT_TOOL_REQUESTED) else {
             return Vec::new();
         };
-        vec![
-            DebtSpec::new("tool-calls", "tool", format!("tool:{request_id}"), serde_json::json!({}))
-                .when(EVENT_TOOL_REQUESTED),
-        ]
+        vec![DebtSpec::new(
+            "tool-calls",
+            "tool",
+            format!("tool:{request_id}"),
+            serde_json::json!({}),
+        )
+        .when(EVENT_TOOL_REQUESTED)]
     }
 }
 
@@ -515,14 +527,21 @@ async fn the_tool_round_is_dispatched_and_fed_back_into_the_model() {
         2,
         "工具轮之后又来一笔模型债（续接那轮）"
     );
-    assert_eq!(counters.tool.load(Ordering::SeqCst), 1, "工具债派且只派一次");
+    assert_eq!(
+        counters.tool.load(Ordering::SeqCst),
+        1,
+        "工具债派且只派一次"
+    );
 
     let facts = host.world_facts(scope);
     let kinds: Vec<&str> = facts.iter().map(|fact| fact.kind.as_str()).collect();
     assert!(kinds.contains(&EVENT_TOOL_REQUESTED), "kinds={kinds:?}");
     assert!(kinds.contains(&EVENT_ARTIFACT_ADDED), "kinds={kinds:?}");
     assert!(kinds.contains(&"tool.calls.done"), "kinds={kinds:?}");
-    assert!(kinds.contains(&EVENT_CHAT_ASSISTANT_FINAL), "kinds={kinds:?}");
+    assert!(
+        kinds.contains(&EVENT_CHAT_ASSISTANT_FINAL),
+        "kinds={kinds:?}"
+    );
 
     let artifact = facts
         .iter()

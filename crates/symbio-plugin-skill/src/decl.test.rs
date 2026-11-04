@@ -24,8 +24,10 @@ use symbio_plugin_api::{
 };
 
 /// loop 拥有的事实格（本二进制不链接它 ⇒ 夹具补格位与载荷字段）。
-const HARNESS_EVENTS: &[EventDecl] =
-    &[EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened))];
+const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
+    EVENT_MEMORY_ENCODED,
+    (Entity::Memory, Verb::Opened),
+)];
 
 const HARNESS_FACTS: &[FactDecl] = &[
     // `memory.encoded` 的**形状**夹具：完整进程由情景记忆能力包申报（D-263），本

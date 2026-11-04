@@ -219,10 +219,7 @@ async fn a_final_answer_without_measured_usage_omits_the_watermark() {
 
     assert!(outcome.success());
     let fact = &outcome.facts[0];
-    assert!(
-        fact.get("context").is_none(),
-        "没测到输入用量 ≠ 用量 0"
-    );
+    assert!(fact.get("context").is_none(), "没测到输入用量 ≠ 用量 0");
 }
 
 #[tokio::test]
@@ -269,7 +266,10 @@ impl symbio_plugin_api::port::PortFactWriter for RecordingWriter {
     }
 }
 
-fn recording_context() -> (symbio_plugin_api::port::PortExecContext, Arc<RecordingWriter>) {
+fn recording_context() -> (
+    symbio_plugin_api::port::PortExecContext,
+    Arc<RecordingWriter>,
+) {
     let recorder = Arc::new(RecordingWriter::default());
     let mut ctx = exec_context();
     ctx.emit = symbio_plugin_api::port::PortFactEmit::new(recorder.clone());
@@ -298,7 +298,10 @@ async fn a_tool_round_writes_one_tool_requested_for_the_whole_turn() {
         1,
         "一次一轮一条，不是一次调用一条（实际草稿: {drafts:?}）"
     );
-    assert_eq!(requested[0].key, "tool.requested:model-1-1", "键随本轮派发唯一");
+    assert_eq!(
+        requested[0].key, "tool.requested:model-1-1",
+        "键随本轮派发唯一"
+    );
     assert_eq!(requested[0].payload["turn_id"], "u-1");
     let calls = requested[0].payload["calls"]
         .as_array()

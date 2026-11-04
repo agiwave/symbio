@@ -42,8 +42,8 @@ fn spec_builder_carries_identity_as_data() {
 
 #[test]
 fn identity_level_unless_names_both_the_kind_and_the_id() {
-    let spec = DebtSpec::new("row", "demo", "demo:1", json!({}))
-        .unless_id("turn.done", "turn.done:u-1");
+    let spec =
+        DebtSpec::new("row", "demo", "demo:1", json!({})).unless_id("turn.done", "turn.done:u-1");
     assert_eq!(
         spec.unless,
         Some(Unless::Id {

@@ -63,7 +63,8 @@ impl SessionPlugin {
         // 写方是本插件（会话编排权归 session）：模型端口只读「最近一条 session.config」，
         // 读不到就退化为空提示词。提示词里的 VDFS 地址由收集期的 `descend_addr` 归一
         // （根地址 `.vdfsv2` + 挂载名），**不是**在这里把绝对路径再相对化。
-        let manager = crate::capabilities::collect_capabilities(self.get_parent().as_ref(), ctx).await;
+        let manager =
+            crate::capabilities::collect_capabilities(self.get_parent().as_ref(), ctx).await;
         let system_prompt = symbio_sdk::capability::capability_prompts(&*manager)
             .await
             .into_iter()

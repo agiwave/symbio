@@ -246,9 +246,7 @@ impl SessionPlugin {
             .await?
             .fact_source(session_id)
             .map_err(PluginError::InternalError)?
-            .ok_or_else(|| {
-                PluginError::NotFound(format!("会话 {session_id} 没有事实源"))
-            })
+            .ok_or_else(|| PluginError::NotFound(format!("会话 {session_id} 没有事实源")))
     }
 
     pub(crate) async fn get_or_create_session(
@@ -712,8 +710,8 @@ fn unbounded_number(key: &str, label: &str, description: &str, default: Value) -
 // 读写删都转发既有会话能力（SessionStore + 会话 metadata 合并），不新造协议。
 
 mod nodes;
-mod vdfs_catalog;
 mod turn;
+mod vdfs_catalog;
 mod vdfs_inbox;
 mod vdfs_messages;
 mod vdfs_provider;

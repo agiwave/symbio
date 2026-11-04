@@ -10,19 +10,18 @@ use std::sync::{Arc, Mutex};
 use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
 };
+use symbio_plugin_api::events::{
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED,
+    EVENT_USER_MESSAGE,
+};
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortFactEmit, PortInput, PortOutcome,
     PortProvider, PortReply,
 };
-use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG,
-    EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
-};
 use symbio_plugin_api::{
     llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecEnv, ExecEventSink,
-    ExecTranscriptWriter, FactDraft, ModelFinishReason, ModelProvider, PluginError,
-    PromptMessage, TurnOutput, TurnToolCallInfo, Verb,
-    EVENT_FAILED, EVENT_RESPONSE,
+    ExecTranscriptWriter, FactDraft, ModelFinishReason, ModelProvider, PluginError, PromptMessage,
+    TurnOutput, TurnToolCallInfo, Verb, EVENT_FAILED, EVENT_RESPONSE,
 };
 
 /// 本插件服务的端口名（提供者自己定义；契约层不认识它）。
@@ -133,13 +132,9 @@ fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMes
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or_default()
                     .to_string();
-                let tool_calls = fact
-                    .payload
-                    .get("tool_calls")
-                    .cloned()
-                    .and_then(|value| {
-                        serde_json::from_value::<Vec<symbio_plugin_api::PromptToolCall>>(value).ok()
-                    });
+                let tool_calls = fact.payload.get("tool_calls").cloned().and_then(|value| {
+                    serde_json::from_value::<Vec<symbio_plugin_api::PromptToolCall>>(value).ok()
+                });
                 if !text.trim().is_empty() || tool_calls.as_ref().is_some_and(|c| !c.is_empty()) {
                     messages.push(PromptMessage {
                         role: "assistant".into(),
@@ -229,13 +224,7 @@ impl PortExecutor for ModelExecutor {
         let mut requested: Option<serde_json::Value> = None;
         let outcome = match provider
             // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
-            .round_trip(
-                &system_prompt,
-                &wire,
-                &tools,
-                &request.root_id,
-                &env,
-            )
+            .round_trip(&system_prompt, &wire, &tools, &request.root_id, &env)
             .await
         {
             Ok(output) => {
@@ -297,13 +286,8 @@ impl PortExecutor for ModelExecutor {
                 }
                 // 一次往返的终稿 → `response` 载荷：正文 / 思考、节点身份、终答折叠、
                 // 用量与工具调用集合展开都由执行体装配（`D-314`）。
-                let mut payload = outcome_payload(
-                    &request,
-                    Some(&output),
-                    &rows.snapshot(),
-                    started,
-                    None,
-                );
+                let mut payload =
+                    outcome_payload(&request, Some(&output), &rows.snapshot(), started, None);
                 // 上下文水位：收束轮才写（中途工具轮的请求体积不代表最终水位）。
                 // 实测输入用量缺席 ⇒ 整格不写——「没测到」不是「用量 0」。
                 if is_final {
@@ -366,10 +350,7 @@ impl PortExecutor for ModelExecutor {
                 EVENT_FAILED
             };
             let (key, verb) = if kind == EVENT_CHAT_ASSISTANT_FINAL {
-                (
-                    format!("{kind}:{}", request.root_id),
-                    Verb::Closed,
-                )
+                (format!("{kind}:{}", request.root_id), Verb::Closed)
             } else {
                 (format!("{kind}-outcome"), Verb::Asserted)
             };

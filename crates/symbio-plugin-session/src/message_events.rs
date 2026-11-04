@@ -80,9 +80,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::declarations::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::store::{AppendError, Store};
-use crate::declarations::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
 use symbio_plugin_api::events::EVENT_MESSAGE_ADDED;
 use symbio_sdk::chat::chat_node::ChatNode;
 

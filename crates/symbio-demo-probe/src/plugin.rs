@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::{
     port_rows, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH,
 };
-use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 
 use crate::port::{DemoPort, DEMO_PORT};
 
@@ -74,7 +74,9 @@ impl Plugin for DemoPlugin {
             for row in port_rows(&provider) {
                 visitor.put(row).await;
             }
-            visitor.put(debt_row("demo-debts", Arc::new(DemoDebts))).await;
+            visitor
+                .put(debt_row("demo-debts", Arc::new(DemoDebts)))
+                .await;
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

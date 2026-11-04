@@ -1056,8 +1056,8 @@ async fn switch_branch(
 /// `turn.branch_selected`（而不是 `message.removed`），进模型的那一份换成另一支。
 #[tokio::test]
 async fn switch_branch_changes_the_reading_not_the_facts() {
-    use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
     use crate::declarations::EVENT_MESSAGE_REMOVED;
+    use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
     use symbio_sdk::projection::branch::branch_selected;
     let (_dir, p) = fixture();
     let id = unique_id("branch-switch");
