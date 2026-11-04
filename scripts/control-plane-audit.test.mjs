@@ -15,6 +15,7 @@
  * | `CP-006` | 循环体改一个字节（基线未跟）；控制面多一份文件（基线未跟）；基线整个缺失；<br>声明第三个端口（裁决闭集只有两个）；闭集那一节读不出 |
  * | `CP-007` | 规范里多出第七条 `TC-n`；`## 判据` 表点名一个不存在的脚本 |
  * | `CP-008` | `seal` 改成借用式；`seal` 之后多一个公开方法；`impl Frozen` 长出 `&mut self` 方法 |
+ * | `CP-009` | 除 `ring.rs` 外另起一段 `loop` 调 `drive_frame`（台账未登记）；同样的循环体登记进 known-red ⇒ 仍 exit 1 |
  *
  * 另有两条**不该红**的用例（防止判据被注释措辞骗到）：
  *   - 注释里写 `loop {` / `ring::owed(` / `"close"` ⇒ 仍绿（判据读剥注释后的代码）；
@@ -411,7 +412,7 @@ function cleanTree() {
 test('干净夹具：八条判据全绿，读数是「循环体 1 个」', () => {
   const r = audit(cleanTree())
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  for (const code of ['CP-001', 'CP-002', 'CP-003', 'CP-004', 'CP-005', 'CP-006', 'CP-007', 'CP-008']) {
+  for (const code of ['CP-001', 'CP-002', 'CP-003', 'CP-004', 'CP-005', 'CP-006', 'CP-007', 'CP-008', 'CP-009']) {
     assert.match(r.stdout, new RegExp(`✓ ${code}`), r.stdout)
   }
   assert.match(r.stdout, /循环体 1 个/)
@@ -440,6 +441,51 @@ test('CP-001：另一份文件多一处 loop_rows::next( ⇒ 红', () => {
   const files = cleanTree()
   files[SETTLE] += '\npub fn shadow_advance(facts: &Facts) {\n    let _ = loop_rows::next(facts, 0, 0);\n}\n'
   assertRed(audit(files), 'CP-001')
+})
+
+// ───────────────────────────── CP-009 ─────────────────────────────
+
+test('CP-009：除 ring.rs 外另起一段推进循环 ⇒ 红（CP-001 看不见）', () => {
+  const files = cleanTree()
+  files['crates/symbio-plugin-loop/src/entry.rs'] =
+    'pub fn drive_entry() {\n    loop {\n        crate::ring::drive_frame();\n    }\n}\n'
+  files['scripts/known-red.json'] = JSON.stringify({ entries: [], exemptions: [] })
+  const r = audit(files)
+  assertRed(r, 'CP-009')
+  assert.match(r.stdout, /\[未登记\]/, r.stdout)
+})
+
+test('CP-009：循环体里没有推进调用 ⇒ 仍绿（不判「有没有循环」）', () => {
+  const files = cleanTree()
+  files['crates/symbio-plugin-loop/src/entry.rs'] =
+    'pub fn collect(items: &[u8]) -> u8 {\n    let mut n = 0;\n    for item in items {\n        n += *item;\n    }\n    n\n}\n'
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /✓ CP-009/)
+})
+
+test('CP-009：登记进 known-red ⇒ 仍然 exit 1（known-red 不是豁免）', () => {
+  const files = cleanTree()
+  const entry = 'crates/symbio-plugin-loop/src/entry.rs'
+  files[entry] = 'pub fn drive_entry() {\n    loop {\n        crate::ring::drive_frame();\n    }\n}\n'
+  files['scripts/known-red.json'] = JSON.stringify({
+    entries: [
+      {
+        code: 'CP-009',
+        file: entry,
+        kind: 'advance-loop',
+        token: 'drive_frame',
+        count: 1,
+        problem: '第二推进循环',
+        knife: '刀 U2：随 run_loop 删除',
+        clearWhen: 'entry.rs 的循环退出',
+      },
+    ],
+    exemptions: [],
+  })
+  const r = audit(files)
+  assertRed(r, 'CP-009')
+  assert.match(r.stdout, /\[known-red\]/, r.stdout)
 })
 
 // ───────────────────────────── CP-002 ─────────────────────────────

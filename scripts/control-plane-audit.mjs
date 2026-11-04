@@ -13,7 +13,7 @@
  * 在派发器外直问一次求解器、给某个执行体的动作多塞一份 `&mut`、在动作里就地落
  * 收束格。它们每一件都只多几十行，而判据面各自看不见——这正是 `TC-n` 要判的东西。
  *
- * ## 八条判据码（每条都指得到规范的一句）
+ * ## 九条判据码（每条都指得到规范的一句）
  *
  * | 码 | 规范 | 判什么 |
  * |---|---|---|
@@ -23,8 +23,9 @@
  * | `CP-004` | `TC-2` 机制层无域名 | 行名 / 执行体名 / 端口名 / 事件名不进 kernel 与 core |
  * | `CP-005` | `TC-4` 事实面唯一写方 | 收束格（final / fallback）各只有一个构造点 |
  * | `CP-006` | `TC-5` 横向扩展零改机制 | 机制面（驱动循环 / 选债 / 在途判据）字节冻结，控制面文件数只许降，端口不越出裁决的闭集 |
- * | `CP-007` | `TC-6` 判据集闭集 | 六条不变量与八条码一一对上；判据数不随能力数增长 |
+ * | `CP-007` | `TC-6` 判据集闭集 | 六条不变量与九条码一一对上；判据数不随能力数增长 |
  * | `CP-008` | `TC-3` 声明面封闭 | `seal` 是按值消费的唯一出口；冻结后没有可变方法 |
+ * | `CP-009` | `TC-1a` 循环体唯一（另一半） | 除 `ring.rs` 外，生产文件里不得有**包含** `drive_frame` / `loop_rows::next` 调用的 loop / while / for |
  *
  * ## 口径（四条，都影响判定，别凭直觉）
  *
@@ -76,8 +77,8 @@
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns CP 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结与端口闭集 / 判据集闭集 / 声明面封闭）
-// @codes CP-001 CP-002 CP-003 CP-004 CP-005 CP-006 CP-007 CP-008
+// @ns CP 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结与端口闭集 / 判据集闭集 / 声明面封闭 / 第二推进循环）
+// @codes CP-001 CP-002 CP-003 CP-004 CP-005 CP-006 CP-007 CP-008 CP-009
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -86,6 +87,7 @@ import { fileURLToPath } from 'node:url'
 import { red, green, dim, yellow } from './color.mjs'
 import { blankComments, blankTestModules, matchBrace, skipString } from './rust-scan.mjs'
 import { stringLiteralsOf } from './gate.d/_shared.mjs'
+import { loadKnownRed, reconcile, KNOWN_RED_REL } from './known-red.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -123,7 +125,7 @@ const BASELINE_REL = 'scripts/baselines/control-plane.json'
  */
 const TERMINAL_CRITERIA = 6
 
-const CODES = ['CP-001', 'CP-002', 'CP-003', 'CP-004', 'CP-005', 'CP-006', 'CP-007', 'CP-008']
+const CODES = ['CP-001', 'CP-002', 'CP-003', 'CP-004', 'CP-005', 'CP-006', 'CP-007', 'CP-008', 'CP-009']
 
 let errors = 0
 const hits = new Map()
@@ -964,12 +966,12 @@ for (const rel of loopProdFiles) {
 // ───────────────── CP-007：判据集闭集（TC-6） ─────────────────
 
 /**
- * 六条不变量 ↔ 八条码。**这张表是判据集本身**：新增一条码必须挂到某条 `TC-n` 下，
+ * 六条不变量 ↔ 九条码。**这张表是判据集本身**：新增一条码必须挂到某条 `TC-n` 下，
  * 而 `TC-n` 的条数被 `TERMINAL_CRITERIA` 钉住（§3 的「六条」）。于是「为某个新能力
  * 单独加一条专用判据」在这里表现为一次显式的表改动 + 一次条数改动，不是顺手。
  */
 const TC_MAP = {
-  'TC-1': ['CP-001', 'CP-002', 'CP-003'],
+  'TC-1': ['CP-001', 'CP-002', 'CP-003', 'CP-009'],
   'TC-2': ['CP-004'],
   'TC-3': ['CP-008'],
   'TC-4': ['CP-005'],
@@ -1091,6 +1093,64 @@ if (declCode === null) {
   }
 }
 
+// ───────────────── CP-009：第二推进循环（TC-1a 的另一半） ─────────────────
+//
+// `CP-001` 只认 `ring.rs` 里的那个循环体（它是「唯一」的正例），因此**看不见**
+// 「在别处另起一段推进」——`D-320` 之后 `entry.rs` 里的 `loop { ring::drive_frame(..) }`
+// 就是这种形态：环自己的循环还在，幕的推进却由第二层循环驱动。CP-009 判「除 ring.rs
+// 外，生产代码里不允许出现**包含**推进调用的 loop / while / for」。
+//
+// 判据面是「循环体里有没有推进调用」，不是「有没有循环」：普通的 `for` 遍历不在射程内。
+// 允许清单只有一处（`DRIVE_REL`），不维护第二张名单——那会变成第二个 owner。
+const ADVANCE_CALL = /drive_frame\s*\(|loop_rows::next\s*\(/
+const LOOP_HEAD = /\bloop\s*\{|\bwhile\b[^{;]*\{|\bfor\b[^{;]*\bin\b[^{;]*\{/g
+const advanceFindings = new Map()
+const advanceSites = []
+for (const rel of allCratesProd()) {
+  const code = prodCodeOf(rel)
+  if (code === null) continue
+  for (const m of code.matchAll(LOOP_HEAD)) {
+    const open = code.indexOf('{', m.index)
+    const end = matchBrace(code, open)
+    if (end < 0) continue
+    const call = code.slice(open, end).match(ADVANCE_CALL)
+    if (!call) continue
+    if (rel === DRIVE_REL) continue
+    const token = call[0].replace(/\s*\($/, '')
+    const line = code.slice(0, m.index).split('\n').length
+    advanceSites.push({ rel, line, token })
+    const key = `${rel}|advance-loop|${token}`
+    const cur = advanceFindings.get(key) ?? { file: rel, kind: 'advance-loop', token, count: 0, lines: [] }
+    cur.count++
+    if (cur.lines.length < 8) cur.lines.push(line)
+    advanceFindings.set(key, cur)
+  }
+}
+
+if (advanceSites.length === 0) {
+  console.log(dim('  CP-009 ✓ 除 ring.rs 外没有第二推进循环'))
+} else {
+  const loaded = loadKnownRed(ROOT)
+  if (!loaded) {
+    report('CP-009', KNOWN_RED_REL, 'known-red 台账读不出 —— 第二推进循环的红无法登记')
+  } else {
+    const rec = reconcile({ code: 'CP-009', findings: advanceFindings, loaded, root: ROOT })
+    for (const f of rec.known) {
+      report(
+        'CP-009',
+        f.file,
+        `[known-red] 第 ${f.lines.join(', ')} 行的循环体调 ${f.token} —— 刀：${f.entry.knife}；` +
+          `清除条件：${f.entry.clearWhen}`,
+      )
+    }
+    for (const f of rec.unregistered) {
+      report('CP-009', f.file, `[${f.reason}] 第 ${f.lines.join(', ')} 行的循环体调 ${f.token}`)
+    }
+    for (const f of rec.stale) report('CP-009', f.file, `[${f.reason}] ${f.kind} "${f.token}"`)
+    for (const f of rec.malformed) report('CP-009', f.file, `[台账形状] ${f.reason}`)
+  }
+}
+
 // ───────────────────────────── 读数与汇总 ─────────────────────────────
 
 if (errors === 0) {
@@ -1122,6 +1182,7 @@ if (errors === 0) {
     'CP-006': '横向扩展零改机制（TC-5）',
     'CP-007': '判据集闭集（TC-6）',
     'CP-008': '声明面封闭（TC-3）',
+    'CP-009': '第二推进循环（TC-1a 的另一半）',
   }
   for (const [code, name] of Object.entries(names)) {
     const n = hits.get(code) ?? 0
