@@ -1,15 +1,15 @@
 //! 世界事实的词汇持有（**临时**）。
 //!
-//! 旧引擎删除后，这些对话 / 记忆 / 承诺 / 授权 / 工件 / 控制面事实暂时没有写方插件；
+//! 旧引擎删除后，这些对话 / 记忆 / 承诺 / 授权 / 控制面事实暂时没有写方插件；
 //! 名字与格位先由本插件继续登记，避免共享词汇表断裂。它们**不是环的机制**：
 //! 环不读、不写、不按它们选债。
 //!
 //! 所有权按接入顺序逐条移交：会话簿记接管 `chat.*` / `user.message` / `turn.branch` /
-//! `session.config`，工具接管 `authz.*` / `task.controlled`，记忆接管 `memory.*`，
-//! 代理接管 `commitment.*`，VDFS 接管 `artifact.added`。
+//! `session.config`，工具接管 `authz.*` / `task.controlled` 与产物格 `artifact.added`，
+//! 记忆接管 `memory.*`，代理接管 `commitment.*`。
 //! 移交完成后删除本模块与 `PLUGIN.yml` 的 `shared_events`。
 
-use symbio_kernel::decl::{ActorDecl, FactDecl, PluginDeclarations};
+use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
 
 use symbio_plugin_api::rows::{declared_writes, PLUGIN_ROW, PORT_ACTOR};
@@ -20,9 +20,6 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-loop";
 /// 旧引擎留下的世界词汇。**不参与选债 / 派发 / 配对**。
 #[rustfmt::skip]
 pub(crate) const EVENTS: &[EventDecl] = &[
-    // 产物格由工具执行体的 `emit` 交草稿、宿主写口落行（执行体不写世界格），
-    // 与 `tool.calls.done` 同一条口径 ⇒ 宿主写口标记。
-    EventDecl::host("artifact.added", (Entity::Artifact, Verb::Asserted)),
     EventDecl::with_roles("authz.denied", (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]),
     EventDecl::new("authz.granted", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("chat.assistant.fallback", (Entity::Scope, Verb::Closed)),
@@ -50,29 +47,6 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         &[FactRole::DeclaresBudget],
     ),
 ];
-
-/// 与 [`EVENTS`] 同批移交的事实形状。
-///
-/// `artifact.added` 是工具执行体落的世界事实：`notes.index` 按 `tool` / `success` /
-/// `tool_call_id` 读它，没有形状声明就无法校验这些字段（`UnknownSource`）。
-/// 形状只登记**确定会写的字段**；`annotations` 一类富化字段随工具声明走，不在此列。
-pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
-    name: "artifact.added",
-    port: None,
-    key: &["tool_call_id"],
-    expand: &[],
-    fields: &[
-        "tool",
-        "text",
-        "tool_call_id",
-        "args",
-        "success",
-        "needs_user_action",
-        "prompt",
-        "failure_kind",
-        "turn_id",
-    ],
-}];
 
 /// 两个**宿主通用执行体**的声明（D-296 / D-303）。
 ///
@@ -109,7 +83,7 @@ symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: EVENTS,
-        facts: FACTS,
+        facts: &[],
         views: &[],
         ports: &[],
         actors: actors(),

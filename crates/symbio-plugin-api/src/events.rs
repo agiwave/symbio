@@ -26,7 +26,7 @@ use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
 
 // ============ artifact ============
 
-/// artifact.added — owner `symbio-plugin-loop`，格位 `(Artifact, Asserted)`
+/// artifact.added — owner `symbio-plugin-tool`，格位 `(Artifact, Asserted)`
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
 // ============ authz ============
@@ -136,7 +136,7 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 /// 只投影名字 + 格位会让那两条判据静默失效（闸门不报错，只是不再拦）。
 #[rustfmt::skip]
 pub const SHARED_EVENTS: &[EventDecl] = &[
-    EventDecl::host(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← loop
+    EventDecl::host(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← tool
     EventDecl::with_roles(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]), // authz.denied ← loop
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)), // authz.granted ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Scope, Verb::Closed)), // chat.assistant.fallback ← loop

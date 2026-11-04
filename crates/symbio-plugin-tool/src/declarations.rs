@@ -6,19 +6,46 @@
 use symbio_plugin_api::ring::{Decl, Lit, Pattern, PortDecl};
 use symbio_plugin_api::rows::PORT_ACTOR;
 use symbio_plugin_api::{
-    Entity, EventDecl, LatencyTier, PluginDeclarations, Verb, EVENT_FAILED, EVENT_REQUEST,
-    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+    Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, EVENT_FAILED,
+    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 
 use super::port::TOOL;
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-tool";
 
-/// 本插件写的**单消费方**世界事实（不进共享表：单消费方的名字随 owner 走）。
-pub(crate) const EVENTS: &[EventDecl] = &[EventDecl::host(
-    "tool.calls.done",
-    (Entity::Scope, Verb::Asserted),
-)];
+/// 本插件写的世界事实。
+///
+/// `tool.calls.done` 是**单消费方**的事实（不进共享表：名字随 owner 走）；
+/// `artifact.added` 是本次调用的产物格，被 notes / model / 转写投影多处按名字读，
+/// 因此同时登记在本插件 `PLUGIN.yml` 的 `shared_events` 里。
+pub(crate) const EVENTS: &[EventDecl] = &[
+    EventDecl::host("tool.calls.done", (Entity::Scope, Verb::Asserted)),
+    // 产物格：载荷来自执行体交出的草稿，落行仍走宿主写口 ⇒ 与 `tool.calls.done` 同一口径。
+    EventDecl::host("artifact.added", (Entity::Artifact, Verb::Asserted)),
+];
+
+/// 与 [`EVENTS`] 同源的事实形状：`notes.index` 按 `tool` / `success` / `tool_call_id`
+/// 读产物格，没有形状声明就无法校验这些字段（`UnknownSource`）。
+///
+/// 形状只登记**确定会写**的字段；`annotations` 一类富化字段随工具声明走，不在此列。
+pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
+    name: "artifact.added",
+    port: None,
+    key: &["tool_call_id"],
+    expand: &[],
+    fields: &[
+        "tool",
+        "text",
+        "tool_call_id",
+        "args",
+        "success",
+        "needs_user_action",
+        "prompt",
+        "failure_kind",
+        "turn_id",
+    ],
+}];
 
 /// 本插件服务的端口：**一次工具调用**。
 ///
@@ -78,7 +105,7 @@ symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: EVENTS,
-        facts: &[],
+        facts: FACTS,
         views: &[],
         ports: PORTS,
         actors: Vec::new(),

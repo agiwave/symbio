@@ -126,7 +126,7 @@ pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
     };
 
 /// 消息变更面（5 条）：本插件是这五条里四条的 owner（`message.*` 与
-/// `session.consolidated`），`artifact.added` 的 owner 是 `crates/symbio-plugin-loop`。
+/// `session.consolidated`），`artifact.added` 的 owner 是 `crates/symbio-plugin-tool`。
 pub(crate) const MESSAGE_VOCAB: symbio_sdk::projection::vocab::MessageVocab =
     symbio_sdk::projection::vocab::MessageVocab {
         artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,

@@ -3,9 +3,9 @@
 //! ## 为什么本文件还要交一份「协议行」夹具
 //!
 //! 插件自己的测试二进制只链接本 crate：协议事实的归宿行住在 `crates/symbio-plugin-loop`，
-//! `artifact.added` 的格位与事实声明也在那里。不在这里 ⇒ `seal` 报 `OrphanFact` /
-//! `UnknownSource`，整张表失败（DE-015 §3.4）。夹具补的正是完整进程里由 loop 提供的
-//! 那一半——五条协议自读行 + 一条产物自读行。它与
+//! `artifact.added` 的格位与事实声明住在 `crates/symbio-plugin-tool`。不在这里 ⇒ `seal`
+//! 报 `OrphanFact` / `UnknownSource`，整张表失败（DE-015 §3.4）。夹具补的正是完整进程里
+//! 由 loop / tool 提供的那一半——五条协议自读行 + 一条产物自读行。它与
 //! `symbio-plugin-session/src/declarations.test.rs` 的同名夹具同形，只在 `cfg(test)` 生效。
 
 use super::{NOTES_CREATED, NOTES_INDEXED, NOTES_INSIGHT, NOTES_SUMMARY, OWNER};
@@ -14,7 +14,7 @@ use symbio_plugin_api::{
     ActorDecl, Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb,
 };
 
-/// loop 拥有的产物格：`notes.index` 的 `owes.source`。完整进程里由 loop 交表，
+/// tool 插件拥有的产物格：`notes.index` 的 `owes.source`。完整进程里由 tool 交表，
 /// 本二进制不链接它 ⇒ 夹具补上格位与载荷字段。
 const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
     symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
