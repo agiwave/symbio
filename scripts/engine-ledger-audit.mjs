@@ -21,8 +21,8 @@
  * | `EL-002` | 分发方的出参通道数 | `SessionDispatchPort` 结构体里 `Mutex<` 字段数 |
  * | `EL-003` | 工具路径的全量读点数 | `tool_dispatch` / `gates` / `port` 三处的 `range(…Seq::new(0))` |
  *
- * **第四格（`TurnState` 的字段数）不在这里**：它已有执行方 `arch-shape-audit` 的
- * `CS-010`，再数一遍就是两个基线会各漂各的。
+ * **账本只有这三格**：`TurnState` 那一格随对象下线一并消失，不再有第四个读数
+ * （`CS-010` 同时退役，见 `GATE_CODES.md` 的退役列）。
  *
  * ## 为什么是「只许降」而不是「等于」
  *
