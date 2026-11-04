@@ -186,7 +186,11 @@ impl SessionPlugin {
     /// 决定「缓存优先、无缓存读投影」（见 `ActiveSessionManager::runtime_of`）。
     pub(super) async fn runtime_of(&self, id: &str) -> SessionRuntime {
         let facts = match self.get_store().await {
-            Ok(store) => store.runtime_facts(id),
+            Ok(store) => store
+                .fact_source(id)
+                .ok()
+                .flatten()
+                .map(|source| crate::runtime::project(&source.range(0))),
             Err(_) => None,
         };
         self.active_mgr.runtime_of(id, facts.as_ref()).await

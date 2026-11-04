@@ -62,9 +62,12 @@ use symbio_kernel::store::Store;
 use symbio_sdk::turn::facts::FleetSnapshot;
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
+mod fact_source;
 mod facts;
 mod layout;
 mod wal;
+
+pub(crate) use fact_source::remember_storage_dir;
 
 /// 持久化事实源（`Store` 端口的一种实现）。**可见性只到会话插件**：WAL 的布局 /
 /// 锁文件 / 归档段都是「会话怎么落事实」的私有细节，别的插件要拿事实走 core 的

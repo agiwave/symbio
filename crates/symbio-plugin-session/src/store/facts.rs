@@ -73,6 +73,16 @@ impl SessionStore {
         Ok(Some(store))
     }
 
+    /// 该会话的契约事实源（五个方法的中性面）；装配层与插件共用同一底层 `WalStore`。
+    pub(crate) fn fact_source(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
+        Ok(self
+            .facts(session_id)?
+            .map(super::fact_source::SessionFactSource::new))
+    }
+
     /// 该会话的**完整史快照**（含归档前缀）；没有事实源 ⇒ `None`。
     ///
     /// 这是读方的唯一形态：值是 `Vec<Event>`，不是路径、不是句柄。已有写句柄时

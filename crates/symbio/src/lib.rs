@@ -24,6 +24,7 @@ mod notify_port_acceptance;
 // 宿主与 CLI 从这里取契约；插件自身只依赖插件门面（E-009）。
 pub use symbio_deploy;
 pub use symbio_kernel;
+pub use symbio_plugin_api;
 pub use symbio_sdk;
 
 // 插件 crate 必须**被链接**，否则 `inventory` 里的工厂注册项会被链接器丢掉。

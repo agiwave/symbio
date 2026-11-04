@@ -13,9 +13,10 @@ use crate::chat_session::Carrier;
 use crate::convergence::SessionStateChange;
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use crate::transcript::publish::append_and_publish;
-use symbio_kernel::event::{Entity, Event, Seq, Verb};
-use symbio_kernel::store::Store;
+use symbio_kernel::event::{Entity, Verb};
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use symbio_plugin_api::fact_source::FactSource;
+use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use symbio_sdk::chat::chat_node as cm;
 
@@ -28,37 +29,31 @@ impl SessionPlugin {
     pub(crate) async fn consume_inbox_turn(
         &self,
         session_id: &str,
+        source: &dyn FactSource,
     ) -> Result<Option<u64>, PluginError> {
         let state = self.active_mgr.get_or_create(session_id).await;
         let Some(item) = self.take_inbox_front(&state).await else {
             return Ok(None);
         };
 
-        let store = self.get_store().await?;
-        let facts = store
-            .facts(session_id)
-            .map_err(PluginError::InternalError)?
-            .ok_or_else(|| PluginError::NotFound(format!("会话没有事实源: {session_id}")))?;
-
-        let scope = facts.head().value();
+        let scope = source.head();
         let text = item
             .message
             .content
             .as_ref()
             .map(|c| c.to_text())
             .unwrap_or_default();
-        let event = Event::pending(
-            item.id.clone(),
-            EVENT_USER_MESSAGE,
-            Entity::Scope,
-            Verb::Opened,
-            scope,
-            PRINCIPAL_USER,
-        )
-        .with_payload(json!({ "text": text, "id": item.id }));
-        facts
-            .append(event)
-            .map_err(|e| PluginError::InternalError(format!("user.message 落格失败: {e:?}")))?;
+        let draft = FactDraft {
+            key: item.id.clone(),
+            kind: EVENT_USER_MESSAGE.to_string(),
+            entity: Entity::Scope,
+            verb: Verb::Opened,
+            payload: json!({ "text": text, "id": item.id }),
+            produced_by: None,
+        };
+        source
+            .append(scope, PRINCIPAL_USER.to_string(), draft)
+            .map_err(|e| PluginError::InternalError(format!("user.message 落格失败: {e}")))?;
 
         let mut message = item.message;
         message.seq = None;
@@ -87,13 +82,9 @@ impl SessionPlugin {
         &self,
         session_id: &str,
         scope: u64,
+        source: &dyn FactSource,
     ) -> Result<bool, PluginError> {
-        let store = self.get_store().await?;
-        let facts = store
-            .facts(session_id)
-            .map_err(PluginError::InternalError)?
-            .ok_or_else(|| PluginError::NotFound(format!("会话没有事实源: {session_id}")))?;
-        let events = facts.range(Seq::new(0));
+        let events = source.range(0);
         let Some(final_event) = events
             .iter()
             .find(|e| e.scope == scope && e.kind == EVENT_CHAT_ASSISTANT_FINAL)
@@ -151,7 +142,8 @@ impl SessionPlugin {
                 "session/consume 需要 metadata.session_id".into(),
             ));
         }
-        let scope = self.consume_inbox_turn(&sid).await?;
+        let source = self.fact_source_for(&ctx, &sid).await?;
+        let scope = self.consume_inbox_turn(&sid, &*source).await?;
         Ok(PluginPayload::new(&json!({ "scope": scope })))
     }
 
@@ -171,7 +163,8 @@ impl SessionPlugin {
             .get("scope")
             .and_then(Value::as_u64)
             .ok_or_else(|| PluginError::ValidationError("session/project 需要 scope".into()))?;
-        let projected = self.project_final_turn(&sid, scope).await?;
+        let source = self.fact_source_for(&ctx, &sid).await?;
+        let projected = self.project_final_turn(&sid, scope, &*source).await?;
         Ok(PluginPayload::new(&json!({ "projected": projected })))
     }
 }

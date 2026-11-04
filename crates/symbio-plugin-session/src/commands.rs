@@ -420,8 +420,8 @@ impl SessionPlugin {
         to: &str,
         actor: &str,
     ) -> Result<(), PluginError> {
-        use symbio_kernel::event::{Entity, Event, Seq, Verb};
-        use symbio_kernel::store::{AppendError, Store as _};
+        use symbio_kernel::event::{Entity, Verb};
+        use symbio_plugin_api::FactDraft;
         use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
         use symbio_plugin_api::events::EVENT_TURN_BRANCH;
         use symbio_sdk::projection::branch::{branch_candidates, branch_selected};
@@ -453,10 +453,8 @@ impl SessionPlugin {
             return Ok(());
         }
 
-        let store = chat_session
-            .facts()?
-            .ok_or_else(|| PluginError::NotFound("会话没有事实源".to_string()))?;
-        let snapshot = store.range(Seq::new(0));
+        let source = self.fact_source(session_id).await?;
+        let snapshot = source.range(0);
         let carrier = snapshot.iter().find(|e| {
             e.kind == EVENT_TURN_BRANCH
                 && e.payload.get("into").and_then(Value::as_str) == Some(member.as_str())
@@ -479,22 +477,22 @@ impl SessionPlugin {
             .iter()
             .filter(|e| e.kind == EVENT_TURN_BRANCH || e.kind == EVENT_TURN_BRANCH_SELECTED)
             .count();
-        let event = Event::pending(
-            format!("branch-selected-{member}-{n}"),
-            EVENT_TURN_BRANCH_SELECTED,
-            Entity::Scope,
-            Verb::Asserted,
-            carrier.map(|e| e.scope).unwrap_or_default(),
-            actor,
-        )
-        .with_produced_by(anchor)
-        .with_ts(clock_now_ms())
-        .with_payload(json!({ "selected": member }));
-        match store.append(event) {
-            Ok(_) | Err(AppendError::Duplicate) => {}
+        let scope = carrier.map(|e| e.scope).unwrap_or_default();
+        let draft = FactDraft {
+            key: format!("branch-selected-{member}-{n}"),
+            kind: EVENT_TURN_BRANCH_SELECTED.to_string(),
+            entity: Entity::Scope,
+            verb: Verb::Asserted,
+            payload: json!({ "selected": member }),
+            produced_by: Some(anchor),
+        };
+        match source.append(scope, actor.to_string(), draft) {
+            Ok(_) => {}
+            // 事实源按幂等键吸收重复——「同一次选择的重复提交」不是失败。
+            Err(e) if e.contains("Duplicate") => {}
             Err(e) => {
                 return Err(PluginError::InternalError(format!(
-                    "分支选择未能入格，本次切换未生效：{e:?}"
+                    "分支选择未能入格，本次切换未生效：{e}"
                 )))
             }
         }

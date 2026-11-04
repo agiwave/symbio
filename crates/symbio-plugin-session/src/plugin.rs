@@ -41,6 +41,7 @@ use symbio_kernel::plugin::{
 use symbio_kernel::present::{DetailDefinition, DetailField, DetailOption, DetailSection};
 use symbio_kernel::vdfs::{VdfsAccess, VdfsChange};
 use symbio_kernel::vdfs::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
+use symbio_plugin_api::fact_source::{FactSource, FACT_SOURCE};
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_providers::MemoryFile;
 use symbio_sdk::chat::session_chat;
@@ -98,6 +99,8 @@ impl SessionPlugin {
         let config_file = PluginConfigFile::new(dir, "会话设置", config_definition());
         // 存储根 = 本插件目录（`storage_dir` 的唯一来源，见 [`Self::storage_dir`]）
         let store_dir = config_file.dir().dir().to_path_buf();
+        // 事实源开面按这个目录解析进程内唯一的 `SessionStore`（装配层 open 用）。
+        super::store::remember_storage_dir(&store_dir);
         let store: Arc<tokio::sync::OnceCell<Arc<SessionStore>>> = Arc::new(OnceCell::new());
         let active_mgr = Arc::new(super::active::ActiveSessionManager::new(
             change_subs.as_ref().clone(),
@@ -219,6 +222,33 @@ impl SessionPlugin {
     /// [`super::store::resolve_store`]）——插件这里只是门面，不是第二个初始化路径。
     pub(crate) async fn get_store(&self) -> Result<Arc<SessionStore>, PluginError> {
         self.convergence.get_store().await
+    }
+
+    /// 该会话的契约事实源：装配层下发 `FACT_SOURCE` 时**优先用同一句柄**，
+    /// 否则走同一个登记开面（不是第二个 store）。
+    pub(crate) async fn fact_source_for(
+        &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        session_id: &str,
+    ) -> Result<Arc<dyn FactSource>, PluginError> {
+        if let Some(source) = ctx.get(FACT_SOURCE) {
+            return Ok(source);
+        }
+        self.fact_source(session_id).await
+    }
+
+    /// 该会话的契约事实源：与装配层经开面打开的是同一底层 `WalStore`。
+    pub(crate) async fn fact_source(
+        &self,
+        session_id: &str,
+    ) -> Result<Arc<dyn FactSource>, PluginError> {
+        self.get_store()
+            .await?
+            .fact_source(session_id)
+            .map_err(PluginError::InternalError)?
+            .ok_or_else(|| {
+                PluginError::NotFound(format!("会话 {session_id} 没有事实源"))
+            })
     }
 
     pub(crate) async fn get_or_create_session(

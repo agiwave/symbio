@@ -242,7 +242,11 @@ impl Convergence {
         let node = match self.get_store().await {
             Ok(store) => match store.load_session_checked(&state.session_id).await {
                 Ok(Some(session)) => {
-                    let facts = store.runtime_facts(&state.session_id);
+                    let facts = store
+                        .fact_source(&state.session_id)
+                        .ok()
+                        .flatten()
+                        .map(|source| crate::runtime::project(&source.range(0)));
                     let rt = self
                         .active
                         .runtime_of(&state.session_id, facts.as_ref())

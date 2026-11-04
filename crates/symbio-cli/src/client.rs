@@ -290,6 +290,19 @@ impl SymbioClient {
         sid: Option<&str>,
         addr: Option<&str>,
     ) -> Result<Value, String> {
+        self.route_with_fact_source(path, payload, sid, addr, None)
+            .await
+    }
+
+    /// 同 [`Self::route`]，但把装配层打开的事实源随上下文下发（`FACT_SOURCE`）。
+    async fn route_with_fact_source<T: Clone + Send + Sync + 'static>(
+        &self,
+        path: &str,
+        payload: T,
+        sid: Option<&str>,
+        addr: Option<&str>,
+        source: Option<Arc<dyn symbio::symbio_plugin_api::fact_source::FactSource>>,
+    ) -> Result<Value, String> {
         if route_log_enabled() {
             match addr {
                 Some(a) => eprintln!("[route] {path} {a}"),
@@ -301,6 +314,12 @@ impl SymbioClient {
         ctx.set(WORKDIR, self.workdir.clone());
         if let Some(sid) = sid {
             ctx.set(SESSION_ID, sid.to_string());
+        }
+        if let Some(source) = source {
+            ctx.set(
+                symbio::symbio_plugin_api::fact_source::FACT_SOURCE,
+                source,
+            );
         }
         ctx.set_payload(payload)
             .map_err(|e| format!("构造 {path} 载荷失败: {e}"))?;
@@ -477,6 +496,41 @@ impl SymbioClient {
             if !err.is_empty() {
                 return Err(format!("消息入队未成功: {err}"));
             }
+        }
+
+        // ── 触发链三步（装配层只做装配，不写业务事实）──
+        // 1. session 把收件箱条目写成事实并返回本轮 scope；
+        // 2. 装配层用**同一事实源**单次 `drive`（见 symbio::drive）；
+        // 3. 终答事实已由环落地，session 自己投影转写（`session/project`）。
+        let source = symbio::drive::open_fact_source(&self.session_id)
+            .map_err(|e| format!("事实源打开失败: {e}"))?;
+        let consumed = self
+            .route_with_fact_source(
+                "session/consume",
+                json!({}),
+                Some(&self.session_id),
+                None,
+                Some(Arc::clone(&source)),
+            )
+            .await?;
+        if let Some(scope) = consumed.get("scope").and_then(Value::as_u64) {
+            let world = symbio::drive::FactWorld {
+                facts: Arc::clone(&source),
+                session_id: &self.session_id,
+                provider: self.provider.as_deref(),
+                workdir: &self.workdir,
+            };
+            symbio::drive::drive_on_new_fact(&self.root, &world)
+                .await
+                .map_err(|e| format!("驱动未完成: {e}"))?;
+            self.route_with_fact_source(
+                "session/project",
+                json!({ "scope": scope }),
+                Some(&self.session_id),
+                None,
+                Some(source),
+            )
+            .await?;
         }
 
         // 本轮的业务错误（失败结局的 `error`）。**不预置初值**：循环的每个出口都在

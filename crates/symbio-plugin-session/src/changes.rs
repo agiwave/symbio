@@ -149,8 +149,12 @@ impl SessionPlugin {
                     .principal
             }
         };
-        let store = self.get_store().await?;
-        let changes = read_changes(&sid, store.snapshot(&sid), viewer.as_deref());
+        let source = self
+            .get_store()
+            .await?
+            .fact_source(&sid)
+            .map_err(PluginError::InternalError)?;
+        let changes = read_changes(&sid, source.map(|s| s.range(0)), viewer.as_deref());
         Ok(PluginPayload::new(&changes))
     }
 }

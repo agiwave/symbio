@@ -15,6 +15,7 @@ use symbio_kernel::plugin::{
     PluginSimpleRequest,
 };
 use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::store::Store;
 
 /// 没有业务行、只把系统环挂进来的根：用来把驱动走到「无债」。
 struct EmptyRoot;
@@ -194,19 +195,19 @@ async fn user_message_becomes_a_model_debt_that_lands_its_response_in_the_store(
 
     // 世界事实由写方（会话侧扮演）落进事实源：宿主没有写口。
     let store = Arc::new(symbio_kernel::store::MemoryStore::<Event>::new());
-    store
-        .append(
-            Event::pending(
-                "u-1",
-                EVENT_USER_MESSAGE,
-                Entity::Scope,
-                Verb::Opened,
-                scope,
-                "user",
-            )
-            .with_payload(serde_json::json!({"text": "你好"})),
+    Store::append(
+        &*store,
+        Event::pending(
+            "u-1",
+            EVENT_USER_MESSAGE,
+            Entity::Scope,
+            Verb::Opened,
+            scope,
+            "user",
         )
-        .expect("用户消息落库");
+        .with_payload(serde_json::json!({"text": "你好"})),
+    )
+    .expect("用户消息落库");
     let host = Host::with_store(Arc::new(SmokeRoot), store);
 
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
@@ -480,19 +481,19 @@ async fn the_tool_round_is_dispatched_and_fed_back_into_the_model() {
     let scope = scope_of(session);
 
     let store = Arc::new(symbio_kernel::store::MemoryStore::<Event>::new());
-    store
-        .append(
-            Event::pending(
-                "u-1",
-                EVENT_USER_MESSAGE,
-                Entity::Scope,
-                Verb::Opened,
-                scope,
-                "user",
-            )
-            .with_payload(serde_json::json!({"text": "你好"})),
+    Store::append(
+        &*store,
+        Event::pending(
+            "u-1",
+            EVENT_USER_MESSAGE,
+            Entity::Scope,
+            Verb::Opened,
+            scope,
+            "user",
         )
-        .expect("用户消息落库");
+        .with_payload(serde_json::json!({"text": "你好"})),
+    )
+    .expect("用户消息落库");
 
     let counters = Arc::new(LoopCounters::default());
     let host = Host::with_store(

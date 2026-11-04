@@ -49,6 +49,7 @@ pub mod declarations;
 pub mod drive;
 pub mod effects;
 pub mod events;
+pub mod fact_source;
 pub mod hooks;
 pub mod port;
 pub mod retrieval;
@@ -71,6 +72,9 @@ pub use declarations::{
 pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,
+};
+pub use fact_source::{
+    declared_fact_source_opener, Fact, FactSource, FactSourceOpener, Principal, FACT_SOURCE,
 };
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
