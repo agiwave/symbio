@@ -87,6 +87,8 @@ pub struct DebtSpec {
     pub payload: Value,
     /// 前置债 id：它收束之前本行不可还（跨端口时只写 id，不写端口名）。
     pub after: Option<String>,
+    /// 触发条件：该**种类**的事实在本可见域存在才欠；宿主判定，契约不解释。
+    pub when: Option<String>,
     /// 排除条件：该 id 的事实已存在 ⇒ 本行不欠（与 `after` 同一种 id 引用）。
     pub unless: Option<String>,
     /// 单次派发租约（毫秒）。
@@ -104,6 +106,7 @@ impl DebtSpec {
             id: id.into(),
             payload,
             after: None,
+            when: None,
             unless: None,
             lease_ms: 60_000,
             max_attempts: 3,
@@ -113,6 +116,12 @@ impl DebtSpec {
     /// 声明前置债 id。
     pub fn after(mut self, id: impl Into<String>) -> Self {
         self.after = Some(id.into());
+        self
+    }
+
+    /// 声明触发条件：该种类的事实存在才欠（字符串由宿主判定）。
+    pub fn when(mut self, kind: impl Into<String>) -> Self {
+        self.when = Some(kind.into());
         self
     }
 

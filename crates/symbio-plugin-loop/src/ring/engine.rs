@@ -81,9 +81,10 @@ pub async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
     loop {
         let facts = ctx.facts();
         let view = FactView::new(&facts);
-        let rows = ctx.source().rows(&view, scope);
+        let source = ctx.source();
+        let rows = source.rows(&view, scope);
         let now_ms = ctx.now_ms();
-        let batch = plan(&view, &rows, scope, now_ms);
+        let batch = plan(&view, source, &rows, scope, now_ms);
 
         if !batch.dispatch.is_empty() {
             let cap = ctx.concurrency().max(1);
@@ -115,12 +116,25 @@ pub async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
 }
 
 /// 选这一圈的全部可还之债：可派发的进批，租约已过的排进过期，其余在飞收进等待。
-fn plan(view: &FactView<'_>, rows: &[DebtRow], scope: u64, now_ms: u64) -> Batch {
+fn plan(
+    view: &FactView<'_>,
+    source: &dyn DebtSource,
+    rows: &[DebtRow],
+    scope: u64,
+    now_ms: u64,
+) -> Batch {
     let mut batch = Batch::default();
     let mut seen = HashSet::new();
     for row in rows {
         if let Some(after) = &row.after {
             if view.closing(after).is_none() {
+                continue;
+            }
+        }
+        // 触发条件是**种类**的存在性：环只问宿主「这个可见域有没有这种事实」，
+        // 不解释它是什么（字符串透传，归属：选债）。
+        if let Some(when) = &row.when {
+            if !source.exists(when, scope) {
                 continue;
             }
         }

@@ -13,7 +13,7 @@ use symbio_plugin_api::port::{
 /// 测试宿主：事实在内存里，债表与执行体由测试给定。
 struct TestCtx {
     facts: Mutex<Vec<Fact>>,
-    rows: Table,
+    rows: Box<dyn DebtSource + Send + Sync>,
     executors: HashMap<&'static str, Arc<dyn PortExecutor>>,
     now: u64,
     outlet: PortFactEmit,
@@ -22,9 +22,13 @@ struct TestCtx {
 
 impl TestCtx {
     fn new(rows: Vec<DebtRow>) -> Self {
+        Self::with_source(Box::new(Table::new(rows)))
+    }
+
+    fn with_source(source: Box<dyn DebtSource + Send + Sync>) -> Self {
         Self {
             facts: Mutex::new(Vec::new()),
-            rows: Table::new(rows),
+            rows: source,
             executors: HashMap::new(),
             now: 0,
             outlet: PortFactEmit::silent(),
@@ -84,7 +88,7 @@ impl DriveCtx for TestCtx {
     }
 
     fn source(&self) -> &dyn DebtSource {
-        &self.rows
+        self.rows.as_ref()
     }
 
     fn executor(&self, port: &str) -> Option<Arc<dyn PortExecutor>> {
@@ -376,6 +380,45 @@ async fn unless_gate_skips_a_row_once_the_fact_exists() {
 
     assert_eq!(report.dispatched, 0);
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
+}
+
+#[tokio::test]
+async fn when_gate_asks_the_host_whether_the_kind_exists() {
+    /// 数据源把「存在的种类」当数据；`exists` 由宿主实现，环只问。
+    struct Gated {
+        rows: Vec<DebtRow>,
+        kinds: Vec<&'static str>,
+    }
+
+    impl DebtSource for Gated {
+        fn rows(&self, _facts: &FactView<'_>, _scope: u64) -> Vec<DebtRow> {
+            self.rows.clone()
+        }
+
+        fn exists(&self, kind: &str, scope: u64) -> bool {
+            scope == S && self.kinds.iter().any(|known| *known == kind)
+        }
+    }
+
+    let rows = vec![DebtRow::new("a", "p1", "a", json!({})).when("user.message")];
+    // 种类不存在 ⇒ 本行不欠。
+    let ctx = TestCtx::with_source(Box::new(Gated {
+        rows: rows.clone(),
+        kinds: vec![],
+    }))
+    .with_executor("p1", Arc::new(Stub::ok()));
+    let report = drive(&ctx, S).await;
+    assert_eq!(report.dispatched, 0);
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+
+    // 种类存在 ⇒ 本行可还。
+    let ctx = TestCtx::with_source(Box::new(Gated {
+        rows,
+        kinds: vec!["user.message"],
+    }))
+    .with_executor("p1", Arc::new(Stub::ok()));
+    let report = drive(&ctx, S).await;
+    assert_eq!(report.dispatched, 1);
 }
 
 #[tokio::test]

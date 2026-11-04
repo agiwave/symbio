@@ -16,6 +16,9 @@ pub struct DebtRow {
     pub payload: Value,
     /// 只有这笔先前的债已收束，本行才可还；`None` = 无前置。
     pub after: Option<DebtKey>,
+    /// 触发条件：该**种类**的事实在本可见域存在才欠；`None` = 无条件。
+    /// 环只把字符串原样交给宿主的 `exists`，不解释它的语义。
+    pub when: Option<String>,
     /// 该身份的事实已存在 ⇒ 本行不欠（排除条件）。环只读 id，不解释语义。
     pub unless: Option<String>,
     /// 一次派发的租约时长（毫秒）。
@@ -33,6 +36,7 @@ impl DebtRow {
             id: id.into(),
             payload,
             after: None,
+            when: None,
             unless: None,
             lease_ms: 60_000,
             max_attempts: 3,
@@ -42,6 +46,12 @@ impl DebtRow {
     /// 声明前置债：它收束之前本行不可还。
     pub fn after(mut self, key: DebtKey) -> Self {
         self.after = Some(key);
+        self
+    }
+
+    /// 声明触发条件：该种类的事实存在才欠（字符串由宿主判定）。
+    pub fn when(mut self, kind: impl Into<String>) -> Self {
+        self.when = Some(kind.into());
         self
     }
 
@@ -66,6 +76,13 @@ impl DebtRow {
 pub trait DebtSource {
     /// 当前可还的债（应用按自己的事实投影决定）。
     fn rows(&self, facts: &FactView<'_>, scope: u64) -> Vec<DebtRow>;
+
+    /// 「这种事实、这个可见域，存在吗」——由宿主实现（宿主看得见全部事实，
+    /// 不止环的五事实）。环只把行里的种类字符串原样透传，不解释它的语义。
+    fn exists(&self, kind: &str, scope: u64) -> bool {
+        let _ = (kind, scope);
+        false
+    }
 }
 
 /// 静态债表。

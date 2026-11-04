@@ -12,7 +12,10 @@ use symbio_kernel::capability::Registry;
 use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
-use symbio_plugin_api::port::{PortExecutor, PortPayload, PORT_FAMILY};
+use symbio_plugin_api::port::{
+    PortExecutor, PortFactEmit, PortFactWriter, PortPayload, PORT_FAMILY,
+};
+use symbio_plugin_api::FactDraft;
 use symbio_plugin_loop::ring::{
     drive, DebtKey, DebtRow, DebtSource, DriveCtx, DriveOutcome, Fact, FactKind, FactView,
 };
@@ -57,6 +60,9 @@ pub fn scope_of(session_id: &str) -> u64 {
 pub struct Host {
     root: Arc<dyn Plugin>,
     facts: Mutex<HashMap<u64, Vec<Fact>>>,
+    /// 世界事实的**种类**清单（按可见域）：执行体经 `emit` 落下的非五类事实。
+    /// 环只按种类字符串问存在性，不解释它们（`exists` 的数据底）。
+    world: Arc<Mutex<HashMap<u64, Vec<String>>>>,
     idle: Mutex<HashMap<u64, u64>>,
     started: Instant,
     concurrency: usize,
@@ -73,6 +79,7 @@ impl Host {
         Self {
             root,
             facts: Mutex::new(HashMap::new()),
+            world: Arc::new(Mutex::new(HashMap::new())),
             idle: Mutex::new(HashMap::new()),
             started: Instant::now(),
             concurrency: concurrency.max(1),
@@ -117,6 +124,7 @@ impl Host {
         let source = MultiSource {
             sources: gathered.sources,
             request,
+            world: Arc::clone(&self.world),
         };
         let ctx = HostCtx {
             host: self,
@@ -246,12 +254,43 @@ impl DriveCtx for HostCtx<'_> {
     fn concurrency(&self) -> usize {
         self.host.concurrency
     }
+
+    /// 非五类事实的去处：记下它们的种类，供环按字符串问存在性。
+    fn outlet(&self) -> PortFactEmit {
+        PortFactEmit::new(Arc::new(WorldWriter {
+            world: Arc::clone(&self.host.world),
+            scope: self.scope,
+        }))
+    }
+}
+
+/// 世界事实的写口：只记种类，不解释载荷（环与宿主都不认识业务名）。
+struct WorldWriter {
+    world: Arc<Mutex<HashMap<u64, Vec<String>>>>,
+    scope: u64,
+}
+
+#[async_trait::async_trait]
+impl PortFactWriter for WorldWriter {
+    async fn emit(&self, facts: Vec<FactDraft>) {
+        let mut world = self
+            .world
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let bucket = world.entry(self.scope).or_default();
+        for fact in facts {
+            if !bucket.iter().any(|kind| kind == &fact.kind) {
+                bucket.push(fact.kind);
+            }
+        }
+    }
 }
 
 /// 多个插件申报的债表合成一个数据源；行数据原样转给环。
 struct MultiSource {
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
     request: DriveRequest,
+    world: Arc<Mutex<HashMap<u64, Vec<String>>>>,
 }
 
 impl DebtSource for MultiSource {
@@ -277,6 +316,9 @@ impl DebtSource for MultiSource {
                 if let Some(after) = after {
                     row = row.after(after);
                 }
+                if let Some(when) = &spec.when {
+                    row = row.when(when.clone());
+                }
                 if let Some(unless) = &spec.unless {
                     row = row.unless(unless.clone());
                 }
@@ -284,6 +326,15 @@ impl DebtSource for MultiSource {
             }
         }
         rows
+    }
+
+    /// 事实存在谓词：宿主看得见全部世界事实，环只把种类字符串透传进来。
+    fn exists(&self, kind: &str, scope: u64) -> bool {
+        self.world
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&scope)
+            .is_some_and(|kinds| kinds.iter().any(|known| known == kind))
     }
 }
 
