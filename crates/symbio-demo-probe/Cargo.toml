@@ -1,0 +1,23 @@
+[package]
+name = "symbio-demo-probe"
+version = "0.1.0"
+edition = "2021"
+description = "验收夹具：demo 端口 + 一笔债（不是生产插件，不进装配清单）"
+authors = ["Symbio Team"]
+license = "MIT"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+symbio-plugin-api = { path = "../symbio-plugin-api" }
+symbio-sdk = { path = "../symbio-sdk" }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+symbio-host = { path = "../symbio-host" }
+symbio-plugin-loop = { path = "../symbio-plugin-loop" }
+tokio = { workspace = true }

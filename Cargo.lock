@@ -4197,6 +4197,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "symbio-demo-probe"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-host",
+ "symbio-plugin-api",
+ "symbio-plugin-loop",
+ "symbio-sdk",
+ "tokio",
+]
+
+[[package]]
 name = "symbio-deploy"
 version = "0.1.14"
 dependencies = [
