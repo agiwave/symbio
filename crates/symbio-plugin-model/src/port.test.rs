@@ -1,10 +1,11 @@
 //! model 端口通用执行面（`DE-048` D-305 裁决一）的用例。
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
 use super::*;
+use symbio_plugin_api::port::PortFactReader;
 use symbio_plugin_api::ModelUsage;
 
 /// 一次往返产物的别名：只在这里出现一次内核类型名，用于实现 trait 的返回签名。
@@ -160,4 +161,94 @@ async fn unreadable_payload_is_a_non_retryable_failure() {
         outcome.error.as_ref().map(|(class, _)| *class),
         Some(PortErrorClass::NonRetryable)
     );
+}
+
+/// 事实读面的静态夹具：执行体只按（种类 / 端口 / 载荷）解释，不认识写方。
+struct StaticReader(Vec<symbio_plugin_api::port::PortFact>);
+
+impl PortFactReader for StaticReader {
+    fn facts(&self, _scope: u64) -> Vec<symbio_plugin_api::port::PortFact> {
+        self.0.clone()
+    }
+}
+
+/// 只记录「执行体从事实组出来的请求」的假 provider。
+struct RecordingModel {
+    seen: Arc<Mutex<Option<(String, usize, usize)>>>,
+}
+
+#[async_trait::async_trait]
+impl ModelProvider for RecordingModel {
+    fn provider_id(&self) -> &str {
+        "active"
+    }
+
+    fn api_protocol(&self) -> &str {
+        "fake"
+    }
+
+    fn rate_limit_ms(&self) -> u64 {
+        0
+    }
+
+    fn max_context_tokens(&self) -> u32 {
+        4096
+    }
+
+    async fn effective_context_tokens(&self) -> u32 {
+        4096
+    }
+
+    async fn round_trip(
+        &self,
+        system_prompt: &str,
+        messages: &[ChatNode],
+        tools: &[CapabilityMeta],
+        _root_id: &str,
+        _env: &ExecEnv,
+    ) -> Result<RoundOutput, PluginError> {
+        *self.seen.lock().unwrap() = Some((system_prompt.to_string(), messages.len(), tools.len()));
+        Ok(RoundOutput::default())
+    }
+}
+
+#[tokio::test]
+async fn executor_builds_the_request_from_the_fact_reader() {
+    let seen = Arc::new(Mutex::new(None));
+    let active: Arc<dyn ModelProvider> = Arc::new(RecordingModel {
+        seen: Arc::clone(&seen),
+    });
+    let executor = ModelPort::new(active, Vec::new())
+        .executor()
+        .expect("model 端口必须交执行面");
+
+    let facts = vec![
+        symbio_plugin_api::port::PortFact {
+            id: "u-1".into(),
+            port: String::new(),
+            kind: "user.message".into(),
+            payload: json!({"text": "你好"}),
+        },
+        symbio_plugin_api::port::PortFact {
+            id: "cfg-1".into(),
+            port: String::new(),
+            kind: "session.config".into(),
+            payload: json!({"system_prompt": "persona", "tools": []}),
+        },
+    ];
+    let mut ctx = exec_context();
+    ctx.reader = Some(Arc::new(StaticReader(facts)));
+
+    let outcome = executor
+        .execute(
+            ctx,
+            input(json!({"provider": "active", "root_id": "u-1", "principal": "user", "scope": 7})),
+        )
+        .await;
+
+    assert!(outcome.success());
+    let (system_prompt, messages, tools) = seen.lock().unwrap().clone().expect("往返已发生");
+    assert_eq!(system_prompt, "persona", "system prompt 从事实读");
+    assert_eq!(messages, 1, "用户消息从事实读");
+    assert_eq!(tools, 0);
 }

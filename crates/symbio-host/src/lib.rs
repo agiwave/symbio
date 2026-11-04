@@ -11,20 +11,22 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use symbio_kernel::capability::Registry;
+use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
+use symbio_kernel::store::{MemoryStore, Store};
 use symbio_plugin_api::drive::{
     DriveFact, DrivePayload, DriveRow, DriveRunner, DriveSupport, DRIVE_FAMILY,
 };
 use symbio_plugin_api::port::{
     PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter, PortPayload, PORT_FAMILY,
 };
-use symbio_plugin_api::FactDraft;
-use symbio_sdk::capability::CAPABILITY_VISITOR;
-use symbio_sdk::debt::{
+use symbio_plugin_api::debt::{
     Closing, DebtFacts, DebtSource as DeclaredDebtSource, DebtTable, DriveRequest, DEBT_FAMILY,
 };
+use symbio_plugin_api::FactDraft;
+use symbio_sdk::capability::CAPABILITY_VISITOR;
 use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_ID, WORKDIR};
 use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
 
@@ -51,13 +53,13 @@ pub fn scope_of(session_id: &str) -> u64 {
     }
 }
 
-/// 进程内宿主：根插件 + 每个可见域的五事实。
+/// 进程内宿主：根插件 + 事实源 + 每个可见域的五事实账。
 pub struct Host {
     root: Arc<dyn Plugin>,
     facts: Arc<Mutex<HashMap<u64, Vec<DriveFact>>>>,
-    /// 世界事实（按可见域）：身份 + 种类 + 不透明载荷。环只按种类问存在性；
-    /// 执行体经通用 `reader` 读载荷——宿主是唯一实现方。
-    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
+    /// 事实源（唯一写入口）：世界事实与环协议事实都落这里。
+    /// 读面（`exists` / `reader`）只从这里投影——**不问写方是谁**。
+    store: Arc<dyn Store<Event = Event>>,
     idle: Arc<Mutex<HashMap<u64, u64>>>,
     started: Instant,
     concurrency: usize,
@@ -66,19 +68,42 @@ pub struct Host {
 impl Host {
     /// 由根插件造宿主。事实在进程内，重启恢复由后续持久化接入；并发缺省串行。
     pub fn new(root: Arc<dyn Plugin>) -> Self {
-        Self::with_concurrency(root, 1)
+        Self::with_store(root, Arc::new(MemoryStore::new()))
     }
 
     /// 指定同轮并发派发上限（配置数据，来自调用方的限额；环不写死）。
     pub fn with_concurrency(root: Arc<dyn Plugin>, concurrency: usize) -> Self {
+        Self::with_store_and_concurrency(root, Arc::new(MemoryStore::new()), concurrency)
+    }
+
+    /// 指定事实源（持久化实现替换时调用方零改动）。
+    pub fn with_store(root: Arc<dyn Plugin>, store: Arc<dyn Store<Event = Event>>) -> Self {
+        Self::with_store_and_concurrency(root, store, 1)
+    }
+
+    fn with_store_and_concurrency(
+        root: Arc<dyn Plugin>,
+        store: Arc<dyn Store<Event = Event>>,
+        concurrency: usize,
+    ) -> Self {
         Self {
             root,
             facts: Arc::new(Mutex::new(HashMap::new())),
-            world: Arc::new(Mutex::new(HashMap::new())),
+            store,
             idle: Arc::new(Mutex::new(HashMap::new())),
             started: Instant::now(),
             concurrency: concurrency.max(1),
         }
+    }
+
+    /// 该可见域的全量事实投影（**从事实源读**，含执行体写口）。
+    pub fn world_facts(&self, scope: u64) -> Vec<PortFact> {
+        self.store
+            .range(Seq::new(0))
+            .into_iter()
+            .filter(|event| event.scope == scope)
+            .map(event_to_fact)
+            .collect()
     }
 
     /// 该 scope 最近一次「无未还债」的落账时刻；`None` = 尚有未还债。
@@ -113,7 +138,7 @@ impl Host {
         let gathered = self.gather(base, session_id, provider).await?;
         let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
             facts: Arc::clone(&self.facts),
-            world: Arc::clone(&self.world),
+            store: Arc::clone(&self.store),
             executors: gathered.executors,
             sources: gathered.sources,
             session_id: session_id.to_string(),
@@ -211,7 +236,7 @@ struct Gathered {
 /// 宿主实现的中性能力束：事实读写、执行体解析、存在性、时钟与限额。
 struct HostDriveSupport {
     facts: Arc<Mutex<HashMap<u64, Vec<DriveFact>>>>,
-    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
+    store: Arc<dyn Store<Event = Event>>,
     executors: HashMap<String, Arc<dyn PortExecutor>>,
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
     session_id: String,
@@ -242,6 +267,17 @@ impl DriveSupport for HostDriveSupport {
         }) {
             return;
         }
+        // 协议事实与世界事实同源：都落事实源（同一写口、同一读面）。
+        let event = Event::pending(
+            ring_event_id(&fact),
+            fact.kind,
+            Entity::Scope,
+            Verb::Asserted,
+            scope,
+            "loop",
+        )
+        .with_payload(fact.payload.clone());
+        let _ = self.store.append(event);
         bucket.push(fact);
     }
 
@@ -251,7 +287,7 @@ impl DriveSupport for HostDriveSupport {
             session_id: self.session_id.clone(),
             provider: self.provider.clone(),
         };
-        let declared = declared_facts(&self.facts(scope), scope);
+        let declared = declared_facts(&self.facts(scope), &*self.store, scope);
         let mut rows = Vec::new();
         for source in &self.sources {
             for spec in source.rows(&request, &declared) {
@@ -277,11 +313,17 @@ impl DriveSupport for HostDriveSupport {
     }
 
     fn exists(&self, kind: &str, scope: u64) -> bool {
-        self.world
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&scope)
-            .is_some_and(|facts| facts.iter().any(|known| known.kind == kind))
+        self.store
+            .range(Seq::new(0))
+            .into_iter()
+            .any(|event| event.scope == scope && event.kind == kind)
+    }
+
+    fn exists_id(&self, kind: &str, id: &str, scope: u64) -> bool {
+        self.store
+            .range(Seq::new(0))
+            .into_iter()
+            .any(|event| event.scope == scope && event.kind == kind && event.event_id == id)
     }
 
     fn now_ms(&self) -> u64 {
@@ -292,10 +334,10 @@ impl DriveSupport for HostDriveSupport {
         self.concurrency
     }
 
-    /// 非五类事实的去处：记下身份 / 种类 / 载荷，供环问存在性与执行体读事实。
+    /// 非五类事实的去处：草稿落事实源（同一事实源、同一读面）。
     fn outlet(&self, scope: u64) -> PortFactEmit {
         PortFactEmit::new(Arc::new(WorldWriter {
-            world: Arc::clone(&self.world),
+            store: Arc::clone(&self.store),
             scope,
         }))
     }
@@ -303,15 +345,15 @@ impl DriveSupport for HostDriveSupport {
     /// 交给执行体的事实读面（宿主实现；环只转交）。
     fn reader(&self, scope: u64) -> Option<Arc<dyn PortFactReader>> {
         Some(Arc::new(HostReader {
-            world: Arc::clone(&self.world),
+            store: Arc::clone(&self.store),
             scope,
         }))
     }
 }
 
-/// 只读事实面：按可见域交出世界事实的副本（载荷不透明）。
+/// 只读事实面：按可见域交出事实源全种类的副本（载荷不透明）。
 struct HostReader {
-    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
+    store: Arc<dyn Store<Event = Event>>,
     scope: u64,
 }
 
@@ -320,44 +362,46 @@ impl PortFactReader for HostReader {
         if scope != self.scope {
             return Vec::new();
         }
-        self.world
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&scope)
-            .cloned()
-            .unwrap_or_default()
+        self.store
+            .range(Seq::new(0))
+            .into_iter()
+            .filter(|event| event.scope == scope)
+            .map(event_to_fact)
+            .collect()
     }
 }
 
-/// 世界事实的写口：记身份 / 种类 / 载荷，不解释语义（环与宿主都不认识业务名）。
+/// 事实源的写口：草稿按草稿的幂等键落行；重复投递被事实源吸收。
 struct WorldWriter {
-    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
+    store: Arc<dyn Store<Event = Event>>,
     scope: u64,
 }
 
 #[async_trait::async_trait]
 impl PortFactWriter for WorldWriter {
     async fn emit(&self, facts: Vec<FactDraft>) {
-        let mut world = self
-            .world
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let bucket = world.entry(self.scope).or_default();
         for fact in facts {
-            if bucket.iter().any(|known| known.id == fact.key) {
-                continue;
-            }
-            bucket.push(PortFact {
-                id: fact.key,
-                kind: fact.kind,
-                payload: fact.payload,
-            });
+            let mut event = Event::pending(
+                fact.key,
+                fact.kind,
+                fact.entity,
+                fact.verb,
+                self.scope,
+                "host",
+            )
+            .with_payload(fact.payload);
+            event.produced_by = fact.produced_by;
+            let _ = self.store.append(event);
         }
     }
 }
 
-/// 五事实 → 申报方读的按 id 归并视图（只取本可见域）。
-fn declared_facts(facts: &[DriveFact], scope: u64) -> DebtFacts {
+/// 五事实与全种类事实身份 → 申报方读的窄视图（只取本可见域）。
+fn declared_facts(
+    facts: &[DriveFact],
+    store: &dyn Store<Event = Event>,
+    scope: u64,
+) -> DebtFacts {
     let mut out = DebtFacts::default();
     for fact in facts {
         if fact.key.scope != scope {
@@ -374,7 +418,46 @@ fn declared_facts(facts: &[DriveFact], scope: u64) -> DebtFacts {
             None => {}
         }
     }
+    for event in store.range(Seq::new(0)) {
+        if event.scope == scope {
+            out.note_fact(&event.kind, &event.event_id);
+        }
+    }
     out
+}
+
+/// 协议事实的入库身份：`ring:` 前缀 + 可见域 / 端口 / 债 id / 尝试号 / 种类
+/// （分片另加一位）。前缀把协议事实与宿主 / 执行体写的世界事实分开——
+/// 读面按它把端口位交回执行体，不用猜。
+fn ring_event_id(fact: &DriveFact) -> String {
+    let base = format!(
+        "ring:{}:{}:{}:{}:{}",
+        fact.scope, fact.key.port, fact.key.id, fact.key.attempt, fact.kind
+    );
+    match shard_of(fact) {
+        Some(shard) => format!("{base}:{shard}"),
+        None => base,
+    }
+}
+
+/// 事件 → 读面的一行（身份 / 端口 / 种类 / 不透明载荷）。
+fn event_to_fact(event: Event) -> PortFact {
+    let port = ring_port_of(&event.event_id);
+    PortFact {
+        id: event.event_id,
+        port,
+        kind: event.kind,
+        payload: event.payload,
+    }
+}
+
+/// 从入库身份取端口位：协议事实的 id 以 `ring:` 开头（见 [`ring_event_id`]）；
+/// 世界事实没有端口——空串表示「不属于任何端口」。
+fn ring_port_of(event_id: &str) -> String {
+    let Some(rest) = event_id.strip_prefix("ring:") else {
+        return String::new();
+    };
+    rest.split(':').nth(1).unwrap_or_default().to_string()
 }
 
 /// 便利构造：一次驱动用的基上下文（前端只需补工作目录等）。

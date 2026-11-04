@@ -27,10 +27,18 @@ fn after_records_the_prerequisite_identity() {
 }
 
 #[test]
-fn unless_records_the_exclusion_identity() {
-    let row = DebtRow::new("b", "p", "d-b", json!({})).unless("d-a");
-    assert_eq!(row.unless.as_deref(), Some("d-a"));
-    assert!(DebtRow::new("c", "p", "d-c", json!({})).unless.is_none());
+fn unless_records_the_exclusion_predicate() {
+    let by_kind = DebtRow::new("b", "p", "d-b", json!({})).unless("turn.done");
+    assert_eq!(by_kind.unless, Some(Unless::Kind("turn.done".into())));
+    let by_id = DebtRow::new("c", "p", "d-c", json!({})).unless_id("turn.done", "turn.done:1");
+    assert_eq!(
+        by_id.unless,
+        Some(Unless::Id {
+            kind: "turn.done".into(),
+            id: "turn.done:1".into(),
+        })
+    );
+    assert!(DebtRow::new("d", "p", "d-d", json!({})).unless.is_none());
 }
 
 #[test]

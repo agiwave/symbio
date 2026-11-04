@@ -4206,7 +4206,6 @@ dependencies = [
  "symbio-host",
  "symbio-plugin-api",
  "symbio-plugin-loop",
- "symbio-sdk",
  "tokio",
 ]
 
@@ -4573,7 +4572,6 @@ dependencies = [
  "serde_json",
  "symbio-plugin-api",
  "symbio-providers",
- "symbio-sdk",
  "tempfile",
  "time",
  "tokio",

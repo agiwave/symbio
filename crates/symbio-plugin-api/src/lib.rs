@@ -44,6 +44,7 @@
 
 pub mod behaviors;
 pub mod context;
+pub mod debt;
 pub mod declarations;
 pub mod drive;
 pub mod effects;
@@ -173,7 +174,7 @@ pub use symbio_sdk::capability::{
     capability_prompts, capability_report_error, capability_take_errors, capability_to_wire,
     capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
 };
-pub use symbio_sdk::chat::{chat_node, chat_request, principal};
+pub use symbio_sdk::chat::{chat_node, principal};
 pub use symbio_sdk::clock::clock_now_ms;
 pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
 pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};

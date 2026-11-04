@@ -25,6 +25,7 @@
 //! session 与 model **两侧共用**的 `ModelProvider` / `TurnOutput`。
 
 mod bound_provider;
+mod debt;
 mod detail;
 mod http;
 mod message_builder;

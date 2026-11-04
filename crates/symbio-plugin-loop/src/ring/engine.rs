@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use futures::future::join_all;
 use serde_json::{json, Value};
 use symbio_plugin_api::effects::FactDraft;
+use symbio_plugin_api::drive::Unless;
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortFactReader, PortFactWriter,
     PortInput, PortOutcome,
@@ -153,8 +154,14 @@ fn plan(
                 continue;
             }
         }
+        // 排除条件与 `when` 走同一条读面（世界事实，按种类读；归属：选债）。
+        // 债表永不读载荷：需要按内容分叉时，由写方把结论写成一条具体事实。
         if let Some(unless) = &row.unless {
-            if view.has_id(scope, unless) {
+            let hit = match unless {
+                Unless::Kind(kind) => source.exists(kind, scope),
+                Unless::Id { kind, id } => source.exists_id(kind, id, scope),
+            };
+            if hit {
                 continue;
             }
         }

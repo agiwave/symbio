@@ -95,8 +95,12 @@ export const WHITELIST_BASELINE = 0
  *
  * 准入（D-269 §5.1 的两条判据）：与容器概念无关 ∧ ≥2 条能力要用。一条能力撑不起
  * 一次架构改动——要加一条就把理由写成决策，并同步上调本基线。
+ *
+ * 109 → 107：门面 `pub use symbio_sdk::chat::…` 删掉 `chat_request` 后实测 108，
+ * 而基线此前已比实测高 1；按「账本只许降、基线跟着实测降」一并收掉两格空转。
+ * 这是下调，不是放宽。
  */
-export const SDK_BASELINE = 109
+export const SDK_BASELINE = 107
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。

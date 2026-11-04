@@ -154,6 +154,10 @@ impl DebtSource for SupportSource {
     fn exists(&self, kind: &str, scope: u64) -> bool {
         self.support.exists(kind, scope)
     }
+
+    fn exists_id(&self, kind: &str, id: &str, scope: u64) -> bool {
+        self.support.exists_id(kind, id, scope)
+    }
 }
 
 /// 该身份在本可见域最近的收束债键。

@@ -1,11 +1,15 @@
 //! 债表契约：端口插件自报债行；宿主收集，环只读。
 //!
 //! 这里的类型是**数据**：端口名与债身份都由申报方给出，契约本身不认识任何端口。
+//! 住在契约层（与 [`crate::drive`] 同一族）：扩展层插件只依赖 `symbio_plugin_api`，
+//! 不自报债的插件不需要看见这些类型。
 
 use std::sync::Arc;
 
 use serde_json::Value;
 use symbio_kernel::capability::{CapabilityFamily, CapabilityRow};
+
+pub use crate::drive::Unless;
 
 /// 债行所在的 `multi` 族。加一个端口 = 由该插件往本族报到，不改族。
 pub const DEBT_FAMILY: CapabilityFamily = CapabilityFamily::multi("debt");
@@ -31,13 +35,41 @@ pub enum Closing {
 }
 
 /// 五事实的只读视图（按债 id 归并；同一可见域内 id 唯一，跨端口也不得重名）。
+///
+/// 另带**全种类事实的身份**（种类 + id，不含载荷）：欠债方要从「哪条事实」派生
+/// 自己的债 id，而不是自己计数（禁计数）。这一格是中性形状——种类是申报方给的
+/// 字符串，契约不解释它属于哪个世界。
 #[derive(Debug, Clone, Default)]
 pub struct DebtFacts {
     closings: Vec<(String, Closing, Value)>,
     attempts: Vec<(String, u32)>,
+    identities: Vec<(String, String)>,
 }
 
 impl DebtFacts {
+    /// 记一条事实的身份（种类 + id；载荷不进来）。
+    pub fn note_fact(&mut self, kind: &str, id: &str) {
+        if self
+            .identities
+            .iter()
+            .any(|(known, key)| known == kind && key == id)
+        {
+            return;
+        }
+        self.identities.push((kind.to_string(), id.to_string()));
+    }
+
+    /// 该种类**最后记入**的事实 id；没有 ⇒ `None`。
+    ///
+    /// 记入顺序由宿主按事实源顺序给出，同 id 去重——「最新」是位置，不是计数。
+    pub fn latest_fact_id(&self, kind: &str) -> Option<&str> {
+        self.identities
+            .iter()
+            .rev()
+            .find(|(known, _)| known == kind)
+            .map(|(_, id)| id.as_str())
+    }
+
     /// 记一笔尝试号（取最大值）。
     pub fn note_attempt(&mut self, id: &str, attempt: u32) {
         match self.attempts.iter_mut().find(|(key, _)| key == id) {
@@ -89,8 +121,8 @@ pub struct DebtSpec {
     pub after: Option<String>,
     /// 触发条件：该**种类**的事实在本可见域存在才欠；宿主判定，契约不解释。
     pub when: Option<String>,
-    /// 排除条件：该 id 的事实已存在 ⇒ 本行不欠（与 `after` 同一种 id 引用）。
-    pub unless: Option<String>,
+    /// 排除条件：该事实已存在 ⇒ 本行不欠（与 `when` 同一条读面，按种类读）。
+    pub unless: Option<Unless>,
     /// 该端口的债全部还清才欠（读债状态）；环只读端口名，不解释语义。
     pub when_no_open: Option<&'static str>,
     /// 单次派发租约（毫秒）。
@@ -128,9 +160,24 @@ impl DebtSpec {
         self
     }
 
-    /// 声明排除条件 id：它的事实已存在 ⇒ 本行不欠。
-    pub fn unless(mut self, id: impl Into<String>) -> Self {
-        self.unless = Some(id.into());
+    /// 声明种类级排除条件：该种类的事实在本可见域存在 ⇒ 本行不欠。
+    pub fn unless(mut self, kind: impl Into<String>) -> Self {
+        self.unless = Some(Unless::Kind(kind.into()));
+        self
+    }
+
+    /// 声明身份级排除条件：该种类、该身份的事实存在 ⇒ 本行不欠。
+    pub fn unless_id(mut self, kind: impl Into<String>, id: impl Into<String>) -> Self {
+        self.unless = Some(Unless::Id {
+            kind: kind.into(),
+            id: id.into(),
+        });
+        self
+    }
+
+    /// 声明「该端口无未还债才欠」。
+    pub fn when_no_open(mut self, port: &'static str) -> Self {
+        self.when_no_open = Some(port);
         self
     }
 

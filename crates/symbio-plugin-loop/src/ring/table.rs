@@ -2,6 +2,7 @@
 
 use crate::ring::facts::{DebtKey, FactView};
 use serde_json::Value;
+use symbio_plugin_api::drive::Unless;
 
 /// 一笔待还的债（应用侧的数据）。
 #[derive(Debug, Clone)]
@@ -20,8 +21,8 @@ pub(crate) struct DebtRow {
     /// 触发条件：该**种类**的事实在本可见域存在才欠；`None` = 无条件。
     /// 环只把字符串原样交给宿主的 `exists`，不解释它的语义。
     pub(crate) when: Option<String>,
-    /// 该身份的事实已存在 ⇒ 本行不欠（排除条件）。环只读 id，不解释语义。
-    pub(crate) unless: Option<String>,
+    /// 该事实已存在 ⇒ 本行不欠（排除条件，与 `when` 同一条读面）。环只透传，不解释。
+    pub(crate) unless: Option<Unless>,
     /// 该端口的债全部还清才欠；`None` = 无此前提。环只读端口名，不解释语义。
     pub(crate) when_no_open: Option<&'static str>,
     /// 一次派发的租约时长（毫秒）。
@@ -60,9 +61,18 @@ impl DebtRow {
         self
     }
 
-    /// 声明排除条件：该 id 的事实已存在 ⇒ 本行不欠。
-    pub(crate) fn unless(mut self, id: impl Into<String>) -> Self {
-        self.unless = Some(id.into());
+    /// 声明种类级排除条件：该种类的事实存在 ⇒ 本行不欠。
+    pub(crate) fn unless(mut self, kind: impl Into<String>) -> Self {
+        self.unless = Some(Unless::Kind(kind.into()));
+        self
+    }
+
+    /// 声明身份级排除条件：该种类、该身份的事实存在 ⇒ 本行不欠。
+    pub(crate) fn unless_id(mut self, kind: impl Into<String>, id: impl Into<String>) -> Self {
+        self.unless = Some(Unless::Id {
+            kind: kind.into(),
+            id: id.into(),
+        });
         self
     }
 
@@ -92,6 +102,12 @@ pub(crate) trait DebtSource {
     /// 不止环的五事实）。环只把行里的种类字符串原样透传，不解释它的语义。
     fn exists(&self, kind: &str, scope: u64) -> bool {
         let _ = (kind, scope);
+        false
+    }
+
+    /// 「这种事实、这个身份、这个可见域，存在吗」——与 [`Self::exists`] 同一条读面。
+    fn exists_id(&self, kind: &str, id: &str, scope: u64) -> bool {
+        let _ = (kind, id, scope);
         false
     }
 }

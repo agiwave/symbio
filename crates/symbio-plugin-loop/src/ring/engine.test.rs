@@ -356,30 +356,83 @@ async fn after_gate_orders_two_ports() {
 }
 
 #[tokio::test]
-async fn unless_gate_skips_a_row_once_the_fact_exists() {
+async fn unless_gate_reads_the_same_surface_as_when() {
+    /// 世界事实的测试读面：种类集合 + 身份集合，与环的五事实无关。
+    struct Gated {
+        rows: Vec<DebtRow>,
+        kinds: Vec<&'static str>,
+        ids: Vec<(&'static str, String)>,
+    }
+
+    impl DebtSource for Gated {
+        fn rows(&self, _facts: &FactView<'_>, _scope: u64) -> Vec<DebtRow> {
+            self.rows.clone()
+        }
+
+        fn exists(&self, kind: &str, _scope: u64) -> bool {
+            self.kinds.contains(&kind)
+        }
+
+        fn exists_id(&self, kind: &str, id: &str, _scope: u64) -> bool {
+            self.ids.iter().any(|(k, i)| *k == kind && i == id)
+        }
+    }
+
     let rows = vec![
         DebtRow::new("a", "p1", "a", json!({})),
-        DebtRow::new("b", "p1", "b", json!({})).unless("a"),
+        DebtRow::new("b", "p1", "b", json!({})).unless("turn.done"),
     ];
-    // 事实尚未出现 ⇒ 两行都欠（同一圈可以两笔在飞）。
-    let ctx = TestCtx::new(rows.clone()).with_executor("p1", Arc::new(Stub::ok()));
-    let report = drive(&ctx, S).await;
-    assert_eq!(report.dispatched, 2);
+    // 种类事实缺席 ⇒ 两行都欠（同一圈可以两笔在飞）。
+    let ctx = TestCtx::with_source(Box::new(Gated {
+        rows: rows.clone(),
+        kinds: Vec::new(),
+        ids: Vec::new(),
+    }))
+    .with_executor("p1", Arc::new(Stub::ok()));
+    assert_eq!(drive(&ctx, S).await.dispatched, 2);
 
-    // 该 id 的事实已存在 ⇒ 本行不欠。
-    let seeded = vec![Fact::new(
-        FactKind::Response,
-        DebtKey::new(S, "p1", "a", 1),
-        json!({}),
-        0,
-    )];
-    let ctx = TestCtx::new(rows)
-        .with_executor("p1", Arc::new(Stub::ok()))
-        .with_facts(seeded);
-    let report = drive(&ctx, S).await;
+    // 种类事实存在 ⇒ 排除行不欠（非五类事实也算，「同一条读面」）。
+    let ctx = TestCtx::with_source(Box::new(Gated {
+        rows: rows.clone(),
+        kinds: vec!["turn.done"],
+        ids: Vec::new(),
+    }))
+    .with_executor("p1", Arc::new(Stub::ok()));
+    assert_eq!(drive(&ctx, S).await.dispatched, 1);
 
-    assert_eq!(report.dispatched, 0);
-    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+    // 身份级：只有该种类、该身份的事实命中；环账上同 id 的 request / sent / retry
+    // 因种类不同不命中（可重试失败后的重试轮不会被提前跳过）。
+    let rows = vec![
+        DebtRow::new("a", "p1", "a", json!({})),
+        DebtRow::new("b", "p1", "b", json!({})).unless_id("turn.done", "turn.done:b"),
+    ];
+    let ledger = vec![
+        Fact::new(FactKind::Request, DebtKey::new(S, "p1", "b", 1), json!({}), 0),
+        Fact::new(FactKind::Sent, DebtKey::new(S, "p1", "b", 1), json!({}), 0),
+        Fact::new(FactKind::Retry, DebtKey::new(S, "p1", "b", 2), json!({}), 0),
+    ];
+    let ctx = TestCtx::with_source(Box::new(Gated {
+        rows: rows.clone(),
+        kinds: Vec::new(),
+        ids: Vec::new(),
+    }))
+    .with_executor("p1", Arc::new(Stub::ok()))
+    .with_facts(ledger);
+    assert_eq!(
+        drive(&ctx, S).await.dispatched,
+        2,
+        "b 的重试轮照常派发：环账上同 id 的 request / sent / retry 不命中这本谓词"
+    );
+
+    // 该身份的世界事实已存在 ⇒ 本行不欠。
+    let ctx = TestCtx::with_source(Box::new(Gated {
+        rows,
+        kinds: Vec::new(),
+        ids: vec![("turn.done", "turn.done:b".to_string())],
+    }))
+    .with_executor("p1", Arc::new(Stub::ok()));
+    assert_eq!(drive(&ctx, S).await.dispatched, 1);
+    assert_eq!(drive(&ctx, S).await.outcome, DriveOutcome::NoDebt);
 }
 
 #[tokio::test]

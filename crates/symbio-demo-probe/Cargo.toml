@@ -13,7 +13,6 @@ dead_code = "warn"
 
 [dependencies]
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-sdk = { path = "../symbio-sdk" }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 

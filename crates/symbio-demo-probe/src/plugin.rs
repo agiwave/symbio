@@ -7,7 +7,7 @@ use symbio_plugin_api::{
     port_rows, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH,
 };
-use symbio_sdk::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
+use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 
 use crate::port::{DemoPort, DEMO_PORT};
 

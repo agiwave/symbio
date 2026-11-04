@@ -99,18 +99,23 @@ pub struct PortInput {
     pub payload: Value,
 }
 
-/// 读面的一行：身份 + 种类 + **不透明**载荷（本文件不定义任何世界词）。
+/// 读面的一行：身份 + 端口 + 种类 + **不透明**载荷（本文件不定义任何世界词）。
+///
+/// `port` 是宿主落协议事实时按债身份盖的端口名；世界事实没有端口，给空串。
+/// 执行体据此把自己端口的产物与其他端口的产物分开（端口名仍是数据）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PortFact {
     /// 事实身份（入库事件的 id）。
     pub id: String,
+    /// 端口名；世界事实为空串。
+    pub port: String,
     /// 事实种类（字符串透传，解释权在声明方）。
     pub kind: String,
     pub payload: Value,
 }
 
 /// 通用执行体上下文的事实读面：**宿主实现、执行体使用**；环不调用、不解释。
-/// 不是具名世界接口——它只认「身份 / 种类 / 载荷」三样通用形状。
+/// 不是具名世界接口——它只认「身份 / 端口 / 种类 / 载荷」四样通用形状。
 pub trait PortFactReader: Send + Sync + 'static {
     fn facts(&self, scope: u64) -> Vec<PortFact>;
 }

@@ -119,6 +119,23 @@ impl DriveFact {
     }
 }
 
+/// `unless` 谓词：与 `when` 走**同一条读面**（世界事实，按种类读；不只环的五事实）。
+///
+/// 两种形态都是「存在即不欠」：种类级问「有没有这种事实」，身份级再问「是不是这条」。
+/// **债表永不读载荷**：需要按内容分叉时，由写方把结论写成一条具体事实。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unless {
+    /// 种类级：本可见域里有一条这个种类的事实。
+    Kind(String),
+    /// 身份级：本可见域里有一条这个种类、这个身份的事实。
+    Id {
+        /// 事实种类（申报方给的字符串）。
+        kind: String,
+        /// 事实身份（入库事件的 id）。
+        id: String,
+    },
+}
+
 /// 一行债（中性形状）：申报方给出的数据，宿主原样转交环。
 #[derive(Debug, Clone)]
 pub struct DriveRow {
@@ -134,8 +151,8 @@ pub struct DriveRow {
     pub after: Option<String>,
     /// 触发条件：该**种类**的事实存在才欠。
     pub when: Option<String>,
-    /// 排除条件：该 id 的事实已存在 ⇒ 本行不欠。
-    pub unless: Option<String>,
+    /// 排除条件：该事实已存在 ⇒ 本行不欠（与 `when` 同一条读面）。
+    pub unless: Option<Unless>,
     /// 该端口的债全部还清才欠（读债状态）。
     pub when_no_open: Option<&'static str>,
     /// 单次派发租约（毫秒）。
@@ -183,6 +200,13 @@ pub trait DriveSupport: Send + Sync {
 
     /// 「这种事实、这个可见域，存在吗」——宿主看得见全部事实，环只透传字符串。
     fn exists(&self, kind: &str, scope: u64) -> bool;
+
+    /// 「这种事实、这个身份、这个可见域，存在吗」——与 [`Self::exists`] 同一条读面，
+    /// 只多看一位身份。环只透传，不解释种类与身份。
+    fn exists_id(&self, kind: &str, id: &str, scope: u64) -> bool {
+        let _ = (kind, id, scope);
+        false
+    }
 
     /// 当前时刻（毫秒，宿主给的相对时间轴）。
     fn now_ms(&self) -> u64;

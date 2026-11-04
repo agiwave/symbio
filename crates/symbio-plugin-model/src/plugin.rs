@@ -921,6 +921,12 @@ impl Plugin for ModelPlugin {
                     .put(CapabilityRow::prompt("model-persona", sp.clone()))
                     .await;
             }
+
+            // 债表（`debt` 族，既有能力收集机制）：模型欠哪一轮由本插件自报，
+            // 宿主收集、环只读。生效者缺席不影响申报——缺席在调用点响亮失败。
+            for row in super::debt::model_debt_rows() {
+                tool_visitor.put(row).await;
+            }
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

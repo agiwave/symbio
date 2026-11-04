@@ -11,14 +11,17 @@ use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
 };
 use symbio_plugin_api::port::{
-    PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortInput, PortOutcome,
+    PortErrorClass, PortExecContext, PortExecutor, PortFact, PortFactEmit, PortInput, PortOutcome,
     PortProvider, PortReply,
+};
+use symbio_plugin_api::events::{
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::{
     llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecEnv, ExecEventSink,
     ExecTranscriptWriter, FactDraft, ModelFinishReason, ModelProvider, PluginError,
-    PromptMessage, TurnOutput, TurnToolCallInfo, Verb, EVENT_FAILED,
-    EVENT_RESPONSE,
+    PromptMessage, TurnOutput, TurnToolCallInfo, Verb,
+    EVENT_FAILED, EVENT_RESPONSE,
 };
 
 /// 本插件服务的端口名（提供者自己定义；契约层不认识它）。
@@ -68,17 +71,14 @@ impl PortProvider for ModelPort {
 }
 
 /// `request(port=model)` 的载荷（行契约由 model 插件自己持有，环不认识这些键）。
+///
+/// 这里只有**身份与选择**：正文输入（system prompt / messages / tools）由执行体
+/// 从事实读面取——载荷不装载它们（`D` 陈述的执行体自解释）。
 #[derive(Debug, serde::Deserialize)]
 struct RoundTripRequest {
     /// 首选 provider id；不在目录 ⇒ 落回当次生效者（与 `llm_round_trip` 同一条规则）。
     #[serde(default)]
     provider: Option<String>,
-    #[serde(default)]
-    system_prompt: String,
-    #[serde(default)]
-    messages: Vec<PromptMessage>,
-    #[serde(default)]
-    tools: Vec<CapabilityMeta>,
     #[serde(default)]
     root_id: String,
     /// 记账与装配用的容器事实（`D-314`）：`response` 载荷的 `turn_id` / `principal`、
@@ -88,6 +88,93 @@ struct RoundTripRequest {
     /// 本笔债所属的可见域（实体身份；行契约里是数据，不是序号）。
     #[serde(default)]
     scope: u64,
+}
+
+/// 一次往返的输入视图：**全从事实读**（写方是谁不问）。
+///
+/// - system prompt / tools：最近一条 `session.config` 事实的同名字段（无则空）；
+/// - messages：`user.message`、本端口已落的 `response`、工具产物 `artifact.added`。
+fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMessage>) {
+    let config = facts
+        .iter()
+        .rev()
+        .find(|fact| fact.kind == EVENT_SESSION_CONFIG);
+    let system_prompt = config
+        .and_then(|fact| fact.payload.get("system_prompt"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let tools = config
+        .and_then(|fact| fact.payload.get("tools"))
+        .and_then(|value| serde_json::from_value::<Vec<CapabilityMeta>>(value.clone()).ok())
+        .unwrap_or_default();
+
+    let mut messages = Vec::new();
+    for fact in facts {
+        match fact.kind.as_str() {
+            EVENT_USER_MESSAGE => {
+                if let Some(text) = fact.payload.get("text").and_then(serde_json::Value::as_str) {
+                    if !text.trim().is_empty() {
+                        messages.push(PromptMessage {
+                            role: "user".into(),
+                            text: text.to_string(),
+                            tool_call_id: None,
+                            tool: None,
+                            tool_calls: None,
+                        });
+                    }
+                }
+            }
+            EVENT_RESPONSE if fact.port == MODEL_PORT => {
+                let text = fact
+                    .payload
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let tool_calls = fact
+                    .payload
+                    .get("tool_calls")
+                    .cloned()
+                    .and_then(|value| {
+                        serde_json::from_value::<Vec<symbio_plugin_api::PromptToolCall>>(value).ok()
+                    });
+                if !text.trim().is_empty() || tool_calls.as_ref().is_some_and(|c| !c.is_empty()) {
+                    messages.push(PromptMessage {
+                        role: "assistant".into(),
+                        text,
+                        tool_call_id: None,
+                        tool: None,
+                        tool_calls,
+                    });
+                }
+            }
+            EVENT_ARTIFACT_ADDED => {
+                let (Some(tool), Some(call_id)) = (
+                    fact.payload.get("tool").and_then(serde_json::Value::as_str),
+                    fact.payload
+                        .get("tool_call_id")
+                        .and_then(serde_json::Value::as_str),
+                ) else {
+                    continue;
+                };
+                let text = fact
+                    .payload
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                messages.push(PromptMessage {
+                    role: "tool".into(),
+                    text: text.to_string(),
+                    tool_call_id: Some(call_id.to_string()),
+                    tool: Some(tool.to_string()),
+                    tool_calls: None,
+                });
+            }
+            _ => {}
+        }
+    }
+    (system_prompt, tools, messages)
 }
 
 /// 一次模型往返的执行体。
@@ -106,13 +193,22 @@ impl PortExecutor for ModelExecutor {
                 // 连载荷都读不出来，这一笔也必须收口（`failed` 由执行体落格，`D-314`）。
                 emit_outcome(
                     &exec.emit,
+                    "failed-outcome".to_string(),
                     EVENT_FAILED,
+                    Verb::Asserted,
                     serde_json::json!({ "status": "failed", "why": &why }),
                 )
                 .await;
                 return PortOutcome::failed(PortErrorClass::NonRetryable, why);
             }
         };
+        // 事实读面由宿主实现、环只转交：正文输入全从事实取，载荷只带身份与选择。
+        let facts = exec
+            .reader
+            .as_ref()
+            .map(|reader| reader.facts(exec.subject))
+            .unwrap_or_default();
+        let (system_prompt, tools, messages) = turn_input(&facts);
         let provider = request
             .provider
             .as_deref()
@@ -120,25 +216,34 @@ impl PortExecutor for ModelExecutor {
             .unwrap_or(&self.active);
         // 请求构造归执行体（D-305 裁决一 / D-306 裁决二）：环交进的是**值**
         // （`PromptMessage`），线格式在这里收口。
-        let wire = wire_messages(&request.messages);
+        let wire = wire_messages(&messages);
         let started = std::time::Instant::now();
         // 流式增量是**瞬时帧**，不进事实表（`D-314` 两条通道）：provider 往 `env.sink()`
         // 写帧，这一出口记下节点 id 与半截正文（供 `response` / `failed` 载荷使用），
         // 再原样转发给展示出口。丢帧不影响正确性——终稿以 `response` 为准。
         let rows = Arc::new(StreamRows::new(exec.sink.clone()));
         let env = ExecEnv::new(ExecEventSink::direct(rows.clone()), exec.abort.clone());
+        let mut world_kind = EVENT_FAILED;
         let outcome = match provider
             // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
             .round_trip(
-                &request.system_prompt,
+                &system_prompt,
                 &wire,
-                &request.tools,
+                &tools,
                 &request.root_id,
                 &env,
             )
             .await
         {
             Ok(output) => {
+                // 终答是**独立事实种类**（`chat.assistant.final`）：只有收束轮（无工具调用）
+                // 才落它。债表据此排除「这一轮已答完」，而环的 `request` / `sent` / `retry`
+                // 因种类不同不误命中——可重试失败后的重试轮不会被提前跳过。
+                if output.tool_calls.is_empty() {
+                    world_kind = EVENT_CHAT_ASSISTANT_FINAL;
+                } else {
+                    world_kind = EVENT_RESPONSE;
+                }
                 // 应答承载（D-319）：assistant 正文 + 逐条 `tool_calls` 声明在这里组装，
                 // 环只把 `messages` 按序追加、按 `links` 配对。id 取法与环侧旧实现同源
                 // （wire id → 节点 id → 合成 `call_<名>_<轮>_<序号>`）。
@@ -226,30 +331,41 @@ impl PortExecutor for ModelExecutor {
                 }
             }
         };
-        // 账：`response` / `failed` 由执行体经宿主写口落格（`D-314`）；
-        // 键与信封（`port` / `id` / `attempt` / `via`）由宿主按本笔债身份盖章。
+        // 账：`chat.assistant.final` / `response` / `failed` 由执行体经宿主写口落格（`D-314`）；
+        // 信封（`scope` / `verb`）由这里按事实种类给，键由 `emit_outcome` 按同一身份构造。
         if let Some(payload) = outcome.facts.first() {
             let kind = if outcome.error.is_none() {
-                EVENT_RESPONSE
+                world_kind
             } else {
                 EVENT_FAILED
             };
-            emit_outcome(&exec.emit, kind, payload.clone()).await;
+            let (key, verb) = if kind == EVENT_CHAT_ASSISTANT_FINAL {
+                (
+                    format!("{kind}:{}", request.root_id),
+                    Verb::Closed,
+                )
+            } else {
+                (format!("{kind}-outcome"), Verb::Asserted)
+            };
+            emit_outcome(&exec.emit, key, kind, verb, payload.clone()).await;
         }
         outcome
     }
 }
 
-/// 执行体落协议事实的统一出口（`D-314`）：只交载荷，键与信封由宿主盖章。
-///
-/// `key` 只是无信封宿主的兜底——模型往返的宿主写口带着本笔债身份，
-/// 会把 `response` / `failed` 的键改写成 `<kind>-<port>-<id>-<attempt>`。
-async fn emit_outcome(emit: &PortFactEmit, kind: &str, payload: serde_json::Value) {
+/// 执行体落协议事实的统一出口（`D-314`）：键与信封由这里构造，只交载荷。
+async fn emit_outcome(
+    emit: &PortFactEmit,
+    key: String,
+    kind: &str,
+    verb: Verb,
+    payload: serde_json::Value,
+) {
     emit.emit(vec![FactDraft {
-        key: format!("{kind}-outcome"),
+        key,
         kind: kind.to_string(),
         entity: Entity::Scope,
-        verb: Verb::Asserted,
+        verb,
         payload,
         produced_by: None,
     }])
