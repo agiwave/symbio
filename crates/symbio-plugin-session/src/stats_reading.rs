@@ -858,7 +858,8 @@ pub(crate) fn notice_stats_of(m: &cm::ChatNode) -> Option<ReadingSection> {
 /// 会话级**上下文水位**读数（挂会话节点 `attributes.context_watermark`）。
 ///
 /// 入参是 `SessionSummary::context` —— 最近一轮 Turn 骨架 `meta.context` 的原样投影
-/// （四个绝对 token 数，写方 `crates/symbio-plugin-loop/src/context.rs::context_watermark`）。本函数是
+/// （写方是模型执行体的收束轮：`crates/symbio-plugin-model/src/port.rs::context_watermark`
+/// 把实测输入用量与 provider 上限放进终答载荷，SDK 重建再折进骨架）。本函数是
 /// 这些数**变成话**的唯一一处，与 [`notice_stats_of`] 同一条纪律：
 ///
 /// - 单位与精度只在这里定（[`format_tokens`] 全仓唯一）；

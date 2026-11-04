@@ -125,7 +125,8 @@ impl SessionSummary {
 
 /// 最近一轮的上下文水位 = 从尾部往前**第一条**带 `meta.context` 的节点载荷。
 ///
-/// 写方是 loop 的 `emit_streaming_start`（一轮一条 Turn 骨架，轮开头取一次数），
+/// 写方是模型执行体的收束轮（`crates/symbio-plugin-model/src/port.rs::context_watermark`，
+/// 传 provider 回报的**实测**输入用量）——随终答载荷折进 Turn 骨架，
 /// 所以「最后一条带水位的节点」就是**最近一次真实发出去的请求**的那一体积。
 ///
 /// 只认对象形态：`None` 表示「这个会话还没记录过水位」（存量会话 / 还没跑过一轮），
