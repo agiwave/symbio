@@ -17,7 +17,6 @@ use crate::actors::*;
 use crate::authz::{production_matrix, PRINCIPAL_MAIN, PRINCIPAL_PEER};
 use crate::governance::{Capability, PermissionMatrix, PrincipalPolicy, VisScope};
 use crate::invariants::check_all;
-use crate::projection::turnstate::turnstate;
 use crate::test_fixtures::{
     CHAT, COMMITMENT, EVENTS, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED, MESSAGE,
@@ -396,22 +395,6 @@ fn forced_failure_produces_fallback_with_provenance() {
     );
 }
 
-/// 验收 3：投影两次运行结果逐字节相同。
-#[test]
-fn turnstate_projection_is_deterministic() {
-    let (store, _) = rehearse_turn("你好", Some("你好，我能做什么？"));
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let p = turnstate(CHAT);
-    let v1 = p.apply(&snapshot, 1_000, Budget::generous());
-    let v2 = p.apply(&snapshot, 1_000, Budget::generous());
-    assert_eq!(v1, v2, "N1：同一事件序列 + 同一参数 ⇒ 逐字节相同");
-    assert!(
-        v1.value.opened && v1.value.settled(),
-        "当前 turn 已开且已收束"
-    );
-    assert!(v1.value.final_text.is_some(), "有应答 ⇒ final 态");
-}
-
 /// 验收 4（反向）：注入两条 final → N3 必须报警。
 #[test]
 fn two_finals_are_caught_by_n3() {
@@ -458,12 +441,6 @@ fn two_finals_are_caught_by_n3() {
         violations.iter().any(|v| v.why.contains("final")),
         "同一 turn 两条 final 必须被看见：{:?}",
         violations
-    );
-    // 投影侧的孪生判定也必须不认这个 turn 为「已合法收束」。
-    let v = turnstate(CHAT).apply(&snapshot, 0, Budget::generous());
-    assert!(
-        !v.value.settled(),
-        "settled 的 xor 语义：两条 final ≠ 合法收束"
     );
 }
 
@@ -623,12 +600,6 @@ async fn reasoner_turn_keeps_all_invariants_green() {
         check_all(EVENTS, &snapshot)
     );
     assert!(unresolved_turns(&snapshot, false).is_empty());
-    // turnstate 投影照常工作（N1：双跑一致）。
-    let p = turnstate(CHAT);
-    let v1 = p.apply(&snapshot, 0, Budget::generous());
-    let v2 = p.apply(&snapshot, 0, Budget::generous());
-    assert_eq!(v1, v2);
-    assert!(v1.value.settled() && v1.value.final_text.is_some());
 }
 
 /// 输入契约：`Reasoner` **只看事件切片**——prompt 由事件渲染，

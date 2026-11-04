@@ -27,7 +27,6 @@ use symbio_plugin_api::ProviderLlmAdapter;
 use symbio_plugin_api::{
     check_all, transcript, Budget, Entity, Event, EventStore, PromptMessage, Seq, Store, Verb,
 };
-use symbio_sdk::projection::turnstate::turnstate;
 
 /// 对话面 / 消息面的词汇表（DE-024 D-203 / D-206）：本插件不是这两面任何名字的
 /// owner，只用它们调 core 的转写 / 轮态投影。拼写一律取清单生成物（D-204）。
@@ -477,9 +476,6 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
         "{:?}",
         check_all(vocab(), &snapshot)
     );
-    let view = turnstate(CHAT_VOCAB).apply(&snapshot, 0, Budget::generous());
-    assert!(view.value.settled() && view.value.final_text.is_some());
-
     // 入账原料（G3）：熔断判据「已耗多少」读的是**实测值**——final 信封上的 `cost_ms`
     // 就是适配器边界量出来的那一个。按它归账的折叠住在成本能力包（名册 #18），
     // 它的数字由那边的用例钉；本处只钉「实测如实落进信封」。

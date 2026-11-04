@@ -10,8 +10,8 @@
 
 use super::*;
 use symbio_kernel::vdfs::{
-    VdfsAccess, VdfsActionResult, VdfsChange, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT,
+    VdfsAccess, VdfsChange, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
+    VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
 };
 use symbio_sdk::vdfs::host::vdfs_from_plugin_error;
 
@@ -149,32 +149,6 @@ impl SessionPlugin {
                 self.unwatch_at_path(path).await?;
                 Ok(VdfsResponse::Unit)
             }
-            // 节点动作：**中止**正在跑的那一轮。
-            //
-            // 落点是**会话节点自身**（`<sid>`），而不是 `<sid>/inbox`：在途那一轮
-            // 早已出队，它现在是转写里的消息；队列上的动作只该管「还没被消费的」
-            // （取消 = 删条目，清空 = `clear`）。两个动词作用在**两个不同的对象**上
-            // ，因此是两个地址——与 D-026 已确立的分界同一条。
-            VdfsRequest::Action { action, .. } => match action.as_str() {
-                VDFS_ACTION_ABORT => {
-                    // 存在性校验：会话不在就没有「它的一轮」可谈
-                    self.session_of(id).await?;
-                    let stopped = self.turn.abort_turn(id).await;
-                    Ok(VdfsResponse::Action(VdfsActionResult {
-                        action: action.clone(),
-                        ok: stopped,
-                        // 「没在跑」不是错误，但也不报成功——报成功会让调用方以为
-                        // 停下来了（这正是 `chat/abort` 最坏的一面）。
-                        message: if stopped {
-                            "已中止当前轮次".to_string()
-                        } else {
-                            format!("该会话没有正在进行的轮次，无需中止：{path}")
-                        },
-                        data: Some(json!({ "session_id": id })),
-                    }))
-                }
-                _ => Err(VdfsError::NotImplemented),
-            },
             _ => Err(VdfsError::NotImplemented),
         }
     }

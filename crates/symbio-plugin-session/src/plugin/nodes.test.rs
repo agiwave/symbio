@@ -186,7 +186,7 @@ fn session_node_publishes_the_context_watermark_reading() {
 }
 
 /// 会话内部寻址：`<id>` / `<id>/MEMORY.md` / `<id>/message[/<mid>]` /
-/// `<id>/subsession[/<sub>]` / `<id>/workdir[/<rel>]` / `<id>/_run/<op>`。
+/// `<id>/subsession[/<sub>]` / `<id>/workdir[/<rel>]`。
 /// 未知区段与越界层级一律 NotFound——不给半通不通的路径留口子。
 #[test]
 fn vdfs_internal_path_parsing() {
@@ -255,22 +255,6 @@ fn vdfs_internal_path_parsing() {
             rel: "src/lib.rs"
         }
     ));
-    // 内部动作段：只认 `<sid>/_run/<op>`，op 合法性留给动作面（地址层不开花名册）
-    assert!(matches!(
-        parse_session_path("abc/_run/messages").unwrap(),
-        Run {
-            id: "abc",
-            op: "messages"
-        }
-    ));
-    assert!(
-        parse_session_path("abc/_run").is_err(),
-        "动作段没有「目录本身」这一级"
-    );
-    assert!(
-        parse_session_path("abc/_run/messages/deeper").is_err(),
-        "动作没有更深层级"
-    );
     // 未知区段、列表项越界层级 → NotFound
     assert!(parse_session_path("abc/nope").is_err());
     assert!(parse_session_path("abc/message/m1/deeper").is_err());
@@ -355,12 +339,6 @@ fn vdfs_internal_dirs_conditional() {
 
     let without = internal_dirs(false, memory());
     assert_eq!(without.len(), 4);
-    assert!(
-        without
-            .iter()
-            .all(|n| n.name != symbio_sdk::turn::dispatch::run_ops::SEG),
-        "内部动作段不是资源，不进清单"
-    );
     assert_eq!(without[0].name, SEG_MESSAGES, "转写列表恒在（会话的本体）");
     assert_eq!(
         without[0].name, "message",

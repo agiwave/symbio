@@ -70,14 +70,6 @@ pub struct SessionPlugin {
     /// （[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2），而「卸载后任务还在收尾」
     /// 恰恰需要这份存储比插件活得更久。
     pub(crate) convergence: Convergence,
-    /// 「开跑一轮」端口：一个 Turn 从装配到收尾所读的宿主切片（字段与用途见
-    /// [`TurnLauncher`] 的模块文档）。
-    ///
-    /// 插件在这里的贡献只是**把同一批 Arc 交出去**：provider 侧的 `dispatch` 只有 `&self`，
-    /// 而一轮执行要 `tokio::spawn` 一个自带句柄的任务。那个句柄若是插件本身
-    /// （`Arc<SessionPlugin>`），provider 注册、路由、订阅表、监听器与常驻任务册就一起
-    /// 被一个 Turn 钉住（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2 第五处）。
-    pub(crate) turn: TurnLauncher,
     /// 工作目录监听管理器（目录树场景的实时数据变更通知）
     pub(crate) workdir_watches: super::workdir::WorkdirWatchManager,
     /// VDFS 实时：变更订阅表（引用计数 + 恰好一次投递）。
@@ -89,24 +81,9 @@ pub struct SessionPlugin {
     /// 用 `Arc` 而非内联值：工作目录监听器（后台任务）也要投递进同一批订阅者，
     /// 需要共享所有权。
     pub(crate) change_subs: Arc<VdfsChangeSubscriptions>,
-    /// 收件箱唤醒：入队时置位，常驻消费者据此醒来取件（见 `inbox` 模块）。
-    /// 它是**唤醒**不是队列——队列本身在 `ActiveSessionStateInner::inbox`。
-    pub(crate) inbox_wake: tokio::sync::Notify,
-    /// 常驻任务的停机位（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1）：`stop` 置这一格并唤醒
-    /// [`Self::shutdown_wake`]，两条 loop 在**下一个可取消点**退出——不是中途退出，
-    /// 抽干与落格跨 `await`，中途砍断会丢一条用户消息。
-    /// 「停用只是从名册里划掉一个名字」就是没有这两格时的形态。
-    pub(crate) stopping: std::sync::atomic::AtomicBool,
-    /// 停机唤醒。与 `stopping` 配对使用，**顺序固定**：循环体先挂好本体的
-    /// `notified()`，再读 `stopping`（见 [`Self::stop_gate`]）——反序就留出一条
-    /// 「读完没停 ⇒ 挂唤醒之前置了位 ⇒ 从此睡死」的竞态窗口，而 `notify_waiters()`
-    /// 只叫醒已经在睡的人，不会替这条窗口兜底。
-    pub(crate) shutdown_wake: tokio::sync::Notify,
-    /// 两条常驻 loop 的句柄册（心跳调度器 + 收件箱消费者），`stop` 据此**等它们真的退**。
-    pub(crate) resident_tasks: resident::ResidentTasks,
 }
 
-use super::orchestrator::{Convergence, TurnLauncher};
+use super::convergence::Convergence;
 use super::store::SessionStore;
 
 impl SessionPlugin {
@@ -127,16 +104,6 @@ impl SessionPlugin {
         ));
         let config = Arc::new(RwLock::new(config));
         let convergence = Convergence::new(store, store_dir, config.clone(), active_mgr.clone());
-        // 「开跑一轮」端口：一轮执行真正读到的那几样宿主切片（字段与插件同源同 Arc，
-        // 不是第二份状态；为什么收成端口见 [`TurnLauncher`] 的模块文档）。
-        let turn = TurnLauncher::new(
-            convergence.clone(),
-            active_mgr.clone(),
-            config.clone(),
-            change_subs.clone(),
-            config_file.dir().clone(),
-            parent.clone(),
-        );
         Self {
             config,
             grant_lock: Mutex::new(()),
@@ -146,11 +113,6 @@ impl SessionPlugin {
             active_mgr,
             workdir_watches,
             change_subs,
-            inbox_wake: tokio::sync::Notify::new(),
-            stopping: std::sync::atomic::AtomicBool::new(false),
-            shutdown_wake: tokio::sync::Notify::new(),
-            resident_tasks: resident::ResidentTasks::default(),
-            turn,
         }
     }
 
@@ -226,46 +188,8 @@ impl SessionPlugin {
         let parent = ctx.parent();
 
         let plugin = Arc::new(SessionPlugin::new(parent, config, dir));
-        plugin.start_resident_tasks();
 
         plugin
-    }
-
-    /// 启动本插件的**常驻任务**（今天只有收件箱消费者一条），句柄记进
-    /// [`Self::resident_tasks`]，因此 [`Plugin::stop`] 能等到它们真的退出。
-    ///
-    /// spawn 都在本函数里交出句柄——任务体不需要持有自己，注册点因此只有一个。
-    /// 没有 runtime 时（部分单元测试里的裸构造）**一条也不起**：那种场景没有会话要跑，
-    /// 构造方不因此失败，而「没启动过」在停机侧就是空表，无事可做。
-    ///
-    /// 心跳扫描循环**不在这里**：它随切片搬进了 `crates/symbio-plugin-heartbeat`
-    /// （[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），判据不变——每条常驻任务
-    /// 都由它的**所有者**在构造点记下句柄。
-    pub(crate) fn start_resident_tasks(self: &Arc<Self>) {
-        // 「有 runtime 才起任务」与 session 之外的常驻任务同一条判据（裸构造的单测里
-        // `tokio::spawn` 会当场 panic，而那种场景没有会话要跑）。
-        if tokio::runtime::Handle::try_current().is_err() {
-            return;
-        }
-        // 消费者在构造点起，因此**早于任何写入**——
-        // "谁来消费第一次写入"不依赖装配顺序。
-        let inbox = self.clone().spawn_inbox_consumer();
-        self.resident_tasks.push(inbox);
-    }
-
-    /// 停机握手：返回（已挂好的唤醒, 当前停机位）。
-    ///
-    /// **先挂唤醒再读位**——顺序就是正确性：反序之间若发生 `stop`，`notify_waiters()`
-    /// 叫的是一个还没睡下的人，而循环体随后睡死（见 [`Self::shutdown_wake`]）。
-    /// 挂好之后即使位已经置上，唤醒也已在场，`select!` 立刻走退出分支。
-    pub(crate) fn stop_gate(&self) -> (tokio::sync::futures::Notified<'_>, bool) {
-        let wake = self.shutdown_wake.notified();
-        (wake, self.is_stopping())
-    }
-
-    /// 已经下令停机了吗（常驻 loop 的退出判据；判据本身见 [`Self::stop_gate`]）。
-    pub(crate) fn is_stopping(&self) -> bool {
-        self.stopping.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// 获取父插件引用
@@ -411,31 +335,10 @@ impl Plugin for SessionPlugin {
         Some(self)
     }
 
-    /// 停机（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1）：两条常驻 loop 与目录监听在这里交出资源。
-    ///
-    /// 顺序是**先置位并唤醒、再等退出**：loop 体在可取消点看到停机位就自己收尾，本函数
-    /// 只等它们把话说完——`drain_inbox_once` 跨 `await`，中途砍断会丢一条已出队的用户消息。
-    /// 等待**有界**：超过 `STOP_WAIT` 仍没退（例如某一回合长时间持着会话状态锁）就直接砍。
-    /// 停机路径不能永久挂起，卸载的最后一次写盘机会就在这次调用里。
+    /// 停机（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1）：目录监听在这里交出资源。
     async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> {
-        const STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
-
-        self.stopping
-            .store(true, std::sync::atomic::Ordering::Release);
-        self.shutdown_wake.notify_waiters();
         // 目录监听：watcher 一 drop 事件流即断（OS 句柄随之内核回收）
         self.workdir_watches.close_all();
-
-        // JoinHandle 不是 Clone，但它是 Unpin —— `&mut handle` 本身就是 Future，
-        // 可以 timeout 之后再 abort；句柄等完还回册，判据用例据此断言「真的退出了」。
-        let mut tasks = self.resident_tasks.take_all();
-        for task in tasks.iter_mut() {
-            if tokio::time::timeout(STOP_WAIT, &mut *task).await.is_err() {
-                symbio_plugin_api::plugin_warn!("session", "常驻任务未在停机窗口内退出，强制取消");
-                task.abort();
-            }
-        }
-        self.resident_tasks.restore(tasks);
         Ok(())
     }
 
@@ -510,16 +413,6 @@ impl Plugin for SessionPlugin {
             // 有两道容量闸门——因此它归共享实现那套机制，本插件只负责「落位 + 标题 + 地址」。
             // 作用域闸门在 `contribute_memory` 内一处收口（无 `ctx[SESSION_ID]` 即不注入）。
             self.contribute_memory(&ctx, &visitor).await;
-
-            // 会话端口（`DE-048` D-315）：四条行契约交给收集宿主；执行体持本插件的
-            // 弱引用——插件不在时 fail-closed，不退回第二份读法。
-            let provider: std::sync::Arc<dyn symbio_plugin_api::port::PortProvider> =
-                std::sync::Arc::new(crate::port::SessionPortProvider::new(
-                    std::sync::Arc::downgrade(&self),
-                ));
-            for row in symbio_plugin_api::port::port_rows(&provider) {
-                visitor.put(row).await;
-            }
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         symbio_sdk::capability::capability_announce_configurable(&ctx, &self.config_file).await;
@@ -784,8 +677,6 @@ fn unbounded_number(key: &str, label: &str, description: &str, default: Value) -
 // 读写删都转发既有会话能力（SessionStore + 会话 metadata 合并），不新造协议。
 
 mod nodes;
-mod resident;
-mod run_actions;
 mod vdfs_catalog;
 mod vdfs_inbox;
 mod vdfs_messages;

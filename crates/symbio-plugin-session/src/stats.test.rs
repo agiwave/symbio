@@ -85,7 +85,7 @@ fn read_path(
         viewer,
         principal,
         false,
-        symbio_sdk::turn::dispatch::TASK_CAP,
+        crate::config::TASK_CAP,
     )
 }
 
@@ -855,7 +855,7 @@ fn stats_recompute_equals_direct_apply() {
     // （`t31-task-table.mjs` / `t42-full-derives-commitment-task.mjs` 钉 `ready` 的成员）。
     assert_eq!(
         got.readyset,
-        serde_json::json!({ "ready": [], "cap": symbio_sdk::turn::dispatch::TASK_CAP }),
+        serde_json::json!({ "ready": [], "cap": crate::config::TASK_CAP }),
         "owner 不在 ⇒ 编不出候选集：空集合是可诊断的缺席，不是「这个会话没有任务」"
     );
 
@@ -1516,7 +1516,7 @@ fn readyset_column_degrades_to_the_documented_empty_shape() {
 
     let empty_column = serde_json::json!({
         "ready": [],
-        "cap": symbio_sdk::turn::dispatch::TASK_CAP
+        "cap": crate::config::TASK_CAP
     });
     let got =
         read_path("s-rs", &wal, None, symbio_sdk::authz::PRINCIPAL_MAIN, &root).expect("读数");
@@ -1611,7 +1611,7 @@ fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
             viewer,
             symbio_sdk::authz::PRINCIPAL_MAIN,
             enabled,
-            symbio_sdk::turn::dispatch::TASK_CAP,
+            crate::config::TASK_CAP,
         )
         .expect("读数")
     };

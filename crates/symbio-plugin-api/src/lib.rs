@@ -199,7 +199,8 @@ pub use symbio_sdk::projection::transcript::transcript;
 pub use symbio_sdk::projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};
 pub use symbio_sdk::text::merge_kernel::truncate_chars;
 pub use symbio_sdk::text::{text_floor_char_boundary, text_truncate_bytes};
-pub use symbio_sdk::turn::dispatch::TASK_CAP;
+/// 插件默认的并发任务容量出厂值（平凡值 = 串行 FIFO）。
+pub const TASK_CAP: usize = 1;
 pub use symbio_sdk::turn::node_build;
 pub use symbio_sdk::vdfs::address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 pub use symbio_sdk::vdfs::host::{

@@ -22,8 +22,6 @@ use symbio_plugin_api::vocab;
 use symbio_sdk::invariants::{check_all, unresolved_turns};
 use symbio_sdk::projection::prompt_fidelity::verify as verify_prompt_fidelity;
 use symbio_sdk::projection::transcript::transcript;
-use symbio_sdk::projection::turnstate::turnstate;
-use symbio_sdk::projection::turnstate::TurnState;
 
 /// 造一条 pending 事件（入库前无 seq；带溯源与正文载荷）。
 fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -> Event {
@@ -167,21 +165,13 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
     // 崩溃前的投影。
     let before_store = EventWalStore::open(&path).unwrap();
     let before = before_store.range(Seq::new(0));
-    let before_turn = turnstate(CHAT_VOCAB).apply(&before, 0, Budget::generous());
     let before_cp = checkpoint().apply(&before, 0, Budget::generous());
 
     // 「重启」：全新实例（同一文件）。
     let after = EventWalStore::open(&path).unwrap();
     let snapshot = after.range(Seq::new(0));
-    let after_turn: TurnState = turnstate(CHAT_VOCAB)
-        .apply(&snapshot, 0, Budget::generous())
-        .value;
     let after_cp: CheckpointState = checkpoint().apply(&snapshot, 0, Budget::generous()).value;
 
-    assert_eq!(
-        before_turn.value, after_turn,
-        "C11：恢复后 turnstate == 崩溃前（逐字节）"
-    );
     assert_eq!(
         before_cp.value, after_cp,
         "C11：恢复后 checkpoint == 崩溃前（逐字节）"
@@ -229,8 +219,6 @@ fn memory_store_trivial_value_still_completes_the_loop() {
         .unwrap();
     let snapshot = store.range(Seq::new(0));
     assert!(check_all(vocab(), &snapshot).is_empty());
-    let v = turnstate(CHAT_VOCAB).apply(&snapshot, 0, Budget::generous());
-    assert!(v.value.settled() && v.value.final_text.is_some());
     // 平凡值锚仍是规则模式（零 LLM 也能跑完整闭环）。
     assert_eq!(
         symbio_testkit::trivial_actor_spec("session/main").pattern,

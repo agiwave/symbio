@@ -8,33 +8,14 @@
 //! `symbio_plugin_api::events`——与任务族同一条通路，不是兄弟插件、也不是内核代答。
 //!
 //! 事实 / 视图不在本插件的控制面，因此不在这里。
-//!
-//! **本插件的世界端口 `session` 在这里声明**（`DE-048` D-315）：四条行契约
-//! （`session-config` / `session-call` / `session-call-unit` / `session-facts`）与执行体
-//! （`crates/symbio-plugin-session/src/port.rs`）同属本插件。别的端口的声明仍归其
-//! 提供者插件（如 `port.tool` 在 `crates/symbio-plugin-tool`，`DE-047` 不变量 6）。
 
 use symbio_kernel::decl::PluginDeclarations;
 use symbio_kernel::event::{Entity, EventDecl, Verb};
-use symbio_plugin_api::ring::{Decl, Lit, Pattern, PortDecl};
-use symbio_plugin_api::rows::PORT_ACTOR;
-use symbio_plugin_api::{
-    LatencyTier, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
-};
-
-use crate::port::{
-    ROW_CALL, ROW_CALL_UNIT, ROW_CONFIG, ROW_FACTS, ROW_FINALIZE, ROW_KEY, ROW_OPEN, SESSION,
-};
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
 /// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
 pub(crate) const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
 
-/// 轮内阶段的三条世界事实（`D-323`）。拼写是**事实源**（`PLUGIN.yml` 的
-/// `shared_events` 导出到 `symbio_plugin_api::events`，读方一律取生成物）。
-pub(crate) const EVENT_CHAT_DECIDED: &str = "chat.decided";
-pub(crate) const EVENT_SESSION_RECALLED: &str = "session.recalled";
-pub(crate) const EVENT_SESSION_PREPARED: &str = "session.prepared";
 /// 健康自检。落在 `system × progressed`。
 pub(crate) const EVENT_SYSTEM_HEALTH: &str = "system.health";
 
@@ -106,13 +87,6 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("session.consolidated", (Entity::Message, Verb::Progressed)),
     // 用户点了切换器：一次「关于这一轮的断言」，不是收束也不是开轮。
     EventDecl::new("turn.branch_selected", (Entity::Scope, Verb::Asserted)),
-    // ── 轮内阶段的世界事实（`D-323`）──
-    //
-    // 判决 / 召回 / 装配三条。写方是**本插件的端口执行体**（`port_stage`），环只欠
-    // `request(port=session)`、不落这些格；名字由本插件导出进共享清单，读方是环的视图。
-    EventDecl::new(EVENT_CHAT_DECIDED, (Entity::Scope, Verb::Asserted)),
-    EventDecl::new(EVENT_SESSION_RECALLED, (Entity::Scope, Verb::Asserted)),
-    EventDecl::new(EVENT_SESSION_PREPARED, (Entity::Scope, Verb::Asserted)),
 ];
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
@@ -162,101 +136,18 @@ pub(crate) const COMMITMENT_VOCAB: symbio_sdk::projection::vocab::CommitmentVoca
         asserted: symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED,
     };
 
-/// 本插件服务的端口：**读本会话的配置 / 事实，执行一次会话动作**。
-///
-/// `max_attempts = 1`：动作是本地写（转写、压缩、补充），重放会重复落笔；重试判据
-/// 留给调用方，租约只负责发现死掉的执行体。
-pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
-    port: SESSION,
-    before: EVENT_SENT,
-    lease_ms: 600_000,
-    max_attempts: 1,
-    // 单会话本地串行：不并发。
-    concurrency: 0,
-}];
-
-/// 四条行共用的收尾面：`sent` / `response` / `failed` / `retry`（该端口的 `before` 在内）。
-///
-/// 只按 `port/id/attempt` 配对——行判别键 `row` 只在 `owes` 上，回体事实不携带世界语义。
-static SESSION_UNTIL: &[Pattern] = &[
-    Pattern {
-        source: EVENT_SENT,
-        key: &["port", "id", "attempt"],
-        eq: &[("port", Lit::Str(SESSION))],
-    },
-    Pattern {
-        source: EVENT_RESPONSE,
-        key: &["port", "id", "attempt"],
-        eq: &[("port", Lit::Str(SESSION))],
-    },
-    Pattern {
-        source: EVENT_FAILED,
-        key: &["port", "id", "attempt"],
-        eq: &[("port", Lit::Str(SESSION))],
-    },
-    Pattern {
-        source: EVENT_RETRY,
-        key: &["port", "id", "attempt"],
-        eq: &[("port", Lit::Str(SESSION))],
-    },
-];
-
-/// 一条行契约：`request(port=session, row=<name>)` → `sent` → 执行体 → `response` / `failed`。
-///
-/// `row` 是载荷里的中性判别键；四条行共用同一个端口名，靠它分流到执行体的四个分支。
-/// 展开点必须在 `static` 初始化里（数组字面量在那里才能被提升成 `'static`）。
-macro_rules! session_row_at {
-    ($name:expr, $phase:expr, $anchor:expr) => {
-        Decl {
-            name: $name,
-            by: Some(PORT_ACTOR),
-            // 本地读写，不调模型：快速档。
-            tier: LatencyTier::Fast,
-            expand: None,
-            owes: Pattern {
-                source: EVENT_REQUEST,
-                key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str(SESSION)), (ROW_KEY, Lit::Str($name))],
-            },
-            until: SESSION_UNTIL,
-            unless: &[],
-        }
-    };
-}
-
-/// 会话读写行（`DE-048` D-315 四条行契约；`run_ops` 行表是动作闭集，`D-094`）。
-///
-/// 等七阶段（`await-tool` 72 / `notify-send` 73 之后）：会话读写不挡轮内进程。
-macro_rules! session_row {
-    ($name:expr, $anchor:expr) => {
-        session_row_at!($name, 7, $anchor)
-    };
-}
-
-/// 端口行。`open` / `finalize` 是 P2-6 的两笔幕债（段 1 只进表，执行体在
-/// `port_turn`；段 2 接线）。`open` 排在轮首判决之前，`finalize` 排在收束段。
-static ROWS: &[Decl] = &[
-    session_row_at!(ROW_OPEN, 0, 1),
-    session_row!(ROW_CONFIG, 74),
-    session_row!(ROW_CALL, 75),
-    session_row!(ROW_CALL_UNIT, 76),
-    session_row!(ROW_FACTS, 77),
-    session_row_at!(ROW_FINALIZE, 4, 57),
-];
-
 // 装配口的提交：宿主链接本 crate 即生效。装配方按 owner 排序后逐个 `declare`，
 // 本插件不认识也不依赖任何兄弟插件。
 symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 
-/// 本插件服务的端口见 [`PORTS`]（工具端口的声明与提供者仍在 `crates/symbio-plugin-tool`）。
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: EVENTS,
         facts: &[],
         views: &[],
-        ports: PORTS,
+        ports: &[],
         actors: Vec::new(),
-        rows: ROWS,
+        rows: &[],
     }
 }
 

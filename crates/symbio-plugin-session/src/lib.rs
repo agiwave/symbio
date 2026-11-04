@@ -12,12 +12,6 @@ mod grants;
 mod memory;
 pub(crate) mod message_events;
 mod options;
-mod orchestrator;
-/// 会话的世界端口（`port=session`，DE-048 D-315）：声明在 `declarations.rs`，
-/// 执行体在此。声明的四条行走 `run_ops` 行表，不为每个动作加行。
-mod port;
-mod port_lifecycle;
-mod port_stage;
 // 会话口径的纯折叠（原 core 的 checkpoint / fallback / slo / span / changes，
 // DE-025 D-221）：读方只在本插件，判定跟着调用方走。
 pub(crate) mod paths;
@@ -29,7 +23,6 @@ mod stats_reading;
 mod temporal;
 mod token_ledger;
 mod transcript;
-pub(crate) mod worker_progress;
 mod working;
 // `plugin` / `types` 作为公共契约层（crate 内可见），让 `lib.rs` 能直接
 // `pub use plugin::xxx::X` 拿到公共类型（避免在 session 顶层做中间

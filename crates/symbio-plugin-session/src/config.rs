@@ -372,11 +372,11 @@ pub struct SessionConfig {
 // 配置面、配置面反过来够不着判定侧；写成两处字面量就是必然漂移的第二份。
 
 /// 出厂值：显式前缀，**带尾空格**——`/work 干活` 命中，`/worker 是什么` 不命中。
-pub const FORCE_PREFIX: &str = symbio_sdk::turn::dispatch::WORKER_FORCE_PREFIX;
+pub const FORCE_PREFIX: &str = "/work ";
 /// 出厂值：关键词（子串、忽略大小写）。**空集 = 本层关闭**。
-pub const KEYWORDS: &[&str] = symbio_sdk::turn::dispatch::WORKER_KEYWORDS;
+pub const KEYWORDS: &[&str] = &[];
 /// 出厂值：主题长度阈值（字符数）。**0 = 本层关闭**。
-pub const MIN_CHARS: usize = symbio_sdk::turn::dispatch::WORKER_MIN_CHARS;
+pub const MIN_CHARS: usize = 0;
 
 pub fn default_worker_force_prefix() -> String {
     FORCE_PREFIX.to_string()
@@ -389,7 +389,7 @@ pub fn default_worker_min_chars() -> usize {
 }
 
 /// 出厂值：调度容量（平凡值 = 串行 FIFO）。
-pub const TASK_CAP: usize = symbio_sdk::turn::dispatch::TASK_CAP;
+pub const TASK_CAP: usize = symbio_plugin_api::TASK_CAP;
 
 pub fn default_task_cap() -> usize {
     TASK_CAP

@@ -14,5 +14,4 @@ pub mod rebuild;
 pub mod task_vocab;
 pub mod transcript;
 pub mod turns;
-pub mod turnstate;
 pub mod vocab;

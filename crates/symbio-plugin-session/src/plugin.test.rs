@@ -410,39 +410,3 @@ async fn migrated_session_routes_stay_retired() {
     }
 }
 
-// ==================== 停机：常驻任务必须真的退出 ====================
-
-/// [D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P1 的判据。原判据是「每个插件可独立卸载且系统仍
-/// 完整」，而 session 当时不满足它的一半：`stop` 是默认 no-op，心跳 loop 与收件箱消费者
-/// 一旦 `tokio::spawn` 就再没有人能取消它们——停用只是从名册里划掉一个名字，线程照跑。
-///
-/// 断言落在**句柄**上而不是「有没有新回合」：后者要等一个心跳间隔才验得出，而句柄
-/// `is_finished()` 直接钉住「这条 loop 已退出」这一事实本身。
-///
-/// 2b 切片后本插件只剩**收件箱消费者**一条（心跳扫描搬进了 `crates/symbio-plugin-heartbeat`，
-/// 判据跟着搬到那边的 `plugin.test.rs`）：这里的 `2 → 1` 是**在册任务变了**，
-/// 不是判据放宽——每条常驻 loop 都由它的**所有者**记下句柄，一处也不许漏。
-#[tokio::test]
-async fn stop_terminates_resident_loops() {
-    let plugin = Arc::new(SessionPlugin::new(
-        None,
-        SessionConfig::default(),
-        test_dir(),
-    ));
-    plugin.start_resident_tasks();
-    assert_eq!(
-        plugin.resident_tasks.len(),
-        1,
-        "收件箱消费者该在册（心跳扫描已随 2b 切进 crates/symbio-plugin-heartbeat）"
-    );
-
-    Plugin::stop(plugin.clone(), PluginStopReason::Disabled)
-        .await
-        .expect("停机不该失败");
-
-    assert!(
-        plugin.resident_tasks.all_finished(),
-        "stop 返回时仍有常驻任务在跑"
-    );
-    assert!(plugin.is_stopping(), "停机位要对后续代码可见");
-}
