@@ -6,16 +6,15 @@
 //! |---|---|---|
 //! | 编译 | 收束贡献（`memory.encoded{tag:"skill"}`，名字与事实形状归情景记忆家族，D-263） | `contributor.rs`，`submit_contributor!`（D-250） |
 //! | 校准 | `memory.calibrated` 的账（`skill.calibration` 视图：每条技能的 `uses` / `fallbacks`） | 本模块的 `calibration_ledger`，算式只有一份 |
-//! | 回退 | `skill.retreat` 视图（低置信技能的 seq 集）+ `skill.recall` 行（观测与命中） | `decl` + `row.rs`，行 `by = plugin_row`（D-241） |
-//! | 命中 | `skill.answered`（这一条技能在本轮判成什么） | `skill.recall` 行的出口格 |
+//! | 回退 | `skill.retreat` 视图（低置信技能的 seq 集，D-286） | 本模块的 `retreating_skills`，阈值 `CONFIDENCE_THRESHOLD` |
+//! | 观测与命中 | **已随 B2 退场（D-318）**：`skill.recall` 行、`skill.answered` 判定格与实现文件一并删除 | — |
 //!
 //! ## 为什么读的是「事实」而不是召回视图
 //!
 //! 回退要改的是**本轮提示词**，而提示词由宿主（loop）装配。能力包不能去改宿主的
-//! 视图结构——那是跨插件的私有面。于是分工是：宿主把本幕召回的技能以
-//! 技能召回由本能力自己的债行驱动（每条带 `recall` = 技能事件的 seq），本能力
-//! 按自己的置信度口径折出 `skill.retreat`（哪些 seq 本轮**不该**进提示词），宿主
-//! 读这个名字过滤自己的段。两边都只认名字，不互相链接（DE-025 D-251）。
+//! 视图结构——那是跨插件的私有面。于是分工是：本能力按自己的置信度口径折出
+//! `skill.retreat`（哪些 seq 本轮**不该**进提示词），宿主读这个名字过滤自己的段。
+//! 两边都只认名字，不互相链接（DE-025 D-251）。观测与命中的债行已随 B2 退场（D-318）。
 //!
 //! ## 名字
 //!
