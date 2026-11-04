@@ -70,11 +70,3 @@ pub async fn drive_on_new_fact(
     host.drive_at(scope, &base, world.session_id, world.provider)
         .await
 }
-
-/// 这次驱动是否停在端口上（`Waiting`：只剩租约未过的在飞债）。
-///
-/// 停在端口意味着「等的是那条响应事实」——它落地后由**新事实**再次触发，
-/// 而不是由调用方轮询重试。
-pub fn stalled(report: &DriveReport) -> bool {
-    matches!(report.outcome, symbio_host::DriveOutcome::Waiting(_))
-}
