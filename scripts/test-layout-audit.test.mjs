@@ -85,6 +85,17 @@ test('找不到宿主文件 → ERROR', () => {
   assert.match(r.stdout, /找不到宿主/)
 })
 
+// 文件模块 `foo.rs` 的测试按 Rust 默认解析落在 `foo/tests.rs`——宿主是 `foo.rs`，
+// 不是 `foo/mod.rs`。认不出这种形状会把合法布局判成孤儿（symbio-host 的
+// `src/tests.rs` 与 demo-probe 的 `plugin/tests.rs` 都是这个形状）。
+test('`X.rs` + `X/tests.rs` → 通过（文件模块的默认测试位置）', () => {
+  const r = audit({
+    'foo.rs': 'pub fn a() {}\n#[cfg(test)]\nmod tests;\n',
+    'foo/tests.rs': '#[test]\nfn t() {}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
 // ── 检查 2：测试模块在**文件中部** → 拆分时最容易把生产代码搬进测试文件 ────
 // 临时目录的基线是 0，放任何内联测试都会先触发棘轮 ERROR，故这里不断言退出码，
 // 只断言告警**确实发出**（退出码由下面的棘轮用例单独覆盖）。
