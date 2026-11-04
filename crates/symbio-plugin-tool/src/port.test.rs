@@ -374,6 +374,7 @@ fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext,
             permitted: true,
             deny_reason: String::new(),
             scratch_dir: None,
+            reader: None,
         },
         PortInput {
             port: TOOL,
@@ -503,6 +504,7 @@ fn authz_call(
             permitted: true,
             deny_reason: String::new(),
             scratch_dir: None,
+            reader: None,
         },
         PortInput {
             port: TOOL,
@@ -696,6 +698,7 @@ fn open_call(
             permitted: true,
             deny_reason: String::new(),
             scratch_dir: None,
+            reader: None,
         },
         PortInput {
             port: TOOL,

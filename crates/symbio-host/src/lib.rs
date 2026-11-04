@@ -13,7 +13,7 @@ use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
 use symbio_plugin_api::port::{
-    PortExecutor, PortFactEmit, PortFactWriter, PortPayload, PORT_FAMILY,
+    PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter, PortPayload, PORT_FAMILY,
 };
 use symbio_plugin_api::FactDraft;
 use symbio_plugin_loop::ring::{
@@ -60,9 +60,9 @@ pub fn scope_of(session_id: &str) -> u64 {
 pub struct Host {
     root: Arc<dyn Plugin>,
     facts: Mutex<HashMap<u64, Vec<Fact>>>,
-    /// 世界事实的**种类**清单（按可见域）：执行体经 `emit` 落下的非五类事实。
-    /// 环只按种类字符串问存在性，不解释它们（`exists` 的数据底）。
-    world: Arc<Mutex<HashMap<u64, Vec<String>>>>,
+    /// 世界事实（按可见域）：身份 + 种类 + 不透明载荷。环只按种类问存在性；
+    /// 执行体经通用 `reader` 读载荷——宿主是唯一实现方。
+    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
     idle: Mutex<HashMap<u64, u64>>,
     started: Instant,
     concurrency: usize,
@@ -255,18 +255,46 @@ impl DriveCtx for HostCtx<'_> {
         self.host.concurrency
     }
 
-    /// 非五类事实的去处：记下它们的种类，供环按字符串问存在性。
+    /// 非五类事实的去处：记下身份 / 种类 / 载荷，供环问存在性与执行体读事实。
     fn outlet(&self) -> PortFactEmit {
         PortFactEmit::new(Arc::new(WorldWriter {
             world: Arc::clone(&self.host.world),
             scope: self.scope,
         }))
     }
+
+    /// 交给执行体的事实读面（宿主实现；环只转交）。
+    fn fact_reader(&self) -> Option<Arc<dyn PortFactReader>> {
+        Some(Arc::new(HostReader {
+            world: Arc::clone(&self.host.world),
+            scope: self.scope,
+        }))
+    }
 }
 
-/// 世界事实的写口：只记种类，不解释载荷（环与宿主都不认识业务名）。
+/// 只读事实面：按可见域交出世界事实的副本（载荷不透明）。
+struct HostReader {
+    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
+    scope: u64,
+}
+
+impl PortFactReader for HostReader {
+    fn facts(&self, scope: u64) -> Vec<PortFact> {
+        if scope != self.scope {
+            return Vec::new();
+        }
+        self.world
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&scope)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+/// 世界事实的写口：记身份 / 种类 / 载荷，不解释语义（环与宿主都不认识业务名）。
 struct WorldWriter {
-    world: Arc<Mutex<HashMap<u64, Vec<String>>>>,
+    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
     scope: u64,
 }
 
@@ -279,9 +307,14 @@ impl PortFactWriter for WorldWriter {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let bucket = world.entry(self.scope).or_default();
         for fact in facts {
-            if !bucket.iter().any(|kind| kind == &fact.kind) {
-                bucket.push(fact.kind);
+            if bucket.iter().any(|known| known.id == fact.key) {
+                continue;
             }
+            bucket.push(PortFact {
+                id: fact.key,
+                kind: fact.kind,
+                payload: fact.payload,
+            });
         }
     }
 }
@@ -290,7 +323,7 @@ impl PortFactWriter for WorldWriter {
 struct MultiSource {
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
     request: DriveRequest,
-    world: Arc<Mutex<HashMap<u64, Vec<String>>>>,
+    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
 }
 
 impl DebtSource for MultiSource {
@@ -337,7 +370,7 @@ impl DebtSource for MultiSource {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(&scope)
-            .is_some_and(|kinds| kinds.iter().any(|known| known == kind))
+            .is_some_and(|facts| facts.iter().any(|known| known.kind == kind))
     }
 }
 

@@ -10,8 +10,8 @@ use futures::future::join_all;
 use serde_json::{json, Value};
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
-    PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortFactWriter, PortInput,
-    PortOutcome,
+    PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortFactReader, PortFactWriter,
+    PortInput, PortOutcome,
 };
 use symbio_plugin_api::{ExecAbortSignal, ExecEventSink};
 
@@ -43,6 +43,11 @@ pub trait DriveCtx: Send + Sync {
     /// 非五类事实的去处（世界事实留在应用侧写口）。
     fn outlet(&self) -> PortFactEmit {
         PortFactEmit::silent()
+    }
+
+    /// 交给执行体的事实读面（宿主实现）。环只**原样转交**，不调用、不解释。
+    fn fact_reader(&self) -> Option<Arc<dyn PortFactReader>> {
+        None
     }
 }
 
@@ -251,6 +256,7 @@ async fn dispatch(ctx: &dyn DriveCtx, scope: u64, row: DebtRow, attempt: u32, no
         permitted: true,
         deny_reason: String::new(),
         scratch_dir: None,
+        reader: ctx.fact_reader(),
     };
     let outcome = executor
         .execute(

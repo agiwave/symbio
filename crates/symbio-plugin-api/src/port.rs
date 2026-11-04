@@ -99,6 +99,22 @@ pub struct PortInput {
     pub payload: Value,
 }
 
+/// 读面的一行：身份 + 种类 + **不透明**载荷（本文件不定义任何世界词）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PortFact {
+    /// 事实身份（入库事件的 id）。
+    pub id: String,
+    /// 事实种类（字符串透传，解释权在声明方）。
+    pub kind: String,
+    pub payload: Value,
+}
+
+/// 通用执行体上下文的事实读面：**宿主实现、执行体使用**；环不调用、不解释。
+/// 不是具名世界接口——它只认「身份 / 种类 / 载荷」三样通用形状。
+pub trait PortFactReader: Send + Sync + 'static {
+    fn facts(&self, scope: u64) -> Vec<PortFact>;
+}
+
 /// 一笔债的执行上下文（`DE-047` I-6.5 / D-305 裁决一）：命名不带世界词。
 #[derive(Clone)]
 pub struct PortExecContext {
@@ -127,6 +143,8 @@ pub struct PortExecContext {
     pub deny_reason: String,
     /// 工作目录（宿主为本轮准备的可写目录）；`None` = 无。
     pub scratch_dir: Option<PathBuf>,
+    /// 事实读面（宿主实现）：执行体按需读本可见域的事实；`None` = 无。
+    pub reader: Option<Arc<dyn PortFactReader>>,
 }
 
 /// provider 执行一笔债期间追加事实草稿的通用出口（`DE-048` D-305 裁决一）。
