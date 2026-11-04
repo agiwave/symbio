@@ -338,7 +338,7 @@ pub(crate) fn latest_snapshot_index(events: &[Event]) -> Option<usize> {
 /// **同一次调用的两条结果**而只留最后那条（第一次的结果凭空消失）。
 /// 过渡期的**适配器路径**（测试夹具 / 旧宿主，没有端口执行体）：环代组一份应答承载。
 ///
-/// 生产路径恒由 `symbio-plugin-model` 的执行体交回 [`PortReply`]（D-317）；本函数
+/// 生产路径恒由 `symbio-plugin-model` 的执行体交回 [`PortReply`]（D-319）；本函数
 /// 只服务「没有执行体」的旧路径，随 `turn_runner` 退场一并删除（P4）。
 pub(crate) fn reply_of_turn(
     turn: &symbio_sdk::adapters::LlmTurn,
@@ -398,7 +398,7 @@ pub(crate) fn reply_of_turn(
 /// 一笔工具结果的**结果半**：`tool` 消息，按调用配对取 id（不是按工具名）。
 ///
 /// 只服务**没有端口应答承载**的路径（假分发方 / 唤醒结果）；生产路径的结果消息
-/// 由 `port=tool` 的执行体交回（`D-317`），环只按序追加。
+/// 由 `port=tool` 的执行体交回（`D-319`），环只按序追加。
 pub(crate) fn tool_exchange_message(
     turn: &symbio_sdk::adapters::LlmTurn,
     outcome: &super::super::tool_dispatch::CallOutcome,

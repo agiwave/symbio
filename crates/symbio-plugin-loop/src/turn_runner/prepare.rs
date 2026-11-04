@@ -79,7 +79,7 @@ pub(crate) struct Prepared {
     /// （`D-222` 订正 3：草稿先于任何动作存在），建草稿那一刻它还不在事实源里。
     pub(crate) base_messages: Vec<symbio_kernel::llm::PromptMessage>,
     pub(crate) exchange: Vec<symbio_kernel::llm::PromptMessage>,
-    /// 应答配对（执行体交回，`D-317`）：环只按它把结果挂回调用，不解释键的含义。
+    /// 应答配对（执行体交回，`D-319`）：环只按它把结果挂回调用，不解释键的含义。
     pub(crate) reply_links: Vec<(String, String)>,
     pub(crate) tool_round: usize,
     pub(crate) cost_ms: u64,

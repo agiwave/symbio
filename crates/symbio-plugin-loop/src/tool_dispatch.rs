@@ -126,7 +126,7 @@ pub(crate) struct ToolPortCall {
     pub(crate) call: port::Call,
     /// 工具名（LLM 可见名；授权事实的载荷要它）。
     pub(crate) name: String,
-    /// 应答配对键（执行体交回的 `PortReply::links`，`D-317`）：环只搬运它，
+    /// 应答配对键（执行体交回的 `PortReply::links`，`D-319`）：环只搬运它，
     /// 让工具结果与模型侧的 assistant 声明用同一个配对键。
     pub(crate) reply_key: Option<String>,
     /// 授权动作的结论（创建时为 `false`，gate 调用写入）。
@@ -263,7 +263,7 @@ pub struct CallOutcome {
     /// 随结果携带而不是当场写进共用的取件面：并发执行时落地顺序由 provider 决定，
     /// 而效果事实的顺序必须等于**调用顺序**——由环在整轮收口时按序交回。
     pub effects: Vec<EffectInput>,
-    /// 应答承载（`D-317`）：工具结果消息由执行体组装，环只按序追加。
+    /// 应答承载（`D-319`）：工具结果消息由执行体组装，环只按序追加。
     pub reply: symbio_plugin_api::port::PortReply,
 }
 
@@ -1603,7 +1603,7 @@ impl SessionDispatchPort {
         // 效果出参随这一笔走（不写进共用取件面）：环在整轮收口时按**调用顺序**
         // 交回，并发完成的次序因此不会改变事实顺序。
         outcome.effects = effects;
-        // 应答承载（`D-317`）：一笔调用一条结果消息；环只按序追加。
+        // 应答承载（`D-319`）：一笔调用一条结果消息；环只按序追加。
         outcome.reply = replies.into_iter().next().unwrap_or_default();
         outcome
     }

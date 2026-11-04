@@ -56,7 +56,7 @@ pub(crate) const TOOL: &str = ports::TOOL;
 const KEY_TOOL_NAME: &str = "name";
 const KEY_ARGS: &str = "args";
 const KEY_TOOL_CALL_ID: &str = "call_id";
-/// 应答配对键（环从模型应答承载里搬来的纯值，`D-317`）：工具结果按它挂回调用。
+/// 应答配对键（环从模型应答承载里搬来的纯值，`D-319`）：工具结果按它挂回调用。
 const KEY_REPLY_KEY: &str = "reply_key";
 /// 结果正文末尾的附注（环算好的同参重复提示；执行体只追加，不解释来源）。
 const KEY_REPLY_NOTE: &str = "reply_note";
@@ -687,7 +687,7 @@ async fn finish_with(
     out
 }
 
-/// 补齐应答承载（`D-317`）：工具结果的 `tool` 消息**在端口里组装**。
+/// 补齐应答承载（`D-319`）：工具结果的 `tool` 消息**在端口里组装**。
 ///
 /// 环只搬来配对键与结果正文附注（纯值），消息文本、角色、配对全在这里定；
 /// 没有配对键（唤醒 / 无模型往返的路径）就不产出——环侧按旧口径兜底。

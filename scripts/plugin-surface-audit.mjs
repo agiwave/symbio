@@ -108,7 +108,10 @@ export const SDK_BASELINE = 109
 // 136 → 137（`D-314`）：`response` 载荷的写方移入执行体后，`answer_id` 必须与读侧
 // 共用内核那一份派生（`event_output_text_node_id`）；两处各算一遍会静默漂移。
 // 消费方是 `symbio-plugin-model`，不是控制面缺口。
-export const GRAMMAR_BASELINE = 137
+// 137 → 138（`D-319`）：model 执行体组装 assistant 应答要声明 `tool_calls` 的配对键，
+// 需要 `PromptToolCall` 这一值类型；插件不得直依赖 `symbio_kernel`（HS-001），只能经
+// 门面转出。消费方是 `symbio-plugin-model` 的执行体。
+export const GRAMMAR_BASELINE = 138
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。

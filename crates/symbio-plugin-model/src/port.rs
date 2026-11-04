@@ -163,20 +163,56 @@ impl PortExecutor for ModelExecutor {
             )
             .await
         {
-            Ok(output) => PortOutcome {
-                // 一次往返的终稿 → `response` 载荷：正文 / 思考、节点身份、终答折叠、
-                // 用量与工具调用集合展开都由执行体装配（`D-314`）。
-                facts: vec![outcome_payload(
-                    &request,
-                    Some(&output),
-                    &rows.snapshot(),
-                    started,
-                    None,
-                )],
-                error: None,
-                // 应答承载（D-317）：assistant 消息的组装是执行体的私事，环只追加与配对。
-                reply: prompt_reply(&request, &output),
-            },
+            Ok(output) => {
+                // 应答承载（D-319）：assistant 正文 + 逐条 `tool_calls` 声明在这里组装，
+                // 环只把 `messages` 按序追加、按 `links` 配对。id 取法与环侧旧实现同源
+                // （wire id → 节点 id → 合成 `call_<名>_<轮>_<序号>`）。
+                let present = |id: &Option<String>| id.clone().filter(|s| !s.trim().is_empty());
+                let mut messages: Vec<PromptMessage> = Vec::new();
+                let mut links = Vec::new();
+                if !output.text.trim().is_empty() {
+                    messages.push(PromptMessage {
+                        role: "assistant".into(),
+                        text: output.text.trim().to_string(),
+                        tool_call_id: None,
+                        tool: None,
+                        tool_calls: None,
+                    });
+                }
+                for (index, call) in output.tool_calls.iter().enumerate() {
+                    let name = call.name.as_deref().unwrap_or("<unnamed>");
+                    let id = present(&call.wire_id)
+                        .or_else(|| present(&call.id))
+                        .unwrap_or_else(|| format!("call_{}_{}_{}", name, request.round, index));
+                    if let Some(key) = call.id.clone().filter(|s| !s.trim().is_empty()) {
+                        links.push((key, id.clone()));
+                    }
+                    messages.push(PromptMessage {
+                        role: "assistant".into(),
+                        text: format!("调用工具 {} {}", name, call.arguments),
+                        tool_call_id: Some(id.clone()),
+                        tool: Some(name.to_string()),
+                        tool_calls: Some(vec![symbio_plugin_api::PromptToolCall {
+                            id,
+                            name: name.to_string(),
+                            arguments: call.arguments.clone(),
+                        }]),
+                    });
+                }
+                PortOutcome {
+                    // 一次往返的终稿 → `response` 载荷：正文 / 思考、节点身份、终答折叠、
+                    // 用量与工具调用集合展开都由执行体装配（`D-314`）。
+                    facts: vec![outcome_payload(
+                        &request,
+                        Some(&output),
+                        &rows.snapshot(),
+                        started,
+                        None,
+                    )],
+                    error: None,
+                    reply: PortReply { messages, links },
+                }
+            }
             Err(PluginError::Aborted) => PortOutcome {
                 // 半截产出仍要留痕：中止是这一笔的状态，不是「没有发生过」。
                 facts: vec![outcome_payload(
@@ -414,65 +450,6 @@ fn dispatch_calls(
             })
         })
         .collect()
-}
-
-/// 一轮往返的**应答承载**（D-317）：assistant 正文 + 逐条 `tool_calls` 声明。
-///
-/// 这一段原本住在环里（`turn_runner::facts::assistant_exchange`）；迁到这里之后，
-/// 环只把 [`PortReply::messages`] 按序追加进下一轮请求，不再构造任何世界消息。
-///
-/// id 的取法与环侧旧实现**逐字同源**（wire id → 节点 id → 合成），跨轮唯一性由
-/// `round` 保证；`links` 交回「节点 id → 应答配对键」，环按它把工具结果挂回调用。
-fn prompt_reply(request: &RoundTripRequest, output: &TurnOutput) -> PortReply {
-    let mut messages: Vec<PromptMessage> = Vec::new();
-    let mut links = Vec::new();
-    if !output.text.trim().is_empty() {
-        messages.push(PromptMessage {
-            role: "assistant".into(),
-            text: output.text.trim().to_string(),
-            tool_call_id: None,
-            tool: None,
-            tool_calls: None,
-        });
-    }
-    for (index, call) in output.tool_calls.iter().enumerate() {
-        let name = call.name.as_deref().unwrap_or("<unnamed>");
-        let id = prompt_call_id(call, request.round, index);
-        if let Some(key) = call.id.clone().filter(|s| !s.trim().is_empty()) {
-            links.push((key, id.clone()));
-        }
-        messages.push(PromptMessage {
-            role: "assistant".into(),
-            text: format!("调用工具 {} {}", name, call.arguments),
-            tool_call_id: Some(id.clone()),
-            tool: Some(name.to_string()),
-            tool_calls: Some(vec![symbio_plugin_api::PromptToolCall {
-                id,
-                name: name.to_string(),
-                arguments: call.arguments.clone(),
-            }]),
-        });
-    }
-    PortReply { messages, links }
-}
-
-/// 合成 / 选取 `tool_call_id`（跨轮唯一，见 [`prompt_reply`]）。
-///
-/// 优先级与环侧旧实现同一口径：wire id → 节点 id → 合成 `call_<tool>_<轮>_<序号>`。
-fn prompt_call_id(call: &TurnToolCallInfo, round: usize, index: usize) -> String {
-    fn present(id: &Option<String>) -> Option<String> {
-        id.clone().filter(|s| !s.trim().is_empty())
-    }
-    present(&call.wire_id)
-        .or_else(|| present(&call.id))
-        .unwrap_or_else(|| {
-            format!(
-                "call_{}_{}_{}",
-                call.name.as_deref().unwrap_or("<unnamed>"),
-                round,
-                index
-            )
-        })
 }
 
 /// 执行体的流式读数与转发口（`D-314` 的「流」通道）。

@@ -162,7 +162,6 @@ pub(crate) async fn refuse(
     parent_updates: &mut Vec<ChatNode>,
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
-    replies: &mut Vec<symbio_plugin_api::port::PortReply>,
 ) {
     plugin_warn!(
         "session",
@@ -178,7 +177,6 @@ pub(crate) async fn refuse(
         Some(symbio_kernel::event::result_node_id(id)),
         Some(name),
     );
-    replies.push(reply_of_node(&tool_msg, id, name));
     tool_messages.push(tool_msg);
 
     // 拒掉的调用同样必须收敛父节点：只推结果子节点，父节点就永远停在
@@ -462,7 +460,6 @@ async fn emit_terminal(
     parent_updates: &mut Vec<ChatNode>,
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
-    replies: &mut Vec<symbio_plugin_api::port::PortReply>,
 ) {
     match terminal {
         PreTerminal::Overflow {
@@ -485,7 +482,6 @@ async fn emit_terminal(
             if let Some(obj) = tool_msg.meta.as_mut().and_then(|m| m.as_object_mut()) {
                 obj.insert("failure_kind".into(), json!("overflow_dropped"));
             }
-            replies.push(reply_of_node(&tool_msg, &id, &name));
             tool_messages.push(tool_msg);
             // 结果子节点必须有父节点终态配套（同工具终态不变量）：否则前端永远转圈。
             if let Some(parent_update) = emit_parent_finalized(
@@ -529,7 +525,6 @@ async fn emit_terminal(
                 parent_updates,
                 effects,
                 decls,
-                replies,
             )
             .await;
         }
@@ -630,13 +625,9 @@ async fn finish_call(
     if !success && !tool_msg.is_interaction() {
         tool_msg.status = Some(NodeStatus::Completed);
     }
-    // 应答承载：执行体产出的优先（`D-317`）；没有配对键的路径（唤醒 / 旧适配器）
-    // 按节点正文兜底——消息文本与 `tool_call_id` 与旧口径逐字同源。
-    if reply.messages.is_empty() {
-        replies.push(reply_of_node(&tool_msg, &id, &name));
-    } else {
-        replies.push(reply);
-    }
+    // 应答承载（`D-319`）：只交执行体产出的那一份；没有端口承载的路径
+    // （假分发方 / 唤醒结果）由环侧 `land_round` 按旧规则兜底。
+    replies.push(reply);
 
     if tool_msg.is_interaction() {
         // user_prompt 节点本身即是工具"结果"（待用户审批/回答）：
@@ -864,7 +855,6 @@ pub(crate) async fn run_calls(
                     &mut parent_updates,
                     effects,
                     &decls,
-                    &mut replies,
                 )
                 .await;
             }
@@ -907,24 +897,6 @@ pub(crate) async fn run_calls(
     }
 
     (tool_messages, parent_updates, replies)
-}
-
-/// 由结果节点兜底组装应答承载（仅限没有端口应答的路径）。
-fn reply_of_node(node: &ChatNode, call_id: &str, name: &str) -> symbio_plugin_api::port::PortReply {
-    let text = match node.content.as_ref() {
-        Some(MessageContent::Text(t)) => t.clone(),
-        _ => String::new(),
-    };
-    symbio_plugin_api::port::PortReply {
-        messages: vec![symbio_plugin_api::PromptMessage {
-            role: "tool".into(),
-            text,
-            tool_call_id: Some(call_id.to_string()),
-            tool: Some(name.to_string()),
-            tool_calls: None,
-        }],
-        links: Vec::new(),
-    }
 }
 
 /// 同参重复调用的判据键：`(工具名, 参数文本)`。
@@ -981,7 +953,7 @@ pub struct ExecResult {
     pub failure_kind: Option<String>,
     /// 执行体交回的「为什么没履约」（中性文本；环只交给能力包的效果端口）。
     pub why: String,
-    /// 执行体交回的应答承载（`D-317`）：环只搬运、按配对键挂回调用。
+    /// 执行体交回的应答承载（`D-319`）：环只搬运、按配对键挂回调用。
     pub reply: symbio_plugin_api::port::PortReply,
 }
 

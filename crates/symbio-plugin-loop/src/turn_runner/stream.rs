@@ -87,8 +87,9 @@ pub(crate) fn begin_model(
     let turn = run.turn;
     let drive = run.drive_seq;
     let produced_by = run.user_seq;
-    // 工具轮序号（纯值）：应答承载里合成 id 的跨轮唯一性由它保证（D-317）。
-    let round_index = run.tool_round;
+    // 轮序（纯值）：应答承载里合成 id 的跨轮唯一性由它保证（D-319）。
+    // 从宣布载荷取——宣布与派出是同一笔的两步，载荷记的就是宣布时的轮序。
+    let round_index = payload.get("round").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     // 基线 + 本轮交换。**拼接消息数组**：拼字符串会把角色拍平、丢掉 `tool_call_id`。
     // 端口执行体在场时这份数组已经随请求载荷交出（`announce-model` 行装配）；
     // 过渡期的适配器路径仍按原位消费它。
@@ -448,7 +449,7 @@ pub(crate) struct ModelFlight {
     /// `None` = 没有落输出事实（控制面失败 / 存储失败），此时**不能**把 id 记进
     /// `responses`——读侧会去查一条不存在的正文。
     pub(crate) output: Option<(serde_json::Value, String)>,
-    /// 执行体交回的应答承载（`D-317`）：环只按序追加、按 `links` 配对。
+    /// 执行体交回的应答承载（`D-319`）：环只按序追加、按 `links` 配对。
     pub(crate) reply: symbio_plugin_api::port::PortReply,
 }
 
@@ -514,7 +515,7 @@ where
         "turn": run.turn,
         "drive": run.drive_seq,
         "round_id": call.id.clone(),
-        // 工具轮序号（纯值）：应答承载的合成 id 用它保证跨轮唯一（`D-317`）。
+        // 工具轮序号（纯值）：应答承载的合成 id 用它保证跨轮唯一（`D-319`）。
         "round": run.tool_round,
     });
     super::super::port::announce_with(store, &call, run.turn, run.user_seq, payload.clone())?;
@@ -704,7 +705,7 @@ where
         }
     };
     run.cost_ms += rt.cost_ms;
-    // 应答承载（`D-317`）：环只按序追加、只按 `links` 配对；消息怎么组装是执行体的私事。
+    // 应答承载（`D-319`）：环只按序追加、只按 `links` 配对；消息怎么组装是执行体的私事。
     run.exchange.extend(flight.reply.messages);
     run.reply_links.extend(flight.reply.links);
     // 每轮的产出载荷在**分发之前**取定：工具分发的定稿会改写它，
@@ -920,7 +921,7 @@ pub(crate) async fn open_round(
         return;
     }
     run.round_turn = Some(rt.clone());
-    // 这一轮的请求半已在落款时推进 `exchange`（应答承载，`D-317`）；结果半按笔
+    // 这一轮的请求半已在落款时推进 `exchange`（应答承载，`D-319`）；结果半按笔
     // 随到随推（[`land_round`]），消息顺序因此是「一次声明、N 条结果」。
     run.tool_round += 1;
     for call in calls {
@@ -1161,13 +1162,14 @@ async fn land_one(
     }
 
     // 把这一笔的**结果半**累加进 prompt，继续下一轮；请求半在开账时已经推进。
-    // 结果消息由执行体组装（`D-317`），环只按序追加。
+    // 结果消息由执行体组装（`D-319`），环只按序追加。
     if let Some(outcome) = &outcome {
         if outcome.reply.messages.is_empty() {
             // 过渡口径（假分发方 / 唤醒结果）：没有端口应答承载时按旧规则兜底。
             if let Some(rt) = run.round_turn.as_ref() {
                 let round = run.tool_round.saturating_sub(1);
-                run.exchange.push(tool_exchange_message(rt, outcome, round));
+                let message = tool_exchange_message(rt, outcome, round);
+                run.exchange.push(message);
             }
         } else {
             run.exchange.extend(outcome.reply.messages.clone());

@@ -612,7 +612,7 @@ fn fixture_outcome(result_text: String, success: bool, pending: Option<Value>) -
     }
 }
 
-/// 替身也遵守应答承载合同（`D-317`）：与生产 `ToolPort::attach_reply` 同一口径。
+/// 替身也遵守应答承载合同（`D-319`）：与生产 `ToolPort::attach_reply` 同一口径。
 fn fixture_reply(mut out: PortOutcome, payload: &Value) -> PortOutcome {
     if out.error.is_some() {
         return out;
