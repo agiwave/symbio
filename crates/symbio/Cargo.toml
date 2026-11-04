@@ -17,6 +17,8 @@ symbio-sdk = { path = "../symbio-sdk" }
 symbio-kernel = { path = "../symbio-kernel" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-deploy = { path = "../symbio-deploy" }
+# 驱动入口：把「某 scope 有新事实」交给义务环（`symbio-host` 只做环的装配与支持面）。
+symbio-host = { path = "../symbio-host" }
 # 主机装配必须带嵌入臂：语义检索的实现经 `submit_object_creator!` 注册在这里，关掉就等于关掉那条能力（D-254）。
 symbio-providers = { path = "../symbio-providers", features = ["embedding"] }
 # >>> plugin-links:begin

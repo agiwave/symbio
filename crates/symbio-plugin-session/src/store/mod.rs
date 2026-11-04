@@ -444,14 +444,58 @@ pub(crate) async fn resolve_store(
         return Ok(Arc::clone(store));
     }
 
-    let store = Arc::new(SessionStore::new(dir.to_path_buf()));
-    if let Err(e) = store.migrate_split_messages().await {
-        symbio_plugin_api::plugin_warn!("session", "会话存储迁移失败（读路径有兜底）: {}", e);
-    }
+    let store = ready_shared_store(dir).await;
 
     // OnceCell::set 在多 writer 竞争时可能失败，但失败时另一线程已成功，直接拿
     let _ = slot.set(Arc::clone(&store));
     Ok(slot.get().cloned().unwrap_or_else(|| Arc::clone(&store)))
+}
+
+/// 按插件目录共享的存储实例：**进程内一个目录只有一个**。
+///
+/// 为什么需要它：生产驱动入口要读**同一个**事实源来发现新事实，而 `WalStore`
+/// 在进程内按会话只许有**一个**写句柄（后开的那个不持跨进程令牌）。插件与装配
+/// 各自 `SessionStore::new` 会各开一份，后开的把先开的顶掉——事实源随即分叉。
+/// 因此目录 → 实例的映射放在进程级，两个取用方拿到同一个 `Arc`。
+struct SharedEntry {
+    store: Arc<SessionStore>,
+    migrated: tokio::sync::OnceCell<()>,
+}
+
+fn shared_entries() -> &'static std::sync::Mutex<HashMap<PathBuf, Arc<SharedEntry>>> {
+    static ENTRIES: std::sync::OnceLock<std::sync::Mutex<HashMap<PathBuf, Arc<SharedEntry>>>> =
+        std::sync::OnceLock::new();
+    ENTRIES.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn shared_entry(dir: &Path) -> Arc<SharedEntry> {
+    let mut entries = shared_entries()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Arc::clone(
+        entries
+            .entry(dir.to_path_buf())
+            .or_insert_with(|| {
+                Arc::new(SharedEntry {
+                    store: Arc::new(SessionStore::new(dir.to_path_buf())),
+                    migrated: tokio::sync::OnceCell::new(),
+                })
+            }),
+    )
+}
+
+async fn ready_shared_store(dir: &Path) -> Arc<SessionStore> {
+    let entry = shared_entry(dir);
+    let store = Arc::clone(&entry.store);
+    entry
+        .migrated
+        .get_or_init(|| async move {
+            if let Err(e) = store.migrate_split_messages().await {
+                symbio_plugin_api::plugin_warn!("session", "会话存储迁移失败（读路径有兜底）: {}", e);
+            }
+        })
+        .await;
+    Arc::clone(&entry.store)
 }
 
 #[cfg(test)]

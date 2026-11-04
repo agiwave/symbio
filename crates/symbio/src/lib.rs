@@ -15,6 +15,7 @@
 //! **插件之间不许经本门面互相可见**（E-009：插件只依赖 plugin-api）。
 
 pub mod assembly;
+pub mod drive;
 pub mod init;
 #[cfg(test)]
 mod notify_port_acceptance;

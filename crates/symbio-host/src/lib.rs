@@ -286,7 +286,7 @@ impl DriveSupport for HostDriveSupport {
             return;
         }
         // 协议事实与世界事实同源：都落事实源（同一写口、同一读面）。
-        let event = Event::pending(
+        let mut event = Event::pending(
             ring_event_id(&fact),
             fact.kind,
             Entity::Scope,
@@ -295,6 +295,7 @@ impl DriveSupport for HostDriveSupport {
             "loop",
         )
         .with_payload(fact.payload.clone());
+        event.produced_by = provenance_at(&*self.store, scope);
         let _ = self.store.append(event);
         bucket.push(fact);
     }
@@ -408,7 +409,10 @@ impl PortFactWriter for WorldWriter {
                 "host",
             )
             .with_payload(fact.payload);
-            event.produced_by = fact.produced_by;
+            // 草稿自带溯源时用它；否则指向该域里刚落地的那条事实（I2 的声明类
+            // 不接受无源）。空域不填——那是真正的无源声明，交给事实源拒绝。
+            event.produced_by =
+                fact.produced_by.or_else(|| provenance_at(&*self.store, self.scope));
             let _ = self.store.append(event);
         }
     }
@@ -456,6 +460,21 @@ fn ring_event_id(fact: &DriveFact) -> String {
         Some(shard) => format!("{base}:{shard}"),
         None => base,
     }
+}
+
+/// I2 的溯源位：该 `scope` 里**最近一条已入库事实**的 seq。
+///
+/// 协议事实（`turn × asserted`）与世界事实（端口执行体交的断言 / 收束）都在 I2 的
+/// 「声明类」里，必须带 `produced_by`。宿主这一层拿不到执行体内心的因果，能指出的
+/// 最准确上游就是**该域里刚落地的那条事实**——它们是同一轮义务链上的前件。
+/// 空域（没有任何前件）返回 `None`，由事实源按 I2 拒绝（那是真正的无源声明）。
+fn provenance_at(store: &dyn Store<Event = Event>, scope: u64) -> Option<u64> {
+    store
+        .range(Seq::new(0))
+        .into_iter()
+        .rev()
+        .find(|event| event.scope == scope && event.seq.is_some())
+        .and_then(|event| event.seq.map(|seq| seq.value()))
 }
 
 /// 事件 → 读面的一行（身份 / 端口 / 种类 / 不透明载荷）。

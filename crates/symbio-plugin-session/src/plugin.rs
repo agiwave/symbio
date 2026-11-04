@@ -368,6 +368,11 @@ impl Plugin for SessionPlugin {
             // 读数：本会话 v2 事实源的四列（时延 / 兜底 / 成本 / 断点）。
             // 纯计算、零副作用——既不落盘也不碰消息。
             "stats" => return self.handle_stats(ctx).await,
+            // 编排：把收件箱队首落成 `user.message` 事实（开轮），返回本轮 scope。
+            // 驱动不在本插件里——宿主看到这条事实后单次驱动该 scope。
+            "consume" => return self.handle_consume(ctx).await,
+            // 投影：把该 scope 的终答事实折成消息节点并收束本轮。
+            "project" => return self.handle_project(ctx).await,
             // 读数：本会话改过哪些文件（D-169：`artifact.added` 的一条投影，不是新事实族）。
             // 同样是纯计算、零副作用。
             "changes" => return self.handle_changes(ctx).await,
@@ -678,6 +683,7 @@ fn unbounded_number(key: &str, label: &str, description: &str, default: Value) -
 
 mod nodes;
 mod vdfs_catalog;
+mod turn;
 mod vdfs_inbox;
 mod vdfs_messages;
 mod vdfs_provider;

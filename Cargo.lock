@@ -4145,6 +4145,7 @@ dependencies = [
  "inventory",
  "serde_json",
  "symbio-deploy",
+ "symbio-host",
  "symbio-kernel",
  "symbio-plugin-agent",
  "symbio-plugin-api",

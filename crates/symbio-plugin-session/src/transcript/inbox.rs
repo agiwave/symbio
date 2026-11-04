@@ -408,6 +408,25 @@ impl SessionPlugin {
         announce_drained(&self.change_subs, &state.session_id, &batch);
         batch
     }
+
+    /// 取队首**一条**（一轮的最小单位），并通知这一条已出队。
+    ///
+    /// 与 [`Self::take_inbox_batch`] 的区别只在**数量**：开轮是「一条消息 = 一轮」，
+    /// 补充合并是轮末的可选加工。按批取会把合并上界之外的消息一起抽走，
+    /// 而一条只够开一轮——多抽的那些就再没有开轮的机会了。
+    pub(crate) async fn take_inbox_front(
+        &self,
+        state: &Arc<ActiveSessionState>,
+    ) -> Option<InboxItem> {
+        let item = {
+            let mut inner = state.inner.write().await;
+            inner.inbox.pop_front()
+        };
+        if let Some(item) = &item {
+            announce_drained(&self.change_subs, &state.session_id, std::slice::from_ref(item));
+        }
+        item
+    }
 }
 
 #[cfg(test)]

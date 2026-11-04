@@ -1,0 +1,72 @@
+//! 宿主驱动入口——**只认三样东西**：事实源、`drive` 能力行、事实信封里的 `scope`。
+//!
+//! 这一层**不认识端口名 / 业务事件名**，也不写任何业务事实：端口执行体与债行都由
+//! 插件经 `port` / `debt` 族自报，`drive` 族由环自报，宿主只把「某个 scope 现在
+//! 有新事实」这件事交给环。**加一个新端口 / 新能力 / 新债行，这里一行都不改。**
+//!
+//! ## 为什么没有 `loop { drive }`
+//!
+//! 外层每看到一条新事实只触发**一次**（CP-009）：环内部的轮次推进归环自己，
+//! 它返回 `NoDebt` / `Waiting` 就结束。`Waiting` 等的是某个端口的**响应事实**，
+//! 那条事实落地后由同一个入口再次触发——外层不持「正在跑」这类会话状态。
+//!
+//! ## 幂等
+//!
+//! 入口没有状态：同一个 scope 相邻两次触发，第一次把该 scope 的债还清后，第二次
+//! 的债表现算是空的 ⇒ `NoDebt`。事实源是唯一输入，scope 是唯一域。
+
+use std::sync::Arc;
+
+use symbio_kernel::event::{Event, Seq};
+use symbio_kernel::plugin::{
+    Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
+};
+use symbio_kernel::store::Store;
+use symbio_host::{DriveReport, Host};
+use symbio_sdk::keys::WORKDIR;
+
+/// 一次驱动需要的**世界**：事实源 + 通用上下文（会话 / 提供方 / 工作目录）。
+///
+/// 这里没有端口名，也没有业务事件名——环从 `drive` 族取能力行，从 `port` / `debt`
+/// 族取执行体与债表。
+pub struct FactWorld<'a> {
+    pub facts: Arc<dyn Store<Event = Event>>,
+    pub session_id: &'a str,
+    pub provider: Option<&'a str>,
+    pub workdir: &'a str,
+}
+
+/// 一条新事实落地后，对它信封里的 `scope` **单次**驱动。
+///
+/// 取「最新一条事实」的信封 `scope`——调用方不需要知道端口、债行，也不需要
+/// 自己算 scope。事实源为空 ⇒ 没有可触发的域（错误，而不是一次空驱动）。
+pub async fn drive_on_new_fact(
+    root: &Arc<dyn Plugin>,
+    world: &FactWorld<'_>,
+) -> Result<DriveReport, String> {
+    let head = world.facts.head().value();
+    if head == 0 {
+        return Err("事实源为空：没有可触发的 scope".to_string());
+    }
+    let mut latest = world.facts.range(Seq::new(head - 1));
+    let Some(fact) = latest.pop() else {
+        return Err("事实源 head 与事件表不一致".to_string());
+    };
+    let scope = fact.scope;
+
+    let ctx = PluginSimpleRequest::new(None, None);
+    ctx.set(WORKDIR, world.workdir.to_string());
+    let base: Arc<dyn PluginInvokeRequest> = Arc::new(ctx);
+
+    let host = Host::with_store(Arc::clone(root), Arc::clone(&world.facts));
+    host.drive_at(scope, &base, world.session_id, world.provider)
+        .await
+}
+
+/// 这次驱动是否停在端口上（`Waiting`：只剩租约未过的在飞债）。
+///
+/// 停在端口意味着「等的是那条响应事实」——它落地后由**新事实**再次触发，
+/// 而不是由调用方轮询重试。
+pub fn stalled(report: &DriveReport) -> bool {
+    matches!(report.outcome, symbio_host::DriveOutcome::Waiting(_))
+}
