@@ -57,15 +57,22 @@ pub struct Host {
     root: Arc<dyn Plugin>,
     facts: Mutex<HashMap<u64, Vec<Fact>>>,
     started: Instant,
+    concurrency: usize,
 }
 
 impl Host {
-    /// 由根插件造宿主。事实在进程内，重启恢复由后续持久化接入。
+    /// 由根插件造宿主。事实在进程内，重启恢复由后续持久化接入；并发缺省串行。
     pub fn new(root: Arc<dyn Plugin>) -> Self {
+        Self::with_concurrency(root, 1)
+    }
+
+    /// 指定同轮并发派发上限（配置数据，来自调用方的限额；环不写死）。
+    pub fn with_concurrency(root: Arc<dyn Plugin>, concurrency: usize) -> Self {
         Self {
             root,
             facts: Mutex::new(HashMap::new()),
             started: Instant::now(),
+            concurrency: concurrency.max(1),
         }
     }
 
@@ -198,6 +205,10 @@ impl DriveCtx for HostCtx<'_> {
 
     fn now_ms(&self) -> u64 {
         self.host.started.elapsed().as_millis() as u64
+    }
+
+    fn concurrency(&self) -> usize {
+        self.host.concurrency
     }
 }
 

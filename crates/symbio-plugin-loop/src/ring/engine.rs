@@ -3,8 +3,10 @@
 //! 入口只有 [`drive`]；环不持有账本、预算、执行体注册表或任何跨步可变状态——
 //! 每一步都从 [`DriveCtx`] 提供的只读投影重算。
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
+use futures::future::join_all;
 use serde_json::{json, Value};
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
@@ -35,6 +37,9 @@ pub trait DriveCtx: Send + Sync {
     /// 当前时刻（毫秒，宿主给的相对时间轴）。
     fn now_ms(&self) -> u64;
 
+    /// 同轮并发派发的上限（宿主给的配置数据；环不写死常数）。
+    fn concurrency(&self) -> usize;
+
     /// 非五类事实的去处（世界事实留在应用侧写口）。
     fn outlet(&self) -> PortFactEmit {
         PortFactEmit::silent()
@@ -59,19 +64,15 @@ pub struct RunReport {
     pub dispatched: usize,
 }
 
-/// 选债结果。
-#[derive(Debug, Clone)]
-enum Action {
-    /// 派发一笔（可能先补 `request`）。
-    Dispatch { row: DebtRow, attempt: u32 },
+/// 选债结果：这一圈的全部可动作。
+#[derive(Debug, Clone, Default)]
+struct Batch {
+    /// 可派发（可能先补 `request`）。
+    dispatch: Vec<(DebtRow, u32)>,
     /// 租约已过：推进尝试或判死。
-    Expire {
-        row: DebtRow,
-        attempt: u32,
-        next: Option<u32>,
-    },
+    expire: Vec<(DebtRow, u32, Option<u32>)>,
     /// 已发未配，租约未过。
-    Wait { key: DebtKey },
+    waiting: Vec<DebtKey>,
 }
 
 /// 驱动一个可见域到没有可还的债、只剩在飞。
@@ -82,35 +83,41 @@ pub async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
         let view = FactView::new(&facts);
         let rows = ctx.source().rows(&view, scope);
         let now_ms = ctx.now_ms();
-        let Some(action) = plan(&view, &rows, scope, now_ms) else {
-            return RunReport {
-                outcome: DriveOutcome::NoDebt,
-                dispatched,
-            };
-        };
-        match action {
-            Action::Wait { key } => {
-                return RunReport {
-                    outcome: DriveOutcome::Waiting(vec![key]),
-                    dispatched,
-                }
+        let batch = plan(&view, &rows, scope, now_ms);
+
+        if !batch.dispatch.is_empty() {
+            let cap = ctx.concurrency().max(1);
+            for chunk in batch.dispatch.chunks(cap) {
+                let run = chunk
+                    .iter()
+                    .map(|(row, attempt)| dispatch(ctx, scope, row.clone(), *attempt, now_ms));
+                join_all(run).await;
+                dispatched += chunk.len();
             }
-            Action::Expire {
-                row,
-                attempt,
-                next,
-            } => expire(ctx, scope, row, attempt, next, now_ms),
-            Action::Dispatch { row, attempt } => {
-                dispatch(ctx, scope, row, attempt, now_ms).await;
-                dispatched += 1;
-            }
+            continue;
         }
+        if !batch.expire.is_empty() {
+            for (row, attempt, next) in batch.expire {
+                expire(ctx, scope, row, attempt, next, now_ms);
+            }
+            continue;
+        }
+        let outcome = if batch.waiting.is_empty() {
+            DriveOutcome::NoDebt
+        } else {
+            DriveOutcome::Waiting(batch.waiting)
+        };
+        return RunReport {
+            outcome,
+            dispatched,
+        };
     }
 }
 
-/// 选一笔最可还的债：先找可派发的，再找在飞的。
-fn plan(view: &FactView<'_>, rows: &[DebtRow], scope: u64, now_ms: u64) -> Option<Action> {
-    let mut waiting: Option<Action> = None;
+/// 选这一圈的全部可还之债：可派发的进批，租约已过的排进过期，其余在飞收进等待。
+fn plan(view: &FactView<'_>, rows: &[DebtRow], scope: u64, now_ms: u64) -> Batch {
+    let mut batch = Batch::default();
+    let mut seen = HashSet::new();
     for row in rows {
         if let Some(after) = &row.after {
             if view.closing(after).is_none() {
@@ -127,27 +134,23 @@ fn plan(view: &FactView<'_>, rows: &[DebtRow], scope: u64, now_ms: u64) -> Optio
         if view.closing(&key).is_some() {
             continue;
         }
+        // 幂等底线：同一 (port, id, attempt) 一圈只入批一次。
+        if !seen.insert(key.clone()) {
+            continue;
+        }
         let Some(sent) = view.last_sent(&key) else {
-            return Some(Action::Dispatch {
-                row: row.clone(),
-                attempt,
-            });
+            batch.dispatch.push((row.clone(), attempt));
+            continue;
         };
         let deadline = sent.at_ms.saturating_add(row.lease_ms);
         if now_ms < deadline {
-            if waiting.is_none() {
-                waiting = Some(Action::Wait { key });
-            }
+            batch.waiting.push(key);
             continue;
         }
         let next = (attempt < row.max_attempts).then(|| attempt + 1);
-        return Some(Action::Expire {
-            row: row.clone(),
-            attempt,
-            next,
-        });
+        batch.expire.push((row.clone(), attempt, next));
     }
-    waiting
+    batch
 }
 
 /// 租约已过：有下一笔就记账并再举，没有就判死。
