@@ -41,6 +41,7 @@ function cleanFiles() {
 
 function cleanBaseline() {
   return {
+    target: 0,
     faces: {
       F1: { prod: 3, test: 2 },
       F2: { prod: 1, test: 0 },
@@ -134,6 +135,20 @@ test('TR-002 只升不降：删掉一处 turn 词根但基线不动 ⇒ 红', ()
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /TR-002/)
     assert.match(r.out, /F2 生产面收窄 1 → 0/)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('TR-002 目标写死 0：基线把 target 改大 ⇒ 红（不许给退场设终点）', () => {
+  const baseline = cleanBaseline()
+  baseline.target = 5
+  const box = sandbox(cleanFiles(), baseline)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /TR-002/)
+    assert.match(r.out, /target 必须是 0/)
   } finally {
     box.cleanup()
   }

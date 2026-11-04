@@ -23,11 +23,18 @@
  * 每面分**生产 / 测试**两组计数：生产面严格冻结（新增即红），测试面只许降。
  * 注释正文不扫（注释由 D-016 管），`docs/**` 不扫（文档是「为什么」的 owner）。
  *
+ * ## 目标：0
+ *
+ * 基线只记**存量**，目标另写 `target: 0`——轮次概念退场后，每个面的正确读数就是 0。
+ * 计数下降是拆题面的**预期形态**，不是「对齐数字」：本脚本承认退场，不为存量找说法。
+ * 到 0 之后不再靠棘轮推动，而由 `TR-003` 守「空扫不退化」（范围读不出仍然红）。
+ *
  * ## 四条判红
  *
  * - `TR-001` **新增**：任一面（生产 / 测试）计数高于基线。
  * - `TR-002` **只升不降**：基线高于实测——收窄了却没在**同批**把基线降下来。
  *   棘轮必须跟着收紧走；「降了但基线不降」等于给下一批留出悄悄变宽的空间。
+ *   基线声明的 `target` 不是 **0** 也判红：目标是写死的，改大等于给退场设终点。
  * - `TR-003` **空扫**：某个面扫到 0 个文件，或实测 0 而基线不为 0。
  *   这一族的老病是「读不出 ⇒ 没什么可判 ⇒ 通过」。
  * - `TR-004` **陈旧 allow**：`allow` / `pending` 条目所指的文件或写法不存在；
@@ -53,6 +60,9 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.resolve(scriptDir, '..')
 const BASELINE_REL = 'scripts/turn-root-baseline.json'
+// 目标写死 0：轮次不是「要不要保留」的产品问题，是已经退场的概念。
+// 因此不存在「允许残留多少」的谈判空间——基线只记还有多少没拆完。
+const TARGET = 0
 
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', '.next', 'verify-target'])
 
@@ -248,6 +258,7 @@ function main() {
       }
       baseline.allow = baseline.allow || []
       baseline.pending = baseline.pending || []
+      baseline.target = TARGET
       const abs = path.join(ROOT, BASELINE_REL)
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       fs.writeFileSync(abs, `${JSON.stringify(baseline, null, 2)}\n`)
@@ -266,6 +277,12 @@ function main() {
   console.log('--- turn-root-audit: turn 词根冻结（TR-001…004） ---')
 
   const problems = []
+  if (baseline.target !== TARGET) {
+    problems.push({
+      code: 'TR-002',
+      msg: `基线 target 必须是 ${TARGET}（轮次已退场，每个面的正确读数就是 0），实际 ${JSON.stringify(baseline.target)}`,
+    })
+  }
   for (const face of FACE_DEFS) {
     const m = measured[face.id]
     const base = baseline.faces[face.id] || { prod: 0, test: 0 }
@@ -298,6 +315,12 @@ function main() {
     )
   }
 
+  const total = FACE_DEFS.reduce(
+    (s, f) => s + measured[f.id].prod + measured[f.id].test,
+    0,
+  )
+  console.log(`  目标 ${TARGET}：实测仍余 ${total} 处待退场`)
+
   for (const p of checkEntries(baseline, measured)) problems.push({ code: 'TR-004', msg: p })
 
   if (problems.length > 0) {
@@ -307,10 +330,6 @@ function main() {
     process.exit(1)
   }
 
-  const total = FACE_DEFS.reduce(
-    (s, f) => s + measured[f.id].prod + measured[f.id].test,
-    0,
-  )
   const pending = (baseline.pending || []).length
   console.log(
     green(
