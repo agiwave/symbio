@@ -83,5 +83,4 @@ impl Plugin for DemoPlugin {
 symbio_plugin_api::submit_object_creator!(DEMO_PLUGIN, DemoPlugin::build, dyn Plugin);
 
 #[cfg(test)]
-#[path = "demo.test.rs"]
 mod tests;

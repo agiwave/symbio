@@ -495,5 +495,4 @@ pub fn base_context() -> Arc<dyn PluginInvokeRequest> {
 }
 
 #[cfg(test)]
-#[path = "host.test.rs"]
 mod tests;
