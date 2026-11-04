@@ -9,6 +9,18 @@
 // ② 否则取阶段范围解析出的基准分支，再退到 `@{upstream}` / `origin/v2` / `origin/main`；
 // ③ 对它取 `git merge-base HEAD <ref>` —— 这才是「这次变更从哪儿开始」的地址。
 //
+// **为什么不能把 `HEAD` 当默认值**（后来者最可能的顺手「简化」）：
+// - `HEAD` 是提交后的现状。对 `HEAD` 比，刚随这批落地的 `baseline-allow` 会变成
+//   「指向没发生的变更」⇒ BS-005 每提交一次假红一次；反过来，等它真落地了又没人删。
+//   后者已经是判据：落地 allow 一律红「请删除」——但这只有在「相对合并基」比时才看得见。
+// - 本地与 CI 都拿得到合并基，只有 `HEAD` 是那个「看起来最方便、语义最错」的地址。
+//
+// CI 调用点（`.github/workflows/ci.yml` 的 docs 作业）因此显式传基准：
+// PR 取目标分支 tip（`github.event.pull_request.base.sha`，阶段再取 merge-base）；
+// push 取「本次推送前的位置」（`github.event.before`）；首次推分支时 before 是全 0，
+// 阶段退到 `@{upstream}` / `origin/v2` / `origin/main` 再取 merge-base。
+// 基准一律经 `git merge-base HEAD <ref>` 收敛——传进来的是「分支 tip」，不是合并基本身。
+//
 // 两条「判不了」必须诚实跳过，不许假绿也不许假红：
 // - 合并基里还没有这两份基线文件（分支从很旧的点切出 / 本地上游过期）⇒ 没有可比的
 //   前态，判不了；

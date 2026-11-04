@@ -568,9 +568,9 @@ export const TEST_ONLY = [
   // （那是洗红）；删除键与 `mechanism.file` / `mechanism.hash` 变化必须留下
   // `baseline-allow: <old>→<new> <理由> D-NNN`，决策号还要真的存在于 `docs/`。
   //
-  // 本体执行方是 `61-baseline-scope`（它必须显式传合并基，理由见 `GUARDS` 尾部那条），
-  // 故本阶段只跑回归测试：14 条用例逐分支钉住「看不见变更 ⇒ 通过」（不是 git 仓 /
-  // 基准版本读不出 / JSON 坏掉一律退 2）。
+  // 本体执行方是 `61-baseline-scope`（它必须显式传合并基，理由见 `GUARDS` 尾部那条；
+  // 执行方归属登记在 `LIBS`），故本阶段只跑回归测试：17 条用例逐分支钉住
+  // 「看不见变更 ⇒ 通过」（不是 git 仓 / 基准版本读不出 / JSON 坏掉一律退 2）。
   'baseline-scope-audit',
   // `facts/routes-ts` + `route-facts` 是前端路由契约的**唯一真源链**（后端 `route()` 臂 →
   // `constants/routes.gen.ts`）。它的失效形态是静默少一条：提取口径一旦把某个形态
@@ -728,6 +728,12 @@ export const LIBS = [
   'decision-anchors',
   'route-facts',
   'gen-facts',
+  // `baseline-scope-audit` 的**本体**由 `gate.d/61-baseline-scope.mjs` spawn（那里显式解析
+  // 合并基再传 `--base`；退回 HEAD 会天天假红，理由见该阶段的头部）。登记在 LIBS 是为了
+  // 让「脚本在、有人跑」这件事有落点：它不是 30-docs 的守卫步骤，也不是没人管的孤儿。
+  // 回归测试因 GW-001 仍需留在 `TEST_ONLY` 跑——**两处指的不是同一件事**（前者是执行方
+  // 归属，后者是测试接线），不要合并成一个条目。
+  'baseline-scope-audit',
   'facts/_lib',
   'facts/_plugin-yml',
   'facts/_capability',

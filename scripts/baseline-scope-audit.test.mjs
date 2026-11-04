@@ -202,20 +202,31 @@ test('BS-005：allow 引用一个不存在的决策 ⇒ 红（不许匿名豁免
   assertRed(r, 'BS-005')
 })
 
-test('BS-005：allow 已落地（to 是当前机制面值）⇒ 绿（署名不是空头）', () => {
+test('BS-005：allow 已落地（to 是当前机制面值）⇒ 红并报「请删除」', () => {
   const landed = cpBaseline()
   landed.mechanism.hash = 'sha256:new'
   landed['baseline-allow'] = ['sha256:old→sha256:new 机制面迁移，三段语义未变 D-321']
-  // base 就是落地后的状态：本轮没有 diff 可命中，但 `to` 等于当前 hash ⇒ 它是署名。
+  // base 就是落地后的状态：本轮没有 diff 可命中，to 已等于当前 hash ⇒ 它是永久豁免，必须删。
   const r = audit({ cp: landed, baseCp: landed })
-  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assertRed(r, 'BS-005')
+  assert.match(r.stdout + r.stderr, /已落地 allow，请删除/)
 })
 
-test('BS-005：清债 allow 已落地（键在当前基线里确实不存在）⇒ 绿', () => {
+test('BS-005：清债 allow 已落地（键在当前基线里确实不存在）⇒ 红并报「请删除」', () => {
   const landed = lpBaseline()
   delete landed.lp003WorldRoots['ring.rs']
   landed['baseline-allow'] = ['lp003WorldRoots/ring.rs→(none) 该文件的世界词根已归零 D-321']
   const r = audit({ lp: landed, baseLp: landed })
+  assertRed(r, 'BS-005')
+  assert.match(r.stdout + r.stderr, /已落地 allow，请删除/)
+})
+
+test('BS-005：to 不等于当前值、相对 base 有变更并带 allow ⇒ 绿（在途豁免）', () => {
+  const cp = cpBaseline()
+  cp.mechanism.hash = 'sha256:new'
+  cp['baseline-allow'] = ['sha256:old→sha256:new 驱动循环体随 D-321 迁移 D-321']
+  // base 是旧值（`sha256:old`）：改动尚未落地 ⇒ 这条 allow 正在起作用。
+  const r = audit({ cp })
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
