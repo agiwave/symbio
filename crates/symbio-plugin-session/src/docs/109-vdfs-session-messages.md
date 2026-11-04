@@ -182,7 +182,7 @@ read(<根>/session/<sid>/message/<mid>)
 
 | 落库路径 | 承载格（`Carrier`） |
 |---|---|
-| 助手侧增量落库（`loop/chat_loop/io.rs::persist_messages`） | `Carrier::Runner`（助手正文归 `turn × closed/progressed`） |
+| 助手侧增量落库（`crates/symbio-plugin-session/src/chat_session/write.rs::append_messages`） | `Carrier::Runner`（助手正文归 `turn × closed/progressed`） |
 | 用户发言（`orchestrator/entry.rs`） | `Carrier::Runner`（用户发言归 `turn × opened`） |
 | 压缩节点（`loop/context/pipeline.rs`） | `Carrier::Here`（没有别的承载格 ⇒ 落 `message.added`） |
 
