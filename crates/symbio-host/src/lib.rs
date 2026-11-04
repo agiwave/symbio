@@ -128,6 +128,9 @@ impl Host {
     }
 
     /// 按一个会话起一次驱动。`base` 提供工作目录等上下文字段。
+    ///
+    /// scope 由会话 id 派生（旧入口）。生产驱动入口走 [`Self::drive_at`]：
+    /// 事实源里的 scope 是**轮的同一性**，同一条会话的不同轮各是各的域。
     pub async fn drive(
         &self,
         base: &Arc<dyn PluginInvokeRequest>,
@@ -135,6 +138,21 @@ impl Host {
         provider: Option<&str>,
     ) -> Result<DriveReport, String> {
         let scope = scope_of(session_id);
+        self.drive_at(scope, base, session_id, provider).await
+    }
+
+    /// 按**事实信封里的 scope** 起一次驱动。`base` 提供工作目录等上下文字段。
+    ///
+    /// 与 [`Self::drive`] 的唯一差别是 scope 的来源：这里由调用方给出（一条新事实
+    /// 自带的 scope），不再从会话 id 派生。调用方**不得**在外层写 `loop { drive }`
+    /// ——环内部的轮次推进归环，外层每看到一条新事实只触发一次。
+    pub async fn drive_at(
+        &self,
+        scope: u64,
+        base: &Arc<dyn PluginInvokeRequest>,
+        session_id: &str,
+        provider: Option<&str>,
+    ) -> Result<DriveReport, String> {
         let gathered = self.gather(base, session_id, provider).await?;
         let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
             facts: Arc::clone(&self.facts),
@@ -463,26 +481,6 @@ fn ring_port_of(event_id: &str) -> String {
 /// 便利构造：一次驱动用的基上下文（前端只需补工作目录等）。
 pub fn base_context() -> Arc<dyn PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
-}
-
-/// 便于前端把驱动结果当 JSON 读懂。
-pub fn report_json(report: &DriveReport) -> serde_json::Value {
-    let outcome = match &report.outcome {
-        DriveOutcome::NoDebt => serde_json::json!({"kind": "no_debt"}),
-        DriveOutcome::Waiting(keys) => serde_json::json!({
-            "kind": "waiting",
-            "debts": keys.iter().map(|key: &DriveKey| serde_json::json!({
-                "port": key.port,
-                "id": key.id,
-                "attempt": key.attempt,
-            })).collect::<Vec<_>>(),
-        }),
-    };
-    serde_json::json!({
-        "scope": report.scope,
-        "dispatched": report.dispatched,
-        "outcome": outcome,
-    })
 }
 
 #[cfg(test)]

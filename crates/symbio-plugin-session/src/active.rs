@@ -10,9 +10,6 @@ use super::plugin::SessionRuntime;
 use super::runtime::RuntimeFacts;
 use super::working::{WorkingState, WorkingTransition};
 
-/// 全局请求 ID 生成器
-pub static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
-
 /// 收件箱里的一条**待消费请求**——用户消息的入队形态。
 ///
 /// ## 它不是一条已在转写里的消息

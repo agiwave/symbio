@@ -206,16 +206,6 @@ pub fn default_tokenizer() -> &'static CalibratedTokenizer {
     DEFAULT.get_or_init(CalibratedTokenizer::new)
 }
 
-/// 用 provider 返回的真实输出用量校准全局估算器。
-///
-/// `estimated` 必须是**未经校准的原始启发式估算**（[`CalibratedTokenizer::count_raw`]），
-/// `actual` 为 provider 给的 `usage.output_tokens`（可能为 `None`，此时忽略）。
-pub fn report_provider_usage(estimated: usize, actual: Option<u32>) {
-    if let Some(a) = actual {
-        default_tokenizer().feedback(a as usize, estimated);
-    }
-}
-
 // ==================== 头尾切分（预算的另一半：怎么花）====================
 //
 // 头尾切分共享机制 —— L0（工具结果守卫）与工具结果淡化（请求视图层）头尾保留

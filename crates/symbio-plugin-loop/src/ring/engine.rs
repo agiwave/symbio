@@ -72,7 +72,7 @@ pub(crate) struct RunReport {
 
 /// 选债结果：这一圈的全部可动作。
 #[derive(Debug, Clone, Default)]
-struct Batch {
+struct Work {
     /// 可派发（可能先补 `request`）。
     dispatch: Vec<(DebtRow, u32)>,
     /// 租约已过：推进尝试或判死。
@@ -90,11 +90,11 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
         let source = ctx.source();
         let rows = source.rows(&view, scope);
         let now_ms = ctx.now_ms();
-        let batch = plan(&view, source, &rows, scope, now_ms);
+        let work = plan(&view, source, &rows, scope, now_ms);
 
-        if !batch.dispatch.is_empty() {
+        if !work.dispatch.is_empty() {
             let cap = ctx.concurrency().max(1);
-            for chunk in batch.dispatch.chunks(cap) {
+            for chunk in work.dispatch.chunks(cap) {
                 let run = chunk
                     .iter()
                     .map(|(row, attempt)| dispatch(ctx, scope, row.clone(), *attempt, now_ms));
@@ -103,16 +103,16 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
             }
             continue;
         }
-        if !batch.expire.is_empty() {
-            for (row, attempt, next) in batch.expire {
+        if !work.expire.is_empty() {
+            for (row, attempt, next) in work.expire {
                 expire(ctx, scope, row, attempt, next, now_ms);
             }
             continue;
         }
-        let outcome = if batch.waiting.is_empty() {
+        let outcome = if work.waiting.is_empty() {
             DriveOutcome::NoDebt
         } else {
-            DriveOutcome::Waiting(batch.waiting)
+            DriveOutcome::Waiting(work.waiting)
         };
         return RunReport {
             outcome,
@@ -128,8 +128,8 @@ fn plan(
     rows: &[DebtRow],
     scope: u64,
     now_ms: u64,
-) -> Batch {
-    let mut batch = Batch::default();
+) -> Work {
+    let mut work = Work::default();
     let mut seen = HashSet::new();
     for row in rows {
         if let Some(after) = &row.after {
@@ -171,18 +171,18 @@ fn plan(
             continue;
         }
         let Some(sent) = view.last_sent(&key) else {
-            batch.dispatch.push((row.clone(), attempt));
+            work.dispatch.push((row.clone(), attempt));
             continue;
         };
         let deadline = sent.at_ms.saturating_add(row.lease_ms);
         if now_ms < deadline {
-            batch.waiting.push(key);
+            work.waiting.push(key);
             continue;
         }
         let next = (attempt < row.max_attempts).then(|| attempt + 1);
-        batch.expire.push((row.clone(), attempt, next));
+        work.expire.push((row.clone(), attempt, next));
     }
-    batch
+    work
 }
 
 /// 租约已过：有下一笔就记账并再举，没有就判死。

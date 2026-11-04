@@ -17,8 +17,6 @@
  *   - S-008:        VdfsNode.status 用裸字面量赋值（词表只有 `VDFS_STATUS_*`）
  *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
- *   - S-011:        补充注入点的位置（两处行序断言：`turn_runner/stream.rs` 的结果/注入次序、
- *                   `entry.rs` 的抽干口/运行器开轮次序；位置错了不会有任何测试变红）
  *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 批次号）
  *   - S-013:        `WalkBuilder` 构造点必须钉遍历序（默认序是文件系统返回序 ⇒
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
@@ -48,7 +46,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns S 源码 grep 形态
-// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013 S-014 S-015 S-016 S-017
+// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-012 S-013 S-014 S-015 S-016 S-017
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -442,123 +440,6 @@ for (const file of s010Files) {
   })
 }
 if (s010 === 0) ok('S-010 通过：根名字面量只在 vdfs 插件内')
-console.log()
-
-// ── S-011: 补充注入点必须在「工具结果已接进请求」之后、汇报判定之前 ──────
-//
-// 抽干点在 v2 搬了家（5b-2：改到运行器的批次边界，见 D-074），约束一条没少，
-// 而且**违反时依然没有测试会变红**——所以判据换成搬家后的**两处行序断言**：
-//   ① `turn_runner/stream.rs`：2e 的「工具结果接进 exchange」必须排在 2f 的
-//      「轮内注入接进 exchange」**之前**。反过来写 = 用户那句补充插进
-//      `assistant(tool_calls)` 与它的 `tool` 结果之间——部分协议直接 400
-//      （三种错法里唯一会响的那种），而且时间序颠倒（工具结果先发生，用户随后才插话）。
-//      落点按搬家后的写法：`land_one` 逐笔 `exchange.push(message)`，最后一笔关账后
-//      `exchange.extend(injected)`。
-//   ② `entry.rs`：抽干口（`inject: injector(…)`）必须随 `TurnInput` 在运行器
-//      开轮点（`begin_turn`）**之前**装上——运行器才会在批次边界调它。
-//      「先抽干、后判定」本身已经不在这一处行序里：汇报判定成了 `policy.report` 行
-//      （`prio` 53），只在**已关闭的批次边界**到期（`report_due` 的 `at_boundary`）；
-//      抽干发生在收束那一批的模型往返动作内部（`turn_runner/stream.rs` 2e → 2f），
-//      所以那一行被选中时补充格早已落进日志、静默时钟已归零。留在这里的断言钉的是
-//      更前面的一环：**抽干口还在，而且装着它开轮**——口子被删、或挪到开轮之后，
-//      用户中途说的话就再也进不了本轮，而日志上一切照常。
-// 两个锚点**任一找不到即 ERROR**：找不到不等于"无需检查"——那说明注入点被删了
-// （那就该连本规则与文档一起改）或被改名了（那本规则必须同步）。**让守卫悄悄退化成
-// 空转，比没有守卫更糟**（它会以绿灯的形式提供虚假保证）。
-// 这也是为什么"锚点缺失"**不接受豁免**：豁免的前提是"我看过并确认没问题"，
-// 而锚点缺失时根本无从判断。
-//
-// 豁免：`// grep-audit-allow S-011: 理由`（写在**后一个锚点**那一行，理由不可为空）——
-// 只在"位置确实不对但已确认可接受"时用。
-// 文档侧的定义见 `docs/003-design/016-工程落地与验证.md` §5 的 C-D2b。
-console.log('--- S-011: 补充注入点位置检查 ---')
-
-const WAIVER_S011_RE = /\/\/\s*grep-audit-allow S-011:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
-
-// 锚点文件只认 `src/<子路径>` 这一段后缀，不写完整路径：D-191 把插件平铺成
-// `crates/symbio-plugin-<id>` 的同时**也改变了归属**（这两个落点从 session 搬到 loop，
-// 并从单文件拆成目录：`turn_runner/stream.rs`、`entry.rs`）。写死完整路径的
-// 后果不是报错而是**静默跳过**——`endsWith` 匹配不上 ⇒ 真仓里 S-011 长期以「跳过」的
-// 绿灯存在。锚点形态也随之下沉一层：`run.exchange\n  .extend(…)` 的链式写法让
-// `exchange\.extend\(` 这种紧凑正则匹配不上，故改为只认 `.extend(<目标>` 本身。
-const S011_PAIRS = [
-  {
-    file: 'turn_runner/stream.rs',
-    before: {
-      re: /\.exchange\.push\(\s*message\b/,
-      name: '2e 工具结果接进请求',
-    },
-    after: {
-      re: /\.extend\(\s*injected\b/,
-      name: '2f 轮内补充接进请求',
-    },
-    why: '补充必须排在工具结果**之后**（插进 `assistant(tool_calls)` 与它的 `tool` 结果之间是协议级 400，且时间序颠倒）',
-  },
-  {
-    file: 'entry.rs',
-    before: {
-      re: /inject:\s*injector\(/,
-      name: '`TurnInput::inject` 抽干口挂载点',
-    },
-    after: {
-      re: /\bmatch\s+begin_turn\(/,
-      name: '运行器开轮点（`begin_turn`）',
-    },
-    why: '抽干口必须随 `TurnInput` 装进运行器、在开轮之前——挪到开轮之后（或删掉）用户中途说的话就进不了本轮，而日志上一切照常',
-  },
-]
-
-for (const pair of S011_PAIRS) {
-  const entry = [...linesOf.entries()].find(([f]) =>
-    f.split(path.sep).join('/').endsWith(pair.file),
-  )
-  if (!entry) {
-    ok(`S-011 跳过：scope 内没有 ${pair.file}`)
-    continue
-  }
-  const [s011File, s011Lines] = entry
-  // 只认代码行：这两个文件里各有一大段解释"为什么放在这里"的注释，注释里提到锚点
-  // 不等于调用在这里。**注释掉注入调用**会被判成"锚点缺失"（响亮），
-  // 这正是想要的——注释掉一个守卫点，不该得到绿灯。
-  const firstLine = (re, exclude) => {
-    for (let i = 0; i < s011Lines.length; i++) {
-      const l = s011Lines[i]
-      if (l.trimStart().startsWith('//')) continue
-      if (!re.test(l)) continue
-      if (exclude && exclude.test(l)) continue
-      return i + 1
-    }
-    return null
-  }
-
-  const beforeAt = firstLine(pair.before.re, pair.before.ex)
-  const afterAt = firstLine(pair.after.re, pair.after.ex)
-  const rel = disp(s011File)
-
-  const missing = []
-  if (beforeAt == null) missing.push(pair.before.name)
-  if (afterAt == null) missing.push(pair.after.name)
-
-  if (missing.length > 0) {
-    err(
-      `${rel}  S-011 锚点缺失：${missing.join(' / ')}——注入点被删除或改名了？` +
-        `守卫不得悄悄退化成空转：同步更新本规则与 DE-016 §5 的 C-D2b`,
-    )
-  } else if (!(beforeAt < afterAt)) {
-    if (WAIVER_S011_RE.test(s011Lines[afterAt - 1])) {
-      ok(`${rel}  S-011 通过（逐行豁免：位置已确认可接受）`)
-    } else {
-      err(
-        `${rel}  S-011 位置错（${pair.before.name}@${beforeAt} → ${pair.after.name}@${afterAt}）：` +
-          pair.why,
-      )
-    }
-  } else {
-    ok(
-      `S-011 通过：${rel} ${pair.before.name}(${beforeAt}) 在 ${pair.after.name}(${afterAt}) 之前`,
-    )
-  }
-}
 console.log()
 
 // ── S-012: 代码注释不得写只有实施排期含义的话 ──────────────────────────

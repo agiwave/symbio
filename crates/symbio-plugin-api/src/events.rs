@@ -89,19 +89,10 @@ pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 /// message.added — owner `symbio-plugin-session`，格位 `(Message, Opened)`
 pub const EVENT_MESSAGE_ADDED: &str = "message.added";
 
-/// message.edited — owner `symbio-plugin-session`，格位 `(Message, Asserted)`
-pub const EVENT_MESSAGE_EDITED: &str = "message.edited";
-
-/// message.removed — owner `symbio-plugin-session`，格位 `(Message, Closed)`
-pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
-
 // ============ session ============
 
 /// session.config — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_SESSION_CONFIG: &str = "session.config";
-
-/// session.consolidated — owner `symbio-plugin-session`，格位 `(Message, Progressed)`
-pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
 // ============ task ============
 
@@ -129,9 +120,6 @@ pub const EVENT_TOOL_REQUESTED: &str = "tool.requested";
 
 /// turn.branch — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_TURN_BRANCH: &str = "turn.branch";
-
-/// turn.branch_selected — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
-pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
 
 // ============ user ============
 
@@ -165,10 +153,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← loop
     EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)), // memory.forgotten ← loop
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
-    EventDecl::new(EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)), // message.edited ← session
-    EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
     EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)), // session.config ← loop
-    EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task
@@ -176,6 +161,5 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← task
     EventDecl::host(EVENT_TOOL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.requested ← model
     EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← loop
-    EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // turn.branch_selected ← session
     EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop
 ];

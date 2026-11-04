@@ -25,7 +25,7 @@ lists: [gate-codes=owner]
 | **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
 | **BS** | 棘轮基线面的变更审 | `scripts/baseline-scope-audit.mjs` | BS-001–005 | `BS-006` |
 | **CP** | 控制面形状（唯一循环体 / 机制层无域名 / 机制面指纹 / 第二推进循环） | `scripts/control-plane-audit.mjs` | CP-001、CP-004、CP-006、CP-009 | `CP-010` |
-| **CS** | core 形状 | `scripts/arch-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–010 | `CS-011` |
+| **CS** | core 形状 | `scripts/arch-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–009 | `CS-010` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–020 | `D-021` |
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
 | **DR** | 死路径（写出来的 crate 名必须存在） | `scripts/dead-path-audit.mjs` | DR-001–003 | `DR-004` |
@@ -41,7 +41,7 @@ lists: [gate-codes=owner]
 | **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
 | **INJ** | 异常注入矩阵 | `scripts/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
 | **KB** | 前端分支（形态 / 资源类型） | `scripts/kind-branch-audit.mjs` | KB-001–002 | `KB-003` |
-| **LP** | 义务环纯度（类型 / 依赖 / 世界语义词根 / 端口受理面） | `scripts/loop-purity-audit.mjs` | LP-001–006 | `LP-007` |
+| **LP** | 义务环纯度（类型 / 依赖 / 世界语义词根 / 端口受理面） | `scripts/loop-purity-audit.mjs` | LP-001–005 | `LP-006` |
 | **LWF** | 列表写入口事实 | `scripts/list-write-fact-audit.mjs` | LWF-001–002 | `LWF-003` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–010 | `M-011` |
 | **ME** | 机制强制等级清单 | `scripts/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
@@ -54,7 +54,7 @@ lists: [gate-codes=owner]
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–003 | `R-004` |
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–033 | `RG-034` |
-| **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–017 | `S-018` |
+| **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–010、S-012–017 | `S-018` |
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
 | **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
@@ -90,7 +90,6 @@ lists: [gate-codes=owner]
 | **CS-007** | `scripts/shared-event-vocab-audit.mjs` |
 | **CS-008** | `scripts/arch-shape-audit.mjs` |
 | **CS-009** | `scripts/arch-shape-audit.mjs` |
-| **CS-010** | `scripts/arch-shape-audit.mjs` |
 | **D-001** | `scripts/doc-link-audit.mjs` |
 | **D-002** | `scripts/doc-link-audit.mjs` |
 | **D-003** | `scripts/doc-link-audit.mjs` |
@@ -179,7 +178,6 @@ lists: [gate-codes=owner]
 | **LP-003** | `scripts/loop-purity-audit.mjs` |
 | **LP-004** | `scripts/loop-purity-audit.mjs` |
 | **LP-005** | `scripts/loop-purity-audit.mjs` |
-| **LP-006** | `scripts/loop-purity-audit.mjs` |
 | **LWF-001** | `scripts/list-write-fact-audit.mjs` |
 | **LWF-002** | `scripts/list-write-fact-audit.mjs` |
 | **M-001** | `scripts/mechanism-audit.mjs` |
@@ -267,7 +265,6 @@ lists: [gate-codes=owner]
 | **S-008** | `scripts/grep-audit.mjs` |
 | **S-009** | `scripts/grep-audit.mjs` |
 | **S-010** | `scripts/grep-audit.mjs` |
-| **S-011** | `scripts/grep-audit.mjs` |
 | **S-012** | `scripts/grep-audit.mjs` |
 | **S-013** | `scripts/grep-audit.mjs` |
 | **S-014** | `scripts/grep-audit.mjs` |

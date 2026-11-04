@@ -8,7 +8,6 @@ use symbio_plugin_api::drive::Unless;
 #[derive(Debug, Clone)]
 pub(crate) struct DebtRow {
     /// 行名（应用侧的标签；环不解释，只用于回读）。
-    #[allow(dead_code)]
     pub(crate) name: &'static str,
     /// 欠哪个端口（数据）。
     pub(crate) port: &'static str,

@@ -36,7 +36,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from './color.mjs'
-import { adrExists } from './known-red.mjs'
+import { adrExists } from './adr-index.mjs'
 import { stripComments as stripCommentsKeepStrings } from './rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))

@@ -66,7 +66,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { red, green, dim } from './color.mjs'
-import { adrExists } from './known-red.mjs'
+import { adrExists } from './adr-index.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
