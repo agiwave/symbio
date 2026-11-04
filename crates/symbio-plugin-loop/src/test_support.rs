@@ -615,6 +615,142 @@ fn fixture_outcome(result_text: String, success: bool, pending: Option<Value>) -
 impl PortExecutor for FixtureToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let payload = input.payload;
+        // 建账专用入口：与生产执行体同形的最小面——把调用清单展开成 `request` 草稿，
+        // 不执行、不写 `sent`。替身没有注册面，风险一律 route-only（`deferred`）。
+        if payload.get("open_only").is_some() {
+            let calls = payload
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let response = payload.get("response").cloned().unwrap_or(Value::Null);
+            let round = response
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("r0")
+                .to_string();
+            let created: Vec<Value> = response
+                .get("calls")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let epoch = payload.get("epoch").and_then(Value::as_u64).unwrap_or(0);
+            let policy = payload.get("policy").cloned().unwrap_or(Value::Null);
+            let mode = policy
+                .get("mode")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let threshold = policy
+                .get("threshold")
+                .and_then(Value::as_str)
+                .map(symbio_plugin_api::CapabilityRiskLevel::from_name)
+                .unwrap_or_default();
+            let grants: std::collections::BTreeMap<String, symbio_plugin_api::CapabilityRiskLevel> =
+                policy
+                    .get("grants")
+                    .and_then(Value::as_str)
+                    .map(|s| serde_json::from_str(s).unwrap_or_default())
+                    .unwrap_or_default();
+            let visitor = exec.ctx.as_ref().and_then(|c| c.get(CAPABILITY_VISITOR));
+            let rows = match visitor.as_ref() {
+                Some(visitor) => visitor.list(symbio_plugin_api::family::TOOL).await,
+                None => Vec::new(),
+            };
+            let known: Vec<String> = rows.iter().map(|r| r.name().to_string()).collect();
+            let mut drafts = Vec::new();
+            for (idx, tc) in calls.iter().enumerate() {
+                let model_id = tc
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty());
+                let name = tc
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty());
+                let id = created
+                    .get(idx)
+                    .and_then(|c| c.get("id"))
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| match model_id {
+                        Some(id) => {
+                            format!("tool-{}-d{}-{}-c{idx:03}-{id}", exec.subject, epoch, round)
+                        }
+                        None => format!("tool-{}-d{}-{}-c{idx:03}", exec.subject, epoch, round),
+                    });
+                let args = tc.get("arguments").cloned().unwrap_or(Value::Null);
+                let invalid = model_id.is_none()
+                    || name.is_none()
+                    || tc
+                        .get("parse_error")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    || tc
+                        .get("overflow_notice")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                // 与生产执行体同一判据的替身版：名字照样要经注册表解析，风险档
+                // 照样来自能力实现；否则 `deny_ctx` 这类夹具会从「高风险→拒绝」
+                // 漂成「route-only→放行」。
+                let resolved = match (name, visitor.as_ref()) {
+                    (Some(name), Some(visitor)) => {
+                        let canonical = known
+                            .iter()
+                            .find(|known| known.as_str() == name)
+                            .cloned()
+                            .or_else(|| {
+                                known
+                                    .iter()
+                                    .find(|known| {
+                                        symbio_plugin_api::capability_to_wire(known) == name
+                                    })
+                                    .cloned()
+                            });
+                        match canonical {
+                            Some(canonical) => visitor
+                                .get(&canonical)
+                                .await
+                                .and_then(|r| r.cap().cloned())
+                                .map(|cap| (canonical, cap.risk_for(&args))),
+                            None => None,
+                        }
+                    }
+                    _ => None,
+                };
+                let risk = resolved.as_ref().map(|(_, risk)| *risk);
+                let grant = resolved
+                    .as_ref()
+                    .and_then(|(canonical, _)| grants.get(canonical))
+                    .map(|level| level.as_str());
+                drafts.push(symbio_plugin_api::effects::FactDraft {
+                    key: format!("request-tool-{id}-1"),
+                    kind: symbio_kernel::event::EVENT_REQUEST.to_string(),
+                    entity: Entity::Scope,
+                    verb: Verb::Asserted,
+                    payload: json!({
+                        "port": ports::TOOL,
+                        "id": id,
+                        "attempt": 1,
+                        "name": name.unwrap_or_default(),
+                        "args": args,
+                        "risk": risk.map(|r| r.as_str()).unwrap_or("unknown"),
+                        "threshold": threshold.as_str(),
+                        "approved": args.get("approved").and_then(Value::as_bool).unwrap_or(false),
+                        "deferred": risk.is_none(),
+                        "grant": grant,
+                        "invalid": invalid,
+                        "mode": mode,
+                    }),
+                    produced_by: exec.origin,
+                });
+            }
+            if !drafts.is_empty() {
+                exec.emit.emit(drafts).await;
+            }
+            return fixture_outcome(String::new(), true, None);
+        }
         // 授权专用入口（gate）：与生产 `ToolPort` 同判据的最小子集——只落一条授权事实，
         // 不执行、不写 `sent`。
         if payload.get("authorize_only").is_some() {

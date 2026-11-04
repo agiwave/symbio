@@ -876,7 +876,7 @@ where
 /// 没有寄存的模型应答 ⇒ 引擎选错了行：不写任何格，派发器的「无进展」判据会显形。
 pub(crate) async fn open_round(
     run: &mut Prepared,
-    store: &dyn Store<Event = Event>,
+    store: Arc<dyn Store<Event = Event>>,
     ctx: Option<&Arc<dyn PluginInvokeRequest>>,
     dispatch: &dyn Dispatcher,
 ) {
@@ -885,7 +885,7 @@ pub(crate) async fn open_round(
     };
     let rt = rt.clone();
     if !run.round_prepared {
-        dispatch.prepare(store, &rt).await;
+        dispatch.prepare(store.as_ref(), &rt).await;
         run.round_prepared = true;
     }
     let calls = open_calls(store, ctx, run.turn, run.user_seq, run.drive_seq, &rt).await;

@@ -59,12 +59,15 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
  *
  * `rows = 16`：15 条字符串命名的固定行 + 1 条以常量命名的归宿行（`EVENT_ARTIFACT_ADDED`）。
  * `channels = 1`：`produced` 与 `derived` 合成 `PortOutput` 之后只剩一条。
- * `fullScans = 8`：`tool_dispatch` 7 + 执行体 1。第 7 处是授权 gate：判定输入取自
+ * `fullScans = 9`：`tool_dispatch` 8 + 执行体 1。第 7 处是授权 gate：判定输入取自
  * `request`（读一次），结论由执行体当场落下、只能再读一次才看得见——事实面没有
- * 「未落先见」的入口，两次读各管一头（B1–B3 下沉 session 后 `port` 三处全量读随
- * 执行体迁走；原 `gates` 那处并入 `tool_exec/execution.rs`）。
+ * 「未落先见」的入口，两次读各管一头。第 8 处是建账 prepass 的同款：先读事实问
+ * 「创建行还欠不欠」，把开账交给 `port=tool` 执行体，再读一次把新落的 `request`
+ * 配回调用清单——同样是一次「交出去才产出」的往返，缺任一次读都判不了
+ * （B1–B3 下沉 session 后 `port` 三处全量读随执行体迁走；原 `gates` 那处并入
+ * `tool_exec/execution.rs`）。
  */
-const BASELINE = { rows: 16, channels: 1, fullScans: 8 }
+const BASELINE = { rows: 16, channels: 1, fullScans: 9 }
 
 const LOOP_ROWS = 'crates/symbio-plugin-loop/src/loop_rows.rs'
 const DISPATCH = 'crates/symbio-plugin-loop/src/tool_dispatch.rs'

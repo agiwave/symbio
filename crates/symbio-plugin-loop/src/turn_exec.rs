@@ -944,7 +944,7 @@ pub(crate) fn run_open<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
         let request_ctx = ctx.request_ctx.clone();
         ctx.session
             .open(
-                ctx.store.as_ref(),
+                ctx.store.clone(),
                 request_ctx.as_ref(),
                 ctx.dispatch.as_deref(),
             )

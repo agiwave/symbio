@@ -44,8 +44,8 @@ use symbio_plugin_api::{
     failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
     Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor, PortInput, PortOutcome,
-    PortProvider, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_SINK, PATH,
-    PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
+    PortProvider, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK,
+    PATH, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
 };
 
 /// 端口名（唯一来源：本插件）。
@@ -90,6 +90,16 @@ const KEY_DEFERRED: &str = "deferred";
 const KEY_INVALID: &str = "invalid";
 /// 授权专用输入（环的 gate 调用）：只判、只落授权事实，不执行也不写 `sent`。
 const KEY_AUTHORIZE_ONLY: &str = "authorize_only";
+/// 建账专用输入（环的 open 调用）：把模型应答里的调用清单展开成 `request` 草稿。
+/// 环只交纯值（应答原文 / 调用清单 / 策略读数字串），线上名、风险档与
+/// 永久放行上限全在本执行体算定（DE-048 D-311）。
+const KEY_OPEN_ONLY: &str = "open_only";
+/// 幕锚（id 兜底段）：环的 `drive_seq` 纯值。
+const KEY_EPOCH: &str = "epoch";
+const KEY_POLICY: &str = "policy";
+const KEY_RESPONSE: &str = "response";
+const KEY_TOOL_CALLS: &str = "tool_calls";
+const KEY_GRANTS: &str = "grants";
 /// 会话的授权模式（`auto` = 无人可问 ⇒ 拒绝措辞 `permission_denied`，其余
 /// ⇒ `needs_approval`）。措辞在线上契约里，不能由模式之外的东西决定。
 const KEY_MODE: &str = "mode";
@@ -273,6 +283,152 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
         verb,
         payload,
         produced_by: None,
+    }
+}
+
+/// 建账：把模型应答里的调用清单展开成 `request` 草稿（D-118 决策 5 的第一笔债）。
+///
+/// 环只交纯值：应答原文（取 `id` / `calls`）、调用清单、阈值 / 放行清单 / 模式的
+/// 读数字串。线上名解析、风险档、永久放行上限与「不可派发」判定全在这里算定——
+/// 这是 DE-048 D-311 的唯一判定式：**事实面答不了「这个名对应哪个能力」，所以判在执行体**。
+async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec<FactDraft> {
+    let tool_calls: Vec<serde_json::Value> = payload
+        .get(KEY_TOOL_CALLS)
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let response = payload
+        .get(KEY_RESPONSE)
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let round = response
+        .get(KEY_ID)
+        .and_then(|v| v.as_str())
+        .unwrap_or("r0");
+    let created: &[serde_json::Value] = response
+        .get("calls")
+        .and_then(|v| v.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let epoch = payload.get(KEY_EPOCH).and_then(|v| v.as_u64()).unwrap_or(0);
+    let policy = payload
+        .get(KEY_POLICY)
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let threshold = policy
+        .get(KEY_THRESHOLD)
+        .and_then(|v| v.as_str())
+        .map(CapabilityRiskLevel::from_name)
+        .unwrap_or_default();
+    let grants: std::collections::BTreeMap<String, CapabilityRiskLevel> = policy
+        .get(KEY_GRANTS)
+        .and_then(|v| v.as_str())
+        .map(|s| serde_json::from_str(s).unwrap_or_default())
+        .unwrap_or_default();
+    let mode = policy
+        .get(KEY_MODE)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let visitor = exec.ctx.as_ref().and_then(|c| c.get(CAPABILITY_VISITOR));
+    let rows = match visitor.as_ref() {
+        Some(visitor) => visitor.list(family::TOOL).await,
+        None => Vec::new(),
+    };
+    let known: Vec<String> = rows.iter().map(|row| row.name().to_string()).collect();
+    let mut out = Vec::with_capacity(tool_calls.len());
+    for (idx, tc) in tool_calls.iter().enumerate() {
+        let model_id = tc
+            .get(KEY_ID)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty());
+        let name = tc
+            .get("name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty());
+        let args = tc
+            .get("arguments")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let id = created
+            .get(idx)
+            .and_then(|c| c.get(KEY_ID))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| fallback_key(exec.subject, epoch, idx, model_id, round));
+        // 不可派发的调用**也开账**：创建行的集合里有这个元素，跳过它那一笔集合债
+        // 就永远欠着。它的终局是「授权拒绝 + 批尾 failed」，不是「不存在」。
+        let invalid = model_id.is_none()
+            || name.is_none()
+            || tc
+                .get("parse_error")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            || tc
+                .get("overflow_notice")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+        // 注册表里没有可判的能力（route-only 工具）⇒ 放行是**交给下游路由闸门**的
+        // 延迟判定；不能凭一个猜出来的风险档拒绝它。
+        let resolved = match (name, visitor.as_ref()) {
+            (Some(name), Some(visitor)) => match resolve(name, known.iter().map(String::as_str)) {
+                Some(canonical) => visitor
+                    .get(&canonical)
+                    .await
+                    .and_then(|row| row.cap().cloned())
+                    .map(|cap| (canonical, cap.risk_for(&args))),
+                None => None,
+            },
+            _ => None,
+        };
+        let risk = resolved.as_ref().map(|(_, risk)| *risk);
+        let risk_name = risk.map(CapabilityRiskLevel::as_str).unwrap_or("unknown");
+        // 永久放行上限按 canonical name 算（D-170）：线上名只是协议字符集的投影。
+        let grant = resolved
+            .as_ref()
+            .and_then(|(canonical, _)| grants.get(canonical))
+            .map(|level| level.as_str());
+        let approved = args
+            .get(KEY_APPROVED)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        out.push(FactDraft {
+            key: format!("{EVENT_REQUEST}-{TOOL}-{id}-1"),
+            kind: EVENT_REQUEST.to_string(),
+            entity: Entity::Scope,
+            verb: Verb::Asserted,
+            payload: serde_json::json!({
+                "port": TOOL,
+                "id": id,
+                "attempt": 1,
+                "name": name.unwrap_or_default(),
+                "args": args,
+                "risk": risk_name,
+                "threshold": threshold.as_str(),
+                "approved": approved,
+                // 缺注册面 / 风险未知 = route-only：授权按 `deferred` 放行。
+                "deferred": risk.is_none(),
+                "grant": grant,
+                "invalid": invalid,
+                "mode": mode,
+            }),
+            produced_by: exec.origin,
+        });
+    }
+    out
+}
+
+/// 调用 id 的兜底段（模型应答没有 `calls` / 缺 id 时用）：只由应答自身的顺序决定。
+fn fallback_key(
+    subject: u64,
+    epoch: u64,
+    idx: usize,
+    model_id: Option<&str>,
+    round: &str,
+) -> String {
+    match model_id {
+        Some(id) => format!("{TOOL}-{subject}-d{epoch}-{round}-c{idx:03}-{id}"),
+        None => format!("{TOOL}-{subject}-d{epoch}-{round}-c{idx:03}"),
     }
 }
 
@@ -775,6 +931,18 @@ impl PortExecutor for ToolPort {
         // 受理即起算：闸门的 `elapsed` 量的是**本执行体**从拿到这笔债到判定的时长。
         let started_at = std::time::Instant::now();
         let payload = input.payload;
+        // 建账专用入口（环的 open 调用）：把调用清单展开成 `request` 草稿后即终局，
+        // 不执行、不写 `sent`（下一笔债由环的授权行另开）。
+        if payload.get(KEY_OPEN_ONLY).is_some() {
+            let drafts = open_drafts(&exec, &payload).await;
+            if !drafts.is_empty() {
+                exec.emit.emit(drafts).await;
+            }
+            return PortOutcome {
+                facts: Vec::new(),
+                error: None,
+            };
+        }
         let tool_name = payload
             .get(KEY_TOOL_NAME)
             .and_then(|v| v.as_str())

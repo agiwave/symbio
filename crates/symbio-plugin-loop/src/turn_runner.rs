@@ -771,7 +771,7 @@ impl TurnSession {
     /// 这个动作，这里的空返回是防御，不是第二条选择路径。
     pub(crate) async fn open(
         &mut self,
-        store: &dyn Store<Event = Event>,
+        store: std::sync::Arc<dyn Store<Event = Event>>,
         ctx: Option<&std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
         dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
     ) {

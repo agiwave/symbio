@@ -669,6 +669,141 @@ async fn invalid_calls_are_denied_before_any_approval_reading() {
     );
 }
 
+/// 一次建账调用（`open_only`）：执行体只落 `request` 草稿，不执行、不写 `sent`。
+fn open_call(
+    ctx: Option<Arc<dyn PluginInvokeRequest>>,
+    payload: serde_json::Value,
+) -> (
+    PortExecContext,
+    PortInput,
+    Arc<std::sync::Mutex<Vec<FactDraft>>>,
+) {
+    let captured: Arc<std::sync::Mutex<Vec<FactDraft>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let emit =
+        symbio_plugin_api::port::PortFactEmit::new(Arc::new(CapturedFacts(captured.clone())));
+    (
+        PortExecContext {
+            deadline_ms: None,
+            abort: ExecAbortSignal::new(),
+            idempotency_key: "open-7-d2".to_string(),
+            sink: ExecEventSink::silent(),
+            emit,
+            ctx,
+            subject: 7,
+            group: String::new(),
+            origin: Some(3),
+            permitted: true,
+            deny_reason: String::new(),
+            scratch_dir: None,
+        },
+        PortInput {
+            port: TOOL,
+            payload,
+        },
+        captured,
+    )
+}
+
+/// 建账判定的固定输入：一次模型应答 + 一条调用 + 策略读数字串。
+fn open_payload(name: &str, grants: &str) -> serde_json::Value {
+    serde_json::json!({
+        "open_only": true,
+        "epoch": 2,
+        "policy": {
+            "threshold": "medium",
+            "grants": grants,
+            "mode": "interactive",
+        },
+        "response": {
+            "id": "model-7",
+            "calls": [{ "id": "tool-7-d2-model-7-c000-tc-a" }],
+        },
+        "tool_calls": [{
+            "id": "tc-a",
+            "name": name,
+            "arguments": { "path": "a.md" },
+            "parse_error": false,
+            "overflow_notice": false,
+        }],
+    })
+}
+
+#[tokio::test]
+async fn open_writes_one_request_per_call_with_the_resolved_risk() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({})).await;
+    let (exec, input, captured) = open_call(Some(ctx), open_payload("echo", "{}"));
+    let out = ToolPort.execute(exec, input).await;
+    assert!(
+        out.error.is_none() && out.facts.is_empty(),
+        "建账即终局：{out:?}"
+    );
+    let facts = captured.lock().unwrap();
+    assert_eq!(facts.len(), 1, "一条调用开一笔账");
+    assert_eq!(facts[0].kind, "request");
+    assert_eq!(facts[0].key, "request-tool-tool-7-d2-model-7-c000-tc-a-1");
+    let payload = &facts[0].payload;
+    assert_eq!(payload["port"], serde_json::json!("tool"));
+    assert_eq!(payload["attempt"], serde_json::json!(1));
+    assert_eq!(payload["name"], serde_json::json!("echo"));
+    assert_eq!(payload["args"], serde_json::json!({ "path": "a.md" }));
+    assert_eq!(payload["mode"], serde_json::json!("interactive"));
+    assert_ne!(
+        payload["risk"],
+        serde_json::json!("unknown"),
+        "注册表里有的能力必须判出风险档"
+    );
+    assert_eq!(payload["deferred"], serde_json::json!(false));
+}
+
+#[tokio::test]
+async fn open_keeps_unresolvable_names_route_only() {
+    let (exec, input, captured) = open_call(None, open_payload("mcp.unknown", "{}"));
+    let out = ToolPort.execute(exec, input).await;
+    assert!(out.facts.is_empty());
+    let facts = captured.lock().unwrap();
+    assert_eq!(facts[0].payload["risk"], serde_json::json!("unknown"));
+    assert_eq!(facts[0].payload["deferred"], serde_json::json!(true));
+    assert_eq!(facts[0].payload["threshold"], serde_json::json!("medium"));
+}
+
+#[tokio::test]
+async fn open_marks_protocol_failures_invalid_and_falls_back_to_the_epoch_id() {
+    let payload = serde_json::json!({
+        "open_only": true,
+        "epoch": 2,
+        "policy": { "threshold": "medium", "grants": "{}", "mode": "" },
+        "response": { "id": "model-7", "calls": [] },
+        "tool_calls": [
+            { "id": "", "name": "echo", "arguments": {}, "parse_error": false, "overflow_notice": false },
+            { "id": "tc-b", "name": "echo", "arguments": {}, "parse_error": true, "overflow_notice": false },
+        ],
+    });
+    let (exec, input, captured) = open_call(None, payload);
+    let _ = ToolPort.execute(exec, input).await;
+    let facts = captured.lock().unwrap();
+    assert_eq!(facts.len(), 2);
+    assert_eq!(
+        facts[0].key, "request-tool-tool-7-d2-model-7-c000-1",
+        "缺模型 id 的兜底段只由应答顺序决定"
+    );
+    assert_eq!(facts[0].payload["invalid"], serde_json::json!(true));
+    assert_eq!(facts[1].payload["invalid"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn open_reads_the_grant_ceiling_by_canonical_name() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({})).await;
+    let (exec, input, captured) = open_call(Some(ctx), open_payload("echo", r#"{"echo":"high"}"#));
+    let _ = ToolPort.execute(exec, input).await;
+    assert_eq!(
+        captured.lock().unwrap()[0].payload["grant"],
+        serde_json::json!("high")
+    );
+}
+
 /// 协议失败的三条读数各说各的：缺 id / 缺 name / 参数不可解析（D-312 的措辞在
 /// 执行体，环不解释）。三者一律**不执行**、落一条失败结果，且成因可指认。
 #[tokio::test]

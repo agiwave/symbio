@@ -53,7 +53,7 @@ use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::events::EVENT_AUTHZ_DENIED;
 use symbio_plugin_api::port::{ports, PortExecContext};
 use symbio_sdk::adapters::LlmTurn;
-use symbio_sdk::capability::{capability_resolve, tool_metas, ApprovalGrants, CAPABILITY_VISITOR};
+use symbio_sdk::capability::ApprovalGrants;
 use symbio_sdk::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
@@ -436,63 +436,6 @@ fn latest_model_response(facts: &[Event], turn: u64, drive: u64) -> Option<&Even
     })
 }
 
-/// 一次开账所需的请求级输入（批次内只读一次）。
-///
-/// 名字不再叫「策略」：它只装配判定**输入**（风险档 / 阈值 / 永久放行上限 / 模式），
-/// 判定本身归端口执行体（`authorize_only` 的 gate 调用）。
-struct BatchInputs {
-    known: Vec<String>,
-    threshold: CapabilityRiskLevel,
-    /// 跨会话的永久放行清单（工具 → 上限），与会话阈值同一处解析（D-170）。
-    grants: ApprovalGrants,
-    mode: String,
-}
-
-impl BatchInputs {
-    /// 行动作入口：有宿主面就读真策略，裸幕夹具没有就按 [`Self::fallback`]。
-    async fn read_opt(ctx: Option<&Arc<dyn PluginInvokeRequest>>) -> Self {
-        match ctx {
-            Some(ctx) => Self::read(ctx).await,
-            None => Self::fallback(),
-        }
-    }
-
-    /// 裸幕夹具（`head = None`）没有请求上下文：按「无注册面、默认阈值、无放行清单」读。
-    ///
-    /// 生产控制面的每一幕都有宿主面（`drive::no_host` 守着），这条只服务
-    /// `ReadyStage { head: None }` 的夹具——它的工具都是 route-only（`risk = None`）
-    /// ⇒ 授权一律按 `deferred` 放行。
-    fn fallback() -> Self {
-        Self {
-            known: Vec::new(),
-            threshold: CapabilityRiskLevel::default(),
-            grants: ApprovalGrants::default(),
-            mode: String::new(),
-        }
-    }
-
-    async fn read(ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
-        let known: Vec<String> = tool_metas(ctx).await.into_iter().map(|m| m.name).collect();
-        // 阈值读法与执行闸门同一处口径：`ctx[RISK_LEVEL]`，缺席 = `Medium`。
-        // 放行依据只问 `CapabilityRiskLevel::approval_basis`（唯一实现）。
-        let threshold = ctx
-            .get(RISK_LEVEL)
-            .map(|s| CapabilityRiskLevel::from_name(&s))
-            .unwrap_or_default();
-        let grants = ctx
-            .get(APPROVAL_GRANTS)
-            .map(|s| ApprovalGrants::parse(&s))
-            .unwrap_or_default();
-        let mode = ctx.get(MODE).unwrap_or_default();
-        Self {
-            known,
-            threshold,
-            grants,
-            mode,
-        }
-    }
-}
-
 impl ToolPort {
     pub(crate) fn new(
         facts: Arc<dyn Store<Event = Event>>,
@@ -522,22 +465,21 @@ impl ToolPort {
 // 两段从 `ToolDispatch` 契约搬到行动作直接调用：它们只写自己那一行的领域事实，
 // 不再借道分发包。派出与收尾仍在 `impl ToolDispatch`（P2-5 的边界）。
 
-/// 创建行 prepass：为每个真正可派发的调用开一笔工具账。
+/// 创建行 prepass：问创建行欠不欠，欠就把调用清单交给 `port=tool` 执行体开账。
 ///
-/// 入口先问创建行 `open-tools` 欠不欠（D-117）：一个模型响应是一笔集合债，
-/// 逐元素展开成 N 笔调用；全部 `request` 落完之后它就不再欠。这里不自己数
-/// 「第几轮」——id 只由模型响应里已有的东西决定（[`call_key`]），
-/// 否则创建行展开出的键与 `request` 的键对不上。
+/// 环不再装配请求载荷：线上名解析、风险档、永久放行上限与「不可派发」判定都在
+/// 执行体（DE-048 D-311）。环只交纯值（应答原文、调用清单、策略读数字串），
+/// 跑完再读回新落的 `request` 事实，按**响应顺序**与模型调用清单配对成草稿。
 pub(crate) async fn open_calls(
-    store: &dyn Store<Event = Event>,
+    store: Arc<dyn Store<Event = Event>>,
     ctx: Option<&Arc<dyn PluginInvokeRequest>>,
-    turn: u64,
+    subject: u64,
     user_seq: u64,
     drive_seq: u64,
     model_turn: &LlmTurn,
 ) -> Vec<ToolPortCall> {
     let facts = store.range(Seq::new(0));
-    let latest = latest_model_response(&facts, turn, drive_seq);
+    let latest = latest_model_response(&facts, subject, drive_seq);
     // 旧存档里的模型应答没有 `calls`（D-117 之前写的）：没有创建债可言，
     // 按旧路径继续派发，不能因为升级把在飞的会话卡死。带 `calls` 的应答
     // 则必须由创建行先开账——它不欠就说明这一批已经落过 `request`。
@@ -547,139 +489,132 @@ pub(crate) async fn open_calls(
         && !loop_rows::owes(
             "open-tools",
             &facts,
-            turn,
+            subject,
             loop_rows::wake_now_ms(&facts, drive_seq),
         )
     {
         symbio_plugin_api::plugin_warn!(
             "session",
-            "[Tool] 创建行不欠（turn={}），不落 request",
-            turn
+            "[Tool] 创建行不欠（subject={}），不落 request",
+            subject
         );
         return Vec::new();
     }
-    let inputs = BatchInputs::read_opt(ctx).await;
-    let round = latest
-        .and_then(|e| e.payload.get("id"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("r0");
-    let created: &[serde_json::Value] = latest
-        .and_then(|e| e.payload.get("calls"))
-        .and_then(|v| v.as_array())
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    let mut out = Vec::new();
-    for (idx, tc) in model_turn.tool_calls.iter().enumerate() {
-        let id = created
-            .get(idx)
-            .and_then(|c| c.get("id"))
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| call_key(turn, drive_seq, idx, tc.id.as_deref(), round));
-        let call = port::Call::new(ports::TOOL, id, 1);
-        let model_id = tc.id.as_deref().filter(|s| !s.trim().is_empty());
-        let name = tc.name.as_deref().filter(|s| !s.trim().is_empty());
-        // 不可派发的调用**也开账**：创建行的集合里有这个元素，跳过它那一笔
-        // 集合债就永远欠着。它的终局是「授权拒绝 + 批尾 failed」，不是「不存在」。
-        let invalid = model_id.is_none()
-            || name.is_none()
-            || tc.parse_error.is_some()
-            || tc.overflow_notice.is_some();
-        if let Some(open) = open_one(
-            store,
-            ctx,
-            &inputs,
-            turn,
-            user_seq,
-            &call,
-            model_id.unwrap_or_default(),
-            name.unwrap_or_default(),
-            &tc.arguments,
-            invalid,
-        )
-        .await
-        {
-            out.push(open);
-        }
-    }
-    out
-}
-
-/// 创建动作的单笔实体：只写 `request`（D-118 决策 5 的第一笔债）。
-///
-/// 判定**输入**在这里算定并写进请求载荷（`risk` / `threshold` / `approved` /
-/// `deferred` / `grant` / `invalid` / `mode`），gate 调用只按它判放行——两处读的是
-/// **同一个判定输入**，不各算一遍。
-#[allow(clippy::too_many_arguments)]
-async fn open_one(
-    store: &dyn Store<Event = Event>,
-    ctx: Option<&Arc<dyn PluginInvokeRequest>>,
-    inputs: &BatchInputs,
-    turn: u64,
-    user_seq: u64,
-    call: &port::Call,
-    model_id: &str,
-    name: &str,
-    args: &serde_json::Value,
-    invalid: bool,
-) -> Option<ToolPortCall> {
-    let approved = args
-        .get("approved")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    // 裸幕夹具（`head = None`）没有注册面：调用一律 route-only（`risk = None`），
-    // 授权按 `deferred` 放行——与生产「注册表里没有可判的能力」同一档。
-    let resolved = match ctx {
-        Some(ctx) => risk_of(ctx, name, args, &inputs.known).await,
-        None => None,
-    };
-    let risk = resolved.as_ref().map(|r| r.risk);
-    // 注册表里没有能力可判（route-only 工具）⇒ 放行是**交给下游路由闸门**
-    // 的延迟判定；不能在这里凭一个猜出来的风险档拒绝它。
-    let deferred = risk.is_none();
-    let risk_name = risk.map(CapabilityRiskLevel::as_str).unwrap_or("unknown");
-    // 永久放行上限按 canonical name 算（D-170）：线上名只是协议字符集的投影。
-    let grant = resolved
-        .as_ref()
-        .and_then(|r| inputs.grants.ceiling(&r.canonical))
-        .map(CapabilityRiskLevel::as_str);
-
-    if let Err(e) = port::announce_with(
-        store,
-        call,
-        turn,
-        user_seq,
-        serde_json::json!({
-            // 中性键（DE-048 D-311）：调用标识 / 名称 / 参数值，加上判定输入。
-            // 世界类型（线上名解析、风险档语义、参数含义）留在提供者一侧。
-            "name": name,
-            "args": args,
-            "risk": risk_name,
-            "threshold": inputs.threshold.as_str(),
-            "approved": approved,
-            "deferred": deferred,
-            "grant": grant,
-            "invalid": invalid,
-            "mode": inputs.mode,
-        }),
-    ) {
+    let Some(ctx) = ctx else {
         symbio_plugin_api::plugin_warn!(
             "session",
-            "[Tool] 工具请求事实未落格（turn={} / {model_id}）：{e:?}",
-            turn
+            "[Tool] 创建行没有宿主面（subject={}），不落 request",
+            subject
         );
-        return None;
+        return Vec::new();
+    };
+    // 策略读数字串（值，不是判定）：阈值 / 永久放行清单 / 模式由执行体自己解释。
+    let threshold = ctx
+        .get(RISK_LEVEL)
+        .map(|s| CapabilityRiskLevel::from_name(&s))
+        .unwrap_or_default();
+    let grants = ctx
+        .get(APPROVAL_GRANTS)
+        .map(|s| ApprovalGrants::parse(&s))
+        .unwrap_or_default();
+    let mode = ctx.get(MODE).unwrap_or_default();
+    let payload = serde_json::json!({
+        "open_only": true,
+        "epoch": drive_seq,
+        "policy": {
+            "threshold": threshold.as_str(),
+            // 已按 owner 的容错规则解析过，执行体只反序列化合法档位。
+            "grants": grants.to_json(),
+            "mode": mode,
+        },
+        "response": latest
+            .map(|e| e.payload.clone())
+            .unwrap_or(serde_json::Value::Null),
+        "tool_calls": model_turn
+            .tool_calls
+            .iter()
+            .map(|tc| {
+                serde_json::json!({
+                    "id": tc.id,
+                    "name": tc.name,
+                    // 参数原文搬运（值，不是装配请求载荷）：执行体才解释它。
+                    "arguments": tc.arguments,
+                    "parse_error": tc.parse_error.is_some(),
+                    "overflow_notice": tc.overflow_notice.is_some(),
+                })
+            })
+            .collect::<Vec<_>>(),
+    });
+    let Some(provider) = port::provider_of(ctx, ports::TOOL).await else {
+        return Vec::new();
+    };
+    let Some(executor) = provider.executor() else {
+        symbio_plugin_api::plugin_warn!(
+            "session",
+            "[Tool] 工具端口没有执行面（subject={}），不落 request",
+            subject
+        );
+        return Vec::new();
+    };
+    let now = loop_rows::wake_now_ms(&facts, drive_seq);
+    let exec = PortExecContext {
+        deadline_ms: None,
+        abort: ExecAbortSignal::default(),
+        idempotency_key: format!("open-{subject}-d{drive_seq}"),
+        sink: ExecEventSink::Null,
+        // 与行表里的执行体名同字面量（`loop_rows::OPENER` 是私有的）。
+        emit: port::host_fact_emit(store.clone(), subject, "opener", now, Some(user_seq), None),
+        ctx: Some(ctx.clone()),
+        subject,
+        group: String::new(),
+        origin: Some(user_seq),
+        permitted: true,
+        deny_reason: String::new(),
+        scratch_dir: None,
+    };
+    let outcome = executor
+        .execute(
+            exec,
+            symbio_plugin_api::port::PortInput {
+                port: ports::TOOL,
+                payload,
+            },
+        )
+        .await;
+    if let Some((class, why)) = outcome.error {
+        symbio_plugin_api::plugin_warn!(
+            "session",
+            "[Tool] 建账调用未交回结论（subject={}）：{class:?} {why}",
+            subject
+        );
     }
-    Some(ToolPortCall {
-        model_id: model_id.to_string(),
-        call: call.clone(),
-        name: name.to_string(),
-        granted: false,
-        deny_why: None,
-        sent: false,
-        wake: None,
-    })
+    let after = store.range(Seq::new(0));
+    after
+        .iter()
+        .skip(facts.len())
+        .filter(|e| {
+            e.kind == EVENT_REQUEST
+                && e.payload.get("port").and_then(|v| v.as_str()) == Some(ports::TOOL)
+        })
+        .zip(model_turn.tool_calls.iter())
+        .filter_map(|(event, tc)| {
+            let id = event.payload.get("id").and_then(|v| v.as_str())?;
+            let attempt = event
+                .payload
+                .get("attempt")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1);
+            Some(ToolPortCall {
+                model_id: tc.id.clone().unwrap_or_default(),
+                call: port::Call::new(ports::TOOL, id, attempt),
+                name: tc.name.clone().unwrap_or_default(),
+                granted: false,
+                deny_why: None,
+                sent: false,
+                wake: None,
+            })
+        })
+        .collect()
 }
 
 /// 授权动作：把这一笔**交给端口执行体的 gate 输入**（第二笔债）。
@@ -1405,34 +1340,6 @@ impl SessionDispatchPort {
         // 关账归 [`ToolDispatch::finish`]（下一个环步）——与正常批次同一条分工。
         Some(outcome)
     }
-}
-
-/// 一次调用的可判风险：能力名与本次风险档。
-///
-/// 两个值必须一起回来——授权级联既要按风险判放行，又要按**能力名**查永久放行清单；
-/// 只回风险档会让记录方再认一次名字，两次解析就可能给出两个答案。
-struct ToolRisk {
-    canonical: String,
-    risk: CapabilityRiskLevel,
-}
-
-/// 这次调用的风险档。`None` = 注册表里没有可判的能力（route-only 工具）。
-async fn risk_of(
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    name: &str,
-    args: &serde_json::Value,
-    known: &[String],
-) -> Option<ToolRisk> {
-    let canonical = capability_resolve(name, known.iter().map(String::as_str))?;
-    let visitor = ctx.get(CAPABILITY_VISITOR)?;
-    let cap = visitor
-        .get(canonical)
-        .await
-        .and_then(|r| r.cap().cloned())?;
-    Some(ToolRisk {
-        canonical: canonical.to_string(),
-        risk: cap.risk_for(args),
-    })
 }
 
 #[async_trait]
