@@ -17,9 +17,9 @@
  *
  * | 码 | 读数 | 取法 |
  * |---|---|---|
- * | `EL-001` | 行表的行数 | `loop_rows.rs` 里 `Decl {` 的出现次数 |
- * | `EL-002` | 分发方的出参通道数 | `SessionDispatchPort` 结构体里 `Mutex<` 字段数 |
- * | `EL-003` | 工具路径的全量读点数 | `tool_dispatch` / `gates` / `port` 三处的 `range(…Seq::new(0))` |
+ * | `EL-001` | 引擎自持的行数 | `crates/symbio-plugin-loop/src/**`（生产 `.rs`）里 `Decl {` 的出现次数（行数据已由应用交来，环侧目标 0） |
+ * | `EL-002` | 分发方的出参通道数 | `ring/engine.rs` 的 `CollectingWriter` 结构体里 `Mutex<` 字段数 |
+ * | `EL-003` | 驱动 / 回合路径的全量读点数 | `ring/engine.rs`、`symbio/src/drive.rs`、`session/plugin/turn.rs` 三处的 `range(…Seq::new(0))` |
  *
  * **账本只有这三格**：`TurnState` 那一格随对象下线一并消失，不再有第四个读数
  * （`CS-010` 同时退役，见 `GATE_CODES.md` 的退役列）。
@@ -57,24 +57,22 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
  * 基线：**只许降**。变宽要改这里，而改这里必须在提交正文里回答「这一处自持事实面答不了吗」
  * ——判据是人，脚本只负责让「悄悄变宽」这件事变得可见。
  *
- * `rows = 16`：15 条字符串命名的固定行 + 1 条以常量命名的归宿行（`EVENT_ARTIFACT_ADDED`）。
- * `channels = 1`：`produced` 与 `derived` 合成 `PortOutput` 之后只剩一条。
- * `fullScans = 9`：`tool_dispatch` 8 + 执行体 1。第 7 处是授权 gate：判定输入取自
- * `request`（读一次），结论由执行体当场落下、只能再读一次才看得见——事实面没有
- * 「未落先见」的入口，两次读各管一头。第 8 处是建账 prepass 的同款：先读事实问
- * 「创建行还欠不欠」，把开账交给 `port=tool` 执行体，再读一次把新落的 `request`
- * 配回调用清单——同样是一次「交出去才产出」的往返，缺任一次读都判不了
- * （B1–B3 下沉 session 后 `port` 三处全量读随执行体迁走；原 `gates` 那处并入
- * `tool_exec/execution.rs`）。
+ * `rows = 0`：行数据由应用经 `DriveRow` 交来（`ring/table.rs` 的 `DebtRow` 只是数据形状），
+ * 环不再自持行表；任何一行 `Decl {` 回到 loop 就是引擎又把行收回来了。
+ * `channels = 1`：`CollectingWriter` 只有一条跨 await 累积的 `collected: Mutex<…>`；
+ * 同步返回的端口结果不是通道。
+ * `fullScans = 1`：驱动 / 回合路径只剩 `session/plugin/turn.rs` 的终答投影读一次全量
+ * （按 `scope` 找终答事实，事实面没有「按实体取一条」以外的入口）；`ring/engine.rs`
+ * 只读当前站的 `FactView`，`symbio/src/drive.rs` 按 `head - 1` 续读，都不从 0 扫。
  */
-const BASELINE = { rows: 16, channels: 1, fullScans: 9 }
+const BASELINE = { rows: 0, channels: 1, fullScans: 1 }
 
-const LOOP_ROWS = 'crates/symbio-plugin-loop/src/loop_rows.rs'
-const DISPATCH = 'crates/symbio-plugin-loop/src/tool_dispatch.rs'
+const LOOP_SRC = 'crates/symbio-plugin-loop/src'
+const DISPATCH = 'crates/symbio-plugin-loop/src/ring/engine.rs'
 const SCAN_FILES = [
-  'crates/symbio-plugin-loop/src/tool_dispatch.rs',
-  'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
-  'crates/symbio-plugin-loop/src/port.rs',
+  'crates/symbio-plugin-loop/src/ring/engine.rs',
+  'crates/symbio/src/drive.rs',
+  'crates/symbio-plugin-session/src/plugin/turn.rs',
 ]
 
 const read = (rel) => {
@@ -83,17 +81,40 @@ const read = (rel) => {
   return fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
 }
 
-/** `Decl {` 的出现次数（行首可有缩进）。 */
-function countRows(text) {
-  if (text === null) return null
-  const hits = text.match(/^\s*Decl \{/gm)
-  return hits ? hits.length : 0
+/** loop 生产源码里 `Decl {` 的出现次数（行数据应由应用交来）。 */
+function countRows() {
+  const abs = path.join(ROOT, LOOP_SRC)
+  if (!fs.existsSync(abs)) return null
+  const files = []
+  walk(abs, files, (n) => n.endsWith('.rs') && !n.endsWith('.test.rs'))
+  let total = 0
+  for (const rel of files) total += (read(rel).match(/^\s*Decl \{/gm) || []).length
+  return total
 }
 
-/** `SessionDispatchPort` 结构体里 `Mutex<` 字段数。 */
+function walk(absDir, out, keep) {
+  let entries
+  try {
+    entries = fs.readdirSync(absDir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue
+    const abs = path.join(absDir, e.name)
+    if (e.isDirectory()) {
+      if (e.name === 'target' || e.name === 'node_modules') continue
+      walk(abs, out, keep)
+    } else if (e.isFile() && keep(path.relative(ROOT, abs).replace(/\r/g, ''))) {
+      out.push(path.relative(ROOT, abs))
+    }
+  }
+}
+
+/** `CollectingWriter` 结构体里 `Mutex<` 字段数。 */
 function countChannels(text) {
   if (text === null) return null
-  const m = /pub\(crate\) struct SessionDispatchPort \{(.*?)\n\}/s.exec(text)
+  const m = /\bstruct CollectingWriter \{(.*?)\n\}/s.exec(text)
   if (!m) return null
   const hits = m[1].match(/^\s+\w+: Mutex</gm)
   return hits ? hits.length : 0
@@ -117,7 +138,7 @@ function countFullScans() {
 function main() {
   const printBaseline = process.argv.includes('--print-baseline')
 
-  const rows = countRows(read(LOOP_ROWS))
+  const rows = countRows()
   const channels = countChannels(read(DISPATCH))
   const scans = countFullScans()
 
@@ -135,8 +156,8 @@ function main() {
 
   // 读不出 ⇒ 红（不是「没什么可判」）。
   const unreadable = []
-  if (rows === null) unreadable.push(LOOP_ROWS)
-  if (channels === null) unreadable.push(`${DISPATCH}（SessionDispatchPort 结构体）`)
+  if (rows === null) unreadable.push(LOOP_SRC)
+  if (channels === null) unreadable.push(`${DISPATCH}（CollectingWriter 结构体）`)
   if (scans === null) unreadable.push(SCAN_FILES.join(' / '))
   if (unreadable.length > 0) {
     console.error(red('EL 读数读不出（绿只说明检查过，不说明没问题）：'))
@@ -145,9 +166,9 @@ function main() {
   }
 
   const cells = [
-    { code: 'EL-001', label: '行表的行数', got: rows, base: BASELINE.rows, hint: 'DE-044 §3：这一行答得出「事实面答不了吗」吗？' },
+    { code: 'EL-001', label: '引擎自持的行数', got: rows, base: BASELINE.rows, hint: 'DE-044 §3：行数据由应用交来——这一行答得出「事实面答不了吗」？' },
     { code: 'EL-002', label: '分发方的出参通道数', got: channels, base: BASELINE.channels, hint: 'DE-044 E-3：通道要跨 await 累积才需要 Mutex；同步返回值不是通道。' },
-    { code: 'EL-003', label: '工具路径的全量读点数', got: scans.total, base: BASELINE.fullScans, hint: 'DE-044 E-2：同一站内的 N 笔只读一次；跨站是链式的，不许共用一份幕首切片。' },
+    { code: 'EL-003', label: '驱动 / 回合路径的全量读点数', got: scans.total, base: BASELINE.fullScans, hint: 'DE-044 E-2：同一站内的 N 笔只读一次；跨站是链式的，不许共用一份幕首切片。' },
   ]
 
   console.log('--- engine-ledger-audit: 引擎账本的可数读数（EL-001…003）---')

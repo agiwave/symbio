@@ -173,7 +173,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 90 · draft 1 · retired 2（共 93）
+**计数**：active 89 · draft 1 · retired 3（共 93）
 
 ## 现行设计（active）
 
@@ -226,7 +226,6 @@ board.columns: [impl]
 | [`DE-050-义务环事实词表与债务表`](050-义务环事实词表与债务表.md) | 义务环事实词表与债务表 | 未落地 |
 | [`DE-051-机制形状规格`](051-机制形状规格.md) | 机制形状规格 | 未落地 |
 | [`DE-101-context-compression-design`](../../crates/symbio-plugin-session/src/docs/101-context-compression-design.md) | 会话上下文压缩设计 | 与代码一致 |
-| [`DE-102-core-loop`](../../crates/symbio-plugin-session/src/docs/102-core-loop.md) | 会话核心循环（LLM × 工具） | 与代码一致 |
 | [`DE-104-module-layout`](../../crates/symbio-plugin-session/src/docs/104-module-layout.md) | Session / Loop 插件模块分工 | 与代码一致 |
 | [`DE-105-node-state-streaming`](../../crates/symbio-plugin-session/src/docs/105-node-state-streaming.md) | 节点状态流（Node-State Streaming）—— 实时面即节点状态 | 与代码一致 |
 | [`DE-106-perf`](../../crates/symbio-plugin-session/src/docs/106-perf.md) | 会话 / 转写的前端性能设计 | 与代码一致 |
@@ -282,5 +281,6 @@ board.columns: [impl]
 |---|---|---|
 | [`DE-014-单环一表`](014-单环一表.md) | 单环一表收敛 | 目标形状已并入 DE-001 §4.3 / §4.4 与 DE-015，施工六步已全部收口（过渡方案 DE-090 随退场删除，收口证据见 DE-016 的 D-237），本文正文（目标设计 / 落地六步 / 场景验证）随退场删除；决策锚点 D-064…D-128 保留原址作为宿主——它们仍约束现行代码，且代码引用最多，搬家不增加信息（D-145 与本篇头注）。 |
 | [`DE-090-过渡方案`](090-过渡方案.md) | 过渡方案与现状差距（已退场） | 六步迁移全部收口，过渡方案不再承载条文；目标形状的 owner 是 DE-001 / DE-015 / DE-022，300 行熔断线升为 DE-016 的 D-237，八条边界与三处有条件启动的缺口各有裁决 owner。正文随退场删除，历史在 git log。 |
+| [`DE-102-core-loop`](../../crates/symbio-plugin-session/src/docs/102-core-loop.md) | 会话核心循环（LLM × 工具） | 它写的实现（`turn_exec::drive` / `TurnState` / `chat_loop` / `orchestrator/` / `AbortGuard`）已随环收口退场（D-317 等）：主循环现在是 `symbio-plugin-loop` 的环（行数据由应用交来，环只按行还债）加宿主的驱动，一轮的装配与收尾在会话插件的 `plugin/turn.rs`。正文（主循环结构、幕与内环、节点状态推进）随退场删除，历史在 `git log`。 |
 
 <!-- registry:summary end -->

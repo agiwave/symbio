@@ -172,36 +172,43 @@ function rustFiles() {
 }
 
 /**
- * `ROWS` 里声明的行名，连带**这一行接没接执行体**（`by: Some(…)`）。
+ * `ROWS` 里声明的行名（各插件的声明文件 `const|static ROWS: &[Decl]`），连带
+ * **这一行接没接执行体**（`by: Some(…)`）。
  *
- * 只取 `static ROWS: &[Decl] = &[ … ]` 那一块：同一文件里还有 `ACTORS`（执行体名）
- * 与端口声明（端口名），它们的 `name:` 长得一模一样，整文件抓会把「端口名」
- * 当成合法行名——于是 OB-003 会被一个**不是行**的名字满足。
+ * 行表随插件拆到各自的 `decl.rs` / `declarations.rs`，不再有宿主总表；本判据按
+ * 「所有生产 `.rs` 里的 `&[Decl]` 行表」取并集。`authz::rows.gen.rs` 的 `ROWS`
+ * 是 `&[(&str, &[&str], VisScope)]`（主体部署行，不是义务行），不在判定面内。
  *
  * `wired` 的取法：`name:` 之后、下一个 `name:` 之前出现 `by: Some(` 才算接了执行体。
  * OB-004 用它区分「执行体动手前的复核」与「这一行唯一的派发点」。
  */
-function declaredRows(rowsFile) {
-  if (!fs.existsSync(rowsFile)) return null
-  const text = blankComments(fs.readFileSync(rowsFile, 'utf8')).join('\n')
-  const start = text.search(/static ROWS\s*:\s*&\[Decl\]\s*=\s*&\[/)
-  if (start < 0) return null
-  const open = text.indexOf('=', start)
-  if (open < 0) return null
-  // ⚠️ 不能用 `matchBrace` 找结尾：它数的是 `{}`，而这里的**最外层是 `[]`**。
-  // 拿 `[` 的下标喂它，第一个 `Decl { … }` 的 `}` 就会让深度归零 ⇒ 只截到第一行，
-  // 于是「行表里只有 authorize-tool」——OB-003 会把 10 处合法点名报成悬空。
-  // 顶层 `static` 以行首 `];` 收尾，按行首锚定才是这一块的边界。
-  const close = text.indexOf('\n];', open)
-  const body = text.slice(open, close < 0 ? text.length : close)
+function declaredRows() {
   const rows = new Map()
-  const marks = [...body.matchAll(/\bname:\s*"([^"]+)"/g)]
-  for (let i = 0; i < marks.length; i++) {
-    const from = marks[i].index
-    const to = i + 1 < marks.length ? marks[i + 1].index : body.length
-    rows.set(marks[i][1], { wired: /\bby:\s*Some\(/.test(body.slice(from, to)) })
+  for (const abs of rustFiles()) {
+    const text = blankComments(fs.readFileSync(abs, 'utf8')).join('\n')
+    // 行表已按插件拆到各声明文件（`decl.rs` / `declarations.rs`），宿主不再有一张总表。
+    // 只认 `&[Decl]` 形态：`authz::rows.gen.rs` 的 `ROWS` 是 `&[(&str, …)]`（主体行，
+    // 不是义务行），若按名字整抓会把它的名字混进来。
+    for (const m of text.matchAll(
+      /\b(?:const|static)\s+ROWS\s*:\s*&\[Decl\]\s*=\s*&\[/g,
+    )) {
+      const open = text.indexOf('&[', m.index)
+      if (open < 0) continue
+      // ⚠️ 不能用 `matchBrace` 找结尾：它数的是 `{}`，而这里的**最外层是 `[]`**。
+      // 拿 `[` 的下标喂它，第一个 `Decl { … }` 的 `}` 就会让深度归零 ⇒ 只截到第一行，
+      // 于是「行表里只有 authorize-tool」——OB-003 会把 10 处合法点名报成悬空。
+      // 顶层 `const` 以行首 `];` 收尾，按行首锚定才是这一块的边界。
+      const close = text.indexOf('\n];', open)
+      const body = text.slice(open, close < 0 ? text.length : close)
+      const locals = [...body.matchAll(/\bname:\s*"([^"]+)"/g)]
+      for (let i = 0; i < locals.length; i++) {
+        const from = locals[i].index
+        const to = i + 1 < locals.length ? locals[i + 1].index : body.length
+        rows.set(locals[i][1], { wired: /\bby:\s*Some\(/.test(body.slice(from, to)) })
+      }
+    }
   }
-  return rows
+  return rows.size > 0 ? rows : null
 }
 
 /** `turn_exec::drive` 的函数体区间（`[start, end)`）——派发器本体问债不算旁路 */
@@ -279,8 +286,7 @@ if (files.length === 0) {
   process.exit(2)
 }
 
-const rowsFile = path.join(ROOT, 'crates/symbio-plugin-loop/src/loop_rows.rs')
-const rows = declaredRows(rowsFile)
+const rows = declaredRows()
 if (!rows || rows.size === 0) {
   console.log(red('[ERROR] OB-003 读不出 `ROWS` 行表 ⇒ 行名无从核对（判据没有输入，宁红不静默）'))
   process.exit(2)

@@ -18,15 +18,13 @@ const script = path.join(scriptDir, 'facts-boundary-audit.mjs')
 /** 与守卫里的清单一致：夹具要让每个文件都存在，否则 FB-002 会先报清单漂移。 */
 const CAPABILITY_FILES = [
   'crates/symbio-plugin-task/src/task.rs',
-  'crates/symbio-plugin-loop/src/memory_events.rs',
-  'crates/symbio-plugin-session/src/worker_progress.rs',
   'crates/symbio-plugin-tool/src/breaker.rs',
   'crates/symbio-plugin-session/src/stats.rs',
   'crates/symbio-sdk/src/projection/rebuild.rs',
   'crates/symbio-plugin-session/src/transcript/inbox.rs',
   'crates/symbio-plugin-session/src/transcript/autonomous.rs',
   'crates/symbio-plugin-session/src/message_events.rs',
-  'crates/symbio-plugin-loop/src/derived_facts.rs',
+  'crates/symbio-plugin-loop/src/ring/facts.rs',
 ]
 
 /** 一棵最小仓库：能力文件清单默认是空的，`extra` 覆盖 / 追加其它文件。 */

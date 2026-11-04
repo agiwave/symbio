@@ -230,6 +230,66 @@ test('manifestEdges：自清单的 `name =` 不是边', () => {
   })
 })
 
+// ── 唯一承认的链接形态：dev-dep + 测试代码里的 `use <crate> as _;` ───────
+// 它是 `plugin-links` 块的测试版：只做链接（`as _`）、不引用符号。普通 dev 依赖
+// 仍然算边——卸载后 `cargo test` 编译不过，正是这条判据要拦的东西。
+
+const DEV_DEP = '[package]\nname = "symbio-kernel"\n\n[dev-dependencies]\nsymbio-plugin-alpha = { path = "../symbio-plugin-alpha" }\n'
+
+test('dev-dep + 测试代码里的链接行 ⇒ 源码与清单两侧都不算边', () => {
+  withTree(
+    {
+      'crates/symbio-kernel/Cargo.toml': DEV_DEP,
+      'crates/symbio-kernel/src/tests.rs': 'use symbio_plugin_alpha as _;\n#[test]\nfn t() {}\n',
+    },
+    (root) => {
+      const targets = disablablePlugins(root).targets
+      assert.deepEqual(rustEdges({ root, targets }).hits, [])
+      assert.deepEqual(manifestEdges({ root, targets }).hits, [])
+      assert.deepEqual(edgeMessages(root), [])
+    },
+  )
+})
+
+test('dev-dep 但测试代码只取符号 ⇒ 仍红（普通 dev 依赖不是链接）', () => {
+  withTree(
+    {
+      'crates/symbio-kernel/Cargo.toml': DEV_DEP,
+      'crates/symbio-kernel/src/tests.rs': 'use symbio_plugin_alpha::a;\n#[test]\nfn t() { a(); }\n',
+    },
+    (root) => {
+      const hits = manifestEdges({ root, targets: disablablePlugins(root).targets }).hits
+      assert.equal(hits.length, 1)
+      assert.equal(hits[0].dev, true)
+      assert.match(edgeMessages(root).join('\n'), /普通 dev 依赖/)
+    },
+  )
+})
+
+test('dev-dep 但链接行写在生产源码 ⇒ 仍红（生产面必须为 0）', () => {
+  withTree(
+    {
+      'crates/symbio-kernel/Cargo.toml': DEV_DEP,
+      'crates/symbio-kernel/src/lib.rs': 'use symbio_plugin_alpha as _;\n',
+    },
+    (root) => {
+      assert.equal(rustEdges({ root, targets: disablablePlugins(root).targets }).hits.length, 1)
+    },
+  )
+})
+
+test('生产依赖 + 测试里的链接行 ⇒ 仍红（链接形态不放宽依赖段）', () => {
+  withTree(
+    {
+      'crates/symbio-kernel/Cargo.toml': DEV_DEP.replace('[dev-dependencies]', '[dependencies]'),
+      'crates/symbio-kernel/src/tests.rs': 'use symbio_plugin_alpha as _;\n#[test]\nfn t() {}\n',
+    },
+    (root) => {
+      assert.equal(manifestEdges({ root, targets: disablablePlugins(root).targets }).hits.length, 1)
+    },
+  )
+})
+
 test('manifestEdges：注释掉的依赖与生成块都不算边', () => {
   withTree(
     {

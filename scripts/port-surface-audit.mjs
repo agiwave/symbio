@@ -10,7 +10,7 @@
  * | PTS-002 | 求解器（`owed` / `drive` 所在文件）里**不出现端口字段名与端口取值** | **端口渗进引擎**——引擎一旦认识端口，加端口就得改引擎 |
  * | PTS-003 | 求解器那两个函数的**字节**与基线一致 | 判据 1 的原文口径：「`drive` 与 `owed` 源码 diff = 0」 |
  * | PTS-004 | 基线引用的 ADR **能打开**、理由**非空** | **改判据而不留决策**——基线是判据的一面，改它必须有决策挂得住 |
- * | PTS-005 | 协议格的**写点只在一个文件里**（扫 `symbio/src` 的 `Event::pending`，名字位上是协议常量或 `PortDecl::before`） | **协议格到处有人写**——「四格由引擎独占」从此靠自觉（DE-015 §2.3 / 判据 5） |
+ * | PTS-005 | 协议格的**写点只在一个文件里**（两种形态：`symbio/src` 的 `Event::pending` 名字实参 ⊆ 协议常量 / `PortDecl::before`；`impl PortFactWriter` 里的 `store.append`——即 effects / `PortFactWriter` 链路） | **协议格到处有人写**——「四格由引擎独占」从此靠自觉（DE-015 §2.3 / 判据 5） |
  * | PTS-006 | DE-015 §2.6 契约表的第 7 行**引 D-138**（重试已启用：键含 attempt，重试前提两条）且**不含「未启用」** | **条文与机制分叉**——重试已进债键（D-138），条文若仍说「未启用」就是把在跑的路说成没跑 |
  *
  * ## 为什么是这几格（而不是「机制键守恒」那种计数）
@@ -42,11 +42,18 @@
  *   `sent`」声明面上查不到。这条判据不钉文件名：它钉**写方唯一**（名单长度 == 1），
  *   因为「唯一」才是判据，「是 `port.rs`」只是今天的实测值。写点为 0 同样判红——
  *   协议格没人写就是环不转，而不是「没什么可判」。
- *   边界（写在绿灯里，别把它当证明）：判定基于 `Event::pending(` 的**名字实参**文本。
- *   本仓 `Event` 的**字段是 `pub`**，所以手搓结构体字面量在类型上合法、本条看不见
- *   （今天全仓零处；要关掉这个缝得先收窄 `Event` 字段，那是 core 形状的事，
- *   挂 `arch-shape-audit` 而不挂本条）。把名字先存进一个认不出来的变量同样能绕，
- *   这一处按 `decl.before` 补判（`sent` 的名字正是它，全仓只在端口层读一次）。
+ *   判定面认两种写点形态，因为链路现在分两段：
+ *   - **落库写点**：`impl PortFactWriter` 体里的 `store.append`（宿主把执行体给的
+ *     `FactDraft` 落成事实——这是协议格真正进账的唯一一处）；
+ *   - **直写**：`Event::pending(` 的名字实参是协议常量或 `PortDecl::before`（老形状，
+ *     也是「有人绕过出口直接构造协议事实」的形状，仍要看见）。
+ *   环里的 `CollectingWriter` 只**收集**效果、不落库，不算写点——它是链路的中间段，
+ *   不是第二个写方。
+ *   边界（写在绿灯里，别把它当证明）：判定基于文本。本仓 `Event` 的**字段是 `pub`**，
+ *   所以手搓结构体字面量在类型上合法、本条看不见（今天全仓零处；要关掉这个缝得先
+ *   收窄 `Event` 字段，那是 core 形状的事，挂 `arch-shape-audit` 而不挂本条）。
+ *   把名字先存进一个认不出来的变量同样能绕，这一处按 `decl.before` 补判
+ *   （`sent` 的名字正是它，全仓只在端口层读一次）。
  * - **PTS-006 管「条文与机制对不对得上」**：前五格判声明、引擎与写侧，这一格判**散文**——
  *   重试已进债键（D-138），契约 7 若继续写「未启用」，读者会以为重试不在生产里跑。
  *   机制侧由用例 `only_the_tool_port_has_headroom_and_only_for_rebuildable_waiters`
@@ -586,6 +593,20 @@ function protocolWritePoints() {
         if (!hit) continue
         const line = code.slice(0, m.index).split('\n').length
         lines.push(line)
+      }
+      // effects / PortFactWriter 链路：宿主把执行体给的 `FactDraft` 落成事实的唯一一处。
+      // 环里的 `CollectingWriter` 只收集效果、不 `append`，因此不进这个名单——它是链路
+      // 的中间段，不是第二个写方（这一格的判据是「写方唯一」，不是「impl 唯一」）。
+      for (const m of code.matchAll(/\bimpl\s+(?:<[^>]*>\s*)?PortFactWriter\s+for\s+/g)) {
+        const open = code.indexOf('{', m.index)
+        if (open < 0) continue
+        const close = matchBrace(code, open)
+        if (close < 0) continue
+        const body = code.slice(open, close + 1)
+        for (const a of body.matchAll(/\.\s*append\s*\(/g)) {
+          const idx = open + a.index
+          lines.push(code.slice(0, idx).split('\n').length)
+        }
       }
       if (lines.length > 0) {
         hits.set(path.relative(ROOT, abs).split(path.sep).join('/'), lines)

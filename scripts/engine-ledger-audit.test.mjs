@@ -3,7 +3,7 @@
  *
  * 这份守卫判的是**读数有没有变宽**（EL-001…003，判据见 DE-044 §3）。它的失效形态
  * 是这一族的老病：**读不出 ⇒ 没什么可判 ⇒ 通过**。所以三条码各配一条「多一处就红」的
- * 反向用例，另加两条输入失效用例——文件不在、结构体找不到，都必须 exit 1，不许亮绿灯。
+ * 反向用例，另加两条输入失效用例——扫描范围不在、结构体找不到，都必须 exit 1，不许亮绿灯。
  *
  * 另有一条**不该红**的用例：读数**收窄**时通过（只提示可降基线）。等于会把收窄也判红，
  * 于是改基线成了常规动作，棘轮就失效了——这条用例钉的是方向只留一个。
@@ -21,22 +21,24 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./engine-ledger-audit.mjs', import.meta.url))
 
-const LOOP_ROWS = 'crates/symbio-plugin-loop/src/loop_rows.rs'
-const DISPATCH = 'crates/symbio-plugin-loop/src/tool_dispatch.rs'
-const GATES = 'crates/symbio-plugin-loop/src/tool_exec/execution.rs'
-const PORT = 'crates/symbio-plugin-loop/src/port.rs'
+// 读数面：环源码（EL-001）、环的收集器（EL-002）、驱动 / 回合路径（EL-003）。
+const LOOP_SRC = 'crates/symbio-plugin-loop/src'
+const TABLE = 'crates/symbio-plugin-loop/src/ring/table.rs'
+const ENGINE = 'crates/symbio-plugin-loop/src/ring/engine.rs'
+const DRIVE = 'crates/symbio/src/drive.rs'
+const TURN = 'crates/symbio-plugin-session/src/plugin/turn.rs'
 
-/** 与基线等量的干净夹具：16 行 / 1 通道 / 9 处全量读（建账与 gate 各前后两次，`port` 无读点）。 */
+/** 与基线等量的干净夹具：0 行 / 1 通道 / 1 处全量读。 */
 function cleanFiles() {
   const decl = `    Decl {\n        name: "row",\n        prio: 1,\n    },\n`
-  const rows = `pub(crate) const TABLE: &[Decl] = &[\n${decl.repeat(16)}];\n`
-  const dispatch = `pub(crate) struct SessionDispatchPort {\n    a: u8,\n    out: Mutex<PortOutput>,\n}\n`
-  const scan = `fn f() { let _ = store.range(Seq::new(0)); }\n`
   return {
-    [LOOP_ROWS]: rows,
-    [DISPATCH]: dispatch + scan.repeat(8),
-    [GATES]: scan,
-    [PORT]: `fn g() { let _ = 0u8; }\n`,
+    [TABLE]: 'pub(crate) struct DebtRow {\n    pub(crate) name: &\'static str,\n}\n',
+    [ENGINE]:
+      'struct CollectingWriter {\n    outlet: PortFactEmit,\n    collected: Mutex<Vec<FactDraft>>,\n}\n',
+    [DRIVE]: 'fn d() { let _ = facts.range(Seq::new(head - 1)); }\n',
+    [TURN]: 'fn f() { let _ = facts.range(Seq::new(0)); }\n',
+    // 夹具里的行常量：证明 `Decl {` 只有在 loop 源码里才进读数。
+    'crates/symbio-plugin-session/src/rows.rs': `pub(crate) const TABLE: &[Decl] = &[\n${decl}];\n`,
   }
 }
 
@@ -71,15 +73,28 @@ test('干净夹具：三格与基线一致 ⇒ 通过', () => {
   }
 })
 
-test('EL-001：多一行 Decl ⇒ 红，并指出变宽几格', () => {
+test('EL-001：loop 里多一行 Decl ⇒ 红（引擎不再自持行表）', () => {
   const files = cleanFiles()
-  files[LOOP_ROWS] += `    Decl {\n        name: "extra",\n        prio: 2,\n    },\n`
+  files[TABLE] += `    Decl {\n        name: "extra",\n        prio: 2,\n    },\n`
   const box = sandbox(files)
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /EL-001/)
-    assert.match(r.out, /16 → 17/)
+    assert.match(r.out, /0 → 1/)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('EL-001 判定面：别的 crate 里的 `Decl {` 不进读数', () => {
+  const files = cleanFiles()
+  files['crates/symbio-plugin-session/src/rows.rs'] += `    Decl {\n        name: "other",\n    },\n`
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 0, r.out)
+    assert.match(r.out, /EL-001 引擎自持的行数：0/)
   } finally {
     box.cleanup()
   }
@@ -87,9 +102,9 @@ test('EL-001：多一行 Decl ⇒ 红，并指出变宽几格', () => {
 
 test('EL-002：多一个 Mutex 字段 ⇒ 红', () => {
   const files = cleanFiles()
-  files[DISPATCH] = files[DISPATCH].replace(
-    '    out: Mutex<PortOutput>,',
-    '    out: Mutex<PortOutput>,\n    extra: Mutex<Vec<u8>>,',
+  files[ENGINE] = files[ENGINE].replace(
+    '    collected: Mutex<Vec<FactDraft>>,',
+    '    collected: Mutex<Vec<FactDraft>>,\n    extra: Mutex<Vec<u8>>,',
   )
   const box = sandbox(files)
   try {
@@ -104,36 +119,36 @@ test('EL-002：多一个 Mutex 字段 ⇒ 红', () => {
 
 test('EL-003：多一处全量读 ⇒ 红（两种写法都算）', () => {
   const files = cleanFiles()
-  files[GATES] += 'fn h() { let _ = store.range(symbio_sdk::Seq::new(0)); }\n'
+  files[DRIVE] += 'fn h() { let _ = facts.range(symbio_sdk::Seq::new(0)); }\n'
   const box = sandbox(files)
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /EL-003/)
-    assert.match(r.out, /9 → 10/)
+    assert.match(r.out, /1 → 2/)
   } finally {
     box.cleanup()
   }
 })
 
-test('收窄不判红：少一行只提示可降基线', () => {
+test('收窄不判红：少一条通道只提示可降基线', () => {
   const files = cleanFiles()
-  const one = `    Decl {\n        name: "row",\n        prio: 1,\n    },\n`
-  files[LOOP_ROWS] = files[LOOP_ROWS].replace(one, '')
+  files[ENGINE] = files[ENGINE].replace('    collected: Mutex<Vec<FactDraft>>,\n', '')
   const box = sandbox(files)
   try {
     const r = run(box.root)
     assert.equal(r.status, 0, r.out)
-    assert.match(r.out, /16 → 15/)
+    assert.match(r.out, /1 → 0/)
     assert.match(r.out, /可以顺手把基线降下来/)
   } finally {
     box.cleanup()
   }
 })
 
-test('输入失效：行表文件不在 ⇒ 红（不许「没什么可判 ⇒ 通过」）', () => {
+test('输入失效：环源码整体不在 ⇒ 红（不许「没什么可判 ⇒ 通过」）', () => {
   const files = cleanFiles()
-  delete files[LOOP_ROWS]
+  delete files[TABLE]
+  delete files[ENGINE]
   const box = sandbox(files)
   try {
     const r = run(box.root)
@@ -144,14 +159,27 @@ test('输入失效：行表文件不在 ⇒ 红（不许「没什么可判 ⇒ �
   }
 })
 
-test('输入失效：结构体找不到 ⇒ 红（通道数不能默认成 0）', () => {
+test('输入失效：CollectingWriter 结构体找不到 ⇒ 红（通道数不能默认成 0）', () => {
   const files = cleanFiles()
-  files[DISPATCH] = files[DISPATCH].replace('SessionDispatchPort', 'SomethingElse')
+  files[ENGINE] = files[ENGINE].replace('CollectingWriter', 'SomethingElse')
   const box = sandbox(files)
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SessionDispatchPort/)
+    assert.match(r.out, /CollectingWriter/)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('输入失效：扫描文件缺失 ⇒ 红（全量读数不能少读一处当通过）', () => {
+  const files = cleanFiles()
+  delete files[TURN]
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /读数读不出/)
   } finally {
     box.cleanup()
   }

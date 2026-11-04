@@ -57,18 +57,25 @@ const ROOT = rootArg
 /** D-084 §4 的能力文件（DE-014 迁移表「能力自取磁盘」一行；
  *  6b 成片搬家后驱动器侧的文件住各能力包，`rebuild` 住 core schema）。
  *  `elimination` 随 D-219 迁入 `symbio-plugin-agent` 的 `before` 实现：它只读
- *  控制面批首算好的读数，连取事实的入口都没有，故退出本清单。 */
+ *  控制面批首算好的读数，连取事实的入口都没有，故退出本清单。
+ *
+ *  **2026-11 清单更新（D-309 轮次投影退场 / D-317 事实身份键改 `scope`）**：
+ *  - `loop/src/memory_events.rs` 的轮末派生与巩固并入 `ring/facts.rs`——环只认
+ *    五类记账事实，读侧收放不再由会话插件自取；
+ *  - `session/src/worker_progress.rs` 随 `turnstate` 投影退场（轮次状态不再是
+ *    可读投影，`chat.assistant.progress` 已无生产写方）；
+ *  会话记忆本体（`session/src/memory.rs`）**不进本清单**：它用引擎递来的
+ *  `session_dir` 拼地址，路径词在能力面——那是 FB-002 要拦的形状，不是读数。
+ *  改这一行清单先要有决策：旧路径是「能力自取磁盘」的实测面，删条目等于关掉读数。 */
 const CAPABILITY_FILES = [
   'crates/symbio-plugin-task/src/task.rs',
-  'crates/symbio-plugin-loop/src/memory_events.rs',
-  'crates/symbio-plugin-session/src/worker_progress.rs',
   'crates/symbio-plugin-tool/src/breaker.rs',
   'crates/symbio-plugin-session/src/stats.rs',
   'crates/symbio-sdk/src/projection/rebuild.rs',
   'crates/symbio-plugin-session/src/transcript/inbox.rs',
   'crates/symbio-plugin-session/src/transcript/autonomous.rs',
   'crates/symbio-plugin-session/src/message_events.rs',
-  'crates/symbio-plugin-loop/src/derived_facts.rs',
+  'crates/symbio-plugin-loop/src/ring/facts.rs',
 ]
 
 const STORE_DIR = 'crates/symbio-plugin-session/src/store/'

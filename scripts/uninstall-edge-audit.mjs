@@ -26,12 +26,16 @@
  * `plugin_manager` / `vdfs` 是界面底座（`ASSEMBLY_UNDISABLABLE_PLUGINS`），没有
  * 「卸载」这条路，对它们的编译期边不构成静默边——判了只会逼人写豁免。
  *
- * ## 豁免只有一处：生成的链接块
+ * ## 豁免只承认一种链接形态
  *
- * `crates/symbio/src/{lib.rs,Cargo.toml}` 的 `plugin-links` 标记块由目录投影生成，
- * 它**就是**装配点的链接表（漏一行的后果是注册项被链接器丢掉）。标记块之外的
- * 手写引用全部算边。标记本身缺失也判红：那时生成行会被当成手写边，而报错会指向
- * 一整屏假阳性，真问题（谁写了跨插件引用）反而看不见。
+ * 1. `crates/symbio/src/{lib.rs,Cargo.toml}` 的 `plugin-links` 标记块由目录投影生成，
+ *    它**就是**装配点的链接表（漏一行的后果是注册项被链接器丢掉）。标记块之外的
+ *    手写引用全部算边。标记本身缺失也判红：那时生成行会被当成手写边，而报错会指向
+ *    一整屏假阳性，真问题（谁写了跨插件引用）反而看不见。
+ * 2. 测试二进制要链接环插件时，只承认 **`[dev-dependencies]` 一条 + 测试代码里的
+ *    `use <crate> as _;`**（与上面生成块的 `pub use <crate>;` 同形：只做链接、不引用
+ *    符号）。生产依赖、生产源码里的同类写法仍判红；普通 dev 依赖（用它的符号/类型）
+ *    也不算链接——卸载后 `cargo test` 编译不过，边还在。
  *
  * ## 失效形态（回归测试钉的是这几条）
  *
@@ -184,6 +188,54 @@ function crateRe(target) {
   return new RegExp(`\\b${target.crate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
 }
 
+/** 测试代码（`.test.rs` / 基名 `tests.rs` / `tests/`）。生产面仍必须是 0。 */
+export function isTestSource(relPath) {
+  return (
+    /\.test\.rs$/.test(relPath) ||
+    path.posix.basename(relPath) === 'tests.rs' ||
+    relPath.includes('/tests/')
+  )
+}
+
+/**
+ * 唯一允许的链接形态：`use <crate> as _;`。
+ *
+ * 它与装配点 `plugin-links` 块里的 `pub use <crate>;` 同形——**只做链接、不引用符号**：
+ * `as _` 让编译器把 crate 链接进来（`inventory` 注册项才不会被丢掉），代码里一个符号
+ * 都不用。任何别的写法（`use symbio_plugin_x::Foo`、`symbio_plugin_x::foo()`）都是真边。
+ */
+export function linkLineRe(target) {
+  const c = target.crate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`^\\s*(?:pub\\s+)?use\\s+${c}\\s+as\\s+_;?\\s*$`)
+}
+
+/** 文件所属 crate 目录（`crates/<crate>` / `tauri/src-tauri`）。 */
+export function crateDirOf(relPath) {
+  const parts = relPath.split('/')
+  if (parts[0] === 'crates' && parts.length >= 2) return `crates/${parts[1]}`
+  if (parts[0] === 'tauri' && parts[1] === 'src-tauri') return 'tauri/src-tauri'
+  return ''
+}
+
+/** 清单的 `[dev-dependencies]` 段里是否列了这个依赖键（`[dev-dependencies.x]` 也算）。 */
+export function hasDevDep(manifestText, key) {
+  const keyRe = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`)
+  let section = ''
+  for (const raw of manifestText.split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, '').trim()
+    const head = line.match(/^\[(.+)\]$/)
+    if (head) {
+      section = head[1].trim()
+      if (section.startsWith('dev-dependencies.')) {
+        if (section.slice('dev-dependencies.'.length).trim() === key) return true
+      }
+      continue
+    }
+    if (section === 'dev-dependencies' && keyRe.test(line)) return true
+  }
+  return false
+}
+
 /** 清单里的依赖键（连字符形态）：`key = …` / `[dependencies.key]` / `package = "key"`。 */
 function manifestRe(target) {
   const key = target.manifest.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -191,11 +243,38 @@ function manifestRe(target) {
 }
 
 /**
+ * 唯一允许的链接形态：dev-dep + 测试代码里的 `use <crate> as _;`。
+ *
+ * 生产依赖 / 生产源码不在这个出口内——那两处仍必须为 0。普通 dev 依赖（用于取符号、
+ * 取夹具类型）也不是链接：那仍然是「卸载后 `cargo test` 编译不过」的边。
+ */
+function devLinkAllowed({ root, crateDir, target, cache }) {
+  if (!crateDir) return false
+  const key = `${crateDir}\0${target.id}`
+  if (cache.has(key)) return cache.get(key)
+  const manifestAbs = path.join(root, ...crateDir.split('/'), 'Cargo.toml')
+  let ok = false
+  if (fs.existsSync(manifestAbs) && hasDevDep(fs.readFileSync(manifestAbs, 'utf8'), target.manifest)) {
+    const files = []
+    walk(path.join(root, ...crateDir.split('/')), files, (n) => n.endsWith('.rs'))
+    ok = files.some((abs) => {
+      const rr = rel(root, abs)
+      if (!isTestSource(rr)) return false
+      const text = blankComments(fs.readFileSync(abs, 'utf8'))
+      return text.some((line) => linkLineRe(target).test(line))
+    })
+  }
+  cache.set(key, ok)
+  return ok
+}
+
+/**
  * Rust 源码里的编译期边。
  *
  * 注释与字符串都置空：`// 见 symbio_plugin_notes` 不是边，`"symbio_plugin_notes"`
  * 也不是。测试代码一并扫——`#[cfg(test)]` 引用了可卸载插件的符号，卸载后
- * `cargo test` 就编译不过，那同样是一条静默边。
+ * `cargo test` 就编译不过，那同样是一条静默边。唯一的例外是**纯链接行**
+ * `use <crate> as _;`（且同一 crate 的清单里是 dev-dep），见 `linkLineRe`。
  */
 export function rustEdges({ root, targets }) {
   const files = []
@@ -203,6 +282,7 @@ export function rustEdges({ root, targets }) {
   const prepared = targets.map((t) => ({ ...t, re: crateRe(t) }))
   const hits = []
   const seen = new Set()
+  const linkCache = new Map()
   let scanned = 0
   for (const abs of files) {
     const r = rel(root, abs)
@@ -216,11 +296,18 @@ export function rustEdges({ root, targets }) {
       const key = `${t.id}\0${r}`
       if (seen.has(key)) continue
       for (let i = 0; i < blanked.length; i += 1) {
-        if (t.re.test(blankStrings(blanked[i] ?? ''))) {
-          seen.add(key)
-          hits.push({ target: t.id, where: `${r}:${i + 1}`, line: (rawLines[i] ?? '').trim().slice(0, 100) })
-          break
+        const line = blankStrings(blanked[i] ?? '')
+        if (!t.re.test(line)) continue
+        if (
+          isTestSource(r) &&
+          linkLineRe(t).test(line) &&
+          devLinkAllowed({ root, crateDir: crateDirOf(r), target: t, cache: linkCache })
+        ) {
+          continue
         }
+        seen.add(key)
+        hits.push({ target: t.id, where: `${r}:${i + 1}`, line: (rawLines[i] ?? '').trim().slice(0, 100) })
+        break
       }
     }
   }
@@ -239,6 +326,7 @@ export function manifestEdges({ root, targets }) {
   const prepared = targets.map((t) => ({ ...t, re: manifestRe(t) }))
   const hits = []
   const seen = new Set()
+  const linkCache = new Map()
   let scanned = 0
   for (const abs of files) {
     const r = rel(root, abs)
@@ -246,17 +334,34 @@ export function manifestEdges({ root, targets }) {
     const rawLines = fs.readFileSync(abs, 'utf8').split(/\r?\n/)
     const { lines } = blankMarked(rawLines)
     const stripped = lines.map((l) => l.replace(/#.*$/, ''))
+    // 逐行归属的 TOML 段：dev-dep 与生产 dep 的处置不同，不能只看依赖名。
+    const sections = []
+    let section = ''
+    for (const line of stripped) {
+      const head = line.trim().match(/^\[(.+)\]$/)
+      if (head) section = head[1].trim()
+      sections.push(section)
+    }
     scanned += 1
     for (const t of prepared) {
       if (own && own.id === t.id) continue
       const key = `${t.id}\0${r}`
       if (seen.has(key)) continue
       for (let i = 0; i < stripped.length; i += 1) {
-        if (t.re.test(stripped[i])) {
-          seen.add(key)
-          hits.push({ target: t.id, where: `${r}:${i + 1}`, line: (rawLines[i] ?? '').trim().slice(0, 100) })
-          break
+        if (!t.re.test(stripped[i])) continue
+        const sec = sections[i] || ''
+        const isDev = sec === 'dev-dependencies' || sec.startsWith('dev-dependencies.')
+        if (isDev && devLinkAllowed({ root, crateDir: crateDirOf(r), target: t, cache: linkCache })) {
+          continue
         }
+        seen.add(key)
+        hits.push({
+          target: t.id,
+          where: `${r}:${i + 1}`,
+          line: (rawLines[i] ?? '').trim().slice(0, 100),
+          dev: isDev,
+        })
+        break
       }
     }
   }
@@ -293,6 +398,14 @@ export function judge(root) {
   const rust = rustEdges({ root, targets })
   const manifest = manifestEdges({ root, targets })
   for (const h of [...rust.hits, ...manifest.hits]) {
+    if (h.dev) {
+      errors.push(
+        `EX-004 可卸载插件 \`${h.target}\` 被 \`${h.where}\` 作为普通 dev 依赖引用（${h.line}）` +
+          ' —— 只有「dev-dep + 测试代码里的 `use <crate> as _;`」这一种链接形态被承认；' +
+          '普通 dev 依赖卸载后 `cargo test` 编译不过，仍是静默边',
+      )
+      continue
+    }
     errors.push(
       `EX-004 可卸载插件 \`${h.target}\` 被 \`${h.where}\` 编译期引用（${h.line}）` +
         ' —— 卸载后该处编译不过，或目录留着只做运行期过滤（静默边）；跨插件能力只经 `plugin-api` 的声明面 / 共享表',
