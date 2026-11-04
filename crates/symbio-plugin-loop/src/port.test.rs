@@ -1177,6 +1177,7 @@ impl PortExecutor for EchoExecutor {
         PortOutcome {
             facts: vec![input.payload],
             error: None,
+            ..Default::default()
         }
     }
 }

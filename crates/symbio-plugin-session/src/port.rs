@@ -108,6 +108,7 @@ impl PortExecutor for SessionPortExecutor {
             Ok(value) => PortOutcome {
                 facts: vec![value],
                 error: None,
+                ..Default::default()
             },
             Err(why) => PortOutcome::failed(PortErrorClass::NonRetryable, why),
         }

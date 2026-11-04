@@ -212,13 +212,25 @@ pub enum PortErrorClass {
     NeedsHuman,
 }
 
-/// 一笔债的产出（`DE-047` I-6.2）：事实草稿或错误。
+/// 执行体交回的**应答承载**（中性契约）：环只按序追加、按 `links` 配对，
+/// **不读其中的世界字段**——消息怎么组装是执行体的私事（D-317）。
+#[derive(Debug, Clone, Default)]
+pub struct PortReply {
+    /// 应答消息（不透明承载；环只传递，不解释内容）。
+    pub messages: Vec<symbio_kernel::llm::PromptMessage>,
+    /// 应答配对：执行体内的调用键 → 应答里的配对键（环只按它配对）。
+    pub links: Vec<(String, String)>,
+}
+
+/// 一笔债的产出（`DE-047` I-6.2）：事实草稿、错误与应答承载。
 #[derive(Debug, Clone, Default)]
 pub struct PortOutcome {
     /// 要写到行上的事实草稿（每项是一个 JSON 对象，字段由端口插件声明）。
     pub facts: Vec<Value>,
     /// `Some` ⇒ 这一笔失败；`facts` 仍可携带半截产物。
     pub error: Option<(PortErrorClass, String)>,
+    /// 这一笔交回的应答承载（缺省为空；环只追加与配对）。
+    pub reply: PortReply,
 }
 
 impl PortOutcome {
@@ -232,6 +244,7 @@ impl PortOutcome {
         Self {
             facts: Vec::new(),
             error: Some((class, why.into())),
+            ..Default::default()
         }
     }
 

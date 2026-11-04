@@ -336,12 +336,14 @@ pub(crate) fn latest_snapshot_index(events: &[Event]) -> Option<usize> {
 /// 调用同一个工具）。于是 id 的唯一性域也从「一次请求」扩到「整个回合」——同一工具
 /// 在两个工具轮各调一次，若两侧的 id 相同，adapter 的 `last_result_of` 会把它当成
 /// **同一次调用的两条结果**而只留最后那条（第一次的结果凭空消失）。
-/// id 因此优先取调用自身带得的身份（wire id / 节点 id，二者天然跨轮唯一），
-/// 两者都缺才合成，且合成式里带上轮次（见 [`prompt_call_id`]）。
-pub(crate) fn assistant_exchange(
+/// 过渡期的**适配器路径**（测试夹具 / 旧宿主，没有端口执行体）：环代组一份应答承载。
+///
+/// 生产路径恒由 `symbio-plugin-model` 的执行体交回 [`PortReply`]（D-317）；本函数
+/// 只服务「没有执行体」的旧路径，随 `turn_runner` 退场一并删除（P4）。
+pub(crate) fn reply_of_turn(
     turn: &symbio_sdk::adapters::LlmTurn,
     round: usize,
-) -> Vec<symbio_kernel::llm::PromptMessage> {
+) -> symbio_plugin_api::port::PortReply {
     let mut out: Vec<symbio_kernel::llm::PromptMessage> = Vec::new();
     if !turn.text.trim().is_empty() {
         out.push(symbio_kernel::llm::PromptMessage {
@@ -376,7 +378,21 @@ pub(crate) fn assistant_exchange(
             }]),
         });
     }
-    out
+    let links = turn
+        .tool_calls
+        .iter()
+        .enumerate()
+        .filter_map(|(i, call)| {
+            call.id
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .map(|key| (key, prompt_call_id(call, round, i)))
+        })
+        .collect();
+    symbio_plugin_api::port::PortReply {
+        messages: out,
+        links,
+    }
 }
 
 /// 一笔工具结果的**结果半**：`tool` 消息，按调用配对取 id（不是按工具名）。

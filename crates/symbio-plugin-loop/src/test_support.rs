@@ -608,6 +608,7 @@ fn fixture_outcome(result_text: String, success: bool, pending: Option<Value>) -
             "pending": pending,
         })],
         error: None,
+        ..Default::default()
     }
 }
 

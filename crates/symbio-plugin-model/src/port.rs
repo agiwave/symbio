@@ -12,7 +12,7 @@ use symbio_plugin_api::chat_node::{
 };
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortInput, PortOutcome,
-    PortProvider,
+    PortProvider, PortReply,
 };
 use symbio_plugin_api::ports;
 use symbio_plugin_api::{
@@ -110,6 +110,9 @@ struct RoundTripRequest {
     /// 这一笔债的逻辑 id（与 `sent` / `response` 的幂等键同源）。
     #[serde(default)]
     round_id: String,
+    /// 工具轮序号（环的纯值；只用于应答承载里合成 id 的跨轮唯一性）。
+    #[serde(default)]
+    round: usize,
 }
 
 /// 一次模型往返的执行体。
@@ -171,6 +174,8 @@ impl PortExecutor for ModelExecutor {
                     None,
                 )],
                 error: None,
+                // 应答承载（D-317）：assistant 消息的组装是执行体的私事，环只追加与配对。
+                reply: prompt_reply(&request, &output),
             },
             Err(PluginError::Aborted) => PortOutcome {
                 // 半截产出仍要留痕：中止是这一笔的状态，不是「没有发生过」。
@@ -182,6 +187,7 @@ impl PortExecutor for ModelExecutor {
                     Some(("aborted", "aborted")),
                 )],
                 error: Some((PortErrorClass::NonRetryable, "aborted".to_string())),
+                ..Default::default()
             },
             Err(PluginError::RateLimited(why)) => PortOutcome {
                 facts: vec![outcome_payload(
@@ -192,6 +198,7 @@ impl PortExecutor for ModelExecutor {
                     Some(("failed", &why)),
                 )],
                 error: Some((PortErrorClass::Retryable, why)),
+                ..Default::default()
             },
             Err(error) => {
                 let why = error.to_string();
@@ -204,6 +211,7 @@ impl PortExecutor for ModelExecutor {
                         Some(("failed", &why)),
                     )],
                     error: Some((PortErrorClass::NonRetryable, why)),
+                    ..Default::default()
                 }
             }
         };
@@ -406,6 +414,65 @@ fn dispatch_calls(
             })
         })
         .collect()
+}
+
+/// 一轮往返的**应答承载**（D-317）：assistant 正文 + 逐条 `tool_calls` 声明。
+///
+/// 这一段原本住在环里（`turn_runner::facts::assistant_exchange`）；迁到这里之后，
+/// 环只把 [`PortReply::messages`] 按序追加进下一轮请求，不再构造任何世界消息。
+///
+/// id 的取法与环侧旧实现**逐字同源**（wire id → 节点 id → 合成），跨轮唯一性由
+/// `round` 保证；`links` 交回「节点 id → 应答配对键」，环按它把工具结果挂回调用。
+fn prompt_reply(request: &RoundTripRequest, output: &TurnOutput) -> PortReply {
+    let mut messages: Vec<PromptMessage> = Vec::new();
+    let mut links = Vec::new();
+    if !output.text.trim().is_empty() {
+        messages.push(PromptMessage {
+            role: "assistant".into(),
+            text: output.text.trim().to_string(),
+            tool_call_id: None,
+            tool: None,
+            tool_calls: None,
+        });
+    }
+    for (index, call) in output.tool_calls.iter().enumerate() {
+        let name = call.name.as_deref().unwrap_or("<unnamed>");
+        let id = prompt_call_id(call, request.round, index);
+        if let Some(key) = call.id.clone().filter(|s| !s.trim().is_empty()) {
+            links.push((key, id.clone()));
+        }
+        messages.push(PromptMessage {
+            role: "assistant".into(),
+            text: format!("调用工具 {} {}", name, call.arguments),
+            tool_call_id: Some(id.clone()),
+            tool: Some(name.to_string()),
+            tool_calls: Some(vec![symbio_plugin_api::PromptToolCall {
+                id,
+                name: name.to_string(),
+                arguments: call.arguments.clone(),
+            }]),
+        });
+    }
+    PortReply { messages, links }
+}
+
+/// 合成 / 选取 `tool_call_id`（跨轮唯一，见 [`prompt_reply`]）。
+///
+/// 优先级与环侧旧实现同一口径：wire id → 节点 id → 合成 `call_<tool>_<轮>_<序号>`。
+fn prompt_call_id(call: &TurnToolCallInfo, round: usize, index: usize) -> String {
+    fn present(id: &Option<String>) -> Option<String> {
+        id.clone().filter(|s| !s.trim().is_empty())
+    }
+    present(&call.wire_id)
+        .or_else(|| present(&call.id))
+        .unwrap_or_else(|| {
+            format!(
+                "call_{}_{}_{}",
+                call.name.as_deref().unwrap_or("<unnamed>"),
+                round,
+                index
+            )
+        })
 }
 
 /// 执行体的流式读数与转发口（`D-314` 的「流」通道）。

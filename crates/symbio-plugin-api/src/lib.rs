@@ -128,7 +128,7 @@ pub use symbio_kernel::exec::{
 };
 pub use symbio_kernel::keys::SymbioKey;
 pub use symbio_kernel::llm::{ModelFinishReason, ModelProvider, ModelSpend, ModelUsage};
-pub use symbio_kernel::llm::{PromptMessage, TurnOutput, TurnToolCallInfo};
+pub use symbio_kernel::llm::{PromptMessage, PromptToolCall, TurnOutput, TurnToolCallInfo};
 pub use symbio_kernel::plugin::error::{lock_read, lock_write};
 pub use symbio_kernel::plugin::{
     Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,

@@ -87,6 +87,8 @@ pub(crate) fn begin_model(
     let turn = run.turn;
     let drive = run.drive_seq;
     let produced_by = run.user_seq;
+    // 工具轮序号（纯值）：应答承载里合成 id 的跨轮唯一性由它保证（D-317）。
+    let round_index = run.tool_round;
     // 基线 + 本轮交换。**拼接消息数组**：拼字符串会把角色拍平、丢掉 `tool_call_id`。
     // 端口执行体在场时这份数组已经随请求载荷交出（`announce-model` 行装配）；
     // 过渡期的适配器路径仍按原位消费它。
@@ -167,10 +169,12 @@ pub(crate) fn begin_model(
         // 执行体交回的 `response` / `failed` 载荷：节点 id、半截正文与终答都由
         // 执行体持有（`D-314`），环不再从 `StreamNodeFacts` 桥取这一份账。
         let mut round_fact: Option<serde_json::Value> = None;
+        let mut reply = symbio_plugin_api::port::PortReply::default();
         let engine: Result<symbio_sdk::adapters::LlmTurn, EngineStop> = match executor {
             Some(executor) => {
                 let outcome = executor.execute(exec, input).await;
                 round_fact = outcome.facts.first().cloned();
+                reply = outcome.reply.clone();
                 match outcome.error {
                     None => {
                         stage_from_fact(round_fact.as_ref().unwrap_or(&serde_json::Value::Null))
@@ -195,7 +199,12 @@ pub(crate) fn begin_model(
                 .generate_turn(&tok, &messages, tools.as_ref(), sink)
                 .await
             {
-                Ok(rt) => Ok(rt),
+                // 过渡期的适配器路径（测试夹具 / 旧宿主）：没有端口执行体可交回
+                // 应答承载，只能由环代组一次；生产路径恒走上面的执行体（D-313）。
+                Ok(rt) => {
+                    reply = super::facts::reply_of_turn(&rt, round_index);
+                    Ok(rt)
+                }
                 Err(AdapterError::Aborted) => Err(EngineStop::Aborted),
                 Err(e) => Err(EngineStop::Failed(e.to_string())),
             },
@@ -304,6 +313,7 @@ pub(crate) fn begin_model(
             id: call_id,
             result,
             output,
+            reply,
         }
     };
     Ok(ModelBegin::InFlight(Box::pin(fut)))
@@ -438,6 +448,8 @@ pub(crate) struct ModelFlight {
     /// `None` = 没有落输出事实（控制面失败 / 存储失败），此时**不能**把 id 记进
     /// `responses`——读侧会去查一条不存在的正文。
     pub(crate) output: Option<(serde_json::Value, String)>,
+    /// 执行体交回的应答承载（`D-317`）：环只按序追加、按 `links` 配对。
+    pub(crate) reply: symbio_plugin_api::port::PortReply,
 }
 
 /// 在飞的一笔工具调用的**句柄**（`D-124` 订正 1 + DE-048 D-311）：派出与收尾两半
@@ -502,6 +514,8 @@ where
         "turn": run.turn,
         "drive": run.drive_seq,
         "round_id": call.id.clone(),
+        // 工具轮序号（纯值）：应答承载的合成 id 用它保证跨轮唯一（`D-317`）。
+        "round": run.tool_round,
     });
     super::super::port::announce_with(store, &call, run.turn, run.user_seq, payload.clone())?;
     run.pending_round = Some(call);
@@ -690,6 +704,11 @@ where
         }
     };
     run.cost_ms += rt.cost_ms;
+    // 应答承载（`D-317`）：环只按序追加、只按 `links` 配对；消息怎么组装是执行体的私事。
+    run.exchange.extend(flight.reply.messages);
+    for (key, value) in flight.reply.links {
+        run.reply_links.insert(key, value);
+    }
     // 每轮的产出载荷在**分发之前**取定：工具分发的定稿会改写它，
     // 之后再取只拿得到下一轮的产出——本轮的中途正文 / 思考就静默丢了。
     //
@@ -894,11 +913,9 @@ pub(crate) async fn open_round(
         return;
     }
     run.round_turn = Some(rt.clone());
-    // 这一轮的请求半**一次**推进 `exchange`：结果半按笔随到随推
-    // （[`land_round`]），消息顺序因此是「一次声明、N 条结果」。
-    let round = run.tool_round;
+    // 这一轮的请求半已在落款时推进 `exchange`（应答承载，`D-317`）；结果半按笔
+    // 随到随推（[`land_round`]），消息顺序因此是「一次声明、N 条结果」。
     run.tool_round += 1;
-    run.exchange.extend(assistant_exchange(&rt, round));
     for call in calls {
         run.calls.insert(call.call.id.clone(), call);
     }
@@ -921,10 +938,15 @@ pub(crate) async fn take_wake_call(
         .cloned()
         .or_else(|| woken.calls.into_iter().next())?;
     // 唤醒幕的请求半同样推进 `exchange`（一次；同一唤醒批被再次取出时不重复）。
+    // 唤醒批没有模型往返，应答承载由工具端口在收编唤醒时交回（P3 迁移点）。
     if run.round_turn.is_none() {
         let round = run.tool_round;
         run.tool_round += 1;
-        run.exchange.extend(assistant_exchange(&woken.turn, round));
+        let reply = super::facts::reply_of_turn(&woken.turn, round);
+        run.exchange.extend(reply.messages);
+        for (key, value) in reply.links {
+            run.reply_links.insert(key, value);
+        }
     }
     run.round_turn = Some(woken.turn);
     Some(call)

@@ -519,6 +519,7 @@ fn refused(text: &str, failure_kind: &'static str) -> PortOutcome {
             "failure_kind": failure_kind,
         })],
         error: None,
+        ..Default::default()
     }
 }
 
@@ -654,6 +655,7 @@ async fn finish(
             FACT_GUARD: guard,
         })],
         error: None,
+        ..Default::default()
     }
 }
 
@@ -941,6 +943,7 @@ impl PortExecutor for ToolPort {
             return PortOutcome {
                 facts: Vec::new(),
                 error: None,
+                ..Default::default()
             };
         }
         let tool_name = payload
@@ -969,6 +972,7 @@ impl PortExecutor for ToolPort {
             return PortOutcome {
                 facts: Vec::new(),
                 error: None,
+                ..Default::default()
             };
         }
         // 只落格、不执行：唤醒结果与没跑到的占位结果。
@@ -977,6 +981,7 @@ impl PortExecutor for ToolPort {
             return PortOutcome {
                 facts: Vec::new(),
                 error: None,
+                ..Default::default()
             };
         }
         // 协议失败：判定与措辞都在执行体（DE-048 D-312）。环只搬原始读数与兜底 id。
