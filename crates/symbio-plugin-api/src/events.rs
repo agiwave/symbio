@@ -128,12 +128,6 @@ pub const EVENT_TURN_BRANCH: &str = "turn.branch";
 /// turn.branch_selected — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
 pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
 
-/// turn.dispatch — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
-pub const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
-
-/// turn.supplemented — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
-pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
-
 // ============ user ============
 
 /// user.message — owner `symbio-plugin-loop`，格位 `(Scope, Opened)`
@@ -177,7 +171,5 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← task
     EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← loop
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // turn.branch_selected ← session
-    EventDecl::with_roles(EVENT_TURN_DISPATCH, (Entity::Scope, Verb::Asserted), &[FactRole::DeclaresBudget]), // turn.dispatch ← loop
-    EventDecl::new(EVENT_TURN_SUPPLEMENTED, (Entity::Scope, Verb::Asserted)), // turn.supplemented ← loop
     EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop
 ];

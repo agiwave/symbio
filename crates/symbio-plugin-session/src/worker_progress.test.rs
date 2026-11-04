@@ -127,12 +127,11 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
 // ── 事实读法的取值 ────────────────────────────────────────────────────
 
 #[test]
-fn a_settled_conversation_reads_rounds_steps_and_not_in_flight() {
+fn a_settled_conversation_reads_steps_and_not_in_flight() {
     let (dir, _msgs) = seed("settled", &[("问 A", Some("答 A")), ("问 B", Some("答 B"))]);
 
     let wal_read = progress_from_facts(&facts_of(&dir).expect("有事实源"), "w1", "worker");
 
-    assert_eq!(wal_read.rounds, 2, "rounds = user.message 条数");
     assert_eq!(
         wal_read.steps,
         vec!["答 A", "答 B"],
@@ -169,7 +168,6 @@ fn an_open_last_turn_reads_as_in_flight() {
     let wal_read = progress_from_facts(&facts_of(&dir).expect("有事实源"), "w1", "worker");
 
     assert!(wal_read.in_flight, "末轮已开未收束 ⇒ 判在途");
-    assert_eq!(wal_read.rounds, 3, "第三轮的开轮格也计入 rounds");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -289,43 +287,6 @@ fn wsession(messages: Vec<cm::ChatNode>) -> Session {
         updated_at: 0,
         metadata: serde_json::json!({ "parent_session_id": "parent-1" }),
     }
-}
-
-#[test]
-fn rounds_counts_user_messages_not_the_summary_count() {
-    // 判据 2「数值同源」的落点：前端数过程段 Turn 条数，后端数 user 消息——同一个量。
-    let s = wsession(vec![
-        wmsg(
-            "1",
-            cm::NodeRole::User,
-            Some(cm::NodeStatus::Completed),
-            "第一轮",
-        ),
-        wmsg(
-            "2",
-            cm::NodeRole::Assistant,
-            Some(cm::NodeStatus::Completed),
-            "答复一",
-        ),
-        wmsg(
-            "3",
-            cm::NodeRole::User,
-            Some(cm::NodeStatus::Completed),
-            "第二轮",
-        ),
-        wmsg(
-            "4",
-            cm::NodeRole::Assistant,
-            Some(cm::NodeStatus::Completed),
-            "答复二",
-        ),
-    ]);
-    let p = progress_of(&sub("worker-1", "重构", 99), &s);
-    assert_eq!(p.rounds, 2, "rounds 必须是 user 消息数");
-    assert_ne!(
-        p.rounds, 99,
-        "拿 summary.message_count 当 rounds ⇒ 与 B2 不同源（不同量）"
-    );
 }
 
 #[test]

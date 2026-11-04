@@ -105,8 +105,6 @@ fn home(fact: &'static str) -> Decl {
     let exit: &'static [Pattern] = Box::leak(Box::new([pattern(fact, &[], &[])]));
     Decl {
         name: fact,
-        phase: 8,
-        anchor: 99,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -151,26 +149,9 @@ fn pattern(
     Pattern { source, key, eq }
 }
 
-/// D-292 的阶段分段：旧全局序的读数折成 `phase`，读数本身留在 `anchor`。
-///
-/// 只服务本文件的夹具；生产行各自写自己的 `phase` / `anchor`。
-fn phase_of(band: u8) -> u8 {
-    match band {
-        0 => 0,
-        1..=51 => 1,
-        52 => 2,
-        53..=54 => 3,
-        55..=56 => 4,
-        57..=66 => 5,
-        67..=69 => 6,
-        70..=72 => 7,
-        _ => 8,
-    }
-}
-
 fn row(
     name: &'static str,
-    band: u8,
+    _band: u8,
     by: Option<&'static str>,
     owes: Pattern,
     until: &[Pattern],
@@ -180,9 +161,6 @@ fn row(
     let leak = |p: &[Pattern]| Box::leak(p.to_vec().into_boxed_slice()) as &'static [Pattern];
     Decl {
         name,
-        // `band` 是夹具里的旧全局序读数，按 D-292 的分段表折成 `(phase, anchor)`。
-        phase: phase_of(band),
-        anchor: band,
         by,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -739,8 +717,6 @@ fn row_exp(
     let leak = |p: &[Pattern]| Box::leak(p.to_vec().into_boxed_slice()) as &'static [Pattern];
     Decl {
         name,
-        phase: 1,
-        anchor: 10,
         by: Some("act"),
         tier: LatencyTier::Reflex,
         expand,
@@ -946,10 +922,10 @@ fn a_precondition_without_any_producer_is_a_gap() {
     );
 }
 
-/// 同一判据的**合法反向依赖**（用户裁决 A）：前件由后阶段的行写，装载期仍然绿。
+/// 同一判据的**合法反向依赖**（用户裁决 A）：前件由另一行写，装载期仍然绿。
 ///
-/// `early`（phase 1）读 `f`，而 `f` 只由排在它后面的 `late`（phase 5）写；判据只问
-/// 「有没有生产者」，不问阶段先后，这种反向依赖由环的反复回访接上。
+/// `early` 读 `f`，而 `f` 只由 `late` 写；判据只问「有没有生产者」，不问先后，
+/// 这种反向依赖由环的反复回访接上。
 #[test]
 fn a_later_phase_producer_is_not_a_gap() {
     const NO_F: ActorDecl = ActorDecl {
@@ -1246,7 +1222,7 @@ fn freeze_exit_view(evidence: &'static [&'static str]) -> Result<Arc<Frozen>, Ve
 /// 出口视图**只帮我算**的那一格，在依赖图上不是收口方（D-160）：图无环、装载绿。
 ///
 /// 按 `reads` 全集配图会多出一条 `r_a → r_b`，与本来就有的 `r_b → r_a` 连成**假环**——
-/// 那是 D-160 落地前产线上 29 条环用例一起红的形状（共写 `turn.stage` 一族的行两两互等）。
+/// 那是 D-160 落地前产线上 29 条环用例一起红的形状（共写同一族格子的行两两互等）。
 #[test]
 fn an_anchor_read_on_an_exit_view_adds_no_edge() {
     assert_eq!(freeze_exit_view(&["g"]).err().unwrap_or_default(), vec![]);

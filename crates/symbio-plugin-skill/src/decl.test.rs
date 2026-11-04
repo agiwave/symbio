@@ -2,9 +2,8 @@
 //!
 //! ## 为什么本文件要交一份「宿主行」夹具
 //!
-//! 插件自己的测试二进制只链接本 crate：`turn.recalled` 视图与 `turn.stage` /
-//! `user.message` 事实的归宿行住在 `crates/symbio-plugin-loop`，`memory.encoded` 的
-//! 格位也在那里；它的**事实形状**自 DE-026 D-263 起住情景记忆能力包
+//! 插件自己的测试二进制只链接本 crate：`user.message` 事实的归宿行住在宿主写口，
+//! `memory.encoded` 的**事实形状**自 DE-026 D-263 起住情景记忆能力包
 //! （`crates/symbio-plugin-memory`）。不在这里 ⇒ `seal` 报 `OrphanFact` /
 //! `UnknownSource` / `UnknownFact` / `FactWithoutEvent`，整张表失败（DE-015 §3.4）。
 //! 夹具补的正是完整进程里由那两个 owner 提供的那一半——视图、事实形状与通用行执行体
@@ -12,11 +11,11 @@
 
 use super::{
     calibration_ledger, calibration_ledger_view, confidence_of, retreating_skills, SkillStat,
-    EVENTS, EVENT_MEMORY_CALIBRATED, FACTS, OWNER, ROWS, SKILL_ANSWERED, SKILL_CALIBRATION,
-    SKILL_RECALL, SKILL_RETREAT, SKILL_TAG, VIEWS,
+    EVENTS, EVENT_MEMORY_CALIBRATED, FACTS, OWNER, ROWS, SKILL_CALIBRATION, SKILL_RETREAT,
+    SKILL_TAG, VIEWS,
 };
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
-use symbio_plugin_api::ring::{Decl, Lit, Pattern};
+use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{
     ActorDecl, Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
 };
@@ -24,7 +23,6 @@ use symbio_plugin_api::{
 /// loop 拥有的两条事实格（本二进制不链接它 ⇒ 夹具补格位与载荷字段）。
 const HARNESS_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
-    EventDecl::new("turn.stage", (Entity::Scope, Verb::Asserted)),
     // 真实进程里开轮事实由宿主写口落格（D-296），环里没有行生产它。
     EventDecl::host("user.message", (Entity::Scope, Verb::Opened)),
 ];
@@ -48,13 +46,6 @@ const HARNESS_FACTS: &[FactDecl] = &[
         ],
     },
     FactDecl {
-        name: "turn.stage",
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["stage", "round", "recalled", "resumed"],
-    },
-    FactDecl {
         name: "user.message",
         port: None,
         key: &[],
@@ -63,28 +54,7 @@ const HARNESS_FACTS: &[FactDecl] = &[
     },
 ];
 
-/// 宿主公开的召回视图：完整进程里住 loop 的 `control_decl::VIEWS`。
-///
-/// 本能力只按名字读它的输出（`recall` / `tag` / `stage` / `resumed`），夹具的形状
-/// 与那份定义同构即可——`seal` 只查「行引用的名字存在、读面字段已声明」。
-fn turn_recalled(_events: &[Event], _now: i64) -> serde_json::Value {
-    serde_json::Value::Array(Vec::new())
-}
-
-const HARNESS_VIEWS: &[ViewDecl] = &[ViewDecl {
-    name: "turn.recalled",
-    ver: 1,
-    reads: &[
-        ("user.message", "id"),
-        ("turn.stage", "stage"),
-        ("turn.stage", "round"),
-        ("turn.stage", "recalled"),
-    ],
-    evidence: &["turn.stage"],
-    cost: 4096,
-    eval: turn_recalled,
-    agg: None,
-}];
+const HARNESS_VIEWS: &[ViewDecl] = &[];
 
 fn harness_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
@@ -98,9 +68,7 @@ fn harness_declarations() -> PluginDeclarations<'static> {
             name: symbio_plugin_api::rows::PLUGIN_ROW,
             mode: LatencyTier::Deep,
             reads: &[],
-            // `turn.stage` 在真实进程由 loop 的筑阶段格写；本二进制不链接它 ⇒
-            // 夹具把这一格补进生产面（D-296）。
-            writes: &[EVENT_MEMORY_CALIBRATED, SKILL_ANSWERED, "turn.stage"],
+            writes: &[EVENT_MEMORY_CALIBRATED],
         }],
         rows: harness_rows(),
     }
@@ -116,8 +84,6 @@ fn harness_encoded_sink_row() -> Decl {
     }]));
     Decl {
         name: EVENT_MEMORY_ENCODED,
-        phase: 8,
-        anchor: 200,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -158,8 +124,6 @@ fn harness_protocol_rows() -> &'static [Decl] {
             }]));
             Decl {
                 name: Box::leak(format!("sink.{name}").into_boxed_str()),
-                phase: 8,
-                anchor: 200,
                 by: None,
                 tier: LatencyTier::Reflex,
                 expand: None,
@@ -195,18 +159,6 @@ fn the_skill_package_submits_its_own_surfaces() {
         "归宿行同样只有一张，随形状 owner 走"
     );
     assert!(VIEWS.iter().any(|v| v.name == SKILL_RETREAT));
-    assert!(ROWS.iter().any(|r| r.name == SKILL_RECALL));
-}
-
-/// `skill.answered` 落在 `Domain × Asserted`，owner 是本插件。
-#[test]
-fn the_answered_event_resolves_through_the_process_assembly() {
-    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
-    assert_eq!(
-        frozen.event_cell(SKILL_ANSWERED),
-        Some((Entity::Domain, Verb::Asserted))
-    );
-    assert_eq!(frozen.event_owner(SKILL_ANSWERED), Some(OWNER));
 }
 
 /// 校准观测的格位自本能力迁入起由本插件交（loop 不再声明它）。
@@ -226,26 +178,6 @@ fn the_retreat_view_is_sealed_under_this_owner() {
     let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert!(frozen.view(SKILL_RETREAT).is_some());
     assert_eq!(frozen.view_owner(SKILL_RETREAT), Some(OWNER));
-}
-
-/// 召回行只认宿主公开的 `turn.recalled` 里属于技能的那些条目。
-#[test]
-fn the_recall_row_binds_to_the_host_view() {
-    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
-    let row = frozen
-        .rows()
-        .iter()
-        .find(|d| d.name == SKILL_RECALL)
-        .expect("召回行应在冻结表里");
-    assert_eq!(row.owes.source, "turn.recalled");
-    assert_eq!(row.owes.eq.len(), 1);
-    assert_eq!(row.owes.eq[0].0, "tag");
-    assert!(matches!(row.owes.eq[0].1, Lit::Str(tag) if tag == SKILL_TAG));
-    assert_eq!(row.by, Some(symbio_plugin_api::rows::PLUGIN_ROW));
-    assert_eq!(row.until.len(), 1);
-    assert_eq!(row.until[0].source, SKILL_ANSWERED);
-    assert_eq!(row.until[0].key, &["recall", "stage"]);
-    assert!(row.until[0].eq.is_empty());
 }
 
 /// 引用关系不虚：夹具里那两条宿主格不是本能力的事实声明。

@@ -329,9 +329,9 @@ impl FactDraft {
     }
 }
 
-// ── 三类效果面（DE-045 D-293）──────────────────────────────────────────
+// ── 两类效果面（DE-045 D-293）──────────────────────────────────────────
 
-/// 能力可以声明的三类效果面。
+/// 能力可以声明的两类效果面。
 ///
 /// 声明是**能力侧**的事，落格仍是宿主唯一写口：声明只回答「这一行的草稿可能落在
 /// 哪一面」，不给出任何写句柄（D-293 的「被否」第四条）。
@@ -339,8 +339,6 @@ impl FactDraft {
 pub enum EffectFace {
     /// 对话面节点：宿主定节点 id 与轮号，写转写并实时上线。
     Dialog,
-    /// 阶段格：宿主折成 `turn.stage`，幂等键 `st-{anchor}-{stage}`。
-    Stage,
     /// 实时上线：宿主经既有帧出口发出；失败只记读数，不回写事实。
     Live,
 }
@@ -358,29 +356,6 @@ pub struct DialogDraft {
     pub card: Option<Value>,
 }
 
-/// 一格阶段草稿：**没有轮号**（宿主按词干与阶段名折成幂等键）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StageDraft {
-    /// 幂等键（`st-{anchor}-{stage}`；同键重复投递被写口吸收）。
-    pub key: String,
-    /// 阶段名。
-    pub stage: String,
-}
-
-impl StageDraft {
-    /// 按 `D-293` 的约定拼幂等键：`st-{anchor}-{stage}`。
-    ///
-    /// 能力拿不到轮号，只能拿宿主给的不透明词干；写口按同一形状复核，拼错的键
-    /// 在写口一处被拒。
-    pub fn new(anchor: &str, stage: impl Into<String>) -> Self {
-        let stage = stage.into();
-        Self {
-            key: format!("st-{anchor}-{stage}"),
-            stage,
-        }
-    }
-}
-
 /// 一帧实时上线草稿：呈现场景的纯值，不是事实。
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveDraft {
@@ -396,7 +371,6 @@ pub struct LiveDraft {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EffectDraft {
     Dialog(DialogDraft),
-    Stage(StageDraft),
     Live(LiveDraft),
 }
 
@@ -405,7 +379,6 @@ impl EffectDraft {
     pub fn face(&self) -> EffectFace {
         match self {
             Self::Dialog(_) => EffectFace::Dialog,
-            Self::Stage(_) => EffectFace::Stage,
             Self::Live(_) => EffectFace::Live,
         }
     }
@@ -414,7 +387,6 @@ impl EffectDraft {
     pub fn key(&self) -> &str {
         match self {
             Self::Dialog(d) => &d.key,
-            Self::Stage(d) => &d.key,
             Self::Live(d) => &d.key,
         }
     }

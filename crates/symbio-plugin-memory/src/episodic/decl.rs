@@ -88,8 +88,6 @@ pub(crate) const ROWS: &[Decl] = &[
     // 不是环上的债：它没有「必须发生」的时机，是收束这一刻的贡献。
     Decl {
         name: EVENT_MEMORY_ENCODED,
-        phase: 8,
-        anchor: 200,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -115,8 +113,6 @@ pub(crate) const ROWS: &[Decl] = &[
     // 两行都是 `by: None` 的空转行：有即闭合，永远不会被选中，也不是任何能力的债。
     Decl {
         name: EVENT_MEMORY_CONSOLIDATED,
-        phase: 8,
-        anchor: 200,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -134,8 +130,6 @@ pub(crate) const ROWS: &[Decl] = &[
     },
     Decl {
         name: EVENT_MEMORY_FORGOTTEN,
-        phase: 8,
-        anchor: 200,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,

@@ -351,7 +351,6 @@ fn nodes_of(
     }
     match slot_of(e, c, m) {
         Some(ChatSlot::UserMessage) => vec![user_node(e)],
-        Some(ChatSlot::Supplemented) => vec![supplement_node(e)],
         // 收束 / 进展 / 兜底：三种格子共用一份产出形状（`produced_payload`），
         // 差别只在 `status`。它们只记**轮级结局**，正文 / 思考归对应的一次模型往返
         // （上一臂）——所以这里只出骨架（与无模型轮自己的正文）。
@@ -404,38 +403,6 @@ fn user_node(e: &Event) -> ChatNode {
     }
 }
 
-/// 轮边界折进的补充（`turn × asserted`）：载荷 `{ text, count, id, ids }`。
-///
-/// 形状**逐字复刻落库那一份**（`turn_exec::supplement_into_request` 的 `ChatNode`）：
-/// 它**没有** `msg_type`、**没有** `status`，但**有** `meta.supplement*` 三键
-/// （用户消息的合并标记，前端据它认出「这是一次折进」）。重建必须三样都对上，
-/// 否则同一条补充在实时面与重建面是两个节点。
-///
-/// `id` 与 `ids` 由**载荷**给出（原则：节点身份是事实的一部分）。载荷缺 `id`
-/// （旧事件）时按事件 id 稳定合成——合成的后果已判定可接受：重开后这条的 id 与
-/// 实时面那份不同，但**内容与角色一致**（D-049 的「呈现细节可能不同」）。
-fn supplement_node(e: &Event) -> ChatNode {
-    use crate::turn::facts::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
-    let count = e.payload.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-    let ids = e
-        .payload
-        .get("ids")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!([]));
-    ChatNode {
-        id: event_payload_node_id(e, "id"),
-        principal: Some(user_principal()),
-        content: Some(MessageContent::Text(text_of(e, "text"))),
-        meta: Some(serde_json::json!({
-            META_SUPPLEMENT: true,
-            META_SUPPLEMENT_COUNT: count,
-            META_SUPPLEMENT_IDS: ids,
-        })),
-        timestamp: Some(e.ts),
-        ..Default::default()
-    }
-}
-
 /// 轮边界汇报（`turn × asserted`）：界面文本。
 ///
 /// 形状**复用写入侧的构造** [`ReportDraft::to_message`]
@@ -445,7 +412,7 @@ fn supplement_node(e: &Event) -> ChatNode {
 /// ——它是**前端与轮次窗口**读的判别位，缺了轮次窗口会把「给人看的汇报」当成模型的
 /// 对话内容发进请求包。
 ///
-/// `id` 由载荷给（缺则按事件 id 合成，同 [`supplement_node`]）；`timestamp` 覆写成
+/// `id` 由载荷给（缺则按事件 id 合成）；`timestamp` 覆写成
 /// 事件自身的 `ts`（构造器取「此刻」会破坏纯函数性，见模块头）。
 fn reported_node(e: &Event) -> ChatNode {
     let draft = ReportDraft {

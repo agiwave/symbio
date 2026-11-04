@@ -4,7 +4,7 @@
 //!
 //! 旧策略表（`loop_registry`，已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
 //! ——判断住在函数体里。这里的一行是 [`Decl`]：`owes` / `until` / `unless` 三个
-//! [`Pattern`] 加 `by` / `phase` / `anchor`。判断因此可 diff、可装载期检查；执行体只拿到一笔
+//! [`Pattern`] 加 `by`。判断因此可 diff、可装载期检查；执行体只拿到一笔
 //! [`Debt`]。
 //!
 //! ## 欠账公式
@@ -13,7 +13,7 @@
 //! open(d,key)      := ∃ f ⊨ d.owes ∧ key = bind(f) ∧ ¬∃ g ⊨ d.until ∧ key(g) = key
 //! blocked(d,key)   := d.by = None ∨ ∃ h ⊨ d.unless ∧ key(h) = key
 //! actionable(d,key) := open ∧ ¬blocked
-//! next(now)        := min { (d,key) | actionable } 按 (phase, anchor, name, key)
+//! next(now)        := min { (d,key) | actionable } 按 (name, key)
 //! ```
 //!
 //! 时间不进公式：需要时间的条件由视图把 `now` 折成布尔字段（[`Frozen::eval`]
@@ -98,16 +98,6 @@ pub struct Pattern {
 pub struct Decl {
     /// 行的身份：日志、冲突报错、对拍都按它指认。
     pub name: &'static str,
-    /// **阶段**身份：环按它升序取债，同一阶段内做不动点（D-292）。
-    ///
-    /// 它是行的值、不是内核词汇：新增时机只在**自己所属的阶段**里挑次序
-    /// （`anchor`），不再在一条 0→72 的全局序列里挑位置。
-    pub phase: u8,
-    /// 阶段内的次序：`(phase, anchor, name, key)` 升序，先小者胜（D-292）。
-    ///
-    /// `phase` 回答「在哪一段」，`anchor` 回答「这一段里谁先」——两者仍是全序，
-    /// 所以 `D-093` 的「跨行竞争有全序」原样成立。
-    pub anchor: u8,
     /// 执行体名。`None` ⇒ 恒 blocked、永不选中（「在等」的唯一声明位）。
     pub by: Option<&'static str>,
     /// 这一行动作允许的时延档。
@@ -216,8 +206,8 @@ impl Ord for Debt<'_> {
 }
 
 impl Debt<'_> {
-    fn order(&self) -> (u8, u8, &'static str, &Key) {
-        (self.decl.phase, self.decl.anchor, self.decl.name, &self.key)
+    fn order(&self) -> (&'static str, &Key) {
+        (self.decl.name, &self.key)
     }
 }
 
@@ -248,7 +238,7 @@ pub fn owed<'a>(rows: &'a [Decl], frozen: &Frozen, events: &[Event], now: i64) -
 /// 接线时与 `ActorDecl` 注册同批改回 `Some`（DE-015 §2.2 / D-118 订正 1）。
 ///
 /// 按行点问（`crates/symbio-plugin-loop/src/loop_rows.rs::owes`）仍留给「刚写完 request，这一行
-/// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `(phase, anchor)` 裁决）是
+/// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `name` 裁决）是
 /// 调度器唯一的选债口（D-118 决策 1–2）。
 pub fn drive<'a>(
     rows: &'a [Decl],
@@ -956,7 +946,7 @@ fn walk(
 /// 一对**可能同时开账**的行（§3.4 第 4 条的报告单元）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Overlap {
-    /// 表内先后，不带裁决意味——谁先被派发由 `(phase, anchor, name, key)` 决，
+    /// 表内先后，不带裁决意味——谁先被派发由 `(name, key)` 决，
     /// 这里不判。
     pub rows: [&'static str; 2],
     /// 两边都当作前件的那些事实名（字典序，一对只列一条）。

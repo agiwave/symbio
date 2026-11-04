@@ -105,7 +105,6 @@ pub(crate) async fn open(ctx: &PortExecContext, payload: &Value) -> Result<Value
                 "auto_compress": payload.get("auto_compress").and_then(Value::as_bool).unwrap_or(false),
                 "progress_enabled": settings.progress_enabled,
                 "progress_interval_ms": settings.progress_interval_ms,
-                "progress_min_rounds": settings.progress_min_rounds,
                 "progress_max_per_turn": settings.progress_max_per_turn,
                 "readyset_cap": settings.task_cap,
                 "skill_compile_enabled": settings.skill_compile_enabled,

@@ -33,8 +33,6 @@ use symbio_sdk::projection::turnstate::turnstate;
 /// owner，只用它们调 core 的转写 / 轮态投影。拼写一律取清单生成物（D-204）。
 const CHAT_VOCAB: symbio_plugin_api::ChatVocab = symbio_plugin_api::ChatVocab {
     user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
-    dispatch: symbio_plugin_api::events::EVENT_TURN_DISPATCH,
-    supplemented: symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
     branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
     branch_selected: symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED,
     reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,

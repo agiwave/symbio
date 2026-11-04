@@ -306,27 +306,6 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                         false,
                     );
                 }
-                // 轮边界折进的补充：它**是用户说的话**，所以 role=user——
-                // 不是为了「让它看起来像用户发言」，而是因为它字面上就是。
-                //
-                // ⚠️ 这条修的是**静默丢失**：补充进了 `context.messages`、会落库、
-                // 会出现在 `messages.json` 里，而 prompt 从事实网格投影 ⇒ 模型看不见。
-                // 落进投影之后它对下一轮可见，且**是这一轮**就该看见（不是下一轮）。
-                Some(ChatSlot::Supplemented) => {
-                    let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                    if !text.trim().is_empty() {
-                        push(
-                            TranscriptEntry {
-                                role: "user".into(),
-                                text: text.to_string(),
-                                tool: None,
-                                exclude_from_context: elisions.elides(e),
-                            },
-                            event_payload_node_id(e, "id"),
-                            false,
-                        );
-                    }
-                }
                 // 轮边界汇报：它是**助手说的话**（role=assistant），但**不是**
                 // 模型的对话内容——它是给人看的界面文本。
                 //

@@ -106,10 +106,9 @@ fn classify_and_compose_switches_are_independent() {
 /// 关掉它的理由：机制化前端已按节点自身呈现「在跑什么 / 跑了多久」（工具子骨架运行态）
 /// 与「还没出声」（Typing 占位），轮边界那句"已完成 N 轮"与执行过程信息重复、反而干扰。
 ///
-/// 仍断言三个上界，是因为总开关关掉不代表这三个数可以乱配：用户把 `progress_enabled`
-/// 打开时，若 `progress_max_per_turn = 0`（或 `progress_min_rounds` 大得离谱），
-/// "打开"仍成一句空话。三个数各自要有意义：间隔足够长（不打扰短任务）、
-/// 最少轮次 > 0（第一轮不算进展）、每轮配额 > 0。
+/// 仍断言两个上界，是因为总开关关掉不代表这两个数可以乱配：用户把 `progress_enabled`
+/// 打开时，若 `progress_max_per_turn = 0`，"打开"仍成一句空话。两个数各自要有意义：
+/// 间隔足够长（不打扰短任务）、每轮配额 > 0。
 #[test]
 fn progress_reporting_is_off_by_default_but_bounds_stay_meaningful() {
     let c = SessionConfig::default();
@@ -120,7 +119,6 @@ fn progress_reporting_is_off_by_default_but_bounds_stay_meaningful() {
         "间隔太短会让长任务反复刷屏（实得 {}）",
         c.progress_interval_ms
     );
-    assert!(c.progress_min_rounds >= 1, "至少要走过一轮才有进展可言");
     assert!(
         c.progress_max_per_turn >= 1,
         "配额为 0 会让重新打开变成空话"
@@ -168,14 +166,13 @@ fn the_opening_switch_is_independent_of_compose() {
     assert!(!only_opening.compose_enabled && only_opening.opening_enabled);
 }
 
-/// 存量 `PLUGIN.yml` 没有这四个键时按缺省补齐（`#[serde(default)]` 的意义）
+/// 存量 `PLUGIN.yml` 没有这三个键时按缺省补齐（`#[serde(default)]` 的意义）
 #[test]
 fn missing_progress_keys_fall_back_to_defaults() {
     let c: SessionConfig = serde_json::from_str(r#"{"max_messages": 42}"#).unwrap();
     let d = SessionConfig::default();
     assert_eq!(c.progress_enabled, d.progress_enabled);
     assert_eq!(c.progress_interval_ms, d.progress_interval_ms);
-    assert_eq!(c.progress_min_rounds, d.progress_min_rounds);
     assert_eq!(c.progress_max_per_turn, d.progress_max_per_turn);
 }
 

@@ -244,7 +244,7 @@ fn a_declared_judgement_refuses_with_its_own_semantics() {
     assert!(!refusal.notes_delegation);
 }
 
-// ── 三类效果面（D-293）──────────────────────────────────────────────
+// ── 两类效果面（D-293）──────────────────────────────────────────────
 
 /// 草稿带上自己的面与幂等键：宿主只按这两个值排序与去重，不再猜形状。
 #[test]
@@ -255,20 +255,14 @@ fn effect_drafts_carry_face_and_key() {
         text: "手册已编译".into(),
         card: Some(serde_json::json!({ "kind": "note" })),
     });
-    let stage = EffectDraft::Stage(StageDraft {
-        key: "st-t3-recall".into(),
-        stage: "recall".into(),
-    });
     let live = EffectDraft::Live(LiveDraft {
         key: "live-t3-1".into(),
         frame: serde_json::json!({ "node": "n-1" }),
     });
 
     assert_eq!(dialog.face(), EffectFace::Dialog);
-    assert_eq!(stage.face(), EffectFace::Stage);
     assert_eq!(live.face(), EffectFace::Live);
     assert_eq!(dialog.key(), "dlg-t3-1");
-    assert_eq!(stage.key(), "st-t3-recall");
     assert_eq!(live.key(), "live-t3-1");
 }
 

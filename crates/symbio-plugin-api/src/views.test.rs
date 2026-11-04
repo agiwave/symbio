@@ -79,8 +79,6 @@ fn protocol_rows() -> &'static [Decl] {
     }]));
     out.push(Decl {
         name: ITEM_ADDED,
-        phase: 1,
-        anchor: 50,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -102,8 +100,6 @@ fn protocol_rows() -> &'static [Decl] {
         }]));
         out.push(Decl {
             name,
-            phase: 8,
-            anchor: 99,
             by: None,
             tier: LatencyTier::Reflex,
             expand: None,

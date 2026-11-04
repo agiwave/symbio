@@ -14,25 +14,25 @@ use symbio_plugin_api::Seq;
 
 const PRINCIPAL: &str = "session/main";
 
-/// 一条派发格（`turn.dispatch`）：本幕以哪一档跑。**新写入档位的唯一来源。**
+/// 一条开轮格（`user.message`）：本幕以哪一档跑。**档位的唯一来源。**
 fn dispatch(id: &str, turn: u64, tier: &str, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
-        EVENT_TURN_DISPATCH,
+        EVENT_USER_MESSAGE,
         Entity::Scope,
-        Verb::Asserted,
+        Verb::Opened,
         turn,
         PRINCIPAL,
     )
     .with_ts(ts)
-    .with_payload(json!({ "tier": tier, "budget_ms": 60_000, "principal": PRINCIPAL }));
+    .with_payload(json!({ "text": "问", "tier": tier, "principal": PRINCIPAL }));
     e.seq = Some(Seq::new(seq));
     e
 }
 
-/// 开轮格（`user.message`）。`tier` 是**历史形态**：新写入不再带它。
-fn user_message(id: &str, turn: u64, legacy_tier: Option<&str>, seq: u64, ts: i64) -> Event {
-    let payload = match legacy_tier {
+/// 开轮格（`user.message`），不带档位。
+fn user_message(id: &str, turn: u64, tier: Option<&str>, seq: u64, ts: i64) -> Event {
+    let payload = match tier {
         Some(t) => json!({ "text": "问", "tier": t }),
         None => json!({ "text": "问" }),
     };
@@ -109,11 +109,9 @@ fn sample_ms(v: &Value, tier: &str) -> Vec<u64> {
 fn latency_takes_only_successful_finals() {
     let events = vec![
         dispatch("d1", 1, "deep", 1, 100),
-        user_message("u1", 1, None, 2, 100),
-        fallback_reply("f1", 1, 9_999, 3, 200),
-        dispatch("d2", 2, "deep", 4, 300),
-        user_message("u2", 2, None, 5, 300),
-        final_reply("a2", 2, 40, 6, 340),
+        fallback_reply("f1", 1, 9_999, 2, 200),
+        dispatch("d2", 2, "deep", 3, 300),
+        final_reply("a2", 2, 40, 4, 340),
     ];
     let v = latency(&events, i64::MAX);
     assert_eq!(
@@ -123,14 +121,13 @@ fn latency_takes_only_successful_finals() {
     );
 }
 
-/// 档位按**本轮收束之前**的派发格归：续写幕换档时，收束归到它之前那一幕。
+/// 档位按**本轮收束之前**的开轮格归：同一 scope 内后一条档位声明覆盖前一条。
 #[test]
 fn latency_assigns_the_tier_declared_before_the_final() {
     let events = vec![
         dispatch("d1", 1, "reflex", 1, 100),
-        user_message("u1", 1, None, 2, 100),
-        dispatch("d1b", 1, "deep", 3, 150),
-        final_reply("a1", 1, 70, 4, 220),
+        dispatch("d1b", 1, "deep", 2, 150),
+        final_reply("a1", 1, 70, 3, 220),
     ];
     let v = latency(&events, i64::MAX);
     assert_eq!(
@@ -141,9 +138,9 @@ fn latency_assigns_the_tier_declared_before_the_final() {
     assert!(rows(&v).iter().all(|r| r["tier"] != json!("reflex")));
 }
 
-/// 历史切片没有派发格时回退读开轮格的 `tier`（接线前的形态）。
+/// 档位读开轮格的 `tier`。
 #[test]
-fn latency_falls_back_to_the_legacy_user_message_tier() {
+fn latency_reads_the_tier_from_the_user_message() {
     let events = vec![
         user_message("u1", 1, Some("fast"), 1, 100),
         final_reply("a1", 1, 15, 2, 115),
@@ -157,8 +154,7 @@ fn latency_falls_back_to_the_legacy_user_message_tier() {
 fn an_unknown_tier_lands_in_the_unspecified_bucket() {
     let events = vec![
         dispatch("d1", 1, "hyper", 1, 100),
-        user_message("u1", 1, None, 2, 100),
-        final_reply("a1", 1, 5, 3, 105),
+        final_reply("a1", 1, 5, 2, 105),
     ];
     let v = latency(&events, i64::MAX);
     assert_eq!(sample_ms(&v, UNSPECIFIED), vec![5]);
@@ -169,8 +165,7 @@ fn an_unknown_tier_lands_in_the_unspecified_bucket() {
 fn percentile_is_nearest_rank() {
     let events = vec![
         dispatch("d1", 1, "deep", 1, 100),
-        user_message("u1", 1, None, 2, 100),
-        final_reply("a1", 1, 10, 3, 110),
+        final_reply("a1", 1, 10, 2, 110),
         final_reply("a2", 1, 20, 4, 120),
         final_reply("a3", 1, 30, 5, 130),
         final_reply("a4", 1, 40, 6, 140),
@@ -197,16 +192,14 @@ fn latency_merge_unions_samples_instead_of_averaging_percentiles() {
     let a = latency(
         &[
             dispatch("d1", 1, "deep", 1, 100),
-            user_message("u1", 1, None, 2, 100),
-            final_reply("a1", 1, 1, 3, 101),
+            final_reply("a1", 1, 1, 2, 101),
         ],
         i64::MAX,
     );
     let b = latency(
         &[
             dispatch("d2", 2, "deep", 1, 100),
-            user_message("u2", 2, None, 2, 100),
-            final_reply("a2", 2, 100, 3, 200),
+            final_reply("a2", 2, 100, 2, 200),
         ],
         i64::MAX,
     );
@@ -224,11 +217,9 @@ fn latency_merge_unions_samples_instead_of_averaging_percentiles() {
 fn fallback_rate_uses_every_served_turn_as_denominator() {
     let events = vec![
         dispatch("d1", 1, "deep", 1, 100),
-        user_message("u1", 1, None, 2, 100),
-        final_reply("a1", 1, 10, 3, 110),
-        dispatch("d2", 2, "deep", 4, 200),
-        user_message("u2", 2, None, 5, 200),
-        fallback_reply("f2", 2, 900, 6, 300),
+        final_reply("a1", 1, 10, 2, 110),
+        dispatch("d2", 2, "deep", 3, 200),
+        fallback_reply("f2", 2, 900, 4, 300),
     ];
     let v = fallback(&events, i64::MAX);
     let r = row(&v, "deep");
@@ -245,22 +236,18 @@ fn fallback_merge_adds_counts_and_recomputes_the_rate() {
     let a = fallback(
         &[
             dispatch("d1", 1, "deep", 1, 100),
-            user_message("u1", 1, None, 2, 100),
-            fallback_reply("f1", 1, 900, 3, 200),
+            fallback_reply("f1", 1, 900, 2, 200),
         ],
         i64::MAX,
     );
     let b = fallback(
         &[
             dispatch("d2", 2, "deep", 1, 100),
-            user_message("u2", 2, None, 2, 100),
-            final_reply("a2", 2, 10, 3, 110),
-            dispatch("d3", 3, "deep", 4, 200),
-            user_message("u3", 3, None, 5, 200),
-            final_reply("a3", 3, 10, 6, 210),
-            dispatch("d4", 4, "deep", 7, 300),
-            user_message("u4", 4, None, 8, 300),
-            final_reply("a4", 4, 10, 9, 310),
+            final_reply("a2", 2, 10, 2, 110),
+            dispatch("d3", 3, "deep", 3, 200),
+            final_reply("a3", 3, 10, 4, 210),
+            dispatch("d4", 4, "deep", 5, 300),
+            final_reply("a4", 4, 10, 6, 310),
         ],
         i64::MAX,
     );
@@ -320,9 +307,6 @@ fn span_merge_skips_single_event_sessions_and_reports_null_when_empty() {
 
 /// 三条视图都交两半，且 `reads` 只指它们真读的那两格。
 ///
-/// `turn.dispatch` 没有 `FactDecl`（`D-282`）：它在 `reads` 里是一条**断言格读法**，
-/// 装载期会进 `Frozen::assertion_reads()` 的名单——这里钉住「它确实被声明成读」，否则
-/// 那张名单是空的，而读法却在偷偷读它。
 #[test]
 fn the_views_declare_both_halves_and_read_only_what_they_use() {
     let names: Vec<&str> = VIEWS.iter().map(|v| v.name).collect();
@@ -333,8 +317,7 @@ fn the_views_declare_both_halves_and_read_only_what_they_use() {
         assert!(v.evidence.is_empty(), "读数不替任何事实关门");
         for (fact, field) in v.reads {
             assert!(
-                (*fact, *field) == (EVENT_TURN_DISPATCH, "tier")
-                    || (*fact, *field) == (EVENT_USER_MESSAGE, "tier"),
+                (*fact, *field) == (EVENT_USER_MESSAGE, "tier"),
                 "`{}` 读了意外的格：{fact}::{field}",
                 v.name
             );

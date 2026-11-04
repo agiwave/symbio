@@ -188,8 +188,7 @@ pub struct SessionConfig {
     /// `compose` 从运行现状组织一句话 ⇒ 一条根级对话面节点）。判定与执行见
     /// `chat_loop/progress.rs`。
     ///
-    /// - `true`：静默超过 [`Self::progress_interval_ms`]、且已跑够
-    ///   [`Self::progress_min_rounds`] 轮时，汇报一次（每轮至多
+    /// - `true`：静默超过 [`Self::progress_interval_ms`] 时，汇报一次（每轮至多
     ///   [`Self::progress_max_per_turn`] 次）；
     /// - `false`：**不判定**，一次都不汇报——与引入汇报之前逐字一致。
     ///
@@ -213,12 +212,6 @@ pub struct SessionConfig {
     /// 它同时是措辞里那句"已经 N 分钟了"的来源——**同一个数**，不另算一份。
     #[serde(default = "default_progress_interval_ms")]
     pub progress_interval_ms: u64,
-    /// 汇报的**最少轮次**：已完成的工具轮次达到它才有"进展"可报。
-    ///
-    /// 第一轮就跑完的任务不该被打断——那时用户刚说完话，一句"我已经跑了一轮"
-    /// 是噪声。
-    #[serde(default = "default_progress_min_rounds")]
-    pub progress_min_rounds: usize,
     /// **每轮**汇报次数上限（护栏）：`0` ⇒ 一次都不汇报（与 `progress_enabled`
     /// 同效，但语义不同——前者是"这个特性关掉"，后者是"上界为零"）。
     ///
@@ -458,10 +451,6 @@ pub fn default_progress_interval_ms() -> u64 {
     // 60s：短于它的任务本来就快，用户不需要被打断；长于它的才值得说一句。
     60_000
 }
-pub fn default_progress_min_rounds() -> usize {
-    // 2 轮：一轮就完事的任务，"进展"还谈不上。
-    2
-}
 pub fn default_progress_max_per_turn() -> u32 {
     // 5 次：一个 10 分钟的任务最多被打断 5 次，间隔已由 `progress_interval_ms` 保证。
     5
@@ -532,7 +521,6 @@ impl Default for SessionConfig {
             opening_enabled: default_opening_enabled(),
             progress_enabled: default_progress_enabled(),
             progress_interval_ms: default_progress_interval_ms(),
-            progress_min_rounds: default_progress_min_rounds(),
             progress_max_per_turn: default_progress_max_per_turn(),
             conation_enabled: default_conation_enabled(),
             skill_compile_enabled: default_skill_compile_enabled(),

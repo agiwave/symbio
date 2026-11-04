@@ -39,7 +39,7 @@
 //! `FactDecl`——那一族格子不属于义务环，给它补一份事实声明等于把词汇塞回控制面
 //! （`EX-007` 判「碰过机制面」的那一侧）。所以这四对按 `D-282` 的第二种读法登记：
 //! 名字由 `EventDecl` 保证拼对，字段无从校验；装载期进 `Frozen::assertion_reads()`
-//! 的名单，不是静默跳过（`slo` 读 `turn.dispatch.tier` 是同一条通道的前例）。
+//! 的名单，不是静默跳过。
 
 use std::collections::BTreeMap;
 

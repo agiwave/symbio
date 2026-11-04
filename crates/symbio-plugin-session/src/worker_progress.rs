@@ -49,14 +49,6 @@ pub(crate) const STEPS_MAX: usize = 8;
 
 /// Q3 投影（旧读法）：由子会话清单 + 完整转写算进展。**纯函数**（形参只有两个 `&`，可穷举测试）。
 pub(crate) fn progress_of(summary: &SessionSummary, session: &Session) -> WorkerProgress {
-    // rounds：只数 user 消息。`role` 为 `None` 是「还没接线」，不冒充一轮——
-    // 与委派判定的 `None` 同一条纪律：没有观测就不要编出一个数来。
-    let rounds = session
-        .messages
-        .iter()
-        .filter(|m| matches!(m.node_role(), Some(cm::NodeRole::User)))
-        .count();
-
     // steps：非 user 节点的非空正文，**保留最近 STEPS_MAX 条**（drain 掉最早的）。
     let mut steps: Vec<String> = session
         .messages
@@ -80,7 +72,6 @@ pub(crate) fn progress_of(summary: &SessionSummary, session: &Session) -> Worker
         id: summary.id.clone(),
         title: summary.title.clone(),
         in_flight,
-        rounds,
         steps,
     }
 }
@@ -173,11 +164,6 @@ pub fn progress_from_facts(
         .read_all(snapshot)
         .value;
 
-    // rounds：`user.message` 条数。`transcript` 投影把开轮折成的补充（
-    // `turn.supplemented`）也渲染成 role=user——它**是用户说的话**，与
-    // `messages.json` 里那条 supplement 消息同源，故两种读法在此仍同数。
-    let rounds = entries.entries.iter().filter(|e| e.role == "user").count();
-
     // steps：非 user 条目里正文非空的那些，**保留最近 STEPS_MAX 条**
     // （与旧读法同一条截断纪律，否则两读法的 steps 条数会对不上）。
     let mut steps: Vec<String> = entries
@@ -207,7 +193,6 @@ pub fn progress_from_facts(
         id: fallback_id.to_string(),
         title: fallback_title.to_string(),
         in_flight,
-        rounds,
         steps,
     }
 }

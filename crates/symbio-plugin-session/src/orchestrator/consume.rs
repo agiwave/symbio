@@ -316,7 +316,6 @@ impl TurnLauncher {
                 opening_enabled: cfg.opening_enabled,
                 progress_enabled: cfg.progress_enabled,
                 progress_interval_ms: cfg.progress_interval_ms,
-                progress_min_rounds: cfg.progress_min_rounds,
                 progress_max_per_turn: cfg.progress_max_per_turn,
                 presentation_tree: cfg.presentation_tree(),
                 skill_compile_enabled: cfg.skill_compile_enabled,

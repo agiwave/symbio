@@ -111,13 +111,10 @@ fn expected_role(
 ) -> Option<&'static str> {
     match slot_of(e, c, m) {
         Some(ChatSlot::UserMessage) => Some("user"),
-        // 轮边界折进的补充：它**是用户说的话**，所以 role=user。
-        //
         // **凡是落进投影的 slot 都必须在这里登记**：漏登记的 slot 在这里返回 None，
-        // 判据把它当成「不在投影范围内」直接跳过——**补充漏进请求包时判据不会红**。
+        // 判据把它当成「不在投影范围内」直接跳过——**漏进请求包时判据不会红**。
         // 判据的覆盖范围必须与投影的实现范围同时长（闭集枚举让这条在编译期可查：
         // `ChatSlot` 加一档，下面的 `match` 就会因为不穷尽而红）。
-        Some(ChatSlot::Supplemented) => Some("user"),
         // 空正文的收束格不进投影（同 `transcript` 的空正文跳过）⇒ 也不在复核范围。
         // 进展格（等待用户）同理：同样投影成 assistant 行；空正文照跳。
         Some(ChatSlot::FinalReply | ChatSlot::Progress) => {

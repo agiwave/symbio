@@ -34,8 +34,6 @@ pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
 static ROWS: &[Decl] = &[Decl {
     name: "notify-send",
     // 等待阶段的末位（`await-tool` 72 之后）：通知不挡任何轮内进程。
-    phase: 7,
-    anchor: 73,
     by: Some(PORT_ACTOR),
     // 一次外部 HTTP 发送，不调模型：快速档。
     tier: LatencyTier::Fast,

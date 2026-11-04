@@ -13,7 +13,7 @@
 //!
 //! 回退要改的是**本轮提示词**，而提示词由宿主（loop）装配。能力包不能去改宿主的
 //! 视图结构——那是跨插件的私有面。于是分工是：宿主把本幕召回的技能以
-//! `turn.recalled` 视图**按名字公开**（每条带 `recall` = 技能事件的 seq），本能力
+//! 技能召回由本能力自己的债行驱动（每条带 `recall` = 技能事件的 seq），本能力
 //! 按自己的置信度口径折出 `skill.retreat`（哪些 seq 本轮**不该**进提示词），宿主
 //! 读这个名字过滤自己的段。两边都只认名字，不互相链接（DE-025 D-251）。
 //!
@@ -56,11 +56,6 @@ pub(crate) const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
 /// 这个字面量是本能力写下的词汇，读它的会话统计另有自己的一份。
 pub(crate) const SKILL_TAG: &str = "skill";
 
-/// 观测格：这一条技能在本轮**判成什么**（命中 / 未命中）。
-///
-/// 它是 `skill.recall` 行的收口格，也是「这条技能本轮被拿去过闸」的事实形态。
-pub(crate) const SKILL_ANSWERED: &str = "skill.answered";
-
 /// 对外可读视图：本轮**不该进提示词**的技能（置信度低于阈值）的 seq 集。
 pub(crate) const SKILL_RETREAT: &str = "skill.retreat";
 
@@ -70,9 +65,6 @@ pub(crate) const SKILL_RETREAT: &str = "skill.retreat";
 /// 的 `stats`）。本能力自己要的那一半（置信度）经 [`calibration_ledger`] 直接折，
 /// 不绕名字读自己的观测。
 pub(crate) const SKILL_CALIBRATION: &str = "skill.calibration";
-
-/// 行名：本幕召回的每条技能按置信度过闸，命中即零往返作答。`by = plugin_row`。
-pub(crate) const SKILL_RECALL: &str = "skill.recall";
 
 /// 技能正文与触发串的截断上限（字符）。
 ///
@@ -93,8 +85,6 @@ const COST: u32 = 4096;
 pub(crate) const EVENTS: &[EventDecl] = &[
     // 校准观测（本能力自有格子）：`memory.calibrated{skill_id, fallback}`。
     EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)),
-    // 本能力对自己的判定（这一条技能本轮命中没有）的断言。
-    EventDecl::new(SKILL_ANSWERED, (Entity::Domain, Verb::Asserted)),
 ];
 
 pub(crate) const FACTS: &[FactDecl] = &[
@@ -105,15 +95,6 @@ pub(crate) const FACTS: &[FactDecl] = &[
         key: &[],
         expand: &[],
         fields: &["skill_id", "fallback"],
-    },
-    // 判定事实：键 `(recall, stage)` 与行的债键同形——`skill.recall` 的 `until`
-    // 按它关账，一个幕一条判定。
-    FactDecl {
-        name: SKILL_ANSWERED,
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["recall", "stage", "skill_id", "hit"],
     },
 ];
 
@@ -159,8 +140,6 @@ pub(crate) const ROWS: &[Decl] = &[
     // 校准观测的归宿行（同上）。
     Decl {
         name: EVENT_MEMORY_CALIBRATED,
-        phase: 8,
-        anchor: 200,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -172,35 +151,6 @@ pub(crate) const ROWS: &[Decl] = &[
         until: &[Pattern {
             source: EVENT_MEMORY_CALIBRATED,
             key: &[],
-            eq: &[],
-        }],
-        unless: &[],
-    },
-    // 本幕召回里**属于技能**的那些条目，逐条过置信度闸：
-    //
-    // - 前件是宿主公开的 `turn.recalled`（每条带 `recall` = 技能事件的 seq 与 `stage`
-    //   = 召回阶段格的 seq）。`eq tag = "skill"` 是行的前件，不是实现里的 if：
-    //   普通记忆条目的债根本不开。
-    // - `prio 50`：召回（40）之后、接缝（52）之前——命中要在装配请求之前定下来，
-    //   观测也要在收束之前落格。
-    // - 出口是本能力自己的 `skill.answered`（同键），一个幕一条；摘行（回退）与
-    //   命中都关同一笔账，不存在「判了但不落格」的第三态。
-    Decl {
-        name: SKILL_RECALL,
-        phase: 1,
-        anchor: 50,
-        by: Some(symbio_plugin_api::rows::PLUGIN_ROW),
-        // 这条行不调模型（命中即零往返作答）：反射档。
-        tier: LatencyTier::Reflex,
-        expand: None,
-        owes: Pattern {
-            source: "turn.recalled",
-            key: &["recall", "stage"],
-            eq: &[("tag", Lit::Str(SKILL_TAG))],
-        },
-        until: &[Pattern {
-            source: SKILL_ANSWERED,
-            key: &["recall", "stage"],
             eq: &[],
         }],
         unless: &[],

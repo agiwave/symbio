@@ -173,7 +173,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 88 · draft 1 · retired 2（共 91）
+**计数**：active 89 · draft 1 · retired 2（共 92）
 
 ## 现行设计（active）
 
@@ -223,6 +223,7 @@ board.columns: [impl]
 | [`DE-047-义务环判据与归属推导`](047-义务环判据与归属推导.md) | 义务环判据与归属推导 | 部分落地 |
 | [`DE-048-端口机制裁决`](048-端口机制裁决.md) | 端口机制裁决 | 部分落地 |
 | [`DE-049-与判据冲突的旧决策`](049-与判据冲突的旧决策.md) | 与判据冲突的旧决策 | 未落地 |
+| [`DE-050-义务环事实词表与债务表`](050-义务环事实词表与债务表.md) | 义务环事实词表与债务表 | 未落地 |
 | [`DE-101-context-compression-design`](../../crates/symbio-plugin-session/src/docs/101-context-compression-design.md) | 会话上下文压缩设计 | 与代码一致 |
 | [`DE-102-core-loop`](../../crates/symbio-plugin-session/src/docs/102-core-loop.md) | 会话核心循环（LLM × 工具） | 与代码一致 |
 | [`DE-104-module-layout`](../../crates/symbio-plugin-session/src/docs/104-module-layout.md) | Session / Loop 插件模块分工 | 与代码一致 |

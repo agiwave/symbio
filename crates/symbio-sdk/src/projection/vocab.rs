@@ -21,7 +21,7 @@
 //!
 //! | 表 | 字段 | 消费方 |
 //! |---|---|---|
-//! | [`ChatVocab`] | 11：开轮 / 派发 / 补充 / 分支两支 / 汇报 / 开场 / 定稿 / 兜底 / 进展 / 被拒 | `turns` `turnstate` `branch` `rebuild` `transcript` `prompt_fidelity` |
+//! | [`ChatVocab`] | 9：开轮 / 分支两支 / 汇报 / 开场 / 定稿 / 兜底 / 进展 / 被拒 | `turns` `turnstate` `branch` `rebuild` `transcript` `prompt_fidelity` |
 //! | [`MessageVocab`] | 5：产物 / 增 / 改 / 删 / 巩固 | `mutations` `rebuild` `transcript` `prompt_fidelity` |
 //! | [`CommitmentVocab`] | 4：立约 / 履约 / 违约 / 断言 | `actors::commitment` |
 //!
@@ -36,7 +36,7 @@
 //!
 //! ## 字段为什么按算法角色命名
 //!
-//! `turn.dispatch` 与 `turn.supplemented` 同落 `Turn × Asserted`，`chat.assistant.final`
+//! `turn.branch` 与 `chat.assistant.reported` 同落 `Turn × Asserted`，`chat.assistant.final`
 //! 与 `chat.assistant.fallback` 同落 `Turn × Closed`，`commitment.released` 与
 //! `commitment.broken` 同落 `Commitment × Closed`——按格子命名字段会撞名，按事件名命名
 //! 字段则这张表退化成名字表的别名。按「这一格在折叠里算什么」命名，才是真正的闭集。
@@ -51,16 +51,12 @@
 
 /// 对话的**发言面**：一轮里谁说了一句话、这一轮怎么开的、为什么停。
 ///
-/// 11 个字段 = 这一面的闭集。加一条发言类事件 ⇒ 加一个字段 ⇒ 编译期点出全部折叠与
+/// 9 个字段 = 这一面的闭集。加一条发言类事件 ⇒ 加一个字段 ⇒ 编译期点出全部折叠与
 /// 全部调用方；**内核与 core 的文件零 diff**，这正是本表存在的理由。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatVocab {
     /// 开轮：`turn × opened`。折叠据它认「这一轮从哪开始」（幕锚）。
     pub user_message: &'static str,
-    /// 本轮派发档：`turn × asserted`，载荷带 `tier` / `budget_ms`。
-    pub dispatch: &'static str,
-    /// 用户补充：`turn × asserted`。静默锚点的次选。
-    pub supplemented: &'static str,
     /// 重试留下的分支事实：`turn × asserted`，载荷 `{ of, into }`。
     pub branch: &'static str,
     /// 「此刻读哪一支」：`turn × asserted`，载荷 `{ root }`。
@@ -153,8 +149,6 @@ pub struct CommitmentVocab {
 pub enum ChatSlot {
     /// 开轮（`turn × opened`）。
     UserMessage,
-    /// 用户补充（`turn × asserted`）。
-    Supplemented,
     /// 定稿发言（`turn × closed`）。**只有它算「这一轮答完了」**。
     FinalReply,
     /// 用户看得见的进展（`turn × progressed`）。
@@ -189,7 +183,6 @@ pub fn slot_of(e: &crate::Event, c: &ChatVocab, m: &MessageVocab) -> Option<Chat
         (Entity::Scope, Verb::Closed) if e.kind == c.final_reply => Some(ChatSlot::FinalReply),
         (Entity::Scope, Verb::Closed) if e.kind == c.fallback => Some(ChatSlot::Fallback),
         (Entity::Scope, Verb::Progressed) if e.kind == c.progress => Some(ChatSlot::Progress),
-        (Entity::Scope, Verb::Asserted) if e.kind == c.supplemented => Some(ChatSlot::Supplemented),
         (Entity::Scope, Verb::Asserted) if e.kind == c.reported => Some(ChatSlot::Reported),
         (Entity::Scope, Verb::Asserted) if e.kind == c.opening => Some(ChatSlot::Opening),
         (Entity::Artifact, Verb::Asserted) if e.kind == m.artifact_added => {
@@ -238,8 +231,8 @@ pub fn slot_of(e: &crate::Event, c: &ChatVocab, m: &MessageVocab) -> Option<Chat
 /// 这条通路（旧实现同样让它们落 `_ => None`）。
 pub fn slot_node_of(e: &crate::Event, c: &ChatVocab, m: &MessageVocab) -> Option<String> {
     match slot_of(e, c, m)? {
-        // 开轮 / 补充 / 汇报 / 开场：一格一句话，各带自己的节点 `id`。
-        ChatSlot::UserMessage | ChatSlot::Supplemented | ChatSlot::Reported | ChatSlot::Opening => {
+        // 开轮 / 汇报 / 开场：一格一句话，各带自己的节点 `id`。
+        ChatSlot::UserMessage | ChatSlot::Reported | ChatSlot::Opening => {
             Some(crate::event::event_payload_node_id(e, "id"))
         }
         // 收束 / 进展 / 兜底：整格都是「本轮产出的正文」形状。

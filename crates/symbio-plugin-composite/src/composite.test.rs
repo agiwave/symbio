@@ -705,7 +705,6 @@ fn guard_turn_spec(sid: &str, root: &Path) -> TurnSpec {
             opening_enabled: false,
             progress_enabled: false,
             progress_interval_ms: 0,
-            progress_min_rounds: 0,
             progress_max_per_turn: 0,
             presentation_tree: PresentationTree::Grouped,
             skill_compile_enabled: false,

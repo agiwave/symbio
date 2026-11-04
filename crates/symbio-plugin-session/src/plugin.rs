@@ -685,12 +685,6 @@ fn config_definition() -> DetailDefinition {
                         json!(d.progress_interval_ms),
                     ),
                     unbounded_number(
-                        "progress_min_rounds",
-                        "汇报最少轮次",
-                        "已完成的工具轮次达到它才有「进展」可报（第一轮就跑完的任务不该被打断）",
-                        json!(d.progress_min_rounds),
-                    ),
-                    unbounded_number(
                         "progress_max_per_turn",
                         "每轮汇报上限",
                         "每轮最多汇报几次（0 = 一次都不汇报；与「关掉汇报」同效但语义不同）",

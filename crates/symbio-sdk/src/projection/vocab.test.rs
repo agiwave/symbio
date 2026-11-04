@@ -6,8 +6,6 @@ use super::{ChatVocab, CommitmentVocab, MessageVocab};
 /// 夹具表：值就是线上名字。用例不引内核常量——那正是这三张表要替掉的东西。
 pub(super) const CHAT: ChatVocab = ChatVocab {
     user_message: "user.message",
-    dispatch: "turn.dispatch",
-    supplemented: "turn.supplemented",
     branch: "turn.branch",
     branch_selected: "turn.branch_selected",
     reported: "chat.assistant.reported",
@@ -71,10 +69,8 @@ fn spoken_covers_the_five_ways_the_assistant_says_something() {
 #[test]
 fn no_event_name_is_claimed_by_two_fields() {
     let all = [
-        // ChatVocab（11）
+        // ChatVocab（9）
         CHAT.user_message,
-        CHAT.dispatch,
-        CHAT.supplemented,
         CHAT.branch,
         CHAT.branch_selected,
         CHAT.reported,

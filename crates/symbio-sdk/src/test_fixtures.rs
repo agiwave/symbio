@@ -27,8 +27,6 @@ use crate::{Entity, EventDecl, FactRole, Verb};
 
 // ── 对话面（`turn`）──
 pub const EVENT_USER_MESSAGE: &str = "user.message";
-pub const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
-pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 pub const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 pub const EVENT_CHAT_ASSISTANT_OPENING: &str = "chat.assistant.opening";
 pub const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
@@ -64,12 +62,6 @@ pub const EVENTS: &[EventDecl] = &[
         (Entity::Scope, Verb::Opened),
         &[FactRole::DeclaresBudget],
     ),
-    EventDecl::with_roles(
-        EVENT_TURN_DISPATCH,
-        (Entity::Scope, Verb::Asserted),
-        &[FactRole::DeclaresBudget],
-    ),
-    EventDecl::new(EVENT_TURN_SUPPLEMENTED, (Entity::Scope, Verb::Asserted)),
     EventDecl::new(
         EVENT_CHAT_ASSISTANT_REPORTED,
         (Entity::Scope, Verb::Asserted),
@@ -122,11 +114,9 @@ pub const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)),
 ];
 
-/// 对话发言面（11 条）。
+/// 对话发言面（9 条）。
 pub const CHAT: ChatVocab = ChatVocab {
     user_message: EVENT_USER_MESSAGE,
-    dispatch: EVENT_TURN_DISPATCH,
-    supplemented: EVENT_TURN_SUPPLEMENTED,
     branch: EVENT_TURN_BRANCH,
     branch_selected: EVENT_TURN_BRANCH_SELECTED,
     reported: EVENT_CHAT_ASSISTANT_REPORTED,

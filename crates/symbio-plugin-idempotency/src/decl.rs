@@ -61,8 +61,6 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
 /// 没有它，`seal` 会把 `idempotency.recorded` 判成 `OrphanFact`（每条事实都要有归宿行）。
 pub(crate) const ROWS: &[Decl] = &[Decl {
     name: IDEMPOTENCY_RECORDED,
-    phase: 8,
-    anchor: 212,
     by: None,
     tier: LatencyTier::Reflex,
     expand: None,

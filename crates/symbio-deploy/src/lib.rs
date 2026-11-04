@@ -54,7 +54,7 @@ pub const PLUGIN_ID_IDEMPOTENCY: &str = "idempotency";
 /// 本地文件
 pub const PLUGIN_ID_LOCAL: &str = "local";
 
-/// 驱动器：一轮的判决 / 工具循环（经地址面被会话触发，随每棵子树分形）
+/// 纯机制环：选债、派发、等待、配对、记账、预算与租约、重放
 pub const PLUGIN_ID_LOOP: &str = "loop";
 
 /// 工具
@@ -111,7 +111,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "plugin_manager", // 插件管理与配置入口
     "event_bus", // 事件总线
     "session", // 会话
-    "loop", // 驱动器：一轮的判决 / 工具循环（经地址面被会话触发，随每棵子树分形）
+    "loop", // 纯机制环：选债、派发、等待、配对、记账、预算与租约、重放
     "task", // 任务表：清单声明成事实、独立验证与返工、就绪集调度与调度段
     "heartbeat", // 心跳调度：会话空闲后自主开一轮（经地址面写会话收件箱，随每棵子树分形）
     "persona", // 人格：一处定义「我是谁」，两条输出面（轮内正文 / 对话措辞）读同一段

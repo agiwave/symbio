@@ -19,19 +19,12 @@
 //! 少了 `agg`，跨会话合并只能在读方再折一遍——那是同一件事的第二份口径，而分位数的
 //! 取法一旦分成两处，「P99 是什么」就有两个答案。
 //!
-//! ## 读的是别人的格（`D-282`）
-//!
-//! `turn.dispatch` 的 `tier` 没有 `FactDecl`（它不属于义务环），所以它在 `reads` 里是一条
-//! **断言格读法**：名字由 `EventDecl` 保证拼对，字段无从校验。装载期会把这条读法记进
-//! `Frozen::assertion_reads()` 的名单里，不是静默跳过。
-
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
 use symbio_plugin_api::events::{
-    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH,
-    EVENT_USER_MESSAGE,
+    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::{Entity, Event, LatencyTier, PluginDeclarations, Verb, ViewDecl};
 
@@ -54,10 +47,9 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {
         name: SLO_LATENCY,
         ver: 1,
-        // 档位读两处：`turn.dispatch`（新写入的唯一来源，无 `FactDecl` ⇒ 断言格读法）与
-        // `user.message`（接线前的历史形态）。`cost_ms` 是**信封**字段，不是载荷，
+        // 档位只读 `user.message` 的 `tier`。`cost_ms` 是**信封**字段，不是载荷，
         // `reads` 表达不了也不该表达。
-        reads: &[(EVENT_TURN_DISPATCH, "tier"), (EVENT_USER_MESSAGE, "tier")],
+        reads: &[(EVENT_USER_MESSAGE, "tier")],
         // 读数不替任何事实关门。
         evidence: &[],
         cost: COST,
@@ -67,7 +59,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {
         name: SLO_FALLBACK,
         ver: 1,
-        reads: &[(EVENT_TURN_DISPATCH, "tier"), (EVENT_USER_MESSAGE, "tier")],
+        reads: &[(EVENT_USER_MESSAGE, "tier")],
         evidence: &[],
         cost: COST,
         eval: fallback,
@@ -85,41 +77,25 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     },
 ];
 
-/// 本轮声明的档位：优先读本轮 `turn.dispatch` 载荷的 `tier`，历史切片没有这一格时回退读
-/// `user.message` 的 `tier`；缺失 / 未知 ⇒ [`UNSPECIFIED`]。
+/// 本轮声明的档位：读 `user.message` 载荷的 `tier`；缺失 / 未知 ⇒ [`UNSPECIFIED`]。
 ///
 /// `before_seq`：
 /// - `Some(b)` ⇒ 只认 seq `< b` 的声明（兜底 / 收束事件要归到**它之前**那一幕的档位）；
-/// - `None` ⇒ 不限 seq，取**最早**一条派发格——开轮事件的分母按「这一轮以哪一档开局」归位
+/// - `None` ⇒ 不限 seq，取**最早**一条开轮格——开轮事件的分母按「这一轮以哪一档开局」归位
 ///   （续写幕可以换档，那是另一幕的事实）。
 fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>) -> String {
     let before = |e: &Event| before_seq.is_none_or(|b| e.seq.is_some_and(|s| s.value() < b));
-    let is_dispatch = |e: &Event| {
-        e.entity == Entity::Scope
-            && e.verb == Verb::Asserted
-            && e.kind.as_str() == EVENT_TURN_DISPATCH
-            && e.scope == turn
-    };
-    let dispatch = match before_seq {
-        None => events.iter().find(|e| is_dispatch(e) && before(e)),
-        Some(_) => events.iter().rev().find(|e| is_dispatch(e) && before(e)),
-    };
-    dispatch
-        .and_then(|e| e.payload.get("tier").and_then(Value::as_str))
-        // 接线前的历史事件：档位随开轮格写入（`user.message.tier`）。
-        .or_else(|| {
-            events
-                .iter()
-                .rev()
-                .find(|u| {
-                    u.entity == Entity::Scope
-                        && u.verb == Verb::Opened
-                        && u.scope == turn
-                        && u.kind.as_str() == EVENT_USER_MESSAGE
-                        && before(u)
-                })
-                .and_then(|u| u.payload.get("tier").and_then(Value::as_str))
+    events
+        .iter()
+        .rev()
+        .find(|u| {
+            u.entity == Entity::Scope
+                && u.verb == Verb::Opened
+                && u.scope == turn
+                && u.kind.as_str() == EVENT_USER_MESSAGE
+                && before(u)
         })
+        .and_then(|u| u.payload.get("tier").and_then(Value::as_str))
         .and_then(LatencyTier::from_name)
         .map(|t| t.name().to_string())
         .unwrap_or_else(|| UNSPECIFIED.to_string())
@@ -230,7 +206,7 @@ fn rate(turns: u64, fallbacks: u64) -> f64 {
 /// 兜底率（单片）。
 ///
 /// - **turn** = `user.message`（`turn × opened`）——用户消息开启一轮；
-/// - **档位** = `turn.dispatch` 载荷的 `tier`，历史事件回退 `user.message` 的 `tier`；
+/// - **档位** = `user.message` 载荷的 `tier`；
 /// - **兜底** = `chat.assistant.fallback`（`turn × closed`）——生成失败也必须有输出，
 ///   fallback 落在哪档就是哪档的兜底。
 fn fallback(events: &[Event], now: i64) -> Value {

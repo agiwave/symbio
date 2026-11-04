@@ -39,8 +39,6 @@ fn cover(fact: &'static str, by: Option<&'static str>) -> Decl {
     }]));
     Decl {
         name: fact,
-        phase: 8,
-        anchor: 99,
         by,
         tier: LatencyTier::Reflex,
         expand: None,

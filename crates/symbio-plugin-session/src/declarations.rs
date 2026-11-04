@@ -131,8 +131,6 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
     symbio_sdk::projection::vocab::ChatVocab {
         user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
-        dispatch: symbio_plugin_api::events::EVENT_TURN_DISPATCH,
-        supplemented: symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
         branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
         branch_selected: symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED,
         reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
@@ -211,8 +209,6 @@ macro_rules! session_row_at {
     ($name:expr, $phase:expr, $anchor:expr) => {
         Decl {
             name: $name,
-            phase: $phase,
-            anchor: $anchor,
             by: Some(PORT_ACTOR),
             // 本地读写，不调模型：快速档。
             tier: LatencyTier::Fast,

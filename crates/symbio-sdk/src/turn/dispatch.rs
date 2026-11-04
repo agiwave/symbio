@@ -63,7 +63,6 @@ pub struct TurnSettings {
     pub opening_enabled: bool,
     pub progress_enabled: bool,
     pub progress_interval_ms: u64,
-    pub progress_min_rounds: usize,
     pub progress_max_per_turn: u32,
     pub presentation_tree: PresentationTree,
     pub skill_compile_enabled: bool,

@@ -127,8 +127,6 @@ pub(crate) const FACTS: &[FactDecl] = &[
 pub(crate) const ROWS: &[Decl] = &[
     Decl {
         name: NOTES_CREATED,
-        phase: 8,
-        anchor: 200,
         by: None,
         tier: LatencyTier::Reflex,
         expand: None,
@@ -152,8 +150,6 @@ pub(crate) const ROWS: &[Decl] = &[
     // （72）之后、收束（55）之前被选中：这一笔在**同一轮**里看得见产物。
     Decl {
         name: NOTES_INDEX,
-        phase: 1,
-        anchor: 45,
         by: Some(symbio_plugin_api::rows::PLUGIN_ROW),
         tier: LatencyTier::Fast,
         expand: None,
@@ -177,8 +173,6 @@ pub(crate) const ROWS: &[Decl] = &[
     // 不把债留在原地再打一次模型。
     Decl {
         name: NOTES_REFLECT,
-        phase: 1,
-        anchor: 46,
         by: Some(symbio_plugin_api::rows::PLUGIN_ROW),
         // 这一行真的要一次模型往返：最宽档（`plugin_row` 的执行体档）。
         tier: LatencyTier::Deep,
@@ -203,8 +197,6 @@ pub(crate) const ROWS: &[Decl] = &[
     // `status = ok`：失败往返的洞察没有可压的正文，开这笔债只会写出一句空摘要。
     Decl {
         name: NOTES_SUMMARIZE,
-        phase: 1,
-        anchor: 47,
         by: Some(symbio_plugin_api::rows::PLUGIN_ROW),
         // 摘要由本能力按事实现算，不再调模型：与索引行同档。
         tier: LatencyTier::Fast,

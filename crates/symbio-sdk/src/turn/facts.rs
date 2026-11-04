@@ -56,8 +56,8 @@ pub struct FleetSnapshot {
 
 /// Q3 · 单个 worker 的进展投影。
 ///
-/// 三个字段与 B2（前端把「过程段」收起成的那行状态）**逐字同名**：`in_flight` /
-/// `rounds` / `steps`。同名约束的是**字段名与语义**，不是算法——后端只见磁盘，
+/// 两个字段与 B2（前端把「过程段」收起成的那行状态）**逐字同名**：`in_flight` /
+/// `steps`。同名约束的是**字段名与语义**，不是算法——后端只见磁盘，
 /// 前端还看得见父工具状态（B2 判据 1 的 OR 式），两端各自用可见信息判定同一语义。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WorkerProgress {
@@ -67,9 +67,6 @@ pub struct WorkerProgress {
     pub title: String,
     /// 该 worker 是否仍在运行（末条消息**未见终态**即为真）。
     pub in_flight: bool,
-    /// Turn 数 = 其 user 消息数 = **前端过程段 Turn 条数**——B2 判据 2「数值同源」
-    /// 的落点。**不能拿 `message_count` 顶**：那是总消息数，与 Turn 数不同量。
-    pub rounds: usize,
     /// 非空内容节点产出的步骤；**无内容节点不产出步骤**（B2 判据 3）。
     pub steps: Vec<String>,
 }

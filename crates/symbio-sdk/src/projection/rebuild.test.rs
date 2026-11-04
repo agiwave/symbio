@@ -14,7 +14,7 @@ use super::rebuild;
 use crate::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 use crate::test_fixtures::{
     CHAT, EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
-    EVENT_CHAT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE, MESSAGE,
+    EVENT_CHAT_ASSISTANT_REPORTED, EVENT_USER_MESSAGE, MESSAGE,
 };
 use crate::{Entity, Event, Verb};
 
@@ -428,61 +428,6 @@ fn rebuild_is_deterministic() {
     assert_eq!(
         shapes(&rebuild(&events, &CHAT, &MESSAGE)),
         shapes(&rebuild(&events, &CHAT, &MESSAGE))
-    );
-}
-
-// ── ④ 载荷没记身份 ⇒ 合成 id 必须稳定 ─────────────────────────────────
-
-#[test]
-fn supplement_gets_a_stable_synthetic_id() {
-    let ev = Event::pending(
-        "s-1-0",
-        EVENT_TURN_SUPPLEMENTED,
-        Entity::Scope,
-        Verb::Asserted,
-        1,
-        "user",
-    )
-    .with_ts(1_200)
-    .with_payload(serde_json::json!({ "text": "插一句", "count": 1 }));
-
-    let a = shapes(&rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE));
-    let b = shapes(&rebuild(&[ev], &CHAT, &MESSAGE));
-    assert_eq!(a, b, "同一条事件每次重建必须得同一个 id");
-    assert_eq!(a[0].id, "s-1-0", "载荷缺 id 时合成 id 取事件 id");
-    assert_eq!(a[0].identity, Some(NodeRole::User));
-    assert_eq!(a[0].text, "插一句");
-}
-
-/// 补充格的形状必须**逐字复刻落库那一份**（`turn_exec::supplement_into_request`）：
-/// 无 `msg_type`、无 `status`、带 `meta.supplement*` 三键。任一格不同，同一条补充
-/// 在实时面与重建面就是两个节点。
-#[test]
-fn supplement_mirrors_the_persisted_shape() {
-    let ev = Event::pending(
-        "s-1-0",
-        EVENT_TURN_SUPPLEMENTED,
-        Entity::Scope,
-        Verb::Asserted,
-        1,
-        "user",
-    )
-    .with_ts(1_200)
-    .with_payload(serde_json::json!({
-        "text": "插一句", "count": 2, "id": "inbox-a", "ids": ["inbox-a", "inbox-b"],
-    }));
-
-    let msgs = rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE);
-    let m = &msgs[0];
-    assert_eq!(m.id, "inbox-a", "载荷带 id ⇒ 复刻该身份（不合成）");
-    assert_eq!(m.msg_type, None, "落库的补充消息没有 msg_type");
-    assert_eq!(m.status, None, "落库的补充消息没有 status");
-    let meta = m.meta.as_ref().expect("补充必须带 meta");
-    assert_eq!(meta["supplement"], serde_json::json!(true));
-    assert_eq!(meta["supplement_count"], serde_json::json!(2));
-    assert_eq!(
-        meta["supplement_ids"],
-        serde_json::json!(["inbox-a", "inbox-b"])
     );
 }
 
