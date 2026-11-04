@@ -3,13 +3,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use symbio_deploy::PLUGIN_ID_LOOP;
 use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload,
 };
 use symbio_plugin_api::drive::drive_row;
-use symbio_plugin_api::CAPABILITY_VISITOR;
+use symbio_plugin_api::{CAPABILITY_VISITOR, PLUGIN_ID_LOOP, PATH};
 
 /// 单环驱动器（crate 内唯一实例；对外经 creator 注册可见）。
 pub(crate) struct LoopPlugin;
@@ -41,7 +40,7 @@ impl Plugin for LoopPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_sdk::keys::PATH).unwrap_or_default();
+        let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!("未知路径: {path}")))
     }
 
