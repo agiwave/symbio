@@ -2,12 +2,15 @@
 //!
 //! ## 为什么本文件要交一份「宿主行」夹具
 //!
-//! 插件自己的测试二进制只链接本 crate：`user.message` 事实的归宿行住在宿主写口，
-//! `memory.encoded` 的**事实形状**自 DE-026 D-263 起住情景记忆能力包
-//! （`crates/symbio-plugin-memory`）。不在这里 ⇒ `seal` 报 `OrphanFact` /
-//! `UnknownSource` / `UnknownFact` / `FactWithoutEvent`，整张表失败（DE-015 §3.4）。
-//! 夹具补的正是完整进程里由那两个 owner 提供的那一半——视图、事实形状与通用行执行体
-//! 的声明。它与 notes 的同名夹具同形，只在 `cfg(test)` 生效。
+//! 插件自己的测试二进制只链接本 crate：`memory.encoded` 的**事实形状**自 DE-026 D-263
+//! 起住情景记忆能力包（`crates/symbio-plugin-memory`）。不在这里 ⇒ `seal` 报
+//! `OrphanFact` / `UnknownSource` / `UnknownFact` / `FactWithoutEvent`，
+//! 整张表失败（DE-015 §3.4）。夹具补的正是完整进程里由那个 owner 提供的那一半
+//! ——事实形状与归宿行。它与 notes 的同名夹具同形，只在 `cfg(test)` 生效。
+//!
+//! **不补 `plugin_row` 执行体与 `user.message`**：本包的 `skill.recall` 行随 B2
+//! （`60cedd50`）与它的实现 `row.rs`、`turn.recalled` 绑定、`skill.answered` 产出
+//! 一起退场，本包今天不再有 `by = plugin_row` 的行。夹具不声明生产上不存在的东西。
 
 use super::{
     calibration_ledger, calibration_ledger_view, confidence_of, retreating_skills, SkillStat,
@@ -17,15 +20,12 @@ use super::{
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
 use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{
-    ActorDecl, Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
+    Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
 };
 
-/// loop 拥有的两条事实格（本二进制不链接它 ⇒ 夹具补格位与载荷字段）。
-const HARNESS_EVENTS: &[EventDecl] = &[
-    EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
-    // 真实进程里开轮事实由宿主写口落格（D-296），环里没有行生产它。
-    EventDecl::host("user.message", (Entity::Scope, Verb::Opened)),
-];
+/// loop 拥有的事实格（本二进制不链接它 ⇒ 夹具补格位与载荷字段）。
+const HARNESS_EVENTS: &[EventDecl] =
+    &[EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened))];
 
 const HARNESS_FACTS: &[FactDecl] = &[
     // `memory.encoded` 的**形状**夹具：完整进程由情景记忆能力包申报（D-263），本
@@ -45,13 +45,6 @@ const HARNESS_FACTS: &[FactDecl] = &[
             "trigger",
         ],
     },
-    FactDecl {
-        name: "user.message",
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["text", "id"],
-    },
 ];
 
 const HARNESS_VIEWS: &[ViewDecl] = &[];
@@ -62,14 +55,9 @@ fn harness_declarations() -> PluginDeclarations<'static> {
         facts: HARNESS_FACTS,
         views: HARNESS_VIEWS,
         ports: &[],
-        // 通用行执行体的声明由宿主给：行实现自己声明写入（`SkillRecall::writes`），
-        // 装配期并进这份名单。本二进制补一份够用的 `ActorDecl`，模式取最宽档。
-        actors: vec![ActorDecl {
-            name: symbio_plugin_api::rows::PLUGIN_ROW,
-            mode: LatencyTier::Deep,
-            reads: &[],
-            writes: &[EVENT_MEMORY_CALIBRATED],
-        }],
+        // 本包没有 `by = plugin_row` 的行（见模块头的退场说明）⇒ 也不声明该执行体：
+        // 声明一个没人绑的 actor 只会让 seal 报 `OrphanActor`。
+        actors: Vec::new(),
         rows: harness_rows(),
     }
 }
@@ -180,7 +168,7 @@ fn the_retreat_view_is_sealed_under_this_owner() {
     assert_eq!(frozen.view_owner(SKILL_RETREAT), Some(OWNER));
 }
 
-/// 引用关系不虚：夹具里那两条宿主格不是本能力的事实声明。
+/// 引用关系不虚：夹具里那条宿主格不是本能力的事实声明。
 #[test]
 fn harness_facts_do_not_overlap_with_our_own() {
     for fact in FACTS {
