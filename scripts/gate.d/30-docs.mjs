@@ -319,7 +319,7 @@ export const GUARDS = [
   // ⚠️ `baseline-scope-audit`（`BS-001`…`BS-005`）**不在这张名单里**：它的本体要显式
   // 传合并基（`--base=<merge-base>`），而本阶段对 `GUARDS` 的统一调用只拼 `--strict`。
   // 不带基准时脚本退回 `HEAD`——提交后的 `baseline-allow` 会变成「指向没发生的变更」，
-  // BS-005 天天假红。本体执行方是 `61-baseline-scope`（自己解析合并基并传入）；本阶段
+  // BS-005 天天假红。本体执行方是 `36-baseline-scope`（自己解析合并基并传入）；本阶段
   // 只跑它的回归测试（`TEST_ONLY`）。判据内容与失效形态见那条在 `TEST_ONLY` 里的说明。
 
   // `capability-ledger-audit`（EX-006）判**名册与处置账逐行对账**：`DE-008 §6.1` 的 54 行
@@ -568,7 +568,7 @@ export const TEST_ONLY = [
   // （那是洗红）；删除键与 `mechanism.file` / `mechanism.hash` 变化必须留下
   // `baseline-allow: <old>→<new> <理由> D-NNN`，决策号还要真的存在于 `docs/`。
   //
-  // 本体执行方是 `61-baseline-scope`（它必须显式传合并基，理由见 `GUARDS` 尾部那条；
+  // 本体执行方是 `36-baseline-scope`（它必须显式传合并基，理由见 `GUARDS` 尾部那条；
   // 执行方归属登记在 `LIBS`），故本阶段只跑回归测试：17 条用例逐分支钉住
   // 「看不见变更 ⇒ 通过」（不是 git 仓 / 基准版本读不出 / JSON 坏掉一律退 2）。
   'baseline-scope-audit',
@@ -728,7 +728,7 @@ export const LIBS = [
   'decision-anchors',
   'route-facts',
   'gen-facts',
-  // `baseline-scope-audit` 的**本体**由 `gate.d/61-baseline-scope.mjs` spawn（那里显式解析
+  // `baseline-scope-audit` 的**本体**由 `gate.d/36-baseline-scope.mjs` spawn（那里显式解析
   // 合并基再传 `--base`；退回 HEAD 会天天假红，理由见该阶段的头部）。登记在 LIBS 是为了
   // 让「脚本在、有人跑」这件事有落点：它不是 30-docs 的守卫步骤，也不是没人管的孤儿。
   // 回归测试因 GW-001 仍需留在 `TEST_ONLY` 跑——**两处指的不是同一件事**（前者是执行方

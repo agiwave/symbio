@@ -39,7 +39,7 @@
  *
  *   05-fmt（屏障，单独跑）
  *     → 06-facts-write（生成器链，串行；docs 读它的产物，故必须是批的前置）
- *     → [10-backend ∥ 15-rustdoc ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv ∥ 55-verify]
+ *     → [10-backend ∥ 15-rustdoc ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 36-baseline-scope ∥ 50-msrv ∥ 55-verify]
  *     → 56-frontend-build → 58-e2e → 60-facts（必须最后）
  *
  * ⚠️ **批只由「连续」的 `parallel: true` 阶段组成**：中间夹一个没标 `parallel` 的阶段，
@@ -75,7 +75,7 @@
  *   node scripts/gate.mjs --skip=id1,id2        跳过指定阶段
  *   node scripts/gate.mjs --ci                  CI 对齐模式（语义由任务模块自行解释）
  *   node scripts/gate.mjs --profile=<p>         附加构建档位（语义由任务模块自行解释）
- *   node scripts/gate.mjs --base=<ref>          棘轮基准版本（只对 baseline 阶段有意义）
+ *   node scripts/gate.mjs --base=<ref>          棘轮基准版本（只对 baseline / baseline-scope 阶段有意义）
  *   node scripts/gate.mjs --list                只列出阶段与任务，不执行
  *   node scripts/gate.mjs --help                打印用法并退出（**不跑任何阶段**）
  *
@@ -242,7 +242,7 @@ const USAGE = `用法：node scripts/gate.mjs [选项]
   --skip=id1,id2        跳过指定阶段（id 同上）
   --ci                  CI 对齐模式（语义由各任务模块自行解释；**恒全跑**，不看范围）
   --profile=<p>         附加构建档位（语义由各任务模块自行解释）
-  --base=<ref>          棘轮基准版本（只对 baseline 阶段有意义）；**同时是本轮变更范围的基准**
+  --base=<ref>          棘轮基准版本（只对 baseline / baseline-scope 阶段有意义）；**同时是本轮变更范围的基准**
   --full                强制全跑，不看变更范围（范围不可得时本来就全跑）
   --list                只列出阶段与任务，不执行
   --help, -h            打印本用法并退出（**不跑任何阶段**）
@@ -283,8 +283,9 @@ if (hasFlag('--help') || hasFlag('-h')) {
 // 开关）都会静默变成一次全量门禁——而人以为自己只跑了一个阶段，白等七分钟。
 // 所以未知参数在这里就停住，不进入任何阶段。
 //
-// `--base=<ref>` 由 `35-baseline.mjs` 直接读 `process.argv`（棘轮基准的显式覆盖口，
-// 见该文件），它不经过本文件的解析，但**是**合法参数，故一并放行并登记进用法。
+// `--base=<ref>` 由 `35-baseline.mjs` 与 `36-baseline-scope.mjs` 直接读 `process.argv`
+// （棘轮基准的显式覆盖口，见那两份文件），它不经过本文件的解析，但**是**合法参数，
+// 故一并放行并登记进用法。
 const KNOWN_FLAGS = new Set(['--ci', '--list', '--help', '-h', '--full'])
 const KNOWN_PREFIXES = ['--only=', '--skip=', '--profile=', '--base=']
 const unknownArgs = argv.filter(

@@ -32,7 +32,7 @@
  * | E-006 | **权威清单**（`003-ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
- * | E-009 | 插件依赖边闭集：**`[dependencies]` 的 `symbio-*` 只许 `plugin-api` / `kernel` / `providers`（+ 第三方）**；兄弟插件、`symbio` 宿主门面（只许 dev）、`include!`/`#[path]` 跨 crate、源码 `symbio_plugin_<兄弟>` 一律禁，**测试代码同样判**；例外只有一条**限期豁免**（`scripts/exemptions/plugin-session-sdk.json`：crate / 依赖精确匹配、`expires` 到点即红、`symbols` 符号级冻结） | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过（Rust 私有可见性包含"定义模块的后代"），旧实现判的就是这个形态。拆 crate（D-191）后兄弟插件是独立 crate，该路径**不可能存在**——约束由 cargo 的依赖图物理给出，但它的物理位置也搬到了 `Cargo.toml`：现在能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条**静默空转**（全仓 4 处 `crate::plugins` 全是注释），绿灯是假的。现判六条通路：清单闭集（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法；`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它就是「插件→应用」反向耦合，控制面插件不豁免）· 源码裸 `symbio_plugin_<x>` · 旧路径兜底 · `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码）· `symbio-providers` 的三条准入条件（自身不依赖插件 / 不含端口名 / 不含业务事实名）。唯一例外是 `plugin-session` 的 `symbio-sdk` 限期豁免（T-034 P4–P6 退役时同批删除）：对象、到期日、符号集都是**数据**，过期 / 扩散 / 新增用法三者任一即红。测试也判：让它对仓内可见去喂一条测试，隔离已经先被拆掉了一个模块 |
+ * | E-009 | 插件依赖边闭集：**`[dependencies]` 的 `symbio-*` 只许 `plugin-api` / `kernel` / `providers`（+ 第三方）**；兄弟插件、`symbio` 宿主门面（只许 dev）、`include!`/`#[path]` 跨 crate、源码 `symbio_plugin_<兄弟>` 一律禁，**测试代码同样判**；例外只有一条**限期豁免**（`scripts/exemptions/plugin-session-sdk.json`：crate / 依赖精确匹配、`expires` 到点即红、`symbols` 符号级冻结） | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过（Rust 私有可见性包含"定义模块的后代"），旧实现判的就是这个形态。拆 crate（D-191）后兄弟插件是独立 crate，该路径**不可能存在**——约束由 cargo 的依赖图物理给出，但它的物理位置也搬到了 `Cargo.toml`：现在能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条**静默空转**（全仓 4 处 `crate::plugins` 全是注释），绿灯是假的。现判六条通路：清单闭集（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法；`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它就是「插件→应用」反向耦合，控制面插件不豁免）· 源码裸 `symbio_plugin_<x>` · 旧路径兜底 · `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码）· `symbio-providers` 的三条准入条件（自身不依赖插件 / 不含端口名 / 不含业务事实名）。唯一例外是 `plugin-session` 的 `symbio-sdk` 限期豁免（session 退役时同批删除）：对象、到期日、符号集都是**数据**，过期 / 扩散 / 新增用法三者任一即红。测试也判：让它对仓内可见去喂一条测试，隔离已经先被拆掉了一个模块 |
  * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../docs/003-design/001-核心架构.md "D-083") 的闭族通货：宿主机制面 `symbio_sdk::` + 封闭语法 `symbio_kernel::` + 通用库 + crate 根日志/工厂宏 + 本插件自己的模块根。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_sdk::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
@@ -823,7 +823,7 @@ function depNameOf(code) {
 
 // ── E-009 限期豁免：`symbio-plugin-session` 的 `symbio-sdk` ────────────────
 //
-// 裁决：session 是 T-034 里排在 P4–P6 的**待退役控制面**，把 SDK 的那一半搬进
+// 裁决：session 是**待退役控制面**（D-253 的第三件：控制面不入扩展门面），把 SDK 的那一半搬进
 // `plugin-api` 等于让契约层长成一个大 SDK，且要靠调宽 HS-002 才绿——那是为了让门
 // 变绿而改门。故这一条边走**限期豁免**：不是白名单条目，也不是 WARNING，
 // 灯只有绿和红。三重条件全部是**数据**，缺一不可：
@@ -836,7 +836,7 @@ function depNameOf(code) {
 //
 // 另外判「空头豁免」：数据指向的 crate 必须存在，且它的 `[dependencies]` 里确有这条
 // 依赖。豁免一旦悬空，删掉它才对——留着只会让下一个人以为这里有理由。
-// T-034 P4–P6 退役 session 时，**同批删除** `scripts/exemptions/plugin-session-sdk.json`。
+// session 退役时，**同批删除** `scripts/exemptions/plugin-session-sdk.json`。
 const SDK_EXEMPTION_PATH = 'scripts/exemptions/plugin-session-sdk.json'
 const SDK_EXEMPTION_CRATE = 'symbio-plugin-session'
 const SDK_EXEMPTION_DEP = 'symbio-sdk'
@@ -970,7 +970,7 @@ function loadSdkExemption() {
   if (data.expires < todayIso()) {
     return fail(
       `限期豁免已过期（expires=${data.expires}，今天 ${todayIso()}）——` +
-        `T-034 P4–P6 退役 session 时同批删除本豁免，不得续期`,
+        `session 退役时同批删除本豁免（D-253），不得续期`,
     )
   }
 
@@ -1025,7 +1025,7 @@ function loadSdkExemption() {
         ln,
         `\`${data.crate}\` 新增了 \`symbio_sdk\` 用法 \`${sym}\`——` +
           `限期豁免只冻结既有符号集（${SDK_EXEMPTION_PATH}）；新增 sdk 用法必须先回到 ` +
-          `D-253 论证，或等 T-034 P4–P6 退役 session 时同批删除本豁免`,
+          `D-253 论证，或等 session 退役时同批删除本豁免`,
       )
     }
   }

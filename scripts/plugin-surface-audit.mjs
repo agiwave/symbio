@@ -67,7 +67,7 @@ export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-loop', 'symbio
  * 源码里不得出现的两个前缀：`symbio_sdk::` / `symbio_deploy::`（应用侧门面）。
  *
  * `symbio_kernel::` **已放行**：kernel 是插件依赖白名单里的共享语法，禁前缀就是
- * 「许依赖、禁使用」的自相矛盾。原 `symbio_core::` 前缀随 crate 一起消失（D-279）。
+ * 「许依赖、禁使用」的自相矛盾。原核心 crate 的根名随该 crate 一起消失（D-279）。
  *
  * manifest 依赖边不在这里判——它只有 E-009 一个 owner。
  */

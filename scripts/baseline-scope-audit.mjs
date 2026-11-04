@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * baseline-scope-audit — 棘轮基线面的**变更审**（`61-baseline-scope`）
+ * baseline-scope-audit — 棘轮基线面的**变更审**（`36-baseline-scope`）
  *
  * ## 它治什么
  *
