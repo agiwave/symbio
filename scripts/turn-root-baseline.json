@@ -2,7 +2,7 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 226,
+      "prod": 219,
       "test": 249
     },
     "F2": {
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-05",
+      "faces": "F1.prod",
+      "reason": "D-318（B2b）落地：`34526409` 退役 `symbio-sdk/src/projection/turns.rs` 等失去对象的判据，F1 生产面 226 → 219 为**实测收窄**；测试面 249 不变。目标 0 不变，余量继续按退场批次清。"
+    },
     {
       "date": "2026-11-04",
       "faces": "F1.prod / F1.test / F2.prod / F2.test",

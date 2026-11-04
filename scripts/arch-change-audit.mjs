@@ -49,6 +49,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow, dim } from './color.mjs'
+import { backfillShas, loadBackfill } from './core-change-backfill.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
@@ -391,6 +392,15 @@ function main() {
     return 1
   }
 
+  // 逐提交补记表（D-333）：提交不能改写，缺 `Core-Change:` 的历史只能由表补记。
+  // 表自身的形状先过判据——「在表内 ⇒ 按表核验」，核验的就是这张表（不是跳过）。
+  const backfill = loadBackfill(repoRoot)
+  if (backfill.errors.length) {
+    for (const e of backfill.errors) console.error(red(`✗ 补记表：${e}`))
+    return 1
+  }
+  const BACKFILL_SHAS = backfillShas(backfill.entries, 'CC-001')
+
   const range = resolveRange()
   if (!range) {
     // **无 git 事实可判 ≠ 判据成立**。浅克隆、`actions/checkout` 没拉 base、
@@ -429,9 +439,17 @@ function main() {
   const bad = []
   let coreTouching = 0
   let skipped = 0
+  let backfilled = 0
   for (const { sha, message, files: rawFiles } of commits) {
     if (BASELINE_SHAS.has(sha.slice(0, 8))) {
       skipped += 1
+      continue
+    }
+    // 在补记表内：按表核验通过（表的形状已在范围解析前判过），这条提交不再要求
+    // 提交信息里的 `Core-Change:`——它缺失的署名由表补上。
+    if (BACKFILL_SHAS.has(sha.slice(0, 8))) {
+      skipped += 1
+      backfilled += 1
       continue
     }
     let files = rawFiles
@@ -450,7 +468,8 @@ function main() {
   if (bad.length === 0) {
     console.log(
       green(
-        `✓ arch-change-audit：${commits.length} 个提交（追溯豁免 ${skipped}）里 ${coreTouching} 个触及 core/kernel，全部留了理由`,
+        `✓ arch-change-audit：${commits.length} 个提交（追溯豁免 ${skipped}，其中补记表 ${backfilled}）` +
+          `里 ${coreTouching} 个触及 core/kernel，全部留了理由`,
       ),
     )
     return 0

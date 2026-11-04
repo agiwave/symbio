@@ -1,0 +1,70 @@
+{
+  "rule": "D-333",
+  "authorized_by": "D-333",
+  "note": "历史提交缺 `Core-Change:` 的逐提交补记表（提交不能改写）。每行记一条：它实际改了机制面的什么、对应哪条决策、补记的是哪条判据（CC-001 / EX-007）。判据只认本表：在表内 ⇒ 按本表核验；不在表内且缺署名 ⇒ 红。新增行只能由一条新决策追加——那条决策必须更新 `authorized_by` 并能在现行文档里打开。",
+  "entries": [
+    {
+      "sha": "60cedd50",
+      "rules": ["CC-001"],
+      "change": "环侧旧编排 / 幕机 / 阶段协议整族退役，只留纯机制环；`symbio-kernel` 的声明面与 `symbio-sdk` 的投影随之收口（`projection/{rebuild,transcript,prompt_fidelity,vocab}.rs`、`turn/dispatch.rs`）",
+      "decision": "D-318",
+      "authorized_by": "D-333"
+    },
+    {
+      "sha": "16ad2f4d",
+      "rules": ["CC-001"],
+      "change": "会话侧 run-turn 旧编排退役；删 `symbio-sdk/src/projection/turnstate.rs` 与 `symbio-sdk/src/turn/dispatch.rs`，保留存储 / 转写 / VDFS 能力面",
+      "decision": "D-318",
+      "authorized_by": "D-333"
+    },
+    {
+      "sha": "a85a2358",
+      "rules": ["CC-001", "EX-007"],
+      "change": "宿主离开环 crate；债务契约落 `symbio-sdk::debt`（债表归插件）；撤销 `session` 端口——本地簿记不是世界端口",
+      "decision": "D-324",
+      "authorized_by": "D-333"
+    },
+    {
+      "sha": "12da3b95",
+      "rules": ["CC-001", "EX-007"],
+      "change": "`symbio-sdk::debt` 的债行新增排除条件 `unless`（归属：选债）",
+      "decision": "D-325",
+      "authorized_by": "D-333"
+    },
+    {
+      "sha": "0639e6a5",
+      "rules": ["CC-001", "EX-007"],
+      "change": "宿主提供事实存在谓词，环零业务知识：`when` 的判定口移交宿主读面",
+      "decision": "D-325",
+      "authorized_by": "D-333"
+    },
+    {
+      "sha": "396e3664",
+      "rules": ["CC-001"],
+      "change": "债行新增 `when_no_open` 谓词（归属：选债）",
+      "decision": "D-325",
+      "authorized_by": "D-333"
+    },
+    {
+      "sha": "243ecb61",
+      "rules": ["CC-001"],
+      "change": "宿主读面与 model 债表接入；`unless` 与 `when` 同一条读面；债务契约由 `symbio-sdk::debt` 移出",
+      "decision": "D-325",
+      "authorized_by": "D-333"
+    },
+    {
+      "sha": "34526409",
+      "rules": ["CC-001"],
+      "change": "退役失去对象的判据与零消费声明：删 `symbio-sdk/src/projection/turns.rs` 等（旧 `TurnState` 的投影面随 B2 消失）",
+      "decision": "D-318",
+      "authorized_by": "D-333"
+    },
+    {
+      "sha": "6f78506b",
+      "rules": ["CC-001"],
+      "change": "收束轮交出实测上下文水位，重建折进轮根 `meta.context`（`symbio-sdk/src/projection/rebuild.rs`）",
+      "decision": "D-137",
+      "authorized_by": "D-333"
+    }
+  ]
+}

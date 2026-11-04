@@ -338,7 +338,12 @@ export const BASELINE = {
   // ⑤ 7：P2-5b 之前同路径的历史删除，**未逐条归名**（如实保留为未查明，不并入上述任何一类）。
   // 非侵蚀：本轮另补 13 条判据（loop +12：stage_driver 2 / policy 1 / execution 9；tool +1
   // 协议读数），清白树实跑 `cargo test --workspace`：2617 passed / 0 failed。
-  ciRustTestsTotal: 2634,
+  // baseline-allow ciRustTestsTotal: 2634 → 2171（D-332）——B2 编排退场（D-318）删掉旧编排的
+  // 整族用例：`60cedd50`（环侧 engine / 幕机 / 阶段协议退役）与 `16ad2f4d`（会话侧 run-turn 与
+  // `TurnState` 接线退役）是主要来源，`34526409` 再退役一批「被测对象已不存在」的判据（`turns.rs`
+  // 等）。清白树实跑 `cargo test --workspace`：2171 passed / 0 failed。不是覆盖丢失：被删的是
+  // 旧编排的判据，新义务环接入时用例数**只会回升**（B 类能力每接回一组就补回对应判据）。
+  ciRustTestsTotal: 2171,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -358,7 +363,10 @@ export const BASELINE = {
   // baseline-allow e2eCases: 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。
   // 增 t76（召回可见域）。
   // 增 t99（工具端口三路径：装行执行 / 不装行让位 / 缺行响亮失败并落事实）。
-  e2eCases: 96,
+  // baseline-allow e2eCases: 96 → 91（D-332）——`60cedd50`（B2 环侧编排退场，D-318）删 5 条
+  // 引擎绑定的 e2e 用例（这些用例的接线点随旧 engine 一起消失，留着只会测不到东西）。后续随
+  // 新义务环接入**只会回升**：B 类能力每接回一组，对应的 e2e 用例重新落地。
+  e2eCases: 91,
   // 换述读数（D-097）：`recall_eval.rs` 的第四个数字带着一组新断言——指纹锁、
   // 每条换述必须真的换了措辞、依赖度定义域、54 条换述逐条验「承重」（换成无关问句
   // 读数必须精确上抬 1/(n·m)）、以及时间兜底案上读数不动。224 → 235，全是**新增判据**，

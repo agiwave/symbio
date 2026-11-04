@@ -631,6 +631,12 @@ export const TEST_ONLY = [
   // 只是基准取错（拼错的 `--base` 静默退化）。前者让整轮门禁 40 秒绿着跑完，后者
   // 只是白跑——不对称，所以 `resolveScope` 在**任何不确定**下都返回 `kind: 'all'`。
   'gate.d/_scope',
+  // `core-change-backfill`（D-333）是历史缺签名补记表的**唯一读取与形状校验实现**，
+  // 被 `arch-change-audit`（CC-001）与 `capability-migration-audit`（EX-007）共读。
+  // 这里跑的是它的回归测试：表的形状判据若写宽，一条没写「改了什么」或决策号打不开的
+  // 补记也能过——那正是「无署名 allow」的形状。六条注入覆盖齐全 / 缺 change / 坏决策号 /
+  // 表外判据名 / 授权不一致 / 提交号重复。
+  'core-change-backfill',
 ]
 /**
  * 被 `import` 或被 `spawn` 调用、但**没有自己的门禁步骤**的 `.mjs`。
@@ -782,6 +788,15 @@ export const LIBS = [
   // 登记成 LIBS 而不是 GUARDS：它**不是一个独立的门禁步骤**，而是 e2e 阶段的
   // 判据在门外的可执行形态——跑两遍就是同一件事。GW-004 要的只是「它有落点」。
   'e2e-concurrency',
+  // `session-dead-code-audit`（SD-001 / D-331）是 B 类死码台账的判据本体。它的输入是
+  // `cargo check --workspace --all-targets` 的诊断，**执行方是 `gate.d/10-backend.mjs`**
+  // （与 clippy 同泳道、同一份 `.cargo-lock` 串行）。登记在 LIBS 是为了给「脚本在、
+  // 有人跑」一个落点：它不是 30-docs 的守卫步骤，也不是没人管的孤儿；本阶段不重复跑
+  // 它（跑一遍 cargo 就是整条 workspace 的编译）。
+  'session-dead-code-audit',
+  // `core-change-backfill` 同上：判据在两个消费方（CC-001 / EX-007）里，本体不判定
+  // 任何东西。回归测试在 TEST_ONLY。
+  'core-change-backfill',
 ]
 /** 不进门禁的辅助脚本：登记它们是为了让 GW-004 的「谁引用它」这条判据有落点。 */
 export const OUT_OF_GATE = [

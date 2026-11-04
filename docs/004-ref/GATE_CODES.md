@@ -56,6 +56,7 @@ lists: [gate-codes=owner]
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–033 | `RG-034` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–010、S-012–017 | `S-018` |
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
+| **SD** | 会话死码台账（B 类能力待接入） | `scripts/session-dead-code-audit.mjs` | SD-001 | `SD-002` |
 | **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
@@ -277,6 +278,7 @@ lists: [gate-codes=owner]
 | **SC-004** | `scripts/plugin-special-case-audit.mjs` |
 | **SC-005** | `scripts/plugin-special-case-audit.mjs` |
 | **SC-006** | `scripts/plugin-special-case-audit.mjs` |
+| **SD-001** | `scripts/session-dead-code-audit.mjs` |
 | **SPC-001** | `scripts/spec-coverage-audit.mjs` |
 | **SPC-002** | `scripts/spec-coverage-audit.mjs` |
 | **SPC-003** | `scripts/spec-coverage-audit.mjs` |

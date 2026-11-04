@@ -84,6 +84,7 @@ import { green, red, yellow, dim } from './color.mjs'
 import { blankComments } from './rust-scan.mjs'
 import { toolFacts } from './facts/_capability.mjs'
 import { pluginIds } from './facts/_plugin-yml.mjs'
+import { backfillShas, loadBackfill } from './core-change-backfill.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
@@ -605,6 +606,15 @@ function main() {
     console.error(red('✗ capability-migration-audit：docs/003-design/ 里一个 `### D-NNN` 都读不到——补件的资格线没有输入'))
     return 1
   }
+
+  // 逐提交补记表（D-333）：与 `arch-change-audit` 共用同一张表与同一套形状判据。
+  // 表只补历史提交的署名，不退役 EX-007：表外的提交缺决策号照样红。
+  const backfill = loadBackfill(repoRoot)
+  if (backfill.errors.length) {
+    for (const e of backfill.errors) console.error(red(`✗ 补记表：${e}`))
+    return 1
+  }
+  const BACKFILLED_EX = backfillShas(backfill.entries, 'EX-007')
   const ids = pluginIds(repoRoot)
   const tools = [...toolFacts(repoRoot).keys()]
 
@@ -702,6 +712,7 @@ function main() {
     if (r.kind === 'migration') migrations += 1
     if (r.kind === 'supplement') supplements += 1
     if (r.errors.length && GRANDFATHERED.has(r.sha.slice(0, 8))) continue
+    if (r.errors.length && BACKFILLED_EX.has(r.sha.slice(0, 8))) continue
     if (r.errors.length) bad.push(r)
   }
   if (bad.length) {
