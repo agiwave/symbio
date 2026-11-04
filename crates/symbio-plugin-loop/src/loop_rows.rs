@@ -71,7 +71,22 @@ use symbio_plugin_api::events::{
 };
 use symbio_plugin_api::port::ports;
 
-use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
+use crate::control_decl::{
+    EVENT_AUTHZ_GRANTED, EVENT_LOOP_STEP, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE,
+};
+
+// ── 步 id（行表数据，不是事实层的闭集）────────────────────────────────────
+//
+// 这些是「哪一步」的名字，环只把它们当不透明键比对（`until` 的 `eq id`），
+// 不解析、不按它们分支。终极形态由 C 批注册表引入；现在它们是本表的行数据。
+pub(crate) const STEP_DECIDE: &str = "decide";
+pub(crate) const STEP_COMPRESS: &str = "compress";
+pub(crate) const STEP_RECALL: &str = "recall";
+pub(crate) const STEP_REFLEX: &str = "reflex";
+pub(crate) const STEP_REPORT: &str = "report";
+pub(crate) const STEP_RESUME: &str = "resume";
+pub(crate) const STEP_ROUND: &str = "round";
+pub(crate) const STEP_INPUTS: &str = "inputs";
 // 绑定表只把行名指到动作上：`actions::run_*` 是同一张表的短名，避免每条都写全路径。
 use super::turn_exec as actions;
 
@@ -154,7 +169,7 @@ const CLASSIFY: &str = "classify";
 ///
 /// 它是「轮首那几行跑完、任何请求之前」的那一次装配：压缩入格、水位与根骨架、
 /// 请求视图、定档、首响、基线 prompt。这些都不是一次模型往返，也不该由幕首的直线
-/// 代码按行序表达——它们是一行债，出口是 `turn.stage{stage:"inputs"}` 那一格。
+/// 代码按行序表达——它们是一行债，出口是 `loop.step{id:"inputs"}` 那一格。
 const SEAM: &str = "seam";
 /// 续幕执行体（`D-222` 裁决 2）：`continue-turn` 行选中的动作。
 ///
@@ -338,7 +353,7 @@ const ACTOR_CLOSE: ActorDecl = ActorDecl {
 
 /// 轮首准备执行体的声明（D-159）。
 ///
-/// 名单只有 `turn.stage` 一格：召回这一步的**出口**就是那一格（`stage:"recall"`
+/// 名单只有 `loop.step` 一格：召回这一步的**出口**就是那一格（`id:"recall"`
 /// 带 `result`），装载期第 6 条判的正是「执行体走不走得到自己那一行的收口」。
 /// 它的三份产物（记忆视图 / 调度段 / 技能命中）寄存在本轮状态里交编排层取——
 /// 执行体不交回产出（D-123 决策 5 在轮首照用，D-159 裁决 4）。
@@ -347,12 +362,12 @@ const ACTOR_RECALL: ActorDecl = ActorDecl {
     // 事实投影的纯读 + 一次技能路由判定，不调模型：与行同档（更慢就装载红）。
     mode: LatencyTier::Reflex,
     reads: &[],
-    writes: &[EVENT_TURN_STAGE],
+    writes: &[EVENT_LOOP_STEP],
 };
 
 /// 轮首压缩执行体的声明（D-159）。
 ///
-/// 名单两格。`turn.stage` 是它的出口；摘要那一次模型往返的三格（`request` /
+/// 名单两格。`loop.step` 是它的出口；摘要那一次模型往返的三格（`request` /
 /// `sent` / `failed`，`port=model`）由**端口记账层**落，属协议格，不在执行体的名单里
 /// （D-122 决策 2；运行期对账按 `PROTOCOL_CELLS` 豁免同一件事）。
 ///
@@ -364,12 +379,12 @@ const ACTOR_COMPRESS: ActorDecl = ActorDecl {
     // 语义压缩调模型：与行同档（深度）。
     mode: LatencyTier::Deep,
     reads: &[],
-    writes: &[EVENT_TURN_STAGE, EVENT_MESSAGE_ADDED],
+    writes: &[EVENT_LOOP_STEP, EVENT_MESSAGE_ADDED],
 };
 
 /// 轮首判决执行体的声明（D-159 / D-162）。
 ///
-/// 名单同样只有 `turn.stage`：判决那一步的**出口**就是 `stage:"decide"` 那一格
+/// 名单同样只有 `loop.step`：判决那一步的**出口**就是 `id:"decide"` 那一格
 /// （带 `result`，它是 `turn_head` 折出 `answered` 的唯一来源）。措辞那次内部往返
 /// 的三格（`request` / `sent` / `response`，`via=compose/wording`）由端口记账层落，
 /// 属协议格，不在执行体名单里（同 [`ACTOR_COMPRESS`]）。
@@ -378,13 +393,13 @@ const ACTOR_CLASSIFY: ActorDecl = ActorDecl {
     // 判决可能落到模型，但不生成：快速档（与行的 `tier` 同值，更慢就装载红）。
     mode: LatencyTier::Fast,
     reads: &[],
-    writes: &[EVENT_TURN_STAGE],
+    writes: &[EVENT_LOOP_STEP],
 };
 
 /// 汇报执行体的声明。
 ///
 /// 两格：`chat.assistant.reported` 是这一行的**出口**（`reported_anchors` 视图按它逐段
-/// 关账），`turn.stage` 是它自己落的**尝试格**（`stage:"report"`，`report_due` 的开账
+/// 关账），`loop.step` 是它自己落的**尝试格**（`id:"report"`，`report_due` 的开账
 /// 前件之一——「这一段静默试过没有」）。尝试格刻意不作出口：作出口就等于让本行的执行
 /// 体同时是本行的关门方，依赖图成环。
 ///
@@ -394,12 +409,12 @@ const ACTOR_REPORT: ActorDecl = ActorDecl {
     // 模板产线，零模型往返：与行同档（反射档，更慢就装载红）。
     mode: LatencyTier::Reflex,
     reads: &[],
-    writes: &[EVENT_CHAT_ASSISTANT_REPORTED, EVENT_TURN_STAGE],
+    writes: &[EVENT_CHAT_ASSISTANT_REPORTED, EVENT_LOOP_STEP],
 };
 
 /// 接缝执行体的声明（`D-223` 订正 1）。
 ///
-/// 名单是这一次装配落下的**全部**格子：`turn.stage`（出口那一格 `stage:"inputs"`，它
+/// 名单是这一次装配落下的**全部**格子：`loop.step`（出口那一格 `id:"inputs"`，它
 /// 同时翻转 `turn_head.prepared`）、`session.consolidated`（压缩入格）、
 /// `turn.dispatch`（定档）、`chat.assistant.opening`（首响）、`turn.branch`（重试新支
 /// 的登记）。它们不是四件事而是**一件事的四个落点**——「轮首那几行跑完之后、请求之前
@@ -410,7 +425,7 @@ const ACTOR_SEAM: ActorDecl = ActorDecl {
     mode: LatencyTier::Fast,
     reads: &[],
     writes: &[
-        EVENT_TURN_STAGE,
+        EVENT_LOOP_STEP,
         EVENT_SESSION_CONSOLIDATED,
         EVENT_TURN_DISPATCH,
         EVENT_CHAT_ASSISTANT_OPENING,
@@ -420,7 +435,7 @@ const ACTOR_SEAM: ActorDecl = ActorDecl {
 
 /// 续幕执行体的声明（`D-222` 裁决 2）。
 ///
-/// 两格都是**开一幕**那一套的写点：`turn.stage` 是新幕的 `round` 格（它是 `until`，
+/// 两格都是**开一幕**那一套的写点：`loop.step` 是新幕的 `round` 格（它是 `until`，
 /// 同时是新幕的锚），`session.config` 是当轮生效配置的重落（与新幕开幕逐字同形）。
 /// 它不写任何领域格——续幕要做的事在动作里（`chat_loop::open_turn::continue_stage`）。
 const ACTOR_CONTINUE: ActorDecl = ActorDecl {
@@ -428,7 +443,7 @@ const ACTOR_CONTINUE: ActorDecl = ActorDecl {
     // 只落两格，不调模型：快速档。
     mode: LatencyTier::Fast,
     reads: &[],
-    writes: &[EVENT_TURN_STAGE, EVENT_SESSION_CONFIG],
+    writes: &[EVENT_LOOP_STEP, EVENT_SESSION_CONFIG],
 };
 
 /// 通用行执行体（DE-025 D-241）：能力包交 `Decl` + `ActorDecl` + `RowHandler`，
@@ -745,13 +760,13 @@ impl Next {
     /// 账本上的这一格收不收得拢：每一格都要**在这张表里对得上一个名字**——协议五格
     /// （引擎写）与 `decl.writes`（执行体声明）。
     ///
-    /// 另有两条按行开的口子：`plugin_row` 的作答行由宿主代落 `turn.stage`
-    /// （[`RowStep::Answer`](symbio_plugin_api::rows::RowStep::Answer)，D-260），
+    /// 另有两条按行开的口子：`plugin_row` 的作答行由宿主代落 `loop.step{id:"reflex"}`
+    /// （[`RowStep::Answer`](symbio_plugin_api::rows::RowStep::Answer)，D-260 / D-322），
     /// 那一格不是能力交的草稿，因此只对**声明会作答**的行豁免。对不上就是越界，
     /// 派发器不静默。
     pub(crate) fn writes_closed(&self, kind: &str) -> bool {
         PROTOCOL_CELLS.contains(&kind)
-            || (self.answers && kind == EVENT_TURN_STAGE)
+            || (self.answers && kind == EVENT_LOOP_STEP)
             || self.writes.contains(&kind)
     }
 }
@@ -846,18 +861,17 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["scope", "round"],
+            key: &["scope", "anchor"],
             eq: &[
-                ("round", Lit::Uint(0)),
                 ("has_utterance", Lit::Bool(true)),
                 ("classify_enabled", Lit::Bool(true)),
                 ("classify_done", Lit::Bool(false)),
             ],
         },
         until: &[Pattern {
-            source: "turn_stages",
-            key: &["scope", "round"],
-            eq: &[("stage", Lit::Str("decide"))],
+            source: EVENT_LOOP_STEP,
+            key: &["scope", "anchor"],
+            eq: &[("id", Lit::Str(STEP_DECIDE))],
         }],
         unless: &[],
     },
@@ -873,7 +887,7 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["scope", "round"],
+            key: &["scope", "anchor"],
             eq: &[
                 ("auto_compress", Lit::Bool(true)),
                 ("compress_done", Lit::Bool(false)),
@@ -884,9 +898,9 @@ pub(crate) static ROWS: &[Decl] = &[
             ],
         },
         until: &[Pattern {
-            source: "turn_stages",
-            key: &["scope", "round"],
-            eq: &[("stage", Lit::Str("compress"))],
+            source: EVENT_LOOP_STEP,
+            key: &["scope", "anchor"],
+            eq: &[("id", Lit::Str(STEP_COMPRESS))],
         }],
         unless: &[],
     },
@@ -902,7 +916,7 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["scope", "round"],
+            key: &["scope", "anchor"],
             eq: &[
                 ("round", Lit::Uint(0)),
                 ("is_persistent", Lit::Bool(true)),
@@ -912,9 +926,9 @@ pub(crate) static ROWS: &[Decl] = &[
             ],
         },
         until: &[Pattern {
-            source: "turn_stages",
-            key: &["scope", "round"],
-            eq: &[("stage", Lit::Str("recall"))],
+            source: EVENT_LOOP_STEP,
+            key: &["scope", "anchor"],
+            eq: &[("id", Lit::Str(STEP_RECALL))],
         }],
         unless: &[],
     },
@@ -923,7 +937,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // 这一行是「一幕的开头」在行表上的形状：压缩入格、水位与根骨架、请求视图、定档、
     // 首响、基线 prompt 都要等轮首那几行寄存的值，因此不能住在幕首的直线代码里；
     // 它们又不是四次模型往返，所以也不必拆成四行。一行 = 一笔债，出口 = 那一格
-    // `turn.stage{stage:"inputs"}`（它同时翻转 `turn_head.prepared`）。
+    // `loop.step{id:"inputs"}`（它同时翻转 `turn_head.prepared`）。
     //
     // `anchor` 52：轮首四行之后（它们的产物是它的前件）、收束与执行之前（还没定档、
     // 没渲染 prompt 的幕不欠一次往返）。轮内各行因此在 `owes` 上都带 `prepared: true`
@@ -938,13 +952,13 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["scope", "round"],
+            key: &["scope", "anchor"],
             eq: &[("prepared", Lit::Bool(false))],
         },
         until: &[Pattern {
-            source: "turn_stages",
-            key: &["scope", "round"],
-            eq: &[("stage", Lit::Str("inputs"))],
+            source: EVENT_LOOP_STEP,
+            key: &["scope", "anchor"],
+            eq: &[("id", Lit::Str(STEP_INPUTS))],
         }],
         unless: &[],
     },
@@ -1035,7 +1049,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // 就欠一次「再开一幕」。`turn_next_round` 已经把两条判据折成一格（收束原因是
     // `exhausted` ∧ `round` 未到上限），本行只把那一格当 `owes`。
     //
-    // 出口是新幕的 `turn.stage{stage:"round", round: N+1}`：那一格既是本行的 `until`
+    // 出口是新幕的 `loop.step{id:"round", round: N+1}`：那一格既是本行的 `until`
     // （按 `(turn, round)` 关账），也是**新幕的锚**（判据 12：一幕一个锚）——债还清的
     // 那一刻即新幕的时刻，`now` 因此跟着它走，不必请墙钟。
     //
@@ -1052,13 +1066,13 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "turn_next_round",
-            key: &["scope", "round"],
+            key: &["scope", "anchor"],
             eq: &[],
         },
         until: &[Pattern {
-            source: "turn_stages",
-            key: &["scope", "round"],
-            eq: &[("stage", Lit::Str("round"))],
+            source: EVENT_LOOP_STEP,
+            key: &["scope", "anchor"],
+            eq: &[("id", Lit::Str(STEP_ROUND))],
         }],
         unless: &[],
     },
@@ -1668,7 +1682,7 @@ pub(crate) use super::control_decl::{has_next_round, MAX_STAGE_ROUNDS};
 /// 在事实面上有一个答案，`continue-turn` 那一行立起来时直接把它当 `owes`。
 ///
 /// 轮次从事实里读，不从内存里数：`round` 是本幕开账时落下的
-/// `turn.stage{stage:"round"}` 那一格的值，`round + 1` 就是下一幕的轮次，
+/// `loop.step{id:"round"}` 那一格的值，`round + 1` 就是下一幕的轮次，
 /// 上界比对的是同一个数（`TurnState::continuation_count` 因此退场）。
 pub(crate) fn next_stage_round(events: &[Event], turn: u64, now: i64) -> Option<u64> {
     let frozen = frozen()?;
@@ -1776,8 +1790,8 @@ pub(crate) struct Next {
     /// 让派发器再查一次表，是因为「跑哪个动作」与「它写了什么」必须同源——
     /// 分两次查就能查出两份答案（D-123 决策 2）。
     pub(crate) writes: &'static [&'static str],
-    /// 这一行会不会零往返作答（D-260）：会作答的行由宿主代落 `turn.stage`，
-    /// 账本对**它**额外豁免那一格。
+    /// 这一行会不会零往返作答（D-260 / D-322）：会作答的行由宿主代落
+    /// `loop.step{id:"reflex"}`，账本对**它**额外豁免那一格。
     pub(crate) answers: bool,
 }
 

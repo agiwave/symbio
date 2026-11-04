@@ -1,7 +1,7 @@
 //! `policy.classify` 缺模型端口的失败通道（D-298）。
 //!
 //! 判决往返需要一个模型提供者：`port.model` 缺席时**不许静默滑进工具循环**。
-//! 本文件钉两条事实：失败格 `turn.stage{stage:"classify",result:"failed"}` 入格，
+//! 本文件钉两条事实：失败格 `loop.step{id:"decide",result:"failed"}` 入格，
 //! 以及本轮以错误交回（编排层据此中止本轮）；同时 `abort_round_trip` 落的
 //! `request` / `failed` 两格在日志上说得清「这次往返想要、没打成」。
 
@@ -21,7 +21,7 @@ use super::super::super::test_support::{
 };
 use super::classify;
 use crate::chat_loop::state::{ChatOrchestrator, SessionContext, TurnState as DraftState};
-use crate::control_decl::EVENT_TURN_STAGE;
+use crate::control_decl::EVENT_LOOP_STEP;
 
 /// 判决插件替身：不判规则，一律要一次模型往返（`NeedsModel`）。
 ///
@@ -144,7 +144,7 @@ async fn a_missing_model_port_lands_a_failed_stage_and_stops_the_turn() {
     let all = raw.range(Seq::new(0));
     let stage = all
         .iter()
-        .find(|e| e.kind == EVENT_TURN_STAGE && e.payload["stage"] == "decide")
+        .find(|e| e.kind == EVENT_LOOP_STEP && e.payload["id"] == "decide")
         .expect("判决阶段格必须入格");
     assert_eq!(
         stage.payload["result"], "failed",

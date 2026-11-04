@@ -73,7 +73,7 @@ pub(crate) async fn settle_reasoning(
 /// 「已自动续写 N 次仍超出」只在**不再续写**时说出来。续不续的判据是幕间那一份
 /// （[`super::super::loop_rows::next_stage_round`]）：`closure == exhausted` ∧ 本幕
 /// 轮次未到 [`super::super::loop_rows::MAX_STAGE_ROUNDS`]。本函数手里的
-/// `turn.round()` 就是本幕开账时落下的 `turn.stage{stage:"round"}` 值
+/// `turn.round()` 就是本幕开账时落下的 `loop.step{id:"round"}` 值
 /// （`open-turn` 落的，`turn_head.round` 读的也是它）——两个读法同一个数，
 /// 上界那一条因此共用 [`super::super::loop_rows::has_next_round`]。
 ///

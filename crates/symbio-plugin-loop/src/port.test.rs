@@ -756,7 +756,7 @@ fn reap_only_sees_the_facts_it_is_handed() {
     let store = boot();
     // 第一笔 = 窗口外的陈旧派发；后面两笔是把它挤出窗口的「新事实」。
     stranded(&store, "turn-9-r0", 1, 1_000, 1, false);
-    for (i, kind) in ["turn.stage", "turn.stage"].iter().enumerate() {
+    for (i, kind) in ["loop.step", "loop.step"].iter().enumerate() {
         store
             .append(
                 Event::pending(
@@ -779,7 +779,7 @@ fn reap_only_sees_the_facts_it_is_handed() {
     assert!(out.is_empty(), "窗口外的陈旧 `sent` 不该被收：{out:?}");
     assert_eq!(
         kinds(&store),
-        vec!["sent", "turn.stage", "turn.stage"],
+        vec!["sent", "loop.step", "loop.step"],
         "收租不动账：没有 `failed` 也没有 `retry`"
     );
 

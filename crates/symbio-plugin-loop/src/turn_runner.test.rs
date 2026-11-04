@@ -232,6 +232,7 @@ impl RunnerFixture {
             input.user_seq,
             &input.actor.principal,
             &[super::super::stage_events::StageFact::inputs(
+                crate::loop_rows::STEP_INPUTS,
                 0,
                 input.drive_seq,
                 "ready",
@@ -307,7 +308,7 @@ impl RunnerFixture {
 
 mod turn_runner_tests {
     use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput};
-    use crate::control_decl::{guard_vocab, EVENT_TURN_STAGE};
+    use crate::control_decl::{guard_vocab, EVENT_LOOP_STEP};
     use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
     use symbio_kernel::event::{Event, Seq};
     use symbio_kernel::store::{AppendError, EventStore, Store};
@@ -1100,7 +1101,7 @@ mod turn_runner_tests {
             vec![
                 "user.message",
                 // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
-                "turn.stage",
+                "loop.step",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -1110,7 +1111,7 @@ mod turn_runner_tests {
             "用户格 + 派发格 + 模型端口三格 + 收束格：{snapshot:?}"
         );
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
-        assert_eq!(snapshot[1].kind, EVENT_TURN_STAGE, "接缝的出口格");
+        assert_eq!(snapshot[1].kind, EVENT_LOOP_STEP, "接缝的出口格");
         assert_eq!(
             snapshot[2].kind,
             symbio_plugin_api::events::EVENT_TURN_DISPATCH,
@@ -1186,7 +1187,7 @@ mod turn_runner_tests {
             vec![
                 "user.message",
                 // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
-                "turn.stage",
+                "loop.step",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -1458,7 +1459,7 @@ mod tool_round_tests {
         CallOutcome, ToolBegin, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
     };
     use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput};
-    use crate::control_decl::EVENT_TURN_STAGE;
+    use crate::control_decl::EVENT_LOOP_STEP;
     use symbio_kernel::capability::CapabilityMeta;
     use symbio_kernel::event::{Entity, Event, Seq, Verb};
     use symbio_kernel::llm::PromptMessage;
@@ -2385,7 +2386,7 @@ mod tool_round_tests {
             super::kinds(&ev),
             vec![
                 "user.message",
-                "turn.stage",
+                "loop.step",
                 "turn.dispatch",
                 "chat.assistant.final"
             ],
@@ -2815,7 +2816,7 @@ mod tool_round_tests {
             vec![
                 "user.message",
                 // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
-                "turn.stage",
+                "loop.step",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -2839,7 +2840,7 @@ mod tool_round_tests {
             check_all(guard_vocab(), &snapshot)
         );
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
-        assert_eq!(snapshot[1].kind, EVENT_TURN_STAGE, "接缝的出口格");
+        assert_eq!(snapshot[1].kind, EVENT_LOOP_STEP, "接缝的出口格");
         assert_eq!(
             snapshot[2].kind,
             symbio_plugin_api::events::EVENT_TURN_DISPATCH,
@@ -2917,7 +2918,7 @@ mod tool_round_tests {
             vec![
                 "user.message",
                 // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
-                "turn.stage",
+                "loop.step",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -3005,7 +3006,7 @@ mod tool_round_tests {
             vec![
                 "user.message",
                 // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
-                "turn.stage",
+                "loop.step",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -3021,7 +3022,7 @@ mod tool_round_tests {
             ],
             "用户格 + 派发格 + 模型端口三格 + 工具批协议格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
         );
-        assert_eq!(snapshot[1].kind, EVENT_TURN_STAGE, "接缝的出口格");
+        assert_eq!(snapshot[1].kind, EVENT_LOOP_STEP, "接缝的出口格");
         assert_eq!(
             snapshot[2].kind,
             symbio_plugin_api::events::EVENT_TURN_DISPATCH
@@ -3108,7 +3109,7 @@ mod tool_round_tests {
             vec![
                 "user.message",
                 // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
-                "turn.stage",
+                "loop.step",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -3674,7 +3675,7 @@ mod tool_round_tests {
             vec![
                 EVENT_USER_MESSAGE,
                 // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
-                EVENT_TURN_STAGE,
+                EVENT_LOOP_STEP,
                 symbio_plugin_api::events::EVENT_TURN_DISPATCH,
                 // 三次模型往返 = 三组协议事实（request / sent / response）；
                 // 两个工具批各带创建 / 授权 / 派发三笔债的协议格。
@@ -4564,7 +4565,7 @@ mod reflex_turn_tests {
     use symbio_sdk::adapters::{DeltaSink, TokenIssuer};
     use symbio_sdk::invariants::{check_all, unresolved_turns};
 
-    use crate::control_decl::EVENT_TURN_STAGE;
+    use crate::control_decl::EVENT_LOOP_STEP;
 
     /// 收集口：按序记增量（快路产物上线的判据）。
     struct CollectingDeltas(Mutex<Vec<String>>);
@@ -4596,7 +4597,12 @@ mod reflex_turn_tests {
             0,
             user_seq,
             "session/main",
-            &[StageFact::reflex(0, user_seq, "weekly-report")],
+            &[StageFact::reflex(
+                crate::loop_rows::STEP_REFLEX,
+                0,
+                user_seq,
+                "weekly-report",
+            )],
         )
         .expect("阶段格必须落得下");
 
@@ -4650,8 +4656,8 @@ mod reflex_turn_tests {
             vec![
                 EVENT_USER_MESSAGE,
                 // 快路自己的阶段格 + 接缝的出口格。
-                EVENT_TURN_STAGE,
-                EVENT_TURN_STAGE,
+                EVENT_LOOP_STEP,
+                EVENT_LOOP_STEP,
                 EVENT_TURN_DISPATCH,
                 EVENT_CHAT_ASSISTANT_FINAL
             ],

@@ -864,7 +864,7 @@ fn the_history_window_keeps_only_the_newest_facts() {
         store
             .append(Event::pending(
                 format!("f-{i}"),
-                "turn.stage",
+                "loop.step",
                 Entity::Scope,
                 Verb::Asserted,
                 0,
@@ -912,7 +912,7 @@ fn memories_older_than_the_window_wait_for_a_later_round() {
         store
             .append(Event::pending(
                 format!("pad-{i}"),
-                "turn.stage",
+                "loop.step",
                 Entity::Scope,
                 Verb::Asserted,
                 0,

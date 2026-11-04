@@ -61,6 +61,48 @@ fn ev_at(turn: u64, kind: &str, payload: Value, ts: i64) -> Event {
     ev(turn, kind, payload).with_ts(ts)
 }
 
+/// 手写一格 `loop.step`；幕锚由 [`opened`] 在整幕建好之后补。
+fn step(turn: u64, id: &str, round: u64) -> Event {
+    ev(
+        turn,
+        "loop.step",
+        json!({ "id": id, "anchor": 0, "round": round }),
+    )
+}
+
+/// 同 [`step`]，另带载荷键（`result` / `reason` / `model_calls` 之类）。
+fn step_with(turn: u64, id: &str, round: u64, extra: Value) -> Event {
+    let mut event = step(turn, id, round);
+    for (k, v) in extra.as_object().into_iter().flatten() {
+        event.payload[k.clone()] = v.clone();
+    }
+    event
+}
+
+/// 把整幕手写的 `loop.step` 载荷 `anchor` 补成**本幕幕锚**。
+///
+/// 幕锚：首幕 = `user.message` 格的 seq；续幕 = `round > 0` 的轮次格 / `resume` 格自身。
+/// 生产由 `stage_events::land` 在落格时写入同一个值，这里给手写夹具补上同一条判据。
+fn opened(events: Vec<Event>) -> Vec<Event> {
+    let mut anchor = 0u64;
+    events
+        .into_iter()
+        .map(|mut e| {
+            if e.kind == "user.message" {
+                anchor = e.seq.map(|s| s.value()).unwrap_or(0);
+            } else if e.kind == "loop.step" {
+                let id = e.payload.get("id").and_then(Value::as_str).unwrap_or("");
+                let round = e.payload.get("round").and_then(Value::as_u64).unwrap_or(0);
+                if id == "resume" || (id == "round" && round > 0) {
+                    anchor = e.seq.map(|s| s.value()).unwrap_or(0);
+                }
+                e.payload["anchor"] = json!(anchor);
+            }
+            e
+        })
+        .collect()
+}
+
 /// 生产装载路径：六个注册口 + `seal`（声明集、执行体、端口、行一起进表）。
 /// 用例拿到的就是会话开幕时那一张表——不是「先冻结声明、行自己想起来再查」。
 fn frozen() -> Arc<Frozen> {
@@ -216,135 +258,130 @@ fn tool_port_declares_its_own_concurrency() {
 
 #[test]
 fn classify_row_owes_only_at_turn_head() {
-    let open = vec![
+    let open = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": true, "auto_compress": false}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert!(owes("policy.classify", &open, 0));
 
     // 没有发言（用户格 `id: null`）。
-    let silent = vec![
+    let silent = opened(vec![
         ev(1, "user.message", json!({"text": "", "id": null})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": true, "auto_compress": false}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert!(!owes("policy.classify", &silent, 0));
 
     // 开关关掉。
-    let off = vec![
+    let off = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "auto_compress": false}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert!(!owes("policy.classify", &off, 0));
 
     // 不是轮首。
-    let later = vec![
+    let later = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": true, "auto_compress": false}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 1})),
-    ];
+        step(1, "round", 1),
+    ]);
     assert!(!owes("policy.classify", &later, 0));
 
     // 已经判过。
     let mut done = open.clone();
-    done.push(ev(1, "turn.stage", json!({"stage": "decide", "round": 0})));
+    done.push(step(1, "decide", 0));
+    let done = opened(done);
     assert!(!owes("policy.classify", &done, 0));
 }
 
 #[test]
 fn compress_row_owes_while_switch_is_on_and_not_done() {
-    let on = vec![
+    let on = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "auto_compress": true}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert!(owes("policy.compress", &on, 0));
 
-    let off = vec![
+    let off = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "auto_compress": false}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert!(!owes("policy.compress", &off, 0));
 
     let mut done = on.clone();
-    done.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "compress", "round": 0}),
-    ));
+    done.push(step(1, "compress", 0));
+    let done = opened(done);
     assert!(!owes("policy.compress", &done, 0));
 }
 
 #[test]
 fn recall_row_owes_only_at_turn_head_with_a_persistent_store() {
-    let ready = vec![
+    let ready = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "is_persistent": true}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert!(owes("policy.recall", &ready, 0));
 
     // 临时会话：没有事实源。
-    let transient = vec![
+    let transient = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "is_persistent": false}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert!(!owes("policy.recall", &transient, 0));
 
     let mut done = ready.clone();
-    done.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "recall", "round": 0, "result": "miss"}),
-    ));
+    done.push(step_with(1, "recall", 0, json!({"result": "miss"})));
+    let done = opened(done);
     assert!(!owes("policy.recall", &done, 0));
 
     // 不是轮首。
-    let later = vec![
+    let later = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "is_persistent": true}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 1})),
-    ];
+        step(1, "round", 1),
+    ]);
     assert!(!owes("policy.recall", &later, 0));
 }
 
@@ -360,8 +397,16 @@ fn the_recall_list_is_the_latest_recall_stage_after_the_anchor() {
     // 上一条（不属于本幕）：锚之前落的召回阶段，条目不得出现在清单里。
     let before = ev(
         1,
-        "turn.stage",
-        StageFact::recall(0, 0, &[(99, "经验".into(), "旧正文".into())], false, false).payload(),
+        "loop.step",
+        StageFact::recall(
+            super::STEP_RECALL,
+            0,
+            0,
+            &[(99, "经验".into(), "旧正文".into())],
+            false,
+            false,
+        )
+        .payload(0),
     );
     let user = ev(1, "user.message", json!({"text": "hi", "id": "u-1"}));
     let live = [
@@ -370,20 +415,20 @@ fn the_recall_list_is_the_latest_recall_stage_after_the_anchor() {
     ];
     let stage = ev(
         1,
-        "turn.stage",
-        StageFact::recall(0, 0, &live, true, false).payload(),
+        "loop.step",
+        StageFact::recall(super::STEP_RECALL, 0, 0, &live, true, false).payload(0),
     );
     // 更后一格（同一幕重跑召回）覆盖前一格：清单只留最新的那一次。
     let later = [(7u64, "skill".to_string(), "正文三".to_string())];
     let newest = ev(
         1,
-        "turn.stage",
-        StageFact::recall(0, 0, &later, false, false).payload(),
+        "loop.step",
+        StageFact::recall(super::STEP_RECALL, 0, 0, &later, false, false).payload(0),
     );
     let stage_seq = stage.seq.map(|s| s.value()).unwrap_or(0);
     let newest_seq = newest.seq.map(|s| s.value()).unwrap_or(0);
 
-    let events = vec![before.clone(), user.clone(), stage.clone(), newest];
+    let events = opened(vec![before.clone(), user.clone(), stage.clone(), newest]);
     let list = super::view("turn.recalled", &events, 1, 0).expect("视图必须可求值");
     assert_eq!(
         list,
@@ -393,7 +438,7 @@ fn the_recall_list_is_the_latest_recall_stage_after_the_anchor() {
 
     // 对照：没有更后那一格时，清单来自本幕那一格（否则上一条判据在「恒取最新」
     // 与「只取某一条」两种实现下都过）。
-    let events = vec![before, user, stage];
+    let events = opened(vec![before, user, stage]);
     let list = super::view("turn.recalled", &events, 1, 0).expect("视图必须可求值");
     assert_eq!(
         list,
@@ -530,10 +575,11 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
     let mut resumed = exhausted.clone();
     resumed.push(ev_at(
         1,
-        "turn.stage",
-        json!({"stage": "resume", "round": 0, "result": "approve"}),
+        "loop.step",
+        json!({"id": "resume", "anchor": 0, "round": 0, "result": "approve"}),
         3_000,
     ));
+    let mut resumed = opened(resumed);
     resumed.push(ev_at(
         1,
         "session.config",
@@ -575,28 +621,26 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
 /// 五条策略行的「不是装饰」证据：**开账用生产的落格形状，关账用生产的符号**。
 ///
 /// 为什么单独立一条，而不是靠上面那些逐行用例：那些钉的是判据语义（什么条件欠、
-/// 什么条件不欠），事件种类与 `stage` 值全是手写字面量。把 `StageName::Decide` 的
-/// 人读名改掉，它们照样绿——而行表里写死的 `"decide"` 会从「关得上」变成
-/// **「永远关不上」**：`policy.classify` 每轮重跑一遍判决，日志上却一个红字都没有。
+/// 什么条件不欠），事件种类与 `id` 值全是手写字面量。把 `STEP_DECIDE` 的人读名改掉，
+/// 它们照样绿——而行表里写死的 `"decide"` 会从「关得上」变成**「永远关不上」**：
+/// `policy.classify` 每轮重跑一遍判决，日志上却一个红字都没有。
 /// 生产符号与行表的字面量是两份数据，只有本用例把它们逐字对上。
 ///
 /// 分工说清楚：本用例只验「行读的那张视图真能由生产形状开、由生产符号关」；
 /// 派发那一侧的行为（选中哪一行、交出哪个执行体）归各 host 的派发用例，不在这里。
 #[test]
 fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
-    use super::super::stage_events::{StageFact, StageName};
+    use super::super::stage_events::StageFact;
     use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_REPORTED, EVENT_USER_MESSAGE};
 
-    use crate::control_decl::{EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
+    use crate::control_decl::{EVENT_LOOP_STEP, EVENT_SESSION_CONFIG};
 
     // 生产侧的三条来源，逐条对齐：
     //  - 用户格与配置格的**种类**与 id 形状：`chat_loop/drive.rs` 的 `u-{turn}` /
     //    `cfg-{turn}-{drive_seq}`；配置载荷的键集就是 `plain()` 那一份（视图按键取值，
     //    键名漂了 ⇒ 视图取不到 ⇒ 行恒不欠，策略静默停摆）。
-    //  - 阶段格的**载荷**由 `StageFact::payload()` 给出、`stage` 值由 `StageName::name()`
-    //    给出：这里一律不写字面量，行表能不能关账就只取决于生产那两处是不是同一个名字。
-    let user = || ev(1, EVENT_USER_MESSAGE, json!({ "text": "hi", "id": "u-1" }));
-    // 生产那份配置载荷（`plain()` 给全键集 = 关掉的会话），只覆盖用例关心的那一个开关。
+    //  - 阶段格的**载荷**由 `StageFact::payload()` 给出、`id` 值由 `STEP_*` 给出：
+    //    这里一律不写字面量，行表能不能关账就只取决于生产那两处是不是同一个名字。
     let with_flags = |flags: Value| {
         let mut payload = plain();
         for (k, v) in flags.as_object().expect("配置格是对象") {
@@ -604,28 +648,44 @@ fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
         }
         payload
     };
+    // 阶段格的载荷由 `StageFact::payload()` 给出（`stage_events::land` 落的就是这一份），
+    // 幕锚由 [`opened`] 统一补。
+    let stage = |fact: StageFact| ev(1, EVENT_LOOP_STEP, fact.payload(0));
+    let round = || stage(StageFact::request_round(super::STEP_ROUND, 0, "0"));
+    let user = || ev(1, EVENT_USER_MESSAGE, json!({ "text": "hi", "id": "u-1" }));
     let config = |flags: Value| ev(1, EVENT_SESSION_CONFIG, with_flags(flags));
-    // 阶段格的载荷由 `StageFact::payload()` 给出（`stage_events::land_with_seqs` 落的
-    // 就是这一份），`stage` 值由 `StageName::name()` 给出——这里不写字面量。
-    let stage = |fact: StageFact| ev(1, EVENT_TURN_STAGE, fact.payload());
-    let round = || stage(StageFact::request_round(0, "1"));
 
-    // `policy.classify`：轮首 + 开关开 + 有发言 ⇒ 欠；`StageName::Decide` 落格 ⇒ 关。
-    let mut head = vec![user(), config(json!({"classify_enabled": true})), round()];
+    // `policy.classify`：轮首 + 开关开 + 有发言 ⇒ 欠；`STEP_DECIDE` 落格 ⇒ 关。
+    let mut head = opened(vec![
+        user(),
+        config(json!({"classify_enabled": true})),
+        round(),
+    ]);
     assert!(owes("policy.classify", &head, 0));
-    head.push(stage(StageFact::ran(StageName::Decide, 0)));
+    head.push(stage(StageFact::ran(super::STEP_DECIDE, 0)));
+    let head = opened(head);
     assert!(!owes("policy.classify", &head, 0));
 
-    // `policy.compress`：同一张视图（`turn_head`）的另一组键；出口是 `StageName::Compress`。
-    let mut compress = vec![user(), config(json!({"auto_compress": true})), round()];
+    // `policy.compress`：同一张视图（`turn_head`）的另一组键；出口是 `STEP_COMPRESS`。
+    let mut compress = opened(vec![
+        user(),
+        config(json!({"auto_compress": true})),
+        round(),
+    ]);
     assert!(owes("policy.compress", &compress, 0));
-    compress.push(stage(StageFact::compress(0, 1, 1)));
+    compress.push(stage(StageFact::compress(super::STEP_COMPRESS, 0, 1, 1)));
+    let compress = opened(compress);
     assert!(!owes("policy.compress", &compress, 0));
 
-    // `policy.recall`：持久会话才欠；出口是 `StageName::Recall`。
-    let mut recall = vec![user(), config(json!({"is_persistent": true})), round()];
+    // `policy.recall`：持久会话才欠；出口是 `STEP_RECALL`。
+    let mut recall = opened(vec![
+        user(),
+        config(json!({"is_persistent": true})),
+        round(),
+    ]);
     assert!(owes("policy.recall", &recall, 0));
-    recall.push(stage(StageFact::ran(StageName::Recall, 0)));
+    recall.push(stage(StageFact::ran(super::STEP_RECALL, 0)));
+    let recall = opened(recall);
     assert!(!owes("policy.recall", &recall, 0));
 
     // 快路（`policy.reflex`）那一行已随技能能力退出本表（`D-262`）：命中判定、作答
@@ -678,14 +738,15 @@ fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
     ));
     assert!(!owes("policy.report", &spoke, 60_000));
 
-    // 反向自检：把 `stage` 的值换成**任何别的**字符串，行就再也关不上——
+    // 反向自检：把 `id` 的值换成**任何别的**字符串，行就再也关不上——
     // 上面那条断言不是恒真，它确实在读生产那一个名字。
-    let mut drifted = vec![user(), config(json!({"classify_enabled": true})), round()];
-    drifted.push(ev(
-        1,
-        EVENT_TURN_STAGE,
-        json!({ "stage": "classify", "round": 0 }),
-    ));
+    let mut drifted = opened(vec![
+        user(),
+        config(json!({"classify_enabled": true})),
+        round(),
+    ]);
+    drifted.push(step(1, "classify", 0));
+    let drifted = opened(drifted);
     assert!(owes("policy.classify", &drifted, 0));
 }
 
@@ -734,10 +795,10 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
 fn the_next_stage_is_read_from_the_closure_reason() {
     // 幕锚 = 用户格，本幕轮次 = `round`。
     let base = |closure: Option<&str>, round: u64| {
-        let mut events = vec![
+        let mut events = opened(vec![
             ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-            ev(1, "turn.stage", json!({"stage": "round", "round": round})),
-        ];
+            step(1, "round", round),
+        ]);
         if let Some(reason) = closure {
             events.push(ev(
                 1,
@@ -773,48 +834,38 @@ fn the_next_stage_is_read_from_the_closure_reason() {
     // `round` 读的是**本幕**那一格（续写幕复用轮号，首幕的轮次格不能算进来）。
     // 幕序：首幕（轮次 0，截断收束）→ 续写幕（锚是 `resume` 格）→ 它的轮次格 → 收束。
     let mut resumed = base(Some("exhausted"), 0);
-    resumed.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "resume", "round": 1, "result": "retry"}),
-    ));
-    resumed.push(ev(1, "turn.stage", json!({"stage": "round", "round": 1})));
+    resumed.push(step_with(1, "resume", 1, json!({"result": "retry"})));
+    resumed.push(step(1, "round", 1));
     resumed.push(ev(
         1,
         "chat.assistant.final",
         json!({"text": "又答完了", "reason": "exhausted"}),
     ));
+    let resumed = opened(resumed);
     assert_eq!(super::next_stage_round(&resumed, 1, 0), Some(2));
 
     // 续写幕还没落自己的轮次格 ⇒ `round` 折成 0（锚之后的默认值），**不许**读成
     // 首幕那个 0 之后再被首幕的收束格带着走。
     let mut bare = base(Some("exhausted"), 0);
-    bare.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "resume", "round": 1, "result": "retry"}),
-    ));
+    bare.push(step_with(1, "resume", 1, json!({"result": "retry"})));
     bare.push(ev(
         1,
         "chat.assistant.final",
         json!({"text": "又答完了", "reason": "exhausted"}),
     ));
+    let bare = opened(bare);
     assert_eq!(super::next_stage_round(&bare, 1, 0), Some(1));
 }
 
 #[test]
 fn execute_row_closes_on_turn_closed() {
-    let open = vec![
+    let open = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "session.config", plain()),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+        step(1, "round", 0),
         // 接缝已还：本用例只问轮内的执行 / 收束两行。
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "inputs", "round": 0, "result": "ready"}),
-        ),
-    ];
+        step_with(1, "inputs", 0, json!({"result": "ready"})),
+    ]);
     // 问的是**轮内那台 host**（`ACTORS` 子集）：外环的宣布行不在这张表里，
     // 否则它按 57 < 60 抢在前面——那正是两台 host 各有行子集的理由。
     let picked = super::next(&open, 1, 0, super::ACTORS).expect("开着的轮次总是欠一次执行");
@@ -831,11 +882,8 @@ fn execute_row_closes_on_turn_closed() {
     // 快路已作答（D-163）：`announce-model` 的前件排除它 ⇒ 第一笔债就是收束。
     // 零模型往返因此是**表上的**判据，不靠 55 < 60 的优先级巧合。
     let mut reflex = open.clone();
-    reflex.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "reflex", "round": 0, "result": "sk-1"}),
-    ));
+    reflex.push(step_with(1, "reflex", 0, json!({"result": "sk-1"})));
+    let reflex = opened(reflex);
     let picked = super::next(&reflex, 1, 0, super::ACTORS).expect("快路空出的那笔账是收束");
     assert_eq!(picked.row, "close-turn");
     assert_eq!(picked.by, super::CLOSE);
@@ -854,30 +902,22 @@ fn execute_row_closes_on_turn_closed() {
 /// 它就从「疑似漏派发」变成「已知且写明的边界」。
 #[test]
 fn a_drafted_turns_closing_row_is_owed_but_the_driver_never_asks() {
-    let drafted = vec![
+    let drafted = opened(vec![
         ev(
             1,
             "user.message",
             json!({"text": "现在几点了", "id": "u-1"}),
         ),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "decide", "reason": "from_context"}),
-        ),
+        step_with(1, "decide", 0, json!({"reason": "from_context"})),
         // 接缝已还（定稿答话轮也走幕首那几行）：下面问的是轮内那一笔。
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "inputs", "round": 0, "result": "ready"}),
-        ),
+        step_with(1, "inputs", 0, json!({"result": "ready"})),
         ev(
             1,
             "response",
             json!({"port": "model", "id": "model-0-d0-w0", "calls": []}),
         ),
         ev(1, "turn.dispatch", json!({})),
-    ];
+    ]);
     let picked = drive(ROWS, &frozen(), &drafted, 0).expect("表里有可还的债");
     assert_eq!(
         picked.decl.name, "close-turn",
@@ -892,7 +932,7 @@ fn order_is_global_and_registration_order_does_not_matter() {
     //
     // 本用例验的是**裁决序**，不是接线面，所以把这三行都接到同一个动作上：
     // 未接线的行 `by = None` ⇒ `blocked`，会被 `drive` 滤掉（D-118 订正 1）。
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
@@ -903,8 +943,8 @@ fn order_is_global_and_registration_order_does_not_matter() {
                 "auto_compress": false,
             }),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     let f = frozen();
     let rows = wired(&["policy.classify", "policy.recall", "announce-model"]);
     assert_eq!(
@@ -922,16 +962,14 @@ fn order_is_global_and_registration_order_does_not_matter() {
 
     // 判过之后轮到召回（40），再之后才是执行（60）。
     let mut decided = events.clone();
-    decided.push(ev(1, "turn.stage", json!({"stage": "decide", "round": 0})));
+    decided.push(step(1, "decide", 0));
+    let mut decided = opened(decided);
     assert_eq!(
         drive(&rows, &f, &decided, 0).map(|d| d.decl.name),
         Some("policy.recall")
     );
-    decided.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "recall", "round": 0, "result": "miss"}),
-    ));
+    decided.push(step_with(1, "recall", 0, json!({"result": "miss"})));
+    let decided = opened(decided);
     assert_eq!(
         drive(&rows, &f, &decided, 0).map(|d| d.decl.name),
         Some("announce-model")
@@ -1541,10 +1579,10 @@ fn a_model_failure_closes_both_the_dispatch_and_the_wait() {
 /// `exhausted{no_progress}`（`turn_exec` 那一批用例就是这么红的）。
 #[test]
 fn the_execute_row_steps_aside_until_the_round_is_settled() {
-    let mut head = vec![
+    let mut head = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     // 幕开着、没有工具批、没走快路 ⇒ 执行行欠；派发行不欠（没有请求）。
     assert!(owes("announce-model", &head, 0));
     assert!(!owes("dispatch-model", &head, 0));
@@ -1592,10 +1630,10 @@ fn announce_key(events: &[Event]) -> Option<String> {
 /// 因此「同一幕的第二次往返」在账本上是一笔**新债**，而不是上一笔的重开。
 #[test]
 fn the_announce_row_is_keyed_by_the_round_trip() {
-    let mut head = vec![
+    let mut head = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     let anchor = head[0].seq.expect("幕锚必须带 seq").value();
     let first = format!("model-1-d{anchor}-s0");
     assert_eq!(
@@ -2140,15 +2178,11 @@ fn next_is_none_without_events() {
 #[test]
 fn next_picks_announce_model_while_the_turn_is_open() {
     // 开着的幕欠一次执行；`announce-model` 是当前最小可还债（接缝已还，其它策略都关着）。
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "inputs", "round": 0, "result": "ready"}),
-        ),
-    ];
+        step(1, "round", 0),
+        step_with(1, "inputs", 0, json!({"result": "ready"})),
+    ]);
     let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕应欠 announce-model");
     assert_eq!(next.row, "announce-model");
     assert_eq!(next.by, "execute");
@@ -2169,10 +2203,10 @@ fn model_answer(turn: u64, id: &str) -> Event {
 /// 下一个动作必须是入格，而不是再跑一次模型往返。
 #[test]
 fn close_row_owes_only_after_an_answer_without_calls() {
-    let open = vec![
+    let open = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert!(!owes("close-turn", &open, 0), "还没有模型应答 ⇒ 不欠收束");
 
     let with_calls = vec![
@@ -2223,10 +2257,10 @@ fn close_row_owes_only_after_an_answer_without_calls() {
 /// `close` 执行体写，行表得能从日志上判出「该收束了」。
 #[test]
 fn close_row_owes_when_the_model_round_failed_in_this_drive() {
-    let open = vec![
+    let open = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert!(!owes("close-turn", &open, 0), "还没派发模型往返 ⇒ 不欠收束");
 
     let mut failed = open.clone();
@@ -2254,9 +2288,10 @@ fn close_row_owes_when_the_model_round_failed_in_this_drive() {
     ));
     stale.push(ev(
         1,
-        "turn.stage",
-        json!({ "stage": "resume", "round": 0, "result": "approve" }),
+        "loop.step",
+        json!({ "id": "resume", "anchor": 0, "round": 0, "result": "approve" }),
     ));
+    let mut stale = opened(stale);
     stale.push(ev(
         1,
         symbio_kernel::event::EVENT_FAILED,
@@ -2270,16 +2305,12 @@ fn close_row_owes_when_the_model_round_failed_in_this_drive() {
 
 #[test]
 fn next_picks_close_turn_once_answered() {
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "inputs", "round": 0, "result": "ready"}),
-        ),
+        step(1, "round", 0),
+        step_with(1, "inputs", 0, json!({"result": "ready"})),
         model_answer(1, "m-1"),
-    ];
+    ]);
     let next = super::next(&events, 1, 0, super::ACTORS).expect("答完了的幕欠一次收束");
     assert_eq!(next.row, "close-turn");
     assert_eq!(next.by, super::CLOSE);
@@ -2290,16 +2321,12 @@ fn next_picks_close_turn_once_answered() {
 #[test]
 fn next_is_none_once_the_turn_is_closed() {
     // 收束格出现后，`announce-model` 的出口命中；表里没有别的可还债。
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "inputs", "round": 0, "result": "ready"}),
-        ),
+        step(1, "round", 0),
+        step_with(1, "inputs", 0, json!({"result": "ready"})),
         ev(1, "chat.assistant.final", json!({"text": "ok"})),
-    ];
+    ]);
     assert!(super::next(&events, 1, 0, super::ACTORS).is_none());
 }
 
@@ -2307,15 +2334,11 @@ fn next_is_none_once_the_turn_is_closed() {
 /// 派发器因此没有任何按行名分支的余地（D-118 决策 1–2）。
 #[test]
 fn next_hands_back_the_action_itself() {
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "inputs", "round": 0, "result": "ready"}),
-        ),
-    ];
+        step(1, "round", 0),
+        step_with(1, "inputs", 0, json!({"result": "ready"})),
+    ]);
     let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕欠 announce-model");
     assert_eq!(next.row, "announce-model");
     assert_eq!(next.by, super::EXECUTE);
@@ -2329,28 +2352,28 @@ fn next_hands_back_the_action_itself() {
 /// （`D-222` 裁决 5）。
 #[test]
 fn next_selects_the_recall_row_before_the_seam() {
-    let ready = vec![
+    let ready = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "is_persistent": true}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     let next = super::next(&ready, 1, 0, super::ACTORS).expect("本幕欠一次召回准备");
     assert_eq!(next.row, "policy.recall");
     assert_eq!(next.by, super::RECALL);
     let run: super::super::turn_exec::Action = super::super::turn_exec::recall_action;
     assert!(std::ptr::fn_addr_eq(next.action, run));
     // 出口那一格在它自己的名单里：执行体不落它 ⇒ 下一次选债读不到「做过」（下条钉这个）。
-    assert!(next.writes_closed("turn.stage"));
+    assert!(next.writes_closed("loop.step"));
 }
 
 /// 轮首两台债的**序**与**档位**：压缩（anchor 30）先于召回（40），而两者的出口同族不同档。
 ///
-/// 这一条同时钉住 D-160 的运行期那一半：`turn.stage{stage=compress}` 关不了召回行，
-/// `…{stage=recall}` 也关不了压缩行——若出口按事实名配图，两行会互相当对方的关门方
+/// 这一条同时钉住 D-160 的运行期那一半：`loop.step{id=compress}` 关不了召回行，
+/// `…{id=recall}` 也关不了压缩行——若出口按事实名配图，两行会互相当对方的关门方
 /// （装载期那条 `cycle` 就是它的影子），轮首这两笔债谁也还不掉。
 /// 汇报那一行由同一个环选中：接缝已落、一批工具已关账、静默到期 ⇒ 最小债是它。
 ///
@@ -2358,7 +2381,7 @@ fn next_selects_the_recall_row_before_the_seam() {
 /// N 轮」是假话），不在派发点上——派发点今天只有这一个。
 #[test]
 fn next_selects_the_report_row_only_while_the_interval_is_due() {
-    let quiet = vec![
+    let quiet = opened(vec![
         ev_at(
             1,
             "session.config",
@@ -2371,14 +2394,9 @@ fn next_selects_the_report_row_only_while_the_interval_is_due() {
             10,
         ),
         ev_at(1, "user.message", json!({"text": "hi", "id": "u-1"}), 20),
-        ev_at(1, "turn.stage", json!({"stage": "round", "round": 0}), 21),
+        step(1, "round", 0).with_ts(21),
         // 接缝已还：`prepared` 折真，`prepare-turn`（52）不再与汇报（53）竞争。
-        ev_at(
-            1,
-            "turn.stage",
-            json!({"stage": "inputs", "round": 0, "result": "ready"}),
-            22,
-        ),
+        step_with(1, "inputs", 0, json!({"result": "ready"})).with_ts(22),
         ev_at(
             1,
             symbio_kernel::event::EVENT_RESPONSE,
@@ -2431,7 +2449,7 @@ fn next_selects_the_report_row_only_while_the_interval_is_due() {
             json!({"port": "tool", "id": "tool-1-d0-c1", "attempt": 1, "result": "ok"}),
             40,
         ),
-    ];
+    ]);
     let next =
         super::next(&quiet, 1, 60_000, super::ACTORS).expect("静默到期且跑过一批工具 ⇒ 欠一次汇报");
     assert_eq!(next.row, "policy.report");
@@ -2459,15 +2477,15 @@ fn next_selects_the_report_row_only_while_the_interval_is_due() {
 
 #[test]
 fn the_sweep_runs_compress_before_recall() {
-    let ready = vec![
+    let ready = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "auto_compress": true, "is_persistent": true}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     let next = super::next(&ready, 1, 0, super::ACTORS).expect("水位过了就欠一次压缩");
     assert_eq!(
         next.row, "policy.compress",
@@ -2479,22 +2497,16 @@ fn the_sweep_runs_compress_before_recall() {
 
     // 压缩格落地 ⇒ 压缩行关掉，召回行照旧欠：同族不同档互不关账。
     let mut after_compress = ready.clone();
-    after_compress.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "compress", "round": 0}),
-    ));
+    after_compress.push(step(1, "compress", 0));
+    let after_compress = opened(after_compress);
     let next =
         super::next(&after_compress, 1, 0, super::ACTORS).expect("压缩还完，本轮仍欠一次召回");
     assert_eq!(next.row, "policy.recall");
 
     // 反向：只有召回格时压缩行仍开着。
     let mut after_recall = ready.clone();
-    after_recall.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "recall", "round": 0, "result": "miss"}),
-    ));
+    after_recall.push(step_with(1, "recall", 0, json!({"result": "miss"})));
+    let after_recall = opened(after_recall);
     let next =
         super::next(&after_recall, 1, 0, super::ACTORS).expect("召回不落压缩那一档，压缩仍欠");
     assert_eq!(next.row, "policy.compress");
@@ -2510,20 +2522,16 @@ fn an_answered_verdict_opens_neither_compress_nor_recall() {
     // 判决格由闭包**当场造**：`ev` 的 seq 取自全局计数，先造出来的格子会落在用户格
     // 之前，而 `turn_head` 的阶段折叠只认幕锚之后的那一格。
     let head = |result: &str| {
-        vec![
+        opened(vec![
             ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
             ev(
                 1,
                 "session.config",
                 json!({"classify_enabled": true, "auto_compress": true, "is_persistent": true}),
             ),
-            ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-            ev(
-                1,
-                "turn.stage",
-                json!({"stage": "decide", "round": 0, "result": result}),
-            ),
-        ]
+            step(1, "round", 0),
+            step_with(1, "decide", 0, json!({"result": result})),
+        ])
     };
     for row in ["policy.compress", "policy.recall"] {
         assert!(
@@ -2538,15 +2546,15 @@ fn an_answered_verdict_opens_neither_compress_nor_recall() {
     }
 
     // 没有判决格（卸载 `classify`）⇒ 同样开账：`answered` 折不出来的默认值是 `false`。
-    let undecided = vec![
+    let undecided = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "auto_compress": true, "is_persistent": true}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     for row in ["policy.compress", "policy.recall"] {
         assert!(owes(row, &undecided, 0), "`{row}` 在没判过的一轮不开账");
     }
@@ -2559,20 +2567,16 @@ fn an_answered_verdict_opens_neither_compress_nor_recall() {
 /// 于是它天然只在它们都还完时才成为最小债。
 #[test]
 fn the_seam_row_follows_the_head_rows_and_closes_their_debts() {
-    let mut done = vec![
+    let mut done = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "is_persistent": true}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "recall", "round": 0, "result": "miss"}),
-        ),
-    ];
+        step(1, "round", 0),
+        step_with(1, "recall", 0, json!({"result": "miss"})),
+    ]);
     let next = super::next(&done, 1, 0, super::ACTORS).expect("轮首还完就欠一次接缝");
     assert_eq!(next.row, "prepare-turn");
     assert_eq!(next.by, super::SEAM);
@@ -2581,11 +2585,8 @@ fn the_seam_row_follows_the_head_rows_and_closes_their_debts() {
 
     // 接缝的出口格（`stage:"inputs"`）落地 ⇒ 这一行关掉，最小债回到轮内
     // （本幕还没跑过模型往返 ⇒ 欠一次宣布）。
-    done.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "inputs", "round": 0, "result": "ready"}),
-    ));
+    done.push(step_with(1, "inputs", 0, json!({"result": "ready"})));
+    let mut done = opened(done);
     assert_eq!(
         super::next(&done, 1, 0, super::ACTORS).map(|n| n.row),
         Some("announce-model"),
@@ -2614,15 +2615,15 @@ fn the_single_binding_table_binds_every_row() {
     assert_eq!(sorted_bound, expected, "绑定表漏了行：整张表必须进同一个环");
 
     // 生产派发点的读数：同一个求解器、同一张表，最小债按 `(phase, anchor)` 落在轮首那几行。
-    let ready = vec![
+    let ready = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             "session.config",
             json!({"classify_enabled": false, "is_persistent": true}),
         ),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     let next = super::next(&ready, 1, 0, super::ACTORS).expect("本幕欠一次召回准备");
     assert_eq!(next.row, "policy.recall");
 }
@@ -2656,10 +2657,10 @@ fn the_row_table_and_the_binding_table_agree() {
 /// （D-238——那种情形在装载期就成环，装载不上）。
 #[test]
 fn writes_closed_admits_declared_and_protocol_only() {
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕欠 announce-model");
     // 声明过的领域格。
     assert!(next.writes_closed("turn.dispatch"));
@@ -2744,13 +2745,8 @@ fn the_same_log_owes_the_same_rows_whatever_the_clock_says() {
         "空账上的「逐字相同」是恒真断言，这条必须先看住非空"
     );
 
-    let mut grown = events.clone();
-    grown.push(ev_at(
-        1,
-        "turn.stage",
-        json!({ "stage": "round", "round": 0 }),
-        9_000_000,
-    ));
+    let mut grown = opened(events.clone());
+    grown.push(step(1, "round", 0).with_ts(9_000_000));
     assert_eq!(
         super::wake_now_ms(&grown, anchor),
         super::wake_now_ms(&events, anchor),
@@ -2785,12 +2781,23 @@ fn the_overlap_report_on_the_production_table() {
         "chat.assistant.fallback",
         "chat.assistant.final",
         "failed",
+        "loop.step",
         "request",
         "response",
         "retry",
         "sent",
         "session.config",
-        "turn.stage",
+        "user.message",
+    ];
+    // 汇报行只读幕头里不需要 `request` / `sent` / `retry` 的那一份（它不看在途往返，
+    // 只在静默到期时说一次话）。
+    let report: &[&str] = &[
+        "chat.assistant.fallback",
+        "chat.assistant.final",
+        "failed",
+        "loop.step",
+        "response",
+        "session.config",
         "user.message",
     ];
     // `announce-model` 的 `owes` 换成 `next_round_trip` 之后（`D-225`），它读的仍是
@@ -2814,13 +2821,18 @@ fn the_overlap_report_on_the_production_table() {
             ("policy.classify", "policy.compress", head),
             ("policy.classify", "policy.recall", head),
             ("policy.classify", "prepare-turn", head),
+            ("policy.classify", "policy.report", report),
             ("policy.classify", "continue-turn", head),
             ("policy.compress", "policy.recall", head),
             ("policy.compress", "prepare-turn", head),
+            ("policy.compress", "policy.report", report),
             ("policy.compress", "continue-turn", head),
             ("policy.recall", "prepare-turn", head),
+            ("policy.recall", "policy.report", report),
             ("policy.recall", "continue-turn", head),
+            ("prepare-turn", "policy.report", report),
             ("prepare-turn", "continue-turn", head),
+            ("policy.report", "continue-turn", report),
             // 宣布行与 `model` 端口的两行同键：宣布之后请求开着（`model_open`），
             // 派发行欠、宣布行不欠；派出之后等待行欠、宣布行仍不欠。
             ("announce-model", "dispatch-model", request),
@@ -2922,11 +2934,11 @@ fn owed_has_no_input_beyond_its_four_arguments() {
 /// 之后的兜底——「永不前进」不是「起不来」，是起了也不动。
 #[test]
 fn an_empty_row_table_owes_nothing_and_never_panics() {
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "session.config", plain()),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     let f = frozen();
     assert!(
         !owed(ROWS, &f, &events, 0).is_empty(),
@@ -2993,21 +3005,13 @@ fn every_control_plane_declaration_records_its_owner() {
 /// 形状）——所以重启后它**必判死**，这正是截断测试要的「终局格落在后面」。
 fn twenty_seven_cells() -> Vec<Event> {
     let stale = 1_000; // 第一轮那笔 sent 的 ts：远在租约线之前
-    vec![
+    opened(vec![
         // 第一轮：开幕、派发，然后没了（8 格）。
         ev(0, "user.message", json!({"text": "第一轮", "id": "u-0"})),
         ev(0, "session.config", plain()),
-        ev(0, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            0,
-            "turn.stage",
-            json!({"stage": "compress", "round": 0, "model_calls": 0}),
-        ),
-        ev(
-            0,
-            "turn.stage",
-            json!({"stage": "recall", "round": 0, "result": "miss"}),
-        ),
+        step(0, "round", 0),
+        step_with(0, "compress", 0, json!({"model_calls": 0})),
+        step_with(0, "recall", 0, json!({"result": "miss"})),
         ev(
             0,
             "turn.dispatch",
@@ -3029,17 +3033,9 @@ fn twenty_seven_cells() -> Vec<Event> {
             }),
         ),
         ev(1, "session.config", plain()),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "compress", "round": 0, "model_calls": 0}),
-        ),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "recall", "round": 0, "result": "miss"}),
-        ),
+        step(1, "round", 0),
+        step_with(1, "compress", 0, json!({"model_calls": 0})),
+        step_with(1, "recall", 0, json!({"result": "miss"})),
         ev(
             1,
             "turn.dispatch",
@@ -3079,7 +3075,7 @@ fn twenty_seven_cells() -> Vec<Event> {
             symbio_kernel::event::EVENT_RESPONSE,
             json!({ "port": "tool", "id": "tool-1-d10-call-a", "attempt": 1 }),
         ),
-    ]
+    ])
 }
 
 /// 判据 8：事实的任意前缀都合法（拆批 / 崩溃恢复的前提）。
@@ -3158,7 +3154,7 @@ fn every_prefix_of_a_session_log_is_a_legal_ledger() {
 
 /// 造一轮超界的事实：`scan_bound() + excess` 条，都在同一轮。
 ///
-/// 用 `turn.stage` 这类宽声明的事实即可——`turn_slice` 只按 `turn` 过滤，
+/// 用 `loop.step` 这类宽声明的事实即可——`turn_slice` 只按 `turn` 过滤，
 /// 视图求值读的是字段；本组用例判的是**长度**，不判内容。
 fn an_over_bound_turn(turn: u64, excess: usize) -> Vec<Event> {
     let bound = super::scan_bound().expect("生产表必须装载得起来，切点才有值");
@@ -3166,8 +3162,8 @@ fn an_over_bound_turn(turn: u64, excess: usize) -> Vec<Event> {
         .map(|i| {
             ev(
                 turn,
-                super::super::control_decl::EVENT_TURN_STAGE,
-                json!({"stage": "round", "round": i}),
+                super::super::control_decl::EVENT_LOOP_STEP,
+                json!({"id": "round", "anchor": i, "round": i}),
             )
         })
         .collect()
@@ -3248,8 +3244,8 @@ fn a_turn_inside_the_bound_is_handed_over_whole() {
         .map(|i| {
             ev(
                 14,
-                super::super::control_decl::EVENT_TURN_STAGE,
-                json!({"stage": "round", "round": i}),
+                super::super::control_decl::EVENT_LOOP_STEP,
+                json!({"id": "round", "anchor": i, "round": i}),
             )
         })
         .collect();
@@ -3258,11 +3254,11 @@ fn a_turn_inside_the_bound_is_handed_over_whole() {
     assert!(super::turn_slice(&[], 14).is_empty(), "空切片不 panic");
 }
 
-/// 零往返作答（D-260）：宿主代落的 `turn.stage` 只对**声明会作答**的能力行豁免，
-/// 其余行照旧越界判红。
+/// 零往返作答（D-260 / D-322）：宿主代落的 `loop.step{id:"reflex"}` 只对**声明会作答**
+/// 的能力行豁免，其余行照旧越界判红。
 #[test]
 fn only_answering_plugin_rows_may_land_the_host_stage_fact() {
-    use super::super::control_decl::EVENT_TURN_STAGE;
+    use super::super::control_decl::{EVENT_LOOP_STEP, EVENT_TURN_STAGE};
     use super::super::turn_exec::run_plugin_row;
     use symbio_kernel::decl::ring::Key;
 
@@ -3274,8 +3270,10 @@ fn only_answering_plugin_rows_may_land_the_host_stage_fact() {
         writes: &[],
         answers,
     };
-    assert!(row(true).writes_closed(EVENT_TURN_STAGE));
-    assert!(!row(false).writes_closed(EVENT_TURN_STAGE));
+    assert!(row(true).writes_closed(EVENT_LOOP_STEP));
+    assert!(!row(false).writes_closed(EVENT_LOOP_STEP));
+    // 效果面的 `turn.stage` 不在「作答」这条口子里：它归能力行的 `effects` 声明。
+    assert!(!row(true).writes_closed(EVENT_TURN_STAGE));
     // 豁免只有那一格：收束格仍归收束执行体（D-163）。
     assert!(!row(true).writes_closed("chat.assistant.final"));
 }

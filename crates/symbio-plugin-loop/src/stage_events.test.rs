@@ -1,14 +1,14 @@
-//! `turn.stage` 事实的单元用例。
+//! `loop.step` 事实的单元用例。
 //!
 //! 两条主线：
 //!
 //! 1. **格的形状**——事件 id、载荷、落格元数据与重复落格的吸收；
-//! 2. **D-107 判据 2 的事实面**——「这一步做过」按 `(turn, round, stage)` 折叠；
+//! 2. **D-107 判据 2 的事实面**——「这一步做过」按 `(turn, 幕锚, id)` 折叠；
 //!    按幕锚的收窄在 `turn_head` 视图（续写幕复用轮号时不得把首幕的格算进来）。
 //!
 //! 行在这一格上关不关账由 `loop_rows` 的 `until` 负责，用例在那边。
 
-use super::{done, land, source_of, StageFact, StageName, VerdictFact, VerdictSource};
+use super::{done, land, source_of, StageFact, VerdictFact, VerdictSource};
 use symbio_kernel::dialog::{
     Verdict, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,
     REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
@@ -16,7 +16,8 @@ use symbio_kernel::dialog::{
 use symbio_kernel::event::{Entity, Seq, Verb};
 use symbio_kernel::store::{EventStore, Store};
 
-use crate::control_decl::EVENT_TURN_STAGE;
+use crate::control_decl::EVENT_LOOP_STEP;
+use crate::loop_rows::{STEP_COMPRESS, STEP_DECIDE, STEP_INPUTS, STEP_RECALL};
 
 // ── 来源划分：词表每一条都要有归属 ─────────────────────────────────────
 
@@ -49,9 +50,9 @@ fn classify_fact_carries_reason_and_source() {
         reason: REASON_GREETING.into(),
     };
     assert_eq!(
-        StageFact::classify(0, Some(&ruled), 0),
+        StageFact::classify(STEP_DECIDE, 0, Some(&ruled), 0),
         StageFact {
-            stage: StageName::Decide,
+            id: STEP_DECIDE,
             round: 0,
             verdict: Some(VerdictFact {
                 reason: Some(REASON_GREETING.into()),
@@ -74,7 +75,7 @@ fn classify_fact_carries_reason_and_source() {
         reason: REASON_NEEDS_WORK.into(),
     };
     assert_eq!(
-        StageFact::classify(4, Some(&modelled), 1).verdict,
+        StageFact::classify(STEP_DECIDE, 4, Some(&modelled), 1).verdict,
         Some(VerdictFact {
             reason: Some(REASON_NEEDS_WORK.into()),
             source: VerdictSource::Model,
@@ -83,9 +84,9 @@ fn classify_fact_carries_reason_and_source() {
 
     // 分类器没给出判决（未挂载 / 路由失败）⇒ 仍是一次执行，记 `absent`。
     assert_eq!(
-        StageFact::classify(0, None, 0),
+        StageFact::classify(STEP_DECIDE, 0, None, 0),
         StageFact {
-            stage: StageName::Decide,
+            id: STEP_DECIDE,
             round: 0,
             verdict: Some(VerdictFact {
                 reason: None,
@@ -107,14 +108,15 @@ fn classify_fact_carries_reason_and_source() {
 
 #[test]
 fn payload_carries_only_what_the_fact_has() {
-    // 没有判决的阶段：载荷只有阶段 + 轮次，不带 `source` / `reason`。
+    // 没有判决的一步：载荷只有 id + 幕锚 + 轮次，不带 `source` / `reason`。
     assert_eq!(
-        StageFact::ran(StageName::Inputs, 2).payload(),
-        serde_json::json!({ "stage": "inputs", "round": 2 })
+        StageFact::ran(STEP_INPUTS, 2).payload(4),
+        serde_json::json!({ "id": "inputs", "anchor": 4, "round": 2 })
     );
-    // 召回阶段例外：它的载荷还带逐条结果与 `resumed`（`turn.recalled` 的数据面）。
+    // 召回例外：它的载荷还带逐条结果与 `resumed`（`turn.recalled` 的数据面）。
     assert_eq!(
         StageFact::recall(
+            STEP_RECALL,
             2,
             9,
             &[
@@ -124,9 +126,10 @@ fn payload_carries_only_what_the_fact_has() {
             false,
             false,
         )
-        .payload(),
+        .payload(4),
         serde_json::json!({
-            "stage": "recall",
+            "id": "recall",
+            "anchor": 4,
             "round": 2,
             "recalled": [
                 { "seq": 3, "tag": "经验", "content": "正文一" },
@@ -138,6 +141,7 @@ fn payload_carries_only_what_the_fact_has() {
     );
 
     let decided = StageFact::classify(
+        STEP_DECIDE,
         0,
         Some(&Verdict::Answered {
             reason: REASON_GREETING.into(),
@@ -145,9 +149,10 @@ fn payload_carries_only_what_the_fact_has() {
         0,
     );
     assert_eq!(
-        decided.payload(),
+        decided.payload(4),
         serde_json::json!({
-            "stage": "decide",
+            "id": "decide",
+            "anchor": 4,
             "round": 0,
             "source": "rule",
             "reason": REASON_GREETING,
@@ -158,8 +163,8 @@ fn payload_carries_only_what_the_fact_has() {
     // 没有理由码时 `reason` 整键缺席，而不是 `null`：读侧按 `as_str` 取值，
     // 两种写法虽都能得到 `None`，但「没有这个事实」与「有事实且为空」不该混。
     assert_eq!(
-        StageFact::classify(0, None, 0).payload(),
-        serde_json::json!({ "stage": "decide", "round": 0, "source": "absent", "model_calls": 0 })
+        StageFact::classify(STEP_DECIDE, 0, None, 0).payload(4),
+        serde_json::json!({ "id": "decide", "anchor": 4, "round": 0, "source": "absent", "model_calls": 0 })
     );
 }
 
@@ -171,14 +176,12 @@ fn the_model_call_count_is_carried_by_the_decide_fact() {
         reason: REASON_NEEDS_WORK.into(),
     };
     assert_eq!(
-        StageFact::classify(0, Some(&modelled), 1).payload()["model_calls"],
+        StageFact::classify(STEP_DECIDE, 0, Some(&modelled), 1).payload(4)["model_calls"],
         serde_json::json!(1)
     );
-    // 其余阶段不写这个字段——「恒 0 的字段」是噪声。
+    // 其余步不写这个字段——「恒 0 的字段」是噪声。
     assert_eq!(
-        StageFact::ran(StageName::Recall, 0)
-            .payload()
-            .get("model_calls"),
+        StageFact::ran(STEP_RECALL, 0).payload(4).get("model_calls"),
         None
     );
 }
@@ -188,48 +191,52 @@ fn the_model_call_count_is_carried_by_the_decide_fact() {
 #[test]
 fn the_compress_fact_carries_its_call_count_and_a_per_act_identity() {
     // 压缩在续写幕会重跑（同一轮号、`request_round` 从 0 重开）。同一性若只按
-    // `(turn, round, stage)` 算，续写幕那格会撞首幕的幂等键 ⇒ 载荷（含
+    // `(turn, id)` 算，续写幕那格会撞首幕的幂等键 ⇒ 载荷（含
     // `model_calls`）**不落** ⇒ 那一笔模型往返在事实层没了数，判据侧对不上账。
     // 所以 identity = 本幕的锚（`drive_seq`）：两幕各一格。
-    let first = StageFact::compress(0, 2, 17);
-    assert_eq!(first.event_id(7), "st-7-0-compress-17");
+    let first = StageFact::compress(STEP_COMPRESS, 0, 2, 17);
+    assert_eq!(first.event_id(7, 17), "st-7-compress-17");
     assert_eq!(
-        first.payload()["model_calls"],
+        first.payload(17)["model_calls"],
         serde_json::json!(2),
         "压缩那格必须带着这次往返的数"
     );
     assert_ne!(
-        first.event_id(7),
-        StageFact::compress(0, 1, 23).event_id(7),
+        first.event_id(7, 17),
+        StageFact::compress(STEP_COMPRESS, 0, 1, 23).event_id(7, 23),
         "两幕的压缩是两格；撞键会让后一幕的 `model_calls` 静默消失"
     );
     // `identity` 只进事件 id，不进载荷——格里的数是 `model_calls`，不是锚。
-    assert!(first.payload().get("identity").is_none());
+    assert!(first.payload(17).get("identity").is_none());
 }
 
 #[test]
-fn event_id_is_the_stage_identity() {
+fn event_id_is_the_step_identity() {
     assert_eq!(
-        StageFact::ran(StageName::Decide, 0).event_id(7),
-        "st-7-0-decide"
+        StageFact::ran(STEP_DECIDE, 0).event_id(7, 0),
+        "st-7-decide-0"
     );
-    assert_eq!(StageFact::classify(2, None, 0).event_id(7), "st-7-2-decide");
-    assert_ne!(
-        StageFact::ran(StageName::Recall, 0).event_id(7),
-        StageFact::ran(StageName::Compress, 0).event_id(7),
-        "同一轮的两个阶段必须是两个幂等键，否则后落的那格会被当成重复丢掉"
+    assert_eq!(
+        StageFact::classify(STEP_DECIDE, 2, None, 0).event_id(7, 2),
+        "st-7-decide-2"
     );
     assert_ne!(
-        StageFact::ran(StageName::Recall, 0).event_id(7),
-        StageFact::ran(StageName::Recall, 1).event_id(7),
-        "跨轮次的重跑是新的一次执行"
+        StageFact::ran(STEP_RECALL, 0).event_id(7, 0),
+        StageFact::ran(STEP_COMPRESS, 0).event_id(7, 0),
+        "同一幕的两个步必须是两个幂等键，否则后落的那格会被当成重复丢掉"
+    );
+    assert_ne!(
+        StageFact::ran(STEP_RECALL, 0).event_id(7, 0),
+        StageFact::ran(STEP_RECALL, 0).event_id(7, 1),
+        "跨幕的重跑是新的一次执行（轮号不进 id，幕锚进 id）"
     );
 }
 
 #[test]
-fn land_writes_the_turn_stage_cell() {
+fn land_writes_the_loop_step_cell() {
     let store = EventStore::new();
     let fact = StageFact::classify(
+        STEP_DECIDE,
         0,
         Some(&Verdict::Escalate {
             reason: REASON_NEEDS_WORK.into(),
@@ -241,15 +248,16 @@ fn land_writes_the_turn_stage_cell() {
     let events = store.range(Seq::new(0));
     assert_eq!(events.len(), 1);
     let e = &events[0];
-    assert_eq!(e.event_id, "st-7-0-decide");
-    assert_eq!(e.kind, EVENT_TURN_STAGE);
+    assert_eq!(e.event_id, "st-7-decide-4");
+    assert_eq!(e.kind, EVENT_LOOP_STEP);
     assert_eq!(e.entity, Entity::Scope);
     assert_eq!(e.verb, Verb::Asserted);
     assert_eq!(e.scope, 7);
     assert_eq!(e.actor, "user-1");
-    // I2：断言类事件必须带溯源（用户格 seq）。
+    // I2：断言类事件必须带溯源（幕锚 seq）。
     assert_eq!(e.produced_by, Some(4));
-    assert_eq!(e.payload["stage"], "decide");
+    assert_eq!(e.payload["id"], "decide");
+    assert_eq!(e.payload["anchor"], 4);
     assert_eq!(e.payload["round"], 0);
     assert_eq!(e.payload["source"], "model");
     assert_eq!(e.payload["reason"], REASON_NEEDS_WORK);
@@ -260,47 +268,30 @@ fn landing_the_same_stage_twice_is_absorbed() {
     // 续写幕复用同一轮号且 `request_round` 从 0 重开，召回 / 压缩会重跑；
     // 重跑撞幂等键不是失败——这一步确实已经做过。
     let store = EventStore::new();
-    let fact = StageFact::ran(StageName::Recall, 0);
+    let fact = StageFact::ran(STEP_RECALL, 0);
     let one = std::slice::from_ref(&fact);
     land(&store, 7, 0, "user", one).expect("首次落格失败");
     land(&store, 7, 0, "user", one).expect("重复落格应被吸收，而不是让整轮失败");
     assert_eq!(store.len(), 1, "重复落格不得产生第二格");
 }
 
-// ── `done` 投影：范围恰好是 (turn, stage, round) ────────────────────────
+// ── `done` 投影：范围恰好是 (turn, id, round) ──────────────────────────
 
 #[test]
-fn done_is_scoped_by_turn_stage_and_round() {
+fn done_is_scoped_by_turn_step_and_round() {
     let store = EventStore::new();
-    land(
-        &store,
-        7,
-        0,
-        "user",
-        &[StageFact::ran(StageName::Recall, 0)],
-    )
-    .unwrap();
-    land(
-        &store,
-        7,
-        0,
-        "user",
-        &[StageFact::ran(StageName::Compress, 0)],
-    )
-    .unwrap();
+    land(&store, 7, 0, "user", &[StageFact::ran(STEP_RECALL, 0)]).unwrap();
+    land(&store, 7, 0, "user", &[StageFact::ran(STEP_COMPRESS, 0)]).unwrap();
     let events = store.range(Seq::new(0));
 
-    assert!(done(&events, 7, StageName::Recall, 0));
+    assert!(done(&events, 7, STEP_RECALL, 0));
     assert!(
-        !done(&events, 8, StageName::Recall, 0),
+        !done(&events, 8, STEP_RECALL, 0),
         "别轮的同一阶段不算本轮已做"
     );
+    assert!(!done(&events, 7, STEP_RECALL, 1), "别轮次不算本请求轮已做");
     assert!(
-        !done(&events, 7, StageName::Recall, 1),
-        "别轮次不算本请求轮已做"
-    );
-    assert!(
-        !done(&events, 7, StageName::Decide, 0),
+        !done(&events, 7, STEP_DECIDE, 0),
         "同轮另一阶段没有落格，不得互相顶替"
     );
 }

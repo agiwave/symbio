@@ -233,7 +233,7 @@ pub struct TurnInput {
 ///
 /// 正文是**本轮状态**里的寄存物，不进事实网格：它唯一的去处是收束格
 /// `chat.assistant.final` 的 `text`（与模型应答同一格同一字段）。技能 id 只进
-/// 快路执行体的出口格（`turn.stage{stage:"reflex"}` 的 `result`）——两件事各有 owner。
+/// 快路执行体的出口格（`loop.step{id:"reflex"}` 的 `result`）——两件事各有 owner。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReflexAnswer {
     /// 技能正文（命中即以此作答）。

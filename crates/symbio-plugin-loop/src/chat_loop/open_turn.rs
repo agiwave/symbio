@@ -12,7 +12,7 @@
 //! | 行 | 写什么 | 什么时候 |
 //! |---|---|---|
 //! | `resume-turn` | 用户动作 → `request(port=tool)`（带 `resume` 标记） | 续写幕，**先于**幕锚 |
-//! | `open-turn` | `user.message` / `session.config` / `turn.stage{resume\|round}` | 新轮 / 续写幕 / 再接一幕 |
+//! | `open-turn` | `user.message` / `session.config` / `loop.step{resume\|round}` | 新轮 / 续写幕 / 再接一幕 |
 //!
 //! `resume-turn` 必须在前：`turn_head` 的请求面按 seq 判「有没有终局」，不看幕锚，
 //! 但锚的 `now` 要等唤醒格落下才有得算（判据 12）。
@@ -36,7 +36,7 @@ use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio_sdk::chat::chat_node::{NodeRole, ResumeAction, ResumeRequest};
 use symbio_sdk::projection::turns::count_user_messages;
 
-use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, MESSAGE_VOCAB};
+use crate::control_decl::{CHAT_VOCAB, EVENT_LOOP_STEP, EVENT_SESSION_CONFIG, MESSAGE_VOCAB};
 
 use super::super::session_port::SessionPort;
 use super::super::stage_events::{self, StageFact};
@@ -105,7 +105,7 @@ pub(crate) fn select(resume: Option<&ResumeRequest>, first_stage: bool) -> &'sta
 const OPEN_WRITES: &[&str] = &[
     EVENT_USER_MESSAGE,
     EVENT_SESSION_CONFIG,
-    EVENT_TURN_STAGE,
+    EVENT_LOOP_STEP,
     symbio_plugin_api::events::EVENT_TURN_BRANCH,
 ];
 const RESUME_WRITES: &[&str] = &[EVENT_REQUEST];
@@ -214,13 +214,19 @@ pub(crate) fn open(
                 .iter()
                 .filter(|e| {
                     e.scope == stage_no
-                        && e.kind == EVENT_TURN_STAGE
-                        && e.payload.get("stage").and_then(|v| v.as_str()) == Some("resume")
+                        && e.kind == crate::control_decl::EVENT_LOOP_STEP
+                        && e.payload.get("id").and_then(|v| v.as_str())
+                            == Some(crate::loop_rows::STEP_RESUME)
                 })
                 .count()
                 + 1;
-            let stage = StageFact::resume(state.round(), kind, &ordinal.to_string())
-                .with_replaces(replaces);
+            let stage = StageFact::resume(
+                crate::loop_rows::STEP_RESUME,
+                state.round(),
+                kind,
+                &ordinal.to_string(),
+            )
+            .with_replaces(replaces);
             let seqs = stage_events::land_with_seqs(
                 store.as_ref(),
                 stage_no,
@@ -328,7 +334,11 @@ pub(crate) fn open(
                 stage_no,
                 user_seq,
                 "system",
-                &[StageFact::request_round(round, &round.to_string())],
+                &[StageFact::request_round(
+                    crate::loop_rows::STEP_ROUND,
+                    round,
+                    &round.to_string(),
+                )],
             )
             .map_err(|e| {
                 TurnExit::Failed(PluginError::InternalError(format!(
@@ -398,7 +408,11 @@ pub(crate) fn open(
             stage_no,
             user_seq,
             "system",
-            &[StageFact::request_round(round, &drive_seq.to_string())],
+            &[StageFact::request_round(
+                crate::loop_rows::STEP_ROUND,
+                round,
+                &drive_seq.to_string(),
+            )],
         )
         .map_err(|e| {
             TurnExit::Failed(PluginError::InternalError(format!(
@@ -477,8 +491,9 @@ pub(crate) fn resume_replaces(state: &TurnState) -> Option<String> {
         .rev()
         .find(|e| {
             e.seq.map(|s| s >= anchor).unwrap_or(false)
-                && e.kind == EVENT_TURN_STAGE
-                && e.payload.get("stage").and_then(|v| v.as_str()) == Some("resume")
+                && e.kind == EVENT_LOOP_STEP
+                && e.payload.get("id").and_then(|v| v.as_str())
+                    == Some(crate::loop_rows::STEP_RESUME)
         })
         .and_then(|e| e.payload.get("replaces").and_then(|v| v.as_str()))
         .map(str::to_string)

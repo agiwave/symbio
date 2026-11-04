@@ -1415,7 +1415,7 @@ impl Compress {
         .await
     }
 
-    /// 这一轮压缩打了几次模型（落进 `turn.stage{compress}.model_calls`）。
+    /// 这一轮压缩打了几次模型（落进 `loop.step{id:"compress"}.model_calls`）。
     pub(crate) fn calls(&self) -> u64 {
         self.calls.load(Ordering::SeqCst)
     }

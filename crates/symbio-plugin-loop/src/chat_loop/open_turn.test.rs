@@ -21,7 +21,7 @@ use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind};
 use symbio_sdk::chat::principal::{Principal, PrincipalKind};
 use symbio_sdk::projection::turns::count_user_messages;
 
-use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, MESSAGE_VOCAB};
+use crate::control_decl::{CHAT_VOCAB, EVENT_LOOP_STEP, EVENT_SESSION_CONFIG, MESSAGE_VOCAB};
 
 fn user_node(id: &str, text: &str) -> ChatNode {
     ChatNode {
@@ -120,8 +120,8 @@ fn a_new_drive_lands_user_config_and_round_before_any_decision() {
     );
     assert_eq!(config.payload["is_persistent"], true);
 
-    let round = fact(&all, EVENT_TURN_STAGE, 0);
-    assert_eq!(round.payload["stage"], "round");
+    let round = fact(&all, EVENT_LOOP_STEP, 0);
+    assert_eq!(round.payload["id"], "round");
     assert_eq!(round.payload["round"], 0);
     assert_eq!(round.produced_by, Some(turn.user_seq));
 
@@ -173,14 +173,16 @@ fn the_turn_number_continues_across_a_snapshot() {
     )
     .expect("新轮开得了");
 
-    assert_eq!(turn.turn_no, 1, "轮号接着水位走");
+    // 轮次格的幂等键 = `st-{轮号}-round-{轮次}`：键里带的是**轮号**（不再带驱动格 seq），
+    // 轮次是第几步，与用户格 `u-1` 同一号段。
     assert!(
         facts
             .range(Seq::new(0))
             .iter()
-            .any(|e| e.event_id == format!("st-1-0-round-{}", turn.drive_seq)),
+            .any(|e| e.event_id.starts_with("st-1-round-")),
         "轮次事实的幂等键带幕号"
     );
+    assert_eq!(turn.turn_no, 1, "轮号接着水位走");
     assert!(
         facts.range(Seq::new(0)).iter().any(|e| e.event_id == "u-1"),
         "第二轮用户格是 u-1（不重号）"
@@ -228,8 +230,8 @@ fn a_resume_drive_reuses_the_open_turn_without_a_new_user_fact() {
     );
 
     let all = facts.range(Seq::new(0));
-    let resume = fact(&all, EVENT_TURN_STAGE, 0);
-    assert_eq!(resume.payload["stage"], "resume");
+    let resume = fact(&all, EVENT_LOOP_STEP, 0);
+    assert_eq!(resume.payload["id"], "resume");
     assert_eq!(resume.payload["result"], "approve");
     assert_eq!(resume.produced_by, Some(turn.user_seq));
     assert_eq!(
@@ -288,13 +290,13 @@ fn a_second_resume_in_the_same_turn_gets_its_own_anchor() {
     let all = facts.range(Seq::new(0));
     let resumes: Vec<&Event> = all
         .iter()
-        .filter(|e| e.kind == EVENT_TURN_STAGE && e.payload["stage"] == "resume")
+        .filter(|e| e.kind == EVENT_LOOP_STEP && e.payload["id"] == "resume")
         .collect();
     assert_eq!(resumes.len(), 2, "两次恢复各落一格：{all:?}");
     assert_eq!(resumes[0].payload["result"], "approve");
     assert_eq!(resumes[1].payload["result"], "answer");
     assert!(
-        all.iter().any(|e| e.event_id == "st-0-0-resume-answer-2"),
+        all.iter().any(|e| e.event_id == "st-0-resume-2"),
         "第二次的序数进幂等键：{all:?}"
     );
     assert!(
@@ -411,14 +413,14 @@ fn a_continuation_stage_reuses_the_turn_and_anchors_on_its_own_round_fact() {
     facts
         .append(
             Event::pending(
-                "st-0-0-round-0",
-                EVENT_TURN_STAGE,
+                "st-0-round-0",
+                EVENT_LOOP_STEP,
                 Entity::Scope,
                 Verb::Asserted,
                 0,
                 "system",
             )
-            .with_payload(serde_json::json!({ "stage": "round", "round": 0 })),
+            .with_payload(serde_json::json!({ "id": "round", "anchor": user_seq, "round": 0 })),
         )
         .expect("首幕的轮次格");
     facts
@@ -463,10 +465,10 @@ fn a_continuation_stage_reuses_the_turn_and_anchors_on_its_own_round_fact() {
     let round = all
         .iter()
         .find(|e| {
-            e.kind == EVENT_TURN_STAGE && e.payload["stage"] == "round" && e.payload["round"] == 1
+            e.kind == EVENT_LOOP_STEP && e.payload["id"] == "round" && e.payload["round"] == 1
         })
         .unwrap_or_else(|| panic!("缺续幕的轮次格：{all:?}"));
-    assert_eq!(round.event_id, "st-0-1-round-1", "幂等段是轮次本身");
+    assert_eq!(round.event_id, "st-0-round-1", "幂等段是轮次本身");
     assert_eq!(
         turn.drive_seq,
         round.seq.map(|s| s.value()).unwrap(),
@@ -497,7 +499,7 @@ fn the_lease_window_keeps_only_the_newest_facts() {
         facts
             .append(Event::pending(
                 format!("f-{i}"),
-                EVENT_TURN_STAGE,
+                EVENT_LOOP_STEP,
                 Entity::Scope,
                 Verb::Asserted,
                 0,
@@ -530,7 +532,7 @@ fn a_short_snapshot_is_handed_over_whole() {
         facts
             .append(Event::pending(
                 format!("s-{i}"),
-                EVENT_TURN_STAGE,
+                EVENT_LOOP_STEP,
                 Entity::Scope,
                 Verb::Asserted,
                 0,

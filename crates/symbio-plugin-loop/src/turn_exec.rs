@@ -16,7 +16,7 @@
 //! 开 `skill_fast_path` 且本轮发言**逐字命中**一条已编译技能时，本轮改走快路——
 //! 以技能正文收束，**一次模型调用都不发生**。判定与作答都住技能能力包
 //! （`skill.recall` 行，D-262）：它交回 `RowStep::Answer`，**宿主**代落
-//! `turn.stage{stage:"reflex"}` 并把正文经 [`TurnSession::set_reflex`] 寄给收束行，
+//! `loop.step{id:"reflex"}` 并把正文经 [`TurnSession::set_reflex`] 寄给收束行，
 //! 由 `close-turn` 的执行体落成同一格 `chat.assistant.final`（D-163 / D-260）。
 //! 它不是"又一条执行链"：产物落的是**同一轮的三格**（`u-{turn}` / `turn.dispatch` /
 //! `f-{turn}`），收束后仍走同一段 `record_learning`，收口（步骤 5–7）也完全共享；
@@ -1216,6 +1216,7 @@ pub(crate) fn run_report<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
             head.turn.user_seq,
             &principal,
             &[super::stage_events::StageFact::report(
+                crate::loop_rows::STEP_REPORT,
                 head.turn.round(),
                 anchor,
                 result,
@@ -1380,7 +1381,10 @@ pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                     user_seq,
                     &principal,
                     &[super::stage_events::StageFact::reflex(
-                        round, drive_seq, "answered",
+                        crate::loop_rows::STEP_REFLEX,
+                        round,
+                        drive_seq,
+                        "answered",
                     )],
                 )
                 .map_err(ActorError::Append)?;
@@ -1646,7 +1650,7 @@ fn land_effects(
     Ok(())
 }
 
-/// 把「备输入」的出口落成阶段事实（`turn.stage{stage:"inputs"}`）。
+/// 把「备输入」的出口落成阶段事实（`loop.step{id:"inputs"}`）。
 ///
 /// `result` 二值：`ready` = 这一幕要跑（请求视图已备好）；`closed` = 定稿答话轮在
 /// 轮首就收束了。它是 `turn_head.prepared` 的唯一来源。
@@ -1662,6 +1666,7 @@ pub(crate) fn land_inputs(
         turn.user_seq,
         &symbio_sdk::authz::request_principal(ctx),
         &[super::stage_events::StageFact::inputs(
+            crate::loop_rows::STEP_INPUTS,
             turn.round(),
             turn.drive_seq,
             result,

@@ -151,7 +151,7 @@ fn tool_free_req<'a>(
 /// **已开未收束**那一轮的入参包：**不新开用户格**，溯源锚由调用方直给。
 ///
 /// 唤醒幕的身份不再由入参携带（d：旁路退役）：它落在**事实**上——
-/// `turn.stage{stage:"resume"}` 是本幕的锚，`turn_head` 据此判「本幕是续写幕」。
+/// `loop.step{id:"resume"}` 是本幕的锚，`turn_head` 据此判「本幕是续写幕」。
 fn open_turn_req<'a>(
     fx: &'a Fixture,
     provider: Arc<dyn ModelProvider>,
@@ -179,7 +179,12 @@ fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> 
         turn_no,
         user_seq,
         "system",
-        &[super::super::stage_events::StageFact::resume(0, kind, "1")],
+        &[super::super::stage_events::StageFact::resume(
+            super::super::loop_rows::STEP_RESUME,
+            0,
+            kind,
+            "1",
+        )],
     )
     .expect("恢复阶段事实落格");
     seqs.first().copied().unwrap_or(user_seq)
@@ -189,7 +194,7 @@ fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> 
 ///
 /// 生产里幕首之后只有**一个环**（`D-222` 裁决 5）：轮首四行、接缝、汇报与轮内各行
 /// 同住一张绑定表，先后由 `(phase, anchor)` 说。接缝读的读数因此不再另开一条通道递进来——
-/// 它们住在**事实切片**上（`turn.stage{recall|decide}` 的载荷），由环上的动作自己取走。
+/// 它们住在**事实切片**上（`loop.step{recall|decide}` 的载荷），由环上的动作自己取走。
 /// 本夹具替幕首把那一片备好，于是轮首那几行没开账时事实切片里没有这些格。
 ///
 /// **本地同名结构遮蔽了 `super::*` 里的 `ExecTurn`**——五个 struct 字面量因此
@@ -1068,7 +1073,8 @@ async fn control_harness_with(
 /// 本幕的 `inputs` 阶段格。
 fn inputs_fact(facts: &[Event]) -> Option<&Event> {
     facts.iter().find(|e| {
-        e.kind == "turn.stage" && e.payload.get("stage").and_then(|v| v.as_str()) == Some("inputs")
+        e.kind == super::super::control_decl::EVENT_LOOP_STEP
+            && e.payload.get("id").and_then(|v| v.as_str()) == Some("inputs")
     })
 }
 
@@ -1106,29 +1112,35 @@ async fn drive_stops_at_an_in_place_answer_and_lands_closed_without_a_model_requ
     let mut h = control_harness().await;
     // 判决执行体落下的决定格（`policy.classify` 的产出形态）：只在事实面上，
     // 不再经 `TurnState` 寄存。
+    let anchor = h.turn.user_seq;
     h.facts
         .append(
             Event::pending(
-                "st-0-0-decide",
-                super::super::control_decl::EVENT_TURN_STAGE,
+                format!("st-0-decide-{anchor}"),
+                super::super::control_decl::EVENT_LOOP_STEP,
                 Entity::Scope,
                 Verb::Opened,
                 h.turn.turn_no,
                 "session",
             )
             .with_payload(
-                super::super::stage_events::StageFact::classify(0, None, 0)
-                    .with_result("answered")
-                    .with_answer(super::super::stage_events::AnswerFact {
-                        utterance: "你好".into(),
-                        reply: "你好，有什么可以帮你？".into(),
-                        cost_ms: 0,
-                        dialog_id: "a-1".into(),
-                        dialog_reason: "answered".into(),
-                        exclude_from_context: false,
-                        reasoning: None,
-                    })
-                    .payload(),
+                super::super::stage_events::StageFact::classify(
+                    super::super::loop_rows::STEP_DECIDE,
+                    0,
+                    None,
+                    0,
+                )
+                .with_result("answered")
+                .with_answer(super::super::stage_events::AnswerFact {
+                    utterance: "你好".into(),
+                    reply: "你好，有什么可以帮你？".into(),
+                    cost_ms: 0,
+                    dialog_id: "a-1".into(),
+                    dialog_reason: "answered".into(),
+                    exclude_from_context: false,
+                    reasoning: None,
+                })
+                .payload(anchor),
             ),
         )
         .expect("落决定格");
@@ -1893,6 +1905,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
         req.user_seq,
         "system",
         &[super::super::stage_events::StageFact::reflex(
+            super::super::loop_rows::STEP_REFLEX,
             0,
             req.user_seq,
             "sk-1",
@@ -1990,7 +2003,10 @@ fn the_recall_list_carries_the_resumed_flag() {
         user_seq,
         "system",
         &[super::super::stage_events::StageFact::resume(
-            0, "approve", "1",
+            super::super::loop_rows::STEP_RESUME,
+            0,
+            "approve",
+            "1",
         )],
     )
     .expect("恢复阶段事实落格")
@@ -2005,7 +2021,12 @@ fn the_recall_list_carries_the_resumed_flag() {
         resume_seq,
         "system",
         &[super::super::stage_events::StageFact::recall(
-            0, resume_seq, &recalled, true, false,
+            super::super::loop_rows::STEP_RECALL,
+            0,
+            resume_seq,
+            &recalled,
+            true,
+            false,
         )],
     )
     .expect("召回阶段事实落格");
@@ -2045,7 +2066,12 @@ fn the_recall_list_carries_the_resumed_flag() {
         fresh_seq,
         "system",
         &[super::super::stage_events::StageFact::recall(
-            0, fresh_seq, &recalled, false, false,
+            super::super::loop_rows::STEP_RECALL,
+            0,
+            fresh_seq,
+            &recalled,
+            false,
+            false,
         )],
     )
     .expect("召回阶段事实落格");

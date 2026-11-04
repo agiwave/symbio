@@ -52,7 +52,8 @@ pub(crate) async fn classify(
     let decision = match decide(orchestrator, ctx, context, state, &utterance).await {
         Ok(decision) => decision,
         Err(e) => {
-            let fact = StageFact::classify(round, None, 0).with_result("failed");
+            let fact = StageFact::classify(crate::loop_rows::STEP_DECIDE, round, None, 0)
+                .with_result("failed");
             super::super::stage_events::land(
                 &**store,
                 state.turn_no,
@@ -74,8 +75,13 @@ pub(crate) async fn classify(
         None => ("proceed".to_string(), None, None),
     };
 
-    let mut fact =
-        StageFact::classify(round, verdict.as_ref(), decision.model_calls).with_result(&result);
+    let mut fact = StageFact::classify(
+        crate::loop_rows::STEP_DECIDE,
+        round,
+        verdict.as_ref(),
+        decision.model_calls,
+    )
+    .with_result(&result);
     if let Some(answer) = answer {
         fact = fact.with_answer(answer);
     }
@@ -475,6 +481,7 @@ pub(crate) async fn recall(
         state.user_seq,
         &recall_viewer,
         &[StageFact::recall(
+            crate::loop_rows::STEP_RECALL,
             state.round(),
             state.drive_seq,
             &entries,
@@ -535,6 +542,7 @@ pub(crate) async fn compress(
         state.user_seq,
         &symbio_sdk::authz::request_principal(ctx.as_ref()),
         &[StageFact::compress(
+            crate::loop_rows::STEP_COMPRESS,
             state.round(),
             compress.calls(),
             state.drive_seq,

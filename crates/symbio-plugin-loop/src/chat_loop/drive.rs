@@ -13,7 +13,7 @@
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::store::Store;
 
-/// 恢复动作的事实名（`turn.stage{stage:"resume"}` 的 `result`）。
+/// 恢复动作的事实名（`loop.step{id:"resume"}` 的 `result`）。
 ///
 /// 与 `ResumeAction` 的 serde 线格式同值；`RetrySubtree` / `RetryCompaction`
 /// 不落本格（前者按新轮处理，后者在进循环之前就返回了）。

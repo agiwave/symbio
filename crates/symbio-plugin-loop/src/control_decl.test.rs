@@ -33,6 +33,47 @@ fn ev_at(turn: u64, kind: &str, payload: Value, ts: i64) -> Event {
     ev(turn, kind, payload).with_ts(ts)
 }
 
+/// 手写一格 `loop.step`；幕锚由 [`opened`] 在整幕建好之后补。
+fn step(turn: u64, id: &str, round: u64) -> Event {
+    ev(
+        turn,
+        "loop.step",
+        json!({ "id": id, "anchor": 0, "round": round }),
+    )
+}
+
+/// 同 [`step`]，另带载荷键（`result` / `reason` 之类）。
+fn step_with(turn: u64, id: &str, round: u64, extra: Value) -> Event {
+    let mut event = step(turn, id, round);
+    for (k, v) in extra.as_object().into_iter().flatten() {
+        event.payload[k.clone()] = v.clone();
+    }
+    event
+}
+
+/// 把整幕手写的 `loop.step` 载荷 `anchor` 补成**本幕幕锚**。
+///
+/// 幕锚：首幕 = `user.message` 格的 seq；续幕 = `round > 0` 的轮次格 / `resume` 格自身。
+fn opened(events: Vec<Event>) -> Vec<Event> {
+    let mut anchor = 0u64;
+    events
+        .into_iter()
+        .map(|mut e| {
+            if e.kind == "user.message" {
+                anchor = e.seq.map(|s| s.value()).unwrap_or(0);
+            } else if e.kind == "loop.step" {
+                let id = e.payload.get("id").and_then(Value::as_str).unwrap_or("");
+                let round = e.payload.get("round").and_then(Value::as_u64).unwrap_or(0);
+                if id == "resume" || (id == "round" && round > 0) {
+                    anchor = e.seq.map(|s| s.value()).unwrap_or(0);
+                }
+                e.payload["anchor"] = json!(anchor);
+            }
+            e
+        })
+        .collect()
+}
+
 fn seq(e: &Event) -> u64 {
     e.seq.unwrap().value()
 }
@@ -121,7 +162,9 @@ fn control_plane_loads_and_freezes() {
             "chat.assistant.reported",
             "chat.assistant.opening",
             "chat.assistant.progress",
-            "turn.stage",
+            // `turn.stage` 不在这张表里：它是 D-321 的契约冻结例外，只剩能力效果面
+            // 的写方，控制面没有任何视图读它（`OrphanFact` 不让它留下）。
+            EVENT_LOOP_STEP,
             "user.message",
             "turn.supplemented",
             "session.config",
@@ -138,7 +181,6 @@ fn control_plane_loads_and_freezes() {
             "in_flight",
             "stale_sent",
             "turn_head",
-            "turn_stages",
             // 本轮召回清单（`D-262`）：技能行按 `(recall, stage)` 认领自己那条，
             // 本幕是不是续写幕也在它的条目上（`resumed`）。
             "turn.recalled",
@@ -186,10 +228,9 @@ fn control_plane_loads_and_freezes() {
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
     // v17：`skill_hit` 随技能能力退出读面（`D-262`）；`reflex_answered` 改由宿主代落的
-    // `stage:"reflex"` 格折出（D-260），本视图不再认 `memory.recalled` 的技能字段。
+    // `id:"reflex"` 格折出（D-260），本视图不再认 `memory.recalled` 的技能字段。
     assert_eq!(frozen.view("turn_head").unwrap().ver, 17);
-    // v2：幕锚多一档续幕轮次格（`turn_stages` / `turn_closed` 的窗口因此能从续幕起算）。
-    assert_eq!(frozen.view("turn_stages").unwrap().ver, 2);
+    // v2：幕锚多一档续幕轮次格（`turn_closed` 的窗口因此能从续幕起算）。
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 2);
     // `report_due` 到 v7：v7 的静默锚多一档续幕轮次格；v5 把「那一批关完了」
     // （`at_boundary`）与「这一段静默试过没有」折进开账侧；v6 再要求最近一批已关闭
@@ -465,17 +506,13 @@ fn flags(classify: bool, compress: bool, persistent: bool) -> Value {
 
 #[test]
 fn turn_head_reads_round_and_done_from_facts() {
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "session.config", flags(true, false, true)),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "recall", "round": 0, "result": "hit"}),
-        ),
-        ev(1, "turn.stage", json!({"stage": "decide", "round": 0})),
-    ];
+        step(1, "round", 0),
+        step_with(1, "recall", 0, json!({"result": "hit"})),
+        step(1, "decide", 0),
+    ]);
     assert_eq!(
         turn_head(&events, 0),
         json!({
@@ -512,34 +549,28 @@ fn turn_head_reads_round_and_done_from_facts() {
     // 快路已作答（D-163）：出口格把 `reflex_answered` 折真 ⇒ 收束行在**零模型往返**
     // 的轮上也开得出账（`has_final` 折不出没有应答的轮）。
     let mut reflex = events.clone();
-    reflex.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "reflex", "round": 0, "result": "sk-1"}),
-    ));
+    reflex.push(step_with(1, "reflex", 0, json!({"result": "sk-1"})));
+    let reflex = opened(reflex);
     let head = turn_head(&reflex, 0);
     assert_eq!(head["reflex_answered"], json!(true));
     assert_eq!(head["closeable"], json!(true));
 
     // `result:"miss"` 只关快路自己那一笔账，不算「已答」：那一轮照常进模型往返。
     let mut missed = events.clone();
-    missed.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "reflex", "round": 0, "result": "miss"}),
-    ));
+    missed.push(step_with(1, "reflex", 0, json!({"result": "miss"})));
+    let missed = opened(missed);
     let head = turn_head(&missed, 0);
     assert_eq!(head["reflex_answered"], json!(false));
     assert_eq!(head["closeable"], json!(false));
 
     // 下一轮的事实出现后，轮头跟着走；`done` 只认**本幕**的阶段格。
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(1, "turn.stage", json!({"stage": "decide", "round": 0})),
+        step(1, "round", 0),
+        step(1, "decide", 0),
         ev(2, "user.message", json!({"text": "again", "id": "u-2"})),
-        ev(2, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(2, "round", 0),
+    ]);
     let head = turn_head(&events, 0);
     assert_eq!(head["scope"], json!(2));
     assert_eq!(head["round"], json!(0));
@@ -553,10 +584,10 @@ fn turn_head_reads_round_and_done_from_facts() {
 /// `reason` 一格，不是任何执行体的返回值。
 #[test]
 fn turn_head_folds_the_closure_reason_of_the_current_stage() {
-    let base = vec![
+    let base = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     // 未收束 ⇒ `null`。「还没停」与「停下了但没记原因」是两件事，这里只表达前者。
     assert_eq!(turn_head(&base, 0)["closure"], Value::Null);
 
@@ -592,60 +623,45 @@ fn turn_head_answers_only_the_drive_the_verdict_landed_in() {
     // `answered` 折的是判决那格 `result == "answered"`（D-162 裁决 1）：压缩与召回的
     // 前件读它，所以它必须是**这一格**——判成「继续走」的 `proceed` 不许开成答话轮。
     let decide = |result: &str| {
-        vec![
+        opened(vec![
             ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
             ev(1, "session.config", flags(true, true, true)),
-            ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-            ev(
-                1,
-                "turn.stage",
-                json!({"stage": "decide", "round": 0, "result": result}),
-            ),
-        ]
+            step(1, "round", 0),
+            step_with(1, "decide", 0, json!({"result": result})),
+        ])
     };
     assert_eq!(turn_head(&decide("proceed"), 0)["answered"], json!(false));
     assert_eq!(turn_head(&decide("answered"), 0)["answered"], json!(true));
     // 没有判决格 ⇒ 恒 `false`：卸载 `classify` 时压缩与召回照旧开账。
-    let no_verdict = vec![
+    let no_verdict = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "session.config", flags(true, true, true)),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert_eq!(turn_head(&no_verdict, 0)["answered"], json!(false));
 
     // 续写幕重跑判决：首幕判成答话不算到本幕头上（折叠按幕锚，同 `classify_done`）。
     let mut resumed = decide("answered");
-    resumed.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "resume", "round": 0, "result": "approve"}),
-    ));
-    resumed.push(ev(1, "turn.stage", json!({"stage": "round", "round": 0})));
+    resumed.push(step_with(1, "resume", 0, json!({"result": "approve"})));
+    resumed.push(step(1, "round", 0));
+    let resumed = opened(resumed);
     assert_eq!(turn_head(&resumed, 0)["answered"], json!(false));
 }
 
 #[test]
 fn turn_head_resume_drive_starts_from_the_resume_anchor() {
     // 续写幕复用同一轮号：首幕的 recall / decide / final 都不能算到它头上。
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "session.config", flags(false, false, true)),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "recall", "round": 0, "result": "hit"}),
-        ),
-        ev(1, "turn.stage", json!({"stage": "decide", "round": 0})),
+        step(1, "round", 0),
+        step_with(1, "recall", 0, json!({"result": "hit"})),
+        step(1, "decide", 0),
         ev(1, "chat.assistant.final", json!({"text": "done"})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "resume", "round": 0, "result": "approve"}),
-        ),
+        step_with(1, "resume", 0, json!({"result": "approve"})),
         ev(1, "session.config", flags(true, true, true)),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     let head = turn_head(&events, 0);
     assert_eq!(head["resumed"], json!(true));
     assert_eq!(head["has_utterance"], json!(false), "续写幕不是用户新发言");
@@ -666,33 +682,21 @@ fn turn_head_resume_drive_starts_from_the_resume_anchor() {
 /// 续幕要重跑接缝与召回，而它自己还没收束。
 #[test]
 fn turn_head_scopes_to_the_continuation_stage() {
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "session.config", flags(false, true, true)),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "decide", "round": 0, "result": "proceed"}),
-        ),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "recall", "round": 0, "result": "hit"}),
-        ),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "inputs", "round": 0, "result": "ready"}),
-        ),
+        step(1, "round", 0),
+        step_with(1, "decide", 0, json!({"result": "proceed"})),
+        step_with(1, "recall", 0, json!({"result": "hit"})),
+        step_with(1, "inputs", 0, json!({"result": "ready"})),
         ev(
             1,
             "chat.assistant.final",
             json!({"text": "半截", "reason": "exhausted"}),
         ),
         ev(1, "session.config", flags(true, false, true)),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 1})),
-    ];
+        step(1, "round", 1),
+    ]);
     let head = turn_head(&events, 0);
     assert_eq!(
         head["anchor"],
@@ -710,32 +714,27 @@ fn turn_head_scopes_to_the_continuation_stage() {
 }
 
 #[test]
-fn turn_stages_only_sees_the_current_drive() {
-    let events = vec![
+fn turn_head_only_sees_the_current_drive() {
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        ev(1, "turn.stage", json!({"stage": "recall", "round": 0})),
-        ev(
-            1,
-            "turn.stage",
-            json!({"stage": "resume", "round": 0, "result": "approve"}),
-        ),
+        step(1, "round", 0),
+        step(1, "recall", 0),
+        step_with(1, "resume", 0, json!({"result": "approve"})),
         ev(1, "session.config", flags(false, false, true)),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
-    assert_eq!(
-        turn_stages(&events, 0),
-        json!([
-            {"scope": 1, "stage": "resume", "round": 0},
-            {"scope": 1, "stage": "round", "round": 0},
-        ])
-    );
+        step(1, "round", 0),
+    ]);
+    // `turn_stages` 退场后的同一性质由幕头表达：幕头只从**最新幕锚**起算，
+    // 首幕的召回格在锚之前 ⇒ 不算续幕做过召回。
+    let head = turn_head(&events, 0);
+    assert_eq!(head["anchor"], json!(seq(&events[3])), "锚是恢复格");
+    assert_eq!(head["round"], json!(0));
+    assert_eq!(head["resumed"], json!(true));
+    assert_eq!(head["recall_done"], json!(false));
 }
 
 #[test]
 fn turn_head_is_empty_without_facts() {
     assert_eq!(turn_head(&[], 0), Value::Null);
-    assert_eq!(turn_stages(&[], 0), json!([]));
     assert_eq!(turn_closed(&[], 0), json!([]));
 }
 
@@ -834,15 +833,11 @@ fn turn_head_has_final_is_false_in_every_not_done_yet_shape() {
 #[test]
 fn turn_head_has_final_ignores_responses_from_an_earlier_drive() {
     // 续写幕复用轮号：首幕那条空 `calls` 的响应不能替新幕开收束债（幕锚收窄）。
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         model_response(1, "m-1", json!([])),
-        ev(
-            1,
-            "turn.stage",
-            json!({ "stage": "resume", "round": 0, "result": "approve" }),
-        ),
-    ];
+        step_with(1, "resume", 0, json!({"result": "approve"})),
+    ]);
     assert_eq!(
         turn_head(&events, 0)["has_final"],
         json!(false),
@@ -880,24 +875,20 @@ fn turn_head_closeable_ignores_a_failure_raised_for_an_earlier_drive() {
     // 上一世那笔卡住的调用，而那笔的 `request` 在锚之前。少了「同一 `(port, id)`
     // 的请求也在本幕」这一条，恢复幕一进门就会判「该收束了」，把「重跑一次模型
     // 往返」读成「这一轮已经答不上来了」。
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
             1,
             EVENT_REQUEST,
             json!({ "port": "model", "id": "m-1", "attempt": 1 }),
         ),
-        ev(
-            1,
-            "turn.stage",
-            json!({ "stage": "resume", "round": 0, "result": "approve" }),
-        ),
+        step_with(1, "resume", 0, json!({"result": "approve"})),
         ev(
             1,
             EVENT_FAILED,
             json!({ "port": "model", "id": "m-1", "why": "lease_expired" }),
         ),
-    ];
+    ]);
     assert_eq!(
         turn_head(&events, 0)["closeable"],
         json!(false),
@@ -984,7 +975,7 @@ fn turn_head_tools_open_until_this_batchs_last_call_is_closed() {
 fn turn_head_tools_open_ignores_closures_from_an_earlier_drive() {
     // 续写幕复用轮号：首幕那条工具应答不能替新幕的同一 id 关账——否则新一批
     // 一开账就被判成「已经关过」，执行行抢先跑，工具批永无派发。
-    let events = vec![
+    let events = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         model_response(1, "m-1", json!([{"port": "tool", "id": "c-1"}])),
         ev(
@@ -992,13 +983,9 @@ fn turn_head_tools_open_ignores_closures_from_an_earlier_drive() {
             EVENT_RESPONSE,
             json!({ "port": "tool", "id": "c-1", "attempt": 1 }),
         ),
-        ev(
-            1,
-            "turn.stage",
-            json!({ "stage": "resume", "round": 0, "result": "approve" }),
-        ),
+        step_with(1, "resume", 0, json!({"result": "approve"})),
         model_response(1, "m-2", json!([{"port": "tool", "id": "c-1"}])),
-    ];
+    ]);
     assert_eq!(
         turn_head(&events, 0)["tools_open"],
         json!(true),
@@ -1009,10 +996,10 @@ fn turn_head_tools_open_ignores_closures_from_an_earlier_drive() {
 #[test]
 fn turn_head_follows_a_resume_anchor_back_to_an_archived_turn() {
     // 恢复一条被后续轮次归档的旧轮：切片从旧轮首条事件延伸到今天，最大轮号指向
-    // 新轮。表头必须跟着**最新幕锚**（恢复幕的 `turn.stage`）回到旧轮——
+    // 新轮。表头必须跟着**最新幕锚**（恢复幕的 `loop.step{id=resume}`）回到旧轮——
     // 否则收束 / 执行两行看的是新轮，旧轮的恢复永远无债可还（d 退役
     // `resume_anchor` 旁路的前提）。
-    let events = vec![
+    let events = opened(vec![
         ev_at(1, "user.message", json!({"text": "旧轮", "id": "u-1"}), 10),
         model_response(1, "m-1", json!([{"port": "tool", "id": "c-1"}])),
         ev_at(
@@ -1022,13 +1009,8 @@ fn turn_head_follows_a_resume_anchor_back_to_an_archived_turn() {
             30,
         ),
         ev_at(2, "user.message", json!({"text": "新轮", "id": "u-2"}), 100),
-        ev_at(
-            1,
-            "turn.stage",
-            json!({ "stage": "resume", "round": 0, "result": "approve" }),
-            200,
-        ),
-    ];
+        step_with(1, "resume", 0, json!({"result": "approve"})).with_ts(200),
+    ]);
     let head = turn_head(&events, 0);
     assert_eq!(head["scope"], json!(1), "表头回到被续写的旧轮");
     assert_eq!(head["resumed"], json!(true));
@@ -1044,7 +1026,7 @@ fn turn_head_tools_open_on_an_unanswered_wake_request() {
     // 恢复幕交回的那一笔：模型响应是首幕的（本幕没有新的模型应答），旧批次也
     // 早已关账——唯一「开着」的是唤醒请求本身。请求落在幕锚之前，按幕锚判会漏，
     // 故判据按请求的 seq 取「之后有没有终局」。
-    let mut events = vec![
+    let mut events = opened(vec![
         ev_at(1, "user.message", json!({"text": "hi", "id": "u-1"}), 10),
         model_response(1, "m-1", json!([{"port": "tool", "id": "c-1"}])),
         ev_at(
@@ -1059,13 +1041,8 @@ fn turn_head_tools_open_on_an_unanswered_wake_request() {
             json!({ "port": "tool", "id": "w-1", "attempt": 1, "intent": "execute" }),
             40,
         ),
-        ev_at(
-            1,
-            "turn.stage",
-            json!({ "stage": "resume", "round": 0, "result": "approve" }),
-            50,
-        ),
-    ];
+        step_with(1, "resume", 0, json!({"result": "approve"})).with_ts(50),
+    ]);
     assert_eq!(
         turn_head(&events, 0)["tools_open"],
         json!(true),
@@ -1204,16 +1181,11 @@ fn report_due_resets_quiet_on_assistant_speech() {
 #[test]
 fn report_due_resets_quiet_on_resume() {
     // 审批 / 回填发生在请求开始时：静默从那一刻起算，而不是从几天前那句用户话。
-    let events = vec![
+    let events = opened(vec![
         ev_at(1, "session.config", cfg(1000, 2), 10),
         ev_at(1, "user.message", json!({"text": "hi"}), 20),
-        ev_at(
-            1,
-            "turn.stage",
-            json!({"stage": "resume", "round": 0, "result": "approve"}),
-            9_000,
-        ),
-    ];
+        step_with(1, "resume", 0, json!({"result": "approve"})).with_ts(9_000),
+    ]);
     let due = report_due(&events, 9_500);
     assert_eq!(due["anchor"], json!(seq(&events[2])));
     assert_eq!(due["due"], json!(false));
@@ -1286,18 +1258,13 @@ fn report_due_respects_quota_and_switch() {
 fn report_due_quota_is_per_drive() {
     // 配额是请求作用域的量：续写幕重新开账，首幕报过不影响本幕的额度。
     let events = with_worked(
-        vec![
+        opened(vec![
             ev_at(1, "session.config", cfg(1000, 1), 10),
             ev_at(1, "user.message", json!({"text": "hi"}), 20),
             ev_at(1, "chat.assistant.reported", json!({"text": "报过"}), 30),
-            ev_at(
-                1,
-                "turn.stage",
-                json!({"stage": "resume", "round": 0, "result": "approve"}),
-                9_000,
-            ),
+            step_with(1, "resume", 0, json!({"result": "approve"})).with_ts(9_000),
             ev_at(1, "session.config", cfg(1000, 1), 9_001),
-        ],
+        ]),
         // 续写幕自己也跑完一批工具：轮数同样随幕重新开账。
         9_500,
     );
@@ -1317,16 +1284,11 @@ fn views_are_pure_same_slice_same_now_same_value() {
     // D-115 决策 1：`now` 是入参。同一份事实切片求值两次逐字相同；
     // 不同 `now` 只通过比较影响 `due`——视图自己不读时钟。
     let events = with_worked(
-        vec![
+        opened(vec![
             ev_at(1, "session.config", cfg(1000, 3), 10),
             ev_at(1, "user.message", json!({"text": "hi"}), 20),
-            ev_at(
-                1,
-                "turn.stage",
-                json!({"stage": "recall", "round": 0, "result": "hit"}),
-                30,
-            ),
-        ],
+            step_with(1, "recall", 0, json!({"result": "hit"})).with_ts(30),
+        ]),
         40,
     );
     assert_eq!(report_due(&events, 5_000), report_due(&events, 5_000));
@@ -1344,10 +1306,10 @@ fn views_are_pure_same_slice_same_now_same_value() {
 /// 那一圈零写入，环读成 `exhausted{no_progress}`。
 #[test]
 fn turn_head_model_open_until_the_round_is_settled() {
-    let base = vec![
+    let base = opened(vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
+        step(1, "round", 0),
+    ]);
     assert_eq!(turn_head(&base, 0)["model_open"], json!(false));
 
     let mut announced = base.clone();
