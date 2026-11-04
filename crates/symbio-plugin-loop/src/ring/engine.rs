@@ -138,6 +138,16 @@ fn plan(
                 continue;
             }
         }
+        // 「该端口的债全部还清才欠」读的是债状态，不是事实状态（归属：选债）。
+        if let Some(port) = row.when_no_open {
+            if view
+                .unresolved(scope)
+                .iter()
+                .any(|key| key.port == port)
+            {
+                continue;
+            }
+        }
         if let Some(unless) = &row.unless {
             if view.has_id(scope, unless) {
                 continue;

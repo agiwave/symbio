@@ -322,6 +322,9 @@ impl DebtSource for MultiSource {
                 if let Some(unless) = &spec.unless {
                     row = row.unless(unless.clone());
                 }
+                if let Some(port) = spec.when_no_open {
+                    row = row.when_no_open(port);
+                }
                 rows.push(row);
             }
         }

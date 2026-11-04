@@ -422,6 +422,26 @@ async fn when_gate_asks_the_host_whether_the_kind_exists() {
 }
 
 #[tokio::test]
+async fn when_no_open_gate_reads_debt_state() {
+    let rows = vec![DebtRow::new("m", "p1", "m", json!({})).when_no_open("p1")];
+    // 该端口没有未还债 ⇒ 本行可还。
+    let ctx = TestCtx::new(rows.clone()).with_executor("p1", Arc::new(Stub::ok()));
+    assert_eq!(drive(&ctx, S).await.dispatched, 1);
+
+    // 该端口已有一笔未收束的 request ⇒ 本行不欠。
+    let ctx = TestCtx::new(rows).with_executor("p1", Arc::new(Stub::ok()));
+    ctx.facts.lock().unwrap().push(Fact::new(
+        FactKind::Request,
+        DebtKey::new(S, "p1", "old", 1),
+        json!({}),
+        0,
+    ));
+    let report = drive(&ctx, S).await;
+    assert_eq!(report.dispatched, 0);
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+}
+
+#[tokio::test]
 async fn absent_executor_lands_failed_and_names_the_port() {
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))]);
     let report = drive(&ctx, S).await;

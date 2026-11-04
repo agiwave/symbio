@@ -91,6 +91,8 @@ pub struct DebtSpec {
     pub when: Option<String>,
     /// 排除条件：该 id 的事实已存在 ⇒ 本行不欠（与 `after` 同一种 id 引用）。
     pub unless: Option<String>,
+    /// 该端口的债全部还清才欠（读债状态）；环只读端口名，不解释语义。
+    pub when_no_open: Option<&'static str>,
     /// 单次派发租约（毫秒）。
     pub lease_ms: u64,
     /// 最多尝试次数（含首次）。
@@ -108,6 +110,7 @@ impl DebtSpec {
             after: None,
             when: None,
             unless: None,
+            when_no_open: None,
             lease_ms: 60_000,
             max_attempts: 3,
         }

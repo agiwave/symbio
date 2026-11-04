@@ -21,6 +21,8 @@ pub struct DebtRow {
     pub when: Option<String>,
     /// 该身份的事实已存在 ⇒ 本行不欠（排除条件）。环只读 id，不解释语义。
     pub unless: Option<String>,
+    /// 该端口的债全部还清才欠；`None` = 无此前提。环只读端口名，不解释语义。
+    pub when_no_open: Option<&'static str>,
     /// 一次派发的租约时长（毫秒）。
     pub lease_ms: u64,
     /// 最多尝试次数（含首次）。
@@ -38,6 +40,7 @@ impl DebtRow {
             after: None,
             when: None,
             unless: None,
+            when_no_open: None,
             lease_ms: 60_000,
             max_attempts: 3,
         }
@@ -58,6 +61,12 @@ impl DebtRow {
     /// 声明排除条件：该 id 的事实已存在 ⇒ 本行不欠。
     pub fn unless(mut self, id: impl Into<String>) -> Self {
         self.unless = Some(id.into());
+        self
+    }
+
+    /// 声明「该端口的债全部还清才欠」（读债状态，不读事实状态）。
+    pub fn when_no_open(mut self, port: &'static str) -> Self {
+        self.when_no_open = Some(port);
         self
     }
 
