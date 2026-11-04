@@ -42,8 +42,7 @@
 //!   子会话清单走 [`SessionStore::list_sub_sessions`]；
 //! - **级联删除**：删除父会话 = `remove_dir_all(父目录)`，子会话随之删除。
 //!
-//! 子会话 id 由系统生成，与顶层 id 同一格式约束。临时会话无目录概念，
-//! 因此不参与嵌套（`list_sub_sessions` 恒空、`session_dir` 恒 `None`）。
+//! 子会话 id 由系统生成，与顶层 id 同一格式约束。
 
 use super::*;
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
@@ -381,7 +380,7 @@ pub(super) async fn split_inline_messages(dir: &Path) -> Result<(), PluginError>
     atomic_write(&dir.join(SESSION_FILE), &SessionMetaFile::of(&summary)).await
 }
 
-/// 清单排序：`updated_at` 降序（两种驻留方式共用同一份，清单顺序不分叉）
+/// 清单排序：`updated_at` 降序（唯一清单顺序）
 pub(super) fn sort_summaries_desc(summaries: &mut [SessionSummary]) {
     summaries.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
 }

@@ -198,7 +198,7 @@ impl PersistentChatSession {
     pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatNode>, PluginError> {
         // ① 落事实（**先于**写缓存）。
         // 事实源句柄由存储层按会话构造一次（D-084 §2）——本函数不再拼目录自己 open。
-        // 打不开是**真失败**：与「没有事实源」（临时会话）必须是两种处置。
+        // 打不开是**真失败**：与「没有事实源」（会话目录不存在）必须是两种处置。
         let facts = match self.store.facts(&self.session_id) {
             Ok(facts) => facts,
             Err(why) => {
@@ -411,9 +411,8 @@ impl PersistentChatSession {
         }
 
         let context_messages = cfg.context_messages;
-        // 内存临时会话（`prune_on_write = false`）跳过物理裁剪：其历史本就不回看，
-        // 裁剪只会让同一轮内可复用的工具链凭空消失。
-        let prune_tool_history = cfg.prune_tool_history && self.prune_on_write;
+        // 工具链物理裁剪由配置控制：默认开启以控制磁盘与节点树体积。
+        let prune_tool_history = cfg.prune_tool_history;
         // `max_messages` 直接生效，0 = 不限制（与 `context_messages` 的取值语义一致）。
         // 历史上此处曾硬编码 `.max(500)`，导致设置面板中小于 500 的值静默失效。
         let max_turns = cfg.max_messages;

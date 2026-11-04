@@ -18,7 +18,7 @@
 use super::*;
 
 impl SessionStore {
-    /// 该会话的**唯一事实源句柄**（持久会话）；临时会话 / 目录不存在 ⇒ `None`。
+    /// 该会话的**唯一事实源句柄**；会话目录不存在 ⇒ `None`。
     ///
     /// 进程内按会话构造一次并缓存：所有引擎写方共享同一实例，`head` 只有一份、
     /// 内部写锁也只有一把。第二个 `WalStore::open` 不存在——这正是
@@ -28,7 +28,7 @@ impl SessionStore {
     /// **只发给引擎写点**：能力面拿到的是事实的值（读）或待落的值（写），
     /// 不是这个句柄（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构") §1）。
     ///
-    /// `Ok(None)` = 没有事实源（临时会话 / 目录不存在）；`Err` = 目录在、事实源
+    /// `Ok(None)` = 没有事实源（会话目录不存在）；`Err` = 目录在、事实源
     /// **打不开**——后者是真正的失败，调用方不得当成「没有事实源」静默跳过。
     pub(crate) fn facts(&self, session_id: &str) -> Result<Option<Arc<EventWalStore>>, String> {
         let mut cache = self.facts.lock().expect("会话事实源表锁中毒");
@@ -73,9 +73,7 @@ impl SessionStore {
     /// `own` = 这份事实源是否调用方自己的会话（按目录名比，同一个根下的两层
     /// 派生可能不同形）——`thread_private` 的收放靠它。
     pub(crate) fn recall_snapshots(&self, self_id: &str) -> Vec<FleetSnapshot> {
-        let Some(base) = self.disk() else {
-            return Vec::new();
-        };
+        let base = &self.base_dir;
         let own_name = paths::safe_id(self_id);
         let mut files: Vec<(std::time::SystemTime, PathBuf, u64)> = Vec::new();
         if let Ok(dir) = std::fs::read_dir(base) {
@@ -138,9 +136,7 @@ impl SessionStore {
     /// 统计聚合与淘汰覆盖层共用：两者都要求「所有会话」完整，单个事实源打不开
     /// ⇒ 跳过并出声，不因一个坏会话让整列消失。
     pub(crate) fn deep_snapshots(&self) -> Vec<Vec<Event>> {
-        let Some(base) = self.disk() else {
-            return Vec::new();
-        };
+        let base = &self.base_dir;
         paths::session_wals_deep(base)
             .into_iter()
             .filter_map(|wal| match EventWalStore::open_readonly(&wal) {

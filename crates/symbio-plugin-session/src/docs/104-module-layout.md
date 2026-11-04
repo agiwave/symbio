@@ -55,7 +55,7 @@ impl: done
 | 会话读写 | `chat_session.rs` + `chat_session/{read,write}.rs` | 读路径：三层清理与 `User` 轮次对齐的上下文装配；写路径：保存边界（轮数对齐裁剪 / 历史工具链裁剪 / 归档配对清理） |
 | 变更入口 | `commands.rs` | 会话与消息的**写语义**：新建 / 覆盖 / 删除会话，改写 / 截断 / 清空消息。VDFS（`write` / `delete` / `action`）与编排入口都只是它的调用方——「谁能改会话」的答案只在这一处（模块头说明它为什么仍在 `impl SessionPlugin` 上） |
 | 转写 | `transcript.rs` + `transcript/{frames,deliver,publish,inbox,supplements,autonomous}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、**落库回包的唯一出口**（`publish.rs`——「谁落库、谁发帧」那条 §3.4 硬不变量，原先住在 `plugin.rs` 里，被切的两片因此反过来引用汇编层，归位理由见该文件头）、状态帧与删除帧出口、收件箱入队与消费挑选、轮边界把 n 条补充并成**一条** `User` 消息，且「取批 + 合并 + 成形」的整体同步单入口 `take_supplement_batch_sync` 也住在本域（`supplements.rs`——存储裁剪按 User 轮次计数，逐条追加会多吃掉保留预算；单入口归位见 [D-081](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 裁决三）、core 执行期转写写柄的桥 `compression_writer`（`transcript.rs`——驱动器不再把 `Arc<Mutex<Transcript>>` 持作字段，经本域构造的写柄落格，裁决一第 3 条）、自主开轮的落格窗口（`autonomous.rs`，写臂识别 `meta.trigger` 后经它开这一轮） |
-| 持久化 | `store/mod.rs` | 一种磁盘布局、两种驻留方式；没有可切换的存储后端 |
+| 持久化 | `store/mod.rs` | 一种磁盘布局、一种驻留方式（落盘；D-329）；没有可切换的存储后端 |
 | 运行态 | `active.rs` + `runtime.rs` | `active.rs`：进程内运行态注册表（待消费请求、请求 id、中止信号、变更订阅）；`runtime.rs`：上一轮结局从生命周期事实折出的**投影**（D-083 §5.2） |
 | 能力与选项收集 | `capabilities.rs` | `collect_capabilities`（工具）与 `collect_options`（选项字段）两个 traverse 收集器，同处一地 |
 | 心跳 | **不住本插件**：`crates/symbio-plugin-heartbeat` | 空闲扫描与触发调度（15 秒节拍、错峰、每 tick 上限）连同它的设置工具与选项行是一个**独立插件**（落点判据 [D-077](../../../symbio-plugin-heartbeat/README.md "crates/symbio-plugin-heartbeat/README")）。本插件与它相接的只有两处：收件箱写臂识别 `meta.trigger`（`plugin/nodes.rs::trigger_declaration`）与自主开轮的落格窗口（`transcript/autonomous.rs`） |

@@ -1,17 +1,16 @@
-//! Session 存储 —— **一种磁盘布局，两种驻留方式**
+//! Session 存储 —— **一种磁盘布局，一种驻留方式**
 //!
 //! ## 它不是什么
 //!
-//! **没有可切换的存储后端**：会话只有一种落盘布局，临时会话只是「不持久化」。
-//! 为什么不做多后端选型（以及当初那个形状被推翻的两个前提），见
-//! D-008——此处不复述。
+//! **没有可切换的存储后端**：会话只有一种落盘布局。为什么不做多后端选型
+//! （以及当初那个形状被推翻的两个前提），见 D-008——此处不复述。
 //!
-//! 差异收成构造时的一次选型：
+//! 无事实源的驻留方式已退场（D-329）：会话只有磁盘一种驻留，因为事实源是
+//! 唯一真相——没有事实源的会话壳既读不到历史，也落不进格。
 //!
 //! | 驻留方式 | 构造 | 条目住在 |
 //!|---|---|---|
 //! | 持久会话 | [`SessionStore::new`]（根 = `<本插件目录>`） | 磁盘 `<根>/<id>/{session.json, messages.json}` |
-//! | 临时会话 | [`SessionStore::ephemeral`] | 进程内，退出即丢 |
 //!
 //! ## 事件事实源（子模块 `wal`）
 //!
@@ -50,14 +49,14 @@
 use super::types::{ChatNode, Session, SessionSummary};
 use crate::paths;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::plugin::PluginError;
 use symbio_kernel::store::Store;
 use symbio_sdk::turn::facts::FleetSnapshot;
-use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 mod fact_source;
 mod facts;
@@ -87,12 +86,10 @@ pub(crate) const MESSAGES_FILE_NAME: &str = "messages.json";
 /// 会话主文件名（一个会话目录内的唯一真源）
 const SESSION_FILE: &str = "session.json";
 
-/// 会话存储：一个具体类型，落盘与不落盘由构造时选定（见模块头）
+/// 会话存储：磁盘是唯一驻留（D-329）
 pub struct SessionStore {
-    /// 落盘根；`None` = 不落盘（临时会话），条目只活在 `mem` 里
-    base_dir: Option<PathBuf>,
-    /// 不落盘时的进程内条目表（落盘型恒空）
-    mem: RwLock<BTreeMap<String, Session>>,
+    /// 落盘根
+    base_dir: PathBuf,
     /// 每会话一把写入锁（见 `lock_writes`）
     write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// 每会话**一个**事实源句柄（见 `facts`）。
@@ -109,21 +106,7 @@ impl SessionStore {
     /// （= 本插件自己的目录），测试注入临时目录。
     pub fn new(base_dir: PathBuf) -> Self {
         Self {
-            base_dir: Some(base_dir),
-            mem: RwLock::new(BTreeMap::new()),
-            write_locks: Mutex::new(HashMap::new()),
-            facts: std::sync::Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// 不落盘的临时会话（`_t_` 前缀 / 空 `session_id`，以及编排器未交付
-    /// 会话句柄时的兜底会话）。
-    ///
-    /// 每次构造一张新表——临时会话的可见范围就是这一个会话句柄的生命周期。
-    pub fn ephemeral() -> Self {
-        Self {
-            base_dir: None,
-            mem: RwLock::new(BTreeMap::new()),
+            base_dir,
             write_locks: Mutex::new(HashMap::new()),
             facts: std::sync::Mutex::new(HashMap::new()),
         }
@@ -148,11 +131,6 @@ impl SessionStore {
         lock.lock_owned().await
     }
 
-    /// 落盘根；`None` = 本实例不落盘
-    fn disk(&self) -> Option<&Path> {
-        self.base_dir.as_deref()
-    }
-
     // ==================== 读 ====================
 
     /// 加载指定会话；**不存在时返回新建的空 Session**（不报错——"没有"与
@@ -173,9 +151,7 @@ impl SessionStore {
         &self,
         session_id: &str,
     ) -> Result<Option<Session>, PluginError> {
-        let Some(base) = self.disk() else {
-            return Ok(self.mem.read().await.get(session_id).cloned());
-        };
+        let base = &self.base_dir;
 
         let path = file_for(base, session_id);
         if path.exists() {
@@ -206,13 +182,7 @@ impl SessionStore {
 
     /// 持久化保存会话（整份覆盖）
     pub async fn save_session(&self, session: &Session) -> Result<(), PluginError> {
-        let Some(base) = self.disk() else {
-            self.mem
-                .write()
-                .await
-                .insert(session.id.clone(), session.clone());
-            return Ok(());
-        };
+        let base = &self.base_dir;
 
         // 归属路由：声明了 parent_session_id 的会话存入父目录的 sessions/ 子目录
         let dir = match session.parent_session_id() {
@@ -237,14 +207,7 @@ impl SessionStore {
 
     /// 删除指定会话（含所有关联存档与——顶层会话的——全部子会话）
     pub async fn delete_session(&self, session_id: &str) -> Result<(), PluginError> {
-        let Some(base) = self.disk() else {
-            self.mem.write().await.remove(session_id);
-            self.facts
-                .lock()
-                .expect("会话事实源表锁中毒")
-                .remove(session_id);
-            return Ok(());
-        };
+        let base = &self.base_dir;
 
         let dir = dir_for(base, session_id);
         if dir.exists() {
@@ -310,14 +273,11 @@ impl SessionStore {
     }
 
     /// 子会话清单：`<根>/<safe(父)>/sessions/*/session.json`，`updated_at` 降序。
-    /// 不落盘的临时会话恒空（无目录概念）。
     pub async fn list_sub_sessions(
         &self,
         parent_id: &str,
     ) -> Result<Vec<SessionSummary>, PluginError> {
-        let Some(base) = self.disk() else {
-            return Ok(Vec::new());
-        };
+        let base = &self.base_dir;
         let nested = dir_for(base, parent_id).join(SUB_SESSIONS_DIR);
         if !nested.exists() {
             return Ok(Vec::new());
@@ -329,16 +289,13 @@ impl SessionStore {
         Ok(summaries)
     }
 
-    /// 未经排序 / 未开窗的全量摘要（两种驻留方式共用）
+    /// 未经排序 / 未开窗的全量摘要
     async fn read_all_summaries(&self) -> Result<Vec<SessionSummary>, PluginError> {
-        let Some(base) = self.disk() else {
-            let mem = self.mem.read().await;
-            return Ok(mem.values().map(SessionSummary::of).collect());
-        };
+        let base = &self.base_dir;
         if !base.exists() {
             return Ok(Vec::new());
         }
-        let base = base.to_path_buf();
+        let base = self.base_dir.clone();
         tokio::task::spawn_blocking(move || read_summaries_in(&base))
             .await
             .map_err(|e| PluginError::InternalError(e.to_string()))
@@ -351,9 +308,7 @@ impl SessionStore {
     /// 为什么要补投影：投影字段是后来加的 `#[serde(default)]`，存量文件里没有，
     /// 少了它清单会静默退化成显示 id（见 docs/019-perf.md §11.3）。
     pub(crate) async fn migrate_split_messages(&self) -> Result<(), PluginError> {
-        let Some(base) = self.disk() else {
-            return Ok(());
-        };
+        let base = &self.base_dir;
         if !base.exists() {
             return Ok(());
         }
@@ -368,12 +323,9 @@ impl SessionStore {
 
     // ==================== 目录寻址 ====================
 
-    /// 该会话的本地目录（压缩存档、transcript 转存的落点）。
-    ///
-    /// 临时会话返回 `None`：存档路径解析因此退化为"无存档"，符合临时会话
-    /// 不回看历史的定位。
+    /// 该会话的本地目录（压缩存档、transcript 转存的落点）；目录不存在 ⇒ `None`。
     pub fn session_dir(&self, session_id: &str) -> Option<PathBuf> {
-        let base = self.disk()?;
+        let base = &self.base_dir;
         let top = dir_for(base, session_id);
         if top.exists() {
             return Some(top);

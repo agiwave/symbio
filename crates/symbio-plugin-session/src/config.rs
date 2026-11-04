@@ -47,8 +47,8 @@ pub use symbio_sdk::turn::node_build::PresentationTree;
 /// - `store_kind`（及 `StoreKind` 枚举）：在 `file` / `sqlite` / `memory`
 ///   三个后端间选型。sqlite 是「可配置但没人能配置」——前端零引用、默认恒为 `file`、
 ///   不支持子会话清单，且仍需一个磁盘目录放压缩存档；memory 表达的不是「另一种存储」
-///   而是「要不要持久化」。两者都不是同一件事的第二种实现，选型因此下沉到构造点
-///   （`store::SessionStore::{new, ephemeral}`），配置面少一个假开关。
+///   而是「要不要持久化」。两者都不是同一件事的第二种实现，且 D-329 已裁决
+///   无事实源的驻留方式退场——存储只有磁盘构造点 `store::SessionStore::new`。
 ///
 /// 旧配置里残留的上述键会被 serde 静默忽略（本结构未开 `deny_unknown_fields`），
 /// 无需数据迁移。

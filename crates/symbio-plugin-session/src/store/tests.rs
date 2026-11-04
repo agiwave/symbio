@@ -1,8 +1,6 @@
-//! 会话存储测试 —— 顶层平级 + 子会话嵌套路由 + 两种驻留方式的契约一致
+//! 会话存储测试 —— 顶层平级 + 子会话嵌套路由 + 会话 CRUD / 迁移 / 事实源。
 //!
-//! 第三类断言（`ephemeral_*`）的意义：证明「临时会话复用同一份会话引擎实现」是
-//! 安全的——不落盘型在 load 缺省语义、save upsert、delete、list 排序上与落盘型
-//! 逐条一致，上层 `PersistentChatSession` 无需为它特判（审计 B2 的原始理由）。
+//! 落盘是唯一驻留（D-329），因此不再有「不落盘型逐条同构」这一类断言。
 
 use super::*;
 use serde_json::json;
@@ -59,20 +57,6 @@ async fn load_session_checked_distinguishes_missing_from_empty() {
         "sess_none",
         "同一份存储上 load_session 仍按「未命中 = 空会话」回答"
     );
-
-    // 不落盘型同契约
-    let mem = SessionStore::ephemeral();
-    assert!(mem
-        .load_session_checked("sess_none")
-        .await
-        .unwrap()
-        .is_none());
-    save(&mem, &session_with("sess_mem", None)).await;
-    assert!(mem
-        .load_session_checked("sess_mem")
-        .await
-        .unwrap()
-        .is_some());
 }
 
 #[tokio::test]
@@ -202,74 +186,6 @@ async fn deleting_parent_cascades_sub_sessions() {
         .await
         .unwrap()
         .is_empty());
-}
-
-/// 不落盘型与落盘型**逐条同构**：会话引擎因此只有一份实现
-#[tokio::test]
-async fn ephemeral_store_matches_the_persistent_contract() {
-    let store = SessionStore::ephemeral();
-
-    // load 不存在的会话 → 新建空 Session（不报错、不留下任何东西）
-    let fresh = store.load_session("mem_missing").await.unwrap();
-    assert_eq!(fresh.id, "mem_missing");
-    assert!(store
-        .list_sessions_window(None, None)
-        .await
-        .unwrap()
-        .is_empty());
-
-    // save → load 往返；load 返回克隆，调用方在副本上改写不影响库内那份
-    let mut s = session_with("mem_a", None);
-    s.metadata["k"] = json!("v");
-    save(&store, &s).await;
-    let loaded = store.load_session("mem_a").await.unwrap();
-    assert_eq!(loaded.metadata["k"], "v");
-
-    // 同 id 再存 → upsert 而非重复
-    s.updated_at = 2000;
-    save(&store, &s).await;
-    assert_eq!(
-        store.list_sessions_window(None, None).await.unwrap().len(),
-        1,
-        "mem_a 的两次写不应变成两条"
-    );
-
-    // list 按 updated_at 降序（与落盘型同一份排序规则）
-    save(&store, &session_with("mem_b", None)).await; // 1000
-    let listed = store.list_sessions_window(None, None).await.unwrap();
-    assert_eq!(listed.len(), 2);
-    assert_eq!(listed[0].id, "mem_a", "2000 在前");
-    assert_eq!(listed[1].id, "mem_b");
-
-    // delete 后回到"空 Session"语义，清单里只剩没被删的那条
-    store.delete_session("mem_a").await.unwrap();
-    assert!(store
-        .load_session("mem_a")
-        .await
-        .unwrap()
-        .messages
-        .is_empty());
-    let listed = store.list_sessions_window(None, None).await.unwrap();
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, "mem_b");
-
-    // 无目录概念：存档路径解析退化为"无存档"，子会话清单恒空
-    assert!(store.session_dir("mem_a").is_none());
-    assert!(store.list_sub_sessions("mem_a").await.unwrap().is_empty());
-}
-
-/// 每个临时会话各一张表：句柄之间不串台
-#[tokio::test]
-async fn each_ephemeral_store_gets_its_own_table() {
-    let a = SessionStore::ephemeral();
-    let b = SessionStore::ephemeral();
-    save(&a, &session_with("shared", None)).await;
-
-    assert_eq!(a.list_sessions_window(None, None).await.unwrap().len(), 1);
-    assert!(
-        b.list_sessions_window(None, None).await.unwrap().is_empty(),
-        "临时会话的可见范围就是它自己的句柄生命周期"
-    );
 }
 
 /// 截断自愈：并发写交错留下的「短 JSON + 旧内容残留」必须还能读出首个完整会话
@@ -708,7 +624,7 @@ async fn facts_hands_out_one_shared_instance_per_session() {
 
 /// 目录在、事实源**打不开** ⇒ `Err`，不是 `Ok(None)`。
 ///
-/// 的判据：把「没有事实源」（临时会话，豁免）与「事实源打不开」（真失败）
+/// 的判据：把「没有事实源」（会话目录不存在，豁免）与「事实源打不开」（真失败）
 /// 压成同一种 None，会让主读切 WAL 之后的编辑静默丢失。复现手法：用**目录**占住
 /// 锁文件路径——`EventWalStore::open` 第一步就是打开它，跨平台都会失败。
 #[tokio::test]

@@ -64,7 +64,7 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 | 模块 | 残留类 | 为什么不是能力 |
 |---|---|---|
 | `chat_session.rs` / `read` / `write`（1061） | 基底 | 会话引擎的唯一实现：孤儿清理、轮次窗口、配置读取的共享语义 |
-| `store/`（`mod` 464 / `wal` 802 / `layout` 407 / `facts` 273） | 基底 | 一种磁盘布局两种驻留方式；`Store` 是机制层的端口（名册 #5 时序历史，`留 基底`） |
+| `store/`（`mod` 464 / `wal` 802 / `layout` 407 / `facts` 273） | 基底 | 一种磁盘布局、一种驻留方式（**无事实源的驻留方式已退役**，D-329）；`Store` 是机制层的端口（名册 #5 时序历史，`留 基底`） |
 | `transcript.rs`（621）+ `deliver` / `publish` / `supplements` | 基底 / 过程体 | 转写的唯一写入点与发射器；投递是过程本身，不是状态转移 |
 | `plugin.rs`（809）+ `plugin/*`（`nodes` / `run_actions` / `resident` / `words` / `vdfs_*`，约 3200） | 基底 | VDFS 地址面的路由、订阅与各域读写——本任务 §内容第 4 条点名的判据对象 |
 | `orchestrator.rs` + `orchestrator/*`（约 2550） | 环 / 过程体 | 一轮的生命周期：请求装配、消费循环、失败降级、限流、Stop 钩子。`consolidate.rs` 是压缩的**落点**（写口），不是压缩的策略 |

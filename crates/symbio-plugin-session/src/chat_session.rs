@@ -1,10 +1,7 @@
 //! 会话引擎（[`PersistentChatSession`]，唯一实现）。
 //!
-//! "要不要持久化"的差异下沉到存储（`store::SessionStore` 的
-//! `new` / `ephemeral` 两种构造）：内存态会话经 [`PersistentChatSession::detached`]
-//! 构造，因此与持久会话共享同一套孤儿清理、轮次窗口与配置读取语义（审计 B1）。
-//!
-//! - 持久化实现委托 `super::store::SessionStore` 落库；不落盘面向 `_t_` 临时会话。
+//! 会话只有磁盘一种驻留（D-329）：无事实源的临时会话壳已退场——它既读不到历史，
+//! 也落不进格。存储的构造见 `super::store::SessionStore::new`。
 //!
 //! ## 模块分工
 //!
@@ -50,11 +47,6 @@ pub struct PersistentChatSession {
     session_id: String,
     config: Arc<RwLock<SessionConfig>>,
     store: Arc<SessionStore>,
-    /// 写入期是否执行工具链物理裁剪（[`write::prune_historical_tool_calls`]）。
-    ///
-    /// 持久会话为 `true`（控制磁盘与节点树体积）；内存临时会话为 `false`——
-    /// 临时会话本就不回看历史，物理裁剪只会让同一轮内可复用的工具链凭空消失。
-    prune_on_write: bool,
 }
 
 impl PersistentChatSession {
@@ -67,34 +59,7 @@ impl PersistentChatSession {
             session_id,
             config,
             store,
-            prune_on_write: true,
         }
-    }
-
-    /// 不落盘的临时会话：同一份引擎逻辑 + [`SessionStore::ephemeral`]，零持久化。
-    ///
-    /// 审计 B1 的收敛点——原先这里存在第二份手写实现 `EphemeralChatSession`
-    /// （116 行），其 seq 分配、轮次 FIFO、剔孤儿、content 归一与持久版各写
-    /// 一遍，任何语义调整都要改两处且已经出现行为漂移（持久版有 prune、内存
-    /// 版没有；持久版配置动态读、内存版构造时快照）。"要不要持久化"是**存储**
-    /// 的差异，不是会话引擎的差异，故下沉到 store 层。
-    ///
-    /// `session_id` 由调用方决定：`_t_` 临时会话用真实传入 id，兜底会话用固定
-    /// `"ephemeral"`（随机 id 会让压缩前的 transcript 转存落到永不复现的目录名
-    /// 下，成为无法关联的孤儿存档）。
-    pub fn ephemeral(session_id: impl Into<String>, config: Arc<RwLock<SessionConfig>>) -> Self {
-        Self {
-            session_id: session_id.into(),
-            config,
-            store: Arc::new(SessionStore::ephemeral()),
-            prune_on_write: false,
-        }
-    }
-
-    /// 同 `ephemeral`，但配置以**值快照**传入（调用方无需自行构造
-    /// `Arc<RwLock<_>>`）：内存会话不接 `session/config` 热更新，快照即其终生命周期的配置。
-    pub fn detached(session_id: impl Into<String>, config: SessionConfig) -> Self {
-        Self::ephemeral(session_id, Arc::new(RwLock::new(config)))
     }
 
     /// 读当前配置；锁被占时回落到 `SessionConfig::default()`。

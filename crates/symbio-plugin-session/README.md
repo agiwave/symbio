@@ -70,8 +70,8 @@ flowchart TD
 session:
  # 存储目录：本插件自己的目录（父插件经 PLUGIN_DIR 告知，装配态即 <homedir>/session/），
  # 跟随系统目录 (homedir) 切换，不作为配置项暴露。
- # 注：会话只有一种落盘布局，没有可切换的"存储后端"。临时会话（`_t_` 前缀 / 空 id）
- # 不落盘，由构造点选择，与用户配置无关。
+ # 注：会话只有一种落盘布局，没有可切换的"存储后端"；也只有磁盘一种驻留
+ # （无事实源的临时会话已退场，D-329），与用户配置无关。
  # 注：会话默认不绑定智能体（纯工具模式）。智能体选择属于前端会话级偏好，
  # 由 session.metadata.agent_id 按会话记录，后端不提供 default_agent。
  
@@ -85,7 +85,7 @@ session:
  context_messages: 6 # 发送给 AI 的对话上下文滑动窗口轮数 (以 User 消息轮次对齐截取；也是存储期 prune 的保留分水岭)
  
  # 4. 存储期工具链裁剪
- prune_tool_history: true # 是否在落库时物理裁剪 context_messages 分水岭之前的历史工具链（Tool/ToolCall/Reasoning 及其子节点；只删节点不删归档；内存临时会话自动跳过）
+ prune_tool_history: true # 是否在落库时物理裁剪 context_messages 分水岭之前的历史工具链（Tool/ToolCall/Reasoning 及其子节点；只删节点不删归档）
  
  # 5. 会话记忆（<会话目录>/MEMORY.md，可编辑地址 <根>/session/<id>/MEMORY.md）
  memory_max_bytes: 16384 # 单次**写入**的字节上限，超出直接拒绝（不截断、不部分写入）
@@ -226,7 +226,7 @@ session:
 
 * **段的来源是端口，不是本模块的固定列表**（DE-025 D-215 / D-220）：`symbio_plugin_api::context::ContextProvider` 由能力包注册、`inventory` 编译期收集，`loop` 按节奏收集、按 owner 序拼接。本仓当前提交三条：`RecallProvider` 产 `slots::RECALL`（`owner() == "loop"`，发言级节奏）、`DelegateProvider` 产 `slots::DELEGATE`（请求级节奏）、`ReadySetProvider` 产 `slots::READYSET`（随任务能力包提交，发言级节奏）。加一类上下文 = 加一条 provider，不改 `loop`。
 * **具体规则**（唯一入口 `build_request_sections`，段各自独立、非空才插）：
- * **长期记忆召回段 (Recall Context)**：`run_recall` 在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档与无目录的临时会话不读），转成端口形状（`RecallFacts`）交给 provider；`RecallProvider` 渲染出段落（`memory_events::prompt_section`，抬头 `【长期记忆】`），非空时产出 `meta.kind = "recall_context"` 的节点。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
+ * **长期记忆召回段 (Recall Context)**：`run_recall` 在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档或无目录时不读），转成端口形状（`RecallFacts`）交给 provider；`RecallProvider` 渲染出段落（`memory_events::prompt_section`，抬头 `【长期记忆】`），非空时产出 `meta.kind = "recall_context"` 的节点。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
  * **任务调度段 (Ready Set)**：`ReadySetProvider`（随任务能力包 `symbio-plugin-task` 提交）读本轮事实切片与**事实里的就绪集容量**（`session.config` 载荷的 `readyset_cap`，D-252）调 `task::prompt_section`（**只读**开档、不创建事实源，`off` 档不读），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**候选集空 ⇒ 整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
  * **委派者真源段 (Delegate Context)**：`DelegateProvider`（请求级节奏，`meta.kind = "delegate_context"`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）+ 能力目录 + worker 进展渲染成一段。输入是 `LiveInputs { tools, delegate, workers }`：工具清单是**收集成形后**的那份（发言级取不齐），委派结论是控制面 Q1 判完的三态（`NotJudged` / `Start { reason }` / `Idle`）。provider 不读配置、不重判；渲染函数仍是 [../loop/chat_loop/delegate.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 `delegate_section`。
  * **段的消费形态**：`crates/symbio-plugin-api/src/context.rs::sections` 按 owner 字典序取出视图里**全部**段（不按下标——缺一段时下标全部左移；也不按名字查表——那会与 `slots` 形成第二处拼写），拼成一条 `system` 前缀消息交给运行器。**视图次序 = 装配次序 = 模型读到的次序**，而装配次序只与 owner 字典序有关（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
@@ -319,7 +319,7 @@ session:
 | **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `crates/symbio-plugin-session/src/chat_session/write.rs` |
 | **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（[../loop/turn_runner.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | `crates/symbio-plugin-model/src/stream.rs` |
 | **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `crates/symbio-plugin-session/src/chat_session/read.rs`<br>`crates/symbio-plugin-loop/src/context.rs` |
-| **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `crates/symbio-plugin-session/src/chat_session/write.rs`（`prune_historical_tool_calls`） |
+| **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收） | `crates/symbio-plugin-session/src/chat_session/write.rs`（`prune_historical_tool_calls`） |
 | **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | [../loop/context/view.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") |
 
 通过这套**五维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求层（`build_request_sections` 三段注入，只追加不改写）→ 语义压缩层（`auto_compress` 语义合并）"的上下文治理链路，实现了高保真度的会话还原与清爽的本地持久化。请求体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）——模型看到的每条历史都能在网格里找到出处，`prompt_fidelity` 每轮复核这一点。

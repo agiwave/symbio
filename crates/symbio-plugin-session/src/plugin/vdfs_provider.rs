@@ -182,7 +182,7 @@ impl SessionPlugin {
 
     /// 运行态的**唯一读取入口**：存储交事实投影，名册交进程内缓存并合并。
     ///
-    /// 事实投影只是 `Option`（无 WAL 的 v1 会话 / 临时会话没有），名册的合并规则
+    /// 事实投影只是 `Option`（无 WAL 的 v1 会话没有），名册的合并规则
     /// 决定「缓存优先、无缓存读投影」（见 `ActiveSessionManager::runtime_of`）。
     pub(super) async fn runtime_of(&self, id: &str) -> SessionRuntime {
         let facts = match self.get_store().await {
