@@ -79,7 +79,7 @@ use crate::turn_exec::{
     UI_FRAME_CAPACITY,
 };
 // 环只从本层借这三样中性件（类型与停机判据），不经由带世界词的模块路径。
-pub(crate) use crate::turn_exec::{ends_the_drive, Ctx, HeadParts};
+pub(crate) use crate::turn_exec::HeadParts;
 use crate::turn_runner::{
     artifact_verdict, begin_turn, DialogFacts, NodeFactsFn, RoundInjector, StreamNodeFacts,
     TurnInput, TurnOutcome, TurnSession, TurnSessionBegin,
@@ -845,30 +845,9 @@ fn into_running(
 
 // ── 小件 ────────────────────────────────────────────────────────────────
 
-/// 停机收束：落兜底格且 `reason = exhausted`。
-pub(crate) async fn exhausted(
-    st: &mut StageRuntime,
-    detail: &str,
-) -> Result<TurnOutcome, TurnExecExit> {
-    st.draft
-        .exhausted(st.store.as_ref(), st.llm.as_ref(), detail)
-        .await
-        .map_err(append_exit)
-}
-
 /// 落格失败的统一出口（与 [`open_turn`] 的同一句话）。
 pub(crate) fn append_exit(e: AppendError) -> TurnExecExit {
     TurnExecExit::Failed(PluginError::InternalError(format!("运行器落格失败：{e:?}")))
-}
-
-pub(crate) fn actor_exit(e: ActorError) -> TurnExecExit {
-    match e {
-        // 读失败：轮首那一片的会话端口读不出来，本轮没有可关的账。
-        ActorError::Read(e) => TurnExecExit::Failed(e),
-        ActorError::Append(e) => {
-            TurnExecExit::Failed(PluginError::InternalError(format!("本幕落格失败：{e:?}")))
-        }
-    }
 }
 
 /// 开一幕失败（`open-turn` / `resume-turn` 两行的出口）：失败原样，其余按内部错误。
@@ -884,12 +863,6 @@ fn to_exit(err: TurnExit) -> TurnExecExit {
 pub(crate) fn no_stage() -> TurnExecExit {
     TurnExecExit::Failed(PluginError::InternalError(
         "环在幕外推进（按构造不可达）".into(),
-    ))
-}
-
-pub(crate) fn no_host() -> TurnExecExit {
-    TurnExecExit::Failed(PluginError::InternalError(
-        "控制面的幕没有宿主面（按构造不可达）".into(),
     ))
 }
 

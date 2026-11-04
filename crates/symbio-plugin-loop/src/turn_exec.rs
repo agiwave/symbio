@@ -1693,6 +1693,37 @@ pub(crate) fn ends_the_drive(e: &Event, turn: u64) -> bool {
         && e.payload.get("status").and_then(|v| v.as_str()) == Some("pending")
 }
 
+/// 停机收束：落兜底格且 `reason = exhausted`。
+///
+/// 随环下沉到中性段（`D-321`）：环不该为了一个出口向编排入口借符号。
+pub(crate) async fn exhausted(
+    st: &mut crate::entry::StageRuntime,
+    detail: &str,
+) -> Result<super::turn_runner::TurnOutcome, crate::entry::TurnExecExit> {
+    st.draft
+        .exhausted(st.store.as_ref(), st.llm.as_ref(), detail)
+        .await
+        .map_err(crate::entry::append_exit)
+}
+
+/// 动作失败的中性出口。
+pub(crate) fn actor_exit(e: ActorError) -> crate::entry::TurnExecExit {
+    match e {
+        // 读失败：轮首那一片的会话端口读不出来，本轮没有可关的账。
+        ActorError::Read(e) => crate::entry::TurnExecExit::Failed(e),
+        ActorError::Append(e) => crate::entry::TurnExecExit::Failed(PluginError::InternalError(
+            format!("本幕落格失败：{e:?}"),
+        )),
+    }
+}
+
+/// 控制面的幕没有宿主面（按构造不可达）。
+pub(crate) fn no_host() -> crate::entry::TurnExecExit {
+    crate::entry::TurnExecExit::Failed(PluginError::InternalError(
+        "控制面的幕没有宿主面（按构造不可达）".into(),
+    ))
+}
+
 #[cfg(test)]
 #[path = "turn_exec.test.rs"]
 mod tests;

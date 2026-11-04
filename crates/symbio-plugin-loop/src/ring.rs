@@ -11,11 +11,9 @@
 //! 环**不**知道幕、阶段号或轮次：开一幕、收一幕、幕间接续都在 [`crate::entry`]。
 //! 环`不`解释行名 / 端口名 / 业务语义（`D-118` 决策 2）；它不按任何序号分支。
 
-use crate::entry::{
-    actor_exit, ends_the_drive, exhausted, no_host, Ctx, DriveState, FrameEnd, HeadParts,
-    StageRuntime, TurnExecExit as Exit,
-};
+use crate::entry::{DriveState, FrameEnd, StageRuntime, TurnExecExit as Exit};
 use crate::loop_rows;
+use crate::turn_exec::{actor_exit, ends_the_drive, exhausted, no_host, Ctx, HeadParts};
 use symbio_kernel::event::Seq;
 
 /// 驱动一幕直到它收束（或判成答话）。
