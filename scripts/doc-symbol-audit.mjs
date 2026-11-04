@@ -58,7 +58,7 @@
  *      （空理由视为未承认，与 grep-audit / dead-code-audit 同一约定）。代码里查无此名
  *      有两种合法情形，理由要写明是哪一种：**历史**（「已判删（D-NNN）」）或**目标态**
  *      （「09 的 S2 才落这个常量」——施工方案指认未来名字是本分，不该被当成漂移）；
- *   4. 退役文档登记（D-327）：表 `RETIRED_MD` 列出的**历史任务文档**全文不判——
+ *   4. 退役文档登记（D-327）：集合 `RETIRED_MD` 列出的**历史任务文档**全文不判——
  *      它们是当时的实施记录，逐条 allow 只会把同一件事写十遍；范围与生效条件见 D-327。
  *
  * 失效形态（回归测试逐条钉住）：
@@ -130,10 +130,10 @@ const ALLOW_RE = /<!--\s*doc-symbol-allow:\s*([^>]*?)\s*-->/
  *   - 生效条件：条目与文件同生命周期——文件删掉或内容被重写进现行文档时，
  *     同提交删掉这一行；被复用进现行文档的段落要按现行代码改指，不得借本条豁免。
  */
-const RETIRED_MD = new Map([
-  ['docs/007-task/007-loop存量能力迁移.md', 'D-327'],
-  ['docs/007-task/031-loop文件级审计与世界语义重分批.md', 'D-327'],
-  ['docs/007-task/033-旁路替换取材与退役.md', 'D-327'],
+const RETIRED_MD = new Set([
+  'docs/007-task/007-loop存量能力迁移.md',
+  'docs/007-task/031-loop文件级审计与世界语义重分批.md',
+  'docs/007-task/033-旁路替换取材与退役.md',
 ])
 
 let errors = 0
@@ -192,10 +192,10 @@ if (mdFiles.length === 0) {
 
 // 退役文档登记与文件同生命周期：文件没了而条目还在 ⇒ 承认通道变成永久空转。
 // 目录整个不在（回归夹具的最小仓库）⇒ 本条不适用，与 D-011「名册不在 ⇒ 不适用」同口径。
-for (const [rel, code] of RETIRED_MD) {
+for (const rel of RETIRED_MD) {
   if (!existsSync(join(REPO_ROOT, dirname(rel)))) continue
   if (!mdFiles.includes(rel)) {
-    report(rel, 1, code, '退役文档登记的条目已不在仓内——文件删了就同提交删掉这一行')
+    report(rel, 1, 'D-005', '退役文档登记的条目已不在仓内（D-327）——文件删了就同提交删掉这一行')
   }
 }
 

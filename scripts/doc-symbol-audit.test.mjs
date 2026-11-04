@@ -643,5 +643,5 @@ test('退役文档登记：表内文件没了而条目还在 ⇒ 红（承认通
     'README.md': '正常文档。\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /D-327 .*退役文档登记的条目已不在仓内/)
+  assert.match(r.stdout, /D-005 .*退役文档登记的条目已不在仓内（D-327）/)
 })
