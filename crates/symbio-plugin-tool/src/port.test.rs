@@ -512,6 +512,7 @@ fn authz_call(
     )
 }
 
+/// 一笔 gate 调用：只判一次，不执行（`authorize_only`），模式默认交互。
 fn debt_input(risk: &str, threshold: &str, approved: bool) -> serde_json::Value {
     serde_json::json!({
         "tool": "shell.exec",
@@ -520,6 +521,8 @@ fn debt_input(risk: &str, threshold: &str, approved: bool) -> serde_json::Value 
         "risk": risk,
         "threshold": threshold,
         "approved": approved,
+        "authorize_only": true,
+        "mode": "interactive",
     })
 }
 
@@ -543,14 +546,68 @@ async fn high_risk_without_basis_is_denied_and_the_debt_fails() {
     let (exec, input, captured) = authz_call(debt_input("high", "low", false));
     let out = ToolPort.execute(exec, input).await;
     assert!(
-        matches!(out.error, Some((PortErrorClass::NonRetryable, _))),
-        "拒绝必须判死，不能静默放行：{out:?}"
+        out.error.is_none() && out.facts.is_empty(),
+        "gate 调用只判不执行：{out:?}"
     );
     let facts = captured.lock().unwrap();
     assert_eq!(facts[0].kind, "authz.denied");
+    // 线上契约：`detail` 是措辞（e2e 读它），`why` 是内部原因码。
+    assert_eq!(
+        facts[0].payload["detail"],
+        serde_json::json!("needs_approval")
+    );
     assert_eq!(
         facts[0].payload["why"],
         serde_json::json!("approval_required")
+    );
+}
+
+#[tokio::test]
+async fn auto_mode_denies_with_permission_denied() {
+    let mut payload = debt_input("high", "low", false);
+    payload["mode"] = serde_json::json!("auto");
+    let (exec, input, captured) = authz_call(payload);
+    let _ = ToolPort.execute(exec, input).await;
+    let facts = captured.lock().unwrap();
+    assert_eq!(facts[0].kind, "authz.denied");
+    assert_eq!(
+        facts[0].payload["detail"],
+        serde_json::json!("permission_denied")
+    );
+}
+
+#[tokio::test]
+async fn wake_approval_grants_and_rejection_denies_without_risk_comparison() {
+    // 批准：用户动作直接放行（route-only 记为 deferred）。
+    let (exec, input, captured) = authz_call(serde_json::json!({
+        "tool": "shell.exec",
+        "id": "tool-w1",
+        "attempt": 1,
+        "authorize_only": true,
+        "resume": "approve",
+    }));
+    let _ = ToolPort.execute(exec, input).await;
+    {
+        let facts = captured.lock().unwrap();
+        assert_eq!(facts[0].kind, "authz.granted");
+        assert_eq!(facts[0].payload["basis"], serde_json::json!("approved"));
+        assert_eq!(facts[0].payload["deferred"], serde_json::json!(true));
+    }
+
+    // 拒绝：用户给的判死，措辞 `user_rejected`。
+    let (exec, input, captured) = authz_call(serde_json::json!({
+        "tool": "shell.exec",
+        "id": "tool-w2",
+        "attempt": 1,
+        "authorize_only": true,
+        "resume": "reject",
+    }));
+    let _ = ToolPort.execute(exec, input).await;
+    let facts = captured.lock().unwrap();
+    assert_eq!(facts[0].kind, "authz.denied");
+    assert_eq!(
+        facts[0].payload["detail"],
+        serde_json::json!("user_rejected")
     );
 }
 
@@ -583,6 +640,7 @@ async fn route_only_tools_are_deferred_not_granted() {
         "attempt": 1,
         "risk": "unknown",
         "threshold": "medium",
+        "authorize_only": true,
     }));
     let _ = ToolPort.execute(exec, input).await;
     let facts = captured.lock().unwrap();
@@ -597,7 +655,14 @@ async fn invalid_calls_are_denied_before_any_approval_reading() {
     payload["invalid"] = serde_json::json!(true);
     let (exec, input, captured) = authz_call(payload);
     let out = ToolPort.execute(exec, input).await;
-    assert!(out.error.is_some());
+    assert!(
+        out.error.is_none(),
+        "gate 只落事实，不借 error 判死：{out:?}"
+    );
+    assert_eq!(
+        captured.lock().unwrap()[0].payload["detail"],
+        serde_json::json!("invalid_tool_call")
+    );
     assert_eq!(
         captured.lock().unwrap()[0].payload["why"],
         serde_json::json!("invalid_call")

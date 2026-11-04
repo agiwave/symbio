@@ -13,7 +13,7 @@ use symbio_kernel::plugin::PluginInvokeRequest;
 use symbio_plugin_api::port::ports;
 
 use super::super::tool_dispatch::{
-    authorize_call, call_key as call_id_of, open_calls, CallOutcome as Outcome, ToolBegin as Begin,
+    call_key as call_id_of, denied_debt, open_calls, CallOutcome as Outcome, ToolBegin as Begin,
     ToolDispatch as Dispatcher, ToolInFlight as Flight, ToolPortCall as PortCall,
 };
 use super::*;
@@ -904,31 +904,10 @@ pub(crate) async fn open_round(
     }
 }
 
-/// 授权（`authorize-tool` 行的动作，**一行一笔**）：为这一笔已开账的调用落放行 / 拒绝。
-///
-/// 行键就是调用标识；草稿里没有这一笔时，恢复幕的唤醒请求是唯一来源。
-pub(crate) async fn authorize_round(
-    run: &mut Prepared,
-    store: &dyn Store<Event = Event>,
-    ctx: Option<&Arc<dyn PluginInvokeRequest>>,
-    dispatch: &dyn Dispatcher,
-    id: &str,
-) {
-    let turn = run.turn;
-    let user_seq = run.user_seq;
-    let drive_seq = run.drive_seq;
-    if let Some(call) = run.calls.get_mut(id) {
-        authorize_call(store, ctx, turn, user_seq, drive_seq, call).await;
-        return;
-    }
-    if let Some(mut call) = take_wake_call(run, store, dispatch, id).await {
-        authorize_call(store, ctx, turn, user_seq, drive_seq, &mut call).await;
-        run.calls.insert(id.to_string(), call);
-    }
-}
-
 /// 从唤醒请求里取回**这一笔**（按调用标识；不拿第一批）。
-async fn take_wake_call(
+///
+/// 授权动作的入口之一：草稿里没有这一笔时，恢复幕的唤醒请求是唯一来源。
+pub(crate) async fn take_wake_call(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,
     dispatch: &dyn Dispatcher,
@@ -1000,6 +979,21 @@ pub(crate) async fn land_round(
         let facts = store.range(symbio_kernel::event::Seq::new(0));
         let now = run.now_ms();
         let Some(call) = run.calls.get(id).cloned() else {
+            // 被拒的债**没有** `sent`：授权行已落 `authz.denied`，这里直接从那条
+            // 事实关账（`deny-tools` 的终局）。按事实判，不凭草稿，也不等租约——
+            // 没有派出去的东西不会有「没收到应答」。
+            if let Some((why, attempt)) = denied_debt(&facts, id) {
+                let denied = PortCall {
+                    model_id: String::new(),
+                    call: super::super::port::Call::new(ports::TOOL, id, attempt),
+                    name: String::new(),
+                    granted: false,
+                    deny_why: Some(why),
+                    sent: false,
+                    wake: None,
+                };
+                dispatch.finish(store.as_ref(), &denied, None).await;
+            }
             // 账本里没有这一笔：等待方随进程没了（日志上有 `sent`、草稿里没有）。
             // 与模型侧同一套租约判据：**未过期就先不动**（这一圈合法地不前进，
             // `waiting` 为真），过期才判死——句柄表只是把手，过没过期只问事实。

@@ -272,6 +272,11 @@ impl RunnerFixture {
             dispatch,
             host: None,
         };
+        // 授权是端口 gate 调用：裸幕夹具也要一条能找得到工具端口行的请求机。
+        let request_ctx = match request_ctx {
+            Some(ctx) => Some(ctx),
+            None => Some(super::super::test_support::port_ctx().await),
+        };
         let end = super::super::stage_driver::drive_prepared(stage, None, request_ctx, actors)
             .await
             .map_err(|exit| match exit {
@@ -2186,13 +2191,13 @@ mod tool_round_tests {
                 return ToolBegin::None;
             };
             if !call.granted {
-                let why = call.deny_why.unwrap_or("denied");
+                let why = call.deny_why.clone().unwrap_or_else(|| "denied".into());
                 if let Err(e) = super::super::super::port::failed(
                     store.as_ref(),
                     &call.call,
                     turn_no,
                     produced_by,
-                    why,
+                    &why,
                 ) {
                     panic!("替身拒绝落格失败：{e:?}");
                 }
@@ -2286,6 +2291,7 @@ mod tool_round_tests {
             ))
                 as std::sync::Arc<dyn Capability>))
             .await;
+        super::super::super::test_support::put_tool_port_row(&visitor).await;
         ctx.set(CAPABILITY_VISITOR, visitor as std::sync::Arc<dyn Registry>);
         ctx.set(RISK_LEVEL, "low".to_string());
         ctx

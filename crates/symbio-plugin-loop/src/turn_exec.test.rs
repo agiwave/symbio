@@ -1050,6 +1050,8 @@ async fn control_harness_with(
     ) {
         visitor.put(row).await;
     }
+    // 工具授权走 `port=tool` 的 gate 调用：能力表里也要有工具端口行。
+    super::super::test_support::put_tool_port_row(&visitor).await;
     h.ctx = ctx;
     h.ctx.set(CAPABILITY_VISITOR, visitor);
     h.message = Some(cm::ChatNode {

@@ -1839,6 +1839,46 @@ fn a_denied_tool_call_owes_a_close_only() {
     assert!(!owes("deny-tools", &closure, 0));
 }
 
+/// **新形态**：`request → authz.denied → failed`，中间**没有** `sent`。
+///
+/// 拒绝不允许带 `sent`（工具有没有被派出去）；这就要求关账判据承认这一形态：
+/// 收尾行仍欠一次 `failed`，而租约视图不该把这条债当成「已派出、等应答」——
+/// 否则一条从未启动的调用会被反复判死。
+#[test]
+fn a_request_closes_as_failed_without_ever_being_sent() {
+    let refused = vec![tool_request("c-1"), tool_denied("c-1")];
+    assert!(
+        owes("deny-tools", &refused, 0),
+        "被拒的一笔仍欠一次收尾（落 `failed`）"
+    );
+    assert!(
+        !super::stale_sent_hit(&refused, 0, ports::TOOL, "c-1", None, 0),
+        "没有 `sent` ⇒ 不在飞，租约不该判死它"
+    );
+
+    let mut closed = refused;
+    closed.push(ev(
+        1,
+        symbio_kernel::event::EVENT_FAILED,
+        json!({
+            "port": "tool",
+            "id": "c-1",
+            "attempt": 1,
+            "why": "denied",
+            "cause": "denied",
+        }),
+    ));
+    assert!(!owes("deny-tools", &closed, 0), "`failed` 关掉这一笔");
+    assert!(!super::stale_sent_hit(
+        &closed,
+        0,
+        ports::TOOL,
+        "c-1",
+        None,
+        0
+    ));
+}
+
 #[test]
 fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
     let dispatched = vec![tool_request("c-1"), tool_granted("c-1"), tool_sent("c-1")];

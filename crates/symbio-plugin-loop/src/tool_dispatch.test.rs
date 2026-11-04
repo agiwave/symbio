@@ -18,7 +18,8 @@
 //! 授权动作落下 `authz.granted(port=tool)` 那一刻，`dispatch-tool` 必须**再次欠着**
 //! ——「用户批了」在事实面上的全部含义就是「这笔派发重新成为一笔待还的账」。
 //! 行层那几条合成用例（`loop_rows.test.rs`）对的是声明；这里对的是写方：
-//! `ToolPort::authorize_calls` / `begin_calls` 真的产出那种载荷、真的换一笔债。
+//! `gate_authorize`（授权判定在端口执行体，用例见 `symbio-plugin-tool/src/port.test.rs`）
+//! 与 `ToolPort::begin_call` 真的产出那种载荷、真的换一笔债。
 //!
 //! 场景二（补充插话）不在这里：补充不产生任何端口事实，它的判据是「`await-tool`
 //! 的 `until` 没有多一个出口」，归行表用例（`a_supplement_does_not_answer_the_in_flight_tool`）。
@@ -32,15 +33,10 @@ use std::sync::Arc;
 use super::super::tool_exec::{ABORTED, NOT_EXECUTED};
 use super::loop_rows;
 use super::port;
-use super::{
-    authorize_one, authorize_wake, CallOutcome, ToolPort, ToolPortCall, ToolPortPolicy, Wake,
-    WakeSpec,
-};
-use symbio_kernel::capability::CapabilityRiskLevel;
-use symbio_kernel::event::{Event, Seq, EVENT_REQUEST, EVENT_SENT};
+use super::{CallOutcome, ToolPort, ToolPortCall, Wake, WakeSpec};
+use symbio_kernel::event::{Entity, Event, Seq, Verb, EVENT_REQUEST, EVENT_SENT};
 use symbio_kernel::store::{EventStore, Store};
 use symbio_plugin_api::events::EVENT_AUTHZ_DENIED;
-use symbio_sdk::capability::ApprovalGrants;
 
 use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
@@ -74,6 +70,53 @@ fn awaits(store: &EventStore) -> bool {
     owes("await-tool", store)
 }
 
+/// 授权事实的生产写方现在是端口执行体；夹具按同一形状落一条，供读侧 / 行表用例。
+///
+/// 环只读、不写——这一条夹具不替代 gate，只是把「已经判过」的前提摆出来。
+fn grant(store: &EventStore, call: &port::Call) {
+    let _ = store.append(
+        Event::pending(
+            format!("grant-{}-{}", call.id, call.attempt),
+            EVENT_AUTHZ_GRANTED,
+            Entity::Scope,
+            Verb::Asserted,
+            TURN,
+            "authorizer",
+        )
+        .with_produced_by(USER_SEQ)
+        .with_payload(json!({
+            "port": "tool",
+            "id": call.id,
+            "attempt": call.attempt,
+            "tool": "shell",
+            "risk": "unknown",
+            "deferred": true,
+        })),
+    );
+}
+
+/// 拒绝事实（gate 的另一种结论）：`detail` 是线上契约的措辞。
+fn deny_at(store: &EventStore, call: &port::Call, detail: &str) {
+    let _ = store.append(
+        Event::pending(
+            format!("deny-tool-{}-{}", call.id, call.attempt),
+            EVENT_AUTHZ_DENIED,
+            Entity::Scope,
+            Verb::Asserted,
+            TURN,
+            "authorizer",
+        )
+        .with_produced_by(USER_SEQ)
+        .with_payload(json!({
+            "port": "tool",
+            "id": call.id,
+            "attempt": call.attempt,
+            "tool": "shell",
+            "detail": detail,
+        })),
+    );
+}
+
 /// 只落了 `request` 的一笔调用：还没判、还没派（授权行的前件）。
 fn requested(store: &EventStore, id: &str) -> ToolPortCall {
     let call = port::Call::new("tool", id, 1);
@@ -82,11 +125,8 @@ fn requested(store: &EventStore, id: &str) -> ToolPortCall {
         model_id: format!("call-{id}"),
         call,
         name: "shell".into(),
-        canonical: None,
-        // `risk = None` ⇒ 注册表里没有可判的能力（route-only），授权按 deferred 放行。
-        risk: None,
-        approved: false,
-        invalid: false,
+        // 授权输入随 `request` 载荷交出（`risk` / `threshold` / `grant` / `mode`），
+        // 判定由端口执行体做；草稿只留结论两格。
         granted: false,
         deny_why: None,
         sent: false,
@@ -99,26 +139,11 @@ fn requested(store: &EventStore, id: &str) -> ToolPortCall {
 /// 两个旗标在这里直接补齐——本函数服务**关账**用例，「派出后欠一次应答」是前提
 /// 不是被测点；派发这一步真的换债由场景一那条用例对。
 ///
-/// 前提要用**生产的写方**落（`granted_event`）：引擎派发前自己读 `dispatch-tool`
-/// 这一行（D-136），而它只认 `authz.granted`——少这一条事实，`sent` 就落不下来。
+/// 前提要用**授权事实**落（引擎派发前自己读 `dispatch-tool` 这一行（D-136），
+/// 而它只认 `authz.granted`——少这一条事实，`sent` 就落不下来）。
 fn opened(store: &EventStore, id: &str) -> ToolPortCall {
     let mut call = requested(store, id);
-    super::append_authz(
-        store,
-        super::granted_event(
-            TURN,
-            USER_SEQ,
-            &call.call,
-            "shell",
-            super::GrantFacts {
-                risk: "unknown",
-                deferred: true,
-                basis: None,
-                grant: None,
-            },
-        ),
-    )
-    .expect("granted 落格");
+    grant(store, &call.call);
     call.granted = true;
     port::begin(
         store,
@@ -170,7 +195,7 @@ fn an_aborted_call_closes_as_failed_not_as_an_answer() {
     assert_eq!(
         payload_of(&store, "failed"),
         // `attempt` 与其它协议格同形（D-138）：`failed` 关的是这一次尝试。
-        json!({"port": "tool", "id": "tool-1-d1-b0-c0", "attempt": 1, "why": ABORTED}),
+        json!({"port": "tool", "id": "tool-1-d1-b0-c0", "attempt": 1, "why": ABORTED, "cause": "aborted"}),
         "中止的成因要写在协议事实上，事后不必靠猜"
     );
     assert!(
@@ -262,147 +287,12 @@ fn a_denied_or_unsent_call_lands_nothing() {
     );
 }
 
-/// 授权动作的策略：会话没设 `RISK_LEVEL` ⇒ 阈值走默认（与 `ToolPortPolicy::read`
-/// 缺席时同一条），能力表为空（route-only 工具按 deferred 放行）。
-fn policy() -> ToolPortPolicy {
-    policy_at(CapabilityRiskLevel::default())
-}
-
-/// 同一个策略、指定会话阈值——「本会话放行」唯一改变的**就是这一个字段**。
-fn policy_at(threshold: CapabilityRiskLevel) -> ToolPortPolicy {
-    ToolPortPolicy {
-        known: Vec::new(),
-        threshold,
-        mode: String::new(),
-        grants: ApprovalGrants::default(),
-    }
-}
-
-/// 会话阈值决定「问不问」：同一次调用，阈值抬到它这一档就不再开审批卡。
-///
-/// 对着「本会话放行」这条用户动作的**全部后果**：它不新增任何授权事实，只是把
-/// 会话阈值抬到本次调用的风险档（前端写 `session.metadata.risk_level`，后端
-/// `resolve_session_params` 把它落成 `ctx[RISK_LEVEL]`）。所以判据落在写侧——
-/// 同一个 `risk` 在两份策略下结论相反，且方向可复算。
-///
-/// 三格一起钉，是因为单看「抬档后放行」这一格，一个**恒放行**的实现也能过：
-/// - 默认档（Medium）下 High 调用要问一次；
-/// - 抬到 High 后同档放行，且放行事实带的是调用自己的风险档；
-/// - 抬档不影响基线：Medium 阈值下的 Medium 调用本来就放行（抬档只减少提问，
-///   不是「一旦抬过就永远不问」）。
-#[test]
-fn the_session_threshold_decides_whether_a_call_is_asked_about() {
-    // ① 默认阈值（Medium）：High 调用 ⇒ 问一次。
-    let store = Arc::new(EventStore::new());
-    let mut calls = [requested(&store, "tool-s1-tc-1-1")];
-    calls[0].risk = Some(CapabilityRiskLevel::High);
-
-    authorize_one(store.as_ref(), TURN, USER_SEQ, &policy(), &mut calls[0]);
-
-    assert!(!calls[0].granted, "High 高于默认阈值 ⇒ 不放行");
-    assert_eq!(calls[0].deny_why, Some("needs_approval"));
-    assert_eq!(
-        payload_of(&store, EVENT_AUTHZ_DENIED)["detail"],
-        json!("needs_approval"),
-        "拒绝原因进载荷（`detail`）：审批卡靠它区分「要你批」与「不许做」"
-    );
-
-    // ② 阈值抬到 High（= 用户点了「本会话放行」）：同一次调用直接放行。
-    let store = Arc::new(EventStore::new());
-    let mut calls = [requested(&store, "tool-s2-tc-1-1")];
-    calls[0].risk = Some(CapabilityRiskLevel::High);
-
-    authorize_one(
-        store.as_ref(),
-        TURN,
-        USER_SEQ,
-        &policy_at(CapabilityRiskLevel::High),
-        &mut calls[0],
-    );
-
-    assert!(calls[0].granted, "阈值抬到这一档 ⇒ 不再问");
-    assert_eq!(calls[0].deny_why, None);
-    assert_eq!(
-        payload_of(&store, EVENT_AUTHZ_GRANTED)["risk"],
-        json!("high"),
-        "放行事实记的是**调用自己的**风险档，不是阈值"
-    );
-    assert_eq!(
-        payload_of(&store, EVENT_AUTHZ_GRANTED)["basis"],
-        json!("threshold"),
-        "放行依据要可读：同一条事实里 agent 才分得清「阈值内」与「工具授权」"
-    );
-
-    // ③ 基线不变：Medium 阈值下 Medium 调用本来就放行。
-    let store = Arc::new(EventStore::new());
-    let mut calls = [requested(&store, "tool-s3-tc-1-1")];
-    calls[0].risk = Some(CapabilityRiskLevel::Medium);
-
-    authorize_one(store.as_ref(), TURN, USER_SEQ, &policy(), &mut calls[0]);
-
-    assert!(calls[0].granted, "不比阈值更危险 ⇒ 不问");
-}
-
-/// **第三档「永久放行」**：按工具的授权上限放行，且只对该工具生效。
-///
-/// 与上一格的分工：会话阈值是**全局**的一刀切，工具授权是**逐工具**的上限。
-/// 两格都要钉，因为一个「把 grant 当成第二个阈值」的实现能过前半格——它会让
-/// 另一个工具同档调用也悄悄放行。
-#[test]
-fn a_per_tool_grant_authorizes_only_that_tool() {
-    let mut granted = policy();
-    granted.grants.raise("shell", CapabilityRiskLevel::High);
-
-    // ① 被授权的工具：High > Medium 阈值，但 ≤ 工具上限 ⇒ 放行。
-    let store = Arc::new(EventStore::new());
-    let mut calls = [requested(&store, "tool-g1-tc-1-1")];
-    calls[0].risk = Some(CapabilityRiskLevel::High);
-    calls[0].canonical = Some("shell".into());
-
-    authorize_one(store.as_ref(), TURN, USER_SEQ, &granted, &mut calls[0]);
-
-    assert!(calls[0].granted, "上限覆盖本次风险档 ⇒ 不问");
-    let payload = payload_of(&store, EVENT_AUTHZ_GRANTED);
-    assert_eq!(payload["basis"], json!("grant"), "依据是工具授权，不是阈值");
-    assert_eq!(
-        payload["grant"],
-        json!("high"),
-        "事实里带上生效的那一格上限"
-    );
-
-    // ② 同档的另一个工具：授权只管自己那一行，仍然要审批。
-    let store = Arc::new(EventStore::new());
-    let mut calls = [requested(&store, "tool-g2-tc-1-1")];
-    calls[0].risk = Some(CapabilityRiskLevel::High);
-    calls[0].canonical = Some("shell_other".into());
-
-    authorize_one(store.as_ref(), TURN, USER_SEQ, &granted, &mut calls[0]);
-
-    assert!(!calls[0].granted, "别的工具不继承这一行授权");
-    assert_eq!(calls[0].deny_why, Some("needs_approval"));
-
-    // ③ 这次调用显式带 `approved` ⇒ 依据是 approved，授权字段不入格
-    //    （两档都可能成立时，事实记**最直接的那个理由**）。
-    let store = Arc::new(EventStore::new());
-    let mut calls = [requested(&store, "tool-g3-tc-1-1")];
-    calls[0].risk = Some(CapabilityRiskLevel::High);
-    calls[0].canonical = Some("shell".into());
-    calls[0].approved = true;
-
-    authorize_one(store.as_ref(), TURN, USER_SEQ, &granted, &mut calls[0]);
-
-    let payload = payload_of(&store, EVENT_AUTHZ_GRANTED);
-    assert_eq!(payload["basis"], json!("approved"));
-    assert!(
-        payload.get("grant").is_none(),
-        "没用到工具上限时不该写下这一格：{payload}"
-    );
-}
-
 /// **场景一（审批唤醒）**：`authz.granted(port=tool)` 一落，`dispatch-tool` 就
-/// 重新欠着；`begin_calls` 落 `sent` 后债位换到 `await-tool`。
+/// 重新欠着；`begin_call` 落 `sent` 后债位换到 `await-tool`。
 ///
-/// 对的是**写方**（`ToolPort::authorize_calls` / `begin_calls`）而不是行声明：
+/// 授权事实的写方是端口执行体（`grant` 夹具落同一条事实，判定表用例在
+/// `symbio-plugin-tool/src/port.test.rs`）；这里对的是环的写方（`begin_call`）
+/// 而不是行声明：
 /// 行层那几条合成用例（`loop_rows.test.rs`）只能证明「表认得 granted」，证明不了
 /// 生产真的写出带 `port` / `id` 的载荷——键对不上时行永不开账，而日志一片绿。
 #[test]
@@ -417,7 +307,8 @@ fn an_authorization_reopens_the_dispatch_debt_and_a_send_moves_to_the_await() {
         "还没判 ⇒ 派发行不成立（fail-closed）"
     );
 
-    authorize_one(store.as_ref(), TURN, USER_SEQ, &policy(), &mut calls[0]);
+    grant(&store, &calls[0].call);
+    calls[0].granted = true;
 
     assert!(calls[0].granted, "deferred 的调用交给下游路由闸门");
     assert_eq!(
@@ -521,7 +412,6 @@ fn the_wake_read_side_restores_the_intent_and_the_target() {
     assert_eq!(call.model_id, "tc-1", "目标节点 id 落在模型侧 id 上");
     assert_eq!(call.name, "vdfs_read");
     assert_eq!(call.call.id, "tool-resume-1-tc-1-1");
-    assert!(call.approved, "参数里带 `approved: true` ⇒ 已由人工确认过");
     assert!(
         matches!(call.wake, Some(Wake::Execute)),
         "唤醒意图从载荷还原：{:?}",
@@ -550,7 +440,6 @@ fn a_wake_that_the_user_rejected_reads_back_as_a_denial() {
     let intent = Wake::Result {
         text: "用户拒绝执行: 有风险".into(),
         ok: false,
-        denied: true,
     };
     port.land_wake(&WakeSpec {
         kind: "reject",
@@ -562,19 +451,20 @@ fn a_wake_that_the_user_rejected_reads_back_as_a_denial() {
     })
     .expect("唤醒请求落格");
 
-    let mut batch = port.wake_batch().expect("唤醒请求读得回");
+    let batch = port.wake_batch().expect("唤醒请求读得回");
     match &batch.calls[0].wake {
-        Some(Wake::Result { text, ok, denied }) => {
+        Some(Wake::Result { text, ok }) => {
             assert_eq!(text, "用户拒绝执行: 有风险");
             assert!(!ok);
-            assert!(denied);
         }
         other => panic!("唤醒意图还原错了：{other:?}"),
     }
 
-    authorize_wake(store.as_ref(), TURN, USER_SEQ, &mut batch.calls[0]);
-    assert!(!batch.calls[0].granted, "拒绝不放行：执行层不会跑它");
-    assert_eq!(batch.calls[0].deny_why, Some("user_rejected"));
+    deny_at(&store, &batch.calls[0].call, "user_rejected");
+    // 读侧把执行体写下的 `detail` 原样带进草稿（gate 的结论只认事实）。
+    let reread = port.wake_batch().expect("拒绝后仍能读回");
+    assert!(!reread.calls[0].granted, "拒绝不放行：执行层不会跑它");
+    assert_eq!(reread.calls[0].deny_why.as_deref(), Some("user_rejected"));
     assert!(
         events(&store).iter().any(|e| e.kind == EVENT_AUTHZ_DENIED),
         "拒绝落 `authz.denied`（授权行由此关账）"
@@ -597,7 +487,8 @@ fn a_closed_wake_request_is_not_read_back() {
     .expect("唤醒请求落格");
 
     let mut batch = port.wake_batch().expect("唤醒请求读得回");
-    authorize_wake(store.as_ref(), TURN, USER_SEQ, &mut batch.calls[0]);
+    grant(&store, &batch.calls[0].call);
+    batch.calls[0].granted = true;
     assert!(batch.calls[0].granted, "批准 ⇒ 放行");
     port.begin_call(&mut batch.calls[0]);
     assert!(batch.calls[0].sent, "派发行欠 ⇒ 落 `sent`");

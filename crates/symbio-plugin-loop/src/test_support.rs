@@ -18,8 +18,8 @@ use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::plugin::PluginError;
 use symbio_kernel::store::{EventStore, Store};
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OPENED,
-    EVENT_COMMITMENT_RELEASED, EVENT_SESSION_CONSOLIDATED,
+    EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_COMMITMENT_BROKEN,
+    EVENT_COMMITMENT_OPENED, EVENT_COMMITMENT_RELEASED, EVENT_SESSION_CONSOLIDATED,
 };
 use symbio_plugin_api::PluginInvokeRequestExt;
 use symbio_sdk::chat::chat_node::ChatNode;
@@ -615,6 +615,117 @@ fn fixture_outcome(result_text: String, success: bool, pending: Option<Value>) -
 impl PortExecutor for FixtureToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let payload = input.payload;
+        // 授权专用入口（gate）：与生产 `ToolPort` 同判据的最小子集——只落一条授权事实，
+        // 不执行、不写 `sent`。
+        if payload.get("authorize_only").is_some() {
+            let id = payload
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let attempt = payload.get("attempt").and_then(Value::as_u64).unwrap_or(1);
+            let tool = payload
+                .get("tool")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let resume = payload.get("resume").and_then(Value::as_str);
+            let denied: Option<(&'static str, &'static str)> = match resume {
+                Some("reject") => Some(("user_rejected", "user_rejected")),
+                Some(_) => None,
+                None if payload
+                    .get("invalid")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false) =>
+                {
+                    Some(("invalid_tool_call", "invalid_call"))
+                }
+                None => {
+                    let risk = payload
+                        .get("risk")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    let deferred = payload
+                        .get("deferred")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(risk == "unknown");
+                    if risk == "unknown" || deferred {
+                        None
+                    } else {
+                        let threshold = payload
+                            .get("threshold")
+                            .and_then(Value::as_str)
+                            .map(symbio_plugin_api::CapabilityRiskLevel::from_name);
+                        let risk = symbio_plugin_api::CapabilityRiskLevel::parse(risk);
+                        let approved = payload
+                            .get("approved")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        let grant = payload
+                            .get("grant")
+                            .and_then(Value::as_str)
+                            .and_then(symbio_plugin_api::CapabilityRiskLevel::parse);
+                        match (threshold, risk) {
+                            (Some(threshold), Some(risk)) => {
+                                risk.approval_basis(threshold, approved, grant).map_or_else(
+                                    || {
+                                        let auto = payload
+                                            .get("mode")
+                                            .and_then(Value::as_str)
+                                            .is_some_and(|m| m == "auto");
+                                        Some(if auto {
+                                            ("permission_denied", "approval_required")
+                                        } else {
+                                            ("needs_approval", "approval_required")
+                                        })
+                                    },
+                                    |_| None,
+                                )
+                            }
+                            _ => None,
+                        }
+                    }
+                }
+            };
+            let draft = match denied {
+                Some((detail, why)) => symbio_plugin_api::effects::FactDraft {
+                    key: format!("{}.authz", exec.idempotency_key),
+                    kind: EVENT_AUTHZ_DENIED.to_string(),
+                    entity: Entity::Scope,
+                    verb: Verb::Asserted,
+                    payload: json!({
+                        "port": ports::TOOL,
+                        "id": id,
+                        "attempt": attempt,
+                        "tool": tool,
+                        "detail": detail,
+                        "why": why,
+                    }),
+                    produced_by: None,
+                },
+                None => symbio_plugin_api::effects::FactDraft {
+                    key: format!("{}.authz", exec.idempotency_key),
+                    kind: EVENT_AUTHZ_GRANTED.to_string(),
+                    entity: Entity::Scope,
+                    verb: Verb::Asserted,
+                    payload: json!({
+                        "port": ports::TOOL,
+                        "id": id,
+                        "attempt": attempt,
+                        "tool": tool,
+                        "risk": payload
+                            .get("risk")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown"),
+                        "deferred": payload
+                            .get("deferred")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true),
+                    }),
+                    produced_by: None,
+                },
+            };
+            exec.emit.emit(vec![draft]).await;
+            return fixture_outcome(String::new(), true, None);
+        }
         // 只落格、不执行：与生产 `ToolPort` 的 `land_only` 出口同形。替身必须在，
         // 否则「环只交结果纯值」这条链路在单测里会静默地少一格产物。
         if payload.get("land_only").is_some() {
@@ -826,4 +937,15 @@ pub(crate) async fn put_tool_port_row<T: Registry + ?Sized>(visitor: &Arc<T>) {
     for row in port_rows(&port) {
         visitor.put(row).await;
     }
+}
+
+/// 只装**工具端口行**的请求机：裸幕夹具用它让授权 Gate 真地跑一次端口调用
+/// （判定归执行体，环里不再有第二条判据）。
+pub(crate) async fn port_ctx() -> Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> {
+    use symbio_kernel::plugin::PluginInvokeRequestExt;
+    let ctx = Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    let visitor = Arc::new(symbio_providers::DefaultToolVisitor::new());
+    put_tool_port_row(&visitor).await;
+    ctx.set(CAPABILITY_VISITOR, visitor as Arc<dyn Registry>);
+    ctx
 }

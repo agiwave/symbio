@@ -783,13 +783,33 @@ impl TurnSession {
     /// 授权动作（`authorize-tool` 行的执行体）：为**这一笔**已开账的调用落放行 / 拒绝。
     pub(crate) async fn authorize(
         &mut self,
-        store: &dyn Store<Event = Event>,
+        store: std::sync::Arc<dyn Store<Event = Event>>,
         ctx: Option<&std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>>,
         dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
         id: &str,
     ) {
+        let turn = self.run.turn;
+        let user_seq = self.run.user_seq;
+        let drive_seq = self.run.drive_seq;
+        if let Some(call) = self.run.calls.get_mut(id) {
+            super::tool_dispatch::gate_authorize(store, ctx, turn, user_seq, drive_seq, call).await;
+            return;
+        }
         if let Some(dispatch) = dispatch {
-            stream::authorize_round(&mut self.run, store, ctx, dispatch, id).await;
+            if let Some(mut call) =
+                stream::take_wake_call(&mut self.run, store.as_ref(), dispatch, id).await
+            {
+                super::tool_dispatch::gate_authorize(
+                    store.clone(),
+                    ctx,
+                    turn,
+                    user_seq,
+                    drive_seq,
+                    &mut call,
+                )
+                .await;
+                self.run.calls.insert(id.to_string(), call);
+            }
         }
     }
 

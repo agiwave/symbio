@@ -227,26 +227,12 @@ fn wake_intent(req: &ResumeRequest, base_args: Value) -> (Value, Wake) {
         // 拒绝 / 回答不执行工具，就地合成结果。
         ResumeAction::Reject => {
             let text = format!("用户拒绝执行: {}", req.reason.clone().unwrap_or_default());
-            (
-                base_args,
-                Wake::Result {
-                    text,
-                    ok: false,
-                    denied: true,
-                },
-            )
+            (base_args, Wake::Result { text, ok: false })
         }
         ResumeAction::Answer => {
             let text = serde_json::to_string_pretty(&req.answer.clone().unwrap_or(json!(null)))
                 .unwrap_or_default();
-            (
-                base_args,
-                Wake::Result {
-                    text,
-                    ok: true,
-                    denied: false,
-                },
-            )
+            (base_args, Wake::Result { text, ok: true })
         }
         ResumeAction::RetrySubtree | ResumeAction::RetryCompaction => {
             plugin_warn!(

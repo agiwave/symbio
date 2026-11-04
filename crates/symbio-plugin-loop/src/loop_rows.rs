@@ -788,7 +788,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // 派生，所以 `granted ⇒ request` 在数据上成立；`dispatch-tool` 只欠
     // `granted`，与 `request ∧ granted` 的可达债集合相同。
     //
-    // 蕴含成立的前提要有人守：`authz.granted` **只有 `granted_event` 一个构造点**，
+    // 蕴含成立的前提要有人守：`authz.granted` **只有端口执行体的 `authz_draft`
+    // 一个构造点**，
     // 且与 `request` 同键 `(port, id, attempt)`（D-138）。第二个写方或键不再 1:1 ⇒
     // 蕴含在数据上断掉而门禁全绿，那是 `D-290` 重开条件第 1 条。
     //

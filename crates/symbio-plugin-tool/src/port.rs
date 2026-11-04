@@ -43,9 +43,9 @@ use symbio_plugin_api::{
     events::EVENT_ARTIFACT_ADDED, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
     failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
     Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext, PortExecutor,
-    PortInput, PortOutcome, PortProvider, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR,
-    EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
+    PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor, PortInput, PortOutcome,
+    PortProvider, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_SINK, PATH,
+    PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
 };
 
 /// 端口名（唯一来源：本插件）。
@@ -88,6 +88,13 @@ const KEY_APPROVED: &str = "approved";
 const KEY_GRANT: &str = "grant";
 const KEY_DEFERRED: &str = "deferred";
 const KEY_INVALID: &str = "invalid";
+/// 授权专用输入（环的 gate 调用）：只判、只落授权事实，不执行也不写 `sent`。
+const KEY_AUTHORIZE_ONLY: &str = "authorize_only";
+/// 会话的授权模式（`auto` = 无人可问 ⇒ 拒绝措辞 `permission_denied`，其余
+/// ⇒ `needs_approval`）。措辞在线上契约里，不能由模式之外的东西决定。
+const KEY_MODE: &str = "mode";
+/// 唤醒动作（`approve` / `retry` / `supply` / `answer` / `reject`）：授权由用户动作裁决。
+const KEY_RESUME: &str = "resume";
 /// 债键字段（与环的 `request` 事实同形，授权事实按它可被行认领）。
 const KEY_ID: &str = "id";
 const KEY_ATTEMPT: &str = "attempt";
@@ -103,27 +110,51 @@ enum Authz {
     },
     /// route-only 工具（注册表里没有可判的风险）：放行延迟给下游路由闸门。
     Deferred,
-    /// 拒绝：`why` 是模型与转写看得到的原因。
-    Denied { why: &'static str },
+    /// 拒绝。`detail` 是**线上契约**（`authz.denied` 载荷的 `detail`：
+    /// `needs_approval` / `permission_denied` / `user_rejected` / `invalid_tool_call`），
+    /// `why` 是内部原因码（转写与日志用），两者并存：措辞由契约固定，原因由判定给出。
+    Denied {
+        detail: &'static str,
+        why: &'static str,
+    },
 }
 
-/// 从请求载荷判一次授权；载荷里没有 `threshold` 就是**不由本执行体判**（`None`）。
+/// 从请求载荷判一次授权。
 ///
-/// `None` 是兼容位，不是放行位：旧路径的授权事实由环自己的动作写，这里的执行体
-/// 只负责执行（P1 的双路径到期点见 `P4`）。
-fn authorize(payload: &serde_json::Value) -> Option<Authz> {
-    let threshold = payload
+/// 优先看唤醒动作：批准 / 重试 / 补充 / 回答是用户给的放行，拒绝是用户给的判死——
+/// 都不参与风险比较。普通调用按载荷里的风险输入判（缺 `threshold` 时按 route-only
+/// 放行延迟给下游路由闸门）。
+fn authorize(payload: &serde_json::Value) -> Authz {
+    if let Some(resume) = payload.get(KEY_RESUME).and_then(|v| v.as_str()) {
+        return if resume == "reject" {
+            Authz::Denied {
+                detail: "user_rejected",
+                why: "user_rejected",
+            }
+        } else {
+            Authz::Granted {
+                risk: "unknown",
+                basis: Some("approved"),
+                grant: None,
+            }
+        };
+    }
+    let Some(threshold) = payload
         .get(KEY_THRESHOLD)
         .and_then(|v| v.as_str())
-        .map(CapabilityRiskLevel::from_name)?;
+        .map(CapabilityRiskLevel::from_name)
+    else {
+        return Authz::Deferred;
+    };
     if payload
         .get(KEY_INVALID)
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
     {
-        return Some(Authz::Denied {
+        return Authz::Denied {
+            detail: "invalid_tool_call",
             why: "invalid_call",
-        });
+        };
     }
     let risk = payload
         .get(KEY_RISK)
@@ -134,13 +165,14 @@ fn authorize(payload: &serde_json::Value) -> Option<Authz> {
         .and_then(|v| v.as_bool())
         .unwrap_or(risk == "unknown");
     if risk == "unknown" || deferred {
-        return Some(Authz::Deferred);
+        return Authz::Deferred;
     }
     // 载荷里的风险档由开账行按注册表算定；认不出就是装配漂移，不能静默认成某一档。
     let Some(risk) = CapabilityRiskLevel::parse(risk) else {
-        return Some(Authz::Denied {
+        return Authz::Denied {
+            detail: "invalid_tool_call",
             why: "unknown_risk",
-        });
+        };
     };
     let approved = payload
         .get(KEY_APPROVED)
@@ -151,14 +183,26 @@ fn authorize(payload: &serde_json::Value) -> Option<Authz> {
         .and_then(|v| v.as_str())
         .and_then(CapabilityRiskLevel::parse);
     match risk.approval_basis(threshold, approved, grant) {
-        Some(basis) => Some(Authz::Granted {
+        Some(basis) => Authz::Granted {
             risk: risk.as_str(),
             basis: Some(basis.as_str()),
             grant: grant.map(CapabilityRiskLevel::as_str),
-        }),
-        None => Some(Authz::Denied {
-            why: "approval_required",
-        }),
+        },
+        None => {
+            // 自动模式下没有人能被问「批不批」，拒绝的措辞就是契约里的 `permission_denied`。
+            let auto = payload
+                .get(KEY_MODE)
+                .and_then(|v| v.as_str())
+                .is_some_and(|m| m == "auto");
+            Authz::Denied {
+                detail: if auto {
+                    "permission_denied"
+                } else {
+                    "needs_approval"
+                },
+                why: "approval_required",
+            }
+        }
     }
 }
 
@@ -191,7 +235,8 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
                 "risk": risk,
                 "basis": basis,
                 "grant": grant,
-                "deferred": false,
+                // `unknown` = route-only（唤醒放行也落这一格）：下游路由闸门据此接管。
+                "deferred": risk == "unknown",
             }),
         ),
         Authz::Deferred => (
@@ -208,7 +253,7 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
                 "deferred": true,
             }),
         ),
-        Authz::Denied { why } => (
+        Authz::Denied { detail, why } => (
             EVENT_AUTHZ_DENIED,
             Verb::Asserted,
             serde_json::json!({
@@ -216,6 +261,7 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
                 "id": id,
                 "attempt": attempt,
                 "tool": tool,
+                "detail": detail,
                 "why": why,
             }),
         ),
@@ -744,6 +790,19 @@ impl PortExecutor for ToolPort {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
         let archive_dir = exec.scratch_dir.clone().unwrap_or_default();
+        // 授权专用入口（环的 gate 调用）：只判一次、只落一条授权事实，**不执行、
+        // 不写 `sent`**。这是环上唯一的下判点——拒绝的债因此没有 `sent` 可等，
+        // 由 `deny-tools` 直接以 `failed{denied}` 关账。
+        if payload.get(KEY_AUTHORIZE_ONLY).is_some() {
+            let authz = authorize(&payload);
+            exec.emit
+                .emit(vec![authz_draft(&exec.idempotency_key, &payload, authz)])
+                .await;
+            return PortOutcome {
+                facts: Vec::new(),
+                error: None,
+            };
+        }
         // 只落格、不执行：唤醒结果与没跑到的占位结果。
         if payload.get(KEY_LAND_ONLY).is_some() {
             land_only(&exec, &payload).await;
@@ -794,29 +853,7 @@ impl PortExecutor for ToolPort {
             }
         }
 
-        // 授权判定先行（`D-306` 裁决一）：载荷带判定输入时由本执行体判，结论经写口落事实；
-        // 拒绝即判死这一笔，不再进入能力调用。旧路径的载荷不带 `threshold`，这里保持旁路。
-        if let Some(authz) = authorize(&payload) {
-            exec.emit
-                .emit(vec![authz_draft(&exec.idempotency_key, &payload, authz)])
-                .await;
-            if let Authz::Denied { why } = authz {
-                // 与环侧 `DispatchOutcome` 的映射同形：`PortOutcome.error` →
-                // `Error: {why}`。产物格正文用同一句话。
-                let text = format!("authorization denied ({why})");
-                if let (Some(ctx), Some(parent)) = (request.as_ref(), hook_parent.as_ref()) {
-                    fire_post_hook(
-                        parent,
-                        &tool_name,
-                        &args,
-                        serde_json::json!({ "error": format!("Error: {text}") }),
-                        ctx,
-                    )
-                    .await;
-                }
-                return PortOutcome::failed(PortErrorClass::NonRetryable, text);
-            }
-        }
+        // 授权只走上面那条 gate 入口（单一判定点）：执行这一笔时不再重判。
         // 通用端口调用可能不带协议读数；名字仍为空时按协议失败拒绝。
         if tool_name.trim().is_empty() {
             return finish_with(
