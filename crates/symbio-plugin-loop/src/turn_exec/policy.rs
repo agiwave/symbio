@@ -466,8 +466,9 @@ pub(crate) async fn recall(
         .iter()
         .find(|e| e.seq.map(|s| s.value()) == Some(state.drive_seq))
         .is_some_and(|e| {
-            e.kind == super::super::control_decl::EVENT_TURN_STAGE
-                && e.payload.get("stage").and_then(serde_json::Value::as_str) == Some("resume")
+            e.kind == super::super::control_decl::EVENT_LOOP_STEP
+                && e.payload.get("id").and_then(serde_json::Value::as_str)
+                    == Some(crate::loop_rows::STEP_RESUME)
         });
 
     let entries: Vec<(u64, String, String)> = view

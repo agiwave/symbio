@@ -385,17 +385,14 @@ impl StageFact {
         if let Some(result) = &self.result {
             payload["result"] = serde_json::Value::String(result.clone());
         }
-        // `model_calls` 只对**打过模型的那几步**有意义（它是那次往返的数）：
-        // 判决与压缩。其余阶段恒 0，载荷里不写这个字段——「恒 0 的字段」是噪声。
-        if matches!(
-            self.id,
-            crate::loop_rows::STEP_DECIDE | crate::loop_rows::STEP_COMPRESS
-        ) {
+        // `model_calls` 跟着**数据**走，不跟着步名走：报过这次数的格才写
+        // （判决格恒报，0 = 规则短路；压缩格只在真打过时报）。「恒 0 的字段」是噪声。
+        if self.verdict.is_some() || self.model_calls > 0 {
             payload["model_calls"] = serde_json::Value::from(self.model_calls);
         }
-        // 召回的结果只对 `recall` 有意义：逐条 seq + 标签，以及本幕是不是续写幕。
-        // 它们是 `turn.recalled` 的数据面，别的阶段不写这两格。
-        if self.id == crate::loop_rows::STEP_RECALL {
+        // 召回读数同理：有逐条结果、或带了降级 / 续写标记时才写。
+        // 它们是 `turn.recalled` 的数据面；缺格由读侧按空 / `false` 兜底。
+        if !self.recalled_content.is_empty() || self.resumed || self.degraded {
             payload["recalled"] = serde_json::Value::Array(
                 self.recalled_content
                     .iter()
