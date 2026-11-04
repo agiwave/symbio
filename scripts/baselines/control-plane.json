@@ -12,9 +12,5 @@
   },
   "extension": {
     "productionFiles": 8
-  },
-  "baseline-allow": [
-    "crates/symbio-plugin-loop/src/ring.rs→crates/symbio-plugin-loop/src/ring/engine.rs 旧环拆分后机制面落到 ring/engine.rs（D-325 机制形状五条固化） D-325",
-    "sha256:90712423730560d522b3e5f76cd4587dbbc436b74bbeb94f18ac837fae21703f→sha256:41b25ba7b5145b819e0eb26a4db018c593903af84c91d4ffe180f0daa62f34af 指纹算法改为归一化 token 流（from 是旧原始字节哈希，不可逐点比较）；驱动 / 选债 / 在途三段语义未变，此后 fmt 不再触发漂移 D-325"
-  ]
+  }
 }
