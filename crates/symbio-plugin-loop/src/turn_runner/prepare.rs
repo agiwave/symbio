@@ -80,7 +80,7 @@ pub(crate) struct Prepared {
     pub(crate) base_messages: Vec<symbio_kernel::llm::PromptMessage>,
     pub(crate) exchange: Vec<symbio_kernel::llm::PromptMessage>,
     /// 应答配对（执行体交回，`D-317`）：环只按它把结果挂回调用，不解释键的含义。
-    pub(crate) reply_links: std::collections::HashMap<String, String>,
+    pub(crate) reply_links: Vec<(String, String)>,
     pub(crate) tool_round: usize,
     pub(crate) cost_ms: u64,
     pub(crate) artifacts_landed: u64,
@@ -410,7 +410,7 @@ where
         started,
         // 空基线：接缝上的 [`Prepared::render_base`] 才渲染（压缩之后那一份）。
         base_messages: Vec::new(),
-        reply_links: std::collections::HashMap::new(),
+        reply_links: Vec::new(),
         exchange,
         tool_round,
         cost_ms,

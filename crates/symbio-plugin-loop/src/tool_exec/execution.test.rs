@@ -181,7 +181,7 @@ async fn a_repeat_in_the_same_batch_says_so_on_the_result() {
     ];
     let mut effects: Vec<EffectInput> = Vec::new();
 
-    let (msgs, _updates) = run_calls(
+    let (msgs, _updates, _replies) = run_calls(
         tcs,
         &None,
         &sink,
@@ -192,6 +192,7 @@ async fn a_repeat_in_the_same_batch_says_so_on_the_result() {
         &store,
         false,
         &mut effects,
+        None,
     )
     .await;
 
@@ -215,7 +216,7 @@ async fn a_repeat_from_the_transcript_says_so_on_the_result() {
     context[0].content = Some(MessageContent::Text(r#"{"path":"."}"#.into()));
     let mut effects: Vec<EffectInput> = Vec::new();
 
-    let (msgs, _updates) = run_calls(
+    let (msgs, _updates, _replies) = run_calls(
         vec![tc(
             "tc-new",
             "vdfs_list",
@@ -230,6 +231,7 @@ async fn a_repeat_from_the_transcript_says_so_on_the_result() {
         &store,
         false,
         &mut effects,
+        None,
     )
     .await;
 
@@ -250,7 +252,7 @@ async fn a_different_argument_is_not_a_repeat() {
     context[0].content = Some(MessageContent::Text(r#"{"path":"a"}"#.into()));
     let mut effects: Vec<EffectInput> = Vec::new();
 
-    let (msgs, _updates) = run_calls(
+    let (msgs, _updates, _replies) = run_calls(
         vec![tc(
             "tc-new",
             "vdfs_list",
@@ -265,6 +267,7 @@ async fn a_different_argument_is_not_a_repeat() {
         &store,
         false,
         &mut effects,
+        None,
     )
     .await;
 
@@ -288,7 +291,7 @@ async fn aborted_batch_terminates_every_tool_call() {
     ];
     let mut effects: Vec<EffectInput> = Vec::new();
 
-    let (msgs, updates) = run_calls(
+    let (msgs, updates, _replies) = run_calls(
         tcs,
         &None,
         &sink,
@@ -299,6 +302,7 @@ async fn aborted_batch_terminates_every_tool_call() {
         &store,
         false,
         &mut effects,
+        None,
     )
     .await;
 
@@ -332,7 +336,7 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
     }];
     let mut effects: Vec<EffectInput> = Vec::new();
 
-    let (msgs, updates) = run_calls(
+    let (msgs, updates, _replies) = run_calls(
         tcs,
         &None,
         &sink,
@@ -343,6 +347,7 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
         &store,
         false,
         &mut effects,
+        None,
     )
     .await;
 
@@ -407,7 +412,7 @@ async fn a_missing_tool_port_fails_loudly_on_the_result() {
     let store = EventStore::new();
     let mut effects: Vec<EffectInput> = Vec::new();
 
-    let (msgs, updates) = run_calls(
+    let (msgs, updates, _replies) = run_calls(
         vec![tc("tc-x", "vdfs_list", serde_json::json!({ "path": "." }))],
         &None,
         &sink,
@@ -418,6 +423,7 @@ async fn a_missing_tool_port_fails_loudly_on_the_result() {
         &store,
         false,
         &mut effects,
+        None,
     )
     .await;
 

@@ -44,8 +44,8 @@ use symbio_plugin_api::{
     failure_kind, family, plugin_error, plugin_info, plugin_warn, ports, CapabilityRiskLevel,
     Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor, PortInput, PortOutcome,
-    PortProvider, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK,
-    PATH, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
+    PortProvider, PromptMessage, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_REQUEST,
+    EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
 };
 
 /// 端口名（唯一来源：本插件）。
@@ -56,6 +56,10 @@ pub(crate) const TOOL: &str = ports::TOOL;
 const KEY_TOOL_NAME: &str = "name";
 const KEY_ARGS: &str = "args";
 const KEY_TOOL_CALL_ID: &str = "call_id";
+/// 应答配对键（环从模型应答承载里搬来的纯值，`D-317`）：工具结果按它挂回调用。
+const KEY_REPLY_KEY: &str = "reply_key";
+/// 结果正文末尾的附注（环算好的同参重复提示；执行体只追加，不解释来源）。
+const KEY_REPLY_NOTE: &str = "reply_note";
 /// 只落格、不执行：唤醒结果与没跑到的占位结果用这一形态交回执行体。
 const KEY_LAND_ONLY: &str = "land_only";
 /// 外部执行闸门的中性输入：`{ authorized, spent_ms, requested_ms, budget_ms }`。
@@ -683,6 +687,57 @@ async fn finish_with(
     out
 }
 
+/// 补齐应答承载（`D-317`）：工具结果的 `tool` 消息**在端口里组装**。
+///
+/// 环只搬来配对键与结果正文附注（纯值），消息文本、角色、配对全在这里定；
+/// 没有配对键（唤醒 / 无模型往返的路径）就不产出——环侧按旧口径兜底。
+fn attach_reply(mut out: PortOutcome, payload: &serde_json::Value) -> PortOutcome {
+    if out.error.is_some() {
+        return out;
+    }
+    let Some(key) = payload
+        .get(KEY_REPLY_KEY)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return out;
+    };
+    let Some(fact) = out.facts.first() else {
+        return out;
+    };
+    let Some(text) = fact.get(FACT_RESULT_TEXT).and_then(|v| v.as_str()) else {
+        return out;
+    };
+    let name = payload
+        .get(KEY_TOOL_NAME)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let mut body = text.to_string();
+    let is_pending = fact
+        .get(FACT_PENDING)
+        .map(|v| !v.is_null())
+        .unwrap_or(false);
+    // 待用户动作的卡片不挂结果附注（它不是结果正文），与环侧同一条口径。
+    if !is_pending {
+        if let Some(note) = payload
+            .get(KEY_REPLY_NOTE)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            body.push('\n');
+            body.push_str(note);
+        }
+    }
+    out.reply.messages.push(PromptMessage {
+        role: "tool".into(),
+        text: body,
+        tool_call_id: Some(key.to_string()),
+        tool: Some(name.to_string()),
+        tool_calls: None,
+    });
+    out
+}
+
 /// 调用信封的协议读数。缺这一格 = 不是协议级调用（通用端口调用）。
 struct ProtocolInput<'a> {
     id_missing: bool,
@@ -930,6 +985,15 @@ impl PortProvider for ToolPort {
 #[async_trait::async_trait]
 impl PortExecutor for ToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let payload = input.payload.clone();
+        let out = self.run(exec, input).await;
+        attach_reply(out, &payload)
+    }
+}
+
+impl ToolPort {
+    /// 执行主体：各出口只交回事实，应答承载由 [`attach_reply`] 在唯一出口补齐。
+    async fn run(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         // 受理即起算：闸门的 `elapsed` 量的是**本执行体**从拿到这笔债到判定的时长。
         let started_at = std::time::Instant::now();
         let payload = input.payload;

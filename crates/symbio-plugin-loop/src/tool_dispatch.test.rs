@@ -125,6 +125,7 @@ fn requested(store: &EventStore, id: &str) -> ToolPortCall {
         model_id: format!("call-{id}"),
         call,
         name: "shell".into(),
+        reply_key: None,
         // 授权输入随 `request` 载荷交出（`risk` / `threshold` / `grant` / `mode`），
         // 判定由端口执行体做；草稿只留结论两格。
         granted: false,
@@ -174,6 +175,7 @@ fn outcome(call: &ToolPortCall, failure_kind: &str) -> CallOutcome {
         failure_kind: failure_kind.into(),
         args: String::new(),
         effects: Vec::new(),
+        reply: symbio_plugin_api::port::PortReply::default(),
     }
 }
 

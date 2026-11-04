@@ -2062,6 +2062,7 @@ mod tool_round_tests {
                 // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点。
                 args: tc_args,
                 effects: Vec::new(),
+                reply: symbio_plugin_api::port::PortReply::default(),
             };
             ToolBegin::InFlight(Box::pin(async move { outcome }))
         }
@@ -2140,6 +2141,7 @@ mod tool_round_tests {
                 failure_kind: String::new(),
                 args: tc_args,
                 effects: Vec::new(),
+                reply: symbio_plugin_api::port::PortReply::default(),
             };
             ToolBegin::InFlight(Box::pin(async move { outcome }))
         }
@@ -2214,6 +2216,7 @@ mod tool_round_tests {
                 failure_kind: "denied".into(),
                 args: tc_args,
                 effects: Vec::new(),
+                reply: symbio_plugin_api::port::PortReply::default(),
             };
             ToolBegin::InFlight(Box::pin(async move { outcome }))
         }
@@ -3545,6 +3548,7 @@ mod tool_round_tests {
                 failure_kind: String::new(),
                 args: tc_args,
                 effects: Vec::new(),
+                reply: symbio_plugin_api::port::PortReply::default(),
             };
             ToolBegin::InFlight(Box::pin(async move { outcome }))
         }

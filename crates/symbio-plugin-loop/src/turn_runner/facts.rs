@@ -397,14 +397,8 @@ pub(crate) fn reply_of_turn(
 
 /// 一笔工具结果的**结果半**：`tool` 消息，按调用配对取 id（不是按工具名）。
 ///
-/// ⚠️ 为什么不能按名字配：同一次响应里调用同一个工具两次时，按名配对会把**两条结果
-/// 都挂到第一次调用**的 id 上。而 adapter 侧 `last_result_of` 按 id 取「同一次调用的
-/// 最终那条结果」——两条同 id 的结果在模型眼里就是一次调用的两条，第一次的真实
-/// 结果被吃掉，第二次拿到别人的正文。**结果与调用错配比缺一结果更坏**：模型据此
-/// 改道，而它改的是凭据不足的道。
-///
-/// 配不上调用时（无对照物）退回结果自己的 `call_id`：它在本次请求里没有对应的
-/// 调用声明，adapter 会把它降级成上下文（`declared_here` 为假那条路）。
+/// 只服务**没有端口应答承载**的路径（假分发方 / 唤醒结果）；生产路径的结果消息
+/// 由 `port=tool` 的执行体交回（`D-317`），环只按序追加。
 pub(crate) fn tool_exchange_message(
     turn: &symbio_sdk::adapters::LlmTurn,
     outcome: &super::super::tool_dispatch::CallOutcome,
@@ -427,7 +421,7 @@ pub(crate) fn tool_exchange_message(
     }
 }
 
-/// 合成 / 选取 `tool_call_id`（跨轮唯一，见 [`assistant_exchange`] 的 `round`）。
+/// 合成 / 选取 `tool_call_id`（跨轮唯一）。
 ///
 /// 优先级与 v1 的请求构建**同一口径**（`crates/symbio-plugin-model/src/message_builder.rs`：wire id
 /// 优先、历史数据回退节点 id）：

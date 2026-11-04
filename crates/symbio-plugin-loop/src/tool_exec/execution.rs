@@ -162,6 +162,7 @@ pub(crate) async fn refuse(
     parent_updates: &mut Vec<ChatNode>,
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
+    replies: &mut Vec<symbio_plugin_api::port::PortReply>,
 ) {
     plugin_warn!(
         "session",
@@ -177,6 +178,7 @@ pub(crate) async fn refuse(
         Some(symbio_kernel::event::result_node_id(id)),
         Some(name),
     );
+    replies.push(reply_of_node(&tool_msg, id, name));
     tool_messages.push(tool_msg);
 
     // 拒掉的调用同样必须收敛父节点：只推结果子节点，父节点就永远停在
@@ -460,6 +462,7 @@ async fn emit_terminal(
     parent_updates: &mut Vec<ChatNode>,
     effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
+    replies: &mut Vec<symbio_plugin_api::port::PortReply>,
 ) {
     match terminal {
         PreTerminal::Overflow {
@@ -482,6 +485,7 @@ async fn emit_terminal(
             if let Some(obj) = tool_msg.meta.as_mut().and_then(|m| m.as_object_mut()) {
                 obj.insert("failure_kind".into(), json!("overflow_dropped"));
             }
+            replies.push(reply_of_node(&tool_msg, &id, &name));
             tool_messages.push(tool_msg);
             // 结果子节点必须有父节点终态配套（同工具终态不变量）：否则前端永远转圈。
             if let Some(parent_update) = emit_parent_finalized(
@@ -525,6 +529,7 @@ async fn emit_terminal(
                 parent_updates,
                 effects,
                 decls,
+                replies,
             )
             .await;
         }
@@ -545,6 +550,7 @@ async fn finish_call(
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
+    replies: &mut Vec<symbio_plugin_api::port::PortReply>,
 ) {
     let Ready {
         id,
@@ -567,6 +573,7 @@ async fn finish_call(
         origin_tokens,
         failure_kind: fail_kind,
         why,
+        reply,
     } = out;
 
     // 代际立约的了结：跑完即知履约与否。**待用户审批的不记**——
@@ -622,6 +629,13 @@ async fn finish_call(
     // 仅对普通工具结果生效（user_prompt 走 WaitingUserAction 分支，不受此覆盖）。
     if !success && !tool_msg.is_interaction() {
         tool_msg.status = Some(NodeStatus::Completed);
+    }
+    // 应答承载：执行体产出的优先（`D-317`）；没有配对键的路径（唤醒 / 旧适配器）
+    // 按节点正文兜底——消息文本与 `tool_call_id` 与旧口径逐字同源。
+    if reply.messages.is_empty() {
+        replies.push(reply_of_node(&tool_msg, &id, &name));
+    } else {
+        replies.push(reply);
     }
 
     if tool_msg.is_interaction() {
@@ -790,9 +804,15 @@ pub(crate) async fn run_calls(
     facts: &dyn Store<Event = Event>,
     elimination_revoked: bool,
     effects: &mut Vec<EffectInput>,
-) -> (Vec<ChatNode>, Vec<ChatNode>) {
+    reply_key: Option<&str>,
+) -> (
+    Vec<ChatNode>,
+    Vec<ChatNode>,
+    Vec<symbio_plugin_api::port::PortReply>,
+) {
     let mut tool_messages = Vec::new();
     let mut parent_updates: Vec<ChatNode> = Vec::new();
+    let mut replies: Vec<symbio_plugin_api::port::PortReply> = Vec::new();
     // 本会话主体：协议级兜底建出的 ToolCall 父节点也归它（结果子节点归工具自己）。
     let principal = symbio_sdk::chat::principal::Principal::from_legacy(
         &symbio_sdk::authz::request_principal(ctx.as_ref()),
@@ -844,6 +864,7 @@ pub(crate) async fn run_calls(
                     &mut parent_updates,
                     effects,
                     &decls,
+                    &mut replies,
                 )
                 .await;
             }
@@ -864,6 +885,8 @@ pub(crate) async fn run_calls(
                     sink,
                     abort,
                     ctx.clone(),
+                    reply_key,
+                    ready.repeat_note.as_deref(),
                 )
                 .await;
                 finish_call(
@@ -876,13 +899,32 @@ pub(crate) async fn run_calls(
                     &decls,
                     &mut tool_messages,
                     &mut parent_updates,
+                    &mut replies,
                 )
                 .await;
             }
         }
     }
 
-    (tool_messages, parent_updates)
+    (tool_messages, parent_updates, replies)
+}
+
+/// 由结果节点兜底组装应答承载（仅限没有端口应答的路径）。
+fn reply_of_node(node: &ChatNode, call_id: &str, name: &str) -> symbio_plugin_api::port::PortReply {
+    let text = match node.content.as_ref() {
+        Some(MessageContent::Text(t)) => t.clone(),
+        _ => String::new(),
+    };
+    symbio_plugin_api::port::PortReply {
+        messages: vec![symbio_plugin_api::PromptMessage {
+            role: "tool".into(),
+            text,
+            tool_call_id: Some(call_id.to_string()),
+            tool: Some(name.to_string()),
+            tool_calls: None,
+        }],
+        links: Vec::new(),
+    }
 }
 
 /// 同参重复调用的判据键：`(工具名, 参数文本)`。
@@ -939,6 +981,8 @@ pub struct ExecResult {
     pub failure_kind: Option<String>,
     /// 执行体交回的「为什么没履约」（中性文本；环只交给能力包的效果端口）。
     pub why: String,
+    /// 执行体交回的应答承载（`D-317`）：环只搬运、按配对键挂回调用。
+    pub reply: symbio_plugin_api::port::PortReply,
 }
 
 /// 执行**一笔债**（不阻塞等待用户）：按端口名取提供者，交给端口执行合同跑。
@@ -968,6 +1012,8 @@ pub async fn execute_one(
     sink: &ExecEventSink,
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
+    reply_key: Option<&str>,
+    reply_note: Option<&str>,
 ) -> ExecResult {
     let absent = |why: &str| {
         let text = format!("Error: `port.{port}` 缺席：{why}（{name} 未执行）");
@@ -1008,6 +1054,8 @@ pub async fn execute_one(
                     "name": name,
                     "args": args,
                     "call_id": call_id,
+                    "reply_key": reply_key,
+                    "reply_note": reply_note,
                     "protocol": {
                         "id_missing": protocol.id_missing,
                         "name_missing": protocol.name_missing,
@@ -1098,6 +1146,7 @@ pub async fn execute_one(
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string(),
+        reply: out.reply,
     }
 }
 
@@ -1198,10 +1247,15 @@ pub(crate) async fn process_tool_calls_in_env(
     facts: &dyn Store<Event = Event>,
     elimination_revoked: bool,
     effects: &mut Vec<EffectInput>,
-) -> (Vec<ChatNode>, Vec<ChatNode>) {
+    reply_key: Option<&str>,
+) -> (
+    Vec<ChatNode>,
+    Vec<ChatNode>,
+    Vec<symbio_plugin_api::port::PortReply>,
+) {
     // 空批不读闸门、不发日志——与拆分前的早退位置逐字一致。
     if tool_calls.is_empty() {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new());
     }
 
     // 逐条执行：批内顺序流程（协议失败 / 闸门拒止 / 钩子拦下 / 正常执行四条出口）。
@@ -1209,7 +1263,7 @@ pub(crate) async fn process_tool_calls_in_env(
     // - `parent_updates`：ToolCall 父节点的**完整终态快照**（发射端从
     //   `context_messages` 取权威副本应用终态），供调用方做内存镜像整条替换并随
     //   `persist_messages` 落库。
-    let (tool_messages, parent_updates) = run_calls(
+    let (tool_messages, parent_updates, replies) = run_calls(
         tool_calls,
         parent,
         sink,
@@ -1220,10 +1274,11 @@ pub(crate) async fn process_tool_calls_in_env(
         facts,
         elimination_revoked,
         effects,
+        reply_key,
     )
     .await;
 
-    (tool_messages, parent_updates)
+    (tool_messages, parent_updates, replies)
 }
 
 #[cfg(test)]

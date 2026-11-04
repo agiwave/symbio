@@ -612,9 +612,59 @@ fn fixture_outcome(result_text: String, success: bool, pending: Option<Value>) -
     }
 }
 
+/// 替身也遵守应答承载合同（`D-317`）：与生产 `ToolPort::attach_reply` 同一口径。
+fn fixture_reply(mut out: PortOutcome, payload: &Value) -> PortOutcome {
+    if out.error.is_some() {
+        return out;
+    }
+    let Some(key) = payload
+        .get("reply_key")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return out;
+    };
+    let Some(fact) = out.facts.first() else {
+        return out;
+    };
+    let Some(text) = fact.get("result_text").and_then(Value::as_str) else {
+        return out;
+    };
+    let mut body = text.to_string();
+    let pending = fact.get("pending").map(|v| !v.is_null()).unwrap_or(false);
+    if !pending {
+        if let Some(note) = payload
+            .get("reply_note")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            body.push('\n');
+            body.push_str(note);
+        }
+    }
+    out.reply.messages.push(symbio_plugin_api::PromptMessage {
+        role: "tool".into(),
+        text: body,
+        tool_call_id: Some(key.to_string()),
+        tool: payload
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        tool_calls: None,
+    });
+    out
+}
+
 #[async_trait]
 impl PortExecutor for FixtureToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let payload = input.payload.clone();
+        fixture_reply(self.run_fixture(exec, input).await, &payload)
+    }
+}
+
+impl FixtureToolPort {
+    async fn run_fixture(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let payload = input.payload;
         // 建账专用入口：与生产执行体同形的最小面——把调用清单展开成 `request` 草稿，
         // 不执行、不写 `sent`。替身没有注册面，风险一律 route-only（`deferred`）。

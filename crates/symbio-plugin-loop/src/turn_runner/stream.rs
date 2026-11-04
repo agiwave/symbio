@@ -706,9 +706,7 @@ where
     run.cost_ms += rt.cost_ms;
     // 应答承载（`D-317`）：环只按序追加、只按 `links` 配对；消息怎么组装是执行体的私事。
     run.exchange.extend(flight.reply.messages);
-    for (key, value) in flight.reply.links {
-        run.reply_links.insert(key, value);
-    }
+    run.reply_links.extend(flight.reply.links);
     // 每轮的产出载荷在**分发之前**取定：工具分发的定稿会改写它，
     // 之后再取只拿得到下一轮的产出——本轮的中途正文 / 思考就静默丢了。
     //
@@ -907,7 +905,16 @@ pub(crate) async fn open_round(
         dispatch.prepare(store.as_ref(), &rt).await;
         run.round_prepared = true;
     }
-    let calls = open_calls(store, ctx, run.turn, run.user_seq, run.drive_seq, &rt).await;
+    let calls = open_calls(
+        store,
+        ctx,
+        run.turn,
+        run.user_seq,
+        run.drive_seq,
+        &rt,
+        &run.reply_links,
+    )
+    .await;
     // 创建行已经开过账（同一响应的第二个展开实例）：这一圈没有新的调用可寄存。
     if calls.is_empty() {
         return;
@@ -944,9 +951,7 @@ pub(crate) async fn take_wake_call(
         run.tool_round += 1;
         let reply = super::facts::reply_of_turn(&woken.turn, round);
         run.exchange.extend(reply.messages);
-        for (key, value) in reply.links {
-            run.reply_links.insert(key, value);
-        }
+        run.reply_links.extend(reply.links);
     }
     run.round_turn = Some(woken.turn);
     Some(call)
@@ -1009,6 +1014,7 @@ pub(crate) async fn land_round(
                     model_id: String::new(),
                     call: super::super::port::Call::new(ports::TOOL, id, attempt),
                     name: String::new(),
+                    reply_key: None,
                     granted: false,
                     deny_why: Some(why),
                     sent: false,
@@ -1155,11 +1161,16 @@ async fn land_one(
     }
 
     // 把这一笔的**结果半**累加进 prompt，继续下一轮；请求半在开账时已经推进。
+    // 结果消息由执行体组装（`D-317`），环只按序追加。
     if let Some(outcome) = &outcome {
-        if let Some(rt) = run.round_turn.as_ref() {
-            let round = run.tool_round.saturating_sub(1);
-            let message = tool_exchange_message(rt, outcome, round);
-            run.exchange.push(message);
+        if outcome.reply.messages.is_empty() {
+            // 过渡口径（假分发方 / 唤醒结果）：没有端口应答承载时按旧规则兜底。
+            if let Some(rt) = run.round_turn.as_ref() {
+                let round = run.tool_round.saturating_sub(1);
+                run.exchange.push(tool_exchange_message(rt, outcome, round));
+            }
+        } else {
+            run.exchange.extend(outcome.reply.messages.clone());
         }
     }
 

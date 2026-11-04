@@ -126,6 +126,9 @@ pub(crate) struct ToolPortCall {
     pub(crate) call: port::Call,
     /// 工具名（LLM 可见名；授权事实的载荷要它）。
     pub(crate) name: String,
+    /// 应答配对键（执行体交回的 `PortReply::links`，`D-317`）：环只搬运它，
+    /// 让工具结果与模型侧的 assistant 声明用同一个配对键。
+    pub(crate) reply_key: Option<String>,
     /// 授权动作的结论（创建时为 `false`，gate 调用写入）。
     pub(crate) granted: bool,
     /// 授权动作写下的拒绝措辞（`authz.denied` 的 `detail`；`None` = 放行或还没判）；
@@ -260,6 +263,8 @@ pub struct CallOutcome {
     /// 随结果携带而不是当场写进共用的取件面：并发执行时落地顺序由 provider 决定，
     /// 而效果事实的顺序必须等于**调用顺序**——由环在整轮收口时按序交回。
     pub effects: Vec<EffectInput>,
+    /// 应答承载（`D-317`）：工具结果消息由执行体组装，环只按序追加。
+    pub reply: symbio_plugin_api::port::PortReply,
 }
 
 impl CallOutcome {
@@ -281,6 +286,7 @@ impl CallOutcome {
             failure_kind: String::new(),
             args: String::new(),
             effects: Vec::new(),
+            reply: symbio_plugin_api::port::PortReply::default(),
         }
     }
 }
@@ -477,6 +483,7 @@ pub(crate) async fn open_calls(
     user_seq: u64,
     drive_seq: u64,
     model_turn: &LlmTurn,
+    reply_links: &[(String, String)],
 ) -> Vec<ToolPortCall> {
     let facts = store.range(Seq::new(0));
     let latest = latest_model_response(&facts, subject, drive_seq);
@@ -597,17 +604,31 @@ pub(crate) async fn open_calls(
                 && e.payload.get("port").and_then(|v| v.as_str()) == Some(ports::TOOL)
         })
         .zip(model_turn.tool_calls.iter())
-        .filter_map(|(event, tc)| {
+        .enumerate()
+        .filter_map(|(index, (event, tc))| {
             let id = event.payload.get("id").and_then(|v| v.as_str())?;
             let attempt = event
                 .payload
                 .get("attempt")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(1);
+            // 应答配对键：优先按调用 id 命中；缺 id 的调用按声明顺序取（模型侧
+            // 的 `tool_calls` 与创建行逐条对齐，顺序因此是稳定配对面）。
+            let reply_key = tc
+                .id
+                .as_deref()
+                .and_then(|key| {
+                    reply_links
+                        .iter()
+                        .find(|(k, _)| k == key)
+                        .map(|(_, v)| v.clone())
+                })
+                .or_else(|| reply_links.get(index).map(|(_, v)| v.clone()));
             Some(ToolPortCall {
                 model_id: tc.id.clone().unwrap_or_default(),
                 call: port::Call::new(ports::TOOL, id, attempt),
                 name: tc.name.clone().unwrap_or_default(),
+                reply_key,
                 granted: false,
                 deny_why: None,
                 sent: false,
@@ -989,6 +1010,8 @@ impl ToolPort {
                 model_id: target.clone(),
                 call: port::Call::new("tool", id, attempt),
                 name: tool,
+                // 唤醒批没有模型往返；配对键随 P3 的「唤醒归端口」一并交回。
+                reply_key: None,
                 granted,
                 deny_why: (!granted).then_some(deny_why),
                 sent: false,
@@ -1333,6 +1356,8 @@ impl SessionDispatchPort {
             failure_kind: failure_kind.to_string(),
             args,
             effects: Vec::new(),
+            // 唤醒结果没有模型往返；结果消息仍由环按调用节点配对兜底（P3 迁往端口）。
+            reply: symbio_plugin_api::port::PortReply::default(),
         };
         let mut produced = call_nodes;
         produced.push(result);
@@ -1384,8 +1409,10 @@ impl ToolDispatch for SessionDispatchPort {
         let this = self;
         let tool_calls = turn.tool_calls.clone();
         let outcome_call = call.call.clone();
+        let reply_key = call.reply_key.clone();
         ToolBegin::InFlight(Box::pin(async move {
-            this.execute_one(tool_calls, call_nodes, outcome_call).await
+            this.execute_one(tool_calls, call_nodes, outcome_call, reply_key)
+                .await
         }))
     }
 
@@ -1513,6 +1540,7 @@ impl SessionDispatchPort {
         tool_calls: Vec<symbio_kernel::llm::TurnToolCallInfo>,
         call_nodes: Vec<ChatNode>,
         call: port::Call,
+        reply_key: Option<String>,
     ) -> CallOutcome {
         // ③ 分发（工具执行层：存档 / 钩子 / 审批 / 未执行收口全在里面）。
         //    父节点查询用刚广播的这批节点——它们与执行器要求的形状同源。
@@ -1522,7 +1550,7 @@ impl SessionDispatchPort {
         // 落格本身由执行体的 `land_only` 出口做，环不装配产物载荷。
         let env = self.round_exec();
         let mut effects: Vec<EffectInput> = Vec::new();
-        let (tool_msgs, parent_updates) = process_tool_calls_in_env(
+        let (tool_msgs, parent_updates, replies) = process_tool_calls_in_env(
             tool_calls.clone(),
             &self.parent,
             &self.sink,
@@ -1534,6 +1562,7 @@ impl SessionDispatchPort {
             self.elimination_revoked,
             // 效果出参（DE-025 D-207）：每次终态调用一条。
             &mut effects,
+            reply_key.as_deref(),
         )
         .await;
 
@@ -1574,6 +1603,8 @@ impl SessionDispatchPort {
         // 效果出参随这一笔走（不写进共用取件面）：环在整轮收口时按**调用顺序**
         // 交回，并发完成的次序因此不会改变事实顺序。
         outcome.effects = effects;
+        // 应答承载（`D-317`）：一笔调用一条结果消息；环只按序追加。
+        outcome.reply = replies.into_iter().next().unwrap_or_default();
         outcome
     }
 }
@@ -1631,6 +1662,7 @@ fn map_outcome(
             .and_then(|n| n.content.as_ref().map(|c| c.to_text()))
             .unwrap_or_default(),
         effects: Vec::new(),
+        reply: symbio_plugin_api::port::PortReply::default(),
     }
 }
 
