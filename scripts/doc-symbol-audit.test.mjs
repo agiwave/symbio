@@ -385,9 +385,20 @@ test('D-012 历史行豁免：说「这条旧路径已删除」的行不判', ()
   assert.match(r.stdout, /CLI 产物指路 1 处/)
 })
 
+/**
+ * 退役文档登记（D-324）里的三篇历史任务文档：夹具必须让它们在场，
+ * 否则登记的条目会被判「已不在仓内」（承认通道不许空转）。
+ */
+const RETIRED_STUBS = {
+  'docs/007-task/007-loop存量能力迁移.md': '# 历史记录\n',
+  'docs/007-task/031-loop文件级审计与世界语义重分批.md': '# 历史记录\n',
+  'docs/007-task/033-旁路替换取材与退役.md': '# 历史记录\n',
+}
+
 test('D-012 任务登记册排除：条目引用旧路径是记录本身，不是指路', () => {
   const r = audit({
     ...RS,
+    ...RETIRED_STUBS,
     'cli/Cargo.toml': '[package]\nname = "cli"\n',
     ...teach(['产物：`../target/debug/symbio-cli.exe`']),
     'docs/007-task/141-x.md': '事故经过：照 `../symbio/target/debug/symbio-cli.exe` 跑，全是旧产物。\n',
@@ -567,4 +578,42 @@ test('D-020 字段 / impl 方法 / trait 方法都算「定义体里有」⇒ �
 test('D-020 外部类型不判（仓内没有定义体可比，`String::from` 不是它能核对的）', () => {
   const r = audit({ ...TYPES, 'README.md': '转换走 `String::from`。\n' })
   assert.equal(r.status, 0, r.stdout)
+})
+
+// ── 退役文档登记（D-324）：历史任务文档全文不判，条目与文件同生命周期 ──────────
+//
+// 三篇历史任务文档记的是**当时的实施记录**，逐条写 allow 只会把同一件事写十遍；
+// 登记表把「哪几篇不按现行代码判」一次说清。但承认通道本身会腐烂：文件删了条目还在，
+// 它就永远空转——所以「表内文件没了 ⇒ 红」这一条必须钉住。
+
+test('退役文档登记：表内文件全文不判（同目录其它文档仍判）', () => {
+  const files = {
+    ...RS,
+    ...RETIRED_STUBS,
+    'docs/007-task/007-loop存量能力迁移.md': '当时叫 `symbio_sdk::GONE_FN`。\n',
+    'README.md': '正常文档。\n',
+  }
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('退役文档登记只覆盖表内文件：同目录未登记的任务文档照常判（exit 1）', () => {
+  const r = audit({
+    ...RS,
+    ...RETIRED_STUBS,
+    'docs/007-task/034-旧loop门禁资产下线清单.md': '指认 `symbio_sdk::GONE_FN`。\n',
+    'README.md': '正常文档。\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-005 docs\/007-task\/034-旧loop门禁资产下线清单\.md:1/)
+})
+
+test('退役文档登记：表内文件没了而条目还在 ⇒ 红（承认通道不许空转）', () => {
+  const r = audit({
+    ...RS,
+    'docs/007-task/007-loop存量能力迁移.md': '正常历史记录。\n',
+    'README.md': '正常文档。\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-324 .*退役文档登记的条目已不在仓内/)
 })

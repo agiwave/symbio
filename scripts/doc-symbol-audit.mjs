@@ -57,7 +57,9 @@
  *   3. 承认通道：行内 `<!-- doc-symbol-allow: <理由> -->`，**理由不可为空**
  *      （空理由视为未承认，与 grep-audit / dead-code-audit 同一约定）。代码里查无此名
  *      有两种合法情形，理由要写明是哪一种：**历史**（「已判删（D-NNN）」）或**目标态**
- *      （「09 的 S2 才落这个常量」——施工方案指认未来名字是本分，不该被当成漂移）。
+ *      （「09 的 S2 才落这个常量」——施工方案指认未来名字是本分，不该被当成漂移）；
+ *   4. 退役文档登记（D-324）：表 `RETIRED_MD` 列出的**历史任务文档**全文不判——
+ *      它们是当时的实施记录，逐条 allow 只会把同一件事写十遍；范围与生效条件见 D-324。
  *
  * 失效形态（回归测试逐条钉住）：
  *   - 审计范围读不出来（没有 md 或没有 .rs 语料）却亮绿灯 ⇒ 必须 exit 1；
@@ -115,6 +117,20 @@ const EXCLUDE_MD_DIRS = ['docs/archive']
 const HISTORY_RE = /已删除|已退役|已废弃|deprecated|取代|判(?:为)?[：:]?\s*删除/
 /** 承认通道，理由非空才生效 */
 const ALLOW_RE = /<!--\s*doc-symbol-allow:\s*([^>]*?)\s*-->/
+/**
+ * 退役文档登记（D-324）：这些文件记的是**当时的实施记录**，
+ * 其中的符号指认不随代码回改（回改反而篡改记录）。
+ *
+ * 范围与生效条件见 [DE-048] 的 D-324：
+ *   - 范围：**只有下表列出的文件全文**；同目录其它任务文档照常判；
+ *   - 生效条件：条目与文件同生命周期——文件删掉或内容被重写进现行文档时，
+ *     同提交删掉这一行；被复用进现行文档的段落要按现行代码改指，不得借本条豁免。
+ */
+const RETIRED_MD = new Map([
+  ['docs/007-task/007-loop存量能力迁移.md', 'D-324'],
+  ['docs/007-task/031-loop文件级审计与世界语义重分批.md', 'D-324'],
+  ['docs/007-task/033-旁路替换取材与退役.md', 'D-324'],
+])
 
 let errors = 0
 function report (file, line, code, msg) {
@@ -168,6 +184,15 @@ const mdFiles = existsSync(REPO_ROOT) ? collectMd(REPO_ROOT).sort() : []
 if (mdFiles.length === 0) {
   console.log(`${red('[ERROR]')} D-005 审计范围读不出：0 篇候选 md（${REPO_ROOT}）`)
   process.exit(1)
+}
+
+// 退役文档登记与文件同生命周期：文件没了而条目还在 ⇒ 承认通道变成永久空转。
+// 目录整个不在（回归夹具的最小仓库）⇒ 本条不适用，与 D-011「名册不在 ⇒ 不适用」同口径。
+for (const [rel, code] of RETIRED_MD) {
+  if (!existsSync(join(REPO_ROOT, dirname(rel)))) continue
+  if (!mdFiles.includes(rel)) {
+    report(rel, 1, code, '退役文档登记的条目已不在仓内——文件删了就同提交删掉这一行')
+  }
 }
 
 // Rust 语料 → 整词集合（一次构建，O(1) 查询）
@@ -570,6 +595,7 @@ function docBase (rel) {
 }
 
 for (const rel of mdFiles) {
+  if (RETIRED_MD.has(rel)) continue // 退役文档（D-324）：记的是当时，不按现行代码判
   const lines = readFileSync(join(REPO_ROOT, rel), 'utf8').split(/\r?\n/)
   // 决策段（`### D-NNN`）与 ADR 正文同性质：记的是**当时**的设计，其中的符号可能早已改名 / 删除。
   // `adr` kind 已废除、正文折进设计文档的这一节，故豁免按**节**判，而不是按目录判。
