@@ -414,7 +414,7 @@ impl PersistentChatSession {
         // 内存临时会话（`prune_on_write = false`）跳过物理裁剪：其历史本就不回看，
         // 裁剪只会让同一轮内可复用的工具链凭空消失。
         let prune_tool_history = cfg.prune_tool_history && self.prune_on_write;
-        // `max_messages` 直接生效，0 = 不限制（与 `context_messages` / `sliding_window` 语义一致）。
+        // `max_messages` 直接生效，0 = 不限制（与 `context_messages` 的取值语义一致）。
         // 历史上此处曾硬编码 `.max(500)`，导致设置面板中小于 500 的值静默失效。
         let max_turns = cfg.max_messages;
         drop(cfg);
@@ -600,8 +600,8 @@ pub(super) fn ensure_durable_states(
 /// 决策 1 的「关闭」原语）。裁剪改了列表却不落事实 ⇒ 切主读后**被裁节点复活**
 /// ——WAL 里它们还在，只是缓存里少了（而缓存已经不再是真源）。
 pub fn prune_historical_tool_calls(messages: &mut Vec<ChatNode>, keep_turns: usize) -> Vec<String> {
-    // keep_turns == 0 语义为「不限制」（与 `SessionConfig::context_messages` 的 0 值语义、
-    // `sliding_window` 保持一致）。此处缺失守卫时，下面 `user_indices[len - keep_turns]`
+    // keep_turns == 0 语义为「不限制」（与 `SessionConfig::context_messages` 的 0 值语义一致）。
+    // 此处缺失守卫时，下面 `user_indices[len - keep_turns]`
     // 会取到下标 `len`（越界）并 panic，导致整次 `append_messages` 失败。
     if keep_turns == 0 {
         return Vec::new();

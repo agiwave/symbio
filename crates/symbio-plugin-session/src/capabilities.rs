@@ -116,14 +116,6 @@ pub async fn collect_capabilities(
 // 见 `symbio_sdk::capability::CapabilityError`：写侧是任意参与 traverse 的插件，
 // 读侧是 session 编排方（orchestrator 在收集结束后 `capability_take_errors` 统一裁决）。
 
-/// 把能力管理器挂到请求上下文，供 model 插件的 chat_loop / tool_executor 取用。
-///
-/// 单独抽出的意义：让"收集"与"挂载"两件事在调用点显式成对出现，
-/// 避免漏挂导致 `Tool not found` 这类只在运行期才暴露的问题。
-pub fn attach_capabilities(ctx: &Arc<dyn PluginInvokeRequest>, manager: Arc<dyn Registry>) {
-    ctx.set(symbio_sdk::capability::CAPABILITY_VISITOR, manager);
-}
-
 // 读侧助手 `tool_metas` 的实现住 core（[`symbio_sdk::capability::collect::tool_metas`]）：loop
 // 切出后它也是驱动器的读点，跨插件共用同一条口径（D-086 §7）。
 

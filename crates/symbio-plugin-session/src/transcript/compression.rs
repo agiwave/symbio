@@ -128,14 +128,6 @@ impl CompressionEmitter {
         };
         node
     }
-
-    /// 压缩请求的**增量改道落点**：返回直连本会话转写唯一写入点的 writer。
-    ///
-    /// 只服务压缩流水线的过滤桥（摘要帧经白名单改写后从这里进转写）。压缩流水线
-    /// 仍在本插件时经此取 writer；驱动器切出后由 `TurnDispatch.writer` 交付。
-    pub(crate) fn transcript_writer(&self) -> Arc<dyn symbio_kernel::exec::ExecTranscriptWriter> {
-        super::compression_writer(self.state.transcript.clone())
-    }
 }
 
 /// 把一个字段补丁（对象）**合并**进节点 `meta`，不覆盖已有键——

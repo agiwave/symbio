@@ -1,12 +1,11 @@
 //! 广播出口：把「状态收敛 + 变更投递」集中到一处。
 //!
 //! 只有一个出口，只做**投递**，不含业务判定：
-//! - [`Convergence::emit_session_state`]：**会话运行态的唯一出口**——写运行态 → 发一条
-//!   VDFS 变更（`<sid>` 上 `data` = 全量节点视图，与 `stat` 同源构造 → 消费端零回读）；
-//! - [`Convergence::broadcast_error_with_idle`]：可恢复错误路径的唯一出口（收敛为「失败」结局）。
+//! [`Convergence::emit_session_state`]：**会话运行态的唯一出口**——写运行态 → 发一条
+//! VDFS 变更（`<sid>` 上 `data` = 全量节点视图，与 `stat` 同源构造 → 消费端零回读）。
 //!
-//! 两者都住在 [`Convergence`]（收敛手柄）上而不是 `SessionPlugin` 上：调用方有写在
-//! 后台任务里的（`TranscriptSink` / `WorkingGuard`），它们要的是收敛能力，不是整个插件。
+//! 它住在 [`Convergence`]（收敛手柄）上而不是 `SessionPlugin` 上：调用方要的是收敛能力，
+//! 不是整个插件。
 //!
 //! ## 为什么运行态要经 VDFS 变更而不是事件
 //!
@@ -28,7 +27,6 @@
 
 use super::active::ActiveSessionState;
 use super::plugin::session_node;
-use super::plugin::{OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use super::types::SessionSummary;
 use std::sync::Arc;
 use symbio_kernel::plugin::PluginError;
@@ -50,30 +48,6 @@ pub enum SessionStateChange {
     /// `Some(text)` 设置，`None` 清除。与 `Finished.error`（失败终态）的分界：
     /// 告警期间会话照常运行（持久化失败 / 长度截断）。
     Warning(Option<String>),
-}
-
-impl SessionStateChange {
-    /// 一轮**正常结束**。
-    pub(crate) fn completed() -> Self {
-        Self::Finished {
-            outcome: OUTCOME_COMPLETED,
-            error: None,
-        }
-    }
-
-    /// 一轮**被用户中止**。
-    ///
-    /// **唯一构造点**，因为中止有两个写者：消费循环的 ABORTED 出口与
-    /// `handle_abort`。两边各写各的（一处 `completed`、一处 `aborted`），
-    /// 最终显示哪个取决于「3s 轮询」与「循环收尾」谁先跑到——窗口期内 UI 会
-    /// 短暂显示"已完成"，提示音也可能选错音色。收成一个构造函数之后，
-    /// 两个写者写的是同一个值，竞态因此无害。
-    pub(crate) fn aborted() -> Self {
-        Self::Finished {
-            outcome: OUTCOME_ABORTED,
-            error: None,
-        }
-    }
 }
 
 /// 会话**收敛**手柄：把一个会话的运行态与终态落到它身上所需的那四样。
@@ -129,70 +103,6 @@ impl Convergence {
         )))
     }
 
-    /// 按 session_id 构造会话引擎实例——**三臂的唯一工厂口**
-    /// （[D-081](../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决一：`PersistentChatSession`
-    /// 的两个构造器在驱动器侧只许经此调用，豁免恰一处 = `chat_loop/io.rs` 的缺句柄回退）。
-    ///
-    /// - `_t_` 前缀 → 内存 ephemeral 会话；
-    /// - 非空 id → 持久会话（走 [`Self::open_chat_session`]，构造点只有一处）；
-    /// - None/空 → 内存 ephemeral 会话（固定 id `"ephemeral"`）。
-    ///
-    /// 两类会话共用同一引擎，差异只在存储后端（审计 B1）；ephemeral 会话的配置取
-    /// 当前值的**快照**（内存会话不随 `session/config` 变更而变）。
-    ///
-    /// 消费方**只有一处**：`TurnLauncher::start_turn` 向 chat_ctx 交付会话句柄
-    /// （`SESSION_HANDLE`，交付失败时 model 侧兜底内存会话）。没有对外 `session/open`
-    /// 路由消费它（对外返回进程内句柄），已退役——进程内句柄不该有对外路由。
-    pub(crate) async fn open_session_handle(
-        &self,
-        session_id: Option<String>,
-    ) -> Result<Arc<super::chat_session::PersistentChatSession>, PluginError> {
-        use super::chat_session::PersistentChatSession;
-
-        let snapshot = {
-            let cfg = self.config.read().await;
-            cfg.clone()
-        };
-
-        match session_id {
-            Some(sid) if !sid.is_empty() && !sid.starts_with("_t_") => {
-                self.open_chat_session(&sid).await
-            }
-            // `_t_` 前缀与空/缺省 id：内存临时会话，配置取当前值快照。
-            // 固定 id "ephemeral"（审计 B2）：随机 id 会让压缩前的 transcript
-            // 转存落到永不复现的目录名下，成为无法关联的孤儿存档。
-            Some(sid) => Ok(Arc::new(PersistentChatSession::detached(sid, snapshot))),
-            None => Ok(Arc::new(PersistentChatSession::detached(
-                "ephemeral",
-                snapshot,
-            ))),
-        }
-    }
-
-    /// 集中收敛"业务错误 + 状态收敛"：收敛为「失败」结局。
-    ///
-    /// **目的**：所有可恢复错误路径都必须保证运行态收敛到"不在跑"，
-    /// 否则前端会一直显示"AI 处理中"且 30 分钟内无任何信号能清；
-    /// 同时后端 `is_working` 不复位会导致后续 resume 请求被 `session_busy` 守卫静默拒绝。
-    ///
-    /// 错误的**呈现**不是另一条通道：它随会话节点视图（`status = failed` +
-    /// `attributes.error`）下发，与状态走同一个出口——这正是「一处判据」的含义。
-    pub(crate) async fn broadcast_error_with_idle(
-        &self,
-        state: &Arc<ActiveSessionState>,
-        error: impl Into<String>,
-    ) {
-        let err = error.into();
-        self.emit_session_state(
-            state,
-            SessionStateChange::Finished {
-                outcome: OUTCOME_FAILED,
-                error: Some(err),
-            },
-        )
-        .await;
-    }
-
     /// 会话运行态变化的**唯一出口**。
     ///
     /// 两件事，顺序写死：
@@ -217,9 +127,8 @@ impl Convergence {
     /// **不需要**：`ChatNode.seq` 决定显示顺序（节点属性），而「本轮是否结束」
     /// 由会话节点自己的 `status` 决定——消费端回读即得，不依赖谁先到。
     ///
-    /// 调用时机（由两条收尾路径保证，都在本轮**最后一条**消息帧之后）：
-    /// 正常收尾「清在途 → 复位 `is_working` → 本函数」，
-    /// 中止收尾「`converge_inflight` 广播节点终态 → 本函数」。
+    /// 调用时机：本轮**最后一条**消息帧之后（收尾 / 中止的落点由动作层决定，
+    /// 本函数只负责写运行态并投递）。
     pub(crate) async fn emit_session_state(
         &self,
         state: &Arc<ActiveSessionState>,

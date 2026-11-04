@@ -45,26 +45,6 @@ fn safe_id_is_the_same_rule_as_vdfs_entry_segments() {
     }
 }
 
-#[test]
-fn session_subdir_appends_under_safe_session_dir() {
-    let dir = session_subdir(
-        std::path::Path::new("/symbio-test/session"),
-        "a/b",
-        TOOL_ARCHIVES_SUBDIR,
-    );
-    let parts: Vec<_> = dir.components().collect();
-    // 末两段应为 safe_id 段与子目录段
-    assert!(parts.len() >= 2);
-    let last_two: Vec<String> = parts[parts.len() - 2..]
-        .iter()
-        .map(|c| c.as_os_str().to_string_lossy().to_string())
-        .collect();
-    assert_eq!(
-        last_two,
-        vec!["a_b".to_string(), "tool_archives".to_string()]
-    );
-}
-
 /// 具名新建：**地址末段即会话 id**；无名目标（挂载根 / 空末段）⇒ `None`（provider 生成）
 ///
 /// 与 `safe_id` 的方向相反，但同属一套寻址规则（见本模块头）。
@@ -113,7 +93,7 @@ fn session_wals_deep_covers_nested_sub_sessions() {
     let top_b = mk("sess-b");
     let child = mk("sess-a/sessions/child-1");
     let grandchild = mk("sess-a/sessions/child-1/sessions/grand-1");
-    std::fs::create_dir_all(top_a.join(TOOL_ARCHIVES_SUBDIR)).ok();
+    std::fs::create_dir_all(top_a.join("tool_archives")).ok();
 
     let mut wals = session_wals_deep(&root);
     wals.sort();

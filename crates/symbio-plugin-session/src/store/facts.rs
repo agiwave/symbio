@@ -11,30 +11,11 @@
 //!
 //! - **句柄只发给引擎写点**，且进程内按会话构造一次（「一写者」，见
 //!   `SessionStore::facts` 的文档）；
-//! - **读方拿值**：`snapshot` / `runtime_facts` 交的是 `Vec<Event>` 与投影结构，
-//!   不交路径、不交句柄；
+//! - **读方拿值面**：`fact_source` 交的是契约事实源；跨会话的读经
+//!   `recall_snapshots` / `deep_snapshots` 交 `Vec<Event>`，不交路径、不交句柄；
 //! - **跨会话的读要预算**：`recall_snapshots` 的名额与字节上限是本文件末尾那几个常量。
 
 use super::*;
-
-/// 运行态投影缓存项：值与它对应的**事实版本戳**。
-#[derive(Debug, Clone)]
-pub(super) struct RuntimeFactsCache {
-    stamp: FactsStamp,
-    facts: RuntimeFacts,
-}
-
-/// 事实版本戳——两种驻留方式各一个判据，互不比较（变体不同即失效）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum FactsStamp {
-    /// 本进程持有写句柄：`head`（下一个待分配序号）即版本。
-    Writer(u64),
-    /// 只读打开：文件长度 + mtime（追加必然改长度）。
-    File {
-        len: u64,
-        modified: Option<SystemTime>,
-    },
-}
 
 impl SessionStore {
     /// 该会话的**唯一事实源句柄**（持久会话）；临时会话 / 目录不存在 ⇒ `None`。
@@ -81,97 +62,6 @@ impl SessionStore {
         Ok(self
             .facts(session_id)?
             .map(super::fact_source::SessionFactSource::open))
-    }
-
-    /// 该会话的**完整史快照**（含归档前缀）；没有事实源 ⇒ `None`。
-    ///
-    /// 这是读方的唯一形态：值是 `Vec<Event>`，不是路径、不是句柄。已有写句柄时
-    /// 走它（就是本进程刚落的那些格），否则只读打开一次——读方不创建文件、
-    /// 不取令牌、不截尾。
-    pub(crate) fn snapshot(&self, session_id: &str) -> Option<Vec<Event>> {
-        if let Some(store) = self
-            .facts
-            .lock()
-            .expect("会话事实源表锁中毒")
-            .get(session_id)
-            .cloned()
-        {
-            return Some(store.range(Seq::new(0)));
-        }
-        let dir = self.session_dir(session_id)?;
-        let wal = dir.join(paths::V2_WAL_FILE);
-        if !wal.is_file() {
-            return None;
-        }
-        let store = EventWalStore::open_readonly(&wal).ok()?;
-        Some(store.range(Seq::new(0)))
-    }
-
-    /// 该会话的**运行态事实投影**（上一轮结局）；临时会话 / 没有 WAL ⇒ `None`。
-    ///
-    /// [D-083 §5.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：结局在读侧是投影值，
-    /// 不是第二份状态。这里只交**值**，不交句柄、不交路径；投影函数是纯的
-    /// （`runtime::project`），缓存只是「事实没变就不重折」。
-    ///
-    /// 缓存失效判据按驻留方式分两种：
-    /// - 本进程有写句柄：`head`（下一个待分配序号）——任何追加都使它变化；
-    /// - 只读：WAL 长度 + mtime——别的进程追加必然改动文件。
-    ///
-    /// 归档不改变 `head` 也不改变完整史（归档段 + live 段仍拼成同一份事实），
-    /// 缓存因此不会因归档而失效，也不需要失效。
-    pub(crate) fn runtime_facts(&self, session_id: &str) -> Option<RuntimeFacts> {
-        let writer = self
-            .facts
-            .lock()
-            .expect("会话事实源表锁中毒")
-            .get(session_id)
-            .cloned();
-        let cached = self.runtime_cache().get(session_id).cloned();
-
-        if let Some(store) = writer {
-            let stamp = FactsStamp::Writer(store.head().value());
-            if let Some(hit) = cached.as_ref().filter(|c| c.stamp == stamp) {
-                return Some(hit.facts.clone());
-            }
-            let facts = runtime::project(&store.range(Seq::new(0)));
-            self.remember_runtime(session_id, stamp, &facts);
-            return Some(facts);
-        }
-
-        let dir = self.session_dir(session_id)?;
-        let wal = dir.join(paths::V2_WAL_FILE);
-        let md = std::fs::metadata(&wal).ok()?;
-        if !md.is_file() {
-            return None;
-        }
-        let stamp = FactsStamp::File {
-            len: md.len(),
-            modified: md.modified().ok(),
-        };
-        if let Some(hit) = cached.as_ref().filter(|c| c.stamp == stamp) {
-            return Some(hit.facts.clone());
-        }
-        let store = EventWalStore::open_readonly(&wal).ok()?;
-        let facts = runtime::project(&store.range(Seq::new(0)));
-        self.remember_runtime(session_id, stamp, &facts);
-        Some(facts)
-    }
-
-    /// 运行态投影缓存表的唯一取锁口（std 锁当无中毒用，同本文件其它表）。
-    pub(super) fn runtime_cache(
-        &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<String, RuntimeFactsCache>> {
-        self.runtime_cache.lock().expect("会话运行态投影缓存锁中毒")
-    }
-
-    fn remember_runtime(&self, session_id: &str, stamp: FactsStamp, facts: &RuntimeFacts) {
-        self.runtime_cache().insert(
-            session_id.to_string(),
-            RuntimeFactsCache {
-                stamp,
-                facts: facts.clone(),
-            },
-        );
     }
 
     /// 顶级会话事实源的召回视图（**新近优先**、名额与字节双预算）。
@@ -278,6 +168,3 @@ pub(crate) const RECALL_MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 // ── panic 面登记（PN-001…003）─────────────────────────────────────────
 // 判据与「登记写在代码旁边」的理由见 `store/mod.rs` 末尾同名区块。
 // panic-allow crates/symbio-plugin-session/src/store/facts.rs::facts: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-plugin-session/src/store/facts.rs::snapshot: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-plugin-session/src/store/facts.rs::runtime_facts: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-plugin-session/src/store/facts.rs::runtime_cache: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

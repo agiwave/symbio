@@ -11,9 +11,6 @@
 use super::*;
 use crate::plugin::SessionConfig;
 use symbio_plugin_api::vocab;
-// 夹具自己开档写一轮事实：`use super::*` 带不过来（生产侧读走存储层句柄）。
-use crate::store::EventWalStore;
-use symbio_kernel::event::Seq;
 use symbio_sdk::chat::session_chat;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
@@ -286,121 +283,6 @@ async fn zero_bound_is_clamped_to_one() {
 
     let batch = p.take_inbox_batch(&state).await;
     assert_eq!(batch.len(), 1, "上界 0 会让队列永不消费，必须兜到 1");
-}
-
-// ────────────── 插话抢占：忙窗判、空闲落、收在插话轮之后───────
-//
-// 上面几例钉的是**队列**规则（忙则排队，D-026）；这一段钉的是跨过忙窗的那条
-// 链子。断言一律看**就绪集**：`readyset` 是模型唯一的调度候选来源，挂起没落格、
-// 恢复没落格对用户都是「任务凭空消失 / 永不复活」，而两者都**不报错**——
-// 正是 DE-016 §9.2 要防的静默失效。
-
-/// 每例独占存储根：抢占要往事实源写格，共用 `test_dir()` 会跨用例串味。
-fn preempt_plugin() -> (tempfile::TempDir, Arc<SessionPlugin>) {
-    let dir = tempfile::tempdir().expect("临时目录创建失败");
-    let plugin = Arc::new(SessionPlugin::new(
-        None,
-        SessionConfig::default(),
-        symbio_sdk::plugin::PluginDir::at(dir.path(), "session"),
-    ));
-    (dir, plugin)
-}
-
-fn wal_path(p: &SessionPlugin, sid: &str) -> std::path::PathBuf {
-    crate::paths::session_dir(&p.storage_dir(), sid).join(crate::paths::V2_WAL_FILE)
-}
-
-/// 往该会话的事实源写一批事实（模拟上一轮的轮末收束入格）。
-///
-/// 目录要自己建：`WalStore::open` 是「写方已经就位」的入口，盘上没这层目录属
-/// 存储层灾难、直接 panic（生产里由统一发送链路先落会话目录）。
-fn seed_wal(p: &SessionPlugin, sid: &str, facts: Vec<symbio_kernel::event::Event>) {
-    let path = wal_path(p, sid);
-    std::fs::create_dir_all(path.parent().expect("WAL 路径必有父目录")).expect("会话目录创建失败");
-    let store = EventWalStore::open(&path).expect("打开 WAL");
-    for fact in facts {
-        store.append(fact).expect("事实入格");
-    }
-}
-
-fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<symbio_kernel::event::Event> {
-    EventWalStore::open_readonly(wal_path(p, sid))
-        .expect("只读打开 WAL")
-        .range(Seq::new(0))
-}
-
-/// 一轮的事实。`final_first` = 收束发言在 `task.opened` **之前**——这正是
-/// 轮末收束的落笔顺序（收束格先落、派生事实后补；DE-016 §9.1 的判据输入，见那里的
-/// 「顺序是判据」注记）。
-fn turn_facts(final_first: bool) -> Vec<symbio_kernel::event::Event> {
-    use symbio_kernel::event::{Entity, Event, Verb};
-    use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
-
-    let user = Event::pending(
-        "u1",
-        EVENT_USER_MESSAGE,
-        Entity::Scope,
-        Verb::Opened,
-        0,
-        "user:t",
-    );
-    let final_msg = Event::pending(
-        "f1",
-        EVENT_CHAT_ASSISTANT_FINAL,
-        Entity::Scope,
-        Verb::Closed,
-        0,
-        "session/t",
-    )
-    .with_produced_by(0);
-    let task = Event::pending(
-        "t1",
-        symbio_plugin_api::events::EVENT_TASK_OPENED,
-        Entity::Task,
-        Verb::Opened,
-        0,
-        "user:t",
-    )
-    .with_produced_by(0)
-    .with_payload(serde_json::json!({ "task_id": "x1", "goal": "把事办了" }));
-
-    if final_first {
-        vec![user, final_msg, task]
-    } else {
-        vec![user, task, final_msg]
-    }
-}
-
-/// 某一格上落了哪些任务 id（**事实层**的读法，不是就绪集）。
-///
-/// 就绪集是任务能力包的折叠（名册 #23，`D-289`），本测试二进制不链接它（E-009）——
-/// 这里只判 session 这一支**写了什么**：挂起与恢复各自落成哪一格的哪条任务。
-/// 「这两格真的让模型看不见 / 重新看见那条任务」归 owner 的单测
-/// （`crates/symbio-plugin-task/src/readyset.test.rs`）与 e2e `t34-preemption.mjs`
-/// （它读生产二进制的 `readyset.ready`）。在这里复算一份折叠就是替身 owner。
-fn task_ids_in(p: &SessionPlugin, sid: &str, verb: symbio_kernel::event::Verb) -> Vec<String> {
-    read_wal(p, sid)
-        .iter()
-        .filter(|e| e.entity == symbio_kernel::event::Entity::Task && e.verb == verb)
-        .filter_map(|e| {
-            e.payload
-                .get("task_id")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-        })
-        .collect()
-}
-
-/// 事实源里有没有那一格：按 **`entity × verb`** 认（名字表在 core 里，不复述字面量）。
-fn has_fact(
-    p: &SessionPlugin,
-    sid: &str,
-    entity: symbio_kernel::event::Entity,
-    verb: symbio_kernel::event::Verb,
-) -> bool {
-    read_wal(p, sid)
-        .iter()
-        .any(|e| e.entity == entity && e.verb == verb)
 }
 
 // ==================== S07 抢占判定（纯函数 + 行，D-190） ====================

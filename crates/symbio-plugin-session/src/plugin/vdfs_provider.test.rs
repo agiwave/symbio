@@ -1090,19 +1090,8 @@ async fn switch_branch_changes_the_reading_not_the_facts() {
     assert!(branch_selected(m1), "选择格说读 m1");
     assert!(!branch_selected(m2), "另一支降成候选");
 
-    // 模型读侧：同一个问题在请求包里只能有一个答复
-    let ctx = p
-        .open_chat_session(&id)
-        .await
-        .unwrap()
-        .get_context_messages(None)
-        .await
-        .unwrap();
-    let ctx_ids: Vec<&str> = ctx.iter().map(|m| m.id.as_str()).collect();
-    assert!(
-        ctx_ids.contains(&"m1") && !ctx_ids.contains(&"m2"),
-        "未选中支不该进模型：{ctx_ids:?}"
-    );
+    // 模型读侧（同一问题在请求包里只能有一个答复）归 sdk 的投影
+    // （`symbio_sdk::projection::transcript` 的分支用例）；本插件只出存储视图。
 
     // 事实：只多一条选择格。**没有** `message.removed`——换读法不毁事实。
     let kinds = fact_kinds(&p, &id).await;

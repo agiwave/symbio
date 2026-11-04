@@ -73,11 +73,6 @@ use self::deliver::{
     DELIVER_WINDOW_MS,
 };
 
-// 域内门面：状态帧 / 删除帧的实现已随 D-086 §7 上移 core（loop 也要发），
-// 这里只留 session 侧调用点的短路径别名。
-pub(crate) use self::publish::append_and_publish;
-pub use symbio_sdk::llm::llm_state_frame;
-
 /// **在途号段**：转写侧给「还没落库的消息」发的位置序号（四套序号的归一表见本域
 /// `docs/109-vdfs-session-messages.md` §3.3）。
 ///
@@ -375,18 +370,6 @@ impl Transcript {
         self.nodes.get(id).cloned()
     }
 
-    /// 清空在途图（轮次收尾：权威副本已全部落库）。
-    ///
-    /// 顺带冲刷待合并的增量 run 与待投递的增量窗口——轮次边界是"这一段增长结束了"
-    /// 的最强信号，也是最后一段增量不至于被吞掉的保证（`clear` 在轮次起止各调一次）。
-    pub fn clear(&mut self) {
-        if let Some(line) = self.delta_log.flush() {
-            plugin_debug!("session", "{line}");
-        }
-        self.flush_pending();
-        self.nodes.clear();
-    }
-
     /// 打一行核心日志、投递一条 VDFS 变更。`frame_no` 在每一帧上 +1。
     ///
     /// ## 这里分岔成两件事（唯一一处）
@@ -582,38 +565,6 @@ impl Transcript {
         };
         self.changes.notify(&change);
     }
-}
-
-/// [`symbio_kernel::exec::ExecTranscriptWriter`] 的转写域落点：一个只做「锁转写 → apply」
-/// 的最小 writer（与 `orchestrator::sink::TranscriptSink` 平行——后者多了会话级告警分派，
-/// 压缩增量用不上）。
-///
-/// 原先住在 `chat_loop/state.rs`（[`super::super::chat_loop::CompressionEmitter::transcript_writer`]
-/// 的私有桥）。桥的全部工作是「锁转写 → apply」，而 `Transcript` 是本域类型——把它的
-/// `Arc<Mutex<Transcript>>` 抄成**驱动器侧自己的字段**正是 [D-081](../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表")
-/// 裁决一第 3 条禁的形状。桥整体迁进本域，对 core trait 的实现一行不削，只是换住址；
-/// 驱动器侧的 `transcript_writer` 退化为一次 [`compression_writer`] 调用。
-struct TranscriptWriterBridge {
-    transcript: Arc<tokio::sync::Mutex<Transcript>>,
-}
-
-#[async_trait::async_trait]
-impl symbio_kernel::exec::ExecTranscriptWriter for TranscriptWriterBridge {
-    async fn apply(&self, message: cm::ChatNode) {
-        self.transcript.lock().await.apply(message);
-    }
-}
-
-/// 从本会话转写构造压缩请求的**增量改道落点** writer（仅由 `context::pipeline` 的
-/// 过滤桥消费——摘要帧经白名单改写后从这里进转写）。
-///
-/// 归属 `CompressionEmitter::transcript_writer`：
-/// 复用转写而不是另开通道——增量落点是「在途图 + 位置号 + 发布」三件事的合成，另开
-/// 通道等于把这套收敛逻辑再实现一遍，且必然漂移。锁点留在本域，`Arc` 只作构造实参流走。
-pub(crate) fn compression_writer(
-    transcript: Arc<tokio::sync::Mutex<Transcript>>,
-) -> Arc<dyn symbio_kernel::exec::ExecTranscriptWriter> {
-    Arc::new(TranscriptWriterBridge { transcript })
 }
 
 #[cfg(test)]

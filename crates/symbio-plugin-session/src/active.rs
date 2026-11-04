@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
+use std::sync::Arc;
 use symbio_kernel::exec::ExecAbortSignal;
 use symbio_sdk::chat::{chat_node as cm, session_chat};
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
@@ -82,9 +82,9 @@ pub struct ActiveSessionStateInner {
     /// 工作态（进程局部量，[`WorkingState`]）。
     ///
     /// **字段私有**：生产侧的写点只有 `ActiveSessionState` 上那三个迁移方法
-    /// （`begin_turn` / `reset_working` 与 `clear_working_and_abort_signal` /
-    /// `finish_turn`），它们都经 [`WorkingState::apply`] 并把「由忙变闲」交给
-    /// `turn_done` 唤醒。收件箱消费者因此不再轮询。
+    /// （`begin_turn` / `clear_working_and_abort_signal` / `finish_turn`），
+    /// 它们都经 [`WorkingState::apply`] 并把「由忙变闲」交给 `turn_done` 唤醒。
+    /// 收件箱消费者因此不再轮询。
     working: WorkingState,
     /// 在途 Turn 的中止信号（登记后 `handle_abort` 直接置位，无需投帧）。
     ///
@@ -171,7 +171,6 @@ impl ActiveSessionStateInner {
 
 /// 会话状态锚点
 pub struct ActiveSessionState {
-    pub request_id: AtomicU64,
     /// 会话 ID 字符串（用于 EventBus 标签）
     pub session_id: String,
     pub inner: RwLock<ActiveSessionStateInner>,
@@ -216,7 +215,6 @@ impl ActiveSessionState {
     /// 带 session_id 的构造函数
     pub fn with_session_id(session_id: String, changes: VdfsChangeSubscriptions) -> Self {
         Self {
-            request_id: AtomicU64::new(0),
             session_id: session_id.clone(),
             inner: RwLock::new(ActiveSessionStateInner {
                 working: WorkingState::Idle,
@@ -239,26 +237,6 @@ impl ActiveSessionState {
             ))),
             turn_done: Arc::new(Notify::new()),
         }
-    }
-
-    /// **提前复位** `is_working`（不发变更、不动运行态的其余字段）。
-    ///
-    /// 忙位的写入只经下文「三条迁移方法」：本方法供「先复位、后收尾」的路径使用——
-    /// 收尾还要做几件事（清在途图 / 注销中止信号 / `persist_failure`），这几步期间
-    /// 必须已经不处于 `is_working`，否则并发进来的 `chat/send` 会被 `session_busy`
-    /// 守卫静默拒绝（用户点重试无任何反应）。
-    ///
-    /// 幂等：已是空闲时不写、也**不**唤醒等待方（见 [`WorkingTransition::EarlyExit`]）。
-    /// 复位**不带**变更投递——那一步由收尾处的 `emit_session_state`（经 `finish_turn`）
-    /// 完成，两者合起来才是「运行态收敛」。
-    pub async fn reset_working(&self) {
-        let became_idle = self
-            .inner
-            .write()
-            .await
-            .working
-            .apply(WorkingTransition::EarlyExit);
-        self.wake_if_idle(became_idle);
     }
 
     /// 工作态**由忙变闲**时叫醒收件箱消费者（一次迁移至多一次唤醒）。
@@ -380,15 +358,6 @@ impl ActiveSessionState {
         {
             inner.auto_compress_circuit_opened_at = Some(std::time::Instant::now());
         }
-    }
-
-    /// 返回 session_id 字符串的便捷方法
-    pub fn request_id_str(&self) -> String {
-        if !self.session_id.is_empty() {
-            return self.session_id.clone();
-        }
-        // 兜底：使用内部 request_id
-        self.request_id.load(Ordering::SeqCst).to_string()
     }
 }
 

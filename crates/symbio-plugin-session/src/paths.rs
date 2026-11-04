@@ -10,7 +10,7 @@
 //!   入口。历史教训：同一替换逻辑曾在 store/file.rs、tools/tool_result_guard.rs、
 //!   chat_loop.rs、chat_session.rs 各写一份，行为漂移风险高；收敛到插件内唯一
 //!   之后仍与宿主层并存的第二版，故再上一台阶。
-//! - [`session_dir`] / [`session_subdir`]：会话目录与会话内子目录。
+//! - [`session_dir`]：会话目录。
 //!   **根由调用方给**（装配态即本插件自己的目录，由父插件经 `PLUGIN_DIR` 告知）——
 //!   本模块只做「id → 目录名」这一段，不认识任何全局布局。
 //! - [`session_id_from_new_path`]：**反向**的那一段——VDFS 写地址 → 会话 id
@@ -24,9 +24,6 @@
 /// **写方（`turn_exec`）与读方（`stats` 读数口）共用这一个拼法**——
 /// 文件名是事实源的身份，两处各写一份字面量就等于两份事实源。
 pub(crate) const V2_WAL_FILE: &str = "v2-events.wal";
-
-/// 会话内固定子目录名：L0 工具结果全文存档。
-pub const TOOL_ARCHIVES_SUBDIR: &str = "tool_archives";
 
 /// 会话内固定子目录名：L3 压缩前完整历史 transcript 转存。
 pub const TRANSCRIPTS_SUBDIR: &str = "transcripts";
@@ -54,18 +51,6 @@ pub(crate) fn safe_id(session_id: &str) -> String {
 /// `root` = 会话存储根（本插件自己的目录）。
 pub(crate) fn session_dir(root: &std::path::Path, session_id: &str) -> std::path::PathBuf {
     root.join(safe_id(session_id))
-}
-
-/// 会话内子目录：`<会话存储根>/<safe_id>/<subdir>/`
-///
-/// 用于 tool_archives / transcripts 等固定子目录
-///（常量见本模块 [`TOOL_ARCHIVES_SUBDIR`] / [`TRANSCRIPTS_SUBDIR`]）。
-pub(crate) fn session_subdir(
-    root: &std::path::Path,
-    session_id: &str,
-    subdir: &str,
-) -> std::path::PathBuf {
-    session_dir(root, session_id).join(subdir)
 }
 
 /// **全会话事实源**的路径枚举（含嵌套子会话，任意深度）——部署级读侧的遍历入口。

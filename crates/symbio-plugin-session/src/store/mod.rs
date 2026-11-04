@@ -47,15 +47,12 @@
 //! 形状与它的两条理由（为什么元数据与消息分两个文件、子会话为什么嵌套存放）
 //! 写在 `layout` 的模块头——那个文件就是这段布局的实现，判据同表。
 
-use super::runtime::{self, RuntimeFacts};
 use super::types::{ChatNode, Session, SessionSummary};
-use crate::declarations::MESSAGE_VOCAB;
 use crate::paths;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::plugin::PluginError;
 use symbio_kernel::store::Store;
@@ -74,7 +71,6 @@ pub(crate) use fact_source::remember_storage_dir;
 /// `Store` 端口或会话的地址面，而不是自己开一个 WAL。
 pub(crate) use wal::EventWalStore;
 // 布局段的自由函数与两种落盘形状（`layout` 是本模块的孩子，`pub(super)` 到这里可见）。
-use facts::RuntimeFactsCache;
 use layout::*;
 
 /// 父会话目录内存放子会话的固定子目录名——**唯一定义在 `paths`**（路径词汇
@@ -105,11 +101,6 @@ pub struct SessionStore {
     /// 会让 `head` 各自重放、写者令牌互斥 ⇒ 要么重复 seq，要么每次写都被拒。
     /// 缓存一次之后，所有引擎写方共享同一把内部锁，`head` 只有一份。
     facts: std::sync::Mutex<HashMap<String, Arc<EventWalStore>>>,
-    /// 每会话**一份运行态投影值**（见 `runtime_facts`）。
-    ///
-    /// 事实变化才重折：有写句柄时以 `head` 为戳（追加即变），只读时以 WAL 的
-    /// 长度 + mtime 为戳。运行态读取（`list` / `stat`）因此不必每次重放整条 WAL。
-    runtime_cache: std::sync::Mutex<HashMap<String, RuntimeFactsCache>>,
 }
 
 impl SessionStore {
@@ -122,7 +113,6 @@ impl SessionStore {
             mem: RwLock::new(BTreeMap::new()),
             write_locks: Mutex::new(HashMap::new()),
             facts: std::sync::Mutex::new(HashMap::new()),
-            runtime_cache: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -136,7 +126,6 @@ impl SessionStore {
             mem: RwLock::new(BTreeMap::new()),
             write_locks: Mutex::new(HashMap::new()),
             facts: std::sync::Mutex::new(HashMap::new()),
-            runtime_cache: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -162,14 +151,6 @@ impl SessionStore {
     /// 落盘根；`None` = 本实例不落盘
     fn disk(&self) -> Option<&Path> {
         self.base_dir.as_deref()
-    }
-
-    /// 本存储是否落在磁盘上（临时会话没有根目录）。
-    ///
-    /// 计划表的「有落盘目录」判据用这个**能力布尔**：调用方要知道的是
-    /// 「有没有事实可读」，不是目录形状（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
-    pub(crate) fn is_persistent(&self) -> bool {
-        self.disk().is_some()
     }
 
     // ==================== 读 ====================
@@ -262,7 +243,6 @@ impl SessionStore {
                 .lock()
                 .expect("会话事实源表锁中毒")
                 .remove(session_id);
-            self.runtime_cache().remove(session_id);
             return Ok(());
         };
 
@@ -275,7 +255,6 @@ impl SessionStore {
                 .lock()
                 .expect("会话事实源表锁中毒")
                 .remove(session_id);
-            self.runtime_cache().remove(session_id);
             return Ok(());
         }
         // 顶层未命中：嵌套删除（子会话级联于父目录之外的单点删除）
@@ -287,7 +266,6 @@ impl SessionStore {
                 .lock()
                 .expect("会话事实源表锁中毒")
                 .remove(session_id);
-            self.runtime_cache().remove(session_id);
         }
         Ok(())
     }
@@ -401,33 +379,6 @@ impl SessionStore {
             return Some(top);
         }
         find_nested_dir(base, session_id)
-    }
-}
-
-// ==================== 读法窗口 ====================
-//
-// 不属于布局（`layout`）也不属于事实源句柄（`facts`）：它只对着一份已经读出来的
-// `&[Event]` 切窗口，没有任何 IO，红的是「上下文/进度从哪读」。
-
-/// **现行窗口**：从最近一份快照事件起的那段（含快照本身；没有快照 ⇒ 整份都是现行）。
-///
-/// `Store::range` 归一后给的是**完整史**（含被
-/// `archive_before` 移出的前缀，
-/// [DE-001 §4.3](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源），
-/// 本函数服务的是「**上下文 / 进度**该从哪读」这类问题。
-///
-/// **它不判轮次生命周期**：「已开未收束」必须读完整史
-/// （[D-085](../../README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "crates/symbio-plugin-session/src/README")）——压缩期间等待审批的那一轮
-/// 会被归档移出本窗口，按窗口找就会把它漏成「找不到未收束的轮次」。
-/// 窗口由**消费方按事实切**，不是存储层的第二种读法——这正是归一的前提：读法只有一种，
-/// 想要窗口就从「最近一份快照落在第几号」自己切。折叠侧的同类判据（消息列表 / 轮次计数）
-/// 已经内建在 `mutations_latest_snapshot` 的用法里，不需要本函数。
-pub(crate) fn current_window(
-    events: &[symbio_kernel::event::Event],
-) -> &[symbio_kernel::event::Event] {
-    match symbio_sdk::projection::mutations::mutations_latest_snapshot(events, &MESSAGE_VOCAB) {
-        Some((i, _)) => &events[i..],
-        None => events,
     }
 }
 

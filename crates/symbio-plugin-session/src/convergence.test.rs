@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::config::SessionConfig;
-use crate::plugin::SessionPlugin;
+use crate::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED};
 use crate::types::Session;
 use symbio_sdk::plugin::PluginDir;
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
@@ -21,11 +21,9 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     );
     (dir, plugin)
 }
-/// 中止与正常结束必须是**不同**的结局，且都经同一个构造点产出。
+/// 中止与正常结束必须是**不同**的结局，且都经同一个出口产出。
 ///
-/// 回归：消费循环的 ABORTED 出口若广播 `completed`、而 `handle_abort` 广播
-/// `aborted`——最终显示哪个取决于「3s 轮询」与「循环收尾」谁先跑到：窗口期内
-/// UI 会短暂显示"已完成"，提示音也可能选错音色。
+/// 回归：两处置不同的结局会让 UI 在窗口期内显示"已完成"，提示音也可能选错音色。
 #[tokio::test]
 async fn aborted_and_completed_outcomes_are_distinct() {
     let (_dir, p) = fixture();
@@ -42,7 +40,13 @@ async fn aborted_and_completed_outcomes_are_distinct() {
     ));
 
     p.convergence
-        .emit_session_state(&state, SessionStateChange::aborted())
+        .emit_session_state(
+            &state,
+            SessionStateChange::Finished {
+                outcome: OUTCOME_ABORTED,
+                error: None,
+            },
+        )
         .await;
     {
         let inner = state.inner.read().await;
@@ -51,7 +55,13 @@ async fn aborted_and_completed_outcomes_are_distinct() {
     }
 
     p.convergence
-        .emit_session_state(&state, SessionStateChange::completed())
+        .emit_session_state(
+            &state,
+            SessionStateChange::Finished {
+                outcome: OUTCOME_COMPLETED,
+                error: None,
+            },
+        )
         .await;
     assert_eq!(
         state.inner.read().await.last_outcome.as_deref(),

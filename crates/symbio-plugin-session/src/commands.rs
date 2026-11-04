@@ -518,7 +518,7 @@ impl SessionPlugin {
     /// **绑定会话身份**：会话创建时登记，身份被 metadata 改写时换行。
     ///
     /// 根会话声明会话面缺省行；委派子会话声明「父行 ∩ 自己的声明」——父主体的
-    /// 取值与运行期 `delegating_principal` 共用同一份实现（
+    /// 取值与运行期 `delegating_principal_in` 共用同一份实现（
     /// [`super::chat_session::delegating_principal_in`]），两处不会分叉成
     /// 「登记挂 A、运行期判 B」。
     ///

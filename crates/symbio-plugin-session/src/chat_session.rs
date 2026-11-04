@@ -10,32 +10,30 @@
 //!
 //! | 文件 | 职责 |
 //! |---|---|
-//! | 本文件 | 引擎本体：句柄与 Key、结构与构造、配置读取 |
-//! | [`read`]  | 读路径：存储视图与上下文候选集（滑动窗口 / 孤儿剔除 / content 归一） |
+//! | 本文件 | 引擎本体：结构与构造、配置读取 |
+//! | [`read`]  | 读路径：存储视图 |
 //! | [`write`] | 写路径：两条写入路径 + 其策略纯函数（序号分配 / 时间戳回填 / 写入不变量 / 存储期裁剪） |
 //!
 //! 读写各自的纯函数与自己的路径同处一文件，便于对照。
 //!
 //! ## 为何归属 session 插件
 //!
-//! `PersistentChatSession` / `ChatSessionHandle` / `SESSION_HANDLE` 的读写方全部
-//! 在 session 插件内（编排器交付句柄 → chat_loop / resume / handlers 消费），
-//! 不存在跨插件使用，故从 `symbio_core` 下沉到本插件——核心架构只保留跨插件
-//! 共享的抽象，不承载单一模块的内部定义。
+//! `PersistentChatSession` 的读写方全部在 session 插件内，不存在跨插件使用，
+//! 故从 `symbio_core` 下沉到本插件——核心架构只保留跨插件共享的抽象，
+//! 不承载单一模块的内部定义。
 //!
 //! 不设 `ChatSession` trait（唯一实现即本结构体）：单实现多态只会
 //! 多一层 `dyn` 分发与一份契约文档的两处维护，已去除——方法直接内聚在实现上。
 
-use super::config::{default_context_messages, SessionConfig};
+use super::config::SessionConfig;
 use super::store::SessionStore;
 use std::collections::HashSet;
 use std::sync::Arc;
-use symbio_kernel::keys::SymbioKey;
 use symbio_kernel::plugin::PluginError;
-use symbio_plugin_api::plugin_info;
 use symbio_sdk::chat::chat_node as cm;
-use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeRole};
+use symbio_sdk::chat::chat_node::{ChatNode, NodeRole};
 use symbio_sdk::clock::clock_now_ms;
+use symbio_sdk::plugin_info;
 use tokio::sync::RwLock;
 
 mod read;
@@ -45,31 +43,6 @@ mod write;
 // 域的各个写点，所以从这里重导出（`mod write` 本身保持私有：两个存储原语
 // `append_messages` / `replace_all` 不得被 `write.rs` 之外直接调用，可见性即守卫）。
 pub(crate) use write::{Carrier, MessageChange};
-
-/// 会话引擎句柄（`SESSION_HANDLE` 键的值类型）。
-pub struct ChatSessionHandle(pub Arc<PersistentChatSession>);
-
-impl ChatSessionHandle {
-    pub fn new(session: Arc<PersistentChatSession>) -> Self {
-        Self(session)
-    }
-}
-
-// 会话句柄 Key（Value）：session 编排器交付给 chat_loop 的会话引擎实例
-pub struct SessionHandleKey;
-impl SymbioKey for SessionHandleKey {
-    type Value = Arc<ChatSessionHandle>;
-    fn name(&self) -> &'static str {
-        "session_handle"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "chat_session_handle".to_string()
-    }
-}
-pub const SESSION_HANDLE: SessionHandleKey = SessionHandleKey;
 
 // PersistentChatSession
 
@@ -135,72 +108,12 @@ impl PersistentChatSession {
             .unwrap_or_default()
     }
 
-    /// 对话窗口（最近轮数，**含当前轮**）——v2 执行器的 prompt 窗口
-    /// （锁被占回落默认，与 [`Self::cfg_or_default`] 同一读取纪律）。
-    pub(crate) fn context_window(&self) -> u64 {
-        self.cfg_or_default().context_messages as u64
-    }
-
     async fn load_session(&self) -> Result<super::types::Session, PluginError> {
         self.store.load_session(&self.session_id).await
     }
 
-    /// 本会话所属**父会话的主体**——委派链上的父主体。
-    ///
-    /// 口径三段，每一段都只有一个 owner：子会话 `metadata.parent_session_id`
-    /// → 父会话 `metadata.agent_id` → `authz::principal_of`（部署事实的唯一派生点）。
-    ///
-    /// 任一环落空 ⇒ `None`：顶层会话的正常形态，或父会话已删 / 读失败。调用方
-    /// （`orchestrator::consume`）按 `Scope::Root` 处置——与接线前逐字一致。
-    /// **这不是 fail-open**：作用域是**权威的上限**，不是许可本身；
-    /// 上限取不到时每一格仍按子主体自己那一行判（`turn_runner::closure_gate`）。
-    ///
-    pub(crate) async fn delegating_principal(&self) -> Option<String> {
-        let session = self.load_session().await.ok()?;
-        delegating_principal_in(&self.store, &session).await
-    }
-
-    /// 子会话清单（Q3 worker 进展的读侧入口）：委托 store 枚举
-    /// `<根>/<safe(本会话)>/sessions/*/session.json`——**按路径天然只含本父之子**，
-    /// 归属复核另走 `Session::parent_session_id`。
-    ///
-    /// 只读 `session.json`（「清单不碰消息」，与会话量脱钩）；`messages.json` 由
-    /// [`Self::load_sub_session`] 按需单独取。
-    pub(crate) async fn list_sub_sessions(
-        &self,
-    ) -> Result<Vec<super::types::SessionSummary>, PluginError> {
-        self.store.list_sub_sessions(&self.session_id).await
-    }
-
-    /// 载入**子**会话的完整转写（含 `messages.json`）——Q3 投影要 `Session.messages`。
-    /// store 的 `load_session` 走嵌套查找，子会话可凭自身 id 直接寻址。
-    pub(crate) async fn load_sub_session(
-        &self,
-        id: &str,
-    ) -> Result<super::types::Session, PluginError> {
-        self.store.load_session(id).await
-    }
-
     async fn save_session(&self, session: &super::types::Session) -> Result<(), PluginError> {
         self.store.save_session(session).await
-    }
-
-    /// 本会话的**事实源句柄**（D-084 §1-B）：会话内写方/读方拿它落格、取切片，
-    /// 不再自己拼目录 `open`。临时会话 ⇒ `Ok(None)`；事实源打不开 ⇒ `Err`（真失败）。
-    pub(crate) fn facts(&self) -> Result<Option<Arc<super::store::EventWalStore>>, PluginError> {
-        self.store
-            .facts(&self.session_id)
-            .map_err(PluginError::InternalError)
-    }
-
-    /// 存储句柄（D-084 §2 的引擎侧端口）：只许 session 插件内的引擎面持有，
-    /// 能力面不得见到 `SessionStore` 类型。
-    pub(crate) fn store_handle(&self) -> Arc<SessionStore> {
-        self.store.clone()
-    }
-
-    pub(crate) fn session_id(&self) -> &str {
-        &self.session_id
     }
 }
 

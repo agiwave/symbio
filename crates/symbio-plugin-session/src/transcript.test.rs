@@ -573,18 +573,10 @@ fn session_state_flushes_pending_delta_first() {
     assert!(tr.pending.is_none(), "运行态帧冲刷掉待投递窗口");
 }
 
-/// `clear` 与 `persisted` 都是冲刷点：最后一段增量不会被吞掉（日志与投递两侧）。
+/// `persisted` 是冲刷点：最后一段增量不会被吞掉（日志与投递两侧）。
 #[test]
-fn clear_and_persisted_flush_the_trailing_run() {
+fn persisted_flushes_the_trailing_run() {
     let (mut tr, _seen) = transcript();
-    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
-    tr.apply(delta_msg("a", "abc"));
-    tr.apply(delta_msg("a", "de"));
-    // clear 之后不得残留（轮次边界）
-    tr.clear();
-    assert_eq!(tr.delta_log.flush(), None, "clear 应冲刷最后一段");
-    assert!(tr.pending.is_none(), "clear 应冲刷待投递窗口");
-
     tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "xy"));
     tr.persisted(&["a".to_string()]);

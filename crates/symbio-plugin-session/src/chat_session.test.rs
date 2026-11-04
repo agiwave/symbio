@@ -6,6 +6,7 @@
 use super::super::config::SessionConfig;
 use super::super::store::SessionStore;
 use super::super::types::Session;
+use super::delegating_principal_in;
 use super::write::{assign_seq, ensure_durable_states, max_seq, prune_historical_tool_calls};
 use super::PersistentChatSession;
 use crate::store::EventWalStore;
@@ -1140,9 +1141,9 @@ async fn apply_reports_a_failed_fact_write_and_writes_nothing() {
 
 // ── 作用域的第一个生产构造点 ──────────────────────────────────────
 //
-// `PersistentChatSession::delegating_principal` 按会话元数据的**委派链**取值：子会话挂
-// 父主体，顶层会话恒 `None`（调用方据此落 `Scope::Root`）。本段钉的是「取值链读得出
-// 真值」——语义（委派不放大权威）的判据在 `turn_runner.test.rs::scope_ceiling_tests`。
+// `delegating_principal_in` 按会话元数据的**委派链**取值：子会话挂父主体，顶层会话恒
+// `None`（调用方据此落 `Scope::Root`）。本段钉的是「取值链读得出真值」——语义
+// （委派不放大权威）的判据在 `turn_runner.test.rs::scope_ceiling_tests`。
 //
 
 /// 顶层会话 ⇒ `None`；`agent_run` 登记形态的子会话 ⇒ `Some(父主体)`。
@@ -1152,20 +1153,15 @@ async fn apply_reports_a_failed_fact_write_and_writes_nothing() {
 #[tokio::test]
 async fn scope_follows_the_delegation_chain_and_defaults_to_root() {
     let tmp = tempfile::tempdir().expect("临时目录创建失败");
-    let store = Arc::new(SessionStore::new(tmp.path().to_path_buf()));
+    let store = SessionStore::new(tmp.path().to_path_buf());
 
     // 父会话：`--agent peer-b` 的会话形态（主体 = 对等体）
     let mut parent = Session::new("parent-sess");
     parent.metadata["agent_id"] = serde_json::json!("peer-b");
     store.save_session(&parent).await.expect("父会话落盘失败");
 
-    let top = PersistentChatSession::new(
-        "parent-sess".to_string(),
-        Arc::new(RwLock::new(SessionConfig::default())),
-        store.clone(),
-    );
     assert_eq!(
-        top.delegating_principal().await,
+        delegating_principal_in(&store, &parent).await,
         None,
         "没有归属声明的会话 = 顶层会话 ⇒ 根作用域"
     );
@@ -1175,13 +1171,8 @@ async fn scope_follows_the_delegation_chain_and_defaults_to_root() {
     child.metadata["parent_session_id"] = serde_json::json!("parent-sess");
     store.save_session(&child).await.expect("子会话落盘失败");
 
-    let sub = PersistentChatSession::new(
-        "child-sess".to_string(),
-        Arc::new(RwLock::new(SessionConfig::default())),
-        store.clone(),
-    );
     assert_eq!(
-        sub.delegating_principal().await.as_deref(),
+        delegating_principal_in(&store, &child).await.as_deref(),
         Some("session/peer-b"),
         "子会话挂**父会话主体**（不是父会话 id，也不是子会话自己的主体）"
     );
@@ -1190,10 +1181,5 @@ async fn scope_follows_the_delegation_chain_and_defaults_to_root() {
     let mut orphan = Session::new("orphan-sess");
     orphan.metadata = serde_json::json!({});
     store.save_session(&orphan).await.expect("孤儿会话落盘失败");
-    let plain = PersistentChatSession::new(
-        "orphan-sess".to_string(),
-        Arc::new(RwLock::new(SessionConfig::default())),
-        store.clone(),
-    );
-    assert_eq!(plain.delegating_principal().await, None);
+    assert_eq!(delegating_principal_in(&store, &orphan).await, None);
 }
