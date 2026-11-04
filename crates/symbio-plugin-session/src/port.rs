@@ -55,6 +55,10 @@ pub(crate) const ROW_CALL: &str = "session-call";
 pub(crate) const ROW_CALL_UNIT: &str = "session-call-unit";
 pub(crate) const ROW_FACTS: &str = "session-facts";
 
+/// 幕开启 / 收束两行（P2-6 段 1：只加不接，执行体在 [`crate::port_turn`]）。
+pub(crate) const ROW_OPEN: &str = "open";
+pub(crate) const ROW_FINALIZE: &str = "finalize";
+
 /// 载荷里的行判别键（中性键，不出现世界名）。
 pub(crate) const ROW_KEY: &str = "row";
 
@@ -101,6 +105,8 @@ impl PortExecutor for SessionPortExecutor {
             Some(ROW_FACTS) => facts_reply(&ctx),
             Some(ROW_CALL) => self.call_reply(&ctx, &input.payload, false).await,
             Some(ROW_CALL_UNIT) => self.call_reply(&ctx, &input.payload, true).await,
+            Some(ROW_OPEN) => crate::port_lifecycle::open(&ctx, &input.payload).await,
+            Some(ROW_FINALIZE) => crate::port_lifecycle::finalize(&ctx, &input.payload).await,
             Some(other) => Err(format!("未知端口行：`{other}`")),
             None => Err(format!("载荷缺 `{ROW_KEY}` 字段（端口 `{}`）", input.port)),
         };
@@ -173,7 +179,7 @@ fn facts_reply(ctx: &PortExecContext) -> Result<Value, String> {
 }
 
 /// 本轮交付包：执行体只从宿主 ctx 的这一个只读键取（不读环的在途状态）。
-fn dispatch_of(ctx: &PortExecContext) -> Result<Arc<TurnDispatch>, String> {
+pub(crate) fn dispatch_of(ctx: &PortExecContext) -> Result<Arc<TurnDispatch>, String> {
     let host = ctx
         .ctx
         .as_ref()

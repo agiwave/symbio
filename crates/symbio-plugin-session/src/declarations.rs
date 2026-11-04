@@ -22,7 +22,9 @@ use symbio_plugin_api::{
     LatencyTier, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 
-use crate::port::{ROW_CALL, ROW_CALL_UNIT, ROW_CONFIG, ROW_FACTS, ROW_KEY, SESSION};
+use crate::port::{
+    ROW_CALL, ROW_CALL_UNIT, ROW_CONFIG, ROW_FACTS, ROW_FINALIZE, ROW_KEY, ROW_OPEN, SESSION,
+};
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
 /// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
@@ -192,12 +194,11 @@ static SESSION_UNTIL: &[Pattern] = &[
 ///
 /// `row` 是载荷里的中性判别键；四条行共用同一个端口名，靠它分流到执行体的四个分支。
 /// 展开点必须在 `static` 初始化里（数组字面量在那里才能被提升成 `'static`）。
-macro_rules! session_row {
-    ($name:expr, $anchor:expr) => {
+macro_rules! session_row_at {
+    ($name:expr, $phase:expr, $anchor:expr) => {
         Decl {
             name: $name,
-            // 等待阶段的末位（`await-tool` 72 / `notify-send` 73 之后）：会话读写不挡轮内进程。
-            phase: 7,
+            phase: $phase,
             anchor: $anchor,
             by: Some(PORT_ACTOR),
             // 本地读写，不调模型：快速档。
@@ -214,12 +215,24 @@ macro_rules! session_row {
     };
 }
 
-/// 端口行（`DE-048` D-315 四条行契约；`run_ops` 行表是动作闭集，`D-094`）。
+/// 会话读写行（`DE-048` D-315 四条行契约；`run_ops` 行表是动作闭集，`D-094`）。
+///
+/// 等七阶段（`await-tool` 72 / `notify-send` 73 之后）：会话读写不挡轮内进程。
+macro_rules! session_row {
+    ($name:expr, $anchor:expr) => {
+        session_row_at!($name, 7, $anchor)
+    };
+}
+
+/// 端口行。`open` / `finalize` 是 P2-6 的两笔幕债（段 1 只进表，执行体在
+/// `port_turn`；段 2 接线）。`open` 排在轮首判决之前，`finalize` 排在收束段。
 static ROWS: &[Decl] = &[
+    session_row_at!(ROW_OPEN, 0, 1),
     session_row!(ROW_CONFIG, 74),
     session_row!(ROW_CALL, 75),
     session_row!(ROW_CALL_UNIT, 76),
     session_row!(ROW_FACTS, 77),
+    session_row_at!(ROW_FINALIZE, 4, 57),
 ];
 
 // 装配口的提交：宿主链接本 crate 即生效。装配方按 owner 排序后逐个 `declare`，

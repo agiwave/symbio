@@ -16,6 +16,7 @@ mod orchestrator;
 /// 会话的世界端口（`port=session`，DE-048 D-315）：声明在 `declarations.rs`，
 /// 执行体在此。声明的四条行走 `run_ops` 行表，不为每个动作加行。
 mod port;
+mod port_lifecycle;
 // 会话口径的纯折叠（原 core 的 checkpoint / fallback / slo / span / changes，
 // DE-025 D-221）：读方只在本插件，判定跟着调用方走。
 pub(crate) mod paths;
