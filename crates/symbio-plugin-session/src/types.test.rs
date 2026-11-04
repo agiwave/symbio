@@ -188,3 +188,48 @@ fn merge_metadata_empty_object_is_a_noop() {
     // 什么都不给的写入不该有任何副作用（否则"空写入"会变成清空）
     assert_eq!(s.metadata, json!({ "workdir": "/a", "title": "旧" }));
 }
+
+/// 写方（模型执行体）把 `context` 交在终答载荷上后，重建出来的 Turn 骨架能让
+/// 读侧读到水位——这是「链在」的那一节；读方本身只是投影。
+#[test]
+fn latest_context_watermark_reads_what_the_writer_put_on_the_final_fact() {
+    use symbio_kernel::event::{Entity, Verb};
+
+    let events = vec![
+        symbio_kernel::event::Event::pending(
+            "e1",
+            symbio_plugin_api::events::EVENT_USER_MESSAGE,
+            Entity::Scope,
+            Verb::Opened,
+            1,
+            "user",
+        )
+        .with_payload(json!({ "text": "问", "id": "T1" })),
+        symbio_kernel::event::Event::pending(
+            "e2",
+            symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
+            Entity::Scope,
+            Verb::Closed,
+            2,
+            "session/main",
+        )
+        .with_payload(json!({
+            "text": "答",
+            "turn_id": "T1",
+            "text_id": "T1-text",
+            "tool_calls": [],
+            "rounds": [],
+            "status": "completed",
+            "context": { "request_tokens": 64, "limit_tokens": 131_072 },
+        })),
+    ];
+
+    let nodes = symbio_sdk::projection::rebuild::rebuild(
+        &events,
+        &crate::declarations::CHAT_VOCAB,
+        &crate::declarations::MESSAGE_VOCAB,
+    );
+    let got = latest_context_watermark(&nodes).expect("末轮水位应可读");
+    assert_eq!(got["request_tokens"], 64);
+    assert_eq!(got["limit_tokens"], 131_072);
+}

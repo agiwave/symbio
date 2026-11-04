@@ -239,10 +239,24 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                 continue;
             }
             if let Some(&i) = at.get(&node.id) {
+                let carried_context = node
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.get("context"))
+                    .cloned();
                 if carries_state {
                     let kept = out[i].seq;
                     out[i] = node;
                     out[i].seq = kept;
+                }
+                // 水位是**请求级**元数据：Turn 骨架的 id 就是发起这一轮的用户消息 id，
+                // 该 id 已被用户节点占住（「同 id 只认首次」），骨架随之被合并掉。
+                // 不能因此丢数——只补 `meta.context` 这一格，正文与状态的裁决不变。
+                if let Some(watermark) = carried_context {
+                    let meta = out[i].meta.get_or_insert_with(|| serde_json::json!({}));
+                    if meta.get("context").is_none() {
+                        meta["context"] = watermark;
+                    }
                 }
                 continue;
             }
@@ -549,6 +563,10 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     let mut nodes = Vec::new();
 
     // 骨架（一整轮响应）节点仅分组、无正文：与 `llm_build_assistant_messages` 同形。
+    //
+    // `meta.context` 随载荷复刻（写方 = 模型执行体在终答事实里交出本轮实测水位）。
+    // 会话读数（`SessionSummary::context`）扫的就是这一格；载荷没有该键 ⇒ `None`
+    // （旧事实 / provider 没回报用量），与「水位是 0」是两件事。
     nodes.push(
         ChatNode {
             id: turn_id.clone(),
@@ -556,6 +574,11 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
             msg_type: Some(NodeKind::Skeleton),
             status: Some(status.clone()),
             error: why.clone(),
+            meta: e
+                .payload
+                .get("context")
+                .filter(|context| context.is_object())
+                .map(|context| serde_json::json!({ "context": context })),
             timestamp: Some(e.ts),
             ..Default::default()
         }

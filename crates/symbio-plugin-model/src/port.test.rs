@@ -22,6 +22,8 @@ enum FakeOutcome {
     Success,
     /// 一轮带两个工具调用的往返（`tool.requested` 的写方就是这个出口）。
     WithToolCalls,
+    /// 收束轮但 provider 没回报输入用量（不少协议不给 prompt 用量）。
+    FinalWithoutUsage,
     Aborted,
     RateLimited,
 }
@@ -67,6 +69,16 @@ impl ModelProvider for FakeModel {
                 output.finish = ModelFinishReason::ToolCalls;
                 output.usage = Some(ModelUsage {
                     input: Some(10),
+                    output: Some(5),
+                });
+                Ok(output)
+            }
+            FakeOutcome::FinalWithoutUsage => {
+                let mut output = RoundOutput::default();
+                output.text = "answer".to_string();
+                output.finish = ModelFinishReason::Stop;
+                output.usage = Some(ModelUsage {
+                    input: None,
                     output: Some(5),
                 });
                 Ok(output)
@@ -155,6 +167,62 @@ async fn executor_turns_round_trip_into_one_fact() {
     assert_eq!(fact["text"], "answer");
     assert_eq!(fact["finish"], "tool_calls");
     assert_eq!(fact["usage"]["input"], 10);
+}
+
+/// 收束轮把**实测**上下文水位随终答载荷交出——这是 `meta.context` 的唯一生产写方。
+#[tokio::test]
+async fn a_final_answer_carries_the_measured_context_watermark() {
+    let outcome = executor(FakeOutcome::Success)
+        .execute(
+            exec_context(),
+            input(json!({
+                "provider": "active",
+                "system_prompt": "sys",
+                "messages": [],
+                "tools": [],
+                "root_id": "r1",
+            })),
+        )
+        .await;
+
+    assert!(outcome.success());
+    let fact = &outcome.facts[0];
+    assert_eq!(
+        fact["context"]["request_tokens"], 10,
+        "输入用量取 provider 回报的实测值"
+    );
+    assert_eq!(
+        fact["context"]["limit_tokens"], 4096,
+        "上限取 provider 的有效上下文"
+    );
+    assert!(
+        fact["context"].get("compress_tokens").is_none(),
+        "trait 不暴露 reserved_tokens ⇒ 不写压缩阈值（不为读数扩 trait）"
+    );
+}
+
+/// 没测到输入用量 ⇒ 载荷里**没有** `context`（缺数不出行，不写 0）。
+#[tokio::test]
+async fn a_final_answer_without_measured_usage_omits_the_watermark() {
+    let outcome = executor(FakeOutcome::FinalWithoutUsage)
+        .execute(
+            exec_context(),
+            input(json!({
+                "provider": "active",
+                "system_prompt": "sys",
+                "messages": [],
+                "tools": [],
+                "root_id": "r1",
+            })),
+        )
+        .await;
+
+    assert!(outcome.success());
+    let fact = &outcome.facts[0];
+    assert!(
+        fact.get("context").is_none(),
+        "没测到输入用量 ≠ 用量 0"
+    );
 }
 
 #[tokio::test]

@@ -128,10 +128,15 @@ fn session_node_projects_runtime_state() {
 ///    属性里出现的是**宿主方言的一格读数**（排好的行 + 已除好的 `bar` 几何）——
 ///    前端拿到就渲染，不认业务词也不再除第二次；
 /// 2. 没跑过一轮 / 存量会话没有水位 ⇒ 整条属性不出现（不是 0，也不是空对象）。
+///
+/// **本用例只钉读方**：骨架与 `meta.context` 都是手工构造的，证明「有数就能排、
+/// 缺数就不出现」；它不覆盖生产写方（模型执行体 → 终答载荷 `context` → 重建）。
+/// 写方的证据在 `symbio-plugin-model::port` 的 `a_final_answer_carries_*` 与
+/// `symbio-sdk::projection::rebuild` 的 `final_payload_context_folds_*`。
 #[test]
 fn session_node_publishes_the_context_watermark_reading() {
     let mut s = Session::new("abc");
-    // 一轮骨架（写方 = loop 的 `emit_streaming_start`）+ 它的子节点（不带水位）
+    // 一轮骨架（写方在 `symbio-plugin-model/src/port.rs`，见上面的说明）+ 它的子节点（不带水位）
     s.messages.push(cm::ChatNode {
         id: "turn1".into(),
         msg_type: Some(cm::NodeKind::Skeleton),

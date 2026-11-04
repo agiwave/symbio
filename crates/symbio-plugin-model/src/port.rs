@@ -242,7 +242,8 @@ impl PortExecutor for ModelExecutor {
                 // 终答是**独立事实种类**（`chat.assistant.final`）：只有收束轮（无工具调用）
                 // 才落它。债表据此排除「这一轮已答完」，而环的 `request` / `sent` / `retry`
                 // 因种类不同不误命中——可重试失败后的重试轮不会被提前跳过。
-                if output.tool_calls.is_empty() {
+                let is_final = output.tool_calls.is_empty();
+                if is_final {
                     world_kind = EVENT_CHAT_ASSISTANT_FINAL;
                 } else {
                     world_kind = EVENT_RESPONSE;
@@ -294,16 +295,26 @@ impl PortExecutor for ModelExecutor {
                         "calls": calls,
                     }));
                 }
+                // 一次往返的终稿 → `response` 载荷：正文 / 思考、节点身份、终答折叠、
+                // 用量与工具调用集合展开都由执行体装配（`D-314`）。
+                let mut payload = outcome_payload(
+                    &request,
+                    Some(&output),
+                    &rows.snapshot(),
+                    started,
+                    None,
+                );
+                // 上下文水位：收束轮才写（中途工具轮的请求体积不代表最终水位）。
+                // 实测输入用量缺席 ⇒ 整格不写——「没测到」不是「用量 0」。
+                if is_final {
+                    if let Some(watermark) =
+                        context_watermark(&output, provider.effective_context_tokens().await)
+                    {
+                        payload["context"] = watermark;
+                    }
+                }
                 PortOutcome {
-                    // 一次往返的终稿 → `response` 载荷：正文 / 思考、节点身份、终答折叠、
-                    // 用量与工具调用集合展开都由执行体装配（`D-314`）。
-                    facts: vec![outcome_payload(
-                        &request,
-                        Some(&output),
-                        &rows.snapshot(),
-                        started,
-                        None,
-                    )],
+                    facts: vec![payload],
                     error: None,
                     reply: PortReply { messages, links },
                 }
@@ -397,6 +408,21 @@ async fn emit_outcome(
         produced_by: None,
     }])
     .await;
+}
+
+/// 收束轮的上下文水位（终答载荷的 `context` 格，读侧折进 Turn 骨架 `meta.context`）。
+///
+/// 只写**测得到**的数：`request_tokens` 取 provider 回报的实测输入用量，缺席 ⇒ 整格
+/// 缺席（不补 0）；`limit_tokens` 取本 provider 的有效上下文上限。
+///
+/// `compress_tokens` 需要 provider 的 `reserved_tokens`，而 `ModelProvider` 不暴露它——
+/// 按「不为读数扩 trait」留缺：读数退化成「已用 / 上限」，不自己发明阈值。
+fn context_watermark(output: &TurnOutput, limit: u32) -> Option<serde_json::Value> {
+    let request_tokens = output.usage.as_ref().and_then(|usage| usage.input)?;
+    Some(serde_json::json!({
+        "request_tokens": request_tokens,
+        "limit_tokens": limit,
+    }))
 }
 
 /// 一次往返写进 `response` / `failed` 的载荷（行契约归本插件，`D-314`）。

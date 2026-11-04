@@ -197,6 +197,98 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
     );
 }
 
+/// 终答载荷的 `context` 复刻到 Turn 骨架的 `meta.context`——会话读数扫的就是这一格。
+#[test]
+fn final_payload_context_folds_into_the_turn_skeleton_meta() {
+    let events = vec![
+        user_event("u-node", "问 A"),
+        final_event(serde_json::json!({
+            "text": "答 A",
+            "model": "m",
+            "turn_id": "T1",
+            "text_id": "T1-text",
+            "reasoning_id": null,
+            "reasoning": null,
+            "tool_calls": [],
+            "rounds": [],
+            "status": "completed",
+            "context": { "request_tokens": 4096, "limit_tokens": 131_072 },
+        })),
+    ];
+
+    let nodes = rebuild(&events, &CHAT, &MESSAGE);
+    let root = nodes.iter().find(|n| n.id == "T1").expect("Turn 骨架");
+    assert_eq!(root.msg_type, Some(NodeKind::Skeleton));
+    let meta = root.meta.as_ref().expect("水位随载荷入格");
+    assert_eq!(meta["context"]["request_tokens"], 4096);
+    assert_eq!(meta["context"]["limit_tokens"], 131_072);
+}
+
+/// 载荷没有 `context`（旧事实 / provider 没回报用量）⇒ 骨架**不带** meta
+/// ——「没记录过」与「水位是 0」是两件事。
+#[test]
+fn final_without_context_payload_leaves_the_skeleton_meta_empty() {
+    let events = vec![
+        user_event("u-node", "问 A"),
+        final_event(serde_json::json!({
+            "text": "答 A",
+            "model": "m",
+            "turn_id": "T1",
+            "text_id": "T1-text",
+            "reasoning_id": null,
+            "reasoning": null,
+            "tool_calls": [],
+            "rounds": [],
+            "status": "completed",
+        })),
+    ];
+
+    let nodes = rebuild(&events, &CHAT, &MESSAGE);
+    let root = nodes.iter().find(|n| n.id == "T1").expect("Turn 骨架");
+    // 骨架的 `meta` 一定有 `style_tag`（那是节点的形状，不是水位）；
+    // 「缺数不出行」判的是 `meta.context` 这一格不出现。
+    assert!(
+        root.meta
+            .as_ref()
+            .and_then(|meta| meta.get("context"))
+            .is_none(),
+        "缺数不出行，不补默认值：{:?}",
+        root.meta
+    );
+}
+
+/// 真实形状：`turn_id` 就是发起这一轮的用户消息 id，Turn 骨架因此与用户节点**同 id**
+/// 被「同 id 只认首次」合并掉——水位必须补到存活的那个节点上，否则读数丢失。
+#[test]
+fn final_context_survives_when_the_turn_root_is_the_user_message() {
+    let events = vec![
+        user_event("T1", "问 A"),
+        final_event(serde_json::json!({
+            "text": "答 A",
+            "model": "m",
+            "turn_id": "T1",
+            "text_id": "T1-text",
+            "reasoning_id": null,
+            "reasoning": null,
+            "tool_calls": [],
+            "rounds": [],
+            "status": "completed",
+            "context": { "request_tokens": 64, "limit_tokens": 131_072 },
+        })),
+    ];
+
+    let nodes = rebuild(&events, &CHAT, &MESSAGE);
+    let root = nodes.iter().find(|n| n.id == "T1").expect("用户节点即轮根");
+    assert_eq!(
+        root.msg_type,
+        Some(NodeKind::Body),
+        "同 id 只认首次：留下的是先到的用户节点"
+    );
+    let meta = root.meta.as_ref().expect("水位随载荷折进轮根");
+    assert_eq!(meta["context"]["request_tokens"], 64);
+    assert_eq!(meta["context"]["limit_tokens"], 131_072);
+}
+
 /// reasoning-only：思考与正文同一段内容且无独立文本回复 ⇒ 只出一个 Text 子节点，
 /// **不另立 Reasoning 子**（与落库侧 `llm_build_assistant_messages` 同一判据）。
 #[test]
