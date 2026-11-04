@@ -1,7 +1,8 @@
-//! 宿主：只做三件事——发现全部 port 行、按 scope 起一次驱动、把债表当数据读。
+//! 宿主：发现全部 port 行、按 scope 起一次驱动、把债表当数据读、记机制状态 `idle`。
 //!
 //! 宿主不是插件：它依赖环 crate 与契约层，但插件不依赖它；插件之间互不依赖仍成立。
 //! 端口名与债行都不在这里构造：执行体由 `port` 族的行解析，债行由插件经 `debt` 族自报。
+//! `idle` 是机制事实（scope 无未还债），不是业务事实；收束谓词由读方自算，宿主不落业务事实。
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -56,6 +57,7 @@ pub fn scope_of(session_id: &str) -> u64 {
 pub struct Host {
     root: Arc<dyn Plugin>,
     facts: Mutex<HashMap<u64, Vec<Fact>>>,
+    idle: Mutex<HashMap<u64, u64>>,
     started: Instant,
     concurrency: usize,
 }
@@ -71,9 +73,31 @@ impl Host {
         Self {
             root,
             facts: Mutex::new(HashMap::new()),
+            idle: Mutex::new(HashMap::new()),
             started: Instant::now(),
             concurrency: concurrency.max(1),
         }
+    }
+
+    /// 该 scope 最近一次「无未还债」的落账时刻；`None` = 尚有未还债。
+    ///
+    /// 机制状态，不是业务：收束谓词由读方拿它与终答事实自算。
+    pub fn idle_at(&self, scope: u64) -> Option<u64> {
+        self.idle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&scope)
+            .copied()
+    }
+
+    /// 该 scope 的五事实只读投影（读方自算谓词用；`idle` 是机制状态，走 [`Self::idle_at`]）。
+    pub fn facts(&self, scope: u64) -> Vec<Fact> {
+        self.facts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&scope)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// 按一个会话起一次驱动。`base` 提供工作目录等上下文字段。
@@ -101,6 +125,18 @@ impl Host {
             source,
         };
         let report = drive(&ctx, scope).await;
+        let at = self.started.elapsed().as_millis() as u64;
+        {
+            let mut idle = self
+                .idle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if matches!(&report.outcome, DriveOutcome::NoDebt) {
+                idle.insert(scope, at);
+            } else {
+                idle.remove(&scope);
+            }
+        }
         Ok(DriveReport {
             outcome: report.outcome,
             dispatched: report.dispatched,
@@ -296,4 +332,9 @@ pub fn report_json(report: &DriveReport) -> serde_json::Value {
         "outcome": outcome,
     })
 }
+
+#[cfg(test)]
+#[path = "host.test.rs"]
+mod tests;
+
 
