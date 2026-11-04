@@ -202,7 +202,7 @@ export function isTestSource(relPath) {
  *
  * 它与装配点 `plugin-links` 块里的 `pub use <crate>;` 同形——**只做链接、不引用符号**：
  * `as _` 让编译器把 crate 链接进来（`inventory` 注册项才不会被丢掉），代码里一个符号
- * 都不用。任何别的写法（`use symbio_plugin_x::Foo`、`symbio_plugin_x::foo()`）都是真边。
+ * 都不用。任何别的写法（`use <crate>::Foo`、`<crate>::foo()`）都是真边。
  */
 export function linkLineRe(target) {
   const c = target.crate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

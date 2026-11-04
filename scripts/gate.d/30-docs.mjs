@@ -768,6 +768,14 @@ export const LIBS = [
   'gen-doc-refs',
   'line-count',
   'doc-find',
+  // `adr-index` 是「`D-NNN` 是否真的存在」的**唯一扫描实现**（从退役的 `known-red`
+  // 抽出）。登记成 LIBS：判据在它的消费方 `control-plane-audit` / `baseline-scope-audit`
+  // 的豁免校验里，本体不是独立门禁步骤——跑两遍就是同一件事。
+  'adr-index',
+  // `doc-freeze-table` 是「决策正文证据锚点冻结表」的**唯一读取实现**，被
+  // `doc-link-audit`（D-017）与 `doc-symbol-audit`（D-005）共用。登记成 LIBS：
+  // 判据在两个消费方里，本体不判定任何东西；两处各解析一遍就必然漂移。
+  'doc-freeze-table',
   'registry-lib',
   // `e2e-concurrency` 的门内版本在 `58-e2e.mjs` 里逐轮打印，本脚本供人工复核 + `--ci`。
   //
