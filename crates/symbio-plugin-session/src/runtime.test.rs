@@ -248,7 +248,7 @@ fn the_last_evidence_wins() {
 fn non_lifecycle_events_do_not_move_the_outcome() {
     let noise = [
         ev(
-            symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
+            crate::declarations::EVENT_MESSAGE_REMOVED,
             Verb::Closed,
             json!({ "id": "m-1" }),
         ),

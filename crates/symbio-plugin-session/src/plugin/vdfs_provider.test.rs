@@ -1057,7 +1057,7 @@ async fn switch_branch(
 #[tokio::test]
 async fn switch_branch_changes_the_reading_not_the_facts() {
     use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
-    use symbio_plugin_api::events::EVENT_MESSAGE_REMOVED;
+    use crate::declarations::EVENT_MESSAGE_REMOVED;
     use symbio_sdk::projection::branch::branch_selected;
     let (_dir, p) = fixture();
     let id = unique_id("branch-switch");

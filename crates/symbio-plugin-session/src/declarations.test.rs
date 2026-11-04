@@ -81,14 +81,10 @@ fn harness_declarations() -> PluginDeclarations<'static> {
         facts: &[],
         views: &[],
         ports: &[],
-        // 完整进程里 `port` 执行体由环提供（宿主词汇，`PORT_ACTOR`）：本插件新声明的
-        // 端口行 `by` 写成它，单测二进制不链接 loop，这里补同一个名字的执行体声明。
-        actors: vec![symbio_kernel::decl::ActorDecl {
-            name: symbio_plugin_api::rows::PORT_ACTOR,
-            mode: LatencyTier::Fast,
-            reads: &[],
-            writes: &[EVENT_REQUEST],
-        }],
+        // 本插件不再声明任何端口行（端口行住在各端口所属插件与 loop），
+        // 因此测试夹具也不需要补 `port` 执行体——声明了却没有行指向它是
+        // `OrphanActor`，整张装配表会失败。
+        actors: Vec::new(),
         rows: protocol_rows(),
     }
 }
