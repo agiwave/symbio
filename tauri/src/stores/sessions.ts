@@ -275,8 +275,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     putStatus,
     getSessionError,
     setSessionError,
-    getSessionWarning,
-    setSessionWarning,
   } = useSessionLiveState()
 
   // 转写版本号：每次 `commitMessages` 提交 +1。
@@ -1298,10 +1296,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     // ② 运行态镜像：节点状态 / 结局直通；activity 只在迁移时改写（见 liveStatusPatchOf）
     putStatus(id, liveStatusPatchOf(rt, wasWorking, nowWorking))
 
-    // ③ 会话级错误 / 告警 = 节点属性（覆盖「错误发生在任何消息节点创建之前」的场景）。
-    //    新一轮开始（working）时节点不带 error / warning ⇒ 自动清空上一轮的残留。
+    // ③ 会话级错误 = 节点属性（覆盖「错误发生在任何消息节点创建之前」的场景）。
+    //    新一轮开始（working）时节点不带 error ⇒ 自动清空上一轮的残留。
     setSessionError(id, rt.error ?? null)
-    setSessionWarning(id, rt.warning ?? null)
 
     // ④ 提示音：状态迁移 + 结局选音色
     if (wasWorking && !nowWorking) {
@@ -1365,8 +1362,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     applySessionState,
     getSessionError,
     setSessionError,
-    getSessionWarning,
-    setSessionWarning,
     dropSessionState,
     // 收件箱（排队中的用户消息）：入队 / 出队 / 整份重列。实时订阅由
     // `sessionInboxSync` 在 MainLayout 启动，这里只提供收敛动作。

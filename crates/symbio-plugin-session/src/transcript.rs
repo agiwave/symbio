@@ -32,7 +32,7 @@
 //! 节点自身的地址** `<id>/message/<mid>`（与 `list` / `read` 的节点地址逐字同源），
 //! 业务载荷 `data` 就是那条 `ChatNode`——`delta` 有 ⇒ 尾部追加（零回读）、
 //! `content` 有 ⇒ 整条替换、`status = removed` ⇒ 就地移除。
-//! 会话节点自身的状态（working / error / warning）也是 VDFS 变更（`<id>`，
+//! 会话节点自身的状态（working / outcome / error）也是 VDFS 变更（`<id>`，
 //! `data` = 全量节点视图），与侧栏会话清单共用同一份订阅。
 //!
 //! 地址形状统一为 `<sid>/<集合段>/<项 id>`：会话是**容器**，其下是若干并列的

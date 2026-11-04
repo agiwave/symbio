@@ -37,28 +37,23 @@ use symbio_kernel::plugin::PluginError;
 /// "`busy` 还带着上次的错误"这种非法组合存在，而它的表现是**静默的**——
 /// 前端会同时显示"处理中"和"上次失败"。
 pub enum SessionStateChange {
-    /// 新一轮开始（上一轮的结局随之作废，上一轮的告警随之清除）
+    /// 新一轮开始（上一轮的结局随之作废）
     Working,
     /// 一轮结束：正常 / 用户中止 / 以错误结束
     Finished {
         outcome: &'static str,
         error: Option<String>,
     },
-    /// 会话级告警（可恢复）：只写 `attributes.warning`，**不改变运行态**。
-    /// `Some(text)` 设置，`None` 清除。与 `Finished.error`（失败终态）的分界：
-    /// 告警期间会话照常运行（持久化失败 / 长度截断）。
-    Warning(Option<String>),
 }
 
 /// 会话**收敛**手柄：把一个会话的运行态与终态落到它身上所需的那四样。
 ///
 /// ## 为什么是手柄而不是插件（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2）
 ///
-/// 收敛这件事有两个写在**后台任务**里的调用方：执行期出口的告警
-/// （`TranscriptSink::warn`）与崩溃兜底（`WorkingGuard::drop`）。任务比插件活得久
-/// 是卸载路径上的常态——它们要的就是「打开会话（存储 + 配置）+ 取会话摘要（存储）+
-/// 取运行态（名册）+ 写进这一份会话状态并发一帧」，把整个插件背进来既多于所需，
-/// 又把 provider 注册、路由与订阅表一起钉住。
+/// 收敛这件事的调用方是会话动作（开轮 / 收轮 / 中止收口）——它们要的就是
+/// 「打开会话（存储 + 配置）+ 取会话摘要（存储）+ 取运行态（名册）+ 写进这一份
+/// 会话状态并发一帧」，把整个插件背进来既多于所需，又把 provider 注册、路由与
+/// 订阅表一起钉住。
 ///
 /// `store` 是**同一个** `OnceCell`（不是解析好的 store）：存储的懒初始化只有一条路，
 /// 由 [`super::store::resolve_store`] 承载，插件与手柄共用这一个格子。
@@ -134,15 +129,13 @@ impl Convergence {
         state: &Arc<ActiveSessionState>,
         change: SessionStateChange,
     ) {
-        // 四条运行态写路径各只有一个方法（单写者）——见 `active.rs` 的
-        // 「运行态的四条写路径」：写点散回调用方就会重新长出双写面。
+        // 运行态写路径各只有一个方法（单写者）——见 `active.rs` 的
+        // 「运行态的写路径」：写点散回调用方就会重新长出双写面。
         match &change {
             SessionStateChange::Working => state.begin_turn().await,
             SessionStateChange::Finished { outcome, error } => {
                 state.finish_turn(outcome, error.clone()).await
             }
-            // 告警只改自己的属性：is_working / 结局原样保留
-            SessionStateChange::Warning(w) => state.set_warning(w.clone()).await,
         }
 
         // 运行态变更挂在会话叶子 `<sid>` 上，`data` = 全量节点视图（与 `stat`

@@ -72,7 +72,7 @@ fn session_node_carries_renderer_ext_and_presentation() {
     let mut s = Session::new("abc");
     s.updated_at = 1_700_000_000_000;
 
-    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
+    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
     assert_eq!(idle.name, "abc");
     assert_eq!(idle.effective_ext().as_deref(), Some("session"));
     assert_eq!(idle.kind, PLUGIN_ID_SESSION);
@@ -98,7 +98,7 @@ fn session_node_projects_runtime_state() {
 
     let failed = session_node(
         &SessionSummary::of(&s),
-        &SessionRuntime::finished(OUTCOME_FAILED, Some("上游 502".to_string()), None),
+        &SessionRuntime::finished(OUTCOME_FAILED, Some("上游 502".to_string())),
     );
     assert_eq!(failed.status, VDFS_STATUS_FAILED);
     assert_eq!(failed.attributes.get("outcome"), Some(&json!("failed")));
@@ -106,13 +106,13 @@ fn session_node_projects_runtime_state() {
 
     let aborted = session_node(
         &SessionSummary::of(&s),
-        &SessionRuntime::finished(OUTCOME_ABORTED, None, None),
+        &SessionRuntime::finished(OUTCOME_ABORTED, None),
     );
     assert_eq!(aborted.status, VDFS_STATUS_ACTIVE, "中止不是失败");
     assert_eq!(aborted.attributes.get("outcome"), Some(&json!("aborted")));
     assert_eq!(aborted.attributes.get("error"), None, "中止不带错误文案");
 
-    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
+    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
     assert_eq!(idle.status, VDFS_STATUS_ACTIVE);
     assert_eq!(
         idle.attributes.get("outcome"),
@@ -159,7 +159,7 @@ fn session_node_publishes_the_context_watermark_reading() {
         ..Default::default()
     });
 
-    let node = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
+    let node = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
     let wm = node
         .attributes
         .get("context_watermark")
@@ -185,7 +185,7 @@ fn session_node_publishes_the_context_watermark_reading() {
     // 没有水位的历史 ⇒ 属性整条不存在
     let empty = session_node(
         &SessionSummary::of(&Session::new("abc")),
-        &SessionRuntime::idle(None),
+        &SessionRuntime::idle(),
     );
     assert_eq!(empty.attributes.get("context_watermark"), None);
 }
@@ -631,7 +631,7 @@ fn vdfs_session_node_carries_list_fields() {
     s.updated_at = 1_700_000_000;
     s.metadata = json!({ "workdir": "/tmp/proj/demo", "title": "T" });
 
-    let n = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
+    let n = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
     assert_eq!(n.attributes.get("message_count"), Some(&json!(0)));
     assert_eq!(
         n.attributes.get("metadata").and_then(|v| v.get("workdir")),
@@ -657,7 +657,7 @@ fn vdfs_session_node_carries_list_fields() {
     assert_eq!(
         session_node(
             &SessionSummary::of(&s),
-            &SessionRuntime::finished(OUTCOME_FAILED, Some("boom".into()), None)
+            &SessionRuntime::finished(OUTCOME_FAILED, Some("boom".into()))
         )
         .status,
         VDFS_STATUS_FAILED,
@@ -667,7 +667,7 @@ fn vdfs_session_node_carries_list_fields() {
     assert_eq!(
         session_node(
             &SessionSummary::of(&s),
-            &SessionRuntime::finished(OUTCOME_COMPLETED, None, None)
+            &SessionRuntime::finished(OUTCOME_COMPLETED, None)
         )
         .status,
         VDFS_STATUS_ACTIVE

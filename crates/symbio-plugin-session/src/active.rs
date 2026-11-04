@@ -112,12 +112,6 @@ pub struct ActiveSessionStateInner {
     /// 只能挂在会话节点上——原先是前端一个平行状态（`sessionErrors`），
     /// 现在它是节点的属性（`attributes.error`）。
     pub last_error: Option<String>,
-    /// 会话级告警（可恢复，面向用户）：持久化失败 / 长度截断。
-    ///
-    /// 它是**状态**不是事件：由出口的告警通道（`ExecEventSink::warn`）写入、随会话节点
-    /// `attributes.warning` 下发，前端按状态渲染；新一轮请求开始（`Working`）时清除。
-    /// 与 `last_error`（失败终态）不同：告警不改变运行态，会话照常运行。
-    pub last_warning: Option<String>,
     /// 连续压缩失败次数（自动路径与用户重试走同一条流水线，计数共用）。
     ///
     /// 熔断依据：LLM 压缩是**整段历史的完整请求**，失败一次就是数分钟的注定浪费。
@@ -223,7 +217,6 @@ impl ActiveSessionState {
                 last_tool_calls: Vec::new(),
                 last_outcome: None,
                 last_error: None,
-                last_warning: None,
                 auto_compress_failures: 0,
                 auto_compress_circuit_opened_at: None,
                 auto_compress_over_limit: false,
@@ -248,16 +241,16 @@ impl ActiveSessionState {
 
     // ==================== 运行态的写路径（单写者）====================
     //
-    // `is_working` / `last_outcome` / `last_error` / `last_warning` 的**唯一写点**。
+    // `is_working` / `last_outcome` / `last_error` 的**唯一写点**。
     // 它们不是第二份可独立演化的状态：结局是 turn 事实投影（`runtime::project`）的
-    // 写穿缓存，开轮 / 收轮 / 告警 / 中止各只经一个方法（[D-083 §5.2]）。
+    // 写穿缓存，开轮 / 收轮 / 中止各只经一个方法（[D-083 §5.2]）。
     // 拆散成调用点各写各的字段，正是要消掉的双写面。
     //
     // 工作态的迁移是**闭集**：只有 `WorkingTransition` 的三个变体，且唯一迁移函数是
     // `WorkingState::apply`。新增收尾路径若要改工作态，只能经这里——绕过它状态不会变，
     // 而不是「变了但收件箱没人被叫醒」（那正是 50ms 轮询掩盖过的失效）。
 
-    /// 开轮：置忙 + 上一轮结局 / 告警作废 + 清空上一轮的流式累积。
+    /// 开轮：置忙 + 上一轮结局作废 + 清空上一轮的流式累积。
     ///
     /// 忙碌位必须在 `spawn` **之前**同步可见——并发排队（t15/t32/t34）的守卫
     /// 读的就是它，而开轮事实是 spawn 之后才追加的。
@@ -268,7 +261,6 @@ impl ActiveSessionState {
         inner.last_tool_calls.clear();
         inner.last_outcome = None;
         inner.last_error = None;
-        inner.last_warning = None;
     }
 
     /// 收轮：结局与错误文案（`failed` 时才带）落进缓存。
@@ -284,11 +276,6 @@ impl ActiveSessionState {
             became_idle
         };
         self.wake_if_idle(became_idle);
-    }
-
-    /// 会话级告警（可恢复）：只写自己的格，不改变运行态。
-    pub(crate) async fn set_warning(&self, warning: Option<String>) {
-        self.inner.write().await.last_warning = warning;
     }
 
     /// 中止的强制收口：置空闲 **并**注销中止信号——同一临界区，两格一起可见。
@@ -362,16 +349,13 @@ impl ActiveSessionState {
 }
 
 /// 无进程内缓存时的运行态读法：**事实投影**作答。
-///
-/// `warning` 不是事实（宿主局部，见 [D-083 §5.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")），
-/// 由调用方原样带上。
-fn runtime_from_facts(facts: Option<&RuntimeFacts>, warning: Option<String>) -> SessionRuntime {
+fn runtime_from_facts(facts: Option<&RuntimeFacts>) -> SessionRuntime {
     match facts.and_then(|f| f.outcome.clone()) {
         Some(outcome) => {
             let (outcome, error) = outcome.into_state();
-            SessionRuntime::finished(&outcome, error, warning)
+            SessionRuntime::finished(&outcome, error)
         }
-        None => SessionRuntime::idle(warning),
+        None => SessionRuntime::idle(),
     }
 }
 
@@ -386,10 +370,9 @@ fn runtime_of_state(
     if inner.is_working() {
         return SessionRuntime::working();
     }
-    let warning = inner.last_warning.clone();
     match &inner.last_outcome {
-        Some(outcome) => SessionRuntime::finished(outcome, inner.last_error.clone(), warning),
-        None => runtime_from_facts(facts, warning),
+        Some(outcome) => SessionRuntime::finished(outcome, inner.last_error.clone()),
+        None => runtime_from_facts(facts),
     }
 }
 
@@ -451,7 +434,7 @@ impl ActiveSessionManager {
     ) -> SessionRuntime {
         let active = self.sessions.read().await;
         let Some(st) = active.get(id) else {
-            return runtime_from_facts(facts, None);
+            return runtime_from_facts(facts);
         };
         // `try_read` 失败（正被写者持有）时按"运行中"回答：运行态的写入都是
         // 瞬时操作，读不到就说明此刻正在变更——宁可多报一次运行中（前端会

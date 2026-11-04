@@ -40,9 +40,6 @@ pub(crate) struct SessionRuntime {
     pub outcome: Option<String>,
     /// 上一轮的错误短消息（仅 `outcome == failed` 时有意义）
     pub error: Option<String>,
-    /// 会话级告警（可恢复）：持久化失败 / 长度截断。
-    /// 与 `error` 的分界：告警不改变运行态，会话照常运行；新一轮开始即清除。
-    pub warning: Option<String>,
 }
 
 /// 上一轮结局的词表：正常结束 / 用户中止 / 以错误结束。
@@ -54,28 +51,25 @@ use super::words::OUTCOME_FAILED;
 
 impl SessionRuntime {
     /// 空闲：没在跑，也没有已知的上一轮结局
-    pub(crate) fn idle(warning: Option<String>) -> Self {
+    pub(crate) fn idle() -> Self {
         Self {
             working: false,
             outcome: None,
             error: None,
-            warning,
         }
     }
 
-    /// 运行中：新一轮开始，上一轮的结局与告警随之作废（否则失败角标/告警条会残留）
+    /// 运行中：新一轮开始，上一轮的结局随之作废（否则失败角标会残留）
     pub(crate) fn working() -> Self {
         Self {
             working: true,
             outcome: None,
             error: None,
-            warning: None,
         }
     }
 
-    /// 由上一轮结局构造（`failed` 时带错误文案；告警原样保留——
-    /// 「以告警收尾的一轮」在结束后仍应能看到那条告警）
-    pub(crate) fn finished(outcome: &str, error: Option<String>, warning: Option<String>) -> Self {
+    /// 由上一轮结局构造（`failed` 时带错误文案）
+    pub(crate) fn finished(outcome: &str, error: Option<String>) -> Self {
         Self {
             working: false,
             outcome: Some(outcome.to_string()),
@@ -84,7 +78,6 @@ impl SessionRuntime {
             } else {
                 None
             },
-            warning,
         }
     }
 
@@ -138,9 +131,6 @@ pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> VdfsNode 
     }
     if let Some(error) = &rt.error {
         let _ = n.attributes.insert("error".to_string(), json!(error));
-    }
-    if let Some(warning) = &rt.warning {
-        let _ = n.attributes.insert("warning".to_string(), json!(warning));
     }
     // 上下文水位（**读数在这里现算**，存的只是四个 token 数）：前端的水位条因此
     // 与消息上的 `stats` 行同一个口径、同一个渲染器，自己不做一次除法。

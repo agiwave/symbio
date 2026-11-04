@@ -2,7 +2,7 @@
 //!
 //! - 自动压缩熔断状态机（`compression_should_skip` / `record_success` /
 //!   `record_failure`）：刻意收在三个方法里，不依赖 LLM / 存储；
-//! - 运行态合并规则（`begin_turn` / `finish_turn` / `set_warning` 与
+//! - 运行态合并规则（`begin_turn` / `finish_turn` 与
 //!   `runtime_of_state`）：钉住 D-083 §5.2 的「工作态 > 进程内缓存 > 事实投影」。
 //!
 //! 回归动机：实测会话 `09d74431` 在运行过程中**反复**自动压缩失败，但旧代码既不记录
@@ -159,36 +159,18 @@ async fn neither_memory_nor_facts_means_idle() {
     assert_eq!(rt.outcome, None);
 }
 
-/// 告警是宿主局部量：无论结局来自缓存还是事实，都原样带上。
+/// 开轮清空上一轮的结局：新一轮开始后它作废。
 #[tokio::test]
-async fn warning_survives_the_merge() {
-    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
-    st.set_warning(Some("持久化失败".into())).await;
-    let from_memory = runtime_of_state(&*st.inner.read().await, None);
-    assert_eq!(from_memory.warning.as_deref(), Some("持久化失败"));
-
-    let from_facts = runtime_of_state(
-        &*st.inner.read().await,
-        Some(&facts(Some(RuntimeOutcome::Completed))),
-    );
-    assert_eq!(from_facts.warning.as_deref(), Some("持久化失败"));
-    assert_eq!(from_facts.outcome.as_deref(), Some(OUTCOME_COMPLETED));
-}
-
-/// 开轮清空上一轮的结局与告警：新一轮开始后它们一律作废。
-#[tokio::test]
-async fn begin_turn_clears_the_previous_round_and_warning() {
+async fn begin_turn_clears_the_previous_round() {
     let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
     st.finish_turn(OUTCOME_FAILED, Some("上一轮失败".into()))
         .await;
-    st.set_warning(Some("告警".into())).await;
     st.begin_turn().await;
 
     let rt = runtime_of_state(&*st.inner.read().await, Some(&failed("事实里的失败")));
     assert!(rt.working);
     assert_eq!(rt.outcome, None);
     assert_eq!(rt.error, None);
-    assert_eq!(rt.warning, None);
 }
 
 // ==================== ：收轮唤醒（取代 50ms 轮询）====================

@@ -1,7 +1,7 @@
 //! 会话运行态的**事实投影**：上一轮结局从生命周期事实折出。
 //!
 //! [D-083 §5.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的落地侧：结局在网格里
-//! 有确切的证据格，因此它是投影而不是又一份状态；`working` / `warning` 是点名论证过的
+//! 有确切的证据格，因此它是投影而不是又一份状态；`working` 是点名论证过的
 //! 进程局部量，不在这里。
 //!
 //! ## 哪些格是生命周期证据
@@ -55,7 +55,7 @@ impl RuntimeOutcome {
     }
 }
 
-/// 事实侧运行态：目前只有结局（`working` / `warning` 不是事实，见模块文档）。
+/// 事实侧运行态：目前只有结局（`working` 不是事实，见模块文档）。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct RuntimeFacts {
     pub(super) outcome: Option<RuntimeOutcome>,

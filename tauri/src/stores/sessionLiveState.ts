@@ -1,11 +1,11 @@
 /**
  * 会话实时状态的落地层（从 `stores/sessions.ts` 按职责拆出）。
  *
- * 它只管三张按 `sessionId` 索引的表——运行态 / 会话级错误 / 会话级告警——以及
+ * 它只管两张按 `sessionId` 索引的表——运行态 / 会话级错误——以及
  * 读写它们的**唯一变更通道**。消息转写、空间寻址、清单刷新等都留在 store 里；
  * store 组合本 composable，把同名符号解构进自己的作用域，因此调用点零改动。
  *
- * 三张表都是 `shallowRef`：整体替换才触发更新，与原实现逐字一致。
+ * 两张表都是 `shallowRef`：整体替换才触发更新，与原实现逐字一致。
  */
 
 import { shallowRef } from 'vue'
@@ -21,12 +21,6 @@ export function useSessionLiveState() {
   // 与消息树中的失败根级骨架（后端权威失败终态，前端只在根级骨架渲染重试）互斥：
   // 只要存在失败根级骨架，错误就由该节点承载，sessionErrors 保持 null。
   const sessionErrors = shallowRef<Record<string, string | null>>({})
-
-  // 会话级告警状态（"告警是状态，不是事件"原则的前端落地）：
-  // 来源唯一——会话节点的 `attributes.warning`（后端 `MessageChange::Warn` 写入，
-  // 持久化失败 / 长度截断等**可恢复**提示；新一轮开始时后端清除）。
-  // 与 `sessionErrors`（失败终态）互斥并存：告警不改变运行态，会话照常运行。
-  const sessionWarnings = shallowRef<Record<string, string | null>>({})
 
   /** 会话是否运行中（运行态的唯一读法：节点 `status == working`） */
   function isSessionWorking(id: string): boolean {
@@ -160,20 +154,9 @@ export function useSessionLiveState() {
     sessionErrors.value = { ...sessionErrors.value, [sessionId]: err ?? null }
   }
 
-  /** 读取会话级告警（null = 无告警） */
-  function getSessionWarning(sessionId: string): string | null {
-    return sessionWarnings.value[sessionId] ?? null
-  }
-  /** 设置/清除会话级告警（null 清除；权威来源是节点属性，见 `applySessionState`） */
-  function setSessionWarning(sessionId: string, warning: string | null) {
-    if (!sessionId) return
-    sessionWarnings.value = { ...sessionWarnings.value, [sessionId]: warning ?? null }
-  }
-
   return {
     sessionStatuses,
     sessionErrors,
-    sessionWarnings,
     isSessionWorking,
     isSessionFailed,
     getSessionStatus,
@@ -184,7 +167,5 @@ export function useSessionLiveState() {
     putStatus,
     getSessionError,
     setSessionError,
-    getSessionWarning,
-    setSessionWarning,
   }
 }

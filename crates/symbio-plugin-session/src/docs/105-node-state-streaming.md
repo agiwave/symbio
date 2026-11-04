@@ -235,7 +235,7 @@ attributes.error = "<面向用户的错误短消息>" // 仅 failed 时存在
 - `outcome` 是**状态**（"上一轮的结局"），不是事件：提示音据此选音色，
  不需要"谁先到"来区分中止与失败。它的值在进程内来自写穿缓存，重启后由轮次生命
  周期事实投影恢复（[D-083](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") §5.2）；
- `working` 与 `warning` 是进程局部量，不从事实投影。
+ `working` 是进程局部量，不从事实投影；`outcome` / `error` 由事实投影作答。
 - `error` 挂在会话节点上，是为了覆盖「错误发生在任何消息节点创建之前」这一类
  （能力收集失败、provider 解析失败、transport 级失败）——此时没有任何失败节点
  可承载错误。它是节点的属性，不是一条平行事件，也不是前端平行状态。
@@ -383,7 +383,7 @@ ToolCall 标 `Completed`**，前端在执行窗口内就没有任何「运行中
 | 执行路径 | 终态来源 |
 |---|---|
 | 正常分发 | `tool_executor::process_tool_calls_async` |
-| 恢复执行（approve / retry / supply） | `resume::process_tool_resume_action` |
+| 恢复执行（approve / retry / supply） | 工具端口的唤醒动作（`port::KEY_RESUME`）：放行 / 拒绝由用户动作裁决 |
 | 被 PreToolUse 拦下 / 用户中止 / 交互中断 | `process_tool_calls_async` 末尾统一收口：父节点 `Completed` + `meta.failure_kind = "not_executed"`，并由 `not_executed_result` 补一条结果子节点（**成对**，缺一就是「有请求无响应」） |
 | 外部执行闸门拒绝（[DE-016](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")） | `process_tool_calls_async` 内**就地收场**：父节点 `Completed`，`meta.failure_kind = "permission_denied"`（`Refuse`，未授权）或 `"tool_unavailable"`（`Break`，熔断），结果子节点文本 `Refused: …`。判据在钩子**之前**读、结论在钩子**之前**出——被拒的调用不跑 `PreToolUse`，`Refuse` 连一条事件都不产生（[DE-039 §6](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")） |
 
