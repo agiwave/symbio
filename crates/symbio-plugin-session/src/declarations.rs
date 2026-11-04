@@ -96,7 +96,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("message.removed", (Entity::Message, Verb::Closed)),
     EventDecl::new("session.consolidated", (Entity::Message, Verb::Progressed)),
     // 用户点了切换器：一次「关于这一轮的断言」，不是收束也不是开轮。
-    EventDecl::new("turn.branch_selected", (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)),
 ];
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。

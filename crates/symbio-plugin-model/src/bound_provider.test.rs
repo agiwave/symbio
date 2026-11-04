@@ -27,29 +27,11 @@ use symbio_plugin_api::ProviderLlmAdapter;
 use symbio_plugin_api::{
     check_all, transcript, Entity, Event, EventStore, PromptMessage, Seq, Store, Verb,
 };
-
-/// 对话面 / 消息面的词汇表（DE-024 D-203 / D-206）：本插件不是这两面任何名字的
-/// owner，只用它们调 core 的转写 / 轮态投影。拼写一律取清单生成物（D-204）。
-const CHAT_VOCAB: symbio_plugin_api::ChatVocab = symbio_plugin_api::ChatVocab {
-    user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
-    branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
-    branch_selected: "turn.branch_selected",
-    reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
-    opening: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
-    final_reply: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
-    fallback: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK,
-    progress: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_PROGRESS,
-    denied: symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
-};
-
-const MESSAGE_VOCAB: symbio_plugin_api::MessageVocab = symbio_plugin_api::MessageVocab {
-    artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
-    message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
-    message_edited: "message.edited",
-    message_removed: "message.removed",
-    consolidated: "session.consolidated",
-};
+// 对话面 / 消息面的词汇表（DE-024 D-203 / D-206）：本插件不是这两面任何名字的
+// owner，只用它们调 core 的转写 / 轮态投影。拼写一律取清单生成物或测试夹具
+// （D-204）——本文件不另抄字面量。
 use symbio_plugin_api::{LlmAdapter as _, TokenIssuer};
+use symbio_sdk::test_fixtures::{CHAT as CHAT_VOCAB, MESSAGE as MESSAGE_VOCAB};
 
 /// 与生产渲染同一口径（`crates/symbio-plugin-loop/src/turn_runner/prepare.rs::render_messages`）：
 /// 事件切片 → 转写投影 → 消息数组。测试不能引兄弟插件的实现（E-009），故在此

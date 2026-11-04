@@ -4571,6 +4571,7 @@ dependencies = [
  "serde_json",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-sdk",
  "tempfile",
  "time",
  "tokio",
