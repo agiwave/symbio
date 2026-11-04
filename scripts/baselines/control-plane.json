@@ -6,15 +6,15 @@
       "fn plan",
       "fn expire"
     ],
-    "hash": "sha256:5b03f45c4bb0aa46047a1182ce9206438991fff80865982b88f30927df626447",
+    "hash": "sha256:10f6247904a88036a868dc0450905e6ee7b4bb888fb88ba36c04d777a46b856e",
     "adr": "D-325",
-    "reason": "基线落在 D-325 机制形状五条固化之后的控制面形状上：驱动循环体（ring/engine.rs 的 loop）+ 选债包装 fn plan + 在途判据 fn expire 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改：机制演进必须同批更新 hash 并改这条理由。D-325 把旧 ring.rs 的驱动拆成 ring/engine.rs 的单一循环与 plan / expire 两段，语义等价，属机制面迁移。"
+    "reason": "基线落在 D-325 机制形状五条固化之后的控制面形状上：驱动循环体（ring/engine.rs 的 loop）+ 选债包装 fn plan + 在途判据 fn expire 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改：机制演进必须同批更新 hash 并改这条理由。D-325 把旧 ring.rs 的驱动拆成 ring/engine.rs 的单一循环与 plan / expire 两段，语义等价，属机制面迁移。e31f98a2 只把 `effects::FactDraft` / `drive::Unless` 两行 import 排序并折叠一处 rustfmt，驱动 / 选债 / 在途三段逻辑逐字未动，属与端口无关的机制面字节变化，故同批更新基线。"
   },
   "extension": {
     "productionFiles": 8
   },
   "baseline-allow": [
     "crates/symbio-plugin-loop/src/ring.rs→crates/symbio-plugin-loop/src/ring/engine.rs 旧环拆分后机制面落到 ring/engine.rs（D-325 机制形状五条固化） D-325",
-    "sha256:90712423730560d522b3e5f76cd4587dbbc436b74bbeb94f18ac837fae21703f→sha256:5b03f45c4bb0aa46047a1182ce9206438991fff80865982b88f30927df626447 机制面按 D-325 重计；驱动 / 选债 / 在途三段语义等价 D-325"
+    "sha256:90712423730560d522b3e5f76cd4587dbbc436b74bbeb94f18ac837fae21703f→sha256:10f6247904a88036a868dc0450905e6ee7b4bb888fb88ba36c04d777a46b856e 机制面按 D-325 重计；驱动 / 选债 / 在途三段语义等价（e31f98a2 仅 import 排序与 rustfmt） D-325"
   ]
 }
