@@ -29,6 +29,12 @@ use crate::port::{
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
 /// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
 pub(crate) const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
+
+/// 轮内阶段的三条世界事实（`D-323`）。拼写是**事实源**（`PLUGIN.yml` 的
+/// `shared_events` 导出到 `symbio_plugin_api::events`，读方一律取生成物）。
+pub(crate) const EVENT_CHAT_DECIDED: &str = "chat.decided";
+pub(crate) const EVENT_SESSION_RECALLED: &str = "session.recalled";
+pub(crate) const EVENT_SESSION_PREPARED: &str = "session.prepared";
 /// 健康自检。落在 `system × progressed`。
 pub(crate) const EVENT_SYSTEM_HEALTH: &str = "system.health";
 
@@ -100,6 +106,13 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("session.consolidated", (Entity::Message, Verb::Progressed)),
     // 用户点了切换器：一次「关于这一轮的断言」，不是收束也不是开轮。
     EventDecl::new("turn.branch_selected", (Entity::Scope, Verb::Asserted)),
+    // ── 轮内阶段的世界事实（`D-323`）──
+    //
+    // 判决 / 召回 / 装配三条。写方是**本插件的端口执行体**（`port_stage`），环只欠
+    // `request(port=session)`、不落这些格；名字由本插件导出进共享清单，读方是环的视图。
+    EventDecl::new(EVENT_CHAT_DECIDED, (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_SESSION_RECALLED, (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_SESSION_PREPARED, (Entity::Scope, Verb::Asserted)),
 ];
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。

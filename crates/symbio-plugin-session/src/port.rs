@@ -55,9 +55,19 @@ pub(crate) const ROW_CALL: &str = "session-call";
 pub(crate) const ROW_CALL_UNIT: &str = "session-call-unit";
 pub(crate) const ROW_FACTS: &str = "session-facts";
 
-/// 幕开启 / 收束两行（P2-6 段 1：只加不接，执行体在 [`crate::port_turn`]）。
+/// 幕开启 / 收束两行（P2-6 段 1：只加不接，执行体在 [`crate::port_lifecycle`]）。
 pub(crate) const ROW_OPEN: &str = "open";
 pub(crate) const ROW_FINALIZE: &str = "finalize";
+
+/// 轮内阶段五行的名字（P2-6 段 2：判决 / 召回 / 压缩 / 装配 / 汇报）。
+///
+/// 它们是**载荷分类**的名字，不是「第几步」：`decide` 说这是一次判决，`recall` 说
+/// 这是一批召回，`prepare` 说这是一次装配（`D-323` 的词根禁令）。
+pub(crate) const ROW_DECIDE: &str = "decide";
+pub(crate) const ROW_RECALL: &str = "recall";
+pub(crate) const ROW_COMPRESS: &str = "compress";
+pub(crate) const ROW_PREPARE: &str = "prepare";
+pub(crate) const ROW_REPORT: &str = "report";
 
 /// 载荷里的行判别键（中性键，不出现世界名）。
 pub(crate) const ROW_KEY: &str = "row";
@@ -107,6 +117,11 @@ impl PortExecutor for SessionPortExecutor {
             Some(ROW_CALL_UNIT) => self.call_reply(&ctx, &input.payload, true).await,
             Some(ROW_OPEN) => crate::port_lifecycle::open(&ctx, &input.payload).await,
             Some(ROW_FINALIZE) => crate::port_lifecycle::finalize(&ctx, &input.payload).await,
+            Some(ROW_DECIDE) => crate::port_stage::decide(&ctx, &input.payload).await,
+            Some(ROW_RECALL) => crate::port_stage::recall(&ctx, &input.payload).await,
+            Some(ROW_COMPRESS) => crate::port_stage::compress(&ctx, &input.payload).await,
+            Some(ROW_PREPARE) => crate::port_stage::prepare(&ctx, &input.payload).await,
+            Some(ROW_REPORT) => crate::port_stage::report(&ctx, &input.payload).await,
             Some(other) => Err(format!("未知端口行：`{other}`")),
             None => Err(format!("载荷缺 `{ROW_KEY}` 字段（端口 `{}`）", input.port)),
         };

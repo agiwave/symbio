@@ -446,3 +446,200 @@ async fn finalize_denied_lands_a_denial_and_no_closure() {
     assert_eq!(denial.payload["kind"], json!("speech"));
     assert_eq!(denial.payload["detail"], json!("缺 reply.first"));
 }
+
+// ── P2-6 段 2：轮内阶段五行（写方是会话执行体）────────────────────────────
+
+fn stage_input(row: &str, id: &str, data: serde_json::Value) -> symbio_plugin_api::port::PortInput {
+    input(json!({
+        ROW_KEY: row,
+        "id": id,
+        "anchor": 4,
+        "user_seq": 0,
+        "data": data,
+    }))
+}
+
+#[tokio::test]
+async fn decide_lands_the_world_fact_with_the_derived_key() {
+    let store = Arc::new(EventStore::new());
+    let ctx = exec_context_with_facts(store.clone(), 1);
+    let outcome = executor()
+        .execute(
+            ctx,
+            stage_input(
+                ROW_DECIDE,
+                "decided-u-1",
+                json!({
+                    "reason": "greeting",
+                    "source": "rule",
+                    "model_calls": 0,
+                    "result": null,
+                    "answer": null,
+                    "opening": null,
+                }),
+            ),
+        )
+        .await;
+    assert!(
+        outcome.error.is_none(),
+        "判决行不应失败：{:?}",
+        outcome.error
+    );
+    let events = store.range(symbio_kernel::event::Seq::new(0));
+    let decided = events
+        .iter()
+        .find(|e| e.kind == crate::declarations::EVENT_CHAT_DECIDED)
+        .expect("判决格");
+    assert_eq!(
+        decided.event_id, "decided-u-1",
+        "幂等键由环派生、执行体原样用"
+    );
+    assert_eq!(decided.payload["reason"], json!("greeting"));
+    assert_eq!(decided.payload["source"], json!("rule"));
+    assert_eq!(decided.payload["anchor"], json!(4));
+    assert_eq!(decided.produced_by, Some(0));
+}
+
+#[tokio::test]
+async fn recall_lands_the_entries_with_tags_for_capability_rows() {
+    let store = Arc::new(EventStore::new());
+    let ctx = exec_context_with_facts(store.clone(), 2);
+    let outcome = executor()
+        .execute(
+            ctx,
+            stage_input(
+                ROW_RECALL,
+                "recalled-u-2",
+                json!({
+                    "entries": [
+                        { "seq": 7, "tag": "skill", "content": "技能正文" },
+                        { "seq": 8, "tag": "memory", "content": "记忆正文" },
+                    ],
+                    "resumed": false,
+                    "degraded": false,
+                }),
+            ),
+        )
+        .await;
+    assert!(
+        outcome.error.is_none(),
+        "召回行不应失败：{:?}",
+        outcome.error
+    );
+    let events = store.range(symbio_kernel::event::Seq::new(0));
+    let recalled = events
+        .iter()
+        .find(|e| e.kind == crate::declarations::EVENT_SESSION_RECALLED)
+        .expect("召回格");
+    assert_eq!(recalled.event_id, "recalled-u-2");
+    assert_eq!(recalled.payload["entries"][0]["tag"], json!("skill"));
+    assert_eq!(recalled.payload["entries"][1]["tag"], json!("memory"));
+    assert_eq!(recalled.payload["resumed"], json!(false));
+    assert_eq!(recalled.payload["anchor"], json!(4));
+}
+
+#[tokio::test]
+async fn prepare_lands_the_assembly_fact() {
+    let store = Arc::new(EventStore::new());
+    let ctx = exec_context_with_facts(store.clone(), 3);
+    let outcome = executor()
+        .execute(
+            ctx,
+            stage_input(
+                ROW_PREPARE,
+                "prepared-u-3",
+                json!({ "kind": "inputs", "result": "ready", "replaces": null }),
+            ),
+        )
+        .await;
+    assert!(
+        outcome.error.is_none(),
+        "装配行不应失败：{:?}",
+        outcome.error
+    );
+    let events = store.range(symbio_kernel::event::Seq::new(0));
+    let prepared = events
+        .iter()
+        .find(|e| e.kind == crate::declarations::EVENT_SESSION_PREPARED)
+        .expect("装配格");
+    assert_eq!(prepared.event_id, "prepared-u-3");
+    assert_eq!(prepared.payload["kind"], json!("inputs"));
+    assert_eq!(prepared.payload["result"], json!("ready"));
+}
+
+#[tokio::test]
+async fn compress_lands_the_consolidation_with_the_model_call_count() {
+    let store = Arc::new(EventStore::new());
+    let ctx = exec_context_with_facts(store.clone(), 4);
+    let outcome = executor()
+        .execute(
+            ctx,
+            stage_input(
+                ROW_COMPRESS,
+                "compressed-u-4",
+                json!({ "messages": [{ "role": "user", "text": "摘要" }], "turns": 2, "model_calls": 1 }),
+            ),
+        )
+        .await;
+    assert!(
+        outcome.error.is_none(),
+        "压缩行不应失败：{:?}",
+        outcome.error
+    );
+    let events = store.range(symbio_kernel::event::Seq::new(0));
+    let consolidated = events
+        .iter()
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED)
+        .expect("压缩格");
+    assert_eq!(consolidated.event_id, "compressed-u-4");
+    assert_eq!(consolidated.payload["model_calls"], json!(1));
+    assert_eq!(consolidated.payload["turns"], json!(2));
+}
+
+#[tokio::test]
+async fn report_lands_the_reported_fact_even_when_silent() {
+    let store = Arc::new(EventStore::new());
+    let ctx = exec_context_with_facts(store.clone(), 5);
+    let outcome = executor()
+        .execute(
+            ctx,
+            stage_input(
+                ROW_REPORT,
+                "reported-u-5",
+                json!({ "text": "", "tool_rounds": 2, "quiet_ms": 900, "node": null }),
+            ),
+        )
+        .await;
+    assert!(
+        outcome.error.is_none(),
+        "汇报行不应失败：{:?}",
+        outcome.error
+    );
+    let events = store.range(symbio_kernel::event::Seq::new(0));
+    let reported = events
+        .iter()
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED)
+        .expect("汇报格");
+    assert_eq!(reported.event_id, "reported-u-5");
+    assert_eq!(
+        reported.payload["text"],
+        json!(""),
+        "静默也落格：试过、没话"
+    );
+    assert_eq!(reported.payload["quiet_ms"], json!(900));
+}
+
+#[tokio::test]
+async fn stage_rows_reject_a_payload_without_an_id() {
+    let store = Arc::new(EventStore::new());
+    let ctx = exec_context_with_facts(store.clone(), 6);
+    let outcome = executor()
+        .execute(
+            ctx,
+            input(json!({ ROW_KEY: ROW_DECIDE, "anchor": 4, "data": { "source": "rule" } })),
+        )
+        .await;
+    let error = outcome.error.expect("缺 id ⇒ 必须失败");
+    assert_eq!(error.0, PortErrorClass::NonRetryable);
+    assert!(error.1.contains("id"), "{}", error.1);
+}

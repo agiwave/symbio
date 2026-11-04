@@ -338,7 +338,7 @@ export const BASELINE = {
   // ⑤ 7：P2-5b 之前同路径的历史删除，**未逐条归名**（如实保留为未查明，不并入上述任何一类）。
   // 非侵蚀：本轮另补 13 条判据（loop +12：stage_driver 2 / policy 1 / execution 9；tool +1
   // 协议读数），清白树实跑 `cargo test --workspace`：2617 passed / 0 failed。
-  ciRustTestsTotal: 2628,
+  ciRustTestsTotal: 2634,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
