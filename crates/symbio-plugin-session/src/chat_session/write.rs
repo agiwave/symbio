@@ -450,7 +450,7 @@ impl PersistentChatSession {
             removed_ids.extend(session.messages[..start_idx].iter().map(|m| m.id.clone()));
             session.messages.drain(0..start_idx);
             if dropped > 0 {
-                plugin_info!(
+                symbio_plugin_api::plugin_info!(
                     "session",
                     "append_messages: 轮次窗口淘汰 {} 条消息（归档文件保留，由 L0 滚动策略回收）",
                     dropped
@@ -528,7 +528,7 @@ impl PersistentChatSession {
                 .filter(|p| !kept.contains(*p))
                 .count();
             if orphans > 0 {
-                plugin_info!(
+                symbio_plugin_api::plugin_info!(
                     "session",
                     "replace_all: {} 个工具存档失去引用（保留于 {}，等待 L0 滚动回收）",
                     orphans,

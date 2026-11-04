@@ -30,7 +30,6 @@ use symbio_kernel::plugin::PluginError;
 use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::chat::chat_node::{ChatNode, NodeRole};
 use symbio_sdk::clock::clock_now_ms;
-use symbio_sdk::plugin_info;
 use tokio::sync::RwLock;
 
 mod read;
