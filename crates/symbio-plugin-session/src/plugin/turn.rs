@@ -14,7 +14,9 @@ use crate::convergence::SessionStateChange;
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use crate::transcript::publish::append_and_publish;
 use symbio_kernel::event::{Entity, Verb};
-use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use symbio_plugin_api::events::{
+    EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
+};
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
@@ -28,6 +30,7 @@ impl SessionPlugin {
     /// （同 scope 二次开轮会被 I1 拒绝），而一个会话有很多轮。
     pub(crate) async fn consume_inbox_turn(
         &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         session_id: &str,
         source: &dyn FactSource,
     ) -> Result<Option<u64>, PluginError> {
@@ -54,6 +57,48 @@ impl SessionPlugin {
         source
             .append(scope, PRINCIPAL_USER.to_string(), draft)
             .map_err(|e| PluginError::InternalError(format!("user.message 落格失败: {e}")))?;
+
+        // 轮首装配：能力收集 → `session.config`（系统提示词 + 工具表 + 本轮生效设置）。
+        //
+        // 写方是本插件（会话编排权归 session）：模型端口只读「最近一条 session.config」，
+        // 读不到就退化为空提示词。提示词里的 VDFS 地址由收集期的 `descend_addr` 归一
+        // （根地址 `.vdfsv2` + 挂载名），**不是**在这里把绝对路径再相对化。
+        let manager = crate::capabilities::collect_capabilities(self.get_parent().as_ref(), ctx).await;
+        let system_prompt = symbio_sdk::capability::capability_prompts(&*manager)
+            .await
+            .into_iter()
+            .map(|(_, prompt)| prompt)
+            .filter(|prompt| !prompt.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let tools = manager
+            .list(symbio_kernel::capability::family::TOOL)
+            .await
+            .into_iter()
+            .map(|row| row.meta())
+            .collect::<Vec<_>>();
+        let cfg = self.config.read().await.clone();
+        let config_draft = FactDraft {
+            key: format!("session-config-{scope}"),
+            kind: EVENT_SESSION_CONFIG.to_string(),
+            entity: Entity::Scope,
+            verb: Verb::Asserted,
+            payload: json!({
+                "system_prompt": system_prompt,
+                "tools": tools,
+                "classify_enabled": cfg.classify_enabled,
+                "progress_enabled": cfg.progress_enabled,
+                "progress_interval_ms": cfg.progress_interval_ms,
+                "progress_max_per_turn": cfg.progress_max_per_turn,
+                "readyset_cap": cfg.task_cap,
+                "skill_compile_enabled": cfg.skill_compile_enabled,
+            }),
+            // 溯源指同一轮刚落的 `user.message`（seq = scope）。
+            produced_by: Some(scope),
+        };
+        source
+            .append(scope, PRINCIPAL_MAIN.to_string(), config_draft)
+            .map_err(|e| PluginError::InternalError(format!("session.config 落格失败: {e}")))?;
 
         let mut message = item.message;
         message.seq = None;
@@ -143,7 +188,7 @@ impl SessionPlugin {
             ));
         }
         let source = self.fact_source_for(&ctx, &sid).await?;
-        let scope = self.consume_inbox_turn(&sid, &*source).await?;
+        let scope = self.consume_inbox_turn(&ctx, &sid, &*source).await?;
         Ok(PluginPayload::new(&json!({ "scope": scope })))
     }
 
