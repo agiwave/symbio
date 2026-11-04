@@ -492,6 +492,8 @@ const STRUCT_SETS = [
  * - **后端拥有的键仍在 owner 文件里**：`owner` 非空时，该键字面必须仍在 owner
  *   文件里出现 ⇒ 否则红（后端改名 / 删除后，前端那条读点会静默读 `undefined`）。
  *   前端自持的键（`owner: null`）只做第一条。
+ *   owner 取**当前真正读/写这个键的那一份文件**：写方退场、只剩读方时，owner 就是
+ *   读方（环侧旧写方随 B2 删除后就是这种情况，别再挂到已经没有写方的文件上）。
  *
  * **已知边界**：第二条判的是「字面从 owner 文件里整词消失」，不是「语义上不再
  * 产出」——`error` 这类通用词在 owner 文件里另有用途时，改名不会立刻红。
@@ -509,8 +511,8 @@ const STRUCT_SETS = [
 const META_KEYS = [
   {
     key: 'compacted',
-    owner: 'crates/symbio-plugin-loop/src/context/pipeline.rs',
-    what: '压缩后的历史记忆标记（渲染成记忆而非用户气泡）',
+    owner: 'crates/symbio-plugin-session/src/stats_reading.rs',
+    what: '压缩后的历史记忆标记（后端在读数面按它认快照；渲染成记忆而非用户气泡）',
   },
   {
     // 重试留下的「并存几支 + 一个选中态」在节点上的投影（D-173 口径 1）。
@@ -526,18 +528,18 @@ const META_KEYS = [
   },
   {
     key: 'error',
-    owner: 'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
-    what: '失败原因（旧路径的兜底读点；今天的失败文本由本文件写进父节点顶层 `error`）',
+    owner: 'tauri/src/registry/messageFacts.ts',
+    what: '失败原因（兜底读点：失败文本已由重建面写进父节点顶层 `error`，本键只剩前端兜底）',
   },
   {
     key: 'failure_kind',
-    owner: 'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
-    what: '失败类别（决定可恢复动作）',
+    owner: 'crates/symbio-sdk/src/projection/rebuild.rs',
+    what: '失败类别（重建面从 `artifact.added` 载荷搬进节点 meta，决定可恢复动作）',
   },
   {
     key: 'started_at',
-    owner: 'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
-    what: '工具开始执行的时刻（运行时长锚点）',
+    owner: 'tauri/src/registry/messageFacts.ts',
+    what: '工具开始执行的时刻（运行时长锚点；写方随 B2 退场，当前只剩前端读点）',
   },
   {
     key: 'recoverable',
@@ -551,8 +553,8 @@ const META_KEYS = [
   },
   {
     key: 'prompt',
-    owner: 'crates/symbio-plugin-loop/src/tool_exec/execution.rs',
-    what: '待用户响应的载荷（提问 / 工具确认）',
+    owner: 'crates/symbio-sdk/src/projection/rebuild.rs',
+    what: '待用户响应的载荷（重建面从 `artifact.added` 载荷复刻到结果节点 meta）',
   },
   {
     key: 'agent_id',

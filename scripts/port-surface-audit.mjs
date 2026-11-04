@@ -317,20 +317,25 @@ for (const f of portFacts) {
 // ───────────────────────── 求解器：指纹与端口字段 ─────────────────────────
 
 /**
- * 端口**取值**名单：谁声明端口，谁的 `PortDecl` 就是名单来源——扫 `crates` 下
- * 含 `PortDecl {` 的 `.rs`，不钉某一张表。钉住文件会把插件路径写进这条 core 侧
- * 判据，而「再加一张端口表」就判不到了。
+ * 端口**取值**名单：谁声明端口，谁的声明就是名单来源。判定面认两种声明形状：
+ * - `PortDecl { port: … }`（静态端口表，tool / telegram 这类）；
+ * - `impl PortProvider for … { fn ports(&self) -> &'static [&'static str] { &[…] } }`
+ *   （提供者自报端口，model 这类：端口名随能力目录注册，没有静态端口表）。
+ * 只认第一种会让「没有 PortDecl 的端口」从名单里**静默消失**——名单一窄，
+ * PTS-002 就不再拦「引擎按这个端口的值分支」。扫 `crates` 下所有 `.rs`，不钉某一张表：
+ * 钉住文件会把插件路径写进这条 core 侧判据，而「再加一张端口表」就判不到了。
  *
  * 端口词可以走常量（`port: ports::MODEL`，端口词单点拼写后生产表就是这么写的）：
  * 常量链解析到字面值为止——`CapabilityFamily::(multi|single)("词")` 给出族词，
- * `pub const X: &str = <路径>::Y.name()` 把族词借成端口词。带 `::` 的路径解析
- * 不出时**报红**而不是跳过：跳过会让取值一侧静默变窄（宁红不静默）；不带 `::`
- * 的裸标识（`None` / `Some` / 结构名）不是端口词，照旧忽略。
+ * `pub const X: &str = <路径>::Y.name()` 把族词借成端口词，`pub const X: &str = "词"`
+ * 是裸常量（`fn ports` 的数组元素就是这种）。带 `::` 的路径解析不出时**报红**而不是
+ * 跳过，裸标识同理：跳过会让取值一侧静默变窄（宁红不静默）。
  */
 function portValueLiterals() {
   const out = new Set()
   const unresolved = []
   const family = new Map()
+  const plainConsts = new Map()
   const strRefs = []
   const portExprs = []
   const skip = new Set(['target', 'node_modules', '.git', '.symbio', '.workbuddy-ai'])
@@ -347,6 +352,11 @@ function portValueLiterals() {
         .replace(/\r\n/g, '\n')
       const code = blankComments(text).join('\n')
       for (const m of code.matchAll(
+        /pub(?:\([^)]*\))?\s+const\s+([A-Z0-9_]+)\s*:\s*&str\s*=\s*"([^"]*)"/g,
+      )) {
+        plainConsts.set(m[1], m[2])
+      }
+      for (const m of code.matchAll(
         /pub\s+const\s+([A-Z0-9_]+)\s*:\s*CapabilityFamily\s*=\s*CapabilityFamily::(?:multi|single)\s*\(\s*"([^"]+)"\s*\)/g,
       )) {
         family.set(m[1], m[2])
@@ -356,9 +366,30 @@ function portValueLiterals() {
       )) {
         strRefs.push([m[1], m[2]])
       }
-      if (!text.includes('PortDecl {')) continue
-      for (const m of code.matchAll(/\bport\s*:\s*("([^"]+)"|[A-Za-z0-9_][A-Za-z0-9_:]*)/g)) {
-        portExprs.push(m[1])
+      if (text.includes('PortDecl {')) {
+        // 只看 `PortDecl { … }` 体里的 `port:`：整份文件里的 `port:` 还会命中
+        // `PortInput { port: None }` 这类别的结构，把 `None` / `Some` 当成端口词。
+        for (const m of code.matchAll(/\bPortDecl\s*\{/g)) {
+          const open = code.indexOf('{', m.index)
+          if (open < 0) continue
+          const body = code.slice(open + 1, matchBrace(code, open))
+          const p = /\bport\s*:\s*("([^"]+)"|[A-Za-z0-9_][A-Za-z0-9_:]*)/.exec(body)
+          if (p) portExprs.push(p[1])
+        }
+      }
+      // 提供者自报端口：`fn ports(&self) -> &'static [&'static str] { &[词, …] }`。
+      for (const m of code.matchAll(
+        /\bfn\s+ports\s*\(\s*&?\s*self\s*\)\s*->\s*&\s*'static\s*\[\s*&\s*'static\s*str\s*\]\s*\{/g,
+      )) {
+        const open = code.indexOf('{', m.index)
+        if (open < 0) continue
+        const body = code.slice(open + 1, matchBrace(code, open))
+        const arr = /&\s*\[([\s\S]*?)\]/.exec(body)
+        if (!arr) continue
+        for (const item of arr[1].split(',')) {
+          const token = item.trim()
+          if (token) portExprs.push(token)
+        }
       }
     }
   }
@@ -372,9 +403,14 @@ function portValueLiterals() {
       out.add(expr.slice(1, -1))
       continue
     }
-    if (!expr.includes('::')) continue
     const last = expr.split('::').pop()
-    if (strConst.has(last)) out.add(strConst.get(last))
+    if (expr.includes('::')) {
+      if (strConst.has(last)) out.add(strConst.get(last))
+      else if (family.has(last)) out.add(family.get(last))
+      else unresolved.push(expr)
+      continue
+    }
+    if (plainConsts.has(last)) out.add(plainConsts.get(last))
     else if (family.has(last)) out.add(family.get(last))
     else unresolved.push(expr)
   }
