@@ -93,8 +93,8 @@ fn no_event_name_is_claimed_by_two_fields() {
     ];
     assert_eq!(
         all.len(),
-        20,
-        "三张表的闭集是 20 条名字（verdict 是单名字形参）"
+        18,
+        "三张表的闭集是 18 条名字（9 + 5 + 4；verdict 是单名字形参）"
     );
     let mut seen = all.to_vec();
     seen.sort_unstable();
