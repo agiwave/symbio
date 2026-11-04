@@ -158,7 +158,6 @@ pub use symbio_kernel::vdfs::{
     VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED, VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN,
     VDFS_STATUS_WORKING,
 };
-pub use symbio_kernel::view::Budget;
 pub use symbio_kernel::{
     ActorSpec, Entity, Event, EventDecl, FactRole, LatencyTier, Pattern, Scope, Seq, Verb,
 };
