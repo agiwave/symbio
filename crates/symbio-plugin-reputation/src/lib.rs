@@ -36,5 +36,3 @@
 
 mod decl;
 mod plugin;
-
-pub(crate) use plugin::{ReputationPlugin, PLUGIN_TITLE};

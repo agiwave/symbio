@@ -190,9 +190,7 @@ impl SessionPlugin {
 
         let parent = ctx.parent();
 
-        let plugin = Arc::new(SessionPlugin::new(parent, config, dir));
-
-        plugin
+        Arc::new(SessionPlugin::new(parent, config, dir))
     }
 
     /// 获取父插件引用

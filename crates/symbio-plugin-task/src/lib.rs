@@ -31,5 +31,3 @@ mod decl;
 mod plugin;
 mod readyset;
 mod task;
-
-pub(crate) use plugin::TaskPlugin;

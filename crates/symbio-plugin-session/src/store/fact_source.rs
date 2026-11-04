@@ -29,7 +29,7 @@ pub(crate) struct SessionFactSource {
 }
 
 impl SessionFactSource {
-    pub(crate) fn new(wal: Arc<WalStore>) -> Arc<dyn FactSource> {
+    pub(crate) fn open(wal: Arc<WalStore>) -> Arc<dyn FactSource> {
         Arc::new(Self { wal })
     }
 }
@@ -78,7 +78,7 @@ impl FactSourceOpener for SessionFactOpener {
         let wal = store
             .facts(session_id)?
             .ok_or_else(|| format!("会话 {session_id} 没有事实源"))?;
-        Ok(SessionFactSource::new(wal))
+        Ok(SessionFactSource::open(wal))
     }
 }
 

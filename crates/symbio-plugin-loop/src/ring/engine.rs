@@ -238,7 +238,7 @@ async fn dispatch(ctx: &dyn DriveCtx, scope: u64, row: DebtRow, attempt: u32, no
             key,
             json!({
                 "class": "non_retryable",
-                "reason": format!("no provider for port {}", row.port),
+                "reason": format!("no provider for port {} (row {})", row.port, row.name),
             }),
             now_ms,
         ));

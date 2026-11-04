@@ -80,7 +80,7 @@ impl SessionStore {
     ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
         Ok(self
             .facts(session_id)?
-            .map(super::fact_source::SessionFactSource::new))
+            .map(super::fact_source::SessionFactSource::open))
     }
 
     /// 该会话的**完整史快照**（含归档前缀）；没有事实源 ⇒ `None`。

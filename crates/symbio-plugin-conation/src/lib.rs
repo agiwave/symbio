@@ -27,5 +27,3 @@
 mod autonomy;
 mod decl;
 mod plugin;
-
-pub(crate) use plugin::{ConationPlugin, PLUGIN_TITLE};

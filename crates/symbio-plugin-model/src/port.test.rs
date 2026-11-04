@@ -85,10 +85,9 @@ impl ModelProvider for FakeModel {
             }
             FakeOutcome::Aborted => Err(PluginError::Aborted),
             FakeOutcome::RateLimited => Err(PluginError::RateLimited("slow down".to_string())),
-            FakeOutcome::WithToolCalls => {
-                let mut output = RoundOutput::default();
-                output.finish = ModelFinishReason::ToolCalls;
-                output.tool_calls = vec![
+            FakeOutcome::WithToolCalls => Ok(RoundOutput {
+                finish: ModelFinishReason::ToolCalls,
+                tool_calls: vec![
                     symbio_plugin_api::TurnToolCallInfo {
                         id: Some("call-1".into()),
                         wire_id: Some("wire-1".into()),
@@ -105,9 +104,9 @@ impl ModelProvider for FakeModel {
                         parse_error: None,
                         overflow_notice: None,
                     },
-                ];
-                Ok(output)
-            }
+                ],
+                ..RoundOutput::default()
+            }),
         }
     }
 }

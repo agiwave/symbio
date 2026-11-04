@@ -21,5 +21,3 @@ mod behavior;
 mod decl;
 mod plugin;
 mod tool;
-
-pub(crate) use plugin::{IdempotencyPlugin, PLUGIN_TITLE};

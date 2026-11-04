@@ -25,7 +25,7 @@ use crate::protocols::openai_chat::OpenaiChatProtocol;
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::ProviderLlmAdapter;
 use symbio_plugin_api::{
-    check_all, transcript, Budget, Entity, Event, EventStore, PromptMessage, Seq, Store, Verb,
+    check_all, transcript, Entity, Event, EventStore, PromptMessage, Seq, Store, Verb,
 };
 
 /// 对话面 / 消息面的词汇表（DE-024 D-203 / D-206）：本插件不是这两面任何名字的

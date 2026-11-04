@@ -21,7 +21,6 @@ use crate::test_fixtures::{
     CHAT, COMMITMENT, EVENTS, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED, MESSAGE,
 };
-use symbio_kernel::view::Budget;
 
 // ── ActorSpec / Pattern（DE-001 §4 契约形状） ──────────────────────────────
 

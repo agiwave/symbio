@@ -21,6 +21,3 @@
 
 mod config;
 mod plugin;
-
-pub(crate) use config::PersonaConfig;
-pub(crate) use plugin::{PersonaPlugin, PLUGIN_TITLE, SEGMENT_NAME};

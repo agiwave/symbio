@@ -26,5 +26,3 @@
 
 mod decl;
 mod plugin;
-
-pub(crate) use plugin::{CostPlugin, PLUGIN_TITLE};

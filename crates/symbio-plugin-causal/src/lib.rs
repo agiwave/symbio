@@ -21,5 +21,3 @@ mod behavior;
 mod decl;
 mod plugin;
 mod tool;
-
-pub(crate) use plugin::{CausalPlugin, PLUGIN_TITLE};

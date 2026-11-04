@@ -24,5 +24,3 @@
 
 mod decl;
 mod plugin;
-
-pub(crate) use plugin::{SloPlugin, PLUGIN_TITLE};

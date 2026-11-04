@@ -468,7 +468,7 @@ async fn when_gate_asks_the_host_whether_the_kind_exists() {
         }
 
         fn exists(&self, kind: &str, scope: u64) -> bool {
-            scope == S && self.kinds.iter().any(|known| *known == kind)
+            scope == S && self.kinds.iter().copied().any(|known| known == kind)
         }
     }
 

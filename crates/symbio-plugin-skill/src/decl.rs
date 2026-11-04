@@ -34,7 +34,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
-use symbio_plugin_api::ring::{Decl, Lit, Pattern};
+use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{
     Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
 };
@@ -206,6 +206,10 @@ pub(crate) fn calibration_ledger(events: &[Event], now: i64) -> BTreeMap<String,
 }
 
 /// 某条技能的置信度：账里没有它 ⇒ [`SkillStat::default`]（零使用 ⇒ 1.0）。
+///
+/// 生产读出口是 [`calibration_ledger_view`]（视图 `skill.calibration`）；这条只是
+/// 折叠的单点读数，用例用它直接对账，故随测试编译。
+#[cfg(test)]
 pub(crate) fn confidence_of(events: &[Event], now: i64, skill_id: &str) -> f64 {
     calibration_ledger(events, now)
         .get(skill_id)
