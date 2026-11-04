@@ -19,6 +19,16 @@ pub(crate) const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
 /// 健康自检。落在 `system × progressed`。
 pub(crate) const EVENT_SYSTEM_HEALTH: &str = "system.health";
 
+/// 消息变更面里**只有本插件读写**的三条：写方在 `message_events` / `runtime`，
+/// 读方是同一插件调用 core 的折叠。没有第二个插件在生产代码里引用它们，
+/// 因此不进 `PLUGIN.yml` 的共享表（CS-007：单消费方的名字随 owner 走）。
+pub(crate) const EVENT_MESSAGE_EDITED: &str = "message.edited";
+pub(crate) const EVENT_MESSAGE_REMOVED: &str = "message.removed";
+pub(crate) const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
+
+/// 用户点切换器时的断言；同样只有本插件读写（`commands` 落格、折叠读回）。
+pub(crate) const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
+
 /// **读方侧**的视图名：主动性读数由能力包交（`crates/symbio-plugin-conation`），本插件按
 /// 名字读。与 [`TASK_READYSET_VIEW`] 同一条通路——拼写只有一个来源（owner 的 `PLUGIN.yml`
 /// `shared_views`），本常量只是让三个读点（`stats` / `stats_reading` / 自主触发）不各写
@@ -106,7 +116,7 @@ pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
     symbio_sdk::projection::vocab::ChatVocab {
         user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
         branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
-        branch_selected: symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED,
+        branch_selected: EVENT_TURN_BRANCH_SELECTED,
         reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
         opening: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
         final_reply: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
@@ -121,9 +131,9 @@ pub(crate) const MESSAGE_VOCAB: symbio_sdk::projection::vocab::MessageVocab =
     symbio_sdk::projection::vocab::MessageVocab {
         artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
         message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
-        message_edited: symbio_plugin_api::events::EVENT_MESSAGE_EDITED,
-        message_removed: symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
-        consolidated: symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
+        message_edited: EVENT_MESSAGE_EDITED,
+        message_removed: EVENT_MESSAGE_REMOVED,
+        consolidated: EVENT_SESSION_CONSOLIDATED,
     };
 
 /// 承诺面（4 条）：本插件只剩 `commitment_records`（承诺列）一个消费方——声誉列改按

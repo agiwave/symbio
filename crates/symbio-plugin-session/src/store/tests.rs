@@ -686,7 +686,8 @@ async fn concurrent_saves_of_one_session_serialize_via_lock() {
 #[test]
 fn current_window_starts_at_the_latest_snapshot() {
     use symbio_kernel::event::{Entity, Event, Verb};
-    use symbio_plugin_api::events::{EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE};
+    use crate::declarations::EVENT_SESSION_CONSOLIDATED;
+    use symbio_plugin_api::events::EVENT_USER_MESSAGE;
     use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus};
     let user = |id: &str, turn: u64| {
         Event::pending(

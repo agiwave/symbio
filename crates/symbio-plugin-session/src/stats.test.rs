@@ -36,9 +36,10 @@ use symbio_sdk::invariants::check_all;
 use symbio_sdk::projection::transcript::transcript;
 
 use crate::projections::checkpoint::checkpoint;
+use crate::declarations::EVENT_SESSION_CONSOLIDATED;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
-    EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+    EVENT_USER_MESSAGE,
 };
 // 任务族的名字走清单生成物（写方在各自能力包，本插件只是读方，DE-024 D-204）。
 use symbio_plugin_api::events::EVENT_TASK_OPENED;

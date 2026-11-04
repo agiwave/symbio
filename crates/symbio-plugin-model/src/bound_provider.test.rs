@@ -33,7 +33,7 @@ use symbio_plugin_api::{
 const CHAT_VOCAB: symbio_plugin_api::ChatVocab = symbio_plugin_api::ChatVocab {
     user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
     branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
-    branch_selected: symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED,
+    branch_selected: "turn.branch_selected",
     reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
     opening: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
     final_reply: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
@@ -45,9 +45,9 @@ const CHAT_VOCAB: symbio_plugin_api::ChatVocab = symbio_plugin_api::ChatVocab {
 const MESSAGE_VOCAB: symbio_plugin_api::MessageVocab = symbio_plugin_api::MessageVocab {
     artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
     message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
-    message_edited: symbio_plugin_api::events::EVENT_MESSAGE_EDITED,
-    message_removed: symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
-    consolidated: symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
+    message_edited: "message.edited",
+    message_removed: "message.removed",
+    consolidated: "session.consolidated",
 };
 use symbio_plugin_api::{LlmAdapter as _, TokenIssuer};
 

@@ -15,7 +15,8 @@ use super::{drain_parked, edited, removed, AppendOutcome};
 use crate::store::EventWalStore;
 use symbio_kernel::event::{Entity, Seq, Verb};
 use symbio_kernel::store::Store;
-use symbio_plugin_api::events::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE};
+use crate::declarations::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
+use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind};
 
 /// 造一个临时会话目录 + 一条 `user.message`（承载节点 `u-1`，正是要被改的那条）。

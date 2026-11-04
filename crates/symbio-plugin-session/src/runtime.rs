@@ -19,9 +19,10 @@
 //! 工具、任务、记忆、消息编辑里不承载根 run 节点的那些）一律不改变结局。
 
 use symbio_kernel::event::Event;
+use crate::declarations::EVENT_MESSAGE_EDITED;
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_PROGRESS,
-    EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_USER_MESSAGE,
+    EVENT_MESSAGE_ADDED, EVENT_USER_MESSAGE,
 };
 use symbio_sdk::chat::chat_node as cm;
 

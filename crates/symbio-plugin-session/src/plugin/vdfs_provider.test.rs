@@ -1056,7 +1056,8 @@ async fn switch_branch(
 /// `turn.branch_selected`（而不是 `message.removed`），进模型的那一份换成另一支。
 #[tokio::test]
 async fn switch_branch_changes_the_reading_not_the_facts() {
-    use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_TURN_BRANCH_SELECTED};
+    use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
+    use symbio_plugin_api::events::EVENT_MESSAGE_REMOVED;
     use symbio_sdk::projection::branch::branch_selected;
     let (_dir, p) = fixture();
     let id = unique_id("branch-switch");
@@ -1134,7 +1135,7 @@ async fn switch_branch_changes_the_reading_not_the_facts() {
 /// 写成事实，而这件事没人要读。
 #[tokio::test]
 async fn switch_branch_to_the_current_candidate_writes_nothing() {
-    use symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED;
+    use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
     let (_dir, p) = fixture();
     let id = unique_id("branch-idem");
     seed_messages(&p, &id, &["问", "第一次答", "重试的答"]).await;
@@ -1165,7 +1166,7 @@ async fn switch_branch_to_the_current_candidate_writes_nothing() {
 /// 允许跨组，就会在事实源上盖一条**读不出来**的选择格（重建按组算选中态）。
 #[tokio::test]
 async fn switch_branch_rejects_anything_that_is_not_a_sibling() {
-    use symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED;
+    use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
     let (_dir, p) = fixture();
     let id = unique_id("branch-reject");
     seed_messages(&p, &id, &["问", "第一次答", "重试的答", "后一轮"]).await;

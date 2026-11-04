@@ -9,7 +9,6 @@ use symbio_plugin_api::behaviors;
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeReadings, BeforeRequest, EffectEnv, EffectInput, ToolBehavior,
 };
-use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
 use symbio_plugin_api::settle::{Contributor, SettleFace, Settling};
 use symbio_plugin_api::PRINCIPAL_SCHEDULER;
 use symbio_plugin_api::{
@@ -464,7 +463,7 @@ fn a_ready_task_survives_the_snapshot_boundary() {
         .append(
             Event::pending(
                 "v2sc-test-archived-readyset",
-                EVENT_SESSION_CONSOLIDATED,
+                "session.consolidated",
                 Entity::Message,
                 Verb::Progressed,
                 0,

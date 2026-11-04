@@ -422,7 +422,8 @@ impl SessionPlugin {
     ) -> Result<(), PluginError> {
         use symbio_kernel::event::{Entity, Event, Seq, Verb};
         use symbio_kernel::store::{AppendError, Store as _};
-        use symbio_plugin_api::events::{EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED};
+        use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
+        use symbio_plugin_api::events::EVENT_TURN_BRANCH;
         use symbio_sdk::projection::branch::{branch_candidates, branch_selected};
         let chat_session = self.open_chat_session(session_id).await?;
         let messages = chat_session.get_messages().await?;
