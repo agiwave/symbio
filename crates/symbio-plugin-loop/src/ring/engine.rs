@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use futures::future::join_all;
 use serde_json::{json, Value};
-use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::drive::Unless;
+use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortFactReader, PortFactWriter,
     PortInput, PortOutcome,
@@ -146,11 +146,7 @@ fn plan(
         }
         // 「该端口的债全部还清才欠」读的是债状态，不是事实状态（归属：选债）。
         if let Some(port) = row.when_no_open {
-            if view
-                .unresolved(scope)
-                .iter()
-                .any(|key| key.port == port)
-            {
+            if view.unresolved(scope).iter().any(|key| key.port == port) {
                 continue;
             }
         }

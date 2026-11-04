@@ -409,4 +409,3 @@ async fn migrated_session_routes_stay_retired() {
         }
     }
 }
-

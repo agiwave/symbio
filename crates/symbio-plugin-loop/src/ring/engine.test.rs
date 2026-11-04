@@ -79,9 +79,10 @@ impl DriveCtx for TestCtx {
             .facts
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if facts.iter().any(|f| {
-            f.kind == fact.kind && f.key == fact.key && shard_of(f) == shard_of(&fact)
-        }) {
+        if facts
+            .iter()
+            .any(|f| f.kind == fact.kind && f.key == fact.key && shard_of(f) == shard_of(&fact))
+        {
             return;
         }
         facts.push(fact);
@@ -152,7 +153,10 @@ impl Stub {
 }
 
 fn attempt_of(key: &str) -> u32 {
-    key.rsplit(':').next().and_then(|s| s.parse().ok()).unwrap_or(1)
+    key.rsplit(':')
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1)
 }
 
 #[async_trait::async_trait]
@@ -289,7 +293,12 @@ async fn non_retryable_error_lands_failed() {
 async fn lease_expiry_replays_an_existing_ledger() {
     let stub = Arc::new(Stub::ok());
     let seed = vec![
-        Fact::new(FactKind::Request, DebtKey::new(S, "p1", "d", 1), json!({}), 0),
+        Fact::new(
+            FactKind::Request,
+            DebtKey::new(S, "p1", "d", 1),
+            json!({}),
+            0,
+        ),
         Fact::new(
             FactKind::Sent,
             DebtKey::new(S, "p1", "d", 1),
@@ -317,7 +326,12 @@ async fn lease_expiry_replays_an_existing_ledger() {
 #[tokio::test]
 async fn a_fresh_lease_is_waited_not_expired() {
     let seed = vec![
-        Fact::new(FactKind::Request, DebtKey::new(S, "p1", "d", 1), json!({}), 0),
+        Fact::new(
+            FactKind::Request,
+            DebtKey::new(S, "p1", "d", 1),
+            json!({}),
+            0,
+        ),
         Fact::new(
             FactKind::Sent,
             DebtKey::new(S, "p1", "d", 1),
@@ -407,7 +421,12 @@ async fn unless_gate_reads_the_same_surface_as_when() {
         DebtRow::new("b", "p1", "b", json!({})).unless_id("turn.done", "turn.done:b"),
     ];
     let ledger = vec![
-        Fact::new(FactKind::Request, DebtKey::new(S, "p1", "b", 1), json!({}), 0),
+        Fact::new(
+            FactKind::Request,
+            DebtKey::new(S, "p1", "b", 1),
+            json!({}),
+            0,
+        ),
         Fact::new(FactKind::Sent, DebtKey::new(S, "p1", "b", 1), json!({}), 0),
         Fact::new(FactKind::Retry, DebtKey::new(S, "p1", "b", 2), json!({}), 0),
     ];
@@ -509,7 +528,12 @@ async fn absent_executor_lands_failed_and_names_the_port() {
 async fn protocol_drafts_pair_and_world_drafts_leave_the_ring() {
     let sink = Arc::new(RecordSink::default());
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
-        .with_executor("p1", Arc::new(Emitting { world: sink.clone() }))
+        .with_executor(
+            "p1",
+            Arc::new(Emitting {
+                world: sink.clone(),
+            }),
+        )
         .with_outlet(PortFactEmit::new(sink.clone()));
     let _ = drive(&ctx, S).await;
 
@@ -598,11 +622,7 @@ async fn response_shards_land_one_fact_per_draft_under_one_key() {
         .collect();
     assert_eq!(responses.len(), 3, "分片按序各成一条事实");
     for fact in &responses {
-        assert_eq!(
-            fact.key,
-            DebtKey::new(S, "p1", "d", 1),
-            "配对键不含分片号"
-        );
+        assert_eq!(fact.key, DebtKey::new(S, "p1", "d", 1), "配对键不含分片号");
     }
     assert_eq!(responses[0].payload["shard"], json!(1));
     assert_eq!(responses[2].payload["done"], json!(true));

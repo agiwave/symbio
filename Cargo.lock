@@ -4638,7 +4638,6 @@ dependencies = [
  "notify",
  "serde",
  "serde_json",
- "symbio-deploy",
  "symbio-kernel",
  "symbio-plugin-api",
  "symbio-providers",

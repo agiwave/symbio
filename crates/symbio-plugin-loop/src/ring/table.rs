@@ -34,7 +34,12 @@ pub(crate) struct DebtRow {
 #[cfg(test)]
 impl DebtRow {
     /// 一行无前置的债；租约 60s、最多 3 次尝试。
-    pub(crate) fn new(name: &'static str, port: &'static str, id: impl Into<String>, payload: Value) -> Self {
+    pub(crate) fn new(
+        name: &'static str,
+        port: &'static str,
+        id: impl Into<String>,
+        payload: Value,
+    ) -> Self {
         Self {
             name,
             port,

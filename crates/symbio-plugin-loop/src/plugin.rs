@@ -8,7 +8,7 @@ use symbio_kernel::plugin::{
     PluginMeta, PluginPayload,
 };
 use symbio_plugin_api::drive::drive_row;
-use symbio_plugin_api::{CAPABILITY_VISITOR, PLUGIN_ID_LOOP, PATH};
+use symbio_plugin_api::{CAPABILITY_VISITOR, PATH, PLUGIN_ID_LOOP};
 
 /// 单环驱动器（crate 内唯一实例；对外经 creator 注册可见）。
 pub(crate) struct LoopPlugin;

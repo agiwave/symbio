@@ -172,9 +172,10 @@ impl<'a> FactView<'a> {
     /// 某个 `(可见域, 端口)` 的最后一笔收束事实（重放与读回都只看这一笔）。
     #[cfg(test)]
     pub(crate) fn last_closing(&self, scope: u64, port: &str) -> Option<&'a Fact> {
-        self.facts.iter().rev().find(|f| {
-            f.kind.closes() && f.key.scope == scope && f.key.port == port
-        })
+        self.facts
+            .iter()
+            .rev()
+            .find(|f| f.kind.closes() && f.key.scope == scope && f.key.port == port)
     }
 
     /// 某个可见域里已开账但未收束的债（重放读它）。

@@ -33,7 +33,6 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
-use symbio_deploy::PLUGIN_ID_SESSION;
 use symbio_kernel::capability::CapabilityRow;
 use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
@@ -42,6 +41,7 @@ use symbio_kernel::plugin::{
 use symbio_kernel::present::{DetailDefinition, DetailField, DetailOption, DetailSection};
 use symbio_kernel::vdfs::{VdfsAccess, VdfsChange};
 use symbio_kernel::vdfs::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
+use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_providers::MemoryFile;
 use symbio_sdk::chat::session_chat;
 use symbio_sdk::keys::SESSION_ID;

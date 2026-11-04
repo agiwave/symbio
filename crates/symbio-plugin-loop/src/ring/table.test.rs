@@ -5,8 +5,7 @@ use serde_json::json;
 #[test]
 fn table_returns_rows_in_order() {
     let table = Table::new(vec![
-        DebtRow::new("a", "p", "d-a", json!({"q": 1}))
-            .after(DebtKey::new(1, "p", "d-0", 1)),
+        DebtRow::new("a", "p", "d-a", json!({"q": 1})).after(DebtKey::new(1, "p", "d-0", 1)),
         DebtRow::new("b", "p", "d-b", json!({"q": 2})),
     ]);
     let facts: Vec<Fact> = Vec::new();
