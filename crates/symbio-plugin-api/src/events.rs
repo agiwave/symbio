@@ -120,6 +120,11 @@ pub const EVENT_TASK_OPENED: &str = "task.opened";
 /// task.progress — owner `symbio-plugin-task`，格位 `(Task, Progressed)`
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
 
+// ============ tool ============
+
+/// tool.requested — owner `symbio-plugin-model`，格位 `(Scope, Asserted)`
+pub const EVENT_TOOL_REQUESTED: &str = "tool.requested";
+
 // ============ turn ============
 
 /// turn.branch — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
@@ -169,6 +174,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task
     EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← task
     EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← task
+    EventDecl::host(EVENT_TOOL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.requested ← model
     EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← loop
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // turn.branch_selected ← session
     EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop

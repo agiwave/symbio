@@ -3,3 +3,5 @@ plugin_id: model
 plugin_comment: 模型服务（子智能体自己的模型；子树会话自行解析）
 plugin_assembly: sub_agent
 plugin_order: 80
+# 跨插件消费的事实名：`tool.requested` 由本执行体写、`plugin-tool` 的债表按名字问。
+shared_events: tool.requested

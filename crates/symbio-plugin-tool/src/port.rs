@@ -41,9 +41,12 @@ use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
     capability_invoke, capability_to_wire, effects::annotations, effects::EffectInput,
     events::EVENT_ARTIFACT_ADDED, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
+    events::EVENT_TOOL_REQUESTED,
     failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel,
-    Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor, PortInput, PortOutcome,
+    Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError,
+    PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext, PortExecutor,
+    PortInput, PortOutcome,
     PortProvider, PromptMessage, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_REQUEST,
     EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
 };
@@ -687,6 +690,72 @@ async fn finish_with(
     out
 }
 
+/// 读面里最近一条 `tool.requested`：返回（事实身份，调用清单）。
+///
+/// 身份用来派生产物与 `tool.calls.done` 的键；清单只在执行体这里展开，债表不看。
+fn read_requested(
+    exec: &PortExecContext,
+) -> Result<(String, Vec<RequestedCall>), (PortErrorClass, String)> {
+    let Some(reader) = exec.reader.clone() else {
+        return Err((
+            PortErrorClass::NonRetryable,
+            "tool.requested 无读面".to_string(),
+        ));
+    };
+    let facts = reader.facts(exec.subject);
+    let Some(fact) = facts
+        .iter()
+        .rev()
+        .find(|fact| fact.kind == EVENT_TOOL_REQUESTED)
+    else {
+        // 事实与派发之间可能有半步时差：可重试，不是协议失败。
+        return Err((
+            PortErrorClass::Retryable,
+            "tool.requested 尚未可见".to_string(),
+        ));
+    };
+    let calls = fact
+        .payload
+        .get("calls")
+        .and_then(|calls| calls.as_array())
+        .map(|calls| {
+            calls
+                .iter()
+                .filter_map(|call| {
+                    let id = call.get("id")?.as_str()?.to_string();
+                    let name = call.get("name")?.as_str()?.to_string();
+                    Some(RequestedCall {
+                        id,
+                        name,
+                        arguments: call
+                            .get("arguments")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok((fact.id.clone(), calls))
+}
+
+/// 一条调用结果的产物格：模型侧按 `tool` / `tool_call_id` / `text` 读回。
+fn artifact_draft(call: &RequestedCall, result: &serde_json::Value) -> FactDraft {
+    FactDraft {
+        key: format!("artifact:{}", call.id),
+        kind: EVENT_ARTIFACT_ADDED.to_string(),
+        entity: Entity::Artifact,
+        verb: Verb::Asserted,
+        payload: serde_json::json!({
+            "tool": call.name,
+            "tool_call_id": call.id,
+            "text": result.get("result_text").cloned().unwrap_or(serde_json::Value::Null),
+            "success": result.get("success").cloned().unwrap_or(serde_json::Value::Bool(true)),
+        }),
+        produced_by: None,
+    }
+}
+
 /// 补齐应答承载（`D-319`）：工具结果的 `tool` 消息**在端口里组装**。
 ///
 /// 环只搬来配对键与结果正文附注（纯值），消息文本、角色、配对全在这里定；
@@ -985,13 +1054,96 @@ impl PortProvider for ToolPort {
 #[async_trait::async_trait]
 impl PortExecutor for ToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        // 新表达：债行载荷为空，调用清单在 `tool.requested` 这条世界事实里 ——
+        // 由执行体自己去读面取，**不是**协议错误（债表永不读载荷）。
+        if input.payload.as_object().is_some_and(|object| object.is_empty()) {
+            return self.run_requested(exec).await;
+        }
         let payload = input.payload.clone();
         let out = self.run(exec, input).await;
         attach_reply(out, &payload)
     }
 }
 
+/// 一轮里被请求的一次工具调用（清单由模型写进 `tool.requested` 的载荷）。
+struct RequestedCall {
+    id: String,
+    name: String,
+    arguments: serde_json::Value,
+}
+
+/// 单消费方事实：这一轮的工具清单已还完（模型侧只读债状态，不读这条）。
+const TOOL_CALLS_DONE: &str = "tool.calls.done";
+
 impl ToolPort {
+    /// 按 `tool.requested` 的清单逐调用执行：复用 [`Self::run`]，每个调用落一条产物，
+    /// 最后落 `tool.calls.done`。结果事实按调用顺序原样交回环（环只当纯值搬运）。
+    async fn run_requested(&self, exec: PortExecContext) -> PortOutcome {
+        let (request_id, calls) = match read_requested(&exec) {
+            Ok(found) => found,
+            Err(error) => {
+                return PortOutcome {
+                    facts: Vec::new(),
+                    error: Some(error),
+                    ..Default::default()
+                }
+            }
+        };
+        let mut facts = Vec::new();
+        let mut reply = symbio_plugin_api::port::PortReply::default();
+        for call in &calls {
+            let payload = serde_json::json!({
+                KEY_TOOL_NAME: call.name.clone(),
+                KEY_ARGS: call.arguments.clone(),
+                KEY_TOOL_CALL_ID: call.id.clone(),
+                KEY_REPLY_KEY: call.id.clone(),
+            });
+            let outcome = self
+                .run(
+                    exec.clone(),
+                    PortInput {
+                        port: TOOL,
+                        payload,
+                    },
+                )
+                .await;
+            let result = outcome.facts.first().cloned();
+            facts.extend(outcome.facts);
+            reply.messages.extend(outcome.reply.messages);
+            reply.links.extend(outcome.reply.links);
+            if let Some(error) = outcome.error {
+                return PortOutcome {
+                    facts,
+                    error: Some(error),
+                    reply,
+                };
+            }
+            if let Some(result) = result {
+                exec.emit
+                    .emit(vec![artifact_draft(call, &result)])
+                    .await;
+            }
+        }
+        exec.emit
+            .emit(vec![FactDraft {
+                key: format!("{TOOL_CALLS_DONE}:{request_id}"),
+                kind: TOOL_CALLS_DONE.to_string(),
+                entity: Entity::Scope,
+                verb: Verb::Asserted,
+                payload: serde_json::json!({
+                    "requested": request_id,
+                    "calls": calls.len(),
+                }),
+                produced_by: None,
+            }])
+            .await;
+        PortOutcome {
+            facts,
+            error: None,
+            reply,
+        }
+    }
+
     /// 执行主体：各出口只交回事实，应答承载由 [`attach_reply`] 在唯一出口补齐。
     async fn run(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         // 受理即起算：闸门的 `elapsed` 量的是**本执行体**从拿到这笔债到判定的时长。

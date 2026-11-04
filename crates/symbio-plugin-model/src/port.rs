@@ -15,7 +15,8 @@ use symbio_plugin_api::port::{
     PortProvider, PortReply,
 };
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG,
+    EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::{
     llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecEnv, ExecEventSink,
@@ -224,6 +225,8 @@ impl PortExecutor for ModelExecutor {
         let rows = Arc::new(StreamRows::new(exec.sink.clone()));
         let env = ExecEnv::new(ExecEventSink::direct(rows.clone()), exec.abort.clone());
         let mut world_kind = EVENT_FAILED;
+        // 工具轮：**一次一轮一条** `tool.requested`（载荷 = 本轮调用清单）。
+        let mut requested: Option<serde_json::Value> = None;
         let outcome = match provider
             // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
             .round_trip(
@@ -250,6 +253,7 @@ impl PortExecutor for ModelExecutor {
                 let present = |id: &Option<String>| id.clone().filter(|s| !s.trim().is_empty());
                 let mut messages: Vec<PromptMessage> = Vec::new();
                 let mut links = Vec::new();
+                let mut calls: Vec<serde_json::Value> = Vec::new();
                 if !output.text.trim().is_empty() {
                     messages.push(PromptMessage {
                         role: "assistant".into(),
@@ -267,6 +271,11 @@ impl PortExecutor for ModelExecutor {
                     if let Some(key) = call.id.clone().filter(|s| !s.trim().is_empty()) {
                         links.push((key, id.clone()));
                     }
+                    calls.push(serde_json::json!({
+                        "id": id.clone(),
+                        "name": name,
+                        "arguments": call.arguments.clone(),
+                    }));
                     messages.push(PromptMessage {
                         role: "assistant".into(),
                         text: format!("调用工具 {} {}", name, call.arguments),
@@ -278,6 +287,12 @@ impl PortExecutor for ModelExecutor {
                             arguments: call.arguments.clone(),
                         }]),
                     });
+                }
+                if !calls.is_empty() {
+                    requested = Some(serde_json::json!({
+                        "turn_id": request.root_id,
+                        "calls": calls,
+                    }));
                 }
                 PortOutcome {
                     // 一次往返的终稿 → `response` 载荷：正文 / 思考、节点身份、终答折叠、
@@ -348,6 +363,18 @@ impl PortExecutor for ModelExecutor {
                 (format!("{kind}-outcome"), Verb::Asserted)
             };
             emit_outcome(&exec.emit, key, kind, verb, payload.clone()).await;
+        }
+        // 工具轮的世界事实：债表只问「有没有 `tool.requested`」，执行体自己从读面取清单。
+        // 身份取本次派发的幂等键（一轮一次，跨轮天然不同），不靠计数。
+        if let Some(payload) = requested {
+            emit_outcome(
+                &exec.emit,
+                format!("{EVENT_TOOL_REQUESTED}:{}", exec.idempotency_key),
+                EVENT_TOOL_REQUESTED,
+                Verb::Asserted,
+                payload,
+            )
+            .await;
         }
         outcome
     }

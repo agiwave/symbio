@@ -42,6 +42,7 @@ fn user_turn_debt_derives_its_identity_from_the_input_fact() {
 fn tool_result_adds_a_second_row_with_its_own_identity() {
     let mut facts = DebtFacts::default();
     facts.note_fact(EVENT_USER_MESSAGE, "u-1");
+    facts.note_fact(EVENT_TOOL_REQUESTED, "tool.requested:model-1");
     facts.note_fact(EVENT_ARTIFACT_ADDED, "a-1");
 
     let rows = ModelDebts.rows(&request(None), &facts);
@@ -50,8 +51,12 @@ fn tool_result_adds_a_second_row_with_its_own_identity() {
     let after_tools = &rows[1];
     assert_eq!(after_tools.name, "model-after-tools");
     assert_eq!(after_tools.id, "model:after:a-1");
+    assert_eq!(
+        after_tools.when.as_deref(),
+        Some(EVENT_TOOL_REQUESTED),
+        "没有这一轮的工具请求就不欠（否则每条响应都想再派一次）"
+    );
     assert_eq!(after_tools.when_no_open, Some(TOOL_PORT));
-    assert!(after_tools.when.is_none(), "工具轮之后只看端口是否还有未还债");
 }
 
 #[test]

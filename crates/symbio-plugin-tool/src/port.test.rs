@@ -462,6 +462,102 @@ async fn pending_intent_travels_through_the_outcome() {
     assert_eq!(pending["prompt"]["kind"], serde_json::json!("confirm"));
 }
 
+// ==================== 工具轮：清单来自事实读面，载荷留空 ====================
+
+/// 记录执行体经写口交出的草稿。
+#[derive(Default)]
+struct RecordingWriter {
+    drafts: std::sync::Mutex<Vec<symbio_plugin_api::FactDraft>>,
+}
+
+#[async_trait]
+impl symbio_plugin_api::port::PortFactWriter for RecordingWriter {
+    async fn emit(&self, facts: Vec<symbio_plugin_api::FactDraft>) {
+        self.drafts.lock().unwrap().extend(facts);
+    }
+}
+
+/// 事实读面的静态夹具。
+struct StaticReader(Vec<symbio_plugin_api::port::PortFact>);
+
+impl symbio_plugin_api::port::PortFactReader for StaticReader {
+    fn facts(&self, _scope: u64) -> Vec<symbio_plugin_api::port::PortFact> {
+        self.0.clone()
+    }
+}
+
+/// 工具轮的现场：空载荷 + 读面里的 `tool.requested`（一次一轮一条）。
+fn requested_call(
+    ctx: Arc<dyn PluginInvokeRequest>,
+    recorder: Arc<RecordingWriter>,
+) -> (PortExecContext, PortInput) {
+    let calls = serde_json::json!([
+        { "id": "c1", "name": "echo", "arguments": { "content": "甲" } },
+        { "id": "c2", "name": "echo", "arguments": { "content": "乙" } },
+    ]);
+    (
+        PortExecContext {
+            deadline_ms: None,
+            abort: ExecAbortSignal::new(),
+            idempotency_key: "tool-1".to_string(),
+            sink: ExecEventSink::silent(),
+            emit: symbio_plugin_api::port::PortFactEmit::new(recorder),
+            ctx: Some(ctx),
+            subject: 0,
+            group: String::new(),
+            origin: None,
+            permitted: true,
+            deny_reason: String::new(),
+            scratch_dir: None,
+            reader: Some(Arc::new(StaticReader(vec![
+                symbio_plugin_api::port::PortFact {
+                    id: "tool.requested:model-1".into(),
+                    port: "model".into(),
+                    kind: "tool.requested".into(),
+                    payload: serde_json::json!({ "turn_id": "u-1", "calls": calls }),
+                },
+            ]))),
+        },
+        PortInput {
+            port: TOOL,
+            payload: serde_json::json!({}),
+        },
+    )
+}
+
+/// 空载荷不是协议失败：走工具轮薄路径，逐调用复用 `run`，落产物与 `tool.calls.done`。
+#[tokio::test]
+async fn empty_payload_runs_the_requested_calls_from_the_reader() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = requested_call(ctx, recorder.clone());
+
+    let out = ToolPort.execute(exec, input).await;
+    assert!(out.error.is_none(), "空载荷是工具轮，不是协议失败：{out:?}");
+    assert_eq!(out.facts.len(), 2, "两个调用各一格结果");
+
+    let drafts = recorder.drafts.lock().unwrap().clone();
+    let artifacts: Vec<_> = drafts
+        .iter()
+        .filter(|draft| draft.kind == EVENT_ARTIFACT_ADDED)
+        .collect();
+    assert_eq!(artifacts.len(), 2, "每次调用落一条产物（实际: {drafts:?}）");
+    assert_eq!(artifacts[0].key, "artifact:c1");
+    assert_eq!(artifacts[1].key, "artifact:c2");
+    assert_eq!(artifacts[0].payload["tool_call_id"], "c1");
+    assert_eq!(artifacts[0].payload["text"], "done");
+    assert_eq!(artifacts[0].payload["success"], true);
+
+    let done = drafts
+        .iter()
+        .find(|draft| draft.kind == "tool.calls.done")
+        .expect("最后必须落 tool.calls.done");
+    assert_eq!(done.key, "tool.calls.done:tool.requested:model-1");
+    assert_eq!(done.payload["requested"], "tool.requested:model-1");
+    assert_eq!(done.payload["calls"], 2);
+}
+
 // ==================== 授权判定：执行体先判，再执行（D-306 裁决一） ====================
 //
 // 载荷带 `threshold`（开账行写的判定输入）时，执行体先落一条授权事实，再决定是否

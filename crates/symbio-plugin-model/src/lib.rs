@@ -37,3 +37,4 @@ mod stream;
 mod tool_accumulator;
 
 mod types;
+mod vocab;

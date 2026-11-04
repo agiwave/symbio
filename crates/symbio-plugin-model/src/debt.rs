@@ -3,7 +3,7 @@
 //! 两行是**两个输入身份**：
 //! - `model-reply`：用户输入事实的 id = 这一轮的身份（`when` 有输入、`unless_id` 该轮尚无终答）；
 //! - `model-after-tools`：最近一条工具产物事实的 id = 工具轮之后那一轮的身份
-//!   （`when_no_open` 工具端口无未还债）。
+//!   （`when` 有工具请求、`when_no_open` 工具端口无未还债）。
 //!
 //! `unless_id` 认**种类 + 身份**：终答是独立事实种类（`chat.assistant.final`），
 //! 环的 `request` / `sent` / `retry` 因种类不同不误命中——可重试失败后的重试轮
@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use serde_json::json;
 use symbio_plugin_api::debt::{DebtFacts, DebtSpec, DebtSource, DriveRequest};
-use symbio_plugin_api::events::{EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use symbio_plugin_api::events::{
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
+};
 
 use crate::port::MODEL_PORT;
 
@@ -49,6 +51,8 @@ impl DebtSource for ModelDebts {
             .unless_id(FINAL_FACT_PREFIX, format!("{FINAL_FACT_PREFIX}:{user_id}")),
         ];
         // 工具轮结束后的续接：身份来自最近一条工具产物，没有产物就不欠。
+        // `when` 认 `tool.requested`：没有这一轮的工具请求，`when_no_open` 会在
+        // 「根本没有工具债」时恒成立，每条响应都想再派一次。
         if let Some(tool_id) = facts.latest_fact_id(EVENT_ARTIFACT_ADDED) {
             rows.push(
                 DebtSpec::new(
@@ -57,6 +61,7 @@ impl DebtSource for ModelDebts {
                     format!("model:after:{tool_id}"),
                     payload,
                 )
+                .when(EVENT_TOOL_REQUESTED)
                 .when_no_open(TOOL_PORT),
             );
         }

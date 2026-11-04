@@ -4,11 +4,17 @@
 //! （`Frozen::ports`）。加一个端口只改提供者的 `ports()`，不改环。
 
 use symbio_plugin_api::ring::PortDecl;
-use symbio_plugin_api::{PluginDeclarations, EVENT_SENT};
+use symbio_plugin_api::{Entity, EventDecl, PluginDeclarations, Verb, EVENT_SENT};
 
 use super::port::TOOL;
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-tool";
+
+/// 本插件写的**单消费方**世界事实（不进共享表：单消费方的名字随 owner 走）。
+pub(crate) const EVENTS: &[EventDecl] = &[EventDecl::host(
+    "tool.calls.done",
+    (Entity::Scope, Verb::Asserted),
+)];
 
 /// 本插件服务的端口：**一次工具调用**。
 ///
@@ -27,7 +33,7 @@ symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
-        events: &[],
+        events: EVENTS,
         facts: &[],
         views: &[],
         ports: PORTS,

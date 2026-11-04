@@ -20,6 +20,8 @@ struct FakeModel {
 #[derive(Clone)]
 enum FakeOutcome {
     Success,
+    /// 一轮带两个工具调用的往返（`tool.requested` 的写方就是这个出口）。
+    WithToolCalls,
     Aborted,
     RateLimited,
 }
@@ -71,6 +73,29 @@ impl ModelProvider for FakeModel {
             }
             FakeOutcome::Aborted => Err(PluginError::Aborted),
             FakeOutcome::RateLimited => Err(PluginError::RateLimited("slow down".to_string())),
+            FakeOutcome::WithToolCalls => {
+                let mut output = RoundOutput::default();
+                output.finish = ModelFinishReason::ToolCalls;
+                output.tool_calls = vec![
+                    symbio_plugin_api::TurnToolCallInfo {
+                        id: Some("call-1".into()),
+                        wire_id: Some("wire-1".into()),
+                        name: Some("echo".into()),
+                        arguments: json!({"text": "甲"}),
+                        parse_error: None,
+                        overflow_notice: None,
+                    },
+                    symbio_plugin_api::TurnToolCallInfo {
+                        id: Some("call-2".into()),
+                        wire_id: Some("wire-2".into()),
+                        name: Some("echo".into()),
+                        arguments: json!({"text": "乙"}),
+                        parse_error: None,
+                        overflow_notice: None,
+                    },
+                ];
+                Ok(output)
+            }
         }
     }
 }
@@ -160,6 +185,75 @@ async fn unreadable_payload_is_a_non_retryable_failure() {
     assert_eq!(
         outcome.error.as_ref().map(|(class, _)| *class),
         Some(PortErrorClass::NonRetryable)
+    );
+}
+
+/// 记录执行体经写口交出的草稿（只认种类 / 键 / 载荷）。
+#[derive(Default)]
+struct RecordingWriter {
+    drafts: Mutex<Vec<symbio_plugin_api::FactDraft>>,
+}
+
+#[async_trait::async_trait]
+impl symbio_plugin_api::port::PortFactWriter for RecordingWriter {
+    async fn emit(&self, facts: Vec<symbio_plugin_api::FactDraft>) {
+        self.drafts.lock().unwrap().extend(facts);
+    }
+}
+
+fn recording_context() -> (symbio_plugin_api::port::PortExecContext, Arc<RecordingWriter>) {
+    let recorder = Arc::new(RecordingWriter::default());
+    let mut ctx = exec_context();
+    ctx.emit = symbio_plugin_api::port::PortFactEmit::new(recorder.clone());
+    (ctx, recorder)
+}
+
+/// 一次一轮一条：两个工具调用的同一轮只写一条 `tool.requested`，载荷是本轮清单。
+#[tokio::test]
+async fn a_tool_round_writes_one_tool_requested_for_the_whole_turn() {
+    let (ctx, recorder) = recording_context();
+    let outcome = executor(FakeOutcome::WithToolCalls)
+        .execute(
+            ctx,
+            input(json!({"root_id": "u-1", "principal": "user", "scope": 7})),
+        )
+        .await;
+    assert!(outcome.success());
+
+    let drafts = recorder.drafts.lock().unwrap().clone();
+    let requested: Vec<_> = drafts
+        .iter()
+        .filter(|draft| draft.kind == "tool.requested")
+        .collect();
+    assert_eq!(
+        requested.len(),
+        1,
+        "一次一轮一条，不是一次调用一条（实际草稿: {drafts:?}）"
+    );
+    assert_eq!(requested[0].key, "tool.requested:model-1-1", "键随本轮派发唯一");
+    assert_eq!(requested[0].payload["turn_id"], "u-1");
+    let calls = requested[0].payload["calls"]
+        .as_array()
+        .expect("载荷是清单");
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["id"], "wire-1");
+    assert_eq!(calls[0]["name"], "echo");
+    assert_eq!(calls[0]["arguments"]["text"], "甲");
+    assert_eq!(calls[1]["id"], "wire-2");
+}
+
+/// 收束轮（无工具调用）不写 `tool.requested`：缺这条事实就不欠工具轮。
+#[tokio::test]
+async fn a_closing_round_writes_no_tool_requested() {
+    let (ctx, recorder) = recording_context();
+    let outcome = executor(FakeOutcome::Success)
+        .execute(ctx, input(json!({"root_id": "u-1"})))
+        .await;
+    assert!(outcome.success());
+    let drafts = recorder.drafts.lock().unwrap().clone();
+    assert!(
+        drafts.iter().all(|draft| draft.kind != "tool.requested"),
+        "收束轮不应写工具请求（实际草稿: {drafts:?}）"
     );
 }
 
