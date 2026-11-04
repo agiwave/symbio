@@ -14,6 +14,8 @@ mod context;
 // 不改内核（`symbio_kernel::decl` 只留协议五格与装载机制）。
 mod control_decl;
 mod derived_facts;
+// 编排入口：生产入口、一幕的开启 / 收束与幕间接续。
+mod entry;
 // 义务环的行表：控制面经 `owes` 问表，判据在数据里。
 mod loop_rows;
 mod memory_events;
@@ -27,10 +29,11 @@ mod projections;
 mod provider;
 // 记忆检索（`recall` 投影与排序内核）自 L2b 起住 `crates/symbio-plugin-memory` 的
 // `recall` 子模块（DE-026 D-264）：控制面只留可见域收放（`memory_events`）与读口。
-// 轮中汇报那一行的落点与能力口（DE-015 的 D-163）。
+// 报告执行体那一行的落点与能力口（DE-015 的 D-163）。
 mod report_exec;
+// 环：读债表 → 跑一笔 → 读账本 → 守卫（五类判断的白名单，见模块头）。
+mod ring;
 mod session_port;
-mod stage_driver;
 mod stage_events;
 mod tool_dispatch;
 mod tool_exec;

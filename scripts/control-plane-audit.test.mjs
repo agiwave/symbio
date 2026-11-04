@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./control-plane-audit.mjs', import.meta.url))
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
 const LOOP = 'crates/symbio-plugin-loop/src'
-const DRIVE = `${LOOP}/stage_driver.rs`
+const DRIVE = `${LOOP}/ring.rs`
 const ROWS = `${LOOP}/loop_rows.rs`
 const TURN_EXEC = `${LOOP}/turn_exec.rs`
 const SETTLE = `${LOOP}/turn_runner/settle.rs`

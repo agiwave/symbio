@@ -1000,14 +1000,16 @@ const LOOP_ALLOWED_CRATE_ROOTS = new Set([
   // 卸载 loop 时编译面不留任何外部内部类型。反过来说，若这里出现 `crate::<兄弟插件>`
   // 形态的根，E-009 与本条都会红。
   'projections',
-  // 本插件自己的驱动 / 执行体模块根（P2 把单一 `turn_exec.rs` 拆成 `stage_driver` /
+  // 本插件自己的驱动 / 执行体模块根（P2 把单一 `turn_exec.rs` 拆成 `entry` /
   // `turn_exec` / `turn_runner` / `tool_exec` 等，并把端口调用收进 `session_port` /
   // `port`）。它们与 `control_decl` / `projections` 同档：`crate::` 指的是**本 crate 内部**，
   // 兄弟插件是独立 crate（D-191），不可能住在这里。E-013 判的是「跨墙通货」，
   // 不是「同一 crate 内的模块引用」——白名单此前只列了搬家的旧三格，是射程漏项。
   'session_port',
   'chat_loop',
-  'stage_driver',
+  // 编排入口与薄环：P4 把 `stage_driver` 拆成「编排（幕的开关/接续）」与「环（选债/守卫）」。
+  'entry',
+  'ring',
   'stage_events',
   'derived_facts',
   'loop_rows',

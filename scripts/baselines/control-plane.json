@@ -1,14 +1,14 @@
 {
   "mechanism": {
-    "file": "crates/symbio-plugin-loop/src/stage_driver.rs",
+    "file": "crates/symbio-plugin-loop/src/ring.rs",
     "parts": [
       "drive loop body",
       "fn next",
       "fn waiting"
     ],
-    "hash": "sha256:a331695abc011dca56c965b142fb990d02a277ebb34fa6a87432ab736aee9c77",
-    "adr": "D-234 / D-238 / D-241 / D-260 / D-272 / D-293 / D-313",
-    "reason": "基线落在 D-222 第 2 步收敛之后的控制面形状上：驱动循环体 / 选债包装 fn next / 在途判据 fn waiting 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改，而是改动必须当批说清它属于哪一类——横向扩展的代价（那就改插件）还是机制演进（那就同批更新基线并改这条理由）。D-260：fn next 多带一格 answers（这一行会不会零往返作答），运行期写入封闭据此只对作答行豁免宿主代落的 turn.stage。D-272：core 根停止转发 kernel / sdk 符号，本文件的 import 行改写为符号真实归属的 crate 路径（`use <删掉的那层>::X` -> `use symbio_kernel::…` / `use symbio_sdk::…`）；驱动循环体、fn next、fn waiting 的逻辑一字未动，属「与端口无关的机制面字节变化」，故同批更新基线。D-293：效果面由宿主唯一写口落格，但写的那一笔仍是该行动作——fn next 的运行期写入名单改按行合并效果面折成的事实，否则合法效果会被判成越界；驱动循环体与 fn waiting 未动，属机制演进，同批更新基线。D-313：P2-6a 把控制面入口并入 `stage_driver.rs`（原 `turn_exec/drive.rs`），驱动循环体随迁移改写；机制面文件改名与入口合并属机制演进，故同批更新基线（`fn next` / `fn waiting` 仍在 `loop_rows.rs`，逻辑未动）。本次（1ec43444 补行为守卫）把幕界中止的内联判据 `retiring.is_some() && aborted` 提取为具名 `fn aborts_at_a_stage_boundary`，驱动循环体只把该表达式换成一次同名调用、语义逐字不变；它是 D-052 决策 1 的唯一可测形状（用例直接钉这三格），属与端口无关的机制面字节变化，故同批更新基线。"
+    "hash": "sha256:90712423730560d522b3e5f76cd4587dbbc436b74bbeb94f18ac837fae21703f",
+    "adr": "D-234 / D-238 / D-241 / D-260 / D-272 / D-293 / D-313 / D-320",
+    "reason": "基线落在 D-222 第 2 步收敛之后的控制面形状上：驱动循环体 / 选债包装 fn next / 在途判据 fn waiting 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改，而是改动必须当批说清它属于哪一类——横向扩展的代价（那就改插件）还是机制演进（那就同批更新基线并改这条理由）。D-260：fn next 多带一格 answers（这一行会不会零往返作答），运行期写入封闭据此只对作答行豁免宿主代落的 turn.stage。D-272：core 根停止转发 kernel / sdk 符号，本文件的 import 行改写为符号真实归属的 crate 路径（`use <删掉的那层>::X` -> `use symbio_kernel::…` / `use symbio_sdk::…`）；驱动循环体、fn next、fn waiting 的逻辑一字未动，属「与端口无关的机制面字节变化」，故同批更新基线。D-293：效果面由宿主唯一写口落格，但写的那一笔仍是该行动作——fn next 的运行期写入名单改按行合并效果面折成的事实，否则合法效果会被判成越界；驱动循环体与 fn waiting 未动，属机制演进，同批更新基线。D-313：P2-6a 把控制面入口并入 `stage_driver.rs`（原 `turn_exec/drive.rs`），驱动循环体随迁移改写；机制面文件改名与入口合并属机制演进，故同批更新基线（`fn next` / `fn waiting` 仍在 `loop_rows.rs`，逻辑未动）。本次（1ec43444 补行为守卫）把幕界中止的内联判据 `retiring.is_some() && aborted` 提取为具名 `fn aborts_at_a_stage_boundary`，驱动循环体只把该表达式换成一次同名调用、语义逐字不变；它是 D-052 决策 1 的唯一可测形状（用例直接钉这三格），属与端口无关的机制面字节变化，故同批更新基线。D-320：把驱动拆成「编排入口 `entry.rs`（幕的开启 / 收束 / 接续）+ 薄环 `ring.rs`（只做选债 / 派发 / 落事实 / 预算与租约守卫 / 停机判据）」，机制面文件由 `stage_driver.rs` 移到 `ring.rs`，循环体只保留环的五类判断；这是与端口无关的机制收窄（环内不再有按阶段号的分支），故同批更新基线。"
   },
   "extension": {
     "productionFiles": 47

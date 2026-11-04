@@ -18,7 +18,7 @@
  *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
  *   - S-011:        补充注入点的位置（两处行序断言：`turn_runner/stream.rs` 的结果/注入次序、
- *                   `stage_driver.rs` 的抽干口/运行器开轮次序；位置错了不会有任何测试变红）
+ *                   `entry.rs` 的抽干口/运行器开轮次序；位置错了不会有任何测试变红）
  *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 批次号）
  *   - S-013:        `WalkBuilder` 构造点必须钉遍历序（默认序是文件系统返回序 ⇒
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
@@ -454,7 +454,7 @@ console.log()
 //      （三种错法里唯一会响的那种），而且时间序颠倒（工具结果先发生，用户随后才插话）。
 //      落点按搬家后的写法：`land_one` 逐笔 `exchange.push(message)`，最后一笔关账后
 //      `exchange.extend(injected)`。
-//   ② `stage_driver.rs`：抽干口（`inject: injector(…)`）必须随 `TurnInput` 在运行器
+//   ② `entry.rs`：抽干口（`inject: injector(…)`）必须随 `TurnInput` 在运行器
 //      开轮点（`begin_turn`）**之前**装上——运行器才会在批次边界调它。
 //      「先抽干、后判定」本身已经不在这一处行序里：汇报判定成了 `policy.report` 行
 //      （`prio` 53），只在**已关闭的批次边界**到期（`report_due` 的 `at_boundary`）；
@@ -477,7 +477,7 @@ const WAIVER_S011_RE = /\/\/\s*grep-audit-allow S-011:[^\n]*[A-Za-z0-9\u4e00-\u9
 
 // 锚点文件只认 `src/<子路径>` 这一段后缀，不写完整路径：D-191 把插件平铺成
 // `crates/symbio-plugin-<id>` 的同时**也改变了归属**（这两个落点从 session 搬到 loop，
-// 并从单文件拆成目录：`turn_runner/stream.rs`、`stage_driver.rs`）。写死完整路径的
+// 并从单文件拆成目录：`turn_runner/stream.rs`、`entry.rs`）。写死完整路径的
 // 后果不是报错而是**静默跳过**——`endsWith` 匹配不上 ⇒ 真仓里 S-011 长期以「跳过」的
 // 绿灯存在。锚点形态也随之下沉一层：`run.exchange\n  .extend(…)` 的链式写法让
 // `exchange\.extend\(` 这种紧凑正则匹配不上，故改为只认 `.extend(<目标>` 本身。
@@ -495,7 +495,7 @@ const S011_PAIRS = [
     why: '补充必须排在工具结果**之后**（插进 `assistant(tool_calls)` 与它的 `tool` 结果之间是协议级 400，且时间序颠倒）',
   },
   {
-    file: 'stage_driver.rs',
+    file: 'entry.rs',
     before: {
       re: /inject:\s*injector\(/,
       name: '`TurnInput::inject` 抽干口挂载点',

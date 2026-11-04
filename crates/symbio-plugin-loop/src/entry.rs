@@ -1,37 +1,39 @@
-//! 阶段驱动器（`stage_driver`）：生产入口、外层环与一次债驱动的全部机制（P2-6a）。
+//! 编排入口（`entry`）：生产入口、幕的开启 / 收束与幕间接续。
 //!
 //! 本模块做三件事：
 //!
 //! 1. [`run_turn`]：装配会话端口与编排器，交给 [`chat_loop::run_chat_loop`] 做前步骤
-//!    （请求解析、状态准备）与收尾（落库映射）；它不再决定「下一步是什么」。
-//! 2. [`drive`]：按冻结行表选一笔债 → 交给对应行/端口受理 → 读账本判本幕收束
-//!    （停机格 [`crate::turn_exec::ends_the_drive`] 或下一幕 [`crate::loop_rows::next_stage_round`]）。
-//! 3. 幕首、收幕与各行实现（旧的 `turn_exec` 阶段模块）：本环只做**选择**与**收束判定**，
-//!    不解释任何行名 / 端口名 / 业务语义（`D-118` 决策 2）。
+//!    （请求解析、状态准备）与收尾（落库映射）。
+//! 2. [`drive`]：一幕一幕地开（[`open_stage`]）→ 交给薄环 [`crate::ring::drive_frame`]
+//!    跑到该幕收束 → 收幕（[`close_stage`]）→ 读事实判幕间接续
+//!    （下一幕 [`crate::loop_rows::next_stage_round`]）。**幕的推进是编排**，
+//!    因此住在这一层，不在环里。
+//! 3. 幕首、收幕与各行实现（旧的 `turn_exec` 阶段模块）：本层只做**开 / 收 / 接续**，
+//!    不按阶段号决定「下一步跑哪个动作」——那是 [`crate::ring`] 的选债。
 //!
 //! ## 幕的被动机制
 //!
 //! 轮首四行、接缝、汇报与轮内各行都是[一张绑定表](crate::loop_rows::ACTORS)上的行；
-//! 幕与幕在**同一次调用**里接续——`continue-turn` 那一行由本环选中，它落下的 `round`
-//! 格既是上一笔的出口、也是下一幕的锚（`D-222` 裁决 2）。
+//! 幕与幕在**同一次调用**里接续——`continue-turn` 那一行由本层在收幕之后单独驱动一次，
+//! 它落下的 `round` 格既是上一笔的出口、也是下一幕的锚（`D-222` 裁决 2）。
 //!
-//! ### 三段，一个循环体
+//! ### 三段
 //!
 //! | 段 | 做什么 | 在哪里 |
 //! |---|---|---|
-//! | 幕首 | 上下文 → 开一幕（用户格 / 恢复格 / 轮次格）→ 纯读 → 定根 → 装配 → 草稿 | [`open_stage`]，环顶 |
-//! | 幕内 | 选最小可还债 → 跑**一个**动作 → 读账本 → 五道守卫 | 循环体（标号 `'step`） |
-//! | 收幕 | 归类 → 派生事实 → 镜像并入 → 定格 → 落库 → 封根 | [`close_stage`]，收束之后 |
+//! | 幕首 | 上下文 → 开一幕（用户格 / 恢复格 / 轮次格）→ 纯读 → 定根 → 装配 → 草稿 | [`open_stage`] |
+//! | 幕内 | 选最小可还债 → 跑**一个**动作 → 读账本 → 五道守卫 | [`crate::ring::drive_frame`] |
+//! | 收幕 | 归类 → 派生事实 → 镜像并入 → 定格 → 落库 → 封根 | [`close_stage`] |
 //!
 //! ### 五道守卫，各一份
 //!
 //! | 守卫 | 判据 | 位置 |
 //! |---|---|---|
 //! | 中止 | 整次驱动的第一圈、选债之前（`D-052` 决策 1） | 循环体开头 |
-//! | 判成答话 | 每圈选债之前（收束格由编排层落） | 同上 |
-//! | 步数上界 | 选债之后、动作之前；有一笔在飞时先收回（`D-222` 订正 2） | 同上 |
-//! | 写封闭 | 动作之后、账本尾段（`D-123` 决策 2） | 环尾 |
-//! | 空账本 | 同上；「在等」不判死（`D-222` 订正 2） | 环尾 |
+//! | 判成答话 | 每圈选债之前（收束格由编排层落） | [`crate::ring`] |
+//! | 步数上界 | 选债之后、动作之前；有一笔在飞时先收回（`D-222` 订正 2） | [`crate::ring`] |
+//! | 写封闭 | 动作之后、账本尾段（`D-123` 决策 2） | [`crate::ring`] |
+//! | 空账本 | 同上；「在等」不判死（`D-222` 订正 2） | [`crate::ring`] |
 //!
 //! 第五道「不重入」在类型上成立：草稿是 `&mut TurnSession`，一个循环体、按步借、
 //! 按步还——没有任何动作能在窗口里再起第二个环。
@@ -43,9 +45,9 @@
 //! （[`TurnSession::abort_before_first_request`]），此后每一圈的开头只判
 //! [`DriveEnd::Boundary`]：上一幕已收束、下一幕不开。
 //!
-//! 生产入口 [`drive`] 只收 [`Control`]：编排层交下本轮状态，本函数一幕一幕地开、
+//! 生产入口 [`drive`] 只收 [`Control`]：编排层交下本轮状态，本层一幕一幕地开、
 //! 跑到全部幕收工。测试的帷幕入口 [`drive_prepared`] 交一截**已经开好的幕**，共用
-//! **同一个**循环体与同一组守卫，差的只是「幕从哪来」与「收束后交给谁」。
+//! **同一个**环与同一组守卫，差的只是「幕从哪来」与「收束后交给谁」。
 
 use std::sync::{Arc, Mutex};
 
@@ -73,9 +75,11 @@ use crate::report_exec::{ReportLanding, ReportPort};
 use crate::session_port::{self, SessionPort};
 use crate::tool_dispatch::{DerivedFacts, PortOutput, SessionDispatchPort, ToolDispatch};
 use crate::turn_exec::{
-    ActorError, Ctx, ExecTurn, FrameQueue, HeadParts, StepFuture, SupplementFn, UiBridge, UiFrame,
+    ActorError, ExecTurn, FrameQueue, StepFuture, SupplementFn, UiBridge, UiFrame,
     UI_FRAME_CAPACITY,
 };
+// 环只从本层借这三样中性件（类型与停机判据），不经由带世界词的模块路径。
+pub(crate) use crate::turn_exec::{ends_the_drive, Ctx, HeadParts};
 use crate::turn_runner::{
     artifact_verdict, begin_turn, DialogFacts, NodeFactsFn, RoundInjector, StreamNodeFacts,
     TurnInput, TurnOutcome, TurnSession, TurnSessionBegin,
@@ -109,14 +113,14 @@ pub(crate) async fn run_turn(
     .await
 }
 
-/// 一圈的结局。
-enum StepEnd {
-    /// 本圈落了账、还在跑。
-    Continue,
-    /// 本轮收束：结局已从草稿取走。
+/// 一幕跑到停下的两种结局（环 [`crate::ring::drive_frame`] 的返回值）。
+pub(crate) enum FrameEnd {
+    /// 本幕收束：结局已从草稿取走。
     Settled(TurnOutcome),
     /// 判决判成「就此答话」。
     Answered,
+    /// 只跑了约定的一笔债就停下（幕间接续用；正常驱动不会出现）。
+    Stepped,
 }
 
 /// 控制面交下来的那一片（编排层与本轮状态）。
@@ -180,6 +184,21 @@ pub(crate) struct StageHost {
 }
 
 impl StageRuntime {
+    /// 本幕的锚（中性取用口：环不按它分支，只把它交给选债口与停机判据）。
+    pub(crate) fn epoch(&self) -> u64 {
+        self.draft.turn()
+    }
+
+    /// 端口客户端的**中性取用口**：环只把它原样交给执行体，不解释内容、不按它分支。
+    pub(crate) fn client(&self) -> Arc<dyn LlmAdapter> {
+        self.llm.clone()
+    }
+
+    /// 可执行能力表的中性取用口（同上）。
+    pub(crate) fn capacities(&self) -> Arc<[CapabilityMeta]> {
+        self.tools.clone()
+    }
+
     /// 轮首那一片的**owned 半边**：桥 / 发射口 / 根 id / 主体 / 汇报面全从宿主面克隆。
     ///
     /// 写在幕上而不是每个调用点各拼一份：这两组句柄只该有一个来源（装配束），
@@ -225,14 +244,14 @@ pub(crate) enum CloseEnd {
 /// 生产构造永远把 `stage` / `head` / `request_ctx` 留空（幕由 [`open_stage`] 每幕
 /// 现开）；[`drive_prepared`] 只填后三项、`control` 留空。两路共用同一个循环体，
 /// 差的只是「幕从哪来」与「收束后交给谁」。
-struct DriveState<'a> {
-    control: Option<Control<'a>>,
+pub(crate) struct DriveState<'a> {
+    pub(crate) control: Option<Control<'a>>,
     /// 已开好的幕（测试帷幕入口；生产为 `None`）。
-    stage: Option<StageRuntime>,
+    pub(crate) stage: Option<StageRuntime>,
     /// 轮首那一片（测试帷幕入口；生产每圈现借）。
-    head: Option<HeadParts<'a>>,
+    pub(crate) head: Option<HeadParts<'a>>,
     /// 裸幕夹具的请求句柄（`head = None` 时创建 / 授权行要它判风险档）。
-    request_ctx: Option<Arc<dyn PluginInvokeRequest>>,
+    pub(crate) request_ctx: Option<Arc<dyn PluginInvokeRequest>>,
 }
 
 impl DriveState<'_> {
@@ -247,7 +266,7 @@ impl DriveState<'_> {
     }
 
     /// 判决已判成「就此答话」（读 `policy.classify` 落下的决定格）。
-    fn answered(&self) -> bool {
+    pub(crate) fn answered(&self) -> bool {
         self.control.as_ref().is_some_and(|control| {
             crate::stage_events::answered(
                 &control.context.facts_snapshot(),
@@ -311,11 +330,11 @@ async fn run_loop<'a>(
 ) -> Result<DriveEnd, TurnExecExit> {
     let mut stage: Option<StageRuntime> = None;
     let mut first_stage = true;
-    let mut first_step = true;
+    let mut first_drive = true;
     // 已收束那一幕的幕锚：控制面把轮次推到下一幕之后，旧幕才让位。
     //
     // 让位不能排在收束当场：`continue-turn` 那一行还要用这一幕的草稿（`Ctx.session`
-    // 不是 `Option`），而它正是由本环在收束之后选中的。
+    // 不是 `Option`），而它正是由本层在收幕之后单独驱动一次。
     let mut retiring: Option<u64> = None;
 
     loop {
@@ -334,11 +353,8 @@ async fn run_loop<'a>(
         //
         // 判据是幕锚变了：`continue-turn` 落地之后 `turn.drive_seq` 指向新落的
         // `round` 格，与已收束那一幕的锚不同 ⇒ 旧幕（只剩一个空壳草稿）可以丢了。
-        if let Some(seq) = retiring {
-            if state.drive_seq() != Some(seq) {
-                stage = None;
-                retiring = None;
-            }
+        if retiring.is_some_and(|seq| state.drive_seq() != Some(seq)) {
+            stage = None;
         }
         // ── 幕首：没有幕就开一幕（`D-222` 订正 3：草稿建在幕首）───────────
         if stage.is_none() {
@@ -352,185 +368,37 @@ async fn run_loop<'a>(
             first_stage = false;
         }
 
-        // ── 幕内：一圈 ───────────────────────────────────────────────────
-        let step: StepEnd = 'step: {
-            let st = stage.as_mut().ok_or_else(no_stage)?;
-
-            // 守卫一：闸门与首请求之间的中止（`D-052` 决策 1）。只在**整次驱动**的
-            // 第一圈：此后每一笔请求的结局都由端口面记成事实，不再由这里判；幕间那
-            // 一种已由上面那道 `Boundary` 接住（同一轮不落第二格收束）。
-            if first_step {
-                first_step = false;
-                if let Some(outcome) = st
-                    .draft
-                    .abort_before_first_request(st.store.as_ref(), st.llm.as_ref())
-                    .await
-                    .map_err(append_exit)?
-                {
-                    break 'step StepEnd::Settled(outcome);
-                }
-            }
-            // 守卫二：判成「就此答话」的一轮不进驱动循环（`D-162` 裁决 3）。
-            if state.answered() {
-                break 'step StepEnd::Answered;
-            }
-
-            // 选债：读切片 → 最小可还债 → 按 `by` 查绑定表。不按行名 / 端口名 /
-            // 业务语义分支（`D-118` 决策 2）。
-            let facts = st.store.range(Seq::new(0));
-            let now = st.draft.now_ms();
-            let stage_no = st.draft.turn();
-            let next = match loop_rows::next(&facts, stage_no, now, actors) {
-                Some(next) => next,
-                // 没有可还的债：要么已经收束，要么表装载失败 / 只剩 blocked 行。
-                // 「只剩 blocked 行」有两种处境（`D-126`）：有一笔已派出未收清的往返
-                // 时这一轮不是「没事」，是「在等」——混成一个值会让「为什么停」在
-                // 事实面上不可判，而恢复路径恰恰要认这一种。
-                None => {
-                    let detail = if loop_rows::waiting(&facts, stage_no, now) {
-                        "waiting"
-                    } else {
-                        "no_progress"
-                    };
-                    break 'step StepEnd::Settled(exhausted(st, detail).await?);
-                }
-            };
-            symbio_plugin_api::plugin_debug!(
-                "session",
-                "[Loop] 派发 {}（执行体 {}；债 {}）",
-                next.row,
-                next.by,
-                next.key.trace()
-            );
-            // 守卫三：步数上界是**收工的判据**，不是「半路撂下」的许可（`D-222`
-            // 订正 2）。有一笔在飞时先把那一笔收回来，否则日志上留一条 `sent` 无
-            // 终局，重启后 `reap` 要判死一笔其实已经答了的往返。
-            //
-            // 已收束那一幕不再数步：本圈要跑的是 `continue-turn`（它不属于谁的
-            // 工作），而上界约束的是**一幕之内**的往返。
-            if retiring.is_none()
-                && st.draft.over_step_limit(&facts)
-                && !loop_rows::waiting(&facts, stage_no, now)
-            {
-                symbio_plugin_api::plugin_warn!(
-                    "actors",
-                    "[v2] 轮内步数超过上限（turn={}），收束为 exhausted（step_limit）",
-                    stage_no
-                );
-                break 'step StepEnd::Settled(exhausted(st, "step_limit").await?);
-            }
-
-            let head_before = st.store.head();
-            {
-                // 请求句柄：控制面在轮首片里，裸幕夹具由入口直给（`head = None`）。
-                let request_ctx = match &state.control {
-                    Some(control) => Some(control.ctx.clone()),
-                    None => state
-                        .request_ctx
-                        .clone()
-                        .or_else(|| state.head.as_ref().map(|h| h.request_ctx.clone())),
-                };
-                // 草稿与端口逐圈再借：动作结束即还（`D-222` 裁决 5 的「按步获取
-                // 按步释放」）。`head` 那一片同样每圈重借一次。
-                let mut control_parts;
-                let head = match state.control.as_mut() {
-                    Some(control) => {
-                        // 控制面的幕一定有宿主面（`open_stage` 建的）；没有就是幕与
-                        // 驱动面对不上，出声而不是让轮首行读到一片假的空。
-                        control_parts = Some(
-                            st.head_parts(
-                                control.orchestrator_arc.clone(),
-                                control.ctx.clone(),
-                                &mut *control.context,
-                                &mut *control.turn,
-                                control.req,
-                            )
-                            .ok_or_else(no_host)?,
-                        );
-                        control_parts.as_mut().map(HeadParts::as_ctx)
-                    }
-                    None => state.head.as_mut().map(HeadParts::as_ctx),
-                };
-                let mut ctx = Ctx {
-                    session: &mut st.draft,
-                    store: &st.store,
-                    llm: st.llm.clone(),
-                    tok: st.tok,
-                    sink: st.sink.clone(),
-                    tools: st.tools.clone(),
-                    dispatch: st.dispatch.clone(),
-                    // 债实例随环境进动作：动作只收 `&mut Ctx`，「这是哪一笔债」
-                    // 只能由派发器写在环境上（见 `Ctx::row`）。
-                    row: next.row,
-                    key: next.key.clone().0,
-                    head,
-                    request_ctx,
-                };
-                // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判
-                // （`D-123` 决策 5）。
-                (next.action)(&mut ctx).await.map_err(actor_exit)?;
-            }
-
-            // **账本**（`D-123` 决策 1）：这一步的**实际写入** = 日志尾段，不是执行
-            // 体自报的一份陈述。写不经过返回值（`DE-015` §2.3「单写者是 store」），
-            // 所以自报的 `Vec<Fact>` 漏一条就对不上一条。
-            let ledger = st.store.range(head_before);
-            // 守卫四：运行期写入封闭（`DE-015` §3.4 第 5 条，`D-123` 决策 2）。
-            // 领域格必须在这个执行体登记过的名单里，协议五格豁免（引擎写）。
-            // **全部行同一份判据**：没有任何一行在窗口里显式放弃这一条。越界不静默、
-            // 不 panic：落一条带理由的停机格，让它在事实面显形。
-            if let Some(offender) = ledger
-                .iter()
-                .map(|e| e.kind.as_str())
-                .find(|k| !next.writes_closed(k))
-            {
-                symbio_plugin_api::plugin_warn!(
-                    "actors",
-                    "[v2] 执行体 {} 写了未登记的事实 `{}`（行 {}，turn={}）——名单 ⊆ 声明的写入封闭在运行期破了",
-                    next.by,
-                    offender,
-                    next.row,
-                    stage_no
-                );
-                break 'step StepEnd::Settled(exhausted(st, "undeclared-write").await?);
-            }
-            // 收束判断读账本（`D-123` 决策 5）：产出是收束那一步寄存进草稿的。
-            if let Some(closing) = ledger
-                .iter()
-                .find(|e| crate::turn_exec::ends_the_drive(e, stage_no))
-            {
-                let Some(outcome) = st.draft.take_settled() else {
-                    // 账本说收了工、草稿里没有产出 = 有一条收束路径写了停机格却没寄存
-                    // 它。不猜一个产出（那等于把「没记账」读成「记了个空账」）。
-                    symbio_plugin_api::plugin_warn!(
-                        "actors",
-                        "[v2] 执行体 {} 落了停机格 `{}`（行 {}，turn={}）却没寄存本轮产出——收束路径漏记",
-                        next.by,
-                        closing.kind,
-                        next.row,
-                        stage_no
-                    );
-                    break 'step StepEnd::Settled(exhausted(st, "unrecorded-outcome").await?);
-                };
-                break 'step StepEnd::Settled(outcome);
-            }
-            // 守卫五：空账本（`D-118` 决策 7 + `D-123` 决策 1）。「没写」有两种
-            // （`D-222` 订正 2）：一次动作把在飞的 future poll 了一次、它还没好——
-            // 那不是没账可还，是环**合法地不前进**（等 I/O）。判据靠形状。
-            if ledger.is_empty() && !loop_rows::waiting(&facts, stage_no, now) {
-                break 'step StepEnd::Settled(exhausted(st, "no_progress").await?);
-            }
-            StepEnd::Continue
+        // ── 幕内：交给薄环 ───────────────────────────────────────────────
+        //
+        // 环只做五类判断（选债 / 派发 / 落事实与关账 / 预算与租约 / 停机判据），
+        // 不知道幕、阶段号或轮次。幕首、收幕、幕间接续全在本层。
+        let st = stage.as_mut().ok_or_else(no_stage)?;
+        // 守卫：闸门与首请求之间的中止（`D-052` 决策 1）。只在**整次驱动**的
+        // 第一圈：此后每一笔请求的结局都由端口面记成事实，不再由这里判；幕间那
+        // 一种已由上面那道 `Boundary` 接住（同一轮不落第二格收束）。
+        let before_first = if first_drive {
+            first_drive = false;
+            st.draft
+                .abort_before_first_request(st.store.as_ref(), st.llm.as_ref())
+                .await
+                .map_err(append_exit)?
+        } else {
+            None
+        };
+        let end = match before_first {
+            Some(outcome) => FrameEnd::Settled(outcome),
+            None => crate::ring::drive_frame(&mut state, st, actors).await?,
         };
 
-        match step {
-            StepEnd::Continue => continue,
-            StepEnd::Answered => {
+        match end {
+            FrameEnd::Answered => {
                 let st = stage.take().ok_or_else(no_stage)?;
                 abandon(st).await;
                 return Ok(DriveEnd::Answered);
             }
-            StepEnd::Settled(outcome) => {
+            // 正常驱动不会拿到它（只有 `run_one` 的「跑一笔就停」用）。
+            FrameEnd::Stepped => continue,
+            FrameEnd::Settled(outcome) => {
                 // 幕锚只有控制面有（夹具的幕不接续），让位判据因此也只对控制面成立。
                 let seq = state.drive_seq();
                 let mut st = stage.take().ok_or_else(no_stage)?;
@@ -555,7 +423,9 @@ async fn run_loop<'a>(
                         {
                             return Ok(DriveEnd::Completed);
                         }
-                        // 还有下一幕：草稿留着给 `continue-turn` 用，宿主面已交出去。
+                        // 还有下一幕：先让 `continue-turn` 在这一幕的草稿上落新锚，
+                        // 再把旧幕留着（让位由下一圈的 `drive_seq` 判）。
+                        crate::ring::run_one(&mut state, &mut st, actors).await?;
                         stage = Some(st);
                         retiring = Some(seq);
                     }
@@ -2304,5 +2174,5 @@ pub(crate) async fn execute_final_reply_turn(
 }
 
 #[cfg(test)]
-#[path = "stage_driver.test.rs"]
+#[path = "entry.test.rs"]
 mod tests;

@@ -300,11 +300,11 @@ test('S-010 waiver requires a reason (same line or the line above)', () => {
 
 // ── S-011：补充注入点的位置（两处行序断言）──────────────────────────────
 // 夹具与 S-010 共用（`s010Audit` 建的就是「cwd 下有 crates/ 的仓库树」），
-// 落点由文件相对路径决定——S-011 认 `turn_runner/stream.rs` 与 `stage_driver.rs`
+// 落点由文件相对路径决定——S-011 认 `turn_runner/stream.rs` 与 `entry.rs`
 // 两处（D-191 拆插件、P2 拆模块之后，注入点落在 loop 的这两个文件里）。
 const s011Audit = s010Audit
 const S011_RUNNER = 'crates/symbio-plugin-loop/src/turn_runner/stream.rs'
-const S011_EXEC = 'crates/symbio-plugin-loop/src/stage_driver.rs'
+const S011_EXEC = 'crates/symbio-plugin-loop/src/entry.rs'
 
 /** 位置正确的形态：2e 结果接进请求 → 2f 补充接进请求 */
 const S011_RUNNER_OK = `fn run() {
@@ -332,7 +332,7 @@ test('S-011 passes when both orderings hold', () => {
   assert.match(r.stdout, /S-011 通过：.*stream\.rs 2e 工具结果接进请求\(2\) 在 2f 轮内补充接进请求\(4\) 之前/)
   assert.match(
     r.stdout,
-    /stage_driver\.rs `TurnInput::inject` 抽干口挂载点\(2\) 在 运行器开轮点（`begin_turn`）\(4\) 之前/,
+    /entry\.rs `TurnInput::inject` 抽干口挂载点\(2\) 在 运行器开轮点（`begin_turn`）\(4\) 之前/,
   )
 })
 
@@ -449,13 +449,13 @@ test('S-011 is skipped (not failed) when either file is outside the scope', () =
   const none = audit('fn unrelated() {}\n')
   assert.equal(none.status, 0)
   assert.match(none.stdout, /S-011 跳过：scope 内没有 turn_runner\/stream\.rs/)
-  assert.match(none.stdout, /S-011 跳过：scope 内没有 stage_driver\.rs/)
+  assert.match(none.stdout, /S-011 跳过：scope 内没有 entry\.rs/)
 
   // 只布一个文件：另一个跳过，布下的那个照常判
   const one = s011Audit({ [S011_RUNNER]: S011_RUNNER_OK })
   assert.equal(one.status, 0)
   assert.match(one.stdout, /S-011 通过：.*stream\.rs/)
-  assert.match(one.stdout, /S-011 跳过：scope 内没有 stage_driver\.rs/)
+  assert.match(one.stdout, /S-011 跳过：scope 内没有 entry\.rs/)
 })
 
 // ── S-012: 代码注释里的实施排期指认 ────────────────────────────────────

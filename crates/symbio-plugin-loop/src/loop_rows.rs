@@ -477,7 +477,7 @@ const ACTOR_PORT: ActorDecl = ActorDecl {
 /// 它的正确答案是把写方搬到出口不同族的执行体上（D-166 就是这么收的）；真要出现
 /// 「必须放行且搬不走」的写出，那是一条新裁决，不是往这张表上加一列。
 ///
-/// 这张表是**派发器的入参**（[`super::stage_driver::drive`] 的 `actors`，D-123
+/// 这张表是**派发器的入参**（[`super::entry::drive`] 的 `actors`，D-123
 /// 决策 4）：生产传 [`ACTORS`]，测试在同一张表的形状上注册别的东西。判据 14 那条
 /// 「动作写了零格 ⇒ `exhausted{no_progress}`」的用例就靠这条接缝——没有它只能永远说
 /// 那条分支「按构造不可达」。
@@ -559,7 +559,7 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
 /// 里，它照旧由外层代码直问 [`owes`]（调度旁路，归零对象），而 [`owes`] 读的是**整张**
 /// 冻结表，两者互不影响。
 ///
-/// [`super::stage_driver::drive`] 因此拿的是整张 [`ACTORS`]：`phase` / `anchor` 是跨行序，一个循环
+/// [`super::entry::drive`] 因此拿的是整张 [`ACTORS`]：`phase` / `anchor` 是跨行序，一个循环
 /// 看得见全部行才是它的目的（`D-222` 裁决 5）。
 ///
 /// 过滤器本身不再承担「静默丢弃」：冻结表里每一条 `by` 都由 [`dispatch_gaps`] 在装载期
@@ -1689,7 +1689,7 @@ pub(crate) fn next_stage_round(events: &[Event], turn: u64, now: i64) -> Option<
 ///
 /// ## 它存在的理由：`await-*` 行不是装饰行
 ///
-/// [`super::stage_driver::drive`] 选不到可还债时，有两种**完全不同**的处境：真的没事
+/// [`super::entry::drive`] 选不到可还债时，有两种**完全不同**的处境：真的没事
 /// 可做，与有一笔往返还在路上。停机理由此前一律写 `no_progress`——于是「这一轮为什么停」在事实面
 /// 上不可区分，而「在等」恰恰是恢复路径最需要看见的那一种（进程在等应答时被打断，
 /// 重启后这笔账要靠 `port::reap` 判死，前提是它当时确实被记成「在等」）。
@@ -1758,7 +1758,7 @@ pub(crate) fn model_rounds(events: &[Event], turn: u64, drive_seq: u64) -> usize
 /// 引擎的**选债口**：本幕当前最小的一笔可还债，连带它的动作。
 ///
 /// 与 [`owes`] 的分工：`owes` 回答「某一行欠不欠」，本类型回答「下一步谁欠、
-/// 跑什么」。[`next`] 是 [`super::stage_driver::drive`] 的唯一选债依据（D-118 决策 1–2）——
+/// 跑什么」。[`next`] 是 [`super::entry::drive`] 的唯一选债依据（D-118 决策 1–2）——
 /// 派发器不按行名 / 端口名 / 业务语义分支，只调 `Next.action` 这**一个**动作。
 pub(crate) struct Next {
     /// 行名（日志与停机理由用）。

@@ -361,9 +361,7 @@ async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
         &mut turn,
         &turn_req,
     );
-    match crate::stage_driver::drive_prepared(stage, head, None, super::super::loop_rows::ACTORS)
-        .await?
-    {
+    match crate::entry::drive_prepared(stage, head, None, super::super::loop_rows::ACTORS).await? {
         // 环跑到收束格出现：归类（中止 / 授权拒 / 正常）与落格按本文件要验的
         // 那几条契约做——生产的镜像并入与封根不在夹具里（`stage.test.rs` 钉）。
         super::DriveEnd::Running(running) => match super::classify_turn(*running, None).await? {
@@ -1008,7 +1006,7 @@ async fn control_harness() -> ControlHarness {
 
 /// 走生产入口跑这一幕（开幕 / 选债 / 收幕都在环里）。
 async fn drive_control(h: &mut ControlHarness) -> Result<super::DriveEnd, super::TurnExecExit> {
-    crate::stage_driver::drive(
+    crate::entry::drive(
         super::Control {
             orchestrator: &h.orchestrator,
             orchestrator_arc: &h.orchestrator,
@@ -1028,7 +1026,7 @@ async fn drive_control(h: &mut ControlHarness) -> Result<super::DriveEnd, super:
 /// 同 [`control_harness`]，换 `port.model` 的提供者与本条用户消息。
 ///
 /// 只有两处不同（提供者行 + 消息），其余请求面逐字相同：入口仍是生产
-/// [`crate::stage_driver::drive`]，开幕 / 选债 / 收幕都在环里。
+/// [`crate::entry::drive`]，开幕 / 选债 / 收幕都在环里。
 async fn control_harness_with(
     provider: Arc<dyn ModelProvider>,
     tools: &[CapabilityMeta],

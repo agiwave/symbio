@@ -98,7 +98,13 @@ const PRINT_BASELINE = argv.includes('--print-baseline')
 const LOOP = 'crates/symbio-plugin-loop/src'
 const KERNEL = 'crates/symbio-kernel/src'
 const CORE = 'crates/symbio-sdk/src'
-const DRIVE_REL = `${LOOP}/stage_driver.rs`
+const DRIVE_REL = `${LOOP}/ring.rs`
+/**
+ * 编排入口（幕的开启 / 收束 / 接续）。`D-320` 把原先一体的驱动拆成两份：环只剩
+ * 债表上的薄循环，幕的生命周期归这一层。CP-003 的「循环体内」因此按**这一对**
+ * 文件判——五道守卫仍各只许一个调用点，不许出现第二条检查路径。
+ */
+const ENTRY_REL = `${LOOP}/entry.rs`
 const ROWS_REL = `${LOOP}/loop_rows.rs`
 const TURN_EXEC_REL = `${LOOP}/turn_exec.rs`
 const SETTLE_REL = `${LOOP}/turn_runner/settle.rs`
@@ -620,7 +626,7 @@ for (const name of GUARD_FNS) {
   }
 }
 
-/** 五道守卫的**调用点**标记：各一次，且都在驱动文件里 */
+/** 五道守卫的**调用点**标记：各一次，且都在驱动面（薄环 + 编排入口）里 */
 const GUARD_MARKERS = [
   ['aborted', 'aborted'],
   ['abort_before_first_request', 'abort_before_first_request'],
@@ -628,15 +634,23 @@ const GUARD_MARKERS = [
   ['writes_closed', 'writes_closed'],
   ['ledger.is_empty', null],
 ]
+/** 驱动面：薄环与编排入口（`D-320` 的二分）。两份文件里的调用点**合起来**各只许一次 */
+const DRIVE_FILES = [
+  { rel: DRIVE_REL, code: driveCode },
+  { rel: ENTRY_REL, code: prodCodeOf(ENTRY_REL) ?? '' },
+]
 for (const [label, name] of GUARD_MARKERS) {
-  const n = name
-    ? callSites(driveCode, name).length
-    : sitesOf(driveCode, new RegExp(`\\b${label.replace('.', '\\.')}\\s*\\(`, 'g')).length
-  if (n !== 1) {
+  const sites = DRIVE_FILES.flatMap(({ code }) =>
+    name
+      ? callSites(code, name)
+      : sitesOf(code, new RegExp(`\\b${label.replace('.', '\\.')}\\s*\\(`, 'g')),
+  )
+  if (sites.length !== 1) {
     report(
       'CP-003',
       DRIVE_REL,
-      `守卫「${label}」在驱动文件里有 ${n} 个调用点（应恰好 1 个）—— ` +
+      `守卫「${label}」在驱动面（${DRIVE_FILES.map((f) => f.rel).join(' + ')}）里` +
+        `有 ${sites.length} 个调用点（应恰好 1 个）—— ` +
         '少一个 = 有一条推进路径不再检查它；多一个 = 同一道守卫两处写法必然分叉（SP-033 TC-1c）',
     )
   }
