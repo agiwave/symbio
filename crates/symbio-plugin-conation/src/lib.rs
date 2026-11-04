@@ -25,7 +25,7 @@
 //! `kernel` / `sdk` / `deploy` 一个都不列，也不认识任何兄弟插件。
 
 mod autonomy;
-pub mod decl;
-pub mod plugin;
+mod decl;
+mod plugin;
 
-pub use plugin::{ConationPlugin, PLUGIN_TITLE};
+pub(crate) use plugin::{ConationPlugin, PLUGIN_TITLE};

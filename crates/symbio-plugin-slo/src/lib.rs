@@ -22,7 +22,7 @@
 //! `[dependencies]` 只有 `symbio-plugin-api` 与 `serde_json`。`kernel` / `sdk` / `deploy`
 //! 一个都不列，也不认识任何兄弟插件（`E-009`）。
 
-pub mod decl;
-pub mod plugin;
+mod decl;
+mod plugin;
 
-pub use plugin::{SloPlugin, PLUGIN_TITLE};
+pub(crate) use plugin::{SloPlugin, PLUGIN_TITLE};

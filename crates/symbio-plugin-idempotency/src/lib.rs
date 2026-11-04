@@ -17,9 +17,9 @@
 //! `[dependencies]` 只有 `symbio-plugin-api`（加 `serde_json` / `tokio` / `async-trait`
 //! 这些通用库），HS-001 判的 `kernel` / `sdk` / `deploy` 一个都不列。
 
-pub mod behavior;
-pub mod decl;
-pub mod plugin;
-pub mod tool;
+mod behavior;
+mod decl;
+mod plugin;
+mod tool;
 
-pub use plugin::{IdempotencyPlugin, PLUGIN_TITLE};
+pub(crate) use plugin::{IdempotencyPlugin, PLUGIN_TITLE};

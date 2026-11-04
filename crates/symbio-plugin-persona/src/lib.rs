@@ -19,8 +19,8 @@
 //! `[dependencies]` 只有 `symbio-plugin-api` 一行（HS-001）：`kernel` / `sdk` /
 //! `deploy` 一个都不列，插件能看见什么由那道门面逐条决定。
 
-pub mod config;
-pub mod plugin;
+mod config;
+mod plugin;
 
-pub use config::PersonaConfig;
-pub use plugin::{PersonaPlugin, PLUGIN_TITLE, SEGMENT_NAME};
+pub(crate) use config::PersonaConfig;
+pub(crate) use plugin::{PersonaPlugin, PLUGIN_TITLE, SEGMENT_NAME};

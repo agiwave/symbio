@@ -14,4 +14,4 @@
 //! - [`host`]：symbio 适配层——manifest 读取与门槛校验、Agent 目录的存储与整包
 //!   分发、子 Agent 插件树的托管与注册代理、VDFS 挂载点
 
-pub mod host;
+mod host;

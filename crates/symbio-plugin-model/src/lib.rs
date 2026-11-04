@@ -27,7 +27,7 @@
 mod bound_provider;
 mod detail;
 mod http;
-pub mod message_builder;
+mod message_builder;
 mod model_providers;
 mod plugin;
 mod port;

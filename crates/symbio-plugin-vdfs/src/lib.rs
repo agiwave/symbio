@@ -36,7 +36,7 @@
 
 mod behavior;
 mod fs;
-pub mod host;
+mod host;
 mod physical;
 mod plugin;
 mod protocol;

@@ -15,7 +15,7 @@
 //! `[dependencies]` 只有 `symbio-plugin-api`（加 `serde_json` / `async-trait` /
 //! `tracing` 这些通用库），HS-001 判的 `kernel` / `sdk` / `deploy` 一个都不列。
 
-pub mod decl;
-pub mod plugin;
+mod decl;
+mod plugin;
 
-pub use plugin::{ForecastPlugin, PLUGIN_TITLE};
+pub(crate) use plugin::{ForecastPlugin, PLUGIN_TITLE};

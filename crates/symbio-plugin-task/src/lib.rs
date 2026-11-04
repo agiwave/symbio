@@ -32,4 +32,4 @@ mod plugin;
 mod readyset;
 mod task;
 
-pub use plugin::TaskPlugin;
+pub(crate) use plugin::TaskPlugin;
