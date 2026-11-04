@@ -1,14 +1,98 @@
 use super::*;
-use crate::ring::facts::{DebtKey, Fact};
-use crate::ring::ledger::Ledger;
-use crate::ring::table::Table;
-use serde_json::json;
+use crate::ring::facts::{DebtKey, Fact, FactKind, FactView};
+use crate::ring::table::{DebtRow, DebtSource, Table};
+use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortFactWriter, PortInput,
     PortOutcome,
 };
+
+/// 测试宿主：事实在内存里，债表与执行体由测试给定。
+struct TestCtx {
+    facts: Mutex<Vec<Fact>>,
+    rows: Table,
+    executors: HashMap<&'static str, Arc<dyn PortExecutor>>,
+    now: u64,
+    outlet: PortFactEmit,
+}
+
+impl TestCtx {
+    fn new(rows: Vec<DebtRow>) -> Self {
+        Self {
+            facts: Mutex::new(Vec::new()),
+            rows: Table::new(rows),
+            executors: HashMap::new(),
+            now: 0,
+            outlet: PortFactEmit::silent(),
+        }
+    }
+
+    fn with_executor(mut self, port: &'static str, executor: Arc<dyn PortExecutor>) -> Self {
+        self.executors.insert(port, executor);
+        self
+    }
+
+    fn with_facts(mut self, facts: Vec<Fact>) -> Self {
+        self.facts = Mutex::new(facts);
+        self
+    }
+
+    fn with_outlet(mut self, outlet: PortFactEmit) -> Self {
+        self.outlet = outlet;
+        self
+    }
+
+    fn at(mut self, now: u64) -> Self {
+        self.now = now;
+        self
+    }
+
+    fn snapshot(&self) -> Vec<Fact> {
+        self.facts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
+impl DriveCtx for TestCtx {
+    fn facts(&self) -> Vec<Fact> {
+        self.snapshot()
+    }
+
+    fn append(&self, fact: Fact) {
+        let mut facts = self
+            .facts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if facts
+            .iter()
+            .any(|f| f.kind == fact.kind && f.key == fact.key)
+        {
+            return;
+        }
+        facts.push(fact);
+    }
+
+    fn source(&self) -> &dyn DebtSource {
+        &self.rows
+    }
+
+    fn executor(&self, port: &str) -> Option<Arc<dyn PortExecutor>> {
+        self.executors.get(port).cloned()
+    }
+
+    fn now_ms(&self) -> u64 {
+        self.now
+    }
+
+    fn outlet(&self) -> PortFactEmit {
+        self.outlet.clone()
+    }
+}
 
 #[derive(Default)]
 struct Seen {
@@ -114,22 +198,18 @@ impl PortFactWriter for RecordSink {
     }
 }
 
-fn ring_with(stub: Arc<Stub>) -> Ring {
-    let mut registry = Registry::new();
-    registry.register("p1", stub);
-    Ring::new(registry, Limits::default())
-}
+const S: u64 = 7;
 
 #[tokio::test]
 async fn one_round_writes_request_sent_response() {
     let stub = Arc::new(Stub::ok());
-    let mut ring = ring_with(stub.clone());
-    let table = Table::new(vec![DebtRow::new("a", "p1", "d", json!({"q": 1}))]);
-    let report = ring.run(&table, 0).await;
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({"q": 1}))])
+        .with_executor("p1", stub.clone());
+    let report = drive(&ctx, S).await;
 
     assert_eq!(report.dispatched, 1);
-    assert_eq!(report.outcome, DriveOutcome::NoDebt(StopReason::Settled));
-    let kinds: Vec<_> = ring.ledger().facts().iter().map(|f| f.kind).collect();
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+    let kinds: Vec<_> = ctx.snapshot().iter().map(|f| f.kind).collect();
     assert_eq!(
         kinds,
         vec![FactKind::Request, FactKind::Sent, FactKind::Response]
@@ -137,21 +217,27 @@ async fn one_round_writes_request_sent_response() {
     let seen = stub.seen();
     assert_eq!(seen[0].0, "p1");
     assert_eq!(seen[0].1, json!({"q": 1}));
-    assert_eq!(seen[0].2, "p1:d:1");
-    assert_eq!(ring.ledger().facts()[2].payload, json!({"answer": {"q": 1}}));
+    assert_eq!(seen[0].2, format!("{S}:p1:d:1"));
+    let response = ctx
+        .snapshot()
+        .into_iter()
+        .find(|f| f.kind == FactKind::Response)
+        .unwrap();
+    assert_eq!(response.key.scope, S);
+    assert_eq!(response.payload, json!({"answer": {"q": 1}}));
 }
 
 #[tokio::test]
 async fn retryable_error_advances_the_lease() {
     let stub = Arc::new(Stub::retry_once_then_ok());
-    let mut ring = ring_with(stub.clone());
-    let table = Table::new(vec![
+    let ctx = TestCtx::new(vec![
         DebtRow::new("a", "p1", "d", json!({})).lease(60_000, 2)
-    ]);
-    let report = ring.run(&table, 0).await;
+    ])
+    .with_executor("p1", stub.clone());
+    let report = drive(&ctx, S).await;
 
     assert_eq!(report.dispatched, 2);
-    let kinds: Vec<_> = ring.ledger().facts().iter().map(|f| f.kind).collect();
+    let kinds: Vec<_> = ctx.snapshot().iter().map(|f| f.kind).collect();
     assert_eq!(
         kinds,
         vec![
@@ -163,18 +249,19 @@ async fn retryable_error_advances_the_lease() {
             FactKind::Response
         ]
     );
-    assert_eq!(ring.ledger().attempt("p1", "d"), 2);
+    let facts = ctx.snapshot();
+    let view = FactView::new(&facts);
+    assert_eq!(view.attempt(S, "p1", "d"), 2);
     assert_eq!(stub.seen().len(), 2);
 }
 
 #[tokio::test]
 async fn non_retryable_error_lands_failed() {
-    let stub = Arc::new(Stub::non_retryable());
-    let mut ring = ring_with(stub);
-    let table = Table::new(vec![DebtRow::new("a", "p1", "d", json!({}))]);
-    let _ = ring.run(&table, 0).await;
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
+        .with_executor("p1", Arc::new(Stub::non_retryable()));
+    let _ = drive(&ctx, S).await;
 
-    let last = ring.ledger().facts().last().unwrap();
+    let last = ctx.snapshot().last().cloned().unwrap();
     assert_eq!(last.kind, FactKind::Failed);
     assert_eq!(last.payload["class"], "non_retryable");
 }
@@ -183,38 +270,26 @@ async fn non_retryable_error_lands_failed() {
 async fn lease_expiry_replays_an_existing_ledger() {
     let stub = Arc::new(Stub::ok());
     let seed = vec![
-        Fact::new(
-            FactKind::Request,
-            DebtKey::new("p1", "d", 1),
-            json!({}),
-            0,
-        ),
+        Fact::new(FactKind::Request, DebtKey::new(S, "p1", "d", 1), json!({}), 0),
         Fact::new(
             FactKind::Sent,
-            DebtKey::new("p1", "d", 1),
+            DebtKey::new(S, "p1", "d", 1),
             json!({"deadline_ms": 10}),
             0,
         ),
     ];
-    let mut registry = Registry::new();
-    registry.register("p1", stub.clone());
-    let mut ring = Ring::with_ledger(
-        Ledger::from_facts(seed),
-        registry,
-        Limits::default(),
-    );
-    let table = Table::new(vec![
-        DebtRow::new("a", "p1", "d", json!({})).lease(10, 2)
-    ]);
-    let report = ring.run(&table, 100).await;
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({})).lease(10, 2)])
+        .with_executor("p1", stub.clone())
+        .with_facts(seed)
+        .at(100);
+    let report = drive(&ctx, S).await;
 
     assert_eq!(report.dispatched, 1);
     assert_eq!(stub.seen().len(), 1);
-    assert_eq!(stub.seen()[0].2, "p1:d:2");
-    let response = ring
-        .ledger()
-        .facts()
-        .iter()
+    assert_eq!(stub.seen()[0].2, format!("{S}:p1:d:2"));
+    let response = ctx
+        .snapshot()
+        .into_iter()
         .find(|f| f.kind == FactKind::Response)
         .unwrap();
     assert_eq!(response.key.attempt, 2);
@@ -222,65 +297,39 @@ async fn lease_expiry_replays_an_existing_ledger() {
 
 #[tokio::test]
 async fn a_fresh_lease_is_waited_not_expired() {
-    let mut registry = Registry::new();
-    registry.register("p1", Arc::new(Stub::ok()));
     let seed = vec![
-        Fact::new(
-            FactKind::Request,
-            DebtKey::new("p1", "d", 1),
-            json!({}),
-            0,
-        ),
+        Fact::new(FactKind::Request, DebtKey::new(S, "p1", "d", 1), json!({}), 0),
         Fact::new(
             FactKind::Sent,
-            DebtKey::new("p1", "d", 1),
+            DebtKey::new(S, "p1", "d", 1),
             json!({"deadline_ms": 100}),
             0,
         ),
     ];
-    let mut ring = Ring::with_ledger(Ledger::from_facts(seed), registry, Limits::default());
-    let table = Table::new(vec![
-        DebtRow::new("a", "p1", "d", json!({})).lease(100, 2)
-    ]);
-    let report = ring.run(&table, 50).await;
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({})).lease(100, 2)])
+        .with_executor("p1", Arc::new(Stub::ok()))
+        .with_facts(seed)
+        .at(50);
+    let report = drive(&ctx, S).await;
 
     assert_eq!(report.dispatched, 0);
     assert_eq!(
         report.outcome,
-        DriveOutcome::Waiting(vec![DebtKey::new("p1", "d", 1)])
+        DriveOutcome::Waiting(vec![DebtKey::new(S, "p1", "d", 1)])
     );
-}
-
-#[tokio::test]
-async fn budget_stops_before_the_second_dispatch() {
-    let stub = Arc::new(Stub::ok());
-    let mut registry = Registry::new();
-    registry.register("p1", stub.clone());
-    let mut ring = Ring::new(registry, Limits { max_dispatches: 1 });
-    let table = Table::new(vec![
-        DebtRow::new("a", "p1", "a", json!({})),
-        DebtRow::new("b", "p1", "b", json!({})),
-    ]);
-    let report = ring.run(&table, 0).await;
-
-    assert_eq!(report.dispatched, 1);
-    assert_eq!(report.outcome, DriveOutcome::NoDebt(StopReason::Budget));
-    assert_eq!(stub.seen().len(), 1);
 }
 
 #[tokio::test]
 async fn after_gate_orders_two_ports() {
     let first = Arc::new(Stub::ok());
     let second = Arc::new(Stub::ok());
-    let mut registry = Registry::new();
-    registry.register("p1", first.clone());
-    registry.register("p2", second.clone());
-    let mut ring = Ring::new(registry, Limits::default());
-    let table = Table::new(vec![
+    let ctx = TestCtx::new(vec![
         DebtRow::new("a", "p1", "a", json!({})),
-        DebtRow::new("b", "p2", "b", json!({})).after(DebtKey::new("p1", "a", 1)),
-    ]);
-    let report = ring.run(&table, 0).await;
+        DebtRow::new("b", "p2", "b", json!({})).after(DebtKey::new(S, "p1", "a", 1)),
+    ])
+    .with_executor("p1", first.clone())
+    .with_executor("p2", second.clone());
+    let report = drive(&ctx, S).await;
 
     assert_eq!(report.dispatched, 2);
     assert_eq!(first.seen().len(), 1);
@@ -289,12 +338,11 @@ async fn after_gate_orders_two_ports() {
 
 #[tokio::test]
 async fn absent_executor_lands_failed_and_names_the_port() {
-    let mut ring = Ring::new(Registry::new(), Limits::default());
-    let table = Table::new(vec![DebtRow::new("a", "p1", "d", json!({}))]);
-    let report = ring.run(&table, 0).await;
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))]);
+    let report = drive(&ctx, S).await;
 
     assert_eq!(report.dispatched, 1);
-    let last = ring.ledger().facts().last().unwrap();
+    let last = ctx.snapshot().last().cloned().unwrap();
     assert_eq!(last.kind, FactKind::Failed);
     assert!(last.payload["reason"].as_str().unwrap().contains("p1"));
 }
@@ -302,15 +350,12 @@ async fn absent_executor_lands_failed_and_names_the_port() {
 #[tokio::test]
 async fn protocol_drafts_pair_and_world_drafts_leave_the_ring() {
     let sink = Arc::new(RecordSink::default());
-    let stub = Arc::new(Emitting { world: sink.clone() });
-    let mut registry = Registry::new();
-    registry.register("p1", stub);
-    let mut ring = Ring::new(registry, Limits::default())
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
+        .with_executor("p1", Arc::new(Emitting { world: sink.clone() }))
         .with_outlet(PortFactEmit::new(sink.clone()));
-    let table = Table::new(vec![DebtRow::new("a", "p1", "d", json!({}))]);
-    let _ = ring.run(&table, 0).await;
+    let _ = drive(&ctx, S).await;
 
-    let kinds: Vec<_> = ring.ledger().facts().iter().map(|f| f.kind).collect();
+    let kinds: Vec<_> = ctx.snapshot().iter().map(|f| f.kind).collect();
     assert_eq!(
         kinds,
         vec![FactKind::Request, FactKind::Sent, FactKind::Response]
@@ -318,4 +363,38 @@ async fn protocol_drafts_pair_and_world_drafts_leave_the_ring() {
     let drafts = sink.drafts.lock().unwrap();
     assert_eq!(drafts.len(), 1);
     assert_eq!(drafts[0].kind, "note");
+}
+
+#[tokio::test]
+async fn scopes_do_not_cross() {
+    let stub = Arc::new(Stub::ok());
+    let seed = vec![Fact::new(
+        FactKind::Response,
+        DebtKey::new(9, "p1", "d", 1),
+        json!({}),
+        0,
+    )];
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
+        .with_executor("p1", stub.clone())
+        .with_facts(seed);
+    let report = drive(&ctx, S).await;
+
+    assert_eq!(report.dispatched, 1);
+    let response = ctx
+        .snapshot()
+        .into_iter()
+        .find(|f| f.kind == FactKind::Response && f.key.scope == S)
+        .unwrap();
+    assert_eq!(response.key.id, "d");
+}
+
+#[tokio::test]
+async fn a_settled_scope_drives_to_no_debt_without_state() {
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
+        .with_executor("p1", Arc::new(Stub::ok()));
+    let first = drive(&ctx, S).await;
+    let second = drive(&ctx, S).await;
+    assert_eq!(first.dispatched, 1);
+    assert_eq!(second.dispatched, 0);
+    assert_eq!(second.outcome, DriveOutcome::NoDebt);
 }

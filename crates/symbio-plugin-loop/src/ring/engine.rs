@@ -1,6 +1,8 @@
 //! 环本体：选债 → 派发 → 等待 → 配对 → 记账 → 预算与租约 → 重放。
+//!
+//! 入口只有 [`drive`]；环不持有账本、预算、执行体注册表或任何跨步可变状态——
+//! 每一步都从 [`DriveCtx`] 提供的只读投影重算。
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
@@ -11,71 +13,39 @@ use symbio_plugin_api::port::{
 };
 use symbio_plugin_api::{ExecAbortSignal, ExecEventSink};
 
-use crate::ring::facts::{DebtKey, Fact, FactKind};
-use crate::ring::ledger::Ledger;
+use crate::ring::facts::{DebtKey, Fact, FactKind, FactView};
 use crate::ring::table::{DebtRow, DebtSource};
 
-/// 预算：派发笔数上限（按已 `sent` 的笔数读，不读序号）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Limits {
-    /// 最多派发多少笔。
-    pub max_dispatches: usize,
-}
+/// 宿主交给环的全部输入：事实投影的读写、债表、执行体解析与时钟。
+///
+/// 缓存（若有）由宿主自己持有；环每一步重新读一遍，跨步不保留任何东西。
+pub trait DriveCtx: Send + Sync {
+    /// 当前可见域的事实快照（只读投影）。
+    fn facts(&self) -> Vec<Fact>;
 
-impl Default for Limits {
-    fn default() -> Self {
-        Self { max_dispatches: 64 }
+    /// 落一条事实；重复投递由宿主按 `(kind, key)` 吸收。
+    fn append(&self, fact: Fact);
+
+    /// 债表数据源（应用侧的行数据）。
+    fn source(&self) -> &dyn DebtSource;
+
+    /// 按端口名解析执行体——清单发现归宿主，环不持有注册表。
+    fn executor(&self, port: &str) -> Option<Arc<dyn PortExecutor>>;
+
+    /// 当前时刻（毫秒，宿主给的相对时间轴）。
+    fn now_ms(&self) -> u64;
+
+    /// 非五类事实的去处（世界事实留在应用侧写口）。
+    fn outlet(&self) -> PortFactEmit {
+        PortFactEmit::silent()
     }
-}
-
-/// 端口执行体注册表：端口名（数据）→ 通用执行体。
-#[derive(Default, Clone)]
-pub struct Registry {
-    executors: HashMap<&'static str, Arc<dyn PortExecutor>>,
-}
-
-impl Registry {
-    /// 空表。
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// 登记一个端口的执行体。
-    pub fn register(&mut self, port: &'static str, executor: Arc<dyn PortExecutor>) -> &mut Self {
-        self.executors.insert(port, executor);
-        self
-    }
-
-    /// 按端口名取执行体（缺席 ⇒ `None`）。
-    pub fn executor(&self, port: &str) -> Option<Arc<dyn PortExecutor>> {
-        self.executors.get(port).cloned()
-    }
-
-    /// 已登记端口数。
-    pub fn len(&self) -> usize {
-        self.executors.len()
-    }
-
-    /// 是否没有登记。
-    pub fn is_empty(&self) -> bool {
-        self.executors.is_empty()
-    }
-}
-
-/// 停机原因。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StopReason {
-    /// 债表上没有可还的债，且没有在飞。
-    Settled,
-    /// 预算用完。
-    Budget,
 }
 
 /// 驱动出口。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriveOutcome {
     /// 没有可还的债。
-    NoDebt(StopReason),
+    NoDebt,
     /// 只剩在飞的债（租约未过）。
     Waiting(Vec<DebtKey>),
 }
@@ -91,7 +61,7 @@ pub struct RunReport {
 
 /// 选债结果。
 #[derive(Debug, Clone)]
-pub(crate) enum Action {
+enum Action {
     /// 派发一笔（可能先补 `request`）。
     Dispatch { row: DebtRow, attempt: u32 },
     /// 租约已过：推进尝试或判死。
@@ -104,236 +74,187 @@ pub(crate) enum Action {
     Wait { key: DebtKey },
 }
 
-/// 纯机制环。
-pub struct Ring {
-    ledger: Ledger,
-    registry: Registry,
-    limits: Limits,
-    outlet: PortFactEmit,
-}
-
-impl Ring {
-    /// 空账本起步。
-    pub fn new(registry: Registry, limits: Limits) -> Self {
-        Self {
-            ledger: Ledger::new(),
-            registry,
-            limits,
-            outlet: PortFactEmit::silent(),
-        }
-    }
-
-    /// 带既有账本起步（重放）。
-    pub fn with_ledger(ledger: Ledger, registry: Registry, limits: Limits) -> Self {
-        Self {
-            ledger,
-            registry,
-            limits,
-            outlet: PortFactEmit::silent(),
-        }
-    }
-
-    /// 指定非五类事实的去处（世界事实留在应用侧写口）。
-    pub fn with_outlet(mut self, outlet: PortFactEmit) -> Self {
-        self.outlet = outlet;
-        self
-    }
-
-    /// 账本只读视图。
-    pub fn ledger(&self) -> &Ledger {
-        &self.ledger
-    }
-
-    /// 取回账本。
-    pub fn into_ledger(self) -> Ledger {
-        self.ledger
-    }
-
-    /// 驱动到没有可还的债、只剩在飞、或预算用完。
-    pub async fn run(&mut self, source: &dyn DebtSource, now_ms: u64) -> RunReport {
-        let mut dispatched = 0usize;
-        loop {
-            let rows = source.rows(self.ledger.facts());
-            let action = self.plan(&rows, now_ms);
-            let Some(action) = action else {
-                return RunReport {
-                    outcome: DriveOutcome::NoDebt(StopReason::Settled),
-                    dispatched,
-                };
+/// 驱动一个可见域到没有可还的债、只剩在飞。
+pub async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
+    let mut dispatched = 0usize;
+    loop {
+        let facts = ctx.facts();
+        let view = FactView::new(&facts);
+        let rows = ctx.source().rows(&view, scope);
+        let now_ms = ctx.now_ms();
+        let Some(action) = plan(&view, &rows, scope, now_ms) else {
+            return RunReport {
+                outcome: DriveOutcome::NoDebt,
+                dispatched,
             };
-            if dispatched >= self.limits.max_dispatches {
+        };
+        match action {
+            Action::Wait { key } => {
                 return RunReport {
-                    outcome: DriveOutcome::NoDebt(StopReason::Budget),
+                    outcome: DriveOutcome::Waiting(vec![key]),
                     dispatched,
-                };
-            }
-            match action {
-                Action::Wait { key } => {
-                    return RunReport {
-                        outcome: DriveOutcome::Waiting(vec![key]),
-                        dispatched,
-                    }
-                }
-                Action::Expire {
-                    row,
-                    attempt,
-                    next,
-                } => self.expire(row, attempt, next, now_ms),
-                Action::Dispatch { row, attempt } => {
-                    self.dispatch(row, attempt, now_ms).await;
-                    dispatched += 1;
                 }
             }
-        }
-    }
-
-    /// 选一笔最可还的债：先找可派发的，再找在飞的。
-    pub(crate) fn plan(&self, rows: &[DebtRow], now_ms: u64) -> Option<Action> {
-        let mut waiting: Option<Action> = None;
-        for row in rows {
-            if let Some(after) = &row.after {
-                if self.ledger.closing(after).is_none() {
-                    continue;
-                }
-            }
-            let attempt = self.ledger.attempt(row.port, &row.id).max(1);
-            let key = DebtKey::new(row.port, row.id.clone(), attempt);
-            if self.ledger.closing(&key).is_some() {
-                continue;
-            }
-            let sent = self
-                .ledger
-                .facts()
-                .iter()
-                .rev()
-                .find(|f| f.kind == FactKind::Sent && f.key == key);
-            let Some(sent) = sent else {
-                return Some(Action::Dispatch {
-                    row: row.clone(),
-                    attempt,
-                });
-            };
-            let deadline = sent.at_ms.saturating_add(row.lease_ms);
-            if now_ms < deadline {
-                if waiting.is_none() {
-                    waiting = Some(Action::Wait { key });
-                }
-                continue;
-            }
-            let next = (attempt < row.max_attempts).then(|| attempt + 1);
-            return Some(Action::Expire {
-                row: row.clone(),
+            Action::Expire {
+                row,
                 attempt,
                 next,
+            } => expire(ctx, scope, row, attempt, next, now_ms),
+            Action::Dispatch { row, attempt } => {
+                dispatch(ctx, scope, row, attempt, now_ms).await;
+                dispatched += 1;
+            }
+        }
+    }
+}
+
+/// 选一笔最可还的债：先找可派发的，再找在飞的。
+fn plan(view: &FactView<'_>, rows: &[DebtRow], scope: u64, now_ms: u64) -> Option<Action> {
+    let mut waiting: Option<Action> = None;
+    for row in rows {
+        if let Some(after) = &row.after {
+            if view.closing(after).is_none() {
+                continue;
+            }
+        }
+        let attempt = view.attempt(scope, row.port, &row.id).max(1);
+        let key = DebtKey::new(scope, row.port, row.id.clone(), attempt);
+        if view.closing(&key).is_some() {
+            continue;
+        }
+        let Some(sent) = view.last_sent(&key) else {
+            return Some(Action::Dispatch {
+                row: row.clone(),
+                attempt,
             });
-        }
-        waiting
-    }
-
-    /// 租约已过：有下一笔就记账并再举，没有就判死。
-    fn expire(&mut self, row: DebtRow, attempt: u32, next: Option<u32>, now_ms: u64) {
-        let key = DebtKey::new(row.port, row.id.clone(), attempt);
-        match next {
-            Some(next) => {
-                let next_key = DebtKey::new(row.port, row.id.clone(), next);
-                let _ = self.ledger.append(Fact::new(
-                    FactKind::Retry,
-                    next_key,
-                    json!({"from": attempt, "class": "retryable", "reason": "lease-expired"}),
-                    now_ms,
-                ));
+        };
+        let deadline = sent.at_ms.saturating_add(row.lease_ms);
+        if now_ms < deadline {
+            if waiting.is_none() {
+                waiting = Some(Action::Wait { key });
             }
-            None => {
-                let _ = self.ledger.append(Fact::new(
-                    FactKind::Failed,
-                    key,
-                    json!({"class": "non_retryable", "reason": "lease-expired"}),
-                    now_ms,
-                ));
-            }
+            continue;
         }
+        let next = (attempt < row.max_attempts).then(|| attempt + 1);
+        return Some(Action::Expire {
+            row: row.clone(),
+            attempt,
+            next,
+        });
     }
+    waiting
+}
 
-    /// 派发一笔：补 `request` → 落 `sent` → 调执行体 → 配对落账。
-    async fn dispatch(&mut self, row: DebtRow, attempt: u32, now_ms: u64) {
-        let key = DebtKey::new(row.port, row.id.clone(), attempt);
-        let _ = self.ledger.append(Fact::new(
-            FactKind::Request,
-            key.clone(),
-            row.payload.clone(),
-            now_ms,
-        ));
-        let _ = self.ledger.append(Fact::new(
-            FactKind::Sent,
-            key.clone(),
-            json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
-            now_ms,
-        ));
-
-        let Some(executor) = self.registry.executor(row.port) else {
-            let _ = self.ledger.append(Fact::new(
-                FactKind::Failed,
-                key,
-                json!({
-                    "class": "non_retryable",
-                    "reason": format!("no provider for port {}", row.port),
-                }),
+/// 租约已过：有下一笔就记账并再举，没有就判死。
+fn expire(
+    ctx: &dyn DriveCtx,
+    scope: u64,
+    row: DebtRow,
+    attempt: u32,
+    next: Option<u32>,
+    now_ms: u64,
+) {
+    let key = DebtKey::new(scope, row.port, row.id.clone(), attempt);
+    match next {
+        Some(next) => {
+            let next_key = DebtKey::new(scope, row.port, row.id.clone(), next);
+            ctx.append(Fact::new(
+                FactKind::Retry,
+                next_key,
+                json!({"from": attempt, "class": "retryable", "reason": "lease-expired"}),
                 now_ms,
             ));
-            return;
-        };
+        }
+        None => {
+            ctx.append(Fact::new(
+                FactKind::Failed,
+                key,
+                json!({"class": "non_retryable", "reason": "lease-expired"}),
+                now_ms,
+            ));
+        }
+    }
+}
 
-        let writer = Arc::new(CollectingWriter::new(self.outlet.clone()));
-        let ctx = PortExecContext {
-            deadline_ms: Some(now_ms.saturating_add(row.lease_ms)),
-            abort: ExecAbortSignal::new(),
-            idempotency_key: format!("{}:{}:{}", row.port, row.id, attempt),
-            sink: ExecEventSink::silent(),
-            emit: PortFactEmit::new(writer.clone()),
-            ctx: None,
-            subject: 0,
-            group: String::new(),
-            origin: None,
-            permitted: true,
-            deny_reason: String::new(),
-            scratch_dir: None,
-        };
-        let outcome = executor
-            .execute(
-                ctx,
-                PortInput {
-                    port: row.port,
-                    payload: row.payload,
-                },
-            )
-            .await;
-        let drafts = writer.take();
+/// 派发一笔：补 `request` → 落 `sent` → 调执行体 → 配对落账。
+async fn dispatch(ctx: &dyn DriveCtx, scope: u64, row: DebtRow, attempt: u32, now_ms: u64) {
+    let key = DebtKey::new(scope, row.port, row.id.clone(), attempt);
+    ctx.append(Fact::new(
+        FactKind::Request,
+        key.clone(),
+        row.payload.clone(),
+        now_ms,
+    ));
+    ctx.append(Fact::new(
+        FactKind::Sent,
+        key.clone(),
+        json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+        now_ms,
+    ));
 
-        match outcome.error {
-            Some((class, why)) => {
-                if class == PortErrorClass::Retryable && attempt < row.max_attempts {
-                    let next_key = DebtKey::new(row.port, row.id, attempt + 1);
-                    let _ = self.ledger.append(Fact::new(
-                        FactKind::Retry,
-                        next_key,
-                        json!({"from": attempt, "class": class_name(class), "reason": why}),
-                        now_ms,
-                    ));
-                } else {
-                    let _ = self.ledger.append(Fact::new(
-                        FactKind::Failed,
-                        key,
-                        json!({"class": class_name(class), "reason": why, "facts": outcome.facts}),
-                        now_ms,
-                    ));
-                }
+    let Some(executor) = ctx.executor(row.port) else {
+        ctx.append(Fact::new(
+            FactKind::Failed,
+            key,
+            json!({
+                "class": "non_retryable",
+                "reason": format!("no provider for port {}", row.port),
+            }),
+            now_ms,
+        ));
+        return;
+    };
+
+    let writer = Arc::new(CollectingWriter::new(ctx.outlet()));
+    let exec = PortExecContext {
+        deadline_ms: Some(now_ms.saturating_add(row.lease_ms)),
+        abort: ExecAbortSignal::new(),
+        idempotency_key: format!("{}:{}:{}:{}", key.scope, row.port, row.id, attempt),
+        sink: ExecEventSink::silent(),
+        emit: PortFactEmit::new(writer.clone()),
+        ctx: None,
+        subject: key.scope,
+        group: String::new(),
+        origin: None,
+        permitted: true,
+        deny_reason: String::new(),
+        scratch_dir: None,
+    };
+    let outcome = executor
+        .execute(
+            exec,
+            PortInput {
+                port: row.port,
+                payload: row.payload,
+            },
+        )
+        .await;
+    let drafts = writer.take();
+
+    match outcome.error {
+        Some((class, why)) => {
+            if class == PortErrorClass::Retryable && attempt < row.max_attempts {
+                let next_key = DebtKey::new(scope, row.port, row.id, attempt + 1);
+                ctx.append(Fact::new(
+                    FactKind::Retry,
+                    next_key,
+                    json!({"from": attempt, "class": class_name(class), "reason": why}),
+                    now_ms,
+                ));
+            } else {
+                ctx.append(Fact::new(
+                    FactKind::Failed,
+                    key,
+                    json!({"class": class_name(class), "reason": why, "facts": outcome.facts}),
+                    now_ms,
+                ));
             }
-            None => {
-                let payload = response_payload(&drafts, &outcome);
-                let fact = Fact::new(FactKind::Response, key, payload, now_ms)
-                    .with_reply(outcome.reply);
-                let _ = self.ledger.append(fact);
-            }
+        }
+        None => {
+            let payload = response_payload(&drafts, &outcome);
+            let fact = Fact::new(FactKind::Response, key, payload, now_ms)
+                .with_reply(outcome.reply);
+            ctx.append(fact);
         }
     }
 }

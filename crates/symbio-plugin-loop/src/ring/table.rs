@@ -1,6 +1,6 @@
 //! 债表：应用交来的行数据。环只按行里的端口名与身份取债，不解释行名。
 
-use crate::ring::facts::{DebtKey, Fact};
+use crate::ring::facts::{DebtKey, FactView};
 use serde_json::Value;
 
 /// 一笔待还的债（应用侧的数据）。
@@ -51,9 +51,12 @@ impl DebtRow {
 }
 
 /// 债表数据源：环每圈重新问一次，应用可据既有事实增减行。
+///
+/// 触发条件与排除条件都是**行数据的表达力**，不是环的机制：应用读事实投影，
+/// 决定这一圈欠哪些债；环只按行选债，不解释世界条件。
 pub trait DebtSource {
     /// 当前可还的债（应用按自己的事实投影决定）。
-    fn rows(&self, facts: &[Fact]) -> Vec<DebtRow>;
+    fn rows(&self, facts: &FactView<'_>, scope: u64) -> Vec<DebtRow>;
 }
 
 /// 静态债表。
@@ -85,7 +88,7 @@ impl Table {
 }
 
 impl DebtSource for Table {
-    fn rows(&self, _facts: &[Fact]) -> Vec<DebtRow> {
+    fn rows(&self, _facts: &FactView<'_>, _scope: u64) -> Vec<DebtRow> {
         self.rows.clone()
     }
 }
