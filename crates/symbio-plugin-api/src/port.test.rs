@@ -46,8 +46,8 @@ impl Registry for FakeRegistry {
     }
 }
 
-const ONLY_MODEL: &[&str] = &[ports::MODEL];
-const ONLY_TOOL: &[&str] = &[ports::TOOL];
+const ONLY_MODEL: &[&str] = &["model"];
+const ONLY_TOOL: &[&str] = &["tool"];
 /// 一个与 model / tool 都无关的世界端口（`DE-047` I-6.7：端口集开放）。
 const ONLY_ECHO: &[&str] = &["echo"];
 
@@ -78,25 +78,14 @@ fn only_row(ports: &'static [&'static str], id: &'static str) -> CapabilityRow {
         .expect("夹具至少申报一个端口")
 }
 
-/// 端口词与内核族词同源：派生后两边是同一个词（谁写死第二份拼写，这里先红）。
-#[test]
-fn port_names_stay_derived_from_kernel_families() {
-    assert_eq!(ports::MODEL, family::MODEL.name());
-    assert_eq!(ports::TOOL, family::TOOL.name());
-}
-
-/// 消费合同的默认形状：非 model 端口的提供者两项合同都是 `None`——「本端口没有
-/// 这条合同」，不是缺席的默认值；model 端口的真实实现随迁移批落进提供者插件。
+/// 执行合同的默认形状：不提供执行面的提供者 `executor()` 是 `None`——「本端口没有
+/// 执行面」，不是缺席的默认值；真实实现随各端口插件落进提供者插件。
 #[test]
 fn contract_defaults_are_absent() {
     let p = FixtureProvider {
         ports: ONLY_TOOL,
         id: "fixture-b",
     };
-    assert!(p
-        .llm_round_trip(None, "", symbio_kernel::exec::ExecAbortSignal::default())
-        .is_none());
-    assert!(p.model().is_none());
     assert!(p.executor().is_none());
     assert_eq!(p.capabilities(), PortCapabilities::default());
 }
@@ -105,8 +94,8 @@ fn contract_defaults_are_absent() {
 /// 行名前缀。端口集开放（`DE-047` I-6.7）：族对它不设闸。
 #[test]
 fn all_ports_share_one_family() {
-    let model = port_family(ports::MODEL).expect("端口有族");
-    let tool = port_family(ports::TOOL).expect("端口有族");
+    let model = port_family("model").expect("端口有族");
+    let tool = port_family("tool").expect("端口有族");
     let echo = port_family("echo").expect("开放端口集：任何端口名都有族");
     assert_eq!(model.name(), tool.name());
     assert_eq!(model.name(), echo.name());
@@ -120,7 +109,7 @@ async fn port_rows_build_the_declared_shape() {
     let rows = port_rows(&p);
     assert_eq!(rows.len(), 1, "单端口提供者只造一行");
     let row = &rows[0];
-    assert_eq!(row.family(), port_family(ports::MODEL).expect("model 有族"));
+    assert_eq!(row.family(), port_family("model").expect("model 有族"));
     assert_eq!(row.name(), "<port:model>:fixture-a");
     assert!(
         !row.active(),
@@ -135,7 +124,7 @@ async fn port_rows_build_the_declared_shape() {
 /// 一个提供者申报 N 个端口 ⇒ N 行（`DE-047` I-6.1：端口身份是数据）。
 #[tokio::test]
 async fn multi_port_provider_builds_one_row_per_port() {
-    let rows = port_rows(&provider(&[ports::MODEL, ports::TOOL], "both"));
+    let rows = port_rows(&provider(&["model", "tool"], "both"));
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].name(), "<port:model>:both");
     assert_eq!(rows[1].name(), "<port:tool>:both");
@@ -161,7 +150,7 @@ async fn open_port_set_is_not_a_closed_enum() {
 async fn live_provider_reads_ready() {
     let visitor = FakeRegistry::new();
     visitor.put(only_row(ONLY_MODEL, "fixture-a")).await;
-    match capability_port_of(&visitor, ports::MODEL).await {
+    match capability_port_of(&visitor, "model").await {
         PortReading::Ready(row) => assert_eq!(row.name(), "<port:model>:fixture-a"),
         other => panic!("单 provider 必须读出 Ready，读到 {other:?}"),
     }
@@ -175,7 +164,7 @@ async fn live_provider_reads_ready() {
 async fn absent_plugin_reads_absent() {
     let visitor = FakeRegistry::new();
     assert!(matches!(
-        capability_port_of(&visitor, ports::TOOL).await,
+        capability_port_of(&visitor, "tool").await,
         PortReading::Absent
     ));
 }
@@ -188,11 +177,11 @@ async fn two_ports_do_not_demote_each_other() {
     visitor.put(only_row(ONLY_MODEL, "fixture-a")).await;
     visitor.put(only_row(ONLY_TOOL, "fixture-b")).await;
     assert!(matches!(
-        capability_port_of(&visitor, ports::MODEL).await,
+        capability_port_of(&visitor, "model").await,
         PortReading::Ready(_)
     ));
     assert!(matches!(
-        capability_port_of(&visitor, ports::TOOL).await,
+        capability_port_of(&visitor, "tool").await,
         PortReading::Ready(_)
     ));
 }
@@ -205,7 +194,7 @@ async fn duplicate_provider_is_loud() {
     visitor.put(only_row(ONLY_MODEL, "fixture-a")).await;
     visitor.put(only_row(ONLY_MODEL, "fixture-b")).await;
 
-    match capability_port_of(&visitor, ports::MODEL).await {
+    match capability_port_of(&visitor, "model").await {
         PortReading::Duplicate { kept, dropped } => {
             assert_eq!(kept.name(), "<port:model>:fixture-a");
             assert_eq!(dropped, ["<port:model>:fixture-b"]);

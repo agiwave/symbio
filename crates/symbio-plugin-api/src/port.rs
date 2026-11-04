@@ -46,22 +46,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
-use symbio_kernel::llm::ModelProvider;
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
-use symbio_sdk::adapters::LlmAdapter;
 use symbio_sdk::capability::{capability_report_error, CAPABILITY_VISITOR};
-
-/// 两个**已落地**世界的端口名（数据，不是闭集）。
-///
-/// 名字从内核族派生：端口词与族词是同一个词，写第二份拼写早晚会漂（字面量还会与
-/// 插件 id 撞审计红线）。新增世界端口由提供者自报字符串，不需要往这里加常量
-/// （`DE-047` I-6.7）。
-pub mod ports {
-    /// 模型往返端口（一次模型调用）。
-    pub const MODEL: &str = symbio_kernel::capability::family::MODEL.name();
-    /// 工具调用端口（一次工具调用）。
-    pub const TOOL: &str = symbio_kernel::capability::family::TOOL.name();
-}
 
 /// 一个世界端口的提供者：申报端口名与提供者 id，并交出通用执行面。
 ///
@@ -87,21 +73,6 @@ pub trait PortProvider: Send + Sync + 'static {
         None
     }
 
-    /// **冻结债** → `DE-047` X-11：模型往返的具名取用面。已判作废，删除随
-    /// `tools/**` / 模型路径迁移完成；在此之前 loop 侧取用按 LP-003 / LP-004 只许降。
-    fn llm_round_trip(
-        &self,
-        _preferred: Option<&str>,
-        _system_prompt: &str,
-        _abort: ExecAbortSignal,
-    ) -> Option<Arc<dyn LlmAdapter>> {
-        None
-    }
-
-    /// **冻结债** → `DE-047` X-11：模型原始面（内部请求用）。
-    fn model(&self) -> Option<Arc<dyn ModelProvider>> {
-        None
-    }
 }
 
 /// 端口提供者的可选能力位（`DE-047` I-6.6）：词表只允许 `streaming` / `cancel` /
