@@ -68,10 +68,9 @@ impl DriveCtx for TestCtx {
             .facts
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if facts
-            .iter()
-            .any(|f| f.kind == fact.kind && f.key == fact.key)
-        {
+        if facts.iter().any(|f| {
+            f.kind == fact.kind && f.key == fact.key && shard_of(f) == shard_of(&fact)
+        }) {
             return;
         }
         facts.push(fact);
@@ -189,6 +188,11 @@ impl PortExecutor for Emitting {
 #[derive(Default)]
 struct RecordSink {
     drafts: Mutex<Vec<FactDraft>>,
+}
+
+/// 测试宿主的吸收与真宿主同口径：分片号是附加身份位。
+fn shard_of(fact: &Fact) -> Option<u64> {
+    fact.payload.get("shard").and_then(|v| v.as_u64())
 }
 
 #[async_trait::async_trait]
@@ -429,4 +433,55 @@ async fn a_settled_scope_drives_to_no_debt_without_state() {
     assert_eq!(first.dispatched, 1);
     assert_eq!(second.dispatched, 0);
     assert_eq!(second.outcome, DriveOutcome::NoDebt);
+}
+
+/// 分片的执行体：同一笔债 emit 三条 `response`，分片号只在载荷里。
+struct Sharded;
+
+#[async_trait::async_trait]
+impl PortExecutor for Sharded {
+    async fn execute(&self, ctx: PortExecContext, _input: PortInput) -> PortOutcome {
+        for shard in 1..=3u64 {
+            ctx.emit
+                .emit(vec![FactDraft {
+                    key: format!("shard-{shard}"),
+                    kind: FactKind::Response.as_str().to_string(),
+                    entity: symbio_plugin_api::Entity::Scope,
+                    verb: symbio_plugin_api::Verb::Asserted,
+                    payload: json!({
+                        "shard": shard,
+                        "text": format!("chunk-{shard}"),
+                        "done": shard == 3,
+                    }),
+                    produced_by: None,
+                }])
+                .await;
+        }
+        PortOutcome::ok()
+    }
+}
+
+#[tokio::test]
+async fn response_shards_land_one_fact_per_draft_under_one_key() {
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
+        .with_executor("p1", Arc::new(Sharded));
+    let report = drive(&ctx, S).await;
+    assert_eq!(report.dispatched, 1);
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+
+    let responses: Vec<_> = ctx
+        .snapshot()
+        .into_iter()
+        .filter(|f| f.kind == FactKind::Response)
+        .collect();
+    assert_eq!(responses.len(), 3, "分片按序各成一条事实");
+    for fact in &responses {
+        assert_eq!(
+            fact.key,
+            DebtKey::new(S, "p1", "d", 1),
+            "配对键不含分片号"
+        );
+    }
+    assert_eq!(responses[0].payload["shard"], json!(1));
+    assert_eq!(responses[2].payload["done"], json!(true));
 }

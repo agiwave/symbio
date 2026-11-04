@@ -23,7 +23,7 @@ pub trait DriveCtx: Send + Sync {
     /// 当前可见域的事实快照（只读投影）。
     fn facts(&self) -> Vec<Fact>;
 
-    /// 落一条事实；重复投递由宿主按 `(kind, key)` 吸收。
+    /// 落一条事实；重复投递的去重规则归宿主（按事实身份）。
     fn append(&self, fact: Fact);
 
     /// 债表数据源（应用侧的行数据）。
@@ -256,10 +256,15 @@ async fn dispatch(ctx: &dyn DriveCtx, scope: u64, row: DebtRow, attempt: u32, no
             }
         }
         None => {
-            let payload = response_payload(&drafts, &outcome);
-            let fact = Fact::new(FactKind::Response, key, payload, now_ms)
-                .with_reply(outcome.reply);
-            ctx.append(fact);
+            let payloads = response_payloads(&drafts, &outcome);
+            let last = payloads.len().saturating_sub(1);
+            for (idx, payload) in payloads.into_iter().enumerate() {
+                let mut fact = Fact::new(FactKind::Response, key.clone(), payload, now_ms);
+                if idx == last {
+                    fact = fact.with_reply(outcome.reply.clone());
+                }
+                ctx.append(fact);
+            }
         }
     }
 }
@@ -272,15 +277,21 @@ fn class_name(class: PortErrorClass) -> &'static str {
     }
 }
 
-/// 收束载荷：优先用执行体 emit 的 `response` 草稿，其次用返回体的唯一事实。
-fn response_payload(drafts: &[FactDraft], outcome: &PortOutcome) -> Value {
-    if let Some(draft) = drafts.iter().find(|d| d.kind == FactKind::Response.as_str()) {
-        return draft.payload.clone();
+/// 收束载荷：执行体 emit 的每条 `response` 草稿按序各成一条事实（分片只是载荷），
+/// 没有草稿时退回返回体的唯一事实。环不合并、不解释分片。
+fn response_payloads(drafts: &[FactDraft], outcome: &PortOutcome) -> Vec<Value> {
+    let emitted: Vec<Value> = drafts
+        .iter()
+        .filter(|d| d.kind == FactKind::Response.as_str())
+        .map(|d| d.payload.clone())
+        .collect();
+    if !emitted.is_empty() {
+        return emitted;
     }
     match outcome.facts.as_slice() {
-        [] => json!({}),
-        [only] => only.clone(),
-        many => Value::Array(many.to_vec()),
+        [] => vec![json!({})],
+        [only] => vec![only.clone()],
+        many => vec![Value::Array(many.to_vec())],
     }
 }
 

@@ -20,6 +20,13 @@ use symbio_sdk::debt::{Closing, DebtFacts, DebtSource as DeclaredDebtSource, Deb
 use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_ID, WORKDIR};
 use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
 
+/// 载荷里的分片号（宿主吸收重复时的附加身份位；环不知道它的存在）。
+const SHARD_KEY: &str = "shard";
+
+fn shard_of(fact: &Fact) -> Option<u64> {
+    fact.payload.get(SHARD_KEY).and_then(|v| v.as_u64())
+}
+
 /// 一次驱动结果（宿主对外）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriveReport {
@@ -173,10 +180,9 @@ impl DriveCtx for HostCtx<'_> {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let bucket = facts.entry(self.scope).or_default();
-        if bucket
-            .iter()
-            .any(|known| known.kind == fact.kind && known.key == fact.key)
-        {
+        if bucket.iter().any(|known| {
+            known.kind == fact.kind && known.key == fact.key && shard_of(known) == shard_of(&fact)
+        }) {
             return;
         }
         bucket.push(fact);
