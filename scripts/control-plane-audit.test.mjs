@@ -220,9 +220,46 @@ test('CP-004：sdk 的代码里出现世界事件名字面量 ⇒ 红', () => {
 
 // ───────────────────────────── CP-006 ─────────────────────────────
 
-test('CP-006：机制字节改一个字符而基线未跟 ⇒ 红', () => {
+test('CP-006：机制语义改一个字符而基线未跟 ⇒ 红', () => {
   const files = cleanTree()
   files[ENGINE] = files[ENGINE].replace('steps += 1;', 'steps += 2;')
+  assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-006')
+})
+
+test('CP-006：只改格式（import 顺序 / 空行 / 注释 / 换行 / 尾逗号）⇒ 绿（指纹不量格式）', () => {
+  const formatted = ENGINE_SRC.replace(
+    'use crate::ring::{DebtRow, DriveCtx};',
+    'use crate::ring::{DriveCtx, DebtRow};',
+  )
+    .replace(
+      '    let Some(_row) = plan(ctx, scope) else {',
+      '    // 只动格式：注释 + 空行\n\n    let Some(_row) = plan(ctx, scope,) else {',
+    )
+    .replace(
+      '    ctx.source().rows(&ctx.facts(), scope).into_iter().next()',
+      '    ctx.source()\n        .rows(&ctx.facts(), scope,)\n        .into_iter()\n        .next()',
+    )
+    .replace('    ctx.now_ms() > scope', '    // 只动格式：注释\n\n    ctx.now_ms() > scope')
+  const files = cleanTree()
+  files[ENGINE] = formatted
+  const r = audit(files, { baselineFrom: cleanTree() })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /CP-006 机制面/)
+})
+
+test('CP-006：fn plan 加一个条件 ⇒ 红（归一化不抹语义）', () => {
+  const files = cleanTree()
+  files[ENGINE] = files[ENGINE].replace(
+    '    ctx.source().rows(&ctx.facts(), scope).into_iter().next()',
+    '    if scope == 0 {\n        return None;\n    }\n' +
+      '    ctx.source().rows(&ctx.facts(), scope).into_iter().next()',
+  )
+  assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-006')
+})
+
+test('CP-006：fn expire 改一处返回值 ⇒ 红', () => {
+  const files = cleanTree()
+  files[ENGINE] = files[ENGINE].replace('ctx.now_ms() > scope', 'ctx.now_ms() >= scope')
   assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-006')
 })
 

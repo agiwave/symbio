@@ -6,15 +6,15 @@
       "fn plan",
       "fn expire"
     ],
-    "hash": "sha256:10f6247904a88036a868dc0450905e6ee7b4bb888fb88ba36c04d777a46b856e",
+    "hash": "sha256:41b25ba7b5145b819e0eb26a4db018c593903af84c91d4ffe180f0daa62f34af",
     "adr": "D-325",
-    "reason": "基线落在 D-325 机制形状五条固化之后的控制面形状上：驱动循环体（ring/engine.rs 的 loop）+ 选债包装 fn plan + 在途判据 fn expire 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改：机制演进必须同批更新 hash 并改这条理由。D-325 把旧 ring.rs 的驱动拆成 ring/engine.rs 的单一循环与 plan / expire 两段，语义等价，属机制面迁移。e31f98a2 只把 `effects::FactDraft` / `drive::Unless` 两行 import 排序并折叠一处 rustfmt，驱动 / 选债 / 在途三段逻辑逐字未动，属与端口无关的机制面字节变化，故同批更新基线。"
+    "reason": "基线落在 D-325 机制形状五条固化之后的控制面形状上：驱动循环体（ring/engine.rs 的 loop）+ 选债包装 fn plan + 在途判据 fn expire 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改：机制演进必须同批更新 hash 并改这条理由。D-325 把旧 ring.rs 的驱动拆成 ring/engine.rs 的单一循环与 plan / expire 两段，语义等价，属机制面迁移。指纹是**归一化 token 流**的哈希（剥注释、折叠空白、不计逗号）：import 顺序 / rustfmt 换行 / 尾逗号不进基线，加条件、改返回值、换比较符才进——不然每次 fmt 都要写一条 allow，allow 就成了橡皮图章。"
   },
   "extension": {
     "productionFiles": 8
   },
   "baseline-allow": [
     "crates/symbio-plugin-loop/src/ring.rs→crates/symbio-plugin-loop/src/ring/engine.rs 旧环拆分后机制面落到 ring/engine.rs（D-325 机制形状五条固化） D-325",
-    "sha256:90712423730560d522b3e5f76cd4587dbbc436b74bbeb94f18ac837fae21703f→sha256:10f6247904a88036a868dc0450905e6ee7b4bb888fb88ba36c04d777a46b856e 机制面按 D-325 重计；驱动 / 选债 / 在途三段语义等价（e31f98a2 仅 import 排序与 rustfmt） D-325"
+    "sha256:90712423730560d522b3e5f76cd4587dbbc436b74bbeb94f18ac837fae21703f→sha256:41b25ba7b5145b819e0eb26a4db018c593903af84c91d4ffe180f0daa62f34af 指纹算法改为归一化 token 流（from 是旧原始字节哈希，不可逐点比较）；驱动 / 选债 / 在途三段语义未变，此后 fmt 不再触发漂移 D-325"
   ]
 }

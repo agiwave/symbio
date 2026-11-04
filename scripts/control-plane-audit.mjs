@@ -10,7 +10,7 @@
  * |---|---|---|
  * | `CP-001` | 唯一循环体：整个环 crate 的生产代码只有一段 `loop` / `while`，落在 `ring/engine.rs` | `crates/symbio-plugin-loop/src/**` |
  * | `CP-004` | 机制层无世界域名：`vocab.rs` 登记的事件名不得作为**代码**字面量出现在 kernel / sdk（注释与测试夹具不算） | `crates/symbio-kernel/src/**`、`crates/symbio-sdk/src/**` |
- * | `CP-006` | 机制面指纹：驱动循环体 + `fn plan` + `fn expire` 的字节哈希与生产文件数冻结在基线里 | `crates/symbio-plugin-loop/src/**` |
+ * | `CP-006` | 机制面指纹：驱动循环体 + `fn plan` + `fn expire` 的**归一化 token 流**哈希（注释 / 空白 / import 顺序 / 尾逗号无关）与生产文件数冻结在基线里 | `crates/symbio-plugin-loop/src/**` |
  * | `CP-009` | 第二推进循环：除 `ring/engine.rs` 外，任何生产文件的循环体都不得调 `drive(` | 全部 crate 的生产源码 |
  *
  * ## 失效形态
@@ -37,6 +37,7 @@ import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from './color.mjs'
 import { adrExists } from './known-red.mjs'
+import { stripComments as stripCommentsKeepStrings } from './rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -273,10 +274,95 @@ function fnBody(code, name) {
   return code.slice(open, matchBrace(code, open) + 1)
 }
 
+/**
+ * 机制面指纹的**归一化**：只保留语义 token，抹掉格式噪声。
+ *
+ * 此前指纹是 `engine.rs` 三段拼接后的**原始字节**哈希，于是 `cargo fmt` 每动一次换行 /
+ * import 顺序 / 尾逗号，基线就漂移一次、就要写一条 allow。漂移越频繁，allow 就越像
+ * 橡皮图章——门最后只剩流程。归一化取三条：
+ *
+ * ① 注释已由 `stripComments` 去掉（保留字符串内容，不误伤 URL 里的 `//`）；
+ * ② 空白全部折叠成一个分隔符：换行、缩进、import 排序都不进指纹；
+ * ③ 逗号不计（rustfmt 会给多行参数 / 结构体补尾逗号）。
+ *
+ * 标识符、字符串 / 字符内容、数字与运算符逐字保留，所以加一个条件、改一处返回值、
+ * 换一个比较符都会变。**指纹对格式不敏感，对语义敏感**——这正是基线该量的东西。
+ */
+function normalizeRust(text) {
+  const tokens = []
+  let i = 0
+  while (i < text.length) {
+    const ch = text[i]
+    if (/\s/.test(ch)) {
+      i++
+      continue
+    }
+    // 原始字符串：r"…" / r#"…"# / br#"…"# / cr#"…"#（整个字面量是一个 token）
+    const raw = /^(?:c|b)?r(#*)"/.exec(text.slice(i))
+    if (raw) {
+      const close = `"${raw[1]}`
+      const end = text.indexOf(close, i + raw[0].length)
+      const stop = end < 0 ? text.length : end + close.length
+      tokens.push(text.slice(i, stop))
+      i = stop
+      continue
+    }
+    // 普通 / 字节字符串：内容逐字保留（语义的一部分）
+    if (ch === '"') {
+      let j = i + 1
+      while (j < text.length) {
+        if (text[j] === '\\') {
+          j += 2
+          continue
+        }
+        if (text[j] === '"') {
+          j++
+          break
+        }
+        j++
+      }
+      tokens.push(text.slice(i, j))
+      i = j
+      continue
+    }
+    // 字符字面量与生命周期：前者是一个 token，后者拆成 `'` + 标识符
+    if (ch === "'") {
+      const chr = /^'(?:\\.|[^'\\])'/.exec(text.slice(i))
+      if (chr) {
+        tokens.push(chr[0])
+        i += chr[0].length
+        continue
+      }
+      tokens.push("'")
+      i++
+      continue
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(i))
+      tokens.push(m[0])
+      i += m[0].length
+      continue
+    }
+    if (/[0-9]/.test(ch)) {
+      const m = /^[0-9][A-Za-z0-9_]*/.exec(text.slice(i))
+      tokens.push(m[0])
+      i += m[0].length
+      continue
+    }
+    if (ch === ',') {
+      i++
+      continue
+    }
+    tokens.push(ch)
+    i++
+  }
+  return tokens.join(' ')
+}
+
 function mechanismSource() {
   const engine = read(ENGINE_REL)
   if (engine === null) return null
-  const code = stripCode(engine)
+  const code = stripCommentsKeepStrings(engine)
   const loops = loopBodies(code, DRIVER_HEAD)
   const plan = fnBody(code, 'plan')
   const expire = fnBody(code, 'expire')
@@ -359,7 +445,7 @@ if (source === null && read(ENGINE_REL) === null) {
   console.error(red(`control-plane-audit：机制面文件读不出（${ENGINE_REL}）`))
   process.exit(2)
 }
-const hash = source === null ? null : `sha256:${crypto.createHash('sha256').update(source).digest('hex')}`
+const hash = source === null ? null : `sha256:${crypto.createHash('sha256').update(normalizeRust(source)).digest('hex')}`
 const productionFiles = loopFiles.length
 
 if (PRINT || WRITE) {
@@ -380,7 +466,7 @@ if (PRINT || WRITE) {
 if (source === null) {
   report('CP-006', ENGINE_REL, `机制三段读不出（需要恰好 1 段驱动循环 + fn plan + fn expire）——形状缺口先看 CP-001`)
 } else if (mech.hash !== hash) {
-  report('CP-006', ENGINE_REL, `机制面哈希变了：基线 ${mech.hash ?? '(空)'} ≠ 实测 ${hash} —— 机制演进必须同批更新基线并署名`)
+  report('CP-006', ENGINE_REL, `机制面归一化哈希变了：基线 ${mech.hash ?? '(空)'} ≠ 实测 ${hash} —— 语义变了才该变（格式 / 注释不进来）；机制演进必须同批更新基线并署名`)
 }
 if (Number(baseline?.extension?.productionFiles) !== productionFiles) {
   report('CP-006', LOOP_SRC, `生产文件数变了：基线 ${baseline?.extension?.productionFiles} ≠ 实测 ${productionFiles}`)

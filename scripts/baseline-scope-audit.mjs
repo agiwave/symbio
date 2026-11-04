@@ -36,6 +36,11 @@
  * **它只对「删除 / 机制面变化」开放**；计数上调与新增键永远不接受 allow——那两件事
  * 的正确答案不是「登记一条豁免」，而是「把这处红修掉」。
  *
+ * **允许记录活得比一批长**：`to` 一旦成为当前基线的值，这条记录就从「在途豁免」
+ * 变成「署名」（`allowLanded`）。它不再命中任何 diff，但保留着「谁、为什么动机制面」
+ * ——若把它判成空头，每批落地后都会红一次；假红一多，allow 就没人看理由了。
+ * 空头只剩两种：`from` 与 `to` 相同、或 `to` 根本不等于当前任何一个基线值。
+ *
  * ## 与「known-red」的区别
  *
  * `known-red` 是**还没修的红**（门禁仍然 exit 1）；`baseline-allow` 是**已经发生的
@@ -131,6 +136,60 @@ function findAllow(records, from, to) {
   const hit = records.find((r) => r.from === from && r.to === to)
   if (hit) hit.used = true
   return hit
+}
+
+/**
+ * 一条**没被本轮命中**的 allow 是不是「已落地」。
+ *
+ * `baseline-allow` 的生命周期比一次提交长：`to` 那一头（新指纹 / 新文件 / `(none)`）
+ * 一旦落在当前基线上，这条记录就从「在途豁免」变成**署名**——它仍是有价值的记录
+ * （谁、为什么改机制面），只是不再对应某个在途 diff。若把它判成 BS-005 的「空头」，
+ * 每一批落地后都会红一次，而假红多了就没人看理由了。
+ *
+ * 判据只有两条，都不接受含糊：
+ *  - `to` 等于当前基线里的某个值（机制面 file / hash、各棘轮格的计数或名单项）；
+ *  - 或 `to` 是 `(none)` 且 `from` 指的键**在当前基线里确实不存在**（清债已落地）。
+ * 其余一律仍是空头：`from` 与 `to` 相同、`to` 谁也不认识、`from` 的键还在——都是
+ * 指向一个没发生的变更。
+ */
+function allowLanded(r, values) {
+  if (r.from === r.to) return false
+  if (values.has(r.to)) return true
+  if (r.to !== '(none)') return false
+  return fromPathAbsentNow(r.from)
+}
+
+/** `objName/key` 形状的 allow 端点：该键在当前两份基线里都不存在 ⇒ 删除已落地。 */
+function fromPathAbsentNow(pathKey) {
+  const slash = pathKey.indexOf('/')
+  if (slash < 0) return false
+  const name = pathKey.slice(0, slash)
+  const key = pathKey.slice(slash + 1)
+  let seen = false
+  for (const obj of [nowLp, nowCp]) {
+    const v = obj?.[name]
+    if (Array.isArray(v)) return !v.includes(key)
+    if (v && typeof v === 'object') return !Object.prototype.hasOwnProperty.call(v, key)
+    if (v !== undefined) seen = true
+  }
+  return !seen
+}
+
+/** 当前两份基线里的全部「值」——`allowLanded` 用它判 `to` 是否已落地。 */
+function currentBaselineValues() {
+  const values = new Set()
+  for (const v of [nowCp?.mechanism?.file, nowCp?.mechanism?.hash]) {
+    if (v !== undefined) values.add(String(v))
+  }
+  for (const obj of [nowLp, nowCp]) {
+    for (const [k, v] of Object.entries(obj ?? {})) {
+      if (META.has(k)) continue
+      if (typeof v === 'string' || typeof v === 'number') values.add(String(v))
+      else if (Array.isArray(v)) for (const x of v) values.add(String(x))
+      else if (v && typeof v === 'object') for (const x of Object.values(v)) values.add(String(x))
+    }
+  }
+  return values
 }
 
 // ───────────────────────────── 读入 ─────────────────────────────
@@ -249,6 +308,7 @@ if (baseCp.extension?.productionFiles !== undefined && nowCp.extension?.producti
 
 // ─────────────────────── allow 记录本身的形状 ───────────────────────
 
+const landedValues = currentBaselineValues()
 for (const [rel, parsed] of [
   [LP_REL, lpAllow],
   [CP_REL, cpAllow],
@@ -257,7 +317,8 @@ for (const [rel, parsed] of [
     report('BS-005', rel, `\`baseline-allow\` 记录不合法：${m} —— 必须写「<old>→<new> <理由> D-NNN」`)
   }
   for (const r of parsed.records) {
-    if (!r.used) report('BS-005', rel, `\`baseline-allow\` 指向一个没有发生的变更：${r.raw}`)
+    if (r.used || allowLanded(r, landedValues)) continue
+    report('BS-005', rel, `\`baseline-allow\` 指向一个没有发生的变更：${r.raw}`)
   }
 }
 

@@ -376,7 +376,14 @@ jobs:
         # 而链上 `registry-audit --write` 的产物（`[[编号]]` 记号）正是下一格 `gen-doc-refs`
         # 的输入 ⇒ `--ci` 恒红。合成一个 `autoChain` 工作（只在末态判差异）后点得进了，
         # 汇总页**内容**落后代码这件事从此这里挡得住（口径 4）。
-        run: node scripts/gate.mjs --only=facts-write,docs,facts,baseline --ci
+        # `baseline-scope`（61）判「基线变了」本身有没有署名：它必须拿到**合并基**才能
+        # 区分「在途变更」与「已落地的旧 allow」。脚本省略 `--base` 时会退回 `HEAD`，
+        # 而 `HEAD` 是提交后的现状 ⇒ 刚署名的 allow 变成「指向没发生的变更」（BS-005 假红）。
+        # 故本行**显式传合并基**：PR 用目标分支 tip，push 用「本次推送前的位置」
+        # （首推时 before 是全 0，阶段自己会退到上游 / `origin/v2` / `origin/main`，
+        # 再取 merge-base；一个都取不到就诚实跳过，不假绿）。阶段内若合并基收敛到 HEAD
+        # 且工作树无基线改动，同样诚实跳过——「没有在途变更」判不了，不是通过。
+        run: node scripts/gate.mjs --only=facts-write,docs,facts,baseline,baseline-scope --ci --base="${{ github.event.pull_request.base.sha || github.event.before }}"
         continue-on-error: false
 
       - name: Check for obvious documentation issues
