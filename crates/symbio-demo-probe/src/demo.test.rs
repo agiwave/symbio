@@ -1,13 +1,54 @@
 //! 验收：假插件只改本 crate，就能被环选中、派发、配对。
 
+use std::sync::Arc;
+
 use super::*;
-// 只做链接：环经 creator 注册被宿主发现，测试二进制必须把它的注册项带进来。
+// 只做链接：环经 creator 注册被这个根构造，测试二进制必须把它的注册项带进来。
 use symbio_plugin_loop as _;
 use symbio_host::{base_context, DriveOutcome, Host};
 
+/// 夹具根：先收假插件的端口/债行，再挂上系统环的 `drive` 行。
+///
+/// 与真实装配一致——根只负责把子插件逐个 `traverse`，自己不认识它们的内容。
+struct ProbeRoot {
+    demo: Arc<dyn Plugin>,
+}
+
+#[async_trait::async_trait]
+impl Plugin for ProbeRoot {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("probe-root", "probe-root")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound("route".into()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        path: String,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        Arc::clone(&self.demo)
+            .traverse(path.clone(), Arc::clone(&ctx))
+            .await?;
+        let ring = symbio_plugin_api::creator_create_object::<dyn Plugin>(
+            symbio_deploy::PLUGIN_ID_LOOP,
+            Arc::clone(&ctx),
+        )
+        .ok_or_else(|| PluginError::NotFound("环插件未注册".into()))?;
+        ring.traverse(path, ctx).await
+    }
+}
+
 #[tokio::test]
 async fn demo_port_runs_through_the_ring() {
-    let host = Host::new(DemoPlugin::build(base_context()));
+    let host = Host::new(Arc::new(ProbeRoot {
+        demo: DemoPlugin::build(base_context()),
+    }));
     let report = host
         .drive(&base_context(), "demo-session", None)
         .await

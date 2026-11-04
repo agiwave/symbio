@@ -8,7 +8,8 @@ use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload,
 };
-use symbio_plugin_api::drive::DRIVE_PATH;
+use symbio_plugin_api::drive::drive_row;
+use symbio_plugin_api::CAPABILITY_VISITOR;
 
 /// 单环驱动器（crate 内唯一实例；对外经 creator 注册可见）。
 pub(crate) struct LoopPlugin;
@@ -41,17 +42,19 @@ impl Plugin for LoopPlugin {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(symbio_sdk::keys::PATH).unwrap_or_default();
-        if path == DRIVE_PATH {
-            return crate::drive::run(ctx).await;
-        }
         Err(PluginError::NotFound(format!("未知路径: {path}")))
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn PluginInvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
+        if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
+            visitor
+                .put(drive_row("loop", Arc::new(crate::drive::LoopDrive)))
+                .await;
+        }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

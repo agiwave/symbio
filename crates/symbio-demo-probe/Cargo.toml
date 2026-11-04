@@ -18,6 +18,7 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
+symbio-deploy = { path = "../symbio-deploy" }
 symbio-host = { path = "../symbio-host" }
 symbio-plugin-loop = { path = "../symbio-plugin-loop" }
 tokio = { workspace = true }

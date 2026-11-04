@@ -1,14 +1,15 @@
 //! 宿主的机制状态：无债即 `idle`，有未还债即撤销。
 
 use super::*;
-// 只做链接：环经 creator 注册被宿主发现，测试二进制必须把它的注册项带进来。
+// 只做链接：环经 creator 注册被这个根构造，测试二进制必须把它的注册项带进来。
+use symbio_deploy::PLUGIN_ID_LOOP;
 use symbio_plugin_loop as _;
 use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
     PluginSimpleRequest,
 };
 
-/// 没有子插件、也不注册任何行的根：用来把驱动走到「无债」。
+/// 没有业务行、只把系统环挂进来的根：用来把驱动走到「无债」。
 struct EmptyRoot;
 
 #[async_trait::async_trait]
@@ -26,10 +27,16 @@ impl Plugin for EmptyRoot {
 
     async fn traverse(
         self: Arc<Self>,
-        _path: String,
-        _ctx: Arc<dyn PluginInvokeRequest>,
+        path: String,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        Ok(PluginPayload::Empty)
+        // 与真实装配一致：系统插件从工厂表构造，再委托 traverse（根自己没有行）。
+        let ring = symbio_plugin_api::creator_create_object::<dyn Plugin>(
+            PLUGIN_ID_LOOP,
+            Arc::clone(&ctx),
+        )
+        .ok_or_else(|| PluginError::NotFound("环插件未注册".into()))?;
+        ring.traverse(path, ctx).await
     }
 }
 

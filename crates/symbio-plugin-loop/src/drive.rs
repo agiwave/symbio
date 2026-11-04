@@ -2,53 +2,47 @@
 //!
 //! 适配是唯一允许的翻译层：中性事实 ↔ 五类事实、中性行 ↔ 债行。环本身仍然只认
 //! 自己的类型；宿主因此不必认识 `ring` 里的任何东西（`DE-051` 机制形状）。
+//!
+//! 这个执行者只在本 crate 内可见，经 `traverse` 往 `drive` 族登记一行；宿主按族
+//! `list` 取回后调用，能力束与可见域是参数。
 
 use std::sync::Arc;
 
-use serde_json::Value;
-use symbio_kernel::plugin::{
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
-};
 use symbio_plugin_api::drive::{
-    DriveFact, DriveOutcome, DriveReport, DriveRow, DriveSupport, DRIVE_REPORT, DRIVE_SCOPE,
-    DRIVE_SUPPORT,
+    DriveFact, DriveOutcome, DriveReport, DriveRow, DriveRunner, DriveSupport,
 };
 use symbio_plugin_api::port::{PortExecutor, PortFactEmit, PortFactReader};
 
 use crate::ring::{drive, DebtKey, DebtRow, DebtSource, DriveCtx, Fact, FactKind, FactView};
 
-/// 环入口：宿主经上下文键给出能力束与可见域，环把报告写回上下文。
-pub(crate) async fn run(
-    ctx: Arc<dyn PluginInvokeRequest>,
-) -> PluginInvokeResponse<PluginPayload> {
-    let Some(support) = ctx.get(DRIVE_SUPPORT) else {
-        return Err(PluginError::NotFound("缺少驱动能力束".to_string()));
-    };
-    let Some(scope) = ctx.get(DRIVE_SCOPE) else {
-        return Err(PluginError::NotFound("缺少驱动可见域".to_string()));
-    };
+/// 环的执行者：宿主把能力束与可见域交进来，报告原样回去。
+pub(crate) struct LoopDrive;
 
-    let adapter = SupportCtx {
-        support: Arc::clone(&support),
-        scope,
-        source: SupportSource { support },
-    };
-    let report = drive(&adapter, scope).await;
-    let outcome = match report.outcome {
-        crate::ring::DriveOutcome::NoDebt => DriveOutcome::NoDebt,
-        crate::ring::DriveOutcome::Waiting(keys) => {
-            DriveOutcome::Waiting(keys.into_iter().map(to_neutral_key).collect())
-        }
-    };
-    ctx.set(
-        DRIVE_REPORT,
-        DriveReport {
+#[async_trait::async_trait]
+impl DriveRunner for LoopDrive {
+    async fn drive(
+        &self,
+        support: Arc<dyn DriveSupport>,
+        scope: u64,
+    ) -> Result<DriveReport, String> {
+        let adapter = SupportCtx {
+            support: Arc::clone(&support),
+            scope,
+            source: SupportSource { support },
+        };
+        let report = drive(&adapter, scope).await;
+        let outcome = match report.outcome {
+            crate::ring::DriveOutcome::NoDebt => DriveOutcome::NoDebt,
+            crate::ring::DriveOutcome::Waiting(keys) => {
+                DriveOutcome::Waiting(keys.into_iter().map(to_neutral_key).collect())
+            }
+        };
+        Ok(DriveReport {
             scope,
             dispatched: report.dispatched,
             outcome,
-        },
-    );
-    Ok(PluginPayload::new(&Vec::<Value>::new()))
+        })
+    }
 }
 
 /// 中性债键 → 环债键。

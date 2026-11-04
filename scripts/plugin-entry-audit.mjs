@@ -1010,6 +1010,10 @@ const LOOP_ALLOWED_CRATE_ROOTS = new Set([
   // 编排入口与薄环：P4 把 `stage_driver` 拆成「编排（幕的开关/接续）」与「环（选债/守卫）」。
   'entry',
   'ring',
+  // 通用契约与环之间的适配层（中性事实/债行 ↔ 五类事实/债行）。
+  // 与 `ring` 同档：`crate::` 指本 crate 内部，兄弟插件是独立 crate（D-191），
+  // E-013 判的是「跨墙通货」，不是「同一 crate 内的模块引用」。
+  'drive',
   'stage_events',
   'derived_facts',
   'loop_rows',

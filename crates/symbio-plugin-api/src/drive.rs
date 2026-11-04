@@ -4,13 +4,15 @@
 //! 业务事实名**：端口名与种类都是值，由数据源给出；这里只规定形状，不解释语义。
 //! 判据与模块边界见 `docs/003-design/051-机制形状规格.md`。
 //!
-//! 宿主经上下文键 [`DRIVE_SUPPORT`] 把实现交给环，经 [`DRIVE_SCOPE`] 指明本次可见域；
-//! 环把报告经 [`DRIVE_REPORT`] 交回。宿主因此**不认识环的任何类型**，环也不认识宿主。
+//! 注册走项目既有的**能力收集机制**：环在 `traverse` 里往 [`DRIVE_FAMILY`] 放一行
+//! [`DrivePayload`]（载荷是 [`DriveRunner`]）；宿主 `list` 该族取回执行者。能力束与
+//! 可见域是**调用参数**，不是注册面。宿主因此**不认识环的任何类型**，环也不认识宿主。
 
+use std::fmt;
 use std::sync::Arc;
 
 use serde_json::Value;
-use symbio_kernel::keys::SymbioKey;
+use symbio_kernel::capability::{CapabilityFamily, CapabilityRow};
 
 use crate::port::{PortExecutor, PortFactEmit, PortFactReader, PortReply};
 
@@ -20,8 +22,56 @@ pub const DRIVE_CLOSING_OK: &str = "response";
 /// 环协议里「判死落账」的事实名（机制词汇，不是世界词）。
 pub const DRIVE_CLOSING_FAILED: &str = "failed";
 
-/// 环入口在插件内的**相对臂**：宿主直呼环插件时放进 `PATH`。
-pub const DRIVE_PATH: &str = "drive";
+/// 驱动执行者所在的唯一 `multi` 族（与 `port` / `debt` 同一手法：族是值，加族不改内核）。
+pub const DRIVE_FAMILY: CapabilityFamily = CapabilityFamily::multi("drive");
+
+/// 驱动执行者：给一个可见域与一份中性能力束，跑到没有可还的债为止。
+///
+/// 内容（能力束 / 可见域）是参数；注册面只有 [`DRIVE_FAMILY`] 的那一行。
+#[async_trait::async_trait]
+pub trait DriveRunner: Send + Sync {
+    /// 驱动一个可见域；报告原样交回宿主。
+    async fn drive(
+        &self,
+        support: Arc<dyn DriveSupport>,
+        scope: u64,
+    ) -> Result<DriveReport, String>;
+}
+
+/// `drive` 行的载荷。
+///
+/// 消费方经 `row.payload::<DrivePayload>()` 下转型取回——类型是声明方与消费方之间的
+/// 私有约定，表不参与校验（与 `PortPayload` 同一条开放载荷形状）。
+#[derive(Clone)]
+pub struct DrivePayload(Arc<dyn DriveRunner>);
+
+impl DrivePayload {
+    /// 由执行者造载荷。
+    pub fn new(runner: Arc<dyn DriveRunner>) -> Self {
+        Self(runner)
+    }
+
+    /// 取执行者。
+    pub fn runner(&self) -> Arc<dyn DriveRunner> {
+        Arc::clone(&self.0)
+    }
+}
+
+impl fmt::Debug for DrivePayload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("DrivePayload")
+    }
+}
+
+/// 造一行 `drive` 族登记（`active = false`，与 port / debt 同一手法）。
+pub fn drive_row(name: &str, runner: Arc<dyn DriveRunner>) -> CapabilityRow {
+    CapabilityRow::new(
+        DRIVE_FAMILY,
+        format!("<drive>{name}"),
+        DrivePayload::new(runner),
+        false,
+    )
+}
 
 /// 债身份（中性形状）：可见域 + 端口名 + 欠债方派生的 id + 租约尝试号。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -153,70 +203,3 @@ pub trait DriveSupport: Send + Sync {
     }
 }
 
-/// 驱动能力束的上下文键。
-pub struct DriveSupportKey;
-
-impl SymbioKey for DriveSupportKey {
-    type Value = Arc<dyn DriveSupport>;
-    const WIRE: bool = false;
-
-    fn name(&self) -> &'static str {
-        "drive_support"
-    }
-
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-
-    fn format(&self, _v: &Self::Value) -> String {
-        String::new()
-    }
-}
-
-/// 驱动能力束的唯一实例。
-pub const DRIVE_SUPPORT: DriveSupportKey = DriveSupportKey;
-
-/// 本次驱动的可见域。
-pub struct DriveScopeKey;
-
-impl SymbioKey for DriveScopeKey {
-    type Value = u64;
-
-    fn name(&self) -> &'static str {
-        "drive_scope"
-    }
-
-    fn parse(&self, s: &str) -> Option<Self::Value> {
-        s.parse().ok()
-    }
-
-    fn format(&self, v: &Self::Value) -> String {
-        v.to_string()
-    }
-}
-
-/// 可见域键的唯一实例。
-pub const DRIVE_SCOPE: DriveScopeKey = DriveScopeKey;
-
-/// 驱动报告回的上下文键（进程内对象，环交回给宿主）。
-pub struct DriveReportKey;
-
-impl SymbioKey for DriveReportKey {
-    type Value = DriveReport;
-    const WIRE: bool = false;
-
-    fn name(&self) -> &'static str {
-        "drive_report"
-    }
-
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-
-    fn format(&self, _v: &Self::Value) -> String {
-        String::new()
-    }
-}
-
-/// 报告键的唯一实例。
-pub const DRIVE_REPORT: DriveReportKey = DriveReportKey;

@@ -10,6 +10,6 @@ pub(crate) mod table;
 
 pub(crate) mod engine;
 
-pub(crate) use engine::{drive, DriveCtx, DriveOutcome};
-pub(crate) use facts::{DebtKey, Fact, FactKind, FactView};
-pub(crate) use table::{DebtRow, DebtSource};
+pub(crate) use self::engine::{drive, DriveCtx, DriveOutcome};
+pub(crate) use self::facts::{DebtKey, Fact, FactKind, FactView};
+pub(crate) use self::table::{DebtRow, DebtSource};

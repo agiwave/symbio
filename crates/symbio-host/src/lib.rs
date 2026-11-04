@@ -1,8 +1,8 @@
 //! 宿主：发现全部 port 行、按 scope 起一次驱动、把债表当数据读、记机制状态 `idle`。
 //!
 //! 宿主不是插件：它依赖契约层，但插件不依赖它；插件之间互不依赖仍成立。
-//! **宿主不认识环的任何类型**：驱动经注册机制取到环插件，能力束与可见域走
-//! `plugin_api::drive` 的通用契约，报告也从同一上下文键取回（`DE-051` 机制形状）。
+//! **宿主不认识环的任何类型**：驱动执行者经既有的**能力收集机制**（`drive` 族的一行）
+//! 取回，能力束与可见域是**调用参数**，不是注册面（`DE-051` 机制形状）。
 //! 端口名与债行都不在这里构造：执行体由 `port` 族的行解析，债行由插件经 `debt` 族自报。
 //! `idle` 是机制事实（scope 无未还债），不是业务事实；收束谓词由读方自算，宿主不落业务事实。
 
@@ -10,12 +10,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use symbio_deploy::PLUGIN_ID_LOOP;
 use symbio_kernel::capability::Registry;
-use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
-use symbio_plugin_api::creator_create_object;
+use symbio_kernel::plugin::{
+    Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
+};
 use symbio_plugin_api::drive::{
-    DriveFact, DriveRow, DriveSupport, DRIVE_PATH, DRIVE_REPORT, DRIVE_SCOPE, DRIVE_SUPPORT,
+    DriveFact, DrivePayload, DriveRow, DriveRunner, DriveSupport, DRIVE_FAMILY,
 };
 use symbio_plugin_api::port::{
     PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter, PortPayload, PORT_FAMILY,
@@ -121,21 +121,7 @@ impl Host {
             started: self.started,
             concurrency: self.concurrency,
         });
-
-        let ctx = base.fork();
-        ctx.set(PATH, DRIVE_PATH.to_string());
-        ctx.set(DRIVE_SCOPE, scope);
-        ctx.set(DRIVE_SUPPORT, support);
-        let loop_plugin: Arc<dyn Plugin> =
-            creator_create_object::<dyn Plugin>(PLUGIN_ID_LOOP, Arc::clone(&ctx))
-                .ok_or_else(|| format!("环插件未注册: {PLUGIN_ID_LOOP}"))?;
-        loop_plugin
-            .route(ctx.clone())
-            .await
-            .map_err(|e| format!("驱动失败: {e:?}"))?;
-        let report = ctx
-            .get(DRIVE_REPORT)
-            .ok_or_else(|| "环未交回驱动报告".to_string())?;
+        let report = gathered.runner.drive(support, scope).await?;
 
         let at = self.started.elapsed().as_millis() as u64;
         {
@@ -196,13 +182,30 @@ impl Host {
             }
         }
 
-        Ok(Gathered { executors, sources })
+        let mut runner: Option<Arc<dyn DriveRunner>> = None;
+        for row in manager.list(DRIVE_FAMILY).await {
+            let Some(payload) = row.payload::<DrivePayload>() else {
+                continue;
+            };
+            if runner.is_some() {
+                return Err("drive 族出现多个提供者".to_string());
+            }
+            runner = Some(payload.runner());
+        }
+        let runner = runner.ok_or_else(|| "drive 族没有任何提供者".to_string())?;
+
+        Ok(Gathered {
+            executors,
+            sources,
+            runner,
+        })
     }
 }
 
 struct Gathered {
     executors: HashMap<String, Arc<dyn PortExecutor>>,
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
+    runner: Arc<dyn DriveRunner>,
 }
 
 /// 宿主实现的中性能力束：事实读写、执行体解析、存在性、时钟与限额。
