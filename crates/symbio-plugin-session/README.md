@@ -147,47 +147,21 @@ session:
 
 ---
 
-### 3. 大模型自动语义压缩策略与对话轮数对齐 (`auto_compress` / `context_messages`)
+### 3. 大模型自动语义压缩策略与对话轮数对齐 (`context_messages`)——加载层与压缩已退场
 
-> **目标**：解决 LLM Token 绝对窗口溢出问题，通过“宏观压缩”在维持长距离记忆连贯性的同时极大降低 Token 话费。
+> **目标**：解决 LLM Token 绝对窗口溢出问题。**现状**：加载层轮次对齐与会话侧语义合并已随 B2 退场（D-318）；`context_messages` 只剩写入期工具链裁剪用途（见第 4 节），请求体由事实网格投影决定。
 
 * **具体规则**：
- * **对话轮数感知滑动窗口限制 (Dialogue Turn-Aware Sliding Window)**：
- * 每次组装上下文时，如果未指定具体的消息条数限制，系统会自动依据 `context_messages` (默认 **6** 轮对话) 作为滑动窗口。
- * **智能对齐**：为了避免工具调用等中间过程物理截断导致 context_messages 切碎了上一轮的 User 消息（导致 Agent 在对齐时把整段历史吞掉），加载过程会**从后往前定位**第 `context_messages` 个 `User` 消息。
- * 系统将从该 `User` 消息起点开始，返回**完整且未遭打碎的最近 $N$ 轮历史对话**。
- * **动态语义压缩**：当滑动窗口内的对话历史 Token 预估值超过大模型上下文限制的 **70%** 时，且 `auto_compress` 开启，系统将自动对老旧历史进行 LLM 语义合并。
+ * **对话轮数感知滑动窗口（加载层已退场，D-318）**：`context_messages`（默认 **6** 轮）现只作为**写入期**工具链裁剪的分水岭（见第 4 节）；加载层不再按 User 轮次截取历史，读路径只交完整节点树。
+ * **动态语义压缩（已随 B2 退场，D-318）**：会话侧语义合并写点已删除；请求体由事实网格的投影决定，压缩若要恢复须按新环重新立决策。
 * **Rust 实现策略**：
- * **Turn 对齐获取 (`crates/symbio-plugin-session/src/chat_session/read.rs`)**：
- * `ChatSession::get_context_messages` 中先做三层清理（过滤 `Failed` 消息、剔除孤儿节点、content 归一兜底），再以 `context_messages` (可通过参数显式覆盖) 调用 `sliding_window` 实现 User 消息轮次级对齐：
+ * **节点树只交全树 (`crates/symbio-plugin-session/src/chat_session/read.rs`)**：
+ * 读路径只回答「存储里有什么」——`get_messages` 按单调 `seq` 排序后交**完整节点树**（含呈现树投影 `flatten_whole_tree`），不再做 User 轮次窗口对齐；`get_context_messages` / `sliding_window` 的加载层截取已随 B2 退场（D-318）。
+ * **请求投影 (`crates/symbio-sdk/src/projection/transcript.rs`)**：
+ * 「哪些历史进请求」由事实网格的投影回答：`transcript` 折叠变更格、压缩快照、分支与区间省略，产出 `TranscriptView`；会话层不持有第二份截取逻辑。
 
- ```rust
- // 从后往前定位第 context_limit 个 User 消息，以其作为起点裁剪历史
- let mut user_indices = Vec::new;
- for (idx, msg) in messages.iter.enumerate {
- if msg.role == Some(NodeRole::User) {
- user_indices.push(idx);
- }
- }
- if user_indices.len <= max_turns {
- return messages.to_vec;
- }
- let start_idx = user_indices[user_indices.len - max_turns];
- messages[start_idx..].to_vec
- ```
-
- * **语义合并 (`crates/symbio-plugin-loop/src/context.rs`)**：
- * 每次大模型执行 Turn 之前，`prepare_compression`（配合 `should_start_compression` 的 Token 估计检测）会检测 Token 估计值。如果超标，它会将历史会话（保留最近 30% 活跃明细）打包发送给一个背景 LLM，并使用特殊的 System Prompt 提炼出高密度的 **`<state_snapshot>` XML 状态快照**：
-
- ```xml
- <state_snapshot>
- <completed_items>已成功重构 Session 核心，并在 symbio 中消灭了硬编码。</completed_items>
- <knowledge_discovered>Model 插件和 Agent 插件解耦，跨插件只能经 VDFS 地址交互。</knowledge_discovered>
- <open_issues>前端 UI 还需适配会话配置的新字段。</open_issues>
- </state_snapshot>
- ```
-
- * 该快照以一条高密度的 User 消息替代被压缩的老旧历史，完美承接之前的所有意图与已知知识，将上下文开销瞬间降到最低。
+ * **语义合并（已随 B2 退场，D-318）**：
+ * 旧编排里的 `loop/src/context.rs`（`prepare_compression` / `should_start_compression`）随 B2 删除；本仓不再有会话侧语义合并写点。压缩快照若再要，按 048 的新环设计重新立决策，不得复活旧名字。
 
 ---
 
@@ -318,11 +292,11 @@ session:
 | :--- | :--- | :--- | :--- | :--- |
 | **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `crates/symbio-plugin-session/src/chat_session/write.rs` |
 | **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（[../loop/turn_runner.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | `crates/symbio-plugin-model/src/stream.rs` |
-| **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `crates/symbio-plugin-session/src/chat_session/read.rs`<br>`crates/symbio-plugin-loop/src/context.rs` |
+| **加载轮次对齐 + 宏观语义快照合并（已退场，D-318）** | `context_messages` 仅剩**写入期**工具链裁剪用途 | — | 会话读路径只交全树，不再做轮次对齐；请求体由 `projection::transcript` 投影，会话侧语义合并已随 B2 退场 | `crates/symbio-plugin-session/src/chat_session/read.rs`<br>`crates/symbio-sdk/src/projection/transcript.rs` |
 | **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收） | `crates/symbio-plugin-session/src/chat_session/write.rs`（`prune_historical_tool_calls`） |
 | **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | [../loop/context/view.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") |
 
-通过这套**五维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求层（`build_request_sections` 三段注入，只追加不改写）→ 语义压缩层（`auto_compress` 语义合并）"的上下文治理链路，实现了高保真度的会话还原与清爽的本地持久化。请求体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）——模型看到的每条历史都能在网格里找到出处，`prompt_fidelity` 每轮复核这一点。
+通过这套**协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪，内容节点恒为完整原文）→ 读路径（`get_messages` 只交全树）→ 请求层（`build_request_sections` 三段注入，只追加不改写）→ 请求投影（`projection::transcript` 从事实网格折出请求体）"的上下文治理链路，实现了高保真度的会话还原与清爽的本地持久化。请求体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）——模型看到的每条历史都能在网格里找到出处，`prompt_fidelity` 每轮复核这一点。
 
 ---
 
