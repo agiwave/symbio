@@ -904,6 +904,211 @@ test('E-009 不误报：装配方 `crates/symbio` 聚合全部插件（inventory
   assert.equal(r.status, 0, r.stdout)
 })
 
+// ── E-009 后半（依赖边闭集）：`symbio-*` 只许 plugin-api / kernel / providers ─────
+//
+// 判据从「只禁兄弟插件」扩成**生产依赖闭集**：`symbio-sdk` / `symbio-deploy` 是应用侧
+// 门面，插件依赖它就是「插件 → 应用」反向耦合；控制面插件不豁免。dev / build 仍只判
+// 兄弟插件。`symbio-providers` 的三条准入条件由 providers 条件块实际检查。
+
+test('E-009 命中：[dependencies] 出现 `symbio-sdk`（应用侧门面）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(`\n[dependencies]\nsymbio-sdk = { path = "../symbio-sdk" }\n`),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, depHit(5))
+  assert.match(r.stdout, /插件 → 应用/)
+})
+
+test('E-009 命中：`symbio-sdk` 改名后仍按 `package` 值判', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      `\n[dependencies]\nsdk = { package = "symbio-sdk", path = "../symbio-sdk" }\n`,
+    ),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, depHit(5))
+})
+
+test('E-009 命中：控制面插件同样受白名单约束（`session` 依赖 `symbio-deploy`）', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-plugin-session/Cargo.toml':
+      '[package]\nname = "symbio-plugin-session"\n\n[dependencies]\nsymbio-deploy = { path = "../symbio-deploy" }\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009 crates\/symbio-plugin-session\/Cargo\.toml/)
+})
+
+test('E-009 不误报：白名单三件套 + 第三方进 [dependencies]', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      '\n[dependencies]\n' +
+        'symbio-plugin-api = { path = "../symbio-plugin-api" }\n' +
+        'symbio-kernel = { path = "../symbio-kernel" }\n' +
+        'symbio-providers = { path = "../symbio-providers" }\n' +
+        'serde = { version = "1" }\n',
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-009 不误报：`symbio-sdk` 只在 [dev-dependencies]（dev 仍只判兄弟插件）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(`\n[dev-dependencies]\nsymbio-sdk = { path = "../symbio-sdk" }\n`),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+// ── E-009（providers 三条件）：白名单条目不是免检 ─────────────────────────
+const PROVIDERS = {
+  'crates/symbio-providers/Cargo.toml':
+    '[package]\nname = "symbio-providers"\n\n[dependencies]\nsymbio-plugin-api = { path = "../symbio-plugin-api" }\n',
+  'crates/symbio-providers/src/lib.rs': 'pub fn http() {}\n',
+}
+
+test('E-009 命中：`symbio-providers` 依赖插件（它会变成第二个共享层）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...PROVIDERS,
+    'crates/symbio-providers/Cargo.toml':
+      '[package]\nname = "symbio-providers"\n\n[dependencies]\nsymbio-plugin-web = { path = "../symbio-plugin-web" }\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009 crates\/symbio-providers\/Cargo\.toml/)
+})
+
+test('E-009 命中：`symbio-providers` 源码引用插件 crate', () => {
+  const r = audit({
+    ...CLEAN,
+    ...PROVIDERS,
+    'crates/symbio-providers/src/lib.rs': 'use symbio_plugin_web::WebConfig;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009 crates\/symbio-providers\/src\/lib\.rs:1/)
+})
+
+test('E-009 命中：`symbio-providers` 出现端口名字面量（端口名取自插件的生产声明）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...PROVIDERS,
+    'crates/symbio-plugin-mcp/src/ports.rs':
+      'pub const PORTS: &[PortDecl] = &[PortDecl::new("mcp.call")];\n',
+    'crates/symbio-providers/src/lib.rs': 'pub const P: &str = "mcp.call";\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009 crates\/symbio-providers\/src\/lib\.rs:1/)
+  assert.match(r.stdout, /端口名字面量/)
+})
+
+test('E-009 命中：`symbio-providers` 出现业务事实名（取自门面事件常量）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...PROVIDERS,
+    'crates/symbio-plugin-api/src/events.rs':
+      'pub const EVENT_USER_MESSAGE: &str = "user.message";\n',
+    'crates/symbio-providers/src/lib.rs': 'pub const E: &str = "user.message";\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009 crates\/symbio-providers\/src\/lib\.rs:1/)
+  assert.match(r.stdout, /业务事实名/)
+})
+
+test('E-009 不误报：`symbio-providers` 注释里的端口名与事实名', () => {
+  const r = audit({
+    ...CLEAN,
+    ...PROVIDERS,
+    'crates/symbio-providers/src/lib.rs':
+      '// 例如 "mcp.call" / "user.message" 都不归这一层\npub fn http() {}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+// ── E-009（限期豁免）：`plugin-session` 的 `symbio-sdk` ────────────────────
+//
+// 豁免的三条条件是**数据**：对象（crate + dependency）、到期日、符号集。下面每条用例
+// 只改一处数据，证明三种失败各自会红，且复原后绿——豁免不是 WARNING，也不是白名单条目。
+const SESSION_SDK_MANIFEST =
+  '[package]\nname = "symbio-plugin-session"\n\n[dependencies]\n' +
+  'symbio-kernel = { path = "../symbio-kernel" }\n' +
+  'symbio-sdk = { path = "../symbio-sdk" }\n' +
+  'symbio-plugin-api = { path = "../symbio-plugin-api" }\n'
+/** 直接写 `symbio_sdk::`（真实 crate 的形态），不沿用夹具里的 `crate::symbio_sdk` 旧路径 */
+const PLUGIN_SDK_DIRECT = PLUGIN.replace('use crate::symbio_sdk::', 'use symbio_sdk::')
+const SDK_FIXTURE_SYMBOLS = ['PluginError', 'PluginMeta', 'PATH', 'TRAVERSE_AVAILABLE_TOOLS']
+
+const sdkExemptionFixture = (over = {}) => ({
+  'crates/symbio-plugin-session/Cargo.toml': SESSION_SDK_MANIFEST,
+  'crates/symbio-plugin-session/src/plugin.rs': PLUGIN_SDK_DIRECT,
+  'scripts/exemptions/plugin-session-sdk.json': JSON.stringify(
+    {
+      rule: 'E-009',
+      crate: 'symbio-plugin-session',
+      dependency: 'symbio-sdk',
+      expires: '2099-12-31',
+      knife: 'T-034',
+      phase: 'P4–P6',
+      retire: 'session 退役时同批删除本豁免',
+      symbols: SDK_FIXTURE_SYMBOLS,
+      ...over,
+    },
+    null,
+    2,
+  ),
+})
+
+test('E-009 限期豁免：对象 / 日期 / 符号集都对时绿（session 的 sdk 依赖放行）', () => {
+  const r = audit({ ...CLEAN, ...sdkExemptionFixture() })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-009 限期豁免：新增一条 sdk 用法即红（符号集冻结真的抓得住新增）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...sdkExemptionFixture(),
+    'crates/symbio-plugin-session/src/new_use.rs':
+      'pub fn fresh() -> u64 { symbio_sdk::keys::NEW_KEY }\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /新增了.*symbio_sdk.*用法.*NEW_KEY/)
+})
+
+test('E-009 限期豁免：日期改成过去即红（`expires` 是数据，不是注释）', () => {
+  const r = audit({ ...CLEAN, ...sdkExemptionFixture({ expires: '2000-01-01' }) })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /限期豁免已过期/)
+})
+
+test('E-009 限期豁免：对象改成别的 crate 即红（豁免不能扩散）', () => {
+  const r = audit({ ...CLEAN, ...sdkExemptionFixture({ crate: 'symbio-plugin-loop' }) })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /限期豁免只能针对/)
+})
+
+test('E-009 限期豁免：依赖被清掉后豁免悬空即红（空头豁免不留在仓里）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...sdkExemptionFixture(),
+    'crates/symbio-plugin-session/Cargo.toml':
+      '[package]\nname = "symbio-plugin-session"\n\n[dependencies]\nsymbio-plugin-api = { path = "../symbio-plugin-api" }\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /限期豁免是空头/)
+})
+
+test('E-009 限期豁免不扩散：同一份豁免对 `mcp` 的 sdk 依赖不生效', () => {
+  const r = audit({
+    ...CLEAN,
+    ...sdkExemptionFixture(),
+    ...mcpManifest(`\n[dependencies]\nsymbio-sdk = { path = "../symbio-sdk" }\n`),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, depHit(5))
+})
+
 // ── E-010（已迁出）─────────────────────────────────────────────────────
 //
 // 原「消费方不得深引 `symbio_sdk::<域>::`」连同它在这里的 7 条用例一起迁到了

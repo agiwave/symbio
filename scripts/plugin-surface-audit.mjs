@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * plugin-surface-audit — **扩展层插件只认一个宿主门面**（HS-001 / HS-002，D-253）
+ * plugin-surface-audit — **扩展层插件的源码只认宿主面**（HS-001 / HS-002，D-253）
  *
  * ## 它治的病
  *
@@ -10,22 +10,28 @@
  * 任何意图，评审也看不出某次改动是不是在扩大插件的可见面。
  *
  * 裁决见 DE-023 D-253：扩展层插件的唯一宿主依赖是 `symbio-plugin-api`，门面里是一份
- * **白名单**（每条都能报出消费方）。本脚本判两件事：
+ * **白名单**（每条都能报出消费方）。**manifest 依赖边只由 `plugin-entry-audit` 的
+ * E-009 裁定**（白名单 = `plugin-api` / `kernel` / `providers` + 第三方）；本脚本只剩
+ * 源码那一半，避免同一条依赖行有两个 owner。
  *
  * | 编号 | 判什么 | 红了怎么办 |
  * |---|---|---|
- * | HS-001 | 非控制面插件的源码（注释外）或 manifest 里出现 `symbio_core` / `symbio-kernel` / `symbio-deploy` | 从门面取那个符号；门面里没有 ⇒ 说明它还不该给插件看，先论证再加白名单 |
+ * | HS-001 | 非控制面插件的源码（注释外）出现 `symbio_sdk::` / `symbio_deploy::` | 从门面或 `symbio_kernel` 取那个符号；门面里没有 ⇒ 说明它还不该给插件看，先论证再加白名单 |
  * | HS-002 | 门面白名单条数超过基线（只许降） | 加一条要配一条决策理由，并同步上调基线 |
  * | HS-003 | 门面白名单里有符号在**扩展层插件代码里零引用** | 删掉它——白名单的每一条都要报得出消费方（与 C-003 同一把尺子）；报不出的就是空转条目 |
  * | HS-004 | 插件胶水层 `symbio-providers` 把**嵌入臂**设成默认开启（`default = ["embedding"]` 或依赖不是 `optional`） | 那一条 `default = []` 是有意的：`ort` / `tokenizers` 带来 55 个传递依赖（168 → 113），而插件侧只有 `local` 一个消费者。要开就在宿主与需要它的插件那里显式开（D-254） |
  * | HS-005 | 门面自己的 `[dependencies]` 里有 `symbio-core` | 门面只依赖 kernel + sdk + deploy。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
  * | HS-006 | 语法臂条数 > 基线，或模块级转发条数 > 基线 | 两格都「只许不涨」：语法臂不计债但计件；模块转发一行换 N 条，要显式（D-278） |
  *
+ * `symbio_kernel::` 前缀**放行**：kernel 已进插件依赖白名单，禁前缀就是「许依赖、
+ * 禁使用」的自相矛盾。
+ *
  * ## 为什么按插件身份分档，而不是一刀切
  *
  * `loop` / `session` 是**控制面**（DE-026 的影响类）：它们按轮的顺序运行、认识幕与
- * 容器概念，本来就该直接依赖 core。把它们也压进门面，只会逼出一批「端口形状不说容器词」
- * 的假豁免——EX-008 的边界正是这条（D-253 候选 b 已否）。
+ * 容器概念。**源码前缀**这一档对它们豁免（D-253 候选 b 已否：压进门面只会逼出假豁免）；
+ * 但 **manifest 依赖边不豁免**——控制面插件同样是插件，`symbio-sdk` / `symbio-deploy`
+ * 一样由 E-009 判红。
  *
  * ## 失效形态
  *
@@ -49,16 +55,23 @@ import { red, green, yellow } from './color.mjs'
 import { stripRustCode } from './extension-vocab-audit.mjs'
 
 /**
- * 控制面：按 DE-026 的影响类运行，认识宿主的容器概念，允许直接依赖 core / kernel。
- * **逐个名字写死**，不写通配——一份通配的白名单就是零张门。
+ * 控制面：按 DE-026 的影响类运行，认识宿主的容器概念。**逐个名字写死**，不写通配——
+ * 一份通配的白名单就是零张门。
+ *
+ * 注意：这里的豁免只作用于**源码前缀**（HS-001）。插件的 **manifest 依赖边**归
+ * `plugin-entry-audit` 的 E-009 统一裁定，控制面插件不豁免。
  */
 export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-loop', 'symbio-plugin-session']
 
-/** 扩展层插件不得直接依赖的三个 crate（manifest 键名）。 */
-export const FORBIDDEN_MANIFEST = ['symbio-core', 'symbio-kernel', 'symbio-sdk', 'symbio-deploy']
-
-/** 源码里不得出现的三个前缀（原 `symbio-core` 的前缀随 crate 一起消失，D-279）。 */
-export const FORBIDDEN_PREFIXES = ['symbio_sdk::', 'symbio_kernel::', 'symbio_deploy::']
+/**
+ * 源码里不得出现的两个前缀：`symbio_sdk::` / `symbio_deploy::`（应用侧门面）。
+ *
+ * `symbio_kernel::` **已放行**：kernel 是插件依赖白名单里的共享语法，禁前缀就是
+ * 「许依赖、禁使用」的自相矛盾。原 `symbio_core::` 前缀随 crate 一起消失（D-279）。
+ *
+ * manifest 依赖边不在这里判——它只有 E-009 一个 owner。
+ */
+export const FORBIDDEN_PREFIXES = ['symbio_sdk::', 'symbio_deploy::']
 
 /**
  * 机制臂条数基线：**只降不升**（HS-002）。实测低于它时打提示要求同步下调。
@@ -282,9 +295,8 @@ export function readSdkArm(root) {
   return out.length ? out : null
 }
 
-/** manifest 的 `[dependencies]` 段里出现的禁用键（只认段内，dev-dependencies 不判）。 */
-export function manifestViolations(toml) {
-  const hits = []
+/** manifest 的 `[dependencies]` 段里是否有某个键（HS-005 只问门面自己，不判插件）。 */
+function dependenciesHas(toml, name) {
   let inDeps = false
   for (const line of toml.split(/\r?\n/)) {
     const t = line.trim()
@@ -293,10 +305,9 @@ export function manifestViolations(toml) {
       continue
     }
     if (!inDeps) continue
-    const m = /^([A-Za-z0-9_-]+)\s*=/.exec(t)
-    if (m && FORBIDDEN_MANIFEST.includes(m[1])) hits.push(m[1])
+    if (new RegExp(`^${name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\s*=`).test(t)) return true
   }
-  return hits
+  return false
 }
 
 /**
@@ -389,16 +400,6 @@ export function run(root) {
     scannedPlugins++
     const dir = path.join(cratesDir, name)
 
-    const tomlP = path.join(dir, 'Cargo.toml')
-    if (fs.existsSync(tomlP)) {
-      for (const dep of manifestViolations(fs.readFileSync(tomlP, 'utf8'))) {
-        errors.push(
-          `crates/${name}/Cargo.toml  [dependencies] 里有 \`${dep}\`——扩展层插件只依赖 \`symbio-plugin-api\`（D-253）；` +
-            '门面里没有要的符号时，先论证「该不该给插件看」，再加白名单',
-        )
-      }
-    }
-
     const srcDir = path.join(dir, 'src')
     if (!fs.existsSync(srcDir)) continue
     for (const f of walkRs(srcDir)) {
@@ -415,7 +416,8 @@ export function run(root) {
           if (!line.includes(pfx)) continue
           errors.push(
             `${path.relative(root, f).split(path.sep).join('/')}:${idx + 1}  \`${pfx}\`——` +
-              '扩展层插件只经 `symbio_plugin_api::…` 取宿主面（D-253，HS-001）',
+              '扩展层插件源码只经 `symbio_plugin_api::…` 或白名单里的 `symbio_kernel::…` 取宿主面（HS-001）；' +
+              '`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它们等于「插件 → 应用」反向耦合',
           )
         }
       }
@@ -479,7 +481,7 @@ export function run(root) {
   const facadeManifest = path.join(root, 'crates', 'symbio-plugin-api', 'Cargo.toml')
   if (fs.existsSync(facadeManifest)) {
     const toml = fs.readFileSync(facadeManifest, 'utf8')
-    if (manifestViolations(toml).includes('symbio-core')) {
+    if (dependenciesHas(toml, 'symbio-core')) {
       errors.push(
         'crates/symbio-plugin-api/Cargo.toml  [dependencies] 里有 `symbio-core`——HS-005 (D-276)：' +
           '门面只依赖 kernel + sdk + deploy；要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口',
@@ -516,9 +518,9 @@ export function run(root) {
   }
   console.log(
     green(
-      `✓ HS-001 扩展层零直接依赖：${scannedPlugins} 个非控制面插件的 ${scannedFiles} 个源文件与 manifest ` +
-        `没有 \`symbio_core\` / \`symbio-kernel\` / \`symbio-sdk\` / \`symbio-deploy\`（控制面 ${CONTROL_PLANE.length} 个豁免：` +
-        `${CONTROL_PLANE.join(' / ')}）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}，` +
+      `✓ HS-001 扩展层零直接依赖：${scannedPlugins} 个非控制面插件的 ${scannedFiles} 个源文件` +
+        `没有 \`symbio_sdk::\` / \`symbio_deploy::\` 前缀（控制面 ${CONTROL_PLANE.length} 个源码前缀豁免：` +
+        `${CONTROL_PLANE.join(' / ')}；manifest 依赖边归 E-009，控制面不豁免）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}，` +
         `读数来自 ${arms.read} 条 \`pub use\` 语句：` +
         `${FACADE_ARMS.map((c) => `${c} ${arms.counts[c] ?? 0}`).join(' · ')}）` +
         `+ SDK 臂 ${ns} 条（基线 ${SDK_BASELINE}，D-269 起同进棘轮）` +

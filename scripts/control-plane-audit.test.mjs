@@ -1,30 +1,26 @@
 /**
- * control-plane-audit 回归测试 —— 证明八条判据**各自会红**
+ * control-plane-audit 回归测试 —— 证明四条判据**各自会红**
  *
- * `SP-033` §5 程序 4：「`TC-n` 的执行方落地时，反向用例与该判据同批提交——没有反向用例的
- * 判据无法区分「真的在算」与「恰好没写错」」。本文件就是 `CP-001`…`CP-008` 的反向用例：
- * 每条用例只把一个地方改坏，断言**对应那条码**出现在 `[ERROR]` 里。
+ * 旧引擎删除后，本脚本只剩四条与引擎无关的形状判据（`CP-001` / `CP-004` / `CP-006` /
+ * `CP-009`，见 034）。旧 33 条用例里有 25 条钉的是已删除的码与已删除的路径
+ * （`loop_rows.rs` / `ring.rs` / `turn_exec.rs`），它们随对象一起删除；剩下的判据各
+ * 保留「只改坏一处」的正反例。
  *
  * | 码 | 反向用例 |
  * |---|---|
- * | `CP-001` | 驱动文件里多一个 `loop {`；另一份文件多一处 `loop_rows::next(` |
- * | `CP-002` | 派发器直问求解器（`ring::owed(`）；第二个 `ring::drive(`；<br>闭集之外的 `round_trip` 调用；`round_trip` 不经 `dispatch_with`；表外点问闭集读不出 |
- * | `CP-003` | 少一个守卫调用；动作签名多一份 `&mut`；`Ctx` 多一个 `&mut` 字段；派发器点问（`owes(`） |
- * | `CP-004` | 内核里出现行名字面量 |
- * | `CP-005` | 收束格第二个构造点；`ACTOR_CLOSE.writes` 里少一格 |
- * | `CP-006` | 循环体改一个字节（基线未跟）；控制面多一份文件（基线未跟）；基线整个缺失；<br>声明第三个端口（裁决闭集只有两个）；闭集那一节读不出 |
- * | `CP-007` | 规范里多出第七条 `TC-n`；`## 判据` 表点名一个不存在的脚本 |
- * | `CP-008` | `seal` 改成借用式；`seal` 之后多一个公开方法；`impl Frozen` 长出 `&mut self` 方法 |
- * | `CP-009` | 除 `ring.rs` 外另起一段 `loop` 调 `drive_frame`（台账未登记）；同样的循环体登记进 known-red ⇒ 仍 exit 1 |
+ * | `CP-001` | 引擎里多一段 `loop`；把唯一循环搬到另一个文件 |
+ * | `CP-004` | kernel / sdk 的**代码**里出现 `vocab.rs` 登记的事件名 |
+ * | `CP-006` | 机制字节改了而基线未跟；多一份生产文件；基线缺失；基线指向不存在的文件；决策号不存在 |
+ * | `CP-009` | 另一 crate 的 `loop` / `for` 里调 `drive(` |
  *
- * 另有两条**不该红**的用例（防止判据被注释措辞骗到）：
- *   - 注释里写 `loop {` / `ring::owed(` / `"close"` ⇒ 仍绿（判据读剥注释后的代码）；
- *   - 干净夹具 ⇒ 全绿且读数为「循环体 1 个」。
+ * 另有三条**不该红**的用例：
+ *   - 注释里的世界域名 ⇒ 仍绿（判据读剥注释后的代码，字符串字面量保留）；
+ *   - `test_fixtures.rs` 是 `cfg(test)` / feature 下的调用方拼写 ⇒ 不算机制层；
+ *   - 循环体里没有推进调用 ⇒ 不算第二推进循环。
  *
- * 夹具的做法：建一棵最小可判的树（控制面三个文件 + kernel 两张表 + 规范 + 决策锚），
- * 用**本脚本自己的 `--print-baseline`** 生成该夹具的基线——于是「基线」在每份夹具里
- * 都是自洽的，反向用例只需要破坏一处。改坏后默认**重新生成**基线（把 `CP-006` 隔离
- * 在外），只有 `CP-006` 的两条用例刻意用**改坏前**的基线。
+ * 夹具的做法：建一棵最小可判的树（新环三个文件 + vocab + kernel / sdk 各一个文件 +
+ * 决策锚），用本脚本自己的 `--print-baseline` 生成夹具基线，于是「基线」在每份夹具里
+ * 都自洽；反向用例只破坏一处。
  *
  * 用法：node --test scripts/control-plane-audit.test.mjs
  */
@@ -40,14 +36,10 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./control-plane-audit.mjs', import.meta.url))
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
 const LOOP = 'crates/symbio-plugin-loop/src'
-const DRIVE = `${LOOP}/ring.rs`
-const ROWS = `${LOOP}/loop_rows.rs`
-const TURN_EXEC = `${LOOP}/turn_exec.rs`
-const SETTLE = `${LOOP}/turn_runner/settle.rs`
-const DECL = 'crates/symbio-kernel/src/decl/mod.rs'
-const SPEC = 'docs/005-spec/033.md'
-const RULING = 'docs/003-design/015-义务环.md'
-const TRIP_RULING = 'docs/003-design/022-行表与派发面.md'
+const ENGINE = `${LOOP}/ring/engine.rs`
+const VOCAB = `${LOOP}/vocab.rs`
+const KERNEL = 'crates/symbio-kernel/src/lib.rs'
+const SDK = 'crates/symbio-sdk/src/lib.rs'
 
 /** 逐个删 —— 不用 rmSync(recursive)（沙箱会拦截批量删除）。 */
 function rmTree(dir) {
@@ -68,13 +60,7 @@ function writeTree(root, files) {
   }
 }
 
-/**
- * 用审计自己的 `--print-baseline` 算一份基线（夹具因此不手抄指纹）。
- *
- * 被改坏的树上，`CP-001`…`CP-005` 会先把错误行打到 stdout，JSON 在最后——
- * 所以从**第一行恰好是 `{`** 的地方起解析（不按「第一个 `{`」找：错误文本里就有
- * `` `loop {` `` 这种字面量）。
- */
+/** 用审计自己的 `--print-baseline` 算一份基线（夹具不手抄指纹）。 */
 function printBaseline(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cp-baseline-'))
   try {
@@ -84,10 +70,9 @@ function printBaseline(files) {
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',
     })
-    const lines = r.stdout.split('\n')
-    const at = lines.findIndex((l) => l === '{')
+    const at = r.stdout.split('\n').findIndex((l) => l === '{')
     assert.notEqual(at, -1, `--print-baseline 没有打印基线：\n${r.stdout}${r.stderr}`)
-    return JSON.parse(lines.slice(at).join('\n'))
+    return JSON.parse(r.stdout.split('\n').slice(at).join('\n'))
   } finally {
     rmTree(root)
   }
@@ -96,16 +81,17 @@ function printBaseline(files) {
 /**
  * 建夹具 → 装基线 → 跑审计。
  *
- * `baselineFrom` 默认是**同一份**被跑的文件树；`CP-006` 的两条用例传改坏之前的树，
- * 于是「基线没跟上」才是被判红的那件事，而不是被顺手修好。
+ * `baselineFrom` 默认是同一份被跑的树；`CP-006` 的「基线没跟上」用例传改坏之前的树。
+ * `mutate` 改基线本身（指向不存在的文件 / 换掉决策号）。
  */
-function audit(files, { baselineFrom = files, withBaseline = true } = {}) {
+function audit(files, { baselineFrom = files, withBaseline = true, mutate } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'control-plane-'))
   try {
     if (withBaseline) {
       const b = printBaseline(baselineFrom)
       b.mechanism.adr = 'D-234'
       b.mechanism.reason = '夹具：机制面冻结在干净形状上（决策锚只为让 CP-006 的输入完整）'
+      if (mutate) mutate(b)
       files[BASELINE_REL] = JSON.stringify(b, null, 2)
     }
     writeTree(root, files)
@@ -120,563 +106,190 @@ function audit(files, { baselineFrom = files, withBaseline = true } = {}) {
 }
 
 function assertRed(r, code) {
-  assert.equal(r.status, 1, r.stdout + r.stderr)
-  assert.match(r.stdout, new RegExp(`\\[ERROR\\] ${code} `), r.stdout)
+  const out = r.stdout + r.stderr
+  assert.equal(r.status, 1, out)
+  assert.match(out, new RegExp(`\\[ERROR\\] ${code} `), out)
 }
 
 // ───────────────────────────── 夹具 ─────────────────────────────
 
-const LOOP_ROWS = `use symbio_sdk::ring;
+const ENGINE_SRC = `use crate::ring::{DebtRow, DriveCtx};
 
-pub const OPENER: &str = "opener";
-pub const CLOSE: &str = "close";
-
-pub const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
-pub const EVENT_CHAT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
-
-pub const ROWS: &[Decl] = &[
-    Decl { name: "prepare-turn", actor: OPENER },
-    Decl { name: "close-turn", actor: CLOSE },
-];
-
-pub const ACTORS: &[ActorDecl] = &[
-    ActorDecl { name: OPENER, writes: &[] },
-    ActorDecl { name: CLOSE, writes: &[] },
-];
-
-pub const ACTOR_CLOSE: ActorDecl = ActorDecl {
-    name: CLOSE,
-    writes: &[EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_FALLBACK],
-};
-
-pub const PORTS: &[PortDecl] = &[PortDecl { port: "model", concurrency: 0 }];
-
-pub fn owes(rows: &[Decl], name: &str) -> bool {
-    ring::owed(rows, name).is_some()
-}
-
-pub fn waiting(events: &[Event]) -> bool {
-    events.iter().any(|e| e.name == "chat.assistant.final")
-}
-
-pub fn next(rows: &[Decl], step: u32, now: u64) -> Option<usize> {
-    ring::drive(rows, &[], &[], now).ok()
-}
-`
-
-const DRIVE_SRC = `use crate::loop_rows;
-
-pub async fn drive(
-    facts: &Facts,
-    ledger: &Ledger,
-    driver: &Driver,
-    events: &[Event],
-    retiring: Option<u32>,
-) -> u32 {
+pub(crate) async fn drive(ctx: &dyn DriveCtx, scope: u64) -> u32 {
     let mut steps = 0;
     loop {
-        if retiring.is_some() && aborted(driver) {
+        let Some(_row) = plan(ctx, scope) else {
             break;
-        }
-        if abort_before_first_request(driver).await {
-            break;
-        }
-        if over_step_limit(steps) {
-            break;
-        }
-        if writes_closed(driver) {
-            break;
-        }
-        if ledger.is_empty() && !loop_rows::waiting(events) {
-            break;
-        }
-        let _action = loop_rows::next(facts, steps, 0);
+        };
+        expire(ctx, scope);
         steps += 1;
     }
     steps
 }
 
-fn aborted(driver: &Driver) -> bool {
-    driver.aborted
+fn plan(ctx: &dyn DriveCtx, scope: u64) -> Option<DebtRow> {
+    ctx.source().rows(&ctx.facts(), scope).into_iter().next()
 }
 
-async fn abort_before_first_request(driver: &Driver) -> bool {
-    driver.retiring
-}
-
-fn over_step_limit(steps: u32) -> bool {
-    steps >= 32
-}
-
-fn writes_closed(driver: &Driver) -> bool {
-    driver.closed
+fn expire(ctx: &dyn DriveCtx, scope: u64) -> bool {
+    ctx.now_ms() > scope
 }
 `
 
-const TURN_EXEC_SRC = `use std::future::Future;
-use std::pin::Pin;
+const VOCAB_SRC = `use symbio_kernel::event::{Entity, EventDecl, Verb};
 
-pub type StepFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
-
-pub type Action = for<'a> fn(&'a mut Ctx<'a>) -> StepFuture<'a>;
-
-pub struct Ctx<'a> {
-    pub session: &'a mut Session,
-    pub events: &'a [Event],
-}
+pub(crate) const EVENTS: &[EventDecl] = &[
+    EventDecl::new("user.message", (Entity::Scope, Verb::Opened)),
+    EventDecl::with_roles(
+        "chat.assistant.final",
+        (Entity::Scope, Verb::Closed),
+        &[],
+    ),
+];
 `
 
-const SETTLE_SRC = `use crate::turn_exec::Ctx;
-
-pub fn land_final(ctx: &Ctx<'_>, turn: u64) {
-    let _ = Event::pending(ctx, EVENT_CHAT_ASSISTANT_FINAL, format!("f-{turn}"));
-}
-
-pub fn land_failure(ctx: &Ctx<'_>, turn: u64) {
-    let _ = Event::pending(ctx, EVENT_CHAT_ASSISTANT_FALLBACK, format!("fb-{turn}"));
-}
-`
-
-const KERNEL_DECL_SRC = `pub struct Builder {
-    rows: Vec<Row>,
-}
-
-pub struct Frozen {
-    rows: Vec<Row>,
-}
-
-impl Builder {
-    pub fn new() -> Self {
-        Self { rows: Vec::new() }
-    }
-
-    pub fn declare(mut self, row: Row) -> Self {
-        self.rows.push(row);
-        self
-    }
-
-    pub fn seal(self) -> Frozen {
-        Frozen { rows: self.rows }
-    }
-}
-
-impl Frozen {
-    pub fn rows(&self) -> &[Row] {
-        &self.rows
-    }
-}
-`
-
-const KERNEL_ADAPTERS_SRC = `pub enum LatencyTier {
-    Reflex,
-}
-
-pub fn tier_name(tier: LatencyTier) -> &'static str {
-    match tier {
-        LatencyTier::Reflex => "reflex",
-    }
-}
-`
-
-const SPEC_ROWS = [
-  '| `TC-1` | `scripts/control-plane-audit.mjs`（CP-001/002/003） | `scripts/control-plane-audit.test.mjs` |',
-  '| `TC-2` | `scripts/control-plane-audit.mjs`（CP-004） | `scripts/control-plane-audit.test.mjs` |',
-  '| `TC-3` | `scripts/control-plane-audit.mjs`（CP-008） | `scripts/control-plane-audit.test.mjs` |',
-  '| `TC-4` | `scripts/control-plane-audit.mjs`（CP-005） | `scripts/control-plane-audit.test.mjs` |',
-  '| `TC-5` | `scripts/control-plane-audit.mjs`（CP-006） | `scripts/control-plane-audit.test.mjs` |',
-  '| `TC-6` | `scripts/control-plane-audit.mjs`（CP-007） | `scripts/control-plane-audit.test.mjs` |',
-]
-
-const SPEC_TEXT = [
-  '# 控制面终态判据（夹具）',
-  '',
-  '#### TC-1 唯一驱动形状',
-  '#### TC-2 机制层无域名',
-  '#### TC-3 声明面封闭',
-  '#### TC-4 事实面唯一写方',
-  '#### TC-5 横向扩展零改机制',
-  '#### TC-6 判据集是闭集',
-  '',
-  '## 判据',
-  '',
-  '| `TC-n` | 执行方（判据码） | 反向用例 |',
-  '|---|---|---|',
-  ...SPEC_ROWS,
-  '',
-].join('\n')
-
-/**
- * 端口闭集的裁决原文（夹具）：判据只认这一句「今天只有…端口：`a`、`b`」，
- * 所以夹具里必须**也**有这一段——否则 `CP-006` 会因为读不出闭集而红（那正是
- * 「闭集没有输入」那条反向用例）。
- */
-const RULING_TEXT = [
-  '## D-222 幕是身份，不是端口也不是迭代器',
-  '',
-  '#### 一、端口闭集',
-  '',
-  '> **端口** = 一次跨出控制面的往返。',
-  '',
-  '按这条定义，今天只有两个端口：`model`、`tool`。三个被排除的：',
-  '',
-  '| 候选 | 排除的理由 |',
-  '|---|---|',
-  '| 时钟 | `now` 是入参，没有派出动作，也没有应答 |',
-  '',
-  '#### 二、幕是身份，不是推进',
-  '',
-].join('\n')
-
-/**
- * 表外点问闭集的裁决原文（夹具）：`D-235` 只认那一句「今天只有…处：`x.rs`、`y.rs`」，
- * 且这句话在 `###` 这一级节内、位于自己带的 `####` 小节里——夹具必须照这个形状写，
- * 否则 `CP-002` 会因为读不出闭集而红（那正是「闭集没有输入」那条反向用例）。
- */
-const TRIP_RULING_TEXT = [
-  '## 行表与派发面（夹具）',
-  '',
-  '### D-235 表外点问的终态',
-  '',
-  '#### 三、可判：闭集，不是归零',
-  '',
-  '> 今天只有三处：`port/classify.rs`（判决）、`chat_loop/compose.rs`（措辞）、`port.rs`（压缩摘要，`Compress::summary`）。',
-  '',
-  '#### 四、什么会推翻本条',
-  '',
-  '### D-236 下一条',
-  '',
-].join('\n')
-
-/**
- * `round_trip` 的入账口与三处调用点（夹具）：判据钉两件事——函数体里
- * `announce_with` / `dispatch_with` 各一次（一步，不是两笔债），调用文件 ⊆ 裁决点名的闭集。
- */
-const PORT_SRC = `pub struct Port;
-
-impl Port {
-    fn announce_with(&self) {}
-
-    fn dispatch_with(&self) {}
-}
-
-pub fn round_trip(port: &Port) {
-    port.announce_with();
-    port.dispatch_with();
-}
-
-pub fn summary(port: &Port) {
-    round_trip(port);
-}
-`
-
-const CLASSIFY_SRC = `use crate::port::{round_trip, Port};
-
-pub fn classify(port: &Port) {
-    round_trip(port);
-}
-`
-
-const COMPOSE_SRC = `use crate::port::{round_trip, Port};
-
-pub fn wording(port: &Port) {
-    round_trip(port);
-}
-`
+const DECL_DOC = '## 关键决策\n\n### D-234 夹具决策\n\n机制面基线挂在这条决策上。\n'
 
 function cleanTree() {
   return {
-    [`${LOOP}/lib.rs`]: 'pub mod loop_rows;\npub mod port;\npub mod turn_exec;\npub mod turn_runner;\n',
-    [`${LOOP}/turn_runner/mod.rs`]: 'pub mod settle;\n',
-    [ROWS]: LOOP_ROWS,
-    [DRIVE]: DRIVE_SRC,
-    [TURN_EXEC]: TURN_EXEC_SRC,
-    [SETTLE]: SETTLE_SRC,
-    [`${LOOP}/port.rs`]: PORT_SRC,
-    [`${LOOP}/port/classify.rs`]: CLASSIFY_SRC,
-    [`${LOOP}/chat_loop/compose.rs`]: COMPOSE_SRC,
-    'crates/symbio-kernel/src/lib.rs': 'pub mod adapters;\npub mod decl;\n',
-    [DECL]: KERNEL_DECL_SRC,
-    'crates/symbio-kernel/src/adapters.rs': KERNEL_ADAPTERS_SRC,
-    'crates/symbio-sdk/src/lib.rs': 'pub struct Event {\n    pub name: String,\n}\n',
-    [SPEC]: SPEC_TEXT,
-    [RULING]: RULING_TEXT,
-    [TRIP_RULING]: TRIP_RULING_TEXT,
-    'docs/003-design/016-工程落地与验证.md': '## 关键决策\n\n### D-234 夹具决策\n\n机制面基线挂在这条决策上。\n',
-    'scripts/control-plane-audit.mjs': '// 夹具占位：CP-007 只判「§判据表点名的脚本存在」\n',
-    'scripts/control-plane-audit.test.mjs': '// 夹具占位\n',
+    [`${LOOP}/lib.rs`]: 'pub mod ring;\npub mod vocab;\n',
+    [`${LOOP}/ring/mod.rs`]: 'pub mod engine;\n',
+    [ENGINE]: ENGINE_SRC,
+    [VOCAB]: VOCAB_SRC,
+    [KERNEL]: '// 内核夹具：没有任何世界域名\npub struct Event;\n',
+    [SDK]: 'pub struct Store;\n',
+    'docs/003-design/016-工程落地与验证.md': DECL_DOC,
   }
 }
 
 // ───────────────────────────── 不该红的用例 ─────────────────────────────
 
-test('干净夹具：八条判据全绿，读数是「循环体 1 个」', () => {
+test('干净夹具：四条判据全绿（循环体 1 段、世界事件名 2 个、生产文件 4 份）', () => {
   const r = audit(cleanTree())
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  for (const code of ['CP-001', 'CP-002', 'CP-003', 'CP-004', 'CP-005', 'CP-006', 'CP-007', 'CP-008', 'CP-009']) {
-    assert.match(r.stdout, new RegExp(`✓ ${code}`), r.stdout)
-  }
-  assert.match(r.stdout, /循环体 1 个/)
-  assert.match(r.stdout, /表外点问 裁决点名 3 处 · 代码调用 3 处/)
-  assert.match(r.stdout, new RegExp(`收束格 chat\\.assistant\\.final：${SETTLE.replace(/[/.]/g, '\\$&')}`))
+  assert.match(r.stdout, /CP-001 唯一循环体 1/)
+  assert.match(r.stdout, /CP-004 世界事件名 2 个、机制层 0 处/)
+  assert.match(r.stdout, /CP-006 机制面/)
+  assert.match(r.stdout, /（4 文件）/)
+  assert.match(r.stdout, /CP-009 第二推进循环 0/)
 })
 
-test('注释里的 loop / owed / 行名不算代码（判据读剥注释后的文本）', () => {
+test('注释里的世界域名不算代码（CP-004 读剥注释后的文本）', () => {
   const files = cleanTree()
-  files[DRIVE] += '\n// 反例说明：别写 loop { } 也别 ring::owed(&rows, 0)\n'
-  files[DECL] += '\n// 这里禁止出现行名 "prepare-turn" 与 "close"\n'
+  files[KERNEL] += '\n// 例如 "user.message" 是业务名字，内核不许持有\n'
+  files[SDK] += '\n/// `"chat.assistant.final"` 只在文档里出现\n'
   const r = audit(files)
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /✓ CP-004/)
+})
+
+test('test_fixtures.rs 是测试支持文件，不算生产机制层（CP-004 不判）', () => {
+  const files = cleanTree()
+  files['crates/symbio-sdk/src/test_fixtures.rs'] = 'pub const N: &str = "user.message";\n'
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
 // ───────────────────────────── CP-001 ─────────────────────────────
 
-test('CP-001：驱动文件里多一个 loop { ⇒ 红', () => {
+test('CP-001：引擎里多一段 loop ⇒ 红', () => {
   const files = cleanTree()
-  files[DRIVE] += '\npub fn shadow_drive() {\n    loop {\n        break;\n    }\n}\n'
-  assertRed(audit(files), 'CP-001')
+  files[ENGINE] += '\npub fn shadow() {\n    loop {\n        break;\n    }\n}\n'
+  assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-001')
 })
 
-test('CP-001：另一份文件多一处 loop_rows::next( ⇒ 红', () => {
+test('CP-001：唯一循环搬到另一个文件 ⇒ 红（唯一允许位置是 ring/engine.rs）', () => {
   const files = cleanTree()
-  files[SETTLE] += '\npub fn shadow_advance(facts: &Facts) {\n    let _ = loop_rows::next(facts, 0, 0);\n}\n'
-  assertRed(audit(files), 'CP-001')
-})
-
-// ───────────────────────────── CP-009 ─────────────────────────────
-
-test('CP-009：除 ring.rs 外另起一段推进循环 ⇒ 红（CP-001 看不见）', () => {
-  const files = cleanTree()
-  files['crates/symbio-plugin-loop/src/entry.rs'] =
-    'pub fn drive_entry() {\n    loop {\n        crate::ring::drive_frame();\n    }\n}\n'
-  files['scripts/known-red.json'] = JSON.stringify({ entries: [], exemptions: [] })
-  const r = audit(files)
-  assertRed(r, 'CP-009')
-  assert.match(r.stdout, /\[未登记\]/, r.stdout)
-})
-
-test('CP-009：循环体里没有推进调用 ⇒ 仍绿（不判「有没有循环」）', () => {
-  const files = cleanTree()
-  files['crates/symbio-plugin-loop/src/entry.rs'] =
-    'pub fn collect(items: &[u8]) -> u8 {\n    let mut n = 0;\n    for item in items {\n        n += *item;\n    }\n    n\n}\n'
-  const r = audit(files)
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /✓ CP-009/)
-})
-
-test('CP-009：登记进 known-red ⇒ 仍然 exit 1（known-red 不是豁免）', () => {
-  const files = cleanTree()
-  const entry = 'crates/symbio-plugin-loop/src/entry.rs'
-  files[entry] = 'pub fn drive_entry() {\n    loop {\n        crate::ring::drive_frame();\n    }\n}\n'
-  files['scripts/known-red.json'] = JSON.stringify({
-    entries: [
-      {
-        code: 'CP-009',
-        file: entry,
-        kind: 'advance-loop',
-        token: 'drive_frame',
-        count: 1,
-        problem: '第二推进循环',
-        knife: '刀 U2：随 run_loop 删除',
-        clearWhen: 'entry.rs 的循环退出',
-      },
-    ],
-    exemptions: [],
-  })
-  const r = audit(files)
-  assertRed(r, 'CP-009')
-  assert.match(r.stdout, /\[known-red\]/, r.stdout)
-})
-
-// ───────────────────────────── CP-002 ─────────────────────────────
-
-test('CP-002：派发器直问求解器（ring::owed）⇒ 红', () => {
-  const files = cleanTree()
-  files[DRIVE] += '\npub fn peek(rows: &[Decl]) -> bool {\n    ring::owed(rows, 0).is_some()\n}\n'
-  assertRed(audit(files), 'CP-002')
-})
-
-test('CP-002：第二个 ring::drive( ⇒ 红', () => {
-  const files = cleanTree()
-  files[DRIVE] += '\npub fn shadow_ring() -> bool {\n    ring::drive(&[], &[], &[], 0).is_ok()\n}\n'
-  assertRed(audit(files), 'CP-002')
-})
-
-// ───────────────────────────── CP-003 ─────────────────────────────
-
-test('CP-003：少一个守卫调用 ⇒ 红', () => {
-  const files = cleanTree()
-  files[DRIVE] = files[DRIVE].replace('writes_closed(driver)', 'false')
-  assertRed(audit(files), 'CP-003')
-})
-
-test('CP-003：动作签名多一份 &mut（能拿到第二份可变状态）⇒ 红', () => {
-  const files = cleanTree()
-  files[TURN_EXEC] = files[TURN_EXEC].replace(
-    "for<'a> fn(&'a mut Ctx<'a>) -> StepFuture<'a>",
-    "for<'a> fn(&'a mut Ctx<'a>, &'a mut Session) -> StepFuture<'a>",
-  )
-  assertRed(audit(files), 'CP-003')
-})
-
-test('CP-003：Ctx 多一个 &mut 字段 ⇒ 红', () => {
-  const files = cleanTree()
-  files[TURN_EXEC] = files[TURN_EXEC].replace("pub events: &'a [Event],", "pub events: &'a mut [Event],")
-  assertRed(audit(files), 'CP-003')
-})
-
-test('CP-003：派发器里点问（owes）⇒ 红', () => {
-  const files = cleanTree()
-  files[DRIVE] += '\npub fn owes_now(rows: &[Decl]) -> bool {\n    owes(rows, "prepare-turn")\n}\n'
-  assertRed(audit(files), 'CP-003')
+  files[ENGINE] = ENGINE_SRC.replace(/loop \{[\s\S]*?\n    \}\n/, '')
+  files[`${LOOP}/driver.rs`] = 'pub fn go() {\n    loop {\n        break;\n    }\n}\n'
+  assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-001')
 })
 
 // ───────────────────────────── CP-004 ─────────────────────────────
 
-test('CP-004：内核里出现行名字面量 ⇒ 红', () => {
+test('CP-004：kernel 的代码里出现世界事件名字面量 ⇒ 红', () => {
   const files = cleanTree()
-  files[DECL] += '\npub const ROW_NAME: &str = "prepare-turn";\n'
+  files[KERNEL] += '\npub const N: &str = "user.message";\n'
   assertRed(audit(files), 'CP-004')
 })
 
-// ───────────────────────────── CP-005 ─────────────────────────────
-
-test('CP-005：收束格第二个构造点 ⇒ 红', () => {
+test('CP-004：sdk 的代码里出现世界事件名字面量 ⇒ 红', () => {
   const files = cleanTree()
-  files[SETTLE] +=
-    '\npub fn land_again(ctx: &Ctx<\'_>, turn: u64) {\n' +
-    '    let _ = Event::pending(ctx, EVENT_CHAT_ASSISTANT_FINAL, format!("f2-{turn}"));\n}\n'
-  assertRed(audit(files), 'CP-005')
-})
-
-test('CP-005：声明面少一格（ACTOR_CLOSE.writes 没有 fallback）⇒ 红', () => {
-  const files = cleanTree()
-  files[ROWS] = files[ROWS].replace(
-    'writes: &[EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_FALLBACK],',
-    'writes: &[EVENT_CHAT_ASSISTANT_FINAL],',
-  )
-  assertRed(audit(files), 'CP-005')
+  files[SDK] += '\npub const N: &str = "chat.assistant.final";\n'
+  assertRed(audit(files), 'CP-004')
 })
 
 // ───────────────────────────── CP-006 ─────────────────────────────
 
-test('CP-006：循环体改一个字节而基线未跟 ⇒ 红', () => {
+test('CP-006：机制字节改一个字符而基线未跟 ⇒ 红', () => {
   const files = cleanTree()
-  const before = cleanTree()
-  files[DRIVE] = files[DRIVE].replace('steps += 1;', 'steps += 2;')
-  assertRed(audit(files, { baselineFrom: before }), 'CP-006')
+  files[ENGINE] = files[ENGINE].replace('steps += 1;', 'steps += 2;')
+  assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-006')
 })
 
 test('CP-006：控制面多一份生产文件而基线未跟 ⇒ 红', () => {
   const files = cleanTree()
-  const before = cleanTree()
-  files[`${LOOP}/host_extra.rs`] = 'pub struct Extra;\n'
-  assertRed(audit(files, { baselineFrom: before }), 'CP-006')
+  files[`${LOOP}/extra.rs`] = 'pub struct Extra;\n'
+  assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-006')
 })
 
-test('CP-006：基线整个缺失 ⇒ 红（判据没有输入，宁红不静默）', () => {
-  assertRed(audit(cleanTree(), { withBaseline: false }), 'CP-006')
+test('CP-006：基线整个缺失 ⇒ 退 2（判不了不许亮绿灯）', () => {
+  const r = audit(cleanTree(), { withBaseline: false })
+  assert.equal(r.status, 2, r.stdout + r.stderr)
+  assert.match(r.stderr, /基线读不出/)
 })
 
-test('CP-006：声明第三个端口而裁决闭集只有两个 ⇒ 红（闭集不是实现顺手扩的）', () => {
+test('CP-006：基线指向一个不存在的机制面文件 ⇒ 红（陈旧基线）', () => {
   const files = cleanTree()
-  files[ROWS] = files[ROWS].replace(
-    'PortDecl { port: "model", concurrency: 0 }',
-    'PortDecl { port: "model", concurrency: 0 },\n    PortDecl { port: "clock", concurrency: 3600 }',
+  assertRed(
+    audit(files, {
+      mutate: (b) => {
+        b.mechanism.file = `${LOOP}/ring/old.rs`
+      },
+    }),
+    'CP-006',
   )
-  assertRed(audit(files), 'CP-006')
 })
 
-test('CP-006：端口声明在行表之外的 crate（kernel）里 ⇒ 红（跨 crate 看，不只判行表）', () => {
+test('CP-006：基线里的决策号不存在 ⇒ 红（不许匿名冻结）', () => {
   const files = cleanTree()
-  files['crates/symbio-kernel/src/adapters.rs'] += '\nconst CLOCK: PortDecl = PortDecl { port: "clock" };\n'
-  assertRed(audit(files), 'CP-006')
+  assertRed(
+    audit(files, {
+      mutate: (b) => {
+        b.mechanism.adr = 'D-999'
+      },
+    }),
+    'CP-006',
+  )
 })
 
-test('CP-006：裁决那一节读不出 ⇒ 红（闭集没有输入）', () => {
+test('机制面文件读不出 ⇒ 退 2（范围读不出，不是红）', () => {
   const files = cleanTree()
-  delete files[RULING]
-  assertRed(audit(files), 'CP-006')
+  delete files[ENGINE]
+  const r = audit(files, { baselineFrom: cleanTree() })
+  assert.equal(r.status, 2, r.stdout + r.stderr)
+  assert.match(r.stderr, /机制面文件读不出/)
 })
 
-test('CP-006：裁决先加了端口、代码还没声明 ⇒ 仍绿（设计先于实施，缺的一侧只是读数）', () => {
+// ───────────────────────────── CP-009 ─────────────────────────────
+
+test('CP-009：另一 crate 的 loop 里调 drive(...) ⇒ 红', () => {
   const files = cleanTree()
-  files[RULING] = files[RULING].replace('`model`、`tool`', '`model`、`tool`、`clock`')
+  files['crates/symbio-sdk/src/job.rs'] = 'pub fn advance() {\n    loop {\n        crate::drive(0);\n    }\n}\n'
+  assertRed(audit(files), 'CP-009')
+})
+
+test('CP-009：for 遍历里调 drive(...) ⇒ 红（第二推进循环不只长得像 loop）', () => {
+  const files = cleanTree()
+  files['crates/symbio-sdk/src/job.rs'] =
+    'pub fn advance(items: &[u8]) {\n    for item in items {\n        let _ = drive(*item);\n    }\n}\n'
+  assertRed(audit(files), 'CP-009')
+})
+
+test('CP-009：循环里没有推进调用 ⇒ 仍绿（不判「有没有循环」）', () => {
+  const files = cleanTree()
+  files['crates/symbio-sdk/src/job.rs'] =
+    'pub fn sum(items: &[u8]) -> u8 {\n    let mut n = 0;\n    for item in items {\n        n += *item;\n    }\n    n\n}\n'
   const r = audit(files)
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /裁决有而代码未声明：.*\bclock\b/)
-})
-
-// ───────────────── CP-002 · 表外点问闭集（D-235）─────────────────
-
-test('CP-002：第四处 round_trip 调用 ⇒ 红（表外点问是闭集，不是清单）', () => {
-  const files = cleanTree()
-  files[`${LOOP}/turn_runner/extra_trip.rs`] = COMPOSE_SRC
-  assertRed(audit(files), 'CP-002')
-})
-
-test('CP-002：round_trip 绕过 dispatch_with（直连适配器）⇒ 红（一步被拆成两笔债）', () => {
-  const files = cleanTree()
-  files[`${LOOP}/port.rs`] = PORT_SRC.replace('port.dispatch_with();', 'port.send_direct();')
-  assertRed(audit(files), 'CP-002')
-})
-
-test('CP-002：表外点问闭集那一节读不出 ⇒ 红（闭集没有输入）', () => {
-  const files = cleanTree()
-  delete files[TRIP_RULING]
-  assertRed(audit(files), 'CP-002')
-})
-
-test('CP-002：裁决先点名第四处、代码还没调用 ⇒ 仍绿（设计先于实施，缺的一侧只是读数）', () => {
-  const files = cleanTree()
-  files[TRIP_RULING] = files[TRIP_RULING].replace(
-    '`port.rs`（压缩摘要',
-    '`turn_runner/refuse.rs`（预留）、`port.rs`（压缩摘要',
-  )
-  const r = audit(files)
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /裁决有而代码未调用：.*turn_runner\/refuse\.rs/)
-})
-
-// ───────────────────────────── CP-007 ─────────────────────────────
-
-test('CP-007：规范里多出第七条 TC-n ⇒ 红（判据集不许跟着能力长）', () => {
-  const files = cleanTree()
-  files[SPEC] += '\n#### TC-7 新能力专用判据\n\n新端口要多一条判据。\n'
-  assertRed(audit(files), 'CP-007')
-})
-
-test('CP-007：规范里少一条 TC-n ⇒ 红（TC_MAP 与条文对不上）', () => {
-  const files = cleanTree()
-  files[SPEC] = files[SPEC].replace('#### TC-6 判据集是闭集\n', '')
-  assertRed(audit(files), 'CP-007')
-})
-
-test('CP-007：§判据表点名一个不存在的执行方脚本 ⇒ 红', () => {
-  const files = cleanTree()
-  files[SPEC] = files[SPEC].replace('`scripts/control-plane-audit.mjs`（CP-004）', '`scripts/nope-audit.mjs`')
-  assertRed(audit(files), 'CP-007')
-})
-
-// ───────────────────────────── CP-008 ─────────────────────────────
-
-test('CP-008：seal 改成借用式（同一份声明事后还能改）⇒ 红', () => {
-  const files = cleanTree()
-  files[DECL] = files[DECL].replace('pub fn seal(self)', 'pub fn seal(&mut self)')
-  assertRed(audit(files), 'CP-008')
-})
-
-test('CP-008：seal 之后多一个公开方法（第二条注册路径）⇒ 红', () => {
-  const files = cleanTree()
-  files[DECL] = files[DECL].replace(
-    '    pub fn seal(self) -> Frozen {',
-    '    pub fn reseal(self) -> Frozen { self.seal() }\n\n    pub fn seal(self) -> Frozen {',
-  )
-  assertRed(audit(files), 'CP-008')
-})
-
-test('CP-008：impl Frozen 长出 &mut self 方法 ⇒ 红', () => {
-  const files = cleanTree()
-  files[DECL] = files[DECL].replace('pub fn rows(&self)', 'pub fn rows(&mut self)')
-  assertRed(audit(files), 'CP-008')
+  assert.match(r.stdout, /CP-009 第二推进循环 0/)
 })

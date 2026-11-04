@@ -159,16 +159,6 @@
       "problem": "`Decl { anchor: <n> }` 是行表的排序数值：谁先谁后按数字排，而不是按事实发生顺序排。它与 key 里的 anchor 是同一笔债的两面——序号的「身份」外衣。",
       "knife": "刀 U3：行的次序由事实（事实发生序）表达，anchor 数值字段退出行表",
       "clearWhen": "loop_rows.rs 的每个 Decl 都不再有 anchor 数值字段"
-    },
-    {
-      "code": "CP-009",
-      "file": "crates/symbio-plugin-loop/src/entry.rs",
-      "kind": "advance-loop",
-      "token": "drive_frame",
-      "count": 1,
-      "problem": "entry.rs 的 loop 里调用 ring::drive_frame：除了环自己的推进循环，还存在第二个按幕推进的外层循环。CP-001 只认 ring.rs 的循环体，看不见它；这正是 047 §4 判据面被缩到 ring.rs 后漏掉的那一半。",
-      "knife": "刀 U2：随 `run_loop` 一起删；推进只由 ring.rs 的单一循环表达",
-      "clearWhen": "U2 落地后除 ring.rs 外的生产文件不再有包含 drive_frame / loop_rows::next 调用的 loop / while / for"
     }
   ]
 }

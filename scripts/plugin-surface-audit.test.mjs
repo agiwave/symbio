@@ -2,20 +2,18 @@
  * plugin-surface-audit 回归测试 —— 证明它**会红**（HS-001…004，D-253 / D-254）
  *
  * 一个只会亮绿灯的守卫等于没有守卫。逐条注入真实违规并断言脚本变红：
- *   ① 干净夹具 → exit 0（扩展层插件只写门面）；
- *   ② 源码里出现 `symbio_sdk::Event` → exit 1 —— 绕过门面直接取宿主面；
- *   ③ 只在注释里提 `symbio_sdk::vdfs::address` → exit 0 —— 判代码不判措辞；
- *   ④ manifest 的 `[dependencies]` 里有 `symbio-core` → exit 1；
- *   ⑤ `[dev-dependencies]` 里有 `symbio-core` → exit 0（测试设施不是运行时面）；
- *   ⑥ 控制面 `symbio-plugin-loop` 直接依赖 core → exit 0 —— 影响类分档（DE-026）；
- *   ⑦ 门面白名单条数超过基线 → exit 1 —— 只许降（HS-002）；
- *   ⑧ 范围读不出（缺 `crates/`）→ exit 2；
- *   ⑨ 门面里有一条扩展层零引用的符号 → exit 1 —— 白名单不许有空转条目（HS-003）；
- *   ⑩ 胶水层的嵌入臂被设为默认 → exit 1，⑪ 不是 `optional` → exit 1 —— 重臂默认必须关（HS-004，D-254）；
- *   ⑬ 门面自己的 manifest 依赖 `symbio-core` → exit 1 —— 机制臂归零之后把回头路堵死（HS-005，D-276）；
- *   ⑭ 门面模块级转发条数超过基线 → exit 1 —— 一行换 N 条也得在账上有数（HS-006，D-278）；
- *   ⑮ 机制臂块回到门面 → exit 1 —— 判据按**来源分区**读，不靠一条会失灵的块锚点（D-280）；
- *   ⑯ 门面一条 `pub use …::` 都读不到 → exit 1 —— 「0 条机制臂」与「一条都没读到」不许长得一样（D-280）。
+ *   ④ 控制面 `symbio-plugin-loop` 直接依赖 core → exit 0 —— 影响类分档（DE-026）；
+ *   ⑤ 门面白名单条数超过基线 → exit 1 —— 只许降（HS-002）；
+ *   ⑥ 范围读不出（缺 `crates/`）→ exit 2；
+ *   ⑦ 门面里有一条扩展层零引用的符号 → exit 1 —— 白名单不许有空转条目（HS-003）；
+ *   ⑧ 胶水层的嵌入臂被设为默认 → exit 1，⑨ 不是 `optional` → exit 1 —— 重臂默认必须关（HS-004，D-254）；
+ *   ⑩ 门面自己的 manifest 依赖 `symbio-core` → exit 1 —— 机制臂归零之后把回头路堵死（HS-005，D-276）；
+ *   ⑪ 门面模块级转发条数超过基线 → exit 1 —— 一行换 N 条也得在账上有数（HS-006，D-278）；
+ *   ⑫ 机制臂块回到门面 → exit 1 —— 判据按**来源分区**读，不靠一条会失灵的块锚点（D-280）；
+ *   ⑬ 门面一条 `pub use …::` 都读不到 → exit 1 —— 「0 条机制臂」与「一条都没读到」不许长得一样（D-280）。
+ *
+ * 插件的 **manifest 依赖边**不在这里判：它只有 `plugin-entry-audit` 的 E-009 一个
+ * owner（白名单 = plugin-api / kernel / providers + 第三方）。本脚本只剩源码前缀那一半。
  *
  * 用法：node --test scripts/plugin-surface-audit.test.mjs
  */
@@ -30,7 +28,6 @@ import { fileURLToPath } from 'node:url'
 
 import {
   CONTROL_PLANE,
-  manifestViolations,
   readGrammar,
   readWhitelist,
   MODULE_REEXPORT_BASELINE,
@@ -142,41 +139,7 @@ test('③ 只在注释里提 core ⇒ 绿（判代码不判措辞）', () => {
   }
 })
 
-test('④ manifest 的 [dependencies] 有 core ⇒ 红', () => {
-  const root = fixture({
-    'symbio-plugin-fix': {
-      manifest: CLEAN_MANIFEST.replace(
-        'symbio-plugin-api = { path = "../symbio-plugin-api" }',
-        'symbio-plugin-api = { path = "../symbio-plugin-api" }\nsymbio-core = { path = "../symbio-core" }',
-      ),
-    },
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
-  })
-  try {
-    const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /symbio-core/)
-  } finally {
-    rmTree(root)
-  }
-})
-
-test('⑤ dev-dependencies 里的 core 不判', () => {
-  const root = fixture({
-    'symbio-plugin-fix': {
-      manifest: `${CLEAN_MANIFEST}\n[dev-dependencies]\nsymbio-core = { path = "../symbio-core" }\n`,
-    },
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
-  })
-  try {
-    const r = runOn(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-  } finally {
-    rmTree(root)
-  }
-})
-
-test('⑥ 控制面插件直接依赖 core ⇒ 绿', () => {
+test('④ 控制面插件源码直取 sdk ⇒ 绿（源码前缀豁免；manifest 归 E-009）', () => {
   const root = fixture({
     'symbio-plugin-loop': {
       rs: 'use symbio_sdk::Event;\npub fn f(_: Event) {}\n',
@@ -365,12 +328,22 @@ test('⑭ 门面模块级转发超过基线 ⇒ 红（HS-006，D-278）', () => 
   }
 })
 
-test('manifestViolations 只认 [dependencies] 段内的禁用键', () => {
-  assert.deepEqual(manifestViolations(CLEAN_MANIFEST), [])
-  assert.deepEqual(
-    manifestViolations('[dependencies]\nsymbio-kernel = { path = "x" }\nsymbio-deploy = { path = "y" }\n'),
-    ['symbio-kernel', 'symbio-deploy'],
-  )
+test('manifest 依赖边不在本脚本判（owner 是 E-009）', () => {
+  const root = fixture({
+    'symbio-plugin-fix': {
+      manifest: CLEAN_MANIFEST.replace(
+        'symbio-plugin-api = { path = "../symbio-plugin-api" }',
+        'symbio-plugin-api = { path = "../symbio-plugin-api" }\nsymbio-sdk = { path = "../symbio-sdk" }',
+      ),
+    },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    rmTree(root)
+  }
 })
 
 test('readWhitelist 只认机制臂那一个块锚点', () => {
