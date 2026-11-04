@@ -717,7 +717,7 @@ async fn append_messages_replaces_inflight_placeholder_seq() {
 /// （`Transcript::apply` 仅在帧带 `seq` 时采用外来值）。调用方拿不到权威副本 ⇒
 /// 那条消息在前端**永远只有在途号** ⇒ 与存储号并存两套序号空间 ⇒ 排序错位
 /// （`user-user-assistant-assistant`，只有整份回读才恢复）。
-/// 端到端回归钉：`e2e/cases/t16-live-order.mjs`。
+/// 端到端回归钉：`e2e/cases/t10-node-protocol.mjs`。
 #[tokio::test]
 async fn append_messages_returns_storage_authoritative_copies() {
     let (session, _dir, _tmp) = setup().await;

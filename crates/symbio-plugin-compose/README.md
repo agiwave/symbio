@@ -109,7 +109,7 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 ## 落点与标记（归 `session`，不归本插件）
 
 本插件只返回字符串；**写到哪、带什么标记**由调用方决定，见
-[`../loop/chat_loop/compose.rs`](../symbio-plugin-loop/src/chat_loop/compose.rs)：
+[D-326 冻结表](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表")：
 
 | 产物 | 落点 | `meta.surface` | `meta.exclude_from_context` | `meta.reason` |
 |---|---|---|---|---|

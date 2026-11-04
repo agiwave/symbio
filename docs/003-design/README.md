@@ -252,7 +252,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-hook/README`](../../crates/symbio-plugin-hook/README.md) | Hook 插件 | 与代码一致 |
 | [`crates/symbio-plugin-idempotency/README`](../../crates/symbio-plugin-idempotency/README.md) | 幂等台账插件 | 与代码一致 |
 | [`crates/symbio-plugin-local/README`](../../crates/symbio-plugin-local/README.md) | Local 插件 | 与代码一致 |
-| [`crates/symbio-plugin-loop/README`](../../crates/symbio-plugin-loop/README.md) | Loop 插件（单环驱动器） | 与代码一致 |
+| [`crates/symbio-plugin-loop/README`](../../crates/symbio-plugin-loop/README.md) | Loop 插件（纯机制环） | 与代码一致 |
 | [`crates/symbio-plugin-mcp/README`](../../crates/symbio-plugin-mcp/README.md) | MCP 插件 | 与代码一致 |
 | [`crates/symbio-plugin-memory/README`](../../crates/symbio-plugin-memory/README.md) | Memory 插件 | 与代码一致 |
 | [`crates/symbio-plugin-model/README`](../../crates/symbio-plugin-model/README.md) | Model 插件 | 与代码一致 |

@@ -1,67 +1,30 @@
 ---
 kind: design
 id: crates/symbio-plugin-loop/README
-title: Loop 插件（单环驱动器）
+title: Loop 插件（纯机制环）
 status: active
 created: 2026-10-19
 impl: done
 ---
 
-# Loop 插件（单环驱动器）
+# Loop 插件（纯机制环）
 
-> **目标形状**见 [DE-001 §4.3 / §4.4](../../docs/003-design/001-核心架构.md "DE-001-核心架构")
-> 与 [DE-015](../../docs/003-design/015-义务环.md "DE-015-义务环")；
-> 本文只写**当前实现**，不复述目标裁决。
+> **旧编排（幕机 / 入口 / 阶段事件 / 行表阶段号）已随 B2 退场（D-318）。**
+> 本目录的现行内容是**纯机制环**：选债 / 派发 / 等待 / 配对 / 记账 / 预算与租约 / 重放。
+> 机制形状与裁决见 [DE-048-端口机制裁决](../../docs/003-design/048-端口机制裁决.md)、[DE-051-机制形状规格](../../docs/003-design/051-机制形状规格.md)；
+> 旧编排的落点与去向见 [DE-052-决策正文证据锚点冻结表](../../docs/003-design/052-决策正文证据锚点冻结表.md)。
 
-一轮对话的**执行引擎**：上下文装配、轮首判决、工具循环、收束与派生事实。它是
-从 session 切出的驱动器件，形状由 [D-086](../../docs/003-design/014-单环一表.md "DE-014-单环一表")
-裁决；跨墙通货闭族见 [D-083](../../docs/003-design/001-核心架构.md "DE-001-核心架构") §4。
+## 现行入口
 
-## 它不拥有什么
+| 文件 | 职责 |
+|---|---|
+| [`src/ring/mod.rs`](src/ring/mod.rs) | 五类事实、事实投影、债表与驱动入口 |
+| [`src/drive.rs`](src/drive.rs) | 驱动执行者：把环交给宿主的通用驱动契约 |
+| [`src/plugin.rs`](src/plugin.rs) | 注册入口：交出驱动执行者 |
+| [`src/vocab.rs`](src/vocab.rs) | 端口名；全部从行数据读入，代码里没有字面量 |
 
-转写、事实源、压缩熔断、用户补充队列、收件箱、运行态都归 **session**（留守层）。
-本插件没有配置文档、没有自有存储、没有常驻任务、没有能力行——它对前端与 LLM
-不可见（`hidden`）。它贡献**恰好 1 条 Mount 行**：挂载点就是起始地址，session
-经容器把 `run_turn` 派发到它。
+## 边界
 
-## 唯一入口
-
-`loop/<sid>` 上的 `Action("run_turn")`（[`provider.rs`](src/provider.rs)）。授权三条：
-
-1. 宿主 ctx 上有 `TURN_DISPATCH`（`WIRE=false` 的进程内键，线上不可伪造）；
-2. `dispatch.spec.session_id == <sid>`（交付包只对本轮会话有效）；
-3. 动作名逐字等于 `run_turn`。
-
-动作体就是**整轮 future**：跑完把结局序列化进 `TurnReport` 交回 session。本插件
-不维护任务表、不记轮次、不开通道。
-
-## 两条连接
-
-| 方向 | 通道 | 用途 |
-|---|---|---|
-| session → loop | `loop/<sid>` `run_turn` + `TurnDispatch` | 触发一轮；`TurnSpec` 纯值 + `facts` / `sink` / `writer` / `abort` 等闭族对象 |
-| loop → session | `session/<sid>/_run/<op>`（[`session_port.rs`](src/session_port.rs)） | 回读历史 / 写转写 / 压缩入格 / 补充取批 / worker 进展 / 恢复等会话侧动作 |
-
-任何第三条连接都要先改 D-086。本插件的 import 根被
-[`E-013`](../../scripts/plugin-entry-audit.mjs) 钉在闭族内：只准
-`crate::symbio_core` + 通用库 + crate 根日志 / 工厂宏，不得引用 `symbio_plugin_session`
-或任何兄弟插件。
-
-## 卸载 / 停用判据
-
-停用本插件 ⇒ `loop/<sid>` 返回 `NotFound`、不再开新轮；**在飞的轮在有限时间内收敛**
-（动作体已 spawned，持有交付包与端口的 `Arc`，存活期长于插件实例）。存储侧
-`list` / `stat` / 读转写 / 写收件箱照常。守卫用例在
-[`../composite/composite.test.rs`](../symbio-plugin-composite/src/composite.test.rs)（真实 `mount_all`
-+ 停用 `loop`）。
-
-## 模块分工
-
-入口（`plugin.rs` / `provider.rs`）· 跨墙面（`session_port.rs`）·
-主循环（`chat_loop*` / `loop_rows.rs` / `report_exec.rs` / `stage_events.rs` /
-`turn_runner.rs` / `turn_exec.rs`）· 上下文与请求（`context*` / `message_build.rs` / `tokenizer.rs` /
-`model_chat.rs`）· 工具与分派（`tools*` / `tool_dispatch.rs`）· 事实与记忆
-（`derived_facts.rs` / `memory_events.rs` / `task_events.rs` / `resume.rs`；技能观测与
-校准随技能能力住在 `symbio-plugin-skill`，D-262）。逐项职责见
-[`../session/docs/104-module-layout.md`](../symbio-plugin-session/src/docs/104-module-layout.md "DE-104-module-layout")
-§1.4，主环结构见 [`../session/docs/102-core-loop.md`](../symbio-plugin-session/src/docs/102-core-loop.md "DE-102-core-loop")。
+本 crate **对外零导出**：宿主不认识环的任何类型。环经 `plugin_api::drive` 的通用契约
+与宿主交互，能力束与可见域是**调用参数**，不是注册面（DE-051）。环本身不持有账本 /
+预算 / 执行体注册表，不生成身份、不读序号、不认阶段。

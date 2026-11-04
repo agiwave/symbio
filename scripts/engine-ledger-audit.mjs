@@ -19,7 +19,7 @@
  * |---|---|---|
  * | `EL-001` | 引擎自持的行数 | `crates/symbio-plugin-loop/src/**`（生产 `.rs`）里 `Decl {` 的出现次数（行数据已由应用交来，环侧目标 0） |
  * | `EL-002` | 分发方的出参通道数 | `ring/engine.rs` 的 `CollectingWriter` 结构体里 `Mutex<` 字段数 |
- * | `EL-003` | 驱动 / 回合路径的全量读点数 | `ring/engine.rs`、`symbio/src/drive.rs`、`session/plugin/turn.rs` 三处的 `range(…Seq::new(0))` |
+ * | `EL-003` | 驱动 / 回合路径的全量读点数 | `ring/engine.rs`、`crates/symbio/src/drive.rs`、`session/plugin/turn.rs` 三处的 `range(…Seq::new(0))` |
  *
  * **账本只有这三格**：`TurnState` 那一格随对象下线一并消失，不再有第四个读数
  * （`CS-010` 同时退役，见 `GATE_CODES.md` 的退役列）。
@@ -63,7 +63,7 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
  * 同步返回的端口结果不是通道。
  * `fullScans = 1`：驱动 / 回合路径只剩 `session/plugin/turn.rs` 的终答投影读一次全量
  * （按 `scope` 找终答事实，事实面没有「按实体取一条」以外的入口）；`ring/engine.rs`
- * 只读当前站的 `FactView`，`symbio/src/drive.rs` 按 `head - 1` 续读，都不从 0 扫。
+ * 只读当前站的 `FactView`，`crates/symbio/src/drive.rs` 按 `head - 1` 续读，都不从 0 扫。
  */
 const BASELINE = { rows: 0, channels: 1, fullScans: 1 }
 

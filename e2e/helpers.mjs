@@ -1063,7 +1063,7 @@ export const INFLIGHT_SEQ_BASE = 1 << 50;
  * ⚠️ **不要退化成「逐帧必须完全相同」**：助手侧节点在落库回包之前持的正是在途号，
  * 逐帧相同只在上线后从未落库时才成立——那恰恰是 bug（前端永远拿不到权威号，
  * 下一条用户消息会排到它前面，显示成 `user-user-assistant-assistant`）。
- * 端到端回归：`e2e/cases/t16-live-order.mjs`。
+ * 端到端回归：`e2e/cases/t10-node-protocol.mjs`。
  */
 export function assertSeqAnchorIsNodeAttribute(frames, label) {
   const seqs = frames.map((f) => f.data?.seq).filter((s) => s != null);
