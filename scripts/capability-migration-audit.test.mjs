@@ -162,6 +162,23 @@ test('classifyCommit：只改注释的架构面改动两类都不是', () => {
   assert.equal(classifyCommit({ message: 'docs: 注释', patch }), null)
 })
 
+// 判定面是 sdk / kernel：`plugin-api` 是插件面的通用契约，为端口执行体加读面、
+// 把驱动契约定在这里，都不改内核的公开面与语义——判成补件等于让每次契约演进都填表。
+test('classifyCommit：只在 plugin-api 新增公开项 ⇒ 不算补件（判定面是 sdk / kernel）', () => {
+  const patch = patchOf([
+    { path: 'crates/symbio-plugin-api/src/drive.rs', added: ['pub struct Drive;'], removed: [] },
+  ])
+  assert.equal(classifyCommit({ message: 'feat(port): 通用驱动契约', patch }), null)
+})
+
+test('classifyCommit：同批再动 sdk ⇒ 仍按补件判', () => {
+  const patch = patchOf([
+    { path: 'crates/symbio-plugin-api/src/drive.rs', added: ['pub struct Drive;'], removed: [] },
+    { path: CORE, added: ['pub fn port() {}'], removed: [] },
+  ])
+  assert.equal(classifyCommit({ message: 'feat: 补件', patch }), 'supplement')
+})
+
 // ── 迁移批次 ──────────────────────────────────────────────────────────────
 
 const IDS = ['memory', 'local', 'notes']

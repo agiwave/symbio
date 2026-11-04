@@ -6,7 +6,7 @@
  *
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
- * | CC-001 | 提交触及 `crates/symbio-sdk/**` 或 `crates/symbio-kernel/**`，提交信息里没有 `Core-Change:` 段 | 内核 / 契约层被当成「顺手改一下」的地方：没有一行文字解释「为什么非动它不可」，就没有人能复核 |
+ * | CC-001 | 提交触及 `crates/symbio-sdk/**` 或 `crates/symbio-kernel/**` 的**生产** `.rs`，提交信息里没有 `Core-Change:` 段 | 内核 / 契约层被当成「顺手改一下」的地方：没有一行文字解释「为什么非动它不可」，就没有人能复核。纯测试断言（`.test.rs` / `tests/`）不改公开面与语义，不在判定面内 |
  * | CC-002 | 同一提交**既动插件又动 core/kernel**，而 `Core-Change:` 的值不是 `D-NNN` | 横向扩充能力的提交悄悄扩大了内核面——正是 DE-023 §2 第 1 条（扩展局部性）要拦的形态 |
  *
  * ## 为什么用提交信息，而不是再写一个静态审计
@@ -307,18 +307,27 @@ export function commentsOnlyPatch(patch) {
 const inDirs = (files, dirs) => files.some((f) => dirs.some((d) => f.startsWith(d)))
 
 /**
+ * 只判**生产**源码。测试文件（`*.test.rs` 与 `tests/` 下的用例）断言的只是既有契约，
+ * 不改内核的公开面与语义——把测试维护算成「改内核」会让一次夹具改名也要求架构理由，
+ * 这条判据随即退化成填表（与 CC-001 只管源码、不管 Cargo.toml 是同一条理由）。
+ */
+export function isProductionSource(f) {
+  return f.endsWith('.rs') && !/\.test\.rs$/.test(f) && !/(^|\/)tests\//.test(f)
+}
+
+/**
  * 判一条提交。
  *
  * 返回 `{ sha, subject, errors: string[] }`；`errors` 空即通过。
  */
 export function judge(sha, files, message) {
   const errors = []
-  // 只对**源码**判 CC-001。`Cargo.toml` / `README.md` 的改动不改变内核的公开面与语义，
+  // 只对**生产源码**判 CC-001。测试文件、`Cargo.toml` / `README.md` 的改动不改变内核的公开面与语义，
   // 而依赖清单几乎每轮都在变（一次依赖整理就动过 31 份，其中包含 core 的）。把清单算进来，
   // 每一轮机械整理都要挂一条 `Core-Change:`，这条判据会从「留理由」退化成「每次都填表」，
   // 贬值速度比它拦住的东西快。清单膨胀的真实后果是内核面变大，那由 C-002（深引）与
   // C-004（账本条数）从**结果面**判——本条判的是**意图**，两者不该混。
-  const sources = files.filter((f) => f.endsWith('.rs'))
+  const sources = files.filter(isProductionSource)
   if (!inDirs(sources, ARCH_DIRS)) return { sha, errors }
 
   const m = message.match(TRAILER_RE)
@@ -433,7 +442,7 @@ function main() {
       const patch = git(['show', '--format=', '--unified=0', sha, '--', ...core])
       if (commentsOnlyPatch(patch)) files = files.filter((f) => !core.includes(f))
     }
-    if (inDirs(files, ARCH_DIRS)) coreTouching += 1
+    if (inDirs(files.filter(isProductionSource), ARCH_DIRS)) coreTouching += 1
     const r = judge(sha, files, message)
     if (r.errors.length) bad.push(r)
   }

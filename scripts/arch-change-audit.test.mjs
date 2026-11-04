@@ -59,6 +59,24 @@ test('CC-001 触发：清单与源码同批改动，仍按源码算', () => {
   assert.match(r.errors[0], /^CC-001/)
 })
 
+// 口径边界：只判**生产**源码。纯测试断言改的是契约的证词，不是契约本身——
+// 为一条夹具改名要求架构理由，会让这条判据退化成填表（与清单 / README 同一条理由）。
+test('CC-001 不触发：只改了 core 的测试文件（纯测试断言不要求架构理由）', () => {
+  const r = judge(SHA, ['crates/symbio-sdk/src/vocab.test.rs'], msg())
+  assert.deepEqual(r.errors, [])
+})
+
+test('CC-001 不触发：`tests/` 目录下的用例同样不算内核语义', () => {
+  const r = judge(SHA, ['crates/symbio-kernel/tests/decl.rs'], msg())
+  assert.deepEqual(r.errors, [])
+})
+
+test('CC-001 仍触发：同批既改测试又改生产源码（测试不豁免生产面的理由）', () => {
+  const r = judge(SHA, ['crates/symbio-sdk/src/vocab.test.rs', CORE], msg())
+  assert.equal(r.errors.length, 1)
+  assert.match(r.errors[0], /^CC-001/)
+})
+
 test('CC-002 触发：既动插件又动 core，理由里没有决策号', () => {
   const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: 顺手补了个分支\n'))
   assert.equal(r.errors.length, 1)

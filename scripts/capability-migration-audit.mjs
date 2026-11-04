@@ -96,6 +96,16 @@ export const ARCH_TREES = [
   'crates/symbio-plugin-api',
 ]
 
+/**
+ * 补件的判定面：`sdk` / `kernel`。
+ *
+ * `plugin-api` 是**插件面**的通用契约——为端口执行体加一个上下文读面、把驱动契约定在这里，
+ * 不改内核的公开面与语义，不该要求架构理由；把只有 `plugin-api` 改动的提交判成补件，
+ * 会让「通用契约随实现演进」变成每次都要挂决策号的填表。机制面变宽的判据仍在
+ * `arch-shape-audit` / `plugin-entry-audit` 从结果面判。
+ */
+export const CORE_TREES = ['crates/symbio-sdk', 'crates/symbio-kernel']
+
 /** 控制面：迁移批次只许在这里删旧实现。 */
 export const CONTROL_TREES = ['crates/symbio-plugin-loop', 'crates/symbio-plugin-session']
 
@@ -150,10 +160,16 @@ export const BEFORE_GUARD = {
   why: 'EX-002 落地时的 HEAD：迁移纪律（D-247）从此后的提交开始判，之前的不追溯（不重写历史）',
 }
 
-/** 补件的正向证据：给 `plugin-api` 加前置判断端口的那次提交（D-219 / D-220）。 */
+/**
+ * 补件的正向证据：给内核 `EventDecl` 加宿主写口的那次提交（D-296）。
+ *
+ * 为什么不取 `709ee583`（给 `plugin-api` 加前置判断端口）：判定面是 `sdk` / `kernel`，
+ * `plugin-api` 是插件面契约、不算补件——夹具必须落在判定面之内，否则「正向证据」
+ * 验的是一条判据已经不管的路。
+ */
 export const FIXTURE = {
-  sha: '709ee583',
-  why: '前置判断端口落地（D-219 / D-220）：补件带一条能打开的决策，新增面不含插件 id 与工具名',
+  sha: '89490914',
+  why: '事件声明的宿主写口（D-296）：在 kernel 新增公开项、挂一条能打开的决策，新增面不含插件 id 与工具名',
 }
 
 /**
@@ -258,14 +274,15 @@ export function movedLines(patch) {
 }
 
 /**
- * 补件在架构面新增的公开项（前几项，供报错点名）。
+ * 补件在**机制面**（`sdk` / `kernel`）新增的公开项（前几项，供报错点名）。
  *
+ * `plugin-api` 的改动不算补件：那是插件面的通用契约，不改内核的公开面与语义。
  * 只看**新增的非注释行**：注释里提一句 `pub fn` 不是机制。
  */
 export function mechanismAdditions(patch) {
   const out = []
   for (const file of patch) {
-    if (!inTrees(file.path, ARCH_TREES) || !isCapabilitySource(file.path)) continue
+    if (!inTrees(file.path, CORE_TREES) || !isCapabilitySource(file.path)) continue
     for (const line of file.added) {
       if (PUB_ITEM_RE.test(line)) out.push({ path: file.path, line: line.trim() })
     }

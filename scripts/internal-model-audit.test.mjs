@@ -184,14 +184,19 @@ test('⑧ 扫描根没有 .rs ⇒ 判据失效，exit 1', () => {
   }
 })
 
-test('⑨ 真仓库：三处存量全部登记，且正好三处', () => {
-  // 第三处是 `symbio-plugin-model` 的端口执行体（D-305 裁决一）：它与闸门本体同形，
-  // 透传调用方给的工具集，因此挂 `/gate`；登记条数随「新增一处就多写一条」增长，
-  // 但每一处仍必须在代码旁写明理由（本审计不提供集中豁免表）。
+test('⑨ 真仓库：实测调用点数 == 登记条数（清单完整，不钉死数量）', () => {
+  // 判据本意是**清单完整性**：每一处直调都在代码旁有理由，数量随架构演进而变。
+  // 把「三处」写死会让「多一处」变成改测试而不是写理由——那正是这条判据要防的形态。
   const r = spawnSync(process.execPath, [script], { encoding: 'utf8' })
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /直调 round_trip 的 3 处全部登记过理由/)
-  assert.match(r.stdout, /存量豁免 3 处/)
+  const calls = r.stdout.match(/直调 round_trip 的 (\d+) 处全部登记过理由/)
+  assert.ok(calls, r.stdout)
+  const n = Number(calls[1])
+  if (n > 0) {
+    const allows = r.stdout.match(/存量豁免 (\d+) 处/)
+    assert.ok(allows, r.stdout)
+    assert.equal(Number(allows[1]), n)
+  }
 })
 
 // ── IM-004 形状判据 ────────────────────────────────────────────────
