@@ -84,12 +84,16 @@ import { fileURLToPath } from 'node:url'
 import { red, green, dim } from './color.mjs'
 import { codeTextOf } from './gate.d/_shared.mjs'
 import { cliArtifactRelPath } from './cli-binary.mjs'
+import { loadFreezeAnchors } from './doc-freeze-table.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // `--root=` 只为回归测试开的口子：测试在临时目录造一棵最小仓库，把判据用
 // 「注入真实违规并断言变红」验证（判定型守卫的教条：只会亮绿灯 = 没有守卫）。
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..')
+
+/** 决策正文证据锚点的冻结表（D-326）：只作用于 `### D-NNN` 段。 */
+const freezeAnchors = loadFreezeAnchors(REPO_ROOT)
 
 /** Rust 语料根：任一缺失可容忍，全缺即「范围读不出」。`docs/003-design/verify` 是硬证据程序
  *  的 Rust 源（`rustc` 直接编译的那批文件），它们声明的常量同样是文档指认的对象。 */
@@ -203,6 +207,34 @@ if (rsFiles.length === 0) {
 }
 const feFiles = FE_ROOTS.flatMap((r) => collectSource(r, isFrontend))
 const toolFiles = TOOL_ROOTS.flatMap((r) => collectSource(r, isTool))
+
+/**
+ * 决策正文的 `.rs::符号` 证据锚点（D-326）：决策段此前整段跳过 ⇒ 「证据全假」
+ * 在这里是看不见的。冻结表只登记**裁决时点的旧锚点**：指得到就照常通过，
+ * 指不到且表里没有对应行 ⇒ 仍判 D-005 红。
+ */
+const DECISION_RS_ANCHOR = /`([A-Za-z0-9_][A-Za-z0-9_./-]*?\.rs)(::[A-Za-z0-9_]+)`/g
+const rsTextCache = new Map()
+function rsText (f) {
+  if (!rsTextCache.has(f)) rsTextCache.set(f, readFileSync(f, 'utf8'))
+  return rsTextCache.get(f)
+}
+function rsWordIn (text, sym) {
+  const esc = sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?:^|[^A-Za-z0-9_])${esc}(?:$|[^A-Za-z0-9_])`).test(text)
+}
+function auditDecisionAnchors (rel, line, lineNo) {
+  for (const m of line.matchAll(DECISION_RS_ANCHOR)) {
+    const base = m[1]
+    const sym = m[2].slice(2)
+    const anchor = `${base}${m[2]}`
+    const cands = rsFiles.filter((p) => p.replace(/\\/g, '/').endsWith('/' + base))
+    if (cands.some((f) => rsWordIn(rsText(f), sym))) continue
+    if (freezeAnchors.has(anchor)) continue
+    report(rel, lineNo, 'D-005',
+      `决策正文的证据锚点指不到，且未在 D-326 冻结表登记：\`${anchor}\`——补一行处置，或改指现行 owner`)
+  }
+}
 
 const identRe = /[A-Za-z_][A-Za-z0-9_]*/g
 /** D-005 的语料：只有 Rust */
@@ -599,11 +631,16 @@ for (const rel of mdFiles) {
   const lines = readFileSync(join(REPO_ROOT, rel), 'utf8').split(/\r?\n/)
   // 决策段（`### D-NNN`）与 ADR 正文同性质：记的是**当时**的设计，其中的符号可能早已改名 / 删除。
   // `adr` kind 已废除、正文折进设计文档的这一节，故豁免按**节**判，而不是按目录判。
+  // D-326 起，段内 `.rs::符号` 证据锚点按冻结表核验：指得到照常通过，指不到且表里
+  // 没有对应行仍判红（见 auditDecisionAnchors）。
   let inDecision = false
   lines.forEach((line, i) => {
     if (/^#{2,6}\s+D-\d{3}[a-z]?\b/.test(line)) inDecision = true
     else if (/^#{1,2}\s/.test(line)) inDecision = false
-    if (inDecision) return
+    if (inDecision) {
+      auditDecisionAnchors(rel, line, i + 1)
+      return
+    }
     // 承认通道：理由非空才生效。作用域是**本行或前一行**（与 D-006 / D-010 同一条约定）——
     // 表格行里塞进 HTML 注释会把这一行写花，机制不该逼人为了豁免去破坏排版。
     const allow = line.match(ALLOW_RE) ?? (i > 0 ? lines[i - 1].match(ALLOW_RE) : null)

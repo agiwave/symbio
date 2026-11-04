@@ -187,6 +187,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listSourceFiles, isSourceCommentLine, codeRanges, inCode } from './gen-doc-refs.mjs'
+import { loadFreezeTable, decisionLineMask } from './doc-freeze-table.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
@@ -194,6 +195,13 @@ const defaultRoot = path.resolve(scriptDir, '..')
 // （与 `mechanism-audit` / `style-audit` 同一约定）。
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const repoRoot = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot
+
+/**
+ * 决策正文证据锚点的冻结表（D-326）：只作用于 `### D-NNN` 段。
+ * 冻结表自己的「旧锚点」列也含失效锚点，按登记表语境跳过（它不是入链）。
+ * 读不出来 ⇒ 空集合（夹具的最小仓库没有冻结表，此时不豁免任何锚点）。
+ */
+const freezeTable = loadFreezeTable(repoRoot)
 
 // `--strict` 是历史参数（曾经"只有加了它才失败"），现已无额外作用：失效链接默认即失败。
 // 保留识别是为了不让旧命令报错，但**不参与判定**——留着参与判定就会有人以为
@@ -601,12 +609,20 @@ function evidenceAnchorResolves(fromFile, base, tail) {
 function evidenceAnchorHits(file, text, limit = 8) {
   const hits = []
   const lines = text.split('\n')
+  const inDecision = decisionLineMask(lines)
+  const isFreezeTableDoc = path.resolve(file) === freezeTable.docAbs
   for (let i = 0; i < lines.length && hits.length < limit; i++) {
     if (evidenceWaivedLine(lines, i)) continue
+    // 冻结表自己的登记行是「历史锚点的名册」，不是入链——按语境跳过。
+    if (isFreezeTableDoc && lines[i].trim().startsWith('|')) continue
     for (const m of lines[i].matchAll(EVIDENCE_ANCHOR)) {
       const base = m[1]
       evidenceChecked += 1
-      if (!evidenceAnchorResolves(file, base, m[2])) hits.push({ line: i + 1, target: m[0] })
+      if (evidenceAnchorResolves(file, base, m[2])) continue
+      // D-326：决策正文按登记时点冻结。只认**表里逐行登记过的旧锚点**，
+      // 表外（含现行文档）照旧判红——冻结不是豁免通道。
+      if (inDecision[i] && freezeTable.anchors.has(`${base}${m[2]}`)) continue
+      hits.push({ line: i + 1, target: m[0] })
     }
   }
   return hits

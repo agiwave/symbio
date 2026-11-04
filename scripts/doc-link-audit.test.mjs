@@ -202,6 +202,36 @@ test('D-017：行内豁免必须带理由（写在上一行也生效）', () => 
   assert.equal(audit({ 'docs/a.md': '# A\n\n<!-- doc-link-allow D-017:   -->\n判据 `gone.rs::removed`。\n' }).status, 1)
 })
 
+// ── D-326：决策正文证据锚点按登记时点冻结 ──────────────────────────────
+// 判据必须**真的接上冻结表**：表里查不到对应行仍然判红；表外（现行文档）不开口子。
+const FREEZE_DOC = 'docs/003-design/052-决策正文证据锚点冻结表.md'
+const freezeTable = (anchor) =>
+  `# 冻结表\n\n## 登记表\n\n| 文档 | 旧锚点 | 处置 | 现落点 |\n|---|---|---|---|\n` +
+  `| \`docs/a.md\` | \`${anchor}\` | 已随 B2 退场（D-318） | — |\n`
+
+test('D-326：决策正文的悬空锚点未登记 ⇒ 仍判红（冻结表不是自动豁免）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n### D-100 裁决\n\n证据 `gone.rs::removed`。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /gone\.rs::removed/)
+})
+
+test('D-326：决策正文的旧锚点逐行登记进冻结表 ⇒ 通过（表本身也不判成入链）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n### D-100 裁决\n\n证据 `gone.rs::removed`。\n',
+    [FREEZE_DOC]: freezeTable('gone.rs::removed'),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-326：登记只作用于决策段——现行正文里的同一锚点仍判红（冻结不是豁免通道）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n证据 `gone.rs::removed`。\n',
+    [FREEZE_DOC]: freezeTable('gone.rs::removed'),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /gone\.rs::removed/)
+})
+
 // ── D-002：过程文档必须归档 ────────────────────────────────────────────
 // 归档是动作，能保持住的才是机制。这组用例钉住「它真的会红」——包括**豁免必须有理由**，
 // 否则加一行注释就能把规则绕成橡皮图章。
