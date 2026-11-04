@@ -6,11 +6,13 @@ edition = "2021"
 [dependencies]
 async-trait = { workspace = true }
 serde_json = { workspace = true }
+symbio-deploy = { path = "../symbio-deploy" }
 symbio-kernel = { path = "../symbio-kernel" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-plugin-loop = { path = "../symbio-plugin-loop" }
 symbio-providers = { path = "../symbio-providers" }
 symbio-sdk = { path = "../symbio-sdk" }
 
 [dev-dependencies]
+# 环插件经 creator 注册被宿主发现；测试二进制需要链接它（源码零引用）。
+symbio-plugin-loop = { path = "../symbio-plugin-loop" }
 tokio = { workspace = true }

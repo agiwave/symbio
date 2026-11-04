@@ -1,8 +1,9 @@
 //! 验收：假插件只改本 crate，就能被环选中、派发、配对。
 
 use super::*;
-use symbio_host::{base_context, Host};
-use symbio_plugin_loop::{DriveOutcome, FactKind};
+// 只做链接：环经 creator 注册被宿主发现，测试二进制必须把它的注册项带进来。
+use symbio_plugin_loop as _;
+use symbio_host::{base_context, DriveOutcome, Host};
 
 #[tokio::test]
 async fn demo_port_runs_through_the_ring() {
@@ -18,7 +19,7 @@ async fn demo_port_runs_through_the_ring() {
     let facts = host.facts(report.scope);
     let response = facts
         .iter()
-        .find(|fact| fact.kind == FactKind::Response)
+        .find(|fact| fact.closing() == Some(true))
         .expect("执行体还了事实，环按同一债键配对");
     assert_eq!(response.key.scope, report.scope);
     assert_eq!(response.key.port, "demo", "环只按插件给的端口名解析");

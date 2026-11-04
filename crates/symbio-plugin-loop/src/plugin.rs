@@ -8,18 +8,19 @@ use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload,
 };
+use symbio_plugin_api::drive::DRIVE_PATH;
 
-/// 单环驱动器。
-pub struct LoopPlugin;
+/// 单环驱动器（crate 内唯一实例；对外经 creator 注册可见）。
+pub(crate) struct LoopPlugin;
 
 impl LoopPlugin {
     /// 静态工厂。
-    pub fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
+    pub(crate) fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         Arc::new(LoopPlugin)
     }
 
     /// 插件元数据。
-    pub fn metadata() -> PluginMeta {
+    pub(crate) fn metadata() -> PluginMeta {
         PluginMeta::new(PLUGIN_ID_LOOP, "单环驱动器")
             .with_description("纯机制环：选债、派发、等待、配对、记账、预算与租约、重放。")
             .with_version("0.1.0")
@@ -40,6 +41,9 @@ impl Plugin for LoopPlugin {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(symbio_sdk::keys::PATH).unwrap_or_default();
+        if path == DRIVE_PATH {
+            return crate::drive::run(ctx).await;
+        }
         Err(PluginError::NotFound(format!("未知路径: {path}")))
     }
 

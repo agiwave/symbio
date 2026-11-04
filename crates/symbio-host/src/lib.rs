@@ -1,6 +1,8 @@
 //! 宿主：发现全部 port 行、按 scope 起一次驱动、把债表当数据读、记机制状态 `idle`。
 //!
-//! 宿主不是插件：它依赖环 crate 与契约层，但插件不依赖它；插件之间互不依赖仍成立。
+//! 宿主不是插件：它依赖契约层，但插件不依赖它；插件之间互不依赖仍成立。
+//! **宿主不认识环的任何类型**：驱动经注册机制取到环插件，能力束与可见域走
+//! `plugin_api::drive` 的通用契约，报告也从同一上下文键取回（`DE-051` 机制形状）。
 //! 端口名与债行都不在这里构造：执行体由 `port` 族的行解析，债行由插件经 `debt` 族自报。
 //! `idle` 是机制事实（scope 无未还债），不是业务事实；收束谓词由读方自算，宿主不落业务事实。
 
@@ -8,38 +10,31 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use symbio_deploy::PLUGIN_ID_LOOP;
 use symbio_kernel::capability::Registry;
-use symbio_kernel::plugin::{
-    Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
+use symbio_plugin_api::creator_create_object;
+use symbio_plugin_api::drive::{
+    DriveFact, DriveRow, DriveSupport, DRIVE_PATH, DRIVE_REPORT, DRIVE_SCOPE, DRIVE_SUPPORT,
 };
 use symbio_plugin_api::port::{
     PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter, PortPayload, PORT_FAMILY,
 };
 use symbio_plugin_api::FactDraft;
-use symbio_plugin_loop::ring::{
-    drive, DebtKey, DebtRow, DebtSource, DriveCtx, DriveOutcome, Fact, FactKind, FactView,
-};
 use symbio_sdk::capability::CAPABILITY_VISITOR;
-use symbio_sdk::debt::{Closing, DebtFacts, DebtSource as DeclaredDebtSource, DebtTable, DriveRequest, DEBT_FAMILY};
+use symbio_sdk::debt::{
+    Closing, DebtFacts, DebtSource as DeclaredDebtSource, DebtTable, DriveRequest, DEBT_FAMILY,
+};
 use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_ID, WORKDIR};
 use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
+
+pub use symbio_plugin_api::drive::{DriveKey, DriveOutcome, DriveReport};
 
 /// 载荷里的分片号（宿主吸收重复时的附加身份位；环不知道它的存在）。
 const SHARD_KEY: &str = "shard";
 
-fn shard_of(fact: &Fact) -> Option<u64> {
+fn shard_of(fact: &DriveFact) -> Option<u64> {
     fact.payload.get(SHARD_KEY).and_then(|v| v.as_u64())
-}
-
-/// 一次驱动结果（宿主对外）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DriveReport {
-    /// 环的出口。
-    pub outcome: DriveOutcome,
-    /// 本次实际派发笔数。
-    pub dispatched: usize,
-    /// 当前可见域。
-    pub scope: u64,
 }
 
 /// 可见域身份：会话 id 的稳定 FNV-1a 64 位；0 保留给「没有可见域」，不拿来占位。
@@ -59,11 +54,11 @@ pub fn scope_of(session_id: &str) -> u64 {
 /// 进程内宿主：根插件 + 每个可见域的五事实。
 pub struct Host {
     root: Arc<dyn Plugin>,
-    facts: Mutex<HashMap<u64, Vec<Fact>>>,
+    facts: Arc<Mutex<HashMap<u64, Vec<DriveFact>>>>,
     /// 世界事实（按可见域）：身份 + 种类 + 不透明载荷。环只按种类问存在性；
     /// 执行体经通用 `reader` 读载荷——宿主是唯一实现方。
     world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
-    idle: Mutex<HashMap<u64, u64>>,
+    idle: Arc<Mutex<HashMap<u64, u64>>>,
     started: Instant,
     concurrency: usize,
 }
@@ -78,9 +73,9 @@ impl Host {
     pub fn with_concurrency(root: Arc<dyn Plugin>, concurrency: usize) -> Self {
         Self {
             root,
-            facts: Mutex::new(HashMap::new()),
+            facts: Arc::new(Mutex::new(HashMap::new())),
             world: Arc::new(Mutex::new(HashMap::new())),
-            idle: Mutex::new(HashMap::new()),
+            idle: Arc::new(Mutex::new(HashMap::new())),
             started: Instant::now(),
             concurrency: concurrency.max(1),
         }
@@ -98,7 +93,7 @@ impl Host {
     }
 
     /// 该 scope 的五事实只读投影（读方自算谓词用；`idle` 是机制状态，走 [`Self::idle_at`]）。
-    pub fn facts(&self, scope: u64) -> Vec<Fact> {
+    pub fn facts(&self, scope: u64) -> Vec<DriveFact> {
         self.facts
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -116,23 +111,32 @@ impl Host {
     ) -> Result<DriveReport, String> {
         let scope = scope_of(session_id);
         let gathered = self.gather(base, session_id, provider).await?;
-        let request = DriveRequest {
-            scope,
+        let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
+            facts: Arc::clone(&self.facts),
+            world: Arc::clone(&self.world),
+            executors: gathered.executors,
+            sources: gathered.sources,
             session_id: session_id.to_string(),
             provider: provider.map(str::to_string),
-        };
-        let source = MultiSource {
-            sources: gathered.sources,
-            request,
-            world: Arc::clone(&self.world),
-        };
-        let ctx = HostCtx {
-            host: self,
-            scope,
-            executors: gathered.executors,
-            source,
-        };
-        let report = drive(&ctx, scope).await;
+            started: self.started,
+            concurrency: self.concurrency,
+        });
+
+        let ctx = base.fork();
+        ctx.set(PATH, DRIVE_PATH.to_string());
+        ctx.set(DRIVE_SCOPE, scope);
+        ctx.set(DRIVE_SUPPORT, support);
+        let loop_plugin: Arc<dyn Plugin> =
+            creator_create_object::<dyn Plugin>(PLUGIN_ID_LOOP, Arc::clone(&ctx))
+                .ok_or_else(|| format!("环插件未注册: {PLUGIN_ID_LOOP}"))?;
+        loop_plugin
+            .route(ctx.clone())
+            .await
+            .map_err(|e| format!("驱动失败: {e:?}"))?;
+        let report = ctx
+            .get(DRIVE_REPORT)
+            .ok_or_else(|| "环未交回驱动报告".to_string())?;
+
         let at = self.started.elapsed().as_millis() as u64;
         {
             let mut idle = self
@@ -145,11 +149,7 @@ impl Host {
                 idle.remove(&scope);
             }
         }
-        Ok(DriveReport {
-            outcome: report.outcome,
-            dispatched: report.dispatched,
-            scope,
-        })
+        Ok(report)
     }
 
     /// 遍历根插件，收集全部 port 行与全部债务申报。
@@ -205,32 +205,35 @@ struct Gathered {
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
 }
 
-/// 宿主驱动上下文：事实读写、执行体解析与债表全部在这里，环不持有它们。
-struct HostCtx<'a> {
-    host: &'a Host,
-    scope: u64,
+/// 宿主实现的中性能力束：事实读写、执行体解析、存在性、时钟与限额。
+struct HostDriveSupport {
+    facts: Arc<Mutex<HashMap<u64, Vec<DriveFact>>>>,
+    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
     executors: HashMap<String, Arc<dyn PortExecutor>>,
-    source: MultiSource,
+    sources: Vec<Arc<dyn DeclaredDebtSource>>,
+    session_id: String,
+    provider: Option<String>,
+    started: Instant,
+    concurrency: usize,
 }
 
-impl DriveCtx for HostCtx<'_> {
-    fn facts(&self) -> Vec<Fact> {
-        self.host
-            .facts
+impl DriveSupport for HostDriveSupport {
+    fn facts(&self, scope: u64) -> Vec<DriveFact> {
+        self.facts
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&self.scope)
+            .get(&scope)
             .cloned()
             .unwrap_or_default()
     }
 
-    fn append(&self, fact: Fact) {
+    fn append(&self, fact: DriveFact) {
+        let scope = fact.scope;
         let mut facts = self
-            .host
             .facts
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let bucket = facts.entry(self.scope).or_default();
+        let bucket = facts.entry(scope).or_default();
         if bucket.iter().any(|known| {
             known.kind == fact.kind && known.key == fact.key && shard_of(known) == shard_of(&fact)
         }) {
@@ -239,35 +242,66 @@ impl DriveCtx for HostCtx<'_> {
         bucket.push(fact);
     }
 
-    fn source(&self) -> &dyn DebtSource {
-        &self.source
+    fn rows(&self, scope: u64) -> Vec<DriveRow> {
+        let request = DriveRequest {
+            scope,
+            session_id: self.session_id.clone(),
+            provider: self.provider.clone(),
+        };
+        let declared = declared_facts(&self.facts(scope), scope);
+        let mut rows = Vec::new();
+        for source in &self.sources {
+            for spec in source.rows(&request, &declared) {
+                rows.push(DriveRow {
+                    name: spec.name,
+                    port: spec.port,
+                    id: spec.id,
+                    payload: spec.payload,
+                    after: spec.after,
+                    when: spec.when,
+                    unless: spec.unless,
+                    when_no_open: spec.when_no_open,
+                    lease_ms: spec.lease_ms,
+                    max_attempts: spec.max_attempts,
+                });
+            }
+        }
+        rows
     }
 
     fn executor(&self, port: &str) -> Option<Arc<dyn PortExecutor>> {
         self.executors.get(port).cloned()
     }
 
+    fn exists(&self, kind: &str, scope: u64) -> bool {
+        self.world
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&scope)
+            .is_some_and(|facts| facts.iter().any(|known| known.kind == kind))
+    }
+
     fn now_ms(&self) -> u64 {
-        self.host.started.elapsed().as_millis() as u64
+        self.started.elapsed().as_millis() as u64
     }
 
     fn concurrency(&self) -> usize {
-        self.host.concurrency
+        self.concurrency
     }
 
     /// 非五类事实的去处：记下身份 / 种类 / 载荷，供环问存在性与执行体读事实。
-    fn outlet(&self) -> PortFactEmit {
+    fn outlet(&self, scope: u64) -> PortFactEmit {
         PortFactEmit::new(Arc::new(WorldWriter {
-            world: Arc::clone(&self.host.world),
-            scope: self.scope,
+            world: Arc::clone(&self.world),
+            scope,
         }))
     }
 
     /// 交给执行体的事实读面（宿主实现；环只转交）。
-    fn fact_reader(&self) -> Option<Arc<dyn PortFactReader>> {
+    fn reader(&self, scope: u64) -> Option<Arc<dyn PortFactReader>> {
         Some(Arc::new(HostReader {
-            world: Arc::clone(&self.host.world),
-            scope: self.scope,
+            world: Arc::clone(&self.world),
+            scope,
         }))
     }
 }
@@ -319,77 +353,22 @@ impl PortFactWriter for WorldWriter {
     }
 }
 
-/// 多个插件申报的债表合成一个数据源；行数据原样转给环。
-struct MultiSource {
-    sources: Vec<Arc<dyn DeclaredDebtSource>>,
-    request: DriveRequest,
-    world: Arc<Mutex<HashMap<u64, Vec<PortFact>>>>,
-}
-
-impl DebtSource for MultiSource {
-    fn rows(&self, facts: &FactView<'_>, scope: u64) -> Vec<DebtRow> {
-        let view = declared_facts(facts, scope);
-        let mut rows = Vec::new();
-        for source in &self.sources {
-            for spec in source.rows(&self.request, &view) {
-                let after = spec.after.as_ref().and_then(|id| {
-                    facts
-                        .all()
-                        .iter()
-                        .rev()
-                        .find(|fact| fact.kind.closes() && fact.key.scope == scope && &fact.key.id == id)
-                        .map(|fact| fact.key.clone())
-                });
-                if spec.after.is_some() && after.is_none() {
-                    // 前置尚未落账：申报方本不该给出这一行，宁可少还也不越过。
-                    continue;
-                }
-                let mut row = DebtRow::new(spec.name, spec.port, spec.id.clone(), spec.payload)
-                    .lease(spec.lease_ms, spec.max_attempts);
-                if let Some(after) = after {
-                    row = row.after(after);
-                }
-                if let Some(when) = &spec.when {
-                    row = row.when(when.clone());
-                }
-                if let Some(unless) = &spec.unless {
-                    row = row.unless(unless.clone());
-                }
-                if let Some(port) = spec.when_no_open {
-                    row = row.when_no_open(port);
-                }
-                rows.push(row);
-            }
-        }
-        rows
-    }
-
-    /// 事实存在谓词：宿主看得见全部世界事实，环只把种类字符串透传进来。
-    fn exists(&self, kind: &str, scope: u64) -> bool {
-        self.world
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&scope)
-            .is_some_and(|facts| facts.iter().any(|known| known.kind == kind))
-    }
-}
-
-/// 环的五事实 → 申报方读的按 id 归并视图（只取本可见域）。
-fn declared_facts(facts: &FactView<'_>, scope: u64) -> DebtFacts {
+/// 五事实 → 申报方读的按 id 归并视图（只取本可见域）。
+fn declared_facts(facts: &[DriveFact], scope: u64) -> DebtFacts {
     let mut out = DebtFacts::default();
-    for fact in facts.all() {
+    for fact in facts {
         if fact.key.scope != scope {
             continue;
         }
         out.note_attempt(&fact.key.id, fact.key.attempt);
-        match fact.kind {
-            FactKind::Response => {
+        match fact.closing() {
+            Some(true) => {
                 out.note_closing(&fact.key.id, Closing::Ok, fact.payload.clone());
             }
-            FactKind::Failed => {
+            Some(false) => {
                 out.note_closing(&fact.key.id, Closing::Failed, fact.payload.clone());
             }
-            _ => {}
+            None => {}
         }
     }
     out
@@ -406,7 +385,7 @@ pub fn report_json(report: &DriveReport) -> serde_json::Value {
         DriveOutcome::NoDebt => serde_json::json!({"kind": "no_debt"}),
         DriveOutcome::Waiting(keys) => serde_json::json!({
             "kind": "waiting",
-            "debts": keys.iter().map(|key: &DebtKey| serde_json::json!({
+            "debts": keys.iter().map(|key: &DriveKey| serde_json::json!({
                 "port": key.port,
                 "id": key.id,
                 "attempt": key.attempt,
@@ -423,5 +402,3 @@ pub fn report_json(report: &DriveReport) -> serde_json::Value {
 #[cfg(test)]
 #[path = "host.test.rs"]
 mod tests;
-
-

@@ -21,7 +21,7 @@ use crate::ring::table::{DebtRow, DebtSource};
 /// 宿主交给环的全部输入：事实投影的读写、债表、执行体解析与时钟。
 ///
 /// 缓存（若有）由宿主自己持有；环每一步重新读一遍，跨步不保留任何东西。
-pub trait DriveCtx: Send + Sync {
+pub(crate) trait DriveCtx: Send + Sync {
     /// 当前可见域的事实快照（只读投影）。
     fn facts(&self) -> Vec<Fact>;
 
@@ -53,7 +53,7 @@ pub trait DriveCtx: Send + Sync {
 
 /// 驱动出口。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DriveOutcome {
+pub(crate) enum DriveOutcome {
     /// 没有可还的债。
     NoDebt,
     /// 只剩在飞的债（租约未过）。
@@ -62,11 +62,11 @@ pub enum DriveOutcome {
 
 /// 一次驱动报告。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunReport {
+pub(crate) struct RunReport {
     /// 出口。
-    pub outcome: DriveOutcome,
+    pub(crate) outcome: DriveOutcome,
     /// 本轮实际派发笔数。
-    pub dispatched: usize,
+    pub(crate) dispatched: usize,
 }
 
 /// 选债结果：这一圈的全部可动作。
@@ -81,7 +81,7 @@ struct Batch {
 }
 
 /// 驱动一个可见域到没有可还的债、只剩在飞。
-pub async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
+pub(crate) async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
     let mut dispatched = 0usize;
     loop {
         let facts = ctx.facts();

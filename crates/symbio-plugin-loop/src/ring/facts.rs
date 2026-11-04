@@ -5,7 +5,7 @@ use symbio_plugin_api::port::PortReply;
 
 /// 环只知道这五类事实。名字是契约，不是世界词汇。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FactKind {
+pub(crate) enum FactKind {
     /// 开账：这一笔债被认领。
     Request,
     /// 已派发：执行体已拿到这一笔。
@@ -20,7 +20,7 @@ pub enum FactKind {
 
 impl FactKind {
     /// 五类事实的全集（顺序固定）。
-    pub const ALL: [FactKind; 5] = [
+    pub(crate) const ALL: [FactKind; 5] = [
         FactKind::Request,
         FactKind::Sent,
         FactKind::Response,
@@ -29,7 +29,7 @@ impl FactKind {
     ];
 
     /// 事实名（账本里的字面值）。
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             FactKind::Request => "request",
             FactKind::Sent => "sent",
@@ -40,12 +40,12 @@ impl FactKind {
     }
 
     /// 从名字读回；不是五类之一 ⇒ `None`（环不落别的事实）。
-    pub fn parse(name: &str) -> Option<Self> {
+    pub(crate) fn parse(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.as_str() == name)
     }
 
     /// 是否为收束事实（配对完成）。
-    pub fn closes(self) -> bool {
+    pub(crate) fn closes(self) -> bool {
         matches!(self, FactKind::Response | FactKind::Failed)
     }
 }
@@ -55,20 +55,20 @@ impl FactKind {
 /// `id` 由欠债方从产生这笔债的事实派生，环不生成、不计数；`attempt` 只由租约推进。
 /// `scope` 是债的归属：不属于某个可见域的债不成其为债，同名债因此不会串台。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DebtKey {
+pub(crate) struct DebtKey {
     /// 债所属的可见域（实体身份，不用哨兵值）。
-    pub scope: u64,
+    pub(crate) scope: u64,
     /// 端口名（数据；环不解释）。
-    pub port: &'static str,
+    pub(crate) port: &'static str,
     /// 欠债方派生的身份。
-    pub id: String,
+    pub(crate) id: String,
     /// 租约尝试号，从 1 起。
-    pub attempt: u32,
+    pub(crate) attempt: u32,
 }
 
 impl DebtKey {
     /// 组一笔债的身份。
-    pub fn new(scope: u64, port: &'static str, id: impl Into<String>, attempt: u32) -> Self {
+    pub(crate) fn new(scope: u64, port: &'static str, id: impl Into<String>, attempt: u32) -> Self {
         Self {
             scope,
             port,
@@ -78,7 +78,8 @@ impl DebtKey {
     }
 
     /// 同一个 (可见域, 端口, id) 的下一次尝试。
-    pub fn next_attempt(&self) -> Self {
+    #[cfg(test)]
+    pub(crate) fn next_attempt(&self) -> Self {
         Self {
             scope: self.scope,
             port: self.port,
@@ -90,24 +91,24 @@ impl DebtKey {
 
 /// 一条记账事实。
 #[derive(Debug, Clone)]
-pub struct Fact {
+pub(crate) struct Fact {
     /// 这条事实所属的可见域。
-    pub scope: u64,
+    pub(crate) scope: u64,
     /// 五类之一。
-    pub kind: FactKind,
+    pub(crate) kind: FactKind,
     /// 这笔账的身份。
-    pub key: DebtKey,
+    pub(crate) key: DebtKey,
     /// 载荷：环原样保存，不解释内容。
-    pub payload: Value,
+    pub(crate) payload: Value,
     /// 记账时刻（毫秒，由调用方给的相对时间轴）。
-    pub at_ms: u64,
+    pub(crate) at_ms: u64,
     /// 收束事实携带的应答承载（环只传递，不读世界字段）。
-    pub reply: Option<PortReply>,
+    pub(crate) reply: Option<PortReply>,
 }
 
 impl Fact {
     /// 记账事实；无应答承载。
-    pub fn new(kind: FactKind, key: DebtKey, payload: Value, at_ms: u64) -> Self {
+    pub(crate) fn new(kind: FactKind, key: DebtKey, payload: Value, at_ms: u64) -> Self {
         Self {
             scope: key.scope,
             kind,
@@ -119,7 +120,7 @@ impl Fact {
     }
 
     /// 带应答承载的收束事实。
-    pub fn with_reply(mut self, reply: PortReply) -> Self {
+    pub(crate) fn with_reply(mut self, reply: PortReply) -> Self {
         self.reply = Some(reply);
         self
     }
@@ -127,37 +128,30 @@ impl Fact {
 
 /// 事实的只读投影：环每一步都从这里重算，不持有写侧状态。
 #[derive(Debug, Clone, Copy)]
-pub struct FactView<'a> {
+pub(crate) struct FactView<'a> {
     facts: &'a [Fact],
 }
 
 impl<'a> FactView<'a> {
     /// 由宿主交来的事实快照造投影。
-    pub fn new(facts: &'a [Fact]) -> Self {
+    pub(crate) fn new(facts: &'a [Fact]) -> Self {
         Self { facts }
     }
 
     /// 全部事实（按落账顺序）。
-    pub fn all(&self) -> &'a [Fact] {
+    pub(crate) fn all(&self) -> &'a [Fact] {
         self.facts
-    }
-
-    /// 某个身份是否已有某类事实。
-    pub fn has(&self, kind: FactKind, key: &DebtKey) -> bool {
-        self.facts
-            .iter()
-            .any(|f| f.kind == kind && &f.key == key)
     }
 
     /// 某个可见域里该 id 是否已有**任何**事实（排除条件只读 id）。
-    pub fn has_id(&self, scope: u64, id: &str) -> bool {
+    pub(crate) fn has_id(&self, scope: u64, id: &str) -> bool {
         self.facts
             .iter()
             .any(|f| f.key.scope == scope && f.key.id == id)
     }
 
     /// 某个身份的收束事实（应答或判死）。
-    pub fn closing(&self, key: &DebtKey) -> Option<&'a Fact> {
+    pub(crate) fn closing(&self, key: &DebtKey) -> Option<&'a Fact> {
         self.facts
             .iter()
             .rev()
@@ -165,7 +159,7 @@ impl<'a> FactView<'a> {
     }
 
     /// 某个 (可见域, 端口, id) 当前尝试号：账上出现的最大 `attempt`；从未出现 ⇒ 0。
-    pub fn attempt(&self, scope: u64, port: &str, id: &str) -> u32 {
+    pub(crate) fn attempt(&self, scope: u64, port: &str, id: &str) -> u32 {
         self.facts
             .iter()
             .filter(|f| f.key.scope == scope && f.key.port == port && f.key.id == id)
@@ -175,7 +169,7 @@ impl<'a> FactView<'a> {
     }
 
     /// 这一笔身份最新的一次 `sent`（按尝试号精确匹配）。
-    pub fn last_sent(&self, key: &DebtKey) -> Option<&'a Fact> {
+    pub(crate) fn last_sent(&self, key: &DebtKey) -> Option<&'a Fact> {
         self.facts
             .iter()
             .rev()
@@ -183,14 +177,15 @@ impl<'a> FactView<'a> {
     }
 
     /// 某个 `(可见域, 端口)` 的最后一笔收束事实（重放与读回都只看这一笔）。
-    pub fn last_closing(&self, scope: u64, port: &str) -> Option<&'a Fact> {
+    #[cfg(test)]
+    pub(crate) fn last_closing(&self, scope: u64, port: &str) -> Option<&'a Fact> {
         self.facts.iter().rev().find(|f| {
             f.kind.closes() && f.key.scope == scope && f.key.port == port
         })
     }
 
     /// 某个可见域里已开账但未收束的债（重放读它）。
-    pub fn unresolved(&self, scope: u64) -> Vec<DebtKey> {
+    pub(crate) fn unresolved(&self, scope: u64) -> Vec<DebtKey> {
         let mut out = Vec::new();
         for fact in self.facts {
             if fact.kind != FactKind::Request || fact.key.scope != scope {

@@ -1,6 +1,8 @@
 //! 宿主的机制状态：无债即 `idle`，有未还债即撤销。
 
 use super::*;
+// 只做链接：环经 creator 注册被宿主发现，测试二进制必须把它的注册项带进来。
+use symbio_plugin_loop as _;
 use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
     PluginSimpleRequest,

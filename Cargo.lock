@@ -4223,6 +4223,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "serde_json",
+ "symbio-deploy",
  "symbio-kernel",
  "symbio-plugin-api",
  "symbio-plugin-loop",
