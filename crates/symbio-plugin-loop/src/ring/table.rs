@@ -16,6 +16,8 @@ pub struct DebtRow {
     pub payload: Value,
     /// 只有这笔先前的债已收束，本行才可还；`None` = 无前置。
     pub after: Option<DebtKey>,
+    /// 该身份的事实已存在 ⇒ 本行不欠（排除条件）。环只读 id，不解释语义。
+    pub unless: Option<String>,
     /// 一次派发的租约时长（毫秒）。
     pub lease_ms: u64,
     /// 最多尝试次数（含首次）。
@@ -31,6 +33,7 @@ impl DebtRow {
             id: id.into(),
             payload,
             after: None,
+            unless: None,
             lease_ms: 60_000,
             max_attempts: 3,
         }
@@ -39,6 +42,12 @@ impl DebtRow {
     /// 声明前置债：它收束之前本行不可还。
     pub fn after(mut self, key: DebtKey) -> Self {
         self.after = Some(key);
+        self
+    }
+
+    /// 声明排除条件：该 id 的事实已存在 ⇒ 本行不欠。
+    pub fn unless(mut self, id: impl Into<String>) -> Self {
+        self.unless = Some(id.into());
         self
     }
 

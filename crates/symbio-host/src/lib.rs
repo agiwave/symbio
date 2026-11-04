@@ -224,6 +224,9 @@ impl DebtSource for MultiSource {
                 if let Some(after) = after {
                     row = row.after(after);
                 }
+                if let Some(unless) = &spec.unless {
+                    row = row.unless(unless.clone());
+                }
                 rows.push(row);
             }
         }

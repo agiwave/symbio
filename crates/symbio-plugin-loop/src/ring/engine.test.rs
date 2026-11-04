@@ -337,6 +337,38 @@ async fn after_gate_orders_two_ports() {
 }
 
 #[tokio::test]
+async fn unless_gate_skips_a_row_once_the_fact_exists() {
+    let stub = Arc::new(Stub::ok());
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("a", "p1", "a", json!({})),
+        DebtRow::new("b", "p1", "b", json!({})).unless("a"),
+    ])
+    .with_executor("p1", stub.clone());
+    let report = drive(&ctx, S).await;
+
+    assert_eq!(report.dispatched, 1);
+    assert_eq!(stub.seen().len(), 1);
+    assert_eq!(stub.seen()[0].1, json!({}));
+
+    let seeded = vec![Fact::new(
+        FactKind::Response,
+        DebtKey::new(S, "p1", "a", 1),
+        json!({}),
+        0,
+    )];
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("a", "p1", "a", json!({})),
+        DebtRow::new("b", "p1", "b", json!({})).unless("a"),
+    ])
+    .with_executor("p1", Arc::new(Stub::ok()))
+    .with_facts(seeded);
+    let report = drive(&ctx, S).await;
+
+    assert_eq!(report.dispatched, 0);
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+}
+
+#[tokio::test]
 async fn absent_executor_lands_failed_and_names_the_port() {
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))]);
     let report = drive(&ctx, S).await;

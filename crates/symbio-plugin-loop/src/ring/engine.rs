@@ -117,6 +117,11 @@ fn plan(view: &FactView<'_>, rows: &[DebtRow], scope: u64, now_ms: u64) -> Optio
                 continue;
             }
         }
+        if let Some(unless) = &row.unless {
+            if view.has_id(scope, unless) {
+                continue;
+            }
+        }
         let attempt = view.attempt(scope, row.port, &row.id).max(1);
         let key = DebtKey::new(scope, row.port, row.id.clone(), attempt);
         if view.closing(&key).is_some() {

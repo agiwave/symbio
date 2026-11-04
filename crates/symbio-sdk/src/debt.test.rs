@@ -19,10 +19,12 @@ fn facts_merge_pairing_and_attempts_by_id() {
 fn spec_builder_carries_identity_as_data() {
     let spec = DebtSpec::new("row", "demo", "demo:1", json!({"q": 1}))
         .after("demo:0")
+        .unless("demo:done")
         .lease(1_000, 2);
     assert_eq!(spec.port, "demo");
     assert_eq!(spec.id, "demo:1");
     assert_eq!(spec.after.as_deref(), Some("demo:0"));
+    assert_eq!(spec.unless.as_deref(), Some("demo:done"));
     assert_eq!(spec.lease_ms, 1_000);
     assert_eq!(spec.max_attempts, 2);
 }

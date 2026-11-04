@@ -149,6 +149,13 @@ impl<'a> FactView<'a> {
             .any(|f| f.kind == kind && &f.key == key)
     }
 
+    /// 某个可见域里该 id 是否已有**任何**事实（排除条件只读 id）。
+    pub fn has_id(&self, scope: u64, id: &str) -> bool {
+        self.facts
+            .iter()
+            .any(|f| f.key.scope == scope && f.key.id == id)
+    }
+
     /// 某个身份的收束事实（应答或判死）。
     pub fn closing(&self, key: &DebtKey) -> Option<&'a Fact> {
         self.facts

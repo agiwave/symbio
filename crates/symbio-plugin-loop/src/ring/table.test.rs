@@ -27,6 +27,13 @@ fn after_records_the_prerequisite_identity() {
 }
 
 #[test]
+fn unless_records_the_exclusion_identity() {
+    let row = DebtRow::new("b", "p", "d-b", json!({})).unless("d-a");
+    assert_eq!(row.unless.as_deref(), Some("d-a"));
+    assert!(DebtRow::new("c", "p", "d-c", json!({})).unless.is_none());
+}
+
+#[test]
 fn lease_builder_clamps_to_at_least_one_attempt() {
     let row = DebtRow::new("a", "p", "d", json!({})).lease(5, 0);
     assert_eq!(row.lease_ms, 5);
