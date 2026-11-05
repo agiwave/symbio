@@ -52,15 +52,23 @@ use symbio_plugin_api::{Entity, Event, EventDecl, PluginDeclarations, Verb, View
 
 /// 淘汰裁决的名字（本包自己写、自己声明；单消费方，不进共享表）。
 ///
-/// 归属由声明给定：缺省 `@principal`（`EventDecl::owner`，D-339），由会话装配解析成
-/// 本轮主体。这里是**写方**的声明，所以名字随本包走，不放 `plugin_api::events`。
+/// 这里是**写方**的声明，所以名字随本包走，不放 `plugin_api::events`。
 pub(crate) const EVENT_VERDICT_ASSERTED: &str = "verdict.asserted";
 
+/// 裁决的归属主体：仲裁者（`principal_*` 注册表里已登记的行，`assert.verification`）。
+///
+/// 这是 `EventDecl::owner` 的第二态——「作者主体 ≠ 会话主体」：写裁决的那一轮可能是
+/// 任一省话，但裁决的签名者恒为仲裁者。装配期会拿它查主体注册表，查不到即拒绝装配
+/// （D-339）；`plugin-api` 门面没有导出 `PRINCIPAL_ARBITER`，本包又不依赖 SDK
+/// （E-009），故取登记表里同一个字面量。
+const VERDICT_AUTHOR: &str = "session/arbiter";
+
 /// 本包交出的事件格：裁决落 `verdict × asserted`，载荷由 [`crate::elimination`] 给。
-pub(crate) const EVENTS: &[EventDecl] = &[EventDecl::new(
-    EVENT_VERDICT_ASSERTED,
-    (Entity::Verdict, Verb::Asserted),
-)];
+pub(crate) const EVENTS: &[EventDecl] =
+    &[
+        EventDecl::new(EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted))
+            .owned(VERDICT_AUTHOR),
+    ];
 
 /// 对外可读的那条视图。名字经 `PLUGIN.yml` 的 `shared_views:` 投影进
 /// `symbio_plugin_api::view_names`；读方按名字读，不依赖本 crate（`D-221`）。

@@ -4,8 +4,8 @@
 //!
 //! 声誉台账（[`crate::decl::REPUTATION_LEDGER`]）折的是**数**，判决住在读它的这一侧。
 //! 本贡献者只做三件事：按名字读账、按部署表与既有裁决筛主体、把裁决交成草稿。落格
-//! 归属不在这里——`verdict.asserted` 的 `EventDecl` 说 `@principal`，信封 `actor` 由
-//! 会话装配解析成本轮主体（D-339）。
+//! 归属不在这里——`verdict.asserted` 的 `EventDecl` 声明作者是仲裁者
+//! （`session/arbiter`），信封 `actor` 由声明表给定，执行体无权指定（D-339 / D-252）。
 //!
 //! ## 三条筛选口径（与搬出前逐字相同）
 //!

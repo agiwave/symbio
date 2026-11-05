@@ -84,7 +84,42 @@ pub fn assemble_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
     // 「每一档守卫角色都有人住」由门禁判仓库（CS-008），不在这里判：本函数也会被
     // **只链接了部分插件**的用例调到（session 的单测里没有 loop 的声明表），
     // 那种子集装配报红是假红。
-    builder.seal(&row_writes)
+    let frozen = builder.seal(&row_writes)?;
+    // D-339：`EventDecl::owner` 的第二态必须是登记过的具名主体。查表用的是**部署表**
+    // （各插件 `PLUGIN.yml` 的 `principal_*` 行），因此在子集装配里同样成立——注册表
+    // 不随链接了哪些插件变化。
+    assert_owners_registered(&frozen);
+    Ok(frozen)
+}
+
+/// 装配期的归属校验（D-339）：`@principal` 之外，owner 必须能在主体注册表里查到。
+///
+/// 为什么放在这里而不是内核 `seal`：注册表是部署事实（`symbio-sdk` 的授权表），
+/// 内核不依赖 `symbio-sdk`；装配方同时看得见两张表，校验因此只有一处。
+///
+/// 为什么是断言而不是一条 `Gap`：声明里写了一个不存在的主体不是「表还能凑合用」的
+/// 缺口——它是**声明表本身被改坏了**，装配必须在启动前停住（写口没有第二个可问的表）。
+/// 名字来自 `'static` 声明，运行期拼出来的字符串进不来。
+fn assert_owners_registered(frozen: &Frozen) {
+    let matrix = symbio_sdk::authz::production_matrix();
+    for event in frozen.events() {
+        let owner = event.owner;
+        if owner == symbio_kernel::event::OWNER_PRINCIPAL {
+            continue;
+        }
+        // 人的主体不在能力表里（发言不是「智能体的权威动作种类」，D-099），但它是
+        // 登记过的主体常量——属第二态的合法值。
+        if owner == symbio_sdk::keys::PRINCIPAL_USER {
+            continue;
+        }
+        assert!(
+            matrix.is_deployed(owner),
+            "事件 `{}` 的声明归属 `{}` 不在主体注册表里（各插件 PLUGIN.yml 的 `principal_*` 行）；\
+             装配期拒绝未登记的主体名（D-339）",
+            event.name,
+            owner
+        );
+    }
 }
 
 /// 进程内冻结一次。`OnceLock` 缓存的是**同一个 `Result`**（成功或全部缺口），

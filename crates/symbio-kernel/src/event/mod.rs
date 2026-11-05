@@ -120,9 +120,11 @@ pub struct EventDecl {
     pub host: bool,
     /// **落格归属主体**：信封里的 `actor`，声明期给定，写口不猜默认值（D-339）。
     ///
-    /// `@principal` 表示「这一格的归属由会话装配决定」——落格时解析成该会话主体
-    /// （`session/main` / `session/arbiter` / `session/worker`）。其余值是非会话主体
-    /// 的直接声明（如 `person/local`、`scheduler/main`）。
+    /// 合法取值只有两种：`@principal` 表示「这一格的归属由会话装配决定」——落格时
+    /// 解析成该会话主体（`session/main` / `session/arbiter` / `session/worker`）；
+    /// 其余值是一个**已登记的主体名**（`principal_*` 注册表里查得到，如
+    /// `session/arbiter`、`person/local`、`scheduler/main`），装配期按注册表校验，
+    /// 查不到即拒绝装配。
     ///
     /// 它与「交表方」（[`Builder::declare`] 的 owner，用来算插件归属）是两件事：
     /// 交表方是插件身份，本字段是**事实的信封主体**。
