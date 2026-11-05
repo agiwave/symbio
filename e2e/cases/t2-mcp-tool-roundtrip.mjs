@@ -58,7 +58,7 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
   });
   let api = null;
   try {
-    const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '帮我回显一下', provider: PROVIDER_ID, session: 'e2e-t2' });
+    const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '帮我回显一下', provider: PROVIDER_ID, session: 'e2e-t2' });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
     assert(r.stdout.includes('工具调用完成，回显成功'), `stdout 应为收尾正文（实际: ${JSON.stringify(r.stdout)}）`);
     assert(r.stderr.includes('调用工具'), `stderr 应播报工具调用（实际: ${r.stderr.slice(0, 400)}）`);

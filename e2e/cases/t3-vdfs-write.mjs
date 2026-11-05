@@ -46,7 +46,7 @@ export default defineCase('T3 工具回路（内置 vdfs_write）：文件真实
   });
   let api = null;
   try {
-    const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '帮我写文件', provider: PROVIDER_ID, session: 'e2e-t3' });
+    const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '帮我写文件', provider: PROVIDER_ID, session: 'e2e-t3' });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
 
     const written = readFileSync(join(hd.workdir, 'notes.md'), 'utf8');

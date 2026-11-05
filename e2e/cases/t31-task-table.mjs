@@ -104,7 +104,7 @@ export default defineCase(
 
     try {
       // ── 第 1 轮：声明任务图（工具真的执行）────────────────────────────────
-      const r1 = runCli({ ...base, session: SID, message: `请${DECLARE}` });
+      const r1 = await runCli({ ...base, session: SID, message: `请${DECLARE}` });
       assertEq(r1.code, 0, `第 1 轮退出码（stderr: ${r1.stderr.slice(0, 600)}）`);
       assert(
         r1.stdout.includes('任务清单已登记'),
@@ -112,7 +112,7 @@ export default defineCase(
       );
 
       // ── 第 2 轮：下一次对话的请求里要带上调度段 ───────────────────────────
-      const r2 = runCli({ ...base, session: SID, message: '继续推进任务' });
+      const r2 = await runCli({ ...base, session: SID, message: '继续推进任务' });
       assertEq(r2.code, 0, `第 2 轮退出码（stderr: ${r2.stderr.slice(0, 600)}）`);
 
       // ── 证据 ①：模型看到的名字后端认得回来 ────────────────────────────────

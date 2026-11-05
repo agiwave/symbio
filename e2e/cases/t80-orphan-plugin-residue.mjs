@@ -34,7 +34,7 @@ export default defineCase(
     });
     try {
       // ① 干净的系统目录：装配期不应有任何 composite WARN
-      const clean = runCli({
+      const clean = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         provider: PROVIDER_ID,
@@ -54,7 +54,7 @@ export default defineCase(
         'plugin_provider: projection\nplugin_name: projection\n',
       );
 
-      const residue = runCli({
+      const residue = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         provider: PROVIDER_ID,

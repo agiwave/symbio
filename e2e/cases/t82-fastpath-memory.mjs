@@ -80,8 +80,8 @@ export default defineCase(
     });
 
     try {
-      const turn = (message, session) => {
-        const r = runCli({
+      const turn = async (message, session) => {
+        const r = await runCli({
           homedir: hd.homedir,
           workdir: hd.workdir,
           message,
@@ -93,7 +93,7 @@ export default defineCase(
       };
 
       // ── ① A 会话：快路答话轮 ────────────────────────────────────────────
-      turn(T_MEMORY, SID_A);
+      await turn(T_MEMORY, SID_A);
       const events = walLines(join(hd.homedir, 'session', SID_A, V2_WAL));
       const kinds = events.map((e) => e.kind);
 
@@ -124,7 +124,7 @@ export default defineCase(
       );
 
       // ── ② B 会话：完整轮，召回段应带 A 的经验 ────────────────────────────
-      turn(T_RECALL, SID_B);
+      await turn(T_RECALL, SID_B);
       const reqs = await llm.requests();
       assertEq(
         reqs.length,

@@ -96,8 +96,8 @@ export default defineCase(
       },
     });
 
-    const turn = (message) => {
-      const r = runCli({
+    const turn = async (message) => {
+      const r = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message,
@@ -110,7 +110,7 @@ export default defineCase(
 
     try {
       // ── 第 1 轮：成功收束 ⇒ 编译技能，本轮照常调模型 ─────────────────────
-      const r1 = turn(TRIGGER);
+      const r1 = await turn(TRIGGER);
       let reqs = await llm.requests();
       assertEq(reqs.length, 1, '第 1 轮照常请求模型（还没有技能可用）');
       assert(
@@ -119,7 +119,7 @@ export default defineCase(
       );
 
       // ── 第 2 轮：同一句话 ⇒ 命中技能 ⇒ **一次模型调用都不发生** ─────────────
-      const r2 = turn(TRIGGER);
+      const r2 = await turn(TRIGGER);
       reqs = await llm.requests();
       assertEq(
         reqs.length,
@@ -132,7 +132,7 @@ export default defineCase(
       );
 
       // ── 第 3 轮：另一句话（不命中）⇒ 照常推理 ─────────────────────────────
-      turn(OTHER);
+      await turn(OTHER);
       reqs = await llm.requests();
       assertEq(
         reqs.length,

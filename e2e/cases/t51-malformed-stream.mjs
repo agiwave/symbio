@@ -46,7 +46,7 @@ export default defineCase('T51 不规范响应：三种脏帧混入流中，用�
   let api = null;
   try {
     for (const k of KINDS) {
-      const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: k.marker, provider: PROVIDER_ID, session: 'e2e-t51', timeoutMs: 90_000 });
+      const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: k.marker, provider: PROVIDER_ID, session: 'e2e-t51', timeoutMs: 90_000 });
       assert(r.code === 0, `${k.kind} 轮应正常完成（code=${r.code}, stderr: ${r.stderr.slice(0, 300)}）`);
       assert(
         r.stdout.includes(k.content),

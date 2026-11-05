@@ -119,7 +119,7 @@ export default defineCase(
 
     try {
       // ── 轮 0：工具轮（工具真的执行、结果真的回灌当轮请求）────────────────────
-      const r0 = runCli({
+      const r0 = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '帮我回显一下',
@@ -129,7 +129,7 @@ export default defineCase(
       assertEq(r0.code, 0, `轮 0 CLI 退出码（stderr: ${r0.stderr.slice(0, 600)}）`);
 
       // ── 轮 1：新的用户发言（同一会话 ⇒ 同一份事实源）────────────────────────
-      const r1 = runCli({
+      const r1 = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '再问一句',

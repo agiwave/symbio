@@ -82,7 +82,7 @@ export default defineCase(
     try {
       // ── 断言 ①：超限不炸轮 ────────────────────────────────────────────
       // 旧方案（整轮 Err）在这里表现为 CLI 非零退出 / Failed 轮。
-      const r = runCli({
+      const r = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '发起风暴：一口气列出目录',

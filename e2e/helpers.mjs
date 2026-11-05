@@ -7,7 +7,7 @@
 // - 每个用例独立的临时 homedir + 独立 mock 实例，互不串扰。
 
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, statSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,75 +66,122 @@ export function nextPort() {
   return ++portCursor;
 }
 
-// ---------- 等待档位（profile） ----------
+// ---------- 等待口径与静止检测 ----------
 /**
- * 等待上限分两档，**单次与整例各自计时**：
+ * 单次等待与整例上限**统一 120s**（mock 与真 provider 同档：不设分档、不设 override）。
+ * 调用点声明更小的值仍然生效。
  *
- * | 档位 | 单次等待 | 整例累计 | 理由 |
- * |---|---|---|---|
- * | `mock`（默认；用例全打 `mock-llm`） | 10s | 20s | mock 栈的进程启动 / 端口就绪 / 落库轮询本身就是秒级 |
- * | `real`（`E2E_PROFILE=real`） | 调用点原值 | 调用点原值 | 真实 provider 的对照，上限不改 |
- *
- * 只收紧「等不到就判失败」的上限，**不放宽也不跳过**任何断言；超时信息带
- * 「第几次等待 / 等的是什么 / 已等多少毫秒 / 轮询几次 / 两个上限各是多少」。
+ * 快速失败靠的**不是**调小这个上限，而是下面的静止检测：观察到「不可能成功」的
+ * 第一时刻就判失败，120s 只是最后一根绳子。
  */
-const PROFILE = process.env.E2E_PROFILE === 'real' ? 'real' : 'mock';
-export const E2E_PROFILE = PROFILE;
-const PROFILE_WAIT_MS = { mock: 10_000, real: null };
-/** 整条用例的等待预算（mock 20s；real 不限，沿用各调用点原值）。 */
-export const CASE_BUDGET_MS = PROFILE === 'mock' ? 20_000 : null;
-/** override 出现时整例预算放宽到 150s：单次 override 封顶 120s，余量给启动/收尾。 */
-const OVERRIDE_CASE_BUDGET_MS = 150_000;
-const OVERRIDE_MAX_MS = 120_000;
+export const HARD_MAX_MS = 120_000;
+
+/**
+ * 静止阈值：等待中的进程仍然存活，但连续这么久**没有任何可观察进展** ⇒ 立刻判失败。
+ *
+ * 为什么是 3 秒：一次正常轮里，事实（`request` / `sent` / `response` / `failed` /
+ * `tool.*`）、子进程活动、stdout/stderr 至少会各出现其一，间隔都在百毫秒级；3 秒
+ * 足够覆盖落盘轮询与进程启动的抖动，又远小于任何一条用例的整例上限。
+ *
+ * 判据（**不许在用例里悄悄调大**）：如果静默超过 3 秒是合法的，说明环该发的事实
+ * 没发——租约、重试、`sent` 都应该是事实。静默不该是正常态。若哪条用例确实需要
+ * 合法静默，单独报，由裁定决定，而不是在用例里放宽这个常量。
+ */
+export const STALL_MS = 3_000;
 const CASE_T0 = Date.now();
 let waitSeq = 0;
-/** 本用例出现过的最大 override（`{ budget, reason }`）；没有就是 null。 */
-let caseOverride = null;
 
-/** 把某个调用点声明的等待上限折算成本档位的单次上限（real 档原样返回）。 */
+/** 把调用点声明的等待上限收敛到统一上限（不区分 profile）。 */
 export function profileWait(ms) {
-  return PROFILE_WAIT_MS[PROFILE] ?? ms;
+  return Math.min(ms, HARD_MAX_MS);
+}
+
+/** 这一次等待还能用多久（受整例上限约束）。 */
+function remainingBudget() {
+  return Math.max(0, HARD_MAX_MS - (Date.now() - CASE_T0));
+}
+
+/** 超时文案的公共尾巴：把「等的是什么、第几步、等了多久、轮询几次」摊开。 */
+function waitDetail(seq, waited, polls, limit, what) {
+  return `等「${what}」；第 ${seq} 次等待；已等 ${waited}ms；轮询 ${polls} 次；单次上限 ${limit}ms；整例上限 ${HARD_MAX_MS}ms`;
+}
+
+// ---------- 观察点：WAL 里的新事实 ----------
+/** homedir 下的全部 `*.wal`（主会话 / 子会话 / 归档，最深 4 层）。 */
+function walFiles(dir, depth = 4, out = []) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) {
+      if (depth > 0) walFiles(p, depth - 1, out);
+    } else if (e.name.endsWith('.wal')) out.push(p);
+  }
+  return out;
 }
 
 /**
- * 调用点显式声明预算（豁免 mock 档上限）：`budget` + `reason` 必须成对出现。
- * 封顶 120s——超过就是用例的设计问题，当场报，不许自行加码。
+ * 进展快照：全部 WAL 的 `(路径, mtime, 大小)` 拼接 + 最新那条事实（`kind` / 键 / 时间戳）。
+ *
+ * 判「有没有进展」只看环自己写下的读数，不看进程自述：最后一条事实停在哪，
+ * 正是失败文案必须回答的问题。
  */
-function declareBudget({ budget, reason }) {
-  if (!reason) throw new Error(`override 预算缺少 reason：budget=${budget}`);
-  if (budget > OVERRIDE_MAX_MS) {
-    throw new Error(`override 预算 ${budget}ms 超过封顶 ${OVERRIDE_MAX_MS}ms（${reason}）——先回来报，不许加码`);
+function walProgress(root) {
+  const files = walFiles(root).sort();
+  const sig = [];
+  let fact = null;
+  let newest = -1;
+  for (const f of files) {
+    let st;
+    try {
+      st = statSync(f);
+    } catch {
+      continue;
+    }
+    sig.push(`${f}:${Math.trunc(st.mtimeMs)}:${st.size}`);
+    if (st.mtimeMs > newest) {
+      newest = st.mtimeMs;
+      const last = readFileSyncSafe(f).split('\n').filter(Boolean).pop();
+      try {
+        const e = JSON.parse(last);
+        fact = {
+          kind: e.kind ?? '?',
+          key: String(e.id ?? e.key ?? e.port ?? e.attempt ?? '?'),
+          ts: e.ts ?? e.at_ms ?? e.atMs ?? '?',
+        };
+      } catch {
+        fact = { kind: '?', key: '?', ts: '?' };
+      }
+    }
   }
-  if (!caseOverride || budget > caseOverride.budget) caseOverride = { budget, reason };
-  return { budget, reason };
+  return { sig: sig.join('|'), fact };
 }
 
-/** 整例预算：有 override 时取放宽值，否则取档位值。 */
-function caseBudget() {
-  if (CASE_BUDGET_MS == null) return Infinity;
-  return caseOverride ? Math.max(CASE_BUDGET_MS, OVERRIDE_CASE_BUDGET_MS) : CASE_BUDGET_MS;
+/** 静止失败文案：最后观察到的事实（kind + 键）、时间戳、已静止毫秒、当时在等什么。 */
+function stallDetail(w) {
+  const f = w.fact
+    ? `最后观察到的事实 kind=${w.fact.kind} key=${w.fact.key} ts=${w.fact.ts}`
+    : '最后观察到的事实 无（WAL 里没有一条可读事实）';
+  return `${f}；已静止 ${Date.now() - w.lastProgress}ms；当时在等「${w.what}」`;
 }
 
-/** 这一次等待还能用多久（受整例预算约束）。 */
-function remainingBudget() {
-  const cap = caseBudget();
-  return cap === Infinity ? Infinity : Math.max(0, cap - (Date.now() - CASE_T0));
-}
+/** 当前存活的一次性 CLI 的观察器（`waitFor` 也读它判静止）。 */
+let cliWatch = null;
 
-/** 超时文案的公共尾巴：把「等了几次、等了多久、预算来自哪」摊开。 */
-function waitDetail(seq, waited, polls, override, perWait) {
-  const budget = override
-    ? `budget=override(${override.budget}, ${override.reason})`
-    : `budget=${PROFILE}(${perWait})`;
-  return `第 ${seq} 次等待；已等 ${waited}ms；轮询 ${polls} 次；${budget}；整例预算 ${caseBudget()}ms；profile=${PROFILE}`;
+function newWatch(what) {
+  const w = { what, alive: true, lastProgress: Date.now(), fact: null };
+  cliWatch = w;
+  return w;
 }
 
 // ---------- 进程等待辅助 ----------
-function waitFor(fn, { timeoutMs = 15_000, what = 'condition', budget = null, reason = null } = {}) {
+function waitFor(fn, { timeoutMs = 15_000, what = 'condition' } = {}) {
   const seq = ++waitSeq;
-  const override = budget == null ? null : declareBudget({ budget, reason });
-  const perWait = override ? override.budget : profileWait(timeoutMs);
-  const limit = override ? perWait : Math.min(perWait, remainingBudget());
+  const limit = Math.min(profileWait(timeoutMs), remainingBudget());
   const started = Date.now();
   const deadline = started + limit;
   let polls = 0;
@@ -146,8 +193,16 @@ function waitFor(fn, { timeoutMs = 15_000, what = 'condition', budget = null, re
       } catch {
         /* 重试 */
       }
+      if (cliWatch?.alive && Date.now() - cliWatch.lastProgress > STALL_MS) {
+        return rej(
+          new Error(
+            `等待「${what}」静止超时（进程仍在运行但 ${STALL_MS}ms 无任何进展；${stallDetail(cliWatch)}；` +
+              `${waitDetail(seq, Date.now() - started, polls, limit, what)}）`,
+          ),
+        );
+      }
       if (Date.now() > deadline) {
-        return rej(new Error(`等待「${what}」超时（${waitDetail(seq, Date.now() - started, polls, override, perWait)}）`));
+        return rej(new Error(`等待「${what}」超时（${waitDetail(seq, Date.now() - started, polls, limit, what)}）`));
       }
       setTimeout(tick, 100);
     };
@@ -388,11 +443,9 @@ export function cleanupHomedir(hd) {
  * `env` 是**追加**给 CLI 的环境变量（如 `SYMBIO_ROUTE_LOG=1` 打开路由留痕），
  * 不是替换——被测系统仍然继承本进程环境。
  */
-export function runCli({ homedir, workdir, message, provider = null, session = null, agent = null, mode = 'auto', timeoutMs = 120_000, budget = null, reason = null, stdinText = null, env = null }) {
+export async function runCli({ homedir, workdir, message, provider = null, session = null, agent = null, mode = 'auto', timeoutMs = 120_000, stdinText = null, env = null }) {
   const seq = ++waitSeq;
-  const override = budget == null ? null : declareBudget({ budget, reason });
-  const perWait = override ? override.budget : profileWait(timeoutMs);
-  const limit = override ? perWait : Math.min(perWait, remainingBudget());
+  const limit = Math.min(profileWait(timeoutMs), remainingBudget());
   const started = Date.now();
   // `cliExe()` 会保证拿到的是「对应当前源码」的那一份（指纹不符则先重建）。
   // 二进制仍然缺失要**当场说清楚**：否则表现为 `code = -1` + 空 stderr，
@@ -415,27 +468,92 @@ export function runCli({ homedir, workdir, message, provider = null, session = n
   if (stdinText != null) argv.push('--repl'); // stdin 喂多轮时强制 REPL
 
   const t0 = Date.now();
-  const r = spawnSync(exe, argv.slice(1), {
-    encoding: 'utf8',
-    timeout: limit,
-    input: stdinText ?? '',
-    maxBuffer: 64 * 1024 * 1024,
+  const WHAT = 'CLI 完成本轮（模型调用 + 工具往返）';
+  const watch = newWatch(WHAT);
+  const child = spawn(exe, argv.slice(1), {
     env: { ...process.env, E2E_STDIO: '1', ...env },
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
-  if (r.error?.code === 'ETIMEDOUT') {
-    const tail = (s) => String(s ?? '').trim().split('\n').slice(-6).join('\n      ');
-    throw new Error(
-      `等待「CLI 完成本轮（模型调用 + 工具往返）」超时（${waitDetail(seq, Date.now() - started, 1, override, perWait)}；` +
-        `message=${JSON.stringify(message ?? '')}）\n` +
-        `      stderr 末尾：\n      ${tail(r.stderr) || '（空）'}`,
-    );
-  }
-  return {
-    code: r.status ?? -1,
-    stdout: r.stdout ?? '',
-    stderr: r.stderr ?? '',
-    ms: Date.now() - t0,
-  };
+  // 一次性模式不读 stdin（REPL 模式把 `stdinText` 喂完后必须关掉，否则 CLI 会等 EOF）。
+  child.stdin.end(stdinText ?? '');
+
+  let stdout = '';
+  let stderr = '';
+  let polls = 0;
+  let lastSig = null;
+  const tail = (s) => String(s ?? '').trim().split('\n').slice(-6).join('\n      ');
+
+  const result = await new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+    const finish = (err, res) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      watch.alive = false;
+      if (cliWatch === watch) cliWatch = null;
+      if (err) {
+        try {
+          child.kill();
+        } catch {
+          /* 已退出 */
+        }
+        reject(err);
+      } else resolve(res);
+    };
+
+    // 观察点 ①：stdout/stderr 新输出。观察点 ②：子进程存活（`close` 之前都算活着）。
+    child.stdout.on('data', (d) => {
+      stdout += d;
+      watch.lastProgress = Date.now();
+    });
+    child.stderr.on('data', (d) => {
+      stderr += d;
+      watch.lastProgress = Date.now();
+    });
+    child.on('error', (e) => finish(new Error(`CLI 启动失败：${e.message}`)));
+    child.on('close', (code) => finish(null, { code: code ?? -1, stdout, stderr, ms: Date.now() - t0 }));
+
+    // 观察点 ③：WAL 有无新事实（mtime/size/末条事实三者任一变化都算进展）。
+    const tick = () => {
+      polls++;
+      try {
+        const p = walProgress(homedir);
+        if (p.sig !== lastSig) {
+          lastSig = p.sig;
+          if (p.fact) watch.fact = p.fact;
+          watch.lastProgress = Date.now();
+        }
+      } catch {
+        /* homedir 还没建好：下一轮再看 */
+      }
+      if (settled) return;
+      const now = Date.now();
+      // 观察点 ④：进程活着却 3 秒无进展 ⇒ 立刻判失败（不等到 120s）。
+      if (now - watch.lastProgress > STALL_MS) {
+        return finish(
+          new Error(
+            `等待「${WHAT}」静止超时（进程仍在运行但 ${STALL_MS}ms 无任何进展；${stallDetail(watch)}；` +
+              `${waitDetail(seq, now - started, polls, limit, WHAT)}；message=${JSON.stringify(message ?? '')}）\n` +
+              `      stderr 末尾：\n      ${tail(stderr) || '（空）'}`,
+          ),
+        );
+      }
+      if (now > started + limit) {
+        return finish(
+          new Error(
+            `等待「${WHAT}」超时（${waitDetail(seq, now - started, polls, limit, WHAT)}；` +
+              `message=${JSON.stringify(message ?? '')}）\n` +
+              `      stderr 末尾：\n      ${tail(stderr) || '（空）'}`,
+          ),
+        );
+      }
+      timer = setTimeout(tick, 100);
+    };
+    timer = setTimeout(tick, 100);
+  });
+
+  return result;
 }
 
 // ---------- 长驻 CLI（REPL）与 gateway HTTP 边界 ----------

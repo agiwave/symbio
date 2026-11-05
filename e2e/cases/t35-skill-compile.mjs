@@ -155,8 +155,8 @@ export default defineCase(
       },
     });
 
-    const turn = (message, session) => {
-      const r = runCli({
+    const turn = async (message, session) => {
+      const r = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message,
@@ -168,13 +168,13 @@ export default defineCase(
 
     try {
       // ── A 会话：第 1 轮编译，第 2 / 3 轮各召回一次 ───────────────────────
-      turn(TRIGGER, SID_A);
-      turn(R2, SID_A);
-      turn(R3, SID_A);
+      await turn(TRIGGER, SID_A);
+      await turn(R2, SID_A);
+      await turn(R3, SID_A);
 
       // ── B 会话（**另一个进程**）：同一句话 ⇒ 自己也编一条、也召得到 ────────
-      turn(TRIGGER, SID_B);
-      turn(R2, SID_B);
+      await turn(TRIGGER, SID_B);
+      await turn(R2, SID_B);
 
       const reqs = await llm.requests();
       assertEq(reqs.length, 5, 'A 三轮 + B 两轮，各一次请求（对话面已关，注入不加请求）');

@@ -113,7 +113,7 @@ export default defineCase(
 
     try {
       // ── A 工具面：能力包的工具有没有出现在模型看得到的地方 ──────────────
-      const turn = runCli({
+      const turn = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: ASK,
@@ -195,7 +195,7 @@ export default defineCase(
       writeFileSync(manifest, `${kept.trimEnd()}\nplugin_enabled: false\n`);
       await llm.reset();
 
-      const off = runCli({
+      const off = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: ASK_OFF,

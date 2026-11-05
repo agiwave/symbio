@@ -179,8 +179,8 @@ export default defineCase(
     });
 
     try {
-      const turn = (message, session) => {
-        const r = runCli({
+      const turn = async (message, session) => {
+        const r = await runCli({
           homedir: hd.homedir,
           workdir: hd.workdir,
           message,
@@ -191,16 +191,16 @@ export default defineCase(
       };
 
       // 轮 1：首轮没有可召回的记忆 ⇒ 只编码，不注入
-      turn(T_COFFEE, SID_A);
+      await turn(T_COFFEE, SID_A);
       // 轮 2：有了可召回的 ⇒ 置顶注入
-      turn(T_MEET, SID_A);
+      await turn(T_MEET, SID_A);
       // 轮 3：把轮 1 的原话再说一遍 ⇒ 同文去重（不编码第二条 ⇒ 注入段里仍只有一句）
-      turn(T_COFFEE, SID_A);
+      await turn(T_COFFEE, SID_A);
       // 轮 4 / 轮 5：第 4 条到齐 ⇒ 巩固（合并最早两条）
-      turn(T_REPORT, SID_A);
-      turn(T_WATER, SID_A);
+      await turn(T_REPORT, SID_A);
+      await turn(T_WATER, SID_A);
       // B 会话首轮：跨会话召回（读的全是 A 写下的记忆）
-      turn(T_HELLO, SID_B);
+      await turn(T_HELLO, SID_B);
 
       // ── 请求回读：记忆段真的进了发给大模型的包，且不落库 ──────────────────
       const reqs = await llm.requests();

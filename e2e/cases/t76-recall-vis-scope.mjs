@@ -122,7 +122,7 @@ export default defineCase(
 
     try {
       // ── ① 会话 A：一轮 ⇒ 经验（shared）+ 判断（thread_private）各一条 ──
-      const a = runCli({ ...base, session: SID_A, message: Q_A });
+      const a = await runCli({ ...base, session: SID_A, message: Q_A });
       assertEq(a.code, 0, `会话 A 一轮退出码（stderr: ${a.stderr.slice(0, 400)}）`);
 
       // 产地核实（生产链第一格）：两条记忆真的带着各自的可见域落了盘。
@@ -133,7 +133,7 @@ export default defineCase(
       assertEq(scopeOf(R_A), 'thread_private', '收束发言 ⇒ 判断 ⇒ thread_private');
 
       // ── ② 会话 B（矩阵内）：召回段有 A 的经验、没有 A 的判断 ──
-      const b = runCli({ ...base, session: SID_B, message: Q_B });
+      const b = await runCli({ ...base, session: SID_B, message: Q_B });
       assertEq(b.code, 0, `会话 B 一轮退出码（stderr: ${b.stderr.slice(0, 400)}）`);
       const reqsB = await llm.requests();
       const sectionB = recallSection(reqsB.at(-1));
@@ -148,9 +148,9 @@ export default defineCase(
       );
 
       // ── ③ 会话 C（矩阵外）：两轮——第二轮的召回段有自己的、没别人的 ──
-      const c1 = runCli({ ...base, session: SID_C, agent: 'ghost', message: Q_C1 });
+      const c1 = await runCli({ ...base, session: SID_C, agent: 'ghost', message: Q_C1 });
       assertEq(c1.code, 0, `会话 C 第一轮退出码（stderr: ${c1.stderr.slice(0, 400)}）`);
-      const c2 = runCli({ ...base, session: SID_C, agent: 'ghost', message: Q_C2 });
+      const c2 = await runCli({ ...base, session: SID_C, agent: 'ghost', message: Q_C2 });
       assertEq(c2.code, 0, `会话 C 第二轮退出码（stderr: ${c2.stderr.slice(0, 400)}）`);
       const reqsC = await llm.requests();
       const sectionC = recallSection(reqsC.at(-1));

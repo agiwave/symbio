@@ -28,7 +28,7 @@ export default defineCase('T12 LLM POST 必须带 Content-Type: application/json
     pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
   });
   try {
-    const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '你好', provider: PROVIDER_ID, session: 'e2e-t12' });
+    const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '你好', provider: PROVIDER_ID, session: 'e2e-t12' });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
 
     const reqs = await llm.requests();

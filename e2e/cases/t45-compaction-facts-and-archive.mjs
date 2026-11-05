@@ -132,7 +132,7 @@ export default defineCase(
 
     try {
       // ── 跑四轮（水位越过 70% ⇒ 中途自动压缩）──────────────────────────────
-      const r = runCli({
+      const r = await runCli({
         ...base,
         session: SID,
         stdinText: `${Q_FIRST}\n第二轮问题\n第三轮问题\n第四轮问题\n`,

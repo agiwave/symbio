@@ -151,7 +151,7 @@ export default defineCase(
 
     try {
       // ── ① A 轮 1：委托失败 ⇒ 违约 ⇒ 轮末落裁决 ──────────────────────────
-      const a1 = runCli({ ...base, session: A_SID, message: A_Q1 });
+      const a1 = await runCli({ ...base, session: A_SID, message: A_Q1 });
       assertEq(a1.code, 0, `A 轮 1 退出码（stderr: ${a1.stderr.slice(0, 400)}）`);
 
       const a1Events = walLines(aWal);
@@ -178,7 +178,7 @@ export default defineCase(
       assert(typeof v.produced_by === 'number', 'I2：断言类事件必须带溯源');
 
       // ── ② A 轮 2：再委托 ⇒ 闸拒；不落第二条裁决 ─────────────────────────
-      const a2 = runCli({ ...base, session: A_SID, message: A_Q2 });
+      const a2 = await runCli({ ...base, session: A_SID, message: A_Q2 });
       assertEq(a2.code, 0, `A 轮 2 退出码（stderr: ${a2.stderr.slice(0, 400)}）`);
 
       const a2Events = walLines(aWal);
@@ -194,7 +194,7 @@ export default defineCase(
       );
 
       // ── ③ B 会话：部署级口径——别处的裁决在这里照样拒 ────────────────────
-      const b = runCli({ ...base, session: B_SID, message: B_Q });
+      const b = await runCli({ ...base, session: B_SID, message: B_Q });
       assertEq(b.code, 0, `B 会话退出码（stderr: ${b.stderr.slice(0, 400)}）`);
 
       // B 的事实源里也有自己的一条裁决（会话级驱动，见文件头说明）。

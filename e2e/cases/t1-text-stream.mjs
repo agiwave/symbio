@@ -44,7 +44,7 @@ export default defineCase('T1 文本流式：SSE 分片输出 + 转写落盘', a
   });
   let api = null;
   try {
-    const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '你好', provider: PROVIDER_ID, session: 'e2e-t1' });
+    const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '你好', provider: PROVIDER_ID, session: 'e2e-t1' });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
     assertEq(r.stdout.trim(), '你好，mock世界', 'stdout 应为分片按序拼接的完整正文');
 

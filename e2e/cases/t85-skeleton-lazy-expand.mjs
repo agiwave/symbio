@@ -133,7 +133,7 @@ export default defineCase(
     writeFileSync(join(hd.workdir, 'README.md'), `${WS_MARKER}\n`);
 
     try {
-      const r = runCli({
+      const r = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         provider: PROVIDER_ID,

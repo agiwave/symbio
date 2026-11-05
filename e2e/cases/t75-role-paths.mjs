@@ -166,7 +166,7 @@ export default defineCase(
 
     try {
       // ── ① 轮 1：主会话立任务（正对照——闸不打断现有流）───────────────────
-      const r1 = runCli({ ...base, session: SID, message: `请${Q1}` });
+      const r1 = await runCli({ ...base, session: SID, message: `请${Q1}` });
       assertEq(r1.code, 0, `轮 1 退出码（stderr: ${r1.stderr.slice(0, 600)}）`);
       assert(
         r1.stdout.includes('任务清单已登记'),
@@ -183,7 +183,7 @@ export default defineCase(
       );
 
       // ── ② 轮 2：委派工人 ⇒ 子会话真跑一轮 ────────────────────────────────
-      const r2 = runCli({ ...base, session: SID, message: `请${Q2}`, timeoutMs: 180_000 });
+      const r2 = await runCli({ ...base, session: SID, message: `请${Q2}`, timeoutMs: 180_000 });
       assertEq(r2.code, 0, `轮 2 退出码（stderr: ${r2.stderr.slice(0, 600)}）`);
       assert(
         r2.stdout.includes('已收到工人的成果'),

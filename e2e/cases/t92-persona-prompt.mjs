@@ -110,7 +110,7 @@ export default defineCase(
       );
 
       // ── B 两条输出面的读数 ───────────────────────────────────────────────
-      const on = runCli({
+      const on = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         provider: PROVIDER_ID,
@@ -147,7 +147,7 @@ export default defineCase(
       disablePlugin(hd.homedir, 'persona');
       await llm.reset();
 
-      const off = runCli({
+      const off = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         provider: PROVIDER_ID,

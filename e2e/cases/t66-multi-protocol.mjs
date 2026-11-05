@@ -144,7 +144,7 @@ export default defineCase('T66 多协议适配：同一用户链路在四协议�
     });
     let api = null;
     try {
-      const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '帮我回显一下', provider: PROVIDER_ID, session: sid });
+      const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '帮我回显一下', provider: PROVIDER_ID, session: sid });
       assertEq(r.code, 0, `${label} CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
       assert(
         r.stdout.includes(FINAL_TEXT),

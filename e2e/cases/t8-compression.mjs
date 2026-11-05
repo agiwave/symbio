@@ -85,7 +85,7 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
   });
   let api = null;
   try {
-    const r = runCli({
+    const r = await runCli({
       homedir: hd.homedir,
       workdir: hd.workdir,
       provider: PROVIDER_ID,

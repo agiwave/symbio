@@ -220,13 +220,13 @@ export default defineCase(
 
     try {
       // ── 三轮：父 → 子 → 父（顺序即判据，见文件头）────────────────────────
-      const p1 = runCli({ ...base, session: PARENT_SID, message: P1 });
+      const p1 = await runCli({ ...base, session: PARENT_SID, message: P1 });
       assertEq(p1.code, 0, `父会话第 1 轮退出码（stderr: ${p1.stderr.slice(0, 400)}）`);
 
-      const c1 = runCli({ ...base, session: CHILD_SID, agent: 'reviewer', message: C1 });
+      const c1 = await runCli({ ...base, session: CHILD_SID, agent: 'reviewer', message: C1 });
       assertEq(c1.code, 0, `子会话第 1 轮退出码（stderr: ${c1.stderr.slice(0, 400)}）`);
 
-      const p2 = runCli({ ...base, session: PARENT_SID, message: P2, timeoutMs: 180_000 });
+      const p2 = await runCli({ ...base, session: PARENT_SID, message: P2, timeoutMs: 180_000 });
       assertEq(
         p2.code,
         0,

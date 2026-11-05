@@ -71,7 +71,7 @@ export default defineCase(
     });
 
     try {
-      const r = runCli({
+      const r = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         provider: PROVIDER_ID,

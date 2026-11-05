@@ -57,7 +57,7 @@ export default defineCase('T6 MCP 工具报错：错误结果回灌 LLM，会话
   });
   let api = null;
   try {
-    const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '算一下 1+2', provider: PROVIDER_ID, session: 'e2e-t6' });
+    const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '算一下 1+2', provider: PROVIDER_ID, session: 'e2e-t6' });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
     assert(r.stdout.includes('工具出错了'), `stdout 应为收尾正文（实际: ${JSON.stringify(r.stdout)}）`);
 

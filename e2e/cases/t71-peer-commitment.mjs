@@ -176,7 +176,7 @@ export default defineCase(
 
     try {
       // ── ① 主会话一轮（对照：发言主体照常收束）────────────────────────────
-      const main = runCli({ ...base, session: MAIN_SID, message: MAIN_Q });
+      const main = await runCli({ ...base, session: MAIN_SID, message: MAIN_Q });
       assertEq(main.code, 0, `主会话一轮退出码（stderr: ${main.stderr.slice(0, 400)}）`);
 
       // ── ② 对等会话：经地址面创建（metadata 绑 peer-b），收一条**带来源主体**的消息

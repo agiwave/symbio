@@ -79,7 +79,7 @@ export default defineCase(
     const hd = homedirFor(llm.port);
 
     try {
-      const turn = runCli({
+      const turn = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         provider: PROVIDER_ID,

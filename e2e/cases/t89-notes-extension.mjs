@@ -154,7 +154,7 @@ export default defineCase(
     const GW = nextPort();
     const hd = homedirFor(llm.port, { notesEnabled: true, gatewayPort: GW });
     try {
-      const first = runCli({
+      const first = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '帮我记下：周五交报告',
@@ -190,7 +190,7 @@ export default defineCase(
         `能力往返的提示应带上索引到的便签正文（实际: ${requestText(reflectRequest.body)}）`,
       );
 
-      const second = runCli({
+      const second = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '我刚才说过什么？',
@@ -216,7 +216,7 @@ export default defineCase(
       );
 
       // ── 第三轮：同一条正文再记一次 ⇒ before 拒，工具结果带回拒因 ─────
-      const third = runCli({
+      const third = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '再记一次：周五交报告',
@@ -370,7 +370,7 @@ export default defineCase(
       gatewayPort: nextPort(),
     });
     try {
-      const r = runCli({
+      const r = await runCli({
         homedir: offHd.homedir,
         workdir: offHd.workdir,
         message: '你好',

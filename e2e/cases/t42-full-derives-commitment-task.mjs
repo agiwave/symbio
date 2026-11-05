@@ -124,7 +124,7 @@ export default defineCase(
 
     try {
       // ── 第 1 轮：声明任务图 ─────────────────────────────────────────────
-      const r1 = runCli({ ...base, session: SID, message: `请${DECLARE}` });
+      const r1 = await runCli({ ...base, session: SID, message: `请${DECLARE}` });
       assertEq(r1.code, 0, `第 1 轮退出码（stderr: ${r1.stderr.slice(0, 600)}）`);
       assert(
         r1.stdout.includes('任务清单已登记'),
@@ -132,7 +132,7 @@ export default defineCase(
       );
 
       // ── 第 2 轮：委托 ⇒ 代际立约 ────────────────────────────────────────
-      const r2 = runCli({ ...base, session: SID, message: `请${DELEGATE}`, timeoutMs: 180_000 });
+      const r2 = await runCli({ ...base, session: SID, message: `请${DELEGATE}`, timeoutMs: 180_000 });
       assertEq(r2.code, 0, `第 2 轮退出码（stderr: ${r2.stderr.slice(0, 600)}）`);
       assert(
         r2.stdout.includes('已收到评审结论'),

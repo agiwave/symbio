@@ -45,7 +45,7 @@ export default defineCase('T4 多轮会话：第二轮请求携带第一轮历�
   let api = null;
   try {
     // REPL 管道模式：两行输入 = 两轮对话
-    const r = runCli({
+    const r = await runCli({
       homedir: hd.homedir,
       workdir: hd.workdir,
       provider: PROVIDER_ID,

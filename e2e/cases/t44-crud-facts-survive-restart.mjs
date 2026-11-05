@@ -105,9 +105,9 @@ export default defineCase(
 
     try {
       // ── 跑两轮成功对话（同一会话 ⇒ 同一份真源）──────────────────────────
-      const r1 = runCli({ ...base, session: SID, message: Q1 });
+      const r1 = await runCli({ ...base, session: SID, message: Q1 });
       assertEq(r1.code, 0, `第 1 轮退出码（stderr: ${r1.stderr.slice(0, 400)}）`);
-      const r2 = runCli({ ...base, session: SID, message: Q2 });
+      const r2 = await runCli({ ...base, session: SID, message: Q2 });
       assertEq(r2.code, 0, `第 2 轮退出码（stderr: ${r2.stderr.slice(0, 400)}）`);
 
       const cli = startLongLivedCli({ ...base, session: SID, gatewayPort: GATEWAY_PORT });

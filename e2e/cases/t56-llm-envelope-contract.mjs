@@ -54,7 +54,7 @@ export default defineCase(
 
     try {
       // ── ① 出厂配置逐字段进请求 ─────────────────────────────────────────
-      const r1 = runCli({
+      const r1 = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '第一轮：打个招呼',
@@ -85,7 +85,7 @@ export default defineCase(
       });
       writeFileSync(providerFile, JSON.stringify(changed));
 
-      const r2 = runCli({
+      const r2 = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '第二轮：再打个招呼',

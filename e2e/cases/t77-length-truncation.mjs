@@ -88,7 +88,7 @@ export default defineCase(
     let api = null;
     try {
       // ── A 截断：草稿不进 stdout，退出码说失败 ──
-      const a = runCli({
+      const a = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '写一份报告',
@@ -108,7 +108,7 @@ export default defineCase(
       );
 
       // ── B 未截断：「思考即正文」照旧成立 ──
-      const b = runCli({
+      const b = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '只凭思考回答',

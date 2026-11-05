@@ -129,7 +129,7 @@ export default defineCase(
 
     try {
       // ── 第一幕：工具停在等用户（本轮不收束，提问节点在转写里等着）────────────
-      const first = runCli({
+      const first = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '帮我确认一下',

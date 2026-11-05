@@ -132,7 +132,7 @@ export default defineCase(
 
     let api = null;
     try {
-      const r = runCli({
+      const r = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '帮我搜一下内容模式',

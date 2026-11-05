@@ -79,7 +79,7 @@ export default defineCase(
         pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
       });
       try {
-        const r1 = runCli({
+        const r1 = await runCli({
           homedir: hd1.homedir,
           workdir: hd1.workdir,
           message: U,
@@ -102,7 +102,7 @@ export default defineCase(
       });
       makeSkill(hd2.homedir, 'probe-skill');
       try {
-        const r2 = runCli({
+        const r2 = await runCli({
           homedir: hd2.homedir,
           workdir: hd2.workdir,
           message: U,
@@ -130,7 +130,7 @@ export default defineCase(
         enabled: true,
       });
       try {
-        const r3 = runCli({
+        const r3 = await runCli({
           homedir: hd3.homedir,
           workdir: hd3.workdir,
           message: U,
@@ -165,7 +165,7 @@ export default defineCase(
         providerPort: llm.port,
       });
       try {
-        const r4 = runCli({
+        const r4 = await runCli({
           homedir: hd4.homedir,
           workdir: hd4.workdir,
           message: U,

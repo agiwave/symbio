@@ -51,7 +51,7 @@ export default defineCase('T52 网络拟真：首字节延迟 / 逐帧抖动 / �
   });
   let api = null;
   try {
-    const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '网络测试', provider: PROVIDER_ID, session: 'e2e-t52', timeoutMs: 90_000 });
+    const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '网络测试', provider: PROVIDER_ID, session: 'e2e-t52', timeoutMs: 90_000 });
     assert(r.code === 0, `网络拟真轮应正常完成（code=${r.code}, stderr: ${r.stderr.slice(0, 300)}）`);
     assert(
       r.stdout.includes(PIECES.join('')) && PIECES.every((p) => r.stdout.includes(p)),

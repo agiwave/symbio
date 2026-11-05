@@ -169,7 +169,7 @@ export default defineCase(
       const victimA = seedVictim();
       assert(existsSync(victimA), `预置文件失败：${victimA}`);
 
-      const first = runCli({
+      const first = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '删掉那个垃圾文件',
@@ -287,7 +287,7 @@ export default defineCase(
       const victimB = seedVictim();
       assert(existsSync(victimB), `预置文件失败：${victimB}`);
 
-      const b = runCli({
+      const b = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '自动模式删掉那个垃圾文件',

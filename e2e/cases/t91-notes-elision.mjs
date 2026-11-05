@@ -109,7 +109,7 @@ export default defineCase(
     const hd = homedirFor(llm.port);
     try {
       // ── 第一轮：记便签 → 索引 → 反思往返 → 摘要，全部在同一轮内落下 ──────
-      const first = runCli({
+      const first = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '帮我记下：周五交报告',
@@ -138,7 +138,7 @@ export default defineCase(
       );
 
       // ── 第二轮：摘要与省略都应在这一轮的请求包里生效 ─────────────────────
-      const second = runCli({
+      const second = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '我刚才说过什么？',

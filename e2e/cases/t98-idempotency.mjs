@@ -131,7 +131,7 @@ export default defineCase(
 
     try {
       // ── A 工具面：能力包的工具有没有出现在模型看得到的地方 ──────────────
-      const first = runCli({
+      const first = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: ASK_FIRST,
@@ -150,7 +150,7 @@ export default defineCase(
       assert(first.stdout.includes('已记下。'), `第一轮 stdout 应为收尾正文（实际: ${JSON.stringify(first.stdout)}）`);
 
       // ── B 跨轮同键：第二次在执行前被拒，台账仍只有一格 ──────────────────
-      const dup = runCli({
+      const dup = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: ASK_DUP,
@@ -164,7 +164,7 @@ export default defineCase(
       );
 
       // ── C 普通工具（启用侧）：两条不同正文 ⇒ 两格便签 ────────────────────
-      const notesOn = runCli({
+      const notesOn = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: ASK_NOTES,
@@ -228,7 +228,7 @@ export default defineCase(
       writeFileSync(manifest, `${kept.trimEnd()}\nplugin_enabled: false\n`);
       await llm.reset();
 
-      const off = runCli({
+      const off = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: ASK_OFF_NOTES,

@@ -136,7 +136,7 @@ export default defineCase(
 
     try {
       // ── 会话 A：零授权智能体，三轮 ──
-      const rA = runCli({
+      const rA = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         provider: PROVIDER_ID,
@@ -147,7 +147,7 @@ export default defineCase(
       assertEq(rA.code, 0, `会话 A 退出码（stderr: ${rA.stderr.slice(0, 600)}）`);
 
       // ── 会话 B：持权智能体，一轮 ──
-      const rB = runCli({
+      const rB = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         provider: PROVIDER_ID,

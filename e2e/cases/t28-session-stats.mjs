@@ -71,7 +71,7 @@ export default defineCase(
 
     try {
       // ── 跑一轮成功 + 一轮失败（两轮共用一个会话 ⇒ 同一个事实源）───────────
-      const ok = runCli({
+      const ok = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '普通提问',
@@ -80,7 +80,7 @@ export default defineCase(
       });
       assertEq(ok.code, 0, `成功轮 CLI 退出码（stderr: ${ok.stderr.slice(0, 400)}）`);
 
-      const boom = runCli({
+      const boom = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '触发故障',

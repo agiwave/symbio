@@ -103,12 +103,12 @@ export default defineCase(
 
     try {
       // ── ① 会话 A：正常一轮 ⇒ 经验编码把用户发言编成 `vis_scope = shared` 的记忆 ──
-      const a = runCli({ ...base, session: SHARED_SID, message: '共享认知提问' });
+      const a = await runCli({ ...base, session: SHARED_SID, message: '共享认知提问' });
       assertEq(a.code, 0, `会话 A 一轮退出码（stderr: ${a.stderr.slice(0, 400)}）`);
 
       // ── ② 会话 B：绑 reflex 跑一轮 ⇒ 发言臂收束被拒 ⇒ 无记忆，但开口格在 ──────
       // CLI 仍以 0 收尾：答案照旧回给调用方（收束格是记录不是呈现，见文件头）。
-      const b = runCli({
+      const b = await runCli({
         ...base,
         session: NOSHARED_SID,
         agent: 'reflex',

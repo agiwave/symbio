@@ -126,7 +126,7 @@ export default defineCase(
     });
 
     try {
-      const r = runCli({
+      const r = await runCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
         message: '帮我连读两次再收束',
