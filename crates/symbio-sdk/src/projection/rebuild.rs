@@ -769,9 +769,12 @@ fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
 
 /// 端口债键 / 应答 `calls[].id` → **模型交回的调用 id**（节点身份）。
 ///
-/// 应答里的 `calls[].id` 一律是 `call_key` 合成键（`…-c{idx:03}-{model_id}`），
-/// 与模型 id 不相等；节点面只认模型 id：那才是流式面上用户看到、下一轮请求
-/// 要原样回灌的身份。端口没给 id 时合成键没有尾段，此时原样返回合成键。
+/// **兼容解析，只对旧数据生效**：历史 WAL 里应答的 `calls[].id` 是 `call_key`
+/// 合成键（`…-c{idx:03}-{model_id}`），需要把尾段还原成模型 id。新数据里
+/// `calls[].id` 就是 provider 的 wire id，不再经过任何剥键逻辑（原样返回），
+/// 也不得参与新数据的匹配——匹配只认 wire id（见 `symbio-plugin-model` 的装配）。
+///
+/// 端口没给 id 时合成键没有尾段，此时原样返回合成键。
 fn call_identity(id: &str) -> &str {
     if let Some((_, tail)) = id.rsplit_once("-c") {
         if let Some((digits, model)) = tail.split_once('-') {

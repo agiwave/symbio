@@ -1253,3 +1253,13 @@ fn an_executed_call_does_not_get_a_projected_placeholder() {
         "不得补第二张「未执行」卡"
     );
 }
+
+/// `call_identity` 是**只对旧数据生效的兼容解析**：新数据里 `calls[].id` 就是
+/// provider 的 wire id，必须原样返回、不经任何剥键逻辑。
+#[test]
+fn call_identity_leaves_wire_ids_untouched() {
+    assert_eq!(super::call_identity("call_w1"), "call_w1");
+    assert_eq!(super::call_identity("call_abc-123"), "call_abc-123");
+    // 旧式合成键仍可还原（历史 WAL 的债键形状）。
+    assert_eq!(super::call_identity("call-root-c000-model-7"), "model-7");
+}

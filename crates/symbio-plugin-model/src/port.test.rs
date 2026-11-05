@@ -414,3 +414,50 @@ async fn executor_builds_the_request_from_the_fact_reader() {
     assert_eq!(messages, 1, "用户消息从事实读");
     assert_eq!(tools, 0);
 }
+
+/// 工具结果已作为 `tool` 节点嵌进请求时，装配**不得**再推一条降级的 assistant 复读。
+///
+/// t3 的断点：调用身份两套（节点 id / wire id），`already_nested` 比不过 ⇒ 结果被
+/// 当成「历史工具结果」降级复读 ⇒ 请求末条变成 assistant ⇒ 按末条判「工具结果轮」
+/// 的适配器会把同一笔调用再要一遍（真 provider 同样会被误导）。
+#[test]
+fn a_nested_tool_result_is_not_degraded_again() {
+    let messages = vec![
+        super::PromptMessage {
+            role: "assistant".into(),
+            text: "我先写文件。".into(),
+            tool_call_id: None,
+            tool: None,
+            tool_calls: Some(vec![symbio_plugin_api::PromptToolCall {
+                id: "call_w1".into(),
+                name: "vdfs_write".into(),
+                arguments: serde_json::json!({"path": "notes.md"}),
+            }]),
+        },
+        super::PromptMessage {
+            role: "tool".into(),
+            text: "{\"ok\":true}".into(),
+            tool_call_id: Some("call_w1".into()),
+            tool: Some("vdfs_write".into()),
+            tool_calls: None,
+        },
+    ];
+    let wire = super::wire_messages(&messages);
+    let json = serde_json::to_string(&wire).expect("ChatNode 必然可序列化");
+    assert_eq!(
+        json.matches("此前调用工具").count(),
+        0,
+        "已嵌套的工具结果不得再降级成 assistant 复读"
+    );
+    assert_eq!(wire.len(), 3, "根 + 调用卡 + 结果，各一条：{json}");
+    assert_eq!(
+        wire.last().unwrap().tool_call_id.as_deref(),
+        Some("call_w1"),
+        "末条必须是工具结果，且身份与声明逐字相同"
+    );
+    assert_eq!(
+        format!("{:?}", wire.last().unwrap().node_role()),
+        "Some(Tool)",
+        "末条 role=tool"
+    );
+}

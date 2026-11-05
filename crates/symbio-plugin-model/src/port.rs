@@ -129,9 +129,51 @@ fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMes
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or_default()
                     .to_string();
-                let tool_calls = fact.payload.get("tool_calls").cloned().and_then(|value| {
-                    serde_json::from_value::<Vec<symbio_plugin_api::PromptToolCall>>(value).ok()
-                });
+                // 声明里的调用身份**只取 provider 交回的 wire id**：`tool.requested` /
+                // `artifact.added` / 工具结果用的都是它。载荷里的 `id`（节点身份）只作
+                // 显示与链接配对，不参与任何匹配——两套 id 混用会让装配误判「结果没
+                // 嵌进来」，于是多推一条降级的 assistant 复读（t3 的断点）。
+                let tool_calls = fact
+                    .payload
+                    .get("tool_calls")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|calls| {
+                        let root = fact
+                            .payload
+                            .get("turn_id")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string();
+                        calls
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(idx, c)| {
+                                let name = c
+                                    .get("name")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("<unnamed>");
+                                // 与 `dispatch_calls` 同一条兜底：provider 没给 id 时两边
+                                // 必须写出同一个合成键，否则工具结果的 `tool_call_id`
+                                // 与声明对不上，复读又回来。
+                                let id = c
+                                    .get("wire_id")
+                                    .and_then(serde_json::Value::as_str)
+                                    .filter(|s| !s.trim().is_empty())
+                                    .or_else(|| c.get("id").and_then(serde_json::Value::as_str))
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| format!("call_{}_{}_{}", name, root, idx));
+                                Some(symbio_plugin_api::PromptToolCall {
+                                    id,
+                                    name: name.to_string(),
+                                    arguments: c
+                                        .get("arguments")
+                                        .cloned()
+                                        .unwrap_or(serde_json::Value::Null),
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|calls: &Vec<symbio_plugin_api::PromptToolCall>| !calls.is_empty());
                 if !text.trim().is_empty() || tool_calls.as_ref().is_some_and(|c| !c.is_empty()) {
                     messages.push(PromptMessage {
                         role: "assistant".into(),
@@ -484,6 +526,8 @@ fn outcome_payload(
         } else {
             "tools"
         });
+        // `id` 是节点身份（流式面上那张调用卡），**不参与任何匹配**；匹配只认
+        // `wire_id`（provider 交回的 tool_call_id，见 `turn_input` 的声明装配）。
         payload["tool_calls"] = serde_json::json!(o
             .tool_calls
             .iter()
@@ -543,8 +587,9 @@ fn fold_answer(output: &TurnOutput, stream_reasoning: &str) -> String {
 
 /// 本轮工具调用 → 派发侧读的调用键（`response.calls`）。
 ///
-/// 格式与环侧 `tool_dispatch::call_key` 逐字相同：`call_key` 的写方从此是执行体，
-/// 派发侧只读这份事实（缺失时才回退到旧式重算）。
+/// 一次调用只有一个身份：**provider 交回的 `tool_call_id`（wire）**。派发、工具债、
+/// `artifact.added` 的 `tool_call_id`、下一轮提示词装配全都用它。节点 id 只在
+/// provider 没给 id 时兜底，绝不参与匹配（t3：两套 id 混用导致重复复读与二次执行）。
 fn dispatch_calls(
     request: &RoundTripRequest,
     tool_calls: &[TurnToolCallInfo],
@@ -553,17 +598,17 @@ fn dispatch_calls(
         .iter()
         .enumerate()
         .map(|(idx, call)| {
-            // 锚点是**触发这一批派发的事实身份**（用户消息 id）；没有它时只保留序号，
-            // 不再拿轮号占位——轮号不是事实身份。
-            let mut id = if request.root_id.trim().is_empty() {
-                format!("call-c{idx:03}")
-            } else {
-                format!("call-{}-c{idx:03}", request.root_id)
-            };
-            if let Some(wire) = call.id.as_deref().filter(|s| !s.trim().is_empty()) {
-                id.push('-');
-                id.push_str(wire);
-            }
+            let id = call
+                .wire_id
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| call.id.clone().filter(|s| !s.trim().is_empty()))
+                // 与提示词装配同一条兜底（`call_<名>_<root>_<序号>`）：两处写出的
+                // 调用键必须相等，否则下一轮又把「同一笔调用」认成两笔。
+                .unwrap_or_else(|| {
+                    let name = call.name.as_deref().unwrap_or("<unnamed>");
+                    format!("call_{}_{}_{}", name, request.root_id, idx)
+                });
             serde_json::json!({
                 "id": id,
                 "name": call.name.clone().unwrap_or_default(),
