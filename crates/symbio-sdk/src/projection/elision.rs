@@ -48,7 +48,7 @@ use crate::projection::vocab::MessageVocab;
 pub(crate) struct Elisions {
     /// 显式区间：按事件 `seq` 的闭区间 `(from, to)`。
     ranges: Vec<(u64, u64)>,
-    /// 分支事实里未被选中的支根 id（事件载荷 `turn_id`）。
+    /// 分支事实里未被选中的支根 id（事件载荷 `root_id`）。
     hidden_roots: HashSet<String>,
 }
 

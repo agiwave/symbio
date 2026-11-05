@@ -56,7 +56,7 @@ fn assistant_turn(turn: u64, text: &str) -> Event {
     .with_payload(serde_json::json!({
         "text": text,
         "model": "deep",
-        "turn_id": format!("t-{turn}"),
+        "root_id": format!("t-{turn}"),
         "text_id": format!("f-{turn}-text"),
     }))
 }

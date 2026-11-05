@@ -79,8 +79,8 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
 
 /// 本轮声明的档位：读 `user.message` 载荷的 `tier`；缺失 / 未知 ⇒ [`UNSPECIFIED`]。
 ///
-/// `turn_id` 是**触发这一轮的事实身份**（`user.message` 的 event id，也就是模型侧
-/// `turn_id` 载荷的取值）：配对按事实 id，不按任何轮号。
+/// `root_id` 是**触发这一轮的事实身份**（`user.message` 的 event id，也就是模型侧
+/// `root_id` 载荷的取值）：配对按事实 id，不按任何轮号。
 ///
 /// `before_seq`：
 /// - `Some(b)` ⇒ 只认 seq `< b` 的声明（兜底 / 收束事件要归到**它之前**那一幕的档位）；
@@ -156,7 +156,7 @@ fn latency(events: &[Event], now: i64) -> Value {
         }
         let turn_id = e
             .payload
-            .get("turn_id")
+            .get("root_id")
             .and_then(Value::as_str)
             .unwrap_or("");
         let tier = declared_tier(events, turn_id, e.seq.map(|s| s.value()));
@@ -239,7 +239,7 @@ fn fallback(events: &[Event], now: i64) -> Value {
                 }
                 let turn_id = e
                     .payload
-                    .get("turn_id")
+                    .get("root_id")
                     .and_then(Value::as_str)
                     .unwrap_or("");
                 let tier = declared_tier(events, turn_id, e.seq.map(|s| s.value()));

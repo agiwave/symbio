@@ -882,7 +882,7 @@ fn an_artifact_round_is_complete_after_reopen() {
     .with_payload(serde_json::json!({
         "text": "回显完成",
         "model": "deep",
-        "turn_id": "t-0",
+        "root_id": "t-0",
         "text_id": "f-0-text",
     }));
 

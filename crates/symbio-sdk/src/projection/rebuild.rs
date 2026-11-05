@@ -184,7 +184,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     let group_of_call: std::collections::HashMap<String, String> = events
         .iter()
         .filter_map(|e| {
-            let group = e.payload.get("turn_id")?.as_str()?;
+            let group = e.payload.get("root_id")?.as_str()?;
             Some((group, e.payload.get("calls")?.as_array()?))
         })
         .flat_map(|(group, calls)| {
@@ -224,7 +224,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 这些轮的那次**答复**（无工具调用的往返）是模型产出的**事实**，但它从未获准
     // 进入对话——fail-closed 的呈现面要求它不出现在消息列表里。判据是跨事件的
     // （拒绝格排在应答格之后），所以先收索引、再折（与变更格同一纪律）。
-    // 配对键是**触发这一轮的事实身份**（`turn_id`，即那条 `user.message` 的 id）：
+    // 配对键是**触发这一轮的事实身份**（`root_id`，即那条 `user.message` 的 id）：
     // 拒绝格与应答格都带同一位，不靠任何「第几轮」的编号。
     // 工具轮的中途正文不受影响：它们属已经准许的循环，不是被拒的那句话。
     let denied_speech: HashSet<String> = events
@@ -235,7 +235,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
         })
         .filter_map(|e| {
             e.payload
-                .get("turn_id")
+                .get("root_id")
                 .and_then(|v| v.as_str())
                 .map(str::to_owned)
         })
@@ -413,7 +413,7 @@ fn nodes_of(
         return output_nodes(
             e,
             e.payload
-                .get("turn_id")
+                .get("root_id")
                 .and_then(|v| v.as_str())
                 .is_some_and(|turn| denied_speech.contains(turn)),
         );
@@ -594,7 +594,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         .with_style_tag(CHAT_STYLE_TAG_REASONING);
         return vec![node, reasoning_node];
     }
-    let Some(group) = str_of(e, "turn_id") else {
+    let Some(group) = str_of(e, "root_id") else {
         return Vec::new();
     };
     let principal = actor_principal(e);
@@ -751,7 +751,7 @@ fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
     if e.payload.get("via").is_some() {
         return Vec::new();
     }
-    let Some(root) = str_of(e, "turn_id") else {
+    let Some(root) = str_of(e, "root_id") else {
         return Vec::new();
     };
     // 节点主体 = **写这条事实的人**（`actor`），不是载荷里的 `principal`。
@@ -916,7 +916,7 @@ fn unfinished_nodes(
             .unwrap_or_default();
 
         if !existing.contains(&node_id) {
-            // 调用卡的父节点是**产生这批调用的那一次模型应答**的 `turn_id`；
+            // 调用卡的父节点是**产生这批调用的那一次模型应答**的 `root_id`；
             // 按调用标识在 `calls[]` 里回找，才能把失败事实对回它所属的那一轮。
             // 回找不到 ⇒ 这不是一次模型发起的调用，不投影（见 `issued_call_id`）。
             let Some(resp) = events.iter().rev().find(|r| {
@@ -937,7 +937,7 @@ fn unfinished_nodes(
             }) else {
                 continue;
             };
-            let root = str_of(resp, "turn_id").unwrap_or_else(|| format!("root-{node_id}"));
+            let root = str_of(resp, "root_id").unwrap_or_else(|| format!("root-{node_id}"));
             let mut call = llm_build_tool_call_node(
                 &root,
                 node_id.clone(),

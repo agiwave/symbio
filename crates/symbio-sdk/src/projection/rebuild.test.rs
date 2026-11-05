@@ -145,7 +145,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
         final_event(serde_json::json!({
             "text": "答 A",
             "model": "m",
-            "turn_id": "T1",
+            "root_id": "T1",
             "text_id": "T1-text",
             "reasoning_id": "T1-reason",
             "reasoning": "想了一下",
@@ -205,7 +205,7 @@ fn final_payload_context_folds_into_the_turn_skeleton_meta() {
         final_event(serde_json::json!({
             "text": "答 A",
             "model": "m",
-            "turn_id": "T1",
+            "root_id": "T1",
             "text_id": "T1-text",
             "reasoning_id": null,
             "reasoning": null,
@@ -233,7 +233,7 @@ fn final_without_context_payload_leaves_the_skeleton_meta_empty() {
         final_event(serde_json::json!({
             "text": "答 A",
             "model": "m",
-            "turn_id": "T1",
+            "root_id": "T1",
             "text_id": "T1-text",
             "reasoning_id": null,
             "reasoning": null,
@@ -257,7 +257,7 @@ fn final_without_context_payload_leaves_the_skeleton_meta_empty() {
     );
 }
 
-/// 真实形状：`turn_id` 就是发起这一轮的用户消息 id，Turn 骨架因此与用户节点**同 id**
+/// 真实形状：`root_id` 就是发起这一轮的用户消息 id，Turn 骨架因此与用户节点**同 id**
 /// 被「同 id 只认首次」合并掉——水位必须补到存活的那个节点上，否则读数丢失。
 #[test]
 fn final_context_survives_when_the_turn_root_is_the_user_message() {
@@ -266,7 +266,7 @@ fn final_context_survives_when_the_turn_root_is_the_user_message() {
         final_event(serde_json::json!({
             "text": "答 A",
             "model": "m",
-            "turn_id": "T1",
+            "root_id": "T1",
             "text_id": "T1-text",
             "reasoning_id": null,
             "reasoning": null,
@@ -297,7 +297,7 @@ fn reasoning_only_does_not_duplicate_the_paragraph() {
         user_event("u-node", "问"),
         final_event(serde_json::json!({
             "text": "同一段",
-            "turn_id": "T1",
+            "root_id": "T1",
             "text_id": "T1-text",
             "reasoning_id": "T1-reason",
             "reasoning": "同一段",
@@ -331,7 +331,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
         .with_payload(serde_json::json!({
             "text": "",
             "model": "m",
-            "turn_id": "T1",
+            "root_id": "T1",
             "text_id": null,
             "reasoning_id": null,
             "reasoning": null,
@@ -373,7 +373,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
     );
 }
 
-/// 发起一批工具调用的那条事实：载荷带 `turn_id` 与 `calls[]`。
+/// 发起一批工具调用的那条事实：载荷带 `root_id` 与 `calls[]`。
 ///
 /// 产物不再复制轮号，重建按 `tool_call_id` 反查这里登记过的调用 id。
 fn tool_requested(calls: &[&str]) -> Event {
@@ -385,7 +385,7 @@ fn tool_requested(calls: &[&str]) -> Event {
         "session/main",
     )
     .with_payload(serde_json::json!({
-        "turn_id": "T1",
+        "root_id": "T1",
         "calls": calls
             .iter()
             .map(|id| serde_json::json!({ "id": id }))
@@ -426,7 +426,7 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
         artifact(0, "c0", "a.md", "a 的内容", round.clone()),
         artifact(1, "c1", "b.md", "b 的内容", serde_json::Value::Null),
         final_event(serde_json::json!({
-            "text": "都读完了", "model": "m", "turn_id": "T1", "text_id": "T1-text",
+            "text": "都读完了", "model": "m", "root_id": "T1", "text_id": "T1-text",
             "reasoning_id": null, "reasoning": null, "tool_calls": [],
             "rounds": [round], "status": "completed",
         })),
@@ -514,7 +514,7 @@ fn tool_calls_reference_does_not_duplicate_the_card() {
         })),
         final_event(serde_json::json!({
             "text": "读完了",
-            "turn_id": "T1",
+            "root_id": "T1",
             "text_id": "T1-text",
             "tool_calls": [{ "id": "T-016", "name": "read", "args": "{}" }],
             "status": "completed",
@@ -532,7 +532,7 @@ fn rebuild_is_deterministic() {
     let events = vec![
         user_event("u-node", "问"),
         final_event(serde_json::json!({
-            "text": "答", "turn_id": "T1", "text_id": "t", "status": "completed",
+            "text": "答", "root_id": "T1", "text_id": "t", "status": "completed",
         })),
     ];
     assert_eq!(
@@ -551,7 +551,7 @@ fn final_with_dialog_rebuilds_reasoning_child_from_the_payload() {
     let ev = final_event(serde_json::json!({
         "text": "我们刚才在聊 README 的事。",
         "model": "",
-        "turn_id": "",
+        "root_id": "",
         "text_id": null,
         "reasoning_id": "ans-reason",
         "reasoning": "想一想：直接从上下文总结。",
@@ -581,7 +581,7 @@ fn final_with_dialog_without_reasoning_stays_single_node() {
     let ev = final_event(serde_json::json!({
         "text": "不客气。",
         "model": "",
-        "turn_id": "",
+        "root_id": "",
         "reasoning_id": null,
         "reasoning": null,
         "tool_calls": [],
@@ -632,7 +632,7 @@ fn aborted_status_lands_on_the_turn_and_its_text() {
     let events = vec![
         user_event("u-node", "问"),
         final_event(serde_json::json!({
-            "text": "说到一半", "turn_id": "T1", "text_id": "t",
+            "text": "说到一半", "root_id": "T1", "text_id": "t",
             "status": "aborted",
         })),
     ];
@@ -664,7 +664,7 @@ fn response_answer_lands_as_a_child_at_its_own_position() {
             1_500,
             serde_json::json!({
                 "port": "model", "id": "model-1", "attempt": 1,
-                "turn_id": "T1", "text_id": "T1-text", "text": "答",
+                "root_id": "T1", "text_id": "T1-text", "text": "答",
                 "answer": "答", "answer_id": "T1-text", "calls": [],
                 "principal": "session/main",
             }),
@@ -695,7 +695,7 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
     .with_ts(3_000)
     .with_payload(serde_json::json!({
         "key": EVENT_CHAT_ASSISTANT_FINAL, "kind": "speech", "reason": "denied", "detail": "窄行",
-        "turn_id": "T1",
+        "root_id": "T1",
     }));
     let events = vec![
         user_event("u-node", "委托出去"),
@@ -706,7 +706,7 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
             1_500,
             serde_json::json!({
                 "port": "model", "id": "model-1", "attempt": 1,
-                "turn_id": "T1", "text_id": "T1-t0", "text": "让我调用工具",
+                "root_id": "T1", "text_id": "T1-t0", "text": "让我调用工具",
                 "answer": "让我调用工具", "answer_id": "T1-t0",
                 "calls": [{ "port": "tool", "id": "c-1", "name": "agent_run", "arguments": {} }],
                 "principal": "session/peer-b",
@@ -719,7 +719,7 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
             2_000,
             serde_json::json!({
                 "port": "model", "id": "model-2", "attempt": 1,
-                "turn_id": "T1", "text_id": "T1-t1", "text": "汇总正文",
+                "root_id": "T1", "text_id": "T1-t1", "text": "汇总正文",
                 "answer": "汇总正文", "answer_id": "T1-t1", "calls": [],
                 "principal": "session/peer-b",
             }),
@@ -783,7 +783,7 @@ fn an_edit_replaces_the_node_in_place() {
     let events = vec![
         user_event("u-node", "原始问题"),
         final_event(serde_json::json!({
-            "text": "答", "turn_id": "T1", "text_id": "T1-text", "status": "completed",
+            "text": "答", "root_id": "T1", "text_id": "T1-text", "status": "completed",
         })),
         edited_event(crate::chat::chat_node::ChatNode {
             id: "u-node".into(),
@@ -816,7 +816,7 @@ fn a_removal_drops_the_nodes_and_leaves_seq_gaps() {
     let events = vec![
         user_event("u-node", "第一问"),
         final_event(serde_json::json!({
-            "text": "第一答", "turn_id": "T1", "text_id": "T1-text", "status": "completed",
+            "text": "第一答", "root_id": "T1", "text_id": "T1-text", "status": "completed",
         })),
         // 从 Turn 根起截断（起点 + 其子节点，与 `truncate_messages` 的区间同形）
         removed_event(&["T1", "T1-text"]),
@@ -839,7 +839,7 @@ fn truncating_everything_yields_an_empty_list() {
     let events = vec![
         user_event("u-node", "问"),
         final_event(serde_json::json!({
-            "text": "答", "turn_id": "T1", "text_id": "T1-text", "status": "completed",
+            "text": "答", "root_id": "T1", "text_id": "T1-text", "status": "completed",
         })),
         removed_event(&["u-node", "T1", "T1-text"]),
     ];
@@ -875,7 +875,7 @@ fn rebuild_with_mutations_is_deterministic() {
     let events = vec![
         user_event("u-node", "问"),
         final_event(serde_json::json!({
-            "text": "答", "turn_id": "T1", "text_id": "T1-text", "status": "completed",
+            "text": "答", "root_id": "T1", "text_id": "T1-text", "status": "completed",
         })),
         edited_event(crate::chat::chat_node::ChatNode {
             id: "u-node".into(),
@@ -953,7 +953,7 @@ fn a_snapshot_rebases_the_prefix() {
     let events = vec![
         user_event("u-old", "被压掉的问题"),
         final_event(serde_json::json!({
-            "text": "被压掉的答复", "turn_id": "T-old", "text_id": "T-old-text",
+            "text": "被压掉的答复", "root_id": "T-old", "text_id": "T-old-text",
             "status": "completed",
         })),
         snapshot_event(vec![

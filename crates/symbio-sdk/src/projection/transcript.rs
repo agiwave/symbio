@@ -195,7 +195,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
         // 节点——把它们去重就是另一种分叉。播种集合只装基线里那份，正是这个边界。
         //
         // 收束 / 进展格的内容节点身份取载荷 `answer_id`（引擎在落格前算定，与重建同源），
-        // 缺失时按 `turn_id` 派生合成 id（见
+        // 缺失时按 `root_id` 派生合成 id（见
         // [`crate::event::event_produced_text_node_id`]）。
         let produced_node = |e: &Event| slot_node_of(e, &c, &m).unwrap_or_default();
         let mut push = |mut entry: TranscriptEntry, node: String, from_snapshot: bool| {
@@ -240,7 +240,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                             role: "user".into(),
                             text: text.to_string(),
                             tool: None,
-                            // 用户格不带 `turn_id` ⇒ 分支判据对它恒 false；但显式区间
+                            // 用户格不带 `root_id` ⇒ 分支判据对它恒 false；但显式区间
                             // （摘要取代的那一段）照样适用——这正是「一个应用点」的意思。
                             exclude_from_context: elisions.elides(e),
                         },

@@ -175,7 +175,7 @@ impl Convergence {
     /// 该开轮事实的终答事实 → 转写节点，并收束本轮；没有终答 ⇒ `false`（不投影）。
     ///
     /// 配对靠**事实身份**：由 `user.message` 的 `seq` 取回它的 `event_id`，
-    /// 再找载荷 `turn_id` 指向它的那条终答——不再拿轮号当键。
+    /// 再找载荷 `root_id` 指向它的那条终答——不再拿轮号当键。
     /// 节点由 `rebuild` 从**同一条事实**折出（读路径与写路径同一个折叠）。幂等：
     /// 同一条事实再投影一次时，`apply` 见到节点已存在会跳过（不重复追加）。
     pub(crate) async fn project_final_turn(
@@ -195,7 +195,7 @@ impl Convergence {
             .rev()
             .find(|e| {
                 e.kind == EVENT_CHAT_ASSISTANT_FINAL
-                    && e.payload.get("turn_id").and_then(Value::as_str) == Some(&user.event_id)
+                    && e.payload.get("root_id").and_then(Value::as_str) == Some(&user.event_id)
             })
             .cloned()
         else {
@@ -324,18 +324,15 @@ impl Convergence {
             })
             .cloned()
             .collect();
-        let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
-            &turn_events,
-            &CHAT_VOCAB,
-            &MESSAGE_VOCAB,
-        )
-        .into_iter()
-        .map(|mut node| {
-            // seq 由存储在临界区内权威分配；折叠给的是「从这份切片起」的局部号。
-            node.seq = None;
-            node
-        })
-        .collect();
+        let nodes: Vec<cm::ChatNode> =
+            symbio_sdk::projection::rebuild::rebuild(&turn_events, &CHAT_VOCAB, &MESSAGE_VOCAB)
+                .into_iter()
+                .map(|mut node| {
+                    // seq 由存储在临界区内权威分配；折叠给的是「从这份切片起」的局部号。
+                    node.seq = None;
+                    node
+                })
+                .collect();
         if !nodes.is_empty() {
             let session = self.open_chat_session(session_id).await?;
             append_and_publish(

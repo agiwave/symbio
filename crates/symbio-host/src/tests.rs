@@ -314,7 +314,7 @@ impl PortExecutor for LoopModelExecutor {
                 entity: Entity::Scope,
                 verb: Verb::Asserted,
                 payload: serde_json::json!({
-                    "turn_id": user_id,
+                    "root_id": user_id,
                     "calls": [{"id": "c1", "name": "echo", "arguments": {}}],
                 }),
                 produced_by: None,

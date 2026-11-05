@@ -104,7 +104,7 @@ fn a_malformed_range_hides_nothing() {
     assert!(!collect(&events).elides(&events[2]));
 }
 
-/// 分支那一路照旧合流：未选中支的根（载荷 `turn_id`）仍被判成不读。
+/// 分支那一路照旧合流：未选中支的根（载荷 `root_id`）仍被判成不读。
 #[test]
 fn an_unselected_branch_still_elides_through_the_same_judgement() {
     let branch = Event::pending(
@@ -122,7 +122,7 @@ fn an_unselected_branch_still_elides_through_the_same_judgement() {
         Verb::Opened,
         "user",
     )
-    .with_payload(serde_json::json!({ "turn_id": "t-1", "text": "旧支" }));
+    .with_payload(serde_json::json!({ "root_id": "t-1", "text": "旧支" }));
     let new = Event::pending(
         "new",
         EVENT_USER_MESSAGE,
@@ -130,7 +130,7 @@ fn an_unselected_branch_still_elides_through_the_same_judgement() {
         Verb::Opened,
         "user",
     )
-    .with_payload(serde_json::json!({ "turn_id": "t-2", "text": "新支" }));
+    .with_payload(serde_json::json!({ "root_id": "t-2", "text": "新支" }));
     let events = vec![branch, old, new];
     let elisions = collect(&events);
     assert!(elisions.elides(&events[1]), "未选中支该不读");

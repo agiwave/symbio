@@ -777,9 +777,7 @@ pub(crate) fn overlay_live(
                 // 列表里，说明那条已被快照换基（压缩 / 截断）取代——旧副本不得复活，
                 // 否则它与存储里的同号并列（实测 `seq 未严格递增（3 → 3）`）。
                 // 尚无号、或在途段内的，才是存储还没收录的新内容。
-                let in_flight = l
-                    .seq
-                    .is_none_or(crate::transcript::InflightSeq::occupies);
+                let in_flight = l.seq.is_none_or(crate::transcript::InflightSeq::occupies);
                 if in_flight {
                     out.push(l);
                 }
@@ -824,7 +822,7 @@ pub(crate) fn session_content(
     // 同 id 在途版本胜出（它更新），顺序锚点仍由存储分配的 `seq` 决定。
     let mut messages = ordered(overlay_live(session.messages.clone(), live));
     // 呈现投影（与 `get_messages` 同一函数、同一档位）：重建 core config-free、
-    // 从事件 `turn_id` 一律重derive 成 grouped，`flat` 档在这里升根 + 打 `turn_root`
+    // 从事件 `root_id` 一律重derive 成 grouped，`flat` 档在这里升根 + 打 `turn_root`
     // 记号，令 live↔reload↔呈现三格锁步。`overlay_live`/`ordered` 只按 id 重排/
     // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
     symbio_sdk::turn::node_build::flatten_whole_tree(&mut messages, mode);

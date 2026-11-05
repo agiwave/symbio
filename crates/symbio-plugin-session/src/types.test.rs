@@ -213,7 +213,7 @@ fn latest_context_watermark_reads_what_the_writer_put_on_the_final_fact() {
         )
         .with_payload(json!({
             "text": "答",
-            "turn_id": "T1",
+            "root_id": "T1",
             "text_id": "T1-text",
             "tool_calls": [],
             "rounds": [],

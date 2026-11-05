@@ -620,7 +620,7 @@ pub fn event_payload_node_id(e: &Event, key: &str) -> String {
 /// 落库侧（`message_build::llm_build_assistant_messages`）有一条 **reasoning-only**
 /// 规则：思考与正文是同一段内容且没有独立文本回复时，那段内容归 **Text 子节点**、
 /// 并**复用 reasoning 的流式 id**（否则同一段内容在存储层出现两份）。重建若只认
-/// `text_id`，reasoning-only 那一轮会得到 `{turn_id}-text` 这个**落库侧并不存在**的
+/// `text_id`，reasoning-only 那一轮会得到 `{root_id}-text` 这个**落库侧并不存在**的
 /// id——于是那条正文在实时面与重建面是两个身份，且 `message.edited` 永远定位不上它。
 ///
 /// 判据与落库侧**逐字相同**（同一段文本比较），因为它就是同一个问题的答案。
@@ -630,7 +630,7 @@ pub fn event_produced_text_node_id(e: &Event) -> String {
         payload_str(e, "reasoning").as_deref().unwrap_or_default(),
         payload_str(e, "text_id").as_deref(),
         payload_str(e, "reasoning_id").as_deref(),
-        payload_str(e, "turn_id").as_deref(),
+        payload_str(e, "root_id").as_deref(),
     )
 }
 
@@ -644,7 +644,7 @@ pub fn event_output_text_node_id(
     reasoning: &str,
     text_id: Option<&str>,
     reasoning_id: Option<&str>,
-    turn_id: Option<&str>,
+    root_id: Option<&str>,
 ) -> String {
     let reasoning_only = !reasoning.trim().is_empty() && reasoning.trim() == text.trim();
     let id = if reasoning_only {
@@ -653,9 +653,9 @@ pub fn event_output_text_node_id(
         text_id
     };
     id.map(str::to_string).unwrap_or_else(|| {
-        // 载荷连 `turn_id` 都没有（答话轮 / 反射档：没有流式节点）⇒ 与落库侧同一条
-        // 回退：正文子节点的名字由 Turn 根派生。
-        format!("{}-text", turn_id.unwrap_or_default())
+        // 载荷连 `root_id` 都没有（答话轮 / 反射档：没有流式节点）⇒ 与落库侧同一条
+        // 回退：正文子节点的名字由轮根派生。
+        format!("{}-text", root_id.unwrap_or_default())
     })
 }
 

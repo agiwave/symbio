@@ -11,7 +11,7 @@
 //!
 //! ## 收束怎么归到开轮格
 //!
-//! 收束事实的载荷带 `turn_id`——**触发这一轮的开轮事实 id**。配对按事实身份，不按轮号：
+//! 收束事实的载荷带 `root_id`——**触发这一轮的开轮事实 id**。配对按事实身份，不按轮号：
 //! 本文件里每个 `final_reply` / `fallback_reply` 的第一个「谁」参数就是那条 `user.message` 的 id。
 
 use super::*;
@@ -53,7 +53,7 @@ fn user_message(id: &str, tier: Option<&str>, seq: u64, ts: i64) -> Event {
     e
 }
 
-/// 成功收束（`chat.assistant.final`），带实测耗时；`turn_id` 是它所属的开轮事实 id。
+/// 成功收束（`chat.assistant.final`），带实测耗时；`root_id` 是它所属的开轮事实 id。
 fn final_reply(id: &str, turn_id: &str, cost_ms: u64, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
@@ -64,7 +64,7 @@ fn final_reply(id: &str, turn_id: &str, cost_ms: u64, seq: u64, ts: i64) -> Even
     )
     .with_ts(ts)
     .with_cost_ms(cost_ms)
-    .with_payload(json!({ "text": "答", "turn_id": turn_id }));
+    .with_payload(json!({ "text": "答", "root_id": turn_id }));
     e.seq = Some(Seq::new(seq));
     e
 }
@@ -80,7 +80,7 @@ fn fallback_reply(id: &str, turn_id: &str, cost_ms: u64, seq: u64, ts: i64) -> E
     )
     .with_ts(ts)
     .with_cost_ms(cost_ms)
-    .with_payload(json!({ "text": "兜底", "turn_id": turn_id }));
+    .with_payload(json!({ "text": "兜底", "root_id": turn_id }));
     e.seq = Some(Seq::new(seq));
     e
 }

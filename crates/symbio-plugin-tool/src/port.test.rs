@@ -573,7 +573,7 @@ fn requested_call_with(
                     id: "tool.requested:model-1".into(),
                     port: "model".into(),
                     kind: "tool.requested".into(),
-                    payload: serde_json::json!({ "turn_id": "u-1", "calls": calls }),
+                    payload: serde_json::json!({ "root_id": "u-1", "calls": calls }),
                 },
             ]))),
         },

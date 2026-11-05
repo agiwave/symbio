@@ -43,7 +43,7 @@
 //!
 //! 一幕起一个新根，幕间续写让同一轮开出多个根（轮号与根不是一对一）。按轮号归组会把
 //! 「同一轮的第二幕」误读成「另一支」。载荷里因此只出现根 id（节点身份是事实的一部分，
-//! 与 `turn_id` / `result_id` 同一条纪律）。
+//! 与 `root_id` / `result_id` 同一条纪律）。
 
 use crate::chat::chat_node::ChatNode;
 use crate::event::Event;
@@ -259,9 +259,9 @@ pub fn stamp_branches(nodes: &mut [ChatNode], events: &[Event], v: &ChatVocab) {
     }
 }
 
-/// 一条事件属于**哪一支**（载荷 `turn_id` = 本轮 Turn 根 id）。
+/// 一条事件属于**哪一支**（载荷 `root_id` = 本轮轮根 id）。
 ///
-/// `None` = 它**不在任何支里**：用户格、轮内补充、快照基线都不带这个键（`turn_id` 只由
+/// `None` = 它**不在任何支里**：用户格、轮内补充、快照基线都不带这个键（`root_id` 只由
 /// 助手侧的产出事实记，见 `turn_runner/facts.rs`）。那些正是各支的**共同祖先**——按它剪
 /// 会连用户的问题一起剪掉。
 ///
@@ -269,7 +269,7 @@ pub fn stamp_branches(nodes: &mut [ChatNode], events: &[Event], v: &ChatVocab) {
 /// 与 [`super::prompt_fidelity`]）引的是同一个判据。
 pub fn event_branch_root(e: &Event) -> Option<&str> {
     e.payload
-        .get("turn_id")
+        .get("root_id")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
 }

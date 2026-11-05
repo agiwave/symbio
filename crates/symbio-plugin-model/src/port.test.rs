@@ -299,7 +299,7 @@ async fn a_tool_round_writes_one_tool_requested_for_the_whole_turn() {
         requested[0].key, "tool.requested:model-1-1",
         "键随本轮派发唯一"
     );
-    assert_eq!(requested[0].payload["turn_id"], "u-1");
+    assert_eq!(requested[0].payload["root_id"], "u-1");
     let calls = requested[0].payload["calls"]
         .as_array()
         .expect("载荷是清单");

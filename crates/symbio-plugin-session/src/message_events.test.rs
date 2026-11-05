@@ -275,7 +275,7 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
     )
     .with_ts(2_000)
     .with_payload(serde_json::json!({
-        "text": "回答", "turn_id": "T1", "text_id": "T1-text",
+        "text": "回答", "root_id": "T1", "text_id": "T1-text",
     }));
     let mut later_json = serde_json::to_value(&later).expect("序列化后续事件");
     later_json["seq"] = serde_json::json!(1);

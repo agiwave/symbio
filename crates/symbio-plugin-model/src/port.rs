@@ -85,7 +85,7 @@ struct RoundTripRequest {
     provider: Option<String>,
     #[serde(default)]
     root_id: String,
-    /// 记账与装配用的容器事实（`D-314`）：`response` 载荷的 `turn_id` / `principal`、
+    /// 记账与装配用的容器事实（`D-314`）：`response` 载荷的 `root_id` / `principal`、
     /// `calls` 的 `call_key` 都从这里取，环不再代装配。
     #[serde(default)]
     principal: String,
@@ -128,10 +128,7 @@ fn turn_input(
         .filter(|fact| fact.kind == EVENT_MESSAGE_ADDED)
         .filter_map(|fact| {
             let elision = fact.payload.get("elision")?;
-            Some((
-                elision.get("from")?.as_u64()?,
-                elision.get("to")?.as_u64()?,
-            ))
+            Some((elision.get("from")?.as_u64()?, elision.get("to")?.as_u64()?))
         })
         .collect();
 
@@ -185,7 +182,9 @@ fn turn_input(
                     .map(|nodes| {
                         nodes
                             .iter()
-                            .filter_map(|node| serde_json::from_value::<ChatNode>(node.clone()).ok())
+                            .filter_map(|node| {
+                                serde_json::from_value::<ChatNode>(node.clone()).ok()
+                            })
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
@@ -231,7 +230,7 @@ fn turn_input(
                     .map(|calls| {
                         let root = fact
                             .payload
-                            .get("turn_id")
+                            .get("root_id")
                             .and_then(serde_json::Value::as_str)
                             .unwrap_or_default()
                             .to_string();
@@ -476,7 +475,7 @@ impl PortExecutor for ModelExecutor {
                 }
                 if !calls.is_empty() {
                     requested = Some(serde_json::json!({
-                        "turn_id": request.root_id,
+                        "root_id": request.root_id,
                         "calls": calls,
                     }));
                 }
@@ -605,7 +604,7 @@ fn context_watermark(output: &TurnOutput, limit: u32) -> Option<serde_json::Valu
 /// 一次往返写进 `response` / `failed` 的载荷（行契约归本插件，`D-314`）。
 ///
 /// 键名与环侧 `output_fields` 同义：`text` / `text_id` / `reasoning` / `reasoning_id` /
-/// `answer` / `answer_id` / `truncated` / `principal` / `turn_id`，外加本轮的工具调用
+/// `answer` / `answer_id` / `truncated` / `principal` / `root_id`，外加本轮的工具调用
 /// 集合展开（`tool_calls` 是给环折 `LlmTurn` 的原始值，`calls` 是派发侧读的调用键）。
 fn outcome_payload(
     request: &RoundTripRequest,
@@ -664,7 +663,7 @@ fn outcome_payload(
         Some(&request.root_id),
     );
     let mut payload = serde_json::json!({
-        "turn_id": request.root_id,
+        "root_id": request.root_id,
         "text": text,
         "text_id": text_id,
         "reasoning": reasoning,
