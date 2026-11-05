@@ -212,6 +212,25 @@ impl Transcript {
     /// 该拼接还是该替换？语义不可判定，报错丢弃：不发布、不占在途号——不让一个
     /// 语义不可判定的帧进内存图，也不让它上实时面。
     pub fn apply(&mut self, msg: cm::ChatNode) {
+        self.apply_with(msg, true);
+    }
+
+    /// 快照帧（整表重写 / 压缩快照的 `messages` 列表）：**不分配在途号**。
+    ///
+    /// 快照是「换基」而不是「新消息」：它的号只能由存储的 `assign_seq` 发
+    /// （[`chat_session::write::assign_seq`] 是 `seq` 的唯一分配者）。这里若按
+    /// 普通帧分在途号，同一份转写里就会出现在途号与存储号两套计数器写同一字段，
+    /// 破坏 `assign_seq`「无号项只允许在头/尾」的前置条件，表现为两条消息同号
+    /// （实测 `seq 未严格递增（3 → 3）`）。
+    pub(crate) fn apply_snapshot(&mut self, messages: Vec<cm::ChatNode>) {
+        for mut msg in messages {
+            // 载荷里带的号不作数（快照可能是从旧视图序列化来的）。
+            msg.seq = None;
+            self.apply_with(msg, false);
+        }
+    }
+
+    fn apply_with(&mut self, msg: cm::ChatNode, allocate: bool) {
         if msg.delta.is_some() && msg.content.is_some() {
             plugin_error!(
                 "session",
@@ -251,7 +270,7 @@ impl Transcript {
         // 独占 `self.nodes` 的可变借用。
         let allocated = match msg.seq {
             Some(s) => Some(s),
-            None if !existed => {
+            None if !existed && allocate => {
                 let s = self.next_seq.raw();
                 self.next_seq = self.next_seq.after();
                 Some(s)

@@ -85,7 +85,7 @@ export default defineCase(
     const hd = makeHomedir({
       // 窗口值与 t18 同一标定（0.3L 窗口 ≈ 8 轮；上限取 12400 保触发轮两侧有余量）
       providers: [
-        { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12400 }) },
+        { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 80 }) },
       ],
       pluginConfigs: {
         session: { auto_compress: true, context_messages: 0, ...DIALOG_FACE_OFF },

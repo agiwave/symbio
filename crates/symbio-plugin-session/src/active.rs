@@ -472,6 +472,16 @@ impl ActiveSessionManager {
         }
     }
 
+    /// 向会话转写发布**快照帧**：不占在途号（`seq` 由存储的 `assign_seq` 唯一发号）。
+    pub(crate) async fn transcript_apply_snapshot(
+        &self,
+        session_id: &str,
+        messages: Vec<cm::ChatNode>,
+    ) {
+        let state = self.get_or_create(session_id).await;
+        state.transcript.lock().await.apply_snapshot(messages);
+    }
+
     /// **整表重写**（L2 语义压缩）后的收敛：被压掉的消息逐条删除帧，
     /// 新的首条快照作为一条**完整消息**下发（`content` = 整条替换）。
     ///
@@ -484,13 +494,15 @@ impl ActiveSessionManager {
         dropped: &[String],
         head: &cm::ChatNode,
     ) {
-        let mut frames: Vec<cm::ChatNode> = dropped
+        let frames: Vec<cm::ChatNode> = dropped
             .iter()
             .map(|mid| symbio_sdk::llm::turn::llm_removed_frame(mid))
             .collect();
-        // 新的首条（压缩快照）：一条完整消息（身份 + 正文 + 终态同帧）。
-        frames.push(symbio_sdk::llm::turn::llm_message_frame(head));
         self.transcript_apply_all(session_id, frames).await;
+        // 新的首条（压缩快照）：**快照帧**，不占在途号——交给存储发号，
+        // 避免与存储号两套计数器写同一字段（`assign_seq` 前置条件）。
+        self.transcript_apply_snapshot(session_id, vec![head.clone()])
+            .await;
     }
 }
 

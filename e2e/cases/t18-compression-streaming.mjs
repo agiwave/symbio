@@ -142,7 +142,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
   const GATEWAY_PORT = nextPort();
   const hd = makeHomedir({
     providers: [
-      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12400 }) },
+      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 80 }) },
     ],
     pluginConfigs: {
       // 本用例的主题是压缩，与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
@@ -237,7 +237,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       assert(String(final.content ?? '').includes('已保留完整历史'), `失败说明应明示历史未丢（实际：${final.content}）`);
       assertEq(final.meta?.failure_kind, 'llm_error', 'HTTP 500 的失败码必须是 llm_error（机读）');
       assertEq(final.meta?.compact_trigger, 'threshold', '自动路径的触发来源必须是 threshold');
-      assertEq(final.meta?.context_limit, 12400, 'meta.context_limit 应为配置的上限');
+      assertEq(final.meta?.context_limit, 80, 'meta.context_limit 应为配置的上限');
       assert(
         Number(final.meta?.before_tokens) > 0,
         `失败时也应有压缩前水位（实际 ${JSON.stringify(final.meta)}）`,
@@ -338,7 +338,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
 
     // B：成功节点的结构化 meta
     assertEq(final.meta?.compact_trigger, 'retry', '重试路径的触发来源必须是 retry');
-    assertEq(final.meta?.context_limit, 12400, 'meta.context_limit');
+    assertEq(final.meta?.context_limit, 80, 'meta.context_limit');
     assert(Number(final.meta?.before_tokens) > 0, 'meta.before_tokens');
     assert(
       Number(final.meta?.after_tokens) > 0 && Number(final.meta?.after_tokens) < Number(final.meta?.before_tokens),
