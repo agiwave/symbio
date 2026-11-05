@@ -237,8 +237,25 @@ impl SessionPlugin {
                             .ok_or_else(|| VdfsError::internal("没有登记事实源开面"))?
                             .open(id)
                             .map_err(|e| VdfsError::internal(format!("打开事实源失败：{e}")))?;
+                        // 溯源锚（I2：断言类事实必须带 `produced_by`，且不许悬空）：
+                        // 答复不是对某条事实的**修改**，而是「站在当前这份状态上」的
+                        // 一次外部断言；取落格前最后一条事实的 seq——与
+                        // `message_events::provenance` 找不到承载事件时的退化口径一致。
+                        let anchor = source
+                            .range(0)
+                            .last()
+                            .and_then(|e| e.seq)
+                            .map(|s| s.value())
+                            .ok_or_else(|| {
+                                VdfsError::internal(
+                                    "答复未能入格：事实源为空，没有可用的溯源锚".to_string(),
+                                )
+                            })?;
                         let draft = FactDraft {
-                            key: format!("user-answer-{mid}-{}", source.head()),
+                            // 事实身份 = 它回答的那次调用（调用 id 全局唯一）：
+                            // 工具侧的续接行按原债键（`tool:<request_id>`）开账，只把这
+                            // 条事实的身份放进载荷，答复原文由执行体自己读。
+                            key: format!("user-answer:{mid}"),
                             kind: EVENT_USER_ANSWER.to_string(),
                             entity: Entity::Scope,
                             verb: Verb::Asserted,
@@ -249,7 +266,7 @@ impl SessionPlugin {
                                 "mode": mode,
                                 "by": symbio_sdk::authz::PRINCIPAL_USER,
                             }),
-                            produced_by: None,
+                            produced_by: Some(anchor),
                         };
                         source
                             .append(symbio_sdk::authz::PRINCIPAL_USER.to_string(), draft)

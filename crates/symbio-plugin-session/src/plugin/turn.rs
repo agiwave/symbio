@@ -16,7 +16,7 @@ use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use crate::transcript::publish::append_and_publish;
 use symbio_kernel::event::{Entity, Verb};
 use symbio_plugin_api::events::{
-    EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::FactDraft;
@@ -147,7 +147,59 @@ impl SessionPlugin {
             })
             .cloned()
         else {
-            return Ok(false);
+            // 没有终答：若本轮落了「等用户动作」的产物，本轮就停在卡片上。
+            // 这是 interactive 档的正常收束形态（`ask_user` / 审批卡）——运行器
+            // 不再推进工具循环，CLI 也据此以退出码 0 结束。归本轮靠 seq：只看
+            // 开轮事实之后的这一段，前一轮没答复的卡不会误判。
+            let waiting_events: Vec<_> = events
+                .iter()
+                .filter(|e| e.seq.is_some_and(|seq| seq.value() > user_seq))
+                .cloned()
+                .collect();
+            let waiting_on_user = waiting_events.iter().any(|e| {
+                e.kind == EVENT_ARTIFACT_ADDED
+                    && e.payload.get("needs_user_action").and_then(Value::as_bool) == Some(true)
+            });
+            if !waiting_on_user {
+                return Ok(false);
+            }
+            // 卡片节点与终答走同一条折叠 + 发布（读路径与写路径同一份规则）：
+            // 本轮所有节点（正文 / 工具调用 / 卡片）一并投影，`apply` 对已存在的
+            // 节点幂等跳过。否则实时面只看得到环的协议事实、看不到卡片。
+            let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
+                &waiting_events,
+                &CHAT_VOCAB,
+                &MESSAGE_VOCAB,
+            )
+            .into_iter()
+            .map(|mut node| {
+                node.seq = None;
+                node
+            })
+            .collect();
+            if !nodes.is_empty() {
+                let session = self.open_chat_session(session_id).await?;
+                append_and_publish(
+                    &session,
+                    nodes,
+                    Carrier::Runner,
+                    &self.active_mgr,
+                    session_id,
+                    PRINCIPAL_MAIN,
+                )
+                .await?;
+            }
+            let state = self.active_mgr.get_or_create(session_id).await;
+            self.convergence
+                .emit_session_state(
+                    &state,
+                    SessionStateChange::Finished {
+                        outcome: OUTCOME_COMPLETED,
+                        error: None,
+                    },
+                )
+                .await;
+            return Ok(true);
         };
 
         let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(

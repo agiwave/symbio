@@ -703,7 +703,10 @@ async fn pending_call_in_a_batch_lands_the_waiting_card_fields() {
     );
 
     let out = ToolPort.execute(exec, input).await;
-    assert!(out.error.is_none(), "停等不是协议失败：{out:?}");
+    assert!(
+        matches!(out.error, Some((PortErrorClass::NeedsHuman, _))),
+        "停等交回第三态「挂起」（不落收束、不开判死），不是判死：{out:?}"
+    );
 
     let drafts = recorder.drafts.lock().unwrap().clone();
     let artifact = drafts

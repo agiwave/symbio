@@ -109,6 +109,13 @@ pub(crate) trait DebtSource {
         false
     }
 
+    /// 「这种事实在 `since_ms` 之后（严格大于）出现过吗」——与 [`Self::exists`]
+    /// 同一条读面，只多带一个**位置**。挂起后的重新点燃只认挂起点之后出现的触发事实。
+    fn exists_since(&self, kind: &str, since_ms: u64) -> bool {
+        let _ = (kind, since_ms);
+        false
+    }
+
     /// 「这种事实、这个身份，存在吗」——与 [`Self::exists`] 同一条读面。
     fn exists_id(&self, kind: &str, id: &str) -> bool {
         let _ = (kind, id);

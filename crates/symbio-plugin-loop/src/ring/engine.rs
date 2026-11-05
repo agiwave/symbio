@@ -169,14 +169,34 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
         if view.closing(&key).is_some() {
             continue;
         }
-        // 幂等底线：同一 (port, id, attempt) 一圈只入批一次。
+        let Some(sent) = view.last_sent(&key) else {
+            // 幂等底线：同一 (port, id, attempt) 一圈只入批一次。
+            if seen.insert(key.clone()) {
+                work.dispatch.push((row.clone(), attempt));
+            }
+            continue;
+        };
+        // 挂起（派发结局第三态）：`sent` 的 `deadline_ms` 为 `null` —— 租约让出与
+        // 「已挂起」是同一个字段。它既不到期重试（那会 `attempt+1`），也不立刻重派
+        // （那会自旋）：只有**挂起点之后**出现的触发事实才能重新点燃这一笔。
+        if sent.payload.get("deadline_ms").is_some_and(Value::is_null) {
+            let retriggered = row
+                .when
+                .as_deref()
+                .is_some_and(|kind| source.exists_since(kind, sent.at_ms));
+            if retriggered {
+                if seen.insert(key.clone()) {
+                    work.dispatch.push((row.clone(), attempt));
+                }
+            } else if !work.waiting.contains(&key) {
+                work.waiting.push(key);
+            }
+            continue;
+        }
+        // 五类配对账：同一 (port, id, attempt) 一圈只入批一次。
         if !seen.insert(key.clone()) {
             continue;
         }
-        let Some(sent) = view.last_sent(&key) else {
-            work.dispatch.push((row.clone(), attempt));
-            continue;
-        };
         let deadline = sent.at_ms.saturating_add(row.lease_ms);
         if now_ms < deadline {
             work.waiting.push(key);
@@ -212,7 +232,13 @@ fn expire(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, next: Option<u32>, now
     }
 }
 
-/// 派发一笔：补 `request` → 落 `sent` → 调执行体 → 配对落账。
+/// 派发一笔：补 `request` → 调执行体 → 按结局落 `sent` 与配对账。
+///
+/// `sent` 落在执行体**之后**：挂起结局要让它与「租约让出」在同一个字段里表达
+/// （`deadline_ms: null`），而事实源按 `(kind, key)` 吸收重复——先落一条带租约的
+/// `sent` 就再也改不成挂起。三种结局：
+/// - 正常 / 可重试 / 判死：`sent{deadline_ms}` + 对应配对账；
+/// - 挂起：只落 `sent{deadline_ms: null}`，**不落收束**，债继续开着。
 async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
     let key = DebtKey::new(row.port, row.id.clone(), attempt);
     ctx.append(Fact::new(
@@ -221,14 +247,14 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
         row.payload.clone(),
         now_ms,
     ));
-    ctx.append(Fact::new(
-        FactKind::Sent,
-        key.clone(),
-        json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
-        now_ms,
-    ));
 
     let Some(executor) = ctx.executor(row.port) else {
+        ctx.append(Fact::new(
+            FactKind::Sent,
+            key.clone(),
+            json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+            now_ms,
+        ));
         ctx.append(Fact::new(
             FactKind::Failed,
             key,
@@ -271,7 +297,23 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
     let drafts = writer.take();
 
     match outcome.error {
+        // 第三态「挂起」：`request` + `sent` 之后不落收束。`deadline_ms: null`
+        // 同时表达「已挂起」与「租约已让出」——计划层读到它只会等新触发。
+        Some((PortErrorClass::NeedsHuman, _why)) => {
+            ctx.append(Fact::new(
+                FactKind::Sent,
+                key,
+                json!({"deadline_ms": Value::Null}),
+                now_ms,
+            ));
+        }
         Some((class, why)) => {
+            ctx.append(Fact::new(
+                FactKind::Sent,
+                key.clone(),
+                json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+                now_ms,
+            ));
             if class == PortErrorClass::Retryable && attempt < row.max_attempts {
                 let next_key = DebtKey::new(row.port, row.id, attempt + 1);
                 ctx.append(Fact::new(
@@ -290,6 +332,12 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
             }
         }
         None => {
+            ctx.append(Fact::new(
+                FactKind::Sent,
+                key.clone(),
+                json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+                now_ms,
+            ));
             let payloads = response_payloads(&drafts, &outcome);
             let last = payloads.len().saturating_sub(1);
             for (idx, payload) in payloads.into_iter().enumerate() {

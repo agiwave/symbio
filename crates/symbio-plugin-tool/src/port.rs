@@ -478,9 +478,8 @@ struct ArtifactCtx {
 
 fn artifact_ctx(exec: &PortExecContext) -> Option<ArtifactCtx> {
     Some(ArtifactCtx {
-        // 键按**这一笔债务**（幂等键）而不是节点身份生成：同一张调用卡的等待态与
-        // 答复态是两笔债（`…-resume-…-1`），各有一次产物；按节点身份生成会让后一条
-        // 因幂等被吞掉（答复卡凭空消失）。
+        // 键按**这一笔债务**（幂等键）生成：批派之外的出口（唤醒、续接）没有调用清单
+        // 形状的 `artifact:{call_id}` 键可用；按债键生成让同一笔债重放只落一个产物。
         key: format!("a-{}", exec.idempotency_key),
         produced_by: exec.origin,
         allowed: exec.permitted,
@@ -1206,6 +1205,12 @@ impl PortProvider for ToolPort {
 #[async_trait::async_trait]
 impl PortExecutor for ToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        // 授权判定专用入口优先：同一载荷即使带着唤醒动作，也只判、不执行、不恢复。
+        if input.payload.get(KEY_AUTHORIZE_ONLY).is_some() {
+            let payload = input.payload.clone();
+            let out = self.run(exec, input).await;
+            return attach_reply(out, &payload);
+        }
         // 恢复（答复）：动作已落成 `user.answer` 事实，环按行表派发到这里。
         // 该分支**不执行**挂起的调用——答复本身就是那次调用的结果，走 `land_only`
         // 同一出口（`tool_call_id` 不变）。恢复只能从事实进环（D-121）。
@@ -1319,7 +1324,11 @@ impl ToolPort {
             .get("args")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        let text = serde_json::to_string(&answer_value).unwrap_or_default();
+        // 答复原文即那次调用的结果：字符串就是原文，不再套一层 JSON 引号。
+        let text = match answer_value {
+            serde_json::Value::String(text) => text,
+            other => serde_json::to_string(&other).unwrap_or_default(),
+        };
         self.run(
             exec,
             PortInput {
@@ -1370,6 +1379,11 @@ impl ToolPort {
             None => Vec::new(),
         };
         let mut reply = symbio_plugin_api::port::PortReply::default();
+        // 本次批派里是否有调用停在等用户（产物声明「需要人」）。
+        // 一次世界交互 = 一笔债 = 一条事实：世界没给结果，落「完成」就是假事实，
+        // 所以只要有一笔停等，整批都不落 `tool.calls.done`——收束只由配对的答复
+        // 事实（`tool-resume`）来。环侧无需新谓词：债没还清本身就是可读判据。
+        let mut awaiting_user = false;
         for call in &calls {
             let payload = serde_json::json!({
                 KEY_TOOL_NAME: call.name.clone(),
@@ -1405,6 +1419,11 @@ impl ToolPort {
                 }
             };
             let result = outcome.facts.first().cloned();
+            awaiting_user |= result
+                .as_ref()
+                .and_then(|fact| fact.get("needs_user_action"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
             facts.extend(outcome.facts);
             reply.messages.extend(outcome.reply.messages);
             reply.links.extend(outcome.reply.links);
@@ -1433,6 +1452,18 @@ impl ToolPort {
                 };
                 land_artifact(&exec, &art, &meta, &result).await;
             }
+        }
+        if awaiting_user {
+            // 停等：本次交互未完成，不落 `tool.calls.done`；交回第三态「挂起」，
+            // 由环落 `sent{deadline_ms: null}`（不落收束、债继续开着）。
+            return PortOutcome {
+                facts,
+                error: Some((
+                    PortErrorClass::NeedsHuman,
+                    "awaiting_user_answer".to_string(),
+                )),
+                reply,
+            };
         }
         exec.emit
             .emit(vec![FactDraft {
