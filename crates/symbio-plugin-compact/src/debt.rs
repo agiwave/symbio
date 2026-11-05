@@ -47,7 +47,8 @@ pub(crate) const ASSIST_PORT: &str = "model.assist";
 /// 摘要指令（**本插件的世界知识**，随行载荷交给 `model.assist` 的执行体）。
 ///
 /// 执行体只按这份 system 发一次问答；它不认识「压缩」——压缩策略归本插件。
-pub(crate) const SUMMARIZE_INSTRUCTION: &str = "你是上下文压缩器。把下面的对话压缩成一段简洁的中文摘要，\
+pub(crate) const SUMMARIZE_INSTRUCTION: &str =
+    "你是上下文压缩器。把下面的对话压缩成一段简洁的中文摘要，\
 保留关键事实、决定、未完成事项与用户偏好；不要编造。只输出摘要正文。";
 
 pub(crate) struct CompactDebts;

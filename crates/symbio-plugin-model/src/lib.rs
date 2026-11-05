@@ -24,8 +24,8 @@
 //! `SseLineParser` 都是本插件私有词汇，core 不承载它们——core 只留
 //! session 与 model **两侧共用**的 `ModelProvider` / `TurnOutput`。
 
-mod bound_provider;
 mod assist;
+mod bound_provider;
 mod debt;
 mod detail;
 mod http;

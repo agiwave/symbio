@@ -56,8 +56,10 @@ pub trait DriveEntry: Send + Sync + 'static {
     /// `None` = 本会话已在跑：调用方无需动作（dirty 位已置，当前那轮退出前会再跑）。
     /// 返回的 future 由调用方 spawn；它**只调用一次**驱动入口，不在外面包
     /// `loop { drive }`——环内部的轮次推进归环自己。
-    fn kick(&self, target: DriveTarget)
-        -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>>;
+    fn kick(
+        &self,
+        target: DriveTarget,
+    ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>>;
 
     /// 等本会话驱动**空闲**（`running == false && dirty == false`）。
     ///

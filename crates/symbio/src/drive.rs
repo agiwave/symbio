@@ -79,13 +79,8 @@ pub async fn drive_on_new_fact(
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(ctx);
 
     let host = Host::with_store(Arc::clone(root), Arc::clone(&world.facts));
-    host.drive(
-        &base,
-        world.session_id,
-        world.provider,
-        world.sink.clone(),
-    )
-    .await
+    host.drive(&base, world.session_id, world.provider, world.sink.clone())
+        .await
 }
 
 // ── 驱动收口：事实写入成功之后踢一次 ────────────────────────────────────
@@ -138,7 +133,10 @@ tokio::task_local! {
 }
 
 impl DriveEntry for HostDrive {
-    fn kick(&self, target: DriveTarget) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
+    fn kick(
+        &self,
+        target: DriveTarget,
+    ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
         let state = self.kick_state(&target.session_id);
         // 已在跑：只置 dirty，不嵌套。
         if state.running.swap(true, Ordering::AcqRel) {
@@ -223,7 +221,10 @@ inventory::submit! {
 }
 
 impl DriveEntry for MainDriveEntry {
-    fn kick(&self, target: DriveTarget) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
+    fn kick(
+        &self,
+        target: DriveTarget,
+    ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
         MAIN_DRIVE.get()?.kick(target)
     }
 

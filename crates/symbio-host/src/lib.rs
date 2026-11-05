@@ -124,7 +124,9 @@ impl Host {
         // 出口**同一句柄两处共持**：执行体经 `ExecEventSink::of(ctx)`（键 `EVENT_SINK`）
         // 取出口，这里把同一份 `sink` 写进它拿到的上下文，再放进 `handles.sink`。
         // 不新建第二个出口、不在端口侧兜底——`Null` 只留给显式静默的只读开面。
-        gathered.ctx.set(symbio_kernel::exec::EVENT_SINK, sink.clone());
+        gathered
+            .ctx
+            .set(symbio_kernel::exec::EVENT_SINK, sink.clone());
         let handles = PortExecHandles {
             ctx: Some(Arc::clone(&gathered.ctx)),
             scratch_dir: (!workdir.is_empty()).then(|| PathBuf::from(&workdir)),

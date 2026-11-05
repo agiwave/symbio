@@ -9,8 +9,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use symbio_plugin_api::{
     port_rows, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR,
-    PLUGIN_ID_COMPACT, PATH,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH,
+    PLUGIN_ID_COMPACT,
 };
 
 use crate::debt::compact_debt_rows;

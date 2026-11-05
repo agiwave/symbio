@@ -51,7 +51,12 @@ async fn demo_port_runs_through_the_ring() {
         demo: DemoPlugin::build(base_context()),
     }));
     let report = host
-        .drive(&base_context(), "demo-session", None, ExecEventSink::silent())
+        .drive(
+            &base_context(),
+            "demo-session",
+            None,
+            ExecEventSink::silent(),
+        )
         .await
         .expect("装配成立");
 
@@ -73,7 +78,12 @@ async fn demo_port_runs_through_the_ring() {
     assert!(host.idle_at().is_some(), "无未还债 ⇒ idle");
 
     let again = host
-        .drive(&base_context(), "demo-session", None, ExecEventSink::silent())
+        .drive(
+            &base_context(),
+            "demo-session",
+            None,
+            ExecEventSink::silent(),
+        )
         .await
         .expect("二次驱动成立");
     assert_eq!(again.dispatched, 0, "已配对的债不再欠");

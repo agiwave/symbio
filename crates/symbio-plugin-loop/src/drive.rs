@@ -150,7 +150,10 @@ impl DebtSource for SupportSource {
         // `Decl` 行参与选债（D-304 裁决六）：`by == plugin_row` 的行由机制自己执行，
         // 世界语义（欠什么、何时算还）全在声明里，这里只做形状适配。
         let events = crate::plugin_rows::decl_events(self.support.facts());
-        out.extend(crate::plugin_rows::decl_rows(&events, self.support.now_ms()));
+        out.extend(crate::plugin_rows::decl_rows(
+            &events,
+            self.support.now_ms(),
+        ));
         out
     }
 

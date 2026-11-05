@@ -22,15 +22,15 @@ use symbio_plugin_api::drive::DriveFact;
 use symbio_plugin_api::effects::EffectDraft;
 use symbio_plugin_api::events::EVENT_MESSAGE_ADDED;
 use symbio_plugin_api::node_build::dialog_node;
-use symbio_plugin_api::principal::Principal;
-use symbio_plugin_api::PluginInvokeRequestExt;
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
+use symbio_plugin_api::principal::Principal;
 use symbio_plugin_api::rows::{
     ask_id, handler_for, ModelReply, RowRequest, RowStep, ASK_KIND, PLUGIN_ROW,
 };
 use symbio_plugin_api::FactDraft;
+use symbio_plugin_api::PluginInvokeRequestExt;
 
 use crate::ring::table::DebtRow;
 
@@ -147,11 +147,7 @@ fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<ModelReply<'a>> {
 /// `owner` 只从 `Frozen::event_owner(kind)` 来——机制侧知道这个格由谁申报；
 /// **不从草稿来**：`FactDraft` 没有 `actor` 字段，行为无权指定归属（DE-026 D-252）。
 /// 表上查不到的 kind 由写闸判 OffGrid（会响），这里退到本行的申报方只为不丢这一批。
-async fn emit_attributed(
-    exec: &PortExecContext,
-    row_owner: &'static str,
-    drafts: Vec<FactDraft>,
-) {
+async fn emit_attributed(exec: &PortExecContext, row_owner: &'static str, drafts: Vec<FactDraft>) {
     let frozen = symbio_plugin_api::sealed_declarations().ok();
     for draft in drafts {
         let owner = frozen

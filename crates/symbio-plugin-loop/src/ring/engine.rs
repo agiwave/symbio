@@ -389,7 +389,9 @@ fn response_payloads(drafts: &[FactDraft], outcome: &PortOutcome, port: &str) ->
             many => vec![Value::Array(many.to_vec())],
         }
     };
-    raw.into_iter().map(|payload| stamp_port(payload, port)).collect()
+    raw.into_iter()
+        .map(|payload| stamp_port(payload, port))
+        .collect()
 }
 
 /// 「端口」是环的身份位：对象载荷直接补键，非对象载荷包一层。

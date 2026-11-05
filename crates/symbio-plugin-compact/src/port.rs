@@ -100,14 +100,11 @@ fn str_of(payload: &Value, key: &str) -> String {
 
 /// 本轮 `model.assist` 交回的摘要正文：按端口 + 终答身份双匹配，取最后一条。
 fn summary_of(facts: &[PortFact], final_id: &str) -> Option<String> {
-    let fact = facts
-        .iter()
-        .rev()
-        .find(|f| {
-            f.port == ASSIST_PORT
-                && f.kind == EVENT_RESPONSE
-                && f.payload.get("final_id").and_then(Value::as_str) == Some(final_id)
-        })?;
+    let fact = facts.iter().rev().find(|f| {
+        f.port == ASSIST_PORT
+            && f.kind == EVENT_RESPONSE
+            && f.payload.get("final_id").and_then(Value::as_str) == Some(final_id)
+    })?;
     let reply: AssistReply = serde_json::from_value(fact.payload.clone()).ok()?;
     (!reply.text.is_empty()).then_some(reply.text)
 }
