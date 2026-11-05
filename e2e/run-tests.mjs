@@ -5,8 +5,7 @@
 // - `node e2e/cases/t5-llm-http-error.mjs`   单独跑某个用例（子进程自执行模式）
 // - `E2E_DEBUG=1`                     失败时输出错误堆栈
 // - `E2E_CONCURRENCY=N`               覆盖并发度（默认见下）
-// - `E2E_PROFILE=real`                等待档位改为真实 provider（各等待沿用原上限；
-//                                     默认 `mock` = 单次等待 10s、整例 20s）
+// - `E2E_PROFILE=real`                用真实 provider 跑（不影响等待上限：mock 与真 provider 统一 120s）
 //
 // 为什么子进程隔离：用例各自起 mock、各自建临时 homedir、CLI 走子进程，
 // 一个用例卡死或泄漏句柄不应拖垮别的用例；单独跑一个用例也无需任何额外入口。
@@ -38,9 +37,8 @@ import { orderForStart, loadTimes, recordTimes, suggestConcurrency } from '../sc
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 
-/** 单例硬上限（毫秒）：mock 档 150s 只兜 override（单次封顶 120s + 余量）；
- * 普通用例的 20s 整例预算由 helpers 自己抛（见 `CASE_BUDGET_MS`）。real 档沿用 180s。 */
-const CASE_TIMEOUT_MS = process.env.E2E_PROFILE === 'real' ? 180_000 : 150_000;
+/** 单例硬上限（毫秒）：mock 与真 provider 统一 120s。 */
+const CASE_TIMEOUT_MS = 120_000;
 
 // ---------- 子进程自执行：`node cases/xxx.mjs` 直接跑该用例 ----------
 // 用例文件被 import 时只做定义（defineCase 不执行）；直接运行时由 `cases/_selfrun.mjs`

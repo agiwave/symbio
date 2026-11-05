@@ -38,7 +38,7 @@ export default defineCase('T5 LLM HTTP 500：失败路径收敛，无「永远�
   });
   let api = null;
   try {
-    const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '触发故障', provider: PROVIDER_ID, session: 'e2e-t5', budget: 60_000, reason: '测试 60s 退避的真实等待' });
+    const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '触发故障', provider: PROVIDER_ID, session: 'e2e-t5', timeoutMs: 60_000 });
     assert(r.code !== 0, '失败轮 CLI 应以非零退出码结束');
     assert(
       r.stderr.includes('mock') || r.stderr.includes('失败') || r.stderr.includes('错误'),

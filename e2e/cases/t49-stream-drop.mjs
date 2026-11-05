@@ -44,7 +44,7 @@ export default defineCase('T49 流中断：断流轮用户可见地失败并收�
   let api = null;
   try {
     // ① 断流轮：用户拿到的是「可见的失败」，而不是悬挂，也不是静默的半截答案。
-    const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '断流测试', provider: PROVIDER_ID, session: 'e2e-t49', budget: 90_000, reason: '测试断流后退避恢复的真实等待' });
+    const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '断流测试', provider: PROVIDER_ID, session: 'e2e-t49', timeoutMs: 90_000 });
     assert(
       r.code !== 0 || r.stdout === '',
       `断流轮要么非零退出、要么拿不到一轮完整回复（实际 code=${r.code}, stdout=${JSON.stringify(r.stdout.slice(0, 200))}）`,
@@ -69,7 +69,7 @@ export default defineCase('T49 流中断：断流轮用户可见地失败并收�
     );
 
     // ③ 恢复轮：同一会话照常工作（用户被坑过后能继续用）。
-    const r2 = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '正常回答', provider: PROVIDER_ID, session: 'e2e-t49', budget: 90_000, reason: '测试断流后退避恢复的真实等待' });
+    const r2 = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '正常回答', provider: PROVIDER_ID, session: 'e2e-t49', timeoutMs: 90_000 });
     assert(r2.code === 0, `恢复轮应正常完成（code=${r2.code}, stderr: ${r2.stderr.slice(0, 300)}）`);
 
     // ④ 两个轮都进了同一个转写，历史一致可读。
