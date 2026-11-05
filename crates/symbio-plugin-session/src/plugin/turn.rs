@@ -64,8 +64,17 @@ impl SessionPlugin {
         // 读不到就退化为空提示词。提示词里的 VDFS 地址由收集期的 `descend_addr` 归一
         // （根名取自 vdfs 插件的装配期声明，不是本插件里的字面量），**不是**在这里把
         // 绝对路径再相对化。
-        let manager =
-            crate::capabilities::collect_capabilities(self.get_parent().as_ref(), ctx).await;
+        //
+        // 作用域按**会话自己的绑定**展开（metadata.agent_id）：收集器只把它当通用的
+        // agent 作用域键递下去，agent 插件自行把子树 prompt rows / 工具加前缀——
+        // 「人格 / 记忆」这些段名谁都不需要认识。
+        let agent_scope = self.get_store().await?.session_agent_scope(session_id);
+        let manager = crate::capabilities::collect_capabilities(
+            self.get_parent().as_ref(),
+            ctx,
+            agent_scope.as_deref(),
+        )
+        .await;
         let system_prompt = symbio_sdk::capability::capability_prompts(&*manager)
             .await
             .into_iter()

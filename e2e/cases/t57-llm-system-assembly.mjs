@@ -44,11 +44,11 @@ const TURN1 = '第一句：记住我喜欢红茶';
 const TURN2 = '第二句：我喜欢什么';
 
 /** agent 级【智能体记忆】段的地址标记（段头自带，段内容 = AGENTS.md 正文） */
-const AGENT_MEM_ADDR = '.vdfsv2/agent/e2e-t57-agent/memory/AGENTS.md';
+const AGENT_MEM_ADDR = '.vdfsv2/vdfs/agent/e2e-t57-agent/memory/AGENTS.md';
 /** 根级【工作区记忆】段地址标记 */
-const ROOT_WS_ADDR = '.vdfsv2/memory/WORKSPACE.md';
+const ROOT_WS_ADDR = '.vdfsv2/vdfs/memory/WORKSPACE.md';
 /** 根级【会话记忆】段地址标记 */
-const ROOT_SESS_ADDR = '.vdfsv2/session/e2e-t57/MEMORY.md';
+const ROOT_SESS_ADDR = '.vdfsv2/vdfs/session/e2e-t57/MEMORY.md';
 
 export default defineCase(
   'T57 system 装配契约：三重注册段全部送达 + 前缀置后 + 合成唯一一条（LC-002）',

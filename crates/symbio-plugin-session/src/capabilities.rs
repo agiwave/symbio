@@ -45,7 +45,7 @@ use symbio_kernel::capability::Registry;
 use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_providers::new_registry;
 use symbio_sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS, OPTION_VISITOR};
-use symbio_sdk::keys::PATH;
+use symbio_sdk::keys::{AGENT_ID, PATH};
 use symbio_sdk::plugin::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
 
 /// 向所有插件广播"贡献工具"，返回装配好的能力管理器。
@@ -55,7 +55,10 @@ use symbio_sdk::plugin::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
 /// 调用方需在 `ctx` 中预先设置好各插件判定所需的上下文键：
 /// - `WORKDIR`（可选）：工作目录，决定 local / skill / agent 的作用域
 /// - `SESSION_ID`：会话标识
-/// - `AGENT_ID`（**可选**）：选定智能体。缺省时 agent 插件不贡献任何工具
+///
+/// `agent_scope`（可选）：会话绑定的智能体作用域。收集器把它设成通用的
+/// `AGENT_ID` 键——由 **agent 插件自己**决定要不要按 `agent/<id>/…` 展开子树；
+/// 收集器不认识任何具体段名。缺省（`None` 或空串）时 agent 插件不贡献任何工具。
 ///
 /// ## 语义
 ///
@@ -66,6 +69,7 @@ use symbio_sdk::plugin::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
 pub async fn collect_capabilities(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
+    agent_scope: Option<&str>,
 ) -> Arc<dyn Registry> {
     let manager: Arc<dyn Registry> = new_registry();
 
@@ -74,6 +78,12 @@ pub async fn collect_capabilities(
     };
 
     let traverse_ctx = ctx.fork();
+    // 作用域展开：会话绑定 `agent`（metadata.agent_id）时，把这一个通用作用域键交给
+    // 各插件自行决定认不认——agent 插件据此把子树的 prompt rows / 工具按
+    // `agent/<id>/…` 展开。收集器**只做展开**，不认识「人格」「记忆」这些段名。
+    if let Some(scope) = agent_scope.map(str::trim).filter(|s| !s.is_empty()) {
+        traverse_ctx.set(AGENT_ID, scope.to_string());
+    }
     traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     traverse_ctx.set(symbio_sdk::capability::CAPABILITY_VISITOR, manager.clone());
     capability_init_error_bucket(&traverse_ctx);

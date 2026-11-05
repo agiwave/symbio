@@ -116,6 +116,17 @@ impl SessionStore {
         symbio_sdk::authz::principal_of(agent_id.as_deref())
     }
 
+    /// 本会话绑定的智能体作用域（metadata 的 `agent_id`）；未绑定 / 空串 ⇒ `None`。
+    ///
+    /// 能力收集据此展开子树（`agent/<id>/…` 的 prompt rows 与工具）：作用域是
+    /// **会话自己的绑定**，不是请求参数，也不由收集器去猜。
+    pub(crate) fn session_agent_scope(&self, session_id: &str) -> Option<String> {
+        self.session_dir(session_id)
+            .and_then(|dir| super::layout::read_agent_id(&dir))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
     /// 该会话的契约事实源（五个方法的中性面）；装配层与插件共用同一底层 `WalStore`。
     pub(crate) fn fact_source(
         &self,
