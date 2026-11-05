@@ -11,11 +11,17 @@ import './_selfrun.mjs';
 // | 重试**不删**旧支，两支都还在转写里 | 生产读出口 `vdfs/read(<会话叶子>)` |
 // | 「此刻读哪一支」真的进了**模型**的请求包 | mock-llm 的 `/_requests` 逐轮请求体 |
 // | 切换只落一条事实，不产生 `message.removed` | 会话 WAL 的事种计数 |
-// | 切读法**不开轮**（用户不重挂载会话） | 同一地址再读一次：轮骨架条数不变、成员 id 不变 |
+// | 切读法**不开轮**（用户不重挂载会话） | 同一地址再读一次：轮锚（用户消息节点）条数不变、成员 id 不变 |
 //
 // 口径本身（并组、组内后到胜出、`flat` 档升根的子孙也一起藏）已在 core 的
 // `projection/branch.test.rs` 与会话层的 `vdfs_provider.test.rs` 钉死；本用例不复刻
 // 判据，只对**真轮次产出的形状**取值。
+//
+// ## D-335：轮不是独立可见节点
+//
+// 一轮的可见锚是**用户消息节点**（其 id 即轮分组 id，`Skeleton{run}` 的 `meta.context`
+// 并入它）。所以首轮的判据是「恰有一个用户消息节点」，重试/切换的成员根也是它。
+// 没有独立 Turn 骨架，不再按 `type = skeleton` 数轮。
 //
 // ## 为什么重试与切换都经 gateway 节点动作，而不是 CLI stdin
 //
@@ -48,6 +54,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
   textOf,
 } from '../helpers.mjs';
 
@@ -65,8 +72,8 @@ const ANSWER_B = '乙的答案';
 const AFTER_B = '先按乙答的这支往下问';
 const AFTER_A = '再按甲答的这支往下问';
 
-/** 一轮 = 一个轮骨架（`Skeleton` + tag `run`）；两支就是两个这样的根。 */
-const runsOf = (msgs) => (msgs ?? []).filter((m) => msgTypeOf(m) === 'turn');
+/** 一支 = 带 `meta.branch` 标注的成员根节点（D-335：锚是用户消息节点，不是 Turn 骨架）。 */
+const runsOf = (msgs) => (msgs ?? []).filter((m) => m.meta?.branch);
 
 /** 整份转写的正文串（认「哪一支的答复还在树里」用）。 */
 const corpusOf = (msgs) => msgs.map((m) => textOf(m)).join('\n');
@@ -159,15 +166,19 @@ export default defineCase(
       await sendAndSettle(cli, sub, QUESTION);
       const msgs0 = await readSessionMessages(cli, SID);
       assertTranscriptInvariants(msgs0, 'T87 首支');
-      const runs0 = runsOf(msgs0);
-      assertEq(runs0.length, 1, `首轮只有一个轮骨架（实得 ${runs0.length}）`);
-      const rootA = runs0[0].id;
+      const users0 = (msgs0 ?? []).filter((m) => msgRoleOf(m) === 'user');
+      assertEq(users0.length, 1, `首轮应恰有一个用户消息节点（实得 ${users0.length}）`);
+      const rootA = users0[0].id;
       assert(
-        runs0[0].meta?.branch === undefined,
+        !msgs0.some((m) => msgTypeOf(m) === 'turn'),
+        `D-335：读出口不应出现独立的 Turn / Skeleton{run} 节点（实得类型: ${msgs0.map((m) => msgTypeOf(m)).join(',')}）`,
+      );
+      assert(
+        users0[0].meta?.branch === undefined,
         '没有第二次尝试 ⇒ 后端不盖分支标注（画出来的 `1/1` 是假的两支）',
       );
 
-      // ── 重试：落点在**那一支的轮骨架自身**，载荷没有新内容 ──────────────────
+      // ── 重试：落点在**那一支的轮锚（用户消息节点）自身**，载荷没有新内容 ───────
       // 水位线要在受理**之前**取：重试是 spawn 执行，它的「在跑」帧可能在 `resumeSession`
       // 返回前就到（见下方等它跑完的那段）。
       const retryMark = sub.sessionChanges().length;

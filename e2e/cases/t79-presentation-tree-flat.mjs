@@ -12,11 +12,12 @@ import './_selfrun.mjs';
 // | `flat` 与 `grouped` 是**同一个会话数据**的两种呈现 | 本用例只翻 `PLUGIN.yml` 的一个键，其它逐字同 T26 |
 // | 工具结果**不受建树策略影响**（那是工具调用内部的骨架） | tool_call 之下仍挂 `role=tool` 结果 |
 //
-// ## 形状契约（flat）
+// ## 形状契约（flat，D-335）
 //
-// - `Skeleton{run}`（一轮响应骨架）留在会话根，是本轮的**分组锚**。
-// - 它的**直接子节点**（思考 / 正文 / ToolCall 骨架）`parent_id = null`、
-//   `meta.turn_root = <骨架 id>`——升到根、靠记号认回本轮。
+// - 一轮的可见锚是**用户消息节点**（`parent_id = null`，其 id 就是本轮分组 id）；
+//   没有独立的 `Skeleton{run}` 节点——它的 `meta.context` 并入用户消息节点。
+// - 本轮其余节点（思考 / 正文 / ToolCall 骨架）`parent_id = null`、
+//   `meta.turn_root = <用户消息节点 id>`——升到根、靠记号认回本轮。
 // - Tool 结果节点 `parent_id = <tool_call id>`——**不升根**，与建树策略正交。
 //
 // ## 失败→重试的并集在哪里钉
@@ -113,26 +114,54 @@ export default defineCase(
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T79');
 
-        // 骨架在会话根：本轮响应骨架是 grouped 里所有子节点的那个父。
-        const run = msgs.find((m) => msgTypeOf(m) === 'turn');
-        assert(run, `应有本轮响应骨架（实得类型: ${msgs.map((m) => msgTypeOf(m)).join(',')}）`);
-        assertEq(run.parent_id ?? null, null, '响应骨架自身在会话根');
-
-        // flat 判据①：骨架的直接子节点（思考/正文/ToolCall）升根 + 带 turn_root 记号。
-        const kids = msgs.filter(
-          (m) => msgTypeOf(m) !== 'user_prompt' && m.meta?.turn_root === run.id
+        // 轮锚 = 用户消息节点（D-335：没有独立的 Skeleton{run} 可见节点）
+        const anchor = msgs.find(
+          (m) => msgRoleOf(m) === 'user' && msgTypeOf(m) === 'text',
         );
-        assert(kids.length > 0, 'flat：本轮至少有一个升根的子节点带 turn_root 记号');
-        for (const k of kids) {
-          assertEq(k.parent_id ?? null, null, `flat：${msgTypeOf(k)} 应升会话根`);
-        }
-        // ToolCall 骨架既升根、又认得本轮。
-        const tc = msgs.find((m) => msgTypeOf(m) === 'tool_call');
-        assert(tc, 'flat：应有 tool_call 骨架');
-        assertEq(tc.parent_id ?? null, null, 'flat：tool_call 升会话根');
-        assertEq(tc.meta?.turn_root, run.id, 'flat：tool_call 靠 turn_root 认回本轮骨架');
+        assert(
+          anchor,
+          `应有用户消息节点作为轮锚（实得类型: ${msgs.map((m) => msgTypeOf(m)).join(',')}）`,
+        );
+        assertEq(anchor.parent_id ?? null, null, '用户消息节点（轮锚）应在会话根');
 
-        // flat 判据②：工具结果**不升根**，仍挂自己的 tool_call 下（建树策略正交）。
+        // 次要断言（防回退）：读出口里没有 Turn / Skeleton{run} 节点
+        assert(
+          !msgs.some((m) => msgTypeOf(m) === 'turn'),
+          `D-335：读出口不应出现 Turn / Skeleton{run} 节点（实得类型: ${msgs.map((m) => msgTypeOf(m)).join(',')}）`,
+        );
+
+        // 主判据①：树是平的——除工具结果挂在自己的 tool_call 下，其余节点全在会话根
+        const toolCalls = msgs.filter((m) => msgTypeOf(m) === 'tool_call');
+        assert(toolCalls.length > 0, 'flat：应有 tool_call 骨架');
+        for (const tc of toolCalls) {
+          assertEq(
+            tc.parent_id ?? null,
+            null,
+            `flat：tool_call 升会话根（实际父 ${tc.parent_id ?? 'null'}，轮锚 ${anchor.id}）`,
+          );
+        }
+        for (const m of msgs) {
+          if ((m.parent_id ?? null) === null) continue;
+          assert(
+            toolCalls.some((tc) => tc.id === m.parent_id),
+            `树应是平的：唯一的父子关系是工具结果 → tool_call（${msgTypeOf(m)} 的父 ${m.parent_id}）`,
+          );
+        }
+
+        // 主判据②：每个子节点（工具结果除外）的 turn_root 等于用户消息节点 id
+        const kids = msgs.filter(
+          (m) => m.id !== anchor.id && msgRoleOf(m) !== 'tool' && msgTypeOf(m) !== 'user_prompt',
+        );
+        assert(kids.length > 0, 'flat：本轮至少有一个升根的子节点');
+        for (const k of kids) {
+          assertEq(k.meta?.turn_root, anchor.id, `flat：${msgTypeOf(k)} 的 turn_root 应指向用户消息节点`);
+        }
+
+        // ToolCall 骨架既升根、又认得本轮。
+        const tc = toolCalls[0];
+        assertEq(tc.meta?.turn_root, anchor.id, 'flat：tool_call 靠 turn_root 认回本轮');
+
+        // flat 判据③：工具结果**不升根**，仍挂自己的 tool_call 下（建树策略正交）。
         const result = msgs.find((m) => m.parent_id === tc.id && msgRoleOf(m) === 'tool');
         assert(result, '工具结果必须仍挂在 tool_call 之下（不受 flat 影响）');
 

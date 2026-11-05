@@ -1,138 +1,87 @@
-// T18 压缩实时流式预览 + 失败纪律 + 重试恢复。
+// T18 压缩失败纪律：`model.assist`（摘要）失败 ⇒ 不落 `session.consolidated`、
+// 不吞任何用户消息；失败本身有交代（`failed` 事实）。
 import './_selfrun.mjs';
 //
-// T8 钉「压缩会发生、快照会落库」，T11 钉「压缩是一个消息节点、两态、位置、
-// 重写收敛」。本用例钉 T8/T11 都够不着的六条契约：
+// ## 本用例钉的是什么
+//
+// 压缩现在是两行债（D-336）：`compact-summarize`（端口 `model.assist`）取摘要，
+// `compact-write`（端口 `compact`）落 `session.consolidated`。故障注入点因此必须是
+// **`model.assist` 那次问答**——注在「压缩请求」上是注空（新形态没有独立的压缩请求，
+// 摘要走 `model.assist`，最后一条 user 是整段转写、以「助手：…」收尾）。
+//
+// 失败路径的硬不变式：
 //
 // | # | 契约 | 判据 |
 // |---|---|---|
-// | A | **流式身份帧**：摘要以 `delta` 逐帧追加到 compression 节点（占位正文之后、终态之前），且不产生任何旁路节点 | compression 节点的流上出现 ≥1 帧纯窄增量；拼接结果 == mock 摘要去掉首个分片（首分片走「全量首帧」被吞）；除此之外没有任何节点收到过摘要增量 |
-// | B | **结构化 meta**：compact_trigger / context_limit / before_tokens / after_tokens / dropped 按字段下发 | 成功节点终态帧的 meta 逐字段核对；失败节点**没有** after_tokens（没有可信的后水位，编 0 是谎报） |
-// | D | **失败分支**：压缩 LLM 500 ⇒ failed 节点 + failure_kind=llm_error + 历史原封不动 | 节点 failed、meta.failure_kind；读出口读回的历史里早期消息仍在 |
-// | E | **触发纪律**：连续失败触发**熔断**——开闸后的轮次直接跳过自动压缩，不再重发注定失败的摘要请求 | 连续 3 个失败压缩节点后（计数口径见「计量口径」），再跑一轮水位超阈值的对话：摘要请求的 HTTP 命中数不增、无新压缩节点、回复照常 |
-// | F | **重试恢复**：`action(<sid>/message/<失败压缩节点 id>, "retry_compaction")` ⇒ 删除旧失败节点（removed 帧）→ 绕过熔断重新压缩 → 成功 → 快照落库 → 后续轮恢复正常 | 旧 mid 收到 removed 帧；新节点 Completed；读出口读回：失败节点消失、快照出现；之后水位低不再压缩 |
+// | A | 摘要失败真的发生 | mock 收到摘要请求（最后一条 user 是转写形态）且返回 500 |
+// | B | 失败不落压缩事实 | 事实源里没有 `session.consolidated` |
+// | C | 失败有交代 | 至少一条 `failed` 事实，且落在 `ring:model.assist:`（`payload.class = non_retryable`、`reason` 非空） |
+// | D | **失败合并不吞消息** | 每条用户 marker 在 live + 归档并集里**恰好出现一次** |
 //
-// 触发参数**刻意不同于** T8/T11（它们只需「压缩发生一次」；本用例要让连续 3 次
-// 摘要请求都落在**同一个可发请求的窗口**里）。窗口宽度由下面三条决定：
+// ## 计量口径
 //
-// 1. 触发线 = 0.7 × `max_context_tokens`，超限线 = `max_context_tokens`
-//    （`should_start_compression` 与 `compress_snapshot_inner` 的预判都含请求级
-//    开销）⇒ 窗口只有 0.3 × L 宽；
-// 2. 压缩失败**不改历史**，水位每轮被回复推高 g ⇒ 窗口只容得下约 0.3L / g 轮；
-// 3. 第 3 次失败之后还有**熔断观察轮**与**一次重试**，而重试（force）同样要过
-//    超限预判 ⇒ 窗口必须多留 2 轮余量，否则重试会变成 `input_over_limit`
-//    （永久失败位，熔断从此不再半开），契约 F「重试恢复」无从谈起。
-//
-// 实测取 `max_context_tokens=12400` + `FILL.repeat(240)`：原始正文每轮涨约
-// 3.9k 字符，但**水位按校准后的估算值推进**——mock 固定回报 usage
-// （`prompt_tokens: 64`，见 `mock-llm.mjs`）⇒ `CalibratedTokenizer` 的比值压在
-// 下限 0.2 ⇒ 估算每轮只涨约 0.5k tokens。于是 0.3L ≈ 3.7k tokens 的窗口容得下
-// 3 次失败 + 观察轮 + 重试。T8/T11 的 600 倍填充把增速放大 2.4 倍，实测一次
-// llm_error 后紧接 input_over_limit，契约 F 无从谈起。
-//
-// ## 触发线两侧必须留余量，不是「卡着线走」
-//
-// 触发轮 = 第一个让「历史估算 + 请求级开销」越过 `0.7 × L` 的轮次，而估算里的
-// 请求级开销 = system prompt + **全部工具定义**（`estimate_overhead_with_tools`）
-// ——工具定义长一截，触发就整体前移一轮；system prompt 带时间戳，其 token 数每
-// 秒还会抖 1–2。**卡在线上**的后果不是「偶尔早一轮」这么轻：切分点只在 User
-// 边界落刀（`find_compress_split_point`）并按字符分数推进目标，触发轮一动整个
-// 切分相位跟着动，窗口两侧的轮次余量会被一起吃掉——先红的会是重试那步的超限
-// 预判。上限取 12400，就是把触发轮两侧的间距从「几十」拉到「两百以上」。
-//
-// **这份参数与 mock 的 usage 口径绑定**：若 mock 改成回报真实 usage，估算会贴回
-// 原始字符数，触发轮与窗口一起前移，本用例需重新标定（轮次推进本身自适应，
-// 先红的会是重试那步的超限预判）。轮次推进**不硬编码「第几轮触发」**：逐轮发送
-// 直到观测到 `CIRCUIT_LIMIT` 个失败压缩节点（熔断阈值，见
-// `active.rs::COMPRESS_CIRCUIT_LIMIT`），再进熔断观察轮。
-//
-// ## 计量口径：数「压缩分幕」，不数请求体也不数 HTTP 命中
-//
-// 契约 E「连续 3 次失败触发熔断」需要一个可靠的计数器，而两个现成口径都不对：
-//
-// - **HTTP 命中数**高估：LLM 层对 5xx 退避重发（`model/http.rs` 的 `MAX_RETRIES`，
-//   重发复用同一份序列化字节），一次逻辑失败打到 mock 5 次；
-// - **不同请求体的个数**低估：切分边界每若干轮才前进一次 ⇒ 相邻两次自动压缩
-//   可能提交**同一份历史**，请求体逐字节相同（实测 3 次失败只有 2 个不同请求体）。
-//
-// 被测系统自己的计数单位恰好是第三个：一次压缩 = 转写上的一个节点分幕，而熔断
-// 按**逻辑失败**计数（`active.rs`）⇒ 失败压缩节点数就是同一口径。于是「3 次失败」
-// 按分幕数判定；E/F 两段「不得重发摘要请求」仍按 HTTP 命中数（那一轮应一个都不
-// 增加，两个口径在这条断言下同向）。
-//
-// ## 恢复由用例触发，不由指纹名额顺带发生
-//
-// 故障注入因此用**静态 500**（这段时间里每次摘要请求都失败），而不是
-// `failTimes: 3`：后者按「场景 id + 请求体指纹」扣名额，于是边界重复时 3 次失败
-// 只烧掉 2 个名额，「下一次请求成功」就成了指纹运气而不是本用例的事件。契约 F 要
-// 的是「服务恢复后，绕过熔断重压一次会成功」——那个「后」必须由用例明确触发，
-// 这里就是重试前的 `llm.setPlan()`（mock 的 `POST /_plan`，换场景表并清游标）。
-//
-// mock 摘要场景用 `chunks` 分片：**首个分片**走 model 流循环的「全量首帧」（被
-// 白名单吞掉），其余分片走窄增量——这正是 A 要验收的改道路径；若回归成「全帧
-// 静默」，A 的增量断言会红；若回归成「全帧放行」，骨架节点会多出来，A 的
-// 「无旁路节点」断言会红。
+// 触发与 t8 同一口径：mock 恒报 `prompt_tokens: 64`（见 `mock-llm.mjs`），上限取 80
+// ⇒ 每轮越线、每轮都欠一次摘要。失败是 `NonRetryable`（provider 5xx 映射），
+// 环不重试；`compact-write` 找不到摘要时返回成功、不落事实（「没压」不是领域事实）。
+// `retryAfterSec: 0` 让客户端的 5xx 退避立即重试，避免空等指数退避。
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
   DIALOG_FACE_OFF,
   cleanupHomedir,
-  startLongLivedCli,
-  subscribeSessionRealtime,
+  runCli,
+  nextPort,
+  startReadbackCli,
+  readSessionMessages,
+  readFileSyncSafe,
   waitFor,
   assert,
   assertEq,
   defineCase,
-  nextPort,
   providerConfig,
   PROVIDER_ID,
-  readSessionMessages,
   assertTranscriptInvariants,
-  createSession,
-  sendInbox,
-  resumeSession,
-  msgTypeOf,
   msgRoleOf,
+  textOf,
 } from '../helpers.mjs';
 
-const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
-const CIRCUIT_LIMIT = 3; // 镜像 active.rs::COMPRESS_CIRCUIT_LIMIT
+const ROUNDS = 6;
+const MARKERS = Array.from({ length: ROUNDS }, (_, i) => `第${i + 1}轮问题`);
 
 const FILL = '上下文填充内容用于推高历史水位。';
-// 每轮约 3.9k 字符原文，校准后水位约 +0.5k tokens/轮：与 12400 的上限配套
-// （0.3L 窗口 ≈ 8 轮，见文件头的实测标定与「触发线两侧必须留余量」）
 const REPLY = '填充：' + FILL.repeat(240);
-// 摘要正文分片：首个分片会成为「全量首帧」被吞，其余逐帧以 delta 改道到压缩节点
-const SNAPSHOT_XML = [
-  '<state_snapshot>',
-  '  <overall_goal>验证压缩摘要的实时流式预览与失败恢复。</overall_goal>',
-  '  <key_knowledge>',
-  '    - 用户偏好：mock 环境下回复应包含轮次编号。',
-  '  </key_knowledge>',
-  '  <completed_items>',
-  '    - 前几轮对话已完成。',
-  '  </completed_items>',
-  '  <in_progress_items>',
-  '    - 等待压缩后的下一轮对话验证记忆延续。',
-  '  </in_progress_items>',
-  '  <open_questions></open_questions>',
-  '</state_snapshot>',
-];
-// 分片 = 每行一段（末行不带换行）：拼接严格等于 `SNAPSHOT`，于是 A 的期望值可以
-// 从常量推导，而不是手抄第二份摘要文本（两份必然漂移，且漂移只在断言失败时暴露）。
-const SNAPSHOT = SNAPSHOT_XML.join('\n');
-const SNAPSHOT_CHUNKS = SNAPSHOT_XML.map((line, i) =>
-  i === SNAPSHOT_XML.length - 1 ? line : `${line}\n`,
-);
 
-export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试恢复', async () => {
+/** 会话事实源：live 段 + 归档段（`transcripts/wal-archive`）的并集。 */
+const walEvents = (homedir, sid) => {
+  const dir = join(homedir, 'session', sid);
+  const archiveDir = join(dir, 'transcripts', 'wal-archive');
+  const texts = [join(dir, 'v2-events.wal')];
+  if (existsSync(archiveDir)) {
+    for (const name of readdirSync(archiveDir)) texts.push(join(archiveDir, name));
+  }
+  return texts
+    .map(readFileSyncSafe)
+    .join('')
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line));
+};
+
+/** 一条请求的最后一条 user 正文（摘要请求的特征是整段转写，带「用户：」前缀）。 */
+const lastUserText = (q) => {
+  const users = (q.body?.messages ?? []).filter((m) => m.role === 'user');
+  return String(users[users.length - 1]?.content ?? '');
+};
+
+export default defineCase('T18 压缩失败纪律：model.assist 失败不落事实、不吞消息', async () => {
   const llm = await new MockLlm([
-    // 静态注入：这段时间里**每一次**摘要请求都失败（恢复由重试前的 `setPlan` 触发，
-    // 见文件头「恢复由用例触发」）。`retryAfterSec: 0` 让客户端的 5xx 退避立即重试，
-    // 否则 3 次失败要空等整段指数退避。
+    // 静态注入：这段时间里**每一次**摘要问答都失败。命中标记是转写形态
+    // （`model.assist` 把整段转写作为最后一条 user 发来，以「助手：」收尾）。
     {
       id: 'snapshot',
-      match: 'Distill the conversation above',
+      match: '助手：',
       status: 500,
       retryAfterSec: 0,
       error: 'mock 注入的摘要服务故障',
@@ -157,305 +106,78 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       },
     },
   });
-  const cli = startLongLivedCli({
-    homedir: hd.homedir,
-    workdir: hd.workdir,
-    session: 'unused-t18',
-    provider: PROVIDER_ID,
-    gatewayPort: GATEWAY_PORT,
-  });
-  let rt = null;
-  /**
-   * 摘要请求的 **HTTP 命中数**。只用于「这一轮不得重发摘要请求」（契约 E、恢复后
-   * 的正常轮）——那一轮应当一个命中都没有，两个口径同向。数「失败了几次」不用它：
-   * 一次逻辑失败会被客户端退避重发放大成 5 次命中（见文件头「计量口径」）。
-   */
-  const snapshotHitCount = async () =>
-    (await llm.requests()).filter((q) =>
-      (q.body?.messages ?? []).some(
-        (m) => m.role === 'user' && String(m.content ?? '').includes('Distill the conversation above'),
-      ),
-    ).length;
-
+  let api = null;
   try {
-    await cli.waitGatewayReady();
-    rt = await subscribeSessionRealtime(cli, { sessionId: 'e2e-t18', gatewayPort: GATEWAY_PORT });
+    const r = await runCli({
+      homedir: hd.homedir,
+      workdir: hd.workdir,
+      provider: PROVIDER_ID,
+      session: 'e2e-t18',
+      stdinText: MARKERS.join('\n') + '\n',
+      timeoutMs: 120_000,
+    });
+    assertEq(r.code, 0, `CLI 退出码（stderr 尾部: ${r.stderr.slice(-600)}）`);
 
-    // 会话先建出来：收件箱是会话内部的集合，会话不在就没有它可写
-    await createSession(cli, 'e2e-t18', { workdir: hd.workdir });
+    // A：注入命中对象真的是 `model.assist`（摘要请求的最后一条 user 是转写形态）
+    const reqs = await llm.requests();
+    const summaryReqs = reqs.filter((q) => lastUserText(q).includes('用户：'));
+    assert(
+      summaryReqs.length >= 1,
+      `mock 应收到摘要问答（model.assist 的 user 是整段转写）；实际请求 ${reqs.length} 条，末条 user: ${JSON.stringify(lastUserText(reqs[reqs.length - 1] ?? {}).slice(0, 40))}`,
+    );
 
-    // D-335：Turn 不作为可见节点（用户消息节点即轮）。一轮的**可见终态**落在
-    // 终答节点上：assistant 正文（非 exclude_from_context）到达终态即该轮收束。
-    // 按 id 合并各帧后再判（`role` 只在携带它的那几帧里，终态帧未必重复带）。
-    const doneTurns = () => {
-      const merged = new Map();
-      for (const { mid, data } of rt.messages()) {
-        merged.set(mid, { ...merged.get(mid), ...data });
-      }
-      return [...merged.values()].filter(
-        (m) =>
-          msgTypeOf(m) === 'text' &&
-          msgRoleOf(m) === 'assistant' &&
-          !m.meta?.exclude_from_context &&
-          TERMINAL.has(m.status),
+    // B：摘要失败 ⇒ 一条压缩事实都不落
+    const events = walEvents(hd.homedir, 'e2e-t18');
+    const kinds = [...new Set(events.map((e) => e.kind))].join(',');
+    assert(
+      !events.some((e) => e.kind === 'session.consolidated'),
+      `摘要失败时不得落 session.consolidated（现有 kind: ${kinds}）`,
+    );
+
+    // C：失败本身有交代——失败落在 `model.assist` 的环事实里（环的 failed 载荷
+    //    形如 `{ class, reason, facts }`），且没有别的端口失败
+    const failed = events.filter((e) => e.kind === 'failed');
+    assert(failed.length >= 1, `失败应落 failed 事实（现有 kind: ${kinds}）`);
+    assert(
+      failed.every((e) => String(e.event_id ?? '').startsWith('ring:model.assist:')),
+      `注入对象应只是 model.assist（实际 failed id: ${failed.map((e) => e.event_id).join(', ')}）`,
+    );
+    const f = failed[0];
+    assertEq(f.payload?.class, 'non_retryable', 'HTTP 500 的失败类别');
+    assert(String(f.payload?.reason ?? '').length > 0, 'failed 事实应带非空原因（reason）');
+
+    // D：失败合并不吞消息——每条 marker 在 live + 归档并集里恰好一次
+    for (const marker of MARKERS) {
+      const count = events.filter(
+        (e) => e.kind === 'user.message' && String(e.payload?.text ?? '') === marker,
       ).length;
-    };
-    const sendRound = async (i, text) => {
-      const before = doneTurns();
-      const send = await sendInbox(cli, 'e2e-t18', text, { workdir: hd.workdir });
-      assert(send.status === 200, `第 ${i + 1} 轮写收件箱应受理（${send.status}）`);
-      await waitFor(() => doneTurns() > before, { what: `第 ${i + 1} 轮 turn 终态`, timeoutMs: 60_000 });
-    };
-
-    // ── 阶段 1：自适应逐轮推进，直到观测到 CIRCUIT_LIMIT 个失败压缩分幕 ──
-    // 计「分幕」而不是「不同请求体」：切分边界每若干轮才前进一次，相邻两次自动压缩
-    // 可以提交同一份历史（理由见文件头「计量口径」）。
-    let rounds = 0;
-    while (failedEpisodes().length < CIRCUIT_LIMIT && rounds < 22) {
-      await sendRound(rounds, `第${rounds + 1}轮问题`);
-      rounds += 1;
-      // 每轮的失败压缩都必须原样保留历史（失败的硬不变式，读出口核对在阶段 4 位置由
-      // 各段落内的读回断言覆盖——历史经生产读出口读，与前端 loadMessages 同一出口）
-      const msgs = await readSessionMessages(cli, 'e2e-t18');
-      assertTranscriptInvariants(msgs, `T18 第 ${rounds} 轮后`);
-    }
-    const fails = failedEpisodes();
-    assertEq(
-      fails.length,
-      CIRCUIT_LIMIT,
-      `应观测到 ${CIRCUIT_LIMIT} 个失败压缩节点（水位超阈值而摘要 500；实际 ${rounds} 轮内 ${fails.length} 个）`,
-    );
-    assert(rounds >= 3, `阈值触发应发生在第 3 轮或之后（实际第 ${rounds} 轮前已达）`);
-
-    // ── 阶段 2：失败分支（D）+ 结构化 meta 的失败形态（B）────────────────
-    // 重试只针对**最后**一个失败节点（契约 F 的入口是用户点在某条失败交代上的动作）。
-    let failId = null;
-    for (const [id, frames] of fails) {
-      failId = id;
-      const final = frames[frames.length - 1].data;
-      assertEq(final.status, 'failed', `压缩节点 ${id.slice(0, 8)} 应以 failed 收场`);
-      assert(String(final.content ?? '').includes('已保留完整历史'), `失败说明应明示历史未丢（实际：${final.content}）`);
-      assertEq(final.meta?.failure_kind, 'llm_error', 'HTTP 500 的失败码必须是 llm_error（机读）');
-      assertEq(final.meta?.compact_trigger, 'threshold', '自动路径的触发来源必须是 threshold');
-      assertEq(final.meta?.context_limit, 80, 'meta.context_limit 应为配置的上限');
-      assert(
-        Number(final.meta?.before_tokens) > 0,
-        `失败时也应有压缩前水位（实际 ${JSON.stringify(final.meta)}）`,
-      );
-      assert(
-        final.meta?.after_tokens == null,
-        `失败节点不得携带 after_tokens（没有可信的后水位，编 0 是谎报）`,
-      );
-      assertSeqShapeOk(frames);
+      assertEq(count, 1, `用户消息「${marker}」在事实源（live + 归档）里应恰好出现一次（实际 ${count}）`);
     }
 
-    // ── 阶段 3：熔断纪律（E）——开闸后的轮次不再重发注定失败的摘要请求 ──
-    const beforeSkip = await snapshotHitCount();
-    await sendRound(rounds, `第${rounds + 1}轮问题`);
-    rounds += 1;
-    assertEq(await snapshotHitCount(), beforeSkip, '熔断开闸后的自动压缩必须被跳过（不得重发摘要请求）');
-    // 熔断跳过路径**不产生任何新压缩节点**——这正是被验的语义；
-    // 之前的 failed 节点原样留在原地（等待用户重试，而不是被静默清理）。
-    const afterSkipMsgs = await readSessionMessages(cli, 'e2e-t18');
-    assert(
-      afterSkipMsgs.some((m) => msgRoleOf(m) === 'user' && String(m.content ?? '').includes(`第${rounds}轮问题`)),
-      '熔断轮的历史必须原样保留（失败/跳过都不改历史）',
-    );
-    assert(
-      doneTurns() > 0,
-      '熔断轮的对话本身必须照常完成',
-    );
-
-    // ── 阶段 4：服务恢复——把「摘要这次是好的」这件事明确地做出来 ────────
-    //
-    // 换一份 plan（`POST /_plan`：场景表 + 游标一起换），而不是依赖 `failTimes`
-    // 名额恰好烧完：后者按请求体指纹扣，切分边界重复时 3 次失败只烧掉 2 个名额，
-    // 「下一次请求成功」就成了运气。契约 F 的「恢复之后」归用例控制（文件头）。
-    await llm.setPlan([
-      { id: 'snapshot', match: 'Distill the conversation above', chunks: SNAPSHOT_CHUNKS },
-      { id: 'big', match: '轮问题', content: REPLY },
-    ]);
-
-    // ── 阶段 5：重试恢复（F）——绕过熔断、删除-重建、成功 ──
-    //
-    // 恢复入口随输入面双轨退役改走节点动作（[D-066]）：
-    // 曾经的 `session/chat/send` + `resume.action = "retry_compaction"` 等价于
-    // `action(<sid>/message/<失败压缩节点 id>, "retry_compaction")`。
-    const retryAnchor = rt.changes.length;
-    const retry = await resumeSession(
-      cli,
-      'e2e-t18',
-      failId,
-      'retry_compaction',
-      {},
-      { session_id: 'e2e-t18', workdir: hd.workdir },
-    );
-    assert(retry.status === 200, `retry_compaction 应受理（${retry.status}: ${JSON.stringify(retry.body)?.slice(0, 200)}）`);
-    assert(retry.body?.data?.ok === true, `retry_compaction 应真的执行（${JSON.stringify(retry.body)?.slice(0, 200)}）`);
-
-    // 旧失败节点被 removed（删除-重建的实时面交代）
-    await waitFor(
-      () => rt.framesOf(failId).some((f) => f.data?.status === 'removed' && f.arrival >= retryAnchor),
-      { what: '旧失败压缩节点的 removed 帧', timeoutMs: 30_000 },
-    );
-    // 新压缩节点出现并终态 completed（重试请求落在换好后的 plan 上 = 成功）
-    await waitFor(
-      () => [...episodesSnapshot().entries()].some(([, fs]) => fs[fs.length - 1].data.status === 'completed'),
-      { what: '重试产生的 completed 压缩节点', timeoutMs: 30_000 },
-    );
-
-    const allEpisodes = episodesSnapshot();
-    const okEntry = [...allEpisodes.entries()].find(([, fs]) => fs[fs.length - 1].data.status === 'completed');
-    assert(okEntry, '应有 completed 压缩节点');
-    const [okId, okFrames] = okEntry;
-    assert(okId !== failId, '重试必须产生**新**节点（删除-重建，不是原地复活旧 id）');
-    const final = okFrames[okFrames.length - 1].data;
-
-    // A：流式身份帧——占位之后、终态之前，摘要以纯窄增量逐帧改道到压缩节点
-    const deltaFrames = okFrames.filter(
-      (f) => f.arrival > okFrames[0].arrival && f.arrival < okFrames[okFrames.length - 1].arrival && f.data?.delta != null,
-    );
-    assert(deltaFrames.length >= 1, '压缩节点上应有摘要的流式增量帧（用户看得到摘要在长出来）');
-    const streamed = deltaFrames.map((f) => f.data.delta).join('');
-    assertEq(
-      streamed,
-      SNAPSHOT.slice(SNAPSHOT_CHUNKS[0].length),
-      '增量拼接应等于摘要去掉首个分片（首分片走全量首帧被吞，其余走窄增量改道）',
-    );
-    for (const f of deltaFrames) {
-      assert(f.data.content == null && f.data.status == null, '改道帧必须是纯窄增量（不构成节点身份）');
-      assertEq(f.data.type, undefined, '增量帧不携带身份字段');
+    // D 的读出口同源：前端 loadMessages 同一出口读回全部 6 条、无压缩节点
+    api = await startReadbackCli({
+      homedir: hd.homedir,
+      workdir: hd.workdir,
+      session: 'e2e-t18',
+      provider: PROVIDER_ID,
+      gatewayPort: GATEWAY_PORT,
+    });
+    const msgs = await readSessionMessages(api, 'e2e-t18');
+    assertTranscriptInvariants(msgs, 'T18');
+    for (const marker of MARKERS) {
+      const count = msgs.filter((m) => msgRoleOf(m) === 'user' && textOf(m) === marker).length;
+      assertEq(count, 1, `读出口里用户消息「${marker}」应恰好一条（实际 ${count}）`);
     }
-    // A（反面）：没有任何**旁路节点**收到过摘要增量
-    const bypass = rt
-      .messages()
-      .filter(({ mid, data }) => mid !== okId && String(data?.content ?? '').includes('state_snapshot') && msgTypeOf(data) !== 'compression');
-    // 快照 head 消息（meta.compacted）合法持有渲染后的快照正文；其余任何节点不得出现原始 XML
     assert(
-      bypass.every(({ data }) => data?.meta?.compacted === true),
-      `摘要增量不得以旁路节点身份上流（可疑节点：${bypass.map((b) => String(b.mid).slice(0, 8)).join(',')}）`,
+      !msgs.some((m) => String(m.content ?? '').includes('state_snapshot')),
+      '摘要失败时读出口不应出现压缩快照正文',
     );
-
-    // B：成功节点的结构化 meta
-    assertEq(final.meta?.compact_trigger, 'retry', '重试路径的触发来源必须是 retry');
-    assertEq(final.meta?.context_limit, 80, 'meta.context_limit');
-    assert(Number(final.meta?.before_tokens) > 0, 'meta.before_tokens');
-    assert(
-      Number(final.meta?.after_tokens) > 0 && Number(final.meta?.after_tokens) < Number(final.meta?.before_tokens),
-      `后水位应存在且低于前水位（${final.meta?.before_tokens} → ${final.meta?.after_tokens}）`,
-    );
-    assert(Number(final.meta?.dropped) > 0, 'meta.dropped 应记录这次压掉的条数');
-
-    // 重写收敛：被压掉历史逐条 removed + 快照帧（meta.compacted）
-    const removes = rt.messages().filter(({ data, arrival }) => data?.status === 'removed' && arrival >= retryAnchor);
-    assert(removes.length > 0, '重试成功后应下发被压掉消息的 removed 帧');
-    const snapshotFrame = rt
-      .messages()
-      .filter(({ data, arrival }) => data?.meta?.compacted === true && arrival >= retryAnchor)
-      .pop();
-    assert(snapshotFrame, '重试成功后实时面应出现 meta.compacted=true 的快照帧');
-
-    // 落盘同源：失败节点已删、快照在、唯一 compression 节点是重试产物
-    // （读出口 = 前端 loadMessages 同一出口，不碰任何内部存储文件）
-    await waitFor(async () => {
-      const msgs = (await readSessionMessages(cli, 'e2e-t18')) ?? [];
-      return msgs.some((m) => msgTypeOf(m) === 'compression' && m.meta?.compact_trigger === 'retry');
-    }, { what: '重试的压缩节点落库', timeoutMs: 30_000 });
-    // ⚠️ 这是**终态**判据，不是瞬时判据：压缩会重写历史（被压掉的消息逐条 `removed`，
-    // 同时插入快照帧），落盘与实时面之间有一个中间窗口——那一刻读到的转写里，旧节点
-    // 与快照帧可能同时存在，于是 `seq` 出现重复。实测（2026-10-19 全量门禁）：
-    // 报「seq 未严格递增（23 → 23 @ 72a25359）」，而**单跑必过、四次里红一次**，
-    // 是典型的负载假红（`--only=e2e` 连跑三次全绿）。
-    //
-    // 处置：**有界地等**不变量成立，判据一字不改——等不到照样红，且报的是最后一次的
-    // 具体原因（"waitFor timed out" 对排查没有信息量）。与 `t16-live-order` 同一处置：
-    // 「压缩/落库还没收敛」和「两套序号空间并存」是两件事，不能让前者冒充后者。
-    let msgs = (await readSessionMessages(cli, 'e2e-t18')) ?? [];
-    let invariantError = null;
-    try {
-      assertTranscriptInvariants(msgs, 'T18 终态');
-    } catch (error) {
-      invariantError = error;
-      try {
-        await waitFor(
-          async () => {
-            msgs = (await readSessionMessages(cli, 'e2e-t18')) ?? [];
-            try {
-              assertTranscriptInvariants(msgs, 'T18 终态');
-              return true;
-            } catch (retryError) {
-              invariantError = retryError;
-              return false;
-            }
-          },
-          { what: 'T18 终态转写收敛（压缩重写历史后的 seq 严格递增）', timeoutMs: 15_000 },
-        );
-        invariantError = null;
-      } catch {
-        /* 超时：把最后一次的具体原因交给下面抛出去 */
-      }
-    }
-    if (invariantError) throw invariantError;
-    // 重试只删除**被点击的那一个**失败节点（failId）；更早的两个失败节点原样
-    // 留在存储里（它们各自都有交代，删除它们不是重试的职责）。
-    const compNodes = msgs.filter((m) => msgTypeOf(m) === 'compression');
-    const completedComp = compNodes.filter((m) => m.status === 'completed');
-    assertEq(completedComp.length, 1, `存储里应恰有一个 completed 压缩节点（实际 ${completedComp.length}）`);
-    assertEq(completedComp[0].id, okId, '存储里的 completed 压缩节点应是实时面上的那个新节点');
-    assert(!completedComp[0].meta?.failure_kind, '成功的压缩节点不带失败码');
-    assert(
-      !msgs.some((m) => m.id === failId),
-      '旧失败节点应已从存储删除（不是留给下次会话当尸体）',
-    );
-    const storedSnap = msgs.find((m) => m.meta?.compacted === true);
-    assert(storedSnap, '存储里应有压缩快照');
-    assertEq(msgRoleOf(storedSnap), 'user', '快照必须是 user 角色');
-    assert(
-      !msgs.some((m) => msgRoleOf(m) === 'user' && String(m.content ?? '').includes('第1轮问题')),
-      '第一轮用户消息应已被重试压缩出存储',
-    );
-
-    // ── 阶段 6：恢复后的正常轮——水位已低，不再触发压缩 ──
-    const beforeCalm = await snapshotHitCount();
-    await sendRound(rounds, `第${rounds + 1}轮问题`);
-    rounds += 1;
-    assertEq(await snapshotHitCount(), beforeCalm, '恢复后的正常轮不得再触发压缩（水位已降）');
-    const calmMsgs = await readSessionMessages(cli, 'e2e-t18');
-    assertTranscriptInvariants(calmMsgs, 'T18 恢复后');
   } finally {
-    rt?.close();
-    cli.stop();
+    api?.stop();
     llm.stop();
     cleanupHomedir(hd);
-  }
-
-  // ── 局部工具 ──
-  /** 当前实时面上 compression 节点的分幕（身份帧 + 夹在中间的增量帧） */
-  function episodesSnapshot() {
-    const map = new Map();
-    for (const f of rt.messages()) {
-      if (msgTypeOf(f.data) === 'compression' || (f.data?.delta != null && rt.framesOf(f.mid).some((x) => msgTypeOf(x.data) === 'compression'))) {
-        const list = map.get(f.mid) ?? [];
-        list.push(f);
-        map.set(f.mid, list);
-      }
-    }
-    return map;
-  }
-  /**
-   * 已以 failed 收场的压缩分幕：`[节点 id, 该分幕的全部帧]`。
-   *
-   * 这就是本用例的「逻辑摘要请求」计数器——一次压缩 = 一个分幕 = 熔断扣的一个额度
-   * （`active.rs` 按逻辑失败计数），既不受客户端 5xx 退避重发放大，也不受切分边界
-   * 重复（两次压缩提交同一份历史）影响。
-   */
-  function failedEpisodes() {
-    return [...episodesSnapshot().entries()].filter(([, fs]) => fs[fs.length - 1].data.status === 'failed');
-  }
-  /** 一个分幕内：除 removed/终态外，位置序号必须是节点属性（复用 T11 的形状判据） */
-  function assertSeqShapeOk(frames) {
-    const seqs = frames.map((f) => f.data?.seq).filter((s) => s != null);
-    const authority = seqs.filter((s) => s < (1 << 50));
-    assert(new Set(authority).size <= 1, `压缩节点权威 seq 至多一个（实得 ${JSON.stringify(seqs)}）`);
+    await waitFor(() => !process.getActiveResourcesInfo().includes('ProcessWrap'), {
+      what: '读回 CLI / mock-llm 子进程退出',
+    });
   }
 });

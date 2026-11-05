@@ -1,26 +1,28 @@
-// T8 上下文压缩：历史水位越过 70% 阈值 → 自动压缩 → 快照落库 + 历史归并。
+// T8 上下文压缩：水位越过阈值 → `compact` 插件落 `session.consolidated`
+// （摘要 Notice + 本轮终答），重建面从这份快照开始折。
 import './_selfrun.mjs';
 //
-// 触发机制：provider 的 max_context_tokens 调小（水位 = 70% × 上限），mock 每轮
-// 回复超大文本把水位顶过阈值；压缩请求以「Distill the conversation above…」
-// 指令收尾（compression.rs::compression_instruction），mock 据此用 <state_snapshot>
-// XML 应答。参数口径实测校准过（dbg 阶段）：
-// - 请求级 overhead ≈ 5.9k tokens（system prompt + 20 个工具 schema）；
-// - 每轮回复 ≈ 9.6k 字符 ≈ 9.6k tokens（CJK ≈ 1 token/字）；
-// - 16000 上限：70% = 11200，第 3 轮开始时水位 ≈ 19k 稳过线，且压缩请求
-//   （历史 ≈ 7.4k + overhead ≈ 5.9k < 16000）能通过「摘要请求自身不超限」预检。
+// ## 触发机制（D-336）
 //
-// 上限为什么留 ≈2.7k 余量而不贴边：预检的分子含**全部工具 schema**，而 schema 的措辞
-// 会被任务改动——2026-10-16 的 给 `vdfs/tools/mod.rs::PATH_DESC` 补了一格「绝对
-// POSIX 地址会变影子树」的警示，8 份 schema 各长 179 字符 ⇒ overhead +≈1.4k，原本只留
-// 100 tokens 余量的 12000 上限当场让压缩**预判注定超限**、静默跳过（本用例那时红在
-// 「mock-llm 应收到压缩请求」）。本用例钉的是压缩链路，不是 schema 有多长。
-// 钉的不变量：
-// - 压缩 LLM 调用真实发生（mock 收到压缩请求）；
-// - 快照消息落库：meta.compacted=true、protocol_version=v2、user 角色、
-//   「[CONTEXT SNAPSHOT」前缀（历史记忆替身）；
-// - 被压掉的消息从存储消失；
-// - 压缩不炸会话：触发压缩的那一轮回复照常完成。
+// `compact` 插件按 `model:<uid>` 收束载荷里的实测水位判债：阈值 = 0.7 × provider 上限。
+// e2e 的 mock 恒报 `prompt_tokens: 64`（见 `mock-llm.mjs`），因此上限取 80
+// ⇒ 64 ≥ 0.7 × 80，每轮都越线（取 16000 则永不越线——那是旧水位口径的夹具值）。
+//
+// ## 压缩的现行形态
+//
+// - 摘要由 `model.assist` 端口取（system = compact 插件的摘要指令，user = 整段转写）；
+// - 结果由 `compact` 端口落 `session.consolidated`，载荷 `messages` =
+//   `Notice`（`meta.style_tag = compression`，正文即摘要）+ 本轮终答；
+// - 生产读出口（`vdfs/read` 会话叶 = 前端 `loadMessages` 同一出口）从这份快照开始
+//   重建，被压掉的前缀不再出现。
+//
+// 本用例钉的不变量：
+// - 真的落了一条 `session.consolidated`（触发线没越 ⇒ 这里红，不许跳过）；
+// - 载荷首节点是 `notice` + `style_tag = compression`，正文是摘要；
+// - 重建后的历史里被压掉的用户消息消失、压缩节点在；
+// - 压缩不炸会话：触发轮回复照常完成。
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
@@ -29,6 +31,7 @@ import {
   nextPort,
   startReadbackCli,
   readSessionMessages,
+  readFileSyncSafe,
   waitFor,
   assert,
   assertEq,
@@ -37,6 +40,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgRoleOf,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const REPLY = `填充：${'上下文填充内容用于推高历史水位。'.repeat(600)}`;
@@ -57,17 +61,34 @@ const SNAPSHOT_XML = [
   '</state_snapshot>',
 ].join('\n');
 
-export default defineCase('T8 上下文压缩：水位触发自动压缩，快照落库 + 历史归并', async () => {
+/** 会话事实源：live 段 + 归档段（`transcripts/wal-archive`）的并集。 */
+const walEvents = (homedir, sid) => {
+  const dir = join(homedir, 'session', sid);
+  const archiveDir = join(dir, 'transcripts', 'wal-archive');
+  const texts = [join(dir, 'v2-events.wal')];
+  if (existsSync(archiveDir)) {
+    for (const name of readdirSync(archiveDir)) texts.push(join(archiveDir, name));
+  }
+  return texts
+    .map(readFileSyncSafe)
+    .join('')
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line));
+};
+
+export default defineCase('T8 上下文压缩：水位触发 session.consolidated，重建历史归并', async () => {
   const llm = await new MockLlm([
-    // 压缩请求：末条 user 是压缩指令（compression.rs 唯一措辞），返回结构化快照
-    { id: 'snapshot', match: 'Distill the conversation above', content: SNAPSHOT_XML },
-    // 普通轮：回复超大文本，把历史水位顶过 70% 阈值
+    // 摘要请求（`model.assist`）：最后一条 user 是整段转写，以「助手：…」收尾；
+    // 主请求的最后一条 user 只是「第N轮问题」，不会命中本场景。
+    { id: 'snapshot', match: '助手：', content: SNAPSHOT_XML },
+    // 普通轮：回复超大文本，把（mock 固定回报的）水位顶过 70% 阈值
     { id: 'big', match: '轮问题', content: REPLY },
   ]).start();
   const GATEWAY_PORT = nextPort();
   const hd = makeHomedir({
     providers: [
-      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 16000 }) },
+      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 80 }) },
     ],
     // context_messages: 0 = 上下文窗口不按轮次截断（压缩判定的原料是完整历史）
     pluginConfigs: {
@@ -95,19 +116,25 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
     });
     assertEq(r.code, 0, `CLI 退出码（stderr 尾部: ${r.stderr.slice(-600)}）`);
 
-    const reqs = await llm.requests();
-
-    // ① 压缩请求真实发生
-    const compReqIdx = reqs.findIndex((q) =>
-      (q.body?.messages ?? []).some(
-        (m) => m.role === 'user' && String(m.content ?? '').includes('Distill the conversation above'),
-      ),
+    // ① 压缩真的发生：`compact` 插件落了一条 `session.consolidated`
+    const events = walEvents(hd.homedir, 'e2e-t8');
+    const consolidated = events.filter((e) => e.kind === 'session.consolidated');
+    assert(
+      consolidated.length >= 1,
+      `应至少落一条 session.consolidated（水位 70% 未触发会在此暴露；现有 kind: ${[...new Set(events.map((e) => e.kind))].join(',')}）`,
     );
-    assert(compReqIdx >= 0, 'mock-llm 应收到压缩请求（水位 70% 未触发或指令措辞漂移都会在此暴露）');
-    // 压缩请求发生在最后一轮主请求之前（压缩在本轮 Turn 创建前）
-    assert(compReqIdx < reqs.length - 1, '压缩请求应先于最后一轮主请求');
 
-    // ② 快照消息落库
+    // ② 载荷形态：首节点是压缩 Notice，正文就是摘要
+    const nodes = consolidated[0].payload?.messages ?? [];
+    assert(nodes.length >= 1, `session.consolidated 载荷 messages 不应为空（实得 ${nodes.length}）`);
+    assertEq(nodes[0].type, 'notice', '压缩快照首节点应是 notice');
+    assertEq(nodes[0].meta?.style_tag, 'compression', '压缩快照首节点的 style_tag');
+    assert(
+      String(nodes[0].content ?? '').includes('state_snapshot'),
+      `压缩快照正文应是摘要（实际首 60 字: ${String(nodes[0].content ?? '').slice(0, 60)}）`,
+    );
+
+    // ③ 重建面（生产读出口）从快照开始折：压缩节点在、被压掉的前缀消失
     api = await startReadbackCli({
       homedir: hd.homedir,
       workdir: hd.workdir,
@@ -117,20 +144,19 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
     });
     const msgs = await readSessionMessages(api, 'e2e-t8');
     assertTranscriptInvariants(msgs, 'T8');
-    const snap = msgs.find((m) => m.meta?.compacted === true);
-    assert(snap, `应有 meta.compacted=true 的快照消息（现有 ${msgs.length} 条）`);
-    assertEq(snap.meta.protocol_version, 'v2', '快照 meta.protocol_version');
-    assertEq(msgRoleOf(snap), 'user', '快照必须是 user 角色（多数 provider 要求对话以 user 开头）');
+    const comp = msgs.find((m) => msgTypeOf(m) === 'compression');
     assert(
-      String(snap.content ?? '').includes('CONTEXT SNAPSHOT'),
-      '快照内容应是「[CONTEXT SNAPSHOT …」前缀的历史记忆替身',
+      comp,
+      `重建历史里应有压缩节点（现有 ${msgs.length} 条，类型: ${msgs.map((m) => msgTypeOf(m)).join(',')}）`,
     );
-
-    // ③ 历史归并：被压掉的消息消失（第一轮 user 消息不在存储里）
-    const firstUserGone = !msgs.some(
-      (m) => msgRoleOf(m) === 'user' && String(m.content ?? '').includes('第一轮问题'),
+    assert(
+      String(comp.content ?? '').includes('state_snapshot'),
+      '重建出的压缩节点正文应是摘要',
     );
-    assert(firstUserGone, '第一轮用户消息应已被压缩出存储');
+    assert(
+      !msgs.some((m) => msgRoleOf(m) === 'user' && String(m.content ?? '').includes('第一轮问题')),
+      '被压掉的第一轮用户消息不应再出现在重建历史里',
+    );
 
     // ④ 压缩不炸会话：压缩后主循环照常完成回复
     assert(
