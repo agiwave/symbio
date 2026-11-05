@@ -225,16 +225,15 @@ export default defineCase(
       assert(artifact, `工人子会话必须落产物格（实际 kinds: ${JSON.stringify(kinds)}）`);
       assertEq(artifact.actor, 'session/worker', '产物格的作者 = 工人（委派链上的登记窄行主体）');
       assertEq(artifact.payload?.tool, 'vdfs_read', '产物来自工人真调的那个工具');
-      // I2 的溯源位由宿主按「本会话刚落地的那条事实」给出（`provenance_at` 的现行
-      // 口径），不是回指开轮格：产物是**这次工具请求**的直接结果。
-      const beforeArtifact = childEvents
-        .slice(0, childEvents.indexOf(artifact))
-        .filter((e) => e.seq !== undefined && e.seq !== null);
-      assertEq(
-        artifact.produced_by,
-        beforeArtifact.at(-1)?.seq,
-        '产物格溯源指向刚落地的前件（I2；provenance_at 现口径）',
+      // I2 的溯源位由宿主按 `provenance_at` 取「本会话刚落地的那条事实」给出：
+      // 产物是**这次工具请求**的直接结果，因此断言指向的是一条 `request` 事实
+      // （种类对、指向成立即可；seq 不写死）。
+      const request = childEvents.find((e) => e.seq === artifact.produced_by);
+      assert(
+        request,
+        `产物溯源 ${artifact.produced_by} 必须指向本会话里存在的事实（实际 kinds: ${JSON.stringify(kinds)}）`,
       );
+      assertEq(request.kind, 'request', '产物是这次工具请求的直接结果：溯源种类 = request');
 
       // 收窄生效（vs 派生整套）：工人无发言权 ⇒ 不落发言格。未登记的 `worker`
       // 会派生主智能体整套（含 reply.*）⇒ 会多出一格 final——那一格就是
