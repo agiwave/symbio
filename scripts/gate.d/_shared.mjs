@@ -352,7 +352,11 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 同一净减 17 条在 CI 口径下的折算（2171→2155，实测 2155）——被删用例均无 `cfg` 门，`--workspace` 求和在两种口径里是同一批；逐条归属见上方 `rustTests` 的注。非侵蚀。
   // baseline-allow ciRustTestsTotal: 同上一条净减 1（2155→2154）——被删的用例无 `cfg` 门，
   // `--workspace` 求和在两种口径里是同一批。非侵蚀。
-  ciRustTestsTotal: 2160,
+  // baseline-allow ciRustTestsTotal: D-339 写口归属收口的用例净增在 CI 口径下折算（2160 → 2163）——
+  // `d2ed7682` 改写/新增的归属判据（声明期 owner、`@principal` 会话解析、宿主 emit 无默认值）全在
+  // `--workspace` 求和里，两种口径数的是同一批用例；随后 `b2dd9770` / `5e968176` 未增删用例。
+  // 基线跟实测走，不是为过门禁上调。非侵蚀。
+  ciRustTestsTotal: 2163,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
