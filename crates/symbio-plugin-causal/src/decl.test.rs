@@ -65,7 +65,6 @@ fn link(cause: &str, effect: &str, confidence: u64) -> Event {
         CAUSAL_LINK,
         Entity::Domain,
         Verb::Asserted,
-        1,
         "session/a",
     )
     .with_payload(json!({ "cause": cause, "effect": effect, "confidence": confidence }))
@@ -153,7 +152,7 @@ fn future_events_are_ignored() {
 /// 缺字段 / 自环的载荷静默跳过：视图不能因为一条坏事实就整个算不出来。
 #[test]
 fn malformed_payloads_are_skipped() {
-    let broken = Event::pending("e-2", CAUSAL_LINK, Entity::Domain, Verb::Asserted, 1, "s")
+    let broken = Event::pending("e-2", CAUSAL_LINK, Entity::Domain, Verb::Asserted, "s")
         .with_payload(json!({ "cause": "a" }));
     let v = causal_graph(&[broken, link("x", "y", 50)], i64::MAX);
     assert_eq!(v["count"], 1);

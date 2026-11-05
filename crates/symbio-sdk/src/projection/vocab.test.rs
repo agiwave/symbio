@@ -125,14 +125,7 @@ fn a_domain_cell_is_never_a_chat_slot() {
     ] {
         // 名字特意挑成「看起来像对话」的形态：判据认的是 `(entity, verb)` 与词汇面，
         // 不是名字长得像不像——名字由 owner 声明，core 不认识它。
-        let e = Event::pending(
-            "d-0",
-            "notes.created",
-            Entity::Domain,
-            verb,
-            0,
-            "session/main",
-        );
+        let e = Event::pending("d-0", "notes.created", Entity::Domain, verb, "session/main");
         assert_eq!(
             slot_of(&e, &CHAT, &MESSAGE),
             None,

@@ -37,7 +37,6 @@ impl DebtSource for ModelDebts {
             "provider": request.provider,
             "root_id": user_id,
             "principal": "user",
-            "scope": request.scope,
         });
         let mut rows = vec![
             // 有用户输入、尚无终答：这一轮欠一次模型往返。

@@ -65,7 +65,6 @@ fn rationale(decision: &str, why: &str, evidence: &str) -> Event {
         EXPLAIN_RATIONALE,
         Entity::Domain,
         Verb::Asserted,
-        1,
         "session/a",
     )
     .with_payload(json!({ "decision": decision, "why": why, "evidence": evidence }))
@@ -159,7 +158,6 @@ fn malformed_payloads_are_skipped() {
         EXPLAIN_RATIONALE,
         Entity::Domain,
         Verb::Asserted,
-        1,
         "s",
     )
     .with_payload(json!({ "decision": "a" }));

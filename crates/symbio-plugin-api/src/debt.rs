@@ -14,11 +14,9 @@ pub use crate::drive::Unless;
 /// 债行所在的 `multi` 族。加一个端口 = 由该插件往本族报到，不改族。
 pub const DEBT_FAMILY: CapabilityFamily = CapabilityFamily::multi("debt");
 
-/// 一次驱动的应用侧输入：可见域、会话地址与选定的 provider。
+/// 一次驱动的应用侧输入：会话地址与选定的 provider。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriveRequest {
-    /// 可见域身份（实体 id，不用哨兵值）。
-    pub scope: u64,
     /// 会话地址里的 id（应用数据）。
     pub session_id: String,
     /// 选定的 provider 标识（可为空）。
@@ -34,7 +32,7 @@ pub enum Closing {
     Failed,
 }
 
-/// 五事实的只读视图（按债 id 归并；同一可见域内 id 唯一，跨端口也不得重名）。
+/// 五事实的只读视图（按债 id 归并；同一会话内 id 唯一，跨端口也不得重名）。
 ///
 /// 另带**全种类事实的身份**（种类 + id，不含载荷）：欠债方要从「哪条事实」派生
 /// 自己的债 id，而不是自己计数（禁计数）。这一格是中性形状——种类是申报方给的
@@ -196,7 +194,7 @@ impl DebtSpec {
 
 /// 一个插件申报的债表（数据源）。
 pub trait DebtSource: Send + Sync {
-    /// 当前可见域该还的债。
+    /// 当前会话该还的债。
     fn rows(&self, request: &DriveRequest, facts: &DebtFacts) -> Vec<DebtSpec>;
 }
 

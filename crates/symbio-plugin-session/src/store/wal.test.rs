@@ -23,8 +23,8 @@ use symbio_sdk::projection::prompt_fidelity::verify as verify_prompt_fidelity;
 use symbio_sdk::projection::transcript::transcript;
 
 /// 造一条 pending 事件（入库前无 seq；带溯源与正文载荷）。
-fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -> Event {
-    Event::pending(id, kind, entity, verb, turn, "session/main")
+fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, _turn: u64, text: &str) -> Event {
+    Event::pending(id, kind, entity, verb, "session/main")
         .with_produced_by(0)
         .with_payload(serde_json::json!({ "text": text }))
 }
@@ -34,8 +34,8 @@ fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -
 /// [`ev`] 统一给 `produced_by(0)`：当日志从 0 起，seq 0 的那条就指向**自己**。
 /// I2 只查"有没有边"时这是绿的，`provenance_dangling` 上线后它必须红——
 /// 根事件本来就没有上游，正确的写法是**不带边**。
-fn ev_root(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -> Event {
-    Event::pending(id, kind, entity, verb, turn, "session/main")
+fn ev_root(id: &str, kind: &str, entity: Entity, verb: Verb, _turn: u64, text: &str) -> Event {
+    Event::pending(id, kind, entity, verb, "session/main")
         .with_payload(serde_json::json!({ "text": text }))
 }
 
@@ -861,7 +861,6 @@ fn an_artifact_round_is_complete_after_reopen() {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "text": "帮我回显", "tier": "deep", "id": "u-0" }));
@@ -870,7 +869,6 @@ fn an_artifact_round_is_complete_after_reopen() {
         EVENT_ARTIFACT_ADDED,
         Entity::Artifact,
         Verb::Asserted,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({ "tool": "vdfs_read", "text": "文件内容：hello" }));
@@ -879,7 +877,6 @@ fn an_artifact_round_is_complete_after_reopen() {
         EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({
@@ -937,7 +934,6 @@ fn final_without_provenance(turn: u64) -> Event {
         symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
-        turn,
         "session/main",
     )
     .with_payload(serde_json::json!({ "text": "答", "status": "completed" }))
@@ -969,8 +965,8 @@ fn gate_rejects_a_declaration_without_provenance() {
     assert_eq!(store.len(), 0, "被拒的事件不落盘");
 }
 
-/// 写闸只认「名字与格位同源」和「溯源」：同一会话后来的开轮 / 终答都合法
-/// （`scope` 是会话身份，不是轮次），重复投递由 `Duplicate` 按 id 拦下。
+/// 写闸只认「名字与格位同源」和「溯源」：同一会话后来的开轮 / 终答都合法，
+/// 重复投递由 `Duplicate` 按 id 拦下。
 #[test]
 fn gate_allows_later_turns_of_the_same_session_but_rejects_replay() {
     let dir = tempfile::tempdir().unwrap();
@@ -1056,7 +1052,6 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
         EVENT_CHAT_ASSISTANT_FINAL,
         given.0,
         given.1,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({ "text": "答" }));
@@ -1083,7 +1078,6 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
         EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
-        1,
         "session/main",
     )
     .with_produced_by(0)
@@ -1177,7 +1171,6 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
             FIXTURE,
             Entity::Scope,
             Verb::Closed,
-            1,
             "session/main",
         ))
         .expect_err("表上住 Turn/Progressed，自述 Turn/Closed 不得入库");
@@ -1203,7 +1196,6 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
             FIXTURE,
             Entity::Scope,
             Verb::Progressed,
-            1,
             "session/main",
         ))
         .expect_err("没有声明格位的名字不得入库");
@@ -1321,7 +1313,6 @@ fn a_domain_cell_is_gated_like_any_other_declared_cell() {
             FIXTURE,
             Entity::Domain,
             Verb::Opened,
-            2,
             "session/main",
         ))
         .expect_err("没有 owner 声明 ⇒ 内核不认识这个领域，必须拒");

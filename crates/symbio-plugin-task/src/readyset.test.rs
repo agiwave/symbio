@@ -42,7 +42,6 @@ fn open_task(store: &EventStore, id: &str, depends_on: &[&str]) {
                 EVENT_TASK_OPENED,
                 Entity::Task,
                 Verb::Opened,
-                0,
                 PRINCIPAL_MAIN,
             )
             .with_payload(
@@ -61,7 +60,6 @@ fn assert_task(store: &EventStore, id: &str) {
                 EVENT_TASK_ASSERTED,
                 Entity::Task,
                 Verb::Asserted,
-                0,
                 PRINCIPAL_MAIN,
             )
             .with_produced_by(0)
@@ -79,7 +77,6 @@ fn progress_task(store: &EventStore, id: &str) {
                 EVENT_TASK_PROGRESS,
                 Entity::Task,
                 Verb::Progressed,
-                0,
                 PRINCIPAL_MAIN,
             )
             .with_payload(serde_json::json!({ "task_id": id })),
@@ -96,7 +93,6 @@ fn hold_task(store: &EventStore, id: &str, ts: i64) {
                 EVENT_TASK_HELD,
                 Entity::Task,
                 Verb::Held,
-                0,
                 PRINCIPAL_MAIN,
             )
             .with_ts(ts)
@@ -118,7 +114,6 @@ fn lease_task(store: &EventStore, id: &str, until_ms: Option<i64>) {
                 EVENT_TASK_ASSIGNED,
                 Entity::Task,
                 Verb::Asserted,
-                0,
                 PRINCIPAL_SCHEDULER,
             )
             .with_produced_by(0)
@@ -136,7 +131,6 @@ fn rework_node(store: &EventStore, id: &str, replaces: &str, round: u64) {
                 EVENT_TASK_REWORK_CREATED,
                 Entity::Task,
                 Verb::Asserted,
-                0,
                 PRINCIPAL_MAIN,
             )
             .with_produced_by(0)

@@ -4,7 +4,7 @@
 //! 自己的类型；宿主因此不必认识 `ring` 里的任何东西（`DE-051` 机制形状）。
 //!
 //! 这个执行者只在本 crate 内可见，经 `traverse` 往 `drive` 族登记一行；宿主按族
-//! `list` 取回后调用，能力束与可见域是参数。
+//! `list` 取回后调用，能力束是参数。
 
 use std::sync::Arc;
 
@@ -15,22 +15,19 @@ use symbio_plugin_api::port::{PortExecHandles, PortExecutor, PortFactEmit, PortF
 
 use crate::ring::{drive, DebtKey, DebtRow, DebtSource, DriveCtx, Fact, FactKind, FactView};
 
-/// 环的执行者：宿主把能力束与可见域交进来，报告原样回去。
+/// 环的执行者：宿主把能力束交进来，报告原样回去。
 pub(crate) struct LoopDrive;
 
 #[async_trait::async_trait]
 impl DriveRunner for LoopDrive {
-    async fn drive(
-        &self,
-        support: Arc<dyn DriveSupport>,
-        scope: u64,
-    ) -> Result<DriveReport, String> {
+    async fn drive(&self, support: Arc<dyn DriveSupport>) -> Result<DriveReport, String> {
         let adapter = SupportCtx {
-            support: Arc::clone(&support),
-            scope,
-            source: SupportSource { support },
+            source: SupportSource {
+                support: Arc::clone(&support),
+            },
+            support,
         };
-        let report = drive(&adapter, scope).await;
+        let report = drive(&adapter).await;
         let outcome = match report.outcome {
             crate::ring::DriveOutcome::NoDebt => DriveOutcome::NoDebt,
             crate::ring::DriveOutcome::Waiting(keys) => {
@@ -38,7 +35,6 @@ impl DriveRunner for LoopDrive {
             }
         };
         Ok(DriveReport {
-            scope,
             dispatched: report.dispatched,
             outcome,
         })
@@ -48,7 +44,6 @@ impl DriveRunner for LoopDrive {
 /// 中性债键 → 环债键。
 fn to_ring_key(key: &symbio_plugin_api::drive::DriveKey) -> DebtKey {
     DebtKey {
-        scope: key.scope,
         port: key.port,
         id: key.id.clone(),
         attempt: key.attempt,
@@ -58,7 +53,6 @@ fn to_ring_key(key: &symbio_plugin_api::drive::DriveKey) -> DebtKey {
 /// 环债键 → 中性债键。
 fn to_neutral_key(key: DebtKey) -> symbio_plugin_api::drive::DriveKey {
     symbio_plugin_api::drive::DriveKey {
-        scope: key.scope,
         port: key.port,
         id: key.id,
         attempt: key.attempt,
@@ -68,14 +62,13 @@ fn to_neutral_key(key: DebtKey) -> symbio_plugin_api::drive::DriveKey {
 /// 环的上下文：每次驱动现造，持有能力束的克隆，不跨步保留状态。
 struct SupportCtx {
     support: Arc<dyn DriveSupport>,
-    scope: u64,
     source: SupportSource,
 }
 
 impl DriveCtx for SupportCtx {
     fn facts(&self) -> Vec<Fact> {
         self.support
-            .facts(self.scope)
+            .facts()
             .into_iter()
             .filter_map(to_ring_fact)
             .collect()
@@ -83,7 +76,6 @@ impl DriveCtx for SupportCtx {
 
     fn append(&self, fact: Fact) {
         self.support.append(DriveFact {
-            scope: fact.scope,
             kind: fact.kind.as_str(),
             key: to_neutral_key(fact.key),
             payload: fact.payload,
@@ -109,15 +101,15 @@ impl DriveCtx for SupportCtx {
     }
 
     fn outlet(&self) -> PortFactEmit {
-        self.support.outlet(self.scope)
+        self.support.outlet()
     }
 
     fn fact_reader(&self) -> Option<Arc<dyn PortFactReader>> {
-        self.support.reader(self.scope)
+        self.support.reader()
     }
 
     fn exec_handles(&self) -> PortExecHandles {
-        self.support.exec_handles(self.scope)
+        self.support.exec_handles()
     }
 }
 
@@ -125,7 +117,6 @@ impl DriveCtx for SupportCtx {
 fn to_ring_fact(fact: DriveFact) -> Option<Fact> {
     let kind = FactKind::parse(fact.kind)?;
     Some(Fact {
-        scope: fact.scope,
         kind,
         key: to_ring_key(&fact.key),
         payload: fact.payload,
@@ -140,12 +131,12 @@ struct SupportSource {
 }
 
 impl DebtSource for SupportSource {
-    fn rows(&self, facts: &FactView<'_>, scope: u64) -> Vec<DebtRow> {
+    fn rows(&self, facts: &FactView<'_>) -> Vec<DebtRow> {
         let mut out = Vec::new();
-        for row in self.support.rows(scope) {
+        for row in self.support.rows() {
             let after = match &row.after {
                 None => None,
-                Some(id) => match closing_key(facts, scope, id) {
+                Some(id) => match closing_key(facts, id) {
                     Some(key) => Some(key),
                     None => continue,
                 },
@@ -155,22 +146,22 @@ impl DebtSource for SupportSource {
         out
     }
 
-    fn exists(&self, kind: &str, scope: u64) -> bool {
-        self.support.exists(kind, scope)
+    fn exists(&self, kind: &str) -> bool {
+        self.support.exists(kind)
     }
 
-    fn exists_id(&self, kind: &str, id: &str, scope: u64) -> bool {
-        self.support.exists_id(kind, id, scope)
+    fn exists_id(&self, kind: &str, id: &str) -> bool {
+        self.support.exists_id(kind, id)
     }
 }
 
-/// 该身份在本可见域最近的收束债键。
-fn closing_key(facts: &FactView<'_>, scope: u64, id: &str) -> Option<DebtKey> {
+/// 该身份在本会话最近的收束债键。
+fn closing_key(facts: &FactView<'_>, id: &str) -> Option<DebtKey> {
     facts
         .all()
         .iter()
         .rev()
-        .find(|f| f.kind.closes() && f.key.scope == scope && f.key.id == id)
+        .find(|f| f.kind.closes() && f.key.id == id)
         .map(|f| f.key.clone())
 }
 

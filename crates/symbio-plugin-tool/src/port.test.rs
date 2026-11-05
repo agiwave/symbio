@@ -368,8 +368,9 @@ fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext,
             sink: ExecEventSink::silent(),
             emit: symbio_plugin_api::port::PortFactEmit::silent(),
             ctx: Some(ctx),
-            subject: 0,
+            subject: String::new(),
             group: String::new(),
+            session_id: String::new(),
             origin: None,
             permitted: true,
             deny_reason: String::new(),
@@ -481,7 +482,7 @@ impl symbio_plugin_api::port::PortFactWriter for RecordingWriter {
 struct StaticReader(Vec<symbio_plugin_api::port::PortFact>);
 
 impl symbio_plugin_api::port::PortFactReader for StaticReader {
-    fn facts(&self, _scope: u64) -> Vec<symbio_plugin_api::port::PortFact> {
+    fn facts(&self) -> Vec<symbio_plugin_api::port::PortFact> {
         self.0.clone()
     }
 }
@@ -503,8 +504,9 @@ fn requested_call(
             sink: ExecEventSink::silent(),
             emit: symbio_plugin_api::port::PortFactEmit::new(recorder),
             ctx: Some(ctx),
-            subject: 0,
+            subject: String::new(),
             group: String::new(),
+            session_id: String::new(),
             origin: None,
             permitted: true,
             deny_reason: String::new(),
@@ -594,8 +596,9 @@ fn authz_call(
             sink: ExecEventSink::silent(),
             emit,
             ctx: None,
-            subject: 0,
+            subject: String::new(),
             group: String::new(),
+            session_id: String::new(),
             origin: None,
             permitted: true,
             deny_reason: String::new(),
@@ -788,8 +791,9 @@ fn open_call(
             sink: ExecEventSink::silent(),
             emit,
             ctx,
-            subject: 7,
+            subject: "req-1".to_string(),
             group: String::new(),
+            session_id: "s-1".to_string(),
             origin: Some(3),
             permitted: true,
             deny_reason: String::new(),
@@ -884,7 +888,7 @@ async fn open_marks_protocol_failures_invalid_and_falls_back_to_the_epoch_id() {
     let facts = captured.lock().unwrap();
     assert_eq!(facts.len(), 2);
     assert_eq!(
-        facts[0].key, "request-tool-tool-7-d2-model-7-c000-1",
+        facts[0].key, "request-tool-tool-req-1-d2-model-7-c000-1",
         "缺模型 id 的兜底段只由应答顺序决定"
     );
     assert_eq!(facts[0].payload["invalid"], serde_json::json!(true));

@@ -122,13 +122,6 @@ define_string_key!(
     KIND,
     "kind"
 );
-// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（004-PROTOCOLS.md 字段表）（消费方=004-PROTOCOLS.md 字段表 + 三方规范键清单）
-define_string_key!(
-    #[allow(dead_code)]
-    ScopeKey,
-    SCOPE,
-    "scope"
-);
 define_string_key!(ContentKey, CONTENT, "content");
 // dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（004-PROTOCOLS.md 字段表）（消费方=004-PROTOCOLS.md 字段表 + 三方规范键清单）
 define_string_key!(

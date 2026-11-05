@@ -1,7 +1,7 @@
 //! 变更账的折叠判据（[D-169]）：收哪些、谁说话、界外怎么办。
 //!
 //! 折叠的**呈现**（地址、文案）由会话出口自己钉（`crates/symbio-plugin-session/src/changes.test.rs`）——
-//! 本文件只判折叠这一半：从事实到 `{path, op, turn, changes}`。
+//! 本文件只判折叠这一半：从事实到 `{path, op, changes}`。
 //!
 //! 判据的口径是**字段**而不是工具名：`file_op` 由写族工具声明的行为交出
 //! （DE-025 D-207），所以本文件同时钉住「折叠不认识任何工具名」这件事——
@@ -15,8 +15,8 @@ use symbio_plugin_api::effects::FileOp;
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 
 /// 一条成功的写（`args` 按生产形状给 JSON 文本）。
-fn ok(id: &str, op: &str, args: serde_json::Value, turn: u64) -> Event {
-    artifact(id, "vdfs_write", Some(op), args, true, turn, "{}")
+fn ok(id: &str, op: &str, args: serde_json::Value) -> Event {
+    artifact(id, "vdfs_write", Some(op), args, true, "{}")
 }
 
 /// 一条工具产物；`text` 是结果 JSON 文本（`edit` 的 `replaced` 从这里读）。
@@ -29,7 +29,6 @@ fn artifact(
     op: Option<&str>,
     args: serde_json::Value,
     ok: bool,
-    turn: u64,
     text: &str,
 ) -> Event {
     let mut payload = serde_json::json!({
@@ -46,18 +45,17 @@ fn artifact(
         EVENT_ARTIFACT_ADDED,
         Entity::Artifact,
         Verb::Asserted,
-        turn,
         "agent",
     )
     .with_payload(payload)
 }
 
-fn fold(events: &[Event]) -> Vec<(String, FileOp, u64, u64)> {
+fn fold(events: &[Event]) -> Vec<(String, FileOp, u64)> {
     workdir_changes(MESSAGE)
         .read_all(events)
         .value
         .into_iter()
-        .map(|c| (c.path, c.op, c.turn, c.changes))
+        .map(|c| (c.path, c.op, c.changes))
         .collect()
 }
 
@@ -70,11 +68,10 @@ fn only_successful_annotated_writes_are_changes() {
         Some("write"),
         serde_json::json!({"path": "a.txt"}),
         false,
-        1,
         "boom",
     );
     let events = [
-        ok("a-0", "write", serde_json::json!({"path": "a.txt"}), 1),
+        ok("a-0", "write", serde_json::json!({"path": "a.txt"})),
         failed,
         // 读族没有声明 `file_change` ⇒ 产物上没有 `file_op` ⇒ 不是变更。
         artifact(
@@ -83,7 +80,6 @@ fn only_successful_annotated_writes_are_changes() {
             None,
             serde_json::json!({"path": "a.txt"}),
             true,
-            1,
             "{}",
         ),
         artifact(
@@ -92,11 +88,10 @@ fn only_successful_annotated_writes_are_changes() {
             None,
             serde_json::json!({"path": "a.txt"}),
             true,
-            1,
             "{}",
         ),
     ];
-    assert_eq!(fold(&events), vec![("a.txt".into(), FileOp::Write, 1, 1)]);
+    assert_eq!(fold(&events), vec![("a.txt".into(), FileOp::Write, 1)]);
 }
 
 /// **core 不认识工具名**：一个从没见过的工具只要带上 `file_op`，就按那个动作进账。
@@ -112,7 +107,6 @@ fn any_tool_that_declares_an_op_is_counted() {
             Some("write"),
             serde_json::json!({"path": "remote.txt"}),
             true,
-            1,
             "{}",
         ),
         artifact(
@@ -121,15 +115,14 @@ fn any_tool_that_declares_an_op_is_counted() {
             Some("delete"),
             serde_json::json!({"path": "tmp/x"}),
             true,
-            2,
             "{}",
         ),
     ];
     assert_eq!(
         fold(&events),
         vec![
-            ("tmp/x".into(), FileOp::Delete, 2, 1),
-            ("remote.txt".into(), FileOp::Write, 1, 1),
+            ("tmp/x".into(), FileOp::Delete, 1),
+            ("remote.txt".into(), FileOp::Write, 1),
         ]
     );
 }
@@ -143,7 +136,6 @@ fn a_write_shaped_tool_without_the_field_is_not_counted() {
         None,
         serde_json::json!({"path": "old.txt"}),
         true,
-        1,
         "{}",
     );
     assert!(
@@ -152,35 +144,32 @@ fn a_write_shaped_tool_without_the_field_is_not_counted() {
     );
 }
 
-/// 同一路径多次改：**最新一条说了算**（动作 / 轮号），次数累加。
+/// 同一路径多次改：**最新一条说了算**（动作），次数累加。
 #[test]
 fn the_last_change_wins_and_changes_are_counted() {
     let events = [
-        ok("a-0", "write", serde_json::json!({"path": "src/x.rs"}), 2),
-        ok("a-1", "edit", serde_json::json!({"path": "src/x.rs"}), 3),
-        ok("a-2", "delete", serde_json::json!({"path": "src/x.rs"}), 4),
+        ok("a-0", "write", serde_json::json!({"path": "src/x.rs"})),
+        ok("a-1", "edit", serde_json::json!({"path": "src/x.rs"})),
+        ok("a-2", "delete", serde_json::json!({"path": "src/x.rs"})),
     ];
-    assert_eq!(
-        fold(&events),
-        vec![("src/x.rs".into(), FileOp::Delete, 4, 3)]
-    );
+    assert_eq!(fold(&events), vec![("src/x.rs".into(), FileOp::Delete, 3)]);
 }
 
 /// 最近改过的在前——顺序取「最后一次出现的位置」，不是字典序。
 #[test]
 fn most_recently_changed_first() {
     let events = [
-        ok("a-0", "write", serde_json::json!({"path": "z.txt"}), 1),
-        ok("a-1", "write", serde_json::json!({"path": "a.txt"}), 1),
+        ok("a-0", "write", serde_json::json!({"path": "z.txt"})),
+        ok("a-1", "write", serde_json::json!({"path": "a.txt"})),
         // 再写 z.txt：它回到最前，且次数变 2。
-        ok("a-2", "write", serde_json::json!({"path": "z.txt"}), 2),
+        ok("a-2", "write", serde_json::json!({"path": "z.txt"})),
     ];
     let rows = fold(&events);
     assert_eq!(
         rows,
         vec![
-            ("z.txt".into(), FileOp::Write, 2, 2),
-            ("a.txt".into(), FileOp::Write, 1, 1),
+            ("z.txt".into(), FileOp::Write, 2),
+            ("a.txt".into(), FileOp::Write, 1),
         ]
     );
 }
@@ -196,7 +185,6 @@ fn noop_edit_is_not_a_change() {
         Some("edit"),
         args.clone(),
         true,
-        1,
         r#"{"success":true,"replaced":0}"#,
     );
     let real = artifact(
@@ -205,7 +193,6 @@ fn noop_edit_is_not_a_change() {
         Some("edit"),
         args.clone(),
         true,
-        2,
         r#"{"success":true,"replaced":1}"#,
     );
     let legacy = artifact(
@@ -214,19 +201,17 @@ fn noop_edit_is_not_a_change() {
         Some("edit"),
         args.clone(),
         true,
-        3,
         r#"{"success":true}"#,
     );
     let events = [noop, real.clone(), legacy];
-    assert_eq!(fold(&events), vec![("n.txt".into(), FileOp::Edit, 3, 2)]);
-    assert_eq!(fold(&[real]), vec![("n.txt".into(), FileOp::Edit, 2, 1)]);
+    assert_eq!(fold(&events), vec![("n.txt".into(), FileOp::Edit, 2)]);
+    assert_eq!(fold(&[real]), vec![("n.txt".into(), FileOp::Edit, 1)]);
     assert!(fold(&[artifact(
         "a-0",
         "vdfs_edit",
         Some("edit"),
         args,
         true,
-        1,
         r#"{"success":true,"replaced":0}"#
     )])
     .is_empty());
@@ -248,14 +233,7 @@ fn paths_outside_the_workdir_are_skipped() {
     let mut events: Vec<Event> = outside
         .iter()
         .enumerate()
-        .map(|(i, p)| {
-            ok(
-                &format!("a-{i}"),
-                "write",
-                serde_json::json!({"path": p}),
-                1,
-            )
-        })
+        .map(|(i, p)| ok(&format!("a-{i}"), "write", serde_json::json!({"path": p})))
         .collect();
     // 虚拟根的名字由 vdfs 插件声明，测试**问声明**而不是写死拼法。
     let root = symbio_sdk::vdfs::address::declared_addr_root().expect("vdfs 插件应已声明根名");
@@ -263,7 +241,6 @@ fn paths_outside_the_workdir_are_skipped() {
         "a-virtual",
         "write",
         serde_json::json!({ "path": format!("{root}/session/s1/inbox/0.md") }),
-        1,
     ));
     assert!(fold(&events).is_empty());
 }
@@ -276,25 +253,23 @@ fn paths_are_normalized_inside_the_workdir() {
             "a-0",
             "write",
             serde_json::json!({"path": "src\\lib\\main.rs"}),
-            1,
         ),
         ok(
             "a-1",
             "write",
             serde_json::json!({"path": "./src/lib/main.rs"}),
-            2,
         ),
     ];
     assert_eq!(
         fold(&events),
-        vec![("src/lib/main.rs".into(), FileOp::Write, 2, 2)]
+        vec![("src/lib/main.rs".into(), FileOp::Write, 2)]
     );
 }
 
 /// 参数形状容错：`args` 是对象也认，坏 JSON / 缺 `path` 跳过，不炸。
 #[test]
 fn argument_shapes_are_tolerated() {
-    let mut object_args = ok("a-0", "write", serde_json::json!({"path": "o.txt"}), 1);
+    let mut object_args = ok("a-0", "write", serde_json::json!({"path": "o.txt"}));
     object_args.payload["args"] = serde_json::json!({"path": "o.txt"});
     let mut bad_json = artifact(
         "a-1",
@@ -302,25 +277,24 @@ fn argument_shapes_are_tolerated() {
         Some("write"),
         serde_json::json!({}),
         true,
-        1,
         "{}",
     );
     bad_json.payload["args"] = serde_json::json!("not json");
-    let missing_path = ok("a-2", "write", serde_json::json!({"text": "x"}), 1);
+    let missing_path = ok("a-2", "write", serde_json::json!({"text": "x"}));
     assert_eq!(
         fold(&[object_args, bad_json, missing_path]),
-        vec![("o.txt".into(), FileOp::Write, 1, 1)]
+        vec![("o.txt".into(), FileOp::Write, 1)]
     );
 }
 
 /// as-of：`ts > now` 的事件不在账上（与其余投影同口径）。
 #[test]
 fn future_events_are_skipped() {
-    let mut e = ok("a-0", "write", serde_json::json!({"path": "t.txt"}), 1);
+    let mut e = ok("a-0", "write", serde_json::json!({"path": "t.txt"}));
     e = e.with_ts(100);
     assert!(workdir_changes(MESSAGE)
         .apply(&[e.clone()], 50, symbio_kernel::view::Budget::generous())
         .value
         .is_empty());
-    assert_eq!(fold(&[e]), vec![("t.txt".into(), FileOp::Write, 1, 1)]);
+    assert_eq!(fold(&[e]), vec![("t.txt".into(), FileOp::Write, 1)]);
 }

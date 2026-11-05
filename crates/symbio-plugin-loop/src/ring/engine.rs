@@ -86,23 +86,23 @@ struct Work {
     waiting: Vec<DebtKey>,
 }
 
-/// 驱动一个可见域到没有可还的债、只剩在飞。
-pub(crate) async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
+/// 驱动本会话到没有可还的债、只剩在飞。
+pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
     let mut dispatched = 0usize;
     loop {
         let facts = ctx.facts();
         let view = FactView::new(&facts);
         let source = ctx.source();
-        let rows = source.rows(&view, scope);
+        let rows = source.rows(&view);
         let now_ms = ctx.now_ms();
-        let work = plan(&view, source, &rows, scope, now_ms);
+        let work = plan(&view, source, &rows, now_ms);
 
         if !work.dispatch.is_empty() {
             let cap = ctx.concurrency().max(1);
             for chunk in work.dispatch.chunks(cap) {
                 let run = chunk
                     .iter()
-                    .map(|(row, attempt)| dispatch(ctx, scope, row.clone(), *attempt, now_ms));
+                    .map(|(row, attempt)| dispatch(ctx, row.clone(), *attempt, now_ms));
                 join_all(run).await;
                 dispatched += chunk.len();
             }
@@ -110,7 +110,7 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
         }
         if !work.expire.is_empty() {
             for (row, attempt, next) in work.expire {
-                expire(ctx, scope, row, attempt, next, now_ms);
+                expire(ctx, row, attempt, next, now_ms);
             }
             continue;
         }
@@ -127,13 +127,7 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx, scope: u64) -> RunReport {
 }
 
 /// 选这一圈的全部可还之债：可派发的进批，租约已过的排进过期，其余在飞收进等待。
-fn plan(
-    view: &FactView<'_>,
-    source: &dyn DebtSource,
-    rows: &[DebtRow],
-    scope: u64,
-    now_ms: u64,
-) -> Work {
+fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: u64) -> Work {
     let mut work = Work::default();
     let mut seen = HashSet::new();
     for row in rows {
@@ -142,16 +136,16 @@ fn plan(
                 continue;
             }
         }
-        // 触发条件是**种类**的存在性：环只问宿主「这个可见域有没有这种事实」，
+        // 触发条件是**种类**的存在性：环只问宿主「有没有这种事实」，
         // 不解释它是什么（字符串透传，归属：选债）。
         if let Some(when) = &row.when {
-            if !source.exists(when, scope) {
+            if !source.exists(when) {
                 continue;
             }
         }
         // 「该端口的债全部还清才欠」读的是债状态，不是事实状态（归属：选债）。
         if let Some(port) = row.when_no_open {
-            if view.unresolved(scope).iter().any(|key| key.port == port) {
+            if view.unresolved().iter().any(|key| key.port == port) {
                 continue;
             }
         }
@@ -159,15 +153,15 @@ fn plan(
         // 债表永不读载荷：需要按内容分叉时，由写方把结论写成一条具体事实。
         if let Some(unless) = &row.unless {
             let hit = match unless {
-                Unless::Kind(kind) => source.exists(kind, scope),
-                Unless::Id { kind, id } => source.exists_id(kind, id, scope),
+                Unless::Kind(kind) => source.exists(kind),
+                Unless::Id { kind, id } => source.exists_id(kind, id),
             };
             if hit {
                 continue;
             }
         }
-        let attempt = view.attempt(scope, row.port, &row.id).max(1);
-        let key = DebtKey::new(scope, row.port, row.id.clone(), attempt);
+        let attempt = view.attempt(row.port, &row.id).max(1);
+        let key = DebtKey::new(row.port, row.id.clone(), attempt);
         if view.closing(&key).is_some() {
             continue;
         }
@@ -191,18 +185,11 @@ fn plan(
 }
 
 /// 租约已过：有下一笔就记账并再举，没有就判死。
-fn expire(
-    ctx: &dyn DriveCtx,
-    scope: u64,
-    row: DebtRow,
-    attempt: u32,
-    next: Option<u32>,
-    now_ms: u64,
-) {
-    let key = DebtKey::new(scope, row.port, row.id.clone(), attempt);
+fn expire(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, next: Option<u32>, now_ms: u64) {
+    let key = DebtKey::new(row.port, row.id.clone(), attempt);
     match next {
         Some(next) => {
-            let next_key = DebtKey::new(scope, row.port, row.id.clone(), next);
+            let next_key = DebtKey::new(row.port, row.id.clone(), next);
             ctx.append(Fact::new(
                 FactKind::Retry,
                 next_key,
@@ -222,8 +209,8 @@ fn expire(
 }
 
 /// 派发一笔：补 `request` → 落 `sent` → 调执行体 → 配对落账。
-async fn dispatch(ctx: &dyn DriveCtx, scope: u64, row: DebtRow, attempt: u32, now_ms: u64) {
-    let key = DebtKey::new(scope, row.port, row.id.clone(), attempt);
+async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
+    let key = DebtKey::new(row.port, row.id.clone(), attempt);
     ctx.append(Fact::new(
         FactKind::Request,
         key.clone(),
@@ -255,16 +242,17 @@ async fn dispatch(ctx: &dyn DriveCtx, scope: u64, row: DebtRow, attempt: u32, no
     let exec = PortExecContext {
         deadline_ms: Some(now_ms.saturating_add(row.lease_ms)),
         abort: ExecAbortSignal::new(),
-        idempotency_key: format!("{}:{}:{}:{}", key.scope, row.port, row.id, attempt),
+        idempotency_key: format!("{}:{}:{}", row.port, row.id, attempt),
         sink: handles.sink,
         emit: PortFactEmit::new(writer.clone()),
         ctx: handles.ctx,
-        subject: key.scope,
+        subject: format!("{}:{}:{}", row.port, row.id, attempt),
         group: String::new(),
         origin: None,
         permitted: true,
         deny_reason: String::new(),
         scratch_dir: handles.scratch_dir,
+        session_id: handles.session_id,
         reader: ctx.fact_reader(),
     };
     let outcome = executor
@@ -281,7 +269,7 @@ async fn dispatch(ctx: &dyn DriveCtx, scope: u64, row: DebtRow, attempt: u32, no
     match outcome.error {
         Some((class, why)) => {
             if class == PortErrorClass::Retryable && attempt < row.max_attempts {
-                let next_key = DebtKey::new(scope, row.port, row.id, attempt + 1);
+                let next_key = DebtKey::new(row.port, row.id, attempt + 1);
                 ctx.append(Fact::new(
                     FactKind::Retry,
                     next_key,

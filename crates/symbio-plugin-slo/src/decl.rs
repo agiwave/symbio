@@ -79,11 +79,14 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
 
 /// 本轮声明的档位：读 `user.message` 载荷的 `tier`；缺失 / 未知 ⇒ [`UNSPECIFIED`]。
 ///
+/// `turn_id` 是**触发这一轮的事实身份**（`user.message` 的 event id，也就是模型侧
+/// `turn_id` 载荷的取值）：配对按事实 id，不按任何轮号。
+///
 /// `before_seq`：
 /// - `Some(b)` ⇒ 只认 seq `< b` 的声明（兜底 / 收束事件要归到**它之前**那一幕的档位）；
 /// - `None` ⇒ 不限 seq，取**最早**一条开轮格——开轮事件的分母按「这一轮以哪一档开局」归位
 ///   （续写幕可以换档，那是另一幕的事实）。
-fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>) -> String {
+fn declared_tier(events: &[Event], turn_id: &str, before_seq: Option<u64>) -> String {
     let before = |e: &Event| before_seq.is_none_or(|b| e.seq.is_some_and(|s| s.value() < b));
     events
         .iter()
@@ -91,8 +94,9 @@ fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>) -> String
         .find(|u| {
             u.entity == Entity::Scope
                 && u.verb == Verb::Opened
-                && u.scope == turn
                 && u.kind.as_str() == EVENT_USER_MESSAGE
+                && (u.event_id == turn_id
+                    || u.payload.get("id").and_then(Value::as_str) == Some(turn_id))
                 && before(u)
         })
         .and_then(|u| u.payload.get("tier").and_then(Value::as_str))
@@ -150,7 +154,12 @@ fn latency(events: &[Event], now: i64) -> Value {
         {
             continue;
         }
-        let tier = declared_tier(events, e.scope, e.seq.map(|s| s.value()));
+        let turn_id = e
+            .payload
+            .get("turn_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let tier = declared_tier(events, turn_id, e.seq.map(|s| s.value()));
         by_tier.entry(tier).or_default().push(e.cost_ms);
     }
     json!({ "by_tier": latency_rows(by_tier) })
@@ -221,14 +230,19 @@ fn fallback(events: &[Event], now: i64) -> Value {
                     continue;
                 }
                 // 分母按整条史取**最早**一幕的派发档。
-                let tier = declared_tier(events, e.scope, None);
+                let tier = declared_tier(events, &e.event_id, None);
                 by_tier.entry(tier).or_default().0 += 1;
             }
             Verb::Closed => {
                 if e.kind.as_str() != EVENT_CHAT_ASSISTANT_FALLBACK {
                     continue;
                 }
-                let tier = declared_tier(events, e.scope, e.seq.map(|s| s.value()));
+                let turn_id = e
+                    .payload
+                    .get("turn_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let tier = declared_tier(events, turn_id, e.seq.map(|s| s.value()));
                 by_tier.entry(tier).or_default().1 += 1;
             }
             _ => {}

@@ -358,7 +358,6 @@ impl AutonomousInitiator {
             EVENT_SYSTEM_TRIGGERED,
             symbio_kernel::event::Entity::System,
             symbio_kernel::event::Verb::Opened,
-            0,
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
@@ -374,7 +373,6 @@ impl AutonomousInitiator {
             symbio_plugin_api::events::EVENT_CONATION_EXPRESSED,
             symbio_kernel::event::Entity::Conation,
             symbio_kernel::event::Verb::Opened,
-            0,
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
@@ -388,7 +386,6 @@ impl AutonomousInitiator {
             symbio_plugin_api::events::EVENT_TASK_OPENED,
             symbio_kernel::event::Entity::Task,
             symbio_kernel::event::Verb::Opened,
-            0,
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
@@ -414,7 +411,6 @@ impl AutonomousInitiator {
             EVENT_SYSTEM_HEALTH,
             symbio_kernel::event::Entity::System,
             symbio_kernel::event::Verb::Progressed,
-            0,
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)

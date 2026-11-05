@@ -111,7 +111,6 @@ fn recorded(cause: &str, effect: &str) -> Event {
         CAUSAL_LINK,
         Entity::Domain,
         Verb::Asserted,
-        3,
         "session/a",
     )
     .with_payload(json!({ "cause": cause, "effect": effect, "confidence": 50 }))

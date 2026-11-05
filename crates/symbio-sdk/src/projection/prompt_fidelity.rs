@@ -74,7 +74,7 @@ use crate::projection::vocab::{ChatVocab, MessageVocab};
 #[derive(Debug, Clone)]
 pub enum PromptGap {
     /// 网格里有一条投影内的事件，没有对应的 prompt entry（投影层把它丢了）。
-    DroppedFromPrompt { kind: String, turn: u64 },
+    DroppedFromPrompt { kind: String, fact: String },
     /// prompt 里有一条 entry，网格里找不到出处（**两条真源**）。
     NoSourceInGrid { role: String, text: String },
     /// `role == "tool"` 却没带工具名——工具结果的机器可读关联丢了。
@@ -84,7 +84,7 @@ pub enum PromptGap {
     /// 为什么独立成一条而不并进 DroppedFromPrompt：两者方向相反——那条是
     /// 「该有的没有」，这条是「不该有的有了」。合成一个方向就会漏掉其中一半，
     /// 而漏掉的那一半恰好是「界面文本污染了对话」这种用户直接看得见的退化。
-    ExcludedLeakedIntoPrompt { kind: String, turn: u64 },
+    ExcludedLeakedIntoPrompt { kind: String, fact: String },
     /// 角色与网格里那条事件的坐标不符（投影把 user 说成 assistant 之类）。
     ///
     /// `expected` 是 `String` 而不是 `&'static str`：**快照条目**的期望角色来自
@@ -95,7 +95,7 @@ pub enum PromptGap {
         expected: String,
         got: String,
         kind: String,
-        turn: u64,
+        fact: String,
     },
 }
 
@@ -249,8 +249,8 @@ impl PromptReport {
         );
         for g in &self.gaps {
             let one = match g {
-                PromptGap::DroppedFromPrompt { kind, turn } => {
-                    format!("网格→prompt 丢事实：{kind}（turn {turn}）没有对应消息")
+                PromptGap::DroppedFromPrompt { kind, fact } => {
+                    format!("网格→prompt 丢事实：{kind}（事实 {fact}）没有对应消息")
                 }
                 PromptGap::NoSourceInGrid { role, text } => format!(
                     "prompt→网格 无出处：一条 role={role} 的消息在事实源里找不到对应（内容前 40 字：{:.40?}）",
@@ -260,12 +260,15 @@ impl PromptReport {
                     "role 退化：role=tool 却没带工具名（内容前 40 字：{:.40?}）",
                     text
                 ),
-                PromptGap::ExcludedLeakedIntoPrompt { kind, turn } => format!(
-                    "界面文本泄漏：{kind}（turn {turn}）标了「不进请求包」，却出现在送模型的消息里"
+                PromptGap::ExcludedLeakedIntoPrompt { kind, fact } => format!(
+                    "界面文本泄漏：{kind}（事实 {fact}）标了「不进请求包」，却出现在送模型的消息里"
                 ),
-                PromptGap::RoleMismatch { expected, got, kind, turn } => format!(
-                    "角色不符：{kind}（turn {turn}）应是 {expected}，prompt 里是 {got}"
-                ),
+                PromptGap::RoleMismatch {
+                    expected,
+                    got,
+                    kind,
+                    fact,
+                } => format!("角色不符：{kind}（事实 {fact}）应是 {expected}，prompt 里是 {got}"),
             };
             s.push_str("  · ");
             s.push_str(&one);
@@ -315,7 +318,7 @@ fn claim(
     text: &str,
     role: &str,
     kind: &str,
-    turn: u64,
+    fact: &str,
 ) {
     let hit = messages
         .iter()
@@ -324,7 +327,7 @@ fn claim(
     match hit {
         None => rep.gaps.push(PromptGap::DroppedFromPrompt {
             kind: kind.to_string(),
-            turn,
+            fact: fact.to_string(),
         }),
         Some(i) => {
             used[i] = true;
@@ -334,7 +337,7 @@ fn claim(
                     expected: role.to_string(),
                     got: m.role.clone(),
                     kind: kind.to_string(),
-                    turn,
+                    fact: fact.to_string(),
                 });
             }
             if m.role == "tool" && m.tool.as_deref().map(str::trim).unwrap_or("").is_empty() {
@@ -358,7 +361,7 @@ fn claim_nodes(
     msgs: &[crate::chat::chat_node::ChatNode],
     mutations: &super::mutations::MessageMutations,
     kind: &str,
-    turn: u64,
+    fact: &str,
 ) {
     for (node, entry) in super::mutations::snapshot_entries(msgs) {
         // 与投影同一份折叠索引：被删的跳过（它本就不该在 prompt 里），
@@ -373,7 +376,7 @@ fn claim_nodes(
             ),
             None => (entry.role.clone(), entry.text.clone()),
         };
-        claim(rep, used, messages, &text, &role, kind, turn);
+        claim(rep, used, messages, &text, &role, kind, fact);
     }
 }
 
@@ -447,7 +450,7 @@ pub fn verify(
                         msgs,
                         &mutations,
                         e.kind.as_str(),
-                        e.scope,
+                        &e.event_id,
                     );
                 }
             }
@@ -469,7 +472,7 @@ pub fn verify(
                     &super::mutations::added_messages(e),
                     &mutations,
                     e.kind.as_str(),
-                    e.scope,
+                    &e.event_id,
                 );
             }
             continue;
@@ -486,7 +489,7 @@ pub fn verify(
             if messages.iter().any(|m| m.text == text) {
                 rep.gaps.push(PromptGap::ExcludedLeakedIntoPrompt {
                     kind: e.kind.as_str().to_string(),
-                    turn: e.scope,
+                    fact: e.event_id.clone(),
                 });
             }
             continue;
@@ -531,7 +534,7 @@ pub fn verify(
             &text,
             &role,
             e.kind.as_str(),
-            e.scope,
+            &e.event_id,
         );
     }
 

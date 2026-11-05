@@ -13,13 +13,12 @@ use symbio_sdk::authz::PRINCIPAL_MAIN;
 /// `file_op` 不是夹具为了方便造的字段——它是写族工具声明 `file_change` 行为之后由
 /// `ToolBehavior::annotate` 交出来的那一句（DE-025 D-214）。夹具照线上形状写，
 /// 才判得住「core 只认字段、不认工具名」。
-fn write(id: &str, path: &str, turn: u64) -> Event {
+fn write(id: &str, path: &str) -> Event {
     Event::pending(
         id,
         EVENT_ARTIFACT_ADDED,
         Entity::Artifact,
         Verb::Asserted,
-        turn,
         "agent",
     )
     .with_payload(serde_json::json!({
@@ -31,15 +30,12 @@ fn write(id: &str, path: &str, turn: u64) -> Event {
     }))
 }
 
-/// 行是呈现就绪的：地址、判别词、文案、轮号、次数一次给全。
+/// 行是呈现就绪的：地址、判别词、文案、次数一次给全。
 #[test]
 fn rows_are_presentation_ready() {
     let got = read_changes(
         "s1",
-        Some(vec![
-            write("a-0", "src/lib.rs", 2),
-            write("a-1", "docs/a.md", 3),
-        ]),
+        Some(vec![write("a-0", "src/lib.rs"), write("a-1", "docs/a.md")]),
         None,
     );
     assert!(got.has_wal && got.readable);
@@ -49,7 +45,6 @@ fn rows_are_presentation_ready() {
     assert_eq!(got.rows[0].address, "workdir/docs/a.md");
     assert_eq!(got.rows[0].op, "write");
     assert_eq!(got.rows[0].label, "写入");
-    assert_eq!(got.rows[0].turn, 3);
     assert_eq!(got.rows[0].changes, 1);
     assert_eq!(got.rows[1].address, "workdir/src/lib.rs");
 }
@@ -69,7 +64,7 @@ fn no_facts_is_an_evidenced_empty() {
 fn reader_without_access_gets_an_empty_ledger() {
     let got = read_changes(
         "s1",
-        Some(vec![write("a-0", "secret.txt", 1)]),
+        Some(vec![write("a-0", "secret.txt")]),
         Some(PRINCIPAL_MAIN),
     );
     assert!(got.has_wal, "有源这一格照报");

@@ -606,9 +606,6 @@ fn append_into(
         kind,
         Entity::Message,
         verb,
-        // `turn = 0`：变更不属于任何一轮（截断跨轮）。与 `memory.recalled` /
-        // `commitment.*` 同一条既有约定。
-        0,
         actor,
     )
     .with_produced_by(anchor)

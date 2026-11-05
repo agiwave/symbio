@@ -248,7 +248,6 @@ impl PreemptionDecider {
             EVENT_TASK_HELD,
             Entity::Task,
             Verb::Held,
-            0,
             PRINCIPAL_REFLEX,
         )
         .with_produced_by(source_seq)
@@ -267,7 +266,6 @@ impl PreemptionDecider {
             EVENT_TASK_PROGRESS,
             Entity::Task,
             Verb::Progressed,
-            0,
             PRINCIPAL_REFLEX,
         )
         .with_produced_by(source_seq)
@@ -281,7 +279,6 @@ impl PreemptionDecider {
             symbio_plugin_api::events::EVENT_TASK_CONTROLLED,
             Entity::Control,
             Verb::Opened,
-            0,
             PRINCIPAL_REFLEX,
         )
         .with_produced_by(source_seq)

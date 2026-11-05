@@ -22,7 +22,6 @@ fn expressed(id: &str, goal: &str, seq: u64, ts: i64) -> Event {
         EVENT_CONATION_EXPRESSED,
         Entity::Conation,
         Verb::Opened,
-        0,
         INITIATOR,
     )
     .with_ts(ts)
@@ -33,17 +32,10 @@ fn expressed(id: &str, goal: &str, seq: u64, ts: i64) -> Event {
 
 /// 由某条欲长出一个任务（`produced_by` 指回欲 seq——`open_long_goal` 的形状）。
 fn opened_task(id: &str, task_id: &str, goal: &str, source: u64, ts: i64) -> Event {
-    let mut e = Event::pending(
-        id,
-        EVENT_TASK_OPENED,
-        Entity::Task,
-        Verb::Opened,
-        0,
-        INITIATOR,
-    )
-    .with_ts(ts)
-    .with_produced_by(source)
-    .with_payload(json!({ "task_id": task_id, "goal": goal }));
+    let mut e = Event::pending(id, EVENT_TASK_OPENED, Entity::Task, Verb::Opened, INITIATOR)
+        .with_ts(ts)
+        .with_produced_by(source)
+        .with_payload(json!({ "task_id": task_id, "goal": goal }));
     e.seq = Some(Seq::new(9_000 + source));
     e
 }

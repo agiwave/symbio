@@ -128,16 +128,9 @@ fn frozen() -> Arc<Frozen> {
 }
 
 fn event(id: &str, text: &str, ts: i64) -> Event {
-    Event::pending(
-        id,
-        ITEM_ADDED,
-        Entity::Domain,
-        Verb::Opened,
-        0,
-        "tests/main",
-    )
-    .with_ts(ts)
-    .with_payload(serde_json::json!({ "text": text }))
+    Event::pending(id, ITEM_ADDED, Entity::Domain, Verb::Opened, "tests/main")
+        .with_ts(ts)
+        .with_payload(serde_json::json!({ "text": text }))
 }
 
 /// 合并那一半由 owner 交、经同一张冻结表被调用——读口不认识值的形状（`D-281`）。

@@ -104,7 +104,6 @@ fn offered(id: &str, from: &str, ts: i64) -> Event {
         EVENT_COMMITMENT_OPENED,
         Entity::Commitment,
         Verb::Opened,
-        0,
         from,
     )
     .with_ts(ts)
@@ -120,7 +119,6 @@ fn kept(id: &str, from: &str, ts: i64) -> Event {
         EVENT_COMMITMENT_RELEASED,
         Entity::Commitment,
         Verb::Closed,
-        0,
         from,
     )
     .with_ts(ts)
@@ -134,7 +132,6 @@ fn breached(id: &str, from: &str, why: &str, ts: i64) -> Event {
         EVENT_COMMITMENT_BROKEN,
         Entity::Commitment,
         Verb::Closed,
-        0,
         from,
     )
     .with_ts(ts)
@@ -148,7 +145,6 @@ fn asserted(id: &str, from: &str, ts: i64) -> Event {
         "commitment.asserted",
         Entity::Commitment,
         Verb::Asserted,
-        0,
         from,
     )
     .with_ts(ts)
@@ -214,7 +210,6 @@ fn a_self_report_never_moves_the_ledger() {
             "reputation.reported",
             Entity::Verdict,
             Verb::Asserted,
-            0,
             "agent:peer-b",
         )
         .with_ts(13)

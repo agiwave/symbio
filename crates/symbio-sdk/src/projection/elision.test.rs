@@ -12,7 +12,6 @@ fn sequenced(kind: &str, seq: u64) -> Event {
         kind,
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     );
     e.seq = Some(Seq::new(seq));
@@ -26,7 +25,6 @@ fn replacement(from: u64, to: u64) -> Event {
         EVENT_MESSAGE_ADDED,
         Entity::Message,
         Verb::Opened,
-        0,
         "notes",
     );
     e.seq = Some(Seq::new(100));
@@ -88,7 +86,6 @@ fn an_event_without_a_seq_is_never_inside_a_range() {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     );
     pending.seq = None;
@@ -115,7 +112,6 @@ fn an_unselected_branch_still_elides_through_the_same_judgement() {
         EVENT_TURN_BRANCH,
         Entity::Scope,
         Verb::Asserted,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "of": "t-1", "into": "t-2" }));
@@ -124,7 +120,6 @@ fn an_unselected_branch_still_elides_through_the_same_judgement() {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "turn_id": "t-1", "text": "旧支" }));
@@ -133,7 +128,6 @@ fn an_unselected_branch_still_elides_through_the_same_judgement() {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "turn_id": "t-2", "text": "新支" }));
@@ -152,7 +146,6 @@ fn only_the_payload_key_decides_a_replacement() {
         EVENT_MESSAGE_ADDED,
         Entity::Message,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "messages": [] }));

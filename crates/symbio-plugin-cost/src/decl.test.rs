@@ -23,7 +23,6 @@ fn billed(id: &str, principal: &str, cost_ms: u64, ts: i64) -> Event {
         EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
-        1,
         principal,
     )
     .with_ts(ts)

@@ -1,10 +1,10 @@
-//! 宿主：发现全部 port 行、按 scope 起一次驱动、把债表当数据读、记机制状态 `idle`。
+//! 宿主：发现全部 port 行、按会话起一次驱动、把债表当数据读、记机制状态 `idle`。
 //!
 //! 宿主不是插件：它依赖契约层，但插件不依赖它；插件之间互不依赖仍成立。
 //! **宿主不认识环的任何类型**：驱动执行者经既有的**能力收集机制**（`drive` 族的一行）
-//! 取回，能力束与可见域是**调用参数**，不是注册面（`DE-051` 机制形状）。
+//! 取回，能力束是**调用参数**，不是注册面（`DE-051` 机制形状）。
 //! 端口名与债行都不在这里构造：执行体由 `port` 族的行解析，债行由插件经 `debt` 族自报。
-//! `idle` 是机制事实（scope 无未还债），不是业务事实；收束谓词由读方自算，宿主不落业务事实。
+//! `idle` 是机制事实（本会话无未还债），不是业务事实；收束谓词由读方自算，宿主不落业务事实。
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -42,28 +42,14 @@ fn shard_of(fact: &DriveFact) -> Option<u64> {
     fact.payload.get(SHARD_KEY).and_then(|v| v.as_u64())
 }
 
-/// 可见域身份：会话 id 的稳定 FNV-1a 64 位；0 保留给「没有可见域」，不拿来占位。
-pub fn scope_of(session_id: &str) -> u64 {
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in session_id.as_bytes() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    if hash == 0 {
-        1
-    } else {
-        hash
-    }
-}
-
-/// 进程内宿主：根插件 + 事实源 + 每个可见域的五事实账。
+/// 进程内宿主：根插件 + 事实源 + 本会话的五事实账。
 pub struct Host {
     root: Arc<dyn Plugin>,
-    facts: Arc<Mutex<HashMap<u64, Vec<DriveFact>>>>,
+    facts: Arc<Mutex<Vec<DriveFact>>>,
     /// 事实源（唯一写入口）：世界事实与环协议事实都落这里。
     /// 读面（`exists` / `reader`）只从这里投影——**不问写方是谁**。
     source: Arc<dyn FactSource>,
-    idle: Arc<Mutex<HashMap<u64, u64>>>,
+    idle: Arc<Mutex<Option<u64>>>,
     started: Instant,
     concurrency: usize,
 }
@@ -91,66 +77,43 @@ impl Host {
     ) -> Self {
         Self {
             root,
-            facts: Arc::new(Mutex::new(HashMap::new())),
+            facts: Arc::new(Mutex::new(Vec::new())),
             source,
-            idle: Arc::new(Mutex::new(HashMap::new())),
+            idle: Arc::new(Mutex::new(None)),
             started: Instant::now(),
             concurrency: concurrency.max(1),
         }
     }
 
-    /// 该可见域的全量事实投影（**从事实源读**，含执行体写口）。
-    pub fn world_facts(&self, scope: u64) -> Vec<PortFact> {
-        self.source
-            .facts(scope)
-            .into_iter()
-            .map(event_to_fact)
-            .collect()
+    /// 本会话的全量事实投影（**从事实源读**，含执行体写口）。
+    pub fn world_facts(&self) -> Vec<PortFact> {
+        self.source.facts().into_iter().map(event_to_fact).collect()
     }
 
-    /// 该 scope 最近一次「无未还债」的落账时刻；`None` = 尚有未还债。
+    /// 本会话最近一次「无未还债」的落账时刻；`None` = 尚有未还债。
     ///
     /// 机制状态，不是业务：收束谓词由读方拿它与终答事实自算。
-    pub fn idle_at(&self, scope: u64) -> Option<u64> {
-        self.idle
+    pub fn idle_at(&self) -> Option<u64> {
+        *self
+            .idle
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&scope)
-            .copied()
     }
 
-    /// 该 scope 的五事实只读投影（读方自算谓词用；`idle` 是机制状态，走 [`Self::idle_at`]）。
-    pub fn facts(&self, scope: u64) -> Vec<DriveFact> {
+    /// 本会话的五事实只读投影（读方自算谓词用；`idle` 是机制状态，走 [`Self::idle_at`]）。
+    pub fn facts(&self) -> Vec<DriveFact> {
         self.facts
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&scope)
-            .cloned()
-            .unwrap_or_default()
+            .clone()
     }
 
-    /// 按一个会话起一次驱动。`base` 提供工作目录等上下文字段。
+    /// 按本会话起一次驱动。`base` 提供工作目录等上下文字段。
     ///
-    /// scope 由会话 id 派生（旧入口）。生产驱动入口走 [`Self::drive_at`]：
-    /// 事实源里的 scope 是**轮的同一性**，同一条会话的不同轮各是各的域。
+    /// 调用方**不得**在外层写 `loop { drive }`——环内部的轮次推进归环，
+    /// 外层每看到一条新事实只触发一次。
     pub async fn drive(
         &self,
-        base: &Arc<dyn PluginInvokeRequest>,
-        session_id: &str,
-        provider: Option<&str>,
-    ) -> Result<DriveReport, String> {
-        let scope = scope_of(session_id);
-        self.drive_at(scope, base, session_id, provider).await
-    }
-
-    /// 按**事实信封里的 scope** 起一次驱动。`base` 提供工作目录等上下文字段。
-    ///
-    /// 与 [`Self::drive`] 的唯一差别是 scope 的来源：这里由调用方给出（一条新事实
-    /// 自带的 scope），不再从会话 id 派生。调用方**不得**在外层写 `loop { drive }`
-    /// ——环内部的轮次推进归环，外层每看到一条新事实只触发一次。
-    pub async fn drive_at(
-        &self,
-        scope: u64,
         base: &Arc<dyn PluginInvokeRequest>,
         session_id: &str,
         provider: Option<&str>,
@@ -161,6 +124,7 @@ impl Host {
             ctx: Some(Arc::clone(&gathered.ctx)),
             scratch_dir: (!workdir.is_empty()).then(|| PathBuf::from(&workdir)),
             sink: ExecEventSink::silent(),
+            session_id: session_id.to_string(),
         };
         let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
             facts: Arc::clone(&self.facts),
@@ -173,7 +137,7 @@ impl Host {
             concurrency: self.concurrency,
             handles,
         });
-        let report = gathered.runner.drive(support, scope).await?;
+        let report = gathered.runner.drive(support).await?;
 
         let at = self.started.elapsed().as_millis() as u64;
         {
@@ -182,9 +146,9 @@ impl Host {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if matches!(&report.outcome, DriveOutcome::NoDebt) {
-                idle.insert(scope, at);
+                *idle = Some(at);
             } else {
-                idle.remove(&scope);
+                *idle = None;
             }
         }
         Ok(report)
@@ -265,7 +229,7 @@ struct Gathered {
 
 /// 宿主实现的中性能力束：事实读写、执行体解析、存在性、时钟与限额。
 struct HostDriveSupport {
-    facts: Arc<Mutex<HashMap<u64, Vec<DriveFact>>>>,
+    facts: Arc<Mutex<Vec<DriveFact>>>,
     source: Arc<dyn FactSource>,
     executors: HashMap<String, Arc<dyn PortExecutor>>,
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
@@ -278,23 +242,19 @@ struct HostDriveSupport {
 }
 
 impl DriveSupport for HostDriveSupport {
-    fn facts(&self, scope: u64) -> Vec<DriveFact> {
+    fn facts(&self) -> Vec<DriveFact> {
         self.facts
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&scope)
-            .cloned()
-            .unwrap_or_default()
+            .clone()
     }
 
     fn append(&self, fact: DriveFact) {
-        let scope = fact.scope;
         let mut facts = self
             .facts
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let bucket = facts.entry(scope).or_default();
-        if bucket.iter().any(|known| {
+        if facts.iter().any(|known| {
             known.kind == fact.kind && known.key == fact.key && shard_of(known) == shard_of(&fact)
         }) {
             return;
@@ -306,19 +266,18 @@ impl DriveSupport for HostDriveSupport {
             entity: Entity::Scope,
             verb: Verb::Asserted,
             payload: fact.payload.clone(),
-            produced_by: provenance_at(&*self.source, scope),
+            produced_by: provenance_at(&*self.source),
         };
-        let _ = self.source.append(scope, "loop".to_string(), draft);
-        bucket.push(fact);
+        let _ = self.source.append("loop".to_string(), draft);
+        facts.push(fact);
     }
 
-    fn rows(&self, scope: u64) -> Vec<DriveRow> {
+    fn rows(&self) -> Vec<DriveRow> {
         let request = DriveRequest {
-            scope,
             session_id: self.session_id.clone(),
             provider: self.provider.clone(),
         };
-        let declared = declared_facts(&self.facts(scope), &*self.source, scope);
+        let declared = declared_facts(&self.facts(), &*self.source);
         let mut rows = Vec::new();
         for source in &self.sources {
             for spec in source.rows(&request, &declared) {
@@ -343,16 +302,16 @@ impl DriveSupport for HostDriveSupport {
         self.executors.get(port).cloned()
     }
 
-    fn exists(&self, kind: &str, scope: u64) -> bool {
+    fn exists(&self, kind: &str) -> bool {
         self.source
-            .facts(scope)
+            .facts()
             .into_iter()
             .any(|event| event.kind == kind)
     }
 
-    fn exists_id(&self, kind: &str, id: &str, scope: u64) -> bool {
+    fn exists_id(&self, kind: &str, id: &str) -> bool {
         self.source
-            .facts(scope)
+            .facts()
             .into_iter()
             .any(|event| event.kind == kind && event.event_id == id)
     }
@@ -366,50 +325,39 @@ impl DriveSupport for HostDriveSupport {
     }
 
     /// 非五类事实的去处：草稿落事实源（同一事实源、同一读面）。
-    fn outlet(&self, scope: u64) -> PortFactEmit {
+    fn outlet(&self) -> PortFactEmit {
         PortFactEmit::new(Arc::new(WorldWriter {
             source: Arc::clone(&self.source),
-            scope,
         }))
     }
 
     /// 交给执行体的事实读面（宿主实现；环只转交）。
-    fn reader(&self, scope: u64) -> Option<Arc<dyn PortFactReader>> {
+    fn reader(&self) -> Option<Arc<dyn PortFactReader>> {
         Some(Arc::new(HostReader {
             source: Arc::clone(&self.source),
-            scope,
         }))
     }
 
     /// 交给执行体的不透明句柄束（宿主装配；环只转交）。
-    fn exec_handles(&self, _scope: u64) -> PortExecHandles {
+    fn exec_handles(&self) -> PortExecHandles {
         self.handles.clone()
     }
 }
 
-/// 只读事实面：按可见域交出事实源全种类的副本（载荷不透明）。
+/// 只读事实面：交出本会话事实源全种类的副本（载荷不透明）。
 struct HostReader {
     source: Arc<dyn FactSource>,
-    scope: u64,
 }
 
 impl PortFactReader for HostReader {
-    fn facts(&self, scope: u64) -> Vec<PortFact> {
-        if scope != self.scope {
-            return Vec::new();
-        }
-        self.source
-            .facts(scope)
-            .into_iter()
-            .map(event_to_fact)
-            .collect()
+    fn facts(&self) -> Vec<PortFact> {
+        self.source.facts().into_iter().map(event_to_fact).collect()
     }
 }
 
 /// 事实源的写口：草稿按草稿的幂等键落行；重复投递被事实源吸收。
 struct WorldWriter {
     source: Arc<dyn FactSource>,
-    scope: u64,
 }
 
 #[async_trait::async_trait]
@@ -417,23 +365,18 @@ impl PortFactWriter for WorldWriter {
     async fn emit(&self, facts: Vec<FactDraft>) {
         for fact in facts {
             let mut draft = fact;
-            // 草稿自带溯源时用它；否则指向该域里刚落地的那条事实（I2 的声明类
-            // 不接受无源）。空域不填——那是真正的无源声明，交给事实源拒绝。
-            draft.produced_by = draft
-                .produced_by
-                .or_else(|| provenance_at(&*self.source, self.scope));
-            let _ = self.source.append(self.scope, "host".to_string(), draft);
+            // 草稿自带溯源时用它；否则指向本会话里刚落地的那条事实（I2 的声明类
+            // 不接受无源）。空会话不填——那是真正的无源声明，交给事实源拒绝。
+            draft.produced_by = draft.produced_by.or_else(|| provenance_at(&*self.source));
+            let _ = self.source.append("host".to_string(), draft);
         }
     }
 }
 
-/// 五事实与全种类事实身份 → 申报方读的窄视图（只取本可见域）。
-fn declared_facts(facts: &[DriveFact], source: &dyn FactSource, scope: u64) -> DebtFacts {
+/// 五事实与全种类事实身份 → 申报方读的窄视图。
+fn declared_facts(facts: &[DriveFact], source: &dyn FactSource) -> DebtFacts {
     let mut out = DebtFacts::default();
     for fact in facts {
-        if fact.key.scope != scope {
-            continue;
-        }
         out.note_attempt(&fact.key.id, fact.key.attempt);
         match fact.closing() {
             Some(true) => {
@@ -445,19 +388,19 @@ fn declared_facts(facts: &[DriveFact], source: &dyn FactSource, scope: u64) -> D
             None => {}
         }
     }
-    for event in source.facts(scope) {
+    for event in source.facts() {
         out.note_fact(&event.kind, &event.event_id);
     }
     out
 }
 
-/// 协议事实的入库身份：`ring:` 前缀 + 可见域 / 端口 / 债 id / 尝试号 / 种类
+/// 协议事实的入库身份：`ring:` 前缀 + 端口 / 债 id / 尝试号 / 种类
 /// （分片另加一位）。前缀把协议事实与宿主 / 执行体写的世界事实分开——
 /// 读面按它把端口位交回执行体，不用猜。
 fn ring_event_id(fact: &DriveFact) -> String {
     let base = format!(
-        "ring:{}:{}:{}:{}:{}",
-        fact.scope, fact.key.port, fact.key.id, fact.key.attempt, fact.kind
+        "ring:{}:{}:{}:{}",
+        fact.key.port, fact.key.id, fact.key.attempt, fact.kind
     );
     match shard_of(fact) {
         Some(shard) => format!("{base}:{shard}"),
@@ -465,18 +408,18 @@ fn ring_event_id(fact: &DriveFact) -> String {
     }
 }
 
-/// I2 的溯源位：该 `scope` 里**最近一条已入库事实**的 seq。
+/// I2 的溯源位：本会话里**最近一条已入库事实**的 seq。
 ///
 /// 协议事实（`turn × asserted`）与世界事实（端口执行体交的断言 / 收束）都在 I2 的
 /// 「声明类」里，必须带 `produced_by`。宿主这一层拿不到执行体内心的因果，能指出的
-/// 最准确上游就是**该域里刚落地的那条事实**——它们是同一轮义务链上的前件。
-/// 空域（没有任何前件）返回 `None`，由事实源按 I2 拒绝（那是真正的无源声明）。
-fn provenance_at(source: &dyn FactSource, scope: u64) -> Option<u64> {
+/// 最准确上游就是**本会话刚落地的那条事实**——它们是同一义务链上的前件。
+/// 空会话（没有任何前件）返回 `None`，由事实源按 I2 拒绝（那是真正的无源声明）。
+fn provenance_at(source: &dyn FactSource) -> Option<u64> {
     source
-        .facts(scope)
+        .facts()
         .into_iter()
         .rev()
-        .find(|event| event.scope == scope && event.seq.is_some())
+        .find(|event| event.seq.is_some())
         .and_then(|event| event.seq.map(|seq| seq.value()))
 }
 

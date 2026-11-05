@@ -204,7 +204,6 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
             EVENT_USER_MESSAGE,
             Entity::Scope,
             crate::event::Verb::Opened,
-            0,
             "user",
         ))
         .expect("首插必成");
@@ -215,7 +214,6 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
                 EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Scope,
                 crate::event::Verb::Closed,
-                0,
                 "session/main",
             )
             .with_produced_by(0),
@@ -463,16 +461,7 @@ fn a_typoed_revoke_revokes_the_whole_principal() {
 #[test]
 fn vis_scope_of_event_only_ever_widens_on_an_exact_spelling() {
     use crate::event::{Entity, Event, Verb};
-    let base = || {
-        Event::pending(
-            "e1",
-            "memory.encoded",
-            Entity::Memory,
-            Verb::Closed,
-            0,
-            "user",
-        )
-    };
+    let base = || Event::pending("e1", "memory.encoded", Entity::Memory, Verb::Closed, "user");
 
     // 缺字段（存量事实）⇒ 最窄。
     assert_eq!(VisScope::of_event(&base()), VisScope::ThreadPrivate);

@@ -21,7 +21,6 @@ fn encode(store: &EventStore, id: &str, content: &str, tag: &str, ts: i64) -> u6
                 EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
-                0,
                 PRINCIPAL_USER,
             )
             .with_ts(ts)
@@ -39,7 +38,6 @@ fn consolidate_and_forget(store: &EventStore, source: u64, ts: i64, digest: &str
                 EVENT_MEMORY_CONSOLIDATED,
                 Entity::Memory,
                 Verb::Progressed,
-                0,
                 PRINCIPAL_USER,
             )
             .with_produced_by(source)
@@ -59,7 +57,6 @@ fn consolidate_and_forget(store: &EventStore, source: u64, ts: i64, digest: &str
                 EVENT_MEMORY_FORGOTTEN,
                 Entity::Memory,
                 Verb::Closed,
-                0,
                 PRINCIPAL_USER,
             )
             .with_produced_by(source)
@@ -190,7 +187,6 @@ fn only_the_cognitive_owner_is_folded() {
                 EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
-                0,
                 "session/other",
             )
             .with_ts(2_000)

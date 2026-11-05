@@ -17,7 +17,6 @@ fn encode(store: &EventStore, id: &str, content: &str, tag: &str, ts: i64) {
                 EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
-                0,
                 PRINCIPAL_USER,
             )
             .with_ts(ts)
@@ -218,7 +217,6 @@ fn no_live_memory_means_no_retrieval() {
             "user.message",
             Entity::Scope,
             Verb::Opened,
-            0,
             PRINCIPAL_USER,
         ))
         .expect("种子入格");

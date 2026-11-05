@@ -87,7 +87,6 @@ fn recorded(text: &str) -> Event {
         NOTES_CREATED,
         Entity::Domain,
         Verb::Opened,
-        3,
         "session/a",
     )
     .with_payload(json!({ "text": text }))
@@ -129,7 +128,6 @@ fn a_fact_of_another_kind_does_not_count_as_a_note() {
         "chat.assistant.final",
         Entity::Scope,
         Verb::Asserted,
-        3,
         "session/a",
     )
     .with_payload(json!({ "text": "买牛奶" }));

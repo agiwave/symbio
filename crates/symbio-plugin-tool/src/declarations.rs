@@ -43,7 +43,6 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
         "needs_user_action",
         "prompt",
         "failure_kind",
-        "turn_id",
     ],
 }];
 

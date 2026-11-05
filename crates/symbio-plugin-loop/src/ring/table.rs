@@ -100,18 +100,18 @@ impl DebtRow {
 /// 决定这一圈欠哪些债；环只按行选债，不解释世界条件。
 pub(crate) trait DebtSource {
     /// 当前可还的债（应用按自己的事实投影决定）。
-    fn rows(&self, facts: &FactView<'_>, scope: u64) -> Vec<DebtRow>;
+    fn rows(&self, facts: &FactView<'_>) -> Vec<DebtRow>;
 
-    /// 「这种事实、这个可见域，存在吗」——由宿主实现（宿主看得见全部事实，
+    /// 「这种事实存在吗」——由宿主实现（宿主看得见全部事实，
     /// 不止环的五事实）。环只把行里的种类字符串原样透传，不解释它的语义。
-    fn exists(&self, kind: &str, scope: u64) -> bool {
-        let _ = (kind, scope);
+    fn exists(&self, kind: &str) -> bool {
+        let _ = kind;
         false
     }
 
-    /// 「这种事实、这个身份、这个可见域，存在吗」——与 [`Self::exists`] 同一条读面。
-    fn exists_id(&self, kind: &str, id: &str, scope: u64) -> bool {
-        let _ = (kind, id, scope);
+    /// 「这种事实、这个身份，存在吗」——与 [`Self::exists`] 同一条读面。
+    fn exists_id(&self, kind: &str, id: &str) -> bool {
+        let _ = (kind, id);
         false
     }
 }
@@ -133,7 +133,7 @@ impl Table {
 
 #[cfg(test)]
 impl DebtSource for Table {
-    fn rows(&self, _facts: &FactView<'_>, _scope: u64) -> Vec<DebtRow> {
+    fn rows(&self, _facts: &FactView<'_>) -> Vec<DebtRow> {
         self.rows.clone()
     }
 }

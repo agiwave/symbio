@@ -14,12 +14,12 @@ use crate::port::{DemoPort, DEMO_PORT};
 /// 插件身份（与端口名分开：一个插件可以申报多个端口，身份不复用端口名）。
 const DEMO_PLUGIN: &str = "demo-plugin";
 
-/// 假插件的债表：一笔 `demo` 端口的债，身份由可见域派生。
+/// 假插件的债表：一笔 `demo` 端口的债，身份由会话身份派生。
 struct DemoDebts;
 
 impl DebtSource for DemoDebts {
     fn rows(&self, request: &DriveRequest, facts: &DebtFacts) -> Vec<DebtSpec> {
-        let id = format!("demo:{}", request.scope);
+        let id = format!("demo:{}", request.session_id);
         if facts.closing(&id).is_some() {
             return Vec::new();
         }

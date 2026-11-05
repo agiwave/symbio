@@ -421,7 +421,6 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
                 EVENT_USER_MESSAGE,
                 Entity::Scope,
                 Verb::Opened,
-                0,
                 "user",
             )
             .with_payload(json!({ "text": "写一句关于秋天的诗" })),
@@ -444,7 +443,6 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
                 EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Scope,
                 Verb::Closed,
-                0,
                 "session/main",
             )
             .with_produced_by(0)
@@ -582,7 +580,6 @@ async fn reflex_tier_system_overhead_is_measured_and_bounded() {
                     EVENT_USER_MESSAGE,
                     Entity::Scope,
                     Verb::Opened,
-                    0,
                     "user",
                 )
                 .with_payload(json!({ "text": "校准" })),
@@ -666,7 +663,6 @@ async fn real_provider_full_calibration() {
                     EVENT_USER_MESSAGE,
                     Entity::Scope,
                     Verb::Opened,
-                    0,
                     "user",
                 )
                 .with_payload(json!({ "text": "用一句话说明什么是事件溯源。" })),

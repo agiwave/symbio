@@ -71,7 +71,6 @@ fn facts() -> Vec<Event> {
         "memory.encoded",
         Entity::Memory,
         Verb::Asserted,
-        0,
         "session/main",
     )]
 }

@@ -50,8 +50,6 @@ pub struct FileChange {
     pub path: String,
     /// 最后一次成功的动作。
     pub op: FileOp,
-    /// 最后一次改它的轮号。
-    pub turn: u64,
     /// 本会话对它成功写入的次数。
     pub changes: u64,
 }
@@ -76,14 +74,12 @@ pub fn workdir_changes(v: MessageVocab) -> Projection<Vec<FileChange>> {
                     FileChange {
                         path,
                         op,
-                        turn: e.scope,
                         changes: 0,
                     },
                 )
             });
             entry.0 = idx;
             entry.1.op = op;
-            entry.1.turn = e.scope;
             entry.1.changes += 1;
         }
         let mut rows: Vec<(usize, FileChange)> = by_path.into_values().collect();

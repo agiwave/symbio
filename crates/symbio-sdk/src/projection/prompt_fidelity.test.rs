@@ -40,7 +40,6 @@ fn user_turn(turn: u64, text: &str) -> Event {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        turn,
         "user",
     )
     .with_payload(serde_json::json!({ "text": text, "tier": "deep", "id": format!("u-{turn}") }))
@@ -52,7 +51,6 @@ fn assistant_turn(turn: u64, text: &str) -> Event {
         EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
-        turn,
         "session/main",
     )
     .with_payload(serde_json::json!({
@@ -69,7 +67,6 @@ fn artifact(turn: u64, tool: &str, text: &str) -> Event {
         EVENT_ARTIFACT_ADDED,
         Entity::Artifact,
         Verb::Asserted,
-        turn,
         "session/main",
     )
     .with_payload(serde_json::json!({ "tool": tool, "text": text }))
@@ -96,7 +93,6 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
             "future.kind.not_in_projection",
             Entity::Scope,
             Verb::Asserted,
-            0,
             "user",
         )
         .with_payload(serde_json::json!({ "text": "不认识的一格" })),
@@ -119,7 +115,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
     assert!(
         rep.gaps.iter().any(|g| matches!(
             g,
-            Gap::DroppedFromPrompt { kind, turn: 0 } if kind == EVENT_CHAT_ASSISTANT_FINAL
+            Gap::DroppedFromPrompt { kind, .. } if kind == EVENT_CHAT_ASSISTANT_FINAL
         )),
         "必须报出「网格有、prompt 没有」：{}",
         rep.summary()
@@ -179,7 +175,6 @@ fn report(turn: u64, text: &str) -> Event {
         EVENT_CHAT_ASSISTANT_REPORTED,
         Entity::Scope,
         Verb::Asserted,
-        turn,
         "session/main",
     )
     .with_payload(serde_json::json!({ "text": text, "tool_rounds": 1, "quiet_ms": 0 }))
@@ -299,7 +294,6 @@ fn edited(node: &str, role: &str, text: &str) -> Event {
         EVENT_MESSAGE_EDITED,
         Entity::Message,
         Verb::Asserted,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({
@@ -313,7 +307,6 @@ fn removed(ids: &[&str]) -> Event {
         EVENT_MESSAGE_REMOVED,
         Entity::Message,
         Verb::Closed,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "ids": ids }))
@@ -334,7 +327,6 @@ fn snapshot(msgs: &[(&str, &str, &str)]) -> Event {
         crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({ "messages": messages }))
@@ -435,7 +427,6 @@ fn branch(of: &str, into: &str) -> Event {
         crate::test_fixtures::EVENT_TURN_BRANCH,
         Entity::Scope,
         Verb::Asserted,
-        2,
         "person/local",
     )
     .with_payload(serde_json::json!({ "of": of, "into": into }))

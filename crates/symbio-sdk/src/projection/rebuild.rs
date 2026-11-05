@@ -61,7 +61,8 @@
 //!
 //! 收束 / 进展 / 兜底三种格子共用一份产出形状（`turn_runner::produced_payload`），
 //! 载荷里带 `turn_id` / `text_id` / `reasoning_id` / `reasoning` / `tool_calls[]` /
-//! `rounds[]`；`artifact.added` 带 `tool_call_id` / `args` / `success` / `turn_id`；
+//! `rounds[]`；`artifact.added` 带 `tool_call_id` / `args` / `success`（**不复制轮号**：
+//! 轮根按 `tool_call_id` 从发起这批调用的那条事实的 `calls[]` 反查）；
 //! `turn.supplemented` 带 `id` / `ids`。结果节点 id 由调用 id 派生
 //! （[`crate::event::result_node_id`]），不作为载荷键。**节点身份因此是
 //! 事实的一部分**，重建不必凭空造号——只有「载荷确实没记的」（旧事件的补充格、
@@ -176,6 +177,24 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 会让它之后的所有位置失效）：先把要删的 id 记进 `gone`，循环结束再一次性
     // `retain`。这样 `at` 在整个循环里都是有效的，编辑能直接按下标改写。
     let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    // 产物格不再自带轮号：配对改成「按调用身份反查发起这批调用的那条事实」。
+    // 那条事实的载荷带 `turn_id` 与 `calls[]`（每次调用的 `id`）；产物只带
+    // `tool_call_id`。这比在每条产物上复制一份轮号更准确——产物属于**那一次调用**，
+    // 而不属于「第几轮」。
+    let call_turns: std::collections::HashMap<String, String> = events
+        .iter()
+        .filter_map(|e| {
+            let turn = e.payload.get("turn_id")?.as_str()?;
+            Some((turn, e.payload.get("calls")?.as_array()?))
+        })
+        .flat_map(|(turn, calls)| {
+            calls.iter().filter_map(move |call| {
+                let id = call.get("id")?.as_str()?;
+                Some((id.to_owned(), turn.to_owned()))
+            })
+        })
+        .collect();
+
     // 被 `message.removed` 判死的节点 id（循环末尾统一剔除）。
     let mut gone: HashSet<String> = HashSet::new();
     let mut seq = RebuildSeq(0);
@@ -184,14 +203,21 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 这些轮的那次**答复**（无工具调用的往返）是模型产出的**事实**，但它从未获准
     // 进入对话——fail-closed 的呈现面要求它不出现在消息列表里。判据是跨事件的
     // （拒绝格排在应答格之后），所以先收索引、再折（与变更格同一纪律）。
+    // 配对键是**触发这一轮的事实身份**（`turn_id`，即那条 `user.message` 的 id）：
+    // 拒绝格与应答格都带同一位，不靠任何「第几轮」的编号。
     // 工具轮的中途正文不受影响：它们属已经准许的循环，不是被拒的那句话。
-    let denied_speech: HashSet<u64> = events
+    let denied_speech: HashSet<String> = events
         .iter()
         .filter(|e| {
             e.kind == c.denied
                 && e.payload.get("key").and_then(|v| v.as_str()) == Some(c.final_reply)
         })
-        .map(|e| e.scope)
+        .filter_map(|e| {
+            e.payload
+                .get("turn_id")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned)
+        })
         .collect();
 
     // ── 压缩快照：先收下它那份列表，再从其下标之后接着折（见函数文档）────────
@@ -234,7 +260,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
         // 后来的事实覆盖先前的，位置与顺序锚保留。其余格子仍是「同 id 只认首次」
         // ——那里的重复是**引用**（收束的 `tool_calls[]`），不是状态推进。
         let carries_state = slot_of(e, c, m) == Some(ChatSlot::ArtifactAdded);
-        for mut node in nodes_of(e, &denied_speech, c, m) {
+        for mut node in nodes_of(e, &denied_speech, &call_turns, c, m) {
             if gone.contains(&node.id) {
                 continue;
             }
@@ -339,17 +365,16 @@ fn added_nodes(e: &Event) -> Vec<ChatNode> {
 
 /// 一条事件 → 它承载的节点（顺序即树内顺序）。
 ///
-/// `denied_speech` 是本切片里发言被拒的轮号（见 [`rebuild`] 的索引）。
-/// 一条事件 → 它承载的节点（顺序即树内顺序）。
-///
-/// `denied_speech` 是本切片里发言被拒的轮号（见 [`rebuild`] 的索引）。
+/// `denied_speech` 是本切片里发言被拒的轮（见 [`rebuild`] 的索引）。
+/// `call_turns` 是调用 id → 发起这批调用的那条事实所指的轮（见 [`rebuild`]）。
 ///
 /// 分类走 [`slot_of`]（DE-024 D-203）：折叠 `match` 的是**闭集枚举**而不是名字，
 /// 加一条对话面事件时 `match` 不全在编译期就红。协议格（`response` / `failed`）
 /// 不在这张表上——它们是内核语法，名字仍住内核，按常量判。
 fn nodes_of(
     e: &Event,
-    denied_speech: &HashSet<u64>,
+    denied_speech: &HashSet<String>,
+    call_turns: &std::collections::HashMap<String, String>,
     c: &ChatVocab,
     m: &MessageVocab,
 ) -> Vec<ChatNode> {
@@ -361,7 +386,13 @@ fn nodes_of(
         && e.verb == Verb::Asserted
         && (e.kind == EVENT_RESPONSE || e.kind == EVENT_FAILED)
     {
-        return output_nodes(e, denied_speech.contains(&e.scope));
+        return output_nodes(
+            e,
+            e.payload
+                .get("turn_id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|turn| denied_speech.contains(turn)),
+        );
     }
     match slot_of(e, c, m) {
         Some(ChatSlot::UserMessage) => vec![user_node(e)],
@@ -376,7 +407,7 @@ fn nodes_of(
         // 形状经 `dialog` 载荷里的 `reason` / `exclude_from_context` 复刻。
         Some(ChatSlot::Opening) => vec![opening_node(e)],
         // 工具结果：调用与结果两张卡都归这一格（一个事实一个 owner）。
-        Some(ChatSlot::ArtifactAdded) => artifact_nodes(e),
+        Some(ChatSlot::ArtifactAdded) => artifact_nodes(e, call_turns),
         // 诞生格：**没有别的格可搭车**的节点在这里出生（压缩记录节点是最典型的一个）。
         // 按**发射顺序**插到列表末尾——顺序锚由本函数统一发号。
         Some(ChatSlot::MessageAdded) => added_nodes(e),
@@ -934,8 +965,19 @@ fn unfinished_text(why: &str) -> String {
 /// 文本入口——**不经 `Value` 重序列化**（键序一变，同一次调用在重建前后就是两个
 /// 内容，见该函数的文档）。provider 的 wire id 不落载荷：重建后的调用与结果用
 /// 同一个节点 id 自洽配对。
-fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
-    let Some(turn_id) = str_of(e, "turn_id") else {
+///
+/// 轮根**不在产物载荷里复制**：它由 `call_turns` 按 `tool_call_id` 反查发起这批
+/// 调用的那条事实。查不到 ⇒ 这条产物不属于本切片的任何一轮，一个节点都不建。
+fn artifact_nodes(
+    e: &Event,
+    call_turns: &std::collections::HashMap<String, String>,
+) -> Vec<ChatNode> {
+    let call_id = str_of(e, "tool_call_id");
+    let Some(turn_id) = call_id
+        .as_deref()
+        .and_then(|id| call_turns.get(id))
+        .cloned()
+    else {
         return Vec::new();
     };
     // 本轮的中途产出（思考 / 正文）**排在工具卡片之前**：它发生在模型请求工具之前，
@@ -958,7 +1000,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         }
         _ => Vec::new(),
     };
-    let call_id = str_of(e, "tool_call_id").unwrap_or_else(|| format!("{turn_id}-call"));
+    let call_id = call_id.unwrap_or_else(|| format!("{turn_id}-call"));
     let success = e
         .payload
         .get("success")

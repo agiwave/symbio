@@ -100,7 +100,6 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
                 symbio_plugin_api::events::EVENT_USER_MESSAGE,
                 Entity::Scope,
                 Verb::Opened,
-                turn,
                 symbio_plugin_api::PRINCIPAL_MAIN,
             ))
             .expect("根事件入格")
@@ -127,8 +126,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
         applied: &[],
     };
     for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
-        let mut event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
-        event.scope = turn;
+        let event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
         store.append(event).expect("任务事件入格");
     }
 }
@@ -466,7 +464,6 @@ fn a_ready_task_survives_the_snapshot_boundary() {
                 "session.consolidated",
                 Entity::Message,
                 Verb::Progressed,
-                0,
                 symbio_plugin_api::PRINCIPAL_MAIN,
             )
             .with_payload(serde_json::json!({
@@ -498,7 +495,6 @@ fn open_task(store: &EventStore, id: &str, depends_on: &[&str], actor: &str) {
                 EVENT_TASK_OPENED,
                 Entity::Task,
                 Verb::Opened,
-                0,
                 actor,
             )
             .with_payload(
@@ -517,7 +513,6 @@ fn assign_task(store: &EventStore, id: &str, owner: &str, until_ms: i64) {
                 EVENT_TASK_ASSIGNED,
                 Entity::Task,
                 Verb::Asserted,
-                0,
                 PRINCIPAL_SCHEDULER,
             )
             .with_produced_by(0)
@@ -576,7 +571,6 @@ fn a_hundred_injections_yield_exactly_one_lease() {
                         f.kind,
                         Entity::Task,
                         verb,
-                        0,
                         PRINCIPAL_SCHEDULER,
                     )
                     .with_produced_by(0)
@@ -678,8 +672,7 @@ fn apply_effects(
         };
         for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
             kinds.push(draft.kind.clone());
-            let mut event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
-            event.scope = turn;
+            let event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
             store.append(event.clone()).expect("任务事件入格");
             applied.push(event);
         }
@@ -695,7 +688,6 @@ fn seed_anchor(store: &EventStore) -> u64 {
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
             Entity::Scope,
             Verb::Opened,
-            0,
             symbio_plugin_api::PRINCIPAL_MAIN,
         ))
         .expect("根事件入格")
@@ -1009,7 +1001,6 @@ fn the_draft_carries_no_envelope() {
         .fact
         .clone()
         .into_event(PRINCIPAL_SCHEDULER);
-    assert_eq!(event.scope, 0, "草稿不带轮号：信封由写口盖（D-252）");
     assert_eq!(event.ts, 0, "草稿不带时刻：信封由写口盖（D-252）");
     assert_eq!(event.actor, PRINCIPAL_SCHEDULER);
 }

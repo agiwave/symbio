@@ -496,7 +496,7 @@ impl SymbioClient {
         }
 
         // ── 触发链三步（装配层只做装配，不写业务事实）──
-        // 1. session 把收件箱条目写成事实并返回本轮 scope；
+        // 1. session 把收件箱条目写成事实并返回开轮事实的 seq；
         // 2. 装配层用**同一事实源**单次 `drive`（见 symbio::drive）；
         // 3. 终答事实已由环落地，session 自己投影转写（`session/project`）。
         let source = symbio::drive::open_fact_source(&self.session_id)
@@ -510,7 +510,7 @@ impl SymbioClient {
                 Some(Arc::clone(&source)),
             )
             .await?;
-        if let Some(scope) = consumed.get("scope").and_then(Value::as_u64) {
+        if let Some(seq) = consumed.get("seq").and_then(Value::as_u64) {
             let world = symbio::drive::FactWorld {
                 facts: Arc::clone(&source),
                 session_id: &self.session_id,
@@ -522,7 +522,7 @@ impl SymbioClient {
                 .map_err(|e| format!("驱动未完成: {e}"))?;
             self.route_with_fact_source(
                 "session/project",
-                json!({ "scope": scope }),
+                json!({ "seq": seq }),
                 Some(&self.session_id),
                 None,
                 Some(source),

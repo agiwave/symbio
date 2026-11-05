@@ -932,7 +932,6 @@ fn seed_fact(dir: &std::path::Path) {
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
             symbio_kernel::event::Entity::Scope,
             symbio_kernel::event::Verb::Opened,
-            1,
             "user",
         )
         .with_payload(serde_json::json!({ "text": "第一问", "id": "u-seed" })),

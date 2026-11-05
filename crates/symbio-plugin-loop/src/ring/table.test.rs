@@ -5,12 +5,12 @@ use serde_json::json;
 #[test]
 fn table_returns_rows_in_order() {
     let table = Table::new(vec![
-        DebtRow::new("a", "p", "d-a", json!({"q": 1})).after(DebtKey::new(1, "p", "d-0", 1)),
+        DebtRow::new("a", "p", "d-a", json!({"q": 1})).after(DebtKey::new("p", "d-0", 1)),
         DebtRow::new("b", "p", "d-b", json!({"q": 2})),
     ]);
     let facts: Vec<Fact> = Vec::new();
     let view = FactView::new(&facts);
-    let rows = table.rows(&view, 1);
+    let rows = table.rows(&view);
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].name, "a");
     assert_eq!(rows[0].id, "d-a");
@@ -20,7 +20,7 @@ fn table_returns_rows_in_order() {
 
 #[test]
 fn after_records_the_prerequisite_identity() {
-    let key = DebtKey::new(1, "p", "d-a", 1);
+    let key = DebtKey::new("p", "d-a", 1);
     let row = DebtRow::new("b", "p", "d-b", json!({})).after(key.clone());
     assert_eq!(row.after, Some(key));
 }
@@ -48,28 +48,23 @@ fn lease_builder_clamps_to_at_least_one_attempt() {
 }
 
 #[test]
-fn source_can_derive_rows_from_scoped_facts() {
+fn source_can_derive_rows_from_the_session_facts() {
     struct Once;
     impl DebtSource for Once {
-        fn rows(&self, facts: &FactView<'_>, scope: u64) -> Vec<DebtRow> {
-            if facts
-                .all()
-                .iter()
-                .any(|f| f.scope == scope && f.kind == FactKind::Response)
-            {
+        fn rows(&self, facts: &FactView<'_>) -> Vec<DebtRow> {
+            if facts.all().iter().any(|f| f.kind == FactKind::Response) {
                 Vec::new()
             } else {
                 vec![DebtRow::new("a", "p", "d", json!({}))]
             }
         }
     }
-    assert_eq!(Once.rows(&FactView::new(&[]), 1).len(), 1);
+    assert_eq!(Once.rows(&FactView::new(&[])).len(), 1);
     let done = [Fact::new(
         FactKind::Response,
-        DebtKey::new(1, "p", "d", 1),
+        DebtKey::new("p", "d", 1),
         json!({}),
         0,
     )];
-    assert!(Once.rows(&FactView::new(&done), 1).is_empty());
-    assert_eq!(Once.rows(&FactView::new(&done), 2).len(), 1);
+    assert!(Once.rows(&FactView::new(&done)).is_empty());
 }

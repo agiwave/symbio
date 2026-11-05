@@ -116,7 +116,8 @@ pub struct PortFact {
 /// 通用执行体上下文的事实读面：**宿主实现、执行体使用**；环不调用、不解释。
 /// 不是具名世界接口——它只认「身份 / 端口 / 种类 / 载荷」四样通用形状。
 pub trait PortFactReader: Send + Sync + 'static {
-    fn facts(&self, scope: u64) -> Vec<PortFact>;
+    /// 本会话的事实（读面在打开时就绑定了会话身份）。
+    fn facts(&self) -> Vec<PortFact>;
 }
 
 /// 一笔债的执行上下文（`DE-047` I-6.5 / D-305 裁决一）：命名不带世界词。
@@ -135,10 +136,13 @@ pub struct PortExecContext {
     pub emit: PortFactEmit,
     /// 调用方 ctx（提供者据此读能力表）；`None` = 无。
     pub ctx: Option<Arc<dyn PluginInvokeRequest>>,
-    /// 产物主体（宿主原样交值；工具端口用作轮号）。
-    pub subject: u64,
-    /// 应答组（宿主原样交值；工具端口用作轮根节点 id）。
+    /// 本次执行所服务的**触发事实标识**（`request` 事实的幂等键）：
+    /// 同一批派发里的不同调用各有各的标识，可由执行体用作产物的命名基准。
+    pub subject: String,
+    /// 应答组（宿主原样交值，不透明；不参与配对）。
     pub group: String,
+    /// 会话身份（宿主原样交值）：执行体需要会话身份时读这一格，不读 `subject`。
+    pub session_id: String,
     /// 产生方（归属序号）；`None` = 无归属。
     pub origin: Option<u64>,
     /// 放行位（宿主侧的产物闸结论）；执行体只按结论记账，不自判。
@@ -163,6 +167,8 @@ pub struct PortExecHandles {
     pub scratch_dir: Option<PathBuf>,
     /// 增量出口（宿主决定去向）。
     pub sink: ExecEventSink,
+    /// 会话身份（宿主原样交值；空串 = 无）。
+    pub session_id: String,
 }
 
 impl Default for PortExecHandles {
@@ -171,6 +177,7 @@ impl Default for PortExecHandles {
             ctx: None,
             scratch_dir: None,
             sink: ExecEventSink::silent(),
+            session_id: String::new(),
         }
     }
 }

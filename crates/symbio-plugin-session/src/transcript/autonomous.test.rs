@@ -44,7 +44,6 @@ fn seed_one_fact(p: &SessionPlugin, sid: &str) {
             EVENT_USER_MESSAGE,
             Entity::Scope,
             Verb::Opened,
-            0,
             "user:t",
         ))
         .expect("事实入格");
@@ -259,7 +258,6 @@ fn seed_root(store: &EventStore) -> u64 {
             EVENT_USER_MESSAGE,
             Entity::Scope,
             Verb::Opened,
-            0,
             PRINCIPAL_USER,
         ))
         .expect("根事件入格")
@@ -307,7 +305,6 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
                 EVENT_TASK_PROGRESS,
                 Entity::Task,
                 Verb::Progressed,
-                0,
                 PRINCIPAL_AUTONOMOUS,
             )
             .with_produced_by(src)
@@ -328,7 +325,6 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
         EVENT_TASK_PROGRESS,
         Entity::Task,
         Verb::Progressed,
-        0,
         PRINCIPAL_AUTONOMOUS,
     )
     .with_produced_by(src)
@@ -374,7 +370,6 @@ fn conation_governance_three_rules() {
             EVENT_CONATION_EXPRESSED,
             Entity::Conation,
             Verb::Opened,
-            0,
             PRINCIPAL_USER,
         )
     };

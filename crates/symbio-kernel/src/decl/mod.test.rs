@@ -21,7 +21,6 @@ fn ev(turn: u64, kind: &str, payload: Value) -> Event {
         kind,
         Entity::Scope,
         Verb::Asserted,
-        turn,
         "test",
     )
     .with_payload(payload);

@@ -221,14 +221,12 @@ impl PortFactWriter for RecordSink {
     }
 }
 
-const S: u64 = 7;
-
 #[tokio::test]
 async fn one_round_writes_request_sent_response() {
     let stub = Arc::new(Stub::ok());
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({"q": 1}))])
         .with_executor("p1", stub.clone());
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 1);
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
@@ -240,13 +238,12 @@ async fn one_round_writes_request_sent_response() {
     let seen = stub.seen();
     assert_eq!(seen[0].0, "p1");
     assert_eq!(seen[0].1, json!({"q": 1}));
-    assert_eq!(seen[0].2, format!("{S}:p1:d:1"));
+    assert_eq!(seen[0].2, "p1:d:1");
     let response = ctx
         .snapshot()
         .into_iter()
         .find(|f| f.kind == FactKind::Response)
         .unwrap();
-    assert_eq!(response.key.scope, S);
     assert_eq!(response.payload, json!({"answer": {"q": 1}}));
 }
 
@@ -257,7 +254,7 @@ async fn retryable_error_advances_the_lease() {
         DebtRow::new("a", "p1", "d", json!({})).lease(60_000, 2)
     ])
     .with_executor("p1", stub.clone());
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 2);
     let kinds: Vec<_> = ctx.snapshot().iter().map(|f| f.kind).collect();
@@ -274,7 +271,7 @@ async fn retryable_error_advances_the_lease() {
     );
     let facts = ctx.snapshot();
     let view = FactView::new(&facts);
-    assert_eq!(view.attempt(S, "p1", "d"), 2);
+    assert_eq!(view.attempt("p1", "d"), 2);
     assert_eq!(stub.seen().len(), 2);
 }
 
@@ -282,7 +279,7 @@ async fn retryable_error_advances_the_lease() {
 async fn non_retryable_error_lands_failed() {
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
         .with_executor("p1", Arc::new(Stub::non_retryable()));
-    let _ = drive(&ctx, S).await;
+    let _ = drive(&ctx).await;
 
     let last = ctx.snapshot().last().cloned().unwrap();
     assert_eq!(last.kind, FactKind::Failed);
@@ -293,15 +290,10 @@ async fn non_retryable_error_lands_failed() {
 async fn lease_expiry_replays_an_existing_ledger() {
     let stub = Arc::new(Stub::ok());
     let seed = vec![
-        Fact::new(
-            FactKind::Request,
-            DebtKey::new(S, "p1", "d", 1),
-            json!({}),
-            0,
-        ),
+        Fact::new(FactKind::Request, DebtKey::new("p1", "d", 1), json!({}), 0),
         Fact::new(
             FactKind::Sent,
-            DebtKey::new(S, "p1", "d", 1),
+            DebtKey::new("p1", "d", 1),
             json!({"deadline_ms": 10}),
             0,
         ),
@@ -310,11 +302,11 @@ async fn lease_expiry_replays_an_existing_ledger() {
         .with_executor("p1", stub.clone())
         .with_facts(seed)
         .at(100);
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 1);
     assert_eq!(stub.seen().len(), 1);
-    assert_eq!(stub.seen()[0].2, format!("{S}:p1:d:2"));
+    assert_eq!(stub.seen()[0].2, "p1:d:2");
     let response = ctx
         .snapshot()
         .into_iter()
@@ -326,15 +318,10 @@ async fn lease_expiry_replays_an_existing_ledger() {
 #[tokio::test]
 async fn a_fresh_lease_is_waited_not_expired() {
     let seed = vec![
-        Fact::new(
-            FactKind::Request,
-            DebtKey::new(S, "p1", "d", 1),
-            json!({}),
-            0,
-        ),
+        Fact::new(FactKind::Request, DebtKey::new("p1", "d", 1), json!({}), 0),
         Fact::new(
             FactKind::Sent,
-            DebtKey::new(S, "p1", "d", 1),
+            DebtKey::new("p1", "d", 1),
             json!({"deadline_ms": 100}),
             0,
         ),
@@ -343,12 +330,12 @@ async fn a_fresh_lease_is_waited_not_expired() {
         .with_executor("p1", Arc::new(Stub::ok()))
         .with_facts(seed)
         .at(50);
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 0);
     assert_eq!(
         report.outcome,
-        DriveOutcome::Waiting(vec![DebtKey::new(S, "p1", "d", 1)])
+        DriveOutcome::Waiting(vec![DebtKey::new("p1", "d", 1)])
     );
 }
 
@@ -358,15 +345,10 @@ async fn a_fresh_lease_is_waited_not_expired() {
 #[tokio::test]
 async fn an_unpaired_request_is_closed_by_lease_not_left_pending() {
     let seed = vec![
-        Fact::new(
-            FactKind::Request,
-            DebtKey::new(S, "p1", "d", 1),
-            json!({}),
-            0,
-        ),
+        Fact::new(FactKind::Request, DebtKey::new("p1", "d", 1), json!({}), 0),
         Fact::new(
             FactKind::Sent,
-            DebtKey::new(S, "p1", "d", 1),
+            DebtKey::new("p1", "d", 1),
             json!({"deadline_ms": 10}),
             0,
         ),
@@ -375,7 +357,7 @@ async fn an_unpaired_request_is_closed_by_lease_not_left_pending() {
         .with_executor("p1", Arc::new(Stub::ok()))
         .with_facts(seed)
         .at(100);
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 0, "到点后不再重复派发");
     let failed = ctx
@@ -393,11 +375,11 @@ async fn after_gate_orders_two_ports() {
     let second = Arc::new(Stub::ok());
     let ctx = TestCtx::new(vec![
         DebtRow::new("a", "p1", "a", json!({})),
-        DebtRow::new("b", "p2", "b", json!({})).after(DebtKey::new(S, "p1", "a", 1)),
+        DebtRow::new("b", "p2", "b", json!({})).after(DebtKey::new("p1", "a", 1)),
     ])
     .with_executor("p1", first.clone())
     .with_executor("p2", second.clone());
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 2);
     assert_eq!(first.seen().len(), 1);
@@ -414,15 +396,15 @@ async fn unless_gate_reads_the_same_surface_as_when() {
     }
 
     impl DebtSource for Gated {
-        fn rows(&self, _facts: &FactView<'_>, _scope: u64) -> Vec<DebtRow> {
+        fn rows(&self, _facts: &FactView<'_>) -> Vec<DebtRow> {
             self.rows.clone()
         }
 
-        fn exists(&self, kind: &str, _scope: u64) -> bool {
+        fn exists(&self, kind: &str) -> bool {
             self.kinds.contains(&kind)
         }
 
-        fn exists_id(&self, kind: &str, id: &str, _scope: u64) -> bool {
+        fn exists_id(&self, kind: &str, id: &str) -> bool {
             self.ids.iter().any(|(k, i)| *k == kind && i == id)
         }
     }
@@ -438,7 +420,7 @@ async fn unless_gate_reads_the_same_surface_as_when() {
         ids: Vec::new(),
     }))
     .with_executor("p1", Arc::new(Stub::ok()));
-    assert_eq!(drive(&ctx, S).await.dispatched, 2);
+    assert_eq!(drive(&ctx).await.dispatched, 2);
 
     // 种类事实存在 ⇒ 排除行不欠（非五类事实也算，「同一条读面」）。
     let ctx = TestCtx::with_source(Box::new(Gated {
@@ -447,7 +429,7 @@ async fn unless_gate_reads_the_same_surface_as_when() {
         ids: Vec::new(),
     }))
     .with_executor("p1", Arc::new(Stub::ok()));
-    assert_eq!(drive(&ctx, S).await.dispatched, 1);
+    assert_eq!(drive(&ctx).await.dispatched, 1);
 
     // 身份级：只有该种类、该身份的事实命中；环账上同 id 的 request / sent / retry
     // 因种类不同不命中（可重试失败后的重试轮不会被提前跳过）。
@@ -456,14 +438,9 @@ async fn unless_gate_reads_the_same_surface_as_when() {
         DebtRow::new("b", "p1", "b", json!({})).unless_id("turn.done", "turn.done:b"),
     ];
     let ledger = vec![
-        Fact::new(
-            FactKind::Request,
-            DebtKey::new(S, "p1", "b", 1),
-            json!({}),
-            0,
-        ),
-        Fact::new(FactKind::Sent, DebtKey::new(S, "p1", "b", 1), json!({}), 0),
-        Fact::new(FactKind::Retry, DebtKey::new(S, "p1", "b", 2), json!({}), 0),
+        Fact::new(FactKind::Request, DebtKey::new("p1", "b", 1), json!({}), 0),
+        Fact::new(FactKind::Sent, DebtKey::new("p1", "b", 1), json!({}), 0),
+        Fact::new(FactKind::Retry, DebtKey::new("p1", "b", 2), json!({}), 0),
     ];
     let ctx = TestCtx::with_source(Box::new(Gated {
         rows: rows.clone(),
@@ -473,7 +450,7 @@ async fn unless_gate_reads_the_same_surface_as_when() {
     .with_executor("p1", Arc::new(Stub::ok()))
     .with_facts(ledger);
     assert_eq!(
-        drive(&ctx, S).await.dispatched,
+        drive(&ctx).await.dispatched,
         2,
         "b 的重试轮照常派发：环账上同 id 的 request / sent / retry 不命中这本谓词"
     );
@@ -485,8 +462,8 @@ async fn unless_gate_reads_the_same_surface_as_when() {
         ids: vec![("turn.done", "turn.done:b".to_string())],
     }))
     .with_executor("p1", Arc::new(Stub::ok()));
-    assert_eq!(drive(&ctx, S).await.dispatched, 1);
-    assert_eq!(drive(&ctx, S).await.outcome, DriveOutcome::NoDebt);
+    assert_eq!(drive(&ctx).await.dispatched, 1);
+    assert_eq!(drive(&ctx).await.outcome, DriveOutcome::NoDebt);
 }
 
 #[tokio::test]
@@ -498,12 +475,12 @@ async fn when_gate_asks_the_host_whether_the_kind_exists() {
     }
 
     impl DebtSource for Gated {
-        fn rows(&self, _facts: &FactView<'_>, _scope: u64) -> Vec<DebtRow> {
+        fn rows(&self, _facts: &FactView<'_>) -> Vec<DebtRow> {
             self.rows.clone()
         }
 
-        fn exists(&self, kind: &str, scope: u64) -> bool {
-            scope == S && self.kinds.iter().copied().any(|known| known == kind)
+        fn exists(&self, kind: &str) -> bool {
+            self.kinds.iter().copied().any(|known| known == kind)
         }
     }
 
@@ -514,7 +491,7 @@ async fn when_gate_asks_the_host_whether_the_kind_exists() {
         kinds: vec![],
     }))
     .with_executor("p1", Arc::new(Stub::ok()));
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
     assert_eq!(report.dispatched, 0);
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
 
@@ -524,7 +501,7 @@ async fn when_gate_asks_the_host_whether_the_kind_exists() {
         kinds: vec!["user.message"],
     }))
     .with_executor("p1", Arc::new(Stub::ok()));
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
     assert_eq!(report.dispatched, 1);
 }
 
@@ -533,17 +510,17 @@ async fn when_no_open_gate_reads_debt_state() {
     let rows = vec![DebtRow::new("m", "p1", "m", json!({})).when_no_open("p1")];
     // 该端口没有未还债 ⇒ 本行可还。
     let ctx = TestCtx::new(rows.clone()).with_executor("p1", Arc::new(Stub::ok()));
-    assert_eq!(drive(&ctx, S).await.dispatched, 1);
+    assert_eq!(drive(&ctx).await.dispatched, 1);
 
     // 该端口已有一笔未收束的 request ⇒ 本行不欠。
     let ctx = TestCtx::new(rows).with_executor("p1", Arc::new(Stub::ok()));
     ctx.facts.lock().unwrap().push(Fact::new(
         FactKind::Request,
-        DebtKey::new(S, "p1", "old", 1),
+        DebtKey::new("p1", "old", 1),
         json!({}),
         0,
     ));
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
     assert_eq!(report.dispatched, 0);
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
 }
@@ -551,7 +528,7 @@ async fn when_no_open_gate_reads_debt_state() {
 #[tokio::test]
 async fn absent_executor_lands_failed_and_names_the_port() {
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))]);
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 1);
     let last = ctx.snapshot().last().cloned().unwrap();
@@ -570,7 +547,7 @@ async fn protocol_drafts_pair_and_world_drafts_leave_the_ring() {
             }),
         )
         .with_outlet(PortFactEmit::new(sink.clone()));
-    let _ = drive(&ctx, S).await;
+    let _ = drive(&ctx).await;
 
     let kinds: Vec<_> = ctx.snapshot().iter().map(|f| f.kind).collect();
     assert_eq!(
@@ -583,34 +560,30 @@ async fn protocol_drafts_pair_and_world_drafts_leave_the_ring() {
 }
 
 #[tokio::test]
-async fn scopes_do_not_cross() {
+async fn a_closed_debt_is_not_dispatched_again() {
     let stub = Arc::new(Stub::ok());
     let seed = vec![Fact::new(
         FactKind::Response,
-        DebtKey::new(9, "p1", "d", 1),
+        DebtKey::new("p1", "d", 1),
         json!({}),
         0,
     )];
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
         .with_executor("p1", stub.clone())
         .with_facts(seed);
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
-    assert_eq!(report.dispatched, 1);
-    let response = ctx
-        .snapshot()
-        .into_iter()
-        .find(|f| f.kind == FactKind::Response && f.key.scope == S)
-        .unwrap();
-    assert_eq!(response.key.id, "d");
+    assert_eq!(report.dispatched, 0);
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+    assert_eq!(ctx.snapshot().len(), 1, "已收束的债不再落新事实");
 }
 
 #[tokio::test]
-async fn a_settled_scope_drives_to_no_debt_without_state() {
+async fn a_settled_session_drives_to_no_debt_without_state() {
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
         .with_executor("p1", Arc::new(Stub::ok()));
-    let first = drive(&ctx, S).await;
-    let second = drive(&ctx, S).await;
+    let first = drive(&ctx).await;
+    let second = drive(&ctx).await;
     assert_eq!(first.dispatched, 1);
     assert_eq!(second.dispatched, 0);
     assert_eq!(second.outcome, DriveOutcome::NoDebt);
@@ -646,7 +619,7 @@ impl PortExecutor for Sharded {
 async fn response_shards_land_one_fact_per_draft_under_one_key() {
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
         .with_executor("p1", Arc::new(Sharded));
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
     assert_eq!(report.dispatched, 1);
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
 
@@ -657,7 +630,7 @@ async fn response_shards_land_one_fact_per_draft_under_one_key() {
         .collect();
     assert_eq!(responses.len(), 3, "分片按序各成一条事实");
     for fact in &responses {
-        assert_eq!(fact.key, DebtKey::new(S, "p1", "d", 1), "配对键不含分片号");
+        assert_eq!(fact.key, DebtKey::new("p1", "d", 1), "配对键不含分片号");
     }
     assert_eq!(responses[0].payload["shard"], json!(1));
     assert_eq!(responses[2].payload["done"], json!(true));
@@ -690,7 +663,7 @@ async fn independent_rows_run_concurrently_within_the_cap() {
         }),
     )
     .with_concurrency(2);
-    let report = tokio::time::timeout(std::time::Duration::from_secs(2), drive(&ctx, S))
+    let report = tokio::time::timeout(std::time::Duration::from_secs(2), drive(&ctx))
         .await
         .expect("两笔同轮并发，互不依赖的债应同时飞");
 
@@ -707,7 +680,7 @@ async fn the_same_identity_is_never_dispatched_twice() {
     ])
     .with_executor("p1", stub.clone())
     .with_concurrency(4);
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 1, "同一 (port, id, attempt) 只派发一次");
     assert_eq!(stub.seen().len(), 1);
@@ -718,13 +691,13 @@ async fn waiting_collects_every_in_flight_key() {
     let seed = vec![
         Fact::new(
             FactKind::Sent,
-            DebtKey::new(S, "p1", "a", 1),
+            DebtKey::new("p1", "a", 1),
             json!({"deadline_ms": 60_000}),
             0,
         ),
         Fact::new(
             FactKind::Sent,
-            DebtKey::new(S, "p1", "b", 1),
+            DebtKey::new("p1", "b", 1),
             json!({"deadline_ms": 60_000}),
             0,
         ),
@@ -735,14 +708,11 @@ async fn waiting_collects_every_in_flight_key() {
     ])
     .with_executor("p1", Arc::new(Stub::ok()))
     .with_facts(seed);
-    let report = drive(&ctx, S).await;
+    let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 0);
     assert_eq!(
         report.outcome,
-        DriveOutcome::Waiting(vec![
-            DebtKey::new(S, "p1", "a", 1),
-            DebtKey::new(S, "p1", "b", 1),
-        ])
+        DriveOutcome::Waiting(vec![DebtKey::new("p1", "a", 1), DebtKey::new("p1", "b", 1),])
     );
 }

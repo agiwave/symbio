@@ -26,7 +26,7 @@
 //! 比较、没有函数——更复杂的条件要么折成视图字段，要么留在执行体里。这是
 //! 「表里零代码」的类型形态（DE-015 判据 2）。
 //!
-//! **事实源的字段**先查载荷，再落三个信封字段：`turn` / `seq` / `ts`。它们不是
+//! **事实源的字段**先查载荷，再落两个信封字段：`seq` / `ts`。它们不是
 //! `FactDecl.fields` 的一部分——信封是每条事实都有的，不必逐条声明。
 //!
 //! **视图源**按求值结果展开：数组的每个元素是一条实例，对象是一条实例，`null`
@@ -70,9 +70,9 @@ fn row_writes_of<'a>(
         .unwrap_or(actor.writes)
 }
 
-/// 信封三格：每条事实都带，因此**不**要求写进 `FactDecl.fields`（模块文档 §「模式
+/// 信封两格：每条事实都带，因此**不**要求写进 `FactDecl.fields`（模块文档 §「模式
 /// 只做等值」）。第 3 条检查对它们放行，其余字段名一律要在声明里。
-const ENVELOPE_FIELDS: &[&str] = &["scope", "seq", "ts"];
+const ENVELOPE_FIELDS: &[&str] = &["seq", "ts"];
 
 /// 模式里的一个字面量。只覆盖 JSON 的三个标量型——键绑定也只认它们。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -343,7 +343,6 @@ fn eq_matches(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> bool
 
 fn fact_field(e: &Event, name: &str) -> Option<Value> {
     match name {
-        "scope" => Some(Value::from(e.scope)),
         "seq" => e.seq.map(|s| Value::from(s.value())),
         "ts" => Some(Value::from(e.ts)),
         _ => e.payload.get(name).cloned(),

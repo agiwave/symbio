@@ -1,11 +1,10 @@
-//! 工具债行的行为判据：有事实才欠、id 从事实身份派生、载荷留空。
+//! 工具债行的行为判据：有事实才欠、id 从事实身份派生、载荷带触发事实 id。
 
 use super::*;
 use symbio_plugin_api::debt::DriveRequest;
 
 fn request() -> DriveRequest {
     DriveRequest {
-        scope: 7,
         session_id: "s-1".to_string(),
         provider: None,
     }
@@ -35,8 +34,8 @@ fn the_debt_id_derives_from_the_latest_requested_fact() {
     );
     assert_eq!(
         row.payload,
-        serde_json::json!({}),
-        "载荷留空：清单由执行体自读"
+        serde_json::json!({ "request_id": "tool.requested:latest" }),
+        "载荷带触发事实 id：执行体据此精确配对"
     );
     assert_eq!(row.when.as_deref(), Some(EVENT_TOOL_REQUESTED));
     assert!(row.unless.is_none());

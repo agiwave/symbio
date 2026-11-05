@@ -36,10 +36,10 @@ pub type Fact = symbio_kernel::event::Event;
 /// 参数表达不了」，不在实现里顺手加。
 pub trait FactSource: Send + Sync + 'static {
     /// 落一条草稿；返回分配到的 `seq`。
-    fn append(&self, scope: u64, actor: Principal, draft: FactDraft) -> Result<u64, String>;
+    fn append(&self, actor: Principal, draft: FactDraft) -> Result<u64, String>;
 
-    /// 某个可见域的全部事实（按号序）。
-    fn facts(&self, scope: u64) -> Vec<Fact>;
+    /// 本会话的全部事实（按号序）。
+    fn facts(&self) -> Vec<Fact>;
 
     /// 从序号 `from_seq` 起的完整史（含被取代的前缀）。
     fn range(&self, from_seq: u64) -> Vec<Fact>;
@@ -96,18 +96,15 @@ pub const FACT_SOURCE: FactSourceKey = FactSourceKey;
 
 /// 内存事实源：测试与平凡基线用（与生产实现走同一契约）。
 impl FactSource for MemoryStore<Fact> {
-    fn append(&self, scope: u64, actor: Principal, draft: FactDraft) -> Result<u64, String> {
-        let event = draft_into_event(scope, actor, draft);
+    fn append(&self, actor: Principal, draft: FactDraft) -> Result<u64, String> {
+        let event = draft_into_event(actor, draft);
         Store::append(self, event)
             .map(|seq| seq.value())
             .map_err(|e| format!("{e:?}"))
     }
 
-    fn facts(&self, scope: u64) -> Vec<Fact> {
+    fn facts(&self) -> Vec<Fact> {
         Store::range(self, KernelSeq::new(0))
-            .into_iter()
-            .filter(|event| event.scope == scope)
-            .collect()
     }
 
     fn range(&self, from_seq: u64) -> Vec<Fact> {
@@ -123,16 +120,9 @@ impl FactSource for MemoryStore<Fact> {
     }
 }
 
-/// 草稿 + 域 + 主体 → 入库事件（信封的号与时刻由事实源填）。
-pub fn draft_into_event(scope: u64, actor: Principal, draft: FactDraft) -> Fact {
-    let mut event = Fact::pending(
-        draft.key,
-        draft.kind,
-        draft.entity,
-        draft.verb,
-        scope,
-        actor,
-    );
+/// 草稿 + 主体 → 入库事件（信封的号与时刻由事实源填）。
+pub fn draft_into_event(actor: Principal, draft: FactDraft) -> Fact {
+    let mut event = Fact::pending(draft.key, draft.kind, draft.entity, draft.verb, actor);
     event.payload = draft.payload;
     event.produced_by = draft.produced_by;
     event

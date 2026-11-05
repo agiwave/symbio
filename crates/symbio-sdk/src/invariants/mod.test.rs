@@ -14,8 +14,8 @@ use crate::test_fixtures::EVENTS;
 /// **不带溯源边**：根事件（`user.message`）本来就没有上游。带边的用例显式
 /// `.with_produced_by(..)`——此前这里默认填 0，于是"首条事件指向自己"被当成合规，
 /// 而 [`provenance_dangling`] 一上线，那个默认值就是一处假绿的来源。
-fn pending(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64) -> Event {
-    Event::pending(id, kind, entity, verb, turn, "main")
+fn pending(id: &str, kind: &str, entity: Entity, verb: Verb, _turn: u64) -> Event {
+    Event::pending(id, kind, entity, verb, "main")
 }
 
 /// 造一批**已入库**事件（seq 由 Store 分配 ⇒ 天然单调）。
@@ -165,7 +165,6 @@ fn at_seq(seq: u64, id: &str, produced_by: Option<u64>) -> Event {
         "classify.verdict",
         Entity::Verdict,
         Verb::Asserted,
-        0,
         "main",
     );
     e.seq = Some(crate::event::Seq::new(seq));
@@ -253,7 +252,6 @@ fn pending_events_are_skipped_by_dangling_check() {
         "classify.verdict",
         Entity::Verdict,
         Verb::Asserted,
-        0,
         "main",
     )
     .with_produced_by(999)];
@@ -268,7 +266,7 @@ fn closed(id: &str, kind: &str, reason: Option<&str>) -> Event {
         Some(r) => serde_json::json!({ "reason": r }),
         None => serde_json::json!({}),
     };
-    Event::pending(id, kind, Entity::Scope, Verb::Closed, 0, "main").with_payload(payload)
+    Event::pending(id, kind, Entity::Scope, Verb::Closed, "main").with_payload(payload)
 }
 
 #[test]
@@ -377,14 +375,7 @@ fn closure_reason_covers_both_closure_cells_and_the_denial_fact() {
     let events = vec![
         closed("f0", "chat.assistant.final", None),
         closed("fb0", "chat.assistant.fallback", None),
-        Event::pending(
-            "d0",
-            "authz.denied",
-            Entity::Scope,
-            Verb::Asserted,
-            0,
-            "main",
-        ),
+        Event::pending("d0", "authz.denied", Entity::Scope, Verb::Asserted, "main"),
     ];
     assert_eq!(
         closure_reason_closed(EVENTS, &events, false).len(),
@@ -395,15 +386,8 @@ fn closure_reason_covers_both_closure_cells_and_the_denial_fact() {
 
 #[test]
 fn closure_reason_denied_on_a_denial_fact_passes() {
-    let e = Event::pending(
-        "d0",
-        "authz.denied",
-        Entity::Scope,
-        Verb::Asserted,
-        0,
-        "main",
-    )
-    .with_payload(serde_json::json!({ "reason": ClosureReason::Denied.as_str() }));
+    let e = Event::pending("d0", "authz.denied", Entity::Scope, Verb::Asserted, "main")
+        .with_payload(serde_json::json!({ "reason": ClosureReason::Denied.as_str() }));
     assert!(closure_reason_closed(EVENTS, &[e], false).is_empty());
 }
 
@@ -415,7 +399,6 @@ fn non_closure_cells_are_not_asked_for_a_reason() {
         "chat.assistant.progress",
         Entity::Scope,
         Verb::Progressed,
-        0,
         "main",
     )];
     assert!(
@@ -436,7 +419,6 @@ fn an_artifact_is_settled_but_not_a_stop_so_it_is_not_asked_for_a_reason() {
             "artifact.added",
             Entity::Artifact,
             Verb::Asserted,
-            0,
             "main",
         ),
     ];
@@ -522,14 +504,13 @@ fn fault_budget_exceeded_is_caught() {
 fn read_side_budget_follows_declared_tiers_and_skips_when_none_declared() {
     // 声明了 reflex 档（80ms）⇒ 预算有值，2000ms 的事件必须被看见。
     let declared = stored(vec![
-        Event::pending("u0", "user.message", Entity::Scope, Verb::Opened, 0, "user")
+        Event::pending("u0", "user.message", Entity::Scope, Verb::Opened, "user")
             .with_payload(serde_json::json!({ "text": "问", "tier": "reflex" })),
         Event::pending(
             "s0",
             "task.progress",
             Entity::Task,
             Verb::Progressed,
-            0,
             "session/autonomous",
         )
         .with_produced_by(0)
@@ -573,7 +554,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
     // ① 数值优先：档位 reflex(80) 会判超，但载荷声明了规格派生的 5000ms，
     //    2000ms 的事件必须**不被**报——若读的是档位就会误红。
     let numeric_wins = stored(vec![
-        Event::pending("u0", "user.message", Entity::Scope, Verb::Opened, 0, "user").with_payload(
+        Event::pending("u0", "user.message", Entity::Scope, Verb::Opened, "user").with_payload(
             serde_json::json!({ "text": "问", "tier": "reflex", "budget_ms": 5_000 }),
         ),
         Event::pending(
@@ -581,7 +562,6 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
             "task.progress",
             Entity::Task,
             Verb::Progressed,
-            0,
             "session/autonomous",
         )
         .with_produced_by(0)
@@ -602,14 +582,13 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
 
     // ② 数值更严时照样红（证明它不是「只取更宽」，而是「数值说了算」）。
     let numeric_strict = stored(vec![
-        Event::pending("u0", "user.message", Entity::Scope, Verb::Opened, 0, "user")
+        Event::pending("u0", "user.message", Entity::Scope, Verb::Opened, "user")
             .with_payload(serde_json::json!({ "text": "问", "tier": "deep", "budget_ms": 50 })),
         Event::pending(
             "s0",
             "task.progress",
             Entity::Task,
             Verb::Progressed,
-            0,
             "session/autonomous",
         )
         .with_produced_by(0)
@@ -630,7 +609,6 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
         "user.message",
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "text": "问", "tier": "reflex" }))]);
@@ -646,7 +624,6 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
         "user.message",
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "text": "问" }))]);

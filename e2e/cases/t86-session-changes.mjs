@@ -149,9 +149,6 @@ export default defineCase(
         assertEq(second.address, 'workdir/docs/a.md');
         assertEq(second.op, 'write');
         assertEq(second.changes, 1);
-        // 轮号沿用事实源自己的编号：首轮从 0 起（`u-0` 开轮），本用例只跑一轮
-        assertEq(first.turn, 0, '首轮 = 0（与开轮事实的既有口径一致）');
-        assertEq(first.turn, second.turn, '同一轮里改的两处 ⇒ 同一个轮号');
 
         // ── 证据 ③：读侧闸（同一条源、三种读法，差异只来自闸）───────────────
         const asOwner = (

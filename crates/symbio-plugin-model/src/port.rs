@@ -85,9 +85,6 @@ struct RoundTripRequest {
     /// `calls` 的 `call_key` 都从这里取，环不再代装配。
     #[serde(default)]
     principal: String,
-    /// 本笔债所属的可见域（实体身份；行契约里是数据，不是序号）。
-    #[serde(default)]
-    scope: u64,
 }
 
 /// 一次往返的输入视图：**全从事实读**（写方是谁不问）。
@@ -202,7 +199,7 @@ impl PortExecutor for ModelExecutor {
         let facts = exec
             .reader
             .as_ref()
-            .map(|reader| reader.facts(exec.subject))
+            .map(|reader| reader.facts())
             .unwrap_or_default();
         let (system_prompt, tools, messages) = turn_input(&facts);
         let provider = request
@@ -342,7 +339,7 @@ impl PortExecutor for ModelExecutor {
             }
         };
         // 账：`chat.assistant.final` / `response` / `failed` 由执行体经宿主写口落格（`D-314`）；
-        // 信封（`scope` / `verb`）由这里按事实种类给，键由 `emit_outcome` 按同一身份构造。
+        // 信封（`verb`）由这里按事实种类给，键由 `emit_outcome` 按同一身份构造。
         if let Some(payload) = outcome.facts.first() {
             let kind = if outcome.error.is_none() {
                 world_kind
@@ -556,12 +553,13 @@ fn dispatch_calls(
         .iter()
         .enumerate()
         .map(|(idx, call)| {
-            let anchor = if request.root_id.trim().is_empty() {
-                format!("scope{}", request.scope)
+            // 锚点是**触发这一批派发的事实身份**（用户消息 id）；没有它时只保留序号，
+            // 不再拿轮号占位——轮号不是事实身份。
+            let mut id = if request.root_id.trim().is_empty() {
+                format!("call-c{idx:03}")
             } else {
-                request.root_id.clone()
+                format!("call-{}-c{idx:03}", request.root_id)
             };
-            let mut id = format!("call-{}-{}-c{idx:03}", request.scope, anchor);
             if let Some(wire) = call.id.as_deref().filter(|s| !s.trim().is_empty()) {
                 id.push('-');
                 id.push_str(wire);

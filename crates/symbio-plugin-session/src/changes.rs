@@ -62,8 +62,6 @@ pub(crate) struct ChangeRow {
     pub op: &'static str,
     /// 展示文案（动作的人话，前端不认 [`Self::op`]）。
     pub label: &'static str,
-    /// 最后一次改它的轮号。
-    pub turn: u64,
     /// 本会话对它成功写入的次数。
     pub changes: u64,
 }
@@ -101,7 +99,6 @@ pub(crate) fn read_changes(
                 path: c.path,
                 op: c.op.as_str(),
                 label: op_label(c.op),
-                turn: c.turn,
                 changes: c.changes,
             })
             .collect()

@@ -15,7 +15,7 @@
 //! | `args` | 调用参数（模型发的原样 JSON） |
 //! | `call_id` | 本次调用的 id（幂等与节点挂靠；结果节点 id 由它派生） |
 //! | `scratch_dir` | 宿主为本轮准备的可写目录（结果超预算时在此写全文；子布局归本插件） |
-//! | `artifact` | `{ key, round, round_id, produced_by, allowed, denied_reason }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
+//! | `artifact` | `{ key, produced_by, allowed, denied_reason }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
 //! | `land_only` | `{ text, success, needs_user_action, prompt, failure_kind }`：只落产物格、不再执行（唤醒结果与没跑到的结果走这一形态） |
 //! | `gate` | `{ authorized, spent_ms, requested_ms, budget_ms }`：外部执行闸门的中性输入；快慢与开窗由执行体判 |
 //!
@@ -101,6 +101,8 @@ const KEY_AUTHORIZE_ONLY: &str = "authorize_only";
 const KEY_OPEN_ONLY: &str = "open_only";
 /// 幕锚（id 兜底段）：环的 `drive_seq` 纯值。
 const KEY_EPOCH: &str = "epoch";
+/// 触发这笔债的事实标识（`tool.requested` 的事实行身份）。
+const KEY_REQUEST_ID: &str = "request_id";
 const KEY_POLICY: &str = "policy";
 const KEY_RESPONSE: &str = "response";
 const KEY_TOOL_CALLS: &str = "tool_calls";
@@ -306,7 +308,7 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
         .get(KEY_RESPONSE)
         .cloned()
         .unwrap_or(serde_json::Value::Null);
-    let round = response
+    let root_id = response
         .get(KEY_ID)
         .and_then(|v| v.as_str())
         .unwrap_or("r0");
@@ -360,7 +362,7 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
-            .unwrap_or_else(|| fallback_key(exec.subject, epoch, idx, model_id, round));
+            .unwrap_or_else(|| fallback_key(&exec.subject, epoch, idx, model_id, root_id));
         // 不可派发的调用**也开账**：创建行的集合里有这个元素，跳过它那一笔集合债
         // 就永远欠着。它的终局是「授权拒绝 + 批尾 failed」，不是「不存在」。
         let invalid = model_id.is_none()
@@ -425,15 +427,15 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
 
 /// 调用 id 的兜底段（模型应答没有 `calls` / 缺 id 时用）：只由应答自身的顺序决定。
 fn fallback_key(
-    subject: u64,
+    subject: &str,
     epoch: u64,
     idx: usize,
     model_id: Option<&str>,
-    round: &str,
+    root_id: &str,
 ) -> String {
     match model_id {
-        Some(id) => format!("{TOOL}-{subject}-d{epoch}-{round}-c{idx:03}-{id}"),
-        None => format!("{TOOL}-{subject}-d{epoch}-{round}-c{idx:03}"),
+        Some(id) => format!("{TOOL}-{subject}-d{epoch}-{root_id}-c{idx:03}-{id}"),
+        None => format!("{TOOL}-{subject}-d{epoch}-{root_id}-c{idx:03}"),
     }
 }
 
@@ -449,8 +451,6 @@ struct CallMeta<'a> {
 /// 产物格上下文（宿主在 [`PortExecContext`] 里给出，字段一律中性）。
 struct ArtifactCtx {
     key: String,
-    round: u64,
-    round_id: String,
     produced_by: Option<u64>,
     allowed: bool,
     denied_reason: String,
@@ -461,9 +461,7 @@ fn artifact_ctx(exec: &PortExecContext) -> Option<ArtifactCtx> {
         // 键按**这一笔债务**（幂等键）而不是节点身份生成：同一张调用卡的等待态与
         // 答复态是两笔债（`…-resume-…-1`），各有一次产物；按节点身份生成会让后一条
         // 因幂等被吞掉（答复卡凭空消失）。
-        key: format!("a-{}-{}", exec.subject, exec.idempotency_key),
-        round: exec.subject,
-        round_id: exec.group.clone(),
+        key: format!("a-{}", exec.idempotency_key),
         produced_by: exec.origin,
         allowed: exec.permitted,
         denied_reason: exec.deny_reason.clone(),
@@ -531,20 +529,20 @@ fn refused(text: &str, failure_kind: &'static str) -> PortOutcome {
 /// 落一条 `artifact.added`：产物是**这次结果的产物**，所以由执行体写（P1b / D-308）。
 ///
 /// 载荷字段（`tool` / `text` / `tool_call_id` / `args` / `success` /
-/// `needs_user_action` / `prompt` / `failure_kind` / `turn_id` + 能力交出的
+/// `needs_user_action` / `prompt` / `failure_kind` + 能力交出的
 /// 富化字段）全在这一处装配。结果节点 id 由 `tool_call_id` 派生，不作为载荷键
 /// （DE-048 D-312）。`allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时
-/// 按 `deny-{round}-artifact` 落一条幂等否定事实（同一轮多条结果说的是同一件事）。
+/// 按 `deny-{key}-artifact` 落一条幂等否定事实（同一笔债的多条结果说的是同一件事）。
 async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &LandedResult<'_>) {
     let Some(art) = artifact_ctx(exec) else {
         return;
     };
     if !art.allowed {
-        // 产物闸拒绝：只落一条否定事实；幂等键让它对同一轮的多条结果只存在一条。
+        // 产物闸拒绝：只落一条否定事实；幂等键让它对同一笔债的多条结果只存在一条。
         // `reason` 的取值与环侧 `ClosureReason::Denied::as_str()` 同字面。
         exec.emit
             .emit(vec![FactDraft {
-                key: format!("deny-{}-artifact", art.round),
+                key: format!("deny-{}-artifact", art.key),
                 kind: EVENT_AUTHZ_DENIED.to_string(),
                 entity: Entity::Scope,
                 verb: Verb::Asserted,
@@ -573,7 +571,6 @@ async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &Lan
             .cloned()
             .unwrap_or(serde_json::Value::Null),
         "failure_kind": landed.failure_kind,
-        "turn_id": art.round_id,
     });
     // 能力交出的富化字段（DE-025 D-207）：执行体算，环侧只落（读侧认字段不认工具名）。
     // 待用户动作的调用不记账——「审批没到可判时刻」，与环侧记账同一条口径。
@@ -688,11 +685,14 @@ async fn finish_with(
     out
 }
 
-/// 读面里最近一条 `tool.requested`：返回（事实身份，调用清单）。
+/// 读面里派发这一笔债的 `tool.requested`：返回（事实身份，调用清单）。
 ///
 /// 身份用来派生产物与 `tool.calls.done` 的键；清单只在执行体这里展开，债表不看。
+/// 载荷里的 `request_id` 是**触发这笔债的事实标识**（债行按它组 id）：按它精确取，
+/// 不拿「最近一条」顶替——两条工具请求同时在场时，「最近」不是配对。
 fn read_requested(
     exec: &PortExecContext,
+    payload: &serde_json::Value,
 ) -> Result<(String, Vec<RequestedCall>), (PortErrorClass, String)> {
     let Some(reader) = exec.reader.clone() else {
         return Err((
@@ -700,12 +700,14 @@ fn read_requested(
             "tool.requested 无读面".to_string(),
         ));
     };
-    let facts = reader.facts(exec.subject);
-    let Some(fact) = facts
-        .iter()
-        .rev()
-        .find(|fact| fact.kind == EVENT_TOOL_REQUESTED)
-    else {
+    let facts = reader.facts();
+    let request_id = payload
+        .get(KEY_REQUEST_ID)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let Some(fact) = facts.iter().rev().find(|fact| {
+        fact.kind == EVENT_TOOL_REQUESTED && request_id.is_none_or(|id| fact.id == id)
+    }) else {
         // 事实与派发之间可能有半步时差：可重试，不是协议失败。
         return Err((
             PortErrorClass::Retryable,
@@ -1052,14 +1054,16 @@ impl PortProvider for ToolPort {
 #[async_trait::async_trait]
 impl PortExecutor for ToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
-        // 新表达：债行载荷为空，调用清单在 `tool.requested` 这条世界事实里 ——
-        // 由执行体自己去读面取，**不是**协议错误（债表永不读载荷）。
-        if input
-            .payload
-            .as_object()
-            .is_some_and(|object| object.is_empty())
+        // 新表达：债行载荷只带**触发事实身份**（`request_id`），调用清单在
+        // `tool.requested` 这条世界事实里 —— 由执行体自己去读面精确取，
+        // **不是**协议错误（债表永不读载荷）。空载荷是同一表达的兼容形态。
+        if input.payload.get(KEY_REQUEST_ID).is_some()
+            || input
+                .payload
+                .as_object()
+                .is_some_and(|object| object.is_empty())
         {
-            return self.run_requested(exec).await;
+            return self.run_requested(exec, input.payload).await;
         }
         let payload = input.payload.clone();
         let out = self.run(exec, input).await;
@@ -1080,8 +1084,12 @@ const TOOL_CALLS_DONE: &str = "tool.calls.done";
 impl ToolPort {
     /// 按 `tool.requested` 的清单逐调用执行：复用 [`Self::run`]，每个调用落一条产物，
     /// 最后落 `tool.calls.done`。结果事实按调用顺序原样交回环（环只当纯值搬运）。
-    async fn run_requested(&self, exec: PortExecContext) -> PortOutcome {
-        let (request_id, calls) = match read_requested(&exec) {
+    async fn run_requested(
+        &self,
+        exec: PortExecContext,
+        payload: serde_json::Value,
+    ) -> PortOutcome {
+        let (request_id, calls) = match read_requested(&exec, &payload) {
             Ok(found) => found,
             Err(error) => {
                 return PortOutcome {

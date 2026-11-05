@@ -60,7 +60,6 @@ fn production_table_accepts_the_third_port() {
         EVENT_REQUEST,
         Entity::System,
         Verb::Asserted,
-        7,
         "system",
     )
     .with_payload(serde_json::json!({

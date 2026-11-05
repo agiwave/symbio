@@ -20,6 +20,6 @@ reason: 它写的实现（`turn_exec::drive` / `TurnState` / `chat_loop` / `orch
 |---|---|
 | 债的挑选与偿还（原来的幕 / 内环 / 派发） | `crates/symbio-plugin-loop/src/ring/engine.rs`（环只按行还债，行数据由应用交来）；驱动在 `crates/symbio/src/drive.rs` |
 | 一轮的装配与收尾 | `crates/symbio-plugin-session/src/plugin/turn.rs` |
-| 轮的身份 | `scope`（会话 id 的确定身份，`crates/symbio-host/src/lib.rs::scope_of`）——取代 `TurnState`（D-317） |
+| 轮的身份 | 事实源打开时绑定的会话身份（取代 `TurnState`，D-317） |
 | 节点状态与流式 | DE-105 |
 | 模块拆分 | DE-104 |

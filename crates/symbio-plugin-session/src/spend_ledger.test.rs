@@ -16,7 +16,7 @@ fn response(id: &str, port: &str, principal: &str, spend: Option<(u64, &str)>, t
             "currency": currency,
         });
     }
-    Event::pending(id, "response", Entity::Scope, Verb::Asserted, 0, "system")
+    Event::pending(id, "response", Entity::Scope, Verb::Asserted, "system")
         .with_produced_by(1)
         .with_ts(ts)
         .with_payload(payload)

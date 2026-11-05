@@ -34,7 +34,6 @@ fn seeded_dir(tag: &str) -> (std::path::PathBuf, u64) {
                 EVENT_USER_MESSAGE,
                 Entity::Scope,
                 Verb::Opened,
-                0,
                 "user",
             )
             .with_ts(1_000)
@@ -110,7 +109,6 @@ fn an_edit_lands_one_fact_with_the_patched_message() {
     let e = &facts[0];
     assert_eq!(e.kind, EVENT_MESSAGE_EDITED);
     assert_eq!((e.entity, e.verb), (Entity::Message, Verb::Asserted));
-    assert_eq!(e.scope, 0, "变更不属于任何一轮（与 memory.* 同约定）");
     assert_eq!(e.actor, "person/local", "编辑是用户对列表的操作");
     assert_eq!(
         e.produced_by,
@@ -261,7 +259,6 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     )
     .with_ts(1_000)
@@ -274,7 +271,6 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
         symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
-        1,
         "session/main",
     )
     .with_ts(2_000)
@@ -468,7 +464,6 @@ fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
                 EVENT_USER_MESSAGE,
                 Entity::Scope,
                 Verb::Opened,
-                1,
                 "user",
             )
             .with_ts(2_000)

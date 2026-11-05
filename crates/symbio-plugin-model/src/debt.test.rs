@@ -2,7 +2,6 @@ use super::*;
 
 fn request(provider: Option<&str>) -> DriveRequest {
     DriveRequest {
-        scope: 7,
         session_id: "s".into(),
         provider: provider.map(str::to_string),
     }

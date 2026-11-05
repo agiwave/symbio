@@ -126,7 +126,6 @@ fn recall_snapshots_scans_one_level_deliberately() {
                 symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
-                0,
                 "user",
             )
             .with_ts(1000)
@@ -255,19 +254,12 @@ fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
 
 /// 用户格事件（载荷带节点 id；与 `rebuild.test.rs::user_event` 同形——那边是投影
 /// 判据、这边是存储判据，两处构造一致才能判到同一件事）
-fn user_event(eid: &str, node_id: &str, text: &str, turn: u64) -> symbio_kernel::event::Event {
+fn user_event(eid: &str, node_id: &str, text: &str, _turn: u64) -> symbio_kernel::event::Event {
     use symbio_kernel::event::{Entity, Event, Verb};
     use symbio_plugin_api::events::EVENT_USER_MESSAGE;
-    Event::pending(
-        eid,
-        EVENT_USER_MESSAGE,
-        Entity::Scope,
-        Verb::Opened,
-        turn,
-        "user",
-    )
-    .with_ts(1_000)
-    .with_payload(serde_json::json!({ "text": text, "tier": "full", "id": node_id }))
+    Event::pending(eid, EVENT_USER_MESSAGE, Entity::Scope, Verb::Opened, "user")
+        .with_ts(1_000)
+        .with_payload(serde_json::json!({ "text": text, "tier": "full", "id": node_id }))
 }
 
 fn session_with_messages(id: &str, updated_at: i64) -> Session {

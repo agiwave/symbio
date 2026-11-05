@@ -7,7 +7,7 @@
  *
  * ## 前端只排版，不判读
  *
- * 后端已经把行排成呈现就绪的 `{path, address, op, label, turn, changes}`：
+ * 后端已经把行排成呈现就绪的 `{path, address, op, label, changes}`：
  * 本文件原样透传，不解析工具参数、不把 `op` 翻译成文案、不拼地址。地址是
  * **相对会话容器**的（`workdir/<path>`），与会话地址拼合由调用方经地址代数完成。
  */
@@ -30,8 +30,6 @@ export interface ChangeRow {
   op: string
   /** 展示文案（「写入」「编辑」…）——前端不认 `op`。 */
   label: string
-  /** 最后一次改它的轮号。 */
-  turn: number
   /** 本会话对它成功写入的次数。 */
   changes: number
 }

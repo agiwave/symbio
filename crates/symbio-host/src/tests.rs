@@ -49,21 +49,14 @@ impl Plugin for EmptyRoot {
 }
 
 #[tokio::test]
-async fn a_scope_with_no_debt_is_idle() {
+async fn a_session_with_no_debt_is_idle() {
     let host = Host::new(Arc::new(EmptyRoot));
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let report = host.drive(&base, "s-1", None).await.expect("驱动装配成立");
 
-    assert_eq!(report.scope, scope_of("s-1"));
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
     assert_eq!(report.dispatched, 0);
-    assert!(host.idle_at(report.scope).is_some(), "无未还债 ⇒ 落 idle");
-}
-
-#[test]
-fn scope_identity_never_degrades_to_zero() {
-    assert_ne!(scope_of(""), 0, "空会话 id 也有确定身份");
-    assert_ne!(scope_of("a"), scope_of("b"));
+    assert!(host.idle_at().is_some(), "无未还债 ⇒ 落 idle");
 }
 
 /// 最小 smoke 的模型端口：执行体只读事实、只落 `response`。
@@ -92,7 +85,7 @@ impl PortExecutor for SmokeExecutor {
         let facts = exec
             .reader
             .as_ref()
-            .map(|reader| reader.facts(exec.subject))
+            .map(|reader| reader.facts())
             .unwrap_or_default();
         let user = facts
             .iter()
@@ -125,7 +118,6 @@ impl DebtSource for SmokeDebts {
             "provider": request.provider,
             "root_id": user_id,
             "principal": "user",
-            "scope": request.scope,
         });
         let mut rows = vec![DebtSpec::new(
             "model-reply",
@@ -200,7 +192,6 @@ impl Plugin for SmokeRoot {
 #[tokio::test]
 async fn user_message_becomes_a_model_debt_that_lands_its_response_in_the_store() {
     let session = "smoke-1";
-    let scope = scope_of(session);
 
     // 世界事实由写方（会话侧扮演）落进事实源：宿主没有写口。
     let store = Arc::new(symbio_kernel::store::MemoryStore::<Event>::new());
@@ -211,7 +202,6 @@ async fn user_message_becomes_a_model_debt_that_lands_its_response_in_the_store(
             EVENT_USER_MESSAGE,
             Entity::Scope,
             Verb::Opened,
-            scope,
             "user",
         )
         .with_payload(serde_json::json!({"text": "你好"})),
@@ -225,12 +215,11 @@ async fn user_message_becomes_a_model_debt_that_lands_its_response_in_the_store(
         .await
         .expect("驱动装配成立");
 
-    assert_eq!(report.scope, scope);
     assert_eq!(report.dispatched, 1, "两行债同一轮身份 ⇒ 只派发一次");
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
 
     // 读面从事实源投影全种类：宿主写的用户消息 + 环落的协议事实 + 执行体交回的应答。
-    let facts = host.world_facts(scope);
+    let facts = host.world_facts();
     let kinds: Vec<&str> = facts.iter().map(|fact| fact.kind.as_str()).collect();
     assert!(kinds.contains(&EVENT_USER_MESSAGE), "kinds={kinds:?}");
     assert!(kinds.contains(&"response"), "kinds={kinds:?}");
@@ -289,7 +278,7 @@ impl PortExecutor for LoopModelExecutor {
         let facts = exec
             .reader
             .as_ref()
-            .map(|reader| reader.facts(exec.subject))
+            .map(|reader| reader.facts())
             .unwrap_or_default();
         let user_id = facts
             .iter()
@@ -365,7 +354,7 @@ impl PortExecutor for LoopToolExecutor {
         let facts = exec
             .reader
             .as_ref()
-            .map(|reader| reader.facts(exec.subject))
+            .map(|reader| reader.facts())
             .unwrap_or_default();
         let Some(request) = facts
             .iter()
@@ -490,7 +479,6 @@ impl Plugin for ToolLoopRoot {
 #[tokio::test]
 async fn the_tool_round_is_dispatched_and_fed_back_into_the_model() {
     let session = "smoke-tool-1";
-    let scope = scope_of(session);
 
     let store = Arc::new(symbio_kernel::store::MemoryStore::<Event>::new());
     Store::append(
@@ -500,7 +488,6 @@ async fn the_tool_round_is_dispatched_and_fed_back_into_the_model() {
             EVENT_USER_MESSAGE,
             Entity::Scope,
             Verb::Opened,
-            scope,
             "user",
         )
         .with_payload(serde_json::json!({"text": "你好"})),
@@ -533,7 +520,7 @@ async fn the_tool_round_is_dispatched_and_fed_back_into_the_model() {
         "工具债派且只派一次"
     );
 
-    let facts = host.world_facts(scope);
+    let facts = host.world_facts();
     let kinds: Vec<&str> = facts.iter().map(|fact| fact.kind.as_str()).collect();
     assert!(kinds.contains(&EVENT_TOOL_REQUESTED), "kinds={kinds:?}");
     assert!(kinds.contains(&EVENT_ARTIFACT_ADDED), "kinds={kinds:?}");

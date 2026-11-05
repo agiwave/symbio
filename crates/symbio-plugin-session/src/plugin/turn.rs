@@ -6,7 +6,8 @@
 //!   本插件把它投影成消息节点；**宿主不写任何业务事实**。
 //!
 //! 本插件**不调** `drive`（那会变成插件调插件）：它只写事实 / 读事实，宿主看到
-//! 新事实再单次驱动那一轮。两半之间的唯一接口是**事实源上的 scope**。
+//! 新事实再单次驱动那一轮。两半之间的唯一接口是**事实源 + 开轮事实的身份**：
+//! 事实源在打开时就绑定会话，`user.message` 的 `seq` / `event_id` 就是这一轮的名字。
 
 use super::*;
 use crate::chat_session::Carrier;
@@ -23,11 +24,10 @@ use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use symbio_sdk::chat::chat_node as cm;
 
 impl SessionPlugin {
-    /// 收件箱队首 → `user.message` 事实；返回这一轮的 `scope`（无消息 ⇒ `None`）。
+    /// 收件箱队首 → `user.message` 事实；返回这条事实的 `seq`（无消息 ⇒ `None`）。
     ///
-    /// `scope` 取「下一条事实的号」：它与这条 `user.message` 落格后拿到的 seq 相同，
-    /// 因此每轮唯一且单调。**不能**用会话哈希：事实源里 scope 是**轮的同一性**
-    /// （同 scope 二次开轮会被 I1 拒绝），而一个会话有很多轮。
+    /// `seq` 由事实源在入库时分配，它就是**开轮事实的身份**：`session.config` 的
+    /// 幂等键与溯源都指向它，投影终答时也用它找回这条 `user.message`。
     pub(crate) async fn consume_inbox_turn(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
@@ -39,7 +39,6 @@ impl SessionPlugin {
             return Ok(None);
         };
 
-        let scope = source.head();
         let text = item
             .message
             .content
@@ -54,8 +53,8 @@ impl SessionPlugin {
             payload: json!({ "text": text, "id": item.id }),
             produced_by: None,
         };
-        source
-            .append(scope, PRINCIPAL_USER.to_string(), draft)
+        let seq = source
+            .append(PRINCIPAL_USER.to_string(), draft)
             .map_err(|e| PluginError::InternalError(format!("user.message 落格失败: {e}")))?;
 
         // 轮首装配：能力收集 → `session.config`（系统提示词 + 工具表 + 本轮生效设置）。
@@ -81,7 +80,7 @@ impl SessionPlugin {
             .collect::<Vec<_>>();
         let cfg = self.config.read().await.clone();
         let config_draft = FactDraft {
-            key: format!("session-config-{scope}"),
+            key: format!("session-config-{seq}"),
             kind: EVENT_SESSION_CONFIG.to_string(),
             entity: Entity::Scope,
             verb: Verb::Asserted,
@@ -95,11 +94,11 @@ impl SessionPlugin {
                 "readyset_cap": cfg.task_cap,
                 "skill_compile_enabled": cfg.skill_compile_enabled,
             }),
-            // 溯源指同一轮刚落的 `user.message`（seq = scope）。
-            produced_by: Some(scope),
+            // 溯源指同一轮刚落的 `user.message`（seq 就是它的号）。
+            produced_by: Some(seq),
         };
         source
-            .append(scope, PRINCIPAL_MAIN.to_string(), config_draft)
+            .append(PRINCIPAL_MAIN.to_string(), config_draft)
             .map_err(|e| PluginError::InternalError(format!("session.config 落格失败: {e}")))?;
 
         let mut message = item.message;
@@ -118,23 +117,34 @@ impl SessionPlugin {
         self.convergence
             .emit_session_state(&state, SessionStateChange::Working)
             .await;
-        Ok(Some(scope))
+        Ok(Some(seq))
     }
 
-    /// 该 `scope` 的终答事实 → 转写节点，并收束本轮；没有终答 ⇒ `false`（不投影）。
+    /// 该开轮事实的终答事实 → 转写节点，并收束本轮；没有终答 ⇒ `false`（不投影）。
     ///
+    /// 配对靠**事实身份**：由 `user.message` 的 `seq` 取回它的 `event_id`，
+    /// 再找载荷 `turn_id` 指向它的那条终答——不再拿轮号当键。
     /// 节点由 `rebuild` 从**同一条事实**折出（读路径与写路径同一个折叠）。幂等：
     /// 同一条事实再投影一次时，`apply` 见到节点已存在会跳过（不重复追加）。
     pub(crate) async fn project_final_turn(
         &self,
         session_id: &str,
-        scope: u64,
+        user_seq: u64,
         source: &dyn FactSource,
     ) -> Result<bool, PluginError> {
         let events = source.range(0);
+        let Some(user) = events.iter().find(|e| {
+            e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq)
+        }) else {
+            return Ok(false);
+        };
         let Some(final_event) = events
             .iter()
-            .find(|e| e.scope == scope && e.kind == EVENT_CHAT_ASSISTANT_FINAL)
+            .rev()
+            .find(|e| {
+                e.kind == EVENT_CHAT_ASSISTANT_FINAL
+                    && e.payload.get("turn_id").and_then(Value::as_str) == Some(&user.event_id)
+            })
             .cloned()
         else {
             return Ok(false);
@@ -178,7 +188,7 @@ impl SessionPlugin {
         Ok(true)
     }
 
-    /// 路由 `session/consume`：把队首落成事实，返回本轮 scope。
+    /// 路由 `session/consume`：把队首落成事实，返回开轮事实的 `seq`。
     pub(crate) async fn handle_consume(
         &self,
         ctx: Arc<dyn PluginInvokeRequest>,
@@ -190,11 +200,11 @@ impl SessionPlugin {
             ));
         }
         let source = self.fact_source_for(&ctx, &sid).await?;
-        let scope = self.consume_inbox_turn(&ctx, &sid, &*source).await?;
-        Ok(PluginPayload::new(&json!({ "scope": scope })))
+        let seq = self.consume_inbox_turn(&ctx, &sid, &*source).await?;
+        Ok(PluginPayload::new(&json!({ "seq": seq })))
     }
 
-    /// 路由 `session/project`：把该 scope 的终答事实投影回转写并收束。
+    /// 路由 `session/project`：把该开轮事实的终答投影回转写并收束。
     pub(crate) async fn handle_project(
         &self,
         ctx: Arc<dyn PluginInvokeRequest>,
@@ -206,12 +216,12 @@ impl SessionPlugin {
             ));
         }
         let payload = ctx.payload::<Value>()?;
-        let scope = payload
-            .get("scope")
+        let seq = payload
+            .get("seq")
             .and_then(Value::as_u64)
-            .ok_or_else(|| PluginError::ValidationError("session/project 需要 scope".into()))?;
+            .ok_or_else(|| PluginError::ValidationError("session/project 需要 seq".into()))?;
         let source = self.fact_source_for(&ctx, &sid).await?;
-        let projected = self.project_final_turn(&sid, scope, &*source).await?;
+        let projected = self.project_final_turn(&sid, seq, &*source).await?;
         Ok(PluginPayload::new(&json!({ "projected": projected })))
     }
 }

@@ -120,7 +120,6 @@ fn seed(tag: &str) -> PathBuf {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "text": "你好", "tier": "deep", "turn_ref": "u-0" }));
@@ -132,7 +131,6 @@ fn seed(tag: &str) -> PathBuf {
                 EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Scope,
                 Verb::Closed,
-                0,
                 "session/main",
             )
             .with_produced_by(s0)
@@ -147,7 +145,6 @@ fn seed(tag: &str) -> PathBuf {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        1,
         "user",
     )
     .with_payload(serde_json::json!({ "text": "再问", "tier": "deep", "turn_ref": "u-1" }));
@@ -159,7 +156,6 @@ fn seed(tag: &str) -> PathBuf {
                 EVENT_CHAT_ASSISTANT_FALLBACK,
                 Entity::Scope,
                 Verb::Closed,
-                1,
                 "session/main",
             )
             .with_produced_by(s1)
@@ -218,7 +214,6 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
                     EVENT_USER_MESSAGE,
                     Entity::Scope,
                     Verb::Opened,
-                    0,
                     "user",
                 )
                 .with_payload(serde_json::json!({ "text": "问", "tier": "deep" })),
@@ -232,7 +227,6 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
                     EVENT_CHAT_ASSISTANT_FINAL,
                     Entity::Scope,
                     Verb::Closed,
-                    0,
                     "session/main",
                 )
                 .with_produced_by(u)
@@ -991,7 +985,6 @@ fn archival_does_not_shrink_the_readout() {
                 EVENT_SESSION_CONSOLIDATED,
                 Entity::Message,
                 Verb::Progressed,
-                0,
                 "session/main",
             )
             .with_payload(serde_json::json!({
@@ -1151,7 +1144,6 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "text": "你好", "tier": "deep", "turn_ref": "u-0" }));
@@ -1163,7 +1155,6 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
                 EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Scope,
                 Verb::Closed,
-                0,
                 "session/main",
             )
             .with_produced_by(s0)
@@ -1179,7 +1170,6 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
                 symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
-                0,
                 "user",
             )
             .with_produced_by(s0)
@@ -1494,7 +1484,6 @@ fn readyset_column_degrades_to_the_documented_empty_shape() {
                     EVENT_TASK_OPENED,
                     Entity::Task,
                     Verb::Opened,
-                    0,
                     symbio_sdk::authz::PRINCIPAL_MAIN,
                 )
                 .with_produced_by(0)
@@ -1564,7 +1553,6 @@ fn calibration_column_degrades_to_the_documented_empty_shape() {
                         EVENT_MEMORY_CALIBRATED,
                         Entity::Memory,
                         Verb::Asserted,
-                        0,
                         "session/main",
                     )
                     .with_produced_by(0)
@@ -1630,7 +1618,6 @@ fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
                         symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
                         Entity::Memory,
                         Verb::Opened,
-                        0,
                         "user",
                     )
                     .with_produced_by(0)
@@ -1727,7 +1714,6 @@ fn transcript_column_surfaces_tool_rows() {
                 EVENT_ARTIFACT_ADDED,
                 Entity::Artifact,
                 Verb::Asserted,
-                0,
                 "session/main",
             )
             .with_produced_by(0)
@@ -1770,7 +1756,7 @@ fn resp_event(id: &str, port: &str, principal: &str, usage: Option<(u64, Option<
         }
         payload["usage"] = u;
     }
-    Event::pending(id, "response", Entity::Scope, Verb::Asserted, 0, "system")
+    Event::pending(id, "response", Entity::Scope, Verb::Asserted, "system")
         .with_produced_by(1)
         .with_payload(payload)
 }

@@ -322,7 +322,7 @@ impl FactDraft {
     /// 为什么本方法不接轮号：`turn` 是宿主的容器概念，能力面拿到它就开始自己数轮次，
     /// 那等于把业务语义焊进端口。落格点（`loop` 的派生事实与收束写口）本来就持有轮号。
     pub fn into_event(self, actor: &str) -> Event {
-        let mut event = Event::pending(self.key, self.kind, self.entity, self.verb, 0, actor);
+        let mut event = Event::pending(self.key, self.kind, self.entity, self.verb, actor);
         event.payload = self.payload;
         event.produced_by = self.produced_by;
         event

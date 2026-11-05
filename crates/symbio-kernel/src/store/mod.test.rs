@@ -6,8 +6,8 @@
 use super::*;
 use crate::event::{Entity, Event, EventEnvelope, Verb};
 
-fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64) -> Event {
-    Event::pending(id, kind, entity, verb, turn, "main")
+fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, _turn: u64) -> Event {
+    Event::pending(id, kind, entity, verb, "main")
 }
 
 // ── C1：seq 严格单调、无跳号（I1 的存储侧） ─────────────────────────────

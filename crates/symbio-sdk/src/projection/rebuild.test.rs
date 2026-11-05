@@ -107,7 +107,7 @@ fn frame_event(
     origin: &str,
     payload: serde_json::Value,
 ) -> Event {
-    Event::pending(id, kind, Entity::Scope, verb, 1, origin)
+    Event::pending(id, kind, Entity::Scope, verb, origin)
         .with_ts(ts)
         .with_payload(payload)
 }
@@ -325,7 +325,6 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
             EVENT_CHAT_ASSISTANT_FALLBACK,
             Entity::Scope,
             Verb::Closed,
-            1,
             "session/main",
         )
         .with_ts(2_000)
@@ -374,6 +373,26 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
     );
 }
 
+/// 发起一批工具调用的那条事实：载荷带 `turn_id` 与 `calls[]`。
+///
+/// 产物不再复制轮号，重建按 `tool_call_id` 反查这里登记过的调用 id。
+fn tool_requested(calls: &[&str]) -> Event {
+    Event::pending(
+        "tr-1",
+        "tool.requested",
+        Entity::Scope,
+        Verb::Asserted,
+        "session/main",
+    )
+    .with_payload(serde_json::json!({
+        "turn_id": "T1",
+        "calls": calls
+            .iter()
+            .map(|id| serde_json::json!({ "id": id }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
 /// 一轮的中途产出**随该轮的产物格入格**，于是重建把它排在自己的工具卡片之前。
 ///
 /// 判据是**位置**而不是存在：这些思考本来就记在收束格的 `rounds[]` 里，一个字段都不少。
@@ -392,18 +411,18 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
             EVENT_ARTIFACT_ADDED,
             Entity::Artifact,
             Verb::Asserted,
-            1,
             "session/main",
         )
         .with_ts(1_500)
         .with_payload(serde_json::json!({
             "tool": "read", "text": body, "tool_call_id": call,
             "args": format!("{{\"path\":\"{path}\"}}"),
-            "success": true, "turn_id": "T1", "round": round,
+            "success": true, "round": round,
         }))
     };
     let events = vec![
         user_event("u-node", "读两个文件"),
+        tool_requested(&["c0", "c1"]),
         artifact(0, "c0", "a.md", "a 的内容", round.clone()),
         artifact(1, "c1", "b.md", "b 的内容", serde_json::Value::Null),
         final_event(serde_json::json!({
@@ -442,12 +461,12 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
 fn artifact_builds_call_and_result_under_the_call() {
     let events = vec![
         user_event("u-node", "读文件"),
+        tool_requested(&["T-016"]),
         Event::pending(
             "a-1-0",
             EVENT_ARTIFACT_ADDED,
             Entity::Artifact,
             Verb::Asserted,
-            1,
             "session/main",
         )
         .with_ts(1_500)
@@ -457,7 +476,6 @@ fn artifact_builds_call_and_result_under_the_call() {
             "tool_call_id": "T-016",
             "args": "{\"path\":\"a.md\"}",
             "success": true,
-            "turn_id": "T1",
         })),
     ];
 
@@ -482,17 +500,17 @@ fn artifact_builds_call_and_result_under_the_call() {
 #[test]
 fn tool_calls_reference_does_not_duplicate_the_card() {
     let events = vec![
+        tool_requested(&["T-016"]),
         Event::pending(
             "a-1-0",
             EVENT_ARTIFACT_ADDED,
             Entity::Artifact,
             Verb::Asserted,
-            1,
             "session/main",
         )
         .with_payload(serde_json::json!({
             "tool": "read", "text": "内容", "tool_call_id": "T-016",
-            "args": "{}", "success": true, "turn_id": "T1",
+            "args": "{}", "success": true,
         })),
         final_event(serde_json::json!({
             "text": "读完了",
@@ -587,7 +605,6 @@ fn reported_mirrors_the_persisted_shape() {
         EVENT_CHAT_ASSISTANT_REPORTED,
         Entity::Scope,
         Verb::Asserted,
-        1,
         "session/main",
     )
     .with_ts(3_000)
@@ -629,7 +646,7 @@ fn aborted_status_lands_on_the_turn_and_its_text() {
 
 /// 一条模型端口的协议事实（`response` / `failed` 走同一形状）。
 fn model_output_event(kind: &str, id: &str, ts: i64, payload: serde_json::Value) -> Event {
-    Event::pending(id, kind, Entity::Scope, Verb::Asserted, 1, "system")
+    Event::pending(id, kind, Entity::Scope, Verb::Asserted, "system")
         .with_ts(ts)
         .with_produced_by(1)
         .with_payload(payload)
@@ -673,12 +690,12 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
         crate::test_fixtures::EVENT_AUTHZ_DENIED,
         Entity::Scope,
         Verb::Asserted,
-        1,
         "session/peer-b",
     )
     .with_ts(3_000)
     .with_payload(serde_json::json!({
         "key": EVENT_CHAT_ASSISTANT_FINAL, "kind": "speech", "reason": "denied", "detail": "窄行",
+        "turn_id": "T1",
     }));
     let events = vec![
         user_event("u-node", "委托出去"),
@@ -738,7 +755,6 @@ fn edited_event(msg: crate::chat::chat_node::ChatNode) -> Event {
         crate::test_fixtures::EVENT_MESSAGE_EDITED,
         Entity::Message,
         Verb::Asserted,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({
@@ -753,7 +769,6 @@ fn removed_event(ids: &[&str]) -> Event {
         crate::test_fixtures::EVENT_MESSAGE_REMOVED,
         Entity::Message,
         Verb::Closed,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "ids": ids }))
@@ -888,7 +903,6 @@ fn a_malformed_edit_payload_is_skipped() {
             crate::test_fixtures::EVENT_MESSAGE_EDITED,
             Entity::Message,
             Verb::Asserted,
-            0,
             "user",
         )
         .with_payload(serde_json::json!({ "message": "我不是一条消息" })),
@@ -908,7 +922,6 @@ fn snapshot_event(msgs: Vec<crate::chat::chat_node::ChatNode>) -> Event {
         crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
-        0,
         "session/main",
     )
     .with_ts(3_000)
@@ -992,7 +1005,6 @@ fn a_malformed_snapshot_payload_is_not_a_snapshot() {
         crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({ "messages": "我不是数组" }));
@@ -1066,7 +1078,6 @@ fn added_event(msgs: Vec<crate::chat::chat_node::ChatNode>) -> Event {
         crate::test_fixtures::EVENT_MESSAGE_ADDED,
         Entity::Message,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({
@@ -1128,7 +1139,6 @@ fn tool_fact_event(kind: &str, id: &str, payload: serde_json::Value) -> Event {
         kind,
         Entity::Scope,
         Verb::Asserted,
-        1,
         "system",
     )
     .with_ts(1_500)

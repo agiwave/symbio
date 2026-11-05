@@ -8,6 +8,11 @@
 //!
 //! 真实链路里 `seq` 由存储的唯一写入口分配、`ts` 由入库时刻填。本 crate 不链接存储（也不许
 //! 链接：`E-009`），所以用例在构造后手工补——测的是**折叠**，不是入库。
+//!
+//! ## 收束怎么归到开轮格
+//!
+//! 收束事实的载荷带 `turn_id`——**触发这一轮的开轮事实 id**。配对按事实身份，不按轮号：
+//! 本文件里每个 `final_reply` / `fallback_reply` 的第一个「谁」参数就是那条 `user.message` 的 id。
 
 use super::*;
 use symbio_plugin_api::Seq;
@@ -15,13 +20,12 @@ use symbio_plugin_api::Seq;
 const PRINCIPAL: &str = "session/main";
 
 /// 一条开轮格（`user.message`）：本幕以哪一档跑。**档位的唯一来源。**
-fn dispatch(id: &str, turn: u64, tier: &str, seq: u64, ts: i64) -> Event {
+fn dispatch(id: &str, tier: &str, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        turn,
         PRINCIPAL,
     )
     .with_ts(ts)
@@ -31,7 +35,7 @@ fn dispatch(id: &str, turn: u64, tier: &str, seq: u64, ts: i64) -> Event {
 }
 
 /// 开轮格（`user.message`），不带档位。
-fn user_message(id: &str, turn: u64, tier: Option<&str>, seq: u64, ts: i64) -> Event {
+fn user_message(id: &str, tier: Option<&str>, seq: u64, ts: i64) -> Event {
     let payload = match tier {
         Some(t) => json!({ "text": "问", "tier": t }),
         None => json!({ "text": "问" }),
@@ -41,7 +45,6 @@ fn user_message(id: &str, turn: u64, tier: Option<&str>, seq: u64, ts: i64) -> E
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        turn,
         PRINCIPAL,
     )
     .with_ts(ts)
@@ -50,36 +53,34 @@ fn user_message(id: &str, turn: u64, tier: Option<&str>, seq: u64, ts: i64) -> E
     e
 }
 
-/// 成功收束（`chat.assistant.final`），带实测耗时。
-fn final_reply(id: &str, turn: u64, cost_ms: u64, seq: u64, ts: i64) -> Event {
+/// 成功收束（`chat.assistant.final`），带实测耗时；`turn_id` 是它所属的开轮事实 id。
+fn final_reply(id: &str, turn_id: &str, cost_ms: u64, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
         EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
-        turn,
         PRINCIPAL,
     )
     .with_ts(ts)
     .with_cost_ms(cost_ms)
-    .with_payload(json!({ "text": "答" }));
+    .with_payload(json!({ "text": "答", "turn_id": turn_id }));
     e.seq = Some(Seq::new(seq));
     e
 }
 
 /// 兜底收束（`chat.assistant.fallback`），同样带耗时——但它**不是**时延样本。
-fn fallback_reply(id: &str, turn: u64, cost_ms: u64, seq: u64, ts: i64) -> Event {
+fn fallback_reply(id: &str, turn_id: &str, cost_ms: u64, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
         EVENT_CHAT_ASSISTANT_FALLBACK,
         Entity::Scope,
         Verb::Closed,
-        turn,
         PRINCIPAL,
     )
     .with_ts(ts)
     .with_cost_ms(cost_ms)
-    .with_payload(json!({ "text": "兜底" }));
+    .with_payload(json!({ "text": "兜底", "turn_id": turn_id }));
     e.seq = Some(Seq::new(seq));
     e
 }
@@ -108,10 +109,10 @@ fn sample_ms(v: &Value, tier: &str) -> Vec<u64> {
 #[test]
 fn latency_takes_only_successful_finals() {
     let events = vec![
-        dispatch("d1", 1, "deep", 1, 100),
-        fallback_reply("f1", 1, 9_999, 2, 200),
-        dispatch("d2", 2, "deep", 3, 300),
-        final_reply("a2", 2, 40, 4, 340),
+        dispatch("d1", "deep", 1, 100),
+        fallback_reply("f1", "d1", 9_999, 2, 200),
+        dispatch("d2", "deep", 3, 300),
+        final_reply("a2", "d2", 40, 4, 340),
     ];
     let v = latency(&events, i64::MAX);
     assert_eq!(
@@ -121,20 +122,16 @@ fn latency_takes_only_successful_finals() {
     );
 }
 
-/// 档位按**本轮收束之前**的开轮格归：同一 scope 内后一条档位声明覆盖前一条。
+/// 收束归到它**指名的**那条开轮格：同一个会话里另有一条别的档位声明也不串味。
 #[test]
-fn latency_assigns_the_tier_declared_before_the_final() {
+fn latency_pairs_the_final_with_the_turn_it_names() {
     let events = vec![
-        dispatch("d1", 1, "reflex", 1, 100),
-        dispatch("d1b", 1, "deep", 2, 150),
-        final_reply("a1", 1, 70, 3, 220),
+        dispatch("d1", "reflex", 1, 100),
+        dispatch("d2", "deep", 2, 150),
+        final_reply("a1", "d2", 70, 3, 220),
     ];
     let v = latency(&events, i64::MAX);
-    assert_eq!(
-        sample_ms(&v, "deep"),
-        vec![70],
-        "归到收束前最近那一幕的档位"
-    );
+    assert_eq!(sample_ms(&v, "deep"), vec![70], "归到它指名的那一幕");
     assert!(rows(&v).iter().all(|r| r["tier"] != json!("reflex")));
 }
 
@@ -142,8 +139,8 @@ fn latency_assigns_the_tier_declared_before_the_final() {
 #[test]
 fn latency_reads_the_tier_from_the_user_message() {
     let events = vec![
-        user_message("u1", 1, Some("fast"), 1, 100),
-        final_reply("a1", 1, 15, 2, 115),
+        user_message("u1", Some("fast"), 1, 100),
+        final_reply("a1", "u1", 15, 2, 115),
     ];
     let v = latency(&events, i64::MAX);
     assert_eq!(sample_ms(&v, "fast"), vec![15]);
@@ -153,8 +150,8 @@ fn latency_reads_the_tier_from_the_user_message() {
 #[test]
 fn an_unknown_tier_lands_in_the_unspecified_bucket() {
     let events = vec![
-        dispatch("d1", 1, "hyper", 1, 100),
-        final_reply("a1", 1, 5, 2, 105),
+        dispatch("d1", "hyper", 1, 100),
+        final_reply("a1", "d1", 5, 2, 105),
     ];
     let v = latency(&events, i64::MAX);
     assert_eq!(sample_ms(&v, UNSPECIFIED), vec![5]);
@@ -164,17 +161,17 @@ fn an_unknown_tier_lands_in_the_unspecified_bucket() {
 #[test]
 fn percentile_is_nearest_rank() {
     let events = vec![
-        dispatch("d1", 1, "deep", 1, 100),
-        final_reply("a1", 1, 10, 2, 110),
-        final_reply("a2", 1, 20, 4, 120),
-        final_reply("a3", 1, 30, 5, 130),
-        final_reply("a4", 1, 40, 6, 140),
-        final_reply("a5", 1, 50, 7, 150),
-        final_reply("a6", 1, 60, 8, 160),
-        final_reply("a7", 1, 70, 9, 170),
-        final_reply("a8", 1, 80, 10, 180),
-        final_reply("a9", 1, 90, 11, 190),
-        final_reply("a10", 1, 100, 12, 200),
+        dispatch("d1", "deep", 1, 100),
+        final_reply("a1", "d1", 10, 2, 110),
+        final_reply("a2", "d1", 20, 4, 120),
+        final_reply("a3", "d1", 30, 5, 130),
+        final_reply("a4", "d1", 40, 6, 140),
+        final_reply("a5", "d1", 50, 7, 150),
+        final_reply("a6", "d1", 60, 8, 160),
+        final_reply("a7", "d1", 70, 9, 170),
+        final_reply("a8", "d1", 80, 10, 180),
+        final_reply("a9", "d1", 90, 11, 190),
+        final_reply("a10", "d1", 100, 12, 200),
     ];
     let v = latency(&events, i64::MAX);
     let r = row(&v, "deep");
@@ -191,15 +188,15 @@ fn percentile_is_nearest_rank() {
 fn latency_merge_unions_samples_instead_of_averaging_percentiles() {
     let a = latency(
         &[
-            dispatch("d1", 1, "deep", 1, 100),
-            final_reply("a1", 1, 1, 2, 101),
+            dispatch("d1", "deep", 1, 100),
+            final_reply("a1", "d1", 1, 2, 101),
         ],
         i64::MAX,
     );
     let b = latency(
         &[
-            dispatch("d2", 2, "deep", 1, 100),
-            final_reply("a2", 2, 100, 2, 200),
+            dispatch("d2", "deep", 1, 100),
+            final_reply("a2", "d2", 100, 2, 200),
         ],
         i64::MAX,
     );
@@ -216,10 +213,10 @@ fn latency_merge_unions_samples_instead_of_averaging_percentiles() {
 #[test]
 fn fallback_rate_uses_every_served_turn_as_denominator() {
     let events = vec![
-        dispatch("d1", 1, "deep", 1, 100),
-        final_reply("a1", 1, 10, 2, 110),
-        dispatch("d2", 2, "deep", 3, 200),
-        fallback_reply("f2", 2, 900, 4, 300),
+        dispatch("d1", "deep", 1, 100),
+        final_reply("a1", "d1", 10, 2, 110),
+        dispatch("d2", "deep", 3, 200),
+        fallback_reply("f2", "d2", 900, 4, 300),
     ];
     let v = fallback(&events, i64::MAX);
     let r = row(&v, "deep");
@@ -235,19 +232,19 @@ fn fallback_rate_uses_every_served_turn_as_denominator() {
 fn fallback_merge_adds_counts_and_recomputes_the_rate() {
     let a = fallback(
         &[
-            dispatch("d1", 1, "deep", 1, 100),
-            fallback_reply("f1", 1, 900, 2, 200),
+            dispatch("d1", "deep", 1, 100),
+            fallback_reply("f1", "d1", 900, 2, 200),
         ],
         i64::MAX,
     );
     let b = fallback(
         &[
-            dispatch("d2", 2, "deep", 1, 100),
-            final_reply("a2", 2, 10, 2, 110),
-            dispatch("d3", 3, "deep", 3, 200),
-            final_reply("a3", 3, 10, 4, 210),
-            dispatch("d4", 4, "deep", 5, 300),
-            final_reply("a4", 4, 10, 6, 310),
+            dispatch("d2", "deep", 1, 100),
+            final_reply("a2", "d2", 10, 2, 110),
+            dispatch("d3", "deep", 3, 200),
+            final_reply("a3", "d3", 10, 4, 210),
+            dispatch("d4", "deep", 5, 300),
+            final_reply("a4", "d4", 10, 6, 310),
         ],
         i64::MAX,
     );
@@ -262,9 +259,9 @@ fn fallback_merge_adds_counts_and_recomputes_the_rate() {
 #[test]
 fn span_measures_first_to_last_and_respects_as_of() {
     let events = vec![
-        user_message("u1", 1, None, 1, 1_000),
-        final_reply("a1", 1, 10, 2, 1_400),
-        user_message("u2", 2, None, 3, 9_000),
+        user_message("u1", None, 1, 1_000),
+        final_reply("a1", "u1", 10, 2, 1_400),
+        user_message("u2", None, 3, 9_000),
     ];
     assert_eq!(
         span(&events, 1_500)["span_ms"],
@@ -280,18 +277,18 @@ fn span_measures_first_to_last_and_respects_as_of() {
 /// 无样本 ⇒ `median_ms: null`——「实例里没有会话」与「会话时长 0ms」是两件事。
 #[test]
 fn span_merge_skips_single_event_sessions_and_reports_null_when_empty() {
-    let one_event = span(&[user_message("u1", 1, None, 1, 1_000)], i64::MAX);
+    let one_event = span(&[user_message("u1", None, 1, 1_000)], i64::MAX);
     let short = span(
         &[
-            user_message("u2", 2, None, 1, 1_000),
-            final_reply("a2", 2, 10, 2, 1_200),
+            user_message("u2", None, 1, 1_000),
+            final_reply("a2", "u2", 10, 2, 1_200),
         ],
         i64::MAX,
     );
     let long = span(
         &[
-            user_message("u3", 3, None, 1, 1_000),
-            final_reply("a3", 3, 10, 2, 5_000),
+            user_message("u3", None, 1, 1_000),
+            final_reply("a3", "u3", 10, 2, 5_000),
         ],
         i64::MAX,
     );

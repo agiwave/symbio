@@ -477,7 +477,6 @@ impl SessionPlugin {
             .iter()
             .filter(|e| e.kind == EVENT_TURN_BRANCH || e.kind == EVENT_TURN_BRANCH_SELECTED)
             .count();
-        let scope = carrier.map(|e| e.scope).unwrap_or_default();
         let draft = FactDraft {
             key: format!("branch-selected-{member}-{n}"),
             kind: EVENT_TURN_BRANCH_SELECTED.to_string(),
@@ -486,7 +485,7 @@ impl SessionPlugin {
             payload: json!({ "selected": member }),
             produced_by: Some(anchor),
         };
-        match source.append(scope, actor.to_string(), draft) {
+        match source.append(actor.to_string(), draft) {
             Ok(_) => {}
             // 事实源按幂等键吸收重复——「同一次选择的重复提交」不是失败。
             Err(e) if e.contains("Duplicate") => {}

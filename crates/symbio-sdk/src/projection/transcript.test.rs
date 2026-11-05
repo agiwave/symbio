@@ -30,7 +30,6 @@ fn user(turn: u64, node: &str, text: &str) -> Event {
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        turn,
         "user",
     )
     .with_payload(serde_json::json!({ "text": text, "tier": "deep", "id": node }))
@@ -43,7 +42,6 @@ fn assistant(turn: u64, text_id: &str, text: &str) -> Event {
         EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
-        turn,
         "session/main",
     )
     .with_payload(serde_json::json!({
@@ -60,7 +58,6 @@ fn edited(node: &str, role: &str, text: &str) -> Event {
         EVENT_MESSAGE_EDITED,
         Entity::Message,
         Verb::Asserted,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({
@@ -74,7 +71,6 @@ fn removed(ids: &[&str]) -> Event {
         EVENT_MESSAGE_REMOVED,
         Entity::Message,
         Verb::Closed,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "ids": ids }))
@@ -195,7 +191,6 @@ fn snapshot(tag: &str, msgs: Vec<serde_json::Value>) -> Event {
         crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({ "messages": msgs }))
@@ -342,7 +337,6 @@ fn an_empty_or_malformed_snapshot_does_not_wipe_the_history() {
         crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({ "messages": "我不是数组" }));
@@ -439,7 +433,6 @@ fn branch(of: &str, into: &str) -> Event {
         crate::test_fixtures::EVENT_TURN_BRANCH,
         Entity::Scope,
         Verb::Asserted,
-        2,
         "person/local",
     )
     .with_payload(serde_json::json!({ "of": of, "into": into }))
@@ -492,7 +485,6 @@ fn switching_back_moves_the_request_package_back() {
             crate::test_fixtures::EVENT_TURN_BRANCH_SELECTED,
             Entity::Scope,
             Verb::Asserted,
-            3,
             "person/local",
         )
         .with_payload(serde_json::json!({ "selected": "t-1" })),

@@ -10,13 +10,12 @@ use super::*;
 use crate::{Entity, Event, LatencyTier, Seq, Verb};
 use std::sync::Arc;
 
-fn ev(seq: u64, turn: u64, kind: &str, payload: Value) -> Event {
+fn ev(seq: u64, _turn: u64, kind: &str, payload: Value) -> Event {
     let mut e = Event::pending(
         format!("{kind}-{seq}"),
         kind,
         Entity::Scope,
         Verb::Asserted,
-        turn,
         "test",
     )
     .with_payload(payload);

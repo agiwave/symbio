@@ -7,14 +7,7 @@ use symbio_plugin_api::{Cadence, ContextProvider, ContextRequest};
 use symbio_plugin_api::{Entity, Event, Verb};
 
 fn note(id: &str, text: &str) -> Event {
-    let mut e = Event::pending(
-        id,
-        NOTES_CREATED,
-        Entity::Domain,
-        Verb::Opened,
-        1,
-        "session/a",
-    );
+    let mut e = Event::pending(id, NOTES_CREATED, Entity::Domain, Verb::Opened, "session/a");
     e.payload = json!({ "text": text });
     e
 }

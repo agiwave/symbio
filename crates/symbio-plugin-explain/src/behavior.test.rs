@@ -98,7 +98,6 @@ fn recorded(decision: &str, why: &str) -> Event {
         EXPLAIN_RATIONALE,
         Entity::Domain,
         Verb::Asserted,
-        3,
         "session/a",
     )
     .with_payload(json!({ "decision": decision, "why": why, "evidence": "" }))

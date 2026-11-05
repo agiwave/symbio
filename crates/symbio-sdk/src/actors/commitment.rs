@@ -31,7 +31,6 @@ impl CommitmentKeeper {
             self.v.opened,
             crate::event::Entity::Commitment,
             crate::event::Verb::Opened,
-            0,
             from,
         )
         .with_produced_by(source_seq)
@@ -45,7 +44,6 @@ impl CommitmentKeeper {
             self.v.released,
             crate::event::Entity::Commitment,
             crate::event::Verb::Closed,
-            0,
             from,
         )
         .with_produced_by(source_seq)
@@ -59,7 +57,6 @@ impl CommitmentKeeper {
             self.v.broken,
             crate::event::Entity::Commitment,
             crate::event::Verb::Closed,
-            0,
             from,
         )
         .with_produced_by(source_seq)
@@ -74,7 +71,6 @@ impl CommitmentKeeper {
             self.v.asserted,
             crate::event::Entity::Commitment,
             crate::event::Verb::Asserted,
-            0,
             from,
         )
         .with_produced_by(source_seq)

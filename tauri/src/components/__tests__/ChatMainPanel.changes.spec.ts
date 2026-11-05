@@ -68,7 +68,6 @@ function row(over: Partial<ChangeRow> = {}): ChangeRow {
     address: 'workdir/docs/a.md',
     op: 'write',
     label: '写入',
-    turn: 3,
     changes: 1,
     ...over,
   }

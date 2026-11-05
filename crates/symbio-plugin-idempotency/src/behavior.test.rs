@@ -102,7 +102,6 @@ fn recorded(key: &str) -> Event {
         IDEMPOTENCY_RECORDED,
         Entity::Domain,
         Verb::Asserted,
-        3,
         "session/a",
     )
     .with_payload(json!({ "key": key, "value": "v" }))

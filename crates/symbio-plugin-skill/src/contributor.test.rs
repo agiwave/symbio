@@ -14,7 +14,6 @@ fn ev(seq: u64, kind: &str, payload: serde_json::Value) -> Event {
         kind,
         Entity::Scope,
         Verb::Asserted,
-        0,
         "session/main",
     );
     e.seq = Some(Seq::new(seq));

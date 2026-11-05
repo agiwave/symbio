@@ -935,7 +935,6 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
                 symbio_kernel::event::Entity::Message,
                 // `turn = 0`：种子是裸数据，不属于任何一轮（与 message_events::append 同约定）。
                 symbio_kernel::event::Verb::Opened,
-                0,
                 symbio_sdk::authz::PRINCIPAL_USER,
             )
             .with_payload(serde_json::json!({ "messages": payload })),
@@ -1004,7 +1003,6 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
             EVENT_TURN_BRANCH,
             Entity::Scope,
             Verb::Asserted,
-            0,
             symbio_sdk::authz::PRINCIPAL_USER,
         )
         .with_payload(serde_json::json!({ "of": of, "into": into }))

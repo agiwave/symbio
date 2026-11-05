@@ -154,7 +154,6 @@ fn principals_are_isolated_until_scope_widened() {
             "task.progress",
             Entity::Task,
             Verb::Progressed,
-            0,
             "session/a",
         ))
         .unwrap();
@@ -164,7 +163,6 @@ fn principals_are_isolated_until_scope_widened() {
             "task.progress",
             Entity::Task,
             Verb::Progressed,
-            0,
             "session/b",
         ))
         .unwrap();
@@ -261,7 +259,6 @@ fn commitment_records_pair_by_payload_id() {
                 crate::test_fixtures::EVENT_COMMITMENT_BROKEN,
                 Entity::Commitment,
                 Verb::Closed,
-                0,
                 "session/x",
             )
             .with_payload(serde_json::json!({ "id": "never-offered", "why": "幽灵" })),
@@ -306,7 +303,6 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
                 EVENT_USER_MESSAGE,
                 Entity::Scope,
                 Verb::Opened,
-                0,
                 "user",
             )
             .with_payload(serde_json::json!({ "text": utterance })),
@@ -322,7 +318,6 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
                         EVENT_CHAT_ASSISTANT_FINAL,
                         Entity::Scope,
                         Verb::Closed,
-                        0,
                         "session/main",
                     )
                     .with_produced_by(seq.value())
@@ -340,7 +335,6 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
                         EVENT_CHAT_ASSISTANT_FALLBACK,
                         Entity::Scope,
                         Verb::Closed,
-                        0,
                         "session/main",
                     )
                     .with_produced_by(seq.value())
@@ -485,7 +479,6 @@ async fn rehearse_reasoner_turn(
                 EVENT_USER_MESSAGE,
                 Entity::Scope,
                 Verb::Opened,
-                0,
                 "user",
             )
             .with_payload(serde_json::json!({ "text": utterance })),
@@ -512,7 +505,6 @@ async fn rehearse_reasoner_turn(
                         EVENT_CHAT_ASSISTANT_FINAL,
                         Entity::Scope,
                         Verb::Closed,
-                        0,
                         "session/main",
                     )
                     .with_produced_by(seq.value())
@@ -525,7 +517,7 @@ async fn rehearse_reasoner_turn(
         Err(e) => {
             store
                 .append(
-                    Event::pending("fb0", EVENT_CHAT_ASSISTANT_FALLBACK, Entity::Scope, Verb::Closed, 0, "session/main")
+                    Event::pending("fb0", EVENT_CHAT_ASSISTANT_FALLBACK, Entity::Scope, Verb::Closed, "session/main")
                         .with_produced_by(seq.value())
                         .with_cost_ms(cost_ms)
                         .with_payload(serde_json::json!({ "text": "抱歉，我暂时答不上来。", "error": format!("{e:?}") })),
@@ -566,7 +558,6 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
                 EVENT_USER_MESSAGE,
                 Entity::Scope,
                 Verb::Opened,
-                0,
                 "user",
             )
             .with_payload(serde_json::json!({ "text": "帮我看看这份计划" })),
@@ -655,7 +646,6 @@ fn memory_event_without_provenance_is_caught() {
             MEMORY_ENCODED,
             Entity::Memory,
             Verb::Opened,
-            0,
             "session/main",
         )
     };
@@ -786,7 +776,6 @@ fn elimination_is_an_auditable_revocable_grants_change() {
         "task.progress",
         Entity::Task,
         Verb::Progressed,
-        0,
         "session/b",
     );
     let bogus = Event::pending(
@@ -794,7 +783,6 @@ fn elimination_is_an_auditable_revocable_grants_change() {
         EVENT_VERDICT_ASSERTED,
         VEntity::Verdict,
         Verb::Asserted,
-        0,
         PRINCIPAL_ARBITER,
     )
     .with_payload(serde_json::json!({ "subject": "session/b", "change": "revokee" }));
@@ -816,7 +804,6 @@ fn elimination_event_keeps_invariants_green() {
             EVENT_USER_MESSAGE,
             Entity::Scope,
             Verb::Opened,
-            0,
             "user",
         ))
         .unwrap();
@@ -879,7 +866,6 @@ fn open_task(store: &EventStore, id: &str, depends_on: &[&str], actor: &str) {
                 TASK.opened,
                 Entity::Task,
                 Verb::Opened,
-                0,
                 actor,
             )
             .with_payload(
@@ -898,7 +884,6 @@ fn assert_task(store: &EventStore, id: &str, actor: &str) {
                 TASK.terminal,
                 Entity::Task,
                 Verb::Asserted,
-                0,
                 actor,
             )
             .with_produced_by(0)
@@ -1003,7 +988,6 @@ fn n_step_chain_terminates_within_rework_bound() {
                     TASK.progressed,
                     Entity::Task,
                     Verb::Progressed,
-                    0,
                     "session/main",
                 )
                 .with_payload(serde_json::json!({ "task_id": format!("t{i}") })),

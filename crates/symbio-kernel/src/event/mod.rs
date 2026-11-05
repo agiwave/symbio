@@ -530,11 +530,6 @@ pub struct Event {
     pub kind: String,
     pub entity: Entity,
     pub verb: Verb,
-    /// 所属可见域（会话内一贯的域编号）。收束格按它分桶。
-    ///
-    /// 历史 WAL 里这一格叫 `turn`（`D-317` 之前）：读侧靠别名词兼容，写侧只写 `scope`。
-    #[serde(rename = "scope", alias = "turn")]
-    pub scope: u64,
     /// 产生者（Principal，数据：字符串 ID）。
     pub actor: String,
     /// 溯源：产生本事件的上游事件 seq（I2——断言类事件必须非空）。
@@ -556,7 +551,6 @@ impl Event {
         kind: impl Into<String>,
         entity: Entity,
         verb: Verb,
-        scope: u64,
         actor: impl Into<String>,
     ) -> Self {
         Event {
@@ -564,7 +558,6 @@ impl Event {
             kind: kind.into(),
             entity,
             verb,
-            scope,
             actor: actor.into(),
             produced_by: None,
             cost_ms: 0,

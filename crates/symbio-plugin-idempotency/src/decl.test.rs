@@ -65,7 +65,6 @@ fn recorded(key: &str, value: &str) -> Event {
         IDEMPOTENCY_RECORDED,
         Entity::Domain,
         Verb::Asserted,
-        1,
         "session/a",
     )
     .with_payload(json!({ "key": key, "value": value }))
@@ -146,7 +145,6 @@ fn malformed_payloads_are_skipped() {
         IDEMPOTENCY_RECORDED,
         Entity::Domain,
         Verb::Asserted,
-        1,
         "s",
     )
     .with_payload(json!({ "key": "build-1" }));

@@ -190,7 +190,12 @@ export const BASELINE = {
   // 执行体补 2 条（写侧档独占 / 只读档并行，`port.test.rs`），环侧另把 1 条旧策略判据
   // 换成钉「环不再做策略」的同数判据。不是丢掉覆盖，是换承担者。非侵蚀。
   // baseline-allow rustTests: §四.1 裁决删按轮配对判据，净减 17 条（2172→2155）——判据资产与实现同批退场，配对改由义务环五事实机制自己记账。逐条：`invariants/mod.test.rs` 的 C2/N3 两节 6 条（`one_final_per_turn_passes`、`two_finals_in_one_turn_is_detected`、`closed_tasks_do_not_count_as_final`、`one_open_per_turn_passes`、`two_opens_in_one_turn_is_detected`、`any_kind_on_the_opened_coordinate_opens_the_turn`）、故障注入 4 条（timeout / unresolved）、读侧宽限 1 条、D-203 final 角色 1 条、`check_all` 故障注入 2 条（`fault_double_final` / `fault_double_open`）、`actors/mod.test.rs` 1 条（`two_finals_are_caught_by_n3`）、`wal.test.rs` 净 −2（删 I1 双 final / I3 降级 / 索引重建 3 条，补 1 条「同会话后续轮合法、重放按 id 拦」）。覆盖没有丢：配对由环的租约 / 过期 / 重放承担，新增 `engine.test.rs::an_unpaired_request_is_closed_by_lease_not_left_pending`。非放宽。
-  rustTests: 2155,
+  // baseline-allow rustTests: §四.2 去 scope 净减 1 条（2155→2154）——删的是 `host` 的
+  // `scope_identity_never_degrades_to_zero`：`scope_of` 已随 D-317 退场，它守的「空会话 id
+  // 也有确定身份」不再有被测对象。环的 `scopes_do_not_cross` 改写为同数的
+  // `a_closed_debt_is_not_dispatched_again`，`facts.test.rs` 与 slo 的按 scope 用例也都是
+  // 1:1 改写；会话身份改由事实源打开时绑定（按实例分片）。非侵蚀。
+  rustTests: 2154,
   kernelRustTests: 131,
 
   // baseline-allow ciRustTestsTotal: 同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
@@ -345,7 +350,9 @@ export const BASELINE = {
   // 等）。清白树实跑 `cargo test --workspace`：2171 passed / 0 failed。不是覆盖丢失：被删的是
   // 旧编排的判据，新义务环接入时用例数**只会回升**（B 类能力每接回一组就补回对应判据）。
   // baseline-allow ciRustTestsTotal: 同一净减 17 条在 CI 口径下的折算（2171→2155，实测 2155）——被删用例均无 `cfg` 门，`--workspace` 求和在两种口径里是同一批；逐条归属见上方 `rustTests` 的注。非侵蚀。
-  ciRustTestsTotal: 2155,
+  // baseline-allow ciRustTestsTotal: 同上一条净减 1（2155→2154）——被删的用例无 `cfg` 门，
+  // `--workspace` 求和在两种口径里是同一批。非侵蚀。
+  ciRustTestsTotal: 2154,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

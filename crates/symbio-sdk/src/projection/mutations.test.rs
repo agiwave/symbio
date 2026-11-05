@@ -16,7 +16,6 @@ fn edited(node: &str, role: &str, text: &str) -> Event {
         EVENT_MESSAGE_EDITED,
         Entity::Message,
         Verb::Asserted,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({
@@ -31,7 +30,6 @@ fn removed(ids: &[&str]) -> Event {
         EVENT_MESSAGE_REMOVED,
         Entity::Message,
         Verb::Closed,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "ids": ids }))
@@ -84,7 +82,6 @@ fn malformed_payloads_are_skipped_not_fatal() {
         EVENT_MESSAGE_EDITED,
         Entity::Message,
         Verb::Asserted,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "nope": 1 }));
@@ -93,7 +90,6 @@ fn malformed_payloads_are_skipped_not_fatal() {
         EVENT_MESSAGE_EDITED,
         Entity::Message,
         Verb::Asserted,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "message": "我不是一条消息" }));
@@ -102,7 +98,6 @@ fn malformed_payloads_are_skipped_not_fatal() {
         EVENT_MESSAGE_EDITED,
         Entity::Message,
         Verb::Asserted,
-        0,
         "user",
     )
     .with_payload(serde_json::json!({ "message": { "id": "", "role": "user" } }));
@@ -120,7 +115,6 @@ fn only_mutation_cells_are_collected() {
         crate::test_fixtures::EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
-        0,
         "user",
     )
     .with_payload(
@@ -148,7 +142,6 @@ fn snapshot(tag: &str, msgs: &[(&str, &str, &str)]) -> Event {
         EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({ "messages": messages }))
@@ -191,7 +184,6 @@ fn a_malformed_snapshot_does_not_eat_the_valid_one() {
         EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({ "messages": "我不是数组" }));
@@ -210,7 +202,6 @@ fn the_cell_must_be_message_progressed() {
         EVENT_SESSION_CONSOLIDATED,
         Entity::System,
         Verb::Progressed,
-        0,
         "session/main",
     )
     .with_payload(serde_json::json!({

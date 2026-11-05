@@ -201,7 +201,6 @@ fn latest_context_watermark_reads_what_the_writer_put_on_the_final_fact() {
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
             Entity::Scope,
             Verb::Opened,
-            1,
             "user",
         )
         .with_payload(json!({ "text": "问", "id": "T1" })),
@@ -210,7 +209,6 @@ fn latest_context_watermark_reads_what_the_writer_put_on_the_final_fact() {
             symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Scope,
             Verb::Closed,
-            2,
             "session/main",
         )
         .with_payload(json!({

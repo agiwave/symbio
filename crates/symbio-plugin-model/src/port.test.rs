@@ -135,7 +135,8 @@ fn exec_context() -> symbio_plugin_api::port::PortExecContext {
         sink: symbio_plugin_api::ExecEventSink::Null,
         emit: symbio_plugin_api::port::PortFactEmit::silent(),
         ctx: None,
-        subject: 0,
+        subject: String::new(),
+        session_id: "s".to_string(),
         group: String::new(),
         origin: None,
         permitted: true,
@@ -280,10 +281,7 @@ fn recording_context() -> (
 async fn a_tool_round_writes_one_tool_requested_for_the_whole_turn() {
     let (ctx, recorder) = recording_context();
     let outcome = executor(FakeOutcome::WithToolCalls)
-        .execute(
-            ctx,
-            input(json!({"root_id": "u-1", "principal": "user", "scope": 7})),
-        )
+        .execute(ctx, input(json!({"root_id": "u-1", "principal": "user"})))
         .await;
     assert!(outcome.success());
 
@@ -331,7 +329,7 @@ async fn a_closing_round_writes_no_tool_requested() {
 struct StaticReader(Vec<symbio_plugin_api::port::PortFact>);
 
 impl PortFactReader for StaticReader {
-    fn facts(&self, _scope: u64) -> Vec<symbio_plugin_api::port::PortFact> {
+    fn facts(&self) -> Vec<symbio_plugin_api::port::PortFact> {
         self.0.clone()
     }
 }
@@ -406,7 +404,7 @@ async fn executor_builds_the_request_from_the_fact_reader() {
     let outcome = executor
         .execute(
             ctx,
-            input(json!({"provider": "active", "root_id": "u-1", "principal": "user", "scope": 7})),
+            input(json!({"provider": "active", "root_id": "u-1", "principal": "user"})),
         )
         .await;
 

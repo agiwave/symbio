@@ -191,7 +191,6 @@ fn only_low_confidence_skills_retreat() {
             EVENT_MEMORY_ENCODED,
             Entity::Memory,
             Verb::Opened,
-            0,
             "session/main",
         );
         e.seq = Some(symbio_plugin_api::Seq::new(seq));
@@ -205,7 +204,6 @@ fn only_low_confidence_skills_retreat() {
             EVENT_MEMORY_CALIBRATED,
             Entity::Memory,
             Verb::Asserted,
-            0,
             "session/main",
         );
         e.seq = Some(symbio_plugin_api::Seq::new(seq));
@@ -247,7 +245,6 @@ fn observed_event(id: &str, kind: &str, payload: serde_json::Value, ts: i64) -> 
         kind,
         Entity::Memory,
         Verb::Asserted,
-        0,
         "session/main",
     )
     .with_ts(ts)

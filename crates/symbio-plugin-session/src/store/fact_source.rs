@@ -35,18 +35,15 @@ impl SessionFactSource {
 }
 
 impl FactSource for SessionFactSource {
-    fn append(&self, scope: u64, actor: Principal, draft: FactDraft) -> Result<u64, String> {
-        let event = symbio_plugin_api::fact_source::draft_into_event(scope, actor, draft);
+    fn append(&self, actor: Principal, draft: FactDraft) -> Result<u64, String> {
+        let event = symbio_plugin_api::fact_source::draft_into_event(actor, draft);
         Store::append(&*self.wal, event)
             .map(|seq| seq.value())
             .map_err(|e| format!("{e:?}"))
     }
 
-    fn facts(&self, scope: u64) -> Vec<Event> {
+    fn facts(&self) -> Vec<Event> {
         Store::range(&*self.wal, Seq::new(0))
-            .into_iter()
-            .filter(|event| event.scope == scope)
-            .collect()
     }
 
     fn range(&self, from_seq: u64) -> Vec<Event> {

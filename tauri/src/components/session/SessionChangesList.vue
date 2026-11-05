@@ -36,7 +36,6 @@
           <span class="change-path">{{ row.path }}</span>
           <span class="change-meta">
             <span class="change-label">{{ row.label }}</span>
-            <span>第 {{ row.turn }} 轮</span>
             <span v-if="row.changes > 1">{{ row.changes }} 次</span>
           </span>
         </button>
@@ -122,7 +121,7 @@ const emit = defineEmits<{
   color: var(--text-muted);
 }
 
-/* 动作词是这一行「发生了什么」的主语，比轮号/次数略重 */
+/* 动作词是这一行「发生了什么」的主语，比次数略重 */
 .change-label {
   color: var(--text-secondary);
 }

@@ -13,7 +13,7 @@ use super::super::decl::{ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG};
 use super::EpisodicEncode;
 
 fn ev(seq: u64, kind: &str, entity: Entity, verb: Verb, payload: serde_json::Value) -> Event {
-    let mut e = Event::pending(format!("seed-{seq}"), kind, entity, verb, 0, PRINCIPAL_USER);
+    let mut e = Event::pending(format!("seed-{seq}"), kind, entity, verb, PRINCIPAL_USER);
     e.seq = Some(Seq::new(seq));
     e.ts = 1000 + seq as i64;
     e.payload = payload;

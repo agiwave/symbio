@@ -67,7 +67,7 @@ fn ev(kind: &str, task: &str) -> Event {
     } else {
         Verb::Asserted
     };
-    Event::pending("e", kind, Entity::Task, verb, 1, "session/a")
+    Event::pending("e", kind, Entity::Task, verb, "session/a")
         .with_payload(json!({ "task_id": task }))
 }
 
@@ -151,7 +151,7 @@ fn future_events_are_ignored() {
 /// 缺 `task_id` 的载荷静默跳过：视图不能因为一条坏事实就整个算不出来。
 #[test]
 fn malformed_payloads_are_skipped() {
-    let broken = Event::pending("e-2", EVENT_TASK_OPENED, Entity::Task, Verb::Opened, 1, "s")
+    let broken = Event::pending("e-2", EVENT_TASK_OPENED, Entity::Task, Verb::Opened, "s")
         .with_payload(json!({ "goal": "没有 id" }));
     let v = remaining(&[broken, ev(EVENT_TASK_OPENED, "t1")], i64::MAX);
     assert_eq!(v["opened"], 1);

@@ -2,8 +2,8 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 196,
-      "test": 243
+      "prod": 181,
+      "test": 208
     },
     "F2": {
       "prod": 16,
@@ -14,8 +14,8 @@
       "test": 0
     },
     "F4": {
-      "prod": 4,
-      "test": 12
+      "prod": 2,
+      "test": 9
     },
     "F5": {
       "prod": 1,
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-05",
+      "faces": "F1.prod / F1.test / F4.prod / F4.test",
+      "reason": "§四.2 载荷里的轮次副本删除：model `request` 的 `scope`、工具调用 id 的 `call-{scope}-…`、notes 的 `turn`、tool 的 `round = exec.subject`、`artifact.added` 的 `turn_id` 退场；`session/changes` 的 `turn` 列随事实源失去来源而删除，前端行 / 组件文案 / e2e 断言同步退场，配对改用触发事实自身的标识（turn_id / request_id / tool_call_id）。F1 196/243 → 181/208、F4 4/12 → 2/9 全部为实测收窄；目标 0 不变。"
+    },
     {
       "date": "2026-11-05",
       "faces": "F1.prod / F1.test / F2.prod / F2.test",

@@ -40,7 +40,6 @@ fn branch(id: &str, of: &str, into: &str) -> Event {
         EVENT_TURN_BRANCH,
         Entity::Scope,
         Verb::Asserted,
-        1,
         "person/local",
     )
     .with_payload(serde_json::json!({ "of": of, "into": into }))
@@ -53,7 +52,6 @@ fn picked(id: &str, selected: &str) -> Event {
         EVENT_TURN_BRANCH_SELECTED,
         Entity::Scope,
         Verb::Asserted,
-        1,
         "person/local",
     )
     .with_payload(serde_json::json!({ "selected": selected }))
@@ -194,7 +192,6 @@ fn 一条分支格都没有时列表零改动() {
             "assistant.final",
             Entity::Scope,
             Verb::Closed,
-            1,
             "session/main",
         )],
     );

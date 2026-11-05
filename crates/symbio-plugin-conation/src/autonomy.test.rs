@@ -12,7 +12,7 @@ use symbio_plugin_api::Verb;
 const INITIATOR: &str = "session/reflex";
 
 fn held(id: &str, task: &str, ts: i64) -> Event {
-    Event::pending(id, EVENT_TASK_HELD, Entity::Task, Verb::Held, 0, INITIATOR)
+    Event::pending(id, EVENT_TASK_HELD, Entity::Task, Verb::Held, INITIATOR)
         .with_ts(ts)
         .with_payload(json!({ "task_id": task }))
 }
@@ -23,7 +23,6 @@ fn asserted(id: &str, task: &str, ts: i64) -> Event {
         EVENT_TASK_ASSERTED,
         Entity::Task,
         Verb::Asserted,
-        0,
         INITIATOR,
     )
     .with_ts(ts)
@@ -67,7 +66,6 @@ fn recovery_does_not_wash_out_the_intervention() {
                 "task.progress",
                 Entity::Task,
                 Verb::Progressed,
-                0,
                 INITIATOR,
             )
             .with_ts(150)
@@ -87,16 +85,9 @@ fn recovery_does_not_wash_out_the_intervention() {
 fn unfinished_tasks_are_excluded_from_both_sides() {
     let v = autonomy(
         &[
-            Event::pending(
-                "o1",
-                "task.opened",
-                Entity::Task,
-                Verb::Opened,
-                0,
-                INITIATOR,
-            )
-            .with_ts(100)
-            .with_payload(json!({ "task_id": "running" })),
+            Event::pending("o1", "task.opened", Entity::Task, Verb::Opened, INITIATOR)
+                .with_ts(100)
+                .with_payload(json!({ "task_id": "running" })),
             held("h1", "suspended", 200),
         ],
         i64::MAX,
@@ -152,22 +143,14 @@ fn merge_adds_numerator_and_denominator() {
 fn ignores_non_task_events() {
     let v = autonomy(
         &[
-            Event::pending(
-                "x1",
-                EVENT_TASK_HELD,
-                Entity::Scope,
-                Verb::Held,
-                0,
-                INITIATOR,
-            )
-            .with_ts(100)
-            .with_payload(json!({ "task_id": "t1" })),
+            Event::pending("x1", EVENT_TASK_HELD, Entity::Scope, Verb::Held, INITIATOR)
+                .with_ts(100)
+                .with_payload(json!({ "task_id": "t1" })),
             Event::pending(
                 "x2",
                 EVENT_TASK_ASSERTED,
                 Entity::Task,
                 Verb::Asserted,
-                0,
                 INITIATOR,
             )
             .with_ts(150)

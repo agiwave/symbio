@@ -304,7 +304,6 @@ fn running_task(store: &EventStore, id: &str) {
                 EVENT_TASK_OPENED,
                 Entity::Task,
                 Verb::Opened,
-                0,
                 "session/main",
             )
             .with_payload(serde_json::json!({ "task_id": id, "depends_on": [], "goal": "goal" })),
@@ -385,7 +384,6 @@ fn interruption_after_final_is_queued_not_preempted() {
                 EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Scope,
                 Verb::Closed,
-                0,
                 "session/main",
             )
             .with_produced_by(0),

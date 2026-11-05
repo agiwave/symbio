@@ -80,7 +80,6 @@ fn declared_tool_produces_draft_with_anchor() {
     assert_eq!(d.produced_by, Some(42));
 
     let event = d.clone().into_event("session/a");
-    assert_eq!(event.scope, 0, "草稿不带轮号：信封由写口盖（D-252）");
     assert_eq!(event.actor, "session/a");
     assert_eq!(event.event_id, "r-t3-call-1");
     assert_eq!(event.kind, "test.recorded");
@@ -147,8 +146,8 @@ fn annotations_do_not_need_the_host_face() {
 /// 第一条刚开的格再开一次。
 #[test]
 fn facts_chain_snapshot_then_applied() {
-    let old = Event::pending("e1", "test.recorded", Entity::Task, Verb::Asserted, 1, "a");
-    let fresh = Event::pending("e2", "test.recorded", Entity::Task, Verb::Asserted, 3, "a");
+    let old = Event::pending("e1", "test.recorded", Entity::Task, Verb::Asserted, "a");
+    let fresh = Event::pending("e2", "test.recorded", Entity::Task, Verb::Asserted, "a");
     let snapshot = [old];
     let applied = [fresh];
     let env = EffectEnv {

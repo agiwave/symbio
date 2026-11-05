@@ -120,7 +120,6 @@ impl EliminationDecider {
             verdict,
             Entity::Verdict,
             Verb::Asserted,
-            0,
             PRINCIPAL_ARBITER,
         )
         .with_produced_by(source_seq)
@@ -158,7 +157,6 @@ impl EliminationDecider {
             verdict,
             Entity::Verdict,
             Verb::Asserted,
-            0,
             PRINCIPAL_ARBITER,
         )
         .with_produced_by(source_seq)
