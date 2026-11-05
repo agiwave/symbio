@@ -44,7 +44,7 @@ impl DriveRunner for LoopDrive {
 /// 中性债键 → 环债键。
 fn to_ring_key(key: &symbio_plugin_api::drive::DriveKey) -> DebtKey {
     DebtKey {
-        port: key.port,
+        port: key.port.clone(),
         id: key.id.clone(),
         attempt: key.attempt,
     }
@@ -76,7 +76,7 @@ impl DriveCtx for SupportCtx {
 
     fn append(&self, fact: Fact) {
         self.support.append(DriveFact {
-            kind: fact.kind.as_str(),
+            kind: fact.kind.as_str().to_string(),
             key: to_neutral_key(fact.key),
             payload: fact.payload,
             at_ms: fact.at_ms,
@@ -115,7 +115,7 @@ impl DriveCtx for SupportCtx {
 
 /// 中性事实 → 五类事实；不是五类之一 ⇒ 丢弃（环不落别的事实）。
 fn to_ring_fact(fact: DriveFact) -> Option<Fact> {
-    let kind = FactKind::parse(fact.kind)?;
+    let kind = FactKind::parse(&fact.kind)?;
     Some(Fact {
         kind,
         key: to_ring_key(&fact.key),

@@ -72,8 +72,9 @@ pub fn drive_row(name: &str, runner: Arc<dyn DriveRunner>) -> CapabilityRow {
 /// 债身份（中性形状）：端口名 + 欠债方派生的 id + 租约尝试号。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DriveKey {
-    /// 端口名（数据；环不解释）。
-    pub port: &'static str,
+    /// 端口名（数据；环不解释）。**拥有所有权**：世界事实的端口位常常来自运行期
+    /// 解析（如入库身份），不是编译期常量。
+    pub port: String,
     /// 欠债方派生的身份。
     pub id: String,
     /// 租约尝试号，从 1 起。
@@ -85,13 +86,14 @@ pub struct DriveKey {
 /// `kind` 的解释权在环；宿主只按同一形状读写，不认世界词汇。
 #[derive(Debug, Clone)]
 pub struct DriveFact {
-    /// 事实种类（字符串透传；五类之一由环判定）。
-    pub kind: &'static str,
+    /// 事实种类（字符串透传；五类之一由环判定）。**拥有所有权**：投影来源既有
+    /// 环协议事实，也有任意世界事实，种类在运行期才知道。
+    pub kind: String,
     /// 这笔账的身份。
     pub key: DriveKey,
     /// 载荷：宿主原样保存，不解释内容。
     pub payload: Value,
-    /// 记账时刻（毫秒，相对时间轴）。
+    /// 记账时刻（毫秒，与 [`DriveSupport::now_ms`] 同一时间轴）。
     pub at_ms: u64,
     /// 收束事实携带的应答承载（只传递，不读世界字段）。
     pub reply: Option<PortReply>,
@@ -103,7 +105,7 @@ impl DriveFact {
     /// 这两个名字是环协议的词汇（[`DRIVE_CLOSING_OK`] / [`DRIVE_CLOSING_FAILED`]），
     /// 不是任何业务事实名。
     pub fn closing(&self) -> Option<bool> {
-        match self.kind {
+        match self.kind.as_str() {
             DRIVE_CLOSING_OK => Some(true),
             DRIVE_CLOSING_FAILED => Some(false),
             _ => None,
@@ -198,7 +200,7 @@ pub trait DriveSupport: Send + Sync {
         false
     }
 
-    /// 当前时刻（毫秒，宿主给的相对时间轴）。
+    /// 当前时刻（毫秒，宿主给的时钟；与事实的 `at_ms` 同一时间轴）。
     fn now_ms(&self) -> u64;
 
     /// 同轮并发派发的上限（宿主给的配置数据；环不写死常数）。

@@ -6,10 +6,9 @@
 //! 端口名与债行都不在这里构造：执行体由 `port` 族的行解析，债行由插件经 `debt` 族自报。
 //! `idle` 是机制事实（本会话无未还债），不是业务事实；收束谓词由读方自算，宿主不落业务事实。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use symbio_kernel::capability::Registry;
 use symbio_kernel::event::{Entity, Event, Verb};
@@ -30,6 +29,7 @@ use symbio_plugin_api::port::{
 };
 use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::capability::CAPABILITY_VISITOR;
+use symbio_sdk::clock::clock_now_ms;
 use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_ID, WORKDIR};
 use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
 
@@ -42,15 +42,13 @@ fn shard_of(fact: &DriveFact) -> Option<u64> {
     fact.payload.get(SHARD_KEY).and_then(|v| v.as_u64())
 }
 
-/// 进程内宿主：根插件 + 事实源 + 本会话的五事实账。
+/// 进程内宿主：根插件 + 事实源 + 机制状态 `idle`。
 pub struct Host {
     root: Arc<dyn Plugin>,
-    facts: Arc<Mutex<Vec<DriveFact>>>,
     /// 事实源（唯一写入口）：世界事实与环协议事实都落这里。
-    /// 读面（`exists` / `reader`）只从这里投影——**不问写方是谁**。
+    /// 读面（`facts` / `exists` / `reader`）只从这里投影——**不问写方是谁**。
     source: Arc<dyn FactSource>,
     idle: Arc<Mutex<Option<u64>>>,
-    started: Instant,
     concurrency: usize,
 }
 
@@ -77,10 +75,8 @@ impl Host {
     ) -> Self {
         Self {
             root,
-            facts: Arc::new(Mutex::new(Vec::new())),
             source,
             idle: Arc::new(Mutex::new(None)),
-            started: Instant::now(),
             concurrency: concurrency.max(1),
         }
     }
@@ -100,12 +96,16 @@ impl Host {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// 本会话的五事实只读投影（读方自算谓词用；`idle` 是机制状态，走 [`Self::idle_at`]）。
+    /// 本会话事实的只读投影（读方自算谓词用；`idle` 是机制状态，走 [`Self::idle_at`]）。
+    ///
+    /// 投影直接来自事实源——**没有第二本账**：环写下的协议事实与任何写方写下的
+    /// 世界事实都从同一个读面出来。
     pub fn facts(&self) -> Vec<DriveFact> {
-        self.facts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+        self.source
+            .facts()
+            .into_iter()
+            .map(event_to_drive_fact)
+            .collect()
     }
 
     /// 按本会话起一次驱动。`base` 提供工作目录等上下文字段。
@@ -127,19 +127,20 @@ impl Host {
             session_id: session_id.to_string(),
         };
         let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
-            facts: Arc::clone(&self.facts),
+            // 每驱动现造、从 0 起的投影游标：事实源是唯一输入，投影只缓存
+            // 「已读过的那一段」，不与任何写侧账本合并。
+            projection: Mutex::new(Projection::default()),
             source: Arc::clone(&self.source),
             executors: gathered.executors,
             sources: gathered.sources,
             session_id: session_id.to_string(),
             provider: provider.map(str::to_string),
-            started: self.started,
             concurrency: self.concurrency,
             handles,
         });
         let report = gathered.runner.drive(support).await?;
 
-        let at = self.started.elapsed().as_millis() as u64;
+        let at = clock_now_ms().max(0) as u64;
         {
             let mut idle = self
                 .idle
@@ -229,47 +230,72 @@ struct Gathered {
 
 /// 宿主实现的中性能力束：事实读写、执行体解析、存在性、时钟与限额。
 struct HostDriveSupport {
-    facts: Arc<Mutex<Vec<DriveFact>>>,
+    /// 事实源 → 中性事实的**投影**（游标增量；不是第二本账）。
+    projection: Mutex<Projection>,
     source: Arc<dyn FactSource>,
     executors: HashMap<String, Arc<dyn PortExecutor>>,
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
     session_id: String,
     provider: Option<String>,
-    started: Instant,
     concurrency: usize,
     /// 交给执行体的不透明句柄束（宿主装配，环原样转交）。
     handles: PortExecHandles,
 }
 
+/// 事实源到中性事实的投影。
+///
+/// 事实本身始终以事实源为唯一来源；这里只缓存**已读过事件**的解析结果，
+/// 游标记「下一段从哪里读」。**没有写侧账本**：`append` 只落事实源，
+/// 下一圈由游标增量读回来——因此上一圈写下的事实下一圈一定看得见。
+#[derive(Default)]
+struct Projection {
+    /// 下一个要读的序号。
+    cursor: u64,
+    /// 已投影事件的入库身份（去重按 `event_id`，不按 `(kind, key)`）。
+    seen: HashSet<String>,
+    /// 已投影的事实，按 `seq` 升序（只按读回顺序追加，不重排）。
+    facts: Vec<DriveFact>,
+}
+
+impl Projection {
+    /// 读 `cursor` 之后的新事实，返回**全部**已投影事实（升序）。
+    fn refresh(&mut self, source: &dyn FactSource) -> Vec<DriveFact> {
+        let events = source.range(self.cursor);
+        if let Some(last) = events.last() {
+            if let Some(seq) = last.seq {
+                self.cursor = seq.value().saturating_add(1);
+            }
+        }
+        for event in events {
+            if !self.seen.insert(event.event_id.clone()) {
+                continue;
+            }
+            self.facts.push(event_to_drive_fact(event));
+        }
+        self.facts.clone()
+    }
+}
+
 impl DriveSupport for HostDriveSupport {
     fn facts(&self) -> Vec<DriveFact> {
-        self.facts
+        self.projection
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+            .refresh(&*self.source)
     }
 
     fn append(&self, fact: DriveFact) {
-        let mut facts = self
-            .facts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if facts.iter().any(|known| {
-            known.kind == fact.kind && known.key == fact.key && shard_of(known) == shard_of(&fact)
-        }) {
-            return;
-        }
         // 协议事实与世界事实同源：都落事实源（同一写口、同一读面）。
+        // 不做旁路去重：重复投递由事实源按 `event_id` 幂等吸收。
         let draft = FactDraft {
             key: ring_event_id(&fact),
-            kind: fact.kind.to_string(),
+            kind: fact.kind.clone(),
             entity: Entity::Scope,
             verb: Verb::Asserted,
             payload: fact.payload.clone(),
             produced_by: provenance_at(&*self.source),
         };
         let _ = self.source.append("loop".to_string(), draft);
-        facts.push(fact);
     }
 
     fn rows(&self) -> Vec<DriveRow> {
@@ -302,22 +328,22 @@ impl DriveSupport for HostDriveSupport {
         self.executors.get(port).cloned()
     }
 
+    /// 与 `facts()` **同一条读面**：世界事实也在投影里，不再回头另读事实源。
     fn exists(&self, kind: &str) -> bool {
-        self.source
-            .facts()
-            .into_iter()
-            .any(|event| event.kind == kind)
+        self.facts().iter().any(|fact| fact.kind == kind)
     }
 
+    /// 与 [`Self::exists`] 同一条读面，只多看一位身份。
+    ///
+    /// 世界事实的投影身份就是入库 `event_id`（协议事实则是债 id）。
     fn exists_id(&self, kind: &str, id: &str) -> bool {
-        self.source
-            .facts()
-            .into_iter()
-            .any(|event| event.kind == kind && event.event_id == id)
+        self.facts()
+            .iter()
+            .any(|fact| fact.kind == kind && fact.key.id == id)
     }
 
     fn now_ms(&self) -> u64 {
-        self.started.elapsed().as_millis() as u64
+        clock_now_ms().max(0) as u64
     }
 
     fn concurrency(&self) -> usize {
@@ -421,6 +447,47 @@ fn provenance_at(source: &dyn FactSource) -> Option<u64> {
         .rev()
         .find(|event| event.seq.is_some())
         .and_then(|event| event.seq.map(|seq| seq.value()))
+}
+
+/// 事件 → 中性事实（**全量映射**：任何世界事实也进投影，不止环的五类）。
+///
+/// 协议事实的债键从入库身份还原（见 [`ring_key_of`]）；世界事实的端口位为空、
+/// 身份就是 `event_id`、尝试号为 0——它们不参与环的五事实视图，但
+/// `exists` / `exists_id` 必须看得见。
+fn event_to_drive_fact(event: Event) -> DriveFact {
+    let (port, id, attempt) = ring_key_of(&event.event_id, &event.kind);
+    DriveFact {
+        kind: event.kind,
+        key: DriveKey { port, id, attempt },
+        payload: event.payload,
+        at_ms: event.ts.max(0) as u64,
+        reply: None,
+    }
+}
+
+/// 从入库身份还原协议事实的债键。
+///
+/// 身份形如 `ring:{port}:{id}:{attempt}:{kind}[:{shard}]`，其中 `id` 自身可能
+/// 含 `:`；因此从右往左定界：最右是可选分片号，往左依次是种类与尝试号，
+/// 剩下的中段整体是 `id`。不是 `ring:` 抬起的事实 ⇒ 世界事实的三元组。
+fn ring_key_of(event_id: &str, kind: &str) -> (String, String, u32) {
+    let Some(rest) = event_id.strip_prefix("ring:") else {
+        return (String::new(), event_id.to_string(), 0);
+    };
+    let parts: Vec<&str> = rest.split(':').collect();
+    let Some(kind_at) = parts.iter().rposition(|part| *part == kind) else {
+        return (String::new(), event_id.to_string(), 0);
+    };
+    // `kind` 左侧必须还有尝试号与端口位。
+    if kind_at < 2 {
+        return (String::new(), event_id.to_string(), 0);
+    }
+    let Ok(attempt) = parts[kind_at - 1].parse::<u32>() else {
+        return (String::new(), event_id.to_string(), 0);
+    };
+    let port = parts[0].to_string();
+    let id = parts[1..kind_at - 1].join(":");
+    (port, id, attempt)
 }
 
 /// 事件 → 读面的一行（身份 / 端口 / 种类 / 不透明载荷）。

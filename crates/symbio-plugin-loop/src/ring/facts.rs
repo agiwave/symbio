@@ -56,8 +56,9 @@ impl FactKind {
 /// 事实源本身绑定单一会话，同名债因此不会跨会话串台。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct DebtKey {
-    /// 端口名（数据；环不解释）。
-    pub(crate) port: &'static str,
+    /// 端口名（数据；环不解释）。拥有所有权：投影里的端口位来自入库身份，
+    /// 不保证是编译期常量。
+    pub(crate) port: String,
     /// 欠债方派生的身份。
     pub(crate) id: String,
     /// 租约尝试号，从 1 起。
@@ -66,9 +67,9 @@ pub(crate) struct DebtKey {
 
 impl DebtKey {
     /// 组一笔债的身份。
-    pub(crate) fn new(port: &'static str, id: impl Into<String>, attempt: u32) -> Self {
+    pub(crate) fn new(port: impl Into<String>, id: impl Into<String>, attempt: u32) -> Self {
         Self {
-            port,
+            port: port.into(),
             id: id.into(),
             attempt,
         }
@@ -78,7 +79,7 @@ impl DebtKey {
     #[cfg(test)]
     pub(crate) fn next_attempt(&self) -> Self {
         Self {
-            port: self.port,
+            port: self.port.clone(),
             id: self.id.clone(),
             attempt: self.attempt + 1,
         }
@@ -148,7 +149,7 @@ impl<'a> FactView<'a> {
     pub(crate) fn attempt(&self, port: &str, id: &str) -> u32 {
         self.facts
             .iter()
-            .filter(|f| f.key.port == port && f.key.id == id)
+            .filter(|f| f.key.port.as_str() == port && f.key.id == id)
             .map(|f| f.key.attempt)
             .max()
             .unwrap_or(0)
@@ -168,7 +169,7 @@ impl<'a> FactView<'a> {
         self.facts
             .iter()
             .rev()
-            .find(|f| f.kind.closes() && f.key.port == port)
+            .find(|f| f.kind.closes() && f.key.port.as_str() == port)
     }
 
     /// 本会话里已开账但未收束的债（重放读它）。

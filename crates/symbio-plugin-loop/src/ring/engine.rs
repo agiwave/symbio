@@ -145,7 +145,11 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
         }
         // 「该端口的债全部还清才欠」读的是债状态，不是事实状态（归属：选债）。
         if let Some(port) = row.when_no_open {
-            if view.unresolved().iter().any(|key| key.port == port) {
+            if view
+                .unresolved()
+                .iter()
+                .any(|key| key.port.as_str() == port)
+            {
                 continue;
             }
         }
