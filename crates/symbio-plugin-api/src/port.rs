@@ -45,8 +45,6 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
-use symbio_kernel::decl::ring::Decl;
-use symbio_kernel::decl::ViewDecl;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_sdk::capability::{capability_report_error, CAPABILITY_VISITOR};
@@ -129,38 +127,6 @@ pub trait PortFactReader: Send + Sync + 'static {
     }
 }
 
-/// 只读声明句柄（D-337）：执行体可以**读**声明表，但不带任何写口。
-///
-/// 两个读口各服务一类判断：视图声明回答「这一段是谁的身份」，债行声明回答「这一行
-/// 欠什么、什么时候算还」。冻结表本身已经是只读的（`Frozen` 没有 `&mut self`
-/// 方法），本句柄只是把它发进执行上下文——不新建注册表，也不让执行体改声明。
-pub trait PortDeclReader: Send + Sync + 'static {
-    /// 按名字取视图声明。`None` = 表上没有这条视图。
-    fn view(&self, name: &str) -> Option<ViewDecl>;
-
-    /// 全部债行声明（按冻结顺序）。
-    fn rows(&self) -> Vec<Decl>;
-}
-
-/// 由进程冻结表做成的只读句柄；冻结失败 ⇒ `None`（执行体按「没有声明可读」处理）。
-pub fn sealed_decl_reader() -> Option<Arc<dyn PortDeclReader>> {
-    struct Sealed(Arc<symbio_kernel::decl::Frozen>);
-
-    impl PortDeclReader for Sealed {
-        fn view(&self, name: &str) -> Option<ViewDecl> {
-            self.0.view(name).copied()
-        }
-
-        fn rows(&self) -> Vec<Decl> {
-            self.0.rows().to_vec()
-        }
-    }
-
-    crate::sealed_declarations()
-        .ok()
-        .map(|frozen| Arc::new(Sealed(frozen)) as Arc<dyn PortDeclReader>)
-}
-
 /// 一笔债的执行上下文（`DE-047` I-6.5 / D-305 裁决一）：命名不带世界词。
 #[derive(Clone)]
 pub struct PortExecContext {
@@ -194,11 +160,6 @@ pub struct PortExecContext {
     pub scratch_dir: Option<PathBuf>,
     /// 事实读面（宿主实现）：执行体按需读本可见域的事实；`None` = 无。
     pub reader: Option<Arc<dyn PortFactReader>>,
-    /// 只读声明句柄（D-337）：执行体按需读视图与债行声明；`None` = 无声明可读。
-    ///
-    /// **只读**：要想改声明，唯一通路是插件自己的 `traverse` 与能力收集
-    /// （`submit_declarations!`）；运行期改表会绕过那条收集，写出没人登记的行。
-    pub decls: Option<Arc<dyn PortDeclReader>>,
 }
 
 /// 宿主交给执行体的**不透明句柄束**：环只原样转交，不读取、不解释其中任何字段。
@@ -215,8 +176,6 @@ pub struct PortExecHandles {
     pub sink: ExecEventSink,
     /// 会话身份（宿主原样交值；空串 = 无）。
     pub session_id: String,
-    /// 只读声明句柄（宿主装配，`D-337`）；`None` = 该宿主没有可读的冻结表。
-    pub decls: Option<Arc<dyn PortDeclReader>>,
 }
 
 impl Default for PortExecHandles {
@@ -226,7 +185,6 @@ impl Default for PortExecHandles {
             scratch_dir: None,
             sink: ExecEventSink::silent(),
             session_id: String::new(),
-            decls: None,
         }
     }
 }
@@ -240,6 +198,19 @@ pub trait PortFactWriter: Send + Sync + 'static {
     /// 追加一组事实草稿。宿主的唯一写口按草稿给的幂等键落行（重复投递被吸收）；
     /// provider 拿不到写句柄，也无权指定轮号 / 主体 / 时刻。
     async fn emit(&self, facts: Vec<FactDraft>);
+
+    /// 追加一组事实草稿，并**显式带 owner**（落格信封的归属位）。
+    ///
+    /// `owner` **只从声明表来**：机制侧按草稿的 `kind` 查出格的申报方
+    /// （`Frozen::event_owner`），再交给写口。它**不从草稿来**——`FactDraft` 的信封
+    /// 三格（轮号 / 归属 / 时刻）归宿主，行为无权指定（DE-026 D-252）；给草稿加
+    /// `actor` 字段会把这条分界重新打开。
+    ///
+    /// 缺省实现丢弃归属、退化为 [`PortFactWriter::emit`]（只读夹具与内部请求仍可工作）。
+    async fn emit_owned(&self, owner: &str, facts: Vec<FactDraft>) {
+        let _ = owner;
+        self.emit(facts).await;
+    }
 }
 
 /// 事实草稿出口的值形态（与 [`ExecEventSink`] 的 `Null` 同一套语义）。
@@ -261,6 +232,14 @@ impl PortFactEmit {
     pub async fn emit(&self, facts: Vec<FactDraft>) {
         if let Some(writer) = &self.0 {
             writer.emit(facts).await;
+        }
+    }
+
+    /// 追加一组事实草稿，归属位由机制侧给的 `owner` 填（见
+    /// [`PortFactWriter::emit_owned`] 的口径：owner 只从声明表来，不从草稿来）。
+    pub async fn emit_owned(&self, owner: &str, facts: Vec<FactDraft>) {
+        if let Some(writer) = &self.0 {
+            writer.emit_owned(owner, facts).await;
         }
     }
 }

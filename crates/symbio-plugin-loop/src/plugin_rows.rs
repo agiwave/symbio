@@ -142,6 +142,26 @@ fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<ModelReply<'a>> {
     found
 }
 
+/// 落格时按**声明表**给每份草稿定归属。
+///
+/// `owner` 只从 `Frozen::event_owner(kind)` 来——机制侧知道这个格由谁申报；
+/// **不从草稿来**：`FactDraft` 没有 `actor` 字段，行为无权指定归属（DE-026 D-252）。
+/// 表上查不到的 kind 由写闸判 OffGrid（会响），这里退到本行的申报方只为不丢这一批。
+async fn emit_attributed(
+    exec: &PortExecContext,
+    row_owner: &'static str,
+    drafts: Vec<FactDraft>,
+) {
+    let frozen = symbio_plugin_api::sealed_declarations().ok();
+    for draft in drafts {
+        let owner = frozen
+            .as_ref()
+            .and_then(|frozen| frozen.event_owner(&draft.kind))
+            .unwrap_or(row_owner);
+        exec.emit.emit_owned(owner, vec![draft]).await;
+    }
+}
+
 /// 通用行执行体：按 `Decl.by == plugin_row` 派发到 [`RowHandler`]。
 pub(crate) struct PluginRowExecutor;
 
@@ -185,7 +205,7 @@ impl PortExecutor for PluginRowExecutor {
                     format!("`{row}` 拿到回执却一笔都不落"),
                 );
             }
-            exec.emit.emit(drafts).await;
+            emit_attributed(&exec, handler.owner(), drafts).await;
             return PortOutcome::ok();
         }
 
@@ -208,7 +228,7 @@ impl PortExecutor for PluginRowExecutor {
                         format!("`{row}` 这一步一笔都不落"),
                     );
                 }
-                exec.emit.emit(facts).await;
+                emit_attributed(&exec, handler.owner(), facts).await;
                 PortOutcome::ok()
             }
             RowStep::FactsWithEffects(facts, effects) => {
@@ -261,7 +281,7 @@ impl PortExecutor for PluginRowExecutor {
                         EffectDraft::Live(_) => {}
                     }
                 }
-                exec.emit.emit(drafts).await;
+                emit_attributed(&exec, handler.owner(), drafts).await;
                 PortOutcome::ok()
             }
             RowStep::Ask(ask) => {

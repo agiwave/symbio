@@ -420,7 +420,6 @@ fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext,
             permitted: true,
             deny_reason: String::new(),
             scratch_dir: None,
-            decls: None,
             reader: None,
         },
         PortInput {
@@ -569,7 +568,6 @@ fn requested_call_with(
             permitted: true,
             deny_reason: String::new(),
             scratch_dir: None,
-            decls: None,
             reader: Some(Arc::new(StaticReader(vec![
                 symbio_plugin_api::port::PortFact {
                     id: "tool.requested:model-1".into(),
@@ -770,7 +768,6 @@ fn authz_call(
             permitted: true,
             deny_reason: String::new(),
             scratch_dir: None,
-            decls: None,
             reader: None,
         },
         PortInput {
@@ -966,7 +963,6 @@ fn open_call(
             permitted: true,
             deny_reason: String::new(),
             scratch_dir: None,
-            decls: None,
             reader: None,
         },
         PortInput {

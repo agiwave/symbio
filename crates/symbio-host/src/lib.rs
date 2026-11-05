@@ -132,8 +132,6 @@ impl Host {
             // 内部请求显式静默）；宿主不再写死静默。
             sink,
             session_id: session_id.to_string(),
-            // 只读声明句柄（D-337）：冻结表是进程内唯一来源，执行体按需读。
-            decls: symbio_plugin_api::port::sealed_decl_reader(),
         };
         let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
             // 每驱动现造、从 0 起的投影游标：事实源是唯一输入，投影只缓存
@@ -404,12 +402,20 @@ struct WorldWriter {
 #[async_trait::async_trait]
 impl PortFactWriter for WorldWriter {
     async fn emit(&self, facts: Vec<FactDraft>) {
+        // 无归属的通用出口（工具 / 模型端口）：沿用宿主身份。
+        self.emit_owned("host", facts).await;
+    }
+
+    /// 归属位由机制侧从**声明表**取得后交来（`Frozen::event_owner` 按草稿的 kind 查
+    /// 申报方），写口只按它落行——**不读草稿里的任何归属暗示**：`FactDraft` 没有
+    /// `actor` 字段，行为也无权指定归属（DE-026 D-252）。
+    async fn emit_owned(&self, owner: &str, facts: Vec<FactDraft>) {
         for fact in facts {
             let mut draft = fact;
             // 草稿自带溯源时用它；否则指向本会话里刚落地的那条事实（I2 的声明类
             // 不接受无源）。空会话不填——那是真正的无源声明，交给事实源拒绝。
             draft.produced_by = draft.produced_by.or_else(|| provenance_at(&*self.source));
-            let _ = self.source.append("host".to_string(), draft);
+            let _ = self.source.append(owner.to_string(), draft);
         }
     }
 }

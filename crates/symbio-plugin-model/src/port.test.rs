@@ -142,7 +142,6 @@ fn exec_context() -> symbio_plugin_api::port::PortExecContext {
         permitted: true,
         deny_reason: String::new(),
         scratch_dir: None,
-        decls: None,
         reader: None,
     }
 }
