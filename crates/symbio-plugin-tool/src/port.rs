@@ -591,7 +591,10 @@ async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &Lan
             }
         }
         // 声明的账：与环派发走**同一个**承接函数（单一实现，不复制）。
-        land_effects(exec, &input).await;
+        let effects = land_effects(exec, &input).await;
+        if effects.bookkeeping_missing {
+            mark_bookkeeping_missing(&mut artifact_payload);
+        }
     }
     exec.emit
         .emit(vec![FactDraft {
@@ -609,9 +612,45 @@ async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &Lan
 ///
 /// **两套承接出口（单次调用 / 环派发）都走这里**：同一承接体只能有一份实现。
 /// 复制一份的后果是——接错了不报错，只是静默地什么都不做（t93 就是这样卡住的）。
-async fn land_effects(exec: &PortExecContext, input: &EffectInput) -> usize {
+/// 记账判决：声明的账落没落。判定只在这里合成一次（两个出口都读它）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EffectsLanded {
+    drafts: usize,
+    bookkeeping_missing: bool,
+}
+
+/// 声明了行为、执行也成功，却一条草稿都没有 ⇒ 违约（fail-closed）。
+///
+/// 当前所有行为**恒返回草稿**（重复由写口按键去重），所以这条分支实际挡的是
+/// 「将来有人写出静默空转的行为」：宁可假红，也不能让「有账不落」隐形。
+fn bookkeeping_missing(success: bool, drafts: usize) -> bool {
+    success && drafts == 0
+}
+
+/// 把「声明的账没落」写进产物格：不报成功，并给出可判定词。
+///
+/// `failure_kind` 目前是字符串词表（`needs_interaction` / `not_executed` /
+/// `tool_unavailable` 同一层），本词新增 `bookkeeping_missing`。
+fn mark_bookkeeping_missing(artifact: &mut serde_json::Value) {
+    if let Some(obj) = artifact.as_object_mut() {
+        obj.insert("success".to_string(), serde_json::Value::Bool(false));
+        obj.insert(
+            "failure_kind".to_string(),
+            serde_json::json!("bookkeeping_missing"),
+        );
+        obj.insert(
+            "why".to_string(),
+            serde_json::json!("声明了行为却没有产出任何事实"),
+        );
+    }
+}
+
+async fn land_effects(exec: &PortExecContext, input: &EffectInput) -> EffectsLanded {
     if input.declared.is_empty() {
-        return 0;
+        return EffectsLanded {
+            drafts: 0,
+            bookkeeping_missing: false,
+        };
     }
     // 行为只读「发生了什么」与宿主面；端口手里没有内核 `Event` 切片，
     // 两片历史交空片是诚实的缺省（行为不得据此假设历史非空）。
@@ -634,7 +673,10 @@ async fn land_effects(exec: &PortExecContext, input: &EffectInput) -> usize {
     if n > 0 {
         exec.emit.emit(drafts).await;
     }
-    n
+    EffectsLanded {
+        drafts: n,
+        bookkeeping_missing: bookkeeping_missing(input.success, n),
+    }
 }
 
 /// 本工具声明的行为名：与环侧 `ToolDecls::behaviors_of` 同一匹配口径
@@ -1180,8 +1222,8 @@ impl ToolPort {
                 };
             }
             if let Some(result) = result {
-                exec.emit.emit(vec![artifact_draft(call, &result)]).await;
-                // 落格之后接着落**声明的账**：与单次出口同一个承接函数。
+                let mut artifact = artifact_draft(call, &result);
+                // 落格之前先判「声明的账」：违约时产物格必须报失败（fail-closed）。
                 let declared = declared_of(&declared_table, &call.name);
                 if !declared.is_empty() {
                     let input = EffectInput {
@@ -1200,8 +1242,12 @@ impl ToolPort {
                         why: String::new(),
                         declared,
                     };
-                    land_effects(&exec, &input).await;
+                    let effects = land_effects(&exec, &input).await;
+                    if effects.bookkeeping_missing {
+                        mark_bookkeeping_missing(&mut artifact.payload);
+                    }
                 }
+                exec.emit.emit(vec![artifact]).await;
             }
         }
         exec.emit

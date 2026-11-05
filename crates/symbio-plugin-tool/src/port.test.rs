@@ -18,6 +18,35 @@ use symbio_plugin_api::{
     Registry, CAPABILITY_VISITOR,
 };
 
+// ==================== 记账 fail-closed：声明的账没落就不许报成功 ====================
+//
+// 当前所有行为**恒返回草稿**（重复由写口按键去重）⇒ 这个分支挡的是
+// 「将来有人写出静默空转的行为」：宁可假红，也不能让「有账不落」隐形。
+
+#[test]
+fn declared_behavior_without_drafts_is_bookkeeping_missing() {
+    assert!(bookkeeping_missing(true, 0));
+    // 执行本身失败：走失败路径，不叠加「记账违约」。
+    assert!(!bookkeeping_missing(false, 0));
+    // 落了账：合法。
+    assert!(!bookkeeping_missing(true, 1));
+}
+
+#[test]
+fn bookkeeping_missing_flips_artifact_to_failed() {
+    let mut artifact = serde_json::json!({"success": true, "text": "ok"});
+    mark_bookkeeping_missing(&mut artifact);
+    assert_eq!(artifact["success"], serde_json::Value::Bool(false));
+    assert_eq!(
+        artifact["failure_kind"],
+        serde_json::json!("bookkeeping_missing")
+    );
+    assert_eq!(
+        artifact["why"],
+        serde_json::json!("声明了行为却没有产出任何事实")
+    );
+}
+
 // ==================== extract_result：判定顺序即约定 ====================
 //
 // 这组用例的作用是**钉住判定顺序**——它现在是 `extract_result` 文档里的表，
