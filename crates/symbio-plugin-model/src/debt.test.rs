@@ -4,6 +4,7 @@ fn request(provider: Option<&str>) -> DriveRequest {
     DriveRequest {
         session_id: "s".into(),
         provider: provider.map(str::to_string),
+        principal: "session/main".into(),
     }
 }
 
@@ -35,6 +36,10 @@ fn user_turn_debt_derives_its_identity_from_the_input_fact() {
     );
     assert_eq!(reply.payload["root_id"], "u-1");
     assert_eq!(reply.payload["provider"], "p");
+    assert_eq!(
+        reply.payload["principal"], "session/main",
+        "会话主体随驱动请求而来，不再写死 user（D-339）"
+    );
 }
 
 #[test]

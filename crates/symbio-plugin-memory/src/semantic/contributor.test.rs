@@ -58,10 +58,6 @@ fn the_three_readings_are_copied_from_the_retrieval() {
     assert_eq!(fact.payload["found"], 2, "found 是摘除之后的条目数");
     assert_eq!(fact.payload["top"], "用户偏好简洁答复", "top 是首条正文");
     assert_eq!(fact.payload["degraded"], false, "不降级不标降级");
-    assert_eq!(
-        out[0].actor, None,
-        "actor 交宿主填本轮主体（问的人，不是记的人）"
-    );
 }
 
 /// 降级必须落进事实：它是**生产读数口**，只在端口 / 提示词里活着就等于没有。

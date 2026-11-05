@@ -523,6 +523,11 @@ pub enum Gap {
     DuplicateEvent {
         name: &'static str,
     },
+    /// 事件声明没有落格归属主体：写口只能在落账时猜一个默认值，而归属一旦靠猜
+    /// 就会静默失效（D-339）。装配期判红，启动即红。
+    EventWithoutOwner {
+        name: &'static str,
+    },
     /// 插件声明了一条事实，却没有任何事件行给它格位——写闸永远认不出它
     /// （没有任何回退表能替它补格位）。
     FactWithoutEvent {

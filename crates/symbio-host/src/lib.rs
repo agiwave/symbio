@@ -19,6 +19,7 @@ use symbio_kernel::store::MemoryStore;
 use symbio_plugin_api::debt::{
     Closing, DebtFacts, DebtSource as DeclaredDebtSource, DebtTable, DriveRequest, DEBT_FAMILY,
 };
+use symbio_plugin_api::SymbioKey;
 use symbio_plugin_api::drive::{
     DriveFact, DrivePayload, DriveRow, DriveRunner, DriveSupport, DRIVE_FAMILY,
 };
@@ -120,6 +121,17 @@ impl Host {
         sink: ExecEventSink,
     ) -> Result<DriveReport, String> {
         let gathered = self.gather(base, session_id, provider).await?;
+        // 会话主体只从开面时唯一设置的 `AGENT_ID` 载体来（D-339）。载体不在就显式失败，
+        // 不用 `principal_of(None)` 默认派生 `session/main`；载体在但值为空 = 会话
+        // **确实没有绑定智能体**，其主体定义就是 `session/main`（`principal_of` 的语义）。
+        let principal = {
+            let Some(agent_id) = gathered.ctx.get(symbio_plugin_api::AGENT_ID) else {
+                return Err(
+                    "驱动缺少会话主体载体（AGENT_ID）；拒绝由缺失值派生 session/main".to_string(),
+                );
+            };
+            symbio_plugin_api::principal_of(Some(agent_id.trim()))
+        };
         let workdir = base.get(WORKDIR).unwrap_or_default();
         // 出口**同一句柄两处共持**：执行体经 `ExecEventSink::of(ctx)`（键 `EVENT_SINK`）
         // 取出口，这里把同一份 `sink` 写进它拿到的上下文，再放进 `handles.sink`。
@@ -144,6 +156,7 @@ impl Host {
             sources: gathered.sources,
             session_id: session_id.to_string(),
             provider: provider.map(str::to_string),
+            principal,
             concurrency: self.concurrency,
             handles,
         });
@@ -246,6 +259,8 @@ struct HostDriveSupport {
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
     session_id: String,
     provider: Option<String>,
+    /// 本会话主体（开面时从 `agent_id` 解析，随债表请求下传；D-339）。
+    principal: String,
     concurrency: usize,
     /// 交给执行体的不透明句柄束（宿主装配，环原样转交）。
     handles: PortExecHandles,
@@ -311,6 +326,7 @@ impl DriveSupport for HostDriveSupport {
         let request = DriveRequest {
             session_id: self.session_id.clone(),
             provider: self.provider.clone(),
+            principal: self.principal.clone(),
         };
         let declared = declared_facts(&self.facts(), &*self.source);
         let mut rows = Vec::new();
@@ -401,15 +417,37 @@ struct WorldWriter {
     source: Arc<dyn FactSource>,
 }
 
+/// 事件声明给出的落格归属主体（D-339）。
+///
+/// 先查冻结表；只链接了部分插件的用例再查共享词汇表。两处都没有说明这条事实
+/// 在声明期就没有归属——写口**拒绝在落账时猜一个默认值**。
+fn declared_owner(kind: &str) -> &'static str {
+    symbio_plugin_api::sealed_declarations()
+        .ok()
+        .and_then(|frozen| frozen.event_writer(kind))
+        .or_else(|| {
+            symbio_plugin_api::events::SHARED_EVENTS
+                .iter()
+                .find(|event| event.name == kind)
+                .map(|event| event.owner)
+        })
+        .unwrap_or_else(|| {
+            panic!("事实 `{kind}` 没有声明归属主体：写口拒绝在落账时猜默认值（D-339）")
+        })
+}
+
 #[async_trait::async_trait]
 impl PortFactWriter for WorldWriter {
     async fn emit(&self, facts: Vec<FactDraft>) {
-        // 无归属的通用出口（工具 / 模型端口）：沿用宿主身份。
-        self.emit_owned("host", facts).await;
+        // 无归属的通用出口（工具 / 模型端口）：归属仍只从声明表来，不再沿用宿主身份。
+        for fact in facts {
+            let owner = declared_owner(&fact.kind);
+            self.emit_owned(owner, vec![fact]).await;
+        }
     }
 
-    /// 归属位由机制侧从**声明表**取得后交来（`Frozen::event_owner` 按草稿的 kind 查
-    /// 申报方），写口只按它落行——**不读草稿里的任何归属暗示**：`FactDraft` 没有
+    /// 归属位由机制侧从**声明表**取得后交来（`Frozen::event_writer` 按草稿的 kind 查
+    /// 声明主体），写口只按它落行——**不读草稿里的任何归属暗示**：`FactDraft` 没有
     /// `actor` 字段，行为也无权指定归属（DE-026 D-252）。
     async fn emit_owned(&self, owner: &str, facts: Vec<FactDraft>) {
         for fact in facts {
@@ -539,8 +577,18 @@ fn ring_port_of(event_id: &str) -> String {
 }
 
 /// 便利构造：一次驱动用的基上下文（前端只需补工作目录等）。
+///
+/// 带 `AGENT_ID` 载体（空值 = 未绑定智能体，主体按定义为 `session/main`）；
+/// 驱动侧只认这个载体，不再从缺失值派生主体（D-339）。
 pub fn base_context() -> Arc<dyn PluginInvokeRequest> {
-    Arc::new(PluginSimpleRequest::new(None, None))
+    let meta = serde_json::Map::from_iter([(
+        symbio_plugin_api::AGENT_ID.name().to_string(),
+        serde_json::json!(""),
+    )]);
+    Arc::new(PluginSimpleRequest::from_parts(
+        serde_json::json!({}),
+        Some(&meta),
+    ))
 }
 
 #[cfg(test)]

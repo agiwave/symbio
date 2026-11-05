@@ -4,6 +4,7 @@ use super::*;
 // 只做链接：环经 creator 注册被这个根构造，测试二进制必须把它的注册项带进来。
 use symbio_deploy::PLUGIN_ID_LOOP;
 use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::keys::SymbioKey;
 use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
     PluginSimpleRequest,
@@ -48,10 +49,22 @@ impl Plugin for EmptyRoot {
     }
 }
 
+/// 开面后的下界上下文：会话主体随 `AGENT_ID` 载体带进来（D-339 起驱动也要它）。
+fn bound_base() -> Arc<dyn PluginInvokeRequest> {
+    let meta = serde_json::Map::from_iter([(
+        symbio_plugin_api::AGENT_ID.name().to_string(),
+        serde_json::json!("main"),
+    )]);
+    Arc::new(PluginSimpleRequest::from_parts(
+        serde_json::json!({}),
+        Some(&meta),
+    ))
+}
+
 #[tokio::test]
 async fn a_session_with_no_debt_is_idle() {
     let host = Host::new(Arc::new(EmptyRoot));
-    let base: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let base = bound_base();
     let report = host
         .drive(&base, "s-1", None, ExecEventSink::silent())
         .await
@@ -212,7 +225,7 @@ async fn user_message_becomes_a_model_debt_that_lands_its_response_in_the_store(
     .expect("用户消息落库");
     let host = Host::with_store(Arc::new(SmokeRoot), store);
 
-    let base: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let base = bound_base();
     let report = host
         .drive(&base, session, Some("smoke"), ExecEventSink::silent())
         .await
@@ -325,7 +338,7 @@ impl PortExecutor for LoopModelExecutor {
     }
 }
 
-/// 工具端口：清单来自读面（载荷空），逐调用落产物，最后落 `tool.calls.done`。
+/// 工具端口：清单来自读面（载荷空），逐调用落产物。
 struct LoopTool {
     counters: Arc<LoopCounters>,
 }
@@ -392,14 +405,6 @@ impl PortExecutor for LoopToolExecutor {
                 produced_by: None,
             });
         }
-        drafts.push(FactDraft {
-            key: format!("tool.calls.done:{}", request.id),
-            kind: "tool.calls.done".into(),
-            entity: Entity::Scope,
-            verb: Verb::Asserted,
-            payload: serde_json::json!({"requested": request.id, "calls": calls.len()}),
-            produced_by: None,
-        });
         exec.emit.emit(drafts).await;
         PortOutcome::ok()
     }
@@ -504,7 +509,7 @@ async fn the_tool_round_is_dispatched_and_fed_back_into_the_model() {
         }),
         store,
     );
-    let base: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let base = bound_base();
     let report = host
         .drive(&base, session, Some("smoke"), ExecEventSink::silent())
         .await
@@ -527,7 +532,6 @@ async fn the_tool_round_is_dispatched_and_fed_back_into_the_model() {
     let kinds: Vec<&str> = facts.iter().map(|fact| fact.kind.as_str()).collect();
     assert!(kinds.contains(&EVENT_TOOL_REQUESTED), "kinds={kinds:?}");
     assert!(kinds.contains(&EVENT_ARTIFACT_ADDED), "kinds={kinds:?}");
-    assert!(kinds.contains(&"tool.calls.done"), "kinds={kinds:?}");
     assert!(
         kinds.contains(&EVENT_CHAT_ASSISTANT_FINAL),
         "kinds={kinds:?}"
@@ -539,12 +543,6 @@ async fn the_tool_round_is_dispatched_and_fed_back_into_the_model() {
         .expect("产物落库");
     assert_eq!(artifact.payload["tool_call_id"], "c1");
     assert_eq!(artifact.payload["text"], "done");
-
-    let done = facts
-        .iter()
-        .find(|fact| fact.kind == "tool.calls.done")
-        .expect("工具轮收尾事实落库");
-    assert_eq!(done.payload["calls"], 1);
 
     let final_fact = facts
         .iter()

@@ -49,10 +49,9 @@ impl DebtSource for ModelDebts {
         let payload = json!({
             "provider": request.provider,
             "root_id": user_id,
-            // 债务台账：这里仍写死 `"user"`，与 `AGENT_ID` 载体的会话主体**两套并存**，
-            // 待 D-339（第二步）与 `CloseTurn` / `RowRequest.principal` 一起收口。
-            // 本步不动；发言闸已改读 `ctx[AGENT_ID]`，不依赖此字段。
-            "principal": "user",
+            // 会话主体随驱动请求而来（开面时从 `agent_id` 解析）；不再写死 `"user"`，
+            // 与信封归属（`@principal` → `session/*`）同源（D-339）。
+            "principal": request.principal,
         });
         let mut rows = vec![
             // 有用户输入、尚无终答：这一轮欠一次模型往返。

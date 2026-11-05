@@ -78,9 +78,9 @@ impl RowHandler for CloseTurn {
             history: req.history,
         };
 
-        // 贡献者只交事实草稿：`Contribution.actor` 不进落格路径——归属由机制侧按
-        // **声明表**定（`plugin_row` 执行体查 `Frozen::event_owner(kind)` 后走
-        // `emit_owned`），贡献方无权指定归属（DE-026 D-252）。
+        // 贡献者只交事实草稿：归属不在草稿里，也不在贡献者手里。`plugin_row` 执行体
+        // 按**声明表**取 `Frozen::event_writer(kind)` 后走 `emit_owned`——贡献方无权
+        // 指定归属（DE-026 D-252 / D-339）。
         let mut facts: Vec<FactDraft> = contributors()
             .iter()
             .flat_map(|contributor| contributor.contribute(&at))

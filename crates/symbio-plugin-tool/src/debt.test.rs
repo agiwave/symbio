@@ -7,6 +7,7 @@ fn request() -> DriveRequest {
     DriveRequest {
         session_id: "s-1".to_string(),
         provider: None,
+        principal: "session/main".to_string(),
     }
 }
 

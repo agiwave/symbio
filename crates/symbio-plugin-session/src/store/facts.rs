@@ -82,7 +82,9 @@ impl SessionStore {
         let agent_id = dir
             .as_deref()
             .and_then(super::layout::read_agent_id)
-            .ok_or_else(|| format!("会话 {session_id} 的 metadata 取不到 agent_id（拒绝回落主体）"))?;
+            .ok_or_else(|| {
+                format!("会话 {session_id} 的 metadata 取不到 agent_id（拒绝回落主体）")
+            })?;
         Ok(self.facts(session_id)?.map(|wal| {
             super::fact_source::SessionFactSource::open(
                 wal,

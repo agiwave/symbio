@@ -981,7 +981,6 @@ fn the_contributor_lands_ready_and_assigned_on_a_generated_turn() {
         "事件号词干由宿主给的不透明锚拼出（与旧的 `t{{turn}}-s` 同形）"
     );
     for draft in &drafts {
-        assert_eq!(draft.actor, Some(PRINCIPAL_SCHEDULER), "派活的主体是调度者");
         assert_eq!(draft.fact.entity, Entity::Task);
         assert_eq!(
             draft.fact.produced_by,

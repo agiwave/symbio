@@ -13,7 +13,7 @@ use symbio_kernel::decl::{ActorDecl, FactDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
 
 use symbio_plugin_api::rows::{declared_writes, PLUGIN_ROW, PORT_ACTOR};
-use symbio_plugin_api::EVENT_REQUEST;
+use symbio_plugin_api::{EVENT_REQUEST, PRINCIPAL_USER};
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-loop";
 
@@ -35,9 +35,11 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("commitment.broken", (Entity::Commitment, Verb::Closed)),
     EventDecl::new("commitment.opened", (Entity::Commitment, Verb::Opened)),
     EventDecl::new("commitment.released", (Entity::Commitment, Verb::Closed)),
-    EventDecl::new("memory.consolidated", (Entity::Memory, Verb::Progressed)),
-    EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
-    EventDecl::new("memory.forgotten", (Entity::Memory, Verb::Closed)),
+    // 记忆事实归**认知归属人**，不是跑轮主体：召回视图按 `actor == viewer` 过滤，
+    // 记忆要按人看见它（D-339）。
+    EventDecl::new("memory.consolidated", (Entity::Memory, Verb::Progressed)).owned(PRINCIPAL_USER),
+    EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)).owned(PRINCIPAL_USER),
+    EventDecl::new("memory.forgotten", (Entity::Memory, Verb::Closed)).owned(PRINCIPAL_USER),
     // 机制事实（D-338）：`plugin_row` 执行体在 Ask 后落的「这一行在等」。
     // 行名与提示在载荷里；种类只有一个名字，否则进不了声明表。
     EventDecl::new("plugin.row.asked", (Entity::Scope, Verb::Asserted)),

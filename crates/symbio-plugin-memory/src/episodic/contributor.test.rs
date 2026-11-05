@@ -85,7 +85,6 @@ fn one_settlement_encodes_question_and_conclusion() {
         assert_eq!(d.fact.entity, Entity::Memory);
         assert_eq!(d.fact.verb, Verb::Opened);
         assert_eq!(d.fact.produced_by, Some(41), "溯源同指本轮开口格（I2）");
-        assert_eq!(d.actor, Some(PRINCIPAL_USER), "记忆的 actor 是认知归属人");
         assert!(
             d.fact.payload.get("vec").is_none(),
             "载荷里没有 vec 键：恒空的预留键不算承诺（D-110 / D-152）"

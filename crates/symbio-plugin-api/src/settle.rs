@@ -34,10 +34,9 @@
 //!
 //! 草稿的 `turn` 恒为宿主当轮的格号、`ts` 恒为本次询问的 [`Settling::now_ms`]——
 //! 「收束事实发生在这一刻」是宿主面，能力交不出这两格（[`crate::effects::FactDraft::into_event`]
-//! 不收轮号）。`actor` 则可能不是本轮主体：记忆的 actor 是**认知归属人**
-//! （`person/local`），而跑轮的主体可能是某个会话。所以 [`Contribution::actor`] 留了
-//! 一格显式声明，缺省仍是本轮主体——「这笔账以谁的名义记」是能力自己的判断，不是
-//! 宿主的默认值能替他做的。
+//! 不收轮号）。落格归属（信封 `actor`）由**事件声明**给定（`EventDecl::owner`，D-339）：
+//! 需要归到认知归属人的事实，在申报方的声明里写 `person/local`；其余写 `@principal`，
+//! 由会话装配解析成本轮主体。贡献者只交事实，不替宿主决定归属（DE-026 D-252）。
 //!
 //! ## 失败口径
 //!
@@ -95,29 +94,19 @@ pub struct Settling<'a> {
     pub history: &'a [Event],
 }
 
-/// 一条**待落格**的收束草稿：事实形状 + 归属人。
+/// 一条**待落格**的收束草稿：只含事实形状，不含归属。
 ///
-/// 与 [`FactDraft`] 的分界只有一格 `actor`：效果与行的事实随本轮主体记名，而记忆的
-/// 事实归**认知归属人**。信封（`turn` / `ts`）不在草稿里——宿主在落格时盖（见模块
-/// 文档）。
+/// 归属（信封 `actor`）由事件声明给定，见模块文档与 D-339；能力只交 [`FactDraft`]。
+/// 信封的 `turn` / `ts` 同样不在草稿里——宿主在落格时盖。
 #[derive(Debug, Clone)]
 pub struct Contribution {
     /// 事实本身（键、种类、格位、载荷、溯源）。
     pub fact: FactDraft,
-    /// 归属人：`None` = 本轮主体；`Some(actor)` = 能力声明的归属（如记忆归人）。
-    pub actor: Option<&'static str>,
 }
 
 impl Contribution {
-    /// 以本轮主体记名。
     pub fn new(fact: FactDraft) -> Self {
-        Self { fact, actor: None }
-    }
-
-    /// 改记到另一个归属人名下（认知归属人 ≠ 跑轮主体的那一类事实）。
-    pub fn with_actor(mut self, actor: &'static str) -> Self {
-        self.actor = Some(actor);
-        self
+        Self { fact }
     }
 }
 

@@ -475,6 +475,14 @@ impl Builder {
             }
         }
 
+        // D-339：事件的落格归属主体是声明格。空值说明注册口被改坏了——此时让写口
+        // 在落账时猜默认值，只会把「归属」变成静默失效；装配期就判红。
+        for event in &self.events {
+            if event.owner.trim().is_empty() {
+                gaps.push(Gap::EventWithoutOwner { name: event.name });
+            }
+        }
+
         let frozen = Frozen {
             events: self.events,
             facts: self.facts,
@@ -591,6 +599,12 @@ impl Frozen {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn event_owner(&self, name: &str) -> Option<&'static str> {
         self.event_owners.get(name).copied()
+    }
+
+    /// 这个事件名的**落格归属主体**（信封 `actor`）。`@principal` 由会话装配在
+    /// 落格时解析成该会话主体（D-339）；写口不再有运行期默认值。
+    pub fn event_writer(&self, name: &str) -> Option<&'static str> {
+        self.events.iter().find(|e| e.name == name).map(|e| e.owner)
     }
 
     pub fn facts(&self) -> &[FactDecl] {

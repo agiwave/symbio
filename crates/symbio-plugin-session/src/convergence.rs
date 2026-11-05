@@ -218,8 +218,7 @@ impl Convergence {
             // 没有这一支，会话停在 `working`、CLI 等不到收束（t73 的 B 侧）。
             let speech_denied = waiting_events.iter().any(|e| {
                 e.kind == CHAT_VOCAB.denied
-                    && e.payload.get("key").and_then(Value::as_str)
-                        == Some(CHAT_VOCAB.final_reply)
+                    && e.payload.get("key").and_then(Value::as_str) == Some(CHAT_VOCAB.final_reply)
                     && e.payload.get("root_id").and_then(Value::as_str)
                         == Some(user.event_id.as_str())
             });

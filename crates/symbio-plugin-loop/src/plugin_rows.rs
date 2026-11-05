@@ -144,18 +144,39 @@ fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<ModelReply<'a>> {
 
 /// 落格时按**声明表**给每份草稿定归属。
 ///
-/// `owner` 只从 `Frozen::event_owner(kind)` 来——机制侧知道这个格由谁申报；
+/// `owner` 只从 `Frozen::event_writer(kind)` 来——机制侧知道这一格的归属主体；
 /// **不从草稿来**：`FactDraft` 没有 `actor` 字段，行为无权指定归属（DE-026 D-252）。
-/// 表上查不到的 kind 由写闸判 OffGrid（会响），这里退到本行的申报方只为不丢这一批。
-async fn emit_attributed(exec: &PortExecContext, row_owner: &'static str, drafts: Vec<FactDraft>) {
-    let frozen = symbio_plugin_api::sealed_declarations().ok();
+/// 表上没有这一格的归属主体就显式失败：写口不猜默认值，也不静默丢（D-339）。
+async fn emit_attributed(
+    exec: &PortExecContext,
+    drafts: Vec<FactDraft>,
+) -> Result<(), PortOutcome> {
+    let Ok(frozen) = symbio_plugin_api::sealed_declarations() else {
+        return Err(PortOutcome::failed(
+            PortErrorClass::NonRetryable,
+            "声明表未装配：行事实没有归属主体",
+        ));
+    };
+    let mut attributed = Vec::with_capacity(drafts.len());
     for draft in drafts {
-        let owner = frozen
-            .as_ref()
-            .and_then(|frozen| frozen.event_owner(&draft.kind))
-            .unwrap_or(row_owner);
+        let owner = frozen.event_writer(&draft.kind).or_else(|| {
+            symbio_plugin_api::events::SHARED_EVENTS
+                .iter()
+                .find(|event| event.name == draft.kind)
+                .map(|event| event.owner)
+        });
+        let Some(owner) = owner else {
+            return Err(PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                format!("事实 `{}` 在声明表上没有归属主体", draft.kind),
+            ));
+        };
+        attributed.push((owner, draft));
+    }
+    for (owner, draft) in attributed {
         exec.emit.emit_owned(owner, vec![draft]).await;
     }
+    Ok(())
 }
 
 /// 通用行执行体：按 `Decl.by == plugin_row` 派发到 [`RowHandler`]。
@@ -179,6 +200,14 @@ impl PortExecutor for PluginRowExecutor {
                 format!("没有 `{row}` 的行实现"),
             );
         };
+        // 行执行体的主体只从会话载体来（`AGENT_ID` 由开面时唯一设置）。取不到就
+        // 显式失败——不回落 `session/main`，也不回落 `"user"`（D-339）。
+        let Some(principal) = session_principal(&exec) else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "行执行体缺少会话主体（拒绝回落 session/main）",
+            );
+        };
         let attempt = exec
             .idempotency_key
             .rsplit(':')
@@ -193,7 +222,7 @@ impl PortExecutor for PluginRowExecutor {
             .unwrap_or_default();
 
         if let Some(reply) = reply_of(&events, &ask) {
-            let request = row_request(handler.row(), &key, &exec, &events);
+            let request = row_request(handler.row(), &key, &exec, &events, &principal);
             let drafts = handler.parse(&request, reply);
             if drafts.is_empty() {
                 return PortOutcome::failed(
@@ -201,7 +230,9 @@ impl PortExecutor for PluginRowExecutor {
                     format!("`{row}` 拿到回执却一笔都不落"),
                 );
             }
-            emit_attributed(&exec, handler.owner(), drafts).await;
+            if let Err(outcome) = emit_attributed(&exec, drafts).await {
+                return outcome;
+            }
             return PortOutcome::ok();
         }
 
@@ -215,7 +246,7 @@ impl PortExecutor for PluginRowExecutor {
             return paused();
         }
 
-        let request = row_request(handler.row(), &key, &exec, &events);
+        let request = row_request(handler.row(), &key, &exec, &events, &principal);
         match handler.run(&request) {
             RowStep::Facts(facts) => {
                 if facts.is_empty() {
@@ -224,7 +255,9 @@ impl PortExecutor for PluginRowExecutor {
                         format!("`{row}` 这一步一笔都不落"),
                     );
                 }
-                emit_attributed(&exec, handler.owner(), facts).await;
+                if let Err(outcome) = emit_attributed(&exec, facts).await {
+                    return outcome;
+                }
                 PortOutcome::ok()
             }
             RowStep::FactsWithEffects(facts, effects) => {
@@ -241,15 +274,10 @@ impl PortExecutor for PluginRowExecutor {
                                 exec.idempotency_key,
                                 draft.key
                             );
-                            let agent_id = exec
-                                .ctx
-                                .as_deref()
-                                .and_then(|ctx| ctx.get(symbio_plugin_api::AGENT_ID));
-                            let principal = symbio_plugin_api::principal_of(agent_id.as_deref());
                             let who: &str = match draft.role {
                                 "user" => "user",
                                 "system" => "system",
-                                _ => &principal,
+                                _ => principal.as_str(),
                             };
                             let mut node = dialog_node(
                                 &draft.text,
@@ -277,7 +305,9 @@ impl PortExecutor for PluginRowExecutor {
                         EffectDraft::Live(_) => {}
                     }
                 }
-                emit_attributed(&exec, handler.owner(), drafts).await;
+                if let Err(outcome) = emit_attributed(&exec, drafts).await {
+                    return outcome;
+                }
                 PortOutcome::ok()
             }
             RowStep::Ask(ask) => {
@@ -303,11 +333,25 @@ fn paused() -> PortOutcome {
     PortOutcome::failed(PortErrorClass::NeedsHuman, "等待模型回执")
 }
 
+/// 行执行体的会话主体：只读开面时唯一设置的 `AGENT_ID` 载体。
+///
+/// 载体不在（`ctx` 缺失或键未设）就返回 `None`，由调用方显式失败——不交给
+/// `principal_of(None)` 去默认派生 `session/main`。载体在而值为空 = 会话确实
+/// 没有绑定智能体，其主体定义就是 `session/main`（`principal_of` 的语义）。
+fn session_principal(exec: &PortExecContext) -> Option<String> {
+    let agent_id = exec
+        .ctx
+        .as_deref()
+        .and_then(|ctx| ctx.get(symbio_plugin_api::AGENT_ID))?;
+    Some(symbio_plugin_api::principal_of(Some(agent_id.trim())))
+}
+
 fn row_request<'a>(
     row: &'static str,
     key: &'a [(String, String)],
     exec: &'a PortExecContext,
     events: &'a [Event],
+    principal: &'a str,
 ) -> RowRequest<'a> {
     let now_ms = events.iter().map(|e| e.ts).max().unwrap_or(0);
     let user_seq = events
@@ -320,7 +364,7 @@ fn row_request<'a>(
         key,
         anchor: &exec.idempotency_key,
         now_ms,
-        principal: "user",
+        principal,
         user_seq,
         facts: events,
         history: events,

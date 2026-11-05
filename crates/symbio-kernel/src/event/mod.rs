@@ -87,6 +87,9 @@ pub fn holds_role(vocab: &[EventDecl], kind: &str, role: FactRole) -> bool {
         .is_some_and(|e| e.roles.contains(&role))
 }
 
+/// 声明归属主体的会话哨兵：写口见到它就把信封主体解析成该会话主体（D-339）。
+pub const OWNER_PRINCIPAL: &str = "@principal";
+
 /// 一个**事件名**的声明：名字、它在网格上的格位，以及它在守卫判据里扮演的角色。
 ///
 /// 这是事件词汇的登记口（DE-024 D-197）：`Entity` × `Verb` 是封闭语法，**名字不是**。
@@ -115,6 +118,15 @@ pub struct EventDecl {
     /// 装载期的「前件有生产者」判据把这一档算作已生产；没有它，宿主事实只能被
     /// 误报成孤儿前件。它是**事件的声明格**，不是能力名——加一条宿主事实不改内核。
     pub host: bool,
+    /// **落格归属主体**：信封里的 `actor`，声明期给定，写口不猜默认值（D-339）。
+    ///
+    /// `@principal` 表示「这一格的归属由会话装配决定」——落格时解析成该会话主体
+    /// （`session/main` / `session/arbiter` / `session/worker`）。其余值是非会话主体
+    /// 的直接声明（如 `person/local`、`scheduler/main`）。
+    ///
+    /// 它与「交表方」（[`Builder::declare`] 的 owner，用来算插件归属）是两件事：
+    /// 交表方是插件身份，本字段是**事实的信封主体**。
+    pub owner: &'static str,
 }
 
 impl EventDecl {
@@ -125,6 +137,7 @@ impl EventDecl {
             cell,
             roles: &[],
             host: false,
+            owner: OWNER_PRINCIPAL,
         }
     }
 
@@ -135,6 +148,7 @@ impl EventDecl {
             cell,
             roles,
             host: false,
+            owner: OWNER_PRINCIPAL,
         }
     }
 
@@ -145,6 +159,7 @@ impl EventDecl {
             cell,
             roles: &[],
             host: true,
+            owner: OWNER_PRINCIPAL,
         }
     }
 
@@ -159,7 +174,14 @@ impl EventDecl {
             cell,
             roles,
             host: true,
+            owner: OWNER_PRINCIPAL,
         }
+    }
+
+    /// 声明落格归属主体（覆盖 `@principal` 默认值）。
+    pub const fn owned(mut self, owner: &'static str) -> Self {
+        self.owner = owner;
+        self
     }
 }
 

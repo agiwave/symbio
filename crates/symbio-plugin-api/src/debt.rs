@@ -14,13 +14,17 @@ pub use crate::drive::Unless;
 /// 债行所在的 `multi` 族。加一个端口 = 由该插件往本族报到，不改族。
 pub const DEBT_FAMILY: CapabilityFamily = CapabilityFamily::multi("debt");
 
-/// 一次驱动的应用侧输入：会话地址与选定的 provider。
+/// 一次驱动的应用侧输入：会话地址、选定的 provider 与会话主体。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriveRequest {
     /// 会话地址里的 id（应用数据）。
     pub session_id: String,
     /// 选定的 provider 标识（可为空）。
     pub provider: Option<String>,
+    /// 本会话主体（开面时从 `agent_id` 经 `principal_of` 得到；D-339）。
+    ///
+    /// 债表用它给请求载荷定归属，避免写死 `"user"` 让两套主体并存。
+    pub principal: String,
 }
 
 /// 一笔债在五事实里的结局。

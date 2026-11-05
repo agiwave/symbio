@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::*;
 use symbio_plugin_api::port::PortFactReader;
-use symbio_plugin_api::ModelUsage;
+use symbio_plugin_api::{ModelUsage, SymbioKey};
 
 /// 一次往返产物的别名：只在这里出现一次内核类型名，用于实现 trait 的返回签名。
 type RoundOutput = symbio_plugin_api::TurnOutput;
@@ -128,13 +128,20 @@ fn input(payload: serde_json::Value) -> PortInput {
 }
 
 fn exec_context() -> symbio_plugin_api::port::PortExecContext {
+    // 开面后的下界：主体随 `AGENT_ID` 载体带进来（发言闸只读这一点，D-339）。
+    let meta = serde_json::Map::from_iter([(
+        symbio_plugin_api::AGENT_ID.name().to_string(),
+        json!("main"),
+    )]);
     symbio_plugin_api::port::PortExecContext {
         deadline_ms: None,
         abort: symbio_plugin_api::ExecAbortSignal::new(),
         idempotency_key: "model-1-1".to_string(),
         sink: symbio_plugin_api::ExecEventSink::Null,
         emit: symbio_plugin_api::port::PortFactEmit::silent(),
-        ctx: None,
+        ctx: Some(Arc::new(
+            symbio_plugin_api::PluginSimpleRequest::from_parts(json!({}), Some(&meta)),
+        )),
         subject: String::new(),
         session_id: "s".to_string(),
         group: String::new(),

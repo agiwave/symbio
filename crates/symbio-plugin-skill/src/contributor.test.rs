@@ -57,7 +57,6 @@ fn compiled_skill_requires_provenance() {
     assert_eq!(fact.payload["content"], json!("先列要点；再合并同类项。"));
     assert_eq!(fact.payload["vis_scope"], json!("shared"));
     assert_eq!(fact.produced_by, Some(7), "技能必带溯源（I2）");
-    assert_eq!(drafts[0].actor, Some(symbio_plugin_api::PRINCIPAL_USER));
 
     // 反向：溯源置空 ⇒ 「技能必须有溯源」那条判据要么在这条断言上失败，要么由 I2 抓住。
     assert!(fact.produced_by.is_some());

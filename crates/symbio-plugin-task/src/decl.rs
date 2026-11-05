@@ -11,7 +11,7 @@
 //! 折叠不认端口形参，也不认识别人交来的表：[`TASK_VOCAB`] 就是它读的那五格。
 
 use symbio_plugin_api::{
-    Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb, ViewDecl,
+    Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb, ViewDecl, PRINCIPAL_SCHEDULER,
 };
 // 跨插件共享的四条走清单生成物（`PLUGIN.yml` 的 `shared_events` → `events.rs`）。
 // `pub(crate) use` 是**转手**不是复制：本插件的写方 / 读方从 `crate::decl` 取名字，
@@ -110,12 +110,12 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 终态：验证通过（验收通过才终态）。
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)),
     // 就绪判死（调度者写，`reason: "lease_expired"`）。
-    EventDecl::new(EVENT_TASK_READY, (Entity::Task, Verb::Progressed)),
+    EventDecl::new(EVENT_TASK_READY, (Entity::Task, Verb::Progressed)).owned(PRINCIPAL_SCHEDULER),
     // 发放（租约）：载荷 `{ task_id, owner, lease_ms, until_ms }`，与终态同落
     // `Task × Asserted`。**唯一写方是调度者**（`ScheduleDecider`），且写侧闸读
     // `assign.work`（`ActorSpec::can_assign_work`）——没有该能力的主体零事件
     // （fail-closed）。租约不是锁原语：持有状态由投影从这格算出，到期由调度者判死。
-    EventDecl::new(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted)),
+    EventDecl::new(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted)).owned(PRINCIPAL_SCHEDULER),
     // 返工轮：终止前提 2（`rework_bounded`）的计数对象。写方 [`crate::task`]，读方
     // core 判据经角色取它（DE-024 D-203）。
     EventDecl::with_roles(

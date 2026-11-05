@@ -30,7 +30,6 @@ use serde_json::json;
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
 use symbio_plugin_api::{
     truncate_chars, Contribution, Contributor, Entity, Event, FactDraft, Settling, Verb,
-    PRINCIPAL_USER,
 };
 
 use super::decl::{ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG};
@@ -105,9 +104,6 @@ fn draft(
         }),
         produced_by: Some(user_seq),
     })
-    // 记忆的 actor 是**认知归属人**，不是跑轮主体——召回视图按 `actor == viewer`
-    // 过滤时要按人看见它。
-    .with_actor(PRINCIPAL_USER)
 }
 
 /// 活记忆的正文集：**折叠只有一份**（[`crate::recall::live::live`]），这里只取正文。

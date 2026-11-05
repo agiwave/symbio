@@ -750,8 +750,6 @@ impl Contributor for ScheduleContributor {
                     payload: fact.payload,
                     produced_by: Some(at.user_seq),
                 })
-                // 派活的主体是调度者，不是跑这一轮的主体：归属由能力声明（D-250）。
-                .with_actor(PRINCIPAL_SCHEDULER)
             })
             .collect()
     }

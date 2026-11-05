@@ -79,26 +79,12 @@ fn contributors_are_ordered_by_prio_then_owner() {
 fn draft_carries_no_envelope_and_the_host_stamps_it() {
     let at = at();
     let contributed = Contribution::new(draft("d-1"));
-    assert_eq!(contributed.actor, None);
     let mut event = contributed.fact.into_event(at.principal);
     event.ts = at.now_ms;
     assert_eq!(event.actor, "session/a");
     assert_eq!(event.event_id, "d-1");
     assert_eq!(event.kind, "test.contributed");
     assert_eq!(event.produced_by, Some(7));
-    assert_eq!(event.ts, 1_700);
-}
-
-/// 能力可以声明归属人（记忆的事实归人，不归跑轮主体）。
-#[test]
-fn actor_can_be_declared_by_the_capability() {
-    let at = at();
-    let contributed = Contribution::new(draft("d-2")).with_actor("person/local");
-    let mut event = contributed
-        .fact
-        .into_event(contributed.actor.unwrap_or(at.principal));
-    event.ts = at.now_ms;
-    assert_eq!(event.actor, "person/local");
     assert_eq!(event.ts, 1_700);
 }
 

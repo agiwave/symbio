@@ -19,9 +19,9 @@
 //!
 //! ## 归属与可见域
 //!
-//! 技能事件的 `actor` 是**认知归属人**（`PRINCIPAL_USER`），不是跑轮主体：它属于
-//! 「人的认知」，召回视图按 `actor == viewer` 过滤时应当看见它。可见域记为
-//! `shared`——技能是固化的可复用经验，跨会话命中是它的设计意图。
+//! 技能事件的归属主体由**事件声明**给定（认知归属人 `person/local`，D-339），不是
+//! 跑轮主体：它属于「人的认知」，召回视图按 `actor == viewer` 过滤时应当看见它。
+//! 可见域记为 `shared`——技能是固化的可复用经验，跨会话命中是它的设计意图。
 //!
 //! 溯源锚是本轮开口格（`user_seq`）：技能**必带溯源**（I2 的「技能溯源 100%」）。
 
@@ -29,7 +29,6 @@ use serde_json::json;
 use symbio_plugin_api::events::{EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG};
 use symbio_plugin_api::{
     truncate_chars, Contribution, Contributor, Entity, Event, FactDraft, Settling, Verb,
-    PRINCIPAL_USER,
 };
 
 use super::decl::{COMPILE_LIMIT, OWNER, SKILL_TAG};
@@ -78,8 +77,7 @@ impl Contributor for SkillCompile {
                 "vis_scope": "shared",
             }),
             produced_by: Some(at.user_seq),
-        })
-        .with_actor(PRINCIPAL_USER)]
+        })]
     }
 }
 
