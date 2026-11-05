@@ -78,7 +78,7 @@ pub const PLUGIN_ID_PERSONA: &str = "persona";
 /// 插件管理与配置入口
 pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 
-/// 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰回路与出口共用的那一个口径）
+/// 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰裁决与出口共用的那一个口径）
 pub const PLUGIN_ID_REPUTATION: &str = "reputation";
 
 /// 会话
@@ -123,7 +123,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "slo", // 时延分层：按派发档折叠时延 / 兜底 / 跨度三列（单片读数 + 跨会话合并）
     "cost", // 成本台账：把事件自带的实测耗时按主体折成一本书（熔断与出口共用的那一个口径）
     "classify", // 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
-    "reputation", // 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰回路与出口共用的那一个口径）
+    "reputation", // 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰裁决与出口共用的那一个口径）
     "explain", // 可解释：把一次决定的理由记成事实（工具），再折成可读的理由台账（视图）
     "forecast", // 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
     "idempotency", // 幂等台账：一个工具、一条 Domain 事实、一张共享视图；同一个键在同一会话里只记一次

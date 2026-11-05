@@ -24,7 +24,7 @@
 //! ## 打分是平凡值，不是架构
 //!
 //! `score = 守约 − 违约`（[`plain_score`]）：换算法改那一处，不加机制。本包交的是**数**，
-//! 判决住在读它的那一侧（`loop` 的淘汰回路问「低到该收回派活权没有」，阈值是它的词汇，
+//! 判决住在读它的那一侧（本包的淘汰贡献者问「低到该收回派活权没有」，阈值是它的词汇，
 //! `DE-043`）。
 //!
 //! ## 自报不进账
@@ -48,7 +48,19 @@ use serde_json::{json, Value};
 use symbio_plugin_api::events::{
     EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OPENED, EVENT_COMMITMENT_RELEASED,
 };
-use symbio_plugin_api::{Event, PluginDeclarations, ViewDecl};
+use symbio_plugin_api::{Entity, Event, EventDecl, PluginDeclarations, Verb, ViewDecl};
+
+/// 淘汰裁决的名字（本包自己写、自己声明；单消费方，不进共享表）。
+///
+/// 归属由声明给定：缺省 `@principal`（`EventDecl::owner`，D-339），由会话装配解析成
+/// 本轮主体。这里是**写方**的声明，所以名字随本包走，不放 `plugin_api::events`。
+pub(crate) const EVENT_VERDICT_ASSERTED: &str = "verdict.asserted";
+
+/// 本包交出的事件格：裁决落 `verdict × asserted`，载荷由 [`crate::elimination`] 给。
+pub(crate) const EVENTS: &[EventDecl] = &[EventDecl::new(
+    EVENT_VERDICT_ASSERTED,
+    (Entity::Verdict, Verb::Asserted),
+)];
 
 /// 对外可读的那条视图。名字经 `PLUGIN.yml` 的 `shared_views:` 投影进
 /// `symbio_plugin_api::view_names`；读方按名字读，不依赖本 crate（`D-221`）。
@@ -156,7 +168,7 @@ symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
-        events: &[],
+        events: EVENTS,
         facts: &[],
         views: VIEWS,
         ports: &[],

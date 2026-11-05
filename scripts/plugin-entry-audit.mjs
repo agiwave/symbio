@@ -1409,6 +1409,9 @@ const LOOP_ALLOWED_CRATE_ROOTS = new Set([
   'stage_events',
   'derived_facts',
   'loop_rows',
+  // 世界行执行体（D-338）：`Ask` 落事实 + `plugin_row` 行的通用执行面。与 `loop_rows`
+  // 同档——`crate::plugin_rows` 指本 crate 内部模块，兄弟插件是独立 crate（D-191）。
+  'plugin_rows',
   'report_exec',
   'tool_dispatch',
   'turn_exec',

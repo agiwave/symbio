@@ -2,15 +2,16 @@
 //!
 //! | 面 | 用在哪 | 谁读 |
 //! |---|---|---|
-//! | 视图（`ViewDecl` + `shared_views`） | `reputation.ledger`：各主体的 `offered` / `kept` / `broken` / `score` | `loop` 的淘汰回路（`derived_facts::record_elimination`）、`session` 的声誉列 |
+//! | 视图（`ViewDecl` + `shared_views`） | `reputation.ledger`：各主体的 `offered` / `kept` / `broken` / `score` | 本包的淘汰贡献者、`session` 的声誉列 |
 //!
 //! 一条折叠、两个读者——搬出 `sdk` 之后，两处读的是**同一条算式**：闸门与出口各自算一遍
 //! 迟早漂移成「淘汰说这一行负分、面板说它守约」（D-044 的同一个病），而错的若是声誉表，
 //! 收回派活权就建立在一份没人复核的数上。
 //!
-//! 它**不产事实**：`commitment.*` 四格的 owner 是 `loop`（它同时是会话统计的读方），
-//! 写方是效果通路与 `agent` 的立约效果。本包只折别人的格，所以 `PLUGIN.yml` 里没有
-//! `shared_events`，`submitted_declarations!` 里 `events` / `facts` 都是空表。
+//! 它**只写一种事实**：`commitment.*` 四格的 owner 仍是 `loop`，写方是效果通路与 `agent`
+//! 的立约效果；本包自己的写面只有淘汰裁决 `verdict.asserted`（[`crate::elimination`]），
+//! 归属按声明 `@principal` 由会话装配解析。`PLUGIN.yml` 里因此仍没有 `shared_events`——
+//! 裁决单消费方，名字随本包走。
 //!
 //! 没有工具、没有路由、没有行为、没有新端口——`kernel` / `sdk` / `loop` / `session` 一行
 //! 都不动，两处读者只是把「类型读 core 的折叠」换成「按名字读 owner 的折叠」（`D-221`）。
@@ -35,4 +36,5 @@
 //! 一个都不列，也不认识任何兄弟插件（`E-009`）。
 
 mod decl;
+mod elimination;
 mod plugin;
