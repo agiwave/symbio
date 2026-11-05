@@ -515,7 +515,10 @@ fn ring_port_of(event_id: &str) -> String {
     let Some(rest) = event_id.strip_prefix("ring:") else {
         return String::new();
     };
-    rest.split(':').nth(1).unwrap_or_default().to_string()
+    // 端口位是 `rest` 的第一个段（`ring:{port}:{id}:…`），不是第二个；`id` 自身可含
+    // `:`，只能从右定界（见 [`ring_key_of`]）。端口名含 `:` 会在注册期被拒绝
+    // （`port_rows` 的保留字符校验，D-336），所以这里没有歧义。
+    rest.split(':').next().unwrap_or_default().to_string()
 }
 
 /// 便利构造：一次驱动用的基上下文（前端只需补工作目录等）。

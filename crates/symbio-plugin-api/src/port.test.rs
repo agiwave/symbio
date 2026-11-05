@@ -90,6 +90,24 @@ fn contract_defaults_are_absent() {
     assert_eq!(p.capabilities(), PortCapabilities::default());
 }
 
+/// 端口名种进事件 id 之前必须过校验：保留字符（`:`）**注册期拒绝**，不转义。
+///
+/// 反例是真的会发生的那种：`model:assist` 会被事件 id 的 `:` 定界截成 `model`，
+/// 事实键与债键对不上（D-336）。
+#[test]
+#[should_panic(expected = "保留字符")]
+fn port_name_with_colon_is_rejected_at_registration() {
+    let _ = port_rows(&provider(&["model:assist"], "fixture-assist"));
+}
+
+/// 正例：普通端口名照常注册，行名照旧带前缀。
+#[test]
+fn port_name_without_reserved_chars_registers() {
+    let rows = port_rows(&provider(&["assist", "model"], "fixture-assist"));
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].name(), "<port:assist>:fixture-assist");
+}
+
 /// 单族（D-299）：全部端口共用一个 `multi` 族——加端口不加族，端口级分组只靠
 /// 行名前缀。端口集开放（`DE-047` I-6.7）：族对它不设闸。
 #[test]

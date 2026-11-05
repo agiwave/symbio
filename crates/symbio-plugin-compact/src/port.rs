@@ -1,35 +1,37 @@
-//! `compact` 端口的执行面：读本轮终答的水位，超阈值时落一条压缩快照。
+//! `compact` 端口的执行面：**读回摘要，落压缩快照**（D-336 的第二行）。
 //!
-//! ## 水位从哪来
+//! 摘要不由本端口取——那是 `model.assist` 的事（执行体归端口提供方）。本端口只做
+//! 世界侧的那一半：
 //!
-//! 终答载荷的 `context` 格（`port.rs` 模型侧写入）：
-//! `request_tokens`（provider 实测输入用量）/ `limit_tokens`（本 provider 的有效
-//! 上下文上限）。缺 `request_tokens` ⇒ 按历史事实估算已用量；缺 `limit_tokens`
-//! ⇒ 取最近一条带该格的事实（上限是 provider 属性，不随轮次变）；都没有 ⇒
-//! 没有可信水位，**不做**（返回成功、不落事实，环照常还债）。
+//! 1. 从读面找本轮那笔 `model.assist` 的 `response`（`port` + `final_id` 双匹配），
+//!    取回 [`AssistReply::text`]；
+//! 2. 落 `session.consolidated`，折叠叶正文 = 摘要。
 //!
-//! ## 未超阈值不落痕
+//! ## 欠不欠由债源决定，不在本执行体判
 //!
-//! 「没压」不是一条领域事实，只是没做。执行体返回 `PortOutcome::ok()`。
+//! 水位（阈值 0.7 × provider 上限）在 `debt.rs` 申报时判：没超就不欠这两行，本执行体
+//! 压根不会被派发。执行体拿不到可信摘要（`model.assist` 失败 / 空转写）⇒ 返回成功、
+//! 不落事实——「没压」不是一条领域事实。
 //!
 //! ## 压出来的快照
 //!
 //! 载荷 `{ "messages": [ChatNode…] }`：压缩节点是折叠叶
-//! （`NodeKind::Notice` + `style_tag = compression`）＋本轮的助手终答。重建面
-//! 从这份列表开始折，被压掉的前缀不再参与。
+//! （`NodeKind::Notice` + `style_tag = compression`，正文就是摘要）＋本轮的助手终答。
+//! 重建面从这份列表开始折，被压掉的前缀不再参与。
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use symbio_plugin_api::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
+    AssistReply, ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
 };
-use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::port::{
     PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome, PortProvider,
 };
-use symbio_plugin_api::{Entity, FactDraft, Verb};
+use symbio_plugin_api::{Entity, FactDraft, Verb, EVENT_RESPONSE};
+
+use crate::debt::ASSIST_PORT;
 
 /// 端口名（唯一来源：本插件）。
 pub(crate) const COMPACT_PORT: &str = "compact";
@@ -38,12 +40,6 @@ pub(crate) const COMPACT_PORT: &str = "compact";
 /// `crates/symbio-plugin-session/src/declarations.rs:27`。本 crate 只写、不声明，
 /// 也不往 `plugin-api` 加常量——owner 与写方分离是已知项（待 E-009 / CS-007 判）。
 pub(crate) const SESSION_CONSOLIDATED: &str = "session.consolidated";
-
-/// 触发阈值（水位占比）。**住插件内**：不下发 `session.config`，不进契约。
-const COMPACT_AT: f64 = 0.7;
-
-/// 估算口径：字符数 / 每 token 字符数（保守偏小，宁可少压）。
-const CHARS_PER_TOKEN: usize = 4;
 
 pub(crate) struct CompactPort;
 
@@ -72,13 +68,11 @@ impl PortExecutor for CompactExecutor {
             return PortOutcome::ok();
         };
         let facts = reader.facts();
-        let Some((used, limit)) = watermark(&facts, &final_id) else {
+        let Some(summary) = summary_of(&facts, &final_id) else {
+            // 摘要那笔没交回正文（失败 / 空转写）：不拿占位冒充摘要。
             return PortOutcome::ok();
         };
-        if limit == 0 || (used as f64) < limit as f64 * COMPACT_AT {
-            return PortOutcome::ok();
-        }
-        let messages = snapshot(&facts, &final_id);
+        let messages = snapshot(&facts, &final_id, &summary);
         if messages.is_empty() {
             return PortOutcome::ok();
         }
@@ -104,44 +98,27 @@ fn str_of(payload: &Value, key: &str) -> String {
         .to_string()
 }
 
-/// 本轮的水位：`(已用, 上限)`；缺可信值 ⇒ `None`（不做）。
-fn watermark(facts: &[PortFact], final_id: &str) -> Option<(u64, u64)> {
-    let limit = facts
+/// 本轮 `model.assist` 交回的摘要正文：按端口 + 终答身份双匹配，取最后一条。
+fn summary_of(facts: &[PortFact], final_id: &str) -> Option<String> {
+    let fact = facts
         .iter()
         .rev()
-        .filter(|f| f.kind == EVENT_CHAT_ASSISTANT_FINAL)
-        .find_map(|f| u64_of_context(f, "limit_tokens"));
-    let limit = limit?;
-    let used = facts
-        .iter()
-        .find(|f| f.id == final_id)
-        .and_then(|f| u64_of_context(f, "request_tokens"))
-        .unwrap_or_else(|| estimate(facts));
-    Some((used, limit))
+        .find(|f| {
+            f.port == ASSIST_PORT
+                && f.kind == EVENT_RESPONSE
+                && f.payload.get("final_id").and_then(Value::as_str) == Some(final_id)
+        })?;
+    let reply: AssistReply = serde_json::from_value(fact.payload.clone()).ok()?;
+    (!reply.text.is_empty()).then_some(reply.text)
 }
 
-fn u64_of_context(fact: &PortFact, key: &str) -> Option<u64> {
-    fact.payload.get("context")?.get(key)?.as_u64()
-}
-
-/// 缺实测用量时按历史事实估算：消息正文总字符数 / 每 token 字符数。
-fn estimate(facts: &[PortFact]) -> u64 {
-    let chars: usize = facts
-        .iter()
-        .filter(|f| f.kind == EVENT_USER_MESSAGE || f.kind == EVENT_CHAT_ASSISTANT_FINAL)
-        .filter_map(|f| f.payload.get("text").and_then(Value::as_str))
-        .map(|text| text.chars().count())
-        .sum();
-    (chars / CHARS_PER_TOKEN) as u64
-}
-
-/// 压缩后的整份消息列表：折叠叶（压缩记录）+ 本轮助手终答。
-fn snapshot(facts: &[PortFact], final_id: &str) -> Vec<Value> {
+/// 压缩后的整份消息列表：折叠叶（正文 = 摘要）+ 本轮助手终答。
+fn snapshot(facts: &[PortFact], final_id: &str, summary: &str) -> Vec<Value> {
     let mut out = vec![node(
         ChatNode {
             id: format!("compression:{final_id}"),
             msg_type: Some(NodeKind::Notice),
-            content: Some(MessageContent::Text("上下文已压缩".to_string())),
+            content: Some(MessageContent::Text(summary.to_string())),
             status: Some(NodeStatus::Completed),
             ..Default::default()
         }

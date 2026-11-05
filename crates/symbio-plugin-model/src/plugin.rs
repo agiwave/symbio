@@ -904,8 +904,14 @@ impl Plugin for ModelPlugin {
                 .find(|p| active_id.as_deref() == Some(p.provider_id()))
                 .cloned()
             {
-                let port = Arc::new(super::port::ModelPort::new(active, available));
+                let port = Arc::new(super::port::ModelPort::new(active.clone(), available));
                 for row in port.rows() {
+                    tool_visitor.put(row).await;
+                }
+                // 一次性问答（D-336）：同一生效者，独立端口成员 `model.assist`；
+                // 提问方的指令随行载荷进，本插件不认识它的世界语义。
+                let assist = Arc::new(super::assist::AssistPort::new(active));
+                for row in assist.rows() {
                     tool_visitor.put(row).await;
                 }
             }

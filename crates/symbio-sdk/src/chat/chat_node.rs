@@ -8,6 +8,35 @@ use serde_json::Value;
 
 pub use symbio_kernel::chat::chat_node::*;
 
+// ==================== 一次性问答的共享载荷（D-336） ====================
+//
+// 只在端口之间传递的**词汇形状**，不是机制、也不是会话历史。与 [`ChatNode`] 同层：
+// 经 `symbio_sdk::chat::chat_node` 的既有转发，插件在 `symbio_plugin_api::chat_node`
+// 就能拿到，门面白名单不必为它新增一条（HS-002 不动）。
+//
+// 与「对话轮」的区分是判据而非命名偏好：对话轮（`Request` / `round_trip` 的
+// `ChatNode` 历史）参与会话、可带工具、留历史；一次性问答只发一轮、不带工具、
+// 不留历史（[D-336](../../../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决")）。
+
+/// 一次性问答的请求（`model.assist` 的行载荷）。
+///
+/// `system` 是提问方自己的指令（谁欠这一行谁给它），`user` 是待处理的正文；
+/// `user` 为空时由执行体从事实读面拼出本轮转写——载荷只带身份，不带正文。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AssistRequest {
+    #[serde(default)]
+    pub system: String,
+    #[serde(default)]
+    pub user: String,
+}
+
+/// 一次性问答的回复（`model.assist` 的应收载荷）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AssistReply {
+    #[serde(default)]
+    pub text: String,
+}
+
 // ==================== 转写地址与节点投影 ====================
 //
 // 下面两项从 `crates/symbio-plugin-session` 上移到 core：它们描述的是**跨插件的契约**，

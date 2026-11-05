@@ -341,16 +341,37 @@ pub fn port_row_name(port: &str, provider_id: &str) -> String {
     format!("<port:{port}>:{provider_id}")
 }
 
+/// 端口名的保留字符：环事件 id 的分隔符。
+///
+/// 事件 id 形如 `ring:{port}:{id}:{attempt}:{kind}`，端口位是首个字段；端口名一旦
+/// 含 `:`，解析会把端口位截断（`model:assist` 会被读成 `model`），事实键与债键对不上。
+/// 这里 **fail-closed**：注册期直接拒绝，不转义、不猜（D-336「已知编码风险」）。
+const PORT_NAME_RESERVED: &[char] = &[':'];
+
+/// 端口名校验：种进事件 id 之前就把保留字符挡在注册期。
+fn check_port_name(port: &str) {
+    if let Some(ch) = port.chars().find(|ch| PORT_NAME_RESERVED.contains(ch)) {
+        panic!(
+            "端口名 {port:?} 含有环事件 id 的保留字符 {ch:?}，端口注册失败。\
+             事件 id 是 `ring:{{port}}:{{id}}:{{attempt}}:{{kind}}`，端口位按 `:` 定界；\
+             命名端口时请避开保留集 {PORT_NAME_RESERVED:?}（D-336）。"
+        );
+    }
+}
+
 /// 提供者行：本提供者申报的**每个端口**一行（`multi` 族，`active = false`，不参与
 /// 表侧降位——端口级唯一由读数与装载期检查裁，D-299）。
 ///
 /// 一个 provider 申报 N 个端口就产生 N 行（`DE-047` I-6.1）：端口身份是数据，行数随
 /// 数据走；新增端口只改提供者的 `ports()` 返回值，不改注册面、不改族。
+///
+/// 端口名先过 [`check_port_name`]（fail-closed）；非法端口名在这里就注册失败。
 pub fn port_rows(provider: &Arc<dyn PortProvider>) -> Vec<CapabilityRow> {
     provider
         .ports()
         .iter()
         .map(|port| {
+            check_port_name(port);
             CapabilityRow::new(
                 PORT_FAMILY,
                 port_row_name(port, provider.provider_id()),
