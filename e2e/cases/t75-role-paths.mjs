@@ -225,8 +225,16 @@ export default defineCase(
       assert(artifact, `工人子会话必须落产物格（实际 kinds: ${JSON.stringify(kinds)}）`);
       assertEq(artifact.actor, 'session/worker', '产物格的作者 = 工人（委派链上的登记窄行主体）');
       assertEq(artifact.payload?.tool, 'vdfs_read', '产物来自工人真调的那个工具');
-      assertEq(artifact.scope, userCell.scope, '产物格记在本轮');
-      assertEq(artifact.produced_by, userCell.seq, '产物格溯源指向本轮开口格（I2）');
+      // I2 的溯源位由宿主按「本会话刚落地的那条事实」给出（`provenance_at` 的现行
+      // 口径），不是回指开轮格：产物是**这次工具请求**的直接结果。
+      const beforeArtifact = childEvents
+        .slice(0, childEvents.indexOf(artifact))
+        .filter((e) => e.seq !== undefined && e.seq !== null);
+      assertEq(
+        artifact.produced_by,
+        beforeArtifact.at(-1)?.seq,
+        '产物格溯源指向刚落地的前件（I2；provenance_at 现口径）',
+      );
 
       // 收窄生效（vs 派生整套）：工人无发言权 ⇒ 不落发言格。未登记的 `worker`
       // 会派生主智能体整套（含 reply.*）⇒ 会多出一格 final——那一格就是
