@@ -6,7 +6,7 @@
 // - mock 与 CLI 全部走真实边界：HTTP（SSE）、stdio（JSON-RPC）、磁盘（homedir）。
 // - 每个用例独立的临时 homedir + 独立 mock 实例，互不串扰。
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, statSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
