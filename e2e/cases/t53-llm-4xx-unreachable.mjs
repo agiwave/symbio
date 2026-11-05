@@ -63,12 +63,12 @@ export default defineCase('T53 LLM 不可用：401 错误态与起点不可达�
   let api = null;
   try {
     // ① 401：不可重试的错误态——立刻给用户可见的失败。
-    const r401 = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '凭证测试', provider: PROVIDER_ID, session: 'e2e-t53', timeoutMs: 60_000 });
+    const r401 = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '凭证测试', provider: PROVIDER_ID, session: 'e2e-t53', budget: 60_000, reason: '测试 4xx 退避后的真实等待' });
     assert(r401.code !== 0, `401 轮应失败退出（实际 code=${r401.code}）`);
     assert(/401|凭证|密钥|API|错误|失败/i.test(r401.stderr), `401 失败应可见（stderr 头部: ${r401.stderr.slice(0, 300)}）`);
 
     // ② 起点不可达：连接级失败——同样可见并收敛。
-    const rDead = runCli({ homedir: hdDead.homedir, workdir: hdDead.workdir, message: '起点不可达测试', provider: PROVIDER_ID, session: 'e2e-t53-dead', timeoutMs: 60_000 });
+    const rDead = runCli({ homedir: hdDead.homedir, workdir: hdDead.workdir, message: '起点不可达测试', provider: PROVIDER_ID, session: 'e2e-t53-dead', budget: 60_000, reason: '测试 4xx 退避后的真实等待' });
     assert(rDead.code !== 0, `不可达轮应失败退出（实际 code=${rDead.code}）`);
     assert(/错误|失败|error|connect|拒绝|不可达/i.test(rDead.stderr), `连接失败应可见（stderr 头部: ${rDead.stderr.slice(0, 300)}）`);
 
@@ -85,7 +85,7 @@ export default defineCase('T53 LLM 不可用：401 错误态与起点不可达�
     );
 
     // ④ 恢复轮：服务正常后，同一会话照常工作。
-    const rOk = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '恢复测试', provider: PROVIDER_ID, session: 'e2e-t53', timeoutMs: 90_000 });
+    const rOk = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '恢复测试', provider: PROVIDER_ID, session: 'e2e-t53', budget: 90_000, reason: '测试恢复路径的真实等待' });
     assert(rOk.code === 0, `恢复轮应正常完成（code=${rOk.code}, stderr: ${rOk.stderr.slice(0, 300)}）`);
     const texts = (await readSessionMessages(api, 'e2e-t53') ?? []).map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
     assert(texts.includes('服务恢复后的正常回答'), '恢复轮回复应在转写里');

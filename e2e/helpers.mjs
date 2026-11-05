@@ -83,31 +83,58 @@ export const E2E_PROFILE = PROFILE;
 const PROFILE_WAIT_MS = { mock: 10_000, real: null };
 /** 整条用例的等待预算（mock 20s；real 不限，沿用各调用点原值）。 */
 export const CASE_BUDGET_MS = PROFILE === 'mock' ? 20_000 : null;
+/** override 出现时整例预算放宽到 150s：单次 override 封顶 120s，余量给启动/收尾。 */
+const OVERRIDE_CASE_BUDGET_MS = 150_000;
+const OVERRIDE_MAX_MS = 120_000;
 const CASE_T0 = Date.now();
 let waitSeq = 0;
+/** 本用例出现过的最大 override（`{ budget, reason }`）；没有就是 null。 */
+let caseOverride = null;
 
 /** 把某个调用点声明的等待上限折算成本档位的单次上限（real 档原样返回）。 */
 export function profileWait(ms) {
   return PROFILE_WAIT_MS[PROFILE] ?? ms;
 }
 
-/** 本档位下，这一次等待还能用多久（受整例预算约束）。 */
-function remainingBudget() {
-  return CASE_BUDGET_MS == null ? Infinity : Math.max(0, CASE_BUDGET_MS - (Date.now() - CASE_T0));
+/**
+ * 调用点显式声明预算（豁免 mock 档上限）：`budget` + `reason` 必须成对出现。
+ * 封顶 120s——超过就是用例的设计问题，当场报，不许自行加码。
+ */
+function declareBudget({ budget, reason }) {
+  if (!reason) throw new Error(`override 预算缺少 reason：budget=${budget}`);
+  if (budget > OVERRIDE_MAX_MS) {
+    throw new Error(`override 预算 ${budget}ms 超过封顶 ${OVERRIDE_MAX_MS}ms（${reason}）——先回来报，不许加码`);
+  }
+  if (!caseOverride || budget > caseOverride.budget) caseOverride = { budget, reason };
+  return { budget, reason };
 }
 
-/** 超时文案的公共尾巴：把「等了几次、等了多久」摊开，避免只报一个「失败」。 */
-function waitDetail(seq, waited, polls) {
-  const budget =
-    CASE_BUDGET_MS == null ? '整例预算不限' : `整例预算 ${CASE_BUDGET_MS}ms`;
-  return `第 ${seq} 次等待；已等 ${waited}ms；轮询 ${polls} 次；${budget}；profile=${PROFILE}`;
+/** 整例预算：有 override 时取放宽值，否则取档位值。 */
+function caseBudget() {
+  if (CASE_BUDGET_MS == null) return Infinity;
+  return caseOverride ? Math.max(CASE_BUDGET_MS, OVERRIDE_CASE_BUDGET_MS) : CASE_BUDGET_MS;
+}
+
+/** 这一次等待还能用多久（受整例预算约束）。 */
+function remainingBudget() {
+  const cap = caseBudget();
+  return cap === Infinity ? Infinity : Math.max(0, cap - (Date.now() - CASE_T0));
+}
+
+/** 超时文案的公共尾巴：把「等了几次、等了多久、预算来自哪」摊开。 */
+function waitDetail(seq, waited, polls, override, perWait) {
+  const budget = override
+    ? `budget=override(${override.budget}, ${override.reason})`
+    : `budget=${PROFILE}(${perWait})`;
+  return `第 ${seq} 次等待；已等 ${waited}ms；轮询 ${polls} 次；${budget}；整例预算 ${caseBudget()}ms；profile=${PROFILE}`;
 }
 
 // ---------- 进程等待辅助 ----------
-function waitFor(fn, { timeoutMs = 15_000, what = 'condition' } = {}) {
+function waitFor(fn, { timeoutMs = 15_000, what = 'condition', budget = null, reason = null } = {}) {
   const seq = ++waitSeq;
-  const perWait = profileWait(timeoutMs);
-  const limit = Math.min(perWait, remainingBudget());
+  const override = budget == null ? null : declareBudget({ budget, reason });
+  const perWait = override ? override.budget : profileWait(timeoutMs);
+  const limit = override ? perWait : Math.min(perWait, remainingBudget());
   const started = Date.now();
   const deadline = started + limit;
   let polls = 0;
@@ -120,7 +147,7 @@ function waitFor(fn, { timeoutMs = 15_000, what = 'condition' } = {}) {
         /* 重试 */
       }
       if (Date.now() > deadline) {
-        return rej(new Error(`等待「${what}」超时（${waitDetail(seq, Date.now() - started, polls)}；单次上限 ${perWait}ms）`));
+        return rej(new Error(`等待「${what}」超时（${waitDetail(seq, Date.now() - started, polls, override, perWait)}）`));
       }
       setTimeout(tick, 100);
     };
@@ -361,10 +388,11 @@ export function cleanupHomedir(hd) {
  * `env` 是**追加**给 CLI 的环境变量（如 `SYMBIO_ROUTE_LOG=1` 打开路由留痕），
  * 不是替换——被测系统仍然继承本进程环境。
  */
-export function runCli({ homedir, workdir, message, provider = null, session = null, agent = null, mode = 'auto', timeoutMs = 120_000, stdinText = null, env = null }) {
+export function runCli({ homedir, workdir, message, provider = null, session = null, agent = null, mode = 'auto', timeoutMs = 120_000, budget = null, reason = null, stdinText = null, env = null }) {
   const seq = ++waitSeq;
-  const perWait = profileWait(timeoutMs);
-  const limit = Math.min(perWait, remainingBudget());
+  const override = budget == null ? null : declareBudget({ budget, reason });
+  const perWait = override ? override.budget : profileWait(timeoutMs);
+  const limit = override ? perWait : Math.min(perWait, remainingBudget());
   const started = Date.now();
   // `cliExe()` 会保证拿到的是「对应当前源码」的那一份（指纹不符则先重建）。
   // 二进制仍然缺失要**当场说清楚**：否则表现为 `code = -1` + 空 stderr，
@@ -397,7 +425,7 @@ export function runCli({ homedir, workdir, message, provider = null, session = n
   if (r.error?.code === 'ETIMEDOUT') {
     const tail = (s) => String(s ?? '').trim().split('\n').slice(-6).join('\n      ');
     throw new Error(
-      `等待「CLI 完成本轮（模型调用 + 工具往返）」超时（${waitDetail(seq, Date.now() - started, 1)}；单次上限 ${perWait}ms；` +
+      `等待「CLI 完成本轮（模型调用 + 工具往返）」超时（${waitDetail(seq, Date.now() - started, 1, override, perWait)}；` +
         `message=${JSON.stringify(message ?? '')}）\n` +
         `      stderr 末尾：\n      ${tail(r.stderr) || '（空）'}`,
     );

@@ -38,9 +38,9 @@ import { orderForStart, loadTimes, recordTimes, suggestConcurrency } from '../sc
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 
-/** 单例硬上限（毫秒）：mock 档 20s（整例预算，见 helpers 的 `CASE_BUDGET_MS`），
- * real 档沿用 180s，只兜「真挂死」。 */
-const CASE_TIMEOUT_MS = process.env.E2E_PROFILE === 'real' ? 180_000 : 20_000;
+/** 单例硬上限（毫秒）：mock 档 150s 只兜 override（单次封顶 120s + 余量）；
+ * 普通用例的 20s 整例预算由 helpers 自己抛（见 `CASE_BUDGET_MS`）。real 档沿用 180s。 */
+const CASE_TIMEOUT_MS = process.env.E2E_PROFILE === 'real' ? 180_000 : 150_000;
 
 // ---------- 子进程自执行：`node cases/xxx.mjs` 直接跑该用例 ----------
 // 用例文件被 import 时只做定义（defineCase 不执行）；直接运行时由 `cases/_selfrun.mjs`
