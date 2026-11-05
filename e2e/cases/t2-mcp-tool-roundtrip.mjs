@@ -31,7 +31,7 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
       match: '帮我回显',
       toolCalls: [{ id: 'call_1', name: 'mcp__mockserv__echo', arguments: { text: 'mock 回显内容' } }],
     },
-    { id: 'after-echo', afterTool: true, content: '工具调用完成，回显成功。' },
+    { id: 'after-echo', afterTool: true, content: '工具调用完成，回显成功：mock 回显内容。' },
   ]).start();
   // 本用例的主题与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
   const GATEWAY_PORT = nextPort();
@@ -61,7 +61,12 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
     const r = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '帮我回显一下', provider: PROVIDER_ID, session: 'e2e-t2' });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
     assert(r.stdout.includes('工具调用完成，回显成功'), `stdout 应为收尾正文（实际: ${JSON.stringify(r.stdout)}）`);
-    assert(r.stderr.includes('调用工具'), `stderr 应播报工具调用（实际: ${r.stderr.slice(0, 400)}）`);
+    // 工具真的被调用、且结果进了用户看到的答复：**从用户角度**测能力，不绑引擎/日志措辞
+    // （「stderr 播报调用工具」是 v1 遗物，v2 的工具往返以事实表达，不该拿它当判据）。
+    assert(
+      r.stdout.includes('mock 回显内容'),
+      `收尾正文应体现工具返回的关键内容（实际: ${JSON.stringify(r.stdout)}）`,
+    );
 
     // 配置只加载一次：build 的异步预热与首次请求都经 `ensure_loaded`（互斥 + 完成标志），
     // 「预热直调 load_from_storage」会让两条入口各加载一次——两次磁盘读 + 两行重复日志。
