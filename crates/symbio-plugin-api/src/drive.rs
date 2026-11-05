@@ -14,7 +14,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use symbio_kernel::capability::{CapabilityFamily, CapabilityRow};
 
-use crate::port::{PortExecutor, PortFactEmit, PortFactReader, PortReply};
+use crate::port::{PortExecHandles, PortExecutor, PortFactEmit, PortFactReader, PortReply};
 
 /// 环协议里「应答落账」的事实名（机制词汇，不是世界词）。
 pub const DRIVE_CLOSING_OK: &str = "response";
@@ -224,5 +224,11 @@ pub trait DriveSupport: Send + Sync {
     fn reader(&self, scope: u64) -> Option<Arc<dyn PortFactReader>> {
         let _ = scope;
         None
+    }
+
+    /// 交给执行体的不透明句柄束（宿主实现）。环只**原样转交**，不读取其中任何字段。
+    fn exec_handles(&self, scope: u64) -> PortExecHandles {
+        let _ = scope;
+        PortExecHandles::default()
     }
 }

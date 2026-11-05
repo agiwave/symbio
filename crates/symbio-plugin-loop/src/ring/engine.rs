@@ -11,10 +11,10 @@ use serde_json::{json, Value};
 use symbio_plugin_api::drive::Unless;
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
-    PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortFactReader, PortFactWriter,
-    PortInput, PortOutcome,
+    PortErrorClass, PortExecContext, PortExecHandles, PortExecutor, PortFactEmit, PortFactReader,
+    PortFactWriter, PortInput, PortOutcome,
 };
-use symbio_plugin_api::{ExecAbortSignal, ExecEventSink};
+use symbio_plugin_api::ExecAbortSignal;
 
 use crate::ring::facts::{DebtKey, Fact, FactKind, FactView};
 use crate::ring::table::{DebtRow, DebtSource};
@@ -49,6 +49,11 @@ pub(crate) trait DriveCtx: Send + Sync {
     /// 交给执行体的事实读面（宿主实现）。环只**原样转交**，不调用、不解释。
     fn fact_reader(&self) -> Option<Arc<dyn PortFactReader>> {
         None
+    }
+
+    /// 交给执行体的不透明句柄束（宿主实现）。环只**原样转交**，不读取其中任何字段。
+    fn exec_handles(&self) -> PortExecHandles {
+        PortExecHandles::default()
     }
 }
 
@@ -246,19 +251,20 @@ async fn dispatch(ctx: &dyn DriveCtx, scope: u64, row: DebtRow, attempt: u32, no
     };
 
     let writer = Arc::new(CollectingWriter::new(ctx.outlet()));
+    let handles = ctx.exec_handles();
     let exec = PortExecContext {
         deadline_ms: Some(now_ms.saturating_add(row.lease_ms)),
         abort: ExecAbortSignal::new(),
         idempotency_key: format!("{}:{}:{}:{}", key.scope, row.port, row.id, attempt),
-        sink: ExecEventSink::silent(),
+        sink: handles.sink,
         emit: PortFactEmit::new(writer.clone()),
-        ctx: None,
+        ctx: handles.ctx,
         subject: key.scope,
         group: String::new(),
         origin: None,
         permitted: true,
         deny_reason: String::new(),
-        scratch_dir: None,
+        scratch_dir: handles.scratch_dir,
         reader: ctx.fact_reader(),
     };
     let outcome = executor

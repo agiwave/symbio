@@ -60,7 +60,9 @@ pub async fn drive_on_new_fact(
     };
     let scope = fact.scope;
 
-    let ctx = PluginSimpleRequest::new(None, None);
+    // 父句柄交给执行体：工具 / 钩子按「调用方插件」路由，装配层给的是根插件
+    // （环不碰这个字段，只原样转交）。
+    let ctx = PluginSimpleRequest::new(Some(Arc::downgrade(root)), None);
     ctx.set(WORKDIR, world.workdir.to_string());
     // 装配层 open 的同一句柄：宿主与插件上下文共享它，插件不自建 store。
     ctx.set(FACT_SOURCE, Arc::clone(&world.facts));

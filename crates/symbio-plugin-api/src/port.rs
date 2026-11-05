@@ -151,6 +151,30 @@ pub struct PortExecContext {
     pub reader: Option<Arc<dyn PortFactReader>>,
 }
 
+/// 宿主交给执行体的**不透明句柄束**：环只原样转交，不读取、不解释其中任何字段。
+///
+/// 这三个值不是环的知识——`ctx` 里装什么、`scratch_dir` 指向哪里、`sink` 把帧送去
+/// 何处，都由宿主决定、由执行体自用（`D-316`）。环只保证「宿主给的，原样到达」。
+#[derive(Clone)]
+pub struct PortExecHandles {
+    /// 调用方上下文（提供者据此读能力表 / 上游）；`None` = 无。
+    pub ctx: Option<Arc<dyn PluginInvokeRequest>>,
+    /// 宿主为本轮准备的可写目录；`None` = 无。
+    pub scratch_dir: Option<PathBuf>,
+    /// 增量出口（宿主决定去向）。
+    pub sink: ExecEventSink,
+}
+
+impl Default for PortExecHandles {
+    fn default() -> Self {
+        Self {
+            ctx: None,
+            scratch_dir: None,
+            sink: ExecEventSink::silent(),
+        }
+    }
+}
+
 /// provider 执行一笔债期间追加事实草稿的通用出口（`DE-048` D-305 裁决一）。
 ///
 /// 形状与 [`ExecEventSink`] 同族：**生产者只写，去处由宿主决定**。命名的「事实」

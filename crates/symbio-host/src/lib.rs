@@ -7,6 +7,7 @@
 //! `idle` 是机制事实（scope 无未还债），不是业务事实；收束谓词由读方自算，宿主不落业务事实。
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -24,9 +25,10 @@ use symbio_plugin_api::drive::{
 };
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::port::{
-    PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter, PortPayload, PORT_FAMILY,
+    PortExecHandles, PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter,
+    PortPayload, PORT_FAMILY,
 };
-use symbio_plugin_api::FactDraft;
+use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::capability::CAPABILITY_VISITOR;
 use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_ID, WORKDIR};
 use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
@@ -154,6 +156,12 @@ impl Host {
         provider: Option<&str>,
     ) -> Result<DriveReport, String> {
         let gathered = self.gather(base, session_id, provider).await?;
+        let workdir = base.get(WORKDIR).unwrap_or_default();
+        let handles = PortExecHandles {
+            ctx: Some(Arc::clone(&gathered.ctx)),
+            scratch_dir: (!workdir.is_empty()).then(|| PathBuf::from(&workdir)),
+            sink: ExecEventSink::silent(),
+        };
         let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
             facts: Arc::clone(&self.facts),
             source: Arc::clone(&self.source),
@@ -163,6 +171,7 @@ impl Host {
             provider: provider.map(str::to_string),
             started: self.started,
             concurrency: self.concurrency,
+            handles,
         });
         let report = gathered.runner.drive(support, scope).await?;
 
@@ -200,7 +209,7 @@ impl Host {
         symbio_sdk::capability::capability_init_error_bucket(&ctx);
 
         Arc::clone(&self.root)
-            .traverse(String::new(), ctx)
+            .traverse(String::new(), Arc::clone(&ctx))
             .await
             .map_err(|e| format!("能力收集失败: {e:?}"))?;
 
@@ -241,6 +250,7 @@ impl Host {
             executors,
             sources,
             runner,
+            ctx,
         })
     }
 }
@@ -249,6 +259,8 @@ struct Gathered {
     executors: HashMap<String, Arc<dyn PortExecutor>>,
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
     runner: Arc<dyn DriveRunner>,
+    /// 装配好的调用方上下文（含能力表）；原样交给执行体，宿主不解释。
+    ctx: Arc<dyn PluginInvokeRequest>,
 }
 
 /// 宿主实现的中性能力束：事实读写、执行体解析、存在性、时钟与限额。
@@ -261,6 +273,8 @@ struct HostDriveSupport {
     provider: Option<String>,
     started: Instant,
     concurrency: usize,
+    /// 交给执行体的不透明句柄束（宿主装配，环原样转交）。
+    handles: PortExecHandles,
 }
 
 impl DriveSupport for HostDriveSupport {
@@ -365,6 +379,11 @@ impl DriveSupport for HostDriveSupport {
             source: Arc::clone(&self.source),
             scope,
         }))
+    }
+
+    /// 交给执行体的不透明句柄束（宿主装配；环只转交）。
+    fn exec_handles(&self, _scope: u64) -> PortExecHandles {
+        self.handles.clone()
     }
 }
 

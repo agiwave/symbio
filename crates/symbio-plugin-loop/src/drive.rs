@@ -11,7 +11,7 @@ use std::sync::Arc;
 use symbio_plugin_api::drive::{
     DriveFact, DriveOutcome, DriveReport, DriveRow, DriveRunner, DriveSupport,
 };
-use symbio_plugin_api::port::{PortExecutor, PortFactEmit, PortFactReader};
+use symbio_plugin_api::port::{PortExecHandles, PortExecutor, PortFactEmit, PortFactReader};
 
 use crate::ring::{drive, DebtKey, DebtRow, DebtSource, DriveCtx, Fact, FactKind, FactView};
 
@@ -114,6 +114,10 @@ impl DriveCtx for SupportCtx {
 
     fn fact_reader(&self) -> Option<Arc<dyn PortFactReader>> {
         self.support.reader(self.scope)
+    }
+
+    fn exec_handles(&self) -> PortExecHandles {
+        self.support.exec_handles(self.scope)
     }
 }
 
