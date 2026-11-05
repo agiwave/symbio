@@ -71,11 +71,11 @@ impl FactSource for SessionFactSource {
         // 本会话主体（`session/main` / `session/arbiter` / `session/worker` 由此得到）。
         // 载体缺失（metadata 读不到）就显式失败——不回落主体；载体在而值为空是
         // 「会话确实没有绑定智能体」，其主体定义就是 `session/main`。
-        let actor = if actor == symbio_plugin_api::OWNER_PRINCIPAL {
+        let actor = if actor == symbio_kernel::event::OWNER_PRINCIPAL {
             let Some(agent_id) = self.agent_id.as_deref() else {
                 return Err(format!(
                     "事实归属为 `{}`，但会话主体不可用（metadata 取不到 agent_id；拒绝回落主体）",
-                    symbio_plugin_api::OWNER_PRINCIPAL
+                    symbio_kernel::event::OWNER_PRINCIPAL
                 ));
             };
             symbio_plugin_api::principal_of(Some(agent_id.trim()))

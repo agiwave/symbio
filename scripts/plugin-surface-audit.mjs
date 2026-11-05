@@ -127,7 +127,9 @@ export const SDK_BASELINE = 105
 // 137 → 138（`D-319`）：model 执行体组装 assistant 应答要声明 `tool_calls` 的配对键，
 // 需要 `PromptToolCall` 这一值类型；插件不得直依赖 `symbio_kernel`（HS-001），只能经
 // 门面转出。消费方是 `symbio-plugin-model` 的执行体。
-export const GRAMMAR_BASELINE = 138
+// 138 → 137（`D-339`）：`OWNER_PRINCIPAL` 在扩展层零消费（唯一引用方 session 属控制面），
+// 按 HS-003 从门面删除；控制面改从 `symbio_kernel::event` 取，棘轮随实测下调。
+export const GRAMMAR_BASELINE = 137
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。
