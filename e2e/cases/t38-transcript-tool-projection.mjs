@@ -157,10 +157,6 @@ export default defineCase(
           .filter((m) => m.role === role)
           .map((m) => (typeof m.content === 'string' ? m.content : ''));
       const toolTexts = (i) => textsOf(i, 'tool');
-      // 跨轮工具结果在请求里是 **assistant 消息**，不是 `role: tool`——
-      // 见 `provider_adapter` 里的降级与理由（协议要求 tool 消息配对**本次**请求
-      // 的 tool_calls，跨轮的调用在上一轮，于是那条消息会被清洗段当孤儿丢掉）。
-      const crossTurnTexts = (i) => textsOf(i, 'assistant');
       const saw = (i, role, needle) => textsOf(i, role).some((t) => t.includes(needle));
 
       // 反向：轮 0 首轮请求里不该有工具结果（那时还没执行）。
@@ -178,9 +174,23 @@ export default defineCase(
       // ── 证据 ②：**本用例的主题**——轮 1 的请求带轮 0 的工具结果（投影消费）──
       // 轮 1 的消息由 `render_messages`（= `transcript` 投影 → `to_messages`）产出，
       // 轮内交换**不跨轮**。它带得着，只可能是因为 `artifact.added` 进了投影。
+      //
+      // 正确形态是 **`role: tool` + `tool_call_id` 配对同包 `assistant.tool_calls[].id`**。
+      // 降级成 assistant 文本只是**未配对时**的兜底（见 `provider_adapter`：协议要求
+      // tool 消息配对本次请求的 tool_calls，孤儿才降级）——配上了就必须是 `role: tool`。
+      // ⚠️ 断言钉的必须是正确形态，不能钉「当年为了绕开问题而采用的形态」——
+      // 否则问题修好之后测试反而红，这是最费解的一种红。
+      const assistantCallIds = msgsOf(2)
+        .filter((m) => m.role === 'assistant')
+        .flatMap((m) => (m.tool_calls ?? []).map((c) => c.id));
+      const echoResults = msgsOf(2).filter(
+        (m) => m.role === 'tool' && String(m.content ?? '').includes(ECHO_TEXT),
+      );
       assert(
-        crossTurnTexts(2).some((t) => t.includes(ECHO_TEXT)),
-        `轮 1 请求应带**第一轮**的工具结果（跨轮投影消费）（实际: ${JSON.stringify(crossTurnTexts(2)).slice(0, 400)}）`,
+        echoResults.some((m) => assistantCallIds.includes(m.tool_call_id)),
+        `轮 1 请求应带**第一轮**的工具结果，且必须是配对的 role=tool（tool_call_id ∈ assistant.tool_calls[].id）；实际: ${JSON.stringify(
+          echoResults.map((m) => ({ content: String(m.content ?? '').slice(0, 60), tool_call_id: m.tool_call_id })),
+        ).slice(0, 400)}`,
       );
       // 轮 1 的历史里也看得见轮 0 的问与答（投影的多轮形态没被工具消息挤掉），
       // 且**角色正确**——问是 user 说的、答是 assistant 说的。
