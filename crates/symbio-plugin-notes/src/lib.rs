@@ -11,7 +11,7 @@
 //! | 行为 | [`behavior::NoteCapture`] | `submit_behavior!` |
 //! | 视图 | [`decl`] 的 `ViewDecl`（`notes.recent` / `notes.digest` / `notes.insights`） | `submit_declarations!` + `PLUGIN.yml` 的 `shared_views` |
 //! | 行执行体 | [`row::NoteIndex`] / [`row::NoteReflect`] / [`row::NoteSummarize`] | `submit_row!`（通用执行体 `plugin_row`，D-241） |
-//! | 模型往返 | [`row::NoteReflect`] 交 `RowStep::Ask`（欠一笔 `request(port=model)`），回执落 `notes.insight` | 环按 `model` 端口派发（D-304） |
+//! | 模型往返 | [`row::NoteReflect`] 交 `RowStep::Ask`（欠一笔 `request(port=model.assist)`），回执落 `notes.insight` | [`debt`] 申报认领行，提示经「在等」事实载荷（D-338） |
 //! | 通用省略 | [`row::NoteSummarize`] 落带 `elision` 的 `message.added`，组装跳过那段工具结果 | 与领域事实同一个写口（D-249） |
 //!
 //! `core` / `kernel` 不认识「便签」这个词：领域事实落在 `Entity::Domain` 扩展位，
@@ -27,12 +27,14 @@
 //! | [`behavior`] | 成功调用 ⇒ 一条 `notes.created` 草稿（写口仍是宿主的） |
 //! | [`row`] | 成功的产物 ⇒ `notes.indexed`；已索引的便签 ⇒ 一次模型往返与 `notes.insight`；答成的洞察 ⇒ `notes.summary` + 一段工具的省略区间 |
 //! | [`context`] | 把最近的便签渲染成一段上下文 |
+//! | [`debt`] | 反思那一步在等模型回执时欠的一笔一次性问答（`model.assist`） |
 //!
 //! 内部依赖是单向的：`plugin` → `tool`；`behavior` / `context` 只读 [`decl`] 的名字，
 //! 三者互不认识——它们各自是扩展面的一条实现，装配顺序由宿主按 owner 排。
 
 mod behavior;
 mod context;
+mod debt;
 mod decl;
 mod plugin;
 mod row;

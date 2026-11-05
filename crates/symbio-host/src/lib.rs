@@ -389,6 +389,11 @@ impl PortFactReader for HostReader {
     fn facts(&self) -> Vec<PortFact> {
         self.source.facts().into_iter().map(event_to_fact).collect()
     }
+
+    /// 事件原样（含入库 `seq`）：行执行体的 `RowRequest` 与区间判断读它（D-338）。
+    fn events(&self) -> Vec<symbio_kernel::event::Event> {
+        self.source.facts()
+    }
 }
 
 /// 事实源的写口：草稿按草稿的幂等键落行；重复投递被事实源吸收。
@@ -426,6 +431,8 @@ fn declared_facts(facts: &[DriveFact], source: &dyn FactSource) -> DebtFacts {
     }
     for event in source.facts() {
         out.note_fact(&event.kind, &event.event_id);
+        // 载荷只读副本：申报方要拿「在等」事实里的提示正文构造请求（D-338）。
+        out.note_fact_payload(&event.kind, &event.event_id, event.payload.clone());
     }
     out
 }

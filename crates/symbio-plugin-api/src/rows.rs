@@ -51,6 +51,24 @@ use crate::effects::FactDraft;
 /// 两边都不需要认识对方的具体身份。
 pub const PLUGIN_ROW: &str = "plugin_row";
 
+/// 「这一行在等一笔模型往返」的事实种类（D-338）。
+///
+/// 静态债行表达不了「此刻在 Ask」，所以 `Ask` 必须落成事实。种类是**一个**名字
+/// （行名进载荷，不进种类）：世界格子只认声明表上的名字，逐行造名会落进 OffGrid。
+pub const ASK_KIND: &str = "plugin.row.asked";
+
+/// 「在等」事实的身份：由 `(row, key, attempt)` 派生（D-338）。
+///
+/// 机制侧与申报方用同一个函数派生，配对不靠插件载荷里的自报 id。
+pub fn ask_id(row: &str, key: &[(String, String)], attempt: u32) -> String {
+    let trace = key
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{row}:{trace}:{attempt}")
+}
+
 /// 通用端口执行体（`DE-048` D-301）：端口行的 `by` 写它，环按名字找动作。
 ///
 /// 与 [`PLUGIN_ROW`] 同一层（宿主词汇）：端口所属插件写这个名字，环认这个名字；

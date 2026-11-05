@@ -13,5 +13,6 @@
 
 mod drive;
 mod plugin;
+mod plugin_rows;
 mod ring;
 mod vocab;

@@ -42,6 +42,8 @@ pub struct DebtFacts {
     closings: Vec<(String, Closing, Value)>,
     attempts: Vec<(String, u32)>,
     identities: Vec<(String, String)>,
+    /// 事实身份 → 载荷（只供**构造请求**用；判定仍只看种类与身份，D-338）。
+    payloads: Vec<(String, String, Value)>,
 }
 
 impl DebtFacts {
@@ -55,6 +57,41 @@ impl DebtFacts {
             return;
         }
         self.identities.push((kind.to_string(), id.to_string()));
+    }
+
+    /// 记一条事实的载荷（只读副本；同一身份只留第一份）。
+    ///
+    /// 申报方要拿「在等」事实里的提示正文构造请求载荷（D-338）；它不是判定位。
+    pub fn note_fact_payload(&mut self, kind: &str, id: &str, payload: Value) {
+        if self
+            .payloads
+            .iter()
+            .any(|(known, key, _)| known == kind && key == id)
+        {
+            return;
+        }
+        self.payloads
+            .push((kind.to_string(), id.to_string(), payload));
+    }
+
+    /// 某条事实的载荷；没有或未记 ⇒ `None`。
+    pub fn fact_payload(&self, kind: &str, id: &str) -> Option<&Value> {
+        self.payloads
+            .iter()
+            .find(|(known, key, _)| known == kind && key == id)
+            .map(|(_, _, payload)| payload)
+    }
+
+    /// 某**种类**的全部事实身份与载荷（按记入顺序）。
+    ///
+    /// 机制事实只有一个种类名、行名在载荷里（D-338），申报方要按载荷挑出自己那行，
+    /// 只能按种类取全集再筛；判定仍是种类 + 身份，不因载荷分叉出新的债。
+    pub fn facts_of(&self, kind: &str) -> Vec<(&str, &Value)> {
+        self.payloads
+            .iter()
+            .filter(|(known, _, _)| known == kind)
+            .map(|(_, id, payload)| (id.as_str(), payload))
+            .collect()
     }
 
     /// 该种类**最后记入**的事实 id；没有 ⇒ `None`。

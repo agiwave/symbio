@@ -56,6 +56,10 @@ impl Plugin for NotesPlugin {
         if path == TRAVERSE_AVAILABLE_TOOLS {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 visitor.put(CapabilityRow::tool(Arc::new(NotesTool))).await;
+                // 债表：反思在等模型回执时欠的一笔一次性问答（D-338）。
+                for row in super::debt::notes_debt_rows() {
+                    visitor.put(row).await;
+                }
             }
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

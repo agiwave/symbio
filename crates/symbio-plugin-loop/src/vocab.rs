@@ -38,6 +38,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("memory.consolidated", (Entity::Memory, Verb::Progressed)),
     EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
     EventDecl::new("memory.forgotten", (Entity::Memory, Verb::Closed)),
+    // 机制事实（D-338）：`plugin_row` 执行体在 Ask 后落的「这一行在等」。
+    // 行名与提示在载荷里；种类只有一个名字，否则进不了声明表。
+    EventDecl::new("plugin.row.asked", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("session.config", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("task.controlled", (Entity::Control, Verb::Opened)),
     EventDecl::new("turn.branch", (Entity::Scope, Verb::Asserted)),

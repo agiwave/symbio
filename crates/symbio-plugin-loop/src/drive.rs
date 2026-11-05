@@ -89,6 +89,10 @@ impl DriveCtx for SupportCtx {
     }
 
     fn executor(&self, port: &str) -> Option<Arc<dyn PortExecutor>> {
+        // 行执行体是机制自己的执行体（与端口提供者同一条解析面，D-338）。
+        if crate::plugin_rows::is_row_port(port) {
+            return Some(crate::plugin_rows::executor());
+        }
         self.support.executor(port)
     }
 
@@ -143,6 +147,10 @@ impl DebtSource for SupportSource {
             };
             out.push(to_ring_row(row, after));
         }
+        // `Decl` 行参与选债（D-304 裁决六）：`by == plugin_row` 的行由机制自己执行，
+        // 世界语义（欠什么、何时算还）全在声明里，这里只做形状适配。
+        let events = crate::plugin_rows::decl_events(self.support.facts());
+        out.extend(crate::plugin_rows::decl_rows(&events, self.support.now_ms()));
         out
     }
 

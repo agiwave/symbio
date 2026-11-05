@@ -120,6 +120,13 @@ pub struct PortFact {
 pub trait PortFactReader: Send + Sync + 'static {
     /// 本会话的事实（读面在打开时就绑定了会话身份）。
     fn facts(&self) -> Vec<PortFact>;
+
+    /// 事件原样（含入库 `seq`）：行执行体按它构造 `RowRequest`（D-338）。
+    ///
+    /// 默认空：只实现 `facts()` 的宿主仍可工作，读不到 `seq` 的行按「无区间」自处。
+    fn events(&self) -> Vec<symbio_kernel::event::Event> {
+        Vec::new()
+    }
 }
 
 /// 只读声明句柄（D-337）：执行体可以**读**声明表，但不带任何写口。
