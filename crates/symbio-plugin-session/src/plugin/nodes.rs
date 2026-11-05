@@ -772,7 +772,18 @@ pub(crate) fn overlay_live(
                 *s = l;
                 s.seq = seq;
             }
-            None => out.push(l),
+            None => {
+                // 权威号只属于落库列表：live 侧带**权威号**（低于在途段下界）却不在
+                // 列表里，说明那条已被快照换基（压缩 / 截断）取代——旧副本不得复活，
+                // 否则它与存储里的同号并列（实测 `seq 未严格递增（3 → 3）`）。
+                // 尚无号、或在途段内的，才是存储还没收录的新内容。
+                let in_flight = l
+                    .seq
+                    .is_none_or(crate::transcript::InflightSeq::occupies);
+                if in_flight {
+                    out.push(l);
+                }
+            }
         }
     }
     out

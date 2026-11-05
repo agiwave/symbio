@@ -119,7 +119,9 @@ pub(super) fn assign_seq(messages: &mut [ChatNode], base: i64) -> i64 {
         }
     }
 
-    debug_assert!(
+    // 前置条件是**硬**的：release 下也生效。`debug_assert` 会让违例静默补号，
+    // 表现为两条消息同号（实测 `seq 未严格递增（3 → 3）`）——那比当场失败更难查。
+    assert!(
         messages.windows(2).all(|w| w[0].seq < w[1].seq),
         "assign_seq 的前置条件被破坏：无号项只允许出现在开头或末尾（实得 {:?}）",
         messages.iter().map(|m| m.seq).collect::<Vec<_>>()
@@ -365,8 +367,8 @@ impl PersistentChatSession {
 
         let cfg = self.config.read().await;
 
-        // 分配单调序号：起点取当前会话已有最大 seq，保证追加的消息严格排在其后。
-        let mut seq_cursor = max_seq(&session.messages);
+        // 发号起点：`assign_seq` 只在「整批新节点全无号」时用它。
+        let seq_base = max_seq(&session.messages);
 
         // 本次追加的 id（顺序 = 追加顺序）：末尾据此从落库结果里取回**权威副本**，
         // 交给调用方做落库回包（见 trait 上 `append_messages` 的说明）。
@@ -397,18 +399,14 @@ impl PersistentChatSession {
             {
                 chat_msg.seq = None;
             }
-            if chat_msg.seq.is_none() {
-                seq_cursor += 1;
-                chat_msg.seq = Some(seq_cursor);
-            } else if let Some(s) = chat_msg.seq {
-                if s > seq_cursor {
-                    seq_cursor = s;
-                }
-            }
-
             appended_ids.push(chat_msg.id.clone());
             session.messages.push(chat_msg);
         }
+
+        // `seq` 只有一个发号点：[`assign_seq`]。这里不再自带 `seq_cursor` 增量补号——
+        // 那会让同一字段出现第二套递增规则，缓存里已有的同号既不被发现也不被拒绝，
+        // 只在运行态表现为 `seq 未严格递增`。整份列表（含本次追加项）交给它统一补号。
+        assign_seq(&mut session.messages, seq_base);
 
         let context_messages = cfg.context_messages;
         // 工具链物理裁剪由配置控制：默认开启以控制磁盘与节点树体积。
