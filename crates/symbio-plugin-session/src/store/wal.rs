@@ -74,7 +74,7 @@ use crate::paths;
 use symbio_kernel::decl::Frozen;
 use symbio_kernel::event::{Event, EventDecl, EventEnvelope as _, Seq};
 use symbio_kernel::store::{AppendError, Store, StoreInvariant};
-use symbio_sdk::invariants::{closes_turn, is_turn_final, is_turn_open, provenance_violation};
+use symbio_sdk::invariants::provenance_violation;
 
 /// 判据的**词汇面**：认识某个名字的那张表说了算（DE-024 D-203）。
 ///
@@ -129,14 +129,6 @@ impl<'a> Vocab<'a> {
             .and_then(|table| table.iter().find(|e| e.name == kind))
             .map(|e| e.cell)
     }
-
-    /// 定稿发言（I1「每轮至多一条 final」的口径）。
-    fn is_final(&self, e: &Event) -> bool {
-        match self.table_for(&e.kind) {
-            Some(table) => is_turn_final(table, e),
-            None => false,
-        }
-    }
 }
 
 /// 持久化 Store（`store = wal`，[DE-001 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表取值）。
@@ -176,60 +168,14 @@ struct WalInner {
     events: Vec<Event>,
     ids: HashSet<String>,
     head: u64,
-    /// 已开轮的 `turn`（[`is_turn_open`] 口径）——I1 的「每轮至多一条开轮」索引。
-    ///
-    /// 存档段移走的是**旧轮**，而旧轮不会再被重开；归档因此**不清空**本索引
-    /// （清空会让一张老会话在压缩之后忘记自己开过哪些轮）。
-    opened: HashSet<u64>,
-    /// 已收束的 `turn`（[`closes_turn`] 口径）——I3 的「旧轮收没收」用这一份。
-    ///
-    /// 注意它**不是** I1 去重的索引：产物收束（`artifact.added`）也算「这一轮有话说过」，
-    /// 但同一轮随后仍应有且只有一条 `final`。
-    closed: HashSet<u64>,
-    /// 已出现 `final` 的 `turn`（[`is_turn_final`] 口径）——I1 的「每轮至多一条 final」索引。
-    finals: HashSet<u64>,
-    /// I3 的**显式降级**计数：新开轮越过了未收束的旧轮（崩溃残轮 / 真丢收束）。
-    ///
-    /// 不拒绝而是计数 + 出声，理由见 [`WalInner::gate`]；读侧 `check_all` 会把同一条
-    /// 缺口报成 `unresolved_turns` 违规，两处口径一致。
-    degraded_i3: u64,
 }
 
 impl WalInner {
-    /// 把一条事件记进两份索引（重放与入库共用）。
-    fn note(&mut self, vocab: &Vocab, event: &Event) {
-        if is_turn_open(event) {
-            self.opened.insert(event.scope);
-        }
-        if closes_turn(event) {
-            self.closed.insert(event.scope);
-        }
-        if vocab.is_final(event) {
-            self.finals.insert(event.scope);
-        }
-    }
-
-    /// 把一段事件（重放结果 / 归档段）整段记进索引。幂等。
-    fn note_all<'e>(&mut self, vocab: &Vocab, events: impl IntoIterator<Item = &'e Event>) {
-        for e in events {
-            self.note(vocab, e);
-        }
-    }
-
-    /// 比 `turn` 更早、却还没收束的轮里最小的那个（I3 的判据）。
-    fn unresolved_before(&self, turn: u64) -> Option<u64> {
-        self.opened
-            .iter()
-            .filter(|t| **t < turn && !self.closed.contains(t))
-            .min()
-            .copied()
-    }
-
     /// 写侧闸门（+
     /// 段四）：
     /// **唯一写入口内**的拒绝判定。
     ///
-    /// 返回 `Err` = 这条事件不得入库；`Ok` = 允许（可能的「显式降级」已在内部出声）。
+    /// 返回 `Err` = 这条事件不得入库；`Ok` = 允许。
     ///
     /// ## 拒 / 降级的分界
     ///
@@ -239,16 +185,12 @@ impl WalInner {
     /// |---|---|---|
     /// | 名字与格位对不上（不在表上 / 自述挪了一格） | **拒绝** | 投影按格子取事实，错位是**静默少一条事实**；名字与坐标必须同源（段四） |
     /// | I2 声明缺 `produced_by` | **拒绝** | 没有上游的声明无法审计也无法撤销；生产者补上即可，重试是安全的 |
-    /// | I1 同轮第二条 `final` | **拒绝** | 这一轮已经有收束，第二条会让「每轮至多一条 final」失效 |
-    /// | I1 同轮第二条开轮（不同 id） | **拒绝** | 同 id 的重放更早就会被 `Duplicate` 拦下，能走到这里是两条不同事件抢同一轮 |
-    /// | I3 新轮越过未收束的旧轮 | **降级**（出声 + 计数） | 崩溃恢复**恰好长这样**：上一轮停在半路，重启后开下一轮。拒绝会让会话再也写不进任何事实 |
     ///
-    /// I3 的降级不是「静默放过」：它在写入口当场 `plugin_warn!` 出声，读侧
-    /// `check_all` 的 `unresolved_turns` 会把同一处
-    /// 缺口报成违规——两条信号指向同一个事实，不存在「日志里有、清单里没有」。
-    fn gate(&mut self, event: &Event, vocab: &Vocab) -> Result<(), AppendError> {
-        // **先判名字与格位是否同源，再判事实之间的关系**：I1 / I2 / I3 的判据全部按
-        // `(entity, verb, kind)` 取事实（`is_turn_open` 认的就是这一格）。坐标本身错位时，
+    /// 轮次维度的判据（同轮至多一条开轮 / final、「新轮越过旧轮」的降级计数）
+    /// 已随 `scope` 一起退场：一轮只能开一次、只能收一次**由环的五事实机制自己记账**，
+    /// 事实源只判「名字与格位同源」和「声明有没有上游」。
+    fn gate(&self, event: &Event, vocab: &Vocab) -> Result<(), AppendError> {
+        // **先判名字与格位是否同源，再判事实之间的关系**：坐标本身错位时，
         // 后面每条判定的输入都是错位的——所以这一臂排在最前，且它不需要任何索引。
         // 三份词汇表的取舍顺序见 [`Vocab`]（DE-024 D-199 / D-203）。
         let given = (event.entity, event.verb);
@@ -267,38 +209,6 @@ impl WalInner {
                 event_id: v.event_id,
                 why: v.why,
             });
-        }
-        if vocab.is_final(event) && self.finals.contains(&event.scope) {
-            return Err(AppendError::Invariant {
-                invariant: StoreInvariant::I1,
-                event_id: event.event_id.clone(),
-                why: format!(
-                    "turn {} 已有收束格，又出现一条 final——每轮至多 1 条（I1 单通道）",
-                    event.scope
-                ),
-            });
-        }
-        if is_turn_open(event) {
-            if self.opened.contains(&event.scope) {
-                return Err(AppendError::Invariant {
-                    invariant: StoreInvariant::I1,
-                    event_id: event.event_id.clone(),
-                    why: format!(
-                        "turn {} 已有开轮事件，又出现一条（I1 单通道：每轮至多 1 条开轮）",
-                        event.scope
-                    ),
-                });
-            }
-            if let Some(missing) = self.unresolved_before(event.scope) {
-                self.degraded_i3 += 1;
-                symbio_plugin_api::plugin_warn!(
-                    "session",
-                    "[invariant-I3] 新开轮 turn {} 越过了未收束的 turn {}（本轮照常入格；\
-                     读侧 session/stats 的 unresolved_turns 会报同一条）",
-                    event.scope,
-                    missing
-                );
-            }
         }
         Ok(())
     }
@@ -453,38 +363,10 @@ impl WalStore {
             .max()
             .unwrap_or(0)
             .max(events.len() as u64);
-        // 闸门索引**从重放结果重建**：重启不是「闸门失忆」的理由——同一份 WAL
-        // 重开后，同轮第二条 final 仍要被拒（见 `gate_index_is_rebuilt_from_the_wal_on_reopen`）。
-        // 此刻还没挂实例表（`with_declarations` 在 `build` 之后），词汇面走进程装配表 →
-        // 共享表这两份表；角色与格位在每份表内同源，重建口径与后续写闸因此一致。
-        let vocab = Vocab::of(None::<&Frozen>);
-        let opened = events
-            .iter()
-            .filter(|e| is_turn_open(e))
-            .map(|e| e.scope)
-            .collect();
-        let closed = events
-            .iter()
-            .filter(|e| closes_turn(e))
-            .map(|e| e.scope)
-            .collect();
-        let finals = events
-            .iter()
-            .filter(|e| vocab.is_final(e))
-            .map(|e| e.scope)
-            .collect();
         WalStore {
             path,
             writer,
-            inner: RwLock::new(WalInner {
-                events,
-                ids,
-                head,
-                opened,
-                closed,
-                finals,
-                degraded_i3: 0,
-            }),
+            inner: RwLock::new(WalInner { events, ids, head }),
             archived: RwLock::new(None),
             declarations: None,
         }
@@ -678,12 +560,6 @@ impl WalStore {
         }
         *self.archived.write().expect("WalStore 锁中毒") = Some(all.clone());
         // 归档段也是历史：索引必须认它（否则压缩之后「这个轮开过没有」会失忆）。
-        // 归档**只增不改**，吸收是幂等的；且本函数不持 `inner` 锁，不会自锁。
-        let vocab = Vocab::of(self.declarations.as_deref());
-        self.inner
-            .write()
-            .expect("WalStore 锁中毒")
-            .note_all(&vocab, &all);
         all
     }
 
@@ -691,12 +567,6 @@ impl WalStore {
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.inner.read().expect("WalStore 锁中毒").events.len()
-    }
-
-    /// I3 显式降级的次数（测试与断言用；生产侧由 `plugin_warn!` 与读侧 `check_all` 出声）。
-    #[cfg(test)]
-    pub fn degraded_i3(&self) -> u64 {
-        self.inner.read().expect("WalStore 锁中毒").degraded_i3
     }
 }
 
@@ -744,7 +614,6 @@ impl Store for WalStore {
             .and_then(|_| file.sync_data())
             .expect("WAL 写入失败（存储层灾难，不可静默）");
         inner.ids.insert(event.event_id().to_string());
-        inner.note(&vocab, &event);
         inner.events.push(event);
         inner.head += 1;
         Ok(seq)

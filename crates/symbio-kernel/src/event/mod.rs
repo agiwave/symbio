@@ -47,7 +47,7 @@ pub type Cell = (Entity, Verb);
 /// **静默不判**——判据从「拒绝」变成「看不见」，正是 J3 点名的失效形状。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactRole {
-    /// 本轮的**定稿发言**（同格还有兜底格，它不算定稿：`final_unique_per_turn` 只拦这一档）。
+    /// 本轮的**定稿发言**（同格还有兜底格，它不算定稿）。
     FinalizesTurn,
     /// 回答「这一轮为什么停」的否定事实（收束格之外唯一的一档）。
     StopsTurn,
@@ -257,7 +257,7 @@ pub const EVENT_RESPONSE: &str = "response";
 ///
 /// ## 为什么落 `turn × asserted`（而不是 `closed`）
 /// 与 `authz.denied` 同一条纪律：一次端口调用失败**不关轮**——轮还可能重试、
-/// 走降级、或以兜底话术收束。把它算成收束会让 `unresolved_turns` 少报一轮
+/// 走降级、或以兜底话术收束。把它算成结算会让「这一轮收到没有」的读法少报一轮
 /// 「静默中断」，而那正是**最该被发现的失效**。
 ///
 /// ## 载荷

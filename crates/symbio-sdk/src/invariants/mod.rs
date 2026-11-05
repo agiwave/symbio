@@ -20,16 +20,13 @@
 //! 判据会在「看不见」的状态下全绿。
 //!
 //! ## 覆盖的 CI 断言（出口判据 + 故障注入，[DE-031 §5](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")；
-//! [`open_unique_per_turn`] 是单写者的观测面）
+//! 开轮/终答的配对是义务环五事实机制自己的事，SDK 不再按轮分组）
 //!
 //! | 断言 | 不变量 | 检查 | 函数 |
 //! |---|---|---|---|
 //! | C1 | I1 单通道 | `seq` 严格单调、无跳号 | [`seq_monotonic`] |
-//! | C2 / N3 | I1 单通道 | 每 `turn` 至多 1 条 final | [`final_unique_per_turn`] |
-//! | C2 对偶 | I1 单通道 | 每 `turn` 至多 1 条开轮（`u-{turn}`） | [`open_unique_per_turn`] |
 //! | C3 / N5 | I2 无溯源不声明 | 断言类 + 收束类事件 `produced_by` 非空 | [`produced_by_coverage`] |
 //! | C3 对偶 | I2 无溯源不声明 | 片内溯源边不倒因果、不落空洞 | [`provenance_dangling`] |
-//! | C4 | I3 到点必答 | 开过的 turn 必须收束（final 或 fallback） | [`unresolved_turns`] |
 //! | C5 | I3 到点必答 | 事件 `cost_ms` 不得超主体预算 | [`budget_exceeded`] |
 //! | C6 | I3 到点必答 | 每条收束格 / 停机角色的 `reason` 在闭集内 | [`closure_reason_closed`] |
 //! | 终止性前提 3（C14） | 终止性定理 | 任务依赖图**无环**且无悬空依赖 | [`acyclic_deps`] |
@@ -45,17 +42,16 @@
 //! 每条检查配**反向用例**：喂入违规序列，违规必须被看见；看不见 = 检查是摆设。
 //! 故障注入用例集在 `mod.test.rs` 的 fault 区统一收纳。
 //!
-//! ## 宽限（C4 / C5 的读侧形参）
+//! ## 宽限（C5 的读侧形参）
 //!
-//! 直接调 C4 / C5 得自己决定「多旧才算违规、拿什么预算比」——这两个决定在
-//! **故障注入**（宁严）与**读侧**（首日假红就没人再看那份清单）里相反。于是
-//! 判据不写死在函数里，而是形参：[`unresolved_turns`] 的尾轮放行、
-//! [`budget_exceeded`] 的「没预算不判」。[`check_all`] 是读侧 / CI 的入口，
-//! 它替读侧选宽限；要严判就绕过它直接调那两条。
+//! 直接调 C5 得自己决定「拿什么预算比」——这个决定在**故障注入**（宁严）与
+//! **读侧**（首日假红就没人再看那份清单）里相反。于是判据不写死在函数里，而是
+//! 形参：[`budget_exceeded`] 的「没预算不判」。[`check_all`] 是读侧 / CI 的入口，
+//! 它替读侧选宽限；要严判就绕过它直接调那一条。
 //!
 //! 出口是 [`crate::invariants::check_all`]（根导出，消费方在 core 之外）——
-//! 这两条检查因此**不必**再进根出口：`core-export-audit` C-003 要求根导出的
-//! 符号至少有两个 core 外的消费方，而它们只服务读出口一个模块，单模块消费的
+//! 这条检查因此**不必**再进根出口：`core-export-audit` C-003 要求根导出的
+//! 符号至少有两个 core 外的消费方，而它只服务读出口一个模块，单模块消费的
 //! 符号该下沉、不该占着架构出口。
 
 use super::event::{holds_role, Entity, Event, EventDecl, FactRole, Verb};
@@ -85,44 +81,11 @@ impl Violation {
     }
 }
 
-/// 这一条是**开轮**事件吗（`turn × opened` 那一格）？
-///
-/// 写侧闸门与读侧 [`open_unique_per_turn`] 共用本判据——「什么算开轮」只有一份。
-///
-/// **判的是格子，不是名字**（DE-024 D-203）：落在开轮格就是开轮，这是那一格的语义。
-/// 格位之外再比一次名字，拦的就不是「谁开了轮」而是「谁的名字在表上」——新名字落进
-/// 开轮格时开轮闸静默不拦。
-pub fn is_turn_open(e: &Event) -> bool {
-    e.entity == Entity::Scope && e.verb == Verb::Opened
-}
-
-/// 这一条是本轮的**定稿发言**吗（收束格上扮演 `finalizes_turn` 角色那一个）？
-///
-/// 只认定稿（不认兜底）：[`final_unique_per_turn`] 的判据就是这一档，写侧若把 fallback
-/// 也算进来，就成了比读侧更严的第二套规则。同格两个名字要分辨，靠的是 owner 声明里
-/// 的角色而不是这里抄一个名字——角色缺失时装配口报 `Gap::UnmannedRole`，不会空转。
-pub fn is_turn_final(vocab: &[EventDecl], e: &Event) -> bool {
-    e.entity == Entity::Scope
-        && e.verb == Verb::Closed
-        && holds_role(vocab, &e.kind, FactRole::FinalizesTurn)
-}
-
-/// 这一条让某一轮**算收束**吗（[`unresolved_turns`] 的口径）？
-///
-/// 两种形态：发言收束（`turn × closed`）、产物收束（`artifact × asserted`，D-067）。
-/// 写侧判「新开轮是否越过了未收束的旧轮」必须与读侧同口径，否则会出现
-/// 「写侧说越界、读侧说没事」的两套绿。两格整格算数，不看名字（DE-024 D-203）。
-pub fn closes_turn(e: &Event) -> bool {
-    (e.entity == Entity::Scope && e.verb == Verb::Closed)
-        || (e.entity == Entity::Artifact && e.verb == Verb::Asserted)
-}
-
 /// 这一条是**停机事实**吗（C6 的口径：它得回答「这一轮为什么停」）？
 ///
 /// 收束格整格算（那上面的每一条都宣称本轮结束了）+ 收束闸的否定事实（`stops_turn`
 /// 角色——被拒不产生收束格，但它同样是一次停）。
-/// **与 [`closes_turn`] 不是一把尺**：后者问「本轮结算了吗」，产物格算结算；
-/// 产物不是停——一工具结果落格后轮还在走，「为什么停」的答案在收束格上
+/// 产物格不是停——一工具结果落格后轮还在走，「为什么停」的答案在收束格上
 /// （DE-015 §4.3 判据 10 点名的就是这两种格）。拿结算尺去问停机，
 /// 就会向生产要一个它永远写不出的字段。
 pub fn is_stop_fact(vocab: &[EventDecl], e: &Event) -> bool {
@@ -176,57 +139,6 @@ pub fn seq_monotonic(events: &[Event]) -> Vec<Violation> {
         .collect()
 }
 
-/// C2 / N3（I1）：每 `turn` 至多 1 条定稿发言。
-///
-/// 「定稿」= 收束格上扮演 `finalizes_turn` 角色那一条（词汇来自 `vocab`，
-/// DE-024 D-203；格位定义见 [DE-001 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
-/// 一轮对用户说两次「最终答复」，转写的收敛性就没了——这是 I1 在发言路径上的形状。
-pub fn final_unique_per_turn(vocab: &[EventDecl], events: &[Event]) -> Vec<Violation> {
-    // 哪些事件算数（定稿的判据）是本模块的解析层；「每 turn 至多一条」
-    // 的判定走 kernel::unique_per_turn_core——可执行论证程序包含的是同一份内核。
-    let finals = events.iter().filter(|e| is_turn_final(vocab, e));
-    kernel::unique_per_turn_core(finals.map(|e| (e.scope, e.event_id.as_str())))
-        .into_iter()
-        .map(|(dup, first, turn)| {
-            let e = events
-                .iter()
-                .find(|e| e.event_id == dup)
-                .expect("重复项的 id 必来自本切片");
-            Violation::at(
-                e,
-                format!("turn {turn} 已有 final（{first}），又出现一条——每 turn 至多 1 条 final"),
-            )
-        })
-        .collect()
-}
-
-/// I1 单通道（C2 的对偶）：每 `turn` 至多 1 条**开轮**事件（`u-{turn}`）。
-///
-/// 开轮 = 落在 `turn × opened` 那一格（[DE-001 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）
-/// 与 [`final_unique_per_turn`] 是同一枚硬币的两面——一轮只能**开**一次、只能**收**一次。
-/// 开两次 = 同一个 `u-{turn}` 事件号落进网格两回：那一轮的输入成了两条、`turn` 计数
-/// 跟着虚增（兜底率的分母就在这条上），而**没有任何下游会察觉**——单写者被绕过的
-/// 典型痕迹。写者令牌在**写入侧**堵住并发写，本检查是它在**事实源上**的观测面：
-/// 令牌漏了、或有人绕过唯一写入口直接落盘，这里就红。
-pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
-    // 与 final_unique_per_turn 同一内核：
-    // 「哪些事件算数」在解析层，「每 turn 至多一条」在 kernel。
-    let opens = events.iter().filter(|e| is_turn_open(e));
-    kernel::unique_per_turn_core(opens.map(|e| (e.scope, e.event_id.as_str())))
-        .into_iter()
-        .map(|(dup, first, turn)| {
-            let e = events
-                .iter()
-                .find(|e| e.event_id == dup)
-                .expect("重复项的 id 必来自本切片");
-            Violation::at(
-                e,
-                format!("turn {turn} 已有开轮事件（{first}），又出现一条——每 turn 至多 1 条开轮"),
-            )
-        })
-        .collect()
-}
-
 /// C3 / N5（I2）：**声明类**事件必须带溯源。
 ///
 /// 「声明」= 宣称某件事为真或已发生，三类（[DE-016 §2 I2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
@@ -275,7 +187,7 @@ fn needs_provenance(e: &Event) -> bool {
 /// 纯函数里这两种与"边写错了"**无从分辨**，所以宽限是必须的，且**头尾对称**：
 /// 只宽限头部等于假设"切片总是从头切"，而读侧窗口两头都会切。
 ///
-/// 处置与 [`unresolved_turns`] 的 `allow_trailing_open` 同一条纪律——
+/// 处置与 [`budget_exceeded`] 同一条纪律——
 /// **宽限写在签名上，不写在判据里**：[`check_all`] 替读侧选 `true`（读侧要的是
 /// "别假红"），故障注入与整份日志校验传 `false`（宁严：片外也不放过）。
 ///
@@ -335,20 +247,13 @@ pub fn provenance_dangling(events: &[Event], allow_slice_edges: bool) -> Vec<Vio
 /// 的「返工次数有界」）。
 const MAX_REWORK_ROUNDS: u32 = 3;
 
-/// 九条一起跑（的 CI 形态：任一违规 ⇒ 清单非空）。
+/// 六条一起跑（的 CI 形态：任一违规 ⇒ 清单非空）。
 ///
-/// 前四条是结构判定（C1 `seq` 单调 / C2 每轮一条 final / C3 断言带溯源 /
-/// C3 对偶 溯源不悬空）；
-/// 中两条（C4 未收束 / C5 超预算）按**读侧口径**带宽限——本函数是
+/// 前三条是结构判定（C1 `seq` 单调 / C3 断言带溯源 / C3 对偶 溯源不悬空）；
+/// C5 超预算按**读侧口径**带宽限——本函数是
 /// `session/stats` 读出口与 e2e 的入口，首日就跑真实流量，假红一次
 /// 那份清单就再没人看：
 ///
-/// - C4 放行**切片末尾**仍在途的一轮：读取瞬间它可能正在生成，而切片没有
-///   wall-clock（`Event::pending` 的 `ts` 恒 0，**Turn 类事件**的写方从不填——
-///   只有记忆类事件填真实编码时刻，见 `RecallEntry::ts`，而本判定只看 Turn 格子），
-///   「在途」与「卡死」
-///   在纯函数里无从分辨。被**后续轮越过**的未收束轮照样报——那才确凿：
-///   会话已经往前走了，旧轮却没收束。
 /// - C5 只在切片**声明过档位**时判，预算取声明档位里**最宽**的一档（判定方向
 ///   宁可漏报、不可假红：拿最严档比，会把别的档位的正常流量整片报成违规）。
 ///
@@ -358,14 +263,16 @@ const MAX_REWORK_ROUNDS: u32 = 3;
 /// 都是**结构判定、无宽限**：环与超界不是「读取瞬间的时序假象」，不会假红
 /// ——「断言进 CI」。
 ///
-/// 要严判就绕过本函数直接调 [`unresolved_turns`]（`false`）/ [`budget_exceeded`]。
+/// 开轮与终答的配对不在本函数里：**配对是义务环五事实机制的一条**，环自己记账
+/// （`request` 未配对时由租约 / 重试 / `failed` 收束）。SDK 再按轮分组就是第二套
+/// 真相，且要靠每事实带同一个轮键才能对上——那个键就是 `scope`，也正是它反复
+/// 被填成轮次的入口。
+///
+/// 要严判就绕过本函数直接调 [`budget_exceeded`]。
 pub fn check_all(vocab: &[EventDecl], events: &[Event]) -> Vec<Violation> {
     let mut all = seq_monotonic(events);
-    all.extend(final_unique_per_turn(vocab, events));
-    all.extend(open_unique_per_turn(events));
     all.extend(produced_by_coverage(events));
     all.extend(provenance_dangling(events, true));
-    all.extend(unresolved_turns(events, true));
     all.extend(budget_exceeded(events, declared_budget_ms(vocab, events)));
     all.extend(closure_reason_closed(vocab, events, true));
     all.extend(acyclic_deps(events));
@@ -414,65 +321,6 @@ fn declared_budget_of(e: &Event) -> Option<u64> {
                 .and_then(crate::adapters::LatencyTier::from_name)
                 .map(|t| t.budget_ms())
         })
-}
-
-/// C4（I3 到点必答）：开过的 turn 必须收束。
-///
-/// 「收到」与「发出」是一对端点（[DE-031 §1](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")）：
-/// 有 `user.message`（`turn × opened`）却始终等不到 `chat.assistant.final` /
-/// `chat.assistant.fallback`（`turn × closed`），就是**对话静默中断**——超时后
-/// 什么都没发生，没有任何错误信号的那类失效。兜底必须产生事件（I3）。
-///
-/// # 产物也算收束（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）
-///
-/// `artifact.added`（`artifact × asserted`）同样关闭一轮：工具结果是**说给用户的
-/// 话**（界面上就是一张卡片），不是内部噪声。没有它，只持 `produce.artifact` 的
-/// 主体（对等主体，没有发言权）每跑一轮都永久留一条违规——「没有说话资格就不能
-/// 留下任何事实」正是那次裁决拆掉的耦合。
-///
-/// 与**等待用户**那一态的关系：等待轮（进展格 `chat.assistant.progress`）的收束格
-/// 刻意留给恢复幕，续写仍由 `turn_exec::last_open_turn` 按 final / fallback 找它
-/// （那里**不**认产物——认了会让恢复幕找不到未收束轮）；本检查认产物只是
-/// 「不再报它静默中断」，两处口径的差异是刻意的，见该函数文档。
-///
-/// # 宽限形参 `allow_trailing_open`
-///
-/// `false` = 严格：任何未收束的轮都算违规（故障注入用这一档，见
-/// `fault_timeout_turn_never_settles_is_caught`）。
-/// `true` = 放行**切片末尾**那一轮（[`check_all`] 的读侧口径）：它可能正在
-/// 生成，切片又没有时间可比。放行的判据是「它就是最后开的那一轮」——
-/// 一旦后面又开了新轮，旧轮的未收束就是确凿的静默中断，照报。
-///
-/// 违规锚在**开轮那条事件**上（`event_id` 指向缺口本身，不是切片末尾某条无关事件）。
-pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Violation> {
-    // (开轮事件在切片中的位置, turn 号, 开轮事件)——位置用于判「尾轮」。
-    let mut opened: Vec<(usize, u64, &Event)> = Vec::new();
-    let mut last_open_pos: Option<usize> = None;
-    for (i, e) in events.iter().enumerate() {
-        if is_turn_open(e) {
-            opened.push((i, e.scope, e));
-            last_open_pos = Some(i);
-        }
-        // 收束 = 发言收束（final / fallback）或产物收束（D-067，落过工具结果）。
-        // 判据与写侧闸门共用 [`closes_turn`]：两处各写一份必然漂移。
-        if closes_turn(e) {
-            opened.retain(|(_, turn, _)| *turn != e.scope);
-        }
-    }
-    let mut bad = Vec::new();
-    for (pos, turn, open_event) in opened {
-        if allow_trailing_open && Some(pos) == last_open_pos {
-            continue; // 宽限：尾轮在途（或崩溃残轮），切片内没有更晚的开轮可证它卡死
-        }
-        bad.push(Violation::at(
-            open_event,
-            format!(
-                "turn {turn}（自 {} 开启）始终未收束——无 final、无 fallback、也无产物格，对话静默中断（I3 到点必答）",
-                open_event.event_id
-            ),
-        ));
-    }
-    bad
 }
 
 /// C6（I3 到点必答）：每条 `turn × closed` 事实必带 `reason`，且取值在闭集内。
@@ -707,6 +555,4 @@ mod tests;
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
 // panic-allow crates/symbio-sdk/src/invariants/kernel.rs::dep_graph_core: 穷尽性不变量：indeg 与 graph 同构造（同一批键），走到 expect 说明本文件的判据漏了一个分支，属代码缺陷。
 // panic-allow crates/symbio-sdk/src/invariants/mod.rs::seq_monotonic: 解析层不变量：内核返回的下标必落在「有 seq 的事件」范围内（内核只对这条序列工作），走到 expect 说明解析与内核的输入约定破了，属代码缺陷。
-// panic-allow crates/symbio-sdk/src/invariants/mod.rs::final_unique_per_turn: 同上：内核返回的重复项 id 必来自本切片（刚 map 出去的输入），走到 expect 说明约定破了。
-// panic-allow crates/symbio-sdk/src/invariants/mod.rs::open_unique_per_turn: 同上：重复项 id 必来自本切片。
 // panic-allow crates/symbio-sdk/src/invariants/mod.rs::rework_bounded: 同上：越界轮必来自本切片（内核只对刚收集的 replaces 计数）。

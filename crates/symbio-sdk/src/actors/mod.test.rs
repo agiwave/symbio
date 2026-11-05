@@ -394,58 +394,9 @@ fn forced_failure_produces_fallback_with_provenance() {
     );
 }
 
-/// 验收 4（反向）：注入两条 final → N3 必须报警。
-#[test]
-fn two_finals_are_caught_by_n3() {
-    let store = EventStore::new();
-    store
-        .append(Event::pending(
-            "u0",
-            EVENT_USER_MESSAGE,
-            Entity::Scope,
-            Verb::Opened,
-            0,
-            "user",
-        ))
-        .expect("首插必成");
-    store
-        .append(
-            Event::pending(
-                "f0",
-                EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Scope,
-                Verb::Closed,
-                0,
-                "session/main",
-            )
-            .with_produced_by(0),
-        )
-        .expect("首插必成");
-    store
-        .append(
-            Event::pending(
-                "f1",
-                EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Scope,
-                Verb::Closed,
-                0,
-                "session/main",
-            )
-            .with_produced_by(0),
-        )
-        .expect("首插必成");
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let violations = check_all(EVENTS, &snapshot);
-    assert!(
-        violations.iter().any(|v| v.why.contains("final")),
-        "同一 turn 两条 final 必须被看见：{:?}",
-        violations
-    );
-}
-
 // ── 彩排：真实执行形状 ──
 //
-// 接入真实模型（pattern = reasoner）→ 真实对话 → N1/N3/N5 仍全绿；
+// 接入真实模型（pattern = reasoner）→ 真实对话 → N1/N5 仍全绿；
 // 兜底埋点 + 四层 budget_ms 就位 → 时延埋点可测。
 // 这里用 ⑤ adapters 的确定性桩（StubLlmAdapter）代替真实模型——闭环形状与
 // 真实接线完全一致，只换适配器。
@@ -515,7 +466,7 @@ impl LlmAdapter for MinimalStub {
         }
     }
 }
-use crate::invariants::{budget_exceeded, unresolved_turns};
+use crate::invariants::budget_exceeded;
 use std::time::Instant;
 
 /// 一轮**真实执行形状**的对话：Decider 换成 Reasoner + 适配器，带 cost_ms 埋点。
@@ -585,7 +536,7 @@ async fn rehearse_reasoner_turn(
     }
 }
 
-/// 验收：接入「真实模型」→ 真实对话 → N1/N3/N5 仍全绿。
+/// 验收：接入「真实模型」→ 真实对话 → N1/N5 仍全绿。
 #[tokio::test]
 async fn reasoner_turn_keeps_all_invariants_green() {
     let llm = MinimalStub::succeed("stub-model");
@@ -598,7 +549,6 @@ async fn reasoner_turn_keeps_all_invariants_green() {
         "{:?}",
         check_all(EVENTS, &snapshot)
     );
-    assert!(unresolved_turns(&snapshot, false).is_empty());
 }
 
 /// 输入契约：`Reasoner` **只看事件切片**——prompt 由事件渲染，
@@ -662,10 +612,6 @@ async fn reasoner_failure_produces_fallback_with_telemetry() {
         check_all(EVENTS, &snapshot).is_empty(),
         "{:?}",
         check_all(EVENTS, &snapshot)
-    );
-    assert!(
-        unresolved_turns(&snapshot, false).is_empty(),
-        "写了 fallback ⇒ turn 已收束"
     );
 }
 

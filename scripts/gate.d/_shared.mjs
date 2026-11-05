@@ -189,7 +189,8 @@ export const BASELINE = {
   // 从环移入执行体：环侧 `tools/dispatch/parallel.test.rs` 整文件退役（5 条判据），
   // 执行体补 2 条（写侧档独占 / 只读档并行，`port.test.rs`），环侧另把 1 条旧策略判据
   // 换成钉「环不再做策略」的同数判据。不是丢掉覆盖，是换承担者。非侵蚀。
-  rustTests: 2172,
+  // baseline-allow rustTests: §四.1 裁决删按轮配对判据，净减 17 条（2172→2155）——判据资产与实现同批退场，配对改由义务环五事实机制自己记账。逐条：`invariants/mod.test.rs` 的 C2/N3 两节 6 条（`one_final_per_turn_passes`、`two_finals_in_one_turn_is_detected`、`closed_tasks_do_not_count_as_final`、`one_open_per_turn_passes`、`two_opens_in_one_turn_is_detected`、`any_kind_on_the_opened_coordinate_opens_the_turn`）、故障注入 4 条（timeout / unresolved）、读侧宽限 1 条、D-203 final 角色 1 条、`check_all` 故障注入 2 条（`fault_double_final` / `fault_double_open`）、`actors/mod.test.rs` 1 条（`two_finals_are_caught_by_n3`）、`wal.test.rs` 净 −2（删 I1 双 final / I3 降级 / 索引重建 3 条，补 1 条「同会话后续轮合法、重放按 id 拦」）。覆盖没有丢：配对由环的租约 / 过期 / 重放承担，新增 `engine.test.rs::an_unpaired_request_is_closed_by_lease_not_left_pending`。非放宽。
+  rustTests: 2155,
   kernelRustTests: 131,
 
   // baseline-allow ciRustTestsTotal: 同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
@@ -343,7 +344,8 @@ export const BASELINE = {
   // `TurnState` 接线退役）是主要来源，`34526409` 再退役一批「被测对象已不存在」的判据（`turns.rs`
   // 等）。清白树实跑 `cargo test --workspace`：2171 passed / 0 failed。不是覆盖丢失：被删的是
   // 旧编排的判据，新义务环接入时用例数**只会回升**（B 类能力每接回一组就补回对应判据）。
-  ciRustTestsTotal: 2171,
+  // baseline-allow ciRustTestsTotal: 同一净减 17 条在 CI 口径下的折算（2171→2155，实测 2155）——被删用例均无 `cfg` 门，`--workspace` 求和在两种口径里是同一批；逐条归属见上方 `rustTests` 的注。非侵蚀。
+  ciRustTestsTotal: 2155,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -383,7 +385,8 @@ export const BASELINE = {
   // ② ③ 在**真实数据形状**上喂合法值 / 越界值各一次：合法值必须全绿（否则判据在误杀）、
   // 越界必须红。真实日志的**回放**不跑这条——夹具只留信封、`reason` 在载荷里、且它采于
   // 之前；硬跑只会得到「每条收束格都缺 reason」的假红，那不是判据错了。
-  verifyAsserts: 256,
+  // baseline-allow verifyAsserts: §四.1 裁决删按轮配对判据（`final_unique_per_turn` / `open_unique_per_turn` / `unresolved_turns`）——判据资产与实现同批退场，`invariants.rs` 的 I1DoubleFinal / I3NoClosure 两处反向用例随之删除（256→254），配对改由义务环五事实机制自己记账。非放宽。
+  verifyAsserts: 254,
   // 唯一一处**向上**的 panic 面（实测 77）：段归档与它的读侧——
   // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
   // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定

@@ -110,7 +110,7 @@ impl ChatVocab {
 /// 与消息变更同属「这一轮留下了什么」。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MessageVocab {
-    /// 产物落地：`artifact × asserted`。它也算一次收束（`closes_turn`）。
+    /// 产物落地：`artifact × asserted`。工具结果也是一次结算。
     pub artifact_added: &'static str,
     /// 消息列表新增：`message × opened`。
     pub message_added: &'static str,

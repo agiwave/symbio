@@ -352,6 +352,41 @@ async fn a_fresh_lease_is_waited_not_expired() {
     );
 }
 
+/// 未配对的 `request` 不会永久悬挂：租约到期且没有下一笔 ⇒ 环自己落 `failed`。
+///
+/// 开轮/终答的配对由环的五事实机制记账（这是它替代 SDK 按轮分组判据的机制证明）。
+#[tokio::test]
+async fn an_unpaired_request_is_closed_by_lease_not_left_pending() {
+    let seed = vec![
+        Fact::new(
+            FactKind::Request,
+            DebtKey::new(S, "p1", "d", 1),
+            json!({}),
+            0,
+        ),
+        Fact::new(
+            FactKind::Sent,
+            DebtKey::new(S, "p1", "d", 1),
+            json!({"deadline_ms": 10}),
+            0,
+        ),
+    ];
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({})).lease(10, 1)])
+        .with_executor("p1", Arc::new(Stub::ok()))
+        .with_facts(seed)
+        .at(100);
+    let report = drive(&ctx, S).await;
+
+    assert_eq!(report.dispatched, 0, "到点后不再重复派发");
+    let failed = ctx
+        .snapshot()
+        .into_iter()
+        .find(|f| f.kind == FactKind::Failed)
+        .expect("未配对的 request 必须被租约收束为 failed，而不是永久悬挂");
+    assert_eq!(failed.key.attempt, 1);
+    assert_eq!(failed.payload["reason"], "lease-expired");
+}
+
 #[tokio::test]
 async fn after_gate_orders_two_ports() {
     let first = Arc::new(Stub::ok());

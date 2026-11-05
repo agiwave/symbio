@@ -74,107 +74,6 @@ fn pending_events_are_skipped_by_seq_check() {
     assert!(seq_monotonic(&events).is_empty());
 }
 
-// ── C2 / N3：每 turn 至多 1 条 final ───────────────────────────────────
-
-#[test]
-fn one_final_per_turn_passes() {
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
-        pending("u1", "user.message", Entity::Scope, Verb::Opened, 1),
-        pending("f1", "chat.assistant.final", Entity::Scope, Verb::Closed, 1),
-    ]);
-    assert!(final_unique_per_turn(EVENTS, &events).is_empty());
-}
-
-#[test]
-fn two_finals_in_one_turn_is_detected() {
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
-        // 同一 turn 的第二条 final——转写收敛性被破坏。
-        pending(
-            "f0b",
-            "chat.assistant.final",
-            Entity::Scope,
-            Verb::Closed,
-            0,
-        ),
-    ]);
-    let bad = final_unique_per_turn(EVENTS, &events);
-    assert_eq!(bad.len(), 1, "一轮两条 final 必须被看见");
-    assert_eq!(bad[0].event_id, "f0b");
-    assert!(
-        bad[0].why.contains("f0"),
-        "违规要指出已存在的那条：{}",
-        bad[0].why
-    );
-}
-
-#[test]
-fn closed_tasks_do_not_count_as_final() {
-    // `task.completed` 也是 closed，但不是发言——N3 只管 turn 的发言收敛。
-    let events = stored(vec![
-        pending("t0", "task.completed", Entity::Task, Verb::Closed, 0),
-        pending("t1", "task.completed", Entity::Task, Verb::Closed, 0),
-    ]);
-    assert!(final_unique_per_turn(EVENTS, &events).is_empty());
-}
-
-// ── C2 对偶：每 turn 至多 1 条开轮（`u-{turn}`）────────────────────────
-
-#[test]
-fn one_open_per_turn_passes() {
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
-        pending("u1", "user.message", Entity::Scope, Verb::Opened, 1),
-        pending("f1", "chat.assistant.final", Entity::Scope, Verb::Closed, 1),
-    ]);
-    assert!(
-        open_unique_per_turn(&events).is_empty(),
-        "每轮只开一次 ⇒ 不报警：{:?}",
-        open_unique_per_turn(&events)
-    );
-}
-
-#[test]
-fn two_opens_in_one_turn_is_detected() {
-    // 同一个 `u-{turn}` 落两回——单写者被绕过的痕迹。
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("u0-again", "user.message", Entity::Scope, Verb::Opened, 0),
-    ]);
-    let bad = open_unique_per_turn(&events);
-    assert_eq!(bad.len(), 1, "一轮两条开轮必须被看见");
-    assert_eq!(bad[0].event_id, "u0-again", "违规锚在**后落**的那条上");
-    assert!(
-        bad[0].why.contains("u0"),
-        "违规要指出已存在的那条：{}",
-        bad[0].why
-    );
-}
-
-/// 开轮那一格上的**任何**名字都算开轮（DE-024 D-203 裁决一）。
-///
-/// 判据一旦在这里额外比一次名字，写侧 `is_turn_open`（只认格子）与读侧本检查就是两
-/// 条尺子，而后果是单向的：一个新名字落进开轮格 ⇒ 读侧静默不拦 ⇒ 同一个 `u-{turn}`
-/// 成了两条输入、兜底率的分母虚增，全绿。格子语义不问名字。
-#[test]
-fn any_kind_on_the_opened_coordinate_opens_the_turn() {
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("x0", "turn.reopened", Entity::Scope, Verb::Opened, 0),
-    ]);
-    let bad = open_unique_per_turn(&events);
-    assert_eq!(
-        bad.len(),
-        1,
-        "同格的第二个名字同样是开轮，必须被看见：{bad:?}"
-    );
-    assert_eq!(bad[0].event_id, "x0", "违规锚在**后落**的那条上");
-}
-
 // ── C3 / N5：断言类事件必须带溯源 ──────────────────────────────────────
 #[test]
 fn asserted_with_provenance_passes() {
@@ -527,7 +426,7 @@ fn non_closure_cells_are_not_asked_for_a_reason() {
 
 #[test]
 fn an_artifact_is_settled_but_not_a_stop_so_it_is_not_asked_for_a_reason() {
-    // `closes_turn`（I3「结算了吗」）把产物格算进去；C6 问的是「为什么停」，
+    // 产物格让某一轮「有事发生」，但 C6 问的是「为什么停」，
     // 产物落格后轮还在走，生产写方永远写不出这条 reason。把两把尺合一，
     // 判据就变成向生产要一个它给不出的字段（`artifact.added 缺 reason` 的飘红）。
     let events = vec![
@@ -548,7 +447,7 @@ fn an_artifact_is_settled_but_not_a_stop_so_it_is_not_asked_for_a_reason() {
     );
 }
 
-// ── check_all：九条合跑 ────────────────────────────────────────────────
+// ── check_all：七条合跑 ────────────────────────────────────────────────
 
 #[test]
 fn check_all_on_clean_sequence_is_empty() {
@@ -558,95 +457,12 @@ fn check_all_on_clean_sequence_is_empty() {
         pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0).with_produced_by(0),
         pending("v0", "classify.verdict", Entity::Verdict, Verb::Asserted, 0).with_produced_by(0),
     ]);
-    assert!(check_all(EVENTS, &events).is_empty(), "合规序列九查全绿");
+    assert!(check_all(EVENTS, &events).is_empty(), "合规序列七查全绿");
 }
 
-// ── 故障注入用例集（超时 / 乱序 / 重复 final / 无溯源，4 类违规全被捕获）────
+// ── 故障注入用例集（乱序 / 无溯源等违规必须被捕获）────────────────────
 //
 // 每类故障注入事件序列，断言**对应的检查必须红**。反向用例（合规序列不报警）在上方各检查区。
-
-#[test]
-fn fault_timeout_turn_never_settles_is_caught() {
-    // 超时 = 生成失败且什么都没写——turn 开了却没有 final/fallback。
-    let events = stored(vec![pending(
-        "u0",
-        "user.message",
-        Entity::Scope,
-        Verb::Opened,
-        0,
-    )]);
-    // 严判档（`false`）：故障注入要的是"开了没关就是红"。
-    let bad = unresolved_turns(&events, false);
-    assert_eq!(bad.len(), 1, "静默中断必须被看见（I3：兜底必须产生事件）");
-    assert!(bad[0].why.contains("未收束"), "{}", bad[0].why);
-    // 宽限档（`true`）：切片尾部这一轮可能只是**还在生成**——纯函数无从分辨，
-    // 放行（读侧口径，见 `check_all`）。两条判据并存，不是谁覆盖谁。
-    assert!(
-        check_all(EVENTS, &events).is_empty(),
-        "读侧不该把在途尾轮报成静默中断：{:?}",
-        check_all(EVENTS, &events)
-    );
-}
-
-#[test]
-fn fault_timeout_avoided_by_fallback_event() {
-    // 反向：超时后**写了** fallback → turn 收束，检查放行（兜底是普通事件）。
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending(
-            "fb0",
-            "chat.assistant.fallback",
-            Entity::Scope,
-            Verb::Closed,
-            0,
-        ),
-    ]);
-    assert!(unresolved_turns(&events, false).is_empty());
-}
-
-#[test]
-fn fault_timeout_avoided_by_artifact_event() {
-    // 反向（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）：只落了**产物格**的轮
-    // 同样算收束——工具结果是说给用户的话，没有发言权的主体（对等主体）以它收束。
-    // 没有这条，对等主体每跑一轮都永久留一条违规，e2e 的「不变量清单为空」无从谈起。
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending(
-            "a0",
-            crate::test_fixtures::EVENT_ARTIFACT_ADDED,
-            Entity::Artifact,
-            Verb::Asserted,
-            0,
-        )
-        .with_produced_by(0),
-    ]);
-    assert!(
-        unresolved_turns(&events, false).is_empty(),
-        "产物收束 ⇒ 放行：{:?}",
-        unresolved_turns(&events, false)
-    );
-    // 边界：**别的轮**的产物不算本轮的收束（按 turn 号配对，与 final 同一纪律）。
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("u1", "user.message", Entity::Scope, Verb::Opened, 1),
-        pending(
-            "a1",
-            crate::test_fixtures::EVENT_ARTIFACT_ADDED,
-            Entity::Artifact,
-            Verb::Asserted,
-            1,
-        )
-        .with_produced_by(0),
-    ]);
-    assert_eq!(
-        unresolved_turns(&events, false)
-            .iter()
-            .map(|v| v.event_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["u0"],
-        "turn 0 没有自己的产物，仍要报；turn 1 被自己的产物合上"
-    );
-}
 
 #[test]
 fn fault_out_of_order_seq_regression_is_caught() {
@@ -665,35 +481,6 @@ fn fault_out_of_order_seq_regression_is_caught() {
     // 两条都被看见：seq 3 处应为 0（开头顶格），seq 1 处应为 4（回退）。
     assert_eq!(bad.len(), 2, "乱序注入的两处异常都必须被看见：{:?}", bad);
     assert_eq!(bad[1].event_id, "e1");
-}
-
-#[test]
-fn fault_double_final_is_caught_by_check_all() {
-    // 重复 final 经 check_all 合跑也必须红（CI 形态下无漏网）。
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
-        pending("f1", "chat.assistant.final", Entity::Scope, Verb::Closed, 0),
-    ]);
-    let violations = check_all(EVENTS, &events);
-    assert!(
-        violations.iter().any(|v| v.why.contains("final")),
-        "{:?}",
-        violations
-    );
-}
-
-#[test]
-fn fault_double_open_is_caught_by_check_all() {
-    // 重复开轮经 check_all 合跑也必须红，且是**唯一**那条（该轮正常收束 ⇒ 不牵连 C4）。
-    let events = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("u0-again", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Scope, Verb::Closed, 0).with_produced_by(0),
-    ]);
-    let violations = check_all(EVENTS, &events);
-    assert_eq!(violations.len(), 1, "只有开轮这一条红：{violations:?}");
-    assert!(violations[0].why.contains("开轮"), "{violations:?}");
 }
 
 #[test]
@@ -729,28 +516,7 @@ fn fault_budget_exceeded_is_caught() {
     assert!(budget_exceeded(&events, None).is_empty(), "无预算 ⇒ 不判");
 }
 
-// ── 读侧宽限（两条 I3 检查接进读出口前先立的口径）────────────
-
-#[test]
-fn read_side_graces_the_trailing_open_turn_but_flags_the_overtaken_one() {
-    // 轮 0 开了没收束，轮 1 随后开轮并正常收束——会话已经往前走，轮 0 是确凿的
-    // 静默中断（不是"还在生成"），读侧必须报。
-    let overtaken = stored(vec![
-        pending("u0", "user.message", Entity::Scope, Verb::Opened, 0),
-        pending("u1", "user.message", Entity::Scope, Verb::Opened, 1),
-        pending("f1", "chat.assistant.final", Entity::Scope, Verb::Closed, 1),
-    ]);
-    let bad = unresolved_turns(&overtaken, true);
-    assert_eq!(bad.len(), 1, "被后续轮越过的未收束轮必须报");
-    assert_eq!(bad[0].event_id, "u0", "违规锚在缺口本身（开轮那条）");
-    assert!(
-        check_all(EVENTS, &overtaken)
-            .iter()
-            .any(|v| v.why.contains("未收束")),
-        "经 check_all 也要红：{:?}",
-        check_all(EVENTS, &overtaken)
-    );
-}
+// ── 读侧宽限（C5 接进读出口前先立的口径）────────────
 
 #[test]
 fn read_side_budget_follows_declared_tiers_and_skips_when_none_declared() {
@@ -887,52 +653,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
     assert_eq!(declared_budget_ms(EVENTS, &neither), None);
 }
 
-// ── D-203：判据读声明，不读名字 ─────────────────────────────────────────
-
-/// 「什么算定稿发言」的答案在**词汇表**上，不在这个函数里（DE-024 D-203 裁决二）。
-///
-/// 一张新插件自己造的表：两个名字落同一格（`turn × closed`），只有其中一个声明了
-/// `finalizes_turn`。判据必须数前者、放过后者——于是横向扩充加一个名字时，守卫跟着
-/// 声明走，而不是跟着内核抄的那串字符走（那才是「加能力必改架构」的来源）。
-#[test]
-fn a_final_is_counted_because_it_declares_the_role_not_because_of_its_name() {
-    const VOCAB: &[EventDecl] = &[
-        EventDecl::with_roles(
-            "fixture.my_final",
-            (Entity::Scope, Verb::Closed),
-            &[FactRole::FinalizesTurn],
-        ),
-        EventDecl::new("fixture.my_silent", (Entity::Scope, Verb::Closed)),
-    ];
-    let closed_at = |id: &str, kind: &str, turn: u64| {
-        pending(id, kind, Entity::Scope, Verb::Closed, turn).with_produced_by(0)
-    };
-
-    // 声明了角色的名字：同轮两条 ⇒ 违规（正向，拦得住）。
-    let dup = stored(vec![
-        closed_at("f-1", "fixture.my_final", 3),
-        closed_at("f-2", "fixture.my_final", 3),
-    ]);
-    let bad = final_unique_per_turn(VOCAB, &dup);
-    assert_eq!(bad.len(), 1, "同轮第二条定稿必须被看见：{bad:?}");
-
-    // 同格但没声明角色的名字：一条都不算定稿（反向，不越权拦）。
-    let silent = stored(vec![
-        closed_at("s-1", "fixture.my_silent", 3),
-        closed_at("s-2", "fixture.my_silent", 3),
-    ]);
-    assert!(
-        final_unique_per_turn(VOCAB, &silent).is_empty(),
-        "没扮演角色的名字不是定稿，收束格之外的拦法不是这条判据"
-    );
-
-    // 同一批事件换一张**不认识这些名字**的表 ⇒ 判据空转（这正是装配口
-    // `Gap::UnmannedRole` 与门禁 CS-008 要拦的形状，不是判据自己的错）。
-    assert!(
-        final_unique_per_turn(EVENTS, &dup).is_empty(),
-        "词汇表里没有的名字不扮演任何角色——角色来自表，不是来自猜"
-    );
-}
+// ── C6 / D-203：停机判据读声明，不读名字 ───────────────────────────────
 
 /// 停机事实的第二臂同样读角色（C6）：`authz.denied` 那一条的名字不出现在判据里。
 #[test]
@@ -952,7 +673,7 @@ fn a_stop_fact_is_a_grid_cell_or_a_declared_role() {
         VOCAB,
         &pending("c-1", "fixture.any", Entity::Scope, Verb::Closed, 1)
     ));
-    // 既不在收束格、又没声明角色 ⇒ 不是停（产物格落在这里，与 `closes_turn` 分歧）。
+    // 既不在收束格、又没声明角色 ⇒ 不是停（产物格落在这里）。
     assert!(!is_stop_fact(
         VOCAB,
         &pending("a-1", "fixture.any", Entity::Artifact, Verb::Asserted, 1)

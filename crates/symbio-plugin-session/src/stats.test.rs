@@ -926,7 +926,8 @@ fn reverse_case_the_readout_moves_when_the_wal_changes() {
 }
 
 /// 不变量列随事实源反向变化：
-/// 真实形状的两轮全绿 ⇒ 空；删掉收束格 ⇒ C4 必须报出那个缺口。
+/// 真实形状的两轮全绿 ⇒ 空；删掉中间一行 ⇒ seq 跳号必须报出。
+/// 轮次配对不在这里判——那是义务环的债表。
 #[test]
 fn invariants_move_when_the_wal_changes() {
     let wal = seed("invariants");
@@ -946,20 +947,11 @@ fn invariants_move_when_the_wal_changes() {
         "两轮都收束、档位已声明且预算内 ⇒ 不变量清单为空（首日不假红）"
     );
 
-    // 删轮 0 的收束格 ⇒ 轮 0 被轮 1 越过 ⇒ C4 报未收束；行删了 ⇒ C1 报 seq 跳号。
+    // 删轮 0 的收束格 ⇒ 行删了 ⇒ C1 报 seq 跳号；轮次配对归义务环，不在此列。
     drop_line(&wal, "f0");
     let list = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN).invariants;
     let list = list.as_array().expect("清单是数组");
-    assert_eq!(list.len(), 2, "{list:?}");
-    assert!(
-        list.iter()
-            .any(|v| v["why"].as_str().unwrap_or_default().contains("未收束")),
-        "C4：删掉收束格 ⇒ 该轮被判未收束：{list:?}"
-    );
-    assert!(
-        list.iter().any(|v| v["event_id"] == "u0"),
-        "违规锚在开轮那条（缺口本身，不是切片末尾某条无关事件）：{list:?}"
-    );
+    assert_eq!(list.len(), 1, "{list:?}");
     assert!(
         list.iter()
             .any(|v| v["why"].as_str().unwrap_or_default().contains("seq")),

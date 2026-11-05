@@ -16,7 +16,7 @@
 //!
 //! ## 为什么还要一张 `EVENTS`
 //!
-//! core 的不变量判据（`is_turn_final` / `is_stop_fact` / `check_all` / `closure_reason_closed`）
+//! core 的不变量判据（`is_stop_fact` / `check_all` / `closure_reason_closed`）
 //! 的词汇面是 `&[EventDecl]`——它们问「这条名字扮演什么角色」，答案必须来自一张声明表。
 //! 这张表由用例自己交：格位与角色与各 owner 的 `EventDecl` 逐条相同；协议五格仍取
 //! 内核常量（它们是语法闭集的一部分）。

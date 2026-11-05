@@ -2,12 +2,12 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 219,
-      "test": 249
+      "prod": 196,
+      "test": 243
     },
     "F2": {
-      "prod": 19,
-      "test": 22
+      "prod": 16,
+      "test": 14
     },
     "F3": {
       "prod": 0,
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-05",
+      "faces": "F1.prod / F1.test / F2.prod / F2.test",
+      "reason": "§四.1 裁决删按轮配对判据：`final_unique_per_turn` / `open_unique_per_turn` / `unresolved_turns` 与 `is_turn_open` / `is_turn_final` / `closes_turn` / `unique_per_turn_core` 整批退场，配对改由义务环五事实机制记账。F1 219/249 → 196/243、F2 19/22 → 16/14 全部为实测收窄；目标 0 不变。"
+    },
     {
       "date": "2026-11-05",
       "faces": "F1.prod",

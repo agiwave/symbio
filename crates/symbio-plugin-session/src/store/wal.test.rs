@@ -8,7 +8,6 @@ use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::decl::ring::Decl;
 use symbio_kernel::decl::ring::Pattern;
 use symbio_kernel::decl::{Builder, PluginDeclarations};
-use symbio_kernel::event::FactRole;
 use symbio_kernel::event::{
     Entity, Event, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
     EVENT_SENT,
@@ -19,7 +18,7 @@ use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::vocab;
-use symbio_sdk::invariants::{check_all, unresolved_turns};
+use symbio_sdk::invariants::check_all;
 use symbio_sdk::projection::prompt_fidelity::verify as verify_prompt_fidelity;
 use symbio_sdk::projection::transcript::transcript;
 
@@ -182,7 +181,6 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
         "{:?}",
         check_all(vocab(), &snapshot)
     );
-    assert!(unresolved_turns(&snapshot, false).is_empty());
     // 断点状态本身也在账上（4 条事实 ⇒ event_count = 4）。
     assert_eq!(after_cp.event_count, 4, "断点按事实条数计");
 }
@@ -971,214 +969,40 @@ fn gate_rejects_a_declaration_without_provenance() {
     assert_eq!(store.len(), 0, "被拒的事件不落盘");
 }
 
-/// I1：同一轮的第二条 final 被拒；**产物收束 + final 是合法组合**（不是重复）。
+/// 写闸只认「名字与格位同源」和「溯源」：同一会话后来的开轮 / 终答都合法
+/// （`scope` 是会话身份，不是轮次），重复投递由 `Duplicate` 按 id 拦下。
 #[test]
-fn gate_rejects_a_second_final_but_allows_artifact_then_final() {
+fn gate_allows_later_turns_of_the_same_session_but_rejects_replay() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("events.jsonl");
     let store = EventWalStore::open(&path).unwrap();
 
-    store
-        .append(ev(
-            "u-0",
-            EVENT_USER_MESSAGE,
-            Entity::Scope,
-            Verb::Opened,
-            0,
-            "问",
-        ))
-        .unwrap();
-    // 产物收束（D-067）：它让「这一轮算收束」，但 final 还没落——必须还能落。
-    store
-        .append(
-            Event::pending(
-                "a-0-0",
-                EVENT_ARTIFACT_ADDED,
-                Entity::Artifact,
-                Verb::Asserted,
-                0,
-                "session/main",
-            )
-            .with_produced_by(0)
-            .with_payload(serde_json::json!({ "tool": "echo", "text": "out" })),
-        )
-        .expect("产物格不是 final，不能被当成重复收束");
-    store
-        .append(ev(
-            "f-0",
-            EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Scope,
-            Verb::Closed,
-            0,
-            "答",
-        ))
-        .expect("产物之后仍应有且只有一条 final");
-
-    let err = store
-        .append(ev(
-            "f-0-again",
-            EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Scope,
-            Verb::Closed,
-            0,
-            "答二",
-        ))
-        .expect_err("同轮第二条 final 必须被拒");
-    match err {
-        symbio_kernel::store::AppendError::Invariant { invariant, .. } => {
-            assert_eq!(invariant, symbio_kernel::store::StoreInvariant::I1);
-        }
-        other => panic!("拒错形态：{other:?}"),
+    for (id, kind, verb, text) in [
+        ("u-0", EVENT_USER_MESSAGE, Verb::Opened, "问"),
+        ("f-0", EVENT_CHAT_ASSISTANT_FINAL, Verb::Closed, "答"),
+        ("u-1", EVENT_USER_MESSAGE, Verb::Opened, "又问"),
+        ("f-1", EVENT_CHAT_ASSISTANT_FINAL, Verb::Closed, "再答"),
+    ] {
+        store
+            .append(ev(id, kind, Entity::Scope, verb, 0, text))
+            .expect("同一会话的后续事实必须能写");
     }
-}
+    assert_eq!(store.len(), 4);
 
-/// I1：同一轮两条**不同 id** 的开轮事件被拒（同 id 的重放更早就会被 `Duplicate` 拦下）。
-#[test]
-fn gate_rejects_a_second_open_for_the_same_turn() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("events.jsonl");
-    let store = EventWalStore::open(&path).unwrap();
-
-    store
-        .append(ev(
-            "u-0",
-            EVENT_USER_MESSAGE,
-            Entity::Scope,
-            Verb::Opened,
-            0,
-            "问",
-        ))
-        .unwrap();
-    let err = store
-        .append(ev(
-            "u-0-retry",
-            EVENT_USER_MESSAGE,
-            Entity::Scope,
-            Verb::Opened,
-            0,
-            "又问",
-        ))
-        .expect_err("同轮第二条开轮必须被拒");
-    match err {
-        symbio_kernel::store::AppendError::Invariant { invariant, .. } => {
-            assert_eq!(invariant, symbio_kernel::store::StoreInvariant::I1);
-        }
-        other => panic!("拒错形态：{other:?}"),
-    }
-}
-
-/// I3：新轮越过未收束的旧轮 = **崩溃恢复的形状** ⇒ 照常入格，但计数（不静默）。
-#[test]
-fn gate_degrades_instead_of_blocking_a_new_turn_over_an_open_one() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("events.jsonl");
-    let store = EventWalStore::open(&path).unwrap();
-
-    store
-        .append(ev(
-            "u-0",
-            EVENT_USER_MESSAGE,
-            Entity::Scope,
-            Verb::Opened,
-            0,
-            "问",
-        ))
-        .unwrap();
-    // 上一轮停在半路（没有 final）：重启后开下一轮。拒绝会把这个会话钉死。
-    store
-        .append(ev(
+    // 同一 id 的重复投递不是「第二条」，而是同一条事实的重放。
+    assert_eq!(
+        store.append(ev(
             "u-1",
             EVENT_USER_MESSAGE,
             Entity::Scope,
             Verb::Opened,
             1,
-            "第二个问题",
-        ))
-        .expect("崩溃恢复形状必须还能写");
-    assert_eq!(store.degraded_i3(), 1, "越过未收束轮要计数，不能静默");
-    assert_eq!(store.len(), 2);
-
-    // 收束之后就不再有缺口：第三轮不该再计一次。**两条**都要收——0 是崩溃残轮，
-    // 1 是本轮；只收 1 的话，0 仍然是「被越过的旧轮」。
-    store
-        .append(ev(
-            "f-0",
-            EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Scope,
-            Verb::Closed,
-            0,
-            "补上的收束",
-        ))
-        .unwrap();
-    store
-        .append(ev(
-            "f-1",
-            EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Scope,
-            Verb::Closed,
-            1,
-            "答",
-        ))
-        .unwrap();
-    store
-        .append(ev(
-            "u-2",
-            EVENT_USER_MESSAGE,
-            Entity::Scope,
-            Verb::Opened,
-            2,
-            "第三个问题",
-        ))
-        .unwrap();
-    assert_eq!(store.degraded_i3(), 1, "旧轮收束后不再算越界");
-}
-
-/// 闸门的索引**随重放重建**：重启后同轮第二条 final 仍然被拒。
-#[test]
-fn gate_index_is_rebuilt_from_the_wal_on_reopen() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("events.jsonl");
-    {
-        let store = EventWalStore::open(&path).unwrap();
-        store
-            .append(ev(
-                "u-0",
-                EVENT_USER_MESSAGE,
-                Entity::Scope,
-                Verb::Opened,
-                0,
-                "问",
-            ))
-            .unwrap();
-        store
-            .append(ev(
-                "f-0",
-                EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Scope,
-                Verb::Closed,
-                0,
-                "答",
-            ))
-            .unwrap();
-    }
-
-    let reopened = EventWalStore::open(&path).unwrap();
-    let err = reopened
-        .append(ev(
-            "f-0-late",
-            EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Scope,
-            Verb::Closed,
-            0,
-            "迟到的第二条",
-        ))
-        .expect_err("重放必须把「这一轮已有 final」带回来");
-    match err {
-        symbio_kernel::store::AppendError::Invariant { invariant, .. } => {
-            assert_eq!(invariant, symbio_kernel::store::StoreInvariant::I1);
-        }
-        other => panic!("拒错形态：{other:?}"),
-    }
+            "又问"
+        )),
+        Err(AppendError::Duplicate),
+        "重放按幂等键拦下"
+    );
+    assert_eq!(store.len(), 4, "被拒的重放不落盘");
 }
 
 /// 段四·名字不在表上 ⇒ 拒，且答的是 `OffGrid { declared: None }`。
@@ -1271,26 +1095,15 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
 /// 写闸读的是**注入的声明表**，不是内核常量：一个内核不认识的名字，只要装配表
 /// 给了格位就能落；同一张表撤掉后，它立刻按「网格之外」被拒。
 ///
-/// 同一条表还给出**角色**：闸门里那条「每轮至多一条 final」数的是声明了
-/// `finalizes_turn` 的名字（DE-024 D-203）——判据的输入随声明走，不随名字走。
+/// 角色随声明走、不随名字走；按轮配对不在写闸里判——那是义务环的债表。
 ///
 /// 这是 DE-024 D-198 / D-199 / D-203 的端到端判据——只测 `Frozen::event_cell`
 /// 会漏掉「写闸有没有真的问它」这一格。
 #[test]
 fn injected_declarations_are_the_grid_the_gate_reads() {
     const FIXTURE: &str = "fixture.wal.event";
-    /// 收束格上的两个新名字：一个声明了 `finalizes_turn`，一个没声明。
-    const FIXTURE_FINAL: &str = "fixture.wal.final";
-    const FIXTURE_SILENT: &str = "fixture.wal.silent";
-    const FIXTURE_EVENTS: &[EventDecl] = &[
-        EventDecl::new(FIXTURE, (Entity::Scope, Verb::Progressed)),
-        EventDecl::with_roles(
-            FIXTURE_FINAL,
-            (Entity::Scope, Verb::Closed),
-            &[FactRole::FinalizesTurn],
-        ),
-        EventDecl::new(FIXTURE_SILENT, (Entity::Scope, Verb::Closed)),
-    ];
+    const FIXTURE_EVENTS: &[EventDecl] =
+        &[EventDecl::new(FIXTURE, (Entity::Scope, Verb::Progressed))];
 
     fn protocol_rows() -> &'static [Decl] {
         let mut out = Vec::new();
@@ -1380,60 +1193,6 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         "拒错形态：{err:?}"
     );
     assert_eq!(store.len(), 1, "被拒的事件不落格");
-
-    // 第二个方向：闸门里那条「每轮至多一条 final」数的是**表上声明了角色的名字**
-    // （DE-024 D-203 裁决二）。这两个名字内核与 core 都不认识，只有这张注入表认识。
-    store
-        .append(ev(
-            "role-1",
-            FIXTURE_FINAL,
-            Entity::Scope,
-            Verb::Closed,
-            5,
-            "一",
-        ))
-        .expect("声明了 finalizes_turn 的收束格要能落");
-    let err = store
-        .append(ev(
-            "role-2",
-            FIXTURE_FINAL,
-            Entity::Scope,
-            Verb::Closed,
-            5,
-            "二",
-        ))
-        .expect_err("同轮第二条定稿必须被拦");
-    assert!(
-        matches!(
-            err,
-            AppendError::Invariant {
-                invariant: StoreInvariant::I1,
-                ..
-            }
-        ),
-        "角色没进闸门的 final 判据：{err:?}"
-    );
-    // 反面对照：同格、同轮，但表上没给角色 ⇒ 不是定稿，两条都落得（拦法不是整格）。
-    store
-        .append(ev(
-            "silent-1",
-            FIXTURE_SILENT,
-            Entity::Scope,
-            Verb::Closed,
-            6,
-            "一",
-        ))
-        .expect("没扮演角色的收束格不是 final");
-    store
-        .append(ev(
-            "silent-2",
-            FIXTURE_SILENT,
-            Entity::Scope,
-            Verb::Closed,
-            6,
-            "二",
-        ))
-        .expect("同格的第二条也不算 final");
 
     // 同一份 WAL 换一个**没有注入**的实例：装配表与共享表都不认识这个新名字 ⇒ 拒绝。
     drop(store);
