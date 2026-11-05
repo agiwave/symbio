@@ -4,7 +4,9 @@
   "lp002ForbiddenDeps": [
     "dev-dependencies:symbio-providers"
   ],
-  "lp003WorldRoots": {},
+  "lp003WorldRoots": {
+    "plugin_rows.rs": 4
+  },
   "lp004WorldNamedContracts": 0,
   "lp005WorldPayloadSig": 0
 }
