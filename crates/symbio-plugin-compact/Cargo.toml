@@ -1,0 +1,18 @@
+[package]
+name = "symbio-plugin-compact"
+version = "0.1.14"
+description = "Symbio plugin: compact"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+symbio-plugin-api = { path = "../symbio-plugin-api" }
+serde_json = { workspace = true }
+async-trait = { workspace = true }

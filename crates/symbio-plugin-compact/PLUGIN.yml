@@ -1,0 +1,7 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: compact
+plugin_comment: 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）
+plugin_assembly: sub_agent
+plugin_order: 85
+# 它产的事实种类 `session.consolidated` 由 session 声明（owner 与写方分离的已知项，
+# 待 E-009 / CS-007 判），因此这里没有 `shared_events`：名字不跨插件导出。

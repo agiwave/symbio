@@ -15,6 +15,9 @@ pub const PLUGIN_ID_CAUSAL: &str = "causal";
 /// 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
 pub const PLUGIN_ID_CLASSIFY: &str = "classify";
 
+/// 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）
+pub const PLUGIN_ID_COMPACT: &str = "compact";
+
 /// 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
 pub const PLUGIN_ID_COMPOSE: &str = "compose";
 
@@ -126,6 +129,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "idempotency", // 幂等台账：一个工具、一条 Domain 事实、一张共享视图；同一个键在同一会话里只记一次
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
+    "compact", // 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）
     "local", // 本地文件
     "tool", // 工具世界（执行 / 路由 / 结果提取）
     "web", // 网络访问

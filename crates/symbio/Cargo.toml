@@ -26,6 +26,7 @@ symbio-providers = { path = "../symbio-providers", features = ["embedding"] }
 symbio-plugin-agent = { path = "../symbio-plugin-agent" }
 symbio-plugin-causal = { path = "../symbio-plugin-causal" }
 symbio-plugin-classify = { path = "../symbio-plugin-classify" }
+symbio-plugin-compact = { path = "../symbio-plugin-compact" }
 symbio-plugin-compose = { path = "../symbio-plugin-compose" }
 symbio-plugin-composite = { path = "../symbio-plugin-composite" }
 symbio-plugin-conation = { path = "../symbio-plugin-conation" }

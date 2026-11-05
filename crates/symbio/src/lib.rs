@@ -35,6 +35,7 @@ pub use symbio_plugin_api::{hooks, routes};
 pub use symbio_plugin_agent;
 pub use symbio_plugin_causal;
 pub use symbio_plugin_classify;
+pub use symbio_plugin_compact;
 pub use symbio_plugin_compose;
 pub use symbio_plugin_composite;
 pub use symbio_plugin_conation;
