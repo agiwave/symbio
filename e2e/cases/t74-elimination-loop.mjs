@@ -21,16 +21,17 @@ import './_selfrun.mjs';
 //   裁决之后才可能拒）——正对照与淘汰同批，缺了它「闸恒拒」也能全绿。
 // - **A 轮 2**：再委托 ⇒ 闸拒（同会话，覆盖层里已有那条撤销）；轮末**不落第二条
 //   裁决**（幂等），但如实再记一笔违约（约了没派成，DE-038 §5）。
-// - **B 会话**：另一个会话、同一主体 ⇒ 同样被拒。裁决在 A 的 WAL 里，闸扫的是
-//   **全部会话**——「换个会话绕开淘汰」这条静默面由这一格钉住。
+// - **B 会话**：另一个会话、同一主体 ⇒ 同样被拒。裁决在 A 的 WAL 里，B 开面时
+//   由会话把**已裁决**的 `verdict.asserted` 播种进 B 的事实流（D-340），于是闸在
+//   B 的**本地切片**里就能拒——「换个会话绕开淘汰」这条静默面由这一格钉住。
 //
-// ## 为什么 B 的 WAL 里也会有一条裁决（不是缺陷）
+// ## 为什么 B 的 WAL 里也有那条裁决（开面播种，不是本地重算）
 //
-// 淘汰**驱动**是会话级的（读本会话 WAL 算声誉、判既有裁决——与承诺 / 任务 / 记忆
-// 同一条口径，派生事实都是会话级的），闸的**读侧**才是部署级的（扫全部 WAL 折
-// 覆盖层）。于是 B 的事实源里「main 又违约一次且本地无既有裁决」⇒ B 也落一条。
-// 同一主体两条裁决，last-wins 折叠出同一个答案——本用例把这件事断言出来，
-// 而不是留给将来的读者纳闷。
+// 淘汰**驱动**是会话级的（读本会话 WAL 算声誉、判既有裁决），闸的**读侧**只看
+// 会话本地切片。B 是新会话、本地不可能自己长出一条「别人会话的」裁决，因此由既有的
+// 开面调用方在 `head() == 0` 时把部署级 last-wins 后的裁决**复制**进来（D-340）。
+// B 轮末的派生事实看到本地已有裁决 ⇒ 不再落第二条（幂等）。这条复制事实的
+// `produced_by` 保留原引用、载荷带 `source_seq`，本用例把它断言出来。
 import {
   MockLlm,
   makeHomedir,
@@ -197,14 +198,25 @@ export default defineCase(
       const b = await runCli({ ...base, session: B_SID, message: B_Q });
       assertEq(b.code, 0, `B 会话退出码（stderr: ${b.stderr.slice(0, 400)}）`);
 
-      // B 的事实源里也有自己的一条裁决（会话级驱动，见文件头说明）。
+      // B 的事实源里那条裁决是**开面播种**进来的（不是 B 本地重算，见文件头说明）。
       const bVerdicts = walLines(bWal).filter((e) => e.kind === 'verdict.asserted');
       assertEq(
         bVerdicts.length,
         1,
-        'B 的事实源各自完整：本地违约 + 本地无既有裁决 ⇒ 本地也落一条（last-wins 折叠同一答案）',
+        'B 开面播种恰好一条：部署级 last-wins 的裁决被复制进 B，本地不再落第二条',
       );
       assertEq(bVerdicts[0].payload?.subject, 'session/main');
+      assertEq(bVerdicts[0].actor, 'session/arbiter', '播入事实保留原 actor');
+      assertEq(
+        bVerdicts[0].payload?.source_seq,
+        verdicts[0].seq,
+        '审计对账：载荷 source_seq 指向被复制事实在 A 里的号',
+      );
+      assertEq(
+        bVerdicts[0].produced_by,
+        verdicts[0].produced_by,
+        '审计对账：信封不新增字段，produced_by 原样保留',
+      );
 
       // ── ④ 请求留痕：拒因真的回灌进了模型（用户与模型都看得见）────────────
       const reqs = await llm.requests();

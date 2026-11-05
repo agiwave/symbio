@@ -15,9 +15,60 @@
 //!   `recall_snapshots` / `deep_snapshots` 交 `Vec<Event>`，不交路径、不交句柄；
 //! - **跨会话的读要预算**：`recall_snapshots` 的名额与字节上限是本文件末尾那几个常量。
 
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+use symbio_kernel::event::{Entity, Verb};
+use symbio_kernel::store::AppendError;
+
 use super::*;
 
 impl SessionStore {
+    /// 开面播种（D-340）：把部署级**已裁决**的 `verdict.asserted` 复制进本会话事实流。
+    ///
+    /// 只在会话尚无事实（`head() == 0`）时执行一次——这是「开面时一致」的全部含义；
+    /// 开面之后才被撤销的主体在本会话内仍能动，运行期**不追发**（已知缺口，见 D-340）。
+    ///
+    /// 跨会话索引只出现在这里（裁决四）：`deep_snapshots` 是既有的部署级读，交的
+    /// 是值不交路径；`DriveTarget` / `PortExecContext` / 执行体一概看不到它。
+    ///
+    /// 复制走 `Store::append` 直落 WAL，不经 `FactSource::append`：播种**不踢驱动**，
+    /// 也不参与义务环的 owes / settled（本会话的第一条业务事实落地时才开轮）。
+    pub(crate) fn seed_open_verdicts(&self, session_id: &str) -> Result<(), String> {
+        let Some(wal) = self.facts(session_id)? else {
+            return Ok(());
+        };
+        if Store::head(&*wal).value() != 0 {
+            return Ok(());
+        }
+        for source in deployment_verdicts(&self.deep_snapshots()) {
+            let source_seq = source.seq.map(|seq| seq.value()).unwrap_or(0);
+            let mut payload = source.payload.clone();
+            if let Value::Object(map) = &mut payload {
+                // 审计对账点：`produced_by` 保留原引用，载荷里的 `source_seq` 指向
+                // 被复制事实的号——不新增信封字段（裁决三）。
+                map.insert("source_seq".to_string(), Value::from(source_seq));
+            }
+            let mut seeded = Event::pending(
+                source.event_id.clone(),
+                source.kind.clone(),
+                source.entity,
+                source.verb,
+                source.actor.clone(),
+            );
+            seeded.payload = payload;
+            seeded.produced_by = source.produced_by;
+            seeded.cost_ms = source.cost_ms;
+            match Store::append(&*wal, seeded) {
+                Ok(_) | Err(AppendError::Duplicate) => {}
+                Err(err) => {
+                    return Err(format!("开面播种失败（{}）：{err:?}", source.event_id));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// 该会话的**唯一事实源句柄**；会话目录不存在 ⇒ `None`。
     ///
     /// 进程内按会话构造一次并缓存：所有引擎写方共享同一实例，`head` 只有一份、
@@ -185,6 +236,53 @@ impl SessionStore {
             })
             .collect()
     }
+}
+
+/// 部署级 `verdict.asserted` 的 last-wins 视图：每对 `(subject, capability)` 只留
+/// **时刻最后**的一条（`ts` 定序，同刻按 `seq`、`event_id` 定序，保证双跑一致）。
+///
+/// 认格子而不是名字：`verdict × asserted` 上只有裁决者说过的话；`change` 认不出
+/// （含缺失）⇒ 跳过该条，不猜。默认能力与读侧覆盖层同口径（`assign.work`）。
+fn deployment_verdicts(snapshots: &[Vec<Event>]) -> Vec<Event> {
+    let mut last: BTreeMap<(String, String), Event> = BTreeMap::new();
+    for events in snapshots {
+        for event in events {
+            if event.entity != Entity::Verdict || event.verb != Verb::Asserted {
+                continue;
+            }
+            let Some(subject) = event.payload.get("subject").and_then(Value::as_str) else {
+                continue;
+            };
+            let capability = event
+                .payload
+                .get("capability")
+                .and_then(Value::as_str)
+                .unwrap_or(symbio_sdk::authz::CAP_ASSIGN_WORK);
+            match event.payload.get("change").and_then(Value::as_str) {
+                Some("revoke") | Some("restore") => {}
+                _ => continue,
+            }
+            let key = (subject.to_string(), capability.to_string());
+            let order = verdict_order(&event);
+            let replace = match last.get(&key) {
+                None => true,
+                Some(current) => verdict_order(current) < order,
+            };
+            if replace {
+                last.insert(key, event.clone());
+            }
+        }
+    }
+    last.into_values().collect()
+}
+
+/// 跨会话的「最后」只能按时钟比：各会话 `seq` 是各自的号空间，不可互比。
+fn verdict_order(event: &Event) -> (i64, u64, &str) {
+    (
+        event.ts,
+        event.seq.map(|seq| seq.value()).unwrap_or(0),
+        event.event_id.as_str(),
+    )
 }
 
 /// 召回扫描预算：最多看几个会话的事实源 / 单文件字节上限 / 总字节上限。

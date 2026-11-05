@@ -253,8 +253,14 @@ impl SessionPlugin {
             Arc::clone(&self.active_mgr),
             session_id.to_string(),
         ));
-        self.get_store()
-            .await?
+        let store = self.get_store().await?;
+        // 开面播种（D-340）：会话尚无事实时，把部署级已裁决的 `verdict.asserted`
+        // 复制进本会话事实流。只在**这一处**开面调用，运行期不追发；跨会话索引
+        // 不随 `DriveTarget` / `PortExecContext` / 执行体出现。
+        store
+            .seed_open_verdicts(session_id)
+            .map_err(PluginError::InternalError)?;
+        store
             .fact_source_bound(
                 session_id,
                 self.drive_entry(),
