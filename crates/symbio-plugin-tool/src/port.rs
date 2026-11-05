@@ -486,16 +486,6 @@ fn artifact_ctx(exec: &PortExecContext) -> Option<ArtifactCtx> {
     })
 }
 
-/// 一条结果的纯值（执行体落格所需）：环只搬数据，不解释。
-struct LandedResult<'a> {
-    text: &'a str,
-    success: bool,
-    pending: Option<&'a serde_json::Value>,
-    /// 成因码（等待用户的原因是 `needs_approval` 等，没跑到的是 `overflow_dropped` 等）。
-    failure_kind: &'a str,
-    raw: &'a str,
-}
-
 /// 外部执行闸门的中性输入（环读授权矩阵与成本台账后交过来的四个值）。
 #[derive(Debug, Clone, Copy)]
 struct GateInput {
@@ -544,17 +534,62 @@ fn refused(text: &str, failure_kind: &'static str) -> PortOutcome {
     }
 }
 
-/// 落一条 `artifact.added`：产物是**这次结果的产物**，所以由执行体写（P1b / D-308）。
+/// `artifact.added` 载荷的**唯一构造点**（`land_only` 与环派发都经 [`land_artifact`] 到这里）。
 ///
 /// 载荷字段（`tool` / `text` / `tool_call_id` / `args` / `success` /
-/// `needs_user_action` / `prompt` / `failure_kind` + 能力交出的
-/// 富化字段）全在这一处装配。结果节点 id 由 `tool_call_id` 派生，不作为载荷键
-/// （DE-048 D-312）。`allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时
-/// 按 `deny-{key}-artifact` 落一条幂等否定事实（同一笔债的多条结果说的是同一件事）。
-async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &LandedResult<'_>) {
-    let Some(art) = artifact_ctx(exec) else {
-        return;
-    };
+/// `needs_user_action` / `prompt` / `failure_kind` + 能力交出的富化字段）只在这一处算定。
+/// 停等信息从结果事实**顶层**取（`needs_user_action` / `prompt` / `failure_kind`）；
+/// 嵌套 `pending` 只是详情，不是唯一来源。
+/// 结果节点 id 由 `tool_call_id` 派生，不作为载荷键（DE-048 D-312）。
+fn artifact_payload(meta: &CallMeta<'_>, result: &serde_json::Value) -> serde_json::Value {
+    let pending = result.get(FACT_PENDING).filter(|v| !v.is_null());
+    let needs_user_action = result
+        .get("needs_user_action")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(pending.is_some());
+    let prompt = result
+        .get("prompt")
+        .cloned()
+        .filter(|v| !v.is_null())
+        .or_else(|| pending.and_then(|p| p.get("prompt")).cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let failure_kind = result
+        .get("failure_kind")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            pending
+                .and_then(|p| p.get("failure_kind"))
+                .and_then(|v| v.as_str())
+        })
+        .unwrap_or_default()
+        .to_string();
+    serde_json::json!({
+        "tool": meta.tool_name,
+        "text": result.get(FACT_RESULT_TEXT).cloned().unwrap_or(serde_json::Value::Null),
+        "tool_call_id": meta.tool_call_id,
+        // 定稿参数随产物落格：变更账按 `args.path` 取路径（读侧不反推结果文本）。
+        "args": meta.args.to_string(),
+        "success": result.get("success").cloned().unwrap_or(serde_json::Value::Bool(true)),
+        // 等待用户：结果节点是一张**待用户动作的卡**（`user_prompt` +
+        // `waiting_user_action`），不是普通结果文本。
+        "needs_user_action": needs_user_action,
+        "prompt": prompt,
+        "failure_kind": failure_kind,
+    })
+}
+
+/// 落一条 `artifact.added`：产物是**这次结果的产物**，所以由执行体写（P1b / D-308）。
+///
+/// **唯一写点**：批派与单次出口都不许自己装配载荷，一律经 [`artifact_payload`]。
+/// `allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时按 `deny-{key}-artifact`
+/// 落一条幂等否定事实（同一笔债的多条结果说的是同一件事）。
+async fn land_artifact(
+    exec: &PortExecContext,
+    art: &ArtifactCtx,
+    meta: &CallMeta<'_>,
+    result: &serde_json::Value,
+) {
     if !art.allowed {
         // 产物闸拒绝：只落一条否定事实；幂等键让它对同一笔债的多条结果只存在一条。
         // `reason` 的取值与环侧 `ClosureReason::Denied::as_str()` 同字面。
@@ -575,30 +610,24 @@ async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &Lan
             .await;
         return;
     }
-    let mut artifact_payload = serde_json::json!({
-        "tool": meta.tool_name,
-        "text": landed.text,
-        "tool_call_id": meta.tool_call_id,
-        "args": meta.args.to_string(),
-        "success": landed.success,
-        // 等待用户：结果节点是一张**待用户动作的卡**（`user_prompt` +
-        // `waiting_user_action`），不是普通结果文本。
-        "needs_user_action": landed.pending.is_some(),
-        "prompt": landed.pending
-            .and_then(|p| p.get("prompt"))
-            .cloned()
-            .unwrap_or(serde_json::Value::Null),
-        "failure_kind": landed.failure_kind,
-    });
+    let mut artifact_payload = artifact_payload(meta, result);
     // 能力交出的富化字段（DE-025 D-207）：执行体算，环侧只落（读侧认字段不认工具名）。
     // 待用户动作的调用不记账——「审批没到可判时刻」，与环侧记账同一条口径。
-    if landed.pending.is_none() && !meta.declared.is_empty() {
+    let pending = result.get(FACT_PENDING).filter(|v| !v.is_null());
+    if pending.is_none() && !meta.declared.is_empty() {
         let input = EffectInput {
             tool: meta.tool_name.to_string(),
             call_id: meta.tool_call_id.to_string(),
             args: meta.args.clone(),
-            success: landed.success,
-            result: landed.raw.to_string(),
+            success: result
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            result: result
+                .get(FACT_RAW_TEXT)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
             why: String::new(),
             declared: meta.declared,
         };
@@ -607,7 +636,7 @@ async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &Lan
     }
     exec.emit
         .emit(vec![FactDraft {
-            key: art.key,
+            key: art.key.clone(),
             kind: EVENT_ARTIFACT_ADDED.to_string(),
             entity: Entity::Artifact,
             verb: Verb::Asserted,
@@ -759,14 +788,34 @@ async fn finish(
             )
         }
     };
+    let needs_user_action = pending.is_some();
+    let prompt = pending
+        .as_ref()
+        .and_then(|p| p.get("prompt"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let pending_kind = pending
+        .as_ref()
+        .and_then(|p| p.get("failure_kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let mut fact = serde_json::json!({
+        FACT_RESULT_TEXT: text,
+        FACT_RAW_TEXT: raw,
+        FACT_SUCCESS: success,
+        FACT_PENDING: pending,
+        // 停等信息在**结果事实顶层**也可见：`pending` 只是详情，不是唯一来源。
+        // 下游（产物格 / 重建 / 编排层）读顶层，不必钻进嵌套对象。
+        "needs_user_action": needs_user_action,
+        "prompt": prompt,
+        FACT_GUARD: guard,
+    });
+    if !pending_kind.is_empty() {
+        fact["failure_kind"] = serde_json::json!(pending_kind);
+    }
     PortOutcome {
-        facts: vec![serde_json::json!({
-            FACT_RESULT_TEXT: text,
-            FACT_RAW_TEXT: raw,
-            FACT_SUCCESS: success,
-            FACT_PENDING: pending,
-            FACT_GUARD: guard,
-        })],
+        facts: vec![fact],
         error: None,
         ..Default::default()
     }
@@ -859,32 +908,6 @@ fn read_requested(
         })
         .unwrap_or_default();
     Ok((fact.id.clone(), calls))
-}
-
-/// 一条调用结果的产物格：模型侧按 `tool` / `tool_call_id` / `text` 读回。
-///
-/// 收据与结果同源：`success` / `text` / `failure_kind` 全部取自同一条结果事实，
-/// **不另判**——收据不许与结果自相矛盾。
-fn artifact_draft(call: &RequestedCall, result: &serde_json::Value) -> FactDraft {
-    let mut payload = serde_json::json!({
-        "tool": call.name,
-        "tool_call_id": call.id,
-        // 定稿参数随产物落格：变更账按 `args.path` 取路径（读侧不反推结果文本）。
-        "args": call.arguments.to_string(),
-        "text": result.get("result_text").cloned().unwrap_or(serde_json::Value::Null),
-        "success": result.get("success").cloned().unwrap_or(serde_json::Value::Bool(true)),
-    });
-    if let Some(kind) = result.get("failure_kind") {
-        payload["failure_kind"] = kind.clone();
-    }
-    FactDraft {
-        key: format!("artifact:{}", call.id),
-        kind: EVENT_ARTIFACT_ADDED.to_string(),
-        entity: Entity::Artifact,
-        verb: Verb::Asserted,
-        payload,
-        produced_by: None,
-    }
 }
 
 /// 补齐应答承载（`D-319`）：工具结果的 `tool` 消息**在端口里组装**。
@@ -1084,10 +1107,6 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
         .unwrap_or_default()
         .to_string();
     let success = lo.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
-    let failure_kind = lo
-        .get("failure_kind")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
     // 行为声明表：与执行形态同一匹配口径（注册表显示名）。
     let declared_table: Vec<(String, &'static [&'static str])> = match exec.ctx.as_ref() {
         Some(ctx) => match ctx.get(CAPABILITY_VISITOR) {
@@ -1110,18 +1129,18 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
         args: &args,
         declared: declared_of(&declared_table, tool_name),
     };
-    land_artifact(
-        exec,
-        &meta,
-        &LandedResult {
-            text: &text,
-            success,
-            pending: pending.as_ref(),
-            failure_kind,
-            raw: &text,
-        },
-    )
-    .await;
+    let Some(art) = artifact_ctx(exec) else {
+        return;
+    };
+    // 结果按**结果事实**的形状交回唯一构造点：停等信息由 `pending` 上提到顶层
+    // （见 [`artifact_payload`]）。
+    let result = serde_json::json!({
+        FACT_RESULT_TEXT: text.clone(),
+        FACT_RAW_TEXT: text,
+        FACT_SUCCESS: success,
+        FACT_PENDING: pending.unwrap_or(serde_json::Value::Null),
+    });
+    land_artifact(exec, &art, &meta, &result).await;
 }
 
 /// 端口声明的同批在飞上限（`PortDecl.concurrency`）——**执行体自己的**并发策略。
@@ -1305,30 +1324,22 @@ impl ToolPort {
                 };
             }
             if let Some(result) = result {
-                let mut artifact = artifact_draft(call, &result);
-                // 落格之前先判「声明的账」：违约时产物格必须报失败（fail-closed）。
-                let declared = declared_of(&declared_table, &call.name);
-                if !declared.is_empty() {
-                    let input = EffectInput {
-                        tool: call.name.clone(),
-                        call_id: call.id.clone(),
-                        args: call.arguments.clone(),
-                        success: result
-                            .get("success")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(true),
-                        result: result
-                            .get("result_text")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        why: String::new(),
-                        declared,
-                    };
-                    // 与单次出口同一条承接路径（富化先于判失败，顺序只有一份实现）。
-                    settle_declared(&exec, &input, &mut artifact.payload).await;
-                }
-                exec.emit.emit(vec![artifact]).await;
+                // 产物载荷只有一个构造点：批派也必须走 `land_artifact`（它再调
+                // `artifact_payload`），不在这里另装一份。
+                let art = ArtifactCtx {
+                    // 一笔债含多条调用：产物键按**调用 id**（按债键会让后一条被幂等吞掉）。
+                    key: format!("artifact:{}", call.id),
+                    produced_by: exec.origin,
+                    allowed: exec.permitted,
+                    denied_reason: exec.deny_reason.clone(),
+                };
+                let meta = CallMeta {
+                    tool_name: &call.name,
+                    tool_call_id: &call.id,
+                    args: &call.arguments,
+                    declared: declared_of(&declared_table, &call.name),
+                };
+                land_artifact(&exec, &art, &meta, &result).await;
             }
         }
         exec.emit

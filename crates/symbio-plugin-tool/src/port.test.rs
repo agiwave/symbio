@@ -673,6 +673,56 @@ async fn overflow_dropped_call_is_not_executed_and_the_receipt_says_so() {
     );
 }
 
+/// 批派路径上的停等调用：产物载荷必须有 `needs_user_action=true` + `prompt` +
+/// 顶层 `failure_kind`。
+///
+/// 产物载荷只有一个构造点（`artifact_payload`），批派也必须走它。从前批派自带一份
+/// 只拷 `tool/text/args/success` 的装配，停等字段在那一遍里被丢掉，投影只好把审批卡
+/// 渲染成普通 `body`（t27 / t78 抓到的就是这一处）。
+#[tokio::test]
+async fn pending_call_in_a_batch_lands_the_waiting_card_fields() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let prompt = serde_json::json!({ "kind": "confirm", "question": "确认删除？" });
+    let ctx = ctx_with_tool(
+        &parent,
+        "echo",
+        serde_json::json!({
+            "content": "需要确认后执行",
+            "failure_kind": "needs_approval",
+            "prompt": prompt,
+        }),
+    )
+    .await;
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = requested_call_with(
+        ctx,
+        recorder.clone(),
+        serde_json::json!([
+            { "id": "c1", "name": "echo", "arguments": { "content": "甲" } },
+        ]),
+    );
+
+    let out = ToolPort.execute(exec, input).await;
+    assert!(out.error.is_none(), "停等不是协议失败：{out:?}");
+
+    let drafts = recorder.drafts.lock().unwrap().clone();
+    let artifact = drafts
+        .iter()
+        .find(|draft| draft.kind == EVENT_ARTIFACT_ADDED)
+        .expect("停等也要落产物（结果节点由它派生）");
+    assert_eq!(
+        artifact.payload["needs_user_action"],
+        serde_json::json!(true),
+        "投影凭这个字段渲染 user_prompt / waiting_user_action"
+    );
+    assert_eq!(artifact.payload["prompt"], prompt, "确认卡正文随产物落格");
+    assert_eq!(
+        artifact.payload["failure_kind"],
+        serde_json::json!("needs_approval"),
+        "停等成因在载荷顶层可见，不是只埋在 pending 里"
+    );
+}
+
 // ==================== 授权判定：执行体先判，再执行（D-306 裁决一） ====================
 // 载荷带 `threshold`（开账行写的判定输入）时，执行体先落一条授权事实，再决定是否
 // 进入能力调用。拒绝必须是**判死**，不能静默放行；旧路径载荷不带 `threshold`，
