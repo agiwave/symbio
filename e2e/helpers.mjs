@@ -150,7 +150,9 @@ function walProgress(root) {
         const e = JSON.parse(last);
         fact = {
           kind: e.kind ?? '?',
-          key: String(e.id ?? e.key ?? e.port ?? e.attempt ?? '?'),
+          // `event_id` 兜底：response / chat.assistant.final 这类事实的载荷里没有
+          // `id`/`port`/`attempt`，只报 `key=?` 等于把「停在哪条事实」说丢了。
+          key: String(e.id ?? e.key ?? e.port ?? e.attempt ?? e.event_id ?? '?'),
           ts: e.ts ?? e.at_ms ?? e.atMs ?? '?',
         };
       } catch {
