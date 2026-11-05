@@ -537,10 +537,22 @@ fn requested_call(
     ctx: Arc<dyn PluginInvokeRequest>,
     recorder: Arc<RecordingWriter>,
 ) -> (PortExecContext, PortInput) {
-    let calls = serde_json::json!([
-        { "id": "c1", "name": "echo", "arguments": { "content": "甲" } },
-        { "id": "c2", "name": "echo", "arguments": { "content": "乙" } },
-    ]);
+    requested_call_with(
+        ctx,
+        recorder,
+        serde_json::json!([
+            { "id": "c1", "name": "echo", "arguments": { "content": "甲" } },
+            { "id": "c2", "name": "echo", "arguments": { "content": "乙" } },
+        ]),
+    )
+}
+
+/// 同一条 `tool.requested`，调用清单由用例给（用来放丢弃标记）。
+fn requested_call_with(
+    ctx: Arc<dyn PluginInvokeRequest>,
+    recorder: Arc<RecordingWriter>,
+    calls: serde_json::Value,
+) -> (PortExecContext, PortInput) {
     (
         PortExecContext {
             deadline_ms: None,
@@ -605,8 +617,63 @@ async fn empty_payload_runs_the_requested_calls_from_the_reader() {
     assert_eq!(done.payload["calls"], 2);
 }
 
+/// 超限丢弃：派发处**不执行**，但必须留痕——收据 `success=false` +
+/// `failure_kind=overflow_dropped`，正文就是模型写下的那一句。
+///
+/// 这是「收据不许与结果矛盾」的判据：同一笔调用只有一条结果事实，产物格从它派生。
+#[tokio::test]
+async fn overflow_dropped_call_is_not_executed_and_the_receipt_says_so() {
+    const NOTICE: &str = "本次调用未执行：本条响应内的工具调用数超过上限（32）……";
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = requested_call_with(
+        ctx,
+        recorder.clone(),
+        serde_json::json!([
+            { "id": "c1", "name": "echo", "arguments": { "content": "甲" } },
+            { "id": "c2", "name": "echo", "arguments": { "content": "乙" },
+              "overflow_notice": NOTICE },
+        ]),
+    );
+
+    let out = ToolPort.execute(exec, input).await;
+    assert!(out.error.is_none(), "丢弃不炸批：{out:?}");
+    assert_eq!(out.facts.len(), 2, "被丢弃的调用同样交回一条结果事实");
+    assert_eq!(
+        out.facts[1]["success"],
+        serde_json::json!(false),
+        "没跑到的结果不许自称成功"
+    );
+    assert_eq!(
+        out.facts[1]["failure_kind"],
+        serde_json::json!("overflow_dropped")
+    );
+
+    let drafts = recorder.drafts.lock().unwrap().clone();
+    let artifacts: Vec<_> = drafts
+        .iter()
+        .filter(|draft| draft.kind == EVENT_ARTIFACT_ADDED)
+        .collect();
+    assert_eq!(artifacts.len(), 2);
+    assert_eq!(artifacts[0].payload["success"], serde_json::json!(true));
+    assert_eq!(
+        artifacts[1].payload["success"],
+        serde_json::json!(false),
+        "收据与结果同源：不得一处说未执行、一处记成功"
+    );
+    assert_eq!(
+        artifacts[1].payload["failure_kind"],
+        serde_json::json!("overflow_dropped")
+    );
+    assert_eq!(
+        artifacts[1].payload["text"],
+        serde_json::json!(NOTICE),
+        "结果正文就是模型侧的丢弃提示"
+    );
+}
+
 // ==================== 授权判定：执行体先判，再执行（D-306 裁决一） ====================
-//
 // 载荷带 `threshold`（开账行写的判定输入）时，执行体先落一条授权事实，再决定是否
 // 进入能力调用。拒绝必须是**判死**，不能静默放行；旧路径载荷不带 `threshold`，
 // 保持旁路（双路径到期点：P4）。
@@ -798,7 +865,7 @@ async fn route_only_tools_are_deferred_not_granted() {
 #[tokio::test]
 async fn invalid_calls_are_denied_before_any_approval_reading() {
     let mut payload = debt_input("low", "medium", true);
-    payload["invalid"] = serde_json::json!(true);
+    payload["failure_kind"] = serde_json::json!("invalid_tool_call");
     let (exec, input, captured) = authz_call(payload);
     let out = ToolPort.execute(exec, input).await;
     assert!(
@@ -936,8 +1003,14 @@ async fn open_marks_protocol_failures_invalid_and_falls_back_to_the_epoch_id() {
         facts[0].key, "request-tool-tool-req-1-d2-model-7-c000-1",
         "缺模型 id 的兜底段只由应答顺序决定"
     );
-    assert_eq!(facts[0].payload["invalid"], serde_json::json!(true));
-    assert_eq!(facts[1].payload["invalid"], serde_json::json!(true));
+    assert_eq!(
+        facts[0].payload["failure_kind"],
+        serde_json::json!("invalid_tool_call")
+    );
+    assert_eq!(
+        facts[1].payload["failure_kind"],
+        serde_json::json!("invalid_tool_call")
+    );
 }
 
 #[tokio::test]

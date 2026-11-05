@@ -352,7 +352,7 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 同一净减 17 条在 CI 口径下的折算（2171→2155，实测 2155）——被删用例均无 `cfg` 门，`--workspace` 求和在两种口径里是同一批；逐条归属见上方 `rustTests` 的注。非侵蚀。
   // baseline-allow ciRustTestsTotal: 同上一条净减 1（2155→2154）——被删的用例无 `cfg` 门，
   // `--workspace` 求和在两种口径里是同一批。非侵蚀。
-  ciRustTestsTotal: 2154,
+  ciRustTestsTotal: 2160,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

@@ -279,10 +279,13 @@ impl PortExecutor for ModelExecutor {
                 // 应答承载（D-319）：assistant 正文 + 逐条 `tool_calls` 声明在这里组装，
                 // 环只把 `messages` 按序追加、按 `links` 配对。id 取法与环侧旧实现同源
                 // （wire id → 节点 id → 合成 `call_<名>_<轮>_<序号>`）。
-                let present = |id: &Option<String>| id.clone().filter(|s| !s.trim().is_empty());
                 let mut messages: Vec<PromptMessage> = Vec::new();
                 let mut links = Vec::new();
-                let mut calls: Vec<serde_json::Value> = Vec::new();
+                // 派发清单只有**一份**构造：`response.calls` 与 `tool.requested.calls`
+                // 读的是同一个向量。此前这里另写一遍（只挑 id/name/arguments），
+                // 丢弃标记就是在那一遍里被剥掉的——同一笔调用于是带着「未执行」的
+                // 正文被执行、收据还记成成功。
+                let calls = dispatch_calls(&request, &output.tool_calls);
                 if !output.text.trim().is_empty() {
                     messages.push(PromptMessage {
                         role: "assistant".into(),
@@ -294,17 +297,10 @@ impl PortExecutor for ModelExecutor {
                 }
                 for (index, call) in output.tool_calls.iter().enumerate() {
                     let name = call.name.as_deref().unwrap_or("<unnamed>");
-                    let id = present(&call.wire_id)
-                        .or_else(|| present(&call.id))
-                        .unwrap_or_else(|| format!("call_{}_{}_{}", name, request.root_id, index));
+                    let id = calls[index]["id"].as_str().unwrap_or_default().to_string();
                     if let Some(key) = call.id.clone().filter(|s| !s.trim().is_empty()) {
                         links.push((key, id.clone()));
                     }
-                    calls.push(serde_json::json!({
-                        "id": id.clone(),
-                        "name": name,
-                        "arguments": call.arguments.clone(),
-                    }));
                     messages.push(PromptMessage {
                         role: "assistant".into(),
                         text: format!("调用工具 {} {}", name, call.arguments),
@@ -609,11 +605,19 @@ fn dispatch_calls(
                     let name = call.name.as_deref().unwrap_or("<unnamed>");
                     format!("call_{}_{}_{}", name, request.root_id, idx)
                 });
-            serde_json::json!({
+            let mut entry = serde_json::json!({
                 "id": id,
                 "name": call.name.clone().unwrap_or_default(),
                 "arguments": call.arguments.clone(),
-            })
+            });
+            // 执行层判「不执行」的成因随清单走：`overflow_notice` 是模型侧在流收口时
+            // 写下的丢弃标记（正文即反馈）。它若被派发清单剥掉，执行层就只看得到
+            // 「一条普通调用」，只好照常执行并把产物记成成功——同一笔调用因此出现
+            // 「结果说未执行、收据说成功」两份互相打脸的说法。
+            if let Some(notice) = call.overflow_notice.as_ref() {
+                entry["overflow_notice"] = serde_json::json!(notice);
+            }
+            entry
         })
         .collect()
 }

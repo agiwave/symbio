@@ -93,7 +93,9 @@ const KEY_THRESHOLD: &str = "threshold";
 const KEY_APPROVED: &str = "approved";
 const KEY_GRANT: &str = "grant";
 const KEY_DEFERRED: &str = "deferred";
-const KEY_INVALID: &str = "invalid";
+/// 不可派发的成因词（缺 id / 解析失败 → `invalid_tool_call`；超限丢弃 →
+/// `overflow_dropped`）。一个布尔会把这三种压扁成一个「是/否」，收据就写不出成因。
+const KEY_FAILURE_KIND: &str = "failure_kind";
 /// 授权专用输入（环的 gate 调用）：只判、只落授权事实，不执行也不写 `sent`。
 const KEY_AUTHORIZE_ONLY: &str = "authorize_only";
 /// 建账专用输入（环的 open 调用）：把模型应答里的调用清单展开成 `request` 草稿。
@@ -164,14 +166,16 @@ fn authorize(payload: &serde_json::Value) -> Authz {
     else {
         return Authz::Deferred;
     };
-    if payload
-        .get(KEY_INVALID)
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
+    if let Some(cause) = payload.get(KEY_FAILURE_KIND).and_then(|v| v.as_str()) {
         return Authz::Denied {
             detail: "invalid_tool_call",
-            why: "invalid_call",
+            // 内部原因码带上成因（超限丢弃不是「调用本身非法」）：`why` 只用于
+            // 转写与日志，不参与线上措辞，故可保留分辨率。
+            why: if cause == "overflow_dropped" {
+                "overflow_dropped"
+            } else {
+                "invalid_call"
+            },
         };
     }
     let risk = payload
@@ -366,16 +370,29 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
             .unwrap_or_else(|| fallback_key(&exec.subject, epoch, idx, model_id, root_id));
         // 不可派发的调用**也开账**：创建行的集合里有这个元素，跳过它那一笔集合债
         // 就永远欠着。它的终局是「授权拒绝 + 批尾 failed」，不是「不存在」。
-        let invalid = model_id.is_none()
+        // 超限丢弃的标记是**字符串正文**（`mark_overflow_dropped` 写整句提示）；
+        // 旧读法 `.as_bool()` 恒为 false，于是「不可派发」的判定从未生效。
+        let overflow = match tc.get("overflow_notice") {
+            Some(serde_json::Value::Bool(true)) => true,
+            Some(serde_json::Value::String(text)) => !text.trim().is_empty(),
+            _ => false,
+        };
+        // 成因词取代布尔：缺 id / 解析失败 → `invalid_tool_call`，超限丢弃 →
+        // `overflow_dropped`。授权门按「有没有成因」判不可派发，收据按同一个词写
+        // 失败种类——一处判定，两处读同一个值，不再各自把三种成因压成一个 bool。
+        let invalid_cause = if overflow {
+            Some("overflow_dropped")
+        } else if model_id.is_none()
             || name.is_none()
             || tc
                 .get("parse_error")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false)
-            || tc
-                .get("overflow_notice")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+        {
+            Some("invalid_tool_call")
+        } else {
+            None
+        };
         // 注册表里没有可判的能力（route-only 工具）⇒ 放行是**交给下游路由闸门**的
         // 延迟判定；不能凭一个猜出来的风险档拒绝它。
         let resolved = match (name, visitor.as_ref()) {
@@ -417,7 +434,7 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
                 // 缺注册面 / 风险未知 = route-only：授权按 `deferred` 放行。
                 "deferred": risk.is_none(),
                 "grant": grant,
-                "invalid": invalid,
+                "failure_kind": invalid_cause,
                 "mode": mode,
             }),
             produced_by: exec.origin,
@@ -818,6 +835,16 @@ fn read_requested(
                 .filter_map(|call| {
                     let id = call.get("id")?.as_str()?.to_string();
                     let name = call.get("name")?.as_str()?.to_string();
+                    // 丢弃标记的正文是**字符串**（`mark_overflow_dropped` 写整句提示），
+                    // 不是布尔：读成布尔会恒为 false，调用就照样被执行。
+                    let failure = call
+                        .get("overflow_notice")
+                        .and_then(|v| v.as_str())
+                        .filter(|text| !text.trim().is_empty())
+                        .map(|text| RequestedFailure {
+                            kind: "overflow_dropped",
+                            text: text.to_string(),
+                        });
                     Some(RequestedCall {
                         id,
                         name,
@@ -825,6 +852,7 @@ fn read_requested(
                             .get("arguments")
                             .cloned()
                             .unwrap_or(serde_json::Value::Null),
+                        failure,
                     })
                 })
                 .collect()
@@ -834,20 +862,27 @@ fn read_requested(
 }
 
 /// 一条调用结果的产物格：模型侧按 `tool` / `tool_call_id` / `text` 读回。
+///
+/// 收据与结果同源：`success` / `text` / `failure_kind` 全部取自同一条结果事实，
+/// **不另判**——收据不许与结果自相矛盾。
 fn artifact_draft(call: &RequestedCall, result: &serde_json::Value) -> FactDraft {
+    let mut payload = serde_json::json!({
+        "tool": call.name,
+        "tool_call_id": call.id,
+        // 定稿参数随产物落格：变更账按 `args.path` 取路径（读侧不反推结果文本）。
+        "args": call.arguments.to_string(),
+        "text": result.get("result_text").cloned().unwrap_or(serde_json::Value::Null),
+        "success": result.get("success").cloned().unwrap_or(serde_json::Value::Bool(true)),
+    });
+    if let Some(kind) = result.get("failure_kind") {
+        payload["failure_kind"] = kind.clone();
+    }
     FactDraft {
         key: format!("artifact:{}", call.id),
         kind: EVENT_ARTIFACT_ADDED.to_string(),
         entity: Entity::Artifact,
         verb: Verb::Asserted,
-        payload: serde_json::json!({
-            "tool": call.name,
-            "tool_call_id": call.id,
-            // 定稿参数随产物落格：变更账按 `args.path` 取路径（读侧不反推结果文本）。
-            "args": call.arguments.to_string(),
-            "text": result.get("result_text").cloned().unwrap_or(serde_json::Value::Null),
-            "success": result.get("success").cloned().unwrap_or(serde_json::Value::Bool(true)),
-        }),
+        payload,
         produced_by: None,
     }
 }
@@ -1172,6 +1207,17 @@ struct RequestedCall {
     id: String,
     name: String,
     arguments: serde_json::Value,
+    /// 模型侧已判定的「本次调用不执行」及成因（当前只有超限丢弃）。
+    failure: Option<RequestedFailure>,
+}
+
+/// 一次「不执行」的判定：成因词 + 模型写下的那句正文。
+///
+/// 正文与收据同源：正文就是 `overflow_notice`，收据由同一条结果事实派生——
+/// 不许一处写「未执行」、另一处写「成功」再让渲染层挑。
+struct RequestedFailure {
+    kind: &'static str,
+    text: String,
 }
 
 /// 单消费方事实：这次往返的工具清单已还完（模型侧只读债状态，不读这条）。
@@ -1220,15 +1266,33 @@ impl ToolPort {
                 KEY_TOOL_CALL_ID: call.id.clone(),
                 KEY_REPLY_KEY: call.id.clone(),
             });
-            let outcome = self
-                .run(
-                    exec.clone(),
-                    PortInput {
-                        port: TOOL,
-                        payload,
-                    },
-                )
-                .await;
+            // 模型已判定「不执行」的调用（超限丢弃）：**不派发**，直接以失败收尾。
+            // 正文 = 模型写进 `overflow_notice` 的那一句，收据由同一条结果事实派生
+            // ⇒ 留痕但不冒充成功；这里就是派发处本身，不在它外面另补一个 if。
+            let outcome = match &call.failure {
+                Some(failure) => {
+                    let raw = finish_with(
+                        failure.text.clone(),
+                        false,
+                        None,
+                        &exec.scratch_dir.clone().unwrap_or_default(),
+                        Some(failure.kind),
+                        "",
+                    )
+                    .await;
+                    attach_reply(raw, &payload)
+                }
+                None => {
+                    self.run(
+                        exec.clone(),
+                        PortInput {
+                            port: TOOL,
+                            payload,
+                        },
+                    )
+                    .await
+                }
+            };
             let result = outcome.facts.first().cloned();
             facts.extend(outcome.facts);
             reply.messages.extend(outcome.reply.messages);
