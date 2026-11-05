@@ -18,18 +18,34 @@ use symbio_plugin_api::{
     Registry, CAPABILITY_VISITOR,
 };
 
-// ==================== 记账 fail-closed：声明的账没落就不许报成功 ====================
+// ==================== 记账 fail-closed：造格型的账没落就不许报成功 ====================
 //
-// 当前所有行为**恒返回草稿**（重复由写口按键去重）⇒ 这个分支挡的是
-// 「将来有人写出静默空转的行为」：宁可假红，也不能让「有账不落」隐形。
+// 判据只管**造格型**行为（`behaviors::Kind::LandsFacts`）：
+// - 造格型 + 成功 + 0 草稿 ⇒ 违约（fail-closed）——挡「将来有人写出静默空转的行为」；
+// - 富化型（只补 `file_op` 这类字段）与纯前置判断型本身不造格，0 草稿是正常形态，
+//   **不能**判成「有账不落」（`file_change` 一度就是这样被误判的）。
+// 种类的唯一来源是行为登记表 `behaviors::KINDS`，不在运行时猜 `after` 有没有被覆写。
 
 #[test]
 fn declared_behavior_without_drafts_is_bookkeeping_missing() {
-    assert!(bookkeeping_missing(true, 0));
+    // 造格型：0 草稿 ⇒ 违约。
+    assert!(bookkeeping_missing(true, true, 0));
     // 执行本身失败：走失败路径，不叠加「记账违约」。
-    assert!(!bookkeeping_missing(false, 0));
+    assert!(!bookkeeping_missing(true, false, 0));
     // 落了账：合法。
-    assert!(!bookkeeping_missing(true, 1));
+    assert!(!bookkeeping_missing(true, true, 1));
+    // 富化型 / 纯前置判断型：不造格，0 草稿不判违约。
+    assert!(!bookkeeping_missing(false, true, 0));
+}
+
+#[test]
+fn behavior_kinds_are_declared_per_name() {
+    assert!(!symbio_plugin_api::effects::expects_facts(&[
+        symbio_plugin_api::behaviors::FILE_CHANGE
+    ]));
+    assert!(symbio_plugin_api::effects::expects_facts(&[
+        symbio_plugin_api::behaviors::TASK_TABLE
+    ]));
 }
 
 #[test]

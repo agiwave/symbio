@@ -471,6 +471,17 @@ pub fn handlers() -> Vec<&'static dyn ToolBehavior> {
     all
 }
 
+/// 这一次调用**按声明应当**产出事实草稿吗？
+///
+/// 判据只认**造格型**登记（[`crate::behaviors::KINDS`]）：富化型与纯前置判断型
+/// 本来就不造格，0 草稿是正常形态。**不靠运行时猜 `after` 有没有被覆写**——那是
+/// 又一个近似判据，换个实现方式就漂移。
+pub fn expects_facts(declared: &[&'static str]) -> bool {
+    declared
+        .iter()
+        .any(|name| crate::behaviors::lands_facts(name) != Some(false))
+}
+
 /// 求一次调用的全部效果草稿：按 owner 序，逐个跑「工具声明了这个行为」的实现。
 ///
 /// 顺序确定（DE-025 §3 第 4 条）：效果按同序追加，于是同一批事实的落笔次序

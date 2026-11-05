@@ -83,6 +83,42 @@ pub const KNOWN: &[&str] = &[
     IDEMPOTENCY_RECORD,
 ];
 
+/// 一个已知行为**造不造格**（DE-025 D-210 的登记面）。
+///
+/// 逐位声明在这里、不在 handler 里：判据问的是「这个行为名按契约该不该产出事实」，
+/// 而不是「某个实现的 `after` 会不会返回空」——后者是运行时近似，换个实现就漂移。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// 造格型：`after` 交出事实草稿；声明了它却 0 草稿 = 违约（fail-closed）。
+    LandsFacts,
+    /// 富化型 / 纯前置判断型：只补既有事实的字段（`annotate`）或只判前置条件
+    /// （`before`），不造新格。0 草稿是它的正常形态。
+    NoFacts,
+}
+
+/// 每个已知行为名的**造格**声明（与 [`KNOWN`] 一一对应）。
+pub const KINDS: &[(&str, Kind)] = &[
+    (ASSIGN_WORK, Kind::NoFacts),
+    (DELEGATION_PROMISE, Kind::LandsFacts),
+    (TASK_TABLE, Kind::LandsFacts),
+    (FILE_CHANGE, Kind::NoFacts),
+    (NOTE_CAPTURE, Kind::LandsFacts),
+    (CAUSAL_LINK, Kind::LandsFacts),
+    (EXPLAIN_RATIONALE, Kind::LandsFacts),
+    (IDEMPOTENCY_RECORD, Kind::LandsFacts),
+];
+
+/// 这个行为名是否**应当**产出事实草稿。
+///
+/// `None` = 未登记（未知行为）：判据按「应当造格」处理，宁可假红也不让一个没声明
+/// 种类的行为静默空转。
+pub fn lands_facts(name: &str) -> Option<bool> {
+    KINDS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, kind)| *kind == Kind::LandsFacts)
+}
+
 /// 这个名字是不是宿主已知的行为。
 ///
 /// **未知行为静默不生效**是 J3 要消灭的形态，所以声明面的读取方应当拿它校验；

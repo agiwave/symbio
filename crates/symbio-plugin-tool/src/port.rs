@@ -40,14 +40,14 @@ use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
     capability_invoke, capability_to_wire, effects::annotations, effects::apply,
-    effects::EffectEnv, effects::EffectInput,
-    events::EVENT_ARTIFACT_ADDED, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
-    events::EVENT_TOOL_REQUESTED, failure_kind, family, plugin_error, plugin_info, plugin_warn,
-    CapabilityRiskLevel, Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext,
-    PortExecutor, PortInput, PortOutcome, PortProvider, PromptMessage, Verb, ABORT_SIGNAL,
-    AGENT_ID, CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID,
-    TOOL_CALL_ID, WORKDIR,
+    effects::expects_facts, effects::EffectEnv, effects::EffectInput, events::EVENT_ARTIFACT_ADDED,
+    events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED, events::EVENT_TOOL_REQUESTED,
+    failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel, Entity,
+    ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext, PortExecutor,
+    PortInput, PortOutcome, PortProvider, PromptMessage, Verb, ABORT_SIGNAL, AGENT_ID,
+    CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID,
+    WORKDIR,
 };
 
 /// 端口名（唯一来源：本插件）。
@@ -585,16 +585,8 @@ async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &Lan
             why: String::new(),
             declared: meta.declared,
         };
-        if let Some(obj) = artifact_payload.as_object_mut() {
-            for (key, value) in annotations(&input) {
-                obj.insert(key.to_string(), value);
-            }
-        }
         // 声明的账：与环派发走**同一个**承接函数（单一实现，不复制）。
-        let effects = land_effects(exec, &input).await;
-        if effects.bookkeeping_missing {
-            mark_bookkeeping_missing(&mut artifact_payload);
-        }
+        settle_declared(exec, &input, &mut artifact_payload).await;
     }
     exec.emit
         .emit(vec![FactDraft {
@@ -619,18 +611,23 @@ struct EffectsLanded {
     bookkeeping_missing: bool,
 }
 
-/// 声明了行为、执行也成功，却一条草稿都没有 ⇒ 违约（fail-closed）。
+/// 声明了**造格型**行为、执行也成功，却一条草稿都没有 ⇒ 违约（fail-closed）。
 ///
-/// 当前所有行为**恒返回草稿**（重复由写口按键去重），所以这条分支实际挡的是
-/// 「将来有人写出静默空转的行为」：宁可假红，也不能让「有账不落」隐形。
-fn bookkeeping_missing(success: bool, drafts: usize) -> bool {
-    success && drafts == 0
+/// 判据只该管造格型（[`symbio_plugin_api::behaviors::Kind::LandsFacts`]）：富化型
+/// 只给既有事实补字段（如 `file_op`），纯前置判断型只判不写——两者 0 草稿是正常
+/// 形态，不能判成「有账不落」。
+fn bookkeeping_missing(expects_facts: bool, success: bool, drafts: usize) -> bool {
+    success && expects_facts && drafts == 0
 }
 
 /// 把「声明的账没落」写进产物格：不报成功，并给出可判定词。
 ///
 /// `failure_kind` 目前是字符串词表（`needs_interaction` / `not_executed` /
 /// `tool_unavailable` 同一层），本词新增 `bookkeeping_missing`。
+///
+/// ⚠️ 次序：本函数改写 `success`，而 `annotations()` 已在它**之前**把富化字段
+/// （如 `file_op`）写进产物格。任何改 `success` / 判失败的写点都**不许连带抹掉
+/// 已写的富化字段**——失败要说明哪里失败，不是把痕迹擦干净。
 fn mark_bookkeeping_missing(artifact: &mut serde_json::Value) {
     if let Some(obj) = artifact.as_object_mut() {
         obj.insert("success".to_string(), serde_json::Value::Bool(false));
@@ -642,6 +639,26 @@ fn mark_bookkeeping_missing(artifact: &mut serde_json::Value) {
             "why".to_string(),
             serde_json::json!("声明了行为却没有产出任何事实"),
         );
+    }
+}
+
+/// 一次调用收口时的「声明的账」：**先**补产物格的富化字段，**再**落事实草稿并判违约。
+///
+/// 两个承接出口（单次调用 / 环派发）都走这里：次序只能有一份实现——富化字段先写，
+/// 判失败后写。任何改 `success` 的判断都**不许**抹掉已写的富化字段（失败要说明
+/// 哪里失败，不是把痕迹擦干净）。
+async fn settle_declared(
+    exec: &PortExecContext,
+    input: &EffectInput,
+    artifact: &mut serde_json::Value,
+) {
+    if let Some(obj) = artifact.as_object_mut() {
+        for (key, value) in annotations(input) {
+            obj.insert(key.to_string(), value);
+        }
+    }
+    if land_effects(exec, input).await.bookkeeping_missing {
+        mark_bookkeeping_missing(artifact);
     }
 }
 
@@ -675,7 +692,7 @@ async fn land_effects(exec: &PortExecContext, input: &EffectInput) -> EffectsLan
     }
     EffectsLanded {
         drafts: n,
-        bookkeeping_missing: bookkeeping_missing(input.success, n),
+        bookkeeping_missing: bookkeeping_missing(expects_facts(input.declared), input.success, n),
     }
 }
 
@@ -826,6 +843,8 @@ fn artifact_draft(call: &RequestedCall, result: &serde_json::Value) -> FactDraft
         payload: serde_json::json!({
             "tool": call.name,
             "tool_call_id": call.id,
+            // 定稿参数随产物落格：变更账按 `args.path` 取路径（读侧不反推结果文本）。
+            "args": call.arguments.to_string(),
             "text": result.get("result_text").cloned().unwrap_or(serde_json::Value::Null),
             "success": result.get("success").cloned().unwrap_or(serde_json::Value::Bool(true)),
         }),
@@ -1242,10 +1261,8 @@ impl ToolPort {
                         why: String::new(),
                         declared,
                     };
-                    let effects = land_effects(&exec, &input).await;
-                    if effects.bookkeeping_missing {
-                        mark_bookkeeping_missing(&mut artifact.payload);
-                    }
+                    // 与单次出口同一条承接路径（富化先于判失败，顺序只有一份实现）。
+                    settle_declared(&exec, &input, &mut artifact.payload).await;
                 }
                 exec.emit.emit(vec![artifact]).await;
             }
