@@ -35,6 +35,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use serde_json::json;
+
 use crate::breaker::{CircuitBreaker, GateDecision};
 use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
@@ -1204,6 +1206,12 @@ impl PortProvider for ToolPort {
 #[async_trait::async_trait]
 impl PortExecutor for ToolPort {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        // 恢复（答复）：动作已落成 `user.answer` 事实，环按行表派发到这里。
+        // 该分支**不执行**挂起的调用——答复本身就是那次调用的结果，走 `land_only`
+        // 同一出口（`tool_call_id` 不变）。恢复只能从事实进环（D-121）。
+        if input.payload.get(KEY_RESUME).is_some() {
+            return self.run_resume(exec, input.payload).await;
+        }
         // 新表达：债行载荷只带**触发事实身份**（`request_id`），调用清单在
         // `tool.requested` 这条世界事实里 —— 由执行体自己去读面精确取，
         // **不是**协议错误（债表永不读载荷）。空载荷是同一表达的兼容形态。
@@ -1243,6 +1251,90 @@ struct RequestedFailure {
 const TOOL_CALLS_DONE: &str = "tool.calls.done";
 
 impl ToolPort {
+    /// 答复恢复：`user.answer` 已经落了事实；把答复原文作为那次调用的结果，走
+    /// [`Self::run`] 的 `land_only` 同一出口（**不执行**挂起的调用）。
+    async fn run_resume(&self, exec: PortExecContext, payload: serde_json::Value) -> PortOutcome {
+        let Some(reader) = exec.reader.clone() else {
+            return PortOutcome {
+                facts: Vec::new(),
+                error: Some((
+                    PortErrorClass::NonRetryable,
+                    "user.answer 无读面".to_string(),
+                )),
+                ..Default::default()
+            };
+        };
+        let facts = reader.facts();
+        let answer_id = payload
+            .get("answer_event")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let Some(answer) = facts.iter().rev().find(|fact| {
+            fact.kind == symbio_plugin_api::events::EVENT_USER_ANSWER
+                && answer_id.is_none_or(|id| fact.id == id)
+        }) else {
+            return PortOutcome {
+                facts: Vec::new(),
+                error: Some((
+                    PortErrorClass::Retryable,
+                    "user.answer 尚未可见".to_string(),
+                )),
+                ..Default::default()
+            };
+        };
+        let call_id = answer
+            .payload
+            .get("call_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let answer_value = answer
+            .payload
+            .get("answer")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        // 从已落的产物复原那次调用：产物的 `tool` / `args` / `tool_call_id` 就是权威。
+        let Some(artifact) = facts.iter().rev().find(|fact| {
+            fact.kind == symbio_plugin_api::events::EVENT_ARTIFACT_ADDED
+                && fact.payload.get("tool_call_id").and_then(|v| v.as_str())
+                    == Some(call_id.as_str())
+        }) else {
+            return PortOutcome {
+                facts: Vec::new(),
+                error: Some((
+                    PortErrorClass::Retryable,
+                    format!("找不到 {call_id} 的产物"),
+                )),
+                ..Default::default()
+            };
+        };
+        let tool_name = artifact
+            .payload
+            .get("tool")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let args = artifact
+            .payload
+            .get("args")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let text = serde_json::to_string(&answer_value).unwrap_or_default();
+        self.run(
+            exec,
+            PortInput {
+                port: TOOL,
+                payload: json!({
+                    KEY_LAND_ONLY: { "text": text, "success": true },
+                    KEY_TOOL_NAME: tool_name,
+                    KEY_TOOL_CALL_ID: call_id,
+                    KEY_ARGS: args,
+                }),
+            },
+        )
+        .await
+    }
+
     /// 按 `tool.requested` 的清单逐调用执行：复用 [`Self::run`]，每个调用落一条产物，
     /// 最后落 `tool.calls.done`。结果事实按调用顺序原样交回环（环只当纯值搬运）。
     async fn run_requested(

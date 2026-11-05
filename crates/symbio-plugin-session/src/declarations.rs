@@ -97,6 +97,11 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("session.consolidated", (Entity::Message, Verb::Progressed)),
     // 用户点了切换器：一次「关于这一轮的断言」，不是收束也不是开轮。
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)),
+    // 用户答复（`kind ∈ answer|approve|deny`）：外部动作落事实，宿主再驱动一环
+    // （D-121）。前缀 `user.` 是既有族（与 `user.message` 同前缀）。
+    // 若将来出现**非用户**的答复（如超时自动拒绝），这个前缀会不够用——那属策略层，
+    // 真出现再议，**现在不预留**。
+    EventDecl::new("user.answer", (Entity::Scope, Verb::Asserted)),
 ];
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。

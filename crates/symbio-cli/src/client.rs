@@ -495,9 +495,9 @@ impl SymbioClient {
             }
         }
 
-        // ── 触发链三步（装配层只做装配，不写业务事实）──
-        // 1. session 把收件箱条目写成事实并返回开轮事实的 seq；
-        // 2. 装配层用**同一事实源**单次 `drive`（见 symbio::drive）；
+        // ── 触发链（装配层只做装配，不写业务事实）──
+        // 1. session 把收件箱条目写成事实并返回开轮事实的 seq（写口顺带踢出驱动）；
+        // 2. 这里只**等**写口踢出的驱动空闲（`settled`，不是第二次 drive）；
         // 3. 终答事实已由环落地，session 自己投影转写（`session/project`）。
         let source = symbio::drive::open_fact_source(&self.session_id)
             .map_err(|e| format!("事实源打开失败: {e}"))?;
@@ -511,15 +511,8 @@ impl SymbioClient {
             )
             .await?;
         if let Some(seq) = consumed.get("seq").and_then(Value::as_u64) {
-            let world = symbio::drive::FactWorld {
-                facts: Arc::clone(&source),
-                session_id: &self.session_id,
-                provider: self.provider.as_deref(),
-                workdir: &self.workdir,
-            };
-            symbio::drive::drive_on_new_fact(&self.root, &world)
-                .await
-                .map_err(|e| format!("驱动未完成: {e}"))?;
+            // 驱动已由写口（事实源 `append`）踢出；这里只**等**它空闲，不再推第二遍。
+            symbio::drive::settled(&self.session_id).await;
             self.route_with_fact_source(
                 "session/project",
                 json!({ "seq": seq }),

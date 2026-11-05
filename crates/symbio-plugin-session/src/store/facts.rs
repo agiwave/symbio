@@ -59,9 +59,12 @@ impl SessionStore {
         &self,
         session_id: &str,
     ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
-        Ok(self
-            .facts(session_id)?
-            .map(super::fact_source::SessionFactSource::open))
+        let workdir = self
+            .session_dir(session_id)
+            .and_then(|dir| super::layout::read_workdir(&dir));
+        Ok(self.facts(session_id)?.map(|wal| {
+            super::fact_source::SessionFactSource::open(wal, session_id.to_string(), workdir)
+        }))
     }
 
     /// 顶级会话事实源的召回视图（**新近优先**、名额与字节双预算）。

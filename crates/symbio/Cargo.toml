@@ -58,10 +58,12 @@ symbio-plugin-vdfs = { path = "../symbio-plugin-vdfs" }
 symbio-plugin-web = { path = "../symbio-plugin-web" }
 # <<< plugin-links:end
 inventory = { workspace = true }
+# 驱动收口：`settled` 的每会话唤醒句柄（`Notify`）与「由驱动自身调用」的检测。
+tokio = { workspace = true, features = ["sync", "rt"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-# 测试用：tokio 时间控制（start_paused / advance）
-tokio = { workspace = true, features = ["test-util"] }
+# 测试用：tokio 时间控制（start_paused / advance）与 `#[tokio::test]`
+tokio = { workspace = true, features = ["test-util", "macros", "rt", "time"] }
 # 第三端口验收（DE-048 D-302）：构造 `request` 事实载荷
 serde_json = { workspace = true }

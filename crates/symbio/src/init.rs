@@ -12,9 +12,12 @@ pub fn initialize() {
 pub async fn create_root_plugin() -> Arc<dyn Plugin> {
     let context = Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
 
-    creator_create_object::<dyn Plugin>(PLUGIN_ID_HOME, context).expect(
+    let root = creator_create_object::<dyn Plugin>(PLUGIN_ID_HOME, context).expect(
         "home plugin creator not found. Make sure 'home' is registered via submit_object_creator!",
-    )
+    );
+    // 驱动收口取用根插件：装配层登记，插件不认识对面是谁。
+    crate::drive::install_root(&root);
+    root
 }
 
 // ── panic 面登记（PN-001…003）─────────────────────────────────────────

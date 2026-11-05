@@ -255,6 +255,18 @@ pub(super) fn read_meta(dir: &Path) -> Option<SessionMetaFile> {
     parse_meta_content(&content)
 }
 
+/// 会话 metadata 里的工作目录（**只读 `session.json`**，不碰消息）。
+///
+/// 驱动收口要把它带进工具上下文：`append` 本身不携带运行选项，而会话 metadata
+/// 是 `workdir` 的唯一 owner。
+pub(super) fn read_workdir(dir: &Path) -> Option<String> {
+    let meta = read_meta(dir)?;
+    meta.metadata
+        .get("workdir")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
 /// 读整个会话目录 = 元数据 + 消息（同步；嵌套查找的 miss 路径用）。
 ///
 /// 消息同样以 WAL 为准（与 [`load_messages`] 同一条真源纪律），遗留读法是回落。

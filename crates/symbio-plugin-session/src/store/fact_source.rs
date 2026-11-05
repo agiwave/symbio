@@ -26,20 +26,46 @@ pub(crate) fn remember_storage_dir(dir: &Path) {
 /// 契约实现：一个会话的 `WalStore` + 五方法。
 pub(crate) struct SessionFactSource {
     wal: Arc<WalStore>,
+    /// 会话身份：驱动收口据此踢对应会话（事实源本身就是会话边界）。
+    session_id: String,
+    /// 会话 metadata 的工作目录：`append` 不携带运行选项，驱动收口把它带进工具上下文。
+    workdir: Option<String>,
 }
 
 impl SessionFactSource {
-    pub(crate) fn open(wal: Arc<WalStore>) -> Arc<dyn FactSource> {
-        Arc::new(Self { wal })
+    pub(crate) fn open(
+        wal: Arc<WalStore>,
+        session_id: String,
+        workdir: Option<String>,
+    ) -> Arc<dyn FactSource> {
+        Arc::new(Self {
+            wal,
+            session_id,
+            workdir,
+        })
     }
 }
 
 impl FactSource for SessionFactSource {
     fn append(&self, actor: Principal, draft: FactDraft) -> Result<u64, String> {
         let event = symbio_plugin_api::fact_source::draft_into_event(actor, draft);
-        Store::append(&*self.wal, event)
+        let seq = Store::append(&*self.wal, event)
             .map(|seq| seq.value())
-            .map_err(|e| format!("{e:?}"))
+            .map_err(|e| format!("{e:?}"))?;
+
+        // 事实写入的**唯一收口**：落账成功后踢一次驱动。
+        //
+        // 装配层经 `drive_entry` 登记唯一的驱动实现；这里只认接口、不认对面是谁。
+        // 写口在异步环境里，future 交给当前运行时 spawn（装配层不持有运行时）。
+        // 未装配（单测）或不在运行时里 ⇒ 不驱动，写入本身照常成功。
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            if let Some(task) = symbio_plugin_api::declared_drive_entry()
+                .and_then(|entry| entry.kick(&self.session_id, self.workdir.as_deref()))
+            {
+                handle.spawn(task);
+            }
+        }
+        Ok(seq)
     }
 
     fn facts(&self) -> Vec<Event> {
@@ -75,7 +101,14 @@ impl FactSourceOpener for SessionFactOpener {
         let wal = store
             .facts(session_id)?
             .ok_or_else(|| format!("会话 {session_id} 没有事实源"))?;
-        Ok(SessionFactSource::open(wal))
+        let workdir = store
+            .session_dir(session_id)
+            .and_then(|dir| super::layout::read_workdir(&dir));
+        Ok(SessionFactSource::open(
+            wal,
+            session_id.to_string(),
+            workdir,
+        ))
     }
 }
 

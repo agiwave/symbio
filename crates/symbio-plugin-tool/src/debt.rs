@@ -19,17 +19,34 @@ pub(crate) struct ToolDebts;
 
 impl DebtSource for ToolDebts {
     fn rows(&self, _request: &DriveRequest, facts: &DebtFacts) -> Vec<DebtSpec> {
-        let Some(request_id) = facts.latest_fact_id(EVENT_TOOL_REQUESTED) else {
-            return Vec::new();
-        };
-        vec![DebtSpec::new(
-            "tool-calls",
-            TOOL,
-            format!("tool:{request_id}"),
-            json!({ "request_id": request_id }),
-        )
-        .when(EVENT_TOOL_REQUESTED)
-        .lease(600_000, 2)]
+        let mut rows = Vec::new();
+        if let Some(request_id) = facts.latest_fact_id(EVENT_TOOL_REQUESTED) {
+            rows.push(
+                DebtSpec::new(
+                    "tool-calls",
+                    TOOL,
+                    format!("tool:{request_id}"),
+                    json!({ "request_id": request_id }),
+                )
+                .when(EVENT_TOOL_REQUESTED)
+                .lease(600_000, 2),
+            );
+        }
+        // 外部答复：一条 `user.answer` 欠一次「把答复落成那次调用的结果」。
+        // 债表只问存在性、不读载荷；触发事实身份进载荷，执行体自己去取答复原文。
+        if let Some(answer_id) = facts.latest_fact_id(symbio_plugin_api::events::EVENT_USER_ANSWER)
+        {
+            rows.push(
+                DebtSpec::new(
+                    "tool-resume",
+                    TOOL,
+                    format!("tool-resume:{answer_id}"),
+                    json!({ "resume": "answer", "answer_event": answer_id }),
+                )
+                .when(symbio_plugin_api::events::EVENT_USER_ANSWER),
+            );
+        }
+        rows
     }
 }
 

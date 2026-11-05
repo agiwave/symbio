@@ -9,11 +9,15 @@
 //! `commands` 的调用，再把变更投进订阅表。
 
 use super::*;
+use symbio_kernel::event::{Entity, Verb};
 use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
     VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_SWITCH_BRANCH,
     VDFS_ACTION_TRUNCATE,
 };
+use symbio_plugin_api::events::EVENT_USER_ANSWER;
+use symbio_plugin_api::fact_source::declared_fact_source_opener;
+use symbio_plugin_api::FactDraft;
 use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::vdfs::host::{vdfs_from_plugin_error, vdfs_host_ctx};
 
@@ -211,6 +215,52 @@ impl SessionPlugin {
                             ok: true,
                             message: format!("已把 {mid} 所在的分支组切到 {to}"),
                             data: Some(json!({ "session_id": id, "selected": to })),
+                        }))
+                    }
+                    // ── 用户答复（`answer`，载荷 `{answer, mode}`）──
+                    //
+                    // **只落一条事实，不在这里续跑。** 事实是 `user.answer`
+                    // （`kind ∈ {answer, approve, deny}`）：宿主看到事实源 head 前进后
+                    // 由写口踢一次驱动（契约 `symbio_plugin_api::drive_entry`）；工具侧那一行
+                    // 把答复原文落成那次调用的结果（`land_only`）——挂起的调用**不在
+                    // 这里执行**（D-121：审批 / 答复恢复只能从事实进环）。
+                    (Some(mid), "answer", payload) => {
+                        let answer = payload
+                            .and_then(|p| p.get("answer"))
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        let mode = payload
+                            .and_then(|p| p.get("mode"))
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        let source = declared_fact_source_opener()
+                            .ok_or_else(|| VdfsError::internal("没有登记事实源开面"))?
+                            .open(id)
+                            .map_err(|e| VdfsError::internal(format!("打开事实源失败：{e}")))?;
+                        let draft = FactDraft {
+                            key: format!("user-answer-{mid}-{}", source.head()),
+                            kind: EVENT_USER_ANSWER.to_string(),
+                            entity: Entity::Scope,
+                            verb: Verb::Asserted,
+                            payload: json!({
+                                "kind": "answer",
+                                "call_id": mid,
+                                "answer": answer,
+                                "mode": mode,
+                                "by": symbio_sdk::authz::PRINCIPAL_USER,
+                            }),
+                            produced_by: None,
+                        };
+                        source
+                            .append(symbio_sdk::authz::PRINCIPAL_USER.to_string(), draft)
+                            .map_err(|e| {
+                                VdfsError::internal(format!("user.answer 落格失败：{e}"))
+                            })?;
+                        Ok(VdfsResponse::Action(VdfsActionResult {
+                            action: action.clone(),
+                            ok: true,
+                            message: format!("已记录对 {mid} 的答复；由宿主再驱动一环"),
+                            data: Some(json!({ "session_id": id, "call_id": mid })),
                         }))
                     }
                     _ => Err(VdfsError::NotImplemented),

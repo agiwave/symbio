@@ -123,6 +123,9 @@ pub const EVENT_TURN_BRANCH: &str = "turn.branch";
 
 // ============ user ============
 
+/// user.answer — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
+pub const EVENT_USER_ANSWER: &str = "user.answer";
+
 /// user.message — owner `symbio-plugin-loop`，格位 `(Scope, Opened)`
 pub const EVENT_USER_MESSAGE: &str = "user.message";
 
@@ -161,5 +164,6 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← task
     EventDecl::host(EVENT_TOOL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.requested ← model
     EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← loop
+    EventDecl::new(EVENT_USER_ANSWER, (Entity::Scope, Verb::Asserted)), // user.answer ← session
     EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop
 ];

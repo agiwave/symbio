@@ -47,6 +47,7 @@ pub mod context;
 pub mod debt;
 pub mod declarations;
 pub mod drive;
+pub mod drive_entry;
 pub mod effects;
 pub mod events;
 pub mod fact_source;
@@ -69,6 +70,7 @@ pub use declarations::{
     assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations, vocab,
     DeclarationsDecl,
 };
+pub use drive_entry::{declared_drive_entry, DriveEntry, DriveEntryDecl};
 pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,

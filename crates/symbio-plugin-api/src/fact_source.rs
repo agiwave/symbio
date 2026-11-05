@@ -94,7 +94,11 @@ impl symbio_kernel::keys::SymbioKey for FactSourceKey {
 /// 上下文键的唯一实例。
 pub const FACT_SOURCE: FactSourceKey = FactSourceKey;
 
-/// 内存事实源：测试与平凡基线用（与生产实现走同一契约）。
+/// 内存事实源：**只作插件单测 / 平凡基线的假事实源**（与生产实现走同一契约）。
+///
+/// 它没有会话身份，因此**没有资格推环**：这里不踢驱动。宿主装配路径上的事实源
+/// 一律经 [`FactSourceOpener`] 打开、由 `SessionFactSource` 承担；把 `MemoryStore`
+/// 当生产写口是错误使用。
 impl FactSource for MemoryStore<Fact> {
     fn append(&self, actor: Principal, draft: FactDraft) -> Result<u64, String> {
         let event = draft_into_event(actor, draft);
