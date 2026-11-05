@@ -6,7 +6,7 @@
 // - `E2E_DEBUG=1`                     失败时输出错误堆栈
 // - `E2E_CONCURRENCY=N`               覆盖并发度（默认见下）
 // - `E2E_PROFILE=real`                等待档位改为真实 provider（各等待沿用原上限；
-//                                     默认 `mock` = `runCli` 与 `waitFor` 均 5s）
+//                                     默认 `mock` = 单次等待 10s、整例 20s）
 //
 // 为什么子进程隔离：用例各自起 mock、各自建临时 homedir、CLI 走子进程，
 // 一个用例卡死或泄漏句柄不应拖垮别的用例；单独跑一个用例也无需任何额外入口。
@@ -38,8 +38,9 @@ import { orderForStart, loadTimes, recordTimes, suggestConcurrency } from '../sc
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 
-/** 单例硬上限（毫秒）。用例自己的等待超时都远小于它；它只兜「真挂死」。 */
-const CASE_TIMEOUT_MS = 180_000;
+/** 单例硬上限（毫秒）：mock 档 20s（整例预算，见 helpers 的 `CASE_BUDGET_MS`），
+ * real 档沿用 180s，只兜「真挂死」。 */
+const CASE_TIMEOUT_MS = process.env.E2E_PROFILE === 'real' ? 180_000 : 20_000;
 
 // ---------- 子进程自执行：`node cases/xxx.mjs` 直接跑该用例 ----------
 // 用例文件被 import 时只做定义（defineCase 不执行）；直接运行时由 `cases/_selfrun.mjs`

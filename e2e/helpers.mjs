@@ -68,35 +68,59 @@ export function nextPort() {
 
 // ---------- 等待档位（profile） ----------
 /**
- * 等待上限按被测对象分档：`mock`（默认；本仓 e2e 用例全部打 `mock-llm`）= 5s，
- * `real`（`E2E_PROFILE=real`，真实 provider 的对照）= 沿用各调用点原值（`runCli`
- * 仍是 120s）。
+ * 等待上限分两档，**单次与整例各自计时**：
  *
- * 只收紧「等不到就判失败」的上限，**不放宽也不跳过**任何断言；超时信息带上
- * `what` 与档位，能直接看出是哪一步没来，而不是只报一个「用例失败」。
+ * | 档位 | 单次等待 | 整例累计 | 理由 |
+ * |---|---|---|---|
+ * | `mock`（默认；用例全打 `mock-llm`） | 10s | 20s | mock 栈的进程启动 / 端口就绪 / 落库轮询本身就是秒级 |
+ * | `real`（`E2E_PROFILE=real`） | 调用点原值 | 调用点原值 | 真实 provider 的对照，上限不改 |
+ *
+ * 只收紧「等不到就判失败」的上限，**不放宽也不跳过**任何断言；超时信息带
+ * 「第几次等待 / 等的是什么 / 已等多少毫秒 / 轮询几次 / 两个上限各是多少」。
  */
 const PROFILE = process.env.E2E_PROFILE === 'real' ? 'real' : 'mock';
 export const E2E_PROFILE = PROFILE;
-const PROFILE_WAIT_MS = { mock: 5_000, real: null };
+const PROFILE_WAIT_MS = { mock: 10_000, real: null };
+/** 整条用例的等待预算（mock 20s；real 不限，沿用各调用点原值）。 */
+export const CASE_BUDGET_MS = PROFILE === 'mock' ? 20_000 : null;
+const CASE_T0 = Date.now();
+let waitSeq = 0;
 
-/** 把某个调用点声明的等待上限折算成本档位的上限（real 档原样返回）。 */
+/** 把某个调用点声明的等待上限折算成本档位的单次上限（real 档原样返回）。 */
 export function profileWait(ms) {
   return PROFILE_WAIT_MS[PROFILE] ?? ms;
 }
 
+/** 本档位下，这一次等待还能用多久（受整例预算约束）。 */
+function remainingBudget() {
+  return CASE_BUDGET_MS == null ? Infinity : Math.max(0, CASE_BUDGET_MS - (Date.now() - CASE_T0));
+}
+
+/** 超时文案的公共尾巴：把「等了几次、等了多久」摊开，避免只报一个「失败」。 */
+function waitDetail(seq, waited, polls) {
+  const budget =
+    CASE_BUDGET_MS == null ? '整例预算不限' : `整例预算 ${CASE_BUDGET_MS}ms`;
+  return `第 ${seq} 次等待；已等 ${waited}ms；轮询 ${polls} 次；${budget}；profile=${PROFILE}`;
+}
+
 // ---------- 进程等待辅助 ----------
 function waitFor(fn, { timeoutMs = 15_000, what = 'condition' } = {}) {
-  const limit = profileWait(timeoutMs);
-  const deadline = Date.now() + limit;
+  const seq = ++waitSeq;
+  const perWait = profileWait(timeoutMs);
+  const limit = Math.min(perWait, remainingBudget());
+  const started = Date.now();
+  const deadline = started + limit;
+  let polls = 0;
   return new Promise((res, rej) => {
     const tick = async () => {
+      polls++;
       try {
         if (await fn()) return res();
       } catch {
         /* 重试 */
       }
       if (Date.now() > deadline) {
-        return rej(new Error(`等待「${what}」超时（${limit}ms，profile=${PROFILE}）`));
+        return rej(new Error(`等待「${what}」超时（${waitDetail(seq, Date.now() - started, polls)}；单次上限 ${perWait}ms）`));
       }
       setTimeout(tick, 100);
     };
@@ -338,7 +362,10 @@ export function cleanupHomedir(hd) {
  * 不是替换——被测系统仍然继承本进程环境。
  */
 export function runCli({ homedir, workdir, message, provider = null, session = null, agent = null, mode = 'auto', timeoutMs = 120_000, stdinText = null, env = null }) {
-  const limit = profileWait(timeoutMs);
+  const seq = ++waitSeq;
+  const perWait = profileWait(timeoutMs);
+  const limit = Math.min(perWait, remainingBudget());
+  const started = Date.now();
   // `cliExe()` 会保证拿到的是「对应当前源码」的那一份（指纹不符则先重建）。
   // 二进制仍然缺失要**当场说清楚**：否则表现为 `code = -1` + 空 stderr，
   // 与"CLI 崩了"无法区分，得翻源码才知道是路径写错了。
@@ -370,7 +397,7 @@ export function runCli({ homedir, workdir, message, provider = null, session = n
   if (r.error?.code === 'ETIMEDOUT') {
     const tail = (s) => String(s ?? '').trim().split('\n').slice(-6).join('\n      ');
     throw new Error(
-      `等待「CLI 完成本轮（模型调用 + 工具往返）」超时（${limit}ms，profile=${PROFILE}；` +
+      `等待「CLI 完成本轮（模型调用 + 工具往返）」超时（${waitDetail(seq, Date.now() - started, 1)}；单次上限 ${perWait}ms；` +
         `message=${JSON.stringify(message ?? '')}）\n` +
         `      stderr 末尾：\n      ${tail(r.stderr) || '（空）'}`,
     );
