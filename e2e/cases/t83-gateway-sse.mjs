@@ -29,6 +29,7 @@ import {
   assert,
   assertEq,
   defineCase,
+  profileWait,
 } from '../helpers.mjs';
 
 /** `event_bus/ping` 的回包形如 `pong (N subscribers)`。 */
@@ -120,13 +121,14 @@ export default defineCase(
       })();
 
       const waitForEvent = async (pred, what, ms = 10_000) => {
-        const deadline = Date.now() + ms;
+        const limit = profileWait(ms);
+        const deadline = Date.now() + limit;
         for (;;) {
           const hit = events.find(pred);
           if (hit) return hit;
           if (Date.now() > deadline) {
             throw new Error(
-              `等待「${what}」超时；已收 ${events.length} 条事件：${JSON.stringify(events).slice(0, 800)}`,
+              `等待「${what}」超时（${limit}ms）；已收 ${events.length} 条事件：${JSON.stringify(events).slice(0, 800)}`,
             );
           }
           await new Promise((r) => setTimeout(r, 50));
@@ -187,7 +189,7 @@ export default defineCase(
       controller.abort();
       await Promise.allSettled([parser]);
 
-      const deadline = Date.now() + 8_000;
+      const deadline = Date.now() + profileWait(8_000);
       let after = subscriberCount(await cli.invoke('event_bus/ping', {}));
       while (after !== baseline && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 100));

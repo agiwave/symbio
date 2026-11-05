@@ -5,6 +5,8 @@
 // - `node e2e/cases/t5-llm-http-error.mjs`   单独跑某个用例（子进程自执行模式）
 // - `E2E_DEBUG=1`                     失败时输出错误堆栈
 // - `E2E_CONCURRENCY=N`               覆盖并发度（默认见下）
+// - `E2E_PROFILE=real`                等待档位改为真实 provider（各等待沿用原上限；
+//                                     默认 `mock` = `runCli` 与 `waitFor` 均 5s）
 //
 // 为什么子进程隔离：用例各自起 mock、各自建临时 homedir、CLI 走子进程，
 // 一个用例卡死或泄漏句柄不应拖垮别的用例；单独跑一个用例也无需任何额外入口。

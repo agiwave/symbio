@@ -34,7 +34,13 @@ node e2e/run-tests.mjs # 全量（被测二进制由机制保证最新，见下�
 node e2e/run-tests.mjs t2 # 按名称过滤
 node e2e/cases/t5-llm-http-error.mjs # 单独跑一个用例（文件可直接执行）
 E2E_DEBUG=1 node e2e/run-tests.mjs # 失败时输出错误堆栈
+E2E_PROFILE=real node e2e/run-tests.mjs # 真实 provider 对照：等待沿用原上限（runCli 120s）
 ```
+
+**等待档位**：默认 `mock`（本仓全部用例都打 `mock-llm`），`runCli` 与每个
+`waitFor` / 轮询的上限都是 **5s**；`E2E_PROFILE=real` 时沿用各调用点原值。
+超时信息会点名**卡在哪一步**（`等待「user.message 落库」超时`、`等待「CLI 完成本轮
+（模型调用 + 工具往返）」超时` 等），不再只报一个「用例失败」。
 
 **被测二进制不需要你记得重建**：`scripts/cli-binary.mjs` 是这条知识的唯一真相
 （门禁与 e2e 共用）。判据是**内容指纹**——整个 `crates/` 树的源码与根清单
@@ -191,7 +197,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs # 失败时输出错误堆栈
  只盯 `exitCode` 同样会等到超时）。全局那条只用在 `finally`（第 6 条）。
 14. **`afterTool` 场景不写 `once` / `times` ⇒ 它吃掉每一个工具结果轮**（含它自己那一次
  的结果轮），于是模型反复发同一个工具调用：**无限工具循环**。症状是 CLI 撞满
- `runCli` 的 120s 超时（**不是断言红**），日志里刷成百上千行 `⚙ 调用工具: <同一个>`，
+ `runCli` 的档位上限（mock 5s / real 120s，**不是断言红**），日志里刷成百上千行 `⚙ 调用工具: <同一个>`，
  而「哪条场景失控」要翻到最前面才看得出。`afterTool` 只是「工具结果轮的**优先池**」
  （`pickScenario`：池里选不出才退回全池），池里**不限名额**的那一条会一直赢。
  收尾场景（`content`）与中间的每个工具场景**都要各写一条**，且除最后一条外都带
