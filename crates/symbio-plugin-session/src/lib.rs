@@ -4,6 +4,7 @@ mod active;
 mod capabilities;
 mod changes;
 mod chat_session;
+mod close_turn;
 mod commands;
 pub(crate) mod config;
 mod convergence;

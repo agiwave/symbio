@@ -9,7 +9,7 @@
 //! 记忆接管 `memory.*`，代理接管 `commitment.*`。
 //! 移交完成后删除本模块与 `PLUGIN.yml` 的 `shared_events`。
 
-use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
+use symbio_kernel::decl::{ActorDecl, FactDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
 
 use symbio_plugin_api::rows::{declared_writes, PLUGIN_ROW, PORT_ACTOR};
@@ -23,7 +23,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::with_roles("authz.denied", (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]),
     EventDecl::new("authz.granted", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("chat.assistant.fallback", (Entity::Scope, Verb::Closed)),
-    EventDecl::with_roles(
+    EventDecl::host_with_roles(
         "chat.assistant.final",
         (Entity::Scope, Verb::Closed),
         &[FactRole::FinalizesTurn],
@@ -50,6 +50,16 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         &[FactRole::DeclaresBudget],
     ),
 ];
+
+/// 旧引擎留下的世界词汇的**载荷形状**。只有被行模式引用的（`chat.assistant.final`
+/// 的 `root_id`）才在这里登记；`port` / `key` / `expand` 不属这一族。
+pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
+    name: "chat.assistant.final",
+    port: None,
+    key: &[],
+    expand: &[],
+    fields: &["root_id", "final_id", "text"],
+}];
 
 /// 两个**宿主通用执行体**的声明（D-296 / D-303）。
 ///
@@ -86,7 +96,7 @@ symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: EVENTS,
-        facts: &[],
+        facts: FACTS,
         views: &[],
         ports: &[],
         actors: actors(),

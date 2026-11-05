@@ -143,7 +143,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::with_roles(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]), // authz.denied ← loop
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)), // authz.granted ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Scope, Verb::Closed)), // chat.assistant.fallback ← loop
-    EventDecl::with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← loop
+    EventDecl::host_with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_OPENING, (Entity::Scope, Verb::Asserted)), // chat.assistant.opening ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_PROGRESS, (Entity::Scope, Verb::Progressed)), // chat.assistant.progress ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_REPORTED, (Entity::Scope, Verb::Asserted)), // chat.assistant.reported ← loop

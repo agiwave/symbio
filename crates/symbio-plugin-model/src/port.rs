@@ -5,14 +5,18 @@
 //! 目录一起装：生效者缺席 ⇒ 不注册端口行 ⇒ 环在调用点响亮失败（落失败事实
 //! 并中止），而不是在这里猜一个别的模型。
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
 };
+use symbio_plugin_api::context::{
+    sections, Cadence, ContextRequest, ContextSection, DelegateVerdict, LiveInputs,
+};
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED,
-    EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED, EVENT_SESSION_CONFIG,
+    EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortFactEmit, PortInput, PortOutcome,
@@ -90,8 +94,15 @@ struct RoundTripRequest {
 /// 一次往返的输入视图：**全从事实读**（写方是谁不问）。
 ///
 /// - system prompt / tools：最近一条 `session.config` 事实的同名字段（无则空）；
-/// - messages：`user.message`、本端口已落的 `response`、工具产物 `artifact.added`。
-fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMessage>) {
+/// - messages：`user.message`、本端口已落的 `response`、工具产物 `artifact.added`、
+///   以及轮内追加的 `message.added`（含 `elision` 的省略形态，D-249）。
+///
+/// 返回值第四格是本轮**第几次**模型请求（0 = 首幕）：`message.added` 与省略区间
+/// 都需要它之外的历史，而发言级上下文段只在首幕取一次（D-220 / D-252）。
+fn turn_input(
+    facts: &[PortFact],
+    events: &[symbio_plugin_api::Event],
+) -> (String, Vec<CapabilityMeta>, Vec<PromptMessage>, u32) {
     let config = facts
         .iter()
         .rev()
@@ -106,10 +117,52 @@ fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMes
         .and_then(|value| serde_json::from_value::<Vec<CapabilityMeta>>(value.clone()).ok())
         .unwrap_or_default();
 
+    // `message.added` 的省略形态：`elision` 记的是**被取代的入库区间**（seq 闭区间）。
+    // 区间是事实的身份，不在载荷里猜：`facts` 的 id 与 `events` 的 id 同源。
+    let seq_of: HashMap<&str, u64> = events
+        .iter()
+        .filter_map(|e| e.seq.as_ref().map(|s| (e.event_id.as_str(), s.value())))
+        .collect();
+    let elided: Vec<(u64, u64)> = facts
+        .iter()
+        .filter(|fact| fact.kind == EVENT_MESSAGE_ADDED)
+        .filter_map(|fact| {
+            let elision = fact.payload.get("elision")?;
+            Some((
+                elision.get("from")?.as_u64()?,
+                elision.get("to")?.as_u64()?,
+            ))
+        })
+        .collect();
+
     let mut messages = Vec::new();
+    // 被省略区间的工具结果：连它的**调用**一起不要。留一条没有结果的调用，
+    // 降级路径会补一条「执行被中断」的占位 tool 消息——省略就漏了（t91）。
+    let elided_calls: Vec<&str> = facts
+        .iter()
+        .filter(|fact| fact.kind == EVENT_ARTIFACT_ADDED)
+        .filter(|fact| {
+            seq_of
+                .get(fact.id.as_str())
+                .is_some_and(|seq| elided.iter().any(|(from, to)| (*from..=*to).contains(seq)))
+        })
+        .filter_map(|fact| {
+            fact.payload
+                .get("tool_call_id")
+                .and_then(serde_json::Value::as_str)
+        })
+        .collect();
+    // 本轮第几次模型请求（0 = 首幕）：最后一条 `user.message` 之后数应答轮。
+    let mut round = 0u32;
     for fact in facts {
+        if let Some(seq) = seq_of.get(fact.id.as_str()) {
+            if elided.iter().any(|(from, to)| (*from..=*to).contains(seq)) {
+                continue;
+            }
+        }
         match fact.kind.as_str() {
             EVENT_USER_MESSAGE => {
+                round = 0;
                 if let Some(text) = fact.payload.get("text").and_then(serde_json::Value::as_str) {
                     if !text.trim().is_empty() {
                         messages.push(PromptMessage {
@@ -122,7 +175,45 @@ fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMes
                     }
                 }
             }
+            // 轮内追加的消息（D-249 的压缩节点 / 省略说明）：id 写的是它取代的区间，
+            // 这里按节点自己的身份回灌成一条普通消息——读侧不解释「为什么」。
+            EVENT_MESSAGE_ADDED => {
+                let nodes = fact
+                    .payload
+                    .get("messages")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|nodes| {
+                        nodes
+                            .iter()
+                            .filter_map(|node| serde_json::from_value::<ChatNode>(node.clone()).ok())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                for node in nodes {
+                    let role = match node.node_role().unwrap_or(NodeRole::User) {
+                        NodeRole::User => "user",
+                        NodeRole::Assistant => "assistant",
+                        NodeRole::Tool => "tool",
+                        NodeRole::System => "system",
+                    };
+                    let text = node
+                        .content
+                        .as_ref()
+                        .map(MessageContent::to_text)
+                        .unwrap_or_default();
+                    if !text.trim().is_empty() {
+                        messages.push(PromptMessage {
+                            role: role.into(),
+                            text,
+                            tool_call_id: None,
+                            tool: None,
+                            tool_calls: None,
+                        });
+                    }
+                }
+            }
             EVENT_RESPONSE if fact.port == MODEL_PORT => {
+                round = round.saturating_add(1);
                 let text = fact
                     .payload
                     .get("text")
@@ -173,6 +264,12 @@ fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMes
                             })
                             .collect::<Vec<_>>()
                     })
+                    .map(|calls| {
+                        calls
+                            .into_iter()
+                            .filter(|call| !elided_calls.contains(&call.id.as_str()))
+                            .collect::<Vec<_>>()
+                    })
                     .filter(|calls: &Vec<symbio_plugin_api::PromptToolCall>| !calls.is_empty());
                 if !text.trim().is_empty() || tool_calls.as_ref().is_some_and(|c| !c.is_empty()) {
                     messages.push(PromptMessage {
@@ -183,6 +280,10 @@ fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMes
                         tool_calls,
                     });
                 }
+            }
+            // 终答也是一次模型请求（收束轮）：请求轮次据此推进，段才按「首幕」分档。
+            EVENT_CHAT_ASSISTANT_FINAL => {
+                round = round.saturating_add(1);
             }
             EVENT_ARTIFACT_ADDED => {
                 let (Some(tool), Some(call_id)) = (
@@ -209,7 +310,49 @@ fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMes
             _ => {}
         }
     }
-    (system_prompt, tools, messages)
+    (system_prompt, tools, messages, round)
+}
+
+/// 装配侧取段（D-208 / D-220）：发言级段只在首幕取一次，请求级段每次请求都取。
+///
+/// 段身份来自 provider 自己声明的 [`ContextSection::slot`]（宿主不拼名字）；
+/// 这里只做「空段过滤 + 按节奏追加」，判断仍留在 provider 侧。
+fn context_sections(
+    events: &[symbio_plugin_api::Event],
+    tools: &[CapabilityMeta],
+    principal: &str,
+    round: u32,
+) -> Vec<ContextSection> {
+    let query = events
+        .iter()
+        .rev()
+        .find(|e| e.kind == EVENT_USER_MESSAGE)
+        .and_then(|e| e.payload.get("text").and_then(serde_json::Value::as_str));
+    let base = ContextRequest {
+        request_round: round,
+        principal,
+        query,
+        facts: events,
+        recall: None,
+        live: None,
+    };
+    let mut out = Vec::new();
+    if round == 0 {
+        out.extend(sections(&base, Cadence::Utterance));
+    }
+    let live = LiveInputs {
+        tools,
+        // Q1 的判定归控制面；模型端口这里只负责「请求已经发出」，不代判委派。
+        delegate: DelegateVerdict::NotJudged,
+        workers: &[],
+    };
+    let with_live = ContextRequest {
+        live: Some(&live),
+        ..base
+    };
+    out.extend(sections(&with_live, Cadence::Request));
+    out.retain(|section| !section.text.trim().is_empty());
+    out
 }
 
 /// 一次模型往返的执行体。
@@ -238,12 +381,17 @@ impl PortExecutor for ModelExecutor {
             }
         };
         // 事实读面由宿主实现、环只转交：正文输入全从事实取，载荷只带身份与选择。
+        let events = exec
+            .reader
+            .as_ref()
+            .map(|reader| reader.events())
+            .unwrap_or_default();
         let facts = exec
             .reader
             .as_ref()
             .map(|reader| reader.facts())
             .unwrap_or_default();
-        let (system_prompt, tools, messages) = turn_input(&facts);
+        let (system_prompt, tools, messages, round) = turn_input(&facts, &events);
         let provider = request
             .provider
             .as_deref()
@@ -251,7 +399,20 @@ impl PortExecutor for ModelExecutor {
             .unwrap_or(&self.active);
         // 请求构造归执行体（D-305 裁决一 / D-306 裁决二）：环交进的是**值**
         // （`PromptMessage`），线格式在这里收口。
-        let wire = wire_messages(&messages);
+        // 段注入（D-220 / D-252）：发言级段与请求级段都拼在**历史之前**、`role: system`。
+        let context = context_sections(&events, &tools, &request.principal, round);
+        let mut prompt = Vec::with_capacity(context.len() + messages.len());
+        for section in context {
+            prompt.push(PromptMessage {
+                role: "system".into(),
+                text: section.text,
+                tool_call_id: None,
+                tool: None,
+                tool_calls: None,
+            });
+        }
+        prompt.extend(messages);
+        let wire = wire_messages(&prompt);
         let started = std::time::Instant::now();
         // 流式增量是**瞬时帧**，不进事实表（`D-314` 两条通道）：provider 往 `env.sink()`
         // 写帧，这一出口记下节点 id 与半截正文（供 `response` / `failed` 载荷使用），

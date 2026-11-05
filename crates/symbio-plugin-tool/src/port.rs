@@ -1723,6 +1723,50 @@ impl ToolPort {
             );
         }
 
+        // 声明闸（DE-025 D-219）：宿主闸之后、执行窗口之前，按 owner 序问这个工具
+        // 声明过的前置判断，先拒绝者胜。判据只认工具自己的 `CapabilityMeta.behaviors`
+        // ——本执行体不认识任何工具名。历史交 `reader.events()`（与行执行体同一份）。
+        let declared: &'static [&'static str] = resolved_name
+            .as_deref()
+            .and_then(|canon| {
+                tool_rows
+                    .iter()
+                    .find(|r| r.name() == canon)
+                    .map(|r| r.meta().behaviors)
+            })
+            .unwrap_or(&[]);
+        if !declared.is_empty() {
+            let facts = exec
+                .reader
+                .as_ref()
+                .map(|reader| reader.events())
+                .unwrap_or_default();
+            let principal =
+                symbio_plugin_api::principal_of(ctx.get(AGENT_ID).as_deref());
+            if let Some(judged) = symbio_plugin_api::effects::apply_before(
+                &symbio_plugin_api::effects::BeforeRequest {
+                    tool: &tool_name,
+                    call_id: &tool_call_id,
+                    args: &args,
+                    principal: &principal,
+                    declared,
+                    facts: &facts,
+                    readings: symbio_plugin_api::effects::BeforeReadings::default(),
+                },
+            ) {
+                let text = format!("Refused: {}", judged.reason);
+                fire_post_hook(
+                    &parent,
+                    &tool_name,
+                    &args,
+                    serde_json::json!({ "error": text }),
+                    &ctx,
+                )
+                .await;
+                return refused(&text, judged.kind);
+            }
+        }
+
         let session_id = ctx.get(SESSION_ID).unwrap_or_default();
         let window = window_for(&session_id);
         let read_only = matches!(risk, Some(CapabilityRiskLevel::Low));

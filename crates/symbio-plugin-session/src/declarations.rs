@@ -7,10 +7,14 @@
 //! 本插件只剩写方（自主触发的落格）。名字因此取自清单生成物
 //! `symbio_plugin_api::events`——与任务族同一条通路，不是兄弟插件、也不是内核代答。
 //!
-//! 事实 / 视图不在本插件的控制面，因此不在这里。
+//! 事实 / 视图不在本插件的控制面，因此不在这里——除 `session.settled` 一条：
+//! 它是**本插件自己的收束格**，写方就在 `close_turn`。
 
-use symbio_kernel::decl::PluginDeclarations;
+use symbio_kernel::decl::{FactDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, Verb};
+use symbio_plugin_api::ring::{Decl, Pattern};
+use symbio_plugin_api::rows::PLUGIN_ROW;
+use symbio_plugin_api::LatencyTier;
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
 /// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
@@ -28,6 +32,16 @@ pub(crate) const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
 /// 用户点切换器时的断言；同样只有本插件读写（`commands` 落格、折叠读回）。
 pub(crate) const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
+
+/// 收束完成的断言：`session.close-turn` 行在终答之后落它，行据此关账（D-250 / D-252）。
+///
+/// 载荷只有 `root_id`：与 `chat.assistant.final` 的键**同名字段、同取值**，
+/// 债键才能对上（`Key` 按字段名比）。
+pub(crate) const EVENT_SESSION_SETTLED: &str = "session.settled";
+
+/// 收束行：终答落格之后，把能力交出的收束贡献（任务调度 / 记忆编码 …）落成事实。
+/// `by = plugin_row`，实现见 `close_turn`。
+pub(crate) const SESSION_CLOSE_TURN: &str = "session.close-turn";
 
 /// **读方侧**的视图名：主动性读数由能力包交（`crates/symbio-plugin-conation`），本插件按
 /// 名字读。与 [`TASK_READYSET_VIEW`] 同一条通路——拼写只有一个来源（owner 的 `PLUGIN.yml`
@@ -102,7 +116,40 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 若将来出现**非用户**的答复（如超时自动拒绝），这个前缀会不够用——那属策略层，
     // 真出现再议，**现在不预留**。
     EventDecl::new("user.answer", (Entity::Scope, Verb::Asserted)),
+    // 收束完成：`session.close-turn` 落完能力贡献之后写它，行据此关账。
+    EventDecl::new(EVENT_SESSION_SETTLED, (Entity::Scope, Verb::Progressed)),
 ];
+
+/// 收束行（D-250 / D-252）：终答落格之后，把能力交出的收束贡献落成事实。
+///
+/// `owes` 与 `until` 同键（`root_id`）：一有终答就欠一笔，落 `session.settled` 即还清。
+/// 没有这一行，`task.ready` / `task.assigned`（就绪视图的输入）永远不会在收束时落格。
+pub(crate) const ROWS: &[Decl] = &[Decl {
+    name: SESSION_CLOSE_TURN,
+    by: Some(PLUGIN_ROW),
+    tier: LatencyTier::Fast,
+    expand: None,
+    owes: Pattern {
+        source: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
+        key: &["root_id"],
+        eq: &[],
+    },
+    until: &[Pattern {
+        source: EVENT_SESSION_SETTLED,
+        key: &["root_id"],
+        eq: &[],
+    }],
+    unless: &[],
+}];
+
+/// 本插件自己的事实形状：只有 `session.settled` 的键字段 `root_id`。
+pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
+    name: EVENT_SESSION_SETTLED,
+    port: None,
+    key: &[],
+    expand: &[],
+    fields: &["root_id"],
+}];
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
 ///
@@ -158,11 +205,11 @@ symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: EVENTS,
-        facts: &[],
+        facts: FACTS,
         views: &[],
         ports: &[],
         actors: Vec::new(),
-        rows: &[],
+        rows: ROWS,
     }
 }
 

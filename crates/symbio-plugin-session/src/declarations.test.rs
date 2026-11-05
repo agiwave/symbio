@@ -25,12 +25,13 @@
 
 use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::decl::ring::{Decl, Pattern};
-use symbio_kernel::decl::PluginDeclarations;
+use symbio_kernel::decl::{ActorDecl, FactDecl, PluginDeclarations};
 use symbio_kernel::event::{
     Entity, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
+use symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL;
 
-use super::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
+use super::{EVENT_SESSION_SETTLED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 
 /// 技能观测的**格位**夹具：owner 是 `crates/symbio-plugin-skill`（`D-262`），它的折叠也住
 /// 在那里（`D-286`），而这条名字除 owner 之外没有生产读方 ⇒ 不在清单生成物里（`CS-007`）。
@@ -39,10 +40,30 @@ use super::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 /// 校准列用例要**把真实观测写进环里**才试得出「owner 不在本进程」这一种缺席。所以这里补
 /// 一条与 owner 同构的 `EventDecl`——**只补格位，不补视图**：`skill.calibration` 保持读
 /// 不到，那正是被测的形状（数字归 owner 的单测与 e2e）。
-const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
-    "memory.calibrated",
-    (Entity::Memory, Verb::Asserted),
-)];
+const HARNESS_EVENTS: &[EventDecl] = &[
+    EventDecl::new("memory.calibrated", (Entity::Memory, Verb::Asserted)),
+    // 终答格：生产装配里由 `loop` 的旧词汇表声明（宿主写口），本二进制不链接它，
+    // 而 `session.close-turn` 行的 `owes` 指向它 ⇒ 夹具补一条同构的宿主格位。
+    EventDecl::host(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed)),
+];
+
+/// 同 [`HARNESS_EVENTS`] 的另一半：`chat.assistant.final` 的载荷形状（键 `root_id`）。
+const HARNESS_FACTS: &[FactDecl] = &[FactDecl {
+    name: EVENT_CHAT_ASSISTANT_FINAL,
+    port: None,
+    key: &[],
+    expand: &[],
+    fields: &["root_id", "final_id", "text"],
+}];
+
+/// `plugin_row` 执行体：生产装配里由 `loop` 交（写名单是全部行实现的并集），
+/// 本二进制只补这一行自己的出口——`session.settled`。
+const HARNESS_ACTORS: &[ActorDecl] = &[ActorDecl {
+    name: symbio_plugin_api::rows::PLUGIN_ROW,
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[EVENT_SESSION_SETTLED],
+}];
 
 /// 协议五格的**覆盖行**：内核无条件声明协议事实（`PROTOCOL_EVENTS` /
 /// `PROTOCOL_FACTS`），而 `seal` 要求每个被声明的事实至少有一行读到它——否则报
@@ -78,13 +99,13 @@ fn protocol_rows() -> &'static [Decl] {
 fn harness_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: HARNESS_EVENTS,
-        facts: &[],
+        facts: HARNESS_FACTS,
         views: &[],
         ports: &[],
         // 本插件不再声明任何端口行（端口行住在各端口所属插件与 loop），
         // 因此测试夹具也不需要补 `port` 执行体——声明了却没有行指向它是
         // `OrphanActor`，整张装配表会失败。
-        actors: Vec::new(),
+        actors: HARNESS_ACTORS.to_vec(),
         rows: protocol_rows(),
     }
 }
