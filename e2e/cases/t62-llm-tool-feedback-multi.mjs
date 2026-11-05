@@ -141,30 +141,31 @@ export default defineCase(
       const echoCall = calls1.find((c) => c.name === 'echo');
       assertEq(echoCall.args, ECHO_ARGS, 'echo 的入参应完整到达工具');
 
-      // ── ④ 同轮请求里的形态：每次调用后紧跟自己的结果（相邻配对）──────────
-      // 实测形态（2026-10-14 探针钉下）：多工具轮在 wire 上不是「一条 assistant
-      // 带两个 tool_calls」，而是**每次调用各一条 assistant 消息、后随自己的
-      // role=tool 结果**——相邻配对。判据钉这个相邻性：调用与结果之间插进别
-      // 的东西（另一调用的结果 / 正文）就是串格的前兆。
-      const seq = (reqs[1].body.messages ?? []).map((m) => m.role);
-      assertEq(
-        seq.join(','),
-        'system,user,assistant,assistant,tool,assistant,tool',
-        `收尾轮的消息序列应为「用户 → 模型正文 → (调用,结果) × 2」（实际: ${seq.join(',')}）`,
-      );
-      const withCalls = dialogOf(reqs[1]).filter((m) => (m.tool_calls ?? []).length > 0);
-      assertEq(withCalls.length, 2, '两次调用应各占一条 assistant 消息');
-      for (const m of withCalls) {
-        assertEq(m.tool_calls.length, 1, '每条带调用的 assistant 消息应恰含一个 tool_calls 条目');
-      }
-      // 相邻性：每条「调用消息」的下一条必须是对应 id 的 tool 结果
+      // ── ④ 同轮请求里的形态：**一 assistant 可承载多个 tool_calls**，其后紧跟
+      // 同数量的 role=tool 结果，`tool_call_id` 与 `tool_calls[].id` 逐一配对。
+      //
+      // ⚠️ 这是 provider 协议的**标准形态**，不是放宽：两种承载方式（一调用一
+      // assistant / 一 assistant 多调用）都合法，判据钉的是**配对本身**。钉
+      // 「恰好一调用一 assistant」等于钉当年探针看到的那一种写法，换个合法承载
+      // 方式就假红——那正是「钉了绕开问题时采用的形态」。
       const msgs1 = reqs[1].body.messages ?? [];
+      const callMsgs = msgs1.filter((m) => (m.tool_calls ?? []).length > 0);
+      assert(
+        callMsgs.length >= 1,
+        `收尾轮应重放至少一条带 tool_calls 的 assistant（实际 ${callMsgs.length}）`,
+      );
       for (const [i, m] of msgs1.entries()) {
-        if (!(m.tool_calls ?? []).length) continue;
-        const next = msgs1[i + 1];
+        const ids = (m.tool_calls ?? []).map((c) => c.id);
+        if (!ids.length) continue;
+        const after = msgs1.slice(i + 1, i + 1 + ids.length);
         assert(
-          next && next.role === 'tool' && next.tool_call_id === m.tool_calls[0].id,
-          `调用 ${m.tool_calls[0].id} 的下一条必须是对应 id 的 tool 结果（实际: ${next?.role}/${next?.tool_call_id}）`,
+          after.length === ids.length && after.every((n) => n.role === 'tool'),
+          `调用 ${ids.join('/')} 之后必须紧跟 ${ids.length} 条 role=tool 结果（实际: ${JSON.stringify(after.map((n) => n.role))}）`,
+        );
+        assertEq(
+          after.map((n) => n.tool_call_id).sort().join(','),
+          ids.slice().sort().join(','),
+          `调用与结果必须逐一配对（tool_call_id ↔ tool_calls[].id；实际调用 ${JSON.stringify(ids)} / 结果 ${JSON.stringify(after.map((n) => n.tool_call_id))}）`,
         );
       }
       // 参数完整性（流式两片聚合的终点）：add 的入参可解析且值正确
