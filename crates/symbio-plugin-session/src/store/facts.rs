@@ -105,6 +105,17 @@ impl SessionStore {
         Ok(Some(store))
     }
 
+    /// 本会话的**读方主体**：与开轮写事件的 `actor` 同一取值点（`principal_of`）。
+    ///
+    /// 召回读侧的可见域收放按它收放——判的是读方、不是写方（D-084）。会话目录/元数据
+    /// 缺失时落 `session/main`（缺省态）：那与写事件的缺省主体一致，不是第二套口径。
+    pub(crate) fn session_principal(&self, session_id: &str) -> String {
+        let agent_id = self
+            .session_dir(session_id)
+            .and_then(|dir| super::layout::read_agent_id(&dir));
+        symbio_sdk::authz::principal_of(agent_id.as_deref())
+    }
+
     /// 该会话的契约事实源（五个方法的中性面）；装配层与插件共用同一底层 `WalStore`。
     pub(crate) fn fact_source(
         &self,

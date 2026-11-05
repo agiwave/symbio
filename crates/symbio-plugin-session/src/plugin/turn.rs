@@ -13,13 +13,15 @@ use super::*;
 use crate::chat_session::Carrier;
 use crate::convergence::SessionStateChange;
 use crate::transcript::publish::append_and_publish;
-use symbio_kernel::event::{Entity, Verb};
+use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::capability_take_errors;
-use symbio_plugin_api::debt::session_config_id;
+use symbio_plugin_api::debt::{session_config_id, session_recall_id};
 use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::fact_source::FactSource;
+use symbio_plugin_api::retrieval::{retrieve_all, RetrievalRequest};
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
+use symbio_sdk::turn::facts::FleetSnapshot;
 
 impl SessionPlugin {
     /// 收件箱队首 → `user.message` 事实；返回这条事实的 `seq`（无消息 ⇒ `None`）。
@@ -120,6 +122,18 @@ impl SessionPlugin {
             .append(PRINCIPAL_MAIN.to_string(), config_draft)
             .map_err(|e| PluginError::InternalError(format!("session.config 落格失败: {e}")))?;
 
+        // 轮首召回：跨会话枚举 + 可见域收放（宿主侧隔离面）→ 检索面 → 一格读数。
+        //
+        // 段 → provider → 落点的实际收集路径（以后加段照抄这一条）：
+        // 1. **本插件**在轮首取快照、按可见域收放（`recall_snapshots` 只在这里读，`pub(crate)`）；
+        // 2. 把收放后的**切片值**交给 `retrieve_all`（能力包注册的 `Retriever` 折成读数）；
+        // 3. 读数落一格事实（`session.recall`），不把切片写进 `session.config`；
+        // 4. **能力包的 `ContextProvider`** 在 `model::turn_input` 收集时从 `req.facts`
+        //    按名字读这一格并渲染段 → 进请求前缀。
+        // `plugin-model` 不认识任何段名：加一段 = 加一个 provider + 它在轮首的那一格读数。
+        self.append_recall(session_id, source, &item.id, seq, &text)
+            .await?;
+
         let mut message = item.message;
         message.seq = None;
         let session = self.open_chat_session(session_id).await?;
@@ -137,6 +151,55 @@ impl SessionPlugin {
             .emit_session_state(&state, SessionStateChange::Working)
             .await;
         Ok(Some(seq))
+    }
+
+    /// 轮首召回读数：可见切片 → 检索面 → 一格 `session.recall` 事实。
+    ///
+    /// 读数（而不是切片）落格：条目带着来源 `seq`、正文与认知标签，能力包的 provider
+    /// 据此渲染段；别的会话的原始事件集不进本会话 WAL。
+    async fn append_recall(
+        &self,
+        session_id: &str,
+        source: &dyn FactSource,
+        user_fact_id: &str,
+        user_seq: u64,
+        query: &str,
+    ) -> Result<(), PluginError> {
+        let store = self.get_store().await?;
+        let viewer = store.session_principal(session_id);
+        let snapshots = store.recall_snapshots(session_id);
+        let visible = recall_visible_slice(snapshots, &viewer);
+        let query = query.trim();
+        let query = (!query.is_empty()).then_some(query);
+        let Some(retrieval) = retrieve_all(&RetrievalRequest {
+            events: &visible,
+            query,
+        }) else {
+            return Ok(());
+        };
+        let draft = FactDraft {
+            key: session_recall_id(user_fact_id),
+            kind: crate::declarations::EVENT_SESSION_RECALL.to_string(),
+            entity: Entity::Scope,
+            verb: Verb::Asserted,
+            payload: json!({
+                "degraded": retrieval.degraded,
+                "entries": retrieval
+                    .entries
+                    .iter()
+                    .map(|entry| json!({
+                        "seq": entry.seq,
+                        "content": entry.content,
+                        "tag": entry.tag,
+                    }))
+                    .collect::<Vec<_>>(),
+            }),
+            produced_by: Some(user_seq),
+        };
+        source
+            .append(PRINCIPAL_MAIN.to_string(), draft)
+            .map_err(|e| PluginError::InternalError(format!("session.recall 落格失败: {e}")))?;
+        Ok(())
     }
 
     /// 路由 `session/consume`：把队首落成事实，返回开轮事实的 `seq`。
@@ -177,5 +240,36 @@ impl SessionPlugin {
             .project_final_turn(&sid, seq, &*source)
             .await?;
         Ok(PluginPayload::new(&json!({ "projected": projected })))
+    }
+}
+
+/// 可见切片：跨会话快照 → **收放之后**的事件集（新近在前）。
+///
+/// 快照是存储层交回的值（枚举平级会话、mtime 新近优先、文件数与字节双预算都在
+/// `SessionStore::recall_snapshots`）；这里只做隔离面那一步——逐条按读方主体收放，
+/// 交出去的是**收放之后**的切片，检索面不需要、也拿不到「哪个会话是谁的」。
+fn recall_visible_slice(snapshots: Vec<FleetSnapshot>, viewer: &str) -> Vec<Event> {
+    let mut events: Vec<Event> = Vec::new();
+    for snap in snapshots {
+        events.extend(snap.events.into_iter().filter(|e| {
+            let is_memory = e.entity == Entity::Memory
+                && (e.kind == symbio_plugin_api::events::EVENT_MEMORY_ENCODED
+                    || e.kind == symbio_plugin_api::events::EVENT_MEMORY_CONSOLIDATED);
+            !is_memory || memory_visible(e, snap.own, viewer)
+        }));
+    }
+    events.sort_by(|a, b| b.ts.cmp(&a.ts));
+    events
+}
+
+/// 一条记忆事件对 `viewer` 可见吗——读侧预过滤的**唯一判定点**。
+///
+/// 本会话自己的内容恒可见；别的会话的 `shared` / `public` 走 core 的读侧闸
+/// （`content_visible`，与 `stats` 同一份判据）。缺省（无 `vis_scope`）= 私有。
+fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
+    use symbio_sdk::governance::VisScope;
+    match VisScope::of_event(e) {
+        VisScope::ThreadPrivate => own,
+        s => own || symbio_sdk::authz::content_visible(s, viewer),
     }
 }

@@ -94,6 +94,9 @@ pub const EVENT_MESSAGE_ADDED: &str = "message.added";
 /// session.config — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_SESSION_CONFIG: &str = "session.config";
 
+/// session.recall — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
+pub const EVENT_SESSION_RECALL: &str = "session.recall";
+
 // ============ task ============
 
 /// task.asserted — owner `symbio-plugin-task`，格位 `(Task, Asserted)`
@@ -157,6 +160,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)), // memory.forgotten ← loop
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
     EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)), // session.config ← loop
+    EventDecl::new(EVENT_SESSION_RECALL, (Entity::Scope, Verb::Asserted)), // session.recall ← session
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task

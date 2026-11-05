@@ -39,6 +39,11 @@ pub(crate) const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
 /// 债键才能对上（`Key` 按字段名比）。
 pub(crate) const EVENT_SESSION_SETTLED: &str = "session.settled";
 
+/// 轮首召回读数（见 `symbio_plugin_api::events::EVENT_SESSION_RECALL`）：本插件是
+/// 事实源的 owner，跨会话枚举与可见域收放只能在这里做；读数落一格事实，能力包的
+/// provider 按名字读它渲染段（不扩 `PortFactReader`、不把切片塞进开轮载荷）。
+pub(crate) const EVENT_SESSION_RECALL: &str = symbio_plugin_api::events::EVENT_SESSION_RECALL;
+
 /// 收束行：终答落格之后，把能力交出的收束贡献（任务调度 / 记忆编码 …）落成事实。
 /// `by = plugin_row`，实现见 `close_turn`。
 pub(crate) const SESSION_CLOSE_TURN: &str = "session.close-turn";
@@ -118,6 +123,10 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("user.answer", (Entity::Scope, Verb::Asserted)),
     // 收束完成：`session.close-turn` 落完能力贡献之后写它，行据此关账。
     EventDecl::new(EVENT_SESSION_SETTLED, (Entity::Scope, Verb::Progressed)),
+    // 轮首召回读数：本插件（事实源的 owner）把跨会话可见切片折成的一格读数。
+    // 写方是 `consume_inbox_turn`，读方是 `symbio-plugin-memory` 的 `RecallProvider`
+    // ——provider 是纯函数拿不到别的事实源，所以读数由宿主落格、能力包按名字读。
+    EventDecl::new(EVENT_SESSION_RECALL, (Entity::Scope, Verb::Asserted)),
 ];
 
 /// 收束行（D-250 / D-252）：终答落格之后，把能力交出的收束贡献落成事实。

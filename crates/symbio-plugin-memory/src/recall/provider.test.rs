@@ -48,6 +48,38 @@ fn renders_the_judged_reading() {
     assert!(got[0].text.contains("经验"), "正文要带认知标签");
 }
 
+/// 轮首那一格读数（`session.recall` 事实）在场 ⇒ 渲染它。
+///
+/// 会话插件在轮首把收放后的切片交给 `retrieve_all`，把读数落成事实；provider
+/// 拿不到会话存储，只能从 `req.facts` 按名字读这一格（本用例钉住这条通路）。
+#[test]
+fn renders_the_turn_opening_reading_from_facts() {
+    let mut fact = symbio_plugin_api::Event::pending(
+        "session-recall:u1",
+        EVENT_SESSION_RECALL,
+        symbio_plugin_api::Entity::Scope,
+        symbio_plugin_api::Verb::Asserted,
+        "session/main",
+    );
+    fact.payload = serde_json::json!({
+        "degraded": false,
+        "entries": [{ "seq": 7, "content": "把总结写进 tmp/a.md", "tag": "经验" }],
+    });
+    let req = ContextRequest {
+        request_round: 0,
+        principal: "session/main",
+        query: Some("上次那份设计"),
+        facts: &[fact],
+        recall: None,
+        live: None,
+    };
+    let got = RecallProvider.provide(&req);
+    assert_eq!(got.len(), 1, "读数在场 ⇒ 交出召回段");
+    assert_eq!(got[0].slot, slots::RECALL);
+    assert!(got[0].text.contains("把总结写进 tmp/a.md"), "{}", got[0].text);
+    assert!(got[0].text.contains("经验"), "正文要带认知标签");
+}
+
 /// 发言级节奏（召回在任何段渲染之前取到），且提交在本包名下。
 ///
 /// owner 决定段的次序（DE-025 §3 第 4 条）：`loop` < `memory` < `task` ⇒ 发言级仍是

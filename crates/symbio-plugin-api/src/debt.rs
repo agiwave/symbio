@@ -154,6 +154,13 @@ pub fn session_config_id(user_fact_id: &str) -> String {
     format!("session-config:{user_fact_id}")
 }
 
+/// `session.recall` 条目的**幂等键**：同样由本轮 `user.message` 的事实 id 派生。
+///
+/// 一回合一条读数：同一条用户消息重放（续跑 / 心跳）不会落出第二格。
+pub fn session_recall_id(user_fact_id: &str) -> String {
+    format!("session-recall:{user_fact_id}")
+}
+
 /// 一行债：申报方给出的数据，宿主原样转给环。
 #[derive(Debug, Clone)]
 pub struct DebtSpec {
