@@ -221,22 +221,31 @@ export default defineCase(
 
         const userCell = peerEvents.find((e) => e.kind === 'user.message');
         assert(userCell, `对等轮应有开轮格（实际 kinds: ${JSON.stringify(kinds)}）`);
-        assertEq(userCell.scope, 0, '对等轮 = turn 0');
+        // `scope`（轮序号）已随事实形状退役：轮身份由**第一条用户消息事实**表达
+        // （D-335 的同一口径——用户消息即轮，不再有独立的轮序号格）。
+        assertEq(peerEvents[0].kind, 'user.message', '对等轮 = turn 0：开轮格是本会话第一条事实');
         assert(
           JSON.stringify(userCell.payload).includes(PEER_Q),
           '开轮格的正文 = 收件箱那条消息',
         );
 
-        // 产物收束（D-065 / D-067）：产物格在、actor = 对等主体、溯源指回开轮格。
+        // 产物收束（D-065 / D-067）：产物格在、actor = 对等主体、溯源落在本轮内。
         const artifact = peerEvents.find((e) => e.kind === 'artifact.added');
         assert(artifact, `产物格必须存在（实际 kinds: ${JSON.stringify(kinds)}）`);
         assertEq(artifact.actor, 'session/peer-b', '产物格的作者 = 对等主体');
-        assertEq(artifact.scope, 0, '产物格记在本轮');
-        assertEq(
-          artifact.produced_by,
-          userCell.seq,
-          '产物格溯源指向本轮开口格（I2）',
+        // `scope` 删掉后「记在本轮」的等价物是溯源指针：它必须指向本会话里
+        // **本轮开口之后**已落地的一条事实（`produced_by` 是宿主写口的直接前件，
+        // 不是轮开口格——同一口径见 t75）。种类对、指向成立即可，seq 不写死。
+        const producer = peerEvents.find((e) => e.seq === artifact.produced_by);
+        assert(
+          producer,
+          `产物溯源 ${artifact.produced_by} 必须指向本会话里存在的事实（实际 kinds: ${JSON.stringify(kinds)}）`,
         );
+        assert(
+          artifact.produced_by > userCell.seq,
+          `产物溯源 ${artifact.produced_by} 应落在本轮开口格（seq ${userCell.seq}）之后`,
+        );
+        assertEq(producer.kind, 'commitment.asserted', '产物是本轮承诺族落格后的直接结果：溯源种类 = commitment.asserted');
 
         // 发言收束**被闸拒**的形态：无 final 也无 fallback（fail-closed 的结构可见）。
         assert(
@@ -258,7 +267,14 @@ export default defineCase(
           'session/main',
           '承诺对象 = 来源主体（metadata.source_principal 声明的数据，不是写死的常量）',
         );
-        assertEq(offered.produced_by, userCell.seq, '立约锚在本轮开口格（I2）');
+        // 溯源口径与产物同一套：`produced_by` 是宿主写口的**直接前件**，不是轮开口格。
+        // 立约紧接本轮那次工具请求（seq 6 的 `request`）落格——种类对、指向成立即可。
+        const openProducer = peerEvents.find((e) => e.seq === offered.produced_by);
+        assert(
+          openProducer,
+          `立约溯源 ${offered.produced_by} 必须指向本会话里存在的事实（实际 kinds: ${JSON.stringify(kinds)}）`,
+        );
+        assertEq(openProducer.kind, 'request', '立约是本轮工具请求之后的直接结果：溯源种类 = request');
         const broken = peerEvents.find((e) => e.kind === 'commitment.broken');
         assert(
           broken,

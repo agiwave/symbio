@@ -19,10 +19,10 @@ import './_selfrun.mjs';
 //
 // | 锚 | 断言 | 它守住什么 |
 // |---|---|---|
-// | ① | 末轮**回答**的 `parent_id` 非空，父节点是**根级** `turn` 容器 | 「位置不参与判定」是**必须**的——回答不在根级，按根级切会把它整个漏掉 |
-// | ② | 至少一条**汇报**是根级 `assistant` 文本 | 助手说的话有**两种**位置：汇报在根级、回答在 `turn` 里，两条都得认 |
+// | ① | 末轮**回答**的 `parent_id` 非空，父节点是**根级**用户消息节点（D-335：用户消息即轮） | 「位置不参与判定」是**必须**的——回答不在根级，按根级切会把它整个漏掉 |
+// | ② | 至少一条**汇报**是根级 `assistant` 文本 | 助手说的话有**两种**位置：汇报在根级、回答在轮锚（用户消息节点）之下，两条都得认 |
 // | ③ | 存在 `role = tool` 且 `type = text` 的节点 | 「看角色」这一条不可省——工具结果就是文本节点 |
-// | ④ | 存在 `role = assistant` 且 `type ∈ {turn, tool_call, reasoning}` 的节点 | 「看类型」这一条不可省——工作节点的角色与助手**相同** |
+// | ④ | 存在 `role = assistant` 且 `type ∈ {tool_call, reasoning}` 的节点 | 「看类型」这一条不可省——工作节点的角色与助手**相同** |
 //
 // ③④ 是一对：**只看类型会漏进工具结果，只看角色会漏进工具调用**。两条判据
 // 各自必要，而不是"两条保险"。
@@ -65,7 +65,7 @@ const SID = 'e2e-t24-split';
 /** 用户发言（mock 用它匹配第 1 轮） */
 const ASK = '读一下 README 再总结';
 
-/** 末轮正文——它是**回答**，落在 `turn` 之下（形状锚 ① 的哨兵） */
+/** 末轮正文——它是**回答**，落在轮锚（用户消息节点）之下（形状锚 ① 的哨兵） */
 const ANSWER = '读完了，这里是总结。';
 
 /**
@@ -73,7 +73,7 @@ const ANSWER = '读完了，这里是总结。';
  *
  * 两轮工具是为了让**汇报**有机会出现——`progress_min_rounds = 1` 时每个轮
  * 边界都够格，于是根级会多出一条 assistant 文本（形状锚 ② 的哨兵）。同时
- * `turn` 里留下 `reasoning` / `tool_call` / 工具结果三类工作节点（形状锚 ③④）。
+ * 轮锚之下留下 `reasoning` / `tool_call` / 工具结果三类工作节点（形状锚 ③④）。
  *
  * `round-2` 必须 `once`：`afterTool` 的池子里它不带 `match`，不消耗掉就会在每一轮
  * 工具结果之后再次命中 ⇒ 无限工具循环（见 `e2e/mock-llm.mjs` 的说明）。
@@ -168,7 +168,7 @@ export default defineCase(
       const roots = msgs.filter((m) => m.parent_id == null);
       const byId = new Map(msgs.map((m) => [m.id, m]));
 
-      // ── 形状锚 ①：回答在 `turn` 之下，不在根级 ──
+      // ── 形状锚 ①：回答挂在**本轮用户消息节点**之下，不在根级（D-335：Turn 不作为可见节点）──
       const answer = msgs.find((m) => textOf(m) === ANSWER);
       assert(answer, `末轮正文 ${ANSWER} 应落库`);
       assert(
@@ -178,10 +178,12 @@ export default defineCase(
       );
       const turnOfAnswer = byId.get(answer.parent_id);
       assert(turnOfAnswer, `回答的父节点 ${answer.parent_id} 应在转写里`);
-      assertEq(typeOf(turnOfAnswer), 'turn', '回答的父节点应是 turn 容器');
+      // 轮锚 = 本轮用户消息节点（D-335：它的 id 就是这一轮的发布身份，没有独立的 turn 节点）。
+      assertEq(msgRoleOf(turnOfAnswer), 'user', '回答的父节点应是本轮用户消息节点（D-335：用户消息即轮）');
+      assertEq(typeOf(turnOfAnswer), 'text', '用户消息节点是文本节点');
       assert(
         turnOfAnswer.parent_id == null,
-        'turn 容器在根级——回答挂在它下面，所以「按根级切」会连容器带回答一起漏掉',
+        '用户消息节点（轮锚）在根级——回答挂在它下面，所以「按根级切」会连轮锚带回答一起漏掉',
       );
       assertEq(msgRoleOf(answer), 'assistant', '回答是助手说的话');
       assertEq(typeOf(answer), 'text', '回答是文本节点');
@@ -197,7 +199,7 @@ export default defineCase(
         assertEq(typeOf(r), 'text', '汇报是文本节点');
         assert(
           r.parent_id == null,
-          '汇报必须挂根级——它与回答（turn 子节点）是「同一件事的两种位置」',
+          '汇报必须挂根级——它与回答（轮锚子节点）是「同一件事的两种位置」',
         );
       }
 
@@ -214,8 +216,8 @@ export default defineCase(
         '工具结果挂在 tool_call 之下（不在根级）——位置同样挡不住它',
       );
 
-      // ── 形状锚 ④：「看类型」不可省——工作节点的角色与助手相同 ──
-      for (const t of ['turn', 'tool_call', 'reasoning']) {
+      // ── 形状锚 ④：「看类型」不可省——工作节点的角色与助手相同（D-335：无独立 turn 节点）──
+      for (const t of ['tool_call', 'reasoning']) {
         const same = msgs.filter((m) => typeOf(m) === t);
         assert(same.length >= 1, `真实转写里应出现 ${t} 节点`);
         for (const m of same) {
@@ -228,15 +230,15 @@ export default defineCase(
 
       // ── 根级同时含「对话线节点」与「工作节点」：分栏在真实数据上不是空动作 ──
       //
-      // 若根级全是助手文本，分栏后工作列就是空的（白拆一列）；若根级全是 `turn`，
+      // 若根级全是助手文本，分栏后工作列就是空的（白拆一列）；若根级全是轮锚，
       // 对话列就只剩用户问句。两个方向都得有东西，这一列才值得存在。
       assert(
         roots.some((m) => (msgRoleOf(m) === 'assistant' || msgRoleOf(m) === 'user') && typeOf(m) === 'text'),
         '根级应有对话线节点（用户问句 / 根级汇报）',
       );
       assert(
-        roots.some((m) => typeOf(m) === 'turn'),
-        '根级应有工作节点（turn 容器）——否则分栏后的工作列是空的',
+        roots.some((m) => m.id === turnOfAnswer.id),
+        '根级应有轮锚（用户消息节点）——工作线按它归组，否则分栏后的工作列是空的',
       );
 
       // ── 工具结果正文不该出现在任何对话面文本里 ──
@@ -271,9 +273,10 @@ export default defineCase(
         `实时面应含 tool_call 帧（实得 ${[...frameTypes].join('/')}）——` +
           '工作面板读的就是这份流；缺了它工作面板会空掉且没有错误信号',
       );
+      // D-335：实时面没有独立的 turn 组合节点——轮锚是那条用户消息帧（紧接下一句断言）。
       assert(
-        frameTypes.has('turn'),
-        `实时面应含 turn 帧（实得 ${[...frameTypes].join('/')}）——工作面板按它分组成"一轮"`,
+        !frameTypes.has('turn'),
+        `D-335：实时面不应出现独立 turn 节点（实得 ${[...frameTypes].join('/')}）`,
       );
       const hasUserFrame = frames.some((f) => msgRoleOf(f.data) === 'user');
       assert(hasUserFrame, '实时面应含用户消息帧（对话面板的另一半）');
