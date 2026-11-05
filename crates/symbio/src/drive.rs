@@ -33,7 +33,7 @@ use symbio_kernel::plugin::{
 };
 use symbio_plugin_api::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
 use symbio_plugin_api::{DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget, ExecEventSink};
-use symbio_sdk::keys::WORKDIR;
+use symbio_sdk::keys::{AGENT_ID, WORKDIR};
 
 /// 一次驱动需要的**世界**：事实源 + 通用上下文（会话 / 提供方 / 工作目录 / 出口）。
 ///
@@ -44,6 +44,9 @@ pub struct FactWorld<'a> {
     pub session_id: &'a str,
     pub provider: Option<&'a str>,
     pub workdir: &'a str,
+    /// 会话主体来源（metadata 的 `agent_id`，空串 = 无绑定主体）。
+    /// 由装配层随事实源带入，`drive_on_new_fact` 只在这里设一次 `AGENT_ID`。
+    pub agent_id: &'a str,
     /// 执行期出口：由会话插件按根交出的真实转写句柄（内部请求显式静默）。
     pub sink: ExecEventSink,
 }
@@ -74,6 +77,9 @@ pub async fn drive_on_new_fact(
     // （环不碰这个字段，只原样转交）。
     let ctx = PluginSimpleRequest::new(Some(Arc::downgrade(root)), None);
     ctx.set(WORKDIR, world.workdir.to_string());
+    // 会话主体的**唯一**装载点：值来自会话 metadata 的 `agent_id`，
+    // 由事实源打开时取来。执行体只读，不再各自派生或回落。
+    ctx.set(AGENT_ID, world.agent_id.to_string());
     // 装配层 open 的同一句柄：宿主与插件上下文共享它，插件不自建 store。
     ctx.set(FACT_SOURCE, Arc::clone(&world.facts));
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(ctx);
@@ -265,12 +271,21 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
                 .map(|dir| dir.to_string_lossy().into_owned())
         })
         .unwrap_or_default();
+    // 会话主体是装配层打开事实源时取的；推进路径不猜、不回落。
+    let Some(agent_id) = target.agent_id.as_deref() else {
+        eprintln!(
+            "驱动失败（{}）：会话主体不可用（metadata 未给出 agent_id，拒绝回落 session/main）",
+            target.session_id
+        );
+        return;
+    };
     let world = FactWorld {
         facts: Arc::clone(&target.facts),
         session_id: &target.session_id,
         // 收口只知道会话身份；提供方由环在驱动内按会话取。
         provider: None,
         workdir: &workdir,
+        agent_id,
         sink: target.sink.clone(),
     };
     if let Err(e) = drive_on_new_fact(root, &world).await {

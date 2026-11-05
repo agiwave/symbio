@@ -76,14 +76,19 @@ impl SessionStore {
         drive: Option<Arc<dyn symbio_plugin_api::DriveEntry>>,
         sink: symbio_kernel::exec::ExecEventSink,
     ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
-        let workdir = self
-            .session_dir(session_id)
-            .and_then(|dir| super::layout::read_workdir(&dir));
+        let dir = self.session_dir(session_id);
+        let workdir = dir.as_deref().and_then(super::layout::read_workdir);
+        // 会话主体的唯一来源；取不到就显式失败，不回落 `session/main`。
+        let agent_id = dir
+            .as_deref()
+            .and_then(super::layout::read_agent_id)
+            .ok_or_else(|| format!("会话 {session_id} 的 metadata 取不到 agent_id（拒绝回落主体）"))?;
         Ok(self.facts(session_id)?.map(|wal| {
             super::fact_source::SessionFactSource::open(
                 wal,
                 session_id.to_string(),
                 workdir,
+                Some(agent_id),
                 drive,
                 sink,
             )

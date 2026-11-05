@@ -35,6 +35,8 @@ pub(crate) struct SessionFactSource {
     session_id: String,
     /// 会话 metadata 的工作目录：`append` 不携带运行选项，驱动收口把它带进工具上下文。
     workdir: Option<String>,
+    /// 会话主体来源（metadata 的 `agent_id`）：随驱动目标交回，`append` 不再反查。
+    agent_id: Option<String>,
     /// 本会话所属**部署根**的驱动实例；`None` = 只读事实源，不踢驱动。
     drive: Option<Arc<dyn DriveEntry>>,
     /// 执行期出口：真实转写句柄，或本根**显式声明**的静默。
@@ -47,6 +49,7 @@ impl SessionFactSource {
         wal: Arc<WalStore>,
         session_id: String,
         workdir: Option<String>,
+        agent_id: Option<String>,
         drive: Option<Arc<dyn DriveEntry>>,
         sink: ExecEventSink,
     ) -> Arc<dyn FactSource> {
@@ -55,6 +58,7 @@ impl SessionFactSource {
             wal,
             session_id,
             workdir,
+            agent_id,
             drive,
             sink,
         })
@@ -82,6 +86,10 @@ impl FactSource for SessionFactSource {
                 let target = DriveTarget {
                     session_id: self.session_id.clone(),
                     workdir: self.workdir.clone(),
+                    // 主体是打开时取的；带驱动的事实源必须有它（打开处已校验）。
+                    agent_id: Some(self.agent_id.clone().ok_or_else(|| {
+                        "会话主体不可用：带驱动的事实源缺少 agent_id".to_string()
+                    })?),
                     facts,
                     sink: self.sink.clone(),
                 };
@@ -136,6 +144,7 @@ impl FactSourceOpener for SessionFactOpener {
             wal,
             session_id.to_string(),
             workdir,
+            None,
             None,
             ExecEventSink::silent(),
         ))

@@ -43,6 +43,11 @@ pub struct DriveTarget {
     pub session_id: String,
     /// 会话 metadata 的工作目录：`append` 不携带运行选项，由写口在打开时取来。
     pub workdir: Option<String>,
+    /// 会话主体来源：metadata 的 `agent_id`（空串 = 无绑定主体 ⇒ `session/main`）。
+    ///
+    /// 由写口在打开会话事实源时取来，`drive_on_new_fact` 据此设 `AGENT_ID`——
+    /// **全链路只有这一处设它**，其余执行体只读。`None` = 取不到（拒绝回落主体）。
+    pub agent_id: Option<String>,
     /// 本会话的事实源句柄（写口打开的那一份，唯一写口）。
     pub facts: Arc<dyn FactSource>,
     /// 执行期出口：由装配层按根提供真实转写句柄；内部请求显式静默。

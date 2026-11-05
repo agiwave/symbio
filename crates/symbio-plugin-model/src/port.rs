@@ -15,8 +15,8 @@ use symbio_plugin_api::context::{
     sections, Cadence, ContextRequest, ContextSection, DelegateVerdict, LiveInputs,
 };
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED, EVENT_SESSION_CONFIG,
-    EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED,
+    EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortFactEmit, PortInput, PortOutcome,
@@ -24,8 +24,9 @@ use symbio_plugin_api::port::{
 };
 use symbio_plugin_api::{
     llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecEnv, ExecEventSink,
-    ExecTranscriptWriter, FactDraft, ModelFinishReason, ModelProvider, PluginError, PromptMessage,
-    TurnOutput, TurnToolCallInfo, Verb, EVENT_FAILED, EVENT_RESPONSE,
+    ExecTranscriptWriter, FactDraft, ModelFinishReason, ModelProvider, PluginError,
+    PluginInvokeRequestExt, PromptMessage, TurnOutput, TurnToolCallInfo, Verb, EVENT_FAILED,
+    EVENT_RESPONSE,
 };
 
 /// 本插件服务的端口名（提供者自己定义；契约层不认识它）。
@@ -536,6 +537,28 @@ impl PortExecutor for ModelExecutor {
                 }
             }
         };
+        // 收束闸 · 发言臂（D-067）：主体未持 `reply.*` ⇒ 不落 `chat.assistant.final`。
+        // `session.close-turn` 以它为欠债来源（`Decl.owes.source`），不落它 ⇒ 本轮
+        // 派生事实（记忆 / 任务 / 承诺）与 `session.settled` 都不产生——拒绝要落到
+        // 收束层（t73）。答案仍经 `reply` 回给调用方：收束格是记录，不是呈现。
+        //
+        // 判的对象取**请求上下文的主体**（`ctx[AGENT_ID]` 的纯派生），与工具端
+        // 同一取值口径；载荷里的 `principal` 是记账字段，不是授权判据。
+        let Some(agent_id) = exec
+            .ctx
+            .as_deref()
+            .and_then(|ctx| ctx.get(symbio_plugin_api::AGENT_ID))
+        else {
+            // 主体缺失就是装配错误：**不回落** `session/main`，也不回落 `"user"`。
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "模型执行体缺少会话主体：装配层未设 AGENT_ID（拒绝回落）",
+            );
+        };
+        let gate_principal = symbio_plugin_api::principal_of(Some(agent_id.as_str()));
+        let speech_denied = outcome.error.is_none()
+            && world_kind == EVENT_CHAT_ASSISTANT_FINAL
+            && !symbio_plugin_api::production_matrix().can_reply(&gate_principal);
         // 账：`chat.assistant.final` / `response` / `failed` 由执行体经宿主写口落格（`D-314`）；
         // 信封（`verb`）由这里按事实种类给，键由 `emit_outcome` 按同一身份构造。
         if let Some(payload) = outcome.facts.first() {
@@ -544,12 +567,30 @@ impl PortExecutor for ModelExecutor {
             } else {
                 EVENT_FAILED
             };
-            let (key, verb) = if kind == EVENT_CHAT_ASSISTANT_FINAL {
-                (format!("{kind}:{}", request.root_id), Verb::Closed)
+            if speech_denied {
+                // 拒绝也要留痕：重建面按 `key = chat.assistant.final` + `root_id` 配对，
+                // 把这一轮的答复挡在对话面之外（`rebuild::denied_speech`）。
+                emit_outcome(
+                    &exec.emit,
+                    format!("deny-{}-speech", request.root_id),
+                    EVENT_AUTHZ_DENIED,
+                    Verb::Asserted,
+                    serde_json::json!({
+                        "port": MODEL_PORT,
+                        "key": EVENT_CHAT_ASSISTANT_FINAL,
+                        "root_id": &request.root_id,
+                        "detail": &request.principal,
+                    }),
+                )
+                .await;
             } else {
-                (format!("{kind}-outcome"), Verb::Asserted)
-            };
-            emit_outcome(&exec.emit, key, kind, verb, payload.clone()).await;
+                let (key, verb) = if kind == EVENT_CHAT_ASSISTANT_FINAL {
+                    (format!("{kind}:{}", request.root_id), Verb::Closed)
+                } else {
+                    (format!("{kind}-outcome"), Verb::Asserted)
+                };
+                emit_outcome(&exec.emit, key, kind, verb, payload.clone()).await;
+            }
         }
         // 工具轮的世界事实：债表只问「有没有 `tool.requested`」，执行体自己从读面取清单。
         // 身份取本次派发的幂等键（一轮一次，跨轮天然不同），不靠计数。

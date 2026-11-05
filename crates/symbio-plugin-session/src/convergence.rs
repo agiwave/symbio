@@ -212,7 +212,18 @@ impl Convergence {
                 e.kind == EVENT_ARTIFACT_ADDED
                     && e.payload.get("needs_user_action").and_then(Value::as_bool) == Some(true)
             });
-            if !waiting_on_user {
+            // 发言闸拒也是**正常收束**（D-067）：终答格被拒 ⇒ 不落 `final`，但轮
+            // 照样了结——拒绝是记录层的结论，不是静默中断。判据按**事实身份**认：
+            // `authz.denied{key = chat.assistant.final}` 且 `root_id` 归属本轮。
+            // 没有这一支，会话停在 `working`、CLI 等不到收束（t73 的 B 侧）。
+            let speech_denied = waiting_events.iter().any(|e| {
+                e.kind == CHAT_VOCAB.denied
+                    && e.payload.get("key").and_then(Value::as_str)
+                        == Some(CHAT_VOCAB.final_reply)
+                    && e.payload.get("root_id").and_then(Value::as_str)
+                        == Some(user.event_id.as_str())
+            });
+            if !waiting_on_user && !speech_denied {
                 // 失败也要收束：本轮落了 `failed`（模型 / 工具失败）却没有终答事实，
                 // 就没有任何节点承载「这一轮怎么结束的」——会话停在 working、CLI
                 // 等不到收束。这里补一条**失败终态**：正文取 `failed` 的可读原因，

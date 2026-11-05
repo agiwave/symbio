@@ -267,6 +267,21 @@ pub(super) fn read_workdir(dir: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+/// 会话 metadata 里的 `agent_id`——**会话主体的唯一来源**。
+///
+/// `Some("")` = 该会话没有绑定主体（合法：主体是 `session/main`）；
+/// `None` = metadata 读不到（调用方必须显式报错，不许回落主体）。
+pub(super) fn read_agent_id(dir: &Path) -> Option<String> {
+    let meta = read_meta(dir)?;
+    Some(
+        meta.metadata
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
 /// 读整个会话目录 = 元数据 + 消息（同步；嵌套查找的 miss 路径用）。
 ///
 /// 消息同样以 WAL 为准（与 [`load_messages`] 同一条真源纪律），遗留读法是回落。
