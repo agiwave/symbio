@@ -1749,6 +1749,10 @@ impl ToolPort {
                 .map(|reader| reader.events())
                 .unwrap_or_default();
             let principal = symbio_plugin_api::principal_of(ctx.get(AGENT_ID).as_deref());
+            // 读侧：闸要的结论从**本会话事实切片**折出来（只读 `reader.events()`）。
+            // 判的是调用方主体的 `assign.work`，不解析工具参数里的目标——闸与目标是否存在无关。
+            let readings =
+                symbio_plugin_api::effects::BeforeReadings::from_facts(&facts, &principal);
             if let Some(judged) = symbio_plugin_api::effects::apply_before(
                 &symbio_plugin_api::effects::BeforeRequest {
                     tool: &tool_name,
@@ -1757,7 +1761,7 @@ impl ToolPort {
                     principal: &principal,
                     declared,
                     facts: &facts,
-                    readings: symbio_plugin_api::effects::BeforeReadings::default(),
+                    readings,
                 },
             ) {
                 let text = format!("Refused: {}", judged.reason);

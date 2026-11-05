@@ -231,8 +231,28 @@ pub struct BeforeRequest<'a> {
 /// 输入，走决策**（DE-025 D-219）——它是插件认识的宿主词汇，不是自由形状。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BeforeReadings {
-    /// 主体的 `assign.work` 是否已被淘汰回路收回（部署级覆盖层 last-wins，宿主批首读一次）。
+    /// 主体的 `assign.work` 是否已被淘汰回路收回（覆盖层 last-wins，从会话事实切片折叠）。
     pub assign_work_revoked: bool,
+}
+
+impl BeforeReadings {
+    /// 从**会话本地事实切片**折出读数：`verdict × asserted` → 覆盖层 → 该主体的
+    /// `assign.work` 是否被收回（DE-043 §3）。
+    ///
+    /// 调用点是 tool 端口执行体入口、`apply_before` 之前：此时闸还没问行为，但读侧
+    /// 非要交的结论已经能在本会话切片里算出来。切片只来自该会话的读写口——跨会话的
+    /// 裁决由部署层在会话开面播种进同一份切片（D-339），本函数永远不读别人的会话。
+    ///
+    /// 判据是**调用方主体**（`principal`），不是被委派的目标：闸管的是「谁还能派活」，
+    /// 与目标存不存在无关。
+    pub fn from_facts(facts: &[Event], principal: &str) -> Self {
+        let overlay = symbio_sdk::governance::GrantsOverlay::fold(
+            symbio_sdk::actors::EliminationDecider::verdict_grants_changes(facts),
+        );
+        Self {
+            assign_work_revoked: overlay.is_revoked(principal, symbio_sdk::authz::CAP_ASSIGN_WORK),
+        }
+    }
 }
 
 /// 一次拒绝：判断归属的名字 + 回灌模型的拒因 + 退出语义。
