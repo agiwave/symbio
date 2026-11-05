@@ -174,6 +174,7 @@ async fn notify_port_registers_and_executes_for_real() {
                 permitted: true,
                 deny_reason: String::new(),
                 scratch_dir: None,
+                decls: None,
                 reader: None,
             },
             PortInput {
@@ -218,6 +219,7 @@ async fn notify_port_without_token_fails_without_network() {
                 permitted: true,
                 deny_reason: String::new(),
                 scratch_dir: None,
+                decls: None,
                 reader: None,
             },
             PortInput {

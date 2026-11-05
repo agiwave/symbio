@@ -293,6 +293,7 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
         scratch_dir: handles.scratch_dir,
         session_id: handles.session_id,
         reader: ctx.fact_reader(),
+        decls: handles.decls,
     };
     let outcome = executor
         .execute(

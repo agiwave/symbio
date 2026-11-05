@@ -11,7 +11,7 @@
 //! | 行为 | [`behavior::NoteCapture`] | `submit_behavior!` |
 //! | 视图 | [`decl`] 的 `ViewDecl`（`notes.recent` / `notes.digest` / `notes.insights`） | `submit_declarations!` + `PLUGIN.yml` 的 `shared_views` |
 //! | 行执行体 | [`row::NoteIndex`] / [`row::NoteReflect`] / [`row::NoteSummarize`] | `submit_row!`（通用执行体 `plugin_row`，D-241） |
-//! | 模型往返 | [`row::NoteReflect`] 交 `RowStep::Ask`，回执落 `notes.insight` | 宿主代付（`plugin_row` → `round_trip`，D-242） |
+//! | 模型往返 | [`row::NoteReflect`] 交 `RowStep::Ask`（欠一笔 `request(port=model)`），回执落 `notes.insight` | 环按 `model` 端口派发（D-304） |
 //! | 通用省略 | [`row::NoteSummarize`] 落带 `elision` 的 `message.added`，组装跳过那段工具结果 | 与领域事实同一个写口（D-249） |
 //!
 //! `core` / `kernel` 不认识「便签」这个词：领域事实落在 `Entity::Domain` 扩展位，

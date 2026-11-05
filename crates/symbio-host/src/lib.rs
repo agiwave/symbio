@@ -132,6 +132,8 @@ impl Host {
             // 内部请求显式静默）；宿主不再写死静默。
             sink,
             session_id: session_id.to_string(),
+            // 只读声明句柄（D-337）：冻结表是进程内唯一来源，执行体按需读。
+            decls: symbio_plugin_api::port::sealed_decl_reader(),
         };
         let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
             // 每驱动现造、从 0 起的投影游标：事实源是唯一输入，投影只缓存

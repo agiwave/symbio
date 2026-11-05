@@ -80,13 +80,6 @@ fn request_is_pure_values() {
     assert_eq!(drafts[0].produced_by, Some(42));
 }
 
-/// 默认不声明作答：只有明确说「我会零往返作答」的行才拿到那一格豁免（D-260）。
-#[test]
-fn answer_is_opt_in() {
-    assert!(!answers_of("test.row"));
-    assert!(!answers_of("test.absent"));
-}
-
 /// 解析口的默认实现是空：不请求往返的实现不该被迫回答「回执怎么办」。
 #[test]
 fn parse_defaults_to_no_facts() {

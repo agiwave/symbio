@@ -103,22 +103,9 @@ pub enum RowStep {
     /// 只有声明了对应 [`RowHandler::effects`] 的行才能走这一档：写口按声明复核形状，
     /// 未声明的效果在写口一处被拒。
     FactsWithEffects(Vec<FactDraft>, Vec<crate::effects::EffectDraft>),
-    /// 本步**就是这一轮的答复**：落 `facts`，宿主再落「已答」阶段格并把正文交给收束行
-    /// （零模型往返，D-260）。
-    Answer(AnswerStep),
-    /// 本步要一次模型往返：宿主执行并记账，回执交 [`RowHandler::parse`]。
+    /// 本步欠一笔 `request(port=model)`（D-304）：宿主据它发起一次往返并记账，
+    /// 回执交 [`RowHandler::parse`] 关账。
     Ask(ModelAsk),
-}
-
-/// 一条「不调模型也能收束」的产物：正文 + 本步要落的事实。
-///
-/// 收束格（`chat.assistant.final`）不在这里：它仍由 `close-turn` 统一落（D-163）。
-/// 正文只经宿主寄存给收束行，能力不直接写定稿格。
-pub struct AnswerStep {
-    /// 这一轮答复的正文。
-    pub text: String,
-    /// 本步要落的事实（按 [`RowHandler::writes`] 对账）。
-    pub facts: Vec<FactDraft>,
 }
 
 /// 一次模型往返的**请求**（纯值）：只有提示正文。
@@ -176,15 +163,6 @@ pub trait RowHandler: Sync {
         &[]
     }
 
-    /// 本行是否可能返回 [`RowStep::Answer`]（零往返作答，D-260）。
-    ///
-    /// 默认 `false`。声明为 `true` 的行，宿主会在它作答时代落一条
-    /// `turn.stage{stage:"reflex"}` 阶段格；运行期账本对**这一行**额外豁免那一格
-    /// （它是宿主代写的，不是能力交的草稿）。没走作答路径的行不受影响。
-    fn answers(&self) -> bool {
-        false
-    }
-
     /// 模型往返的回执 → 这一笔债的产物（D-242）。
     ///
     /// 只有 `run` 交过 [`RowStep::Ask`] 的实现会被调到；收的仍然是纯值。
@@ -237,11 +215,6 @@ pub fn handler_for(row: &str) -> Option<&'static dyn RowHandler> {
 /// 这一行的写入声明（运行期账本守卫用）。
 pub fn writes_of(row: &str) -> Option<&'static [&'static str]> {
     handler_for(row).map(|h| h.writes())
-}
-
-/// 这一行会不会零往返作答（宿主据此豁免它代写的阶段格，D-260）。
-pub fn answers_of(row: &str) -> bool {
-    handler_for(row).is_some_and(|h| h.answers())
 }
 
 /// 全部行实现的写入并集（装配期并进 `plugin_row` 的 `ActorDecl`）。

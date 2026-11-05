@@ -45,6 +45,8 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
+use symbio_kernel::decl::ring::Decl;
+use symbio_kernel::decl::ViewDecl;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_sdk::capability::{capability_report_error, CAPABILITY_VISITOR};
@@ -120,6 +122,38 @@ pub trait PortFactReader: Send + Sync + 'static {
     fn facts(&self) -> Vec<PortFact>;
 }
 
+/// 只读声明句柄（D-337）：执行体可以**读**声明表，但不带任何写口。
+///
+/// 两个读口各服务一类判断：视图声明回答「这一段是谁的身份」，债行声明回答「这一行
+/// 欠什么、什么时候算还」。冻结表本身已经是只读的（`Frozen` 没有 `&mut self`
+/// 方法），本句柄只是把它发进执行上下文——不新建注册表，也不让执行体改声明。
+pub trait PortDeclReader: Send + Sync + 'static {
+    /// 按名字取视图声明。`None` = 表上没有这条视图。
+    fn view(&self, name: &str) -> Option<ViewDecl>;
+
+    /// 全部债行声明（按冻结顺序）。
+    fn rows(&self) -> Vec<Decl>;
+}
+
+/// 由进程冻结表做成的只读句柄；冻结失败 ⇒ `None`（执行体按「没有声明可读」处理）。
+pub fn sealed_decl_reader() -> Option<Arc<dyn PortDeclReader>> {
+    struct Sealed(Arc<symbio_kernel::decl::Frozen>);
+
+    impl PortDeclReader for Sealed {
+        fn view(&self, name: &str) -> Option<ViewDecl> {
+            self.0.view(name).copied()
+        }
+
+        fn rows(&self) -> Vec<Decl> {
+            self.0.rows().to_vec()
+        }
+    }
+
+    crate::sealed_declarations()
+        .ok()
+        .map(|frozen| Arc::new(Sealed(frozen)) as Arc<dyn PortDeclReader>)
+}
+
 /// 一笔债的执行上下文（`DE-047` I-6.5 / D-305 裁决一）：命名不带世界词。
 #[derive(Clone)]
 pub struct PortExecContext {
@@ -153,6 +187,11 @@ pub struct PortExecContext {
     pub scratch_dir: Option<PathBuf>,
     /// 事实读面（宿主实现）：执行体按需读本可见域的事实；`None` = 无。
     pub reader: Option<Arc<dyn PortFactReader>>,
+    /// 只读声明句柄（D-337）：执行体按需读视图与债行声明；`None` = 无声明可读。
+    ///
+    /// **只读**：要想改声明，唯一通路是插件自己的 `traverse` 与能力收集
+    /// （`submit_declarations!`）；运行期改表会绕过那条收集，写出没人登记的行。
+    pub decls: Option<Arc<dyn PortDeclReader>>,
 }
 
 /// 宿主交给执行体的**不透明句柄束**：环只原样转交，不读取、不解释其中任何字段。
@@ -169,6 +208,8 @@ pub struct PortExecHandles {
     pub sink: ExecEventSink,
     /// 会话身份（宿主原样交值；空串 = 无）。
     pub session_id: String,
+    /// 只读声明句柄（宿主装配，`D-337`）；`None` = 该宿主没有可读的冻结表。
+    pub decls: Option<Arc<dyn PortDeclReader>>,
 }
 
 impl Default for PortExecHandles {
@@ -178,6 +219,7 @@ impl Default for PortExecHandles {
             scratch_dir: None,
             sink: ExecEventSink::silent(),
             session_id: String::new(),
+            decls: None,
         }
     }
 }
