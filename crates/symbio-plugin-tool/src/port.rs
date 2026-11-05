@@ -39,7 +39,8 @@ use crate::breaker::{CircuitBreaker, GateDecision};
 use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
-    capability_invoke, capability_to_wire, effects::annotations, effects::EffectInput,
+    capability_invoke, capability_to_wire, effects::annotations, effects::apply,
+    effects::EffectEnv, effects::EffectInput,
     events::EVENT_ARTIFACT_ADDED, events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED,
     events::EVENT_TOOL_REQUESTED, failure_kind, family, plugin_error, plugin_info, plugin_warn,
     CapabilityRiskLevel, Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError,
@@ -589,6 +590,8 @@ async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &Lan
                 obj.insert(key.to_string(), value);
             }
         }
+        // 声明的账：与环派发走**同一个**承接函数（单一实现，不复制）。
+        land_effects(exec, &input).await;
     }
     exec.emit
         .emit(vec![FactDraft {
@@ -600,6 +603,38 @@ async fn land_artifact(exec: &PortExecContext, meta: &CallMeta<'_>, landed: &Lan
             produced_by: art.produced_by,
         }])
         .await;
+}
+
+/// 一次调用的「声明的账」：按 `declared` 求行为草稿，交宿主唯一写口。
+///
+/// **两套承接出口（单次调用 / 环派发）都走这里**：同一承接体只能有一份实现。
+/// 复制一份的后果是——接错了不报错，只是静默地什么都不做（t93 就是这样卡住的）。
+async fn land_effects(exec: &PortExecContext, input: &EffectInput) -> usize {
+    if input.declared.is_empty() {
+        return 0;
+    }
+    // 行为只读「发生了什么」与宿主面；端口手里没有内核 `Event` 切片，
+    // 两片历史交空片是诚实的缺省（行为不得据此假设历史非空）。
+    let env = EffectEnv {
+        anchor: &exec.idempotency_key,
+        user_seq: exec.origin.unwrap_or(0),
+        principal: &exec.session_id,
+        source: &exec.session_id,
+        snapshot: &[],
+        applied: &[],
+    };
+    let drafts: Vec<FactDraft> = apply(&input.call(&env))
+        .into_iter()
+        .map(|mut d| {
+            d.produced_by = exec.origin;
+            d
+        })
+        .collect();
+    let n = drafts.len();
+    if n > 0 {
+        exec.emit.emit(drafts).await;
+    }
+    n
 }
 
 /// 本工具声明的行为名：与环侧 `ToolDecls::behaviors_of` 同一匹配口径
@@ -1100,6 +1135,22 @@ impl ToolPort {
             }
         };
         let mut facts = Vec::new();
+        // 声明表复用与单次出口同一口径（`visitor.list(family::TOOL)`）：只查表，不另建判据。
+        let declared_table: Vec<(String, &'static [&'static str])> = match exec.ctx.as_ref() {
+            Some(ctx) => match ctx.get(CAPABILITY_VISITOR) {
+                Some(visitor) => visitor
+                    .list(family::TOOL)
+                    .await
+                    .iter()
+                    .map(|row| {
+                        let meta = row.meta();
+                        (meta.name.to_string(), meta.behaviors)
+                    })
+                    .collect(),
+                None => Vec::new(),
+            },
+            None => Vec::new(),
+        };
         let mut reply = symbio_plugin_api::port::PortReply::default();
         for call in &calls {
             let payload = serde_json::json!({
@@ -1130,6 +1181,27 @@ impl ToolPort {
             }
             if let Some(result) = result {
                 exec.emit.emit(vec![artifact_draft(call, &result)]).await;
+                // 落格之后接着落**声明的账**：与单次出口同一个承接函数。
+                let declared = declared_of(&declared_table, &call.name);
+                if !declared.is_empty() {
+                    let input = EffectInput {
+                        tool: call.name.clone(),
+                        call_id: call.id.clone(),
+                        args: call.arguments.clone(),
+                        success: result
+                            .get("success")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true),
+                        result: result
+                            .get("result_text")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        why: String::new(),
+                        declared,
+                    };
+                    land_effects(&exec, &input).await;
+                }
             }
         }
         exec.emit
