@@ -143,6 +143,13 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
                 continue;
             }
         }
+        // 输入依赖的身份：执行体要读的那条事实必须**这一轮的**那条，不是旧的那条。
+        // 与 `when` 走同一条读面（宿主的 `exists_id`），环仍不解释种类。
+        if let Some((kind, id)) = &row.when_id {
+            if !source.exists_id(kind, id) {
+                continue;
+            }
+        }
         // 「该端口的债全部还清才欠」读的是债状态，不是事实状态（归属：选债）。
         if let Some(port) = row.when_no_open {
             if view
@@ -240,6 +247,8 @@ fn expire(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, next: Option<u32>, now
 /// - 正常 / 可重试 / 判死：`sent{deadline_ms}` + 对应配对账；
 /// - 挂起：只落 `sent{deadline_ms: null}`，**不落收束**，债继续开着。
 async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
+    // 端口名要跟着收束载荷走：读侧按 `port` 判「这一次往返算不算对读者说的话」。
+    let port = row.port;
     let key = DebtKey::new(row.port, row.id.clone(), attempt);
     ctx.append(Fact::new(
         FactKind::Request,
@@ -338,7 +347,7 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
                 json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
                 now_ms,
             ));
-            let payloads = response_payloads(&drafts, &outcome);
+            let payloads = response_payloads(&drafts, &outcome, port);
             let last = payloads.len().saturating_sub(1);
             for (idx, payload) in payloads.into_iter().enumerate() {
                 let mut fact = Fact::new(FactKind::Response, key.clone(), payload, now_ms);
@@ -361,19 +370,36 @@ fn class_name(class: PortErrorClass) -> &'static str {
 
 /// 收束载荷：执行体 emit 的每条 `response` 草稿按序各成一条事实（分片只是载荷），
 /// 没有草稿时退回返回体的唯一事实。环不合并、不解释分片。
-fn response_payloads(drafts: &[FactDraft], outcome: &PortOutcome) -> Vec<Value> {
+///
+/// 环把**端口名**补进载荷（执行体不自报，也不该自报「我是哪个端口」）：读侧
+/// （`rebuild::output_nodes`）按 `port == "model"` 判这一次往返是否对读者说话，
+/// 缺了它，正文 / 思考节点在重建面全部静默消失。
+fn response_payloads(drafts: &[FactDraft], outcome: &PortOutcome, port: &str) -> Vec<Value> {
     let emitted: Vec<Value> = drafts
         .iter()
         .filter(|d| d.kind == FactKind::Response.as_str())
         .map(|d| d.payload.clone())
         .collect();
-    if !emitted.is_empty() {
-        return emitted;
-    }
-    match outcome.facts.as_slice() {
-        [] => vec![json!({})],
-        [only] => vec![only.clone()],
-        many => vec![Value::Array(many.to_vec())],
+    let raw = if !emitted.is_empty() {
+        emitted
+    } else {
+        match outcome.facts.as_slice() {
+            [] => vec![json!({})],
+            [only] => vec![only.clone()],
+            many => vec![Value::Array(many.to_vec())],
+        }
+    };
+    raw.into_iter().map(|payload| stamp_port(payload, port)).collect()
+}
+
+/// 「端口」是环的身份位：对象载荷直接补键，非对象载荷包一层。
+fn stamp_port(payload: Value, port: &str) -> Value {
+    match payload {
+        Value::Object(mut map) => {
+            map.insert("port".to_string(), Value::String(port.to_string()));
+            Value::Object(map)
+        }
+        other => json!({ "port": port, "facts": other }),
     }
 }
 

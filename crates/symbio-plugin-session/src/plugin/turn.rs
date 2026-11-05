@@ -12,22 +12,21 @@
 use super::*;
 use crate::chat_session::Carrier;
 use crate::convergence::SessionStateChange;
-use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use crate::transcript::publish::append_and_publish;
 use symbio_kernel::event::{Entity, Verb};
-use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
-};
+use symbio_plugin_api::capability_take_errors;
+use symbio_plugin_api::debt::session_config_id;
+use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
-use symbio_sdk::chat::chat_node as cm;
 
 impl SessionPlugin {
     /// 收件箱队首 → `user.message` 事实；返回这条事实的 `seq`（无消息 ⇒ `None`）。
     ///
     /// `seq` 由事实源在入库时分配，它就是**开轮事实的身份**：`session.config` 的
-    /// 幂等键与溯源都指向它，投影终答时也用它找回这条 `user.message`。
+    /// 溯源指向它；`session.config` 的幂等键则由这条 `user.message` 的入库 id 派生
+    /// （`session_config_id`），让模型债行的 `when_id` 能只认**这一轮**的 config。
     pub(crate) async fn consume_inbox_turn(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
@@ -78,9 +77,22 @@ impl SessionPlugin {
             .into_iter()
             .map(|row| row.meta())
             .collect::<Vec<_>>();
+        // 收集过程的失败信号（traverse 侧记在 ctx 的桶里）：能力表为空/有错都要落 config，
+        // 只是把原因写进载荷。**不造新事件类型**——模型行依赖的是 `session.config` 这条
+        // 输入本身，它必须在每一轮都出现，否则模型行会永远等不到输入。
+        let capability_errors = capability_take_errors(ctx).await;
+        let tools_empty_reason = if tools.is_empty() {
+            Some(if capability_errors.is_empty() {
+                "no_tool_rows"
+            } else {
+                "capability_error"
+            })
+        } else {
+            None
+        };
         let cfg = self.config.read().await.clone();
         let config_draft = FactDraft {
-            key: format!("session-config-{seq}"),
+            key: session_config_id(&item.id),
             kind: EVENT_SESSION_CONFIG.to_string(),
             entity: Entity::Scope,
             verb: Verb::Asserted,
@@ -93,6 +105,13 @@ impl SessionPlugin {
                 "progress_max_per_turn": cfg.progress_max_per_turn,
                 "readyset_cap": cfg.task_cap,
                 "skill_compile_enabled": cfg.skill_compile_enabled,
+                // 兜底表达：空表原因 / 收集错误明细（均为既有 config 载荷的字段，
+                // 不是新事件类型）。非空表时前者为 null，后者为空数组。
+                "tools_empty_reason": tools_empty_reason,
+                "capability_errors": capability_errors
+                    .iter()
+                    .map(|e| json!({ "plugin": e.plugin, "message": e.message }))
+                    .collect::<Vec<_>>(),
             }),
             // 溯源指同一轮刚落的 `user.message`（seq 就是它的号）。
             produced_by: Some(seq),
@@ -118,126 +137,6 @@ impl SessionPlugin {
             .emit_session_state(&state, SessionStateChange::Working)
             .await;
         Ok(Some(seq))
-    }
-
-    /// 该开轮事实的终答事实 → 转写节点，并收束本轮；没有终答 ⇒ `false`（不投影）。
-    ///
-    /// 配对靠**事实身份**：由 `user.message` 的 `seq` 取回它的 `event_id`，
-    /// 再找载荷 `turn_id` 指向它的那条终答——不再拿轮号当键。
-    /// 节点由 `rebuild` 从**同一条事实**折出（读路径与写路径同一个折叠）。幂等：
-    /// 同一条事实再投影一次时，`apply` 见到节点已存在会跳过（不重复追加）。
-    pub(crate) async fn project_final_turn(
-        &self,
-        session_id: &str,
-        user_seq: u64,
-        source: &dyn FactSource,
-    ) -> Result<bool, PluginError> {
-        let events = source.range(0);
-        let Some(user) = events.iter().find(|e| {
-            e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq)
-        }) else {
-            return Ok(false);
-        };
-        let Some(final_event) = events
-            .iter()
-            .rev()
-            .find(|e| {
-                e.kind == EVENT_CHAT_ASSISTANT_FINAL
-                    && e.payload.get("turn_id").and_then(Value::as_str) == Some(&user.event_id)
-            })
-            .cloned()
-        else {
-            // 没有终答：若本轮落了「等用户动作」的产物，本轮就停在卡片上。
-            // 这是 interactive 档的正常收束形态（`ask_user` / 审批卡）——运行器
-            // 不再推进工具循环，CLI 也据此以退出码 0 结束。归本轮靠 seq：只看
-            // 开轮事实之后的这一段，前一轮没答复的卡不会误判。
-            let waiting_events: Vec<_> = events
-                .iter()
-                .filter(|e| e.seq.is_some_and(|seq| seq.value() > user_seq))
-                .cloned()
-                .collect();
-            let waiting_on_user = waiting_events.iter().any(|e| {
-                e.kind == EVENT_ARTIFACT_ADDED
-                    && e.payload.get("needs_user_action").and_then(Value::as_bool) == Some(true)
-            });
-            if !waiting_on_user {
-                return Ok(false);
-            }
-            // 卡片节点与终答走同一条折叠 + 发布（读路径与写路径同一份规则）：
-            // 本轮所有节点（正文 / 工具调用 / 卡片）一并投影，`apply` 对已存在的
-            // 节点幂等跳过。否则实时面只看得到环的协议事实、看不到卡片。
-            let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
-                &waiting_events,
-                &CHAT_VOCAB,
-                &MESSAGE_VOCAB,
-            )
-            .into_iter()
-            .map(|mut node| {
-                node.seq = None;
-                node
-            })
-            .collect();
-            if !nodes.is_empty() {
-                let session = self.open_chat_session(session_id).await?;
-                append_and_publish(
-                    &session,
-                    nodes,
-                    Carrier::Runner,
-                    &self.active_mgr,
-                    session_id,
-                    PRINCIPAL_MAIN,
-                )
-                .await?;
-            }
-            let state = self.active_mgr.get_or_create(session_id).await;
-            self.convergence
-                .emit_session_state(
-                    &state,
-                    SessionStateChange::Finished {
-                        outcome: OUTCOME_COMPLETED,
-                        error: None,
-                    },
-                )
-                .await;
-            return Ok(true);
-        };
-
-        let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
-            std::slice::from_ref(&final_event),
-            &CHAT_VOCAB,
-            &MESSAGE_VOCAB,
-        )
-        .into_iter()
-        .map(|mut node| {
-            // seq 由存储在临界区内权威分配；折叠给的是「从这份切片起」的局部号。
-            node.seq = None;
-            node
-        })
-        .collect();
-        if !nodes.is_empty() {
-            let session = self.open_chat_session(session_id).await?;
-            append_and_publish(
-                &session,
-                nodes,
-                Carrier::Runner,
-                &self.active_mgr,
-                session_id,
-                PRINCIPAL_MAIN,
-            )
-            .await?;
-        }
-
-        let state = self.active_mgr.get_or_create(session_id).await;
-        self.convergence
-            .emit_session_state(
-                &state,
-                SessionStateChange::Finished {
-                    outcome: OUTCOME_COMPLETED,
-                    error: None,
-                },
-            )
-            .await;
-        Ok(true)
     }
 
     /// 路由 `session/consume`：把队首落成事实，返回开轮事实的 `seq`。
@@ -273,7 +172,10 @@ impl SessionPlugin {
             .and_then(Value::as_u64)
             .ok_or_else(|| PluginError::ValidationError("session/project 需要 seq".into()))?;
         let source = self.fact_source_for(&ctx, &sid).await?;
-        let projected = self.project_final_turn(&sid, seq, &*source).await?;
+        let projected = self
+            .convergence
+            .project_final_turn(&sid, seq, &*source)
+            .await?;
         Ok(PluginPayload::new(&json!({ "projected": projected })))
     }
 }

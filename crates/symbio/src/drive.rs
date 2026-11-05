@@ -10,10 +10,16 @@
 //! 它返回 `NoDebt` / `Waiting` 就结束。`Waiting` 等的是某个端口的**响应事实**，
 //! 那条事实落地后由同一个入口再次触发——外层不持「正在跑」这类会话状态。
 //!
+//! ## 按根构造，不按入口构造
+//!
+//! [`HostDrive`] 的每个实例绑一份部署根（主根 / 子智能体容器树 / 测试装配）：
+//! 能力收集从这份根出发，会话的 `session_id` 只用来取上下文身份，**不再**反查
+//! 进程级 store。实例由事实源在打开时持有，踢的时候连事实源一起交回。
+//!
 //! ## 幂等
 //!
-//! 入口没有状态：同一会话相邻两次触发，第一次把债还清后，第二次的债表现算是空的
-//! ⇒ `NoDebt`。事实源是唯一输入，事实源本身绑定会话。
+//! 入口没有跨轮状态：同一会话相邻两次触发，第一次把债还清后，第二次的债表现算
+//! 是空的 ⇒ `NoDebt`。事实源是唯一输入，事实源本身绑定会话。
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -21,14 +27,15 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use symbio_host::{DriveOutcome, DriveReport, Host};
+use symbio_host::{DriveReport, Host};
 use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
 use symbio_plugin_api::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
+use symbio_plugin_api::{DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget, ExecEventSink};
 use symbio_sdk::keys::WORKDIR;
 
-/// 一次驱动需要的**世界**：事实源 + 通用上下文（会话 / 提供方 / 工作目录）。
+/// 一次驱动需要的**世界**：事实源 + 通用上下文（会话 / 提供方 / 工作目录 / 出口）。
 ///
 /// 这里没有端口名，也没有业务事件名——环从 `drive` 族取能力行，从 `port` / `debt`
 /// 族取执行体与债表。
@@ -37,9 +44,14 @@ pub struct FactWorld<'a> {
     pub session_id: &'a str,
     pub provider: Option<&'a str>,
     pub workdir: &'a str,
+    /// 执行期出口：由会话插件按根交出的真实转写句柄（内部请求显式静默）。
+    pub sink: ExecEventSink,
 }
 
-/// 装配层打开该会话的**唯一事实源**（经登记开面；插件不自建）。
+/// 装配层打开该会话的**只读事实源**（经登记开面；插件不自建）。
+///
+/// 这是读面（CLI 投影 / `session/project`）：不绑驱动、出口显式静默。开轮写口
+/// 不走这里——它由会话插件按本根绑定，见 `SessionPlugin::fact_source`。
 pub fn open_fact_source(session_id: &str) -> Result<Arc<dyn FactSource>, String> {
     declared_fact_source_opener()
         .ok_or_else(|| "没有登记事实源开面".to_string())?
@@ -67,7 +79,13 @@ pub async fn drive_on_new_fact(
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(ctx);
 
     let host = Host::with_store(Arc::clone(root), Arc::clone(&world.facts));
-    host.drive(&base, world.session_id, world.provider).await
+    host.drive(
+        &base,
+        world.session_id,
+        world.provider,
+        world.sink.clone(),
+    )
+    .await
 }
 
 // ── 驱动收口：事实写入成功之后踢一次 ────────────────────────────────────
@@ -75,12 +93,35 @@ pub async fn drive_on_new_fact(
 // 这是**唯一实现**。写口（会话事实源 `append`）经 `drive_entry` 契约调到这
 // 里；Tauri / gateway / CLI 都不再各自记得「写完要驱动」。
 
-/// 装配后的根插件（首个装配的根生效；进程内只有一个根）。
-static ROOT: OnceLock<Arc<dyn Plugin>> = OnceLock::new();
+/// 一份部署根的驱动实例：根 + 按会话的重入位。
+struct HostDrive {
+    /// 本实例的部署根（能力收集从这里出发）。
+    root: Arc<dyn Plugin>,
+    /// 本根的会话推进状态（**不是进程级表**）。
+    kicks: Mutex<HashMap<String, Arc<KickState>>>,
+}
 
-/// 装配层登记根插件，供驱动收口取用。
-pub fn install_root(root: &Arc<dyn Plugin>) {
-    let _ = ROOT.set(Arc::clone(root));
+impl HostDrive {
+    fn new(root: Arc<dyn Plugin>) -> Self {
+        Self {
+            root,
+            kicks: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn kick_state(&self, session_id: &str) -> Arc<KickState> {
+        let mut guard = self
+            .kicks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(guard.entry(session_id.to_string()).or_insert_with(|| {
+            Arc::new(KickState {
+                running: AtomicBool::new(false),
+                dirty: AtomicBool::new(false),
+                idle: tokio::sync::Notify::new(),
+            })
+        }))
+    }
 }
 
 /// 本会话的推进状态：两个原子位 + 一个唤醒句柄（**不加锁**）。
@@ -96,49 +137,19 @@ tokio::task_local! {
     static IN_DRIVE: ();
 }
 
-static KICKS: OnceLock<Mutex<HashMap<String, Arc<KickState>>>> = OnceLock::new();
-
-fn kick_state(session_id: &str) -> Arc<KickState> {
-    let map = KICKS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = map.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    Arc::clone(guard.entry(session_id.to_string()).or_insert_with(|| {
-        Arc::new(KickState {
-            running: AtomicBool::new(false),
-            dirty: AtomicBool::new(false),
-            idle: tokio::sync::Notify::new(),
-        })
-    }))
-}
-
-/// 装配层的驱动实现（进程内唯一）。
-struct HostDriveEntry;
-
-static HOST_DRIVE_ENTRY: HostDriveEntry = HostDriveEntry;
-
-inventory::submit! {
-    symbio_plugin_api::DriveEntryDecl { entry: &HOST_DRIVE_ENTRY }
-}
-
-impl symbio_plugin_api::DriveEntry for HostDriveEntry {
-    fn kick(
-        &self,
-        session_id: &str,
-        workdir: Option<&str>,
-    ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
-        // 未装配根插件（单测）⇒ 不驱动。
-        let root = ROOT.get()?.clone();
-        let state = kick_state(session_id);
+impl DriveEntry for HostDrive {
+    fn kick(&self, target: DriveTarget) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
+        let state = self.kick_state(&target.session_id);
         // 已在跑：只置 dirty，不嵌套。
         if state.running.swap(true, Ordering::AcqRel) {
             state.dirty.store(true, Ordering::Release);
             return None;
         }
 
-        let sid = session_id.to_string();
-        let workdir = workdir.map(str::to_string);
+        let root = Arc::clone(&self.root);
         Some(Box::pin(IN_DRIVE.scope((), async move {
             loop {
-                drain(&root, &sid, workdir.as_deref()).await;
+                drain(&root, &target).await;
                 // 跑着期间来过写入：再跑一轮，`running` 保持 true。
                 if state.dirty.swap(false, Ordering::AcqRel) {
                     continue;
@@ -161,19 +172,66 @@ impl symbio_plugin_api::DriveEntry for HostDriveEntry {
         if IN_DRIVE.try_with(|_| ()).is_ok() {
             return Box::pin(async {});
         }
-        let state = kick_state(session_id);
-        Box::pin(async move {
-            loop {
-                let notified = state.idle.notified();
-                tokio::pin!(notified);
-                // 先登记再查条件：避免「查完已空闲、通知却发生在查之前」的丢唤醒。
-                notified.as_mut().enable();
-                if !state.running.load(Ordering::Acquire) && !state.dirty.load(Ordering::Acquire) {
-                    return;
-                }
-                notified.await;
-            }
-        })
+        Box::pin(wait_idle(self.kick_state(session_id)))
+    }
+}
+
+/// 等一份会话推进状态空闲（`settled` 的等待体）。
+async fn wait_idle(state: Arc<KickState>) {
+    loop {
+        let notified = state.idle.notified();
+        tokio::pin!(notified);
+        // 先登记再查条件：避免「查完已空闲、通知却发生在查之前」的丢唤醒。
+        notified.as_mut().enable();
+        if !state.running.load(Ordering::Acquire) && !state.dirty.load(Ordering::Acquire) {
+            return;
+        }
+        notified.await;
+    }
+}
+
+/// 按根绑定工厂：装配层登记的**唯一实现**；每个部署根各持一份 [`HostDrive`]。
+struct HostDriveBinding;
+
+static HOST_DRIVE_BINDING: HostDriveBinding = HostDriveBinding;
+
+inventory::submit! {
+    DriveBindingDecl { binding: &HOST_DRIVE_BINDING }
+}
+
+impl DriveBinding for HostDriveBinding {
+    fn bind(&self, root: Arc<dyn Plugin>) -> Arc<dyn DriveEntry> {
+        Arc::new(HostDrive::new(root))
+    }
+}
+
+/// 主根的那一份实例（`settled` / CLI 等入口用）。
+static MAIN_DRIVE: OnceLock<Arc<HostDrive>> = OnceLock::new();
+
+/// 装配层登记主根插件：构造主根的驱动实例，供只认 `DriveEntryDecl` 的入口取用。
+pub fn install_root(root: &Arc<dyn Plugin>) {
+    let _ = MAIN_DRIVE.set(Arc::new(HostDrive::new(Arc::clone(root))));
+}
+
+/// 主根实例的静态入口（`inventory` 登记；未装配时 `None`）。
+struct MainDriveEntry;
+
+static MAIN_DRIVE_ENTRY: MainDriveEntry = MainDriveEntry;
+
+inventory::submit! {
+    symbio_plugin_api::DriveEntryDecl { entry: &MAIN_DRIVE_ENTRY }
+}
+
+impl DriveEntry for MainDriveEntry {
+    fn kick(&self, target: DriveTarget) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
+        MAIN_DRIVE.get()?.kick(target)
+    }
+
+    fn settled(&self, session_id: &str) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+        match MAIN_DRIVE.get() {
+            Some(drive) => drive.settled(session_id),
+            None => Box::pin(async {}),
+        }
     }
 }
 
@@ -186,19 +244,18 @@ pub async fn settled(session_id: &str) {
     }
 }
 
-/// 驱动一轮。**循环在 `drive_on_new_fact` 里**：环自己「读事实 → 选债 → 派发 →
+/// 驱动一轮。**循环在 [`DriveEntry::kick`] 里**：环自己「读事实 → 选债 → 派发 →
 /// 再读」，直到 `NoDebt`（还清）或 `Waiting`（只剩在飞的债：模型未回 / 答复未到）。
 /// 这里不一步一返回，也不在外层再包一圈 `loop { drive }`。
-async fn drain(root: &Arc<dyn Plugin>, session_id: &str, workdir: Option<&str>) {
-    // 事实源为空 ⇒ 没有可触发的事实。
-    let Ok(facts) = open_fact_source(session_id) else {
-        return;
-    };
-    if facts.head() == 0 {
+async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
+    // 事实源就是本会话的那一份（打开时绑好，不按 id 反查）。
+    if target.facts.head() == 0 {
         return;
     }
     // 会话 metadata 是 `workdir` 的唯一 owner；缺省才回落到进程当前目录。
-    let workdir = workdir
+    let workdir = target
+        .workdir
+        .as_deref()
         .filter(|dir| !dir.trim().is_empty())
         .map(str::to_string)
         .or_else(|| {
@@ -208,36 +265,19 @@ async fn drain(root: &Arc<dyn Plugin>, session_id: &str, workdir: Option<&str>) 
         })
         .unwrap_or_default();
     let world = FactWorld {
-        facts,
-        session_id,
+        facts: Arc::clone(&target.facts),
+        session_id: &target.session_id,
         // 收口只知道会话身份；提供方由环在驱动内按会话取。
         provider: None,
         workdir: &workdir,
+        sink: target.sink.clone(),
     };
-    let _ = drive_on_new_fact(root, &world).await;
+    if let Err(e) = drive_on_new_fact(root, &world).await {
+        // 宿主装配层不链 `tracing`（插件日志宏在这里展开不出来），退回 stderr。
+        eprintln!("驱动失败（{}）：{e}", target.session_id);
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use symbio_plugin_api::DriveEntry;
-
-    /// `settled` 是「等」不是「立即返回」：跑着时挂起，空闲后由通知唤醒。
-    #[tokio::test]
-    async fn settled_waits_for_idle() {
-        let sid = "drive-entry-settled-test";
-        let state = kick_state(sid);
-        state.running.store(true, Ordering::Release);
-
-        let waiting = tokio::spawn(HostDriveEntry.settled(sid));
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        assert!(!waiting.is_finished(), "驱动还在跑时 settled 不该返回");
-
-        state.running.store(false, Ordering::Release);
-        state.idle.notify_waiters();
-        tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
-            .await
-            .expect("空闲后应被唤醒")
-            .unwrap();
-    }
-}
+#[path = "drive.test.rs"]
+mod tests;

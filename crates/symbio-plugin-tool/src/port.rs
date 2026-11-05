@@ -14,6 +14,7 @@
 //! | `name` | 模型给的**线上名**（解析在本插件；环只当不具名纯值搬运） |
 //! | `args` | 调用参数（模型发的原样 JSON） |
 //! | `call_id` | 本次调用的 id（幂等与节点挂靠；结果节点 id 由它派生） |
+//! | `node_id` | 工具卡在实时面上的节点 id（执行窗口的状态帧写到它上面；可选） |
 //! | `scratch_dir` | 宿主为本轮准备的可写目录（结果超预算时在此写全文；子布局归本插件） |
 //! | `artifact` | `{ key, produced_by, allowed, denied_reason }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
 //! | `land_only` | `{ text, success, needs_user_action, prompt, failure_kind }`：只落产物格、不再执行（唤醒结果与没跑到的结果走这一形态） |
@@ -44,6 +45,7 @@ use symbio_plugin_api::{
     capability_invoke, capability_to_wire, effects::annotations, effects::apply,
     effects::expects_facts, effects::EffectEnv, effects::EffectInput, events::EVENT_ARTIFACT_ADDED,
     events::EVENT_AUTHZ_DENIED, events::EVENT_AUTHZ_GRANTED, events::EVENT_TOOL_REQUESTED,
+    chat_node::{ChatNode, NodeStatus},
     failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel, Entity,
     ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext, PortExecutor,
@@ -60,6 +62,9 @@ pub(crate) const TOOL: &str = "tool";
 const KEY_TOOL_NAME: &str = "name";
 const KEY_ARGS: &str = "args";
 const KEY_TOOL_CALL_ID: &str = "call_id";
+/// 工具卡在实时面上的节点身份（`tool_calls[].id`）。执行窗口的状态帧要落到
+/// **那张卡**上，而 `call_id`（wire id）是产物配对键，两套身份不能互换。
+const KEY_NODE_ID: &str = "node_id";
 /// 应答配对键（环从模型应答承载里搬来的纯值，`D-319`）：工具结果按它挂回调用。
 const KEY_REPLY_KEY: &str = "reply_key";
 /// 结果正文末尾的附注（环算好的同参重复提示；执行体只追加，不解释来源）。
@@ -718,10 +723,16 @@ async fn land_effects(exec: &PortExecContext, input: &EffectInput) -> EffectsLan
     }
     // 行为只读「发生了什么」与宿主面；端口手里没有内核 `Event` 切片，
     // 两片历史交空片是诚实的缺省（行为不得据此假设历史非空）。
+    //
+    // 主体 = **发起这次调用的主体**（`ctx[AGENT_ID]` 的纯派生，与会话写侧同一取值口径），
+    // 不是会话 id：立约格的 `from` 落在「谁许的诺」头上、声誉按主体聚合（DE-038），
+    // 两者混用会把账记到会话名下。
+    let agent_id = exec.ctx.as_deref().and_then(|ctx| ctx.get(AGENT_ID));
+    let principal = symbio_plugin_api::principal_of(agent_id.as_deref());
     let env = EffectEnv {
         anchor: &exec.idempotency_key,
         user_seq: exec.origin.unwrap_or(0),
-        principal: &exec.session_id,
+        principal: &principal,
         source: &exec.session_id,
         snapshot: &[],
         applied: &[],
@@ -898,6 +909,11 @@ fn read_requested(
                     Some(RequestedCall {
                         id,
                         name,
+                        node_id: call
+                            .get("node_id")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.trim().is_empty())
+                            .map(str::to_string),
                         arguments: call
                             .get("arguments")
                             .cloned()
@@ -1238,6 +1254,8 @@ impl PortExecutor for ToolPort {
 struct RequestedCall {
     id: String,
     name: String,
+    /// 工具卡的节点身份（与 `id` 的 wire 身份分工见 [`KEY_NODE_ID`]）。
+    node_id: Option<String>,
     arguments: serde_json::Value,
     /// 模型侧已判定的「本次调用不执行」及成因（当前只有超限丢弃）。
     failure: Option<RequestedFailure>,
@@ -1389,6 +1407,7 @@ impl ToolPort {
                 KEY_TOOL_NAME: call.name.clone(),
                 KEY_ARGS: call.arguments.clone(),
                 KEY_TOOL_CALL_ID: call.id.clone(),
+                KEY_NODE_ID: call.node_id.clone(),
                 KEY_REPLY_KEY: call.id.clone(),
             });
             // 模型已判定「不执行」的调用（超限丢弃）：**不派发**，直接以失败收尾。
@@ -1722,6 +1741,25 @@ impl ToolPort {
         } else {
             None
         };
+        // 执行窗口开始：把 `meta.started_at` 写到**工具卡**上（前端据它显示
+        // 「运行中 · Ns」）。放到窗口之后、路由之前——排队等窗口的时间不算执行时长。
+        if let Some(node_id) = payload
+            .get(KEY_NODE_ID)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            exec.sink
+                .emit(ChatNode {
+                    id: node_id.to_string(),
+                    status: Some(NodeStatus::Streaming),
+                    meta: Some(serde_json::json!({
+                        "started_at": symbio_plugin_api::clock_now_ms(),
+                        "tool_name": tool_name,
+                    })),
+                    ..Default::default()
+                })
+                .await;
+        }
         let agent_id = ctx.get(AGENT_ID).unwrap_or_default();
         let workdir = ctx.get(WORKDIR).unwrap_or_default();
 

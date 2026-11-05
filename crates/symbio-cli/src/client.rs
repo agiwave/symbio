@@ -49,6 +49,7 @@ use symbio::symbio_kernel::plugin::{
     Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest,
 };
 use symbio::symbio_kernel::vdfs::{VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
+use symbio::symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio::symbio_sdk::chat::chat_node::ChatNode;
 use symbio::symbio_sdk::event_bus::{
     event_bus_resync_of, event_bus_vdfs_change_of, EventBusSubscribeRequest, EVENT_BUS_KIND_VDFS,
@@ -496,23 +497,23 @@ impl SymbioClient {
         }
 
         // ── 触发链（装配层只做装配，不写业务事实）──
-        // 1. session 把收件箱条目写成事实并返回开轮事实的 seq（写口顺带踢出驱动）；
+        // 1. 收件箱写臂在入队后**自己开轮**（`consume_inbox_turn`）：写返回时
+        //    这条 `user.message` 已落格、写口已踢出驱动；CLI 不再替它调
+        //    `session/consume`（那是会话编排，不是客户端的必答题）。
         // 2. 这里只**等**写口踢出的驱动空闲（`settled`，不是第二次 drive）；
-        // 3. 终答事实已由环落地，session 自己投影转写（`session/project`）。
+        // 3. 终答事实已由环落地，session 自己投影转写（`session/project`）——
+        //    开轮事实的 seq 从事实源取，不再靠 consume 的返回值。
         let source = symbio::drive::open_fact_source(&self.session_id)
             .map_err(|e| format!("事实源打开失败: {e}"))?;
-        let consumed = self
-            .route_with_fact_source(
-                "session/consume",
-                json!({}),
-                Some(&self.session_id),
-                None,
-                Some(Arc::clone(&source)),
-            )
-            .await?;
-        if let Some(seq) = consumed.get("seq").and_then(Value::as_u64) {
-            // 驱动已由写口（事实源 `append`）踢出；这里只**等**它空闲，不再推第二遍。
-            symbio::drive::settled(&self.session_id).await;
+        symbio::drive::settled(&self.session_id).await;
+        let user_seq = source
+            .facts()
+            .into_iter()
+            .rev()
+            .find(|e| e.kind == EVENT_USER_MESSAGE)
+            .and_then(|e| e.seq)
+            .map(|seq| seq.value());
+        if let Some(seq) = user_seq {
             self.route_with_fact_source(
                 "session/project",
                 json!({ "seq": seq }),

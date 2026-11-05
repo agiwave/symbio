@@ -26,10 +26,20 @@
 //! 的持有者）。
 
 use super::active::ActiveSessionState;
-use super::plugin::session_node;
+use super::chat_session::Carrier;
+use super::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
+use super::plugin::{session_node, OUTCOME_COMPLETED};
+use super::transcript::publish::append_and_publish;
 use super::types::SessionSummary;
+use serde_json::Value;
 use std::sync::Arc;
 use symbio_kernel::plugin::PluginError;
+use symbio_plugin_api::events::{
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+};
+use symbio_plugin_api::fact_source::FactSource;
+use symbio_sdk::authz::PRINCIPAL_MAIN;
+use symbio_sdk::chat::chat_node as cm;
 
 /// 会话运行态的一次变化。
 ///
@@ -160,6 +170,227 @@ impl Convergence {
             Err(_) => None,
         };
         state.transcript.lock().await.emit_session_state(node);
+    }
+
+    /// 该开轮事实的终答事实 → 转写节点，并收束本轮；没有终答 ⇒ `false`（不投影）。
+    ///
+    /// 配对靠**事实身份**：由 `user.message` 的 `seq` 取回它的 `event_id`，
+    /// 再找载荷 `turn_id` 指向它的那条终答——不再拿轮号当键。
+    /// 节点由 `rebuild` 从**同一条事实**折出（读路径与写路径同一个折叠）。幂等：
+    /// 同一条事实再投影一次时，`apply` 见到节点已存在会跳过（不重复追加）。
+    pub(crate) async fn project_final_turn(
+        &self,
+        session_id: &str,
+        user_seq: u64,
+        source: &dyn FactSource,
+    ) -> Result<bool, PluginError> {
+        let events = source.range(0);
+        let Some(user) = events.iter().find(|e| {
+            e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq)
+        }) else {
+            return Ok(false);
+        };
+        let Some(final_event) = events
+            .iter()
+            .rev()
+            .find(|e| {
+                e.kind == EVENT_CHAT_ASSISTANT_FINAL
+                    && e.payload.get("turn_id").and_then(Value::as_str) == Some(&user.event_id)
+            })
+            .cloned()
+        else {
+            // 没有终答：若本轮落了「等用户动作」的产物，本轮就停在卡片上。
+            // 这是 interactive 档的正常收束形态（`ask_user` / 审批卡）——运行器
+            // 不再推进工具循环，CLI 也据此以退出码 0 结束。归本轮靠 seq：只看
+            // 开轮事实之后的这一段，前一轮没答复的卡不会误判。
+            let waiting_events: Vec<_> = events
+                .iter()
+                .filter(|e| e.seq.is_some_and(|seq| seq.value() > user_seq))
+                .cloned()
+                .collect();
+            let waiting_on_user = waiting_events.iter().any(|e| {
+                e.kind == EVENT_ARTIFACT_ADDED
+                    && e.payload.get("needs_user_action").and_then(Value::as_bool) == Some(true)
+            });
+            if !waiting_on_user {
+                // 失败也要收束：本轮落了 `failed`（模型 / 工具失败）却没有终答事实，
+                // 就没有任何节点承载「这一轮怎么结束的」——会话停在 working、CLI
+                // 等不到收束。这里补一条**失败终态**：正文取 `failed` 的可读原因，
+                // 与卡片 / 终答走同一条折叠 + 发布（同一个 closer、同一份事实源，
+                // 不新增契约、不新增写点）。
+                let failed = waiting_events
+                    .iter()
+                    .rev()
+                    .find(|e| e.kind == symbio_plugin_api::EVENT_FAILED)
+                    .cloned();
+                let Some(failed) = failed else {
+                    return Ok(false);
+                };
+                let why = failed
+                    .payload
+                    .get("why")
+                    .and_then(Value::as_str)
+                    .unwrap_or("模型调用失败")
+                    .to_string();
+                let mut nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
+                    &waiting_events,
+                    &CHAT_VOCAB,
+                    &MESSAGE_VOCAB,
+                )
+                .into_iter()
+                .map(|mut node| {
+                    node.seq = None;
+                    node
+                })
+                .collect();
+                nodes.push(cm::ChatNode {
+                    id: format!("failed:{}", failed.event_id),
+                    msg_type: Some(cm::NodeKind::Body),
+                    content: Some(cm::MessageContent::Text(why.clone())),
+                    status: Some(cm::NodeStatus::Failed),
+                    error: Some(why.clone()),
+                    ..Default::default()
+                });
+                if !nodes.is_empty() {
+                    let session = self.open_chat_session(session_id).await?;
+                    append_and_publish(
+                        &session,
+                        nodes,
+                        Carrier::Runner,
+                        &self.active,
+                        session_id,
+                        PRINCIPAL_MAIN,
+                    )
+                    .await?;
+                }
+                let state = self.active.get_or_create(session_id).await;
+                self.emit_session_state(
+                    &state,
+                    SessionStateChange::Finished {
+                        outcome: super::plugin::OUTCOME_FAILED,
+                        error: Some(why),
+                    },
+                )
+                .await;
+                return Ok(true);
+            }
+            // 卡片节点与终答走同一条折叠 + 发布（读路径与写路径同一份规则）：
+            // 本轮所有节点（正文 / 工具调用 / 卡片）一并投影，`apply` 对已存在的
+            // 节点幂等跳过。否则实时面只看得到环的协议事实、看不到卡片。
+            let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
+                &waiting_events,
+                &CHAT_VOCAB,
+                &MESSAGE_VOCAB,
+            )
+            .into_iter()
+            .map(|mut node| {
+                node.seq = None;
+                node
+            })
+            .collect();
+            if !nodes.is_empty() {
+                let session = self.open_chat_session(session_id).await?;
+                append_and_publish(
+                    &session,
+                    nodes,
+                    Carrier::Runner,
+                    &self.active,
+                    session_id,
+                    PRINCIPAL_MAIN,
+                )
+                .await?;
+            }
+            let state = self.active.get_or_create(session_id).await;
+            self.emit_session_state(
+                &state,
+                SessionStateChange::Finished {
+                    outcome: OUTCOME_COMPLETED,
+                    error: None,
+                },
+            )
+            .await;
+            return Ok(true);
+        };
+
+        // 本轮的全部事实（开轮之后、终答为止）：推理 / 正文 / 工具调用都从这一
+        // 段折出。只喂终答一格会把工具轮（没有 `chat.assistant.final` 的那一半）
+        // 的节点整段丢掉——实时面只剩 user.message 与 final。
+        let final_seq = final_event.seq.map(|seq| seq.value()).unwrap_or(u64::MAX);
+        let turn_events: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                e.seq
+                    .is_some_and(|seq| seq.value() > user_seq && seq.value() <= final_seq)
+            })
+            .cloned()
+            .collect();
+        let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
+            &turn_events,
+            &CHAT_VOCAB,
+            &MESSAGE_VOCAB,
+        )
+        .into_iter()
+        .map(|mut node| {
+            // seq 由存储在临界区内权威分配；折叠给的是「从这份切片起」的局部号。
+            node.seq = None;
+            node
+        })
+        .collect();
+        if !nodes.is_empty() {
+            let session = self.open_chat_session(session_id).await?;
+            append_and_publish(
+                &session,
+                nodes,
+                Carrier::Runner,
+                &self.active,
+                session_id,
+                PRINCIPAL_MAIN,
+            )
+            .await?;
+        }
+
+        let state = self.active.get_or_create(session_id).await;
+        self.emit_session_state(
+            &state,
+            SessionStateChange::Finished {
+                outcome: OUTCOME_COMPLETED,
+                error: None,
+            },
+        )
+        .await;
+        Ok(true)
+    }
+
+    /// 开轮之后的**收尾**：等写口踢出的驱动空闲，再把终答投影并收束本轮。
+    ///
+    /// 起后台任务而不是在写臂里等：写入的回执语义是「已经开轮」，不是「这一轮
+    /// 已经跑完」。收尾也不靠时间——`settled` 等的是驱动自己的空闲通知
+    /// （`DriveEntry::settled`），驱动跑到 `NoDebt` 才可能返回。
+    ///
+    /// 调用方两种：CLI 写自己的收件箱（它另会 `session/project`，幂等），以及
+    /// `agent_run` 写子会话的收件箱（子会话没有 CLI 投影方——不在这里收，
+    /// 它永远停在 `working`，转播桥也就永远等不到本轮结束）。
+    pub(crate) fn spawn_turn_closer(
+        &self,
+        session_id: String,
+        user_seq: u64,
+        source: Arc<dyn FactSource>,
+        drive: Option<Arc<dyn symbio_plugin_api::DriveEntry>>,
+    ) {
+        let this = self.clone();
+        tokio::spawn(async move {
+            // 等**本部署根**那一份驱动空闲：主根 / 子空间各持一份实例，拿主根的
+            // 实例等子会话永远是「本会话没在跑」——投影会抢在驱动前面落空。
+            if let Some(entry) = drive {
+                entry.settled(&session_id).await;
+            }
+            if let Err(e) = this
+                .project_final_turn(&session_id, user_seq, &*source)
+                .await
+            {
+                symbio_plugin_api::plugin_warn!("session", "收轮投影失败（{session_id}）：{e}");
+            }
+        });
     }
 }
 

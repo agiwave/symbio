@@ -5,6 +5,7 @@ use std::sync::Arc;
 use super::*;
 // 只做链接：环经 creator 注册被这个根构造，测试二进制必须把它的注册项带进来。
 use symbio_host::{base_context, DriveOutcome, Host};
+use symbio_plugin_api::ExecEventSink;
 use symbio_plugin_loop as _;
 
 /// 夹具根：先收假插件的端口/债行，再挂上系统环的 `drive` 行。
@@ -50,7 +51,7 @@ async fn demo_port_runs_through_the_ring() {
         demo: DemoPlugin::build(base_context()),
     }));
     let report = host
-        .drive(&base_context(), "demo-session", None)
+        .drive(&base_context(), "demo-session", None, ExecEventSink::silent())
         .await
         .expect("装配成立");
 
@@ -72,7 +73,7 @@ async fn demo_port_runs_through_the_ring() {
     assert!(host.idle_at().is_some(), "无未还债 ⇒ idle");
 
     let again = host
-        .drive(&base_context(), "demo-session", None)
+        .drive(&base_context(), "demo-session", None, ExecEventSink::silent())
         .await
         .expect("二次驱动成立");
     assert_eq!(again.dispatched, 0, "已配对的债不再欠");

@@ -10,6 +10,8 @@ use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
     VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR,
 };
+use symbio_plugin_api::fact_source::FACT_SOURCE;
+use symbio_sdk::keys::SESSION_ID;
 use symbio_sdk::vdfs::host::vdfs_host_ctx;
 
 impl SessionPlugin {
@@ -154,6 +156,48 @@ impl SessionPlugin {
                         .await
                     }
                 };
+                // **入队之后由本臂开轮**（同一插件内，不跨插件依赖）。
+                //
+                // 没有这一下，「入队」与「开轮」之间就没有人接：`agent_run` 起的子会话
+                // 只写这份 inbox、从不调 `session/consume`，队列项会永远停在队首。
+                // 写入返回前必须把开轮做完——调用方拿到的回执对应的是「这一轮已经开」，
+                // 不是「这条消息被人签收了」。
+                //
+                // **两条分支不分家**：自主触发的分支先落触发事实（`request_autonomous_round`
+                // 只入队、不落 `user.message`），开轮同样归本臂——心跳侧没有任何消费者，
+                // 少这一下则那一轮永远不开（事实链里只有触发、没有 `user.message`）。
+                // 开轮单元的固定形状：`user.message` → `session.config`（溯源指前者）。
+                {
+                    // 事实源按**收件箱的会话 id** 取，不按调用方上下文取：
+                    // `agent_run` 写的是子会话的 inbox，而调用方上下文里的
+                    // `FACT_SOURCE` 是**外层**的。用上下文那一份会把子会话的
+                    // `user.message` / `session.config` 落进外层 WAL——子会话
+                    // 永远没有事实、也就永远不会被写口踢起驱动。
+                    let source = self
+                        .fact_source(id)
+                        .await
+                        .map_err(|e| VdfsError::Internal(format!("开轮取事实源失败: {e}")))?;
+                    // 能力收集与开轮都按**这条消息的会话**算：fork 出独立上下文，
+                    // 把会话键与事实源重挂到子会话（子插件的能力可见域据此计算）。
+                    let inbox_ctx = vdfs_host_ctx(ctx)?.fork();
+                    inbox_ctx.set(SESSION_ID, id.to_string());
+                    inbox_ctx.set(FACT_SOURCE, Arc::clone(&source));
+                    let seq = self
+                        .consume_inbox_turn(&inbox_ctx, id, &*source)
+                        .await
+                        .map_err(|e| VdfsError::Internal(format!("开轮失败: {e}")))?;
+                    // 收尾：等这轮驱动空闲后投影终答（见 `spawn_turn_closer`）。
+                    // 本臂的调用方可能是 CLI（自己会 `session/project`，幂等），也可能
+                    // 是 `agent_run`（子会话没有投影方——缺席就永远停在 `working`）。
+                    if let Some(seq) = seq {
+                        self.convergence.spawn_turn_closer(
+                            id.to_string(),
+                            seq,
+                            source,
+                            self.drive_entry(),
+                        );
+                    }
+                }
                 // 回执的 `name` 是**条目自己的名字**（不是请求地址的末段）：写收件箱
                 // 目录自身时 id 由 provider 生成，调用方只能从回执得知它落成了什么
                 // （与新建会话回执返回生成的 id 同一手法）；写具名条目

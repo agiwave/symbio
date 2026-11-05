@@ -20,6 +20,9 @@ pub(crate) struct DebtRow {
     /// 触发条件：该**种类**的事实在本可见域存在才欠；`None` = 无条件。
     /// 环只把字符串原样交给宿主的 `exists`，不解释它的语义。
     pub(crate) when: Option<String>,
+    /// 触发条件（种类 + 身份）：该条输入事实存在才欠。与 `when` 同一条读面，
+    /// 只是多带一位身份——「有没有过这种事实」与「这一轮的输入到了没有」是两件事。
+    pub(crate) when_id: Option<(String, String)>,
     /// 该事实已存在 ⇒ 本行不欠（排除条件，与 `when` 同一条读面）。环只透传，不解释。
     pub(crate) unless: Option<Unless>,
     /// 该端口的债全部还清才欠；`None` = 无此前提。环只读端口名，不解释语义。
@@ -46,6 +49,7 @@ impl DebtRow {
             payload,
             after: None,
             when: None,
+            when_id: None,
             unless: None,
             when_no_open: None,
             lease_ms: 60_000,

@@ -6,16 +6,14 @@
       "fn plan",
       "fn expire"
     ],
-    "hash": "sha256:fd32bcfb62890c01e2b21b05242991d5bb39c1c7b17e4964d1be4b420d32e124",
-    "adr": "D-332",
-    "reason": "基线落在 D-325 机制形状五条固化之后的控制面形状上：驱动循环体（ring/engine.rs 的 loop）+ 选债包装 fn plan + 在途判据 fn expire 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改：机制演进必须同批更新 hash 并改这条理由。D-332 更新时先核了合法性——自上一基线（a81fe3b2 记录）以来 engine.rs 的全部 diff 只有两处：`34526409` 把选债结构 `Batch` 改名 `Work`（LP-003 的 batch 词根退役），`62c6e74f` 在「无 provider」诊断里补上 `row.name`；两处都是机制面（改名 / 诊断措辞），没有新增世界域名、端口名或业务事实名字面量，同批 CP-004 / LP-003 实测为绿。指纹是**归一化 token 流**的哈希（剥注释、折叠空白、不计逗号）：import 顺序 / rustfmt 换行 / 尾逗号不进基线，加条件、改返回值、换比较符才进——不然每次 fmt 都要写一条 allow，allow 就成了橡皮图章。"
+    "hash": "sha256:acfe29ec3a0daa039b62a17577b1cc75329f282e42816112bfd193ff1a69ee5d",
+    "adr": "D-334",
+    "reason": "基线跟到实测：自 `sha256:fd32bc…`（`6c9b4918` 记录）以来，机制三段只有 `fn plan` 变了两次——`08950b85` 的派发第三态「挂起」（`sent.deadline_ms: null` 的债只在挂起点之后的新触发上重派，既不按时间重试也不自旋），本批的 `when_id`（种类 + 身份）触发条件（债行依赖的输入事实必须是这一轮的，经宿主的 `exists_id` 读面，D-325）。两处都没有新增世界域名 / 端口名 / 业务事实名字面量；驱动循环体与 `fn expire` 未变。冻结不是不许改：机制演进必须同批更新 hash 并改这条理由；指纹是**归一化 token 流**的哈希（剥注释、折叠空白、不计逗号）：import 顺序 / rustfmt 换行 / 尾逗号不进基线，加条件、改返回值、换比较符才进——不然每次 fmt 都要写一条 allow，allow 就成了橡皮图章。合法性的核验见 D-334。"
   },
   "extension": {
     "productionFiles": 8
   },
   "baseline-allow": [
-    "sha256:41b25ba7b5145b819e0eb26a4db018c593903af84c91d4ffe180f0daa62f34af→sha256:a1b30d611c27fd5c5dab3e9fd3f7cc5e91a5959d326739ec16764a6aeccf968a 选债结构 Batch 改名 Work（LP-003 batch 词根退役）+ 无 provider 诊断补 row.name；均为机制面，无世界域名 / 端口名 / 业务事实名，CP-004 与 LP-003 同批为绿 D-332",
-    "sha256:a1b30d611c27fd5c5dab3e9fd3f7cc5e91a5959d326739ec16764a6aeccf968a→sha256:db545d45b6d9c370878ec1dd6367acb0836f0e63e28cf55afc7f9d4cf4967079 §四.2 去 scope：drive / plan / expire / dispatch 不再接收与传递 scope（会话由宿主按实例选定），同批 diff 另含缺口① 的 exec_handles 原样透传（83306b7a）；两处均无世界域名 / 端口名 / 业务事实名，CP-004 与 LP-003 同批为绿 D-317",
-    "sha256:db545d45b6d9c370878ec1dd6367acb0836f0e63e28cf55afc7f9d4cf4967079→sha256:fd32bcfb62890c01e2b21b05242991d5bb39c1c7b17e4964d1be4b420d32e124 债键端口位类型由 &'static str 改为 String（世界事实要进同一投影），`fn plan` 的 `when_no_open` 比较点补 `as_str()`；比较语义不变，无世界域名 / 端口名 / 业务事实名，CP-004 与 LP-003 同批为绿 D-332"
+    "sha256:fd32bcfb62890c01e2b21b05242991d5bb39c1c7b17e4964d1be4b420d32e124→sha256:acfe29ec3a0daa039b62a17577b1cc75329f282e42816112bfd193ff1a69ee5d `fn plan` 的两处机制面演进：派发第三态「挂起」的等待与重触发判定（08950b85）、`when_id`（种类 + 身份）触发条件（债行依赖这一轮的输入事实，经宿主 `exists_id` 读面）；两处均无世界域名 / 端口名 / 业务事实名，CP-004 与 LP-003 同批为绿 D-334"
   ]
 }

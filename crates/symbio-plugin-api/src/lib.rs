@@ -70,7 +70,10 @@ pub use declarations::{
     assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations, vocab,
     DeclarationsDecl,
 };
-pub use drive_entry::{declared_drive_entry, DriveEntry, DriveEntryDecl};
+pub use drive_entry::{
+    declared_drive_binding, declared_drive_entry, DriveBinding, DriveBindingDecl, DriveEntry,
+    DriveEntryDecl, DriveTarget,
+};
 pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,

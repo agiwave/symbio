@@ -104,6 +104,15 @@ impl DebtFacts {
     }
 }
 
+/// `session.config` 条目的**幂等键**：由本轮 `user.message` 的事实 id 派生。
+///
+/// 写方（会话开轮单元）用它做本轮的 config 键，读方（模型债行的 `when_id`）用同一个
+/// 键声明「我依赖的是**这一轮**的输入」。两边必须由这里派生，否则对不上——只按种类
+/// 判会把上一轮的 config 当成这一轮的输入。
+pub fn session_config_id(user_fact_id: &str) -> String {
+    format!("session-config:{user_fact_id}")
+}
+
 /// 一行债：申报方给出的数据，宿主原样转给环。
 #[derive(Debug, Clone)]
 pub struct DebtSpec {
@@ -119,6 +128,12 @@ pub struct DebtSpec {
     pub after: Option<String>,
     /// 触发条件：该**种类**的事实在本可见域存在才欠；宿主判定，契约不解释。
     pub when: Option<String>,
+    /// 触发条件（种类 + 身份）：该种类、该身份的事实存在才欠；与 `when` 同一条读面。
+    ///
+    /// 用途是**依赖**而不是时序：派出这一行的执行体要读某条输入事实（如模型读
+    /// `session.config` 的工具表），行就必须把那条输入的身份写进 `when` —— 只按种类
+    /// 判「有没有过」会把**上一轮**的旧事实当成这一轮的输入。
+    pub when_id: Option<(String, String)>,
     /// 排除条件：该事实已存在 ⇒ 本行不欠（与 `when` 同一条读面，按种类读）。
     pub unless: Option<Unless>,
     /// 该端口的债全部还清才欠（读债状态）；环只读端口名，不解释语义。
@@ -144,6 +159,7 @@ impl DebtSpec {
             payload,
             after: None,
             when: None,
+            when_id: None,
             unless: None,
             when_no_open: None,
             lease_ms: 60_000,
@@ -160,6 +176,12 @@ impl DebtSpec {
     /// 声明触发条件：该种类的事实存在才欠（字符串由宿主判定）。
     pub fn when(mut self, kind: impl Into<String>) -> Self {
         self.when = Some(kind.into());
+        self
+    }
+
+    /// 声明触发条件（种类 + 身份）：该条输入事实存在才欠。
+    pub fn when_id(mut self, kind: impl Into<String>, id: impl Into<String>) -> Self {
+        self.when_id = Some((kind.into(), id.into()));
         self
     }
 

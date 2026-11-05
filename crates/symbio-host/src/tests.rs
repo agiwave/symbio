@@ -52,7 +52,10 @@ impl Plugin for EmptyRoot {
 async fn a_session_with_no_debt_is_idle() {
     let host = Host::new(Arc::new(EmptyRoot));
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-    let report = host.drive(&base, "s-1", None).await.expect("驱动装配成立");
+    let report = host
+        .drive(&base, "s-1", None, ExecEventSink::silent())
+        .await
+        .expect("驱动装配成立");
 
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
     assert_eq!(report.dispatched, 0);
@@ -211,7 +214,7 @@ async fn user_message_becomes_a_model_debt_that_lands_its_response_in_the_store(
 
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let report = host
-        .drive(&base, session, Some("smoke"))
+        .drive(&base, session, Some("smoke"), ExecEventSink::silent())
         .await
         .expect("驱动装配成立");
 
@@ -503,7 +506,7 @@ async fn the_tool_round_is_dispatched_and_fed_back_into_the_model() {
     );
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let report = host
-        .drive(&base, session, Some("smoke"))
+        .drive(&base, session, Some("smoke"), ExecEventSink::silent())
         .await
         .expect("驱动装配成立");
 

@@ -288,10 +288,12 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     );
     assertEq(cb.final.data.status, 'completed', 'tool_call 终态应为 completed');
 
-    // ⑩ 组合节点终态跟随子树：Turn 终态不得早于任一子节点终态。
-    //    顺序用**到达序**（单一 FIFO）——`seq` 是节点位置，不承担投递顺序。
-    const turnNode = [...nodes.values()].find((m) => msgTypeOf(m) === 'turn');
-    assert(turnNode, '实时面应有 turn 组合节点');
+    // ⑩ 组合节点终态跟随子树。**Turn 不作为可见节点**（D-335：用户消息节点即轮，
+    //     Turn 骨架只补字段、不参与发布身份）。实测实时面里**没有**会话运行态帧
+    //     （`sessionChanges()` 为空：本用例的时间线没有任何 `path = 会话根` 的变更），
+    //     因此「轮终态」落在**终答节点**上：最后一个到达的消息节点必须是 assistant 正文
+    //     且已收在终态；各子节点终态到达序必须早于它。
+    //     顺序用**到达序**（单一 FIFO）——`seq` 是节点位置，不承担投递顺序。
     const terminalArrival = (mid) =>
       Math.max(
         ...rt
@@ -299,12 +301,22 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
           .filter((f) => TERMINAL.has(f.data?.status))
           .map((f) => f.arrival),
       );
-    const turnTerminalArrival = terminalArrival(turnNode.id);
+    const lastMid = ops[ops.length - 1]?.mid;
+    const lastNode = nodes.get(lastMid);
+    assert(
+      lastNode && msgTypeOf(lastNode) === 'text' && msgRoleOf(lastNode) === 'assistant',
+      `最后一个到达的节点应是终答（assistant text），实得 ${msgTypeOf(lastNode ?? {})}/${msgRoleOf(lastNode ?? {})}\n时间线:\n${timeline.join('\n')}`,
+    );
+    assert(
+      TERMINAL.has(lastNode.status),
+      `终答节点应停在终态（实得 ${lastNode.status}）\n时间线:\n${timeline.join('\n')}`,
+    );
+    const finalArrival = terminalArrival(lastMid);
     for (const id of [reasonNode.id, textNode.id, tcNode.id]) {
       const childTerminalArrival = terminalArrival(id);
       assert(
-        childTerminalArrival < turnTerminalArrival,
-        `子节点 ${String(id).slice(0, 8)} 终态(arrival=${childTerminalArrival}) 应早于 Turn 终态(arrival=${turnTerminalArrival})`,
+        childTerminalArrival < finalArrival,
+        `子节点 ${String(id).slice(0, 8)} 终态(arrival=${childTerminalArrival}) 应早于终答节点终态(arrival=${finalArrival})`,
       );
     }
 

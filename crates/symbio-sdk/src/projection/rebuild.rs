@@ -194,6 +194,27 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
             })
         })
         .collect();
+    // 调用身份（provider 的 wire id）→ 工具卡节点 id。
+    //
+    // 两个身份**不同**：`tool_calls[].id` 是流式面上那张卡的节点 id（跨轮复用同一
+    // wire id 时必须换一个节点 id，否则第二轮会更新第一轮的老卡）；`wire_id` 才是
+    // 与产物 / 下一轮请求配对的键。重建若拿 wire id 当节点 id，实时面那张卡永远
+    // 停在 `streaming`（t10 抓到）。这里只解「节点身份」，产物配对仍走 wire id。
+    let node_of_call: std::collections::HashMap<String, String> = events
+        .iter()
+        .filter_map(|e| e.payload.get("tool_calls")?.as_array())
+        .flat_map(|calls| {
+            calls.iter().filter_map(|call| {
+                let node = call.get("id")?.as_str()?;
+                let wire = call
+                    .get("wire_id")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(node);
+                Some((wire.to_owned(), node.to_owned()))
+            })
+        })
+        .collect();
 
     // 被 `message.removed` 判死的节点 id（循环末尾统一剔除）。
     let mut gone: HashSet<String> = HashSet::new();
@@ -260,7 +281,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
         // 后来的事实覆盖先前的，位置与顺序锚保留。其余格子仍是「同 id 只认首次」
         // ——那里的重复是**引用**（收束的 `tool_calls[]`），不是状态推进。
         let carries_state = slot_of(e, c, m) == Some(ChatSlot::ArtifactAdded);
-        for mut node in nodes_of(e, &denied_speech, &group_of_call, c, m) {
+        for mut node in nodes_of(e, &denied_speech, &group_of_call, &node_of_call, c, m) {
             if gone.contains(&node.id) {
                 continue;
             }
@@ -278,6 +299,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                 // 水位是**请求级**元数据：Turn 骨架的 id 就是发起这一轮的用户消息 id，
                 // 该 id 已被用户节点占住（「同 id 只认首次」），骨架随之被合并掉。
                 // 不能因此丢数——只补 `meta.context` 这一格，正文与状态的裁决不变。
+                // 骨架只补字段、不参与发布身份（D-335）。
                 if let Some(watermark) = carried_context {
                     let meta = out[i].meta.get_or_insert_with(|| serde_json::json!({}));
                     if meta.get("context").is_none() {
@@ -367,6 +389,7 @@ fn added_nodes(e: &Event) -> Vec<ChatNode> {
 ///
 /// `denied_speech` 是本切片里发言被拒的分组（见 [`rebuild`] 的索引）。
 /// `group_of_call` 是调用 id → 发起这批调用的那条事实给的分组（见 [`rebuild`]）。
+/// `node_of_call` 是 wire id → 工具卡节点 id（见 [`rebuild`]）。
 ///
 /// 分类走 [`slot_of`]（DE-024 D-203）：折叠 `match` 的是**闭集枚举**而不是名字，
 /// 加一条对话面事件时 `match` 不全在编译期就红。协议格（`response` / `failed`）
@@ -375,6 +398,7 @@ fn nodes_of(
     e: &Event,
     denied_speech: &HashSet<String>,
     group_of_call: &std::collections::HashMap<String, String>,
+    node_of_call: &std::collections::HashMap<String, String>,
     c: &ChatVocab,
     m: &MessageVocab,
 ) -> Vec<ChatNode> {
@@ -407,7 +431,7 @@ fn nodes_of(
         // 形状经 `dialog` 载荷里的 `reason` / `exclude_from_context` 复刻。
         Some(ChatSlot::Opening) => vec![opening_node(e)],
         // 工具结果：调用与结果两张卡都归这一格（一个事实一个 owner）。
-        Some(ChatSlot::ArtifactAdded) => artifact_nodes(e, group_of_call),
+        Some(ChatSlot::ArtifactAdded) => artifact_nodes(e, group_of_call, node_of_call),
         // 诞生格：**没有别的格可搭车**的节点在这里出生（压缩记录节点是最典型的一个）。
         // 按**发射顺序**插到列表末尾——顺序锚由本函数统一发号。
         Some(ChatSlot::MessageAdded) => added_nodes(e),
@@ -730,9 +754,11 @@ fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
     let Some(root) = str_of(e, "turn_id") else {
         return Vec::new();
     };
-    let principal = str_of(e, "principal")
-        .map(|p| Principal::from_legacy(&p))
-        .unwrap_or_else(|| actor_principal(e));
+    // 节点主体 = **写这条事实的人**（`actor`），不是载荷里的 `principal`。
+    // 后者是计费口径（谁发起这一轮，`spend_ledger` / `token_ledger` 读它），
+    // 拿它当发言人会把助手正文署成用户（t10：正文节点折出 `person/local`，
+    // 实时面按「用户说的话」呈现，且与收束轮的答话节点主体不一致）。
+    let principal = actor_principal(e);
     // 一次 `failed` 没有 `calls`：与「这次往返没有请求工具」同一条判据。
     let calls_empty = e
         .payload
@@ -963,11 +989,11 @@ fn unfinished_text(why: &str) -> String {
 
 /// 工具格（`artifact × asserted`）→ `[本轮中途产出子（可选）, ToolCall 子, 结果子]`。
 ///
-/// 载荷自带两张卡的身份：`tool_call_id`（ToolCall 节点 id；结果节点 id 由它派生）/
+/// 载荷自带两张卡的身份：`tool_call_id`（provider 的 wire id；结果节点 id 由它派生）/
 /// `args`（**已定稿的参数文本**）/ `success`。参数走 `llm_build_tool_call_node` 的
 /// 文本入口——**不经 `Value` 重序列化**（键序一变，同一次调用在重建前后就是两个
-/// 内容，见该函数的文档）。provider 的 wire id 不落载荷：重建后的调用与结果用
-/// 同一个节点 id 自洽配对。
+/// 内容，见该函数的文档）。工具卡节点 id 不能取 wire id：它是流式面那帧的身份
+/// （`tool_calls[].id`），由 `node_of_call` 反查（见 [`rebuild`] 的同名注释）。
 ///
 /// 分组标识**不在产物载荷里复制**：它由 `group_of_call` 按 `tool_call_id` 反查
 /// 发起这批调用的那条事实。查不到 ⇒ 这条产物不对应本切片的任何一次已发起调用，
@@ -975,6 +1001,7 @@ fn unfinished_text(why: &str) -> String {
 fn artifact_nodes(
     e: &Event,
     group_of_call: &std::collections::HashMap<String, String>,
+    node_of_call: &std::collections::HashMap<String, String>,
 ) -> Vec<ChatNode> {
     let call_id = str_of(e, "tool_call_id");
     let Some(group) = call_id
@@ -1005,6 +1032,12 @@ fn artifact_nodes(
         _ => Vec::new(),
     };
     let call_id = call_id.unwrap_or_else(|| format!("{group}-call"));
+    // 工具卡节点 id 用**节点身份**（`tool_calls[].id`），不是携带的 wire id：
+    // 实时面那张卡是按节点身份发帧的，拿 wire id 建卡会让它永远停在 streaming。
+    let call_node_id = node_of_call
+        .get(&call_id)
+        .cloned()
+        .unwrap_or_else(|| call_id.clone());
     let success = e
         .payload
         .get("success")
@@ -1014,7 +1047,7 @@ fn artifact_nodes(
     let tool = text_of(e, "tool");
     let mut call = llm_build_tool_call_node(
         &group,
-        call_id.clone(),
+        call_node_id.clone(),
         Some(tool.clone()),
         text_of(e, "args"),
         None,
@@ -1066,7 +1099,7 @@ fn artifact_nodes(
     let mut result = if needs_user_action {
         ChatNode {
             id: result_id,
-            parent_id: Some(call_id.clone()),
+            parent_id: Some(call_node_id.clone()),
             principal: tool_principal,
             msg_type: Some(NodeKind::Interaction),
             content: Some(MessageContent::Text(text_of(e, "text"))),
@@ -1084,7 +1117,7 @@ fn artifact_nodes(
         }
     } else {
         let mut msg = llm_build_tool_message(
-            &call_id,
+            &call_node_id,
             &text_of(e, "text"),
             Some(success),
             Some(result_id),

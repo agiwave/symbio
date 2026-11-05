@@ -145,6 +145,8 @@ pub struct DriveRow {
     pub after: Option<String>,
     /// 触发条件：该**种类**的事实存在才欠。
     pub when: Option<String>,
+    /// 触发条件（种类 + 身份）：该条输入事实存在才欠（与 `when` 同一条读面）。
+    pub when_id: Option<(String, String)>,
     /// 排除条件：该事实已存在 ⇒ 本行不欠（与 `when` 同一条读面）。
     pub unless: Option<Unless>,
     /// 该端口的债全部还清才欠（读债状态）。

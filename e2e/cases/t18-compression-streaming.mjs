@@ -184,12 +184,21 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     // 会话先建出来：收件箱是会话内部的集合，会话不在就没有它可写
     await createSession(cli, 'e2e-t18', { workdir: hd.workdir });
 
+    // D-335：Turn 不作为可见节点（用户消息节点即轮）。一轮的**可见终态**落在
+    // 终答节点上：assistant 正文（非 exclude_from_context）到达终态即该轮收束。
+    // 按 id 合并各帧后再判（`role` 只在携带它的那几帧里，终态帧未必重复带）。
     const doneTurns = () => {
-      const last = new Map();
+      const merged = new Map();
       for (const { mid, data } of rt.messages()) {
-        if (msgTypeOf(data) === 'turn') last.set(mid, data.status);
+        merged.set(mid, { ...merged.get(mid), ...data });
       }
-      return [...last.values()].filter((s) => TERMINAL.has(s)).length;
+      return [...merged.values()].filter(
+        (m) =>
+          msgTypeOf(m) === 'text' &&
+          msgRoleOf(m) === 'assistant' &&
+          !m.meta?.exclude_from_context &&
+          TERMINAL.has(m.status),
+      ).length;
     };
     const sendRound = async (i, text) => {
       const before = doneTurns();

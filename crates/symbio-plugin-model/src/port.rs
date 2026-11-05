@@ -147,7 +147,7 @@ fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMes
                         calls
                             .iter()
                             .enumerate()
-                            .filter_map(|(idx, c)| {
+                            .map(|(idx, c)| {
                                 let name = c
                                     .get("name")
                                     .and_then(serde_json::Value::as_str)
@@ -162,14 +162,14 @@ fn turn_input(facts: &[PortFact]) -> (String, Vec<CapabilityMeta>, Vec<PromptMes
                                     .or_else(|| c.get("id").and_then(serde_json::Value::as_str))
                                     .map(str::to_string)
                                     .unwrap_or_else(|| format!("call_{}_{}_{}", name, root, idx));
-                                Some(symbio_plugin_api::PromptToolCall {
+                                symbio_plugin_api::PromptToolCall {
                                     id,
                                     name: name.to_string(),
                                     arguments: c
                                         .get("arguments")
                                         .cloned()
                                         .unwrap_or(serde_json::Value::Null),
-                                })
+                                }
                             })
                             .collect::<Vec<_>>()
                     })
@@ -610,6 +610,11 @@ fn dispatch_calls(
                 "name": call.name.clone().unwrap_or_default(),
                 "arguments": call.arguments.clone(),
             });
+            // 工具卡在实时面上的节点身份（`tool_calls[].id`），与 wire id 是两套：
+            // 执行方据此把「开始执行」的状态帧写到**那张卡**上（`meta.started_at`）。
+            if let Some(node_id) = call.id.clone().filter(|s| !s.trim().is_empty()) {
+                entry["node_id"] = serde_json::json!(node_id);
+            }
             // 执行层判「不执行」的成因随清单走：`overflow_notice` 是模型侧在流收口时
             // 写下的丢弃标记（正文即反馈）。它若被派发清单剥掉，执行层就只看得到
             // 「一条普通调用」，只好照常执行并把产物记成成功——同一笔调用因此出现

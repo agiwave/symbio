@@ -16,7 +16,6 @@ use symbio_kernel::vdfs::{
     VDFS_ACTION_TRUNCATE,
 };
 use symbio_plugin_api::events::EVENT_USER_ANSWER;
-use symbio_plugin_api::fact_source::declared_fact_source_opener;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::vdfs::host::{vdfs_from_plugin_error, vdfs_host_ctx};
@@ -233,9 +232,12 @@ impl SessionPlugin {
                             .and_then(|p| p.get("mode"))
                             .cloned()
                             .unwrap_or(Value::Null);
-                        let source = declared_fact_source_opener()
-                            .ok_or_else(|| VdfsError::internal("没有登记事实源开面"))?
-                            .open(id)
+                        // 走**本部署根**的写口（不是通用开面）：驱动与转写出口都绑在
+                        // 这个句柄上，答复落格后由它踢出续跑的一环（`user.answer`
+                        // 只落事实，续跑由踢驱动发起）。
+                        let source = self
+                            .fact_source(id)
+                            .await
                             .map_err(|e| VdfsError::internal(format!("打开事实源失败：{e}")))?;
                         // 溯源锚（I2：断言类事实必须带 `produced_by`，且不许悬空）：
                         // 答复不是对某条事实的**修改**，而是「站在当前这份状态上」的

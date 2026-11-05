@@ -244,7 +244,10 @@ async fn one_round_writes_request_sent_response() {
         .into_iter()
         .find(|f| f.kind == FactKind::Response)
         .unwrap();
-    assert_eq!(response.payload, json!({"answer": {"q": 1}}));
+    // 环把端口名补进收束载荷（执行体不自报「我是哪个端口」）；重建面按
+    // `payload.port == "model"` 判这次往返是否对读者说话，缺了它正文 / 思考节点
+    // 会全部静默消失（见 `response_payloads` 的文档）。这里钉的是「补进去」。
+    assert_eq!(response.payload, json!({"answer": {"q": 1}, "port": "p1"}));
 }
 
 #[tokio::test]

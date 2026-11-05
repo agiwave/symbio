@@ -59,11 +59,34 @@ impl SessionStore {
         &self,
         session_id: &str,
     ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
+        self.fact_source_bound(
+            session_id,
+            None,
+            symbio_kernel::exec::ExecEventSink::silent(),
+        )
+    }
+
+    /// 按**部署根**绑定的契约事实源：驱动句柄与执行期出口随事实源一起打开。
+    ///
+    /// 只读调用方走 [`Self::fact_source`]（显式无驱动、静默）；开轮写口必须走本方法，
+    /// 把本根的驱动实例与真实转写出口绑上——写口自己不做任何进程级反查。
+    pub(crate) fn fact_source_bound(
+        &self,
+        session_id: &str,
+        drive: Option<Arc<dyn symbio_plugin_api::DriveEntry>>,
+        sink: symbio_kernel::exec::ExecEventSink,
+    ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
         let workdir = self
             .session_dir(session_id)
             .and_then(|dir| super::layout::read_workdir(&dir));
         Ok(self.facts(session_id)?.map(|wal| {
-            super::fact_source::SessionFactSource::open(wal, session_id.to_string(), workdir)
+            super::fact_source::SessionFactSource::open(
+                wal,
+                session_id.to_string(),
+                workdir,
+                drive,
+                sink,
+            )
         }))
     }
 

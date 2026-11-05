@@ -135,6 +135,9 @@ function walProgress(root) {
   const sig = [];
   let fact = null;
   let newest = -1;
+  // 未还之债：有 `request` 而尚无同 key 的 `response` / `failed` ⇒ 环在等远端回答
+  // （重试退避也算）。此时没有新行是**预期**，不是静止。
+  const pending = new Set();
   for (const f of files) {
     let st;
     try {
@@ -143,6 +146,23 @@ function walProgress(root) {
       continue;
     }
     sig.push(`${f}:${Math.trunc(st.mtimeMs)}:${st.size}`);
+    for (const line of readFileSyncSafe(f).split('\n')) {
+      if (
+        !line.includes('"kind":"request"') &&
+        !line.includes('"kind":"response"') &&
+        !line.includes('"kind":"failed"')
+      ) {
+        continue;
+      }
+      let e;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (e.kind === 'request') pending.add(String(e.key ?? ''));
+      else pending.delete(String(e.key ?? ''));
+    }
     if (st.mtimeMs > newest) {
       newest = st.mtimeMs;
       const last = readFileSyncSafe(f).split('\n').filter(Boolean).pop();
@@ -160,7 +180,7 @@ function walProgress(root) {
       }
     }
   }
-  return { sig: sig.join('|'), fact };
+  return { sig: sig.join('|'), fact, pending: pending.size > 0 };
 }
 
 /** 静止失败文案：最后观察到的事实（kind + 键）、时间戳、已静止毫秒、当时在等什么。 */
@@ -195,7 +215,7 @@ function waitFor(fn, { timeoutMs = 15_000, what = 'condition' } = {}) {
       } catch {
         /* 重试 */
       }
-      if (cliWatch?.alive && Date.now() - cliWatch.lastProgress > STALL_MS) {
+      if (cliWatch?.alive && !cliWatch.pending && Date.now() - cliWatch.lastProgress > STALL_MS) {
         return rej(
           new Error(
             `等待「${what}」静止超时（进程仍在运行但 ${STALL_MS}ms 无任何进展；${stallDetail(cliWatch)}；` +
@@ -524,6 +544,7 @@ export async function runCli({ homedir, workdir, message, provider = null, sessi
         if (p.sig !== lastSig) {
           lastSig = p.sig;
           if (p.fact) watch.fact = p.fact;
+          watch.pending = p.pending;
           watch.lastProgress = Date.now();
         }
       } catch {
@@ -531,8 +552,9 @@ export async function runCli({ homedir, workdir, message, provider = null, sessi
       }
       if (settled) return;
       const now = Date.now();
-      // 观察点 ④：进程活着却 3 秒无进展 ⇒ 立刻判失败（不等到 120s）。
-      if (now - watch.lastProgress > STALL_MS) {
+      // 观察点 ④：进程活着却 3 秒无进展 ⇒ 判失败（不等到 120s）。
+      // 有未还之债（request 已落、response/failed 未落）时无新行是预期：放行等待。
+      if (!watch.pending && now - watch.lastProgress > STALL_MS) {
         return finish(
           new Error(
             `等待「${WHAT}」静止超时（进程仍在运行但 ${STALL_MS}ms 无任何进展；${stallDetail(watch)}；` +

@@ -124,14 +124,18 @@ export default defineCase(
       await cli.waitGatewayReady();
       rt = await subscribeSessionRealtime(cli, { sessionId: SID, gatewayPort: GATEWAY_PORT });
 
-      /** 已收束的轮次数（实时面口径：Turn 节点终态） */
+      /** 已收束的轮次数（实时面口径：终答节点到达终态；D-335：Turn 不作为可见节点） */
       const doneTurns = () => {
-        const last = new Map();
+        const merged = new Map();
         for (const { mid, data } of rt.messages()) {
-          if (msgTypeOf(data) === 'turn') last.set(mid, data.status);
+          merged.set(mid, { ...merged.get(mid), ...data });
         }
-        return [...last.values()].filter((s) =>
-          ['completed', 'failed', 'aborted', 'waiting_user_action'].includes(s),
+        return [...merged.values()].filter(
+          (m) =>
+            msgTypeOf(m) === 'text' &&
+            msgRoleOf(m) === 'assistant' &&
+            !m.meta?.exclude_from_context &&
+            ['completed', 'failed', 'aborted', 'waiting_user_action'].includes(m.status),
         ).length;
       };
       /** 等轮次收束数达到 n */

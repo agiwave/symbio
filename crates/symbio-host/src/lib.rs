@@ -117,13 +117,20 @@ impl Host {
         base: &Arc<dyn PluginInvokeRequest>,
         session_id: &str,
         provider: Option<&str>,
+        sink: ExecEventSink,
     ) -> Result<DriveReport, String> {
         let gathered = self.gather(base, session_id, provider).await?;
         let workdir = base.get(WORKDIR).unwrap_or_default();
+        // 出口**同一句柄两处共持**：执行体经 `ExecEventSink::of(ctx)`（键 `EVENT_SINK`）
+        // 取出口，这里把同一份 `sink` 写进它拿到的上下文，再放进 `handles.sink`。
+        // 不新建第二个出口、不在端口侧兜底——`Null` 只留给显式静默的只读开面。
+        gathered.ctx.set(symbio_kernel::exec::EVENT_SINK, sink.clone());
         let handles = PortExecHandles {
             ctx: Some(Arc::clone(&gathered.ctx)),
             scratch_dir: (!workdir.is_empty()).then(|| PathBuf::from(&workdir)),
-            sink: ExecEventSink::silent(),
+            // 出口由装配层按**本部署根**交来（会话插件给真实转写句柄，
+            // 内部请求显式静默）；宿主不再写死静默。
+            sink,
             session_id: session_id.to_string(),
         };
         let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
@@ -314,6 +321,7 @@ impl DriveSupport for HostDriveSupport {
                     payload: spec.payload,
                     after: spec.after,
                     when: spec.when,
+                    when_id: spec.when_id,
                     unless: spec.unless,
                     when_no_open: spec.when_no_open,
                     lease_ms: spec.lease_ms,

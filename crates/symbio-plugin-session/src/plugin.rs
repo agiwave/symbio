@@ -32,7 +32,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use symbio_kernel::capability::CapabilityRow;
 use symbio_kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
@@ -82,6 +82,11 @@ pub struct SessionPlugin {
     /// 用 `Arc` 而非内联值：工作目录监听器（后台任务）也要投递进同一批订阅者，
     /// 需要共享所有权。
     pub(crate) change_subs: Arc<VdfsChangeSubscriptions>,
+    /// 本部署根的驱动实例（按根构造一次；父插件即根）。
+    ///
+    /// 懒建：构造时父句柄可能还是弱引用，等第一次开轮再 upgrade；之后整份插件
+    /// 共享同一实例（按会话的重入位因此只有一份）。
+    drive: OnceLock<Option<Arc<dyn symbio_plugin_api::DriveEntry>>>,
 }
 
 use super::convergence::Convergence;
@@ -116,6 +121,7 @@ impl SessionPlugin {
             active_mgr,
             workdir_watches,
             change_subs,
+            drive: OnceLock::new(),
         }
     }
 
@@ -236,15 +242,38 @@ impl SessionPlugin {
     }
 
     /// 该会话的契约事实源：与装配层经开面打开的是同一底层 `WalStore`。
+    ///
+    /// 开轮写口必须拿到**本部署根**的驱动实例与真实转写出口：驱动句柄随事实源
+    /// 一起绑好，`append` 落地后直接用它，不按会话 id 反查进程级入口。
     pub(crate) async fn fact_source(
         &self,
         session_id: &str,
     ) -> Result<Arc<dyn FactSource>, PluginError> {
+        let sink = Arc::new(super::transcript::sink::TranscriptSink::new(
+            Arc::clone(&self.active_mgr),
+            session_id.to_string(),
+        ));
         self.get_store()
             .await?
-            .fact_source(session_id)
+            .fact_source_bound(
+                session_id,
+                self.drive_entry(),
+                symbio_kernel::exec::ExecEventSink::direct(sink),
+            )
             .map_err(PluginError::InternalError)?
             .ok_or_else(|| PluginError::NotFound(format!("会话 {session_id} 没有事实源")))
+    }
+
+    /// 本实例所属**部署根**的驱动实例（父插件即根；按根构造一次，随插件留守）。
+    ///
+    /// 未装配驱动工厂（单测）或无父插件 ⇒ `None`：写口落地即止，不去猜入口。
+    pub(crate) fn drive_entry(&self) -> Option<Arc<dyn symbio_plugin_api::DriveEntry>> {
+        self.drive
+            .get_or_init(|| {
+                let root = self.parent.as_ref()?.upgrade()?;
+                symbio_plugin_api::declared_drive_binding().map(|binding| binding.bind(root))
+            })
+            .clone()
     }
 
     pub(crate) async fn get_or_create_session(
