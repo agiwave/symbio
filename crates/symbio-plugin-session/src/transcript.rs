@@ -58,10 +58,10 @@ pub(crate) mod autonomous;
 /// 持活跃名册与转写，随 session 留守。
 pub(crate) mod compression;
 pub(crate) mod inbox;
-/// 补充整合：n 条收件箱条目 → 一条用户消息（纯函数，见模块文档）。
-pub(crate) mod supplements;
 /// 执行期出口实现：把模型 / 工具的流式帧写回本会话转写（装配层按根交出去）。
 pub(crate) mod sink;
+/// 补充整合：n 条收件箱条目 → 一条用户消息（纯函数，见模块文档）。
+pub(crate) mod supplements;
 
 // 帧构造 / 日志合并 / 合帧窗口（纯机械；状态机仍在根）
 mod deliver;
