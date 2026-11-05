@@ -13,6 +13,7 @@
 
 use super::*;
 use crate::chat::chat_node::{NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
+use crate::chat::principal::{Principal, PrincipalKind};
 
 /// 构造器入参：本文件的节点模仿**落库/流式面**，身份写 `principal`（D-147）。
 fn assistant_principal() -> crate::chat::principal::Principal {
@@ -236,6 +237,32 @@ fn flatten_whole_tree_detaches_run_children_keeps_tool_results() {
     // 工具结果挂在工具调用骨架下——与建树策略正交，flat 不碰。
     assert_eq!(tree[4].parent_id.as_deref(), Some("tool-1"));
     assert_eq!(turn_root_of(&tree[4]), None);
+}
+
+/// D-335：Turn 并入用户消息节点后，读侧重建树里**没有** `Skeleton{run}`；
+/// 该轮的轮锚就是用户消息节点，flat 必须按它折叠（不能继续只认 `is_run()`）。
+#[test]
+fn flatten_whole_tree_detaches_children_of_user_turn_anchor() {
+    let mut user = node("user-1", None);
+    user.msg_type = Some(NodeKind::Body);
+    user.principal = Some(Principal::new(PrincipalKind::Person, "person/local"));
+    let mut tree = vec![
+        user,
+        node("reasoning-1", Some("user-1")),
+        tool_node("tool-1", "user-1"),
+        node("result-1", Some("tool-1")),
+    ];
+    flatten_whole_tree(&mut tree, PresentationTree::Flat);
+    assert_eq!(tree[1].parent_id, None, "轮锚的直接子节点升根");
+    assert_eq!(turn_root_of(&tree[1]), Some("user-1"));
+    assert_eq!(tree[2].parent_id, None, "工具卡也升根");
+    assert_eq!(turn_root_of(&tree[2]), Some("user-1"));
+    assert_eq!(
+        tree[3].parent_id.as_deref(),
+        Some("tool-1"),
+        "工具结果仍挂工具卡下，flat 不碰"
+    );
+    assert_eq!(turn_root_of(&tree[3]), None);
 }
 
 #[test]

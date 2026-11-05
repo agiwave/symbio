@@ -24,7 +24,9 @@
 //!
 //! core 侧**没有任何东西反过来调本模块**——方向永远是消费方 → core。
 
-use crate::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL};
+use crate::chat::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_TOOL,
+};
 use crate::chat::principal::Principal;
 use crate::clock::clock_now_ms;
 use crate::llm::llm_short_id;
@@ -306,9 +308,12 @@ pub fn flatten_whole_tree(nodes: &mut [ChatNode], mode: PresentationTree) {
         .filter(|n| n.is_tool_call())
         .map(|n| n.id.clone())
         .collect();
+    // 轮锚有两态：D-335 之前是 `Skeleton{run}`；D-335 之后骨架并入**用户消息节点**
+    // （其 id 就是骨架 id），读侧重建出来的树上已没有 run 骨架。两种都要认，
+    // 否则 flat 对存量树（旧 WAL 里仍有骨架）与现行树（只有用户节点）只生效一半。
     let run_roots: std::collections::HashSet<String> = nodes
         .iter()
-        .filter(|n| n.is_run())
+        .filter(|n| n.is_run() || (n.is_text() && n.node_role() == Some(NodeRole::User)))
         .filter(|n| {
             n.parent_id
                 .as_deref()

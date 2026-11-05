@@ -127,15 +127,17 @@ impl SessionStore {
         drive: Option<Arc<dyn symbio_plugin_api::DriveEntry>>,
         sink: symbio_kernel::exec::ExecEventSink,
     ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
-        let dir = self.session_dir(session_id);
-        let workdir = dir.as_deref().and_then(super::layout::read_workdir);
-        // 会话主体的唯一来源；取不到就显式失败，不回落 `session/main`。
-        let agent_id = dir
-            .as_deref()
-            .and_then(super::layout::read_agent_id)
-            .ok_or_else(|| {
-                format!("会话 {session_id} 的 metadata 取不到 agent_id（拒绝回落主体）")
-            })?;
+        // 会话目录不存在 = 没跑过 = **没有事实源**（缺省态，不是失败）。
+        // 只读面（`session/changes` 等）必须能回答「这个会话还没有 WAL」，
+        // 不能把「还没开幕」报成取不到主体。
+        let Some(dir) = self.session_dir(session_id) else {
+            return Ok(None);
+        };
+        let workdir = super::layout::read_workdir(&dir);
+        // 会话主体的唯一来源；目录在却取不到就显式失败，不回落 `session/main`。
+        let agent_id = super::layout::read_agent_id(&dir).ok_or_else(|| {
+            format!("会话 {session_id} 的 metadata 取不到 agent_id（拒绝回落主体）")
+        })?;
         Ok(self.facts(session_id)?.map(|wal| {
             super::fact_source::SessionFactSource::open(
                 wal,
