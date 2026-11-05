@@ -1071,14 +1071,14 @@ impl PortExecutor for ToolPort {
     }
 }
 
-/// 一轮里被请求的一次工具调用（清单由模型写进 `tool.requested` 的载荷）。
+/// 一次模型往返里被请求的一次工具调用（清单由模型写进 `tool.requested` 的载荷）。
 struct RequestedCall {
     id: String,
     name: String,
     arguments: serde_json::Value,
 }
 
-/// 单消费方事实：这一轮的工具清单已还完（模型侧只读债状态，不读这条）。
+/// 单消费方事实：这次往返的工具清单已还完（模型侧只读债状态，不读这条）。
 const TOOL_CALLS_DONE: &str = "tool.calls.done";
 
 impl ToolPort {

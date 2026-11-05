@@ -60,9 +60,9 @@
 //! ## 载荷里的节点结构（铺的路）
 //!
 //! 收束 / 进展 / 兜底三种格子共用一份产出形状（`turn_runner::produced_payload`），
-//! 载荷里带 `turn_id` / `text_id` / `reasoning_id` / `reasoning` / `tool_calls[]` /
-//! `rounds[]`；`artifact.added` 带 `tool_call_id` / `args` / `success`（**不复制轮号**：
-//! 轮根按 `tool_call_id` 从发起这批调用的那条事实的 `calls[]` 反查）；
+//! 载荷里带这一组的产出身份与中途产出序列；`artifact.added` 带 `tool_call_id` /
+//! `args` / `success`（**不复制分组标识**：分组按 `tool_call_id` 从发起这批调用的
+//! 那条事实的 `calls[]` 反查）；
 //! `turn.supplemented` 带 `id` / `ids`。结果节点 id 由调用 id 派生
 //! （[`crate::event::result_node_id`]），不作为载荷键。**节点身份因此是
 //! 事实的一部分**，重建不必凭空造号——只有「载荷确实没记的」（旧事件的补充格、
@@ -177,20 +177,20 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 会让它之后的所有位置失效）：先把要删的 id 记进 `gone`，循环结束再一次性
     // `retain`。这样 `at` 在整个循环里都是有效的，编辑能直接按下标改写。
     let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    // 产物格不再自带轮号：配对改成「按调用身份反查发起这批调用的那条事实」。
-    // 那条事实的载荷带 `turn_id` 与 `calls[]`（每次调用的 `id`）；产物只带
-    // `tool_call_id`。这比在每条产物上复制一份轮号更准确——产物属于**那一次调用**，
-    // 而不属于「第几轮」。
-    let call_turns: std::collections::HashMap<String, String> = events
+    // 产物格不再自带分组标识：配对改成「按调用身份反查发起这批调用的那条事实」。
+    // 那条事实的载荷带分组标识与 `calls[]`（每次调用的 `id`）；产物只带
+    // `tool_call_id`。这比在每条产物上复制一份分组标识更准确——产物属于
+    // **那一次调用**，不属于整批。
+    let group_of_call: std::collections::HashMap<String, String> = events
         .iter()
         .filter_map(|e| {
-            let turn = e.payload.get("turn_id")?.as_str()?;
-            Some((turn, e.payload.get("calls")?.as_array()?))
+            let group = e.payload.get("turn_id")?.as_str()?;
+            Some((group, e.payload.get("calls")?.as_array()?))
         })
-        .flat_map(|(turn, calls)| {
+        .flat_map(|(group, calls)| {
             calls.iter().filter_map(move |call| {
                 let id = call.get("id")?.as_str()?;
-                Some((id.to_owned(), turn.to_owned()))
+                Some((id.to_owned(), group.to_owned()))
             })
         })
         .collect();
@@ -260,7 +260,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
         // 后来的事实覆盖先前的，位置与顺序锚保留。其余格子仍是「同 id 只认首次」
         // ——那里的重复是**引用**（收束的 `tool_calls[]`），不是状态推进。
         let carries_state = slot_of(e, c, m) == Some(ChatSlot::ArtifactAdded);
-        for mut node in nodes_of(e, &denied_speech, &call_turns, c, m) {
+        for mut node in nodes_of(e, &denied_speech, &group_of_call, c, m) {
             if gone.contains(&node.id) {
                 continue;
             }
@@ -365,8 +365,8 @@ fn added_nodes(e: &Event) -> Vec<ChatNode> {
 
 /// 一条事件 → 它承载的节点（顺序即树内顺序）。
 ///
-/// `denied_speech` 是本切片里发言被拒的轮（见 [`rebuild`] 的索引）。
-/// `call_turns` 是调用 id → 发起这批调用的那条事实所指的轮（见 [`rebuild`]）。
+/// `denied_speech` 是本切片里发言被拒的分组（见 [`rebuild`] 的索引）。
+/// `group_of_call` 是调用 id → 发起这批调用的那条事实给的分组（见 [`rebuild`]）。
 ///
 /// 分类走 [`slot_of`]（DE-024 D-203）：折叠 `match` 的是**闭集枚举**而不是名字，
 /// 加一条对话面事件时 `match` 不全在编译期就红。协议格（`response` / `failed`）
@@ -374,7 +374,7 @@ fn added_nodes(e: &Event) -> Vec<ChatNode> {
 fn nodes_of(
     e: &Event,
     denied_speech: &HashSet<String>,
-    call_turns: &std::collections::HashMap<String, String>,
+    group_of_call: &std::collections::HashMap<String, String>,
     c: &ChatVocab,
     m: &MessageVocab,
 ) -> Vec<ChatNode> {
@@ -407,7 +407,7 @@ fn nodes_of(
         // 形状经 `dialog` 载荷里的 `reason` / `exclude_from_context` 复刻。
         Some(ChatSlot::Opening) => vec![opening_node(e)],
         // 工具结果：调用与结果两张卡都归这一格（一个事实一个 owner）。
-        Some(ChatSlot::ArtifactAdded) => artifact_nodes(e, call_turns),
+        Some(ChatSlot::ArtifactAdded) => artifact_nodes(e, group_of_call),
         // 诞生格：**没有别的格可搭车**的节点在这里出生（压缩记录节点是最典型的一个）。
         // 按**发射顺序**插到列表末尾——顺序锚由本函数统一发号。
         Some(ChatSlot::MessageAdded) => added_nodes(e),
@@ -570,7 +570,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         .with_style_tag(CHAT_STYLE_TAG_REASONING);
         return vec![node, reasoning_node];
     }
-    let Some(turn_id) = str_of(e, "turn_id") else {
+    let Some(group) = str_of(e, "turn_id") else {
         return Vec::new();
     };
     let principal = actor_principal(e);
@@ -600,7 +600,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     // （旧事实 / provider 没回报用量），与「水位是 0」是两件事。
     nodes.push(
         ChatNode {
-            id: turn_id.clone(),
+            id: group.clone(),
             principal: Some(principal.clone()),
             msg_type: Some(NodeKind::Skeleton),
             status: Some(status.clone()),
@@ -623,8 +623,8 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     if !reasoning.trim().is_empty() && !reasoning_only {
         nodes.push(
             ChatNode {
-                id: str_of(e, "reasoning_id").unwrap_or_else(|| format!("{turn_id}-reasoning")),
-                parent_id: Some(turn_id.clone()),
+                id: str_of(e, "reasoning_id").unwrap_or_else(|| format!("{group}-reasoning")),
+                parent_id: Some(group.clone()),
                 principal: Some(principal.clone()),
                 msg_type: Some(NodeKind::Notice),
                 content: Some(MessageContent::Text(reasoning)),
@@ -641,7 +641,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         // 那条分支）——它与落库侧同源，`message.edited` 才定位得到这条节点。
         let child_id = event_produced_text_node_id(e);
         // 形状经 `llm_build_text_node`（单点定义），只覆写「此刻」为事件时刻。
-        let mut m = llm_build_text_node(&turn_id, &text, None, child_id, &principal);
+        let mut m = llm_build_text_node(&group, &text, None, child_id, &principal);
         m.timestamp = Some(e.ts);
         m.status = Some(status.clone());
         nodes.push(m);
@@ -651,17 +651,17 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     // 它们与末轮产出同为 Turn 根的子节点（`tool_dispatch` 把中途正文定格在同一个根下）。
     if let Some(rounds) = e.payload.get("rounds").and_then(|v| v.as_array()) {
         for (i, r) in rounds.iter().enumerate() {
-            push_round_nodes(&mut nodes, &turn_id, i, r, &status, e.ts, &principal);
+            push_step_nodes(&mut nodes, &group, i, r, &status, e.ts, &principal);
         }
     }
 
     nodes
 }
 
-/// 一轮中途产出（`rounds[i]`）→ 最多两个子节点（Reasoning / Text）。
-fn push_round_nodes(
+/// 一次模型往返的中途产出（`steps[i]`）→ 最多两个子节点（Reasoning / Text）。
+fn push_step_nodes(
     nodes: &mut Vec<ChatNode>,
-    turn_id: &str,
+    group: &str,
     i: usize,
     r: &serde_json::Value,
     status: &NodeStatus,
@@ -681,8 +681,8 @@ fn push_round_nodes(
     if !reasoning.trim().is_empty() && !reasoning_only {
         nodes.push(
             ChatNode {
-                id: get("reasoning_id").unwrap_or_else(|| format!("{turn_id}-r{i}")),
-                parent_id: Some(turn_id.to_string()),
+                id: get("reasoning_id").unwrap_or_else(|| format!("{group}-r{i}")),
+                parent_id: Some(group.to_string()),
                 principal: Some(principal.clone()),
                 msg_type: Some(NodeKind::Notice),
                 content: Some(MessageContent::Text(reasoning)),
@@ -699,8 +699,8 @@ fn push_round_nodes(
         } else {
             get("text_id")
         }
-        .unwrap_or_else(|| format!("{turn_id}-t{i}"));
-        let mut m = llm_build_text_node(turn_id, &text, None, id, principal);
+        .unwrap_or_else(|| format!("{group}-t{i}"));
+        let mut m = llm_build_text_node(group, &text, None, id, principal);
         m.timestamp = Some(ts);
         m.status = Some(status.clone());
         nodes.push(m);
@@ -744,22 +744,22 @@ fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
     if speech_denied && calls_empty {
         return Vec::new();
     }
-    let mut round = serde_json::Map::new();
+    let mut step = serde_json::Map::new();
     for key in ["text_id", "reasoning_id", "reasoning"] {
         if let Some(value) = e.payload.get(key) {
-            round.insert(key.to_string(), value.clone());
+            step.insert(key.to_string(), value.clone());
         }
     }
     let content = if calls_empty { "answer" } else { "text" };
     if let Some(value) = e.payload.get(content) {
-        round.insert("text".to_string(), value.clone());
+        step.insert("text".to_string(), value.clone());
     }
     let mut nodes = Vec::new();
-    push_round_nodes(
+    push_step_nodes(
         &mut nodes,
         &root,
         0,
-        &serde_json::Value::Object(round),
+        &serde_json::Value::Object(step),
         &status_of(e),
         e.ts,
         &principal,
@@ -966,32 +966,33 @@ fn unfinished_text(why: &str) -> String {
 /// 内容，见该函数的文档）。provider 的 wire id 不落载荷：重建后的调用与结果用
 /// 同一个节点 id 自洽配对。
 ///
-/// 轮根**不在产物载荷里复制**：它由 `call_turns` 按 `tool_call_id` 反查发起这批
-/// 调用的那条事实。查不到 ⇒ 这条产物不属于本切片的任何一轮，一个节点都不建。
+/// 分组标识**不在产物载荷里复制**：它由 `group_of_call` 按 `tool_call_id` 反查
+/// 发起这批调用的那条事实。查不到 ⇒ 这条产物不对应本切片的任何一次已发起调用，
+/// 一个节点都不建。
 fn artifact_nodes(
     e: &Event,
-    call_turns: &std::collections::HashMap<String, String>,
+    group_of_call: &std::collections::HashMap<String, String>,
 ) -> Vec<ChatNode> {
     let call_id = str_of(e, "tool_call_id");
-    let Some(turn_id) = call_id
+    let Some(group) = call_id
         .as_deref()
-        .and_then(|id| call_turns.get(id))
+        .and_then(|id| group_of_call.get(id))
         .cloned()
     else {
         return Vec::new();
     };
-    // 本轮的中途产出（思考 / 正文）**排在工具卡片之前**：它发生在模型请求工具之前，
-    // 而落在这张卡片所属的格里正是为了拿到这个位置（写侧见 `turn_runner` 的产物收尾）。
-    // 载荷没有 `round`（恢复路、以及把中途产出只记在收束格 `rounds[]` 的老会话）⇒
-    // 一个节点都不多发。
+    // 这次调用的中途产出（思考 / 正文）**排在工具卡片之前**：它发生在模型请求
+    // 工具之前，而落在这张卡片所属的格里正是为了拿到这个位置（写侧见
+    // `turn_runner` 的产物收尾）。载荷没有中途产出（恢复路、以及把中途产出只记在
+    // 收束格的老会话）⇒ 一个节点都不多发。
     let mut nodes = match e.payload.get("round") {
-        Some(round) if round.is_object() => {
+        Some(step) if step.is_object() => {
             let mut v = Vec::new();
-            push_round_nodes(
+            push_step_nodes(
                 &mut v,
-                &turn_id,
+                &group,
                 0,
-                round,
+                step,
                 &NodeStatus::Completed,
                 e.ts,
                 &actor_principal(e),
@@ -1000,7 +1001,7 @@ fn artifact_nodes(
         }
         _ => Vec::new(),
     };
-    let call_id = call_id.unwrap_or_else(|| format!("{turn_id}-call"));
+    let call_id = call_id.unwrap_or_else(|| format!("{group}-call"));
     let success = e
         .payload
         .get("success")
@@ -1009,7 +1010,7 @@ fn artifact_nodes(
 
     let tool = text_of(e, "tool");
     let mut call = llm_build_tool_call_node(
-        &turn_id,
+        &group,
         call_id.clone(),
         Some(tool.clone()),
         text_of(e, "args"),
