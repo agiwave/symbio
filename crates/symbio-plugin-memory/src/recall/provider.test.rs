@@ -76,7 +76,11 @@ fn renders_the_turn_opening_reading_from_facts() {
     let got = RecallProvider.provide(&req);
     assert_eq!(got.len(), 1, "读数在场 ⇒ 交出召回段");
     assert_eq!(got[0].slot, slots::RECALL);
-    assert!(got[0].text.contains("把总结写进 tmp/a.md"), "{}", got[0].text);
+    assert!(
+        got[0].text.contains("把总结写进 tmp/a.md"),
+        "{}",
+        got[0].text
+    );
     assert!(got[0].text.contains("经验"), "正文要带认知标签");
 }
 

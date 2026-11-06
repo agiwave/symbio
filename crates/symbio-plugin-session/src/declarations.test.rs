@@ -29,7 +29,7 @@ use symbio_kernel::decl::{ActorDecl, FactDecl, PluginDeclarations};
 use symbio_kernel::event::{
     Entity, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
-use symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL;
+use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_OPENING};
 
 use super::{EVENT_SESSION_SETTLED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 
@@ -45,16 +45,32 @@ const HARNESS_EVENTS: &[EventDecl] = &[
     // 终答格：生产装配里由 `loop` 的旧词汇表声明（宿主写口），本二进制不链接它，
     // 而 `session.close-turn` 行的 `owes` 指向它 ⇒ 夹具补一条同构的宿主格位。
     EventDecl::host(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed)),
+    // 首响格：生产装配里由 `loop` 的词汇表声明，本二进制不链接它，而本插件新增的
+    // 归宿行 `session.opening-seat` 的 `owes` / `until` 指向它 ⇒ 补一条同构格位。
+    EventDecl::new(
+        EVENT_CHAT_ASSISTANT_OPENING,
+        (Entity::Scope, Verb::Asserted),
+    ),
 ];
 
-/// 同 [`HARNESS_EVENTS`] 的另一半：`chat.assistant.final` 的载荷形状（键 `root_id`）。
-const HARNESS_FACTS: &[FactDecl] = &[FactDecl {
-    name: EVENT_CHAT_ASSISTANT_FINAL,
-    port: None,
-    key: &[],
-    expand: &[],
-    fields: &["root_id", "final_id", "text"],
-}];
+/// 同 [`HARNESS_EVENTS`] 的另一半：两条事实的载荷形状（`chat.assistant.final` 键
+/// `root_id`；`chat.assistant.opening` 键 `id`）。
+const HARNESS_FACTS: &[FactDecl] = &[
+    FactDecl {
+        name: EVENT_CHAT_ASSISTANT_FINAL,
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["root_id", "final_id", "text"],
+    },
+    FactDecl {
+        name: EVENT_CHAT_ASSISTANT_OPENING,
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["id", "reason", "text", "exclude_from_context"],
+    },
+];
 
 /// `plugin_row` 执行体：生产装配里由 `loop` 交（写名单是全部行实现的并集），
 /// 本二进制只补这一行自己的出口——`session.settled`。

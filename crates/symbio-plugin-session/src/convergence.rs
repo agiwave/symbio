@@ -305,7 +305,9 @@ impl Convergence {
         }
         let Some(user) = events
             .iter()
-            .find(|e| e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq))
+            .find(|e| {
+                e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq)
+            })
             .cloned()
         else {
             return Ok(false);
@@ -556,7 +558,7 @@ impl Convergence {
 /// **不要在这里重拼「以下是历史」的散文**：那会把同一份事实变成两种形状，且给
 /// 「谁说了什么」再错一次的机会（compose 的 `build_messages` 就吃这组节点）。
 /// 只留 `user | assistant` 两类：调用方是措辞产线，工具卡不属于对话线。
-fn dialog_context(events: &[Event]) -> Vec<cm::ChatNode> {
+pub(crate) fn dialog_context(events: &[Event]) -> Vec<cm::ChatNode> {
     symbio_sdk::projection::rebuild::rebuild(events, &CHAT_VOCAB, &MESSAGE_VOCAB)
         .into_iter()
         .filter(|node| {

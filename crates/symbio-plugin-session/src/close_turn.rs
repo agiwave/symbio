@@ -17,9 +17,7 @@ use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep};
 use symbio_plugin_api::settle::{contributors, SettleFace, Settling};
 use symbio_plugin_api::{Entity, Verb};
 
-use crate::declarations::{
-    EVENT_SESSION_RECALL, EVENT_SESSION_SETTLED, OWNER, SESSION_CLOSE_TURN,
-};
+use crate::declarations::{EVENT_SESSION_RECALL, EVENT_SESSION_SETTLED, OWNER, SESSION_CLOSE_TURN};
 
 pub(crate) struct CloseTurn;
 
@@ -69,9 +67,11 @@ impl RowHandler for CloseTurn {
         // 收束贡献里有两类消费者：语义记忆记「本轮用过什么」，技能记账按真实命中
         // 写 `memory.calibrated`。**读的是本轮那一格**（`produced_by = 开口格 seq`），
         // 不是「最近一格」——收束与召回必须同属一轮，否则账目会记到别轮头上。
-        let recall_reading = req.history.iter().rev().find(|e| {
-            e.kind == EVENT_SESSION_RECALL && e.produced_by == Some(user_seq)
-        });
+        let recall_reading = req
+            .history
+            .iter()
+            .rev()
+            .find(|e| e.kind == EVENT_SESSION_RECALL && e.produced_by == Some(user_seq));
         let recall_lines: Vec<RecallLine<'_>> = recall_reading
             .and_then(|e| e.payload.get("entries").and_then(Value::as_array))
             .map(|entries| {

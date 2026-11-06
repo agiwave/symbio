@@ -81,7 +81,11 @@ impl DebtSource for ClassifyDebts {
 
         // 规则命中：reason 是**规则表的确定性结论**（同一输入恒定），可以进债键。
         // 规则未命中：债键只留 id，等 `parse` 把结论落成事实。
-        let key = match self.rule_shortcut.then(|| classify_by_rule(utterance)).flatten() {
+        let key = match self
+            .rule_shortcut
+            .then(|| classify_by_rule(utterance))
+            .flatten()
+        {
             Some(reason) => vec![
                 ("id".to_string(), user_id.to_string()),
                 ("reason".to_string(), reason.to_string()),

@@ -247,7 +247,7 @@ impl PortExecutor for PluginRowExecutor {
         }
 
         let request = row_request(handler.row(), &key, &exec, &events, &principal);
-        match handler.run(&request) {
+        match handler.run_ctx(&request, exec.ctx.clone()).await {
             RowStep::Facts(facts) => {
                 if facts.is_empty() {
                     return PortOutcome::failed(

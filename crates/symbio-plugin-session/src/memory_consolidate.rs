@@ -20,9 +20,7 @@
 use serde_json::{json, Value};
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
-use symbio_plugin_api::{
-    Entity, Event, FactSource, Verb, ViewRead, PRINCIPAL_USER,
-};
+use symbio_plugin_api::{Entity, Event, FactSource, Verb, ViewRead, PRINCIPAL_USER};
 use symbio_sdk::governance::VisScope;
 use symbio_sdk::text::merge_kernel::merge_with_fidelity;
 
@@ -99,9 +97,7 @@ pub(crate) fn consolidate_turn(
     user_seq: u64,
     now: i64,
 ) -> Result<usize, String> {
-    let value = match ViewRead::named(MEMORY_LIVE_VIEW)
-        .and_then(|view| view.read(events, now))
-    {
+    let value = match ViewRead::named(MEMORY_LIVE_VIEW).and_then(|view| view.read(events, now)) {
         Ok(value) => value,
         Err(why) => {
             // 四种缺席都是**可诊断的缺席**，不是「没有活记忆」。跳过这一轮，
@@ -177,9 +173,7 @@ pub(crate) fn consolidate_turn(
         if let Err(rejection) = accept(&ConsolidateParams::default(), generation, fidelity) {
             let (generation, max, fidelity, min) = match rejection {
                 Rejection::RejectedMaxGen { generation, max } => (generation, max, fidelity, 0.0),
-                Rejection::RejectedLowFidelity { fidelity, min } => {
-                    (generation, 0, fidelity, min)
-                }
+                Rejection::RejectedLowFidelity { fidelity, min } => (generation, 0, fidelity, min),
             };
             symbio_plugin_api::plugin_debug!(
                 "session",

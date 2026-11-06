@@ -35,14 +35,18 @@
 //! `after` 只在**本轮分类开关的有效值为真**时声明。会话把 `classify_enabled` 写成
 //! 生效值（调用方开关 ∧ 分类插件本轮挂载）：卸载分类插件（t21-E）时该值为 false，
 //! 本行不挂 `after`——否则它会等一笔不会出现的债，整轮一个请求都不发。
+//!
+//! 首响开启时（`opening_enabled` 同样由会话写成生效值），`after` 指向**首响行**
+//! 的债 id（`session.opening:id=<user.message id>`）而不是判决行：首响行自己等
+//! `classify.escalate`，链是「判决 → 首响 → 生成」，模型不会在「我先看一下」之前抢跑。
 
 use std::sync::Arc;
 
 use serde_json::json;
 use symbio_plugin_api::debt::{session_config_id, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CLASSIFY_ANSWERED, EVENT_SESSION_CONFIG,
-    EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CLASSIFY_ANSWERED,
+    EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
 };
 
 use crate::port::MODEL_PORT;
@@ -57,6 +61,10 @@ const FINAL_FACT_PREFIX: &str = EVENT_CHAT_ASSISTANT_FINAL;
 /// `CLASSIFY_DECIDE` 同一字面量。跨插件的时序参照只能按字符串约定——本行不 import
 /// 兄弟插件的类型，只等它那笔债收束。
 const CLASSIFY_DECIDE_ROW: &str = "classify.decide";
+
+/// 首响行名（数据）：与 `crates/symbio-plugin-session/src/opening.rs` 的
+/// `SESSION_OPENING` 同一字面量。首响由会话的行经 `compose/wording` 取措辞后落格。
+const SESSION_OPENING_ROW: &str = "session.opening";
 
 /// model 的债表（无状态：每轮从请求与事实视图现算）。
 pub(crate) struct ModelDebts;
@@ -81,6 +89,13 @@ impl DebtSource for ModelDebts {
             .and_then(|c| c.get("classify_enabled"))
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
+        // 首响开关：只影响 `after` 指向哪一笔前置债（见模块文档）。分类关闭时它不参与，
+        // 否则会等一笔永远不会出现的首响债。
+        let opening_on = facts
+            .fact_payload(EVENT_SESSION_CONFIG, &config_id)
+            .and_then(|c| c.get("opening_enabled"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         let payload = json!({
             "provider": request.provider,
             "root_id": user_id,
@@ -98,8 +113,14 @@ impl DebtSource for ModelDebts {
         .when_id(EVENT_SESSION_CONFIG, config_id.clone())
         .unless_id(FINAL_FACT_PREFIX, format!("{FINAL_FACT_PREFIX}:{user_id}"));
         if classify_on {
-            // 前置债 id = 判决行的债 id（两种判决路径共用同一个 id，见 classify/debt.rs）。
-            reply = reply.after(format!("{CLASSIFY_DECIDE_ROW}:id={user_id}"));
+            // 首响开启 ⇒ 等首响行收束（它自己等 `classify.escalate`）；否则直接等判决行。
+            // 前置债 id 两种判决路径共用同一个 id（见 classify/debt.rs）。
+            let prerequisite = if opening_on {
+                format!("{SESSION_OPENING_ROW}:id={user_id}")
+            } else {
+                format!("{CLASSIFY_DECIDE_ROW}:id={user_id}")
+            };
+            reply = reply.after(prerequisite);
         }
         let mut rows = vec![reply];
         // 工具轮结束后的续接：身份来自最近一条工具产物，没有产物就不欠。

@@ -9,8 +9,8 @@ import './_selfrun.mjs';
 //
 // | 线 | 输入 | 判决 | 措辞产线 | 可观测后果 |
 // |---|---|---|---|---|
-// | A 模板路径 | 「谢谢」 | `Answered{thanks}` | 模板 | **零** LLM 请求、**零**端口 `model` 协议事实；一条根级 `surface=reply` 节点 |
-// | B 生成路径 | 「我们刚才聊了什么」 | `Answered{from_context}` | 生成 | 分类 1 次 + 生成 1 次静默请求；生成那一笔是端口 `model` 的三格账；答话**进**后续请求包 |
+// | A 模板路径 | 「谢谢」 | `Answered{thanks}` | 模板 | **零** LLM 请求、**零**端口 `model.assist` 协议事实；一条根级 `surface=reply` 节点 |
+// | B 生成路径 | 「我们刚才聊了什么」 | `Answered{from_context}` | 生成 | 分类 1 次 + 生成 1 次静默请求；生成那一笔是端口 `model.assist` 的三格账；答话**进**后续请求包 |
 // | B 首响剔除 | 再接「读一下 README」 | `Escalate{needs_work}` | 模板 | 首响节点**不进**请求包（同一批 worker 请求里查无此句） |
 // | B 首响到达时序 | 同上（同一次投递） | 同上 | 同上 | 首响帧在实时面上**早于**第一条工具结果帧，且只占一个节点 id |
 // | C 卸载平凡值 | 「谢谢」+ 不挂载 `compose` | `Answered{thanks}` | 无 | **降级进工具循环**；转写里没有对话面文本 |
@@ -103,20 +103,49 @@ function walLines(path) {
     .map((l) => JSON.parse(l));
 }
 
+/** 内部往返（措辞）落账的端口（D-336 裁决 4：一次性问答的成员，不是会话轮的 `model`）。 */
+const MODEL_ASSIST_PORT = 'model.assist';
+
 /**
- * 端口 `model` 的一笔内部调用的三格（`request` / `sent` / `response`）。
+ * 从协议事实的入库身份还原债键：`ring:{port}:{id}:{attempt}:{kind}[:{shard}]`。
+ *
+ * 与宿主 `ring_key_of` 同一口径：`id` 自身含 `:`，因此从右往左定界——最右是可选的
+ * 分片号，往左是种类与尝试号，剩下的中段整体是 `id`。
+ */
+function ringKeyOf(kind, eventId) {
+  const rest = String(eventId ?? '').replace(/^ring:/, '');
+  if (!String(eventId ?? '').startsWith('ring:')) return null;
+  const parts = rest.split(':');
+  const kindAt = parts.lastIndexOf(kind);
+  if (kindAt < 2) return null;
+  if (!/^\d+$/.test(parts[kindAt - 1])) return null;
+  return { port: parts[0], id: parts.slice(1, kindAt - 1).join(':') };
+}
+
+/**
+ * 某个端口上的一笔内部调用的三格（`request` / `sent` / `response`）。
  *
  * 认领方式是 `request` 载荷里的 `via`（内部请求各自有名，会话轮的模型调用没有这个
- * 字段）——先按用途找到那一笔的逻辑 id，再按 id 收齐它自己的三格。
+ * 字段）——先按用途找到那一笔，再从它的**事件 id** 取回端口与逻辑 id，最后按
+ * `(port, id)` 收齐它自己的三格。
+ *
+ * 为什么不读载荷里的 `port` / `id`：环落的 `request` / `sent` 载荷是行载荷与租约，
+ * 只有 `response` 由环补 `port`；把三格的认领压在载荷上等于要求执行体回显协议字段，
+ * 而协议身份本来就在事件 id 里（`ring:{port}:{id}:{attempt}:{kind}`）。
  */
-function internalModelCall(homedir, sid, via) {
+function internalCall(homedir, sid, via, port) {
   const facts = walLines(join(homedir, 'session', sid, V2_WAL));
-  const req = facts.find((e) => e.kind === 'request' && e.payload?.via === via);
-  if (!req) return { found: false, facts: [] };
-  const own = facts.filter(
-    (e) => e.payload?.port === 'model' && e.payload?.id === req.payload.id,
+  const req = facts.find(
+    (e) => e.kind === 'request' && e.payload?.via === via && ringKeyOf(e.kind, e.event_id)?.port === port,
   );
-  return { found: true, id: req.payload.id, facts: own };
+  if (!req) return { found: false, facts: [] };
+  const key = ringKeyOf(req.kind, req.event_id);
+  if (!key) return { found: false, facts: [] };
+  const own = facts.filter((e) => {
+    const k = ringKeyOf(e.kind, e.event_id);
+    return k && k.port === port && k.id === key.id;
+  });
+  return { found: true, id: key.id, port: key.port, facts: own };
 }
 
 /** 本用例的会话 id（一条断言线一个：四条线各自从零开始，断言互不污染） */
@@ -284,15 +313,15 @@ export default defineCase(
         !tplMsgs.some((m) => msgTypeOf(m) === 'turn'),
         'A 线不进工具循环 ⇒ 不该有 Turn 组合节点',
       );
-      // 事实层的反向判据：模板产线**不开**端口 `model` 的账。
+      // 事实层的反向判据：模板产线**不开**端口 `model.assist` 的账。
       //
       // 上面那条「零 LLM 请求」只说明电话没打；这一条说明日志里也没有一笔**虚账**。
-      // 两者合起来才守住那句判据：`request/sent/response` 三格**恰好**代表一次模型
-      // 往返——若给零往返的产线也落一条 `request(port=model)`，三格从此数不准调用，
-      // 而「调了模型没有账」与「有账没调模型」是同一种病的两个方向。
+      // 两者合起来才守住那句判据：`request/sent/response` 三格**恰好**代表一次内部
+      // 往返——若给零往返的产线也落一条 `request(port=model.assist)`，三格从此数不准
+      // 调用，而「调了模型没有账」与「有账没调模型」是同一种病的两个方向。
       assert(
-        !internalModelCall(hd.homedir, SIDS.template, 'compose/wording').found,
-        'A 线（模板产线）不该落任何端口 `model` 的协议事实',
+        !internalCall(hd.homedir, SIDS.template, 'compose/wording', MODEL_ASSIST_PORT).found,
+        'A 线（模板产线）不该落任何端口 `model.assist` 的协议事实',
       );
 
       // ── B 生成路径：「我们刚才聊了什么」⇒ 分类 + 生成（各一次静默请求）──
@@ -333,25 +362,41 @@ export default defineCase(
       //
       // 旧实测（CLI 会话 `verify-ring-1`，2026-10-22）：这一句问答走了**两次**模型
       // HTTP 调用，而 WAL 里一格协议事实都没有——短路轮直接调模型，绕开了端口，
-      // 「这一轮欠一次模型往返」只活在内存里。现在它必须是端口 `model` 的一笔账：
-      // 三格齐、同一逻辑 id、`sent` 夹在中间（引擎在执行体**之前**记账），
-      // 逻辑 id 带幕锚（`model-{轮}-d{幕}-w{请求轮次}`）。
-      const genCall = internalModelCall(hd.homedir, SIDS.generate, 'compose/wording');
-      assert(genCall.found, 'B 线那次答话生成必须落一条 `request(port=model)`');
+      // 「这一轮欠一次模型往返」只活在内存里。现在它必须是端口 `model.assist` 的一笔账：
+      // 三格齐、同一逻辑 id、`sent` 夹在中间（引擎在执行体**之前**记账）。
+      const genCall = internalCall(
+        hd.homedir,
+        SIDS.generate,
+        'compose/wording',
+        MODEL_ASSIST_PORT,
+      );
+      assert(genCall.found, 'B 线那次答话生成必须落一条 `request(port=model.assist)`');
       const kindsInOrder = genCall.facts.map((e) => e.kind);
       assertEq(
         JSON.stringify(kindsInOrder),
         JSON.stringify(['request', 'sent', 'response']),
         `那一笔应当是三格且按派发序（实际 ${JSON.stringify(kindsInOrder)}，id=${genCall.id}）`,
       );
+      // 逻辑 id 由事实派生（D-323）：不许计数、不许带轮号 / 幕锚。判据只剩两件事——
+      // 它非空，且三格的身份真的**同一个**（从各自的事件 id 独立还原后比对）。
+      const ringIds = genCall.facts.map((e) => ringKeyOf(e.kind, e.event_id)?.id);
       assert(
-        genCall.id.startsWith('model-') && /-d\d+-w\d+$/.test(genCall.id),
-        `逻辑 id 应带幕锚与步名（实际 ${genCall.id}）`,
+        typeof genCall.id === 'string' && genCall.id.length > 0,
+        `逻辑 id 不得为空（实际 ${JSON.stringify(genCall.id)}）`,
       );
       assertEq(
-        genCall.facts[1].payload.lease_ms,
-        600_000,
-        '`sent` 要带上派发那一刻约定的租约（崩溃后收租读的就是它）',
+        JSON.stringify(ringIds),
+        JSON.stringify(genCall.facts.map(() => genCall.id)),
+        `三格必须共享同一逻辑 id（实际 ${JSON.stringify(ringIds)}，id=${genCall.id}）`,
+      );
+      // 租约有期限：`sent` 带派发那一刻约定的截止时刻，且为正数（`deadline_ms: null`
+      // 是「挂起」，那是另一种结局，不是本线的正常完成）。
+      const genSent = genCall.facts.find((e) => e.kind === 'sent');
+      assert(genSent, '三格里必须有 `sent`（派发事实与租约是同一格）');
+      assert(
+        typeof genSent.payload?.deadline_ms === 'number' &&
+          genSent.payload.deadline_ms > 0,
+        `\`sent\` 要带上派发那一刻约定的租约（deadline_ms 必须为正，实际 ${JSON.stringify(genSent.payload)}）`,
       );
 
       // ── B 首响剔除：再接一句「读一下 README」⇒ Escalate ⇒ 首响 + 工具循环 ──

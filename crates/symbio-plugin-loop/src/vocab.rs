@@ -53,15 +53,28 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     ),
 ];
 
-/// 旧引擎留下的世界词汇的**载荷形状**。只有被行模式引用的（`chat.assistant.final`
-/// 的 `root_id`）才在这里登记；`port` / `key` / `expand` 不属这一族。
-pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
-    name: "chat.assistant.final",
-    port: None,
-    key: &[],
-    expand: &[],
-    fields: &["root_id", "final_id", "text"],
-}];
+/// 旧引擎留下的世界词汇的**载荷形状**。只有被行模式引用的字段才在这里登记
+/// （`chat.assistant.final` 的 `root_id`、`chat.assistant.opening` 的 `id`）；
+/// `port` / `key` / `expand` 不属这一族。
+pub(crate) const FACTS: &[FactDecl] = &[
+    FactDecl {
+        name: "chat.assistant.final",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["root_id", "final_id", "text"],
+    },
+    // 首响格：内容由 compose 的模板产出、由会话的行落格（D-344 的「跨插件只走 route」）。
+    // 它是一轮里**先于**终答/工具轮出现的对话面事实，排除出上下文（旧的 `escalate`
+    // 断言靠它把「我先看一下」与真正的答话分开）。
+    FactDecl {
+        name: "chat.assistant.opening",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["id", "reason", "text", "exclude_from_context"],
+    },
+];
 
 /// 两个**宿主通用执行体**的声明（D-296 / D-303）。
 ///

@@ -100,10 +100,7 @@ fn recall_from_facts(events: &[Event]) -> Option<OwnedRecall> {
     if lines.is_empty() {
         return None;
     }
-    Some(OwnedRecall {
-        degraded,
-        lines,
-    })
+    Some(OwnedRecall { degraded, lines })
 }
 
 symbio_plugin_api::submit_context_provider!(RecallProvider);

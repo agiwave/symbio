@@ -117,8 +117,7 @@ impl SessionPlugin {
                 .await
                 .iter()
                 .any(|row| {
-                    row.name()
-                        == format!("<debt>{}", symbio_plugin_api::PLUGIN_ID_CLASSIFY)
+                    row.name() == format!("<debt>{}", symbio_plugin_api::PLUGIN_ID_CLASSIFY)
                 });
         let config_draft = FactDraft {
             key: session_config_id(&item.id),
@@ -129,6 +128,9 @@ impl SessionPlugin {
                 "system_prompt": system_prompt,
                 "tools": tools,
                 "classify_enabled": classify_enabled,
+                // 首响开关（调用方开关；没有 compose 时行会因路由取不到措辞而失败、
+                // 收敛为「不说话」，模型行照常放行）。模型债行按它决定是否等首响行。
+                "opening_enabled": cfg.opening_enabled,
                 "progress_enabled": cfg.progress_enabled,
                 "progress_interval_ms": cfg.progress_interval_ms,
                 "progress_max_per_turn": cfg.progress_max_per_turn,

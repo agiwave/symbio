@@ -479,6 +479,15 @@ impl Plugin for SessionPlugin {
             // 有两道容量闸门——因此它归共享实现那套机制，本插件只负责「落位 + 标题 + 地址」。
             // 作用域闸门在 `contribute_memory` 内一处收口（无 `ctx[SESSION_ID]` 即不注入）。
             self.contribute_memory(&ctx, &visitor).await;
+            // 首响的运行时债表（`session.opening`）：装载期只挂「这一族归谁申报」，
+            // 每轮 `rows()` 现算是否欠首响（开关读当轮 `session.config`）。
+            visitor
+                .put(symbio_plugin_api::debt::debt_row(
+                    "session",
+                    Arc::new(crate::opening::OpeningDebts)
+                        as Arc<dyn symbio_plugin_api::debt::DebtSource>,
+                ))
+                .await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         symbio_sdk::capability::capability_announce_configurable(&ctx, &self.config_file).await;

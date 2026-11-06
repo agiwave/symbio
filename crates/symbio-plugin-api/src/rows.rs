@@ -41,6 +41,10 @@
 //! `plugin_row` 的 `ActorDecl`（装载检查看得见），派发时按**这一行**的名单对账
 //! （运行期账本守卫仍要求「声明 ⊆ 强制」，D-123）。
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
 use symbio_kernel::event::Event;
 
 use crate::effects::FactDraft;
@@ -172,6 +176,25 @@ pub trait RowHandler: Sync {
     /// 上界把这一轮判成 `step_limit`。因此「这一笔不该记账」要在行的 `owes` 里
     /// 排除（用 `eq` 收窄），而不是在实现里返回空。
     fn run(&self, req: &RowRequest<'_>) -> RowStep;
+
+    /// 同一行的**带上下文**入口：默认原样转调 [`RowHandler::run`]。
+    ///
+    /// 绝大多数行只读事实、直接落格——那类行保持 `run` 即可；`run_ctx` 的默认实现
+    /// 把 `run` 包成一次已完成的异步调用，因此**其它行实现零改动**。
+    ///
+    /// `ctx` 与派发这次调用的 `PortExecContext.ctx` 是**同一份**上下文：不另造句柄，
+    /// 也不追加 `parent` 或别的字段（D-344）。
+    /// 行拿它只做一件事：`fork` 出子上下文、设 `PATH` 与载荷，经 `ctx.parent()` 的
+    /// **插件路由**取别的插件的能力答复。跨插件调用只走 route、不直连插件；谁想用
+    /// `ctx` 绕过路由去摸别处的数据，按 D-344 驳回。
+    fn run_ctx<'a>(
+        &'a self,
+        req: &'a RowRequest<'_>,
+        ctx: Option<Arc<dyn crate::PluginInvokeRequest>>,
+    ) -> Pin<Box<dyn Future<Output = RowStep> + Send + 'a>> {
+        let _ = ctx;
+        Box::pin(async move { self.run(req) })
+    }
 
     /// 本行声明产出的**效果面**（D-293）：默认空 = 这一行不交任何效果。
     ///
