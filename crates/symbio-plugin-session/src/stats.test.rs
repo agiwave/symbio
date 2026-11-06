@@ -1530,7 +1530,7 @@ fn readyset_column_degrades_to_the_documented_empty_shape() {
 /// `skill.calibration` 不在冻结表里 ⇒ 列只能是 `{ by_skill: {} }`。在这里补一份替身 owner
 /// 只会让两条真判据变成假绿——**数字**归 owner 的单测（`crates/symbio-plugin-skill/src/decl.test.rs`：
 /// 三次里回退两次 ⇒ 置信度 1/3、缺字段的观测不计数、as-of 之后的观测不进账），
-/// **生产二进制里读得到真数**归 e2e（`t35-skill-compile.mjs` / `t41-skill-fast-path.mjs`
+/// **生产二进制里读得到真数**归 e2e（`t35-skill-compile.mjs`
 /// 按已知轮次钉 `by_skill` 的 `uses`）。读侧闸对本列的作用与其余列同族，由 `capability_views`
 /// 那一列的「本进程没链接 owner ⇒ 必须出声」用例与断点 / 转写列的闸用例共同承担。
 ///

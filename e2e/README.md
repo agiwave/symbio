@@ -170,7 +170,7 @@ E2E_PROFILE=real node e2e/run-tests.mjs # 真实 provider 对照：等待沿用�
  是整段转写**（含长期记忆的注入段）。于是**第 2 轮起的 prompt 里会出现第 1 轮的用户
  发言**（它作为一条记忆被召回注入），早先写的 `match: <第 1 轮那句话>` 场景会把后面
  每一轮都吃掉——表现为「换了句话问，答的还是上一轮的模板」。**数组顺序即优先级**：
- 把更具体的 `match` 排在前面，或改用 `once: true`。参考 `t41`。
+ 把更具体的 `match` 排在前面，或改用 `once: true`。参考 `t63`。
 8. **同一个 WAL 的写者令牌是独占的**（`wal.rs` 的 `<wal>.lock`，非阻塞 `try_lock`）。
  在测试里先 `EventWalStore::open(...)` 播种、再调被测函数（它自己也会 `open`），
  第二个句柄只能拿到**只读降级**（`append` 恒 `NotTheWriter`）——被测函数的落格会

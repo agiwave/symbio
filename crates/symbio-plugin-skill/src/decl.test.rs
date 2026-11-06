@@ -365,7 +365,7 @@ fn the_calibration_view_emits_the_ledger_in_key_order() {
 ///
 /// 读方是 `crates/symbio-plugin-session` 的校准列（跨插件读口按名字取）；
 /// 数字判据在上面的 owner 用例，「名字在装配表里」由这条钉，
-/// 「生产二进制里读得到真数」由 e2e `t35` / `t41` 钉。
+/// 「生产二进制里读得到真数」由 e2e `t35` 钉。
 #[test]
 fn the_calibration_view_is_sealed_under_this_owner() {
     let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
