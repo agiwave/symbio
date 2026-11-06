@@ -312,6 +312,28 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
     }
 }
 
+/// 审批闸门拦下的一笔的留痕草稿（t78-A）。
+///
+/// 活闸门住在能力调用里（`ApprovalGate` 装饰器）：它把「需要用户批准」作为**结果值**
+/// 交回。端口此前只把它折成停等载荷，事实面上没有一条授权结论——`request` 开过账，
+/// `authz.denied` 却是空白。这里在同一个出口补上那条结论；id 与该笔 `request` 同源
+///（开账行用的就是调用 id）。**不**写 `sent`：没放行就没有派发。
+fn approval_denied_draft(exec: &PortExecContext, tool: &str, call_id: &str) -> FactDraft {
+    let payload = serde_json::json!({
+        KEY_TOOL: tool,
+        KEY_ID: call_id,
+    });
+    // 批派里同一笔债含多条调用：按调用 id 派生幂等键，一条调用一份授权结论。
+    authz_draft(
+        &format!("{}-{call_id}", exec.idempotency_key),
+        &payload,
+        Authz::Denied {
+            detail: "needs_approval",
+            why: "approval_required",
+        },
+    )
+}
+
 /// 建账：把模型应答里的调用清单展开成 `request` 草稿（D-118 决策 5 的第一笔债）。
 ///
 /// 环只交纯值：应答原文（取 `id` / `calls`）、调用清单、阈值 / 放行清单 / 模式的
@@ -1949,6 +1971,22 @@ impl ToolPort {
                         }
                     };
                     let pending = pending_prompt_from(&data);
+                    // 活闸门（`approval_gate`）拦下的一笔必须留痕：停等载荷只是结果形态，
+                    // 事实面还要有一条与原 `request` 同 id 的授权拒绝（t78-A）。
+                    if pending
+                        .as_ref()
+                        .and_then(|p| p.get(KEY_FAILURE_KIND))
+                        .and_then(|v| v.as_str())
+                        == Some(failure_kind::NEEDS_APPROVAL)
+                    {
+                        exec.emit
+                            .emit(vec![approval_denied_draft(
+                                &exec,
+                                &tool_name,
+                                &tool_call_id,
+                            )])
+                            .await;
+                    }
                     let res = extract_result(&data);
                     plugin_info!(
                         "tool",

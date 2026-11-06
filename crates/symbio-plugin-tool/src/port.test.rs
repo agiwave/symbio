@@ -724,6 +724,25 @@ async fn pending_call_in_a_batch_lands_the_waiting_card_fields() {
         serde_json::json!("needs_approval"),
         "停等成因在载荷顶层可见，不是只埋在 pending 里"
     );
+    // 闸门拦下的一笔必须留痕（t78-A）：同批要有与原 `request` 同 id 的授权拒绝，
+    // 且**不得**有同 id 的 `sent`——没放行就没派发。
+    let denied = drafts
+        .iter()
+        .find(|draft| draft.kind == EVENT_AUTHZ_DENIED)
+        .expect("审批拒绝必须落 authz.denied（否则事实面上一笔拒绝是空白）");
+    assert_eq!(denied.payload["port"], serde_json::json!("tool"));
+    assert_eq!(denied.payload["id"], serde_json::json!("c1"));
+    assert_eq!(
+        denied.payload["detail"],
+        serde_json::json!("needs_approval"),
+        "线上措辞由契约固定"
+    );
+    assert!(
+        !drafts
+            .iter()
+            .any(|draft| draft.kind == "sent" && draft.payload["id"] == "c1"),
+        "被拒的调用不得派发（不得落同 id 的 sent）"
+    );
 }
 
 // ==================== 授权判定：执行体先判，再执行（D-306 裁决一） ====================
