@@ -198,7 +198,7 @@ impl SessionPlugin {
                             ctx: inbox_ctx.clone(),
                             parent,
                         });
-                        self.convergence.spawn_turn_closer(
+                        self.spawn_turn_closer(
                             id.to_string(),
                             seq,
                             source,

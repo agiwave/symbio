@@ -539,39 +539,6 @@ impl Convergence {
         .await;
         Ok(true)
     }
-
-    /// 开轮之后的**收尾**：等写口踢出的驱动空闲，再把终答投影并收束本轮。
-    ///
-    /// 起后台任务而不是在写臂里等：写入的回执语义是「已经开轮」，不是「这一轮
-    /// 已经跑完」。收尾也不靠时间——`settled` 等的是驱动自己的空闲通知
-    /// （`DriveEntry::settled`），驱动跑到 `NoDebt` 才可能返回。
-    ///
-    /// 调用方两种：CLI 写自己的收件箱（它另会 `session/project`，幂等），以及
-    /// `agent_run` 写子会话的收件箱（子会话没有 CLI 投影方——不在这里收，
-    /// 它永远停在 `working`，转播桥也就永远等不到本轮结束）。
-    pub(crate) fn spawn_turn_closer(
-        &self,
-        session_id: String,
-        user_seq: u64,
-        source: Arc<dyn FactSource>,
-        drive: Option<Arc<dyn symbio_plugin_api::DriveEntry>>,
-        compose: Option<ComposeCall>,
-    ) {
-        let this = self.clone();
-        tokio::spawn(async move {
-            // 等**本部署根**那一份驱动空闲：主根 / 子空间各持一份实例，拿主根的
-            // 实例等子会话永远是「本会话没在跑」——投影会抢在驱动前面落空。
-            if let Some(entry) = drive {
-                entry.settled(&session_id).await;
-            }
-            if let Err(e) = this
-                .project_final_turn(&session_id, user_seq, &*source, compose.as_ref())
-                .await
-            {
-                symbio_plugin_api::plugin_warn!("session", "收轮投影失败（{session_id}）：{e}");
-            }
-        });
-    }
 }
 
 /// 本轮 `model.assist` 的回执：按**端口 + 开局事实身份**双认（与 compact 的

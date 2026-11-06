@@ -386,11 +386,34 @@ impl SessionPlugin {
     /// 抽干与变更通知必须成对（[`announce_drained`]）：分开写就会出现"抽了没通知"
     /// （前端以为条目还在）或"通知了没抽"（条目凭空消失）两种静默不一致。
     ///
-    /// `pub(crate)`：轮边界抽干（[`super::super::chat_loop::SupplementDrain`]）经它的
+    /// `pub(crate)`：轮边界抽干（[`super::supplements::SupplementDrain`]）经它的
     /// 同步孪生 [`take_inbox_batch_sync`] 取批，再交给
     /// [`super::supplements::merge_supplements`] 合并。两个抽干点共用同一个上界判定与
     /// 同一份通知出口——各写一遍必然在"上界取谁""变更发几次"上漂移。
     pub(crate) async fn take_inbox_batch(&self, state: &Arc<ActiveSessionState>) -> Vec<InboxItem> {
+        self.take_inbox_batch_inner(state, false).await
+    }
+
+    /// 只在该会话**空闲**时取走队首一批（轮收尾后的抽干口）。
+    ///
+    /// 与 [`Self::take_inbox_batch`] 的唯一区别是那一道忙门：抽干与开下一轮是
+    /// 同一件事的两半，若抽干时本轮还在跑，抽出来的那一批会在另一条轮上再开一次
+    /// ——同一份存储出现两个写方。忙则返回空批（条目留在队里）。
+    ///
+    /// 判空、取批与变更通知在**同一处**完成：调用方拿到的批一定已从队列里消失，
+    /// 也一定已经投递过删除变更（[`announce_drained`]）。
+    pub(crate) async fn take_inbox_batch_when_idle(
+        &self,
+        state: &Arc<ActiveSessionState>,
+    ) -> Vec<InboxItem> {
+        self.take_inbox_batch_inner(state, true).await
+    }
+
+    async fn take_inbox_batch_inner(
+        &self,
+        state: &Arc<ActiveSessionState>,
+        only_if_idle: bool,
+    ) -> Vec<InboxItem> {
         let limit = {
             let cfg = self.config.read().await;
             drain_limit(&cfg)
@@ -398,6 +421,9 @@ impl SessionPlugin {
 
         let batch: Vec<InboxItem> = {
             let mut inner = state.inner.write().await;
+            if only_if_idle && inner.is_working() {
+                return Vec::new();
+            }
             let n = inner.inbox.len().min(limit);
             inner.inbox.drain(..n).collect()
         };
@@ -410,13 +436,20 @@ impl SessionPlugin {
     ///
     /// 与 [`Self::take_inbox_batch`] 的区别只在**数量**：开轮是「一条消息 = 一轮」，
     /// 补充合并是轮末的可选加工。按批取会把合并上界之外的消息一起抽走，
-    /// 而一条只够开一轮——多抽的那些就再没有开轮的机会了。
+    /// 一条只够开一轮——多抽的那些就再没有开轮的机会了。
+    ///
+    /// **忙则留队**（D-026 #4）：本轮还在跑时不再开第二轮——那是把「补充」当成
+    /// 并发会话，同一份存储会出现两个写方。忙窗写入只入队，出队由轮收尾后的
+    /// 抽干接手（[`Self::take_inbox_batch_when_idle`]）。
     pub(crate) async fn take_inbox_front(
         &self,
         state: &Arc<ActiveSessionState>,
     ) -> Option<InboxItem> {
         let item = {
             let mut inner = state.inner.write().await;
+            if inner.is_working() {
+                return None;
+            }
             inner.inbox.pop_front()
         };
         if let Some(item) = &item {

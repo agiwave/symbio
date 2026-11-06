@@ -87,6 +87,12 @@ pub struct SessionPlugin {
     /// 懒建：构造时父句柄可能还是弱引用，等第一次开轮再 upgrade；之后整份插件
     /// 共享同一实例（按会话的重入位因此只有一份）。
     drive: OnceLock<Option<Arc<dyn symbio_plugin_api::DriveEntry>>>,
+    /// 指向自身的弱引用：轮收尾的后台任务（[`SessionPlugin::spawn_turn_closer`]）
+    /// 要活得比写臂久，必须持有一份 `'static` 的插件句柄，而 `dispatch` 只有 `&self`。
+    ///
+    /// 装配期在 [`Self::build`] 里登记一次（`Weak` 不延长生命周期，不构成泄漏）；
+    /// 直接 `new` 出来的实例（测试）没有它，收尾任务因而只投影、不抽干。
+    pub(crate) self_ref: OnceLock<Weak<SessionPlugin>>,
 }
 
 use super::convergence::Convergence;
@@ -122,6 +128,7 @@ impl SessionPlugin {
             workdir_watches,
             change_subs,
             drive: OnceLock::new(),
+            self_ref: OnceLock::new(),
         }
     }
 
@@ -196,7 +203,10 @@ impl SessionPlugin {
 
         let parent = ctx.parent();
 
-        Arc::new(SessionPlugin::new(parent, config, dir))
+        let plugin = Arc::new(SessionPlugin::new(parent, config, dir));
+        // 收尾任务要 self 的 `'static` 句柄（见字段说明），装配期登记一次。
+        let _ = plugin.self_ref.set(Arc::downgrade(&plugin));
+        plugin
     }
 
     /// 获取父插件引用

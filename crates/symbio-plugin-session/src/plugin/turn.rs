@@ -11,14 +11,16 @@
 
 use super::*;
 use crate::chat_session::Carrier;
-use crate::convergence::SessionStateChange;
+use crate::convergence::{ComposeCall, SessionStateChange};
 use crate::transcript::publish::append_and_publish;
+use crate::transcript::supplements::merge_supplements;
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::capability_take_errors;
 use symbio_plugin_api::debt::{session_config_id, session_recall_id};
 use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::retrieval::{retrieve_all, RetrievalRequest};
+use symbio_plugin_api::DriveEntry;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use symbio_sdk::turn::facts::FleetSnapshot;
@@ -36,9 +38,31 @@ impl SessionPlugin {
         source: &dyn FactSource,
     ) -> Result<Option<u64>, PluginError> {
         let state = self.active_mgr.get_or_create(session_id).await;
+        // 忙则留队：出队与开轮是同一件事的两半，忙窗里出队会开出第二条并发轮。
         let Some(item) = self.take_inbox_front(&state).await else {
             return Ok(None);
         };
+        self.consume_item_turn(ctx, session_id, source, item).await
+    }
+
+    /// 把**一条已出队**的条目落成本轮（写臂与轮收尾抽干共用同一份落格）。
+    ///
+    /// 入队形态（`InboxItem`）是两条路径的共同语言：写臂按一条开轮，轮收尾把
+    /// 一批补充合并成一条（`merge_supplements`）后同样以一条开下一轮。
+    pub(crate) async fn consume_item_turn(
+        &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        session_id: &str,
+        source: &dyn FactSource,
+        item: InboxItem,
+    ) -> Result<Option<u64>, PluginError> {
+        let state = self.active_mgr.get_or_create(session_id).await;
+        {
+            let inner = state.inner.read().await;
+            if inner.is_working() {
+                return Ok(None);
+            }
+        }
 
         let text = item
             .message
@@ -46,12 +70,19 @@ impl SessionPlugin {
             .as_ref()
             .map(|c| c.to_text())
             .unwrap_or_default();
+        // `meta` 必须随用户格事实入格：读路径由 `rebuild::user_node` 从载荷复刻，
+        // 落在节点上而不在载荷里就等于只有实时面看得到——重开会话后合并标记消失，
+        // 同一条发言在两面成了两个身份（t19 的 A 线读的就是重建面）。
+        let payload = match item.message.meta.as_ref() {
+            Some(meta) => json!({ "text": text, "id": item.id, "meta": meta }),
+            None => json!({ "text": text, "id": item.id }),
+        };
         let draft = FactDraft {
             key: item.id.clone(),
             kind: EVENT_USER_MESSAGE.to_string(),
             entity: Entity::Scope,
             verb: Verb::Opened,
-            payload: json!({ "text": text, "id": item.id }),
+            payload,
             produced_by: None,
         };
         let seq = source
@@ -204,6 +235,95 @@ impl SessionPlugin {
             .emit_session_state(&state, SessionStateChange::Working)
             .await;
         Ok(Some(seq))
+    }
+
+    /// 开轮之后的**收尾**：等写口踢出的驱动空闲 → 投影终答 → 把排队的补充
+    /// 抽干成**下一轮**。
+    ///
+    /// 起后台任务而不是在写臂里等：写入的回执语义是「已经开轮」，不是「这一轮
+    /// 已经跑完」。收尾也不靠时间——`settled` 等的是驱动自己的空闲通知
+    /// （`DriveEntry::settled`），驱动跑到 `NoDebt` 才可能返回。
+    ///
+    /// ## 为什么抽干挂在这里（t19 的 A 线）
+    ///
+    /// 写臂在忙窗只入队、不开轮（`take_inbox_front` 的忙门）。没有批次边界的轮
+    /// （无工具调用）结束后，排队条目只能由**后台消费者**接手；本任务就是那个
+    /// 消费者：本轮收尾后抽一批、合并成一条、开下一轮，直到队列排空。
+    ///
+    /// 合并沿用 [`merge_supplements`]（`supplements_enabled = false` 时它退化取一条，
+    /// 叠加后的行为与「一条消息 = 一轮」逐字一致）。
+    pub(crate) fn spawn_turn_closer(
+        &self,
+        session_id: String,
+        user_seq: u64,
+        source: Arc<dyn FactSource>,
+        drive: Option<Arc<dyn DriveEntry>>,
+        compose: Option<ComposeCall>,
+    ) {
+        // 后台任务需要一个 `'static` 的自持句柄；`build` 期登记的弱自引用就是它。
+        // 直接 `new` 出来的实例没有它（收不到自引用）——保留旧行为：只投影、不抽干。
+        let Some(plugin) = self.self_ref.get().and_then(|weak| weak.upgrade()) else {
+            let this = self.convergence.clone();
+            tokio::spawn(async move {
+                if let Some(entry) = &drive {
+                    entry.settled(&session_id).await;
+                }
+                if let Err(e) = this
+                    .project_final_turn(&session_id, user_seq, &*source, compose.as_ref())
+                    .await
+                {
+                    symbio_plugin_api::plugin_warn!("session", "收轮投影失败（{session_id}）：{e}");
+                }
+            });
+            return;
+        };
+        tokio::spawn(async move {
+            let mut seq = user_seq;
+            loop {
+                if let Some(entry) = &drive {
+                    entry.settled(&session_id).await;
+                }
+                if let Err(e) = plugin
+                    .convergence
+                    .project_final_turn(&session_id, seq, &*source, compose.as_ref())
+                    .await
+                {
+                    symbio_plugin_api::plugin_warn!("session", "收轮投影失败（{session_id}）：{e}");
+                    // 终态未定就不接着开下一轮：队列留给下一次写入按空闲路径处理。
+                    return;
+                }
+                let state = plugin.active_mgr.get_or_create(&session_id).await;
+                let batch = plugin.take_inbox_batch_when_idle(&state).await;
+                let Some(message) = merge_supplements(&batch) else {
+                    return;
+                };
+                // 没有能力视图（`session/project` 路径）就开不了下一轮：条目仍在队列里，
+                // 下一次写入会按空闲路径开轮。
+                let Some(call) = compose.as_ref() else {
+                    return;
+                };
+                let item = InboxItem {
+                    id: message.id.clone(),
+                    message,
+                    params: batch[0].params.clone(),
+                    workdir: batch[0].workdir.clone(),
+                };
+                match plugin
+                    .consume_item_turn(&call.ctx, &session_id, &*source, item)
+                    .await
+                {
+                    Ok(Some(next)) => seq = next,
+                    Ok(None) => return,
+                    Err(e) => {
+                        symbio_plugin_api::plugin_warn!(
+                            "session",
+                            "轮收尾抽干开轮失败（{session_id}）：{e}"
+                        );
+                        return;
+                    }
+                }
+            }
+        });
     }
 
     /// 轮首召回读数：可见切片 → 检索面 → 一格 `session.recall` 事实。
