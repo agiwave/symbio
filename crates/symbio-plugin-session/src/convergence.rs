@@ -470,6 +470,7 @@ impl Convergence {
                 node
             })
             .collect();
+            let projected: Vec<String> = nodes.iter().map(|node| node.id.clone()).collect();
             if !nodes.is_empty() {
                 let session = self.open_chat_session(session_id).await?;
                 append_and_publish(
@@ -481,6 +482,32 @@ impl Convergence {
                     PRINCIPAL_MAIN,
                 )
                 .await?;
+            }
+            // 发言闸拒：模型在流式期已经把正文推上实时面（`llm_emit_message`），但这一轮
+            // 没有终答格来接替它（`chat.assistant.final` 被写侧闸拒）——不撤回落空的那条，
+            // 转写里就留下一条永远 `streaming` 的助手正文，与「拒了就不入格」相矛盾
+            // （t71 ⑧）。撤销复用既有的 `removed` 帧，不新造状态（同 D-347 的口径）。
+            if speech_denied {
+                let ghosts: Vec<cm::ChatNode> = {
+                    let state = self.active.get_or_create(session_id).await;
+                    let live = state.transcript.lock().await.snapshot();
+                    live.into_iter()
+                        .filter(|node| {
+                            node.status == Some(cm::NodeStatus::Streaming)
+                                && node.msg_type == Some(cm::NodeKind::Body)
+                                && node.tool_call_id.is_none()
+                                && !projected.iter().any(|id| id == &node.id)
+                        })
+                        .map(|node| cm::ChatNode {
+                            id: node.id,
+                            status: Some(cm::NodeStatus::Removed),
+                            ..Default::default()
+                        })
+                        .collect()
+                };
+                if !ghosts.is_empty() {
+                    self.active.transcript_apply_all(session_id, ghosts).await;
+                }
             }
             let state = self.active.get_or_create(session_id).await;
             self.emit_session_state(
