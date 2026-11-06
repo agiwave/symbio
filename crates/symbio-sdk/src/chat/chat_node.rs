@@ -28,6 +28,13 @@ pub struct AssistRequest {
     pub system: String,
     #[serde(default)]
     pub user: String,
+    /// 提问方**偏好的 provider id**（`<根>/model/<id>`）。
+    ///
+    /// 能力方知道该用什么档（分类要便宜快的、措辞要好写的），这个偏好就该随请求
+    /// 带进来，而不是让会话替它猜。缺席 / 空串 / 取不到该条目 ⇒ 回落**会话选定**
+    /// 的那个 provider（降级而不失效）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
 }
 
 /// 一次性问答的回复（`model.assist` 的应收载荷）。

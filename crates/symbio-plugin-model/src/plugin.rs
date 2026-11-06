@@ -904,13 +904,17 @@ impl Plugin for ModelPlugin {
                 .find(|p| active_id.as_deref() == Some(p.provider_id()))
                 .cloned()
             {
-                let port = Arc::new(super::port::ModelPort::new(active.clone(), available));
+                let port = Arc::new(super::port::ModelPort::new(
+                    active.clone(),
+                    available.clone(),
+                ));
                 for row in port.rows() {
                     tool_visitor.put(row).await;
                 }
                 // 一次性问答（D-336）：同一生效者，独立端口成员 `model.assist`；
-                // 提问方的指令随行载荷进，本插件不认识它的世界语义。
-                let assist = Arc::new(super::assist::AssistPort::new(active));
+                // 提问方的指令随行载荷进，本插件不认识它的世界语义。偏好 provider
+                // 从行载荷取（D-348），全集随端口带过去供按 id 解析。
+                let assist = Arc::new(super::assist::AssistPort::new(active, available));
                 for row in assist.rows() {
                     tool_visitor.put(row).await;
                 }

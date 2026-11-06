@@ -41,11 +41,17 @@ const ASSIST_PROVIDER: &str = "model-assist";
 
 pub(crate) struct AssistPort {
     active: Arc<dyn ModelProvider>,
+    /// 本轮可用的 provider 全集：请求里的偏好按 `provider_id()` 在这里查；
+    /// 查不到（或没带偏好）就回落 `active`（= 会话选定）。
+    available: Vec<Arc<dyn ModelProvider>>,
 }
 
 impl AssistPort {
-    pub(crate) fn new(active: Arc<dyn ModelProvider>) -> Self {
-        Self { active }
+    pub(crate) fn new(
+        active: Arc<dyn ModelProvider>,
+        available: Vec<Arc<dyn ModelProvider>>,
+    ) -> Self {
+        Self { active, available }
     }
 
     pub(crate) fn rows(self: Arc<Self>) -> Vec<CapabilityRow> {
@@ -65,12 +71,33 @@ impl PortProvider for AssistPort {
     fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
         Some(Arc::new(AssistExecutor {
             active: self.active.clone(),
+            available: self.available.clone(),
         }))
     }
 }
 
 struct AssistExecutor {
     active: Arc<dyn ModelProvider>,
+    available: Vec<Arc<dyn ModelProvider>>,
+}
+
+impl AssistExecutor {
+    /// 偏好 provider 的解析：**只查这一次请求带进来的 id**。
+    ///
+    /// 命中 ⇒ 用那个条目；缺席 / 空串 / 查不到 ⇒ 回落会话选定的 `active`。
+    /// 「查不到」也算回落而不是失败：一个 typo 不该让问答整条消失（D-348）。
+    fn provider_for(&self, preferred: Option<&str>) -> Arc<dyn ModelProvider> {
+        preferred
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .and_then(|id| {
+                self.available
+                    .iter()
+                    .find(|provider| provider.provider_id() == id)
+                    .cloned()
+            })
+            .unwrap_or_else(|| self.active.clone())
+    }
 }
 
 #[async_trait::async_trait]
@@ -124,8 +151,9 @@ impl PortExecutor for AssistExecutor {
         }];
         let env = ExecEnv::new(ExecEventSink::silent(), exec.abort.clone());
         let started = std::time::Instant::now();
-        match self
-            .active
+        // 能力方带进来的偏好优先；没带 / 取不到 ⇒ 会话选定（这一个端口实例的 active）。
+        let provider = self.provider_for(request.provider.as_deref());
+        match provider
             // internal-model-allow IM-001: 问答端口是静默的一次性往返（无工具、无会话历史、不参与档位闸门）；走 `for_turn` 会把问答伪装成对话轮。
             .round_trip(&request.system, &wire, &[], &root_id, &env)
             .await

@@ -33,11 +33,14 @@ const CLASSIFY_ANSWERED: &str = "classify.answered";
 /// 措辞的运行时债表（挂载时由 `traverse` 报到，每轮 `rows()` 现算）。
 pub(crate) struct ComposeDebts {
     config: ComposeConfig,
+    /// 措辞的**偏好 provider**（D-348）：缺席 ⇒ 会话选定值。
+    provider: Option<String>,
 }
 
 impl ComposeDebts {
     pub(crate) fn new(config: ComposeConfig) -> Self {
-        Self { config }
+        let provider = config.model_id().map(str::to_string);
+        Self { config, provider }
     }
 }
 
@@ -90,6 +93,9 @@ impl DebtSource for ComposeDebts {
                 // 对话线由执行体从事实投影进 `user`（与 classify 的请求同一形态）：
                 // 这里不再拼第二份「以下是历史」。
                 "user": "",
+                // 措辞的偏好 provider（D-348）：能力方知道该用什么档就直说，
+                // 会话选定值只是缺省；缺席 / 查不到由端口回落。
+                "provider": self.provider,
                 // 回执的匹配键：宿主按 `(port, root_id)` 双认这一次往返。
                 "root_id": user_id,
                 // 环账的用途名（WAL 与 e2e 按它认领这次内部请求）。

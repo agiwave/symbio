@@ -15,9 +15,11 @@
 //! | 键 | 平凡值 | 平凡值下 |
 //! |---|---|---|
 //! | `instruction` | 缺席 | 用内置的那份指令段 |
+//! | `model` | 缺席 | 用**会话选定的** provider（= 没有"偏好"之前的行为） |
 //!
-//! 「用哪个模型」不再是本插件的旋钮：生成已搬到 `model.assist` 口债，执行体
-//! 归 model 端口，选哪个 provider 因此是**会话**的选择（与 compact 同一条路）。
+//! 生成已搬到 `model.assist` 口债，执行体归 model 端口，本插件仍**不直连
+//! provider**。但「用哪个档」是能力方的知识：措辞知道要写得好，就在请求里带上
+//! 偏好；会话选定值是**缺省**，不是天花板（D-348）。
 
 use serde::{Deserialize, Serialize};
 
@@ -30,12 +32,26 @@ pub struct ComposeConfig {
     /// 前面——同一个人在两处口吻不同，比一句措辞不理想糟得多。
     #[serde(default)]
     pub instruction: Option<String>,
+
+    /// 措辞用的**偏好 provider id**（`<根>/model/<id>`）。
+    ///
+    /// 措辞是一次「写得好」的生成，本插件知道该用哪个档，就在 assist 请求里带上
+    /// 这个偏好——与 `classify.model` 同一形态（D-348：请求偏好 > 会话选定 >
+    /// 端口缺省）。缺席 / 空串 / 取不到该条目 ⇒ 回落**会话选定**的那一个，
+    /// 降级而不失效。
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 impl ComposeConfig {
     /// 生效的指令段覆盖（`None` ⇒ 调用方用内置常量）
     pub fn instruction_override(&self) -> Option<&str> {
         non_empty(self.instruction.as_deref())
+    }
+
+    /// 生效的偏好 provider id。空串与缺席同义（设置页清空得到的是 `""`）。
+    pub fn model_id(&self) -> Option<&str> {
+        non_empty(self.model.as_deref())
     }
 }
 

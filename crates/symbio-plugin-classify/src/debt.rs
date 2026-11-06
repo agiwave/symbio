@@ -51,6 +51,9 @@ const ASSIST_PORT: &str = "model.assist";
 pub(crate) struct ClassifyDebts {
     rule_shortcut: bool,
     system_prompt: String,
+    /// 本插件偏好的 provider id（配置的 `model`）；缺席 ⇒ 交给 `model.assist`
+    /// 回落会话选定（D-348：能力方知道该用什么档，就在请求里带偏好）。
+    provider: Option<String>,
 }
 
 impl DebtSource for ClassifyDebts {
@@ -118,7 +121,11 @@ impl DebtSource for ClassifyDebts {
                     "classify-decide-model",
                     ASSIST_PORT,
                     ask_id.clone(),
-                    json!({ "system": self.system_prompt, "user": "" }),
+                    json!({
+                        "system": self.system_prompt,
+                        "user": "",
+                        "provider": self.provider,
+                    }),
                 )
                 .when_id(ASK_KIND, ask_id),
             );
@@ -171,6 +178,7 @@ pub(crate) fn classify_debt_rows(config: &ClassifyConfig) -> Vec<CapabilityRow> 
                 .prompt_override()
                 .unwrap_or(SYSTEM_PROMPT)
                 .to_string(),
+            provider: config.model_id().map(str::to_string),
         }) as Arc<dyn DebtSource>,
     )]
 }
