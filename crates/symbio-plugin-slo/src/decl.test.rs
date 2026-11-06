@@ -19,27 +19,26 @@ use symbio_plugin_api::Seq;
 
 const PRINCIPAL: &str = "session/main";
 
-/// 一条开轮格（`user.message`）：本幕以哪一档跑。**档位的唯一来源。**
-fn dispatch(id: &str, tier: &str, seq: u64, ts: i64) -> Event {
+/// 一轮的派发格（`turn.dispatch`）：本幕以哪一档跑。**档位的唯一来源。**
+///
+/// `root_id` 指向这一轮的开轮事实（`user.message` 的 event id）；本文件里测试把
+/// 第 1 个参数当作**轮的身份**，收束格与它同名，于是配对与生产同构。
+fn dispatch(turn_id: &str, tier: &str, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
-        id,
-        EVENT_USER_MESSAGE,
+        format!("{turn_id}.dispatch"),
+        EVENT_TURN_DISPATCH,
         Entity::Scope,
-        Verb::Opened,
+        Verb::Asserted,
         PRINCIPAL,
     )
     .with_ts(ts)
-    .with_payload(json!({ "text": "问", "tier": tier, "principal": PRINCIPAL }));
+    .with_payload(json!({ "root_id": turn_id, "tier": tier, "principal": PRINCIPAL }));
     e.seq = Some(Seq::new(seq));
     e
 }
 
-/// 开轮格（`user.message`），不带档位。
-fn user_message(id: &str, tier: Option<&str>, seq: u64, ts: i64) -> Event {
-    let payload = match tier {
-        Some(t) => json!({ "text": "问", "tier": t }),
-        None => json!({ "text": "问" }),
-    };
+/// 开轮格（`user.message`）：兜底率的分母 / 跨度的端点。**不再带档位**（`D-282`）。
+fn user_message(id: &str, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
         EVENT_USER_MESSAGE,
@@ -48,7 +47,7 @@ fn user_message(id: &str, tier: Option<&str>, seq: u64, ts: i64) -> Event {
         PRINCIPAL,
     )
     .with_ts(ts)
-    .with_payload(payload);
+    .with_payload(json!({ "text": "问", "id": id }));
     e.seq = Some(Seq::new(seq));
     e
 }
@@ -135,11 +134,12 @@ fn latency_pairs_the_final_with_the_turn_it_names() {
     assert!(rows(&v).iter().all(|r| r["tier"] != json!("reflex")));
 }
 
-/// 档位读开轮格的 `tier`。
+/// 档位读派发格的 `tier`，**不读**开轮格（开轮格不再带它）。
 #[test]
-fn latency_reads_the_tier_from_the_user_message() {
+fn latency_reads_the_tier_from_the_dispatch_row() {
     let events = vec![
-        user_message("u1", Some("fast"), 1, 100),
+        user_message("u1", 1, 100),
+        dispatch("u1", "fast", 1, 100),
         final_reply("a1", "u1", 15, 2, 115),
     ];
     let v = latency(&events, i64::MAX);
@@ -213,8 +213,10 @@ fn latency_merge_unions_samples_instead_of_averaging_percentiles() {
 #[test]
 fn fallback_rate_uses_every_served_turn_as_denominator() {
     let events = vec![
+        user_message("d1", 1, 100),
         dispatch("d1", "deep", 1, 100),
         final_reply("a1", "d1", 10, 2, 110),
+        user_message("d2", 3, 200),
         dispatch("d2", "deep", 3, 200),
         fallback_reply("f2", "d2", 900, 4, 300),
     ];
@@ -232,6 +234,7 @@ fn fallback_rate_uses_every_served_turn_as_denominator() {
 fn fallback_merge_adds_counts_and_recomputes_the_rate() {
     let a = fallback(
         &[
+            user_message("d1", 1, 100),
             dispatch("d1", "deep", 1, 100),
             fallback_reply("f1", "d1", 900, 2, 200),
         ],
@@ -239,10 +242,13 @@ fn fallback_merge_adds_counts_and_recomputes_the_rate() {
     );
     let b = fallback(
         &[
+            user_message("d2", 1, 100),
             dispatch("d2", "deep", 1, 100),
             final_reply("a2", "d2", 10, 2, 110),
+            user_message("d3", 3, 200),
             dispatch("d3", "deep", 3, 200),
             final_reply("a3", "d3", 10, 4, 210),
+            user_message("d4", 5, 300),
             dispatch("d4", "deep", 5, 300),
             final_reply("a4", "d4", 10, 6, 310),
         ],
@@ -259,9 +265,9 @@ fn fallback_merge_adds_counts_and_recomputes_the_rate() {
 #[test]
 fn span_measures_first_to_last_and_respects_as_of() {
     let events = vec![
-        user_message("u1", None, 1, 1_000),
+        user_message("u1", 1, 1_000),
         final_reply("a1", "u1", 10, 2, 1_400),
-        user_message("u2", None, 3, 9_000),
+        user_message("u2", 3, 9_000),
     ];
     assert_eq!(
         span(&events, 1_500)["span_ms"],
@@ -277,17 +283,17 @@ fn span_measures_first_to_last_and_respects_as_of() {
 /// 无样本 ⇒ `median_ms: null`——「实例里没有会话」与「会话时长 0ms」是两件事。
 #[test]
 fn span_merge_skips_single_event_sessions_and_reports_null_when_empty() {
-    let one_event = span(&[user_message("u1", None, 1, 1_000)], i64::MAX);
+    let one_event = span(&[user_message("u1", 1, 1_000)], i64::MAX);
     let short = span(
         &[
-            user_message("u2", None, 1, 1_000),
+            user_message("u2", 1, 1_000),
             final_reply("a2", "u2", 10, 2, 1_200),
         ],
         i64::MAX,
     );
     let long = span(
         &[
-            user_message("u3", None, 1, 1_000),
+            user_message("u3", 1, 1_000),
             final_reply("a3", "u3", 10, 2, 5_000),
         ],
         i64::MAX,
@@ -314,7 +320,7 @@ fn the_views_declare_both_halves_and_read_only_what_they_use() {
         assert!(v.evidence.is_empty(), "读数不替任何事实关门");
         for (fact, field) in v.reads {
             assert!(
-                (*fact, *field) == (EVENT_USER_MESSAGE, "tier"),
+                (*fact, *field) == (EVENT_TURN_DISPATCH, "tier"),
                 "`{}` 读了意外的格：{fact}::{field}",
                 v.name
             );

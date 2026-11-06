@@ -46,6 +46,18 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("session.config", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("task.controlled", (Entity::Control, Verb::Opened)),
     EventDecl::new("turn.branch", (Entity::Scope, Verb::Asserted)),
+    // 幕级派发格（D-223 / D-262 / D-282）：开轮处由会话簿记落，载荷 `tier` /
+    // `budget_ms` / `principal` / `root_id`。它是**档位的唯一来源**，也是 `C5`
+    // 读预算的那一格（`DeclaresBudget`）。没有 `FactDecl`：没有一行以它为前提或出口，
+    // 视图读它走「声明过、无载荷形状」那一档（名字在表上、字段不进网格）。
+    EventDecl::with_roles(
+        "turn.dispatch",
+        (Entity::Scope, Verb::Asserted),
+        &[FactRole::DeclaresBudget],
+    ),
+    // 历史形态：`tier` 曾经随开轮格落（`D-223` 订正前）。新写入不再带它，档位只读
+    // `turn.dispatch`；这里仍保留 `DeclaresBudget` 角色，让**接线前落的历史 WAL**
+    // 还能被 `C5` 读到预算（缺 `budget_ms` 时才回退到 `tier`）。
     EventDecl::host_with_roles(
         "user.message",
         (Entity::Scope, Verb::Opened),

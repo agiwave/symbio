@@ -80,12 +80,13 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：☐ todo 7 · 🟡 doing 15 · done 0 · wont 0（共 22）
+**计数**：☐ todo 8 · 🟡 doing 15 · done 0 · wont 0（共 23）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
+| `T-037-契约读者缺口台账` | 契约读者缺口台账：写方与声明俱全、读方/调用方从未接上的事实（`session.consolidated`、`retire_prefix`、信封 `cost_ms`） | now | arch | — |
 | `T-023-世界端口注册面` | 世界端口注册面：port 族、动态收集、装配期判重与缺席读数 | next | arch | — |
 | `T-024-model端口迁出` | model 端口迁出：provider 由 model 插件注册，loop 只按端口名调用 | next | arch | T-023-世界端口注册面 |
 | `T-025-tool端口迁出` | tool 端口迁出：声明与提供者归 `symbio-plugin-tool`，工具仍由各工具插件执行 | next | arch | T-023-世界端口注册面 |
@@ -141,5 +142,6 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 - [`T-034-旧loop门禁资产下线清单`](034-旧loop门禁资产下线清单.md) 旧 loop 门禁资产下线清单：删 / 撤接线 / 保留改造（doing）
 - [`T-035-e2e实施表`](035-e2e实施表.md) e2e 实施表：91 条逐条断言、插件依赖、引擎绑定判定与实施顺序（doing）
 - [`T-036-债行同族写法台账`](036-债行同族写法台账.md) 债行同族写法台账：`rev().find` 只取最后一条 ask 的复制品与触发条件（todo）
+- [`T-037-契约读者缺口台账`](037-契约读者缺口台账.md) 契约读者缺口台账：写方与声明俱全、读方/调用方从未接上的事实（`session.consolidated`、`retire_prefix`、信封 `cost_ms`）（todo）
 
 <!-- registry:summary end -->

@@ -44,8 +44,14 @@ export default defineCase(
   'T28 读数口 session/stats：出口各列按已知动作钉死期望值，读侧闸随读方收放',
   async () => {
     const llm = await new MockLlm([
-      // 成功轮：正常收束（final ⇒ 进时延样本）
-      { id: 'ok', match: '普通提问', content: '这是正常回答。' },
+      // 成功轮：正常收束（final ⇒ 进时延样本）。
+      //
+      // `chunkDelayMs: 5` 不是为了让断言好过，而是**让「实测耗时」成立**：模型侧的
+      // `cost_ms` 是 `as_millis` 截断，即答的环回往返可能不足 1ms ⇒ 合法地落 0，
+      // 而本用例要断「成功轮有真实耗时」。仓库里同一个前提在
+      // `bound_provider.test.rs` 的 `spawn_mock_after(.., 5ms)` 上已经写过一次：
+      // 「实测耗时必须为正」要成立，前提是真实往返 ≥1ms。
+      { id: 'ok', match: '普通提问', content: '这是正常回答。', chunkDelayMs: 5 },
       // 失败轮：HTTP 500 打穿重试 ⇒ turn 失败 ⇒ 兜底格（I3：失败也是一句话）
       { id: 'boom', match: '触发故障', status: 500, error: 'mock 注入的服务端错误' },
     ]).start();

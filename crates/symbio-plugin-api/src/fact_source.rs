@@ -125,10 +125,17 @@ impl FactSource for MemoryStore<Fact> {
 }
 
 /// 草稿 + 主体 → 入库事件（信封的号与时刻由事实源填）。
+///
+/// `cost_ms` 与号 / 时刻同属**信封**：写方把这次往返的实测耗时放在载荷的
+/// `cost_ms` 字段（那是它唯一能给的值），入库前提到信封。读方（`slo` 的分位数、
+/// 成本台账、`I3` 的预算判据）只认信封字段——载荷里那份是给重建面留的原始读数。
 pub fn draft_into_event(actor: Principal, draft: FactDraft) -> Fact {
     let mut event = Fact::pending(draft.key, draft.kind, draft.entity, draft.verb, actor);
     event.payload = draft.payload;
     event.produced_by = draft.produced_by;
+    if let Some(cost) = event.payload.get("cost_ms").and_then(serde_json::Value::as_u64) {
+        event.cost_ms = cost;
+    }
     event
 }
 

@@ -15,9 +15,12 @@ use crate::convergence::{ComposeCall, SessionStateChange};
 use crate::transcript::publish::append_and_publish;
 use crate::transcript::supplements::merge_supplements;
 use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::LatencyTier;
 use symbio_plugin_api::capability_take_errors;
 use symbio_plugin_api::debt::{session_config_id, session_recall_id};
-use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
+use symbio_plugin_api::events::{
+    EVENT_SESSION_CONFIG, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE,
+};
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::retrieval::{retrieve_all, RetrievalRequest};
 use symbio_plugin_api::DriveEntry;
@@ -96,6 +99,33 @@ impl SessionPlugin {
         let seq = source
             .append(PRINCIPAL_USER.to_string(), draft)
             .map_err(|e| PluginError::InternalError(format!("user.message 落格失败: {e}")))?;
+
+        // 幕级派发格（`D-223` / `D-282`）：`tier` 是档位的**唯一来源**，写侧在开轮处。
+        // 快路（技能命中直接作答）随 `D-318 B2` 整条退场后，本幕没有第二条执行路径——
+        // 档位折自「还能落到别处吗」的答案恒为 `Deep`（`D-262` 的「否则 Deep」一支）。
+        // `root_id` 与收束格的同名字段取同一个值（开轮事实的 event id），SLO 的
+        // `declared_tier` 按它把收束格归回本幕；`budget_ms` 由档位数据面派生，两者
+        // 不许各写一个数（`C5` 读的是这一格）。
+        let tier = LatencyTier::Deep;
+        source
+            .append(
+                PRINCIPAL_MAIN.to_string(),
+                FactDraft {
+                    key: format!("{EVENT_TURN_DISPATCH}:{}", item.id),
+                    kind: EVENT_TURN_DISPATCH.to_string(),
+                    entity: Entity::Scope,
+                    verb: Verb::Asserted,
+                    payload: json!({
+                        "root_id": item.id,
+                        "tier": tier.name(),
+                        "budget_ms": tier.budget_ms(),
+                        "principal": PRINCIPAL_MAIN,
+                    }),
+                    // 溯源指同一轮刚落的 `user.message`（seq 就是它的号）。
+                    produced_by: Some(seq),
+                },
+            )
+            .map_err(|e| PluginError::InternalError(format!("turn.dispatch 落格失败: {e}")))?;
 
         // 轮首装配：能力收集 → `session.config`（系统提示词 + 工具表 + 本轮生效设置）。
         //

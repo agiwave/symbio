@@ -24,7 +24,8 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use symbio_plugin_api::events::{
-    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH,
+    EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::{Entity, Event, LatencyTier, PluginDeclarations, Verb, ViewDecl};
 
@@ -47,9 +48,10 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {
         name: SLO_LATENCY,
         ver: 1,
-        // 档位只读 `user.message` 的 `tier`。`cost_ms` 是**信封**字段，不是载荷，
-        // `reads` 表达不了也不该表达。
-        reads: &[(EVENT_USER_MESSAGE, "tier")],
+        // 档位只读派发格 `turn.dispatch` 的 `tier`（`D-282`：它是档位的唯一来源；
+        // `user.message` 上的 `tier` 是历史形态，新写入不再带它）。`cost_ms` 是**信封**
+        // 字段，不是载荷，`reads` 表达不了也不该表达。
+        reads: &[(EVENT_TURN_DISPATCH, "tier")],
         // 读数不替任何事实关门。
         evidence: &[],
         cost: COST,
@@ -59,7 +61,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {
         name: SLO_FALLBACK,
         ver: 1,
-        reads: &[(EVENT_USER_MESSAGE, "tier")],
+        reads: &[(EVENT_TURN_DISPATCH, "tier")],
         evidence: &[],
         cost: COST,
         eval: fallback,
@@ -77,29 +79,29 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     },
 ];
 
-/// 本轮声明的档位：读 `user.message` 载荷的 `tier`；缺失 / 未知 ⇒ [`UNSPECIFIED`]。
+/// 本轮声明的档位：读派发格（`turn.dispatch`，`turn × asserted`）载荷的 `tier`；
+/// 缺失 / 未知 ⇒ [`UNSPECIFIED`]。
 ///
-/// `root_id` 是**触发这一轮的事实身份**（`user.message` 的 event id，也就是模型侧
-/// `root_id` 载荷的取值）：配对按事实 id，不按任何轮号。
+/// `root_id` 是**触发这一轮的事实身份**（`user.message` 的 event id，也就是派发格与
+/// 收束格里 `root_id` 的取值）：配对按事实 id，不按任何轮号。
 ///
 /// `before_seq`：
 /// - `Some(b)` ⇒ 只认 seq `< b` 的声明（兜底 / 收束事件要归到**它之前**那一幕的档位）；
-/// - `None` ⇒ 不限 seq，取**最早**一条开轮格——开轮事件的分母按「这一轮以哪一档开局」归位
+/// - `None` ⇒ 不限 seq，取**最早**一条派发格——开轮事件的分母按「这一轮以哪一档开局」归位
 ///   （续写幕可以换档，那是另一幕的事实）。
 fn declared_tier(events: &[Event], turn_id: &str, before_seq: Option<u64>) -> String {
     let before = |e: &Event| before_seq.is_none_or(|b| e.seq.is_some_and(|s| s.value() < b));
     events
         .iter()
         .rev()
-        .find(|u| {
-            u.entity == Entity::Scope
-                && u.verb == Verb::Opened
-                && u.kind.as_str() == EVENT_USER_MESSAGE
-                && (u.event_id == turn_id
-                    || u.payload.get("id").and_then(Value::as_str) == Some(turn_id))
-                && before(u)
+        .find(|d| {
+            d.entity == Entity::Scope
+                && d.verb == Verb::Asserted
+                && d.kind.as_str() == EVENT_TURN_DISPATCH
+                && d.payload.get("root_id").and_then(Value::as_str) == Some(turn_id)
+                && before(d)
         })
-        .and_then(|u| u.payload.get("tier").and_then(Value::as_str))
+        .and_then(|d| d.payload.get("tier").and_then(Value::as_str))
         .and_then(LatencyTier::from_name)
         .map(|t| t.name().to_string())
         .unwrap_or_else(|| UNSPECIFIED.to_string())
@@ -215,7 +217,7 @@ fn rate(turns: u64, fallbacks: u64) -> f64 {
 /// 兜底率（单片）。
 ///
 /// - **turn** = `user.message`（`turn × opened`）——用户消息开启一轮；
-/// - **档位** = `user.message` 载荷的 `tier`；
+/// - **档位** = 该轮派发格（`turn.dispatch`）的 `tier`；
 /// - **兜底** = `chat.assistant.fallback`（`turn × closed`）——生成失败也必须有输出，
 ///   fallback 落在哪档就是哪档的兜底。
 fn fallback(events: &[Event], now: i64) -> Value {
