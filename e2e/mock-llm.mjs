@@ -51,6 +51,9 @@
 //! }
 //! ```
 //! 匹配规则：按数组顺序，`match` 是对**最后一条 user 消息**的子串匹配；
+//! `matchSystem` 是对**请求的 system 文本**的子串匹配，且**优先于**只靠 `match`
+//! 的场景——一次性问答（`model.assist`）与主请求的末条 user 常常相同，只有 system
+//! 能区分两者。两者都写时必须同时命中。
 //! 不带 `match` 的场景可设 `once: true`（只用一次，适合「第 N 轮调工具」的编排）
 //! 或 `times: N`（**最多被选中 N 次**，`once` 就是 `times: 1` 的别名）。
 //! `finishReason`：**原样覆盖**终止帧里的结束原因（缺省按有没有工具调用推 `stop` /
@@ -176,7 +179,7 @@ function resolveFormat(pathname) {
  * 协议下**恒判 false** ⇒ `afterTool` 场景永不命中 ⇒ 工具结果轮落到普通池 ⇒ 无限
  * 工具循环。症状是用例撞超时而不是断言红，离真因隔很远。
  *
- * @returns {{ userText: string, isToolResultTurn: boolean }}
+ * @returns {{ userText: string, systemText: string, isToolResultTurn: boolean }}
  */
 function readTurn(format, body) {
   const arr = (x) => (Array.isArray(x) ? x : []);
@@ -187,7 +190,11 @@ function readTurn(format, body) {
       .filter((c) => c.type === 'input_text')
       .map((c) => c.text ?? '')
       .join('');
-    return { userText, isToolResultTurn: items[items.length - 1]?.type === 'function_call_output' };
+    return {
+      userText,
+      systemText: String(body.instructions ?? ''),
+      isToolResultTurn: items[items.length - 1]?.type === 'function_call_output',
+    };
   }
   if (format === 'gemini_api') {
     const contents = arr(body.contents);
@@ -196,8 +203,16 @@ function readTurn(format, body) {
       .filter((p) => typeof p.text === 'string')
       .map((p) => p.text)
       .join('');
+    const systemText = arr(body.systemInstruction?.parts)
+      .filter((p) => typeof p.text === 'string')
+      .map((p) => p.text)
+      .join('');
     const last = contents[contents.length - 1];
-    return { userText, isToolResultTurn: arr(last?.parts).some((p) => p.functionResponse != null) };
+    return {
+      userText,
+      systemText,
+      isToolResultTurn: arr(last?.parts).some((p) => p.functionResponse != null),
+    };
   }
   const msgs = arr(body.messages);
   const last = msgs[msgs.length - 1];
@@ -207,9 +222,15 @@ function readTurn(format, body) {
       .filter((c) => c.type === 'text')
       .map((c) => c.text ?? '')
       .join('');
+    const systemText =
+      typeof body.system === 'string'
+        ? body.system
+        : arr(body.system)
+            .map((p) => p.text ?? '')
+            .join('');
     const isToolResultTurn =
       last?.role === 'user' && arr(last.content).some((c) => c.type === 'tool_result');
-    return { userText, isToolResultTurn };
+    return { userText, systemText, isToolResultTurn };
   }
   // openai_chat（也是缺省）：末条 role=user 的 content；工具结果轮 = 末条 role=tool。
   const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
@@ -217,7 +238,16 @@ function readTurn(format, body) {
     typeof lastUser?.content === 'string'
       ? lastUser.content
       : arr(lastUser?.content).map((p) => p.text ?? '').join('');
-  return { userText, isToolResultTurn: last?.role === 'tool' };
+  // system 段可能被协议层并成首条，也可能与其余段并列：全收。
+  const systemText = msgs
+    .filter((m) => m.role === 'system')
+    .map((m) =>
+      typeof m.content === 'string'
+        ? m.content
+        : arr(m.content).map((p) => p.text ?? '').join(''),
+    )
+    .join('\n');
+  return { userText, systemText, isToolResultTurn: last?.role === 'tool' };
 }
 
 /** 逻辑请求指纹：场景 id + 请求体（重发复用同一份字节 ⇒ 指纹相同）。 */
@@ -239,7 +269,7 @@ function pickScenario(format, body) {
   // 用户文本与「是否工具结果轮」都**按格式**读（四协议承载形状不同，见 `readTurn`）。
   // 误判的两端都栽过：判窄 ⇒ `afterTool` 永不命中 ⇒ 无限工具循环（撞超时，不是
   // 断言红）；判宽 ⇒ 新一轮的第一次请求被误认成工具结果轮 ⇒ 根本不请求工具。
-  const { userText, isToolResultTurn } = readTurn(format, body);
+  const { userText, systemText, isToolResultTurn } = readTurn(format, body);
 
   // ⚠️ `afterTool` 是**优先**而不是**硬过滤**。
   //
@@ -258,12 +288,28 @@ function pickScenario(format, body) {
   // 不被前一轮的普通场景抢走（否则故障静默不发生、那一轮假成功、CLI 退出 0，而症状出现在
   // **被测系统之外**，极易误诊成产品缺陷）。
   //
+  // `matchSystem` 是**更高优先**的匹配：一次性问答端口（`model.assist` 的摘要）与主
+  // 请求的末条 user 常常逐字相同（同一条对话线投影），只有 system 能区分两者。声明了
+  // `matchSystem` 的场景不参与位置比较——它在 system 里命中就是本次选中的那一条。
+  //
   // `match` 缺失的规则不参与位置比较（位置对它没有意义），只在还没有任何位置命中时兜底。
   const choose = (candidates) => {
+    let sysBest = null;
+    for (const s of candidates) {
+      if (usageCap(s) <= (useCounts.get(s.id) ?? 0)) continue;
+      if (!s.matchSystem) continue;
+      if (systemText.lastIndexOf(s.matchSystem) < 0) continue;
+      if (s.match && userText.lastIndexOf(s.match) < 0) continue;
+      // 多条同时声明时取**先声明的**（system 里没有「后一条更具体」的位置可比较，
+      // 顺序就是唯一判据）。
+      sysBest ??= s;
+    }
+    if (sysBest !== null) return sysBest;
     let best = null;
     let bestAt = -1;
     for (const s of candidates) {
       if (usageCap(s) <= (useCounts.get(s.id) ?? 0)) continue;
+      if (s.matchSystem) continue;
       if (s.match) {
         const at = userText.lastIndexOf(s.match);
         if (at < 0) continue;

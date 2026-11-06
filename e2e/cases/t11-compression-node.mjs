@@ -16,8 +16,8 @@ import './_selfrun.mjs';
 // ## 触发参数
 //
 // mock 恒报 `prompt_tokens: 64`（见 `mock-llm.mjs`），上限取 80 ⇒ 64 ≥ 0.7 × 80，
-// 每轮越线（t8/t18/t63 同一口径）。摘要由 `model.assist` 取：该端口把整段转写作为
-// 最后一条 user 发来，以「助手：…」收尾，故 mock 用这个标记命中摘要场景。
+// 每轮越线（t8/t18/t63 同一口径）。摘要由 `model.assist` 取：该端口的对话线与主请求
+// 同形，只能按 system（compact 插件的摘要指令）命中摘要场景。
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -82,7 +82,7 @@ const walEvents = (homedir, sid) => {
 
 export default defineCase('T11 压缩的现行形态：session.consolidated 落格 + 重建收敛 + 无 compression 帧', async () => {
   const llm = await new MockLlm([
-    { id: 'snapshot', match: '助手：', content: SNAPSHOT_XML },
+    { id: 'snapshot', matchSystem: '你是上下文压缩器', content: SNAPSHOT_XML },
     { id: 'big', match: '轮问题', content: REPLY },
   ]).start();
   const GATEWAY_PORT = nextPort();

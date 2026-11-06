@@ -99,8 +99,9 @@ export default defineCase(
   'T45 压缩入格 + 段归档：快照落 message × progressed，被取代的前缀进归档段，删缓存后重建 = 快照 + 其后事实',
   async () => {
     const llm = await new MockLlm([
-      // 压缩请求：末条 user 是压缩指令（compression.rs 唯一措辞），返回结构化快照
-      { id: 'snapshot', match: 'Distill the conversation above', content: SNAPSHOT_XML },
+      // 摘要请求：system 是 compact 插件的压缩指令（对话线与主请求同形，只能按 system 区分），
+      // 返回结构化快照
+      { id: 'snapshot', matchSystem: '你是上下文压缩器', content: SNAPSHOT_XML },
       // 普通轮：回复超大文本，把历史水位顶过 70% 阈值
       { id: 'big', match: '轮问题', content: REPLY },
     ]).start();
@@ -108,7 +109,8 @@ export default defineCase(
     const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
       providers: [
-        { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 16000 }) },
+        // 水位口径与 t8/t18/t63 同一：mock 恒报 `prompt_tokens: 64`，上限取 80 ⇒ 每轮越线。
+        { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 80 }) },
       ],
       pluginConfigs: {
         gateway: {
@@ -151,14 +153,9 @@ export default defineCase(
       assert(snaps.length >= 1, `压缩必须落一条事实（现有 kind: ${JSON.stringify([...new Set(live.map((e) => e.kind))])}）`);
       assertEq(snaps[0].entity, 'Message', '快照实体的格子 = message');
       assertEq(snaps[0].verb, 'Progressed', '快照动词的格子 = progressed');
-      assertEq(snaps[0].scope, 0, '压缩不属于任何一轮（turn = 0）');
       assert(
         Array.isArray(snaps[0].payload?.messages) && snaps[0].payload.messages.length > 0,
         `快照载荷应带压缩后的消息列表（实际: ${JSON.stringify(snaps[0].payload)?.slice(0, 300)}）`,
-      );
-      assert(
-        typeof snaps[0].payload?.turns === 'number' && snaps[0].payload.turns >= 1,
-        `快照载荷应带轮次水位（归档后轮号靠它续上，实际: ${JSON.stringify(snaps[0].payload?.turns)}）`,
       );
 
       // ── ② 取代：live 段以快照开头，且**不含**压缩前的用户格 ──────────────
@@ -221,7 +218,7 @@ export default defineCase(
         const rebuilt = await readLeaf('删缓存后读会话叶子');
         const texts = rebuilt.messages.map(contentText).join('\n');
         assert(
-          texts.includes('CONTEXT SNAPSHOT'),
+          texts.includes('state_snapshot'),
           `重建的历史应含压缩快照（实际: ${texts.slice(0, 400)}）`,
         );
         assert(

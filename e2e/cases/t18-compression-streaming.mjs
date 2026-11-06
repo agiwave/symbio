@@ -7,7 +7,7 @@ import './_selfrun.mjs';
 // 压缩现在是两行债（D-336）：`compact-summarize`（端口 `model.assist`）取摘要，
 // `compact-write`（端口 `compact`）落 `session.consolidated`。故障注入点因此必须是
 // **`model.assist` 那次问答**——注在「压缩请求」上是注空（新形态没有独立的压缩请求，
-// 摘要走 `model.assist`，最后一条 user 是整段转写、以「助手：…」收尾）。
+// 摘要走 `model.assist`，与主请求同形，按 system 里的压缩指令识别）。
 //
 // 失败路径的硬不变式：
 //
@@ -69,19 +69,19 @@ const walEvents = (homedir, sid) => {
     .map((line) => JSON.parse(line));
 };
 
-/** 一条请求的最后一条 user 正文（摘要请求的特征是整段转写，带「用户：」前缀）。 */
-const lastUserText = (q) => {
-  const users = (q.body?.messages ?? []).filter((m) => m.role === 'user');
-  return String(users[users.length - 1]?.content ?? '');
+/** 一条请求的 system 正文（摘要请求的特征 = compact 插件的摘要指令）。 */
+const systemText = (q) => {
+  const sys = (q.body?.messages ?? []).find((m) => m.role === 'system');
+  return String(sys?.content ?? '');
 };
 
 export default defineCase('T18 压缩失败纪律：model.assist 失败不落事实、不吞消息', async () => {
   const llm = await new MockLlm([
-    // 静态注入：这段时间里**每一次**摘要问答都失败。命中标记是转写形态
-    // （`model.assist` 把整段转写作为最后一条 user 发来，以「助手：」收尾）。
+    // 静态注入：这段时间里**每一次**摘要问答都失败。命中标记是 system（`model.assist`
+    // 的对话线与主请求同形，只有摘要指令能把它与主请求区分开）。
     {
       id: 'snapshot',
-      match: '助手：',
+      matchSystem: '你是上下文压缩器',
       status: 500,
       retryAfterSec: 0,
       error: 'mock 注入的摘要服务故障',
@@ -118,12 +118,12 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
     });
     assertEq(r.code, 0, `CLI 退出码（stderr 尾部: ${r.stderr.slice(-600)}）`);
 
-    // A：注入命中对象真的是 `model.assist`（摘要请求的最后一条 user 是转写形态）
+    // A：注入命中对象真的是 `model.assist`（摘要请求的 system 是压缩指令）
     const reqs = await llm.requests();
-    const summaryReqs = reqs.filter((q) => lastUserText(q).includes('用户：'));
+    const summaryReqs = reqs.filter((q) => systemText(q).includes('你是上下文压缩器'));
     assert(
       summaryReqs.length >= 1,
-      `mock 应收到摘要问答（model.assist 的 user 是整段转写）；实际请求 ${reqs.length} 条，末条 user: ${JSON.stringify(lastUserText(reqs[reqs.length - 1] ?? {}).slice(0, 40))}`,
+      `mock 应收到摘要问答（model.assist 的 system 是压缩指令）；实际请求 ${reqs.length} 条，末条 system: ${JSON.stringify(systemText(reqs[reqs.length - 1] ?? {}).slice(0, 40))}`,
     );
 
     // B：摘要失败 ⇒ 一条压缩事实都不落

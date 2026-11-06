@@ -17,7 +17,7 @@ HTTP/SSE（LLM）、stdio/JSON-RPC（MCP）、磁盘（homedir）。
 
 | 文件 | 作用 |
 |---|---|
-| `mock-llm.mjs` | Mock LLM（**四协议线格式**：`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`，按请求路径分派——`resolveFormat`）：流式、场景编排（`match`/`afterTool`/`once`/`chunks`/故障注入，四格式共用一套）、请求记录 `GET /_requests`（含 `format` 字段） |
+| `mock-llm.mjs` | Mock LLM（**四协议线格式**：`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`，按请求路径分派——`resolveFormat`）：流式、场景编排（`match`/`matchSystem`/`afterTool`/`once`/`chunks`/故障注入，四格式共用一套）、请求记录 `GET /_requests`（含 `format` 字段） |
 | `mock-mcp.mjs` | stdio JSON-RPC Mock MCP server：规范握手、可编排工具与错误/断连、调用记录 `--record` |
 | `mock-http.mjs` | **本地 HTTP 靶子**（`web_fetch` / `http_request` 的对面那一端）：确定性端点 `/page` `/json` `/big` `/slow` `/missing` `/echo`，正文含每次启动随机生成的标记，请求留痕 `GET /_requests`。存在的理由是**真外网在 CI 上不存在、内容会变、对方会限流**——那三类失败都不在被测系统里，却会被记成产品缺陷。T65 起 |
 | `mock-actions.json` | mock-mcp 行为脚本示例（T6：`add` 返回 JSON-RPC 错误） |
@@ -85,6 +85,7 @@ E2E_PROFILE=real node e2e/run-tests.mjs # 真实 provider 对照：等待沿用�
 | 字段 | 语义 |
 |---|---|
 | `match` | 对最后一条 user 消息做子串匹配 |
+| `matchSystem` | 对请求的 **system 正文**做子串匹配，且**优先于**只靠 `match` 的场景（两者同时写时必须同时命中）。一次性问答端口（`model.assist` 的摘要）与主请求的对话线同形、末条 user 逐字相同，只有 system 能区分两者 |
 | `afterTool` | 只匹配「工具结果回灌轮」（最后一条消息 role=tool）；**不带它**的场景只匹配用户轮，防止工具循环 |
 | `once` | 场景只消费一次（适合「第 N 轮才调工具」的编排） |
 | `times: N` | 场景**至多被选中 N 次**（`once` 就是 `times: 1`）。给「同一轮里连调 N 次工具」用：`{ afterTool: true, times: 24, toolCalls: [...] }` 耗尽后，池子里**下一条**同族场景接上——不带 `match` 的候选是**先声明的先用**，所以循环要排在收束那条之前 |

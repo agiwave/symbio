@@ -10,7 +10,7 @@ import './_selfrun.mjs';
 //
 // | # | 契约 | 判据 |
 // |---|---|---|
-// | A | 压缩窗口真的出现过 | mock 收到摘要问答（最后一条 user 是整段转写，带「用户：」前缀） |
+// | A | 压缩窗口真的出现过 | mock 收到摘要问答（按 system 里的压缩指令识别——对话线与主请求同形） |
 // | B | 插话被消费，且排在摘要之后 | 某轮**主请求**的 `messages` 里出现插话正文（`role=user`、正文以插话开头），且该请求下标 > 摘要请求下标 |
 // | C | 压缩真的完成 | 事实源里落了一条 `session.consolidated`（首节点 notice + style_tag=compression） |
 // | D | 插话不丢 | 事实源里恰有一条 `user.message` 正文 = 插话（压缩合并它、但不抹掉它） |
@@ -82,16 +82,16 @@ const walEvents = (homedir, sid) => {
     .map((line) => JSON.parse(line));
 };
 
-/** 一条请求的最后一条 user 正文。 */
-const lastUserText = (q) => {
-  const users = (q.body?.messages ?? []).filter((m) => m.role === 'user');
-  return String(users[users.length - 1]?.content ?? '');
+/** 一条请求的 system 正文（摘要请求 = compact 插件的压缩指令）。 */
+const systemTextOf = (q) => {
+  const sys = (q.body?.messages ?? []).find((m) => m.role === 'system');
+  return String(sys?.content ?? '');
 };
 
 /** 主请求的 `messages` 里是否**真带**插话正文。
  *
- * 摘要请求的 messages 里也含插话（它在整段转写里、前缀「用户：」），那不算送进模型；
- * 主请求把发言原样作为一条 `role=user` 消息送上，正文以插话开头。
+ * 摘要请求的对话线投影也含用户发言，因此两个请求都可能带插话；判据要的是「最早出现
+ * 插话的那条请求下标」，即承载它被消费的那一轮主请求。
  */
 const mainRequestHasInterject = (q) =>
   (q.body?.messages ?? []).some(
@@ -105,7 +105,7 @@ export default defineCase(
     const llm = await new MockLlm([
       {
         id: 'snapshot',
-        match: '助手：',
+        matchSystem: '你是上下文压缩器',
         chunks: SNAPSHOT,
         chunkDelayMs: 500,
       },
@@ -142,9 +142,9 @@ export default defineCase(
     });
     let rt = null;
 
-    /** 摘要问答是否已到达（压缩真的开始了；`model.assist` 的 user 是整段转写） */
+    /** 摘要问答是否已到达（压缩真的开始了；`model.assist` 的 system 是压缩指令） */
     const hasSummaryRequest = async () =>
-      (await llm.requests()).some((q) => lastUserText(q).includes('用户：'));
+      (await llm.requests()).some((q) => systemTextOf(q).includes('你是上下文压缩器'));
 
     try {
       await cli.waitGatewayReady();
@@ -220,9 +220,9 @@ export default defineCase(
 
       // ── ⑤ 判据：插话被消费，且消费发生在摘要问答**之后**（排队语义）──────
       // 光有下标序 + 事实条数会漏「收进去了但没送进模型」：这里断言**主请求的
-      // messages 真带插话正文**（摘要请求里那段转写不算——它前缀是「用户：」）。
+      // messages 真带插话正文**（摘要请求的对话线里也会有它，但那条的下标本就在前）。
       const reqs = await llm.requests();
-      const summaryAt = reqs.findIndex((q) => lastUserText(q).includes('用户：'));
+      const summaryAt = reqs.findIndex((q) => systemTextOf(q).includes('你是上下文压缩器'));
       assert(summaryAt >= 0, '摘要问答应在请求记录里');
       const interjectAt = reqs.findIndex(mainRequestHasInterject);
       assert(

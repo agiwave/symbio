@@ -82,10 +82,9 @@ impl SessionPlugin {
         // 作用域要**随轮进执行 ctx**（D-153）：收集器把它挂在**本轮** ctx 上，而工具
         // 执行跑在驱动新建的 ctx 里。由事实源随驱动目标带过去（`set_agent_scope`），
         // 工具执行体只读 `AGENT_PERMS`，不重新解析 manifest。
-        self.get_store().await?.set_agent_scope(
-            session_id,
-            symbio_sdk::agent::agent_perms_of(ctx.as_ref()),
-        );
+        self.get_store()
+            .await?
+            .set_agent_scope(session_id, symbio_sdk::agent::agent_perms_of(ctx.as_ref()));
         let system_prompt = symbio_sdk::capability::capability_prompts(&*manager)
             .await
             .into_iter()

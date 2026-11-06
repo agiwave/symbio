@@ -123,11 +123,7 @@ impl FactSource for SessionFactSource {
                     risk_level: self.params.risk_level.clone(),
                     provider_id: self.params.provider_id.clone(),
                     // 作用域由轮装配发布（见字段文档）；这里只取当前值，不解析。
-                    agent_scope: self
-                        .agent_scope
-                        .read()
-                        .ok()
-                        .and_then(|scope| scope.clone()),
+                    agent_scope: self.agent_scope.read().ok().and_then(|scope| scope.clone()),
                     facts,
                     sink: self.sink.clone(),
                 };

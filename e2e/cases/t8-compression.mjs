@@ -10,7 +10,8 @@ import './_selfrun.mjs';
 //
 // ## 压缩的现行形态
 //
-// - 摘要由 `model.assist` 端口取（system = compact 插件的摘要指令，user = 整段转写）；
+// - 摘要由 `model.assist` 端口取（system = compact 插件的摘要指令，正文 = 按角色投影
+//   的整段对话线）；
 // - 结果由 `compact` 端口落 `session.consolidated`，载荷 `messages` =
 //   `Notice`（`meta.style_tag = compression`，正文即摘要）+ 本轮终答；
 // - 生产读出口（`vdfs/read` 会话叶 = 前端 `loadMessages` 同一出口）从这份快照开始
@@ -79,9 +80,9 @@ const walEvents = (homedir, sid) => {
 
 export default defineCase('T8 上下文压缩：水位触发 session.consolidated，重建历史归并', async () => {
   const llm = await new MockLlm([
-    // 摘要请求（`model.assist`）：最后一条 user 是整段转写，以「助手：…」收尾；
-    // 主请求的最后一条 user 只是「第N轮问题」，不会命中本场景。
-    { id: 'snapshot', match: '助手：', content: SNAPSHOT_XML },
+    // 摘要请求（`model.assist`）：对话线与主请求同形（末条 user 也是「第N轮问题」），
+    // 只有 system（compact 插件的摘要指令）能把它与主请求分开。
+    { id: 'snapshot', matchSystem: '你是上下文压缩器', content: SNAPSHOT_XML },
     // 普通轮：回复超大文本，把（mock 固定回报的）水位顶过 70% 阈值
     { id: 'big', match: '轮问题', content: REPLY },
   ]).start();

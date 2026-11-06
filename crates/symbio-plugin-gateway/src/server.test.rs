@@ -292,6 +292,16 @@ fn http_response_declares_length_and_cors() {
     assert!(text.ends_with("{\"ok\":true}"));
 }
 
+/// 400 错误体必须**始终是合法 JSON**：错误文案里带引号（分派失败的原样消息，如
+/// `动作 "abort" 不存在`）时，手拼的 `{"error":"…"}` 会闭合字符串、让客户端
+/// `JSON.parse` 失败（实测 `body=null`）。
+#[test]
+fn error_body_is_valid_json_when_the_text_contains_quotes() {
+    let body = error_body("动作 \"abort\" 不存在");
+    let v: serde_json::Value = serde_json::from_slice(&body).expect("400 错误体应是合法 JSON");
+    assert_eq!(v["error"], "动作 \"abort\" 不存在");
+}
+
 // ---- 请求解析与上限闸门 ----
 
 #[tokio::test]

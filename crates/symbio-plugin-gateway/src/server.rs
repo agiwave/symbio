@@ -282,6 +282,14 @@ fn check_auth(token: &str, req: &HttpRequest) -> bool {
         .unwrap_or(false)
 }
 
+/// 400 错误体。**由 `serde_json` 转义**：错误文案会带动作名与引号（如
+/// `动作 "abort" 不存在`），手拼字符串会产出非法 JSON，客户端只能拿到 `body=null`。
+fn error_body(error: &str) -> Vec<u8> {
+    serde_json::json!({ "error": error })
+        .to_string()
+        .into_bytes()
+}
+
 /// 连接上限：`0` 按 `1` 处理（等于关掉服务，不该由默认值的意外产生），上限钳到
 /// [`MAX_CONNECTION_CAP`]（避免手改配置把 `Semaphore::new` 推进 panic）。
 fn connection_cap(configured: usize) -> usize {
@@ -615,7 +623,7 @@ async fn handle_conn(
                 if let Some(t) = &ticket {
                     t.release();
                 }
-                let b = format!("{{\"error\":\"{e}\"}}").into_bytes();
+                let b = error_body(&e);
                 let _ = stream
                     .write_all(&http_response(
                         400,
