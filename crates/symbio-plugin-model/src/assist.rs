@@ -8,7 +8,9 @@
 //! ## 载荷
 //!
 //! [`AssistRequest`]：`system`（提问方指令）+ `user`（正文）。`user` 为空时从事实读面
-//! 拼本轮转写（用户消息 + 助手终答）——载荷只带身份，正文不进载荷。
+//! **按角色投影**本轮对话线（用户发言 / 助手终答各一条消息节点，交给 provider 的
+//! `flatten_chat_messages` 展平——与主线同一条投影，不在这里拼「用户：…」正文）——
+//! 载荷只带身份，正文不进载荷。
 //!
 //! ## 应答
 //!
@@ -126,29 +128,29 @@ impl PortExecutor for AssistExecutor {
             .unwrap_or_default()
             .to_string();
 
-        let user = if request.user.trim().is_empty() {
+        // 对话线投影：一条事实一条节点，角色由事实给；正文原样交出，由 provider 侧的
+        // `flatten_chat_messages` 折成协议消息。这里**不再拼**「用户：…助手：…」——
+        // 那会造出第二个投影器，请求形状与主线漂移（t61 / LC-007）。
+        let wire = if request.user.trim().is_empty() {
             let facts = exec
                 .reader
                 .as_ref()
                 .map(|reader| reader.facts())
                 .unwrap_or_default();
-            transcript(&facts)
+            transcript_nodes(&facts)
         } else {
-            request.user.clone()
+            // 身份写 `principal`（D-147 / S-014）：`role` 只是存量反序列化落点。
+            vec![ChatNode {
+                id: llm_short_id(),
+                principal: Some(Principal::new(PrincipalKind::Person, "person/local")),
+                content: Some(MessageContent::Text(request.user.clone())),
+                ..Default::default()
+            }]
         };
-        if user.trim().is_empty() {
+        // 一条消息、无工具表、静默出口：问答不参与对话轮，也不往展示面写帧。
+        if wire.is_empty() {
             return PortOutcome::ok();
         }
-
-        // 一条消息、无工具表、静默出口：问答不参与对话轮，也不往展示面写帧。
-        // 身份写 `principal`（`Person` = 用户发言）：`role` 只是存量反序列化落点，
-        // 生产构造点一律写主体，读侧 `node_role()` 以主体为先（D-147 / S-014）。
-        let wire = vec![ChatNode {
-            id: llm_short_id(),
-            principal: Some(Principal::new(PrincipalKind::Person, "person/local")),
-            content: Some(MessageContent::Text(user)),
-            ..Default::default()
-        }];
         let env = ExecEnv::new(ExecEventSink::silent(), exec.abort.clone());
         let started = std::time::Instant::now();
         // 能力方带进来的偏好优先；没带 / 取不到 ⇒ 会话选定（这一个端口实例的 active）。
@@ -192,14 +194,21 @@ impl PortExecutor for AssistExecutor {
     }
 }
 
-/// 本轮转写：用户发言 + 助手终答，按事实顺序拼成一问一答的正文。
-fn transcript(facts: &[PortFact]) -> String {
-    let mut out = String::new();
+/// 本轮对话线：用户发言 / 助手终答各自一条**带主体**的消息节点，按事实顺序。
+///
+/// 主体族决定读侧角色（`Person → user`、`Agent → assistant`）：role 是请求形状的
+/// 一部分（对话面判据 t61 数的是 `role == user` 的条数），所以由事实种类决定，
+/// 不靠正文前缀表达，也不直写存量 `role` 格（S-014）。
+fn transcript_nodes(facts: &[PortFact]) -> Vec<ChatNode> {
+    let mut nodes = Vec::new();
     for fact in facts {
-        let (role, text) = match fact.kind.as_str() {
-            EVENT_USER_MESSAGE => ("用户", fact.payload.get("text")),
+        let (principal, text) = match fact.kind.as_str() {
+            EVENT_USER_MESSAGE => (
+                Principal::new(PrincipalKind::Person, "person/local"),
+                fact.payload.get("text"),
+            ),
             EVENT_CHAT_ASSISTANT_FINAL => (
-                "助手",
+                Principal::new(PrincipalKind::Agent, "session/main"),
                 fact.payload
                     .get("text")
                     .or_else(|| fact.payload.get("answer")),
@@ -212,12 +221,14 @@ fn transcript(facts: &[PortFact]) -> String {
         if text.trim().is_empty() {
             continue;
         }
-        out.push_str(role);
-        out.push('：');
-        out.push_str(text.trim());
-        out.push('\n');
+        nodes.push(ChatNode {
+            id: llm_short_id(),
+            principal: Some(principal),
+            content: Some(MessageContent::Text(text.trim().to_string())),
+            ..Default::default()
+        });
     }
-    out
+    nodes
 }
 
 #[cfg(test)]
