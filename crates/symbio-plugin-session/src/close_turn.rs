@@ -8,6 +8,7 @@
 //! （`run` 返回后才落格），因此只承诺「本条依赖的输入是终答之前已落的事实」。
 
 use serde_json::{json, Value};
+use symbio_plugin_api::context::{RecallFacts, RecallLine};
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
@@ -16,7 +17,9 @@ use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep};
 use symbio_plugin_api::settle::{contributors, SettleFace, Settling};
 use symbio_plugin_api::{Entity, Verb};
 
-use crate::declarations::{EVENT_SESSION_SETTLED, OWNER, SESSION_CLOSE_TURN};
+use crate::declarations::{
+    EVENT_SESSION_RECALL, EVENT_SESSION_SETTLED, OWNER, SESSION_CLOSE_TURN,
+};
 
 pub(crate) struct CloseTurn;
 
@@ -62,6 +65,36 @@ impl RowHandler for CloseTurn {
                 .is_some_and(|seq| seq >= user_seq)
                 && matches!(e.kind.as_str(), EVENT_TOOL_REQUESTED | EVENT_ARTIFACT_ADDED)
         });
+        // 本轮开口时的召回读数（`session.recall`，写方是同轮的 `append_recall`）。
+        // 收束贡献里有两类消费者：语义记忆记「本轮用过什么」，技能记账按真实命中
+        // 写 `memory.calibrated`。**读的是本轮那一格**（`produced_by = 开口格 seq`），
+        // 不是「最近一格」——收束与召回必须同属一轮，否则账目会记到别轮头上。
+        let recall_reading = req.history.iter().rev().find(|e| {
+            e.kind == EVENT_SESSION_RECALL && e.produced_by == Some(user_seq)
+        });
+        let recall_lines: Vec<RecallLine<'_>> = recall_reading
+            .and_then(|e| e.payload.get("entries").and_then(Value::as_array))
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| {
+                        Some(RecallLine {
+                            seq: entry.get("seq")?.as_u64()?,
+                            content: entry.get("content")?.as_str()?,
+                            tag: entry.get("tag")?.as_str()?,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let recall = recall_reading.map(|e| RecallFacts {
+            degraded: e
+                .payload
+                .get("degraded")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            lines: &recall_lines,
+        });
         let at = Settling {
             face: if generated {
                 SettleFace::Generated
@@ -74,7 +107,7 @@ impl RowHandler for CloseTurn {
             anchor: req.anchor,
             user_text,
             response,
-            recall: None,
+            recall: recall.as_ref(),
             history: req.history,
         };
 

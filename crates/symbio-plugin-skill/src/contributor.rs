@@ -25,13 +25,13 @@
 //!
 //! 溯源锚是本轮开口格（`user_seq`）：技能**必带溯源**（I2 的「技能溯源 100%」）。
 
-use serde_json::json;
+use serde_json::{json, Value};
 use symbio_plugin_api::events::{EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG};
 use symbio_plugin_api::{
     truncate_chars, Contribution, Contributor, Entity, Event, FactDraft, Settling, Verb,
 };
 
-use super::decl::{COMPILE_LIMIT, OWNER, SKILL_TAG};
+use super::decl::{COMPILE_LIMIT, EVENT_MEMORY_CALIBRATED, OWNER, SKILL_TAG};
 
 pub(crate) struct SkillCompile;
 
@@ -83,6 +83,69 @@ impl Contributor for SkillCompile {
 
 // 链接期提交：宿主按 `(prio, owner)` 询问。
 symbio_plugin_api::submit_contributor!(SkillCompile);
+
+/// 收束贡献：技能**校准账** —— 本轮真实召回到的技能各记一笔 `memory.calibrated`。
+///
+/// ## 账只能从真实召回长出来
+///
+/// 输入是收束值里的 `at.recall`（本轮开口格的 `session.recall` 读数），不是
+/// 「技能表里有哪些」。一条技能从没进过请求包却记一次使用，会让 `uses` 涨而
+/// `fallbacks` 不涨——置信度被凭空抬高，回退机制失效（见 `decl::calibration_ledger`
+/// 的同一句判据）。所以这里只认**这轮召回条目里** `tag:"skill"` 的那些行。
+///
+/// `skill_id` 从被召回的**源事件**读：召回条目只带 `{seq, content, tag}`，归属它的
+/// 那条 `memory.encoded` 才是 `skill_id` 的产地。`fallback` 恒 `false`：被回退的技能
+/// 已被 `skill.retreat` 挡在提示词之外，不会出现在召回条目里。
+pub(crate) struct SkillCalibrate;
+
+impl Contributor for SkillCalibrate {
+    fn owner(&self) -> &'static str {
+        OWNER
+    }
+
+    fn contribute(&self, at: &Settling<'_>) -> Vec<Contribution> {
+        let Some(recall) = at.recall else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for line in recall.lines {
+            if line.tag != SKILL_TAG {
+                continue;
+            }
+            let Some(skill_id) = recalled_skill_id(at.history, line.seq) else {
+                continue;
+            };
+            // 每轮每个技能至多一笔：同一轮的重复收束贡献按这个键收敛（幂等）。
+            let key = format!("cal-{}-{skill_id}", at.anchor);
+            if at.history.iter().any(|e| e.event_id == key) {
+                continue;
+            }
+            out.push(Contribution::new(FactDraft {
+                key,
+                kind: EVENT_MEMORY_CALIBRATED.to_string(),
+                entity: Entity::Memory,
+                verb: Verb::Asserted,
+                payload: json!({ "skill_id": skill_id, "fallback": false }),
+                produced_by: Some(at.user_seq),
+            }));
+        }
+        out
+    }
+}
+
+// 链接期提交：宿主按 `(prio, owner)` 询问。
+symbio_plugin_api::submit_contributor!(SkillCalibrate);
+
+/// 被召回条目（源事件 seq）对应的技能 id；不是技能事实 ⇒ `None`。
+fn recalled_skill_id<'a>(history: &'a [Event], seq: u64) -> Option<&'a str> {
+    let event = history
+        .iter()
+        .find(|e| e.kind == EVENT_MEMORY_ENCODED && e.seq.map(|s| s.value()) == Some(seq))?;
+    if event.payload.get("tag").and_then(Value::as_str) != Some(SKILL_TAG) {
+        return None;
+    }
+    event.payload.get("skill_id").and_then(Value::as_str)
+}
 
 /// 最后一条 `session.config` 的 `skill_compile_enabled`（缺省 `false`）。
 fn compile_enabled(history: &[Event]) -> bool {
