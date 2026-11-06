@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 25 |
 | req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 25 |
-| req2 | 7 | system → user → assistant[calls=1] → tool[id] → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】       | 25 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 25 |
 
 ## 规模观测（**不进判据**：同一列里既有装配代码的字，也有负载的字）
 
@@ -24,7 +24,7 @@
 |---|---|---|---|---|---|---|---|
 | req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 25 | 667 | 24644 | 25518 |
 | req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 25 | 702 | 24644 | 25791 |
-| req2 | 7 | system → user → assistant[calls=1] → tool[id] → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】       | 25 | 1172 | 24644 | 26362 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 25 | 1136 | 24644 | 26292 |
 
 ## 基线（判据本体）
 
@@ -224,12 +224,6 @@
           "content": "text"
         },
         {
-          "role": "assistant",
-          "tool_calls": 0,
-          "tool_call_id": false,
-          "content": "text"
-        },
-        {
           "role": "user",
           "tool_calls": 0,
           "tool_call_id": false,
@@ -251,7 +245,6 @@
             "chars": 137
           }
         ],
-        [],
         [],
         [],
         [],

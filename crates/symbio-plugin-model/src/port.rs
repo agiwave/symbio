@@ -5,7 +5,7 @@
 //! 目录一起装：生效者缺席 ⇒ 不注册端口行 ⇒ 环在调用点响亮失败（落失败事实
 //! 并中止），而不是在这里猜一个别的模型。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use symbio_plugin_api::chat_node::{
@@ -152,6 +152,10 @@ fn turn_input(
         .collect();
     // 本轮第几次模型请求（0 = 首幕）：最后一条 `user.message` 之后数应答轮。
     let mut round = 0u32;
+    // 同一句话可能落两格：模型行的 `response`（环的收据）与会话的
+    // `chat.assistant.final`（轮末投影）在收束轮里带**同一个 `text_id`**——那是同一个
+    // 文本节点的身份。回灌只认第一格，否则同一句话在请求里出现两次（t46 基线第 7 条）。
+    let mut seen_texts: HashSet<String> = HashSet::new();
     for fact in facts {
         if let Some(seq) = seq_of.get(fact.id.as_str()) {
             if elided.iter().any(|(from, to)| (*from..=*to).contains(seq)) {
@@ -213,6 +217,10 @@ fn turn_input(
                 }
             }
             EVENT_RESPONSE if fact.port == MODEL_PORT => {
+                // 收束轮可能与 `chat.assistant.final` 同文本（见 `first_text`）。
+                if !first_text(&mut seen_texts, fact) {
+                    continue;
+                }
                 round = round.saturating_add(1);
                 let text = fact
                     .payload
@@ -281,12 +289,13 @@ fn turn_input(
                     });
                 }
             }
-            // 终答也是一次模型请求（收束轮）：请求轮次据此推进，段才按「首幕」分档。
-            //
-            // 正文必须回灌成一条 assistant 消息：收束轮没有 `response` 格（`world_kind`
-            // 是独立种类），若只推轮次不推正文，下一轮的请求包就会丢掉上一轮的答话
-            // ——用户看到的对话还在，模型看到的对话线却断了一截。
+            // 终答也要回灌正文：收束轮可能只有 `chat.assistant.final`（没有模型行的
+            // `response`）——漏了它下一轮的对话线就断一截。两格同时存在时由
+            // [`first_text`] 按 `text_id` 去重，同一句只进请求一次。
             EVENT_CHAT_ASSISTANT_FINAL => {
+                if !first_text(&mut seen_texts, fact) {
+                    continue;
+                }
                 round = round.saturating_add(1);
                 if let Some(text) = fact.payload.get("text").and_then(serde_json::Value::as_str) {
                     if !text.trim().is_empty() {
@@ -326,6 +335,25 @@ fn turn_input(
         }
     }
     (system_prompt, tools, messages, round)
+}
+
+/// 这条应答事实的文本节点身份是否**首次出现**。
+///
+/// 收束轮把同一句终答落两格：模型行的 `response`（环的收据）与会话的
+/// `chat.assistant.final`（轮末投影），两者的 `text_id` 不变。回灌只认第一格，
+/// 否则请求里同一句话出现两次。`text_id` 缺失/为空 ⇒ 没有身份可比，返回 `true`
+/// （宁可重复，也不误删）。
+fn first_text(seen: &mut HashSet<String>, fact: &PortFact) -> bool {
+    let Some(id) = fact
+        .payload
+        .get("text_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    else {
+        return true;
+    };
+    seen.insert(id.to_string())
 }
 
 /// 装配侧取段（D-208 / D-220）：发言级段只在首幕取一次，请求级段每次请求都取。
