@@ -14,6 +14,9 @@ dead_code = "warn"
 
 [dependencies]
 symbio-plugin-api = { path = "../symbio-plugin-api" }
+# 内核（封闭语法的共享类型层）：闭集取值（`ClosureReason`）与事件常量都在这里，
+# 执行体写收束事实时直接取类型，不在本 crate 另抄字面量。
+symbio-kernel = { path = "../symbio-kernel" }
 symbio-providers = { path = "../symbio-providers" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续

@@ -10,7 +10,7 @@
 //! |---|---|
 //! | `user.message`（开轮） | 清空：新一轮开始，上一轮结局作废 |
 //! | `chat.assistant.final` | 载荷 `status`：`aborted` / `failed` / 其余按 `completed` |
-//! | `chat.assistant.fallback` | `failed`，错误取载荷 `why` |
+//! | `chat.assistant.fallback` | `failed`，错误取载荷 `detail` |
 //! | `chat.assistant.progress` | `completed`（等待用户的那一轮以 `Ok` 收尾） |
 //! | 根 run 节点的 `message.edited` / `message.added` | `Failed` / `Aborted` 即失败/中止收口 |
 //!

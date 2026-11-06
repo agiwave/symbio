@@ -97,6 +97,11 @@
 //! | `malformed` | 第 N 个事件后混入一帧**不规范内容**再继续正常收尾：`badJson`（data 行坏 JSON）/ `truncated`（chunk JSON 半途截断）/ `garbage`（非 SSE 字节） |
 //! | `malformedAfter` | `malformed` 的位次（默认中间）；位次按正常事件计，malformed 帧不占位 |
 //!
+//! plan 级 `usageFromRequest: true` 让用量**按请求体估算**（CJK ≈ 1 token/字，
+//! 其余 ≈ 0.25 token/字符），而不是恒报 `prompt_tokens: 64`。缺省关闭：既存用例
+//! （t8/t11/t18/t45/t63）的水位口径依赖「64 对 80 上限恒越线」，换掉会把它们的
+//! 触发条件一起改掉。需要「水位随请求体真的涨落」的用例（t47）显式打开。
+//!
 //! plan 级 `rateLimit: { limit, windowMs }` 造 **429 限流语义**（不是别的场景字段，
 //! 因为限流是**整个账号**的，不是单条回答的）：滑动窗口配额，超额请求拿 429 +
 //! `retry-after`（窗口冷却秒数）+ `x-ratelimit-*` 头；被拒请求不占配额（与主流provider 一致），窗口冷却后自动恢复。四个流级字段都**改变不了匹配/名额口径**——
@@ -115,7 +120,7 @@ const PORT = Number(argOf('port', '18081'));
 const SCENARIOS_PATH = argOf('scenarios', null);
 
 // ---------- 状态 ----------
-/** @type {{scenarios: any[], fallback: any|null}} */
+/** @type {{scenarios: any[], fallback: any|null, usageFromRequest?: boolean}} */
 let plan = { scenarios: [], fallback: null };
 if (SCENARIOS_PATH) {
   plan = JSON.parse(await import('node:fs/promises').then((fs) => fs.readFile(SCENARIOS_PATH, 'utf8')));
@@ -399,7 +404,7 @@ function buildToolCallId(scenario, tc, i, useIndex) {
   return scenario.times != null && useIndex > 0 ? `${base}#${useIndex}` : base;
 }
 
-function* buildEvents(scenario, model, requestId, useIndex = 0) {
+function* buildEvents(scenario, model, requestId, useIndex = 0, usage = { prompt: 64, completion: 32 }) {
   // ⓪ 思考（reasoning_content，真实模型在正文之前输出）
   for (const piece of scenario.reasoning ?? []) {
     yield chunkOf(requestId, model, { reasoning_content: piece });
@@ -422,7 +427,7 @@ function* buildEvents(scenario, model, requestId, useIndex = 0) {
   for (const piece of chunks) yield chunkOf(requestId, model, { content: piece });
   // ③ 终止帧
   const finish = finishFor(scenario, ['tool_calls', 'stop']);
-  yield chunkOf(requestId, model, {}, finish, { prompt_tokens: 64, completion_tokens: 32 });
+  yield chunkOf(requestId, model, {}, finish, { prompt_tokens: usage.prompt, completion_tokens: usage.completion });
 }
 
 /**
@@ -454,6 +459,35 @@ function contentChunks(scenario) {
 }
 
 /**
+ * 请求体估算成 token 数（`plan.usageFromRequest` 打开时用）。
+ *
+ * 口径是**粗估**，不是分词器：CJK 按 1 token/字、其余按 0.25 token/字符。真实
+ * provider 的 `prompt_tokens` 也是这个量级（中文一行 ≈ 一行 token），所以拿它
+ * 驱动「水位随请求体涨落」的判据是诚实的；精确值不是判据——压缩只看比值。
+ */
+function estimateTokens(text) {
+  let weight = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+    const cjk =
+      (cp >= 0x3000 && cp <= 0x9fff) || // 标点 + 假名 + 统一汉字
+      (cp >= 0xf900 && cp <= 0xfaff) || // 兼容汉字
+      (cp >= 0xff00 && cp <= 0xffef); // 全角
+    weight += cjk ? 1 : 0.25;
+  }
+  return Math.max(1, Math.ceil(weight));
+}
+
+/** 一次应答的用量：打开 `usageFromRequest` 时按请求体 / 正文估算，否则沿用恒定的 64/32。 */
+function usageFor(body, scenario) {
+  if (!plan.usageFromRequest) return { prompt: 64, completion: 32 };
+  return {
+    prompt: estimateTokens(JSON.stringify(body)),
+    completion: estimateTokens(contentChunks(scenario).join('')),
+  };
+}
+
+/**
  * 场景的结束原因：`finishReason` **原样覆盖**，否则按「有没有工具调用」推缺省值。
  * 参数 `[有工具的缺省, 没工具的缺省]` 是**本协议的原始写法**（四协议各不同），
  * 覆盖值同样按协议写——后端 `ModelFinishReason::from_provider` 认全部变体。
@@ -468,8 +502,8 @@ function argsString(tc) {
 }
 
 /** openai_chat：复用 `buildEvents` 的 chunk 形状，序列化为 SSE 数据帧。 */
-function openaiChatFrames(scenario, model, requestId, useIndex) {
-  return [...buildEvents(scenario, model, requestId, useIndex)].map(SSE);
+function openaiChatFrames(scenario, model, requestId, useIndex, usage) {
+  return [...buildEvents(scenario, model, requestId, useIndex, usage)].map(SSE);
 }
 
 /**
@@ -479,7 +513,7 @@ function openaiChatFrames(scenario, model, requestId, useIndex) {
  * `item.call_id`），参数由 `response.function_call_arguments.delta` 分两片流式吐；
  * 结束原因与用量在 `response.completed` 的 `response` 对象里（`parse_line` 从那里读）。
  */
-function openaiResponsesFrames(scenario, model, requestId, useIndex) {
+function openaiResponsesFrames(scenario, model, requestId, useIndex, usage) {
   const frames = [];
   for (const [i, tc] of (scenario.toolCalls ?? []).entries()) {
     const callId = buildToolCallId(scenario, tc, i, useIndex);
@@ -505,7 +539,7 @@ function openaiResponsesFrames(scenario, model, requestId, useIndex) {
       response: {
         id: `resp_${requestId}`,
         finish_reason: finish,
-        usage: { input_tokens: 64, output_tokens: 32 },
+        usage: { input_tokens: usage.prompt, output_tokens: usage.completion },
       },
     }),
   );
@@ -520,13 +554,13 @@ function openaiResponsesFrames(scenario, model, requestId, useIndex) {
  * 分两片流式吐；正文是 `text_delta`。结束原因是 `message_delta.delta.stop_reason`，
  * `input_tokens` 在 `message_start`、`output_tokens` 在 `message_delta`（两处合并）。
  */
-function anthropicFrames(scenario, model, requestId, useIndex) {
+function anthropicFrames(scenario, model, requestId, useIndex, usage) {
   const frames = [];
   const ev = (type, obj) => `event: ${type}\ndata: ${JSON.stringify(obj)}\n\n`;
   frames.push(
     ev('message_start', {
       type: 'message_start',
-      message: { id: `msg_${requestId}`, usage: { input_tokens: 64 } },
+      message: { id: `msg_${requestId}`, usage: { input_tokens: usage.prompt } },
     }),
   );
   const toolCount = (scenario.toolCalls ?? []).length;
@@ -554,7 +588,7 @@ function anthropicFrames(scenario, model, requestId, useIndex) {
     ev('message_delta', {
       type: 'message_delta',
       delta: { stop_reason: stop },
-      usage: { output_tokens: 32 },
+      usage: { output_tokens: usage.completion },
     }),
   );
   return { frames, terminator: 'event: message_stop\ndata: {"type":"message_stop"}\n\n' };
@@ -569,7 +603,7 @@ function anthropicFrames(scenario, model, requestId, useIndex) {
  *
  * `functionCall.args` 每次给**完整对象**（Gemini 无「参数在增长」这回事），一帧一个。
  */
-function geminiFrames(scenario, model, requestId, useIndex) {
+function geminiFrames(scenario, model, requestId, useIndex, usage) {
   const frames = ['[\n'];
   for (const tc of scenario.toolCalls ?? []) {
     const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : (tc.arguments ?? {});
@@ -587,7 +621,7 @@ function geminiFrames(scenario, model, requestId, useIndex) {
   frames.push(
     JSON.stringify({
       candidates: [{ content: { role: 'model', parts: [] }, finishReason: scenario.finishReason ?? 'STOP' }],
-      usageMetadata: { promptTokenCount: 64, candidatesTokenCount: 32 },
+      usageMetadata: { promptTokenCount: usage.prompt, candidatesTokenCount: usage.completion },
     }) + '\n',
   );
   frames.push(']\n');
@@ -595,16 +629,16 @@ function geminiFrames(scenario, model, requestId, useIndex) {
 }
 
 /** 按线格式分派：返回 `{ frames, terminator }`。 */
-function buildFrames(format, scenario, model, requestId, useIndex) {
+function buildFrames(format, scenario, model, requestId, useIndex, usage) {
   switch (format) {
     case 'openai_responses':
-      return openaiResponsesFrames(scenario, model, requestId, useIndex);
+      return openaiResponsesFrames(scenario, model, requestId, useIndex, usage);
     case 'anthropic_messages':
-      return anthropicFrames(scenario, model, requestId, useIndex);
+      return anthropicFrames(scenario, model, requestId, useIndex, usage);
     case 'gemini_api':
-      return geminiFrames(scenario, model, requestId, useIndex);
+      return geminiFrames(scenario, model, requestId, useIndex, usage);
     default:
-      return { frames: openaiChatFrames(scenario, model, requestId, useIndex), terminator: 'data: [DONE]\n\n' };
+      return { frames: openaiChatFrames(scenario, model, requestId, useIndex, usage), terminator: 'data: [DONE]\n\n' };
   }
 }
 
@@ -648,7 +682,14 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(400, noKeepAlive);
       return res.end(JSON.stringify({ error: { message: 'mock-llm: /_plan 缺 scenarios 数组' } }));
     }
-    plan = { scenarios: next.scenarios, fallback: next.fallback ?? null, ...(next.rateLimit ? { rateLimit: next.rateLimit } : {}) };
+    // 换场景表不该顺手关掉用量口径：它是 mock 的**读数**模式，不是场景数据。
+    const usageFromRequest = next.usageFromRequest ?? plan.usageFromRequest;
+    plan = {
+      scenarios: next.scenarios,
+      fallback: next.fallback ?? null,
+      ...(next.rateLimit ? { rateLimit: next.rateLimit } : {}),
+      ...(usageFromRequest ? { usageFromRequest: true } : {}),
+    };
     useCounts.clear();
     failOutcome.clear();
     failLogicalHits.clear();
@@ -738,7 +779,14 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    const { frames, terminator } = buildFrames(format, scenario, model, requestId, useIndex);
+    const { frames, terminator } = buildFrames(
+      format,
+      scenario,
+      model,
+      requestId,
+      useIndex,
+      usageFor(parsed, scenario),
+    );
 
     // ⚠️ 本 mock **只说流式**（与生产一致）：四个协议实现全部硬编码 `"stream": true`
     // （gemini 的 `streamGenerateContent` 本身就是流式端点），不存在非流式补全请求。

@@ -608,7 +608,8 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         direct
     };
     let reasoning = text_of(e, "reasoning");
-    // 兜底格的 `detail` = 这一轮**为什么失败**（写侧 `append_fallback` 记的原因码文本）。
+    // 兜底格的 `detail` = 这一轮**为什么失败**（写侧 = 会话收束的失败分支，见
+    // `convergence::project_final_turn`）。
     // 它必须折回节点：界面的组级交代条（`TurnGroupNode` → `MessageErrorBox`）读的是
     // 节点 `error`，取不到就只剩一个 failed 状态 + 一串产出——用户看到的是「模型想了
     // 很久然后什么也没说」，而事实是「模型没答，原因 X」。失败原因在网格里是事实，

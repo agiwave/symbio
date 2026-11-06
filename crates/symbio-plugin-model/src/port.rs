@@ -32,6 +32,12 @@ use symbio_plugin_api::{
 /// 本插件服务的端口名（提供者自己定义；契约层不认识它）。
 pub(crate) const MODEL_PORT: &str = "model";
 
+/// 压缩快照的事实种类：**已有种类**，声明 owner 是
+/// `crates/symbio-plugin-session/src/declarations.rs`。本 crate 只读、不声明，也不往
+/// `plugin-api` 加常量——owner 与读方分离是已知项（与 compact 插件同一处待判，
+/// 见 `crates/symbio-plugin-compact/src/port.rs` 的同名常量注释）。
+const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
+
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
 ///
 /// 目录 = 全部已启用的 provider（与能力目录同一批 `BoundProvider`）；生效者
@@ -90,6 +96,47 @@ struct RoundTripRequest {
     /// `calls` 的 `call_key` 都从这里取，环不再代装配。
     #[serde(default)]
     principal: String,
+}
+
+/// 把载荷里的 `messages`（ChatNode 数组）逐条译成请求消息。
+///
+/// `message.added` 与 `session.consolidated` 的载荷同一形状（都是整份/追加的节点
+/// 列表），译法必须只有这一处：两处各译一遍，迟早有一处把 Notice 的摘要丢掉。
+fn append_payload_nodes(messages: &mut Vec<PromptMessage>, payload: &serde_json::Value) {
+    let nodes = payload
+        .get("messages")
+        .and_then(serde_json::Value::as_array)
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|node| serde_json::from_value::<ChatNode>(node.clone()).ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for node in nodes {
+        // 压缩快照的摘要节点是 `Notice` 且不带 `role`：在请求里它就是一条 user 消息
+        // （与转写投影对快照载体的读法一致）。
+        let role = match node.node_role().unwrap_or(NodeRole::User) {
+            NodeRole::User => "user",
+            NodeRole::Assistant => "assistant",
+            NodeRole::Tool => "tool",
+            NodeRole::System => "system",
+        };
+        let text = node
+            .content
+            .as_ref()
+            .map(MessageContent::to_text)
+            .unwrap_or_default();
+        if !text.trim().is_empty() {
+            messages.push(PromptMessage {
+                role: role.into(),
+                text,
+                tool_call_id: None,
+                tool: None,
+                tool_calls: None,
+            });
+        }
+    }
 }
 
 /// 一次往返的输入视图：**全从事实读**（写方是谁不问）。
@@ -156,7 +203,21 @@ fn turn_input(
     // `chat.assistant.final`（轮末投影）在收束轮里带**同一个 `text_id`**——那是同一个
     // 文本节点的身份。回灌只认第一格，否则同一句话在请求里出现两次（t46 基线第 7 条）。
     let mut seen_texts: HashSet<String> = HashSet::new();
-    for fact in facts {
+    // 压缩快照：`session.consolidated` 的载荷是**整份消息列表**，取代它之前的一切
+    // （D-053 / D-336）。请求视图也必须从这份列表起折——少了这一步，压缩只改对话面、
+    // 模型仍读全量历史（同一段历史两个读法），而且水位只涨不落：每轮都欠一次压缩。
+    let snapshot_at = facts.iter().rposition(|fact| {
+        fact.kind == EVENT_SESSION_CONSOLIDATED
+            && fact
+                .payload
+                .get("messages")
+                .and_then(serde_json::Value::as_array)
+                .is_some()
+    });
+    if let Some(index) = snapshot_at {
+        append_payload_nodes(&mut messages, &facts[index].payload);
+    }
+    for fact in facts.iter().skip(snapshot_at.map_or(0, |index| index + 1)) {
         if let Some(seq) = seq_of.get(fact.id.as_str()) {
             if elided.iter().any(|(from, to)| (*from..=*to).contains(seq)) {
                 continue;
@@ -177,45 +238,9 @@ fn turn_input(
                     }
                 }
             }
-            // 轮内追加的消息（D-249 的压缩节点 / 省略说明）：id 写的是它取代的区间，
-            // 这里按节点自己的身份回灌成一条普通消息——读侧不解释「为什么」。
-            EVENT_MESSAGE_ADDED => {
-                let nodes = fact
-                    .payload
-                    .get("messages")
-                    .and_then(serde_json::Value::as_array)
-                    .map(|nodes| {
-                        nodes
-                            .iter()
-                            .filter_map(|node| {
-                                serde_json::from_value::<ChatNode>(node.clone()).ok()
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                for node in nodes {
-                    let role = match node.node_role().unwrap_or(NodeRole::User) {
-                        NodeRole::User => "user",
-                        NodeRole::Assistant => "assistant",
-                        NodeRole::Tool => "tool",
-                        NodeRole::System => "system",
-                    };
-                    let text = node
-                        .content
-                        .as_ref()
-                        .map(MessageContent::to_text)
-                        .unwrap_or_default();
-                    if !text.trim().is_empty() {
-                        messages.push(PromptMessage {
-                            role: role.into(),
-                            text,
-                            tool_call_id: None,
-                            tool: None,
-                            tool_calls: None,
-                        });
-                    }
-                }
-            }
+            // 轮内追加的消息（D-249 的省略说明）：id 写的是它取代的区间，这里按
+            // 节点自己的身份回灌成一条普通消息——读侧不解释「为什么」。
+            EVENT_MESSAGE_ADDED => append_payload_nodes(&mut messages, &fact.payload),
             EVENT_RESPONSE if fact.port == MODEL_PORT => {
                 // 收束轮可能与 `chat.assistant.final` 同文本（见 `first_text`）。
                 if !first_text(&mut seen_texts, fact) {
@@ -535,6 +560,15 @@ impl PortExecutor for ModelExecutor {
                     {
                         payload["context"] = watermark;
                     }
+                    // 收束格必须写明这一轮为什么停（`closure_reason_closed`）：自然结束
+                    // 是 `completed`，撞长度上限是 `exhausted`。`chat.assistant.fallback`
+                    // 开始写 `reason` 之后，这一段成为「所有终结格都要带 reason」的边界
+                    // ——模型自己是终答的写方，这里不能空着（t47 的八条不变量）。
+                    payload["reason"] = serde_json::json!(if output.finish.is_length() {
+                        symbio_kernel::event::ClosureReason::Exhausted.as_str()
+                    } else {
+                        symbio_kernel::event::ClosureReason::Completed.as_str()
+                    });
                 }
                 // ── 空正文收束不是「答完了」 ─────────────────────────────
                 //

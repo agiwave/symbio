@@ -12,7 +12,7 @@ import './_selfrun.mjs';
 //
 // | 真实负载的形状 | 本用例的取法 | 为什么这样取 |
 // |---|---|---|
-// | 轮次多到越过压缩水位线若干次 | 20 轮 ≈4.7KB 长回答 ＋ `max_context_tokens: 16000` | 触发线是**相对**的（0.7 × 窗口，`context.rs::COMPRESSION_TOKEN_THRESHOLD`），而常驻量由请求视图的轮次窗口（出厂 `context_messages = 6`）决定——顶到水位线靠的是**最近几轮的体量**，真实会话正是这样（模型一次给几千字）。窗口大小不是判据，「触发过、触发后守住」才是（与 t8 / t18 同一取舍） |
+// | 轮次多到越过压缩水位线若干次 | 20 轮 ≈4.7K 字长回答 ＋ `max_context_tokens: 60000` | 触发线是**相对**的（0.7 × 窗口，`compact` 插件的 `COMPACT_AT`），而常驻量由请求视图的轮次窗口（出厂 `context_messages = 6`）决定——顶到水位线靠的是**最近几轮的体量**，真实会话正是这样（模型一次给几千字）。本用例让 mock 的用量按请求体估算（CJK ≈ 1 token/字），水位因此随会话变长而真的涨落：每 8~9 轮越线一次，整场压两次，最近一次之后仍留着尾巴（证据 ④ 要的后缀）。窗口大小不是判据，「触发过、触发后守住」才是（与 t8 / t18 同一取舍） |
 // | 单轮里几十次工具调用 | 最后一轮连调 45 次工具 | 长 agentic 轮是 v2 的主用法。它同时钉住一个**实测形状**：交换**跨轮累加**，所以第 45 步的请求里 `role=tool` 有 45 条——模型看得见自己已经做过什么（这一条曾经是 1 条：交换每轮清空，长轮于是反复重读同一份材料，见 [t55](t55-multi-tool-round-memory.mjs)）。**长轮自身不设工具轮数上限**（[D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")），这一格钉的是「累积」而不是「有界」 |
 // | 工具结果有真实字节量 | 第 1 轮读一份 ≈14KB 的材料，长轮里读小文件 | 大结果**当时**完整落进库，之后从请求视图与 live 读面一起滑走——「裁的是带着跑的那一份，不是记过的那一份」这条契约只有两头都在才判得动 |
 // | 会话会出故障 | 第 2 轮的应答按 `failTimes: 1` 打 500 | 真实会话不是一路成功；兜底也是一句「这一轮说了什么」，它必须进轮次账 |
@@ -39,14 +39,16 @@ import './_selfrun.mjs';
 // **写入时**（L0 单条工具结果守卫，约 8K token/条）与**水位**（压缩 70%），两者都不在
 // 请求视图里，所以本负载的字节量按设计由它们承担，不指望视图再收一道。
 //
-// 于是证据 ⑤ 的「有界」只对上界成立**一次**：视图里的 `role=user` 条数被轮次窗口按住；
-// 长轮自己的 `role=tool` 条数**不**被按住——那是设计（丢掉它们会让模型重读材料）。
+// 请求视图唯一会**变小**的时机是**换基**：压缩把一段前缀换成快照，模型请求从快照
+// 起折（`session.consolidated` 的载荷就是那份整段消息列表）。于是证据 ⑤ 判的是换基的
+// 后果（大结果不再出现在主请求里），**不判**任何条数上界——那会把「快照 + 本轮」
+// 错当成窗口，也会拿摘要请求（它本来就要看全段）当主请求的样本。
 //
 // ## 为什么只有配置里的一项被改过
 //
 // `session` 侧只钉 `DIALOG_FACE_OFF`（本用例主题与对话面正交，理由见该常量的文档），
-// **其余全取出厂默认**：`auto_compress`、`context_messages = 6` 都是真实会话跑的同一套旋钮。
-// 负载要「真实」，配置就不能是为用例特调的。被调小的只有 provider 窗口——它是上面那格
+// **其余全取出厂默认**：`auto_compress` 等是真实会话跑的同一套旋钮。
+// 负载要「真实」，配置就不能是为用例特调的。被改小的只有 provider 窗口——它是上面那格
 // 说清的相对性取舍。
 //
 // ## 判据为什么读生产出口
@@ -94,22 +96,14 @@ const TOTAL_TURNS = NORMAL_TURNS + 1;
 /**
  * provider 窗口：水位线 = 0.7 × 本值。
  *
- * 取值口径（实测，不是猜的）：请求视图的常驻量 = 系统提示 + 工具清单 + 最近
- * `context_messages = 6` 轮的正文，而估算器是**校准过**的——mock 每轮报 `prompt_tokens: 64`
- * 会把比值压到下限 0.2（`tokenizer.rs::feedback` 的 clamp），于是 4.7KB 的回答按 ≈940 token
- * 计。本值取 16000 时，6 轮长回答 + 常驻开销恰好跨过 11200 的触发线，实测压出 2 次压缩
- * 且都收在终态；再小一档（12000）就会顶到「待压缩历史 + 摘要预算 > 上限」的注定失败分支，
- * 触发熔断而不是压缩。窗口值本身**不是**判据——判据是「压到了压缩、压过之后守住」（证据 ⑤）。
+ * 取值口径（实测，不是猜的）：mock 的用量**按请求体估算**（`usageFromRequest`：
+ * CJK ≈ 1 token/字），所以水位随会话变长真的涨落，而不是被固定的 `prompt_tokens: 64`
+ * 钉死。请求视图的常驻量 = 系统提示 + 工具清单 + 最近 `context_messages = 6` 轮的正文；
+ * 一轮长回答 ≈4.7K token，越过 0.7 × 60000 = 42000 需要约 9 轮 ⇒ 整场（20 个正文轮）
+ * 压两次，且最近一次在收尾前若干轮——末尾几轮的发言因此留在网格里（证据 ④）。
+ * 窗口值本身**不是**判据——判据是「压到了压缩、压过之后守住」（证据 ③）。
  */
-const CONTEXT_WINDOW_TOKENS = 16000;
-
-/**
- * 出厂轮次窗口（`session.context_messages` 的默认值，本用例**不**覆盖它）。
- *
- * 写在这里只为了让证据 ⑤ 的上界能从来源算出来，而不是抄一个实测数字：窗口 + 本轮 +
- * 换基载体 = 视图里 `role=user` 的条数上界。改了出厂默认就该改这一格，而那是另一件事。
- */
-const CONTEXT_MESSAGES = 6;
+const CONTEXT_WINDOW_TOKENS = 60000;
 
 /** 第 1 轮读的那份材料：唯一首尾锚点用来证「整段原文进了存储」 */
 const BIG_FILE = 'incident-notes.md';
@@ -117,9 +111,6 @@ const BIG_HEAD = '事故复盘〔T47-BIG-HEAD〕：网关侧 5xx 的退避节奏
 const BIG_TAIL = '事故复盘〔T47-BIG-TAIL〕：结论是视图裁剪、存储保留全文。';
 /** 长轮里反复读的小文件（两条循环各读一份，参数静态 ⇒ 同轮里同一份内容重复进视图） */
 const SMALL_FILES = ['ctx/loop-a.md', 'ctx/loop-b.json'];
-
-/** 节点终态集（与 t9 / t16 / t18 同一口径） */
-const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
 
 /**
  * 正文轮的问题：中英混排、长度不一，含粘贴的日志与代码片段——真实会话的提问形状。
@@ -168,11 +159,12 @@ export default defineCase(
   'T47 真实会话负载：21 轮 + 单轮 45 次工具调用压出厂 full 路径，七段判据全部读生产出口',
   async () => {
     const llm = await new MockLlm([
-      // 摘要请求单独一条：`match` 命中它自己的提示词，不占正文轮的场景名额（逻辑请求
-      // 计数的口径见 `mock-llm.mjs` 文件头）。
+      // 摘要请求单独一条：`matchSystem` 命中 compact 插件的摘要指令（对话线与主请求
+      // 同形，只有 system 能区分两者），不占正文轮的场景名额（逻辑请求计数的口径见
+      // `mock-llm.mjs` 文件头）。
       {
         id: 'snapshot',
-        match: 'Distill the conversation above',
+        matchSystem: '你是上下文压缩器',
         content: [
           '<state_snapshot>',
           '  <completed_items>',
@@ -220,7 +212,7 @@ export default defineCase(
         toolCalls: [{ id: 'call_db', name: 'mcp__mockserv__echo', arguments: { text: 'loop-b' } }],
       },
       { id: 'deep-final', afterTool: true, content: '两份都读完了：差异只在裁剪时机。' },
-    ]).start();
+    ], { usageFromRequest: true }).start();
 
     const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
@@ -324,46 +316,47 @@ export default defineCase(
         `事实总量应随负载累积（实际: ${stats.checkpoint.event_count}）`,
       );
 
-      // ── 证据 ③：压缩真的被这副负载触发了多次，且每次都收在终态 ────────────
-      const episodes = new Map();
-      for (const f of sub.messages()) {
-        if (msgTypeOf(f.data) !== 'compression') continue;
-        const list = episodes.get(f.mid) ?? [];
-        list.push(f);
-        episodes.set(f.mid, list);
-      }
+      // ── 证据 ③：压缩真的被这副负载触发了多次 ─────────────────────────────
+      //
+      // 压缩的现行形态是**落格**（`session.consolidated`，`message × progressed`），
+      // 不是实时节点——实时面上没有 compression 帧（t11 钉的是同一件事）。所以这里数
+      // 事实账里的格数，再从重建历史里核对最近一次快照的形状：长跑里「压过、但压出来的
+      // 东西读不回来」才是真的坏。
+      const compactions = Number(stats.checkpoint.kind_counts?.['session.consolidated'] ?? 0);
       assert(
-        episodes.size >= 2,
-        `正文轮应至少越过水位线两次（压缩节点 ${episodes.size} 个；窗口=${CONTEXT_WINDOW_TOKENS}）`,
+        compactions >= 2,
+        `正文轮应至少越过水位线两次（session.consolidated 落格 ${compactions} 条；窗口=${CONTEXT_WINDOW_TOKENS}）`,
       );
-      for (const [mid, frames] of episodes) {
-        const last = frames[frames.length - 1].data;
-        assert(
-          TERMINAL.has(last.status),
-          `压缩节点 ${mid.slice(0, 8)} 必须收在终态（实际 ${last.status}）——长跑里挂着的压缩就是死链`,
-        );
-      }
+      const leafForSnapshot = await readSessionMessages(cli, SID);
+      const compNode = leafForSnapshot.find((m) => msgTypeOf(m) === 'compression');
+      assert(
+        compNode,
+        `重建历史里应有最近一次压缩的快照节点（现有类型: ${leafForSnapshot.map((m) => msgTypeOf(m)).join(',')}）`,
+      );
+      assertEq(compNode.status, 'completed', '压缩快照节点应收在终态');
+      assert(
+        String(compNode.content ?? '').includes('state_snapshot'),
+        `压缩快照正文应是摘要（实际首 60 字: ${String(compNode.content ?? '').slice(0, 60)}）`,
+      );
 
       // ── 证据 ④：发言的**出处账**（终点第 1 条在负载下的正确形态）──────────
       //
       // 单点用例判「每一句用户发言都在网格里」。本用例的负载**必然**触发压缩，而压缩
-      // 的语义就是把一段前缀换成一条快照载体（D-053 的「换基」）——在这里逐句点名
-      // 会把正确行为判成故障。换成三条能对账的：
-      //   a) **换基的痕迹在**：网格里有那条快照载体（压缩在对话面上留了东西，不是静默蒸发）；
+      // 的语义就是把一段前缀换成一条快照（D-053 的「换基」）——在这里逐句点名会把正确
+      // 行为判成故障。换成三条能对账的：
+      //   a) **换基的痕迹在**：快照落格且重建可读（证据 ③）——对话网格只承载还能逐句
+      //      对账的后缀，快照摘要节点是 `Notice`、不进网格（转写投影的规则见
+      //      `symbio-sdk/src/projection/mutations.rs` 的 `snapshot_entries`）；
       //   b) **换基只吃前缀**：网格里剩下的发言是轮次序列的一段**连续后缀**——中间少一句
       //      就是真丢（后缀之外的那些在快照里，无从逐句核对，那是压缩的语义而不是缺陷）；
-      //   c) **一句不多**：每个 marker 至多出现一次。压缩把**本轮**的发言原文留在快照载荷
-      //      尾部，而那条发言同时是本轮的开场格（落在快照之后）——投影分不清这条边界，
-      //      网格里就多一条重复发言。这一条正是本负载抓出来的缺陷（修在
-      //      `symbio_core/projection/transcript.rs` 的换基边界去重），也是 ④ 里唯一
-      //      「不跑够轮次就看不见」的判据。
+      //   c) **一句不多**：每个 marker 至多出现一次。换基边界的两条来源（快照载荷与
+      //      紧随其后的轮次格）对同一个节点身份各产一行，投影里就会多一条重复发言。
+      //      这一条只在真的压过压缩、且压过之后还有轮次时才有靶子，是 ④ 里唯一
+      //      「不跑够轮次就看不见」的判据（边界去重见
+      //      `symbio-sdk/src/projection/transcript.rs` 的 `superseded`）。
       const gridEntries = stats.transcript?.entries ?? [];
       assert(gridEntries.length > 0, '转写列应读出内容（对话面读侧）');
       const userGrid = gridEntries.filter((e) => e.role === 'user').map((e) => e.text ?? '');
-      assert(
-        userGrid.some((t) => t.includes('[CONTEXT SNAPSHOT')),
-        `压缩过的网格应留下换基的载体条目（用户格 ${userGrid.length} 条，一条都没有就是压缩在对话面上无痕）`,
-      );
       const hits = Array.from(
         { length: NORMAL_TURNS },
         (_, i) => userGrid.filter((t) => t.includes(markerOf(i))).length,
@@ -388,31 +381,24 @@ export default defineCase(
       const leaf = await readSessionMessages(cli, SID);
       assertTranscriptInvariants(leaf, 'T47 收尾');
 
-      // ── 证据 ⑤：视图有界、裁剪确实发生，而存储一侧整段原文还在 ───────────
+      // ── 证据 ⑤：换基之后大结果不进请求、也不在读面，而存储一侧整段原文还在 ──
       const reqs = await llm.requests();
-      // **不判字节上界**（这条曾经在这里，被删掉是对的）：窗口按 token 计，而 token 是
-      // 估算器给的数——本夹具里它被 mock 的固定 `prompt_tokens: 64` 钉在校准下限（见文件
-      // 头），于是「请求体 ≤ 窗口 × 4 字节」测的是夹具的校准，不是产品的有界性。一条
-      // 测夹具的判据比没有判据更糟：它会随夹具一起红。字节量只作观测（末尾那行）。
+      // **不判体积上界**（这条曾经在这里，被删掉是对的，且有两层原因）：
+      //   · v2 没有请求视图级的窗口上界（D-078 把「请求视图三层淡化」整族退役，见文件头
+      //     「没有压到的」一节 / `D-318 B2`）：请求体只按事实网格投影走，能把它变小的只有
+      //     **换基**（压缩把前缀换成快照），不是某个轮的条数上限。
+      //   · 取 `max` 还会混进**摘要请求**：它本来就要看全段（那是压缩的输入），拿它的条数
+      //     去断言「视图被按住」是拿错了样本（摘要请求的 system 就是压缩指令）。
+      // 因此这里只判换基的**后果**：主请求里读不到那条大结果的原文，读面也一样。
+      const isSummaryReq = (q) => {
+        const system = (q.body?.messages ?? []).find((m) => m.role === 'system');
+        return typeof system?.content === 'string' && system.content.includes('你是上下文压缩器');
+      };
+      const mainReqs = reqs.filter((q) => !isSummaryReq(q));
       const peak = Math.max(...extractObservations(reqs).map((o) => o.request_bytes));
-      // 会话已经 21 轮，而视图里的 `role=user` 条数始终被出厂窗口按住。上界由三个来源
-      // 相加，一个都不多：
-      //   · 轮次窗口 `context_messages = 6` 轮的发言；
-      //   · **本轮**自己的那条发言；
-      //   · 换基的那条**快照载体**（`[CONTEXT SNAPSHOT …]`，压缩注入、role=user）——
-      //     它是压缩留下的唯一一条「不属于任何轮」的发言，且只有一条（只认最近一次快照）。
-      // 这条判据钉的是「长跑不靠把历史全带着跑」：21 轮的会话在视图里最多 8 条发言。
-      const VIEW_USER_CEILING = CONTEXT_MESSAGES + 1 + 1;
-      const userTurnsInView = Math.max(
-        ...reqs.map((q) => (q.body?.messages ?? []).filter((m) => m.role === 'user').length),
-      );
-      assert(
-        userTurnsInView <= VIEW_USER_CEILING,
-        `视图里的 user 发言数应被出厂窗口按住（实测峰值 ${userTurnsInView}，上界 ${VIEW_USER_CEILING} = 窗口 ${CONTEXT_MESSAGES} ＋本轮 ＋快照载体）`,
-      );
       // 长轮**真的跑了几十步**：每次工具调用都会产生一个「视图末条是工具结果」的请求，
       // 于是请求序列就是步数账。事实网格在这里帮不上——它给工具轮立的是产物格（证据 ②）。
-      const toolRoundReqs = reqs.filter(
+      const toolRoundReqs = mainReqs.filter(
         (q) => (q.body?.messages ?? []).at(-1)?.role === 'tool',
       ).length;
       assertEq(
@@ -423,21 +409,18 @@ export default defineCase(
       // 而长轮**自己的交换全带着**：45 步的第 45 个请求里有 45 条 `role=tool`。
       // 这条判据钉的是「模型看得见自己做过什么」——曾经是 1 条（交换每轮清空），
       // 症状就是长轮反复重读同一份材料（缺陷与单点判据见 [t55](t55-multi-tool-round-memory.mjs)）。
-      // 有界性不在这里判：v2 没有请求视图级的体积上界（D-078 已把那一层整族退役，
-      // 见文件头「没有压到的」那一节），所以这里只钉下界，不钉上界。
       const maxToolMsgs = Math.max(
-        ...reqs.map((q) => (q.body?.messages ?? []).filter((m) => m.role === 'tool').length),
+        ...mainReqs.map((q) => (q.body?.messages ?? []).filter((m) => m.role === 'tool').length),
       );
       assert(
         maxToolMsgs >= DEEP_ROUNDS,
         `长轮的工具结果应累积到 ${DEEP_ROUNDS} 条（实测峰值 ${maxToolMsgs}）；少一条就是交换被清空、模型重新开局`,
       );
-      // 大结果滑出窗口后：请求里读不到它的原文。另一半在负载循环里已经取过——第 1 轮
-      // 末它**整段**落进了库（首尾锚点都在），所以这里裁的是视图与 live 段，不是事实。
-      const lastView = JSON.stringify(reqs.at(-1)?.body?.messages ?? '');
+      // 大结果换基之后：请求里读不到它的原文。另一半在读面上（下面那条）。
+      const lastView = JSON.stringify(mainReqs.at(-1)?.body?.messages ?? '');
       assert(
         !lastView.includes(BIG_TAIL),
-        '第 1 轮的大结果应已滑出请求视图（还带着就是视图没被按住）',
+        '第 1 轮的大结果应已随换基离开请求视图（还带着就是压缩只落了格、没有被请求侧消费）',
       );
       // 同一条契约在读面上的另一半：压过缩之后 live 段也该换基到快照，不再携带那条被
       // 取代的大结果（`consolidate_into_wal` 的归档）。留着它 = 「一次压缩在 prompt 面上
@@ -492,12 +475,15 @@ export default defineCase(
       }
 
       // 观测行（不参与判定）：规模是负载的读数，两次运行之差才有意义。这里报的是
-      // **本负载实际压到的形状**——视图里的轮次对数（受窗口按住）与工具结果条数
-      // （长轮内累积，不受窗口按住）。两者都不经任何请求视图裁剪，见文件头。
+      // **本负载实际压到的形状**——主请求里的 user 发言数（换基之后回落，压缩的读数）
+      // 与工具结果条数（长轮内累积）。两者都不经任何请求视图裁剪，见文件头。
+      const viewUsers = Math.max(
+        ...mainReqs.map((q) => (q.body?.messages ?? []).filter((m) => m.role === 'user').length),
+      );
       console.log(
         `  负载观测：${TOTAL_TURNS} 轮 · ${reqs.length} 次模型请求 · 峰值请求体 ${(peak / 1024).toFixed(1)}KB` +
-          ` · 压缩 ${episodes.size} 次 · 长轮 ${toolRoundReqs} 步` +
-          ` · 视图峰值 ${userTurnsInView} 轮 / ${maxToolMsgs} 条工具结果`,
+          ` · 压缩 ${compactions} 次 · 长轮 ${toolRoundReqs} 步` +
+          ` · 视图峰值 ${viewUsers} 条发言 / ${maxToolMsgs} 条工具结果`,
       );
     } finally {
       // 三个句柄全在这里收（⑦ 里已经 stop 过的那次是幂等的）：漏掉哪一个，症状都是

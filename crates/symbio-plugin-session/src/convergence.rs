@@ -34,9 +34,11 @@ use super::types::SessionSummary;
 use serde_json::Value;
 use std::sync::Arc;
 use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::event::ClosureReason;
 use symbio_kernel::plugin::PluginError;
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CLASSIFY_ANSWERED, EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
+    EVENT_CLASSIFY_ANSWERED, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
@@ -285,6 +287,9 @@ impl Convergence {
                         "text": text,
                         "principal": PRINCIPAL_MAIN,
                         "cost_ms": reply.cost_ms,
+                        // 终结格必须标明这一轮为什么停（闭集取值，`closure_reason_closed`）；
+                        // 对话面自己的 `dialog.reason` 是另一回事（为什么这样措辞）。
+                        "reason": ClosureReason::Completed.as_str(),
                         "reasoning": reply.reasoning,
                         "reasoning_id": reply.reasoning_id,
                         "dialog": {
@@ -418,6 +423,46 @@ impl Convergence {
                     .and_then(Value::as_str)
                     .unwrap_or("模型调用失败")
                     .to_string();
+                // 兜底格（`chat.assistant.fallback`）：本轮没有终答、以失败收束时，
+                // 除「哪一步坏了」之外还必须有一条**轮级收束事实**——`slo.fallback`
+                // 按它算兜底率，`runtime` 按它判结局（两处声明都在，缺的只是写方，t47）。
+                //
+                // **与环的 `failed` 的关系**：环的 `failed` 是执行事实（哪个端口、
+                // 为什么），先落；这一格是会话对**这一轮**的收束，后落，两者不重复
+                // ——前者回答「哪一步坏了」，后者回答「这一轮以什么结束」。
+                // 键按轮固定并在写前查重：重入（CLI 投影 / 后台收轮重复调用）每轮
+                // 至多写一条。
+                let root_id = user.event_id.as_str();
+                let has_fallback = events.iter().any(|e| {
+                    e.kind == EVENT_CHAT_ASSISTANT_FALLBACK
+                        && e.payload.get("root_id").and_then(Value::as_str) == Some(root_id)
+                });
+                if !has_fallback {
+                    source
+                        .append(
+                            PRINCIPAL_MAIN.to_string(),
+                            FactDraft {
+                                key: format!("{EVENT_CHAT_ASSISTANT_FALLBACK}:{root_id}"),
+                                kind: EVENT_CHAT_ASSISTANT_FALLBACK.to_string(),
+                                entity: Entity::Scope,
+                                verb: Verb::Closed,
+                                payload: serde_json::json!({
+                                    "root_id": user.event_id,
+                                    "status": "failed",
+                                    "reason": "fallback",
+                                    "detail": &why,
+                                    // 正文由失败节点承载：这一格若再带正文，读面会
+                                    // 多长出一条同轮正文节点（t77 的空正文判据）。
+                                    "text": "",
+                                    "principal": PRINCIPAL_MAIN,
+                                }),
+                                produced_by: Some(user_seq),
+                            },
+                        )
+                        .map_err(|e| {
+                            PluginError::InternalError(format!("兜底收束落格失败: {e}"))
+                        })?;
+                }
                 let mut nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
                     &waiting_events,
                     &CHAT_VOCAB,

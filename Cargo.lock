@@ -4579,6 +4579,7 @@ dependencies = [
  "reqwest-eventsource",
  "serde",
  "serde_json",
+ "symbio-kernel",
  "symbio-plugin-api",
  "symbio-providers",
  "symbio-sdk",
