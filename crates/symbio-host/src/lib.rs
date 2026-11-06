@@ -432,6 +432,7 @@ fn declared_owner(kind: &str) -> &'static str {
                 .map(|event| event.owner)
         })
         .unwrap_or_else(|| {
+            // panic-allow crates/symbio-host/src/lib.rs::declared_owner: 写口拒绝在落账时猜归属——声明表里查不到的 kind 说明声明期就漏了，静默落一条无主事实比崩掉更难查（D-339）。
             panic!("事实 `{kind}` 没有声明归属主体：写口拒绝在落账时猜默认值（D-339）")
         })
 }

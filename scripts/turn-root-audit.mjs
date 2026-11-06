@@ -149,6 +149,10 @@ function stripComments(text, ext) {
         // 一个标记都会把计数抬高，冻结就变成「标记越多越红」。只去掉标记本身，
         // **代码部分照常计数**——否则迁移通道那一行会被标记自己抹掉（F5 变 0）。
         line = line.replace(/\/\/\s*turn-migration-allow.*$/, '')
+        // 行尾注释同样不是词根：生成器给共享事件行留的 `// turn.branch ← loop` 这类
+        // 投影注解若计入，冻结的就不是代码而是注释正文（与「注释正文不扫」自相矛盾）。
+        if (line.trim().startsWith('//')) line = ''
+        else line = line.replace(/\s+\/\/(?!\/).*$/, '')
         if (line.trim() === '') return ''
         const isComment =
           t.startsWith('//') ||

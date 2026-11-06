@@ -57,12 +57,14 @@ use symbio_plugin_api::PLUGIN_ID_CLASSIFY;
 use symbio_plugin_api::REASON_UNCLASSIFIED;
 use symbio_plugin_api::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR,
+    PATH,
 };
 use symbio_plugin_api::{DecideOutcome, DecideRequest, ParseVerdictRequest, Verdict};
 use symbio_plugin_api::{DetailDefinition, DetailField};
 
 use super::config::ClassifyConfig;
+use super::debt::classify_debt_rows;
 use super::decide::{parse_verdict, plan};
 use super::rules::classify_by_rule;
 
@@ -218,6 +220,13 @@ impl Plugin for ClassifyPlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
+        // 债行只在**挂载**时申报：停用插件 ⇒ 本实例不构造 ⇒ 分类一次都不发生
+        // （与 `classify_enabled` 是两层独立开关：一层装配期、一层运行期）。
+        if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
+            for row in classify_debt_rows(&self.config) {
+                visitor.put(row).await;
+            }
+        }
         symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

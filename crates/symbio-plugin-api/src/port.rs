@@ -379,6 +379,7 @@ const PORT_NAME_RESERVED: &[char] = &[':'];
 /// 端口名校验：种进事件 id 之前就把保留字符挡在注册期。
 fn check_port_name(port: &str) {
     if let Some(ch) = port.chars().find(|ch| PORT_NAME_RESERVED.contains(ch)) {
+        // panic-allow crates/symbio-plugin-api/src/port.rs::check_port_name: 注册期 fail-closed——含保留字符的端口名会让环事件 id 的端口位被截断，注册当场拒绝；带病启动比崩掉更难诊断（D-336）。
         panic!(
             "端口名 {port:?} 含有环事件 id 的保留字符 {ch:?}，端口注册失败。\
              事件 id 是 `ring:{{port}}:{{id}}:{{attempt}}:{{kind}}`，端口位按 `:` 定界；\

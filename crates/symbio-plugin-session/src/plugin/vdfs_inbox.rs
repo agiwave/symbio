@@ -6,6 +6,7 @@
 //! 转写是事实源的渲染；把两者混在一处，最先被碰坏的是「停了还在不在」这条判据。
 
 use super::*;
+use crate::convergence::ComposeCall;
 use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
     VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR,
@@ -190,11 +191,19 @@ impl SessionPlugin {
                     // 本臂的调用方可能是 CLI（自己会 `session/project`，幂等），也可能
                     // 是 `agent_run`（子会话没有投影方——缺席就永远停在 `working`）。
                     if let Some(seq) = seq {
+                        // 收尾任务拿一份本轮能力视图的上下文去问 `compose/wording`
+                        // （`consume_inbox_turn` 已把能力视图挂到 `inbox_ctx` 上）；
+                        // 父插件从本插件取，未挂载时按既有路径降级。
+                        let compose = self.get_parent().map(|parent| ComposeCall {
+                            ctx: inbox_ctx.clone(),
+                            parent,
+                        });
                         self.convergence.spawn_turn_closer(
                             id.to_string(),
                             seq,
                             source,
                             self.drive_entry(),
+                            compose,
                         );
                     }
                 }

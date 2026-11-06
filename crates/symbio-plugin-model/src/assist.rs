@@ -19,14 +19,13 @@
 use std::sync::Arc;
 
 use serde_json::json;
-use symbio_plugin_api::chat_node::{
-    AssistReply, AssistRequest, ChatNode, MessageContent, NodeRole,
-};
+use symbio_plugin_api::chat_node::{AssistReply, AssistRequest, ChatNode, MessageContent};
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::port::{
     port_rows, PortErrorClass, PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome,
     PortProvider,
 };
+use symbio_plugin_api::principal::{Principal, PrincipalKind};
 use symbio_plugin_api::{
     llm_short_id, CapabilityRow, ExecEnv, ExecEventSink, ModelProvider, PluginError,
 };
@@ -112,15 +111,18 @@ impl PortExecutor for AssistExecutor {
         }
 
         // 一条消息、无工具表、静默出口：问答不参与对话轮，也不往展示面写帧。
+        // 身份写 `principal`（`Person` = 用户发言）：`role` 只是存量反序列化落点，
+        // 生产构造点一律写主体，读侧 `node_role()` 以主体为先（D-147 / S-014）。
         let wire = vec![ChatNode {
             id: llm_short_id(),
-            role: Some(NodeRole::User),
+            principal: Some(Principal::new(PrincipalKind::Person, "person/local")),
             content: Some(MessageContent::Text(user)),
             ..Default::default()
         }];
         let env = ExecEnv::new(ExecEventSink::silent(), exec.abort.clone());
         match self
             .active
+            // internal-model-allow IM-001: 问答端口是静默的一次性往返（无工具、无会话历史、不参与档位闸门）；走 `for_turn` 会把问答伪装成对话轮。
             .round_trip(&request.system, &wire, &[], &root_id, &env)
             .await
         {
@@ -174,26 +176,5 @@ fn transcript(facts: &[PortFact]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn transcript_reads_user_and_final_facts() {
-        let facts = vec![
-            PortFact {
-                id: "u-1".into(),
-                port: String::new(),
-                kind: EVENT_USER_MESSAGE.into(),
-                payload: json!({ "text": "问题一" }),
-            },
-            PortFact {
-                id: "chat.assistant.final:u-1".into(),
-                port: "model".into(),
-                kind: EVENT_CHAT_ASSISTANT_FINAL.into(),
-                payload: json!({ "text": "答复一" }),
-            },
-        ];
-        assert_eq!(transcript(&facts), "用户：问题一\n助手：答复一\n");
-    }
-}
+#[path = "assist.test.rs"]
+mod tests;

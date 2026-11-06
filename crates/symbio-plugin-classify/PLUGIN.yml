@@ -5,3 +5,6 @@ plugin_assembly: sub_agent
 plugin_order: 60
 # 跨插件地址（相对臂）：生成 crates/symbio-plugin-api/src/routes.rs 的 ROUTE_* 常量
 plugin_routes: decide, parse
+# 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
+# crates/symbio-plugin-api/src/events.rs）。格位仍住在 decl::EVENTS。
+shared_events: classify.answered

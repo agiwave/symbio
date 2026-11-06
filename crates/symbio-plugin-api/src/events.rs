@@ -54,6 +54,11 @@ pub const EVENT_CHAT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 /// chat.assistant.reported — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 
+// ============ classify ============
+
+/// classify.answered — owner `symbio-plugin-classify`，格位 `(Verdict, Asserted)`
+pub const EVENT_CLASSIFY_ANSWERED: &str = "classify.answered";
+
 // ============ commitment ============
 
 /// commitment.asserted — owner `symbio-plugin-loop`，格位 `(Commitment, Asserted)`
@@ -150,6 +155,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_CHAT_ASSISTANT_OPENING, (Entity::Scope, Verb::Asserted)), // chat.assistant.opening ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_PROGRESS, (Entity::Scope, Verb::Progressed)), // chat.assistant.progress ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_REPORTED, (Entity::Scope, Verb::Asserted)), // chat.assistant.reported ← loop
+    EventDecl::new(EVENT_CLASSIFY_ANSWERED, (Entity::Verdict, Verb::Asserted)), // classify.answered ← classify
     EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← loop
     EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← loop
     EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← loop

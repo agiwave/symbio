@@ -20,6 +20,7 @@ use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::retrieval::{retrieve_all, RetrievalRequest};
 use symbio_plugin_api::FactDraft;
+use symbio_plugin_api::CAPABILITY_VISITOR;
 use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use symbio_sdk::turn::facts::FleetSnapshot;
 
@@ -75,6 +76,11 @@ impl SessionPlugin {
             agent_scope.as_deref(),
         )
         .await;
+        // 收尾面（`project_final_turn`）要经 `compose/wording` 就地落 `Answered` 的终答，
+        // 而 compose 的生成产线读的就是这条能力视图。收集器只在自己 fork 的遍历上下文
+        // 上 set，所以这里把同一份视图挂到**本轮的**上下文：收尾任务 fork 自它即可继承。
+        // 没有 compose（未挂载）时路由 NotFound，收尾按既有路径原样降级。
+        ctx.set(CAPABILITY_VISITOR, manager.clone());
         let system_prompt = symbio_sdk::capability::capability_prompts(&*manager)
             .await
             .into_iter()
@@ -102,6 +108,18 @@ impl SessionPlugin {
             None
         };
         let cfg = self.config.read().await.clone();
+        // 分类开关的**有效值**：调用方开关 ∧ 分类插件本轮的债表在场（`debt` 族报到）。
+        // 卸载（t21-E）时写 false——模型债行的 `after` 等的是判决行的债；一个不会出现
+        // 的前置债会让模型行永远停在「等」，本轮一个请求都不发。
+        let classify_enabled = cfg.classify_enabled
+            && manager
+                .list(symbio_plugin_api::debt::DEBT_FAMILY)
+                .await
+                .iter()
+                .any(|row| {
+                    row.name()
+                        == format!("<debt>{}", symbio_plugin_api::PLUGIN_ID_CLASSIFY)
+                });
         let config_draft = FactDraft {
             key: session_config_id(&item.id),
             kind: EVENT_SESSION_CONFIG.to_string(),
@@ -110,7 +128,7 @@ impl SessionPlugin {
             payload: json!({
                 "system_prompt": system_prompt,
                 "tools": tools,
-                "classify_enabled": cfg.classify_enabled,
+                "classify_enabled": classify_enabled,
                 "progress_enabled": cfg.progress_enabled,
                 "progress_interval_ms": cfg.progress_interval_ms,
                 "progress_max_per_turn": cfg.progress_max_per_turn,
@@ -248,9 +266,11 @@ impl SessionPlugin {
             .and_then(Value::as_u64)
             .ok_or_else(|| PluginError::ValidationError("session/project 需要 seq".into()))?;
         let source = self.fact_source_for(&ctx, &sid).await?;
+        // 本路由不由开轮单元发起（拿不到本轮的能力视图），因此不在这里问 compose：
+        // 带措辞的收口由开轮臂的 `spawn_turn_closer` 完成；这里只是幂等投影。
         let projected = self
             .convergence
-            .project_final_turn(&sid, seq, &*source)
+            .project_final_turn(&sid, seq, &*source, None)
             .await?;
         Ok(PluginPayload::new(&json!({ "projected": projected })))
     }
