@@ -18,6 +18,7 @@ use symbio_plugin_api::FactDraft;
 
 use super::layout::SessionParams;
 use super::wal::WalStore;
+use crate::declarations::EVENT_SESSION_CONSOLIDATED;
 use crate::transcript::supplements::SupplementDrain;
 
 /// 会话存储目录（进程内首次登记；开面据此解析共享实例）。
@@ -148,6 +149,16 @@ impl FactSource for SessionFactSource {
         // 内排队的补充——合并事实的 seq 因此必然排在工具结果之后（见 `fold_supplements`）。
         if kind == EVENT_ARTIFACT_ADDED {
             self.fold_supplements();
+        }
+
+        // **取代格**：压缩快照一落进 live，被它取代的前缀就不该再留在 live 段
+        // （[D-053] 决策 6）。归档段保留「零回退损失」，而读面（`Store::range`）
+        // 本就含归档段——这一步只换 live 段起点，不改变谁能读到什么。
+        //
+        // 归档失败不动摇已落格的事实（事实已入库，重建面本来就按快照换基），
+        // 因此不把它升级成写失败。
+        if kind == EVENT_SESSION_CONSOLIDATED {
+            let _ = self.wal.archive_before(Seq::new(seq));
         }
 
         // 事实写入的**唯一收口**：落账成功后踢一次本根绑定的驱动。
