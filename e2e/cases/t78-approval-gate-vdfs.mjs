@@ -132,9 +132,15 @@ export default defineCase(
       return abs;
     };
 
-    // 事实面读面：授权级联必须留下 `request` + `authz.denied`，
-    // 而拒绝的那一笔**不能**有 `sent`——「没放行 ⇒ 没派发」是 fail-closed 的
-    // 唯一可观测形态。直接读会话 WAL，不经过转写（转写是投影，不是事实源）。
+    // 事实面读面：「**一次世界交互 = 一笔债 = 一条事实**」。一个模型响应里的 N 个调用
+    // 是**一次端口往返、一笔批债**，不是 N 笔——批级 `request` 的载荷只有
+    // `request_id`，指向那条 `tool.requested`。若要求每条调用各有一条
+    // `request(port=tool)`，就是把旧的「每个 tool call 一笔债」搬回来（旧形状），
+    // 所以拒绝的判据是**配对**而不是「有任意一条 `request` 就算过」：
+    //   ① 批级 `request` 的 `request_id` 指向的 `tool.requested`，其调用清单里含该调用 id；
+    //   ② 该调用自己有留痕（`artifact.added.tool_call_id` 或同 id 的 `authz.denied`）。
+    // 裸 `request` 不顶账；「没放行 ⇒ 没派发」仍按该调用 id 查 `sent`。
+    // 直接读会话 WAL，不经过转写（转写是投影，不是事实源）。
     const readWal = (sid) =>
       readFileSyncSafe(join(hd.homedir, 'session', sid, 'v2-events.wal'))
         .split('\n')
@@ -142,7 +148,8 @@ export default defineCase(
         .map((l) => JSON.parse(l));
     const toolFacts = (events) => events.filter((e) => e?.payload?.port === 'tool');
     const assertDeniedWithoutSent = (sid, detail) => {
-      const facts = toolFacts(readWal(sid));
+      const events = readWal(sid);
+      const facts = toolFacts(events);
       const denied = facts.find(
         (e) => e.kind === 'authz.denied' && e.payload?.detail === detail,
       );
@@ -152,14 +159,40 @@ export default defineCase(
           facts.map((e) => ({ kind: e.kind, id: e.payload?.id, detail: e.payload?.detail })),
         )}`,
       );
-      const id = denied.payload?.id;
+      const callId = denied.payload?.id;
       assert(
-        facts.some((e) => e.kind === 'request' && e.payload?.id === id),
-        `${sid}: 拒绝的那一笔必须先有 \`request\`（id=${id}）`,
+        callId,
+        `${sid}: 拒绝必须点名调用 id，否则配不上任何一笔批债（实际: ${JSON.stringify(denied.payload)}）`,
+      );
+      // 批级债：该调用必须出现在某条 `tool.requested` 的调用清单里，
+      // 而 `request.request_id` 必须指向同一条事实——这是「一笔批债」的配对。
+      const requested = events.find(
+        (e) =>
+          e.kind === 'tool.requested' &&
+          (e.payload?.calls ?? []).some((call) => call?.id === callId),
       );
       assert(
-        !facts.some((e) => e.kind === 'sent' && e.payload?.id === id),
-        `${sid}: 拒绝 ⇒ 不得有 \`sent\`（id=${id}）——没放行就没派发`,
+        requested,
+        `${sid}: 该调用必须出现在 \`tool.requested\` 的调用清单里（id=${callId}）`,
+      );
+      const batchRequest = events.find(
+        (e) => e.kind === 'request' && e.payload?.request_id === requested.event_id,
+      );
+      assert(
+        batchRequest,
+        `${sid}: 批级 \`request\` 必须指向含该调用的 \`tool.requested\`（request_id=${requested.event_id}）`,
+      );
+      // 该调用自己的留痕：产物落格或同 id 的授权拒绝，至少一笔。
+      const artifact = events.find(
+        (e) => e.kind === 'artifact.added' && e.payload?.tool_call_id === callId,
+      );
+      assert(
+        artifact || denied,
+        `${sid}: 该调用必须有留痕（\`artifact.added\` 或 \`authz.denied\`；id=${callId}）`,
+      );
+      assert(
+        !facts.some((e) => e.kind === 'sent' && e.payload?.id === callId),
+        `${sid}: 拒绝 ⇒ 不得有 \`sent\`（id=${callId}）——没放行就没派发`,
       );
     };
 
