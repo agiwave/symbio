@@ -12,11 +12,13 @@ use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::exec::ExecEventSink;
 use symbio_kernel::store::Store;
 use symbio_plugin_api::drive_entry::{DriveEntry, DriveTarget};
+use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 use symbio_plugin_api::fact_source::{FactSource, FactSourceOpener, Principal};
 use symbio_plugin_api::FactDraft;
 
 use super::layout::SessionParams;
 use super::wal::WalStore;
+use crate::transcript::supplements::SupplementDrain;
 
 /// 会话存储目录（进程内首次登记；开面据此解析共享实例）。
 static STORAGE_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -51,10 +53,17 @@ pub(crate) struct SessionFactSource {
     drive: Option<Arc<dyn DriveEntry>>,
     /// 执行期出口：真实转写句柄，或本根**显式声明**的静默。
     sink: ExecEventSink,
+    /// 补充整合的**批次边界折叠器**：`artifact.added`（工具结果）落格后，把忙窗内
+    /// 排队的补充抽干并合并成一条，落一条 `message.added`。`None` = 只读事实源。
+    supplements: Option<SupplementDrain>,
 }
 
 impl SessionFactSource {
-    /// 打开会话事实源；`drive` / `sink` 由打开者按自己的根绑定。
+    /// 打开会话事实源；`drive` / `sink` / `supplements` 由打开者按自己的根绑定。
+    ///
+    /// 参数虽多，但每一个都是**打开那一刻的装订**（没有一个是运行期可变的第二份
+    /// 状态）；拆成结构体只是把同一组值换个地方拼，故就地收下。
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn open(
         wal: Arc<WalStore>,
         session_id: String,
@@ -64,6 +73,7 @@ impl SessionFactSource {
         agent_scope: Arc<RwLock<Option<symbio_sdk::agent::AgentScope>>>,
         drive: Option<Arc<dyn DriveEntry>>,
         sink: ExecEventSink,
+        supplements: Option<SupplementDrain>,
     ) -> Arc<dyn FactSource> {
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
@@ -75,7 +85,34 @@ impl SessionFactSource {
             agent_scope,
             drive,
             sink,
+            supplements,
         })
+    }
+
+    /// 工具结果落格之后的**补充折叠**（同步、落在工具结果之后）。
+    ///
+    /// 为什么触发点在这里：合并消息必须排在工具结果**之后**（本轮的第二次请求
+    /// 才会把它当已有输入）。写臂那一刻落格会插在 `tool_calls` 与结果之间，违反
+    /// 协议顺序；而批次边界没有别的事实时刻——`artifact.added` 就是工具结果本身，
+    /// 且它经过本事实源这唯一写口。此处折叠后，环的下一次请求重读事实自然读到。
+    ///
+    /// `blocking_read / blocking_write` 只在多线程 runtime 的 worker 上可用
+    /// `block_in_place` 包住：其它形态（单线程 runtime / 无运行时）留队给轮收尾的
+    /// A 线，**不在这里 panic**。
+    fn fold_supplements(&self) {
+        let Some(drain) = self.supplements.as_ref() else {
+            return;
+        };
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        if handle.runtime_flavor() != tokio::runtime::RuntimeFlavor::MultiThread {
+            return;
+        }
+        // 取件要用 `blocking_write`，落格要走 `apply`（`Handle::block_on`）：两者都
+        // 只能在 `block_in_place` 里做。`apply` 是消息列表的唯一写入口——它把事实与
+        // `messages.json` 一起折，别处只落事实会让读缓存与重建分叉（LWF-001）。
+        tokio::task::block_in_place(|| drain.land_merged_sync(&handle));
     }
 }
 
@@ -96,10 +133,17 @@ impl FactSource for SessionFactSource {
         } else {
             actor
         };
+        let kind = draft.kind.clone();
         let event = symbio_plugin_api::fact_source::draft_into_event(actor, draft);
         let seq = Store::append(&*self.wal, event)
             .map(|seq| seq.value())
             .map_err(|e| format!("{e:?}"))?;
+
+        // **批次边界**：工具结果刚进事实源，而环的下一次请求还没装配。此刻折进忙窗
+        // 内排队的补充——合并事实的 seq 因此必然排在工具结果之后（见 `fold_supplements`）。
+        if kind == EVENT_ARTIFACT_ADDED {
+            self.fold_supplements();
+        }
 
         // 事实写入的**唯一收口**：落账成功后踢一次本根绑定的驱动。
         //
@@ -184,6 +228,7 @@ impl FactSourceOpener for SessionFactOpener {
             Arc::new(RwLock::new(None)),
             None,
             ExecEventSink::silent(),
+            None,
         ))
     }
 }

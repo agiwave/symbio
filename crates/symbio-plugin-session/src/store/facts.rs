@@ -136,6 +136,7 @@ impl SessionStore {
             session_id,
             None,
             symbio_kernel::exec::ExecEventSink::silent(),
+            None,
         )
     }
 
@@ -143,11 +144,16 @@ impl SessionStore {
     ///
     /// 只读调用方走 [`Self::fact_source`]（显式无驱动、静默）；开轮写口必须走本方法，
     /// 把本根的驱动实例与真实转写出口绑上——写口自己不做任何进程级反查。
+    ///
+    /// `supplements` 只由开轮写口传入（批次边界折叠，见
+    /// [`SessionFactSource::fold_supplements`](super::fact_source::SessionFactSource)）；
+    /// 只读面传 `None`。
     pub(crate) fn fact_source_bound(
         &self,
         session_id: &str,
         drive: Option<Arc<dyn symbio_plugin_api::DriveEntry>>,
         sink: symbio_kernel::exec::ExecEventSink,
+        supplements: Option<crate::transcript::supplements::SupplementDrain>,
     ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
         // 会话目录不存在 = 没跑过 = **没有事实源**（缺省态，不是失败）。
         // 只读面（`session/changes` 等）必须能回答「这个会话还没有 WAL」，
@@ -172,6 +178,7 @@ impl SessionStore {
                 self.agent_scope_cell(session_id),
                 drive,
                 sink,
+                supplements,
             )
         }))
     }

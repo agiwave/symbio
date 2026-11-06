@@ -115,14 +115,6 @@
     },
     {
       "path": "crates/symbio-plugin-session/src/transcript/inbox.rs",
-      "symbols": ["drain_limit"],
-      "capability": "一轮最多抽几条补充的上限（补充整合的批次边界）",
-      "future_caller": "transcript::supplements::SupplementDrain::take_inbox_batch_sync",
-      "batch": "supplements",
-      "e2e": ["t19-supplements-merge"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/inbox.rs",
       "symbols": ["take_inbox_batch_sync"],
       "capability": "同步抽取收件箱一批条目（供补充整合与压缩前置使用）",
       "future_caller": "轮首准备段：抽干收件箱后交给 merge_supplements",
@@ -203,17 +195,9 @@
     },
     {
       "path": "crates/symbio-plugin-session/src/transcript/supplements.rs",
-      "symbols": ["SupplementDrain"],
-      "capability": "补充抽干器（把收件箱条目按上限抽成一批）",
-      "future_caller": "轮首准备段的补充整合入口（构造后 take_inbox_batch_sync）",
-      "batch": "supplements",
-      "e2e": ["t19-supplements-merge"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/supplements.rs",
-      "symbols": ["new", "take_inbox_batch_sync"],
-      "capability": "补充抽干器的构造与抽取实现",
-      "future_caller": "SupplementDrain::new → take_inbox_batch_sync（轮首准备段）",
+      "symbols": ["take_inbox_batch_sync"],
+      "capability": "补充抽干器的同步抽取实现（把收件箱条目按上限抽成一批）",
+      "future_caller": "轮首准备段：SupplementDrain::take_inbox_batch_sync（补充整合入口）",
       "batch": "supplements",
       "e2e": ["t19-supplements-merge"]
     },

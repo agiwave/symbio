@@ -270,11 +270,21 @@ impl SessionPlugin {
         store
             .seed_open_verdicts(session_id)
             .map_err(PluginError::InternalError)?;
+        // 补充整合的批次边界折叠器：随**开轮写口**一起绑上（只读面不折叠）。
+        // 它持的是「取批那三样」+ 消息列表写口，折叠全程留在会话域，不需要驱动器伸手来问。
+        let state = self.active_mgr.get_or_create(session_id).await;
+        let supplements = super::transcript::supplements::SupplementDrain::new(
+            Arc::clone(&self.config),
+            Arc::clone(&self.change_subs),
+            state,
+            Arc::clone(&store),
+        );
         store
             .fact_source_bound(
                 session_id,
                 self.drive_entry(),
                 symbio_kernel::exec::ExecEventSink::direct(sink),
+                Some(supplements),
             )
             .map_err(PluginError::InternalError)?
             .ok_or_else(|| PluginError::NotFound(format!("会话 {session_id} 没有事实源")))

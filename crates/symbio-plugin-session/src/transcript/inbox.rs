@@ -114,6 +114,44 @@ pub(crate) fn take_inbox_batch_sync(
     batch
 }
 
+/// **忙窗批次边界**抽干（同步）：只在该会话**正在跑**时取走队首一批。
+///
+/// 与 [`take_inbox_batch_sync`] 的区别只有忙门方向：批次边界发生在**本轮之内**
+/// （工具结果落格之后、下一次请求装配之前），因此先确认本会话确实在跑；
+/// 空闲时取走的那批属于**下一轮**（轮收尾的 A 线），两条抽干点不能互相顶替。
+///
+/// `supplements_enabled = false` ⇒ 空批：关闭补充整合等于「一条消息 = 一轮」，
+/// 忙窗写入留队，由轮收尾各自开轮（与改造前逐字一致）。
+///
+/// ⚠️ 调用方负责 `block_in_place`（同 [`take_inbox_batch_sync`]）：单线程 runtime
+/// 的 async 上下文里 `blocking_read` 会 panic。
+pub(crate) fn take_busy_supplement_batch_sync(
+    config: &tokio::sync::RwLock<SessionConfig>,
+    change_subs: &VdfsChangeSubscriptions,
+    state: &Arc<ActiveSessionState>,
+) -> Vec<InboxItem> {
+    let limit = {
+        let cfg = config.blocking_read();
+        if !cfg.supplements_enabled {
+            return Vec::new();
+        }
+        drain_limit(&cfg)
+    };
+
+    let batch: Vec<InboxItem> = {
+        let mut inner = state.inner.blocking_write();
+        // 空闲留给轮收尾：它按「下一轮」的语义抽干，不在这里折进本轮。
+        if !inner.is_working() {
+            return Vec::new();
+        }
+        let n = inner.inbox.len().min(limit);
+        inner.inbox.drain(..n).collect()
+    };
+
+    announce_drained(change_subs, &state.session_id, &batch);
+    batch
+}
+
 // ── S07 抢占判定────────────────────────────────────────────
 //
 // 唯一生产消费方就是本文件的忙窗判定与空闲落格链（D-190）；判定是纯函数，

@@ -184,19 +184,22 @@ pub(crate) fn take_supplement_batch_sync(
 /// ## 为什么住 session 而不随驱动器迁走
 ///
 /// 抽干要读**取批那三样**（上界、队列、通知表，见 [`take_supplement_batch_sync`]），
-/// 它们全是会话状态；驱动器经 `session/<sid>/_run/take-supplements` 动作使用它。
+/// 它们全是会话状态；批次边界本身（工具结果落格）也在会话的**事实写口**上，
+/// 两条判据因此都不需要驱动器伸手向会话要数据。
 ///
 /// ## 它只做一件事
 ///
-/// 委托本域的单一入口 [`take_supplement_batch_sync`]（取批 + 合并 + 成形三步整体
-/// 住在本域，见 [D-081](../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决三），
-/// **不在驱动器侧自拼步骤、不写任何地址、不落格、不落库**：抽干发生在工具循环的
-/// **批次边界**，落格与「进下一次请求」都在 loop 的 `turn_exec.rs` 的
-/// `supplement_into_request`（由 `turn_runner.rs` 的 2f 触发）。
+/// 委托本域的单一入口：取批 + 合并两步都在本域内完成，**不写任何地址、不落库**。
+/// 落格由会话事实源在 `artifact.added`（工具结果）之后调用
+/// [`Self::land_merged_sync`]，经消息列表的**唯一写入口** `apply` 落一条
+/// `message.added`——合并消息因此必然排在工具结果**之后**（写臂那一刻落格会插在
+/// `tool_calls` 与结果之间，违反协议顺序）。
 pub(crate) struct SupplementDrain {
     config: Arc<tokio::sync::RwLock<super::super::config::SessionConfig>>,
     change_subs: Arc<VdfsChangeSubscriptions>,
     state: Arc<ActiveSessionState>,
+    /// 消息列表的唯一写入口 `apply` 需要它（落格不能只写事实，见 [`Self::land_merged_sync`]）。
+    store: Arc<crate::store::SessionStore>,
 }
 
 impl SupplementDrain {
@@ -204,11 +207,13 @@ impl SupplementDrain {
         config: Arc<tokio::sync::RwLock<super::super::config::SessionConfig>>,
         change_subs: Arc<VdfsChangeSubscriptions>,
         state: Arc<ActiveSessionState>,
+        store: Arc<crate::store::SessionStore>,
     ) -> Self {
         Self {
             config,
             change_subs,
             state,
+            store,
         }
     }
 
@@ -220,6 +225,54 @@ impl SupplementDrain {
     /// loop 的注入闭包都有 flavor 判定（多线程才 `block_in_place`，否则裸调）。
     pub(crate) fn take_inbox_batch_sync(&self) -> Option<DrainedSupplement> {
         take_supplement_batch_sync(&self.config, &self.change_subs, &self.state)
+    }
+
+    /// 忙窗批次边界：抽干并合并成**一条**用户消息（**只取件、不落格**）。
+    ///
+    /// 与 [`Self::take_inbox_batch_sync`] 的区别是忙门方向：只有本会话正在跑时才取
+    /// （空闲那批归轮收尾的下一轮）。返回完整节点而不是 [`DrainedSupplement`]——
+    /// 落格要的是 `message.added` 的载荷，而 `DrainedSupplement` 是给模型注入用的成形值。
+    ///
+    /// ⚠️ **调用方负责 `block_in_place`**（同 [`Self::take_inbox_batch_sync`]）。
+    fn take_merged_node_sync(&self) -> Option<cm::ChatNode> {
+        let batch = super::inbox::take_busy_supplement_batch_sync(
+            &self.config,
+            &self.change_subs,
+            &self.state,
+        );
+        merge_supplements(&batch)
+    }
+
+    /// **批次边界落格**（同步外壳）：取件、合并、经唯一写入口 `apply` 落一条
+    /// `message.added`。
+    ///
+    /// 为什么走 `apply` 而不是直接写事实：消息列表的「事实 + `messages.json`」必须
+    /// 由同一个入口一起折（LWF-001）；只落事实会让读缓存与重建结果分叉。
+    ///
+    /// ⚠️ **调用方负责 `block_in_place` 且当前必须是多线程 runtime**：取件用
+    /// `blocking_write`，`apply` 经 `Handle::block_on` 走存储的异步写口。
+    pub(crate) fn land_merged_sync(&self, handle: &tokio::runtime::Handle) {
+        use crate::chat_session::{Carrier, MessageChange, PersistentChatSession};
+
+        let Some(node) = self.take_merged_node_sync() else {
+            return;
+        };
+        let session = PersistentChatSession::new(
+            self.state.session_id.clone(),
+            Arc::clone(&self.config),
+            Arc::clone(&self.store),
+        );
+        let outcome = handle.block_on(session.apply(MessageChange::Born {
+            nodes: vec![node],
+            carrier: Carrier::Here,
+        }));
+        if let Err(why) = outcome {
+            symbio_plugin_api::plugin_warn!(
+                "session",
+                "[补充] 合并消息落格失败（{why:?}；会话 {}）——条目已出队，轮收尾不会再抽到它",
+                self.state.session_id
+            );
+        }
     }
 }
 
