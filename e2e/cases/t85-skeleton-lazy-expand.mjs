@@ -12,20 +12,33 @@ import './_selfrun.mjs';
 // 「后端按根算子 BFS」与「前端按 `parent_id` 组装」是不是同一棵子树。真会话里
 // 跑一遍，两份才对得上；对不上时前端会重复渲染或丢内容，且只在长会话里现形。
 //
+// ## D-335 之后的形状（不是退役）
+//
+// 「整轮骨架 ⊃ 工具骨架 ⊃ 工具结果」那两层已不存在：整轮骨架按 D-335 并入
+// **用户消息节点**（同 id 合并，读出的是 `body` 不是 `skeleton`）。剩下的折叠
+// 主体是**工具卡**（`skeleton` + `style_tag=tool`），它仍有可展开的后代——工具
+// 结果（一层）。所以能力还在，只是从两层变一层；本用例断言的是**懒展开确实
+// 发生**：
+//
+// - 折叠视图（全量读去掉后代，即前端本地释放后的那份）里只有骨架本身，且骨架
+//   自带的 `content` 只有调用参数，不含工具结果正文；
+// - 结果正文**只**藏在后代里，唯一取到它的路是 `expand_skeleton`；
+// - 重取回来合并后，折叠视图与全量读逐条相等。
+//
+// 若哪天工具卡也不再有后代，本用例会在「至少一个后代 / 结果只在后代里」这一条
+// 上红——那意味着懒展开真的没有主体了，该按退役处理，而不是把判据改弱。
+//
 // ## 判据怎么取
 //
-// 1. **重取 = 全量读**：按骨架 id 重取的子树，其 `{id, parent_id, seq}` 三元组
-//    集合与「从全量转写里按 `parent_id` BFS 出的后代集合」**逐条相等**——多一个
-//    会重复渲染，少一个会丢内容，`seq` 错了会排到别的位置。
-// 2. **depth="1" 只直接子**：不下探孙节点（整轮骨架只回工具骨架，不回工具结果）。
+// 1. **懒展开确实发生**：折叠视图里有骨架、无后代内容；`expand_skeleton` 取回的
+//    正是被摘掉的那批（含结果正文），合并后与全量读一致。
+// 2. **depth="1" 只直接子**：工具卡当前只有一层，故与 `all` 同集——判据是
+//    「只回直接子」，不是「必须比 all 少」（D-335 之前才靠层数分道）。
 // 3. **since_seq 增量**：只回 seq 更高的那批（窄帧序列的增量写法）。
 // 4. **非法入参有错误码**（判据 1）：`depth` 给了 `"2"`、`since_seq` 给了字符串
 //    ⇒ 被拒，**不静默按缺省返回整棵**——静默的后果是「以为只要直接子」的调用方
 //    拿到整棵树，而他从回执里看不出来。
 // 5. **只读**：重取前后全量转写一条不少（它是读出口，不是写动作）。
-//
-// 场景取一次真实的工具调用：整轮骨架 ⊃ 工具骨架 ⊃ 工具结果，天然两层，
-// 正好让 depth="1" 与 depth="all" 分道。
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -110,7 +123,7 @@ function rejected(resp) {
 }
 
 export default defineCase(
-  'T85 折叠骨架的按需重取：重取回来的子树与全量读逐字段一致，非法入参有错误码',
+  'T85 折叠骨架的按需重取：折叠视图里只有骨架、结果正文只在展开后取到，非法入参有错误码',
   async () => {
     const llm = await new MockLlm([
       {
@@ -156,20 +169,24 @@ export default defineCase(
         const all = await readSessionMessages(cli, SID);
         assert(Array.isArray(all) && all.length > 0, `应读到转写（实际: ${JSON.stringify(all)?.slice(0, 300)}）`);
 
-        // 骨架必须真存在，且**至少两层**：整轮 ⊃ 工具 ⊃ 结果
+        // ── 骨架仍在，但折叠主体只剩工具卡（D-335 把整轮骨架并入用户消息）──
         const skeletons = all.filter((m) => m?.type === 'skeleton');
         assert(skeletons.length > 0, `转写里应有骨架（实际类型: ${all.map((m) => m?.type).join(',')}）`);
-        const withKids = skeletons
-          .map((s) => ({ s, kids: descendantsOf(all, s.id) }))
-          .sort((a, b) => b.kids.length - a.kids.length);
-        const target = withKids[0];
         assert(
-          target.kids.length >= 2,
-          `最外层骨架应有至少两代后代（depth="1" 与 all 才能分道，实际 ${target.kids.length} 个）`,
+          skeletons.every((s) => (s.meta?.style_tag ?? '') !== 'run'),
+          `整轮骨架按 D-335 并入用户消息节点，不应再有 run 骨架（实际: ${JSON.stringify(
+            skeletons.map((s) => [s.id, s.meta?.style_tag ?? null]),
+          )}）`,
         );
-        // 至少有一个后代的 parent 不是骨架自身 ⇒ 真的有两层
-        const grandKids = target.kids.filter((k) => k.parent_id !== target.s.id);
-        assert(grandKids.length > 0, '骨架子树应是多层的（否则 depth 判据是空跑）');
+        const target = skeletons
+          .map((s) => ({ s, kids: descendantsOf(all, s.id) }))
+          .sort((a, b) => b.kids.length - a.kids.length)[0];
+        // 「还有没有可展开的对象」的判据就落在这里：工具卡仍有后代（工具结果）。
+        // 若哪天为 0，懒展开已无主体——该整例退役，而不是把这句话删掉。
+        assert(
+          target.kids.length >= 1,
+          `工具卡骨架应仍有可展开的后代（实际 0 个：懒展开已无主体，应按退役处理）`,
+        );
 
         const addr = await sessionAddr(cli, SID);
         const targetPath = `${addr}/${SEG_MESSAGES}/${target.s.id}`;
@@ -182,7 +199,29 @@ export default defineCase(
             { session_id: SID },
           );
 
-        // ── 判据 1：重取 = 全量读（depth 缺省 = all）────────────────────────
+        // ── 判据 1：懒展开确实发生（不是只数节点）──────────────────────────
+        //
+        // 前端释放 = 把这棵子树从本地列表里摘掉。折叠视图必须只剩骨架本身：
+        // 有骨架、没有后代；且骨架自己的 `content` 只有调用参数——工具结果
+        // 正文**只在**后代节点里。于是「结果正文能出现」这件事只能由展开完成。
+        const kidIds = new Set(target.kids.map((k) => k.id));
+        const collapsed = all.filter((m) => !kidIds.has(m.id));
+        assert(collapsed.some((m) => m.id === target.s.id), '折叠视图里应有骨架本身');
+        assert(
+          !String(target.s.content ?? '').includes(WS_MARKER),
+          `骨架的 content 只该有调用参数：结果正文若也在骨架里，懒展开就是空跑（实际: ${JSON.stringify(
+            target.s.content,
+          )?.slice(0, 200)}）`,
+        );
+        assert(
+          target.kids.some((k) => String(k.content ?? '').includes(WS_MARKER)),
+          '工具结果正文应藏在后代里（折叠时看不见）',
+        );
+        assert(
+          collapsed.every((m) => !String(m.content ?? '').includes(WS_MARKER)),
+          '折叠视图里不应出现工具结果正文（否则前端不必展开）',
+        );
+
         const respAll = await expand({ depth: 'all' });
         assertEq(
           respAll.status,
@@ -203,18 +242,27 @@ export default defineCase(
           target.kids.map(triple).sort(),
           '重取的子树须与全量读里的后代逐条一致（id / parent_id / seq）',
         );
+        assert(
+          gotAll.some((n) => String(n.content ?? '').includes(WS_MARKER)),
+          '重取应带回工具结果正文（不只是 id）',
+        );
+        const merged = [...collapsed, ...gotAll];
+        assertEq(
+          merged.map(triple).sort(),
+          all.map(triple).sort(),
+          '重取合并回折叠视图后，应与全量读逐条相等',
+        );
 
         // ── 判据 2：depth="1" 只回直接子 ────────────────────────────────────
+        //
+        // D-335 之后工具卡只有一层，所以它与 `all` 同集——判据是「只回直接子」，
+        // 不是「必须比 all 少」。层数分道是整轮骨架还在时的事。
         const respOne = await expand({ depth: '1' });
         assertEq(respOne.status, 200, `depth="1" 应受理（${JSON.stringify(respOne.body)?.slice(0, 400)}）`);
         const gotOne = nodesOf(respOne);
         assert(Array.isArray(gotOne), 'depth="1" 回执应带 nodes 数组');
         assert(
-          gotOne.length > 0 && gotOne.length < gotAll.length,
-          `depth="1" 应少于 all（实际 ${gotOne.length} vs ${gotAll.length}）`,
-        );
-        assert(
-          gotOne.every((n) => n.parent_id === target.s.id),
+          gotOne.length > 0 && gotOne.every((n) => n.parent_id === target.s.id),
           `depth="1" 只该有直接子（实际: ${JSON.stringify(gotOne.map((n) => [n.id, n.parent_id]))}）`,
         );
         assertEq(
@@ -227,6 +275,7 @@ export default defineCase(
         const seqs = target.kids.map((k) => k.seq).filter((s) => typeof s === 'number');
         assert(seqs.length === target.kids.length, '后代都应带 seq（顺序的唯一权威锚点）');
         const water = Math.min(...seqs);
+        assert(water > 0, 'seq 从 1 起发号（since_seq=0 才是「不过滤」）');
         const respSince = await expand({ since_seq: water });
         assertEq(respSince.status, 200, `since_seq 应受理（${JSON.stringify(respSince.body)?.slice(0, 400)}）`);
         const gotSince = nodesOf(respSince);
@@ -234,6 +283,13 @@ export default defineCase(
           gotSince.map(triple).sort(),
           target.kids.filter((k) => k.seq > water).map(triple).sort(),
           `since_seq=${water} 只该回 seq 更高的后代`,
+        );
+        // 反向锚：`since_seq=0` 时全部后代都在增量里——否则「只回更高」是空跑。
+        const respSince0 = await expand({ since_seq: 0 });
+        assertEq(
+          (nodesOf(respSince0) ?? []).map(triple).sort(),
+          target.kids.map(triple).sort(),
+          'since_seq=0 应回全部后代',
         );
 
         // ── 判据 4：非法入参被拒，不静默按缺省 ───────────────────────────────
