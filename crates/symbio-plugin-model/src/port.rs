@@ -282,8 +282,23 @@ fn turn_input(
                 }
             }
             // 终答也是一次模型请求（收束轮）：请求轮次据此推进，段才按「首幕」分档。
+            //
+            // 正文必须回灌成一条 assistant 消息：收束轮没有 `response` 格（`world_kind`
+            // 是独立种类），若只推轮次不推正文，下一轮的请求包就会丢掉上一轮的答话
+            // ——用户看到的对话还在，模型看到的对话线却断了一截。
             EVENT_CHAT_ASSISTANT_FINAL => {
                 round = round.saturating_add(1);
+                if let Some(text) = fact.payload.get("text").and_then(serde_json::Value::as_str) {
+                    if !text.trim().is_empty() {
+                        messages.push(PromptMessage {
+                            role: "assistant".into(),
+                            text: text.to_string(),
+                            tool_call_id: None,
+                            tool: None,
+                            tool_calls: None,
+                        });
+                    }
+                }
             }
             EVENT_ARTIFACT_ADDED => {
                 let (Some(tool), Some(call_id)) = (

@@ -513,16 +513,13 @@ export default defineCase(
 
         const unmBase = await reqCount();
         await send(cli2, SIDS.unmounted, '谢谢', hdUn.workdir);
-        // 降级方向 = **进工具循环**（不是沉默）：因此必然出现 worker 请求与 Turn 节点。
-        // 两个判据**在同一个轮询里一起等**，而不是「先等 Turn 再数请求」——后者有竞态：
-        // Turn 节点与 worker 请求几乎同时可见，`waitFor` 一返回就立刻 `reqCount()`
-        // 可能抢在请求被 mock 记账之前（实测偶发 C 线「应发一次 worker 请求」失败，
-        // 单独重跑必过）。把两者合成一个条件，「等到」与「判据」就是同一个瞬间。
+        // 降级方向 = **进模型轮**（不是沉默）：判据只有一个——这一轮真的发出了一次
+        // 带工具表的模型请求（compose 没挂载时没人能说话，判决不能把整轮压成沉默）。
+        // 不等 `msgTypeOf === 'turn'`：D-259 把 `turn` 从容器改成**信封字段**，投影
+        // 不再产出 Turn 组合节点——等它等于等一个按目标形状不该存在的东西。
         await waitFor(
-          async () =>
-            (await reqCount()) - unmBase >= 1 &&
-            ((await readSessionMessages(cli2, SIDS.unmounted)) ?? []).some((m) => msgTypeOf(m) === 'turn'),
-          { what: 'C 线降级进工具循环（worker 请求 + Turn 节点）', timeoutMs: 40_000 },
+          async () => (await reqCount()) - unmBase >= 1,
+          { what: 'C 线降级进模型轮（worker 请求）', timeoutMs: 40_000 },
         );
         const unmMsgs = await readSessionMessages(cli2, SIDS.unmounted);
         assertTranscriptInvariants(unmMsgs, 'T22-C');
@@ -558,12 +555,10 @@ export default defineCase(
       try {
         const offBase = await reqCount();
         await send(cli3, SIDS.off, '谢谢', hdOff.workdir);
-        // 同 C 线：两个判据合成一个轮询（理由见 C 线的注释）。
+        // 同 C 线：判据就是「这一轮发了带工具表的模型请求」（理由见 C 线的注释）。
         await waitFor(
-          async () =>
-            (await reqCount()) - offBase >= 1 &&
-            ((await readSessionMessages(cli3, SIDS.off)) ?? []).some((m) => msgTypeOf(m) === 'turn'),
-          { what: 'D 线降级进工具循环（worker 请求 + Turn 节点）', timeoutMs: 40_000 },
+          async () => (await reqCount()) - offBase >= 1,
+          { what: 'D 线降级进模型轮（worker 请求）', timeoutMs: 40_000 },
         );
         const offMsgs = await readSessionMessages(cli3, SIDS.off);
         assertTranscriptInvariants(offMsgs, 'T22-D');

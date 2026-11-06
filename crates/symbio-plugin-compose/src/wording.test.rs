@@ -1,120 +1,40 @@
-//! `crates/symbio-plugin-compose/src/lib.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `crates/symbio-plugin-compose/src/wording.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
-//! 这里只测**不需要模型**的部分（纯函数 + 「没有模型服务」这条失败方向）：
-//! 生成路径本身由 e2e `t22-compose.mjs` 在真实边界上验（mock LLM）。
+//! 这里只测**不需要模型**的部分：系统提示的拼接顺序与覆盖口径。生成路径本身由
+//! e2e `t22-compose.mjs` 在真实边界上验（mock LLM）。
 
 use super::*;
-use symbio_plugin_api::chat_node::{ChatNode, MessageContent, NodeRole};
 
-/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_plugin_api::principal::Principal {
-    use symbio_plugin_api::principal::Principal;
-    match role {
-        NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
-        NodeRole::Assistant => Principal::from_legacy("session/main"),
-        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
-        NodeRole::System => Principal::from_legacy("system/local"),
-    }
-}
-
-fn node(role: NodeRole, text: &str) -> ChatNode {
-    ChatNode {
-        id: llm_short_id(),
-        principal: Some(principal_for(role)),
-        content: Some(MessageContent::Text(text.to_string())),
-        ..Default::default()
-    }
-}
-
-fn request(context: Vec<ChatNode>) -> ComposeRequest {
-    ComposeRequest {
-        session_id: "s1".to_string(),
-        verdict: symbio_plugin_api::Verdict::Answered {
-            reason: "from_context".to_string(),
-        },
-        context,
-        snapshot: symbio_plugin_api::RunSnapshot::default(),
-    }
-}
-
-/// 消息列表**原样**转发投影：顺序与角色都不动。
-///
-/// 这里刻意不重排、不合并、不插"以下是历史"——投影已经是模型要的形状，
-/// 再加工一次就是把同一份事实变成两种形状。
+/// 注册段在前、指令段在后：顺序反了，指令压不住长人格段里的措辞习惯。
 #[test]
-fn messages_follow_the_projection_verbatim() {
-    let context = vec![
-        node(NodeRole::User, "第一个问题"),
-        node(NodeRole::Assistant, "第一个回答"),
-        node(NodeRole::User, "第二个问题"),
-    ];
-    let messages = build_messages(&context);
+fn registered_prompt_stays_in_front_of_the_instruction() {
+    let prompt = system_prompt(&ComposeConfig::default(), "你是这个助手。");
+    let (head, tail) = prompt.split_once("\n\n").expect("两段之间应当有空行分隔");
 
-    assert_eq!(messages.len(), 3);
-    assert_eq!(messages[0].role, "user");
-    assert_eq!(messages[1].role, "assistant");
-    assert_eq!(messages[2].text, "第二个问题");
+    assert_eq!(head, "你是这个助手。");
+    assert_eq!(tail, INSTRUCTION);
 }
 
-/// 空正文节点剔除：投影只保证"是文本节点"，不保证"有正文"。
-///
-/// 留着它们会让模型收到一条空消息——部分协议直接 400，其余协议也会让它
-/// 把"空白"当成一次发言。
+/// 本轮没有装配出注册段（没有会话 / 空提示词）⇒ 只剩指令段，不留一个空段。
 #[test]
-fn blank_text_nodes_are_dropped() {
-    let context = vec![
-        node(NodeRole::User, "有内容"),
-        node(NodeRole::Assistant, "   "),
-        node(NodeRole::User, ""),
-    ];
-    let messages = build_messages(&context);
-
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].text, "有内容");
+fn empty_registered_prompt_leaves_only_the_instruction() {
+    assert_eq!(system_prompt(&ComposeConfig::default(), ""), INSTRUCTION);
+    assert_eq!(
+        system_prompt(&ComposeConfig::default(), "  \n "),
+        INSTRUCTION
+    );
 }
 
-/// `non_empty` 去首尾空白后判空：只含空白的生成结果等于"什么都没说"，
-/// 它比退回模板更糟——用户会看到一条空消息。
+/// 配置的 `instruction` 只覆盖**指令段**，注册段不受影响。
 #[test]
-fn only_non_blank_generation_survives() {
-    assert_eq!(non_empty("  你好  ").as_deref(), Some("你好"));
-    assert_eq!(non_empty(""), None);
-    assert_eq!(non_empty("  \n\t "), None);
-}
+fn instruction_override_replaces_only_the_tail() {
+    let config = ComposeConfig {
+        instruction: Some("只答一句。".to_string()),
+        ..ComposeConfig::default()
+    };
 
-/// **没有模型服务 ⇒ 生成不了**（返回 `None`，由调用方退回模板）。
-///
-/// 这条是失败方向的可执行形式：本插件的调用点拿不到能力访问器（`CAPABILITY_VISITOR`
-/// 缺席），必须**安静地**返回 `None`，而不是 panic 或造一句凭空的话。
-#[tokio::test]
-async fn generation_without_a_model_service_returns_none() {
-    let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
-
-    let out = generate(
-        &ctx,
-        &request(vec![node(NodeRole::User, "我们刚才聊了什么")]),
-        &ComposeConfig::default(),
-    )
-    .await;
-    assert!(out.is_none(), "没有模型服务时应返回 None");
-}
-
-/// 对话线里**没有用户发言** ⇒ 没有"要回答的那句话"，生成路径跳过。
-///
-/// 仓外调用方直呼本路由时可能给出这样的载荷（契约字段全部 `#[serde(default)]`）。
-#[tokio::test]
-async fn generation_without_a_user_turn_returns_none() {
-    let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
-
-    let only_assistant = vec![node(NodeRole::Assistant, "我先说一句")];
-    let out = generate(&ctx, &request(only_assistant), &ComposeConfig::default()).await;
-    assert!(out.is_none(), "没有用户发言时不该生成");
-
-    let empty: Vec<ChatNode> = Vec::new();
-    let out = generate(&ctx, &request(empty), &ComposeConfig::default()).await;
-    assert!(out.is_none(), "空对话线时不该生成");
+    let prompt = system_prompt(&config, "注册段");
+    assert_eq!(prompt, "注册段\n\n只答一句。");
 }

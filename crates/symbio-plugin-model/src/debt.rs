@@ -74,15 +74,26 @@ impl DebtSource for ModelDebts {
         let Some(user_id) = facts.latest_fact_id(EVENT_USER_MESSAGE) else {
             return Vec::new();
         };
-        // W2c-1a 门：本轮已落 `classify.answered` ⇒ 本轮**不欠**模型往返
-        // （终答由会话经 `compose/wording` 就地落，见 D-341）。只认**本轮身份**
-        // （事件 id = `classify.answered:<user_id>`，按种类 + 身份比较、不读载荷）：
-        // 不扫历史轮，也不把别的轮的判决借到这一轮；`classify.escalate` 不触发本门。
-        if answered_this_turn(facts, user_id) {
+        // W2c-1a 门：本轮已落 `classify.answered` 且**有人能说话**（compose 有效）⇒
+        // 本轮**不欠**模型往返（终答由会话经 compose 的 `model.assist` 行债生成后落格，
+        // 见 D-341）。只认**本轮身份**（事件 id = `classify.answered:<user_id>`，按种类 +
+        // 身份比较、不读载荷）：不扫历史轮，也不把别的轮的判决借到这一轮；
+        // `classify.escalate` 不触发本门。
+        //
+        // `compose_enabled` 是会话写下的**有效值**（调用方开关 ∧ compose 债表在场）：
+        // 关掉 / 未挂载时为 false——判决说「能直接答」却没人能说话，这一轮必须降级进
+        // 工具循环，而不是两个产线都不出手、整轮沉默。
+        let config_id = session_config_id(user_id);
+        let compose_on = facts
+            .fact_payload(EVENT_SESSION_CONFIG, &config_id)
+            .and_then(|c| c.get("compose_enabled"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let answered = answered_this_turn(facts, user_id);
+        if compose_on && answered {
             return Vec::new();
         }
         // 这一轮的 config 身份 = 由这条 user.message 的 id 派生（写方同源）。
-        let config_id = session_config_id(user_id);
         // 判决时序：本轮分类生效 ⇒ 本行等判决行收束后才可派发（见模块文档）。
         let classify_on = facts
             .fact_payload(EVENT_SESSION_CONFIG, &config_id)
@@ -114,8 +125,11 @@ impl DebtSource for ModelDebts {
         .unless_id(FINAL_FACT_PREFIX, format!("{FINAL_FACT_PREFIX}:{user_id}"));
         if classify_on {
             // 首响开启 ⇒ 等首响行收束（它自己等 `classify.escalate`）；否则直接等判决行。
+            // **answered 且没人能说话**（compose 关掉 / 未挂载）时不等首响：这一轮不会
+            // 进入 `escalate`，首响行根本不会触发，等它就是整轮停摆——直接等已收束的
+            // 判决行，让模型接管（t22-C/D 的「降级进工具循环」）。
             // 前置债 id 两种判决路径共用同一个 id（见 classify/debt.rs）。
-            let prerequisite = if opening_on {
+            let prerequisite = if opening_on && !answered {
                 format!("{SESSION_OPENING_ROW}:id={user_id}")
             } else {
                 format!("{CLASSIFY_DECIDE_ROW}:id={user_id}")

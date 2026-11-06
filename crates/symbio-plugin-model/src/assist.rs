@@ -15,6 +15,9 @@
 //! 返回一条载荷 [`AssistReply`] + `root_id` / `final_id`：环把它落成 `response`
 //! 事实并补 `port`，读方按 `port == model.assist` 取回。`response` 不进
 //! `turn_input` 的 messages（那里只收 `port == model`），所以问答不会污染对话历史。
+//!
+//! `reasoning` / `reasoning_id` / `cost_ms` 也随回执走：思考段是一次真实往返的
+//! 产出，读方（如 `session` 的终答落格）照实复刻，**不在落格侧造理由**。
 
 use std::sync::Arc;
 
@@ -120,6 +123,7 @@ impl PortExecutor for AssistExecutor {
             ..Default::default()
         }];
         let env = ExecEnv::new(ExecEventSink::silent(), exec.abort.clone());
+        let started = std::time::Instant::now();
         match self
             .active
             // internal-model-allow IM-001: 问答端口是静默的一次性往返（无工具、无会话历史、不参与档位闸门）；走 `for_turn` 会把问答伪装成对话轮。
@@ -127,14 +131,27 @@ impl PortExecutor for AssistExecutor {
             .await
         {
             Ok(output) => {
+                let text = output.text.trim().to_string();
+                // 思考段与正文同源（有正文才可能有思考）：如实带回，读方不得自造。
+                let reasoning = (!output.reasoning.trim().is_empty())
+                    .then(|| output.reasoning.trim().to_string());
+                let reasoning_id = reasoning.as_ref().map(|_| llm_short_id());
                 let reply = AssistReply {
-                    text: output.text.trim().to_string(),
+                    text,
+                    reasoning,
+                    reasoning_id,
+                    // cost_ms 与对话轮同一条实测口径（执行体是 adapter 边界）：
+                    // 内部往返本身不写事件，但这一次的耗时随回执交给落格方。
+                    cost_ms: started.elapsed().as_millis() as u64,
                 };
                 PortOutcome {
                     facts: vec![json!({
                         "root_id": root_id,
                         "final_id": final_id,
                         "text": reply.text,
+                        "reasoning": reply.reasoning,
+                        "reasoning_id": reply.reasoning_id,
+                        "cost_ms": reply.cost_ms,
                     })],
                     ..Default::default()
                 }

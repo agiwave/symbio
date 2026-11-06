@@ -20,7 +20,6 @@ use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::retrieval::{retrieve_all, RetrievalRequest};
 use symbio_plugin_api::FactDraft;
-use symbio_plugin_api::CAPABILITY_VISITOR;
 use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use symbio_sdk::turn::facts::FleetSnapshot;
 
@@ -76,11 +75,9 @@ impl SessionPlugin {
             agent_scope.as_deref(),
         )
         .await;
-        // 收尾面（`project_final_turn`）要经 `compose/wording` 就地落 `Answered` 的终答，
-        // 而 compose 的生成产线读的就是这条能力视图。收集器只在自己 fork 的遍历上下文
-        // 上 set，所以这里把同一份视图挂到**本轮的**上下文：收尾任务 fork 自它即可继承。
-        // 没有 compose（未挂载）时路由 NotFound，收尾按既有路径原样降级。
-        ctx.set(CAPABILITY_VISITOR, manager.clone());
+        // 能力视图只在本轮**装配**（系统提示词 / 工具表 / 分类开关）里读；收尾面
+        // 不再需要它：答话的生成往返由 compose 的 `model.assist` 行债驱动，回执从
+        // 事实读面取，模板路径也不读能力视图。
         let system_prompt = symbio_sdk::capability::capability_prompts(&*manager)
             .await
             .into_iter()
@@ -108,6 +105,15 @@ impl SessionPlugin {
             None
         };
         let cfg = self.config.read().await.clone();
+        // 答话措辞的**有效开关**：调用方开关 ∧ compose 本轮的债表在场（`debt` 族报到）。
+        // 关掉 / 未挂载时，本插件不欠 `model.assist` 往返；模型行也据此知道「判决说
+        // 能直接答，但没人能说话」——那一轮降级进工具循环，而不是沉默。
+        let compose_enabled = cfg.compose_enabled
+            && manager
+                .list(symbio_plugin_api::debt::DEBT_FAMILY)
+                .await
+                .iter()
+                .any(|row| row.name() == format!("<debt>{}", symbio_plugin_api::PLUGIN_ID_COMPOSE));
         // 分类开关的**有效值**：调用方开关 ∧ 分类插件本轮的债表在场（`debt` 族报到）。
         // 卸载（t21-E）时写 false——模型债行的 `after` 等的是判决行的债；一个不会出现
         // 的前置债会让模型行永远停在「等」，本轮一个请求都不发。
@@ -131,6 +137,9 @@ impl SessionPlugin {
                 // 首响开关（调用方开关；没有 compose 时行会因路由取不到措辞而失败、
                 // 收敛为「不说话」，模型行照常放行）。模型债行按它决定是否等首响行。
                 "opening_enabled": cfg.opening_enabled,
+                // 答话措辞的**有效**开关：compose 的 `model.assist` 口债按它决定欠不欠
+                // 一次生成往返；模型行也按它决定「answered 是否提前收手」。
+                "compose_enabled": compose_enabled,
                 "progress_enabled": cfg.progress_enabled,
                 "progress_interval_ms": cfg.progress_interval_ms,
                 "progress_max_per_turn": cfg.progress_max_per_turn,

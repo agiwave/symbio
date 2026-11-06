@@ -31,10 +31,19 @@ pub struct AssistRequest {
 }
 
 /// 一次性问答的回复（`model.assist` 的应收载荷）。
+///
+/// `text` 是正文；`reasoning` / `reasoning_id` 是执行体如实带回的思考段（没有思考
+/// 产出就是 `None`，读方不得自造）；`cost_ms` 是这一次往返的耗时。
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AssistReply {
     #[serde(default)]
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_id: Option<String>,
+    #[serde(default)]
+    pub cost_ms: u64,
 }
 
 // ==================== 转写地址与节点投影 ====================

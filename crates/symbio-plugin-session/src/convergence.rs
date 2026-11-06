@@ -42,10 +42,14 @@ use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
 use symbio_plugin_api::{
     ComposeRequest, FactDraft, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, RunSnapshot,
-    Verdict, WordingReply, PATH,
+    Verdict, WordingReply, EVENT_RESPONSE, PATH,
 };
 use symbio_sdk::authz::PRINCIPAL_MAIN;
 use symbio_sdk::chat::chat_node as cm;
+
+/// 一次性问答端口名（数据）。写在这里而不是从 compose / compact 内部 import：
+/// 端口名是契约层不解释的数据，读方按**值**匹配回执，不依赖别的插件的私有常量。
+const MODEL_ASSIST_PORT: &str = "model.assist";
 
 /// 会话运行态的一次变化。
 ///
@@ -188,11 +192,18 @@ impl Convergence {
         state.transcript.lock().await.emit_session_state(node);
     }
 
-    /// 本轮 `classify.answered` 的终答：请 `compose/wording` 给文本，由本插件落格。
+    /// 本轮 `classify.answered` 的终答：拿到文本，由本插件落格。
     ///
     /// **本插件不产出话术**（thanks / clarify 的措辞在 compose 的模板表里）：
-    /// 这里只做三件事——带判决与对话线去问、把回来的文本落成终答事实、没有文本就
-    /// 原样返回 `false`（下方既有失败 / 卡片 / 无终答分支照常接管，绝不自己编一句）。
+    /// 这里只做三件事——拿到文本、把文本落成终答事实、没有文本就原样返回 `false`
+    /// （下方既有失败 / 卡片 / 无终答分支照常接管，绝不自己编一句）。
+    ///
+    /// 文本的**来源**按判决自己分派（[`Verdict::needs_wording_generation`]）：
+    ///
+    /// - `from_context` ⇒ 一次模型往返。往返由 compose 申报的 `model.assist` 行债
+    ///   驱动、执行体归 model 插件；本插件只从事实读面取回执（端口 + 开局事实身份
+    ///   双认，与 compact 的读法同一口径）。
+    /// - 其余理由码 ⇒ compose 的模板表（模板零模型往返，也不带思考）。
     ///
     /// 归属按声明表：`chat.assistant.final` 的声明方是本机主体（`@principal` →
     /// `PRINCIPAL_MAIN`），不写任何宿主字面量；节点由 `rebuild` 从 `dialog` 段折出。
@@ -220,30 +231,41 @@ impl Convergence {
         else {
             return Ok(false);
         };
-        let request = ComposeRequest {
-            session_id: session_id.to_string(),
-            verdict: Verdict::Answered {
-                reason: reason.clone(),
-            },
-            context: dialog_context(events),
-            snapshot: RunSnapshot::default(),
+        let verdict = Verdict::Answered {
+            reason: reason.clone(),
         };
-        let child = call.ctx.fork();
-        child.set(PATH, ROUTE_COMPOSE_WORDING.to_string());
-        child.set_payload(request)?;
-        let reply = match call.parent.clone().route(child).await {
-            Ok(response) => response.get::<WordingReply>().ok(),
-            Err(e) => {
-                // 未挂载 / 路由不存在与业务无关：与"没有 compose"走同一条降级路径。
-                symbio_plugin_api::plugin_warn!(
-                    "session",
-                    "compose/wording 不可用（{session_id}）：{e}"
-                );
-                None
-            }
-        };
-        let Some(reply) = reply else {
-            return Ok(false);
+        let reply = if verdict.needs_wording_generation() {
+            // 生成路径：回执已经在事实面上（行债的派发与三格都归环），只读不写。
+            let Some(reply) = assist_reply(events, &user.event_id) else {
+                return Ok(false);
+            };
+            reply
+        } else {
+            // 模板路径：文本仍由 compose 的模板表给出（本插件不产出话术）。
+            let request = ComposeRequest {
+                session_id: session_id.to_string(),
+                verdict,
+                context: dialog_context(events),
+                snapshot: RunSnapshot::default(),
+            };
+            let child = call.ctx.fork();
+            child.set(PATH, ROUTE_COMPOSE_WORDING.to_string());
+            child.set_payload(request)?;
+            let reply = match call.parent.clone().route(child).await {
+                Ok(response) => response.get::<WordingReply>().ok(),
+                Err(e) => {
+                    // 未挂载 / 路由不存在与业务无关：与"没有 compose"走同一条降级路径。
+                    symbio_plugin_api::plugin_warn!(
+                        "session",
+                        "compose/wording 不可用（{session_id}）：{e}"
+                    );
+                    None
+                }
+            };
+            let Some(reply) = reply else {
+                return Ok(false);
+            };
+            reply
         };
         let text = reply.text;
         if text.trim().is_empty() {
@@ -552,12 +574,30 @@ impl Convergence {
     }
 }
 
-/// 对话线：由既有折叠（与实时面同一份规则）折出用户 / 助手文本节点，供 compose
-/// 的生成产线直接当消息列表吃。
+/// 本轮 `model.assist` 的回执：按**端口 + 开局事实身份**双认（与 compact 的
+/// `summary_of` 同一读法），取最后一条。
+///
+/// 只读事实面上的 `response`；没有回执 = 这一次生成失败 / 被拒 ⇒ 调用方不落终答，
+/// 由既有降级分支接管，**不在这里造一句**。
+fn assist_reply(events: &[Event], root_id: &str) -> Option<WordingReply> {
+    let fact = events.iter().rev().find(|e| {
+        e.kind == EVENT_RESPONSE
+            && e.payload.get("port").and_then(Value::as_str) == Some(MODEL_ASSIST_PORT)
+            && e.payload.get("root_id").and_then(Value::as_str) == Some(root_id)
+    })?;
+    let reply: cm::AssistReply = serde_json::from_value(fact.payload.clone()).ok()?;
+    Some(WordingReply {
+        text: reply.text,
+        reasoning: reply.reasoning,
+        reasoning_id: reply.reasoning_id,
+        cost_ms: reply.cost_ms,
+    })
+}
+
+/// 对话线：由既有折叠（与实时面同一份规则）折出用户 / 助手文本节点。
 ///
 /// **不要在这里重拼「以下是历史」的散文**：那会把同一份事实变成两种形状，且给
-/// 「谁说了什么」再错一次的机会（compose 的 `build_messages` 就吃这组节点）。
-/// 只留 `user | assistant` 两类：调用方是措辞产线，工具卡不属于对话线。
+/// 「谁说了什么」再错一次的机会。只留 `user | assistant` 两类——工具卡不属于对话线。
 pub(crate) fn dialog_context(events: &[Event]) -> Vec<cm::ChatNode> {
     symbio_sdk::projection::rebuild::rebuild(events, &CHAT_VOCAB, &MESSAGE_VOCAB)
         .into_iter()
