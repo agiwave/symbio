@@ -1045,12 +1045,16 @@ fn artifact_nodes(
         .unwrap_or(true);
 
     let tool = text_of(e, "tool");
+    // 卡上同时留下**wire id**（`tool_call_id`）：节点 id 是节点身份，产物 /
+    // `user.answer` / 授权事实认的都是 wire id。丢了它，恢复类动作就只能在
+    // 节点 id 与 wire id 之间猜（T27 的错配现场）。实时面构造时本就带着它，
+    // 重建必须同形（`skip_serializing` 只挡落盘，不挡重建回放）。
     let mut call = llm_build_tool_call_node(
         &group,
         call_node_id.clone(),
         Some(tool.clone()),
         text_of(e, "args"),
-        None,
+        Some(call_id.clone()),
         &actor_principal(e),
     );
     call.timestamp = Some(e.ts);

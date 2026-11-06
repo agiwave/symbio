@@ -216,14 +216,21 @@ impl SessionPlugin {
                             data: Some(json!({ "session_id": id, "selected": to })),
                         }))
                     }
-                    // ── 用户答复（`answer`，载荷 `{answer, mode}`）──
+                    // ── 用户答复 / 批准 / 拒绝（载荷 `{answer, mode}`）──
                     //
-                    // **只落一条事实，不在这里续跑。** 事实是 `user.answer`
-                    // （`kind ∈ {answer, approve, deny}`）：宿主看到事实源 head 前进后
-                    // 由写口踢一次驱动（契约 `symbio_plugin_api::drive_entry`）；工具侧那一行
-                    // 把答复原文落成那次调用的结果（`land_only`）——挂起的调用**不在
-                    // 这里执行**（D-121：审批 / 答复恢复只能从事实进环）。
-                    (Some(mid), "answer", payload) => {
+                    // **只落一条事实，不在这里续跑。** 动作闭集是
+                    // `{answer, approve, reject}`，落成 `user.answer`（事实里的 `kind`
+                    // 取 `answer | approve | deny`）：宿主看到事实源 head 前进后由写口
+                    // 踢一次驱动（契约 `symbio_plugin_api::drive_entry`），工具侧那一行
+                    // 按 `kind` 分岔——`answer` 把答复原文落成结果，`approve` 合并
+                    // `approved:true` 走正常执行，`deny` 不执行、落 `user_rejected`。
+                    // 挂起的调用**不在这里执行**（D-121：审批 / 答复恢复只能从事实进环）。
+                    (Some(mid), action @ ("answer" | "approve" | "reject"), payload) => {
+                        let kind = match action {
+                            "approve" => "approve",
+                            "reject" => "deny",
+                            _ => "answer",
+                        };
                         let answer = payload
                             .and_then(|p| p.get("answer"))
                             .cloned()
@@ -232,6 +239,12 @@ impl SessionPlugin {
                             .and_then(|p| p.get("mode"))
                             .cloned()
                             .unwrap_or(Value::Null);
+                        // 动作落在**卡片节点**（`mid`）上，但答复事实要认的是
+                        // **调用的 wire id**：工具侧的产物 / 续接行都按
+                        // `tool_call_id` 配对（t27 的现场：两套身份混用 ⇒ 永远找不到
+                        // 产物）。解不出 wire id 就拒绝，不静默拿节点 id 顶替。
+                        let msgs = self.transcript_of(id).await?;
+                        let wire_id = wire_call_id_of(&msgs, mid)?;
                         // 走**本部署根**的写口（不是通用开面）：驱动与转写出口都绑在
                         // 这个句柄上，答复落格后由它踢出续跑的一环（`user.answer`
                         // 只落事实，续跑由踢驱动发起）。
@@ -254,16 +267,16 @@ impl SessionPlugin {
                                 )
                             })?;
                         let draft = FactDraft {
-                            // 事实身份 = 它回答的那次调用（调用 id 全局唯一）：
+                            // 事实身份 = 它回答的那次调用（wire id 全局唯一）：
                             // 工具侧的续接行按原债键（`tool:<request_id>`）开账，只把这
-                            // 条事实的身份放进载荷，答复原文由执行体自己读。
-                            key: format!("user-answer:{mid}"),
+                            // 条事实的身份放进载荷，答复原文 / `kind` 由执行体自己读。
+                            key: format!("user-answer:{wire_id}"),
                             kind: EVENT_USER_ANSWER.to_string(),
                             entity: Entity::Scope,
                             verb: Verb::Asserted,
                             payload: json!({
-                                "kind": "answer",
-                                "call_id": mid,
+                                "kind": kind,
+                                "call_id": wire_id,
                                 "answer": answer,
                                 "mode": mode,
                                 "by": symbio_sdk::authz::PRINCIPAL_USER,
@@ -275,11 +288,16 @@ impl SessionPlugin {
                             .map_err(|e| {
                                 VdfsError::internal(format!("user.answer 落格失败：{e}"))
                             })?;
+                        let label = match kind {
+                            "approve" => "批准",
+                            "deny" => "拒绝",
+                            _ => "答复",
+                        };
                         Ok(VdfsResponse::Action(VdfsActionResult {
-                            action: action.clone(),
+                            action: action.to_string(),
                             ok: true,
-                            message: format!("已记录对 {mid} 的答复；由宿主再驱动一环"),
-                            data: Some(json!({ "session_id": id, "call_id": mid })),
+                            message: format!("已记录对 {mid} 的{label}；由宿主再驱动一环"),
+                            data: Some(json!({ "session_id": id, "call_id": wire_id })),
                         }))
                     }
                     _ => Err(VdfsError::NotImplemented),
@@ -371,4 +389,38 @@ fn expand_params(payload: Option<&Value>) -> VdfsResult<(Option<String>, Option<
         }
     };
     Ok((depth, since_seq))
+}
+
+/// 动作目标（卡片节点 `mid`）→ 这次调用的 **wire id**（`ChatNode.tool_call_id`）。
+///
+/// 两套身份各有各的用处，不能混：
+/// - `ChatNode.id` 是**节点地址**——动作、变更帧、前端选中都落在它上面；
+/// - `tool_call_id` 是 **provider 的 wire id**——`tool.requested.calls[].id`、
+///   `artifact.added.tool_call_id`、`authz.denied.id` 全按它配对。
+///
+/// 规则：自身是 `tool_call` ⇒ 直接取它的 `tool_call_id`；交互 / `user_prompt`
+/// 之类子节点沿 `parent_id` 向上找最近的 `tool_call`。找不到（或历史里那段没留下
+/// wire id）就**拒绝**——静默用节点 id 顶替，答复事实会落在一个工具侧永远配不上的
+/// 键上（T27 的现场）。
+fn wire_call_id_of(msgs: &[cm::ChatNode], mid: &str) -> VdfsResult<String> {
+    let mut cursor: Option<&str> = Some(mid);
+    // 父链最长不超过消息条数：防御坏数据里的环。
+    for _ in 0..=msgs.len() {
+        let Some(node) = cursor.and_then(|id| msgs.iter().find(|m| m.id == id)) else {
+            break;
+        };
+        if node.is_tool_call() {
+            return match node.tool_call_id.as_deref().map(str::trim) {
+                Some(wire) if !wire.is_empty() => Ok(wire.to_string()),
+                // 老数据 / 投影丢了 wire id：这里**不猜**（猜 = 落一条配不上的事实）。
+                _ => Err(VdfsError::invalid(format!(
+                    "动作目标 {mid} 是工具调用卡，但历史里没有它的 wire id（tool_call_id 缺失）"
+                ))),
+            };
+        }
+        cursor = node.parent_id.as_deref();
+    }
+    Err(VdfsError::invalid(format!(
+        "动作目标 {mid} 解不出调用的 wire id：自身不是工具调用，父链上也没有最近的 tool_call"
+    )))
 }

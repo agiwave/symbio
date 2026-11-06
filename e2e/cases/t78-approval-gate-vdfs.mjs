@@ -291,26 +291,75 @@ export default defineCase(
         '恢复后 tool_call 须有结果子节点',
       );
 
-      // 事实面：批准恢复的那一笔必须走完 `request → granted → sent → response`。
-      // 这是端口账的分水岭——在此之前 resume 直接调执行层，端口账上
-      // 只有首轮的 `denied`，批准后的执行是事实面的空白。
-      const aFacts = toolFacts(readWal(SID_INTERACTIVE));
-      const aGranted = aFacts
-        .filter((e) => e.kind === 'authz.granted' && e.payload?.tool === 'vdfs_delete')
-        .at(-1);
+      // 事实面（批准后的形状）：**一次世界交互 = 一笔债 = 一条事实**。
+      // ① `user.answer{kind:approve}` —— 授权放行**当前没有事实留痕**，唯一痕迹就是
+      //    这条答复事实。写 `authz.granted` 就得在能力内重解析风险档 = 第二个解析器，
+      //    不做；这是**已知缺口**（记台账），不是「设计如此」。
+      // ② 批级 `sent`：恢复行复用首派债键 `tool:<request_id>`，收束落回同一笔批债
+      //    （不再要求逐调用的 `request` —— 那是旧形状）。
+      // ③ 同一调用的**第二次落格** `artifact.added`：键带 `:resume` 后缀、`tool_call_id`
+      //    仍是 wire id。不换键会被 (kind, key) 吸收，恢复结果就丢了。
+      const events1 = readWal(SID_INTERACTIVE);
+      const approveFact = events1.find(
+        (e) => e.kind === 'user.answer' && e.payload?.kind === 'approve',
+      );
       assert(
-        aGranted,
-        `批准恢复必须落 authz.granted（实际工具事实: ${JSON.stringify(
-          aFacts.map((e) => ({ kind: e.kind, id: e.payload?.id, tool: e.payload?.tool })),
+        approveFact,
+        `批准恢复必须落 \`user.answer{kind:approve}\`（实际: ${JSON.stringify(
+          events1.filter((e) => e.kind === 'user.answer').map((e) => e.payload),
         )}）`,
       );
-      const gid = aGranted.payload?.id;
-      for (const kind of ['request', 'sent', 'response']) {
-        assert(
-          aFacts.some((e) => e.kind === kind && e.payload?.id === gid),
-          `批准恢复的 ${kind} 必须与 authz.granted 同 id（id=${gid}）`,
-        );
-      }
+      const wireId = approveFact.payload?.call_id;
+      assert(
+        wireId,
+        `user.answer 必须点名调用的 wire id（实际: ${JSON.stringify(approveFact.payload)}）`,
+      );
+      const requested = events1.find(
+        (e) =>
+          e.kind === 'tool.requested' &&
+          (e.payload?.calls ?? []).some((call) => call?.id === wireId),
+      );
+      assert(requested, `该调用必须出现在 \`tool.requested\` 的调用清单里（wire=${wireId}）`);
+      // 批级 `sent` 的身份是 `ring:tool:tool:<tool.requested 事实行 id>:<attempt>:sent`。
+      assert(
+        events1.some(
+          (e) =>
+            e.kind === 'sent' &&
+            e.event_id.startsWith(`ring:tool:tool:${requested.event_id}:`),
+        ),
+        `批准恢复必须收束在同一笔批债上（批级 \`sent\`，request@${requested.event_id}）`,
+      );
+      // 恢复必须落在**首派 attempt** 上：多出一个 attempt 的 request / sent 就是
+      // 「首派在新 attempt 上重跑」（恢复失败被判 Retryable 时的典型现场）。
+      const batchPrefix = `ring:tool:tool:${requested.event_id}:`;
+      const batchAttempts = events1
+        .filter(
+          (e) =>
+            (e.kind === 'request' || e.kind === 'sent') &&
+            e.event_id.startsWith(batchPrefix),
+        )
+        .map((e) => Number(e.event_id.slice(batchPrefix.length).split(':')[0]))
+        .filter((n) => Number.isFinite(n));
+      assert(
+        batchAttempts.every((n) => n === 1),
+        `恢复必须复用首派 attempt（不得让首派在新 attempt 上重跑）；实际: ${JSON.stringify(
+          batchAttempts,
+        )}`,
+      );
+      const resumedArtifact = events1.find(
+        (e) =>
+          e.kind === 'artifact.added' &&
+          e.payload?.tool_call_id === wireId &&
+          e.event_id.endsWith(':resume'),
+      );
+      assert(
+        resumedArtifact,
+        `恢复结果必须是同一调用的第二次落格（键 \`artifact:${wireId}:resume\`）；实际: ${JSON.stringify(
+          events1
+            .filter((e) => e.kind === 'artifact.added')
+            .map((e) => ({ key: e.event_id, tool_call_id: e.payload?.tool_call_id })),
+        )}`,
+      );
       assertTranscriptInvariants(msgs1, 'T78-A 恢复后');
 
       api.stop();

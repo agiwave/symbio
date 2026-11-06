@@ -29,6 +29,12 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 /// 读产物格，没有形状声明就无法校验这些字段（`UnknownSource`）。
 ///
 /// 形状只登记**确定会写**的字段；`annotations` 一类富化字段随工具声明走，不在此列。
+///
+/// **恢复的第二次落格**：`user.answer` 的 `answer` / `approve` / `deny` 恢复落的是
+/// **同一调用的第二次落格**，幂等键带 `:resume` 后缀（`artifact:{wire}:resume`）。
+/// 它**不是新事实**——事件名仍是 `artifact.added`、幂等维度仍是 `tool_call_id`，
+/// 投影按 `{wire}-result` 覆盖同一张卡；带后缀只是为了让事实源按 `(kind, key)`
+/// 去重时不把「新状态」当成重复吞掉。别按这个后缀再造新的事件名或新键维度。
 pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
     name: "artifact.added",
     port: None,

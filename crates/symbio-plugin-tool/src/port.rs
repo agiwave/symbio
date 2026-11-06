@@ -133,6 +133,15 @@ const KEY_RESUME: &str = "resume";
 const KEY_ID: &str = "id";
 const KEY_ATTEMPT: &str = "attempt";
 
+/// 恢复产物键的后缀：同一调用的**第二次落格**。
+///
+/// 首派键 `artifact:{call_id}` 已被那张「待用户动作」的产物占住；事实源按
+/// `(kind, key)` 吸收重复，恢复结果若不换键会被直接吞掉。事件名仍是
+/// `artifact.added`、幂等维度仍是 `tool_call_id`，投影按 `{wire}-result` 覆盖
+/// 同一张卡——所以它是**同一次调用的新状态**，不是新事实（词表见
+/// `declarations.rs` 的 `FACTS`）。
+const RESUME_ARTIFACT_SUFFIX: &str = ":resume";
+
 /// 一次授权判定（`D-306` 裁决一：由端口执行体判，不再由环的动作判）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Authz {
@@ -312,13 +321,22 @@ fn authz_draft(idempotency_key: &str, payload: &serde_json::Value, authz: Authz)
     }
 }
 
-/// 审批闸门拦下的一笔的留痕草稿（t78-A）。
+/// 审批闸门拦下的一笔的留痕草稿（t78）。
 ///
 /// 活闸门住在能力调用里（`ApprovalGate` 装饰器）：它把「需要用户批准」作为**结果值**
 /// 交回。端口此前只把它折成停等载荷，事实面上没有一条授权结论——`request` 开过账，
 /// `authz.denied` 却是空白。这里在同一个出口补上那条结论；id 与该笔 `request` 同源
 ///（开账行用的就是调用 id）。**不**写 `sent`：没放行就没有派发。
-fn approval_denied_draft(exec: &PortExecContext, tool: &str, call_id: &str) -> FactDraft {
+///
+/// `detail` 是线上措辞：交互档 `needs_approval`（停在卡上等批）、自动档
+/// `permission_denied`（无人可批，直接判死）——两者都是「闸门拒绝」，只是能不能等
+/// 人不一样（`approval.rs::confirm_prompt_payload`）。
+fn approval_denied_draft(
+    exec: &PortExecContext,
+    tool: &str,
+    call_id: &str,
+    detail: &'static str,
+) -> FactDraft {
     let payload = serde_json::json!({
         KEY_TOOL: tool,
         KEY_ID: call_id,
@@ -328,7 +346,7 @@ fn approval_denied_draft(exec: &PortExecContext, tool: &str, call_id: &str) -> F
         &format!("{}-{call_id}", exec.idempotency_key),
         &payload,
         Authz::Denied {
-            detail: "needs_approval",
+            detail,
             why: "approval_required",
         },
     )
@@ -798,6 +816,47 @@ fn declared_of(table: &[(String, &'static [&'static str])], wire: &str) -> &'sta
         .unwrap_or(&[])
 }
 
+/// 行为声明表：三个出口（批派 / 只落格 / 恢复）都只查这一张表。
+///
+/// 复制一份的后果与承接体是同一个教训——接错了不报错，只是静默地不做富化。
+async fn declared_table_of(exec: &PortExecContext) -> Vec<(String, &'static [&'static str])> {
+    match exec.ctx.as_ref() {
+        Some(ctx) => match ctx.get(CAPABILITY_VISITOR) {
+            Some(visitor) => visitor
+                .list(family::TOOL)
+                .await
+                .iter()
+                .map(|row| {
+                    let m = row.meta();
+                    (m.name.to_string(), m.behaviors)
+                })
+                .collect(),
+            None => Vec::new(),
+        },
+        None => Vec::new(),
+    }
+}
+
+/// 产物里的 `args` 是**定稿参数文本**（[`artifact_payload`] 按 `to_string` 落格）；
+/// 恢复要重跑同一调用时必须先解析回值，才能把 `approved` 合并进去。
+fn artifact_args(payload: &serde_json::Value) -> serde_json::Value {
+    match payload.get("args") {
+        Some(serde_json::Value::String(text)) => {
+            serde_json::from_str(text).unwrap_or(serde_json::Value::Null)
+        }
+        Some(other) => other.clone(),
+        None => serde_json::Value::Null,
+    }
+}
+
+/// 答复原文：字符串按原文用（不再套一层 JSON 引号），其余按 JSON 文本。
+fn answer_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
+}
+
 /// 统一出口：L0 守卫 → 交回事实（产物格由 [`land_only`] 出口另落）。
 ///
 /// 守卫在**执行体**里做（P1b / D-308）：环只消费「已守卫文本 + 守卫元数据」，不再
@@ -1154,21 +1213,7 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
         .to_string();
     let success = lo.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
     // 行为声明表：与执行形态同一匹配口径（注册表显示名）。
-    let declared_table: Vec<(String, &'static [&'static str])> = match exec.ctx.as_ref() {
-        Some(ctx) => match ctx.get(CAPABILITY_VISITOR) {
-            Some(visitor) => visitor
-                .list(family::TOOL)
-                .await
-                .iter()
-                .map(|row| {
-                    let m = row.meta();
-                    (m.name.to_string(), m.behaviors)
-                })
-                .collect(),
-            None => Vec::new(),
-        },
-        None => Vec::new(),
-    };
+    let declared_table = declared_table_of(exec).await;
     let meta = CallMeta {
         tool_name,
         tool_call_id,
@@ -1303,8 +1348,10 @@ struct RequestedFailure {
 const TOOL_CALLS_DONE: &str = "tool.calls.done";
 
 impl ToolPort {
-    /// 答复恢复：`user.answer` 已经落了事实；把答复原文作为那次调用的结果，走
-    /// [`Self::run`] 的 `land_only` 同一出口（**不执行**挂起的调用）。
+    /// 答复恢复：`user.answer` 已经落了事实；按事实里的 `kind` 分岔——
+    /// `answer` 把答复原文作为那次调用的结果、`approve` 合并 `approved:true` 走
+    /// **正常执行路径**、`deny` 不执行并以 `user_rejected` 收尾。三者都不新开
+    /// 端口往返：这是同一笔调用的第二次落格（产物键带 [`RESUME_ARTIFACT_SUFFIX`]）。
     async fn run_resume(&self, exec: PortExecContext, payload: serde_json::Value) -> PortOutcome {
         let Some(reader) = exec.reader.clone() else {
             return PortOutcome {
@@ -1321,6 +1368,9 @@ impl ToolPort {
             .get("answer_event")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty());
+        // 恢复失败判 **NonRetryable**：读面里没有答复 / 产物不是「还没到」的时机问题，
+        // 重试只会把同一笔债抬到新 attempt 上重跑（首派跟着重来）。这是**当前选择、
+        // 非能力上限**：将来要做真正的重试归属，再单立一条裁决。
         let Some(answer) = facts.iter().rev().find(|fact| {
             fact.kind == symbio_plugin_api::events::EVENT_USER_ANSWER
                 && answer_id.is_none_or(|id| fact.id == id)
@@ -1328,12 +1378,18 @@ impl ToolPort {
             return PortOutcome {
                 facts: Vec::new(),
                 error: Some((
-                    PortErrorClass::Retryable,
-                    "user.answer 尚未可见".to_string(),
+                    PortErrorClass::NonRetryable,
+                    "恢复目标缺失：user.answer 不在读面".to_string(),
                 )),
                 ..Default::default()
             };
         };
+        let kind = answer
+            .payload
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         let call_id = answer
             .payload
             .get("call_id")
@@ -1354,8 +1410,8 @@ impl ToolPort {
             return PortOutcome {
                 facts: Vec::new(),
                 error: Some((
-                    PortErrorClass::Retryable,
-                    format!("找不到 {call_id} 的产物"),
+                    PortErrorClass::NonRetryable,
+                    format!("恢复目标缺失：找不到 {call_id} 的产物"),
                 )),
                 ..Default::default()
             };
@@ -1366,29 +1422,97 @@ impl ToolPort {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        let args = artifact
-            .payload
-            .get("args")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        // 答复原文即那次调用的结果：字符串就是原文，不再套一层 JSON 引号。
-        let text = match answer_value {
-            serde_json::Value::String(text) => text,
-            other => serde_json::to_string(&other).unwrap_or_default(),
+        let original_args = artifact_args(&artifact.payload);
+        let archive_dir = exec.scratch_dir.clone().unwrap_or_default();
+        // 分岔的判据是事实里的 `kind`（动作闭集 `answer | approve | deny`），不是
+        // 债行载荷：债表只问存在性、不读载荷，动作语义由写方落成具体事实。
+        let (outcome, run_args) = match kind.as_str() {
+            // 答复原文即那次调用的结果：字符串就是原文，不再套一层 JSON 引号。
+            "answer" => (
+                finish(answer_text(&answer_value), true, None, &archive_dir).await,
+                original_args,
+            ),
+            // 批准：批准位**只进 args**（活闸门读的就是 `args.approved`），不另开
+            // 端口载荷键——载荷键是机制形状，批准是这一次调用的参数值。
+            "approve" => {
+                let Some(mut args) = original_args.as_object().cloned() else {
+                    return PortOutcome {
+                        facts: Vec::new(),
+                        error: Some((
+                            PortErrorClass::NonRetryable,
+                            "恢复批准失败：产物里的 args 不是 JSON 对象".to_string(),
+                        )),
+                        ..Default::default()
+                    };
+                };
+                args.insert(KEY_APPROVED.to_string(), serde_json::Value::Bool(true));
+                let args = serde_json::Value::Object(args);
+                let outcome = self
+                    .run(
+                        exec.clone(),
+                        PortInput {
+                            port: TOOL,
+                            payload: json!({
+                                KEY_TOOL_NAME: tool_name.clone(),
+                                KEY_ARGS: args.clone(),
+                                KEY_TOOL_CALL_ID: call_id.clone(),
+                            }),
+                        },
+                    )
+                    .await;
+                (outcome, args)
+            }
+            // 拒绝：不执行，按失败收尾（`user_rejected` 是判决词，不是「等用户」）。
+            "deny" => {
+                let text = match &answer_value {
+                    serde_json::Value::Null => "用户拒绝了本次调用，未执行。".to_string(),
+                    other => answer_text(other),
+                };
+                (
+                    finish_with(
+                        text,
+                        false,
+                        None,
+                        &archive_dir,
+                        // 判决词（线上契约，与 `Authz::Denied{detail:"user_rejected"}` 同一词）。
+                        Some("user_rejected"),
+                        "",
+                    )
+                    .await,
+                    original_args,
+                )
+            }
+            other => {
+                return PortOutcome {
+                    facts: Vec::new(),
+                    error: Some((
+                        PortErrorClass::NonRetryable,
+                        format!("user.answer 的 kind 不可恢复：{other:?}"),
+                    )),
+                    ..Default::default()
+                };
+            }
         };
-        self.run(
-            exec,
-            PortInput {
-                port: TOOL,
-                payload: json!({
-                    KEY_LAND_ONLY: { "text": text, "success": true },
-                    KEY_TOOL_NAME: tool_name,
-                    KEY_TOOL_CALL_ID: call_id,
-                    KEY_ARGS: args,
-                }),
-            },
-        )
-        .await
+        // 结果按**结果事实**的形状落进产物格：与批派同一个构造点（`land_artifact`），
+        // 只是键换成「第二次落格」的那个。
+        let Some(result) = outcome.facts.first().cloned() else {
+            return outcome;
+        };
+        let declared = declared_table_of(&exec).await;
+        let art = ArtifactCtx {
+            key: format!("artifact:{call_id}{RESUME_ARTIFACT_SUFFIX}"),
+            produced_by: exec.origin,
+            allowed: exec.permitted,
+            denied_reason: exec.deny_reason.clone(),
+        };
+        let meta = CallMeta {
+            tool_name: &tool_name,
+            tool_call_id: &call_id,
+            args: &run_args,
+            declared: declared_of(&declared, &tool_name),
+        };
+        land_artifact(&exec, &art, &meta, &result).await;
+        outcome
     }
 
     /// 按 `tool.requested` 的清单逐调用执行：复用 [`Self::run`]，每个调用落一条产物，
@@ -1410,21 +1534,7 @@ impl ToolPort {
         };
         let mut facts = Vec::new();
         // 声明表复用与单次出口同一口径（`visitor.list(family::TOOL)`）：只查表，不另建判据。
-        let declared_table: Vec<(String, &'static [&'static str])> = match exec.ctx.as_ref() {
-            Some(ctx) => match ctx.get(CAPABILITY_VISITOR) {
-                Some(visitor) => visitor
-                    .list(family::TOOL)
-                    .await
-                    .iter()
-                    .map(|row| {
-                        let meta = row.meta();
-                        (meta.name.to_string(), meta.behaviors)
-                    })
-                    .collect(),
-                None => Vec::new(),
-            },
-            None => Vec::new(),
-        };
+        let declared_table = declared_table_of(&exec).await;
         let mut reply = symbio_plugin_api::port::PortReply::default();
         // 本次批派里是否有调用停在等用户（产物声明「需要人」）。
         // 一次世界交互 = 一笔债 = 一条事实：世界没给结果，落「完成」就是假事实，
@@ -1972,18 +2082,30 @@ impl ToolPort {
                     };
                     let pending = pending_prompt_from(&data);
                     // 活闸门（`approval_gate`）拦下的一笔必须留痕：停等载荷只是结果形态，
-                    // 事实面还要有一条与原 `request` 同 id 的授权拒绝（t78-A）。
-                    if pending
+                    // 事实面还要有一条与原 `request` 同 id 的授权拒绝（t78）。两类措辞
+                    // 都要落：交互档停在卡上（`needs_approval`）、自动档无人可批
+                    // （`permission_denied`，它没有 pending 形态，判据在结果 `failure_kind`）。
+                    let denial = if pending
                         .as_ref()
                         .and_then(|p| p.get(KEY_FAILURE_KIND))
                         .and_then(|v| v.as_str())
                         == Some(failure_kind::NEEDS_APPROVAL)
                     {
+                        Some("needs_approval")
+                    } else if data.get(KEY_FAILURE_KIND).and_then(|v| v.as_str())
+                        == Some(failure_kind::PERMISSION_DENIED)
+                    {
+                        Some("permission_denied")
+                    } else {
+                        None
+                    };
+                    if let Some(detail) = denial {
                         exec.emit
                             .emit(vec![approval_denied_draft(
                                 &exec,
                                 &tool_name,
                                 &tool_call_id,
+                                detail,
                             )])
                             .await;
                     }
