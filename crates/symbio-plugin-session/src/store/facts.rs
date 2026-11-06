@@ -176,6 +176,7 @@ impl SessionStore {
                 Some(agent_id),
                 params,
                 self.agent_scope_cell(session_id),
+                self.source_principal_cell(session_id),
                 drive,
                 sink,
                 supplements,

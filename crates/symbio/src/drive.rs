@@ -33,7 +33,7 @@ use symbio_kernel::plugin::{
 };
 use symbio_plugin_api::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
 use symbio_plugin_api::{DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget, ExecEventSink};
-use symbio_sdk::keys::{AGENT_ID, MODE, RISK_LEVEL, WORKDIR};
+use symbio_sdk::keys::{AGENT_ID, MODE, RISK_LEVEL, SOURCE_PRINCIPAL, WORKDIR};
 
 /// 一次驱动需要的**世界**：事实源 + 通用上下文（会话 / 提供方 / 工作目录 / 出口）。
 ///
@@ -57,6 +57,8 @@ pub struct FactWorld<'a> {
     /// 本会话的 Agent 权限作用域（D-153）：由轮装配发布、随驱动目标带来。
     /// `None` = 本会话没选中 Agent（宿主态）；驱动只发布槽，不解析 manifest。
     pub agent_scope: Option<&'a symbio_sdk::agent::AgentScope>,
+    /// 本轮入站来源主体（D-067）：本机用户发起时 `None`。
+    pub source_principal: Option<&'a str>,
     /// 执行期出口：由会话插件按根交出的真实转写句柄（内部请求显式静默）。
     pub sink: ExecEventSink,
 }
@@ -94,6 +96,11 @@ pub async fn drive_on_new_fact(
     // 与 `workdir` / `agent_id` 同一来源（会话 metadata），不在执行体里二次反查。
     ctx.set(MODE, world.mode.to_string());
     ctx.set(RISK_LEVEL, world.risk_level.to_string());
+    // 入站来源主体（D-067）：同址装配，工具侧 `EffectEnv.source` 只读它；
+    // 缺席 = 本机用户发起，执行体回落会话身份（不在这里补默认值就是「没声明」）。
+    if let Some(source) = world.source_principal {
+        ctx.set(SOURCE_PRINCIPAL, source.to_string());
+    }
     // 装配层 open 的同一句柄：宿主与插件上下文共享它，插件不自建 store。
     ctx.set(FACT_SOURCE, Arc::clone(&world.facts));
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(ctx);
@@ -308,6 +315,7 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
         mode: &target.mode,
         risk_level: &target.risk_level,
         agent_scope: target.agent_scope.as_ref(),
+        source_principal: target.source_principal.as_deref(),
         sink: target.sink.clone(),
     };
     if let Err(e) = drive_on_new_fact(root, &world).await {

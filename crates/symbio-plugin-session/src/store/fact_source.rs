@@ -49,6 +49,9 @@ pub(crate) struct SessionFactSource {
     /// 不放在 `params` 里：它不是 metadata 的静态选项，而是收集期才得到的运行期
     /// 事实；打开那一刻还没人发布。
     agent_scope: Arc<RwLock<Option<symbio_sdk::agent::AgentScope>>>,
+    /// 本轮入站来源主体（D-067）：由开轮写方从收件箱条目的 `params` 发布，`append`
+    /// 时随驱动目标带进本轮 ctx。`None` = 本机用户发起（工具侧回落会话身份）。
+    source_principal: Arc<RwLock<Option<String>>>,
     /// 本会话所属**部署根**的驱动实例；`None` = 只读事实源，不踢驱动。
     drive: Option<Arc<dyn DriveEntry>>,
     /// 执行期出口：真实转写句柄，或本根**显式声明**的静默。
@@ -71,6 +74,7 @@ impl SessionFactSource {
         agent_id: Option<String>,
         params: SessionParams,
         agent_scope: Arc<RwLock<Option<symbio_sdk::agent::AgentScope>>>,
+        source_principal: Arc<RwLock<Option<String>>>,
         drive: Option<Arc<dyn DriveEntry>>,
         sink: ExecEventSink,
         supplements: Option<SupplementDrain>,
@@ -83,6 +87,7 @@ impl SessionFactSource {
             agent_id,
             params,
             agent_scope,
+            source_principal,
             drive,
             sink,
             supplements,
@@ -168,6 +173,12 @@ impl FactSource for SessionFactSource {
                     provider_id: self.params.provider_id.clone(),
                     // 作用域由轮装配发布（见字段文档）；这里只取当前值，不解析。
                     agent_scope: self.agent_scope.read().ok().and_then(|scope| scope.clone()),
+                    // 来源主体由开轮写方发布（见字段文档）；`None` = 本机用户发起。
+                    source_principal: self
+                        .source_principal
+                        .read()
+                        .ok()
+                        .and_then(|source| source.clone()),
                     facts,
                     sink: self.sink.clone(),
                 };
@@ -225,6 +236,7 @@ impl FactSourceOpener for SessionFactOpener {
             workdir,
             None,
             SessionParams::default(),
+            Arc::new(RwLock::new(None)),
             Arc::new(RwLock::new(None)),
             None,
             ExecEventSink::silent(),

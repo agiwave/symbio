@@ -64,6 +64,14 @@ impl SessionPlugin {
             }
         }
 
+        // 入站来源主体（D-067）：条目在**入队时**把它寄存进 `params`（写臂从请求
+        // `metadata.source_principal` 取），这里在开轮前发布到会话槽——随后的
+        // `append` 会把它装进本轮驱动目标，工具侧 `commitment.*` 的 `to` 据此取值。
+        // 每轮都发布（含 `None`）：上一轮的来源不能漏进下一轮。
+        self.get_store()
+            .await?
+            .set_source_principal(session_id, item.params.source_principal.clone());
+
         let text = item
             .message
             .content

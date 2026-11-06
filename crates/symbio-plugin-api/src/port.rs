@@ -160,11 +160,15 @@ pub struct PortExecContext {
     pub scratch_dir: Option<PathBuf>,
     /// 事实读面（宿主实现）：执行体按需读本可见域的事实；`None` = 无。
     pub reader: Option<Arc<dyn PortFactReader>>,
+    /// 入站来源主体（D-067）：**宿主**从本轮 ctx 取好并解析完（缺席 ⇒ 会话身份），
+    /// 环只原样转交。效果面拿它填 `EffectEnv.source`——承诺的 `to` 是数据，不是
+    /// 让扩展插件自己去读某个 ctx 键。
+    pub source: String,
 }
 
 /// 宿主交给执行体的**不透明句柄束**：环只原样转交，不读取、不解释其中任何字段。
 ///
-/// 这三个值不是环的知识——`ctx` 里装什么、`scratch_dir` 指向哪里、`sink` 把帧送去
+/// 这几个值不是环的知识——`ctx` 里装什么、`scratch_dir` 指向哪里、`sink` 把帧送去
 /// 何处，都由宿主决定、由执行体自用（`D-316`）。环只保证「宿主给的，原样到达」。
 #[derive(Clone)]
 pub struct PortExecHandles {
@@ -176,6 +180,8 @@ pub struct PortExecHandles {
     pub sink: ExecEventSink,
     /// 会话身份（宿主原样交值；空串 = 无）。
     pub session_id: String,
+    /// 入站来源主体（宿主原样交值；空串 = 本机用户发起 ⇒ 效果面回落会话身份）。
+    pub source: String,
 }
 
 impl Default for PortExecHandles {
@@ -185,6 +191,7 @@ impl Default for PortExecHandles {
             scratch_dir: None,
             sink: ExecEventSink::silent(),
             session_id: String::new(),
+            source: String::new(),
         }
     }
 }

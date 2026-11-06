@@ -292,6 +292,7 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
         deny_reason: String::new(),
         scratch_dir: handles.scratch_dir,
         session_id: handles.session_id,
+        source: handles.source,
         reader: ctx.fact_reader(),
     };
     let outcome = executor

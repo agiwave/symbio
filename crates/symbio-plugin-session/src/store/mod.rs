@@ -106,6 +106,11 @@ pub struct SessionStore {
     agent_scopes: std::sync::Mutex<
         HashMap<String, Arc<std::sync::RwLock<Option<symbio_sdk::agent::AgentScope>>>>,
     >,
+    /// 每会话的**入站来源主体**槽（D-067）：开轮写方从收件箱条目的 `params` 发布，
+    /// 事实源在 `append` 时取走并随驱动目标交给驱动（工具侧据此填 `EffectEnv.source`）。
+    ///
+    /// 值为 `None` = 本条消息没有外部来源（本机用户发起）⇒ 工具侧回落会话身份。
+    source_principals: std::sync::Mutex<HashMap<String, Arc<std::sync::RwLock<Option<String>>>>>,
 }
 
 impl SessionStore {
@@ -118,6 +123,7 @@ impl SessionStore {
             write_locks: Mutex::new(HashMap::new()),
             facts: std::sync::Mutex::new(HashMap::new()),
             agent_scopes: std::sync::Mutex::new(HashMap::new()),
+            source_principals: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -143,6 +149,28 @@ impl SessionStore {
     ) {
         if let Ok(mut cell) = self.agent_scope_cell(session_id).write() {
             *cell = scope;
+        }
+    }
+
+    /// 该会话的入站来源主体槽（共享句柄）：事实源在打开时取走同一个 `Arc`。
+    pub(crate) fn source_principal_cell(
+        &self,
+        session_id: &str,
+    ) -> Arc<std::sync::RwLock<Option<String>>> {
+        let mut map = self
+            .source_principals
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(map.entry(session_id.to_string()).or_default())
+    }
+
+    /// 发布本会话这一轮的来源主体（`None` = 本机用户发起）。
+    ///
+    /// 唯一的发布方是开轮写口（`consume_item_turn`，值来自收件箱条目的 `params`）；
+    /// 事实源只读。**每轮都发布**（含 `None`）：上一轮的来源不能漏进下一轮。
+    pub(crate) fn set_source_principal(&self, session_id: &str, source: Option<String>) {
+        if let Ok(mut cell) = self.source_principal_cell(session_id).write() {
+            *cell = source;
         }
     }
 

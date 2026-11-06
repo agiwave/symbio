@@ -776,11 +776,19 @@ async fn land_effects(exec: &PortExecContext, input: &EffectInput) -> EffectsLan
     // 两者混用会把账记到会话名下。
     let agent_id = exec.ctx.as_deref().and_then(|ctx| ctx.get(AGENT_ID));
     let principal = symbio_plugin_api::principal_of(agent_id.as_deref());
+    // 承诺对象 = **这条消息的来源主体**（D-067：`to` 是数据，不是写死的常量）。
+    // 宿主已在句柄束里解析好（`PortExecHandles.source`）；空 = 本机用户发起，
+    // 回落会话身份（旧口径的唯一保留处，不是第二套默认）。
+    let source = if exec.source.trim().is_empty() {
+        exec.session_id.clone()
+    } else {
+        exec.source.clone()
+    };
     let env = EffectEnv {
         anchor: &exec.idempotency_key,
         user_seq: exec.origin.unwrap_or(0),
         principal: &principal,
-        source: &exec.session_id,
+        source: &source,
         snapshot: &[],
         applied: &[],
     };

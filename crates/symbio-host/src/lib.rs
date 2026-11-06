@@ -139,6 +139,13 @@ impl Host {
         gathered
             .ctx
             .set(symbio_kernel::exec::EVENT_SINK, sink.clone());
+        // 入站来源主体（D-067）：宿主从本轮 ctx 取好——`metadata.source_principal` 由
+        // 网关落 ctx、收件箱写口随会话轮装配挂回来。缺席 = 本机用户发起，效果面
+        // 回落会话身份；这一格的解析是宿主的事，不往下推给扩展插件。
+        let source = gathered
+            .ctx
+            .get(symbio_sdk::keys::SOURCE_PRINCIPAL)
+            .unwrap_or_default();
         let handles = PortExecHandles {
             ctx: Some(Arc::clone(&gathered.ctx)),
             scratch_dir: (!workdir.is_empty()).then(|| PathBuf::from(&workdir)),
@@ -146,6 +153,7 @@ impl Host {
             // 内部请求显式静默）；宿主不再写死静默。
             sink,
             session_id: session_id.to_string(),
+            source,
         };
         let support: Arc<dyn DriveSupport> = Arc::new(HostDriveSupport {
             // 每驱动现造、从 0 起的投影游标：事实源是唯一输入，投影只缓存

@@ -66,6 +66,9 @@ pub struct DriveTarget {
     /// 载在驱动目标上而不是让执行体回头解析：工具执行跑在驱动新建的 ctx 里，
     /// 与收集期的轮 ctx 不是同一个；重新读 manifest 就是第二个解析器。
     pub agent_scope: Option<AgentScope>,
+    /// 本轮入站来源主体（D-067）：请求 `metadata.source_principal` 声明的数据，
+    /// 由开轮写方从收件箱条目发布、事实源随目标带过来。`None` = 本机用户发起。
+    pub source_principal: Option<String>,
     /// 本会话的事实源句柄（写口打开的那一份，唯一写口）。
     pub facts: Arc<dyn FactSource>,
     /// 执行期出口：由装配层按根提供真实转写句柄；内部请求显式静默。
