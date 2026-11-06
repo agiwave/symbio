@@ -299,7 +299,7 @@ fn deployment_verdicts(snapshots: &[Vec<Event>]) -> Vec<Event> {
                 _ => continue,
             }
             let key = (subject.to_string(), capability.to_string());
-            let order = verdict_order(&event);
+            let order = verdict_order(event);
             let replace = match last.get(&key) {
                 None => true,
                 Some(current) => verdict_order(current) < order,

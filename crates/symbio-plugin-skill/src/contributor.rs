@@ -137,7 +137,7 @@ impl Contributor for SkillCalibrate {
 symbio_plugin_api::submit_contributor!(SkillCalibrate);
 
 /// 被召回条目（源事件 seq）对应的技能 id；不是技能事实 ⇒ `None`。
-fn recalled_skill_id<'a>(history: &'a [Event], seq: u64) -> Option<&'a str> {
+fn recalled_skill_id(history: &[Event], seq: u64) -> Option<&str> {
     let event = history
         .iter()
         .find(|e| e.kind == EVENT_MEMORY_ENCODED && e.seq.map(|s| s.value()) == Some(seq))?;
