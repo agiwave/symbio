@@ -151,6 +151,7 @@ impl Host {
             // 每驱动现造、从 0 起的投影游标：事实源是唯一输入，投影只缓存
             // 「已读过的那一段」，不与任何写侧账本合并。
             projection: Mutex::new(Projection::default()),
+            plan: Mutex::new(None),
             source: Arc::clone(&self.source),
             executors: gathered.executors,
             sources: gathered.sources,
@@ -254,6 +255,11 @@ struct Gathered {
 struct HostDriveSupport {
     /// 事实源 → 中性事实的**投影**（游标增量；不是第二本账）。
     projection: Mutex<Projection>,
+    /// 本轮计划的事实快照：`rows()` 刷新一次后缓存，`exists*` 复用同一份。
+    ///
+    /// 计划的一致性读面（`D-343`）：`rows()` 与 `exists*` 若各刷一次，两次读之间
+    /// 落格的事实会让判据分叉（如 `session.config` 让债表判「没有」而选债判「有」）。
+    plan: Mutex<Option<Arc<Vec<DriveFact>>>>,
     source: Arc<dyn FactSource>,
     executors: HashMap<String, Arc<dyn PortExecutor>>,
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
@@ -300,6 +306,26 @@ impl Projection {
     }
 }
 
+impl HostDriveSupport {
+    /// 本轮计划的事实快照：`rows()` 已刷新过就复用，否则刷新一次并缓存。
+    fn plan_facts(&self) -> Arc<Vec<DriveFact>> {
+        let cached = self
+            .plan
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(facts) = cached {
+            return facts;
+        }
+        let facts = Arc::new(self.facts());
+        *self
+            .plan
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(&facts));
+        facts
+    }
+}
+
 impl DriveSupport for HostDriveSupport {
     fn facts(&self) -> Vec<DriveFact> {
         self.projection
@@ -328,7 +354,13 @@ impl DriveSupport for HostDriveSupport {
             provider: self.provider.clone(),
             principal: self.principal.clone(),
         };
-        let declared = declared_facts(&self.facts(), &*self.source);
+        // 一轮计划只刷新一次：这份快照同时喂给债表与随后的 `exists*`（`D-343`）。
+        let snapshot = Arc::new(self.facts());
+        *self
+            .plan
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(&snapshot));
+        let declared = declared_facts(&snapshot);
         let mut rows = Vec::new();
         for source in &self.sources {
             for spec in source.rows(&request, &declared) {
@@ -354,18 +386,25 @@ impl DriveSupport for HostDriveSupport {
         self.executors.get(port).cloned()
     }
 
-    /// 与 `facts()` **同一条读面**：世界事实也在投影里，不再回头另读事实源。
+    /// 读**本轮计划**的快照（`D-343`）：与 `rows()` 同一份，不再各自刷新。
     fn exists(&self, kind: &str) -> bool {
-        self.facts().iter().any(|fact| fact.kind == kind)
+        self.plan_facts().iter().any(|fact| fact.kind == kind)
     }
 
     /// 与 [`Self::exists`] 同一条读面，只多看一位身份。
     ///
     /// 世界事实的投影身份就是入库 `event_id`（协议事实则是债 id）。
     fn exists_id(&self, kind: &str, id: &str) -> bool {
-        self.facts()
+        self.plan_facts()
             .iter()
             .any(|fact| fact.kind == kind && fact.key.id == id)
+    }
+
+    /// 与 [`Self::exists`] 同一条读面，只多问一句位置。
+    fn exists_since(&self, kind: &str, since_ms: u64) -> bool {
+        self.plan_facts()
+            .iter()
+            .any(|fact| fact.kind == kind && fact.at_ms > since_ms)
     }
 
     fn now_ms(&self) -> u64 {
@@ -461,8 +500,8 @@ impl PortFactWriter for WorldWriter {
     }
 }
 
-/// 五事实与全种类事实身份 → 申报方读的窄视图。
-fn declared_facts(facts: &[DriveFact], source: &dyn FactSource) -> DebtFacts {
+/// 五事实与全种类事实身份 → 申报方读的窄视图（`D-343`：只读本轮计划那一份快照）。
+fn declared_facts(facts: &[DriveFact]) -> DebtFacts {
     let mut out = DebtFacts::default();
     for fact in facts {
         out.note_attempt(&fact.key.id, fact.key.attempt);
@@ -475,11 +514,12 @@ fn declared_facts(facts: &[DriveFact], source: &dyn FactSource) -> DebtFacts {
             }
             None => {}
         }
-    }
-    for event in source.facts() {
-        out.note_fact(&event.kind, &event.event_id);
-        // 载荷只读副本：申报方要拿「在等」事实里的提示正文构造请求（D-338）。
-        out.note_fact_payload(&event.kind, &event.event_id, event.payload.clone());
+        // 世界事实的投影端口位为空（协议事实的端口位由 `ring:` 身份还原）。
+        if fact.key.port.is_empty() {
+            out.note_fact(&fact.kind, &fact.key.id);
+            // 载荷只读副本：申报方要拿「在等」事实里的提示正文构造请求（D-338）。
+            out.note_fact_payload(&fact.kind, &fact.key.id, fact.payload.clone());
+        }
     }
     out
 }

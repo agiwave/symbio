@@ -202,6 +202,15 @@ pub trait DriveSupport: Send + Sync {
         false
     }
 
+    /// 「这种事实在 `since_ms` 之后落过格吗」——与 [`Self::exists`] 同一条读面，
+    /// 只多看一位时刻（挂起债重燃的触发判断）。默认实现走 [`Self::facts`]；
+    /// 宿主若维护**本轮计划快照**，应覆盖它，使计划内的三次存在性查询读同一份。
+    fn exists_since(&self, kind: &str, since_ms: u64) -> bool {
+        self.facts()
+            .iter()
+            .any(|fact| fact.kind == kind && fact.at_ms > since_ms)
+    }
+
     /// 当前时刻（毫秒，宿主给的时钟；与事实的 `at_ms` 同一时间轴）。
     fn now_ms(&self) -> u64;
 

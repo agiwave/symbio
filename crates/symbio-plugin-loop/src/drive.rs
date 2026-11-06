@@ -161,12 +161,9 @@ impl DebtSource for SupportSource {
         self.support.exists(kind)
     }
 
-    /// 与宿主的事实读面同一份数据（`facts()` 带 `at_ms`），只多问一句位置。
+    /// 与宿主的事实读面同一份数据，只多问一句位置（宿主按本轮计划快照作答）。
     fn exists_since(&self, kind: &str, since_ms: u64) -> bool {
-        self.support
-            .facts()
-            .iter()
-            .any(|fact| fact.kind == kind && fact.at_ms > since_ms)
+        self.support.exists_since(kind, since_ms)
     }
 
     fn exists_id(&self, kind: &str, id: &str) -> bool {
