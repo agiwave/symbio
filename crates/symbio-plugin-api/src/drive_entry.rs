@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use symbio_kernel::exec::ExecEventSink;
 use symbio_kernel::plugin::Plugin;
+use symbio_sdk::agent::AgentScope;
 
 use crate::fact_source::FactSource;
 
@@ -58,6 +59,13 @@ pub struct DriveTarget {
     pub risk_level: String,
     /// 显式指定的 provider；`None` = 由模型侧选默认（本契约不猜）。
     pub provider_id: Option<String>,
+    /// 本会话的 Agent 权限作用域（D-153）：`agent_id` 经 agent 插件解析后的运行期
+    /// 事实（目录根 + 声明），由**收集方**在 `collect_capabilities` 之后发布到事实源；
+    /// `None` = 本会话没有选中 Agent（宿主态，工具侧按宿主权限处理）。
+    ///
+    /// 载在驱动目标上而不是让执行体回头解析：工具执行跑在驱动新建的 ctx 里，
+    /// 与收集期的轮 ctx 不是同一个；重新读 manifest 就是第二个解析器。
+    pub agent_scope: Option<AgentScope>,
     /// 本会话的事实源句柄（写口打开的那一份，唯一写口）。
     pub facts: Arc<dyn FactSource>,
     /// 执行期出口：由装配层按根提供真实转写句柄；内部请求显式静默。

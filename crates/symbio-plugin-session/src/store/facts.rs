@@ -169,6 +169,7 @@ impl SessionStore {
                 workdir,
                 Some(agent_id),
                 params,
+                self.agent_scope_cell(session_id),
                 drive,
                 sink,
             )

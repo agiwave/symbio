@@ -54,6 +54,9 @@ pub struct FactWorld<'a> {
     /// 审批闸门（`RISK_LEVEL` / `MODE`）只读。
     pub mode: &'a str,
     pub risk_level: &'a str,
+    /// 本会话的 Agent 权限作用域（D-153）：由轮装配发布、随驱动目标带来。
+    /// `None` = 本会话没选中 Agent（宿主态）；驱动只发布槽，不解析 manifest。
+    pub agent_scope: Option<&'a symbio_sdk::agent::AgentScope>,
     /// 执行期出口：由会话插件按根交出的真实转写句柄（内部请求显式静默）。
     pub sink: ExecEventSink,
 }
@@ -94,6 +97,11 @@ pub async fn drive_on_new_fact(
     // 装配层 open 的同一句柄：宿主与插件上下文共享它，插件不自建 store。
     ctx.set(FACT_SOURCE, Arc::clone(&world.facts));
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(ctx);
+    // Agent 权限作用域（D-153）：随轮带来，在这里挂进本轮 ctx。执行体（web / fs
+    // 权限闸门、工具侧）只读 `AGENT_PERMS`；取不到就不发布槽 = 宿主态。
+    if let Some(scope) = world.agent_scope {
+        scope.publish(&base);
+    }
 
     let host = Host::with_store(Arc::clone(root), Arc::clone(&world.facts));
     host.drive(&base, world.session_id, world.provider, world.sink.clone())
@@ -299,6 +307,7 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
         agent_id,
         mode: &target.mode,
         risk_level: &target.risk_level,
+        agent_scope: target.agent_scope.as_ref(),
         sink: target.sink.clone(),
     };
     if let Err(e) = drive_on_new_fact(root, &world).await {

@@ -98,6 +98,14 @@ pub struct SessionStore {
     /// 会让 `head` 各自重放、写者令牌互斥 ⇒ 要么重复 seq，要么每次写都被拒。
     /// 缓存一次之后，所有引擎写方共享同一把内部锁，`head` 只有一份。
     facts: std::sync::Mutex<HashMap<String, Arc<EventWalStore>>>,
+    /// 每会话的 Agent 权限作用域槽（D-153）：轮装配在 `collect_capabilities`
+    /// 之后发布，事实源在 `append` 时取走并随驱动目标交给驱动。
+    ///
+    /// 键的**存在**不代表已发布（值为 `None` = 本会话没选中 Agent ⇒ 宿主态）；
+    /// 只有 agent 插件能把 `agent_id` 解析成作用域，本模块不重读 manifest。
+    agent_scopes: std::sync::Mutex<
+        HashMap<String, Arc<std::sync::RwLock<Option<symbio_sdk::agent::AgentScope>>>>,
+    >,
 }
 
 impl SessionStore {
@@ -109,6 +117,32 @@ impl SessionStore {
             base_dir,
             write_locks: Mutex::new(HashMap::new()),
             facts: std::sync::Mutex::new(HashMap::new()),
+            agent_scopes: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// 该会话的权限作用域槽（共享句柄）：事实源在打开时取走同一个 `Arc`。
+    pub(crate) fn agent_scope_cell(
+        &self,
+        session_id: &str,
+    ) -> Arc<std::sync::RwLock<Option<symbio_sdk::agent::AgentScope>>> {
+        let mut map = self
+            .agent_scopes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(map.entry(session_id.to_string()).or_default())
+    }
+
+    /// 发布本会话的权限作用域（`None` = 明确「本会话没选中 Agent」）。
+    ///
+    /// 唯一的发布方是会话轮装配（`collect_capabilities` 之后）；事实源只读。
+    pub(crate) fn set_agent_scope(
+        &self,
+        session_id: &str,
+        scope: Option<symbio_sdk::agent::AgentScope>,
+    ) {
+        if let Ok(mut cell) = self.agent_scope_cell(session_id).write() {
+            *cell = scope;
         }
     }
 

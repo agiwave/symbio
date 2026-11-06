@@ -6,7 +6,7 @@
 //! `WalStore::append` 在入库时填，写方只交草稿。
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, OnceLock, RwLock, Weak};
 
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::exec::ExecEventSink;
@@ -41,6 +41,12 @@ pub(crate) struct SessionFactSource {
     /// 会话运行参数（`mode` / `risk_level` / `provider_id`）：随驱动目标交回，
     /// `append` 不再反查 metadata。
     params: SessionParams,
+    /// Agent 权限作用域（D-153）：由**收集方**（轮装配 `collect_capabilities` 之后）
+    /// 发布，`append` 时随驱动目标带进本轮 ctx。`None` = 本会话没选中 Agent。
+    ///
+    /// 不放在 `params` 里：它不是 metadata 的静态选项，而是收集期才得到的运行期
+    /// 事实；打开那一刻还没人发布。
+    agent_scope: Arc<RwLock<Option<symbio_sdk::agent::AgentScope>>>,
     /// 本会话所属**部署根**的驱动实例；`None` = 只读事实源，不踢驱动。
     drive: Option<Arc<dyn DriveEntry>>,
     /// 执行期出口：真实转写句柄，或本根**显式声明**的静默。
@@ -55,6 +61,7 @@ impl SessionFactSource {
         workdir: Option<String>,
         agent_id: Option<String>,
         params: SessionParams,
+        agent_scope: Arc<RwLock<Option<symbio_sdk::agent::AgentScope>>>,
         drive: Option<Arc<dyn DriveEntry>>,
         sink: ExecEventSink,
     ) -> Arc<dyn FactSource> {
@@ -65,6 +72,7 @@ impl SessionFactSource {
             workdir,
             agent_id,
             params,
+            agent_scope,
             drive,
             sink,
         })
@@ -114,6 +122,12 @@ impl FactSource for SessionFactSource {
                     mode: self.params.mode.clone(),
                     risk_level: self.params.risk_level.clone(),
                     provider_id: self.params.provider_id.clone(),
+                    // 作用域由轮装配发布（见字段文档）；这里只取当前值，不解析。
+                    agent_scope: self
+                        .agent_scope
+                        .read()
+                        .ok()
+                        .and_then(|scope| scope.clone()),
                     facts,
                     sink: self.sink.clone(),
                 };
@@ -164,13 +178,14 @@ impl FactSourceOpener for SessionFactOpener {
         let workdir = store
             .session_dir(session_id)
             .and_then(|dir| super::layout::read_workdir(&dir));
-        // 只读开面不带驱动：运行参数没有消费方，取默认值即可。
+        // 只读开面不带驱动：运行参数没有消费方，取默认值即可（作用域槽为独立空置）。
         Ok(SessionFactSource::open(
             wal,
             session_id.to_string(),
             workdir,
             None,
             SessionParams::default(),
+            Arc::new(RwLock::new(None)),
             None,
             ExecEventSink::silent(),
         ))
