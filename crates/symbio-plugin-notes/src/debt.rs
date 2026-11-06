@@ -20,45 +20,43 @@ pub(crate) struct NotesDebts;
 
 impl DebtSource for NotesDebts {
     fn rows(&self, _request: &DriveRequest, facts: &DebtFacts) -> Vec<DebtSpec> {
-        // 「在等」事实只有一个种类名（行名在载荷里，D-338）：按 `row` 挑本行那一条，
-        // 后写覆盖先写——同一键的再次 Ask 只保留最新的提示。
-        let Some((ask_id, ask)) = facts
+        // 「在等」事实只有一个种类名（行名在载荷里，D-338）：按 `row` 挑本行那些，
+        // **每条 ask 各成一笔债**。同一回合可以有多条便签（t98 一次调用两条），
+        // 用常量债 id 会让后一条顶掉前一条——先发的 ask 永远等不到回执。
+        let insights = facts.facts_of(NOTES_INSIGHT);
+        facts
             .facts_of(ASK_KIND)
             .into_iter()
-            .rev()
-            .find(|(_, payload)| payload.get("row").and_then(Value::as_str) == Some(NOTES_REFLECT))
-        else {
-            return Vec::new();
-        };
-        let Some(prompt) = ask.get("prompt").and_then(Value::as_str) else {
-            return Vec::new();
-        };
-        // 行名不够：同一行会有多条债键（每条便签一条）。排除条件钉死**同一键**的
-        // 洞察，不按种类笼统排除——否则一条便签反思过，后面所有便签都不再反思。
-        let done = ask
-            .get("key")
-            .and_then(|key| key_value(key, "tool_call_id"))
-            .and_then(|call_id| {
-                facts
-                    .facts_of(NOTES_INSIGHT)
-                    .into_iter()
-                    .find(|(_, payload)| {
-                        payload.get("tool_call_id").and_then(Value::as_str) == Some(call_id)
-                    })
+            .filter(|(_, payload)| {
+                payload.get("row").and_then(Value::as_str) == Some(NOTES_REFLECT)
             })
-            .map(|(id, _)| id.to_string());
+            .filter_map(|(ask_id, ask)| {
+                let prompt = ask.get("prompt").and_then(Value::as_str)?;
+                // 行名不够：同一行会有多条债键（每条便签一条）。排除条件钉死**同一键**的
+                // 洞察，不按种类笼统排除——否则一条便签反思过，后面所有便签都不再反思。
+                let done = ask
+                    .get("key")
+                    .and_then(|key| key_value(key, "tool_call_id"))
+                    .and_then(|call_id| {
+                        insights.iter().find(|(_, payload)| {
+                            payload.get("tool_call_id").and_then(Value::as_str) == Some(call_id)
+                        })
+                    })
+                    .map(|(id, _)| id.to_string());
 
-        let mut spec = DebtSpec::new(
-            "notes-reflect-model",
-            ASSIST_PORT,
-            ask_id.to_string(),
-            json!({ "system": "", "user": prompt }),
-        )
-        .when_id(ASK_KIND, ask_id.to_string());
-        if let Some(id) = done {
-            spec = spec.unless_id(NOTES_INSIGHT, id);
-        }
-        vec![spec]
+                let mut spec = DebtSpec::new(
+                    "notes-reflect-model",
+                    ASSIST_PORT,
+                    ask_id.to_string(),
+                    json!({ "system": "", "user": prompt }),
+                )
+                .when_id(ASK_KIND, ask_id.to_string());
+                if let Some(id) = done {
+                    spec = spec.unless_id(NOTES_INSIGHT, id);
+                }
+                Some(spec)
+            })
+            .collect()
     }
 }
 
