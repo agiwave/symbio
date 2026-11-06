@@ -186,7 +186,7 @@ pub struct SessionConfig {
     ///
     /// 长任务进行中，助手是否在**轮边界**主动说一句进度（`Verdict::Report` ⇒
     /// `compose` 从运行现状组织一句话 ⇒ 一条根级对话面节点）。判定与执行见
-    /// `chat_loop/progress.rs`。
+    /// `progress.rs`。
     ///
     /// - `true`：静默超过 [`Self::progress_interval_ms`] 时，汇报一次（每轮至多
     ///   [`Self::progress_max_per_turn`] 次）；
@@ -219,6 +219,19 @@ pub struct SessionConfig {
     /// 上界是"最多说几次"。没有它，一个长时间运行的任务会按间隔反复刷屏。
     #[serde(default = "default_progress_max_per_turn")]
     pub progress_max_per_turn: u32,
+    /// 汇报的**最少轮次**：本轮至少走完这么多轮工具，才值得说一句。
+    ///
+    /// 与 [`Self::progress_interval_ms`] / [`Self::progress_max_per_turn`] 同属
+    /// 「什么时候该打断」的三个上界（第一个轮边界就够格 ⇒ `1`）。
+    #[serde(default = "default_progress_min_rounds")]
+    pub progress_min_rounds: u32,
+    /// 汇报债行的**派发租约**（毫秒）。这是策略，不是机制常数：`session.progress`
+    /// 行把它原样交给 `DebtSpec`，本文件是它的唯一 owner。
+    #[serde(default = "default_progress_lease_ms")]
+    pub progress_lease_ms: u64,
+    /// 汇报债行的**最多尝试次数**（含首次）。默认 1：一句旁白重复说比漏说更糟。
+    #[serde(default = "default_progress_max_attempts")]
+    pub progress_max_attempts: u32,
     /// 「欲」升格为任务的总开关（**E3 平凡值：`false`**，[DE-008 §2.3](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
     ///
     /// ## 它控制什么
@@ -455,6 +468,18 @@ pub fn default_progress_max_per_turn() -> u32 {
     // 5 次：一个 10 分钟的任务最多被打断 5 次，间隔已由 `progress_interval_ms` 保证。
     5
 }
+pub fn default_progress_min_rounds() -> u32 {
+    // 1 轮：避免刚开工就汇报；走完第一轮工具才值得说一句。
+    1
+}
+pub fn default_progress_lease_ms() -> u64 {
+    // 60s：与其它行债同一个量级；汇报本身是零往返的填表，派发不会久拖。
+    60_000
+}
+pub fn default_progress_max_attempts() -> u32 {
+    // 1：汇报不重试，失败即跳过——重复说一句比漏说更糟。
+    1
+}
 
 pub fn default_conation_enabled() -> bool {
     // E3 平凡值（[DE-001 §4.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：关掉后「欲」照样入格、照样可读，只是不升格为任务——
@@ -522,6 +547,9 @@ impl Default for SessionConfig {
             progress_enabled: default_progress_enabled(),
             progress_interval_ms: default_progress_interval_ms(),
             progress_max_per_turn: default_progress_max_per_turn(),
+            progress_min_rounds: default_progress_min_rounds(),
+            progress_lease_ms: default_progress_lease_ms(),
+            progress_max_attempts: default_progress_max_attempts(),
             conation_enabled: default_conation_enabled(),
             skill_compile_enabled: default_skill_compile_enabled(),
             skill_fast_path: default_skill_fast_path(),

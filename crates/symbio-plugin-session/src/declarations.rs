@@ -178,6 +178,10 @@ pub(crate) const ROWS: &[Decl] = &[
 ];
 
 /// 本插件自己的事实形状：只有 `session.settled` 的键字段 `root_id`。
+///
+/// `chat.assistant.reported` 不在这里登记：它的写方虽是本插件的债行，但格位与归属
+/// 由 `loop` 的词汇表声明（`EventDecl`），写闸按名字查得到；登记成事实只会多出一条
+/// `OrphanFact` 需要归宿行，而不是多一条检查。
 pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
     name: EVENT_SESSION_SETTLED,
     port: None,

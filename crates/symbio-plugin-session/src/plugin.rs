@@ -488,6 +488,16 @@ impl Plugin for SessionPlugin {
                         as Arc<dyn symbio_plugin_api::debt::DebtSource>,
                 ))
                 .await;
+            // 轮边界汇报的运行时债表（`session.progress`）：一「轮边界」一笔债，
+            // 边界身份由 `tool.calls.done` 的事实 id 派生；开关与上界读当轮的
+            // `session.config`。措辞仍归 compose，转写仍归本插件（D-020）。
+            visitor
+                .put(symbio_plugin_api::debt::debt_row(
+                    "session.progress",
+                    Arc::new(crate::progress::ProgressDebts)
+                        as Arc<dyn symbio_plugin_api::debt::DebtSource>,
+                ))
+                .await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         symbio_sdk::capability::capability_announce_configurable(&ctx, &self.config_file).await;
@@ -657,6 +667,24 @@ fn config_definition() -> DetailDefinition {
                         "每轮汇报上限",
                         "每轮最多汇报几次（0 = 一次都不汇报；与「关掉汇报」同效但语义不同）",
                         json!(d.progress_max_per_turn),
+                    ),
+                    unbounded_number(
+                        "progress_min_rounds",
+                        "汇报起始轮次",
+                        "本轮走完这么多轮工具调用后才允许汇报（0 = 第一个轮边界即可汇报）",
+                        json!(d.progress_min_rounds),
+                    ),
+                    unbounded_number(
+                        "progress_lease_ms",
+                        "汇报租约（毫秒）",
+                        "同一轮边界最多占用多久；超时未落由环按这条租约裁决（策略数，债行只读不写）",
+                        json!(d.progress_lease_ms),
+                    ),
+                    unbounded_number(
+                        "progress_max_attempts",
+                        "汇报尝试上限",
+                        "同一边界至多重派几次（租约的第二半；1 = 不重试）",
+                        json!(d.progress_max_attempts),
                     ),
                     DetailField::toggle(
                         "supplements_enabled",

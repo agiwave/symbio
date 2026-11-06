@@ -6,7 +6,7 @@
   "knife": "T-034",
   "phase": "P4–P6",
   "retire": "session 退役时同批删除本豁免",
-  "reason": "session 是 T-034 里排在 P4–P6 的待退役控制面；把 SDK 那一半搬进 plugin-api 等于让契约层长成一个大 SDK，且要靠调宽 HS-002 才绿——那是为了让门变绿而改门。故走限期豁免，不搬层。",
+  "reason": "session 是 T-034 里排在 P4–P6 的待退役控制面；把 SDK 那一半搬进 plugin-api 等于让契约层长成一个大 SDK，且要靠调宽 HS-002 才绿——那是为了让门变绿而改门。故走限期豁免，不搬层。`ReportDraft` 是本轮新增的唯一一条：轮边界汇报节点的形状只能由 SDK 构造器（`ReportDraft::to_message`）给出，session 的债行只递参数、不在这里复抄节点形状。",
   "symbols": [
     "AGENT_ID",
     "AGENT_PERMS",
@@ -45,6 +45,7 @@
     "PluginDir",
     "PresentationTree",
     "Principal",
+    "ReportDraft",
     "SEG_MESSAGES",
     "SESSION_ID",
     "SKILL_TAG",

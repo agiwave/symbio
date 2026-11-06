@@ -143,6 +143,10 @@ impl SessionPlugin {
                 "progress_enabled": cfg.progress_enabled,
                 "progress_interval_ms": cfg.progress_interval_ms,
                 "progress_max_per_turn": cfg.progress_max_per_turn,
+                "progress_min_rounds": cfg.progress_min_rounds,
+                // 债行的租约与尝试上界：策略数随 config 走，债行不写字面量。
+                "progress_lease_ms": cfg.progress_lease_ms,
+                "progress_max_attempts": cfg.progress_max_attempts,
                 "readyset_cap": cfg.task_cap,
                 "skill_compile_enabled": cfg.skill_compile_enabled,
                 // 兜底表达：空表原因 / 收集错误明细（均为既有 config 载荷的字段，
