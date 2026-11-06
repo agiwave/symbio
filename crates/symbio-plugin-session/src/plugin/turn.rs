@@ -127,10 +127,6 @@ impl SessionPlugin {
             // 溯源指同一轮刚落的 `user.message`（seq 就是它的号）。
             produced_by: Some(seq),
         };
-        source
-            .append(PRINCIPAL_MAIN.to_string(), config_draft)
-            .map_err(|e| PluginError::InternalError(format!("session.config 落格失败: {e}")))?;
-
         // 轮首召回：跨会话枚举 + 可见域收放（宿主侧隔离面）→ 检索面 → 一格读数。
         //
         // 段 → provider → 落点的实际收集路径（以后加段照抄这一条）：
@@ -140,8 +136,16 @@ impl SessionPlugin {
         // 4. **能力包的 `ContextProvider`** 在 `model::turn_input` 收集时从 `req.facts`
         //    按名字读这一格并渲染段 → 进请求前缀。
         // `plugin-model` 不认识任何段名：加一段 = 加一个 provider + 它在轮首的那一格读数。
+        //
+        // **先于 `session.config` 落格**：config 是这一轮模型债的 `when`，而模型执行体
+        // 只读事实。若 config 先落，驱动可能在读数落格之前就发出本轮请求——新会话首轮
+        // 没有上一轮读数可借，请求包里就整段缺席。
         self.append_recall(session_id, source, &item.id, seq, &text)
             .await?;
+
+        source
+            .append(PRINCIPAL_MAIN.to_string(), config_draft)
+            .map_err(|e| PluginError::InternalError(format!("session.config 落格失败: {e}")))?;
 
         let mut message = item.message;
         message.seq = None;

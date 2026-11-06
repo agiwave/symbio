@@ -185,6 +185,16 @@ impl Convergence {
         source: &dyn FactSource,
     ) -> Result<bool, PluginError> {
         let events = source.range(0);
+        // 记忆巩固（D-268）：调用方在驱动空闲之后才走到这里，本轮编码已经落格——
+        // 这就是「编码先于巩固」的时点。条数不够 / 活集视图读不到 ⇒ 本轮不巩固。
+        // 事件键按 `(user_seq, 源 seq)` 定死，CLI 投影与后台收轮的重复调用按
+        // `Duplicate` 收敛，不会多出一条合并产物。
+        let now = events.iter().map(|e| e.ts).max().unwrap_or(0);
+        if let Err(why) =
+            crate::memory_consolidate::consolidate_turn(source, &events, user_seq, now)
+        {
+            symbio_plugin_api::plugin_warn!("session", "记忆巩固落格失败（{session_id}）：{why}");
+        }
         let Some(user) = events.iter().find(|e| {
             e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq)
         }) else {

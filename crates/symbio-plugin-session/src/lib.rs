@@ -11,6 +11,7 @@ mod convergence;
 mod declarations;
 mod grants;
 mod memory;
+mod memory_consolidate;
 pub(crate) mod message_events;
 mod options;
 // 会话口径的纯折叠（原 core 的 checkpoint / fallback / slo / span / changes，
