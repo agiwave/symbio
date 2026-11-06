@@ -599,7 +599,14 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     };
     let principal = actor_principal(e);
     let status = status_of(e);
-    let text = text_of(e, "text");
+    let direct = text_of(e, "text");
+    // 末轮「思考即正文」：写侧把正文折成 `answer`（`text` 为空），读面按同一个数走，
+    // 否则 `reasoning_only` 的判据两端对不上，正文子节点会缺席（t55）。
+    let text = if direct.trim().is_empty() {
+        text_of(e, "answer")
+    } else {
+        direct
+    };
     let reasoning = text_of(e, "reasoning");
     // 兜底格的 `detail` = 这一轮**为什么失败**（写侧 `append_fallback` 记的原因码文本）。
     // 它必须折回节点：界面的组级交代条（`TurnGroupNode` → `MessageErrorBox`）读的是
@@ -661,9 +668,11 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     }
 
     if !text.trim().is_empty() {
-        // 正文子节点的 id 由 core 的 [`event_produced_text_node_id`] 给（含 reasoning-only
-        // 那条分支）——它与落库侧同源，`message.edited` 才定位得到这条节点。
-        let child_id = event_produced_text_node_id(e);
+        // 正文子节点的 id 与写侧同源：优先取执行体交出的 `answer_id`（含
+        // reasoning-only 那条分支），旧事实没有该键时按 core 的
+        // [`event_produced_text_node_id`] 派生。
+        let child_id =
+            str_of(e, "answer_id").unwrap_or_else(|| event_produced_text_node_id(e));
         // 形状经 `llm_build_text_node`（单点定义），只覆写「此刻」为事件时刻。
         let mut m = llm_build_text_node(&group, &text, None, child_id, &principal);
         m.timestamp = Some(e.ts);

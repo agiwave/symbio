@@ -536,10 +536,42 @@ impl PortExecutor for ModelExecutor {
                         payload["context"] = watermark;
                     }
                 }
-                PortOutcome {
-                    facts: vec![payload],
-                    error: None,
-                    reply: PortReply { messages, links },
+                // ── 空正文收束不是「答完了」 ─────────────────────────────
+                //
+                // 收束轮拿不出可交付正文时仍以 `final` 收口，会把「被长度上限截断」
+                // 与「模型什么都没说」压成同一条 CLI 通用兜底（t77）。判据按写侧
+                // 折好的 `answer` 走：`text` 空但 `answer` 有内容 ⇒ 仍是成功收束
+                // （「思考即正文」，t55）；两者都空 ⇒ 失败事实，保留已到的思考，
+                // 原因如实说截断——不许放宽成「只要有字就行」。
+                let answer_empty = match payload.get("answer").and_then(|v| v.as_str()) {
+                    Some(answer) => answer.trim().is_empty(),
+                    None => true,
+                };
+                if is_final && answer_empty {
+                    let why = if output.finish.is_length() {
+                        "模型输出在长度上限处被截断，未产出可交付正文"
+                    } else {
+                        "模型未产出可交付正文"
+                    };
+                    PortOutcome {
+                        facts: vec![outcome_payload(
+                            &request,
+                            // 保留本轮产出：`answer` 因截断被折空，但 `reasoning`
+                            // 仍是草稿——它要以**思考事实**入格，不能当没发生过。
+                            Some(&output),
+                            &rows.snapshot(),
+                            started,
+                            Some(("failed", why)),
+                        )],
+                        error: Some((PortErrorClass::NonRetryable, why.to_string())),
+                        ..Default::default()
+                    }
+                } else {
+                    PortOutcome {
+                        facts: vec![payload],
+                        error: None,
+                        reply: PortReply { messages, links },
+                    }
                 }
             }
             Err(PluginError::Aborted) => PortOutcome {

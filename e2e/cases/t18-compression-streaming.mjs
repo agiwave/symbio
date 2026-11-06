@@ -135,7 +135,7 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
     );
 
     // C：失败本身有交代——失败落在 `model.assist` 的环事实里（环的 failed 载荷
-    //    形如 `{ class, reason, facts }`），且没有别的端口失败
+    //    与本轮产出同形：`class` / `reason` 加端口与该次往返的字段），且没有别的端口失败
     const failed = events.filter((e) => e.kind === 'failed');
     assert(failed.length >= 1, `失败应落 failed 事实（现有 kind: ${kinds}）`);
     assert(

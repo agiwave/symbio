@@ -336,7 +336,7 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
                 ctx.append(Fact::new(
                     FactKind::Failed,
                     key,
-                    json!({"class": class_name(class), "reason": why, "facts": outcome.facts}),
+                    failure_payload(&outcome.facts, port, class, &why),
                     now_ms,
                 ));
             }
@@ -404,6 +404,30 @@ fn stamp_port(payload: Value, port: &str) -> Value {
         }
         other => json!({ "port": port, "facts": other }),
     }
+}
+
+/// 失败载荷：与 `response` **同一条产出形状**（环补的 `port` + 执行体交回的产出），
+/// 只多 `class` / `reason`。
+///
+/// `failed` 的声明字段本来就含 `port` / `root_id` / `text` / `reasoning` / `answer`
+/// 等（`symbio-kernel::decl::PROTOCOL_FACTS`），读侧（`rebuild::output_nodes`）正是
+/// 按 `port == "model"` 折正文 / 思考节点。失败若把这些产出裹进 `facts` 数组，
+/// 读侧只看得见顶层——被截断的思考会随失败一起消失（t77）；端口也必须与成功路径
+/// （`response_payloads`）同一套补法，否则同一次往返在两种结局下是两个身份。
+fn failure_payload(facts: &[Value], port: &str, class: PortErrorClass, why: &str) -> Value {
+    let body = match facts {
+        [] => json!({}),
+        [only] => only.clone(),
+        many => Value::Array(many.to_vec()),
+    };
+    let mut payload = stamp_port(body, port);
+    if let Some(map) = payload.as_object_mut() {
+        map.insert("class".to_string(), json!(class_name(class)));
+        // 环侧读原因用 `reason`（notes 的 `reply_of` 与会话收束都读它）；执行体
+        // 自带的 `why` 不覆盖，两个键同义并存。
+        map.insert("reason".to_string(), json!(why));
+    }
+    payload
 }
 
 /// 执行体 emit 的收集器：五类事实进账本，其余原样转交应用出口。

@@ -384,6 +384,16 @@ impl OutputIndex {
         if !direct.trim().is_empty() {
             return direct.to_string();
         }
+        // 末轮「思考即正文」：写侧把正文折成 `answer`（`text` 为空）——投影必须与
+        // 写侧同读数，否则这一轮在历史里没有正文（t55）。
+        let answer = e
+            .payload
+            .get("answer")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if !answer.trim().is_empty() {
+            return answer.to_string();
+        }
         let Some(ids) = e.payload.get("responses").and_then(|v| v.as_array()) else {
             return String::new();
         };

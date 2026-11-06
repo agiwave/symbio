@@ -287,6 +287,49 @@ async fn non_retryable_error_lands_failed() {
     let last = ctx.snapshot().last().cloned().unwrap();
     assert_eq!(last.kind, FactKind::Failed);
     assert_eq!(last.payload["class"], "non_retryable");
+    // 失败与成功同一条身份位：端口由环补，读侧按它判「这次往返对读者说话」。
+    assert_eq!(last.payload["port"], "p1");
+}
+
+/// 失败但交回产出（截断轮的形状）：产出在**顶层**，端口同成功路径。
+///
+/// 读侧（`rebuild::output_nodes`）只认顶层 `port` + `reasoning`；把产出裹进
+/// `facts` 数组等于让它随失败一起消失（t77）。
+struct DraftFailure;
+
+#[async_trait::async_trait]
+impl PortExecutor for DraftFailure {
+    async fn execute(&self, _ctx: PortExecContext, _input: PortInput) -> PortOutcome {
+        PortOutcome {
+            facts: vec![json!({
+                "root_id": "turn-1",
+                "text": "",
+                "reasoning": "先读三处，再逐段列数字",
+                "reasoning_id": "turn-1-reasoning",
+                "answer": "",
+                "truncated": true,
+            })],
+            error: Some((PortErrorClass::NonRetryable, "长度截断".to_string())),
+            ..Default::default()
+        }
+    }
+}
+
+#[tokio::test]
+async fn failed_carries_the_draft_at_top_level() {
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "model", "d", json!({}))])
+        .with_executor("model", Arc::new(DraftFailure));
+    let _ = drive(&ctx).await;
+
+    let last = ctx.snapshot().last().cloned().unwrap();
+    assert_eq!(last.kind, FactKind::Failed);
+    assert_eq!(last.payload["port"], "model");
+    assert_eq!(last.payload["reasoning"], "先读三处，再逐段列数字");
+    assert_eq!(last.payload["reason"], "长度截断");
+    assert!(
+        last.payload.get("facts").is_none(),
+        "本轮产出在顶层，不裹 facts：{last:?}"
+    );
 }
 
 #[tokio::test]

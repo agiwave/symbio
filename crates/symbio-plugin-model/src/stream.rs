@@ -182,9 +182,9 @@ fn truncate_for_display(s: &str, max: usize) -> String {
 /// 发送一帧**增量**：`delta` 追加到目标节点正文尾部（流式热路径，O(delta)）。
 /// 目标未知时写入点用帧内信息建占位（帧自给自足，不依赖任何先行帧）。
 /// 原住 `symbio_plugin_api::llm::turn`（帧家族），按 D-023 的「依赖方数量」判据随
-/// **唯一调用方**迁到本模块（D-023）：只有这里的流循环发增量帧。终态帧走
-/// session 的 `llm_emit_state`（`crates/symbio-sdk/src/llm/frames.rs`），完整消息帧走 core 的
-/// `llm_emit_message`——三者同一套帧语义，位置由消费方数量决定。
+/// **唯一调用方**迁到本模块（D-023）：只有这里的流循环发增量帧。收束轮
+/// 「思考即正文」的状态帧也在这里就地发（见流结束段），完整消息帧走 core 的
+/// `llm_emit_message`——同一套帧语义，位置由消费方决定。
 async fn llm_emit_delta(sink: &ExecEventSink, message_id: &str, delta: &str) {
     sink.emit(ChatNode {
         id: message_id.to_string(),
@@ -559,6 +559,32 @@ pub async fn parse_sse_stream(
             out.finish
         );
     }
+    // ── 收束轮「思考即正文」：把思考节点改回正文节点 ──────────────────────
+    //
+    // 末轮没有正文、只有思考时，写侧把这段思考折成 `answer`；实时面却只发过
+    // Reasoning 帧，节点停在思考形态，非交互出口只回显 Text ⇒ 用户看不到这句话
+    // （t55）。这里补一帧**状态**（不带正文：正文已随 delta 到过），只换类型并清掉
+    // 思考标签；`Content` 仍由转写里已到的那段内容承载。
+    // 截断的思考**不是**答话（t77）：`finish=length` 时保持思考形态，交给端口侧
+    // 收口为失败事实；只有「说完了」的整段思考才换正文类型。
+    if !abort.is_aborted()
+        && !out.finish.is_length()
+        && out.tool_calls.is_empty()
+        && out.text.trim().is_empty()
+        && !out.reasoning.trim().is_empty()
+        && !out.reasoning_child_id.is_empty()
+    {
+        sink.emit(ChatNode {
+            id: out.reasoning_child_id.clone(),
+            parent_id: Some(root_id.to_string()),
+            msg_type: Some(NodeKind::Body),
+            meta: Some(serde_json::json!({})),
+            status: Some(NodeStatus::Completed),
+            ..Default::default()
+        })
+        .await;
+    }
+
     // 产物已写入调用方持有的 `out`（见本函数签名）：这里只报「这一批流跑完了」。
     Ok(())
 }

@@ -408,9 +408,13 @@ impl Convergence {
                 let Some(failed) = failed else {
                     return Ok(false);
                 };
+                // 环侧失败格的键是 `reason`（`ring/engine.rs` 的 `failed` 载荷），
+                // 执行体自己落的那条用 `why`——两个写法都读，否则环收口那条会
+                // 掉回通用文案，把「长度截断」说成「模型调用失败」（t77）。
                 let why = failed
                     .payload
-                    .get("why")
+                    .get("reason")
+                    .or_else(|| failed.payload.get("why"))
                     .and_then(Value::as_str)
                     .unwrap_or("模型调用失败")
                     .to_string();

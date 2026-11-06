@@ -378,7 +378,11 @@ impl ModelProvider for RecordingModel {
         _env: &ExecEnv,
     ) -> Result<RoundOutput, PluginError> {
         *self.seen.lock().unwrap() = Some((system_prompt.to_string(), messages.len(), tools.len()));
-        Ok(RoundOutput::default())
+        // 收束轮必须有可交付正文：正文与思考都空是失败收束（t77 的判据）。
+        Ok(RoundOutput {
+            text: "收到".into(),
+            ..RoundOutput::default()
+        })
     }
 }
 

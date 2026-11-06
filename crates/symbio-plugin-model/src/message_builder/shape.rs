@@ -38,7 +38,14 @@ pub(super) struct RunOutput {
 pub(super) fn aggregate_run(turn: &ChatNode, tree: &RequestTree<'_>) -> RunOutput {
     let mut native: NativeMessage = turn.clone().into();
     native.role = NodeRole::Assistant;
-    native.content = None;
+    // 根节点自带的正文也要算：**请求线格式**的 run 根把本轮正文放在自己的
+    // `content` 上（`wire_messages` 与 adapter 两侧同形状）；落库树则是「run 根 +
+    // Text 子节点」。只认子节点会把工具轮的中途正文从请求里抹掉（t55：第三次
+    // 请求的 assistant 正文为空）。
+    native.content = turn
+        .content
+        .clone()
+        .filter(|content| !content.to_text().trim().is_empty());
     native.reasoning_content = None;
     native.tool_calls = None;
 
