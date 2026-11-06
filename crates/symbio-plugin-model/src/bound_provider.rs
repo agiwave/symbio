@@ -27,7 +27,9 @@ use symbio_plugin_api::plugin_error;
 use symbio_plugin_api::plugin_info;
 use symbio_plugin_api::plugin_warn;
 use symbio_plugin_api::TurnOutput;
-use symbio_plugin_api::{CapabilityMeta, ExecEnv, ModelProvider, PluginError};
+use symbio_plugin_api::{
+    llm_removed_frame, CapabilityMeta, ExecEnv, ExecEventSink, ModelProvider, PluginError,
+};
 
 use super::http::{endpoint_label, execute_post_with_abort, PostResult};
 use super::model_providers::ModelProviderConfig;
@@ -44,6 +46,25 @@ impl BoundProvider {
     /// 绑定持久化配置与协议实现
     pub fn new(cfg: ModelProviderConfig, protocol: Arc<dyn ModelProtocol>) -> Self {
         Self { cfg, protocol }
+    }
+}
+
+/// 撤销**播种了却未被触碰**的工具节点：上一批尝试已把它们的卡片广播出去，本批流
+/// 没有真正收到增量 ⇒ 那些卡片再没有人认领，会永远停在时间线上。
+///
+/// 判据只有一条：在 `seeded` 里、不在 `kept` 里。`kept` 是本批真正收口的调用
+/// （[`TurnOutput::tool_calls`] 由累积器的 `finish()` 产出，只含 `touched`），它们
+/// 照常留给工具执行与落库；本批新出现、未经播种的 id 不在 `seeded` 里，因此不会
+/// 被误删。
+///
+/// 复用**既有的 `removed` 写口**（`llm_removed_frame`），不新造状态：时间线上会出现
+/// 一次删除，前端可能有删除动画（D-347）。这条语义**仅限**「重发撤销播种槽位」，
+/// 不扩大到别处。
+async fn revoke_untouched(sink: &ExecEventSink, seeded: &[String], kept: &[String]) {
+    for id in seeded {
+        if !kept.iter().any(|kept_id| kept_id == id) {
+            sink.emit(llm_removed_frame(id)).await;
+        }
     }
 }
 
@@ -200,8 +221,10 @@ impl ModelProvider for BoundProvider {
         // - 已广播的正文 / 推理子节点 id 记在 `out` 里，跨尝试保留 ⇒ 重试时同一节点
         //   被完整快照覆盖，不新建第二条（`dispatch_and_track` 的首增量为整条快照）；
         // - 已广播的 ToolCall 节点 id 由 `reuse_node_ids` 播种进累积器，同理整条覆盖；
+        // - 上一批广播了、本批**没真正收到**的 ToolCall 槽位补一条删除帧
+        //   （`revoke_untouched`，D-347）——卡片不会留在时间线上等一个不存在的调用；
         // - 根 Turn 节点由 session 侧在轮次开头创建一次，不在这里产生；
-        // ⇒ 重试不产生任何「重复卡片」。
+        // ⇒ 重试不产生任何「重复卡片」，也不留没人认领的空卡。
         //
         // 只重发**瞬时**故障（`StreamFailure::transient`）：协议帧里的 `error` 事件是
         // 上游明确拒绝，原样重发只会再被拒，白等 N 次。
@@ -222,6 +245,14 @@ impl ModelProvider for BoundProvider {
             .await
             {
                 Ok(()) => {
+                    // 重发成功：上一批广播出去、本批没真正触碰的播种槽位撤掉。
+                    // 本批收口的调用（`out.tool_calls`）一张都不动。
+                    let kept: Vec<String> = out
+                        .tool_calls
+                        .iter()
+                        .filter_map(|tc| tc.id.clone())
+                        .collect();
+                    revoke_untouched(sink, &reuse_node_ids, &kept).await;
                     // 钱与 token 同一次测量、同一个边界：价格是本 Provider 的配置，
                     // 用量是 provider 这次实测的数（见 `ModelPricing::charge`）。
                     // 没有实测用量 ⇒ 没有可折算的金额（`charge` 返回 `None`）。
@@ -238,12 +269,17 @@ impl ModelProvider for BoundProvider {
                          （已建 {} 个工具调用节点将复用 id）",
                         out.tool_calls.len()
                     );
-                    // 本批尝试已广播的节点 id 交给下一批：重发时整条覆盖而不是新建。
-                    reuse_node_ids = out
+                    // 本批播种了却没被触碰的槽位先撤掉：下一批的播种集合只含本批真正
+                    // 收口的调用，留在这里的卡片不会再有谁认领。
+                    let kept: Vec<String> = out
                         .tool_calls
                         .iter()
                         .filter_map(|tc| tc.id.clone())
                         .collect();
+                    revoke_untouched(sink, &reuse_node_ids, &kept).await;
+                    // 本批尝试已广播（且真正收口）的节点 id 交给下一批：重发时整条
+                    // 覆盖而不是新建。
+                    reuse_node_ids = kept;
                     // 退避与请求级重试**同一条曲线**（`http::backoff_delay`）：断流多因上游
                     // 瞬时过载，立刻重打只会再断一次。等待同样响应中止信号。
                     let delay = super::http::backoff_delay(stream_attempt, None);
@@ -293,6 +329,13 @@ impl ModelProvider for BoundProvider {
                     }
                 }
                 Err(fail) => {
+                    // 最终失败：播种了却未被触碰的卡片一并撤掉，不留悬挂的空卡。
+                    let kept: Vec<String> = out
+                        .tool_calls
+                        .iter()
+                        .filter_map(|tc| tc.id.clone())
+                        .collect();
+                    revoke_untouched(sink, &reuse_node_ids, &kept).await;
                     plugin_error!(
                         "model",
                         "[LLM] 轮次异常结束：{} (总耗时 {:?}, 流重发 {} 次)",
