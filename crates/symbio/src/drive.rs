@@ -33,7 +33,7 @@ use symbio_kernel::plugin::{
 };
 use symbio_plugin_api::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
 use symbio_plugin_api::{DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget, ExecEventSink};
-use symbio_sdk::keys::{AGENT_ID, WORKDIR};
+use symbio_sdk::keys::{AGENT_ID, MODE, RISK_LEVEL, WORKDIR};
 
 /// 一次驱动需要的**世界**：事实源 + 通用上下文（会话 / 提供方 / 工作目录 / 出口）。
 ///
@@ -42,11 +42,18 @@ use symbio_sdk::keys::{AGENT_ID, WORKDIR};
 pub struct FactWorld<'a> {
     pub facts: Arc<dyn FactSource>,
     pub session_id: &'a str,
+    /// 选定的 provider（会话 metadata 的 `provider_id`）；`None` = 模型侧默认。
     pub provider: Option<&'a str>,
     pub workdir: &'a str,
     /// 会话主体来源（metadata 的 `agent_id`，空串 = 无绑定主体）。
     /// 由装配层随事实源带入，`drive_on_new_fact` 只在这里设一次 `AGENT_ID`。
     pub agent_id: &'a str,
+    /// 会话运行参数（写口按 `req > metadata > 默认` 解析完的结果）。
+    ///
+    /// `append` 不携带运行选项，由事实源打开时取来；这里挂进本轮 ctx，
+    /// 审批闸门（`RISK_LEVEL` / `MODE`）只读。
+    pub mode: &'a str,
+    pub risk_level: &'a str,
     /// 执行期出口：由会话插件按根交出的真实转写句柄（内部请求显式静默）。
     pub sink: ExecEventSink,
 }
@@ -80,6 +87,10 @@ pub async fn drive_on_new_fact(
     // 会话主体的**唯一**装载点：值来自会话 metadata 的 `agent_id`，
     // 由事实源打开时取来。执行体只读，不再各自派生或回落。
     ctx.set(AGENT_ID, world.agent_id.to_string());
+    // 会话运行参数同址装配：审批闸门与模型端口都从这个 ctx 读值，
+    // 与 `workdir` / `agent_id` 同一来源（会话 metadata），不在执行体里二次反查。
+    ctx.set(MODE, world.mode.to_string());
+    ctx.set(RISK_LEVEL, world.risk_level.to_string());
     // 装配层 open 的同一句柄：宿主与插件上下文共享它，插件不自建 store。
     ctx.set(FACT_SOURCE, Arc::clone(&world.facts));
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(ctx);
@@ -282,10 +293,12 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
     let world = FactWorld {
         facts: Arc::clone(&target.facts),
         session_id: &target.session_id,
-        // 收口只知道会话身份；提供方由环在驱动内按会话取。
-        provider: None,
+        // 提供方随会话 metadata 一并取来（`req > metadata > 默认` 的元数据档）。
+        provider: target.provider_id.as_deref(),
         workdir: &workdir,
         agent_id,
+        mode: &target.mode,
+        risk_level: &target.risk_level,
         sink: target.sink.clone(),
     };
     if let Err(e) = drive_on_new_fact(root, &world).await {

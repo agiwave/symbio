@@ -244,7 +244,7 @@ async fn run_once(
             }
             // 停在等待用户动作上的本轮没有正文：卡片本身就是这一轮的产出，
             // interactive 档下不算失败（与上一段同一口径）。
-            if !renderer.wrote_text && !renderer.saw_waiting_action() {
+            if !renderer.produced_text && !renderer.saw_waiting_action() {
                 eprintln!("（模型没有产出文本内容，请检查 Provider 配置或用 --verbose 查看详情）");
                 return ExitCode::FAILURE;
             }

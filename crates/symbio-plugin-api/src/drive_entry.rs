@@ -48,6 +48,16 @@ pub struct DriveTarget {
     /// 由写口在打开会话事实源时取来，`drive_on_new_fact` 据此设 `AGENT_ID`——
     /// **全链路只有这一处设它**，其余执行体只读。`None` = 取不到（拒绝回落主体）。
     pub agent_id: Option<String>,
+    /// 会话运行参数：已按 `req > session.metadata > 默认` 解析完的**结果值**。
+    ///
+    /// 与 `workdir` / `agent_id` 同一来源、同一理由：`append` 不携带运行选项，由写口
+    /// 在打开会话事实源时从 metadata 取来；`drive_on_new_fact` 把它们挂进本轮 ctx
+    /// （`MODE` / `RISK_LEVEL` / `PROVIDER_ID`），审批闸门与模型端口据此取值。
+    /// 解析链的**唯一实现**在会话侧（`store/layout.rs::resolve_session_params`）。
+    pub mode: String,
+    pub risk_level: String,
+    /// 显式指定的 provider；`None` = 由模型侧选默认（本契约不猜）。
+    pub provider_id: Option<String>,
     /// 本会话的事实源句柄（写口打开的那一份，唯一写口）。
     pub facts: Arc<dyn FactSource>,
     /// 执行期出口：由装配层按根提供真实转写句柄；内部请求显式静默。

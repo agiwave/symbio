@@ -15,6 +15,7 @@ use symbio_plugin_api::drive_entry::{DriveEntry, DriveTarget};
 use symbio_plugin_api::fact_source::{FactSource, FactSourceOpener, Principal};
 use symbio_plugin_api::FactDraft;
 
+use super::layout::SessionParams;
 use super::wal::WalStore;
 
 /// 会话存储目录（进程内首次登记；开面据此解析共享实例）。
@@ -37,6 +38,9 @@ pub(crate) struct SessionFactSource {
     workdir: Option<String>,
     /// 会话主体来源（metadata 的 `agent_id`）：随驱动目标交回，`append` 不再反查。
     agent_id: Option<String>,
+    /// 会话运行参数（`mode` / `risk_level` / `provider_id`）：随驱动目标交回，
+    /// `append` 不再反查 metadata。
+    params: SessionParams,
     /// 本会话所属**部署根**的驱动实例；`None` = 只读事实源，不踢驱动。
     drive: Option<Arc<dyn DriveEntry>>,
     /// 执行期出口：真实转写句柄，或本根**显式声明**的静默。
@@ -50,6 +54,7 @@ impl SessionFactSource {
         session_id: String,
         workdir: Option<String>,
         agent_id: Option<String>,
+        params: SessionParams,
         drive: Option<Arc<dyn DriveEntry>>,
         sink: ExecEventSink,
     ) -> Arc<dyn FactSource> {
@@ -59,6 +64,7 @@ impl SessionFactSource {
             session_id,
             workdir,
             agent_id,
+            params,
             drive,
             sink,
         })
@@ -105,6 +111,9 @@ impl FactSource for SessionFactSource {
                     agent_id: Some(self.agent_id.clone().ok_or_else(|| {
                         "会话主体不可用：带驱动的事实源缺少 agent_id".to_string()
                     })?),
+                    mode: self.params.mode.clone(),
+                    risk_level: self.params.risk_level.clone(),
+                    provider_id: self.params.provider_id.clone(),
                     facts,
                     sink: self.sink.clone(),
                 };
@@ -155,11 +164,13 @@ impl FactSourceOpener for SessionFactOpener {
         let workdir = store
             .session_dir(session_id)
             .and_then(|dir| super::layout::read_workdir(&dir));
+        // 只读开面不带驱动：运行参数没有消费方，取默认值即可。
         Ok(SessionFactSource::open(
             wal,
             session_id.to_string(),
             workdir,
             None,
+            SessionParams::default(),
             None,
             ExecEventSink::silent(),
         ))

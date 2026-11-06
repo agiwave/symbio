@@ -156,6 +156,8 @@ impl SessionStore {
             return Ok(None);
         };
         let workdir = super::layout::read_workdir(&dir);
+        // 运行参数与 workdir 同一读法：地址写入面不承载运行选项，metadata 是来源。
+        let params = super::layout::read_session_params(&dir);
         // 会话主体的唯一来源；目录在却取不到就显式失败，不回落 `session/main`。
         let agent_id = super::layout::read_agent_id(&dir).ok_or_else(|| {
             format!("会话 {session_id} 的 metadata 取不到 agent_id（拒绝回落主体）")
@@ -166,6 +168,7 @@ impl SessionStore {
                 session_id.to_string(),
                 workdir,
                 Some(agent_id),
+                params,
                 drive,
                 sink,
             )

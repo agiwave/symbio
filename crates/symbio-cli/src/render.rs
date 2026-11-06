@@ -134,6 +134,12 @@ pub struct Renderer {
     waiting_cards: HashSet<String>,
     /// 本轮是否已经输出过正文（用于收尾换行判断）
     pub wrote_text: bool,
+    /// 本轮是否**产出过**正文（一旦置真不再复位；退出判定只认它）
+    ///
+    /// 与 [`Self::wrote_text`] 分开：后者会被「正文之后到达的工具卡」清掉
+    /// （排版换行用），若拿它判「有没有答案」，一张迟到的卡就会让有正文的一轮
+    /// 被判成空答案。
+    pub produced_text: bool,
 }
 
 impl Renderer {
@@ -149,6 +155,7 @@ impl Renderer {
             waiting_announced: HashSet::new(),
             waiting_cards: HashSet::new(),
             wrote_text: false,
+            produced_text: false,
         }
     }
 
@@ -169,6 +176,7 @@ impl Renderer {
         self.waiting_announced.clear();
         self.waiting_cards.clear();
         self.wrote_text = false;
+        self.produced_text = false;
     }
 
     /// 一轮收尾：若输出过正文则补一个换行，让下一个提示符另起一行。
@@ -348,6 +356,7 @@ impl Renderer {
                 if !frame.tail.is_empty() {
                     write_stdout(&frame.tail);
                     self.wrote_text = true;
+                    self.produced_text = true;
                     return true;
                 }
                 false

@@ -46,6 +46,7 @@
 
 use super::*;
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
+use symbio_sdk::chat::session_chat;
 
 /// `<base>/<safe_id>/`
 ///
@@ -253,6 +254,68 @@ pub(super) fn read_messages_sync(dir: &Path) -> Option<Vec<ChatNode>> {
 pub(super) fn read_meta(dir: &Path) -> Option<SessionMetaFile> {
     let content = std::fs::read_to_string(dir.join(SESSION_FILE)).ok()?;
     parse_meta_content(&content)
+}
+
+/// 会话运行参数解析后的**结果值**（三项都已落到具体取值 / 明确的缺席）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionParams {
+    pub mode: String,
+    pub risk_level: String,
+    /// 显式 provider；`None` = 由模型侧选默认
+    pub provider_id: Option<String>,
+}
+
+impl Default for SessionParams {
+    fn default() -> Self {
+        Self {
+            mode: "auto".to_string(),
+            risk_level: "medium".to_string(),
+            provider_id: None,
+        }
+    }
+}
+
+/// 三项运行参数的**唯一解析点**：`req > session.metadata > 默认`。
+///
+/// - `mode` 默认 `auto`；`risk_level` 默认 `medium`；`provider_id` 无默认（缺席 =
+///   由模型侧选默认 provider）；
+/// - 空串与非字符串值一律视为缺席——「写了空值」不等于「显式要空」；
+/// - 收件箱路径的 `req` 档恒为空：地址写入面不承载运行选项（D-066），metadata 是
+///   唯一来源；直接调用方带进来的请求级参数仍然优先。
+///
+/// 解析结果由事实源随 `DriveTarget` 交给驱动，在驱动装配处挂进本轮 ctx——
+/// 审批闸门与模型端口都从那里读，不在执行体里二次反查。
+pub(crate) fn resolve_session_params(
+    req: &session_chat::Request,
+    metadata: &serde_json::Value,
+) -> SessionParams {
+    let pick = |req: Option<&str>, key: &str| {
+        req.map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                metadata
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string)
+            })
+    };
+    SessionParams {
+        mode: pick(req.mode.as_deref(), "mode").unwrap_or_else(|| "auto".to_string()),
+        risk_level: pick(req.risk_level.as_deref(), "risk_level")
+            .unwrap_or_else(|| "medium".to_string()),
+        provider_id: pick(req.provider_id.as_deref(), "provider_id"),
+    }
+}
+
+/// 从会话目录解析运行参数（`req` 档为空：地址写入面不承载运行选项，metadata 是来源）。
+///
+/// 与 [`read_workdir`] / [`read_agent_id`] 同一读法：只读 `session.json`。
+pub(super) fn read_session_params(dir: &Path) -> SessionParams {
+    let metadata = read_meta(dir).map(|meta| meta.metadata).unwrap_or_default();
+    resolve_session_params(&session_chat::Request::default(), &metadata)
 }
 
 /// 会话 metadata 里的工作目录（**只读 `session.json`**，不碰消息）。
