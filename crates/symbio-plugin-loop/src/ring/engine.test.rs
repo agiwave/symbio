@@ -118,6 +118,7 @@ struct Stub {
     seen: Mutex<Seen>,
     retry_until: u32,
     non_retryable: bool,
+    needs_human: bool,
 }
 
 impl Stub {
@@ -126,6 +127,7 @@ impl Stub {
             seen: Mutex::new(Seen::default()),
             retry_until: 1,
             non_retryable: false,
+            needs_human: false,
         }
     }
 
@@ -139,6 +141,14 @@ impl Stub {
     fn non_retryable() -> Self {
         Self {
             non_retryable: true,
+            ..Self::ok()
+        }
+    }
+
+    /// 第三态「挂起」：`sent{deadline_ms:null}`，债继续开着。
+    fn needs_human() -> Self {
+        Self {
+            needs_human: true,
             ..Self::ok()
         }
     }
@@ -174,6 +184,9 @@ impl PortExecutor for Stub {
             ));
         if self.non_retryable {
             return PortOutcome::failed(PortErrorClass::NonRetryable, "nope");
+        }
+        if self.needs_human {
+            return PortOutcome::failed(PortErrorClass::NeedsHuman, "等待用户");
         }
         if attempt < self.retry_until {
             return PortOutcome::failed(PortErrorClass::Retryable, "again");
@@ -568,7 +581,60 @@ async fn when_no_open_gate_reads_debt_state() {
     ));
     let report = drive(&ctx).await;
     assert_eq!(report.dispatched, 0);
-    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+    // 不派发是对的；但债还开着、又没有行能还 ⇒ 出口不能报 `NoDebt`
+    // （那会让宿主把 `idle` 记成正常完成）。旧用例把这一格钉成了 `NoDebt`，
+    // 钉的正是本条要修的静默停摆。
+    assert_eq!(
+        report.outcome,
+        DriveOutcome::Waiting(vec![DebtKey::new("p1", "old", 1)])
+    );
+}
+
+/// 重试之后门控不能被旧 attempt 永久挡住：`retry` 把 attempt 1 作废，
+/// `when_no_open` 只该看最新 attempt。今天缺的正是「重试 + 门控」这个组合。
+#[tokio::test]
+async fn retry_does_not_poison_the_when_no_open_gate() {
+    // 账上已经是「attempt 1 可重试失败、retry 指向 attempt 2」的形状。
+    let seed = vec![
+        Fact::new(
+            FactKind::Request,
+            DebtKey::new("tool", "call-1", 1),
+            json!({}),
+            0,
+        ),
+        Fact::new(
+            FactKind::Sent,
+            DebtKey::new("tool", "call-1", 1),
+            json!({"deadline_ms": 60_000}),
+            0,
+        ),
+        Fact::new(
+            FactKind::Retry,
+            DebtKey::new("tool", "call-1", 2),
+            json!({"from": 1}),
+            0,
+        ),
+    ];
+    let gate = Arc::new(Stub::needs_human());
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("tool-calls", "tool", "call-1", json!({})).lease(600_000, 2),
+        // 工具端口还开着债就不欠；attempt 1 被 retry 取代后不该再挡住它。
+        DebtRow::new("model-after-tools", "model", "model:after:1", json!({})).when_no_open("tool"),
+    ])
+    .with_executor("tool", Arc::new(Stub::ok()))
+    .with_executor("model", gate.clone())
+    .with_facts(seed);
+
+    let report = drive(&ctx).await;
+
+    // tool 的 attempt 2 收束后，续接行仍能欠账并派发（旧口径下它永远不会被派）。
+    assert_eq!(report.dispatched, 2);
+    assert_eq!(gate.seen().len(), 1);
+    // 续接行挂起（债继续开着）⇒ 出口必须是 `Waiting`，而不是骗人的 `NoDebt`。
+    assert_eq!(
+        report.outcome,
+        DriveOutcome::Waiting(vec![DebtKey::new("model", "model:after:1", 1)])
+    );
 }
 
 #[tokio::test]

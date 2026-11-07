@@ -6,15 +6,15 @@
       "fn plan",
       "fn expire"
     ],
-    "hash": "sha256:acfe29ec3a0daa039b62a17577b1cc75329f282e42816112bfd193ff1a69ee5d",
-    "adr": "D-334",
-    "reason": "基线跟到实测：自 `sha256:fd32bc…`（`6c9b4918` 记录）以来，机制三段只有 `fn plan` 变了两次——`08950b85` 的派发第三态「挂起」（`sent.deadline_ms: null` 的债只在挂起点之后的新触发上重派，既不按时间重试也不自旋），本批的 `when_id`（种类 + 身份）触发条件（债行依赖的输入事实必须是这一轮的，经宿主的 `exists_id` 读面，D-325）。两处都没有新增世界域名 / 端口名 / 业务事实名字面量；驱动循环体与 `fn expire` 未变。冻结不是不许改：机制演进必须同批更新 hash 并改这条理由；指纹是**归一化 token 流**的哈希（剥注释、折叠空白、不计逗号）：import 顺序 / rustfmt 换行 / 尾逗号不进基线，加条件、改返回值、换比较符才进——不然每次 fmt 都要写一条 allow，allow 就成了橡皮图章。合法性的核验见 D-334。"
+    "hash": "sha256:ff34d5b124aa148442c53666bbe28ca72ec2d511923db3e3fc179278d55c9440",
+    "adr": "D-355",
+    "reason": "基线跟到实测：自 `sha256:acfe29ec…`（D-334 记录）以来，机制三段只有**驱动循环体**变了——出口分支在无动作时再读 `unresolved()`，账上仍开着债就报 `Waiting` 而不是 `NoDebt`（D-355）。读侧「还开着」改为按 (port,id) 最新 attempt 折叠（D-354），落在 `facts.rs`，不在本指纹。没有新增世界域名 / 端口名 / 业务事实名字面量；`fn plan` 与 `fn expire` 未变。指纹是**归一化 token 流**的哈希（剥注释、折叠空白、不计逗号）：import 顺序 / rustfmt 换行 / 尾逗号不进基线，加条件、改返回值、换比较符才进——不然每次 fmt 都要写一条 allow，allow 就成了橡皮图章。合法性的核验见 D-334。"
   },
   "extension": {
     "productionFiles": 9,
     "reason": "基线补登 `plugin_rows.rs`：D-338 引入的世界行执行体（`Ask` 落事实 + `plugin_row` 花名册）是环的机制面，与 D-334 的机制三段同档计数；当时漏改基线，本批按实测补到 9，无新增世界域名 / 端口名 / 业务事实名。"
   },
   "baseline-allow": [
-    "sha256:fd32bcfb62890c01e2b21b05242991d5bb39c1c7b17e4964d1be4b420d32e124→sha256:acfe29ec3a0daa039b62a17577b1cc75329f282e42816112bfd193ff1a69ee5d `fn plan` 的两处机制面演进：派发第三态「挂起」的等待与重触发判定（08950b85）、`when_id`（种类 + 身份）触发条件（债行依赖这一轮的输入事实，经宿主 `exists_id` 读面）；两处均无世界域名 / 端口名 / 业务事实名，CP-004 与 LP-003 同批为绿 D-334"
+    "sha256:acfe29ec3a0daa039b62a17577b1cc75329f282e42816112bfd193ff1a69ee5d→sha256:ff34d5b124aa148442c53666bbe28ca72ec2d511923db3e3fc179278d55c9440 驱动循环体的出口判据：无动作时再读 `unresolved()`，开着债 ⇒ `Waiting`（D-355）；读侧「还开着」按最新 attempt 折叠（D-354，`facts.rs` 不在本指纹）。无新增世界域名 / 端口名 / 业务事实名 D-355"
   ]
 }

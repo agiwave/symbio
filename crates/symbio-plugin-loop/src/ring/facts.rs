@@ -1,5 +1,7 @@
 //! 五类记账事实、债身份与只读事实投影。
 
+use std::collections::HashSet;
+
 use serde_json::Value;
 use symbio_plugin_api::port::PortReply;
 
@@ -172,15 +174,27 @@ impl<'a> FactView<'a> {
             .find(|f| f.kind.closes() && f.key.port.as_str() == port)
     }
 
-    /// 本会话里已开账但未收束的债（重放读它）。
+    /// 本会话里还开着的债（重放与门控都读它）。
+    ///
+    /// 口径是 **(端口, id) 的最新 attempt**：一笔债的身份是 `(port, id, attempt)`，
+    /// 但「还开着吗」只由最新 attempt 回答——attempt N 被 `retry` 指向 N+1 后不再算活。
+    /// 逐 attempt 独立判会把每个旧 attempt 留成永久孤儿（`retry` 落在下一 attempt 的
+    /// 键上，从不给旧 attempt 落收束），`when_no_open` 因此永久不成立。
+    ///
+    /// `request` 已落、`sent` 未落就中断的窗口**算开着**：最新 attempt 没有收束。
+    /// 它不会变成新孤儿——下一圈 `plan` 见这个键没有 `sent` 会重新派发（同一
+    /// attempt，`request` 由事实源按身份去重）；行已不可派时由出口报 `Waiting`。
     pub(crate) fn unresolved(&self) -> Vec<DebtKey> {
         let mut out = Vec::new();
+        let mut seen: HashSet<(&str, &str)> = HashSet::new();
         for fact in self.facts {
-            if fact.kind != FactKind::Request {
+            let pair = (fact.key.port.as_str(), fact.key.id.as_str());
+            if !seen.insert(pair) {
                 continue;
             }
-            if self.closing(&fact.key).is_none() && !out.contains(&fact.key) {
-                out.push(fact.key.clone());
+            let key = DebtKey::new(pair.0, pair.1, self.attempt(pair.0, pair.1));
+            if self.closing(&key).is_none() {
+                out.push(key);
             }
         }
         out

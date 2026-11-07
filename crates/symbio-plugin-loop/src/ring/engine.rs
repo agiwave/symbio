@@ -62,7 +62,8 @@ pub(crate) trait DriveCtx: Send + Sync {
 pub(crate) enum DriveOutcome {
     /// 没有可还的债。
     NoDebt,
-    /// 只剩在飞的债（租约未过）。
+    /// 仍有未收束的债，但本轮没有可动作的：在飞（租约未过），或开着却没人能还
+    /// （如被 `when_no_open` 挡住、又无别的行可派）。宿主不得据此记 `idle`。
     Waiting(Vec<DebtKey>),
 }
 
@@ -114,10 +115,20 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
             }
             continue;
         }
-        let outcome = if work.waiting.is_empty() {
+        // `NoDebt` 只许在**没有任何未收束债**时用：行被 `when_no_open` 之类挡住、
+        // 又没有别的行可派时，账上仍开着债。此时报 `NoDebt` 会让宿主把 `idle`
+        // 记成「正常完成」，轮静默停摆（无终答、无失败格）。开着的债即使暂时
+        // 没人能还，也必须被调用方看见。
+        let mut outstanding = work.waiting;
+        for key in view.unresolved() {
+            if !outstanding.contains(&key) {
+                outstanding.push(key);
+            }
+        }
+        let outcome = if outstanding.is_empty() {
             DriveOutcome::NoDebt
         } else {
-            DriveOutcome::Waiting(work.waiting)
+            DriveOutcome::Waiting(outstanding)
         };
         return RunReport {
             outcome,
