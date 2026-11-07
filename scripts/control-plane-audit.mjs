@@ -9,7 +9,7 @@
  * | 码 | 判什么 | 范围 |
  * |---|---|---|
  * | `CP-001` | 唯一循环体：整个环 crate 的生产代码只有一段 `loop` / `while`，落在 `ring/engine.rs` | `crates/symbio-plugin-loop/src/**` |
- * | `CP-004` | 机制层无世界域名：`vocab.rs` 登记的事件名不得作为**代码**字面量出现在 kernel / sdk（注释与测试夹具不算） | `crates/symbio-kernel/src/**`、`crates/symbio-sdk/src/**` |
+ * | `CP-004` | 机制层无世界域名：`vocab.rs` 登记的事件名不得作为**代码**字面量出现在 kernel / sdk / loop；端口名不得出现在 **loop 的派发面**（注释与测试夹具不算） | `crates/symbio-kernel/src/**`、`crates/symbio-sdk/src/**`、`crates/symbio-plugin-loop/src/**` |
  * | `CP-006` | 机制面指纹：驱动循环体 + `fn plan` + `fn expire` 的**归一化 token 流**哈希（注释 / 空白 / import 顺序 / 尾逗号无关）与生产文件数冻结在基线里 | `crates/symbio-plugin-loop/src/**` |
  * | `CP-009` | 第二推进循环：除 `ring/engine.rs` 外，任何生产文件的循环体都不得调 `drive(` | 全部 crate 的生产源码 |
  *
@@ -49,6 +49,7 @@ const VOCAB_REL = `${LOOP_SRC}/vocab.rs`
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
 const KERNEL_SRC = 'crates/symbio-kernel/src'
 const SDK_SRC = 'crates/symbio-sdk/src'
+const PORT_VOCAB_REL = 'crates/symbio-plugin-api/src/vocab.rs'
 
 const PRINT = process.argv.includes('--print-baseline')
 const WRITE = process.argv.includes('--write-baseline')
@@ -61,6 +62,8 @@ const LOOP_HEAD = /\bloop\s*\{|\bwhile\b[^{;]*\{|\bfor\b[^{;]*\bin\b[^{;]*\{/g
 const DRIVER_HEAD = /\bloop\s*\{|\bwhile\b[^{;]*\{/g
 const ADVANCE_CALL = /(?<!fn )(?<!async fn )\bdrive\s*\(/
 const EVENT_DECL = /EventDecl::(?:new|with_roles|host_with_roles)\(\s*(?:\r?\n\s*)?"([^"]+)"/g
+/** 端口名只有一处登记：`plugin-api/vocab.rs` 的 `PORT_*` 常量。 */
+const PORT_DECL = /pub const PORT_[A-Z0-9_]+:\s*&str\s*=\s*"([^"]+)"/g
 const PART_LABELS = ['drive loop body', 'fn plan', 'fn expire']
 
 function read(rel) {
@@ -412,17 +415,42 @@ if (vocab === null) {
   console.error(red(`control-plane-audit：词汇表读不出（${VOCAB_REL}）`))
   process.exit(2)
 }
-const worldNames = [...vocab.matchAll(EVENT_DECL)].map((m) => m[1])
+const worldNames = [...new Set([...vocab.matchAll(EVENT_DECL)].map((m) => m[1]))]
 if (worldNames.length === 0) {
   console.error(red(`control-plane-audit：词汇表里一个事件名都读不出（${VOCAB_REL}）`))
   process.exit(2)
 }
-for (const src of [KERNEL_SRC, SDK_SRC]) {
+const portVocab = read(PORT_VOCAB_REL)
+if (portVocab === null) {
+  console.error(red(`control-plane-audit：端口词汇表读不出（${PORT_VOCAB_REL}）`))
+  process.exit(2)
+}
+const portNames = [...new Set([...portVocab.matchAll(PORT_DECL)].map((m) => m[1]))]
+if (portNames.length === 0) {
+  console.error(red(`control-plane-audit：端口词汇表里一个端口名都读不出（${PORT_VOCAB_REL}）`))
+  process.exit(2)
+}
+
+// 世界事件名：kernel / sdk / loop 的**代码**都不许持有名字。`vocab.rs` 是声明表本身
+// （`TC-2` 的「除声明表与测试外」），不算机制层。
+for (const src of [KERNEL_SRC, SDK_SRC, LOOP_SRC]) {
   for (const rel of walk(src)) {
+    if (rel === VOCAB_REL) continue
     const code = stripComments(read(rel) ?? '')
     for (const name of worldNames) {
       if (code.includes(`"${name}"`)) report('CP-004', rel, `机制层出现世界事件名字面量 "${name}"`)
     }
+  }
+}
+
+// 端口名只在**派发面**（loop）判：loop 按世界端口名派发 / 选债，就是把世界名焊进机制。
+// kernel / sdk 里的 `"model"` / `"tool"` 大量是**载荷取值**、能力家族名与消息角色
+// （见 `plugin-api/vocab.rs` 的「多义拼写」注），文本扫描分不出概念，故不在此判。
+for (const rel of walk(LOOP_SRC)) {
+  if (rel === VOCAB_REL) continue
+  const code = stripComments(read(rel) ?? '')
+  for (const name of portNames) {
+    if (code.includes(`"${name}"`)) report('CP-004', rel, `派发面出现端口名字面量 "${name}"`)
   }
 }
 
@@ -496,7 +524,7 @@ if (errors.length) {
 
 console.log(
   green(
-    `control-plane-audit 通过：CP-001 唯一循环体 1（${ENGINE_REL}）· CP-004 世界事件名 ${worldNames.length} 个、机制层 0 处 · ` +
+    `control-plane-audit 通过：CP-001 唯一循环体 1（${ENGINE_REL}）· CP-004 世界事件名 ${worldNames.length} 个、端口名 ${portNames.length} 个、机制层 0 处 · ` +
       `CP-006 机制面 ${hash ? `${hash.slice(7, 19)}…` : '(读不出)'}（${productionFiles} 文件）· CP-009 第二推进循环 0`,
   ),
 )

@@ -9,13 +9,14 @@
  * | 码 | 反向用例 |
  * |---|---|
  * | `CP-001` | 引擎里多一段 `loop`；把唯一循环搬到另一个文件 |
- * | `CP-004` | kernel / sdk 的**代码**里出现 `vocab.rs` 登记的事件名 |
+ * | `CP-004` | kernel / sdk / loop 的**代码**里出现 `vocab.rs` 登记的事件名；loop 的派发面出现端口名 |
  * | `CP-006` | 机制字节改了而基线未跟；多一份生产文件；基线缺失；基线指向不存在的文件；决策号不存在 |
  * | `CP-009` | 另一 crate 的 `loop` / `for` 里调 `drive(` |
  *
- * 另有三条**不该红**的用例：
+ * 另有四条**不该红**的用例：
  *   - 注释里的世界域名 ⇒ 仍绿（判据读剥注释后的代码，字符串字面量保留）；
  *   - `test_fixtures.rs` 是 `cfg(test)` / feature 下的调用方拼写 ⇒ 不算机制层；
+ *   - sdk 里的端口名是载荷取值 / 角色词，不在派发面 ⇒ 不算机制在派发；
  *   - 循环体里没有推进调用 ⇒ 不算第二推进循环。
  *
  * 夹具的做法：建一棵最小可判的树（新环三个文件 + vocab + kernel / sdk 各一个文件 +
@@ -38,6 +39,7 @@ const BASELINE_REL = 'scripts/baselines/control-plane.json'
 const LOOP = 'crates/symbio-plugin-loop/src'
 const ENGINE = `${LOOP}/ring/engine.rs`
 const VOCAB = `${LOOP}/vocab.rs`
+const PORT_VOCAB = 'crates/symbio-plugin-api/src/vocab.rs'
 const KERNEL = 'crates/symbio-kernel/src/lib.rs'
 const SDK = 'crates/symbio-sdk/src/lib.rs'
 
@@ -156,6 +158,7 @@ function cleanTree() {
     [`${LOOP}/ring/mod.rs`]: 'pub mod engine;\n',
     [ENGINE]: ENGINE_SRC,
     [VOCAB]: VOCAB_SRC,
+    [PORT_VOCAB]: '/// 夹具：端口词汇面（端口名只有这一处登记）\npub const PORT_MODEL: &str = "model";\n',
     [KERNEL]: '// 内核夹具：没有任何世界域名\npub struct Event;\n',
     [SDK]: 'pub struct Store;\n',
     'docs/003-design/016-工程落地与验证.md': DECL_DOC,
@@ -164,11 +167,11 @@ function cleanTree() {
 
 // ───────────────────────────── 不该红的用例 ─────────────────────────────
 
-test('干净夹具：四条判据全绿（循环体 1 段、世界事件名 2 个、生产文件 4 份）', () => {
+test('干净夹具：四条判据全绿（循环体 1 段、世界事件名 2 个、端口名 1 个、生产文件 4 份）', () => {
   const r = audit(cleanTree())
   assert.equal(r.status, 0, r.stdout + r.stderr)
   assert.match(r.stdout, /CP-001 唯一循环体 1/)
-  assert.match(r.stdout, /CP-004 世界事件名 2 个、机制层 0 处/)
+  assert.match(r.stdout, /CP-004 世界事件名 2 个、端口名 1 个、机制层 0 处/)
   assert.match(r.stdout, /CP-006 机制面/)
   assert.match(r.stdout, /（4 文件）/)
   assert.match(r.stdout, /CP-009 第二推进循环 0/)
@@ -216,6 +219,25 @@ test('CP-004：sdk 的代码里出现世界事件名字面量 ⇒ 红', () => {
   const files = cleanTree()
   files[SDK] += '\npub const N: &str = "chat.assistant.final";\n'
   assertRed(audit(files), 'CP-004')
+})
+
+test('CP-004：loop 的代码里出现世界事件名字面量 ⇒ 红（声明表 vocab.rs 不算）', () => {
+  const files = cleanTree()
+  files[`${LOOP}/lib.rs`] += '\npub const N: &str = "user.message";\n'
+  assertRed(audit(files), 'CP-004')
+})
+
+test('CP-004：loop 的派发面出现端口名字面量 ⇒ 红', () => {
+  const files = cleanTree()
+  files[`${LOOP}/lib.rs`] += '\npub const P: &str = "model";\n'
+  assertRed(audit(files), 'CP-004')
+})
+
+test('CP-004：sdk 里的端口名是载荷取值 / 角色词，不在派发面 ⇒ 仍绿', () => {
+  const files = cleanTree()
+  files[SDK] += '\npub fn port_is(e: &str) -> bool {\n    e == "model" || e == "tool"\n}\n'
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
 // ───────────────────────────── CP-006 ─────────────────────────────

@@ -938,8 +938,7 @@ fn unfinished_nodes(
             // 回找不到 ⇒ 这不是一次模型发起的调用，不投影（见 `issued_call_id`）。
             let Some(resp) = events.iter().rev().find(|r| {
                 r.kind == EVENT_RESPONSE
-                    && r.payload.get("port").and_then(|v| v.as_str()) == Some("model")
-                    && r.payload.get("via").is_none()
+                    && is_model_roundtrip(r, c)
                     && r.payload
                         .get("calls")
                         .and_then(|v| v.as_array())
