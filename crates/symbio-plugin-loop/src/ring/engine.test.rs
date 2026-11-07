@@ -613,10 +613,11 @@ async fn when_no_open_gate_reads_debt_state() {
     assert_eq!(report.dispatched, 0);
     // 不派发是对的；但债还开着、又没有行能还 ⇒ 出口不能报 `NoDebt`
     // （那会让宿主把 `idle` 记成正常完成）。旧用例把这一格钉成了 `NoDebt`，
-    // 钉的正是本条要修的静默停摆。
+    // 钉的正是本条要修的静默停摆。这一笔**没有执行体在跑** ⇒ 归「等外部事实」
+    // 那一档（`NeedsHuman`），不是「在飞」。
     assert_eq!(
         report.outcome,
-        DriveOutcome::Waiting(vec![DebtKey::new("p1", "old", 1)])
+        DriveOutcome::NeedsHuman(vec![DebtKey::new("p1", "old", 1)])
     );
 }
 
@@ -660,10 +661,12 @@ async fn retry_does_not_poison_the_when_no_open_gate() {
     // tool 的 attempt 2 收束后，续接行仍能欠账并派发（旧口径下它永远不会被派）。
     assert_eq!(report.dispatched, 2);
     assert_eq!(gate.seen().len(), 1);
-    // 续接行挂起（债继续开着）⇒ 出口必须是 `Waiting`，而不是骗人的 `NoDebt`。
+    // 续接行挂起（执行体明确说「等你」：`sent{deadline_ms: null}`，债继续开着）⇒
+    // 出口必须是「等外部事实」，而不是骗人的 `NoDebt`，也不是「在飞」——没有执行体
+    // 还在跑，环自己已经推不动了。
     assert_eq!(
         report.outcome,
-        DriveOutcome::Waiting(vec![DebtKey::new("model", "model:after:1", 1)])
+        DriveOutcome::NeedsHuman(vec![DebtKey::new("model", "model:after:1", 1)])
     );
 }
 

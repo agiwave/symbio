@@ -7,8 +7,10 @@
 //! ## 为什么没有 `loop { drive }`
 //!
 //! 外层每看到一条新事实只触发**一次**（CP-009）：环内部的轮次推进归环自己，
-//! 它返回 `NoDebt` / `Waiting` 就结束。`Waiting` 等的是某个端口的**响应事实**，
-//! 那条事实落地后由同一个入口再次触发——外层不持「正在跑」这类会话状态。
+//! 它返回 `NoDebt` / `Waiting` / `NeedsHuman` 就结束。`Waiting` 是**在飞**（某端口
+//! 已派发、应答未落），这条应答落地后由同一个入口再次触发，因此那一刻不算空闲；
+//! `NeedsHuman` 才把控制权交还（等答复 / 授权 / 超时唤醒）。两种「停」的分界见
+//! `docs/003-design/051-机制形状规格.md` §2（D-359）。
 //!
 //! ## 按根构造，不按入口构造
 //!
@@ -155,6 +157,7 @@ impl HostDrive {
             Arc::new(KickState {
                 running: AtomicBool::new(false),
                 dirty: AtomicBool::new(false),
+                in_flight: AtomicBool::new(false),
                 latest: Mutex::new(None),
                 idle: tokio::sync::Notify::new(),
             })
@@ -166,6 +169,12 @@ impl HostDrive {
 struct KickState {
     running: AtomicBool,
     dirty: AtomicBool,
+    /// 上一轮驱动停在**在飞**（`Waiting`）：环自己还能推进，这一轮不算空闲。
+    ///
+    /// 与 `running` / `dirty` 分开：驱动循环退出后 `running` 为假，但「还有一笔已派发、
+    /// 租约未过的债」意味着应答还没落格——此刻叫醒 `settled`，调用方就会在空档里
+    /// 投影 / 收口（t29：巩固看到 3+3 而跳过）。`NeedsHuman` 落回假：那是交还。
+    in_flight: AtomicBool,
     /// 最近一次 `kick` 交来的目标。驱动在跑时后续 `append` 只置 `dirty`，
     /// 但**目标必须换成最新那份**：作用域、中止信号、workdir 都随目标带过来，
     /// 拿首次那份跑完整轮 = 后续轮次读到旧的作用域（t84 的「该拒而放行」窗口）。
@@ -211,7 +220,7 @@ impl DriveEntry for HostDrive {
                     state.idle.notify_waiters();
                     break;
                 };
-                drain(&root, &target).await;
+                drain(&root, &target, &state).await;
                 // 跑着期间来过写入：再跑一轮，用最新目标，`running` 保持 true。
                 if state.dirty.swap(false, Ordering::AcqRel) {
                     continue;
@@ -238,6 +247,16 @@ impl DriveEntry for HostDrive {
     }
 }
 
+/// 这一份会话推进状态是否已经空闲：没有在跑的驱动、没有待续的写入，也没有在飞的债。
+///
+/// 三个条件缺一不可：`Waiting`（在飞）时 `running` 为假但应答还没落格，此时放行会让
+/// 调用方在空档里投影（t29：巩固只看到本轮一半的编码，合并被跳过）。
+fn is_settled(state: &KickState) -> bool {
+    !state.running.load(Ordering::Acquire)
+        && !state.dirty.load(Ordering::Acquire)
+        && !state.in_flight.load(Ordering::Acquire)
+}
+
 /// 等一份会话推进状态空闲（`settled` 的等待体）。
 async fn wait_idle(state: Arc<KickState>) {
     loop {
@@ -245,7 +264,7 @@ async fn wait_idle(state: Arc<KickState>) {
         tokio::pin!(notified);
         // 先登记再查条件：避免「查完已空闲、通知却发生在查之前」的丢唤醒。
         notified.as_mut().enable();
-        if !state.running.load(Ordering::Acquire) && !state.dirty.load(Ordering::Acquire) {
+        if is_settled(&state) {
             return;
         }
         notified.await;
@@ -310,9 +329,15 @@ pub async fn settled(session_id: &str) {
 }
 
 /// 驱动一轮。**循环在 [`DriveEntry::kick`] 里**：环自己「读事实 → 选债 → 派发 →
-/// 再读」，直到 `NoDebt`（还清）或 `Waiting`（只剩在飞的债：模型未回 / 答复未到）。
-/// 这里不一步一返回，也不在外层再包一圈 `loop { drive }`。
-async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
+/// 再读」，直到没有可还的债或只剩等外部事实。这里不一步一返回，也不在外层再包一圈
+/// `loop { drive }`。
+///
+/// 出口只分两类：`Waiting`（在飞）**不算空闲**——应答还没落格，继续等；`NeedsHuman`
+/// 与安全阀出口才算这一轮交还。置位放在 `running` 清零之前，`wait_idle` 因此不会
+/// 看到「已停但还没置位」的中间态。
+async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget, state: &KickState) {
+    // 每次进入先清位：只有本轮确凿停在在飞才重新置上。
+    state.in_flight.store(false, Ordering::Release);
     // 事实源就是本会话的那一份（打开时绑好，不按 id 反查）。
     if target.facts.head() == 0 {
         return;
@@ -353,6 +378,11 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
     };
     match drive_on_new_fact(root, &world).await {
         Ok(report) => {
+            // 在飞 = 环自己还能推进：这一轮要继续算「没空闲」，不能让调用方在此
+            // 投影 / 收口（应答还没落格，t29 的早投影就是从这里来的）。
+            state
+                .in_flight
+                .store(matches!(&report.outcome, DriveOutcome::Waiting(_)), Ordering::Release);
             if let Some(notice) = drive_notice(&target.session_id, &report.outcome) {
                 // 宿主装配层不链 `tracing`（插件日志宏在这里展开不出来），退回 stderr。
                 eprintln!("{notice}");
@@ -366,7 +396,8 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
 }
 
 /// 安全阀出口的可见文案：`Exhausted` 与 `Stalled` **都意味着这一轮没跑完**，
-/// 两条都必须让调用面看见；`Waiting`（等下一次踢）与 `NoDebt`（正常结清）不出声。
+/// 两条都必须让调用面看见；`Waiting`（在飞，等下一次踢）与 `NeedsHuman`（交还人工，
+/// 等外部事实）是正常出口，不出声。
 ///
 /// 判据与文案同址，是为了不出现「一条有声、一条闷着」的不对称——闷着的那条
 /// 迟早被当成正常结束。

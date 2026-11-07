@@ -75,9 +75,12 @@ pub(crate) trait DriveCtx: Send + Sync {
 pub(crate) enum DriveOutcome {
     /// 没有可还的债，且账上没有未收束的债。
     NoDebt,
-    /// 仍有未收束的债，但本轮没有可动作的：在飞（租约未过）、挂起，或开着却
-    /// 没人能还（如被 `when_no_open` 挡住、又无别的行可派）。宿主不得据此记 `idle`。
+    /// 只剩**在飞的债**（租约未过）：环自己还能推进（应答落格 / 租约到期都会再踢），
+    /// 宿主**不得**据此记 `idle`，也不得据此投影。
     Waiting(Vec<DebtKey>),
+    /// 只剩**需要外部事实才能推进**的债（挂起：等答复 / 授权 / 超时唤醒）。环自己
+    /// 已无可动作，把控制权交还调用方——这是正常的一轮结束，不是停摆。
+    NeedsHuman(Vec<DebtKey>),
     /// 步数预算用尽：还欠着债，本轮不再继续（调用方必须看见，不能静默）。
     Exhausted {
         /// 实际走完的步数（一圈一次 `plan`）。
@@ -105,11 +108,14 @@ struct Work {
     dispatch: Vec<(DebtRow, u32)>,
     /// 租约已过：推进尝试或判死。
     expire: Vec<(DebtRow, u32, Option<u32>)>,
-    /// 已发未配，租约未过。
-    waiting: Vec<DebtKey>,
+    /// 已发未配，租约未过：**在飞**（环自己还能推进）。
+    in_flight: Vec<DebtKey>,
+    /// 挂起（`sent{deadline_ms:null}`）：只有挂起点之后的触发事实能重新点燃。
+    /// 这一格不是「在飞」——没有执行体在跑，只有外部事实能推进。
+    suspended: Vec<DebtKey>,
 }
 
-/// 驱动本会话到没有可还的债、只剩在飞（或明确告诉调用方跑不完）。
+/// 驱动本会话到没有可还的债、只剩在飞或只剩等外部事实（或明确告诉调用方跑不完）。
 pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
     let mut dispatched = 0usize;
     let mut steps = 0usize;
@@ -161,7 +167,17 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
         // 又没有别的行可派时，账上仍开着债。此时报 `NoDebt` 会让宿主把 `idle`
         // 记成「正常完成」，轮静默停摆（无终答、无失败格）。开着的债即使暂时
         // 没人能还，也必须被调用方看见。
-        let mut outstanding = work.waiting;
+        //
+        // 两种「等」必须分开（t29）：在飞 = 环自己还能推进，继续等；挂起 = 只有
+        // 外部事实能推进，这才是交还控制权的时刻。混成一个出口会让调用方在
+        // 「应答还没落到库」的空档去投影 / 收口。
+        let in_flight_pending = !work.in_flight.is_empty();
+        let mut outstanding = work.in_flight;
+        for key in work.suspended {
+            if !outstanding.contains(&key) {
+                outstanding.push(key);
+            }
+        }
         for key in view.unresolved() {
             if !outstanding.contains(&key) {
                 outstanding.push(key);
@@ -169,8 +185,10 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
         }
         let outcome = if outstanding.is_empty() {
             DriveOutcome::NoDebt
-        } else {
+        } else if in_flight_pending {
             DriveOutcome::Waiting(outstanding)
+        } else {
+            DriveOutcome::NeedsHuman(outstanding)
         };
         return RunReport {
             outcome,
@@ -202,7 +220,8 @@ fn stalled(ctx: &dyn DriveCtx, dispatched: usize) -> RunReport {
     }
 }
 
-/// 选这一圈的全部可还之债：可派发的进批，租约已过的排进过期，其余在飞收进等待。
+/// 选这一圈的全部可还之债：可派发的进批，租约已过的排进过期，其余按「在飞」与
+/// 「挂起」分表收进等待（两类的区别见 [`DriveOutcome::Waiting`] / [`DriveOutcome::NeedsHuman`]）。
 fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: u64) -> Work {
     let mut work = Work::default();
     let mut seen = HashSet::new();
@@ -271,8 +290,8 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
                 if seen.insert(key.clone()) {
                     work.dispatch.push((row.clone(), attempt));
                 }
-            } else if !work.waiting.contains(&key) {
-                work.waiting.push(key);
+            } else if !work.suspended.contains(&key) {
+                work.suspended.push(key);
             }
             continue;
         }
@@ -282,7 +301,7 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
         }
         let deadline = sent.at_ms.saturating_add(row.lease_ms);
         if now_ms < deadline {
-            work.waiting.push(key);
+            work.in_flight.push(key);
             continue;
         }
         let next = (attempt < row.max_attempts).then(|| attempt + 1);

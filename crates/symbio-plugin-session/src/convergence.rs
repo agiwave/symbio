@@ -320,30 +320,17 @@ impl Convergence {
         compose: Option<&ComposeCall>,
     ) -> Result<bool, PluginError> {
         let events = source.range(0);
-        // 记忆巩固（D-268）：调用方在驱动空闲之后才走到这里，本轮编码已经落格——
-        // 这就是「编码先于巩固」的时点。条数不够 / 活集视图读不到 ⇒ 本轮不巩固。
-        // 事件键按 `(user_seq, 源 seq)` 定死，CLI 投影与后台收轮的重复调用按
-        // `Duplicate` 收敛，不会多出一条合并产物。
-        let now = events.iter().map(|e| e.ts).max().unwrap_or(0);
-        if let Err(why) =
-            crate::memory_consolidate::consolidate_turn(source, &events, user_seq, now)
-        {
-            symbio_plugin_api::plugin_warn!("session", "记忆巩固落格失败（{session_id}）：{why}");
-        }
-        let Some(user) = events
+        let user = events
             .iter()
             .find(|e| {
                 e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq)
             })
-            .cloned()
-        else {
-            return Ok(false);
-        };
+            .cloned();
         // W2c-1a 收口：本轮已判 `answered` 且还没有终答 ⇒ 让 compose 交出措辞，
         // 由本插件落一条终答（D-341 / D-020：文本只来自 compose，转写只有本插件写）。
         // 落成之后重读事实，投影与下方所有既有分支照常走。
-        let events = match compose {
-            Some(call) => {
+        let events = match (&user, compose) {
+            (Some(user), Some(call)) => {
                 let answered = events.iter().any(|e| {
                     e.kind == EVENT_CLASSIFY_ANSWERED
                         && e.payload.get("id").and_then(Value::as_str)
@@ -357,7 +344,7 @@ impl Convergence {
                 if answered
                     && !has_final
                     && self
-                        .answer_if_answered(session_id, user_seq, &events, &user, call, source)
+                        .answer_if_answered(session_id, user_seq, &events, user, call, source)
                         .await?
                 {
                     source.range(0)
@@ -365,7 +352,29 @@ impl Convergence {
                     events
                 }
             }
-            None => events,
+            _ => events,
+        };
+        // 编码先于巩固（D-268）：终答一落格就踢起一轮驱动，`session.close-turn` 债在
+        // 那一轮里才写 `memory.encoded`。不等到「没有在飞的债」就读快照，巩固看到的
+        // 是半轮——t29 的失败形态正是 4 条经验只到 3 条、合并被跳过，而这一轮之后
+        // 再没有调用方会回来巩固。等到的空闲 = 应答与编码都已落格（t29 / D-359）。
+        //
+        // 两格仍按活集兜底（条数不够就不合并）：轮停在等外部事实（`NeedsHuman`）时
+        // 编码本来就还没发生；安全阀出口（`Exhausted` / `Stalled`）意味着本轮没跑完。
+        // 事件键按 `(user_seq, 源 seq)` 定死，CLI 投影与后台收轮的重复调用按
+        // `Duplicate` 收敛，不会多出一条合并产物。
+        if let Some(entry) = symbio_plugin_api::declared_drive_entry() {
+            entry.settled(session_id).await;
+        }
+        let events = source.range(0);
+        let now = events.iter().map(|e| e.ts).max().unwrap_or(0);
+        if let Err(why) =
+            crate::memory_consolidate::consolidate_turn(source, &events, user_seq, now)
+        {
+            symbio_plugin_api::plugin_warn!("session", "记忆巩固落格失败（{session_id}）：{why}");
+        }
+        let Some(user) = user else {
+            return Ok(false);
         };
         let Some(final_event) = events
             .iter()
