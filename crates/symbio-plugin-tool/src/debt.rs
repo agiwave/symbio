@@ -1,19 +1,20 @@
-//! 工具债：只问「有没有 `tool.requested` 这条事实」，**是否欠**不按载荷分叉。
+//! 工具债：**一调用一笔**（D-378）——只问「有没有 `tool.call.requested` 这条标记」。
 //!
-//! 模型执行体在一次带工具调用的往返里写**一条** `tool.requested`（载荷 = 这次往返请求的调用
-//! 清单）；本行从这条事实的身份派生债 id（禁计数），并把**触发事实 id**放进载荷——
-//! 执行体据此精确配对那一条 `tool.requested`，不靠任何编号。债表永远只问存在性，
-//! 按内容分叉的责任留在写方。
+//! 模型执行体在一次带工具调用的往返里写一条 `tool.requested`（组织键）与 N 条
+//! `tool.call.requested`（逐调用标记，载荷 `{request_id, call_id}`）。本行按标记
+//! **逐条**申报债：键 `tool:{request_id}:{call_id}`，触发事实是那条标记自己的身份。
+//! 债表永远只问存在性，不读 `tool.requested` 的 `calls[]`——拆分在写方（I-2 不破）。
 //!
-//! **配对例外（D-369）**：恢复行必须读载荷里的 wire id 才找得到「这条答复属于哪条请求」。
-//! `user.answer.call_id` 与 `tool.requested.calls[].id` 是同一个 provider wire id；
-//! 按它反查，而不是拿「最近一条请求」顶替——两条请求同时在场时，最近的那条不是配对。
+//! **恢复按 `call_id` 一对一**：每条 `user.answer` 只恢复它自己那次调用；同一请求的
+//! 多张卡各欠各的恢复，不再「一次恢复消费整批」。恢复行与首派行用**同一个债 id**
+//! （`tool:{request_id}:{call_id}`），收束因此落在同一 `(port, id, attempt)` 上——
+//! `attempt` 不加、不开新债、不新 `request`。
 
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
-use symbio_plugin_api::events::{EVENT_TOOL_REQUESTED, EVENT_USER_ANSWER};
+use symbio_plugin_api::events::{EVENT_TOOL_CALL_REQUESTED, EVENT_USER_ANSWER};
 use symbio_plugin_api::CapabilityRow;
 
 use super::port::TOOL;
@@ -24,76 +25,66 @@ pub(crate) struct ToolDebts;
 impl DebtSource for ToolDebts {
     fn rows(&self, _request: &DriveRequest, facts: &DebtFacts) -> Vec<DebtSpec> {
         let mut rows = Vec::new();
-        // 一笔 `tool.requested` 欠一次执行：首派（无 `sent`）由环直接派发。
-        // 触发事实是**旧**的 `tool.requested`，挂起之后它不再满足「新触发」。
-        if let Some(request_id) = facts.latest_fact_id(EVENT_TOOL_REQUESTED) {
+        // 标记 → 一次调用一笔债。每条标记都欠；不同的 `request_id` 即使复用同一
+        // wire id 也是两笔债（`call_id` 只在本请求内唯一）。
+        let mut owners: Vec<(&str, &str)> = Vec::new();
+        for (marker_id, payload) in facts.facts_of(EVENT_TOOL_CALL_REQUESTED) {
+            let Some(request_id) = payload.get("request_id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(call_id) = payload.get("call_id").and_then(Value::as_str) else {
+                continue;
+            };
+            owners.push((call_id, request_id));
             rows.push(
                 DebtSpec::new(
-                    "tool-calls",
+                    "tool-call",
                     TOOL,
-                    format!("tool:{request_id}"),
-                    json!({ "request_id": request_id }),
+                    format!("tool:{request_id}:{call_id}"),
+                    json!({ "request_id": request_id, "call_id": call_id }),
                 )
-                .when(EVENT_TOOL_REQUESTED)
+                .when_id(EVENT_TOOL_CALL_REQUESTED, marker_id)
                 .lease(600_000, 2),
             );
         }
-        // 外部答复：一条 `user.answer` 欠一次「把答复落成那次调用的结果」。
-        // 债表只问存在性、不按载荷分叉；**配对**读 wire id：答复自带的 `call_id` 反查
-        // 它所属的那条 `tool.requested`（见模块文档 D-369），不拿「最近一条请求」顶替。
-        // 改回原 key（与首派行同一个 `tool:<request_id>`），收束因此落在同一
-        // `(port, id, attempt)` 上——`attempt` 不加、不开新债、不新 `request`。
-        // 同一请求的多条答复只认最后一条：一次恢复只消费一条答复；批内多卡需要
-        // 逐调用债务（批债 / 逐笔债另议，见任务台账的「债行同族写法」一节）。
-        let mut resume: Vec<(String, String)> = Vec::new();
+        // 外部答复：一条 `user.answer` 欠一次「把答复落成**它自己那次**调用的结果」。
+        // 配对只认 wire id，不拿「最近一条请求」顶替。
+        let mut resume: Vec<(&str, String)> = Vec::new();
         for (answer_id, payload) in facts.facts_of(EVENT_USER_ANSWER) {
             let Some(call_id) = payload.get("call_id").and_then(Value::as_str) else {
                 continue;
             };
-            let Some(request_id) = request_owning_call(facts, call_id) else {
-                continue;
-            };
-            match resume.iter_mut().find(|(known, _)| known == &request_id) {
+            match resume.iter_mut().find(|(known, _)| *known == call_id) {
                 Some((_, slot)) => *slot = answer_id.to_string(),
-                None => resume.push((request_id, answer_id.to_string())),
+                None => resume.push((call_id, answer_id.to_string())),
             }
         }
-        for (request_id, answer_id) in resume {
+        for (call_id, answer_id) in resume {
+            // 复用同一 wire id 的多条标记：答复只带 call_id，按最后记入的那条配对
+            // （与旧口径一致；无法区分时取最新的那一笔，不猜更早的）。
+            let Some((_, request_id)) = owners.iter().rev().find(|(known, _)| *known == call_id)
+            else {
+                // 标记不在了（压缩 / 归档）⇒ 不恢复。不拿别的调用顶替：顶替会把
+                // 这条答复落进另一笔债，账却记在另一处。
+                continue;
+            };
             rows.push(
                 DebtSpec::new(
                     "tool-resume",
                     TOOL,
-                    format!("tool:{request_id}"),
-                    json!({ "resume": "answer", "answer_event": answer_id }),
+                    format!("tool:{request_id}:{call_id}"),
+                    json!({
+                        "resume": "answer",
+                        "answer_event": answer_id,
+                        "request_id": request_id,
+                        "call_id": call_id,
+                    }),
                 )
                 .when(EVENT_USER_ANSWER),
             );
         }
         rows
     }
-}
-
-/// 这次调用属于哪条 `tool.requested`：按答复自带的 `call_id` 在请求载荷的
-/// `calls[].id` 里反查（两者都是 provider 的 wire id）。
-///
-/// 找不到 ⇒ `None`：那条请求可能已被压缩 / 归档。**不拿别的请求顶替**——顶替会把
-/// 这条答复的调用结果落进另一轮的工具结果里，账上却记在另一笔债上。
-fn request_owning_call(facts: &DebtFacts, call_id: &str) -> Option<String> {
-    facts
-        .facts_of(EVENT_TOOL_REQUESTED)
-        .into_iter()
-        .rev()
-        .find(|(_, payload)| {
-            payload
-                .get("calls")
-                .and_then(Value::as_array)
-                .is_some_and(|calls| {
-                    calls
-                        .iter()
-                        .any(|call| call.get("id").and_then(Value::as_str) == Some(call_id))
-                })
-        })
-        .map(|(id, _)| id.to_string())
 }
 
 /// 本插件申报的债行（`debt` 族的登记）。

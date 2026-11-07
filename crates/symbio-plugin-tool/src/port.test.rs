@@ -571,7 +571,7 @@ impl symbio_plugin_api::port::PortFactReader for StaticReader {
     }
 }
 
-/// 工具轮的现场：空载荷 + 读面里的 `tool.requested`（一次一轮一条）。
+/// 工具轮的现场：债行载荷只带 `(request_id, call_id)`，清单在读面的 `tool.requested`。
 fn requested_call(
     ctx: Arc<dyn PluginInvokeRequest>,
     recorder: Arc<RecordingWriter>,
@@ -579,6 +579,7 @@ fn requested_call(
     requested_call_with(
         ctx,
         recorder,
+        "c1",
         serde_json::json!([
             { "id": "c1", "name": "echo", "arguments": { "content": "甲" } },
             { "id": "c2", "name": "echo", "arguments": { "content": "乙" } },
@@ -586,10 +587,11 @@ fn requested_call(
     )
 }
 
-/// 同一条 `tool.requested`，调用清单由用例给（用来放丢弃标记）。
+/// 同一条 `tool.requested`，这次执行只认 `call_id` 指名的那一笔。
 fn requested_call_with(
     ctx: Arc<dyn PluginInvokeRequest>,
     recorder: Arc<RecordingWriter>,
+    call_id: &str,
     calls: serde_json::Value,
 ) -> (PortExecContext, PortInput) {
     (
@@ -618,42 +620,67 @@ fn requested_call_with(
         },
         PortInput {
             port: TOOL,
-            payload: serde_json::json!({}),
+            payload: serde_json::json!({
+                "request_id": "tool.requested:model-1",
+                "call_id": call_id,
+            }),
         },
     )
 }
 
-/// 空载荷不是协议失败：走工具轮薄路径，逐调用复用 `run`，落产物与 `tool.calls.done`。
+/// 一笔债只执行它指名的那次调用：清单里的其余调用由各自的债负责。
+///
+/// `tool.calls.done` 不在执行体里写——收尾由簿记写方从各笔债的终局重算（D-378）。
 #[tokio::test]
-async fn empty_payload_runs_the_requested_calls_from_the_reader() {
+async fn one_debt_runs_only_the_call_it_names() {
     let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
     let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
     let recorder = Arc::new(RecordingWriter::default());
     let (exec, input) = requested_call(ctx, recorder.clone());
 
     let out = ToolPort.execute(exec, input).await;
-    assert!(out.error.is_none(), "空载荷是工具轮，不是协议失败：{out:?}");
-    assert_eq!(out.facts.len(), 2, "两个调用各一格结果");
+    assert!(out.error.is_none(), "工具轮不是协议失败：{out:?}");
+    assert_eq!(out.facts.len(), 1, "这次债只交回 c1 的结果");
 
     let drafts = recorder.drafts.lock().unwrap().clone();
     let artifacts: Vec<_> = drafts
         .iter()
         .filter(|draft| draft.kind == EVENT_ARTIFACT_ADDED)
         .collect();
-    assert_eq!(artifacts.len(), 2, "每次调用落一条产物（实际: {drafts:?}）");
+    assert_eq!(artifacts.len(), 1, "只落被指名调用的产物（实际: {drafts:?}）");
     assert_eq!(artifacts[0].key, "artifact:c1");
-    assert_eq!(artifacts[1].key, "artifact:c2");
     assert_eq!(artifacts[0].payload["tool_call_id"], "c1");
     assert_eq!(artifacts[0].payload["text"], "done");
     assert_eq!(artifacts[0].payload["success"], true);
+    assert!(
+        !drafts.iter().any(|draft| draft.kind == "tool.calls.done"),
+        "执行体不再写批次完成事实（由 round_done 投影补写）"
+    );
+}
 
-    let done = drafts
-        .iter()
-        .find(|draft| draft.kind == "tool.calls.done")
-        .expect("最后必须落 tool.calls.done");
-    assert_eq!(done.key, "tool.calls.done:tool.requested:model-1");
-    assert_eq!(done.payload["requested"], "tool.requested:model-1");
-    assert_eq!(done.payload["calls"], 2);
+/// 指名一笔不存在的调用：协议失败，不误执行别的调用。
+#[tokio::test]
+async fn a_debt_naming_an_unknown_call_is_a_protocol_error() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = requested_call_with(
+        ctx,
+        recorder.clone(),
+        "c9",
+        serde_json::json!([{ "id": "c1", "name": "echo", "arguments": {} }]),
+    );
+
+    let out = ToolPort.execute(exec, input).await;
+    assert!(
+        matches!(out.error, Some((PortErrorClass::NonRetryable, _))),
+        "清单里没有这一笔就是协议错：{out:?}"
+    );
+    assert!(out.facts.is_empty());
+    assert!(
+        recorder.drafts.lock().unwrap().is_empty(),
+        "不拿另一笔调用顶替"
+    );
 }
 
 /// 超限丢弃：派发处**不执行**，但必须留痕——收据 `success=false` +
@@ -669,6 +696,7 @@ async fn overflow_dropped_call_is_not_executed_and_the_receipt_says_so() {
     let (exec, input) = requested_call_with(
         ctx,
         recorder.clone(),
+        "c2",
         serde_json::json!([
             { "id": "c1", "name": "echo", "arguments": { "content": "甲" } },
             { "id": "c2", "name": "echo", "arguments": { "content": "乙" },
@@ -677,15 +705,15 @@ async fn overflow_dropped_call_is_not_executed_and_the_receipt_says_so() {
     );
 
     let out = ToolPort.execute(exec, input).await;
-    assert!(out.error.is_none(), "丢弃不炸批：{out:?}");
-    assert_eq!(out.facts.len(), 2, "被丢弃的调用同样交回一条结果事实");
+    assert!(out.error.is_none(), "丢弃不是协议失败：{out:?}");
+    assert_eq!(out.facts.len(), 1, "被丢弃的调用同样交回一条结果事实");
     assert_eq!(
-        out.facts[1]["success"],
+        out.facts[0]["success"],
         serde_json::json!(false),
         "没跑到的结果不许自称成功"
     );
     assert_eq!(
-        out.facts[1]["failure_kind"],
+        out.facts[0]["failure_kind"],
         serde_json::json!("overflow_dropped")
     );
 
@@ -694,32 +722,31 @@ async fn overflow_dropped_call_is_not_executed_and_the_receipt_says_so() {
         .iter()
         .filter(|draft| draft.kind == EVENT_ARTIFACT_ADDED)
         .collect();
-    assert_eq!(artifacts.len(), 2);
-    assert_eq!(artifacts[0].payload["success"], serde_json::json!(true));
+    assert_eq!(artifacts.len(), 1);
     assert_eq!(
-        artifacts[1].payload["success"],
+        artifacts[0].payload["success"],
         serde_json::json!(false),
         "收据与结果同源：不得一处说未执行、一处记成功"
     );
     assert_eq!(
-        artifacts[1].payload["failure_kind"],
+        artifacts[0].payload["failure_kind"],
         serde_json::json!("overflow_dropped")
     );
     assert_eq!(
-        artifacts[1].payload["text"],
+        artifacts[0].payload["text"],
         serde_json::json!(NOTICE),
         "结果正文就是模型侧的丢弃提示"
     );
 }
 
-/// 批派路径上的停等调用：产物载荷必须有 `needs_user_action=true` + `prompt` +
+/// 停等调用的产物载荷必须有 `needs_user_action=true` + `prompt` +
 /// 顶层 `failure_kind`。
 ///
-/// 产物载荷只有一个构造点（`artifact_payload`），批派也必须走它。从前批派自带一份
+/// 产物载荷只有一个构造点（`artifact_payload`），逐笔派发也必须走它。从前批派自带一份
 /// 只拷 `tool/text/args/success` 的装配，停等字段在那一遍里被丢掉，投影只好把审批卡
 /// 渲染成普通 `body`（t27 / t78 抓到的就是这一处）。
 #[tokio::test]
-async fn pending_call_in_a_batch_lands_the_waiting_card_fields() {
+async fn pending_call_lands_the_waiting_card_fields() {
     let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
     let prompt = serde_json::json!({ "kind": "confirm", "question": "确认删除？" });
     let ctx = ctx_with_tool(
@@ -736,6 +763,7 @@ async fn pending_call_in_a_batch_lands_the_waiting_card_fields() {
     let (exec, input) = requested_call_with(
         ctx,
         recorder.clone(),
+        "c1",
         serde_json::json!([
             { "id": "c1", "name": "echo", "arguments": { "content": "甲" } },
         ]),

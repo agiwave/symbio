@@ -992,15 +992,15 @@ async fn finish_with(
     out
 }
 
-/// 读面里派发这一笔债的 `tool.requested`：返回（事实身份，调用清单）。
+/// 读面里派发这一笔债的 `tool.requested`：返回该请求的调用清单。
 ///
-/// 身份用来派生产物与 `tool.calls.done` 的键；清单只在执行体这里展开，债表不看。
+/// 清单只在执行体这里展开，债表不看（它只认逐笔标记）。
 /// 载荷里的 `request_id` 是**触发这笔债的事实标识**（债行按它组 id）：按它精确取，
 /// 不拿「最近一条」顶替——两条工具请求同时在场时，「最近」不是配对。
 fn read_requested(
     exec: &PortExecContext,
     payload: &serde_json::Value,
-) -> Result<(String, Vec<RequestedCall>), (PortErrorClass, String)> {
+) -> Result<Vec<RequestedCall>, (PortErrorClass, String)> {
     let Some(reader) = exec.reader.clone() else {
         return Err((
             PortErrorClass::NonRetryable,
@@ -1059,7 +1059,7 @@ fn read_requested(
                 .collect()
         })
         .unwrap_or_default();
-    Ok((fact.id.clone(), calls))
+    Ok(calls)
 }
 
 /// 补齐应答承载（`D-319`）：工具结果的 `tool` 消息**在端口里组装**。
@@ -1354,15 +1354,10 @@ impl PortExecutor for ToolPort {
         if input.payload.get(KEY_RESUME).is_some() {
             return self.run_resume(exec, input.payload).await;
         }
-        // 新表达：债行载荷只带**触发事实身份**（`request_id`），调用清单在
-        // `tool.requested` 这条世界事实里 —— 由执行体自己去读面精确取，
-        // **不是**协议错误（债表永不读载荷）。空载荷是同一表达的兼容形态。
-        if input.payload.get(KEY_REQUEST_ID).is_some()
-            || input
-                .payload
-                .as_object()
-                .is_some_and(|object| object.is_empty())
-        {
+        // 新表达：债行载荷只带**触发事实身份**（`request_id` + 这一笔的 `call_id`），
+        // 调用清单在 `tool.requested` 这条世界事实里 —— 由执行体自己去读面精确取，
+        // **不是**协议错误（债表永不读载荷）。
+        if input.payload.get(KEY_REQUEST_ID).is_some() {
             return self.run_requested(exec, input.payload).await;
         }
         let payload = input.payload.clone();
@@ -1390,9 +1385,6 @@ struct RequestedFailure {
     kind: &'static str,
     text: String,
 }
-
-/// 单消费方事实：这次往返的工具清单已还完（模型侧只读债状态，不读这条）。
-const TOOL_CALLS_DONE: &str = "tool.calls.done";
 
 impl ToolPort {
     /// 答复恢复：`user.answer` 已经落了事实；按事实里的 `kind` 分岔——
@@ -1571,14 +1563,31 @@ impl ToolPort {
         outcome
     }
 
-    /// 按 `tool.requested` 的清单逐调用执行：复用 [`Self::run`]，每个调用落一条产物，
-    /// 最后落 `tool.calls.done`。结果事实按调用顺序原样交回环（环只当纯值搬运）。
+    /// 一次只执行**一笔**（D-378）：载荷里的 `call_id` 从 `tool.requested.calls[]` 精确取。
+    ///
+    /// 不再按批循环；`tool.calls.done` 也不在这里写——收尾是**投影**，由工具插件的
+    /// 簿记写方（`round_done`）在该请求每一笔债都有终局事实后重算，执行体中途死掉
+    /// 不会让这批永远停在「未完成」。
     async fn run_requested(
         &self,
         exec: PortExecContext,
         payload: serde_json::Value,
     ) -> PortOutcome {
-        let (request_id, calls) = match read_requested(&exec, &payload) {
+        let Some(call_id) = payload
+            .get(KEY_TOOL_CALL_ID)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        else {
+            return PortOutcome {
+                facts: Vec::new(),
+                error: Some((
+                    PortErrorClass::NonRetryable,
+                    "工具债载荷缺 call_id".to_string(),
+                )),
+                ..Default::default()
+            };
+        };
+        let calls = match read_requested(&exec, &payload) {
             Ok(found) => found,
             Err(error) => {
                 return PortOutcome {
@@ -1588,114 +1597,99 @@ impl ToolPort {
                 }
             }
         };
-        let mut facts = Vec::new();
-        // 声明表复用与单次出口同一口径（`visitor.list(family::TOOL)`）：只查表，不另建判据。
-        let declared_table = declared_table_of(&exec).await;
-        let mut reply = symbio_plugin_api::port::PortReply::default();
-        // 本次批派里是否有调用停在等用户（产物声明「需要人」）。
-        // 一次世界交互 = 一笔债 = 一条事实：世界没给结果，落「完成」就是假事实，
-        // 所以只要有一笔停等，整批都不落 `tool.calls.done`——收束只由配对的答复
-        // 事实（`tool-resume`）来。环侧无需新谓词：债没还清本身就是可读判据。
-        let mut awaiting_user = false;
-        for call in &calls {
-            let payload = serde_json::json!({
-                KEY_TOOL_NAME: call.name.clone(),
-                KEY_ARGS: call.arguments.clone(),
-                KEY_TOOL_CALL_ID: call.id.clone(),
-                KEY_NODE_ID: call.node_id.clone(),
-                KEY_REPLY_KEY: call.id.clone(),
-            });
-            // 模型已判定「不执行」的调用（超限丢弃）：**不派发**，直接以失败收尾。
-            // 正文 = 模型写进 `overflow_notice` 的那一句，收据由同一条结果事实派生
-            // ⇒ 留痕但不冒充成功；这里就是派发处本身，不在它外面另补一个 if。
-            let outcome = match &call.failure {
-                Some(failure) => {
-                    let raw = finish_with(
-                        failure.text.clone(),
-                        false,
-                        None,
-                        &exec.scratch_dir.clone().unwrap_or_default(),
-                        Some(failure.kind),
-                        "",
-                    )
-                    .await;
-                    attach_reply(raw, &payload)
-                }
-                None => {
-                    self.run(
-                        exec.clone(),
-                        PortInput {
-                            port: TOOL,
-                            payload,
-                        },
-                    )
-                    .await
-                }
-            };
-            let result = outcome.facts.first().cloned();
-            awaiting_user |= result
-                .as_ref()
-                .and_then(|fact| fact.get("needs_user_action"))
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false);
-            facts.extend(outcome.facts);
-            reply.messages.extend(outcome.reply.messages);
-            reply.links.extend(outcome.reply.links);
-            if let Some(error) = outcome.error {
-                return PortOutcome {
-                    facts,
-                    error: Some(error),
-                    reply,
-                };
-            }
-            if let Some(result) = result {
-                // 产物载荷只有一个构造点：批派也必须走 `land_artifact`（它再调
-                // `artifact_payload`），不在这里另装一份。
-                let art = ArtifactCtx {
-                    // 一笔债含多条调用：产物键按**调用 id**（按债键会让后一条被幂等吞掉）。
-                    key: format!("artifact:{}", call.id),
-                    produced_by: exec.origin,
-                    allowed: exec.permitted,
-                    denied_reason: exec.deny_reason.clone(),
-                };
-                let meta = CallMeta {
-                    tool_name: &call.name,
-                    tool_call_id: &call.id,
-                    args: &call.arguments,
-                    declared: declared_of(&declared_table, &call.name),
-                };
-                land_artifact(&exec, &art, &meta, &result).await;
-            }
-        }
-        if awaiting_user {
-            // 停等：本次交互未完成，不落 `tool.calls.done`；交回第三态「挂起」，
-            // 由环落 `sent{deadline_ms: null}`（不落收束、债继续开着）。
+        let Some(call) = calls.iter().find(|call| call.id == call_id) else {
             return PortOutcome {
-                facts,
+                facts: Vec::new(),
                 error: Some((
-                    PortErrorClass::NeedsHuman,
-                    "awaiting_user_answer".to_string(),
+                    PortErrorClass::NonRetryable,
+                    format!("tool.requested 清单里没有 call_id={call_id}"),
                 )),
-                reply,
+                ..Default::default()
+            };
+        };
+        let inner = serde_json::json!({
+            KEY_TOOL_NAME: call.name.clone(),
+            KEY_ARGS: call.arguments.clone(),
+            KEY_TOOL_CALL_ID: call.id.clone(),
+            KEY_NODE_ID: call.node_id.clone(),
+            KEY_REPLY_KEY: call.id.clone(),
+        });
+        // 模型已判定「不执行」的调用（超限丢弃）：**不派发**，直接以失败收尾。
+        // 正文 = 模型写进 `overflow_notice` 的那一句，收据由同一条结果事实派生
+        // ⇒ 留痕但不冒充成功；这里就是派发处本身，不在它外面另补一个 if。
+        let outcome = match &call.failure {
+            Some(failure) => {
+                let raw = finish_with(
+                    failure.text.clone(),
+                    false,
+                    None,
+                    &exec.scratch_dir.clone().unwrap_or_default(),
+                    Some(failure.kind),
+                    "",
+                )
+                .await;
+                attach_reply(raw, &inner)
+            }
+            None => {
+                self.run(
+                    exec.clone(),
+                    PortInput {
+                        port: TOOL,
+                        payload: inner,
+                    },
+                )
+                .await
+            }
+        };
+        if let Some(error) = outcome.error {
+            return PortOutcome {
+                facts: outcome.facts,
+                error: Some(error),
+                reply: outcome.reply,
             };
         }
-        exec.emit
-            .emit(vec![FactDraft {
-                key: format!("{TOOL_CALLS_DONE}:{request_id}"),
-                kind: TOOL_CALLS_DONE.to_string(),
-                entity: Entity::Scope,
-                verb: Verb::Asserted,
-                payload: serde_json::json!({
-                    "requested": request_id,
-                    "calls": calls.len(),
-                }),
-                produced_by: None,
-            }])
-            .await;
+        let Some(result) = outcome.facts.first().cloned() else {
+            return PortOutcome {
+                facts: Vec::new(),
+                error: Some((
+                    PortErrorClass::NonRetryable,
+                    "工具调用没有产出结果事实".to_string(),
+                )),
+                reply: outcome.reply,
+            };
+        };
+        // 停等：这一笔未完成，产物卡照落（正文声明「需要人」），但交回第三态「挂起」；
+        // 环落 `sent{deadline_ms: null}`，收束只由配对的答复事实（`tool-resume`）来。
+        let awaiting_user = result
+            .get("needs_user_action")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        // 产物载荷只有一个构造点：逐笔派发也必须走 `land_artifact`（它再调
+        // `artifact_payload`），不在这里另装一份。产物键按调用 id（同一请求内唯一）。
+        let declared_table = declared_table_of(&exec).await;
+        let art = ArtifactCtx {
+            key: format!("artifact:{}", call.id),
+            produced_by: exec.origin,
+            allowed: exec.permitted,
+            denied_reason: exec.deny_reason.clone(),
+        };
+        let meta = CallMeta {
+            tool_name: &call.name,
+            tool_call_id: &call.id,
+            args: &call.arguments,
+            declared: declared_of(&declared_table, &call.name),
+        };
+        land_artifact(&exec, &art, &meta, &result).await;
+        let error = awaiting_user.then(|| {
+            (
+                PortErrorClass::NeedsHuman,
+                "awaiting_user_answer".to_string(),
+            )
+        });
         PortOutcome {
-            facts,
-            error: None,
-            reply,
+            facts: outcome.facts,
+            error,
+            reply: outcome.reply,
         }
     }
 
