@@ -541,30 +541,37 @@ impl Convergence {
                         && e.payload.get("root_id").and_then(Value::as_str) == Some(root_id)
                 });
                 if !has_fallback {
-                    source
-                        .append(
-                            PRINCIPAL_MAIN.to_string(),
-                            FactDraft {
-                                key: format!("{EVENT_CHAT_ASSISTANT_FALLBACK}:{root_id}"),
-                                kind: EVENT_CHAT_ASSISTANT_FALLBACK.to_string(),
-                                entity: Entity::Scope,
-                                verb: Verb::Closed,
-                                payload: serde_json::json!({
-                                    "root_id": user.event_id,
-                                    "status": "failed",
-                                    "reason": "fallback",
-                                    "detail": &why,
-                                    // 正文由失败节点承载：这一格若再带正文，读面会
-                                    // 多长出一条同轮正文节点（t77 的空正文判据）。
-                                    "text": "",
-                                    "principal": PRINCIPAL_MAIN,
-                                }),
-                                produced_by: Some(user_seq),
-                            },
-                        )
-                        .map_err(|e| {
-                            PluginError::InternalError(format!("兜底收束落格失败: {e}"))
-                        })?;
+                    // 两个收轮路径并发（CLI 的 `session/project` 与后台收轮）：
+                    // 两者都用同一个按轮固定的幂等键，后到的拿到 `Duplicate`。
+                    // 「已经有兜底格」不是失败——那一轮要的事实已在，重入直接继续。
+                    match source.append(
+                        PRINCIPAL_MAIN.to_string(),
+                        FactDraft {
+                            key: format!("{EVENT_CHAT_ASSISTANT_FALLBACK}:{root_id}"),
+                            kind: EVENT_CHAT_ASSISTANT_FALLBACK.to_string(),
+                            entity: Entity::Scope,
+                            verb: Verb::Closed,
+                            payload: serde_json::json!({
+                                "root_id": user.event_id,
+                                "status": "failed",
+                                "reason": "fallback",
+                                "detail": &why,
+                                // 正文由失败节点承载：这一格若再带正文，读面会
+                                // 多长出一条同轮正文节点（t77 的空正文判据）。
+                                "text": "",
+                                "principal": PRINCIPAL_MAIN,
+                            }),
+                            produced_by: Some(user_seq),
+                        },
+                    ) {
+                        Ok(_) => {}
+                        Err(e) if e.contains("Duplicate") => {}
+                        Err(e) => {
+                            return Err(PluginError::InternalError(format!(
+                                "兜底收束落格失败: {e}"
+                            )));
+                        }
+                    }
                 }
                 let mut nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
                     &waiting_events,
