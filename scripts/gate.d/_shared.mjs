@@ -359,7 +359,7 @@ export const BASELINE = {
   // D-362：搬家用例里 5 条 kernel 侧折叠断言与 sdk 侧既有用例重复（`stamp_branches` /
   // `unselected_roots` 已经逐条钉同一折法），故只保留一侧；唯一新增的判据（删除格必须落在
   // `(Message, Closed)`）改写进 `mutations.test.rs` 从消费方一侧钉。净减 4，非覆盖丢失。
-  ciRustTestsTotal: 2187,
+  ciRustTestsTotal: 2207,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -386,7 +386,7 @@ export const BASELINE = {
   // 它唯一独有的断言依赖 `session.skill_fast_path`，该快路已随 B2 退场，没有生产事实可断；
   // 能力断言由 t35-skill-compile 承接（退役口径见 `docs/007-task/035-e2e实施表.md`）。
   // 收紧基线，不是放松。
-  e2eCases: 90,
+  e2eCases: 91,
   // 换述读数（D-097）：`recall_eval.rs` 的第四个数字带着一组新断言——指纹锁、
   // 每条换述必须真的换了措辞、依赖度定义域、54 条换述逐条验「承重」（换成无关问句
   // 读数必须精确上抬 1/(n·m)）、以及时间兜底案上读数不动。224 → 235，全是**新增判据**，

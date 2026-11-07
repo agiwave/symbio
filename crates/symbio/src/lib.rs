@@ -44,6 +44,7 @@ pub use symbio_plugin_event_bus;
 pub use symbio_plugin_explain;
 pub use symbio_plugin_forecast;
 pub use symbio_plugin_gateway;
+pub use symbio_plugin_glossary;
 pub use symbio_plugin_heartbeat;
 pub use symbio_plugin_home;
 pub use symbio_plugin_hook;

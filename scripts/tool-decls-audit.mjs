@@ -68,6 +68,7 @@ const DEFAULT_BASELINE = [
   'causal_assert',
   'content_search',
   'explain_record',
+  'glossary_define',
   'heartbeat',
   'http_request',
   'idempotent_record',

@@ -1,0 +1,5 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: glossary
+plugin_comment: 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
+plugin_assembly: sub_agent
+plugin_order: 210

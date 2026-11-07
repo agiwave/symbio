@@ -4161,6 +4161,7 @@ dependencies = [
  "symbio-plugin-explain",
  "symbio-plugin-forecast",
  "symbio-plugin-gateway",
+ "symbio-plugin-glossary",
  "symbio-plugin-heartbeat",
  "symbio-plugin-home",
  "symbio-plugin-hook",
@@ -4420,6 +4421,18 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "symbio-plugin-glossary"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "symbio-plugin-api",
+ "tokio",
  "tracing",
 ]
 

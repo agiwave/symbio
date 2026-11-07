@@ -131,6 +131,7 @@ export const FACTORY_TOOLS = Object.freeze([
   'causal_assert',
   'codebase_search',
   'explain_record',
+  'glossary_define',
   'idempotent_record',
   'content_search',
   'todo_write',

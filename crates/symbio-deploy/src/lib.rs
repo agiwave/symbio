@@ -42,6 +42,9 @@ pub const PLUGIN_ID_FORECAST: &str = "forecast";
 /// 外部 API 网关
 pub const PLUGIN_ID_GATEWAY: &str = "gateway";
 
+/// 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
+pub const PLUGIN_ID_GLOSSARY: &str = "glossary";
+
 /// 心跳调度：会话空闲后自主开一轮（经地址面写会话收件箱，随每棵子树分形）
 pub const PLUGIN_ID_HEARTBEAT: &str = "heartbeat";
 
@@ -143,6 +146,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "memory", // 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
     "setting", // 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
     "notes", // 便签扩展夹具：一个工具、一条 Domain 事实、三条轮内行（索引、反思借宿主一次模型往返、答成后压缩）、一个上下文段、一条效果行为
+    "glossary", // 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
 ];
 
 /// **不可停用的插件**——界面自身的底座（停用其中一个，少的是整个界面）。

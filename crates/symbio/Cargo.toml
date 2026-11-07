@@ -35,6 +35,7 @@ symbio-plugin-event_bus = { path = "../symbio-plugin-event_bus" }
 symbio-plugin-explain = { path = "../symbio-plugin-explain" }
 symbio-plugin-forecast = { path = "../symbio-plugin-forecast" }
 symbio-plugin-gateway = { path = "../symbio-plugin-gateway" }
+symbio-plugin-glossary = { path = "../symbio-plugin-glossary" }
 symbio-plugin-heartbeat = { path = "../symbio-plugin-heartbeat" }
 symbio-plugin-home = { path = "../symbio-plugin-home" }
 symbio-plugin-hook = { path = "../symbio-plugin-hook" }
