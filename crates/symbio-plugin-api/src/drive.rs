@@ -22,6 +22,11 @@ pub const DRIVE_CLOSING_OK: &str = "response";
 /// 环协议里「判死落账」的事实名（机制词汇，不是世界词）。
 pub const DRIVE_CLOSING_FAILED: &str = "failed";
 
+/// 环协议里「已派发」的事实名（机制词汇，不是世界词）：执行体已拿到这一笔。
+///
+/// 依赖方读它来钉**首派次序**——等收束会把挂起的一笔当成堵点（`D-378`）。
+pub const DRIVE_SENT: &str = "sent";
+
 /// 驱动执行者所在的唯一 `multi` 族（与 `port` / `debt` 同一手法：族是值，加族不改内核）。
 pub const DRIVE_FAMILY: CapabilityFamily = CapabilityFamily::multi("drive");
 

@@ -68,7 +68,16 @@ fn tool_result_adds_a_second_row_with_its_own_identity() {
         Some(EVENT_TOOL_REQUESTED),
         "没有这一轮的工具请求就不欠（否则每条响应都想再派一次）"
     );
-    assert_eq!(after_tools.when_no_open, Some(TOOL_PORT));
+    assert_eq!(
+        after_tools.when_no_open,
+        Some(TOOL_PORT),
+        "已落账的调用债（在飞 / 挂起）未收束就不欠"
+    );
+    assert_eq!(
+        after_tools.after_port,
+        Some(TOOL_PORT),
+        "逐笔债串链后，同圈首派的链上后一笔还没有账上痕迹，只有 after_port 挡得住"
+    );
 }
 
 #[test]

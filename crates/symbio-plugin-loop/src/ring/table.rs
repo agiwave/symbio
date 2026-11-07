@@ -90,6 +90,12 @@ impl DebtRow {
         self
     }
 
+    /// 声明身份级触发条件：该种类、该身份的事实存在才欠（字符串由宿主判定）。
+    pub(crate) fn when_id(mut self, kind: impl Into<String>, id: impl Into<String>) -> Self {
+        self.when_id = Some((kind.into(), id.into()));
+        self
+    }
+
     /// 声明种类级排除条件：该种类的事实存在 ⇒ 本行不欠。
     pub(crate) fn unless(mut self, kind: impl Into<String>) -> Self {
         self.unless = Some(Unless::Kind(kind.into()));

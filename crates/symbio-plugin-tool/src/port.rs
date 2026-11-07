@@ -1008,13 +1008,21 @@ fn read_requested(
         ));
     };
     let facts = reader.facts();
-    let request_id = payload
+    let Some(request_id) = payload
         .get(KEY_REQUEST_ID)
         .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty());
-    let Some(fact) = facts.iter().rev().find(|fact| {
-        fact.kind == EVENT_TOOL_REQUESTED && request_id.is_none_or(|id| fact.id == id)
-    }) else {
+        .filter(|s| !s.is_empty())
+    else {
+        return Err((
+            PortErrorClass::NonRetryable,
+            "工具债载荷缺 request_id".to_string(),
+        ));
+    };
+    let Some(fact) = facts
+        .iter()
+        .rev()
+        .find(|fact| fact.kind == EVENT_TOOL_REQUESTED && fact.id == request_id)
+    else {
         // 事实与派发之间可能有半步时差：可重试，不是协议失败。
         return Err((
             PortErrorClass::Retryable,

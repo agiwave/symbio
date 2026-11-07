@@ -647,7 +647,11 @@ async fn one_debt_runs_only_the_call_it_names() {
         .iter()
         .filter(|draft| draft.kind == EVENT_ARTIFACT_ADDED)
         .collect();
-    assert_eq!(artifacts.len(), 1, "只落被指名调用的产物（实际: {drafts:?}）");
+    assert_eq!(
+        artifacts.len(),
+        1,
+        "只落被指名调用的产物（实际: {drafts:?}）"
+    );
     assert_eq!(artifacts[0].key, "artifact:c1");
     assert_eq!(artifacts[0].payload["tool_call_id"], "c1");
     assert_eq!(artifacts[0].payload["text"], "done");
@@ -736,6 +740,37 @@ async fn overflow_dropped_call_is_not_executed_and_the_receipt_says_so() {
         artifacts[0].payload["text"],
         serde_json::json!(NOTICE),
         "结果正文就是模型侧的丢弃提示"
+    );
+}
+
+/// 指名一条读面里没有的 `tool.requested`：可重试，**不**拿「最近一条」顶替。
+#[tokio::test]
+async fn a_debt_naming_an_unseen_request_is_retryable_not_redirected() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({ "content": "done" })).await;
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, _) = requested_call_with(
+        ctx,
+        recorder.clone(),
+        "c1",
+        serde_json::json!([{ "id": "c1", "name": "echo", "arguments": {} }]),
+    );
+    let input = PortInput {
+        port: TOOL,
+        payload: serde_json::json!({
+            "request_id": "tool.requested:model-2",
+            "call_id": "c1",
+        }),
+    };
+
+    let out = ToolPort.execute(exec, input).await;
+    assert!(
+        matches!(out.error, Some((PortErrorClass::Retryable, _))),
+        "目标请求尚未可见是半步时差：{out:?}"
+    );
+    assert!(
+        recorder.drafts.lock().unwrap().is_empty(),
+        "不拿另一条请求的清单顶替"
     );
 }
 

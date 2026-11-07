@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use symbio_plugin_api::drive::DRIVE_SENT;
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortFactWriter, PortInput,
@@ -785,6 +786,270 @@ async fn when_no_open_gate_reads_debt_state() {
     assert_eq!(
         report.outcome,
         DriveOutcome::NeedsHuman(vec![DebtKey::new("p1", "old", 1)])
+    );
+}
+
+/// 链式源的读面：`when_id` 按「种类 + 债 id」查事实账，与宿主 `exists_id` 同口径。
+struct ChainedRows {
+    facts: Arc<Mutex<Vec<Fact>>>,
+    rows: Vec<DebtRow>,
+}
+
+impl DebtSource for ChainedRows {
+    fn rows(&self, _facts: &FactView<'_>) -> Vec<DebtRow> {
+        self.rows.clone()
+    }
+
+    fn exists_id(&self, kind: &str, id: &str) -> bool {
+        self.facts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .any(|f| f.kind.as_str() == kind && f.key.id == id)
+    }
+}
+
+/// 第二笔挂起（待批），其余成功。
+struct SecondSuspends {
+    seen: Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl PortExecutor for SecondSuspends {
+    async fn execute(&self, _ctx: PortExecContext, input: PortInput) -> PortOutcome {
+        let call = input
+            .payload
+            .get("call_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        self.seen
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(call.clone());
+        if call == "call-2" {
+            return PortOutcome::failed(PortErrorClass::NeedsHuman, "等待用户");
+        }
+        PortOutcome::ok()
+    }
+}
+
+/// 第一笔首次可重试失败、重试后成功。
+struct FirstRetriesOnce {
+    seen: Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl PortExecutor for FirstRetriesOnce {
+    async fn execute(&self, ctx: PortExecContext, input: PortInput) -> PortOutcome {
+        let call = input
+            .payload
+            .get("call_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let attempt = attempt_of(&ctx.idempotency_key);
+        self.seen
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(format!("{call}#{attempt}"));
+        if call == "call-1" && attempt == 1 {
+            return PortOutcome::failed(PortErrorClass::Retryable, "稍后再试");
+        }
+        PortOutcome::ok()
+    }
+}
+
+/// 重试口径：`when_id(sent, 前一债 id)` 落到 `exists_id`，只比 `kind + key.id`，
+/// **不比 attempt**——问的是「这一 id 有过 `sent`」，不是「attempt 1 的 `sent`」。
+/// 因此这是单调判定：第 1 笔重试到 attempt 2 也不会把第 2 笔重新挂住。
+#[tokio::test]
+async fn retrying_the_previous_call_does_not_reblock_the_next_one() {
+    let rows = vec![
+        DebtRow::new("tool-call", "tool", "call-1", json!({"call_id": "call-1"})).lease(60_000, 3),
+        DebtRow::new("tool-call", "tool", "call-2", json!({"call_id": "call-2"}))
+            .lease(60_000, 3)
+            .when_id(DRIVE_SENT, "call-1"),
+    ];
+    let facts = Arc::new(Mutex::new(Vec::new()));
+    let executor = Arc::new(FirstRetriesOnce {
+        seen: Mutex::new(Vec::new()),
+    });
+    let mut ctx = TestCtx::with_source(Box::new(ChainedRows {
+        facts: Arc::clone(&facts),
+        rows,
+    }));
+    ctx.facts = facts;
+    let ctx = ctx.with_executor("tool", executor.clone());
+
+    let report = drive(&ctx).await;
+
+    let seen = executor
+        .seen
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert_eq!(seen.iter().filter(|s| *s == "call-1#1").count(), 1);
+    assert_eq!(
+        seen.iter().filter(|s| *s == "call-1#2").count(),
+        1,
+        "第 1 笔重试到 attempt 2"
+    );
+    assert_eq!(
+        seen.iter().filter(|s| *s == "call-2#1").count(),
+        1,
+        "第 2 笔只派发一次：重试没有把它重新挂住"
+    );
+    let facts = ctx.snapshot();
+    assert!(
+        facts
+            .iter()
+            .any(|f| f.kind == FactKind::Response && f.key.id == "call-1" && f.key.attempt == 2),
+        "第 1 笔在 attempt 2 收束"
+    );
+    assert!(
+        facts
+            .iter()
+            .any(|f| f.kind == FactKind::Response && f.key.id == "call-2" && f.key.attempt == 1),
+        "第 2 笔按自己的 attempt 1 独立收束"
+    );
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+}
+
+/// 派发链不是收束链：第 2 笔挂起（`sent{deadline_ms:null}`）时，第 3 笔仍要派发并收束。
+#[tokio::test]
+async fn a_suspended_call_does_not_block_the_next_one_in_the_chain() {
+    let rows = vec![
+        DebtRow::new("tool-call", "tool", "call-1", json!({"call_id": "call-1"})).lease(600_000, 2),
+        DebtRow::new("tool-call", "tool", "call-2", json!({"call_id": "call-2"}))
+            .lease(600_000, 2)
+            .when_id(DRIVE_SENT, "call-1"),
+        DebtRow::new("tool-call", "tool", "call-3", json!({"call_id": "call-3"}))
+            .lease(600_000, 2)
+            .when_id(DRIVE_SENT, "call-2"),
+    ];
+    // 数据源与事实账共享同一份：`when_id` 读的就是环正在写的那本账。
+    let facts = Arc::new(Mutex::new(Vec::new()));
+    let executor = Arc::new(SecondSuspends {
+        seen: Mutex::new(Vec::new()),
+    });
+    let mut ctx = TestCtx::with_source(Box::new(ChainedRows {
+        facts: Arc::clone(&facts),
+        rows,
+    }));
+    ctx.facts = facts;
+    let ctx = ctx.with_executor("tool", executor.clone());
+
+    let report = drive(&ctx).await;
+
+    assert_eq!(
+        executor
+            .seen
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone(),
+        vec!["call-1", "call-2", "call-3"],
+        "挂起的那笔不挡后面：三笔都派发"
+    );
+    let facts = ctx.snapshot();
+    for call in ["call-1", "call-3"] {
+        assert_eq!(
+            facts
+                .iter()
+                .filter(|f| f.kind == FactKind::Response && f.key.id == call)
+                .count(),
+            1,
+            "{call} 各自独立收束一条"
+        );
+    }
+    assert!(
+        !facts.iter().any(|f| {
+            (f.kind == FactKind::Response || f.kind == FactKind::Failed) && f.key.id == "call-2"
+        }),
+        "挂起的第 2 笔没有收束事实"
+    );
+    assert!(
+        facts
+            .iter()
+            .any(|f| f.kind == FactKind::Response && f.key.id == "call-3"),
+        "第 3 笔必须收束"
+    );
+    assert!(
+        facts.iter().any(|f| {
+            f.kind == FactKind::Sent
+                && f.key.id == "call-2"
+                && f.payload.get("deadline_ms") == Some(&Value::Null)
+        }),
+        "第 2 笔停在 sent{{deadline_ms:null}}"
+    );
+    assert_eq!(report.dispatched, 3);
+    assert!(
+        matches!(
+            report.outcome,
+            DriveOutcome::NeedsHuman(ref keys)
+                if keys.len() == 1 && keys[0].port == "tool" && keys[0].id == "call-2"
+        ),
+        "结束时只剩挂起的那一笔等外部事实"
+    );
+}
+
+/// 逐笔债串链后的同圈窗口：链上后一笔在「前一笔刚收束」的那一圈才首次可派，
+/// 此时账上还没有它的任何事实，`when_no_open`（只读 `unresolved()`）看不见它。
+/// `after_port` 的认领集合含本圈候选，两者并用才等于「这批调用全部收束」。
+#[tokio::test]
+async fn a_chained_debt_keeps_the_port_gate_closed_in_the_same_round() {
+    // call-1 已收束；call-2 是链上的下一笔，尚未派发（账上无痕迹）。
+    let seed = vec![
+        Fact::new(
+            FactKind::Request,
+            DebtKey::new("tool", "call-1", 1),
+            json!({}),
+            0,
+        ),
+        Fact::new(
+            FactKind::Sent,
+            DebtKey::new("tool", "call-1", 1),
+            json!({"deadline_ms": 60_000}),
+            0,
+        ),
+        Fact::new(
+            FactKind::Response,
+            DebtKey::new("tool", "call-1", 1),
+            json!({}),
+            0,
+        ),
+    ];
+    let gate = Arc::new(Stub::ok());
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("tool-call", "tool", "call-1", json!({})).lease(600_000, 2),
+        DebtRow::new("tool-call", "tool", "call-2", json!({}))
+            .lease(600_000, 2)
+            .after(DebtKey::new("tool", "call-1", 1)),
+        DebtRow::new("model-after-tools", "model", "model:after:1", json!({}))
+            .when_no_open("tool")
+            .after_port("tool"),
+    ])
+    .with_executor("tool", Arc::new(Stub::ok()))
+    .with_executor("model", gate.clone())
+    .with_facts(seed);
+
+    let report = drive(&ctx).await;
+
+    // 同一圈里 call-2 首派；续接行必须等它收束后的下一圈。
+    assert_eq!(report.dispatched, 2);
+    assert_eq!(gate.seen().len(), 1, "续接行只在 call-2 收束后派发一次");
+    let facts = ctx.snapshot();
+    let call2_done = facts
+        .iter()
+        .position(|f| f.kind == FactKind::Response && f.key.port == "tool" && f.key.id == "call-2")
+        .expect("call-2 应当收束");
+    let model_request = facts
+        .iter()
+        .position(|f| f.kind == FactKind::Request && f.key.port == "model")
+        .expect("续接行应当派发");
+    assert!(
+        call2_done < model_request,
+        "续接行的派发必须晚于 call-2 的收束，不能与它同圈"
     );
 }
 

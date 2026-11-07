@@ -93,6 +93,14 @@ impl DebtSource for ModelDebts {
         // `when` 认 `tool.requested`：没有这一轮的工具请求，`when_no_open` 会在
         // 「根本没有工具债」时恒成立，每条响应都想再派一次。
         // 续接请求同样读本轮 config，因此依赖同一条身份。
+        //
+        // 两个门并用，读的是债状态的两面（谓词语义都不变）：
+        // - `when_no_open(tool)`：已落账的调用债（在飞 / 挂起）未收束就不欠；
+        // - `after_port(tool)`：本圈**有人认领**也不欠。工具债改逐笔后，同一请求
+        //   的调用按 `calls[]` 串成派发链，后一笔在前一笔落 `sent` 的那一圈才首次
+        //   可派——此时账上还没有它的任何事实，`unresolved()` 看不见它，只靠
+        //   `when_no_open` 会让本行与它同圈派发（模型在调用未回时续跑）。
+        //   `after_port` 的认领集合含本圈候选，正好补上这个窗口。
         if let Some(tool_id) = facts.latest_fact_id(EVENT_ARTIFACT_ADDED) {
             rows.push(
                 DebtSpec::new(
@@ -103,7 +111,8 @@ impl DebtSource for ModelDebts {
                 )
                 .when(EVENT_TOOL_REQUESTED)
                 .when_id(EVENT_SESSION_CONFIG, config_id)
-                .when_no_open(TOOL_PORT),
+                .when_no_open(TOOL_PORT)
+                .after_port(TOOL_PORT),
             );
         }
         rows
