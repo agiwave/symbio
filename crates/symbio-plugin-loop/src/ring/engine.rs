@@ -365,6 +365,23 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
         });
     }
 
+    // 入批顺序只由**行名与债 id** 决定，不继承装配顺序。
+    //
+    // `rows` 是宿主按能力收集顺序拼出来的表（`IndexMap` 插入序 = 插件挂载序），
+    // 同一组能力换个装配顺序，派发顺序与落格次序就会跟着换——行为因此依赖一个
+    // 与语义无关的偶然量。这里在分桶之前排一次全序，把顺序变成环自己的数据：
+    // 同一组债、任意装配顺序，入批序列一致。
+    //
+    // 键取 `(行名, 债 id, 端口)`：前两位就是「名字与 id」，端口只用于不同端口恰好
+    // 同名的两行；三者相同即同一笔债，谁先谁后没有语义差别。
+    //
+    // **排序不承担时序**：真的有时序要求的债必须用 `after` / `after_port` /
+    // `when_no_open` 表达（谓词，见 DE-051 §1）。排序只消除并列者之间的偶然顺序，
+    // 不会让任何一行提前——需要「先 A 后 B」的地方，顺序碰巧对不算成立。
+    candidates.sort_by(|a, b| {
+        (a.row.name, &a.row.id, a.row.port).cmp(&(b.row.name, &b.row.id, b.row.port))
+    });
+
     // 第二处来源：这一圈**有动作**的行所在端口（首派发的行还没有 `sent`）。
     for candidate in &candidates {
         claimed.insert(candidate.row.port.to_string());

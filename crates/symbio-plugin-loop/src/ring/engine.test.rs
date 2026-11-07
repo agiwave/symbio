@@ -968,6 +968,39 @@ async fn independent_rows_run_concurrently_within_the_cap() {
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
 }
 
+/// 入批顺序与装配顺序无关：同一组债换个申报次序，派发与落格序列一致。
+///
+/// 债表来自能力收集（`IndexMap` 插入序 = 插件挂载序）；不排序时同一组能力换个
+/// 装配顺序就会换一个派发顺序，进而换一份事实次序。判据落在**落格序列**上：
+/// 只断言 `dispatched` 相同不足以证明行为一致。
+#[tokio::test]
+async fn batch_order_depends_on_name_and_id_not_assembly_order() {
+    async fn land(rows: Vec<DebtRow>) -> Vec<(FactKind, String)> {
+        let stub = Arc::new(Stub::ok());
+        let ctx = TestCtx::new(rows)
+            .with_executor("p1", stub)
+            .with_concurrency(4);
+        let _ = drive(&ctx).await;
+        ctx.snapshot()
+            .into_iter()
+            .map(|f| (f.kind, format!("{}:{}", f.key.port, f.key.id)))
+            .collect()
+    }
+
+    let mut rows = vec![
+        DebtRow::new("z-row", "p1", "id-z", json!({})),
+        DebtRow::new("a-row", "p1", "id-a", json!({})),
+        DebtRow::new("m-row", "p1", "id-m", json!({})),
+    ];
+    let declared_in_order = land(rows.clone()).await;
+    rows.reverse();
+    let declared_reversed = land(rows).await;
+    assert_eq!(
+        declared_in_order, declared_reversed,
+        "同一组债换装配顺序后，入批与落格序列必须一致（顺序只由行名与债 id 决定）"
+    );
+}
+
 #[tokio::test]
 async fn the_same_identity_is_never_dispatched_twice() {
     let stub = Arc::new(Stub::ok());
