@@ -341,7 +341,11 @@ impl HomePlugin {
         let worker_plugin: Arc<dyn Plugin> =
             symbio_plugin_api::creator_create_object::<dyn Plugin>("composite", sub_context)
                 .expect("composite creator registered but failed to construct");
-        self.add_instance_sync("worker".to_string(), worker_plugin);
+        self.add_instance_sync("worker".to_string(), Arc::clone(&worker_plugin));
+        // 登记主部署的驱动根：业务插件都挂在 worker 下，插件 `drive_entry` 绑的也是它；
+        // 宿主入口（`settled` / `kick`）经同一张表解析——绑 home 会造出第二份驱动，
+        // `settled` 等的那份永远空闲（t29 / D-365）。reload 重建后这里覆盖。
+        symbio_plugin_api::publish_deployment_root(worker_plugin);
         plugin_info!(
             "home",
             "工作区插件 'worker' (Composite) 构造完成并已挂载 (Stateless Singleton)"

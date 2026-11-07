@@ -181,11 +181,16 @@ impl Convergence {
     /// 再找载荷 `root_id` 指向它的那条终答——不再拿轮号当键。
     /// 节点由 `rebuild` 从**同一条事实**折出（读路径与写路径同一个折叠）。幂等：
     /// 同一条事实再投影一次时，`apply` 见到节点已存在会跳过（不重复追加）。
+    ///
+    /// `drive` 是**本部署根**的驱动实例（会话插件经 `drive_entry` 取，收轮任务用
+    /// 开轮时绑好的那一份）。这里刻意不读进程级 `declared_drive_entry()`：那是
+    /// 主根的一份，子智能体容器的会话等它会等到别人的空闲上（t29 / D-365）。
     pub(crate) async fn project_final_turn(
         &self,
         session_id: &str,
         user_seq: u64,
         source: &dyn FactSource,
+        drive: Option<&Arc<dyn symbio_plugin_api::DriveEntry>>,
     ) -> Result<bool, PluginError> {
         let events = source.range(0);
         let user = events
@@ -203,7 +208,7 @@ impl Convergence {
         // 编码本来就还没发生；安全阀出口（`Exhausted` / `Stalled`）意味着本轮没跑完。
         // 事件键按 `(user_seq, 源 seq)` 定死，CLI 投影与后台收轮的重复调用按
         // `Duplicate` 收敛，不会多出一条合并产物。
-        if let Some(entry) = symbio_plugin_api::declared_drive_entry() {
+        if let Some(entry) = drive {
             entry.settled(session_id).await;
         }
         let events = source.range(0);

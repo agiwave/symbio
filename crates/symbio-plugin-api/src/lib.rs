@@ -73,8 +73,8 @@ pub use declarations::{
     DeclarationsDecl,
 };
 pub use drive_entry::{
-    declared_drive_binding, declared_drive_entry, DriveBinding, DriveBindingDecl, DriveEntry,
-    DriveEntryDecl, DriveTarget,
+    declared_drive_binding, declared_drive_entry, deployment_root, publish_deployment_root,
+    DriveBinding, DriveBindingDecl, DriveEntry, DriveEntryDecl, DriveTarget,
 };
 pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,

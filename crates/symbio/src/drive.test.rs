@@ -2,6 +2,81 @@
 
 use super::*;
 use symbio_plugin_api::drive::DriveKey;
+use symbio_plugin_api::PluginPayload;
+
+// ==================== 驱动实例的唯一性（t29 根因） ====================
+//
+// t29 的根因不是「等待语义写错了」，而是**等错了实例**：装配入口自己 `new` 了
+// 一份 `HostDrive`、`bind` 又 `new` 了一份，`settled` 读的那份 `KickState` 表
+// 永远空闲 ⇒ 等待立即返回（D-359 因此在 CLI 路径上从未生效）。
+// 下面两条钉住「一个根只有一份」：类型上 `HostDrive::new` 只对 `host` 可见；
+// 入口按当前部署根解析，与插件 `drive_entry` 绑的是同一个节点。
+
+/// 驱动 trait 的返回别名需要具体化载荷类型（与内核签名一致）。
+type Response = symbio_plugin_api::PluginInvokeResponse<PluginPayload>;
+
+/// 只用于身份判据的假根：不路由、不遍历。
+struct FakeRoot;
+
+#[async_trait::async_trait]
+impl Plugin for FakeRoot {
+    fn meta(&self) -> symbio_kernel::plugin::PluginMeta {
+        symbio_kernel::plugin::PluginMeta::new("fake-root", "fake-root")
+    }
+
+    async fn route(self: Arc<Self>, _ctx: Arc<dyn PluginInvokeRequest>) -> Response {
+        Ok(PluginPayload::new(&serde_json::json!({})))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> Response {
+        Ok(PluginPayload::new(&serde_json::json!([])))
+    }
+}
+
+/// 同一个根绑两次拿到同一个实例；不同根各自一份。
+#[test]
+fn binding_is_one_instance_per_root() {
+    let binding = symbio_plugin_api::declared_drive_binding().expect("驱动绑定必须已登记");
+    let root: Arc<dyn Plugin> = Arc::new(FakeRoot);
+    let first = binding.bind(Arc::clone(&root));
+    let second = binding.bind(Arc::clone(&root));
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "同一个根两次 bind 必须返回同一份驱动（否则 settled 等的那份与 kick 写的不是同一个）"
+    );
+
+    let other: Arc<dyn Plugin> = Arc::new(FakeRoot);
+    assert!(
+        !Arc::ptr_eq(&first, &binding.bind(other)),
+        "不同根必须各自一份驱动（重入位不能跨根共享）"
+    );
+}
+
+/// 主部署入口解析到的必须就是 `bind` 会交出的那一份。
+///
+/// 这条是 t29 的直接判据：装配根（`publish_deployment_root`）与插件
+/// （`drive_entry` → `bind`）取到的若是两个实例，`settled` 永远立即返回。
+#[test]
+fn main_entry_resolves_to_the_bound_instance() {
+    let root: Arc<dyn Plugin> = Arc::new(FakeRoot);
+    symbio_plugin_api::publish_deployment_root(Arc::clone(&root));
+    let bound = symbio_plugin_api::declared_drive_binding()
+        .expect("驱动绑定必须已登记")
+        .bind(Arc::clone(&root));
+    let resolved = main_drive().expect("主部署根已登记");
+    assert!(
+        Arc::ptr_eq(&resolved, &bound),
+        "主部署入口解析到的实例必须与 bind 交出的是同一份（t29：等的那份不能是另一个）"
+    );
+    assert!(
+        symbio_plugin_api::declared_drive_entry().is_some(),
+        "主部署驱动入口必须可被 declared_drive_entry 取到"
+    );
+}
 
 /// `settled` 是「等」不是「立即返回」：跑着时挂起，空闲后由通知唤醒。
 #[tokio::test]

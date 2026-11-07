@@ -27,7 +27,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::Plugin;
@@ -126,16 +126,46 @@ pub fn declared_drive_binding() -> Option<&'static dyn DriveBinding> {
         .map(|decl| decl.binding)
 }
 
-/// 装配层登记的驱动实现（主根的那一份，`settled` 等入口用）。
+/// 装配层登记的驱动实现（**按当前部署根解析**，`settled` 等入口用）。
 pub struct DriveEntryDecl {
     pub entry: &'static dyn DriveEntry,
 }
 
 inventory::collect!(DriveEntryDecl);
 
-/// 取装配层登记的主根驱动实现；未装配（如单测）返回 `None`，写口静默跳过。
+/// 取装配层登记的驱动实现；未装配（如单测）返回 `None`，写口静默跳过。
 pub fn declared_drive_entry() -> Option<&'static dyn DriveEntry> {
     inventory::iter::<DriveEntryDecl>()
         .next()
         .map(|decl| decl.entry)
+}
+
+// ── 部署根：主部署只有一个，插件与宿主经同一张表取 ────────────────────────
+//
+// 为什么要有这张表：驱动实例按根绑定，而「根」在装配树里有不止一个候选节点
+// （home 与其下的 worker 容器）。谁把哪个节点当根，取决于它站在树的哪一层——
+// 这让入口与写口各绑一份，等待读的那份永远空闲（t29 / D-365）。
+//
+// 因此由**装配根自己**登记：Home 构造 worker 后在这里登记它，插件 `drive_entry`
+// 绑的也是 worker，宿主入口（`settled` / `kick`）经同一张表解析。表的键是
+// 「本进程的主部署」，不含任何插件 crate 的符号——插件与宿主都不必直接依赖
+// `symbio-plugin-home`（插件可卸载，EX-004）。
+//
+// 可重复调用：工作区 reload 重建 worker 后由 Home 覆盖，入口下次取用即拿到新根。
+
+static DEPLOYMENT_ROOT: RwLock<Option<Arc<dyn Plugin>>> = RwLock::new(None);
+
+/// 登记本进程主部署的驱动根；子智能体容器树**不登记**（它们不是主部署）。
+pub fn publish_deployment_root(root: Arc<dyn Plugin>) {
+    *DEPLOYMENT_ROOT
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(root);
+}
+
+/// 取当前主部署的驱动根；未登记（单测 / 未装配）返回 `None`。
+pub fn deployment_root() -> Option<Arc<dyn Plugin>> {
+    DEPLOYMENT_ROOT
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
 }

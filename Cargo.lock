@@ -4142,6 +4142,7 @@ dependencies = [
 name = "symbio"
 version = "0.1.14"
 dependencies = [
+ "async-trait",
  "inventory",
  "serde_json",
  "symbio-deploy",

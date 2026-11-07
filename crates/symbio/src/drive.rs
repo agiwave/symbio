@@ -133,35 +133,143 @@ pub async fn drive_on_new_fact(
 // 里；Tauri / gateway / CLI 都不再各自记得「写完要驱动」。
 
 /// 一份部署根的驱动实例：根 + 按会话的重入位。
-struct HostDrive {
-    /// 本实例的部署根（能力收集从这里出发）。
-    root: Arc<dyn Plugin>,
-    /// 本根的会话推进状态（**不是进程级表**）。
-    kicks: Mutex<HashMap<String, Arc<KickState>>>,
-}
+///
+/// ## 构造只经 [`HostDriveBinding::bind`]（类型上堵住第二份）
+///
+/// 这个结构住在私有子模块 `host` 里，构造函数 [`HostDrive::new`] 只对 `host` 可见：
+/// 模块之外（包括本文件的 [`MainDriveEntry`]）**拿不到造第二个实例的入口**。于是
+/// 「一个装配根只有一份 [`HostDrive`]」不是约定，而是没有第二条构造路径。
+///
+/// 这条约束是 t29 的根因修复：此前装配入口自己 `new` 了一份、`bind` 又
+/// `new` 一份，`settled` 读的那份永远空闲，等待形同虚设（D-359 因此在 CLI 路径上
+/// 从未生效过）——「等哪一份」与「谁在通知」必须是同一个实例。
+mod host {
+    use super::*;
 
-impl HostDrive {
-    fn new(root: Arc<dyn Plugin>) -> Self {
-        Self {
-            root,
-            kicks: Mutex::new(HashMap::new()),
+    /// 一份部署根的驱动实例：根 + 按会话的重入位。
+    pub(super) struct HostDrive {
+        /// 本实例的部署根（能力收集从这里出发）。
+        root: Arc<dyn Plugin>,
+        /// 本根的会话推进状态（**不是进程级表**）。
+        kicks: Mutex<HashMap<String, Arc<KickState>>>,
+    }
+
+    impl HostDrive {
+        /// 私有构造：只有本模块的 [`HostDriveBinding::bind`] 能调。
+        fn new(root: Arc<dyn Plugin>) -> Self {
+            Self {
+                root,
+                kicks: Mutex::new(HashMap::new()),
+            }
+        }
+
+        fn kick_state(&self, session_id: &str) -> Arc<KickState> {
+            let mut guard = self
+                .kicks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            Arc::clone(guard.entry(session_id.to_string()).or_insert_with(|| {
+                Arc::new(KickState {
+                    running: AtomicBool::new(false),
+                    dirty: AtomicBool::new(false),
+                    in_flight: AtomicBool::new(false),
+                    latest: Mutex::new(None),
+                    idle: tokio::sync::Notify::new(),
+                })
+            }))
         }
     }
 
-    fn kick_state(&self, session_id: &str) -> Arc<KickState> {
-        let mut guard = self
-            .kicks
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        Arc::clone(guard.entry(session_id.to_string()).or_insert_with(|| {
-            Arc::new(KickState {
-                running: AtomicBool::new(false),
-                dirty: AtomicBool::new(false),
-                in_flight: AtomicBool::new(false),
-                latest: Mutex::new(None),
-                idle: tokio::sync::Notify::new(),
-            })
-        }))
+    impl DriveEntry for HostDrive {
+        fn kick(
+            &self,
+            target: DriveTarget,
+        ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
+            let state = self.kick_state(&target.session_id);
+            // 最新目标先落槽：即使已有驱动在跑，它下一圈也要用**这一份**（作用域 /
+            // 中止信号 / workdir 都随目标带过来；拿首份跑完整轮就是 t84 放行窗口）。
+            *state
+                .latest
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(target);
+            // 已在跑：只置 dirty，不嵌套。
+            if state.running.swap(true, Ordering::AcqRel) {
+                state.dirty.store(true, Ordering::Release);
+                return None;
+            }
+
+            let root = Arc::clone(&self.root);
+            Some(Box::pin(IN_DRIVE.scope((), async move {
+                loop {
+                    let current = state
+                        .latest
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .take();
+                    let Some(target) = current else {
+                        // 槽被别的接管者取走（理论上不可达）：干净退出，不重复跑。
+                        state.running.store(false, Ordering::Release);
+                        state.idle.notify_waiters();
+                        break;
+                    };
+                    drain(&root, &target, &state).await;
+                    // 跑着期间来过写入：再跑一轮，用最新目标，`running` 保持 true。
+                    if state.dirty.swap(false, Ordering::AcqRel) {
+                        continue;
+                    }
+                    state.running.store(false, Ordering::Release);
+                    // 清位之后才置上的 dirty：要么自己接着跑，要么交给已接管的驱动。
+                    if !state.dirty.swap(false, Ordering::AcqRel) {
+                        state.idle.notify_waiters();
+                        break;
+                    }
+                    if state.running.swap(true, Ordering::AcqRel) {
+                        break; // 别人接管，它退出时会 notify
+                    }
+                }
+            })))
+        }
+
+        fn settled(&self, session_id: &str) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+            // 驱动自身调用 ⇒ 直接返回，不自锁。
+            if IN_DRIVE.try_with(|_| ()).is_ok() {
+                return Box::pin(async {});
+            }
+            Box::pin(wait_idle(self.kick_state(session_id)))
+        }
+    }
+
+    /// 按根绑定工厂：装配层登记的**唯一实现**。
+    ///
+    /// ## 同一个根只有一个实例（这张表是「唯一」的兑现处）
+    ///
+    /// 表按根的地址索引，**持强引用**：`HostDrive` 带着 `Arc<dyn Plugin>`，根不会在
+    /// 表项存活期间被释放，地址因此不会被复用。一个进程里的根数量是个位数，
+    /// 这份表就是「一根本一份」的全部实现——没有第二处能造出同根的另一个实例。
+    struct HostDriveBinding;
+
+    static HOST_DRIVE_BINDING: HostDriveBinding = HostDriveBinding;
+
+    static BOUND: OnceLock<Mutex<HashMap<usize, Arc<dyn DriveEntry>>>> = OnceLock::new();
+
+    inventory::submit! {
+        DriveBindingDecl { binding: &HOST_DRIVE_BINDING }
+    }
+
+    impl DriveBinding for HostDriveBinding {
+        fn bind(&self, root: Arc<dyn Plugin>) -> Arc<dyn DriveEntry> {
+            let key = Arc::as_ptr(&root) as *const () as usize;
+            let mut guard = BOUND
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(entry) = guard.get(&key) {
+                return Arc::clone(entry);
+            }
+            let entry: Arc<dyn DriveEntry> = Arc::new(HostDrive::new(root));
+            guard.insert(key, Arc::clone(&entry));
+            entry
+        }
     }
 }
 
@@ -188,65 +296,6 @@ tokio::task_local! {
     static IN_DRIVE: ();
 }
 
-impl DriveEntry for HostDrive {
-    fn kick(
-        &self,
-        target: DriveTarget,
-    ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
-        let state = self.kick_state(&target.session_id);
-        // 最新目标先落槽：即使已有驱动在跑，它下一圈也要用**这一份**（作用域 /
-        // 中止信号 / workdir 都随目标带过来；拿首份跑完整轮就是 t84 放行窗口）。
-        *state
-            .latest
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(target);
-        // 已在跑：只置 dirty，不嵌套。
-        if state.running.swap(true, Ordering::AcqRel) {
-            state.dirty.store(true, Ordering::Release);
-            return None;
-        }
-
-        let root = Arc::clone(&self.root);
-        Some(Box::pin(IN_DRIVE.scope((), async move {
-            loop {
-                let current = state
-                    .latest
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .take();
-                let Some(target) = current else {
-                    // 槽被别的接管者取走（理论上不可达）：干净退出，不重复跑。
-                    state.running.store(false, Ordering::Release);
-                    state.idle.notify_waiters();
-                    break;
-                };
-                drain(&root, &target, &state).await;
-                // 跑着期间来过写入：再跑一轮，用最新目标，`running` 保持 true。
-                if state.dirty.swap(false, Ordering::AcqRel) {
-                    continue;
-                }
-                state.running.store(false, Ordering::Release);
-                // 清位之后才置上的 dirty：要么自己接着跑，要么交给已接管的驱动。
-                if !state.dirty.swap(false, Ordering::AcqRel) {
-                    state.idle.notify_waiters();
-                    break;
-                }
-                if state.running.swap(true, Ordering::AcqRel) {
-                    break; // 别人接管，它退出时会 notify
-                }
-            }
-        })))
-    }
-
-    fn settled(&self, session_id: &str) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-        // 驱动自身调用 ⇒ 直接返回，不自锁。
-        if IN_DRIVE.try_with(|_| ()).is_ok() {
-            return Box::pin(async {});
-        }
-        Box::pin(wait_idle(self.kick_state(session_id)))
-    }
-}
-
 /// 这一份会话推进状态是否已经空闲：没有在跑的驱动、没有待续的写入，也没有在飞的债。
 ///
 /// 三个条件缺一不可：`Waiting`（在飞）时 `running` 为假但应答还没落格，此时放行会让
@@ -271,30 +320,16 @@ async fn wait_idle(state: Arc<KickState>) {
     }
 }
 
-/// 按根绑定工厂：装配层登记的**唯一实现**；每个部署根各持一份 [`HostDrive`]。
-struct HostDriveBinding;
-
-static HOST_DRIVE_BINDING: HostDriveBinding = HostDriveBinding;
-
-inventory::submit! {
-    DriveBindingDecl { binding: &HOST_DRIVE_BINDING }
+/// 主部署的那一份实例（`settled` / CLI 等入口用）。
+///
+/// 每次调用经 [`main_drive`] **按当前部署根解析**：`HostDriveBinding` 按根缓存，
+/// 因此这里拿到的与插件 `drive_entry` 绑的是同一个实例；reload 重建根后自然换到新根。
+fn main_drive() -> Option<Arc<dyn DriveEntry>> {
+    let root = symbio_plugin_api::deployment_root()?;
+    Some(symbio_plugin_api::declared_drive_binding()?.bind(root))
 }
 
-impl DriveBinding for HostDriveBinding {
-    fn bind(&self, root: Arc<dyn Plugin>) -> Arc<dyn DriveEntry> {
-        Arc::new(HostDrive::new(root))
-    }
-}
-
-/// 主根的那一份实例（`settled` / CLI 等入口用）。
-static MAIN_DRIVE: OnceLock<Arc<HostDrive>> = OnceLock::new();
-
-/// 装配层登记主根插件：构造主根的驱动实例，供只认 `DriveEntryDecl` 的入口取用。
-pub fn install_root(root: &Arc<dyn Plugin>) {
-    let _ = MAIN_DRIVE.set(Arc::new(HostDrive::new(Arc::clone(root))));
-}
-
-/// 主根实例的静态入口（`inventory` 登记；未装配时 `None`）。
+/// 主部署实例的静态入口（`inventory` 登记；未装配时 `None`）。
 struct MainDriveEntry;
 
 static MAIN_DRIVE_ENTRY: MainDriveEntry = MainDriveEntry;
@@ -308,14 +343,16 @@ impl DriveEntry for MainDriveEntry {
         &self,
         target: DriveTarget,
     ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
-        MAIN_DRIVE.get()?.kick(target)
+        main_drive()?.kick(target)
     }
 
     fn settled(&self, session_id: &str) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-        match MAIN_DRIVE.get() {
-            Some(drive) => drive.settled(session_id),
-            None => Box::pin(async {}),
-        }
+        let session_id = session_id.to_string();
+        Box::pin(async move {
+            if let Some(drive) = main_drive() {
+                drive.settled(&session_id).await;
+            }
+        })
     }
 }
 

@@ -68,3 +68,5 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros", "rt", "time"] }
 # 第三端口验收（DE-048 D-302）：构造 `request` 事实载荷
 serde_json = { workspace = true }
+# 驱动实例身份判据：假根插件实现 `Plugin`（trait 带 async 方法）
+async-trait = { workspace = true }

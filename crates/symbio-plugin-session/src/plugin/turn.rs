@@ -312,7 +312,7 @@ impl SessionPlugin {
                     entry.settled(&session_id).await;
                 }
                 if let Err(e) = this
-                    .project_final_turn(&session_id, user_seq, &*source)
+                    .project_final_turn(&session_id, user_seq, &*source, drive.as_ref())
                     .await
                 {
                     symbio_plugin_api::plugin_warn!("session", "收轮投影失败（{session_id}）：{e}");
@@ -328,7 +328,7 @@ impl SessionPlugin {
                 }
                 if let Err(e) = plugin
                     .convergence
-                    .project_final_turn(&session_id, seq, &*source)
+                    .project_final_turn(&session_id, seq, &*source, drive.as_ref())
                     .await
                 {
                     symbio_plugin_api::plugin_warn!("session", "收轮投影失败（{session_id}）：{e}");
@@ -451,10 +451,13 @@ impl SessionPlugin {
             .and_then(Value::as_u64)
             .ok_or_else(|| PluginError::ValidationError("session/project 需要 seq".into()))?;
         let source = self.fact_source_for(&ctx, &sid).await?;
+        // 等的是**本根**那一份驱动（不是进程级主根入口）：CLI 与子智能体容器的
+        // `session/project` 都必须等到自己这一根空闲。取不到（单测未装配）就不等。
+        let drive = self.drive_entry();
         // 终答已在驱动内由 `session.answer` 行落格；这里只做幂等投影。
         let projected = self
             .convergence
-            .project_final_turn(&sid, seq, &*source)
+            .project_final_turn(&sid, seq, &*source, drive.as_ref())
             .await?;
         Ok(PluginPayload::new(&json!({ "projected": projected })))
     }
