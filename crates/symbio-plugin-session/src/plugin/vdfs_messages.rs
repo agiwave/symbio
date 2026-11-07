@@ -9,7 +9,6 @@
 //! `commands` 的调用，再把变更投进订阅表。
 
 use super::*;
-use crate::convergence::ComposeCall;
 use symbio_kernel::event::{Entity, Verb};
 use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
@@ -267,16 +266,13 @@ impl SessionPlugin {
                             .await
                             .map_err(|e| VdfsError::internal(format!("开轮失败: {e}")))?;
                         if let Some(seq) = seq {
-                            let compose = self.get_parent().map(|parent| ComposeCall {
-                                ctx: inbox_ctx.clone(),
-                                parent,
-                            });
+                            let next_ctx = self.get_parent().map(|_| inbox_ctx.clone());
                             self.spawn_turn_closer(
                                 id.to_string(),
                                 seq,
                                 source,
                                 self.drive_entry(),
-                                compose,
+                                next_ctx,
                             );
                         }
                         Ok(VdfsResponse::Action(VdfsActionResult {

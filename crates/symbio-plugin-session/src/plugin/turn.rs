@@ -11,7 +11,7 @@
 
 use super::*;
 use crate::chat_session::Carrier;
-use crate::convergence::{ComposeCall, SessionStateChange};
+use crate::convergence::SessionStateChange;
 use crate::transcript::publish::append_and_publish;
 use crate::transcript::supplements::merge_supplements;
 use symbio_kernel::event::{Entity, Event, Verb};
@@ -168,8 +168,7 @@ impl SessionPlugin {
         // 绝对路径再相对化。
         //
         // 能力视图只在本轮**装配**（系统提示词 / 工具表 / 分类开关）里读；收尾面
-        // 不再需要它：答话的生成往返由 compose 的 `model.assist` 行债驱动，回执从
-        // 事实读面取，模板路径也不读能力视图。
+        // 只投影终答，不再补写它——`session.answer` 行在驱动内落格。
         let system_prompt = symbio_sdk::capability::capability_prompts(&*manager)
             .await
             .into_iter()
@@ -198,8 +197,8 @@ impl SessionPlugin {
         };
         let cfg = self.config.read().await.clone();
         // 答话措辞的**有效开关**：调用方开关 ∧ compose 本轮的债表在场（`debt` 族报到）。
-        // 关掉 / 未挂载时，本插件不欠 `model.assist` 往返；模型行也据此知道「判决说
-        // 能直接答，但没人能说话」——那一轮降级进工具循环，而不是沉默。
+        // 关掉 / 未挂载时，本插件不欠 `session.answer` 债，也不欠 `model.assist` 往返；
+        // 模型行按「`plugin_row` 端口有没有人认领」自己判断，不读这个字段（D2）。
         let compose_enabled = cfg.compose_enabled
             && manager
                 .list(symbio_plugin_api::debt::DEBT_FAMILY)
@@ -219,8 +218,8 @@ impl SessionPlugin {
                 // 收敛为「不说话」）。模型债行不再读它：它等的是 `plugin_row` 端口
                 // 这一圈的认领，首响行不开就没人认领——缺席即收束。
                 "opening_enabled": cfg.opening_enabled,
-                // 答话措辞的**有效**开关：compose 的 `model.assist` 口债按它决定欠不欠
-                // 一次生成往返；模型行也按它决定「answered 是否提前收手」。
+                // 答话措辞的**有效**开关：compose 的 `model.assist` 口债与会话的
+                // `session.answer` 债都按它决定欠不欠；模型行不读它。
                 "compose_enabled": compose_enabled,
                 "progress_enabled": cfg.progress_enabled,
                 "progress_interval_ms": cfg.progress_interval_ms,
@@ -302,7 +301,7 @@ impl SessionPlugin {
         user_seq: u64,
         source: Arc<dyn FactSource>,
         drive: Option<Arc<dyn DriveEntry>>,
-        compose: Option<ComposeCall>,
+        next_ctx: Option<Arc<dyn PluginInvokeRequest>>,
     ) {
         // 后台任务需要一个 `'static` 的自持句柄；`build` 期登记的弱自引用就是它。
         // 直接 `new` 出来的实例没有它（收不到自引用）——保留旧行为：只投影、不抽干。
@@ -313,7 +312,7 @@ impl SessionPlugin {
                     entry.settled(&session_id).await;
                 }
                 if let Err(e) = this
-                    .project_final_turn(&session_id, user_seq, &*source, compose.as_ref())
+                    .project_final_turn(&session_id, user_seq, &*source)
                     .await
                 {
                     symbio_plugin_api::plugin_warn!("session", "收轮投影失败（{session_id}）：{e}");
@@ -329,7 +328,7 @@ impl SessionPlugin {
                 }
                 if let Err(e) = plugin
                     .convergence
-                    .project_final_turn(&session_id, seq, &*source, compose.as_ref())
+                    .project_final_turn(&session_id, seq, &*source)
                     .await
                 {
                     symbio_plugin_api::plugin_warn!("session", "收轮投影失败（{session_id}）：{e}");
@@ -341,9 +340,9 @@ impl SessionPlugin {
                 let Some(message) = merge_supplements(&batch) else {
                     return;
                 };
-                // 没有能力视图（`session/project` 路径）就开不了下一轮：条目仍在队列里，
-                // 下一次写入会按空闲路径开轮。
-                let Some(call) = compose.as_ref() else {
+                // 没有本轮的能力视图（`session/project` 路径）就开不了下一轮：条目仍在
+                // 队列里，下一次写入会按空闲路径开轮。
+                let Some(ctx) = next_ctx.as_ref() else {
                     return;
                 };
                 let item = InboxItem {
@@ -353,7 +352,7 @@ impl SessionPlugin {
                     workdir: batch[0].workdir.clone(),
                 };
                 match plugin
-                    .consume_item_turn(&call.ctx, &session_id, &*source, item)
+                    .consume_item_turn(ctx, &session_id, &*source, item)
                     .await
                 {
                     Ok(Some(next)) => seq = next,
@@ -452,11 +451,10 @@ impl SessionPlugin {
             .and_then(Value::as_u64)
             .ok_or_else(|| PluginError::ValidationError("session/project 需要 seq".into()))?;
         let source = self.fact_source_for(&ctx, &sid).await?;
-        // 本路由不由开轮单元发起（拿不到本轮的能力视图），因此不在这里问 compose：
-        // 带措辞的收口由开轮臂的 `spawn_turn_closer` 完成；这里只是幂等投影。
+        // 终答已在驱动内由 `session.answer` 行落格；这里只做幂等投影。
         let projected = self
             .convergence
-            .project_final_turn(&sid, seq, &*source, None)
+            .project_final_turn(&sid, seq, &*source)
             .await?;
         Ok(PluginPayload::new(&json!({ "projected": projected })))
     }

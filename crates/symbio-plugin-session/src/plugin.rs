@@ -512,6 +512,16 @@ impl Plugin for SessionPlugin {
                         as Arc<dyn symbio_plugin_api::debt::DebtSource>,
                 ))
                 .await;
+            // 终答的运行时债表（`session.answer`）：`classify.answered` 一经落格就欠
+            // 一笔终答，执行体问 compose/wording 或读 assist 回执，由本插件落格。
+            // 本行在 `plugin_row` 端口认领 ⇒ 模型行按端口等它，不再读 `compose_enabled`。
+            visitor
+                .put(symbio_plugin_api::debt::debt_row(
+                    "session.answer",
+                    Arc::new(crate::answer::AnswerDebts)
+                        as Arc<dyn symbio_plugin_api::debt::DebtSource>,
+                ))
+                .await;
             // 轮边界汇报的运行时债表（`session.progress`）：一「轮边界」一笔债，
             // 边界身份由 `tool.calls.done` 的事实 id 派生；开关与上界读当轮的
             // `session.config`。措辞仍归 compose，转写仍归本插件（D-020）。

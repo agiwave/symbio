@@ -33,25 +33,16 @@ use super::transcript::publish::append_and_publish;
 use super::types::SessionSummary;
 use serde_json::Value;
 use std::sync::Arc;
-use symbio_kernel::event::ClosureReason;
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::plugin::PluginError;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
-    EVENT_CLASSIFY_ANSWERED, EVENT_USER_MESSAGE,
+    EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::fact_source::FactSource;
-use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
-use symbio_plugin_api::{
-    ComposeRequest, FactDraft, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, RunSnapshot,
-    Verdict, WordingReply, EVENT_RESPONSE, PATH,
-};
+use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::PRINCIPAL_MAIN;
 use symbio_sdk::chat::chat_node as cm;
-
-/// 一次性问答端口名（数据）。写在这里而不是从 compose / compact 内部 import：
-/// 端口名是契约层不解释的数据，读方按**值**匹配回执，不依赖别的插件的私有常量。
-const MODEL_ASSIST_PORT: &str = "model.assist";
 
 /// 会话运行态的一次变化。
 ///
@@ -66,16 +57,6 @@ pub enum SessionStateChange {
         outcome: &'static str,
         error: Option<String>,
     },
-}
-
-/// 会话收尾时调用 `compose/wording` 所需的两样上下文。
-///
-/// 只在收轮路径上传（来自 `vdfs_inbox` 的 `inbox_ctx`）；`session/project` 这类
-/// 不由本轮开轮单元发起的投影拿不到能力视图，就传 `None`，收尾按既有路径降级。
-/// **本插件不产出话术文本**：文本只来自 compose（[D-341]）。
-pub(crate) struct ComposeCall {
-    pub(crate) ctx: Arc<dyn PluginInvokeRequest>,
-    pub(crate) parent: Arc<dyn Plugin>,
 }
 
 /// 会话**收敛**手柄：把一个会话的运行态与终态落到它身上所需的那四样。
@@ -194,118 +175,6 @@ impl Convergence {
         state.transcript.lock().await.emit_session_state(node);
     }
 
-    /// 本轮 `classify.answered` 的终答：拿到文本，由本插件落格。
-    ///
-    /// **本插件不产出话术**（thanks / clarify 的措辞在 compose 的模板表里）：
-    /// 这里只做三件事——拿到文本、把文本落成终答事实、没有文本就原样返回 `false`
-    /// （下方既有失败 / 卡片 / 无终答分支照常接管，绝不自己编一句）。
-    ///
-    /// 文本的**来源**按判决自己分派（[`Verdict::needs_wording_generation`]）：
-    ///
-    /// - `from_context` ⇒ 一次模型往返。往返由 compose 申报的 `model.assist` 行债
-    ///   驱动、执行体归 model 插件；本插件只从事实读面取回执（端口 + 开局事实身份
-    ///   双认，与 compact 的读法同一口径）。
-    /// - 其余理由码 ⇒ compose 的模板表（模板零模型往返，也不带思考）。
-    ///
-    /// 归属按声明表：`chat.assistant.final` 的声明方是本机主体（`@principal` →
-    /// `PRINCIPAL_MAIN`），不写任何宿主字面量；节点由 `rebuild` 从 `dialog` 段折出。
-    async fn answer_if_answered(
-        &self,
-        session_id: &str,
-        user_seq: u64,
-        events: &[Event],
-        user: &Event,
-        call: &ComposeCall,
-        source: &dyn FactSource,
-    ) -> Result<bool, PluginError> {
-        if !self.config.read().await.compose_enabled {
-            return Ok(false);
-        }
-        let Some(reason) = events
-            .iter()
-            .rev()
-            .find(|e| {
-                e.kind == EVENT_CLASSIFY_ANSWERED
-                    && e.payload.get("id").and_then(Value::as_str) == Some(user.event_id.as_str())
-            })
-            .and_then(|e| e.payload.get("reason").and_then(Value::as_str))
-            .map(str::to_string)
-        else {
-            return Ok(false);
-        };
-        let verdict = Verdict::Answered {
-            reason: reason.clone(),
-        };
-        let reply = if verdict.needs_wording_generation() {
-            // 生成路径：回执已经在事实面上（行债的派发与三格都归环），只读不写。
-            let Some(reply) = assist_reply(events, &user.event_id) else {
-                return Ok(false);
-            };
-            reply
-        } else {
-            // 模板路径：文本仍由 compose 的模板表给出（本插件不产出话术）。
-            let request = ComposeRequest {
-                session_id: session_id.to_string(),
-                verdict,
-                context: dialog_context(events),
-                snapshot: RunSnapshot::default(),
-            };
-            let child = call.ctx.fork();
-            child.set(PATH, ROUTE_COMPOSE_WORDING.to_string());
-            child.set_payload(request)?;
-            let reply = match call.parent.clone().route(child).await {
-                Ok(response) => response.get::<WordingReply>().ok(),
-                Err(e) => {
-                    // 未挂载 / 路由不存在与业务无关：与"没有 compose"走同一条降级路径。
-                    symbio_plugin_api::plugin_warn!(
-                        "session",
-                        "compose/wording 不可用（{session_id}）：{e}"
-                    );
-                    None
-                }
-            };
-            let Some(reply) = reply else {
-                return Ok(false);
-            };
-            reply
-        };
-        let text = reply.text;
-        if text.trim().is_empty() {
-            // 契约里的平凡值：空串 = 没有对话面文本 ⇒ 不写节点（不另造一句顶上）。
-            return Ok(false);
-        }
-        source
-            .append(
-                PRINCIPAL_MAIN.to_string(),
-                FactDraft {
-                    key: format!("{EVENT_CHAT_ASSISTANT_FINAL}:{}", user.event_id),
-                    kind: EVENT_CHAT_ASSISTANT_FINAL.to_string(),
-                    entity: Entity::Scope,
-                    verb: Verb::Closed,
-                    payload: serde_json::json!({
-                        "root_id": user.event_id,
-                        "text": text,
-                        "principal": PRINCIPAL_MAIN,
-                        "cost_ms": reply.cost_ms,
-                        // 终结格必须标明这一轮为什么停（闭集取值，`closure_reason_closed`）；
-                        // 对话面自己的 `dialog.reason` 是另一回事（为什么这样措辞）。
-                        "reason": ClosureReason::Completed.as_str(),
-                        "reasoning": reply.reasoning,
-                        "reasoning_id": reply.reasoning_id,
-                        "dialog": {
-                            "id": format!("reply:{}", user.event_id),
-                            "reason": reason,
-                            "text": text,
-                            "exclude_from_context": false,
-                        },
-                    }),
-                    produced_by: Some(user_seq),
-                },
-            )
-            .map_err(|e| PluginError::InternalError(format!("终答落格失败: {e}")))?;
-        Ok(true)
-    }
-
     /// 该开轮事实的终答事实 → 转写节点，并收束本轮；没有终答 ⇒ `false`（不投影）。
     ///
     /// 配对靠**事实身份**：由 `user.message` 的 `seq` 取回它的 `event_id`，
@@ -317,7 +186,6 @@ impl Convergence {
         session_id: &str,
         user_seq: u64,
         source: &dyn FactSource,
-        compose: Option<&ComposeCall>,
     ) -> Result<bool, PluginError> {
         let events = source.range(0);
         let user = events
@@ -326,24 +194,6 @@ impl Convergence {
                 e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq)
             })
             .cloned();
-        // W2c-1a 收口：本轮已判 `answered` 且还没有终答 ⇒ 让 compose 交出措辞，
-        // 由本插件落一条终答（D-341 / D-020：文本只来自 compose，转写只有本插件写）。
-        // 落成之后重读事实（下文 `source.range(0)`），投影与下方所有既有分支照常走。
-        if let (Some(user), Some(call)) = (&user, compose) {
-            let answered = events.iter().any(|e| {
-                e.kind == EVENT_CLASSIFY_ANSWERED
-                    && e.payload.get("id").and_then(Value::as_str) == Some(user.event_id.as_str())
-            });
-            let has_final = events.iter().any(|e| {
-                e.kind == EVENT_CHAT_ASSISTANT_FINAL
-                    && e.payload.get("root_id").and_then(Value::as_str)
-                        == Some(user.event_id.as_str())
-            });
-            if answered && !has_final {
-                self.answer_if_answered(session_id, user_seq, &events, user, call, source)
-                    .await?;
-            }
-        }
         // 编码先于巩固（D-268）：终答一落格就踢起一轮驱动，`session.close-turn` 债在
         // 那一轮里才写 `memory.encoded`。不等到「没有在飞的债」就读快照，巩固看到的
         // 是半轮——t29 的失败形态正是 4 条经验只到 3 条、合并被跳过，而这一轮之后
@@ -731,26 +581,6 @@ impl Convergence {
         .await;
         Ok(true)
     }
-}
-
-/// 本轮 `model.assist` 的回执：按**端口 + 开局事实身份**双认（与 compact 的
-/// `summary_of` 同一读法），取最后一条。
-///
-/// 只读事实面上的 `response`；没有回执 = 这一次生成失败 / 被拒 ⇒ 调用方不落终答，
-/// 由既有降级分支接管，**不在这里造一句**。
-fn assist_reply(events: &[Event], root_id: &str) -> Option<WordingReply> {
-    let fact = events.iter().rev().find(|e| {
-        e.kind == EVENT_RESPONSE
-            && e.payload.get("port").and_then(Value::as_str) == Some(MODEL_ASSIST_PORT)
-            && e.payload.get("root_id").and_then(Value::as_str) == Some(root_id)
-    })?;
-    let reply: cm::AssistReply = serde_json::from_value(fact.payload.clone()).ok()?;
-    Some(WordingReply {
-        text: reply.text,
-        reasoning: reply.reasoning,
-        reasoning_id: reply.reasoning_id,
-        cost_ms: reply.cost_ms,
-    })
 }
 
 /// 对话线：由既有折叠（与实时面同一份规则）折出用户 / 助手文本节点。
