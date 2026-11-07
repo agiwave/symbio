@@ -3,7 +3,8 @@
 //! ## 为什么本文件还要交一份「协议行」夹具
 //!
 //! 插件自己的单元测试二进制**只链接本 crate**：装配表里只有内核协议五格与本插件
-//! 声明的两个事件，而协议事实的归宿行住在 `crates/symbio-plugin-loop`——不在这里，就没有行读它们，
+//! 声明的事件（`system.*` / `session.*` / 自 `loop` 移交过来的对话面），而协议事实的
+//! 归宿行住在 `crates/symbio-plugin-loop`——不在这里，就没有行读它们，
 //! `seal` 判据 7 报 `OrphanFact`，整张表失败（D-198「失败是整体失败」），写闸于是
 //! 退到共享表。`system.*` 由本插件声明，不在共享表里 ⇒ 写不进去。
 //!
@@ -25,11 +26,10 @@
 
 use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::decl::ring::{Decl, Pattern};
-use symbio_kernel::decl::{ActorDecl, FactDecl, PluginDeclarations};
+use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
 use symbio_kernel::event::{
     Entity, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
-use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_OPENING};
 
 use super::{EVENT_SESSION_SETTLED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 
@@ -40,37 +40,10 @@ use super::{EVENT_SESSION_SETTLED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 /// 校准列用例要**把真实观测写进环里**才试得出「owner 不在本进程」这一种缺席。所以这里补
 /// 一条与 owner 同构的 `EventDecl`——**只补格位，不补视图**：`skill.calibration` 保持读
 /// 不到，那正是被测的形状（数字归 owner 的单测与 e2e）。
-const HARNESS_EVENTS: &[EventDecl] = &[
-    EventDecl::new("memory.calibrated", (Entity::Memory, Verb::Asserted)),
-    // 终答格：生产装配里由 `loop` 的旧词汇表声明（宿主写口），本二进制不链接它，
-    // 而 `session.close-turn` 行的 `owes` 指向它 ⇒ 夹具补一条同构的宿主格位。
-    EventDecl::host(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed)),
-    // 首响格：生产装配里由 `loop` 的词汇表声明，本二进制不链接它，而本插件新增的
-    // 归宿行 `session.opening-seat` 的 `owes` / `until` 指向它 ⇒ 补一条同构格位。
-    EventDecl::new(
-        EVENT_CHAT_ASSISTANT_OPENING,
-        (Entity::Scope, Verb::Asserted),
-    ),
-];
-
-/// 同 [`HARNESS_EVENTS`] 的另一半：两条事实的载荷形状（`chat.assistant.final` 键
-/// `root_id`；`chat.assistant.opening` 键 `id`）。
-const HARNESS_FACTS: &[FactDecl] = &[
-    FactDecl {
-        name: EVENT_CHAT_ASSISTANT_FINAL,
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["root_id", "final_id", "text"],
-    },
-    FactDecl {
-        name: EVENT_CHAT_ASSISTANT_OPENING,
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["id", "reason", "text", "exclude_from_context"],
-    },
-];
+const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
+    "memory.calibrated",
+    (Entity::Memory, Verb::Asserted),
+)];
 
 /// `plugin_row` 执行体：生产装配里由 `loop` 交（写名单是全部行实现的并集），
 /// 本二进制只补这一行自己的出口——`session.settled`。
@@ -115,7 +88,7 @@ fn protocol_rows() -> &'static [Decl] {
 fn harness_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: HARNESS_EVENTS,
-        facts: HARNESS_FACTS,
+        facts: &[],
         views: &[],
         ports: &[],
         // 本插件不再声明任何端口行（端口行住在各端口所属插件与 loop），

@@ -1,19 +1,18 @@
 //! 世界事实的词汇持有（**临时**）。
 //!
-//! 旧引擎删除后，这些对话 / 记忆 / 承诺 / 授权 / 控制面事实暂时没有写方插件；
-//! 名字与格位先由本插件继续登记，避免共享词汇表断裂。它们**不是环的机制**：
-//! 环不读、不写、不按它们选债。
+//! 旧引擎删除后，这些承诺 / 授权 / 控制面事实暂时没有写方插件；名字与格位先由本插件
+//! 继续登记，避免共享词汇表断裂。它们**不是环的机制**：环不读、不写、不按它们选债。
 //!
-//! 所有权按接入顺序逐条移交：会话簿记接管 `chat.*` / `user.message` / `turn.branch` /
-//! `session.config`，工具接管 `authz.*` / `task.controlled` 与产物格 `artifact.added`，
-//! 记忆接管 `memory.*`，代理接管 `commitment.*`。
-//! 移交完成后删除本模块与 `PLUGIN.yml` 的 `shared_events`。
+//! 所有权按接入顺序逐条移交，**已完成**：会话簿记接管 `chat.*` / `user.message`
+//! （`session::declarations`），记忆接管 `memory.*`（`memory::decl`）。仍在途：
+//! `turn.branch` / `session.config` → 会话，`authz.*` / `task.controlled` → 工具，
+//! `commitment.*` → 代理。全部移交完成后删除本模块与 `PLUGIN.yml` 的 `shared_events`。
 
-use symbio_kernel::decl::{ActorDecl, FactDecl, PluginDeclarations};
+use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
 
 use symbio_plugin_api::rows::{declared_writes, PLUGIN_ROW, PORT_ACTOR};
-use symbio_plugin_api::{EVENT_REQUEST, PRINCIPAL_USER};
+use symbio_plugin_api::EVENT_REQUEST;
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-loop";
 
@@ -22,24 +21,10 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-loop";
 pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::with_roles("authz.denied", (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]),
     EventDecl::new("authz.granted", (Entity::Scope, Verb::Asserted)),
-    EventDecl::new("chat.assistant.fallback", (Entity::Scope, Verb::Closed)),
-    EventDecl::host_with_roles(
-        "chat.assistant.final",
-        (Entity::Scope, Verb::Closed),
-        &[FactRole::FinalizesTurn],
-    ),
-    EventDecl::new("chat.assistant.opening", (Entity::Scope, Verb::Asserted)),
-    EventDecl::new("chat.assistant.progress", (Entity::Scope, Verb::Progressed)),
-    EventDecl::new("chat.assistant.reported", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("commitment.asserted", (Entity::Commitment, Verb::Asserted)),
     EventDecl::new("commitment.broken", (Entity::Commitment, Verb::Closed)),
     EventDecl::new("commitment.opened", (Entity::Commitment, Verb::Opened)),
     EventDecl::new("commitment.released", (Entity::Commitment, Verb::Closed)),
-    // 记忆事实归**认知归属人**，不是跑轮主体：召回视图按 `actor == viewer` 过滤，
-    // 记忆要按人看见它（D-339）。
-    EventDecl::new("memory.consolidated", (Entity::Memory, Verb::Progressed)).owned(PRINCIPAL_USER),
-    EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)).owned(PRINCIPAL_USER),
-    EventDecl::new("memory.forgotten", (Entity::Memory, Verb::Closed)).owned(PRINCIPAL_USER),
     // 机制事实（D-338）：`plugin_row` 执行体在 Ask 后落的「这一行在等」。
     // 行名与提示在载荷里；种类只有一个名字，否则进不了声明表。
     EventDecl::new("plugin.row.asked", (Entity::Scope, Verb::Asserted)),
@@ -55,37 +40,6 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         (Entity::Scope, Verb::Asserted),
         &[FactRole::DeclaresBudget],
     ),
-    // `tier` 的另一种落点：`D-223` 之前的开轮格带它，新写入不带；档位只读
-    // `turn.dispatch`。这里保留 `DeclaresBudget` 角色，让历史 WAL 仍能被 `C5`
-    // 读到预算（缺 `budget_ms` 时才回退到 `tier`）。
-    EventDecl::host_with_roles(
-        "user.message",
-        (Entity::Scope, Verb::Opened),
-        &[FactRole::DeclaresBudget],
-    ),
-];
-
-/// 旧引擎留下的世界词汇的**载荷形状**。只有被行模式引用的字段才在这里登记
-/// （`chat.assistant.final` 的 `root_id`、`chat.assistant.opening` 的 `id`）；
-/// `port` / `key` / `expand` 不属这一族。
-pub(crate) const FACTS: &[FactDecl] = &[
-    FactDecl {
-        name: "chat.assistant.final",
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["root_id", "final_id", "text"],
-    },
-    // 首响格：内容由 compose 的模板产出、由会话的行落格（D-344 的「跨插件只走 route」）。
-    // 它是一轮里**先于**终答/工具轮出现的对话面事实，排除出上下文（旧的 `escalate`
-    // 断言靠它把「我先看一下」与真正的答话分开）。
-    FactDecl {
-        name: "chat.assistant.opening",
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["id", "reason", "text", "exclude_from_context"],
-    },
 ];
 
 /// 两个**宿主通用执行体**的声明（D-296 / D-303）。
@@ -123,7 +77,7 @@ symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
         events: EVENTS,
-        facts: FACTS,
+        facts: &[],
         views: &[],
         ports: &[],
         actors: actors(),

@@ -3,6 +3,10 @@ plugin_id: memory
 plugin_comment: 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
 plugin_assembly: sub_agent
 plugin_order: 180
+# 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
+# crates/symbio-plugin-api/src/events.rs）。格位仍住在 `decl::EVENTS`。
+# 三条都被 session / skill / compact 按名字读；`memory.recalled` 无跨插件读方，不进本行。
+shared_events: memory.consolidated, memory.encoded, memory.forgotten
 # 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住 `recall::decl::VIEWS`。
 # `memory.live` = 活集折叠（encoded ∪ consolidated − forgotten）：巩固留控制面

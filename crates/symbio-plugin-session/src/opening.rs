@@ -33,9 +33,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 
 use symbio_plugin_api::debt::{session_config_id, DebtFacts, DebtSource, DebtSpec, DriveRequest};
-use symbio_plugin_api::events::{
-    EVENT_CHAT_ASSISTANT_OPENING, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
-};
+use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
 use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep, PLUGIN_ROW};
 use symbio_plugin_api::{
@@ -45,7 +43,7 @@ use symbio_plugin_api::{
 use symbio_sdk::keys::SESSION_ID;
 
 use crate::convergence::dialog_context;
-use crate::declarations::OWNER;
+use crate::declarations::{EVENT_CHAT_ASSISTANT_OPENING, OWNER};
 
 /// 首响行的行名 / 债名前缀。本行与判决行同在 `plugin_row` 端口；模型行只等端口
 /// （`after_port(plugin_row)`），不认这个行名。

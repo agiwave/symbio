@@ -7,11 +7,11 @@
 //! 本插件只剩写方（自主触发的落格）。名字因此取自清单生成物
 //! `symbio_plugin_api::events`——与任务族同一条通路，不是兄弟插件、也不是内核代答。
 //!
-//! 事实 / 视图不在本插件的控制面，因此不在这里——除 `session.settled` 一条：
-//! 它是**本插件自己的收束格**，写方就在 `close_turn`。
+//! 事实 / 视图不在本插件的控制面，因此大多不在这里——除本插件自己的收束格
+//! `session.settled` / `session.terminated`，以及随 `chat.*` 词汇移交的对话面两条。
 
 use symbio_kernel::decl::{FactDecl, PluginDeclarations};
-use symbio_kernel::event::{Entity, EventDecl, Verb};
+use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
 use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::rows::PLUGIN_ROW;
 use symbio_plugin_api::LatencyTier;
@@ -27,6 +27,15 @@ pub(crate) const EVENT_SYSTEM_HEALTH: &str = "system.health";
 /// 读方是同一插件调用 core 的折叠。没有第二个插件在生产代码里引用它，
 /// 因此不进 `PLUGIN.yml` 的共享表（CS-007：单消费方的名字随 owner 走）。
 pub(crate) const EVENT_MESSAGE_EDITED: &str = "message.edited";
+
+/// 对话面里**只有本插件读写**的三条（首响 / 进度 / 过程报告）。
+///
+/// 写方与读方都在本插件（`opening` / `progress` / `runtime`），没有第二个插件在生产
+/// 代码里引用它们 ⇒ 名字随 owner 走，不进 `PLUGIN.yml` 的共享表、不出现在清单生成物里
+/// （CS-007）。端到端折叠（`symbio-sdk` 的投影）只吃传入的词汇表，不 import 这些名字。
+pub(crate) const EVENT_CHAT_ASSISTANT_OPENING: &str = "chat.assistant.opening";
+pub(crate) const EVENT_CHAT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
+pub(crate) const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 
 /// `message.removed` 与 `session.consolidated` 被 `model` / `compact` 按名字读，
 /// 因此进 `PLUGIN.yml` 的 `shared_events`；消费方 import 生成常量（D-364）。
@@ -111,6 +120,28 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 写方是 `consume_inbox_turn`，读方是 `symbio-plugin-memory` 的 `RecallProvider`
     // ——provider 是纯函数拿不到别的事实源，所以读数由宿主落格、能力包按名字读。
     EventDecl::new(EVENT_SESSION_RECALL, (Entity::Scope, Verb::Asserted)),
+    // ── 对话面词汇（自 `loop` 的临时词汇表移交）──
+    //
+    // 写方全在本插件（`runtime` / `close_turn` / `opening` / `progress`），读方是各
+    // 消费插件（classify / compact / compose / cost / hook / model / tool …）的折叠与
+    // 投影；名字经本插件 `PLUGIN.yml` 的 `shared_events` 投影成生成常量。
+    EventDecl::new("chat.assistant.fallback", (Entity::Scope, Verb::Closed)),
+    // 终答：`FinalizesTurn` 是「这一轮已经答完」的唯一判据（`is_turn_final`）。
+    EventDecl::host_with_roles(
+        "chat.assistant.final",
+        (Entity::Scope, Verb::Closed),
+        &[FactRole::FinalizesTurn],
+    ),
+    EventDecl::new("chat.assistant.opening", (Entity::Scope, Verb::Asserted)),
+    EventDecl::new("chat.assistant.progress", (Entity::Scope, Verb::Progressed)),
+    EventDecl::new("chat.assistant.reported", (Entity::Scope, Verb::Asserted)),
+    // 用户发言。`tier` 的旧落点仍带 `DeclaresBudget`：新写入的档位只读 `turn.dispatch`，
+    // 历史 WAL 里缺 `budget_ms` 时回退到 `tier`，`C5` 仍要读得到预算。
+    EventDecl::host_with_roles(
+        "user.message",
+        (Entity::Scope, Verb::Opened),
+        &[FactRole::DeclaresBudget],
+    ),
 ];
 
 /// 收束行（D-250 / D-252）：终答落格之后，把能力交出的收束贡献落成事实。
@@ -143,12 +174,12 @@ pub(crate) const ROWS: &[Decl] = &[
         tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
-            source: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
+            source: EVENT_CHAT_ASSISTANT_OPENING,
             key: &["id"],
             eq: &[],
         },
         until: &[Pattern {
-            source: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
+            source: EVENT_CHAT_ASSISTANT_OPENING,
             key: &["id"],
             eq: &[],
         }],
@@ -175,11 +206,10 @@ pub(crate) const ROWS: &[Decl] = &[
     },
 ];
 
-/// 本插件自己的事实形状：只有 `session.settled` 的键字段 `root_id`。
+/// 本插件声明的事实形状：`session.*` 两条，以及随 `chat.*` 词汇移交过来的对话面两条。
 ///
-/// `chat.assistant.reported` 不在这里登记：它的写方虽是本插件的债行，但格位与归属
-/// 由 `loop` 的词汇表声明（`EventDecl`），写闸按名字查得到；登记成事实只会多出一条
-/// `OrphanFact` 需要归宿行，而不是多一条检查。
+/// `chat.assistant.reported` 不登记形状：没有行以它为前提或出口；格位仍在本文件的
+/// `EVENTS` 里，登记成事实只会多出一条 `OrphanFact` 需要归宿行，而不是多一条检查。
 pub(crate) const FACTS: &[FactDecl] = &[
     FactDecl {
         name: EVENT_SESSION_SETTLED,
@@ -195,16 +225,34 @@ pub(crate) const FACTS: &[FactDecl] = &[
         expand: &[],
         fields: &["root_id", "reason"],
     },
+    FactDecl {
+        name: "chat.assistant.final",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["root_id", "final_id", "text"],
+    },
+    // 首响格：内容由 compose 的模板产出、由会话的行落格（D-344 的「跨插件只走 route」）。
+    // 它是一轮里**先于**终答/工具轮出现的对话面事实，排除出上下文（旧的 `escalate`
+    // 断言靠它把「我先看一下」与真正的答话分开）。
+    FactDecl {
+        name: "chat.assistant.opening",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["id", "reason", "text", "exclude_from_context"],
+    },
 ];
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
 ///
 /// 与 [`CONATION_INTENTS_VIEW`] 同一条通路、同一个理由：折叠（`transcript` / `rebuild` /
 /// `prompt_fidelity` / `branch` / `mutations` / `slo` / `commitment_records` …）住在
-/// core，两个插件都调它，所以拼写只能来自**清单生成物**——本插件是 `message.*` 与
-/// `session.consolidated` / `turn.branch_selected` 五条的 owner，其余十一条的 owner 是
-/// `crates/symbio-plugin-loop`（E-009 禁兄弟插件依赖，故不引用 loop 的 `control_decl`）；
-/// 任务族五条已随能力迁到 `crates/symbio-plugin-task`——拼写同样只从清单生成物取。
+/// core，两个插件都调它，所以拼写只能来自**清单生成物**——本插件是 `message.*`、
+/// `session.consolidated` / `turn.branch_selected` 与 `chat.*` / `user.message`
+/// 的 owner；`authz.*` 与 `commitment.*` 的 owner 仍是 `crates/symbio-plugin-loop`
+/// （E-009 禁兄弟插件依赖，故不引用 loop 的 `vocab`）；任务族五条已随能力迁到
+/// `crates/symbio-plugin-task`——拼写同样只从清单生成物取。
 ///
 /// ## 为什么是三张而不是一张
 ///
@@ -215,11 +263,11 @@ pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
         user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
         branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
         branch_selected: EVENT_TURN_BRANCH_SELECTED,
-        reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
-        opening: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
+        reported: EVENT_CHAT_ASSISTANT_REPORTED,
+        opening: EVENT_CHAT_ASSISTANT_OPENING,
         final_reply: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
         fallback: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK,
-        progress: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_PROGRESS,
+        progress: EVENT_CHAT_ASSISTANT_PROGRESS,
         denied: symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
     };
 

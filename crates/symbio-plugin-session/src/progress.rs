@@ -43,8 +43,7 @@ use serde_json::{json, Value};
 
 use symbio_plugin_api::debt::{session_config_id, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::{
-    EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_REPORTED, EVENT_SESSION_CONFIG,
-    EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
+    EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
 use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep, PLUGIN_ROW};
@@ -60,7 +59,7 @@ use crate::config::{
     default_progress_max_attempts, default_progress_max_per_turn, default_progress_min_rounds,
 };
 use crate::convergence::dialog_context;
-use crate::declarations::{CHAT_VOCAB, OWNER};
+use crate::declarations::{CHAT_VOCAB, EVENT_CHAT_ASSISTANT_REPORTED, OWNER};
 
 /// 汇报行的行名 / 债名前缀。
 pub(crate) const SESSION_PROGRESS: &str = "session.progress";

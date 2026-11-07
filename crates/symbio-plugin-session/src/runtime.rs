@@ -18,11 +18,11 @@
 //! （[D-085](README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "crates/symbio-plugin-session/src/README") 的同一条取向）。非生命周期事件（产出、汇报、
 //! 工具、任务、记忆、消息编辑里不承载根 run 节点的那些）一律不改变结局。
 
-use crate::declarations::EVENT_MESSAGE_EDITED;
+use crate::declarations::{EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_MESSAGE_EDITED};
 use symbio_kernel::event::Event;
 use symbio_plugin_api::events::{
-    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_PROGRESS,
-    EVENT_MESSAGE_ADDED, EVENT_USER_MESSAGE,
+    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED,
+    EVENT_USER_MESSAGE,
 };
 use symbio_sdk::chat::chat_node as cm;
 

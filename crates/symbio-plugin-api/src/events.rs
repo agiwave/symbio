@@ -39,20 +39,11 @@ pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 
 // ============ chat ============
 
-/// chat.assistant.fallback — owner `symbio-plugin-loop`，格位 `(Scope, Closed)`
+/// chat.assistant.fallback — owner `symbio-plugin-session`，格位 `(Scope, Closed)`
 pub const EVENT_CHAT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 
-/// chat.assistant.final — owner `symbio-plugin-loop`，格位 `(Scope, Closed)`
+/// chat.assistant.final — owner `symbio-plugin-session`，格位 `(Scope, Closed)`
 pub const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
-
-/// chat.assistant.opening — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
-pub const EVENT_CHAT_ASSISTANT_OPENING: &str = "chat.assistant.opening";
-
-/// chat.assistant.progress — owner `symbio-plugin-loop`，格位 `(Scope, Progressed)`
-pub const EVENT_CHAT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
-
-/// chat.assistant.reported — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
-pub const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 
 // ============ classify ============
 
@@ -83,13 +74,13 @@ pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
 // ============ memory ============
 
-/// memory.consolidated — owner `symbio-plugin-loop`，格位 `(Memory, Progressed)`
+/// memory.consolidated — owner `symbio-plugin-memory`，格位 `(Memory, Progressed)`
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 
-/// memory.encoded — owner `symbio-plugin-loop`，格位 `(Memory, Opened)`
+/// memory.encoded — owner `symbio-plugin-memory`，格位 `(Memory, Opened)`
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 
-/// memory.forgotten — owner `symbio-plugin-loop`，格位 `(Memory, Closed)`
+/// memory.forgotten — owner `symbio-plugin-memory`，格位 `(Memory, Closed)`
 pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 
 // ============ message ============
@@ -152,7 +143,7 @@ pub const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
 /// user.answer — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
 pub const EVENT_USER_ANSWER: &str = "user.answer";
 
-/// user.message — owner `symbio-plugin-loop`，格位 `(Scope, Opened)`
+/// user.message — owner `symbio-plugin-session`，格位 `(Scope, Opened)`
 pub const EVENT_USER_MESSAGE: &str = "user.message";
 
 /// 跨插件共享的事件行（名字 + 格位 + 角色）——写闸的**共享臂**。
@@ -168,11 +159,8 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::host(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← tool
     EventDecl::with_roles(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]), // authz.denied ← loop
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)), // authz.granted ← loop
-    EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Scope, Verb::Closed)), // chat.assistant.fallback ← loop
-    EventDecl::host_with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← loop
-    EventDecl::new(EVENT_CHAT_ASSISTANT_OPENING, (Entity::Scope, Verb::Asserted)), // chat.assistant.opening ← loop
-    EventDecl::new(EVENT_CHAT_ASSISTANT_PROGRESS, (Entity::Scope, Verb::Progressed)), // chat.assistant.progress ← loop
-    EventDecl::new(EVENT_CHAT_ASSISTANT_REPORTED, (Entity::Scope, Verb::Asserted)), // chat.assistant.reported ← loop
+    EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Scope, Verb::Closed)), // chat.assistant.fallback ← session
+    EventDecl::host_with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← session
     EventDecl::new(EVENT_CLASSIFY_ANSWERED, (Entity::Verdict, Verb::Asserted)), // classify.answered ← classify
     EventDecl::new(EVENT_CLASSIFY_ESCALATE, (Entity::Verdict, Verb::Asserted)), // classify.escalate ← classify
     EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← loop
@@ -180,9 +168,9 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← loop
     EventDecl::new(EVENT_COMMITMENT_RELEASED, (Entity::Commitment, Verb::Closed)), // commitment.released ← loop
     EventDecl::new(EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)), // conation.expressed ← conation
-    EventDecl::new(EVENT_MEMORY_CONSOLIDATED, (Entity::Memory, Verb::Progressed)), // memory.consolidated ← loop
-    EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← loop
-    EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)), // memory.forgotten ← loop
+    EventDecl::new(EVENT_MEMORY_CONSOLIDATED, (Entity::Memory, Verb::Progressed)), // memory.consolidated ← memory
+    EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← memory
+    EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)), // memory.forgotten ← memory
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
     EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
     EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)), // session.config ← loop
@@ -199,5 +187,5 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // turn.branch_selected ← session
     EventDecl::with_roles(EVENT_TURN_DISPATCH, (Entity::Scope, Verb::Asserted), &[FactRole::DeclaresBudget]), // turn.dispatch ← loop
     EventDecl::new(EVENT_USER_ANSWER, (Entity::Scope, Verb::Asserted)), // user.answer ← session
-    EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← loop
+    EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← session
 ];

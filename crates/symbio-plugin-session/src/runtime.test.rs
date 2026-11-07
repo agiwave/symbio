@@ -258,7 +258,7 @@ fn non_lifecycle_events_do_not_move_the_outcome() {
             json!({ "task_id": "t-1" }),
         ),
         ev(
-            symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
+            crate::declarations::EVENT_CHAT_ASSISTANT_REPORTED,
             Verb::Progressed,
             json!({ "text": "汇报" }),
         ),
