@@ -81,20 +81,18 @@ pub enum PreemptPending {
 pub struct ActiveSessionStateInner {
     /// 工作态（进程局部量，[`WorkingState`]）。
     ///
-    /// **字段私有**：生产侧的写点只有 `ActiveSessionState` 上那三个迁移方法
-    /// （`begin_turn` / `clear_working_and_abort_signal` / `finish_turn`），
-    /// 它们都经 [`WorkingState::apply`] 并把「由忙变闲」交给 `turn_done` 唤醒。
-    /// 收件箱消费者因此不再轮询。
+    /// **字段私有**：生产侧的写点只有 `ActiveSessionState` 上的迁移方法
+    /// （`begin_turn` / `finish_turn`），它们都经 [`WorkingState::apply`] 并把
+    /// 「由忙变闲」交给 `turn_done` 唤醒。收件箱消费者因此不再轮询。
     working: WorkingState,
-    /// 在途 Turn 的中止信号（登记后 `handle_abort` 直接置位，无需投帧）。
+    /// 在途 Turn 的中止信号（登记后中止动作直接置位，无需投帧）。
     ///
     /// 收口前这里是 `Option<mpsc::Sender<PluginFrame>>`——中止只能靠「往执行期
     /// 通道投一帧 `ControlSignal::Abort`」，执行方在 `select!` 里收帧再置位标志。
     /// 现在登记的就是那个信号本身：置位即生效、置位即唤醒（无轮询、无帧）。
     ///
-    /// `None` 的双重含义与收口前一致：既表示「当前没有在途 Turn」，也是
-    /// `handle_abort` 判断 chat_loop 是否已收敛的判据。
-    pub abort_signal: Option<ExecAbortSignal>,
+    /// **唯一所有者是 [`ActiveSessionState`] 上的 `abort_signal` 格子**：事实源
+    /// 只持同一个 `Arc` 的引用，不另存一份 `Option`（两份就是两个真源）。
     pub last_content: String,
     pub last_tool_calls: Vec<Value>,
     /// 上一轮交互的**结局**（`completed` / `aborted` / `failed`）。
@@ -167,6 +165,15 @@ impl ActiveSessionStateInner {
 pub struct ActiveSessionState {
     /// 会话 ID 字符串（用于 EventBus 标签）
     pub session_id: String,
+    /// 在途 Turn 的中止信号格：**唯一所有者**。
+    ///
+    /// 事实源（`SessionFactSource`）只持同一个 `Arc` 的引用，每次踢驱动时读它的
+    /// **当前值**挂进 `DriveTarget`；中止动作也只置位、不取走——取走之后本轮后续
+    /// 派发读到的是新造的死信号，中止就退化成「只打断当前这次调用」。
+    /// 注销只在 [`ActiveSessionState::finish_turn`] 的同一临界区做一次。
+    ///
+    /// 用同步锁：事实源的 `append` 是同步函数，不能 await。
+    pub(crate) abort_signal: Arc<std::sync::RwLock<Option<ExecAbortSignal>>>,
     pub inner: RwLock<ActiveSessionStateInner>,
     /// 会话**转写**（在途图 + 单调 seq + 实时发布）。
     ///
@@ -210,9 +217,9 @@ impl ActiveSessionState {
     pub fn with_session_id(session_id: String, changes: VdfsChangeSubscriptions) -> Self {
         Self {
             session_id: session_id.clone(),
+            abort_signal: Arc::new(std::sync::RwLock::new(None)),
             inner: RwLock::new(ActiveSessionStateInner {
                 working: WorkingState::Idle,
-                abort_signal: None,
                 last_content: String::new(),
                 last_tool_calls: Vec::new(),
                 last_outcome: None,
@@ -270,6 +277,12 @@ impl ActiveSessionState {
     pub(crate) async fn finish_turn(&self, outcome: &str, error: Option<String>) {
         let became_idle = {
             let mut inner = self.inner.write().await;
+            // 同一临界区：工作态落闲与注销中止信号一起可见——不留「已收轮但信号
+            // 仍置位」的窗口（那会让下一轮带着上一轮已取消的信号开局）。
+            *self
+                .abort_signal
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
             let became_idle = inner.working.apply(WorkingTransition::Finish);
             inner.last_outcome = Some(outcome.to_string());
             inner.last_error = error;
@@ -278,15 +291,31 @@ impl ActiveSessionState {
         self.wake_if_idle(became_idle);
     }
 
-    /// 中止的强制收口：置空闲 **并**注销中止信号——同一临界区，两格一起可见。
-    pub(crate) async fn clear_working_and_abort_signal(&self) {
-        let became_idle = {
-            let mut inner = self.inner.write().await;
-            let became_idle = inner.working.apply(WorkingTransition::EarlyExit);
-            inner.abort_signal = None;
-            became_idle
-        };
-        self.wake_if_idle(became_idle);
+    /// 开轮登记：把**本轮唯一的信号对象**放进格子。必须在第一次 `append` 之前调用
+    /// ——第一次 append 就会踢驱动，而 `DriveTarget` 只带当时的当前值。
+    pub(crate) fn register_abort_signal(&self, signal: ExecAbortSignal) {
+        *self
+            .abort_signal
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(signal);
+    }
+
+    /// 中止在途一轮：**只置位、不取走**。返回是否确有在途信号（没有 ⇒ 会话没在跑）。
+    ///
+    /// 取走会让本轮后续派发（如工具行）读到空槽、由环现造一个死信号——那正是
+    /// 「用户按下中止、工具照常跑」。注销由 [`Self::finish_turn`] 在同一临界区做。
+    pub(crate) fn abort_current_turn(&self) -> bool {
+        let slot = self
+            .abort_signal
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match slot.as_ref() {
+            Some(signal) => {
+                signal.abort();
+                true
+            }
+            None => false,
+        }
     }
 
     /// 自动压缩熔断阈值：连续失败达到此数即开闸跳过。

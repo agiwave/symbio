@@ -1,6 +1,6 @@
 {
   "rule": "D-333",
-  "authorized_by": "D-342",
+  "authorized_by": "D-353",
   "note": "历史提交缺 `Core-Change:` 的逐提交补记表（提交不能改写）。每行记一条：它实际改了机制面的什么、对应哪条决策、补记的是哪条判据（CC-001 / EX-007）。判据只认本表：在表内 ⇒ 按本表核验；不在表内且缺署名 ⇒ 红。新增行只能由一条新决策追加——那条决策必须更新 `authorized_by` 并能在现行文档里打开。",
   "entries": [
     {
@@ -8,112 +8,140 @@
       "rules": ["CC-001"],
       "change": "环侧旧编排 / 幕机 / 阶段协议整族退役，只留纯机制环；`symbio-kernel` 的声明面与 `symbio-sdk` 的投影随之收口（`projection/{rebuild,transcript,prompt_fidelity,vocab}.rs`、`turn/dispatch.rs`）",
       "decision": "D-318",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "16ad2f4d",
       "rules": ["CC-001"],
       "change": "会话侧 run-turn 旧编排退役；删 `symbio-sdk/src/projection/turnstate.rs` 与 `symbio-sdk/src/turn/dispatch.rs`，保留存储 / 转写 / VDFS 能力面",
       "decision": "D-318",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "a85a2358",
       "rules": ["CC-001", "EX-007"],
       "change": "宿主离开环 crate；债务契约落 `symbio-sdk::debt`（债表归插件）；撤销 `session` 端口——本地簿记不是世界端口",
       "decision": "D-324",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "12da3b95",
       "rules": ["CC-001", "EX-007"],
       "change": "`symbio-sdk::debt` 的债行新增排除条件 `unless`（归属：选债）",
       "decision": "D-325",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "0639e6a5",
       "rules": ["CC-001", "EX-007"],
       "change": "宿主提供事实存在谓词，环零业务知识：`when` 的判定口移交宿主读面",
       "decision": "D-325",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "396e3664",
       "rules": ["CC-001"],
       "change": "债行新增 `when_no_open` 谓词（归属：选债）",
       "decision": "D-325",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "243ecb61",
       "rules": ["CC-001"],
       "change": "宿主读面与 model 债表接入；`unless` 与 `when` 同一条读面；债务契约由 `symbio-sdk::debt` 移出",
       "decision": "D-325",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "34526409",
       "rules": ["CC-001"],
       "change": "退役失去对象的判据与零消费声明：删 `symbio-sdk/src/projection/turns.rs` 等（旧 `TurnState` 的投影面随 B2 消失）",
       "decision": "D-318",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "6f78506b",
       "rules": ["CC-001"],
       "change": "收束轮交出实测上下文水位，重建折进轮根 `meta.context`（`symbio-sdk/src/projection/rebuild.rs`）",
       "decision": "D-137",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "4a00dd6e",
       "rules": ["CC-001"],
       "change": "投影重建去掉「轮根」措辞：产物不再复制分组标识，改由 `tool_call_id` 反查 `tool.requested` 的 `calls[]`；`call_turns` / `turn_id` / `push_round_nodes` 改名 `group_of_call` / `group` / `push_step_nodes`，行为不变（`symbio-sdk/src/projection/rebuild.rs`）",
       "decision": "D-318",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "073183e2",
       "rules": ["CC-001"],
       "change": "一次工具调用只有一个身份：声明与派发键统一取 provider 的 `wire_id`（缺省写 `call_<名>_<root>_<序号>`），`response.calls[].id` 与 `tool.requested.calls[].id` 逐字相同；重建侧 wire id 原样返回、旧合成键仍可还原（`symbio-plugin-model/src/port.rs`、`symbio-sdk/src/projection/rebuild.rs`）",
       "decision": "D-319",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "62350e9b",
       "rules": ["CC-001"],
       "change": "开轮单元推广到自主发起路径（`symbio-sdk` 事实源打开即绑定本根驱动）；执行出口同一份 sink 同时进 `ctx[EVENT_SINK]` 与 `handles.sink`；收轮器补失败收敛（`chat.assistant.final` 缺席时合成失败终态）",
       "decision": "D-335",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "845ce961",
       "rules": ["CC-001"],
       "change": "跨插件模型往返的共享载荷住 SDK 词汇层（`chat_node::AssistRequest` / `AssistReply`）；`port_rows` 注册期对端口名 fail-closed（保留集 `PORT_NAME_RESERVED`）",
       "decision": "D-336",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "dda70ba4",
       "rules": ["CC-001"],
       "change": "终答载荷键 `turn_id` → `root_id`：生产者改 `model` 端口 outcome 载荷，内核声明字段与 SDK 重建分组键跟随读新键，声明不被旧词咬住",
       "decision": "D-318",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "d2ed7682",
       "rules": ["CC-001"],
       "change": "`EventDecl` 增 owner 字段，`emit` / `emit_attributed` 只按冻结表取归属、查不到显式失败；`@principal` 由会话装配按 `agent_id` 解析，`RowRequest.principal` / `DriveRequest.principal` 来自开面唯一载体",
       "decision": "D-339",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
     },
     {
       "sha": "7e2571eb",
       "rules": ["CC-001"],
       "change": "`symbio-sdk` 的 `flatten_whole_tree` 轮锚判据从 `is_run()` 扩到 D-335 的用户消息节点（`is_text + role=User`），存量骨架树继续兼容",
       "decision": "D-335",
-      "authorized_by": "D-342"
+      "authorized_by": "D-353"
+    },
+    {
+      "sha": "93914fe7",
+      "rules": ["CC-001"],
+      "change": "`chat_node::AssistReply` 增 `reasoning` / `reasoning_id` / `cost_ms`：一次问答的回复带回执行体实测的思考段与耗时，落格侧不自造（`symbio-sdk/src/chat/chat_node.rs`）",
+      "decision": "D-341",
+      "authorized_by": "D-353"
+    },
+    {
+      "sha": "b962f042",
+      "rules": ["CC-001"],
+      "change": "`chat_node::AssistRequest` 增可选 `provider`：请求偏好 > 会话选定 > 端口缺省的解析次序（`symbio-sdk/src/chat/chat_node.rs`）",
+      "decision": "D-348",
+      "authorized_by": "D-353"
+    },
+    {
+      "sha": "9a2206fa",
+      "rules": ["CC-001"],
+      "change": "工具卡重建保留 `tool_call_id`（wire id），使恢复类动作在投影回放里与实时面同形、能配对同一调用（`symbio-sdk/src/projection/rebuild.rs`）",
+      "decision": "D-319",
+      "authorized_by": "D-353"
+    },
+    {
+      "sha": "83c27421",
+      "rules": ["CC-001"],
+      "change": "投影读面与写侧同读数：`produced_text` / `produced_nodes` 补 `answer` 回退，正文子节点 id 优先取 `answer_id`（`symbio-sdk/src/projection/{mutations,rebuild}.rs`）",
+      "decision": "D-165",
+      "authorized_by": "D-353"
     }
   ]
 }

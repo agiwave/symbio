@@ -55,9 +55,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         (Entity::Scope, Verb::Asserted),
         &[FactRole::DeclaresBudget],
     ),
-    // 历史形态：`tier` 曾经随开轮格落（`D-223` 订正前）。新写入不再带它，档位只读
-    // `turn.dispatch`；这里仍保留 `DeclaresBudget` 角色，让**接线前落的历史 WAL**
-    // 还能被 `C5` 读到预算（缺 `budget_ms` 时才回退到 `tier`）。
+    // `tier` 的另一种落点：`D-223` 之前的开轮格带它，新写入不带；档位只读
+    // `turn.dispatch`。这里保留 `DeclaresBudget` 角色，让历史 WAL 仍能被 `C5`
+    // 读到预算（缺 `budget_ms` 时才回退到 `tier`）。
     EventDecl::host_with_roles(
         "user.message",
         (Entity::Scope, Verb::Opened),

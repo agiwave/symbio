@@ -578,12 +578,15 @@ impl SessionPlugin {
     ) -> Result<(), PluginError> {
         // 删除前先 abort 该会话的活跃任务
         let state = self.active_mgr.get_or_create(session_id).await;
-        {
-            // 置位即中止（无帧、无 await）：与 `handle_abort` 走同一个原语。
-            let mut inner = state.inner.write().await;
-            if let Some(signal) = inner.abort_signal.take() {
-                signal.abort();
-            }
+        // 删除是终态：这里可以直接取走信号（与中止动作不同——中止只置位，
+        // 因为本轮之后还有派发；删除之后没有下一笔）。
+        let signal = state
+            .abort_signal
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(signal) = signal {
+            signal.abort();
         }
         // 清理活跃条目
         self.active_mgr.sessions.write().await.remove(session_id);

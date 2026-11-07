@@ -144,6 +144,10 @@ fn latency_rows(by_tier: BTreeMap<String, Vec<u64>>) -> Vec<Value> {
 /// **兜底轮不计入时延样本**：兜底是失败路径，把它的耗时混进成功响应的分位数会同时污染
 /// 两列（时延被拉高、兜底率看不见）。失败轮的耗时记在 fallback 事件的 `cost_ms` 里，
 /// 由需要它的读方按需取。
+///
+/// **中止轮也不计入**（`final.status == "aborted"`）：中止样本的耗时是「被打断的
+/// 那一截」，不代表服务能力——计入会把 p95 往「用户手速」而不是「模型时延」拉。
+/// 它是**样本语义污染**，不是样本缺失，所以按 `status` 排除而不是留空。
 fn latency(events: &[Event], now: i64) -> Value {
     let mut by_tier: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     for e in events {
@@ -153,6 +157,7 @@ fn latency(events: &[Event], now: i64) -> Value {
         if e.entity != Entity::Scope
             || e.verb != Verb::Closed
             || e.kind.as_str() != EVENT_CHAT_ASSISTANT_FINAL
+            || e.payload.get("status").and_then(Value::as_str) == Some("aborted")
         {
             continue;
         }

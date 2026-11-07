@@ -490,11 +490,16 @@ impl PortExecutor for ModelExecutor {
         let mut world_kind = EVENT_FAILED;
         // 工具轮：**一次一轮一条** `tool.requested`（载荷 = 本轮调用清单）。
         let mut requested: Option<serde_json::Value> = None;
-        let outcome = match provider
-            // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
-            .round_trip(&system_prompt, &wire, &tools, &request.root_id, &env)
-            .await
-        {
+        let outcome = match tokio::select! {
+            biased;
+            // 中止（`DE-047` 驱动级信号）：置位即放弃这次往返——drop 掉 future
+            // 就断开 HTTP / SSE，落到下面的 `Err(PluginError::Aborted)` 分支，
+            // 半截正文由 `rows.snapshot()` 留痕。工具侧的读方是同一个 `exec.abort`。
+            _ = exec.abort.cancelled() => Err(PluginError::Aborted),
+            result = provider
+                // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
+                .round_trip(&system_prompt, &wire, &tools, &request.root_id, &env) => result,
+        } {
             Ok(output) => {
                 // 终答是**独立事实种类**（`chat.assistant.final`）：只有收束轮（无工具调用）
                 // 才落它。债表据此排除「这一轮已答完」，而环的 `request` / `sent` / `retry`

@@ -2,11 +2,11 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 148,
-      "test": 178
+      "prod": 147,
+      "test": 183
     },
     "F2": {
-      "prod": 16,
+      "prod": 20,
       "test": 14
     },
     "F3": {
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-07",
+      "faces": "F1.prod / F1.test / F2.prod",
+      "reason": "t28（`b924d376`）按 D-223 / D-262 / D-282 落幕级派发格 `turn.dispatch`：事件名与其声明 / 读法（`plugin-api/events.rs`、`loop/vocab.rs`、`loop/PLUGIN.yml`、`session/plugin/turn.rs` 及其内联判据）在 F2 生产面 16 → 20、F1 测试面 178 → 183 各计一次；同批的旧判据收窄让 F1 生产面 148 → 147。三面都跟到实测——事件名属裁决、不是顺手加词根，基线不跟就是空转。目标 0 不变。"
+    },
     {
       "date": "2026-11-06",
       "faces": "F1.prod / F1.test",

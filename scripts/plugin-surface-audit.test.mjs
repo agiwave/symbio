@@ -230,6 +230,20 @@ test('⑨ 白名单里的空转条目 ⇒ 红（HS-003）', () => {
   }
 })
 
+test('⑨b `X as _` 算消费方（HS-003 认 `as` 前的门面符号）', () => {
+  const root = fixture({
+    // 把 trait 带进作用域只为调方法——既不写别名，消费的也是 `Event` 本身。
+    'symbio-plugin-fix': { rs: 'use symbio_plugin_api::{Event as _};\npub fn f() {}\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    rmTree(root)
+  }
+})
+
 test('⑧ 范围读不出 ⇒ exit 2', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-surface-empty-'))
   try {

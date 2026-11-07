@@ -28,7 +28,7 @@
 use super::active::ActiveSessionState;
 use super::chat_session::Carrier;
 use super::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
-use super::plugin::{session_node, OUTCOME_COMPLETED};
+use super::plugin::{session_node, OUTCOME_ABORTED, OUTCOME_COMPLETED};
 use super::transcript::publish::append_and_publish;
 use super::types::SessionSummary;
 use serde_json::Value;
@@ -423,6 +423,109 @@ impl Convergence {
                     .and_then(Value::as_str)
                     .unwrap_or("模型调用失败")
                     .to_string();
+                // 中止不是失败（D-044 / D-165：中止与失败只在 `status` 上区分）。
+                // 中止只落终答格（`status: "aborted"`），**不落兜底、不推失败节点**
+                // ——那两条会把「用户按下停止」说成错误，也会把中止样本记进兜底率。
+                let aborted = failed.payload.get("status").and_then(Value::as_str)
+                    == Some("aborted")
+                    || why == "aborted";
+                if aborted {
+                    let root_id = user.event_id.as_str();
+                    // 正文取 `failed` 折出的半截（`output_payload` 的 `answer`），与
+                    // 正文节点同源；没有半截（派发前就中止）则为空串。
+                    let text = failed
+                        .payload
+                        .get("answer")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let has_final = events.iter().any(|e| {
+                        e.kind == EVENT_CHAT_ASSISTANT_FINAL
+                            && e.payload.get("root_id").and_then(Value::as_str) == Some(root_id)
+                    });
+                    if !has_final {
+                        // 终答格是这一轮的**持久收束证据**：重启后 `runtime` 按
+                        // `final.status` 判 `outcome=aborted`（映射已有）。
+                        source
+                            .append(
+                                PRINCIPAL_MAIN.to_string(),
+                                FactDraft {
+                                    key: format!("{EVENT_CHAT_ASSISTANT_FINAL}:{root_id}"),
+                                    kind: EVENT_CHAT_ASSISTANT_FINAL.to_string(),
+                                    entity: Entity::Scope,
+                                    verb: Verb::Closed,
+                                    payload: serde_json::json!({
+                                        "root_id": user.event_id,
+                                        "status": "aborted",
+                                        "reason": "interrupted",
+                                        "text": &text,
+                                        "principal": PRINCIPAL_MAIN,
+                                        // 对话面节点：与正常终答同一形状（`rebuild`
+                                        // 的 `dialog` 分支折出一条正文节点），否则
+                                        // 只剩「轮骨架」——D-335 后骨架不是发布身份，
+                                        // 这一轮在对话面就凭空消失。id 与模型端口
+                                        // 交回的正文身份同源（`{root}-text`）：中止前
+                                        // 已流过正文时，`failed` 折出的节点与它同 id，
+                                        // 重建按 id 合成一条，不会多出第二个 aborted。
+                                        "dialog": {
+                                            "id": format!("{root_id}-text"),
+                                            "reason": "interrupted",
+                                            "text": &text,
+                                            "exclude_from_context": false,
+                                        },
+                                    }),
+                                    produced_by: Some(user_seq),
+                                },
+                            )
+                            .map_err(|e| {
+                                PluginError::InternalError(format!("中止收束落格失败: {e}"))
+                            })?;
+                    }
+                    // 终答格刚落格：重建要**看得见它**。只折写前那段快照，首读为空、
+                    // 重启后又出现——同一轮两条命。重读本段事实再折，与落库面同源。
+                    let fresh = source.range(0);
+                    let fresh_waiting: Vec<_> = fresh
+                        .iter()
+                        .filter(|e| e.seq.is_some_and(|seq| seq.value() > user_seq))
+                        .cloned()
+                        .collect();
+                    // 正文节点全部由 `rebuild` 从事实折出：中止前已流过正文时来自
+                    // `failed` 的半截，否则来自刚落格的终答 `dialog`（同 id，合一条）。
+                    // 中止不推 `failed:` 节点（那是失败路径，D-044 / D-165）。
+                    let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
+                        &fresh_waiting,
+                        &CHAT_VOCAB,
+                        &MESSAGE_VOCAB,
+                    )
+                    .into_iter()
+                    .map(|mut node| {
+                        node.seq = None;
+                        node
+                    })
+                    .collect();
+                    if !nodes.is_empty() {
+                        let session = self.open_chat_session(session_id).await?;
+                        append_and_publish(
+                            &session,
+                            nodes,
+                            Carrier::Runner,
+                            &self.active,
+                            session_id,
+                            PRINCIPAL_MAIN,
+                        )
+                        .await?;
+                    }
+                    let state = self.active.get_or_create(session_id).await;
+                    self.emit_session_state(
+                        &state,
+                        SessionStateChange::Finished {
+                            outcome: super::plugin::OUTCOME_ABORTED,
+                            error: None,
+                        },
+                    )
+                    .await;
+                    return Ok(true);
+                }
                 // 兜底格（`chat.assistant.fallback`）：本轮没有终答、以失败收束时，
                 // 除「哪一步坏了」之外还必须有一条**轮级收束事实**——`slo.fallback`
                 // 按它算兜底率，`runtime` 按它判结局（两处声明都在，缺的只是写方，t47）。
@@ -605,10 +708,17 @@ impl Convergence {
         }
 
         let state = self.active.get_or_create(session_id).await;
+        // 终答格的 `status` 是这一轮的持久结局：中止轮（`aborted`）与正常轮
+        // （`completed`）走同一条收束，但结局不同——重入投影不能把中止覆盖成完成。
+        let aborted = final_event.payload.get("status").and_then(Value::as_str) == Some("aborted");
         self.emit_session_state(
             &state,
             SessionStateChange::Finished {
-                outcome: OUTCOME_COMPLETED,
+                outcome: if aborted {
+                    OUTCOME_ABORTED
+                } else {
+                    OUTCOME_COMPLETED
+                },
                 error: None,
             },
         )

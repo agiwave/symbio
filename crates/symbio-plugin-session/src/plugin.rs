@@ -273,6 +273,9 @@ impl SessionPlugin {
         // 补充整合的批次边界折叠器：随**开轮写口**一起绑上（只读面不折叠）。
         // 它持的是「取批那三样」+ 消息列表写口，折叠全程留在会话域，不需要驱动器伸手来问。
         let state = self.active_mgr.get_or_create(session_id).await;
+        // 中止信号格：**会话状态是唯一所有者**，事实源只拿同一个 `Arc` 的引用
+        // （不是第二份 `Option`，否则动作写一边、驱动读另一边，中止永不生效）。
+        let abort_signal = Arc::clone(&state.abort_signal);
         let supplements = super::transcript::supplements::SupplementDrain::new(
             Arc::clone(&self.config),
             Arc::clone(&self.change_subs),
@@ -285,6 +288,7 @@ impl SessionPlugin {
                 self.drive_entry(),
                 symbio_kernel::exec::ExecEventSink::direct(sink),
                 Some(supplements),
+                abort_signal,
             )
             .map_err(PluginError::InternalError)?
             .ok_or_else(|| PluginError::NotFound(format!("会话 {session_id} 没有事实源")))

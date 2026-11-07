@@ -28,6 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use symbio_host::{DriveReport, Host};
+use symbio_kernel::exec::{ExecAbortSignal, ABORT_SIGNAL};
 use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
@@ -59,6 +60,9 @@ pub struct FactWorld<'a> {
     pub agent_scope: Option<&'a symbio_sdk::agent::AgentScope>,
     /// 本轮入站来源主体（D-067）：本机用户发起时 `None`。
     pub source_principal: Option<&'a str>,
+    /// 本轮的中止信号（`DE-047` 驱动级信号）：随事实源的交回值带来。
+    /// `None` = 没有在途轮次；读方按「不会中止」处理（`ExecAbortSignal::of` 同一语义）。
+    pub abort: Option<&'a ExecAbortSignal>,
     /// 执行期出口：由会话插件按根交出的真实转写句柄（内部请求显式静默）。
     pub sink: ExecEventSink,
 }
@@ -100,6 +104,12 @@ pub async fn drive_on_new_fact(
     // 缺席 = 本机用户发起，执行体回落会话身份（不在这里补默认值就是「没声明」）。
     if let Some(source) = world.source_principal {
         ctx.set(SOURCE_PRINCIPAL, source.to_string());
+    }
+    // 中止信号（`DE-047`）：与 `source_principal` 同一来源（会话状态），在这里
+    // 挂进本轮 ctx。环与工具 / 模型执行体都经 `ExecAbortSignal::of(ctx)` 读同一个对象——
+    // 不在执行体里各建一个（那正是「每次执行现造死信号」的旧断点）。
+    if let Some(signal) = world.abort {
+        ctx.set(ABORT_SIGNAL, signal.clone());
     }
     // 装配层 open 的同一句柄：宿主与插件上下文共享它，插件不自建 store。
     ctx.set(FACT_SOURCE, Arc::clone(&world.facts));
@@ -316,6 +326,7 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
         risk_level: &target.risk_level,
         agent_scope: target.agent_scope.as_ref(),
         source_principal: target.source_principal.as_deref(),
+        abort: target.abort.as_ref(),
         sink: target.sink.clone(),
     };
     if let Err(e) = drive_on_new_fact(root, &world).await {

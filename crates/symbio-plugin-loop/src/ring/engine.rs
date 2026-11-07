@@ -250,6 +250,44 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
     // 端口名要跟着收束载荷走：读侧按 `port` 判「这一次往返算不算对读者说的话」。
     let port = row.port;
     let key = DebtKey::new(row.port, row.id.clone(), attempt);
+    let handles = ctx.exec_handles();
+    // 中止是**本轮**的（`DE-047` 驱动级信号）：置位后，每一笔还没起活的派发都先看
+    // 它一眼。已取消 ⇒ 不再调执行体，按中止关账——否则「用户按下中止、下一笔工具
+    // 照常跑」，中止退化成「只打断当前这一次调用」。
+    let abort = handles
+        .ctx
+        .as_deref()
+        .map(ExecAbortSignal::of)
+        .unwrap_or_default();
+    if abort.is_aborted() {
+        ctx.append(Fact::new(
+            FactKind::Request,
+            key.clone(),
+            row.payload.clone(),
+            now_ms,
+        ));
+        ctx.append(Fact::new(
+            FactKind::Sent,
+            key.clone(),
+            json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+            now_ms,
+        ));
+        ctx.append(Fact::new(
+            FactKind::Failed,
+            key,
+            json!({
+                // 产出身份跟着收束载荷走（`failed` 的声明字段含 `root_id`）：
+                // 读侧按端口 + 本轮开端折正文节点，缺了它这一笔在重建面静默消失。
+                "root_id": row.payload.get("root_id").cloned().unwrap_or(Value::Null),
+                "port": port,
+                "class": "non_retryable",
+                "reason": "aborted",
+                "status": "aborted",
+            }),
+            now_ms,
+        ));
+        return;
+    }
     ctx.append(Fact::new(
         FactKind::Request,
         key.clone(),
@@ -277,10 +315,10 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
     };
 
     let writer = Arc::new(CollectingWriter::new(ctx.outlet()));
-    let handles = ctx.exec_handles();
     let exec = PortExecContext {
         deadline_ms: Some(now_ms.saturating_add(row.lease_ms)),
-        abort: ExecAbortSignal::new(),
+        // 交给执行体的是**本轮同一个**信号（从上一条派发的 ctx 读回），不是现造的死信号。
+        abort,
         idempotency_key: format!("{}:{}:{}", row.port, row.id, attempt),
         sink: handles.sink,
         emit: PortFactEmit::new(writer.clone()),

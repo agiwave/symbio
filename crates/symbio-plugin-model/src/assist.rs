@@ -208,6 +208,7 @@ fn transcript_nodes(facts: &[PortFact]) -> Vec<ChatNode> {
                 fact.payload.get("text"),
             ),
             EVENT_CHAT_ASSISTANT_FINAL => (
+                // plugin-entry-allow E-005: `session/main` 是会话主体 id（Principal），不是插件路由地址
                 Principal::new(PrincipalKind::Agent, "session/main"),
                 fact.payload
                     .get("text")

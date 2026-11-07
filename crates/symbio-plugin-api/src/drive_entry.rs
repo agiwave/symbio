@@ -29,7 +29,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use symbio_kernel::exec::ExecEventSink;
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::Plugin;
 use symbio_sdk::agent::AgentScope;
 
@@ -69,6 +69,12 @@ pub struct DriveTarget {
     /// 本轮入站来源主体（D-067）：请求 `metadata.source_principal` 声明的数据，
     /// 由开轮写方从收件箱条目发布、事实源随目标带过来。`None` = 本机用户发起。
     pub source_principal: Option<String>,
+    /// 本轮的中止信号（`DE-047` 新增槽位）：由会话状态**唯一持有**，事实源只引用
+    /// 同一个 `Arc` 的当前值。`None` = 没有在途轮次（读方按「不会中止」处理）。
+    ///
+    /// 它是**驱动级信号**（`DE-047`：`abort` 留环），不是端口私有值：环把它挂进本轮
+    /// ctx 的 `ABORT_SIGNAL`，模型 / 工具的读取面因此看到同一个对象。
+    pub abort: Option<ExecAbortSignal>,
     /// 本会话的事实源句柄（写口打开的那一份，唯一写口）。
     pub facts: Arc<dyn FactSource>,
     /// 执行期出口：由装配层按根提供真实转写句柄；内部请求显式静默。

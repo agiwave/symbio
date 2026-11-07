@@ -10,8 +10,8 @@
 
 use super::*;
 use symbio_kernel::vdfs::{
-    VdfsAccess, VdfsChange, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
-    VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
+    VdfsAccess, VdfsActionResult, VdfsChange, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
+    VdfsNode, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT,
 };
 use symbio_sdk::vdfs::host::vdfs_from_plugin_error;
 
@@ -148,6 +148,24 @@ impl SessionPlugin {
             VdfsRequest::Unwatch => {
                 self.unwatch_at_path(path).await?;
                 Ok(VdfsResponse::Unit)
+            }
+            // 中止（`DE-047` 驱动级信号）：**只置位、不取走**。取走之后本轮后续派发
+            // （如工具行）读到的是新造的死信号——「用户按下中止、工具照常跑」。
+            // 注销只在 `finish_turn` 的同一临界区做一次。
+            VdfsRequest::Action { action, .. } if action == VDFS_ACTION_ABORT => {
+                self.session_of(id).await?;
+                let state = self.active_mgr.get_or_create(id).await;
+                let ok = state.abort_current_turn();
+                Ok(VdfsResponse::Action(VdfsActionResult {
+                    action,
+                    ok,
+                    message: if ok {
+                        "已中止在途一轮".to_string()
+                    } else {
+                        "会话没有在途轮次".to_string()
+                    },
+                    data: None,
+                }))
             }
             _ => Err(VdfsError::NotImplemented),
         }

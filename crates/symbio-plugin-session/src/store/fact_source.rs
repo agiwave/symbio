@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock, Weak};
 
 use symbio_kernel::event::{Event, Seq};
-use symbio_kernel::exec::ExecEventSink;
+use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::drive_entry::{DriveEntry, DriveTarget};
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
@@ -53,6 +53,10 @@ pub(crate) struct SessionFactSource {
     /// 本轮入站来源主体（D-067）：由开轮写方从收件箱条目的 `params` 发布，`append`
     /// 时随驱动目标带进本轮 ctx。`None` = 本机用户发起（工具侧回落会话身份）。
     source_principal: Arc<RwLock<Option<String>>>,
+    /// 在途 Turn 的中止信号：**不是本事实源的私有状态**——它只引用会话状态里的
+    /// 同一个 `Arc`（唯一所有者是 `ActiveSessionState`）。每次踢驱动读当前值，
+    /// 置位后本轮后续任何派发都读得到（取走会退化成「只打断当前这次调用」）。
+    abort_signal: Arc<RwLock<Option<ExecAbortSignal>>>,
     /// 本会话所属**部署根**的驱动实例；`None` = 只读事实源，不踢驱动。
     drive: Option<Arc<dyn DriveEntry>>,
     /// 执行期出口：真实转写句柄，或本根**显式声明**的静默。
@@ -76,6 +80,7 @@ impl SessionFactSource {
         params: SessionParams,
         agent_scope: Arc<RwLock<Option<symbio_sdk::agent::AgentScope>>>,
         source_principal: Arc<RwLock<Option<String>>>,
+        abort_signal: Arc<RwLock<Option<ExecAbortSignal>>>,
         drive: Option<Arc<dyn DriveEntry>>,
         sink: ExecEventSink,
         supplements: Option<SupplementDrain>,
@@ -89,6 +94,7 @@ impl SessionFactSource {
             params,
             agent_scope,
             source_principal,
+            abort_signal,
             drive,
             sink,
             supplements,
@@ -190,6 +196,12 @@ impl FactSource for SessionFactSource {
                         .read()
                         .ok()
                         .and_then(|source| source.clone()),
+                    // 中止信号只取**当前值**（共享格子，见字段文档）。
+                    abort: self
+                        .abort_signal
+                        .read()
+                        .ok()
+                        .and_then(|signal| signal.clone()),
                     facts,
                     sink: self.sink.clone(),
                 };
@@ -248,6 +260,8 @@ impl FactSourceOpener for SessionFactOpener {
             None,
             SessionParams::default(),
             Arc::new(RwLock::new(None)),
+            Arc::new(RwLock::new(None)),
+            // 只读开面没有在途轮次：中止槽独立空置（不是任何会话状态的那一格）。
             Arc::new(RwLock::new(None)),
             None,
             ExecEventSink::silent(),

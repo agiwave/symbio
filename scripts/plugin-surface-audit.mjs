@@ -325,8 +325,13 @@ export function collectConsumers(root, pluginNames) {
       const code = stripRustCode(fs.readFileSync(f, 'utf8'))
       for (const m of code.matchAll(/symbio_plugin_api::\{([^}]*)\}/g)) {
         for (const raw of m[1].split(',')) {
-          const s = raw.trim().split(/\s+as\s+/).pop().trim()
-          if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(s)) used.add(s)
+          const parts = raw.trim().split(/\s+as\s+/)
+          // 别名只是本地名，**被消费的是 `as` 前面那个门面符号**。`X as _` 尤其如此：
+          // 它把 trait / 常量带进作用域只为调方法（`LlmAdapter as _`），旧实现取别名
+          // 得到 `_`、把真正的消费方数丢，白名单条目被误判成空转（HS-003 假红）。
+          for (const s of [parts[0].trim(), parts.length > 1 ? parts[1].trim() : '']) {
+            if (s !== '_' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(s)) used.add(s)
+          }
         }
       }
       for (const m of code.matchAll(/symbio_plugin_api::([A-Za-z_][A-Za-z0-9_]*)/g)) used.add(m[1])

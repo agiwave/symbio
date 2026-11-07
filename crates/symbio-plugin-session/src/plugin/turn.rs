@@ -15,6 +15,7 @@ use crate::convergence::{ComposeCall, SessionStateChange};
 use crate::transcript::publish::append_and_publish;
 use crate::transcript::supplements::merge_supplements;
 use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::exec::ExecAbortSignal;
 use symbio_kernel::LatencyTier;
 use symbio_plugin_api::capability_take_errors;
 use symbio_plugin_api::debt::{session_config_id, session_recall_id};
@@ -74,6 +75,12 @@ impl SessionPlugin {
         self.get_store()
             .await?
             .set_source_principal(session_id, item.params.source_principal.clone());
+
+        // 本轮的中止信号（`DE-047` 驱动级信号）：**登记必须早于第一次 `append`**——
+        // 那次 append 就会踢驱动，而 `DriveTarget` 只带当时的当前值。信号对象由
+        // 会话状态唯一持有，事实源只引用同一个 `Arc`；中止动作只置位、不取走，
+        // 所以本轮后续派发（如工具行）读到的仍是**这个已取消的信号**，而不是新造的死信号。
+        state.register_abort_signal(ExecAbortSignal::new());
 
         let text = item
             .message
