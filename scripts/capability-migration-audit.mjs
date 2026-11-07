@@ -81,6 +81,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from './color.mjs'
+import { BASELINE } from './gate.d/_shared.mjs'
 import { blankComments } from './rust-scan.mjs'
 import { toolFacts } from './facts/_capability.mjs'
 import { pluginIds } from './facts/_plugin-yml.mjs'
@@ -109,6 +110,17 @@ export const CORE_TREES = ['crates/symbio-sdk', 'crates/symbio-kernel']
 
 /** 控制面：迁移批次只许在这里删旧实现。 */
 export const CONTROL_TREES = ['crates/symbio-plugin-loop', 'crates/symbio-plugin-session']
+
+/**
+ * **受保护目录的唯一一份**：`EX-002`（新增能力只改自己目录）判的就是这五棵树的
+ * 非生成物指纹。`extension-locality-audit` 直接引用本常量，不再抄第二份——
+ * 此前两条任务的 exit 与审计脚本各写一套（有的漏 `sdk`、有的漏
+ * `plugin-api`），同一提交在三处得到不同结论（D-372）。
+ *
+ * 取**并集**而不是交集：任何一套旧口径里出现的树都算受保护。少一棵就留一条
+ * 「加能力时顺手改这里」的路，而这条路的代价正是本判据要防的。
+ */
+export const PROTECTED_TREES = [...ARCH_TREES, ...CONTROL_TREES]
 
 /** 迁移批次的声明：提交正文里一行 `Migration: <批次>`。 */
 export const MIGRATION_RE = /^\s*Migration[:：]\s*(\S.*)$/m
@@ -181,6 +193,27 @@ export const FIXTURE = {
  * 连着两次就是「每一批都在补架构」，那时该做的是 §5.1 的站位表复核，不是继续加面。
  */
 export const SUPPLEMENT_ALARM = 2
+
+/**
+ * 累计「补件 : 迁移」的付账读数（D-372）。
+ *
+ * 判据落地那天的存量 `stock` 是**欠账本金**：从那天起，每多一个补件必须由一次
+ * 迁移抵账。`debt > 0` ⇒ 红。不直接拿「比值 ≤ 某数」当阈值——范围基线一变计数
+ * 就变，比值会假红（`SUPPLEMENT_ALARM` 上面那条理由仍然成立）；而「欠账不许
+ * 变大」与范围无关：两边的计数同源同范围，差值只在真实新增时变。
+ *
+ * `ratio` 只是读数（打印给人看），不是判据。
+ */
+export function supplementRatioReading({ supplements, migrations, stock }) {
+  const dSupp = supplements - stock.supplements
+  const dMig = migrations - stock.migrations
+  return {
+    dSupp,
+    dMig,
+    debt: dSupp - dMig,
+    ratio: migrations > 0 ? supplements / migrations : Infinity,
+  }
+}
 
 /** 架构面「新增一个公开项」的形状——机制增量的机械面。 */
 const PUB_ITEM_RE =
@@ -726,6 +759,40 @@ function main() {
         `+ 判据起点 ${BEFORE_GUARD.sha} 之后 ${migrations} 个迁移批次 / ${supplements} 个补件，全部只搬运`,
     ),
   )
+
+  // ── 累计付账线（D-372）：补件必须由迁移抵账，欠账不许变大 ──
+  const stock =
+    BASELINE.capabilitySupplements !== undefined && BASELINE.capabilityMigrations !== undefined
+      ? { supplements: BASELINE.capabilitySupplements, migrations: BASELINE.capabilityMigrations }
+      : null
+  if (!stock) {
+    console.error(
+      red(
+        '✗ capability-migration-audit：`BASELINE.capabilitySupplements` / `capabilityMigrations` 读不到' +
+          '——付账判据没有输入，宁红不静默',
+      ),
+    )
+    return 1
+  }
+  const reading = supplementRatioReading({ supplements, migrations, stock })
+  const ratioText = Number.isFinite(reading.ratio) ? reading.ratio.toFixed(2) : '∞'
+  const signed = (n) => `${n >= 0 ? '+' : ''}${n}`
+  console.log(
+    `  · 累计补件 ${supplements} / 迁移 ${migrations} = ${ratioText}:1（目标 ≤1:1）` +
+      `；自本判据起 补件 ${signed(reading.dSupp)} / 迁移 ${signed(reading.dMig)}（欠账 ${signed(reading.debt)}）`,
+  )
+  if (reading.debt > 0) {
+    console.error(
+      red(
+        `✗ EX-007 累计补件/迁移比恶化：自本判据起新增补件 ${reading.dSupp} 个、迁移 ${reading.dMig} 个` +
+          `（欠账 +${reading.debt}）—— 补件必须与迁移同批或由既有迁移抵账；` +
+          '只补不搬等于每个能力都在拓宽机制面（D-372）',
+      ),
+    )
+    return 1
+  }
+  if (reading.debt < 0) console.log(green(`  ✓ 已提前 ${-reading.debt} 笔迁移抵账`))
+  if (reading.ratio <= 1) console.log(green('  ✓ 累计补件/迁移比已达 ≤1:1'))
   if (migrations === 0) {
     console.log(
       dim('  ⊘ 还没有迁移批次（S6 起生效）：本轮的读数只是「补件夹具成立」，不证明任何一批拆得动'),

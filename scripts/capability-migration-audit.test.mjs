@@ -32,6 +32,7 @@ import {
   movedLines,
   parsePatch,
   supplementErrors,
+  supplementRatioReading,
   validateBeforeGuard,
 } from './capability-migration-audit.mjs'
 
@@ -423,6 +424,30 @@ test('常量：起点与夹具各自带理由，且不是同一个提交', () =>
   assert.deepEqual(validateBeforeGuard(BEFORE_GUARD), [])
   assert.match(FIXTURE.sha, /^[0-9a-f]{7,40}$/)
   assert.notEqual(FIXTURE.sha, BEFORE_GUARD.sha)
+})
+
+// ── 累计付账线（D-372）────────────────────────────────────────────────────
+
+test('supplementRatioReading：欠账按「新增补件 − 新增迁移」算，不按比值算', () => {
+  const stock = { supplements: 21, migrations: 15 }
+  assert.deepEqual(supplementRatioReading({ supplements: 21, migrations: 15, stock }), {
+    dSupp: 0,
+    dMig: 0,
+    debt: 0,
+    ratio: 1.4,
+  })
+  // 只补不搬 ⇒ 欠账 +1（红）
+  assert.equal(supplementRatioReading({ supplements: 22, migrations: 15, stock }).debt, 1)
+  // 补一搬一 ⇒ 欠账不变（绿），比值仍高于 1:1 也不假红
+  assert.equal(supplementRatioReading({ supplements: 22, migrations: 16, stock }).debt, 0)
+  // 搬两补一 ⇒ 提前抵账（绿）
+  assert.equal(supplementRatioReading({ supplements: 22, migrations: 17, stock }).debt, -1)
+  // 累计比值降到 1:1 以下是另一条读数
+  assert.equal(supplementRatioReading({ supplements: 16, migrations: 16, stock }).debt, -6)
+})
+
+test('supplementRatioReading：没有迁移时比值为 ∞（不是 NaN）', () => {
+  assert.equal(supplementRatioReading({ supplements: 3, migrations: 0, stock: { supplements: 0, migrations: 0 } }).ratio, Infinity)
 })
 
 // ── 真仓冒烟 ──────────────────────────────────────────────────────────────

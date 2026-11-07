@@ -1,7 +1,7 @@
 /**
  * extension-locality-audit 回归测试 —— 证明 EX-002 **改输入后结论必须变**
  *
- * `EX-002`（T1）的判定对象是**提交 diff 的四棵树指纹**，不是「有没有新 crate」。
+ * `EX-002`（T1）的判定对象是**提交 diff 的五棵树指纹**，不是「有没有新 crate」。
  * 这条守卫的失效形态都是「看起来在算」：
  *
  * - 只判新 crate 是否存在 ⇒ 新增能力包夹带 `loop` 分支照样绿；
@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   TREES,
+  GRANDFATHERED,
   addedPackages,
   fingerprints,
   isMigrationBatch,
@@ -76,6 +77,47 @@ test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-0
   assert.equal(isMigrationBatch(null), false)
 })
 
+test('TREES：五棵是并集且含 plugin-api（D-372 的唯一口径）', () => {
+  assert.deepEqual(TREES, [
+    'crates/symbio-sdk',
+    'crates/symbio-kernel',
+    'crates/symbio-plugin-api',
+    'crates/symbio-plugin-loop',
+    'crates/symbio-plugin-session',
+  ])
+})
+
+test('GRANDFATHERED：口径加宽的存量提交逐条带理由', () => {
+  assert.ok(GRANDFATHERED.length > 0)
+  assert.deepEqual(validateBeforeGuard(GRANDFATHERED), [])
+})
+
+test('fingerprints：描述符声明的生成物（view_names.rs）已存在时随清单改，不动指纹', () => {
+  const before = [
+    f('crates/symbio-plugin-api/src/view_names.rs', 'old'),
+    f('crates/symbio-plugin-api/src/lib.rs', 'same'),
+  ]
+  const after = [
+    f('crates/symbio-plugin-api/src/view_names.rs', 'new'),
+    f('crates/symbio-plugin-api/src/lib.rs', 'same'),
+  ]
+  const parent = paths(before)
+  assert.equal(
+    fingerprints(before, parent)['crates/symbio-plugin-api'],
+    fingerprints(after, parent)['crates/symbio-plugin-api'],
+  )
+})
+
+test('fingerprints：plugin-api 的手写文件改动会动指纹（生成物不是整棵豁免）', () => {
+  const before = [f('crates/symbio-plugin-api/src/view_names.rs', 'old'), f('crates/symbio-plugin-api/src/port.rs', 'same')]
+  const after = [f('crates/symbio-plugin-api/src/view_names.rs', 'new'), f('crates/symbio-plugin-api/src/port.rs', 'changed')]
+  const parent = paths(before)
+  assert.notEqual(
+    fingerprints(before, parent)['crates/symbio-plugin-api'],
+    fingerprints(after, parent)['crates/symbio-plugin-api'],
+  )
+})
+
 test('fingerprints：与输入顺序无关', () => {
   const entries = [
     f('crates/symbio-sdk/src/a.rs', '111'),
@@ -128,7 +170,7 @@ test('judgeNewCapability：没有新增能力包的提交不判', () => {
   assert.deepEqual(r.errors, [])
 })
 
-test('judgeNewCapability：四棵树指纹不变 ⇒ 绿', () => {
+test('judgeNewCapability：五棵树指纹不变 ⇒ 绿', () => {
   const same = Object.fromEntries(TREES.map((t) => [t, 'h']))
   const r = judgeNewCapability({ sha: 'x', added: ['crates/symbio-plugin-new/PLUGIN.yml'], before: same, after: { ...same } })
   assert.deepEqual(r.errors, [])
@@ -166,6 +208,6 @@ test('validateBeforeGuard：豁免必须有提交号与理由', () => {
 test('真仓冒烟：夹具提交读得出，--last 跑绿', () => {
   const r = spawnSync(process.execPath, [script, '--last'], { cwd: repoRoot, encoding: 'utf8', shell: false })
   assert.equal(r.status, 0, r.stderr || r.stdout)
-  assert.match(r.stdout, /77ff41fa/)
-  assert.match(r.stdout, /四棵树指纹不变/)
+  assert.match(r.stdout, /f5e4bbed/)
+  assert.match(r.stdout, /五棵树指纹不变/)
 })

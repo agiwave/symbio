@@ -131,6 +131,6 @@ fn multiple_answers_for_one_request_keep_the_last() {
     assert_eq!(resume[0].id, "tool:tool.requested:r1");
     assert_eq!(
         resume[0].payload["answer_event"], "user-answer:call-2",
-        "一次恢复只消费一条答复，取最后一条；批内多卡见 T-036"
+        "一次恢复只消费一条答复，取最后一条；批内多卡另案（逐调用债务）"
     );
 }
