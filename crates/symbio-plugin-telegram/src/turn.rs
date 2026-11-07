@@ -43,7 +43,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use symbio_plugin_api::chat_node::{message_of_node, ChatNode, NodeRole, NodeStatus, SEG_MESSAGES};
-use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use symbio_plugin_api::routes::{
+    ROUTE_VDFS_READ, ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
+    ROUTE_VDFS_WRITE,
+};
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{
     event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
@@ -63,11 +66,9 @@ const BUS_QUEUE: usize = 4096;
 
 /// 收件箱段名（地址契约 `<会话>/inbox` 的一段）。
 ///
-/// 机制层的 `SEG_INBOX` 是 session 插件的 `pub(crate)` 内部词汇、插件间不可见
-/// （`plugin-entry-audit` E-009），本插件按地址契约自持一份——与 `cli` 自持
-/// `SESSION_SEG` / `MESSAGES_SEG` 同一约定。拼错表现为「消息进不去队列」，
-/// 不会静默错乱。
-const SEG_INBOX: &str = "inbox";
+/// 名字住 `plugin-api` 的词汇面（D-364）：跨插件共用的地址段只有一个住处。
+/// 拼错表现为「消息进不去队列」，不会静默错乱。
+use symbio_plugin_api::vocab::SEG_INBOX;
 
 /// telegram 通道的会话工作目录。接入的是无人值守通道，进程的工作目录就是它的
 /// 会话根——与旧实现 `sub_ctx.set(WORKDIR, ".")` 逐字一致。
@@ -130,7 +131,7 @@ pub(super) async fn run_turn(
     if let Err(e) = route_json(
         &router,
         ctx,
-        "vdfs/write",
+        ROUTE_VDFS_WRITE,
         session_id,
         json!({ "path": session_addr, "create": true, "text": meta }),
     )
@@ -167,7 +168,7 @@ pub(super) async fn run_turn(
     let queued = route_json(
         &router,
         ctx,
-        "vdfs/write",
+        ROUTE_VDFS_WRITE,
         session_id,
         json!({ "path": format!("{session_addr}/{SEG_INBOX}"), "text": text }),
     )
@@ -362,15 +363,27 @@ async fn readback(
     rel: &str,
 ) -> Option<ChatNode> {
     let node: VdfsNode = serde_json::from_value(
-        route_json(router, ctx, "vdfs/stat", session_id, json!({ "path": rel }))
-            .await
-            .ok()?,
+        route_json(
+            router,
+            ctx,
+            ROUTE_VDFS_STAT,
+            session_id,
+            json!({ "path": rel }),
+        )
+        .await
+        .ok()?,
     )
     .ok()?;
     let content: VdfsContent = serde_json::from_value(
-        route_json(router, ctx, "vdfs/read", session_id, json!({ "path": rel }))
-            .await
-            .ok()?,
+        route_json(
+            router,
+            ctx,
+            ROUTE_VDFS_READ,
+            session_id,
+            json!({ "path": rel }),
+        )
+        .await
+        .ok()?,
     )
     .ok()?;
     message_of_node(&node, content.text?)
@@ -387,7 +400,7 @@ async fn stat_node(
         route_json(
             router,
             ctx,
-            "vdfs/stat",
+            ROUTE_VDFS_STAT,
             session_id,
             json!({ "path": addr }),
         )
@@ -433,9 +446,8 @@ fn is_resync(frame: &PluginFrame) -> bool {
 ///
 /// `PATH` 取常量而非字面量：`set(PATH, "<字面量>")` 会让「路由改名」不产生任何编译
 /// 错误，只在运行期表现为「调用失败」——`plugin-entry-audit` E-003 拦的正是这个。
-/// 尚无 core 常量的两条（`vdfs/write` / `vdfs/stat`）按 `cli` 的先例自持字面量：
-/// core 只把 `root` / `watch` / `unwatch` 三条列为跨插件例外，其余协议路径归 vdfs
-/// 插件自己（见 `crates/symbio-plugin-vdfs/src/protocol.rs` 的模块文档）。
+/// 本插件用到的协议路径都住 `symbio_plugin_api::routes`（跨插件消费的操作由 vdfs
+/// 的 `PLUGIN.yml` 投影，D-364），这里不写第二遍字面量。
 async fn route_json(
     router: &Arc<dyn Plugin>,
     ctx: &Arc<dyn PluginInvokeRequest>,

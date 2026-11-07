@@ -24,8 +24,9 @@ use symbio_plugin_api::{Entity, Event, FactSource, Verb, ViewRead, PRINCIPAL_USE
 use symbio_sdk::governance::VisScope;
 use symbio_sdk::text::merge_kernel::merge_with_fidelity;
 
-/// 能力包公开的活集视图（`memory.live`，owner = `crates/symbio-plugin-memory`）。
-const MEMORY_LIVE_VIEW: &str = "memory.live";
+/// 能力包公开的活集视图（`memory.live`）：名字由 owner 的清单生成，
+/// 本插件 import 同一常量（D-364）。
+use symbio_plugin_api::view_names::VIEW_MEMORY_LIVE as MEMORY_LIVE_VIEW;
 
 /// 合并正文的最大字符数（与能力包的编码上限同一量级）。
 const MERGE_MAX_CHARS: usize = 400;

@@ -57,12 +57,12 @@ use crate::declarations::OWNER;
 /// 只等端口（`after_port(plugin_row)`），不认这个行名。
 pub(crate) const SESSION_ANSWER: &str = "session.answer";
 
-/// 一次性问答端口名（数据）。写在这里而不是从 compose / compact 内部 import：
-/// 端口名是契约层不解释的数据，读方按**值**匹配回执，不依赖别的插件的私有常量。
-pub(crate) const MODEL_ASSIST_PORT: &str = "model.assist";
+/// 一次性问答端口名（数据）：名字住 `plugin-api` 的词汇面（D-364），提供者与
+/// 各消费方 import 同一常量。
+pub(crate) use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as MODEL_ASSIST_PORT;
 
-/// 上游判决事实（classify 插件所有）：会话只按 id 等它，不解释载荷。
-const CLASSIFY_ANSWERED: &str = "classify.answered";
+/// 上游判决事实（classify 插件所有）：名字由 owner 的清单生成（D-364）。
+use symbio_plugin_api::events::EVENT_CLASSIFY_ANSWERED as CLASSIFY_ANSWERED;
 
 /// 终答的落格行。
 pub(crate) struct AnswerRow;

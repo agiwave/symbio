@@ -33,9 +33,9 @@ use crate::decl::{EVENT_VERDICT_ASSERTED, OWNER, REPUTATION_LEDGER};
 
 /// 被收回的能力（DE-043 §2 淘汰行的字面机制）。
 ///
-/// `plugin-api` 门面按棘轮只许收窄，没有导出 `CAP_ASSIGN_WORK`；本包又不依赖
-/// `symbio-sdk`（E-009），故这里取同一字面量。
-const CAP_ASSIGN_WORK: &str = "assign.work";
+/// 名字住 `plugin-api` 的词汇面（D-364），门面转出 `symbio-sdk` 的同一常量；
+/// 本包仍不依赖兄弟插件，也不需要直接依赖 sdk（E-009）。
+use symbio_plugin_api::vocab::CAP_ASSIGN_WORK;
 
 /// 淘汰阈值：与 `symbio_sdk::actors::EliminationDecider::THRESHOLD` 同一个平凡值。
 const THRESHOLD: i64 = 0;

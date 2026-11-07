@@ -34,10 +34,11 @@ use symbio_plugin_api::{
 pub(crate) const MODEL_PORT: &str = "model";
 
 /// 压缩快照的事实种类：**已有种类**，声明 owner 是
-/// `crates/symbio-plugin-session/src/declarations.rs`。本 crate 只读、不声明，也不往
-/// `plugin-api` 加常量——owner 与读方分离是已知项（与 compact 插件同一处待判，
-/// 见 `crates/symbio-plugin-compact/src/port.rs` 的同名常量注释）。
-const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
+/// `crates/symbio-plugin-session/src/declarations.rs`。本 crate 只读、不声明；
+/// 名字由 owner 的清单生成到 `plugin-api`，本 crate import 同一常量（D-364）。
+///
+/// `message.removed` 同理：owner 是 session，本 crate 只读。
+use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED};
 
 /// `port.model` 的提供者：当次生效者 + 完整目录（严格解析用）。
 ///
@@ -185,7 +186,7 @@ fn turn_input(
     // 「哪一支是活的」是事实层判断，折法住在 `symbio_kernel::event::branch`（DE-051
     // D-362）：投影、请求包裁支、这里读的是同一个函数。「还在不在」的证据与转写投影
     // 同源（`message.removed`），两处对同一份历史因此得出同一组隐藏支。
-    let removed = symbio_kernel::event::branch::removed_ids(events, "message.removed");
+    let removed = symbio_kernel::event::branch::removed_ids(events, EVENT_MESSAGE_REMOVED);
     let hidden_branches = symbio_kernel::event::branch::unselected_roots(
         events,
         |id| !removed.contains(id),

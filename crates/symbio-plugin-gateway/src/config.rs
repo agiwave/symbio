@@ -8,6 +8,10 @@
 //! 因此本配置只描述「本实例如何被调用（入站）」。
 
 use serde::{Deserialize, Serialize};
+use symbio_plugin_api::routes::{
+    ROUTE_VDFS_LIST, ROUTE_VDFS_READ, ROUTE_VDFS_ROOT, ROUTE_VDFS_SEARCH, ROUTE_VDFS_STAT,
+    ROUTE_VDFS_TREE,
+};
 
 /// 网关配置（整体作为插件配置持久化于 `symbio.plugins.gateway`）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,12 +89,17 @@ impl Default for GatewayConfig {
 /// home 的臂经入站真的可达，先在白名单显式加回并补 e2e，再动这里。
 pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
     let p = path.trim_start_matches('/');
-    if p == "vdfs/read" && reads_config_document(payload) {
+    if p == ROUTE_VDFS_READ && reads_config_document(payload) {
         return false;
     }
     matches!(
         p,
-        "vdfs/root" | "vdfs/list" | "vdfs/tree" | "vdfs/stat" | "vdfs/read" | "vdfs/search"
+        ROUTE_VDFS_ROOT
+            | ROUTE_VDFS_LIST
+            | ROUTE_VDFS_TREE
+            | ROUTE_VDFS_STAT
+            | ROUTE_VDFS_READ
+            | ROUTE_VDFS_SEARCH
     )
 }
 

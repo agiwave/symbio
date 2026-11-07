@@ -153,6 +153,31 @@ const ALIASES = [
     what: '取消订阅某地址的变更（跨插件可见，故常量归宿主的 `routes.rs`）',
   },
   {
+    ts: 'VDFS_LIST',
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_LIST' },
+    what: '列目录（gateway 白名单按名判定、前端按旧名镜像）',
+  },
+  {
+    ts: 'VDFS_TREE',
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_TREE' },
+    what: '树状遍历（gateway 白名单按名判定、前端按旧名镜像）',
+  },
+  {
+    ts: 'VDFS_STAT',
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_STAT' },
+    what: '读元数据（telegram / cli 调用、gateway 白名单按名判定、前端按旧名镜像）',
+  },
+  {
+    ts: 'VDFS_READ',
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_READ' },
+    what: '读内容（telegram / cli 调用、gateway 白名单按名判定、前端按旧名镜像）',
+  },
+  {
+    ts: 'VDFS_WRITE',
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_WRITE' },
+    what: '写内容（telegram / cli 调用、前端按旧名镜像）',
+  },
+  {
     ts: 'VDFS_EVENT_KIND',
     rust: { file: 'crates/symbio-sdk/src/event_bus/mod.rs', name: 'EVENT_BUS_KIND_VDFS' },
     what: 'VDFS 变更的总线频道名',

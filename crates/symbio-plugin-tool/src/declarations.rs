@@ -16,9 +16,10 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-tool";
 
 /// 本插件写的世界事实。
 ///
-/// `tool.calls.done` 是**单消费方**的事实（不进共享表：名字随 owner 走）；
-/// `artifact.added` 是本次调用的产物格，被 notes / model / 转写投影多处按名字读，
-/// 因此同时登记在本插件 `PLUGIN.yml` 的 `shared_events` 里。
+/// `tool.calls.done` 是工具调用收束，session 的进度面按名字读；
+/// `artifact.added` 是本次调用的产物格，被 notes / model / 转写投影多处按名字读。
+/// 两条都登记在本插件 `PLUGIN.yml` 的 `shared_events` 里，消费方 import 生成常量
+/// （D-364）。
 pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::host("tool.calls.done", (Entity::Scope, Verb::Asserted)),
     // 产物格：载荷来自执行体交出的草稿，落行仍走宿主写口 ⇒ 与 `tool.calls.done` 同一口径。

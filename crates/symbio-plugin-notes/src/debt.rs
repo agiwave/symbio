@@ -13,8 +13,8 @@ use symbio_plugin_api::CapabilityRow;
 
 use crate::decl::{NOTES_INSIGHT, NOTES_REFLECT};
 
-/// 一次性问答的端口成员（D-336 裁决 4）：指令 / 提问随行载荷进。
-const ASSIST_PORT: &str = "model.assist";
+/// 一次性问答的端口成员（D-336 裁决 4）：名字住 `plugin-api` 的词汇面（D-364）。
+use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
 pub(crate) struct NotesDebts;
 

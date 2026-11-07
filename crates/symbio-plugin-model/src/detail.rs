@@ -9,6 +9,7 @@
 //!   保存 / 设为默认 / 删除）
 //! - id·name 派生回落链（前端 slug 去重，后端 `validate_manifest` 兜底）
 
+use symbio_plugin_api::vocab::COND_CAP_TEST_CONNECTION;
 use symbio_plugin_api::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection,
@@ -592,7 +593,7 @@ pub fn model_detail_definition() -> DetailDefinition {
                 label: "校验连接".into(),
                 style: "secondary".into(),
                 when: Some(DetailCondition {
-                    key: "cap.test_connection".into(),
+                    key: COND_CAP_TEST_CONNECTION.into(),
                     equals: Some(serde_json::json!(true)),
                     ..Default::default()
                 }),

@@ -23,12 +23,14 @@ pub(crate) const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
 /// 健康自检。落在 `system × progressed`。
 pub(crate) const EVENT_SYSTEM_HEALTH: &str = "system.health";
 
-/// 消息变更面里**只有本插件读写**的三条：写方在 `message_events` / `runtime`，
-/// 读方是同一插件调用 core 的折叠。没有第二个插件在生产代码里引用它们，
+/// 消息变更面里**只有本插件读写**的一条：写方在 `message_events` / `runtime`，
+/// 读方是同一插件调用 core 的折叠。没有第二个插件在生产代码里引用它，
 /// 因此不进 `PLUGIN.yml` 的共享表（CS-007：单消费方的名字随 owner 走）。
 pub(crate) const EVENT_MESSAGE_EDITED: &str = "message.edited";
-pub(crate) const EVENT_MESSAGE_REMOVED: &str = "message.removed";
-pub(crate) const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
+
+/// `message.removed` 与 `session.consolidated` 被 `model` / `compact` 按名字读，
+/// 因此进 `PLUGIN.yml` 的 `shared_events`；消费方 import 生成常量（D-364）。
+pub(crate) use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED};
 
 /// 用户点切换器时的断言；同样只有本插件读写（`commands` 落格、折叠读回）。
 pub(crate) const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
@@ -53,54 +55,19 @@ pub(crate) const SESSION_CLOSE_TURN: &str = "session.close-turn";
 /// `opening_enabled`）——行名的字面量见 `opening.rs`。
 pub(crate) const SESSION_OPENING_SEAT: &str = "session.opening-seat";
 
-/// **读方侧**的视图名：主动性读数由能力包交（`crates/symbio-plugin-conation`），本插件按
-/// 名字读。与 [`TASK_READYSET_VIEW`] 同一条通路——拼写只有一个来源（owner 的 `PLUGIN.yml`
-/// `shared_views`），本常量只是让三个读点（`stats` / `stats_reading` / 自主触发）不各写
-/// 一遍字面量。改名由 owner 决定，改完这里跟着改，读口不变。
-pub(crate) const CONATION_INTENTS_VIEW: &str = "conation.intents";
-
-/// 自主程度轴的名字：折叠由同一个能力包交（`conation.autonomy`），本插件按名字读。
-///
-/// 与 [`CONATION_INTENTS_VIEW`] 同一条通路：owner 的 `PLUGIN.yml` `shared_views` 是
-/// 唯一来源，读点（`stats` 列 / `stats_reading` 实例级聚合）不各写一遍字面量。
-pub(crate) const CONATION_AUTONOMY_VIEW: &str = "conation.autonomy";
-
-/// 时延分层三列的名字：三条视图都由能力包 `crates/symbio-plugin-slo` 交，本插件按名字读。
-///
-/// 与 [`CONATION_INTENTS_VIEW`] 同一条纪律：拼写只有一个来源（owner 的 `PLUGIN.yml`
-/// `shared_views`），这三个常量只是让读点不各写一遍字面量。
-pub(crate) const SLO_LATENCY_VIEW: &str = "slo.latency";
-pub(crate) const SLO_FALLBACK_VIEW: &str = "slo.fallback";
-pub(crate) const SLO_SPAN_VIEW: &str = "slo.span";
-
-/// 成本台账列的名字：折叠由能力包 `crates/symbio-plugin-cost` 交，本插件按名字读。
-///
-/// 与上面三条同一条纪律。它同时也是 `loop` 那侧熔断闸门读的名字——两个读者一个 owner，
-/// 「闸门说还有余量、出口说已耗尽」这类漂移就没有立足点（D-044）。
-pub(crate) const COST_LEDGER_VIEW: &str = "cost.ledger";
-
-/// 校准列的名字：账由技能能力包 `crates/symbio-plugin-skill` 折（`memory.calibrated`
-/// 的 owner 就是它），本插件按名字读。
-///
-/// 与上面几条同一条纪律：拼写只有一个来源（owner 的 `PLUGIN.yml` `shared_views`），
-/// `confidence = 1 − 回退率` 的算式也不在本插件重算一遍。
-pub(crate) const SKILL_CALIBRATION_VIEW: &str = "skill.calibration";
-
-/// 声誉台账列的名字：账由声誉能力包 `crates/symbio-plugin-reputation` 折（承诺三格的
-/// 读法住在那一侧），本插件按名字读。
-///
-/// 与上面几条同一条纪律：拼写只有一个来源（owner 的 `PLUGIN.yml` `shared_views`），
-/// 「守约 − 违约」的算式也不在本插件重算一遍。它同时也是 `loop` 那侧淘汰回路读的名字
-/// ——两个读者一个 owner（D-044）。
-pub(crate) const REPUTATION_LEDGER_VIEW: &str = "reputation.ledger";
-
-/// 就绪集列的名字：折叠由任务能力包 `crates/symbio-plugin-task` 交（`task.*` 五格的
-/// owner 与调度者就是它），本插件按名字读。
-///
-/// 与上面几条同一条纪律：拼写只有一个来源（owner 的 `PLUGIN.yml` `shared_views`），
-/// 「谁就绪、什么序」的算式也不在本插件重算一遍。本插件只交**本轮的容量**——那是读者
-/// 的预算，不是折叠的一格（`D-289`）。
-pub(crate) const TASK_READYSET_VIEW: &str = "task.readyset";
+// 读方侧的视图名：名字住 `plugin-api` 的词汇面（由 owner 的 `PLUGIN.yml`
+// `shared_views` 生成，D-364），本插件按名字读。以下别名只保留调用点的旧名字，
+// 读口不变；owner 改名时生成物与这里一起变，不再出现「各写一遍字面量」。
+// `cost.ledger` / `reputation.ledger` 同时被 `loop` 的闸门与淘汰回路读（D-044）；
+// `task.readyset` 只交本轮的容量，不是折叠的一格（D-289）。
+pub(crate) use symbio_plugin_api::view_names::{
+    VIEW_CONATION_AUTONOMY as CONATION_AUTONOMY_VIEW,
+    VIEW_CONATION_INTENTS as CONATION_INTENTS_VIEW, VIEW_COST_LEDGER as COST_LEDGER_VIEW,
+    VIEW_REPUTATION_LEDGER as REPUTATION_LEDGER_VIEW,
+    VIEW_SKILL_CALIBRATION as SKILL_CALIBRATION_VIEW, VIEW_SLO_FALLBACK as SLO_FALLBACK_VIEW,
+    VIEW_SLO_LATENCY as SLO_LATENCY_VIEW, VIEW_SLO_SPAN as SLO_SPAN_VIEW,
+    VIEW_TASK_READYSET as TASK_READYSET_VIEW,
+};
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 

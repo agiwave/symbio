@@ -24,11 +24,11 @@ use super::wording;
 /// 债行名（行表数据）：`plugin_rows` 按它选执行体，环按它派发。
 pub(crate) const COMPOSE_WORDING_MODEL: &str = "compose-wording-model";
 
-/// 一次性问答的端口（D-336 裁决 4）。与 model 插件 `AssistPort` 的声明同名。
-pub(crate) const ASSIST_PORT: &str = "model.assist";
+/// 一次性问答的端口（D-336 裁决 4）：名字住 `plugin-api` 的词汇面（D-364）。
+pub(crate) use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
-/// 上游判决事实的种类与 id 前缀（归 classify；本插件只读，不改写）。
-const CLASSIFY_ANSWERED: &str = "classify.answered";
+/// 上游判决事实的种类：名字住 `plugin-api` 的生成面（owner 是 classify，本插件只读）。
+use symbio_plugin_api::events::EVENT_CLASSIFY_ANSWERED as CLASSIFY_ANSWERED;
 
 /// 措辞的运行时债表（挂载时由 `traverse` 报到，每轮 `rows()` 现算）。
 pub(crate) struct ComposeDebts {

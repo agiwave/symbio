@@ -44,7 +44,9 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use symbio::init::create_root_plugin;
-use symbio::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
+use symbio::routes::{
+    ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_WRITE,
+};
 use symbio::symbio_kernel::plugin::{
     Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest,
 };
@@ -240,7 +242,7 @@ impl SymbioClient {
 
     /// 取 VDFS 根地址（`vdfs/root` 是唯一「不给地址」的入口）。
     async fn fetch_root_addr(&self) -> Result<String, String> {
-        let resp = self.route("vdfs/root", json!({}), None, None).await?;
+        let resp = self.route(ROUTE_VDFS_ROOT, json!({}), None, None).await?;
         resp.get("path")
             .and_then(Value::as_str)
             .filter(|p| !p.is_empty())
@@ -370,7 +372,7 @@ impl SymbioClient {
         );
         let resp = self
             .route(
-                "vdfs/write",
+                ROUTE_VDFS_WRITE,
                 json!({
                     "path": addr,
                     "create": true,
@@ -477,7 +479,7 @@ impl SymbioClient {
         );
         let resp = self
             .route(
-                "vdfs/write",
+                ROUTE_VDFS_WRITE,
                 json!({
                     "path": inbox_addr,
                     // 正文是**纯文本**：`parse_inbox_message` 的判别式是「不以 `{` 开头」
@@ -721,7 +723,7 @@ impl SymbioClient {
     /// 回读一个节点的当前视图（`vdfs/stat`）。
     async fn stat_node(&self, addr: &str) -> Option<VdfsNode> {
         let resp = self
-            .route("vdfs/stat", json!({ "path": addr }), None, Some(addr))
+            .route(ROUTE_VDFS_STAT, json!({ "path": addr }), None, Some(addr))
             .await
             .ok()?;
         serde_json::from_value::<VdfsNode>(resp).ok()

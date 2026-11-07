@@ -9,10 +9,12 @@
 //!   `agent` 也要读它的 `path` 拼子会话地址，按 D-196 它属于领域（两个 Rust 侧消费方），
 //!   归 `symbio_plugin_api::vdfs`，本文件只 `pub use` 转发。
 //!
-//! ⚠️ **三个例外**：`vdfs/root` / `vdfs/watch` / `vdfs/unwatch` **跨插件可见**
-//! （`agent` 拼 Run 根地址、`cli` 订阅 vdfs 频道、前端按它们发请求），因此它们的
-//! 常量**归宿主的 `symbio_plugin_api::routes`**（`ROUTE_VDFS_*`），本文件只引用、不重复定义——
-//! 同一路由两份常量就是「一个事实两个 owner」，必然漂移。
+//! ⚠️ **跨插件消费的路径**（`vdfs/root` / `vdfs/watch` / `vdfs/unwatch` /
+//! `vdfs/list` / `vdfs/tree` / `vdfs/stat` / `vdfs/read` / `vdfs/write` /
+//! `vdfs/search`）**归宿主的 `symbio_plugin_api::routes`**（`ROUTE_VDFS_*`，由本插件
+//! `PLUGIN.yml` 的 `plugin_routes` 生成）。本文件只引用、不重复定义——同一路径两份
+//! 常量就是「一个事实两个 owner」，必然漂移（D-364）。只有本插件自己消费的
+//! `delete` / `mkdir` / `edit` / `action` 仍是本地常量。
 //!
 //! 这与 model 插件把 `ModelProtocol` 钩子与注册常量收在
 //! `crates/symbio-plugin-model/src/protocols/` 的做法一致（见 `symbio_plugin_api::model_provider` 的模块文档）。
@@ -21,45 +23,44 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use symbio_plugin_api::routes::{
+    ROUTE_VDFS_LIST, ROUTE_VDFS_READ, ROUTE_VDFS_ROOT, ROUTE_VDFS_SEARCH, ROUTE_VDFS_STAT,
+    ROUTE_VDFS_TREE, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, ROUTE_VDFS_WRITE,
+};
 use symbio_plugin_api::{VdfsContent, VdfsItem};
 
 // ==================== 协议操作路径 ====================
 //
-// 三个跨插件可见的路径（`vdfs/root` / `vdfs/watch` / `vdfs/unwatch`）不在此定义
-// —— 它们住宿主 `symbio_plugin_api::routes::ROUTE_VDFS_*`（见模块文档的「三个例外」）。
+// 跨插件消费的九条住宿主常量（见模块文档）；这里给出本插件内部的短名，
+// 以及只有本插件自己消费的四个操作。
 
-/// 列目录（一级）
-pub const VDFS_LIST: &str = "vdfs/list";
-/// 树状遍历（递归；节点的 `t` 位控制可遍历性）
-pub const VDFS_TREE: &str = "vdfs/tree";
-/// 读元数据
-pub const VDFS_STAT: &str = "vdfs/stat";
-/// 读内容（`r` 位）
-pub const VDFS_READ: &str = "vdfs/read";
-/// 写内容（`w` 位）
-pub const VDFS_WRITE: &str = "vdfs/write";
+pub use symbio_plugin_api::routes::{
+    ROUTE_VDFS_LIST as VDFS_LIST, ROUTE_VDFS_READ as VDFS_READ, ROUTE_VDFS_SEARCH as VDFS_SEARCH,
+    ROUTE_VDFS_STAT as VDFS_STAT, ROUTE_VDFS_TREE as VDFS_TREE, ROUTE_VDFS_WRITE as VDFS_WRITE,
+};
+
 /// 删除节点
 pub const VDFS_DELETE: &str = "vdfs/delete";
 /// 新建目录
 pub const VDFS_MKDIR: &str = "vdfs/mkdir";
 /// 内容编辑（精确字符串替换）
 pub const VDFS_EDIT: &str = "vdfs/edit";
-/// 文件名模式搜索（glob）
-pub const VDFS_SEARCH: &str = "vdfs/search";
 /// 执行**节点动作**（provider 自持的动词，如「测试连接」）
 pub const VDFS_ACTION: &str = "vdfs/action";
 
-/// 全部 VDFS 操作（宿主据此判定是否为本协议请求）
+/// 全部 VDFS 操作（宿主据此判定是否为本协议请求）。
+///
+/// 跨插件那九条写 `ROUTE_VDFS_*`：`routes-rs.mjs` 的注册核对按**名字**认
+/// `VDFS_OPS` 的成员，名字必须与生成物逐字对上。
 pub const VDFS_OPS: &[&str] = &[
     ROUTE_VDFS_ROOT,
-    VDFS_LIST,
-    VDFS_TREE,
-    VDFS_STAT,
-    VDFS_READ,
+    ROUTE_VDFS_LIST,
+    ROUTE_VDFS_TREE,
+    ROUTE_VDFS_STAT,
+    ROUTE_VDFS_READ,
     VDFS_EDIT,
-    VDFS_SEARCH,
-    VDFS_WRITE,
+    ROUTE_VDFS_SEARCH,
+    ROUTE_VDFS_WRITE,
     VDFS_DELETE,
     VDFS_MKDIR,
     ROUTE_VDFS_WATCH,

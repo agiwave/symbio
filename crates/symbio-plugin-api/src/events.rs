@@ -59,6 +59,9 @@ pub const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 /// classify.answered — owner `symbio-plugin-classify`，格位 `(Verdict, Asserted)`
 pub const EVENT_CLASSIFY_ANSWERED: &str = "classify.answered";
 
+/// classify.escalate — owner `symbio-plugin-classify`，格位 `(Verdict, Asserted)`
+pub const EVENT_CLASSIFY_ESCALATE: &str = "classify.escalate";
+
 // ============ commitment ============
 
 /// commitment.asserted — owner `symbio-plugin-loop`，格位 `(Commitment, Asserted)`
@@ -94,10 +97,16 @@ pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 /// message.added — owner `symbio-plugin-session`，格位 `(Message, Opened)`
 pub const EVENT_MESSAGE_ADDED: &str = "message.added";
 
+/// message.removed — owner `symbio-plugin-session`，格位 `(Message, Closed)`
+pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
+
 // ============ session ============
 
 /// session.config — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_SESSION_CONFIG: &str = "session.config";
+
+/// session.consolidated — owner `symbio-plugin-session`，格位 `(Message, Progressed)`
+pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
 /// session.recall — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
 pub const EVENT_SESSION_RECALL: &str = "session.recall";
@@ -120,6 +129,9 @@ pub const EVENT_TASK_OPENED: &str = "task.opened";
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
 
 // ============ tool ============
+
+/// tool.calls.done — owner `symbio-plugin-tool`，格位 `(Scope, Asserted)`
+pub const EVENT_TOOL_CALLS_DONE: &str = "tool.calls.done";
 
 /// tool.requested — owner `symbio-plugin-model`，格位 `(Scope, Asserted)`
 pub const EVENT_TOOL_REQUESTED: &str = "tool.requested";
@@ -162,6 +174,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_CHAT_ASSISTANT_PROGRESS, (Entity::Scope, Verb::Progressed)), // chat.assistant.progress ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_REPORTED, (Entity::Scope, Verb::Asserted)), // chat.assistant.reported ← loop
     EventDecl::new(EVENT_CLASSIFY_ANSWERED, (Entity::Verdict, Verb::Asserted)), // classify.answered ← classify
+    EventDecl::new(EVENT_CLASSIFY_ESCALATE, (Entity::Verdict, Verb::Asserted)), // classify.escalate ← classify
     EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← loop
     EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← loop
     EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← loop
@@ -171,13 +184,16 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← loop
     EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)), // memory.forgotten ← loop
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
+    EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
     EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)), // session.config ← loop
+    EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
     EventDecl::new(EVENT_SESSION_RECALL, (Entity::Scope, Verb::Asserted)), // session.recall ← session
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task
     EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← task
     EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← task
+    EventDecl::host(EVENT_TOOL_CALLS_DONE, (Entity::Scope, Verb::Asserted)), // tool.calls.done ← tool
     EventDecl::host(EVENT_TOOL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.requested ← model
     EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← loop
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // turn.branch_selected ← session

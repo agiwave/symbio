@@ -42,10 +42,9 @@ const JITTER_SECS: u64 = 30;
 
 /// 收件箱段名（地址契约 `<会话>/inbox` 的一段）。
 ///
-/// 机制层的正主是 session 插件的 `pub(crate)` 内部词汇、插件间不可见（E-009），
-/// 故按地址契约自持一份——`agent` / `telegram` 两处同此办理（理由各自写在文件里）。
+/// 名字住 `plugin-api` 的词汇面（D-364）：跨插件共用的地址段只有一个住处。
 /// 拼错的表现为「消息进不去队列」，不会静默错乱。
-const SEG_INBOX: &str = "inbox";
+use symbio_plugin_api::vocab::SEG_INBOX;
 
 /// 按会话 id 派生的确定性抖动（0..`JITTER_SECS` 秒），用于错峰触发。
 ///

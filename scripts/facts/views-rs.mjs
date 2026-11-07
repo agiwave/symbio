@@ -126,6 +126,11 @@ export function collectSharedViews(root) {
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/** 视图名 → 生成常量名：`conation.autonomy` → `VIEW_CONATION_AUTONOMY`。 */
+function viewConstName(name) {
+  return `VIEW_${name.toUpperCase().replace(/\./g, '_')}`
+}
+
 /** 纯函数：声明清单 → 文件内容。导出给回归测试（测试不触发写盘）。 */
 export function render(rows) {
   const L = [HEADER, '']
@@ -144,11 +149,17 @@ export function render(rows) {
     L.push('pub const SHARED_VIEWS: &[SharedViewDecl] = &[];')
     return `${L.join('\n').replace(/\n+$/, '')}\n`
   }
+  L.push('/// 每条公开视图一个名字常量：消费方 import 它，不写第二遍字面量（D-364）。')
+  for (const r of rows) {
+    L.push(`pub const ${viewConstName(r.name)}: &str = "${r.name}";`)
+  }
+  L.push('')
   L.push('/// 跨插件可读视图（按名字排序）。')
   L.push('#[rustfmt::skip]')
   L.push('pub const SHARED_VIEWS: &[SharedViewDecl] = &[')
   for (const r of rows) {
-    L.push(`    SharedViewDecl { name: "${r.name}", owner: "${r.owner}" },`)
+    // 用上面的名字常量，不在这里再写一遍字面量：同一份生成物里两份拼写也是两个家。
+    L.push(`    SharedViewDecl { name: ${viewConstName(r.name)}, owner: "${r.owner}" },`)
   }
   L.push('];')
   return `${L.join('\n').replace(/\n+$/, '')}\n`

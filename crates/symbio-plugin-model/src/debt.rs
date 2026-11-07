@@ -52,8 +52,9 @@ use symbio_plugin_api::rows::PLUGIN_ROW;
 
 use crate::port::MODEL_PORT;
 
-/// 工具端口名（数据，不是类型）：本行只问它「还有没有未还债」，不解释它的语义。
-const TOOL_PORT: &str = "tool";
+/// 工具端口名（数据，不是类型）：名字住 `plugin-api` 的词汇面（D-364），
+/// 提供者 `tool` 与本行共用同一常量。
+use symbio_plugin_api::vocab::PORT_TOOL as TOOL_PORT;
 
 /// 终答事实的身份前缀：与执行体落的那条事实**逐字一致**（`chat.assistant.final:<root_id>`）。
 const FINAL_FACT_PREFIX: &str = EVENT_CHAT_ASSISTANT_FINAL;

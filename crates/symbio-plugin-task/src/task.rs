@@ -312,7 +312,10 @@ fn drafts(call: &EffectCall<'_>, items: &[TaskItem]) -> Vec<FactDraft> {
 
 /// 本行为管辖的名字。**由本 crate 自报**（D-363）：工具（`todo_write`）在
 /// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
-pub(crate) const TASK_TABLE_BEHAVIOR: &str = "task_table";
+///
+/// 名字住 `plugin-api` 的词汇面（D-364），声明方 `symbio-plugin-local` 与本实现 import
+/// 同一常量；插件之间仍不互相依赖（E-009）。
+pub(crate) use symbio_plugin_api::vocab::BEHAVIOR_TASK_TABLE as TASK_TABLE_BEHAVIOR;
 
 /// 从 `todo_write` 的参数里读出声明项（形状是跨插件契约，见 [`TASK_TABLE_BEHAVIOR`]）。
 ///

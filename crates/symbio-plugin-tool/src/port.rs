@@ -61,8 +61,8 @@ use symbio_plugin_api::{
     WORKDIR,
 };
 
-/// 端口名（唯一来源：本插件）。
-pub(crate) const TOOL: &str = "tool";
+/// 端口名：名字住 `plugin-api` 的词汇面（D-364），提供者与消费方 import 同一常量。
+pub(crate) use symbio_plugin_api::vocab::PORT_TOOL as TOOL;
 
 /// 载荷键（环与提供者之间的私有约定，随 [`PortInput`] 走）。环不认识世界：
 /// 线上名与调用 id 到这里只是两个**不具名的纯值**，语义由本插件给。

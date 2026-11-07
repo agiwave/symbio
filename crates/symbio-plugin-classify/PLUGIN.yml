@@ -7,4 +7,4 @@ plugin_order: 60
 plugin_routes: decide, parse
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 decl::EVENTS。
-shared_events: classify.answered
+shared_events: classify.answered, classify.escalate

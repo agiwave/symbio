@@ -5,7 +5,7 @@ plugin_assembly: sub_agent
 plugin_order: 170
 plugin_undisablable: true
 # 跨插件地址（相对臂）：生成 crates/symbio-plugin-api/src/routes.rs 的 ROUTE_* 常量
-plugin_routes: root, watch, unwatch
+plugin_routes: root, watch, unwatch, list, tree, stat, read, write, search
 
 # 授权行（同 session 的口径）：工具主体——工具响应的权威动作是**产生产物**。
 principal_tool_write: vdfs/write|produce.artifact|thread_private

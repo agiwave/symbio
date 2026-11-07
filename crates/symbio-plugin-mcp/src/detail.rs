@@ -12,6 +12,7 @@
 //! 新建态派生目录 id，`validate_manifest` 时丢弃），校验与规范化在
 //! `validate_manifest`（plugin.rs）完成。
 
+use symbio_plugin_api::vocab::COND_CAP_TEST_CONNECTION;
 use symbio_plugin_api::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailSection,
@@ -183,7 +184,7 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                 label: "连接测试".into(),
                 style: "secondary".into(),
                 when: Some(cond(
-                    "cap.test_connection",
+                    COND_CAP_TEST_CONNECTION,
                     Some(serde_json::json!(true)),
                     None,
                 )),

@@ -65,8 +65,9 @@ use crate::declarations::{CHAT_VOCAB, OWNER};
 /// 汇报行的行名 / 债名前缀。
 pub(crate) const SESSION_PROGRESS: &str = "session.progress";
 
-/// 工具端口落的「一整轮已完成」事实（单消费方，名字随 owner 走）。
-const TOOL_CALLS_DONE: &str = "tool.calls.done";
+/// 工具端口落的「一整轮已完成」事实：名字由 owner（tool）的清单生成，
+/// 本插件 import 同一常量（D-364）。
+use symbio_plugin_api::events::EVENT_TOOL_CALLS_DONE as TOOL_CALLS_DONE;
 
 /// 汇报的落格行：取措辞 → 落 `chat.assistant.reported`；取不到就**不落**。
 pub(crate) struct ProgressRow;

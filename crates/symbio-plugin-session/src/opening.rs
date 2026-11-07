@@ -51,8 +51,9 @@ use crate::declarations::OWNER;
 /// （`after_port(plugin_row)`），不认这个行名。
 pub(crate) const SESSION_OPENING: &str = "session.opening";
 
-/// 上游判决事实（classify 插件所有）：会话只按 id 等它，不解释载荷。
-const CLASSIFY_ESCALATE: &str = "classify.escalate";
+/// 上游判决事实（classify 插件所有）：名字由 owner 的清单生成（D-364），
+/// 本插件按 id 等它，不解释载荷。
+use symbio_plugin_api::events::EVENT_CLASSIFY_ESCALATE as CLASSIFY_ESCALATE;
 
 /// 首响的落格行。
 pub(crate) struct OpeningRow;

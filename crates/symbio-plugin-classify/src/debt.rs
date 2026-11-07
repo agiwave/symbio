@@ -45,8 +45,9 @@ use super::decide::SYSTEM_PROMPT;
 use super::decl::{CLASSIFY_ANSWERED, CLASSIFY_DECIDE, CLASSIFY_ESCALATE};
 use super::rules::classify_by_rule;
 
-/// 一次性问答的端口成员（数据；由 `model` 插件提供，D-336 裁决 4）。
-const ASSIST_PORT: &str = "model.assist";
+/// 一次性问答的端口成员（数据）：名字住 `plugin-api` 的词汇面（D-364），
+/// `model` 提供者与本消费方 import 同一常量。
+use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
 /// 分类的债表（无状态：每轮从事实视图现算）。
 pub(crate) struct ClassifyDebts {

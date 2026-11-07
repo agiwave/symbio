@@ -74,10 +74,9 @@ const NAME: &str = "agent_run";
 const KEY_PARENT_SESSION_ID: &str = "parent_session_id";
 /// 收件箱段名（地址契约 `<sid>/inbox` 的一段）。
 ///
-/// 与 `SEG_MESSAGES` 不同——那条在 core 里是**公共契约**（消息集合形状跨插件要认），
-/// 这一条是 session 插件的 `pub(crate)` 内部词汇、插件间不可见（`plugin-entry-audit`
-/// E-009），故按地址契约自持一份。拼错表现为「消息进不去队列」，不会静默错乱。
-const SEG_INBOX: &str = "inbox";
+/// 名字住 `plugin-api` 的词汇面（D-364）：跨插件共用的地址段只有一个住处，
+/// 拼错表现为「消息进不去队列」，不会静默错乱。
+use symbio_plugin_api::vocab::SEG_INBOX;
 
 /// agent_run 能力：把任务委托给指定 agent 目录（子智能体）。
 pub struct AgentRunCapability {

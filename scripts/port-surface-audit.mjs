@@ -328,14 +328,17 @@ for (const f of portFacts) {
  * 端口词可以走常量（`port: ports::MODEL`，端口词单点拼写后生产表就是这么写的）：
  * 常量链解析到字面值为止——`CapabilityFamily::(multi|single)("词")` 给出族词，
  * `pub const X: &str = <路径>::Y.name()` 把族词借成端口词，`pub const X: &str = "词"`
- * 是裸常量（`fn ports` 的数组元素就是这种）。带 `::` 的路径解析不出时**报红**而不是
- * 跳过，裸标识同理：跳过会让取值一侧静默变窄（宁红不静默）。
+ * 是裸常量（`fn ports` 的数组元素就是这种）。跨 crate 的共享名走
+ * `use <路径>::NAME as ALIAS`（D-364 的词汇层），别名也沿链解析到 `NAME` 的声明。
+ * 带 `::` 的路径解析不出时**报红**而不是跳过，裸标识同理：跳过会让取值一侧
+ * 静默变窄（宁红不静默）。
  */
 function portValueLiterals() {
   const out = new Set()
   const unresolved = []
   const family = new Map()
   const plainConsts = new Map()
+  const aliases = new Map()
   const strRefs = []
   const portExprs = []
   const skip = new Set(['target', 'node_modules', '.git', '.symbio', '.workbuddy-ai'])
@@ -365,6 +368,18 @@ function portValueLiterals() {
         /pub\s+const\s+([A-Z0-9_]+)\s*:\s*&str\s*=\s*(?:[A-Za-z0-9_]+::)+([A-Z0-9_]+)\.name\s*\(\s*\)/g,
       )) {
         strRefs.push([m[1], m[2]])
+      }
+      // 跨 crate 的共享名：`use <路径>::NAME as ALIAS;` / `use <路径>::NAME;`。
+      // 别名本身不携带字面量，沿链解析到 `NAME` 的常量声明（D-364）。
+      for (const m of code.matchAll(
+        /(?:pub(?:\([^)]*\))?\s+)?use\s+(?:[A-Za-z0-9_]+::)*([A-Z][A-Z0-9_]*)\s+as\s+([A-Z][A-Z0-9_]*)\s*;/g,
+      )) {
+        aliases.set(m[2], m[1])
+      }
+      for (const m of code.matchAll(
+        /(?:pub(?:\([^)]*\))?\s+)?use\s+(?:[A-Za-z0-9_]+::)+([A-Z][A-Z0-9_]*)\s*;/g,
+      )) {
+        aliases.set(m[1], m[1])
       }
       if (text.includes('PortDecl {')) {
         // 只看 `PortDecl { … }` 体里的 `port:`：整份文件里的 `port:` 还会命中
@@ -398,20 +413,26 @@ function portValueLiterals() {
   for (const [name, ref] of strRefs) {
     if (family.has(ref)) strConst.set(name, family.get(ref))
   }
+  /** 沿 `use … as` 别名解析到常量声明（最多 8 跳，防环）。 */
+  const resolveName = (name) => {
+    let cur = name
+    for (let i = 0; i < 8; i++) {
+      if (plainConsts.has(cur)) return plainConsts.get(cur)
+      if (family.has(cur)) return family.get(cur)
+      const next = aliases.get(cur)
+      if (!next || next === cur) return undefined
+      cur = next
+    }
+    return undefined
+  }
   for (const expr of portExprs) {
     if (expr.startsWith('"')) {
       out.add(expr.slice(1, -1))
       continue
     }
     const last = expr.split('::').pop()
-    if (expr.includes('::')) {
-      if (strConst.has(last)) out.add(strConst.get(last))
-      else if (family.has(last)) out.add(family.get(last))
-      else unresolved.push(expr)
-      continue
-    }
-    if (plainConsts.has(last)) out.add(plainConsts.get(last))
-    else if (family.has(last)) out.add(family.get(last))
+    const resolved = resolveName(last) ?? strConst.get(last)
+    if (resolved !== undefined) out.add(resolved)
     else unresolved.push(expr)
   }
   return { values: out, unresolved }

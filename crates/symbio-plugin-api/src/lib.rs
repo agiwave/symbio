@@ -19,6 +19,7 @@
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //! - [`views`]：声明视图的跨插件读口（按 owner 公开的名字读纯折叠）
 //! - [`view_names`]：`shared_views` 清单生成物（哪些视图公开可读）
+//! - [`vocab`]：跨插件共享名的唯一住处（端口 / 行为 / 路径段 / 治理能力，D-364）
 //!
 //! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、机制入口与
 //! 装配常量，逐条转发、逐条可审。按**来源**分两臂（D-255 / D-258 / D-276）：
@@ -60,6 +61,7 @@ pub mod settle;
 pub mod text;
 pub mod view_names;
 pub mod views;
+pub mod vocab;
 
 pub use context::{
     fit_sections, providers as context_providers, section_meta, sections as context_sections,

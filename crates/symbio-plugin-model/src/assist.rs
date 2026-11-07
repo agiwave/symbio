@@ -35,8 +35,9 @@ use symbio_plugin_api::{
     llm_short_id, CapabilityRow, ExecEnv, ExecEventSink, ModelProvider, PluginError,
 };
 
-/// 端口名（数据；提供者自己定义，契约层不认识它）。
-pub(crate) const ASSIST_PORT: &str = "model.assist";
+/// 一次性问答端口的名字（数据）：名字住 `plugin-api` 的词汇面，提供者与本端口共用
+/// 同一常量（D-364）。
+pub(crate) use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
 /// 提供者 id（行名后缀；与 `model` 端口行的提供者区分）。
 const ASSIST_PROVIDER: &str = "model-assist";

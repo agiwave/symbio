@@ -41,8 +41,9 @@ const SUMMARIZE_ROW: &str = "compact-summarize";
 /// 另一行债的名字。
 const WRITE_ROW: &str = "compact-write";
 
-/// 一次性问答端口的名字（数据，不是类型）：由 model 插件提供（`assist.rs`）。
-pub(crate) const ASSIST_PORT: &str = "model.assist";
+/// 一次性问答端口的名字（数据）：名字住 `plugin-api` 的词汇面（D-364），
+/// 提供者 `model` 与本消费方 import 同一常量。
+pub(crate) use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
 /// 摘要指令（**本插件的世界知识**，随行载荷交给 `model.assist` 的执行体）。
 ///

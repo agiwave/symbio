@@ -373,7 +373,8 @@ pub(crate) fn message_dir_path(session_id: &str) -> String {
 /// 替它调 `chat/send`，它的会话由自己消费这个队列而自驱动（见 D-026）。
 ///
 /// 与会话内部其它集合同构：`<sid>/<集合段>/<项 id>`，身份就是末段。
-pub(crate) const SEG_INBOX: &str = "inbox";
+/// 名字住 `plugin-api` 的词汇面（D-364），`agent` / `heartbeat` / `telegram` 共用同一常量。
+pub(crate) use symbio_plugin_api::vocab::SEG_INBOX;
 
 /// 收件箱的**展示名**（`title`）。只影响 UI，不参与寻址。
 pub(crate) const TITLE_INBOX: &str = "收件箱";

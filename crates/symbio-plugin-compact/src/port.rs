@@ -37,9 +37,9 @@ use crate::debt::ASSIST_PORT;
 pub(crate) const COMPACT_PORT: &str = "compact";
 
 /// 事实种类：**已有种类**，声明 owner 是
-/// `crates/symbio-plugin-session/src/declarations.rs:27`。本 crate 只写、不声明，
-/// 也不往 `plugin-api` 加常量——owner 与写方分离是已知项（待 E-009 / CS-007 判）。
-pub(crate) const SESSION_CONSOLIDATED: &str = "session.consolidated";
+/// `crates/symbio-plugin-session/src/declarations.rs`。本 crate 只写、不声明；
+/// 名字由 owner 的清单生成到 `plugin-api`，本 crate import 同一常量（D-364）。
+pub(crate) use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED as SESSION_CONSOLIDATED;
 
 pub(crate) struct CompactPort;
 

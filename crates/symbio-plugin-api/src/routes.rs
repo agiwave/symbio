@@ -63,11 +63,29 @@ pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 
 // ============ vdfs ============
 
+/// vdfs/list — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
+pub const ROUTE_VDFS_LIST: &str = "vdfs/list";
+
+/// vdfs/read — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
+pub const ROUTE_VDFS_READ: &str = "vdfs/read";
+
 /// vdfs/root — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
 pub const ROUTE_VDFS_ROOT: &str = "vdfs/root";
+
+/// vdfs/search — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
+pub const ROUTE_VDFS_SEARCH: &str = "vdfs/search";
+
+/// vdfs/stat — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
+pub const ROUTE_VDFS_STAT: &str = "vdfs/stat";
+
+/// vdfs/tree — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
+pub const ROUTE_VDFS_TREE: &str = "vdfs/tree";
 
 /// vdfs/unwatch — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
 pub const ROUTE_VDFS_UNWATCH: &str = "vdfs/unwatch";
 
 /// vdfs/watch — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
 pub const ROUTE_VDFS_WATCH: &str = "vdfs/watch";
+
+/// vdfs/write — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
+pub const ROUTE_VDFS_WRITE: &str = "vdfs/write";
