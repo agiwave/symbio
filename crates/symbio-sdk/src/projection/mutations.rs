@@ -37,6 +37,7 @@ use std::collections::{HashMap, HashSet};
 use crate::chat::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::event::{Entity, Event, Verb, EVENT_FAILED, EVENT_RESPONSE};
 use crate::projection::vocab::MessageVocab;
+use symbio_kernel::event::branch::removed_ids;
 
 use serde::{Deserialize, Serialize};
 
@@ -100,22 +101,18 @@ impl MessageMutations {
     /// 匹配臂里放不下变量，故拆成 `verb` 的 `match` 加一层名字判等。
     pub fn collect(events: &[Event], v: &MessageVocab) -> Self {
         let mut edited = HashMap::new();
-        let mut removed = HashSet::new();
         for e in events {
             if e.entity != Entity::Message {
                 continue;
             }
-            match e.verb {
-                Verb::Asserted if e.kind == v.message_edited => {
-                    let Some(m) = parse_edited(e) else { continue };
-                    edited.insert(m.0, m.1);
-                }
-                Verb::Closed if e.kind == v.message_removed => {
-                    removed.extend(ids_of(e));
-                }
-                _ => {}
+            if e.verb == Verb::Asserted && e.kind == v.message_edited {
+                let Some(m) = parse_edited(e) else { continue };
+                edited.insert(m.0, m.1);
             }
         }
+        // 删除那一格与分支读法的「还在不在」共用同一份扫描（`removed_ids`）：
+        // 「哪条事实算删除」只许有一个实现（DE-051 D-362）。
+        let removed = removed_ids(events, v.message_removed);
         Self { edited, removed }
     }
 
@@ -151,20 +148,6 @@ fn role_word(r: NodeRole) -> String {
         NodeRole::System => "system",
     }
     .to_string()
-}
-
-/// `message.removed` 的载荷 → 被删节点 id 列表。
-fn ids_of(e: &Event) -> Vec<String> {
-    e.payload
-        .get("ids")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 /// **最近一次压缩快照**：`(快照事件在本切片里的下标, 压缩后的整份消息列表)`。

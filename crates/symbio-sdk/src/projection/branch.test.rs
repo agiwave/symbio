@@ -79,7 +79,8 @@ fn 两支并存默认读最新那一次尝试() {
     assert_eq!(branch_of(&nodes[1]).unwrap()["index"], 1);
     assert_eq!(branch_of(&nodes[0]).unwrap()["total"], 2);
     assert_eq!(branch_of(&nodes[0]).unwrap()["group"], "t1");
-    // 重试完什么都不点 ⇒ 读到的必须是新的一次（分支格自带读法，见 `BranchLedger::fold`）。
+    // 重试完什么都不点 ⇒ 读到的必须是新的一次（分支格自带读法，见
+    // `symbio_kernel::event::branch`）。
     assert!(!branch_selected(&nodes[0]));
     assert!(branch_selected(&nodes[1]));
 }

@@ -127,6 +127,38 @@ fn only_mutation_cells_are_collected() {
     );
 }
 
+/// 删除也只认 `(Message, Closed)` 这一格：同 kind 落在别的格子上不算删除。
+///
+/// 「哪条事实算删除」的扫描住在 kernel（`event::branch::removed_ids`，D-362 下沉），
+/// 而消费方是本模块，所以从收集这一侧钉它——与 `only_mutation_cells_are_collected`
+/// 同一把尺子。
+#[test]
+fn a_removal_fact_outside_message_closed_is_not_a_removal() {
+    let asserted = Event::pending(
+        "del-a",
+        EVENT_MESSAGE_REMOVED,
+        Entity::Message,
+        Verb::Asserted,
+        "user",
+    )
+    .with_payload(serde_json::json!({ "ids": ["n-ignored"] }));
+    let other_entity = Event::pending(
+        "del-b",
+        EVENT_MESSAGE_REMOVED,
+        Entity::Scope,
+        Verb::Closed,
+        "user",
+    )
+    .with_payload(serde_json::json!({ "ids": ["n-ignored"] }));
+
+    let m = MessageMutations::collect(
+        &[removed(&["n-1", "n-2"]), asserted, other_entity],
+        &MESSAGE,
+    );
+    assert!(m.is_removed("n-1") && m.is_removed("n-2"));
+    assert!(!m.is_removed("n-ignored"), "格位不对 ⇒ 不是删除");
+}
+
 // ── 压缩快照（取代格）──────────────────────────────────────
 
 use crate::test_fixtures::EVENT_SESSION_CONSOLIDATED;

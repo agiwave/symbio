@@ -9,7 +9,7 @@
 //!
 //! 现在重试不删了：它落一条 `EVENT_TURN_BRANCH`（`{of, into}`：新根是那一条的另一
 //! 支），用户点切换器落 `EVENT_BRANCH_SELECTED`。**「读哪一支」由这两类事实共同说**，
-//! 组内后到的胜出（[`BranchLedger::fold`]）——分支格自带读法，否则「切回旧支再重试」会
+//! 组内后到的胜出（[`symbio_kernel::event::branch`]）——分支格自带读法，否则「切回旧支再重试」会
 //! 停在用户刚发起重试的那一支上。两者都是**事实**，本模块把它们折回节点
 //! 形状——重建是纯函数，所以「哪一支在当前历史里」必须能从事实里读出来，而不是由
 //! 某个调用方记得传一个参数。
@@ -36,14 +36,18 @@
 //! 若请求包也按「有没有节点」问，被替换掉的那一支会在模型眼前活到本轮结束，
 //! 用户刚按下的重试在模型眼里等于没发生。
 //!
-//! 分岔的只有这一句问话；**挑哪一支的算术**住在 [`marks`] 一处。两个出口各算一遍就会
-//! 对同一段历史给出两种读法，而那种分叉是静默的。
+//! 分岔的只有这一句问话；**挑哪一支的算术**住在
+//! [`symbio_kernel::event::branch::branch_marks`] 一处（事实层判断，与节点形状无关；
+//! 插件侧不该为了它依赖应用门面，DE-051 D-362）。本模块只负责把结论盖成
+//! `meta.branch`。两个出口各算一遍就会对同一段历史给出两种读法，而那种分叉是静默的。
 //!
 //! ## 为什么按**节点 id** 归组而不是轮号
 //!
 //! 一幕起一个新根，幕间续写让同一轮开出多个根（轮号与根不是一对一）。按轮号归组会把
 //! 「同一轮的第二幕」误读成「另一支」。载荷里因此只出现根 id（节点身份是事实的一部分，
 //! 与 `root_id` / `result_id` 同一条纪律）。
+
+use symbio_kernel::event::branch::branch_marks;
 
 use crate::chat::chat_node::ChatNode;
 use crate::event::Event;
@@ -60,195 +64,12 @@ use crate::turn::node_build::subtree_of;
 /// `candidates` 的内容——切换动作把目标候选的 id 原样交回后端，后端按它认人。
 pub const META_BRANCH: &str = "branch";
 
-/// 并查集找锚（带路径压缩）。
-///
-/// 迭代而非递归：链长 = 重试次数，它不是栈预算；一次重试压一层，走到今天不会有事，
-/// 但把栈深交给数据形状是白送的一个坑。
-///
-/// **自身即锚**是集合里的表示法，不是待走的边：`fold` 用 `parent[x] = x` 标记「x 是这个
-/// 组的成员」（孤立成员也占这一格，`contains_key` / `is_empty` 都靠它）。两处循环都必须在
-/// `p == cur` 处停下——把它当成「还要往上走一步」就是死循环。
-fn anchor_of(parent: &mut std::collections::HashMap<String, String>, id: &str) -> String {
-    let mut root = id.to_string();
-    while let Some(p) = parent.get(&root) {
-        if p == &root {
-            break;
-        }
-        root = p.clone();
-    }
-    let mut cur = id.to_string();
-    while let Some(p) = parent.get(&cur) {
-        if p == &cur {
-            break;
-        }
-        let next = p.clone();
-        parent.insert(cur, root.clone());
-        cur = next;
-    }
-    root
-}
-
-/// 一条事件载荷里的**非空**字符串字段（空串读作「这个字段没记」，与 `event` 同口径）。
-fn payload_str(e: &Event, key: &str) -> Option<String> {
-    e.payload
-        .get(key)
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
-
-/// 折叠事实得到的分支结构。
-struct BranchLedger {
-    /// 成员 id → 父（并查集；自身 = 尚未并过任何支的孤立成员）。
-    parent: std::collections::HashMap<String, String>,
-    /// 组锚 → 该组**最后一条**选择格说的那一支。
-    picks: std::collections::HashMap<String, String>,
-}
-
-impl BranchLedger {
-    /// 两类事实都在说「读哪一支」，后到的覆盖先到的（事实顺序 = 用户动作顺序）。
-    ///
-    /// - `turn.branch{of, into}`：一次重试 = 一组多了一支 + 读的就是这**新落地的**一支。
-    ///   它必须自己带读法，否则「切回旧支再重试」会停在用户刚发起重试的那一支上——
-    ///   用户看到的是「重试没反应」。
-    /// - `turn.branch_selected{selected}`：用户点切换器，明确指定这一支。
-    ///
-    /// 组锚 = 最早出现的成员 id：`of` 是被重试的那一支，它先入集，所以锚天然是**第一次
-    /// 尝试**的根。在已属于某组的成员上再重试时两组并成一组、锚取较早的那个——
-    /// 「切回旧支再重试一次」因此不会开出第二个组。
-    fn fold(events: &[Event], branch: &str, branch_selected: &str) -> Self {
-        let mut parent: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-        let mut picks: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        for e in events {
-            if e.kind == branch {
-                let (Some(of), Some(into)) = (payload_str(e, "of"), payload_str(e, "into")) else {
-                    continue;
-                };
-                if of == into {
-                    continue;
-                }
-                // 各自先入集（没见过同伴时自成一组），再并。
-                parent.entry(of.clone()).or_insert_with(|| of.clone());
-                parent.entry(into.clone()).or_insert_with(|| into.clone());
-                let ra = anchor_of(&mut parent, &of);
-                let rb = anchor_of(&mut parent, &into);
-                if ra != rb {
-                    parent.insert(rb.clone(), ra.clone());
-                    // 被并掉的锚不再是锚，它的读法记在锚上才有人读得到；而这一条分支格
-                    // 马上就要在合并后的锚上写下新的读法 ⇒ 旧的那份直接作废。
-                    picks.remove(&rb);
-                }
-                picks.insert(anchor_of(&mut parent, &into), into);
-            } else if e.kind == branch_selected {
-                let Some(sel) = payload_str(e, "selected") else {
-                    continue;
-                };
-                if !parent.contains_key(&sel) {
-                    // 选择的是一组里从来没有过的 id（手改的 WAL / 已整段截断）⇒ 不认。
-                    continue;
-                }
-                let anchor = anchor_of(&mut parent, &sel);
-                picks.insert(anchor, sel);
-            }
-        }
-        Self { parent, picks }
-    }
-
-    /// 一个分支格都没有 ⇒ 本模块对这批事实零改动（绝大多数会话走这条）。
-    fn is_empty(&self) -> bool {
-        self.parent.is_empty()
-    }
-}
-
-/// 一个成员根在组里的位置与此刻读法（字面 = `meta.branch` 那五个字段）。
-struct BranchMark {
-    group: String,
-    candidates: Vec<String>,
-    index: usize,
-    total: usize,
-    selected: bool,
-}
-
-/// 折出**每个在世成员**在组里的位置与此刻读法（成员根 id → 标注）。
-///
-/// `live` 是「这一支还在不在」的证据，由调用方给（两条问法各自的理由见模块文档）。
-/// 组里在世成员不足两条时**一个成员都不标注**：画出来的 `1/1` 是假的两支，而被请求包
-/// 剪掉的「另一支」更是无中生有。
-///
-/// 读法指向的成员不在世时（那支后来被整段截断）退回**在世的最后一支**——宁读最新，
-/// 不判成「哪一支都没被读」（那样等于把这一轮的问题连同所有答复一起抹掉）。
-///
-/// 成员顺序 = 该 id 在事实里**首次出现**的顺序 = 尝试顺序（`of` 总排在同一条分支格的
-/// `into` 之前，所以较早的那一支总是先入列）。`BranchLedger::parent` 是哈希表，迭代它
-/// 得不到这个顺序，所以这里单独扫一遍事件收列——**不能**改成「遍历 `parent`」，那会让
-/// `index` / `candidates` 随哈希种子漂。
-fn marks(
-    events: &[Event],
-    live: impl Fn(&str) -> bool,
-    branch: &str,
-    branch_selected: &str,
-) -> std::collections::HashMap<String, BranchMark> {
-    let ledger = BranchLedger::fold(events, branch, branch_selected);
-    if ledger.is_empty() {
-        return std::collections::HashMap::new();
-    }
-    let mut parent = ledger.parent;
-    let mut seen: Vec<String> = Vec::new();
-    for e in events {
-        if e.kind != branch {
-            continue;
-        }
-        for key in ["of", "into"] {
-            if let Some(id) = payload_str(e, key) {
-                if !seen.contains(&id) {
-                    seen.push(id);
-                }
-            }
-        }
-    }
-    let mut groups: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    for id in &seen {
-        let anchor = anchor_of(&mut parent, id);
-        groups.entry(anchor).or_default().push(id.clone());
-    }
-    let mut out: std::collections::HashMap<String, BranchMark> = std::collections::HashMap::new();
-    for (anchor, members) in groups {
-        let candidates: Vec<String> = members.into_iter().filter(|id| live(id)).collect();
-        if candidates.len() < 2 {
-            continue;
-        }
-        // 读法 = 组里**最后一条读动作**说的那一支（`picks`：分支格与选择格同一种效力，
-        // 见 [`BranchLedger::fold`]）。
-        let chosen = ledger
-            .picks
-            .get(&anchor)
-            .and_then(|sel| candidates.iter().position(|id| id == sel))
-            .unwrap_or(candidates.len() - 1);
-        let total = candidates.len();
-        for (index, id) in candidates.iter().enumerate() {
-            out.insert(
-                id.clone(),
-                BranchMark {
-                    group: anchor.clone(),
-                    candidates: candidates.clone(),
-                    index,
-                    total,
-                    selected: index == chosen,
-                },
-            );
-        }
-    }
-    out
-}
-
 /// 把分支结构盖成成员根节点的 `meta.branch`（**就地改**，不改列表长度与顺序）。
 ///
 /// 在世的证据这里是「**有没有对应的节点**」：一支从没产出过根节点就没有可画的东西，
 /// 把它列进 `candidates` 只会多出一个点不动的候选。
 pub fn stamp_branches(nodes: &mut [ChatNode], events: &[Event], v: &ChatVocab) {
-    let marks = marks(
+    let marks = branch_marks(
         events,
         |id| nodes.iter().any(|n| n.id == id),
         v.branch,
@@ -271,7 +92,7 @@ pub fn stamp_branches(nodes: &mut [ChatNode], events: &[Event], v: &ChatVocab) {
 /// 助手侧的产出事实记，见 `turn_runner/facts.rs`）。那些正是各支的**共同祖先**——按它剪
 /// 会连用户的问题一起剪掉。
 ///
-/// 键名与 [`BranchLedger::fold`] 的载荷读法同一处，请求包的两个出口（[`super::transcript`]
+/// 键名与 [`symbio_kernel::event::branch`] 的载荷读法同一处，请求包的两个出口（[`super::transcript`]
 /// 与 [`super::prompt_fidelity`]）引的是同一个判据。
 pub fn event_branch_root(e: &Event) -> Option<&str> {
     e.payload
@@ -290,25 +111,12 @@ pub fn unselected_roots(
     removed: impl Fn(&str) -> bool,
     v: &ChatVocab,
 ) -> std::collections::HashSet<String> {
-    unselected_roots_named(events, removed, v.branch, v.branch_selected)
-}
-
-/// 同 [`unselected_roots`]，但**只收两条名字**、不要整张 [`ChatVocab`]。
-///
-/// 给「手折请求包、又不该抄一份折叠算法」的消费方用（模型端口的请求装配就是这种：
-/// 它按事实自己拼 prompt，不经过 [`super::transcript`]）。折叠仍只有这一处实现，
-/// 名字取 owner 的事件常量。
-pub fn unselected_roots_named(
-    events: &[Event],
-    removed: impl Fn(&str) -> bool,
-    branch: &str,
-    branch_selected: &str,
-) -> std::collections::HashSet<String> {
-    marks(events, |id| !removed(id), branch, branch_selected)
-        .into_iter()
-        .filter(|(_, m)| !m.selected)
-        .map(|(id, _)| id)
-        .collect()
+    symbio_kernel::event::branch::unselected_roots(
+        events,
+        |id| !removed(id),
+        v.branch,
+        v.branch_selected,
+    )
 }
 
 /// 盖一条节点的 `meta.branch`。

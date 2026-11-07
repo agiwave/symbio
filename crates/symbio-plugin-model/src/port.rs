@@ -182,23 +182,13 @@ fn turn_input(
         .collect();
 
     // 被重试 / 切换换下的支：那些轮根下的产出不进请求包（转写里照留，切回去还在）。
-    // 折法只住 `projection::branch`，这里不另抄一份；「还在不在」的证据与转写投影同源
-    // （`message.removed`），两处对同一份历史因此得出同一组隐藏支。
-    let mutations = symbio_sdk::projection::mutations::MessageMutations::collect(
+    // 「哪一支是活的」是事实层判断，折法住在 `symbio_kernel::event::branch`（DE-051
+    // D-362）：投影、请求包裁支、这里读的是同一个函数。「还在不在」的证据与转写投影
+    // 同源（`message.removed`），两处对同一份历史因此得出同一组隐藏支。
+    let removed = symbio_kernel::event::branch::removed_ids(events, "message.removed");
+    let hidden_branches = symbio_kernel::event::branch::unselected_roots(
         events,
-        &symbio_sdk::projection::vocab::MessageVocab {
-            artifact_added: EVENT_ARTIFACT_ADDED,
-            message_added: EVENT_MESSAGE_ADDED,
-            // 消息变更两格没有跨插件共享的常量（owner 是 session），与
-            // `EVENT_SESSION_CONSOLIDATED` 同一条已知项：本 crate 只读，不声明。
-            message_edited: "message.edited",
-            message_removed: "message.removed",
-            consolidated: EVENT_SESSION_CONSOLIDATED,
-        },
-    );
-    let hidden_branches = symbio_sdk::projection::branch::unselected_roots_named(
-        events,
-        |id| mutations.is_removed(id),
+        |id| !removed.contains(id),
         EVENT_TURN_BRANCH,
         EVENT_TURN_BRANCH_SELECTED,
     );

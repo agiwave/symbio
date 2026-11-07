@@ -356,7 +356,10 @@ export const BASELINE = {
   // `d2ed7682` 改写/新增的归属判据（声明期 owner、`@principal` 会话解析、宿主 emit 无默认值）全在
   // `--workspace` 求和里，两种口径数的是同一批用例；随后 `b2dd9770` / `5e968176` 未增删用例。
   // 基线跟实测走，不是为过门禁上调。非侵蚀。
-  ciRustTestsTotal: 2179,
+  // D-362：搬家用例里 5 条 kernel 侧折叠断言与 sdk 侧既有用例重复（`stamp_branches` /
+  // `unselected_roots` 已经逐条钉同一折法），故只保留一侧；唯一新增的判据（删除格必须落在
+  // `(Message, Closed)`）改写进 `mutations.test.rs` 从消费方一侧钉。净减 4，非覆盖丢失。
+  ciRustTestsTotal: 2180,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

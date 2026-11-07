@@ -461,6 +461,10 @@ mod trigger_kinds_gen;
 
 pub use trigger_kinds_gen::EVENT_TRIGGER_KINDS;
 
+// 分支事实的读法（哪一支是活的、此刻读哪一支）。放在事实层而不是投影层：
+// 它只读载荷，与节点形状无关；投影层先用到它不代表它属于呈现（DE-051 D-362）。
+pub mod branch;
+
 // ── 裁决格子（DE-043 §3，[DE-043](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）──
 //
 // 集体决策 = 「多个主体对同一 verdict 的竞争 + 仲裁者」：`verdict` 实体（F5 闭集
