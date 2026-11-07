@@ -672,8 +672,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         // 正文子节点的 id 与写侧同源：优先取执行体交出的 `answer_id`（含
         // reasoning-only 那条分支），旧事实没有该键时按 core 的
         // [`event_produced_text_node_id`] 派生。
-        let child_id =
-            str_of(e, "answer_id").unwrap_or_else(|| event_produced_text_node_id(e));
+        let child_id = str_of(e, "answer_id").unwrap_or_else(|| event_produced_text_node_id(e));
         // 形状经 `llm_build_text_node`（单点定义），只覆写「此刻」为事件时刻。
         let mut m = llm_build_text_node(&group, &text, None, child_id, &principal);
         m.timestamp = Some(e.ts);

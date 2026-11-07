@@ -33,8 +33,8 @@ use super::transcript::publish::append_and_publish;
 use super::types::SessionSummary;
 use serde_json::Value;
 use std::sync::Arc;
-use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::event::ClosureReason;
+use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::plugin::PluginError;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,

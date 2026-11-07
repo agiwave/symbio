@@ -133,7 +133,11 @@ pub fn draft_into_event(actor: Principal, draft: FactDraft) -> Fact {
     let mut event = Fact::pending(draft.key, draft.kind, draft.entity, draft.verb, actor);
     event.payload = draft.payload;
     event.produced_by = draft.produced_by;
-    if let Some(cost) = event.payload.get("cost_ms").and_then(serde_json::Value::as_u64) {
+    if let Some(cost) = event
+        .payload
+        .get("cost_ms")
+        .and_then(serde_json::Value::as_u64)
+    {
         event.cost_ms = cost;
     }
     event
