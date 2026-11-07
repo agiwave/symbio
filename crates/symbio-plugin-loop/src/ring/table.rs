@@ -1,8 +1,21 @@
 //! 债表：应用交来的行数据。环只按行里的端口名与身份取债，不解释行名。
 
+use std::sync::Arc;
+
 use crate::ring::facts::{DebtKey, FactView};
 use serde_json::Value;
+use symbio_kernel::decl::Frozen;
+use symbio_kernel::event::Event;
 use symbio_plugin_api::drive::Unless;
+
+/// 声明行这一圈的**选债输入**：冻结声明表 + 事实切片。
+///
+/// 数据源只交这两样，**求解归选债口**（`plan`）：在数据源里问 `owed` 再把结果交上来，
+/// 等于在派发器之外先做一次「现在该还哪笔」的判定——那就是第二个选债口（`TC-1b`）。
+pub(crate) struct DeclInput {
+    pub(crate) frozen: Arc<Frozen>,
+    pub(crate) events: Vec<Event>,
+}
 
 /// 一笔待还的债（应用侧的数据）。
 #[derive(Debug, Clone)]
@@ -120,6 +133,14 @@ impl DebtRow {
 pub(crate) trait DebtSource {
     /// 当前可还的债（应用按自己的事实投影决定）。
     fn rows(&self, facts: &FactView<'_>) -> Vec<DebtRow>;
+
+    /// 声明行的选债输入。`None` = 这个宿主没有声明行。
+    ///
+    /// **只交数据，不交结论**：`owed` 由选债口（`plan`）调用。数据源在这里先求一遍
+    /// 再把「欠哪几笔」交上去，就是派发器之外的第二个选债口（`TC-1b`）。
+    fn declarations(&self) -> Option<DeclInput> {
+        None
+    }
 
     /// 「这种事实存在吗」——由宿主实现（宿主看得见全部事实，
     /// 不止环的五事实）。环只把行里的种类字符串原样透传，不解释它的语义。

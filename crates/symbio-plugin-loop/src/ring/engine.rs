@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::future::join_all;
 use serde_json::{json, Value};
+use symbio_kernel::decl::ring::owed;
 use symbio_plugin_api::drive::Unless;
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
@@ -304,6 +305,21 @@ fn stalled(ctx: &dyn DriveCtx, dispatched: usize, blocked: Vec<DebtKey>) -> RunR
 /// 选这一圈的全部可还之债：可派发的进批，租约已过的排进过期，其余按「在飞」与
 /// 「挂起」分表收进等待（两类的区别见 [`DriveOutcome::Waiting`] / [`DriveOutcome::NeedsHuman`]）。
 fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: u64) -> Work {
+    // 声明行的求解**只在这里**做（`TC-1b`）：`owed` 是选债口的调用，数据源只交
+    // 「冻结声明表 + 事实切片」，不交「欠哪几笔」的结论。放在数据源里先求一遍，
+    // 就是派发器之外的第二个选债口。
+    let mut all_rows: Vec<DebtRow> = rows.to_vec();
+    if let Some(input) = source.declarations() {
+        let debts = owed(
+            input.frozen.rows(),
+            &input.frozen,
+            &input.events,
+            now_ms as i64,
+        );
+        all_rows.extend(crate::plugin_rows::rows_from_debts(&debts, &input.events));
+    }
+    let rows = all_rows.as_slice();
+
     // 第一步只算「这一行这一圈是什么动作」，**不看** `after_port`：前提端口有没有
     // 认领，取决于同一份行集合里别的行——那是第二步用本圈算出的动作集合回答的。
     // 整个判断只用 `rows`（已由宿主按同一次事实快照求出），不第二次读事实（D-343）。

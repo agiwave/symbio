@@ -12,4 +12,4 @@ pub(crate) mod engine;
 
 pub(crate) use self::engine::{drive, DriveCtx, DriveOutcome};
 pub(crate) use self::facts::{DebtKey, Fact, FactKind, FactView};
-pub(crate) use self::table::{DebtRow, DebtSource};
+pub(crate) use self::table::{DebtRow, DebtSource, DeclInput};

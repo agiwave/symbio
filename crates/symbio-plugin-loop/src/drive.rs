@@ -13,7 +13,9 @@ use symbio_plugin_api::drive::{
 };
 use symbio_plugin_api::port::{PortExecHandles, PortExecutor, PortFactEmit, PortFactReader};
 
-use crate::ring::{drive, DebtKey, DebtRow, DebtSource, DriveCtx, Fact, FactKind, FactView};
+use crate::ring::{
+    drive, DebtKey, DebtRow, DebtSource, DeclInput, DriveCtx, Fact, FactKind, FactView,
+};
 
 /// 环的执行者：宿主把能力束交进来，报告原样回去。
 pub(crate) struct LoopDrive;
@@ -177,20 +179,17 @@ impl DebtSource for SupportSource {
             };
             out.push(to_ring_row(row, after));
         }
-        // `Decl` 行参与选债（D-304 裁决六）：`by == plugin_row` 的行由机制自己执行，
-        // 世界语义（欠什么、何时算还）全在声明里，这里只做形状适配。
-        let events = crate::plugin_rows::decl_events(self.support.facts());
-        // 行表选债的 `now` 与环同一口径：**全部**事实（含世界事实）时间轴上最晚的
-        // 一笔，不读墙钟（`D-376`）。
-        let now_ms = self
-            .support
-            .facts()
-            .iter()
-            .map(|f| f.at_ms)
-            .max()
-            .unwrap_or(0);
-        out.extend(crate::plugin_rows::decl_rows(&events, now_ms));
+        // 声明行**不在这里求**（`TC-1b`）：数据源只交「冻结声明表 + 事实切片」，
+        // `owed` 由环的选债口调用（见 [`DeclInput`]）。
         out
+    }
+
+    fn declarations(&self) -> Option<DeclInput> {
+        let frozen = symbio_plugin_api::sealed_declarations().ok()?;
+        Some(DeclInput {
+            frozen,
+            events: crate::plugin_rows::decl_events(self.support.facts()),
+        })
     }
 
     fn exists(&self, kind: &str) -> bool {

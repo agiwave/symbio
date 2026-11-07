@@ -4,11 +4,14 @@
 //! 不认识任何世界名（不 `use` notes / task 的任何类型）。
 //!
 //! ```text
-//! Frozen::rows() + 事实投影 ──owed──▶ 债行（by == plugin_row）
+//! 环选债口（`ring::plan`）──owed + 事实投影──▶ 债行（by == plugin_row）
 //! 环派发 ──row + key + attempt──▶ RowHandler::run
 //! RowStep::Ask ──▶ 落「在等」事实，执行体挂起
 //! 模型回执落在同一 id 上 ──▶ 行重新触发，RowHandler::parse 关账
 //! ```
+//!
+//! **本模块不选债**：`owed` 由环的选债口调用（`TC-1b`），这里只把已求出的 `Debt`
+//! 投影成环认得的行形状。在派发器之外先问求解器再看结果，就是第二个选债口。
 //!
 //! `Ask` 不在这里调模型：那是 D-304 被否的那条。执行体只落一条事实并挂起，
 //! 往返由申报方声明的那笔债走端口（D-338）。
@@ -16,7 +19,7 @@
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use symbio_kernel::decl::ring::owed;
+use symbio_kernel::decl::ring::Debt;
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::drive::DriveFact;
 use symbio_plugin_api::effects::EffectDraft;
@@ -38,15 +41,13 @@ use crate::ring::table::DebtRow;
 const ROW_LEASE_MS: u64 = 60_000;
 const ROW_MAX_ATTEMPTS: u32 = 1;
 
-/// `Decl` 行 → 运行期债行（`by == plugin_row` 的全部未结债）。
+/// 选债口求出的 `Debt` → 环认得的债行（`by == plugin_row` 的全部未结债）。
 ///
 /// `Frozen::rows()` 参与选债是 D-304 裁决六：谁执行由 `by` 判别，环只认债行。
-pub(crate) fn decl_rows(events: &[Event], now_ms: u64) -> Vec<DebtRow> {
-    let Ok(frozen) = symbio_plugin_api::sealed_declarations() else {
-        return Vec::new();
-    };
-    owed(frozen.rows(), &frozen, events, now_ms as i64)
-        .into_iter()
+/// **本函数不调 `owed`**：求解发生在环的选债口里（`TC-1b`），这里只做形状投影。
+pub(crate) fn rows_from_debts(debts: &[Debt<'_>], events: &[Event]) -> Vec<DebtRow> {
+    debts
+        .iter()
         .filter(|debt| !debt.blocked && debt.decl.by == Some(PLUGIN_ROW))
         .map(|debt| {
             let row = debt.decl.name;
