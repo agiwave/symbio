@@ -1,6 +1,7 @@
 //! `settled` 的语义：等空闲，不是立即返回。
 
 use super::*;
+use symbio_plugin_api::drive::DriveKey;
 
 /// `settled` 是「等」不是「立即返回」：跑着时挂起，空闲后由通知唤醒。
 #[tokio::test]
@@ -24,4 +25,32 @@ async fn settled_waits_for_idle() {
         .await
         .expect("空闲后应被唤醒")
         .unwrap();
+}
+
+fn key() -> DriveKey {
+    DriveKey {
+        port: "p".into(),
+        id: "x".into(),
+        attempt: 1,
+    }
+}
+
+#[test]
+fn exhausted_and_stalled_are_both_visible() {
+    let exhausted = drive_notice(
+        "s",
+        &DriveOutcome::Exhausted {
+            steps: 128,
+            outstanding: vec![key()],
+        },
+    )
+    .expect("超预算必须出声");
+    assert!(exhausted.contains("步数预算用尽"), "{exhausted}");
+
+    let stalled =
+        drive_notice("s", &DriveOutcome::Stalled(vec![key()])).expect("零进展必须出声");
+    assert!(stalled.contains("一圈没有新增事实"), "{stalled}");
+
+    assert!(drive_notice("s", &DriveOutcome::NoDebt).is_none());
+    assert!(drive_notice("s", &DriveOutcome::Waiting(vec![])).is_none());
 }

@@ -180,20 +180,10 @@ impl Host {
             if matches!(&report.outcome, DriveOutcome::NoDebt) {
                 *idle = Some(at);
             } else {
+                // 只记机制状态；安全阀出口（`Exhausted` / `Stalled`）的可见文案
+                // 归驱动入口（`crates/symbio/src/drive.rs::drive_notice`），
+                // 那里同时覆盖两条，不会一条有声一条闷着。
                 *idle = None;
-                // 安全阀出口不能静默：`Waiting` 是正常等待下一次踢；
-                // 超预算 / 零进展意味着「这一轮没跑完」，必须在调用方看得见的地方留痕。
-                match &report.outcome {
-                    DriveOutcome::Exhausted { steps, outstanding } => eprintln!(
-                        "驱动停摆（{session_id}）：步数预算用尽（{steps} 步），未收束 {} 笔：{outstanding:?}",
-                        outstanding.len()
-                    ),
-                    DriveOutcome::Stalled(outstanding) => eprintln!(
-                        "驱动停摆（{session_id}）：一圈没有新增事实，未收束 {} 笔：{outstanding:?}",
-                        outstanding.len()
-                    ),
-                    _ => {}
-                }
             }
         }
         Ok(report)

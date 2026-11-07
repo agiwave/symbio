@@ -27,7 +27,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use symbio_host::{DriveReport, Host};
+use symbio_host::{DriveOutcome, DriveReport, Host};
 use symbio_kernel::exec::{ExecAbortSignal, ABORT_SIGNAL};
 use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
@@ -329,9 +329,36 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget) {
         abort: target.abort.as_ref(),
         sink: target.sink.clone(),
     };
-    if let Err(e) = drive_on_new_fact(root, &world).await {
-        // 宿主装配层不链 `tracing`（插件日志宏在这里展开不出来），退回 stderr。
-        eprintln!("驱动失败（{}）：{e}", target.session_id);
+    match drive_on_new_fact(root, &world).await {
+        Ok(report) => {
+            if let Some(notice) = drive_notice(&target.session_id, &report.outcome) {
+                // 宿主装配层不链 `tracing`（插件日志宏在这里展开不出来），退回 stderr。
+                eprintln!("{notice}");
+            }
+        }
+        Err(e) => {
+            // 宿主装配层不链 `tracing`（插件日志宏在这里展开不出来），退回 stderr。
+            eprintln!("驱动失败（{}）：{e}", target.session_id);
+        }
+    }
+}
+
+/// 安全阀出口的可见文案：`Exhausted` 与 `Stalled` **都意味着这一轮没跑完**，
+/// 两条都必须让调用面看见；`Waiting`（等下一次踢）与 `NoDebt`（正常结清）不出声。
+///
+/// 判据与文案同址，是为了不出现「一条有声、一条闷着」的不对称——闷着的那条
+/// 迟早被当成正常结束。
+fn drive_notice(session_id: &str, outcome: &DriveOutcome) -> Option<String> {
+    match outcome {
+        DriveOutcome::Exhausted { steps, outstanding } => Some(format!(
+            "驱动停摆（{session_id}）：步数预算用尽（{steps} 步），未收束 {} 笔：{outstanding:?}",
+            outstanding.len()
+        )),
+        DriveOutcome::Stalled(open) => Some(format!(
+            "驱动停摆（{session_id}）：一圈没有新增事实，未收束 {} 笔：{open:?}",
+            open.len()
+        )),
+        _ => None,
     }
 }
 
