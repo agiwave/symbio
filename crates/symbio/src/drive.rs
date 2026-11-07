@@ -155,16 +155,21 @@ impl HostDrive {
             Arc::new(KickState {
                 running: AtomicBool::new(false),
                 dirty: AtomicBool::new(false),
+                latest: Mutex::new(None),
                 idle: tokio::sync::Notify::new(),
             })
         }))
     }
 }
 
-/// 本会话的推进状态：两个原子位 + 一个唤醒句柄（**不加锁**）。
+/// 本会话的推进状态：两个原子位 + 最新目标槽 + 一个唤醒句柄（**不加锁**）。
 struct KickState {
     running: AtomicBool,
     dirty: AtomicBool,
+    /// 最近一次 `kick` 交来的目标。驱动在跑时后续 `append` 只置 `dirty`，
+    /// 但**目标必须换成最新那份**：作用域、中止信号、workdir 都随目标带过来，
+    /// 拿首次那份跑完整轮 = 后续轮次读到旧的作用域（t84 的「该拒而放行」窗口）。
+    latest: Mutex<Option<DriveTarget>>,
     /// 空闲时的唤醒句柄：`settled` 等它，驱动退出时叫醒。
     idle: tokio::sync::Notify,
 }
@@ -180,6 +185,12 @@ impl DriveEntry for HostDrive {
         target: DriveTarget,
     ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
         let state = self.kick_state(&target.session_id);
+        // 最新目标先落槽：即使已有驱动在跑，它下一圈也要用**这一份**（作用域 /
+        // 中止信号 / workdir 都随目标带过来；拿首份跑完整轮就是 t84 放行窗口）。
+        *state
+            .latest
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(target);
         // 已在跑：只置 dirty，不嵌套。
         if state.running.swap(true, Ordering::AcqRel) {
             state.dirty.store(true, Ordering::Release);
@@ -189,8 +200,19 @@ impl DriveEntry for HostDrive {
         let root = Arc::clone(&self.root);
         Some(Box::pin(IN_DRIVE.scope((), async move {
             loop {
+                let current = state
+                    .latest
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                let Some(target) = current else {
+                    // 槽被别的接管者取走（理论上不可达）：干净退出，不重复跑。
+                    state.running.store(false, Ordering::Release);
+                    state.idle.notify_waiters();
+                    break;
+                };
                 drain(&root, &target).await;
-                // 跑着期间来过写入：再跑一轮，`running` 保持 true。
+                // 跑着期间来过写入：再跑一轮，用最新目标，`running` 保持 true。
                 if state.dirty.swap(false, Ordering::AcqRel) {
                     continue;
                 }

@@ -42,8 +42,9 @@
 
 use std::sync::Arc;
 use symbio_kernel::capability::Registry;
-use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_providers::new_registry;
+use symbio_sdk::agent::AgentScope;
 use symbio_sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS, OPTION_VISITOR};
 use symbio_sdk::keys::{AGENT_ID, PATH};
 use symbio_sdk::plugin::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
@@ -120,6 +121,24 @@ pub async fn collect_capabilities(
     // 同一条 traverse 通路）；本插件的职责止于收集能力表。
 
     manager
+}
+
+/// 选中了智能体 ⇒ 收集期必须发布权限作用域；发布不到就拒绝本轮。
+///
+/// 「没有作用域」有两种含义，不能合并：本会话**没有选中**智能体（宿主态，
+/// 工具按宿主权限处理）与本会话**选中了**智能体但插件没有发布声明。
+/// 后者若按宿主态放行，出站闸门就读不到任何 deny 名单——t84 的
+/// 「该拒而没拒」窗口。这里把后者钉成显式失败，宁可本轮不可用，也不静默放宽。
+pub(crate) fn require_agent_scope(
+    bound: Option<&str>,
+    published: Option<AgentScope>,
+) -> Result<Option<AgentScope>, PluginError> {
+    match (bound, published) {
+        (Some(id), None) => Err(PluginError::InternalError(format!(
+            "会话绑定智能体 {id}，但能力收集期没有发布权限作用域；拒绝按宿主态放行"
+        ))),
+        (_, published) => Ok(published),
+    }
 }
 
 // 错误通道（CapabilityError / CAPABILITY_ERRORS / capability_report_error / capability_take_errors）

@@ -178,6 +178,7 @@ impl FactSource for SessionFactSource {
                 (self.me.upgrade(), tokio::runtime::Handle::try_current())
             {
                 let facts: Arc<dyn FactSource> = this;
+                let scope_now = self.agent_scope.read().ok().and_then(|scope| scope.clone());
                 let target = DriveTarget {
                     session_id: self.session_id.clone(),
                     workdir: self.workdir.clone(),
@@ -189,7 +190,7 @@ impl FactSource for SessionFactSource {
                     risk_level: self.params.risk_level.clone(),
                     provider_id: self.params.provider_id.clone(),
                     // 作用域由轮装配发布（见字段文档）；这里只取当前值，不解析。
-                    agent_scope: self.agent_scope.read().ok().and_then(|scope| scope.clone()),
+                    agent_scope: scope_now,
                     // 来源主体由开轮写方发布（见字段文档）；`None` = 本机用户发起。
                     source_principal: self
                         .source_principal

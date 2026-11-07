@@ -80,6 +80,34 @@ impl SessionPlugin {
         // 所以本轮后续派发（如工具行）读到的仍是**这个已取消的信号**，而不是新造的死信号。
         state.register_abort_signal(ExecAbortSignal::new());
 
+        // 权限作用域（D-153）与中止信号同理：**发布必须早于第一次 `append`**。
+        // 那次 append 就会踢驱动，而 `DriveTarget` 只带当时的当前作用域；晚一步发布，
+        // 抢先的驱动会拿着「宿主态」（无作用域）跑完模型 → 工具整条链——零授权智能体
+        // 的出站闸门因此读到空 deny 名单，该拒而放行（t84）。
+        //
+        // 作用域按**会话自己的绑定**展开（metadata.agent_id）：收集器只把它当通用的
+        // agent 作用域键递下去，agent 插件自行把子树 prompt rows / 工具加前缀——
+        // 「人格 / 记忆」这些段名谁都不需要认识。
+        let agent_scope = self.get_store().await?.session_agent_scope(session_id);
+        let manager = crate::capabilities::collect_capabilities(
+            self.get_parent().as_ref(),
+            ctx,
+            agent_scope.as_deref(),
+        )
+        .await;
+        // 选中了智能体 ⇒ 收集期必须发布权限作用域。发布不到就**拒绝本轮**，
+        // 不能当作「没有选智能体」的宿主态放行——那正是 t84 的漏过窗口。
+        let agent_perms = crate::capabilities::require_agent_scope(
+            agent_scope.as_deref(),
+            symbio_sdk::agent::agent_perms_of(ctx.as_ref()),
+        )?;
+        // 作用域要**随轮进执行 ctx**（D-153）：收集器把它挂在**本轮** ctx 上，而工具
+        // 执行跑在驱动新建的 ctx 里。由事实源随驱动目标带过去（`set_agent_scope`），
+        // 工具执行体只读 `AGENT_PERMS`，不重新解析 manifest。
+        self.get_store()
+            .await?
+            .set_agent_scope(session_id, agent_perms);
+
         let text = item
             .message
             .content
@@ -132,33 +160,16 @@ impl SessionPlugin {
             )
             .map_err(|e| PluginError::InternalError(format!("turn.dispatch 落格失败: {e}")))?;
 
-        // 轮首装配：能力收集 → `session.config`（系统提示词 + 工具表 + 本轮生效设置）。
+        // 轮首装配的收尾：`session.config`（系统提示词 + 工具表 + 本轮生效设置）。
         //
         // 写方是本插件（会话编排权归 session）：模型端口只读「最近一条 session.config」，
         // 读不到就退化为空提示词。提示词里的 VDFS 地址由收集期的 `descend_addr` 归一
         // （根名取自 vdfs 插件的装配期声明，不是本插件里的字面量），**不是**在这里把
         // 绝对路径再相对化。
         //
-        // 作用域按**会话自己的绑定**展开（metadata.agent_id）：收集器只把它当通用的
-        // agent 作用域键递下去，agent 插件自行把子树 prompt rows / 工具加前缀——
-        // 「人格 / 记忆」这些段名谁都不需要认识。
-        let agent_scope = self.get_store().await?.session_agent_scope(session_id);
-        let manager = crate::capabilities::collect_capabilities(
-            self.get_parent().as_ref(),
-            ctx,
-            agent_scope.as_deref(),
-        )
-        .await;
         // 能力视图只在本轮**装配**（系统提示词 / 工具表 / 分类开关）里读；收尾面
         // 不再需要它：答话的生成往返由 compose 的 `model.assist` 行债驱动，回执从
         // 事实读面取，模板路径也不读能力视图。
-        //
-        // 作用域要**随轮进执行 ctx**（D-153）：收集器把它挂在**本轮** ctx 上，而工具
-        // 执行跑在驱动新建的 ctx 里。由事实源随驱动目标带过去（`set_agent_scope`），
-        // 工具执行体只读 `AGENT_PERMS`，不重新解析 manifest。
-        self.get_store()
-            .await?
-            .set_agent_scope(session_id, symbio_sdk::agent::agent_perms_of(ctx.as_ref()));
         let system_prompt = symbio_sdk::capability::capability_prompts(&*manager)
             .await
             .into_iter()

@@ -9,6 +9,7 @@ async fn settled_waits_for_idle() {
     let state = Arc::new(KickState {
         running: AtomicBool::new(true),
         dirty: AtomicBool::new(false),
+        latest: Mutex::new(None),
         idle: tokio::sync::Notify::new(),
     });
 
