@@ -3,7 +3,6 @@
 //! 读方法回答「存储里有什么」，与写侧 [`super::write`] 的「哪些消息能留在存储里」相对。
 
 use super::*;
-use symbio_plugin_api::Store;
 
 impl PersistentChatSession {
     /// 全量消息（按单调 `seq` 排序后的存储视图）。

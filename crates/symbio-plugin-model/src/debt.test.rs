@@ -40,6 +40,14 @@ fn user_turn_debt_derives_its_identity_from_the_input_fact() {
         reply.payload["principal"], "session/main",
         "会话主体随驱动请求而来，不再写死 user（D-339）"
     );
+    // 时序只按**端口**表达：不写兄弟插件的行名，也不拼债 id（`after` 为空）。
+    // 该端口没人认领 ⇒ 前提已了（缺席即收束）。
+    assert_eq!(reply.after_port, Some(PLUGIN_ROW));
+    assert!(
+        reply.after.is_none(),
+        "模型行不许再按兄弟插件的债 id 排时序：{:?}",
+        reply.after
+    );
 }
 
 #[test]

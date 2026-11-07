@@ -356,7 +356,7 @@ export const BASELINE = {
   // `d2ed7682` 改写/新增的归属判据（声明期 owner、`@principal` 会话解析、宿主 emit 无默认值）全在
   // `--workspace` 求和里，两种口径数的是同一批用例；随后 `b2dd9770` / `5e968176` 未增删用例。
   // 基线跟实测走，不是为过门禁上调。非侵蚀。
-  ciRustTestsTotal: 2165,
+  ciRustTestsTotal: 2179,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -379,7 +379,11 @@ export const BASELINE = {
   // baseline-allow e2eCases: 96 → 91（D-332）——`60cedd50`（B2 环侧编排退场，D-318）删 5 条
   // 引擎绑定的 e2e 用例（这些用例的接线点随旧 engine 一起消失，留着只会测不到东西）。后续随
   // 新义务环接入**只会回升**：B 类能力每接回一组，对应的 e2e 用例重新落地。
-  e2eCases: 91,
+  // baseline-allow e2eCases: 91 → 90（D-318）——`346b3134` 整例退役 t41 技能快路：
+  // 它唯一独有的断言依赖 `session.skill_fast_path`，该快路已随 B2 退场，没有生产事实可断；
+  // 能力断言由 t35-skill-compile 承接（退役口径见 `docs/007-task/035-e2e实施表.md`）。
+  // 收紧基线，不是放松。
+  e2eCases: 90,
   // 换述读数（D-097）：`recall_eval.rs` 的第四个数字带着一组新断言——指纹锁、
   // 每条换述必须真的换了措辞、依赖度定义域、54 条换述逐条验「承重」（换成无关问句
   // 读数必须精确上抬 1/(n·m)）、以及时间兜底案上读数不动。224 → 235，全是**新增判据**，

@@ -476,6 +476,158 @@ async fn after_gate_orders_two_ports() {
 }
 
 #[tokio::test]
+async fn after_port_waits_for_a_claim_and_treats_absence_as_settled() {
+    // 前提端口这一圈有人认领 ⇒ 依赖行等它收束后的下一圈才派发。
+    let gate = Arc::new(Stub::ok());
+    let dependent = Arc::new(Stub::ok());
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("gate", "p1", "g", json!({})),
+        DebtRow::new("dep", "p2", "d", json!({})).after_port("p1"),
+    ])
+    .with_executor("p1", gate.clone())
+    .with_executor("p2", dependent.clone());
+    let report = drive(&ctx).await;
+    assert_eq!(report.dispatched, 2);
+    assert_eq!(gate.seen().len(), 1);
+    assert_eq!(dependent.seen().len(), 1);
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+
+    // 前提端口这一圈**没人认领**（能力未挂载 / 开关关闭的形状）⇒ 缺席即收束，直接可还。
+    let dependent = Arc::new(Stub::ok());
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("dep", "p2", "d", json!({})).after_port("p1")
+    ])
+    .with_executor("p2", dependent.clone());
+    let report = drive(&ctx).await;
+    assert_eq!(report.dispatched, 1, "没人认领的前提不许挡住依赖方");
+    assert_eq!(dependent.seen().len(), 1);
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+}
+
+/// 本圈计划快照（D-343）还没看见回执，但债本身已派发未收束：这仍然是「有人在做
+/// 的活」，依赖方不许因为 `when` 的判定滞后就抢跑。
+#[tokio::test]
+async fn a_reported_open_debt_claims_its_port_even_when_when_looks_stale() {
+    struct Stale {
+        rows: Vec<DebtRow>,
+    }
+    impl DebtSource for Stale {
+        fn rows(&self, _facts: &FactView<'_>) -> Vec<DebtRow> {
+            self.rows.clone()
+        }
+        // 快照里还没有 `response`：`when` 判定会滞后。
+        fn exists(&self, _kind: &str) -> bool {
+            false
+        }
+    }
+
+    let seed = vec![
+        Fact::new(FactKind::Request, DebtKey::new("p1", "g", 1), json!({}), 0),
+        Fact::new(
+            FactKind::Sent,
+            DebtKey::new("p1", "g", 1),
+            json!({"deadline_ms": null}),
+            0,
+        ),
+    ];
+    let dependent = Arc::new(Stub::ok());
+    let ctx = TestCtx::with_source(Box::new(Stale {
+        rows: vec![
+            DebtRow::new("gate", "p1", "g", json!({})).when("response"),
+            DebtRow::new("dep", "p2", "d", json!({})).after_port("p1"),
+        ],
+    }))
+    .with_executor("p2", dependent.clone())
+    .with_facts(seed);
+
+    let report = drive(&ctx).await;
+
+    assert_eq!(dependent.seen().len(), 0, "回执还没到，模型不许抢跑");
+    assert_eq!(
+        report.outcome,
+        DriveOutcome::NeedsHuman(vec![DebtKey::new("p1", "g", 1)]),
+        "这笔已派发未收束的债必须交回调用方，由它等回执后再踢"
+    );
+}
+
+/// 门认领了却永远收不了束（写口把投递全吸收）：依赖方不许被静默放行，
+/// 也不能变成 `NoDebt`——必须停在可见的 `Stalled`。
+#[tokio::test]
+async fn a_gate_that_never_settles_surfaces_as_stalled_not_silence() {
+    let dependent = Arc::new(Stub::ok());
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("gate", "p1", "g", json!({})),
+        DebtRow::new("dep", "p2", "d", json!({})).after_port("p1"),
+    ])
+    .with_executor("p1", Arc::new(Stub::ok()))
+    .with_executor("p2", dependent.clone())
+    .ignoring_writes();
+
+    let report = drive(&ctx).await;
+
+    assert_eq!(report.dispatched, 1, "门被认领并派发了一次");
+    assert_eq!(dependent.seen().len(), 0, "门没收束，依赖方不许抢跑");
+    match report.outcome {
+        DriveOutcome::Stalled(keys) => {
+            assert!(
+                keys.contains(&DebtKey::new("p2", "d", 1)),
+                "被前提挡住的依赖方必须出现在 Stalled 里：{keys:?}"
+            );
+        }
+        other => panic!("永不收束的门债必须走到 Stalled，不能静默：{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_suspended_gate_keeps_the_dependent_waiting_visibly() {
+    let dependent = Arc::new(Stub::ok());
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("gate", "p1", "g", json!({})),
+        DebtRow::new("dep", "p2", "d", json!({})).after_port("p1"),
+    ])
+    .with_executor("p1", Arc::new(Stub::needs_human()))
+    .with_executor("p2", dependent.clone());
+
+    let report = drive(&ctx).await;
+
+    assert_eq!(report.dispatched, 1);
+    assert_eq!(dependent.seen().len(), 0);
+    assert_eq!(
+        report.outcome,
+        DriveOutcome::NeedsHuman(vec![DebtKey::new("p1", "g", 1)]),
+        "挂起的门不是静默：依赖方的等待必须交回调用方"
+    );
+}
+
+#[tokio::test]
+async fn an_expired_gate_releases_the_dependent_instead_of_waiting_forever() {
+    let seed = vec![
+        Fact::new(FactKind::Request, DebtKey::new("p1", "g", 1), json!({}), 0),
+        Fact::new(
+            FactKind::Sent,
+            DebtKey::new("p1", "g", 1),
+            json!({"deadline_ms": 10}),
+            0,
+        ),
+    ];
+    let dependent = Arc::new(Stub::ok());
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("gate", "p1", "g", json!({})).lease(10, 1),
+        DebtRow::new("dep", "p2", "d", json!({})).after_port("p1"),
+    ])
+    .with_executor("p1", Arc::new(Stub::ok()))
+    .with_executor("p2", dependent.clone())
+    .with_facts(seed)
+    .at(100);
+
+    let report = drive(&ctx).await;
+
+    // 门的租约到期、attempt 1 没有下一笔 ⇒ 判死落 `failed`；端口清空，依赖方放行。
+    assert_eq!(dependent.seen().len(), 1, "门判死后依赖方必须能继续");
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+}
+
+#[tokio::test]
 async fn unless_gate_reads_the_same_surface_as_when() {
     /// 世界事实的测试读面：种类集合 + 身份集合，与环的五事实无关。
     struct Gated {

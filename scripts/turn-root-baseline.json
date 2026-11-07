@@ -2,11 +2,11 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 147,
+      "prod": 148,
       "test": 183
     },
     "F2": {
-      "prod": 20,
+      "prod": 22,
       "test": 14
     },
     "F3": {
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-07",
+      "faces": "F1.prod / F2.prod",
+      "reason": "t87（`e75e5d7f`，D-358）给分支切换新增共享事实 `turn.branch_selected`：常量 `EVENT_TURN_BRANCH_SELECTED` 在 `plugin-api/events.rs` 计 F1 生产面 +1；事件字面量在 `plugin-api/events.rs` 的声明与 `session/PLUGIN.yml` 的 `shared_events` 各计一次，F2 生产面 +2。三面跟到实测 148 / 22（测试面 183 / 14 不变）；词本身是分支投影的既有词汇，去 turn 化随「分支投影改名」单独一笔做，目标 0 不变。"
+    },
     {
       "date": "2026-11-07",
       "faces": "F1.prod / F1.test / F2.prod",

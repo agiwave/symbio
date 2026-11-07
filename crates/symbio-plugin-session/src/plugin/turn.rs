@@ -206,17 +206,6 @@ impl SessionPlugin {
                 .await
                 .iter()
                 .any(|row| row.name() == format!("<debt>{}", symbio_plugin_api::PLUGIN_ID_COMPOSE));
-        // 分类开关的**有效值**：调用方开关 ∧ 分类插件本轮的债表在场（`debt` 族报到）。
-        // 卸载（t21-E）时写 false——模型债行的 `after` 等的是判决行的债；一个不会出现
-        // 的前置债会让模型行永远停在「等」，本轮一个请求都不发。
-        let classify_enabled = cfg.classify_enabled
-            && manager
-                .list(symbio_plugin_api::debt::DEBT_FAMILY)
-                .await
-                .iter()
-                .any(|row| {
-                    row.name() == format!("<debt>{}", symbio_plugin_api::PLUGIN_ID_CLASSIFY)
-                });
         let config_draft = FactDraft {
             key: session_config_id(&item.id),
             kind: EVENT_SESSION_CONFIG.to_string(),
@@ -225,9 +214,10 @@ impl SessionPlugin {
             payload: json!({
                 "system_prompt": system_prompt,
                 "tools": tools,
-                "classify_enabled": classify_enabled,
+                "classify_enabled": cfg.classify_enabled,
                 // 首响开关（调用方开关；没有 compose 时行会因路由取不到措辞而失败、
-                // 收敛为「不说话」，模型行照常放行）。模型债行按它决定是否等首响行。
+                // 收敛为「不说话」）。模型债行不再读它：它等的是 `plugin_row` 端口
+                // 这一圈的认领，首响行不开就没人认领——缺席即收束。
                 "opening_enabled": cfg.opening_enabled,
                 // 答话措辞的**有效**开关：compose 的 `model.assist` 口债按它决定欠不欠
                 // 一次生成往返；模型行也按它决定「answered 是否提前收手」。

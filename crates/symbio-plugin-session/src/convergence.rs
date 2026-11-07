@@ -328,32 +328,22 @@ impl Convergence {
             .cloned();
         // W2c-1a 收口：本轮已判 `answered` 且还没有终答 ⇒ 让 compose 交出措辞，
         // 由本插件落一条终答（D-341 / D-020：文本只来自 compose，转写只有本插件写）。
-        // 落成之后重读事实，投影与下方所有既有分支照常走。
-        let events = match (&user, compose) {
-            (Some(user), Some(call)) => {
-                let answered = events.iter().any(|e| {
-                    e.kind == EVENT_CLASSIFY_ANSWERED
-                        && e.payload.get("id").and_then(Value::as_str)
-                            == Some(user.event_id.as_str())
-                });
-                let has_final = events.iter().any(|e| {
-                    e.kind == EVENT_CHAT_ASSISTANT_FINAL
-                        && e.payload.get("root_id").and_then(Value::as_str)
-                            == Some(user.event_id.as_str())
-                });
-                if answered
-                    && !has_final
-                    && self
-                        .answer_if_answered(session_id, user_seq, &events, user, call, source)
-                        .await?
-                {
-                    source.range(0)
-                } else {
-                    events
-                }
+        // 落成之后重读事实（下文 `source.range(0)`），投影与下方所有既有分支照常走。
+        if let (Some(user), Some(call)) = (&user, compose) {
+            let answered = events.iter().any(|e| {
+                e.kind == EVENT_CLASSIFY_ANSWERED
+                    && e.payload.get("id").and_then(Value::as_str) == Some(user.event_id.as_str())
+            });
+            let has_final = events.iter().any(|e| {
+                e.kind == EVENT_CHAT_ASSISTANT_FINAL
+                    && e.payload.get("root_id").and_then(Value::as_str)
+                        == Some(user.event_id.as_str())
+            });
+            if answered && !has_final {
+                self.answer_if_answered(session_id, user_seq, &events, user, call, source)
+                    .await?;
             }
-            _ => events,
-        };
+        }
         // 编码先于巩固（D-268）：终答一落格就踢起一轮驱动，`session.close-turn` 债在
         // 那一轮里才写 `memory.encoded`。不等到「没有在飞的债」就读快照，巩固看到的
         // 是半轮——t29 的失败形态正是 4 条经验只到 3 条、合并被跳过，而这一轮之后

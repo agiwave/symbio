@@ -63,6 +63,7 @@ pub(crate) fn decl_rows(events: &[Event], now_ms: u64) -> Vec<DebtRow> {
                 when_id: None,
                 unless: None,
                 when_no_open: None,
+                after_port: None,
                 lease_ms: ROW_LEASE_MS,
                 max_attempts: ROW_MAX_ATTEMPTS,
             }

@@ -186,6 +186,14 @@ pub struct DebtSpec {
     pub unless: Option<Unless>,
     /// 该端口的债全部还清才欠（读债状态）；环只读端口名，不解释语义。
     pub when_no_open: Option<&'static str>,
+    /// 前提（读债状态）：该端口**这一轮**还有人认领（可派发 / 在飞 / 挂起）⇒ 本行
+    /// 不进计划；没人认领 ⇒ 前提已了（**缺席即收束**）。上一轮遗留的未收束债不算
+    /// 认领（债表按当轮事实现算，遗留债由自己的租约收束）。
+    ///
+    /// 与 [`Self::when_no_open`] 同族、方向相反：一个问「端口干净才欠」，一个问
+    /// 「端口干净才可还」。依赖方只认端口，不认行名——能力未挂载 / 开关关闭时
+    /// 不产生任何债，本行因此不会被一笔永不出现的前置债挡住。
+    pub after_port: Option<&'static str>,
     /// 单次派发租约（毫秒）。
     pub lease_ms: u64,
     /// 最多尝试次数（含首次）。
@@ -210,6 +218,7 @@ impl DebtSpec {
             when_id: None,
             unless: None,
             when_no_open: None,
+            after_port: None,
             lease_ms: 60_000,
             max_attempts: 3,
         }
@@ -251,6 +260,12 @@ impl DebtSpec {
     /// 声明「该端口无未还债才欠」。
     pub fn when_no_open(mut self, port: &'static str) -> Self {
         self.when_no_open = Some(port);
+        self
+    }
+
+    /// 声明前提「该端口这一轮没人认领才算已了」（与 [`Self::when_no_open`] 对偶）。
+    pub fn after_port(mut self, port: &'static str) -> Self {
+        self.after_port = Some(port);
         self
     }
 

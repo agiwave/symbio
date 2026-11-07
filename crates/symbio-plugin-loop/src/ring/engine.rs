@@ -113,6 +113,11 @@ struct Work {
     /// 挂起（`sent{deadline_ms:null}`）：只有挂起点之后的触发事实能重新点燃。
     /// 这一格不是「在飞」——没有执行体在跑，只有外部事实能推进。
     suspended: Vec<DebtKey>,
+    /// 被 `after_port` 前提挡住的行：该端口这一圈有人认领，所以本行不进计划。
+    ///
+    /// 只用于出口：一圈没有动作、账上也没有未收束债，但这里非空 ⇒ 有人在等一笔
+    /// 没人能还的前提。必须报 `Stalled`，**不能报 `NoDebt`**（否则就是静默停摆）。
+    blocked: Vec<DebtKey>,
 }
 
 /// 驱动本会话到没有可还的债、只剩在飞或只剩等外部事实（或明确告诉调用方跑不完）。
@@ -150,7 +155,7 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
                 dispatched += chunk.len();
             }
             if !advanced(ctx, &facts) {
-                return stalled(ctx, dispatched);
+                return stalled(ctx, dispatched, work.blocked.clone());
             }
             continue;
         }
@@ -159,7 +164,7 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
                 expire(ctx, row, attempt, next, now_ms);
             }
             if !advanced(ctx, &facts) {
-                return stalled(ctx, dispatched);
+                return stalled(ctx, dispatched, work.blocked);
             }
             continue;
         }
@@ -184,7 +189,14 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
             }
         }
         let outcome = if outstanding.is_empty() {
-            DriveOutcome::NoDebt
+            if work.blocked.is_empty() {
+                DriveOutcome::NoDebt
+            } else {
+                // 依赖方被前提挡住，前提端口却没有任何本圈动作（与未收束债）：
+                // 没有人能还、也没有人能认领下来。报 `NoDebt` 会让宿主把 `idle`
+                // 记成正常完成——这里必须可见。
+                DriveOutcome::Stalled(work.blocked)
+            }
         } else if in_flight_pending {
             DriveOutcome::Waiting(outstanding)
         } else {
@@ -210,12 +222,21 @@ fn advanced(ctx: &dyn DriveCtx, before: &[Fact]) -> bool {
         .any(|f| !known.contains(&(f.kind, f.key.clone())))
 }
 
-/// 无进展出口：交回当前账上仍未收束的债。
-fn stalled(ctx: &dyn DriveCtx, dispatched: usize) -> RunReport {
+/// 无进展出口：交回当前账上仍未收束的债，外加被 `after_port` 挡住的依赖方。
+///
+/// 后者虽然不是「已派发」，却仍然是**这一轮还欠着**的债：前提没走完，依赖方就
+/// 不该被当作「没事」。把它交回调用方，才能让「门永不收束」停在可见的 `Stalled`。
+fn stalled(ctx: &dyn DriveCtx, dispatched: usize, blocked: Vec<DebtKey>) -> RunReport {
     let facts = ctx.facts();
     let view = FactView::new(&facts);
+    let mut outstanding = view.unresolved();
+    for key in blocked {
+        if !outstanding.contains(&key) {
+            outstanding.push(key);
+        }
+    }
     RunReport {
-        outcome: DriveOutcome::Stalled(view.unresolved()),
+        outcome: DriveOutcome::Stalled(outstanding),
         dispatched,
     }
 }
@@ -223,9 +244,27 @@ fn stalled(ctx: &dyn DriveCtx, dispatched: usize) -> RunReport {
 /// 选这一圈的全部可还之债：可派发的进批，租约已过的排进过期，其余按「在飞」与
 /// 「挂起」分表收进等待（两类的区别见 [`DriveOutcome::Waiting`] / [`DriveOutcome::NeedsHuman`]）。
 fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: u64) -> Work {
-    let mut work = Work::default();
+    // 第一步只算「这一行这一圈是什么动作」，**不看** `after_port`：前提端口有没有
+    // 认领，取决于同一份行集合里别的行——那是第二步用本圈算出的动作集合回答的。
+    // 整个判断只用 `rows`（已由宿主按同一次事实快照求出），不第二次读事实（D-343）。
+    let mut candidates: Vec<Candidate> = Vec::new();
     let mut seen = HashSet::new();
+    // 前提端口：这一圈**有人认领**的端口。两处来源合起来才是完整的「认领」：
+    // 1. 申报方这一轮报了这一行、且它那笔债还开着（已派发未收束）——**不看 `when`
+    //    的判定**：`when` 读的是本圈计划快照（D-343），可能还没看见本圈刚落下的回执
+    //    （例如分类刚收到 `response`、还没等到下一圈 parse），此时这笔债仍然是有人
+    //    在做的活，依赖方不能抢跑；
+    // 2. 下文选出的可动作行所在端口（尤其首派发的行还没有 `sent`）。
+    //
+    // 上一轮遗留的未收束债不算认领：债表按当轮事实现算，遗留债不会再被任何源申报，
+    // 由它自己的租约判死收束，不该挡住新一轮（t49 恢复轮）。
+    let mut claimed: HashSet<String> = HashSet::new();
     for row in rows {
+        let attempt = view.attempt(row.port, &row.id).max(1);
+        let key = DebtKey::new(row.port, row.id.clone(), attempt);
+        if view.closing(&key).is_none() && view.last_sent(&key).is_some() {
+            claimed.insert(row.port.to_string());
+        }
         if let Some(after) = &row.after {
             if view.closing(after).is_none() {
                 continue;
@@ -266,15 +305,17 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
                 continue;
             }
         }
-        let attempt = view.attempt(row.port, &row.id).max(1);
-        let key = DebtKey::new(row.port, row.id.clone(), attempt);
         if view.closing(&key).is_some() {
             continue;
         }
         let Some(sent) = view.last_sent(&key) else {
             // 幂等底线：同一 (port, id, attempt) 一圈只入批一次。
             if seen.insert(key.clone()) {
-                work.dispatch.push((row.clone(), attempt));
+                candidates.push(Candidate {
+                    row: row.clone(),
+                    key,
+                    pick: Pick::Dispatch,
+                });
             }
             continue;
         };
@@ -288,10 +329,18 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
                 .is_some_and(|kind| source.exists_since(kind, sent.at_ms));
             if retriggered {
                 if seen.insert(key.clone()) {
-                    work.dispatch.push((row.clone(), attempt));
+                    candidates.push(Candidate {
+                        row: row.clone(),
+                        key,
+                        pick: Pick::Dispatch,
+                    });
                 }
-            } else if !work.suspended.contains(&key) {
-                work.suspended.push(key);
+            } else if !candidates.iter().any(|c| c.key == key) {
+                candidates.push(Candidate {
+                    row: row.clone(),
+                    key,
+                    pick: Pick::Suspended,
+                });
             }
             continue;
         }
@@ -301,13 +350,64 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
         }
         let deadline = sent.at_ms.saturating_add(row.lease_ms);
         if now_ms < deadline {
-            work.in_flight.push(key);
+            candidates.push(Candidate {
+                row: row.clone(),
+                key,
+                pick: Pick::InFlight,
+            });
             continue;
         }
         let next = (attempt < row.max_attempts).then(|| attempt + 1);
-        work.expire.push((row.clone(), attempt, next));
+        candidates.push(Candidate {
+            row: row.clone(),
+            key,
+            pick: Pick::Expire(next),
+        });
+    }
+
+    // 第二处来源：这一圈**有动作**的行所在端口（首派发的行还没有 `sent`）。
+    for candidate in &candidates {
+        claimed.insert(candidate.row.port.to_string());
+    }
+
+    let mut work = Work::default();
+    for candidate in candidates {
+        if let Some(port) = candidate.row.after_port {
+            if claimed.contains(port) {
+                // 前提还没了：本行不进计划。记下来，出口据此证明「有人在等」。
+                work.blocked.push(candidate.key);
+                continue;
+            }
+        }
+        match candidate.pick {
+            Pick::Dispatch => work.dispatch.push((candidate.row, candidate.key.attempt)),
+            Pick::Expire(next) => work
+                .expire
+                .push((candidate.row, candidate.key.attempt, next)),
+            Pick::InFlight => work.in_flight.push(candidate.key),
+            Pick::Suspended => work.suspended.push(candidate.key),
+        }
     }
     work
+}
+
+/// 一行这一圈的动作（`after` / `when` / `when_id` / `unless` / `when_no_open` 已判过）。
+struct Candidate {
+    row: DebtRow,
+    key: DebtKey,
+    pick: Pick,
+}
+
+/// 动作类别；`after_port` 只决定这行「进不进计划」，不改变动作本身。
+enum Pick {
+    /// 可派发（可能先补 `request`）。
+    Dispatch,
+    /// 租约已过：推进尝试或判死。
+    Expire(Option<u32>),
+    /// 已发未配，租约未过：在飞。
+    InFlight,
+    /// 挂起：只有外部事实能推进。
+    Suspended,
 }
 
 /// 租约已过：有下一笔就记账并再举，没有就判死。

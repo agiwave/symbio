@@ -380,9 +380,10 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget, state: &KickState) 
         Ok(report) => {
             // 在飞 = 环自己还能推进：这一轮要继续算「没空闲」，不能让调用方在此
             // 投影 / 收口（应答还没落格，t29 的早投影就是从这里来的）。
-            state
-                .in_flight
-                .store(matches!(&report.outcome, DriveOutcome::Waiting(_)), Ordering::Release);
+            state.in_flight.store(
+                matches!(&report.outcome, DriveOutcome::Waiting(_)),
+                Ordering::Release,
+            );
             if let Some(notice) = drive_notice(&target.session_id, &report.outcome) {
                 // 宿主装配层不链 `tracing`（插件日志宏在这里展开不出来），退回 stderr。
                 eprintln!("{notice}");

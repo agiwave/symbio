@@ -359,3 +359,4 @@ pub(crate) const RECALL_MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 // ── panic 面登记（PN-001…003）─────────────────────────────────────────
 // 判据与「登记写在代码旁边」的理由见 `store/mod.rs` 末尾同名区块。
 // panic-allow crates/symbio-plugin-session/src/store/facts.rs::facts: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-plugin-session/src/store/facts.rs::read_events: 同上——同一张会话事实源表锁，读侧只是取缓存句柄；毒后恢复需单独 ADR。

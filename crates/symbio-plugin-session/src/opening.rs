@@ -47,7 +47,8 @@ use symbio_sdk::keys::SESSION_ID;
 use crate::convergence::dialog_context;
 use crate::declarations::OWNER;
 
-/// 首响行的行名 / 债名前缀。`model/debt.rs` 的 `after` 按同一字面量等它收束。
+/// 首响行的行名 / 债名前缀。本行与判决行同在 `plugin_row` 端口；模型行只等端口
+/// （`after_port(plugin_row)`），不认这个行名。
 pub(crate) const SESSION_OPENING: &str = "session.opening";
 
 /// 上游判决事实（classify 插件所有）：会话只按 id 等它，不解释载荷。

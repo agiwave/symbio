@@ -151,6 +151,10 @@ pub struct DriveRow {
     pub unless: Option<Unless>,
     /// 该端口的债全部还清才欠（读债状态）。
     pub when_no_open: Option<&'static str>,
+    /// 前提（读债状态）：该端口**这一轮**还有人认领（可派发 / 在飞 / 挂起）⇒ 本行
+    /// 不进计划；没人认领 ⇒ 前提已了（**缺席即收束**）。与 [`Self::when_no_open`]
+    /// 对偶：依赖方只写端口名，不写兄弟插件的行名与债 id。
+    pub after_port: Option<&'static str>,
     /// 单次派发租约（毫秒）。
     pub lease_ms: u64,
     /// 最多尝试次数（含首次）。

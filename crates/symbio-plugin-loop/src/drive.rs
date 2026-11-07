@@ -205,6 +205,7 @@ fn to_ring_row(row: DriveRow, after: Option<DebtKey>) -> DebtRow {
         when_id: row.when_id,
         unless: row.unless,
         when_no_open: row.when_no_open,
+        after_port: row.after_port,
         lease_ms: row.lease_ms,
         max_attempts: row.max_attempts,
     }

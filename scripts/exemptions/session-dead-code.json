@@ -7,14 +7,6 @@
   "rows": [
     {
       "path": "crates/symbio-plugin-session/src/active.rs",
-      "symbols": ["params", "workdir"],
-      "capability": "收件箱条目的请求级参数与工作目录（InboxItem.params / InboxItem.workdir）：入队与直连发送信息等价，跨空间投递沿用目标会话的工作目录",
-      "future_caller": "transcript::inbox::take_inbox_batch → 会话发消息 / 续写入口（新的按债驱动链路）",
-      "batch": "session-base",
-      "e2e": ["t15-subagent-inbox"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/active.rs",
       "symbols": ["Hold", "Resume"],
       "capability": "抢占判定的待结算三态（PreemptPending::Hold 判出未落格 / Resume 已落格等收）",
       "future_caller": "transcript::inbox::PreemptionDecider 的结算路径（忙窗判定 → 空闲分支落格 / 收格）",
@@ -39,31 +31,30 @@
       "symbols": [
         "COMPRESS_CIRCUIT_COOLDOWN",
         "COMPRESS_CIRCUIT_LIMIT",
-        "clear_working_and_abort_signal",
         "compression_record_failure",
         "compression_record_success",
         "compression_should_skip"
       ],
-      "capability": "中止的强制收口（置空闲并注销中止信号）与自动压缩熔断阈值 / 冷却 / 记账",
-      "future_caller": "新链路的中止处理（act=abort）与轮首自动压缩门控",
+      "capability": "自动压缩熔断阈值 / 冷却 / 记账",
+      "future_caller": "轮首自动压缩门控",
       "batch": "session-base",
       "e2e": ["t7-abort-convergence", "t8-compression"]
     },
     {
       "path": "crates/symbio-plugin-session/src/active.rs",
-      "symbols": ["emit_transcript_rewritten", "get"],
-      "capability": "整表重写后的转写收敛帧（逐条删除 + 新首条快照）与「本实例是否在跑该会话」的可查询读口",
-      "future_caller": "压缩 L5 的改写出口 emit_transcript_rewritten；控制类动作（中止）经 ActiveSessionRegistry::get 判在跑",
+      "symbols": ["emit_transcript_rewritten", "get", "transcript_apply_snapshot"],
+      "capability": "整表重写后的转写收敛帧（逐条删除 + 新首条快照帧）与「本实例是否在跑该会话」的可查询读口",
+      "future_caller": "压缩 L5 的改写出口 emit_transcript_rewritten（快照帧经 transcript_apply_snapshot 下发）；控制类动作（中止）经 ActiveSessionRegistry::get 判在跑",
       "batch": "compression",
       "e2e": ["t8-compression", "t7-abort-convergence"]
     },
     {
-      "path": "crates/symbio-plugin-session/src/chat_session/write.rs",
-      "symbols": ["Here"],
-      "capability": "压缩载体 `Carrier::Here`：快照节点标记「压缩产物就地落在本会话」，供重建侧区分来源",
-      "future_caller": "transcript/compression 的压缩落库出口（写压缩快照节点时构造）",
+      "path": "crates/symbio-plugin-session/src/transcript.rs",
+      "symbols": ["apply_snapshot"],
+      "capability": "快照帧换基（整表重写 / 压缩快照的 messages 列表）：清掉载荷里的号，交给存储 assign_seq 唯一发号",
+      "future_caller": "ActiveSessionRegistry::transcript_apply_snapshot → Transcript::apply_snapshot（压缩 L5 改写出口）",
       "batch": "compression",
-      "e2e": ["t11-compression-node"]
+      "e2e": ["t8-compression", "t11-compression-node"]
     },
     {
       "path": "crates/symbio-plugin-session/src/message_events.rs",
@@ -155,38 +146,6 @@
     },
     {
       "path": "crates/symbio-plugin-session/src/transcript/supplements.rs",
-      "symbols": ["JOINER"],
-      "capability": "补充合并的正文连接符（空行，不引入用户没写过的字符）",
-      "future_caller": "merge_content 的纯文本拼接",
-      "batch": "supplements",
-      "e2e": ["t19-supplements-merge"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/supplements.rs",
-      "symbols": ["merge_supplements"],
-      "capability": "把一批收件箱条目合并成一条用户消息（n=1 原样返回）",
-      "future_caller": "轮首准备段：抽干收件箱后的统一入口",
-      "batch": "supplements",
-      "e2e": ["t19-supplements-merge"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/supplements.rs",
-      "symbols": ["merge_many"],
-      "capability": "n>1 时的合并结果构造（沿用第一条 id，写 supplement_ids / count）",
-      "future_caller": "merge_supplements 的多条分支",
-      "batch": "supplements",
-      "e2e": ["t19-supplements-merge"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/supplements.rs",
-      "symbols": ["merge_content"],
-      "capability": "按入队顺序拼接正文并保持内容形态无损（文本 / Parts）",
-      "future_caller": "merge_many 的正文构造",
-      "batch": "supplements",
-      "e2e": ["t19-supplements-merge"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/supplements.rs",
       "symbols": ["take_supplement_batch_sync"],
       "capability": "同步抽取补充批次（补充整合的入口）",
       "future_caller": "轮首准备段：收件箱抽干 → merge_supplements",
@@ -200,46 +159,6 @@
       "future_caller": "轮首准备段：SupplementDrain::take_inbox_batch_sync（补充整合入口）",
       "batch": "supplements",
       "e2e": ["t19-supplements-merge"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/working.rs",
-      "symbols": ["EarlyExit"],
-      "capability": "工作态迁移的提前退出分支（中止 / 强制收口时由忙变闲）",
-      "future_caller": "ActiveSessionState::clear_working_and_abort_signal（中止处理）",
-      "batch": "session-base",
-      "e2e": ["t7-abort-convergence"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/store/facts.rs",
-      "symbols": ["recall_snapshots"],
-      "capability": "顶级会话事实源的召回视图（新近优先、名额与字节双预算）",
-      "future_caller": "记忆召回读路径 memory_events::recall_view（按可见域过滤后交模型）",
-      "batch": "memory-recall",
-      "e2e": ["t29-memory-recall", "t76-recall-vis-scope"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/store/facts.rs",
-      "symbols": ["RECALL_MAX_FILES"],
-      "capability": "召回扫描的会话数上限（读成本策略）",
-      "future_caller": "recall_snapshots 的枚举循环",
-      "batch": "memory-recall",
-      "e2e": ["t29-memory-recall"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/store/facts.rs",
-      "symbols": ["RECALL_MAX_FILE_BYTES"],
-      "capability": "召回扫描的单事实源字节上限（超限不扫并出声）",
-      "future_caller": "recall_snapshots 的候选过滤",
-      "batch": "memory-recall",
-      "e2e": ["t29-memory-recall"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/store/facts.rs",
-      "symbols": ["RECALL_MAX_TOTAL_BYTES"],
-      "capability": "召回扫描的总字节上限（读成本策略）",
-      "future_caller": "recall_snapshots 的预算闸",
-      "batch": "memory-recall",
-      "e2e": ["t29-memory-recall"]
     }
   ]
 }

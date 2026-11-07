@@ -196,7 +196,14 @@ function main() {
   for (const row of rows) for (const name of row.symbols) ledgerPairs.set(`${row.path}::${name}`, row)
 
   const unregistered = [...pairs.keys()].filter((k) => !ledgerPairs.has(k)).map((k) => pairs.get(k))
-  const stale = [...ledgerPairs.keys()].filter((k) => !pairs.has(k)).map((k) => ledgerPairs.get(k))
+  // 过期项按**符号**报，不按行报：一行可能登记多个符号，只报行会让「哪一个该销账」
+  // 无从下手（`path::undefined` 那种输出就是按行报的后果）。
+  const stale = [...ledgerPairs.keys()]
+    .filter((k) => !pairs.has(k))
+    .map((k) => {
+      const [path, name] = k.split('::')
+      return { path, name }
+    })
   const landedRows = rows.filter((r) => landed.has(r.batch))
 
   if (unregistered.length || stale.length || landedRows.length) {

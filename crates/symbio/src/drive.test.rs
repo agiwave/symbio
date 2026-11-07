@@ -97,8 +97,7 @@ fn exhausted_and_stalled_are_both_visible() {
     .expect("超预算必须出声");
     assert!(exhausted.contains("步数预算用尽"), "{exhausted}");
 
-    let stalled =
-        drive_notice("s", &DriveOutcome::Stalled(vec![key()])).expect("零进展必须出声");
+    let stalled = drive_notice("s", &DriveOutcome::Stalled(vec![key()])).expect("零进展必须出声");
     assert!(stalled.contains("一圈没有新增事实"), "{stalled}");
 
     assert!(drive_notice("s", &DriveOutcome::NoDebt).is_none());

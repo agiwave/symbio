@@ -385,6 +385,7 @@ impl DriveSupport for HostDriveSupport {
                     when_id: spec.when_id,
                     unless: spec.unless,
                     when_no_open: spec.when_no_open,
+                    after_port: spec.after_port,
                     lease_ms: spec.lease_ms,
                     max_attempts: spec.max_attempts,
                 });
