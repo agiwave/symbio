@@ -58,6 +58,7 @@ pub mod retrieval;
 pub mod routes;
 pub mod rows;
 pub mod settle;
+pub mod termination;
 pub mod text;
 pub mod view_names;
 pub mod views;

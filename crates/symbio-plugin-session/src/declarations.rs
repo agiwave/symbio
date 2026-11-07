@@ -41,6 +41,12 @@ pub(crate) const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
 /// 债键才能对上（`Key` 按字段名比）。
 pub(crate) const EVENT_SESSION_SETTLED: &str = "session.settled";
 
+/// 一个 scope 算完的断言（D-367）：终答已落 **且** 宿主报告 `NoDebt` 时，由本插件的
+/// 簿记写方落它。与 `session.settled` 的区别是判据来源：`settled` 只问「收束贡献落完
+/// 没有」，`terminated` 问「这一轮还有没有未还的债」——后者由宿主交回的 `exhausted`
+/// 给出，写方不自行判环。
+pub(crate) const EVENT_SESSION_TERMINATED: &str = "session.terminated";
+
 /// 轮首召回读数（见 `symbio_plugin_api::events::EVENT_SESSION_RECALL`）：本插件是
 /// 事实源的 owner，跨会话枚举与可见域收放只能在这里做；读数落一格事实，能力包的
 /// provider 按名字读它渲染段（不扩 `PortFactReader`、不把切片塞进开轮载荷）。
@@ -54,6 +60,10 @@ pub(crate) const SESSION_CLOSE_TURN: &str = "session.close-turn";
 /// 不参与派发。实际申报在运行时（`OpeningDebts`，开关读当轮 `session.config` 的
 /// `opening_enabled`）——行名的字面量见 `opening.rs`。
 pub(crate) const SESSION_OPENING_SEAT: &str = "session.opening-seat";
+
+/// 终止事实的**归宿行**（`by = None`）：只给 `session.terminated` 一个声明期读方
+/// （`OrphanFact`），不参与派发。实际写方是宿主侧簿记写方（`termination.rs`）。
+pub(crate) const SESSION_TERMINATED_SEAT: &str = "session.terminated-seat";
 
 // 读方侧的视图名：名字住 `plugin-api` 的词汇面（由 owner 的 `PLUGIN.yml`
 // `shared_views` 生成，D-364），本插件按名字读。以下别名只保留调用点的旧名字，
@@ -95,6 +105,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("user.answer", (Entity::Scope, Verb::Asserted)),
     // 收束完成：`session.close-turn` 落完能力贡献之后写它，行据此关账。
     EventDecl::new(EVENT_SESSION_SETTLED, (Entity::Scope, Verb::Progressed)),
+    // 一个 scope 算完：终答 ∧ 无未还债（后者由宿主的 `NoDebt` 交回，D-367）。
+    EventDecl::new(EVENT_SESSION_TERMINATED, (Entity::Scope, Verb::Closed)),
     // 轮首召回读数：本插件（事实源的 owner）把跨会话可见切片折成的一格读数。
     // 写方是 `consume_inbox_turn`，读方是 `symbio-plugin-memory` 的 `RecallProvider`
     // ——provider 是纯函数拿不到别的事实源，所以读数由宿主落格、能力包按名字读。
@@ -142,6 +154,25 @@ pub(crate) const ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
+    // 终止格的归宿（`by = None`，不派发）：与首响同一手法。写方是宿主侧簿记写方，
+    // 不在债表里；这里只负责让装载期查得到「谁看护这条事实」。
+    Decl {
+        name: SESSION_TERMINATED_SEAT,
+        by: None,
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_SESSION_TERMINATED,
+            key: &["root_id"],
+            eq: &[],
+        },
+        until: &[Pattern {
+            source: EVENT_SESSION_TERMINATED,
+            key: &["root_id"],
+            eq: &[],
+        }],
+        unless: &[],
+    },
 ];
 
 /// 本插件自己的事实形状：只有 `session.settled` 的键字段 `root_id`。
@@ -149,13 +180,22 @@ pub(crate) const ROWS: &[Decl] = &[
 /// `chat.assistant.reported` 不在这里登记：它的写方虽是本插件的债行，但格位与归属
 /// 由 `loop` 的词汇表声明（`EventDecl`），写闸按名字查得到；登记成事实只会多出一条
 /// `OrphanFact` 需要归宿行，而不是多一条检查。
-pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
-    name: EVENT_SESSION_SETTLED,
-    port: None,
-    key: &[],
-    expand: &[],
-    fields: &["root_id"],
-}];
+pub(crate) const FACTS: &[FactDecl] = &[
+    FactDecl {
+        name: EVENT_SESSION_SETTLED,
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["root_id"],
+    },
+    FactDecl {
+        name: EVENT_SESSION_TERMINATED,
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["root_id", "reason"],
+    },
+];
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
 ///

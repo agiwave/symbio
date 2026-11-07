@@ -27,6 +27,9 @@ use symbio_plugin_api::port::{
     PortExecHandles, PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter,
     PortPayload, PORT_FAMILY,
 };
+use symbio_plugin_api::termination::{
+    TerminationPayload, TerminationView, TerminationWriter, TERMINATION_FAMILY,
+};
 use symbio_plugin_api::SymbioKey;
 use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::capability::CAPABILITY_VISITOR;
@@ -169,7 +172,15 @@ impl Host {
             concurrency: self.concurrency,
             handles,
         });
+        // 簿记写方：驱动**前后**各给同一份只读投影（D-367）。前一次让「开轮前已落
+        // 的事实」有机会成立谓词；后一次带宿主的 `NoDebt` 结论。终止事实落进同一
+        // 事实源，环下一圈经同一投影读回——环零知识，宿主不替它判。
+        let support_handle = Arc::clone(&support);
+        observe_termination(&gathered.writers, &*support_handle, &self.source, false).await;
         let report = gathered.runner.drive(support).await?;
+        if matches!(&report.outcome, DriveOutcome::NoDebt) {
+            observe_termination(&gathered.writers, &*support_handle, &self.source, true).await;
+        }
 
         let at = clock_now_ms().max(0) as u64;
         {
@@ -245,10 +256,21 @@ impl Host {
         }
         let runner = runner.ok_or_else(|| "drive 族没有任何提供者".to_string())?;
 
+        // 簿记写方是按行收集的**数据**：宿主不认插件名，也不给某个内置写方开旁路
+        // （D-367）。一个写方都没有时，前后两次观察都是空转。
+        let mut writers: Vec<Arc<dyn TerminationWriter>> = Vec::new();
+        for row in manager.list(TERMINATION_FAMILY).await {
+            let Some(payload) = row.payload::<TerminationPayload>() else {
+                continue;
+            };
+            writers.push(payload.writer());
+        }
+
         Ok(Gathered {
             executors,
             sources,
             runner,
+            writers,
             ctx,
         })
     }
@@ -258,6 +280,8 @@ struct Gathered {
     executors: HashMap<String, Arc<dyn PortExecutor>>,
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
     runner: Arc<dyn DriveRunner>,
+    /// 宿主侧簿记写方（`termination` 族）：驱动前后各观察一次。
+    writers: Vec<Arc<dyn TerminationWriter>>,
     /// 装配好的调用方上下文（含能力表）；原样交给执行体，宿主不解释。
     ctx: Arc<dyn PluginInvokeRequest>,
 }
@@ -508,6 +532,36 @@ impl PortFactWriter for WorldWriter {
             // 不接受无源）。空会话不填——那是真正的无源声明，交给事实源拒绝。
             draft.produced_by = draft.produced_by.or_else(|| provenance_at(&*self.source));
             let _ = self.source.append(owner.to_string(), draft);
+        }
+    }
+}
+
+/// 把同一份只读投影交给全部簿记写方，并按声明表落回它们交回的草稿（D-367）。
+///
+/// 这里只有两件事：**读投影**、**按声明写**。宿主不解释谓词，也不给任何写方
+/// 开「直接落一条业务事实」的后门——草稿的 owner 仍由 [`declared_owner`] 从事件
+/// 声明解析，与通用世界写口同一条路径。
+async fn observe_termination(
+    writers: &[Arc<dyn TerminationWriter>],
+    support: &dyn DriveSupport,
+    source: &Arc<dyn FactSource>,
+    exhausted: bool,
+) {
+    if writers.is_empty() {
+        return;
+    }
+    let facts = support.facts();
+    let view = TerminationView {
+        facts: &facts,
+        exhausted,
+    };
+    let outlet = WorldWriter {
+        source: Arc::clone(source),
+    };
+    for writer in writers {
+        for draft in writer.observe(&view) {
+            let owner = declared_owner(&draft.kind);
+            outlet.emit_owned(owner, vec![draft]).await;
         }
     }
 }

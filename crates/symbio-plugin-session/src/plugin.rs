@@ -532,6 +532,11 @@ impl Plugin for SessionPlugin {
                         as Arc<dyn symbio_plugin_api::debt::DebtSource>,
                 ))
                 .await;
+            // 终止写方（`session.terminated`，D-367）：宿主在驱动前后把同一份只读
+            // 投影交给它；谓词「终答 ∧ 无未还债」成立就落一条收束事实。
+            for row in crate::termination::rows() {
+                visitor.put(row).await;
+            }
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         symbio_sdk::capability::capability_announce_configurable(&ctx, &self.config_file).await;

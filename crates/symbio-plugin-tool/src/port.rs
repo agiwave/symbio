@@ -352,6 +352,45 @@ fn approval_denied_draft(
     )
 }
 
+/// 批准结论的留痕草稿（D-368）。
+///
+/// 批准是**一次用户动作**，但此前的授权结论只在内存里（`resume` 动作串）：
+/// `authz.denied{needs_approval}` 之后没有对应的放行结论。这里在批准执行前补上
+/// `authz.granted`，风险档**原样取闸门已交回的产物载荷**（`prompt.risk_level`，
+/// 唯一解析点在 `ApprovalGate`）——消费端不许再算一遍（D-350）。
+///
+/// 幂等键与首派的 `authz` 分开：同一笔债的第二次结论，不是重复；重放会被事实源
+/// 按同键吸收。
+fn approval_granted_draft(
+    idempotency_key: &str,
+    artifact: &serde_json::Value,
+    call_id: &str,
+    tool: &str,
+) -> Option<FactDraft> {
+    // 没有风险档的卡（非审批路径）不造授权结论：宁可不写，也不写一个假的 `unknown`。
+    let risk = artifact
+        .get("prompt")
+        .and_then(|prompt| prompt.get("risk_level"))
+        .and_then(|v| v.as_str())?;
+    Some(FactDraft {
+        key: format!("{idempotency_key}-{call_id}.authz-approved"),
+        kind: EVENT_AUTHZ_GRANTED.to_string(),
+        entity: Entity::Scope,
+        verb: Verb::Asserted,
+        payload: serde_json::json!({
+            "port": TOOL,
+            "id": call_id,
+            "attempt": 1,
+            "tool": tool,
+            "risk": risk,
+            "basis": "approved",
+            "grant": serde_json::Value::Null,
+            "deferred": risk == "unknown",
+        }),
+        produced_by: None,
+    })
+}
+
 /// 建账：把模型应答里的调用清单展开成 `request` 草稿（D-118 决策 5 的第一笔债）。
 ///
 /// 环只交纯值：应答原文（取 `id` / `calls`）、调用清单、阈值 / 放行清单 / 模式的
@@ -1455,6 +1494,15 @@ impl ToolPort {
                 };
                 args.insert(KEY_APPROVED.to_string(), serde_json::Value::Bool(true));
                 let args = serde_json::Value::Object(args);
+                // 批准留痕（D-368）：批准结论先落事实，再执行；风险档从产物载荷原样搬。
+                if let Some(draft) = approval_granted_draft(
+                    &exec.idempotency_key,
+                    &artifact.payload,
+                    &call_id,
+                    &tool_name,
+                ) {
+                    exec.emit.emit(vec![draft]).await;
+                }
                 let outcome = self
                     .run(
                         exec.clone(),

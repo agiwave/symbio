@@ -11,6 +11,69 @@ use crate::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED};
 use crate::types::Session;
 use symbio_sdk::plugin::PluginDir;
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
+/// 造一条已入库的事件（只给 `waits_for_user` 用：kind / payload / seq）。
+fn at(seq: u64, kind: &str, payload: serde_json::Value) -> Event {
+    let mut event = Event::pending(
+        format!("e-{seq}"),
+        kind,
+        Entity::Scope,
+        Verb::Asserted,
+        "session/main",
+    );
+    event.payload = payload;
+    event.seq = Some(symbio_kernel::event::Seq::new(seq));
+    event
+}
+
+fn card(seq: u64, call_id: &str) -> Event {
+    at(
+        seq,
+        EVENT_ARTIFACT_ADDED,
+        serde_json::json!({ "needs_user_action": true, "tool_call_id": call_id }),
+    )
+}
+
+fn answer(seq: u64, call_id: &str) -> Event {
+    at(
+        seq,
+        EVENT_USER_ANSWER,
+        serde_json::json!({ "call_id": call_id, "kind": "approve" }),
+    )
+}
+
+fn granted(seq: u64, call_id: &str) -> Event {
+    at(
+        seq,
+        EVENT_AUTHZ_GRANTED,
+        serde_json::json!({ "id": call_id, "basis": "approved" }),
+    )
+}
+
+/// 卡在、答未到 ⇒ 仍在等。
+#[test]
+fn card_without_decision_keeps_waiting() {
+    assert!(waits_for_user(&[card(1, "c1")]));
+}
+
+/// 答复在卡**之后** ⇒ 已答；答复在卡之前（上一轮）⇒ 仍在等。
+#[test]
+fn answer_resolves_only_when_it_follows_the_card() {
+    assert!(!waits_for_user(&[card(1, "c1"), answer(2, "c1")]));
+    assert!(waits_for_user(&[answer(1, "c1"), card(2, "c1")]));
+}
+
+/// 批准结论与答复同权（D-368）：批准之后不再算「停在卡片上」。
+#[test]
+fn approved_card_is_resolved() {
+    assert!(!waits_for_user(&[card(1, "c1"), granted(2, "c1")]));
+}
+
+/// 别的调用的答复不能替这张卡结账。
+#[test]
+fn answer_for_another_call_does_not_resolve() {
+    assert!(waits_for_user(&[card(1, "c1"), answer(2, "c2")]));
+}
+
 /// 每例独占存储根。
 fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     let dir = tempfile::tempdir().expect("临时目录创建失败");

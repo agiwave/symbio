@@ -1455,3 +1455,27 @@ async fn exhausted_budget_breaks_and_lands_a_control_event() {
         serde_json::json!("budget-exhausted")
     );
 }
+
+// ==================== 批准留痕（D-368）：风险档原样搬，不在消费端重算 ====================
+
+#[test]
+fn approval_granted_carries_the_gate_risk_without_reparsing() {
+    let artifact = serde_json::json!({
+        "prompt": { "risk_level": "high", "content": "允许执行吗" }
+    });
+    let draft = approval_granted_draft("k1", &artifact, "call-1", "shell")
+        .expect("审批卡之后应能落批准结论");
+    assert_eq!(draft.kind, EVENT_AUTHZ_GRANTED);
+    assert_eq!(draft.key, "k1-call-1.authz-approved");
+    assert_eq!(draft.payload["id"], serde_json::json!("call-1"));
+    assert_eq!(draft.payload["risk"], serde_json::json!("high"));
+    assert_eq!(draft.payload["basis"], serde_json::json!("approved"));
+    assert_eq!(draft.payload["deferred"], serde_json::json!(false));
+}
+
+#[test]
+fn approval_without_a_risk_level_writes_nothing() {
+    // 非审批路径的卡没有风险档：宁缺不假，不补一个 `unknown` 的授权结论。
+    let artifact = serde_json::json!({ "prompt": { "content": "随便问一句" } });
+    assert!(approval_granted_draft("k1", &artifact, "call-1", "ask_user").is_none());
+}

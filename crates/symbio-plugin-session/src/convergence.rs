@@ -36,8 +36,8 @@ use std::sync::Arc;
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::plugin::PluginError;
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_GRANTED, EVENT_CHAT_ASSISTANT_FALLBACK,
+    EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_ANSWER, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::FactDraft;
@@ -239,10 +239,7 @@ impl Convergence {
                 .filter(|e| e.seq.is_some_and(|seq| seq.value() > user_seq))
                 .cloned()
                 .collect();
-            let waiting_on_user = waiting_events.iter().any(|e| {
-                e.kind == EVENT_ARTIFACT_ADDED
-                    && e.payload.get("needs_user_action").and_then(Value::as_bool) == Some(true)
-            });
+            let waiting_on_user = waits_for_user(&waiting_events);
             // 发言闸拒也是**正常收束**（D-067）：终答格被拒 ⇒ 不落 `final`，但轮
             // 照样了结——拒绝是记录层的结论，不是静默中断。判据按**事实身份**认：
             // `authz.denied{key = chat.assistant.final}` 且 `root_id` 归属本轮。
@@ -586,6 +583,43 @@ impl Convergence {
         .await;
         Ok(true)
     }
+}
+
+/// 本轮是否仍停在「等用户动作」的卡上（D-368）。
+///
+/// 停在卡片上 = 某张 `needs_user_action` 的产物之后**没有**答复 / 批准事实。
+/// 两张决策事实在消费侧各有一个读法：
+/// - `user.answer{call_id, kind}`：答复 / 批准动作原文（写方：会话消息面）；
+/// - `authz.granted{id, basis:"approved"}`：批准结论（写方：工具端口，风险档从
+///   闸门已交回的 `prompt.risk_level` 取，不在消费端重算）。
+///
+/// 按 seq 比较而不是「出现过」：重问会在答复之后落一张新卡，同一调用应重新计入
+/// 等待。没有配对键的卡保守地按仍在等。
+fn waits_for_user(events: &[Event]) -> bool {
+    events.iter().any(|pending| {
+        if pending.kind != EVENT_ARTIFACT_ADDED
+            || pending
+                .payload
+                .get("needs_user_action")
+                .and_then(Value::as_bool)
+                != Some(true)
+        {
+            return false;
+        }
+        let Some(call_id) = pending.payload.get("tool_call_id").and_then(Value::as_str) else {
+            return true;
+        };
+        !events.iter().any(|answer| {
+            answer
+                .seq
+                .zip(pending.seq)
+                .is_some_and(|(answer_seq, card_seq)| answer_seq.value() > card_seq.value())
+                && ((answer.kind == EVENT_USER_ANSWER
+                    && answer.payload.get("call_id").and_then(Value::as_str) == Some(call_id))
+                    || (answer.kind == EVENT_AUTHZ_GRANTED
+                        && answer.payload.get("id").and_then(Value::as_str) == Some(call_id)))
+        })
+    })
 }
 
 /// 对话线：由既有折叠（与实时面同一份规则）折出用户 / 助手文本节点。

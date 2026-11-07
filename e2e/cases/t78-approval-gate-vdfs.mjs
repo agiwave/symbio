@@ -292,9 +292,9 @@ export default defineCase(
       );
 
       // 事实面（批准后的形状）：**一次世界交互 = 一笔债 = 一条事实**。
-      // ① `user.answer{kind:approve}` —— 授权放行**当前没有事实留痕**，唯一痕迹就是
-      //    这条答复事实。写 `authz.granted` 就得在能力内重解析风险档 = 第二个解析器，
-      //    不做；这是**已知缺口**（记台账），不是「设计如此」。
+      // ① `user.answer{kind:approve}` —— 人动作原文；批准结论另有一条
+      //    `authz.granted{basis:"approved"}`（D-368：风险档原样取审批卡的
+      //    `prompt.risk_level`，不在能力内重解析 = 不造第二个解析器）。
       // ② 批级 `sent`：恢复行复用首派债键 `tool:<request_id>`，收束落回同一笔批债
       //    （不再要求逐调用的 `request` —— 那是旧形状）。
       // ③ 同一调用的**第二次落格** `artifact.added`：键带 `:resume` 后缀、`tool_call_id`
@@ -313,6 +313,34 @@ export default defineCase(
       assert(
         wireId,
         `user.answer 必须点名调用的 wire id（实际: ${JSON.stringify(approveFact.payload)}）`,
+      );
+      // 批准结论（D-368）：风险档必须**原样**等于审批卡上的那一格（闸门是唯一解析点），
+      // 且同一调用只落一条 approved 结论。
+      const card = events1.find(
+        (e) =>
+          e.kind === 'artifact.added' &&
+          e.payload?.tool_call_id === wireId &&
+          e.payload?.needs_user_action === true,
+      );
+      assert(card, `审批卡应落在事实面（wire=${wireId}）`);
+      const cardRisk = card.payload?.prompt?.risk_level;
+      assert(
+        cardRisk,
+        `审批卡必须带 risk_level（实际: ${JSON.stringify(card.payload?.prompt)}）`,
+      );
+      const granted = events1.filter(
+        (e) => e.kind === 'authz.granted' && e.payload?.id === wireId,
+      );
+      assertEq(
+        granted.length,
+        1,
+        `批准结论应恰好一条（实际: ${JSON.stringify(granted.map((e) => e.payload))}）`,
+      );
+      assertEq(granted[0].payload?.basis, 'approved', '批准结论的 basis');
+      assertEq(
+        granted[0].payload?.risk,
+        cardRisk,
+        '批准结论的风险档必须原样等于审批卡（不得在消费端重算）',
       );
       const requested = events1.find(
         (e) =>
