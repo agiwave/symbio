@@ -22,6 +22,13 @@ pub const PORT_MODEL_ASSIST: &str = "model.assist";
 /// 工具端口：`tool` 声明，`model` 在债表里等它。
 pub const PORT_TOOL: &str = "tool";
 
+/// 模型端口：`model` 声明，本轮往返的 `response` / `failed` 载荷 `port` 取它。
+///
+/// 与 [`PORT_TOOL`] 同属**多义拼写**（载荷里的 `model` 字段是模型 id），字面量扫描
+/// 会把不同概念判成重复，因此只由「同名 const 在两个 crate」那一半守；消费方 import，
+/// 不要写字面量。
+pub const PORT_MODEL: &str = "model";
+
 /// `todo_write` 的落格行为：`local` 声明工具，`task` 实现行为。
 pub const BEHAVIOR_TASK_TABLE: &str = "task_table";
 

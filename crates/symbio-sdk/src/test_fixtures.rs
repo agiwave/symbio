@@ -114,7 +114,7 @@ pub const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)),
 ];
 
-/// 对话发言面（9 条）。
+/// 对话发言面（9 条事件 + 1 个端口名）。
 pub const CHAT: ChatVocab = ChatVocab {
     user_message: EVENT_USER_MESSAGE,
     branch: EVENT_TURN_BRANCH,
@@ -125,6 +125,7 @@ pub const CHAT: ChatVocab = ChatVocab {
     fallback: EVENT_CHAT_ASSISTANT_FALLBACK,
     progress: EVENT_CHAT_ASSISTANT_PROGRESS,
     denied: EVENT_AUTHZ_DENIED,
+    model_port: "model",
 };
 
 /// 消息变更面（5 条）。

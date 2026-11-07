@@ -325,7 +325,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 与「未执行」结果子项因此都由投影器按事实渲染。真正跑过的调用已有
     // `artifact.added` 产出的两张卡，这里一条都不补；父节点终态由子事实齐备自然给出。
     let existing: HashSet<String> = out.iter().map(|n| n.id.clone()).collect();
-    for mut node in unfinished_nodes(events, &existing, &out) {
+    for mut node in unfinished_nodes(events, &existing, &out, c) {
         if existing.contains(&node.id) {
             continue;
         }
@@ -416,6 +416,7 @@ fn nodes_of(
                 .get("root_id")
                 .and_then(|v| v.as_str())
                 .is_some_and(|turn| denied_speech.contains(turn)),
+            c,
         );
     }
     match slot_of(e, c, m) {
@@ -740,24 +741,31 @@ fn push_step_nodes(
     }
 }
 
+/// 这一条 `response` / `failed` 是不是**本轮自己的模型往返**。
+///
+/// 两个维度都来自载荷、都从词表取名字：`port` 是这一轮模型端口的名字（`ChatVocab`
+/// 注入），`via` 缺席是「不是内部往返（措辞 / 裁判 / 摘要）」。core 不写端口的字面量
+/// ——与事件名同一条纪律（D-203 / D-206）。
+fn is_model_roundtrip(e: &Event, c: &ChatVocab) -> bool {
+    e.payload.get("port").and_then(|v| v.as_str()) == Some(c.model_port)
+        && e.payload.get("via").is_none()
+}
+
 /// 一次模型往返（`response` / `failed`）→ 最多两个子节点（Reasoning / Text）。
 ///
 /// 载荷自带这一轮的产出身份（`output_fields` 在落格前算定）：
 /// - 有工具调用 ⇒ 正文取 `text`（思考另有节点）；
 /// - 没有工具调用 ⇒ 正文取 `answer`（收束轮折出的那段）。
 ///
-/// 只有**本轮自己的**往返（端口 `model`、无 `via`）产节点：内部往返（措辞 / 裁判 /
-/// 摘要）的 `response` 同样带正文，但那些话不是这一轮对读者说的。
+/// 只有**本轮自己的**往返（端口是词表里的模型端口、无 `via`）产节点：内部往返
+/// （措辞 / 裁判 / 摘要）的 `response` 同样带正文，但那些话不是这一轮对读者说的。
 /// 状态取载荷 `status`（`failed` 的停法）——`response` 没有该键 ⇒ `Completed`。
 ///
 /// `speech_denied`：这一轮的发言被写侧闸拒 ⇒ **答复那一次**（无工具调用）不产节点。
 /// 正文与思考仍是网格里的事实，但从未获准进入对话（fail-closed）；工具轮的中途产出
 /// 不受影响——它们属于已经准许的循环。
-fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
-    if e.payload.get("port").and_then(|v| v.as_str()) != Some("model") {
-        return Vec::new();
-    }
-    if e.payload.get("via").is_some() {
+fn output_nodes(e: &Event, speech_denied: bool, c: &ChatVocab) -> Vec<ChatNode> {
+    if !is_model_roundtrip(e, c) {
         return Vec::new();
     }
     let Some(root) = str_of(e, "root_id") else {
@@ -824,15 +832,14 @@ fn call_identity(id: &str) -> &str {
 
 /// 把端口债键对回某次模型应答交回的调用；对不回的债（环侧另行开账的合成键）
 /// 返回 `None`——投影面不从合成键里凭空造节点。
-fn issued_call_id(events: &[Event], debt: &str) -> Option<String> {
+fn issued_call_id(events: &[Event], debt: &str, c: &ChatVocab) -> Option<String> {
     let id = call_identity(debt);
     events
         .iter()
         .rev()
         .any(|e| {
             e.kind == EVENT_RESPONSE
-                && e.payload.get("port").and_then(|v| v.as_str()) == Some("model")
-                && e.payload.get("via").is_none()
+                && is_model_roundtrip(e, c)
                 && e.payload
                     .get("calls")
                     .and_then(|v| v.as_array())
@@ -868,6 +875,7 @@ fn unfinished_nodes(
     events: &[Event],
     existing: &HashSet<String>,
     projected: &[ChatNode],
+    c: &ChatVocab,
 ) -> Vec<ChatNode> {
     let mut nodes = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -891,7 +899,7 @@ fn unfinished_nodes(
         // 端口债键 → **模型交回的调用 id**（节点身份）。开账兜底键是环侧合成的
         // （`…-c{idx:03}-{model_id}`），它与模型 id 不相等；节点面只认模型 id，
         // 因为那才是用户在流式面看到、并且下一轮请求要原样回灌的那一个。
-        let Some(node_id) = issued_call_id(events, &call_id) else {
+        let Some(node_id) = issued_call_id(events, &call_id, c) else {
             continue;
         };
         // 已有子节点（真正跑过）⇒ 调用卡与结果卡都归 `artifact.added`，这里不补。

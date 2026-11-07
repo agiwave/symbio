@@ -14,6 +14,7 @@ pub(super) const CHAT: ChatVocab = ChatVocab {
     fallback: "chat.assistant.fallback",
     progress: "chat.assistant.progress",
     denied: "authz.denied",
+    model_port: "model",
 };
 
 pub(super) const MESSAGE: MessageVocab = MessageVocab {

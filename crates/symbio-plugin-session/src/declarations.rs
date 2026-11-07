@@ -254,6 +254,9 @@ pub(crate) const FACTS: &[FactDecl] = &[
 /// （E-009 禁兄弟插件依赖，故不引用 loop 的 `vocab`）；任务族五条已随能力迁到
 /// `crates/symbio-plugin-task`——拼写同样只从清单生成物取。
 ///
+/// `model_port` 是**端口名**，不属事件清单：它从共享词汇面
+/// `symbio_plugin_api::vocab::PORT_MODEL` 取，折叠据此认「本轮自己的模型往返」。
+///
 /// ## 为什么是三张而不是一张
 ///
 /// 按**面**切开，每张表的大小就是那个折叠算法真正的依赖：`commitment_records` 只认承诺
@@ -269,6 +272,7 @@ pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
         fallback: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK,
         progress: EVENT_CHAT_ASSISTANT_PROGRESS,
         denied: symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
+        model_port: symbio_plugin_api::vocab::PORT_MODEL,
     };
 
 /// 消息变更面（5 条）：本插件是这五条里四条的 owner（`message.*` 与

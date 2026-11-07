@@ -21,7 +21,7 @@
 //!
 //! | 表 | 字段 | 消费方 |
 //! |---|---|---|
-//! | [`ChatVocab`] | 9：开轮 / 分支两支 / 汇报 / 开场 / 定稿 / 兜底 / 进展 / 被拒 | `turns` `turnstate` `branch` `rebuild` `transcript` `prompt_fidelity` |
+//! | [`ChatVocab`] | 10：开轮 / 分支两支 / 汇报 / 开场 / 定稿 / 兜底 / 进展 / 被拒 / 模型端口 | `turns` `turnstate` `branch` `rebuild` `transcript` `prompt_fidelity` |
 //! | [`MessageVocab`] | 5：产物 / 增 / 改 / 删 / 巩固 | `mutations` `rebuild` `transcript` `prompt_fidelity` |
 //! | [`CommitmentVocab`] | 4：立约 / 履约 / 违约 / 断言 | `actors::commitment` |
 //!
@@ -51,8 +51,8 @@
 
 /// 对话的**发言面**：一轮里谁说了一句话、这一轮怎么开的、为什么停。
 ///
-/// 9 个字段 = 这一面的闭集。加一条发言类事件 ⇒ 加一个字段 ⇒ 编译期点出全部折叠与
-/// 全部调用方；**内核与 core 的文件零 diff**，这正是本表存在的理由。
+/// 9 个事件名字段 + 1 个端口名字段 = 这一面的闭集。加一条发言类事件 ⇒ 加一个字段 ⇒
+/// 编译期点出全部折叠与全部调用方；**内核与 core 的文件零 diff**，这正是本表存在的理由。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatVocab {
     /// 开轮：`turn × opened`。折叠据它认「这一轮从哪开始」（幕锚）。
@@ -73,6 +73,13 @@ pub struct ChatVocab {
     pub progress: &'static str,
     /// 被拒：`turn × asserted`。不产生收束格，但回答「这一轮为什么停」。
     pub denied: &'static str,
+    /// 这一轮模型往返的**端口名**（`response` / `failed` 载荷里的 `port`）。
+    ///
+    /// 它和上面九个不是同类：上面是事件名，它是端口名。放在同一张表里的理由与
+    /// 「这一面的闭集」相同——折叠需要判「这条往返是不是这一轮对读者说的」，
+    /// 而那个判据的两个维度（端口、有无 `via`）只能由调用方交进来；写字面量就是
+    /// core 又认识了一个世界名（D-203 / D-206 同一形状）。
+    pub model_port: &'static str,
 }
 
 impl ChatVocab {
