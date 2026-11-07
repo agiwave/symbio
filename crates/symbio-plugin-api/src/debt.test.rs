@@ -27,6 +27,31 @@ fn fact_identities_are_read_by_kind_without_counting() {
 }
 
 #[test]
+fn latest_fact_id_names_the_current_instance_while_facts_of_lists_all() {
+    let mut facts = DebtFacts::default();
+    for (id, text) in [("u-1", "first"), ("u-2", "second")] {
+        facts.note_fact("user.message", id);
+        facts.note_fact_payload("user.message", id, json!({ "text": text }));
+    }
+
+    assert_eq!(
+        facts.latest_fact_id("user.message"),
+        Some("u-2"),
+        "单实例口径：最新一条即当前那一份"
+    );
+    let all: Vec<_> = facts
+        .facts_of("user.message")
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(
+        all,
+        ["u-1", "u-2"],
+        "多份实例同时有效时必须走 facts_of，不能在 latest 里丢掉前一份"
+    );
+}
+
+#[test]
 fn spec_builder_carries_identity_as_data() {
     let spec = DebtSpec::new("row", "demo", "demo:1", json!({"q": 1}))
         .after("demo:0")

@@ -446,7 +446,6 @@ async fn ctx_with_tool(
 fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext, PortInput) {
     (
         PortExecContext {
-            deadline_ms: None,
             abort: ExecAbortSignal::new(),
             idempotency_key: "tc-1".to_string(),
             sink: ExecEventSink::silent(),
@@ -595,7 +594,6 @@ fn requested_call_with(
 ) -> (PortExecContext, PortInput) {
     (
         PortExecContext {
-            deadline_ms: None,
             abort: ExecAbortSignal::new(),
             idempotency_key: "tool-1".to_string(),
             sink: ExecEventSink::silent(),
@@ -815,7 +813,6 @@ fn authz_call(
         symbio_plugin_api::port::PortFactEmit::new(Arc::new(CapturedFacts(captured.clone())));
     (
         PortExecContext {
-            deadline_ms: None,
             abort: ExecAbortSignal::new(),
             idempotency_key: "req-1".to_string(),
             sink: ExecEventSink::silent(),
@@ -1011,7 +1008,6 @@ fn open_call(
         symbio_plugin_api::port::PortFactEmit::new(Arc::new(CapturedFacts(captured.clone())));
     (
         PortExecContext {
-            deadline_ms: None,
             abort: ExecAbortSignal::new(),
             idempotency_key: "open-7-d2".to_string(),
             sink: ExecEventSink::silent(),

@@ -162,7 +162,6 @@ async fn notify_port_registers_and_executes_for_real() {
         .execute(
             PortExecContext {
                 emit: symbio_plugin_api::port::PortFactEmit::silent(),
-                deadline_ms: None,
                 abort: ExecAbortSignal::new(),
                 idempotency_key: "request-notify-1".to_string(),
                 sink: ExecEventSink::Null,
@@ -207,7 +206,6 @@ async fn notify_port_without_token_fails_without_network() {
         .execute(
             PortExecContext {
                 emit: symbio_plugin_api::port::PortFactEmit::silent(),
-                deadline_ms: None,
                 abort: ExecAbortSignal::new(),
                 idempotency_key: "request-notify-2".to_string(),
                 sink: ExecEventSink::Null,

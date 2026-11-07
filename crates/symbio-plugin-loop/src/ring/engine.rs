@@ -528,7 +528,6 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
 
     let writer = Arc::new(CollectingWriter::new(ctx.outlet()));
     let exec = PortExecContext {
-        deadline_ms: Some(now_ms.saturating_add(row.lease_ms)),
         // 交给执行体的是**本轮同一个**信号（从上一条派发的 ctx 读回），不是现造的死信号。
         abort,
         idempotency_key: format!("{}:{}:{}", row.port, row.id, attempt),

@@ -42,3 +42,95 @@ fn the_debt_id_derives_from_the_latest_requested_fact() {
     assert!(row.unless.is_none());
     assert!(row.when_no_open.is_none());
 }
+
+fn note_request(facts: &mut DebtFacts, id: &str, calls: &[&str]) {
+    facts.note_fact(EVENT_TOOL_REQUESTED, id);
+    let calls: Vec<_> = calls
+        .iter()
+        .map(|call| json!({ "id": call, "name": "demo", "arguments": {} }))
+        .collect();
+    facts.note_fact_payload(EVENT_TOOL_REQUESTED, id, json!({ "calls": calls }));
+}
+
+fn note_answer(facts: &mut DebtFacts, call_id: &str) {
+    let id = format!("user-answer:{call_id}");
+    facts.note_fact(EVENT_USER_ANSWER, &id);
+    facts.note_fact_payload(
+        EVENT_USER_ANSWER,
+        &id,
+        json!({ "call_id": call_id, "kind": "answer" }),
+    );
+}
+
+fn resume_rows(rows: &[DebtSpec]) -> Vec<&DebtSpec> {
+    rows.iter()
+        .filter(|row| row.name == "tool-resume")
+        .collect()
+}
+
+#[test]
+fn resume_pairs_the_answer_to_the_request_that_owns_its_call() {
+    let mut facts = DebtFacts::default();
+    note_request(&mut facts, "tool.requested:r1", &["call-1"]);
+    note_request(&mut facts, "tool.requested:r2", &["call-2"]);
+    note_answer(&mut facts, "call-1");
+
+    let rows = ToolDebts.rows(&request(), &facts);
+    let resume = resume_rows(&rows);
+    assert_eq!(resume.len(), 1);
+    assert_eq!(
+        resume[0].id, "tool:tool.requested:r1",
+        "答复属于 r1 就恢复 r1——最近一条请求 r2 不是配对"
+    );
+    assert_eq!(
+        resume[0].payload["answer_event"], "user-answer:call-1",
+        "载荷带答复事实自己的身份"
+    );
+}
+
+#[test]
+fn each_answer_resumes_its_own_request() {
+    let mut facts = DebtFacts::default();
+    note_request(&mut facts, "tool.requested:r1", &["call-1"]);
+    note_request(&mut facts, "tool.requested:r2", &["call-2"]);
+    note_answer(&mut facts, "call-1");
+    note_answer(&mut facts, "call-2");
+
+    let rows = ToolDebts.rows(&request(), &facts);
+    let resume = resume_rows(&rows);
+    assert_eq!(resume.len(), 2, "两条答复各自归自己的请求");
+    assert_eq!(resume[0].id, "tool:tool.requested:r1");
+    assert_eq!(resume[0].payload["answer_event"], "user-answer:call-1");
+    assert_eq!(resume[1].id, "tool:tool.requested:r2");
+    assert_eq!(resume[1].payload["answer_event"], "user-answer:call-2");
+}
+
+#[test]
+fn an_unowned_answer_does_not_hijack_the_latest_request() {
+    let mut facts = DebtFacts::default();
+    note_request(&mut facts, "tool.requested:r1", &["call-1"]);
+    note_answer(&mut facts, "call-gone");
+
+    let rows = ToolDebts.rows(&request(), &facts);
+    assert!(
+        resume_rows(&rows).is_empty(),
+        "找不到所属请求就不恢复，不拿最新请求顶替"
+    );
+}
+
+#[test]
+fn multiple_answers_for_one_request_keep_the_last() {
+    let mut facts = DebtFacts::default();
+    note_request(&mut facts, "tool.requested:r1", &["call-1", "call-2"]);
+    note_answer(&mut facts, "call-1");
+    note_answer(&mut facts, "call-2");
+
+    let rows = ToolDebts.rows(&request(), &facts);
+    let resume = resume_rows(&rows);
+    assert_eq!(resume.len(), 1, "一条请求只有一个恢复键，不重复申报");
+    assert_eq!(resume[0].id, "tool:tool.requested:r1");
+    assert_eq!(
+        resume[0].payload["answer_event"], "user-answer:call-2",
+        "一次恢复只消费一条答复，取最后一条；批内多卡见 T-036"
+    );
+}

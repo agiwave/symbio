@@ -134,7 +134,6 @@ fn exec_context() -> symbio_plugin_api::port::PortExecContext {
         json!("main"),
     )]);
     symbio_plugin_api::port::PortExecContext {
-        deadline_ms: None,
         abort: symbio_plugin_api::ExecAbortSignal::new(),
         idempotency_key: "model-1-1".to_string(),
         sink: symbio_plugin_api::ExecEventSink::Null,

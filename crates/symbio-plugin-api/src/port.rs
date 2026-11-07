@@ -128,10 +128,11 @@ pub trait PortFactReader: Send + Sync + 'static {
 }
 
 /// 一笔债的执行上下文（`DE-047` I-6.5 / D-305 裁决一）：命名不带世界词。
+///
+/// **不含租约截止**（D-370）：租约是环的簿记（落在 `sent{deadline_ms}`），不是执行体的
+/// 预算；执行体各自持有自己的超时常数。
 #[derive(Clone)]
 pub struct PortExecContext {
-    /// 截止时刻（毫秒，相对时间轴）；`None` = 无截止。
-    pub deadline_ms: Option<u64>,
     /// 取消信号。
     pub abort: ExecAbortSignal,
     /// 幂等键：同一笔债的重放按它去重。
