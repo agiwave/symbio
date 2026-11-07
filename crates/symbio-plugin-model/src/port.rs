@@ -16,8 +16,8 @@ use symbio_plugin_api::context::{
 };
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED,
-    EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED, EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED,
-    EVENT_USER_MESSAGE,
+    EVENT_SESSION_CONFIG, EVENT_TOOL_CALL_REQUESTED, EVENT_TOOL_REQUESTED, EVENT_TURN_BRANCH,
+    EVENT_TURN_BRANCH_SELECTED, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortFactEmit, PortInput, PortOutcome,
@@ -731,17 +731,43 @@ impl PortExecutor for ModelExecutor {
                 emit_outcome(&exec.emit, key, kind, verb, payload.clone()).await;
             }
         }
-        // 工具轮的世界事实：债表只问「有没有 `tool.requested`」，执行体自己从读面取清单。
-        // 身份取本次派发的幂等键（一轮一次，跨轮天然不同），不靠计数。
+        // 工具轮的世界事实：`tool.requested` 是组织键（一轮一条），`tool.call.requested`
+        // 是逐笔债的标记（按 `calls[]` 一调用一条，D-378）。债表只问标记存在性，不读
+        // `tool.requested` 的载荷。身份取本次派发的幂等键（一轮一次，跨轮天然不同），
+        // 标记键再拼 `call_id`——同一 `(request_id, call_id)` 重试由事实源按 `event_id`
+        // 吸收，不会长出第二条。
         if let Some(payload) = requested {
+            let request_id = format!("{EVENT_TOOL_REQUESTED}:{}", exec.idempotency_key);
             emit_outcome(
                 &exec.emit,
-                format!("{EVENT_TOOL_REQUESTED}:{}", exec.idempotency_key),
+                request_id.clone(),
                 EVENT_TOOL_REQUESTED,
                 Verb::Asserted,
-                payload,
+                payload.clone(),
             )
             .await;
+            let markers: Vec<FactDraft> = payload["calls"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|call| {
+                    let call_id = call.get("id").and_then(serde_json::Value::as_str)?;
+                    Some(FactDraft {
+                        key: format!("{EVENT_TOOL_CALL_REQUESTED}:{request_id}:{call_id}"),
+                        kind: EVENT_TOOL_CALL_REQUESTED.to_string(),
+                        entity: Entity::Scope,
+                        verb: Verb::Asserted,
+                        payload: serde_json::json!({
+                            "request_id": request_id.clone(),
+                            "call_id": call_id,
+                        }),
+                        produced_by: None,
+                    })
+                })
+                .collect();
+            if !markers.is_empty() {
+                exec.emit.emit(markers).await;
+            }
         }
         outcome
     }

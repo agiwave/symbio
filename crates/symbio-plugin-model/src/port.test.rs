@@ -317,6 +317,52 @@ async fn a_tool_round_writes_one_tool_requested_for_the_whole_turn() {
     assert_eq!(calls[1]["id"], "wire-2");
 }
 
+/// 逐笔标记：N 次调用 ⇒ N 条 `tool.call.requested`，字段是 `(request_id, call_id)`。
+///
+/// 重试幂等由事实键承担：同一对再次执行时草稿键逐字相同，事实源按 `event_id`
+/// 吸收重复——不派生第二笔债。
+#[tokio::test]
+async fn tool_call_markers_are_one_per_call_and_idempotent() {
+    let (ctx, recorder) = recording_context();
+    let outcome = executor(FakeOutcome::WithToolCalls)
+        .execute(ctx, input(json!({"root_id": "u-1", "principal": "user"})))
+        .await;
+    assert!(outcome.success());
+
+    let drafts = recorder.drafts.lock().unwrap().clone();
+    let markers: Vec<_> = drafts
+        .iter()
+        .filter(|draft| draft.kind == "tool.call.requested")
+        .cloned()
+        .collect();
+    assert_eq!(markers.len(), 2, "一次调用一条标记（实际草稿: {drafts:?}）");
+    assert_eq!(
+        markers[0].key,
+        "tool.call.requested:tool.requested:model-1-1:wire-1"
+    );
+    assert_eq!(markers[0].payload["request_id"], "tool.requested:model-1-1");
+    assert_eq!(markers[0].payload["call_id"], "wire-1");
+    assert_eq!(markers[1].payload["call_id"], "wire-2");
+
+    // 同一 `(request_id, call_id)` 重放：键相同 ⇒ 事实源吸收，只留一条。
+    let source = symbio_kernel::store::MemoryStore::<
+        symbio_plugin_api::fact_source::Fact,
+    >::default();
+    for draft in markers.iter().chain(markers.iter()) {
+        let _ = symbio_plugin_api::fact_source::FactSource::append(
+            &source,
+            "model".into(),
+            draft.clone(),
+        );
+    }
+    let facts = symbio_plugin_api::fact_source::FactSource::facts(&source);
+    let marked: Vec<_> = facts
+        .iter()
+        .filter(|fact| fact.kind == "tool.call.requested")
+        .collect();
+    assert_eq!(marked.len(), 2, "重放不长出第二条标记（实际: {facts:?}）");
+}
+
 /// 收束轮（无工具调用）不写 `tool.requested`：缺这条事实就不欠工具轮。
 #[tokio::test]
 async fn a_closing_round_writes_no_tool_requested() {
