@@ -125,8 +125,14 @@ impl SessionPlugin {
                 // 详见 `session_content` 的文档。
                 let live = self.live_messages_of(id).await;
                 let mode = self.presentation_mode().await;
+                let events = self
+                    .get_store()
+                    .await
+                    .map_err(vdfs_from_plugin_error)?
+                    .read_events(id)
+                    .map_err(VdfsError::internal)?;
                 Ok(VdfsResponse::Read(session_content(
-                    &session, live, id, mode,
+                    &session, live, &events, id, mode,
                 )?))
             }
             // 会话本身（`path` 即会话 id —— 具名新建时它就是**身份**，见
@@ -310,8 +316,14 @@ impl SessionPlugin {
                 // 自己的在途缓冲，而不是父会话的——父会话的在途消息不属于它。
                 let live = self.live_messages_of(&session.id).await;
                 let mode = self.presentation_mode().await;
+                let events = self
+                    .get_store()
+                    .await
+                    .map_err(vdfs_from_plugin_error)?
+                    .read_events(&session.id)
+                    .map_err(VdfsError::internal)?;
                 Ok(VdfsResponse::Read(session_content(
-                    &session, live, id, mode,
+                    &session, live, &events, id, mode,
                 )?))
             }
             VdfsRequest::Write { .. } => Err(VdfsError::invalid(format!("该路径不可写入：{path}"))),

@@ -116,12 +116,12 @@ impl BranchLedger {
     /// 组锚 = 最早出现的成员 id：`of` 是被重试的那一支，它先入集，所以锚天然是**第一次
     /// 尝试**的根。在已属于某组的成员上再重试时两组并成一组、锚取较早的那个——
     /// 「切回旧支再重试一次」因此不会开出第二个组。
-    fn fold(events: &[Event], v: &ChatVocab) -> Self {
+    fn fold(events: &[Event], branch: &str, branch_selected: &str) -> Self {
         let mut parent: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         let mut picks: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         for e in events {
-            if e.kind == v.branch {
+            if e.kind == branch {
                 let (Some(of), Some(into)) = (payload_str(e, "of"), payload_str(e, "into")) else {
                     continue;
                 };
@@ -140,7 +140,7 @@ impl BranchLedger {
                     picks.remove(&rb);
                 }
                 picks.insert(anchor_of(&mut parent, &into), into);
-            } else if e.kind == v.branch_selected {
+            } else if e.kind == branch_selected {
                 let Some(sel) = payload_str(e, "selected") else {
                     continue;
                 };
@@ -186,16 +186,17 @@ struct BranchMark {
 fn marks(
     events: &[Event],
     live: impl Fn(&str) -> bool,
-    v: &ChatVocab,
+    branch: &str,
+    branch_selected: &str,
 ) -> std::collections::HashMap<String, BranchMark> {
-    let ledger = BranchLedger::fold(events, v);
+    let ledger = BranchLedger::fold(events, branch, branch_selected);
     if ledger.is_empty() {
         return std::collections::HashMap::new();
     }
     let mut parent = ledger.parent;
     let mut seen: Vec<String> = Vec::new();
     for e in events {
-        if e.kind != v.branch {
+        if e.kind != branch {
             continue;
         }
         for key in ["of", "into"] {
@@ -247,7 +248,12 @@ fn marks(
 /// 在世的证据这里是「**有没有对应的节点**」：一支从没产出过根节点就没有可画的东西，
 /// 把它列进 `candidates` 只会多出一个点不动的候选。
 pub fn stamp_branches(nodes: &mut [ChatNode], events: &[Event], v: &ChatVocab) {
-    let marks = marks(events, |id| nodes.iter().any(|n| n.id == id), v);
+    let marks = marks(
+        events,
+        |id| nodes.iter().any(|n| n.id == id),
+        v.branch,
+        v.branch_selected,
+    );
     if marks.is_empty() {
         return;
     }
@@ -284,7 +290,21 @@ pub fn unselected_roots(
     removed: impl Fn(&str) -> bool,
     v: &ChatVocab,
 ) -> std::collections::HashSet<String> {
-    marks(events, |id| !removed(id), v)
+    unselected_roots_named(events, removed, v.branch, v.branch_selected)
+}
+
+/// 同 [`unselected_roots`]，但**只收两条名字**、不要整张 [`ChatVocab`]。
+///
+/// 给「手折请求包、又不该抄一份折叠算法」的消费方用（模型端口的请求装配就是这种：
+/// 它按事实自己拼 prompt，不经过 [`super::transcript`]）。折叠仍只有这一处实现，
+/// 名字取 owner 的事件常量。
+pub fn unselected_roots_named(
+    events: &[Event],
+    removed: impl Fn(&str) -> bool,
+    branch: &str,
+    branch_selected: &str,
+) -> std::collections::HashSet<String> {
+    marks(events, |id| !removed(id), branch, branch_selected)
         .into_iter()
         .filter(|(_, m)| !m.selected)
         .map(|(id, _)| id)

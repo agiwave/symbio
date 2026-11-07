@@ -512,6 +512,87 @@ impl SessionPlugin {
         Ok(())
     }
 
+    // ==================== 分支重试 ====================
+
+    /// 重试另开一支（D-358）：校验落点是**那一支的轮锚**（用户消息节点），铸新根 id，
+    /// 落一条 `turn.branch{of, into}`，返回**换上新根 id 的那条用户消息**。
+    ///
+    /// 开轮不在这里：本域只管写语义（「动作 → 事实」）。调用方（地址面）把返回的
+    /// 节点入队并按空闲规则开轮——与 `write(<A>/inbox)` 用的是同一个开轮单元。
+    pub(crate) async fn retry_branch(
+        &self,
+        session_id: &str,
+        mid: &str,
+        actor: &str,
+    ) -> Result<cm::ChatNode, PluginError> {
+        use symbio_kernel::event::{Entity, Verb};
+        use symbio_plugin_api::events::EVENT_TURN_BRANCH;
+        use symbio_plugin_api::FactDraft;
+
+        let chat_session = self.open_chat_session(session_id).await?;
+        let messages = chat_session.get_messages().await?;
+        let origin = messages
+            .iter()
+            .find(|m| m.id == mid)
+            .ok_or_else(|| PluginError::NotFound(format!("消息不存在: {mid}")))?;
+        if origin.node_role() != Some(cm::NodeRole::User) {
+            return Err(PluginError::ValidationError(format!(
+                "{mid} 不是一支的轮锚（用户消息节点）：重试的落点是那一支自身，\
+                 不是轮内某条产出"
+            )));
+        }
+
+        // 新根 id = 新一条用户消息的节点 id。它同时是转写里的地址末段，撞上就是
+        // 两条消息一个名字——与 `new_session_id` 一样先查再落。
+        let mut new_id = String::new();
+        for _ in 0..8 {
+            let candidate = symbio_sdk::llm::turn::llm_short_id();
+            if !messages.iter().any(|m| m.id == candidate) {
+                new_id = candidate;
+                break;
+            }
+        }
+        if new_id.is_empty() {
+            new_id = uuid::Uuid::new_v4().to_string();
+        }
+
+        let source = self.fact_source(session_id).await?;
+        let anchor = source
+            .range(0)
+            .last()
+            .and_then(|e| e.seq)
+            .map(|s| s.value())
+            .ok_or_else(|| {
+                PluginError::InternalError("重试未能入格：事实源为空，没有可用的溯源锚".to_string())
+            })?;
+        // 幂等键带新根 id：每按一次重试就该多一支；**不是**「切到同一支」那种可合并的
+        // 重复。反过来，同一次动作重放也不会凭空多出第二条。
+        let draft = FactDraft {
+            key: format!("branch-{mid}-{new_id}"),
+            kind: EVENT_TURN_BRANCH.to_string(),
+            entity: Entity::Scope,
+            verb: Verb::Asserted,
+            payload: json!({ "of": mid, "into": new_id }),
+            produced_by: Some(anchor),
+        };
+        source
+            .append(actor.to_string(), draft)
+            .map_err(|e| PluginError::InternalError(format!("分支重试未能入格：{e}")))?;
+
+        // 新根是「同一句话再答一遍」：正文照抄；读时叠上的 `meta.branch` 不带进新事实
+        // （它是呈现侧的标注，不是这条消息的内容）。
+        let mut message = origin.clone();
+        message.id = new_id;
+        message.parent_id = None;
+        message.delta = None;
+        message.status = None;
+        message.error = None;
+        if let Some(meta) = message.meta.as_mut().and_then(Value::as_object_mut) {
+            meta.remove(symbio_sdk::projection::branch::META_BRANCH);
+        }
+        Ok(message)
+    }
+
     // ==================== 创建即登记 ====================
 
     /// **绑定会话身份**：会话创建时登记，身份被 metadata 改写时换行。

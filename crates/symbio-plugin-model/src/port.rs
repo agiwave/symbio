@@ -16,7 +16,8 @@ use symbio_plugin_api::context::{
 };
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED,
-    EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
+    EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED, EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED,
+    EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortFactEmit, PortInput, PortOutcome,
@@ -180,6 +181,28 @@ fn turn_input(
         })
         .collect();
 
+    // 被重试 / 切换换下的支：那些轮根下的产出不进请求包（转写里照留，切回去还在）。
+    // 折法只住 `projection::branch`，这里不另抄一份；「还在不在」的证据与转写投影同源
+    // （`message.removed`），两处对同一份历史因此得出同一组隐藏支。
+    let mutations = symbio_sdk::projection::mutations::MessageMutations::collect(
+        events,
+        &symbio_sdk::projection::vocab::MessageVocab {
+            artifact_added: EVENT_ARTIFACT_ADDED,
+            message_added: EVENT_MESSAGE_ADDED,
+            // 消息变更两格没有跨插件共享的常量（owner 是 session），与
+            // `EVENT_SESSION_CONSOLIDATED` 同一条已知项：本 crate 只读，不声明。
+            message_edited: "message.edited",
+            message_removed: "message.removed",
+            consolidated: EVENT_SESSION_CONSOLIDATED,
+        },
+    );
+    let hidden_branches = symbio_sdk::projection::branch::unselected_roots_named(
+        events,
+        |id| mutations.is_removed(id),
+        EVENT_TURN_BRANCH,
+        EVENT_TURN_BRANCH_SELECTED,
+    );
+
     let mut messages = Vec::new();
     // 被省略区间的工具结果：连它的**调用**一起不要。留一条没有结果的调用，
     // 降级路径会补一条「执行被中断」的占位 tool 消息——省略就漏了（t91）。
@@ -218,6 +241,17 @@ fn turn_input(
         append_payload_nodes(&mut messages, &facts[index].payload);
     }
     for fact in facts.iter().skip(snapshot_at.map_or(0, |index| index + 1)) {
+        // 换下的支：轮根命中隐藏集的产出不进请求包。共同祖先（用户发言、轮内补充、
+        // 快照基线）不带 `root_id`，因此不会被这一刀误伤。
+        if let Some(root) = fact
+            .payload
+            .get("root_id")
+            .and_then(serde_json::Value::as_str)
+        {
+            if hidden_branches.contains(root) {
+                continue;
+            }
+        }
         if let Some(seq) = seq_of.get(fact.id.as_str()) {
             if elided.iter().any(|(from, to)| (*from..=*to).contains(seq)) {
                 continue;

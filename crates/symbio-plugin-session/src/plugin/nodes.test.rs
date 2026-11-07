@@ -682,6 +682,7 @@ fn vdfs_session_content_is_json() {
     let c = session_content(
         &s,
         Vec::new(),
+        &[],
         "s",
         crate::config::PresentationTree::Grouped,
     )
@@ -706,6 +707,7 @@ fn vdfs_session_content_overlays_live_messages() {
     let c = session_content(
         &s,
         vec![msg("live-1", None)],
+        &[],
         "s",
         crate::config::PresentationTree::Grouped,
     )
@@ -730,6 +732,7 @@ fn vdfs_session_content_overlays_live_messages() {
     let c = session_content(
         &s2,
         vec![live],
+        &[],
         "s2",
         crate::config::PresentationTree::Grouped,
     )

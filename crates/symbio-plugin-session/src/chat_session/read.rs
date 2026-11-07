@@ -3,6 +3,7 @@
 //! 读方法回答「存储里有什么」，与写侧 [`super::write`] 的「哪些消息能留在存储里」相对。
 
 use super::*;
+use symbio_plugin_api::Store;
 
 impl PersistentChatSession {
     /// 全量消息（按单调 `seq` 排序后的存储视图）。
@@ -26,6 +27,19 @@ impl PersistentChatSession {
             &mut messages,
             self.cfg_or_default().presentation_tree(),
         );
+        // 分支标注是**读时投影**：`meta.branch` 不由写方入库（写事件只说 `of/into`），
+        // 必须每次从事实重折。这既是前端叶子（`session_content`）的出口，也是请求包
+        // 的入口——`get_context_messages` 按标注裁掉未选中支的子树。存储缓存里早于
+        // 分支事实入库的节点没有标注，漏这一步就会出现「新支裁掉了、旧支没裁」。
+        // 读侧走 `read_events`（不取写者令牌）：本进程只是读时若开写者句柄，
+        // 会把真正要写的另一个进程降级成 `NotTheWriter`（另一个 CLI 进程正好在写）。
+        if let Ok(facts) = self.store.read_events(&self.session_id) {
+            symbio_sdk::projection::branch::stamp_branches(
+                &mut messages,
+                &facts,
+                &crate::declarations::CHAT_VOCAB,
+            );
+        }
 
         Ok(messages)
     }

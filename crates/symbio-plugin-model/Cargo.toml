@@ -17,6 +17,9 @@ symbio-plugin-api = { path = "../symbio-plugin-api" }
 # 内核（封闭语法的共享类型层）：闭集取值（`ClosureReason`）与事件常量都在这里，
 # 执行体写收束事实时直接取类型，不在本 crate 另抄字面量。
 symbio-kernel = { path = "../symbio-kernel" }
+# 机制层投影：分支读法（`projection::branch`）是请求包的**同一份判据**，不在这里
+# 另抄一套折法——重试/切换后的裁剪与转写投影必须得出同一个答案。
+symbio-sdk = { path = "../symbio-sdk" }
 symbio-providers = { path = "../symbio-providers" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续

@@ -9,15 +9,18 @@
 //! `commands` 的调用，再把变更投进订阅表。
 
 use super::*;
+use crate::convergence::ComposeCall;
 use symbio_kernel::event::{Entity, Verb};
 use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
-    VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_SWITCH_BRANCH,
-    VDFS_ACTION_TRUNCATE,
+    VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_RETRY_SUBTREE,
+    VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE,
 };
 use symbio_plugin_api::events::EVENT_USER_ANSWER;
+use symbio_plugin_api::fact_source::FACT_SOURCE;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::chat::chat_node as cm;
+use symbio_sdk::keys::SESSION_ID;
 use symbio_sdk::vdfs::host::{vdfs_from_plugin_error, vdfs_host_ctx};
 
 impl SessionPlugin {
@@ -214,6 +217,77 @@ impl SessionPlugin {
                             ok: true,
                             message: format!("已把 {mid} 所在的分支组切到 {to}"),
                             data: Some(json!({ "session_id": id, "selected": to })),
+                        }))
+                    }
+                    // ── 重试另一支（`retry_subtree`，无载荷）──
+                    //
+                    // 与 `switch_branch` 是一对，方向相反：那条只改读法、不开轮；这条
+                    // 只开轮、不改既有节点。**动作 → 事实 → 环派发**：写侧落一条
+                    // `turn.branch{of, into}`（D-173 的目标事实），随后**复用写收件箱
+                    // 的那一个开轮单元**（`user.message` → `session.config`，由事实源
+                    // 的写口踢驱动）——不另造第二种「开轮」接法，也不在这里重跑模型。
+                    //
+                    // 新支的请求因此天然不带旧支的产出：`of` 是旧支的轮锚，投影按
+                    // `turn.branch` 折出「当前读哪一支」，旧支子树在请求装配时被裁掉。
+                    (Some(mid), VDFS_ACTION_RETRY_SUBTREE, _payload) => {
+                        let host = vdfs_host_ctx(ctx)?;
+                        let actor = symbio_sdk::authz::request_principal(&*host);
+                        let message = self
+                            .retry_branch(id, mid, &actor)
+                            .await
+                            .map_err(vdfs_from_plugin_error)?;
+                        // 新支的轮根 = 新一条用户消息的节点 id（`retry_branch` 已铸好，
+                        // 并把它换到返回节点上）。入队用这个 id：地址末段即身份。
+                        let new_id = message.id.clone();
+                        let workdir = host.get(symbio_sdk::keys::WORKDIR);
+                        let source_principal = host
+                            .get(symbio_sdk::keys::SOURCE_PRINCIPAL)
+                            .filter(|s| !s.trim().is_empty());
+                        self.enqueue_inbox(
+                            id,
+                            Some(new_id.clone()),
+                            message,
+                            session_chat::Request {
+                                source_principal,
+                                ..Default::default()
+                            },
+                            workdir,
+                        )
+                        .await;
+                        // 开轮：形状与写收件箱逐字相同（同上一条注释）。
+                        let source = self
+                            .fact_source(id)
+                            .await
+                            .map_err(|e| VdfsError::internal(format!("开轮取事实源失败: {e}")))?;
+                        let inbox_ctx = vdfs_host_ctx(ctx)?.fork();
+                        inbox_ctx.set(SESSION_ID, id.to_string());
+                        inbox_ctx.set(FACT_SOURCE, Arc::clone(&source));
+                        let seq = self
+                            .consume_inbox_turn(&inbox_ctx, id, &*source)
+                            .await
+                            .map_err(|e| VdfsError::internal(format!("开轮失败: {e}")))?;
+                        if let Some(seq) = seq {
+                            let compose = self.get_parent().map(|parent| ComposeCall {
+                                ctx: inbox_ctx.clone(),
+                                parent,
+                            });
+                            self.spawn_turn_closer(
+                                id.to_string(),
+                                seq,
+                                source,
+                                self.drive_entry(),
+                                compose,
+                            );
+                        }
+                        Ok(VdfsResponse::Action(VdfsActionResult {
+                            action: VDFS_ACTION_RETRY_SUBTREE.to_string(),
+                            ok: true,
+                            message: format!("已重试 {mid}：新的一支 {new_id} 已开轮"),
+                            data: Some(json!({
+                                "session_id": id,
+                                "of": mid,
+                                "into": new_id,
+                            })),
                         }))
                     }
                     // ── 用户答复 / 批准 / 拒绝（载荷 `{answer, mode}`）──

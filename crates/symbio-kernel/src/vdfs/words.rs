@@ -158,6 +158,17 @@ pub const VDFS_ACTION_EXPAND_SKELETON: &str = "expand_skeleton";
 /// 报错误码——把一个外来 id 接进选择格，等于让任何人改写别人会话的当前视图。
 pub const VDFS_ACTION_SWITCH_BRANCH: &str = "switch_branch";
 
+/// 节点动作标识：**重试另一支**（写操作，落在那一支的轮锚——用户消息节点上）。
+///
+/// 入参无（`{}`）：动作自己从落点读出问题与旧支，不需要调用方再给一份内容。
+/// 它落一条 `turn.branch{of, into}`（[D-173] 立的目标事实：新旧两支并存、
+/// 默认读新的一支）并由会话复开一轮，**不是**在这里重跑模型（[D-358]）。
+///
+/// 与 [`VDFS_ACTION_SWITCH_BRANCH`] 是一对：那条只改读法、不开轮；这条开轮、
+/// 不改任何既有节点。词形与 `ResumeAction` 的 snake_case 逐字相同（§4 的词表
+/// 是一条，不另造名字）。
+pub const VDFS_ACTION_RETRY_SUBTREE: &str = "retry_subtree";
+
 // ==================== 插件容器的注册表动词 ====================
 //
 // 容器的根地址同时是两个视图的锚点：**资源树**（`List` 只给已挂载、且自己暴露了

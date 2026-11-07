@@ -105,6 +105,31 @@ impl SessionStore {
         Ok(Some(store))
     }
 
+    /// 读侧事件快照：**不取写者令牌**（[`EventWalStore::open_readonly`]）。
+    ///
+    /// 读路径若走 [`Self::facts`]，会在「本进程只是读」的场合抢到写者令牌，
+    /// 把真正要写的另一个进程降级成 `NotTheWriter`（t49 的恢复轮：读回 CLI 先开、
+    /// 写入 CLI 后开，后者落 `user.message` 当场失败）。所以读侧用只读开法。
+    ///
+    /// 本进程已经持写者实例（缓存命中）时直接用那一份：读到的是同一份内存事实，
+    /// 不另开句柄，也不改变「一写者」的进程内约定。
+    pub(crate) fn read_events(&self, session_id: &str) -> Result<Vec<Event>, String> {
+        let cached = {
+            let cache = self.facts.lock().expect("会话事实源表锁中毒");
+            cache.get(session_id).cloned()
+        };
+        if let Some(store) = cached {
+            return Ok(store.range(Seq::new(0)));
+        }
+        let Some(dir) = self.session_dir(session_id) else {
+            return Ok(Vec::new());
+        };
+        let wal = dir.join(paths::V2_WAL_FILE);
+        EventWalStore::open_readonly(&wal)
+            .map(|store| store.range(Seq::new(0)))
+            .map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))
+    }
+
     /// 本会话的**读方主体**：与开轮写事件的 `actor` 同一取值点（`principal_of`）。
     ///
     /// 召回读侧的可见域收放按它收放——判的是读方、不是写方（D-084）。会话目录/元数据
