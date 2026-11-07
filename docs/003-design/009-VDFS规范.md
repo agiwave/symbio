@@ -482,7 +482,7 @@ visitor.put(CapabilityRow::mount_root(provider)).await; // 容器自身视图：
 capability_vdfs_root(visitor).await // 取 <根> 服务者（无注册 ⇒ None）
 ```
 
-> **这一族只有根一形，是裁决而不是欠账**（[DE-015-义务环](015-义务环.md "DE-015-义务环") `D-144`）。
+> **这一族只有根一形，是裁决而不是欠账**。
 > 「哪个目录由谁提供」由组合视图（`CompositeVdfs`）与 `Plugin::get_vfs_provider` 现场
 > 算出，两者按同一判据回答；再往行表里存一份按名的挂载行，就是同一事实的第三份复述，
 > 且要靠收集期那次广播维持同步。按可见域裁剪也不落在这一层——裁剪是地址解析的事

@@ -1,26 +1,26 @@
 #!/usr/bin/env node
 /**
- * port-surface-audit — **端口面**：DE-015 §6 判据 1 的可执行形态
+ * port-surface-audit — **端口面**：DE-051 / DE-050 的端口判据可执行形态
  *
  * ## 它判什么
  *
  * | 编号 | 判据 | 它拦的是哪一种走样 |
  * |---|---|---|
- * | PTS-001 | 带端口载荷的**事实名** ⊆ 协议族（`request` / `sent` / `response` / `failed` / `retry`），且端口字段名唯一 | **加端口顺手加事实名**——端口是载荷，不是事实种类（DE-015 §2.4 裁决） |
+ * | PTS-001 | 带端口载荷的**事实名** ⊆ 协议族（`request` / `sent` / `response` / `failed` / `retry`），且端口字段名唯一 | **加端口顺手加事实名**——端口是载荷，不是事实种类（DE-050 §0） |
  * | PTS-002 | 求解器（`owed` / `drive` 所在文件）里**不出现端口字段名与端口取值** | **端口渗进引擎**——引擎一旦认识端口，加端口就得改引擎 |
  * | PTS-003 | 求解器那两个函数的**字节**与基线一致 | 判据 1 的原文口径：「`drive` 与 `owed` 源码 diff = 0」 |
  * | PTS-004 | 基线引用的 ADR **能打开**、理由**非空** | **改判据而不留决策**——基线是判据的一面，改它必须有决策挂得住 |
- * | PTS-005 | 协议格的**写点只在一个文件里**（两种形态：`symbio/src` 的 `Event::pending` 名字实参 ⊆ 协议常量 / `PortDecl::before`；`impl PortFactWriter` 里的 `store.append`——即 effects / `PortFactWriter` 链路） | **协议格到处有人写**——「四格由引擎独占」从此靠自觉（DE-015 §2.3 / 判据 5） |
- * | PTS-006 | DE-015 §2.6 契约表的第 7 行**引 D-138**（重试已启用：键含 attempt，重试前提两条）且**不含「未启用」** | **条文与机制分叉**——重试已进债键（D-138），条文若仍说「未启用」就是把在跑的路说成没跑 |
+ * | PTS-005 | 协议格的**写点只在一个文件里**（两种形态：`symbio/src` 的 `Event::pending` 名字实参 ⊆ 协议常量 / `PortDecl::before`；`impl PortFactWriter` 里的 `store.append`——即 effects / `PortFactWriter` 链路） | **协议格到处有人写**——「四格由引擎独占」从此靠自觉（DE-050 §0） |
+ * | PTS-006 | DE-050 §3.3 的**重试条文**写明 `retry(attempt+1)` 且**不含「未启用」** | **条文与机制分叉**——重试已进债键，条文若仍说「未启用」就是把在跑的路说成没跑 |
  *
  * ## 为什么是这几格（而不是「机制键守恒」那种计数）
  *
- * DE-015 §6 判据 1 是本方案最硬的一条：**加一个端口 = 0 个新事实名 + 1 个
- * `PortDecl` + 适配器 + 2 行模板，`drive` 与 `owed` 的源码 diff = 0**。
+ * DE-051 的端口面判据是本方案最硬的一条：**加一个端口 = 0 个新事实名 + 1 个
+ * `PortDecl` + 债行 / 行声明 + 执行体，`drive` 与 `owed` 的源码 diff = 0**。
  * 它不是「键数不变」，是**那两段代码的字节不变**——因为端口一旦渗进引擎，
  * 「加端口」就变成「改引擎」，机制面随端口数线性增长，而端口数没有上界。
  *
- * 判据 1 此前**只有散文**（DE-015 §6 那一行），没有执行方。于是三件事都能悄悄发生：
+ * 判据 1 此前**只有散文**（DE-050 / DE-051 的条文），没有执行方。于是三件事都能悄悄发生：
  * 新端口带出新事实名（协议族闭集被稀释）、引擎里长出 `if port == "…"`（端口渗进）、
  * 引擎为某个端口加了特判（字节变了而没人说得清是谁的锅）。
  *
@@ -55,12 +55,11 @@
  *   把名字先存进一个认不出来的变量同样能绕，这一处按 `decl.before` 补判
  *   （`sent` 的名字正是它，全仓只在端口层读一次）。
  * - **PTS-006 管「条文与机制对不对得上」**：前五格判声明、引擎与写侧，这一格判**散文**——
- *   重试已进债键（D-138），契约 7 若继续写「未启用」，读者会以为重试不在生产里跑。
+ *   重试已进债键，`DE-050` §3.3 若继续写「未启用」，读者会以为重试不在生产里跑。
  *   机制侧由用例 `only_the_tool_port_has_headroom_and_only_for_rebuildable_waiters`
  *   （真表取值）与 `a_retried_request_reopens_authorization_and_dispatch`（行层重新开账）
- *   钉住，条文侧由本条钉「引了 D-138、不再写未启用」，两侧各钉一头；任何一侧单独
- *   放宽都足以让「重试通道未启用」的说法复活。边界：它只认 §2.6 契约表第 7 行的文字，
- *   判不出别的段落里的同类说法。
+ *   钉住，条文侧由本条钉「写了 `retry(attempt+1)`、不再写未启用」，两侧各钉一头。
+ *   边界：它只认 §3.3 那一段的文字，判不出别的段落里的同类说法。
  *
  * ## 基线在哪、为什么是文件而不是常量
  *
@@ -98,7 +97,7 @@
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns PTS 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 契约 7 的重试限定）
+// @ns PTS 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 重试条文）
 // @codes PTS-001 PTS-002 PTS-003 PTS-004 PTS-005 PTS-006
 
 import fs from 'node:fs'
@@ -121,11 +120,11 @@ const EVENT_REL = 'crates/symbio-kernel/src/event/mod.rs'
 const DECL_REL = 'crates/symbio-kernel/src/decl/mod.rs'
 /** 基线（判据面之一，见文件头「基线在哪」） */
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
-/** 契约 7 的条文所在（PTS-006 的唯一输入：§2.6 契约表的第 7 行） */
-const PLAN_REL = 'docs/003-design/015-义务环.md'
+/** 重试条文所在（PTS-006 的唯一输入：§3.3 重放收敛） */
+const PLAN_REL = 'docs/003-design/050-义务环事实词表与债务表.md'
 
 /**
- * 协议族：**哪五个常量**是协议族（DE-015 §2.4 的「五个协议名」）。
+ * 协议族：**哪五个常量**是协议族（DE-050 §0 的「五个协议名」）。
  *
  * 这里钉的是**常量名**，不是字面量——字面量的 owner 是 `event/mod.rs`，
  * 抄一份「request / sent / …」到脚本里就是第二处真相（改了协议名的拼写，
@@ -690,55 +689,42 @@ if (writers.length === 0) {
   )
 }
 
-// ───────────────────────── PTS-006 契约 7 的重试限定 ─────────────────────────
+// ───────────────────────── PTS-006 重试条文 ─────────────────────────
 
 /**
- * DE-015 §2.6 契约表第 7 行：重试已启用（D-138）。
+ * DE-050 §3.3：重试已启用。
  *
- * 判据只认契约表第 7 行那一段文字。重试进债键的裁决落纸后，条文必须**引 D-138**
- * （键含 attempt、重试前提两条），且不得再写「未启用」——真表上 `tool` 端口
- * `max_attempts = 2`、行层对 attempt+1 重新开账，条文说「未启用」就是把在跑的路
- * 说成没跑。缺重试裁决的锚 = 改了机制而不留决策（本仓纪律）；留着「未启用」= 条文
- * 与机制分叉（「条文与真表不一致」的旧病反向复发）。
+ * 判据只认 §3.3 那一段文字。真表上 `tool` 端口 `max_attempts = 2`、行层对
+ * attempt+1 重新开账，条文说「未启用」就是把在跑的路说成没跑。缺 `retry(attempt+1)`
+ * 同样判红——条文没有把重试写出来，读者会以为它不在生产里跑。
  *
- * 找不到 §2.6 / 第 7 行同样判红——锚点漂了不是「没什么可判」。
+ * 找不到 §3.3 同样判红——锚点漂了不是「没什么可判」。
  */
-const CONTRACT_RETRY_ROW_RE = /^\|\s*7\s*\|/
-
-function contractRetryRow() {
+function contractRetrySection() {
   const text = readText(PLAN_REL)
   if (text === null) {
-    report('PTS-006', `读不出 ${PLAN_REL} —— 契约 7 的条文是这条判据的唯一输入，宁红不静默`)
+    report('PTS-006', `读不出 ${PLAN_REL} —— 重试条文是这条判据的唯一输入，宁红不静默`)
     return null
   }
-  const start = text.indexOf('### 2.6 ')
+  const start = text.indexOf('### 3.3 ')
   if (start < 0) {
-    report('PTS-006', `${PLAN_REL} 里找不到「### 2.6 」小节 —— 契约表的锚点没了，判据没有输入`)
+    report('PTS-006', `${PLAN_REL} 里找不到「### 3.3 」小节 —— 重试条文的锚点没了，判据没有输入`)
     return null
   }
   const end = text.indexOf('\n### ', start + 1)
-  const section = text.slice(start, end < 0 ? text.length : end)
-  const rows = section.split('\n').filter((l) => CONTRACT_RETRY_ROW_RE.test(l))
-  if (rows.length !== 1) {
-    report('PTS-006', `§2.6 契约表的第 7 行找到 ${rows.length} 条（应恰好 1 条）—— 锚点漂了，判据没有输入`)
-    return null
-  }
-  return rows[0]
+  return text.slice(start, end < 0 ? text.length : end)
 }
 
-const contractRow = contractRetryRow()
-// 引用决策编号用正则字面量而不是字符串字面量：`'D-138'` 整串等值会被
-// gate-codes-audit 判成「发射了未登记的判据码」（D 前缀下决策编号与判据码共用
-// 一个字母，只认整串等值）；这里是对文档散文的**引用**，不是发射码。
-if (contractRow !== null && !/D-138/.test(contractRow)) {
+const retrySection = contractRetrySection()
+if (retrySection !== null && !/retry\(attempt\+1\)/.test(retrySection)) {
   report(
     'PTS-006',
-    `§2.6 契约 7 那一行不引重试进债键的裁决 —— 重试的键口径是裁决过的机制改动（键含 attempt、前提两条）；改判据不留决策 = 本仓纪律 SP-007 要拦的形状`,
+    `§3.3 没有写 \`retry(attempt+1)\` —— 重试已启用（\`tool\` 端口 \`max_attempts = 2\`，行层对 attempt+1 重新开账）；条文不写等于把在跑的路说成没跑`,
   )
-} else if (contractRow !== null && contractRow.includes('未启用')) {
+} else if (retrySection !== null && retrySection.includes('未启用')) {
   report(
     'PTS-006',
-    `§2.6 契约 7 那一行仍写「未启用」—— 重试已启用（\`tool\` 端口 \`max_attempts = 2\`，行层对 attempt+1 重新开账，见重试进债键裁决）；条文与机制分叉`,
+    `§3.3 仍写「未启用」—— 重试已启用（\`tool\` 端口 \`max_attempts = 2\`，行层对 attempt+1 重新开账）；条文与机制分叉`,
   )
 }
 
@@ -768,14 +754,14 @@ if (errors.length === 0) {
     'PTS-005',
     `协议格写方唯一：${writers.join(' / ')}（命中 ${[...writePoints.values()].reduce((n, l) => n + l.length, 0)} 处构造）`,
   )
-  ruleLine(true, 'PTS-006', `契约 7 引 D-138（重试已启用）：${PLAN_REL} §2.6`)
+  ruleLine(true, 'PTS-006', `重试条文已写出：${PLAN_REL} §3.3`)
   process.exit(0)
 }
 
 console.error(`\n== port-surface-audit：${errors.length} 处违规 ==`)
 for (const e of errors) console.error(`  ${red(e.rule)}  ${e.msg}`)
 console.error(
-  `\n${yellow('提示')}：判据口径见本脚本文件头与 docs/003-design/015-义务环.md §6 判据 1；` +
+  `\n${yellow('提示')}：判据口径见本脚本文件头与 docs/003-design/051-机制形状规格.md 的端口面判据；` +
     `改引擎后更新基线：node scripts/port-surface-audit.mjs --print-baseline`,
 )
 process.exit(1)

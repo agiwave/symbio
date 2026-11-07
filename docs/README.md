@@ -57,11 +57,11 @@ created: 2026-07-20
 |---|---|---|---|---|---|
 | [goal · 目标](001-goal/README.md "GO-000-目标汇总") | 编号前缀 `GO-` | 要达成什么——产品 / 技术 / 工程三个大目标，各挂可度量判据 | 3 | draft 0 · active 3 · retired 0 | — |
 | [scene · 场景](002-scene/README.md "SC-000-场景汇总") | 编号前缀 `SC-` | 用户拿它做什么——角色、情境与用户判据 | 18 | draft 5 · active 13 · retired 0 | — |
-| [design · 设计](003-design/README.md "DE-000-设计总览") | 编号前缀 `DE-` | 产品与系统怎么设计——现状、目标形态与关键取舍（每篇的时态由 impl 标注） | 95 | draft 1 · active 91 · retired 3 | — |
+| [design · 设计](003-design/README.md "DE-000-设计总览") | 编号前缀 `DE-` | 产品与系统怎么设计——现状、目标形态与关键取舍（每篇的时态由 impl 标注） | 93 | draft 1 · active 90 · retired 2 | — |
 | [ref · 参考](004-ref/README.md "RE-000-参考汇总") | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 11 | draft 0 · active 11 · retired 0 | — |
 | [spec · 规范](005-spec/README.md "SP-000-规范汇总") | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 33 | draft 0 · active 27 · retired 6 | — |
 | [guide · 指南](006-guide/README.md "GU-000-指南汇总") | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 14 | draft 0 · active 14 · retired 0 | — |
-| [task · 任务](007-task/README.md "T-000-任务汇总") | 编号前缀 `T-` | 要做什么、做到哪一步——可勾销的最小工作单元，收口即删（只留 git 历史） | 23 | todo 8 · doing 15 · done 0 · wont 0 | 16 条分解边 |
+| [task · 任务](007-task/README.md "T-000-任务汇总") | 编号前缀 `T-` | 要做什么、做到哪一步——可勾销的最小工作单元，收口即删（只留 git 历史） | 11 | todo 5 · doing 6 · done 0 · wont 0 | 6 条分解边 |
 
 <!-- registry:summary end -->
 
@@ -178,7 +178,7 @@ owner 从各文档 front-matter 的 `lists: [<id>=owner]` 读（与 [RE-007-清�
 | 核对「现在是什么」（插件 × 挂载点 × 路由 × 工具，自动生成） | [RE-006-当前事实表](004-ref/006-当前事实表.md "RE-006-当前事实表") |
 | 了解系统全貌 / 架构设计 | [001-核心架构.md](003-design/001-核心架构.md "DE-001-核心架构") · [002-架构总览.md](003-design/002-架构总览.md "DE-002-架构总览") · [004-系统地图.md](003-design/004-系统地图.md "DE-004-系统地图") |
 | 查看协议规范 / 追踪请求全链路 | [005-协议规范.md](003-design/005-协议规范.md "DE-005-协议规范") · [003-数据流与调用链.md](003-design/003-数据流与调用链.md "DE-003-数据流与调用链") |
-| 理解控制面 / 义务环 | [001-核心架构.md](003-design/001-核心架构.md "DE-001-核心架构") §4.3–§4.4 · [015-义务环.md](003-design/015-义务环.md "DE-015-义务环") · [022-行表与派发面.md](003-design/022-行表与派发面.md "DE-022-行表与派发面") |
+| 理解控制面 / 义务环 | [001-核心架构.md](003-design/001-核心架构.md "DE-001-核心架构") §4.3–§4.4 · [050-义务环事实词表与债务表.md](003-design/050-义务环事实词表与债务表.md "DE-050-义务环事实词表与债务表") · [051-机制形状规格.md](003-design/051-机制形状规格.md "DE-051-机制形状规格") · [022-行表与派发面.md](003-design/022-行表与派发面.md "DE-022-行表与派发面") |
 | 查找路由路径 / 理解错误码 / 配置系统 | [RE-003-ROUTES](004-ref/003-ROUTES.md "RE-003-ROUTES") · [RE-002-ERROR_CODES](004-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") · [RE-001-CONFIGURATION](004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") |
 | 给门禁加一条判据、要挑不撞的号 | [RE-008-判据码登记表](004-ref/GATE_CODES.md) |
 | 快速上手 / 开发新插件 / 排查问题 | [GU-006-QUICK_START](006-guide/006-QUICK_START.md "GU-006-QUICK_START") · [GU-005-PLUGIN_DEVELOPMENT](006-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [GU-007-TROUBLESHOOTING](006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") |

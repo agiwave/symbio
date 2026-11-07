@@ -3,7 +3,7 @@
  *
  * 这条守卫的失效形态**全是恒真**：各格判据读不出输入（事件名字表读空、事实声明表
  * 读空、基线读空、写点扫空、契约表锚点漂走）时，最省事的实现是「没读到 ⇒ 没什么可判 ⇒ 通过」。而判据 1 是
- * DE-015 最硬的一条——它恒真就等于「加端口可以随便改引擎」这条最贵的走样没人管。
+ * DE-051 最硬的一条——它恒真就等于「加端口可以随便改引擎」这条最贵的走样没人管。
  *
  * 所以第一组用例拿**真仓当前状态**做非零对照（协议事实数 > 0、指纹非空），
  * 后面几组逐条注入违规，断言脚本**变红且只红该红的那条**。
@@ -30,8 +30,8 @@ const BASELINE_REL = 'scripts/baselines/port-surface.json'
 const PORTS_REL = 'crates/symbio-plugin-loop/src/loop_rows.rs'
 /** 协议格写点所在文件（PTS-005 判**写方唯一**，不判这个路径——路径只是夹具的落点） */
 const WRITER_REL = 'crates/symbio-plugin-loop/src/port.rs'
-/** 契约 7 的条文（PTS-006 的唯一输入） */
-const PLAN_REL = 'docs/003-design/015-义务环.md'
+/** 重试条文（PTS-006 的唯一输入） */
+const PLAN_REL = 'docs/003-design/050-义务环事实词表与债务表.md'
 
 /** 协议族常量（五个名字的定义，值取协议名的字面值） */
 const EVENT_SRC = `pub const EVENT_REQUEST: &str = "request";
@@ -117,18 +117,15 @@ pub(crate) fn succeed<S>(store: &S, call: &Call, turn: u64) -> Result<(), Append
 `
 
 /**
- * 契约 7 的夹具条文：**合规的形状**（同时写「重试」与「未启用」）。
+ * 重试条文的夹具形状：**合规**（写出 `retry(attempt+1)`、不写「未启用」）。
  *
  * 每份夹具都自带它——PTS-006 的输入不是这条判据的开关，而是仓库里本来就有的一份
  * 文档；夹具缺了它就等于「真仓的门在夹具上永远开着」，其余用过绿灯的用例也就不再
  * 证明它们各自的格。
  */
-const PLAN_SRC = `### 2.6 执行契约
+const PLAN_SRC = `### 3.3 重放收敛
 
-| # | 契约 | 不做的后果 |
-|---|---|---|
-| 6 | 无进展守卫 | 静默停摆 |
-| 7 | 在途请求带租约；重试前提成立时落 retry 并重开下一笔（D-138），否则到顶即判死 | 永久在等 |
+- 有 \`sent\`、无收束且租约已过 ⇒ 落 \`retry(attempt+1)\` 再派发；同一 \`(kind, key)\` 重复投递被账本吸收。
 `
 
 /**
@@ -208,7 +205,7 @@ test('真仓当前状态通过，且各格判据都数得出非零输入', () =>
     assert.ok(values[1].includes(v), `端口取值名单里没有 ${v}：提取器与端口表脱节`)
   }
   // PTS-006 的输入也要真的存在（真仓里那份文档不是夹具自动补的）。
-  assert.match(r.stdout, /PTS-006.*契约 7.*§2\.6/, '真仓里契约 7 的条文没被判到 ⇒ PTS-006 可能没有输入')
+  assert.match(r.stdout, /PTS-006.*050-义务环事实词表与债务表\.md §3\.3/, '真仓里契约 7 的条文没被判到 ⇒ PTS-006 可能没有输入')
 })
 
 // ── ② PTS-001：协议名闭集 ─────────────────────────────────────────────
@@ -489,10 +486,10 @@ test('PTS-005 行表里的 `source: EVENT_SENT` 不算写点（模式不是账�
   }
 })
 
-// ── ⑦ PTS-006：契约 7 必须引 D-138 且不再写「未启用」 ──────────────────────
+// ── ⑦ PTS-006：§3.3 必须写 retry(attempt+1) 且不再写「未启用」 ──────────────
 
-test('PTS-006 契约 7 仍写「未启用」⇒ 红（重试已启用，条文与机制分叉）', () => {
-  const root = fixture({ plan: PLAN_SRC.replace('（D-138），否则到顶即判死', '（D-138），否则到顶即判死。重试通道未启用') })
+test('PTS-006 §3.3 仍写「未启用」⇒ 红（重试已启用，条文与机制分叉）', () => {
+  const root = fixture({ plan: `${PLAN_SRC}\n重试通道未启用。\n` })
   try {
     const r = run(root)
     assert.equal(r.status, 1, r.stdout)
@@ -502,41 +499,29 @@ test('PTS-006 契约 7 仍写「未启用」⇒ 红（重试已启用，条文�
   }
 })
 
-test('PTS-006 契约 7 不引重试裁决 ⇒ 红（改判据不留决策）', () => {
-  const root = fixture({ plan: PLAN_SRC.replace('（D-138）', '') })
+test('PTS-006 §3.3 不写 retry(attempt+1) ⇒ 红（条文不把重试写出来）', () => {
+  const root = fixture({ plan: PLAN_SRC.replace('retry(attempt+1)', 'retry') })
   try {
     const r = run(root)
     assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-006.*重试进债键/s)
+    assert.match(r.stderr, /PTS-006.*retry\(attempt\+1\)/s)
   } finally {
     cleanup(root)
   }
 })
 
-test('PTS-006 契约表的第 7 行找不到 ⇒ 红（锚点漂了不是没什么可判）', () => {
-  // 锚点漂的形状：第 7 行被改号（变成 8），判据找不到自己那一条。
-  const root = fixture({ plan: PLAN_SRC.replace('| 7 |', '| 8 |') })
+test('PTS-006 §3.3 小节不在了 ⇒ 红（判据没有输入）', () => {
+  const root = fixture({ plan: PLAN_SRC.replace('### 3.3 重放收敛', '### 别的标题') })
   try {
     const r = run(root)
     assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-006.*找到 0 条/)
+    assert.match(r.stderr, /PTS-006.*找不到「### 3\.3 /s)
   } finally {
     cleanup(root)
   }
 })
 
-test('PTS-006 §2.6 小节不在了 ⇒ 红（判据没有输入）', () => {
-  const root = fixture({ plan: PLAN_SRC.replace('### 2.6 执行契约', '### 别的标题') })
-  try {
-    const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-006.*找不到「### 2\.6 /s)
-  } finally {
-    cleanup(root)
-  }
-})
-
-test('PTS-006 契约 7 文档读不出 ⇒ 红（不得「没读到 ⇒ 没什么可判」）', () => {
+test('PTS-006 重试条文文档读不出 ⇒ 红（不得「没读到 ⇒ 没什么可判」）', () => {
   const root = fixture({ plan: null })
   try {
     const r = run(root)
