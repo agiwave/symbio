@@ -71,7 +71,7 @@ async fn traverse_contributes_exactly_one_tool() {
     assert_eq!(meta.name, "idempotent_record");
     assert_eq!(
         meta.behaviors,
-        &[symbio_plugin_api::behaviors::IDEMPOTENCY_RECORD],
+        &[crate::behavior::IDEMPOTENCY_RECORD_BEHAVIOR],
         "工具必须声明行为名——否则效果端口选不到实现，事实永远不落格"
     );
 }

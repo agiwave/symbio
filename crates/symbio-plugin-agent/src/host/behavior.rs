@@ -28,11 +28,18 @@
 //! 「约了没履约」比「查无此约」诚实（DE-038 §5——违约可被观测是 T5 的全部前提）。
 //! 待用户审批的不在此列：承诺还没到可判时刻，抢跑记成履约或违约都是假事实。
 
-use symbio_plugin_api::behaviors;
+use symbio_plugin_api::behaviors::Kind;
 use symbio_plugin_api::commitment_events;
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
+
+/// 立约行为的名字。**由本 crate 自报**（D-363）：`agent_run` 在自己的
+/// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
+pub(crate) const DELEGATION_PROMISE: &str = "delegation_promise";
+
+/// 派活行为的名字（淘汰闸的管辖对象）。同样由本 crate 自报。
+pub(crate) const ASSIGN_WORK: &str = "assign_work";
 
 /// 委托型工具的立约效果。
 pub struct DelegationPromise;
@@ -44,7 +51,11 @@ impl ToolBehavior for DelegationPromise {
     }
 
     fn behavior(&self) -> &'static str {
-        behaviors::DELEGATION_PROMISE
+        DELEGATION_PROMISE
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::LandsFacts
     }
 
     fn after(&self, call: &EffectCall<'_>) -> Vec<FactDraft> {
@@ -106,7 +117,11 @@ impl ToolBehavior for DelegationGate {
     }
 
     fn behavior(&self) -> &'static str {
-        behaviors::ASSIGN_WORK
+        ASSIGN_WORK
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::NoFacts
     }
 
     fn before(&self, req: &BeforeRequest<'_>) -> BeforeDecision {

@@ -13,7 +13,7 @@ fn call<'a>(args: &'a serde_json::Value, success: bool, why: &'a str) -> EffectC
         success,
         result: "子智能体已完成",
         why,
-        declared: &[behaviors::DELEGATION_PROMISE],
+        declared: &[DELEGATION_PROMISE],
         anchor: "t7",
         user_seq: 42,
         principal: "session/a",
@@ -100,7 +100,7 @@ fn judgement<'a>(
         call_id: "call-9",
         args,
         principal,
-        declared: &[behaviors::ASSIGN_WORK],
+        declared: &[ASSIGN_WORK],
         facts: &[],
         readings: BeforeReadings {
             assign_work_revoked: revoked,

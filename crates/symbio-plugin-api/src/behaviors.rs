@@ -1,91 +1,31 @@
-//! 行为名 —— 工具对自己的**能力效果**做的自声明（DE-025 D-210）。
+//! 行为名的**收集面**：名字由实现自报，本模块不持有任何能力名（D-363）。
 //!
-//! 与 `Capability` 同层：能力包在这里取一个名字写进 `CapabilityMeta.behaviors`，
-//! 宿主侧的闸门按名字判，**不认工具名**。新增一个行为**实例**（「我的工具也写
-//! 任务表」）= 在这里加一个常量 + 在工具里声明 + 注册 handler；新增一种行为
-//! **语义**（框架第一次出现这种判断）才是架构变更。
+//! 一个能力包要新开一种行为，只在**自己的 crate** 里做两件事：定义一个常量，
+//! 连同 [`ToolBehavior::behavior`] / [`ToolBehavior::kind`] 经
+//! [`submit_behavior!`](crate::submit_behavior) 链接期登记。宿主经本模块收集，
+//! **不需要改 `symbio-plugin-api`**——手写名单一旦存在，新增能力就又要回到
+//! 「装一个能力改架构模块」的老路。
 //!
-//! 内核只装开放集合（`&'static [&'static str]`），不认识下面任何名字——所以
-//! 加一个行为不再改 `symbio-kernel`。已知名字留在本模块的理由与 `routes` /
-//! `events` 相同：它们是宿主词汇，不是内核语法。
+//! ## 为什么收集面在这里
 //!
-//! ## 已知行为
+//! 宿主有两处要问「这个名字按契约造不造格」：写口的违约判据
+//! （[`crate::effects::expects_facts`]）与声明面的校验（[`is_known`]）。问题问的是
+//! **名字**，不是某个实现，所以由本模块从已登记的实现里折出「名字 → 造格声明」；
+//! 换一个实现，答案不变。
 //!
-//! | 常量 | 线格式 | 管辖方 |
-//! |---|---|---|
-//! | [`ASSIGN_WORK`] | `assign_work` | 淘汰闸：`assign.work` 被收回时拒止 |
-//! | [`DELEGATION_PROMISE`] | `delegation_promise` | 承诺记账：跨主体立约的出参 |
-//! | [`TASK_TABLE`] | `task_table` | 任务表写侧资格闸与任务声明记账 |
-//! | [`FILE_CHANGE`] | `file_change` | 工作目录变更账：产物格的 `file_op` 富化 |
-//! | [`NOTE_CAPTURE`] | `note_capture` | 便签记账（DE-025 `EX-001` 的夹具实例） |
-//! | [`CAUSAL_LINK`] | `causal_link` | 因果断言记账（名册 #33 / #39 的能力包实例） |
-//! | [`EXPLAIN_RATIONALE`] | `explain_rationale` | 理由记录记账（名册 #49 的能力包实例） |
-//! | [`IDEMPOTENCY_RECORD`] | `idempotency_record` | 幂等台账记账（名册 #37 的能力包实例） |
+//! 名字仍是**跨进程的**（工具元数据随插件通道走），改名等于改协议；只在语义真的要
+//! 变的时候改，并在 DE-024 留一条决策。
 //!
-//! 名字是**跨进程的**（工具元数据随插件通道走），改名等于改协议；只在语义真的要
-//! 变的时候改，并在 `DE-025` 留一条决策。
+//! ## 同名多实现
+//!
+//! 一个行为名可以有多个实现（按 owner 序逐个跑），但**造格声明必须一致**——
+//! 名字是一份契约。声明不一致视为未登记：判据按「应当造格」处理（fail-closed）。
 
-/// 提供 `assign.work`（派活）——淘汰闸的管辖对象。
-pub const ASSIGN_WORK: &str = "assign_work";
+use crate::effects::handlers;
 
-/// 跨主体立约（承诺）——承诺记账的管辖对象。
-pub const DELEGATION_PROMISE: &str = "delegation_promise";
-
-/// 写任务表——任务表写侧资格闸与任务声明记账的管辖对象。
-pub const TASK_TABLE: &str = "task_table";
-
-/// 改工作目录——工作目录变更账的管辖对象（产物格的 `file_op` 富化）。
+/// 一个行为**造不造格**。
 ///
-/// 它不是一个新格：`artifact.added` 早就记下了这次调用（D-169），本行为只补一句
-/// 「这次写属于哪种动作」。读侧因此不必再按工具名猜，改一个工具名只影响它自己的
-/// 声明。
-pub const FILE_CHANGE: &str = "file_change";
-
-/// 记一条便签——扩展夹具（DE-025 `EX-001`）的行为实例。
-///
-/// 它不是新的行为**语义**（判断种类仍由宿主给出），只是一个新的实例：能力包声明
-/// 这个名字并注册 handler，`loop` 与内核都不认识 `notes_add`。
-pub const NOTE_CAPTURE: &str = "note_capture";
-
-/// 断言一条因果关系——`symbio-plugin-causal` 的行为实例。
-///
-/// 与 [`NOTE_CAPTURE`] 同一档：判断种类仍由宿主给出（写口、幂等、审批），这里只是
-/// 又一个能力包声明自己的名字并注册 handler。宿主不认识 `causal_assert` 这个工具名，
-/// 也不认识 `causal.link` 这条领域事实。
-pub const CAUSAL_LINK: &str = "causal_link";
-
-/// 记下一次决定的理由——`symbio-plugin-explain` 的行为实例。
-///
-/// 与 [`CAUSAL_LINK`] 同一档：判断种类仍由宿主给出（写口、幂等、审批），这里只是
-/// 又一个能力包声明自己的名字并注册 handler。宿主不认识 `explain_record` 这个工具名，
-/// 也不认识 `explain.rationale` 这条领域事实。
-pub const EXPLAIN_RATIONALE: &str = "explain_rationale";
-
-/// 记一条幂等台账——`symbio-plugin-idempotency` 的行为实例。
-///
-/// 与 [`EXPLAIN_RATIONALE`] 同一档：判断种类仍由宿主给出（写口、幂等、审批），这里只是
-/// 又一个能力包声明自己的名字并注册 handler。宿主不认识 `idempotent_record` 这个工具名，
-/// 也不认识 `idempotency.recorded` 这条领域事实。
-pub const IDEMPOTENCY_RECORD: &str = "idempotency_record";
-
-/// 宿主认识的**全部**行为名。
-///
-/// 只用于两件事：装配期/收集期的显式校验，以及判据脚本的读取面。闸门自己按
-/// 单个常量判，不遍历这张表——「表里有什么」不是判断。
-pub const KNOWN: &[&str] = &[
-    ASSIGN_WORK,
-    DELEGATION_PROMISE,
-    TASK_TABLE,
-    FILE_CHANGE,
-    NOTE_CAPTURE,
-    CAUSAL_LINK,
-    EXPLAIN_RATIONALE,
-    IDEMPOTENCY_RECORD,
-];
-
-/// 一个已知行为**造不造格**（DE-025 D-210 的登记面）。
-///
-/// 逐位声明在这里、不在 handler 里：判据问的是「这个行为名按契约该不该产出事实」，
+/// 逐位声明在实现上、不在中心的表里：判据问的是「这个行为名按契约该不该产出事实」，
 /// 而不是「某个实现的 `after` 会不会返回空」——后者是运行时近似，换个实现就漂移。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -96,27 +36,41 @@ pub enum Kind {
     NoFacts,
 }
 
-/// 每个已知行为名的**造格**声明（与 [`KNOWN`] 一一对应）。
-pub const KINDS: &[(&str, Kind)] = &[
-    (ASSIGN_WORK, Kind::NoFacts),
-    (DELEGATION_PROMISE, Kind::LandsFacts),
-    (TASK_TABLE, Kind::LandsFacts),
-    (FILE_CHANGE, Kind::NoFacts),
-    (NOTE_CAPTURE, Kind::LandsFacts),
-    (CAUSAL_LINK, Kind::LandsFacts),
-    (EXPLAIN_RATIONALE, Kind::LandsFacts),
-    (IDEMPOTENCY_RECORD, Kind::LandsFacts),
-];
+/// 已登记的行为名（按字典序，去重）。
+///
+/// 这就是「已知行为」的**全部**：没有第二份清单可漂移，新增能力不改本 crate。
+pub fn known() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = handlers().iter().map(|b| b.behavior()).collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// 这个行为名登记的造格声明。
+///
+/// `None` = 未登记（没有任何实现自报这个名字），或同名实现的声明互相矛盾。
+pub fn kind_of(name: &str) -> Option<Kind> {
+    let mut found: Option<Kind> = None;
+    for behavior in handlers() {
+        if behavior.behavior() != name {
+            continue;
+        }
+        match found {
+            None => found = Some(behavior.kind()),
+            Some(kind) if kind == behavior.kind() => {}
+            // 同名不同声明：契约自相矛盾，按未登记处理（fail-closed）。
+            Some(_) => return None,
+        }
+    }
+    found
+}
 
 /// 这个行为名是否**应当**产出事实草稿。
 ///
 /// `None` = 未登记（未知行为）：判据按「应当造格」处理，宁可假红也不让一个没声明
 /// 种类的行为静默空转。
 pub fn lands_facts(name: &str) -> Option<bool> {
-    KINDS
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, kind)| *kind == Kind::LandsFacts)
+    kind_of(name).map(|kind| kind == Kind::LandsFacts)
 }
 
 /// 这个名字是不是宿主已知的行为。
@@ -124,7 +78,7 @@ pub fn lands_facts(name: &str) -> Option<bool> {
 /// **未知行为静默不生效**是 J3 要消灭的形态，所以声明面的读取方应当拿它校验；
 /// 本函数只回答词汇问题，不替任何闸门决定语义。
 pub fn is_known(name: &str) -> bool {
-    KNOWN.contains(&name)
+    kind_of(name).is_some()
 }
 
 #[cfg(test)]

@@ -13,15 +13,17 @@
 //!
 //! 重试**不在本片**：重放身份与续写幕的口径属后续片，这里不假装已经具备。
 
+use symbio_plugin_api::behaviors::Kind;
 use symbio_plugin_api::{
-    behaviors, BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
+    BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
 use symbio_plugin_api::{Entity, Verb};
 
 use super::decl::IDEMPOTENCY_RECORDED;
 
-/// 本行为管辖的名字（宿主词汇，见 `symbio_plugin_api::behaviors`）。
-pub(crate) const IDEMPOTENCY_RECORD_BEHAVIOR: &str = behaviors::IDEMPOTENCY_RECORD;
+/// 本行为管辖的名字。**由本 crate 自报**（D-363）：工具在自己的
+/// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
+pub(crate) const IDEMPOTENCY_RECORD_BEHAVIOR: &str = "idempotency_record";
 
 /// 参数 / 事实载荷里的二元组：键 + 值。三处（判方、写方、工具回执）共用这一个口径。
 fn pair(value: &serde_json::Value) -> Option<(&str, &str)> {
@@ -40,6 +42,10 @@ impl ToolBehavior for IdempotencyRecord {
 
     fn behavior(&self) -> &'static str {
         IDEMPOTENCY_RECORD_BEHAVIOR
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::LandsFacts
     }
 
     /// 同一会话里已经记过**同一个键** ⇒ 拒绝这次写入。

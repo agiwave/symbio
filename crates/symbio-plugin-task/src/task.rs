@@ -50,7 +50,7 @@ use std::collections::BTreeMap;
 
 use symbio_plugin_api::{ActorSpec, Pattern, Scope};
 
-use symbio_plugin_api::behaviors;
+use symbio_plugin_api::behaviors::Kind;
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
@@ -310,7 +310,11 @@ fn drafts(call: &EffectCall<'_>, items: &[TaskItem]) -> Vec<FactDraft> {
     out
 }
 
-/// 从 `todo_write` 的参数里读出声明项（形状是跨插件契约，见 [`behaviors::TASK_TABLE`]）。
+/// 本行为管辖的名字。**由本 crate 自报**（D-363）：工具（`todo_write`）在
+/// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
+pub(crate) const TASK_TABLE_BEHAVIOR: &str = "task_table";
+
+/// 从 `todo_write` 的参数里读出声明项（形状是跨插件契约，见 [`TASK_TABLE_BEHAVIOR`]）。
 ///
 /// 只认 `todos[]` 里的 `id` / `content` / `status` / `depends_on`：其余字段（`priority`
 /// 之类）是给模型看的提示，不落事实。`content` 为空的项跳过——没有目标的任务开出来
@@ -362,7 +366,7 @@ fn declared_items(args: &serde_json::Value) -> Vec<TaskItem> {
 ///
 /// ## 为什么实现住这里，而不是工具所在的那个插件
 ///
-/// 行为名 [`behaviors::TASK_TABLE`] 的 owner 是**任务词族**的 owner：格位、角色与
+/// 行为名 [`TASK_TABLE_BEHAVIOR`] 的 owner 是**任务词族**的 owner：格位、角色与
 /// 折叠（[`step`] / [`rebuild`] / [`crate::readyset`]）都在本插件。工具那边只声明「我写
 /// 任务表」，不需要也不应该知道 `task.*` 有几格。两侧各自声明，中间没有中心映射表。
 ///
@@ -380,7 +384,11 @@ impl ToolBehavior for TaskTable {
     }
 
     fn behavior(&self) -> &'static str {
-        behaviors::TASK_TABLE
+        TASK_TABLE_BEHAVIOR
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::LandsFacts
     }
 
     /// 写侧资格（[DE-033 §3](../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）：

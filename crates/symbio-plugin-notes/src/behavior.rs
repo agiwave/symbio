@@ -10,16 +10,17 @@
 //! 前置判断（[`NoteCapture::before`]）是同一份声明的另一半：重复的便签在**执行前**
 //! 就被拒，模型看到的是「已经记过」而不是一条被幂等键悄悄吞掉的成功结果。
 
+use symbio_plugin_api::behaviors::Kind;
 use symbio_plugin_api::{
-    behaviors, BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
+    BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
 use symbio_plugin_api::{Entity, Verb};
 
 use super::decl::NOTES_CREATED;
 
-/// 本行为管辖的名字。它是**宿主词汇**（`symbio_plugin_api::behaviors`），
-/// 工具在自己的 `CapabilityMeta.behaviors` 里声明同一个常量。
-pub(crate) const NOTE_CAPTURE: &str = behaviors::NOTE_CAPTURE;
+/// 本行为管辖的名字。**由本 crate 自报**（D-363）：工具在自己的
+/// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
+pub(crate) const NOTE_CAPTURE: &str = "note_capture";
 
 /// 参数 / 事实载荷里的正文：去空白后的非空 `text`。写方与判方共用同一口径。
 fn note_text(value: &serde_json::Value) -> Option<&str> {
@@ -37,6 +38,10 @@ impl ToolBehavior for NoteCapture {
 
     fn behavior(&self) -> &'static str {
         NOTE_CAPTURE
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::LandsFacts
     }
 
     /// 同一会话里已经记过同一条便签 ⇒ 拒绝这次写入。

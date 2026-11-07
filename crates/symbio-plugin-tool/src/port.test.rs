@@ -24,7 +24,46 @@ use symbio_plugin_api::{
 // - 造格型 + 成功 + 0 草稿 ⇒ 违约（fail-closed）——挡「将来有人写出静默空转的行为」；
 // - 富化型（只补 `file_op` 这类字段）与纯前置判断型本身不造格，0 草稿是正常形态，
 //   **不能**判成「有账不落」（`file_change` 一度就是这样被误判的）。
-// 种类的唯一来源是行为登记表 `behaviors::KINDS`，不在运行时猜 `after` 有没有被覆写。
+// 种类的唯一来源是**实现自报**的 `kind()`（D-363），不在运行时猜 `after` 有没有被覆写。
+
+/// 判据夹具：只在本测试二进制里登记，不依赖任何真插件被链接。
+const FIXTURE_FILE_CHANGE: &str = "fixture_file_change";
+const FIXTURE_TASK_TABLE: &str = "fixture_task_table";
+
+struct FixtureEnricher;
+
+impl symbio_plugin_api::ToolBehavior for FixtureEnricher {
+    fn owner(&self) -> &'static str {
+        "tests/enricher"
+    }
+
+    fn behavior(&self) -> &'static str {
+        FIXTURE_FILE_CHANGE
+    }
+
+    fn kind(&self) -> symbio_plugin_api::behaviors::Kind {
+        symbio_plugin_api::behaviors::Kind::NoFacts
+    }
+}
+
+struct FixtureLander;
+
+impl symbio_plugin_api::ToolBehavior for FixtureLander {
+    fn owner(&self) -> &'static str {
+        "tests/lander"
+    }
+
+    fn behavior(&self) -> &'static str {
+        FIXTURE_TASK_TABLE
+    }
+
+    fn kind(&self) -> symbio_plugin_api::behaviors::Kind {
+        symbio_plugin_api::behaviors::Kind::LandsFacts
+    }
+}
+
+symbio_plugin_api::submit_behavior!(FixtureEnricher);
+symbio_plugin_api::submit_behavior!(FixtureLander);
 
 #[test]
 fn declared_behavior_without_drafts_is_bookkeeping_missing() {
@@ -41,10 +80,10 @@ fn declared_behavior_without_drafts_is_bookkeeping_missing() {
 #[test]
 fn behavior_kinds_are_declared_per_name() {
     assert!(!symbio_plugin_api::effects::expects_facts(&[
-        symbio_plugin_api::behaviors::FILE_CHANGE
+        FIXTURE_FILE_CHANGE
     ]));
     assert!(symbio_plugin_api::effects::expects_facts(&[
-        symbio_plugin_api::behaviors::TASK_TABLE
+        FIXTURE_TASK_TABLE
     ]));
 }
 

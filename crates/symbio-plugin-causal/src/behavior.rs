@@ -14,15 +14,17 @@
 //! 收窄到一条可用的断言：同一条断言重复断言只留一条（靠幂等键），方向相反的
 //! 两条各自成立——后者由读方（视图的 `edges`）自己看见，本层不替它裁决。
 
+use symbio_plugin_api::behaviors::Kind;
 use symbio_plugin_api::{
-    behaviors, BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
+    BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
 use symbio_plugin_api::{Entity, Verb};
 
 use super::decl::CAUSAL_LINK;
 
-/// 本行为管辖的名字（宿主词汇，见 `symbio_plugin_api::behaviors`）。
-pub(crate) const CAUSAL_LINK_BEHAVIOR: &str = behaviors::CAUSAL_LINK;
+/// 本行为管辖的名字。**由本 crate 自报**（D-363）：工具在自己的
+/// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
+pub(crate) const CAUSAL_LINK_BEHAVIOR: &str = "causal_link";
 
 /// 参数里的三元组：因 / 果 / 置信度。三处（判方、写方、工具回执）共用这一个口径。
 fn triple(value: &serde_json::Value) -> Option<(&str, &str, u64)> {
@@ -49,6 +51,10 @@ impl ToolBehavior for CausalCapture {
 
     fn behavior(&self) -> &'static str {
         CAUSAL_LINK_BEHAVIOR
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::LandsFacts
     }
 
     /// 同一会话里已经断言过**同一条**（同向、同因、同果）⇒ 拒绝这次写入。

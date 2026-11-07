@@ -4,6 +4,10 @@ use super::*;
 use crate::rows::declared_effects;
 use symbio_kernel::event::{Entity, Verb};
 
+/// 测试夹具的名字：只在本测试二进制里登记，不依赖任何真插件被链接。
+const TEST_TASK: &str = "test_task_table";
+const TEST_GATE: &str = "test_gatekeeper";
+
 /// 一个只为测试存在的实现：把调用记成一条 `test × asserted` 的草稿。
 struct Recorder;
 
@@ -13,7 +17,11 @@ impl ToolBehavior for Recorder {
     }
 
     fn behavior(&self) -> &'static str {
-        crate::behaviors::TASK_TABLE
+        TEST_TASK
+    }
+
+    fn kind(&self) -> crate::behaviors::Kind {
+        crate::behaviors::Kind::LandsFacts
     }
 
     fn after(&self, call: &EffectCall<'_>) -> Vec<FactDraft> {
@@ -72,7 +80,7 @@ fn undeclared_tool_produces_nothing() {
 /// 行为无权指定「这笔账记在哪一轮」，那是写口的事（DE-026 D-252）。
 #[test]
 fn declared_tool_produces_draft_with_anchor() {
-    let i = input(&[crate::behaviors::TASK_TABLE]);
+    let i = input(&[TEST_TASK]);
     let drafts = apply(&i.call(&env()));
     assert_eq!(drafts.len(), 1);
     let d = &drafts[0];
@@ -87,18 +95,19 @@ fn declared_tool_produces_draft_with_anchor() {
     assert_eq!(event.verb, Verb::Asserted);
 }
 
-/// 行为名不在 [`crate::behaviors::KNOWN`] 里 ⇒ 宿主不认识，读侧校验能抓住。
+/// 收集面是已提交实现的并集：没有第二张名单可漂移。
 ///
-/// 这是 J3 的入口面：未知行为**静默不生效**是坏形态，所以实现必须自报一个已知名，
-/// 而工具侧的声明由 `ToolDecls` 校验（见 loop 的 `decls.test.rs`）。
+/// 这是 J3 的入口面：未知行为**静默不生效**是坏形态，所以实现必须自报名字与造格
+/// 声明，而工具侧的声明由 `ToolDecls` 校验（见 loop 的 `decls.test.rs`）。
 #[test]
-fn test_behavior_declares_a_known_name() {
+fn known_names_are_the_collected_handlers() {
+    let names = crate::behaviors::known();
     let handlers = handlers();
     assert!(handlers.iter().any(|b| b.owner() == "tests/recorder"));
     for b in handlers {
         assert!(
-            crate::behaviors::is_known(b.behavior()),
-            "{} 报了未登记的行为名 {:?}",
+            names.contains(&b.behavior()),
+            "{} 报的名字 {:?} 没进收集结果",
             b.owner(),
             b.behavior()
         );
@@ -123,7 +132,7 @@ fn annotations_follow_the_declaration() {
     let undeclared = input(&[]);
     assert!(annotations(&undeclared).is_empty());
 
-    let declared = input(&[crate::behaviors::TASK_TABLE]);
+    let declared = input(&[TEST_TASK]);
     let got = annotations(&declared);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].0, "test_tool");
@@ -135,7 +144,7 @@ fn annotations_follow_the_declaration() {
 /// 判据形态：`annotations` 的入参是 `EffectInput`，编译期就交不出 `turn` / `principal`。
 #[test]
 fn annotations_do_not_need_the_host_face() {
-    let i = input(&[crate::behaviors::TASK_TABLE]);
+    let i = input(&[TEST_TASK]);
     // 若富化需要轮锚，这里必须构造 `EffectEnv`——它构造不出来就说明时机确实更早。
     assert_eq!(annotations(&i).len(), 1);
 }
@@ -173,7 +182,11 @@ impl ToolBehavior for Gatekeeper {
     }
 
     fn behavior(&self) -> &'static str {
-        crate::behaviors::NOTE_CAPTURE
+        TEST_GATE
+    }
+
+    fn kind(&self) -> crate::behaviors::Kind {
+        crate::behaviors::Kind::NoFacts
     }
 
     fn before(&self, req: &BeforeRequest<'_>) -> BeforeDecision {
@@ -228,7 +241,7 @@ fn undeclared_tools_are_not_judged() {
 #[test]
 fn neutral_readings_pass() {
     let args = serde_json::json!({});
-    let req = before_req(&[crate::behaviors::NOTE_CAPTURE], &args, &[], false);
+    let req = before_req(&[TEST_GATE], &args, &[], false);
     assert!(apply_before(&req).is_none());
 }
 
@@ -236,7 +249,7 @@ fn neutral_readings_pass() {
 #[test]
 fn a_declared_judgement_refuses_with_its_own_semantics() {
     let args = serde_json::json!({});
-    let req = before_req(&[crate::behaviors::NOTE_CAPTURE], &args, &[], true);
+    let req = before_req(&[TEST_GATE], &args, &[], true);
     let refusal = apply_before(&req).expect("已收回必须被拒");
     assert_eq!(refusal.gate, "测试闸");
     assert_eq!(refusal.reason, "session/a 已被收回");

@@ -4,8 +4,8 @@
 
 use super::{
     prompt_section, ScheduleContributor, ScheduleDecider, TaskItem, TaskStatus, TaskTable,
+    TASK_TABLE_BEHAVIOR,
 };
-use symbio_plugin_api::behaviors;
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeReadings, BeforeRequest, EffectEnv, EffectInput, ToolBehavior,
 };
@@ -113,7 +113,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
         success: true,
         result: String::new(),
         why: String::new(),
-        declared: &[behaviors::TASK_TABLE],
+        declared: &[TASK_TABLE_BEHAVIOR],
     };
     let snapshot = store.range(Seq::new(0));
     let stem = format!("t{turn}");
@@ -646,7 +646,7 @@ fn effect(call_id: &str, args: serde_json::Value, success: bool) -> EffectInput 
         } else {
             "被拒".into()
         },
-        declared: &[behaviors::TASK_TABLE],
+        declared: &[TASK_TABLE_BEHAVIOR],
     }
 }
 
@@ -844,7 +844,7 @@ fn judgement<'a>(args: &'a serde_json::Value, principal: &'a str) -> BeforeReque
         call_id: "call-1",
         args,
         principal,
-        declared: &[behaviors::TASK_TABLE],
+        declared: &[TASK_TABLE_BEHAVIOR],
         facts: &[],
         readings: BeforeReadings::default(),
     }

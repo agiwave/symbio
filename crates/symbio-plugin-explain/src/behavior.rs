@@ -12,15 +12,17 @@
 //! 「同一个决定 + 同一条理由重复记录」是**入参**就能看出来的问题，不需要扫全量事实。
 //! 同一个决定换一条理由不是重复——那是同一决定的新理由，是一条新信息。
 
+use symbio_plugin_api::behaviors::Kind;
 use symbio_plugin_api::{
-    behaviors, BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
+    BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
 use symbio_plugin_api::{Entity, Verb};
 
 use super::decl::EXPLAIN_RATIONALE;
 
-/// 本行为管辖的名字（宿主词汇，见 `symbio_plugin_api::behaviors`）。
-pub(crate) const EXPLAIN_RATIONALE_BEHAVIOR: &str = behaviors::EXPLAIN_RATIONALE;
+/// 本行为管辖的名字。**由本 crate 自报**（D-363）：工具在自己的
+/// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
+pub(crate) const EXPLAIN_RATIONALE_BEHAVIOR: &str = "explain_rationale";
 
 /// 参数里的三元组：决定 / 理由 / 证据。三处（判方、写方、工具回执）共用这一个口径。
 fn triple(value: &serde_json::Value) -> Option<(&str, &str, &str)> {
@@ -48,6 +50,10 @@ impl ToolBehavior for ExplainCapture {
 
     fn behavior(&self) -> &'static str {
         EXPLAIN_RATIONALE_BEHAVIOR
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::LandsFacts
     }
 
     /// 同一会话里已经记录过**同一个决定 + 同一条理由** ⇒ 拒绝这次写入。

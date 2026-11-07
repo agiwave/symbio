@@ -152,7 +152,7 @@ pub static SPECS: &[ToolSpec] = &[
             "{\"path\":\"tmp\",\"recursive\":true}",
         ],
         risk: CapabilityRiskLevel::High,
-        behaviors: &[symbio_plugin_api::behaviors::FILE_CHANGE],
+        behaviors: &[crate::behavior::FILE_CHANGE],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -180,7 +180,7 @@ pub static SPECS: &[ToolSpec] = &[
         },
         examples: &["{\"path\":\"docs/notes\"}"],
         risk: CapabilityRiskLevel::Medium,
-        behaviors: &[symbio_plugin_api::behaviors::FILE_CHANGE],
+        behaviors: &[crate::behavior::FILE_CHANGE],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -210,7 +210,7 @@ pub static SPECS: &[ToolSpec] = &[
         },
         examples: &["{\"path\":\"notes.md\",\"text\":\"# 标题\\n\"}"],
         risk: CapabilityRiskLevel::Medium,
-        behaviors: &[symbio_plugin_api::behaviors::FILE_CHANGE],
+        behaviors: &[crate::behavior::FILE_CHANGE],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -247,7 +247,7 @@ pub static SPECS: &[ToolSpec] = &[
         },
         examples: &["{\"path\":\"src/main.rs\",\"old_string\":\"fn old()\",\"new_string\":\"fn new()\"}"],
         risk: CapabilityRiskLevel::Medium,
-        behaviors: &[symbio_plugin_api::behaviors::FILE_CHANGE],
+        behaviors: &[crate::behavior::FILE_CHANGE],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;

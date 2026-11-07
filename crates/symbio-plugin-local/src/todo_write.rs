@@ -13,6 +13,14 @@ use symbio_plugin_api::{
 };
 use tokio::sync::{OnceCell, RwLock};
 
+/// 任务表行为名：本 crate 只是**声明方**，实现（以及名字的登记）在
+/// `symbio-plugin-task`（D-363）。
+///
+/// 插件之间不许互相依赖（E-009），所以这一串在两侧各写一次——改名字要同时改两处。
+/// 这是当前仍欠的一处代码耦合（D-363 的「残余」）；其余能力（工具与实现同包）
+/// 只改自己的 crate。
+const TASK_TABLE: &str = "task_table";
+
 /// 会话级任务清单存储：session_id -> 任务数组
 static TODO_STORE: OnceCell<RwLock<HashMap<String, Vec<Value>>>> = OnceCell::const_new();
 
@@ -167,7 +175,7 @@ impl Capability for TodoWriteTool {
             ]),
             // 行为名自声明：任务表写侧资格闸与任务声明记账的管辖对象。
             // 执行器读这个名字判，不认工具名——与风险同一条自声明纪律。
-            behaviors: &[symbio_plugin_api::behaviors::TASK_TABLE],
+            behaviors: &[TASK_TABLE],
         }
     }
 

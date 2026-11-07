@@ -41,6 +41,7 @@
 //! 在子会话内恢复被审批的工具；随后同 4-5。恢复不走入队——它不是一条新消息，
 //! 而是对当时那条消息的操作。父子关系始终由子会话存储元数据承载，无进程内状态。
 
+use super::behavior::{ASSIGN_WORK, DELEGATION_PROMISE};
 use super::store::AgentDirStore;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -116,10 +117,7 @@ impl symbio_plugin_api::Capability for AgentRunCapability {
             // 行为名自声明：本工具提供 `assign.work`（淘汰闸的管辖对象），
             // 且是跨主体立约型工具（承诺记账对象）。执行器读这两个名字判，不认工具名——
             // 作用域投影只换名字、原样透传集合（改名包装器不重判风险的同一条纪律）。
-            behaviors: &[
-                symbio_plugin_api::behaviors::ASSIGN_WORK,
-                symbio_plugin_api::behaviors::DELEGATION_PROMISE,
-            ],
+            behaviors: &[ASSIGN_WORK, DELEGATION_PROMISE],
             description: format!(
                 "将任务委托给一个独立的子智能体会话：在其独立会话中执行任务，\
                  完成后返回其最终答复；子智能体拥有自己的提示词与工具集。\n\n\

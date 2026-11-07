@@ -21,9 +21,13 @@
 //! 失败 / 被拒的写没有改变工作目录。判据留在**这里**（而不是让读侧再判一次
 //! `success`）：一条失败产物的载荷里出现 `file_op`，本身就是「这次写了」的谎。
 
-use symbio_plugin_api::behaviors;
+use symbio_plugin_api::behaviors::Kind;
 use symbio_plugin_api::effects::FileOp;
 use symbio_plugin_api::effects::{EffectInput, ToolBehavior};
+
+/// 本行为管辖的名字。**由本 crate 自报**（D-363）：写族四个工具在
+/// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
+pub(crate) const FILE_CHANGE: &str = "file_change";
 
 /// 写族工具 → 动作。
 ///
@@ -49,7 +53,12 @@ impl ToolBehavior for FileChange {
     }
 
     fn behavior(&self) -> &'static str {
-        behaviors::FILE_CHANGE
+        FILE_CHANGE
+    }
+
+    fn kind(&self) -> Kind {
+        // 富化型：只给产物格补字段，不造新格。
+        Kind::NoFacts
     }
 
     fn annotate(&self, input: &EffectInput) -> Vec<(&'static str, serde_json::Value)> {

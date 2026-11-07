@@ -1,7 +1,7 @@
 //! 插件身份与工具元数据的判据。
 
 use super::{NotesPlugin, NotesTool};
-use symbio_plugin_api::behaviors;
+use crate::behavior::NOTE_CAPTURE;
 use symbio_plugin_api::PLUGIN_ID_NOTES;
 use symbio_plugin_api::{Capability, CapabilityCategory};
 
@@ -17,6 +17,6 @@ fn the_plugin_identity_comes_from_the_manifest() {
 fn the_tool_declares_its_behavior() {
     let meta = NotesTool.meta();
     assert_eq!(meta.name, "notes_add");
-    assert!(meta.declares(behaviors::NOTE_CAPTURE));
+    assert!(meta.declares(NOTE_CAPTURE));
     assert_eq!(meta.category, Some(CapabilityCategory::Other));
 }

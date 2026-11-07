@@ -7,7 +7,7 @@
 //!
 //! - [`routes`]：跨插件调用路径（地址）常量
 //! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂）
-//! - [`behaviors`]：能力自声明的行为名（内核只装开放集合，不认识名字）
+//! - [`behaviors`]：行为名的收集面（名字与造格声明由实现自报，本 crate 不持有）
 //! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）
 //! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份

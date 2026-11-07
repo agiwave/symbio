@@ -24,8 +24,8 @@
 //! ## 选工具的依据是**声明**，不是名字
 //!
 //! 一个行为是否管辖某次调用，只看工具的 `CapabilityMeta.behaviors` 里有没有这个
-//! 行为名（开放集合）。行为名住 [`crate::behaviors`]，实现住能力包——宿主
-//! 两侧都不认识工具名。
+//! 行为名（开放集合）。名字与造格声明都由实现自报，[`crate::behaviors`] 只做收集
+//! ——宿主两侧都不认识工具名。
 //!
 //! ## 前置判断：同一份声明，另一种出口
 //!
@@ -49,6 +49,7 @@
 //! 与 [`EffectEnv::applied`]（本轮已落格的草稿）。后者存在的理由很具体：同一轮里
 //! 两个调用互相看不见时，第二条声明会把第一条刚开的格再开一次。
 
+use crate::behaviors::Kind;
 use serde_json::Value;
 use symbio_kernel::event::{Entity, Event, Verb};
 
@@ -420,11 +421,18 @@ pub trait ToolBehavior: Sync {
     /// 装配顺序的依据：同一次调用上多个行为按 owner 字典序执行（DE-025 §3 第 4 条）。
     fn owner(&self) -> &'static str;
 
-    /// 本实现管辖的行为名，必须是 [`crate::behaviors`] 里的已知名字。
+    /// 本实现管辖的行为名。
     ///
     /// 与工具声明同名才生效：工具说「我受这项管辖」，实现说「我来记这笔账」——
-    /// 两侧各自声明，中间没有一张中心映射表。
+    /// 两侧各自声明，中间没有一张中心映射表。名字由本实现自报，宿主经
+    /// [`crate::behaviors::known`] 收集；本 crate 不持有能力名。
     fn behavior(&self) -> &'static str;
+
+    /// 这个行为名按契约**造不造格**（[`Kind`]）。
+    ///
+    /// 声明在实现上，由 [`crate::behaviors::kind_of`] 折叠给写口：换个实现，
+    /// 「这个名字该不该产出事实」的答案不变。同名多实现必须声明一致。
+    fn kind(&self) -> Kind;
 
     /// 一次调用的终态效果。返回空 = 这次调用对本能力没有效果（**默认**：
     /// 大多数行为只在部分终态上记账）。
@@ -493,9 +501,9 @@ pub fn handlers() -> Vec<&'static dyn ToolBehavior> {
 
 /// 这一次调用**按声明应当**产出事实草稿吗？
 ///
-/// 判据只认**造格型**登记（[`crate::behaviors::KINDS`]）：富化型与纯前置判断型
-/// 本来就不造格，0 草稿是正常形态。**不靠运行时猜 `after` 有没有被覆写**——那是
-/// 又一个近似判据，换个实现方式就漂移。
+/// 判据只认实现自报的**造格型**（[`crate::behaviors::kind_of`]）：富化型与纯前置
+/// 判断型本来就不造格，0 草稿是正常形态。**不靠运行时猜 `after` 有没有被覆写**——
+/// 那是又一个近似判据，换个实现方式就漂移。
 pub fn expects_facts(declared: &[&'static str]) -> bool {
     declared
         .iter()
