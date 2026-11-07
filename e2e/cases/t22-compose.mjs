@@ -372,10 +372,12 @@ export default defineCase(
       );
       assert(genCall.found, 'B 线那次答话生成必须落一条 `request(port=model.assist)`');
       const kindsInOrder = genCall.facts.map((e) => e.kind);
+      // `sent` 必须先于执行体返回落账（D-376）：执行体挂死时 `expire` 才排得上；
+      // `request` 随后作为溯源的直接前件，`response` 收尾。
       assertEq(
         JSON.stringify(kindsInOrder),
-        JSON.stringify(['request', 'sent', 'response']),
-        `那一笔应当是三格且按派发序（实际 ${JSON.stringify(kindsInOrder)}，id=${genCall.id}）`,
+        JSON.stringify(['sent', 'request', 'response']),
+        `那一笔应当三格且先 sent 后 request 再 response（实际 ${JSON.stringify(kindsInOrder)}，id=${genCall.id}）`,
       );
       // 逻辑 id 由事实派生（D-323）：不许计数、不许带轮号 / 幕锚。判据只剩两件事——
       // 它非空，且三格的身份真的**同一个**（从各自的事件 id 独立还原后比对）。

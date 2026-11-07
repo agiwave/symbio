@@ -23,8 +23,10 @@ import { fileURLToPath } from 'node:url'
 import {
   ARCH_TREES,
   BEFORE_GUARD,
+  DEBT_SCHEDULE,
   FIXTURE,
   classifyCommit,
+  debtAllowance,
   generatedPaths,
   isCapabilitySource,
   isGenerated,
@@ -34,6 +36,7 @@ import {
   supplementErrors,
   supplementRatioReading,
   validateBeforeGuard,
+  validateDebtSchedule,
 } from './capability-migration-audit.mjs'
 
 const script = fileURLToPath(new URL('./capability-migration-audit.mjs', import.meta.url))
@@ -450,6 +453,56 @@ test('supplementRatioReading：没有迁移时比值为 ∞（不是 NaN）', ()
   assert.equal(supplementRatioReading({ supplements: 3, migrations: 0, stock: { supplements: 0, migrations: 0 } }).ratio, Infinity)
 })
 
+// ── 绝对欠账的期限与台阶（D-375）──────────────────────────────────────────
+
+test('debtAllowance：起算日宽限到本金，检查点当天降档，末点归零', () => {
+  const initialDebt = 6
+  assert.deepEqual(debtAllowance({ today: '2026-11-07', initialDebt }), {
+    today: '2026-11-07',
+    allowed: 6,
+    next: { by: '2026-11-10', max: 5 },
+    deadline: '2026-11-25',
+  })
+  // 检查点前一天仍按上一档：宽限到日期当天，不是提前判红
+  assert.equal(debtAllowance({ today: '2026-11-09', initialDebt }).allowed, 6)
+  // 检查点当天降档（日期一过即按新上限判）
+  assert.equal(debtAllowance({ today: '2026-11-10', initialDebt }).allowed, 5)
+  assert.equal(debtAllowance({ today: '2026-11-22', initialDebt }).allowed, 1)
+  // 到期清零，且没有下一台阶
+  const atDeadline = debtAllowance({ today: '2026-11-25', initialDebt })
+  assert.equal(atDeadline.allowed, 0)
+  assert.equal(atDeadline.next, null)
+  assert.equal(debtAllowance({ today: '2026-11-26', initialDebt }).allowed, 0)
+})
+
+test('validateDebtSchedule：真表合法；平台阶 / 末点非 0 / 日期倒序都判红', () => {
+  assert.deepEqual(validateDebtSchedule(DEBT_SCHEDULE, 6), [])
+  // 空的台阶 = 没有期限
+  assert.ok(validateDebtSchedule({ start: '2026-11-07', checkpoints: [] }, 6).length > 0)
+  // 平的台阶 = 绝对线退回增量线
+  const flat = {
+    start: '2026-11-07',
+    checkpoints: [
+      { by: '2026-12-31', max: 5 },
+      { by: '2027-01-31', max: 5 },
+      { by: '2027-06-30', max: 0 },
+    ],
+  }
+  assert.match(validateDebtSchedule(flat, 6).join('；'), /至少降 1/)
+  // 末点不归零 = 到期还能欠
+  const noZero = { start: '2026-11-07', checkpoints: [{ by: '2027-06-30', max: 1 }] }
+  assert.match(validateDebtSchedule(noZero, 6).join('；'), /压到 0/)
+  // 日期不递增
+  const back = {
+    start: '2026-11-07',
+    checkpoints: [
+      { by: '2027-01-31', max: 5 },
+      { by: '2026-12-31', max: 0 },
+    ],
+  }
+  assert.match(validateDebtSchedule(back, 6).join('；'), /严格递增/)
+})
+
 // ── 真仓冒烟 ──────────────────────────────────────────────────────────────
 
 test('真仓冒烟：夹具读得出、--last 跑绿且点名夹具', () => {
@@ -457,4 +510,7 @@ test('真仓冒烟：夹具读得出、--last 跑绿且点名夹具', () => {
   assert.equal(r.status, 0, r.stderr || r.stdout)
   assert.match(r.stdout, new RegExp(FIXTURE.sha.slice(0, 8)))
   assert.match(r.stdout, /全部只搬运/)
+  // 期限线必须每轮打印（不手抄数字）：欠账 / 今日允许 / 下一台阶
+  assert.match(r.stdout, /累计欠账 \d+ 笔/)
+  assert.match(r.stdout, /今日（\d{4}-\d{2}-\d{2}）允许 ≤\d+/)
 })

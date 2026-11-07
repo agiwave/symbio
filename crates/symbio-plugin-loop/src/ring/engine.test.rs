@@ -3,6 +3,7 @@ use crate::ring::facts::{DebtKey, Fact, FactKind, FactView};
 use crate::ring::table::{DebtRow, DebtSource, Table};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
@@ -11,10 +12,13 @@ use symbio_plugin_api::port::{
 };
 
 /// 测试宿主：事实在内存里，债表与执行体由测试给定。
+///
+/// 克隆的是句柄：后台执行体经 `shared()` 拿到同一份账（`D-376`）。
+#[derive(Clone)]
 struct TestCtx {
-    facts: Mutex<Vec<Fact>>,
-    rows: Box<dyn DebtSource + Send + Sync>,
-    executors: HashMap<&'static str, Arc<dyn PortExecutor>>,
+    facts: Arc<Mutex<Vec<Fact>>>,
+    rows: Arc<dyn DebtSource + Send + Sync>,
+    executors: Arc<HashMap<&'static str, Arc<dyn PortExecutor>>>,
     now: u64,
     outlet: PortFactEmit,
     concurrency: usize,
@@ -30,9 +34,9 @@ impl TestCtx {
 
     fn with_source(source: Box<dyn DebtSource + Send + Sync>) -> Self {
         Self {
-            facts: Mutex::new(Vec::new()),
-            rows: source,
-            executors: HashMap::new(),
+            facts: Arc::new(Mutex::new(Vec::new())),
+            rows: Arc::from(source),
+            executors: Arc::new(HashMap::new()),
             now: 0,
             outlet: PortFactEmit::silent(),
             concurrency: 1,
@@ -57,12 +61,12 @@ impl TestCtx {
     }
 
     fn with_executor(mut self, port: &'static str, executor: Arc<dyn PortExecutor>) -> Self {
-        self.executors.insert(port, executor);
+        Arc::make_mut(&mut self.executors).insert(port, executor);
         self
     }
 
     fn with_facts(mut self, facts: Vec<Fact>) -> Self {
-        self.facts = Mutex::new(facts);
+        self.facts = Arc::new(Mutex::new(facts));
         self
     }
 
@@ -86,7 +90,18 @@ impl TestCtx {
 
 impl DriveCtx for TestCtx {
     fn facts(&self) -> Vec<Fact> {
-        self.snapshot()
+        // 环的 now 只取自事实（`D-376`）：`.at(now)` 把时间推到 now = 在账上落一条
+        // 已收束的时钟事实，测试不靠墙钟也能模拟「时间过去了」。
+        let mut facts = self.snapshot();
+        if self.now > facts.iter().map(|f| f.at_ms).max().unwrap_or(0) {
+            facts.push(Fact::new(
+                FactKind::Response,
+                DebtKey::new("__clock", "__tick", 1),
+                json!({}),
+                self.now,
+            ));
+        }
+        facts
     }
 
     fn append(&self, fact: Fact) {
@@ -114,8 +129,8 @@ impl DriveCtx for TestCtx {
         self.executors.get(port).cloned()
     }
 
-    fn now_ms(&self) -> u64 {
-        self.now
+    fn shared(&self) -> Arc<dyn DriveCtx> {
+        Arc::new(self.clone())
     }
 
     fn concurrency(&self) -> usize {
@@ -276,7 +291,7 @@ async fn one_round_writes_request_sent_response() {
     let kinds: Vec<_> = ctx.snapshot().iter().map(|f| f.kind).collect();
     assert_eq!(
         kinds,
-        vec![FactKind::Request, FactKind::Sent, FactKind::Response]
+        vec![FactKind::Sent, FactKind::Request, FactKind::Response]
     );
     let seen = stub.seen();
     assert_eq!(seen[0].0, "p1");
@@ -307,11 +322,11 @@ async fn retryable_error_advances_the_lease() {
     assert_eq!(
         kinds,
         vec![
-            FactKind::Request,
             FactKind::Sent,
+            FactKind::Request,
             FactKind::Retry,
-            FactKind::Request,
             FactKind::Sent,
+            FactKind::Request,
             FactKind::Response
         ]
     );
@@ -849,7 +864,7 @@ async fn protocol_drafts_pair_and_world_drafts_leave_the_ring() {
     let kinds: Vec<_> = ctx.snapshot().iter().map(|f| f.kind).collect();
     assert_eq!(
         kinds,
-        vec![FactKind::Request, FactKind::Sent, FactKind::Response]
+        vec![FactKind::Sent, FactKind::Request, FactKind::Response]
     );
     let drafts = sink.drafts.lock().unwrap();
     assert_eq!(drafts.len(), 1);
@@ -1081,4 +1096,143 @@ async fn a_lap_without_new_facts_is_reported_as_stalled() {
         "一圈零新增必须停摆并交回账，不能继续自旋：{:?}",
         report.outcome
     );
+}
+
+/// 会真的挂住的执行体：第一次进来就停在 `release` 上，直到测试放行。
+struct HungOnce {
+    release: Arc<tokio::sync::Notify>,
+    calls: Arc<Mutex<Vec<u32>>>,
+    returned: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl PortExecutor for HungOnce {
+    async fn execute(&self, ctx: PortExecContext, _input: PortInput) -> PortOutcome {
+        let attempt = attempt_of(&ctx.idempotency_key);
+        self.calls
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(attempt);
+        if attempt == 1 {
+            self.release.notified().await;
+        }
+        self.returned.store(true, Ordering::SeqCst);
+        PortOutcome::ok()
+    }
+}
+
+/// 租约真超时（`D-376`）：`sent` 在执行体返回**之前**落账；执行体挂死时 `expire`
+/// 照样排得上并推进环；超时之后才回来的那一笔被 `(port, id, attempt)` 整笔吸收。
+#[tokio::test]
+async fn a_hung_executor_lets_expire_advance_and_drops_the_late_return() {
+    let release = Arc::new(tokio::sync::Notify::new());
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let returned = Arc::new(AtomicBool::new(false));
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("a", "p1", "d", json!({"q": 1})).lease(100, 1)
+    ])
+    .with_executor(
+        "p1",
+        Arc::new(HungOnce {
+            release: release.clone(),
+            calls: calls.clone(),
+            returned: returned.clone(),
+        }),
+    );
+
+    // 第一圈：执行体已经起了活并挂住，环靠「租约未过」把它当在飞，不被它挡住。
+    let first = drive(&ctx).await;
+    assert_eq!(first.dispatched, 1);
+    assert_eq!(
+        first.outcome,
+        DriveOutcome::Waiting(vec![DebtKey::new("p1", "d", 1)])
+    );
+    assert_eq!(*calls.lock().unwrap(), vec![1], "执行体确实起了活");
+    assert!(!returned.load(Ordering::SeqCst), "执行体还挂在那儿");
+
+    // `sent` 是 before 事实：执行体返回之前就在账上，租约从它的 `at_ms` 起算。
+    let sent = ctx
+        .snapshot()
+        .into_iter()
+        .find(|f| f.kind == FactKind::Sent)
+        .expect("sent 必须在执行体返回之前落账");
+    assert_eq!(sent.at_ms, 0);
+    assert_eq!(sent.payload["deadline_ms"], json!(100));
+
+    // 时间前进 = 在账上落一条更晚的事实，不读墙钟。
+    ctx.append(Fact::new(
+        FactKind::Response,
+        DebtKey::new("__clock", "__tick", 1),
+        json!({}),
+        1_000,
+    ));
+
+    // 第二圈：租约已过，`expire` 判死——执行体仍挂着也不妨碍环推进。
+    let second = drive(&ctx).await;
+    assert_eq!(second.dispatched, 0);
+    assert_eq!(second.outcome, DriveOutcome::NoDebt);
+    assert!(!returned.load(Ordering::SeqCst), "expire 时执行体还没返回");
+    let failed = ctx
+        .snapshot()
+        .into_iter()
+        .find(|f| f.kind == FactKind::Failed)
+        .expect("租约过期必须判死");
+    assert_eq!(failed.key, DebtKey::new("p1", "d", 1));
+    assert_eq!(failed.payload["reason"], "lease-expired");
+
+    // 迟归：执行体此刻才返回。整笔被幂等键吸收，不长出新事实与新债。
+    let before = format!("{:?}", ctx.snapshot());
+    release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while !returned.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("放行后执行体应当返回");
+    // 让后台任务的 `finish` 跑完。
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        format!("{:?}", ctx.snapshot()),
+        before,
+        "迟归一整笔丢弃：账上不多一条，也不长出新债"
+    );
+}
+
+/// 同一份事实日志重放两次，结果逐字节相同（`D-376` 的确定性时钟判据）。
+///
+/// 新事实的时间戳一律取日志里的「现在」（最晚 `at_ms`），不是进程时钟——若环
+/// 读墙钟，两次重放的时间戳就会漂，进而租约判定与落格序列都会不同。
+#[tokio::test]
+async fn replaying_the_same_fact_log_is_byte_identical() {
+    async fn replay() -> Vec<Fact> {
+        let ctx = TestCtx::new(vec![
+            DebtRow::new("a", "p1", "d", json!({"q": 1})).lease(100, 2)
+        ])
+        .with_executor("p1", Arc::new(Stub::retry_once_then_ok()))
+        .with_facts(vec![Fact::new(
+            FactKind::Response,
+            DebtKey::new("__seed", "__seed", 1),
+            json!({}),
+            42,
+        )]);
+        let _ = drive(&ctx).await;
+        ctx.snapshot()
+    }
+
+    let first = replay().await;
+    let second = replay().await;
+    assert_eq!(
+        format!("{first:?}"),
+        format!("{second:?}"),
+        "同一份事实日志重放两次必须逐字节相同（环不读墙钟）"
+    );
+    for fact in &first[1..] {
+        assert_eq!(
+            fact.at_ms, 42,
+            "事实时间取自日志里的现在，不是墙钟：{fact:?}"
+        );
+    }
 }

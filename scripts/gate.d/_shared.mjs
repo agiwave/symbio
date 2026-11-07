@@ -359,7 +359,7 @@ export const BASELINE = {
   // D-362：搬家用例里 5 条 kernel 侧折叠断言与 sdk 侧既有用例重复（`stamp_branches` /
   // `unselected_roots` 已经逐条钉同一折法），故只保留一侧；唯一新增的判据（删除格必须落在
   // `(Message, Closed)`）改写进 `mutations.test.rs` 从消费方一侧钉。净减 4，非覆盖丢失。
-  ciRustTestsTotal: 2223,
+  ciRustTestsTotal: 2225,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -389,8 +389,12 @@ export const BASELINE = {
   e2eCases: 92,
   // 累计「补件 : 迁移」的**欠账本金**（D-372，`capability-migration-audit` 的付账线）。
   // 不是「比值上限」：范围基线一变计数就变，比值当阈值会假红。这里记的是判据落地当天的
-  // 存量（实测 21 个补件 / 15 个迁移批次；任务账里手写的「补件 20 / 迁移 5」是旧读数），
-  // 判据只问「从这天起欠账有没有变大」——新增一个补件必须由一次迁移抵账，`debt > 0` 即红。
+  // 存量（实测 21 个补件 / 15 个迁移批次）。文档里手写的「补件 20 / 迁移 5」是 2026-11-01
+  // 的**旧尺**读数（同一范围新尺读 7），与今天不可比；口径与拆分见 `capability-migration-audit`
+  // 的计数规则与 `D-372`。
+  // 增量线只问「从这天起欠账有没有变大」——新增一个补件必须由一次迁移抵账，`debt > 0` 即红。
+  // 绝对欠账 6 笔按 D-375 的检查点递减、2026-11-25 归零；台阶表在审计脚本的
+  // `DEBT_SCHEDULE`，不在这里复制一份。
   // 两格是 floor 棘轮（`35-baseline` 守）：只许在**欠账为 0** 时随实测上移（等价于把窗口
   // 前移，判据结果不变）；欠账不为 0 时改大是**豁免**，必须先有决策。
   capabilitySupplements: 21,

@@ -11,10 +11,11 @@ use serde_json::{json, Value};
 use symbio_plugin_api::drive::Unless;
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
-    PortErrorClass, PortExecContext, PortExecHandles, PortExecutor, PortFactEmit, PortFactReader,
-    PortFactWriter, PortInput, PortOutcome,
+    PortErrorClass, PortExecContext, PortExecHandles, PortExecutor, PortFact, PortFactEmit,
+    PortFactReader, PortFactWriter, PortInput, PortOutcome,
 };
 use symbio_plugin_api::ExecAbortSignal;
+use tokio::task::JoinHandle;
 
 use crate::ring::facts::{DebtKey, Fact, FactKind, FactView};
 use crate::ring::table::{DebtRow, DebtSource};
@@ -26,9 +27,12 @@ use crate::ring::table::{DebtRow, DebtSource};
 /// 自身推进的硬约束，不该由宿主配置调没（所以不放 `DriveSupport` 的配置面）。
 const STEP_BUDGET: usize = 128;
 
-/// 宿主交给环的全部输入：事实投影的读写、债表、执行体解析与时钟。
+/// 宿主交给环的全部输入：事实投影的读写、债表与执行体解析。
 ///
 /// 缓存（若有）由宿主自己持有；环每一步重新读一遍，跨步不保留任何东西。
+///
+/// **时钟不在这里**：`now` 只取事实的 `at_ms` 最大值（`D-376`）。要推进时间就落一条
+/// 带更晚 `at_ms` 的事实——读墙钟会让同一份事实日志重放两次得到不同结果。
 pub(crate) trait DriveCtx: Send + Sync {
     /// 当前可见域的事实快照（只读投影）。
     fn facts(&self) -> Vec<Fact>;
@@ -42,8 +46,19 @@ pub(crate) trait DriveCtx: Send + Sync {
     /// 按端口名解析执行体——清单发现归宿主，环不持有注册表。
     fn executor(&self, port: &str) -> Option<Arc<dyn PortExecutor>>;
 
-    /// 当前时刻（毫秒，宿主给的相对时间轴）。
-    fn now_ms(&self) -> u64;
+    /// 同一份上下文的可持有句柄：派发出去的执行体在后台完成时要靠它回写。
+    ///
+    /// 返回的是**同一份事实账**的共享视图（实现方克隆的是句柄，不是账本）。
+    fn shared(&self) -> Arc<dyn DriveCtx>;
+
+    /// 环的「现在」：事实时间轴上最晚的一笔（`D-376`），不读墙钟。
+    ///
+    /// 默认只从五类事实取。宿主实现应覆盖成**全部**事实（含世界事实）：触发一次
+    /// 驱动的往往是世界事实（用户消息 / 工具回执），它的 `ts` 就是这一圈的起点；
+    /// 只看五类事实会在首圈得到 0，把刚派发的租约算成「早已过期」。
+    fn now_ms(&self) -> u64 {
+        latest_ts(&self.facts())
+    }
 
     /// 同轮并发派发的上限（宿主给的配置数据；环不写死常数）。
     fn concurrency(&self) -> usize;
@@ -142,18 +157,32 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
 
         let source = ctx.source();
         let rows = source.rows(&view);
+        // `now` 只来自事实（`D-376`）：同一份日志重放两次，租约的判定逐字节相同。
         let now_ms = ctx.now_ms();
         let work = plan(&view, source, &rows, now_ms);
 
         if !work.dispatch.is_empty() {
             let cap = ctx.concurrency().max(1);
+            // 执行体的读面固定在**这一圈计划时**的快照上（`D-376`）：同一批里别的
+            // 执行体随后落下的事实不进本笔的提示词 / 行输入。否则「收尾轮读到同轮
+            // 摘要」这类先后就成了调度器的机缘——同一份事实日志重放两次，请求未必
+            // 逐字节相同。计划本来就只用一次快照（`D-343`），读面与之对齐。
+            let reader = ctx.fact_reader().map(|reader| {
+                Arc::new(SnapshotReader::snapshot(&*reader)) as Arc<dyn PortFactReader>
+            });
+            let mut handles = Vec::new();
             for chunk in work.dispatch.chunks(cap) {
-                let run = chunk
-                    .iter()
-                    .map(|(row, attempt)| dispatch(ctx, row.clone(), *attempt, now_ms));
-                join_all(run).await;
+                let run = chunk.iter().map(|(row, attempt)| {
+                    dispatch(ctx, row.clone(), *attempt, now_ms, reader.clone())
+                });
+                for handle in join_all(run).await.into_iter().flatten() {
+                    handles.push(handle);
+                }
                 dispatched += chunk.len();
             }
+            // 已经跑完的执行体在本圈内收账（保持「派发即完成」的既有语义）；
+            // 挂死的那个不阻塞环：几轮让出后仍未完的留在后台，完成时自己回写并再踢。
+            wait_ready(&mut handles).await;
             if !advanced(ctx, &facts) {
                 return stalled(ctx, dispatched, work.blocked.clone());
             }
@@ -209,6 +238,14 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
     }
 }
 
+/// 环的「现在」：事实时间轴上最晚的一笔（`D-376`）。
+///
+/// 不读墙钟：同一份事实日志重放两次，租约到期与否逐字节相同。要让时间前进，
+/// 就落一条带更晚 `at_ms` 的事实——时间是账上的数据，不是进程的环境。
+fn latest_ts(facts: &[Fact]) -> u64 {
+    facts.iter().map(|f| f.at_ms).max().unwrap_or(0)
+}
+
 /// 这一圈有没有新增事实（按事实身份 `(kind, key)` 判；五类事实按这一对吸收重复）。
 ///
 /// 判据落在**事实层面**，不数「连续几圈没进展」——后者是在拍一个数字，且会把
@@ -220,6 +257,29 @@ fn advanced(ctx: &dyn DriveCtx, before: &[Fact]) -> bool {
     ctx.facts()
         .iter()
         .any(|f| !known.contains(&(f.kind, f.key.clone())))
+}
+
+/// 让本圈已经跑完的后台执行体先收账；挂死的那个不挡路。
+///
+/// 既有语义是「派发即完成」，所以给刚 spawn 的任务几轮让出机会；仍未完成的
+/// （真的挂住或等外部 I/O）留在后台，完成时经 [`finish`] 回写并再踢一次驱动。
+/// 这里只等 `is_finished` 的句柄；不 `abort`，因为取消会让「迟归」不可验证，
+/// 也可能把已经产生副作用的外部调用切成半截。
+async fn wait_ready(handles: &mut Vec<JoinHandle<()>>) {
+    for _ in 0..4 {
+        if handles.iter().all(JoinHandle::is_finished) {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    if handles.iter().all(JoinHandle::is_finished) {
+        for handle in handles.drain(..) {
+            // 已完成的执行体：`Err` 只可能是 panic / abort，出声不吞（S-002）。
+            if let Err(err) = handle.await {
+                symbio_plugin_api::plugin_warn!("loop", "执行体任务异常结束：{err}");
+            }
+        }
+    }
 }
 
 /// 无进展出口：交回当前账上仍未收束的债，外加被 `after_port` 挡住的依赖方。
@@ -451,14 +511,21 @@ fn expire(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, next: Option<u32>, now
     }
 }
 
-/// 派发一笔：补 `request` → 调执行体 → 按结局落 `sent` 与配对账。
+/// 派发一笔：补 `request` → 落 `sent` → 把执行体交给后台 → 按结局收账。
 ///
-/// `sent` 落在执行体**之后**：挂起结局要让它与「租约让出」在同一个字段里表达
-/// （`deadline_ms: null`），而事实源按 `(kind, key)` 吸收重复——先落一条带租约的
-/// `sent` 就再也改不成挂起。三种结局：
-/// - 正常 / 可重试 / 判死：`sent{deadline_ms}` + 对应配对账；
-/// - 挂起：只落 `sent{deadline_ms: null}`，**不落收束**，债继续开着。
-async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
+/// `sent` 是 `before` 事实，**先于执行体**落格（`DE-022`）：执行体挂死时租约已经在
+/// 账上，下一圈 `plan` 看得到它，`expire` 能收束（`D-376`）。执行体因此不能挡在
+/// `drive` 的路径上——它跑在后台任务里，完成时经 [`finish`] 回写并再踢一次。
+///
+/// 挂起不再改写 `sent`（事实源按 `(kind, key)` 吸收重复）：同 attempt 再落**第二条**
+/// `sent`，载荷带 `shard` 区分、`deadline_ms: null`；计划层取最后一条，债继续开着。
+async fn dispatch(
+    ctx: &dyn DriveCtx,
+    row: DebtRow,
+    attempt: u32,
+    now_ms: u64,
+    reader: Option<Arc<dyn PortFactReader>>,
+) -> Option<JoinHandle<()>> {
     // 端口名要跟着收束载荷走：读侧按 `port` 判「这一次往返算不算对读者说的话」。
     let port = row.port;
     let key = DebtKey::new(row.port, row.id.clone(), attempt);
@@ -498,20 +565,19 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
             }),
             now_ms,
         ));
-        return;
+        return None;
     }
-    ctx.append(Fact::new(
-        FactKind::Request,
-        key.clone(),
-        row.payload.clone(),
-        now_ms,
-    ));
-
     let Some(executor) = ctx.executor(row.port) else {
         ctx.append(Fact::new(
             FactKind::Sent,
             key.clone(),
             json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+            now_ms,
+        ));
+        ctx.append(Fact::new(
+            FactKind::Request,
+            key.clone(),
+            row.payload.clone(),
             now_ms,
         ));
         ctx.append(Fact::new(
@@ -523,10 +589,26 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
             }),
             now_ms,
         ));
-        return;
+        return None;
     };
 
-    let writer = Arc::new(CollectingWriter::new(ctx.outlet()));
+    // 租约先落，执行体后跑（`DE-022` 的 `before`）：挂死时 `expire` 才有东西可判。
+    // `request` 紧贴在它之后、执行体之前落：执行期间产生的世界事实以 `request` 为直接
+    // 前件（I2 的溯源锚），租约只是基础设施，不顶替「这次请求」的因果位（`D-376`）。
+    ctx.append(Fact::new(
+        FactKind::Sent,
+        key.clone(),
+        json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+        now_ms,
+    ));
+    ctx.append(Fact::new(
+        FactKind::Request,
+        key.clone(),
+        row.payload.clone(),
+        now_ms,
+    ));
+
+    let writer = Arc::new(CollectingWriter::new());
     let exec = PortExecContext {
         // 交给执行体的是**本轮同一个**信号（从上一条派发的 ctx 读回），不是现造的死信号。
         abort,
@@ -542,37 +624,78 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
         scratch_dir: handles.scratch_dir,
         session_id: handles.session_id,
         source: handles.source,
-        reader: ctx.fact_reader(),
+        // 读面是这一圈计划时的快照（`D-376`），不是执行体跑起来时的活账本。
+        reader,
     };
-    let outcome = executor
-        .execute(
-            exec,
-            PortInput {
-                port: row.port,
-                payload: row.payload,
-            },
-        )
-        .await;
-    let drafts = writer.take();
+    let input = PortInput {
+        port: row.port,
+        payload: row.payload.clone(),
+    };
+    let shared = ctx.shared();
+    Some(tokio::spawn(async move {
+        let outcome = executor.execute(exec, input).await;
+        finish(shared, row, attempt, key, writer, outcome).await;
+    }))
+}
+
+/// 后台执行体返回后的收账（`D-376`）。
+///
+/// **迟归整笔丢弃**：完成时先看 `(port, id, attempt)` 这一笔还开不开——账上 attempt
+/// 已经推进（`retry` 落在 N+1），或同键已有收束（`failed` / `response`），或租约
+/// 已过（`now` 取自事实，不读墙钟），都说明这一笔已经被 `expire` 判死。此时连同
+/// 执行体产生的草稿一起丢弃：迟到的一次往返不许再落格，更不许长出新债。
+///
+/// **产物一次性提交**：执行体 `emit` 的草稿（五类协议事实与它写出的世界事实）都
+/// 缓冲到此处，只有这一笔还开着才一起落格。世界事实若在执行期间就写出去，工具产物
+/// 会先于工具债收束落账，把消费它的能力行提前叫醒——同一份事实日志的阅读顺序
+/// 因此取决于后台任务的完成时刻（`D-376`）。
+async fn finish(
+    ctx: Arc<dyn DriveCtx>,
+    row: DebtRow,
+    attempt: u32,
+    key: DebtKey,
+    writer: Arc<CollectingWriter>,
+    outcome: PortOutcome,
+) {
+    let facts = ctx.facts();
+    let view = FactView::new(&facts);
+    let now_ms = ctx.now_ms();
+    let superseded = view.attempt(&key.port, &key.id) > attempt;
+    let closed = view.closing(&key).is_some();
+    let lease_over = view
+        .last_sent(&key)
+        .and_then(|s| s.payload.get("deadline_ms").and_then(Value::as_u64))
+        .is_some_and(|deadline| now_ms >= deadline);
+    if superseded || closed || lease_over {
+        return;
+    }
+    // 五类事实归环记账，其余原样交出：两类都在这里、且只在这里提交。
+    let mut protocol = Vec::new();
+    let mut world = Vec::new();
+    for draft in writer.take() {
+        if FactKind::parse(&draft.kind).is_some() {
+            protocol.push(draft);
+        } else {
+            world.push(draft);
+        }
+    }
+    if !world.is_empty() {
+        ctx.outlet().emit(world).await;
+    }
 
     match outcome.error {
-        // 第三态「挂起」：`request` + `sent` 之后不落收束。`deadline_ms: null`
-        // 同时表达「已挂起」与「租约已让出」——计划层读到它只会等新触发。
+        // 第三态「挂起」：带租约的 `sent` 已在派发前落过，这里再落**第二条** `sent`。
+        // `deadline_ms: null` 同时表达「已挂起」与「租约已让出」；`shard` 让它不被
+        // `(kind, key)` 吸收。计划层取最后一条，读到 null ⇒ 只等新触发，债继续开着。
         Some((PortErrorClass::NeedsHuman, _why)) => {
             ctx.append(Fact::new(
                 FactKind::Sent,
                 key,
-                json!({"deadline_ms": Value::Null}),
+                json!({"deadline_ms": Value::Null, "shard": 1}),
                 now_ms,
             ));
         }
         Some((class, why)) => {
-            ctx.append(Fact::new(
-                FactKind::Sent,
-                key.clone(),
-                json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
-                now_ms,
-            ));
             if class == PortErrorClass::Retryable && attempt < row.max_attempts {
                 let next_key = DebtKey::new(row.port, row.id, attempt + 1);
                 ctx.append(Fact::new(
@@ -585,19 +708,14 @@ async fn dispatch(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, now_ms: u64) {
                 ctx.append(Fact::new(
                     FactKind::Failed,
                     key,
-                    failure_payload(&outcome.facts, port, class, &why),
+                    failure_payload(&outcome.facts, row.port, class, &why),
                     now_ms,
                 ));
             }
         }
         None => {
-            ctx.append(Fact::new(
-                FactKind::Sent,
-                key.clone(),
-                json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
-                now_ms,
-            ));
-            let payloads = response_payloads(&drafts, &outcome, port);
+            let port = row.port;
+            let payloads = response_payloads(&protocol, &outcome, port);
             let last = payloads.len().saturating_sub(1);
             for (idx, payload) in payloads.into_iter().enumerate() {
                 let mut fact = Fact::new(FactKind::Response, key.clone(), payload, now_ms);
@@ -679,16 +797,46 @@ fn failure_payload(facts: &[Value], port: &str, class: PortErrorClass, why: &str
     payload
 }
 
-/// 执行体 emit 的收集器：五类事实进账本，其余原样转交应用出口。
+/// 执行体读面的**派发时刻快照**（`D-376`）。
+///
+/// 同一圈派发的每一笔都看到同一份事实：计划已经只用一次快照（`D-343`），执行体若
+/// 跑起来再读活账本，就会看见同批兄弟刚落下的事实——「哪一笔先完成」于是决定请求
+/// 正文，重放不再逐字节相同。快照在 `drive` 里取一次，克隆句柄分给整批。
+struct SnapshotReader {
+    facts: Vec<PortFact>,
+    events: Vec<symbio_kernel::event::Event>,
+}
+
+impl SnapshotReader {
+    fn snapshot(reader: &dyn PortFactReader) -> Self {
+        Self {
+            facts: reader.facts(),
+            events: reader.events(),
+        }
+    }
+}
+
+impl PortFactReader for SnapshotReader {
+    fn facts(&self) -> Vec<PortFact> {
+        self.facts.clone()
+    }
+
+    fn events(&self) -> Vec<symbio_kernel::event::Event> {
+        self.events.clone()
+    }
+}
+
+/// 执行体 emit 的收集器：**全部**草稿先缓冲，`finish` 时一次性提交（`D-376`）。
+///
+/// 五类事实进环的账本、其余走应用出口——分派只在 `finish` 做一次，执行期间不写
+/// 任何东西：迟归的那一笔连同它的世界事实一起丢弃，半成品不会先落账。
 struct CollectingWriter {
-    outlet: PortFactEmit,
     collected: Mutex<Vec<FactDraft>>,
 }
 
 impl CollectingWriter {
-    fn new(outlet: PortFactEmit) -> Self {
+    fn new() -> Self {
         Self {
-            outlet,
             collected: Mutex::new(Vec::new()),
         }
     }
@@ -705,20 +853,10 @@ impl CollectingWriter {
 #[async_trait::async_trait]
 impl PortFactWriter for CollectingWriter {
     async fn emit(&self, facts: Vec<FactDraft>) {
-        let mut protocol = Vec::new();
-        for fact in facts {
-            if FactKind::parse(&fact.kind).is_some() {
-                protocol.push(fact);
-            } else {
-                self.outlet.emit(vec![fact]).await;
-            }
-        }
-        if !protocol.is_empty() {
-            self.collected
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .extend(protocol);
-        }
+        self.collected
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .extend(facts);
     }
 }
 

@@ -72,6 +72,10 @@ fn to_neutral_key(key: DebtKey) -> symbio_plugin_api::drive::DriveKey {
 }
 
 /// 环的上下文：每次驱动现造，持有能力束的克隆，不跨步保留状态。
+///
+/// `Clone` 克隆的是句柄（`Arc`），不是账本：后台执行体拿到的 `shared()` 与驱动
+/// 循环读写的是同一份事实。
+#[derive(Clone)]
 struct SupportCtx {
     support: Arc<dyn DriveSupport>,
     source: SupportSource,
@@ -108,8 +112,21 @@ impl DriveCtx for SupportCtx {
         self.support.executor(port)
     }
 
+    fn shared(&self) -> Arc<dyn DriveCtx> {
+        Arc::new(self.clone())
+    }
+
+    /// 环的「现在」取**全部**事实（含世界事实）的最晚 `ts`，不读墙钟（`D-376`）。
+    ///
+    /// 触发一次驱动的往往是世界事实（用户消息 / 工具回执）；只看五类事实会在
+    /// 首圈得到 0，把刚派发的租约算成「早已过期」。
     fn now_ms(&self) -> u64 {
-        self.support.now_ms()
+        self.support
+            .facts()
+            .iter()
+            .map(|f| f.at_ms)
+            .max()
+            .unwrap_or(0)
     }
 
     fn concurrency(&self) -> usize {
@@ -142,6 +159,7 @@ fn to_ring_fact(fact: DriveFact) -> Option<Fact> {
 }
 
 /// 债表数据源：从能力束取行，`after` 由当前事实投影解析成环债键。
+#[derive(Clone)]
 struct SupportSource {
     support: Arc<dyn DriveSupport>,
 }
@@ -162,10 +180,16 @@ impl DebtSource for SupportSource {
         // `Decl` 行参与选债（D-304 裁决六）：`by == plugin_row` 的行由机制自己执行，
         // 世界语义（欠什么、何时算还）全在声明里，这里只做形状适配。
         let events = crate::plugin_rows::decl_events(self.support.facts());
-        out.extend(crate::plugin_rows::decl_rows(
-            &events,
-            self.support.now_ms(),
-        ));
+        // 行表选债的 `now` 与环同一口径：**全部**事实（含世界事实）时间轴上最晚的
+        // 一笔，不读墙钟（`D-376`）。
+        let now_ms = self
+            .support
+            .facts()
+            .iter()
+            .map(|f| f.at_ms)
+            .max()
+            .unwrap_or(0);
+        out.extend(crate::plugin_rows::decl_rows(&events, now_ms));
         out
     }
 

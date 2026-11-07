@@ -63,7 +63,9 @@ pub(crate) fn decl_rows(events: &[Event], now_ms: u64) -> Vec<DebtRow> {
                 when_id: None,
                 unless: None,
                 when_no_open: None,
-                after_port: None,
+                // 消费端口产物的行必须等该端口收束：派发不再等执行体之后，
+                // 「产物落格」与「响应落账」这两笔谁先到不能由调度机缘决定（D-376）。
+                after_port: symbio_plugin_api::rows::port_of_fact(debt.decl.owes.source),
                 lease_ms: ROW_LEASE_MS,
                 max_attempts: ROW_MAX_ATTEMPTS,
             }

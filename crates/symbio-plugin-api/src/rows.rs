@@ -55,6 +55,18 @@ use crate::effects::FactDraft;
 /// 两边都不需要认识对方的具体身份。
 pub const PLUGIN_ROW: &str = "plugin_row";
 
+/// 共享事件由哪个端口承载（`None` = 与端口无关）。
+///
+/// 消费端口产物的声明行必须等该端口收束（`D-376`）：`artifact.added` 由 `tool`
+/// 端口写出，以它为 `owes.source` 的行因此在计划层带 `after_port(tool)`。
+/// 这张映射住在共享词表旁的门面上——环按它取门，不自己拼端口名（环不认识世界词）。
+pub fn port_of_fact(fact: &str) -> Option<&'static str> {
+    match fact {
+        crate::events::EVENT_ARTIFACT_ADDED => Some(crate::vocab::PORT_TOOL),
+        _ => None,
+    }
+}
+
 /// 「这一行在等一笔模型往返」的事实种类（D-338）。
 ///
 /// 静态债行表达不了「此刻在 Ask」，所以 `Ask` 必须落成事实。种类是**一个**名字

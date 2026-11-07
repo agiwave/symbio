@@ -93,7 +93,7 @@ pub struct DriveFact {
     pub key: DriveKey,
     /// 载荷：宿主原样保存，不解释内容。
     pub payload: Value,
-    /// 记账时刻（毫秒，与 [`DriveSupport::now_ms`] 同一时间轴）。
+    /// 记账时刻（毫秒）。环的「现在」取本字段的最大值（`D-376`），不另读墙钟。
     pub at_ms: u64,
     /// 收束事实携带的应答承载（只传递，不读世界字段）。
     pub reply: Option<PortReply>,
@@ -235,9 +235,6 @@ pub trait DriveSupport: Send + Sync {
             .iter()
             .any(|fact| fact.kind == kind && fact.at_ms > since_ms)
     }
-
-    /// 当前时刻（毫秒，宿主给的时钟；与事实的 `at_ms` 同一时间轴）。
-    fn now_ms(&self) -> u64;
 
     /// 同轮并发派发的上限（宿主给的配置数据；环不写死常数）。
     fn concurrency(&self) -> usize;

@@ -215,6 +215,71 @@ export function supplementRatioReading({ supplements, migrations, stock }) {
   }
 }
 
+/**
+ * 累计欠账的递减台阶（D-375）。
+ *
+ * 起算日建账 6 笔（21 − 15）。此后每个检查点把上限压 1，日期一过而上限没达到 ⇒ 红；
+ * 最后一个检查点就是硬期限，上限 0——`2027-06-30` 之后任何欠账即红。
+ *
+ * 为什么是台阶而不是每日线性：线性在宽限期内多数日子算出同一个 `allowed`，报错只能说
+ * 「还差一点」；台阶把「每批该还多少」写成日期上的义务，每个检查点至少抵 1 笔，
+ * 报错能同时给出「当前欠账 / 今日允许 / 下一台阶」。
+ */
+export const DEBT_SCHEDULE = {
+  start: '2026-11-07',
+  checkpoints: [
+    { by: '2026-11-10', max: 5 },
+    { by: '2026-11-13', max: 4 },
+    { by: '2026-11-16', max: 3 },
+    { by: '2026-11-19', max: 2 },
+    { by: '2026-11-22', max: 1 },
+    { by: '2026-11-25', max: 0 },
+  ],
+}
+
+/**
+ * 某一天的欠账上限：取**已经到期的最后一个**检查点；一个都没到期时用起算本金。
+ *
+ * 「已经到期」而不是「下一个检查点」：否则起算日当天就会拿 `2026-12-31 ≤5` 去判
+ * 当天的 6 笔，判据一落地就假红。宽限到第一个检查点，之后每过一点降一档。
+ */
+export function debtAllowance({ today, initialDebt, schedule = DEBT_SCHEDULE }) {
+  let allowed = initialDebt
+  let next = null
+  for (const p of schedule.checkpoints) {
+    if (p.by <= today) {
+      allowed = p.max
+      continue
+    }
+    next = p
+    break
+  }
+  return { today, allowed, next, deadline: schedule.checkpoints.at(-1)?.by ?? null }
+}
+
+/**
+ * 台阶表自身的判据：日期严格递增、每点至少降 1、末点压到 0。
+ *
+ * 它挡的是「把台阶改成平的」这类沉默放宽——表一旦不再递减，绝对线就退回本金线，
+ * 与 D-372 的增量线完全重合，等于没有期限。读不出形状就判红，不静默跳过。
+ */
+export function validateDebtSchedule(schedule = DEBT_SCHEDULE, initialDebt = 6) {
+  const errors = []
+  const points = schedule.checkpoints ?? []
+  if (!points.length) errors.push('没有任何检查点')
+  let prevMax = initialDebt
+  let prevBy = schedule.start ?? ''
+  for (const p of points) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.by ?? ''))) errors.push(`检查点日期不是 YYYY-MM-DD：${p.by}`)
+    if (prevBy && p.by <= prevBy) errors.push(`检查点日期必须严格递增：${prevBy} → ${p.by}`)
+    if (!(p.max < prevMax)) errors.push(`检查点上界必须至少降 1：${prevMax} → ${p.max}（${p.by}）`)
+    prevMax = p.max
+    prevBy = p.by
+  }
+  if (points.at(-1)?.max !== 0) errors.push('最后一个检查点必须把上限压到 0（到期清零）')
+  return errors
+}
+
 /** 架构面「新增一个公开项」的形状——机制增量的机械面。 */
 const PUB_ITEM_RE =
   /^\s*pub(?:\([^)]*\))?\s+(?:trait|struct|enum|fn|type|const|static|mod|use|async\s+fn|unsafe\s+fn|extern\s+fn)\b/
@@ -627,6 +692,12 @@ function judgeCommit({ sha, message, patch, decisions, ids, tools }) {
   return { sha, subject: subjectOf(message), kind, errors: [] }
 }
 
+/** 今天的本地日期（`YYYY-MM-DD`）：台阶按自然日判，本地跨月当天就该降档。 */
+function todayIso(now = new Date()) {
+  const p = (n) => String(n).padStart(2, '0')
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`
+}
+
 function main() {
   const guardErrors = validateBeforeGuard(BEFORE_GUARD)
   if (guardErrors.length) {
@@ -774,6 +845,12 @@ function main() {
     )
     return 1
   }
+  const initialDebt = stock.supplements - stock.migrations
+  const scheduleErrors = validateDebtSchedule(DEBT_SCHEDULE, initialDebt)
+  if (scheduleErrors.length) {
+    console.error(red(`✗ capability-migration-audit：欠账台阶表失效——${scheduleErrors.join('；')}`))
+    return 1
+  }
   const reading = supplementRatioReading({ supplements, migrations, stock })
   const ratioText = Number.isFinite(reading.ratio) ? reading.ratio.toFixed(2) : '∞'
   const signed = (n) => `${n >= 0 ? '+' : ''}${n}`
@@ -781,6 +858,30 @@ function main() {
     `  · 累计补件 ${supplements} / 迁移 ${migrations} = ${ratioText}:1（目标 ≤1:1）` +
       `；自本判据起 补件 ${signed(reading.dSupp)} / 迁移 ${signed(reading.dMig)}（欠账 ${signed(reading.debt)}）`,
   )
+
+  // ── 绝对欠账的期限线（D-375）：增量线只拦新债，旧债按台阶还清 ──
+  const absoluteDebt = supplements - migrations
+  const allowance = debtAllowance({ today: todayIso(), initialDebt })
+  const nextText = allowance.next
+    ? `下一台阶 ${allowance.next.by} ≤${allowance.next.max}` +
+      `（至少再抵 ${Math.max(0, absoluteDebt - allowance.next.max)} 笔）`
+    : `已过最后检查点，${allowance.deadline} 之后必须为 0`
+  console.log(
+    `  · 累计欠账 ${absoluteDebt} 笔（补件 ${supplements} − 迁移 ${migrations}）；` +
+      `今日（${allowance.today}）允许 ≤${allowance.allowed}，${nextText}`,
+  )
+  if (absoluteDebt > allowance.allowed) {
+    console.error(
+      red(
+        `✗ EX-007 累计欠账 ${absoluteDebt} 笔 > 今日（${allowance.today}）允许 ≤${allowance.allowed}：` +
+          '欠账按台阶递减，每个检查点至少抵 1 笔迁移；' +
+          `${allowance.deadline} 必须归零，到期仍欠即红（D-375）`,
+      ),
+    )
+    return 1
+  }
+  if (absoluteDebt <= 0) console.log(green('  ✓ 累计欠账已归零（补件 ≤ 迁移）'))
+
   if (reading.debt > 0) {
     console.error(
       red(

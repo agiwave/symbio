@@ -443,10 +443,6 @@ impl DriveSupport for HostDriveSupport {
             .any(|fact| fact.kind == kind && fact.at_ms > since_ms)
     }
 
-    fn now_ms(&self) -> u64 {
-        clock_now_ms().max(0) as u64
-    }
-
     fn concurrency(&self) -> usize {
         self.concurrency
     }
