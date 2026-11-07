@@ -181,6 +181,19 @@ impl Host {
                 *idle = Some(at);
             } else {
                 *idle = None;
+                // 安全阀出口不能静默：`Waiting` 是正常等待下一次踢；
+                // 超预算 / 零进展意味着「这一轮没跑完」，必须在调用方看得见的地方留痕。
+                match &report.outcome {
+                    DriveOutcome::Exhausted { steps, outstanding } => eprintln!(
+                        "驱动停摆（{session_id}）：步数预算用尽（{steps} 步），未收束 {} 笔：{outstanding:?}",
+                        outstanding.len()
+                    ),
+                    DriveOutcome::Stalled(outstanding) => eprintln!(
+                        "驱动停摆（{session_id}）：一圈没有新增事实，未收束 {} 笔：{outstanding:?}",
+                        outstanding.len()
+                    ),
+                    _ => {}
+                }
             }
         }
         Ok(report)

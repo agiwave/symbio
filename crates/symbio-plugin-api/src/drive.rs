@@ -160,10 +160,22 @@ pub struct DriveRow {
 /// 驱动出口。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriveOutcome {
-    /// 没有可还的债。
+    /// 没有可还的债，且账上没有未收束的债。
     NoDebt,
-    /// 只剩在飞的债（租约未过）。
+    /// 仍有未收束的债，但本轮没有可动作的：在飞、挂起，或开着却没人能还。
     Waiting(Vec<DriveKey>),
+    /// 步数预算用尽：还欠着债，本轮不再继续。
+    ///
+    /// 这是**安全阀，不是正常出口**：正常一轮的步数远低于预算。调用方必须把它
+    /// 当成「这一轮没跑完」处理，不能记 `idle`，也不能静默吞掉。
+    Exhausted {
+        /// 实际走完的步数（一圈一次 `plan`）。
+        steps: usize,
+        /// 仍未收束的债。
+        outstanding: Vec<DriveKey>,
+    },
+    /// 一圈没有新增任何事实：继续跑只会自旋，因此停下并交回未收束的债。
+    Stalled(Vec<DriveKey>),
 }
 
 /// 一次驱动报告。

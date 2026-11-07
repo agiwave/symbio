@@ -33,6 +33,15 @@ impl DriveRunner for LoopDrive {
             crate::ring::DriveOutcome::Waiting(keys) => {
                 DriveOutcome::Waiting(keys.into_iter().map(to_neutral_key).collect())
             }
+            crate::ring::DriveOutcome::Exhausted { steps, outstanding } => {
+                DriveOutcome::Exhausted {
+                    steps,
+                    outstanding: outstanding.into_iter().map(to_neutral_key).collect(),
+                }
+            }
+            crate::ring::DriveOutcome::Stalled(keys) => {
+                DriveOutcome::Stalled(keys.into_iter().map(to_neutral_key).collect())
+            }
         };
         Ok(DriveReport {
             dispatched: report.dispatched,

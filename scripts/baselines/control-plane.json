@@ -6,15 +6,16 @@
       "fn plan",
       "fn expire"
     ],
-    "hash": "sha256:ff34d5b124aa148442c53666bbe28ca72ec2d511923db3e3fc179278d55c9440",
-    "adr": "D-355",
-    "reason": "基线跟到实测：自 `sha256:acfe29ec…`（D-334 记录）以来，机制三段只有**驱动循环体**变了——出口分支在无动作时再读 `unresolved()`，账上仍开着债就报 `Waiting` 而不是 `NoDebt`（D-355）。读侧「还开着」改为按 (port,id) 最新 attempt 折叠（D-354），落在 `facts.rs`，不在本指纹。没有新增世界域名 / 端口名 / 业务事实名字面量；`fn plan` 与 `fn expire` 未变。指纹是**归一化 token 流**的哈希（剥注释、折叠空白、不计逗号）：import 顺序 / rustfmt 换行 / 尾逗号不进基线，加条件、改返回值、换比较符才进——不然每次 fmt 都要写一条 allow，allow 就成了橡皮图章。合法性的核验见 D-334。"
+    "hash": "sha256:2a1143c14536fe0ca9c16d1702e28eea81366c9778b420aa900aa4963c066513",
+    "adr": "D-356",
+    "reason": "机制三段只有**驱动循环体**变了：新增步数上界（`STEP_BUDGET = 128`，超界出口 `Exhausted`，D-356）与同圈零新增判据（`advanced()` 比较 `(kind, key)` 事实集合，零新增出口 `Stalled`，D-357）。`fn plan` 与 `fn expire` 未变；没有新增世界域名 / 端口名 / 业务事实名字面量。指纹是**归一化 token 流**的哈希（剥注释、折叠空白、不计逗号）：import 顺序 / rustfmt 换行 / 尾逗号不进基线，加条件、改返回值、换比较符才进。合法性的核验见 D-334。"
   },
   "extension": {
     "productionFiles": 9,
     "reason": "基线补登 `plugin_rows.rs`：D-338 引入的世界行执行体（`Ask` 落事实 + `plugin_row` 花名册）是环的机制面，与 D-334 的机制三段同档计数；当时漏改基线，本批按实测补到 9，无新增世界域名 / 端口名 / 业务事实名。"
   },
   "baseline-allow": [
-    "sha256:acfe29ec3a0daa039b62a17577b1cc75329f282e42816112bfd193ff1a69ee5d→sha256:ff34d5b124aa148442c53666bbe28ca72ec2d511923db3e3fc179278d55c9440 驱动循环体的出口判据：无动作时再读 `unresolved()`，开着债 ⇒ `Waiting`（D-355）；读侧「还开着」按最新 attempt 折叠（D-354，`facts.rs` 不在本指纹）。无新增世界域名 / 端口名 / 业务事实名 D-355"
+    "sha256:acfe29ec3a0daa039b62a17577b1cc75329f282e42816112bfd193ff1a69ee5d→sha256:ff34d5b124aa148442c53666bbe28ca72ec2d511923db3e3fc179278d55c9440 驱动循环体的出口判据：无动作时再读 `unresolved()`，开着债 ⇒ `Waiting`（D-355）；读侧「还开着」按最新 attempt 折叠（D-354，`facts.rs` 不在本指纹）。无新增世界域名 / 端口名 / 业务事实名 D-355",
+    "sha256:ff34d5b124aa148442c53666bbe28ca72ec2d511923db3e3fc179278d55c9440→sha256:2a1143c14536fe0ca9c16d1702e28eea81366c9778b420aa900aa4963c066513 驱动循环体新增步数上界（`STEP_BUDGET = 128` / `Exhausted`，D-356）与同圈零新增判据（`advanced()` / `Stalled`，D-357）；`fn plan` / `fn expire` 未变，无新增世界域名 / 端口名 / 业务事实名 D-356 D-357"
   ]
 }

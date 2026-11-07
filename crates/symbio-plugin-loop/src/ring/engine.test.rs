@@ -18,6 +18,9 @@ struct TestCtx {
     now: u64,
     outlet: PortFactEmit,
     concurrency: usize,
+    step_budget: usize,
+    /// 模拟「写口把投递全吸收了」：用于覆盖无进展出口。
+    writes_ignored: bool,
 }
 
 impl TestCtx {
@@ -33,7 +36,19 @@ impl TestCtx {
             now: 0,
             outlet: PortFactEmit::silent(),
             concurrency: 1,
+            step_budget: 128,
+            writes_ignored: false,
         }
+    }
+
+    fn with_step_budget(mut self, step_budget: usize) -> Self {
+        self.step_budget = step_budget;
+        self
+    }
+
+    fn ignoring_writes(mut self) -> Self {
+        self.writes_ignored = true;
+        self
     }
 
     fn with_concurrency(mut self, concurrency: usize) -> Self {
@@ -75,6 +90,9 @@ impl DriveCtx for TestCtx {
     }
 
     fn append(&self, fact: Fact) {
+        if self.writes_ignored {
+            return;
+        }
         let mut facts = self
             .facts
             .lock()
@@ -102,6 +120,10 @@ impl DriveCtx for TestCtx {
 
     fn concurrency(&self) -> usize {
         self.concurrency
+    }
+
+    fn step_budget(&self) -> usize {
+        self.step_budget
     }
 
     fn outlet(&self) -> PortFactEmit {
@@ -134,6 +156,14 @@ impl Stub {
     fn retry_once_then_ok() -> Self {
         Self {
             retry_until: 2,
+            ..Self::ok()
+        }
+    }
+
+    /// 永远可重试：用来把步数预算真的走完。
+    fn always_retryable() -> Self {
+        Self {
+            retry_until: u32::MAX,
             ..Self::ok()
         }
     }
@@ -826,5 +856,41 @@ async fn waiting_collects_every_in_flight_key() {
     assert_eq!(
         report.outcome,
         DriveOutcome::Waiting(vec![DebtKey::new("p1", "a", 1), DebtKey::new("p1", "b", 1),])
+    );
+}
+
+#[tokio::test]
+async fn step_budget_stops_a_runaway_loop_and_reports_it() {
+    // 每圈都派发、都会写 Retry(attempt+1)，账一直开着；把预算压到 3 步。
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("r", "p1", "x", json!({})).lease(1_000, u32::MAX)
+    ])
+    .with_executor("p1", Arc::new(Stub::always_retryable()))
+    .with_step_budget(3);
+
+    let report = drive(&ctx).await;
+
+    assert_eq!(report.dispatched, 3);
+    assert!(
+        matches!(report.outcome, DriveOutcome::Exhausted { steps: 3, .. }),
+        "超界必须返回可见的 Exhausted，不能静默：{:?}",
+        report.outcome
+    );
+}
+
+#[tokio::test]
+async fn a_lap_without_new_facts_is_reported_as_stalled() {
+    // 这一笔有可派发的动作，但写口把所有投递都吸收了：一圈下来账上零新增。
+    let ctx = TestCtx::new(vec![DebtRow::new("r", "p1", "x", json!({}))])
+        .with_executor("p1", Arc::new(Stub::ok()))
+        .ignoring_writes();
+
+    let report = drive(&ctx).await;
+
+    assert_eq!(report.dispatched, 1);
+    assert!(
+        matches!(report.outcome, DriveOutcome::Stalled(_)),
+        "一圈零新增必须停摆并交回账，不能继续自旋：{:?}",
+        report.outcome
     );
 }

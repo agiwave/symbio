@@ -19,6 +19,13 @@ use symbio_plugin_api::ExecAbortSignal;
 use crate::ring::facts::{DebtKey, Fact, FactKind, FactView};
 use crate::ring::table::{DebtRow, DebtSource};
 
+/// 单次驱动的步数上界（安全阀，不是宿主配置）：一圈一次 `plan`。
+///
+/// 取 128 的理由：正常一轮的步数 ≈ 债的「波次」——同一圈的批量派发只算一步，
+/// 十几轮工具往返也只有几十步。再高就不是现实负载，而是环在自旋；上界是环对
+/// 自身推进的硬约束，不该由宿主配置调没（所以不放 `DriveSupport` 的配置面）。
+const STEP_BUDGET: usize = 128;
+
 /// 宿主交给环的全部输入：事实投影的读写、债表、执行体解析与时钟。
 ///
 /// 缓存（若有）由宿主自己持有；环每一步重新读一遍，跨步不保留任何东西。
@@ -41,6 +48,12 @@ pub(crate) trait DriveCtx: Send + Sync {
     /// 同轮并发派发的上限（宿主给的配置数据；环不写死常数）。
     fn concurrency(&self) -> usize;
 
+    /// 单次驱动的步数上界（安全阀；不是宿主配置）。默认 [`STEP_BUDGET`]；
+    /// 测试用它把预算压小以覆盖出口。
+    fn step_budget(&self) -> usize {
+        STEP_BUDGET
+    }
+
     /// 非五类事实的去处（世界事实留在应用侧写口）。
     fn outlet(&self) -> PortFactEmit {
         PortFactEmit::silent()
@@ -60,11 +73,20 @@ pub(crate) trait DriveCtx: Send + Sync {
 /// 驱动出口。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DriveOutcome {
-    /// 没有可还的债。
+    /// 没有可还的债，且账上没有未收束的债。
     NoDebt,
-    /// 仍有未收束的债，但本轮没有可动作的：在飞（租约未过），或开着却没人能还
-    /// （如被 `when_no_open` 挡住、又无别的行可派）。宿主不得据此记 `idle`。
+    /// 仍有未收束的债，但本轮没有可动作的：在飞（租约未过）、挂起，或开着却
+    /// 没人能还（如被 `when_no_open` 挡住、又无别的行可派）。宿主不得据此记 `idle`。
     Waiting(Vec<DebtKey>),
+    /// 步数预算用尽：还欠着债，本轮不再继续（调用方必须看见，不能静默）。
+    Exhausted {
+        /// 实际走完的步数（一圈一次 `plan`）。
+        steps: usize,
+        /// 仍未收束的债。
+        outstanding: Vec<DebtKey>,
+    },
+    /// 一圈没有新增任何事实：继续跑只会自旋，因此停下并交回未收束的债。
+    Stalled(Vec<DebtKey>),
 }
 
 /// 一次驱动报告。
@@ -87,12 +109,26 @@ struct Work {
     waiting: Vec<DebtKey>,
 }
 
-/// 驱动本会话到没有可还的债、只剩在飞。
+/// 驱动本会话到没有可还的债、只剩在飞（或明确告诉调用方跑不完）。
 pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
     let mut dispatched = 0usize;
+    let mut steps = 0usize;
     loop {
         let facts = ctx.facts();
         let view = FactView::new(&facts);
+        // 步数上界：一圈一次 `plan`。超界不静默——把还开着的债交回调用方，
+        // 由它当成「这一轮没跑完」处理（宿主因此不会记 `idle`）。
+        if steps >= ctx.step_budget().max(1) {
+            return RunReport {
+                outcome: DriveOutcome::Exhausted {
+                    steps,
+                    outstanding: view.unresolved(),
+                },
+                dispatched,
+            };
+        }
+        steps += 1;
+
         let source = ctx.source();
         let rows = source.rows(&view);
         let now_ms = ctx.now_ms();
@@ -107,11 +143,17 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
                 join_all(run).await;
                 dispatched += chunk.len();
             }
+            if !advanced(ctx, &facts) {
+                return stalled(ctx, dispatched);
+            }
             continue;
         }
         if !work.expire.is_empty() {
             for (row, attempt, next) in work.expire {
                 expire(ctx, row, attempt, next, now_ms);
+            }
+            if !advanced(ctx, &facts) {
+                return stalled(ctx, dispatched);
             }
             continue;
         }
@@ -134,6 +176,29 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
             outcome,
             dispatched,
         };
+    }
+}
+
+/// 这一圈有没有新增事实（按事实身份 `(kind, key)` 判；五类事实按这一对吸收重复）。
+///
+/// 判据落在**事实层面**，不数「连续几圈没进展」——后者是在拍一个数字，且会把
+/// 「一圈派发、下一圈收束」这种正常节律误判成停滞。一圈有动作却一条新事实都没
+/// 落下，只可能是写口把全部投递都吸收了：再跑下一圈还是同一结果，必须停下。
+fn advanced(ctx: &dyn DriveCtx, before: &[Fact]) -> bool {
+    let known: HashSet<(FactKind, DebtKey)> =
+        before.iter().map(|f| (f.kind, f.key.clone())).collect();
+    ctx.facts()
+        .iter()
+        .any(|f| !known.contains(&(f.kind, f.key.clone())))
+}
+
+/// 无进展出口：交回当前账上仍未收束的债。
+fn stalled(ctx: &dyn DriveCtx, dispatched: usize) -> RunReport {
+    let facts = ctx.facts();
+    let view = FactView::new(&facts);
+    RunReport {
+        outcome: DriveOutcome::Stalled(view.unresolved()),
+        dispatched,
     }
 }
 
