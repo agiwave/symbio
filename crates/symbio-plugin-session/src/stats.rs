@@ -40,10 +40,11 @@
 //! ## as-of 口径
 //!
 //! 本模块的读数一律走 `Projection::read_all`（= `now = i64::MAX` + 全量预算）：WAL 是
-//! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——按名字读的视图
-//! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
+//! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——按报表读的列
+//! （`report_value`）与尚未迁移的能力视图（`capability_views` 的 `read_shared_view_all`）
+//! 走的是同一个口，两族因此同一个 as-of。
 
-use crate::declarations::{CHAT_VOCAB, CONATION_INTENTS_VIEW, MESSAGE_VOCAB};
+use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -285,8 +286,9 @@ pub(crate) struct SessionStats {
     /// 与其余各列同款。
     pub transcript: serde_json::Value,
     /// 主动性（[DE-008 §3.1 外部效标](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") · 主动性）：
-    /// `conation` 投影原样序列化（`{ intents: [ { seq, ts, goal, task_id } ] }`，按 seq 升序）——
-    /// 「自发发起且被采纳」的分子 / 分母同出一列：已升格（`task_id` 非空）/ 已表达。
+    /// 报表 `slot = "conation"` 的出口（`{ intents: [ { seq, ts, goal, task_id } ], adoption_rate }`，
+    /// `intents` 按 seq 升序）——「自发发起且被采纳」的分子 / 分母同出一列：已升格
+    /// （`task_id` 非空）/ 已表达。折叠、挑格与率都归能力包 `conation`（`D-387`）。
     ///
     /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ { intents: [] }`）：
     /// 欲是流，截断它等于悄悄丢掉「想要过什么」的事实（conation 投影不设配额）。
@@ -298,8 +300,9 @@ pub(crate) struct SessionStats {
     /// 实例级「任务级时长中位数」在 `fleet` 的 `axes.span` 族（单会话一个跨度没有
     /// 中位数可言，见 `crates/symbio-plugin-slo/src/decl.rs::span_merged` 的「为什么」）。
     pub span: serde_json::Value,
-    /// 自主程度（DE-008 §3.1 外部效标）：**读数由能力包交**（`conation.autonomy`，
-    /// `D-221` 按名字读、`D-281` 折叠两半），本插件原样装一格，不算率、不认识形状。
+    /// 自主程度（DE-008 §3.1 外部效标）：**读数由能力包交**（报表 `slot = "autonomy"`，
+    /// 视图 `conation.autonomy`，`D-387`；折叠两半见 `D-281`），本插件原样装一格，不算率、
+    /// 不认识形状。
     ///
     /// 归**四列**那一族（同切片、同 as-of）。读不到 ⇒ `null`（不是三个零：零是
     /// 「没有闭环任务」，`null` 是「这一格今天读不出来」）。
@@ -539,10 +542,13 @@ pub(crate) fn read(
     // 分子分母都是事实源里已有的事件，不加新格子。`may_read = false` 时切片已空
     // ⇒ `{ intents: [], adoption_rate: 0.0 }`（四列形态）。
     //
-    // **读数由能力包交**（`D-221` 按名字读、`D-281` 折叠两半）：本插件按名字读 `conation.intents`，不认识
-    // 意图流的形状、也不算采纳率——率是 owner 的算式（单片那一半就在视图里，跨会话那一半
-    // 由 `ViewDecl::agg` 交）。本处只挑两格排版，与 `capability_views` 同一纪律。
-    let conation = conation_reading(&snapshot);
+    // **读数由能力包交**（报表 `slot = conation`，`D-387`）：本插件按 `slot` 取整条读数，
+    // 不认识意图流的形状、也不算采纳率——率是 owner 的算式（单片那一半就在视图里，
+    // 跨会话那一半由 `ViewDecl::agg` 交）。owner 只下发历史形状的两格，其余三格
+    // （`declared` / 两个计数）是它自己判、自己合并用的中间量。
+    // 整条报表读不出来时退回文档写过的空形状并出声。
+    let conation = report_value("conation", &snapshot, &report_ctx)
+        .unwrap_or_else(|| serde_json::json!({ "intents": [], "adoption_rate": 0.0 }));
 
     // 时域跨度列：`slo.span` 只读事件信封的 `ts`（入库时间，与 `cost_ms` 同源的实测面），
     // as-of 之后的事件一概不见。空形状 `{ events: 0, span_ms: 0 }` 留在 owner 的 `render`
@@ -622,40 +628,6 @@ pub(crate) fn read(
         usage,
         ..reading
     })
-}
-
-/// 主动性列：**按名字读**能力包交的视图，挑两格排版（`D-221`）。
-///
-/// ## 为什么只挑两格
-///
-/// 视图交的是 `{ intents, declared, expressed, escalated, adoption_rate }`；本列的历史形状
-/// 是 `{ intents, adoption_rate }`（e2e 与前端都按它读）。多出来的三格是**给别的读方**的：
-/// `declared` 供自主触发去重、两个计数供实例级聚合复算。把整份值原样下发会让「这一列的
-/// 形状」变成「owner 今天交了什么」——那是把出口契约交给 owner 的口径去决定。
-///
-/// ## 读不到 ⇒ 空形状 + 出声
-///
-/// 四种缺席都可诊断（`reason` 在 `capability_views` 那一列里另有完整报告），这里折成
-/// 与 `may_read = false` 同一个空形状，并**出声**一次：静默空形状会让「装配坏了」与
-/// 「没主动发起过」看起来一样，而这两件事一个要修、一个不用。
-fn conation_reading(snapshot: &[Event]) -> serde_json::Value {
-    let empty = || serde_json::json!({ "intents": [], "adoption_rate": 0.0 });
-    match symbio_plugin_api::read_shared_view_all(CONATION_INTENTS_VIEW, snapshot) {
-        Ok(value) => serde_json::json!({
-            "intents": value.get("intents").cloned().unwrap_or_else(|| serde_json::json!([])),
-            "adoption_rate": value
-                .get("adoption_rate")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!(0.0)),
-        }),
-        Err(why) => {
-            symbio_plugin_api::plugin_warn!(
-                symbio_plugin_api::PLUGIN_ID_SESSION,
-                "[stats] 主动性列读不到 `{CONATION_INTENTS_VIEW}`（{why}）：按空读数交"
-            );
-            empty()
-        }
-    }
 }
 
 impl SessionPlugin {

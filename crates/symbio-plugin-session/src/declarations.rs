@@ -74,13 +74,10 @@ pub(crate) const SESSION_OPENING_SEAT: &str = "session.opening-seat";
 /// （`OrphanFact`），不参与派发。实际写方是宿主侧簿记写方（`termination.rs`）。
 pub(crate) const SESSION_TERMINATED_SEAT: &str = "session.terminated-seat";
 
-// 读方侧的视图名：名字住 `plugin-api` 的词汇面（由 owner 的 `PLUGIN.yml`
-// `shared_views` 生成，D-364），本插件按名字读。以下别名只保留调用点的旧名字，
-// 读口不变；owner 改名时生成物与这里一起变，不再出现「各写一遍字面量」。
-// 已收起的三条（`task.readyset` / `slo.span` / `conation.autonomy`）随报表登记
-// （`D-387`）一起退场：报表自带 `views`，读方不再需要名字。本条随
-// `conation.intents` 那一列一起消失——届时 `view_names.rs` 只剩本插件自己的 `memory.live`。
-pub(crate) use symbio_plugin_api::view_names::VIEW_CONATION_INTENTS as CONATION_INTENTS_VIEW;
+// 读方侧的视图名别名已全部退场：八列都改报表登记之后（`D-387`），读者按 `slot` 取
+// 整条读数，名字住在 owner 的 `ReportDecl.views` 里，本插件不再持有任何视图名。
+// 生成物 `view_names.rs` 只剩 `memory.live`（本插件自己的那一条），它随
+// `views-rs.mjs` 在 Q3 一起退役（`D-387` 的实施顺序第 6 步）。
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 
@@ -240,13 +237,12 @@ pub(crate) const FACTS: &[FactDecl] = &[
 
 /// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
 ///
-/// 与 [`CONATION_INTENTS_VIEW`] 同一条通路、同一个理由：折叠（`transcript` / `rebuild` /
-/// `prompt_fidelity` / `branch` / `mutations` / `slo` / `commitment_records` …）住在
-/// core，两个插件都调它，所以拼写只能来自**清单生成物**——本插件是 `message.*`、
-/// `session.consolidated` / `turn.branch_selected` 与 `chat.*` / `user.message`
-/// 的 owner；`authz.*` 与 `commitment.*` 的 owner 仍是 `crates/symbio-plugin-loop`
-/// （E-009 禁兄弟插件依赖，故不引用 loop 的 `vocab`）；任务族五条已随能力迁到
-/// `crates/symbio-plugin-task`——拼写同样只从清单生成物取。
+/// 折叠（`transcript` / `rebuild` / `prompt_fidelity` / `branch` / `mutations` /
+/// `slo` / `commitment_records` …）住在 core，两个插件都调它，所以拼写只能来自
+/// **清单生成物**——本插件是 `message.*`、`session.consolidated` / `turn.branch_selected`
+/// 与 `chat.*` / `user.message` 的 owner；`authz.*` 与 `commitment.*` 的 owner 仍是
+/// `crates/symbio-plugin-loop`（E-009 禁兄弟插件依赖，故不引用 loop 的 `vocab`）；任务族
+/// 五条已随能力迁到 `crates/symbio-plugin-task`——拼写同样只从清单生成物取。
 ///
 /// `model_port` 是**端口名**，不属事件清单：它从共享词汇面
 /// `symbio_plugin_api::vocab::PORT_MODEL` 取，折叠据此认「本轮自己的模型往返」。

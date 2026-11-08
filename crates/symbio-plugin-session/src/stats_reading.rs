@@ -18,7 +18,7 @@
 //! （`ViewDecl::agg`）都由 owner 交，本文件只做「逐片求值 → 把值交回去 → 原样装一格」
 //! （`D-281`）。同一份事实长出两套口径，读数与投影就会静默漂移，而两边都自称是 SLO。
 
-use crate::declarations::{COMMITMENT_VOCAB, CONATION_INTENTS_VIEW};
+use crate::declarations::COMMITMENT_VOCAB;
 use symbio_kernel::event::Event;
 use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 use symbio_plugin_api::reports::ReportCtx;
@@ -179,7 +179,10 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> se
     let span = fleet_of("span", snapshots, ctx).unwrap_or_else(
         || serde_json::json!({ "sessions": 0, "median_ms": serde_json::Value::Null }),
     );
-    let conation = shared_axis(CONATION_INTENTS_VIEW, snapshots).unwrap_or(serde_json::Value::Null);
+    // 主动性轴：报表 `slot = conation`，逐片 `eval` → owner `agg` → owner `fleet_render`。
+    // 形状归 owner（`expressed` / `escalated` / `adoption_rate`），本插件不列它的字段。
+    // 读不到 ⇒ `null`（不是三个零：零是「没有主动发起」，`null` 是「这一格今天读不出来」）。
+    let conation = fleet_of("conation", snapshots, ctx).unwrap_or(serde_json::Value::Null);
     // 自主程度轴同样归能力包：报表 `slot = autonomy`，逐片 `eval` → owner `agg` →
     // owner `fleet_render`，本处不认识分子分母。读不到 ⇒ `null`（与主动性的缺席同一条：
     // 零是读数，`null` 是读不出来）。
@@ -188,21 +191,18 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> se
     // 合计两格读 owner 交的逐档行（形状归 owner，本处只做加法）。
     let (turns, fallbacks) = totals_of(&by_tier["fallback"]);
 
-    // 外部效标两族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
+    // 外部效标三族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
     // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
-    // 两族都是能力包的 `agg` 原样交出（`D-281`）：本插件不列它们的字段。
-    let mut axes = serde_json::json!({
-        "span": span,
-        "autonomy": autonomy,
-    });
-    // 主动性那一格是**能力包的 `agg` 原样交出**（`D-281`）：形状归 owner，本插件不在这里
-    // 列它的字段——列了就是第二份口径。读不到 ⇒ `null`（不是三个零：零是「没有主动发起」，
-    // `null` 是「这一格今天读不出来」）。
-    //
-    // 键名也不另抄一份字面量：取视图名的第一段（`conation.intents` ⇒ `conation`）——那一段
-    // 是 owner 给自己能力起的名字，读方再写一遍就是第二份叫法，漂移了没有东西会变红。
-    if let Some(map) = axes.as_object_mut() {
-        map.insert(axis_of(CONATION_INTENTS_VIEW).to_string(), conation);
+    // 三族都是 owner 的 `agg` 经 `fleet_render` 原样交出（`D-281` / `D-387`）：本插件
+    // 不列它们的字段。轴键取报表登记的 `fleet`（`axes.span` ⇒ `span`）——那是 owner
+    // 给这一格起的名字，读方不抄第二份字面量。
+    let mut axes = serde_json::Map::new();
+    for (slot, value) in [
+        ("span", span),
+        ("autonomy", autonomy),
+        ("conation", conation),
+    ] {
+        axes.insert(fleet_key_of(slot), value);
     }
 
     serde_json::json!({
@@ -215,71 +215,30 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> se
         "fallbacks": fallbacks,
         // 逐档位并集：合并后由 owner 的分位数纯查询给出，与单会话列同一套口径
         "by_tier": by_tier,
-        // 外部效标两族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
+        // 外部效标三族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
         // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
         // 键名稳定（不随文档改字号）：conation ↔ 主动性、span ↔ 时域跨度。
         "axes": axes,
     })
 }
 
-/// 轴名 = 视图名的第一段（`conation.intents` ⇒ `conation`）。
+/// 轴键 = 报表登记的 `fleet` 去掉 `axes.` 前缀（`axes.span` ⇒ `span`）。
 ///
-/// 视图名的第一段是 owner 给自己的能力起的名字；读方要一个稳定的轴键时取它，而不是
-/// 在出口处再抄一份字面量——两份叫法漂移了没有任何东西会变红。
-fn axis_of(view: &str) -> &str {
-    view.split_once('.').map_or(view, |(head, _)| head)
-}
-
-/// 逐片求值 + 交回 owner 合并（`D-281`）。
-///
-/// ## 为什么读方不再有 `merge`
-///
-/// 迁移前这里调的是本插件的 `SloLatencyView::merge` / `FallbackRateView::merge` /
-/// `SpanView::merge` / `ConationView::merge`——**同一件事的第二个实现者**：能力包已经交了
-/// 「一片怎么折」，本插件又写了一遍「N 片怎么合」。现在两半都由 owner 交
-/// （`ViewDecl::eval` / `ViewDecl::agg`），本函数只做三件**不认识形状**的事：逐片 `read`、
-/// 把值攒成数组、把数组交回 `aggregate`。里面有哪些字段、率怎么算、分位数怎么取，
-/// 本文件一概不知道——这正是「加一条视图不改本文件」能成立的原因。
-///
-/// ## 读不到 ⇒ `None`（由调用方决定给什么）
-///
-/// 四种缺席都可诊断（`capability_views` 那一列另有完整报告）。给 `None` 而不是零值：
-/// 零是「一个会话都没发生过」，`None` 是「这一格今天读不出来」——把后者写成前者
-/// 就是让装配故障看起来像一次正常的安静（`D-281` 理由 3 的同一条）。
-fn shared_axis(view_name: &str, snapshots: &[Vec<Event>]) -> Option<serde_json::Value> {
-    let view = match symbio_plugin_api::ViewRead::named(view_name) {
-        Ok(view) => view,
-        Err(why) => {
-            symbio_plugin_api::plugin_warn!(
-                symbio_plugin_api::PLUGIN_ID_SESSION,
-                "[stats] 实例级聚合读不到 `{view_name}`（{why}）：这一格交空形状"
-            );
-            return None;
-        }
-    };
-    let mut parts = Vec::with_capacity(snapshots.len());
-    for snapshot in snapshots {
-        match view.read_all(snapshot) {
-            Ok(value) => parts.push(value),
-            Err(why) => {
-                symbio_plugin_api::plugin_warn!(
-                    symbio_plugin_api::PLUGIN_ID_SESSION,
-                    "[stats] 实例级聚合有一片读不出 `{view_name}`（{why}）：这一格交空形状"
-                );
-                return None;
-            }
-        }
-    }
-    match view.aggregate(&parts) {
-        Ok(value) => Some(value),
-        Err(why) => {
-            symbio_plugin_api::plugin_warn!(
-                symbio_plugin_api::PLUGIN_ID_SESSION,
-                "[stats] 实例级聚合合并失败 `{view_name}`（{why}）：这一格交空形状"
-            );
-            None
-        }
-    }
+/// `fleet` 是 owner 在报表登记里给这一格起的名字（`D-387`），读方取它而不是在出口处
+/// 再抄一份字面量——两份叫法漂移了没有任何东西会变红。登记缺席时退回 `slot`：此时
+/// 这一格本来就是 `null`，键名只负责让形状可读。
+fn fleet_key_of(slot: &str) -> String {
+    symbio_plugin_api::reports::reports()
+        .ok()
+        .and_then(|reports| {
+            reports
+                .iter()
+                .find(|r| r.slot == slot)
+                .and_then(|r| r.fleet)
+        })
+        .and_then(|fleet| fleet.strip_prefix("axes."))
+        .unwrap_or(slot)
+        .to_string()
 }
 
 /// 逐档累加 `turns` / `fallbacks` 两格——出口的合计两格。

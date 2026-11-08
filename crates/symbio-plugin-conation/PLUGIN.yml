@@ -8,7 +8,4 @@ plugin_order: 57
 # 「欲」这条事件的 owner 是本站（站位见 D-269 的站位表）。写方仍是会话（自主触发的落格
 # 是会话存储所有者的写窗口），所以名字必须进共享表：写方按生成物命名，不引本 crate。
 shared_events: conation.expressed
-# 对外可读的视图（scripts/facts/views-rs.mjs 读取 → crates/symbio-plugin-api/src/view_names.rs）。
-# 名字与求值仍住 `decl::VIEWS`；`conation.autonomy` 已改报表登记（`D-387`）——
-# 只剩 `conation.intents` 还走生成物，随它那一列一起退场。
-shared_views: conation.intents
+# 对外可读的报表都在 `src/decl.rs` 的 `submit_reports!`（D-387）——本插件已无 `shared_views`。

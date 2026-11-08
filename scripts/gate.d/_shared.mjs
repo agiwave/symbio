@@ -359,7 +359,7 @@ export const BASELINE = {
   // D-362：搬家用例里 5 条 kernel 侧折叠断言与 sdk 侧既有用例重复（`stamp_branches` /
   // `unselected_roots` 已经逐条钉同一折法），故只保留一侧；唯一新增的判据（删除格必须落在
   // `(Message, Closed)`）改写进 `mutations.test.rs` 从消费方一侧钉。净减 4，非覆盖丢失。
-  ciRustTestsTotal: 2392,
+  ciRustTestsTotal: 2393,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

@@ -208,8 +208,8 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
 `EX-007` 判「`loop` / `session` 没有新增带能力名的源码行」，`S7a` 上抓到的第一件事不是别人
 的能力名，而是**自己的插件 id**（`plugin_warn!("session", …)`，5 处）与**出口键名**
 （`axes` 里那一格）。两处都改成一个名字只定义一次的写法——前者取清单生成物
-`symbio_plugin_api::PLUGIN_ID_SESSION`，后者从视图名的第一段派生
-（`conation.intents` ⇒ `conation`，`stats_reading::axis_of`）。
+`symbio_plugin_api::PLUGIN_ID_SESSION`，后者从 owner 给这一格起的名字派生（`D-387` 之后
+取报表登记的 `fleet`：`axes.conation` ⇒ `conation`，`stats_reading::fleet_key_of`）。
 
 不是为了讨好判据：读方在出口处再抄一遍能力名，等于给自己开第二份叫法，漂移了没有东西
 会变红；`"session"` 那几处本来就是「同一个 id 抄了十几遍」的存量，改完少一处定义。

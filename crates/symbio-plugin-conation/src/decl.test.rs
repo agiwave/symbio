@@ -334,3 +334,47 @@ fn the_autonomy_report_hands_back_the_view_value_untouched() {
         "读不到 ⇒ null（零是读数，null 是读不出来）"
     );
 }
+
+/// 主动性列：出口只有历史形状的两格；`declared` 与两个计数是本包的中间量，不下发。
+#[test]
+fn the_intents_report_drops_the_owners_intermediate_cells() {
+    let reports = symbio_plugin_api::reports::reports().expect("登记表应合法");
+    let report = reports
+        .iter()
+        .find(|r| r.slot == "conation")
+        .expect("主动性列应有登记项");
+    assert_eq!(report.owner, "conation");
+    assert_eq!(report.views, &[CONATION_INTENTS][..], "视图只有一个");
+    assert_eq!(report.fleet, Some("axes.conation"));
+
+    let full = json!({
+        "intents": [{ "seq": 1, "ts": 0, "goal": "补撤回的重试", "task_id": null }],
+        "declared": ["补撤回的重试"],
+        "expressed": 1,
+        "escalated": 0,
+        "adoption_rate": 0.0,
+    });
+    let out = intents_report(std::slice::from_ref(&full), &report_ctx());
+    assert_eq!(out["intents"], full["intents"], "意图流原样交");
+    assert_eq!(out["adoption_rate"], 0.0);
+    for middle in ["declared", "expressed", "escalated"] {
+        assert!(
+            out.get(middle).is_none(),
+            "{middle} 是本包判、本包合并用的中间量，不下发"
+        );
+    }
+
+    assert_eq!(
+        intents_report(&[], &report_ctx()),
+        json!({ "intents": [], "adoption_rate": 0.0 }),
+        "读不到 ⇒ 文档写过的空形状"
+    );
+
+    // 实例级那一格是 `agg` 之后的值本身（两格计数 + 率），与单片列不同形是有意的：
+    // 跨会话没有统一的意图流，那一格只报可加的量。
+    let merged = json!({ "expressed": 2, "escalated": 1, "adoption_rate": 0.5 });
+    assert_eq!(
+        intents_fleet(std::slice::from_ref(&merged), &report_ctx()),
+        merged
+    );
+}

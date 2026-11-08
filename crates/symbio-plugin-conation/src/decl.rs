@@ -64,6 +64,9 @@ pub(crate) use symbio_plugin_api::events::EVENT_TASK_OPENED;
 pub(crate) use symbio_plugin_api::events::{EVENT_TASK_ASSERTED, EVENT_TASK_HELD};
 
 /// 对外可读的视图：表达过的欲及其升格状态。
+///
+/// 读者按报表登记取（`D-387`，`slot = conation`）：出口只交历史形状的两格
+/// （`intents` / `adoption_rate`），其余三格是本包与跨会话合并用的中间量。
 pub(crate) const CONATION_INTENTS: &str = "conation.intents";
 
 /// 对外可读的第二条视图：无人干预完成率（DE-008 §3.1 自主程度）。
@@ -365,16 +368,55 @@ symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 // 自主程度列的报表登记（`D-387`）：视图是 `conation.autonomy`，出口就是视图值本身。
 //
 // 有 `fleet`：跨会话那一格由本包的 `agg` 合并（`D-281`），读方不认识分子分母。
-symbio_plugin_api::submit_reports!([ReportDecl {
-    owner: "conation",
-    slot: "autonomy",
-    order: 90,
-    views: &[CONATION_AUTONOMY],
-    fleet: Some("axes.autonomy"),
-    render: autonomy_value,
-    fleet_render: Some(autonomy_value),
-    panel: None,
-}]);
+//
+// 主动性列同理，但出口只有历史形状的两格：`declared` 与两个计数是本包判、本包合并用的
+// 中间量，不下发（下发等于把「这一列的形状」交给 owner 的口径去决定）。
+symbio_plugin_api::submit_reports!([
+    ReportDecl {
+        owner: "conation",
+        slot: "autonomy",
+        order: 90,
+        views: &[CONATION_AUTONOMY],
+        fleet: Some("axes.autonomy"),
+        render: autonomy_value,
+        fleet_render: Some(autonomy_value),
+        panel: None,
+    },
+    ReportDecl {
+        owner: "conation",
+        slot: "conation",
+        order: 100,
+        views: &[CONATION_INTENTS],
+        fleet: Some("axes.conation"),
+        render: intents_report,
+        fleet_render: Some(intents_fleet),
+        panel: None,
+    },
+]);
+
+/// 主动性列：只有历史形状的两格（`intents` / `adoption_rate`），多出来的三格不下发。
+///
+/// 缺格按空补（`[]` / `0.0`）：形状是本包自己交的，读不出说明版本对不上——补的是
+/// **有据的空**，不是编一个率（与 [`merge`] 的「认不出按 0 计」同一条）。
+fn intents_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    match views.first() {
+        Some(value) if !value.is_null() => json!({
+            "intents": value.get("intents").cloned().unwrap_or_else(|| json!([])),
+            "adoption_rate": value
+                .get("adoption_rate")
+                .cloned()
+                .unwrap_or_else(|| json!(0.0)),
+        }),
+        _ => json!({ "intents": [], "adoption_rate": 0.0 }),
+    }
+}
+
+/// 主动性列的实例级那一格：`agg` 之后的汇总值原样交出（`expressed` / `escalated` /
+/// `adoption_rate`）——与单片列不同形是**有意的**：跨会话没有统一的意图流，那一列
+/// 只报可加的量与由它重算的率（[`merge`]）。
+fn intents_fleet(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    autonomy_value(views, _ctx)
+}
 
 /// 自主程度列：owner 交的整片值**原样**交出，不在这里加键也不在这里改名。
 ///
