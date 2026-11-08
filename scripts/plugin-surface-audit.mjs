@@ -20,7 +20,7 @@
  * | HS-002 | 门面白名单条数超过基线（只许降） | 加一条要配一条决策理由，并同步上调基线 |
  * | HS-003 | 门面白名单里有符号在**扩展层插件代码里零引用** | 删掉它——白名单的每一条都要报得出消费方（与 C-003 同一把尺子）；报不出的就是空转条目 |
  * | HS-004 | 插件胶水层 `symbio-providers` 把**嵌入臂**设成默认开启（`default = ["embedding"]` 或依赖不是 `optional`） | 那一条 `default = []` 是有意的：`ort` / `tokenizers` 带来 55 个传递依赖（168 → 113），而插件侧只有 `local` 一个消费者。要开就在宿主与需要它的插件那里显式开（D-254） |
- * | HS-005 | 门面自己的 `[dependencies]` 里有旧 core 的 crate 名 | 门面只依赖 kernel + sdk + deploy。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
+ * | HS-005 | 门面 manifest **或任一活跃 crate 的源码 / manifest** 里出现旧 core 名（两种拼写） | 旧 core 已整棵并入 `symbio-sdk`（D-279）；门面只依赖 kernel + sdk + deploy，活跃区不再把已删名写成引用。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
  * | HS-006 | 语法臂条数 > 基线，或模块级转发条数 > 基线 | 两格都「只许不涨」：语法臂不计债但计件；模块转发一行换 N 条，要显式（D-278） |
  *
  * `symbio_kernel::` 前缀**放行**：kernel 已进插件依赖白名单，禁前缀就是「许依赖、
@@ -385,10 +385,21 @@ export function collectModuleReexports(root) {
   return out
 }
 
-function walkRs(dir, out = []) {  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+function walkRs(dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name)
     if (e.isDirectory()) walkRs(p, out)
     else if (e.name.endsWith('.rs')) out.push(p)
+  }
+  return out
+}
+
+/** 递归收集 `Cargo.toml` —— HS-005 的另一半扫描面（源码只盖住 `use`，依赖键在 manifest）。 */
+function walkManifests(dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name)
+    if (e.isDirectory()) walkManifests(p, out)
+    else if (e.name === 'Cargo.toml') out.push(p)
   }
   return out
 }
@@ -495,8 +506,45 @@ export function run(root) {
     )
   }
 
-  // HS-005：门面自己不得依赖旧 core（D-276）。机制臂归零之后，这一条把「下次再为
-  // 一条控制面符号整块依赖实现层」的路堵死——否则 21 个插件的编译图会重新背上控制面。
+  // HS-005：旧 core 名不得回到活跃区（门面 manifest + 任一活跃 crate 的源码 / manifest）。
+  //
+  // 前半（D-276）：门面不得依赖旧 core。机制臂归零之后，这一条把「下次再为一条控制面
+  // 符号整块依赖实现层」的路堵死——否则 21 个插件的编译图会重新背上控制面。
+  // 后半（D-279）：旧 core 整棵并入 sdk 之后，任何 `use` / 依赖键写它都是编译不了的
+  // 死引用。**这条判据不是「名字不存在所以永远绿」**：被禁名以常量拼出，但扫描面是
+  // 真实源码；回归用例把两种拼写写进夹具，各自必须红。
+  const retiredCoreHits = []
+  const nameRe = (name) => new RegExp(`\\b${name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`)
+  const allRs = walkRs(cratesDir)
+  const allManifests = walkManifests(cratesDir)
+  for (const f of allRs) {
+    const code = stripRustCode(fs.readFileSync(f, 'utf8'))
+    for (const name of [RETIRED_CORE_MODULE, RETIRED_CORE_CRATE]) {
+      if (nameRe(name).test(code)) {
+        retiredCoreHits.push(`${path.relative(root, f).split(path.sep).join('/')}（\`${name}\`）`)
+      }
+    }
+  }
+  for (const manifest of allManifests) {
+    const lines = fs.readFileSync(manifest, 'utf8').split(/\r?\n/)
+    for (const line of lines) {
+      if (line.trim().startsWith('#')) continue
+      for (const name of [RETIRED_CORE_MODULE, RETIRED_CORE_CRATE]) {
+        if (nameRe(name).test(line)) {
+          retiredCoreHits.push(
+            `${path.relative(root, manifest).split(path.sep).join('/')}（\`${name}\`）`,
+          )
+        }
+      }
+    }
+  }
+  if (retiredCoreHits.length) {
+    errors.push(
+      `活跃区仍有已退役的旧 core 名：${[...new Set(retiredCoreHits)].join(' / ')}——HS-005 (D-276/D-279)：` +
+        '旧 core 整棵并入 `symbio-sdk`；源码里的 `use` 改成 `symbio_sdk::…` / `symbio_kernel::…`，' +
+        'manifest 里的依赖键整条删掉。同一条判据也挡门面重新依赖实现层',
+    )
+  }
   const facadeManifest = path.join(root, 'crates', 'symbio-plugin-api', 'Cargo.toml')
   if (fs.existsSync(facadeManifest)) {
     const toml = fs.readFileSync(facadeManifest, 'utf8')
@@ -545,7 +593,8 @@ export function run(root) {
         `+ SDK 臂 ${ns} 条（基线 ${SDK_BASELINE}，D-269 起同进棘轮）` +
         `· 语法臂 ${gram.length} 条（基线 ${GRAMMAR_BASELINE}，不计债但计件）` +
         `· 模块级转发 ${moduleEntries.length} 条（基线 ${MODULE_REEXPORT_BASELINE}）` +
-        `· HS-003 每条都有扩展层消费方（0 空转）· HS-004 胶水层重臂默认关闭（${HEAVY_ARM.feature}）`,
+        `· HS-003 每条都有扩展层消费方（0 空转）· HS-004 胶水层重臂默认关闭（${HEAVY_ARM.feature}）` +
+        `· HS-005 活跃区无旧 core 名（扫 ${allRs.length} 个源码 / ${allManifests.length} 个 manifest）`,
     ),
   )
   return 0

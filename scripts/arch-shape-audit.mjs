@@ -18,6 +18,7 @@
  * | CS-006 | —— | 逐条内核业务事件名核**消费方分布**：报出「≥2 crate 消费」与「core 读者」两类各几条，第三种（恰好一个消费方且 core 不读）判红 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是当批可迁的形状。这条把判据逐名落到代码；`core 读者` 那一类**不是**归属证据，是待迁存量——名字随那条读者一起迁出（DE-024 D-203） |
  * | CS-008 | —— | core / kernel 的**生产代码**里事件名字面量数 = 0（首段闭集 = `Entity` 的变体；`#[cfg(test)] mod x;` 的夹具文件剔出判据面） | **名字从第二条路回来**：CS-005 / CS-006 的输入都是内核那张表，表归零之后两者都没有输入，而 `match e.kind.as_str() { "chat.assistant.final" => … }` 照样能让「加一条事件」变成改架构模块。这条是 D-203 承诺的翻转，落成独立一格而不是翻转 CS-006（那会让判据在归零后空转） |
  * | CS-009 | `structFields` / `enumVariants` | core + kernel **生产代码**里 `pub struct` 的字段总数、`pub enum` 的变体总数，两格都只许降 | **数据面变宽**：CS-001 只数 trait / `fn` / 默认体，`CapabilityMeta` 的字段、`Entity` 的变体、`FactRole` 的变体都不在它的判定面里——内核可以靠数据面持续变宽而全绿（DE-025 D-212） |
+ * | CS-010 | —— | **内核文件集**的**生产代码**里出现 `PLUGIN.yml` 的**业务名**（`principal_*` 行的 owner 与能力名）**完整字面量** = 0 | **语法里认业务坐标**：内核「只含语法类型与冻结机制原语」这条判据，长时期内唯一可执行的半边是「不认插件 id」（CS-004）。owner（`session/main`）与能力名（`judge.intent`）是同一类回流：写死一条就把「加能力 / 换主体」变成改内核（DE-023 D-398） |
  *
  * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
  * 域文件（authz / chat / plugin / event_bus / projection …）的插件 id 字面量不是内核
@@ -97,7 +98,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
-// @codes CS-001 CS-002 CS-003 CS-004 CS-005 CS-006 CS-008 CS-009
+// @codes CS-001 CS-002 CS-003 CS-004 CS-005 CS-006 CS-008 CS-009 CS-010
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -1156,6 +1157,64 @@ if (entityNames) {
   }
 }
 
+// ==================== CS-010 内核不含业务名 ====================
+
+/**
+ * 业务名集合的唯一来源：各插件 `PLUGIN.yml` 的 `principal_*` 行。
+ *
+ * 行格式：`principal_<角色>: <owner>|<能力名1+能力名2+…>|<可见性>`。第一个字段是
+ * owner（主体坐标），第二个字段按 `+` 拆是能力名（能力坐标）——两者都是**业务名**，
+ * 内核对它们的任何一处字面量引用都意味着「加能力 / 换主体」要改内核。
+ *
+ * 插件 id 由目录名反推（与 CS-004 同一个词表来源）：新增插件 = 新 crate + 新
+ * `PLUGIN.yml`，判据不需要跟着改。一条 `principal_*` 都读不到 ⇒ `null`（夹具仓库，
+ * 判据不适用），而不是「读 0 条 = 全绿」。
+ */
+function businessNames(root) {
+  const dir = path.join(root, 'crates')
+  if (!fs.existsSync(dir)) return null
+  const owners = new Set()
+  const caps = new Set()
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!e.isDirectory() || !e.name.startsWith(PLUGIN_CRATE_PREFIX)) continue
+    const manifest = path.join(dir, e.name, 'PLUGIN.yml')
+    if (!fs.existsSync(manifest)) continue
+    for (const line of fs.readFileSync(manifest, 'utf8').split(/\r?\n/)) {
+      const t = line.trim()
+      if (t.startsWith('#')) continue
+      const m = /^principal_[A-Za-z0-9_]+:\s*([^|]+)\|([^|]*)\|/.exec(t)
+      if (!m) continue
+      owners.add(m[1].trim())
+      for (const cap of m[2].split('+')) if (cap.trim()) caps.add(cap.trim())
+    }
+  }
+  return owners.size || caps.size ? { owners, caps } : null
+}
+
+const bizNames = businessNames(ROOT)
+const bizHits = []
+if (bizNames) {
+  for (const f of purityTexts) {
+    for (const name of [...bizNames.owners, ...bizNames.caps]) {
+      // 只认**带引号的完整字面量**：子串匹配会把 `session` 这类领域词全判红，
+      // 而「内核在生产代码里写 `"session/main"` / `"judge.intent"`」才是业务坐标回流。
+      const re = new RegExp(`"${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g')
+      for (const m of f.text.matchAll(re)) {
+        const line = f.text.slice(0, m.index).split('\n').length
+        bizHits.push({ rel: f.rel, line, name })
+      }
+    }
+  }
+  for (const h of bizHits) {
+    report(
+      'CS-010',
+      `\`${h.rel}:${h.line}\` 出现了业务名字面量 \`"${h.name}"\` —— ` +
+        '内核只含语法类型与冻结机制原语，不含任何业务名、owner 归属、能力名、端口名常量。' +
+        '名字属于声明（`PLUGIN.yml` / `EventDecl`），由声明方写、内核对字符串透传（DE-023 D-398）',
+    )
+  }
+}
+
 const cells = Object.keys(SHAPE_BASELINE)
 const shapeLine = cells
   .map((k) => `${k} ${shape.values[k]}/${SHAPE_BASELINE[k]}`)
@@ -1236,6 +1295,16 @@ if (errors.length === 0) {
     )
   } else {
     ruleLine(true, 'CS-008', 'core 生产代码零事件名字面量：夹具仓库没有内核事件表，CS-008 不适用')
+  }
+  if (bizNames) {
+    ruleLine(
+      true,
+      'CS-010',
+      `内核不含业务名：${bizNames.owners.size} 个 owner / ${bizNames.caps.size} 个能力名` +
+        `（来自 PLUGIN.yml 的 \`principal_*\` 行）在 ${purityTexts.length} 个内核文件的生产代码里零字面量`,
+    )
+  } else {
+    ruleLine(true, 'CS-010', '内核不含业务名：夹具仓库没有 `principal_*` 声明，CS-010 不适用')
   }
   const under = cells.filter((k) => shape.values[k] < SHAPE_BASELINE[k])
   if (under.length) {

@@ -320,6 +320,42 @@ test('⑬ 门面 manifest 依赖旧 core 的 crate 名 ⇒ 红（HS-005，D-276�
   }
 })
 
+test('⑬b HS-005 退化：活跃源码里 `use symbio_core::…` ⇒ 红（守卫不是永远绿）', () => {
+  // 被禁名在脚本里是拼出来的常量，若扫描面写错（比如只扫门面 manifest），这一条会变绿
+  // 而真仓库里同样写的 `use` 谁也拦不住。因此必须从**活跃 crate 的源码**这一面注入。
+  const root = fixture({
+    'symbio-plugin-fix': { rs: `use ${RETIRED_CORE_MODULE}::Event;\npub fn f(_: Event) {}\n` },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /HS-005/)
+    assert.match(r.stdout, new RegExp(RETIRED_CORE_MODULE))
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑬c HS-005 退化：两种字面拼写各写一次 ⇒ 各自红', () => {
+  for (const spelling of [RETIRED_CORE_MODULE, RETIRED_CORE_CRATE]) {
+    const root = fixture({
+      'symbio-plugin-fix': {
+        manifest: CLEAN_MANIFEST + `${spelling} = "0.1"\n`,
+      },
+      'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
+    })
+    try {
+      const r = runOn(root)
+      assert.equal(r.status, 1, `${spelling} 未被判红\n` + r.stdout + r.stderr)
+      assert.match(r.stdout, /HS-005/)
+      assert.match(r.stdout, new RegExp(spelling))
+    } finally {
+      rmTree(root)
+    }
+  }
+})
+
 test('⑭ 门面模块级转发超过基线 ⇒ 红（HS-006，D-278）', () => {
   const mods = Array.from({ length: MODULE_REEXPORT_BASELINE + 1 }, (_, i) => `M${i}`)
   const root = fixture({

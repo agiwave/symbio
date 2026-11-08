@@ -622,3 +622,66 @@ test('CS-006：没有插件 crate 的夹具仓库 ⇒ 不适用，不许静默�
   assert.match(r.stdout, /CS-006.*不适用/)
 })
 
+// ==================== CS-010 内核不含业务名 ====================
+
+/** 一份最小的 `PLUGIN.yml`：`principal_<角色>: <owner>|<能力名+…>|<可见性>`。 */
+const PLUGIN_YML = 'principal_main: session/main|judge.intent+reply|thread_private\n'
+
+/**
+ * CS-010 夹具：内核文件集（`alpha`）+ 一个声明了 owner / 能力名的插件。
+ *
+ * `alpha` 在文件集里 ⇒ 它是判据面；`beta` 不在 ⇒ 域文件，同一个字面量不该红。
+ */
+const bizFiles = (alphaSrc, extra = {}) => ({
+  [CORE_MOD]: 'mod alpha;\nmod beta;\nmod kernel;\n',
+  [ALPHA]: alphaSrc,
+  [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
+  'crates/symbio-plugin-biz/PLUGIN.yml': PLUGIN_YML,
+  ...extra,
+})
+
+test('CS-010：内核文件集写死能力名 ⇒ 红（能力坐标回流）', () => {
+  const r = audit(bizFiles(ONE + 'pub const C: &str = "judge.intent";\n'), {
+    baseline: '1:1:0',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stderr, /CS-010/)
+  assert.match(r.stderr, /judge\.intent/)
+})
+
+test('CS-010：内核文件集写死 owner ⇒ 红（主体坐标回流）', () => {
+  const r = audit(bizFiles(ONE + 'pub const O: &str = "session/main";\n'), {
+    baseline: '1:1:0',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stderr, /CS-010/)
+  assert.match(r.stderr, /session\/main/)
+})
+
+test('CS-010：同名子串（不带引号）与注释里的名字 ⇒ 不红（判业务坐标，不判措辞）', () => {
+  const r = audit(
+    bizFiles(
+      ONE +
+        '// 见 `session/main` 的能力清单：judge.intent。\n' +
+        'pub fn f(owner: &str) -> bool {\n    owner.starts_with("session")\n}\n',
+    ),
+    { baseline: '1:1:0' },
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('CS-010 只量内核文件集：域文件里的业务名字面量不判红', () => {
+  const r = audit(
+    bizFiles(ONE, { 'crates/symbio-sdk/src/beta/mod.rs': 'pub const N: &str = "session/main";\n' }),
+    { baseline: '1:1:0' },
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /CS-010.*14 个|CS-010.*1 个 owner/)
+})
+
+test('CS-010：没有 `principal_*` 声明的夹具仓库 ⇒ 不适用（不是「扫 0 条 = 全绿」）', () => {
+  const r = audit(core(ONE), { baseline: '1:1:0' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /CS-010.*不适用/)
+})
+
