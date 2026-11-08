@@ -372,6 +372,13 @@ impl DriveSupport for HostDriveSupport {
     fn append(&self, fact: DriveFact) {
         // 协议事实与世界事实同源：都落事实源（同一写口、同一读面）。
         // 不做旁路去重：重复投递由事实源按 `event_id` 幂等吸收。
+        //
+        // **拒收必须留痕**（D-396）：`Duplicate` 是幂等吸收，不算拒收；其余失败
+        //（`OffGrid` / `Invariant` / 非写者 / I/O）若静默吞掉，环会拿着一条假「已落」
+        // 继续派发，债务永不收束——t46 的哑故障正是从这里开始的。
+        let kind = fact.kind.clone();
+        let port = fact.key.port.clone();
+        let id = fact.key.id.clone();
         let draft = FactDraft {
             key: ring_event_id(&fact),
             kind: fact.kind.clone(),
@@ -380,7 +387,20 @@ impl DriveSupport for HostDriveSupport {
             payload: fact.payload.clone(),
             produced_by: provenance_at(&*self.source),
         };
-        let _ = self.source.append("loop".to_string(), draft);
+        if let Err(err) = self.source.append("loop".to_string(), draft) {
+            // 契约层把失败压成字符串（`AppendError` 的 `Debug` 形态），幂等命中即
+            // 裸 `Duplicate`——正常路径，不按错误报。
+            if err != "Duplicate" {
+                symbio_plugin_api::plugin_error!(
+                    "drive",
+                    "[Loop] 协议事实落格被拒：kind={} port={} id={} err={}",
+                    kind,
+                    port,
+                    id,
+                    err
+                );
+            }
+        }
     }
 
     fn rows(&self) -> Vec<DriveRow> {
@@ -531,7 +551,21 @@ impl PortFactWriter for WorldWriter {
             // 草稿自带溯源时用它；否则指向本会话里刚落地的那条事实（I2 的声明类
             // 不接受无源）。空会话不填——那是真正的无源声明，交给事实源拒绝。
             draft.produced_by = draft.produced_by.or_else(|| provenance_at(&*self.source));
-            let _ = self.source.append(owner.to_string(), draft);
+            // 世界事实的拒收同样不许静默：落不进格 = 写口拒了，不是「写成功了但看不见」。
+            let kind = draft.kind.clone();
+            let key = draft.key.clone();
+            if let Err(err) = self.source.append(owner.to_string(), draft) {
+                if err != "Duplicate" {
+                    symbio_plugin_api::plugin_error!(
+                        "host",
+                        "[Writer] 世界事实落格被拒：owner={} kind={} key={} err={}",
+                        owner,
+                        kind,
+                        key,
+                        err
+                    );
+                }
+            }
         }
     }
 }

@@ -157,8 +157,8 @@ pub struct WalStore {
     /// 装配期冻结表（DE-024 D-198 / D-199）：写闸先问它，未命中再问进程装配表与
     /// 共享表。
     ///
-    /// 注入点有两个：生产路径在 [`crate::store::Store::facts`] 打开事实源后挂上
-    /// `symbio_plugin_api::sealed_declarations()`；用例可以用
+    /// 注入点有两个：生产路径在 [`crate::store::Store::facts`] **打开事实源之前**
+    /// 先封声明表（缺口即装载期硬错，D-396），再把冻结表挂到这里；用例可以用
     /// [`WalStore::with_declarations`] 挂一张小表。`None` 不表示「没有网格」——
     /// 写闸仍会问全局装配表；三份表都不认识 ⇒ 网格之外（fail-closed）。
     declarations: Option<Arc<Frozen>>,

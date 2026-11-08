@@ -22,6 +22,28 @@ use symbio_kernel::event::{Entity, Verb};
 use symbio_kernel::store::AppendError;
 
 use super::*;
+use symbio_kernel::decl::ring::Gap;
+use symbio_kernel::decl::Frozen;
+
+/// 打开事实源并挂装配期冻结表。
+///
+/// **装载期缺口是硬错**（D-396）：不许降级成「没有冻结表也照开」——那样写闸会退到
+/// 共享词汇面，环的协议事实被 `OffGrid` 静默拒收，工具会重复派发、债务永不收束
+/// （t46 的停摆链）。缺口在打开之前换成 `Err`，调用方按会话打不开处理。
+pub(super) fn open_fact_store(
+    wal: &std::path::Path,
+    sealed: Result<Arc<Frozen>, Vec<Gap>>,
+) -> Result<EventWalStore, String> {
+    let frozen = sealed.map_err(|gaps| {
+        format!(
+            "声明表装载失败（{} 条缺口），拒绝打开事实源：{gaps:?}",
+            gaps.len()
+        )
+    })?;
+    let store =
+        EventWalStore::open(wal).map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))?;
+    Ok(store.with_declarations(frozen))
+}
 
 impl SessionStore {
     /// 开面播种（D-340）：把部署级**已裁决**的 `verdict.asserted` 复制进本会话事实流。
@@ -92,14 +114,11 @@ impl SessionStore {
         let wal = dir.join(paths::V2_WAL_FILE);
         // 持锁 open：两个并发 `facts` 若各自 open，后插入者可能是不持令牌的
         // 降级实例，把先前的写者顶掉（跨进程锁是进程级独占，不是句柄级）。
-        let mut store = EventWalStore::open(&wal)
-            .map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))?;
-        // 写闸先问装配期冻结表（DE-024 D-198）。装载失败不阻断事实源打开——
-        // 写闸仍会退到进程装配表与共享表（已知名字照常），而义务环的装载口会带着同一份
-        // 缺口拒绝开幕（`crates/symbio-plugin-loop`）；这里再抛一次只会让会话连读都打不开。
-        if let Ok(frozen) = symbio_plugin_api::sealed_declarations() {
-            store = store.with_declarations(frozen);
-        }
+        //
+        // 装载期缺口是**硬错**（D-396）：不许降级成「没有冻结表也照开」——那样写闸
+        // 会退到共享词汇面，环的协议事实被 `OffGrid` 静默拒收，工具重复派发、债务
+        // 永不收束（t46 的停摆链）。缺口在这里换成会话打不开。
+        let store = open_fact_store(&wal, symbio_plugin_api::sealed_declarations())?;
         let store = Arc::new(store);
         cache.insert(session_id.to_string(), store.clone());
         Ok(Some(store))

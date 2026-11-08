@@ -374,7 +374,10 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 2398 → 2169（D-395 撤回 8 个专用验证包）——净减 229 条
   // 是整包实现与其单元用例一起撤回（被测对象不存在，不是覆盖丢失）；设计条目仍在 §6.1 名册，
   // 扩展面判据由 glossary / tool / model 等通用包的 e2e 承接。非侵蚀。
-  ciRustTestsTotal: 2169,
+  // baseline-allow ciRustTestsTotal: 2169 → 2170（D-396）——新增 1 条**退化用例**
+  // `store::tests::seal_gaps_are_a_load_error_not_a_degraded_store`：装载期缺口必须
+  // 拒绝打开事实源；不是补回被删的扩展覆盖。非侵蚀。
+  ciRustTestsTotal: 2170,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

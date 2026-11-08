@@ -4230,6 +4230,7 @@ dependencies = [
  "symbio-providers",
  "symbio-sdk",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ symbio-kernel = { path = "../symbio-kernel" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-providers = { path = "../symbio-providers" }
 symbio-sdk = { path = "../symbio-sdk" }
+tracing = { workspace = true }
 
 [dev-dependencies]
 # 环插件经能力收集注册 `drive` 行；测试二进制需要链接它（源码零引用）。

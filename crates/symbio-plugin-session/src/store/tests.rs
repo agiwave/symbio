@@ -697,3 +697,27 @@ async fn an_unopenable_fact_source_is_an_error_not_none() {
         Ok(_) => panic!("事实源打不开必须是 Err，而不是「没有事实源」"),
     }
 }
+
+/// 退化用例（D-396）：**故意去掉某个格的唯一读者** ⇒ 装载期红。
+///
+/// 缺口形状与 `ring.test.rs` 的「去掉唯一读者 ⇒ `OrphanFact`」同一份：
+/// `artifact.added` 没有任何行读它。判据不是「环后来会拒收协议事实」，而是
+/// **事实源根本打不开**——不许带病降到共享词汇面，让进程看起来起来了。
+#[test]
+fn seal_gaps_are_a_load_error_not_a_degraded_store() {
+    use symbio_kernel::decl::ring::Gap;
+
+    let tmp = TempDir::new().unwrap();
+    let wal = tmp.path().join(paths::V2_WAL_FILE);
+    let gaps = vec![Gap::OrphanFact {
+        fact: "artifact.added",
+    }];
+    let err = super::facts::open_fact_store(&wal, Err(gaps))
+        .err()
+        .expect("装载期缺口必须拒绝打开事实源，不能降级到共享词汇面");
+    assert!(
+        err.contains("声明表装载失败") && err.contains("artifact.added"),
+        "错误要带得出缺口名：{err}"
+    );
+    assert!(!wal.exists(), "拒绝发生在打开之前：不留半个事实源");
+}
