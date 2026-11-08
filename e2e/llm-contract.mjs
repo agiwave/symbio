@@ -457,22 +457,35 @@ export const INTERNAL_NAMES = Object.freeze([
 ]);
 
 /**
- * LC-005b 子智能体挂载后的工具面：根工具一个不少，且每个根工具都有
- * `agent_<id>_<工具>` 的对偶（子空间能力经前缀寻址——t30 主体不串包的名字基础）。
+ * LC-005b 子智能体挂载后的工具面：根工具一个不少，且与根工具同名的
+ * `agent_<id>_<工具>` 前缀副本**不得出现**。
  *
- * 拦的失效：挂了 agent 子树后根工具被挤掉（收集广播漏了兄弟插件）、
- * 前缀寻名不一致（一边 `agent_probe-agent_x` 一边 `agent/probe-agent/x`）。
+ * 为什么不再是「对偶必须齐」：前缀副本只换名字、执行原样透传
+ * （`PrefixedCapability`），对模型而言就是同一个能力出现两次——每多一份都白占
+ * schema 字节，还会诱导模型去选一个更长的名字。去重发生在会话装配侧
+ * （`symbio-plugin-session` 的 `dedup_subtree_twins`）；子树独有的工具不在根集里，
+ * 不会被去重，仍带前缀留在面上（那部分由 `assertToolSurface` 的 exact 集合兜）。
+ *
+ * 拦的失效：挂了 agent 子树后根工具被挤掉（收集广播漏了兄弟插件）；前缀副本没被
+ * 去掉（工具面白长一倍）；`agent_<id>_` 再套一层 `agent_`（双重前缀，名字解析歧义）。
  */
-export function assertAgentPrefixedTwins(req, agentId, label) {
+export function assertAgentToolSurfaceDeduped(req, agentId, label) {
   const actual = new Set(toolNamesOf(req));
   const prefix = `agent_${agentId}_`;
   const missingRoot = FACTORY_TOOLS.filter((t) => !actual.has(t));
   if (missingRoot.length) {
     throw new Error(`${label}: 绑定智能体后根工具被挤掉（${missingRoot.join(', ')}）`);
   }
-  const missingTwin = FACTORY_TOOLS.filter((t) => t !== PLATFORM_VARIANT_TOOL && !actual.has(`${prefix}${t}`));
-  if (missingTwin.length) {
-    throw new Error(`${label}: 根工具缺少 agent 前缀对偶（${missingTwin.map((t) => prefix + t).join(', ')}）`);
+  const prefixed = toolNamesOf(req).filter((n) => n.startsWith(prefix));
+  const twins = prefixed
+    .map((n) => normalizeShell(n.slice(prefix.length)))
+    .filter((base) => FACTORY_TOOLS.includes(base));
+  if (twins.length) {
+    throw new Error(`${label}: 根工具的前缀副本没被去重（${twins.map((t) => prefix + t).join(', ')}）`);
+  }
+  const doubled = prefixed.filter((n) => n.slice(prefix.length).startsWith('agent_'));
+  if (doubled.length) {
+    throw new Error(`${label}: 前缀副本里出现双重 agent_ 前缀（${doubled.join(', ')}）`);
   }
 }
 

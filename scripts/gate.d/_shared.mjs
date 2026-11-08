@@ -379,7 +379,7 @@ export const BASELINE = {
   // 拒绝打开事实源；不是补回被删的扩展覆盖。非侵蚀。
   // baseline-allow ciRustTestsTotal: 2170 → 2172（D-397）——新增 2 条判据用例：
   // 归宿行守端口格 ⇒ `SinkRowOnPortFact`；派发行改 `by = None` ⇒ 红。非侵蚀。
-  ciRustTestsTotal: 2172,
+  ciRustTestsTotal: 2177,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

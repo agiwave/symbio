@@ -36,19 +36,9 @@ import {
   PROVIDER_ID,
 } from '../helpers.mjs';
 import {
-  PLATFORM_VARIANT_TOOL,
-  PLATFORM_VARIANT_TOOL_NAMES,
-} from '../../scripts/prompt-shape-audit.mjs';
-import {
-  FACTORY_TOOLS,
+  assertAgentToolSurfaceDeduped,
   assertToolSurface,
-  assertAgentPrefixedTwins,
-  toolNamesOf,
 } from '../llm-contract.mjs';
-
-/** wire 名里的 shell 平台变体归一（与 prompt-shape-audit 同一记号，不抄第二份规则） */
-const normalizeShell = (name) =>
-  PLATFORM_VARIANT_TOOL_NAMES.includes(name) ? PLATFORM_VARIANT_TOOL : name;
 
 const U = '随便说点什么';
 
@@ -64,7 +54,7 @@ function makeSkill(homedir, id) {
 }
 
 export default defineCase(
-  'T59 工具面契约：出厂集 + 条件工具 + MCP 桥接 + 内部面黑名单 + agent 对偶（LC-005）',
+  'T59 工具面契约：出厂集 + 条件工具 + MCP 桥接 + 内部面黑名单 + agent 去重（LC-005）',
   async () => {
     const llm = await new MockLlm([{ id: 'rest', content: '收到。' }]).start();
 
@@ -151,7 +141,7 @@ export default defineCase(
         cleanupHomedir(hd3);
       }
 
-      // ── ④ 子智能体挂载：根工具不少 + agent 前缀对偶齐 ────────────────────
+      // ── ④ 子智能体挂载：根工具不少 + 同名前缀副本被去重 ──────────────────
       await llm.reset();
       const hd4 = makeHomedir({
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
@@ -176,20 +166,13 @@ export default defineCase(
         assertEq(r4.code, 0, `agent 面 CLI 退出码（stderr: ${r4.stderr.slice(0, 600)}）`);
         const reqs = await llm.requests();
         assertEq(reqs.length, 1, 'agent 面应恰好一次请求');
-        assertAgentPrefixedTwins(reqs[reqs.length - 1], 't59-agent', 'T59④ agent 对偶');
-        // 对偶集合与出厂集**双向相等**：根工具全有对偶（上一步已判），对偶也
-        // 不许有「子树独有」的未声明工具（那是收集广播把别的东西也带进来了）。
+        assertAgentToolSurfaceDeduped(reqs[reqs.length - 1], 't59-agent', 'T59④ agent 去重');
+        // 去重后的工具面应与出厂集**逐项相等**：根工具一个不少，前缀副本一个不留，
+        // 也不许有「子树独有」的未声明工具（那是收集广播把别的东西也带进来了）。
         // shell 平台变体两侧同一规则，归一后比。
-        const prefix = 'agent_t59-agent_';
-        const actualTwins = toolNamesOf(reqs[reqs.length - 1])
-          .filter((n) => n.startsWith(prefix))
-          .map((n) => normalizeShell(n.slice(prefix.length)));
-        const expectedTwins = FACTORY_TOOLS.map(normalizeShell).sort();
-        const actualSorted = [...new Set(actualTwins)].sort();
-        assertEq(
-          JSON.stringify(actualSorted),
-          JSON.stringify(expectedTwins),
-          'agent 前缀对偶应与出厂集逐项相等（多一个 = 子树独有工具泄漏，少一个 = 委派面残缺）',
+        assertToolSurface(reqs[reqs.length - 1], {}, 'T59④ agent 去重后的工具面');
+        console.log(
+          `  agent 面工具数：${(reqs[reqs.length - 1].body?.tools ?? []).length}（去重前为根工具 + 同名前缀副本两份）`,
         );
       } finally {
         cleanupHomedir(hd4);

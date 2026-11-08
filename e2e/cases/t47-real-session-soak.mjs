@@ -541,6 +541,47 @@ export default defineCase(
           ` · 压缩 ${compactions} 次 · 长轮 ${toolRoundReqs} 步` +
           ` · 视图峰值 ${viewUsers} 条发言 / ${maxToolMsgs} 条工具结果`,
       );
+      // 压缩水位观测（不参与判定）：**阈值命中时点**，不是压缩次数。工具面/上下文段的
+      // 字节改动会平移这个时点——只报省下的字节而不报它，等于把「更早触发压缩」的代价藏起来。
+      const firstSummary = reqs.findIndex(isSummaryReq);
+      console.log(
+        `  压缩水位观测：首次摘要请求 index=${firstSummary} / 总请求 ${reqs.length}`,
+      );
+
+      // ── 证据 ⑧：路径语义段是**请求级**上下文，压缩之后必须还在 ─────────────
+      //
+      // 它是 `symbio-plugin-vdfs` 的 `Cadence::Request` 静态段（`context.rs`）：段随每次
+      // 模型请求重新拼接，而不是「早期注入一次、后续靠历史累积」。后者在压缩后会把语义
+      // 整段丢掉——工具还在、参数却看不懂，比省下的 6KB 糟得多。所以这里逐条判**常规
+      // 请求**（摘要请求除外：它的 system 是压缩指令，本就不该带工具面语义）。
+      const hasPathSegment = (q) =>
+        (q.body?.messages ?? []).some(
+          (m) => typeof m.content === 'string' && m.content.includes('工作目录根本身写成'),
+        );
+      const missingPath = mainReqs.filter((q) => !hasPathSegment(q));
+      assert(
+        missingPath.length === 0,
+        `路径语义段应在每次模型请求里（含压缩后）：缺失 ${missingPath.length}/${mainReqs.length} 条`,
+      );
+      let beforeIdx = -1;
+      for (let i = firstSummary - 1; i >= 0; i -= 1) {
+        if (!isSummaryReq(reqs[i])) {
+          beforeIdx = i;
+          break;
+        }
+      }
+      let afterIdx = -1;
+      for (let i = firstSummary + 1; i < reqs.length; i += 1) {
+        if (!isSummaryReq(reqs[i])) {
+          afterIdx = i;
+          break;
+        }
+      }
+      console.log(
+        `  路径段存活：压缩前 req${beforeIdx}=${hasPathSegment(reqs[beforeIdx])}` +
+          ` · 压缩后 req${afterIdx}=${afterIdx >= 0 ? hasPathSegment(reqs[afterIdx]) : 'n/a'}` +
+          ` · 常规请求 ${mainReqs.length - missingPath.length}/${mainReqs.length} 含该段`,
+      );
     } finally {
       // 三个句柄全在这里收（⑦ 里已经 stop 过的那次是幂等的）：漏掉哪一个，症状都是
       // 收尾等待超时——而失败信息会说「子进程没退」，看不出是哪一个。

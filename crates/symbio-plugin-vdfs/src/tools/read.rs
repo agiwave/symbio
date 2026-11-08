@@ -32,7 +32,7 @@ impl Capability for ReadTool {
             json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": super::PATH_DESC },
+                    "path": { "type": "string", "description": super::PATH_SHORT },
                     "offset": { "type": "integer", "description": "起始行号（从 1 开始，默认 1）" },
                     "limit": { "type": "integer", "description": "返回的最大行数（默认全部）" }
                 },

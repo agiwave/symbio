@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 22 | 667 | 22819 | 23690 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 22 | 723 | 22819 | 23982 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 22 | 1157 | 22819 | 24483 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 22 | 1522 | 16211 | 17939 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 22 | 1578 | 16211 | 18231 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 22 | 2012 | 16211 | 18732 |
 
 ## 基线（判据本体）
 
@@ -64,7 +64,7 @@
           },
           {
             "tag": "会话记忆",
-            "chars": 152
+            "chars": 575
           }
         ],
         []
@@ -95,7 +95,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 22819
+        "schema_bytes": 16211
       }
     },
     {
@@ -141,7 +141,7 @@
           },
           {
             "tag": "会话记忆",
-            "chars": 152
+            "chars": 575
           }
         ],
         [],
@@ -174,7 +174,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 22819
+        "schema_bytes": 16211
       }
     },
     {
@@ -236,7 +236,7 @@
           },
           {
             "tag": "长期记忆",
-            "chars": 137
+            "chars": 560
           }
         ],
         [],
@@ -271,7 +271,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 22819
+        "schema_bytes": 16211
       }
     }
   ]

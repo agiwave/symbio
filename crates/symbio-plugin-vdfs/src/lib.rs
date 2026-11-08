@@ -32,9 +32,11 @@
 //! - 线路信封（`vdfs/*` 请求响应 + 协议路径）：本插件的 `protocol` 模块
 //! - 访问层（取根 / 翻译操作 / 树遍历 / 事件投递）：本插件的 `host` 模块
 //! - LLM 工具链路（把工具调用改为对 `UnifiedFs` 的调用）：本插件的 `provider` 模块
+//! - 路径语义上下文段（八个工具共用，注入一次）：本插件的 `context` 模块
 //! - 虚拟层拓扑（容器聚合 + 注册为根）：`crates/symbio-plugin-composite/src/vdfs.rs`
 
 mod behavior;
+mod context;
 mod fs;
 mod host;
 mod physical;

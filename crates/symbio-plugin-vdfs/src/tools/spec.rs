@@ -117,7 +117,7 @@ pub static SPECS: &[ToolSpec] = &[
             serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": super::PATH_DESC }
+                    "path": { "type": "string", "description": super::PATH_SHORT }
                 },
                 "required": ["path"]
             })
@@ -141,7 +141,7 @@ pub static SPECS: &[ToolSpec] = &[
             serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": super::PATH_DESC },
+                    "path": { "type": "string", "description": super::PATH_SHORT },
                     "recursive": { "type": "boolean", "description": "删除目录时是否递归" }
                 },
                 "required": ["path"]
@@ -173,7 +173,7 @@ pub static SPECS: &[ToolSpec] = &[
             serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": super::PATH_DESC }
+                    "path": { "type": "string", "description": super::PATH_SHORT }
                 },
                 "required": ["path"]
             })
@@ -201,7 +201,7 @@ pub static SPECS: &[ToolSpec] = &[
             serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": super::PATH_DESC },
+                    "path": { "type": "string", "description": super::PATH_SHORT },
                     "text": { "type": "string", "description": "文本内容（与 b64 二选一）" },
                     "b64": { "type": "string", "description": "base64 内容（与 text 二选一）" }
                 },
@@ -238,7 +238,7 @@ pub static SPECS: &[ToolSpec] = &[
             serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": super::PATH_DESC },
+                    "path": { "type": "string", "description": super::PATH_SHORT },
                     "old_string": { "type": "string", "description": "要查找并替换的文本（必须精确匹配一次）" },
                     "new_string": { "type": "string", "description": "替换为的文本（默认空字符串）" }
                 },
@@ -307,7 +307,7 @@ pub static SPECS: &[ToolSpec] = &[
             serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": super::PATH_DESC },
+                    "path": { "type": "string", "description": super::PATH_SHORT },
                     "depth": { "type": "integer", "description": "最大深度，缺省 3；0 表示不限" },
                     "limit": { "type": "integer", "description": "最多返回节点数，缺省 500" }
                 },

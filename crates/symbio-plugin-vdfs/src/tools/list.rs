@@ -41,7 +41,7 @@ impl Capability for ListTool {
             json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": super::PATH_DESC },
+                    "path": { "type": "string", "description": super::PATH_SHORT },
                     "ignore": {
                         "type": "array",
                         "items": { "type": "string" },

@@ -27,6 +27,32 @@ use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use symbio_sdk::turn::facts::FleetSnapshot;
 
+/// 工具表的**去重**：子 Agent 作用域会把同一能力以 `agent_<id>_<name>` 再注册一遍，
+/// 而 `PrefixedCapability` 只改名、执行原样透传（`crates/symbio-plugin-agent/src/host/scope.rs`），
+/// 所以对模型而言两份是同一个能力。这里按**名字集合**去掉前缀副本，子树独有的工具仍保留。
+///
+/// 判定不看遍历顺序：先取全量名集合，再对每个 `agent_` 开头的名字试所有 `_` 切点——
+/// 只要切点之后的基名也在集合里，它就是前缀副本。`safe_id` 本身可含 `_`/`-`，
+/// 因此不能假定前缀的固定长度。
+fn dedup_subtree_twins(
+    metas: Vec<symbio_kernel::capability::CapabilityMeta>,
+) -> Vec<symbio_kernel::capability::CapabilityMeta> {
+    let names: std::collections::HashSet<String> =
+        metas.iter().map(|meta| meta.name.clone()).collect();
+    metas
+        .into_iter()
+        .filter(|meta| !is_subtree_twin(&meta.name, &names))
+        .collect()
+}
+
+fn is_subtree_twin(name: &str, names: &std::collections::HashSet<String>) -> bool {
+    let Some(rest) = name.strip_prefix("agent_") else {
+        return false;
+    };
+    rest.match_indices('_')
+        .any(|(i, _)| names.contains(&rest[i + 1..]))
+}
+
 impl SessionPlugin {
     /// 收件箱队首 → `user.message` 事实；返回这条事实的 `seq`（无消息 ⇒ `None`）。
     ///
@@ -176,12 +202,14 @@ impl SessionPlugin {
             .filter(|prompt| !prompt.trim().is_empty())
             .collect::<Vec<_>>()
             .join("\n\n");
-        let tools = manager
-            .list(symbio_kernel::capability::family::TOOL)
-            .await
-            .into_iter()
-            .map(|row| row.meta())
-            .collect::<Vec<_>>();
+        let tools = dedup_subtree_twins(
+            manager
+                .list(symbio_kernel::capability::family::TOOL)
+                .await
+                .into_iter()
+                .map(|row| row.meta())
+                .collect(),
+        );
         // 收集过程的失败信号（traverse 侧记在 ctx 的桶里）：能力表为空/有错都要落 config，
         // 只是把原因写进载荷。**不造新事件类型**——模型行依赖的是 `session.config` 这条
         // 输入本身，它必须在每一轮都出现，否则模型行会永远等不到输入。
@@ -496,3 +524,7 @@ fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
         s => own || symbio_sdk::authz::content_visible(s, viewer),
     }
 }
+
+#[cfg(test)]
+#[path = "turn.test.rs"]
+mod tests;
