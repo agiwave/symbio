@@ -756,6 +756,11 @@ const server = http.createServer(async (req, res) => {
     // 故障注入：非 2xx（静态）
     if (scenario.status && scenario.status >= 400) {
       rec.status = scenario.status;
+      // 失败应答也走一次真实往返（provider 的超窗 400 同样要等首字节）：
+      // `latencyMs` 在这里一起生效，并记下收尾时刻，`doneAt - at` 才是这次
+      // 往返的可读耗时。缺了它，压缩失败的额外时延会被量成 0。
+      if (scenario.latencyMs) await sleep(scenario.latencyMs);
+      rec.doneAt = Date.now();
       res.writeHead(scenario.status, errorHeaders(scenario));
       return res.end(JSON.stringify({ error: { message: scenario.error ?? 'mock 注入的错误', type: 'mock_error' } }));
     }

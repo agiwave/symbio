@@ -30,6 +30,10 @@ import './_selfrun.mjs';
 // （超窗归 `non_retryable_context_length`），读面折出 `Failed` 压缩叶，重试入口可达。
 // 两行债的 id 按**前缀指纹**派生（最旧未压事实 + 上限 + 代），同一前缀失败过就收束在
 // 同一把键上——其后轮次不再重付。
+//
+// 第三步的读数同用这一格：失败应答带 150ms `latencyMs`（模拟 provider 首字节），mock
+// 另记 `doneAt`；用例按主请求分轮数「额外请求数 / 额外往返 ms」，判据是同一前缀判死后，
+// 其后每轮这两项都为 0——即跨轮抑制省下的正是这份重复往返。
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -92,6 +96,9 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
       matchSystem: '你是上下文压缩器',
       status: 400,
       error: 'maximum context length exceeded',
+      // 失败应答同样要等一次首字节：真实 provider 的超窗 400 不是瞬时的。
+      // 没有这段延迟，第三步的「每轮额外往返」会恒为 0，读数失去意义。
+      latencyMs: 150,
     },
     { id: 'big', match: '轮问题', content: REPLY },
   ]).start();
@@ -175,6 +182,41 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
       `6 轮里摘要请求只应有 1 次（同一前缀失败过 ⇒ 跨轮抑制）；实际 ${summaryReqs.length} 次；failed: ${failed.map((e) => e.event_id).join(' | ')}`,
     );
     assertEq(compactFailed.length, 1, '同一前缀只判死一次，不随轮次重复落格');
+
+    // 读数（第三步，先度量不优化）：持续失败时，每轮为压缩失败**多付了多少**。
+    // 按「带用户 marker 的主请求」分轮，摘要请求归到它之前的那一轮；耗时取 mock 的
+    // `doneAt - at`（失败应答的首字节 150ms + 服务端处理），不含主请求自身的时间。
+    const isSummaryReq = (q) => systemText(q).includes('你是上下文压缩器');
+    const lastUserText = (q) => {
+      const msgs = Array.isArray(q.body?.messages) ? q.body.messages : [];
+      const m = [...msgs].reverse().find((x) => x.role === 'user');
+      return typeof m?.content === 'string' ? m.content : '';
+    };
+    const perRound = Array.from({ length: ROUNDS }, () => ({ requests: 0, ms: 0 }));
+    let round = -1;
+    for (const q of reqs) {
+      if (!isSummaryReq(q)) {
+        if (MARKERS.includes(lastUserText(q))) round += 1;
+        continue;
+      }
+      if (round < 0 || round >= ROUNDS) continue;
+      perRound[round].requests += 1;
+      perRound[round].ms += Math.max(0, (q.doneAt ?? q.at) - q.at);
+    }
+    const extraRequests = perRound.map((r) => r.requests);
+    const extraMs = perRound.map((r) => r.ms);
+    const totalExtra = extraRequests.reduce((a, b) => a + b, 0);
+    console.log(
+      `  [读数] 持续失败 ${ROUNDS} 轮：每轮额外请求 ${JSON.stringify(extraRequests)}` +
+        `｜每轮额外往返 ${JSON.stringify(extraMs)} ms` +
+        `｜合计 ${totalExtra} 次 / ${extraMs.reduce((a, b) => a + b, 0)} ms（失败应答按 150ms 首字节计）`,
+    );
+    assertEq(totalExtra, summaryReqs.length, '分轮读数应覆盖全部摘要请求（归属不漏）');
+    assertEq(
+      extraRequests.slice(1).reduce((a, b) => a + b, 0),
+      0,
+      '同一前缀判死后，其后每轮不得再付压缩失败的额外往返',
+    );
 
     // D：失败合并不吞消息——每条 marker 在 live + 归档并集里恰好一次
     for (const marker of MARKERS) {

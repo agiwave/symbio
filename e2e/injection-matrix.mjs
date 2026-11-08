@@ -189,7 +189,7 @@ export const CELLS = [
   { kind: 'llm.status', face: 'compression', cases: ['t18'] },
   { kind: 'llm.failTimes', face: 'compression', na: '压缩失败的静态故障由 `llm.status` / t18 覆盖；t18 注释提到的 `failTimes` 只解释计数口径，未使用该字段' },
   { kind: 'llm.rateLimit', face: 'compression', na: '配额语义与能力面正交；t50 已钉限流后的冷却恢复，压缩请求共用同一客户端' },
-  { kind: 'llm.latencyMs', face: 'compression', na: '首字节延迟不改变压缩节点契约；流式预览的时序由 t18 的场景编排钉住' },
+  { kind: 'llm.latencyMs', face: 'compression', cases: ['t18'] },
   { kind: 'llm.chunkJitterMs', face: 'compression', na: '帧抖动只影响节奏，摘要拼接正确性已由 t18 逐字断言' },
   { kind: 'llm.stallAfter', face: 'compression', na: '停顿的容忍由客户端单点判；压缩面无独立空闲超时' },
   { kind: 'llm.dropAfter', face: 'compression', na: '压缩请求的断流走同一客户端重试；t18 钉的是失败纪律与重试恢复，未单独编排中途断连' },
