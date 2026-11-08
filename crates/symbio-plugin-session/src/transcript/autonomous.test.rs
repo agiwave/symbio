@@ -212,17 +212,6 @@ async fn no_fact_source_or_a_live_writer_both_block_the_trigger() {
         "收束期写方在跑 ⇒ 让开"
     );
     assert_eq!(read_wal(&p, sid).len(), 1, "忙时一格都不写");
-
-    // 收件箱的空闲写方只在 `preempt != None` 时才落格 ⇒ 未结清时让开。
-    state.inner.write().await.set_working_for_test(false);
-    state.inner.write().await.preempt = PreemptPending::Resume {
-        task_id: "t1".to_string(),
-    };
-    assert!(
-        !p.record_autonomous_trigger(sid, 100, "看一眼").await,
-        "抢占待结算 ⇒ 让开"
-    );
-    assert_eq!(read_wal(&p, sid).len(), 1, "两个空闲写方不许同时开档");
 }
 
 // ==================== 发起者与预算的单元验收（D-189） ====================
@@ -230,7 +219,7 @@ use crate::declarations::EVENT_SYSTEM_TRIGGERED;
 use crate::store::EventWalStore;
 use symbio_kernel::store::EventStore;
 use symbio_kernel::Seq;
-use symbio_plugin_api::events::{EVENT_TASK_OPENED, EVENT_TASK_PROGRESS};
+use symbio_plugin_api::events::EVENT_TASK_OPENED;
 use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
 use symbio_sdk::authz::PRINCIPAL_USER;
 use symbio_sdk::invariants::budget_exceeded;
@@ -305,7 +294,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
         .append(
             Event::pending(
                 "g1",
-                EVENT_TASK_PROGRESS,
+                "task.progress",
                 Entity::Task,
                 Verb::Progressed,
                 PRINCIPAL_AUTONOMOUS,
@@ -325,7 +314,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     // 验收 4（反向）：同一事件 70M ms（预算内）；把预算改成 60000 → 判定改变。
     let ok_event = Event::pending(
         "g2",
-        EVENT_TASK_PROGRESS,
+        "task.progress",
         Entity::Task,
         Verb::Progressed,
         PRINCIPAL_AUTONOMOUS,

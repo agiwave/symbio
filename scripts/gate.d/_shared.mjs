@@ -368,7 +368,10 @@ export const BASELINE = {
   // `Transcript::persisted`）已随本批删除，无被测对象即无覆盖可丢。压缩能力本身由 `symbio-plugin-compact`
   // 的两行债与 t8 / t11 / t18 / t45 / t63 承接；失败后的跨轮抑制与重试出路在新链路没有等价物，
   // 按实登记为缺口（`SC-009` 判据 3 记「未落地」），不拿旧用例冒充。非侵蚀。
-  ciRustTestsTotal: 2396,
+  // baseline-allow ciRustTestsTotal: 2396 → 2390（抢占判定面删除，D-388）——删掉 inbox.test.rs 的
+  // 6 条判定/落格用例（判定器、三态、落格函数全删，无被测对象即无覆盖可丢）；忙窗插话的可观察行为
+  // 仍由 e2e t34 承接。非侵蚀。
+  ciRustTestsTotal: 2390,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

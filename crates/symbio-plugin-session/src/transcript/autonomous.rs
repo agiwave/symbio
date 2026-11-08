@@ -21,7 +21,7 @@
 //! 所以 [`SessionPlugin::record_autonomous_trigger`] 返回 `false` 时，调用方连队列都不碰，
 //! 重试回到调度侧（一个 tick 之后），而不是压在队列里等一个永不到来的条件。
 
-use super::super::active::{InboxItem, PreemptPending};
+use super::super::active::InboxItem;
 use super::super::plugin::SessionPlugin;
 use crate::declarations::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 use symbio_kernel::event::Event;
@@ -108,17 +108,14 @@ impl SessionPlugin {
     ///
     /// ## 谁有资格写
     ///
-    /// 会话事实源只有两个写窗口，本函数把两条互斥条件都检查掉：
+    /// 会话事实源在空闲分支只剩这一个写窗口，本函数把互斥条件检查掉：
     ///
     /// - 收束期写方（v2 运行器的轮末收束）跑在 `is_working` 复位**之前** ⇒ 要求
-    ///   `is_working == false`；
-    /// - 收件箱的空闲写方（挂起落格 / 恢复落格）**只在 `preempt != None` 时**才
-    ///   落格 ⇒ 要求 `preempt == PreemptPending::None`。
+    ///   `is_working == false`。本函数只判这一条：抢占面已删（`D-388`），收件箱侧
+    ///   没有第二个会在空闲分支写事实源的写方。
     ///
-    /// 两条同时成立时没有第二个写方能开档。残余窗口是"检查之后一毫秒内跑完一整轮
-    /// 插话"——那是既有设计已接受的一类风险（同款说明见
-    /// `transcript/inbox.rs::append_preemption`），本函数不放大它：检查紧跟开档、
-    /// 格子逐条落、失败逐条记日志。
+    /// 残余窗口是"检查之后一毫秒内跑完一整轮插话"——那是既有设计已接受的一类风险，
+    /// 本函数不放大它：检查紧跟开档、格子逐条落、失败逐条记日志。
     pub(crate) async fn record_autonomous_trigger(
         &self,
         session_id: &str,
@@ -129,7 +126,7 @@ impl SessionPlugin {
             let sessions = self.active_mgr.sessions.read().await;
             if let Some(state) = sessions.get(session_id) {
                 let inner = state.inner.read().await;
-                if inner.is_working() || inner.preempt != PreemptPending::None {
+                if inner.is_working() {
                     symbio_plugin_api::plugin_info!(
                         "session",
                         "[Autonomous] 会话 {} 有写方在写，本次触发不落格（下个 tick 重试）",

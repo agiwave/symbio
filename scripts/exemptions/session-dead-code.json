@@ -6,52 +6,12 @@
   "landed_batches": [],
   "rows": [
     {
-      "path": "crates/symbio-plugin-session/src/active.rs",
-      "symbols": ["Hold", "Resume"],
-      "capability": "抢占判定的待结算三态（PreemptPending::Hold 判出未落格 / Resume 已落格等收）",
-      "future_caller": "transcript::inbox::PreemptionDecider 的结算路径（忙窗判定 → 空闲分支落格 / 收格）",
-      "batch": "preemption",
-      "e2e": ["t34-preemption"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/active.rs",
-      "symbols": ["preempt_judged"],
-      "capability": "一忙窗一判的抢占判定标记（忙窗内事实源不长新判据，判过一次就够）",
-      "future_caller": "抢占判定入口（忙窗判定的去重标记，空闲分支复位）",
-      "batch": "preemption",
-      "e2e": ["t34-preemption"]
-    },
-    {
       "path": "crates/symbio-plugin-session/src/message_events.rs",
       "symbols": ["drain_parked"],
       "capability": "寄存区落格：把磁盘上寄存的变更按寄存顺序补落到事实源",
       "future_caller": "会话开场 / 令牌句柄建立后的补落点（新链路启动时调用）",
       "batch": "session-base",
       "e2e": ["t44-crud-facts-survive-restart"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/inbox.rs",
-      "symbols": ["Preemption"],
-      "capability": "抢占判定的结论值（挂起 / 恢复 / 继续）",
-      "future_caller": "transcript::inbox::PreemptionDecider::decide 的返回值与结算入口",
-      "batch": "preemption",
-      "e2e": ["t34-preemption"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/inbox.rs",
-      "symbols": ["PreemptionDecider"],
-      "capability": "忙窗内「用户插话是否挂起当前任务」的判定器（判据来自事实投影，不读进程状态）",
-      "future_caller": "轮首 / 忙窗入口的抢占判定（新链路按债驱动前先判）",
-      "batch": "preemption",
-      "e2e": ["t34-preemption"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/inbox.rs",
-      "symbols": ["control_event", "decide", "held_event", "resume_event", "spec"],
-      "capability": "抢占判定器的构造（spec）与判定（decide）以及挂起 / 恢复 / 控制事件的落格",
-      "future_caller": "抢占批次的判定 → 落格闭环（忙窗判定、空闲分支 held_event / resume_event）",
-      "batch": "preemption",
-      "e2e": ["t34-preemption"]
     }
   ]
 }

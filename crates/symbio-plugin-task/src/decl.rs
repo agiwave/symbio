@@ -16,12 +16,16 @@ use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::{
     Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb, ViewDecl, PRINCIPAL_SCHEDULER,
 };
-// 跨插件共享的四条走清单生成物（`PLUGIN.yml` 的 `shared_events` → `events.rs`）。
+// 跨插件共享的三条走清单生成物（`PLUGIN.yml` 的 `shared_events` → `events.rs`）。
 // `pub(crate) use` 是**转手**不是复制：本插件的写方 / 读方从 `crate::decl` 取名字，
 // 拼写的唯一出处仍是生成物。
 pub(crate) use symbio_plugin_api::events::{
-    EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
+    EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
 };
+
+/// 推进（调度者写，读方只有 owner 自己的折叠）：`session` 的挂起恢复随抢占面删除后，
+/// 外部消费方清零 ⇒ 名字随 owner 走（CS-007），`EventDecl` 仍住 [`EVENTS`]。
+pub(crate) const EVENT_TASK_PROGRESS: &str = "task.progress";
 
 /// 就绪判死（调度者写，`reason: "lease_expired"`）：名字随 owner 声明入库——写闸
 /// 只认声明过的名字，没声明的格位一律 `OffGrid`。

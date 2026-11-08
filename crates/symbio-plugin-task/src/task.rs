@@ -510,8 +510,8 @@ pub(crate) struct ScheduleFact {
 ///
 /// ## 它不做什么
 ///
-/// 不做优先级与公平性（`readyset` 的打分参数）、不做抢占（那是
-/// `crates/symbio-plugin-session/src/transcript/inbox.rs::PreemptionDecider` 的活）、不做验收
+/// 不做优先级与公平性（`readyset` 的打分参数）、不做抢占（今天没有抢占面，
+/// `D-388`）、不做验收
 /// （`task.asserted` 归验证者）。它只回答一个问题：**这一刻该把哪几笔活交出去，
 /// 交给谁，租到什么时候**。
 pub(crate) struct ScheduleDecider;

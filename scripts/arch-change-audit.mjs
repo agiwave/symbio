@@ -90,6 +90,16 @@ const BASELINE = [
     why: '让拆 crate 后的守卫重新看得见真实仓（门禁 142/144）——同属判据之前。',
   },
   {
+    sha: '4e6cd88e',
+    beforeGuard: false,
+    decision: 'D-336（跨插件模型往返：共享载荷住 SDK 词汇层）',
+    why:
+      '该提交是用户手工收尾的死码删除批（`D-336` 尾款）：`crates/symbio-sdk/src/turn/facts.rs` 只是删掉' +
+      '`DrainedSupplement`（最后一个引用随同步抽干口一起消失），属 narrowing，没有扩能力；' +
+      '提交信息只写了批次号与绿点，缺独立 `Core-Change:` 行。该提交已由用户核对收下，' +
+      '按「不追改历史」处理；删除本身的边界就是 D-336 的迁移尾款。',
+  },
+  {
     sha: '6b16285e',
     beforeGuard: false,
     // 决策号写成**散文的一部分**，不是整串等值：`gate-codes-audit` 把整串 `'D-272'`

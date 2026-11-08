@@ -53,9 +53,9 @@
 //! 未登记的主体在表里没有行 ⇒ 每个谓词为假，登记过的一行就是它的权威能力集，
 //! 谁都不派生谁。
 //!
-//! 抢占判定者那一行（`session/reflex`，只持 `judge.intent`）按 [DE-037 §5](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")
-//! 随后落地，与自主行同形：**正文写着「不得直接发言」而表里没有行**时，判据是
-//! 「没有行 = 拒」——断言与表同一方向。
+//! 会话反射档那一行（`session/reflex`，只持 `judge.intent`）按 [DE-037 §5](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")
+//! 与自主行同形：**正文写着「不得直接发言」而表里没有行**时，判据是
+//! 「没有行 = 拒」——断言与表同一方向。抢占面已删（`D-388`），这一行今天只作窄权限参照。
 
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
@@ -112,15 +112,12 @@ pub const PRINCIPAL_TOOL_CONTENT_SEARCH: &str = "local/content_search";
 /// 死记录，而自主行为照旧能冒充用户对话。
 pub const PRINCIPAL_AUTONOMOUS: &str = "session/autonomous";
 
-/// 抢占判定者的身份（[DE-037 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")）
-/// ——表里那一行的名字与 `crates/symbio-plugin-session/src/transcript/inbox.rs::PreemptionDecider` 三个事件
-/// （`task.held` / `task.progress` / `control.opened`）的 `actor` 是同一个常量。
-/// 策略本体已随 D-190 归 session 插件；常量留在这里，因为它是**本机部署事实**（表与判定同住）。
+/// 会话反射档的身份（`session/reflex`）——只持 `judge.intent` 的窄行键。
+/// 抢占判定面已删（`D-388`），今天没有 actor 构造这个主体；本行保留为**窄权限的参照行**
+/// （授权表与「少给」纪律的测试仍用它），不是任何能力的现成入口。
 ///
-/// 与 [`PRINCIPAL_AUTONOMOUS`] 同理：判定用的主体名与实际写入的主体名各写一份字符串，
-/// 两边迟早漂移到「判的是 A、写的是 B」而没有任何东西会变红。它与自主行同属「少给」一侧：
-/// 判定者只产控制事件、**不得直接发言**（DE-037 §5）——这一行就是它的全部能力来源，
-/// 「不得发言」与断言同方向（D-099：表是权威，未登记 = 拒）。
+/// 它同属「少给」一侧：只持 `judge.intent`、不持 `reply.*`（DE-037 §5）——表是权威，
+/// 未登记 = 拒（D-099）。
 pub const PRINCIPAL_REFLEX: &str = "session/reflex";
 
 /// **对等主体**的身份（[DE-038 §3](../../../../docs/003-design/038-多主体与对等承诺.md "DE-038-多主体与对等承诺")）
@@ -300,9 +297,8 @@ pub const CAP_ASSERT_VERIFICATION: &str = Capability::AssertVerification.name();
 ///   没有独立验证者行，验证能力因此无人持有；
 /// - [`PRINCIPAL_AUTONOMOUS`]（自主发起者）**只持 `define.work`**——自主行为不得冒充
 ///   用户对话（DE-042 §3 grants 行 / §5）；
-/// - [`PRINCIPAL_REFLEX`]（抢占判定者）**只持 `judge.intent`**——判定者不得直接发言
-///   （DE-037 §5）：它写的是控制事件（`task.held` / `task.progressed` / `control.opened`），
-///   不含任何 `reply.*`；
+/// - [`PRINCIPAL_REFLEX`]（会话反射档）**只持 `judge.intent`**——不持任何 `reply.*`
+///   （DE-037 §5）；抢占判定面已删（`D-388`），这一行今天没有 actor；
 /// - [`PRINCIPAL_PEER`]（对等主体）**只持 `produce.artifact`**——对等体是图侧的协作方，
 ///   权威动作是产生产物（DE-038 §3 的 ActorSpec 行 `capabilities: [ProduceArtifact]`），
 ///   协作经 `commitment.*` 而非 `chat.*`；

@@ -113,9 +113,6 @@ pub const EVENT_TASK_HELD: &str = "task.held";
 /// task.opened — owner `symbio-plugin-task`，格位 `(Task, Opened)`
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 
-/// task.progress — owner `symbio-plugin-task`，格位 `(Task, Progressed)`
-pub const EVENT_TASK_PROGRESS: &str = "task.progress";
-
 // ============ tool ============
 
 /// tool.call.requested — owner `symbio-plugin-model`，格位 `(Scope, Asserted)`
@@ -179,7 +176,6 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task
     EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← task
-    EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← task
     EventDecl::host(EVENT_TOOL_CALL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.call.requested ← model
     EventDecl::host(EVENT_TOOL_CALLS_DONE, (Entity::Scope, Verb::Asserted)), // tool.calls.done ← tool
     EventDecl::host(EVENT_TOOL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.requested ← model

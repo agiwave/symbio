@@ -50,7 +50,7 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 |---|---|---|---|---|
 | `conation.rs`（208） | `conation` 投影：从事件折出「表达过哪些欲、各自升没升格」 | #31 目标自生成 | **已搬** → `symbio-plugin-conation`（`ViewDecl` + `agg`，`D-281`） | 无——补件甲落定后搬完：折叠与两半（`eval` / `agg`）都进包，本插件三处读方改按名字读 |
 | `config.rs::conation_enabled` + `ConationPolicy` | 「这一轮该不该自发开一个长目标」的开关与判据 | #32 内在动机 | **已搬** → `symbio-plugin-conation`（自申报债 `conation.promote` + 端口执行体，`D-386`） | 无——`D-379` 补上开关事实，`D-386` 把开关读法、目标宽度判据（`MAX_GOAL_LEN` 200 字节）、授权闸与 `ApprovedIntent` 一起交回能力包；`session` 删掉了全部判据与闸门，只写触发 / 健康 / 欲三格 |
-| `transcript/inbox.rs::PreemptionDecider`（约 120 行） | 「这一条插话该不该挂起在跑的任务」 | #14 打断与插话 | `symbio-plugin-preemption`（I-3 裁决 + I-1 收件箱事实） | **已知边界，不迁**（`D-380`）：`PreemptionDecider` / `spec` / `decide` / `held_event` / `resume_event` / `control_event` 在 `scripts/exemptions/session-dead-code.json` 登记为死代码（`batch: preemption`），`task.held` 无生产写方——触发条件 = `T-048` 接线完成（忙窗判定 → 空闲落格、五条豁免删除、`t34` 绿），之后再裁是否拆出 |
+| `transcript/inbox.rs::PreemptionDecider`（约 120 行，已删） | 「这一条插话该不该挂起在跑的任务」 | #14 打断与插话 | **已知边界，不迁**（`D-388`）：判定面已删（三态 / 判定者 / 落格函数随死码一并删除），`task.held` 无生产写方——本条不再有触发条件，重启需新 D 号 |
 | `active.rs` 的其余部分 + `transcript/inbox.rs`（881） | 收件箱 FIFO、在途中止信号、工作态迁移、`turn_done` 唤醒 | — | **留 基底** | 它们是「收件箱的读写接口」，判据对象本身就是基底（本任务 §内容第 4 条） |
 | `projections/slo.rs`（147）+ `tiers.rs`（55） | 时延样本按档位折叠、分位数取法 | #13 时延分层 | **已搬** → `symbio-plugin-slo`（`ViewDecl` + `agg`，`D-281`） | 无——补件甲（`D-281` 两半折叠）+ `D-282`（读数视图可读「有格位、无事实声明」的断言格）落定后搬完：`eval` 交一片、`agg` 交 N 片，`session` 只按名字读 |
 | `projections/fallback.rs`（144） | 每档位的兜底率 | 与 #13 同族（SLO §1.2 两列共用 `tiers`） | **已搬** → 随 #13 同包 | 无——与 `slo` 共用 `declared_tier`，同包搬走，那条唯一判据没有跨包 |
@@ -86,17 +86,17 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 | # | 能力 | 表里在哪 | 处置 |
 |:-:|---|---|---|
 | 13 | 时延分层 | 一 · `projections/slo.rs` + `tiers.rs` | **已拆**：能力包 `symbio-plugin-slo`（三视图 + 两半折叠），`session` 只剩读方 |
-| 14 | 打断与插话 | 一 · `transcript/inbox.rs::PreemptionDecider`（判定）+ 二 · 收件箱（基底） | **已知边界，不迁**：闭环未接线（`D-380`）；触发条件 = `T-048` 接线完成后再裁是否拆出 |
+| 14 | 打断与插话 | 一 · `transcript/inbox.rs::PreemptionDecider`（已删）+ 二 · 收件箱（基底） | **已知边界，面已删**（`D-388`）：今天没有预占判定承担者，重启需新 D 号；收件箱留基底 |
 | 15 | 主动开口 | 一 · `transcript/autonomous.rs` | **已拆（受限）**：触发时机在 heartbeat 包；落格与开轮是写窗口纪律，留基底（`D-076` 已裁） |
 | 31 | 目标自生成 | 一 · `conation.rs` | **已拆**：能力包 `symbio-plugin-conation`（事实 + 视图 + 两半折叠），`session` 只剩读方 |
 | 32 | 内在动机 | 一 · `config.rs::conation_enabled` | **已拆**：能力包 `symbio-plugin-conation`（自申报债 + 端口执行体），`session` 不再读判决、不再构造 `ApprovedIntent`（`D-386`） |
 
-### 四、这张表给出的结论：真缺口只有一处（补件甲），#14 的阻塞不是补件
+### 四、这张表给出的结论：真缺口只有一处（补件甲），#14 不是补件
 
 逐行看下去，五条里没有一条卡在「代码难搬」，也没有一条卡在「找不到归属」。#15 已经拆完
 （触发时机在 heartbeat 包，剩下的半边按 `D-076` 不是能力）。剩下四条里，#13 / #31 / #32
-共用补件甲那条缺口；补件乙已落（`D-379`）；#14 经查**不是补件**——判定与落格两端今天都
-没有生产调用方（`D-380`），阻塞是闭环未接线：
+共用补件甲那条缺口；补件乙已落（`D-379`）；#14 经查**不是补件**，判定面已删
+（`D-388`）——能力不存在，不是阻塞：
 
 **补件甲：读数能力的读方要类型，而跨插件只能按名字读 JSON。** 这是 §一 里六条读数折叠
 （`slo` / `fallback` / `span` / `autonomy` / `conation` / `changes`）的共同阻塞，也是本段
@@ -125,15 +125,12 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
 **已裁并已落：`D-379`**——快照是配置定义的平铺投影，`conation_enabled` 补进载荷，
 闸门改读最近一条 `session.config`（缺格取出厂值 `false`）；写方唯一是轮首装配，
 读方是 conation 自申报的债（`D-386` 已迁）只按共享名读**本轮** config。它与 #14 无关：
-#14 的阻塞是闭环未接线（`D-380`），不是开关形状。
+#14 与开关形状无关；它的判定面已删（`D-388`）。
 
 **补件丙不成立（`D-380`）。** #14 原先写的「判定只能在忙窗、落格只能在空闲分支，中间由
-`PreemptPending` 三态背着」是**设计意图**，不是代码现状：判定器与三个落格函数在
-`session-dead-code.json` 登记为死代码（`batch: preemption`），生产代码没有写
-`ActiveSessionState::preempt`，`task.held` 也没有生产写方。没有两个 owner，就没有「跨窗
-开面」可开——现在只该接线（`preemption` 批次），不该开端口。因此 #14 记为**已知边界，
-不迁**：阻塞是「闭环未接线」，触发条件是 `T-048` 接线完成（忙窗判定 → 空闲落格、五条
-豁免删除、`t34` 绿），之后按那时的代码再裁是否拆出；`S7` 的补件计数不 +1。
+`PreemptPending` 三态背着」是**设计意图**，不是代码现状。没有两个 owner，就没有「跨窗
+开面」可开。因此 #14 记为**已知边界，面已删**（`D-388`）：判定器、三态与落格函数全部
+删除，今天没有预占判定承担者；重启需新 D 号，`S7` 的补件计数不 +1。
 
 **所以 S7 的下一步是拿补件甲搬剩下的读数能力**：它一条解锁两条读数能力（`#13` / `#31`），
 且是六条读数折叠（`slo` / `fallback` / `span` / `autonomy` / `conation` / `changes`）的
@@ -142,8 +139,8 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
 
 ### 五、分量读数（为什么 S7 与 S6 形状不同）
 
-本插件约 21k 行非测试代码里，**能力实现约 1.5k 行**（`conation` 208 + `autonomy` 122 +
-`slo` 147 + `tiers` 55 + `span` 110 + `fallback` 144 + `PreemptionDecider` 约 120 +
+本插件约 21k 行非测试代码里，**能力实现约 1.4k 行**（`conation` 208 + `autonomy` 122 +
+`slo` 147 + `tiers` 55 + `span` 110 + `fallback` 144 +
 `conation_enabled` 相关约 40 + `changes` 两件 321 + 台账 240），其余约 19k 行是会话基底与
 过程体。这正是「session 比 loop 更接近会话基底」这句话的量化形式：
 
@@ -227,7 +224,7 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
 2. **先裁补件甲，再搬读数**。它不改 `session`，只回答「多切片合并是能力的一部分还是读方的
    一部分」；裁出来之后 `slo` / `fallback` / `span` / `autonomy` / `conation` / `changes`
    六条按同一个形状各落一包（可同包，账里写明）。补件乙（开关的事实形状）已落 `D-379`，
-   解锁 #32 的开关面；#14 经查不是补件（`D-380`），阻塞是 `preemption` 批次尚未接线。
+   解锁 #32 的开关面；#14 经查不是补件（`D-380`），面已删（`D-388`）。
    **补件甲已裁并已落（`D-281`）**：`ViewDecl::agg`（`None` ⇒ 该格可诊断地缺席，不是恒等）。`#31` 与 `#13` 都已用它搬完（见 §六）；`#13` 还额外
    用上 `D-282`（读数视图可以读「有 `EventDecl` 格位、无 `FactDecl` 声明」的断言格，
    进报告名单而不是判 `UnknownFact`）——`turn.dispatch` 的 `tier` 正是那一类格子。

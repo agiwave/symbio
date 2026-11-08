@@ -1374,7 +1374,7 @@ fn commitments_column_exposes_each_delegation_record() {
 /// （`crates/symbio-plugin-task/src/readyset.test.rs`：依赖闭包 / 一次一个 / 活租约出局 /
 /// 挂起与恢复 / 返工开新节点），**`cap` 由 owner 套上**归 owner 的报表单测
 /// （`crates/symbio-plugin-task/src/decl.test.rs`），**出口读得到真数**归 e2e
-/// （`t31-task-table.mjs` 钉成员与 `deniedReady.cap`，`t34-preemption.mjs` 钉抢占时的进出）。
+/// （`t31-task-table.mjs` 钉成员与 `deniedReady.cap`，`t34-preemption.mjs` 钉不抢占时任务留在就绪集）。
 ///
 /// 载荷仍按**写方落下的真实形状**造（`task × opened`、`depends_on` 数组）：本插件不认识
 /// 这些字段，带着它们才试得出「不认识」是不是真的。
