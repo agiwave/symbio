@@ -161,7 +161,7 @@ session:
  * 「哪些历史进请求」由事实网格的投影回答：`transcript` 折叠变更格、压缩快照、分支与区间省略，产出 `TranscriptView`；会话层不持有第二份截取逻辑。
 
  * **语义合并（已随 B2 退场，D-318）**：
- * 旧编排里的 `loop/src/context.rs`（`prepare_compression` / `should_start_compression`）随 B2 删除；本仓不再有会话侧语义合并写点。压缩实现今天归 `symbio-plugin-compact`（`D-336`），会话侧没有入口。
+ * 本仓没有会话侧语义合并写点；压缩实现归 `symbio-plugin-compact`（`D-336`），会话侧没有入口。
 
 ---
 

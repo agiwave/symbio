@@ -315,7 +315,24 @@ pub fn drain_parked(store: &EventWalStore, session_id: &str) {
                 );
                 let _ = std::fs::remove_file(&path);
             }
-            // 真失败：补落没有第二次机会（调用方早已把回执发给了用户），出声并出队。
+            // ## 已知误报（已记、未收口；**不丢事实**）
+            //
+            // 触发链：这件已落格但删文件失败（上面 `Ok` 分支的 warn）⇒ 下一个窗口再补落
+            // 同一条 ⇒ `append_into` 算回同一个幂等键 `{prefix}-{n}` ⇒
+            // `WalStore::append` 返回 `AppendError::Duplicate` ⇒ 被 `append_into` 的
+            // `Err(e)` 分支归成 `Failed` ⇒ 这里打一条「该次变更已丢失」并把文件出队。
+            // 事实其实**在**（第一次就写进了 WAL），所以这条 error 是误报；文件被删掉
+            // 恰好是对的。
+            //
+            // 为什么不在这里改成「`Duplicate` ⇒ 幂等」：`AppendError::Duplicate` 是不带
+            // 键/内容的单元变体，调用点无法区分「同键同内容（同一份寄存件）」与「同键
+            // 不同内容（不同寄存件撞 `n`）」；全局并进 `Ok` 会把键碰撞的探测一起关掉——
+            // 用一条错误日志换静默丢数据的风险，不划算。要收口，得先让 `append_into`
+            // 把 `Duplicate` 作为**独立结果**传出（带上它算出的 event id），再由本侧
+            // 比对已落事实的 kind / target / payload 同不同。
+            //
+            // 真失败（`Conflict` / 闸门拒绝 / IO）：补落没有第二次机会（调用方早已把
+            // 回执发给了用户），出声并出队。
             Err(TryAppendError::Failed(why)) => {
                 symbio_plugin_api::plugin_error!(
                     "session",
