@@ -72,7 +72,7 @@ const isSummaryRequest = (req) =>
     (m) => m.role === 'system' && String(m.content ?? '').includes('你是上下文压缩器'),
   );
 
-export default defineCase('T-049 压缩摘要按预算切片：摘要输入 ≤ k×limit，水位两降', async () => {
+export default defineCase('压缩摘要按预算切片：摘要输入 ≤ k×limit，水位两降', async () => {
   const llm = await new MockLlm(
     [
       { id: 'snapshot', matchSystem: '你是上下文压缩器', content: SNAPSHOT },

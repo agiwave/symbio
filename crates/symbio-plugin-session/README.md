@@ -206,8 +206,8 @@ session:
  * **段的消费形态**：`crates/symbio-plugin-api/src/context.rs::sections` 按 owner 字典序取出视图里**全部**段（不按下标——缺一段时下标全部左移；也不按名字查表——那会与 `slots` 形成第二处拼写），拼成一条 `system` 前缀消息交给运行器。**视图次序 = 装配次序 = 模型读到的次序**，而装配次序只与 owner 字典序有关（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
  * **水位治理不在本层**：压缩入口在 `symbio-plugin-compact` 的两行债（`compact-summarize`
  取摘要、`compact-write` 落 `session.consolidated`），触发读 provider 收束载荷的
- 70% 水位。会话侧没有 `auto_compress_process`；失败后的跨轮抑制与重试是缺口
-（`T-049`）。
+ 70% 水位。会话侧没有 `auto_compress_process`；失败后的跨轮抑制与重试住在
+ `symbio-plugin-compact`（前缀指纹抑制 + 失败产物派生 `retry_compaction`）。
 * **Rust 实现策略**：
  * 唯一入口为 [../loop/context/view.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 `build_request_sections`——收的是「段身份 + 正文」的数组，**不决定有哪几段**；由 [../loop/chat_loop/inputs.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 `prepare_request_sections` 调用：
 
