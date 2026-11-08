@@ -57,6 +57,7 @@ pub use symbio_plugin_model;
 pub use symbio_plugin_notes;
 pub use symbio_plugin_persona;
 pub use symbio_plugin_plugin_manager;
+pub use symbio_plugin_protocol;
 pub use symbio_plugin_reputation;
 pub use symbio_plugin_reversibility;
 pub use symbio_plugin_session;

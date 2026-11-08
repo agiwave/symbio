@@ -59,6 +59,10 @@ export const ROUTE_HOOK_FIRE = 'hook/fire'
 export const ROUTE_HOOK_LIST = 'hook/list'
 export const ROUTE_HOOK_REGISTER = 'hook/register'
 
+// ==================== protocol ====================
+
+export const ROUTE_PROTOCOL_CATALOG = 'protocol/catalog'
+
 // ==================== session ====================
 
 export const ROUTE_SESSION_CHANGES = 'session/changes'

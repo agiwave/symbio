@@ -84,6 +84,8 @@ const DEFAULT_BASELINE = [
   'vdfs_stat',
   'vdfs_tree',
   'vdfs_write',
+  'protocol_join',
+  'protocol_propose',
   'reversibility_annotate',
   'toolsmith_define',
   'web_fetch',

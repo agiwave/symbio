@@ -81,6 +81,9 @@ pub const PLUGIN_ID_PERSONA: &str = "persona";
 /// 插件管理与配置入口
 pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 
+/// 抽象协议设计：提出协议、第二方加入后成立；catalog 路由是第二方的读入口
+pub const PLUGIN_ID_PROTOCOL: &str = "protocol";
+
 /// 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰裁决与出口共用的那一个口径）
 pub const PLUGIN_ID_REPUTATION: &str = "reputation";
 
@@ -142,6 +145,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "world_model", // 世界模型：一次观察记一条领域事实，视图按（实体，属性）折出当前世界
     "reversibility", // 可逆性设计：给动作标注可逆等级与补偿做法，视图按动作折出当前等级分布
     "toolsmith", // 制造工具（L2 受限）：只能登记本插件自己的工具定义，清单按名字折出当前版本
+    "protocol", // 抽象协议设计：提出协议、第二方加入后成立；catalog 路由是第二方的读入口
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "compact", // 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）

@@ -1,0 +1,11 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: protocol
+plugin_comment: 抽象协议设计：提出协议、第二方加入后成立；catalog 路由是第二方的读入口
+plugin_assembly: sub_agent
+plugin_order: 68
+# 跨插件地址（相对臂）：生成 crates/symbio-plugin-api/src/routes.rs 的 ROUTE_* 常量
+plugin_routes: catalog
+# 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
+# crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住本插件的
+# `decl::VIEWS`；这里只登记「对外可读」这一件事。
+shared_views: protocol.catalog

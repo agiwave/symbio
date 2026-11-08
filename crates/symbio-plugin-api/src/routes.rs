@@ -61,6 +61,11 @@ pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// hook/fire — 触发一次命名 hook（生命周期点调用，插件之间的通用挂钩）。
 pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 
+// ============ protocol ============
+
+/// protocol/catalog — 协议清单：第二方的只读读入口，与视图 `protocol.catalog` 同一折叠。
+pub const ROUTE_PROTOCOL_CATALOG: &str = "protocol/catalog";
+
 // ============ vdfs ============
 
 /// vdfs/list — 经 `VDFS_OPS` 分发（无静态 `match` 臂）

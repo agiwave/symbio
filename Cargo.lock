@@ -4174,6 +4174,7 @@ dependencies = [
  "symbio-plugin-notes",
  "symbio-plugin-persona",
  "symbio-plugin-plugin_manager",
+ "symbio-plugin-protocol",
  "symbio-plugin-reputation",
  "symbio-plugin-reversibility",
  "symbio-plugin-session",
@@ -4643,6 +4644,16 @@ dependencies = [
  "symbio-plugin-api",
  "symbio-providers",
  "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "symbio-plugin-protocol"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
  "tokio",
 ]
 

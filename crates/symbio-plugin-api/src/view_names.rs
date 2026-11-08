@@ -28,6 +28,7 @@ pub const VIEW_MEMORY_LIVE: &str = "memory.live";
 pub const VIEW_NOTES_DIGEST: &str = "notes.digest";
 pub const VIEW_NOTES_INSIGHTS: &str = "notes.insights";
 pub const VIEW_NOTES_RECENT: &str = "notes.recent";
+pub const VIEW_PROTOCOL_CATALOG: &str = "protocol.catalog";
 pub const VIEW_REPUTATION_LEDGER: &str = "reputation.ledger";
 pub const VIEW_REVERSIBILITY_REGISTER: &str = "reversibility.register";
 pub const VIEW_SKILL_CALIBRATION: &str = "skill.calibration";
@@ -53,6 +54,7 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: VIEW_NOTES_DIGEST, owner: "notes" },
     SharedViewDecl { name: VIEW_NOTES_INSIGHTS, owner: "notes" },
     SharedViewDecl { name: VIEW_NOTES_RECENT, owner: "notes" },
+    SharedViewDecl { name: VIEW_PROTOCOL_CATALOG, owner: "protocol" },
     SharedViewDecl { name: VIEW_REPUTATION_LEDGER, owner: "reputation" },
     SharedViewDecl { name: VIEW_REVERSIBILITY_REGISTER, owner: "reversibility" },
     SharedViewDecl { name: VIEW_SKILL_CALIBRATION, owner: "skill" },
