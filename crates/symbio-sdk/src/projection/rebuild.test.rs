@@ -350,7 +350,8 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
     // 生产形状：`root_id` 就是用户消息事实 id，骨架被「同 id 只认首次」并进用户
     // 节点——失败状态与原因必须一并移交，否则读面看到的是一轮没有交代的失败（D-381）。
     assert!(
-        !got.iter().any(|m| m.id == "u-node" && m.msg_type == Some(NodeKind::Skeleton)),
+        !got.iter()
+            .any(|m| m.id == "u-node" && m.msg_type == Some(NodeKind::Skeleton)),
         "不存在独立的 Turn 骨架：它就是用户节点"
     );
     let turn = got

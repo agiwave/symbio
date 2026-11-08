@@ -293,10 +293,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                     .cloned();
                 // 失败移交的两格先取下来：`carries_state` 分支会把 `node` 整个搬走，
                 // 之后不能再借它（成功轮的 `error` 为空，不会被移交）。
-                let failure = node
-                    .error
-                    .clone()
-                    .map(|error| (node.status.clone(), error));
+                let failure = node.error.clone().map(|error| (node.status.clone(), error));
                 if carries_state {
                     let kept = out[i].seq;
                     out[i] = node;
