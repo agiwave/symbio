@@ -35,10 +35,14 @@ pub(super) fn open_fact_store(
     sealed: Result<Arc<Frozen>, Vec<Gap>>,
 ) -> Result<EventWalStore, String> {
     let frozen = sealed.map_err(|gaps| {
-        format!(
+        // 硬错也要**被人看见**：CLI 没有 tracing 订阅器，宏会退回 `eprintln!`；
+        // App 走 tracing。缺口名随正文一起落日志，不只在返回的 `Err` 里。
+        let why = format!(
             "声明表装载失败（{} 条缺口），拒绝打开事实源：{gaps:?}",
             gaps.len()
-        )
+        );
+        symbio_plugin_api::plugin_error!("session", "[Decl] {}", why);
+        why
     })?;
     let store =
         EventWalStore::open(wal).map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))?;
