@@ -99,7 +99,12 @@ function audit(files) {
 }
 
 function cleanTree() {
-  return { [ROSTER]: ROSTER_TEXT, [LEDGER]: LEDGER_TEXT }
+  return {
+    [ROSTER]: ROSTER_TEXT,
+    [LEDGER]: LEDGER_TEXT,
+    'crates/symbio-plugin-a/Cargo.toml': '[package]\nname = "symbio-plugin-a"\n',
+    'crates/symbio-plugin-c/Cargo.toml': '[package]\nname = "symbio-plugin-c"\n',
+  }
 }
 
 const PLAN_ROW =
@@ -142,7 +147,44 @@ function assertRed(r, needle) {
 test('干净夹具：名册与账本逐行对上，读数是 3 行', () => {
   const r = audit(cleanTree())
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 待裁决 1）/)
+  assert.match(r.stdout, /名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 不做 0 · 待裁决 1）/)
+})
+
+// ── 「不做（边界）」是单列一类（D-388 的收口口径） ─────────────────
+
+test('记为拆但目标 crate 不存在 ⇒ 红（虚记让完成率虚高）', () => {
+  const files = cleanTree()
+  delete files['crates/symbio-plugin-a/Cargo.toml']
+  assertRed(audit(files), /目标 crate `symbio-plugin-a` 都不存在/)
+})
+
+test('不做（边界）单列一类，不进拆计数 ⇒ 绿', () => {
+  const files = cleanTree()
+  files[LEDGER] = files[LEDGER]
+    .replace('| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |', '| 2 | 乙能力 | core `b.rs` | 不做（边界） | 面已删（D-388）：能力不存在；重启需新 D 号 | — |')
+    .replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
+    .replace('| 待裁决 | 1 | 3 |', '| 待裁决 | 1 | 3 |\n| 不做 | 1 | 2 |')
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /拆 1 · 留守 0 · 不做 1 · 待裁决 1/)
+})
+
+test('不做不挂决策号 ⇒ 红（「决定不做」必须是裁决）', () => {
+  const files = cleanTree()
+  files[LEDGER] = files[LEDGER]
+    .replace('| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |', '| 2 | 乙能力 | core `b.rs` | 不做（边界） | 面已删：能力不存在 | — |')
+    .replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
+    .replace('| 待裁决 | 1 | 3 |', '| 待裁决 | 1 | 3 |\n| 不做 | 1 | 2 |')
+  assertRed(audit(files), /没挂决策号/)
+})
+
+test('不做却挂了交付段 ⇒ 红（不做不建段）', () => {
+  const files = cleanTree()
+  files[LEDGER] = files[LEDGER]
+    .replace('| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |', '| 2 | 乙能力 | core `b.rs` | 不做（边界） | 面已删（D-388）：能力不存在 | S7 |')
+    .replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
+    .replace('| 待裁决 | 1 | 3 |', '| 待裁决 | 1 | 3 |\n| 不做 | 1 | 2 |')
+  assertRed(audit(files), /不做不建段/)
 })
 
 test('括号说明不参与名字对账（工作记忆（≈4 槽）↔ 工作记忆）', () => {

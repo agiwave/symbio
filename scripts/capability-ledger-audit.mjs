@@ -21,7 +21,11 @@
  *
  * | 码 | 判什么 |
  * |---|---|
- * | `EX-006` | 名册每一行恰好一条处置；账本编号 1..N 唯一；处置在闭集内；「拆」指得出 crate 或同包行、并写明交付段（S6 / S7 / S8 / S9）；「留」写明残留类且不是借口、不挂交付段；「待裁决」写 S10；合计表与逐行账双向一致 |
+ * | `EX-006` | 名册每一行恰好一条处置；账本编号 1..N 唯一；处置在闭集内；「拆」指得出 crate 或同包行、并写明交付段（S6 / S7 / S8 / S9），且目标 crate 在 `crates/` 下真实存在；「留」写明残留类且不是借口、不挂交付段；「不做」写明边界并挂决策号、不挂交付段；「待裁决」写 S10；合计表与逐行账双向一致 |
+ *
+ * **「不做」是单列一类，不是「拆」的同义词**：能力不存在（或按裁决删除而不换 crate）时，
+ * 记 `不做（边界）` 并挂裁决号。把它记成 `拆` 会让完成率虚高——比漏记更危险：漏记少一条，
+ * 虚记让后来者以为那件事已经落地。判据对「记为拆、目标 crate 不存在」的行直接判红。
  *
  * 判据读的是**两份文档**，不是代码：账本是计划，名册是输入。两者都对不上时先修账——
  * 数字不能改，改名册或改处置（`DE-008` §6.1 的口径）。
@@ -65,6 +69,7 @@ const DISPOSITIONS = [
   '留 守门',
   '留 过程体',
   '留 基底',
+  '不做（边界）',
   '待裁决',
 ]
 
@@ -196,6 +201,7 @@ function keyOf(name) {
 function categoryOf(disposition) {
   if (disposition.startsWith('拆')) return '拆'
   if (disposition.startsWith('留')) return '留守'
+  if (disposition.startsWith('不做')) return '不做'
   return '待裁决'
 }
 
@@ -303,6 +309,24 @@ for (const row of ledger) {
           '若它其实要拆，改处置，不要两边都写',
       )
     }
+  } else if (categoryOf(row.disposition) === '不做') {
+    if (!/D-\d{3}/.test(row.reason)) {
+      report(
+        at,
+        `#${row.num}「${row.name}」记为不做（边界），但理由没挂决策号（\`D-NNN\`）—— ` +
+          '「决定不做」必须是裁决，不是一次顺手记；没有决策号，这一栏迟早被当成「已拆」',
+      )
+    }
+    if (row.reason.trim().length < 4) {
+      report(at, `#${row.num}「${row.name}」记为不做，但没写边界在哪 —— 要说清「能力不存在 / 已删」与重启条件`)
+    }
+    if (row.stage && row.stage !== '—') {
+      report(
+        at,
+        `#${row.num}「${row.name}」记为不做，却挂了交付段 \`${row.stage}\` —— 不做不建段；` +
+          '若它其实要拆，改处置，不要两边都写',
+      )
+    }
   } else {
     if (row.stage !== PENDING_STAGE) {
       report(
@@ -314,6 +338,36 @@ for (const row of ledger) {
       report(at, `#${row.num}「${row.name}」记为待裁决，但没写为什么悬着 —— 下一步无从裁决`)
     }
   }
+}
+
+// ── 拆的落点必须真实存在 ─────────────────────────────────────────────
+//
+// 「记为拆」等于「这个能力已经有新家」。目标 crate 不存在时把它记成拆，完成率就会虚高：
+// 漏记少一条，虚记让后来者以为那件事已经落地。`拆（未建）` 是显式的「先记计划」，
+// 不在此列；其余三种拆法都要求 `crates/<crate>/Cargo.toml` 真实存在。
+const UNBUILT_DISPOSITION = '拆（未建）'
+function cratesOf(row, seen = new Set()) {
+  const same = row.reason.match(/与 #(\d+) 同包/)
+  if (same) {
+    const other = byNum.get(Number(same[1]))
+    if (other && !seen.has(other.num)) {
+      seen.add(row.num)
+      return cratesOf(other, seen)
+    }
+  }
+  return [...row.reason.matchAll(/symbio-plugin-[A-Za-z0-9_-]+/g)].map((m) => m[0])
+}
+for (const row of ledger) {
+  if (categoryOf(row.disposition) !== '拆' || row.disposition === UNBUILT_DISPOSITION) continue
+  const crates = cratesOf(row)
+  if (!crates.length) continue // 落点指不出的情况已在上面的逐行检查里报过
+  if (crates.some((c) => fs.existsSync(path.join(ROOT, 'crates', c, 'Cargo.toml')))) continue
+  report(
+    `${LEDGER_REL}:${row.line}`,
+    `#${row.num}「${row.name}」记为 ${row.disposition}，但目标 crate ${crates.map((c) => `\`${c}\``).join(' / ')} 都不存在 —— ` +
+      '把「决定不做」记成「已拆」会让完成率虚高；改记 `不做（边界）` 并挂决策号，' +
+      '或真的把它建出来',
+  )
 }
 
 // ── D-294 移除计划 ───────────────────────────────────────────────────
@@ -438,25 +492,35 @@ if (roster.length && ledger.length) {
 
 let splitCount = 0
 let residueCount = 0
+let boundaryCount = 0
 let pendingCount = 0
 for (const row of ledger) {
   const c = categoryOf(row.disposition)
   if (c === '拆') splitCount++
   else if (c === '留守') residueCount++
+  else if (c === '不做') boundaryCount++
   else pendingCount++
 }
 
 if (totalRows && totalRows.length) {
   const claimed = new Map() // 编号 → 合计表给的类别
-  const sums = { 拆: 0, 留守: 0, 待裁决: 0 }
+  const sums = { 拆: 0, 留守: 0, 不做: 0, 待裁决: 0 }
   for (const r of totalRows) {
     const at = `${LEDGER_REL}:${r.line}`
     const label = r.cells[0] ?? ''
     const count = Number(r.cells[1])
     const list = r.cells[2] ?? ''
-    const cat = label.startsWith('拆') ? '拆' : label === '留守' ? '留守' : label === '待裁决' ? '待裁决' : null
+    const cat = label.startsWith('拆')
+      ? '拆'
+      : label === '留守'
+        ? '留守'
+        : label.startsWith('不做')
+          ? '不做'
+          : label === '待裁决'
+            ? '待裁决'
+            : null
     if (!cat) {
-      report(at, `合计表有一行「${label}」不属于 拆 / 留守 / 待裁决 —— 汇总类别必须是这三类`)
+      report(at, `合计表有一行「${label}」不属于 拆 / 留守 / 不做 / 待裁决 —— 汇总类别必须是这四类`)
       continue
     }
     if (!Number.isInteger(count) || count < 0) {
@@ -492,6 +556,7 @@ if (totalRows && totalRows.length) {
   const pairs = [
     ['拆', splitCount],
     ['留守', residueCount],
+    ['不做', boundaryCount],
     ['待裁决', pendingCount],
   ]
   for (const [cat, actual] of pairs) {
@@ -508,7 +573,7 @@ if (errors.length) {
   console.log(
     red(
       `capability-ledger-audit 未通过：${errors.length} 处 —— 名册 ${roster.length} 行 / 账本 ${ledger.length} 行` +
-        `（拆 ${splitCount} · 留守 ${residueCount} · 待裁决 ${pendingCount}）`,
+        `（拆 ${splitCount} · 留守 ${residueCount} · 不做 ${boundaryCount} · 待裁决 ${pendingCount}）`,
     ),
   )
   process.exit(1)
@@ -517,7 +582,7 @@ if (errors.length) {
 console.log(
   green(
     `capability-ledger-audit 通过：名册 ${roster.length} 行 = 账本 ${ledger.length} 行` +
-      `（拆 ${splitCount} · 留守 ${residueCount} · 待裁决 ${pendingCount}）；` +
+      `（拆 ${splitCount} · 留守 ${residueCount} · 不做 ${boundaryCount} · 待裁决 ${pendingCount}）；` +
       '每行恰好一条处置，合计表与逐行账一致',
   ),
 )
