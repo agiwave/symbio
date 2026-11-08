@@ -359,7 +359,7 @@ export const BASELINE = {
   // D-362：搬家用例里 5 条 kernel 侧折叠断言与 sdk 侧既有用例重复（`stamp_branches` /
   // `unselected_roots` 已经逐条钉同一折法），故只保留一侧；唯一新增的判据（删除格必须落在
   // `(Message, Closed)`）改写进 `mutations.test.rs` 从消费方一侧钉。净减 4，非覆盖丢失。
-  ciRustTestsTotal: 2387,
+  ciRustTestsTotal: 2388,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -433,10 +433,8 @@ export const BASELINE = {
   // kernel.rs」后，各加一处 `expect` 把「内核返回的下标/id 必来自本切片」钉成显式
   // 约定（解析层与内核的输入约定若破，这里当场响而不是静默错位）——四条理由同构、
   // 均为穷尽性不变量，已按 PN-001 登记在 mod.rs。基线随之 79 → 83。
-  // D-387：报表描述符登记面的装配期 fail-closed（`slot` 重复 / 视图重复 / 空 `slot` /
-  // 空 `views` / 空 `fleet` ⇒ 当场响），已按 PN-001 登记在 `plugin-api/src/reports.rs`。
-  // 基线 83 → 84。
-  panicSites: 84,
+  // baseline-allow panicSites: D-387 的报表登记判据改用 Result（不 panic），这里是撤销上一笔的临时上调，不是放松。
+  panicSites: 83,
 }
 
 

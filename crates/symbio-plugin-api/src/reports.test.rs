@@ -135,6 +135,14 @@ fn same_registration_serializes_byte_identically_twice() {
 }
 
 #[test]
+fn an_empty_inventory_seals_as_ok_and_is_stable() {
+    let first = reports().expect("本 crate 的测试进程还没有报表登记");
+    let second = reports().expect("同一进程第二次读应给同一结论");
+    assert!(first.is_empty());
+    assert_eq!(first.as_ptr(), second.as_ptr());
+}
+
+#[test]
 fn readable_is_distinguished_from_a_failed_read() {
     fn empty_when_unreadable(_views: &[Value], ctx: &ReportCtx<'_>) -> Value {
         if ctx.readable {

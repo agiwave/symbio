@@ -15,11 +15,11 @@
 //! ## 顺序是判据
 //!
 //! [`reports()`] 按 `(order, slot)` 排序：`order` 相同按 `slot` 字典序，`slot` 全局唯一
-//! 由装配期判据保证（见下）。排序在读取侧做而不是装配期做一次，与
+//! 由登记判据保证（见下）。排序在读取侧做而不是装配期做一次，与
 //! [`crate::settle::contributors`] / [`crate::context::providers`] 同一条纪律：本仓不持有
 //! 第二个可变注册表。同一份登记连跑两次，输出必须逐字节相同。
 //!
-//! ## 装配期 fail-closed
+//! ## 登记判据返回错误，不 panic
 //!
 //! [`validate`] 一次判出四类登记错误：
 //!
@@ -28,8 +28,9 @@
 //! - 同一视图进两条报表——两处各算一遍，口径静默漂移；
 //! - `fleet` 显式写成空串——落点为空时写不进去，等于静默丢实例级读数。
 //!
-//! [`reports()`] 在读到非法登记时当场失败（fail-closed），不返回一份「能读多少算多少」
-//! 的残缺表。与 [`crate::port::check_port_name`] 同一条取舍：带病启动比崩掉更难诊断。
+//! [`reports()`] 把非法登记作为 `Err` 交回调用方（与 [`crate::sealed_declarations`]
+//! 同一形状）：装载期由部署面报出，读侧由读数方决定降级还是失败。`Gap` 是内核声明 /
+//! 环的词汇，报表是出品装配面——不把错误类型塞回内核，也不拿 panic 替调用方做决定。
 
 use std::fmt;
 
@@ -167,7 +168,7 @@ impl fmt::Display for ReportError {
 
 /// 纯函数判据：返回全部登记错误；空数组即成立。
 ///
-/// 不读 `inventory`、不排序，便于单测直接构造夹具——`reports()` 的排序与 panic
+/// 不读 `inventory`、不排序，便于单测直接构造夹具——`reports()` 的排序与 `Result`
 /// 都只是对它的调用。
 pub fn validate(reports: &[&ReportDecl]) -> Vec<ReportError> {
     let mut errors = Vec::new();
@@ -228,25 +229,27 @@ fn sorted(mut all: Vec<&ReportDecl>) -> Vec<&ReportDecl> {
     all
 }
 
-/// 已链接进来的全部报表，按 `(order, slot)` 排序；非法登记当场失败。
+/// 已链接进来的全部报表，按 `(order, slot)` 排序；非法登记交回错误清单。
 ///
-/// 排序与 fail-closed 都在读取侧做：表是 `inventory` 的编译期集合，本仓不持有第二个
-/// 可变注册表（与 `settle::contributors` / `context::providers` 同一条纪律）。
-pub fn reports() -> Vec<&'static ReportDecl> {
-    let all = sorted(inventory::iter::<ReportDecl>().collect());
-    let errors = validate(&all);
-    if !errors.is_empty() {
-        // panic-allow crates/symbio-plugin-api/src/reports.rs::reports: 装配期 fail-closed——slot 重复 / 视图重复 / 空 slot / 空 views 会让读数静默丢列或串列，带病启动比当场响更难诊断（D-387）。
-        panic!(
-            "报表登记不合法：\n{}",
-            errors
-                .iter()
-                .map(|e| format!("- {e}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
+/// 排序与判据都在读取侧做：表是 `inventory` 的编译期集合，本仓不持有第二个可变注册表
+/// （与 `settle::contributors` / `context::providers` 同一条纪律）。结果按进程缓存一次，
+/// 与 `sealed_declarations()` 同形——非法登记是装配错误，不该每次读数重判一遍。
+pub fn reports() -> Result<&'static [&'static ReportDecl], &'static [ReportError]> {
+    static SEALED: std::sync::OnceLock<Result<Vec<&'static ReportDecl>, Vec<ReportError>>> =
+        std::sync::OnceLock::new();
+    let sealed = SEALED.get_or_init(|| {
+        let all = sorted(inventory::iter::<ReportDecl>().collect());
+        let errors = validate(&all);
+        if errors.is_empty() {
+            Ok(all)
+        } else {
+            Err(errors)
+        }
+    });
+    match sealed {
+        Ok(all) => Ok(all.as_slice()),
+        Err(errors) => Err(errors.as_slice()),
     }
-    all
 }
 
 #[cfg(test)]
