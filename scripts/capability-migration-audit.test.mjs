@@ -26,8 +26,11 @@ import {
   DEBT_EXEMPTIONS,
   DEBT_SCHEDULE,
   FIXTURE,
+  NET_GUARD,
   activeDebtExemption,
+  archNetChange,
   classifyCommit,
+  crossTreeMoves,
   debtAllowance,
   generatedPaths,
   isCapabilitySource,
@@ -35,6 +38,8 @@ import {
   migrationErrors,
   movedLines,
   parsePatch,
+  parseRelocationHeader,
+  relocationErrors,
   supplementErrors,
   supplementRatioReading,
   validateBeforeGuard,
@@ -299,6 +304,107 @@ test('migrationErrors：迁移中改测试与 .gen.rs 不判（断言与镜像�
     ]),
     [],
   )
+})
+
+// ── 搬迁口径：净变化（D-404）─────────────────────────────────────────────
+
+const API_TEXT = 'crates/symbio-plugin-api/src/text.rs'
+const SDK_TEXT = 'crates/symbio-sdk/src/text.rs'
+const MOVED = ['pub fn count(s: &str) -> usize { s.len() }', 'pub struct Tokenizer;']
+
+/** 一份「实现从 plugin-api 搬进 sdk」的补丁；`stub` 为 false 时故意不留 `pub use`。 */
+function relocationPatch({ toLines = MOVED.length, stub = true } = {}) {
+  return [
+    {
+      path: API_TEXT,
+      removed: MOVED,
+      added: stub ? ['pub use symbio_sdk::text::*;'] : [],
+    },
+    {
+      path: SDK_TEXT,
+      added: [...MOVED, 'pub fn extra() {}'].slice(0, toLines),
+      removed: [],
+    },
+  ]
+}
+
+const relocationMessage = (from = MOVED.length, to = MOVED.length) =>
+  `feat: 搬 text 进 sdk\n\nMigration: T-053\nfrom: ${API_TEXT} (${from})\nto: ${SDK_TEXT} (${to})`
+
+const reloc = (message, files) => relocationErrors({ message, patch: patchOf(files) }).errors
+
+test('archNetChange：`use` 转发不算机制面，净零搬迁读作 0', () => {
+  const net = archNetChange(patchOf(relocationPatch()))
+  assert.deepEqual([net.added, net.removed, net.net], [MOVED.length, MOVED.length, 0])
+})
+
+test('parseRelocationHeader：两侧都写才算完整；缺一侧不算', () => {
+  assert.deepEqual(parseRelocationHeader(relocationMessage()), {
+    from: { path: API_TEXT, lines: 2 },
+    to: { path: SDK_TEXT, lines: 2 },
+    declared: true,
+    complete: true,
+  })
+  const half = parseRelocationHeader(`Migration: T-053\nfrom: ${API_TEXT} (2)`)
+  assert.equal(half.complete, false)
+  assert.equal(half.declared, true)
+})
+
+test('classifyCommit：净零搬迁是 relocation（不记欠账），净减仍是迁移（抵 1 笔）', () => {
+  const zero = patchOf(relocationPatch())
+  assert.equal(classifyCommit({ message: relocationMessage(), patch: zero }), 'relocation')
+  const shrink = patchOf([
+    { path: API_TEXT, removed: MOVED, added: ['pub use symbio_sdk::text::*;'] },
+    { path: SDK_TEXT, added: [MOVED[0]], removed: [] },
+  ])
+  assert.equal(classifyCommit({ message: relocationMessage(2, 1), patch: shrink }), 'migration')
+})
+
+test('classifyCommit：旧口径（NET_GUARD 之前）没有 relocation 这一类', () => {
+  assert.equal(
+    classifyCommit({ message: relocationMessage(), patch: patchOf(relocationPatch()), net: false }),
+    'migration',
+  )
+})
+
+test('relocationErrors：净零 + 完整声明 + api 留转发 ⇒ 绿', () => {
+  assert.deepEqual(reloc(relocationMessage(), relocationPatch()), [])
+})
+
+test('relocationErrors 红 1：`to` 比 `from` 多 1 行 ⇒ 红（不许借搬迁加面）', () => {
+  const [e] = reloc(relocationMessage(2, 3), relocationPatch({ toLines: 3 }))
+  assert.match(e, /EX-007/)
+  assert.match(e, /净增 1 行/)
+})
+
+test('relocationErrors 红 2：`from` 行数写错 ⇒ 红（写错等于没写）', () => {
+  const errors = reloc(relocationMessage(3, 2), relocationPatch())
+  assert.ok(errors.some((e) => /`from:` 写了 3 行，实际/.test(e)), errors.join('\n'))
+})
+
+test('relocationErrors 红 2：没有 `Migration:` 却跨树搬同一份文本 ⇒ 红', () => {
+  const errors = reloc('feat: 顺手挪了个文件', relocationPatch())
+  assert.ok(errors.some((e) => /没有 `Migration:`/.test(e)), errors.join('\n'))
+  assert.equal(classifyCommit({ message: 'feat: 顺手挪了个文件', patch: patchOf(relocationPatch()) }), 'relocation')
+})
+
+test('relocationErrors 红 3：搬走 plugin-api 实现却不留 `pub use` ⇒ E-009 红', () => {
+  const errors = reloc(relocationMessage(), relocationPatch({ stub: false }))
+  assert.ok(errors.some((e) => /E-009/.test(e) && /pub use/.test(e)), errors.join('\n'))
+})
+
+test('crossTreeMoves：同树内删了又加不算搬家', () => {
+  const same = patchOf([
+    { path: 'crates/symbio-sdk/src/a.rs', added: ['pub fn helper() {}'], removed: [] },
+    { path: 'crates/symbio-sdk/src/b.rs', added: [], removed: ['pub fn helper() {}'] },
+  ])
+  assert.equal(crossTreeMoves(same).count, 0)
+})
+
+test('NET_GUARD：口径起点有提交号与理由，且不是判据起点本身', () => {
+  assert.deepEqual(validateBeforeGuard(NET_GUARD), [])
+  assert.match(NET_GUARD.sha, /^[0-9a-f]{7,40}$/)
+  assert.notEqual(NET_GUARD.sha, BEFORE_GUARD.sha)
 })
 
 // ── 补件 ──────────────────────────────────────────────────────────────────
