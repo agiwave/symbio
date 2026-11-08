@@ -80,9 +80,9 @@ session:
  
  # 2. 单轮迭代边界：v2 **没有**这一项配置（工具轮数不设上限，理由见三.2）
  
- # 3. 宏观语义压缩策略
- auto_compress: true # 是否启用基于 Token 溢出 (70% 触发) 的大模型自我语义合并
+ # 3. 上下文窗口与压缩
  context_messages: 6 # 发送给 AI 的对话上下文滑动窗口轮数 (以 User 消息轮次对齐截取；也是存储期 prune 的保留分水岭)
+ # 上下文压缩不在本插件配置里：入口是 symbio-plugin-compact 的两行债（产物 session.consolidated）
  
  # 4. 存储期工具链裁剪
  prune_tool_history: true # 是否在落库时物理裁剪 context_messages 分水岭之前的历史工具链（Tool/ToolCall/Reasoning 及其子节点；只删节点不删归档）
@@ -161,7 +161,7 @@ session:
  * 「哪些历史进请求」由事实网格的投影回答：`transcript` 折叠变更格、压缩快照、分支与区间省略，产出 `TranscriptView`；会话层不持有第二份截取逻辑。
 
  * **语义合并（已随 B2 退场，D-318）**：
- * 旧编排里的 `loop/src/context.rs`（`prepare_compression` / `should_start_compression`）随 B2 删除；本仓不再有会话侧语义合并写点。压缩快照若再要，按 048 的新环设计重新立决策，不得复活旧名字。
+ * 旧编排里的 `loop/src/context.rs`（`prepare_compression` / `should_start_compression`）随 B2 删除；本仓不再有会话侧语义合并写点。压缩实现今天归 `symbio-plugin-compact`（`D-336`），会话侧没有入口。
 
 ---
 
@@ -204,7 +204,10 @@ session:
  * **任务调度段 (Ready Set)**：`ReadySetProvider`（随任务能力包 `symbio-plugin-task` 提交）读本轮事实切片与**事实里的就绪集容量**（`session.config` 载荷的 `readyset_cap`，D-252）调 `task::prompt_section`（**只读**开档、不创建事实源，`off` 档不读），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**候选集空 ⇒ 整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
  * **委派者真源段 (Delegate Context)**：`DelegateProvider`（请求级节奏，`meta.kind = "delegate_context"`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）+ 能力目录 + worker 进展渲染成一段。输入是 `LiveInputs { tools, delegate, workers }`：工具清单是**收集成形后**的那份（发言级取不齐），委派结论是控制面 Q1 判完的三态（`NotJudged` / `Start { reason }` / `Idle`）。provider 不读配置、不重判；渲染函数仍是 [../loop/chat_loop/delegate.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 `delegate_section`。
  * **段的消费形态**：`crates/symbio-plugin-api/src/context.rs::sections` 按 owner 字典序取出视图里**全部**段（不按下标——缺一段时下标全部左移；也不按名字查表——那会与 `slots` 形成第二处拼写），拼成一条 `system` 前缀消息交给运行器。**视图次序 = 装配次序 = 模型读到的次序**，而装配次序只与 owner 字典序有关（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
- * **水位治理不在本层**：压缩只有一个入口 `auto_compress_process`（70% 阈值自动触发，加上用户点「失败压缩节点重试」的 `force` 路径），它改写的是存储态上下文（写成 `session.consolidated` 一格事实），不是请求视图。
+ * **水位治理不在本层**：压缩入口在 `symbio-plugin-compact` 的两行债（`compact-summarize`
+ 取摘要、`compact-write` 落 `session.consolidated`），触发读 provider 收束载荷的
+ 70% 水位。会话侧没有 `auto_compress_process`；失败后的跨轮抑制与重试是缺口
+（`T-049`）。
 * **Rust 实现策略**：
  * 唯一入口为 [../loop/context/view.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 `build_request_sections`——收的是「段身份 + 正文」的数组，**不决定有哪几段**；由 [../loop/chat_loop/inputs.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 `prepare_request_sections` 调用：
 
@@ -376,9 +379,9 @@ D-048 把出厂档位翻到 `full` 后，写侧换成 WAL 原生记账，`Sessio
 
 事实源里的每条事件必须完整回答谁（actor）、何时（ts）、发生了什么。这条不变量对 seq 成立（收口到 [`Store`](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 唯一写入口），对 actor 与 ts 没有对应约束——`d781a6c7` 号会话的实测后果：363 条助手与工具产出被记成 `actor: "user"`（写入方写死 `PRINCIPAL_USER`），548 个事件 `ts` 缺失或为 0，时间轴无法重建。修法：actor 在写入方按真实来源派生，`ts` 兜底收进 `WalStore` 唯一写入口（`MemoryStore` 不兜底）。
 
-### D-072 `context_compact` 工具与 55% 水位提醒一并退役；压缩只剩一个入口
+### D-072 `context_compact` 工具与 55% 水位提醒一并退役；压缩入口归 `symbio-plugin-compact`
 
-[DE-014 §5](../../docs/003-design/014-单环一表.md "DE-014-单环一表") 步骤 5 要删 v1 外壳的 `close_turn` 死分支。
+[DE-014 §5](../../docs/003-design/014-单环一表.md "DE-014-单环一表") 步骤 5 要删 v1 外壳的 `close_turn` 死分支。今天会话侧没有任何压缩入口：入口是 `symbio-plugin-compact` 的两行债，产物是 `session.consolidated`（`D-336`）。
 
 ### D-078 请求视图三层淡化退役：请求体是事实网格的纯投影，注入段只追加不改写
 

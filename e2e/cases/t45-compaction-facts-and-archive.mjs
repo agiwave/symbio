@@ -122,7 +122,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // context_messages: 0 = 上下文窗口不按轮次截断（压缩判定的原料是完整历史）
-        session: { ...DIALOG_FACE_OFF, auto_compress: true, context_messages: 0 },
+        session: { ...DIALOG_FACE_OFF, context_messages: 0 },
       },
     });
 

@@ -16,7 +16,6 @@ fn fully_populated() -> Request {
         system_prompt: Some("p".into()),
         single_message: Some(ChatNode::default()),
         stream: Some(false),
-        auto_compress: Some(false),
         provider_id: Some("pid".into()),
         load_history: Some(false),
         resume: Some(ResumeRequest {
@@ -57,16 +56,10 @@ fn request_key_set_is_value_independent() {
 #[test]
 fn absent_fields_deserialize_as_none_not_zero() {
     let r: Request = serde_json::from_str("{}").unwrap();
-    assert_eq!(
-        r.auto_compress, None,
-        "缺键必须是 None（chat_loop 据此取默认 true）"
-    );
     assert_eq!(r.load_history, None, "缺键必须是 None（默认加载历史）");
 
-    let r2: Request =
-        serde_json::from_str(r#"{"auto_compress":null,"load_history":null}"#).unwrap();
+    let r2: Request = serde_json::from_str(r#"{"load_history":null}"#).unwrap();
     // `null` 与缺键等价（Request 未派生 PartialEq，逐字段比对）
-    assert_eq!(r2.auto_compress, r.auto_compress);
     assert_eq!(r2.load_history, r.load_history);
 }
 

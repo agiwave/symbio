@@ -57,9 +57,6 @@ pub struct SessionConfig {
     /// 最大保存会话轮数（每一轮以一个 User 消息开始）
     #[serde(default = "default_max_messages")]
     pub max_messages: usize,
-    /// 自动压缩（上下文 Token 用量达到有效上限 70% 时触发 LLM 语义快照）
-    #[serde(default = "default_auto_compress")]
-    pub auto_compress: bool,
     /// 上下文会话轮数限制（0 表示不限制，每一轮以一个 User 消息开始）
     #[serde(default = "default_context_messages")]
     pub context_messages: usize,
@@ -419,9 +416,6 @@ pub fn default_presentation_tree() -> String {
 pub fn default_max_messages() -> usize {
     100
 }
-pub fn default_auto_compress() -> bool {
-    true
-}
 pub fn default_context_messages() -> usize {
     6
 }
@@ -538,7 +532,6 @@ impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             max_messages: default_max_messages(),
-            auto_compress: default_auto_compress(),
             context_messages: default_context_messages(),
             prune_tool_history: default_prune_tool_history(),
             memory_max_bytes: default_memory_max_bytes(),

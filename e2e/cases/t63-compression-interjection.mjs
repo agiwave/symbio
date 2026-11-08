@@ -119,7 +119,7 @@ export default defineCase(
         { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 80 }) },
       ],
       pluginConfigs: {
-        session: { auto_compress: true, context_messages: 0, ...DIALOG_FACE_OFF },
+        session: { context_messages: 0, ...DIALOG_FACE_OFF },
         gateway: {
           inbound_enabled: true,
           inbound_protocol: 'http',

@@ -135,21 +135,21 @@ L0 / L4 / 轮次窗口是确定性机制，常开；L5 是被动兜底；L6 是�
 
 ---
 
-## 5. 目标四：压缩只有一个入口（`auto_compress_process`）
+## 5. 压缩入口归 `symbio-plugin-compact`（会话侧无入口）
 
-「何时压」一个入口两种触发，「怎么压」一个实现（`compress_with_snapshot_core`）：
-
-- **阈值触发**：§2 的 70% 判定 + 迟滞检查；
-- **用户重试**（`RetryCompaction`）：`force = true`，越过迟滞**并**绕过熔断——熔断约束的是
- "每轮自动白等一次注定失败的请求"，用户点重试是他的明确意愿，不该被冷却挡住；
-- **收益护栏**：待压缩历史 < 4000 token ⇒ 不值得一次 LLM 摘要调用（`has_compaction_payoff`）；
-- **护栏**：每轮最多一次压缩；失败回滚并保留"压缩已跳过"的如实记录；全程支持 abort。
+- **何时压**：`symbio-plugin-compact` 的 `compact-summarize` 债——`over_threshold` 读
+  `model:<uid>` 收束载荷的 `request_tokens / limit_tokens`，≥ 70% 才欠；`unless_id` 钉
+  本轮 `session.consolidated:<uid>`，一轮只落一次。
+- **怎么压**：`compact-summarize`（端口 `model.assist`，执行体在 model 插件）取摘要，
+  `compact-write`（端口 `compact`，执行体在 compact 插件）落 `session.consolidated`
+  （`message × progressed`，载荷 `messages` = 压缩摘要 + 本轮终答）。
+- **没有**：会话侧的 `auto_compress_process`、压缩熔断、失败节点重试入口——这些随旧实现
+  删除。失败后的跨轮抑制与重试是**真缺口**（`T-049`），不在本设计文档里假装存在。
+- **读侧**：消息列表按 `session.consolidated` 快照重建；变更面按
+  [109 §4.0](109-vdfs-session-messages.md "DE-109-vdfs-session-messages") 的重读自愈收敛。
 
 模型**不持有**压缩工具，请求视图里也没有"提醒模型自己去压"那一段——这条链的退役裁决与
 将来恢复它的前提（注册成能力行走 v2 分发）都在 [D-072](../../README.md "crates/symbio-plugin-session/README")。
-
-**请求组装期不做水位治理**：那里只排三段**注入段**（长期记忆召回 / 就绪任务集 / 委派判定），
-只追加不改写。水位归本节的唯一入口，两者不共用时机。
 
 ---
 

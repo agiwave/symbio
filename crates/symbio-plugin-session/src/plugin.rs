@@ -635,12 +635,6 @@ fn config_definition() -> DetailDefinition {
                 collapsed: true,
                 fields: vec![
                     DetailField::toggle(
-                        "auto_compress",
-                        "自动压缩",
-                        "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）",
-                        d.auto_compress,
-                    ),
-                    DetailField::toggle(
                         "prune_tool_history",
                         "落库期工具链裁剪",
                         "开启时在落库阶段物理删除上下文窗口之外的 Tool / ToolCall / Reasoning 节点\

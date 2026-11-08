@@ -95,7 +95,7 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
     ],
     pluginConfigs: {
       // 本用例的主题是压缩，与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
-      session: { auto_compress: true, context_messages: 0, ...DIALOG_FACE_OFF },
+      session: { context_messages: 0, ...DIALOG_FACE_OFF },
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',

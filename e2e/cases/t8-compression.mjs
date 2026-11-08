@@ -102,7 +102,7 @@ export default defineCase('T8 上下文压缩：水位触发 session.consolidate
         inbound_token: '',
         inbound_readonly: false,
       },
-      session: { auto_compress: true, context_messages: 0 },
+      session: { context_messages: 0 },
     },
   });
   let api = null;

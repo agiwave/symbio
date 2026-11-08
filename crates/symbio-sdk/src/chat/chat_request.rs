@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 关于 `Option` 与序列化（契约，2026-09-14 归一）：
 /// - 字段保持 `Option` 是**契约要求**：`None`（调用方未表态）与"零值"语义不同
-///   （如 `auto_compress: None` → chat_loop 取默认 `true`；`load_history: None` → 加载历史）。
+///   （如 `load_history: None` → 加载历史）。
 ///   因此**不得**改成带 serde default 的裸类型，否则缺省会翻转为零值语义。
 /// - 输出**不使用** `skip_serializing_if`：`None` 序列化为 `null`，使键集合恒定存在，
 ///   不随字段取值增删（历史上 `stream` 无该属性、其余字段有，导致同一协议在不同取值下
@@ -34,9 +34,6 @@ pub struct Request {
     pub single_message: Option<ChatNode>,
     /// 是否使用流式输出
     pub stream: Option<bool>,
-
-    /// 是否开启自动语义压缩
-    pub auto_compress: Option<bool>,
 
     /// 指定本次会话使用的 Model Provider ID（来自 `ModelProvidersConfig.providers`）
     /// 由 session 编排层解析（精确 id → is_default → 首个注册），为空时同样走回退链取默认 Provider
