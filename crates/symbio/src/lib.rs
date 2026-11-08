@@ -67,4 +67,5 @@ pub use symbio_plugin_telegram;
 pub use symbio_plugin_tool;
 pub use symbio_plugin_vdfs;
 pub use symbio_plugin_web;
+pub use symbio_plugin_world_model;
 // <<< plugin-links:end

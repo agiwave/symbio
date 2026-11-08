@@ -5,15 +5,15 @@
 > 口径与「什么进基线、什么只作观测」见 [D-057](../../crates/symbio-plugin-session/README.md#d-057-prompt-形状基线钉装配决定的结构规模只作观测)，
 > 提取实现在 `scripts/prompt-shape-audit.mjs`。
 
-场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-11-07 · 请求数 3
+场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-11-08 · 请求数 3
 
 ## 判据列（逐字段比，PS-001）
 
 | 请求 | 消息数 | 消息序列（role + 结构载体） | system 小节标签序列 | 工具数 |
 |---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 26 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 26 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 26 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 27 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 27 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 27 |
 
 ## 规模观测（**不进判据**：同一列里既有装配代码的字，也有负载的字）
 
@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 26 | 667 | 25288 | 26163 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 26 | 723 | 25288 | 26455 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 26 | 1157 | 25288 | 26956 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 27 | 667 | 26211 | 27087 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 27 | 723 | 26211 | 27379 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 27 | 1157 | 26211 | 27880 |
 
 ## 基线（判据本体）
 
@@ -70,7 +70,7 @@
         []
       ],
       "tools": {
-        "count": 26,
+        "count": 27,
         "names": [
           "agent_run",
           "causal_assert",
@@ -97,9 +97,10 @@
           "vdfs_mkdir",
           "web_fetch",
           "web_search",
-          "http_request"
+          "http_request",
+          "world_observe"
         ],
-        "schema_bytes": 25288
+        "schema_bytes": 26211
       }
     },
     {
@@ -153,7 +154,7 @@
         []
       ],
       "tools": {
-        "count": 26,
+        "count": 27,
         "names": [
           "agent_run",
           "causal_assert",
@@ -180,9 +181,10 @@
           "vdfs_mkdir",
           "web_fetch",
           "web_search",
-          "http_request"
+          "http_request",
+          "world_observe"
         ],
-        "schema_bytes": 25288
+        "schema_bytes": 26211
       }
     },
     {
@@ -254,7 +256,7 @@
         []
       ],
       "tools": {
-        "count": 26,
+        "count": 27,
         "names": [
           "agent_run",
           "causal_assert",
@@ -281,9 +283,10 @@
           "vdfs_mkdir",
           "web_fetch",
           "web_search",
-          "http_request"
+          "http_request",
+          "world_observe"
         ],
-        "schema_bytes": 25288
+        "schema_bytes": 26211
       }
     }
   ]

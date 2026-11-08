@@ -86,6 +86,7 @@ const DEFAULT_BASELINE = [
   'vdfs_write',
   'web_fetch',
   'web_search',
+  'world_observe',
 ]
 
 /** 基线可由环境变量替换（回归测试用）：守卫逻辑与具体工具名解耦。 */

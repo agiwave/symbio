@@ -148,6 +148,7 @@ export const FACTORY_TOOLS = Object.freeze([
   'vdfs_mkdir',
   'web_fetch',
   'web_search',
+  'world_observe',
   'http_request',
   PLATFORM_VARIANT_TOOL,
 ]);

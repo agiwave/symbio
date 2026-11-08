@@ -35,6 +35,7 @@ pub const VIEW_SLO_FALLBACK: &str = "slo.fallback";
 pub const VIEW_SLO_LATENCY: &str = "slo.latency";
 pub const VIEW_SLO_SPAN: &str = "slo.span";
 pub const VIEW_TASK_READYSET: &str = "task.readyset";
+pub const VIEW_WORLD_MODEL: &str = "world.model";
 
 /// 跨插件可读视图（按名字排序）。
 #[rustfmt::skip]
@@ -57,4 +58,5 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: VIEW_SLO_LATENCY, owner: "slo" },
     SharedViewDecl { name: VIEW_SLO_SPAN, owner: "slo" },
     SharedViewDecl { name: VIEW_TASK_READYSET, owner: "task" },
+    SharedViewDecl { name: VIEW_WORLD_MODEL, owner: "world_model" },
 ];

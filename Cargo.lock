@@ -4184,6 +4184,7 @@ dependencies = [
  "symbio-plugin-tool",
  "symbio-plugin-vdfs",
  "symbio-plugin-web",
+ "symbio-plugin-world_model",
  "symbio-providers",
  "symbio-sdk",
  "tempfile",
@@ -4802,6 +4803,16 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
+]
+
+[[package]]
+name = "symbio-plugin-world_model"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
+ "tokio",
 ]
 
 [[package]]

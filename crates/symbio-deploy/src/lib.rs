@@ -111,6 +111,9 @@ pub const PLUGIN_ID_VDFS: &str = "vdfs";
 /// 网络访问
 pub const PLUGIN_ID_WEB: &str = "web";
 
+/// 世界模型：一次观察记一条领域事实，视图按（实体，属性）折出当前世界
+pub const PLUGIN_ID_WORLD_MODEL: &str = "world_model";
+
 /// 子 Agent 子树默认挂载的插件清单（按 `plugin_order` 排序）。
 #[rustfmt::skip]
 pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
@@ -130,6 +133,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "explain", // 可解释：把一次决定的理由记成事实（工具），再折成可读的理由台账（视图）
     "forecast", // 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
     "idempotency", // 幂等台账：一个工具、一条 Domain 事实、一张共享视图；同一个键在同一会话里只记一次
+    "world_model", // 世界模型：一次观察记一条领域事实，视图按（实体，属性）折出当前世界
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "compact", // 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）

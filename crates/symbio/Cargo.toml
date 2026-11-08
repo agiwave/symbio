@@ -58,6 +58,7 @@ symbio-plugin-telegram = { path = "../symbio-plugin-telegram" }
 symbio-plugin-tool = { path = "../symbio-plugin-tool" }
 symbio-plugin-vdfs = { path = "../symbio-plugin-vdfs" }
 symbio-plugin-web = { path = "../symbio-plugin-web" }
+symbio-plugin-world_model = { path = "../symbio-plugin-world_model" }
 # <<< plugin-links:end
 inventory = { workspace = true }
 # 驱动收口：`settled` 的每会话唤醒句柄（`Notify`）与「由驱动自身调用」的检测。
