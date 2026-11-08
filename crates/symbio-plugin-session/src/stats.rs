@@ -44,8 +44,7 @@
 //! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{
-    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB, SLO_SPAN_VIEW,
-    TASK_READYSET_VIEW,
+    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB, TASK_READYSET_VIEW,
 };
 use std::sync::Arc;
 
@@ -584,14 +583,11 @@ pub(crate) fn read(
     // 由 `ViewDecl::agg` 交）。本处只挑两格排版，与 `capability_views` 同一纪律。
     let conation = conation_reading(&snapshot);
 
-    // 时域跨度列（同上）：`slo.span` 只读事件信封的 `ts`（入库时间，与 `cost_ms`
-    // 同源的实测面），as-of 之后的事件一概不见。空形状是 `{ events: 0, span_ms: 0 }`
-    // （四列那一族的有据的零），不是逐档视图的 `{ by_tier: [] }`。
-    let span = read_view_or(
-        SLO_SPAN_VIEW,
-        &snapshot,
-        || serde_json::json!({ "events": 0, "span_ms": 0 }),
-    );
+    // 时域跨度列：`slo.span` 只读事件信封的 `ts`（入库时间，与 `cost_ms` 同源的实测面），
+    // as-of 之后的事件一概不见。空形状 `{ events: 0, span_ms: 0 }` 留在 owner 的 `render`
+    // （`D-387`），本插件只在整条报表读不出来时退回文档写过的这一份。
+    let span = report_value("span", &snapshot, &report_ctx)
+        .unwrap_or_else(|| serde_json::json!({ "events": 0, "span_ms": 0 }));
 
     // 自主程度列（同上）：**折叠归能力包**（`conation.autonomy`）——本插件按名字读，
     // 不认识分子分母是怎么数的，也不再自己算率。读不到 ⇒ `null`，与 `may_read = false`

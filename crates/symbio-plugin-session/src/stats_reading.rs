@@ -18,9 +18,7 @@
 //! （`ViewDecl::agg`）都由 owner 交，本文件只做「逐片求值 → 把值交回去 → 原样装一格」
 //! （`D-281`）。同一份事实长出两套口径，读数与投影就会静默漂移，而两边都自称是 SLO。
 
-use crate::declarations::{
-    COMMITMENT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, SLO_SPAN_VIEW,
-};
+use crate::declarations::{COMMITMENT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW};
 use symbio_kernel::event::Event;
 use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 use symbio_plugin_api::reports::ReportCtx;
@@ -177,8 +175,8 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> se
     let by_tier = fleet_of("tiers", snapshots, ctx)
         .unwrap_or_else(|| serde_json::json!({ "latency": [], "fallback": [] }));
 
-    // 还没迁的列仍走 `shared_views` 生成物（`span` / 主动性 / 自主程度），迁一列删一格。
-    let span = shared_axis(SLO_SPAN_VIEW, snapshots).unwrap_or_else(
+    // 跨度已迁：`fleet_render` 交 `agg` 之后的那一格；读不到才退回文档写过的空读数。
+    let span = fleet_of("span", snapshots, ctx).unwrap_or_else(
         || serde_json::json!({ "sessions": 0, "median_ms": serde_json::Value::Null }),
     );
     let conation = shared_axis(CONATION_INTENTS_VIEW, snapshots).unwrap_or(serde_json::Value::Null);

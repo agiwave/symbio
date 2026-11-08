@@ -450,6 +450,40 @@ fn tiers_fleet(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
     })
 }
 
+// 报表登记（`D-387`）：`session/stats` 的 `span` 顶层键与 `fleet.axes.span` 落点。
+// 单会话交视图原样；实例级交 `agg` 之后的值——两处都不在本插件之外再排版。
+symbio_plugin_api::submit_reports!([ReportDecl {
+    owner: "slo",
+    slot: "span",
+    order: 70,
+    views: &[SLO_SPAN],
+    fleet: Some("axes.span"),
+    render: span_report,
+    fleet_render: Some(span_fleet),
+    panel: None,
+}]);
+
+/// 单会话跨度：视图原样交出；读不出来（读方以 `Null` 占位）时交空读数。
+///
+/// 空读数是 `{events: 0, span_ms: 0}`——「这一列今天读不出来」与「会话里没有事件」
+/// 在出口上都长这样，区别由 `capability_views` 的可诊断缺席承担。
+fn span_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    match views.first() {
+        Some(value) if !value.is_null() => value.clone(),
+        _ => json!({ "events": 0, "span_ms": 0 }),
+    }
+}
+
+/// 实例级跨度：`agg` 之后原样交出（`sessions` + `median_ms`）。
+///
+/// 无样本时 `median_ms` 是 `null`（有据的空）——这一点由 [`span_merged`] 定，本处不重算。
+fn span_fleet(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    match views.first() {
+        Some(value) if !value.is_null() => value.clone(),
+        _ => json!({ "sessions": 0, "median_ms": Value::Null }),
+    }
+}
+
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。
 symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 
