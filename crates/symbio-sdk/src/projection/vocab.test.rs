@@ -17,6 +17,7 @@ pub(super) const CHAT: ChatVocab = ChatVocab {
 };
 
 pub(super) const MESSAGE: MessageVocab = MessageVocab {
+    tool_requested: "tool.requested",
     artifact_added: "artifact.added",
     message_added: "message.added",
     message_edited: "message.edited",

@@ -182,8 +182,12 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 那条事实的载荷带分组标识与 `calls[]`（每次调用的 `id`）；产物只带
     // `tool_call_id`。这比在每条产物上复制一份分组标识更准确——产物属于
     // **那一次调用**，不属于整批。
+    //
+    // **分组只来自 `tool.requested`**（`D-382` ①）：卡的存在由派发清单决定，不由
+    // 助手往返的 `tool_calls[]` 倒推。一条产物若找不到发它的派发事实，就没有卡可挂。
     let group_of_call: std::collections::HashMap<String, String> = events
         .iter()
+        .filter(|e| e.kind == m.tool_requested)
         .filter_map(|e| {
             let group = e.payload.get("root_id")?.as_str()?;
             Some((group, e.payload.get("calls")?.as_array()?))
@@ -201,21 +205,48 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // wire id 时必须换一个节点 id，否则第二轮会更新第一轮的老卡）；`wire_id` 才是
     // 与产物 / 下一轮请求配对的键。重建若拿 wire id 当节点 id，实时面那张卡永远
     // 停在 `streaming`（t10 抓到）。这里只解「节点身份」，产物配对仍走 wire id。
-    let node_of_call: std::collections::HashMap<String, String> = events
+    //
+    // **两个来源，一份身份表**（`D-382` ③）：派发清单 `calls[]` 的
+    // `{ id, node_id }` 是主来源（恢复后再次发问没有助手往返，只有它）；助手往返
+    // 的 `tool_calls[]` 只补旧 WAL / 增量内容，不覆盖已有身份。同一批 `calls[]`
+    // 先按 `call_id` 排序再折（`D-382` ②：顺序由调用 id 决定，不由到达时刻决定）。
+    let mut node_of_call: std::collections::HashMap<String, String> = events
         .iter()
-        .filter_map(|e| e.payload.get("tool_calls")?.as_array())
+        .filter(|e| e.kind == m.tool_requested)
+        .filter_map(|e| e.payload.get("calls")?.as_array())
         .flat_map(|calls| {
-            calls.iter().filter_map(|call| {
-                let node = call.get("id")?.as_str()?;
-                let wire = call
-                    .get("wire_id")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(node);
-                Some((wire.to_owned(), node.to_owned()))
-            })
+            let mut rows: Vec<(String, String)> = calls
+                .iter()
+                .filter_map(|call| {
+                    let wire = call.get("id")?.as_str()?;
+                    let node = call
+                        .get("node_id")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())?;
+                    Some((wire.to_owned(), node.to_owned()))
+                })
+                .collect();
+            rows.sort_by(|a, b| a.0.cmp(&b.0));
+            rows
         })
         .collect();
+    for call in events
+        .iter()
+        .filter_map(|e| e.payload.get("tool_calls")?.as_array())
+        .flatten()
+    {
+        let Some(node) = call.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let wire = call
+            .get("wire_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(node);
+        node_of_call
+            .entry(wire.to_owned())
+            .or_insert_with(|| node.to_owned());
+    }
 
     // 被 `message.removed` 判死的节点 id（循环末尾统一剔除）。
     let mut gone: HashSet<String> = HashSet::new();

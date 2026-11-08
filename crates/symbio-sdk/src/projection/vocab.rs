@@ -22,7 +22,7 @@
 //! | 表 | 字段 | 消费方 |
 //! |---|---|---|
 //! | [`ChatVocab`] | 10：开轮 / 分支两支 / 汇报 / 开场 / 定稿 / 兜底 / 进展 / 被拒 / 模型端口 | `turns` `turnstate` `branch` `rebuild` `transcript` `prompt_fidelity` |
-//! | [`MessageVocab`] | 5：产物 / 增 / 改 / 删 / 巩固 | `mutations` `rebuild` `transcript` `prompt_fidelity` |
+//! | [`MessageVocab`] | 6：派发 / 产物 / 增 / 改 / 删 / 巩固 | `mutations` `rebuild` `transcript` `prompt_fidelity` |
 //! | [`CommitmentVocab`] | 4：立约 / 履约 / 违约 / 断言 | `actors::commitment` |
 //!
 //! 三个折叠（`rebuild` / `transcript` / `prompt_fidelity`）确实要两张表——它们折的
@@ -127,12 +127,16 @@ impl ChatVocab {
 
 /// 消息**列表的变更面**：追加 / 改写 / 删除 / 巩固，以及落在同一片事实里的产物。
 ///
-/// 五个名字都改变「对话列表长什么样」，`mutations` / `changes` / `transcript` /
+/// 六个名字都改变「对话列表长什么样」，`mutations` / `changes` / `transcript` /
 /// `rebuild` / `prompt_fidelity` 折的是同一片。`artifact.added` 在这里不是凑数：
 /// 它是工具结果的**事实来源**（`rebuild` 据它折工具节点、`changes` 据它折改动账），
-/// 与消息变更同属「这一轮留下了什么」。
+/// 与消息变更同属「这一轮留下了什么」。`tool.requested` 也不是凑数：工具卡片的
+/// **出生来源**是它的 `calls[]`，助手往返只供增量内容（`D-382`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MessageVocab {
+    /// 工具派发：`tool × asserted`，载荷 `{ root_id, calls[] }`。卡片按这里的
+    /// `calls[]` 逐一出生（`D-382`），不由助手往返的 `tool_calls[]` 倒推。
+    pub tool_requested: &'static str,
     /// 产物落地：`artifact × asserted`。工具结果也是一次结算。
     pub artifact_added: &'static str,
     /// 消息列表新增：`message × opened`。

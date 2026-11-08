@@ -39,6 +39,9 @@ pub const EVENT_TURN_BRANCH: &str = "turn.branch";
 pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
 pub const EVENT_MODEL_SPEECH_DENIED: &str = "model.speech.denied";
 
+// ── 工具派发面 ──
+pub const EVENT_TOOL_REQUESTED: &str = "tool.requested";
+
 // ── 产物与消息面 ──
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 pub const EVENT_MESSAGE_ADDED: &str = "message.added";
@@ -76,6 +79,7 @@ pub const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← session
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // turn.branch_selected ← session
     EventDecl::with_roles(EVENT_MODEL_SPEECH_DENIED, (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]), // model.speech.denied ← model
+    EventDecl::host(EVENT_TOOL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.requested ← model
     EventDecl::host(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← tool
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
     EventDecl::new(EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)), // message.edited ← session
@@ -101,8 +105,9 @@ pub const CHAT: ChatVocab = ChatVocab {
     model_port: "model",
 };
 
-/// 消息变更面（5 条）。
+/// 消息变更面（6 条）。
 pub const MESSAGE: MessageVocab = MessageVocab {
+    tool_requested: EVENT_TOOL_REQUESTED,
     artifact_added: EVENT_ARTIFACT_ADDED,
     message_added: EVENT_MESSAGE_ADDED,
     message_edited: EVENT_MESSAGE_EDITED,

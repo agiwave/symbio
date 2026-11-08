@@ -45,6 +45,10 @@ const GROUPS = [
     ],
   },
   {
+    title: '工具派发面',
+    names: ['tool.requested'],
+  },
+  {
     title: '产物与消息面',
     names: [
       'artifact.added',
@@ -190,9 +194,10 @@ export function render({ root }) {
   L.push('};')
   L.push('')
 
-  L.push('/// 消息变更面（5 条）。')
+  L.push('/// 消息变更面（6 条）。')
   L.push('pub const MESSAGE: MessageVocab = MessageVocab {')
   for (const [field, constName] of [
+    ['tool_requested', 'EVENT_TOOL_REQUESTED'],
     ['artifact_added', 'EVENT_ARTIFACT_ADDED'],
     ['message_added', 'EVENT_MESSAGE_ADDED'],
     ['message_edited', 'EVENT_MESSAGE_EDITED'],

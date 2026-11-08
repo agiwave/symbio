@@ -282,10 +282,12 @@ pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
         model_port: symbio_plugin_api::vocab::PORT_MODEL,
     };
 
-/// 消息变更面（5 条）：本插件是这五条里四条的 owner（`message.*` 与
-/// `session.consolidated`），`artifact.added` 的 owner 是 `crates/symbio-plugin-tool`。
+/// 消息变更面（6 条）：本插件是这六条里四条的 owner（`message.*` 与
+/// `session.consolidated`），`artifact.added` 的 owner 是 `crates/symbio-plugin-tool`，
+/// `tool.requested` 的 owner 是 `crates/symbio-plugin-model`。
 pub(crate) const MESSAGE_VOCAB: symbio_sdk::projection::vocab::MessageVocab =
     symbio_sdk::projection::vocab::MessageVocab {
+        tool_requested: symbio_plugin_api::events::EVENT_TOOL_REQUESTED,
         artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
         message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
         message_edited: EVENT_MESSAGE_EDITED,

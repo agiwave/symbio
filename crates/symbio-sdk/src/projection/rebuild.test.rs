@@ -531,6 +531,144 @@ fn tool_calls_reference_does_not_duplicate_the_card() {
     assert_eq!(calls, 1, "同一张工具卡只能有一份，实得 {calls}");
 }
 
+// ── ②b 卡的身份与存在性来自派发清单（D-382）────────────────────────────
+
+/// 派发清单（`tool.requested`）的**生产形状**：每条调用自带 `{ id, node_id, name, arguments }`。
+///
+/// 与 [`tool_requested`] 的差别只在载荷齐不齐：那条夹具模仿旧 WAL（只有 `id`），
+/// 这条是模型端口今天的写法——`node_id` 就是实时面那张卡的节点身份。
+fn dispatch_list(no: u64, root: &str, calls: &[(&str, &str)]) -> Event {
+    Event::pending(
+        format!("tr-{no}"),
+        "tool.requested",
+        Entity::Scope,
+        Verb::Asserted,
+        "session/main",
+    )
+    .with_ts(1_000 + no as i64 * 100)
+    .with_payload(serde_json::json!({
+        "root_id": root,
+        "calls": calls
+            .iter()
+            .map(|(wire, node)| serde_json::json!({
+                "id": wire,
+                "node_id": node,
+                "name": "ask_user",
+                "arguments": { "question": "还要继续吗" },
+            }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+/// 一次提问的产物格（`artifact.added`）：等待用户动作的卡。
+fn prompt_artifact(no: u64, call: &str) -> Event {
+    Event::pending(
+        format!("a-{no}"),
+        EVENT_ARTIFACT_ADDED,
+        Entity::Artifact,
+        Verb::Asserted,
+        "session/main",
+    )
+    .with_ts(1_000 + no as i64 * 100 + 1)
+    .with_payload(serde_json::json!({
+        "tool": "ask_user",
+        "text": "还要继续吗",
+        "tool_call_id": call,
+        "args": "{\"question\":\"还要继续吗\"}",
+        "success": true,
+        "needs_user_action": true,
+        "prompt": { "question": "还要继续吗" },
+    }))
+}
+
+/// 同一轮两次提问：第二次调用**没有**对应的助手往返（恢复后再次发问），
+/// 只有派发清单与产物格——卡必须照样出生，身份取各自 `calls[].node_id`。
+///
+/// 这条判据在旧形状下会红两次：`node_of_call` 只认助手 `tool_calls[]` ⇒ 卡节点
+/// id 退化成 wire id；待答结果的父节点因此指向一个不存在的节点（「一个没有来处
+/// 的提问」）。e2e 复现不了它：真实装配里恢复后的再提问仍会经过一次模型往返，
+/// 而 `tool.requested` 的 `calls[]` 与那次往返的 `tool_calls[]` 恰好同时在场，
+/// 旧代码顺手就拿到了身份（见 `e2e/cases/t105-two-prompts-one-round.mjs` 的读数）。
+#[test]
+fn cards_are_born_one_by_one_from_the_dispatch_list() {
+    let events = vec![
+        user_event("T1", "帮我确认两件事"),
+        dispatch_list(1, "T1", &[("call_ask_1", "node_ask_1")]),
+        prompt_artifact(1, "call_ask_1"),
+        dispatch_list(2, "T1", &[("call_ask_2", "node_ask_2")]),
+        prompt_artifact(2, "call_ask_2"),
+    ];
+
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
+    let cards: Vec<&Shape> = got.iter().filter(|s| s.ty == NodeForm::Tool).collect();
+    assert_eq!(
+        cards.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+        vec!["node_ask_1", "node_ask_2"],
+        "每张卡的身份取自己的 `calls[].node_id`，顺序与 `call_id` 一致：{got:?}"
+    );
+    assert_eq!(cards[0].parent.as_deref(), Some("T1"));
+    assert_eq!(cards[1].parent.as_deref(), Some("T1"));
+
+    let prompts: Vec<&Shape> = got
+        .iter()
+        .filter(|s| s.ty == NodeForm::Interaction)
+        .collect();
+    assert_eq!(prompts.len(), 2, "两次提问各一张待答卡：{got:?}");
+    assert_eq!(prompts[0].id, "call_ask_1-result");
+    assert_eq!(prompts[0].parent.as_deref(), Some("node_ask_1"));
+    assert_eq!(prompts[1].id, "call_ask_2-result");
+    assert_eq!(
+        prompts[1].parent.as_deref(),
+        Some("node_ask_2"),
+        "第二个提问挂在自己的卡下——不能退化成轮节点或 wire id：{got:?}"
+    );
+}
+
+/// **退化红线**：卡只能由派发清单出生。
+///
+/// 助手往返的 `calls[]` / `tool_calls[]` 是这张卡的**增量内容**，不是出生事实。
+/// 把「已经聚合好的响应」当成出生点，形状上看起来也能凑出一张卡，但那张卡没有
+/// 来处：同一批调用若在恢复路径上没有往返，它就不存在；而且它会让产物格把
+/// 「这一轮有过一次往返」误当成「这次调用发生过」。
+#[test]
+fn an_aggregated_response_alone_does_not_birth_a_card() {
+    let events = vec![
+        user_event("T1", "帮我确认一件事"),
+        model_output_event(
+            crate::event::EVENT_RESPONSE,
+            "response-model-1",
+            1_500,
+            serde_json::json!({
+                "port": "model", "stamp": { "role": "reader" },
+                "id": "model-1", "attempt": 1,
+                "root_id": "T1", "text": null, "answer": null,
+                "calls": [{
+                    "id": "call_ask_1", "node_id": "node_ask_1",
+                    "name": "ask_user", "arguments": { "question": "还要继续吗" },
+                }],
+                "tool_calls": [{
+                    "id": "node_ask_1", "wire_id": "call_ask_1",
+                    "name": "ask_user", "args": "{}",
+                }],
+                "principal": "session/main",
+            }),
+        ),
+        prompt_artifact(1, "call_ask_1"),
+    ];
+
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
+    assert_eq!(
+        got.iter().filter(|s| s.ty == NodeForm::Tool).count(),
+        0,
+        "没有 `tool.requested` 就没有卡：{got:?}"
+    );
+    assert_eq!(
+        got.iter().filter(|s| s.ty == NodeForm::Interaction).count(),
+        0,
+        "没有卡就没有可挂的待答结果：{got:?}"
+    );
+}
+
 // ── ③ 纯函数：同输入 ⇒ 同输出 ─────────────────────────────────────────
 
 #[test]
