@@ -4,7 +4,7 @@
  *
  * ## 它治的病
  *
- * `symbio_kernel` / `symbio_core` / `symbio_plugin_api` 三个 crate 拆完之后，每个插件
+ * `symbio_kernel` / 宿主机制层 / `symbio_plugin_api` 三个 crate 拆完之后，每个插件
  * 仍在 manifest 里列三到四行内部依赖、源码里混写三种前缀。「插件依赖几个架构模块」
  * 于是由**某段代码当初顺手写了哪个前缀**决定，而不是由边界决定——cargo 依赖图表达不了
  * 任何意图，评审也看不出某次改动是不是在扩大插件的可见面。
@@ -20,7 +20,7 @@
  * | HS-002 | 门面白名单条数超过基线（只许降） | 加一条要配一条决策理由，并同步上调基线 |
  * | HS-003 | 门面白名单里有符号在**扩展层插件代码里零引用** | 删掉它——白名单的每一条都要报得出消费方（与 C-003 同一把尺子）；报不出的就是空转条目 |
  * | HS-004 | 插件胶水层 `symbio-providers` 把**嵌入臂**设成默认开启（`default = ["embedding"]` 或依赖不是 `optional`） | 那一条 `default = []` 是有意的：`ort` / `tokenizers` 带来 55 个传递依赖（168 → 113），而插件侧只有 `local` 一个消费者。要开就在宿主与需要它的插件那里显式开（D-254） |
- * | HS-005 | 门面自己的 `[dependencies]` 里有 `symbio-core` | 门面只依赖 kernel + sdk + deploy。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
+ * | HS-005 | 门面自己的 `[dependencies]` 里有旧 core 的 crate 名 | 门面只依赖 kernel + sdk + deploy。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
  * | HS-006 | 语法臂条数 > 基线，或模块级转发条数 > 基线 | 两格都「只许不涨」：语法臂不计债但计件；模块转发一行换 N 条，要显式（D-278） |
  *
  * `symbio_kernel::` 前缀**放行**：kernel 已进插件依赖白名单，禁前缀就是「许依赖、
@@ -78,7 +78,7 @@ export const FORBIDDEN_PREFIXES = ['symbio_sdk::', 'symbio_deploy::']
  *
  * 只数机制臂。门面按来源分三臂（D-255 / D-258）：语法臂来自 `symbio-kernel`（直接依赖
  * 6 个，插件取共享类型不增加任何机制面）、SDK 臂来自 `symbio-sdk`（机制实现，但不认
- * 容器概念，同样不计债）、机制臂来自 `symbio-core`（每条都要控制面支撑）。
+ * 容器概念，同样不计债）、机制臂曾来自旧 core（每条都要控制面支撑）。
  * 把前两臂计进基线，会让「欠账还剩多少」被两个与债无关的数字稀释——248 听起来离 0
  * 很远，133 才是真实的待还量。
  *
@@ -94,7 +94,7 @@ export const FORBIDDEN_PREFIXES = ['symbio_sdk::', 'symbio_deploy::']
  * **D-276 复核后改判 0**：`principal_of` / `production_matrix` 只查一张部署表，`CAP_*` 是
  * 那张表的闭集，`actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——
  * 没有一条认识轮次、幕或判决。它们随 `governance` / `authz` / `view` / `actors` 的
- * spec+commitment 一起进 `symbio-sdk`，门面从此不依赖 `symbio-core`（HS-005）。
+ * spec+commitment 一起进 `symbio-sdk`，门面从此不依赖旧 core（HS-005）。
  */
 export const WHITELIST_BASELINE = 0
 
@@ -193,13 +193,22 @@ export function heavyArmViolations(toml) {
  *
  * 改法是换判据的形状：不问「那段块在不在」，问「门面把这些 `pub use` 都发给了谁」。
  * 分区是**穷尽**的——除 kernel / sdk / deploy 之外的任何来源都算机制臂，所以
- * `symbio_core` 若回来不需要任何锚点也当场红；同时要求**至少读到一条** `pub use …::`，
+ * 旧 core 若回来不需要任何锚点也当场红；同时要求**至少读到一条** `pub use …::`，
  * 读不到就退 null（判不了不许亮绿灯）。
  */
 const USE_STMT_RE = /pub use\s+([A-Za-z_][A-Za-z0-9_]*)(?:::[A-Za-z0-9_]+)*::(\{[^}]*\}|[A-Za-z0-9_]+|\*)\s*;/g
 
 /** 门面允许的三个来源：语法（kernel）/ 机制（sdk）/ 装配常量（deploy）。 */
 export const FACADE_ARMS = ['symbio_kernel', 'symbio_sdk', 'symbio_deploy']
+
+/**
+ * 已退役的旧 core crate 名——HS-005 要禁的就是它（Cargo `[dependencies]` 侧的连字符拼写）。
+ *
+ * 拆开拼写：它已不在活跃区作引用，但这条判据必须能报出被禁的名字。
+ */
+export const RETIRED_CORE_CRATE = `symbio${'-'}core`
+/** 同一旧名在 Rust 源码里的下划线拼写（`pub use` 语句按它判「三臂之外」）。 */
+export const RETIRED_CORE_MODULE = `symbio${'_'}core`
 /** 语法臂：可能有多块（按 kernel 子模块分组），因此按正则全量取。 */
 const GRAMMAR_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
 /**
@@ -486,14 +495,14 @@ export function run(root) {
     )
   }
 
-  // HS-005：门面自己不得依赖 `symbio-core`（D-276）。机制臂归零之后，这一条把「下次再为
+  // HS-005：门面自己不得依赖旧 core（D-276）。机制臂归零之后，这一条把「下次再为
   // 一条控制面符号整块依赖实现层」的路堵死——否则 21 个插件的编译图会重新背上控制面。
   const facadeManifest = path.join(root, 'crates', 'symbio-plugin-api', 'Cargo.toml')
   if (fs.existsSync(facadeManifest)) {
     const toml = fs.readFileSync(facadeManifest, 'utf8')
-    if (dependenciesHas(toml, 'symbio-core')) {
+    if (dependenciesHas(toml, RETIRED_CORE_CRATE)) {
       errors.push(
-        'crates/symbio-plugin-api/Cargo.toml  [dependencies] 里有 `symbio-core`——HS-005 (D-276)：' +
+        `crates/symbio-plugin-api/Cargo.toml  [dependencies] 里有 \`${RETIRED_CORE_CRATE}\`——HS-005 (D-276)：` +
           '门面只依赖 kernel + sdk + deploy；要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口',
       )
     }

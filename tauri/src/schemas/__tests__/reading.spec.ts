@@ -6,7 +6,7 @@ import { panelHasWarn, panelRowCount, readingSectionOf, type ReadingPanel } from
  *
  * ## 这个模块唯一的失效形态
  *
- * 它是**跨栈契约的半边**：后端 `symbio_core/schemas/reading.rs` 下发描述，本文件
+ * 它是**跨栈契约的半边**：后端 `crates/symbio-kernel/src/present/reading.rs` 下发描述，本文件
  * 认它。两个访问器（行数 / 有无需留意）若与后端语义不一致，症状不是报错而是
  * **静默显示错**——抽屉标题的提示点不亮，或空态文案说错。故这里逐条钉住与后端
  * `row_count` / `has_warn` 逐字对应的形状。

@@ -6,7 +6,7 @@
 //! - 注册表在第一次访问时自动惰性初始化
 //! - 不针对任何具体类型做特殊化
 //!
-//! 公共 API（导出至 `symbio_core`）：
+//! 公共 API（在 crate 根重导出）：
 //! - [`creator_create_object`]
 //! - [`creator_has`]
 //! - [`creator_ids`]

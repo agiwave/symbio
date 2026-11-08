@@ -43,4 +43,4 @@ impl: done
 ## 关联
 
 - 架构哲学：`docs/003-design/002-架构总览.md`
-- 注册机制：`symbio_core/creator/`（`submit_object_creator!`）
+- 注册机制：`crates/symbio-sdk/src/creator/`（`submit_object_creator!`）

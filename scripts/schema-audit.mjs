@@ -298,8 +298,8 @@ while ((rm = reExportRe.exec(modRs))) {
 }
 
 const shortMod = (p) => {
-  const m = p.match(/src[\\/](plugins|symbio_core)[\\/]([^/\\.]+)/);
-  return m ? `${m[1] === 'plugins' ? '' : 'core:'}${m[2]}` : p;
+  const m = p.match(/src[\\/]plugins[\\/]([^/\\.]+)/);
+  return m ? m[1] : p;
 };
 
 console.log('\n--- 顶层模块外部消费方（下放/删除决策单元） ---');

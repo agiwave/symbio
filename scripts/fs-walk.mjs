@@ -4,7 +4,7 @@
  * ## 为什么单独立一个文件
  *
  * 这两条判据此前住在 `core-surface.mjs` 里——那个库里 90% 的代码是「数公开面消费方」
- * 的分析器，只有 `walk` 与 `isTestFile` 是别人也在用的。D-279 删掉 `symbio-core` 之后，
+ * 的分析器，只有 `walk` 与 `isTestFile` 是别人也在用的。D-279 删掉旧 core 之后，
  * `core-export-audit` / `core-surface-audit` 随之退役，那个库的分析器再没有调用方；
  * 把两个辅助函数留下来单独成文件，比「让一个判据背着 600 行死代码」干净。
  *

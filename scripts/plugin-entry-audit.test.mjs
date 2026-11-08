@@ -54,7 +54,7 @@ function audit(files, { strict = false } = {}) {
   }
 }
 
-/** 装配方与 `symbio_core` 的最小事实源：工厂 id、协议端点、路由常量 */
+/** 装配方与共享层的最小事实源：工厂 id、协议端点、路由常量 */
 const CORE = {
   'crates/symbio-deploy/src/lib.rs': `pub const PLUGIN_ID_SESSION: &str = "session";\n`,
   'crates/symbio-sdk/src/plugin/traverse.rs':
@@ -1290,7 +1290,7 @@ test('E-013 不误报：宿主机制面 / 通用库 / 相对路径 / crate 根�
       'use serde_json::Value;\n' +
       // crate 化（D-191）之后宿主机制面是**外部 crate**：写法是 `use symbio_sdk::…`，
       // 不是 `crate::symbio_sdk::…`（后者编译不过）；D-279 又删掉了 core 整棵，
-      // `crate::symbio_core::…` 同样已成死形态。
+      // `crate::<旧 core>` 同样已成死形态。
       'use symbio_sdk::{Plugin, Store};\n' +
       'use symbio_kernel::event::Event;\n' +
       'use crate::control_decl::EVENT_TURN_STAGE;\n' +

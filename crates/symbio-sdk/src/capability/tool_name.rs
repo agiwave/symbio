@@ -8,23 +8,23 @@
 //! 对工具名的字符集有硬约束——OpenAI / Anthropic 只接受 `[A-Za-z0-9_-]`。
 //! 两者之间必须有一次换算，且**出方向与入方向必须成对**。
 //!
-//! ## 为什么放在 `symbio_core`
+//! ## 为什么放在本 crate（`symbio-sdk`）
 //!
-//! core 的准入规则是**依赖方数量**，不是「够不够底层」：只被一个模块依赖的内容
-//! 一律下沉回该模块（core 是跨模块的系统架构，不是通用工具箱）。按这条规则核一遍
+//! 本 crate 的准入规则是**依赖方数量**，不是「够不够底层」：只被一个模块依赖的内容
+//! 一律下沉回该模块（本 crate 是跨插件的共享机制层，不是通用工具箱）。按这条规则核一遍
 //! 本模块的两个函数：
 //!
 //! | 函数 | 依赖方 | 位置 |
 //! |---|---|---|
-//! | [`capability_to_wire`] | `model` 插件（4 个协议的请求序列化）+ 本模块的 [`capability_resolve`] | core |
-//! | [`capability_resolve`] | `session` 插件（`tool_executor` 把模型给的名字认回来） | core |
+//! | [`capability_to_wire`] | `model` 插件（4 个协议的请求序列化）+ 本模块的 [`capability_resolve`] | 本 crate |
+//! | [`capability_resolve`] | `session` 插件（`tool_executor` 把模型给的名字认回来） | 本 crate |
 //!
 //! 两者是**同一份契约的两半**（出方向与入方向必须成对，改一个不改另一个就是静默
-//! 错位），因此放在一起。而它们能落在 core，是因为**跨模块**：名字由 `model` 发出、
-//! 由 `session` 认回，两个插件互相不可见，只有 core 是共同可见处。
+//! 错位），因此放在一起。而它们能落在本 crate，是因为**跨插件**：名字由 `model` 发出、
+//! 由 `session` 认回，两个插件互相不可见，只有本 crate 是共同可见处。
 //!
 //! 对照：`ModelProvider` 是同样的形状——**契约**在
-//! core（session 只认这个 trait），**协议字段名与实现**在 model 插件
+//! 本 crate（session 只认这个 trait），**协议字段名与实现**在 model 插件
 //! （`crates/symbio-plugin-model/src/protocols/` 的四个适配器）。本模块里没有任何协议字段名，只有字符集与
 //! 分隔符这两个「契约本身」的参数。
 //!

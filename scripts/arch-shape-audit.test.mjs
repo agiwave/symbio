@@ -415,7 +415,7 @@ test('CS-009 的放宽同样要挂能打开的决策（`core-shape-allow enumVar
 // ==================== 判据自己不能哑火 ====================
 
 test('读不出 core 范围 ⇒ 退出 1（宁红不静默）', () => {
-  const r = audit({ 'README.md': '没有 symbio_core 的仓库\n' }, { baseline: '0:0:0' })
+  const r = audit({ 'README.md': '没有 symbio_kernel 的仓库\n' }, { baseline: '0:0:0' })
   assert.equal(r.status, 1, '没有输入时不许绿灯')
   assert.match(r.stderr, /读不出 core 范围/)
 })

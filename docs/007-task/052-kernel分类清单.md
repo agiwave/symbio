@@ -6,7 +6,7 @@ status: todo
 track: arch
 prio: later
 created: 2026-11-08
-deps: [T-050-架构文档与残留对齐]
+deps: []
 where: "`crates/symbio-kernel/src`（`store/mod.rs` 144-225 行的 `MemoryStore`、`capability/mod.rs` 293-302 行的 `capability_invoke`、`exec/mod.rs`、`present/detail.rs` / `present/reading.rs`）；`crates/symbio-sdk/src`"
 exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（语法 / 冻结求解器 / 可替换实现 / 契约 / 机制）/ 处置（留守 / 下沉 sdk）/ 理由），不改代码；清单经批准后才搬迁；判据是「任何能力都用同一份、且换实现就破坏语义」——能过可替换性检验的下沉 sdk，不能的把理由写死在清单里；`MemoryStore` / `capability_invoke` / `exec` / `present` 四块逐块有结论；环求解器不因「判据好看」搬走；搬迁后 `gate --full` 全绿
 ---

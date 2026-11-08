@@ -45,7 +45,7 @@ export const GUARDS = [
   // **manifest 依赖边不在本脚本判**——它只有 `plugin-entry-audit` 的 E-009 一个 owner，
   // 避免同一行依赖出现两道门。HS-002 / HS-006 仍把门面白名单钉成**只许降**的账本。
   'plugin-surface-audit',
-  // `arch-shape-audit` 判 `symbio_core` 的**公共形状**（CS-001 三格棘轮：`pub trait` 数 /
+  // `arch-shape-audit` 判 `symbio_kernel` 的**公共形状**（CS-001 三格棘轮：`pub trait` 数 /
   // `fn` 成员总数 / 带默认体的成员数；CS-002：放宽数字必须挂一条能打开的 ADR）。
   // 它补的是 `SP-007`「架构改动必须逐条论证必需」唯一的真缺口：那条纪律的判据一直写着
   // 「人工核对」，而 C2 那一批（把一个 trait 扩成十个方法、多挂 9 个默认体）在既有全部
@@ -461,7 +461,7 @@ export const GUARDS = [
   // `dead-path-audit`（DR-001…003）判**写出来的 crate 名必须存在**：源码与现行文档里
   // 出现 `symbio_<名字>::` 或 `crates/symbio-<名字>/`，就到 `crates/` 下找同名目录。
   //
-  // 它补的是 D-279 之后最大的一片静默失效：`symbio_core` 整棵删掉，留下 **186 处**指向
+  // 它补的是 D-279 之后最大的一片静默失效：旧 core 整棵删掉，留下 **186 处**指向
   // 它的路径——`doc-symbol-audit` 只验 `module::symbol` 的最后一段在 Rust 语料里存在
   // （`PLUGIN_PAYLOAD_KEY` 确实存在，只是不在那个 crate 里），`doc-link-audit` 只管相对
   // 链接，`arch-shape-audit` 只管架构 crate 的形状。于是「一个不存在的 crate」可以被

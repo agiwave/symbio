@@ -77,7 +77,7 @@ const SOURCE_EXTS: &[&str] = &[
 /// 不纳入索引。
 ///
 /// 阈值 5000 来自本仓的实测空档：最大的正常源码是 VDFS 纯接口（原单文件
-/// 1640 行，现拆在 `symbio_core/vdfs/` 下），而 `tokenizer.json` 是 21,277 行、
+/// 1640 行，现拆在 `crates/symbio-kernel/src/vdfs/` 下），而 `tokenizer.json` 是 21,277 行、
 /// `package-lock.json` 是 7,249 行——两者之间
 /// 隔着数量级，5000 行能干净地把"人写的代码"和"工具吐的数据"分开。
 ///
@@ -760,7 +760,7 @@ async fn save_to_disk(workdir: &Path, idx: &CodeIndex) -> std::io::Result<()> {
 /// 同一个查询 = 同一份 top-k」。缺了这一半，平手块的先后由 `files`/`chunks` 的
 /// 向量顺序决定，而那个顺序是**增量重建的历史**（哪些文件上次被重嵌过）——
 /// 代码没动、索引没变，两次调用却可能给出不同的前 k 条。
-/// 记忆面的同一判据住在 [`symbio_core`] 的召回排序内核里（平手看编码时刻、
+/// 记忆面的同一判据住在 [`symbio-sdk`] 的召回排序内核里（平手看编码时刻、
 /// 再看 seq），两边打分各归各（词面重叠 vs 余弦），只有这条是全项目一份。
 async fn semantic_search(
     index: &CodeIndex,

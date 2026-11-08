@@ -551,7 +551,7 @@ fn validate_working_dir(provided: &str) -> Result<String, PluginError> {
 /// 接口）：容器把子插件按**实例名**列为子目录，而 `route` 分发用的是同一个键，
 /// 因此 `session/<sid>` 命中的正是本工具要写入收件箱的那个会话插件实例
 /// ——子智能体分形子树里同样成立。用到的 `vdfs_context` / `VdfsProvider` / `VdfsNode`
-/// 全在 `symbio_core`：线路形状（`vdfs/*` 的信封）不进本文件，也不新增插件间依赖。
+/// 全在 `symbio-kernel`：线路形状（`vdfs/*` 的信封）不进本文件，也不新增插件间依赖。
 async fn validate_subsession_exists(
     parent: Arc<dyn Plugin>,
     ctx: &Arc<dyn PluginInvokeRequest>,
@@ -635,7 +635,7 @@ async fn register_subsession(
     Ok(())
 }
 
-// 实时面的**解包**不在这里：`event_bus_vdfs_change_of` 走 `symbio_core` 的公共入口
+// 实时面的**解包**不在这里：`event_bus_vdfs_change_of` 走 `symbio-sdk` 的公共入口
 // （信封形状是跨模块契约，本文件曾是三份手写副本之一）。这里只留「解出来之后怎么用」。
 
 /// 一条变更是否落在**某条消息节点自身**的地址上（`<sid>/message/<mid>`）。

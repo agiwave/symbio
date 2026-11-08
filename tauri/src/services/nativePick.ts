@@ -5,7 +5,7 @@
  *
  * 它是**机制级原语**（目录 / 文件选择），不含任何业务语义；闭集与线上面
  * （`DetailField.pick`）的唯一定义处是 `schemas/vdfs-form.DETAIL_PICKS`
- * （后端对应 `symbio_core/schemas/detail.rs` 的 `DETAIL_PICK_*`）。
+ * （后端对应 `crates/symbio-kernel/src/present/detail.rs` 的 `DETAIL_PICK_*`）。
  *
  * 取值结果由调用方按自己的绑定写入字段 / 载荷——本模块**不知道**谁会用它。
  *

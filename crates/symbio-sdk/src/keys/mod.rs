@@ -15,7 +15,7 @@
 //! 本域自此只留**值类型为通用词汇**（`String` / `Value` / `Vec<String>`）的键——
 //! 那些键没有「原生域」可回，机制（[`SymbioKey`] trait）是它们唯一的家。
 //! 先例：`TURN_DISPATCH`（值类型 `TurnDispatch`）本就住 `turn` 域。
-//! 判据见 `symbio_core/README.md` §1.2 与 D-095。
+//! 判据见 D-095。
 //!
 //! ## 命名：两种形态，互不重叠
 //!
@@ -36,8 +36,7 @@
 //! 本域**只收上下文键**。跨进程 / 跨文件的字面量按「它描述什么」归各自的域——
 //! 插件 id 归装配方（`crates/symbio-deploy/src/lib.rs`），路由地址归 `crate::routes`，
 //! 遍历端点归 `plugin::traverse`，
-//! 嵌入服务 id 归 `embedding::ids`，信封载荷键归 `plugin`。判据见
-//! `symbio_core/README.md` §1.2。
+//! 嵌入服务 id 归 `embedding::ids`，信封载荷键归 `plugin`。判据见 D-095。
 
 pub use symbio_kernel::keys::SymbioKey;
 

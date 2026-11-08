@@ -43,8 +43,10 @@ created: 2026-07-20
 ```
 symbio/
 ├── crates/ # Rust 全 workspace（根 Cargo.toml 的 members；cargo 命令在仓库根跑）
-│ ├── symbio-core/ # 框架层：Plugin trait / 路由 / Schema
-│ ├── symbio-kernel/ # 内核：控制面 / 事件 / 投影
+│ ├── symbio-kernel/ # 封闭语法：事件 / 视图 / Store / 投影构造器
+│ ├── symbio-sdk/ # 宿主机制与策略：配置 IO / 事件总线 / 授权
+│ ├── symbio-plugin-api/ # 扩展层门面：插件唯一的宿主依赖
+│ ├── symbio-host/ # 宿主运行时：port 行 / 每会话驱动
 │ ├── symbio-plugin-*/ # 业务插件（各含 README.md）
 │ ├── symbio-provider-*/ # 基础设施（嵌入、文件存储）
 │ ├── symbio/ # 装配 crate：根插件装配入口
@@ -284,7 +286,7 @@ mod tests;
 ## 5. 插件开发流程
 
 新增一个业务插件的最短路径（**加插件 = 建 crate 目录 + 写 `PLUGIN.yml` + 实现声明**，
-装配方与 `symbio_core` 零改动）：
+装配方与 `symbio-kernel` / `symbio-sdk` 零改动）：
 
 1. 建 crate：`crates/symbio-plugin-<name>/`，内含
  `Cargo.toml`（`name = "symbio-plugin-<name>"`，内部依赖走 `path`，外部版本一律 `{ workspace = true }`）、

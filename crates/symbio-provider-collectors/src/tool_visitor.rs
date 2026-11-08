@@ -1,6 +1,6 @@
 //! 默认能力收集器 —— [`Registry`] 的内存实现
 //!
-//! ## 为什么在 `providers/` 而不是 `symbio_core`
+//! ## 为什么在 `providers/` 而不是 `symbio-sdk`
 //!
 //! 本类型的**写入者是全体插件**（经 `ctx` 的 `CAPABILITY_VISITOR` 键注册工具 / 模型服务 /
 //! 系统提示词 / VDFS 挂载点），安装它的宿主（session 的 `collect_capabilities`）只是

@@ -39,9 +39,9 @@ function withRepo(ids, fn) {
   }
 }
 
-const CARGO_HEAD = "[dependencies]\nsymbio-core = { path = \"../symbio-core\" }\n";
+const CARGO_HEAD = "[dependencies]\nsymbio-sdk = { path = \"../symbio-sdk\" }\n";
 const CARGO_TAIL = "inventory = \"0.3.24\"\n";
-const LIB_HEAD = "pub use symbio_core;\n";
+const LIB_HEAD = "pub use symbio_sdk;\n";
 
 test("两个目录 ⇒ 两条依赖行 + 两条链接行，块外字节原样保留", () => {
   withRepo(["alpha", "beta"], (root) => {

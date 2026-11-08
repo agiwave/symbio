@@ -2,7 +2,7 @@
 //!
 //! 两个收集器是**同一件事的两半**（`collect_capabilities` 收工具、
 //! `collect_options` 收选项字段），同处本文件；「收集机制」的契约
-//! （`Registry` 收集口三方法与端点字面量）留在 `symbio_core`。
+//! （`Registry` 收集口三方法与端点字面量）留在共享层（`symbio-kernel` / `symbio-sdk`）。
 //!
 //! ## 背景
 //!
@@ -34,10 +34,10 @@
 //!
 //! 本管线的唯一驱动方是 session 编排器：子智能体（agent 插件的 `agent_run`）需要
 //! 嵌套会话时，经收件箱地址写入（`vdfs/write <子会话地址>/inbox`）复用本管线，而非由
-//! agent 插件直接调用——管线不再是跨插件共享设施，故从 `symbio_core` 下沉到 session
+//! agent 插件直接调用——管线不再是跨插件共享设施，故从旧 core 下沉到 session
 //! 插件内部。
 //!
-//! 仍留在 `symbio_core` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
+//! 仍留在 `symbio-sdk` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
 use std::sync::Arc;
@@ -150,9 +150,9 @@ pub(crate) fn require_agent_scope(
 
 // ==================== 选项收集机制（宿主侧） ====================
 //
-// 本段原是 `symbio_core/capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是
+// 本段原是旧 core 的 `capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是
 // D-023 的「依赖方数量」——契约（收集口三方法与 `TRAVERSE_AVAILABLE_OPTIONS`
-// 端点字面量）两侧都认，留在 core；而「谁来收集」只有会话宿主一个答案。
+// 端点字面量）两侧都认，留在共享层；而「谁来收集」只有会话宿主一个答案。
 // 它与平行物 `collect_capabilities` 是**同一件事的两半**（工具 / 选项各一半），
 // 故两者同处本文件，不因历史路径而分居。
 //

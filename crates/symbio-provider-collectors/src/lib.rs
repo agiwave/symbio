@@ -1,6 +1,6 @@
 //! 收集器的默认实现 —— 收集口 trait 的内存版（`DefaultToolVisitor`）
 //!
-//! ## 为什么在 `providers/` 而不是 `symbio_core`
+//! ## 为什么在 `providers/` 而不是 `symbio-sdk`
 //!
 //! 收集口 **trait** 是契约（住 `symbio_sdk::capability`）；它的**默认实现**
 //! 是「不存在第二种实现的机制底座」，因此按 `crate::providers` 的第二种接线方式

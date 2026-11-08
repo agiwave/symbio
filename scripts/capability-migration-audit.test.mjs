@@ -376,7 +376,7 @@ test('supplementErrors：搬家行不算补件定制（D-279）', () => {
   // 那一行字没变、面也没变宽。夹具里把 id 换成本文件的 `notes`，道理相同。
   const line = 'pub const NOTES_TAG: &str = "notes";'
   const moved = movedLines(
-    patchOf([{ path: 'crates/symbio-core/src/actors/skill.rs', deleted: true, removed: [line] }]),
+    patchOf([{ path: 'crates/symbio-sdk/src/actors/skill.rs', deleted: true, removed: [line] }]),
   )
   assert.deepEqual(supp('feat: 搬迁\n\nCore-Change: D-219', [{ path: CORE, added: [line], removed: [] }], { moved }), [])
 })
@@ -384,7 +384,7 @@ test('supplementErrors：搬家行不算补件定制（D-279）', () => {
 test('supplementErrors：搬家豁免只抵一次（同一行新增两处仍红）', () => {
   const line = 'pub const NOTES_TAG: &str = "notes";'
   const moved = movedLines(
-    patchOf([{ path: 'crates/symbio-core/src/actors/skill.rs', deleted: true, removed: [line] }]),
+    patchOf([{ path: 'crates/symbio-sdk/src/actors/skill.rs', deleted: true, removed: [line] }]),
   )
   const errors = supp(
     'feat: 搬迁\n\nCore-Change: D-219',
@@ -406,7 +406,7 @@ test('supplementErrors：从 loop 删掉同一行再加进 sdk ⇒ 仍红（反�
 test('movedLines：只收「整份文件被删掉」的那些行', () => {
   const moved = movedLines(
     patchOf([
-      { path: 'crates/symbio-core/src/a.rs', deleted: true, removed: ['pub fn a() {}', ''] },
+      { path: 'crates/symbio-sdk/src/a.rs', deleted: true, removed: ['pub fn a() {}', ''] },
       { path: LOOP, added: [], removed: ['pub fn b() {}'] },
     ]),
   )

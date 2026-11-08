@@ -11,7 +11,7 @@
  * - `ASSEMBLY_SUB_AGENT_PLUGINS` ← `plugin_assembly: sub_agent`，按 `plugin_order`
  * - `ASSEMBLY_UNDISABLABLE_PLUGINS` ← `plugin_undisablable: true`
  *
- * **加插件 = 建目录 + 写 `PLUGIN.yml` + 声明**；`assembly.rs` 与 `symbio_core` 零改动
+ * **加插件 = 建目录 + 写 `PLUGIN.yml` + 声明**；`assembly.rs` 与共享层零改动
  * （DE-023 D-181 / C5）。命中手改时，门禁 `gen-facts --check` 判红。
  *
  * ## 命名规则

@@ -7,7 +7,7 @@
  *   ⑥ 范围读不出（缺 `crates/`）→ exit 2；
  *   ⑦ 门面里有一条扩展层零引用的符号 → exit 1 —— 白名单不许有空转条目（HS-003）；
  *   ⑧ 胶水层的嵌入臂被设为默认 → exit 1，⑨ 不是 `optional` → exit 1 —— 重臂默认必须关（HS-004，D-254）；
- *   ⑩ 门面自己的 manifest 依赖 `symbio-core` → exit 1 —— 机制臂归零之后把回头路堵死（HS-005，D-276）；
+ *   ⑩ 门面自己的 manifest 依赖旧 core 的 crate 名 → exit 1 —— 机制臂归零之后把回头路堵死（HS-005，D-276）；
  *   ⑪ 门面模块级转发条数超过基线 → exit 1 —— 一行换 N 条也得在账上有数（HS-006，D-278）；
  *   ⑫ 机制臂块回到门面 → exit 1 —— 判据按**来源分区**读，不靠一条会失灵的块锚点（D-280）；
  *   ⑬ 门面一条 `pub use …::` 都读不到 → exit 1 —— 「0 条机制臂」与「一条都没读到」不许长得一样（D-280）。
@@ -31,6 +31,8 @@ import {
   readGrammar,
   readWhitelist,
   MODULE_REEXPORT_BASELINE,
+  RETIRED_CORE_CRATE,
+  RETIRED_CORE_MODULE,
   SDK_BASELINE,
   WHITELIST_BASELINE,
 } from './plugin-surface-audit.mjs'
@@ -301,12 +303,12 @@ test('⑫ 嵌入臂默认关闭 ⇒ 绿（HS-004 的正例）', () => {
   }
 })
 
-test('⑬ 门面 manifest 依赖 symbio-core ⇒ 红（HS-005，D-276）', () => {
+test('⑬ 门面 manifest 依赖旧 core 的 crate 名 ⇒ 红（HS-005，D-276）', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
     'symbio-plugin-api': {
       rs: 'pub use symbio_sdk::{Event, Plugin};\n',
-      manifest: CLEAN_MANIFEST + 'symbio-core = { path = "../symbio-core" }\n',
+      manifest: CLEAN_MANIFEST + `${RETIRED_CORE_CRATE} = { path = "../${RETIRED_CORE_CRATE}" }\n`,
     },
   })
   try {
@@ -365,7 +367,7 @@ test('readWhitelist 只认机制臂那一个块锚点', () => {
   //    `i < 0 → []` 的早退蒙混过关——否则「读不出」与「已经归零」在测试里长得一模一样，
   //    正是 D-280 记的空转绿形状（夹具消失，判据扫 0 条，报绿）。
   const old = fixture({
-    'symbio-plugin-api': { rs: 'pub use symbio_core::{\n    A, B,\n    C,\n};\n' },
+    'symbio-plugin-api': { rs: `pub use ${RETIRED_CORE_MODULE}::{\n    A, B,\n    C,\n};\n` },
   })
   try {
     assert.deepEqual(readWhitelist(old), ['A', 'B', 'C'])
@@ -405,7 +407,7 @@ test('readGrammar 收齐多个 kernel 分块，且 `as` 取别名', () => {
   try {
     // 语法臂按来源分块，读的时候必须全收——只读第一块会让多半语法臂逃过 HS-003。
     assert.deepEqual(readGrammar(root), ['Event', 'Seq', 'VdfsError', 'vdfs_unavailable_reason'])
-    // 机制臂块（`symbio_core::`）在夹具里不存在 ⇒ 空清单，不是「读不出」
+    // 机制臂块（旧 core 来源）在夹具里不存在 ⇒ 空清单，不是「读不出」
     assert.deepEqual(readWhitelist(root), [])
   } finally {
     rmTree(root)
@@ -413,12 +415,14 @@ test('readGrammar 收齐多个 kernel 分块，且 `as` 取别名', () => {
 })
 
 test('⑮ 机制臂块回到门面 ⇒ 红（HS-002）：判据靠来源分区，不靠死锚点', () => {
-  // 这一条是 D-280 的正例：`symbio_core` 整棵删掉之后，`BLOCK_START` 式的块锚点再也打不中，
+  // 这一条是 D-280 的正例：旧 core 整棵删掉之后，`BLOCK_START` 式的块锚点再也打不中，
   // HS-002 于是恒读到「0 条」、恒等于基线、恒绿。改判「门面把这些 `pub use` 发给了谁」之后，
   // 任何一个三臂之外的来源都算机制臂——不需要锚点，写回来就红。
   const root = fixture({
     'symbio-plugin-fix': { rs: 'use symbio_plugin_api::Event;\npub fn f(_: Event) {}\n' },
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\npub use symbio_core::{LegacyThing};\n' },
+    'symbio-plugin-api': {
+      rs: `pub use symbio_sdk::{Event};\npub use ${RETIRED_CORE_MODULE}::{LegacyThing};\n`,
+    },
   })
   try {
     const r = runOn(root)

@@ -51,7 +51,7 @@ const V2_WAL = 'v2-events.wal';
 /** `messages.json`（与 `crates/symbio-plugin-session/src/store/mod.rs::MESSAGES_FILE` 同一常量口径） */
 const MESSAGES_JSON = 'messages.json';
 
-/** 归档段子目录（与 `symbio_core/store/wal.rs::WAL_ARCHIVE_SUBDIR` 同一常量口径） */
+/** 归档段子目录（与 `crates/symbio-plugin-session/src/store/wal.rs::archive_dir_of` 同一拼法） */
 const WAL_ARCHIVE_SUBDIR = join('transcripts', 'wal-archive');
 
 /** 推高水位的大段回复（CJK ≈ 1 token/字，见 t8 的实测口径） */

@@ -60,8 +60,8 @@ deps: [DE-009-VDFS规范]
 
 | 层 | 落点 | 说明 |
 |---|---|---|
-| 纯接口 | `symbio_core/vdfs/` | `VdfsProvider` trait + 域类型 |
-| 宿主桥 | `symbio_core/vdfs/host.rs` | 上下文注入 + 错误翻译 |
+| 纯接口 | `crates/symbio-kernel/src/vdfs/` | `VdfsProvider` trait + 域类型 |
+| 宿主桥 | `crates/symbio-sdk/src/vdfs/host.rs` | 上下文注入 + 错误翻译 |
 | 线路信封 | `crates/symbio-plugin-vdfs/src/protocol.rs` | 13 个 `vdfs/*` 操作（闭集 `VDFS_OPS`，成员逐个列在该常量里；清单见 `docs/004-ref/006-当前事实表.md` §3.2）+ 使用方形状 |
 | 访问层 | `crates/symbio-plugin-vdfs/src/fs.rs` + `host.rs` | `<根>`/物理分流（UnifiedFs）+ 翻译操作 + 树遍历 + 事件投递 |
 | 拓扑 | `crates/symbio-plugin-composite/src/vdfs.rs` | 逐子插件经 `Plugin::get_vfs_provider` 查询聚合子目录 provider → 组合成包含子目录列表的 provider（系统链路）；`traverse` 中经根行 `put(CapabilityRow::mount_root(…))` 登记供 LLM 工具取根，并按同一判据为子插件派生挂载行（插件不自行注册） |

@@ -1,7 +1,7 @@
 //! `providers/collectors/tool_visitor.rs` 的单元测试。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
-//! 这三条原在 `symbio_core/capability/tools.test.rs`，随默认收集器一起迁出 core。
+//! 这三条原在旧 core 的 `capability/tools` 用例，随默认收集器一起迁出。
 
 use super::*;
 

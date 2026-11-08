@@ -1,5 +1,5 @@
 /**
- * 对话消息的数据契约（与后端 `symbio_core` 的消息形状对齐）
+ * 对话消息的数据契约（与后端 `crates/symbio-kernel/src/chat/chat_node.rs` 的消息形状对齐）
  *
  * ## 为什么词表要有**运行时常量**，而不只是类型联合
  *

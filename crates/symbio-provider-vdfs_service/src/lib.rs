@@ -16,7 +16,7 @@
 //! 三者的磁盘布局**完全一致**（`<类别根>/<id>/<manifest>`），
 //! 差别只在**访问拓扑**，因此换型不动数据。
 //!
-//! ## 为什么放在 providers 而不是 symbio_core
+//! ## 为什么放在 providers 而不是 `symbio-sdk`
 //!
 //! `symbio_kernel::vdfs` 是**纯接口**（只依赖 std / serde / async_trait，
 //! 可原样抽出为独立 crate）；带 tokio IO 与 homedir 的**实现**属于宿主基础设施，

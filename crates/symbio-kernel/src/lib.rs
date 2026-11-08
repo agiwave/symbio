@@ -5,9 +5,8 @@
 //! actor 策略 / 执行体）住在 `symbio_sdk` 与各 owner 插件——加一项词汇或行为不应
 //! 落进本 crate（DE-023 D-177）。
 //!
-//! 依赖方向单向：`symbio_sdk`（宿主机制与策略）依赖本 crate，反过来不成立。D-279 之前
-//! 中间还有一层 `symbio_core`，它把实现放在本 crate 的私有模块转发之上；那一层已经整体
-//! 并进 `symbio_sdk`，仓内写法统一成 `symbio_kernel::event::…`；根账本归控制面（C-003 / C-004）。
+//! 依赖方向单向：`symbio_sdk`（宿主机制与策略）依赖本 crate，反过来不成立。D-279 把中间那层
+//! 整体并入 `symbio_sdk`，仓内写法统一成 `symbio_kernel::event::…`；根账本归控制面（C-003 / C-004）。
 //!
 //! ## 内核文件集
 //!

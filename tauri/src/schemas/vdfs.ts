@@ -157,7 +157,7 @@ export interface VdfsAccess {
 /**
  * 目录可接受的**新建元素类型**（「新建」入口的类型）——**至多一个**。
  *
- * 对齐后端 `symbio_core/vdfs/node.rs` 的 `VdfsNewType`。
+ * 对齐后端 `crates/symbio-kernel/src/vdfs/node.rs` 的 `VdfsNewType`。
  *
  * 一个目录接受的是**一类**东西（`session` 目录只收会话、`model` 目录只收模型），
  * 所以节点上声明的是 `new_type?: VdfsNewType` 而不是一张清单。

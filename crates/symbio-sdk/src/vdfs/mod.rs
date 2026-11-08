@@ -6,8 +6,8 @@
 //!
 //! ```text
 //! crates/symbio-kernel/src/vdfs/*.rs     纯接口：VdfsProvider trait + 域类型（words / access / node / …）
-//! symbio_core/vdfs/host.rs        symbio 桥：上下文注入 + 错误翻译 + 变更广播
-//! symbio_core/vdfs/address.rs     当前父地址机制：根的静态声明 + 拼接 + 路径守卫
+//! crates/symbio-sdk/src/vdfs/host.rs      symbio 桥：上下文注入 + 错误翻译 + 变更广播
+//! crates/symbio-sdk/src/vdfs/address.rs   当前父地址机制：根的静态声明 + 拼接 + 路径守卫
 //! providers/vdfs_service/         存储实现：单文件 / 目录 / 内存三种拓扑
 //! crates/symbio-plugin-vdfs/src/protocol.rs        线路信封：vdfs/* 请求响应 + 协议路径常量
 //! crates/symbio-plugin-vdfs/src/fs.rs              地址规则（根名在这里）+ 两半分流 + 展示口径映射

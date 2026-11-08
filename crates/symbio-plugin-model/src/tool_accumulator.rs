@@ -1,6 +1,6 @@
 //! 工具调用增量累积 —— **流式状态机**（只有本插件驱动它）。
 //!
-//! ## 为什么住在这里，而不是 `symbio_core`
+//! ## 为什么住在这里，而不是共享层
 //!
 //! 唯一的驱动方是本插件的 `stream.rs`：它按协议增量逐块喂 [`process_delta`]。
 //! session 只读**结果**（`TurnOutput::tool_calls`），从不驱动累积过程——即
@@ -15,8 +15,8 @@
 //!
 //! | 符号 | 住哪 | 理由 |
 //! |---|---|---|
-//! | [`TurnToolCallInfo`] | `symbio_core` | `TurnOutput::tool_calls` 的**元素类型**：本插件产出、session（`tool_executor` · 落库）消费，两个插件共用 |
-//! | `llm_short_id` | `symbio_core` | 消息节点 id 的统一格式：本模块（`entry.node_id`）与 session 的消息构造共用 |
+//! | [`TurnToolCallInfo`] | `symbio-kernel` | `TurnOutput::tool_calls` 的**元素类型**：本插件产出、session（`tool_executor` · 落库）消费，两个插件共用 |
+//! | `llm_short_id` | `symbio-kernel` | 消息节点 id 的统一格式：本模块（`entry.node_id`）与 session 的消息构造共用 |
 //! | [`TurnToolCallAccumulator`] | 本模块 | 只有 `stream.rs` 驱动 |
 //!
 //! ## 三条不变量

@@ -1,4 +1,4 @@
-//! 嵌入服务抽象（symbio_core 层）
+//! 嵌入服务抽象（`symbio-sdk` 层）
 //!
 //! 这是 `providers/`（具体实现层）之上的**抽象接口层**：trait 在此定义，
 //! 具体实现（Local / Noop 等）放在 `src/providers/embedding`，
@@ -10,7 +10,7 @@
 //!
 //! ## 设计原则
 //!
-//! - **抽象在 symbio_core**：所有可插拔服务的 trait 都在这里定义
+//! - **抽象在本 crate**：所有可插拔服务的 trait 都在这里定义
 //! - **实现在 `providers/`**：trait 的具体实现放在 `src/providers/`
 //! - **统一工厂**：所有服务的实例都通过 `creator_create_object::<dyn XXXService>(...)` 获取
 //! - **不依赖具体实现**：业务模块只 `use` 这里的 trait，不 `use` `providers::xxx` 的具体类型

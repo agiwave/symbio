@@ -6,7 +6,7 @@ status: todo
 track: arch
 prio: later
 created: 2026-11-08
-deps: [T-050-架构文档与残留对齐]
+deps: []
 where: "`crates/symbio-plugin-api/src`（`effects.rs` 519 行、`port.rs` 540 行、`text.rs` 286 行、`context.rs` 327 行、`reports.rs` 327 行）；`crates/symbio-sdk/src`；`scripts/plugin-surface-audit.mjs`（HS-002 / HS-006）"
 exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 / 实现 / 机制）/ 处置（留守 api / 迁 sdk / 只转出）），不改代码；清单经批准后才搬迁；api 只留纯类型、宏、声明面与 re-export；`effects::apply`、端口能力校验、`text` 预算算术、`context` 拼装迁 sdk、api 只转出；`reports` 拆开——`ReportDecl` / `submit_reports!` / `inventory` 是契约，`validate` / `reports()` / `read_view` 是实现；HS-002 / HS-006 各补一条「自有实现」约束（不只数转发条数）；搬迁后 `gate --full` 全绿
 ---

@@ -28,15 +28,17 @@
 //! | 语法臂 | `symbio-kernel` | 136 | 形状与闭集，**不计债但计件**（D-278） |
 //! | SDK 臂 | `symbio-sdk` | 114 | 只碰内核词汇的宿主机制（含授权判定），进棘轮 |
 //!
-//! 第三臂（`symbio-core`，6 条授权符号）已于 D-276 清零：授权判定只查一张部署表，
+//! 第三臂（旧 core 的 6 条授权符号）已于 D-276 清零：授权判定只查一张部署表，
 //! 不认识轮次 / 幕 / 判决，按 sdk 自己的章程（「插件要用的宿主机制……授权判定」）归位。
-//! 本 crate 的 manifest 因此**不含** `symbio-core`，HS-005 判它不许回头。
+//! 本 crate 的 manifest 因此**只列** `symbio-kernel` / `symbio-sdk` / `symbio-deploy` 三条，
+//! HS-005 判它不许回头。
 //!
-//! 插件因此只写 `symbio_plugin_api::…`，manifest 里也不列 `symbio-core` /
-//! `symbio-kernel` / `symbio-sdk` / `symbio-deploy`；控制面（`loop` / `session`）
-//! 不在此列，它们按影响类运行、本来就认识宿主的容器概念（D-253）。判据是
+//! 插件因此只写 `symbio_plugin_api::…`，manifest 里也不列 `symbio-kernel` /
+//! `symbio-sdk` / `symbio-deploy`；控制面（`loop` / `session`）不在此列，它们按影响类
+//! 运行、本来就认识宿主的容器概念（D-253）——`loop` 只依赖内核（连 `symbio-sdk` 都不依赖），
+//! `session` 依赖内核与 `symbio-sdk`。判据是
 //! `plugin-surface-audit`（HS-001 零直接依赖 / HS-002 两臂棘轮 / HS-003 无空转条目 /
-//! HS-005 门面不依赖 core / HS-006 语法臂与模块级转发只许不涨）。
+//! HS-005 门面 manifest 三条 / HS-006 语法臂与模块级转发只许不涨）。
 //!
 //! 插件不得依赖宿主 crate（`symbio`）——那会形成「插件 ← 宿主 ← 插件」的环。
 //! `declarations` 只依赖 `symbio-sdk` 的声明容器，不认识任何具体插件；收集在链接期
@@ -105,7 +107,7 @@ pub use views::ViewUnavailable;
 // 重新变成不可审的隐式集合——那正是本块要消除的东西。
 //
 // **控制面不在此列**：`loop` / `session` 按 DE-026 的影响类运行，本来就认识宿主的容器
-// 概念（`turn` / 幕），继续直接依赖 core；EX-008 的边界正是这一条。把它们也压进本门面，
+// 概念（`turn` / 幕），直接依赖内核（`session` 另加 `symbio-sdk`）；EX-008 的边界正是这一条。把它们也压进本门面，
 // 只会逼出一批「端口形状不说容器词」的假豁免。
 //
 // 装配常量走 `symbio-deploy`（零内部依赖的生成物——插件 id 与装配位是部署契约，
@@ -221,14 +223,14 @@ pub use symbio_sdk::{
 };
 
 // ---- 授权判定：机制臂的一部分，单列成账（D-276） ----
-// 这几条曾以「认识容器概念」为由留在 `symbio-core`（D-259），门面于是为它们整块依赖
+// 这几条曾以「认识容器概念」为由留在旧 core（D-259），门面于是为它们整块依赖
 // 控制面——21 个扩展层插件的编译图里都躺着 grep / ignore / notify（实测多 34 个 crate）。
 // D-276 复核后改判：`principal_of` / `production_matrix` 只查一张**部署表**，`CAP_*` 是那张
 // 表的闭集，`actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——
 // 没有一条认识轮次、幕或判决。而 `symbio-sdk` 的章程本来就写着「授权判定」，欠的是实现。
 //
 // 这几条与上面的 SDK 臂同源、同一把尺子（HS-002），因此**并入 SDK 基线**：core 臂归零，
-// HS-005（门面 manifest 不得依赖 `symbio-core`）随之成立。
+// HS-005（门面 manifest 只许三条）随之成立。
 pub use symbio_sdk::actors::{actor_can_assign_work, commitment_events};
 pub use symbio_sdk::authz::{
     principal_of, production_matrix, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK, PRINCIPAL_AUTONOMOUS,

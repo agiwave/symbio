@@ -37,7 +37,7 @@ pub const PRINCIPAL_USER: &str = "person/local";
  * 三处都要建出来：`PRINCIPAL_*` 常量横跨 `keys`（机制层要用的主体名）与 `authz`
  * （授权表自己的主体名）两个文件，生成器读的是**并集**。只建一处，测的就不是真形状。
  *
- * 三个目录**全在 `symbio-sdk`**：`governance` / `authz` 于 D-276 从 `symbio-core` 搬进来
+ * 三个目录**全在 `symbio-sdk`**：`governance` / `authz` 于 D-276 从旧 core 搬进来
  * （授权判定只查一张部署表，不认识轮次、幕与判决），`keys` 早在 D-258 就住这里。
  * 夹具跟着真仓走——判据读哪个路径，夹具就建哪个路径，否则测的是一棵不存在的仓库。
  */

@@ -306,7 +306,7 @@ pub async fn capability_invoke(
 /// ## 为什么需要共享常量
 ///
 /// 这些词是**工具（生产方）与编排层（消费方）之间的约定**，而两者分属不同插件
-/// （`local` / `session`），互相不可见，只能经 `symbio_core` 共享。写成字面量会
+/// （`local` / `session`），互相不可见，只能经共享层（`symbio-kernel` / `symbio-plugin-api`）共享。写成字面量会
 /// 立刻分裂：编排层里已有一处硬编码判定
 /// （`k == "error" || k == "needs_approval" || k == "needs_interaction"`），
 /// 再加一个「等待用户」的 kind 就得记得同步改它——忘掉的表现是**交互模式下本批

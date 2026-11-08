@@ -189,7 +189,7 @@ impl SymbioClient {
         // 判定型守卫强制。
         //
         // 常量从 `symbio::routes` 导入（宿主侧地址模块，DE-023 D-184），
-        // 不再是 `symbio_core` 的根出口——地址常量随 `fire_hook` 一起搬出了内核。
+        // 不再是 `symbio-kernel` 的根出口——地址常量已随 `fire_hook` 一起搬出了内核。
         ctx.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
         ctx.set_payload(EventBusSubscribeRequest {})
             .map_err(|e| format!("构造订阅载荷失败: {e}"))?;

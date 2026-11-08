@@ -8,8 +8,8 @@
 //! **F2** 的后半句：投影返回 `View` 而**不是** `Result`——「可降级」是类型义务
 //! 而不是约定：超预算的投影返回 `degraded: true`，对话永不因状态爆炸而中断。
 //!
-//! 召回视图与可见域登记表是**词汇**（谁的记忆、哪个 namespace），住 `symbio_core`
-//! 的 `view` 模块；本模块只装 [`Budget`] / [`View`] 这两个封闭语法（DE-023 D-188）。
+//! 召回视图与可见域登记表是**词汇**（谁的记忆、哪个 namespace），住 `symbio-sdk` 的 `view` 模块；
+//! 本模块只装 [`Budget`] / [`View`] 这两个封闭语法（DE-023 D-188）。
 
 /// 投影预算（I3 记账口径）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

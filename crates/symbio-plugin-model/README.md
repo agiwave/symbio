@@ -63,7 +63,7 @@ DE-002 选 `tract-onnx` 而弃 ORT，理由有三（零 C/C++ 编译、不引入
 
 ### D-096 快速档裁 (ii) 一次受限模型调用，ClassifyOnly 令牌闸门显式退役——「不得生成」的强制力搬到返回类型与工具集判据上
 
-快速档 = (ii) 一次受限的模型调用（不是 (i) 纯规则分类器）， `ClassifyOnly` / `TokenIssuer::issue_fast` / `CanClassify` / `CanGenerate` 从 `symbio_core` 契约面收掉， `RuleOnly` / `FullModel` 两档令牌与 `LlmAdapter::generate(&FullModel)` 不动。
+快速档 = (ii) 一次受限的模型调用（不是 (i) 纯规则分类器）， `ClassifyOnly` / `TokenIssuer::issue_fast` / `CanClassify` / `CanGenerate` 从 `symbio-kernel` 契约面收掉， `RuleOnly` / `FullModel` 两档令牌与 `LlmAdapter::generate(&FullModel)` 不动。
 
 ### D-106 模型消费端口归一：内部请求共享 LlmAdapter，未识别协议不静默兜底
 

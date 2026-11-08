@@ -10,7 +10,7 @@
 
 /// 测试替身：`StubLlmAdapter` / [`trivial_actor_spec`]。
 ///
-/// 测试替身住**测试设施**：`symbio-core` 的公开面只装「被两处以上生产代码看见」的
+/// 测试替身住**测试设施**：公开面只装「被两处以上生产代码看见」的
 /// 东西，`StubLlmAdapter` / [`trivial_actor_spec`] 只有测试面消费，故归这里。
 pub mod stubs;
 

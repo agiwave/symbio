@@ -694,7 +694,7 @@ function judgeCommit({ sha, message, patch, decisions, ids, tools }) {
   }
   if (kind === 'supplement') {
     // 搬家行只看**被删掉的文件**，故单独取一次 diff（`patch` 收窄在机制面 + 控制面两棵树，
-    // 达不到 `crates/symbio-core` 这种已经消失的路径上）。
+    // 达不到像旧 core 那种已经消失的路径上）。
     const moved = movedLines(parsePatch(git(['show', '--format=', '--unified=0', '--no-renames', '--diff-filter=D', sha]) ?? ''))
     return {
       sha,
@@ -798,7 +798,7 @@ function main() {
 
   const bad = []
   /**
-   * 不追溯名单：`ARCH_TREES` 从 `symbio-core` 扩到 `symbio-sdk` 之后（D-279），
+   * 不追溯名单：`ARCH_TREES` 从旧 core 扩到 `symbio-sdk` 之后（D-279），
    * 那几批把域搬进 SDK 的提交会被**按新范围重新判一遍**——它们当年在旧范围下通过，
    * 而现在「新增的 sdk 文件」看起来像架构补件。
    *

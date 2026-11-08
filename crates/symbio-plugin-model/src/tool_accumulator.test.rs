@@ -1,6 +1,6 @@
 //! `crates/symbio-plugin-model/src/tool_accumulator.rs` 的单元测试 —— 与实现同级分文件。
 //!
-//! 自 `symbio_core/llm/turn.test.rs` 迁入（该文件里测累积器的那 10 条），
+//! 自旧 core 的 `llm/turn` 用例迁入（该文件里测累积器的那 10 条），
 //! 断言随 `get_completed(&mut self)` → `finish(self)` 的收口语义调整：
 //! 「重复调用返回同一 id」这条不再是运行时兜底，而是**结构事实**——
 //! 节点 id 由 `process_delta` 分配并原样带进 `finish` 的产物。

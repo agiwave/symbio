@@ -1,4 +1,4 @@
-//! `symbio_core/capability/row.rs` 的单元测试。
+//! `crates/symbio-kernel/src/capability/row.rs` 的单元测试。
 //!
 //! 钉三件事：**行的名字从能力自述派生**（调用方没有机会填错）、**meta 现取**
 //! （改名装饰器不会让表键与自述分叉）、**cap 拿到的是能力本身**（执行链路

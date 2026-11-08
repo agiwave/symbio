@@ -1269,7 +1269,7 @@ for (const abs of codeFiles) {
         i + 1,
         `\`symbio_plugin_${other}\` —— 插件不得引用兄弟插件（测试代码同样判）；` +
           `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`，` +
-          `载荷走 \`PluginFrame\` / \`Value\`；确需共享类型则上移 \`symbio-core\` 的领域模块（D-196）`,
+          `载荷走 \`PluginFrame\` / \`Value\`；确需共享类型则上移内核 / SDK 的领域模块（D-196）`,
       )
     }
     // ③ 旧形态兜底：机制一旦回退到「插件同 crate」，这里必须立刻红
@@ -1337,7 +1337,7 @@ for (const abs of codeFiles) {
         i + 1,
         `\`pub use symbio_plugin_${m[1]}\` —— 非插件 crate 不得转发某个插件：` +
           `任何依赖本 crate 的插件都会因此看见 \`${m[1]}\` 的类型，而它的清单里一条兄弟依赖都没有。` +
-          `共享类型请上移 \`symbio-core\` 的领域模块（D-196）；聚合全部插件的只有装配方 \`crates/symbio\``,
+          `共享类型请上移内核 / SDK 的领域模块（D-196）；聚合全部插件的只有装配方 \`crates/symbio\``,
       )
     }
   }
@@ -1364,8 +1364,8 @@ for (const abs of codeFiles) {
 // 不携带会话状态）。生产文件用它是违规。
 const LOOP_DIR = crateDirOf('loop')
 const LOOP_ALLOWED_CRATE_ROOTS = new Set([
-  // `symbio_core` 曾在这里：D-191 把它 crate 化、D-279 直接删掉了 crate，
-  // `crate::symbio_core` 这条写法从此不可能出现在任何源码里。留着它就是一条
+  // 旧 core 的 crate 根曾在这里：D-191 把它 crate 化、D-279 直接删掉了 crate，
+  // 那条 `crate::<旧 core>` 的写法从此不可能出现在任何源码里。留着它就是一条
   // **永远不会被命中的白名单项**——它不拦任何东西，只让闭族看起来比实际宽（D-280：
   // 名单里放一条打不中的名字，与没有这条名字的判据等价，但更贵）。
   // 装配方的部署身份表：插件叫什么、标准树装哪些、哪些不得停用。它没有任何插件实现，
@@ -1420,15 +1420,15 @@ const LOOP_ALLOWED_CRATE_ROOTS = new Set([
 ])
 const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   // ── crate 化（D-191）把三个「crate 内根」变成了三个**外部 crate**：闭族的成员没变，
-  //    只是写法从 `crate::symbio_core` / `crate::assembly` / `crate::routes` 变成
+  //    只是写法从 `crate::<旧 core>` / `crate::assembly` / `crate::routes` 变成
   //    `use symbio_sdk::…` / `use symbio_deploy::…` / `use symbio_plugin_api::…`。
   //    这里逐个对应列出，而不是「凡 symbio_ 开头都放行」——前缀白名单会让「新增一个
   //    `symbio-plugin-xxx` 依赖」悄悄落在族内，那正是本条要拦的形态。
   //
-  //    ⚠️ 对应表原本还有**第三个**成员 `symbio_core`（原 `crate::symbio_core`）。D-279
+  //    ⚠️ 对应表原本还有**第三个**成员：旧 core 的 crate 根。D-279
   //    删掉那个 crate 之后，它连写都写不出来：白名单里留一条永远不会被命中的名字，
   //    不拦任何东西，只把闭族显得比实际宽（D-280）。故直接删条目，而不是留着「以防
-  //    万一」——真回来时 `symbio-core` 会在 HS-001 / HS-005 上先红。
+  //    万一」——真回来时旧 crate 名会在 HS-001 / HS-005 上先红。
   'symbio_deploy', // 装配方的部署身份表（原 `crate::assembly`）
   'symbio_plugin_api', // 跨插件地址常量与钩子助手（原 `crate::routes` / `crate::hooks`）
   // 仅测试豁免：`symbio_providers` 是「被多个插件模块公用」的实现层，测试拿它当
@@ -1440,7 +1440,7 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   'tokio',
   // 封闭语法 crate（D-188 / D-189）：`symbio_kernel` 只装 `ActorSpec` / `Pattern` /
   // `Scope` 这类跨墙语法与签名类型，没有任何插件实现，也不反向依赖宿主——它是
-  // 「内核只装语法、插件声明词汇」的那半边，与 `symbio_core` 同档而非族外实现面。
+  // 「内核只装语法、插件声明词汇」的那半边，与共享机制层同档而非族外实现面。
   'symbio_kernel',
   // 宿主机制面（D-272 收入）：`symbio_sdk` 只装插件可用的宿主机制（adapters / chat /
   // turn::dispatch / projection 这类签名与机制），不认容器概念、不反向依赖宿主。
@@ -1450,7 +1450,7 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   // 开头都放行」：那样会让新出现的 `symbio-plugin-xxx` 悄悄落进族内。
   'symbio_sdk',
   // 测试设施（`[dev-dependencies]`，生产构建看不见）：`trivial_actor_spec` 与
-  // `StubLlmAdapter` 原住 `symbio_core` 的常开出口，拆 crate 后 `cfg(test)` 对下游
+  // `StubLlmAdapter` 原住旧 core 的常开出口，拆 crate 后 `cfg(test)` 对下游
   // 不生效，故搬 `symbio-testkit`。它**不含任何插件实现**，也不携带会话状态——
   // 与 `symbio_providers` 的测试豁免同档，不是族外实现面。
   'symbio_testkit',

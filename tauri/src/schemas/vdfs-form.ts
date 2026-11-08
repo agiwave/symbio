@@ -25,7 +25,7 @@
 /**
  * 机制原生取值原语（`DetailField.pick`）——**跨栈闭集**，唯一定义处。
  *
- * 后端 `symbio_core/schemas/detail.rs` 用一组 `pub const DETAIL_PICK_*: &str`
+ * 后端 `crates/symbio-kernel/src/present/detail.rs` 用一组 `pub const DETAIL_PICK_*: &str`
  * 表达同一个闭集（不是枚举，故字面即线上取值）。`protocol-mirror-audit` 的 C 组
  * 按前缀提取后端取值、与本词表逐词比对。
  *

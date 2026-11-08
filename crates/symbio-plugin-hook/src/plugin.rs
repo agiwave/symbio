@@ -4,7 +4,7 @@
 //! - 其他插件通过 `hook/fire` 路由触发 Hook（路径前缀是**目录名 `hook`**，
 //!   不是 `PluginMeta` 的首参——见 [`HooksPlugin::metadata`] 的说明）
 //! - Hook 执行结果通过 PluginMessage 返回
-//! - 不需要在 symbio_core 中添加特殊处理
+//! - 不需要在共享层中添加特殊处理
 
 use super::executor::HookExecutor;
 use super::registry::{HookRegistration, HookRegistry};

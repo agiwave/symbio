@@ -100,7 +100,7 @@ symbio_plugin_api::submit_object_creator!(PLUGIN_ID_COMPOSITE, Composite::build,
 
 /// 向子插件**广播**一次收集；只有**真失败**才留痕。
 ///
-/// 收集是广播（契约见 `symbio_core/capability/option.rs`）：宿主对每个子插件发一次问，由插件
+/// 收集是广播（契约见 `crates/symbio-sdk/src/capability/option.rs`）：宿主对每个子插件发一次问，由插件
 /// 按 `ctx[PATH]` 自己决定贡不贡献。**不参与**的插件回答
 /// `NotFound("未知遍历路径: …")`，那是它的正常答复，不是失败——每个子插件都 warn
 /// 一次会把真正的失败埋进噪音里（启动期实测：同一条消息每个子插件各来两遍）。

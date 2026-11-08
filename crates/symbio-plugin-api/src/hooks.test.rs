@@ -1,4 +1,4 @@
-//! `crates/symbio-plugin-api/src/hooks.rs` 的单元测试 —— 拆自 `symbio_core/plugin/tests.rs`。
+//! `crates/symbio-plugin-api/src/hooks.rs` 的单元测试 —— 拆自旧 core 的 `plugin` 测试模块。
 //!
 //! 钩子是旁路观察者：**失败不得改变判定链**（仍按放行处理），但「钩子跑了」与
 //! 「钩子根本没跑」不能同形。判据：`should_proceed` 仍为 true，且 `context` 里带固定标记。

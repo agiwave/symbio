@@ -9,7 +9,7 @@ use symbio_sdk::capability::capability_option_fields;
 
 // ==================== 选项收集管线（宿主侧） ====================
 //
-// 原在 `symbio_core/capability/option.test.rs`，随 `collect_options` 一起搬来
+// 原在旧 core 的 `capability/option` 用例，随 `collect_options` 一起搬来
 // （先到 `session/options.rs`，后随收集器合一迁到本文件）。
 // 测的是**无父插件时的降级**，不是契约——契约由 `capability/option.rs` 的读协议文档钉住。
 //

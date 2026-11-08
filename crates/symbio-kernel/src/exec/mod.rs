@@ -45,7 +45,7 @@ use tokio_util::sync::CancellationToken;
 
 /// 转写唯一写入点的抽象。
 ///
-/// `symbio_core` 不认识 `Transcript`（它在 session 插件里），因此只约定这个最小面；
+/// 内核不认识 `Transcript`（它在 session 插件里），因此只约定这个最小面；
 /// 生产实现是 session 插件的 `TranscriptSink`——`apply` 内部调用
 /// `Transcript::apply`，`warn` 路由到会话状态出口。
 #[async_trait]

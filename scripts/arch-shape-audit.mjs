@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * arch-shape-audit — `symbio_core` 的**公共形状**只许收窄（判定型）
+ * arch-shape-audit — `symbio_kernel` 的**公共形状**只许收窄（判定型）
  *
  * ## 它判什么
  *
@@ -616,7 +616,7 @@ for (const [key, cap] of Object.entries(SHAPE_BASELINE)) {
   if (now > cap) {
     report(
       'CS-001',
-      `核心形状变宽：${CELL_LABEL[key]} 实测 ${now} > 基线 ${cap} —— symbio_core 的公共形状只许收窄。` +
+      `核心形状变宽：${CELL_LABEL[key]} 实测 ${now} > 基线 ${cap} —— symbio_kernel 的公共形状只许收窄。` +
         `要让这一步成立，先在 \`docs/003-design/\` 立一条 ADR 逐条论证「必需」（SP-007；` +
         `被这份棘轮钉住的先例见 D-055），再在基线旁写 core-shape-allow ${key}: ADR-NNN <理由>。逐 trait 清单：--verbose`,
     )

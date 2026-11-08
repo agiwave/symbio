@@ -1,6 +1,6 @@
 //! 装配策略 —— 「一棵标准插件树挂哪些插件」「哪些插件不许被停用」。
 //!
-//! ## 为什么不在 `symbio_core`
+//! ## 为什么不在 `symbio-kernel` / `symbio-sdk`
 //!
 //! 这里的常量**不是**上下文键（不走 `SymbioKey`、不进任何 `ctx`），**也不是**
 //! 路由地址——它们描述的是**装配方的事实**：一棵子树默认挂哪些插件、哪些插件属于
@@ -11,7 +11,7 @@
 //! 要不要共享一处**机制**」；这里要共享的不是机制，而是**宿主决定接哪些插件**。
 //! 装配是宿主的事：插件清单、启停状态、出厂 id 与装配结果归装配方持有，容器只经
 //! [`symbio_sdk::keys::REQUIRED_PLUGINS`] 接收结果（见 `crates/symbio-plugin-composite` 的 README）。
-//! 因此加一个插件不再需要改 `symbio_core`——这是「加插件不改内核」的判据。
+//! 因此加一个插件不再需要改架构 crate——这是「加插件不改内核」的判据。
 //!
 //! ## 消费方
 //!
@@ -36,7 +36,7 @@
 //!
 //! 下面三组常量由 `scripts/facts/assembly.mjs` 从各插件目录的 `PLUGIN.yml` 生成到
 //! `crates/symbio-deploy/src/lib.rs`，本模块只是它的门面（`pub use symbio_deploy::*;`）。
-//! 要加一个插件：建 crate、写 `PLUGIN.yml`、加代码——`assembly.rs` 与 `symbio_core` 都
+//! 要加一个插件：建 crate、写 `PLUGIN.yml`、加代码——`assembly.rs` 与 `symbio-kernel` / `symbio-sdk` 都
 //! 不需要改；手改生成区会被 `gen-facts --check` 判红。
 //!
 //! ## 子 Agent 子树清单的事实与边界

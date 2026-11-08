@@ -245,13 +245,13 @@ export function toolFacts(root) {
  * 每个 VDFS 操作的一句话定义：`Map<操作地址, 定义>`，取自**声明它的那个常量**
  * 正上方的 `///`。
  *
- * 三个跨插件可见的操作（`root` / `watch` / `unwatch`）归 core，其余归 vdfs 插件的
+ * 三个跨插件可见的操作（`root` / `watch` / `unwatch`）归门面 `plugin-api`，其余归 vdfs 插件的
  * 协议文件——两份都收，取值时以先声明者为准（它们是**同一个常量**，不是两份事实）。
  */
 export function vdfsOpDocs(root) {
   const out = new Map()
   const files = [
-    path.join(root, 'crates', 'symbio-core', 'src', 'plugin', 'route.rs'),
+    path.join(root, 'crates', 'symbio-plugin-api', 'src', 'routes.rs'),
     path.join(root, 'crates', 'symbio-plugin-vdfs', 'src', 'protocol.rs'),
   ]
   for (const file of files) {

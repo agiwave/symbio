@@ -1,4 +1,4 @@
-//! `symbio_core/event_bus.rs` 的单元测试。
+//! `crates/symbio-sdk/src/event_bus/mod.rs` 的单元测试。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
 

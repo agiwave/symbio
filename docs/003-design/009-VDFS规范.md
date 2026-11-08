@@ -86,15 +86,15 @@ impl: done
 VDFS 的核心是**一个包含全部资源操作的接口**——`VdfsProvider` trait。它**不是**
 一组请求 / 响应结构；请求响应只是它的线路投影。
 
-这与既有的 provider 组织方式一致（见 `symbio_core/model_provider.rs` 的模块文档）：
-**core 只暴露纯 object-safe trait**，协议适配与线路形状留在插件内部。
+这与既有的 provider 组织方式一致（见 `symbio-kernel` 的 `llm` 模块文档）：
+**语法层只暴露纯 object-safe trait**，协议适配与线路形状留在插件内部。
 
 ```
-symbio_core/vdfs/*.rs ← centerpiece：VdfsProvider trait
+crates/symbio-kernel/src/vdfs/*.rs ← centerpiece：VdfsProvider trait
  + 域类型（VdfsNode / VdfsContent / VdfsAccess /
  VdfsWriteResponse / VdfsError / VdfsChange）
  + VdfsContext + 路径工具 + 回填
-symbio_core/vdfs/host.rs ← symbio 桥：上下文注入 + 错误翻译
+crates/symbio-sdk/src/vdfs/host.rs ← 宿主桥：上下文注入 + 错误翻译
 crates/symbio-plugin-vdfs/src/protocol.rs ← 线路信封：vdfs/* 请求响应 + 协议路径常量
  + VDFS_OPS（变更事件与 provider 侧 VdfsChange 同形）
 crates/symbio-plugin-vdfs/src/fs.rs ← UnifiedFs：地址分流 + 口径映射 + 根守卫
@@ -748,19 +748,19 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 
 重写三个文件即可：
 
-- `symbio_core/vdfs/host.rs`（桥：装上下文、翻错误）；
+- `crates/symbio-sdk/src/vdfs/host.rs`（桥：装上下文、翻错误）；
 - `crates/symbio-plugin-vdfs/src/host.rs` + `fs.rs`（访问层与门面：拆信封、地址分流、树遍历、
  事件投递——`UnifiedFs` 只依赖纯接口，可原样带走）；
 - 容器的注册接线（子插件收集方式随宿主插件机制而变）。
 
-`symbio_core/vdfs/`（纯接口）与 `crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封）
+`crates/symbio-kernel/src/vdfs/`（纯接口）与 `crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封）
 **原样复用**——前者零宿主依赖，后者只依赖前者。
 
 ## 12. 一致性要求
 
 - 任何新的资源访问功能 **不得** 绕开 `vdfs/*` 新造私有协议。
-- `symbio_core/vdfs/` **不得**引入 `crate::` 依赖；线路类型（请求 / 响应信封、
- `VDFS_OPS`）**不得**上浮到 core；宿主专有类型与状态一律经 `VdfsContext` 注入。
+- `crates/symbio-kernel/src/vdfs/` **不得**引入 `crate::` 依赖；线路类型（请求 / 响应信封、
+ `VDFS_OPS`）**不得**上浮到内核；宿主专有类型与状态一律经 `VdfsContext` 注入。
 - provider **不得**提供或假设自己的位置（trait 上无 `mount` / `category` / root
  概念），只接收自身子树内的相对路径。
 - 子目录名**只**由容器实例表的挂载名给出——两条链路用同一个名字，且都从实例表取；

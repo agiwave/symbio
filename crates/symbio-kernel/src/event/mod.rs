@@ -196,7 +196,7 @@ impl EventDecl {
 pub struct Seq(u64);
 
 impl Seq {
-    /// 仅事件源实现可构造（kernel crate 内；对 `symbio_core` 是同一份共享语法）。
+    /// 仅事件源实现可构造（kernel crate 内；对 `symbio-sdk` 与控制面是同一份共享语法）。
     pub fn new(v: u64) -> Self {
         Seq(v)
     }

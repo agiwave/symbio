@@ -17,7 +17,7 @@
 //! 真要做成多频道总线（服务端按 `kind` 分流）时，第一个改动点就是这里：先加一条 ADR，
 //! 再谈 `kind` 过滤与新增频道。
 //!
-//! 把它放在 `symbio_core`（而非某个具体插件）是为了遵循「插件互不可见」的分层原则：
+//! 把它放在 `symbio-sdk`（而非某个具体插件）是为了遵循「插件互不可见」的分层原则：
 //! 任何插件都通过 `crate::event_bus::EventBus` 访问，而非直接引用
 //! `plugins::event_bus` 模块。
 
@@ -92,7 +92,7 @@ static RESYNC_INFLIGHT: LazyLock<DashMap<String, ()>> = LazyLock::new(DashMap::n
 /// | 消费方 | `crates/symbio-plugin-event_bus`（`plugin.rs` 把路由载荷反序列化成它） |
 ///
 /// 两侧**分属不同 crate 且互相不可见**（cli 是独立 crate，只能经 `symbio` 的公开面
-/// = `symbio_core` 取用），core 是唯一共同可见处——这正是它不能下沉的原因，
+/// = `symbio-sdk` 取用），本 crate 是唯一共同可见处——这正是它不能下沉的原因，
 /// 与 `symbio_sdk::chat::session_chat` 同构。
 ///
 /// ## 为什么是空结构体（不是遗漏）

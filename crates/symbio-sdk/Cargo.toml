@@ -12,7 +12,7 @@ unused_imports = "warn"
 unused_variables = "warn"
 dead_code = "warn"
 
-# 依赖面即判据：**只有内核**。出现第二个 Symbio crate（尤其 symbio-core）就说明又有机制
+# 依赖面即判据：**只有内核**。出现第二个 Symbio crate 就说明又有机制
 # 不是「插件能用的」而是「控制面才知道的」，那条该留在 core（DE-023 D-258）。
 [dependencies]
 symbio-kernel = { path = "../symbio-kernel" }
