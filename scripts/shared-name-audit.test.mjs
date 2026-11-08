@@ -9,7 +9,10 @@
  *   ⑤ 测试文件里的重复 → exit 0（测试不是生产消费方）；
  *   ⑥ 范围读不出 → exit 2；
  *   ⑦ `plugin-api` 的非生成生产代码写了 manifest 视图名 → exit 1（SV-002）；
- *   ⑧ manifest 视图名只出现在 `plugin-api` 的生成物 / 测试里 → exit 0。
+ *   ⑧ manifest 视图名只出现在 `plugin-api` 的生成物 / 测试里 → exit 0；
+ *   ⑨ 登记与 024 契约表逐行相等 → exit 0（SV-003）；
+ *   ⑩ 契约表有、登记没有 → exit 1；⑪ 登记了、表里没有 → exit 1；
+ *   ⑫ 同一 slot 的 `fleet` 落点不一致 → exit 1。
  *
  * 用法：node --test scripts/shared-name-audit.test.mjs
  */
@@ -35,10 +38,14 @@ function rmTree(dir) {
   fs.rmdirSync(dir)
 }
 
+const PLAN_REL = 'docs/003-design/024-能力横向扩充的通路.md'
+/** 默认契约表：表头在、零数据行。各用例要判 SV-003 时自行覆盖。 */
+const DEFAULT_PLAN = '# fixture\n\n| `slot` | 顶层路径 | 实例级落点 |\n|---|---|---|\n'
+
 /** 造一个最小仓库：`crates/<插件>/src/<文件>`，内容由调用方给。 */
 function fixture(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shared-name-'))
-  for (const [rel, content] of Object.entries(files)) {
+  for (const [rel, content] of Object.entries({ [PLAN_REL]: DEFAULT_PLAN, ...files })) {
     const abs = path.join(root, rel)
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     fs.writeFileSync(abs, content)
@@ -155,6 +162,88 @@ test('⑧ manifest 视图名只在生成物 / 测试里出现 ⇒ 绿', () => {
     const r = runOn(root)
     assert.equal(r.status, 0, r.stdout + r.stderr)
     assert.match(r.stdout, /SV-002/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+/** 契约表正文（含表头与分隔行）。 */
+function plan(rows) {
+  return ['| `slot` | 顶层路径 | 实例级落点 |', '|---|---|---|', ...rows, ''].join('\n')
+}
+
+/** 一条 `submit_reports!` 登记；`fleet = null` ⇒ `fleet: None`。 */
+function reportDecl(slot, fleet) {
+  const value = fleet === null ? 'None' : `Some("${fleet}")`
+  return (
+    'pub fn f() { symbio_plugin_api::submit_reports!([ReportDecl { owner: "o", ' +
+    `slot: "${slot}", order: 1, views: &[], fleet: ${value}, render: r, ` +
+    'fleet_render: None, panel: None }]); }\n'
+  )
+}
+
+test('⑨ 登记与 024 契约表逐行相等 ⇒ 绿（SV-003）', () => {
+  const root = fixture({
+    [PLAN_REL]: plan([
+      '| `tiers` | `session/stats.tiers` | `fleet.by_tier` |',
+      '| `cost` | `session/stats.cost` | — |',
+    ]),
+    'crates/symbio-plugin-slo/src/decl.rs': reportDecl('tiers', 'by_tier'),
+    'crates/symbio-plugin-cost/src/decl.rs': reportDecl('cost', null),
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-003/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑩ 契约表有、登记没有 ⇒ 红（SV-003 双向）', () => {
+  const root = fixture({
+    [PLAN_REL]: plan([
+      '| `tiers` | `session/stats.tiers` | `fleet.by_tier` |',
+      '| `cost` | `session/stats.cost` | — |',
+    ]),
+    'crates/symbio-plugin-slo/src/decl.rs': reportDecl('tiers', 'by_tier'),
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-003/)
+    assert.match(r.stdout, /cost/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑪ 登记了、契约表里没有 ⇒ 红（SV-003 双向）', () => {
+  const root = fixture({
+    [PLAN_REL]: plan(['| `tiers` | `session/stats.tiers` | `fleet.by_tier` |']),
+    'crates/symbio-plugin-slo/src/decl.rs': reportDecl('tiers', 'by_tier'),
+    'crates/symbio-plugin-cost/src/decl.rs': reportDecl('cost', null),
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-003/)
+    assert.match(r.stdout, /cost/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑫ 同一 slot 的 fleet 落点不一致 ⇒ 红', () => {
+  const root = fixture({
+    [PLAN_REL]: plan(['| `tiers` | `session/stats.tiers` | `fleet.by_tier` |']),
+    'crates/symbio-plugin-slo/src/decl.rs': reportDecl('tiers', 'axes.span'),
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-003/)
+    assert.match(r.stdout, /by_tier/)
   } finally {
     rmTree(root)
   }

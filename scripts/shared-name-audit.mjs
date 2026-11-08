@@ -12,6 +12,7 @@
  * |---|---|---|
  * | SV-001 | ① **有结构**的名字（含 `.` 或 `/`）出现在两个以上非 `plugin-api` 的插件生产代码里；② 同名 `const` 在两个以上插件 crate 各声明一次 | 两份字面量 = 两个 owner：改名只改一处，另一处静默漂移；或绕过词汇层把名字抄回实现 |
  * | SV-002 | `symbio-plugin-api` 的**非生成**生产代码里出现任一 manifest 视图名（`view_names.rs` 里的 `shared_views` 投影） | 业务视图名渗进机制层：机制层于是「认识」某个 owner 的视图，横扩又要改门面 |
+ * | SV-003 | 全仓 `submit_reports!` 每条登记的 `(slot, fleet)` 与 `024` 的出品契约表**双向**逐行相等 | 加了列 / 改了 slot 却没更新契约，或表里留着一条已经删掉的列——出口形状与声称的形状静默分叉 |
  *
  * ## 为什么不扫普通单词
  *
@@ -27,12 +28,13 @@
  * 没有按名字逐条开的口子。
  *
  * 用法：node scripts/shared-name-audit.mjs [--root=<目录>]
- * 退出码：1 = 有违规；2 = 范围读不出（缺 `crates/` 或没有任何插件 crate）。
+ * 退出码：1 = 有违规；2 = 范围 / 规则源读不出（缺 `crates/`、没有任何插件 crate、
+ * 契约表或 `submit_reports!` 的 `slot` / `fleet` 解析不了）。
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns SV 共享词汇
-// @codes SV-001 SV-002
+// @codes SV-001 SV-002 SV-003
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -175,6 +177,141 @@ function mechanismViewNameErrors() {
   return out
 }
 
+const PLAN_REL = path.join('docs', '003-design', '024-能力横向扩充的通路.md')
+
+/**
+ * 出品契约表：`[{ slot, topPath, fleet }]`，`fleet` 为 `null` 表示「无实例级落点」。
+ *
+ * 表住 `024` 的「报表列注册面」节，表头首格是 `` `slot` ``。文件不在 / 找不到表 ⇒
+ * `null`（规则源读不出，调用方 exit 2）；表在但没有数据行 ⇒ `[]`（合法的空契约）。
+ */
+function readReportContract(root) {
+  const abs = path.join(root, PLAN_REL)
+  if (!fs.existsSync(abs)) return null
+  const lines = fs.readFileSync(abs, 'utf8').split('\n')
+  const start = lines.findIndex((line) => /^\|\s*`slot`\s*\|/.test(line.trim()))
+  if (start < 0) return null
+  const rows = []
+  for (let i = start + 2; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line.startsWith('|')) break
+    const cells = line
+      .replace(/^\||\|$/g, '')
+      .split('|')
+      .map((s) => s.trim().replace(/`/g, ''))
+    if (cells.length < 3) return null
+    rows.push({
+      slot: cells[0],
+      topPath: cells[1],
+      fleet: cells[2] === '—' || cells[2] === '-' ? null : cells[2],
+    })
+  }
+  return rows
+}
+
+/**
+ * 全仓 `submit_reports!` 里每条 `ReportDecl` 的 `(slot, fleet)`。
+ *
+ * `fleet` 归一成出口里的落点写法（`Some("by_tier")` → `fleet.by_tier`），好与契约表
+ * 的直接对照。测试文件不算（`reports.test.rs` 里有造数的 `slot`）；解析不出 ⇒ `null`
+ * ——宁可 exit 2，也不静默漏掉一条登记（漏掉会让 SV-003 变成假绿）。
+ */
+function registeredReports(root) {
+  const cratesDir = path.join(root, 'crates')
+  if (!fs.existsSync(cratesDir)) return null
+  const bySlot = new Map()
+  const duplicates = []
+  for (const abs of productionFiles(cratesDir)) {
+    const text = stripComments(fs.readFileSync(abs, 'utf8'))
+    let at = 0
+    while ((at = text.indexOf('submit_reports!', at)) >= 0) {
+      const start = text.indexOf('[', at)
+      if (start < 0) return null
+      let depth = 0
+      let end = -1
+      for (let j = start; j < text.length; j++) {
+        if (text[j] === '[') depth++
+        else if (text[j] === ']' && --depth === 0) {
+          end = j
+          break
+        }
+      }
+      if (end < 0) return null
+      const block = text.slice(start, end)
+      for (const m of block.matchAll(/ReportDecl\s*\{/g)) {
+        const open = m.index + m[0].length - 1
+        let braces = 0
+        let close = -1
+        for (let j = open; j < block.length; j++) {
+          if (block[j] === '{') braces++
+          else if (block[j] === '}' && --braces === 0) {
+            close = j
+            break
+          }
+        }
+        if (close < 0) return null
+        const body = block.slice(open, close + 1)
+        const slot = body.match(/slot\s*:\s*"([^"]+)"/)
+        const fleet = body.match(/fleet\s*:\s*(None|Some\s*\(\s*"([^"]+)"\s*\))/)
+        if (!slot || !fleet) return null
+        const landing = fleet[1] === 'None' ? null : `fleet.${fleet[2]}`
+        if (bySlot.has(slot[1])) duplicates.push(slot[1])
+        bySlot.set(slot[1], landing)
+      }
+      at = end + 1
+    }
+  }
+  return { bySlot, duplicates }
+}
+
+/**
+ * SV-003：登记与契约表**双向**逐行相等。
+ *
+ * 只按 `(slot, fleet)` 比——`topPath` 由 slot 拼出，比它只会多一个可以漂的副本。
+ * 规则源任何一半读不出 ⇒ `null`（exit 2），不把「没读到」当成「没有」。
+ */
+function reportContractErrors(root) {
+  const table = readReportContract(root)
+  const reg = registeredReports(root)
+  if (!table || !reg) return null
+  const errors = []
+  for (const slot of reg.duplicates) {
+    errors.push(`slot \`${slot}\` 被登记了两次——一条报表列只有一个家`)
+  }
+  const tableBySlot = new Map()
+  for (const row of table) {
+    if (tableBySlot.has(row.slot)) {
+      errors.push(`契约表里 slot \`${row.slot}\` 出现了两次`)
+      continue
+    }
+    tableBySlot.set(row.slot, row)
+  }
+  for (const [slot, row] of tableBySlot) {
+    if (!reg.bySlot.has(slot)) {
+      errors.push(
+        `契约表有 \`${slot}\`（\`${row.topPath}\`），全仓却没有任何 \`submit_reports!\` 登记` +
+          '——表在说一条不存在的列',
+      )
+      continue
+    }
+    const got = reg.bySlot.get(slot)
+    if (got !== row.fleet) {
+      errors.push(
+        `\`${slot}\` 的实例级落点不一致：契约表 \`${row.fleet ?? '—'}\`，登记 \`${got ?? '—'}\``,
+      )
+    }
+  }
+  for (const [slot, landing] of reg.bySlot) {
+    if (!tableBySlot.has(slot)) {
+      errors.push(
+        `登记了 \`${slot}\`（实例级落点 \`${landing ?? '—'}\`），契约表里没有这一行` +
+          '——先补 024 的契约表再登记',
+      )
+    }
+  }
+  return { errors, table, registered: reg.bySlot }
+}
+
 function pluginCrates(root) {
   const crates = path.join(root, 'crates')
   if (!fs.existsSync(crates)) {
@@ -256,11 +393,20 @@ for (const [value, per] of [...constHomes.entries()].sort((a, b) => a[0].localeC
 }
 
 const viewNameErrors = mechanismViewNameErrors()
+const contract = reportContractErrors(ROOT)
+if (!contract) {
+  console.log(
+    `${red('[ERROR]')} shared-name-audit：SV-003 规则源读不出` +
+      '（024 契约表或 `submit_reports!` 的 `slot` / `fleet` 解析不了）',
+  )
+  process.exit(2)
+}
 
-if (errors.length || viewNameErrors.length) {
+if (errors.length || viewNameErrors.length || contract.errors.length) {
   for (const e of errors) console.log(red(`✗ SV-001 ${e}`))
   for (const e of viewNameErrors) console.log(red(`✗ SV-002 ${e}`))
-  console.log(`\n共享词汇：${errors.length + viewNameErrors.length} 条违规`)
+  for (const e of contract.errors) console.log(red(`✗ SV-003 ${e}`))
+  console.log(`\n共享词汇：${errors.length + viewNameErrors.length + contract.errors.length} 条违规`)
   process.exit(1)
 }
 
@@ -277,5 +423,12 @@ console.log(
 console.log(
   green(
     `✓ SV-002 机制层没有业务视图名：symbio-plugin-api 的非生成生产代码里没有 manifest 视图名（${manifestViewNames(VIEW_NAMES_RS).length} 个名字待守）`,
+  ),
+)
+const withFleet = contract.table.filter((row) => row.fleet !== null).length
+console.log(
+  green(
+    `✓ SV-003 报表契约：${contract.table.length} 行与 ${contract.registered.size} 条登记逐行相等` +
+      `（实例级落点 ${withFleet} 条非空）`,
   ),
 )
