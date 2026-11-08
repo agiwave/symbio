@@ -32,6 +32,9 @@ pub enum FailureProjection {
     None,
     /// 工具调用的失败要在转写面补一张「结果卡」。
     ToolCall,
+    /// 压缩失败要在转写面补一个 `Failed` 的压缩叶（D-402）：
+    /// 它既是失败交代，也是 `RetryCompaction` 派生的形状来源。
+    Compression,
 }
 
 impl FailureProjection {
@@ -39,6 +42,7 @@ impl FailureProjection {
         match self {
             Self::None => "none",
             Self::ToolCall => "tool_call",
+            Self::Compression => "compression",
         }
     }
 }

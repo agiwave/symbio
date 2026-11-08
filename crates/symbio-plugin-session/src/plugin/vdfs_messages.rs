@@ -12,10 +12,10 @@ use super::*;
 use symbio_kernel::event::{Entity, Verb};
 use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
-    VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_RETRY_SUBTREE,
-    VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE,
+    VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_RETRY_COMPACTION,
+    VDFS_ACTION_RETRY_SUBTREE, VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE,
 };
-use symbio_plugin_api::events::EVENT_USER_ANSWER;
+use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_USER_ANSWER};
 use symbio_plugin_api::fact_source::FACT_SOURCE;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::chat::chat_node as cm;
@@ -283,6 +283,64 @@ impl SessionPlugin {
                                 "session_id": id,
                                 "of": mid,
                                 "into": new_id,
+                            })),
+                        }))
+                    }
+                    // ── 压缩失败重试（D-402 ③）──
+                    //
+                    // 动作落在**失败的压缩节点**（`mid`）上：只落一条 `message.removed`
+                    // （目标就是该节点），不在这里重跑（恢复只能从事实进环）。读面因此
+                    // 丢弃失败叶；压缩债源看到「该节点的最新一次移除」就换一把带纪元的
+                    // 前缀指纹，不欠水位也重跑失败时那段切片——驱动由事实源写口踢出。
+                    (Some(mid), VDFS_ACTION_RETRY_COMPACTION, _payload) => {
+                        let msgs = self.transcript_of(id).await?;
+                        let node =
+                            msgs.iter()
+                                .find(|message| message.id == mid)
+                                .ok_or_else(|| {
+                                    VdfsError::not_found(format!("压缩节点不存在：{mid}"))
+                                })?;
+                        if !(node.is_compression() && node.status == Some(cm::NodeStatus::Failed)) {
+                            return Err(VdfsError::invalid(format!(
+                                "retry_compaction 只能落在失败的压缩节点上：{mid}"
+                            )));
+                        }
+                        let source = self
+                            .fact_source(id)
+                            .await
+                            .map_err(|e| VdfsError::internal(format!("打开事实源失败：{e}")))?;
+                        let anchor = source
+                            .range(0)
+                            .last()
+                            .and_then(|e| e.seq)
+                            .map(|s| s.value())
+                            .ok_or_else(|| {
+                                VdfsError::internal(
+                                    "重试未能入格：事实源为空，没有可用的溯源锚".to_string(),
+                                )
+                            })?;
+                        let host = vdfs_host_ctx(ctx)?;
+                        let actor = symbio_sdk::authz::request_principal(&*host);
+                        source
+                            .append(
+                                actor,
+                                FactDraft {
+                                    key: format!("compaction-retry:{mid}"),
+                                    kind: EVENT_MESSAGE_REMOVED.to_string(),
+                                    entity: Entity::Message,
+                                    verb: Verb::Closed,
+                                    payload: json!({ "ids": [mid] }),
+                                    produced_by: Some(anchor),
+                                },
+                            )
+                            .map_err(|e| VdfsError::internal(format!("压缩重试落格失败：{e}")))?;
+                        Ok(VdfsResponse::Action(VdfsActionResult {
+                            action: VDFS_ACTION_RETRY_COMPACTION.to_string(),
+                            ok: true,
+                            message: format!("已重试压缩 {mid}"),
+                            data: Some(json!({
+                                "session_id": id,
+                                "target": mid,
                             })),
                         }))
                     }

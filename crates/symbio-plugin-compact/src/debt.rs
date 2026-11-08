@@ -25,12 +25,28 @@
 //!
 //! 行的载荷只带身份与**切片边界**（`root_id` / `final_id` / 切片两端事实 id /
 //! `keep_from`）：摘要正文仍从事实读，世界语义仍归本插件（D-336 / D-401）。
+//!
+//! ## 跨轮失败记忆：按「前缀指纹」寻址，不另存状态（D-402）
+//!
+//! 两行债的 id 不再按 `user_id` 派生（那样每轮都换一把键，同一份前缀每轮重新欠一次
+//! 注定失败的往返）。指纹 = **最旧未压事实 id + provider 上限 + 代**（**上一轮及更早**
+//! 的成功压缩事实 id；本轮的压缩不算代，否则同一轮立刻换键重压同一段）：成功换代 ⇒
+//! 键自然换一把；失败不换代 ⇒ 跨轮仍是同一把键，债源读 `closing()` 看到它已收束
+//! （Ok / Failed）就不再欠。记忆本身是环的收束事实，本插件不持有运行期状态。
+//!
+//! 失败产物的**重试**（D-402 ③）：`retry_compaction` 落一条 `message.removed` 指向
+//! 失败压缩节点；债源看到该节点的最新一次移除，就把指纹换成带重试纪元的键，并沿用
+//! 失败载荷里那段切片（`from` / `to` / `truncate` / `keep_from` / `split`）重跑。
 
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
-use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use symbio_plugin_api::debt::{
+    debt_row, Closing, DebtFacts, DebtSource, DebtSpec, DriveRequest, FailureProjection,
+};
+use symbio_plugin_api::events::{
+    EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE,
+};
 use symbio_plugin_api::text::{default_tokenizer, Tokenizer};
 use symbio_plugin_api::CapabilityRow;
 
@@ -85,16 +101,52 @@ impl DebtSource for CompactDebts {
         let Some((used, limit)) = watermark(facts, user_id) else {
             return Vec::new();
         };
-        if (used as f64) < limit as f64 * COMPACT_AT {
-            return Vec::new();
-        }
         // 装不下就没有可压的段：不派发注定失败的往返（正文见 `slice_plan`）。
         let Some(plan) = slice_plan(facts, limit) else {
             return Vec::new();
         };
-        let final_id = format!("{EVENT_CHAT_ASSISTANT_FINAL}:{user_id}");
-        let consolidated_id = format!("{SESSION_CONSOLIDATED}:{user_id}");
-        let summarize_id = format!("{SUMMARIZE_ROW}:{user_id}");
+        // 前缀指纹：最旧未压事实 + 上限 + 代（**上一轮及更早**的成功压缩事实 id）。
+        // 成功后代才前进 ⇒ 下一轮有资格再压；本轮刚落的压缩不算代，否则同一轮
+        // 立刻换一把键、把同一段重压一遍（`unless_id` 也钉不住）。
+        let generation = facts
+            .facts_of(SESSION_CONSOLIDATED)
+            .into_iter()
+            .rev()
+            .find(|(_, payload)| payload.get("root_id").and_then(Value::as_str) != Some(user_id))
+            .map(|(id, _)| id.to_string())
+            .unwrap_or_default();
+        let base = format!("{}|{}|{}", plan.from, limit, generation);
+        // 沿「失败 → 显式重试」链走到当前这一笔（D-402 ②③）：
+        // - 尚未收束 ⇒ 就是它欠；
+        // - 收 `Ok` ⇒ 这一代压过了；
+        // - 收 `Failed` 且失败节点没被删过 ⇒ 判过死，不每轮重付；
+        // - 收 `Failed` 且节点被删过 ⇒ 换纪元重跑（沿用失败时那段切片）。
+        let Some((key, failed)) = current_owe(facts, &base) else {
+            return Vec::new();
+        };
+        let (plan, final_id, root_id) = match failed {
+            Some(payload) => match retry_plan(&payload) {
+                Some(parts) => parts,
+                None => return Vec::new(),
+            },
+            None => {
+                if (used as f64) < limit as f64 * COMPACT_AT {
+                    return Vec::new();
+                }
+                (
+                    plan,
+                    format!("{EVENT_CHAT_ASSISTANT_FINAL}:{user_id}"),
+                    user_id.to_string(),
+                )
+            }
+        };
+        let consolidated_id = format!("{SESSION_CONSOLIDATED}:{key}");
+        let summarize_id = format!("{SUMMARIZE_ROW}:{key}");
+        let slice = json!({
+            "from": plan.from,
+            "to": plan.to,
+            "truncate": plan.truncate,
+        });
         vec![
             // 拿摘要：欠 model 插件的端口。载荷只带身份 + 切片计划（都是本轮的
             // 事实 id 与预算参数，不是世界语义）；正文由执行体从事实读。
@@ -103,33 +155,34 @@ impl DebtSource for CompactDebts {
                 ASSIST_PORT,
                 summarize_id.clone(),
                 json!({
-                    "root_id": user_id,
+                    "root_id": root_id,
                     "final_id": final_id,
                     "system": SUMMARIZE_INSTRUCTION,
                     "user": "",
-                    "slice": {
-                        "from": plan.from,
-                        "to": plan.to,
-                        "truncate": plan.truncate,
-                    },
+                    "slice": slice,
                 }),
             )
             .when(EVENT_CHAT_ASSISTANT_FINAL)
             .when_id(EVENT_CHAT_ASSISTANT_FINAL, final_id.clone())
             .unless_id(SESSION_CONSOLIDATED, consolidated_id.clone())
-            .after(format!("model:{user_id}")),
+            .after(format!("model:{root_id}")),
             // 落压缩事实：必须等**本轮那笔 summarize** 收束；`after` 写的是它的债键，
             // 不是尝试号派生出来的键（失败后重试的尝试号与本行的判据无关）。
             DebtSpec::new(
                 WRITE_ROW,
                 COMPACT_PORT,
-                format!("{WRITE_ROW}:{user_id}"),
+                format!("{WRITE_ROW}:{key}"),
                 // 载荷只带身份 + 切片边界：摘要正文从 summarize 的收束事实读，
                 // 水位从终答事实读；`keep_from` 告诉读面从哪条事实起接着折。
                 json!({
-                    "root_id": user_id,
+                    "root_id": root_id,
                     "final_id": final_id,
+                    "fingerprint": key,
                     "after_port": ASSIST_PORT,
+                    "after_id": summarize_id,
+                    "from": plan.from,
+                    "to": plan.to,
+                    "truncate": plan.truncate,
                     "keep_from": plan.keep_from,
                     "split": plan.split,
                 }),
@@ -137,9 +190,88 @@ impl DebtSource for CompactDebts {
             .when(EVENT_CHAT_ASSISTANT_FINAL)
             .when_id(EVENT_CHAT_ASSISTANT_FINAL, final_id)
             .unless_id(SESSION_CONSOLIDATED, consolidated_id)
-            .after(summarize_id),
+            .after(summarize_id)
+            .failure_card(FailureProjection::Compression),
         ]
     }
+}
+
+/// 重试链的长度上限（防御性）：正常路径每个纪元都对应一条新事实，链只会向前；
+/// 上限只防手工改过的 WAL 造出环。
+const MAX_RETRY_EPOCHS: usize = 16;
+
+/// 沿「失败 → 显式重试」链走到**当前这一笔**债。
+///
+/// 返回 `(债键, 上一笔失败载荷)`：
+/// - 这一笔尚无收束 ⇒ 返回它（首笔或刚换过纪元）；
+/// - 收到 `Ok` ⇒ 这一代已压过，不欠；
+/// - 收到 `Failed` 但失败节点**没被删过** ⇒ 判过死，不每轮重付（D-402 ②）；
+/// - 收到 `Failed` 且节点被删过 ⇒ 以该移除为纪元继续向前（D-402 ③）。
+fn current_owe(facts: &DebtFacts, base: &str) -> Option<(String, Option<Value>)> {
+    let mut key = base.to_string();
+    let mut failed = None;
+    for _ in 0..MAX_RETRY_EPOCHS {
+        match facts.closing(&format!("{WRITE_ROW}:{key}")) {
+            None => return Some((key, failed)),
+            Some((Closing::Ok, _)) => return None,
+            Some((Closing::Failed, payload)) => {
+                let epoch = retry_epoch(facts, payload)?;
+                let next = format!("{base}|retry:{epoch}");
+                // 同一纪元又算回同一把键（坏 WAL）⇒ 不再前进，按已判死抑制。
+                if next == key {
+                    return None;
+                }
+                failed = Some(payload.clone());
+                key = next;
+            }
+        }
+    }
+    None
+}
+
+/// 失败产物的**重试纪元**：该失败节点最后一次被 `message.removed` 删掉的移除事实 id。
+///
+/// 每点一次重试换一条新的移除（目标节点按纪元换身份，见 `compression_id`），
+/// 取最后一条 ⇒ 第二次失败不会被第一次的移除误判成「已重试」。
+fn retry_epoch(facts: &DebtFacts, failed: &Value) -> Option<String> {
+    let compression_id = failed.get("compression_id").and_then(Value::as_str)?;
+    facts
+        .facts_of(EVENT_MESSAGE_REMOVED)
+        .into_iter()
+        .rev()
+        .find(|(_, removed)| {
+            removed
+                .get("ids")
+                .and_then(Value::as_array)
+                .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(compression_id)))
+        })
+        .map(|(id, _)| id.to_string())
+}
+
+/// 从失败载荷恢复那次失败的切片与身份：重试压的必须是**失败过的那一段**，
+/// 不能拿此刻的转写重新规划。
+fn retry_plan(payload: &Value) -> Option<(SlicePlan, String, String)> {
+    Some((
+        SlicePlan {
+            from: payload.get("from")?.as_str()?.to_string(),
+            to: payload.get("to")?.as_str()?.to_string(),
+            truncate: payload
+                .get("truncate")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default(),
+            keep_from: payload
+                .get("keep_from")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            split: payload
+                .get("split")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
+        payload.get("final_id")?.as_str()?.to_string(),
+        payload.get("root_id")?.as_str()?.to_string(),
+    ))
 }
 
 /// 一次摘要的切片计划：**只压最旧的前缀**，其余原样留给读面。

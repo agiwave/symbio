@@ -78,7 +78,8 @@
 use std::collections::HashSet;
 
 use crate::chat::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
+    CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
 };
 use crate::event::event_payload_node_id;
 use crate::event::{
@@ -455,6 +456,11 @@ fn nodes_of(
     c: &ChatVocab,
     m: &MessageVocab,
 ) -> Vec<ChatNode> {
+    // 压缩失败（D-402 ①）：`compact` 端口的 `failed` 不是这一轮对读者说的话，
+    // 但它有独立的读面形状（失败压缩叶，重试入口挂在上面），必须先于模型往返分支。
+    if let Some(node) = compression_failure_node(e) {
+        return vec![node];
+    }
     // 一次模型往返的产出（`response` / `failed`，端口 `model`、无 `via`）：
     // 正文 / 思考节点落在**应答落格的位置**，顺序因此是实时的
     // 「思考→卡片→思考→卡片」。内部往返（措辞 / 裁判 / 摘要）不是这一轮对
@@ -805,6 +811,67 @@ fn is_model_roundtrip(e: &Event) -> bool {
         .and_then(serde_json::Value::as_str)
         == Some("reader")
         && e.payload.get("via").is_none()
+}
+
+/// 压缩失败（`failed` + `stamp.failure = compression`）→ 一个 `Failed` 压缩叶（D-402 ①）。
+///
+/// 成功那笔同样带这枚章（章按债行声明盖），所以只认 `failed` 格：成功仍由快照折出
+/// `Completed` 的压缩叶。节点身份取失败载荷的 `compression_id`（按前缀指纹派生，
+/// 含重试纪元；旧 WAL 无该字段时回落 `compression:<final_id>`）——读面把
+/// `message.removed` 当永久隐藏，重试产物必须换身份才可读；`meta.failure_kind` 是原因
+/// 分类，`meta.fingerprint` 是债源的收束键（诊断用）。节点被 `message.removed` 判死后
+/// 由主循环统一剔除（重试入口）。
+fn compression_failure_node(e: &Event) -> Option<ChatNode> {
+    if e.kind != EVENT_FAILED {
+        return None;
+    }
+    let failure = e.payload.get(STAMP_KEY)?.get(STAMP_FAILURE)?.as_str()?;
+    if failure != "compression" {
+        return None;
+    }
+    let id = match e
+        .payload
+        .get("compression_id")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(id) => id.to_string(),
+        None => format!("compression:{}", e.payload.get("final_id")?.as_str()?),
+    };
+    let detail = e.payload.get("detail").and_then(serde_json::Value::as_str);
+    let text = e
+        .payload
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .or(detail)
+        .unwrap_or("上下文压缩失败");
+    let class = e
+        .payload
+        .get("failure_class")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("failed");
+    let mut meta = serde_json::json!({ "failure_kind": class });
+    if let Some(fingerprint) = e
+        .payload
+        .get("fingerprint")
+        .and_then(serde_json::Value::as_str)
+    {
+        meta["fingerprint"] = serde_json::json!(fingerprint);
+    }
+    Some(
+        ChatNode {
+            id,
+            principal: Some(actor_principal(e)),
+            msg_type: Some(NodeKind::Notice),
+            content: Some(MessageContent::Text(text.to_string())),
+            status: Some(NodeStatus::Failed),
+            timestamp: Some(e.ts),
+            error: detail.map(str::to_string),
+            meta: Some(meta),
+            ..Default::default()
+        }
+        .with_style_tag(CHAT_STYLE_TAG_COMPRESSION),
+    )
 }
 
 /// 一次模型往返（`response` / `failed`）→ 最多两个子节点（Reasoning / Text）。

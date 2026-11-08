@@ -6,10 +6,12 @@
 
 use serde_json::{json, Value};
 use symbio_plugin_api::debt::{Closing, DebtFacts, DebtSource, DriveRequest};
-use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use symbio_plugin_api::events::{
+    EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE,
+};
 use symbio_plugin_api::text::{default_tokenizer, Tokenizer};
 
-use super::{CompactDebts, SUMMARIZE_INSTRUCTION};
+use super::{CompactDebts, SESSION_CONSOLIDATED, SUMMARIZE_INSTRUCTION, WRITE_ROW};
 
 const LIMIT: u64 = 1_000;
 
@@ -149,4 +151,178 @@ fn no_watermark_means_no_debt() {
         json!({ "context": { "request_tokens": 900, "limit_tokens": 1_000 } }),
     );
     assert_eq!(CompactDebts.rows(&drive(), &facts).len(), 2);
+}
+
+/// 失败收束的载荷（形状与 `port.rs::summary_failed` 一致）。
+fn failed_payload(final_of: &str) -> Value {
+    let fingerprint = format!("u-0|{LIMIT}|");
+    json!({
+        "root_id": final_of,
+        "final_id": format!("{EVENT_CHAT_ASSISTANT_FINAL}:{final_of}"),
+        "compression_id": format!("compression:{fingerprint}"),
+        "failure_class": "non_retryable_provider",
+        "detail": "boom",
+        "from": "u-0",
+        "to": format!("{EVENT_CHAT_ASSISTANT_FINAL}:u-0"),
+        "truncate": {},
+        "keep_from": null,
+        "split": false,
+        "fingerprint": fingerprint,
+    })
+}
+
+// ==================== D-402：跨轮抑制与重试 ====================
+
+/// 同一前缀收束为 Failed ⇒ 下一轮不再欠（不每轮重付注定失败的往返）。
+#[test]
+fn a_failed_prefix_is_not_owed_again_on_the_next_round() {
+    let (mut facts, _) = facts_with(2, 100, 100);
+    // 收束键 = 最旧未压事实 | 上限 | 代（无成功压缩 ⇒ 代为空）。
+    let base = format!("u-0|{LIMIT}|");
+    facts.note_closing(
+        &format!("{WRITE_ROW}:{base}"),
+        Closing::Failed,
+        failed_payload("u-1"),
+    );
+    assert!(
+        CompactDebts.rows(&drive(), &facts).is_empty(),
+        "同一前缀已判死 ⇒ 跨轮抑制"
+    );
+}
+
+/// 失败产物被删过一次（`message.removed`）⇒ 换一把指纹，按失败时那段切片重跑；
+/// 且**不欠水位**也重跑（显式重试不是自动压缩）。
+#[test]
+fn removing_the_failed_node_reopens_the_debt_with_a_new_epoch() {
+    let (mut facts, _) = facts_with(2, 100, 100);
+    // 水位压到阈值以下：自动压缩不欠，重试仍要跑。
+    facts.note_closing(
+        "model:u-1",
+        Closing::Ok,
+        json!({ "context": { "request_tokens": 100, "limit_tokens": LIMIT } }),
+    );
+    let base = format!("u-0|{LIMIT}|");
+    facts.note_closing(
+        &format!("{WRITE_ROW}:{base}"),
+        Closing::Failed,
+        failed_payload("u-1"),
+    );
+
+    facts.note_fact(EVENT_MESSAGE_REMOVED, "removed-1");
+    facts.note_fact_payload(
+        EVENT_MESSAGE_REMOVED,
+        "removed-1",
+        json!({ "ids": [format!("compression:{base}")] }),
+    );
+
+    let rows = CompactDebts.rows(&drive(), &facts);
+    assert_eq!(rows.len(), 2, "显式重试 ⇒ 两行重新欠");
+    let summarize = &rows[0].payload;
+    let write = &rows[1].payload;
+    assert_eq!(
+        summarize["slice"]["from"],
+        json!("u-0"),
+        "沿用失败时那段切片的起点，不拿此刻的转写重规划"
+    );
+    assert_eq!(
+        summarize["slice"]["to"],
+        json!("chat.assistant.final:u-0"),
+        "沿用失败时那段切片的终点"
+    );
+    assert_eq!(summarize["final_id"], json!("chat.assistant.final:u-1"));
+    let fingerprint = write["fingerprint"].as_str().expect("带指纹");
+    assert!(
+        fingerprint.starts_with(&base) && fingerprint.contains("|retry:removed-1"),
+        "指纹换到重试纪元：{fingerprint}"
+    );
+}
+
+/// 重试本身也失败、节点再被删一次 ⇒ 换**下一个**纪元（链走到最新那一笔）。
+#[test]
+fn a_second_retry_moves_to_the_next_epoch() {
+    let (mut facts, _) = facts_with(2, 100, 100);
+    let base = format!("u-0|{LIMIT}|");
+    let first = format!("{WRITE_ROW}:{base}");
+    facts.note_closing(&first, Closing::Failed, failed_payload("u-1"));
+    facts.note_fact(EVENT_MESSAGE_REMOVED, "removed-1");
+    facts.note_fact_payload(
+        EVENT_MESSAGE_REMOVED,
+        "removed-1",
+        json!({ "ids": [format!("compression:{base}")] }),
+    );
+
+    // 第一次重试也判死：它的键是 `base|retry:removed-1`，节点身份带同一纪元。
+    let retry_key = format!("{base}|retry:removed-1");
+    let mut retried = failed_payload("u-1");
+    retried["fingerprint"] = json!(retry_key);
+    retried["compression_id"] = json!(format!("compression:{retry_key}"));
+    facts.note_closing(
+        &format!("{WRITE_ROW}:{retry_key}"),
+        Closing::Failed,
+        retried,
+    );
+    // 没有第二次移除 ⇒ 抑制（不把同一把键重付）。
+    assert!(
+        CompactDebts.rows(&drive(), &facts).is_empty(),
+        "第二次失败尚未被显式重试 ⇒ 抑制"
+    );
+
+    facts.note_fact(EVENT_MESSAGE_REMOVED, "removed-2");
+    facts.note_fact_payload(
+        EVENT_MESSAGE_REMOVED,
+        "removed-2",
+        json!({ "ids": [format!("compression:{retry_key}")] }),
+    );
+    let rows = CompactDebts.rows(&drive(), &facts);
+    assert_eq!(rows.len(), 2, "第二次显式重试 ⇒ 两行重新欠");
+    let fingerprint = rows[1].payload["fingerprint"].as_str().expect("带指纹");
+    assert_eq!(
+        fingerprint,
+        format!("{base}|retry:removed-2"),
+        "纪元换到最后一次移除，而不是停在第一次"
+    );
+}
+
+/// **本轮**刚落成的压缩不算代：否则同一轮立刻换一把键，把同一段重压一遍。
+#[test]
+fn this_rounds_consolidation_does_not_move_the_generation() {
+    let (mut facts, users) = facts_with(2, 100, 100);
+    let (_, write) = rows_of(&facts);
+    let fingerprint = write["fingerprint"].clone();
+
+    // 本轮的压缩落成（root_id = 当前用户）：代不动，键不变。
+    facts.note_fact(SESSION_CONSOLIDATED, "consolidated-now");
+    facts.note_fact_payload(
+        SESSION_CONSOLIDATED,
+        "consolidated-now",
+        json!({ "root_id": users.last() }),
+    );
+    let (_, same) = rows_of(&facts);
+    assert_eq!(same["fingerprint"], fingerprint, "本轮压缩不进代");
+
+    // 收 `Ok` ⇒ 同一把键不再欠（成功路径的抑制）。
+    facts.note_closing(
+        &format!("{WRITE_ROW}:{}", fingerprint.as_str().expect("带指纹")),
+        Closing::Ok,
+        json!({}),
+    );
+    assert!(
+        CompactDebts.rows(&drive(), &facts).is_empty(),
+        "这一代已压过 ⇒ 不重付"
+    );
+
+    // 上一轮的压缩才进代：下一轮有资格再压，键随代前进。
+    facts.note_fact(SESSION_CONSOLIDATED, "consolidated-before");
+    facts.note_fact_payload(
+        SESSION_CONSOLIDATED,
+        "consolidated-before",
+        json!({ "root_id": users[users.len() - 2] }),
+    );
+    let rows = CompactDebts.rows(&drive(), &facts);
+    assert_eq!(rows.len(), 2, "换代 ⇒ 新一轮重新欠");
+    let next = rows[1].payload["fingerprint"].as_str().expect("带指纹");
+    assert!(
+        next.ends_with("consolidated-before"),
+        "代取上一轮的压缩：{next}"
+    );
 }

@@ -13,17 +13,23 @@ import './_selfrun.mjs';
 //
 // | # | 契约 | 判据 |
 // |---|---|---|
-// | A | 摘要失败真的发生 | mock 收到摘要请求（最后一条 user 是转写形态）且返回 500 |
+// | A | 摘要失败真的发生 | mock 收到摘要请求（最后一条 user 是转写形态）且返回 400（超窗） |
 // | B | 失败不落压缩事实 | 事实源里没有 `session.consolidated` |
-// | C | 失败有交代 | 至少一条 `failed` 事实，且落在 `ring:model.assist:`（`payload.class = non_retryable`、`reason` 非空） |
+// | C | 失败有交代 | `model.assist` 的 `failed`（`class = non_retryable`、`reason` 非空）+ `compact` 的 `failed`（`stamp.failure = compression`、`failure_class = non_retryable_context_length`） |
 // | D | **失败合并不吞消息** | 每条用户 marker 在 live + 归档并集里**恰好出现一次** |
+// | E | 跨轮抑制 | 6 轮里摘要请求**只有 1 次**（同一前缀失败过 ⇒ 不再每轮重付）；仍无 `session.consolidated` |
+// | F | 失败产物 + 重试出路 | 读出口有一个 `Failed` 压缩节点（`actions` 含 `retry_compaction`）；对它发 `retry_compaction` ⇒ 摘要请求 +1 |
 //
 // ## 计量口径
 //
 // 触发与 t8 同一口径：mock 恒报 `prompt_tokens: 64`（见 `mock-llm.mjs`），上限取 80
-// ⇒ 每轮越线、每轮都欠一次摘要。失败是 `NonRetryable`（provider 5xx 映射），
-// 环不重试；`compact-write` 找不到摘要时返回成功、不落事实（「没压」不是领域事实）。
-// `retryAfterSec: 0` 让客户端的 5xx 退避立即重试，避免空等指数退避。
+// ⇒ 第一轮越线、欠一次摘要。失败按**真实 provider 的超窗错误**注入：HTTP 400 +
+// `maximum context length`——它不是可重试状态，因此**一次派发只对应一次请求**（500
+// 会被 HTTP 层退避重试 4 次，用它计量会把一次派发数成 5 次，抑制就测不出来）。
+// `compact-write` 拿不到摘要 ⇒ **失败是产物**（D-402）：落带原因分类的 `failed` 事实
+// （超窗归 `non_retryable_context_length`），读面折出 `Failed` 压缩叶，重试入口可达。
+// 两行债的 id 按**前缀指纹**派生（最旧未压事实 + 上限 + 代），同一前缀失败过就收束在
+// 同一把键上——其后轮次不再重付。
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -45,6 +51,7 @@ import {
   assertTranscriptInvariants,
   msgRoleOf,
   textOf,
+  resumeSession,
 } from '../helpers.mjs';
 
 const ROUNDS = 6;
@@ -78,13 +85,13 @@ const systemText = (q) => {
 export default defineCase('T18 压缩失败纪律：model.assist 失败不落事实、不吞消息', async () => {
   const llm = await new MockLlm([
     // 静态注入：这段时间里**每一次**摘要问答都失败。命中标记是 system（`model.assist`
-    // 的对话线与主请求同形，只有摘要指令能把它与主请求区分开）。
+    // 的对话线与主请求同形，只有摘要指令能把它与主请求区分开）。400 是不可重试状态，
+    // 一次派发只发一次请求（见文件头计量口径）。
     {
       id: 'snapshot',
       matchSystem: '你是上下文压缩器',
-      status: 500,
-      retryAfterSec: 0,
-      error: 'mock 注入的摘要服务故障',
+      status: 400,
+      error: 'maximum context length exceeded',
     },
     { id: 'big', match: '轮问题', content: REPLY },
   ]).start();
@@ -134,17 +141,40 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
       `摘要失败时不得落 session.consolidated（现有 kind: ${kinds}）`,
     );
 
-    // C：失败本身有交代——失败落在 `model.assist` 的环事实里（环的 failed 载荷
-    //    与本轮产出同形：`class` / `reason` 加端口与该次往返的字段），且没有别的端口失败
+    // C：失败本身有交代——上游 `model.assist` 的 failed（类 + 原因）与
+    //    `compact` 的 failed（压缩失败产物：`stamp.failure = compression` + 原因分类）
     const failed = events.filter((e) => e.kind === 'failed');
     assert(failed.length >= 1, `失败应落 failed 事实（现有 kind: ${kinds}）`);
-    assert(
-      failed.every((e) => String(e.event_id ?? '').startsWith('ring:model.assist:')),
-      `注入对象应只是 model.assist（实际 failed id: ${failed.map((e) => e.event_id).join(', ')}）`,
+    const assistantFailed = failed.filter((e) =>
+      String(e.event_id ?? '').startsWith('ring:model.assist:'),
     );
-    const f = failed[0];
-    assertEq(f.payload?.class, 'non_retryable', 'HTTP 500 的失败类别');
+    const compactFailed = failed.filter(
+      (e) =>
+        String(e.event_id ?? '').startsWith('ring:compact:') &&
+        e.payload?.stamp?.failure === 'compression',
+    );
+    assert(assistantFailed.length >= 1, `注入对象应只是 model.assist（实际 failed id: ${failed.map((e) => e.event_id).join(', ')}）`);
+    const f = assistantFailed[0];
+    assertEq(f.payload?.class, 'non_retryable', 'HTTP 400 超窗的失败类别');
     assert(String(f.payload?.reason ?? '').length > 0, 'failed 事实应带非空原因（reason）');
+    assert(compactFailed.length >= 1, `压缩失败要有产物（D-402）；实际 failed id: ${failed.map((e) => e.event_id).join(', ')}`);
+    const c = compactFailed[0];
+    assertEq(
+      c.payload?.failure_class,
+      'non_retryable_context_length',
+      '真实超窗错误码应归类为 non_retryable_context_length',
+    );
+    assert(String(c.payload?.detail ?? '').length > 0, '失败产物应带原因正文（detail）');
+    assert(String(c.payload?.compression_id ?? '').length > 0, '失败产物应带压缩节点身份（compression_id）');
+
+    // E：跨轮抑制——同一前缀只欠一次。6 轮里摘要请求只有 1 次，判死也只落一条；
+    //    水位仍越线，但债键（前缀指纹）已收束，不再每轮重付注定失败的往返。
+    assertEq(
+      summaryReqs.length,
+      1,
+      `6 轮里摘要请求只应有 1 次（同一前缀失败过 ⇒ 跨轮抑制）；实际 ${summaryReqs.length} 次；failed: ${failed.map((e) => e.event_id).join(' | ')}`,
+    );
+    assertEq(compactFailed.length, 1, '同一前缀只判死一次，不随轮次重复落格');
 
     // D：失败合并不吞消息——每条 marker 在 live + 归档并集里恰好一次
     for (const marker of MARKERS) {
@@ -154,7 +184,7 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
       assertEq(count, 1, `用户消息「${marker}」在事实源（live + 归档）里应恰好出现一次（实际 ${count}）`);
     }
 
-    // D 的读出口同源：前端 loadMessages 同一出口读回全部 6 条、无压缩节点
+    // D 的读出口同源：前端 loadMessages 同一出口读回全部 6 条、无压缩快照正文
     api = await startReadbackCli({
       homedir: hd.homedir,
       workdir: hd.workdir,
@@ -171,6 +201,52 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
     assert(
       !msgs.some((m) => String(m.content ?? '').includes('state_snapshot')),
       '摘要失败时读出口不应出现压缩快照正文',
+    );
+
+    // F：失败产物在**读出口**上是一个 `Failed` 压缩节点，且 `actions` 带重试出路；
+    //    对它发一次 `retry_compaction` ⇒ 只看生产出口：摘要请求数 +1。
+    const failedNodes = msgs.filter(
+      (m) => m.status === 'failed' && Array.isArray(m.actions) && m.actions.includes('retry_compaction'),
+    );
+    assertEq(
+      failedNodes.length,
+      1,
+      `读出口应恰有一个可重试的失败压缩节点（实际 ${failedNodes.length}；节点: ${JSON.stringify(msgs.map((m) => [m.id, m.status, m.actions]))}）`,
+    );
+    const target = failedNodes[0].id;
+    const before = summaryReqs.length;
+    const retry = await resumeSession(api, 'e2e-t18', target, 'retry_compaction', {});
+    assert(
+      retry.status === 200 && retry.body?.data?.ok === true,
+      `retry_compaction 应被受理（实际: ${retry.status} ${JSON.stringify(retry.body)}）`,
+    );
+    await waitFor(
+      async () => {
+        const now = (await llm.requests()).filter((q) =>
+          systemText(q).includes('你是上下文压缩器'),
+        );
+        return now.length >= before + 1;
+      },
+      { what: '重试重新发出一次摘要请求', timeoutMs: 30_000 },
+    );
+    // 重试仍失败 ⇒ 出现**新一代**失败产物（身份按前缀指纹换纪元，旧节点被移除事实隐藏），
+    // 读出口再次出现可重试的 `Failed` 压缩节点、不再有 `session.consolidated`。
+    await waitFor(
+      async () => {
+        const again = await readSessionMessages(api, 'e2e-t18');
+        return again.some(
+          (m) =>
+            m.id !== target &&
+            m.status === 'failed' &&
+            Array.isArray(m.actions) &&
+            m.actions.includes('retry_compaction'),
+        );
+      },
+      { what: '失败产物在重试后重建', timeoutMs: 30_000 },
+    );
+    assert(
+      !walEvents(hd.homedir, 'e2e-t18').some((e) => e.kind === 'session.consolidated'),
+      '重试仍然失败 ⇒ 仍不得落 session.consolidated',
     );
   } finally {
     api?.stop();

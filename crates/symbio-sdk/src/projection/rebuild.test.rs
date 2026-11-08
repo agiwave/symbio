@@ -98,6 +98,80 @@ fn shapes(msgs: &[crate::chat::chat_node::ChatNode]) -> Vec<Shape> {
     msgs.iter().map(shape).collect()
 }
 
+/// 压缩失败格（D-402 ①）：只认 `failed` 格 + `stamp.failure = compression`。
+fn compression_failed_event(id: &str, compression_id: &str, ts: i64) -> Event {
+    Event::pending(id, "failed", Entity::Scope, Verb::Asserted, "session/main")
+        .with_ts(ts)
+        .with_payload(serde_json::json!({
+            "port": "compact",
+            "stamp": { "role": "internal", "failure": "compression" },
+            "class": "non_retryable",
+            "reason": "non_retryable_provider: boom",
+            "root_id": "u-1",
+            "final_id": "chat.assistant.final:u-1",
+            "compression_id": compression_id,
+            "failure_class": "non_retryable_provider",
+            "detail": "boom",
+            "text": "上下文压缩失败：boom（non_retryable_provider）。",
+            "fingerprint": "u-0|1000|",
+            "from": "u-0",
+            "to": "chat.assistant.final:u-1",
+            "truncate": {},
+            "keep_from": null,
+            "split": false
+        }))
+}
+
+/// 压缩失败不再是「静默成功」：读面出现一个 `Failed` 压缩叶（重试入口的形状来源）。
+#[test]
+fn compression_failure_is_a_failed_notice_node() {
+    let compression_id = "compression:chat.assistant.final:u-1";
+    let nodes = rebuild(
+        &[compression_failed_event("f-1", compression_id, 10)],
+        &CHAT,
+        &MESSAGE,
+    );
+    assert_eq!(nodes.len(), 1, "失败产物一条节点");
+    let node = &nodes[0];
+    assert_eq!(node.id, compression_id, "身份与成功快照的折叠叶同名");
+    assert!(node.is_compression());
+    assert_eq!(node.status, Some(NodeStatus::Failed));
+    assert_eq!(
+        node.content
+            .as_ref()
+            .map(|c| c.to_text())
+            .unwrap_or_default(),
+        "上下文压缩失败：boom（non_retryable_provider）。"
+    );
+    assert_eq!(
+        node.meta.as_ref().and_then(|m| m.get("failure_kind")),
+        Some(&serde_json::json!("non_retryable_provider")),
+        "原因分类可读"
+    );
+}
+
+/// 重试动作（`message.removed`）删得掉失败叶：读面不再出现它。
+#[test]
+fn removing_the_compression_failure_hides_the_node() {
+    let compression_id = "compression:chat.assistant.final:u-1";
+    let events = vec![
+        compression_failed_event("f-1", compression_id, 10),
+        Event::pending(
+            "rm-1",
+            "message.removed",
+            Entity::Message,
+            Verb::Closed,
+            "session/main",
+        )
+        .with_ts(11)
+        .with_payload(serde_json::json!({ "ids": [compression_id] })),
+    ];
+    assert!(
+        rebuild(&events, &CHAT, &MESSAGE).is_empty(),
+        "失败叶被判死之后读面不再出现"
+    );
+}
+
 /// 一条轮级事实的公共壳（用户格 / 收束格 / 补充格的形状都从它出发）。
 fn frame_event(
     id: &str,

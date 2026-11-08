@@ -169,6 +169,13 @@ pub const VDFS_ACTION_SWITCH_BRANCH: &str = "switch_branch";
 /// 是一条，不另造名字）。
 pub const VDFS_ACTION_RETRY_SUBTREE: &str = "retry_subtree";
 
+/// 节点动作标识：**重试压缩**（写操作，落在失败的压缩节点上）。
+///
+/// 入参无（`{}`）。它落一条 `message.removed`（目标就是该节点），把失败产物从读面
+/// 丢掉；压缩债源据此换一把带纪元的前缀指纹，不欠水位也重跑失败时那段切片
+/// （[D-402]）。词形与 `ResumeAction` 的 snake_case 逐字相同（§4 的词表是一条）。
+pub const VDFS_ACTION_RETRY_COMPACTION: &str = "retry_compaction";
+
 // ==================== 插件容器的注册表动词 ====================
 //
 // 容器的根地址同时是两个视图的锚点：**资源树**（`List` 只给已挂载、且自己暴露了

@@ -10,8 +10,9 @@
 //! ## 欠不欠由债源决定，不在本执行体判
 //!
 //! 水位（阈值 0.7 × provider 上限）在 `debt.rs` 申报时判：没超就不欠这两行，本执行体
-//! 压根不会被派发。执行体拿不到可信摘要（`model.assist` 失败 / 空转写）⇒ 返回成功、
-//! 不落事实——「没压」不是一条领域事实。
+//! 压根不会被派发。执行体拿不到可信摘要（`model.assist` 失败 / 空转写）⇒ **失败是产物**
+//! （D-402）：落一条带原因分类的 `failed` 事实，读面据此折出 `Failed` 压缩叶，重试入口
+//! 因此可达；不再返回成功、不再让压缩节点恒 `Completed`。
 //!
 //! ## 压出来的快照
 //!
@@ -29,9 +30,9 @@ use symbio_plugin_api::chat_node::{
     AssistReply, ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
 };
 use symbio_plugin_api::port::{
-    PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome, PortProvider,
+    PortErrorClass, PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome, PortProvider,
 };
-use symbio_plugin_api::{Entity, FactDraft, Verb, EVENT_RESPONSE};
+use symbio_plugin_api::{Entity, FactDraft, Verb, EVENT_FAILED, EVENT_RESPONSE};
 
 /// 端口名（唯一来源：本插件）。
 pub(crate) const COMPACT_PORT: &str = "compact";
@@ -69,9 +70,25 @@ impl PortExecutor for CompactExecutor {
         };
         let facts = reader.facts();
         let after_port = str_of(&input.payload, "after_port");
+        let after_id = str_of(&input.payload, "after_id");
         let Some(summary) = summary_of(&facts, &final_id, &after_port) else {
-            // 摘要那笔没交回正文（失败 / 空转写）：不拿占位冒充摘要。
-            return PortOutcome::ok();
+            // 摘要那笔没交回正文（失败 / 空转写）：失败是产物（D-402），不拿成功冒充。
+            return summary_failed(
+                &input.payload,
+                &facts,
+                &root_id,
+                &final_id,
+                &after_port,
+                &after_id,
+            );
+        };
+        let key = {
+            let fingerprint = str_of(&input.payload, "fingerprint");
+            if fingerprint.is_empty() {
+                root_id.clone()
+            } else {
+                fingerprint
+            }
         };
         let keep_from = input
             .payload
@@ -87,13 +104,13 @@ impl PortExecutor for CompactExecutor {
         if messages.is_empty() {
             return PortOutcome::ok();
         }
-        let mut payload = json!({ "messages": messages, "split": split });
+        let mut payload = json!({ "root_id": root_id, "messages": messages, "split": split });
         if let Some(keep_from) = &keep_from {
             payload["keep_from"] = json!(keep_from);
         }
         ctx.emit
             .emit(vec![FactDraft {
-                key: format!("{SESSION_CONSOLIDATED}:{root_id}"),
+                key: format!("{SESSION_CONSOLIDATED}:{key}"),
                 kind: SESSION_CONSOLIDATED.to_string(),
                 entity: Entity::Message,
                 verb: Verb::Progressed,
@@ -103,6 +120,108 @@ impl PortExecutor for CompactExecutor {
             .await;
         PortOutcome::ok()
     }
+}
+
+/// 拿不到摘要时的产物：一条带原因分类的失败（D-402 ①）。
+///
+/// 载荷必须带上**读出与重试要用的全部材料**：失败压缩节点的身份（`compression_id`）、
+/// 原因分类（`failure_class`）、给展示面的正文（`text`），以及失败时那段切片的边界
+/// （`from` / `to` / `truncate` / `keep_from` / `split`）——重试不能拿「此刻的转写」
+/// 重新规划，否则压的就不是失败过的那一段。
+fn summary_failed(
+    input: &Value,
+    facts: &[PortFact],
+    root_id: &str,
+    final_id: &str,
+    after_port: &str,
+    after_id: &str,
+) -> PortOutcome {
+    let upstream = failure_of(facts, after_id, after_port);
+    let class = classify_failure(
+        upstream.as_ref().map(|(class, _)| class.as_str()),
+        upstream.as_ref().map(|(_, reason)| reason.as_str()),
+    );
+    let detail = upstream
+        .map(|(_, reason)| reason)
+        .unwrap_or_else(|| "摘要服务没有交回正文".to_string());
+    // 失败节点的身份按**前缀指纹**（含重试纪元）派生：读面把 `message.removed`
+    // 当作永久隐藏，重试若沿用旧身份，重建出的节点永远不可见（D-402 ③）。
+    let fingerprint = str_of(input, "fingerprint");
+    let compression_id = if fingerprint.is_empty() {
+        format!("compression:{final_id}")
+    } else {
+        format!("compression:{fingerprint}")
+    };
+    let mut outcome =
+        PortOutcome::failed(PortErrorClass::NonRetryable, format!("{class}: {detail}"));
+    outcome.facts = vec![json!({
+        "root_id": root_id,
+        "final_id": final_id,
+        "compression_id": compression_id,
+        "failure_class": class,
+        "detail": detail,
+        "text": failure_text(&class, &detail),
+        "from": str_of(input, "from"),
+        "to": str_of(input, "to"),
+        "truncate": input.get("truncate").cloned().unwrap_or_else(|| json!({})),
+        "keep_from": input.get("keep_from").cloned().unwrap_or(Value::Null),
+        "split": input.get("split").and_then(Value::as_bool).unwrap_or(false),
+        "fingerprint": fingerprint,
+    })];
+    outcome
+}
+
+/// 上游摘要那笔的失败事实：按债 id 前缀与端口双匹配（`failed` 载荷不带 `final_id`）。
+fn failure_of(facts: &[PortFact], after_id: &str, port: &str) -> Option<(String, String)> {
+    let prefix = format!("ring:{port}:{after_id}:");
+    let fact = facts
+        .iter()
+        .rev()
+        .find(|f| f.port == port && f.kind == EVENT_FAILED && f.id.starts_with(&prefix))?;
+    let class = fact
+        .payload
+        .get("class")
+        .and_then(Value::as_str)
+        .unwrap_or("non_retryable")
+        .to_string();
+    let reason = fact
+        .payload
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Some((class, reason))
+}
+
+/// 失败原因分类：provider 的错误文本只按**已登记特征**归类，其余如实落到 `*_provider`。
+///
+/// 超窗（`non_retryable_context_length`）单独成一类，因为它是「换个小转写 / 换大窗口」
+/// 才能解的；认证、配额等与瞬时故障分开，读面与债源都能据此解释。
+fn classify_failure(class: Option<&str>, reason: Option<&str>) -> String {
+    let reason = reason.unwrap_or_default().to_ascii_lowercase();
+    const CONTEXT_LENGTH: &[&str] = &[
+        "context length",
+        "context_length",
+        "context window",
+        "maximum context",
+        "prompt is too long",
+        "too many tokens",
+    ];
+    if CONTEXT_LENGTH.iter().any(|needle| reason.contains(needle)) {
+        return "non_retryable_context_length".to_string();
+    }
+    match class {
+        // 没有上游失败事实：摘要服务就是没交回正文（空转写 / 空摘要）。
+        None => "non_retryable_empty_summary".to_string(),
+        Some("retryable") => "retryable_provider".to_string(),
+        Some("needs_human") => "needs_human".to_string(),
+        _ => "non_retryable_provider".to_string(),
+    }
+}
+
+/// 失败节点的正文：用户能读懂的交代（分类 + 原因）。
+fn failure_text(class: &str, detail: &str) -> String {
+    format!("上下文压缩失败：{detail}（{class}）。可在此重试；持续失败时换用窗口更大的模型。")
 }
 
 fn str_of(payload: &Value, key: &str) -> String {
