@@ -70,6 +70,7 @@ const LEDGER_TEXT = [
   '|---|:-:|---|',
   '| 拆 | 1 | 1 |',
   '| 留守 | 1 | 2 |',
+  '| 撤回 | 0 | |',
   '| 待裁决 | 1 | 3 |',
   '',
 ].join('\n')
@@ -158,7 +159,7 @@ function assertRed(r, needle) {
 test('干净夹具：名册与账本逐行对上，读数是 3 行', () => {
   const r = audit(cleanTree())
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 不做 0 · 待裁决 1）/)
+  assert.match(r.stdout, /名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 撤回 0 · 不做 0 · 待裁决 1）/)
 })
 
 // ── 实现状态：设计在 / 实现还在，是两个字段 ─────────────────────────
@@ -211,6 +212,49 @@ test('与 done 行同包共享的 crate 不适用 planned 装配判据 ⇒ 绿',
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
+// ── 撤回（设计保留）：删实现不删设计行 ──────────────────────────────
+
+function withdrawnTree(reason = '设计保留 / 实现撤回 / 待重新实现；场景：乙能力在一次真实会话里被调用') {
+  const files = cleanTree()
+  files[ROSTER] = files[ROSTER].replace('`crates/symbio-plugin-c/src/lib.rs::B` | done |', '`crates/symbio-plugin-c/src/lib.rs::B` | planned |')
+  files[LEDGER] = files[LEDGER]
+    .replace(
+      '| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |',
+      `| 2 | 乙能力 | 实现已撤回 | 撤回（设计保留） | ${reason} | — |`,
+    )
+    .replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
+    .replace('| 撤回 | 0 | |', '| 撤回 | 1 | 2 |')
+  return files
+}
+
+test('撤回写明设计保留与场景、且不挂交付段 ⇒ 绿', () => {
+  const r = audit(withdrawnTree())
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /拆 1 · 留守 0 · 撤回 1 · 不做 0 · 待裁决 1/)
+})
+
+test('撤回不写真实使用场景 ⇒ 红（写不出场景就该标 planned-unspecified）', () => {
+  const files = withdrawnTree('设计保留 / 实现撤回 / 待重新实现')
+  assertRed(audit(files), /没给一句真实使用场景/)
+})
+
+test('撤回却挂了交付段 ⇒ 红（重新实现要另开任务）', () => {
+  const files = withdrawnTree('设计保留 / 实现撤回 / 待重新实现；场景：乙能力在真实会话里被调用 | S9')
+  assertRed(audit(files), /撤回不建段/)
+})
+
+test('名册标 done、账本却记撤回 ⇒ 红（两本账互相矛盾）', () => {
+  const files = cleanTree()
+  files[LEDGER] = files[LEDGER]
+    .replace(
+      '| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |',
+      '| 2 | 乙能力 | 实现已撤回 | 撤回（设计保留） | 设计保留 / 实现撤回 / 待重新实现；场景：乙能力在真实会话里被调用 | — |',
+    )
+    .replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
+    .replace('| 撤回 | 0 | |', '| 撤回 | 1 | 2 |')
+  assertRed(audit(files), /两本账互相矛盾/)
+})
+
 // ── 「不做（边界）」是单列一类（D-388 的收口口径） ─────────────────
 
 test('记为拆但目标 crate 不存在 ⇒ 红（虚记让完成率虚高）', () => {
@@ -227,7 +271,7 @@ test('不做（边界）单列一类，不进拆计数 ⇒ 绿', () => {
     .replace('| 待裁决 | 1 | 3 |', '| 待裁决 | 1 | 3 |\n| 不做 | 1 | 2 |')
   const r = audit(files)
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /拆 1 · 留守 0 · 不做 1 · 待裁决 1/)
+  assert.match(r.stdout, /拆 1 · 留守 0 · 撤回 0 · 不做 1 · 待裁决 1/)
 })
 
 test('不做不挂决策号 ⇒ 红（「决定不做」必须是裁决）', () => {

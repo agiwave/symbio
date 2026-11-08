@@ -1,5 +1,0 @@
-# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
-plugin_id: explain
-plugin_comment: 可解释：把一次决定的理由记成事实（工具），再折成可读的理由台账（视图）
-plugin_assembly: sub_agent
-plugin_order: 62

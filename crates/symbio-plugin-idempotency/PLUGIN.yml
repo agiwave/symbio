@@ -1,5 +1,0 @@
-# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
-plugin_id: idempotency
-plugin_comment: 幂等台账：一个工具、一条 Domain 事实、一张视图；同一个键在同一会话里只记一次
-plugin_assembly: sub_agent
-plugin_order: 64

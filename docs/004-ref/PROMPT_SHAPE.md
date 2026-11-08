@@ -11,9 +11,9 @@
 
 | 请求 | 消息数 | 消息序列（role + 结构载体） | system 小节标签序列 | 工具数 |
 |---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 31 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 31 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 31 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 22 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 22 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 22 |
 
 ## 规模观测（**不进判据**：同一列里既有装配代码的字，也有负载的字）
 
@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 31 | 667 | 29652 | 30532 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 31 | 723 | 29652 | 30824 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 31 | 1157 | 29652 | 31325 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 22 | 667 | 22906 | 23777 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 22 | 723 | 22906 | 24069 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 22 | 1157 | 22906 | 24570 |
 
 ## 基线（判据本体）
 
@@ -70,14 +70,11 @@
         []
       ],
       "tools": {
-        "count": 31,
+        "count": 22,
         "names": [
           "agent_run",
-          "causal_assert",
-          "explain_record",
           "glossary_define",
           "heartbeat",
-          "idempotent_record",
           "<shell>",
           "content_search",
           "todo_write",
@@ -85,11 +82,6 @@
           "ask_user",
           "mcp__mockserv__echo",
           "mcp__mockserv__add",
-          "notes_add",
-          "protocol_propose",
-          "protocol_join",
-          "reversibility_annotate",
-          "toolsmith_define",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -101,10 +93,9 @@
           "vdfs_mkdir",
           "web_fetch",
           "web_search",
-          "http_request",
-          "world_observe"
+          "http_request"
         ],
-        "schema_bytes": 29652
+        "schema_bytes": 22906
       }
     },
     {
@@ -158,14 +149,11 @@
         []
       ],
       "tools": {
-        "count": 31,
+        "count": 22,
         "names": [
           "agent_run",
-          "causal_assert",
-          "explain_record",
           "glossary_define",
           "heartbeat",
-          "idempotent_record",
           "<shell>",
           "content_search",
           "todo_write",
@@ -173,11 +161,6 @@
           "ask_user",
           "mcp__mockserv__echo",
           "mcp__mockserv__add",
-          "notes_add",
-          "protocol_propose",
-          "protocol_join",
-          "reversibility_annotate",
-          "toolsmith_define",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -189,10 +172,9 @@
           "vdfs_mkdir",
           "web_fetch",
           "web_search",
-          "http_request",
-          "world_observe"
+          "http_request"
         ],
-        "schema_bytes": 29652
+        "schema_bytes": 22906
       }
     },
     {
@@ -264,14 +246,11 @@
         []
       ],
       "tools": {
-        "count": 31,
+        "count": 22,
         "names": [
           "agent_run",
-          "causal_assert",
-          "explain_record",
           "glossary_define",
           "heartbeat",
-          "idempotent_record",
           "<shell>",
           "content_search",
           "todo_write",
@@ -279,11 +258,6 @@
           "ask_user",
           "mcp__mockserv__echo",
           "mcp__mockserv__add",
-          "notes_add",
-          "protocol_propose",
-          "protocol_join",
-          "reversibility_annotate",
-          "toolsmith_define",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -295,10 +269,9 @@
           "vdfs_mkdir",
           "web_fetch",
           "web_search",
-          "http_request",
-          "world_observe"
+          "http_request"
         ],
-        "schema_bytes": 29652
+        "schema_bytes": 22906
       }
     }
   ]

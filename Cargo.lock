@@ -4150,7 +4150,6 @@ dependencies = [
  "symbio-kernel",
  "symbio-plugin-agent",
  "symbio-plugin-api",
- "symbio-plugin-causal",
  "symbio-plugin-classify",
  "symbio-plugin-compact",
  "symbio-plugin-compose",
@@ -4158,25 +4157,20 @@ dependencies = [
  "symbio-plugin-conation",
  "symbio-plugin-cost",
  "symbio-plugin-event_bus",
- "symbio-plugin-explain",
  "symbio-plugin-forecast",
  "symbio-plugin-gateway",
  "symbio-plugin-glossary",
  "symbio-plugin-heartbeat",
  "symbio-plugin-home",
  "symbio-plugin-hook",
- "symbio-plugin-idempotency",
  "symbio-plugin-local",
  "symbio-plugin-loop",
  "symbio-plugin-mcp",
  "symbio-plugin-memory",
  "symbio-plugin-model",
- "symbio-plugin-notes",
  "symbio-plugin-persona",
  "symbio-plugin-plugin_manager",
- "symbio-plugin-protocol",
  "symbio-plugin-reputation",
- "symbio-plugin-reversibility",
  "symbio-plugin-session",
  "symbio-plugin-setting",
  "symbio-plugin-skill",
@@ -4184,10 +4178,8 @@ dependencies = [
  "symbio-plugin-task",
  "symbio-plugin-telegram",
  "symbio-plugin-tool",
- "symbio-plugin-toolsmith",
  "symbio-plugin-vdfs",
  "symbio-plugin-web",
- "symbio-plugin-world_model",
  "symbio-providers",
  "symbio-sdk",
  "tempfile",
@@ -4291,17 +4283,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "symbio-plugin-causal"
-version = "0.1.14"
-dependencies = [
- "async-trait",
- "serde_json",
- "symbio-plugin-api",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "symbio-plugin-classify"
 version = "0.1.14"
 dependencies = [
@@ -4388,17 +4369,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
-]
-
-[[package]]
-name = "symbio-plugin-explain"
-version = "0.1.14"
-dependencies = [
- "async-trait",
- "serde_json",
- "symbio-plugin-api",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -4489,16 +4459,6 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
-]
-
-[[package]]
-name = "symbio-plugin-idempotency"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde_json",
- "symbio-plugin-api",
- "tokio",
 ]
 
 [[package]]
@@ -4612,18 +4572,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "symbio-plugin-notes"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
- "symbio-plugin-api",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "symbio-plugin-persona"
 version = "0.1.14"
 dependencies = [
@@ -4649,32 +4597,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "symbio-plugin-protocol"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde_json",
- "symbio-plugin-api",
- "tokio",
-]
-
-[[package]]
 name = "symbio-plugin-reputation"
 version = "0.1.14"
 dependencies = [
  "async-trait",
  "serde_json",
  "symbio-plugin-api",
-]
-
-[[package]]
-name = "symbio-plugin-reversibility"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde_json",
- "symbio-plugin-api",
- "tokio",
 ]
 
 [[package]]
@@ -4787,16 +4715,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "symbio-plugin-toolsmith"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde_json",
- "symbio-plugin-api",
- "tokio",
-]
-
-[[package]]
 name = "symbio-plugin-vdfs"
 version = "0.1.14"
 dependencies = [
@@ -4837,16 +4755,6 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
-]
-
-[[package]]
-name = "symbio-plugin-world_model"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde_json",
- "symbio-plugin-api",
- "tokio",
 ]
 
 [[package]]

@@ -7,8 +7,7 @@
 //! （DE-015 §3.4），于是 [`symbio_plugin_api::vocab`] 退回共享清单——而
 //! `task.rework_created` 的 `CountsRework` 角色只在本插件自己的声明里。
 //!
-//! 夹具补的正是完整进程里由 loop 提供的那一半：五条协议自读行。它与
-//! `crates/symbio-plugin-notes/src/decl.test.rs` 的同名夹具同形，只在 `cfg(test)` 生效；
+//! 夹具补的正是完整进程里由 loop 提供的那一半：五条协议自读行，只在 `cfg(test)` 生效；
 //! 生产装配（全插件链接）不会走到这份提交——`cfg(test)` 不进 lib 的正常构建。
 
 use super::{EVENT_TASK_REWORK_CREATED, OWNER};

@@ -1,5 +1,0 @@
-# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
-plugin_id: causal
-plugin_comment: 因果结构：把「A 导致 B」记成事实（工具），再折成可读的因果图（视图）
-plugin_assembly: sub_agent
-plugin_order: 56

@@ -181,7 +181,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 95 · draft 1 · retired 2（共 98）
+**计数**：active 87 · draft 1 · retired 2（共 90）
 
 ## 现行设计（active）
 
@@ -246,40 +246,32 @@ board.columns: [impl]
 | [`DE-112-architecture`](../../crates/symbio-cli/docs/112-architecture.md) | 架构 | 与代码一致 |
 | [`DE-113-heartbeat-mechanism`](../../crates/symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） | 与代码一致 |
 | [`crates/symbio-plugin-agent/README`](../../crates/symbio-plugin-agent/README.md) | Agent 插件 | 与代码一致 |
-| [`crates/symbio-plugin-causal/README`](../../crates/symbio-plugin-causal/README.md) | 因果结构插件（含因果表征工具） | 与代码一致 |
 | [`crates/symbio-plugin-classify/README`](../../crates/symbio-plugin-classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
 | [`crates/symbio-plugin-compose/README`](../../crates/symbio-plugin-compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |
 | [`crates/symbio-plugin-composite/README`](../../crates/symbio-plugin-composite/README.md) | Composite 插件 | 与代码一致 |
 | [`crates/symbio-plugin-conation/README`](../../crates/symbio-plugin-conation/README.md) | 目标自生成能力包 | 与代码一致 |
 | [`crates/symbio-plugin-cost/README`](../../crates/symbio-plugin-cost/README.md) | 成本能力包（成本台账折叠） | 与代码一致 |
 | [`crates/symbio-plugin-event_bus/README`](../../crates/symbio-plugin-event_bus/README.md) | Event Bus 插件 | 与代码一致 |
-| [`crates/symbio-plugin-explain/README`](../../crates/symbio-plugin-explain/README.md) | 可解释插件 | 与代码一致 |
 | [`crates/symbio-plugin-gateway/README`](../../crates/symbio-plugin-gateway/README.md) | Gateway 插件 | 与代码一致 |
 | [`crates/symbio-plugin-glossary/README`](../../crates/symbio-plugin-glossary/README.md) | Glossary 插件（项目术语表） | 与代码一致 |
 | [`crates/symbio-plugin-heartbeat/README`](../../crates/symbio-plugin-heartbeat/README.md) | Heartbeat 插件（空闲会话的自主开轮调度） | 与代码一致 |
 | [`crates/symbio-plugin-home/README`](../../crates/symbio-plugin-home/README.md) | Home 插件 | 与代码一致 |
 | [`crates/symbio-plugin-hook/README`](../../crates/symbio-plugin-hook/README.md) | Hook 插件 | 与代码一致 |
-| [`crates/symbio-plugin-idempotency/README`](../../crates/symbio-plugin-idempotency/README.md) | 幂等台账插件 | 与代码一致 |
 | [`crates/symbio-plugin-local/README`](../../crates/symbio-plugin-local/README.md) | Local 插件 | 与代码一致 |
 | [`crates/symbio-plugin-loop/README`](../../crates/symbio-plugin-loop/README.md) | Loop 插件（纯机制环） | 与代码一致 |
 | [`crates/symbio-plugin-mcp/README`](../../crates/symbio-plugin-mcp/README.md) | MCP 插件 | 与代码一致 |
 | [`crates/symbio-plugin-memory/README`](../../crates/symbio-plugin-memory/README.md) | Memory 插件 | 与代码一致 |
 | [`crates/symbio-plugin-model/README`](../../crates/symbio-plugin-model/README.md) | Model 插件 | 与代码一致 |
-| [`crates/symbio-plugin-notes/README`](../../crates/symbio-plugin-notes/README.md) | Notes 插件（扩展夹具） | 与代码一致 |
 | [`crates/symbio-plugin-persona/README`](../../crates/symbio-plugin-persona/README.md) | 人格插件 | 与代码一致 |
 | [`crates/symbio-plugin-plugin_manager/README`](../../crates/symbio-plugin-plugin_manager/README.md) | Plugin_manager 插件（插件管理） | 与代码一致 |
-| [`crates/symbio-plugin-protocol/README`](../../crates/symbio-plugin-protocol/README.md) | 抽象协议设计插件（L4） | 与代码一致 |
 | [`crates/symbio-plugin-reputation/README`](../../crates/symbio-plugin-reputation/README.md) | 声誉能力包（声誉台账折叠） | 与代码一致 |
-| [`crates/symbio-plugin-reversibility/README`](../../crates/symbio-plugin-reversibility/README.md) | 可逆性设计插件 | 与代码一致 |
 | [`crates/symbio-plugin-session/README`](../../crates/symbio-plugin-session/README.md) | Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书) | 与代码一致 |
 | [`crates/symbio-plugin-session/src/docs/README`](../../crates/symbio-plugin-session/src/docs/README.md) | Session 插件文档 | 与代码一致 |
 | [`crates/symbio-plugin-setting/README`](../../crates/symbio-plugin-setting/README.md) | Setting 插件 | 与代码一致 |
 | [`crates/symbio-plugin-skill/README`](../../crates/symbio-plugin-skill/README.md) | Skill 插件 | 与代码一致 |
 | [`crates/symbio-plugin-telegram/README`](../../crates/symbio-plugin-telegram/README.md) | Telegram 插件 | 与代码一致 |
-| [`crates/symbio-plugin-toolsmith/README`](../../crates/symbio-plugin-toolsmith/README.md) | 制造工具插件（L2 受限） | 与代码一致 |
 | [`crates/symbio-plugin-vdfs/README`](../../crates/symbio-plugin-vdfs/README.md) | VDFS 插件 | 与代码一致 |
 | [`crates/symbio-plugin-web/README`](../../crates/symbio-plugin-web/README.md) | Web 插件 | 与代码一致 |
-| [`crates/symbio-plugin-world_model/README`](../../crates/symbio-plugin-world_model/README.md) | 世界模型插件 | 与代码一致 |
 | [`scripts/facts/README`](../../scripts/facts/README.md) | ''`scripts/facts/` —— 事实生成器目录'' | 与代码一致 |
 | [`tauri/README`](../../tauri/README.md) | Tauri 前端 | 与代码一致 |
 

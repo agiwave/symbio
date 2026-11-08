@@ -344,7 +344,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S10"],
-        status: "done",
+        status: "planned",
     },
     Capability {
         name: "未来预测",
@@ -364,7 +364,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S06"],
-        status: "done",
+        status: "planned",
     },
     Capability {
         name: "长期记忆检索",
@@ -424,7 +424,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 1,
         kind: "工程",
         stages: &["S02"],
-        status: "done",
+        status: "planned",
     },
     Capability {
         name: "执行隔离",
@@ -444,7 +444,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "认知",
         stages: &["S09"],
-        status: "done",
+        status: "planned",
     },
     Capability {
         name: "可逆性设计",
@@ -454,7 +454,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "工程",
         stages: &["S09"],
-        status: "done",
+        status: "planned",
     },
     Capability {
         name: "制造工具（L2）",
@@ -464,7 +464,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S13"],
-        status: "done",
+        status: "planned",
     },
     Capability {
         name: "造工具的工具（L3）",
@@ -484,7 +484,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S13"],
-        status: "done",
+        status: "planned",
     },
     Capability {
         name: "具身实时闭环",
@@ -684,7 +684,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S12"],
-        status: "done",
+        status: "planned",
     },
     Capability {
         name: "技能编译",

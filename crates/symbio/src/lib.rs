@@ -33,7 +33,6 @@ pub use symbio_plugin_api::{hooks, routes};
 // >>> plugin-links:begin
 // 以下链接行由 `scripts/facts/plugin-links-rs.mjs` 从 `crates/symbio-plugin-<id>/` 目录投影，请勿手改；漏一行的后果是那个插件的 inventory 注册项被链接器丢掉（不报错，只少功能）。
 pub use symbio_plugin_agent;
-pub use symbio_plugin_causal;
 pub use symbio_plugin_classify;
 pub use symbio_plugin_compact;
 pub use symbio_plugin_compose;
@@ -41,25 +40,20 @@ pub use symbio_plugin_composite;
 pub use symbio_plugin_conation;
 pub use symbio_plugin_cost;
 pub use symbio_plugin_event_bus;
-pub use symbio_plugin_explain;
 pub use symbio_plugin_forecast;
 pub use symbio_plugin_gateway;
 pub use symbio_plugin_glossary;
 pub use symbio_plugin_heartbeat;
 pub use symbio_plugin_home;
 pub use symbio_plugin_hook;
-pub use symbio_plugin_idempotency;
 pub use symbio_plugin_local;
 pub use symbio_plugin_loop;
 pub use symbio_plugin_mcp;
 pub use symbio_plugin_memory;
 pub use symbio_plugin_model;
-pub use symbio_plugin_notes;
 pub use symbio_plugin_persona;
 pub use symbio_plugin_plugin_manager;
-pub use symbio_plugin_protocol;
 pub use symbio_plugin_reputation;
-pub use symbio_plugin_reversibility;
 pub use symbio_plugin_session;
 pub use symbio_plugin_setting;
 pub use symbio_plugin_skill;
@@ -67,10 +61,8 @@ pub use symbio_plugin_slo;
 pub use symbio_plugin_task;
 pub use symbio_plugin_telegram;
 pub use symbio_plugin_tool;
-pub use symbio_plugin_toolsmith;
 pub use symbio_plugin_vdfs;
 pub use symbio_plugin_web;
-pub use symbio_plugin_world_model;
 // <<< plugin-links:end
 
 #[cfg(test)]

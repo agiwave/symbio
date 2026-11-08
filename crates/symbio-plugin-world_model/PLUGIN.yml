@@ -1,5 +1,0 @@
-# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
-plugin_id: world_model
-plugin_comment: 世界模型：一次观察记一条领域事实，视图按（实体，属性）折出当前世界
-plugin_assembly: sub_agent
-plugin_order: 65

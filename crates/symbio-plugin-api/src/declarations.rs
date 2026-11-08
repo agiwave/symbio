@@ -48,9 +48,9 @@ inventory::collect!(DeclarationsDecl);
 /// 提交一份声明表。在插件 crate 的模块作用域调用一次即可。
 ///
 /// ```ignore
-/// symbio_plugin_api::submit_declarations!("crates/symbio-plugin-notes", notes_declarations);
+/// symbio_plugin_api::submit_declarations!("crates/symbio-plugin-glossary", glossary_declarations);
 ///
-/// fn notes_declarations() -> PluginDeclarations<'static> {
+/// fn glossary_declarations() -> PluginDeclarations<'static> {
 ///     todo!("由插件自己的声明模块返回六张表")
 /// }
 /// ```

@@ -63,7 +63,7 @@ const TASKS_REL = 'docs/007-task'
 const ROSTER_STATUSES = ['done', 'planned', 'planned-unspecified']
 const STATUS_COLUMN = '实现状态'
 
-/** 处置闭集：`拆` 的三种限定与 `留` 的五个残留类，外加「待裁决」。 */
+/** 处置闭集：`拆` 的三种限定、`留` 的五个残留类、`撤回`、外加「待裁决」。 */
 const DISPOSITIONS = [
   '拆',
   '拆（折叠）',
@@ -74,6 +74,7 @@ const DISPOSITIONS = [
   '留 守门',
   '留 过程体',
   '留 基底',
+  '撤回（设计保留）',
   '不做（边界）',
   '待裁决',
 ]
@@ -215,6 +216,7 @@ function keyOf(name) {
 function categoryOf(disposition) {
   if (disposition.startsWith('拆')) return '拆'
   if (disposition.startsWith('留')) return '留守'
+  if (disposition.startsWith('撤回')) return '撤回'
   if (disposition.startsWith('不做')) return '不做'
   return '待裁决'
 }
@@ -372,6 +374,29 @@ for (const row of ledger) {
           '若它其实要拆，改处置，不要两边都写',
       )
     }
+  } else if (categoryOf(row.disposition) === '撤回') {
+    if (!row.reason.includes('设计保留 / 实现撤回 / 待重新实现')) {
+      report(
+        at,
+        `#${row.num}「${row.name}」记为撤回，但没写「设计保留 / 实现撤回 / 待重新实现」—— ` +
+          '撤回是实现账：设计行仍留在名册，别把它记成删除',
+      )
+    }
+    const scene = row.reason.match(/场景：(.+)$/m)
+    if (!scene || scene[1].trim().length < 4) {
+      report(
+        at,
+        `#${row.num}「${row.name}」记为撤回，但没给一句真实使用场景 —— ` +
+          '写不出场景的能力应标 planned-unspecified，不是「撤回」',
+      )
+    }
+    if (row.stage && row.stage !== '—') {
+      report(
+        at,
+        `#${row.num}「${row.name}」记为撤回，却挂了交付段 \`${row.stage}\` —— ` +
+          '撤回不建段；重新实现要另开任务',
+      )
+    }
   } else if (categoryOf(row.disposition) === '不做') {
     if (!/D-\d{3}/.test(row.reason)) {
       report(
@@ -448,6 +473,17 @@ function assemblyIds(text) {
 }
 const assembly = assemblyIds(deployText)
 const ledgerByKey = new Map(ledger.map((row) => [keyOf(row.name), row]))
+// 设计与实现是两本账：名册说 done、处置账说撤回，必有一本在说假话。
+for (const r of roster) {
+  if (r.status !== 'done') continue
+  const row = ledgerByKey.get(keyOf(r.name))
+  if (row && categoryOf(row.disposition) === '撤回') {
+    report(
+      `${ROSTER_REL}:${r.line}`,
+      `「${r.name}」标 done，账本处置却是「实现撤回」—— 设计与实现两本账互相矛盾`,
+    )
+  }
+}
 const doneCrates = new Set()
 for (const r of roster) {
   if (r.status !== 'done') continue
@@ -605,19 +641,21 @@ if (roster.length && ledger.length) {
 
 let splitCount = 0
 let residueCount = 0
+let withdrawCount = 0
 let boundaryCount = 0
 let pendingCount = 0
 for (const row of ledger) {
   const c = categoryOf(row.disposition)
   if (c === '拆') splitCount++
   else if (c === '留守') residueCount++
+  else if (c === '撤回') withdrawCount++
   else if (c === '不做') boundaryCount++
   else pendingCount++
 }
 
 if (totalRows && totalRows.length) {
   const claimed = new Map() // 编号 → 合计表给的类别
-  const sums = { 拆: 0, 留守: 0, 不做: 0, 待裁决: 0 }
+  const sums = { 拆: 0, 留守: 0, 撤回: 0, 不做: 0, 待裁决: 0 }
   for (const r of totalRows) {
     const at = `${LEDGER_REL}:${r.line}`
     const label = r.cells[0] ?? ''
@@ -627,13 +665,15 @@ if (totalRows && totalRows.length) {
       ? '拆'
       : label === '留守'
         ? '留守'
-        : label.startsWith('不做')
-          ? '不做'
-          : label === '待裁决'
-            ? '待裁决'
-            : null
+        : label.startsWith('撤回')
+          ? '撤回'
+          : label.startsWith('不做')
+            ? '不做'
+            : label === '待裁决'
+              ? '待裁决'
+              : null
     if (!cat) {
-      report(at, `合计表有一行「${label}」不属于 拆 / 留守 / 不做 / 待裁决 —— 汇总类别必须是这四类`)
+      report(at, `合计表有一行「${label}」不属于 拆 / 留守 / 撤回 / 不做 / 待裁决 —— 汇总类别必须是这五类`)
       continue
     }
     if (!Number.isInteger(count) || count < 0) {
@@ -669,6 +709,7 @@ if (totalRows && totalRows.length) {
   const pairs = [
     ['拆', splitCount],
     ['留守', residueCount],
+    ['撤回', withdrawCount],
     ['不做', boundaryCount],
     ['待裁决', pendingCount],
   ]
@@ -690,7 +731,7 @@ if (errors.length) {
   console.log(
     red(
       `capability-ledger-audit 未通过：${errors.length} 处 —— 名册 ${roster.length} 行 / 账本 ${ledger.length} 行` +
-        `（拆 ${splitCount} · 留守 ${residueCount} · 不做 ${boundaryCount} · 待裁决 ${pendingCount}）`,
+        `（拆 ${splitCount} · 留守 ${residueCount} · 撤回 ${withdrawCount} · 不做 ${boundaryCount} · 待裁决 ${pendingCount}）`,
     ),
   )
   process.exit(1)
@@ -699,7 +740,7 @@ if (errors.length) {
 console.log(
   green(
     `capability-ledger-audit 通过：名册 ${roster.length} 行 = 账本 ${ledger.length} 行` +
-      `（拆 ${splitCount} · 留守 ${residueCount} · 不做 ${boundaryCount} · 待裁决 ${pendingCount}）；` +
+      `（拆 ${splitCount} · 留守 ${residueCount} · 撤回 ${withdrawCount} · 不做 ${boundaryCount} · 待裁决 ${pendingCount}）；` +
       `实现状态 ${statusSummary}；` +
       '每行恰好一条处置，合计表与逐行账一致',
   ),

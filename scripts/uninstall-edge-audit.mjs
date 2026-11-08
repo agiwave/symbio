@@ -7,7 +7,7 @@
  * 「卸载插件 ⇒ 系统完整运行」在运行期已经有用例盯住（停用 / 卸载后工具面与存储
  * 两端都验），但那些用例证明的是**同一个二进制里**的行为：`inventory` 注册项还在、
  * 目录还在，只是运行期被过滤。若另一个 crate 在**编译期**引用了某个可卸载插件的
- * crate（`use symbio_plugin_notes::…`、`symbio::symbio_plugin_notes::…`，或在其
+ * crate（`use symbio_plugin_glossary::…`、`symbio::symbio_plugin_glossary::…`，或在其
  * `Cargo.toml` 里写一条依赖），那么「卸载」在源码层根本不成立：删掉那个目录，
  * 该处编译不过；留着目录，所谓卸载就只是运行期过滤——**一条静默边**。
  *

@@ -122,7 +122,7 @@ pub use symbio_kernel::capability::{
     CapabilityRow, Registry,
 };
 pub use symbio_kernel::decl::ring;
-pub use symbio_kernel::decl::{ActorDecl, Builder, FactDecl, PluginDeclarations, ViewDecl};
+pub use symbio_kernel::decl::{Builder, FactDecl, PluginDeclarations, ViewDecl};
 pub use symbio_kernel::dialog::{
     ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
     Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,

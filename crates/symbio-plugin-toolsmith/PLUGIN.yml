@@ -1,5 +1,0 @@
-# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
-plugin_id: toolsmith
-plugin_comment: 制造工具（L2 受限）：只能登记本插件自己的工具定义，清单按名字折出当前版本
-plugin_assembly: sub_agent
-plugin_order: 67

@@ -65,14 +65,10 @@ const DEFAULT_BASELINE = [
   'agent_run',
   'ask_user',
   'codebase_search',
-  'causal_assert',
   'content_search',
-  'explain_record',
   'glossary_define',
   'heartbeat',
   'http_request',
-  'idempotent_record',
-  'notes_add',
   'read_skill',
   'todo_write',
   'vdfs_delete',
@@ -84,13 +80,8 @@ const DEFAULT_BASELINE = [
   'vdfs_stat',
   'vdfs_tree',
   'vdfs_write',
-  'protocol_join',
-  'protocol_propose',
-  'reversibility_annotate',
-  'toolsmith_define',
   'web_fetch',
   'web_search',
-  'world_observe',
 ]
 
 /** 基线可由环境变量替换（回归测试用）：守卫逻辑与具体工具名解耦。 */

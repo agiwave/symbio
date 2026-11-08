@@ -41,7 +41,7 @@ test('parseRawCommits：正文里以冒号开头的行不截断消息，状态�
     '',
     'Core-Change: D-247 补件已先行',
     '',
-    ':000000 100644 0000000 aaaa111 A\tcrates/symbio-plugin-notes/PLUGIN.yml',
+    ':000000 100644 0000000 aaaa111 A\tcrates/symbio-plugin-glossary/PLUGIN.yml',
     ':100644 100644 bbbb222 cccc333 M\tcrates/symbio-plugin-loop/src/loop_rows.rs',
   ].join('\n')
   const [c] = parseRawCommits(out)
@@ -50,7 +50,7 @@ test('parseRawCommits：正文里以冒号开头的行不截断消息，状态�
   assert.deepEqual(
     c.files.map((x) => [x.status, x.path]),
     [
-      ['A', 'crates/symbio-plugin-notes/PLUGIN.yml'],
+      ['A', 'crates/symbio-plugin-glossary/PLUGIN.yml'],
       ['M', 'crates/symbio-plugin-loop/src/loop_rows.rs'],
     ],
   )
@@ -59,14 +59,14 @@ test('parseRawCommits：正文里以冒号开头的行不截断消息，状态�
 test('addedPackages：只认新增的插件清单', () => {
   const commit = {
     files: [
-      { status: 'A', path: 'crates/symbio-plugin-notes/PLUGIN.yml' },
+      { status: 'A', path: 'crates/symbio-plugin-glossary/PLUGIN.yml' },
       { status: 'M', path: 'crates/symbio-plugin-heartbeat/PLUGIN.yml' },
-      { status: 'A', path: 'crates/symbio-plugin-notes/src/decl.rs' },
+      { status: 'A', path: 'crates/symbio-plugin-glossary/src/decl.rs' },
       { status: 'A', path: 'examples/fullstack-dev/mcp/PLUGIN.yml' },
       { status: 'A', path: 'agent/x/PLUGIN.yml' },
     ],
   }
-  assert.deepEqual(addedPackages(commit), ['crates/symbio-plugin-notes/PLUGIN.yml'])
+  assert.deepEqual(addedPackages(commit), ['crates/symbio-plugin-glossary/PLUGIN.yml'])
 })
 
 test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-003 接管），没声明的不豁免', () => {

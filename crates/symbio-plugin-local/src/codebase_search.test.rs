@@ -437,7 +437,7 @@ fn generated_files_are_not_indexed() {
 
     // 正常文件不受影响 —— 别把闸门开成"只留 .rs"
     assert!(is_source_file(Path::new(
-        "crates/symbio-plugin-notes/src/lib.rs"
+        "crates/symbio-plugin-glossary/src/lib.rs"
     )));
     assert!(is_source_file(Path::new("tauri/src/stores/sessions.ts")));
     // doc-link-allow D-010: 下一行是这条测试的史实叙述（已删除文件），不是入链
