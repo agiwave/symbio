@@ -270,26 +270,33 @@ export default defineCase(
       // ── 跑负载：20 轮正文 + 1 轮 45 步工具轮 ─────────────────────────────
       for (let i = 0; i < NORMAL_TURNS; i++) {
         await sendAndSettle(cli, sub, turnText(i), { timeoutMs: 90_000 });
-        // 每轮的用户可见收束：从生产读出口取本轮最后一条节点——
-        // 正常轮是一句完成正文，故障轮（第 2 轮）是失败节点。
-        // 不判实时面帧：并发下收尾帧可能只带增量，角色/类型/状态分散在几帧里。
-        const now = await readSessionMessages(cli, SID);
-        const last = now.reduce(
-          (a, b) => ((a?.seq ?? -1) >= (b?.seq ?? -1) ? a : b),
-          null,
+        // 每轮的用户可见收束：从生产读出口取「本轮用户消息之后」的节点——
+        // 正常轮有一句完成正文，故障轮（第 2 轮）有失败节点。
+        // 读出口可能比实时面晚一拍，waitFor 轮询到本轮自己的节点出现为止；
+        // 以本轮用户消息为锚，避免上一轮的收束冒充本轮。
+        await waitFor(
+          async () => {
+            const now = await readSessionMessages(cli, SID);
+            const anchor = [...now]
+              .reverse()
+              .find(
+                (m) =>
+                  msgRoleOf(m) === 'user' &&
+                  JSON.stringify(m).includes(turnText(i)),
+              );
+            if (!anchor) return false;
+            const after = now.filter((m) => (m.seq ?? -1) > (anchor.seq ?? -1));
+            return i === 1
+              ? after.some((m) => m.status === 'failed')
+              : after.some(
+                  (m) =>
+                    msgRoleOf(m) === 'assistant' &&
+                    msgTypeOf(m) === 'text' &&
+                    m.status === 'completed',
+                );
+          },
+          { what: `第 ${i + 1} 轮的可见收束`, timeoutMs: 30_000 },
         );
-        assert(
-          last,
-          `第 ${i + 1} 轮后读出口应有节点`,
-        );
-        if (i === 1) {
-          assertEq(last.status, 'failed', '故障轮应以失败节点收束');
-        } else {
-          assert(
-            msgRoleOf(last) === 'assistant' && msgTypeOf(last) === 'text' && last.status === 'completed',
-            `第 ${i + 1} 轮应以一句完成正文收束（实得 ${JSON.stringify({ role: msgRoleOf(last), type: msgTypeOf(last), status: last.status })}）`,
-          );
-        }
         // 大结果**当时**完整进存储（不是 head/tail 之后的样子）——存储侧的全文锚点只在
         // 第 1 轮结束时取，后续压缩会归并消息集合，届时这一条已不代表「存储」。
         if (i === 0) {
