@@ -7,5 +7,6 @@ plugin_assembly: sub_agent
 plugin_order: 58
 # 它**不产事实**：三列读的都是别人的格（`chat.assistant.final` 的 `cost_ms` 是信封字段，
 # 档位读 `user.message` 的 `tier`）。所以这里没有 `shared_events`。
-# 对外可读的视图（scripts/facts/views-rs.mjs 读取 → crates/symbio-plugin-api/src/view_names.rs）。
-shared_views: slo.latency, slo.fallback, slo.span
+# 对外可读的报表在 `src/decl.rs` 的 `submit_reports!`（D-387）。跨度列还没迁，本轮只剩它
+# 仍走 `shared_views` 生成物；迁完这一行整条删除。
+shared_views: slo.span

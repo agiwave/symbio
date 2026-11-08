@@ -25,7 +25,7 @@
 
 use super::{fleet_reading, read, TierRow};
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
-use crate::stats_reading::{fallback_exit_rows, latency_exit_rows, panel_of, totals_of};
+use crate::stats_reading::{panel_of, totals_of};
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
 use symbio_kernel::event::{Entity, Event, EventEnvelope as _, Seq, Verb};
@@ -338,7 +338,12 @@ fn fleet_aggregates_the_snapshots_it_is_given() {
     let facts = fleet_of(&root);
     assert_eq!(facts.len(), 2, "存储层深遍交回两个会话的值");
 
-    let got = fleet_reading(&facts);
+    let ctx = symbio_plugin_api::reports::ReportCtx {
+        principal: symbio_sdk::authz::PRINCIPAL_MAIN,
+        cap: 0,
+        readable: true,
+    };
+    let got = fleet_reading(&facts, &ctx);
     assert_eq!(got["wals"], 2);
     assert_eq!(got["sessions"], 2, "与 wals 同值：都是交到手里的快照数");
 }
@@ -374,49 +379,27 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
 
 // ── 出口排版（本插件自己的代码，与 owner 在不在无关）────────────────────────
 //
-// 三列的口径归 owner，但**出口长什么样**归本插件：`sample_ms` → `samples`（取个数）、
-// `rate` 原样搬、合计两格逐档相加。这一段拿 owner 的**形状**当输入，验的是搬运没有走样
-// ——没有一条断言涉及「分位数怎么算」「率怎么除」，所以它不是替身 owner。
+// 逐档行的口径与排版（`sample_ms` → `samples`、率原样搬、按档并表）已随报表登记搬回
+// owner（`D-387`），由 `crates/symbio-plugin-slo/src/decl.test.rs` 钉。本插件只剩**加法**：
+// 合计两格逐档相加。
 
-/// 逐档两列的出口行：键与 owner 交的同名，`samples` 取样本的**长度**。
+/// 合计两格 = 逐档相加（计数可加）。
 #[test]
-fn the_exit_rows_carry_the_owner_shape() {
-    // owner 交的形状（见 `crates/symbio-plugin-slo/src/decl.rs::latency_rows` 的文档）
-    let latency = serde_json::json!({ "by_tier": [
-        { "tier": "deep", "sample_ms": [900, 1200, 1500], "p50": 1200, "p95": 1500, "p99": 1500 },
-        { "tier": "fast", "sample_ms": [], "p50": 0, "p95": 0, "p99": 0 },
-    ]});
-    let rows = latency_exit_rows(&latency);
-    assert_eq!(
-        rows[0]["samples"], 3,
-        "样本数 = `sample_ms` 的长度（出口不放样本数组）"
-    );
-    assert_eq!(rows[0]["p95"], 1500, "分位数原样搬，不在这里重算");
-    assert_eq!(
-        rows[1]["samples"], 0,
-        "空样本的档位仍在表里（不造也不删档位）"
-    );
-    assert!(
-        rows[0].get("sample_ms").is_none(),
-        "出口不带原始样本：实例级的样本数组随会话数线性膨胀，而出口没人读它"
-    );
-
-    let fallback = serde_json::json!({ "by_tier": [
+fn totals_add_the_owner_rows() {
+    // owner 交的形状（`tiers.fleet_render` 的 `fallback` 数组）
+    let fallback = serde_json::json!([
         { "tier": "deep", "turns": 4, "fallbacks": 1, "rate": 0.25 },
         { "tier": "fast", "turns": 2, "fallbacks": 2, "rate": 1.0 },
-    ]});
-    let fb = fallback_exit_rows(&fallback);
-    assert_eq!(fb[0]["rate"], 0.25, "率是 owner 算的，本处只搬");
+    ]);
     assert_eq!(
         totals_of(&fallback),
         (6, 3),
         "合计两格 = 逐档相加（计数可加）"
     );
 
-    // 缺席（空表）⇒ 三样都给得出空，不 panic
-    assert!(latency_exit_rows(&serde_json::json!({ "by_tier": [] })).is_empty());
-    assert!(fallback_exit_rows(&serde_json::json!({ "by_tier": [] })).is_empty());
-    assert_eq!(totals_of(&serde_json::json!({ "by_tier": [] })), (0, 0));
+    // 缺席（空表 / `null`）⇒ 零，不 panic
+    assert_eq!(totals_of(&serde_json::json!([])), (0, 0));
+    assert_eq!(totals_of(&serde_json::Value::Null), (0, 0));
 }
 
 // ── 外部效标两列（DE-008 §3.1.1：主动性 / 时域跨度）────────────────────────────────

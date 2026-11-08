@@ -329,3 +329,51 @@ fn the_views_declare_both_halves_and_read_only_what_they_use() {
     // 跨度只读信封的 `ts`，没有载荷字段可声明。
     assert!(VIEWS[2].reads.is_empty());
 }
+
+/// 报表登记：两条视图并成一行，出口行与 `fleet.by_tier` 的排版都在 owner（`D-387`）。
+#[test]
+fn the_tiers_report_merges_latency_and_fallback_by_tier() {
+    let latency = json!({ "by_tier": [
+        { "tier": "deep", "sample_ms": [900, 1200, 1500], "p50": 1200, "p95": 1500, "p99": 1500 },
+        { "tier": "fast", "sample_ms": [], "p50": 0, "p95": 0, "p99": 0 },
+    ]});
+    let fallback = json!({ "by_tier": [
+        { "tier": "deep", "turns": 4, "fallbacks": 1, "rate": 0.25 },
+        { "tier": "reflect", "turns": 2, "fallbacks": 2, "rate": 1.0 },
+    ]});
+    let ctx = ReportCtx {
+        principal: PRINCIPAL,
+        cap: 0,
+        readable: true,
+    };
+
+    let rows = tiers_report(&[latency.clone(), fallback.clone()], &ctx);
+    let rows = rows.as_array().expect("逐档数组");
+    let names: Vec<&str> = rows.iter().filter_map(|r| r["tier"].as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["deep", "fast", "reflect"],
+        "两列的档位取并集并排序"
+    );
+    assert_eq!(rows[0]["samples"], 3, "样本数 = `sample_ms` 的长度");
+    assert_eq!(rows[0]["p95"], 1500, "分位数原样搬，不在这里重算");
+    assert_eq!(rows[0]["turns"], 4, "兜底列的数字原样搬");
+    assert_eq!(rows[0]["rate"], 0.25);
+    assert_eq!(rows[1]["turns"], 0, "只有时延样本的档位：兜底两格按 0 交");
+    assert!(
+        rows[0].get("sample_ms").is_none(),
+        "出口不带原始样本：实例级的样本数组随会话数线性膨胀"
+    );
+
+    let fleet = tiers_fleet(&[latency, fallback], &ctx);
+    assert_eq!(fleet["latency"][0]["samples"], 3);
+    assert_eq!(fleet["fallback"][0]["rate"], 0.25);
+    assert_eq!(fleet["fallback"][1]["tier"], "reflect");
+
+    // 缺席（两片都读不出来 ⇒ `Null` 占位）⇒ 空表，不 panic
+    assert_eq!(tiers_report(&[Value::Null, Value::Null], &ctx), json!([]));
+    assert_eq!(
+        tiers_fleet(&[Value::Null, Value::Null], &ctx),
+        json!({ "latency": [], "fallback": [] })
+    );
+}

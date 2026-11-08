@@ -44,12 +44,12 @@
 //! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{
-    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB, SLO_FALLBACK_VIEW,
-    SLO_LATENCY_VIEW, SLO_SPAN_VIEW, TASK_READYSET_VIEW,
+    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB, SLO_SPAN_VIEW,
+    TASK_READYSET_VIEW,
 };
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use symbio_kernel::event::Event;
 use symbio_kernel::plugin::{
@@ -73,7 +73,7 @@ use super::stats_reading::{
 };
 
 /// 一个档位的一行读数：时延列与兜底列并排（同一档位的两类收益同处一行）。
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TierRow {
     /// 档位名（`deep` / `fast` / `reflect` / `autonomous` / `unspecified`）。
     pub tier: String,
@@ -117,18 +117,10 @@ fn read_view_or(
     }
 }
 
-/// 逐档视图的**空形状**：`{ by_tier: [] }`（与 owner 交的形状同键，读方不必分诊）。
-///
-/// 单会话列与实例级聚合列共用它——两处写两份，迟早一处改了另一处没改，
-/// 于是「读不到」在抽屉里与在会话头上长得不一样。
-pub(super) fn empty_by_tier() -> serde_json::Value {
-    serde_json::json!({ "by_tier": [] })
-}
-
 /// 成本台账的**空形状**：`{ by_principal: {}, total_ms: 0 }`（与 owner 交的形状同键）。
 ///
-/// 与 [`empty_by_tier`] 同一条纪律：读方不替 owner 猜形状——猜错一次，出口就长出
-/// 一份 nobody 认识的读数。
+/// 与其余空形状同一条纪律：读方不替 owner 猜形状——猜错一次，出口就长出一份
+/// nobody 认识的读数。
 fn empty_ledger() -> serde_json::Value {
     serde_json::json!({ "by_principal": {}, "total_ms": 0 })
 }
@@ -191,31 +183,6 @@ fn reputation_reading(ledger: serde_json::Value, principal: &str) -> serde_json:
         })
     });
     serde_json::json!({ "own": own, "by_principal": rows })
-}
-
-/// 一条视图交的档位名。形状归 owner（`D-281`），本处只做**查表**。
-fn tier_names(view: &serde_json::Value) -> Vec<String> {
-    view.get("by_tier")
-        .and_then(serde_json::Value::as_array)
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|r| r.get("tier").and_then(serde_json::Value::as_str))
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// 某档位在一条视图里的那一行；查不到 ⇒ `Null`（`get` 对 `Null` 一律 `None`，读方按缺省取）。
-fn tier_of<'a>(view: &'a serde_json::Value, tier: &str) -> &'a serde_json::Value {
-    static NO_ROW: serde_json::Value = serde_json::Value::Null;
-    view.get("by_tier")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|rows| {
-            rows.iter()
-                .find(|r| r.get("tier").and_then(serde_json::Value::as_str) == Some(tier))
-        })
-        .unwrap_or(&NO_ROW)
 }
 
 /// 会话级读数（四列同源，D-044）。
@@ -537,11 +504,11 @@ pub(crate) fn read(
 
     // 四列全部来自同一份事件切片（D-044：实测与判据同源）。
     //
-    // 时延、兜底与成本三列由能力包交（`D-221` 按名字读、`D-281` 折叠两半）：本插件不认识
-    // 这些列的形状，也不在这里算分位数、率或累计——那是 owner 的算式。读不到 ⇒ 空表（可诊断的
-    // 缺席，不是「这一档没有数」）。
-    let latency = read_view_or(SLO_LATENCY_VIEW, &snapshot, empty_by_tier);
-    let fallback = read_view_or(SLO_FALLBACK_VIEW, &snapshot, empty_by_tier);
+    // 时延 + 兜底两列由能力包 `slo` 在报表里按 `tier` 并成一行（`D-387`）；本插件不
+    // 并表、不取分位数、不把两列各折一遍——那会与 owner 的口径漂移成两套。
+    let tiers = report_value("tiers", &snapshot, &report_ctx)
+        .and_then(|value| serde_json::from_value::<Vec<TierRow>>(value).ok())
+        .unwrap_or_default();
     // 成本列：owner 用报表登记公开（`D-387`），此处只按 `slot` 取整条读数；
     // 空形状住在 owner 的 `render` 里，整条读不出来时才退回文档写过的空账。
     let cost = report_value("cost", &snapshot, &report_ctx).unwrap_or_else(empty_ledger);
@@ -556,55 +523,6 @@ pub(crate) fn read(
     let calibration =
         report_value("calibration", &snapshot, &report_ctx).unwrap_or_else(empty_calibration);
     let ck = checkpoint().read_all(&snapshot).value;
-
-    // 档位取两列的并集：只开轮没收束的档位（时延列无样本）与只有兜底样本的
-    // 档位都要在表里出现——漏掉一档等于把「这一档没有数」报成「这一档不存在」。
-    let mut names: Vec<String> = tier_names(&latency)
-        .into_iter()
-        .chain(tier_names(&fallback))
-        .collect();
-    names.sort_unstable();
-    names.dedup();
-
-    let tiers = names
-        .into_iter()
-        .map(|t| {
-            let l = tier_of(&latency, &t);
-            let f = tier_of(&fallback, &t);
-            TierRow {
-                tier: t,
-                turns: f
-                    .get("turns")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                fallbacks: f
-                    .get("fallbacks")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                // 率是 owner 的算式，本处只**读**它交的值（`D-281`：形状归 owner）。
-                rate: f
-                    .get("rate")
-                    .and_then(serde_json::Value::as_f64)
-                    .unwrap_or(0.0),
-                p50: l
-                    .get("p50")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                p95: l
-                    .get("p95")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                p99: l
-                    .get("p99")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                samples: l
-                    .get("sample_ms")
-                    .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len),
-            }
-        })
-        .collect();
 
     let tokens = serde_json::to_value(&tokens)
         .map_err(|e| PluginError::InternalError(format!("用量台账序列化失败：{e}")))?;
@@ -697,7 +615,7 @@ pub(crate) fn read(
         .count();
 
     let fleet = if may_read {
-        fleet_reading(&deep_facts())
+        fleet_reading(&deep_facts(), &report_ctx)
     } else {
         serde_json::json!({
             "wals": 0, "sessions": 0, "turns": 0, "fallbacks": 0,

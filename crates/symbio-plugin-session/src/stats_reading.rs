@@ -19,8 +19,7 @@
 //! （`D-281`）。同一份事实长出两套口径，读数与投影就会静默漂移，而两边都自称是 SLO。
 
 use crate::declarations::{
-    COMMITMENT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, SLO_FALLBACK_VIEW,
-    SLO_LATENCY_VIEW, SLO_SPAN_VIEW,
+    COMMITMENT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, SLO_SPAN_VIEW,
 };
 use symbio_kernel::event::Event;
 use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
@@ -29,7 +28,7 @@ use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::chat::chat_node::ChatNodePresentationExt;
 use symbio_sdk::governance::VisScope;
 
-use super::stats::{empty_by_tier, SessionStats};
+use super::stats::SessionStats;
 
 /// 读一条报表（`D-387`）：按 `slot` 找到登记项，逐条取 `views` 的整片值，交回
 /// owner 的 `render`。
@@ -166,17 +165,19 @@ pub(super) fn commitments_reading(snapshot: &[Event]) -> serde_json::Value {
 /// **全会话**：存储层的深遍覆盖顶层各一份 WAL 与嵌套子会话（分形委派整棵子树）。
 /// 子会话不是「别的实例」，文档上一行说着「**所有**会话」——只扫一层会让那句话说假话。
 /// 打不开的快照已在存储层被跳过（出声一次）；本列只数交到手里的值。
-pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
+pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> serde_json::Value {
     let sessions = snapshots.len();
 
-    // SLO 三列与主动性族走**能力包的 `agg`**（`D-281`）：单片读数是 owner 的 `eval`
-    // 交的，N 片的合并是 owner 的 `agg` 交的——本插件只负责「每片求一次值、把值交回去」，
-    // 不认识里面有哪些字段，也不在这里写「率 = 分子 / 分母」「分位数怎么取」。
+    // 已迁的列走**报表**（`D-387`）：每条视图按 owner 的 `agg` 合并，再由 `fleet_render`
+    // 排版。本插件只负责「每片求一次值、把值交回去」，不认识里面有哪些字段，也不在这里
+    // 写「率 = 分子 / 分母」「分位数怎么取」。
     //
-    // SLO 三列是**累计口径**：被快照取代而移入归档段的前缀也在 `range(0)` 里，实例聚合
+    // 逐档两列是**累计口径**：被快照取代而移入归档段的前缀也在 `range(0)` 里，实例聚合
     // 不会**静默**少算。
-    let latency = shared_axis(SLO_LATENCY_VIEW, snapshots).unwrap_or_else(empty_by_tier);
-    let fallback = shared_axis(SLO_FALLBACK_VIEW, snapshots).unwrap_or_else(empty_by_tier);
+    let by_tier = fleet_of("tiers", snapshots, ctx)
+        .unwrap_or_else(|| serde_json::json!({ "latency": [], "fallback": [] }));
+
+    // 还没迁的列仍走 `shared_views` 生成物（`span` / 主动性 / 自主程度），迁一列删一格。
     let span = shared_axis(SLO_SPAN_VIEW, snapshots).unwrap_or_else(
         || serde_json::json!({ "sessions": 0, "median_ms": serde_json::Value::Null }),
     );
@@ -186,8 +187,8 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
     let autonomy =
         shared_axis(CONATION_AUTONOMY_VIEW, snapshots).unwrap_or(serde_json::Value::Null);
 
-    // 合计两格读 owner 交的汇总值（形状归 owner，本处只挑两格）。
-    let (turns, fallbacks) = totals_of(&fallback);
+    // 合计两格读 owner 交的逐档行（形状归 owner，本处只做加法）。
+    let (turns, fallbacks) = totals_of(&by_tier["fallback"]);
 
     // 外部效标两族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
     // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
@@ -215,10 +216,7 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
         "turns": turns,
         "fallbacks": fallbacks,
         // 逐档位并集：合并后由 owner 的分位数纯查询给出，与单会话列同一套口径
-        "by_tier": {
-            "latency": latency_exit_rows(&latency),
-            "fallback": fallback_exit_rows(&fallback),
-        },
+        "by_tier": by_tier,
         // 外部效标两族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
         // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
         // 键名稳定（不随文档改字号）：conation ↔ 主动性、span ↔ 时域跨度。
@@ -289,13 +287,10 @@ fn shared_axis(view_name: &str, snapshots: &[Vec<Event>]) -> Option<serde_json::
 /// 逐档累加 `turns` / `fallbacks` 两格——出口的合计两格。
 ///
 /// 这是**加法**不是口径：分子分母是计数，owner 已经按档交好，跨档求和只是把它们并成一行。
-/// 率不在这里算（算率是 owner 的 `rate`，出口不重算——见 [`fallback_exit_rows`] 交的
-/// `rate` 是 owner 逐档给的）。
-pub(super) fn totals_of(fallback: &serde_json::Value) -> (u64, u64) {
-    let Some(rows) = fallback
-        .get("by_tier")
-        .and_then(serde_json::Value::as_array)
-    else {
+/// 率不在这里算（算率是 owner 的 `rate`，出口不重算——见 owner 的 `fleet_render` 交的
+/// `rate` 是逐档给的）。
+pub(super) fn totals_of(fallback_rows: &serde_json::Value) -> (u64, u64) {
+    let Some(rows) = fallback_rows.as_array() else {
         return (0, 0);
     };
     rows.iter().fold((0u64, 0u64), |(turns, fallbacks), row| {
@@ -314,49 +309,39 @@ pub(super) fn totals_of(fallback: &serde_json::Value) -> (u64, u64) {
     })
 }
 
-/// 出口的时延逐档行：`{ tier, samples, p50, p95, p99 }`。
+/// 一条报表的实例级读数：逐片求值 → owner 的 `agg` 合并 → owner 的 `fleet_render` 排版。
 ///
-/// `samples` 是**样本数**，owner 交的是样本本身（`sample_ms`）——取长度是排版，不是重算：
-/// 三个分位数由 owner 从同一批样本取，本处不参与。出口不放样本数组：实例级几十个会话的
-/// 原始时延在出口里没有读者，却会让这一列随实例规模线性膨胀。
-pub(super) fn latency_exit_rows(latency: &serde_json::Value) -> Vec<serde_json::Value> {
-    let Some(rows) = latency.get("by_tier").and_then(serde_json::Value::as_array) else {
-        return Vec::new();
-    };
-    rows.iter()
-        .map(|r| {
-            serde_json::json!({
-                "tier": r.get("tier").cloned().unwrap_or(serde_json::Value::Null),
-                "samples": r
-                    .get("sample_ms")
-                    .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len),
-                "p50": r.get("p50").cloned().unwrap_or(serde_json::json!(0)),
-                "p95": r.get("p95").cloned().unwrap_or(serde_json::json!(0)),
-                "p99": r.get("p99").cloned().unwrap_or(serde_json::json!(0)),
-            })
-        })
-        .collect()
-}
-
-/// 出口的兜底逐档行：`{ tier, turns, fallbacks, rate }`——`rate` 是 owner 算的，本处只搬。
-pub(super) fn fallback_exit_rows(fallback: &serde_json::Value) -> Vec<serde_json::Value> {
-    let Some(rows) = fallback
-        .get("by_tier")
-        .and_then(serde_json::Value::as_array)
-    else {
-        return Vec::new();
-    };
-    rows.iter()
-        .map(|r| {
-            serde_json::json!({
-                "tier": r.get("tier").cloned().unwrap_or(serde_json::Value::Null),
-                "turns": r.get("turns").cloned().unwrap_or(serde_json::json!(0)),
-                "fallbacks": r.get("fallbacks").cloned().unwrap_or(serde_json::json!(0)),
-                "rate": r.get("rate").cloned().unwrap_or(serde_json::json!(0.0)),
-            })
-        })
-        .collect()
+/// 与 [`report_value`] 同一条「不认识形状」的纪律；区别只在合并：单片读数按
+/// `ViewDecl::eval` 求，N 片交 `ViewDecl::agg`，最后才交给 `fleet_render`（`D-387`：
+/// `fleet_render` 是 `agg` 之后的排版，不是第三份口径）。
+fn fleet_of(
+    slot: &str,
+    snapshots: &[Vec<Event>],
+    ctx: &ReportCtx<'_>,
+) -> Option<serde_json::Value> {
+    let reports = symbio_plugin_api::reports::reports().ok()?;
+    let report = reports.iter().find(|r| r.slot == slot)?;
+    let fleet_render = report.fleet_render?;
+    let frozen = symbio_plugin_api::sealed_declarations().ok()?;
+    let mut merged = Vec::with_capacity(report.views.len());
+    for name in report.views {
+        let view = frozen.view(name)?;
+        let mut parts = Vec::with_capacity(snapshots.len());
+        for snapshot in snapshots {
+            parts.push((view.eval)(snapshot, i64::MAX));
+        }
+        let aggregate = view.agg.ok_or_else(|| {
+            symbio_plugin_api::plugin_warn!(
+                symbio_plugin_api::PLUGIN_ID_SESSION,
+                "[stats] 报表视图 `{name}` 没有 `agg`：`{slot}` 的实例级这一格读不出来"
+            );
+        });
+        match aggregate {
+            Ok(aggregate) => merged.push(aggregate(&parts)),
+            Err(()) => return None,
+        }
+    }
+    Some(fleet_render(&merged, ctx))
 }
 
 /// 能力视图列：遍历**公开清单**，逐条经 `symbio_plugin_api::views` 求值（DE-025 D-221）。

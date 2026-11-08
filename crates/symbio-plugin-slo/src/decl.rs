@@ -27,10 +27,11 @@ use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH,
     EVENT_USER_MESSAGE,
 };
+use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::{Entity, Event, LatencyTier, PluginDeclarations, Verb, ViewDecl};
 
-/// 对外可读的三条视图。名字经 `PLUGIN.yml` 的 `shared_views:` 投影进
-/// `symbio_plugin_api::view_names`；读方按名字读，不依赖本 crate（`D-221`）。
+/// 对外可读的三条视图。名字只在本 crate 出现一次（`SV-001`）；公开动作是下面的
+/// 报表登记（`D-387`），读方按报表的 `views` 取，不依赖本 crate（`D-221`）。
 pub(crate) const SLO_LATENCY: &str = "slo.latency";
 pub(crate) const SLO_FALLBACK: &str = "slo.fallback";
 pub(crate) const SLO_SPAN: &str = "slo.span";
@@ -323,6 +324,130 @@ fn span_merged(parts: &[Value]) -> Value {
         json!(percentile(&spans, 50))
     };
     json!({ "sessions": spans.len(), "median_ms": median })
+}
+
+/// 一条视图交的档位名。形状归 owner（`D-281`），本处只做**查表**。
+fn tier_names(view: &Value) -> Vec<String> {
+    view.get("by_tier")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| r.get("tier").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 某档位在一条视图里的那一行；查不到 ⇒ `Null`（`get` 对 `Null` 一律 `None`，读方按缺省取）。
+fn tier_of<'a>(view: &'a Value, tier: &str) -> &'a Value {
+    static NO_ROW: Value = Value::Null;
+    view.get("by_tier")
+        .and_then(Value::as_array)
+        .and_then(|rows| {
+            rows.iter()
+                .find(|r| r.get("tier").and_then(Value::as_str) == Some(tier))
+        })
+        .unwrap_or(&NO_ROW)
+}
+
+/// 出口的时延逐档行：`{ tier, samples, p50, p95, p99 }`。
+///
+/// `samples` 是**样本数**，owner 交的是样本本身（`sample_ms`）——取长度是排版，不是重算：
+/// 三个分位数由 owner 从同一批样本取。出口不放样本数组：实例级几十个会话的原始时延在
+/// 出口里没有读者，却会让这一列随实例规模线性膨胀。
+fn latency_exit_rows(latency: &Value) -> Vec<Value> {
+    let Some(rows) = latency.get("by_tier").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    rows.iter()
+        .map(|r| {
+            json!({
+                "tier": r.get("tier").cloned().unwrap_or(Value::Null),
+                "samples": r.get("sample_ms").and_then(Value::as_array).map_or(0, Vec::len),
+                "p50": r.get("p50").cloned().unwrap_or(json!(0)),
+                "p95": r.get("p95").cloned().unwrap_or(json!(0)),
+                "p99": r.get("p99").cloned().unwrap_or(json!(0)),
+            })
+        })
+        .collect()
+}
+
+/// 出口的兜底逐档行：`{ tier, turns, fallbacks, rate }`——`rate` 是 [`rate`] 算的。
+fn fallback_exit_rows(fallback: &Value) -> Vec<Value> {
+    let Some(rows) = fallback.get("by_tier").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    rows.iter()
+        .map(|r| {
+            json!({
+                "tier": r.get("tier").cloned().unwrap_or(Value::Null),
+                "turns": r.get("turns").cloned().unwrap_or(json!(0)),
+                "fallbacks": r.get("fallbacks").cloned().unwrap_or(json!(0)),
+                "rate": r.get("rate").cloned().unwrap_or(json!(0.0)),
+            })
+        })
+        .collect()
+}
+
+// 报表登记（`D-387`）：`session/stats` 的 `tiers` 顶层键与 `fleet.by_tier` 落点。
+// 两条视图（时延 / 兜底）在 owner 这里按 `tier` 并成一行；读方不再并表、不再套形状。
+symbio_plugin_api::submit_reports!([ReportDecl {
+    owner: "slo",
+    slot: "tiers",
+    order: 30,
+    views: &[SLO_LATENCY, SLO_FALLBACK],
+    fleet: Some("by_tier"),
+    render: tiers_report,
+    fleet_render: Some(tiers_fleet),
+    panel: None,
+}]);
+
+/// 单会话的逐档行：两列按 `tier` 的并集，缺哪列的那一格按 `0` 交。
+///
+/// 并集而不是交集：只开轮没收束的档位（时延列无样本）与只有兜底样本的档位都要在表里
+/// 出现——漏掉一档等于把「这一档没有数」报成「这一档不存在」。
+fn tiers_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    let latency = views.first().unwrap_or(&Value::Null);
+    let fallback = views.get(1).unwrap_or(&Value::Null);
+    let mut names: Vec<String> = tier_names(latency)
+        .into_iter()
+        .chain(tier_names(fallback))
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    Value::Array(
+        names
+            .into_iter()
+            .map(|tier| {
+                let l = tier_of(latency, &tier);
+                let f = tier_of(fallback, &tier);
+                json!({
+                    "tier": tier,
+                    "turns": f.get("turns").and_then(Value::as_u64).unwrap_or(0),
+                    "fallbacks": f.get("fallbacks").and_then(Value::as_u64).unwrap_or(0),
+                    // 率是 owner 的算式，本处只搬（`D-281`：形状归 owner）。
+                    "rate": f.get("rate").and_then(Value::as_f64).unwrap_or(0.0),
+                    "p50": l.get("p50").and_then(Value::as_u64).unwrap_or(0),
+                    "p95": l.get("p95").and_then(Value::as_u64).unwrap_or(0),
+                    "p99": l.get("p99").and_then(Value::as_u64).unwrap_or(0),
+                    // 样本数 = `sample_ms` 的长度（样本本身是 `agg` 的输入，不进出口）。
+                    "samples": l.get("sample_ms").and_then(Value::as_array).map_or(0, Vec::len),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// 实例级落点 `fleet.by_tier`：两列各自 `agg` 之后的排版（`D-387`：`fleet_render`
+/// 是 `agg` 之后的排版，不是第三份口径）。
+fn tiers_fleet(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    let latency = views.first().unwrap_or(&Value::Null);
+    let fallback = views.get(1).unwrap_or(&Value::Null);
+    json!({
+        "latency": latency_exit_rows(latency),
+        "fallback": fallback_exit_rows(fallback),
+    })
 }
 
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。
