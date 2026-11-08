@@ -13,9 +13,9 @@ import './_selfrun.mjs';
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
 // | 对等主体真的跑了一轮（主体 = 登记窄行 `session/peer-b`） | 事实源 `actor` / 声誉列逐字段 |
-// | 产物收束成立：发言格被拒、轮照样了结 | WAL 无 `chat.assistant.final` 而有 `artifact.added`；`invariants` 为空 |
-// | 来源主体是**数据**：`to` = 请求 metadata 声明的那个主体 | `commitment.opened` 的 `from` / `to` |
-// | 派生事实照写（`closure_denied` 数产物） | 同上——收束族被跳过就一格都不会有 |
+// | 产物收束成立：发言格被拒、轮照样了结 | 产物格（`artifact.added`）在、作者 = 对等主体；`invariants` 为空 |
+// | 来源主体是**数据** | 声誉列 `by_principal['session/peer-b']` 的 `offered` / `kept` / `broken` / `score` |
+// | 派生事实照写（`closure_denied` 数产物） | 同一条产物格——收束族被跳过就一格都不会有 |
 // | 请求包不串主体（t30 纪律） | mock-llm `/_requests` 回读逐条正文 |
 //
 // ## 场景
