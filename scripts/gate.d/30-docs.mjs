@@ -646,6 +646,12 @@ export const TEST_ONLY = [
   // 补记也能过——那正是「无署名 allow」的形状。六条注入覆盖齐全 / 缺 change / 坏决策号 /
   // 表外判据名 / 授权不一致 / 提交号重复。
   'core-change-backfill',
+  // `session-dead-code-audit`（SD-001 / SD-002）本体由 `gate.d/10-backend.mjs` 执行
+  // （输入是 `cargo check` 的诊断），这里跑的是**回归测试**。SD-002 拦的是
+  // `cfg_attr(not(test), allow(dead_code))` 这类「换个拼写压掉警告」的形态，失效方向
+  // 是静默放行：正则写宽/写窄、例外校验松一格，脚本都照常亮绿灯。注入覆盖单行 /
+  // 跨行 / 内层属性 / 三件不误伤，以及「空理由」「过期登记」两类坏豁免。
+  'session-dead-code-audit',
 ]
 /**
  * 被 `import` 或被 `spawn` 调用、但**没有自己的门禁步骤**的 `.mjs`。

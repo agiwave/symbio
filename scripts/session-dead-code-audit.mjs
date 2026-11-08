@@ -5,14 +5,18 @@
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
  * | SD-001 | `cargo check --workspace --all-targets` 报出的每一条 `dead_code` 都必须在 `scripts/exemptions/session-dead-code.json` 里有一行（按 `path` + 符号名）；台账里的每一行也必须在源码里仍然报 `dead_code` | 两头都会漂：源码悄悄长出新的死码（clippy 已按 D-331 让开 `dead_code`），或台账留着已经有消费者的旧行（一行永久豁免变成一张过期地图） |
+ * | SD-002 | 源码里出现 `cfg_attr(...)` 包着 `allow(dead_code)`（如 `cfg_attr(not(test), …)` / `cfg_attr(not(any(test, doc)), …)`）⇒ 红；例外只能按 `path + 符号名 + 理由` 登记在 `CFG_ATTR_EXEMPT` | 测试专用符号留在生产构建里，用 cfg 换个拼写压掉同一条 dead_code 警告——与直接 `#[allow(dead_code)]` 是同一件事 |
  *
- * 四条红线（D-331）：
+ * 五条红线（D-331）：
  *
  * 1. **源码有、台账没有** ⇒ 红。新死码不许静默存在。
  * 2. **台账有、源码没有** ⇒ 红。符号已有消费者或已不存在 ⇒ 删行。
  * 3. **某行所属批次已写进 `landed_batches`** ⇒ 红。批次落地即销账。
  * 4. **源码里出现 `#[allow(dead_code)]` / `#![allow(dead_code)]`** ⇒ 红。
  *    台账是唯一的豁免形态；源码内 allow 会把该符号从判据的输入里抹掉。
+ * 5. **源码里出现 `cfg_attr(... allow(dead_code) ...)`** ⇒ 红。只被测试与文档用的符号
+ *    住 `#[cfg(test)]`，不留在生产构建里靠 cfg 压警告；真必须留的例外在
+ *    `CFG_ATTR_EXEMPT` 按「路径 + 符号 + 理由」登记，不认注释说明。
  *
  * 台账为空且源码无 `dead_code` = **能力全部接入完成**（绿）。台账不得长期保留：
  * 每一行都是「这项能力还没接回来」的欠条，不是保险。
@@ -36,7 +40,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns SD 会话死码台账（B 类能力待接入）
-// @codes SD-001
+// @codes SD-001 SD-002
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -103,7 +107,7 @@ export function validateLedger(ledger) {
   return errors
 }
 
-/** 源码内的 `#[allow(dead_code)]` / `#![allow(dead_code)]`（`cfg_attr(not(test), …)` 不算）。 */
+/** 源码内的 `#[allow(dead_code)]` / `#![allow(dead_code)]`（`cfg_attr(...)` 归 SD-002）。 */
 export function allowInSource(dir = ALLOW_SCAN_DIR) {
   const out = []
   const walk = (d) => {
@@ -130,6 +134,111 @@ export function allowInSource(dir = ALLOW_SCAN_DIR) {
   }
   walk(dir)
   return out
+}
+
+/**
+ * 允许保留的 `cfg_attr(... allow(dead_code))`：**路径 + 符号名 + 理由**三列缺一不可。
+ *
+ * 这里不是白名单式例外：条目必须指名一个真实检出项（源码里不再出现即判红，见
+ * `compareCfgAttr`），理由必须是可核对的文字——「测试专用」四个字不算。
+ */
+export const CFG_ATTR_EXEMPT = []
+
+/** 声明形态：`cfg_attr` 属性块之后的那一项。`impl` 等无名项记作 `?`。 */
+const DECL_RE =
+  /(?:^|\s)(fn|struct|enum|union|trait|type|const|static|mod)\s+([A-Za-z_][A-Za-z0-9_]*)/
+
+/**
+ * 源码里 `cfg_attr(...)` 包着 `allow(dead_code)`（SD-002），逐项返回 `{ path, line, symbol }`。
+ *
+ * 属性允许跨行：从 `#[cfg_attr(` 起累计括号深度到 0 取整块，块内出现
+ * `allow(dead_code)` 即算。符号名取属性块之后、跳过其它属性与注释的第一处声明；
+ * 取不到（例如属性挂在 `impl` 上）记 `?`——报告仍能定位到行。
+ */
+export function cfgAttrAllowInSource(dir = ALLOW_SCAN_DIR) {
+  const out = []
+  const walk = (d) => {
+    let entries
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const p = path.join(d, e.name)
+      if (e.isDirectory()) {
+        walk(p)
+        continue
+      }
+      if (!e.isFile() || !e.name.endsWith('.rs')) continue
+      const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/)
+      for (let i = 0; i < lines.length; i++) {
+        if (!/^[ \t]*#!?[ \t]*\[[ \t]*cfg_attr[ \t]*\(/.test(lines[i])) continue
+        // 整块：括号深度回到 0 的那一行即属性末尾
+        let depth = 0
+        let end = i
+        let endCol = -1
+        outer: for (; end < lines.length; end++) {
+          const line = lines[end]
+          for (let c = 0; c < line.length; c++) {
+            if (line[c] === '(') depth++
+            else if (line[c] === ')') {
+              depth--
+              if (depth === 0) {
+                endCol = c
+                break outer
+              }
+            }
+          }
+        }
+        const block = lines.slice(i, end + 1).join('\n')
+        if (!/allow[ \t]*\([ \t]*dead_code/.test(block)) {
+          i = end
+          continue
+        }
+        // 符号：先看属性闭合行剩余部分（单行写法），再看后面几行
+        let symbol = '?'
+        const rest = endCol >= 0 ? lines[end].slice(endCol + 1) : ''
+        const sameLine = DECL_RE.exec(rest)
+        if (sameLine) {
+          symbol = sameLine[2]
+        } else {
+          for (let k = end + 1; k < Math.min(lines.length, end + 9); k++) {
+            const line = lines[k]
+            if (!line.trim() || /^[ \t]*#/.test(line) || /^[ \t]*\/\//.test(line)) continue
+            const m = DECL_RE.exec(line)
+            if (m) symbol = m[2]
+            break
+          }
+        }
+        out.push({ path: relPath(p), line: i + 1, symbol })
+        i = end
+      }
+    }
+  }
+  walk(dir)
+  return out
+}
+
+/** `CFG_ATTR_EXEMPT` 的形状校验：三列都必须是非空字符串。 */
+export function validateCfgAttrExempt(exempt = CFG_ATTR_EXEMPT) {
+  const errors = []
+  for (const [i, e] of exempt.entries()) {
+    for (const k of ['path', 'symbol', 'reason']) {
+      if (typeof e?.[k] !== 'string' || !e[k].trim()) errors.push(`CFG_ATTR_EXEMPT[${i}]：缺 \`${k}\``)
+    }
+  }
+  return errors
+}
+
+/** 检出项与登记项的比对：未登记 = 违规；登记了但源码里没有 = 过期。 */
+export function compareCfgAttr(hits, exempt = CFG_ATTR_EXEMPT) {
+  const keys = new Set(exempt.map((e) => `${e.path}::${e.symbol}`))
+  const violations = hits.filter((h) => !keys.has(`${h.path}::${h.symbol}`))
+  const stale = exempt.filter(
+    (e) => !hits.some((h) => h.path === e.path && h.symbol === e.symbol),
+  )
+  return { violations, stale }
 }
 
 /** 跑 `cargo check --workspace --all-targets`，把每条 `dead_code` 的 (`path`, 符号) 抽成集合。 */
@@ -181,6 +290,28 @@ function main() {
   if (allows.length) {
     console.error(red(`✗ SD-001 源码里出现 \`allow(dead_code)\`（${allows.length} 处）——台账是唯一豁免形态`))
     for (const a of allows) console.log(`    ${a.path}:${a.line}`)
+    return 1
+  }
+
+  const cfgExemptErrors = validateCfgAttrExempt()
+  if (cfgExemptErrors.length) {
+    for (const e of cfgExemptErrors) console.error(red(`✗ SD-002 ${e}`))
+    return 1
+  }
+  const cfgHits = cfgAttrAllowInSource()
+  const { violations: cfgViolations, stale: cfgStale } = compareCfgAttr(cfgHits)
+  if (cfgViolations.length || cfgStale.length) {
+    console.error(
+      red(
+        `✗ SD-002 源码里出现 \`cfg_attr(... allow(dead_code))\`（${cfgViolations.length} 处）` +
+          '——测试专用符号住 `#[cfg(test)]`，例外必须在 `CFG_ATTR_EXEMPT` 登记路径 + 符号 + 理由',
+      ),
+    )
+    for (const h of cfgViolations) console.log(`    ${h.path}:${h.line} :: ${h.symbol}`)
+    if (cfgStale.length) {
+      console.log(red(`\n  CFG_ATTR_EXEMPT 有过期登记（${cfgStale.length}）——源码里已不再出现，删掉登记：`))
+      for (const e of cfgStale) console.log(`    ${e.path} :: ${e.symbol}`)
+    }
     return 1
   }
 

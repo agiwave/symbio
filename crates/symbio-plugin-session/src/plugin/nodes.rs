@@ -2,8 +2,8 @@
 //!
 //! 三组**纯函数**，都不持有 `self`：
 //! - **路径模型**：[`VdfsSessionPath`] / [`parse_session_path`] / [`SEG_MESSAGES`] /
-//!   [`SEG_INBOX`] / [`message_dir_path`] / [`message_path`] / [`inbox_item_path`] /
-//!   [`internal_dirs`]
+//!   [`SEG_INBOX`] / `message_dir_path`（仅测试，`#[cfg(test)]`）/ [`message_path`] /
+//!   [`inbox_item_path`] / [`internal_dirs`]
 //!   （会话寻址的另一半——「VDFS 写地址 → 会话 id」——不在此处，见
 //!   `session/paths.rs`：那条规则属**领域层**，而本模块是汇编层的投影）
 //! - **节点构造**：[`session_node`] / [`message_node`] / [`inbox_dir_node`] /
@@ -360,8 +360,8 @@ pub(crate) fn messages_dir_node() -> VdfsNode {
 /// 与 [`message_path`] 同源：列表与列表项是同一地址方案的两级。
 ///
 /// **它不再是变更的落点**：变更落在**节点自身**（[`message_path`]），目录只服务
-/// `list` 与 `action`（截断 / 清空）。因此本函数只剩测试与文档在用。
-#[cfg_attr(not(test), allow(dead_code))]
+/// `list` 与 `action`（截断 / 清空）。因此本函数只剩测试在用，随测试一起编译。
+#[cfg(test)]
 pub(crate) fn message_dir_path(session_id: &str) -> String {
     format!("{session_id}/{SEG_MESSAGES}")
 }
