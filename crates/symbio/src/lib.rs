@@ -15,12 +15,12 @@
 //! **插件之间不许经本门面互相可见**（E-009：插件只依赖 plugin-api）。
 
 pub mod assembly;
+#[cfg(test)]
+mod assembly_acceptance;
 pub mod drive;
 pub mod init;
 #[cfg(test)]
 mod notify_port_acceptance;
-#[cfg(test)]
-mod probe_plugin_acceptance;
 
 // ── 门面出口 ──────────────────────────────────────────────────────────────
 // 宿主与 CLI 从这里取契约；插件自身只依赖插件门面（E-009）。

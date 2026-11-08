@@ -7,99 +7,131 @@
 // ============ 插件工厂 id（部署身份） ============
 
 /// 智能体（含子 Agent —— 分形）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_AGENT: &str = "agent";
 
 /// 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_CLASSIFY: &str = "classify";
 
 /// 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_COMPACT: &str = "compact";
 
 /// 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_COMPOSE: &str = "compose";
 
 /// 执行容器
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_COMPOSITE: &str = "composite";
 
 /// 目标自生成：把「欲」的表达折成意图视图，并把升格做成自申报的债
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_CONATION: &str = "conation";
 
 /// 成本台账：把事件自带的实测耗时按主体折成一本书（熔断与出口共用的那一个口径）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_COST: &str = "cost";
 
 /// 事件总线
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_EVENT_BUS: &str = "event_bus";
 
 /// 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_FORECAST: &str = "forecast";
 
 /// 外部 API 网关
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_GATEWAY: &str = "gateway";
 
 /// 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_GLOSSARY: &str = "glossary";
 
 /// 心跳调度：会话空闲后自主开一轮（经地址面写会话收件箱，随每棵子树分形）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_HEARTBEAT: &str = "heartbeat";
 
 /// 系统根
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_HOME: &str = "home";
 
 /// 钩子
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_HOOK: &str = "hook";
 
 /// 本地文件
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_LOCAL: &str = "local";
 
 /// 纯机制环：选债、派发、等待、配对、记账、预算与租约、重放
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_LOOP: &str = "loop";
 
 /// 工具
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_MCP: &str = "mcp";
 
 /// 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_MEMORY: &str = "memory";
 
 /// 模型服务（子智能体自己的模型；子树会话自行解析）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_MODEL: &str = "model";
 
 /// 人格：一处定义「我是谁」，两条输出面（轮内正文 / 对话措辞）读同一段
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_PERSONA: &str = "persona";
 
 /// 插件管理与配置入口
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 
 /// 验收探针：一个世界端口 + 一笔债 + 一个执行体（债按会话前缀惰性）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_PROBE: &str = "probe";
 
 /// 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰裁决与出口共用的那一个口径）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_REPUTATION: &str = "reputation";
 
 /// 会话
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_SESSION: &str = "session";
 
 /// 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_SETTING: &str = "setting";
 
 /// 技能
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_SKILL: &str = "skill";
 
 /// 时延分层：按派发档折叠时延 / 兜底 / 跨度三列（单片读数 + 跨会话合并）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_SLO: &str = "slo";
 
 /// 任务表：清单声明成事实、独立验证与返工、就绪集调度与调度段
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_TASK: &str = "task";
 
 /// 消息渠道
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_TELEGRAM: &str = "telegram";
 
 /// 工具世界（执行 / 路由 / 结果提取）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_TOOL: &str = "tool";
 
 /// VDFS 根（单槽归系统 Agent）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_VDFS: &str = "vdfs";
 
 /// 网络访问
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_WEB: &str = "web";
 
 /// 子 Agent 子树默认挂载的插件清单（按 `plugin_order` 排序）。
@@ -133,7 +165,6 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "vdfs", // VDFS 根（单槽归系统 Agent）
     "memory", // 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
     "setting", // 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
-    "probe", // 验收探针：一个世界端口 + 一笔债 + 一个执行体（债按会话前缀惰性）
     "glossary", // 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
 ];
 

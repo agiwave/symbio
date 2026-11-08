@@ -108,6 +108,9 @@ function renderAssembly(root) {
   lines.push("");
   for (const p of [...plugins].sort((a, b) => a.id.localeCompare(b.id))) {
     if (p.comment) lines.push(`/// ${p.comment}`);
+    lines.push(
+      "// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）",
+    );
     lines.push(`pub const ${p.constName}: &str = "${p.id}";`);
     lines.push("");
   }
