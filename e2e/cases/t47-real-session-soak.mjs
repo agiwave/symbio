@@ -15,7 +15,7 @@ import './_selfrun.mjs';
 // | 轮次多到越过压缩水位线若干次 | 20 轮 ≈4.7K 字长回答 ＋ `max_context_tokens: 60000` | 触发线是**相对**的（0.7 × 窗口，`compact` 插件的 `COMPACT_AT`），而常驻量由请求视图的轮次窗口（出厂 `context_messages = 6`）决定——顶到水位线靠的是**最近几轮的体量**，真实会话正是这样（模型一次给几千字）。本用例让 mock 的用量按请求体估算（CJK ≈ 1 token/字），水位因此随会话变长而真的涨落：每 8~9 轮越线一次，整场压两次，最近一次之后仍留着尾巴（证据 ④ 要的后缀）。窗口大小不是判据，「触发过、触发后守住」才是（与 t8 / t18 同一取舍） |
 // | 单轮里几十次工具调用 | 最后一轮连调 45 次工具 | 长 agentic 轮是 v2 的主用法。它同时钉住一个**实测形状**：交换**跨轮累加**，所以第 45 步的请求里 `role=tool` 有 45 条——模型看得见自己已经做过什么（这一条曾经是 1 条：交换每轮清空，长轮于是反复重读同一份材料，见 [t55](t55-multi-tool-round-memory.mjs)）。**长轮自身不设工具轮数上限**（[D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")），这一格钉的是「累积」而不是「有界」 |
 // | 工具结果有真实字节量 | 第 1 轮读一份 ≈14KB 的材料，长轮里读小文件 | 大结果**当时**完整落进库，之后从请求视图与 live 读面一起滑走——「裁的是带着跑的那一份，不是记过的那一份」这条契约只有两头都在才判得动 |
-// | 会话会出故障 | 第 2 轮的应答按 `failTimes: 1` 打 500 | 真实会话不是一路成功；失败轮的可见收束今天读会话节点（`outcome = failed` + `attributes.error`）——转写读面的失败节点是已记账的缺口，见 [D-381](../../docs/003-design/005-协议规范.md "DE-005-协议规范") |
+// | 会话会出故障 | 第 2 轮的应答按 `failTimes: 1` 打 500 | 真实会话不是一路成功；失败轮的可见收束今天读会话节点（`status = failed`，`outcome` / `error` 是它的场景属性）——转写读面的失败节点是已记账的缺口，见 [D-381](../../docs/003-design/005-协议规范.md "DE-005-协议规范") |
 // | 会话会被重新打开 | 全程跑完后**换进程**再读一遍 | 长跑会话第二天被打开是常态：事实源要还能整体读出，且读数不随重开漂移 |
 //
 // ## 这副负载压出来的两处缺陷（都修在 core，都有单点判据）
@@ -191,11 +191,20 @@ export default defineCase(
         content: '我逐份读完再答。',
         toolCalls: [{ id: 'call_d0', name: 'vdfs_read', arguments: { path: SMALL_FILES[0] } }],
       },
-      // 正文轮的应答：没有任何 marker 命中的轮都走它；`failTimes: 1` ⇒ 第一个落到它
-      // 上的逻辑请求（第 2 轮）失败 ⇒ 那一轮进兜底格。
+      // 正文轮的应答：**每条都带本轮 marker**，因为压缩会在轮与轮之间重写读出口
+      // （快照 + 本轮回答），用户消息节点可能被折进快照——判「这一轮收束了」只能
+      // 认本轮自己的回答。`afterTool` 场景同理。
+      //
+      // `soak-reply` 是**没有 marker 命中时的兜底**：`failTimes: 1` ⇒ 第一个落到它
+      // 上的逻辑请求（第 2 轮，它没有专属场景）失败 ⇒ 那一轮进兜底格。
+      ...Array.from({ length: NORMAL_TURNS }, (_, i) =>
+        i >= 2
+          ? { id: `soak-reply-${i}`, match: markerOf(i), content: `${LONG_ANSWER}${markerOf(i)}` }
+          : null,
+      ).filter(Boolean),
       { id: 'soak-reply', failTimes: 1, content: LONG_ANSWER },
       // ── 工具结果轮（`afterTool` 池，先声明的先用）──
-      { id: 'early-read-after', afterTool: true, once: true, content: '材料读完了，要点在三处。' },
+      { id: 'early-read-after', afterTool: true, once: true, content: `材料读完了，要点在三处。${markerOf(0)}` },
       {
         id: 'deep-loop-a',
         afterTool: true,
@@ -267,63 +276,63 @@ export default defineCase(
         loadCliExited = true;
       });
 
+      // 会话节点地址：既用来判「上一轮真的离开了 working」，也用来读失败轮的结局。
+      // 上一轮还在 working 时发下一句，会被并进上一轮（t87 的并发教训）；并发门禁下
+      // 这个窗口会被放大，所以每轮开口前先等它离开 working，而不是只等转写里出现正文。
+      const root = await cli.invoke('vdfs/root', {});
+      const rootPath = root.body?.data?.path;
+      assert(
+        typeof rootPath === 'string' && rootPath.length > 0,
+        `vdfs/root 应返回根地址（${JSON.stringify(root.body).slice(0, 200)}）`,
+      );
+      const sessionPath = `${rootPath.replace(/\/+$/, '')}/session/${SID}`;
+      const readSessionNode = async () =>
+        (await cli.invoke('vdfs/stat', { path: sessionPath })).body?.data;
+      const waitOutsideWorking = () =>
+        waitFor(
+          async () => {
+            const node = await readSessionNode();
+            return !!node && node.status !== 'working';
+          },
+          { what: '会话离开 working', timeoutMs: 60_000 },
+        );
+
       // ── 跑负载：20 轮正文 + 1 轮 45 步工具轮 ─────────────────────────────
       for (let i = 0; i < NORMAL_TURNS; i++) {
+        await waitOutsideWorking();
         cli.send(turnText(i));
-        // 先等本轮用户消息出现，再等收束。正常轮读「本轮 marker 之后的助手正文」；
-        // 失败轮读会话节点（转写读面的失败节点是 D-381 记的缺口）。
-        // 不用实时面的 working 状态判轮次：并发下上一轮的收尾帧可能晚到，
-        // 会被误当成本轮收尾，进而把下一句并进上一轮（t87 的并发教训）。
-        await waitFor(
-          async () => {
-            const now = await readSessionMessages(cli, SID);
-            return now.some(
-              (m) =>
-                msgRoleOf(m) === 'user' &&
-                JSON.stringify(m).includes(markerOf(i)),
-            );
-          },
-          { what: `第 ${i + 1} 轮开口`, timeoutMs: 30_000 },
-        );
+        // 正常轮读「本轮自己的那一句回复」——mock 的每条正文都带着本轮 marker，
+        // 所以判据是「助手正文里出现 A<i>」而不是「用户消息之后出现正文」：
+        // 压缩会在轮与轮之间重写读出口（快照 + 本轮回答），用户消息节点可能被
+        // 折进快照，拿它当锚点在并发门禁下会假超时。失败轮读会话节点（转写读面
+        // 的失败节点是 D-381 记的缺口）。
         if (i === 1) {
-          // 失败轮的可见收束＝会话节点（前端错误条与它同源）：`status = failed`
-          // 经 `outcome` 落在 attributes 上，`attributes.error` 带失败原因。
-          const root = await cli.invoke('vdfs/root', {});
-          const rootPath = root.body?.data?.path;
-          assert(
-            typeof rootPath === 'string' && rootPath.length > 0,
-            `vdfs/root 应返回根地址（${JSON.stringify(root.body).slice(0, 200)}）`,
-          );
-          const sessionPath = `${rootPath.replace(/\/+$/, '')}/session/${SID}`;
+          // 失败轮的可见收束＝会话节点（前端错误条与它同源）：`status = failed`，
+          // `error` 带失败原因（会话节点的场景属性在线上是 flatten 到顶层的）。
           await waitFor(
             async () => {
-              const node = (await cli.invoke('vdfs/stat', { path: sessionPath })).body?.data;
+              const node = await readSessionNode();
               return (
-                node?.outcome === 'failed' &&
-                typeof node?.attributes?.error === 'string' &&
-                node.attributes.error.length > 0
+                node?.status === 'failed' &&
+                typeof node?.error === 'string' &&
+                node.error.length > 0
               );
             },
-            { what: '第 2 轮的失败收束（会话节点 outcome/error）', timeoutMs: 60_000 },
+            { what: '第 2 轮的失败收束（会话节点 status/error）', timeoutMs: 60_000 },
           );
         } else {
+          // 正常轮：读「本轮自己的那一句回答」——mock 的正文带着本轮 marker，判据是
+          // 「助手正文里出现 A<i> 且已收在终态」。压缩可能把本轮的用户消息折进快照
+          // （读出口只剩「快照 + 本轮回答」），拿用户消息当锚点会假超时。
           await waitFor(
             async () => {
-              const now = await readSessionMessages(cli, SID);
-              const anchor = [...now]
-                .reverse()
-                .find(
-                  (m) =>
-                    msgRoleOf(m) === 'user' &&
-                    JSON.stringify(m).includes(markerOf(i)),
-                );
-              if (!anchor) return false;
-              const after = now.filter((m) => (m.seq ?? -1) > (anchor.seq ?? -1));
-              return after.some(
+              const now = (await readSessionMessages(cli, SID)) ?? [];
+              return now.some(
                 (m) =>
                   msgRoleOf(m) === 'assistant' &&
                   msgTypeOf(m) === 'text' &&
-                  m.status === 'completed',
+                  m.status === 'completed' &&
+                  String(m.content ?? '').includes(markerOf(i)),
               );
             },
             { what: `第 ${i + 1} 轮的可见收束`, timeoutMs: 60_000 },
