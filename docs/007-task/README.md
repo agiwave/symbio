@@ -80,7 +80,7 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：☐ todo 6 · 🟡 doing 0 · done 0 · wont 0（共 6）
+**计数**：☐ todo 5 · 🟡 doing 0 · done 0 · wont 0（共 5）
 
 ## 待处理（按依赖顺序）
 
@@ -88,7 +88,6 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 |---|---|---|---|---|
 | `T-047-同轮二次提问调用卡` | 同一轮第二次提问的 tool_call 卡在消息面缺失 | next | arch | — |
 | `T-049-压缩失败跨轮抑制与重试出路` | 压缩失败后的跨轮抑制与重试出路：新链路无等价物，用户判据未落地 | next | arch | — |
-| `T-051-宿主合并与唯一写口` | 宿主合并与唯一写口：状态机下沉 symbio-host，write_stall 并回 declared_owner | next | arch | — |
 | `T-021-度量补齐` | D：度量补齐——EX-001 扩到首次落地、验收映射与 21 统一 | later | arch | — |
 | `T-053-plugin-api分类清单` | plugin-api 分类清单：契约留下、实现迁 sdk、reports 拆两半（先清单，后搬迁） | later | arch | — |
 | `T-054-同名模块改名与门面收窄` | 同名模块改名与门面收窄：镜像模块唯一归属，symbio 只显式导出装配所需 | later | arch | T-053-plugin-api分类清单 |
