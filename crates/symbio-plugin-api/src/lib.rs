@@ -87,7 +87,7 @@ pub use fact_source::{
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
 pub use port::{
-    capability_port_check, capability_port_of, port_family, port_row_name, port_rows,
+    capability_port_check, capability_port_of, port_family, port_row_name, port_rows, AuthzVerdict,
     PortCapabilities, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
     PortPayload, PortProvider, PortReading,
 };
@@ -226,7 +226,7 @@ pub use symbio_sdk::{
 };
 
 // ---- 授权判定：机制臂的一部分，单列成账（D-276） ----
-// 这 6 条曾以「认识容器概念」为由留在 `symbio-core`（D-259），门面于是为它们整块依赖
+// 这几条曾以「认识容器概念」为由留在 `symbio-core`（D-259），门面于是为它们整块依赖
 // 控制面——21 个扩展层插件的编译图里都躺着 grep / ignore / notify（实测多 34 个 crate）。
 // D-276 复核后改判：`principal_of` / `production_matrix` 只查一张**部署表**，`CAP_*` 是那张
 // 表的闭集，`actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——
@@ -236,5 +236,5 @@ pub use symbio_sdk::{
 // HS-005（门面 manifest 不得依赖 `symbio-core`）随之成立。
 pub use symbio_sdk::actors::{actor_can_assign_work, commitment_events};
 pub use symbio_sdk::authz::{
-    principal_of, production_matrix, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK,
+    principal_of, production_matrix, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK, PRINCIPAL_AUTONOMOUS,
 };

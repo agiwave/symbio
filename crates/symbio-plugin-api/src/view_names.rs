@@ -19,7 +19,6 @@ pub struct SharedViewDecl {
 /// 每条公开视图一个名字常量：消费方 import 它，不写第二遍字面量（D-364）。
 pub const VIEW_CONATION_AUTONOMY: &str = "conation.autonomy";
 pub const VIEW_CONATION_INTENTS: &str = "conation.intents";
-pub const VIEW_CONATION_POLICY: &str = "conation.policy";
 pub const VIEW_COST_LEDGER: &str = "cost.ledger";
 pub const VIEW_MEMORY_LIVE: &str = "memory.live";
 pub const VIEW_REPUTATION_LEDGER: &str = "reputation.ledger";
@@ -34,7 +33,6 @@ pub const VIEW_TASK_READYSET: &str = "task.readyset";
 pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: VIEW_CONATION_AUTONOMY, owner: "conation" },
     SharedViewDecl { name: VIEW_CONATION_INTENTS, owner: "conation" },
-    SharedViewDecl { name: VIEW_CONATION_POLICY, owner: "conation" },
     SharedViewDecl { name: VIEW_COST_LEDGER, owner: "cost" },
     SharedViewDecl { name: VIEW_MEMORY_LIVE, owner: "memory" },
     SharedViewDecl { name: VIEW_REPUTATION_LEDGER, owner: "reputation" },

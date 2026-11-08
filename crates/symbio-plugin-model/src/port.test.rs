@@ -145,8 +145,6 @@ fn exec_context() -> symbio_plugin_api::port::PortExecContext {
         session_id: "s".to_string(),
         group: String::new(),
         origin: None,
-        permitted: true,
-        deny_reason: String::new(),
         scratch_dir: None,
         source: String::new(),
         reader: None,

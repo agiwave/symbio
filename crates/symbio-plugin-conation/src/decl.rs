@@ -25,13 +25,8 @@
 //!
 //! ## 第三条视图为什么是「判决」（`D-384`）
 //!
-//! `conation.policy` 回答的不是「发生过什么」，是「**这一条欲该不该升格**」：开关
-//! （`session.config` 的 `conation_enabled`）与目标宽度（[`MAX_GOAL_LEN`]）都是内在动机
-//! 这条能力自己的策略。会话只保留强制点（授权 + 不可伪造的批准类型），策略经名字读——
-//! 与 `conation.intents` 同一通道，不新增端口、不改机制面。
-//!
-//! 它**不交** `agg`：判决是逐会话的一次评估，没有「N 片合起来该不该升格」这种东西。
-//! `NotAggregable` 是可辨的缺席（`D-281`），不是「汇总下来为零」。
+//! 判决不再是一条视图：开关、目标宽度与「已声明」由本包申报的债行判，动作由本包的
+//! 端口执行体做（`D-386`）。视图只回答「发生过什么」，动作面不借查询面绕路。
 //!
 //! ## 三条随包事实为什么只交声明（`#36` / `#50` / `#51`）
 //!
@@ -67,31 +62,17 @@ pub(crate) use symbio_plugin_api::events::EVENT_TASK_OPENED;
 /// 自主程度折叠读的两格（任务族，`D-282` 第二种读法）：挂起与闭环。
 pub(crate) use symbio_plugin_api::events::{EVENT_TASK_ASSERTED, EVENT_TASK_HELD};
 
-use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
-
 /// 对外可读的视图：表达过的欲及其升格状态。
 pub(crate) const CONATION_INTENTS: &str = "conation.intents";
 
 /// 对外可读的第二条视图：无人干预完成率（DE-008 §3.1 自主程度）。
 pub(crate) const CONATION_AUTONOMY: &str = "conation.autonomy";
 
-/// 对外可读的第三条视图：这一条「欲」该不该升格（E3 治理策略，`D-384`）。
-pub(crate) const CONATION_POLICY: &str = "conation.policy";
-
-/// 目标长度上界（字节）：过宽的目标 = 不可评估的意图。
-///
-/// 它是**策略参数**，住 owner（`D-384`）：迁移前它以 `ConationPolicy::default()` 的
-/// 字面量躺在会话里，读方替能力包记着一条它自己的规则。
-pub(crate) const MAX_GOAL_LEN: usize = 200;
-
-/// 开关的出厂值：快照里没有这一格 / 不是布尔 ⇒ 关（`D-252` / `D-379`）。
-pub(crate) const DEFAULT_ENABLED: bool = false;
-
 /// 名册 #36「主动求知」的最小能力面：**一次求知被发起**。
 ///
 /// 它与 `conation.expressed` 同格（`Conation × Opened`），但不是同一条事实：「我想知道 X」
 /// 与「我想要 X」在治理上是两件事——前者升格成一次检索 / 提问，后者升格成任务
-/// （`conation.policy` 的判决只对后者生效）。
+/// （升格债的判据只对后者生效）。
 ///
 /// 名字**只在本包内使用**：没有写方之前不进 `shared_events`（CS-007：单消费方的名字随
 /// owner 走，进了共享表就是第二张没人用的内核表）。
@@ -267,22 +248,6 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         eval: crate::autonomy::autonomy,
         agg: Some(crate::autonomy::merge),
     },
-    ViewDecl {
-        name: CONATION_POLICY,
-        ver: 1,
-        // `session.config` 没有 `FactDecl`（owner 是 `loop` 的词汇表）：这两对同样走
-        // `D-282` 的第二种读法。
-        reads: &[
-            (EVENT_CONATION_EXPRESSED, "goal"),
-            (EVENT_SESSION_CONFIG, "conation_enabled"),
-        ],
-        // 判决不替任何事实关门。
-        evidence: &[],
-        cost: COST,
-        eval: policy,
-        // 逐会话的判决，不参与跨会话汇总（`D-384`）。
-        agg: None,
-    },
 ];
 
 /// 采纳率：**一条算式**，单片与 N 片都调它。
@@ -365,65 +330,6 @@ fn intents(events: &[Event], now: i64) -> Value {
         "expressed": expressed,
         "escalated": escalated,
         "adoption_rate": rate(expressed, escalated),
-    })
-}
-
-/// **判决折叠**：最新一条「欲」+ 最新一条 `session.config` → 这一条该不该升格（`D-384`）。
-///
-/// 三条口径：
-///
-/// - **只判带溯源的那条**：无溯源的欲构造不出候选（I2），会话根本不会拿它来问；把它当
-///   判决对象只会让会话按 `seq` 对不上而白跑一趟。所以取「最近一条 `produced_by` 非空」
-///   的表达。
-/// - **开关读最近一条快照**：缺格 / 非布尔 ⇒ 出厂值关（`D-252` / `D-379`）。读不到不等于
-///   开着——装配问题不得被读成放行。
-/// - **as-of**：`ts > now` 的快照与欲一概不见，与其余视图同口径。
-///
-/// 输出的 `seq` 是判决的**绑定锚**：会话拿候选的 seq 来对，对不上就不升格。少这一格，
-/// 「读到的是哪一条欲的判决」只能靠猜「反正最后一条就是我刚写的那条」。
-pub(crate) fn policy(events: &[Event], now: i64) -> Value {
-    let seq_key = |e: &&Event| e.seq.map(|s| s.value()).unwrap_or(u64::MAX);
-    let enabled = events
-        .iter()
-        .filter(|e| e.ts <= now && e.kind.as_str() == EVENT_SESSION_CONFIG)
-        .max_by_key(seq_key)
-        .and_then(|e| e.payload.get("conation_enabled").and_then(Value::as_bool))
-        .unwrap_or(DEFAULT_ENABLED);
-    let want = events
-        .iter()
-        .filter(|e| {
-            e.ts <= now && e.kind.as_str() == EVENT_CONATION_EXPRESSED && e.produced_by.is_some()
-        })
-        .max_by_key(seq_key);
-    let Some(want) = want else {
-        return json!({
-            "seq": Value::Null,
-            "goal": Value::Null,
-            "enabled": enabled,
-            "max_goal_len": MAX_GOAL_LEN,
-            "promotable": false,
-            "reason": "no expressed intent",
-        });
-    };
-    let goal = want
-        .payload
-        .get("goal")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let (promotable, reason) = if !enabled {
-        (false, Some("conation disabled"))
-    } else if goal.len() > MAX_GOAL_LEN {
-        (false, Some("goal too broad"))
-    } else {
-        (true, None)
-    };
-    json!({
-        "seq": want.seq.map(|s| s.value()),
-        "goal": goal,
-        "enabled": enabled,
-        "max_goal_len": MAX_GOAL_LEN,
-        "promotable": promotable,
-        "reason": reason,
     })
 }
 

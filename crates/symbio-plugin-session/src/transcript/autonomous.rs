@@ -3,7 +3,8 @@
 //! ## 为什么这段代码不住在心跳里
 //!
 //! 心跳回答的是「**什么时候**该开一轮」（间隔、抖动、空闲基线）；本文件回答的是
-//! 「这一次开轮是一次**自主触发**，先把四格事实落进这个会话的事实源，落成了才准开」。
+//! 「这一次开轮是一次**自主触发**，先把三格事实（触发 / 健康 / 欲）落进这个会话的事实源，
+//! 落成了才准开」。升格不在本文件：那是由 conation 申报的债与执行体（`D-386`）。
 //! 后者不是定时器的属性——它回答的是**谁有资格开这个会话的事实源、在什么时刻开**，
 //! 那是存储所有者的写窗口纪律，不是某个触发器的私事（归属裁决见
 //! [D-076](../../../symbio-plugin-heartbeat/README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README") 裁决一 #5/#6）。
@@ -11,7 +12,7 @@
 //! 于是「谁来发起」在这里不重要：今天唯一的入口是收件箱写臂（`write(<会话地址>/inbox)`，
 //! 写体带 `meta.trigger` 触发声明，识别在 `plugin/nodes.rs::trigger_declaration`），
 //! 它经 [`SessionPlugin::request_autonomous_round`] 开这一轮。任何触发器（心跳、巡检、
-//! 外部调度、网关）声明同一件事，落的都是这同四格——**发起者的身份不是这段代码的输入**。
+//! 外部调度、网关）声明同一件事，落的都是这同三格——**发起者的身份不是这段代码的输入**。
 //!
 //! ## 失败落在队列之外，不落队首
 //!
@@ -22,13 +23,9 @@
 
 use super::super::active::{InboxItem, PreemptPending};
 use super::super::plugin::SessionPlugin;
-use crate::declarations::{
-    CONATION_INTENTS_VIEW, CONATION_POLICY_VIEW, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED,
-};
-use crate::store::EventWalStore;
-use symbio_kernel::event::{Event, Seq};
+use crate::declarations::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
+use symbio_kernel::event::Event;
 use symbio_kernel::store::Store;
-use symbio_sdk::authz::EffectiveMatrix;
 use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
 use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::chat::session_chat;
@@ -214,174 +211,23 @@ impl SessionPlugin {
         }
 
         // 「欲」先入格（E1：欲是数据），闸门再决定它要不要升格成任务。
-        let conation_seq = match store.append(initiator.express_intent(goal, triggered_seq)) {
-            Ok(seq) => seq.value(),
-            Err(e) => {
-                symbio_plugin_api::plugin_warn!(
-                    "session",
-                    "[Autonomous] 意图未入格（会话 {}）：{:?}",
-                    session_id,
-                    e
-                );
-                // 触发已经落格 ⇒ 这一轮照常开跑（意图没写成不该连累触发）。
-                return true;
-            }
-        };
-        // 回读刚落格的那一条：候选的唯一构造路径要读 `seq`，而本地副本还是 pending。
-        let source = store.range(Seq::new(conation_seq)).into_iter().next();
-        let Some(source) = source else {
+        if let Err(e) = store.append(initiator.express_intent(goal, triggered_seq)) {
             symbio_plugin_api::plugin_warn!(
                 "session",
-                "[Autonomous] 意图回读不到（会话 {}，seq {}）",
+                "[Autonomous] 意图未入格（会话 {}）：{:?}",
                 session_id,
-                conation_seq
+                e
             );
+            // 触发已经落格 ⇒ 这一轮照常开跑（意图没写成不该连累触发）。
             return true;
-        };
-        let Some(mut candidate) = ConationCandidate::from_event(&source) else {
-            symbio_plugin_api::plugin_warn!(
-                "session",
-                "[Autonomous] 意图构造不出候选（会话 {}）",
-                session_id
-            );
-            return true;
-        };
-
-        let Some(policy) = conation_policy(&store, candidate.seq) else {
-            // 读不到判决 ⇒ 本轮不升格（与 [`long_goal_declared`] 读不到「已声明」同款退化）：
-            // 装配问题不得被读成放行，也不得被读成「没声明过，于是每 tick 重开一条」。
-            return true;
-        };
-        // 授权与本体同一把尺：自主主体在 `authz::ROWS` 里只持 `define.work`。
-        let grants = symbio_sdk::authz::production_matrix();
-        let principal = symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
-        match IntentGate::approve(&mut candidate, &policy, grants, principal) {
-            Ok(approved) => {
-                // E2 的**动作点**：`task.opened` 只从闸门批准过的候选长出来
-                //（`ApprovedIntent` 字段私有 = 编译期唯一出口），这一行验的是升格本身
-                // ——少了它，「闸门与自主层同批成对」就退化成一句约定。
-                if candidate.is_approved()
-                    && !long_goal_declared(&store, approved.goal()).unwrap_or(true)
-                {
-                    let task_id = format!("hb-{triggered_seq}");
-                    let opened =
-                        initiator.open_long_goal(&task_id, approved.goal(), approved.source_seq());
-                    if let Err(e) = store.append(opened) {
-                        symbio_plugin_api::plugin_error!(
-                            "session",
-                            "[Autonomous] 长目标未入格（会话 {}）：{:?}",
-                            session_id,
-                            e
-                        );
-                    }
-                }
-            }
-            Err(reason) => {
-                symbio_plugin_api::plugin_info!(
-                    "session",
-                    "[Autonomous] 意图闸门拒绝（会话 {}）：{}",
-                    session_id,
-                    reason
-                );
-            }
         }
+        // 升格不在本插件：`conation.expressed` 落格后，由 conation 自己申报的债
+        // （`conation.promote`）在环里判开关 / 授权 / 是否已声明，并落 `task.opened`。
         true
     }
 }
 
-/// 事实源里有没有**已经声明过的**同一个长目标。
-///
-/// 自主触发按间隔周期性表达同一条「欲」，每次都开格会让就绪集无界增长——而 `readyset`
-/// 是模型唯一的调度候选来源，那就等于用自己刷爆自己的提示词。重新发起是 S03 返工机制
-/// （`{id}-r{n}`）的事，不由触发器每 tick 重开；「欲」本身照样每次入格（它是流，不是状态）。
-///
-/// 判定住能力包（`crates/symbio-plugin-conation` 的 `conation.intents` 视图），这里只
-/// **按名字读 `declared` 那一格并查表**——「哪些目标算已声明」（= 升格过的那几条）由
-/// owner 判，本插件不再自己扫事实源拼一个布尔。
-// doc-link-allow D-004: 「曾经声明过吗」问的是事实网格里有无该条记录，属数据语义
-/// as-of 取全量读数口径 `read_all`：问的是「这条目标曾经声明过吗」，与 `session/stats`
-/// 的复算同一写法。升格靠**溯源**认（`task.opened` 的 `produced_by` 指回欲 seq），
-/// 不靠 goal 字符串相等，见能力包 `decl` 模块头。
-///
-// doc-link-allow D-004: 「曾经声明过」是累计口径的表述，非版本变更史
-/// 读**完整史**（`range(0)`）：「曾经声明过」是累计口径——被快照取代而移入
-/// 归档段的那次声明也在里面 ⇒ 压缩前声明过的目标不会被读成「没声明过」（每 tick 重开
-/// 一条目标，静默的重复开工）。
-///
-/// ## 读不到 ⇒ `None`（本轮不升格）
-///
-/// 四种缺席（装配表没冻结 / 名字没公开 / 声明表里没有 / 切片超预算）都是**可诊断的缺席**，
-/// 不是「没声明过」。把它读成 `false` 会让每个 tick 都重开一条长目标——那是拿重复开工
-/// 掩盖一个装配问题。退化方向与 `loop` 读 `memory.live` 同款：**跳过这一轮**。
-fn long_goal_declared(store: &EventWalStore, goal: &str) -> Option<bool> {
-    let value = match symbio_plugin_api::read_shared_view_all(
-        CONATION_INTENTS_VIEW,
-        &store.range(Seq::new(0)),
-    ) {
-        Ok(value) => value,
-        Err(why) => {
-            symbio_plugin_api::plugin_warn!(
-                symbio_plugin_api::PLUGIN_ID_SESSION,
-                "[Autonomous] 意图视图 `{CONATION_INTENTS_VIEW}` 本轮读不到（{why}）：本轮不升格"
-            );
-            return None;
-        }
-    };
-    let declared = value.get("declared").and_then(|d| d.as_array())?;
-    Some(declared.iter().any(|g| g.as_str() == Some(goal)))
-}
-
-/// 能力包交来的判决（视图 `conation.policy` 的一格，`D-384`）。
-///
-/// 它只是**读形状**，不是 policy 的第二个 owner：开关怎么读、目标多宽算过宽，都由
-/// `crates/symbio-plugin-conation` 判；本插件只认 `promotable` 与那句原因。
-struct PolicyVerdict {
-    /// 该不该升格。
-    promotable: bool,
-    /// 拒绝原因（`promotable == false` 时非空）。直接来自 owner，本插件不翻译、不重写。
-    reason: String,
-}
-
-/// 读本轮生效的判决：**最近一条** `conation.policy`，绑定到这一次的候选 seq。
-///
-/// 口径见 `D-252` / `D-379` / `D-384`：开关与宽度是**能力包的策略**，本插件按名字读，
-/// 不认识 `SessionConfig` 活值，也不自己再判一遍（两处各判一遍必然漂移，`D-251`）。
-///
-/// 读不到（能力包不在 / 视图没公开 / 切片超预算 / 判决绑定的 seq 不是这一条）⇒ `None`
-/// ——本轮不升格。四种都是**可诊断的缺席**，不是「该升格」。
-fn conation_policy(store: &EventWalStore, want: u64) -> Option<PolicyVerdict> {
-    let value = match symbio_plugin_api::read_shared_view_all(
-        CONATION_POLICY_VIEW,
-        &store.range(Seq::new(0)),
-    ) {
-        Ok(value) => value,
-        Err(why) => {
-            symbio_plugin_api::plugin_warn!(
-                symbio_plugin_api::PLUGIN_ID_SESSION,
-                "[Autonomous] 判决视图 `{CONATION_POLICY_VIEW}` 本轮读不到（{why}）：本轮不升格"
-            );
-            return None;
-        }
-    };
-    let seq = value.get("seq").and_then(|v| v.as_u64())?;
-    if seq != want {
-        symbio_plugin_api::plugin_warn!(
-            symbio_plugin_api::PLUGIN_ID_SESSION,
-            "[Autonomous] 判决绑定 seq {seq} 与本次欲 {want} 不一致：本轮不升格"
-        );
-        return None;
-    }
-    Some(PolicyVerdict {
-        promotable: value.get("promotable").and_then(|v| v.as_bool())?,
-        reason: value
-            .get("reason")
-            .and_then(|v| v.as_str())
-            .unwrap_or("rejected")
-            .to_string(),
-    })
-}
-
-// ==================== 自主发起者与意欲闸门（D-189：唯一生产消费方在本文件） ====================
+// ==================== 自主发起者（D-189：唯一生产消费方在本文件） ====================
 
 /// 自主发起者（[DE-042](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")）。
 ///
@@ -416,7 +262,7 @@ impl AutonomousInitiator {
         }))
     }
 
-    /// 表达一条「欲」（E1：欲是数据，必带溯源——否则过不了 IntentGate）。
+    /// 表达一条「欲」（E1：欲是数据，必带溯源——升格债按这条 seq 认它，不按 goal 猜）。
     fn express_intent(&self, goal: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("want-{source_seq}"),
@@ -426,25 +272,7 @@ impl AutonomousInitiator {
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
-        .with_payload(serde_json::json!({ "goal": goal }))
-    }
-
-    /// 把闸门批准的意图落成长目标任务（自主层 `budget_ms` 的完整取值）。
-    fn open_long_goal(&self, task_id: &str, goal: &str, source_seq: u64) -> Event {
-        Event::pending(
-            format!("o-{task_id}"),
-            symbio_plugin_api::events::EVENT_TASK_OPENED,
-            symbio_kernel::event::Entity::Task,
-            symbio_kernel::event::Verb::Opened,
-            PRINCIPAL_AUTONOMOUS,
-        )
-        .with_produced_by(source_seq)
-        .with_payload(serde_json::json!({
-            "task_id": task_id,
-            "depends_on": [],
-            "goal": goal,
-            "budget_ms": symbio_kernel::adapters::LatencyTier::Autonomic.budget_ms(),
-        }))
+        .with_payload(serde_json::json!({ "goal": goal, "source_seq": source_seq }))
     }
 
     /// 健康自检：触发时刻测得的状态入格（`system × progressed`）。
@@ -465,116 +293,6 @@ impl AutonomousInitiator {
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({ "idle_ms": idle_ms }))
-    }
-}
-
-/// 候选意图：从 `conation.expressed` 事件**唯一**构造路径读出，
-/// 造出来一定**未被批准**——「欲」不得直接变成「行」（E2）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ConationCandidate {
-    /// 源事件 seq（溯源锚）。
-    seq: u64,
-    goal: String,
-    /// 私有：只有闸门能把它置真。
-    approved: bool,
-}
-
-impl ConationCandidate {
-    /// 唯一构造路径：从欲事件读出候选。**无溯源的欲构造不出候选**（I2 强化）。
-    fn from_event(e: &Event) -> Option<Self> {
-        if e.kind != symbio_plugin_api::events::EVENT_CONATION_EXPRESSED {
-            return None;
-        }
-        // 来路不明的意图混不进来（I2 强化：无溯源即 None）。
-        e.produced_by?;
-        let goal = e
-            .payload
-            .get("goal")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        Some(ConationCandidate {
-            seq: e.seq.map(|s| s.value()).unwrap_or(u64::MAX),
-            goal,
-            approved: false,
-        })
-    }
-
-    fn is_approved(&self) -> bool {
-        self.approved
-    }
-}
-
-/// 闸门评估结论。
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum IntentDecision {
-    Approved,
-    Rejected(String),
-}
-
-/// 经闸门批准后的可执行任务（**只有** [`IntentGate::approve`] 能造出来：字段私有，
-/// 模块外连结构体字面量都写不出——这是 E2「欲不得直接变成行」的编译期兑现）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ApprovedIntent {
-    from_seq: u64,
-    goal: String,
-}
-
-impl ApprovedIntent {
-    /// 溯源锚：升格自哪一条 `conation.expressed`。
-    fn source_seq(&self) -> u64 {
-        self.from_seq
-    }
-
-    /// 被批准的目标文本。
-    fn goal(&self) -> &str {
-        &self.goal
-    }
-}
-
-/// 意图闸门：**「欲」与「行」之间唯一的一道门**（[DE-001 §4.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") E2）。
-struct IntentGate;
-
-impl IntentGate {
-    /// 评估：能力包的判决优先，其次授权（升格就是「定义工作」）。
-    ///
-    /// 判决（开关 / 目标宽度）由 `conation.policy` 交来（`D-384`）——本闸**不**再判一遍
-    /// 「多宽算过宽」，那会变成同一策略的第二份口径（`D-251`）。留下的是**强制点**：
-    /// 授权**不是**一句声明，判据取 [`EffectiveMatrix::can_write`] 那一份（`define.work`），
-    /// 与本仓任务表写侧闸同一把尺。预算与时延不在这里判——它们是**执行面**的闸
-    /// （`CircuitBreaker` 在真动作上判），把意图升格成任务本身不花预算。
-    fn evaluate(
-        verdict: &PolicyVerdict,
-        grants: &EffectiveMatrix,
-        principal: &str,
-    ) -> IntentDecision {
-        if !verdict.promotable {
-            return IntentDecision::Rejected(verdict.reason.clone());
-        }
-        if !grants.can_write_name(principal, symbio_sdk::authz::CAP_DEFINE_WORK) {
-            return IntentDecision::Rejected("unauthorized: define.work".to_string());
-        }
-        IntentDecision::Approved
-    }
-
-    /// 升格：**唯一**能把 [`ConationCandidate`] 变成 [`ApprovedIntent`] 的函数
-    /// （`ApprovedIntent` 字段私有，绕过它造不出可执行任务）。
-    fn approve(
-        candidate: &mut ConationCandidate,
-        verdict: &PolicyVerdict,
-        grants: &EffectiveMatrix,
-        principal: &str,
-    ) -> Result<ApprovedIntent, String> {
-        match Self::evaluate(verdict, grants, principal) {
-            IntentDecision::Approved => {
-                candidate.approved = true;
-                Ok(ApprovedIntent {
-                    from_seq: candidate.seq,
-                    goal: candidate.goal.clone(),
-                })
-            }
-            IntentDecision::Rejected(r) => Err(r),
-        }
     }
 }
 

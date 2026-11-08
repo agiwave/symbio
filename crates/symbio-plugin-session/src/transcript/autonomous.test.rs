@@ -12,9 +12,13 @@ use symbio_sdk::invariants::check_all;
 
 // 这一段钉的不是"触发器会不会开跑一轮"（那要真模型，归 e2e），而是**触发先落事实**
 // 这条链子：`system.triggered` 必须存在且溯源指向更早的格子、健康自检紧随其后、
-// 「欲」永远入格、任务却**只在闸门放行时**才长出来。分开断言是因为三者各自的失效
-// 都不报错：漏了触发 = 自主行为查无此事；漏了自检 = `system` 实体只开不进；
-// 漏了闸门 = 自己写自己的对话（[DE-042 §5](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")「自主写入对话 0」）。
+// 「欲」永远入格。三者各自的失效都不报错：漏了触发 = 自主行为查无此事；漏了自检 =
+// `system` 实体只开不进；漏了「欲」= 这条触发没有留下可升格的数据
+// （[DE-042 §5](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")「自主写入对话 0」）。
+//
+// 升格不在这里：它是 conation 自申报的债 + 执行体（`D-386`）。本二进制不链接那个包
+// （E-009），所以这里只能钉「读不到 ⇒ 不升格」；「只开一次」的组合证明在
+// `e2e/cases/t36-autonomous-initiator.mjs`。
 
 fn autonomy_plugin(conation_enabled: bool) -> (tempfile::TempDir, Arc<SessionPlugin>) {
     let dir = tempfile::tempdir().expect("临时目录创建失败");
@@ -77,7 +81,7 @@ fn seed_config(p: &SessionPlugin, sid: &str, payload: serde_json::Value) {
 }
 
 /// 主链路：触发 → 自检 → 欲三格按序入格、溯源逐级指向更早的格子；
-/// 判决（开关 / 目标宽度）在能力包里，本二进制读不到 ⇒ 一条自主任务都不产生（T3）。
+/// 升格由能力包自己的债与执行体做，本二进制不链接它 ⇒ 一条自主任务都不产生（T3）。
 #[tokio::test]
 async fn trigger_facts_land_in_order_and_no_task_grows_without_the_capability_pack() {
     let (_dir, p) = autonomy_plugin(false);
@@ -143,20 +147,13 @@ async fn trigger_facts_land_in_order_and_no_task_grows_without_the_capability_pa
 ///
 /// ## 为什么这里断言的是「不开」而不是「只开一次」
 ///
-/// 「同一条长目标只开一次」的去重判据**归能力包**（`D-269` 站位表「读侧折叠」行）：`declared` 那一格
-/// 由 `crates/symbio-plugin-conation` 的视图算，「哪些目标算已声明」不再由本插件判。
-/// 本二进制不链接那个包（E-009），所以这里读到的必然是**可诊断的缺席**——本文件因此只能钉
-/// 本插件剩下的那一半：**读不到 ⇒ 不升格**（而不是「读不到 ⇒ 当作没声明过，于是每 tick
-/// 重开一条」，那会拿重复开工掩盖一个装配问题）。
-///
-/// 「只开一次」的**组合**证明在两处，缺一不可：
-/// - 能力包自己的用例：`declared` 只含升格过的那几条（`declaring_one_goal_does_not_declare_another`）；
-/// - e2e：真实装配里跑两个 tick，`readyset.ready` 里始终只有一条心跳任务
-///   （`e2e/cases/t36-autonomous-initiator.mjs`）。
-///
-/// 把这两半拼起来才是原来那条用例，而拼的动作不该发生在「只链接一半」的二进制里。
+/// 升格判据（开关 / 授权 / 已声明）**归能力包**：`crates/symbio-plugin-conation` 的
+/// `DebtSource::rows` 算「哪些目标算已声明」（`D-386`）。本二进制不链接那个包（E-009），
+/// 所以这里读到的必然是**可诊断的缺席**——本文件因此只能钉本插件剩下的那一半：
+/// **读不到 ⇒ 不升格**（而不是「读不到 ⇒ 当作没声明过，于是每 tick 重开一条」，
+/// 那会拿重复开工掩盖一个装配问题）。
 #[tokio::test]
-async fn without_the_capability_pack_the_gate_opens_nothing() {
+async fn without_the_capability_pack_nothing_promotes() {
     let (_dir, p) = autonomy_plugin(true);
     let sid = "s-gate";
     seed_one_fact(&p, sid);
@@ -228,14 +225,14 @@ async fn no_fact_source_or_a_live_writer_both_block_the_trigger() {
     assert_eq!(read_wal(&p, sid).len(), 1, "两个空闲写方不许同时开档");
 }
 
-// ==================== 发起者与意欲闸门的单元验收（D-189） ====================
+// ==================== 发起者与预算的单元验收（D-189） ====================
 use crate::declarations::EVENT_SYSTEM_TRIGGERED;
+use crate::store::EventWalStore;
 use symbio_kernel::store::EventStore;
-use symbio_plugin_api::events::EVENT_CONATION_EXPRESSED;
-use symbio_plugin_api::events::EVENT_TASK_PROGRESS;
+use symbio_kernel::Seq;
+use symbio_plugin_api::events::{EVENT_TASK_OPENED, EVENT_TASK_PROGRESS};
 use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
 use symbio_sdk::authz::PRINCIPAL_USER;
-use symbio_sdk::authz::PRINCIPAL_WORKER;
 use symbio_sdk::invariants::budget_exceeded;
 
 /// 事实源里先放一格：触发是"从当时的状态出发"的，必须先有可指的锚。
@@ -276,6 +273,9 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 }
 
 /// DE-042 §6 验收 3 + 4：长目标超过自主层预算 → 必须被看见；预算改小 → 判定改变。
+///
+/// 升格本身归 conation 的债与执行体（`D-386`）；这里只钉预算读数对**升格产物形状**
+/// 的反应——`task.opened` 的 `budget_ms` 就是自主层的 86.4M，没超过时读数不该报。
 #[test]
 fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     let store = EventStore::new();
@@ -283,7 +283,22 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     let init = AutonomousInitiator;
     store.append(init.trigger(src)).unwrap();
     store
-        .append(init.open_long_goal("goal-1", "整理全年归档", src))
+        .append(
+            Event::pending(
+                "o-hb-1",
+                EVENT_TASK_OPENED,
+                Entity::Task,
+                Verb::Opened,
+                PRINCIPAL_AUTONOMOUS,
+            )
+            .with_produced_by(src)
+            .with_payload(serde_json::json!({
+                "task_id": "hb-1",
+                "depends_on": [],
+                "goal": "整理全年归档",
+                "budget_ms": symbio_kernel::adapters::LatencyTier::Autonomic.budget_ms(),
+            })),
+        )
         .unwrap();
     // 任务执行事件：耗时 90M ms > 自主层预算 86.4M。
     store
@@ -297,7 +312,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
             )
             .with_produced_by(src)
             .with_cost_ms(90_000_000)
-            .with_payload(serde_json::json!({ "task_id": "goal-1" })),
+            .with_payload(serde_json::json!({ "task_id": "hb-1" })),
         )
         .unwrap();
     let snapshot = store.range(Seq::new(0));
@@ -317,7 +332,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     )
     .with_produced_by(src)
     .with_cost_ms(70_000)
-    .with_payload(serde_json::json!({ "task_id": "goal-1" }));
+    .with_payload(serde_json::json!({ "task_id": "hb-1" }));
     let ok_events = vec![ok_event];
     assert!(
         budget_exceeded(&ok_events, Some(86_400_000)).is_empty(),
@@ -328,79 +343,4 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
         1,
         "同一耗时，深挖档预算下违规"
     );
-}
-
-/// [DE-001 §4.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
-/// 无任何自主任务但读侧投影照常（J2 平凡值）。ZST 令牌零开销。
-#[test]
-fn conation_governance_three_rules() {
-    let init = AutonomousInitiator;
-    let store = EventStore::new();
-    let src = seed_root(&store);
-    store.append(init.trigger(src)).unwrap();
-    store.append(init.express_intent("整理归档", src)).unwrap();
-    let snapshot = store.range(Seq::new(0));
-
-    // (a) 唯一构造路径读出的候选，approved 恒 false——欲不得直接变成行。
-    let want = snapshot
-        .iter()
-        .find(|e| e.kind == EVENT_CONATION_EXPRESSED)
-        .unwrap();
-    let mut candidate = ConationCandidate::from_event(want).expect("合法欲事件必出候选");
-    assert!(!candidate.is_approved());
-    // approved 字段私有：外部无法伪造 true（error[E0451]，编译期反向用例）。
-
-    // (b) 无溯源的欲 → 构造不出候选（I2 强化）。
-    let bare = Event {
-        produced_by: None,
-        ..Event::pending(
-            "w1",
-            EVENT_CONATION_EXPRESSED,
-            Entity::Conation,
-            Verb::Opened,
-            PRINCIPAL_USER,
-        )
-    };
-    assert!(
-        ConationCandidate::from_event(&bare).is_none(),
-        "来路不明的意图混不进来"
-    );
-
-    // (c) 判决否决：能力包说「不升格」（关停 / 目标过宽）⇒ 评估拒绝，理由原样透传。
-    let rejected = PolicyVerdict {
-        promotable: false,
-        reason: "conation disabled".to_string(),
-    };
-    let grants = symbio_sdk::authz::production_matrix();
-    assert_eq!(
-        IntentGate::evaluate(&rejected, grants, PRINCIPAL_AUTONOMOUS),
-        IntentDecision::Rejected("conation disabled".to_string())
-    );
-    // 打开后：评估通过 → 升格；溯源锚与目标都从 `ApprovedIntent` 读（字段私有）。
-    let approved_verdict = PolicyVerdict {
-        promotable: true,
-        reason: String::new(),
-    };
-    let approved = IntentGate::approve(
-        &mut candidate,
-        &approved_verdict,
-        grants,
-        PRINCIPAL_AUTONOMOUS,
-    )
-    .expect("合法意图必批");
-    assert!(candidate.is_approved());
-    assert_eq!(approved.goal(), "整理归档");
-    assert_eq!(
-        approved.source_seq(),
-        want.seq.map(|s| s.value()).unwrap_or(0)
-    );
-
-    // (d) 授权是真闸：判决放行，但不持 `define.work` 的主体升格被拒。
-    let mut other = ConationCandidate::from_event(want).expect("同一事件可再造候选");
-    assert_eq!(
-        IntentGate::approve(&mut other, &approved_verdict, grants, PRINCIPAL_WORKER),
-        Err("unauthorized: define.work".to_string()),
-        "worker 不持 define.work"
-    );
-    assert!(!other.is_approved(), "被拒的候选不得变成已批准");
 }

@@ -36,7 +36,7 @@ impl PortExecutor for DemoExecutor {
             .unwrap_or_default();
         PortOutcome {
             facts: vec![serde_json::json!({ "echo": text })],
-            ..Default::default()
+            ..PortOutcome::ok()
         }
     }
 }

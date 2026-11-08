@@ -635,8 +635,6 @@ async fn dispatch(
         subject: format!("{}:{}:{}", row.port, row.id, attempt),
         group: String::new(),
         origin: None,
-        permitted: true,
-        deny_reason: String::new(),
         scratch_dir: handles.scratch_dir,
         session_id: handles.session_id,
         source: handles.source,
@@ -683,6 +681,17 @@ async fn finish(
         .and_then(|s| s.payload.get("deadline_ms").and_then(Value::as_u64))
         .is_some_and(|deadline| now_ms >= deadline);
     if superseded || closed || lease_over {
+        return;
+    }
+    // D-385：执行体自判拒绝 ⇒ 它交来的任何草稿都不落格（fail-closed），这一笔按
+    // 不可重试失败收束。环不替它补结论，也不把拒绝读成成功。
+    if let Some(reason) = outcome.authz.denial() {
+        ctx.append(Fact::new(
+            FactKind::Failed,
+            key,
+            failure_payload(&[], row.port, PortErrorClass::NonRetryable, reason),
+            now_ms,
+        ));
         return;
     }
     // 五类事实归环记账，其余原样交出：两类都在这里、且只在这里提交。

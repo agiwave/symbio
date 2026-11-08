@@ -111,8 +111,12 @@ export const WHITELIST_BASELINE = 0
  *
  * 105：实测 105，低于此前基线 107（两格漏跟降）；按「账本只许降、基线跟着实测降」
  * 收平。这是下调，不是放宽。
+ *
+ * 106（D-386）：升格闸搬进 conation 后，`PRINCIPAL_AUTONOMOUS` 成为扩展层第二处消费的
+ * 授权常量（债源与执行体同一把尺）。它满足 §5.1 两条：不提能力名（是一条主体身份），
+ * 且 ≥2 条能力要用（conation 的债与执行体）。上调一格，记在 D-386 的「判据」节。
  */
-export const SDK_BASELINE = 105
+export const SDK_BASELINE = 106
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。

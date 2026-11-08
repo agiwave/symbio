@@ -1,6 +1,6 @@
 # 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
 plugin_id: conation
-plugin_comment: 目标自生成：把「欲」的表达折成意图视图（单片读数 + 跨会话合并）
+plugin_comment: 目标自生成：把「欲」的表达折成意图视图，并把升格做成自申报的债
 # 声明面能力包：没有工具、没有路由、没有行为——它只交事实、视图与归宿行。
 # 实例仍然要有（与 `task` 同一条理由）：装配清单按插件目录挂载，停用插件 ⇒ 实例不构造。
 plugin_assembly: sub_agent
@@ -10,4 +10,4 @@ plugin_order: 57
 shared_events: conation.expressed
 # 对外可读的视图（scripts/facts/views-rs.mjs 读取 → crates/symbio-plugin-api/src/view_names.rs）。
 # 名字与求值仍住 `decl::VIEWS`；读方按名字读，不依赖本 crate（D-221）。
-shared_views: conation.intents, conation.autonomy, conation.policy
+shared_views: conation.intents, conation.autonomy

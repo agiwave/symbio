@@ -628,13 +628,14 @@ impl PortExecutor for ModelExecutor {
                             Some(("failed", why)),
                         )],
                         error: Some((PortErrorClass::NonRetryable, why.to_string())),
-                        ..Default::default()
+                        ..PortOutcome::ok()
                     }
                 } else {
                     PortOutcome {
                         facts: vec![payload],
                         error: None,
                         reply: PortReply { messages, links },
+                        ..PortOutcome::ok()
                     }
                 }
             }
@@ -648,7 +649,7 @@ impl PortExecutor for ModelExecutor {
                     Some(("aborted", "aborted")),
                 )],
                 error: Some((PortErrorClass::NonRetryable, "aborted".to_string())),
-                ..Default::default()
+                ..PortOutcome::ok()
             },
             Err(PluginError::RateLimited(why)) => PortOutcome {
                 facts: vec![outcome_payload(
@@ -659,7 +660,7 @@ impl PortExecutor for ModelExecutor {
                     Some(("failed", &why)),
                 )],
                 error: Some((PortErrorClass::Retryable, why)),
-                ..Default::default()
+                ..PortOutcome::ok()
             },
             Err(error) => {
                 let why = error.to_string();
@@ -672,7 +673,7 @@ impl PortExecutor for ModelExecutor {
                         Some(("failed", &why)),
                     )],
                     error: Some((PortErrorClass::NonRetryable, why)),
-                    ..Default::default()
+                    ..PortOutcome::ok()
                 }
             }
         };

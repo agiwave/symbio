@@ -153,10 +153,6 @@ pub struct PortExecContext {
     pub session_id: String,
     /// 产生方（归属序号）；`None` = 无归属。
     pub origin: Option<u64>,
-    /// 放行位（宿主侧的产物闸结论）；执行体只按结论记账，不自判。
-    pub permitted: bool,
-    /// 拒绝因（放行位为假时的整份交代）。
-    pub deny_reason: String,
     /// 工作目录（宿主为本轮准备的可写目录）；`None` = 无。
     pub scratch_dir: Option<PathBuf>,
     /// 事实读面（宿主实现）：执行体按需读本可见域的事实；`None` = 无。
@@ -282,9 +278,45 @@ pub struct PortReply {
     pub links: Vec<(String, String)>,
 }
 
-/// 一笔债的产出（`DE-047` I-6.2）：事实草稿、错误与应答承载。
-#[derive(Debug, Clone, Default)]
+/// 一次派发的**授权结论**（D-385）：执行体自判、环不代填。
+///
+/// 它没有「未表态」的变体，也没有 `Default`：任何 [`PortExecutor`] 都必须选一个变体
+/// 才能交回 [`PortOutcome`]，漏判在类型上不可表达。环不构造它，也不解释它的理由。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthzVerdict {
+    /// 执行体自己的闸门通过（对不需要授权判定的端口是「无待判事项」）。
+    Authorized,
+    /// 执行体自己的闸门拒绝；`reason` 是拒绝因，必须写清。
+    Denied { reason: String },
+}
+
+impl AuthzVerdict {
+    /// 拒绝结论（构造时就把理由带上，不留空理由的路径）。
+    pub fn denied(reason: impl Into<String>) -> Self {
+        Self::Denied {
+            reason: reason.into(),
+        }
+    }
+
+    /// 是否被拒绝。
+    pub fn is_denied(&self) -> bool {
+        matches!(self, Self::Denied { .. })
+    }
+
+    /// 拒绝因（通过 ⇒ `None`）。
+    pub fn denial(&self) -> Option<&str> {
+        match self {
+            Self::Authorized => None,
+            Self::Denied { reason } => Some(reason.as_str()),
+        }
+    }
+}
+
+/// 一笔债的产出（`DE-047` I-6.2）：授权结论、事实草稿、错误与应答承载。
+#[derive(Debug, Clone)]
 pub struct PortOutcome {
+    /// 执行体自判的授权结论（D-385）；环只读这一格决定是否落它交来的事实。
+    pub authz: AuthzVerdict,
     /// 要写到行上的事实草稿（每项是一个 JSON 对象，字段由端口插件声明）。
     pub facts: Vec<Value>,
     /// `Some` ⇒ 这一笔失败；`facts` 仍可携带半截产物。
@@ -294,18 +326,40 @@ pub struct PortOutcome {
 }
 
 impl PortOutcome {
-    /// 成功且无额外事实。
+    /// 成功、无额外事实、执行体的闸门通过。
     pub fn ok() -> Self {
-        Self::default()
+        Self {
+            authz: AuthzVerdict::Authorized,
+            facts: Vec::new(),
+            error: None,
+            reply: PortReply::default(),
+        }
     }
 
-    /// 失败。
+    /// 失败（失败不是授权拒绝：错误类已经交代了原因）。
     pub fn failed(class: PortErrorClass, why: impl Into<String>) -> Self {
         Self {
+            authz: AuthzVerdict::Authorized,
             facts: Vec::new(),
             error: Some((class, why.into())),
-            ..Default::default()
+            reply: PortReply::default(),
         }
+    }
+
+    /// 执行体的闸门拒绝：不落任何事实 / 产物。
+    pub fn denied(reason: impl Into<String>) -> Self {
+        Self {
+            authz: AuthzVerdict::denied(reason),
+            facts: Vec::new(),
+            error: None,
+            reply: PortReply::default(),
+        }
+    }
+
+    /// 覆盖授权结论（执行体自判后把结论放进结果）。
+    pub fn with_authz(mut self, verdict: AuthzVerdict) -> Self {
+        self.authz = verdict;
+        self
     }
 
     /// 这一笔成功与否。

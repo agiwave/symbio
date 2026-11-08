@@ -567,14 +567,21 @@ struct ArtifactCtx {
     denied_reason: String,
 }
 
-fn artifact_ctx(exec: &PortExecContext) -> Option<ArtifactCtx> {
+/// 产物格的授权结论由**本执行体自判**（D-385）：外部执行闸门的授权读数在载荷里，
+/// 有读数按读数，没有读数就是「无待判事项」（通用端口调用不带这一格）。
+fn artifact_ctx(exec: &PortExecContext, gate: Option<GateInput>) -> Option<ArtifactCtx> {
+    let allowed = gate.map(|g| g.authorized).unwrap_or(true);
     Some(ArtifactCtx {
         // 键按**这一笔债务**（幂等键）生成：批派之外的出口（唤醒、续接）没有调用清单
         // 形状的 `artifact:{call_id}` 键可用；按债键生成让同一笔债重放只落一个产物。
         key: format!("a-{}", exec.idempotency_key),
         produced_by: exec.origin,
-        allowed: exec.permitted,
-        denied_reason: exec.deny_reason.clone(),
+        allowed,
+        denied_reason: if allowed {
+            String::new()
+        } else {
+            "外部执行闸门未授权".to_string()
+        },
     })
 }
 
@@ -622,7 +629,7 @@ fn refused(text: &str, failure_kind: &'static str) -> PortOutcome {
             "failure_kind": failure_kind,
         })],
         error: None,
-        ..Default::default()
+        ..PortOutcome::ok()
     }
 }
 
@@ -964,7 +971,7 @@ async fn finish(
     PortOutcome {
         facts: vec![fact],
         error: None,
-        ..Default::default()
+        ..PortOutcome::ok()
     }
 }
 
@@ -1275,7 +1282,7 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
         args: &args,
         declared: declared_of(&declared_table, tool_name),
     };
-    let Some(art) = artifact_ctx(exec) else {
+    let Some(art) = artifact_ctx(exec, gate_inputs(lo)) else {
         return;
     };
     // 结果按**结果事实**的形状交回唯一构造点：停等信息由 `pending` 上提到顶层
@@ -1407,7 +1414,7 @@ impl ToolPort {
                     PortErrorClass::NonRetryable,
                     "user.answer 无读面".to_string(),
                 )),
-                ..Default::default()
+                ..PortOutcome::ok()
             };
         };
         let facts = reader.facts();
@@ -1428,7 +1435,7 @@ impl ToolPort {
                     PortErrorClass::NonRetryable,
                     "恢复目标缺失：user.answer 不在读面".to_string(),
                 )),
-                ..Default::default()
+                ..PortOutcome::ok()
             };
         };
         let kind = answer
@@ -1460,7 +1467,7 @@ impl ToolPort {
                     PortErrorClass::NonRetryable,
                     format!("恢复目标缺失：找不到 {call_id} 的产物"),
                 )),
-                ..Default::default()
+                ..PortOutcome::ok()
             };
         };
         let tool_name = artifact
@@ -1489,7 +1496,7 @@ impl ToolPort {
                             PortErrorClass::NonRetryable,
                             "恢复批准失败：产物里的 args 不是 JSON 对象".to_string(),
                         )),
-                        ..Default::default()
+                        ..PortOutcome::ok()
                     };
                 };
                 args.insert(KEY_APPROVED.to_string(), serde_json::Value::Bool(true));
@@ -1545,7 +1552,7 @@ impl ToolPort {
                         PortErrorClass::NonRetryable,
                         format!("user.answer 的 kind 不可恢复：{other:?}"),
                     )),
-                    ..Default::default()
+                    ..PortOutcome::ok()
                 };
             }
         };
@@ -1558,8 +1565,8 @@ impl ToolPort {
         let art = ArtifactCtx {
             key: format!("artifact:{call_id}{RESUME_ARTIFACT_SUFFIX}"),
             produced_by: exec.origin,
-            allowed: exec.permitted,
-            denied_reason: exec.deny_reason.clone(),
+            allowed: gate_inputs(&payload).map(|g| g.authorized).unwrap_or(true),
+            denied_reason: String::new(),
         };
         let meta = CallMeta {
             tool_name: &tool_name,
@@ -1592,7 +1599,7 @@ impl ToolPort {
                     PortErrorClass::NonRetryable,
                     "工具债载荷缺 call_id".to_string(),
                 )),
-                ..Default::default()
+                ..PortOutcome::ok()
             };
         };
         let calls = match read_requested(&exec, &payload) {
@@ -1601,7 +1608,7 @@ impl ToolPort {
                 return PortOutcome {
                     facts: Vec::new(),
                     error: Some(error),
-                    ..Default::default()
+                    ..PortOutcome::ok()
                 }
             }
         };
@@ -1612,7 +1619,7 @@ impl ToolPort {
                     PortErrorClass::NonRetryable,
                     format!("tool.requested 清单里没有 call_id={call_id}"),
                 )),
-                ..Default::default()
+                ..PortOutcome::ok()
             };
         };
         let inner = serde_json::json!({
@@ -1651,6 +1658,7 @@ impl ToolPort {
         };
         if let Some(error) = outcome.error {
             return PortOutcome {
+                authz: outcome.authz.clone(),
                 facts: outcome.facts,
                 error: Some(error),
                 reply: outcome.reply,
@@ -1658,6 +1666,7 @@ impl ToolPort {
         }
         let Some(result) = outcome.facts.first().cloned() else {
             return PortOutcome {
+                authz: outcome.authz.clone(),
                 facts: Vec::new(),
                 error: Some((
                     PortErrorClass::NonRetryable,
@@ -1675,11 +1684,16 @@ impl ToolPort {
         // 产物载荷只有一个构造点：逐笔派发也必须走 `land_artifact`（它再调
         // `artifact_payload`），不在这里另装一份。产物键按调用 id（同一请求内唯一）。
         let declared_table = declared_table_of(&exec).await;
+        let allowed = gate_inputs(&payload).map(|g| g.authorized).unwrap_or(true);
         let art = ArtifactCtx {
             key: format!("artifact:{}", call.id),
             produced_by: exec.origin,
-            allowed: exec.permitted,
-            denied_reason: exec.deny_reason.clone(),
+            allowed,
+            denied_reason: if allowed {
+                String::new()
+            } else {
+                "外部执行闸门未授权".to_string()
+            },
         };
         let meta = CallMeta {
             tool_name: &call.name,
@@ -1695,6 +1709,7 @@ impl ToolPort {
             )
         });
         PortOutcome {
+            authz: outcome.authz.clone(),
             facts: outcome.facts,
             error,
             reply: outcome.reply,
@@ -1716,7 +1731,7 @@ impl ToolPort {
             return PortOutcome {
                 facts: Vec::new(),
                 error: None,
-                ..Default::default()
+                ..PortOutcome::ok()
             };
         }
         let tool_name = payload
@@ -1745,7 +1760,7 @@ impl ToolPort {
             return PortOutcome {
                 facts: Vec::new(),
                 error: None,
-                ..Default::default()
+                ..PortOutcome::ok()
             };
         }
         // 只落格、不执行：唤醒结果与没跑到的占位结果。
@@ -1754,7 +1769,7 @@ impl ToolPort {
             return PortOutcome {
                 facts: Vec::new(),
                 error: None,
-                ..Default::default()
+                ..PortOutcome::ok()
             };
         }
         // 协议失败：判定与措辞都在执行体（DE-048 D-312）。环只搬原始读数与兜底 id。

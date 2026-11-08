@@ -184,7 +184,7 @@ impl PortExecutor for AssistExecutor {
                         "reasoning_id": reply.reasoning_id,
                         "cost_ms": reply.cost_ms,
                     })],
-                    ..Default::default()
+                    ..PortOutcome::ok()
                 }
             }
             Err(PluginError::RateLimited(why)) => {

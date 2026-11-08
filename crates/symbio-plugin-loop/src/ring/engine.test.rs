@@ -350,6 +350,46 @@ async fn non_retryable_error_lands_failed() {
     assert_eq!(last.payload["port"], "p1");
 }
 
+/// 授权拒绝（`D-385`）：执行体交 `Denied` ⇒ 它这一笔的草稿**一概不落**，落
+/// `Failed(non_retryable)` 且理由非空。
+///
+/// 这是 `D-385` 判据 3 的反例：类型化结论不是装饰——`Denied` 必须能在环里断掉
+/// 产物通路，否则「忘了判」与「判了通过」在行为上没有区别。
+struct Denying;
+
+#[async_trait::async_trait]
+impl PortExecutor for Denying {
+    async fn execute(&self, _ctx: PortExecContext, _input: PortInput) -> PortOutcome {
+        PortOutcome {
+            facts: vec![json!({"answer": "must not land"})],
+            ..PortOutcome::denied("禁止写入")
+        }
+    }
+}
+
+#[tokio::test]
+async fn denied_outcome_drops_the_draft_and_lands_failed() {
+    let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])
+        .with_executor("p1", Arc::new(Denying));
+    let _ = drive(&ctx).await;
+
+    let kinds: Vec<_> = ctx.snapshot().iter().map(|f| f.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![FactKind::Sent, FactKind::Request, FactKind::Failed],
+        "拒绝不产生 Response（草稿被丢弃）"
+    );
+    let last = ctx.snapshot().last().cloned().unwrap();
+    assert_eq!(last.kind, FactKind::Failed);
+    assert_eq!(last.payload["class"], "non_retryable");
+    assert_eq!(last.payload["reason"], "禁止写入");
+    assert_eq!(
+        last.payload.get("answer"),
+        None,
+        "被拒的草稿不许混进失败载荷"
+    );
+}
+
 /// 失败但交回产出（截断轮的形状）：产出在**顶层**，端口同成功路径。
 ///
 /// 读侧（`rebuild::output_nodes`）只认顶层 `port` + `reasoning`；把产出裹进
@@ -369,7 +409,7 @@ impl PortExecutor for DraftFailure {
                 "truncated": true,
             })],
             error: Some((PortErrorClass::NonRetryable, "长度截断".to_string())),
-            ..Default::default()
+            ..PortOutcome::ok()
         }
     }
 }

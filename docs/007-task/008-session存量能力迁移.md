@@ -47,7 +47,7 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 | 模块 | 它是什么 | 名册行 | 去向 | 今天挡在哪 |
 |---|---|---|---|---|
 | `conation.rs`（208） | `conation` 投影：从事件折出「表达过哪些欲、各自升没升格」 | #31 目标自生成 | **已搬** → `symbio-plugin-conation`（`ViewDecl` + `agg`，`D-281`） | 无——补件甲落定后搬完：折叠与两半（`eval` / `agg`）都进包，本插件三处读方改按名字读 |
-| `config.rs::conation_enabled` + `ConationPolicy` | 「这一轮该不该自发开一个长目标」的开关与判据 | #32 内在动机 | **已搬** → `symbio-plugin-conation`（`conation.policy` 判决视图，`D-384`） | 无——`D-379` 补上开关事实，`D-384` 把开关读法与目标宽度判据（`MAX_GOAL_LEN` 200 字节）一起交回能力包；`session` 只剩强制点（`PolicyVerdict` 读形状 + 授权 + `ApprovedIntent`） |
+| `config.rs::conation_enabled` + `ConationPolicy` | 「这一轮该不该自发开一个长目标」的开关与判据 | #32 内在动机 | **已搬** → `symbio-plugin-conation`（自申报债 `conation.promote` + 端口执行体，`D-386`） | 无——`D-379` 补上开关事实，`D-386` 把开关读法、目标宽度判据（`MAX_GOAL_LEN` 200 字节）、授权闸与 `ApprovedIntent` 一起交回能力包；`session` 删掉了全部判据与闸门，只写触发 / 健康 / 欲三格 |
 | `transcript/inbox.rs::PreemptionDecider`（约 120 行） | 「这一条插话该不该挂起在跑的任务」 | #14 打断与插话 | `symbio-plugin-preemption`（I-3 裁决 + I-1 收件箱事实） | **已知边界，不迁**（`D-380`）：`PreemptionDecider` / `spec` / `decide` / `held_event` / `resume_event` / `control_event` 在 `scripts/exemptions/session-dead-code.json` 登记为死代码（`batch: preemption`），`task.held` 无生产写方——触发条件 = `T-048` 接线完成（忙窗判定 → 空闲落格、五条豁免删除、`t34` 绿），之后再裁是否拆出 |
 | `active.rs` 的其余部分 + `transcript/inbox.rs`（881） | 收件箱 FIFO、在途中止信号、工作态迁移、`turn_done` 唤醒 | — | **留 基底** | 它们是「收件箱的读写接口」，判据对象本身就是基底（本任务 §内容第 4 条） |
 | `projections/slo.rs`（147）+ `tiers.rs`（55） | 时延样本按档位折叠、分位数取法 | #13 时延分层 | **已搬** → `symbio-plugin-slo`（`ViewDecl` + `agg`，`D-281`） | 无——补件甲（`D-281` 两半折叠）+ `D-282`（读数视图可读「有格位、无事实声明」的断言格）落定后搬完：`eval` 交一片、`agg` 交 N 片，`session` 只按名字读 |
@@ -87,7 +87,7 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 | 14 | 打断与插话 | 一 · `transcript/inbox.rs::PreemptionDecider`（判定）+ 二 · 收件箱（基底） | **已知边界，不迁**：闭环未接线（`D-380`）；触发条件 = `T-048` 接线完成后再裁是否拆出 |
 | 15 | 主动开口 | 一 · `transcript/autonomous.rs` | **已拆（受限）**：触发时机在 heartbeat 包；落格与开轮是写窗口纪律，留基底（`D-076` 已裁） |
 | 31 | 目标自生成 | 一 · `conation.rs` | **已拆**：能力包 `symbio-plugin-conation`（事实 + 视图 + 两半折叠），`session` 只剩读方 |
-| 32 | 内在动机 | 一 · `config.rs::conation_enabled` | **已拆**：能力包 `symbio-plugin-conation`（`conation.policy` 判决视图），`session` 只剩强制点（`D-384`） |
+| 32 | 内在动机 | 一 · `config.rs::conation_enabled` | **已拆**：能力包 `symbio-plugin-conation`（自申报债 + 端口执行体），`session` 不再读判决、不再构造 `ApprovedIntent`（`D-386`） |
 
 ### 四、这张表给出的结论：真缺口只有一处（补件甲），#14 的阻塞不是补件
 
@@ -122,7 +122,7 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
 `session.config` 这条事实，不读 `SessionConfig` 活值），`memory` 的活集去重已经照它落地。
 **已裁并已落：`D-379`**——快照是配置定义的平铺投影，`conation_enabled` 补进载荷，
 闸门改读最近一条 `session.config`（缺格取出厂值 `false`）；写方唯一是轮首装配，
-读方是能力包的 `conation.policy` 判决视图（`D-384` 已迁）只按共享名读。它与 #14 无关：
+读方是 conation 自申报的债（`D-386` 已迁）只按共享名读**本轮** config。它与 #14 无关：
 #14 的阻塞是闭环未接线（`D-380`），不是开关形状。
 
 **补件丙不成立（`D-380`）。** #14 原先写的「判定只能在忙窗、落格只能在空闲分支，中间由
@@ -180,7 +180,7 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
 
 落地动作（都是**减**）：删掉 `conation_column_recomputes_and_moves_with_the_wal`（120 行，
 数字断言）；`gate_opens_the_long_goal_exactly_once_per_goal` 改写成
-`without_the_capability_pack_the_gate_opens_nothing`（断言的是退化方向，不是去重结果）；
+`without_the_capability_pack_nothing_promotes`（断言的是退化方向，不是去重结果）；
 `fleet_axes_aggregate_across_sessions` 把主动性轴从「有据的零」改成 `null`（缺席不伪装成
 读数）；去重与汇总的**数字**在 `t36` 里补两条（第二个 tick 只开一格 + `fleet.axes.conation`
 由汇总的分子分母重算）。会话侧的测试代码净减约 110 行，且不含任何折叠逻辑。

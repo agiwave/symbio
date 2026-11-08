@@ -16,3 +16,6 @@ dead_code = "warn"
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
