@@ -1,10 +1,8 @@
 //! `vdfs_read` —— 读取文件内容（**面向 LLM：带行号 + 分页**）
 //!
-//! 移植自已下线的原生 `read_file`：原生 `read_file` 直接 `tokio::fs::read_to_string`
-//! 再做行号加工；本工具把「访问文件系统」改为「调用封装 provider 的 `read`」，
-//! 拿到 `VdfsContent` 后做**与原生 `read_file` 完全一致的行号 + 分页封装**。
-//! 原生 `read_file` 对图片返回 base64 多模态载荷，本工具对 `VdfsContent.binary`
-//! 直接透传（已含 `b64` / `mime`，供多模态链路消费）。
+//! 本工具把「访问文件系统」改为「调用封装 provider 的 `read`」，拿到
+//! `VdfsContent` 后做行号 + 分页封装；二进制内容（已含 `b64` / `mime`）
+//! 直接透传，供多模态链路消费。
 
 use super::{tool, ToolVdfs};
 use async_trait::async_trait;
@@ -70,7 +68,7 @@ impl Capability for ReadTool {
             return Ok(serde_json::to_value(&content)?);
         };
 
-        // 以下逻辑与原生 read_file 的 execute_inner 完全一致（行号 + 分页）
+        // 以下是行号 + 分页封装（offset / limit 归一后逐行编号）
         let lines: Vec<&str> = text.lines().collect();
         let total = lines.len();
 

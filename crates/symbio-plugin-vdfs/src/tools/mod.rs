@@ -3,8 +3,7 @@
 //! ## 每个工具 = 一个框架原生 `Capability`，持有封装的 provider
 //!
 //! 本目录下的每一个文件（`list.rs` / `read.rs` / …）定义一个**框架原生的
-//! `Capability` 实现**——与已下线的原生 local 工具（`read_file` / `file_edit` /
-//! `dir_list` / `glob_search` / `write_file` / `delete_file`）是同一种东西：
+//! `Capability` 实现**：
 //!
 //! - `meta()` 返回工具的 LLM 元数据（名称 / 描述 / 入参 schema / 示例 / 风险类别）；
 //! - `execute()` 做两件事——① **对文件系统的操作改为对 `ToolVdfs` 的操作**

@@ -1,8 +1,7 @@
-//! `vdfs_list` —— 列出目录下的直接子项（**面向 LLM：ignore 过滤 + 原生 dir_list 形状**）
+//! `vdfs_list` —— 列出目录下的直接子项（**面向 LLM：ignore 过滤 + 目录优先排序**）
 //!
-//! 移植自已下线的原生 `dir_list`：原生 `dir_list` 直接 `tokio::fs::read_dir` 遍历工作区；
 //! 本工具把「访问文件系统」改为「调用封装 provider 的 `list`」，拿到条目列表
-//! （[`VdfsItem`] = 地址 + `VdfsNode`）后做**与原生 `dir_list` 一致的 ignore 过滤**，
+//! （[`VdfsItem`] = 地址 + `VdfsNode`）后按名称 glob 做 ignore 过滤，
 //! 封装成 `{entries:[{name,type,size,modified}], truncated, count, message}` 形状。
 //!
 //! 条目地址在本工具里用不上（只报 `name`），所以只取 `item.node`。
@@ -73,7 +72,7 @@ impl Capability for ListTool {
             .to_string();
         let items = self.provider.list(&ctx, &path).await?;
 
-        // 与原生 dir_list 一致的 ignore 过滤（按文件名 glob）
+        // ignore 过滤（按文件名 glob）
         let ignore: Vec<String> = raw
             .get("ignore")
             .and_then(|v| v.as_array())

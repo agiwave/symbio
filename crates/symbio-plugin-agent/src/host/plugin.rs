@@ -421,13 +421,18 @@ impl Plugin for AgentPlugin {
 
         // ── agent_run：无条件注册 ──
         let store = AgentDirStore::new(self.dir().dir());
+        let agent_ids: Vec<String> = store
+            .list()
+            .iter()
+            .map(|record| record.manifest.id.clone())
+            .collect();
         // `register_batch(vec![一个元素])` 随 Tool 族收敛为 put（DE-025 §3）：
         // 其实这里从来只有一个能力，批入口本无存在理由。
         // （`new` 自己返回 `Arc<Self>`，此处只做最后一次 trait object 收窄。）
         let agent_run: Arc<dyn Capability> = super::subagent::AgentRunCapability::new(
             workdir.clone(),
             self.dir().dir().to_path_buf(),
-            super::subagent::format_agent_dirs_brief(&store.list()),
+            agent_ids,
             self.router.clone(),
         );
         tool_visitor.put(CapabilityRow::tool(agent_run)).await;

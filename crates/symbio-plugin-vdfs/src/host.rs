@@ -521,7 +521,7 @@ async fn action(
 // `symbio_plugin_api::vdfs` 的「没有 `Move`」一节（跨子树时它不是原语，
 // 由外层组合才是它的正确位置；当前外层也没提供）。
 
-/// 统一换行符为 `\n`（用于精确替换匹配，与原生 `file_edit` 一致）
+/// 统一换行符为 `\n`（用于精确替换匹配）
 fn normalize_line_endings(s: &str) -> String {
     s.replace("\r\n", "\n").replace('\r', "\n")
 }
@@ -619,7 +619,7 @@ pub(crate) async fn edit_via(
     })
 }
 
-/// 单次搜索返回上限（与原生 `glob_search` 一致）
+/// 单次搜索返回上限
 pub(crate) const MAX_SEARCH_RESULTS: usize = 1000;
 
 /// 文件名 Glob 搜索 = 递归 `list` + 模式过滤的组合。

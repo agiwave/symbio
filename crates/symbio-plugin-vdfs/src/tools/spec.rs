@@ -327,7 +327,7 @@ pub static SPECS: &[ToolSpec] = &[
     },
 ];
 
-/// `vdfs_search` 的回执封装（结果列表 + 总计 + 截断提示）——与原生 `glob_search` 一致。
+/// `vdfs_search` 的回执封装（结果列表 + 总计 + 截断提示）。
 const SEARCH_MAX_RESULTS: usize = 1000;
 
 fn search_receipt(mut data: super::super::protocol::VdfsSearchResult) -> Value {

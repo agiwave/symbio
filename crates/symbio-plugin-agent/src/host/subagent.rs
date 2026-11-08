@@ -86,8 +86,8 @@ pub struct AgentRunCapability {
     ///
     /// 能力侧同样不认识全局布局：目录由插件给，这里只透传给 [`AgentDirStore`]。
     agent_dir_root: std::path::PathBuf,
-    /// 工具描述中的可用 agent 清单（供 LLM 选择 agent_id）
-    agent_dirs_brief: String,
+    /// `agent_id` 的 enum 候选（可用智能体目录 id）
+    agent_ids: Vec<String>,
     /// 插件间路由入口（composite 容器弱引用，构造时由插件实例捕获）
     router: Option<std::sync::Weak<dyn Plugin>>,
 }
@@ -96,13 +96,13 @@ impl AgentRunCapability {
     pub fn new(
         workdir: Option<String>,
         agent_dir_root: std::path::PathBuf,
-        agent_dirs_brief: String,
+        agent_ids: Vec<String>,
         router: Option<std::sync::Weak<dyn Plugin>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             workdir,
             agent_dir_root,
-            agent_dirs_brief,
+            agent_ids,
             router,
         })
     }
@@ -117,26 +117,24 @@ impl symbio_plugin_api::Capability for AgentRunCapability {
             // 且是跨主体立约型工具（承诺记账对象）。执行器读这两个名字判，不认工具名——
             // 作用域投影只换名字、原样透传集合（改名包装器不重判风险的同一条纪律）。
             behaviors: &[ASSIGN_WORK, DELEGATION_PROMISE],
-            description: format!(
-                "将任务委托给一个独立的子智能体会话：在其独立会话中执行任务，\
+            description: "将任务委托给一个独立的子智能体会话：在其独立会话中执行任务，\
                  完成后返回其最终答复；子智能体拥有自己的提示词与工具集。\n\n\
                  ## 智能体选择\n\n\
-                 `agent_id` 可选：省略时默认使用当前会话正在使用的智能体\
-                 （当它落在本插件目录下的可用列表里时）；\
+                 `agent_id` 从 enum 中选：省略时默认使用当前会话正在使用的智能体\
+                 （当它落在 enum 里时）；\
                  否则子会话以无智能体的纯对话模式运行。\n\n\
-                 ## 可用智能体列表\n\n{}\n\n\
                  ## 工作目录\n\n\
                  可选参数 `working_dir` 指定子智能体的工作目录：绝对路径、支持 `~` 展开、\
-                 禁止包含 `..`；省略时沿用当前会话的工作目录。",
-                self.agent_dirs_brief
-            ),
+                 禁止包含 `..`；省略时沿用当前会话的工作目录。"
+                .to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "agent_id": {
                         "type": "string",
-                        "description": "可选。要执行的智能体 ID（agent id，见可用智能体列表）；\
-                                省略则默认使用当前会话正在使用的智能体"
+                        "description": "可选。要执行的智能体 ID（从 enum 中选）；\
+                                省略则默认使用当前会话正在使用的智能体",
+                        "enum": self.agent_ids.clone()
                     },
                     "prompt": {
                         "type": "string",
@@ -1145,28 +1143,6 @@ async fn vdfs_watch(
             e
         );
     }
-}
-
-/// 从 AgentDirStore 摘要生成工具描述中的"可用智能体列表"。
-pub(crate) fn format_agent_dirs_brief(agent_dirs: &[super::store::AgentDirRecord]) -> String {
-    if agent_dirs.is_empty() {
-        return "（暂无可用智能体）".to_string();
-    }
-    agent_dirs
-        .iter()
-        .map(|r| {
-            let desc = if r.manifest.description.is_empty() {
-                "(无描述)".to_string()
-            } else {
-                r.manifest.description.clone()
-            };
-            format!(
-                "- ID: `{}`\n  Name: {}\n  Description: {}",
-                r.manifest.id, r.manifest.name, desc
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[cfg(test)]

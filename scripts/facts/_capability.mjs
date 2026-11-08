@@ -141,7 +141,13 @@ function readDescription(block) {
   // 而症状是「那个工具没有描述」——看起来像没写，其实是提取漏了。
   const L = '((?:[^"\\\\]|\\\\[\\s\\S])*)'
   let m = block.match(new RegExp(`\\bdescription:\\s*(?:\\n\\s*)?"${L}"`))
-  if (m) return m[1].replace(/\\"/g, '"')
+  if (m)
+    return m[1]
+      .replace(/\\\s*\n\s*/g, '')
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
 
   m = block.match(new RegExp(`\\bdescription:\\s*format!\\(\\s*"${L}"`))
   if (!m) return null
