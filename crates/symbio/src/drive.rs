@@ -1,9 +1,11 @@
-//! 主部署驱动入口的**装配登记**——状态与推进逻辑住在 `symbio_host::drive`。
+//! 主部署驱动入口的**装配登记**——状态、推进逻辑与空闲查询都在 `symbio_host::drive`。
 //!
-//! 这里只剩三件事：
+//! 这里只剩两件事：
 //! 1. 把「主部署的驱动入口」登记进 `DriveEntryDecl`（`inventory`，链接期生效）；
-//! 2. 按当前部署根解析出那一份实例（`HostDriveBinding` 按根缓存，见宿主）；
-//! 3. 给 CLI 暴露 `settled`（等，不是推）。
+//! 2. 按当前部署根解析出那一份实例（`HostDriveBinding` 按根缓存，见宿主）。
+//!
+//! 其余是对外再导出（`FactWorld` / `drive_on_new_fact` / `open_fact_source` /
+//! `settled`）——**本 crate 不持有任何会话级状态**，也不实现等待体。
 //!
 //! ## 为什么登记留在这里
 //!
@@ -22,7 +24,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-pub use symbio_host::drive::{drive_on_new_fact, open_fact_source, FactWorld};
+pub use symbio_host::drive::{drive_on_new_fact, open_fact_source, settled, FactWorld};
 
 use symbio_plugin_api::{DriveEntry, DriveTarget};
 
@@ -59,15 +61,6 @@ impl DriveEntry for MainDriveEntry {
                 drive.settled(&session_id).await;
             }
         })
-    }
-}
-
-/// 等本会话驱动空闲（**等，不是推**）。
-///
-/// CLI 在 `session/consume` 之后用它等写口踢出的那次驱动落地，再投影转写。
-pub async fn settled(session_id: &str) {
-    if let Some(entry) = symbio_plugin_api::declared_drive_entry() {
-        entry.settled(session_id).await;
     }
 }
 

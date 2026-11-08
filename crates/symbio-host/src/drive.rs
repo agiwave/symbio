@@ -26,8 +26,11 @@
 //! ## 为什么住在宿主
 //!
 //! `HostDrive` / `KickState` / `BOUND` 是**运行时状态**（按会话累积、跨轮存活），
-//! `symbio` 只做装配：登记主部署入口、把根交给 [`main_drive`]。状态与它服务的
+//! `symbio` 只做装配：登记主部署入口、把根交给 `main_drive`。状态与它服务的
 //! `Host` 同一个 crate，「一个宿主拆成两半」的形状到此为止（P1 批一）。
+//!
+//! 对外的空闲查询 [`settled`] 也住在这一层：它只解析入口、转发给 [`HostDrive`]，
+//! 读的是本模块的 `KickState`，装配层不再留一份等待体（P1 批二 / `D-400`）。
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -88,6 +91,26 @@ pub fn open_fact_source(session_id: &str) -> Result<Arc<dyn FactSource>, String>
     declared_fact_source_opener()
         .ok_or_else(|| "没有登记事实源开面".to_string())?
         .open(session_id)
+}
+
+/// 等本会话驱动空闲（**等，不是推**）——**查询口**，不是状态。
+///
+/// ## 它读的是谁的状态
+///
+/// 只读 [`HostDrive`] 的 `KickState`：`running` / `dirty` / `in_flight` 三个位与
+/// 唤醒句柄都在本 crate 的 [`host`] 子模块里，这里一行状态都不持有。函数体只剩
+/// 「解析装配层登记的入口并转发」——入口（`DriveEntryDecl`）是装配选择，等待体
+/// 是 [`HostDrive::settled`] → [`wait_idle`]。
+///
+/// ## 为什么这个口跟着状态走
+///
+/// 「这个会话还能不能推进」是**运行时的读数**，不是装配层的判断。装配层只回答
+/// 「主部署用哪个入口」；把等待体留在装配 crate 会让「状态在宿主、读数在装配」
+/// 重新分裂一次（P1 的原始病灶缩小一号，不是治好）。判据见 `D-400`。
+pub async fn settled(session_id: &str) {
+    if let Some(entry) = symbio_plugin_api::declared_drive_entry() {
+        entry.settled(session_id).await;
+    }
 }
 
 /// 一条新事实落地后**单次**驱动本会话。

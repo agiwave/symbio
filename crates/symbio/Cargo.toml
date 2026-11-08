@@ -56,15 +56,15 @@ symbio-plugin-tool = { path = "../symbio-plugin-tool" }
 symbio-plugin-vdfs = { path = "../symbio-plugin-vdfs" }
 symbio-plugin-web = { path = "../symbio-plugin-web" }
 # <<< plugin-links:end
+# 装配登记（`DriveEntryDecl`）。
 inventory = { workspace = true }
-# 驱动收口：`settled` 的每会话唤醒句柄（`Notify`）与「由驱动自身调用」的检测。
-tokio = { workspace = true, features = ["sync", "rt"] }
-# 安全阀出口的机制事实（`driver.stalled`）载荷与用例（`D-393`）。
-serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-# 测试用：tokio 时间控制（start_paused / advance）与 `#[tokio::test]`
+# 测试用：tokio 时间控制（start_paused / advance）与 `#[tokio::test]`；
+# 生产依赖里没有 tokio —— 唤醒句柄与等待体随 `KickState` 住在 `symbio-host`（D-400）。
 tokio = { workspace = true, features = ["test-util", "macros", "rt", "time"] }
+# 测试夹具的载荷构造（假根的 `PluginPayload` / 事实草稿）。
+serde_json = { workspace = true }
 # 驱动实例身份判据：假根插件实现 `Plugin`（trait 带 async 方法）
 async-trait = { workspace = true }

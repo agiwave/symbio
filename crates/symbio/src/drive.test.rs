@@ -62,6 +62,27 @@ fn main_entry_resolves_to_the_bound_instance() {
     );
 }
 
+/// 空闲查询是**查询口**，不是装配层的状态副本：空闲会话立即返回。
+///
+/// 等待体（`wait_idle`）与三个状态位住在 `symbio-host` 的 `KickState`；这里只验
+/// 装配侧能经登记入口找到那份实例——找不到入口时静默返回，找到时由宿主的等待体
+/// 决定何时放行。
+#[tokio::test]
+async fn settled_port_resolves_the_registered_entry() {
+    let root: Arc<dyn Plugin> = Arc::new(FakeRoot);
+    symbio_plugin_api::publish_deployment_root(Arc::clone(&root));
+    let _bound = symbio_plugin_api::declared_drive_binding()
+        .expect("驱动绑定必须已登记")
+        .bind(Arc::clone(&root));
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        super::settled("port-idle"),
+    )
+    .await
+    .expect("空闲会话的查询口必须立即返回（等待体读的是宿主的 KickState）");
+}
+
 fn key() -> DriveKey {
     DriveKey {
         port: "p".into(),
