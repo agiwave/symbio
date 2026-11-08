@@ -52,4 +52,3 @@ impl: done
 
 - 提示词族的读写协议：`crates/symbio-sdk/src/capability/prompt.rs`
 - 逐行处置账（#47）：`docs/003-design/026-能力拆分与影响类.md` §2.3
-- 本条的验证账：`docs/007-task/012-A类能力插件化.md`

@@ -384,7 +384,7 @@ export const BASELINE = {
   // 新义务环接入**只会回升**：B 类能力每接回一组，对应的 e2e 用例重新落地。
   // baseline-allow e2eCases: 91 → 90（D-318）——`346b3134` 整例退役 t41 技能快路：
   // 它唯一独有的断言依赖 `session.skill_fast_path`，该快路已随 B2 退场，没有生产事实可断；
-  // 能力断言由 t35-skill-compile 承接（退役口径见 `docs/007-task/035-e2e实施表.md`）。
+  // 能力断言由 t35-skill-compile 承接（退役口径见 `docs/004-ref/013-e2e实施表.md`）。
   // 收紧基线，不是放松。
   e2eCases: 96,
   // 累计「补件 : 迁移」的**欠账本金**（D-372，`capability-migration-audit` 的付账线）。
