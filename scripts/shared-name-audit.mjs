@@ -10,8 +10,15 @@
  *
  * | 编号 | 判什么 | 它拦的是哪一种腐烂 |
  * |---|---|---|
- * | SV-001 | ① **有结构**的名字（含 `.` 或 `/`）出现在两个以上非 `plugin-api` 的插件生产代码里；② 同名 `const` 在两个以上插件 crate 各声明一次 | 两份字面量 = 两个 owner：改名只改一处，另一处静默漂移；或绕过词汇层把名字抄回实现 |
+ * | SV-001 | ① **有结构**的名字（含 `.` 或 `/`）出现在两个以上非 `plugin-api` 的插件生产代码里；② 同名 `const` 在两个以上插件 crate 各声明一次；③ 机制层（`symbio-sdk` / `symbio-kernel` / `symbio`）的生产代码里出现**词汇层已有的事件名**字面量（词汇家 = `symbio-plugin-api/src/events.rs`，owner 声明补私有名） | 两份字面量 = 两个 owner：改名只改一处，另一处静默漂移；或绕过词汇层把名字抄回实现（D-364 / D-392） |
  * | SV-003 | 全仓 `submit_reports!` 每条登记的 `(slot, fleet)` 与 `024` 的出品契约表**双向**逐行相等 | 加了列 / 改了 slot 却没更新契约，或表里留着一条已经删掉的列——出口形状与声称的形状静默分叉 |
+ *
+ * ## 为什么扫 `test_fixtures.rs`，又跳过生成物
+ *
+ * `crates/symbio-sdk/src/test_fixtures.rs` 是 core 用例唯一的事件拼写面。它若手抄
+ * 词汇层的名字，正是本判据要拦的第二份定义；所以这个文件名**不按「测试文件」排除**。
+ * 但它（以及任何事实生成物）由生成器投影、首行带「生成，请勿手改」标记——带标记的
+ * 文件整体跳过：**同一份 owner 声明生成两处产物**是允许的，手抄副本不是（D-392）。
  *
  * ## 为什么不扫普通单词
  *
@@ -28,7 +35,8 @@
  *
  * 用法：node scripts/shared-name-audit.mjs [--root=<目录>]
  * 退出码：1 = 有违规；2 = 范围 / 规则源读不出（缺 `crates/`、没有任何插件 crate、
- * 契约表或 `submit_reports!` 的 `slot` / `fleet` 解析不了）。
+ * 缺机制层 crate、缺词汇层 `events.rs`，或契约表 / `submit_reports!` 的 `slot` / `fleet`
+ * 解析不了）。
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
@@ -40,6 +48,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { red, green } from './color.mjs'
+import { pluginDeclarationFaces } from './facts/events-rs.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -107,7 +116,13 @@ function stripComments(s) {
   return out
 }
 
-/** 生产代码里的 `.rs` 文件（测试文件不算：它们不是跨插件的词汇消费方）。 */
+/**
+ * 生产代码里的 `.rs` 文件（测试文件不算：它们不是跨插件的词汇消费方）。
+ *
+ * 例外是 `test_fixtures.rs`：它不是普通测试文件，而是 core 用例**唯一的事件拼写面**。
+ * 它若手抄词汇层的名字，正是本判据要拦的第二份定义；生成物由 {@link isGenerated} 另判
+ * （见文件头「为什么扫 `test_fixtures.rs`」）。
+ */
 function productionFiles(dir) {
   const out = []
   const walk = (d) => {
@@ -116,11 +131,21 @@ function productionFiles(dir) {
       if (e.name === 'target' || e.name.startsWith('.')) continue
       const p = path.join(d, e.name)
       if (e.isDirectory()) walk(p)
-      else if (p.endsWith('.rs') && !/test/i.test(e.name)) out.push(p)
+      else if (p.endsWith('.rs') && (!/test/i.test(e.name) || e.name === 'test_fixtures.rs')) out.push(p)
     }
   }
   walk(dir)
   return out
+}
+
+/**
+ * 生成物标记：首五行里带「生成，请勿手改」。
+ *
+ * 事实生成物（`events.rs`、`test_fixtures.rs` 等）与手写实现同形，但它的重复是
+ * **单源投影**的结果，不是第二份定义。允许它；手写副本没有这行标记，照样红（D-392）。
+ */
+function isGenerated(text) {
+  return text.split('\n', 5).some((line) => /生成[，,]?\s*请勿手改/.test(line))
 }
 
 const PLAN_REL = path.join('docs', '003-design', '024-能力横向扩充的通路.md')
@@ -258,53 +283,118 @@ function reportContractErrors(root) {
   return { errors, table, registered: reg.bySlot }
 }
 
-function pluginCrates(root) {
+/** 机制层 crate：它们不许自己写词汇层的事件名，只能 import / 由生成器投影（D-392）。 */
+const CORE_CRATES = ['symbio-sdk', 'symbio-kernel', 'symbio']
+
+function auditCrates(root) {
   const crates = path.join(root, 'crates')
   if (!fs.existsSync(crates)) {
     throw new Error('范围读不出：缺少 crates/')
   }
-  const ids = fs
+  const plugins = fs
     .readdirSync(crates, { withFileTypes: true })
     .filter((e) => e.isDirectory() && e.name.startsWith('symbio-plugin-') && e.name !== 'symbio-plugin-api')
     .map((e) => e.name)
-  if (ids.length === 0) throw new Error('范围读不出：crates/ 下没有任何 symbio-plugin-* 插件 crate')
-  return ids
+  if (plugins.length === 0) throw new Error('范围读不出：crates/ 下没有任何 symbio-plugin-* 插件 crate')
+  const core = CORE_CRATES.filter((id) => fs.existsSync(path.join(crates, id, 'src')))
+  if (core.length !== CORE_CRATES.length) {
+    throw new Error(`范围读不出：机制层 crate 缺 ${CORE_CRATES.filter((x) => !core.includes(x)).join('、')}`)
+  }
+  return { plugins, core, all: [...plugins, ...core] }
+}
+
+const EVENTS_REL = path.join('crates', 'symbio-plugin-api', 'src', 'events.rs')
+
+/**
+ * 词汇层的事件名面：`events.rs` 的常量值（必需），加上 owner 声明补出来的私有名
+ * （可选增强——夹具仓库没有插件清单时只以 `events.rs` 为准）。
+ *
+ * 返回 `Map(名字 → 家)`；`events.rs` 不在 ⇒ `null`（规则源读不出，exit 2）。
+ */
+function vocabulary(root) {
+  const abs = path.join(root, EVENTS_REL)
+  if (!fs.existsSync(abs)) return null
+  const text = stripComments(fs.readFileSync(abs, 'utf8'))
+  const names = new Map()
+  const constNames = new Set()
+  for (const m of text.matchAll(CONST_RE)) {
+    names.set(m[2], `\`${EVENTS_REL.replace(/\\/g, '/')}\` 的 ${m[1]}`)
+    constNames.add(m[1])
+  }
+  try {
+    for (const [owner, face] of pluginDeclarationFaces(root)) {
+      for (const name of face.cells.keys()) {
+        if (!names.has(name)) names.set(name, `owner ${owner} 的 \`EventDecl\``)
+      }
+    }
+  } catch {
+    // 夹具仓库没有 PLUGIN.yml ⇒ 只以 events.rs 为准（私有名这一步只是增强）。
+  }
+  return { names, constNames }
 }
 
 let crates
+let vocab
 try {
-  crates = pluginCrates(ROOT)
+  const scope = auditCrates(ROOT)
+  crates = scope
+  vocab = vocabulary(ROOT)
+  if (!vocab) throw new Error(`范围读不出：缺少词汇层 ${EVENTS_REL.replace(/\\/g, '/')}`)
 } catch (e) {
   console.log(`${red('[ERROR]')} shared-name-audit：${e.message}`)
   process.exit(2)
 }
 
-/** value → Map(crate → Set(文件相对路径))；只收词汇形字面量。 */
+/** 插件生产代码：value → Map(crate → Set(文件相对路径))，只收词汇形字面量（①）。 */
 const literalHomes = new Map()
-/** value → Map(crate → Set(const 名 + 文件))；只收字符串常量。 */
+/** 插件生产代码：value → Map(crate → Set(const 名 + 文件))，只收字符串常量（②）。 */
 const constHomes = new Map()
+/** 机制层生产代码：value → Map(crate → Set(文件相对路径))，词汇形字面量（③）。 */
+const coreLiteralHomes = new Map()
+/** 机制层生产代码：const 名 → Map(crate → Set(文件相对路径))（③）。 */
+const coreConstHomes = new Map()
 
-for (const crate of crates) {
+for (const crate of crates.all) {
+  const isCore = crates.core.includes(crate)
   for (const abs of productionFiles(path.join(ROOT, 'crates', crate, 'src'))) {
     const rel = path.relative(ROOT, abs).replace(/\\/g, '/')
-    const text = stripComments(fs.readFileSync(abs, 'utf8'))
+    const raw = fs.readFileSync(abs, 'utf8')
+    // 生成物是单源投影，不是第二份定义（`events.rs` / `test_fixtures.rs` 都带这行标记）。
+    if (isGenerated(raw)) continue
+    const text = stripComments(raw)
     for (const m of text.matchAll(CONST_RE)) {
       const value = m[2]
       if (!VOCAB_RE.test(value)) continue
-      if (!constHomes.has(value)) constHomes.set(value, new Map())
-      const per = constHomes.get(value)
-      if (!per.has(crate)) per.set(crate, new Set())
-      per.get(crate).add(`${m[1]} @ ${rel}`)
+      if (isCore) {
+        if (!coreConstHomes.has(m[1])) coreConstHomes.set(m[1], new Map())
+        const per = coreConstHomes.get(m[1])
+        if (!per.has(crate)) per.set(crate, new Set())
+        per.get(crate).add(rel)
+      } else {
+        if (!constHomes.has(value)) constHomes.set(value, new Map())
+        const per = constHomes.get(value)
+        if (!per.has(crate)) per.set(crate, new Set())
+        per.get(crate).add(`${m[1]} @ ${rel}`)
+      }
     }
     for (const m of text.matchAll(/"([^"\\\n]*)"/g)) {
       const value = m[1]
       if (!VOCAB_RE.test(value)) continue
-      if (!literalHomes.has(value)) literalHomes.set(value, new Map())
-      const per = literalHomes.get(value)
+      const homes = isCore ? coreLiteralHomes : literalHomes
+      if (!homes.has(value)) homes.set(value, new Map())
+      const per = homes.get(value)
       if (!per.has(crate)) per.set(crate, new Set())
       per.get(crate).add(rel)
     }
   }
+}
+
+/** `Map(crate → Set(条目))` → 「crate（条目、条目）」的排序串。 */
+function whereOf(per) {
+  return [...per.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([crate, entries]) => `${crate}（${[...entries].join('、')}）`)
+    .join('；')
 }
 
 const errors = []
@@ -314,12 +404,8 @@ for (const [value, per] of [...literalHomes.entries()].sort((a, b) => a[0].local
   if (per.size < 2) continue
   if (!STRUCTURED_RE.test(value)) continue
   if (isMime(value) || isFileName(value)) continue
-  const where = [...per.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([crate, files]) => `${crate}（${[...files].join('、')}）`)
-    .join('；')
   errors.push(
-    `"${value}" 在 ${per.size} 个插件 crate 各写了一次字面量：${where}——` +
+    `"${value}" 在 ${per.size} 个插件 crate 各写了一次字面量：${whereOf(per)}——` +
       '共享名应住 `symbio-plugin-api` 的词汇面（或清单投影），两侧 import 同一常量（D-364）',
   )
 }
@@ -328,13 +414,27 @@ for (const [value, per] of [...literalHomes.entries()].sort((a, b) => a[0].local
 for (const [value, per] of [...constHomes.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
   if (per.size < 2) continue
   if (isMime(value) || isFileName(value)) continue
-  const where = [...per.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([crate, decls]) => `${crate}（${[...decls].join('、')}）`)
-    .join('；')
   errors.push(
-    `"${value}" 的 const 在 ${per.size} 个插件 crate 各声明一次：${where}——` +
+    `"${value}" 的 const 在 ${per.size} 个插件 crate 各声明一次：${whereOf(per)}——` +
       '同一拼写两个家，改名只改一处就漂移；共享常量应住词汇层，其余改成 import（D-364）',
+  )
+}
+
+// ③ 机制层（`symbio-sdk` / `symbio-kernel` / `symbio`）不许自己写词汇层已有的事件名。
+//   合法形态只有 import 同一常量，或由生成器从同源投影一份（带「生成」标记的整份跳过）。
+for (const [value, per] of [...coreLiteralHomes.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+  const home = vocab.names.get(value)
+  if (!home) continue
+  errors.push(
+    `词汇层已有事件名 "${value}"（${home}），机制层 crate 却自己写了一份字面量：` +
+      `${whereOf(per)}——机制层只能 import 或由生成器投影（D-392）`,
+  )
+}
+for (const [name, per] of [...coreConstHomes.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+  if (!vocab.constNames.has(name)) continue
+  errors.push(
+    `机制层 crate 声明了常量 \`${name}\`：${whereOf(per)}，与词汇层 ` +
+      `\`${EVENTS_REL.replace(/\\/g, '/')}\` 同名——词表只有一个家（D-392）`,
   )
 }
 
@@ -359,8 +459,9 @@ const skipped = [...literalHomes.entries()].filter(
 ).length
 console.log(
   green(
-    `✓ SV-001 共享词汇：${crates.length} 个插件 crate 的生产代码里，` +
-      '没有「同一有结构名字出现在两个 crate」的字面量，也没有同名 const 的两个家' +
+    `✓ SV-001 共享词汇：${crates.plugins.length} 个插件 crate + ${crates.core.length} 个机制层 crate 的生产代码里，` +
+      '没有「同一有结构名字出现在两个 crate」的字面量，没有同名 const 的两个家，' +
+      '机制层也没有自己写词汇层已有的事件名' +
       (skipped ? `（另有 ${skipped} 条 MIME / 文件名形态，按语法形状不判）` : ''),
   ),
 )

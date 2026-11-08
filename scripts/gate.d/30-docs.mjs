@@ -768,6 +768,12 @@ export const LIBS = [
   // 清单时的三条抛错（形状非法 / 幽灵名字 / 一条名字两个 owner）由消费方
   // `shared-event-vocab-audit` 转述成人读的一行，故也不进 GUARDS。
   'facts/events-rs',
+  // `test-fixtures-rs` 与 `events-rs` 是同一批 owner `EventDecl` 的两处产物（D-392）：
+  // `events-rs` 生成给生产读者的词汇层，本模块生成给 core 测试读者的
+  // `symbio-sdk/src/test_fixtures.rs`。登记成 LIBS：它由 `gen-facts` 调用、漂移由
+  // `gen-facts --check`（GEN-001）判；「手抄第二份定义」由 `shared-name-audit` 的
+  // SV-001 ③ 判（生成标记跳过、无标记即红）。
+  'facts/test-fixtures-rs',
   // 部署事实的四个生成器与它们的共享材料（`_plugin-links`）。登记成 LIBS 而不是
   // GUARDS 的**理由**：它们由 `gen-facts` 调用、生成物漂移由 `gen-facts --check`
   // 判，本体不是独立门禁步骤；回归测试那几格另在 GUARDS 里（同 `routes-rs` 的两处

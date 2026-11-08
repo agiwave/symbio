@@ -8,6 +8,9 @@
  *   ④ 标准 MIME 类型在两个插件都出现 → exit 0（语法形状不是词汇名）；
  *   ⑤ 测试文件里的重复 → exit 0（测试不是生产消费方）；
  *   ⑥ 范围读不出 → exit 2；
+ *   ⑦ 机制层手写词汇层事件名 → exit 1（SV-001 ③ 扩围）；
+ *   ⑧ 带「生成，请勿手改」标记的 `test_fixtures.rs` → exit 0（单源投影）；
+ *   ⑬ 无标记的 `test_fixtures.rs` 手抄 → exit 1（第二份定义）；
  *   ⑨ 登记与 024 契约表逐行相等 → exit 0（SV-003）；
  *   ⑩ 契约表有、登记没有 → exit 1；⑪ 登记了、表里没有 → exit 1；
  *   ⑫ 同一 slot 的 `fleet` 落点不一致 → exit 1。
@@ -40,10 +43,28 @@ const PLAN_REL = 'docs/003-design/024-能力横向扩充的通路.md'
 /** 默认契约表：表头在、零数据行。各用例要判 SV-003 时自行覆盖。 */
 const DEFAULT_PLAN = '# fixture\n\n| `slot` | 顶层路径 | 实例级落点 |\n|---|---|---|\n'
 
+/** 默认词汇层：`events.rs` 是规则源，缺了判据只能 exit 2。带生成标记（它本来就是投影）。 */
+const API_EVENTS_REL = 'crates/symbio-plugin-api/src/events.rs'
+const DEFAULT_API_EVENTS =
+  '//! 跨插件事件名常量 —— **由 `scripts/facts/events-rs.mjs` 生成，请勿手改**。\n\n' +
+  'pub const EVENT_VDFS_WRITE: &str = "vdfs/write";\n'
+
+/** 机制层三 crate：判据要求它们都在（SV-001 ③ 的扫描范围）。 */
+const DEFAULT_CORE = {
+  'crates/symbio-sdk/src/lib.rs': '',
+  'crates/symbio-kernel/src/lib.rs': '',
+  'crates/symbio/src/lib.rs': '',
+}
+
 /** 造一个最小仓库：`crates/<插件>/src/<文件>`，内容由调用方给。 */
 function fixture(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shared-name-'))
-  for (const [rel, content] of Object.entries({ [PLAN_REL]: DEFAULT_PLAN, ...files })) {
+  for (const [rel, content] of Object.entries({
+    [PLAN_REL]: DEFAULT_PLAN,
+    [API_EVENTS_REL]: DEFAULT_API_EVENTS,
+    ...DEFAULT_CORE,
+    ...files,
+  })) {
     const abs = path.join(root, rel)
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     fs.writeFileSync(abs, content)
@@ -124,6 +145,52 @@ test('⑤ 测试文件里的重复 ⇒ 绿（测试不是生产消费方）', ()
   try {
     const r = runOn(root)
     assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑦ 机制层手写词汇层事件名 ⇒ 红（SV-001 ③）', () => {
+  const root = fixture({
+    'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n',
+    'crates/symbio-sdk/src/foo.rs': 'pub const WRITE: &str = "vdfs/write";\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-001/)
+    assert.match(r.stdout, /vdfs\/write/)
+    assert.match(r.stdout, /symbio-sdk/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑧ 带生成标记的 test_fixtures.rs ⇒ 绿（单源投影不是第二份定义）', () => {
+  const root = fixture({
+    'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n',
+    'crates/symbio-sdk/src/test_fixtures.rs':
+      '//! core 用例事件拼写 —— **由 `scripts/facts/test-fixtures-rs.mjs` 生成，请勿手改**。\n\n' +
+      'pub const EVENT_VDFS_WRITE: &str = "vdfs/write";\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑬ 手抄 test_fixtures.rs（无生成标记）⇒ 红（正是本判据要拦的第二份定义）', () => {
+  const root = fixture({
+    'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n',
+    'crates/symbio-sdk/src/test_fixtures.rs': 'pub const EVENT_VDFS_WRITE: &str = "vdfs/write";\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-001/)
+    assert.match(r.stdout, /test_fixtures/)
   } finally {
     rmTree(root)
   }
