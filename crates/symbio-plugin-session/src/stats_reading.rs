@@ -240,32 +240,70 @@ fn fleet_of(
     Some(fleet_render(&merged, ctx))
 }
 
-/// 能力视图列：遍历**公开清单**，逐条经 `symbio_plugin_api::views` 求值（DE-025 D-221）。
+/// 能力视图列：遍历**登记面**，逐条经 `symbio_plugin_api::views` 求值（DE-025 D-221）。
 ///
-/// ## 为什么这里不认识任何视图名
+/// ## 两个来源，一段过渡
 ///
-/// 名字、版本、扫描成本与折叠都在 owner 的 `ViewDecl` 里；本函数只做「按清单取、
-/// 原样装一格」。于是加一项能力视图 = owner 声明 + `PLUGIN.yml` 公开一行，本文件
-/// 不动——这正是「横向扩展不改架构」在本列上的落点。读不到时给**可诊断的缺席**
-/// （`reason` + `detail`），不给空值冒充读数。
+/// ① **报表登记面**（`D-387`）：owner 在 `submit_reports!` 的 `views` 里列出的名字。
+/// 这是本列的主路——加一条被阅读的视图 = owner 登记，本文件不动。
+///
+/// ② **过渡：尚未转报表的 `shared_views`**——`Q3` 只剩 `memory.live` 一条。两者同名时
+/// 以 ① 为准（迁移期可能短暂并存）。`Q3` 把巩固搬进 memory 后，② 整段删除。
+///
+/// 名字、版本、扫描成本与折叠都在 owner 的 `ViewDecl` 里；本函数只做「按登记取、
+/// 原样装一格」。读不到时给**可诊断的缺席**（`reason` + `detail`），不给空值冒充读数。
 pub(super) fn capability_views(snapshot: &[Event]) -> serde_json::Value {
     let mut out = serde_json::Map::new();
+    match symbio_plugin_api::reports::reports() {
+        Ok(reports) => {
+            for report in reports {
+                for name in report.views {
+                    if out.contains_key(*name) {
+                        continue;
+                    }
+                    out.insert(
+                        (*name).to_string(),
+                        view_entry(report.owner, name, snapshot),
+                    );
+                }
+            }
+        }
+        Err(errors) => {
+            for why in errors {
+                symbio_plugin_api::plugin_warn!(
+                    symbio_plugin_api::PLUGIN_ID_SESSION,
+                    "[stats] 报表登记不合法（{why}）：能力视图列缺少报表来源"
+                );
+            }
+        }
+    }
+    // 过渡分支：Q3 之后 `shared_views` 为空（`memory.live` 转报表描述符）时整段删除。
     for shared in symbio_plugin_api::shared_views() {
-        let entry = match symbio_plugin_api::ViewRead::named(shared.name) {
-            Ok(view) => match (view.ver(), view.read_all(snapshot)) {
-                (Ok(ver), Ok(value)) => serde_json::json!({
-                    "owner": shared.owner,
-                    "status": "ok",
-                    "ver": ver,
-                    "value": value,
-                }),
-                (Err(why), _) | (_, Err(why)) => view_unavailable(shared.owner, &why),
-            },
-            Err(why) => view_unavailable(shared.owner, &why),
-        };
-        out.insert(shared.name.to_string(), entry);
+        if out.contains_key(shared.name) {
+            continue;
+        }
+        out.insert(
+            shared.name.to_string(),
+            view_entry(shared.owner, shared.name, snapshot),
+        );
     }
     serde_json::Value::Object(out)
+}
+
+/// 一条视图读成一格：`{ owner, status, ver, value }` 或可诊断的缺席。
+fn view_entry(owner: &str, name: &str, snapshot: &[Event]) -> serde_json::Value {
+    match symbio_plugin_api::ViewRead::named(name) {
+        Ok(view) => match (view.ver(), view.read_all(snapshot)) {
+            (Ok(ver), Ok(value)) => serde_json::json!({
+                "owner": owner,
+                "status": "ok",
+                "ver": ver,
+                "value": value,
+            }),
+            (Err(why), _) | (_, Err(why)) => view_unavailable(owner, &why),
+        },
+        Err(why) => view_unavailable(owner, &why),
+    }
 }
 
 /// 一格缺席：原因词（稳定拼写）+ 人话细节。两者都要——前者给分支，后者给定位。

@@ -11,4 +11,3 @@ shared_events: authz.denied, authz.granted, commitment.asserted, commitment.brok
 # 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住 `control_decl::VIEWS`。
 # 纯机制环不导出视图。
-shared_views: 

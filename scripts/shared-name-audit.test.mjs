@@ -7,7 +7,9 @@
  *   ③ 同名 `const`（`task_table`）在两个插件各声明一次 → exit 1；
  *   ④ 标准 MIME 类型在两个插件都出现 → exit 0（语法形状不是词汇名）；
  *   ⑤ 测试文件里的重复 → exit 0（测试不是生产消费方）；
- *   ⑥ 范围读不出 → exit 2。
+ *   ⑥ 范围读不出 → exit 2；
+ *   ⑦ `plugin-api` 的非生成生产代码写了 manifest 视图名 → exit 1（SV-002）；
+ *   ⑧ manifest 视图名只出现在 `plugin-api` 的生成物 / 测试里 → exit 0。
  *
  * 用法：node --test scripts/shared-name-audit.test.mjs
  */
@@ -117,6 +119,42 @@ test('⑤ 测试文件里的重复 ⇒ 绿（测试不是生产消费方）', ()
   try {
     const r = runOn(root)
     assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑦ plugin-api 的非生成生产代码写了 manifest 视图名 ⇒ 红', () => {
+  const root = fixture({
+    'crates/symbio-plugin-api/src/view_names.rs':
+      '//! 由 `scripts/facts/views-rs.mjs` 生成。\npub const VIEW_MEMORY_LIVE: &str = "memory.live";\n',
+    'crates/symbio-plugin-api/src/reports.rs':
+      'pub fn f() -> &\'static str { "memory.live" }\n',
+    'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-002/)
+    assert.match(r.stdout, /memory\.live/)
+    assert.match(r.stdout, /reports\.rs:1/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑧ manifest 视图名只在生成物 / 测试里出现 ⇒ 绿', () => {
+  const root = fixture({
+    'crates/symbio-plugin-api/src/view_names.rs':
+      '//! 由 `scripts/facts/views-rs.mjs` 生成。\npub const VIEW_MEMORY_LIVE: &str = "memory.live";\n',
+    'crates/symbio-plugin-api/src/views.test.rs':
+      'pub fn f() -> &\'static str { "memory.live" }\n',
+    'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-002/)
   } finally {
     rmTree(root)
   }

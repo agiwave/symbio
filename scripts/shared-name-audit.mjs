@@ -11,6 +11,7 @@
  * | 编号 | 判什么 | 它拦的是哪一种腐烂 |
  * |---|---|---|
  * | SV-001 | ① **有结构**的名字（含 `.` 或 `/`）出现在两个以上非 `plugin-api` 的插件生产代码里；② 同名 `const` 在两个以上插件 crate 各声明一次 | 两份字面量 = 两个 owner：改名只改一处，另一处静默漂移；或绕过词汇层把名字抄回实现 |
+ * | SV-002 | `symbio-plugin-api` 的**非生成**生产代码里出现任一 manifest 视图名（`view_names.rs` 里的 `shared_views` 投影） | 业务视图名渗进机制层：机制层于是「认识」某个 owner 的视图，横扩又要改门面 |
  *
  * ## 为什么不扫普通单词
  *
@@ -31,7 +32,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns SV 共享词汇
-// @codes SV-001
+// @codes SV-001 SV-002
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -121,6 +122,59 @@ function productionFiles(dir) {
   return out
 }
 
+const API_SRC = path.join(ROOT, 'crates', 'symbio-plugin-api', 'src')
+const VIEW_NAMES_RS = path.join(API_SRC, 'view_names.rs')
+
+/** `view_names.rs` 里公开的视图名（只认生成物里的字符串常量）。 */
+function manifestViewNames(file) {
+  if (!fs.existsSync(file)) return []
+  const text = fs.readFileSync(file, 'utf8')
+  const names = new Set()
+  for (const m of text.matchAll(
+    /pub const [A-Z][A-Z0-9_]*\s*:\s*&(?:'static\s+)?str\s*=\s*"([^"]+)"/g,
+  )) {
+    if (VOCAB_RE.test(m[1]) && STRUCTURED_RE.test(m[1])) names.add(m[1])
+  }
+  return [...names]
+}
+
+/** 生成物特征：文件头声明「由 `scripts/facts/…` 生成」。 */
+function isGenerated(text) {
+  return /由 `scripts\/facts\//.test(text.slice(0, 600))
+}
+
+/**
+ * SV-002：机制层（`symbio-plugin-api`）的非生成生产代码里出现任一 manifest 视图名。
+ *
+ * 视图名属于 owner 的业务身份，只该由 `submit_reports!` 交给读方；写进门面就意味着
+ * 「加一条视图要改机制层」。`view_names.rs` 是名字的生成地、生成物整体不判。
+ */
+function mechanismViewNameErrors() {
+  const names = manifestViewNames(VIEW_NAMES_RS)
+  if (names.length === 0) return []
+  const out = []
+  for (const abs of productionFiles(API_SRC)) {
+    if (path.resolve(abs) === path.resolve(VIEW_NAMES_RS)) continue
+    const raw = fs.readFileSync(abs, 'utf8')
+    if (isGenerated(raw)) continue
+    const text = stripComments(raw)
+    const rel = path.relative(ROOT, abs).replace(/\\/g, '/')
+    for (const name of names) {
+      const needle = `"${name}"`
+      let at = text.indexOf(needle)
+      while (at !== -1) {
+        const line = text.slice(0, at).split('\n').length
+        out.push(
+          `${rel}:${line} 写了 "${name}"——业务视图名不该出现在机制层（它只该由 owner 的 ` +
+            'submit_reports! 交出，读方按登记遍历）',
+        )
+        at = text.indexOf(needle, at + needle.length)
+      }
+    }
+  }
+  return out
+}
+
 function pluginCrates(root) {
   const crates = path.join(root, 'crates')
   if (!fs.existsSync(crates)) {
@@ -201,9 +255,12 @@ for (const [value, per] of [...constHomes.entries()].sort((a, b) => a[0].localeC
   )
 }
 
-if (errors.length) {
+const viewNameErrors = mechanismViewNameErrors()
+
+if (errors.length || viewNameErrors.length) {
   for (const e of errors) console.log(red(`✗ SV-001 ${e}`))
-  console.log(`\n共享词汇：${errors.length} 条违规`)
+  for (const e of viewNameErrors) console.log(red(`✗ SV-002 ${e}`))
+  console.log(`\n共享词汇：${errors.length + viewNameErrors.length} 条违规`)
   process.exit(1)
 }
 
@@ -215,5 +272,10 @@ console.log(
     `✓ SV-001 共享词汇：${crates.length} 个插件 crate 的生产代码里，` +
       '没有「同一有结构名字出现在两个 crate」的字面量，也没有同名 const 的两个家' +
       (skipped ? `（另有 ${skipped} 条 MIME / 文件名形态，按语法形状不判）` : ''),
+  ),
+)
+console.log(
+  green(
+    `✓ SV-002 机制层没有业务视图名：symbio-plugin-api 的非生成生产代码里没有 manifest 视图名（${manifestViewNames(VIEW_NAMES_RS).length} 个名字待守）`,
   ),
 )

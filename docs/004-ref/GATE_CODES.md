@@ -58,7 +58,7 @@ lists: [gate-codes=owner]
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
 | **SD** | 会话死码台账（B 类能力待接入） | `scripts/session-dead-code-audit.mjs` | SD-001 | `SD-002` |
 | **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
-| **SV** | 共享词汇 | `scripts/shared-name-audit.mjs` | SV-001 | `SV-002` |
+| **SV** | 共享词汇 | `scripts/shared-name-audit.mjs` | SV-001–002 | `SV-003` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
 | **TR** | turn 词根冻结（废弃概念的存量棘轮） | `scripts/turn-root-audit.mjs` | TR-001–004 | `TR-005` |
@@ -284,6 +284,7 @@ lists: [gate-codes=owner]
 | **SPC-002** | `scripts/spec-coverage-audit.mjs` |
 | **SPC-003** | `scripts/spec-coverage-audit.mjs` |
 | **SV-001** | `scripts/shared-name-audit.mjs` |
+| **SV-002** | `scripts/shared-name-audit.mjs` |
 | **SX-001** | `scripts/slo-exit-audit.mjs` |
 | **SX-002** | `scripts/slo-exit-audit.mjs` |
 | **SX-003** | `scripts/slo-exit-audit.mjs` |

@@ -521,8 +521,8 @@ fn panel_matches_the_columns_it_describes() {
     let panel = panel_of(&got);
 
     // 分区：时延兜底 / 事实源 / 不变量 / 技能 / 承诺，再加**能力视图**段
-    // （段数随公开清单，不是本插件写死的常数——DE-025 D-221）
-    let expected_sections = 5 + usize::from(!symbio_plugin_api::shared_views().is_empty());
+    // （段数随登记面，不是本插件写死的常数——DE-025 D-221）
+    let expected_sections = 5 + usize::from(!expected_capability_view_names().is_empty());
     assert_eq!(
         panel.sections.len(),
         expected_sections,
@@ -641,15 +641,33 @@ fn panel_matches_the_columns_it_describes() {
     assert_eq!(cm_row.tone, symbio_kernel::present::ReadingTone::Normal);
 }
 
-/// 能力视图列（DE-025 D-221）：**键完全由公开清单决定，本插件一个名字也不写**。
+/// 能力视图列应有的键：报表登记的 `views` ∪ 尚未迁移的 `shared_views`（同名去重）。
 ///
-/// 这一条判据盯的是「扩展不必改本插件」：清单里多一条视图，列里就多一格，
+/// 与 `stats_reading::capability_views` 的两个来源一一对应；过渡分支在 `Q3` 删除后，
+/// 这里只剩前半段。
+fn expected_capability_view_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = match symbio_plugin_api::reports::reports() {
+        Ok(reports) => reports
+            .iter()
+            .flat_map(|report| report.views.iter().copied())
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    names.extend(symbio_plugin_api::shared_views().iter().map(|v| v.name));
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// 能力视图列（DE-025 D-221）：**键完全由登记面决定，本插件一个名字也不写**。
+///
+/// 这一条判据盯的是「扩展不必改本插件」：登记面里多一条视图，列里就多一格，
 /// 而这个文件与 `stats_reading.rs` 都没有为此改过一行。缺席也必须是**有名有姓**
 /// 的缺席（原因词 + 人话），不许塌成空对象。
 ///
-/// 本测试二进制只链接 session 与协议行夹具，公开清单里 owner 的 `ViewDecl` 不在
-/// 冻结表里 ⇒ 期望是 `unknown`。读到真值的那条路在链接了全部插件的 e2e
-/// （`capability_views[<公开名>]` 读出 `status: ok`），两侧合起来才是「跨插件可读」
+/// 本测试二进制只链接 session 与协议行夹具，登记面与公开清单里 owner 的 `ViewDecl`
+/// 都不在冻结表里 ⇒ 期望是 `unknown`。读到真值的那条路在链接了全部插件的 e2e
+/// （`capability_views[<登记名>]` 读出 `status: ok`），两侧合起来才是「跨插件可读」
 /// 的完整证据。
 #[test]
 fn capability_views_column_follows_the_shared_manifest() {
@@ -659,14 +677,10 @@ fn capability_views_column_follows_the_shared_manifest() {
 
     let mut names: Vec<&str> = col.keys().map(String::as_str).collect();
     names.sort_unstable();
-    let mut expected: Vec<&str> = symbio_plugin_api::shared_views()
-        .iter()
-        .map(|v| v.name)
-        .collect();
-    expected.sort_unstable();
+    let expected = expected_capability_view_names();
     assert_eq!(
         names, expected,
-        "列的键 = shared_views 清单，一个不多一个不少（本插件不写死名字）"
+        "列的键 = 报表登记的 views ∪ 尚未迁移的 shared_views，一个不多一个不少"
     );
 
     for shared in symbio_plugin_api::shared_views() {
@@ -697,15 +711,15 @@ fn capability_views_column_follows_the_shared_manifest() {
     }
 }
 
-/// 面板的能力视图段：**一行一条公开视图**，标签就是清单里的名字。
+/// 面板的能力视图段：**一行一条登记视图**，标签就是登记面里的名字。
 ///
-/// 反向判据（清单为空时段落整段不出现）由 `expected_sections` 那条并排覆盖：
+/// 反向判据（登记面为空时段落整段不出现）由 `expected_sections` 那条并排覆盖：
 /// 段数不是常数，而是「固定五段 + 有无能力视图」的和。
 #[test]
 fn the_capability_section_has_one_row_per_shared_view() {
     let wal = seed("capability-panel");
     let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    let shared = symbio_plugin_api::shared_views();
+    let expected = expected_capability_view_names();
     let Some(section) = got
         .panel
         .sections
@@ -713,8 +727,8 @@ fn the_capability_section_has_one_row_per_shared_view() {
         .find(|s| s.title.as_deref() == Some("能力视图"))
     else {
         assert!(
-            shared.is_empty(),
-            "清单非空却没有能力视图段： {:?}",
+            expected.is_empty(),
+            "登记面非空却没有能力视图段： {:?}",
             got.panel
                 .sections
                 .iter()
@@ -725,15 +739,15 @@ fn the_capability_section_has_one_row_per_shared_view() {
     };
     assert_eq!(
         section.rows.len(),
-        shared.len(),
-        "一行一条公开视图，不多不少"
+        expected.len(),
+        "一行一条登记视图，不多不少"
     );
-    for decl in shared {
+    for name in expected {
         let row = section
             .rows
             .iter()
-            .find(|r| r.label == decl.name)
-            .unwrap_or_else(|| panic!("清单里的 {} 在面板上没有行", decl.name));
+            .find(|r| r.label == name)
+            .unwrap_or_else(|| panic!("登记面里的 {} 在面板上没有行", name));
         assert!(
             row.value.starts_with("可读") || row.value.starts_with("读不出来"),
             "值只说「有没有数」，语义属于 owner：{}",
