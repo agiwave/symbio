@@ -331,7 +331,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
         .with_payload(serde_json::json!({
             "text": "",
             "model": "m",
-            "root_id": "T1",
+            "root_id": "u-node",
             "text_id": null,
             "reasoning_id": null,
             "reasoning": null,
@@ -347,16 +347,21 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
     ];
 
     let got = rebuild(&events, &CHAT, &MESSAGE);
+    // 生产形状：`root_id` 就是用户消息事实 id，骨架被「同 id 只认首次」并进用户
+    // 节点——失败状态与原因必须一并移交，否则读面看到的是一轮没有交代的失败（D-381）。
+    assert!(
+        !got.iter().any(|m| m.id == "u-node" && m.msg_type == Some(NodeKind::Skeleton)),
+        "不存在独立的 Turn 骨架：它就是用户节点"
+    );
     let turn = got
         .iter()
-        .find(|m| m.id == "T1")
-        .expect("Turn 根在重建结果里");
-    assert_eq!(form_of(turn), NodeForm::Run);
+        .find(|m| m.id == "u-node")
+        .expect("用户节点即轮节点");
     assert_eq!(turn.status, Some(NodeStatus::Failed));
     assert_eq!(
         turn.error.as_deref(),
         Some("model returned empty text"),
-        "失败原因进节点 error——否则交代条只有一句话都没有"
+        "失败原因进轮节点的 error——否则交代条只有一句话都没有"
     );
 
     let shapes = shapes(&got);

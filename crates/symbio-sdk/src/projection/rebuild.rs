@@ -291,6 +291,12 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                     .as_ref()
                     .and_then(|meta| meta.get("context"))
                     .cloned();
+                // 失败移交的两格先取下来：`carries_state` 分支会把 `node` 整个搬走，
+                // 之后不能再借它（成功轮的 `error` 为空，不会被移交）。
+                let failure = node
+                    .error
+                    .clone()
+                    .map(|error| (node.status.clone(), error));
                 if carries_state {
                     let kept = out[i].seq;
                     out[i] = node;
@@ -305,6 +311,14 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                     if meta.get("context").is_none() {
                         meta["context"] = watermark;
                     }
+                }
+                // 失败收束的骨架与用户节点同 id（D-335 之后 `root_id` 就是用户消息
+                // 事实 id）：骨架的失败状态与原因必须补到既有节点上，否则这一轮
+                // 「以失败结束」在读面不可见（D-381）。成功轮的骨架 `error` 为空，
+                // 不移交状态——既有节点自己的状态不被覆盖。
+                if let Some((status, error)) = failure {
+                    out[i].status = status;
+                    out[i].error = Some(error);
                 }
                 continue;
             }

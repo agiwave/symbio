@@ -424,7 +424,7 @@ impl Convergence {
                         }
                     }
                 }
-                let mut nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
+                let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
                     &waiting_events,
                     &CHAT_VOCAB,
                     &MESSAGE_VOCAB,
@@ -435,16 +435,16 @@ impl Convergence {
                     node
                 })
                 .collect();
-                nodes.push(cm::ChatNode {
+                let failed_node = cm::ChatNode {
                     id: format!("failed:{}", failed.event_id),
                     msg_type: Some(cm::NodeKind::Body),
                     content: Some(cm::MessageContent::Text(why.clone())),
                     status: Some(cm::NodeStatus::Failed),
                     error: Some(why.clone()),
                     ..Default::default()
-                });
+                };
+                let session = self.open_chat_session(session_id).await?;
                 if !nodes.is_empty() {
-                    let session = self.open_chat_session(session_id).await?;
                     append_and_publish(
                         &session,
                         nodes,
@@ -455,6 +455,18 @@ impl Convergence {
                     )
                     .await?;
                 }
+                // 失败节点**单独一批**走 `Here`：重建节点的事实已由运行器落过，
+                // 整批翻成 `Here` 会给它们补第二个 owner；而这条节点没有别的格
+                // 可搭车（兜底格 `text` 为空），必须靠自己的诞生事实进读面（D-381）。
+                append_and_publish(
+                    &session,
+                    vec![failed_node],
+                    Carrier::Here,
+                    &self.active,
+                    session_id,
+                    PRINCIPAL_MAIN,
+                )
+                .await?;
                 let state = self.active.get_or_create(session_id).await;
                 self.emit_session_state(
                     &state,
