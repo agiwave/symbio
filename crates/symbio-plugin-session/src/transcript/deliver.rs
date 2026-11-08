@@ -133,8 +133,7 @@ impl DeltaLogCoalescer {
 
     /// 冲刷待合并的 run。没有待合并时返回 `None`。
     ///
-    /// 调用点：换 id / 非纯增量帧（`feed` 内）、`persisted`（落库回执 = 这段增长结束）、
-    /// `clear`（轮次收尾，保证最后一段不被吞掉）。
+    /// 调用点：换 id / 非纯增量帧（`feed` 内），以及读侧断言「走完后不留残留 run」。
     pub(crate) fn flush(&mut self) -> Option<String> {
         let run = self.run.take()?;
         Some(run.render())

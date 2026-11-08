@@ -80,6 +80,12 @@ fn seen_of(seen: &Arc<Mutex<Vec<VdfsChange>>>) -> Vec<VdfsChange> {
     seen.lock().unwrap().clone()
 }
 
+/// 按 id 取一个在途节点：走**生产读口** `snapshot()`（VDFS 转写列表的叠加源），
+/// 不在测试里另开一个访问器。
+fn node_of(tr: &Transcript, id: &str) -> Option<cm::ChatNode> {
+    tr.snapshot().into_iter().find(|m| m.id == id)
+}
+
 /// 帧计数器单调：每个被投递的帧 +1；违例帧（同帧既带增量又带完整正文）不占号。
 #[test]
 fn frame_counter_is_monotonic_and_violations_consume_no_frame() {
@@ -96,7 +102,7 @@ fn frame_counter_is_monotonic_and_violations_consume_no_frame() {
     tr.apply(text_msg("a", NodeStatus::Completed, "你好"));
     assert_eq!(tr.frame_no, 3, "违例帧不得消耗帧号（3 个合法帧）");
     assert_eq!(seen_of(&seen).len(), 3, "违例帧不得投递");
-    match tr.get("a").unwrap().content {
+    match node_of(&tr, "a").unwrap().content {
         Some(MessageContent::Text(t)) => assert_eq!(t, "你好", "content 帧是整条替换"),
         _ => panic!("应为 Text"),
     }
@@ -109,13 +115,13 @@ fn delta_appends_and_content_replaces() {
     tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "ab"));
     tr.apply(delta_msg("a", "cd"));
-    match tr.get("a").unwrap().content {
+    match node_of(&tr, "a").unwrap().content {
         Some(MessageContent::Text(ref t)) => assert_eq!(t, "abcd", "delta 逐字累积"),
         _ => panic!("应为 Text"),
     }
     // 替换：把累积结果整条换掉（工具输出被改写 / 编辑消息 / 权威副本对齐都走这里）
     tr.apply(text_msg("a", NodeStatus::Completed, "XYZ"));
-    match tr.get("a").unwrap().content {
+    match node_of(&tr, "a").unwrap().content {
         Some(MessageContent::Text(t)) => assert_eq!(t, "XYZ", "content 是整条替换"),
         _ => panic!("应为 Text"),
     }
@@ -127,7 +133,7 @@ fn delta_appends_and_content_replaces() {
 fn delta_for_unknown_id_creates_placeholder() {
     let (mut tr, seen) = transcript();
     tr.apply(delta_msg("ghost", "片段"));
-    let n = tr.get("ghost").expect("增量帧自给自足，应建占位");
+    let n = node_of(&tr, "ghost").expect("增量帧自给自足，应建占位");
     assert_eq!(n.id, "ghost");
     match n.content {
         Some(MessageContent::Text(t)) => assert_eq!(t, "片段"),
@@ -151,18 +157,15 @@ fn delta_for_unknown_id_creates_placeholder() {
     );
 }
 
-/// 删除帧（`status = removed`）与 persisted 的图语义。
+/// 删除帧（`status = removed`）把节点移出在途图，且照常占帧号。
 #[test]
-fn removed_and_persisted_evict() {
+fn removed_frames_evict() {
     let (mut tr, seen) = transcript();
-    tr.apply(text_msg("a", NodeStatus::Streaming, "1"));
     tr.apply(text_msg("b", NodeStatus::Streaming, "2"));
-    tr.persisted(&["a".to_string()]);
-    assert!(tr.get("a").is_none(), "persisted 后节点离开在途图");
     tr.apply(removed_msg("b"));
     assert!(tr.snapshot().is_empty(), "删除帧把节点移出在途图");
     // 删除帧照常占帧号：**删了什么**在时间线上必须可追溯
-    assert_eq!(tr.frame_no, 3);
+    assert_eq!(tr.frame_no, 2);
     let delivered = seen_of(&seen);
     let last = delivered.last().unwrap();
     assert_eq!(
@@ -188,7 +191,7 @@ fn delta_is_never_retained_on_graph_nodes() {
     tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "abc"));
     assert!(
-        tr.get("a").unwrap().delta.is_none(),
+        node_of(&tr, "a").unwrap().delta.is_none(),
         "图内节点不得携带 delta"
     );
 }
@@ -204,11 +207,11 @@ fn inflight_messages_get_their_position_seq_at_creation() {
     tr.apply(text_msg("t1", NodeStatus::Streaming, ""));
     tr.apply(text_msg("t2", NodeStatus::Streaming, ""));
     // 顺序与到达顺序一致，且都落在 `InflightSeq::BASE` 起的段内
-    assert_eq!(tr.get("t1").unwrap().seq, Some(InflightSeq::BASE));
-    assert_eq!(tr.get("t2").unwrap().seq, Some(InflightSeq::BASE + 1));
+    assert_eq!(node_of(&tr, "t1").unwrap().seq, Some(InflightSeq::BASE));
+    assert_eq!(node_of(&tr, "t2").unwrap().seq, Some(InflightSeq::BASE + 1));
     // 同一节点的后续帧**不重新分配**（位置是节点属性，不是帧属性）
     tr.apply(delta_msg("t1", "x"));
-    assert_eq!(tr.get("t1").unwrap().seq, Some(InflightSeq::BASE));
+    assert_eq!(node_of(&tr, "t1").unwrap().seq, Some(InflightSeq::BASE));
 
     // 存储分配的权威值（落库后回发的对齐帧）覆盖在途号
     tr.apply(cm::ChatNode {
@@ -216,7 +219,7 @@ fn inflight_messages_get_their_position_seq_at_creation() {
         seq: Some(7),
         ..Default::default()
     });
-    assert_eq!(tr.get("t1").unwrap().seq, Some(7));
+    assert_eq!(node_of(&tr, "t1").unwrap().seq, Some(7));
 }
 
 /// 在途号**排在全部历史之后**——`ordered` 按 `seq` 升序，而存储分配的序号是
@@ -293,7 +296,7 @@ fn a_first_frame_carrying_delta_is_delivered_as_full_copy() {
     assert!(v.get("delta").is_none(), "首帧不携带 delta");
     assert_eq!(v["content"], "片段", "首帧带合并后的全量正文");
     // 图里的正文不受影响（首帧形状只影响**投递**）
-    match tr.get("a").unwrap().content {
+    match node_of(&tr, "a").unwrap().content {
         Some(MessageContent::Text(t)) => assert_eq!(t, "片段"),
         _ => panic!("应为 Text"),
     }
@@ -461,7 +464,7 @@ fn coalescing_keeps_the_graph_and_loses_no_text() {
     // 8 个合法帧 ⇒ 帧号 8（合帧不得影响日志的帧计数）
     assert_eq!(tr.frame_no, 8, "合帧不得影响帧号");
     assert_eq!(tr.snapshot().len(), 1, "b 已被删除，在途图只剩 a");
-    match tr.get("a").unwrap().content {
+    match node_of(&tr, "a").unwrap().content {
         Some(MessageContent::Text(ref t)) => {
             assert_eq!(t, "你好世界", "content 帧整条替换")
         }
@@ -573,21 +576,6 @@ fn session_state_flushes_pending_delta_first() {
     assert!(tr.pending.is_none(), "运行态帧冲刷掉待投递窗口");
 }
 
-/// `persisted` 是冲刷点：最后一段增量不会被吞掉（日志与投递两侧）。
-#[test]
-fn persisted_flushes_the_trailing_run() {
-    let (mut tr, _seen) = transcript();
-    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
-    tr.apply(delta_msg("a", "xy"));
-    tr.persisted(&["a".to_string()]);
-    assert_eq!(
-        tr.delta_log.flush(),
-        None,
-        "persisted（落库回执）应冲刷最后一段"
-    );
-    assert!(tr.pending.is_none(), "persisted 应冲刷待投递窗口");
-}
-
 /// 会话运行态与消息走**同一张订阅表**（D-025 的实时面与历史面合流）。
 ///
 /// 挂载点是会话叶子 `<sid>` 本身（`data` = 全量节点视图，与 `stat` 同源），
@@ -635,7 +623,7 @@ fn session_state_frame_does_not_touch_the_message_graph() {
 
     assert_eq!(tr.snapshot().len(), before, "运行态帧不得往消息图里加节点");
     assert_eq!(
-        tr.get("a").and_then(|m| m.status),
+        node_of(&tr, "a").and_then(|m| m.status),
         Some(NodeStatus::Completed),
         "既有节点的状态也不得被运行态改写（状态只有一个来源）"
     );

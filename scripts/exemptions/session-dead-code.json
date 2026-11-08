@@ -15,46 +15,11 @@
     },
     {
       "path": "crates/symbio-plugin-session/src/active.rs",
-      "symbols": [
-        "auto_compress_circuit_opened_at",
-        "auto_compress_failures",
-        "auto_compress_over_limit",
-        "preempt_judged"
-      ],
-      "capability": "自动压缩熔断计数 / 开闸时刻 / 永久失败标志，以及一忙窗一判的抢占判定标记",
-      "future_caller": "ActiveSessionState::compression_should_skip / compression_record_* 与抢占判定入口（新链路的轮首准备段）",
-      "batch": "compression",
-      "e2e": ["t8-compression", "t11-compression-node", "t18-compression-streaming", "t63-compression-interjection"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/active.rs",
-      "symbols": [
-        "COMPRESS_CIRCUIT_COOLDOWN",
-        "COMPRESS_CIRCUIT_LIMIT",
-        "compression_record_failure",
-        "compression_record_success",
-        "compression_should_skip"
-      ],
-      "capability": "自动压缩熔断阈值 / 冷却 / 记账",
-      "future_caller": "轮首自动压缩门控",
-      "batch": "session-base",
-      "e2e": ["t7-abort-convergence", "t8-compression"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/active.rs",
-      "symbols": ["emit_transcript_rewritten", "get", "transcript_apply_snapshot"],
-      "capability": "整表重写后的转写收敛帧（逐条删除 + 新首条快照帧）与「本实例是否在跑该会话」的可查询读口",
-      "future_caller": "压缩 L5 的改写出口 emit_transcript_rewritten（快照帧经 transcript_apply_snapshot 下发）；控制类动作（中止）经 ActiveSessionRegistry::get 判在跑",
-      "batch": "compression",
-      "e2e": ["t8-compression", "t7-abort-convergence"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript.rs",
-      "symbols": ["apply_snapshot"],
-      "capability": "快照帧换基（整表重写 / 压缩快照的 messages 列表）：清掉载荷里的号，交给存储 assign_seq 唯一发号",
-      "future_caller": "ActiveSessionRegistry::transcript_apply_snapshot → Transcript::apply_snapshot（压缩 L5 改写出口）",
-      "batch": "compression",
-      "e2e": ["t8-compression", "t11-compression-node"]
+      "symbols": ["preempt_judged"],
+      "capability": "一忙窗一判的抢占判定标记（忙窗内事实源不长新判据，判过一次就够）",
+      "future_caller": "抢占判定入口（忙窗判定的去重标记，空闲分支复位）",
+      "batch": "preemption",
+      "e2e": ["t34-preemption"]
     },
     {
       "path": "crates/symbio-plugin-session/src/message_events.rs",
@@ -63,54 +28,6 @@
       "future_caller": "会话开场 / 令牌句柄建立后的补落点（新链路启动时调用）",
       "batch": "session-base",
       "e2e": ["t44-crud-facts-survive-restart"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/temporal.rs",
-      "symbols": ["temporal_context"],
-      "capability": "请求的时间上下文段（当前时刻 / 时区等注入段）",
-      "future_caller": "请求装配 build_request_sections 的时间段注入",
-      "batch": "session-base",
-      "e2e": ["t46-prompt-shape-baseline"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript.rs",
-      "symbols": ["get", "persisted"],
-      "capability": "在途转写的单节点读取（get）与落库回执（persisted：权威副本已入存储后把节点从内存图移除）",
-      "future_caller": "VDFS 转写列表的单条读取与轮末落库回执（新链路转写读侧）",
-      "batch": "session-base",
-      "e2e": ["t37-transcript-read"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/compression.rs",
-      "symbols": ["CompressionEmitter"],
-      "capability": "压缩过程的事件发射器（开始 / 结束 / 失败等转写帧）",
-      "future_caller": "L5 压缩流水线的执行体（轮首准备段触发自动压缩时构造）",
-      "batch": "compression",
-      "e2e": ["t8-compression", "t18-compression-streaming"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/compression.rs",
-      "symbols": ["begin", "finish", "new", "record_failure", "record_success", "should_skip"],
-      "capability": "压缩发射器的生命周期与熔断记账（与 active.rs 的熔断状态共用同一判定）",
-      "future_caller": "L5 压缩流水线：门控 should_skip → begin → 成功 / 失败记账 → finish",
-      "batch": "compression",
-      "e2e": ["t8-compression", "t63-compression-interjection"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/compression.rs",
-      "symbols": ["merge_meta"],
-      "capability": "压缩产物节点的 meta 合并（保留既有属性并补压缩标记）",
-      "future_caller": "压缩快照落库出口（构造压缩节点时调用）",
-      "batch": "compression",
-      "e2e": ["t11-compression-node"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/inbox.rs",
-      "symbols": ["take_inbox_batch_sync"],
-      "capability": "同步抽取收件箱一批条目（供补充整合与压缩前置使用）",
-      "future_caller": "轮首准备段：抽干收件箱后交给 merge_supplements",
-      "batch": "supplements",
-      "e2e": ["t19-supplements-merge"]
     },
     {
       "path": "crates/symbio-plugin-session/src/transcript/inbox.rs",
@@ -135,30 +52,6 @@
       "future_caller": "抢占批次的判定 → 落格闭环（忙窗判定、空闲分支 held_event / resume_event）",
       "batch": "preemption",
       "e2e": ["t34-preemption"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/inbox.rs",
-      "symbols": ["take_inbox_batch"],
-      "capability": "异步抽取收件箱一批条目（与同步版同一语义，供 async 调用点使用）",
-      "future_caller": "轮首准备段的 async 入口（新链路按债驱动时抽干收件箱）",
-      "batch": "session-base",
-      "e2e": ["t15-subagent-inbox"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/supplements.rs",
-      "symbols": ["take_supplement_batch_sync"],
-      "capability": "同步抽取补充批次（补充整合的入口）",
-      "future_caller": "轮首准备段：收件箱抽干 → merge_supplements",
-      "batch": "supplements",
-      "e2e": ["t19-supplements-merge"]
-    },
-    {
-      "path": "crates/symbio-plugin-session/src/transcript/supplements.rs",
-      "symbols": ["take_inbox_batch_sync"],
-      "capability": "补充抽干器的同步抽取实现（把收件箱条目按上限抽成一批）",
-      "future_caller": "轮首准备段：SupplementDrain::take_inbox_batch_sync（补充整合入口）",
-      "batch": "supplements",
-      "e2e": ["t19-supplements-merge"]
     }
   ]
 }

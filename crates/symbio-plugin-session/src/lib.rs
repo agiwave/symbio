@@ -24,7 +24,6 @@ pub(crate) mod runtime;
 mod spend_ledger;
 mod stats;
 mod stats_reading;
-mod temporal;
 mod termination;
 mod token_ledger;
 mod transcript;

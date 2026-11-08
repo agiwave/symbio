@@ -362,7 +362,13 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 2413 → 2405（D-387）——退役 `views.test.rs` 整文件删掉 8 条
   // 「`shared()` 清单闸」判据：被测对象（生成清单与四种缺席态）已不在，改由
   // `shared-name-audit` 的 SV-003（登记 ↔ 契约表双向）与 `reports` 的 Result 判据承担。非侵蚀。
-  ciRustTestsTotal: 2405,
+  // baseline-allow ciRustTestsTotal: 2405 → 2396（死码清偿批，压缩迁移 D-336 的尾款）——整文件删
+  // `temporal.test.rs`（3 条）+ `active.test.rs` 的 5 条压缩熔断记账用例 + `transcript.test.rs` 的
+  // `persisted_flushes_the_trailing_run`（1 条）：被测对象（`temporal_context` / 压缩失败计数与冷却 /
+  // `Transcript::persisted`）已随本批删除，无被测对象即无覆盖可丢。压缩能力本身由 `symbio-plugin-compact`
+  // 的两行债与 t8 / t11 / t18 / t45 / t63 承接；失败后的跨轮抑制与重试出路在新链路没有等价物，
+  // 按实登记为缺口（`SC-009` 判据 3 记「未落地」），不拿旧用例冒充。非侵蚀。
+  ciRustTestsTotal: 2396,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

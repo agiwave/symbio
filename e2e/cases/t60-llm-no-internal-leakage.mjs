@@ -9,8 +9,8 @@ import './_selfrun.mjs';
 // （mock 场景匹配、轮次窗口、记忆编码全按它读）。
 //
 // 两条判据：
-// ① user 消息正文 == 用户原话（时间上下文走 `prompt` 字段是既定设计，
-//    `message_build.rs::temporal_context`；正文必须保持原话）；
+// ① user 消息正文 == 用户原话（系统侧注入只能走独立字段，不得拼进正文——
+//    正文必须保持原话）；
 // ② system 消息不含 homedir / workdir / mock 端口 / 回环地址（记忆地址用
 //    相对路径 `.vdfsv2/...` 是既定设计，不在判据范围）。
 //

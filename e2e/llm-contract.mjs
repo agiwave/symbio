@@ -491,8 +491,8 @@ export function assertAgentPrefixedTwins(req, agentId, label) {
  * LC-006 用户消息纯度：user 消息正文 == 用户原话。
  *
  * 拦的失效：把系统前缀 / 时间上下文 / 路由信息包进用户发言正文（那会同时污染
- * 模型对「用户说了什么」的理解与 mock 的场景匹配）；时间上下文走的是
- * `prompt` 字段（`message_build.rs::temporal_context`），正文必须保持原话。
+ * 模型对「用户说了什么」的理解与 mock 的场景匹配）；系统侧注入只能走独立字段，
+ * 正文必须保持原话。
  */
 export function assertUserTextPure(req, expectedText, label) {
   const users = dialogOf(req).filter((m) => m.role === 'user');

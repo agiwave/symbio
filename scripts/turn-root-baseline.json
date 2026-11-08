@@ -2,7 +2,7 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 148,
+      "prod": 145,
       "test": 182
     },
     "F2": {
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-08",
+      "faces": "F1.prod",
+      "reason": "本批删除会话内压缩的最后一处死码（`transcript/compression.rs`、`active.rs` 的压缩熔断记账、同步抽干口）与无生产调用点的时间上下文，F1 生产面实测 148 → 145 为**实测收窄**；其余四面逐格与基线相等。目标 0 不变。"
+    },
     {
       "date": "2026-11-08",
       "faces": "F1.test",

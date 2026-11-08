@@ -647,11 +647,11 @@ async fn append_messages_assigns_monotonic_authoritative_seq() {
 
 /// 存储边界：**在途占位号不得落库**（事故现场见 `transcript::InflightSeq::BASE`）。
 ///
-/// `CompressionEmitter::finish` 交给 `append_messages` 的是**在途图里的节点**——
-/// 它的 `seq` 已被 `Transcript::apply` 填成在途号。存储若把它当权威号存下，存储
-/// 水位就被抬进在途号段；此后存储计数器与在途计数器在同一数值区间各自递增，
-/// **必然撞号**：实测同一会话里「本轮用户消息」与「压缩节点」各持 `1099511627781`，
-/// `assertTranscriptInvariants` 的「seq 严格递增」当场失败。
+/// 交给 `append_messages` 的可能是**在途图里的节点**——它的 `seq` 已被
+/// `Transcript::apply` 填成在途号。存储若把它当权威号存下，存储水位就被抬进
+/// 在途号段；此后存储计数器与在途计数器在同一数值区间各自递增，**必然撞号**：
+/// 实测同一会话里两条消息各持 `1099511627781`，`assertTranscriptInvariants`
+/// 的「seq 严格递增」当场失败。
 ///
 /// 断言的是**回执上的号**——边界只对"交出去的是什么"负责。
 ///

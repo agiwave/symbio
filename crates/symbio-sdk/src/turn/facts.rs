@@ -71,28 +71,6 @@ pub struct WorkerProgress {
     pub steps: Vec<String>,
 }
 
-/// 抽干结果：**正文 + 原条数 + 溯源身份**。
-///
-/// `InboxItem` 是 session 转写域的私有类型，抽干口不返回它——跨模块暴露内部类型
-/// 会让「谁都能构造一个假的抽干结果」成为可能。
-///
-/// ⚠️ **不带 `ChatNode`**：注入只要正文，落库镜像那条节点由接收方按这里的
-/// `id` / `ids` 构造——多带一个字段就是给下一个人留一个不必有的理由。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrainedSupplement {
-    /// 折进 prompt 的正文（多条已合并）。
-    pub text: String,
-    /// **原条数**：合并了 n 条时是 n。
-    pub count: u64,
-    /// 合并消息的 **id** = **第一条补充的 id**（`merge_supplements` 的既有约定）。
-    ///
-    /// 为什么必须沿用而不是新造：前端按 id 合并权威帧，换 id 等于让同一句话在前端
-    /// **出现两条**。
-    pub id: String,
-    /// 批内**原始条目 id 列表**（顺序 = 入队顺序），落进 `meta.supplement_ids`。
-    pub ids: Vec<String>,
-}
-
 /// 折进消息的元数据键（写侧、重建侧与读侧共用；`projection::rebuild` 需要它们）。
 pub const META_SUPPLEMENT: &str = "supplement";
 pub const META_SUPPLEMENT_IDS: &str = "supplement_ids";

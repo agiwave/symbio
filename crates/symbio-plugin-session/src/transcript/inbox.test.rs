@@ -188,7 +188,7 @@ async fn drain_takes_the_whole_queue_in_one_batch() {
     let ids = enqueue_n(&p, 3).await;
     let state = p.active_mgr.get_or_create("s1").await;
 
-    let batch = p.take_inbox_batch(&state).await;
+    let batch = p.take_inbox_batch_when_idle(&state).await;
     let taken: Vec<String> = batch.iter().map(|i| i.id.clone()).collect();
 
     assert_eq!(taken, ids, "一趟取走整队，且保持入队顺序");
@@ -208,7 +208,7 @@ async fn drain_is_bounded_by_max_per_drain() {
     enqueue_n(&p, 3).await;
     let state = p.active_mgr.get_or_create("s1").await;
 
-    let batch = p.take_inbox_batch(&state).await;
+    let batch = p.take_inbox_batch_when_idle(&state).await;
     assert_eq!(batch.len(), 2, "一趟至多取上界条");
     assert_eq!(
         p.inbox_items("s1").await.len(),
@@ -227,7 +227,7 @@ async fn disabled_supplements_take_one_item_per_pass() {
     enqueue_n(&p, 3).await;
     let state = p.active_mgr.get_or_create("s1").await;
 
-    let batch = p.take_inbox_batch(&state).await;
+    let batch = p.take_inbox_batch_when_idle(&state).await;
     assert_eq!(batch.len(), 1, "关掉开关后一趟一条，与今天一致");
     assert_eq!(p.inbox_items("s1").await.len(), 2, "其余留队");
 }
@@ -259,7 +259,7 @@ async fn drain_notifies_every_taken_item_at_its_own_address() {
     let seen = watch_inbox_paths(&p);
 
     let state = p.active_mgr.get_or_create("s1").await;
-    let batch = p.take_inbox_batch(&state).await;
+    let batch = p.take_inbox_batch_when_idle(&state).await;
     assert_eq!(batch.len(), 3);
 
     let paths = seen.lock().unwrap().clone();
@@ -281,7 +281,7 @@ async fn zero_bound_is_clamped_to_one() {
     enqueue_n(&p, 2).await;
     let state = p.active_mgr.get_or_create("s1").await;
 
-    let batch = p.take_inbox_batch(&state).await;
+    let batch = p.take_inbox_batch_when_idle(&state).await;
     assert_eq!(batch.len(), 1, "上界 0 会让队列永不消费，必须兜到 1");
 }
 

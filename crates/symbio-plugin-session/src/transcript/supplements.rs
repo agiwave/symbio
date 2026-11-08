@@ -124,76 +124,21 @@ fn merge_content(items: &[InboxItem]) -> cm::MessageContent {
     cm::MessageContent::Parts(parts)
 }
 
-/// 抽干结果（类型已随 D-086 §7 上移 core：loop 的补充注入与 session 的抽干口
-/// 都要命名它；这里只留 session 侧的短路径别名）。
-pub use symbio_sdk::turn::facts::DrainedSupplement;
-
-/// 「取批 + 合并 + 成形」的**同步单一入口**（[D-081](../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决三）。
-///
-/// 补充消息的**到达**归存储（队列与变更通知都在本域），驱动器只掌握**要的时机**
-/// （工具循环的批次边界）——于是这三步整体住在本域，`chat_loop::SupplementDrain`
-/// 不再在驱动器侧自拼两步、手写成形段，退化为「持着取批那三样、调一下」。
-///
-/// 判定与取件逻辑不复制：内部走 [`super::inbox::take_inbox_batch_sync`]
-/// （`supplements_enabled = false` 时它退化为"取一条"，与 [`merge_supplements`] 叠加后
-/// 恰好等于"一条消息 = 一轮"的今天行为）。
-///
-/// 返回 `None` = 队列为空（或合并结果为空批次）——调用方据此**什么都不做**，
-/// 不推进 `last_saved`、不落库。
-///
-/// ⚠️ **调用方负责 `block_in_place`**：本函数内部用 `blocking_read`，若在
-/// 单线程 runtime 的 async 上下文里直接调会 panic。`turn_exec` 的注入闭包里有
-/// flavor 判定（多线程才 `block_in_place`，否则裸调）。
-pub(crate) fn take_supplement_batch_sync(
-    config: &tokio::sync::RwLock<super::super::config::SessionConfig>,
-    change_subs: &VdfsChangeSubscriptions,
-    state: &Arc<ActiveSessionState>,
-) -> Option<DrainedSupplement> {
-    let batch = super::inbox::take_inbox_batch_sync(config, change_subs, state);
-    let merged = merge_supplements(&batch)?;
-    let count = merged
-        .meta
-        .as_ref()
-        .and_then(|m| m.get(META_SUPPLEMENT_COUNT))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(1);
-    Some(DrainedSupplement {
-        text: merged
-            .content
-            .as_ref()
-            .map(|c| c.to_text())
-            .unwrap_or_default(),
-        count,
-        id: merged.id,
-        ids: merged
-            .meta
-            .as_ref()
-            .and_then(|m| m.get(META_SUPPLEMENT_IDS))
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_str().map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default(),
-    })
-}
-
 /// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
 ///
 /// ## 为什么住 session 而不随驱动器迁走
 ///
-/// 抽干要读**取批那三样**（上界、队列、通知表，见 [`take_supplement_batch_sync`]），
-/// 它们全是会话状态；批次边界本身（工具结果落格）也在会话的**事实写口**上，
-/// 两条判据因此都不需要驱动器伸手向会话要数据。
+/// 抽干要读**取批那三样**（上界、队列、通知表，见
+/// [`super::inbox::take_busy_supplement_batch_sync`]），它们全是会话状态；
+/// 批次边界本身（工具结果落格）也在会话的**事实写口**上，两条判据因此都不需要
+/// 驱动器伸手向会话要数据。
 ///
 /// ## 它只做一件事
 ///
-/// 委托本域的单一入口：取批 + 合并两步都在本域内完成，**不写任何地址、不落库**。
-/// 落格由会话事实源在 `artifact.added`（工具结果）之后调用
-/// [`Self::land_merged_sync`]，经消息列表的**唯一写入口** `apply` 落一条
-/// `message.added`——合并消息因此必然排在工具结果**之后**（写臂那一刻落格会插在
-/// `tool_calls` 与结果之间，违反协议顺序）。
+/// 取批 + 合并 + 落格都在本域内完成。落格由会话事实源在 `artifact.added`
+/// （工具结果）之后调用 [`Self::land_merged_sync`]，经消息列表的**唯一写入口**
+/// `apply` 落一条 `message.added`——合并消息因此必然排在工具结果**之后**
+/// （写臂那一刻落格会插在 `tool_calls` 与结果之间，违反协议顺序）。
 pub(crate) struct SupplementDrain {
     config: Arc<tokio::sync::RwLock<super::super::config::SessionConfig>>,
     change_subs: Arc<VdfsChangeSubscriptions>,
@@ -217,23 +162,13 @@ impl SupplementDrain {
         }
     }
 
-    /// 抽干该会话队首的一批补充并合并成**一条**用户消息（v2 工具循环里的
-    /// 注入挂点）。
-    ///
-    /// ⚠️ **调用方负责 `block_in_place`**：委托的入口内部用 `blocking_read`，若在
-    /// 单线程 runtime 的 async 上下文里直接调会 panic。动作面（`run_actions`）与
-    /// loop 的注入闭包都有 flavor 判定（多线程才 `block_in_place`，否则裸调）。
-    pub(crate) fn take_inbox_batch_sync(&self) -> Option<DrainedSupplement> {
-        take_supplement_batch_sync(&self.config, &self.change_subs, &self.state)
-    }
-
     /// 忙窗批次边界：抽干并合并成**一条**用户消息（**只取件、不落格**）。
     ///
-    /// 与 [`Self::take_inbox_batch_sync`] 的区别是忙门方向：只有本会话正在跑时才取
-    /// （空闲那批归轮收尾的下一轮）。返回完整节点而不是 [`DrainedSupplement`]——
-    /// 落格要的是 `message.added` 的载荷，而 `DrainedSupplement` 是给模型注入用的成形值。
+    /// 只有本会话正在跑时才取（空闲那批归轮收尾的下一轮）。返回完整节点——
+    /// 落格要的是 `message.added` 的载荷。
     ///
-    /// ⚠️ **调用方负责 `block_in_place`**（同 [`Self::take_inbox_batch_sync`]）。
+    /// ⚠️ **调用方负责 `block_in_place`**：委托的入口内部用 `blocking_read`，
+    /// 单线程 runtime 的 async 上下文里直接调会 panic。
     fn take_merged_node_sync(&self) -> Option<cm::ChatNode> {
         let batch = super::inbox::take_busy_supplement_batch_sync(
             &self.config,

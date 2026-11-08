@@ -110,21 +110,6 @@ pub struct ActiveSessionStateInner {
     /// 只能挂在会话节点上——原先是前端一个平行状态（`sessionErrors`），
     /// 现在它是节点的属性（`attributes.error`）。
     pub last_error: Option<String>,
-    /// 连续压缩失败次数（自动路径与用户重试走同一条流水线，计数共用）。
-    ///
-    /// 熔断依据：LLM 压缩是**整段历史的完整请求**，失败一次就是数分钟的注定浪费。
-    /// 连续失败达到阈值即"开闸"跳过自动压缩——历史已回滚、本轮仍能正常回复，
-    /// 不必每轮再白等一次注定失败的请求（实测会话 `09d74431` 就是这种反复失败）。
-    /// 任一次压缩**成功**清零；开闸后按冷却时长重试一次（半开），让瞬时错误自愈。
-    pub auto_compress_failures: u32,
-    /// 熔断开闸时刻（`None` = 未开闸）。用于冷却判断。
-    pub auto_compress_circuit_opened_at: Option<std::time::Instant>,
-    /// **永久失败标志**：历史已超出模型上下文上限（`input_over_limit`）。
-    ///
-    /// 与瞬时失败不同——历史只增不减，这类失败**注定复现**，重试没有意义；
-    /// 熔断的半开重试对它必然再失败。置位后自动压缩一律跳过，直到下一次
-    /// 压缩**成功**（例如用户手动清理历史后）才清除。
-    pub auto_compress_over_limit: bool,
     /// **收件箱**：待消费的用户请求队列（FIFO）。
     ///
     /// 它是「用户消息」的唯一入队形态（见 [`InboxItem`]），也是 VDFS 集合
@@ -188,7 +173,8 @@ pub struct ActiveSessionState {
     /// 之所以必须共享：**流式期间消息还没落库**（`persist_messages` 只在每轮结束时
     /// 写盘）。若 VDFS 只读存储，列表在流式期间就是空的。
     ///
-    /// 生命周期：每轮开始时清空（防上一轮残留），本轮落库后清空（防与落库版本重复）。
+    /// 落库后不摘节点：读出口 `overlay_live` 按 id 合并存储副本与在途副本，
+    /// 同一条消息只出一条（权威号保留存储那一侧）。
     pub transcript: Arc<Mutex<super::transcript::Transcript>>,
     /// 「本轮收尾」唤醒：
     /// 工作态**由忙变闲**时通知一次。
@@ -224,9 +210,6 @@ impl ActiveSessionState {
                 last_tool_calls: Vec::new(),
                 last_outcome: None,
                 last_error: None,
-                auto_compress_failures: 0,
-                auto_compress_circuit_opened_at: None,
-                auto_compress_over_limit: false,
                 inbox: VecDeque::new(),
                 preempt_judged: false,
                 preempt: PreemptPending::None,
@@ -317,64 +300,6 @@ impl ActiveSessionState {
             None => false,
         }
     }
-
-    /// 自动压缩熔断阈值：连续失败达到此数即开闸跳过。
-    pub const COMPRESS_CIRCUIT_LIMIT: u32 = 3;
-    /// 开闸后的冷却时长：期间跳过自动压缩；冷却结束允许一次重试（半开）。
-    pub const COMPRESS_CIRCUIT_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(300);
-
-    /// 自动压缩熔断：是否应跳过本次自动压缩。
-    ///
-    /// 判定：连续失败达到阈值即认为"这次 LLM 压缩注定失败"——继续重试只是每轮
-    /// 白等数分钟。开闸后冷却期内一律跳过；冷却结束放行一次（半开），由这次
-    /// 成功与否决定是否复位或重开。
-    ///
-    /// **永久失败优先**：历史超限（`input_over_limit`）不参与半开重试——它不是
-    /// 瞬时错误，冷却到期后的重试注定再失败（实测会话 `09d74431` 冷却到期后
-    /// 每轮都白跑一次），故该标志置位期间一律跳过。
-    pub async fn compression_should_skip(&self) -> bool {
-        let inner = self.inner.read().await;
-        if inner.auto_compress_over_limit {
-            return true;
-        }
-        if inner.auto_compress_failures < Self::COMPRESS_CIRCUIT_LIMIT {
-            return false;
-        }
-        match inner.auto_compress_circuit_opened_at {
-            // 已开闸且冷却未到：跳过
-            Some(opened) => opened.elapsed() < Self::COMPRESS_CIRCUIT_COOLDOWN,
-            // 计数达标却没记录开闸时刻（不应发生）：保守放行一次探查
-            None => false,
-        }
-    }
-
-    /// 记录一次自动压缩**成功**：清零失败计数、开闸时刻与永久失败标志。
-    /// 任何路径的压缩成功都调用——熔断只在"连续失败"时维持。
-    pub async fn compression_record_success(&self) {
-        let mut inner = self.inner.write().await;
-        inner.auto_compress_failures = 0;
-        inner.auto_compress_circuit_opened_at = None;
-        inner.auto_compress_over_limit = false;
-    }
-
-    /// 记录一次自动压缩**失败**：计数 +1；首次达到阈值时记下开闸时刻。
-    /// 冷却期内失败不刷新开闸时刻（避免「每次失败都重置冷却」导致永不重试）。
-    ///
-    /// `permanent`：是否永久失败（`input_over_limit`——历史只增不减，重试注定
-    /// 复现）。为真时置 [`ActiveSessionStateInner::auto_compress_over_limit`]，
-    /// 此后跳过不再有半开重试。
-    pub async fn compression_record_failure(&self, permanent: bool) {
-        let mut inner = self.inner.write().await;
-        if permanent {
-            inner.auto_compress_over_limit = true;
-        }
-        inner.auto_compress_failures += 1;
-        if inner.auto_compress_failures >= Self::COMPRESS_CIRCUIT_LIMIT
-            && inner.auto_compress_circuit_opened_at.is_none()
-        {
-            inner.auto_compress_circuit_opened_at = Some(std::time::Instant::now());
-        }
-    }
 }
 
 /// 无进程内缓存时的运行态读法：**事实投影**作答。
@@ -422,18 +347,6 @@ impl ActiveSessionManager {
         }
     }
 
-    /// 取**已有**的活跃状态；没有就是没有（不新建）。
-    ///
-    /// ## 为什么需要它
-    ///
-    /// `get_or_create` 的"没有就建"对**控制类**动作是错的：中止一个本实例从未
-    /// 跑过的会话（典型是子智能体空间的会话被错投到根实例）会顺手造出一个
-    /// 永不释放的幽灵状态，而中止本身是空操作——调用方拿到"成功"，什么都没停。
-    /// 「这里有没有在跑的东西」必须是**可查询**的，而不是一问就自动变成有。
-    pub async fn get(&self, session_id: &str) -> Option<Arc<ActiveSessionState>> {
-        self.sessions.read().await.get(session_id).cloned()
-    }
-
     pub async fn get_or_create(&self, session_id: &str) -> Arc<ActiveSessionState> {
         let mut sessions = self.sessions.write().await;
         if let Some(state) = sessions.get(session_id) {
@@ -477,14 +390,13 @@ impl ActiveSessionManager {
 
     // ==================== 转写发布（消息变更的唯一出口）====================
     //
-    // 一切消息级变更（压缩节点 / 前端 CRUD 动作 / 用户消息定稿 / 失败与中止的
-    // 终态收敛）都经 `Transcript::apply` 发布——内存图、seq、核心日志、发布在
-    // 同一个函数里完成。VDFS 转写列表的在途叠加读的是同一份内存图，
-    // 「存储一份 + 在途一份」两种表示从此同源。
+    // 一切消息级变更（前端 CRUD 动作 / 用户消息定稿 / 失败与中止的终态收敛）
+    // 都经 `Transcript::apply` 发布——内存图、seq、核心日志、发布在同一个函数里
+    // 完成。VDFS 转写列表的在途叠加读的是同一份内存图，「存储一份 + 在途一份」
+    // 两种表示从此同源。
     //
-    // 这三个函数住在**名册**上而不是插件上，是因为「按会话 id 解析到它的那份转写」
-    // 只需要这张 `sessions` 表——插件在这里没有别的贡献。于是需要发布能力的
-    // 一方（压缩发射器）拿的是名册，不是整个插件。
+    // 这两个函数住在**名册**上而不是插件上，是因为「按会话 id 解析到它的那份转写」
+    // 只需要这张 `sessions` 表——插件在这里没有别的贡献。
 
     /// 向会话转写发布一条消息帧（唯一出口）。
     pub(crate) async fn transcript_apply(&self, session_id: &str, message: cm::ChatNode) {
@@ -499,39 +411,6 @@ impl ActiveSessionManager {
         for message in messages {
             tr.apply(message);
         }
-    }
-
-    /// 向会话转写发布**快照帧**：不占在途号（`seq` 由存储的 `assign_seq` 唯一发号）。
-    pub(crate) async fn transcript_apply_snapshot(
-        &self,
-        session_id: &str,
-        messages: Vec<cm::ChatNode>,
-    ) {
-        let state = self.get_or_create(session_id).await;
-        state.transcript.lock().await.apply_snapshot(messages);
-    }
-
-    /// **整表重写**（L2 语义压缩）后的收敛：被压掉的消息逐条删除帧，
-    /// 新的首条快照作为一条**完整消息**下发（`content` = 整条替换）。
-    ///
-    /// 逐条删除帧是元数据（id + 状态，每条几十字节），条数受上下文窗口上界
-    /// 约束——比「清空 + 整份重读」便宜得多：保留的消息不再重传。协议里也没有
-    /// 「清空重读」这种形态（消费端要重读只有一条路：自己发现序号缺口）。
-    pub(crate) async fn emit_transcript_rewritten(
-        &self,
-        session_id: &str,
-        dropped: &[String],
-        head: &cm::ChatNode,
-    ) {
-        let frames: Vec<cm::ChatNode> = dropped
-            .iter()
-            .map(|mid| symbio_sdk::llm::turn::llm_removed_frame(mid))
-            .collect();
-        self.transcript_apply_all(session_id, frames).await;
-        // 新的首条（压缩快照）：**快照帧**，不占在途号——交给存储发号，
-        // 避免与存储号两套计数器写同一字段（`assign_seq` 前置条件）。
-        self.transcript_apply_snapshot(session_id, vec![head.clone()])
-            .await;
     }
 }
 

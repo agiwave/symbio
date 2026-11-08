@@ -54,9 +54,6 @@ use {
 
 /// 自主触发落格：「这次开轮是系统自己发起的」在事实源里的样子（归属理由见模块头）。
 pub(crate) mod autonomous;
-/// 压缩节点发射器与熔断计数（`compression-*` 动作的执行体，D-086 §6）：
-/// 持活跃名册与转写，随 session 留守。
-pub(crate) mod compression;
 pub(crate) mod inbox;
 /// 执行期出口实现：把模型 / 工具的流式帧写回本会话转写（装配层按根交出去）。
 pub(crate) mod sink;
@@ -203,8 +200,8 @@ impl Transcript {
     /// 未知 id 用帧内信息建占位再合并——帧自给自足，不依赖任何先行帧（含它的顺序：
     /// 在途号在这里就有，不必等落库）。
     ///
-    /// 这里分配的**在途号是节点属性，不是落库值**：它只用来在图上排序，直到
-    /// [`Self::persisted`] 把该节点交回存储。把它带进存储的路径一律被存储边界拒收
+    /// 这里分配的**在途号是节点属性，不是落库值**：它只用来在图上排序，落库后由
+    /// 存储发的权威号覆盖。把它带进存储的路径一律被存储边界拒收
     /// （见 [`InflightSeq::BASE`] 的说明——那里记着一次真实的撞号事故）。
     ///
     /// ## 协议违例：同帧既带增量又带完整正文
@@ -212,25 +209,6 @@ impl Transcript {
     /// 该拼接还是该替换？语义不可判定，报错丢弃：不发布、不占在途号——不让一个
     /// 语义不可判定的帧进内存图，也不让它上实时面。
     pub fn apply(&mut self, msg: cm::ChatNode) {
-        self.apply_with(msg, true);
-    }
-
-    /// 快照帧（整表重写 / 压缩快照的 `messages` 列表）：**不分配在途号**。
-    ///
-    /// 快照是「换基」而不是「新消息」：它的号只能由存储的 `assign_seq` 发
-    /// （[`chat_session::write::assign_seq`] 是 `seq` 的唯一分配者）。这里若按
-    /// 普通帧分在途号，同一份转写里就会出现在途号与存储号两套计数器写同一字段，
-    /// 破坏 `assign_seq`「无号项只允许在头/尾」的前置条件，表现为两条消息同号
-    /// （实测 `seq 未严格递增（3 → 3）`）。
-    pub(crate) fn apply_snapshot(&mut self, messages: Vec<cm::ChatNode>) {
-        for mut msg in messages {
-            // 载荷里带的号不作数（快照可能是从旧视图序列化来的）。
-            msg.seq = None;
-            self.apply_with(msg, false);
-        }
-    }
-
-    fn apply_with(&mut self, msg: cm::ChatNode, allocate: bool) {
         if msg.delta.is_some() && msg.content.is_some() {
             plugin_error!(
                 "session",
@@ -270,7 +248,7 @@ impl Transcript {
         // 独占 `self.nodes` 的可变借用。
         let allocated = match msg.seq {
             Some(s) => Some(s),
-            None if !existed && allocate => {
+            None if !existed => {
                 let s = self.next_seq.raw();
                 self.next_seq = self.next_seq.after();
                 Some(s)
@@ -367,28 +345,12 @@ impl Transcript {
         self.emit(frame, FrameLog { level, detail });
     }
 
-    /// 落库回执：权威副本已写入存储，把节点从内存图移除（不发布）。
-    ///
-    /// 存储是唯一权威；图里只留**在途**节点（VDFS 转写列表的叠加来源）。
-    pub fn persisted(&mut self, ids: &[String]) {
-        // 落库 = 该节点的增长段结束：把待合并的增量 run 与待投递的增量窗口都收尾。
-        if let Some(line) = self.delta_log.flush() {
-            plugin_debug!("session", "{line}");
-        }
-        self.flush_pending();
-        for id in ids {
-            self.nodes.shift_remove(id);
-        }
-    }
-
     /// 在途图快照（VDFS 转写列表的叠加源）。
+    ///
+    /// 落库后**不必**把节点从图里摘掉：读出口 `overlay_live` 按 id 合并，同号的
+    /// 存储副本与在途副本只会出一条（权威号由存储那一侧保留）。
     pub fn snapshot(&self) -> Vec<cm::ChatNode> {
         self.nodes.values().cloned().collect()
-    }
-
-    /// 取单个在途节点。
-    pub fn get(&self, id: &str) -> Option<cm::ChatNode> {
-        self.nodes.get(id).cloned()
     }
 
     /// 打一行核心日志、投递一条 VDFS 变更。`frame_no` 在每一帧上 +1。
@@ -515,8 +477,8 @@ impl Transcript {
         });
     }
 
-    /// 冲刷待投递的增量窗口（`persisted` / `clear` / `emit_session_state` 与
-    /// 非纯增量帧都经它，保证「更早的正文先出」）。
+    /// 冲刷待投递的增量窗口（`emit_session_state` 与非纯增量帧都经它，
+    /// 保证「更早的正文先出」）。
     fn flush_pending(&mut self) {
         let Some(p) = self.pending.take() else {
             return;
@@ -552,8 +514,7 @@ impl Transcript {
     /// 恰恰是最不该省的那一步。丢失不要紧（状态是幂等的，下一次 `list` 收敛）。
     /// `None`（会话已删、取不到视图）⇒ 退化为无载荷变更：回读 `NotFound` 即删除。
     ///
-    /// 调用时机由编排层保证：正常收尾在「清在途 → 复位 `is_working`」之后、
-    /// 中止收尾在 `converge_inflight` 之后——两者都在本轮**最后一条**消息帧之后。
+    /// 调用时机由编排层保证：在本轮**最后一条**消息帧之后。
     ///
     /// ## 必须先冲刷待投递的增量
     ///

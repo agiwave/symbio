@@ -63,7 +63,6 @@ impl: done
 | 工作目录 | `workdir/{mod,fs_watcher}.rs` | 会话工作目录的 VDFS 实现（`<根>/session/<id>/workdir/<rel>`）与其下的文件系统监听 |
 | 会话记忆 | `memory.rs` | 本会话自己的 `MEMORY.md`：落位、地址、两道闸门与系统提示词注册段（机制在 `providers/memory`） |
 | 消息变更事实 | `message_events.rs` | 「编辑 / 截断」入格的写方（D-053）：`commands::patch_message` / `commands::truncate_messages` 经唯一写入口落事实，重建读路径不会让旧内容复活 |
-| 时间上下文 | `temporal.rs` | 挂在用户消息 `prompt` 上的 `<context>` 段（唯一调用点是本插件落库路径） |
 | 统计读数 | `stats.rs` | `session/stats` 的只读投影出口 |
 | worker 进展 | `worker_progress.rs` | Q3（worker 进展）的**唯一归属**：`WorkerProgress` 类型、旧落库读法（`progress_of`）与 WAL 读法（`progress_from_wal`）、逐子会话编排的存储侧单入口 `for_session`——驱动器只调这一个入口，「枚举 + 加载 + 复核 + 读法」这条链不在驱动器侧自拼（[D-081](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 裁决一第 4 条） |
 
