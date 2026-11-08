@@ -70,6 +70,22 @@ async function loadFact(id) {
   return mod.default
 }
 
+/**
+ * 生成顺序：`current`（`006-当前事实表.md`）排在**所有生成器之后**。
+ *
+ * `current` 统计的是**代码文件**的规模与条目数，其中一部分文件正是别的事实生成的
+ * （`view_names.rs` / `events.rs` / `routes.rs` / `trigger_kinds.gen.rs` …）。按目录
+ * 字典序它恰好排在中间（`current` < `views-rs`），于是「删掉一条 `shared_views`」
+ * 这类改动会读到上一轮写下的那份生成物：本轮 006 记的是旧行数，`views-rs` 紧接着
+ * 把它改小——整轮跑完的 `gen-facts --check` 必红，而**再跑一次就绿**。那不是代码漂移，
+ * 是生成顺序让 006 读了半旧的生成物（本仓为此付了两次「重跑一次才绿」）。
+ *
+ * 顺序是 runner 的事，`discover` 只管「目录里有哪几份事实」，所以这条规则放在这里。
+ */
+export function runOrder(ids) {
+  return [...ids.filter((id) => id !== 'current'), ...ids.filter((id) => id === 'current')]
+}
+
 async function main() {
   let ids
   try {
@@ -88,6 +104,8 @@ async function main() {
     )
     return 2
   }
+
+  ids = runOrder(ids)
 
   const contractErrs = []
   const drifts = []
