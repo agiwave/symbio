@@ -56,7 +56,7 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 | `projections/span.rs`（110） | 会话级时域跨度 | 名册无此行 | **已搬** → 随 #13 同包 | 无——同族读数，跟着时延列一起进包 |
 | `token_ledger.rs`（107）+ `spend_ledger.rs`（133） | 用量 / 金额台账（按主体、按币种） | #18 成本控制 | **不随 #18**：两条折叠只有 `stats` 一个读方，按 D-221「只被 owner 自己在读 ⇒ 住 owner 的 `projections/`」它们已在正确位置；`cost.ledger` 读的是信封字段 `cost_ms`，这两本读的是载荷里的 `usage` / `spend`——搬进成本包要先让那两个字段成为声明过的事实形状，那是另一条机制补件 | 无——归 S8 的那一半（core 的 `cost` 折叠）已落 `crates/symbio-plugin-cost` |
 | `projections/changes.rs`（161）+ `changes.rs`（160） | 工作目录变更账 + 它的只读出口 | 名册无此行 | 随工作目录能力（`symbio-plugin-vdfs` / `local`） | 出口是 VDFS 地址面的一段，与 `workdir` 的读写同属一域；搬它要连出口一起搬，那是另一段的事 |
-| `transcript/autonomous.rs`（539） | 自主触发的**落格与开轮**（四格事实 + 入队） | #15 主动开口 | 拆（受限）：**触发时机已在 `symbio-plugin-heartbeat`**；本文件剩下的「谁有资格在什么时刻写这个会话的事实源」是存储所有者的写窗口纪律，留基底（`D-076` 裁决一 #5/#6） | 无——这一条的拆分已经完成，剩下的半边按裁决**不是能力** |
+| `transcript/autonomous.rs`（539） | 自主触发的**落格与开轮**（四格事实 + 入队） | #15 主动开口 | **已拆（受限）**：触发时机在 `symbio-plugin-heartbeat`；本文件剩下的「谁有资格在什么时刻写这个会话的事实源」是存储所有者的写窗口纪律，留基底（`D-076` 裁决一 #5/#6）——这一半按裁决**不是能力**，不再有迁移动作 | 无——拆分已完成，判据在 `D-076` |
 | `transcript/compression.rs`（158） | 压缩节点的发射器（前端可见的「正在压缩」） | L5 的落点 | 随 L5 的补件走 | 压缩帧要先进 `plugin-api`，本段不动 |
 
 ### 二、五类残留（留）
@@ -85,7 +85,7 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 |:-:|---|---|---|
 | 13 | 时延分层 | 一 · `projections/slo.rs` + `tiers.rs` | **已拆**：能力包 `symbio-plugin-slo`（三视图 + 两半折叠），`session` 只剩读方 |
 | 14 | 打断与插话 | 一 · `transcript/inbox.rs::PreemptionDecider`（判定）+ 二 · 收件箱（基底） | **已知边界，不迁**：闭环未接线（`D-380`）；触发条件 = `T-048` 接线完成后再裁是否拆出 |
-| 15 | 主动开口 | 一 · `transcript/autonomous.rs` | 拆（受限）：触发时机已在 heartbeat 包，落格与开轮留基底（`D-076` 已裁） |
+| 15 | 主动开口 | 一 · `transcript/autonomous.rs` | **已拆（受限）**：触发时机在 heartbeat 包；落格与开轮是写窗口纪律，留基底（`D-076` 已裁） |
 | 31 | 目标自生成 | 一 · `conation.rs` | **已拆**：能力包 `symbio-plugin-conation`（事实 + 视图 + 两半折叠），`session` 只剩读方 |
 | 32 | 内在动机 | 一 · `config.rs::conation_enabled` | **已拆**：能力包 `symbio-plugin-conation`（`conation.policy` 判决视图），`session` 只剩强制点（`D-384`） |
 
