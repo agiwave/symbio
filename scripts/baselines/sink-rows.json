@@ -1,0 +1,75 @@
+{
+  "note": "归宿行（by = None）条数棘轮：只许降。统计口径是生产 Decl 字面量里 by: None 的行（剥注释、剔除 #[cfg(test)] 与 *.test.rs），不是文本出现次数。新增一行必须同批登记非空 why 与能打开的 adr（D-NNN），并在提交说明里回答「这一格为什么不需要派发」。",
+  "rows": [
+    {
+      "name": "tool.artifact",
+      "why": "产物格无端口；读者是 model 续接债与会话投影，不是环前件",
+      "adr": "D-397"
+    },
+    {
+      "name": "glossary.defined",
+      "why": "术语定义写即闭合，没有「必须发生」的时机",
+      "adr": "D-397"
+    },
+    {
+      "name": "classify.verdict",
+      "why": "判定记录无端口，结局由写方落定（守 classify.answered / classify.escalate）",
+      "adr": "D-397"
+    },
+    {
+      "name": "heartbeat.cadence",
+      "why": "心跳是观测事实，写即闭合",
+      "adr": "D-397"
+    },
+    {
+      "name": "conation.expressed",
+      "why": "表达记录，写方可选、无时机债务",
+      "adr": "D-397"
+    },
+    {
+      "name": "conation.inquiry",
+      "why": "表达记录，写方可选、无时机债务",
+      "adr": "D-397"
+    },
+    {
+      "name": "conation.curiosity",
+      "why": "表达记录，写方可选、无时机债务",
+      "adr": "D-397"
+    },
+    {
+      "name": "conation.avoidance",
+      "why": "表达记录，写方可选、无时机债务",
+      "adr": "D-397"
+    },
+    {
+      "name": "memory.encoded",
+      "why": "编码是收束贡献，无派发时机",
+      "adr": "D-397"
+    },
+    {
+      "name": "memory.consolidated",
+      "why": "巩固产物，写即闭合",
+      "adr": "D-397"
+    },
+    {
+      "name": "memory.forgotten",
+      "why": "遗忘产物，写即闭合",
+      "adr": "D-397"
+    },
+    {
+      "name": "session.opening-seat",
+      "why": "首响由模型写，是声明锚点不是环债（守 chat.assistant.opening）",
+      "adr": "D-397"
+    },
+    {
+      "name": "session.terminated-seat",
+      "why": "终止由宿主簿记写方写，不在债表（守 session.terminated）",
+      "adr": "D-397"
+    },
+    {
+      "name": "memory.calibrated",
+      "why": "校准观测，写即闭合",
+      "adr": "D-397"
+    }
+  ]
+}

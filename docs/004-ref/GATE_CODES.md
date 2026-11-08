@@ -58,6 +58,7 @@ lists: [gate-codes=owner]
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
 | **SD** | 会话死码台账（B 类能力待接入） | `scripts/session-dead-code-audit.mjs` | SD-001–002 | `SD-003` |
 | **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
+| **SR** | 归宿行（by = None）条数棘轮 | `scripts/sink-row-audit.mjs` | SR-001–004 | `SR-005` |
 | **SV** | 共享词汇 | `scripts/shared-name-audit.mjs` | SV-001、SV-003 | `SV-004` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
@@ -285,6 +286,10 @@ lists: [gate-codes=owner]
 | **SPC-001** | `scripts/spec-coverage-audit.mjs` |
 | **SPC-002** | `scripts/spec-coverage-audit.mjs` |
 | **SPC-003** | `scripts/spec-coverage-audit.mjs` |
+| **SR-001** | `scripts/sink-row-audit.mjs` |
+| **SR-002** | `scripts/sink-row-audit.mjs` |
+| **SR-003** | `scripts/sink-row-audit.mjs` |
+| **SR-004** | `scripts/sink-row-audit.mjs` |
 | **SV-001** | `scripts/shared-name-audit.mjs` |
 | **SV-003** | `scripts/shared-name-audit.mjs` |
 | **SX-001** | `scripts/slo-exit-audit.mjs` |
