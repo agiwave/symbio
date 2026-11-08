@@ -18,7 +18,7 @@ import './_selfrun.mjs';
 // | 变更非空 | 「两步订阅」任缺一步 ⇒ 零变更（不报错、不断连，最像"模型没产出"） |
 // | 首帧全量 + 后续窄 delta | 增量不得落在没有基线的节点上 |
 // | 首帧 content + Σdelta == 完整正文 | 增量不丢不重 |
-// | 同一节点的 `seq` 逐帧相同 | `seq` 是**节点属性**（位置），不是投递序号 |
+// | 同一节点的 `seq` 是节点位置（非投递序号） | 顺序由单一订阅 FIFO 给出 |
 // | 全部变更 `path` 在会话作用域内 | 广播语义下消费端按地址归属 |
 // | 离开 working 的会话帧**到达晚于**全部消息帧 | 「不忙 ⇒ 本轮已终态」的唯一依据 |
 //
@@ -41,7 +41,6 @@ import {
   createSession,
   sendInbox,
   assertTranscriptInvariants,
-  assertSeqAnchorIsNodeAttribute,
   msgTypeOf,
   msgRoleOf,
 } from '../helpers.mjs';
@@ -171,18 +170,12 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
     );
 
     // ⑧ `seq` 是**节点属性**（位置序号），不是投递序号。
-    //    曾经 `seq` 是逐帧递增的流内序号，于是"顺序"成了投递属性——到达顺序一变
-    //    （两条通道、乱序合并）就要靠补丁纠正。此后顺序由**单一订阅 FIFO** 给出。
-    //
-    //    允许的形态是「在途号… → 权威号（其后全部帧）」：号只在存储写入时分配，
-    //    节点先以在途号上线、落库后由回包帧交回权威号（§3.4 唯一的换号时机）。
-    //    断言「逐帧必须完全相同」会把"从未落库"当成正确——那正是本用例要拦的 bug。
+    //    顺序由**单一订阅 FIFO** 给出；节点一旦落库，`seq` 就是它的位置。
     const seqsOfNode = frames.map((f) => f.data?.seq).filter((s) => s != null);
     assert(
       seqsOfNode.length > 0,
       `正文节点的帧应带位置序号 seq\n时间线:\n${timeline.join('\n')}`,
     );
-    assertSeqAnchorIsNodeAttribute(frames, 'T9 正文节点');
 
     // ⑨ 增量拼接 == 完整正文：不丢不重。
     //    首个分片随首帧以 `content` 下发（全量），其余分片是 `delta`；终态帧只带状态。

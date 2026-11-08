@@ -176,13 +176,13 @@ export default defineCase(
         '回答（末轮正文）**不在根级**——若哪天它变成根级，前端镜像的「位置不参与判定」' +
           '就不再被真实数据覆盖，请同步复核 conversation_line.ts',
       );
-      const turnOfAnswer = byId.get(answer.parent_id);
-      assert(turnOfAnswer, `回答的父节点 ${answer.parent_id} 应在转写里`);
-      // 轮锚 = 本轮用户消息节点（D-335：它的 id 就是这一轮的发布身份，没有独立的 turn 节点）。
-      assertEq(msgRoleOf(turnOfAnswer), 'user', '回答的父节点应是本轮用户消息节点（D-335：用户消息即轮）');
-      assertEq(typeOf(turnOfAnswer), 'text', '用户消息节点是文本节点');
+      const anchorOfAnswer = byId.get(answer.parent_id);
+      assert(anchorOfAnswer, `回答的父节点 ${answer.parent_id} 应在转写里`);
+      // 轮锚 = 本轮用户消息节点（它的 id 就是这一轮的发布身份）。
+      assertEq(msgRoleOf(anchorOfAnswer), 'user', '回答的父节点应是本轮用户消息节点（用户消息即轮）');
+      assertEq(typeOf(anchorOfAnswer), 'text', '用户消息节点是文本节点');
       assert(
-        turnOfAnswer.parent_id == null,
+        anchorOfAnswer.parent_id == null,
         '用户消息节点（轮锚）在根级——回答挂在它下面，所以「按根级切」会连轮锚带回答一起漏掉',
       );
       assertEq(msgRoleOf(answer), 'assistant', '回答是助手说的话');

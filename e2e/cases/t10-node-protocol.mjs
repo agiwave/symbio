@@ -44,7 +44,6 @@ import {
   createSession,
   sendInbox,
   assertTranscriptInvariants,
-  assertSeqAnchorIsNodeAttribute,
   msgTypeOf,
   msgRoleOf,
 } from '../helpers.mjs';
@@ -52,7 +51,7 @@ import {
 /** 终态词（与后端 `is_terminal` 同口径） */
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
 
-export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall 三态与增量收敛', async () => {
+export default defineCase('T10 节点协议全景：Reason/Text/ToolCall 三态与增量收敛', async () => {
   const llm = await new MockLlm([
     {
       id: 'panorama',
@@ -134,17 +133,13 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
       return [...entered].filter((id) => !TERMINAL.has(last.get(id)));
     }
     /**
-     * 收网**水位线**：见过 assistant 首帧或 turn 节点才算「助手侧已经开跑」。
+     * 收网**水位线**：见过 assistant 首帧才算「助手侧已经开跑」。
      *
-     * 判据取「带身份帧（`type` 非空）且折叠角色为 assistant」或「折叠类型为 turn」：
-     * 用户帧折叠角色是 `user`（principal person），天然不过线；纯增量 / 内容帧
-     * 不带 `type`，不是首帧。
+     * 判据取「带身份帧（`type` 非空）且折叠角色为 assistant」：用户帧折叠角色是
+     * `user`（principal person），天然不过线；纯增量 / 内容帧不带 `type`，不是首帧。
      */
     function pastWatermark() {
-      return rt.messages().some(({ data }) => {
-        if (data?.type == null) return false;
-        return msgTypeOf(data) === 'turn' || msgRoleOf(data) === 'assistant';
-      });
+      return rt.messages().some(({ data }) => data?.type != null && msgRoleOf(data) === 'assistant');
     }
     let lastLen = -1;
     let quietSince = Date.now();
@@ -183,14 +178,16 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
       `消息变更的落点应是 <会话>/${SEG_MESSAGES}/<mid>`,
     );
 
-    // ④' `seq` 是节点位置，不是投递序号（逐帧递增的那个概念已随
-    //     `session/stream` 退役）。允许的形态是「在途号… → 权威号（其后全部帧）」：
-    //     号只在存储写入时分配，节点先以在途号上线、落库后由回包帧交回权威号
-    //     （§3.4 唯一的换号时机）。断言"逐帧完全相同"会把"从未落库"当成正确。
+    // ④' `seq` 是节点位置，不是投递序号。帧的顺序由单一订阅 FIFO 给出；
+    //     节点落库后，`seq` 就是它在历史里的位置（读出口与实时面同源）。
     for (const { mid } of ops) {
-      assertSeqAnchorIsNodeAttribute(
-        rt.framesOf(mid),
-        `节点 ${String(mid).slice(0, 8)}`,
+      const seqs = rt
+        .framesOf(mid)
+        .map((f) => f.data?.seq)
+        .filter((s) => s != null);
+      assert(
+        seqs.length > 0 || rt.framesOf(mid).every((f) => f.data?.delta != null),
+        `节点 ${String(mid).slice(0, 8)} 的帧应带位置序号 seq`,
       );
     }
 

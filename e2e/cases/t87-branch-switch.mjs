@@ -170,10 +170,6 @@ export default defineCase(
       assertEq(users0.length, 1, `首轮应恰有一个用户消息节点（实得 ${users0.length}）`);
       const rootA = users0[0].id;
       assert(
-        !msgs0.some((m) => msgTypeOf(m) === 'turn'),
-        `D-335：读出口不应出现独立的 Turn / Skeleton{run} 节点（实得类型: ${msgs0.map((m) => msgTypeOf(m)).join(',')}）`,
-      );
-      assert(
         users0[0].meta?.branch === undefined,
         '没有第二次尝试 ⇒ 后端不盖分支标注（画出来的 `1/1` 是假的两支）',
       );

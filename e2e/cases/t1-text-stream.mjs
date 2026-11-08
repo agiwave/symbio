@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T1 文本流式：SSE 分片 → stdout 拼接 + 转写落盘（turn/text 节点、seq 单调）。
+// T1 文本流式：SSE 分片 → stdout 拼接 + 转写落盘（用户发言 + 完整正文）。
 import {
   MockLlm,
   makeHomedir,
@@ -55,7 +55,7 @@ export default defineCase('T1 文本流式：SSE 分片输出 + 转写落盘', a
     assert(toolNames.includes('vdfs_read'), `请求 tools 应含 vdfs_read（实际: ${toolNames.join(',')}）`);
     assertEq(reqs[0].body.stream, true, '请求应为流式');
 
-    // 转写落盘：user + turn + assistant text(completed)——经生产读出口读
+    // 转写落盘：user + assistant text(completed)——经生产读出口读
     api = await startReadbackCli({
       homedir: hd.homedir,
       workdir: hd.workdir,

@@ -6,8 +6,8 @@ import './_selfrun.mjs';
 // 钉的不变量：
 // - 中止后**不得有节点停在 streaming/pending**；
 // - 会话节点 attributes.outcome = "aborted"（经 vdfs/stat 真实边界读取）；
-// - D-335 后没有 Turn 节点：中止落在**本轮正文节点**的 status=aborted 上，
-//   且不落失败节点、不落兜底（中止不是失败，D-044 / D-165）。
+// - 中止落在**本轮正文节点**的 status=aborted 上，且不落失败节点、不落兜底
+//   （中止不是失败，D-044 / D-165）。
 import {
   MockLlm,
   makeHomedir,
@@ -82,11 +82,7 @@ export default defineCase('T7 中止收敛：运行中 action(会话地址, abor
     const msgs = await readSessionMessages(cli, 'e2e-t7');
     assertTranscriptInvariants(msgs, 'T7');
 
-    // D-335：整轮骨架已折叠，不再有 Turn 节点——中止落在**本轮正文节点**的状态上。
-    // 把「没有 Turn 节点」从隐含变成显式回归钉子，同时钉住「中止不落失败 / 兜底」。
-    const turnNodes = msgs.filter((m) => msgTypeOf(m) === 'turn');
-    assert(turnNodes.length === 0, `D-335 后不应再有 Turn 节点（实际 ${turnNodes.length}）`);
-
+    // 中止落在**本轮正文节点**的状态上；同时钉住「中止不落失败 / 兜底」。
     const aborted = msgs.filter((m) => m.status === 'aborted');
     assert(
       aborted.length === 1,

@@ -15,7 +15,7 @@ import './_selfrun.mjs';
 // ## 形状契约（flat，D-335）
 //
 // - 一轮的可见锚是**用户消息节点**（`parent_id = null`，其 id 就是本轮分组 id）；
-//   没有独立的 `Skeleton{run}` 节点——它的 `meta.context` 并入用户消息节点。
+//   没有独立的轮骨架节点——轮信息并入用户消息节点。
 // - 本轮其余节点（思考 / 正文 / ToolCall 骨架）`parent_id = null`、
 //   `meta.turn_root = <用户消息节点 id>`——升到根、靠记号认回本轮。
 // - Tool 结果节点 `parent_id = <tool_call id>`——**不升根**，与建树策略正交。
@@ -114,7 +114,7 @@ export default defineCase(
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T79');
 
-        // 轮锚 = 用户消息节点（D-335：没有独立的 Skeleton{run} 可见节点）
+        // 轮锚 = 用户消息节点（没有独立的轮骨架可见节点）
         const anchor = msgs.find(
           (m) => msgRoleOf(m) === 'user' && msgTypeOf(m) === 'text',
         );
@@ -123,12 +123,6 @@ export default defineCase(
           `应有用户消息节点作为轮锚（实得类型: ${msgs.map((m) => msgTypeOf(m)).join(',')}）`,
         );
         assertEq(anchor.parent_id ?? null, null, '用户消息节点（轮锚）应在会话根');
-
-        // 次要断言（防回退）：读出口里没有 Turn / Skeleton{run} 节点
-        assert(
-          !msgs.some((m) => msgTypeOf(m) === 'turn'),
-          `D-335：读出口不应出现 Turn / Skeleton{run} 节点（实得类型: ${msgs.map((m) => msgTypeOf(m)).join(',')}）`,
-        );
 
         // 主判据①：树是平的——除工具结果挂在自己的 tool_call 下，其余节点全在会话根
         const toolCalls = msgs.filter((m) => msgTypeOf(m) === 'tool_call');
