@@ -269,11 +269,21 @@ export default defineCase(
 
       // ── 跑负载：20 轮正文 + 1 轮 45 步工具轮 ─────────────────────────────
       for (let i = 0; i < NORMAL_TURNS; i++) {
-        await sendAndSettle(cli, sub, turnText(i), { timeoutMs: 90_000 });
-        // 每轮的用户可见收束：从生产读出口取「本轮用户消息之后」的节点——
-        // 正常轮有一句完成正文，故障轮（第 2 轮）有失败节点。
-        // 读出口可能比实时面晚一拍，waitFor 轮询到本轮自己的节点出现为止；
-        // 以本轮用户消息为锚，避免上一轮的收束冒充本轮。
+        cli.send(turnText(i));
+        // 先等本轮用户消息出现，再等它之后出现收束——两段都以本轮 marker 为锚。
+        // 不用实时面的 working 状态判轮次：并发下上一轮的收尾帧可能晚到，
+        // 会被误当成本轮收尾，进而把下一句并进上一轮（t87 的并发教训）。
+        await waitFor(
+          async () => {
+            const now = await readSessionMessages(cli, SID);
+            return now.some(
+              (m) =>
+                msgRoleOf(m) === 'user' &&
+                JSON.stringify(m).includes(markerOf(i)),
+            );
+          },
+          { what: `第 ${i + 1} 轮开口`, timeoutMs: 30_000 },
+        );
         await waitFor(
           async () => {
             const now = await readSessionMessages(cli, SID);
@@ -282,7 +292,7 @@ export default defineCase(
               .find(
                 (m) =>
                   msgRoleOf(m) === 'user' &&
-                  JSON.stringify(m).includes(turnText(i)),
+                  JSON.stringify(m).includes(markerOf(i)),
               );
             if (!anchor) return false;
             const after = now.filter((m) => (m.seq ?? -1) > (anchor.seq ?? -1));
@@ -295,7 +305,7 @@ export default defineCase(
                     m.status === 'completed',
                 );
           },
-          { what: `第 ${i + 1} 轮的可见收束`, timeoutMs: 30_000 },
+          { what: `第 ${i + 1} 轮的可见收束`, timeoutMs: 60_000 },
         );
         // 大结果**当时**完整进存储（不是 head/tail 之后的样子）——存储侧的全文锚点只在
         // 第 1 轮结束时取，后续压缩会归并消息集合，届时这一条已不代表「存储」。
