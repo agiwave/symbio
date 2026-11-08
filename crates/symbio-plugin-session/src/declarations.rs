@@ -77,12 +77,10 @@ pub(crate) const SESSION_TERMINATED_SEAT: &str = "session.terminated-seat";
 // 读方侧的视图名：名字住 `plugin-api` 的词汇面（由 owner 的 `PLUGIN.yml`
 // `shared_views` 生成，D-364），本插件按名字读。以下别名只保留调用点的旧名字，
 // 读口不变；owner 改名时生成物与这里一起变，不再出现「各写一遍字面量」。
-// 已收起的两条（`task.readyset`、`slo.span` 等）随报表登记（`D-387`）一起退场：
-// 报表自带 `views`，读方不再需要名字。
-pub(crate) use symbio_plugin_api::view_names::{
-    VIEW_CONATION_AUTONOMY as CONATION_AUTONOMY_VIEW,
-    VIEW_CONATION_INTENTS as CONATION_INTENTS_VIEW,
-};
+// 已收起的三条（`task.readyset` / `slo.span` / `conation.autonomy`）随报表登记
+// （`D-387`）一起退场：报表自带 `views`，读方不再需要名字。本条随
+// `conation.intents` 那一列一起消失——届时 `view_names.rs` 只剩本插件自己的 `memory.live`。
+pub(crate) use symbio_plugin_api::view_names::VIEW_CONATION_INTENTS as CONATION_INTENTS_VIEW;
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 

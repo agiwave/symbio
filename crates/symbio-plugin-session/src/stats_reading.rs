@@ -18,7 +18,7 @@
 //! （`ViewDecl::agg`）都由 owner 交，本文件只做「逐片求值 → 把值交回去 → 原样装一格」
 //! （`D-281`）。同一份事实长出两套口径，读数与投影就会静默漂移，而两边都自称是 SLO。
 
-use crate::declarations::{COMMITMENT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW};
+use crate::declarations::{COMMITMENT_VOCAB, CONATION_INTENTS_VIEW};
 use symbio_kernel::event::Event;
 use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 use symbio_plugin_api::reports::ReportCtx;
@@ -180,10 +180,10 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> se
         || serde_json::json!({ "sessions": 0, "median_ms": serde_json::Value::Null }),
     );
     let conation = shared_axis(CONATION_INTENTS_VIEW, snapshots).unwrap_or(serde_json::Value::Null);
-    // 自主程度轴同样归能力包：逐片求值 + 交回 `agg`，本处不认识分子分母。
-    // 读不到 ⇒ `null`（与主动性的缺席同一条：零是读数，`null` 是读不出来）。
-    let autonomy =
-        shared_axis(CONATION_AUTONOMY_VIEW, snapshots).unwrap_or(serde_json::Value::Null);
+    // 自主程度轴同样归能力包：报表 `slot = autonomy`，逐片 `eval` → owner `agg` →
+    // owner `fleet_render`，本处不认识分子分母。读不到 ⇒ `null`（与主动性的缺席同一条：
+    // 零是读数，`null` 是读不出来）。
+    let autonomy = fleet_of("autonomy", snapshots, ctx).unwrap_or(serde_json::Value::Null);
 
     // 合计两格读 owner 交的逐档行（形状归 owner，本处只做加法）。
     let (turns, fallbacks) = totals_of(&by_tier["fallback"]);

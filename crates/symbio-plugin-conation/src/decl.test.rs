@@ -295,3 +295,42 @@ fn the_three_unbuilt_capabilities_ship_name_cell_field_and_row() {
         );
     }
 }
+
+// ==================== 自主程度列的报表登记（D-387） ====================
+
+fn report_ctx() -> symbio_plugin_api::reports::ReportCtx<'static> {
+    symbio_plugin_api::reports::ReportCtx {
+        principal: "session/main",
+        cap: 0,
+        readable: true,
+    }
+}
+
+/// `slot = autonomy` 已登记：带跨会话轴，出口就是视图值**本身**（不加键、不改名）。
+#[test]
+fn the_autonomy_report_hands_back_the_view_value_untouched() {
+    let reports = symbio_plugin_api::reports::reports().expect("登记表应合法");
+    let report = reports
+        .iter()
+        .find(|r| r.slot == "autonomy")
+        .expect("自主程度列应有登记项");
+    assert_eq!(report.owner, "conation");
+    assert_eq!(report.views, &[CONATION_AUTONOMY][..], "视图只有一个");
+    assert_eq!(
+        report.fleet,
+        Some("axes.autonomy"),
+        "跨会话那一格由本包的 agg 合并（D-281）"
+    );
+
+    let sample = json!({ "closed": 3, "unattended": 2, "unattended_rate": 2.0 / 3.0 });
+    assert_eq!(
+        autonomy_value(std::slice::from_ref(&sample), &report_ctx()),
+        sample,
+        "单片：owner 的值原样交，读方不加键"
+    );
+    assert_eq!(
+        autonomy_value(&[], &report_ctx()),
+        Value::Null,
+        "读不到 ⇒ null（零是读数，null 是读不出来）"
+    );
+}

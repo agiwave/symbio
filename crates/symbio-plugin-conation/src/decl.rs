@@ -41,6 +41,7 @@
 
 use serde_json::{json, Value};
 
+use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{
     Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
@@ -66,6 +67,9 @@ pub(crate) use symbio_plugin_api::events::{EVENT_TASK_ASSERTED, EVENT_TASK_HELD}
 pub(crate) const CONATION_INTENTS: &str = "conation.intents";
 
 /// 对外可读的第二条视图：无人干预完成率（DE-008 §3.1 自主程度）。
+///
+/// 读者按报表登记取（`D-387`，`slot = autonomy`）：出口形状是这条视图的值本身，
+/// 单片与跨会话合并后同形，`null` 表示这一格读不出来（零是读数）。
 pub(crate) const CONATION_AUTONOMY: &str = "conation.autonomy";
 
 /// 名册 #36「主动求知」的最小能力面：**一次求知被发起**。
@@ -357,6 +361,33 @@ fn merge(parts: &[Value]) -> Value {
 
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。
 symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
+
+// 自主程度列的报表登记（`D-387`）：视图是 `conation.autonomy`，出口就是视图值本身。
+//
+// 有 `fleet`：跨会话那一格由本包的 `agg` 合并（`D-281`），读方不认识分子分母。
+symbio_plugin_api::submit_reports!([ReportDecl {
+    owner: "conation",
+    slot: "autonomy",
+    order: 90,
+    views: &[CONATION_AUTONOMY],
+    fleet: Some("axes.autonomy"),
+    render: autonomy_value,
+    fleet_render: Some(autonomy_value),
+    panel: None,
+}]);
+
+/// 自主程度列：owner 交的整片值**原样**交出，不在这里加键也不在这里改名。
+///
+/// 单片（`eval`）与跨会话合并后（`agg`）同形，所以同一个函数兼任 `render` 与
+/// `fleet_render`——两份不同的排版会让「这一列在读哪一半」变成读方要猜的事。
+/// 读不到（读方交的是 `Null` 占位）⇒ `null`：零是读数，`null` 是读不出来
+///（与 `slo.span` 的有据零形状不同，这条视图的零形状由 `eval` 自己给出）。
+fn autonomy_value(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    match views.first() {
+        Some(value) if !value.is_null() => value.clone(),
+        _ => Value::Null,
+    }
+}
 
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {

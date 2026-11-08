@@ -43,9 +43,7 @@
 //! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——按名字读的视图
 //! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
-use crate::declarations::{
-    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB,
-};
+use crate::declarations::{CHAT_VOCAB, CONATION_INTENTS_VIEW, MESSAGE_VOCAB};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -91,29 +89,6 @@ pub(crate) struct TierRow {
     /// 取自 owner 交的 `sample_ms` 的**长度**：owner 交的是样本本身（跨会话合并要从
     /// 样本重算分位数），出口只要个数——取长度是排版，不是重算。
     pub samples: usize,
-}
-
-/// 按名字读一条能力包交的视图；读不到 ⇒ **调用方给的形状**，并出声一次。
-///
-/// 空形状不是「这一档没有数」，是「这一列今天读不出来」——两者的区别由
-/// `capability_views` 那一列的可诊断缺席承担，本处只保证出口形状可读（读方不必分诊）。
-/// 空形状由调用方交而不是本函数写死：`{ by_tier: [] }` 是逐档视图的形状，跨度视图是
-/// `{ events, span_ms }`——读方替 owner 猜形状，就是第二份口径。
-fn read_view_or(
-    name: &str,
-    snapshot: &[Event],
-    empty: impl FnOnce() -> serde_json::Value,
-) -> serde_json::Value {
-    match symbio_plugin_api::read_shared_view_all(name, snapshot) {
-        Ok(value) => value,
-        Err(why) => {
-            symbio_plugin_api::plugin_warn!(
-                symbio_plugin_api::PLUGIN_ID_SESSION,
-                "[stats] `{name}` 读不到（{why}）：按空读数交"
-            );
-            empty()
-        }
-    }
 }
 
 /// 成本台账的**空形状**：`{ by_principal: {}, total_ms: 0 }`（与 owner 交的形状同键）。
@@ -575,12 +550,12 @@ pub(crate) fn read(
     let span = report_value("span", &snapshot, &report_ctx)
         .unwrap_or_else(|| serde_json::json!({ "events": 0, "span_ms": 0 }));
 
-    // 自主程度列（同上）：**折叠归能力包**（`conation.autonomy`）——本插件按名字读，
-    // 不认识分子分母是怎么数的，也不再自己算率。读不到 ⇒ `null`，与 `may_read = false`
-    // 的零形状分开：后者是「不给你看」，前者是「装配里没有 owner」。
-    let autonomy = read_view_or(CONATION_AUTONOMY_VIEW, &snapshot, || {
-        serde_json::Value::Null
-    });
+    // 自主程度列（同上）：**折叠归能力包**（报表 `slot = autonomy`，视图
+    // `conation.autonomy`）——本插件按 `slot` 取整条读数，不认识分子分母是怎么数的，
+    // 也不再自己算率。读不到 ⇒ `null`，与 `may_read = false` 的零形状分开：后者是
+    // 「不给你看」，前者是「装配里没有 owner」。空形状住在 owner 的 `render`（`D-387`）。
+    let autonomy =
+        report_value("autonomy", &snapshot, &report_ctx).unwrap_or(serde_json::Value::Null);
 
     // 实例级聚合列。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
     // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（axes 两族给有据的

@@ -17,14 +17,12 @@ pub struct SharedViewDecl {
 }
 
 /// 每条公开视图一个名字常量：消费方 import 它，不写第二遍字面量（D-364）。
-pub const VIEW_CONATION_AUTONOMY: &str = "conation.autonomy";
 pub const VIEW_CONATION_INTENTS: &str = "conation.intents";
 pub const VIEW_MEMORY_LIVE: &str = "memory.live";
 
 /// 跨插件可读视图（按名字排序）。
 #[rustfmt::skip]
 pub const SHARED_VIEWS: &[SharedViewDecl] = &[
-    SharedViewDecl { name: VIEW_CONATION_AUTONOMY, owner: "conation" },
     SharedViewDecl { name: VIEW_CONATION_INTENTS, owner: "conation" },
     SharedViewDecl { name: VIEW_MEMORY_LIVE, owner: "memory" },
 ];
