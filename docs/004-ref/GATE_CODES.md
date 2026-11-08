@@ -26,7 +26,7 @@ lists: [gate-codes=owner]
 | **BS** | 棘轮基线面的变更审 | `scripts/baseline-scope-audit.mjs` | BS-001–005 | `BS-006` |
 | **CP** | 控制面形状（唯一循环体 / 机制层无域名 / 机制面指纹 / 第二推进循环） | `scripts/control-plane-audit.mjs` | CP-001、CP-004、CP-006、CP-009 | `CP-010` |
 | **CS** | core 形状 | `scripts/arch-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–010 | `CS-011` |
-| **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–020 | `D-021` |
+| **D** | 文档正文与链接 | `scripts/capability-migration-audit.mjs` · `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–020、D-403 | `D-404` |
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
 | **DR** | 死路径（写出来的 crate 名必须存在） | `scripts/dead-path-audit.mjs` | DR-001–003 | `DR-004` |
 | **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
@@ -114,6 +114,7 @@ lists: [gate-codes=owner]
 | **D-018** | `scripts/doc-link-audit.mjs` |
 | **D-019** | `scripts/doc-link-audit.mjs` |
 | **D-020** | `scripts/doc-symbol-audit.mjs` |
+| **D-403** | `scripts/capability-migration-audit.mjs` |
 | **DC-001** | `scripts/doc-count-audit.mjs` |
 | **DC-002** | `scripts/doc-count-audit.mjs` |
 | **DC-003** | `scripts/doc-count-audit.mjs` |

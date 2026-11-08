@@ -46,6 +46,10 @@ impl Plugin for FakeRoot {
 /// （`drive_entry` → `bind`）取到的若是两个实例，`settled` 永远立即返回。
 #[test]
 fn main_entry_resolves_to_the_bound_instance() {
+    // 同一二进制里 Home 构造也会 publish 根：本段必须与它们串行（见锁的注释）。
+    let _serial = crate::DEPLOYMENT_ROOT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let root: Arc<dyn Plugin> = Arc::new(FakeRoot);
     symbio_plugin_api::publish_deployment_root(Arc::clone(&root));
     let bound = symbio_plugin_api::declared_drive_binding()
@@ -69,11 +73,17 @@ fn main_entry_resolves_to_the_bound_instance() {
 /// 决定何时放行。
 #[tokio::test]
 async fn settled_port_resolves_the_registered_entry() {
-    let root: Arc<dyn Plugin> = Arc::new(FakeRoot);
-    symbio_plugin_api::publish_deployment_root(Arc::clone(&root));
-    let _bound = symbio_plugin_api::declared_drive_binding()
-        .expect("驱动绑定必须已登记")
-        .bind(Arc::clone(&root));
+    {
+        // 只在「写根 + 绑定」这段持有；进 await 前释放（见锁的注释）。
+        let _serial = crate::DEPLOYMENT_ROOT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let root: Arc<dyn Plugin> = Arc::new(FakeRoot);
+        symbio_plugin_api::publish_deployment_root(Arc::clone(&root));
+        let _bound = symbio_plugin_api::declared_drive_binding()
+            .expect("驱动绑定必须已登记")
+            .bind(Arc::clone(&root));
+    }
 
     tokio::time::timeout(
         std::time::Duration::from_secs(1),

@@ -22,6 +22,12 @@ pub mod init;
 #[cfg(test)]
 mod notify_port_acceptance;
 
+/// 部署根是**进程级单例**：Home 构造与两个驱动用例都会写它。本测试二进制里任何
+/// 「先 `publish_deployment_root`、后解析」的判据都要持这把锁——并行构造 Home 会把
+/// 根换掉，`main_drive()` 解到别人的根上，t29 判据就假红。
+#[cfg(test)]
+pub(crate) static DEPLOYMENT_ROOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // ── 门面出口 ──────────────────────────────────────────────────────────────
 // 宿主与 CLI 从这里取契约；插件自身只依赖插件门面（E-009）。
 pub use symbio_deploy;

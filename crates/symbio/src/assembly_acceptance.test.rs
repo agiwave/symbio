@@ -37,6 +37,11 @@ async fn every_assembled_package_can_be_constructed() {
     // 遍历**全部已链接包**（含只由测试装配的包），逐个构造。加包不加文件：
     // 新 crate 只要链接进来就自动进入这份清单。
     let tmp = tempfile::tempdir().expect("临时插件目录");
+    // 遍历里会构造 Home，而 Home 构造时 publish 部署根：与驱动用例串行，
+    // 否则 t29 的「先 publish、后解析」会被这里的构造插队（见锁的注释）。
+    let _serial = crate::DEPLOYMENT_ROOT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     for id in linked {
         let dir = tmp.path().join(id);
         std::fs::create_dir_all(&dir).expect("建临时插件目录");

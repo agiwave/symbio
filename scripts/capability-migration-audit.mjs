@@ -74,7 +74,8 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns EX 能力全面拆分（名册处置与迁移边界）
-// @codes EX-003 EX-007
+// @ns D 文档正文与链接
+// @codes EX-003 EX-007 D-403
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -270,6 +271,38 @@ export function debtAllowance({ today, initialDebt, schedule = DEBT_SCHEDULE }) 
     break
   }
   return { today, allowed, next, deadline: schedule.checkpoints.at(-1)?.by ?? null }
+}
+
+/**
+ * 到期豁免（`D-375` §5 的「另裁一条新决策」路径）。
+ *
+ * 豁免**不改判据、不改计数口径**，只把 `EX-007` 的绝对欠账线推迟到 `through`：
+ * 到期后照常按台阶判红，续期必须另裁一条决策并写明代价。
+ * 条目必须挂一个真实存在的 `### D-NNN`、理由非空、日期可读——形状不对一律不生效，
+ * 宁可按台阶判红，也不让一条拼号或匿名的豁免把红藏起来。
+ */
+export const DEBT_EXEMPTIONS = [
+  {
+    decision: 'D-403',
+    through: '2026-11-12',
+    reason:
+      '欠账 7 > 6（2026-11-09 台阶）：存量 6 笔来自 T-053 待搬，第 7 笔来自 91b097fc（D-402 的压缩失败投影新增 pub 项）。' +
+      '不做凑数迁移：迁移批次必须是真的该搬的东西。另更正：91b097fc 正文所载 188/188 在该提交点不成立（实为 187/188，红项即本欠账）；' +
+      '960a692f 的 188/188 成立（该点欠账 6 ≤ 6）',
+  },
+]
+
+/** 当前仍生效的到期豁免（`null` = 没有）。判定见 `DEBT_EXEMPTIONS` 的注释。 */
+export function activeDebtExemption({ today, decisions, exemptions = DEBT_EXEMPTIONS }) {
+  return (
+    exemptions.find(
+      (e) =>
+        /^\d{4}-\d{2}-\d{2}$/.test(String(e.through ?? '')) &&
+        String(e.through) >= today &&
+        decisions.has(String(e.decision ?? '')) &&
+        String(e.reason ?? '').replace(/\s+/g, '').length >= 8,
+    ) ?? null
+  )
 }
 
 /**
@@ -820,6 +853,8 @@ function main() {
   ])
   let migrations = 0
   let supplements = 0
+  /** 逐笔账：欠账明细要能点到具体提交（`D-403`），不能只印总数。 */
+  const ledger = []
   for (const c of commits) {
     if (!touchesAuditedTree(c.files)) continue
     const patch = patchOf(c.sha)
@@ -830,6 +865,9 @@ function main() {
     const r = judgeCommit({ sha: c.sha, message: c.message, patch, decisions, ids, tools })
     if (r.kind === 'migration') migrations += 1
     if (r.kind === 'supplement') supplements += 1
+    if (r.kind === 'migration' || r.kind === 'supplement') {
+      ledger.push({ sha: r.sha.slice(0, 8), subject: r.subject, kind: r.kind })
+    }
     if (r.errors.length && GRANDFATHERED.has(r.sha.slice(0, 8))) continue
     if (r.errors.length && BACKFILLED_EX.has(r.sha.slice(0, 8))) continue
     if (r.errors.length) bad.push(r)
@@ -885,27 +923,56 @@ function main() {
     `  · 累计欠账 ${absoluteDebt} 笔（补件 ${supplements} − 迁移 ${migrations}）；` +
       `今日（${allowance.today}）允许 ≤${allowance.allowed}，${nextText}`,
   )
+  // 欠账明细（D-403）：按提交顺序把最早的补件配给迁移，剩下未被抵掉的补件就是欠账——
+  // 豁免必须能逐笔复核，不能只印一个总数。
+  const supplementsSeen = ledger.filter((e) => e.kind === 'supplement')
+  const migrationsSeen = ledger.filter((e) => e.kind === 'migration').length
+  const unpaid = supplementsSeen.slice(Math.min(migrationsSeen, supplementsSeen.length))
+  if (absoluteDebt > 0) {
+    console.log(`  · 欠账明细（${unpaid.length} 笔补件尚未被迁移抵掉，按提交顺序）：`)
+    for (const e of unpaid) console.log(dim(`    - ${e.sha} ${e.subject}`))
+  }
+  const exemption = activeDebtExemption({ today: allowance.today, decisions })
   if (absoluteDebt > allowance.allowed) {
-    console.error(
-      red(
-        `✗ EX-007 累计欠账 ${absoluteDebt} 笔 > 今日（${allowance.today}）允许 ≤${allowance.allowed}：` +
-          '欠账按台阶递减，每个检查点至少抵 1 笔迁移；' +
-          `${allowance.deadline} 必须归零，到期仍欠即红（D-375）`,
-      ),
-    )
-    return 1
+    if (exemption) {
+      console.log(
+        yellow(
+          `  ⊘ EX-007 到期豁免：欠账 ${absoluteDebt} > 今日允许 ${allowance.allowed}，` +
+            `按 ${exemption.decision} 暂不判红，至 ${exemption.through}（到期仍欠即红，续期须另裁决策）` +
+            `；理由：${exemption.reason}`,
+        ),
+      )
+    } else {
+      console.error(
+        red(
+          `✗ EX-007 累计欠账 ${absoluteDebt} 笔 > 今日（${allowance.today}）允许 ≤${allowance.allowed}：` +
+            '欠账按台阶递减，每个检查点至少抵 1 笔迁移；' +
+            `${allowance.deadline} 必须归零，到期仍欠即红（D-375）`,
+        ),
+      )
+      return 1
+    }
   }
   if (absoluteDebt <= 0) console.log(green('  ✓ 累计欠账已归零（补件 ≤ 迁移）'))
 
   if (reading.debt > 0) {
-    console.error(
-      red(
-        `✗ EX-007 累计补件/迁移比恶化：自本判据起新增补件 ${reading.dSupp} 个、迁移 ${reading.dMig} 个` +
-          `（欠账 +${reading.debt}）—— 补件必须与迁移同批或由既有迁移抵账；` +
-          '只补不搬等于每个能力都在拓宽机制面（D-372）',
-      ),
-    )
-    return 1
+    if (exemption) {
+      console.log(
+        yellow(
+          `  ⊘ EX-007 新增欠账 +${reading.debt} 同由 ${exemption.decision} 豁免至 ${exemption.through}` +
+            '（到期仍欠即红，续期须另裁决策）',
+        ),
+      )
+    } else {
+      console.error(
+        red(
+          `✗ EX-007 累计补件/迁移比恶化：自本判据起新增补件 ${reading.dSupp} 个、迁移 ${reading.dMig} 个` +
+            `（欠账 +${reading.debt}）—— 补件必须与迁移同批或由既有迁移抵账；` +
+            '只补不搬等于每个能力都在拓宽机制面（D-372）',
+        ),
+      )
+      return 1
+    }
   }
   if (reading.debt < 0) console.log(green(`  ✓ 已提前 ${-reading.debt} 笔迁移抵账`))
   if (reading.ratio <= 1) console.log(green('  ✓ 累计补件/迁移比已达 ≤1:1'))

@@ -181,7 +181,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 87 · draft 1 · retired 2（共 90）
+**计数**：active 88 · draft 1 · retired 2（共 91）
 
 ## 现行设计（active）
 
@@ -234,6 +234,7 @@ board.columns: [impl]
 | [`DE-051-机制形状规格`](051-机制形状规格.md) | 机制形状规格 | 未落地 |
 | [`DE-052-决策正文证据锚点冻结表`](052-决策正文证据锚点冻结表.md) | 决策正文证据锚点冻结表（DE-053 D-326 附表） | 部分落地 |
 | [`DE-053-环驱动与写口裁决`](053-环驱动与写口裁决.md) | 环驱动与写口裁决 | 部分落地 |
+| [`DE-054-判据欠账与到期豁免`](054-判据欠账与到期豁免.md) | 判据欠账与到期豁免 | 与代码一致 |
 | [`DE-101-context-compression-design`](../../crates/symbio-plugin-session/src/docs/101-context-compression-design.md) | 会话上下文压缩设计 | 与代码一致 |
 | [`DE-104-module-layout`](../../crates/symbio-plugin-session/src/docs/104-module-layout.md) | Session / Loop 插件模块分工 | 与代码一致 |
 | [`DE-105-node-state-streaming`](../../crates/symbio-plugin-session/src/docs/105-node-state-streaming.md) | 节点状态流（Node-State Streaming）—— 实时面即节点状态 | 与代码一致 |

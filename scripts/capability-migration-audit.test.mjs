@@ -23,8 +23,10 @@ import { fileURLToPath } from 'node:url'
 import {
   ARCH_TREES,
   BEFORE_GUARD,
+  DEBT_EXEMPTIONS,
   DEBT_SCHEDULE,
   FIXTURE,
+  activeDebtExemption,
   classifyCommit,
   debtAllowance,
   generatedPaths,
@@ -500,6 +502,38 @@ test('validateDebtSchedule：真表合法；平台阶 / 末点非 0 / 日期倒�
     ],
   }
   assert.match(validateDebtSchedule(back, 6).join('；'), /严格递增/)
+})
+
+// ── 到期豁免（D-403）──────────────────────────────────────────────────────
+
+test('activeDebtExemption：期限当天仍有效、次日失效', () => {
+  const decisions = new Set(['D-403'])
+  const entry = { decision: 'D-403', through: '2026-11-12', reason: '欠账 7 来自 T-053 待搬' }
+  assert.equal(activeDebtExemption({ today: '2026-11-09', decisions, exemptions: [entry] }), entry)
+  assert.equal(activeDebtExemption({ today: '2026-11-12', decisions, exemptions: [entry] }), entry)
+  assert.equal(activeDebtExemption({ today: '2026-11-13', decisions, exemptions: [entry] }), null)
+})
+
+test('activeDebtExemption：决策号打不开或理由为空 ⇒ 不生效（匿名豁免等于没写）', () => {
+  const entry = { decision: 'D-403', through: '2026-11-12', reason: '欠账 7 来自 T-053 待搬' }
+  assert.equal(activeDebtExemption({ today: '2026-11-09', decisions: new Set(), exemptions: [entry] }), null)
+  assert.equal(
+    activeDebtExemption({
+      today: '2026-11-09',
+      decisions: new Set(['D-403']),
+      exemptions: [{ ...entry, reason: '  ' }],
+    }),
+    null,
+  )
+})
+
+test('DEBT_EXEMPTIONS：真仓条目有决策号 / 可读日期 / 非空理由', () => {
+  assert.ok(DEBT_EXEMPTIONS.length >= 1)
+  for (const e of DEBT_EXEMPTIONS) {
+    assert.match(e.decision, /^D-\d+$/)
+    assert.match(e.through, /^\d{4}-\d{2}-\d{2}$/)
+    assert.ok(e.reason.trim().length >= 8)
+  }
 })
 
 // ── 真仓冒烟 ──────────────────────────────────────────────────────────────
