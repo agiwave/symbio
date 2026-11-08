@@ -299,6 +299,17 @@ impl WalStore {
         self.path.parent().unwrap_or_else(|| Path::new("."))
     }
 
+    /// 本实例是否持有写者令牌：`open` 拿到锁 ⇒ `true`；降级实例与 `open_readonly` ⇒ `false`。
+    ///
+    /// 只给会话域内的**补落闸门**用（`SessionStore::drain_parked`）：寄存的变更只能由
+    /// 持令牌的实例补落。降级实例既补不进事实源（`NotTheWriter`），还会顺手清掉
+    /// 对方正在写的 `.staged` 半件与读不出的寄存件（`drain_parked` 的清理分支）。
+    /// 令牌身份不能靠试写来问：试写会真的抛 `NotTheWriter`，而这里问的是
+    /// 「要不要开始补落」。
+    pub(crate) fn is_writer(&self) -> bool {
+        self.writer.is_some()
+    }
+
     /// **只读**打开：只解析，不动文件、不取令牌。
     ///
     /// 与 `open` 的差别只在「谁有资格写」：恢复（截断撕裂尾行）

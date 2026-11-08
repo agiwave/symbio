@@ -105,6 +105,26 @@ impl SessionStore {
         Ok(Some(store))
     }
 
+    /// **开轮写口的补落一步**：把另一个进程寄存的消息变更落进事实源。
+    ///
+    /// 生产调用点只有一处——`plugin.rs::fact_source`（会话开面 / 开轮写口），在
+    /// `seed_open_verdicts` 之后、本轮事实源构造之前。那正是
+    /// [`drain_parked`](crate::message_events::drain_parked) 要求的窗口：令牌句柄建立后、
+    /// 本轮其它落格之前、读切片之前（turn 号 / 续写锚 / 幂等键都从那份切片折）。
+    ///
+    /// 只有持令牌的实例才做（[`EventWalStore::is_writer`]）：降级实例补落不掉，还
+    /// 会误清对方正在写的半件。事实源打不开仍是**真失败**（与 [`Self::facts`] 同一口径），
+    /// 调用方按开轮失败处理。
+    pub(crate) fn drain_parked(&self, session_id: &str) -> Result<(), String> {
+        let Some(store) = self.facts(session_id)? else {
+            return Ok(());
+        };
+        if store.is_writer() {
+            crate::message_events::drain_parked(&store, session_id);
+        }
+        Ok(())
+    }
+
     /// 读侧事件快照：**不取写者令牌**（[`EventWalStore::open_readonly`]）。
     ///
     /// 读路径若走 [`Self::facts`]，会在「本进程只是读」的场合抢到写者令牌，

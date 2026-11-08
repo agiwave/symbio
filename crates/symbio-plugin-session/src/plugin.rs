@@ -270,6 +270,12 @@ impl SessionPlugin {
         store
             .seed_open_verdicts(session_id)
             .map_err(PluginError::InternalError)?;
+        // 寄存补落（跨进程兜底）：另一个进程持令牌期间寄存的消息变更，在令牌回到本
+        // 进程后的第一个写窗口补进事实源。必须先于本轮其它落格与读切片（turn 号 /
+        // 续写锚 / 幂等键都从那份切片折）。
+        store
+            .drain_parked(session_id)
+            .map_err(PluginError::InternalError)?;
         // 补充整合的批次边界折叠器：随**开轮写口**一起绑上（只读面不折叠）。
         // 它持的是「取批那三样」+ 消息列表写口，折叠全程留在会话域，不需要驱动器伸手来问。
         let state = self.active_mgr.get_or_create(session_id).await;

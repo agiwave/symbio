@@ -4,14 +4,5 @@
   "crate": "symbio-plugin-session",
   "note": "B 类死码台账：B2 删除旧编排后、等待按义务环重新接入的能力面。判据是 scripts/session-dead-code-audit.mjs（SD-001）：源码里出现 dead_code 而本表没有该符号 ⇒ 红；本表有而源码已不再报（已有消费者或符号已不存在）⇒ 红（删行）；某行所属批次写进 landed_batches ⇒ 红（销账）。台账清空即能力全部接入完成，不得长期保留。",
   "landed_batches": [],
-  "rows": [
-    {
-      "path": "crates/symbio-plugin-session/src/message_events.rs",
-      "symbols": ["drain_parked"],
-      "capability": "寄存区落格：把磁盘上寄存的变更按寄存顺序补落到事实源",
-      "future_caller": "会话开场 / 令牌句柄建立后的补落点（新链路启动时调用）",
-      "batch": "session-base",
-      "e2e": ["t44-crud-facts-survive-restart"]
-    }
-  ]
+  "rows": []
 }

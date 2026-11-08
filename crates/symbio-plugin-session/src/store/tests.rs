@@ -614,6 +614,67 @@ async fn facts_hands_out_one_shared_instance_per_session() {
     );
 }
 
+/// **开轮写口的补落**：另一个进程寄存的消息变更，在令牌回到本进程后的第一个
+/// 写窗口落进事实源（`SessionStore::drain_parked` 的生产调用点是会话开面的
+/// `plugin.rs::fact_source`）。
+///
+/// 判据三样：变更进了事实源（号在落格时分配）、寄存件落一条删一条、寄存区清空。
+/// 盘上格式是跨进程契约，故测试按字面写那份 JSON，不借私有构造。
+#[tokio::test]
+async fn drain_parked_lands_parked_edits_through_the_opening_window() {
+    use symbio_kernel::event::Seq;
+    use symbio_kernel::store::Store as _;
+
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    let dir = dir_for(tmp.path(), "sess_parked");
+    save(&store, &session_with("sess_parked", None)).await;
+    // 补落要有可解的溯源锚：先种一条事实（种子句柄离开块时释放写者令牌）。
+    {
+        let wal = EventWalStore::open(dir.join(paths::V2_WAL_FILE)).unwrap();
+        wal.append(user_event("e1", "n1", "第一问", 1)).unwrap();
+    }
+    let pending = dir.join(paths::TRANSCRIPTS_SUBDIR).join("pending");
+    std::fs::create_dir_all(&pending).unwrap();
+    let parked = pending.join("0000000000001-0000001-000001.json");
+    std::fs::write(
+        &parked,
+        json!({
+            "kind": "message.edited",
+            "verb": "Asserted",
+            "id_prefix": "m-edit",
+            "target": "n1",
+            "payload": { "message": { "id": "n1", "content": { "text": "改过的话" } } }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    store.drain_parked("sess_parked").expect("开轮补落失败");
+
+    let events = EventWalStore::open_readonly(dir.join(paths::V2_WAL_FILE))
+        .unwrap()
+        .range(Seq::new(0));
+    let edit = events
+        .iter()
+        .find(|e| e.kind == "message.edited")
+        .expect("寄存的编辑应补落进事实源");
+    assert_eq!(
+        edit.payload
+            .get("message")
+            .and_then(|m| m.get("id"))
+            .and_then(|v| v.as_str()),
+        Some("n1"),
+        "补落改的正是寄存那条消息"
+    );
+    assert!(edit.seq.is_some(), "补落走 append：号在落格时分配");
+    assert!(!parked.exists(), "落一条删一条");
+    assert!(
+        !pending.exists() || std::fs::read_dir(&pending).unwrap().next().is_none(),
+        "寄存区应清空"
+    );
+}
+
 /// 目录在、事实源**打不开** ⇒ `Err`，不是 `Ok(None)`。
 ///
 /// 的判据：把「没有事实源」（会话目录不存在，豁免）与「事实源打不开」（真失败）

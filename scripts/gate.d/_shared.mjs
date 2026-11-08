@@ -371,7 +371,7 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 2396 → 2390（抢占判定面删除，D-388）——删掉 inbox.test.rs 的
   // 6 条判定/落格用例（判定器、三态、落格函数全删，无被测对象即无覆盖可丢）；忙窗插话的可观察行为
   // 仍由 e2e t34 承接。非侵蚀。
-  ciRustTestsTotal: 2390,
+  ciRustTestsTotal: 2391,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
