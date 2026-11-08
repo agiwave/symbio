@@ -41,12 +41,15 @@
  *
  * 逐树新增把每一次搬迁都判红：`--no-renames` 的 diff 把「搬走一份实现」写成
  * 「旧文件全删 + 新文件全增」，于是 `sdk` 侧看起来凭空多了几百行——字没变、面没宽，
- * 判据却在阻止架构变干净。改判**机制面总量**：新增行数减删除行数，为正才红。
- * 注释与 `use` 行（含 `pub use` 转发）两边都不计——它们是搬家的附带，不是机制面。
+ * 判据却在阻止架构变干净。改为判**机制面总量**：新增行数减删除行数，为正才红。
+ * 注释、`use` 行（含 `pub use` 转发）与 `mod` 声明两边都不计——它们是搬家的附带与接线。
  *
  * 净零的搬迁（`from` 删多少、`to` 就增多少）单独记一类 `relocation`：它**不记欠账，
  * 也不抵账**；只有净减才算一次迁移、抵 1 笔。这样「欠账笔数因为换了口径而自己消失」
  * 就不可能发生（`D-404` §3）。
+ *
+ * 接线行（`use` / `mod` 声明）两边都不计：搬家的合法形态是「实现在新家 + 旧家留一行
+ * 转发 + 宿主模块树加一行 `pub mod`」，把这三行算成加面，净零搬迁永远差几行。
  *
  * 口径不追溯：`NET_GUARD` 之前的提交按旧口径判（与 `BEFORE_GUARD` 同一条纪律）。
  *
@@ -510,15 +513,20 @@ const BARE_LITERAL_LINE = /^\s*"[^"]*"\s*[,;]?\s*$/
  * 若把转发行算成新增，净零搬迁会被记成净增 1 行而永远判红（`D-404` 红 3 的另一半）。
  */
 const USE_ONLY_LINE = /^\s*(?:pub(?:\s*\(\s*[^)]*\s*\))?\s+)?use\s[^;]+;\s*$/
+/**
+ * 一整行只是一条模块声明（`mod x;` / `pub mod x;`）：它声明一个文件的存在，
+ * 和 `use` 一样是**接线**而不是机制面。搬迁必然要在宿主的模块树上加这么一行。
+ */
+const MOD_DECL_ONLY_LINE = /^\s*(?:pub(?:\s*\(\s*[^)]*\s*\))?\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*;\s*$/
 
 function describeHit(h) {
   return `${h.path}: ${h.what} —— ${h.line.slice(0, 80)}`
 }
 
-/** 一行是否算「机制面源码」：去掉注释与空行后还剩内容，且不是纯 `use` 转发。 */
+/** 一行是否算「机制面源码」：去掉注释与空行后还剩内容，且不是纯接线（`use` / `mod`）。 */
 function isMechanismLine(raw) {
   const code = (blankComments(raw)[0] ?? '').trim()
-  return code.length > 0 && !USE_ONLY_LINE.test(code)
+  return code.length > 0 && !USE_ONLY_LINE.test(code) && !MOD_DECL_ONLY_LINE.test(code)
 }
 
 /** 一组 diff 行里算作机制面的条数。 */
@@ -550,19 +558,31 @@ export function archNetChange(patch) {
 }
 
 /** 提交正文里的搬迁声明：`from: <path> (<n>)` / `to: <path> (<n>)`。 */
-const FROM_RE = /^[ \t]*from[:：][ \t]*(\S+)[ \t]*\(([0-9]+)\)[ \t]*$/m
-const TO_RE = /^[ \t]*to[:：][ \t]*(\S+)[ \t]*\(([0-9]+)\)[ \t]*$/m
+const FROM_RE = /^[ \t]*from[:：][ \t]*(\S+)[ \t]*\(([0-9]+)\)[ \t]*$/gm
+const TO_RE = /^[ \t]*to[:：][ \t]*(\S+)[ \t]*\(([0-9]+)\)[ \t]*$/gm
 
 /**
- * 解析搬迁声明。`{ from, to }` 各自可为 `null`（没写），`complete` 表示两侧都写了。
+ * 解析搬迁声明。
+ *
+ * 一次搬迁可能搬多个文件（实现 + 它的测试），所以 `from` / `to` 成对出现、可有若干对：
+ * 按出现顺序配对，`pairs[i] = { from, to }`。`complete` 要求两侧条数相等且至少一对
+ * ——差一条就等于有一侧没写行数。
  */
 export function parseRelocationHeader(message) {
   const text = String(message ?? '')
-  const f = text.match(FROM_RE)
-  const t = text.match(TO_RE)
-  const from = f ? { path: f[1], lines: Number(f[2]) } : null
-  const to = t ? { path: t[1], lines: Number(t[2]) } : null
-  return { from, to, declared: Boolean(f || t), complete: Boolean(f && t) }
+  const froms = [...text.matchAll(FROM_RE)].map((m) => ({ path: m[1], lines: Number(m[2]) }))
+  const tos = [...text.matchAll(TO_RE)].map((m) => ({ path: m[1], lines: Number(m[2]) }))
+  const pairs = []
+  for (let i = 0; i < Math.max(froms.length, tos.length); i += 1) {
+    pairs.push({ from: froms[i] ?? null, to: tos[i] ?? null })
+  }
+  return {
+    from: froms[0] ?? null,
+    to: tos[0] ?? null,
+    pairs,
+    declared: froms.length > 0 || tos.length > 0,
+    complete: froms.length > 0 && froms.length === tos.length,
+  }
 }
 
 /** 路径所属的树（crate 根）；不在 `crates/` 下则返回路径本身。 */
@@ -675,37 +695,68 @@ export function relocationErrors({ message, patch }) {
 
   if (!header.complete) return { errors }
 
-  const fromFile = patch.find((f) => f.path === header.from.path)
-  const toFile = patch.find((f) => f.path === header.to.path)
-  if (!fromFile) {
-    errors.push(`EX-007 \`from:\` 指的 \`${header.from.path}\` 不在本提交的 diff 里 —— 行数无法核验（D-404 红 2）`)
-  } else if (fromFile.removed.length !== header.from.lines) {
-    errors.push(
-      `EX-007 \`from:\` 写了 ${header.from.lines} 行，实际从 \`${header.from.path}\` 删了 ${fromFile.removed.length} 行` +
-        ' —— 行数写错就等于没写（D-404 红 2）',
-    )
+  for (const pair of header.pairs) {
+    if (!pair.from || !pair.to) continue
+    const fromFile = patch.find((f) => f.path === pair.from.path)
+    const toFile = patch.find((f) => f.path === pair.to.path)
+    if (!fromFile) {
+      errors.push(
+        `EX-007 \`from:\` 指的 \`${pair.from.path}\` 不在本提交的 diff 里 —— 行数无法核验（D-404 红 2）`,
+      )
+    } else if (fromFile.removed.length !== pair.from.lines) {
+      errors.push(
+        `EX-007 \`from:\` 写了 ${pair.from.lines} 行，实际从 \`${pair.from.path}\` 删了 ${fromFile.removed.length} 行` +
+          ' —— 行数写错就等于没写（D-404 红 2）',
+      )
+    }
+    if (!toFile) {
+      errors.push(
+        `EX-007 \`to:\` 指的 \`${pair.to.path}\` 不在本提交的 diff 里 —— 行数无法核验（D-404 红 2）`,
+      )
+    } else if (toFile.added.length !== pair.to.lines) {
+      errors.push(
+        `EX-007 \`to:\` 写了 ${pair.to.lines} 行，实际往 \`${pair.to.path}\` 加了 ${toFile.added.length} 行` +
+          ' —— 行数写错就等于没写（D-404 红 2）',
+      )
+    }
   }
-  if (!toFile) {
-    errors.push(`EX-007 \`to:\` 指的 \`${header.to.path}\` 不在本提交的 diff 里 —— 行数无法核验（D-404 红 2）`)
-  } else if (toFile.added.length !== header.to.lines) {
-    errors.push(
-      `EX-007 \`to:\` 写了 ${header.to.lines} 行，实际往 \`${header.to.path}\` 加了 ${toFile.added.length} 行` +
-        ' —— 行数写错就等于没写（D-404 红 2）',
-    )
+
+  // 红 1（逐对）：`to` 侧新增的**机制行**多于 `from` 侧删掉的机制行 ⇒ 借搬迁加面。
+  // 比的是机制行，不是物理行：文件名相同的空白 / 注释段会被 diff 当成未改动，
+  // 物理行数天然对不上（那两行不是「搬过去的新面」，是「没动的旧行」）。
+  for (const pair of header.pairs) {
+    if (!pair.from || !pair.to) continue
+    const fromFile = patch.find((f) => f.path === pair.from.path)
+    const toFile = patch.find((f) => f.path === pair.to.path)
+    if (!fromFile || !toFile) continue
+    const grew = mechanismLineCount(toFile.added) - mechanismLineCount(fromFile.removed)
+    if (grew > 0) {
+      errors.push(
+        `EX-007 \`${pair.to.path}\` 比 \`${pair.from.path}\` 多搬了 ${grew} 行机制面源码` +
+          ' —— 不许借搬迁名义在机制面加面（D-404 红 1）',
+      )
+    }
   }
-  if (header.to.lines > header.from.lines) {
+
+  // 红 1（总量）：搬迁可能夹带第三处的新增（搬 A 的同时在 sdk 里加了 B）。
+  const total = archNetChange(patch)
+  if (total.net > 0) {
     errors.push(
-      `EX-007 搬迁净增 ${header.to.lines - header.from.lines} 行（to ${header.to.lines} > from ${header.from.lines}）` +
-        ' —— 不许借搬迁名义在机制面加面（D-404 红 1）',
+      `EX-007 机制面净增 ${total.net} 行（新增 ${total.added} / 删除 ${total.removed}）` +
+        ' —— 搬迁必须是净零或净减，多出来的机制增量拆成带 `### D-NNN` 的独立补件提交（D-404 红 1）',
     )
   }
 
   // 红 3：搬走的是 `plugin-api` 的实现时，门面必须仍把该模块转出去。
   // 否则扩展插件只能直接依赖 `sdk`——那是 E-009 要消灭的那条依赖边。
-  const fromApi = inTrees(header.from.path, PLUGIN_API_TREES)
-  const toApi = inTrees(header.to.path, PLUGIN_API_TREES)
-  if (fromApi && !toApi) {
-    const stem = moduleStem(header.from.path)
+  for (const pair of header.pairs) {
+    if (!pair.from || !pair.to) continue
+    // 测试文件不是公开面：搬走它没有「插件少一条路」的问题，不必留转发。
+    if (!isCapabilitySource(pair.from.path)) continue
+    if (!inTrees(pair.from.path, PLUGIN_API_TREES) || inTrees(pair.to.path, PLUGIN_API_TREES)) {
+      continue
+    }
+    const stem = moduleStem(pair.from.path)
     const reexported = patch.some(
       (f) =>
         inTrees(f.path, PLUGIN_API_TREES) &&
@@ -716,7 +767,7 @@ export function relocationErrors({ message, patch }) {
     )
     if (!reexported) {
       errors.push(
-        `E-009 从 \`plugin-api\` 搬走了 \`${header.from.path}\`，却没有在同一文件树里留 \`pub use\` 把 \`${stem}\` 转出` +
+        `E-009 从 \`plugin-api\` 搬走了 \`${pair.from.path}\`，却没有在同一文件树里留 \`pub use\` 把 \`${stem}\` 转出` +
           ' —— 扩展插件只许依赖 `plugin-api`，缺这行转发它们就得多依赖 `sdk`（D-404 红 3）',
       )
     }

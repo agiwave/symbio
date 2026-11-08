@@ -338,16 +338,24 @@ test('archNetChange：`use` 转发不算机制面，净零搬迁读作 0', () =>
   assert.deepEqual([net.added, net.removed, net.net], [MOVED.length, MOVED.length, 0])
 })
 
-test('parseRelocationHeader：两侧都写才算完整；缺一侧不算', () => {
-  assert.deepEqual(parseRelocationHeader(relocationMessage()), {
-    from: { path: API_TEXT, lines: 2 },
-    to: { path: SDK_TEXT, lines: 2 },
-    declared: true,
-    complete: true,
-  })
-  const half = parseRelocationHeader(`Migration: T-053\nfrom: ${API_TEXT} (2)`)
+test('parseRelocationHeader：两侧都写才算完整；缺一侧不算；多对按序配对', () => {
+  const one = parseRelocationHeader(relocationMessage())
+  assert.deepEqual(one.pairs, [{ from: { path: API_TEXT, lines: 2 }, to: { path: SDK_TEXT, lines: 2 } }])
+  assert.equal(one.complete, true)
+  assert.equal(one.declared, true)
+
+  const half = parseRelocationHeader(`Migration: 搬 text\nfrom: ${API_TEXT} (2)`)
   assert.equal(half.complete, false)
   assert.equal(half.declared, true)
+
+  const two = parseRelocationHeader(
+    `Migration: 搬 text\nfrom: ${API_TEXT} (2)\nto: ${SDK_TEXT} (2)\nfrom: a/b.test.rs (9)\nto: c/d.test.rs (9)`,
+  )
+  assert.deepEqual(two.pairs, [
+    { from: { path: API_TEXT, lines: 2 }, to: { path: SDK_TEXT, lines: 2 } },
+    { from: { path: 'a/b.test.rs', lines: 9 }, to: { path: 'c/d.test.rs', lines: 9 } },
+  ])
+  assert.equal(two.complete, true)
 })
 
 test('classifyCommit：净零搬迁是 relocation（不记欠账），净减仍是迁移（抵 1 笔）', () => {
@@ -371,10 +379,9 @@ test('relocationErrors：净零 + 完整声明 + api 留转发 ⇒ 绿', () => {
   assert.deepEqual(reloc(relocationMessage(), relocationPatch()), [])
 })
 
-test('relocationErrors 红 1：`to` 比 `from` 多 1 行 ⇒ 红（不许借搬迁加面）', () => {
-  const [e] = reloc(relocationMessage(2, 3), relocationPatch({ toLines: 3 }))
-  assert.match(e, /EX-007/)
-  assert.match(e, /净增 1 行/)
+test('relocationErrors 红 1：`to` 比 `from` 多搬 1 行机制面 ⇒ 红（不许借搬迁加面）', () => {
+  const errors = reloc(relocationMessage(2, 3), relocationPatch({ toLines: 3 }))
+  assert.ok(errors.some((e) => /多搬了 1 行/.test(e)), errors.join('\n'))
 })
 
 test('relocationErrors 红 2：`from` 行数写错 ⇒ 红（写错等于没写）', () => {
