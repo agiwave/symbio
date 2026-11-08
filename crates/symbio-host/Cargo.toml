@@ -11,9 +11,11 @@ symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-providers = { path = "../symbio-providers" }
 symbio-sdk = { path = "../symbio-sdk" }
 tracing = { workspace = true }
+# 驱动收口住在宿主：`settled` 的每会话唤醒句柄（`Notify`）与「由驱动自身调用」的检测。
+tokio = { workspace = true, features = ["sync", "rt", "macros", "time"] }
 
 [dev-dependencies]
 # 环插件经能力收集注册 `drive` 行；测试二进制需要链接它（源码零引用）。
 symbio-deploy = { path = "../symbio-deploy" }
 symbio-plugin-loop = { path = "../symbio-plugin-loop" }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros", "rt", "time"] }

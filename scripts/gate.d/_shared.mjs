@@ -385,7 +385,7 @@ export const BASELINE = {
   // 只改能力插件」的注册面 / 执行面；能力账本（EX-001）与名册（EX-006）不因此变动。非侵蚀。
   // baseline-allow ciRustTestsTotal: 2179 → 2181（真实能力包探针）——新增 2 条：默认装配接纳
   // （symbio 冻结表）与环上驱动（选债→执行体还事实→配对）。非侵蚀。
-  ciRustTestsTotal: 2181,
+  ciRustTestsTotal: 2182,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

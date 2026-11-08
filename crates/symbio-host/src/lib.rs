@@ -1,10 +1,13 @@
-//! 宿主：发现全部 port 行、按会话起一次驱动、把债表当数据读、记机制状态 `idle`。
+//! 宿主：发现全部 port 行、按会话起一次驱动、把债表当数据读。
 //!
 //! 宿主不是插件：它依赖契约层，但插件不依赖它；插件之间互不依赖仍成立。
 //! **宿主不认识环的任何类型**：驱动执行者经既有的**能力收集机制**（`drive` 族的一行）
 //! 取回，能力束是**调用参数**，不是注册面（`DE-051` 机制形状）。
 //! 端口名与债行都不在这里构造：执行体由 `port` 族的行解析，债行由插件经 `debt` 族自报。
-//! `idle` 是机制事实（本会话无未还债），不是业务事实；收束谓词由读方自算，宿主不落业务事实。
+//! 收束谓词由读方自算，宿主不落业务事实。
+//!
+//! **宿主运行时也在这里**：驱动入口（`HostDrive` / 每会话重入位 / 按根绑定表）住在
+//! [`drive`]，与它服务的 `Host` 同一个 crate——`symbio` 只剩装配登记（P1 批一）。
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -33,11 +36,13 @@ use symbio_plugin_api::termination::{
 use symbio_plugin_api::SymbioKey;
 use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::capability::CAPABILITY_VISITOR;
-use symbio_sdk::clock::clock_now_ms;
 use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_ID, WORKDIR};
 use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
 
 pub use symbio_plugin_api::drive::{DriveKey, DriveOutcome, DriveReport};
+
+/// 宿主运行时：驱动入口与每会话推进状态（`P1` 批一：状态归宿主）。
+pub mod drive;
 
 /// 载荷里的分片号（宿主吸收重复时的附加身份位；环不知道它的存在）。
 const SHARD_KEY: &str = "shard";
@@ -46,43 +51,26 @@ fn shard_of(fact: &DriveFact) -> Option<u64> {
     fact.payload.get(SHARD_KEY).and_then(|v| v.as_u64())
 }
 
-/// 进程内宿主：根插件 + 事实源 + 机制状态 `idle`。
+/// 进程内宿主：根插件 + 事实源。
 pub struct Host {
     root: Arc<dyn Plugin>,
     /// 事实源（唯一写入口）：世界事实与环协议事实都落这里。
     /// 读面（`facts` / `exists` / `reader`）只从这里投影——**不问写方是谁**。
     source: Arc<dyn FactSource>,
-    idle: Arc<Mutex<Option<u64>>>,
-    concurrency: usize,
 }
 
 impl Host {
-    /// 由根插件造宿主。事实在进程内，重启恢复由后续持久化接入；并发缺省串行。
+    /// 由根插件造宿主。事实在进程内，重启恢复由后续持久化接入。
     pub fn new(root: Arc<dyn Plugin>) -> Self {
         Self::with_store(root, Arc::new(MemoryStore::<Event>::new()))
     }
 
-    /// 指定同轮并发派发上限（配置数据，来自调用方的限额；环不写死）。
-    pub fn with_concurrency(root: Arc<dyn Plugin>, concurrency: usize) -> Self {
-        Self::with_store_and_concurrency(root, Arc::new(MemoryStore::<Event>::new()), concurrency)
-    }
-
     /// 指定事实源（持久化实现替换时调用方零改动）。
+    ///
+    /// 同轮派发固定串行：唯一调用方是驱动入口，它按会话一次一轮推进；宿主不提供
+    /// 「并发上限」参数（并行债的挑选判据在单 provider 场景不存在）。
     pub fn with_store(root: Arc<dyn Plugin>, source: Arc<dyn FactSource>) -> Self {
-        Self::with_store_and_concurrency(root, source, 1)
-    }
-
-    fn with_store_and_concurrency(
-        root: Arc<dyn Plugin>,
-        source: Arc<dyn FactSource>,
-        concurrency: usize,
-    ) -> Self {
-        Self {
-            root,
-            source,
-            idle: Arc::new(Mutex::new(None)),
-            concurrency: concurrency.max(1),
-        }
+        Self { root, source }
     }
 
     /// 本会话的全量事实投影（**从事实源读**，含执行体写口）。
@@ -90,17 +78,7 @@ impl Host {
         self.source.facts().into_iter().map(event_to_fact).collect()
     }
 
-    /// 本会话最近一次「无未还债」的落账时刻；`None` = 尚有未还债。
-    ///
-    /// 机制状态，不是业务：收束谓词由读方拿它与终答事实自算。
-    pub fn idle_at(&self) -> Option<u64> {
-        *self
-            .idle
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    /// 本会话事实的只读投影（读方自算谓词用；`idle` 是机制状态，走 [`Self::idle_at`]）。
+    /// 本会话事实的只读投影（读方自算谓词用）。
     ///
     /// 投影直接来自事实源——**没有第二本账**：环写下的协议事实与任何写方写下的
     /// 世界事实都从同一个读面出来。
@@ -169,7 +147,6 @@ impl Host {
             session_id: session_id.to_string(),
             provider: provider.map(str::to_string),
             principal,
-            concurrency: self.concurrency,
             handles,
         });
         // 簿记写方：驱动**前后**各给同一份只读投影（D-367）。前一次让「开轮前已落
@@ -180,22 +157,6 @@ impl Host {
         let report = gathered.runner.drive(support).await?;
         if matches!(&report.outcome, DriveOutcome::NoDebt) {
             observe_termination(&gathered.writers, &*support_handle, &self.source, true).await;
-        }
-
-        let at = clock_now_ms().max(0) as u64;
-        {
-            let mut idle = self
-                .idle
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if matches!(&report.outcome, DriveOutcome::NoDebt) {
-                *idle = Some(at);
-            } else {
-                // 只记机制状态；安全阀出口（`Exhausted` / `Stalled`）的可见文案
-                // 归驱动入口（`crates/symbio/src/drive.rs::drive_notice`），
-                // 那里同时覆盖两条，不会一条有声一条闷着。
-                *idle = None;
-            }
         }
         Ok(report)
     }
@@ -302,7 +263,6 @@ struct HostDriveSupport {
     provider: Option<String>,
     /// 本会话主体（开面时从 `agent_id` 解析，随债表请求下传；D-339）。
     principal: String,
-    concurrency: usize,
     /// 交给执行体的不透明句柄束（宿主装配，环原样转交）。
     handles: PortExecHandles,
 }
@@ -467,8 +427,12 @@ impl DriveSupport for HostDriveSupport {
             .any(|fact| fact.kind == kind && fact.at_ms > since_ms)
     }
 
+    /// 同轮派发上限：**恒为串行**。
+    ///
+    /// 环按轮推进，同一会话不存在两笔可并行的债（`Waiting` 在飞时本轮就结束）；
+    /// 因此这个上限是常量，不是配置项——宿主不持有它，调用方也设不了。
     fn concurrency(&self) -> usize {
-        self.concurrency
+        1
     }
 
     /// 非五类事实的去处：草稿落事实源（同一事实源、同一读面）。

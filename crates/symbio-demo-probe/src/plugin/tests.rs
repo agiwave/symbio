@@ -75,7 +75,6 @@ async fn demo_port_runs_through_the_ring() {
         response.payload["echo"], "hello",
         "载荷字符串原样透传到执行体再回来"
     );
-    assert!(host.idle_at().is_some(), "无未还债 ⇒ idle");
 
     let again = host
         .drive(

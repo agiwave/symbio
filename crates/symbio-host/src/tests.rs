@@ -1,4 +1,4 @@
-//! 宿主的机制状态：无债即 `idle`，有未还债即撤销。
+//! 宿主的出口读数：无债即 `NoDebt`，未还债即带上未收束的键。
 
 use super::*;
 // 只做链接：环经 creator 注册被这个根构造，测试二进制必须把它的注册项带进来。
@@ -62,7 +62,7 @@ fn bound_base() -> Arc<dyn PluginInvokeRequest> {
 }
 
 #[tokio::test]
-async fn a_session_with_no_debt_is_idle() {
+async fn a_session_with_no_debt_reports_no_debt() {
     let host = Host::new(Arc::new(EmptyRoot));
     let base = bound_base();
     let report = host
@@ -72,7 +72,6 @@ async fn a_session_with_no_debt_is_idle() {
 
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
     assert_eq!(report.dispatched, 0);
-    assert!(host.idle_at().is_some(), "无未还债 ⇒ 落 idle");
 }
 
 /// 最小 smoke 的模型端口：执行体只读事实、只落 `response`。
