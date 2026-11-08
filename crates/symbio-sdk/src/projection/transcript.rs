@@ -168,8 +168,17 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
         //
         // 快照事件自身也受 `now` 约束（as-of 读视图：晚于 `now` 的压缩在那一刻
         // 还没发生，历史就该按压缩**前**的样子读）。
+        // `keep_from`（D-401）：切片只压最旧前缀时，首条未压事实在快照事件之前，
+        // 必须从那里起接着折；旧快照没有这一格 ⇒ 回落 `快照下标 + 1`。
         let (start, snapshot) = match super::mutations::mutations_latest_snapshot(events, &m) {
-            Some((i, msgs)) if events[i].ts <= now => (i + 1, msgs),
+            Some((i, msgs, keep_from)) if events[i].ts <= now => {
+                let start = keep_from
+                    .as_deref()
+                    .and_then(|id| events.iter().position(|e| e.event_id.as_str() == id))
+                    .filter(|index| *index < i)
+                    .unwrap_or(i + 1);
+                (start, msgs)
+            }
             _ => (0, Vec::new()),
         };
         let baseline = snapshot_entries(&snapshot);

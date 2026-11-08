@@ -273,9 +273,20 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
         .collect();
 
     // ── 压缩快照：先收下它那份列表，再从其下标之后接着折（见函数文档）────────
+    //
+    // `keep_from`（D-401）：切片只压了最旧前缀时，首条未压事实在快照事件**之前**，
+    // 必须从那里起折；否则被保留的后缀会被整段跳过。旧快照没有这一格 ⇒ 回落
+    // `快照下标 + 1`，与旧行为逐字一致。
     let (start, snapshot_messages) =
         match crate::projection::mutations::mutations_latest_snapshot(events, m) {
-            Some((i, msgs)) => (i + 1, msgs),
+            Some((i, msgs, keep_from)) => {
+                let start = keep_from
+                    .as_deref()
+                    .and_then(|id| events.iter().position(|e| e.event_id.as_str() == id))
+                    .filter(|index| *index < i)
+                    .unwrap_or(i + 1);
+                (start, msgs)
+            }
             None => (0, Vec::new()),
         };
     for mut m in snapshot_messages {

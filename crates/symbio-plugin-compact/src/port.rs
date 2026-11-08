@@ -15,9 +15,11 @@
 //!
 //! ## 压出来的快照
 //!
-//! 载荷 `{ "messages": [ChatNode…] }`：压缩节点是折叠叶
-//! （`NodeKind::Notice` + `style_tag = compression`，正文就是摘要）＋本轮的助手终答。
-//! 重建面从这份列表开始折，被压掉的前缀不再参与。
+//! 载荷 `{ "messages": [ChatNode…], "keep_from": <事实 id>, "split": bool }`：
+//! 压缩节点是折叠叶（`NodeKind::Notice` + `style_tag = compression`，正文就是摘要）。
+//! `keep_from` 是首条**未压**事实（切片只覆盖最旧前缀）：读面从这条事实起接着折，
+//! 其余原样保留；缺席（整份都压掉了 / 旧快照）时读面回落「快照下标 + 1」，
+//! 此时快照尾部补本轮终答（否则它不在任何一段里）。`split` 记录这一段被头尾截断过。
 
 use std::sync::Arc;
 
@@ -71,9 +73,23 @@ impl PortExecutor for CompactExecutor {
             // 摘要那笔没交回正文（失败 / 空转写）：不拿占位冒充摘要。
             return PortOutcome::ok();
         };
-        let messages = snapshot(&facts, &final_id, &summary);
+        let keep_from = input
+            .payload
+            .get("keep_from")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let split = input
+            .payload
+            .get("split")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let messages = snapshot(&facts, &final_id, &summary, keep_from.as_deref(), split);
         if messages.is_empty() {
             return PortOutcome::ok();
+        }
+        let mut payload = json!({ "messages": messages, "split": split });
+        if let Some(keep_from) = &keep_from {
+            payload["keep_from"] = json!(keep_from);
         }
         ctx.emit
             .emit(vec![FactDraft {
@@ -81,7 +97,7 @@ impl PortExecutor for CompactExecutor {
                 kind: SESSION_CONSOLIDATED.to_string(),
                 entity: Entity::Message,
                 verb: Verb::Progressed,
-                payload: json!({ "messages": messages }),
+                payload,
                 produced_by: None,
             }])
             .await;
@@ -108,18 +124,37 @@ fn summary_of(facts: &[PortFact], final_id: &str, port: &str) -> Option<String> 
     (!reply.text.is_empty()).then_some(reply.text)
 }
 
-/// 压缩后的整份消息列表：折叠叶（正文 = 摘要）+ 本轮助手终答。
-fn snapshot(facts: &[PortFact], final_id: &str, summary: &str) -> Vec<Value> {
-    let mut out = vec![node(
-        ChatNode {
-            id: format!("compression:{final_id}"),
-            msg_type: Some(NodeKind::Notice),
-            content: Some(MessageContent::Text(summary.to_string())),
-            status: Some(NodeStatus::Completed),
-            ..Default::default()
+/// 压缩后的消息列表：折叠叶（正文 = 摘要）。
+///
+/// - 有 `keep_from`（只压了最旧前缀）⇒ **只**放折叠叶；后缀由读面从该事实起接着折，
+///   本轮终答也在后缀里，放进快照会重复一份。
+/// - 没有 `keep_from`（整份都压掉了）⇒ 补本轮助手终答，否则它不属于任何一段。
+fn snapshot(
+    facts: &[PortFact],
+    final_id: &str,
+    summary: &str,
+    keep_from: Option<&str>,
+    split: bool,
+) -> Vec<Value> {
+    let mut leaf = ChatNode {
+        id: format!("compression:{final_id}"),
+        msg_type: Some(NodeKind::Notice),
+        content: Some(MessageContent::Text(summary.to_string())),
+        status: Some(NodeStatus::Completed),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_COMPRESSION);
+    if split {
+        // 读面可见的「这一段被切开过」：载荷另有 `split`，节点上再留一份给展示面。
+        let meta = leaf.meta.get_or_insert_with(|| json!({}));
+        if let Some(map) = meta.as_object_mut() {
+            map.insert("split".to_string(), Value::Bool(true));
         }
-        .with_style_tag(CHAT_STYLE_TAG_COMPRESSION),
-    )];
+    }
+    let mut out = vec![node(leaf)];
+    if keep_from.is_some() {
+        return out;
+    }
     if let Some(final_fact) = facts.iter().find(|f| f.id == final_id) {
         if let Some(text) = final_fact
             .payload
@@ -142,3 +177,7 @@ fn snapshot(facts: &[PortFact], final_id: &str, summary: &str) -> Vec<Value> {
 fn node(node: ChatNode) -> Value {
     serde_json::to_value(node).unwrap_or(Value::Null)
 }
+
+#[cfg(test)]
+#[path = "port.test.rs"]
+mod tests;

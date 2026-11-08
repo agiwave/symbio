@@ -189,10 +189,33 @@ fn latest_snapshot_picks_the_most_recent_one() {
             &[("s-1", "user", "摘要二"), ("k-0", "assistant", "近轮")],
         ),
     ];
-    let (i, msgs) = mutations_latest_snapshot(&evs, &MESSAGE).expect("有快照");
+    let (i, msgs, keep_from) = mutations_latest_snapshot(&evs, &MESSAGE).expect("有快照");
     assert_eq!(i, 1, "取最近一条的**下标**（折方要的是「从哪接着折」）");
     let ids: Vec<&str> = msgs.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, vec!["s-1", "k-0"], "载荷里的列表按序收下");
+    assert_eq!(
+        keep_from, None,
+        "旧式快照没有 keep_from ⇒ 读面回落快照下标 + 1"
+    );
+}
+
+/// `keep_from`（D-401）：切片只压最旧前缀时，载荷给出首条未压事实；读面从它起折。
+#[test]
+fn snapshot_carries_the_first_uncompressed_fact() {
+    let ev = Event::pending(
+        "snap-keep",
+        EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        "session/main",
+    )
+    .with_payload(serde_json::json!({
+        "messages": [{ "id": "s-0", "role": "user", "content": "摘要" }],
+        "keep_from": "user.message:u-3",
+    }));
+    let (_, msgs, keep_from) = mutations_latest_snapshot(&[ev], &MESSAGE).expect("有快照");
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(keep_from.as_deref(), Some("user.message:u-3"));
 }
 
 /// 平凡值：没有快照事件 ⇒ `None`（整段历史照常折，与接线前逐字一致）。
@@ -220,7 +243,7 @@ fn a_malformed_snapshot_does_not_eat_the_valid_one() {
     )
     .with_payload(serde_json::json!({ "messages": "我不是数组" }));
     let evs = vec![snapshot("a", &[("s-0", "user", "摘要一")]), broken];
-    let (i, msgs) = mutations_latest_snapshot(&evs, &MESSAGE).expect("前面那份仍然有效");
+    let (i, msgs, _) = mutations_latest_snapshot(&evs, &MESSAGE).expect("前面那份仍然有效");
     assert_eq!(i, 0);
     assert_eq!(msgs.len(), 1);
 }

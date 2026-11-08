@@ -4305,6 +4305,7 @@ dependencies = [
  "async-trait",
  "serde_json",
  "symbio-plugin-api",
+ "tokio",
 ]
 
 [[package]]

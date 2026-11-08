@@ -410,7 +410,7 @@ pub fn verify(
     // 那是恒假警报（prompt 一个字都不缺），但每次压缩之后每轮都叫一次，真缺口就淹在
     // 里面——本仓的判据一旦恒红就等于没有判据。
     let carried: std::collections::HashSet<String> = match snapshot.as_ref() {
-        Some((_, msgs)) => super::mutations::snapshot_entries(msgs)
+        Some((_, msgs, _)) => super::mutations::snapshot_entries(msgs)
             .into_iter()
             .map(|(node, _)| node)
             .collect(),
@@ -418,6 +418,18 @@ pub fn verify(
     };
 
     // 网格侧：投影范围内的事件，逐条找对应 entry。
+    //
+    // 换基边界：快照取代的是它之前的一段；`keep_from`（D-401）把边界提前到
+    // 「首条未压事实」——那之后（含快照事件本身）的事件仍对 prompt 有主张。
+    // 旧快照没有 `keep_from` ⇒ 边界就是快照下标（与旧行为逐字一致）。
+    let fold_from = match snapshot.as_ref() {
+        Some((si, _, keep_from)) => keep_from
+            .as_deref()
+            .and_then(|id| events.iter().position(|e| e.event_id.as_str() == id))
+            .filter(|index| *index < *si)
+            .unwrap_or(*si),
+        None => 0,
+    };
     let mut used = vec![false; messages.len()];
     for (idx, e) in events.iter().enumerate() {
         // 被最近一次快照**取代**的事件不再对 prompt 有主张：它们承载的那段历史已被
@@ -426,7 +438,7 @@ pub fn verify(
         //
         // 这一步与 `window_by_turn` 的裁剪**不重复**：窗口裁的是「更早的轮次」，
         // 而 `keep == 0`（不截断）时窗口是全量，被取代的事件就在切片里。
-        if snapshot.as_ref().is_some_and(|(si, _)| idx < *si) {
+        if idx < fold_from {
             continue;
         }
         // 变更格自己**不产 entry**：它们不是新的对话内容，也不是「按设计不进请求包」
@@ -441,7 +453,7 @@ pub fn verify(
         if is_snapshot(e, c, m) {
             rep.checked_events += 1;
             rep.consolidations += 1;
-            if let Some((si, msgs)) = snapshot.as_ref() {
+            if let Some((si, msgs, _)) = snapshot.as_ref() {
                 if *si == idx {
                     claim_nodes(
                         &mut rep,

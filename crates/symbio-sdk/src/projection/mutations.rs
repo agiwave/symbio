@@ -151,7 +151,7 @@ fn role_word(r: NodeRole) -> String {
     .to_string()
 }
 
-/// **最近一次压缩快照**：`(快照事件在本切片里的下标, 压缩后的整份消息列表)`。
+/// **最近一次压缩快照**：`(快照事件下标, 快照节点列表, keep_from)`。
 ///
 /// ## 为什么返回下标而不是 seq
 ///
@@ -168,19 +168,22 @@ fn role_word(r: NodeRole) -> String {
 /// 载荷不是合法列表（旧版本 / 手工改过的 WAL）⇒ **跳过那条**继续往前找：读侧必须
 /// 对任意历史事件容错，一条坏载荷不该让整次投影失败——但也不该让一个坏快照
 /// 把此前有效的那一份吃掉。
+///
+/// `keep_from` 是首条未压事实的 id（D-401）：切片只压最旧前缀时，后缀要由读面
+/// 从这条事实起继续折；`None` = 整份都被这份快照取代（旧快照也读作 `None`）。
 pub fn mutations_latest_snapshot(
     events: &[Event],
     v: &MessageVocab,
-) -> Option<(usize, Vec<ChatNode>)> {
+) -> Option<(usize, Vec<ChatNode>, Option<String>)> {
     events
         .iter()
         .enumerate()
         .rev()
-        .find_map(|(i, e)| snapshot_messages(e, v).map(|msgs| (i, msgs)))
+        .find_map(|(i, e)| snapshot_messages(e, v).map(|(msgs, keep)| (i, msgs, keep)))
 }
 
-/// `session.consolidated` 的载荷 → 压缩后的整份消息列表。
-fn snapshot_messages(e: &Event, v: &MessageVocab) -> Option<Vec<ChatNode>> {
+/// `session.consolidated` 的载荷 → `(压缩后的消息列表, keep_from)`。
+fn snapshot_messages(e: &Event, v: &MessageVocab) -> Option<(Vec<ChatNode>, Option<String>)> {
     if !(e.entity == Entity::Message && e.verb == Verb::Progressed) {
         return None;
     }
@@ -193,9 +196,14 @@ fn snapshot_messages(e: &Event, v: &MessageVocab) -> Option<Vec<ChatNode>> {
         .iter()
         .filter_map(|v| serde_json::from_value::<ChatNode>(v.clone()).ok())
         .collect();
+    let keep_from = e
+        .payload
+        .get("keep_from")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
     // 空列表不是一份快照：压缩恒产出「至少那条摘要消息」。空数组若被当成有效快照，
     // 后果是**整段历史被抹掉**——容错的方向必须是「少折」而不是「多抹」。
-    (!msgs.is_empty()).then_some(msgs)
+    (!msgs.is_empty()).then_some((msgs, keep_from))
 }
 
 /// 诞生格（`message.added`）的载荷 → 节点列表（载荷 `{ messages: [...] }`）。

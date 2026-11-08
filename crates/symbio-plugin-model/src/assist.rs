@@ -21,9 +21,10 @@
 //! `reasoning` / `reasoning_id` / `cost_ms` 也随回执走：思考段是一次真实往返的
 //! 产出，读方（如 `session` 的终答落格）照实复刻，**不在落格侧造理由**。
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use serde_json::json;
+use serde_json::{json, Value};
 use symbio_plugin_api::chat_node::{AssistReply, AssistRequest, ChatNode, MessageContent};
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::port::{
@@ -129,6 +130,14 @@ impl PortExecutor for AssistExecutor {
             .unwrap_or_default()
             .to_string();
 
+        // 切片计划（可选）：提问方（如 `compact`）只压「装得下的最旧一段」，
+        // 用两端事实 id + 每条的头尾字符预算表达。它只约束这一段怎么装，
+        // 不改变角色投影——正文仍从事实读，本执行体不认识「压缩」。
+        let slice = match TranscriptSlice::from_payload(&input.payload) {
+            Ok(slice) => slice,
+            Err(error) => return PortOutcome::failed(PortErrorClass::NonRetryable, error),
+        };
+
         // 对话线投影：一条事实一条节点，角色由事实给；正文原样交出，由 provider 侧的
         // `flatten_chat_messages` 折成协议消息。这里**不再拼**「用户：…助手：…」——
         // 那会造出第二个投影器，请求形状与主线漂移（t61 / LC-007）。
@@ -138,7 +147,12 @@ impl PortExecutor for AssistExecutor {
                 .as_ref()
                 .map(|reader| reader.facts())
                 .unwrap_or_default();
-            transcript_nodes(&facts)
+            match transcript_nodes(&facts, slice.as_ref()) {
+                Ok(nodes) => nodes,
+                // 切片端点在读面找不到 ⇒ 这一笔**响亮失败**，绝不退回整份转写：
+                // 那正是「请求装不下」的原始故障（D-401）。
+                Err(error) => return PortOutcome::failed(PortErrorClass::NonRetryable, error),
+            }
         } else {
             // 身份写 `principal`（D-147 / S-014）：`role` 只是存量反序列化落点。
             vec![ChatNode {
@@ -195,14 +209,97 @@ impl PortExecutor for AssistExecutor {
     }
 }
 
+/// 摘要输入可选的**切片计划**：只取两条端点事实之间（含两端）的对话线，
+/// 并按 `truncate` 对某条正文做头尾截断。
+///
+/// 形状由提问方在载荷里给（`slice: { from, to, truncate: { <id>: { head_chars,
+/// tail_chars } } }`）；缺 `slice` = 整份转写（通用问答的既有形状）。两端端点或
+/// 截断参数读不出 ⇒ 这一笔失败——执行体**不得**用「找不到就退回整份」来掩盖。
+struct TranscriptSlice {
+    from: String,
+    to: String,
+    truncate: BTreeMap<String, (usize, usize)>,
+}
+
+impl TranscriptSlice {
+    fn from_payload(payload: &Value) -> Result<Option<Self>, String> {
+        let Some(slice) = payload.get("slice") else {
+            return Ok(None);
+        };
+        let text = |key: &str| {
+            slice
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| format!("摘要切片缺 `{key}`"))
+        };
+        let from = text("from")?;
+        let to = text("to")?;
+        let mut truncate = BTreeMap::new();
+        if let Some(map) = slice.get("truncate").and_then(Value::as_object) {
+            for (id, spec) in map {
+                let head = spec.get("head_chars").and_then(Value::as_u64);
+                let tail = spec.get("tail_chars").and_then(Value::as_u64);
+                let (Some(head), Some(tail)) = (head, tail) else {
+                    return Err(format!("摘要切片 `{id}` 的截断参数不可读"));
+                };
+                truncate.insert(id.clone(), (head as usize, tail as usize));
+            }
+        }
+        Ok(Some(Self { from, to, truncate }))
+    }
+
+    /// 按切片取正文；`None` = 整份。
+    fn window<'a>(&self, facts: &'a [PortFact]) -> Result<&'a [PortFact], String> {
+        let from = facts
+            .iter()
+            .position(|fact| fact.id == self.from)
+            .ok_or_else(|| format!("摘要切片起点 `{}` 不在事实读面", self.from))?;
+        let to = facts
+            .iter()
+            .position(|fact| fact.id == self.to)
+            .ok_or_else(|| format!("摘要切片终点 `{}` 不在事实读面", self.to))?;
+        if from > to {
+            return Err(format!(
+                "摘要切片端点顺序颠倒（{} 在 {} 之后）",
+                self.from, self.to
+            ));
+        }
+        Ok(&facts[from..=to])
+    }
+
+    /// 一条正文按计划取头尾（按字符截：本仓估算器里 1 字符 ≤ 1 token，是硬上限）。
+    fn body(&self, fact: &PortFact, text: &str) -> String {
+        let Some((head_chars, tail_chars)) = self.truncate.get(&fact.id) else {
+            return text.to_string();
+        };
+        let chars: Vec<char> = text.chars().collect();
+        let head: String = chars.iter().take(*head_chars).collect();
+        let tail: String = chars
+            .iter()
+            .skip(chars.len().saturating_sub(*tail_chars))
+            .collect();
+        format!("{head}…中间省略…\n{tail}")
+    }
+}
+
 /// 本轮对话线：用户发言 / 助手终答各自一条**带主体**的消息节点，按事实顺序。
 ///
 /// 主体族决定读侧角色（`Person → user`、`Agent → assistant`）：role 是请求形状的
 /// 一部分（对话面判据 t61 数的是 `role == user` 的条数），所以由事实种类决定，
 /// 不靠正文前缀表达，也不直写存量 `role` 格（S-014）。
-fn transcript_nodes(facts: &[PortFact]) -> Vec<ChatNode> {
+fn transcript_nodes(
+    facts: &[PortFact],
+    slice: Option<&TranscriptSlice>,
+) -> Result<Vec<ChatNode>, String> {
+    let window = match slice {
+        Some(slice) => slice.window(facts)?,
+        None => facts,
+    };
     let mut nodes = Vec::new();
-    for fact in facts {
+    for fact in window {
         let (principal, text) = match fact.kind.as_str() {
             EVENT_USER_MESSAGE => (
                 Principal::new(PrincipalKind::Person, "person/local"),
@@ -223,14 +320,18 @@ fn transcript_nodes(facts: &[PortFact]) -> Vec<ChatNode> {
         if text.trim().is_empty() {
             continue;
         }
+        let text = match slice {
+            Some(slice) => slice.body(fact, text.trim()),
+            None => text.trim().to_string(),
+        };
         nodes.push(ChatNode {
             id: llm_short_id(),
             principal: Some(principal),
-            content: Some(MessageContent::Text(text.trim().to_string())),
+            content: Some(MessageContent::Text(text)),
             ..Default::default()
         });
     }
-    nodes
+    Ok(nodes)
 }
 
 #[cfg(test)]

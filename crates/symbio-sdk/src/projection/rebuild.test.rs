@@ -1080,6 +1080,13 @@ fn snapshot_event(msgs: Vec<crate::chat::chat_node::ChatNode>) -> Event {
     }))
 }
 
+/// 带 `keep_from` 的 `session.consolidated`（D-401）：只压最旧前缀。
+fn snapshot_event_keeping(msgs: Vec<crate::chat::chat_node::ChatNode>, keep_from: &str) -> Event {
+    let mut event = snapshot_event(msgs);
+    event.payload["keep_from"] = serde_json::json!(keep_from);
+    event
+}
+
 /// 快照列表里的一条普通文本节点。
 fn text_msg(id: &str, role: NodeRole, text: &str) -> crate::chat::chat_node::ChatNode {
     crate::chat::chat_node::ChatNode {
@@ -1121,6 +1128,74 @@ fn a_snapshot_rebases_the_prefix() {
         got.iter()
             .all(|s| s.text != "被压掉的问题" && s.text != "被压掉的答复"),
         "被压掉的不复活"
+    );
+}
+
+/// 带 `keep_from` 的快照（D-401）：只取代**最旧前缀**，后缀从该事实起接着折。
+///
+/// 这是「压一半」的读形状：若读面仍从快照下标之后折，被保留的后缀会整段消失——
+/// 而快照只含一条摘要，没有任何东西会红。
+#[test]
+fn a_snapshot_with_keep_from_preserves_the_uncompressed_suffix() {
+    let events = vec![
+        frame_event(
+            "u-old",
+            EVENT_USER_MESSAGE,
+            Verb::Opened,
+            1_000,
+            "user",
+            serde_json::json!({ "text": "被压掉的问题", "tier": "full", "id": "u-old" }),
+        ),
+        frame_event(
+            "f-old",
+            EVENT_CHAT_ASSISTANT_FINAL,
+            Verb::Closed,
+            1_100,
+            "session/main",
+            serde_json::json!({
+                "text": "被压掉的答复", "root_id": "T-old", "text_id": "T-old-text",
+                "status": "completed",
+            }),
+        ),
+        frame_event(
+            "u-keep",
+            EVENT_USER_MESSAGE,
+            Verb::Opened,
+            1_500,
+            "user",
+            serde_json::json!({ "text": "保留的问题", "tier": "full", "id": "u-keep" }),
+        ),
+        frame_event(
+            "f-keep",
+            EVENT_CHAT_ASSISTANT_FINAL,
+            Verb::Closed,
+            1_600,
+            "session/main",
+            serde_json::json!({
+                "text": "保留的答复", "root_id": "T-keep", "text_id": "T-keep-text",
+                "status": "completed",
+            }),
+        ),
+        snapshot_event_keeping(
+            vec![text_msg("snap-root", NodeRole::User, "前缀摘要")],
+            "u-keep",
+        ),
+    ];
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
+    let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids[0], "snap-root", "摘要仍是折叠叶，位于最旧段的位置");
+    assert!(
+        got.iter().any(|s| s.text == "保留的问题"),
+        "keep_from 之后的用户发言必须保留：{ids:?}"
+    );
+    assert!(
+        got.iter().any(|s| s.text == "保留的答复"),
+        "keep_from 之后的终答必须保留：{ids:?}"
+    );
+    assert!(
+        got.iter()
+            .all(|s| s.text != "被压掉的问题" && s.text != "被压掉的答复"),
+        "前缀不再复活：{ids:?}"
     );
 }
 
