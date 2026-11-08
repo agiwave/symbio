@@ -43,7 +43,7 @@ use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
     capability_invoke, capability_to_wire,
-    chat_node::{ChatNode, NodeStatus},
+    chat_node::{ChatNode, NodeStatus, CHAT_STYLE_TAG_TOOL},
     effects::annotations,
     effects::apply,
     effects::expects_facts,
@@ -2008,15 +2008,21 @@ impl ToolPort {
             .filter(|s| !s.trim().is_empty())
         {
             exec.sink
-                .emit(ChatNode {
-                    id: node_id.to_string(),
-                    status: Some(NodeStatus::Streaming),
-                    meta: Some(serde_json::json!({
-                        "started_at": symbio_plugin_api::clock_now_ms(),
-                        "tool_name": tool_name,
-                    })),
-                    ..Default::default()
-                })
+                .emit(
+                    ChatNode {
+                        id: node_id.to_string(),
+                        status: Some(NodeStatus::Streaming),
+                        meta: Some(serde_json::json!({
+                            "started_at": symbio_plugin_api::clock_now_ms(),
+                            "tool_name": tool_name,
+                        })),
+                        ..Default::default()
+                    }
+                    // 这一帧是**工具卡**的完整身份：`meta` 有则覆盖（`Transcript::apply`），
+                    // 少带 `style_tag` 就把卡折回 `turn`——执行窗口越长越容易在状态帧与
+                    // 落库镜像之间读到半截形状（e2e t24 / t99 抓到）。
+                    .with_style_tag(CHAT_STYLE_TAG_TOOL),
+                )
                 .await;
         }
         let agent_id = ctx.get(AGENT_ID).unwrap_or_default();
