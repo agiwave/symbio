@@ -199,6 +199,16 @@ function coverageCells(text) {
   return cells
 }
 
+/** `scripts/baselines/tool-surface.json`：默认装配下 `tools` 数组字节数（一格，只许降）。
+ *  实测量由 `e2e/cases/t46-prompt-shape-baseline.mjs` 读同一份基线并断言；本条只判
+ *  「基线文件有没有被改松」——两半合起来才是「工具面不会悄悄长回去」。 */
+function toolSurfaceCells(text) {
+  const cells = new Map()
+  const m = /"tools_bytes"\s*:\s*(\d+)/.exec(text.replace(/\r\n/g, '\n'))
+  if (m) cells.set('tools', Number(m[1]))
+  return cells
+}
+
 /** 豁免注释：沿用各守卫自己的标记名（`baseline-allow` / `core-export-allow` /
  *  `dead-code-allow`），不新造第四种拼写——那会让豁免散在四种语法里。 */
 function waiverReader(tag) {
@@ -350,6 +360,17 @@ const RATCHETS = [
     waivers: waiverReader('obligation-precheck-allow'),
     envVar: 'OBLIGATION_PRECHECK_BASELINE',
     label: '幂等点问（执行体动手前复核）存量（只许降，但不以归零为目标）',
+  },
+  {
+    // 工具面字节：默认装配下 `tools` 数组的 UTF-8 字节数只许降。实测量在 t46 里
+    // 按同一份基线断言；本条守的是「改基线文件」这条绕过路径。
+    id: 'tool-surface',
+    file: 'scripts/baselines/tool-surface.json',
+    dir: 'ceiling',
+    cellsOf: toolSurfaceCells,
+    // 不设豁免标记：收窄自动生效，变宽只能改基线，而改基线会被本条按基准版本抓住。
+    waivers: () => new Map(),
+    label: '默认装配下 tools 数组字节数（只许降）',
   },
   {
     id: 'coverage',

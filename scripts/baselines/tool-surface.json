@@ -1,0 +1,4 @@
+{
+  "note": "默认装配下 `tools` 数组的 UTF-8 字节数棘轮：只许降。口径 = t46 `full-主线装配-工具轮-对话面关闭` 的真实请求体里每个工具对象 JSON.stringify 后的字节和。含 2 个 mock MCP 夹具工具（mcp__mockserv__echo / add）与 <shell> 平台占位；不含运行期动态 MCP server、绑定智能体后的子树对偶（已去重）、动态清单（enum 里的运行期值）。基线取 Windows 实测：<shell> 的 schema 在 Linux/macOS 上是 `sh`，比 `cmd` 少 2 B，因此那两平台的棘轮略松（只影响上限的严格度，不会误红）。请求体字节与占比只作读数，不设棘轮。",
+  "tools_bytes": 16211
+}

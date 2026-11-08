@@ -33,7 +33,7 @@ import './_selfrun.mjs';
 // 拍不出它们——把工具结果降级成一段正文，形状里必须看得见 `tool_calls` 计数与
 // `tool_call_id` 的消失。工具走 mock-mcp 的 `echo`（返回确定，与 t26 同一取舍）。
 import { join } from 'node:path';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {
@@ -52,7 +52,7 @@ import {
   PROVIDER_ID,
   waitFor,
 } from '../helpers.mjs';
-import { extractObservations } from '../../scripts/prompt-shape-audit.mjs';
+import { extractObservations, extractShape } from '../../scripts/prompt-shape-audit.mjs';
 
 /** 会话 id 固定：它出现在 prompt 的记忆地址里，随机 id 会让基线每次都不一致 */
 const SID = 'e2e-t46';
@@ -62,6 +62,23 @@ const SCENARIO = 'full-主线装配-工具轮-对话面关闭';
 const ECHO_TEXT = '形状基线回显内容';
 
 const AUDIT_SCRIPT = join(E2E_ROOT, 'scripts', 'prompt-shape-audit.mjs');
+
+/** 工具面字节棘轮（只许降）：口径见文件里的 `note`。 */
+const TOOL_SURFACE_BASELINE = join(E2E_ROOT, 'scripts', 'baselines', 'tool-surface.json');
+
+/** 一次性收集一个工具 schema 里所有 `description` 字符串。 */
+function descriptionTexts(node, out = new Set()) {
+  if (Array.isArray(node)) {
+    for (const item of node) descriptionTexts(item, out);
+    return out;
+  }
+  if (!node || typeof node !== 'object') return out;
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'description' && typeof value === 'string') out.add(value);
+    else descriptionTexts(value, out);
+  }
+  return out;
+}
 
 export default defineCase(
   'T46 prompt 形状基线：真实链路送出的形状与基线逐字段一致（PS-001…003）',
@@ -122,6 +139,42 @@ export default defineCase(
       for (const [i, o] of obs.entries()) {
         console.log(`  req${i}: 消息 ${o.messages} 条 · 正文 ${o.message_bytes}B · 请求体 ${o.request_bytes}B`);
       }
+
+      // ── 工具面两条判据（与形状基线同源：读同一份真实请求体，不另解析 Rust 源码）──
+      //
+      // ① **字节棘轮**：默认装配下 `tools` 数组的 UTF-8 字节只许降。形状基线只把规模
+      //    记进「观测列」，改了装配不会红；这一条把「工具面能不能悄悄长回去」变成机器判据。
+      //    口径（含不含 MCP / 动态清单）写在基线文件的 `note` 里，与读数一起复述。
+      // ② **防回流**：同一段重文案（≥200 B 的 `description`）出现在 ≥3 个工具 schema 里 ⇒ 红。
+      //    典型回流是 `PATH_DESC` 被逐份抄回参数说明——它现在由一段上下文注入一次
+      //    （`symbio-plugin-vdfs/src/context.rs`），schema 里只该有短句。
+      const shape = extractShape(reqs, { scenario: SCENARIO });
+      const schemaBytes = Math.max(...shape.requests.map((r) => r.tools.schema_bytes));
+      const base = JSON.parse(readFileSync(TOOL_SURFACE_BASELINE, 'utf8'));
+      const sharePct = (schemaBytes / obs[0].request_bytes) * 100;
+      console.log(
+        `  工具面：${schemaBytes}B ≤ 棘轮 ${base.tools_bytes}B · 请求体 ${obs[0].request_bytes}B · 占比 ${sharePct.toFixed(2)}%`,
+      );
+      assert(
+        schemaBytes <= base.tools_bytes,
+        `默认装配下 tools 字节 ${schemaBytes} 超过棘轮 ${base.tools_bytes}（只许降；口径见 scripts/baselines/tool-surface.json）`,
+      );
+
+      const heavyOwners = new Map();
+      for (const tool of reqs[0].body?.tools ?? []) {
+        const name = tool?.function?.name ?? tool?.name ?? '?';
+        for (const text of descriptionTexts(tool)) {
+          if (Buffer.byteLength(text, 'utf8') < 200) continue;
+          heavyOwners.set(text, [...(heavyOwners.get(text) ?? []), name]);
+        }
+      }
+      const repeated = [...heavyOwners].filter(([, names]) => names.length >= 3);
+      assert(
+        repeated.length === 0,
+        `重文案（≥200B 的 description）在 ≥3 个工具 schema 里重复出现：${repeated
+          .map(([text, names]) => `${names.join('/')} ← ${text.slice(0, 40)}…`)
+          .join('；')}`,
+      );
 
       const dir = mkdtempSync(join(tmpdir(), 'symbio-prompt-shape-'));
       const livePath = join(dir, 'live.json');
