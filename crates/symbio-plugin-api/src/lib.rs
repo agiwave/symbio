@@ -54,6 +54,7 @@ pub mod events;
 pub mod fact_source;
 pub mod hooks;
 pub mod port;
+pub mod reports;
 pub mod retrieval;
 pub mod routes;
 pub mod rows;
