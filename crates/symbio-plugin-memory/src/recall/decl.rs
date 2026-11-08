@@ -4,12 +4,15 @@
 //!
 //! 巩固（名册 #2 的后半）的格位是债（D-268 订正）：申报与执行都在本包
 //! （[`crate::debt`] / [`crate::port`]），执行体直接调本包的折叠。声明视图
-//! `memory.live` 留给跨插件读方——D-387 Q3 的 `memory` 报表按名字读同一副折叠。
+//! `memory.live` 留给跨插件读方——D-387 的 `memory` 报表按名字读同一副折叠。
 //!
 //! ```text
-//! 本包 ──ViewDecl{eval = live::memory_live} + PLUGIN.yml 的 shared_views──▶ 名字公开
-//! 报表 ──ViewRead::named("memory.live")──▶ 冻结表里取 decl ──▶ read(events, now)
+//! 本包 ──ViewDecl{eval = live::memory_live} + submit_reports!──▶ 名字公开
+//! 报表 ──reports::read_view("memory.live")──▶ 冻结表里取 decl ──▶ read(events, now)
 //! ```
+//!
+//! 公开的动作是**报表登记**（D-387），不再经 `PLUGIN.yml` 的 `shared_views` 生成
+//! 清单：`ViewDecl` 仍住 owner，名字仍只有一份（本模块的 [`MEMORY_LIVE`]）。
 //!
 //! 这是 `D-221` 已有的机制，**不新增任何面**：视图是 owner 自己交的纯函数，
 //! 公开是 owner 的显式动作，读方按名字读、不抄口径。
@@ -27,12 +30,15 @@
 //! 正确性（折叠拿到的是完整 `&[Event]`），但装配期的依赖图对这条边是乐观的。
 //! 不开 `reads` 的口子——那条缺口住 DE-026 D-268，不住代码注释。
 
+use serde_json::Value;
 use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED};
+use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::ViewDecl;
 
 use super::live::memory_live;
 
-/// 视图名——与 `PLUGIN.yml` 的 `shared_views` 逐字相同（`view_names.rs` 由它生成）。
+/// 视图名——全仓只此一份（`MEMORY_LIVE`）；报表登记与 `ViewDecl` 都按它取。不写进
+/// `PLUGIN.yml`：公开动作是报表登记（D-387），不再经生成清单。
 pub(crate) const MEMORY_LIVE: &str = "memory.live";
 
 /// 扫描成本上界。与全仓其余视图同值（`seal` 的 `ViewCostMismatch` 要求切点唯一）：
@@ -56,3 +62,27 @@ pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
     eval: memory_live,
     agg: None,
 }];
+
+// 报表登记（`D-387`）：`session/stats` 的 `memory` 顶层键。`views` 是本模块自己的
+// 常量；空形状留在 [`report`]，读方不替 owner 猜形状。没有 `fleet`：活集是会话级
+// 读数，实例级聚合没有可加的维度。
+symbio_plugin_api::submit_reports!([ReportDecl {
+    owner: "memory",
+    slot: "memory",
+    order: 110,
+    views: &[MEMORY_LIVE],
+    fleet: None,
+    render: report,
+    fleet_render: None,
+    panel: None,
+}]);
+
+/// 记忆列的排版：活集原样交出；读不出来（读口以 `Null` 占位）时交 owner 的空活集
+/// ——「还没有记忆」与「这一列没数」用同一个空数组分辨不了，缺席由诊断列承担。
+fn report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    views
+        .first()
+        .filter(|value| !value.is_null())
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]))
+}

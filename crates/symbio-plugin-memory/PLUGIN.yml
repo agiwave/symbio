@@ -10,9 +10,6 @@ plugin_order: 180
 # 外没有生产读者（CS-007），名字留在 `decl.rs` 的本地常量，不进生成物。
 # `memory.recalled` 同样没有跨插件读方，不进本行。
 shared_events: memory.encoded, memory.consolidated
-# 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
-# crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住 `recall::decl::VIEWS`。
-# `memory.live` = 活集折叠（encoded ∪ consolidated − forgotten）：巩固执行体在包内直调
-# 同一函数（D-268 订正）；声明视图留给 D-387 Q3 的 `memory` 报表按名字读——一副折叠
-# 两个读者，不是两份实现。
-shared_views: memory.live
+# 本插件不登记 `shared_views`：`memory.live` 的公开动作是报表登记（`D-387`）——
+# `recall::decl` 的 `submit_reports!` 以 `slot = memory` 交出，读方遍历 `reports()`，
+# 不再经生成清单 `view_names.rs`。视图本身仍是 owner 的 `ViewDecl`，名字只有一份。

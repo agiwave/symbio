@@ -16,11 +16,5 @@ pub struct SharedViewDecl {
     pub owner: &'static str,
 }
 
-/// 每条公开视图一个名字常量：消费方 import 它，不写第二遍字面量（D-364）。
-pub const VIEW_MEMORY_LIVE: &str = "memory.live";
-
-/// 跨插件可读视图（按名字排序）。
-#[rustfmt::skip]
-pub const SHARED_VIEWS: &[SharedViewDecl] = &[
-    SharedViewDecl { name: VIEW_MEMORY_LIVE, owner: "memory" },
-];
+/// 当前没有跨插件可读的视图。owner 在自家 `PLUGIN.yml` 的 `shared_views:` 里登记一行。
+pub const SHARED_VIEWS: &[SharedViewDecl] = &[];

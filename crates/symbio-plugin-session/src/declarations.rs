@@ -76,8 +76,8 @@ pub(crate) const SESSION_TERMINATED_SEAT: &str = "session.terminated-seat";
 
 // 读方侧的视图名别名已全部退场：八列都改报表登记之后（`D-387`），读者按 `slot` 取
 // 整条读数，名字住在 owner 的 `ReportDecl.views` 里，本插件不再持有任何视图名。
-// 生成物 `view_names.rs` 只剩 `memory.live`（本插件自己的那一条），它随
-// `views-rs.mjs` 在 Q3 一起退役（`D-387` 的实施顺序第 6 步）。
+// 生成物 `view_names.rs` 已清空（`memory.live` 也转成了报表），它随 `views-rs.mjs`
+// 在 Q3 收尾一起退役（`D-387` 的实施顺序第 6 步）。
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 

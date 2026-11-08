@@ -250,26 +250,17 @@ fn absence_states_are_distinguishable() {
     );
 }
 
-/// 生成的公开表确实进了本 crate：表非空、按名字全序、每条都带 owner。
+/// 公开动作已全部交给报表登记（`D-387`）：清单生成表必须是空的。
 ///
-/// **不点名任何业务视图**——点一个名字等于把清单内容抄成第二份，清单增删一行就要改这里。
-/// 夹具视图 [`RECENT`] 只登记在 `frozen()`，它进不了生成表，正好用来证明「未公开 ⇒ 不可读」。
+/// 这一条钉的是**没有两个读口并存**——只要还有一条视图走 `shared_views` 生成表，
+/// 同一个名字就能同时从 `reports()` 与 `shared()` 读到，迁移期就成了长期并存。
+/// `shared()` 本身随 `Q3` 收尾退役（本表与 `views-rs.mjs` 同批删除）。
 #[test]
-fn the_generated_shared_table_is_linked() {
-    let table = shared();
-    assert!(!table.is_empty(), "生成的公开表不该为空");
-    let names: Vec<&str> = table.iter().map(|v| v.name).collect();
-    let mut sorted = names.clone();
-    sorted.sort_unstable();
-    assert_eq!(names, sorted, "公开表按名字全序：读侧不依赖注册顺序");
+fn no_shared_view_remains_after_the_report_migration() {
     assert!(
-        table.iter().all(|v| !v.owner.is_empty()),
-        "每条公开视图都要带 owner：{:?}",
-        table
-    );
-    assert!(
-        !table.iter().any(|v| v.name == RECENT),
-        "夹具视图不进生成表：它只活在测试自己的登记里"
+        shared().is_empty(),
+        "报表登记接管后，清单生成表不该再有条目：{:?}",
+        shared()
     );
 }
 

@@ -416,7 +416,11 @@ fn totals_add_the_owner_rows() {
 /// 本进程不链接任何 owner（E-009）⇒ `reports()` 为空 ⇒ `SessionStats::reports` 是空表。
 /// 这与迁移前的「读方替 owner 交一份文档写过的空形状」是两种降级语义：空形状会让
 /// 「装配里没有这个 owner」长得像「这一列本来就是空的」；整条缺席才可诊断
-/// （`D-281` 理由 3）。缺席的**原因**由能力视图那一列按名字报出。
+/// （`D-281` 理由 3）。
+///
+/// 诊断列同样没有名字可报：不链接 owner 就没有报表登记的 `views`，而清单生成表已随
+/// 报表迁移清空（`D-387`）。**有名字却读不出来**的缺席由
+/// [`capability_views_column_follows_the_shared_manifest`] 与全装配 e2e 覆盖。
 #[test]
 fn unregistered_reports_are_absent_from_the_exit() {
     let wal = seed("absent");
@@ -428,23 +432,11 @@ fn unregistered_reports_are_absent_from_the_exit() {
         "本进程不链接任何 owner ⇒ 报表列一格都不出现：{:?}",
         got.reports.keys().collect::<Vec<_>>()
     );
-    // 缺席必须**可诊断**：能力视图那一列按名字报出原因词与人话。
     let absent = got.capability_views.as_object().expect("能力视图列是对象");
     assert!(
-        !absent.is_empty(),
-        "清单非空 ⇒ 缺席的每一条都要有名有姓：{absent:?}"
+        absent.is_empty(),
+        "一个登记名都没有 ⇒ 没有可诊断的缺席：{absent:?}"
     );
-    for (name, entry) in absent {
-        assert_eq!(
-            entry["status"].as_str(),
-            Some("unavailable"),
-            "{name}: 本进程没链接 owner ⇒ 必须出声，不能给空值冒充读数"
-        );
-        assert!(
-            entry["reason"].as_str().is_some_and(|r| !r.is_empty()),
-            "{name}: 缺席要带原因词"
-        );
-    }
 }
 
 /// 实例级 `axes` 三族：形状恒在，各自归各自的 owner。
