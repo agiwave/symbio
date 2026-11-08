@@ -15,9 +15,9 @@ use symbio_plugin_api::context::{
     sections, Cadence, ContextRequest, ContextSection, DelegateVerdict, LiveInputs,
 };
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED,
-    EVENT_SESSION_CONFIG, EVENT_TOOL_CALL_REQUESTED, EVENT_TOOL_REQUESTED, EVENT_TURN_BRANCH,
-    EVENT_TURN_BRANCH_SELECTED, EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED, EVENT_SESSION_CONFIG,
+    EVENT_TOOL_CALL_REQUESTED, EVENT_TOOL_REQUESTED, EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED,
+    EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortFactEmit, PortInput, PortOutcome,
@@ -708,18 +708,21 @@ impl PortExecutor for ModelExecutor {
                 EVENT_FAILED
             };
             if speech_denied {
-                // 拒绝也要留痕：重建面按 `key = chat.assistant.final` + `root_id` 配对，
-                // 把这一轮的答复挡在对话面之外（`rebuild::denied_speech`）。
+                // 拒绝也要留痕：读者按**格位 + 载荷的语音键**配对——`(Scope, Asserted)`
+                // 且 `key = chat.assistant.final`、`root_id` 归属本轮，把这一轮的答复挡在
+                // 对话面之外（`rebuild::denied_speech`）。名字是本插件私有的
+                // `model.speech.denied`（D-390），读者不按名字取。
                 emit_outcome(
                     &exec.emit,
                     format!("deny-{}-speech", request.root_id),
-                    EVENT_AUTHZ_DENIED,
+                    crate::vocab::EVENT_MODEL_SPEECH_DENIED,
                     Verb::Asserted,
                     serde_json::json!({
                         "port": MODEL_PORT,
                         "key": EVENT_CHAT_ASSISTANT_FINAL,
                         "root_id": &request.root_id,
                         "detail": &request.principal,
+                        "reason": "denied",
                     }),
                 )
                 .await;

@@ -31,9 +31,6 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
 // ============ authz ============
 
-/// authz.denied — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
-pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
-
 /// authz.granted — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
 pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 
@@ -104,9 +101,6 @@ pub const EVENT_SESSION_RECALL: &str = "session.recall";
 /// task.asserted — owner `symbio-plugin-task`，格位 `(Task, Asserted)`
 pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 
-/// task.controlled — owner `symbio-plugin-loop`，格位 `(Control, Opened)`
-pub const EVENT_TASK_CONTROLLED: &str = "task.controlled";
-
 /// task.held — owner `symbio-plugin-task`，格位 `(Task, Held)`
 pub const EVENT_TASK_HELD: &str = "task.held";
 
@@ -154,7 +148,6 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 #[rustfmt::skip]
 pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::host(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← tool
-    EventDecl::with_roles(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted), &[FactRole::StopsTurn]), // authz.denied ← loop
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)), // authz.granted ← loop
     EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Scope, Verb::Closed)), // chat.assistant.fallback ← session
     EventDecl::host_with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← session
@@ -173,7 +166,6 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
     EventDecl::new(EVENT_SESSION_RECALL, (Entity::Scope, Verb::Asserted)), // session.recall ← session
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task
-    EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task
     EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← task
     EventDecl::host(EVENT_TOOL_CALL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.call.requested ← model

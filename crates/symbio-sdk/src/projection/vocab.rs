@@ -51,8 +51,12 @@
 
 /// 对话的**发言面**：一轮里谁说了一句话、这一轮怎么开的、为什么停。
 ///
-/// 9 个事件名字段 + 1 个端口名字段 = 这一面的闭集。加一条发言类事件 ⇒ 加一个字段 ⇒
+/// 8 个事件名字段 + 1 个端口名字段 = 这一面的闭集。加一条发言类事件 ⇒ 加一个字段 ⇒
 /// 编译期点出全部折叠与全部调用方；**内核与 core 的文件零 diff**，这正是本表存在的理由。
+///
+/// 「本轮为什么停」不在这里留名字字段：拒因事实的 owner 已按写方拆开（D-390），
+/// 名字是各插件的私有拼写，读者认的是**格位 + 载荷的语音键**（见
+/// [`ChatVocab::denies_speech`]）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatVocab {
     /// 开轮：`turn × opened`。折叠据它认「这一轮从哪开始」（幕锚）。
@@ -71,11 +75,9 @@ pub struct ChatVocab {
     pub fallback: &'static str,
     /// 用户看得见的进展：`turn × progressed`。
     pub progress: &'static str,
-    /// 被拒：`turn × asserted`。不产生收束格，但回答「这一轮为什么停」。
-    pub denied: &'static str,
     /// 这一轮模型往返的**端口名**（`response` / `failed` 载荷里的 `port`）。
     ///
-    /// 它和上面九个不是同类：上面是事件名，它是端口名。放在同一张表里的理由与
+    /// 它和上面八个不是同类：上面是事件名，它是端口名。放在同一张表里的理由与
     /// 「这一面的闭集」相同——折叠需要判「这条往返是不是这一轮对读者说的」，
     /// 而那个判据的两个维度（端口、有无 `via`）只能由调用方交进来；写字面量就是
     /// core 又认识了一个世界名（D-203 / D-206 同一形状）。
@@ -106,6 +108,20 @@ impl ChatVocab {
             || kind == self.final_reply
             || kind == self.fallback
             || kind == self.progress
+    }
+
+    /// 这一条事实是不是「本轮发言被写侧闸拒」的停格。
+    ///
+    /// 判据是**格位 + 载荷键**，不是事件名：拒因事实的名字已按写方私有化（D-390），
+    /// 会话仍要认出「本轮那句答复被拒了」。`key` 取本表自己的定稿格名
+    /// `chat.assistant.final`，格位取 `(Scope, Asserted)`——写侧闸的否定事实只有这一格，
+    /// 而 `chat.assistant.final` 本身落在 `Scope × Closed`，不会误伤定稿。
+    ///
+    /// 工具侧的授权拒因落在同一格位、但 `key` 是调用身份（不是语音键），因此不命中。
+    pub fn denies_speech(&self, e: &crate::Event) -> bool {
+        e.entity == crate::event::Entity::Scope
+            && e.verb == crate::event::Verb::Asserted
+            && e.payload.get("key").and_then(|v| v.as_str()) == Some(self.final_reply)
     }
 }
 

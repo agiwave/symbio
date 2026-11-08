@@ -693,7 +693,7 @@ fn response_answer_lands_as_a_child_at_its_own_position() {
 fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
     let denied = Event::pending(
         "deny-1-speech",
-        crate::test_fixtures::EVENT_AUTHZ_DENIED,
+        crate::test_fixtures::EVENT_MODEL_SPEECH_DENIED,
         Entity::Scope,
         Verb::Asserted,
         "session/peer-b",

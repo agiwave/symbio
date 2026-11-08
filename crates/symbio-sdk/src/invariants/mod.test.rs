@@ -7,7 +7,7 @@ use super::*;
 use crate::event::ClosureReason;
 use crate::event::{Entity, Event, EventEnvelope, Verb};
 use crate::store::{EventStore, Store};
-use crate::test_fixtures::EVENTS;
+use crate::test_fixtures::{EVENTS, EVENT_MODEL_SPEECH_DENIED};
 
 /// 造一条 pending 事件（未入库，无 seq）。
 ///
@@ -371,11 +371,17 @@ fn an_all_historical_log_stays_green_under_the_graced_read() {
 
 #[test]
 fn closure_reason_covers_both_closure_cells_and_the_denial_fact() {
-    // `fallback` 是另一个格名，`authz.denied` 根本不是收束格——三处都问同一个问题。
+    // `fallback` 是另一个格名，语音键拒因根本不是收束格——三处都问同一个问题。
     let events = vec![
         closed("f0", "chat.assistant.final", None),
         closed("fb0", "chat.assistant.fallback", None),
-        Event::pending("d0", "authz.denied", Entity::Scope, Verb::Asserted, "main"),
+        Event::pending(
+            "d0",
+            EVENT_MODEL_SPEECH_DENIED,
+            Entity::Scope,
+            Verb::Asserted,
+            "main",
+        ),
     ];
     assert_eq!(
         closure_reason_closed(EVENTS, &events, false).len(),
@@ -386,8 +392,14 @@ fn closure_reason_covers_both_closure_cells_and_the_denial_fact() {
 
 #[test]
 fn closure_reason_denied_on_a_denial_fact_passes() {
-    let e = Event::pending("d0", "authz.denied", Entity::Scope, Verb::Asserted, "main")
-        .with_payload(serde_json::json!({ "reason": ClosureReason::Denied.as_str() }));
+    let e = Event::pending(
+        "d0",
+        EVENT_MODEL_SPEECH_DENIED,
+        Entity::Scope,
+        Verb::Asserted,
+        "main",
+    )
+    .with_payload(serde_json::json!({ "reason": ClosureReason::Denied.as_str() }));
     assert!(closure_reason_closed(EVENTS, &[e], false).is_empty());
 }
 
@@ -632,7 +644,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
 
 // ── C6 / D-203：停机判据读声明，不读名字 ───────────────────────────────
 
-/// 停机事实的第二臂同样读角色（C6）：`authz.denied` 那一条的名字不出现在判据里。
+/// 停机事实的第二臂同样读角色（C6）：具体事件名不出现在判据里。
 #[test]
 fn a_stop_fact_is_a_grid_cell_or_a_declared_role() {
     const VOCAB: &[EventDecl] = &[EventDecl::with_roles(

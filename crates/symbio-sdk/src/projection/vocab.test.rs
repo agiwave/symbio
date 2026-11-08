@@ -13,7 +13,6 @@ pub(super) const CHAT: ChatVocab = ChatVocab {
     final_reply: "chat.assistant.final",
     fallback: "chat.assistant.fallback",
     progress: "chat.assistant.progress",
-    denied: "authz.denied",
     model_port: "model",
 };
 
@@ -60,7 +59,7 @@ fn spoken_covers_the_five_ways_the_assistant_says_something() {
         assert!(CHAT.is_spoken(kind), "{kind} 是助手说的一句话");
     }
     // 用户说的话、被拒都不是「助手说话了」。
-    for kind in [CHAT.user_message, CHAT.denied] {
+    for kind in [CHAT.user_message, "model.speech.denied"] {
         assert!(!CHAT.is_spoken(kind), "{kind} 不是助手说的话");
     }
 }
@@ -70,7 +69,7 @@ fn spoken_covers_the_five_ways_the_assistant_says_something() {
 #[test]
 fn no_event_name_is_claimed_by_two_fields() {
     let all = [
-        // ChatVocab（9）
+        // ChatVocab（8）
         CHAT.user_message,
         CHAT.branch,
         CHAT.branch_selected,
@@ -79,7 +78,6 @@ fn no_event_name_is_claimed_by_two_fields() {
         CHAT.final_reply,
         CHAT.fallback,
         CHAT.progress,
-        CHAT.denied,
         // MessageVocab（5）
         MESSAGE.artifact_added,
         MESSAGE.message_added,
@@ -94,8 +92,8 @@ fn no_event_name_is_claimed_by_two_fields() {
     ];
     assert_eq!(
         all.len(),
-        18,
-        "三张表的闭集是 18 条名字（9 + 5 + 4；verdict 是单名字形参）"
+        17,
+        "三张表的闭集是 17 条名字（8 + 5 + 4；verdict 是单名字形参）"
     );
     let mut seen = all.to_vec();
     seen.sort_unstable();

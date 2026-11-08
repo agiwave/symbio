@@ -14,13 +14,28 @@ use super::port::TOOL;
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-tool";
 
-/// 本插件写的世界事实。
+/// 工具侧的授权拒因：**本插件私有**（D-390）。
+///
+/// 拆名前它与 model 的语音键拒因共用 `authz.denied`——一个名字两个写方。拆开后
+/// 本插件这份只描述「这一笔调用没放行」：它**不是停轮事实**，因此不带 `StopsTurn`
+/// （C6 不再向它要 `reason`）。会话投影按格位 + 语音键认停，不按这个名字取。
+pub(crate) const EVENT_AUTHZ_DENIED: &str = "authz.denied";
+
+/// 熔断器落下的控制事实：**本插件私有**（D-389）。
+///
+/// 今天只有本插件的熔断写它，没有第二个插件在生产代码里按名字读它 ⇒ 不进
+/// `PLUGIN.yml` 的 `shared_events`，格位在本文件的 [`EVENTS`] 里登记。
+pub(crate) const EVENT_TASK_CONTROLLED: &str = "task.controlled";
+
+/// 本插件写的事实格位（含两条私有名）。
 ///
 /// `tool.calls.done` 是工具调用收束，session 的进度面按名字读；
 /// `artifact.added` 是本次调用的产物格，被 notes / model / 转写投影多处按名字读。
 /// 两条都登记在本插件 `PLUGIN.yml` 的 `shared_events` 里，消费方 import 生成常量
-/// （D-364）。
+/// （D-364）。`authz.denied` / `task.controlled` 是单消费方私有名，只在本表登记。
 pub(crate) const EVENTS: &[EventDecl] = &[
+    EventDecl::new(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
     EventDecl::host("tool.calls.done", (Entity::Scope, Verb::Asserted)),
     // 产物格：载荷来自执行体交出的草稿，落行仍走宿主写口 ⇒ 与 `tool.calls.done` 同一口径。
     EventDecl::host("artifact.added", (Entity::Artifact, Verb::Asserted)),

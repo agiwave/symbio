@@ -1495,10 +1495,7 @@ async fn exhausted_budget_breaks_and_lands_a_control_event() {
     let facts = captured.lock().unwrap();
     assert_eq!(facts.len(), 1, "一笔熔断只落一条事实");
     assert_eq!(facts[0].key, "cb-tc-1");
-    assert_eq!(
-        facts[0].kind,
-        symbio_plugin_api::events::EVENT_TASK_CONTROLLED
-    );
+    assert_eq!(facts[0].kind, crate::declarations::EVENT_TASK_CONTROLLED);
     assert_eq!(facts[0].entity, Entity::Control);
     assert_eq!(facts[0].verb, Verb::Opened);
     assert_eq!(

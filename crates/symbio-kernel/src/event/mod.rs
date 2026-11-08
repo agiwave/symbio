@@ -344,7 +344,7 @@ pub enum ClosureReason {
     /// 主路径失败，兜底顶上。
     Fallback,
     /// 收束闸拒绝。**不产生收束格**——被拒的一轮仍然未收束，
-    /// 这个值只落在 `authz.denied` 上。
+    /// 这个值只落在写侧闸的语音键拒因上（`model.speech.denied`，D-390）。
     Denied,
 }
 
@@ -430,9 +430,9 @@ impl ClosureReason {
 
 // ── 控制格子（`task.controlled`）──
 //
-// 名字不在这里：写方在两个插件各一个（session 的打断处置、loop 的熔断与拒因），
-// 它因此是**跨插件事件名**，登记口是 owner 清单的 `shared_events:` 行
-// （`symbio_plugin_api::events`，判据 CS-007）——内核不为任何业务事件命名
+// 名字不在这里：今天只有工具插件的熔断写它，没有第二个插件在生产代码里按名字读它
+// ⇒ 它是**单消费方名字**，随 owner 私有，不进 `shared_events:`
+// （`symbio_plugin_api::events`）——内核不为任何业务事件命名
 // （DE-024 D-203 / D-204）。格子语义与写侧纪律随 owner 的 `EventDecl` 走。
 
 /// 「这是一次自主开轮」在**地址写入体**上的判别键（`ChatNode.meta` 的键名）。

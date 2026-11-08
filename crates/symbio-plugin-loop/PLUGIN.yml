@@ -6,8 +6,9 @@ plugin_order: 40
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 vocab::EVENTS。
 # `chat.*` / `user.message` 已随词汇移交进会话簿记的清单，`memory.*` 已随词汇移交进
-# 记忆包的清单（本插件不再是它们的 owner）。
-shared_events: authz.denied, authz.granted, commitment.asserted, commitment.broken, commitment.opened, commitment.released, task.controlled
+# 记忆包的清单（本插件不再是它们的 owner）。`authz.denied` 已按写方拆成两个私有名
+# （D-390）、`task.controlled` 已私有化到工具插件（D-389），两者都不再登记在这里。
+shared_events: authz.granted, commitment.asserted, commitment.broken, commitment.opened, commitment.released
 # 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住 `control_decl::VIEWS`。
 # 纯机制环不导出视图。

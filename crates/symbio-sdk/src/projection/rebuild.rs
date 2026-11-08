@@ -219,20 +219,19 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 被 `message.removed` 判死的节点 id（循环末尾统一剔除）。
     let mut gone: HashSet<String> = HashSet::new();
     let mut seq = RebuildSeq(0);
-    // 发言被写侧闸拒的轮（`authz.denied{key: chat.assistant.final}`）。
+    // 发言被写侧闸拒的轮（拒因格载荷 `key: chat.assistant.final`，D-390）。
     //
     // 这些轮的那次**答复**（无工具调用的往返）是模型产出的**事实**，但它从未获准
     // 进入对话——fail-closed 的呈现面要求它不出现在消息列表里。判据是跨事件的
     // （拒绝格排在应答格之后），所以先收索引、再折（与变更格同一纪律）。
+    // 认的是**格位 + 载荷的语音键**，不是事件名：拒因事实的 owner 已按写方拆开，
+    // 名字是各插件的私有拼写（[`ChatVocab::denies_speech`]）。
     // 配对键是**触发这一轮的事实身份**（`root_id`，即那条 `user.message` 的 id）：
     // 拒绝格与应答格都带同一位，不靠任何「第几轮」的编号。
     // 工具轮的中途正文不受影响：它们属已经准许的循环，不是被拒的那句话。
     let denied_speech: HashSet<String> = events
         .iter()
-        .filter(|e| {
-            e.kind == c.denied
-                && e.payload.get("key").and_then(|v| v.as_str()) == Some(c.final_reply)
-        })
+        .filter(|e| c.denies_speech(e))
         .filter_map(|e| {
             e.payload
                 .get("root_id")

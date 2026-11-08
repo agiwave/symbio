@@ -229,12 +229,13 @@ impl Convergence {
                 .collect();
             let waiting_on_user = waits_for_user(&waiting_events);
             // 发言闸拒也是**正常收束**（D-067）：终答格被拒 ⇒ 不落 `final`，但轮
-            // 照样了结——拒绝是记录层的结论，不是静默中断。判据按**事实身份**认：
-            // `authz.denied{key = chat.assistant.final}` 且 `root_id` 归属本轮。
+            // 照样了结——拒绝是记录层的结论，不是静默中断。判据按**格位 + 语音键**
+            // 认（D-390）：写侧闸的否定事实落在 `(Scope, Asserted)`、载荷
+            // `key = chat.assistant.final`，`root_id` 归属本轮。名字是写方的私有拼写，
+            // 会话不再按名字取。
             // 没有这一支，会话停在 `working`、CLI 等不到收束（t73 的 B 侧）。
             let speech_denied = waiting_events.iter().any(|e| {
-                e.kind == CHAT_VOCAB.denied
-                    && e.payload.get("key").and_then(Value::as_str) == Some(CHAT_VOCAB.final_reply)
+                CHAT_VOCAB.denies_speech(e)
                     && e.payload.get("root_id").and_then(Value::as_str)
                         == Some(user.event_id.as_str())
             });

@@ -6,7 +6,7 @@
       "test": 182
     },
     "F2": {
-      "prod": 22,
+      "prod": 21,
       "test": 14
     },
     "F3": {
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-08",
+      "faces": "F2.prod",
+      "reason": "D-390 拆名：`authz.denied` 与 model 语音键拒因分开，共享声明里的 `StopsTurn` 随生成物退场一处，角色只落在 owner 私有的 `model.speech.denied` 声明（其余两面不变）。F2 生产面实测 22 → 21 为**实测收窄**；目标 0 不变。"
+    },
     {
       "date": "2026-11-08",
       "faces": "F1.prod",

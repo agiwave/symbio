@@ -34,7 +34,8 @@ pub const EVENT_CHAT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 pub const EVENT_CHAT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 pub const EVENT_TURN_BRANCH: &str = "turn.branch";
 pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
-pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
+/// 模型侧的语音键拒因：写方私有名（`model.speech.denied`），带 `StopsTurn`（D-390）。
+pub const EVENT_MODEL_SPEECH_DENIED: &str = "model.speech.denied";
 
 // ── 产物与消息面 ──
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
@@ -89,7 +90,7 @@ pub const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_FAILED, (Entity::Scope, Verb::Asserted)),
     EventDecl::new(EVENT_RETRY, (Entity::Scope, Verb::Asserted)),
     EventDecl::with_roles(
-        EVENT_AUTHZ_DENIED,
+        EVENT_MODEL_SPEECH_DENIED,
         (Entity::Scope, Verb::Asserted),
         &[FactRole::StopsTurn],
     ),
@@ -114,7 +115,7 @@ pub const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)),
 ];
 
-/// 对话发言面（9 条事件 + 1 个端口名）。
+/// 对话发言面（8 条事件 + 1 个端口名）。
 pub const CHAT: ChatVocab = ChatVocab {
     user_message: EVENT_USER_MESSAGE,
     branch: EVENT_TURN_BRANCH,
@@ -124,7 +125,6 @@ pub const CHAT: ChatVocab = ChatVocab {
     final_reply: EVENT_CHAT_ASSISTANT_FINAL,
     fallback: EVENT_CHAT_ASSISTANT_FALLBACK,
     progress: EVENT_CHAT_ASSISTANT_PROGRESS,
-    denied: EVENT_AUTHZ_DENIED,
     model_port: "model",
 };
 

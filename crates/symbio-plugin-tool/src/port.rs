@@ -39,6 +39,7 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::breaker::{CircuitBreaker, GateDecision};
+use crate::declarations::EVENT_AUTHZ_DENIED;
 use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
@@ -50,7 +51,6 @@ use symbio_plugin_api::{
     effects::EffectEnv,
     effects::EffectInput,
     events::EVENT_ARTIFACT_ADDED,
-    events::EVENT_AUTHZ_DENIED,
     events::EVENT_AUTHZ_GRANTED,
     events::EVENT_TOOL_REQUESTED,
     failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel, Entity,

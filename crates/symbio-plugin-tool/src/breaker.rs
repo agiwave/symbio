@@ -4,8 +4,8 @@
 //! 总预算）随债交过来。判据、「熔断中不发」以及那条 `control × opened` 事实都由
 //! 本执行体自己落（[DE-039 §6](../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 
+use crate::declarations::EVENT_TASK_CONTROLLED;
 use serde_json::json;
-use symbio_plugin_api::events::EVENT_TASK_CONTROLLED;
 use symbio_plugin_api::{Entity, FactDraft, Verb};
 
 /// 一次开窗判定的结论。

@@ -24,7 +24,7 @@
 //!    发言收束（收束格）判 `can_reply`，产物收束
 //!    （`artifact.added`）判 `can_produce_artifact`
 //!    （[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）。未持有 ⇒ **不落那一格，
-//!    但落一条否定事实** `authz.denied{key, kind, why}`：
+//!    但落一条否定事实** `model.speech.denied{key, kind, why, reason}`（D-390）：
 //!    发言臂下该轮留在未收束态——除非它落过产物格（产物也是「这一轮有事发生」）。
 //!
 //!    **「拒绝 = 不落格」是旧口径，已订正为「拒绝 = 落 `denied` 且不落格」。**

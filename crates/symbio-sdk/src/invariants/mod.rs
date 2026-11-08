@@ -336,7 +336,8 @@ fn declared_budget_of(e: &Event) -> Option<u64> {
 /// ## 判定范围
 ///
 /// `turn × closed` 的两种格（`chat.assistant.final` / `chat.assistant.fallback`）
-/// 加上 `authz.denied`（拒绝不产生收束格，但它同样是一次"停"）。
+/// 加上带 `StopsTurn` 角色的否定事实（拒绝不产生收束格，但它同样是一次"停"）。
+/// 具体名字由 owner 声明决定，这里只读角色（D-390：拒因已按写方拆成私有名）。
 /// 闭集由 [`symbio_kernel::event::ClosureReason::ALL`] 派生，**不在这里另写一份**——两处各写一份，
 /// 加一个新原因时就会出现"写侧合法、读侧报红"的两套绿。
 ///
