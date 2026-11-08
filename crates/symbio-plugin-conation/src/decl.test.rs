@@ -208,21 +208,32 @@ fn merging_nothing_is_a_zero_not_a_division() {
     assert_eq!(sum["adoption_rate"], 0.0);
 }
 
-/// 声明自检：每条视图都交了多片合并那一半，且 `reads` 指向已声明的名字。
+/// 声明自检：读数视图都交了多片合并那一半，且 `reads` 指向已声明的名字。
 ///
 /// 后半条不是形式主义：`reads` 里写一条没声明的名字，`seal` 会判 `UnknownFact`；写一条
 /// 有事实没字段的，会判 `UndeclaredField`。两者都在装配期红，而这里让它们在**单测**里先红。
 ///
 /// 两种合法读法：本包的事实走 `FactDecl`（名字 + 字段都校验）；兄弟插件的事实族（任务族
 /// 没有 `FactDecl`）走 `D-282` 的第二种读法——名字必须在清单生成物 `SHARED_EVENTS` 里。
+///
+/// `conation.policy` 是唯一的例外：它是**一次判决**，没有「N 片合起来该不该升格」这种东西，
+/// 所以 `agg` 明确为空（`D-384`）——`NotAggregable` 是可辨的缺席，不是「汇总下来为零」。
 #[test]
 fn every_view_ships_both_halves_and_its_reads_are_declared() {
     for view in VIEWS {
-        assert!(
-            view.agg.is_some(),
-            "{}: 多片合并那一半必须交（D-281）",
-            view.name
-        );
+        if view.name == CONATION_POLICY {
+            assert!(
+                view.agg.is_none(),
+                "{}: 判决逐会话，不交合并那一半（D-384）",
+                view.name
+            );
+        } else {
+            assert!(
+                view.agg.is_some(),
+                "{}: 多片合并那一半必须交（D-281）",
+                view.name
+            );
+        }
         for (fact, field) in view.reads {
             if let Some(decl) = FACTS.iter().find(|f| f.name == *fact) {
                 assert!(
@@ -246,4 +257,133 @@ fn every_view_ships_both_halves_and_its_reads_are_declared() {
             view.name
         );
     }
+}
+
+// ==================== `conation.policy`：开关与宽度（`D-384`） ====================
+//
+// 这三条口径原先躺在会话的 `ConationPolicy` 里，读方替能力包记着一条它自己的规则。
+// 搬回这里之后，判据的**数字**与**边界**都归本包；会话只剩强制点（授权 + 不可伪造的
+// 批准类型），因此这几条用例也只能住在这里。
+
+use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
+
+/// 一条配置快照（`session.config`，owner 是 `loop` 的词汇表）。
+fn config(seq: u64, ts: i64, payload: Value) -> Event {
+    let mut e = Event::pending(
+        "cfg",
+        EVENT_SESSION_CONFIG,
+        Entity::Scope,
+        Verb::Asserted,
+        "session/assembly",
+    )
+    .with_ts(ts)
+    .with_payload(payload);
+    e.seq = Some(Seq::new(seq));
+    e
+}
+
+/// 带溯源的欲——生产路径（`express_intent`）的唯一形状。
+fn sourced(id: &str, goal: &str, seq: u64, ts: i64) -> Event {
+    expressed(id, goal, seq, ts).with_produced_by(seq - 1)
+}
+
+/// 开关：判决策读**最近一条** `session.config`；关着就拒，理由原样交给会话。
+#[test]
+fn policy_refuses_when_the_switch_is_off() {
+    let events = [
+        config(1, 10, json!({ "conation_enabled": true })),
+        config(2, 20, json!({ "conation_enabled": false })),
+        sourced("want-0", "把周报写了", 3, 30),
+    ];
+    let v = policy(&events, i64::MAX);
+    assert_eq!(v["seq"], 3);
+    assert_eq!(v["enabled"], false);
+    assert_eq!(v["promotable"], false);
+    assert_eq!(v["reason"], "conation disabled");
+}
+
+/// 缺格 / 非布尔 ⇒ 出厂值关：读不到不等于开着（`D-252` / `D-379`）。
+#[test]
+fn policy_defaults_the_switch_to_off() {
+    let missing = policy(
+        &[config(1, 10, json!({})), sourced("want-0", "看一眼", 2, 20)],
+        i64::MAX,
+    );
+    assert_eq!(missing["enabled"], false);
+    assert_eq!(missing["reason"], "conation disabled");
+
+    let wrong_type = policy(
+        &[
+            config(1, 10, json!({ "conation_enabled": "true" })),
+            sourced("want-0", "看一眼", 2, 20),
+        ],
+        i64::MAX,
+    );
+    assert_eq!(wrong_type["enabled"], false, "字符串 \"true\" 不是布尔");
+}
+
+/// 宽度闸：**超过** 200 字节才拒——正好 200 是允许的（边界值不许两边都算越界）。
+#[test]
+fn policy_refuses_only_a_goal_wider_than_the_owner_limit() {
+    let open = json!({ "conation_enabled": true });
+    let at_limit = "x".repeat(MAX_GOAL_LEN);
+    let over = "x".repeat(MAX_GOAL_LEN + 1);
+
+    let ok = policy(
+        &[
+            config(1, 10, open.clone()),
+            sourced("want-0", &at_limit, 2, 20),
+        ],
+        i64::MAX,
+    );
+    assert_eq!(ok["enabled"], true);
+    assert_eq!(ok["promotable"], true);
+    assert_eq!(ok["reason"], Value::Null);
+
+    let no = policy(
+        &[config(1, 10, open), sourced("want-0", &over, 2, 20)],
+        i64::MAX,
+    );
+    assert_eq!(no["promotable"], false);
+    assert_eq!(no["reason"], "goal too broad");
+}
+
+/// 判决只判**带溯源**的那一条（无溯源的欲构造不出候选，I2），且 as-of 之外一概不可见。
+#[test]
+fn policy_binds_the_latest_sourced_intent_as_of_now() {
+    let events = [
+        config(1, 10, json!({ "conation_enabled": true })),
+        sourced("want-a", "目标 A", 2, 20),
+        expressed("want-orphan", "来路不明", 3, 30),
+        config(4, 40, json!({ "conation_enabled": false })),
+        sourced("want-b", "目标 B", 5, 50),
+    ];
+    // as-of 25：只有 A 与开着的快照 ⇒ 判 A、放行。
+    let early = policy(&events, 25);
+    assert_eq!(early["seq"], 2);
+    assert_eq!(early["goal"], "目标 A");
+    assert_eq!(early["promotable"], true);
+
+    // as-of 45：无溯源的孤儿更晚，但它不是判决对象；开关已翻成关 ⇒ 仍判 A、拒。
+    let mid = policy(&events, 45);
+    assert_eq!(mid["seq"], 2);
+    assert_eq!(mid["promotable"], false);
+    assert_eq!(mid["reason"], "conation disabled");
+
+    // as-of 最晚：B 是最后一条带溯源的欲 ⇒ 判 B。
+    let late = policy(&events, i64::MAX);
+    assert_eq!(late["seq"], 5);
+    assert_eq!(late["goal"], "目标 B");
+}
+
+/// 没有可判的欲 ⇒ 明说「没有」，不拿空目标冒充一条可升格的欲（`""` 会永远通过宽度闸）。
+#[test]
+fn policy_without_an_intent_says_so_instead_of_guessing() {
+    let v = policy(
+        &[config(1, 10, json!({ "conation_enabled": true }))],
+        i64::MAX,
+    );
+    assert_eq!(v["seq"], Value::Null);
+    assert_eq!(v["promotable"], false);
+    assert_eq!(v["reason"], "no expressed intent");
 }

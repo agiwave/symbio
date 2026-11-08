@@ -20,6 +20,7 @@ pub struct SharedViewDecl {
 pub const VIEW_CAUSAL_LINKS: &str = "causal.links";
 pub const VIEW_CONATION_AUTONOMY: &str = "conation.autonomy";
 pub const VIEW_CONATION_INTENTS: &str = "conation.intents";
+pub const VIEW_CONATION_POLICY: &str = "conation.policy";
 pub const VIEW_COST_LEDGER: &str = "cost.ledger";
 pub const VIEW_EXPLAIN_RATIONALES: &str = "explain.rationales";
 pub const VIEW_FORECAST_REMAINING: &str = "forecast.remaining";
@@ -46,6 +47,7 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: VIEW_CAUSAL_LINKS, owner: "causal" },
     SharedViewDecl { name: VIEW_CONATION_AUTONOMY, owner: "conation" },
     SharedViewDecl { name: VIEW_CONATION_INTENTS, owner: "conation" },
+    SharedViewDecl { name: VIEW_CONATION_POLICY, owner: "conation" },
     SharedViewDecl { name: VIEW_COST_LEDGER, owner: "cost" },
     SharedViewDecl { name: VIEW_EXPLAIN_RATIONALES, owner: "explain" },
     SharedViewDecl { name: VIEW_FORECAST_REMAINING, owner: "forecast" },

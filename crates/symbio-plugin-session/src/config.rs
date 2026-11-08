@@ -238,7 +238,7 @@ pub struct SessionConfig {
     ///
     /// 心跳 tick 表达出来的意图（`conation.expressed`）要不要经 `IntentGate` 升格成
     /// 长目标任务（`task.opened`，`budget_ms = 86400000`）：
-    /// - `true`：闸门按 `ConationPolicy` 评估（目标过宽仍拒），通过即开格；
+    /// - `true`：判决视图 `conation.policy` 判「可升格」（目标过宽仍拒），闸门放行即开格；
     /// - `false`：`IntentGate::approve` 恒 `Err("conation disabled")` ⇒ **一条自主
     ///   任务都不产生**，而「欲」照样入格、照样可被读——退化为纯响应式且完整运行。
     ///
@@ -254,8 +254,8 @@ pub struct SessionConfig {
     ///
     /// ## 开着之后还有一道长度闸
     ///
-    /// 闸门按 `ConationPolicy::default().max_goal_len`（**200 字节**）再判一次
-    /// 「目标过宽 ⇒ 拒」。心跳拿 `HeartbeatConfig::prompt` 本身当目标，中文提示词
+    /// 判决视图还按 `crates/symbio-plugin-conation` 的 `MAX_GOAL_LEN`（**200 字节**）
+    /// 判「目标过宽 ⇒ 拒」。心跳拿 `HeartbeatConfig::prompt` 本身当目标，中文提示词
     /// 3 字节一个字 ⇒ 约 66 字之后就会每趟被 `goal too broad` 拒掉（拒绝会记日志、
     /// `conation.expressed` 照样入格，但永远开不出长任务）。要开长目标，提示词就得
     /// 短于这个上界。

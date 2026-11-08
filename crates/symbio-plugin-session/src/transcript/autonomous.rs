@@ -22,12 +22,12 @@
 
 use super::super::active::{InboxItem, PreemptPending};
 use super::super::plugin::SessionPlugin;
-use crate::config::default_conation_enabled;
-use crate::declarations::{CONATION_INTENTS_VIEW, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
+use crate::declarations::{
+    CONATION_INTENTS_VIEW, CONATION_POLICY_VIEW, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED,
+};
 use crate::store::EventWalStore;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::store::Store;
-use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
 use symbio_sdk::authz::EffectiveMatrix;
 use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
 use symbio_sdk::chat::chat_node as cm;
@@ -247,9 +247,10 @@ impl SessionPlugin {
             return true;
         };
 
-        let policy = ConationPolicy {
-            enabled: conation_enabled_from(&store),
-            ..ConationPolicy::default()
+        let Some(policy) = conation_policy(&store, candidate.seq) else {
+            // 读不到判决 ⇒ 本轮不升格（与 [`long_goal_declared`] 读不到「已声明」同款退化）：
+            // 装配问题不得被读成放行，也不得被读成「没声明过，于是每 tick 重开一条」。
+            return true;
         };
         // 授权与本体同一把尺：自主主体在 `authz::ROWS` 里只持 `define.work`。
         let grants = symbio_sdk::authz::production_matrix();
@@ -330,24 +331,54 @@ fn long_goal_declared(store: &EventWalStore, goal: &str) -> Option<bool> {
     Some(declared.iter().any(|g| g.as_str() == Some(goal)))
 }
 
-/// 本轮生效的自主层开关：**最近一条** `session.config` 的 `conation_enabled` 那一格。
+/// 能力包交来的判决（视图 `conation.policy` 的一格，`D-384`）。
 ///
-/// 口径见 `D-252` / `D-379`：能力开关是一条事实，不读 `SessionConfig` 活值。
-/// 读不到（没有快照 / 缺该格 / 非布尔）⇒ 出厂值 `false`——与
-/// `ConationPolicy::default()` 同一个平凡值，不把装配问题读成「开着」。
-fn conation_enabled_from(store: &EventWalStore) -> bool {
-    store
-        .range(Seq::new(0))
-        .into_iter()
-        .rev()
-        .find(|event| event.kind == EVENT_SESSION_CONFIG)
-        .and_then(|event| {
-            event
-                .payload
-                .get("conation_enabled")
-                .and_then(|value| value.as_bool())
-        })
-        .unwrap_or_else(default_conation_enabled)
+/// 它只是**读形状**，不是 policy 的第二个 owner：开关怎么读、目标多宽算过宽，都由
+/// `crates/symbio-plugin-conation` 判；本插件只认 `promotable` 与那句原因。
+struct PolicyVerdict {
+    /// 该不该升格。
+    promotable: bool,
+    /// 拒绝原因（`promotable == false` 时非空）。直接来自 owner，本插件不翻译、不重写。
+    reason: String,
+}
+
+/// 读本轮生效的判决：**最近一条** `conation.policy`，绑定到这一次的候选 seq。
+///
+/// 口径见 `D-252` / `D-379` / `D-384`：开关与宽度是**能力包的策略**，本插件按名字读，
+/// 不认识 `SessionConfig` 活值，也不自己再判一遍（两处各判一遍必然漂移，`D-251`）。
+///
+/// 读不到（能力包不在 / 视图没公开 / 切片超预算 / 判决绑定的 seq 不是这一条）⇒ `None`
+/// ——本轮不升格。四种都是**可诊断的缺席**，不是「该升格」。
+fn conation_policy(store: &EventWalStore, want: u64) -> Option<PolicyVerdict> {
+    let value = match symbio_plugin_api::read_shared_view_all(
+        CONATION_POLICY_VIEW,
+        &store.range(Seq::new(0)),
+    ) {
+        Ok(value) => value,
+        Err(why) => {
+            symbio_plugin_api::plugin_warn!(
+                symbio_plugin_api::PLUGIN_ID_SESSION,
+                "[Autonomous] 判决视图 `{CONATION_POLICY_VIEW}` 本轮读不到（{why}）：本轮不升格"
+            );
+            return None;
+        }
+    };
+    let seq = value.get("seq").and_then(|v| v.as_u64())?;
+    if seq != want {
+        symbio_plugin_api::plugin_warn!(
+            symbio_plugin_api::PLUGIN_ID_SESSION,
+            "[Autonomous] 判决绑定 seq {seq} 与本次欲 {want} 不一致：本轮不升格"
+        );
+        return None;
+    }
+    Some(PolicyVerdict {
+        promotable: value.get("promotable").and_then(|v| v.as_bool())?,
+        reason: value
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("rejected")
+            .to_string(),
+    })
 }
 
 // ==================== 自主发起者与意欲闸门（D-189：唯一生产消费方在本文件） ====================
@@ -437,25 +468,6 @@ impl AutonomousInitiator {
     }
 }
 
-/// 「欲」的治理策略（E3：平凡值 `enabled = false`——关掉后系统退化为纯响应式
-/// 且仍完整运行；两层开关独立，这是生产环境最需要的开关）。
-#[derive(Debug, Clone)]
-struct ConationPolicy {
-    /// 是否允许「欲」升格为任务。
-    enabled: bool,
-    /// 目标长度上界（过宽的目标 = 不可评估的意图，拒绝）。
-    max_goal_len: usize,
-}
-
-impl Default for ConationPolicy {
-    fn default() -> Self {
-        ConationPolicy {
-            enabled: false,
-            max_goal_len: 200,
-        }
-    }
-}
-
 /// 候选意图：从 `conation.expressed` 事件**唯一**构造路径读出，
 /// 造出来一定**未被批准**——「欲」不得直接变成「行」（E2）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -497,7 +509,7 @@ impl ConationCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum IntentDecision {
     Approved,
-    Rejected(&'static str),
+    Rejected(String),
 }
 
 /// 经闸门批准后的可执行任务（**只有** [`IntentGate::approve`] 能造出来：字段私有，
@@ -524,26 +536,23 @@ impl ApprovedIntent {
 struct IntentGate;
 
 impl IntentGate {
-    /// 评估：关停开关优先，其次授权（升格就是「定义工作」），最后目标宽度。
+    /// 评估：能力包的判决优先，其次授权（升格就是「定义工作」）。
     ///
-    /// 授权**不是**一句声明：判据取 [`EffectiveMatrix::can_write`] 那一份
-    /// （`define.work`），与本仓任务表写侧闸同一把尺。预算与时延不在这里判——
-    /// 它们是**执行面**的闸（`CircuitBreaker` 在真动作上判），把意图升格成任务
-    /// 本身不花预算。
+    /// 判决（开关 / 目标宽度）由 `conation.policy` 交来（`D-384`）——本闸**不**再判一遍
+    /// 「多宽算过宽」，那会变成同一策略的第二份口径（`D-251`）。留下的是**强制点**：
+    /// 授权**不是**一句声明，判据取 [`EffectiveMatrix::can_write`] 那一份（`define.work`），
+    /// 与本仓任务表写侧闸同一把尺。预算与时延不在这里判——它们是**执行面**的闸
+    /// （`CircuitBreaker` 在真动作上判），把意图升格成任务本身不花预算。
     fn evaluate(
-        candidate: &ConationCandidate,
-        policy: &ConationPolicy,
+        verdict: &PolicyVerdict,
         grants: &EffectiveMatrix,
         principal: &str,
     ) -> IntentDecision {
-        if !policy.enabled {
-            return IntentDecision::Rejected("conation disabled");
+        if !verdict.promotable {
+            return IntentDecision::Rejected(verdict.reason.clone());
         }
         if !grants.can_write_name(principal, symbio_sdk::authz::CAP_DEFINE_WORK) {
-            return IntentDecision::Rejected("unauthorized: define.work");
-        }
-        if candidate.goal.len() > policy.max_goal_len {
-            return IntentDecision::Rejected("goal too broad");
+            return IntentDecision::Rejected("unauthorized: define.work".to_string());
         }
         IntentDecision::Approved
     }
@@ -552,11 +561,11 @@ impl IntentGate {
     /// （`ApprovedIntent` 字段私有，绕过它造不出可执行任务）。
     fn approve(
         candidate: &mut ConationCandidate,
-        policy: &ConationPolicy,
+        verdict: &PolicyVerdict,
         grants: &EffectiveMatrix,
         principal: &str,
-    ) -> Result<ApprovedIntent, &'static str> {
-        match Self::evaluate(candidate, policy, grants, principal) {
+    ) -> Result<ApprovedIntent, String> {
+        match Self::evaluate(verdict, grants, principal) {
             IntentDecision::Approved => {
                 candidate.approved = true;
                 Ok(ApprovedIntent {

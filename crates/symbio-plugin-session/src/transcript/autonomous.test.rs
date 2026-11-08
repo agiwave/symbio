@@ -77,9 +77,9 @@ fn seed_config(p: &SessionPlugin, sid: &str, payload: serde_json::Value) {
 }
 
 /// 主链路：触发 → 自检 → 欲三格按序入格、溯源逐级指向更早的格子；
-/// 闸门的平凡值 `enabled = false` ⇒ 一条自主任务都不产生（E3）。
+/// 判决（开关 / 目标宽度）在能力包里，本二进制读不到 ⇒ 一条自主任务都不产生（T3）。
 #[tokio::test]
-async fn trigger_facts_land_in_order_and_the_gate_stays_closed_by_default() {
+async fn trigger_facts_land_in_order_and_no_task_grows_without_the_capability_pack() {
     let (_dir, p) = autonomy_plugin(false);
     let sid = "s-hb";
     seed_one_fact(&p, sid);
@@ -114,7 +114,7 @@ async fn trigger_facts_land_in_order_and_the_gate_stays_closed_by_default() {
         !events
             .iter()
             .any(|e| e.entity == Entity::Task && e.verb == Verb::Opened),
-        "ConationPolicy 平凡值 false ⇒ 不升格为任务（E3）"
+        "能力包不在 ⇒ 读不到判决 ⇒ 不升格为任务（T3）"
     );
 
     // 溯源必须指向**更早**的格子：触发接种子、自检与欲接触发。
@@ -226,81 +226,6 @@ async fn no_fact_source_or_a_live_writer_both_block_the_trigger() {
         "抢占待结算 ⇒ 让开"
     );
     assert_eq!(read_wal(&p, sid).len(), 1, "两个空闲写方不许同时开档");
-}
-
-/// 闸门的第二条规则也在生产里：目标过宽 ⇒ 拒（`conation_enabled = true` 也拦得住）。
-///
-/// 拒绝同样是**事实**——触发与欲照样入格，只是不长成任务；静默拒绝就等于没有闸门。
-#[tokio::test]
-async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
-    let (_dir, p) = autonomy_plugin(true);
-    let sid = "s-broad";
-    seed_one_fact(&p, sid);
-    seed_config(&p, sid, serde_json::json!({ "conation_enabled": true }));
-
-    let broad = "x".repeat(201); // > ConationPolicy::default().max_goal_len（200）
-    assert!(p.record_autonomous_trigger(sid, 1, &broad).await);
-
-    let events = read_wal(&p, sid);
-    assert!(
-        !events
-            .iter()
-            .any(|e| e.entity == Entity::Task && e.verb == Verb::Opened),
-        "过宽的目标不升格"
-    );
-    assert_eq!(
-        events
-            .iter()
-            .filter(|e| e.entity == Entity::Conation && e.verb == Verb::Opened)
-            .count(),
-        1,
-        "欲照样入格——拒绝是可查的结论，不是静默"
-    );
-    assert!(
-        check_all(vocab(), &events).is_empty(),
-        "{:?}",
-        check_all(vocab(), &events)
-    );
-}
-
-/// 开关的读法：看**最近一条** `session.config`，不看插件里的活配置（`D-252` / `D-379`）。
-///
-/// 三种情形各自可辨：快照说开、活配置说关 ⇒ 开；反之 ⇒ 关；快照缺该格 ⇒ 出厂值 `false`。
-/// 最后一条尤其重要——读不到不等于「开着」，装配问题不能被读成放行。
-#[tokio::test]
-async fn the_switch_is_read_from_the_snapshot_not_the_live_config() {
-    // 活配置关、快照开 ⇒ 读真（若仍读活值，这里会是 false）
-    let (_d1, p) = autonomy_plugin(false);
-    let sid = "s-switch-on";
-    seed_one_fact(&p, sid);
-    seed_config(&p, sid, serde_json::json!({ "conation_enabled": true }));
-    let facts = EventWalStore::open_readonly(wal(&p, sid)).expect("只读打开 WAL");
-    assert!(
-        conation_enabled_from(&facts),
-        "开关的真源是快照：活配置 false 不得覆盖快照的 true"
-    );
-
-    // 活配置开、快照关 ⇒ 读假
-    let (_d2, p) = autonomy_plugin(true);
-    let sid = "s-switch-off";
-    seed_one_fact(&p, sid);
-    seed_config(&p, sid, serde_json::json!({ "conation_enabled": false }));
-    let facts = EventWalStore::open_readonly(wal(&p, sid)).expect("只读打开 WAL");
-    assert!(
-        !conation_enabled_from(&facts),
-        "活配置 true 不得覆盖快照的 false"
-    );
-
-    // 快照缺该格 ⇒ 出厂值 false
-    let (_d3, p) = autonomy_plugin(true);
-    let sid = "s-switch-missing";
-    seed_one_fact(&p, sid);
-    seed_config(&p, sid, serde_json::json!({}));
-    let facts = EventWalStore::open_readonly(wal(&p, sid)).expect("只读打开 WAL");
-    assert!(
-        !conation_enabled_from(&facts),
-        "缺格取出厂值 false——装配问题不得被读成放行"
-    );
 }
 
 // ==================== 发起者与意欲闸门的单元验收（D-189） ====================
@@ -441,20 +366,28 @@ fn conation_governance_three_rules() {
         "来路不明的意图混不进来"
     );
 
-    // (c) 关停开关：enabled=false → 评估拒绝，无自主任务；但读侧照常工作。
-    let policy_off = ConationPolicy::default();
+    // (c) 判决否决：能力包说「不升格」（关停 / 目标过宽）⇒ 评估拒绝，理由原样透传。
+    let rejected = PolicyVerdict {
+        promotable: false,
+        reason: "conation disabled".to_string(),
+    };
     let grants = symbio_sdk::authz::production_matrix();
     assert_eq!(
-        IntentGate::evaluate(&candidate, &policy_off, grants, PRINCIPAL_AUTONOMOUS),
-        IntentDecision::Rejected("conation disabled")
+        IntentGate::evaluate(&rejected, grants, PRINCIPAL_AUTONOMOUS),
+        IntentDecision::Rejected("conation disabled".to_string())
     );
     // 打开后：评估通过 → 升格；溯源锚与目标都从 `ApprovedIntent` 读（字段私有）。
-    let policy_on = ConationPolicy {
-        enabled: true,
-        max_goal_len: 200,
+    let approved_verdict = PolicyVerdict {
+        promotable: true,
+        reason: String::new(),
     };
-    let approved = IntentGate::approve(&mut candidate, &policy_on, grants, PRINCIPAL_AUTONOMOUS)
-        .expect("合法意图必批");
+    let approved = IntentGate::approve(
+        &mut candidate,
+        &approved_verdict,
+        grants,
+        PRINCIPAL_AUTONOMOUS,
+    )
+    .expect("合法意图必批");
     assert!(candidate.is_approved());
     assert_eq!(approved.goal(), "整理归档");
     assert_eq!(
@@ -462,11 +395,11 @@ fn conation_governance_three_rules() {
         want.seq.map(|s| s.value()).unwrap_or(0)
     );
 
-    // (d) 授权是真闸：开关打开，但不持 `define.work` 的主体升格被拒。
+    // (d) 授权是真闸：判决放行，但不持 `define.work` 的主体升格被拒。
     let mut other = ConationCandidate::from_event(want).expect("同一事件可再造候选");
     assert_eq!(
-        IntentGate::approve(&mut other, &policy_on, grants, PRINCIPAL_WORKER),
-        Err("unauthorized: define.work"),
+        IntentGate::approve(&mut other, &approved_verdict, grants, PRINCIPAL_WORKER),
+        Err("unauthorized: define.work".to_string()),
         "worker 不持 define.work"
     );
     assert!(!other.is_approved(), "被拒的候选不得变成已批准");
