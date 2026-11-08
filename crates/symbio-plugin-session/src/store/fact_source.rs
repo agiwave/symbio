@@ -225,13 +225,6 @@ impl FactSource for SessionFactSource {
     fn head(&self) -> u64 {
         Store::head(&*self.wal).value()
     }
-
-    fn retire_prefix(&self, before_seq: u64) -> Result<(), String> {
-        self.wal
-            .archive_before(Seq::new(before_seq))
-            .map(|_| ())
-            .map_err(|e| e.to_string())
-    }
 }
 
 /// 开面实现：按会话 id 取共享 `SessionStore` 的同一事实源。

@@ -76,10 +76,6 @@ impl FactSource for FakeFacts {
     fn head(&self) -> u64 {
         self.facts.lock().unwrap().len() as u64
     }
-
-    fn retire_prefix(&self, _before_seq: u64) -> Result<(), String> {
-        Ok(())
-    }
 }
 
 fn proposed(name: &str, title: &str) -> Event {

@@ -32,7 +32,7 @@ pub type Fact = symbio_kernel::event::Event;
 
 /// 事实源：一个会话域的事实读写入口。
 ///
-/// 五个方法，多一个都不许。需要第四条以外的形状时先报「缺什么 + 为什么现有
+/// 四个方法，多一个都不许。需要第四条以外的形状时先报「缺什么 + 为什么现有
 /// 参数表达不了」，不在实现里顺手加。
 pub trait FactSource: Send + Sync + 'static {
     /// 落一条草稿；返回分配到的 `seq`。
@@ -46,9 +46,6 @@ pub trait FactSource: Send + Sync + 'static {
 
     /// 下一个待分配的序号。
     fn head(&self) -> u64;
-
-    /// 该前缀已固化，可回收；**不得影响 `before_seq` 之后的可读性**。
-    fn retire_prefix(&self, before_seq: u64) -> Result<(), String>;
 }
 
 /// 事实源开面：装配层调用一次，拿到该会话的唯一句柄。
@@ -117,10 +114,6 @@ impl FactSource for MemoryStore<Fact> {
 
     fn head(&self) -> u64 {
         Store::head(self).value()
-    }
-
-    fn retire_prefix(&self, _before_seq: u64) -> Result<(), String> {
-        Ok(())
     }
 }
 
