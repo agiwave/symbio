@@ -29,6 +29,7 @@ pub const VIEW_NOTES_DIGEST: &str = "notes.digest";
 pub const VIEW_NOTES_INSIGHTS: &str = "notes.insights";
 pub const VIEW_NOTES_RECENT: &str = "notes.recent";
 pub const VIEW_REPUTATION_LEDGER: &str = "reputation.ledger";
+pub const VIEW_REVERSIBILITY_REGISTER: &str = "reversibility.register";
 pub const VIEW_SKILL_CALIBRATION: &str = "skill.calibration";
 pub const VIEW_SKILL_RETREAT: &str = "skill.retreat";
 pub const VIEW_SLO_FALLBACK: &str = "slo.fallback";
@@ -52,6 +53,7 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: VIEW_NOTES_INSIGHTS, owner: "notes" },
     SharedViewDecl { name: VIEW_NOTES_RECENT, owner: "notes" },
     SharedViewDecl { name: VIEW_REPUTATION_LEDGER, owner: "reputation" },
+    SharedViewDecl { name: VIEW_REVERSIBILITY_REGISTER, owner: "reversibility" },
     SharedViewDecl { name: VIEW_SKILL_CALIBRATION, owner: "skill" },
     SharedViewDecl { name: VIEW_SKILL_RETREAT, owner: "skill" },
     SharedViewDecl { name: VIEW_SLO_FALLBACK, owner: "slo" },

@@ -84,6 +84,9 @@ pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 /// 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰裁决与出口共用的那一个口径）
 pub const PLUGIN_ID_REPUTATION: &str = "reputation";
 
+/// 可逆性设计：给动作标注可逆等级与补偿做法，视图按动作折出当前等级分布
+pub const PLUGIN_ID_REVERSIBILITY: &str = "reversibility";
+
 /// 会话
 pub const PLUGIN_ID_SESSION: &str = "session";
 
@@ -134,6 +137,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "forecast", // 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
     "idempotency", // 幂等台账：一个工具、一条 Domain 事实、一张共享视图；同一个键在同一会话里只记一次
     "world_model", // 世界模型：一次观察记一条领域事实，视图按（实体，属性）折出当前世界
+    "reversibility", // 可逆性设计：给动作标注可逆等级与补偿做法，视图按动作折出当前等级分布
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "compact", // 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）

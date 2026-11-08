@@ -4175,6 +4175,7 @@ dependencies = [
  "symbio-plugin-persona",
  "symbio-plugin-plugin_manager",
  "symbio-plugin-reputation",
+ "symbio-plugin-reversibility",
  "symbio-plugin-session",
  "symbio-plugin-setting",
  "symbio-plugin-skill",
@@ -4651,6 +4652,16 @@ dependencies = [
  "async-trait",
  "serde_json",
  "symbio-plugin-api",
+]
+
+[[package]]
+name = "symbio-plugin-reversibility"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
+ "tokio",
 ]
 
 [[package]]

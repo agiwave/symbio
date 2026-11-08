@@ -84,6 +84,7 @@ const DEFAULT_BASELINE = [
   'vdfs_stat',
   'vdfs_tree',
   'vdfs_write',
+  'reversibility_annotate',
   'web_fetch',
   'web_search',
   'world_observe',

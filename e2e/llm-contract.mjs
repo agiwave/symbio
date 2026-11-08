@@ -146,6 +146,7 @@ export const FACTORY_TOOLS = Object.freeze([
   'vdfs_write',
   'vdfs_delete',
   'vdfs_mkdir',
+  'reversibility_annotate',
   'web_fetch',
   'web_search',
   'world_observe',
