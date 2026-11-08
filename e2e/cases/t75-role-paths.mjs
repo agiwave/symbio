@@ -290,11 +290,13 @@ export default defineCase(
           `工人没立任何约 ⇒ by_principal 空（实际: ${JSON.stringify(rep)}）`,
         );
 
-        // 工人无发言权 ⇒ 子会话转写里没有助手正文（用户可见的收窄面）。
+        // 工人无发言权 ⇒ 子会话转写里没有对话面节点（surface=reply）。
+        // 注意不能按「有没有助手正文」判：工人的收尾正文仍是工作线文本节点，
+        // 被闸掉的只是它成为本会话**发言**的那一步。
         const childMsgs = await readSessionMessages(api, childSid);
         assert(
-          !childMsgs.some((m) => msgRoleOf(m) === 'assistant'),
-          '工人无发言权 ⇒ 子会话转写不应出现助手正文',
+          !childMsgs.some((m) => m.meta?.surface === 'reply'),
+          '工人无发言权 ⇒ 子会话转写不应出现对话面节点（surface=reply）',
         );
 
         // 父会话的承诺了结：不直读事种，改判声誉列——委派成功 ⇒ offered 1、kept 1。

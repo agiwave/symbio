@@ -237,7 +237,7 @@ export default defineCase(
         '根级应有对话线节点（用户问句 / 根级汇报）',
       );
       assert(
-        roots.some((m) => m.id === turnOfAnswer.id),
+        roots.some((m) => m.id === anchorOfAnswer.id),
         '根级应有轮锚（用户消息节点）——工作线按它归组，否则分栏后的工作列是空的',
       );
 

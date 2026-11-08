@@ -272,14 +272,20 @@ export default defineCase(
         const mark = sub.sessionChanges().length;
         await sendAndSettle(cli, sub, turnText(i), { timeoutMs: 90_000 });
         // 每轮的用户可见收束：正常轮拿到一句完成正文，故障轮（第 2 轮）拿到失败节点。
-        const turnFrames = sub.sessionChanges().slice(mark).map((c) => c.data ?? c);
-        const failed = turnFrames.some((d) => d.status === 'failed');
-        const replied = turnFrames.some(
-          (d) => msgRoleOf(d) === 'assistant' && msgTypeOf(d) === 'text' && d.status === 'completed',
-        );
-        assert(
-          i === 1 ? failed : replied,
-          `第 ${i + 1} 轮应在实时面收束成${i === 1 ? '失败节点' : '一句完成正文'}`,
+        // 收束帧可能比 working=false 晚一两帧到达，用 waitFor 抵消投递延迟。
+        await waitFor(
+          () => {
+            const turnFrames = sub.sessionChanges().slice(mark).map((c) => c.data ?? c);
+            const failed = turnFrames.some((d) => d.status === 'failed');
+            const replied = turnFrames.some(
+              (d) =>
+                msgRoleOf(d) === 'assistant' &&
+                msgTypeOf(d) === 'text' &&
+                d.status === 'completed',
+            );
+            return i === 1 ? failed : replied;
+          },
+          { what: `第 ${i + 1} 轮的实时面收束`, timeoutMs: 10_000 },
         );
         // 大结果**当时**完整进存储（不是 head/tail 之后的样子）——存储侧的全文锚点只在
         // 第 1 轮结束时取，后续压缩会归并消息集合，届时这一条已不代表「存储」。
