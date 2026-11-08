@@ -155,11 +155,11 @@ test('discover：真实目录下每份事实都是 `_` 前缀之外的可执行�
 })
 
 test('runOrder：`current` 排在所有生成器之后', () => {
-  // 006 统计的是代码文件规模，其中 `view_names.rs` 等由别的事实生成——先跑 006 会读到
+  // 006 统计的是代码文件规模，其中 `events.rs` 等由别的事实生成——先跑 006 会读到
   // 上一轮的行数，整轮末态复核因此红一次、再跑一次才绿（见 `runOrder` 的注释）。
-  assert.deepEqual(runOrder(['assembly', 'current', 'views-rs']), [
+  assert.deepEqual(runOrder(['assembly', 'current', 'events-rs']), [
     'assembly',
-    'views-rs',
+    'events-rs',
     'current',
   ])
   assert.deepEqual(runOrder(['current']), ['current'], '只有它一份时顺序仍是它')

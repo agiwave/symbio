@@ -13,8 +13,8 @@
 //! ## 视图为什么也在这里
 //!
 //! [`CONATION_INTENTS`] 是纯折叠：从 `conation.expressed` 折出「表达过哪些欲、各自升没升格」。
-//! 它在 `PLUGIN.yml` 的 `shared_views:` 登记为**对外可读**，读方经
-//! `symbio_plugin_api::views` 按名字读——不依赖本 crate，也不在任何控制面里再写一份（D-221）。
+//! 它在 `submit_reports!` 里登记为**对外可读**，读方经
+//! `symbio_plugin_api::reports` 遍历登记面、按名字求值——不依赖本 crate，也不在任何控制面里再写一份（D-221 / D-387）。
 //!
 //! ## 为什么折叠要交两半（D-281）
 //!

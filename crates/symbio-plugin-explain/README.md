@@ -20,7 +20,7 @@ impl: done
 | 工具 | `explain_record(decision, why, evidence?)` | 模型（经工具面调用） |
 | 行为 | 一次成功记录 ⇒ 一条 `explain.rationale` 草稿 | 宿主唯一的写口（I-1，D-213） |
 | 事实 | `explain.rationale`，格位 `domain × asserted`，字段 `decision` / `why` / `evidence` | 写闸按声明校验名字与格位；`seal` 按归宿行判它有没有人看护 |
-| 视图 | `explain.rationales` → `{ count, entries, decisions }` | 本包私有（没有第二个读者；名字不进 `shared_views`，D-221） |
+| 视图 | `explain.rationales` → `{ count, entries, decisions }` | 本包私有（没有第二个读者；名字不进报表登记，D-221） |
 
 **没有自有路由、没有配置、没有 VDFS 挂载点、没有新端口。**
 

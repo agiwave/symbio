@@ -183,7 +183,7 @@ test('PP-004 反例：基线收到 0:0 而实测 1 ⇒ 红，且给出下沉路�
   assert.match(out(r), /core 产投影文件数变宽：实测 1 > 基线 0/, out(r))
   assert.match(out(r), /core 投影构造器条数变宽：实测 1 > 基线 0/, out(r))
   assert.match(out(r), /下沉给那个 owner/, out(r))
-  assert.match(out(r), /symbio_plugin_api::views/, out(r))
+  assert.match(out(r), /submit_reports!/, out(r))
   assert.match(out(r), /D-221/, out(r))
 })
 

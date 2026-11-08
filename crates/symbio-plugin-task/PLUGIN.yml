@@ -8,7 +8,8 @@ plugin_order: 45
 # task.assigned（租约）不在此列：D-281 后无外部消费方，名字随 owner 走（CS-007）。
 shared_events: task.asserted, task.held, task.opened, task.progress
 
-# 对外可读的报表都在 `src/decl.rs` 的 `submit_reports!`（D-387）——本插件已无 `shared_views`。
+# 对外可读的报表都在 `src/decl.rs` 的 `submit_reports!`（D-387）：报表登记就是公开，
+# 不存在第二份视图名清单。
 
 # 授权行：调度者只持 `assign.work`——发放的权威动作是派活，
 # 不立任务（`define.work`）、不发言（`reply`）。

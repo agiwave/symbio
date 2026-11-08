@@ -359,7 +359,10 @@ export const BASELINE = {
   // D-362：搬家用例里 5 条 kernel 侧折叠断言与 sdk 侧既有用例重复（`stamp_branches` /
   // `unselected_roots` 已经逐条钉同一折法），故只保留一侧；唯一新增的判据（删除格必须落在
   // `(Message, Closed)`）改写进 `mutations.test.rs` 从消费方一侧钉。净减 4，非覆盖丢失。
-  ciRustTestsTotal: 2413,
+  // baseline-allow ciRustTestsTotal: 2413 → 2405（D-387）——退役 `views.test.rs` 整文件删掉 8 条
+  // 「`shared()` 清单闸」判据：被测对象（生成清单与四种缺席态）已不在，改由
+  // `shared-name-audit` 的 SV-003（登记 ↔ 契约表双向）与 `reports` 的 Result 判据承担。非侵蚀。
+  ciRustTestsTotal: 2405,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

@@ -28,7 +28,7 @@
  *
  * - **生成物**：已存在的生成件可以随能力包的清单变化——`*.gen.rs`（`rows.gen.rs` /
  *   `tool_namespaces.gen.rs` / `trigger_kinds.gen.rs`）**加上描述符 `OUT_REL` 声明的
- *   落点**（`plugin-api/src/view_names.rs` / `events.rs` / `routes.rs`）。它们是
+ *   落点**（`plugin-api/src/events.rs` / `routes.rs`）。它们是
  *   `PLUGIN.yml` 的镜像，作者只改自己目录；生成器保证内容与清单一致（`GEN-001`）。
  *   **新出现**的生成件不算例外——那是新增一条生成面，属机制补件（D-371）。
  * - **迁移批次**（正文声明 `Migration:`，D-247）：**迁出**一条既有能力的提交必然在新增
@@ -70,6 +70,7 @@ import {
   MIGRATION_RE,
   PROTECTED_TREES,
   generatedPaths,
+  isRetiredGenerated,
 } from './capability-migration-audit.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -100,7 +101,7 @@ const GENERATED = generatedPaths(repoRoot)
 
 /** 生成物是否豁免：内容是清单的镜像，已存在的随清单改；新出现的不算。 */
 function isGenerated(p, parentPaths) {
-  return (GENERATED_RE.test(p) || GENERATED.has(p)) && parentPaths.has(p)
+  return (GENERATED_RE.test(p) || GENERATED.has(p) || isRetiredGenerated(p)) && parentPaths.has(p)
 }
 
 /** 正向证据：扩展夹具的落地提交。范围里没有它也要判。 */

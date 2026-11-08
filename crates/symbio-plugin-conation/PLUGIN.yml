@@ -8,4 +8,5 @@ plugin_order: 57
 # 「欲」这条事件的 owner 是本站（站位见 D-269 的站位表）。写方仍是会话（自主触发的落格
 # 是会话存储所有者的写窗口），所以名字必须进共享表：写方按生成物命名，不引本 crate。
 shared_events: conation.expressed
-# 对外可读的报表都在 `src/decl.rs` 的 `submit_reports!`（D-387）——本插件已无 `shared_views`。
+# 对外可读的报表都在 `src/decl.rs` 的 `submit_reports!`（D-387）：报表登记就是公开，
+# 不存在第二份视图名清单。

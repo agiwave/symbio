@@ -134,11 +134,10 @@ const GENERATED_RE = /\.gen\.rs$/
 /**
  * 生成物清单：`scripts/facts/` 各描述符声明的输出。
  *
- * 生成物不都叫 `*.gen.rs`——`plugin-api` 的 `view_names.rs` / `events.rs` /
- * `routes.rs` 是插件清单的投影，随能力包增删而变。按名字猜会把「加一条能力顺带
- * 重生成登记表」判成机制增量；只认后缀则这三份漏网，补件几乎条条假红。清单直接
- * 读描述符的 `OUT_REL`：那是生成器的唯一注册处（`scripts/gen-facts.mjs` 目录即接线），
- * 不在这里抄第二份路径。
+ * 生成物不都叫 `*.gen.rs`——`plugin-api` 的 `events.rs` / `routes.rs` 是插件清单的
+ * 投影，随能力包增删而变。按名字猜会把「加一条能力顺带重生成登记表」判成机制增量；
+ * 只认后缀则这两份漏网，补件几乎条条假红。清单直接读描述符的 `OUT_REL`：那是生成器
+ * 的唯一注册处（`scripts/gen-facts.mjs` 目录即接线），不在这里抄第二份路径。
  */
 export function generatedPaths(root) {
   const out = new Set()
@@ -159,6 +158,20 @@ export function generatedPaths(root) {
 
 /** 本仓的生成物清单（模块加载时读一次；描述符是唯一注册处）。 */
 const GENERATED = generatedPaths(repoRoot)
+
+/**
+ * 已退役的生成物：曾由描述符产出，退役后描述符不在了，但**历史提交**里的增删仍是
+ * 清单镜像的变化，不是机制增量——否则退役本身会把当年那些提交追溯判红。
+ *
+ * 只在文件于当前树**确已消失**时生效（`isRetiredGenerated`）：若同名文件被重新手写，
+ * 它不再算生成物，判据照常扫它。退役决策见 `D-387`。
+ */
+export const RETIRED_GENERATED = new Set(['crates/symbio-plugin-api/src/view_names.rs'])
+
+/** 退役生成物且当前树里确已不存在。 */
+export function isRetiredGenerated(p) {
+  return RETIRED_GENERATED.has(p) && !fs.existsSync(path.join(repoRoot, p))
+}
 
 /** 测试文件：迁移批次可能改测试而机制不变（断言跟着搬）。 */
 const TEST_RE = /\.test\.rs$/
@@ -289,9 +302,9 @@ export function isCapabilitySource(p) {
   return p.endsWith('.rs') && !TEST_RE.test(p) && !isGenerated(p)
 }
 
-/** 生成物：后缀一类的 `*.gen.rs`，加上描述符声明的输出（`view_names.rs` 等）。 */
+/** 生成物：后缀一类的 `*.gen.rs`，加上描述符声明的输出（`events.rs` / `routes.rs` 等）。 */
 export function isGenerated(p, generated = GENERATED) {
-  return GENERATED_RE.test(p) || generated.has(p)
+  return GENERATED_RE.test(p) || generated.has(p) || isRetiredGenerated(p)
 }
 
 function inTrees(p, trees) {

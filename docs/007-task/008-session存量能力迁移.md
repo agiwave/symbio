@@ -99,7 +99,7 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 **补件甲：读数能力的读方要类型，而跨插件只能按名字读 JSON。** 这是 §一 里六条读数折叠
 （`slo` / `fallback` / `span` / `autonomy` / `conation` / `changes`）的共同阻塞，也是本段
 唯一真正的架构缺口。今天的形状是：owner 交 `ViewDecl`（`eval: fn(&[Event], i64) -> Value`），
-读方经 `ViewRead` 拿到 `Value`。**只读一格**没问题（`capability_views` 那一列就是原样装一格，
+读方经 `read_view` 拿到 `Value`。**只读一格**没问题（`capability_views` 那一列就是原样装一格，
 它不认识任何视图名）；**要参与算**就不行——`stats` 的 `tiers` 列要用 `TierLatency::percentile`
 （最近邻取法，`ceil(p/100 × n) - 1`）与 `SloLatencyView::merge`（同档位样本并集后重排），
 `stats_reading` 要用 `ConationView::merge` / `adoption_rate`。这三处都是**算式**，不是读数：
@@ -114,8 +114,8 @@ session 比 loop 更接近「会话基底」，迁移的第一步不是搬代码
 的缺口账（「读侧折叠 + 多切片」一行，结论 `开格`）：两条准入都满足（不含能力名、六条读数
 能力要用）。**已裁并已落：`D-281`**——`ViewDecl` 末尾加 `agg: Option<fn(&[Value]) -> Value>`，
 owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一起交，两半同经冻结声明表；读方
-经 `ViewRead::aggregate` / `aggregable` 取用，`None` 报 `ViewUnavailable::NotAggregable`
-（第五种可辨的缺席，不是恒等）。补件提交只动 `kernel` / `plugin-api`，`session` 一字未改，
+直接从 `ViewDecl.agg` 取用，`None` ⇒ 那一格可诊断地缺席并出声（不是恒等）。
+补件提交只动 `kernel` / `plugin-api`，`session` 一字未改，
 符合 `EX-007` 的补件口径。
 
 **补件乙：能力的开关要有一条事实形状。** `D-252` 第 2 条已经把口径裁死了（能力读
@@ -226,8 +226,7 @@ owner 把「一片怎么折」（`eval`）与「N 片怎么合」（`agg`）一�
    一部分」；裁出来之后 `slo` / `fallback` / `span` / `autonomy` / `conation` / `changes`
    六条按同一个形状各落一包（可同包，账里写明）。补件乙（开关的事实形状）已落 `D-379`，
    解锁 #32 的开关面；#14 经查不是补件（`D-380`），阻塞是 `preemption` 批次尚未接线。
-   **补件甲已裁并已落（`D-281`）**：`ViewDecl::agg` + `ViewRead::aggregate` / `aggregable`
-   + `ViewUnavailable::NotAggregable`。`#31` 与 `#13` 都已用它搬完（见 §六）；`#13` 还额外
+   **补件甲已裁并已落（`D-281`）**：`ViewDecl::agg`（`None` ⇒ 该格可诊断地缺席，不是恒等）。`#31` 与 `#13` 都已用它搬完（见 §六）；`#13` 还额外
    用上 `D-282`（读数视图可以读「有 `EventDecl` 格位、无 `FactDecl` 声明」的断言格，
    进报告名单而不是判 `UnknownFact`）——`turn.dispatch` 的 `tier` 正是那一类格子。
 3. 按表分批：能独立提交的，一个能力一个提交；共用状态的先拆状态再搬。

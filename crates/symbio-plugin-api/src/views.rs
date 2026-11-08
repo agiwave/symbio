@@ -1,258 +1,47 @@
-//! 声明视图的**跨插件读口** —— 按名字读任意 owner 声明的纯折叠（DE-025 D-221）。
+//! 视图读不出来的**缺席原因**。
 //!
-//! ## 它补的是哪一格
+//! 声明视图的公开读口只有一条：owner 用 `submit_reports!` 把视图登记成报表列
+//! （`ReportDecl.views`，`D-387`），读方遍历 [`crate::reports`] 取得整条读数。
+//! 按名字的**共享清单**（`PLUGIN.yml` 的 `shared_views` → `view_names.rs`）已退役：
+//! 它给同一条视图制造了第二个读口，而迁移完成后它已没有条目。
 //!
-//! 视图（[`symbio_kernel::decl::ViewDecl`]）本来就是 owner 自己交的纯函数：入参只有事实切片与
-//! 时间戳，出参是 JSON。但过去**只有义务环的行引擎**在读它们（`Frozen::eval`），别的
-//! 插件读不到——于是「会话统计想加一列便签数」只有两条路：在 core 里再写一份折叠
-//! （同一事实两个 owner），或者依赖 notes 插件（跨插件依赖，禁止）。两条都会把
-//! 「加能力」变成「改架构」。
-//!
-//! 本模块把读半边补上：
-//!
-//! ```text
-//! owner 插件  ──ViewDecl + PLUGIN.yml 的 shared_views──▶ 名字公开
-//! 读方插件    ──ViewRead::named(name)──▶ 冻结表里取 decl ──▶ read(events, now) ──▶ JSON
-//! ```
-//!
-//! ## 三条边界
-//!
-//! - **只读公开的名字**：[`crate::view_names::SHARED_VIEWS`] 之外的视图不可见（默认私有）。
-//!   公开是 owner 的显式动作，不是读方的猜测。
-//! - **不抄口径**：`ver` / 求值函数都从冻结声明表取。本模块不认识任何具体视图名。
-//! - **读侧不设扫描上界**（`D-284`）：调用方给多大切片就折多大，既不截断也不报缺席。
-//!   `ViewDecl::cost` 约束的是**环内窗口求值**（[`symbio_kernel::decl::Frozen::eval`] 超界回
-//!   `None`，切片长度由 [`symbio_kernel::decl::Frozen::scan_bound`] 决定），不是读口的许可。
-//!   把环内的预算搬到读侧，长会话会读成「这一格没算出来」——而折叠本身照样折得动，
-//!   于是「搬家」凭空改变读数。
-//!
-//! ## 失败四态
-//!
-//! [`ViewUnavailable::NotSealed`]（装配表没冻结）/ [`ViewUnavailable::NotShared`]
-//! （owner 没公开）/ [`ViewUnavailable::Unknown`]（公开了但没有声明实现）/
-//! [`ViewUnavailable::NotAggregable`]（owner 没交合并那一半）。四种都是**可诊断的缺席**，
-//! 没有「静默空值」这一档。
+//! 本模块只留「读不到」的两种原因，供报表读口与诊断列共用——缺席必须说得出为什么，
+//! 不能让空值冒充读数（`D-281` 理由 3）。视图名本身只有 owner 的 [`crate::reports::ReportDecl`]
+//! 一处。
 
-use serde_json::Value;
-use symbio_kernel::decl::Frozen;
-use symbio_kernel::event::Event;
+use std::fmt;
 
-use crate::declarations::sealed_declarations;
-use crate::view_names::{SharedViewDecl, SHARED_VIEWS};
-
-/// 一条视图读不出来的原因。每一种都带足以定位的名字或数字。
+/// 一条已声明视图读不出来的原因。
+///
+/// 只保留**与共享清单无关**的两种态：报表登记之后，「没有公开」不再是一种原因
+/// ——公开就是登记本身。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewUnavailable {
-    /// 声明表没有冻结（`seal` 报过缺口）：任何视图都不可读。
+    /// 声明表还没冻结（装配未完成）。
     NotSealed,
-    /// 这个名字没有被 owner 在 `PLUGIN.yml` 的 `shared_views` 里公开。
-    NotShared { name: String },
-    /// owner 公开了名字，但冻结表里没有对应的 `ViewDecl`（清单与代码脱节）。
+    /// 冻结表里没有这个名字：owner 没交这条 `ViewDecl`。
     Unknown { name: String },
-    /// owner 没交「多片合并」那一半（`ViewDecl::agg` 为 `None`）——这一格不参与跨会话汇总。
-    ///
-    /// 与上面三态同族：**可诊断的缺席**。静默返回「恒等 / 空汇总」会把「这一格
-    /// 不参与汇总」读成「汇总下来是零」——那是把缺项伪装成读数（`D-281`）。
-    NotAggregable { name: &'static str },
 }
 
 impl ViewUnavailable {
-    /// 稳定拼写的**原因词**（供读数出口落 JSON 用；人读文案另走本类型的
-    /// [`std::fmt::Display`] 实现）。
-    ///
-    /// 四种缺席态是闭集：读方据此分支，不需要解析人话。新增一态必须同时改这里——
-    /// 编译器会逼着改（`match` 无通配）。
+    /// 线格式的原因词（诊断列的 `reason` 字段）。
     pub fn reason(&self) -> &'static str {
         match self {
-            Self::NotSealed => "not_sealed",
-            Self::NotShared { .. } => "not_shared",
-            Self::Unknown { .. } => "unknown",
-            Self::NotAggregable { .. } => "not_aggregable",
+            ViewUnavailable::NotSealed => "not_sealed",
+            ViewUnavailable::Unknown { .. } => "unknown",
         }
     }
 }
 
-impl std::fmt::Display for ViewUnavailable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ViewUnavailable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotSealed => write!(f, "声明表未冻结：任何视图都不可读"),
-            Self::NotShared { name } => {
-                write!(f, "`{name}` 未在 owner 的 PLUGIN.yml 里登记 shared_views")
-            }
-            Self::Unknown { name } => write!(f, "`{name}` 已公开，但冻结声明表里没有它"),
-            Self::NotAggregable { name } => {
-                write!(
-                    f,
-                    "`{name}` 的 owner 没交「多片合并」，这一格不参与跨会话汇总"
-                )
+            ViewUnavailable::NotSealed => write!(f, "声明表还没冻结，读不出任何视图"),
+            ViewUnavailable::Unknown { name } => {
+                write!(f, "冻结表里没有视图 `{name}`（owner 没交这条 ViewDecl）")
             }
         }
     }
 }
 
-/// 跨插件视图的读句柄：名字 + owner，求值仍走冻结声明表。
-///
-/// 句柄不持有值，也不缓存：每次 `read` 都以调用方给的切片与时间戳求值，求值函数
-/// 就是 owner 声明里那一个（本模块不复制口径）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ViewRead {
-    name: &'static str,
-    owner: &'static str,
-}
-
-impl ViewRead {
-    /// 按名字取一条**已公开**的视图。未公开 / 未声明 / 装配表没冻结 ⇒ 相应的缺席态。
-    pub fn named(name: &str) -> Result<Self, ViewUnavailable> {
-        let sealed = sealed_declarations().ok();
-        Self::named_in(sealed.as_deref(), name, true)
-    }
-
-    /// 视图名（owner 声明的原样拼写）。
-    pub fn name(&self) -> &'static str {
-        self.name
-    }
-
-    /// 公开这条视图的 owner（与声明表的 owner 同形，如 `crates/symbio-plugin-notes`）。
-    pub fn owner(&self) -> &'static str {
-        self.owner
-    }
-
-    /// 口径版本（`ViewDecl::ver`）——读方据此判断自己理解的是哪一版。
-    pub fn ver(&self) -> Result<u32, ViewUnavailable> {
-        let sealed = sealed_declarations().ok();
-        self.ver_in(sealed.as_deref())
-    }
-
-    /// 以 `now` 为 as-of 求值：把调用方给的切片原样交给 owner 的求值函数。
-    ///
-    /// 读侧不查 `cost`（`D-284`）——切片长度是调用方的事，环内的窗口预算由
-    /// [`symbio_kernel::decl::Frozen::scan_bound`] 在调用方那一侧回答。
-    pub fn read(&self, events: &[Event], now: i64) -> Result<Value, ViewUnavailable> {
-        let sealed = sealed_declarations().ok();
-        self.read_in(sealed.as_deref(), events, now)
-    }
-
-    /// 全量读：`now = i64::MAX`（落盘事实源没有「未来的事件」可滤）。
-    pub fn read_all(&self, events: &[Event]) -> Result<Value, ViewUnavailable> {
-        self.read(events, i64::MAX)
-    }
-
-    /// 这一格参不参与跨会话汇总（owner 交没交 `agg` 那一半）。
-    pub fn aggregable(&self) -> Result<bool, ViewUnavailable> {
-        let sealed = sealed_declarations().ok();
-        self.aggregable_in(sealed.as_deref())
-    }
-
-    /// **跨会话合并**：N 份 [`Self::read_all`] 的产物 → 一份汇总（`D-281`）。
-    ///
-    /// 合并函数是 owner 交的（`ViewDecl::agg`），本模块不认识值的形状——与 `read`
-    /// 同一条纪律：口径不抄。读方因此拿得到「分位数 / 率 / 合计」，而不必自己再折
-    /// 一遍（两份口径）、跨插件调 owner（`E-009`）、或反序列化成同名类型（两个形状
-    /// owner）。
-    ///
-    /// 输入为**每个会话一份**的值；空输入也交给 owner（「没有会话」与「会话都是零」
-    /// 是两件事，只有 owner 知道该报哪一个）。
-    ///
-    /// 失败两态：名字读不出来（同 [`Self::read`] 的四种），或 owner 没交合并
-    /// （[`ViewUnavailable::NotAggregable`]）——后者不是「恒等」，是**这一格不在汇总里**。
-    pub fn aggregate(&self, parts: &[Value]) -> Result<Value, ViewUnavailable> {
-        let sealed = sealed_declarations().ok();
-        self.aggregate_in(sealed.as_deref(), parts)
-    }
-
-    fn aggregable_in(&self, frozen: Option<&Frozen>) -> Result<bool, ViewUnavailable> {
-        let frozen = frozen.ok_or(ViewUnavailable::NotSealed)?;
-        Ok(self.view(frozen)?.agg.is_some())
-    }
-
-    fn aggregate_in(
-        &self,
-        frozen: Option<&Frozen>,
-        parts: &[Value],
-    ) -> Result<Value, ViewUnavailable> {
-        let frozen = frozen.ok_or(ViewUnavailable::NotSealed)?;
-        let view = self.view(frozen)?;
-        match view.agg {
-            Some(agg) => Ok(agg(parts)),
-            None => Err(ViewUnavailable::NotAggregable { name: view.name }),
-        }
-    }
-
-    fn named_in(
-        frozen: Option<&Frozen>,
-        name: &str,
-        require_shared: bool,
-    ) -> Result<Self, ViewUnavailable> {
-        if require_shared {
-            let Some(shared) = SHARED_VIEWS.iter().find(|v| v.name == name) else {
-                return Err(ViewUnavailable::NotShared {
-                    name: name.to_string(),
-                });
-            };
-            let frozen = frozen.ok_or(ViewUnavailable::NotSealed)?;
-            if frozen.view(shared.name).is_none() {
-                return Err(ViewUnavailable::Unknown {
-                    name: name.to_string(),
-                });
-            }
-            return Ok(Self {
-                name: shared.name,
-                owner: shared.owner,
-            });
-        }
-        let frozen = frozen.ok_or(ViewUnavailable::NotSealed)?;
-        let view = frozen.view(name).ok_or_else(|| ViewUnavailable::Unknown {
-            name: name.to_string(),
-        })?;
-        Ok(Self {
-            name: view.name,
-            owner: frozen.view_owner(view.name).unwrap_or(""),
-        })
-    }
-
-    fn ver_in(&self, frozen: Option<&Frozen>) -> Result<u32, ViewUnavailable> {
-        let frozen = frozen.ok_or(ViewUnavailable::NotSealed)?;
-        self.view(frozen).map(|v| v.ver)
-    }
-
-    fn view<'a>(
-        &self,
-        frozen: &'a Frozen,
-    ) -> Result<&'a symbio_kernel::decl::ViewDecl, ViewUnavailable> {
-        frozen
-            .view(self.name)
-            .ok_or_else(|| ViewUnavailable::Unknown {
-                name: self.name.to_string(),
-            })
-    }
-
-    fn read_in(
-        &self,
-        frozen: Option<&Frozen>,
-        events: &[Event],
-        now: i64,
-    ) -> Result<Value, ViewUnavailable> {
-        let frozen = frozen.ok_or(ViewUnavailable::NotSealed)?;
-        let view = self.view(frozen)?;
-        Ok((view.eval)(events, now))
-    }
-}
-
-/// 全部公开视图（清单声明序，按名字排序）。
-pub fn shared() -> &'static [SharedViewDecl] {
-    SHARED_VIEWS
-}
-
-/// 一次读的便捷入口：`read_from(name, events, now)` = `ViewRead::named(name)?.read(..)`。
-pub fn read_from(name: &str, events: &[Event], now: i64) -> Result<Value, ViewUnavailable> {
-    ViewRead::named(name)?.read(events, now)
-}
-
-/// 全量读的便捷入口（`now = i64::MAX`）。
-pub fn read_all_from(name: &str, events: &[Event]) -> Result<Value, ViewUnavailable> {
-    read_from(name, events, i64::MAX)
-}
-
-#[cfg(test)]
-#[path = "views.test.rs"]
-mod tests;
+impl std::error::Error for ViewUnavailable {}

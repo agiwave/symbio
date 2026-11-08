@@ -17,7 +17,7 @@ impl: done
 | 面 | 交出物 | 谁用 |
 |---|---|---|
 | 事实 | `conation.expressed`，格位 `conation × opened`，字段 `goal` | 写闸按声明校验名字与格位；`seal` 按归宿行判它有没有人看护 |
-| 视图 | `conation.intents` → `{ intents, declared, expressed, escalated, adoption_rate }` | 任何按名字读的插件（`shared_views`，D-221） |
+| 视图 | `conation.intents` → `{ intents, declared, expressed, escalated, adoption_rate }` | 任何按名字读的插件（报表登记，D-221 / D-387） |
 | 多片合并 | `ViewDecl::agg`：N 份单片读数 → `{ expressed, escalated, adoption_rate }` | 实例级聚合列的读方（D-281） |
 
 **没有工具、没有路由、没有配置、没有新端口。**

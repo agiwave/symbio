@@ -11,5 +11,5 @@ plugin_order: 180
 # `memory.recalled` 同样没有跨插件读方，不进本行。
 shared_events: memory.encoded, memory.consolidated
 # 本插件不登记 `shared_views`：`memory.live` 的公开动作是报表登记（`D-387`）——
-# `recall::decl` 的 `submit_reports!` 以 `slot = memory` 交出，读方遍历 `reports()`，
-# 不再经生成清单 `view_names.rs`。视图本身仍是 owner 的 `ViewDecl`，名字只有一份。
+# `recall::decl` 的 `submit_reports!` 以 `slot = memory` 交出，读方遍历 `reports()`；
+# 视图名只有 `ViewDecl` / `MEMORY_LIVE` 一个来源，不存在第二份清单。

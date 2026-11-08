@@ -633,10 +633,10 @@ fn panel_matches_the_columns_it_describes() {
     assert_eq!(cm_row.tone, symbio_kernel::present::ReadingTone::Normal);
 }
 
-/// 能力视图列应有的键：报表登记的 `views` ∪ 尚未迁移的 `shared_views`（同名去重）。
+/// 能力视图列应有的键：报表登记的 `views`（同名去重）。
 ///
-/// 与 `stats_reading::capability_views` 的两个来源一一对应；过渡分支在 `Q3` 删除后，
-/// 这里只剩前半段。
+/// 与 `stats_reading::capability_views` 的唯一来源一一对应；共享清单退役后，
+/// 这里不再有第二个来源。
 fn expected_capability_view_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> = match symbio_plugin_api::reports::reports() {
         Ok(reports) => reports
@@ -645,24 +645,21 @@ fn expected_capability_view_names() -> Vec<&'static str> {
             .collect(),
         Err(_) => Vec::new(),
     };
-    names.extend(symbio_plugin_api::shared_views().iter().map(|v| v.name));
     names.sort_unstable();
     names.dedup();
     names
 }
 
-/// 能力视图列（DE-025 D-221）：**键完全由登记面决定，本插件一个名字也不写**。
+/// 能力视图列（D-387）：**键完全由报表登记面决定，本插件一个名字也不写**。
 ///
 /// 这一条判据盯的是「扩展不必改本插件」：登记面里多一条视图，列里就多一格，
-/// 而这个文件与 `stats_reading.rs` 都没有为此改过一行。缺席也必须是**有名有姓**
-/// 的缺席（原因词 + 人话），不许塌成空对象。
+/// 而这个文件与 `stats_reading.rs` 都没有为此改过一行。
 ///
-/// 本测试二进制只链接 session 与协议行夹具，登记面与公开清单里 owner 的 `ViewDecl`
-/// 都不在冻结表里 ⇒ 期望是 `unknown`。读到真值的那条路在链接了全部插件的 e2e
-/// （`capability_views[<登记名>]` 读出 `status: ok`），两侧合起来才是「跨插件可读」
-/// 的完整证据。
+/// 本测试二进制不链接任何 owner ⇒ 两侧都是空；读到真值的路径在链接了全部插件的
+/// e2e（`capability_views[<登记名>]` 读出 `status: ok`），两侧合起来才是「跨插件
+/// 可读」的完整证据。
 #[test]
-fn capability_views_column_follows_the_shared_manifest() {
+fn capability_views_column_follows_the_report_registry() {
     let wal = seed("capability-views");
     let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
     let col = got.capability_views.as_object().expect("能力视图列是对象");
@@ -672,35 +669,8 @@ fn capability_views_column_follows_the_shared_manifest() {
     let expected = expected_capability_view_names();
     assert_eq!(
         names, expected,
-        "列的键 = 报表登记的 views ∪ 尚未迁移的 shared_views，一个不多一个不少"
+        "列的键 = 报表登记的 views，一个不多一个不少"
     );
-
-    for shared in symbio_plugin_api::shared_views() {
-        let entry = &col[shared.name];
-        assert_eq!(
-            entry["owner"].as_str(),
-            Some(shared.owner),
-            "owner 来自清单生成物，不是本插件抄的"
-        );
-        assert_eq!(
-            entry["status"].as_str(),
-            Some("unavailable"),
-            "本测试进程没链接 owner ⇒ 必须出声，不能给空值：{}",
-            entry
-        );
-        assert_eq!(
-            entry["reason"].as_str(),
-            Some("unknown"),
-            "已公开但声明表里没有实现（清单与代码脱节的那种红）"
-        );
-        assert!(
-            entry["detail"]
-                .as_str()
-                .is_some_and(|d| d.contains(shared.name)),
-            "人话里要带名字，便于定位：{}",
-            entry["detail"]
-        );
-    }
 }
 
 /// 面板的能力视图段：**一行一条登记视图**，标签就是登记面里的名字。
@@ -708,7 +678,7 @@ fn capability_views_column_follows_the_shared_manifest() {
 /// 反向判据（登记面为空时段落整段不出现）由 `expected_sections` 那条并排覆盖：
 /// 段数不是常数，而是「固定五段 + 有无能力视图」的和。
 #[test]
-fn the_capability_section_has_one_row_per_shared_view() {
+fn the_capability_section_has_one_row_per_registered_view() {
     let wal = seed("capability-panel");
     let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
     let expected = expected_capability_view_names();

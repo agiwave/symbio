@@ -13,7 +13,7 @@
 //! ## 视图为什么也在这里
 //!
 //! [`IDEMPOTENCY_LEDGER`] 是纯折叠：从 `idempotency.recorded` 按键去重折出台账。它只在
-//! 本包内折，名字不进 `PLUGIN.yml` 的 `shared_views:`：今天没有第二个读者（`D-221`）。
+//! 本包内折，名字不进任何报表登记：今天没有第二个读者（`D-221`）。
 
 use serde_json::{json, Value};
 

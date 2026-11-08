@@ -17,8 +17,7 @@
 //! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
-//! - [`views`]：声明视图的跨插件读口（按 owner 公开的名字读纯折叠）
-//! - [`view_names`]：`shared_views` 清单生成物（哪些视图公开可读）
+//! - [`views`]：视图读不出来的缺席原因（公开读口是 [`reports`] 的报表登记）
 //! - [`vocab`]：跨插件共享名的唯一住处（端口 / 行为 / 路径段 / 治理能力，D-364）
 //!
 //! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、机制入口与
@@ -61,7 +60,6 @@ pub mod rows;
 pub mod settle;
 pub mod termination;
 pub mod text;
-pub mod view_names;
 pub mod views;
 pub mod vocab;
 
@@ -94,11 +92,7 @@ pub use port::{
 };
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};
 pub use settle::{Contribution, Contributor, SettleFace, Settling};
-pub use view_names::SharedViewDecl;
-pub use views::{
-    read_all_from as read_shared_view_all, read_from as read_shared_view, shared as shared_views,
-    ViewRead, ViewUnavailable,
-};
+pub use views::ViewUnavailable;
 
 // ==================== 扩展层宿主面 ====================
 // 本块是**扩展层插件唯一需要认识的宿主入口**：能力包与结构件插件只写

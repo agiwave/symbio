@@ -5,7 +5,7 @@
 //!
 //! | 面 | 用在哪 | 谁读 |
 //! |---|---|---|
-//! | 视图（`ViewDecl`） | `forecast.remaining` 折 `task.opened` / `task.asserted` | 本包私有：没有第二读者，名字不进 `shared_views`（D-221 的公开动作只对真有读方的视图做） |
+//! | 视图（`ViewDecl`） | `forecast.remaining` 折 `task.opened` / `task.asserted` | 本包私有：没有第二读者，名字不进报表登记（D-221 的公开动作只对真有读方的视图做） |
 //!
 //! 账行里的**移除计划**（`DE-026 §2.3` #34）写明期限、触发条件与承接任务：这一格
 //! 只由一条能力撑着，所以它带撤除路径（`D-294`）。

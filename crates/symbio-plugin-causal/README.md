@@ -20,7 +20,7 @@ impl: done
 | 工具 | `causal_assert(cause, effect, confidence?)` | 模型（经工具面调用） |
 | 行为 | 一次成功断言 ⇒ 一条 `causal.link` 草稿 | 宿主唯一的写口（I-1，D-213） |
 | 事实 | `causal.link`，格位 `domain × asserted`，字段 `cause` / `effect` / `confidence` | 写闸按声明校验名字与格位；`seal` 按归宿行判它有没有人看护 |
-| 视图 | `causal.links` → `{ count, edges, causes }` | 本包私有（没有第二个读者；名字不进 `shared_views`，D-221） |
+| 视图 | `causal.links` → `{ count, edges, causes }` | 本包私有（没有第二个读者；名字不进报表登记，D-221） |
 
 **没有自有路由、没有配置、没有 VDFS 挂载点、没有新端口。**
 

@@ -5,7 +5,7 @@
  *
  * - 有 `Migration:` 就放行 ⇒ 写上 trailer 即可在架构面夹带，D-247 的两类分家作废；
  * - 只判新增、不判删除 ⇒ 插件落地而旧实现留着（两份同时生效）照样绿；
- * - 只认 `*.gen.rs` ⇒ `plugin-api` 的 `view_names.rs` / `events.rs` / `routes.rs` 被当成
+ * - 只认 `*.gen.rs` ⇒ `plugin-api` 的 `events.rs` / `routes.rs` 被当成
  *   机制增量，补件几乎条条假红，豁免写满之后没人再看；
  * - 决策号只判形状不查存在 ⇒ 拼一个 `D-999` 就能进架构；
  * - 注释里的插件 id / 工具名算成代码 ⇒ 「补件不是通用的」这条判据自伤。
@@ -118,10 +118,9 @@ test('parsePatch：hunk 里以 `--- ` 开头的删除行不是文件头', () => 
 
 // ── 文件类别 ──────────────────────────────────────────────────────────────
 
-test('generatedPaths：描述符声明的输出都在清单里（含不带 .gen.rs 后缀的三份）', () => {
+test('generatedPaths：描述符声明的输出都在清单里（含不带 .gen.rs 后缀的两份）', () => {
   const g = generatedPaths(repoRoot)
   for (const p of [
-    'crates/symbio-plugin-api/src/view_names.rs',
     'crates/symbio-plugin-api/src/events.rs',
     'crates/symbio-plugin-api/src/routes.rs',
     'crates/symbio-sdk/src/authz/rows.gen.rs',
@@ -138,7 +137,7 @@ test('isCapabilitySource：测试与生成物都不算可迁移源码', () => {
   assert.equal(isCapabilitySource(LOOP), true)
   assert.equal(isCapabilitySource('crates/symbio-plugin-loop/src/loop_rows.test.rs'), false)
   assert.equal(isCapabilitySource('crates/symbio-sdk/src/authz/rows.gen.rs'), false)
-  assert.equal(isCapabilitySource('crates/symbio-plugin-api/src/view_names.rs'), false)
+  assert.equal(isCapabilitySource('crates/symbio-plugin-api/src/events.rs'), false)
   assert.equal(isCapabilitySource('crates/symbio-plugin-api/src/context.rs'), true)
 })
 
@@ -242,7 +241,7 @@ test('migrationErrors：折叠整文件搬出机制面、落进能力包 ⇒ 绿
     mig([
       { path: 'crates/symbio-sdk/src/projection/cost.rs', added: [], removed: ['pub fn cost_ledger() {}'] },
       { path: 'crates/symbio-plugin-cost/src/decl.rs', added: ['name: "cost.ledger"'], removed: [] },
-      { path: LOOP, added: ['ViewRead::named(COST_LEDGER_VIEW)'], removed: ['cost_ledger()'] },
+      { path: LOOP, added: ['reports::read_all(snapshot)'], removed: ['cost_ledger()'] },
     ]),
     [],
   )
@@ -279,10 +278,10 @@ test('migrationErrors：迁移提交没有删除旧实现 ⇒ EX-003 红（改�
   assert.match(e, /EX-003/)
 })
 
-test('migrationErrors：迁移中重生成 view_names.rs 不算碰机制面', () => {
+test('migrationErrors：迁移中重生成 events.rs 不算碰机制面', () => {
   assert.deepEqual(
     mig([
-      { path: 'crates/symbio-plugin-api/src/view_names.rs', added: ['const X: &str = "notes.recent";'], removed: [] },
+      { path: 'crates/symbio-plugin-api/src/events.rs', added: ['const X: &str = "notes.recent";'], removed: [] },
       { path: LOOP, added: [], removed: ['row!("memory")'] },
     ]),
     [],
@@ -364,7 +363,7 @@ test('supplementErrors：注释里提到插件 id 与工具名 ⇒ 绿（判的�
 test('supplementErrors：生成物里的插件 id 不算补件定制', () => {
   assert.deepEqual(
     supp('feat: 端口\n\nCore-Change: D-219', [
-      { path: 'crates/symbio-plugin-api/src/view_names.rs', added: ['const X: &str = "notes.recent";'], removed: [] },
+      { path: 'crates/symbio-plugin-api/src/events.rs', added: ['const X: &str = "notes.recent";'], removed: [] },
       { path: CORE, added: ['pub fn port() {}'], removed: [] },
     ]),
     [],

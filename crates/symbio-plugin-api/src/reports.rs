@@ -1,16 +1,12 @@
 //! 跨插件报表的登记面 —— owner 自己交「哪一格、怎么排版、读哪几条视图」。
 //!
-//! ## 它替换的是什么
+//! ## 为什么登记面在 owner 而不是读方
 //!
-//! 此前一条视图要给出品读数，owner 得在 `PLUGIN.yml` 写 `shared_views`，生成器再把
-//! 名字镜像进 `plugin-api/src/view_names.rs`；读方（`session/stats`）要么 import
-//! 生成的常量、要么照名字猜空形状。名字因此作为业务身份住进了机制层，且读方仍要
-//! 「知道有哪几条」才能出列（DE-024 D-387）。
-//!
-//! 现在登记的是**报表描述符**：owner 在自己 crate 的模块作用域 `submit_reports!`
+//! 登记的是**报表描述符**：owner 在自己 crate 的模块作用域 `submit_reports!`
 //! 一条 [`ReportDecl`]，名字只出现在 owner 自己的常量里；读方只遍历 [`reports()`]，
 //! 按 `views` 逐个读、把整片值交回 `render`。空形状、`own` 行、`cap` 截断、按档并表
-//! 全在 owner 的 `render` 里——读方不再替 owner 猜形状。
+//! 全在 owner 的 `render` 里——读方不再替 owner 猜形状，也不必先「知道有哪几条」
+//! 才能出列（DE-024 D-387）。
 //!
 //! ## 顺序是判据
 //!
@@ -282,9 +278,9 @@ pub fn read_view(name: &str, snapshot: &[Event]) -> Value {
 
 /// 一条已登记视图的读数**加口径版本**：供诊断列（`capability_views`）用。
 ///
-/// 与 [`read_view`] 同一条路径（冻结声明表 + 名字），**不走 `shared_views` 的清单闸**：
-/// 报表登记就是公开（`D-387`），名字由 owner 的 `ReportDecl` 交出，读方不需要它再出现在
-/// 生成清单里。读不到 ⇒ 缺席原因（四种态之一），不是 `Null`——诊断列要说得出为什么没数。
+/// 与 [`read_view`] 同一条路径（冻结声明表 + 名字）：报表登记就是公开（`D-387`），
+/// 名字由 owner 的 `ReportDecl` 交出，读方不需要它再出现在第二份清单里。读不到 ⇒
+/// 缺席原因（两种态之一），不是 `Null`——诊断列要说得出为什么没数。
 pub fn read_view_with_ver(
     name: &str,
     snapshot: &[Event],

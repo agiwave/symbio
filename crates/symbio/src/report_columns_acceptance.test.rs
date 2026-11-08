@@ -24,9 +24,10 @@ fn every_registered_slot_is_rendered_exactly_once() {
 
 /// 每一条已登记视图都必须能**按名字**求值（登记表有它、声明表也冻结了）。
 ///
-/// `capability_views` 只遍历登记面，不再过 `shared_views` 的清单闸（`D-387`）。若读口
-/// 仍要求「名字在生成清单里」，已登记的视图会整列读成 `not_shared`——报表照样出数，
-/// 诊断列却全灭，而两边都不报错。这条判据挡的就是那个半截状态。
+/// `capability_views` 只遍历登记面（`D-387`），它不给「名字解析不了」留后路：缺席原因
+/// 只有 `not_sealed` / `unknown` 两态，没有任何一态叫「登记了但清单里没有」。若某条
+/// 报表的 `views` 在冻结声明表里查不到，诊断列那一格就是 `unknown`——报表照样出数，
+/// 诊断列却瘸一格，而两边都不报错。这条判据挡的就是那个半截状态。
 #[test]
 fn every_registered_view_is_readable_by_name() {
     let reports = reports().expect("全装配的报表登记必须合法");

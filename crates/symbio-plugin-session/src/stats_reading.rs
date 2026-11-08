@@ -240,15 +240,11 @@ fn fleet_of(
     Some(fleet_render(&merged, ctx))
 }
 
-/// 能力视图列：遍历**登记面**，逐条经 `symbio_plugin_api::views` 求值（DE-025 D-221）。
+/// 能力视图列：遍历**报表登记面**，逐条经 `symbio_plugin_api::reports` 求值（`D-387`）。
 ///
-/// ## 两个来源，一段过渡
-///
-/// ① **报表登记面**（`D-387`）：owner 在 `submit_reports!` 的 `views` 里列出的名字。
-/// 这是本列的主路——加一条被阅读的视图 = owner 登记，本文件不动。
-///
-/// ② **过渡：尚未转报表的 `shared_views`**——`memory.live` 转报表后这里已为空，
-/// 整段随 `Q3` 收尾删除。两者同名时以 ① 为准。
+/// owner 在 `submit_reports!` 的 `views` 里列出的名字就是这一列的全部来源——加一条被
+/// 阅读的视图 = owner 登记，本文件不动。按名字的共享清单（`shared_views` /
+/// `view_names.rs`）已退役，同一条视图不再有第二个读口。
 ///
 /// 名字、版本、扫描成本与折叠都在 owner 的 `ViewDecl` 里；本函数只做「按登记取、
 /// 原样装一格」。读不到时给**可诊断的缺席**（`reason` + `detail`），不给空值冒充读数。
@@ -277,24 +273,13 @@ pub(super) fn capability_views(snapshot: &[Event]) -> serde_json::Value {
             }
         }
     }
-    // 过渡分支：Q3 之后 `shared_views` 为空（`memory.live` 转报表描述符）时整段删除。
-    for shared in symbio_plugin_api::shared_views() {
-        if out.contains_key(shared.name) {
-            continue;
-        }
-        out.insert(
-            shared.name.to_string(),
-            view_entry(shared.owner, shared.name, snapshot),
-        );
-    }
     serde_json::Value::Object(out)
 }
 
 /// 一条视图读成一格：`{ owner, status, ver, value }` 或可诊断的缺席。
 ///
-/// 读口用 [`symbio_plugin_api::reports::read_view_with_ver`]，**不**用
-/// `ViewRead::named`：后者要求名字在 `shared_views` 清单里，而报表登记就是公开
-/// （`D-387`）——过清单闸会把已登记的视图全部读成 `not_shared`。
+/// 读口用 [`symbio_plugin_api::reports::read_view_with_ver`]：报表登记就是公开
+/// （`D-387`），读方不另过任何清单闸。
 fn view_entry(owner: &str, name: &str, snapshot: &[Event]) -> serde_json::Value {
     match symbio_plugin_api::reports::read_view_with_ver(name, snapshot) {
         Ok((ver, value)) => serde_json::json!({

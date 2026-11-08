@@ -393,7 +393,7 @@ export const GUARDS = [
   // 「两份实现同时生效」这半**不在这里按名字再判一遍**：同名声明在装载期已由 `seal` 的
   // `Gap::Duplicate*` 判红；本脚本只判 `seal` 看不见的 diff 事实（旧实现还没删）。
   // 失效形态全是「看起来在判」：有 trailer 就放行、只判新增不判删除、只认 `*.gen.rs`
-  // （`plugin-api` 的 `view_names.rs` / `events.rs` / `routes.rs` 是生成物）、决策号只判形状
+  // （`plugin-api` 的 `events.rs` / `routes.rs` 是生成物）、决策号只判形状
   // 不查存在、注释/字符串里的名字被算成代码——各由回归测试注入并断言红。判据只追溯
   // `BEFORE_GUARD` 之后的提交；补件夹具 `709ee583` 不在范围里也每轮判一次。
   'capability-migration-audit',
@@ -414,7 +414,7 @@ export const GUARDS = [
   // 本判据判**结果面**——哪怕分十个提交、每个都写了漂亮理由，端口上有一格 `turn` 照样红。
   //
   // 判的是**形状**不是措辞（`SC-006` 同一条纪律）：注释与文档里说「这一轮」不红，`return`
-  // 关键字不算。三处有名豁免（D-252）：① 生成表 `events.rs` / `routes.rs` / `view_names.rs`
+  // 关键字不算。三处有名豁免（D-252）：① 生成表 `events.rs` / `routes.rs`
   // 是 `PLUGIN.yml` 清单的镜像（事实名不是端口形状），逐文件名登记；② ③（loop 的 `t{turn}`
   // 词干、core 的 `Event.turn` 信封）不在扫描范围内，名字住在 D-252 里、不在脚本里复述成
   // 第二张表。豁免通道逐条 `{ path, token, why }` 精确等值——通配在登记那一刻就被判红。
@@ -762,12 +762,6 @@ export const LIBS = [
   // 清单时的三条抛错（形状非法 / 幽灵名字 / 一条名字两个 owner）由消费方
   // `shared-event-vocab-audit` 转述成人读的一行，故也不进 GUARDS。
   'facts/events-rs',
-  // `views-rs` 与 `events-rs` 同一形状，只是投影的是**视图名**：读各插件 `PLUGIN.yml`
-  // 的 `shared_views` 行，生成 `symbio-plugin-api/src/view_names.rs` 的公开清单（DE-025
-  // D-221）。登记成 LIBS：它由 `gen-facts` 遍历目录调用（目录即接线，不在门禁里单列一步），
-  // 生成物漂移由 `gen-facts --check`（GEN-001）判；「清单里的名字必须有 owner 的 `ViewDecl`」
-  // 由它自己抛错 + `plugin-api::views` 的读口判，本脚本不是独立门禁步骤。
-  'facts/views-rs',
   // 部署事实的四个生成器与它们的共享材料（`_plugin-links`）。登记成 LIBS 而不是
   // GUARDS 的**理由**：它们由 `gen-facts` 调用、生成物漂移由 `gen-facts --check`
   // 判，本体不是独立门禁步骤；回归测试那几格另在 GUARDS 里（同 `routes-rs` 的两处

@@ -92,13 +92,13 @@ test('GRANDFATHERED：口径加宽的存量提交逐条带理由', () => {
   assert.deepEqual(validateBeforeGuard(GRANDFATHERED), [])
 })
 
-test('fingerprints：描述符声明的生成物（view_names.rs）已存在时随清单改，不动指纹', () => {
+test('fingerprints：描述符声明的生成物（events.rs）已存在时随清单改，不动指纹', () => {
   const before = [
-    f('crates/symbio-plugin-api/src/view_names.rs', 'old'),
+    f('crates/symbio-plugin-api/src/events.rs', 'old'),
     f('crates/symbio-plugin-api/src/lib.rs', 'same'),
   ]
   const after = [
-    f('crates/symbio-plugin-api/src/view_names.rs', 'new'),
+    f('crates/symbio-plugin-api/src/events.rs', 'new'),
     f('crates/symbio-plugin-api/src/lib.rs', 'same'),
   ]
   const parent = paths(before)
@@ -109,8 +109,8 @@ test('fingerprints：描述符声明的生成物（view_names.rs）已存在时�
 })
 
 test('fingerprints：plugin-api 的手写文件改动会动指纹（生成物不是整棵豁免）', () => {
-  const before = [f('crates/symbio-plugin-api/src/view_names.rs', 'old'), f('crates/symbio-plugin-api/src/port.rs', 'same')]
-  const after = [f('crates/symbio-plugin-api/src/view_names.rs', 'new'), f('crates/symbio-plugin-api/src/port.rs', 'changed')]
+  const before = [f('crates/symbio-plugin-api/src/events.rs', 'old'), f('crates/symbio-plugin-api/src/port.rs', 'same')]
+  const after = [f('crates/symbio-plugin-api/src/events.rs', 'new'), f('crates/symbio-plugin-api/src/port.rs', 'changed')]
   const parent = paths(before)
   assert.notEqual(
     fingerprints(before, parent)['crates/symbio-plugin-api'],

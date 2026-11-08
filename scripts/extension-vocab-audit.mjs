@@ -24,7 +24,7 @@
  * |---|---|
  * | `crates/symbio-plugin-api/src` 下的 `.rs`（递归，非生成、非测试） | 逐文件扫标识符与 CJK 容器字（轮 / 幕） |
  * | `*.test.rs` | 不判——测试可以把宿主词汇摆上桌来断言「交不进去」 |
- * | 生成表 `events.rs` / `routes.rs` / `view_names.rs`（豁免①） | 不判——它们是各插件 `PLUGIN.yml` 清单的镜像，`turn.*` / `Entity::Turn` 是控制面**声明的事实名**，不是端口形状（生成器 `gen-facts --check` 保证内容与清单一致） |
+ * | 生成表 `events.rs` / `routes.rs`（豁免①） | 不判——它们是各插件 `PLUGIN.yml` 清单的镜像，`turn.*` / `Entity::Turn` 是控制面**声明的事实名**，不是端口形状（生成器 `gen-facts --check` 保证内容与清单一致） |
  *
  * D-252 的另两处有名豁免（② loop 的 `t{turn}` 词干生成、③ core 的 `Event.turn` 信封
  * 字段与 I1 / I3 不变量）**不在本判据的扫描范围内**——它们分别住在 `symbio-plugin-loop`
@@ -66,8 +66,6 @@ export const GENERATED_FILES = [
   'events.rs',
   // scripts/facts/routes-rs.mjs：PLUGIN.yml `routes` 的镜像
   'routes.rs',
-  // scripts/facts/views-rs.mjs：PLUGIN.yml `shared_views` 的镜像（D-221）
-  'view_names.rs',
 ]
 
 /**

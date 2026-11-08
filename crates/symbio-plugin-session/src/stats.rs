@@ -4,9 +4,9 @@
 //! 协议投影算得出，
 //! 但**算得出 ≠ 读得到**——没有生产出口，投影只是「能算的函数」，三类收益
 //! 无法验收、回归也看不见。本模块就是那一格的读侧出口：出口形态②（只读路由）。
-//! 读数今天还多一族**能力视图**：键来自各能力包公开的 `shared_views` 清单、值由
-//! owner 自己的折叠算出，本插件只按名字读、不写任何视图名（DE-025 D-221）——
-//! 一项新能力公开一条视图，这一列就多一格，本文件不动一行。
+//! 读数今天还多一族**能力视图**：键来自各能力包的报表登记（`ReportDecl.views`）、值由
+//! owner 自己的折叠算出，本插件只按登记取、不写任何视图名（`D-387`）——
+//! 一项新能力登记一条视图，这一列就多一格，本文件不动一行。
 //!
 //! ## 两个文件的分工（判据：这一段错了谁会红）
 //!
@@ -41,7 +41,7 @@
 //!
 //! 本模块的读数一律走 `Projection::read_all`（= `now = i64::MAX` + 全量预算）：WAL 是
 //! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——按报表读的列
-//! （`reports::read_all`）与尚未迁移的能力视图（`capability_views` 的 `read_shared_view_all`）
+//! （`reports::read_all`）与能力视图（`capability_views` 的 `read_view_with_ver`）
 //! 走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
@@ -204,16 +204,16 @@ pub(crate) struct SessionStats {
     ///
     /// ## 为什么这一列没有写死的键名
     ///
-    /// 它是**通用读口**，不是某一项能力的专用列：键 = owner 在 `PLUGIN.yml` 的
-    /// `shared_views` 里公开的名字（`symbio_plugin_api::shared_views()`），值 =
+    /// 它是**通用读口**，不是某一项能力的专用列：键 = owner 在 `submit_reports!` 的
+    /// `ReportDecl.views` 里登记的名字，值 =
     /// `{ owner, status: "ok", ver, value }`，或
     /// `{ owner, status: "unavailable", reason, detail }`。加一条「最近几条便签」
-    /// 只需要能力包自己声明视图并公开名字——本插件不改一行，下一次读数就多一格；
+    /// 只需要能力包自己登记视图——本插件不改一行，下一次读数就多一格；
     /// 读的是 owner 的折叠（`ViewDecl::eval`），本插件不抄它的口径。
     ///
     /// ## 缺席态各有名字
     ///
-    /// 未冻结 / 未公开 / 已公开但没实现分别报 `not_sealed` / `not_shared` / `unknown`
+    /// 未冻结 / 已声明但没实现分别报 `not_sealed` / `unknown`
     /// （词表在 `ViewUnavailable::reason`），不折叠成空值——「没算出来」与「算出来是空」
     /// 必须分得开（与 `tokens.calls` 同一条纪律）。读侧没有「超预算」这一态：切片给多长
     /// 就折多长，`cost` 只约束环内窗口求值（`D-284`）。

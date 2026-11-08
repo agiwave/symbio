@@ -271,9 +271,10 @@ for (const [key, cap] of Object.entries(PROJ_BASELINE)) {
       `PP-004 ${PROJ_CELL_LABEL[key]}变宽：实测 ${now} > 基线 ${cap} —— ` +
         `能力折叠住进 \`symbio_sdk/projection/\` 就等于「加一个能力要改架构模块」（DE-025 D-221）。` +
         '唯一合法的路径按序走：① 数它有几个 crate 在读——只有一个 owner 在读就**下沉给那个 owner**' +
-        '（先例：checkpoint / fallback / slo / span / changes 归 session，consolidate 归 loop）；' +
-        '② 别的插件想读 owner 的折叠，走 `symbio_plugin_api::views` 的按名字读口 + ' +
-        '`PLUGIN.yml` 的 `shared_views`，不在 core 里再写一份；③ 三条路都不通才谈放宽：' +
+        '（先例：checkpoint / fallback / slo / span / changes 归 session，consolidate 归 memory）；' +
+        '② 别的插件想读 owner 的折叠，由 owner 用 `submit_reports!` 把视图登记成报表列' +
+        '（`ReportDecl.views`），读方遍历 `reports()`——不在 core 里再写一份；' +
+        '③ 三条路都不通才谈放宽：' +
         '先在 `docs/003-design/` 立一条 `### D-NNN` 逐条论证「必需」，再在本脚本基线旁写 ' +
         `projection-purity-allow ${key}: D-NNN <理由>`,
     )
