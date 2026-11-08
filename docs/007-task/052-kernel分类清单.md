@@ -13,6 +13,7 @@ exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（语法 /
 
 # kernel 分类清单
 
+> 对应架构分析：**P2（裁决类）**。
 > 架构批第 3 笔之一。裁决（用户既定，不再开讨论）：
 > **kernel 承认含冻结求解器，但判据必须可执行。**
 > 依据：P2 核实——kernel 生产面 43 文件 / 9000 行 / 256 个 `pub fn`，
@@ -38,6 +39,12 @@ exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（语法 /
 | `capability_invoke` | `crates/symbio-kernel/src/capability/mod.rs` 293-302 行 | 「唯一拆信封点」是契约还是可替换便利 |
 | `exec` | `crates/symbio-kernel/src/exec/mod.rs` | `ExecEnv::from_request` / 出口绑定是语法还是机制 |
 | `present` / `detail` | `crates/symbio-kernel/src/present/detail.rs`、`present/reading.rs` | 呈现方言的类型面与默认实现各归哪类 |
+
+## 是否阻塞横向扩展
+
+**是（裁决类）**。kernel 归类判据失真时，新能力无法从判据判断该住哪一层；
+四块（`MemoryStore` / `capability_invoke` / `exec` / `present`）必须在清单里各有结论，
+先清单后搬迁，不许留与代码相反的判据。
 
 ## 处理过程
 
