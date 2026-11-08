@@ -9,14 +9,15 @@
  * | 码 | 反向用例 |
  * |---|---|
  * | `CP-001` | 引擎里多一段 `loop`；把唯一循环搬到另一个文件 |
- * | `CP-004` | kernel / sdk / loop 的**代码**里出现 `vocab.rs` 登记的事件名；loop 的派发面出现端口名 |
+ * | `CP-004` | kernel / sdk / loop 的**代码**里出现词汇家 `events.rs` 的事件名；loop 的派发面出现端口名 |
  * | `CP-006` | 机制字节改了而基线未跟；多一份生产文件；基线缺失；基线指向不存在的文件；决策号不存在 |
  * | `CP-009` | 另一 crate 的 `loop` / `for` 里调 `drive(` |
  *
- * 另有四条**不该红**的用例：
+ * 另有五条**不该红**的用例：
  *   - 注释里的世界域名 ⇒ 仍绿（判据读剥注释后的代码，字符串字面量保留）；
  *   - `test_fixtures.rs` 是 `cfg(test)` / feature 下的调用方拼写 ⇒ 不算机制层；
  *   - sdk 里的端口名是载荷取值 / 角色词，不在派发面 ⇒ 不算机制在派发；
+ *   - `loop/vocab.rs` 里剩下的机制事实 `plugin.row.asked` 不算世界名 ⇒ 不进 CP-004 视野；
  *   - 循环体里没有推进调用 ⇒ 不算第二推进循环。
  *
  * 夹具的做法：建一棵最小可判的树（新环三个文件 + vocab + kernel / sdk 各一个文件 +
@@ -40,6 +41,7 @@ const LOOP = 'crates/symbio-plugin-loop/src'
 const ENGINE = `${LOOP}/ring/engine.rs`
 const VOCAB = `${LOOP}/vocab.rs`
 const PORT_VOCAB = 'crates/symbio-plugin-api/src/vocab.rs'
+const EVENTS = 'crates/symbio-plugin-api/src/events.rs'
 const KERNEL = 'crates/symbio-kernel/src/lib.rs'
 const SDK = 'crates/symbio-sdk/src/lib.rs'
 
@@ -152,12 +154,19 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 
 const DECL_DOC = '## 关键决策\n\n### D-234 夹具决策\n\n机制面基线挂在这条决策上。\n'
 
+/** 词汇家（生成物）：CP-004 的世界名集合只能从这里取。 */
+const EVENTS_SRC = `//! 夹具：词汇层生成物（各 owner 声明经生成器投影，请勿手改）。
+pub const EVENT_USER_MESSAGE: &str = "user.message";
+pub const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
+`
+
 function cleanTree() {
   return {
     [`${LOOP}/lib.rs`]: 'pub mod ring;\npub mod vocab;\n',
     [`${LOOP}/ring/mod.rs`]: 'pub mod engine;\n',
     [ENGINE]: ENGINE_SRC,
     [VOCAB]: VOCAB_SRC,
+    [EVENTS]: EVENTS_SRC,
     [PORT_VOCAB]: '/// 夹具：端口词汇面（端口名只有这一处登记）\npub const PORT_MODEL: &str = "model";\n',
     [KERNEL]: '// 内核夹具：没有任何世界域名\npub struct Event;\n',
     [SDK]: 'pub struct Store;\n',
@@ -236,6 +245,24 @@ test('CP-004：loop 的派发面出现端口名字面量 ⇒ 红', () => {
 test('CP-004：sdk 里的端口名是载荷取值 / 角色词，不在派发面 ⇒ 仍绿', () => {
   const files = cleanTree()
   files[SDK] += '\npub fn port_is(e: &str) -> bool {\n    e == "model" || e == "tool"\n}\n'
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+})
+
+test('CP-004：词汇家新增一个名字且机制层持有 ⇒ 红（证明源是词汇家，不是 loop/vocab.rs）', () => {
+  const files = cleanTree()
+  files[EVENTS] += 'pub const EVENT_COMMITMENT_OPENED: &str = "commitment.opened";\n'
+  files[KERNEL] += '\npub const N: &str = "commitment.opened";\n'
+  assertRed(audit(files), 'CP-004')
+})
+
+test('CP-004：loop/vocab.rs 的机制事实 plugin.row.asked 不算世界名 ⇒ 仍绿', () => {
+  const files = cleanTree()
+  files[VOCAB] = VOCAB_SRC.replace(
+    '];',
+    '    EventDecl::new("plugin.row.asked", (Entity::Scope, Verb::Asserted)),\n];\n',
+  )
+  files[`${LOOP}/lib.rs`] += '\npub const MECH: &str = "plugin.row.asked";\n'
   const r = audit(files)
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })

@@ -9,14 +9,14 @@
  * | 码 | 判什么 | 范围 |
  * |---|---|---|
  * | `CP-001` | 唯一循环体：整个环 crate 的生产代码只有一段 `loop` / `while`，落在 `ring/engine.rs` | `crates/symbio-plugin-loop/src/**` |
- * | `CP-004` | 机制层无世界域名：`vocab.rs` 登记的事件名不得作为**代码**字面量出现在 kernel / sdk / loop；端口名不得出现在 **loop 的派发面**（注释与测试夹具不算） | `crates/symbio-kernel/src/**`、`crates/symbio-sdk/src/**`、`crates/symbio-plugin-loop/src/**` |
+ * | `CP-004` | 机制层无世界域名：词汇层生成物 `events.rs` 的 `EVENT_*` 事件名不得作为**代码**字面量出现在 kernel / sdk / loop；端口名不得出现在 **loop 的派发面**（注释与测试夹具不算） | `crates/symbio-kernel/src/**`、`crates/symbio-sdk/src/**`、`crates/symbio-plugin-loop/src/**` |
  * | `CP-006` | 机制面指纹：驱动循环体 + `fn plan` + `fn expire` 的**归一化 token 流**哈希（注释 / 空白 / import 顺序 / 尾逗号无关）与生产文件数冻结在基线里 | `crates/symbio-plugin-loop/src/**` |
  * | `CP-009` | 第二推进循环：除 `ring/engine.rs` 外，任何生产文件的循环体都不得调 `drive(` | 全部 crate 的生产源码 |
  *
  * ## 失效形态
  *
  * 这一族的老病是「读不出 ⇒ 通过」。故：
- * - 环 crate / 基线文件 / `vocab.rs` / 机制三段读不出 ⇒ exit 2（不亮绿灯）；
+ * - 环 crate / 基线文件 / 词汇层 `events.rs` / 机制三段读不出 ⇒ exit 2（不亮绿灯）；
  * - 基线里的 `mechanism.file` 指向一个不存在的文件 ⇒ 红（陈旧基线）；
  * - `adr` 决策号不存在 ⇒ 红（不许匿名冻结）。
  *
@@ -50,6 +50,8 @@ const BASELINE_REL = 'scripts/baselines/control-plane.json'
 const KERNEL_SRC = 'crates/symbio-kernel/src'
 const SDK_SRC = 'crates/symbio-sdk/src'
 const PORT_VOCAB_REL = 'crates/symbio-plugin-api/src/vocab.rs'
+/** 世界事件名的**词汇家**：`events.rs` 是各 owner 声明经生成器投影的共享词汇面。 */
+const EVENT_VOCAB_REL = 'crates/symbio-plugin-api/src/events.rs'
 
 const PRINT = process.argv.includes('--print-baseline')
 const WRITE = process.argv.includes('--write-baseline')
@@ -61,7 +63,8 @@ const LOOP_HEAD = /\bloop\s*\{|\bwhile\b[^{;]*\{|\bfor\b[^{;]*\bin\b[^{;]*\{/g
 /** 驱动循环只算 `loop` / `while`；`for` 是遍历，不是「一圈一圈推进」。 */
 const DRIVER_HEAD = /\bloop\s*\{|\bwhile\b[^{;]*\{/g
 const ADVANCE_CALL = /(?<!fn )(?<!async fn )\bdrive\s*\(/
-const EVENT_DECL = /EventDecl::(?:new|with_roles|host_with_roles)\(\s*(?:\r?\n\s*)?"([^"]+)"/g
+/** 词汇家的事件名：生成物 `events.rs` 的 `EVENT_*` 常量值。 */
+const EVENT_CONST = /pub const EVENT_[A-Z0-9_]+:\s*&str\s*=\s*"([^"]+)"/g
 /** 端口名只有一处登记：`plugin-api/vocab.rs` 的 `PORT_*` 常量。 */
 const PORT_DECL = /pub const PORT_[A-Z0-9_]+:\s*&str\s*=\s*"([^"]+)"/g
 const PART_LABELS = ['drive loop body', 'fn plan', 'fn expire']
@@ -410,14 +413,14 @@ if (cp001.length !== 1) {
 
 // ───────────────────────────── CP-004 机制层无世界域名 ─────────────────────────────
 
-const vocab = read(VOCAB_REL)
+const vocab = read(EVENT_VOCAB_REL)
 if (vocab === null) {
-  console.error(red(`control-plane-audit：词汇表读不出（${VOCAB_REL}）`))
+  console.error(red(`control-plane-audit：词汇层读不出（${EVENT_VOCAB_REL}）`))
   process.exit(2)
 }
-const worldNames = [...new Set([...vocab.matchAll(EVENT_DECL)].map((m) => m[1]))]
+const worldNames = [...new Set([...vocab.matchAll(EVENT_CONST)].map((m) => m[1]))]
 if (worldNames.length === 0) {
-  console.error(red(`control-plane-audit：词汇表里一个事件名都读不出（${VOCAB_REL}）`))
+  console.error(red(`control-plane-audit：词汇层里一个事件名都读不出（${EVENT_VOCAB_REL}）`))
   process.exit(2)
 }
 const portVocab = read(PORT_VOCAB_REL)
@@ -431,8 +434,9 @@ if (portNames.length === 0) {
   process.exit(2)
 }
 
-// 世界事件名：kernel / sdk / loop 的**代码**都不许持有名字。`vocab.rs` 是声明表本身
-// （`TC-2` 的「除声明表与测试外」），不算机制层。
+// 世界事件名：kernel / sdk / loop 的**代码**都不许持有名字。环的 `vocab.rs` 是声明表
+// 本身（`TC-2` 的「除声明表与测试外」），不算机制层；它里面的 `plugin.row.asked`
+// 是**机制事实**，不进 `worldNames`（那个集合只来自词汇家 `events.rs`）。
 for (const src of [KERNEL_SRC, SDK_SRC, LOOP_SRC]) {
   for (const rel of walk(src)) {
     if (rel === VOCAB_REL) continue
