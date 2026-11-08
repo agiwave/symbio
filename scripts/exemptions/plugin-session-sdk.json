@@ -93,7 +93,6 @@
     "llm_removed_frame",
     "llm_short_id",
     "llm_state_frame",
-    "merge_with_fidelity",
     "mutations_latest_snapshot",
     "pattern_for_principal",
     "plugin_dir_from_ctx",

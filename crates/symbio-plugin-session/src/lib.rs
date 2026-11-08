@@ -12,7 +12,6 @@ mod convergence;
 mod declarations;
 mod grants;
 mod memory;
-mod memory_consolidate;
 pub(crate) mod message_events;
 mod opening;
 mod options;

@@ -2,13 +2,13 @@
 //!
 //! ## 它是给谁读的
 //!
-//! 巩固（名册 #2 的后半）留控制面——它的触发条件是聚合计数，落在 DE-025 §5.1 的
-//! 「聚合触发」空格里（那一格没有位置，D-269 判定不开）。于是它需要读活集，而活集的
-//! 折叠归本包（D-267：记忆一个所有者）。两条路里选的是**声明视图**：
+//! 巩固（名册 #2 的后半）的格位是债（D-268 订正）：申报与执行都在本包
+//! （[`crate::debt`] / [`crate::port`]），执行体直接调本包的折叠。声明视图
+//! `memory.live` 留给跨插件读方——D-387 Q3 的 `memory` 报表按名字读同一副折叠。
 //!
 //! ```text
 //! 本包 ──ViewDecl{eval = live::memory_live} + PLUGIN.yml 的 shared_views──▶ 名字公开
-//! loop ──ViewRead::named("memory.live")──▶ 冻结表里取 decl ──▶ read(events, now)
+//! 报表 ──ViewRead::named("memory.live")──▶ 冻结表里取 decl ──▶ read(events, now)
 //! ```
 //!
 //! 这是 `D-221` 已有的机制，**不新增任何面**：视图是 owner 自己交的纯函数，

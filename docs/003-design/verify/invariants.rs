@@ -42,7 +42,7 @@
 //! 编译运行：rustc --edition 2021 invariants.rs -o inv && ./inv
 
 // `#[path]` 指向仓库里的**生产文件**（与 recall_eval 挂 recall_score、
-// consolidation_fidelity 挂 merge_kernel 同一形态）——这一行就是「判定与生产
+// consolidation_fidelity 挂 consolidate/merge.rs 同一形态）——这一行就是「判定与生产
 // 共处一处」的全部含义。kernel 是 std-only（理由见它的文件头）；本程序只用它
 // 四个内核里的一个，`allow(dead_code)` 只在 verify 侧生效（生产 crate 全用）。
 #[allow(dead_code)]

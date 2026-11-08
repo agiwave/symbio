@@ -19,19 +19,19 @@
 //!
 //! ## 名字与形状分开
 //!
-//! `memory.encoded` / `memory.consolidated` / `memory.forgotten` 的**名字与格位**由本
-//! 模块的 `EVENTS` 交出（词汇的 owner 是记忆），**事实形状与归宿行**仍在
-//! [`crate::episodic::decl`]（编码 / 巩固 / 遗忘是那些格子的家）。写方向控制面借用格位
-//! ——会话的巩固写口与技能 / 情景记忆的收束贡献——但名字不因此换 owner；名字的消费方
-//! 从清单生成物 `symbio_plugin_api::events` 取，本 crate 不认识任何兄弟插件。
+//! `memory.encoded` 与 `memory.consolidated` 的**名字与格位**由本模块的 `EVENTS` 交出，
+//! 它们都有跨插件生产读者，名字的消费方从清单生成物 `symbio_plugin_api::events` 取；
+//! `memory.forgotten` 的名字同样在本模块声明，但除 owner 外没有生产读者（CS-007），
+//! 故以本地常量交给本 crate 的写方 / 读方，不进生成物——**事实形状与归宿行**仍在
+//! [`crate::episodic::decl`]（编码 / 巩固 / 遗忘是那些格子的家）。写方向借用格位
+//! ——本包的巩固执行体（`crate::consolidate`）与技能 / 情景记忆的收束贡献——但名字不因此
+//! 换 owner；本 crate 不认识任何兄弟插件。
 //!
 //! `memory.recalled` 今天没有跨插件读方 ⇒ 不登记 `shared_events`、不进生成物。真有
 //! 第二个读方时，动作是把它登记进清单再让读方从生成物取，而不是让读方抄一份字面量
 //! （DE-024 D-204）。
 
-use symbio_plugin_api::events::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-};
+use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED};
 use symbio_plugin_api::{Entity, EventDecl, PluginDeclarations, Verb, PRINCIPAL_USER};
 
 use crate::episodic::decl as episodic;
@@ -42,12 +42,20 @@ use crate::semantic::decl as semantic;
 /// 装配表与贡献次序按它排序。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-memory";
 
+/// `memory.forgotten` 的线格式名字。
+///
+/// 除 owner 外没有生产读者（CS-007 普查）⇒ 不进 `PLUGIN.yml` 的 `shared_events`、
+/// 不进生成物；名字与格位仍由本模块的 `EVENTS` 一处声明，消费方从本模块取。
+pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
+
 /// 记忆词汇四格（`memory.*`）。
 ///
-/// 名字与格位都归本插件：`encoded` / `consolidated` / `forgotten` 的写方向控制面借用
-/// 格位（会话的巩固写口、技能与情景记忆的收束贡献），`recalled` 的写方就在本包。
-/// 前三条跨插件被 session / skill / compact 按名字读，因此登记进本插件 `PLUGIN.yml`
-/// 的 `shared_events`；`recalled` 今天没有跨插件读方，不进清单（DE-024 D-204）。
+/// 名字与格位都归本插件：`encoded` / `consolidated` / `forgotten` 的写方向借用
+/// 格位（本包的巩固执行体、技能与情景记忆的收束贡献），`recalled` 的写方就在本包。
+/// 只有 `encoded` / `consolidated` 被 skill 幂等、recall 与 session 的召回可见切片
+/// 按名字跨插件读，因此它们登记进本插件 `PLUGIN.yml` 的 `shared_events`；
+/// `forgotten` 除 owner 外没有生产读者（CS-007），名字留在本模块的本地常量；
+/// `recalled` 同样不进清单（DE-024 D-204）。
 ///
 /// 记忆事实归**认知归属人**，不是跑轮主体：召回视图按 `actor == viewer` 过滤，
 /// 记忆要按人看见它（D-339）。

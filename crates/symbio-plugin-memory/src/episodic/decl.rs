@@ -8,14 +8,15 @@
 //! 兄弟插件，也不依赖 core。
 //!
 //! `tag` 的取值「经验」「判断」是本能力自己的词汇（七类认知内容里的两类，
-//! DE-030）。读侧的巩固域在 loop 按同样的两个字面量分组——两条拼写是否一致由
-//! 端到端判据（e2e t29）钉住，与技能包对 `SKILL_TAG` 的处理同一条口径。
+//! DE-030）。读侧的巩固域与巩固写口（本包的 `crate::debt` / `crate::consolidate`）
+//! 按同样的两个字面量分组——两条拼写是否一致由单元判据（`debt.test.rs` /
+//! `consolidate.test.rs`）钉住，与技能包对 `SKILL_TAG` 的处理同一条口径。
 
-use symbio_plugin_api::events::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-};
+use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED};
 use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{FactDecl, LatencyTier};
+
+use crate::decl::EVENT_MEMORY_FORGOTTEN;
 
 /// 认知内容标签：本轮**用户发言**编成的情景记忆标「经验」（七类，DE-030）。
 pub(crate) const MEMORY_TAG: &str = "经验";
@@ -51,7 +52,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
             "trigger",
         ],
     },
-    // 巩固产物（写方是控制面的 `memory_events::consolidate`，DE-026 D-270 订正 D-268
+    // 巩固产物（写方是本包的 `memory` 端口执行体，DE-026 D-270 订正 D-268
     // 第 3 条的落点）：形状随**活集折叠**走——`memory.live` 的 `reads` 要它，而
     // `seal` 的 `OrphanFact` 又要求形状与归宿行同处（行在本文件的 `ROWS`）。
     // 字段集与写方载荷逐字对应：`sources` 是最初一代的溯源链，`generation` /
@@ -105,9 +106,9 @@ pub(crate) const ROWS: &[Decl] = &[
     },
     // 巩固产物与遗忘的两张归宿行（DE-026 D-268 第 3 条）。
     //
-    // 三张归宿行同处一处（同一族的三条事实），形状同在本文件的 `FACTS`；写方是控制面
-    // 的 `memory_events::consolidate`。行是「谁接住这条事实」（`seal` 的 `OrphanFact`），
-    // 与写方在哪无关。
+    // 三张归宿行同处一处（同一族的三条事实），形状同在本文件的 `FACTS`；写方是本包的
+    // `memory` 端口执行体（`crate::consolidate`）。行是「谁接住这条事实」（`seal` 的
+    // `OrphanFact`），与写方在哪无关。
     //
     // 两行都是 `by: None` 的空转行：有即闭合，永远不会被选中，也不是任何能力的债。
     Decl {

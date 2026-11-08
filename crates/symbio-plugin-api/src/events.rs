@@ -80,9 +80,6 @@ pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 /// memory.encoded — owner `symbio-plugin-memory`，格位 `(Memory, Opened)`
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 
-/// memory.forgotten — owner `symbio-plugin-memory`，格位 `(Memory, Closed)`
-pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
-
 // ============ message ============
 
 /// message.added — owner `symbio-plugin-session`，格位 `(Message, Opened)`
@@ -173,7 +170,6 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)), // conation.expressed ← conation
     EventDecl::new(EVENT_MEMORY_CONSOLIDATED, (Entity::Memory, Verb::Progressed)), // memory.consolidated ← memory
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← memory
-    EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)), // memory.forgotten ← memory
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
     EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
     EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)), // session.config ← loop

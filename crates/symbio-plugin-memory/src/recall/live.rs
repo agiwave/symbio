@@ -6,9 +6,10 @@
 //! | 读者 | 怎么读 | 为什么 |
 //! |---|---|---|
 //! | 检索（本包内） | 直接调 [`live`] | 检索是包内的判据，不必绕一圈声明 |
-//! | 巩固（控制面） | 按名字读声明视图 `memory.live`（`eval` = [`memory_live`]） | 巩固留 `loop`（D-268），它读的是**同一副折叠** |
+//! | 巩固（本包内） | 直接调 [`live`] | 格位是债（D-268 订正），执行体与折叠同在一个 crate |
+//! | `memory` 报表（跨插件） | 按名字读声明视图 `memory.live`（`eval` = [`memory_live`]） | 报表按名字取，不抄口径（D-387 Q3） |
 //!
-//! 两条路走同一个函数：`memory_live` 只是把 [`live`] 的输出序列化成 JSON，没有第二份
+//! 几条路走同一个函数：`memory_live` 只是把 [`live`] 的输出序列化成 JSON，没有第二份
 //! 折叠逻辑。这正是 `D-267`「记忆一个所有者」的兑现——若记忆真是四个 crate，这副折叠
 //! 就得跨 crate，那时只能靠声明视图；现在它是同一个 crate 里的一个函数 + 一张声明。
 //!
@@ -26,10 +27,10 @@
 //! 新近在前（`ts` 降序，平手 `seq` 降序）：检索随后按查询重排（[`super::score`]），
 //! 巩固按「倒序取最旧两条」推进代数。两个读者都要的次序在这里定一次，调用方不再排第二遍。
 
-use symbio_plugin_api::events::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-};
+use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED};
 use symbio_plugin_api::{Entity, Event, PRINCIPAL_USER};
+
+use crate::decl::EVENT_MEMORY_FORGOTTEN;
 
 /// 活集里的一条记忆。
 ///

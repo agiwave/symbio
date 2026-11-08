@@ -199,25 +199,13 @@ impl Convergence {
                 e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq)
             })
             .cloned();
-        // 编码先于巩固（D-268）：终答一落格就踢起一轮驱动，`session.close-turn` 债在
-        // 那一轮里才写 `memory.encoded`。不等到「没有在飞的债」就读快照，巩固看到的
-        // 是半轮——t29 的失败形态正是 4 条经验只到 3 条、合并被跳过，而这一轮之后
-        // 再没有调用方会回来巩固。等到的空闲 = 应答与编码都已落格（t29 / D-359）。
-        //
-        // 两格仍按活集兜底（条数不够就不合并）：轮停在等外部事实（`NeedsHuman`）时
-        // 编码本来就还没发生；安全阀出口（`Exhausted` / `Stalled`）意味着本轮没跑完。
-        // 事件键按 `(user_seq, 源 seq)` 定死，CLI 投影与后台收轮的重复调用按
-        // `Duplicate` 收敛，不会多出一条合并产物。
+        // 终答一落格就踢起一轮驱动，让本轮编码 / 收束贡献都在本轮之内落格（D-359 / t29）。
+        // 之后的记忆巩固**不在这里**：它的格位是债（D-268 订正），由 memory 端口的
+        // 执行体在看见本轮 `memory.encoded` 之后自己还，会话不留调用点。
         if let Some(entry) = drive {
             entry.settled(session_id).await;
         }
         let events = source.range(0);
-        let now = events.iter().map(|e| e.ts).max().unwrap_or(0);
-        if let Err(why) =
-            crate::memory_consolidate::consolidate_turn(source, &events, user_seq, now)
-        {
-            symbio_plugin_api::plugin_warn!("session", "记忆巩固落格失败（{session_id}）：{why}");
-        }
         let Some(user) = user else {
             return Ok(false);
         };

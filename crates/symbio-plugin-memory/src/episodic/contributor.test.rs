@@ -2,15 +2,14 @@
 //! 截断按字符、同文去重读**全量史**（跨标签、含巩固产物、排除式遗忘后可重记）。
 
 use serde_json::json;
-use symbio_plugin_api::events::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-};
+use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED};
 use symbio_plugin_api::{
     Contribution, Contributor, Entity, Event, Seq, SettleFace, Settling, Verb, PRINCIPAL_USER,
 };
 
 use super::super::decl::{ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG};
 use super::EpisodicEncode;
+use crate::decl::EVENT_MEMORY_FORGOTTEN;
 
 fn ev(seq: u64, kind: &str, entity: Entity, verb: Verb, payload: serde_json::Value) -> Event {
     let mut e = Event::pending(format!("seed-{seq}"), kind, entity, verb, PRINCIPAL_USER);

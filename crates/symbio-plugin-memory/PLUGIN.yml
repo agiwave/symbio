@@ -5,10 +5,14 @@ plugin_assembly: sub_agent
 plugin_order: 180
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 `decl::EVENTS`。
-# 三条都被 session / skill / compact 按名字读；`memory.recalled` 无跨插件读方，不进本行。
-shared_events: memory.consolidated, memory.encoded, memory.forgotten
+# 只有 `memory.encoded` 与 `memory.consolidated` 有跨插件生产读者（skill 幂等 / recall；
+# session 的召回可见切片按 `memory.consolidated` 判收放）；`memory.forgotten` 除 owner
+# 外没有生产读者（CS-007），名字留在 `decl.rs` 的本地常量，不进生成物。
+# `memory.recalled` 同样没有跨插件读方，不进本行。
+shared_events: memory.encoded, memory.consolidated
 # 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住 `recall::decl::VIEWS`。
-# `memory.live` = 活集折叠（encoded ∪ consolidated − forgotten）：巩固留控制面
-# （D-268），它按这个名字读同一副折叠——一副折叠两个读者，不是两份实现。
+# `memory.live` = 活集折叠（encoded ∪ consolidated − forgotten）：巩固执行体在包内直调
+# 同一函数（D-268 订正）；声明视图留给 D-387 Q3 的 `memory` 报表按名字读——一副折叠
+# 两个读者，不是两份实现。
 shared_views: memory.live

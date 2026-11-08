@@ -77,8 +77,14 @@
 //!   `memory.recalled` 的收束贡献，外加这条事实的名字与格位。它不重算折叠：读数由
 //!   [`recall`] 产出、由宿主作为值交进来（`Settling.recall`）。
 //! - [`decl`]：本插件交出的全部声明（一个 owner 一次提交，三个能力模块各交几张）。
+//! - [`consolidate`]：**巩固**的写口（D-268 订正）——活集最旧两条的合并与两条
+//!   `memory.forgotten`；它的格位是债，不是事件。
+//! - [`debt`]：巩固债的申报方（`memory-consolidate` 行，身份从活集派生）。
+//! - [`port`]：`memory` 端口的执行体（巩固债在这里被还）。
 
 mod config;
+mod consolidate;
+mod debt;
 mod decl;
 mod episodic;
 // 智能体腿实现与插件同名：memory 插件 = 智能体记忆（`memory`）+ 工作区记忆（`workspace`），
@@ -86,6 +92,7 @@ mod episodic;
 #[allow(clippy::module_inception)]
 mod memory;
 mod plugin;
+mod port;
 mod recall;
 mod semantic;
 mod vdfs;

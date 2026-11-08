@@ -20,9 +20,9 @@
 //! | [`decl`] | 事实形状（`memory.encoded`）与归宿行 |
 //! | [`contributor`] | 收束贡献：两条编码与同文去重 |
 //!
-//! 读侧（召回、巩固、遗忘）仍在 `crates/symbio-plugin-loop`——那是控制面的
-//! 行与过程。检索读侧（名册 #6）自 L2b 起已搬回本 crate 的 [`crate::recall`]；
-//! 巩固留控制面（D-268），它按名字读本包交的声明视图 `memory.live`。
+//! 读侧（召回）自 L2b 起已搬回本 crate 的 [`crate::recall`]；巩固也在本包——
+//! 它的格位是 `memory-consolidate` 债（D-268 订正），申报在 [`crate::debt`]、
+//! 执行体在 [`crate::port`]，合并写口在 [`crate::consolidate`]。
 
 mod contributor;
 pub(crate) mod decl;

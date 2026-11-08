@@ -299,6 +299,13 @@ impl Plugin for MemoryPlugin {
         }
 
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
+            // 巩固的债 + 还债的端口：两行同一次收集交出（D-268 订正）。
+            for row in super::port::memory_port_rows() {
+                visitor.put(row).await;
+            }
+            for row in super::debt::memory_debt_rows() {
+                visitor.put(row).await;
+            }
             // 系统提示词：两段注入（各自含地址与容量口径）
             self.contribute_prompt(&ctx, &visitor).await;
             self.contribute_workspace_prompt(&ctx, &visitor).await;

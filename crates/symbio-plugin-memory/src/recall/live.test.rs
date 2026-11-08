@@ -8,10 +8,10 @@
 //! （后台巩固污染在途视图 / 遗忘变成删除 / 巩固产物召不回 / 别人的记忆漏进来）。
 
 use super::*;
-use symbio_plugin_api::events::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-};
+use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED};
 use symbio_plugin_api::{Entity, Event, EventStore, Seq, Store, Verb, PRINCIPAL_USER};
+
+use crate::decl::EVENT_MEMORY_FORGOTTEN;
 
 fn encode(store: &EventStore, id: &str, content: &str, tag: &str, ts: i64) -> u64 {
     store
