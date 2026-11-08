@@ -43,7 +43,7 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use super::{ActorDecl, Frozen};
+use super::{ActorDecl, Frozen, ENGINE_ONLY_CELLS};
 use crate::event::{EVENT_FAILED, EVENT_RESPONSE, EVENT_SENT};
 use crate::{Event, LatencyTier};
 
@@ -391,6 +391,8 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::DuplicateName`]：两行同名；
 /// - [`Gap::OrphanFact`]：一个被声明的事实没有任何行**直接或经由视图**读到——
 ///   拼错名字的静默形态，也是旧 `Verdict::Unmanned` 那一档的可观测性替代物；
+/// - [`Gap::SinkRowOnPortFact`]：`by = None` 的归宿行守着一个端口事实——端口事实
+///   必须由派发行接住，用归宿行接住就是给「本该派发」开后门（D-397）；
 /// - [`Gap::ExpandKeyMissing`]：`expand` 的元素键字段不在 `owes.key` 里——元素
 ///   之间分不出谁是谁，`until` 无从按键还账；
 /// - [`Gap::UndeclaredExpand`]：`owes` 是事实，但它的 `expand` 列表字段没有写进
@@ -470,6 +472,14 @@ pub enum Gap {
         fact: &'static str,
     },
     OrphanFact {
+        fact: &'static str,
+    },
+    /// `by = None` 的归宿行守着一个**端口事实**（`FactDecl.port` 非空），而本表
+    /// 登记了端口（会落 `before` ⇒ 产生债务）。端口事实是派发契约的输入，它的归宿
+    /// 必须是 `by = Some` 的派发行；用归宿行接住 = 把「本该派发」换成「没人派发但
+    /// 封闭性绿」（D-397）。
+    SinkRowOnPortFact {
+        row: &'static str,
         fact: &'static str,
     },
     ExpandKeyMissing {
@@ -655,6 +665,44 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
             .any(|p| p.key == decl.owes.key)
         {
             gaps.push(Gap::KeyMismatch { row: decl.name });
+        }
+        // 归宿行（`by = None`）**只许守不产生债务的格**（D-397）：
+        //
+        // - 端口事实里只有**开启侧**（非 `ENGINE_ONLY_CELLS`，即 `request` 那一格）
+        //   是派发契约的输入；`sent` / `response` / `failed` / `retry` 由引擎写，
+        //   看守它们是合法的「观察行」；
+        // - 开启侧还要真的钉到一个**本表登记过的端口**（`PortDecl` 会落 `before`
+        //   ⇒ 产生债务）才构成「本该派发」；未钉端口时只要表里有端口就可能命中。
+        //
+        // 命中即红：用 `by = None` 接住它 = 把「本该派发」换成「没人派发但封闭性绿」。
+        if decl.by.is_none() {
+            for fact in fact_names_of(decl.owes.source, frozen) {
+                let Some(f) = frozen.fact(fact) else { continue };
+                let Some(port_field) = f.port else { continue };
+                if ENGINE_ONLY_CELLS.contains(&fact) {
+                    continue;
+                }
+                let bound_port = decl
+                    .owes
+                    .eq
+                    .iter()
+                    .find(|(name, _)| *name == port_field)
+                    .and_then(|(_, lit)| match lit {
+                        Lit::Str(port) => Some(*port),
+                        _ => None,
+                    });
+                let produces_debt = match bound_port {
+                    Some(port) => frozen.ports().iter().any(|p| p.port == port),
+                    None => !frozen.ports().is_empty(),
+                };
+                if produces_debt {
+                    gaps.push(Gap::SinkRowOnPortFact {
+                        row: decl.name,
+                        fact,
+                    });
+                    break;
+                }
+            }
         }
         if let Some((list, elem_key)) = decl.expand {
             if !decl.owes.key.contains(&elem_key) {

@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 use super::super::{ActorDecl, Builder, FactDecl, ViewDecl};
 use super::*;
+use crate::event::{EVENT_FAILED, EVENT_RESPONSE, EVENT_SENT};
 use crate::{Entity, Event, LatencyTier, Seq, Verb};
 use std::sync::Arc;
 
@@ -628,6 +629,108 @@ fn a_complete_row_set_has_no_gaps() {
         &[],
     )];
     assert!(seal_gaps(&rows, &[ACT]).is_empty());
+}
+
+/// 归宿行的边界（D-397）：`by = None` 只许守**不产生债务的格**。
+///
+/// 判据读的是事实自己的 `port`：端口事实是派发契约的输入，归宿必须是派发行。
+/// 这条与 `OrphanFact` 互补——前者说「有人接住」，本条说「接住的方式不能是
+/// 归宿行」。
+#[test]
+fn a_sink_row_may_not_guard_a_port_fact() {
+    // 登记了端口 ⇒ 端口事实会产生债务；用归宿行接住 `req` ⇒ 红。
+    let mut b = port_world(&[]);
+    b.row(home("req"));
+    let gaps = b.seal(&[]).expect_err("端口事实的归宿行必须红");
+    assert!(
+        gaps.contains(&Gap::SinkRowOnPortFact {
+            row: "req",
+            fact: "req"
+        }),
+        "{gaps:?}"
+    );
+}
+
+/// 退化用例：把一条**本该派发**的行改成 `by = None` ⇒ 红（D-397）。
+#[test]
+fn a_dispatch_row_turned_into_a_sink_row_is_red() {
+    let dispatch = |by| {
+        row(
+            "req.dispatch",
+            10,
+            by,
+            Pattern {
+                source: "req",
+                key: &[],
+                eq: &[("port", Lit::Str("p"))],
+            },
+            &[
+                Pattern {
+                    source: EVENT_SENT,
+                    key: &[],
+                    eq: &[("port", Lit::Str("p"))],
+                },
+                Pattern {
+                    source: EVENT_RESPONSE,
+                    key: &[],
+                    eq: &[("port", Lit::Str("p"))],
+                },
+                Pattern {
+                    source: EVENT_FAILED,
+                    key: &[],
+                    eq: &[("port", Lit::Str("p"))],
+                },
+            ],
+            &[],
+        )
+    };
+    let mut b = port_world(&[REQ_ACT]);
+    b.row(dispatch(Some("req_act")));
+    assert!(b.seal(&[]).is_ok(), "先证明这一行本来是可派发的合法行");
+
+    let mut b = port_world(&[REQ_ACT]);
+    b.row(dispatch(None));
+    let gaps = b.seal(&[]).expect_err("本该派发的行改成 by=None 必须红");
+    assert!(
+        gaps.contains(&Gap::SinkRowOnPortFact {
+            row: "req.dispatch",
+            fact: "req"
+        }),
+        "{gaps:?}"
+    );
+}
+
+/// 写 `req` 的执行体：只为让「派发行」那一支有生产者（D-296），与本条判据无关。
+const REQ_ACT: ActorDecl = ActorDecl {
+    name: "req_act",
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &["req", "g"],
+};
+
+/// 用例端口名：登记的 `PortDecl` 让它成为一个会 `sent` 的派发端口。
+fn port_world(actors: &[ActorDecl]) -> Builder {
+    let mut b = declare(actors);
+    for name in ["req", EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED] {
+        b.fact(FactDecl {
+            name,
+            port: Some("port"),
+            key: &[],
+            expand: &[],
+            fields: &["port"],
+        });
+    }
+    b.port(PortDecl {
+        port: "p",
+        before: EVENT_SENT,
+        lease_ms: 1,
+        max_attempts: 1,
+        concurrency: 1,
+    });
+    for name in ["f", "g", "h"] {
+        b.row(home(name));
+    }
+    b
 }
 
 // ── 端口声明─────────────────────────────────────────────────────
