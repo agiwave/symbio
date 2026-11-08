@@ -36,12 +36,14 @@
 //!
 //! | 文件 | 职责 |
 //! |---|---|
+//! | [`decl`] | 名册 #48「节奏与时机」的最小能力面：`heartbeat.cadence` 的名字、格位、载荷字段与归宿行（暂无写方） |
 //! | [`plugin`] | 插件本体：能力行贡献（Tool + Option 两行）、常驻循环的启动与停机 |
 //! | [`scheduler`] | 扫描循环：tick、错峰、空闲基线、触发一次写入 |
 //! | [`setting`] | `Session.metadata.heartbeat` 那块数据的形状（本片写、会话侧透传） |
 //! | [`tool`] | 模型侧设置入口（`heartbeat` 工具：set / get / cancel） |
 //! | [`option`] | 会话选项栏那一行的声明（字段 + 子表单定义） |
 
+mod decl;
 mod option;
 mod plugin;
 mod scheduler;

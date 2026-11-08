@@ -1,7 +1,7 @@
 # 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
 plugin_id: conation
 plugin_comment: 目标自生成：把「欲」的表达折成意图视图（单片读数 + 跨会话合并）
-# 声明面能力包：没有工具、没有路由、没有行为——它只交一条事实、一条视图与一条归宿行。
+# 声明面能力包：没有工具、没有路由、没有行为——它只交事实、视图与归宿行。
 # 实例仍然要有（与 `task` 同一条理由）：装配清单按插件目录挂载，停用插件 ⇒ 实例不构造。
 plugin_assembly: sub_agent
 plugin_order: 57
