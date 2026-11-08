@@ -1,14 +1,13 @@
 //! 世界事实的词汇持有（**临时**）。
 //!
-//! 旧引擎删除后，这些承诺 / 授权 / 控制面事实暂时没有写方插件；名字与格位先由本插件
-//! 继续登记，避免共享词汇表断裂。它们**不是环的机制**：环不读、不写、不按它们选债。
+//! 旧引擎删除后，这些控制面事实暂时没有写方插件；名字与格位先由本插件继续登记，
+//! 避免共享词汇表断裂。它们**不是环的机制**：环不读、不写、不按它们选债。
 //!
 //! 所有权按接入顺序逐条移交，**已完成**：会话簿记接管 `chat.*` / `user.message`
 //! 与 `session.config` / `turn.branch` / `turn.dispatch`（`session::declarations`），
-//! 记忆接管 `memory.*`（`memory::decl`）。仍在途：`authz.granted` → 工具，
-//! `commitment.*` → 代理。`authz.denied` 已按写方拆成两个私有名（D-390）、
-//! `task.controlled` 已私有化到工具插件（D-389），两者都不再需要共享登记。
-//! 全部移交完成后删除本模块与 `PLUGIN.yml` 的 `shared_events`。
+//! 记忆接管 `memory.*`（`memory::decl`），工具接管 `authz.granted` / `authz.denied`
+//! / `task.controlled`（`tool::declarations`），代理接管 `commitment.*`
+//! （`agent::declarations`）。本模块如今只剩 `plugin.row.asked` 一条机制私有名。
 
 use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, Verb};
@@ -18,14 +17,9 @@ use symbio_plugin_api::EVENT_REQUEST;
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-loop";
 
-/// 旧引擎留下的世界词汇。**不参与选债 / 派发 / 配对**。
+/// 旧引擎留下的机制私有名。**不参与选债 / 派发 / 配对**。
 #[rustfmt::skip]
 pub(crate) const EVENTS: &[EventDecl] = &[
-    EventDecl::new("authz.granted", (Entity::Scope, Verb::Asserted)),
-    EventDecl::new("commitment.asserted", (Entity::Commitment, Verb::Asserted)),
-    EventDecl::new("commitment.broken", (Entity::Commitment, Verb::Closed)),
-    EventDecl::new("commitment.opened", (Entity::Commitment, Verb::Opened)),
-    EventDecl::new("commitment.released", (Entity::Commitment, Verb::Closed)),
     // 机制事实（D-338）：`plugin_row` 执行体在 Ask 后落的「这一行在等」。
     // 行名与提示在载荷里；种类只有一个名字，否则进不了声明表。
     EventDecl::new("plugin.row.asked", (Entity::Scope, Verb::Asserted)),

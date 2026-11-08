@@ -254,8 +254,9 @@ pub(crate) const FACTS: &[FactDecl] = &[
 /// 折叠（`transcript` / `rebuild` / `prompt_fidelity` / `branch` / `mutations` /
 /// `slo` / `commitment_records` …）住在 core，两个插件都调它，所以拼写只能来自
 /// **清单生成物**——本插件是 `message.*`、`session.consolidated` / `turn.branch_selected`
-/// 与 `chat.*` / `user.message` 的 owner；`authz.granted` 与 `commitment.*` 的 owner 仍是
-/// `crates/symbio-plugin-loop`（E-009 禁兄弟插件依赖，故不引用 loop 的 `vocab`）；任务族
+/// 与 `chat.*` / `user.message` 的 owner；`authz.granted` 的 owner 是
+/// `crates/symbio-plugin-tool`、`commitment.*` 的 owner 是 `crates/symbio-plugin-agent`
+/// （E-009 禁兄弟插件依赖，故只引用清单生成物）；任务族
 /// 五条已随能力迁到 `crates/symbio-plugin-task`——拼写同样只从清单生成物取。
 ///
 /// 发言拒因**不占字段**：那两条事实已按写方拆成各 owner 的私有名（D-390），

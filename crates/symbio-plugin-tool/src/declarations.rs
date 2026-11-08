@@ -29,11 +29,14 @@ pub(crate) const EVENT_TASK_CONTROLLED: &str = "task.controlled";
 
 /// 本插件写的事实格位（含两条私有名）。
 ///
-/// `tool.calls.done` 是工具调用收束，session 的进度面按名字读；
+/// `authz.granted` 的写方在本插件（`port.rs` 的授权草稿），会话按名字读回批准结论；
+/// 它登记在本插件 `PLUGIN.yml` 的 `shared_events` 里，消费方 import 生成常量
+/// （D-364）。`tool.calls.done` 是工具调用收束，session 的进度面按名字读；
 /// `artifact.added` 是本次调用的产物格，被 notes / model / 转写投影多处按名字读。
-/// 两条都登记在本插件 `PLUGIN.yml` 的 `shared_events` 里，消费方 import 生成常量
-/// （D-364）。`authz.denied` / `task.controlled` 是单消费方私有名，只在本表登记。
+/// `authz.denied` / `task.controlled` 是单消费方私有名，只在本表登记。
 pub(crate) const EVENTS: &[EventDecl] = &[
+    // 授权结论：owner 随写方移交到本插件（D-389 批二）。格位照旧。
+    EventDecl::new("authz.granted", (Entity::Scope, Verb::Asserted)),
     EventDecl::new(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted)),
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
     EventDecl::host("tool.calls.done", (Entity::Scope, Verb::Asserted)),

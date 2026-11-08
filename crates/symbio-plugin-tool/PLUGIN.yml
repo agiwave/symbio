@@ -5,6 +5,8 @@ plugin_assembly: sub_agent
 plugin_order: 95
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住 `declarations::EVENTS`。
+# `authz.granted` 的写方是本插件的授权草稿，会话按名字读回批准结论（D-389 批二：
+# owner 从环移交到这里）。
 # `artifact.added` 是本次调用的产物格，被 notes / model / 转写投影按名字读；
 # `tool.calls.done` 是工具调用收束，session 的进度面按名字读。
-shared_events: artifact.added, tool.calls.done
+shared_events: artifact.added, authz.granted, tool.calls.done

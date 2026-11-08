@@ -8,7 +8,7 @@
 //! | 模块 | 内容 | 谁消费 |
 //! |---|---|---|
 //! | `spec` | 本机部署表的读法——模式派生（`pattern_for_principal`）与能力位判定（`actor_can_*`） | 全部能力包 |
-//! | `commitment` | 「谁向谁承诺了什么 / 是否履行」落成普通事件（`CommitmentKeeper`） | 写侧 `loop` · 读侧 `session` |
+//! | `commitment` | 「谁向谁承诺了什么 / 是否履行」落成普通事件（`CommitmentKeeper`） | 写侧 `agent` · 读侧 `session` |
 //! | `control` | 淘汰裁决（`EliminationDecider`）：声誉投影低于阈值 ⇒ 收回 `assign.work` | 写侧 `loop` 轮末 · 读侧 `session` 工具层 |
 //! | `skill` | `SKILL_TAG`：`memory.encoded` 载荷里的技能标签（DE-041） | 写侧技能能力包 · 读侧 `session` 路由 |
 //!

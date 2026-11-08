@@ -31,7 +31,7 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
 // ============ authz ============
 
-/// authz.granted — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
+/// authz.granted — owner `symbio-plugin-tool`，格位 `(Scope, Asserted)`
 pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 
 // ============ chat ============
@@ -52,16 +52,16 @@ pub const EVENT_CLASSIFY_ESCALATE: &str = "classify.escalate";
 
 // ============ commitment ============
 
-/// commitment.asserted — owner `symbio-plugin-loop`，格位 `(Commitment, Asserted)`
+/// commitment.asserted — owner `symbio-plugin-agent`，格位 `(Commitment, Asserted)`
 pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
-/// commitment.broken — owner `symbio-plugin-loop`，格位 `(Commitment, Closed)`
+/// commitment.broken — owner `symbio-plugin-agent`，格位 `(Commitment, Closed)`
 pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 
-/// commitment.opened — owner `symbio-plugin-loop`，格位 `(Commitment, Opened)`
+/// commitment.opened — owner `symbio-plugin-agent`，格位 `(Commitment, Opened)`
 pub const EVENT_COMMITMENT_OPENED: &str = "commitment.opened";
 
-/// commitment.released — owner `symbio-plugin-loop`，格位 `(Commitment, Closed)`
+/// commitment.released — owner `symbio-plugin-agent`，格位 `(Commitment, Closed)`
 pub const EVENT_COMMITMENT_RELEASED: &str = "commitment.released";
 
 // ============ conation ============
@@ -148,15 +148,15 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 #[rustfmt::skip]
 pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::host(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← tool
-    EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)), // authz.granted ← loop
+    EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)), // authz.granted ← tool
     EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Scope, Verb::Closed)), // chat.assistant.fallback ← session
     EventDecl::host_with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← session
     EventDecl::new(EVENT_CLASSIFY_ANSWERED, (Entity::Verdict, Verb::Asserted)), // classify.answered ← classify
     EventDecl::new(EVENT_CLASSIFY_ESCALATE, (Entity::Verdict, Verb::Asserted)), // classify.escalate ← classify
-    EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← loop
-    EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← loop
-    EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← loop
-    EventDecl::new(EVENT_COMMITMENT_RELEASED, (Entity::Commitment, Verb::Closed)), // commitment.released ← loop
+    EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← agent
+    EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← agent
+    EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← agent
+    EventDecl::new(EVENT_COMMITMENT_RELEASED, (Entity::Commitment, Verb::Closed)), // commitment.released ← agent
     EventDecl::new(EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)), // conation.expressed ← conation
     EventDecl::new(EVENT_MEMORY_CONSOLIDATED, (Entity::Memory, Verb::Progressed)), // memory.consolidated ← memory
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← memory

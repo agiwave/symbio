@@ -3,3 +3,8 @@ plugin_id: agent
 plugin_comment: 智能体（含子 Agent —— 分形）
 plugin_assembly: sub_agent
 plugin_order: 140
+# 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
+# crates/symbio-plugin-api/src/events.rs）。格位住 `declarations::EVENTS`。
+# 写方是本插件的委派行为（`host::behavior`），会话 / 声誉按名字读回承诺列
+# （D-389 批二：owner 从环移交到这里）。
+shared_events: commitment.asserted, commitment.broken, commitment.opened, commitment.released

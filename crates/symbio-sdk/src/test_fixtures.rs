@@ -11,6 +11,10 @@
 //! 所以夹具的拼写由生成器从**同一批 owner 声明**投影一份，只在 `#[cfg(test)]` /
 //! `feature = "test-fixtures"` 下存在。**测试也是调用方**，它交的拼写就是它要断言的语义。
 //!
+//! **本产物只供 `#[cfg(test)]` / `feature = "test-fixtures"` 使用，不进生产构建。**
+//! 生产拼写只有一个出口——`symbio_plugin_api::events`；若把本生成器改成「顺带产出生产
+//! 常量」，它就成了第二词汇面，与 D-392 的单一源前提直接冲突。
+//!
 //! 删掉本模块不影响任何生产代码；它也不参与 CS-005 / CS-006 / CS-007 的判定（那三条
 //! 判的是内核名字表与清单的消费方分布）。
 //!
@@ -77,10 +81,10 @@ pub const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)), // message.edited ← session
     EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
     EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
-    EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← loop
-    EventDecl::new(EVENT_COMMITMENT_RELEASED, (Entity::Commitment, Verb::Closed)), // commitment.released ← loop
-    EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← loop
-    EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← loop
+    EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← agent
+    EventDecl::new(EVENT_COMMITMENT_RELEASED, (Entity::Commitment, Verb::Closed)), // commitment.released ← agent
+    EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← agent
+    EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← agent
     EventDecl::new(EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)), // verdict.asserted ← reputation
 ];
 
