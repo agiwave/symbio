@@ -16,7 +16,7 @@ use symbio_plugin_api::{Cadence, ContextProvider, ContextRequest, ContextSection
 /// owner 决定拼接顺序（按 `owner` 字典序）。
 const OWNER: &str = "vdfs";
 
-/// 段身份（`ChatNode.meta.kind`）。
+/// 段身份（裁剪读数里的 `slot`）。
 pub(crate) const SLOT: &str = "vdfs_path";
 
 /// 段优先级：路径语义是**必须一直看得见**的环境事实，排在参考类段之上、宿主三类段之下。

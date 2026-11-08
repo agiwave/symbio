@@ -208,23 +208,8 @@ session:
  取摘要、`compact-write` 落 `session.consolidated`），触发读 provider 收束载荷的
  70% 水位。会话侧没有 `auto_compress_process`；失败后的跨轮抑制与重试住在
  `symbio-plugin-compact`（前缀指纹抑制 + 失败产物派生 `retry_compaction`）。
-* **Rust 实现策略**：
- * 唯一入口为 [../loop/context/view.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 `build_request_sections`——收的是「段身份 + 正文」的数组，**不决定有哪几段**；由 [../loop/chat_loop/inputs.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 `prepare_request_sections` 调用：
-
- ```rust
- pub fn build_request_sections(sections: &[(&'static str, String)]) -> Vec<ChatNode> {
- sections
- .iter()
- .map(|(slot, text)| ChatNode {
- meta: Some(section_meta(slot)), // {"kind": slot} —— 拼写只有这一处
- content: Some(MessageContent::Text(text.clone())),
- ..Default::default()
- })
- .collect
- }
- ```
-
- * 调用点参数（[../loop/chat_loop/inputs.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表")）：发言级段取 `symbio_plugin_api::context_sections`（`run_recall` 里经 `context_sections(&request, Cadence::Utterance)` 收集一次，`request_round == 0` 口径；**段数由 provider 决定**，宿主不假设几段）；请求级段在工具收集完成后经 `context_sections(&request, Cadence::Request)` 收集，两批按「发言级段在前、请求级段在后」拼成一个数组。
+* **Rust 实现形态**：模型端口执行体（`crates/symbio-plugin-model/src/port.rs::execute`）按 `Cadence::Utterance`（首幕一次）/ `Cadence::Request`（每次请求）收段，再拼成 `role: system` 的 `PromptMessage` 放在历史之前。**段数由 provider 决定**，宿主不假设几段；段身份 `slot` 只进裁剪读数，不再写进节点 `meta`——请求体是 `PromptMessage`，没有 `meta` 字段。
+* **段预算**：同一执行体在拼段前算余量（`effective_context_tokens` 减去历史 + system prompt + 工具定义），`fit_sections` 按段自报的 `prio` 裁剪；真的裁了才在日志里出声（`[section-budget]`）。预算与收束轮水位共用同一个上限。
 
 ---
 

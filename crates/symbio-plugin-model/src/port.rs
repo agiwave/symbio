@@ -458,6 +458,56 @@ fn context_sections(
     out
 }
 
+/// 单条请求消息的固定结构开销（角色 / 分隔符等）。
+const PER_MESSAGE_OVERHEAD: usize = 8;
+
+/// 估算本轮**已占用**的 token：历史消息 + 请求级固定开销（system prompt + 工具定义）。
+///
+/// 与段成本的计量共用 `default_tokenizer()`——预算与成本必须同一把尺（D-243）；
+/// 各算各的就会出现「水位说满了、段却以为自己还有空间」。
+fn estimate_prompt_tokens(
+    system_prompt: &str,
+    tools: &[CapabilityMeta],
+    messages: &[PromptMessage],
+) -> usize {
+    use symbio_plugin_api::text::{default_tokenizer, Tokenizer};
+
+    let tok = default_tokenizer();
+    let mut total = tok.count(system_prompt);
+    for cap in tools {
+        // 工具定义实际发出去的是名字 + 描述 + 参数 Schema（与 adapter 的线格式同源）。
+        let schema = cap.input_schema.to_string();
+        total += tok.count(&format!("{} {} {}", cap.name, cap.description, schema));
+    }
+    for message in messages {
+        total += PER_MESSAGE_OVERHEAD;
+        if !message.text.is_empty() {
+            total += tok.count(&message.text);
+        }
+        if let Some(tool) = &message.tool {
+            total += tok.count(tool);
+        }
+        for call in message.tool_calls.iter().flatten() {
+            total += tok.count(&call.name);
+            total += tok.count(&call.arguments.to_string());
+        }
+    }
+    total
+}
+
+/// 段预算：上下文上限减去**已经被占用**的那一体（历史 + system prompt + 工具）。
+///
+/// 上限取本 provider 的**有效上下文**（`effective_context_tokens`，线上限与用户设置取小），
+/// 与收束轮水位是同一个数——段裁剪和水位不许各认一个上限。
+fn section_budget(
+    system_prompt: &str,
+    tools: &[CapabilityMeta],
+    messages: &[PromptMessage],
+    context_limit: usize,
+) -> usize {
+    context_limit.saturating_sub(estimate_prompt_tokens(system_prompt, tools, messages))
+}
+
 /// 一次模型往返的执行体。
 struct ModelExecutor {
     active: Arc<dyn ModelProvider>,
@@ -503,7 +553,32 @@ impl PortExecutor for ModelExecutor {
         // 请求构造归执行体（D-305 裁决一 / D-306 裁决二）：环交进的是**值**
         // （`PromptMessage`），线格式在这里收口。
         // 段注入（D-220 / D-252）：发言级段与请求级段都拼在**历史之前**、`role: system`。
+        //
+        // 段预算（D-243）：预算 = **配置上限** − 历史与固定开销。这里读 `max_context_tokens`
+        // 而不是 `effective_context_tokens`：后者会发起上下文探测（四个并发 HTTP），
+        // 每轮请求前多付一次出口往返，而预算只需要一个上界——旧环的 `context_limit`
+        // 同样是配置值。服务端上报的较小上限由收束轮水位那一处 `effective` 承担读数。
+        let context_limit = provider.max_context_tokens() as usize;
         let context = context_sections(&events, &tools, &request.principal, round);
+        let budget = section_budget(&system_prompt, &tools, &messages, context_limit);
+        let (context, fit) = {
+            use symbio_plugin_api::text::{default_tokenizer, Tokenizer};
+            let tok = default_tokenizer();
+            symbio_plugin_api::context::fit_sections(context, budget, |text| tok.count(text))
+        };
+        if fit.trimmed() {
+            // 只在真的裁了才出声：各段皆空是常态，逐轮打印会把日志淹掉。
+            symbio_plugin_api::plugin_info!(
+                "model",
+                "[section-budget] 预算 {} token、需求 {}、保留 {}；裁掉 {} 段（{:?}）；超界 {}",
+                fit.budget,
+                fit.demanded,
+                fit.kept_cost,
+                fit.dropped.len(),
+                fit.dropped,
+                fit.over()
+            );
+        }
         let mut prompt = Vec::with_capacity(context.len() + messages.len());
         for section in context {
             prompt.push(PromptMessage {

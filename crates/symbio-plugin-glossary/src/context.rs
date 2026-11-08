@@ -15,7 +15,7 @@ use super::decl::{GLOSSARY_DEFINED, MAX_DEFINITION_CHARS, MAX_TERM_CHARS};
 /// 本段最多回显几条术语：上下文是每轮都付的成本。
 const MAX_TERMS: usize = 20;
 
-/// 段身份（`ChatNode.meta.kind`）。
+/// 段身份（裁剪读数里的 `slot`）。
 pub(crate) const SLOT: &str = "glossary_context";
 
 /// 段优先级：术语表是**参考**，排在三类宿主段之后、便签之前。

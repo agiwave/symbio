@@ -82,3 +82,81 @@ fn empty_slot_is_not_unrestricted_when_an_agent_is_bound() {
         );
     }
 }
+
+// ==================== 装配期端口判重（接线判据） ====================
+
+/// 只在自己的 `traverse` 里注册两个**同端口**提供者的父插件。
+struct DuplicatePortParent;
+
+struct FixturePort {
+    id: &'static str,
+}
+
+impl symbio_plugin_api::port::PortProvider for FixturePort {
+    fn ports(&self) -> &'static [&'static str] {
+        &["fixture"]
+    }
+
+    fn provider_id(&self) -> &str {
+        self.id
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for DuplicatePortParent {
+    fn meta(&self) -> symbio_kernel::plugin::PluginMeta {
+        symbio_kernel::plugin::PluginMeta::new("duplicate-port", "duplicate-port")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
+        Err(PluginError::NotFound("duplicate-port".to_string()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
+        if let Some(visitor) = ctx.get(symbio_sdk::capability::CAPABILITY_VISITOR) {
+            for id in ["a", "b"] {
+                let provider: Arc<dyn symbio_plugin_api::port::PortProvider> =
+                    Arc::new(FixturePort { id });
+                for row in symbio_plugin_api::port::port_rows(&provider) {
+                    visitor.put(row).await;
+                }
+            }
+        }
+        Ok(symbio_plugin_api::PluginPayload::new(&Vec::<
+            serde_json::Value,
+        >::new()))
+    }
+}
+
+/// 收集结束即判重，且错误经**调用方 ctx** 可见（`capability_take_errors` 的同一个桶）。
+///
+/// 这条钉的是接线而不是判重规则本身（规则由 `plugin-api` 的 `port.test.rs` 守）：
+/// 端口行只在子 ctx 上，检查若不接在收集管线里，两个提供者同端口的装配错误会永远
+/// 无人读——判重退化为「照常跑」。
+#[tokio::test]
+async fn duplicate_port_providers_are_reported_through_the_collection_ctx() {
+    let ctx: Arc<dyn PluginInvokeRequest> =
+        Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    let parent: Arc<dyn Plugin> = Arc::new(DuplicatePortParent);
+    collect_capabilities(Some(&parent), &ctx, None).await;
+
+    // 经 plugin-api 的转出口读（与生产 turn 同一条出口；session 的 sdk 用法是冻结集）。
+    let errors = symbio_plugin_api::capability_take_errors(&ctx).await;
+    assert_eq!(
+        errors.len(),
+        1,
+        "两个同端口提供者必须落一条判重错误：{errors:?}"
+    );
+    assert!(
+        errors[0].message.contains("fixture"),
+        "错误要指名端口：{}",
+        errors[0].message
+    );
+}

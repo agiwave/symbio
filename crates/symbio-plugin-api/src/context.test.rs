@@ -184,15 +184,6 @@ fn known_slots_are_unique_and_snake_case() {
     }
 }
 
-/// 段载荷的拼写只有一处：`section_meta` 与 `slots` 同源。
-#[test]
-fn section_meta_carries_the_slot_verbatim() {
-    assert_eq!(
-        section_meta(slots::READYSET),
-        serde_json::json!({ "kind": "readyset" })
-    );
-}
-
 /// 成本由宿主计量回填：provider 构造时是 0，`fit_sections` 用注入的尺写一次。
 #[test]
 fn the_host_measures_the_cost() {

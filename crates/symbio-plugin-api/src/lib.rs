@@ -66,9 +66,9 @@ pub mod views;
 pub mod vocab;
 
 pub use context::{
-    fit_sections, providers as context_providers, section_meta, sections as context_sections,
-    Cadence, ContextProvider, ContextRequest, ContextSection, DelegateVerdict, LiveInputs,
-    RecallFacts, RecallLine, SectionFit,
+    fit_sections, providers as context_providers, sections as context_sections, Cadence,
+    ContextProvider, ContextRequest, ContextSection, DelegateVerdict, LiveInputs, RecallFacts,
+    RecallLine, SectionFit,
 };
 pub use declarations::{
     assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations, vocab,

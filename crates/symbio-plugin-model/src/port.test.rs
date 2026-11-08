@@ -206,6 +206,57 @@ async fn a_final_answer_carries_the_measured_context_watermark() {
     );
 }
 
+/// 段预算真的生效：余量只够一段时，低优先级段被裁、高优先级留下（D-243）。
+#[test]
+fn section_budget_trims_low_priority_sections() {
+    use symbio_plugin_api::context::slots;
+    use symbio_plugin_api::text::{default_tokenizer, Tokenizer};
+
+    let high = "a".repeat(100);
+    let low = "b".repeat(200);
+    let tok = default_tokenizer();
+    // 预算恰好等于高优先级段的成本：它留下，低优先级那段放不下。
+    let budget = tok.count(&high);
+    let sections = vec![
+        ContextSection::new(slots::READYSET, low, 1),
+        ContextSection::new(slots::RECALL, high, 10),
+    ];
+    let (kept, fit) =
+        symbio_plugin_api::context::fit_sections(sections, budget, |text| tok.count(text));
+
+    assert!(fit.trimmed(), "余量不足时必须发生裁剪");
+    assert_eq!(kept.len(), 1, "只留得下一段");
+    assert_eq!(kept[0].slot, slots::RECALL, "留下的是高优先级段");
+    assert!(fit.kept_cost <= fit.budget, "留下段的成本不得超过预算");
+}
+
+/// 预算 = 上限 − 历史与固定开销：历史 / 工具定义占得越多，留给段的余量越小。
+#[test]
+fn section_budget_subtracts_history_and_overhead() {
+    let history = vec![PromptMessage {
+        role: "user".into(),
+        text: "x".repeat(400),
+        ..Default::default()
+    }];
+    let tools = vec![CapabilityMeta {
+        name: "echo".into(),
+        description: "回显".into(),
+        input_schema: json!({"type": "object"}),
+        ..Default::default()
+    }];
+
+    let empty = section_budget("", &[], &[], 4096);
+    let with_history = section_budget("", &[], &history, 4096);
+    let with_overhead = section_budget("sys", &tools, &history, 4096);
+
+    assert!(empty > 4000, "没有历史与工具时几乎全部余量给段：{empty}");
+    assert!(with_history < empty, "历史消息必须从预算里扣");
+    assert!(
+        with_overhead < with_history,
+        "system prompt 与工具定义必须从预算里扣"
+    );
+}
+
 /// 没测到输入用量 ⇒ 载荷里**没有** `context`（缺数不出行，不写 0）。
 #[tokio::test]
 async fn a_final_answer_without_measured_usage_omits_the_watermark() {

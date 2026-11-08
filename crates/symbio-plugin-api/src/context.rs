@@ -52,18 +52,17 @@
 //! 不按插件名 / 段名特判。放不下的段在这里被裁掉并计入 [`SectionFit`]，宿主据此出声
 //! （裁了谁、超了多少）；「谁更重要」仍是声明方的判断，本模块不做第二遍。
 
-use serde_json::Value;
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::event::Event;
 use symbio_sdk::turn::facts::WorkerProgress;
 
-/// 已知的**段身份**（`meta.kind` 的取值）——宿主词汇，与 [`crate::behaviors`] 同层。
+/// 已知的**段身份**（[`ContextSection::slot`] 的取值）——宿主词汇，与 [`crate::behaviors`] 同层。
 ///
 /// 段身份是 `&'static str` 而不是枚举：provider 来自任意插件，宿主不可能预先枚举完。
 /// 这与 D-210 对行为名的裁决同形——**已知名字登记在这里，新名字由声明方自带**。
 ///
 /// 与行为名不同的是：未知的段名**不会静默失效**。拼接方按视图次序取全部段，没有
-/// 「按名字查一张表」的第二处拼写，所以拼错只影响它自己那一段的 `meta.kind` 标记。
+/// 「按名字查一张表」的第二处拼写，所以拼错只影响它自己那一段的裁剪读数。
 pub mod slots {
     /// 长期记忆（背景事实，置顶）。
     pub const RECALL: &str = "recall_context";
@@ -341,13 +340,6 @@ pub fn sections(req: &ContextRequest<'_>, cadence: Cadence) -> Vec<ContextSectio
         out.extend(provider.provide(req));
     }
     out
-}
-
-/// 段的载荷形状：`meta.kind` 由 [`ContextSection::slot`] 单点给出。
-///
-/// 放在这里而不是让各拼接点自己 `json!`：拼写只有一处，且与 [`slots`] 同源。
-pub fn section_meta(slot: &'static str) -> Value {
-    serde_json::json!({ "kind": slot })
 }
 
 #[cfg(test)]

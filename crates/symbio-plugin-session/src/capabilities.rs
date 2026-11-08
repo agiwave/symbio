@@ -106,6 +106,13 @@ pub async fn collect_capabilities(
         );
     }
 
+    // 装配期端口判重（D-298 / `DE-047` I-6.7）：端口行是在上面这次 traverse 里由各
+    // 提供者插件 `put` 的，表只在**子 ctx** 上可见。`capability_port_check` 的时点契约
+    // 是「收集结束、编排方读错误桶之前」——这里正是那一点：检查在回写错误桶**之前**跑，
+    // 判重错误与收集期错误同桶同路。不接这一句，两个提供者同端口的装配错误就永远
+    // 留在子 ctx 的桶里无人读，判重退化为「照常跑」。
+    symbio_plugin_api::port::capability_port_check(&traverse_ctx).await;
+
     // 把子 ctx 上收集到的错误回写到调用方的 ctx，供编排方判定。
     // （`fork()` 会拷贝 extensions 快照，子 ctx 后续的写入不会自动回流）
     if let Some(bucket) = traverse_ctx.get(CAPABILITY_ERRORS) {
