@@ -1,7 +1,7 @@
-//! `text` 模块的单元测试。
+//! `text::tokenizer` 模块的单元测试。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
-//! `text.rs` 只保留生产代码，测试全部放本文件。
+//! `tokenizer.rs` 只保留生产代码，测试全部放本文件。
 //!
 //! 后半部分（`split_*` / `truncate_*`）测的是同文件里的头尾切分机制。
 

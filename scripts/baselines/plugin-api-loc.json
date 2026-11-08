@@ -4,9 +4,9 @@
   "files": [
     { "path": "effects.rs", "lines": 562, "adr": "D-399" },
     { "path": "port.rs", "lines": 589, "adr": "D-399" },
-    { "path": "text.rs", "lines": 314, "adr": "D-399" },
+    { "path": "text.rs", "lines": 6, "adr": "D-404" },
     { "path": "context.rs", "lines": 347, "adr": "D-399" },
     { "path": "reports.rs", "lines": 344, "adr": "D-399" }
   ],
-  "total": { "lines": 4913, "adr": "D-399" }
+  "total": { "lines": 4605, "adr": "D-404" }
 }

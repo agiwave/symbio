@@ -22,10 +22,15 @@
 //! 同族的**巩固合并算法**（分句 / 合并 + 保真度）只有一个消费者（memory 的巩固写口），
 //! 按共享库准入的第一条（≥2 个不同 owner）**一律私有**，已随写口搬进
 //! `symbio-plugin-memory` 的 `src/consolidate/merge.rs`，本域不再留副本。
+//!
+//! 第三块是 [`tokenizer`]：预算的计量与头尾切分。它原住门面（`plugin-api`），
+//! 但那里只该装词、宏与转发——纯机制归共享库（`D-404`），门面留一行转发。
 
 use std::borrow::Cow;
 
 pub mod merge_kernel;
+/// Token 计量与头尾切分（预算的计量基础；`D-404`）。
+pub mod tokenizer;
 
 /// 按字节上限安全截断：返回不超过 `max_bytes` 的最长合法前缀。
 ///

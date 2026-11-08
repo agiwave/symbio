@@ -2,12 +2,12 @@
 kind: task
 id: T-053-plugin-api分类清单
 title: plugin-api 分类清单：契约留下、实现迁 sdk、reports 拆两半（先清单，后搬迁）
-status: todo
+status: doing
 track: arch
-prio: later
+prio: now
 created: 2026-11-08
 deps: []
-where: "`crates/symbio-plugin-api/src`（`effects.rs` 562 行、`port.rs` 589 行、`text.rs` 314 行、`context.rs` 355 行、`reports.rs` 344 行；2026-11-09 实测，生产文件合计 4 921 行）；`crates/symbio-sdk/src`；`scripts/plugin-surface-audit.mjs`（HS-002 / HS-006）"
+where: "`crates/symbio-plugin-api/src`（`effects.rs` 562 行、`port.rs` 589 行、`text.rs` 6 行、`context.rs` 347 行、`reports.rs` 344 行；生产文件合计 4 605 行）；`crates/symbio-sdk/src/text/tokenizer.rs`；`scripts/plugin-surface-audit.mjs`（HS-002 / HS-006）；`scripts/facade-loc-audit.mjs`（FA-001…FA-004）"
 exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 / 实现 / 机制）/ 处置（留守 api / 迁 sdk / 只转出）），不改代码；清单经批准后才搬迁；api 只留纯类型、宏、声明面与 re-export；`effects::apply`、端口能力校验、`text` 预算算术、`context` 拼装迁 sdk、api 只转出；`reports` 拆开——`ReportDecl` / `submit_reports!` / `inventory` 是契约，`validate` / `reports()` / `read_view` 是实现；「自有实现只许降」由行数棘轮 `FA-001`…`FA-004`（`scripts/facade-loc-audit.mjs`）判，不另开 HS 臂；搬迁后 `gate --full` 全绿
 ---
 
@@ -72,9 +72,11 @@ HS-002 / HS-006 只数转发条数，看不见实现。**这一条已由棘轮�
    （`FA-001`…`FA-004`）、基线 `scripts/baselines/plugin-api-loc.json`，进门禁 `GUARDS`；
    回归用例 `scripts/facade-loc-audit.test.mjs` 钉住「实现加 5 行 ⇒ 红」。判据与初始读数
    已登记在 `018-模块架构.md` 的 `D-399`。
-2. 逐块填「类 / 处置 / 理由」，**先只出清单，不动代码**；清单交评审后才搬迁。
+2. 逐块搬迁（清单已评审）。第一块 `text` 已落地：实现住 `symbio-sdk/src/text/tokenizer.rs`，
+   api 侧 `text.rs` 只剩一行 `pub use` 转发（314 → 6 行，基线同批下调至 6）。
    搬迁后 api 侧只留 `pub use`，实现住在 sdk；`reports` 的契约与实现分居两处。
-   每搬一块 **同批下调基线**（`FA-002` 会拦住「删了不同批下调」）。
+   每搬一块 **同批下调基线**（`FA-002` 会拦住「删了不同批下调」）。口径见
+   054 的 `D-404`：净零搬迁不记欠账，`from` / `to` 与两侧行数写进提交正文。
 3. HS-002 / HS-006（`scripts/plugin-surface-audit.mjs`）仍只判「转发了几条」；
    「门面持有实现」这一面由 `FA-001` 判，不重复造第二臂。
 4. 跑 `gate --full`，全绿后提交。
