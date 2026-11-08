@@ -10,3 +10,7 @@ plugin_order: 95
 # `artifact.added` 是本次调用的产物格，被 notes / model / 转写投影按名字读；
 # `tool.calls.done` 是工具调用收束，session 的进度面按名字读。
 shared_events: artifact.added, authz.granted, tool.calls.done
+# 共享事件里哪几条由**本插件的端口**写出（scripts/facts/events-rs.mjs 读取 →
+# `port_of_fact`）。消费端口产物的声明行据此带 `after_port`（D-376）：机制层不再
+# 手抄「artifact.added 归 tool 端口」——那会让世界名在门面上有第二个 owner。
+shared_event_ports: artifact.added=tool

@@ -66,12 +66,12 @@ symbio-plugin-world_model = { path = "../symbio-plugin-world_model" }
 inventory = { workspace = true }
 # 驱动收口：`settled` 的每会话唤醒句柄（`Notify`）与「由驱动自身调用」的检测。
 tokio = { workspace = true, features = ["sync", "rt"] }
+# 安全阀出口的机制事实（`driver.stalled`）载荷与用例（`D-393`）。
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）与 `#[tokio::test]`
 tokio = { workspace = true, features = ["test-util", "macros", "rt", "time"] }
-# 第三端口验收（DE-048 D-302）：构造 `request` 事实载荷
-serde_json = { workspace = true }
 # 驱动实例身份判据：假根插件实现 `Plugin`（trait 带 async 方法）
 async-trait = { workspace = true }

@@ -166,6 +166,16 @@ pub struct DriveRow {
     pub max_attempts: u32,
 }
 
+/// 驱动安全阀出口的**机制事实名**（`Exhausted` / `Stalled` 共用一种形状）。
+///
+/// 写方是驱动入口（宿主装配层，`crates/symbio/src/drive.rs::drain`）：两条出口在
+/// CLI 上有 stderr，但在没有控制台的宿主（Tauri / gateway）里没有读者。把出口落成
+/// 事实后，非 CLI 宿主经 VDFS 订阅面直接可见（`D-393`）。
+///
+/// 它不是世界词：不在任何插件的 `shared_events` 里，读方按名字取这一条机制记录，
+/// 不参与选债 / 派发 / 配对。
+pub const EVENT_DRIVER_STALLED: &str = "driver.stalled";
+
 /// 驱动出口。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriveOutcome {

@@ -371,7 +371,7 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 2396 → 2390（抢占判定面删除，D-388）——删掉 inbox.test.rs 的
   // 6 条判定/落格用例（判定器、三态、落格函数全删，无被测对象即无覆盖可丢）；忙窗插话的可观察行为
   // 仍由 e2e t34 承接。非侵蚀。
-  ciRustTestsTotal: 2391,
+  ciRustTestsTotal: 2397,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -398,7 +398,7 @@ export const BASELINE = {
   // 它唯一独有的断言依赖 `session.skill_fast_path`，该快路已随 B2 退场，没有生产事实可断；
   // 能力断言由 t35-skill-compile 承接（退役口径见 `docs/004-ref/013-e2e实施表.md`）。
   // 收紧基线，不是放松。
-  e2eCases: 96,
+  e2eCases: 97,
   // 累计「补件 : 迁移」的**欠账本金**（D-372，`capability-migration-audit` 的付账线）。
   // 不是「比值上限」：范围基线一变计数就变，比值当阈值会假红。这里记的是判据落地当天的
   // 存量（实测 21 个补件 / 15 个迁移批次）。文档里手写的「补件 20 / 迁移 5」是 2026-11-01

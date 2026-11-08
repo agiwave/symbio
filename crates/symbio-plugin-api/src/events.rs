@@ -1,7 +1,9 @@
 //! 跨插件事件名常量 —— **由 `scripts/facts/events-rs.mjs` 生成，请勿手改**。
 //!
 //! 事实源：各插件自己目录里的 `PLUGIN.yml` 的 `shared_events:` 行（**owner** 导出给
-//! 别的插件命名的那几条事件名）与 owner 自己的 `EventDecl` 表（格位）。加一条跨插件
+//! 别的插件命名的那几条事件名）与 owner 自己的 `EventDecl` 表（格位）；同清单的
+//! `shared_event_ports:` 行（`<事件名>=<端口名>`）投影成 `port_of_fact`——消费端口
+//! 产物的行据此带 `after_port`（D-376），机制层不手抄这条映射。加一条跨插件
 //! 事件 = 在 owner 自己的清单里登记一行，并在 owner 的 `EventDecl` 里给它格位；内核与
 //! core 的文件零 diff。手改本文件会被 `gen-facts --check` 判红。
 //!
@@ -177,3 +179,14 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_USER_ANSWER, (Entity::Scope, Verb::Asserted)), // user.answer ← session
     EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← session
 ];
+
+/// 共享事件由哪个端口写出（owner 的 `PLUGIN.yml` 的 `shared_event_ports:` 行）。
+///
+/// 消费端口产物的声明行据此带 `after_port`（D-376）。映射随 owner 的清单走，
+/// 机制层不再手抄「哪个世界名归哪个端口」——那会让世界名在门面上有第二个 owner。
+pub fn port_of_fact(fact: &str) -> Option<&'static str> {
+    match fact {
+        EVENT_ARTIFACT_ADDED => Some("tool"),
+        _ => None,
+    }
+}

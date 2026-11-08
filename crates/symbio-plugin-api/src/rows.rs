@@ -55,17 +55,9 @@ use crate::effects::FactDraft;
 /// 两边都不需要认识对方的具体身份。
 pub const PLUGIN_ROW: &str = "plugin_row";
 
-/// 共享事件由哪个端口承载（`None` = 与端口无关）。
-///
-/// 消费端口产物的声明行必须等该端口收束（`D-376`）：`artifact.added` 由 `tool`
-/// 端口写出，以它为 `owes.source` 的行因此在计划层带 `after_port(tool)`。
-/// 这张映射住在共享词表旁的门面上——环按它取门，不自己拼端口名（环不认识世界词）。
-pub fn port_of_fact(fact: &str) -> Option<&'static str> {
-    match fact {
-        crate::events::EVENT_ARTIFACT_ADDED => Some(crate::vocab::PORT_TOOL),
-        _ => None,
-    }
-}
+// 共享事件 → 写出它的端口，投影在 `events::port_of_fact`（由 owner 的 `PLUGIN.yml`
+// 的 `shared_event_ports:` 行生成）。机制层不再手写这张映射：一旦这里出现一个世界名，
+// 它就有了第二个 owner（`D-393` 同批收窄）。
 
 /// 「这一行在等一笔模型往返」的事实种类（D-338）。
 ///

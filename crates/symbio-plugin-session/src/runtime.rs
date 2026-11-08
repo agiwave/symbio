@@ -12,6 +12,7 @@
 //! | `chat.assistant.final` | 载荷 `status`：`aborted` / `failed` / 其余按 `completed` |
 //! | `chat.assistant.fallback` | `failed`，错误取载荷 `detail` |
 //! | `chat.assistant.progress` | `completed`（等待用户的那一轮以 `Ok` 收尾） |
+//! | `driver.stalled` | `failed`：驱动安全阀出口（`Exhausted` / `Stalled`），错误取载荷（`D-393`） |
 //! | 根 run 节点的 `message.edited` / `message.added` | `Failed` / `Aborted` 即失败/中止收口 |
 //!
 //! 按**完整史**扫描、取最后一条证据：压缩只取代消息列表，不取代轮次生命周期
@@ -20,6 +21,7 @@
 
 use crate::declarations::{EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_MESSAGE_EDITED};
 use symbio_kernel::event::Event;
+use symbio_plugin_api::drive::EVENT_DRIVER_STALLED;
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED,
     EVENT_USER_MESSAGE,
@@ -95,6 +97,11 @@ fn outcome_step(e: &Event) -> Option<Option<RuntimeOutcome>> {
         })),
         // 等待用户：本轮以 Ok 收尾（恢复续写是下一轮的事），与现网结局一致。
         EVENT_CHAT_ASSISTANT_PROGRESS => Some(Some(RuntimeOutcome::Completed)),
+        // 驱动安全阀出口（`D-393`）：没有终答的一轮不能读成「正常结束」。
+        // 文本面直接带「为什么停 + 未收束几笔」，非 CLI 宿主不用再拼第二套口径。
+        EVENT_DRIVER_STALLED => Some(Some(RuntimeOutcome::Failed {
+            error: Some(stall_error(e)),
+        })),
         EVENT_MESSAGE_EDITED => e
             .payload
             .get("message")
@@ -130,6 +137,23 @@ fn root_run_outcome(node: &serde_json::Value) -> Option<RuntimeOutcome> {
         }),
         Some(cm::NodeStatus::Aborted) => Some(RuntimeOutcome::Aborted),
         _ => None,
+    }
+}
+
+/// 安全阀出口的错误文案：`为什么停` + `未收束几笔`。
+fn stall_error(e: &Event) -> String {
+    let open = e
+        .payload
+        .get("outstanding")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    match payload_str(e, "outcome").as_deref() {
+        Some("exhausted") => {
+            let steps = e.payload.get("steps").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("驱动停摆：步数预算用尽（{steps} 步，未收束 {open} 笔）")
+        }
+        _ => format!("驱动停摆：一圈没有新增事实（未收束 {open} 笔）"),
     }
 }
 

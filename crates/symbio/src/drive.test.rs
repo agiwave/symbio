@@ -180,3 +180,93 @@ fn exhausted_and_stalled_are_both_visible() {
     // 交还人工是正常出口，不是停摆：不出声。
     assert!(drive_notice("s", &DriveOutcome::NeedsHuman(vec![key()])).is_none());
 }
+
+// ==================== 安全阀出口落格（`D-393`） ====================
+//
+// stderr 只对 CLI 有意义：Tauri / gateway 没有控制台，两条安全阀出口在界面上与
+// 「正常结束」同形。出口必须同时是**一条机制事实**，非 CLI 宿主经 VDFS 订阅面读到。
+
+/// 停摆落一条机制事实：种类 / 载荷 / 溯源锚 / 写方主体都对得上。
+#[test]
+fn safety_valve_lands_one_mechanism_fact() {
+    let source =
+        symbio_kernel::store::MemoryStore::<symbio_plugin_api::fact_source::Fact>::default();
+    // 先垫一条事实，让溯源锚（I2）有指处。
+    FactSource::append(
+        &source,
+        "session/main".into(),
+        FactDraft {
+            key: "seed".into(),
+            kind: "user.message".into(),
+            entity: Entity::Scope,
+            verb: Verb::Asserted,
+            payload: serde_json::json!({}),
+            produced_by: None,
+        },
+    )
+    .expect("垫一条事实");
+
+    write_stall(
+        &source,
+        "sess-1",
+        "agent-1",
+        &DriveOutcome::Stalled(vec![key()]),
+    );
+
+    let facts = FactSource::facts(&source);
+    assert_eq!(facts.len(), 2, "停摆只落一条：{facts:?}");
+    let stall = &facts[1];
+    assert_eq!(
+        stall.kind,
+        symbio_plugin_api::drive::EVENT_DRIVER_STALLED,
+        "出口必须用机制事实名落格"
+    );
+    assert_eq!(stall.payload["outcome"], "stalled");
+    assert_eq!(stall.payload["session_id"], "sess-1");
+    assert_eq!(stall.payload["outstanding"][0]["port"], "p");
+    assert_eq!(stall.produced_by, Some(0), "溯源锚指落格前的最后一条");
+    assert!(
+        stall.actor.contains("agent-1"),
+        "写方是会话主体，不是匿名：{}",
+        stall.actor
+    );
+}
+
+/// 超预算那条带步数；两条安全阀共用一种形状，读方不必分两套。
+#[test]
+fn exhausted_fact_carries_steps() {
+    let source =
+        symbio_kernel::store::MemoryStore::<symbio_plugin_api::fact_source::Fact>::default();
+    write_stall(
+        &source,
+        "sess-2",
+        "agent-1",
+        &DriveOutcome::Exhausted {
+            steps: 128,
+            outstanding: vec![key()],
+        },
+    );
+    let facts = FactSource::facts(&source);
+    assert_eq!(facts.len(), 1, "一次驱动只落一条：{facts:?}");
+    assert_eq!(facts[0].payload["outcome"], "exhausted");
+    assert_eq!(facts[0].payload["steps"], 128);
+}
+
+/// 反向：正常出口（没欠债 / 在飞 / 交还人工）不落任何事实。
+#[test]
+fn normal_outcomes_leave_no_stall_fact() {
+    let source =
+        symbio_kernel::store::MemoryStore::<symbio_plugin_api::fact_source::Fact>::default();
+    for outcome in [
+        DriveOutcome::NoDebt,
+        DriveOutcome::Waiting(vec![]),
+        DriveOutcome::NeedsHuman(vec![key()]),
+    ] {
+        write_stall(&source, "sess-3", "agent-1", &outcome);
+    }
+    assert!(
+        FactSource::facts(&source).is_empty(),
+        "正常出口不得落安全阀事实"
+    );
+    assert!(stall_draft("sess-3", &DriveOutcome::NoDebt, 1).is_none());
+}

@@ -7,12 +7,14 @@
 //! 与 `session.config` / `turn.branch` / `turn.dispatch`（`session::declarations`），
 //! 记忆接管 `memory.*`（`memory::decl`），工具接管 `authz.granted` / `authz.denied`
 //! / `task.controlled`（`tool::declarations`），代理接管 `commitment.*`
-//! （`agent::declarations`）。本模块如今只剩 `plugin.row.asked` 一条机制私有名。
+//! （`agent::declarations`）。本模块如今只剩两条**机制私有名**（`plugin.row.asked`
+//! / `driver.stalled`）——名字的唯一定义处仍在 `plugin-api`，这里只登记格位。
 
 use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, Verb};
 
-use symbio_plugin_api::rows::{declared_writes, PLUGIN_ROW, PORT_ACTOR};
+use symbio_plugin_api::drive::EVENT_DRIVER_STALLED;
+use symbio_plugin_api::rows::{declared_writes, ASK_KIND, PLUGIN_ROW, PORT_ACTOR};
 use symbio_plugin_api::EVENT_REQUEST;
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-loop";
@@ -22,7 +24,10 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-loop";
 pub(crate) const EVENTS: &[EventDecl] = &[
     // 机制事实（D-338）：`plugin_row` 执行体在 Ask 后落的「这一行在等」。
     // 行名与提示在载荷里；种类只有一个名字，否则进不了声明表。
-    EventDecl::new("plugin.row.asked", (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(ASK_KIND, (Entity::Scope, Verb::Asserted)),
+    // 驱动安全阀出口（`D-393`）：`Exhausted` / `Stalled` 共用一种形状。
+    // 写方是驱动入口（宿主装配层），不是插件；标 `host` 免得被当成「无人可写」的债。
+    EventDecl::host(EVENT_DRIVER_STALLED, (Entity::Scope, Verb::Asserted)),
 ];
 
 /// 两个**宿主通用执行体**的声明（D-296 / D-303）。

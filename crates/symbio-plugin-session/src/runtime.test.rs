@@ -147,6 +147,62 @@ fn progress_settles_completed() {
     );
 }
 
+// ==================== 驱动安全阀出口（`D-393`） ====================
+
+/// 安全阀事实：写方是驱动入口，不是插件。
+fn stall(verdict: &str, outstanding: serde_json::Value) -> Event {
+    let mut payload = json!({
+        "session_id": "s-1",
+        "outcome": verdict,
+        "outstanding": outstanding,
+    });
+    if verdict == "exhausted" {
+        payload["steps"] = json!(128);
+    }
+    ev(EVENT_DRIVER_STALLED, Verb::Asserted, payload)
+}
+
+#[test]
+fn stalled_settles_failed_with_the_reason() {
+    assert_eq!(
+        outcome(&[
+            opened(),
+            stall("stalled", json!([{"port": "p"}, {"port": "q"}])),
+        ]),
+        Some(RuntimeOutcome::Failed {
+            error: Some("驱动停摆：一圈没有新增事实（未收束 2 笔）".to_string())
+        }),
+        "没有终答的一轮不能读成正常结束"
+    );
+}
+
+#[test]
+fn exhausted_stall_carries_the_step_budget() {
+    assert_eq!(
+        outcome(&[
+            opened(),
+            stall("exhausted", json!([{"port": "p"}, {"port": "q"}]))
+        ]),
+        Some(RuntimeOutcome::Failed {
+            error: Some("驱动停摆：步数预算用尽（128 步，未收束 2 笔）".to_string())
+        }),
+        "两条安全阀共用一种形状，读方按 outcome 取文案"
+    );
+}
+
+#[test]
+fn a_later_final_discards_the_stall() {
+    assert_eq!(
+        outcome(&[
+            opened(),
+            stall("stalled", json!([{"port": "p"}]),),
+            final_with("completed")
+        ]),
+        Some(RuntimeOutcome::Completed),
+        "停摆之后真出了终答 ⇒ 以最后一条证据为准"
+    );
+}
+
 // ==================== 根 run 节点的收口 ====================
 
 #[test]

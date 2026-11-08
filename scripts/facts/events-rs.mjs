@@ -34,7 +34,9 @@ const OUT_REL = 'crates/symbio-plugin-api/src/events.rs'
 const HEADER = `//! 跨插件事件名常量 —— **由 \`scripts/facts/events-rs.mjs\` 生成，请勿手改**。
 //!
 //! 事实源：各插件自己目录里的 \`PLUGIN.yml\` 的 \`shared_events:\` 行（**owner** 导出给
-//! 别的插件命名的那几条事件名）与 owner 自己的 \`EventDecl\` 表（格位）。加一条跨插件
+//! 别的插件命名的那几条事件名）与 owner 自己的 \`EventDecl\` 表（格位）；同清单的
+//! \`shared_event_ports:\` 行（\`<事件名>=<端口名>\`）投影成 \`port_of_fact\`——消费端口
+//! 产物的行据此带 \`after_port\`（D-376），机制层不手抄这条映射。加一条跨插件
 //! 事件 = 在 owner 自己的清单里登记一行，并在 owner 的 \`EventDecl\` 里给它格位；内核与
 //! core 的文件零 diff。手改本文件会被 \`gen-facts --check\` 判红。
 //!
@@ -93,6 +95,47 @@ function parseEventList(raw, where) {
     seen.add(name)
   }
   return names
+}
+
+const PORT_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/
+
+/**
+ * `shared_event_ports: artifact.added=tool` → `Map { "artifact.added" → "tool" }`；缺键 ⇒ 空。
+ *
+ * 这条映射只回答「这条共享事实由哪个端口写出」，与 `shared_events` 的 owner 同一个来源
+ * （owner 自己的清单）。它进生成物，是因为消费行要在计划层带 `after_port`（D-376）：
+ * 机制层手抄一份「哪个世界名归哪个端口」会让世界名在门面上有了第二个 owner。
+ */
+function parsePortList(raw, events, where) {
+  const out = new Map()
+  if (!raw) return out
+  for (const item of raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)) {
+    const parts = item.split('=').map((s) => s.trim())
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      throw new Error(
+        `${where}：shared_event_ports 的 ${JSON.stringify(item)} 读不懂` +
+          '（写成 `<owner 的 shared_events 名>=<端口名>`，多条用逗号分隔）',
+      )
+    }
+    const [fact, port] = parts
+    if (!events.includes(fact)) {
+      throw new Error(
+        `${where}：shared_event_ports 里的 ${JSON.stringify(fact)} 不在本插件的 shared_events 里` +
+          '——端口归属只能给本 owner 导出的共享事件登记',
+      )
+    }
+    if (!PORT_RE.test(port)) {
+      throw new Error(`${where}：shared_event_ports 里的端口名 ${JSON.stringify(port)} 不合法`)
+    }
+    if (out.has(fact)) {
+      throw new Error(`${where}：shared_event_ports 里的 ${JSON.stringify(fact)} 出现了两次`)
+    }
+    out.set(fact, port)
+  }
+  return out
 }
 
 function productionTexts(srcDir) {
@@ -184,7 +227,9 @@ export function collectSharedEvents(root, faces = pluginDeclarationFaces(root)) 
     const where = `crates/symbio-plugin-${dir}/PLUGIN.yml`
     const manifest = readPluginManifest(root, dir)
     const declared = faces.get(dir).cells
-    for (const name of parseEventList(manifest.shared_events, where)) {
+    const names = parseEventList(manifest.shared_events, where)
+    const ports = parsePortList(manifest.shared_event_ports, names, where)
+    for (const name of names) {
       if (!declared.has(name)) {
         throw new Error(
           `${where}：shared_events 声明了 ${JSON.stringify(name)}，但 ${dir} 的生产代码里没有为它` +
@@ -202,13 +247,37 @@ export function collectSharedEvents(root, faces = pluginDeclarationFaces(root)) 
       if (prior) {
         throw new Error(`${where}：${name} 已由 ${prior.owner} 声明——一条事件名只能有一个 owner`)
       }
-      byName.set(name, { name, owner: dir, ...cell })
+      byName.set(name, { name, owner: dir, ...cell, port: ports.get(name) ?? null })
     }
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 const constOf = (name) => `EVENT_${name.replace(/\./g, '_').toUpperCase()}`
+
+/**
+ * `port_of_fact` 的生成体：owner 清单里登记的端口归属 → 消费行的 `after_port`。
+ *
+ * 无论有没有映射都生成（空表返回 `None`）：它是机制层的稳定读面，生成器停掉一条函数
+ * 会让调用方在编译期才发现——比空表更难定位。
+ */
+function portOfFactFn(rows) {
+  const P = [
+    '/// 共享事件由哪个端口写出（owner 的 `PLUGIN.yml` 的 `shared_event_ports:` 行）。',
+    '///',
+    '/// 消费端口产物的声明行据此带 `after_port`（D-376）。映射随 owner 的清单走，',
+    '/// 机制层不再手抄「哪个世界名归哪个端口」——那会让世界名在门面上有第二个 owner。',
+    "pub fn port_of_fact(fact: &str) -> Option<&'static str> {",
+    '    match fact {',
+  ]
+  for (const r of rows) {
+    if (r.port) P.push(`        ${constOf(r.name)} => Some("${r.port}"),`)
+  }
+  P.push('        _ => None,')
+  P.push('    }')
+  P.push('}')
+  return P
+}
 
 /** 纯函数：声明清单 → 文件内容。导出给回归测试（测试不触发写盘）。 */
 export function render(rows) {
@@ -235,6 +304,8 @@ export function render(rows) {
   }
   if (rows.length === 0) {
     L.push('// 当前没有跨插件共享的事件名。owner 在自家 `PLUGIN.yml` 的 `shared_events:` 里登记一行。')
+    L.push('')
+    L.push(...portOfFactFn(rows))
     return `${L.join('\n').replace(/\n+$/, '')}\n`
   }
   L.push('/// 跨插件共享的事件行（名字 + 格位 + 角色）——写闸的**共享臂**。')
@@ -264,6 +335,8 @@ export function render(rows) {
     L.push(`    ${decl}, // ${r.name} ← ${r.owner}`)
   }
   L.push('];')
+  L.push('')
+  L.push(...portOfFactFn(rows))
   return `${L.join('\n').replace(/\n+$/, '')}\n`
 }
 

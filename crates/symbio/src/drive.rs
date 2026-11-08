@@ -30,12 +30,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use symbio_host::{DriveOutcome, DriveReport, Host};
+use symbio_kernel::event::{Entity, Verb};
 use symbio_kernel::exec::{ExecAbortSignal, ABORT_SIGNAL};
 use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
+use symbio_plugin_api::drive::{DriveKey, EVENT_DRIVER_STALLED};
 use symbio_plugin_api::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
-use symbio_plugin_api::{DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget, ExecEventSink};
+use symbio_plugin_api::{
+    DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget, ExecEventSink, FactDraft,
+};
 use symbio_sdk::keys::{AGENT_ID, MODE, RISK_LEVEL, SOURCE_PRINCIPAL, WORKDIR};
 
 /// 一次驱动需要的**世界**：事实源 + 通用上下文（会话 / 提供方 / 工作目录 / 出口）。
@@ -425,6 +429,8 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget, state: &KickState) 
                 // 宿主装配层不链 `tracing`（插件日志宏在这里展开不出来），退回 stderr。
                 eprintln!("{notice}");
             }
+            // 两条安全阀同形落一条机制事实（`D-393`）：stderr 之外还得有读方。
+            record_stall(&target.session_id, agent_id, &report.outcome);
         }
         Err(e) => {
             // 宿主装配层不链 `tracing`（插件日志宏在这里展开不出来），退回 stderr。
@@ -451,6 +457,73 @@ fn drive_notice(session_id: &str, outcome: &DriveOutcome) -> Option<String> {
         )),
         _ => None,
     }
+}
+
+/// 安全阀出口落成**机制事实**（`D-393`）：CLI 有 stderr，但没有控制台的宿主
+/// （Tauri / gateway）读不到 `eprintln!`——出口落格后经 VDFS 订阅面可见。
+///
+/// 走**只读开面**（`drive == None`）：这条事实是通知，不是环的输入。若经绑定驱动的
+/// 写口落地，`append` 会再踢一次驱动——`Exhausted` 就从「停下」变成「写完再跑一轮」，
+/// 步数预算失去意义。
+fn record_stall(session_id: &str, agent_id: &str, outcome: &DriveOutcome) {
+    let Ok(facts) = open_fact_source(session_id) else {
+        // 开面不可用（未装配会话插件）：保持 stderr 路径，不把一次通知失败升级成错误。
+        return;
+    };
+    write_stall(facts.as_ref(), session_id, agent_id, outcome);
+}
+
+/// 落格本体（可独立喂事实源做用例）。
+fn write_stall(facts: &dyn FactSource, session_id: &str, agent_id: &str, outcome: &DriveOutcome) {
+    let head = facts.head();
+    let Some(draft) = stall_draft(session_id, outcome, head) else {
+        return;
+    };
+    let _ = facts.append(
+        symbio_sdk::authz::principal_of(Some(agent_id.trim())),
+        draft,
+    );
+}
+
+/// 安全阀出口 → 一条事实草稿；正常出口（`NoDebt` / `Waiting` / `NeedsHuman`）⇒ `None`。
+///
+/// 幂等键取**落格前的水位**：每次停摆落一条，同一次停摆不会重复（这条路径不绑驱动，
+/// 写自己不触发再跑一轮；水位只在别的写入前进）。
+fn stall_draft(session_id: &str, outcome: &DriveOutcome, head: u64) -> Option<FactDraft> {
+    let (verdict, outstanding) = match outcome {
+        DriveOutcome::Exhausted { outstanding, .. } => ("exhausted", outstanding),
+        DriveOutcome::Stalled(open) => ("stalled", open),
+        _ => return None,
+    };
+    let mut payload = serde_json::json!({
+        "session_id": session_id,
+        "outcome": verdict,
+        "outstanding": stalled_keys(outstanding),
+    });
+    if let DriveOutcome::Exhausted { steps, .. } = outcome {
+        payload["steps"] = serde_json::json!(steps);
+    }
+    Some(FactDraft {
+        key: format!("{EVENT_DRIVER_STALLED}:{head}:{verdict}"),
+        kind: EVENT_DRIVER_STALLED.to_string(),
+        entity: Entity::Scope,
+        verb: Verb::Asserted,
+        payload,
+        // 溯源锚（I2）：指向落格前的最后一条事实。
+        produced_by: head.checked_sub(1),
+    })
+}
+
+fn stalled_keys(keys: &[DriveKey]) -> Vec<serde_json::Value> {
+    keys.iter()
+        .map(|key| {
+            serde_json::json!({
+                "port": key.port,
+                "id": key.id,
+                "attempt": key.attempt,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
