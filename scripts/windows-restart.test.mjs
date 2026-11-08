@@ -313,7 +313,10 @@ test('Windows restart: independent real processes only', {
     const s = f.status();
     assert.equal(s.phase, 'survived'); assert.equal(s.applicationReady, false);
     assert.equal(s.survivedSeconds, 1);
-    await assert.rejects(processIdentity(f.target.pid), /Command failed/);
+    // PID 退出后 Windows 可以立刻把它发给另一个进程（本文件 `assertPidNotRunning`
+    // 的注释里记过这条）；并发门禁下这类复用尤其常见。`processIdentity` 解析成功
+    // 只证明「这个号上有活进程」，不证明「旧目标还活着」——按 exe 交叉核对。
+    await assertPidNotRunning(f.target.pid, f.target.exe);
     assert.equal((await processIdentity(s.candidatePid)).exe.toLowerCase(), s.candidate.toLowerCase());
     const log = fs.readFileSync(path.join(s.stage, 'candidate.stdout.log'), 'utf8');
     assert.ok(log.includes('argument with spaces'));
