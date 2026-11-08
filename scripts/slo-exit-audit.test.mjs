@@ -58,7 +58,11 @@ function table(exitCells) {
   ].join('\n')
 }
 
-function audit({ docBody = table(['`invariants`', '—', '—']), stats = STATS_FIXTURE } = {}) {
+function audit({
+  docBody = table(['`invariants`', '—', '—']),
+  stats = STATS_FIXTURE,
+  files = {},
+} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slo-exit-'))
   try {
     const write = (rel, content) => {
@@ -68,6 +72,7 @@ function audit({ docBody = table(['`invariants`', '—', '—']), stats = STATS_
     }
     write(PLAN04, docBody)
     write(STATS, stats)
+    for (const [rel, content] of Object.entries(files)) write(rel, content)
     const r = spawnSync(process.execPath, [script, `--root=${root}`], {
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',
@@ -178,4 +183,40 @@ test('一行里多个指认可解析（顿号 / 分号 / 逗号都算分隔）',
     docBody: table(['`invariants`、`tiers.p99`', '`session_id`, `has_wal`；`tiers.tier`', '—']),
   })
   assert.equal(r.status, 0, r.stdout)
+})
+
+// ── ⑤ 动态槽位（报表列迁出之后） ──────────────────────────────────────
+
+/** `SessionStats` 的真形：固定列 + `#[serde(flatten)]` 的报表容器 */
+const CONTAINER_STATS = STATS_FIXTURE.replace(
+  '    pub invariants: serde_json::Value,',
+  '    pub invariants: serde_json::Value,\n    #[serde(flatten)]\n    pub reports: BTreeMap<String, serde_json::Value>,',
+)
+
+const COST_DECL = [
+  'symbio_plugin_api::submit_reports!([ReportDecl {',
+  '    owner: "cost",',
+  '    slot: "cost",',
+  '    order: 40,',
+  '    views: &[COST_LEDGER],',
+  '}])',
+].join('\n')
+
+test('报表 slot 是动态列：owner 登记一条就指得到一列', () => {
+  const r = audit({
+    docBody: table(['`cost`', '`invariants`', '—']),
+    stats: CONTAINER_STATS,
+    files: { [path.join('crates', 'symbio-plugin-cost', 'src', 'decl.rs')]: COST_DECL },
+  })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+})
+
+test('`#[serde(flatten)]` 的容器字段本身不是列', () => {
+  const r = audit({
+    docBody: table(['`reports`', '—', '—']),
+    stats: CONTAINER_STATS,
+    files: { [path.join('crates', 'symbio-plugin-cost', 'src', 'decl.rs')]: COST_DECL },
+  })
+  assert.equal(r.status, 1, '容器名不是出口键：' + r.stdout)
+  assert.match(r.stdout, /SX-001/)
 })

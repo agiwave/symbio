@@ -26,68 +26,7 @@ use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::chat::chat_node::ChatNodePresentationExt;
 use symbio_sdk::governance::VisScope;
 
-use super::stats::SessionStats;
-
-/// 读一条报表（`D-387`）：按 `slot` 找到登记项，逐条取 `views` 的整片值，交回
-/// owner 的 `render`。
-///
-/// **不再查 `shared_views` 生成物**：报表登记本身就是「这些视图可读」的公开动作，
-/// 名单随报表走，`view_names.rs` 只留尚未迁移的条目。某一格读不出来时以 `Null`
-/// 占位，owner 的 `render` 各自交自己的空形状——空形状住在 owner 那里，读方不猜。
-///
-/// 登记表本身不合法（[`symbio_plugin_api::reports::reports`] 交回错误）时整条报表
-/// 读不出来，返回 `None`：降级还是失败由调用方决定（读侧不替装配面 panic）。
-pub(super) fn report_value(
-    slot: &str,
-    snapshot: &[Event],
-    ctx: &ReportCtx<'_>,
-) -> Option<serde_json::Value> {
-    let reports = match symbio_plugin_api::reports::reports() {
-        Ok(reports) => reports,
-        Err(errors) => {
-            for why in errors {
-                symbio_plugin_api::plugin_warn!(
-                    symbio_plugin_api::PLUGIN_ID_SESSION,
-                    "[stats] 报表登记不合法（{why}）：`{slot}` 这一列读不出来"
-                );
-            }
-            return None;
-        }
-    };
-    let report = reports.iter().find(|r| r.slot == slot)?;
-    let mut views = Vec::with_capacity(report.views.len());
-    for name in report.views {
-        views.push(read_report_view(name, snapshot));
-    }
-    Some((report.render)(&views, ctx))
-}
-
-/// 报表声明的视图名取整片值；名字的唯一出处是 owner 的 `const`（`SV-001`）。
-///
-/// 读不到（没冻结 / 名字不在表里）⇒ `Null` 占位并出声：owner 的 `render` 据此交
-/// 自己的空形状，出口仍是一份文档写过的形状。
-fn read_report_view(name: &str, snapshot: &[Event]) -> serde_json::Value {
-    let frozen = match symbio_plugin_api::sealed_declarations() {
-        Ok(frozen) => frozen,
-        Err(_) => {
-            symbio_plugin_api::plugin_warn!(
-                symbio_plugin_api::PLUGIN_ID_SESSION,
-                "[stats] 声明表未冻结：报表视图 `{name}` 按空读数交"
-            );
-            return serde_json::Value::Null;
-        }
-    };
-    match frozen.view(name) {
-        Some(view) => (view.eval)(snapshot, i64::MAX),
-        None => {
-            symbio_plugin_api::plugin_warn!(
-                symbio_plugin_api::PLUGIN_ID_SESSION,
-                "[stats] 报表视图 `{name}` 不在冻结声明表里：按空读数交"
-            );
-            serde_json::Value::Null
-        }
-    }
-}
+use super::stats::{SessionStats, TierRow};
 
 /// 读侧出口的**读方身份声明**：`session/stats` 与 `session/changes` 同一份载荷形状。
 ///
@@ -268,7 +207,7 @@ pub(super) fn totals_of(fallback_rows: &serde_json::Value) -> (u64, u64) {
 
 /// 一条报表的实例级读数：逐片求值 → owner 的 `agg` 合并 → owner 的 `fleet_render` 排版。
 ///
-/// 与 [`report_value`] 同一条「不认识形状」的纪律；区别只在合并：单片读数按
+/// 与 [`symbio_plugin_api::reports::read_all`] 同一条「不认识形状」的纪律；区别只在合并：单片读数按
 /// `ViewDecl::eval` 求，N 片交 `ViewDecl::agg`，最后才交给 `fleet_render`（`D-387`：
 /// `fleet_render` 是 `agg` 之后的排版，不是第三份口径）。
 fn fleet_of(
@@ -349,11 +288,16 @@ fn view_unavailable(owner: &str, why: &symbio_plugin_api::ViewUnavailable) -> se
 /// 看不住过程。写在这里的转换只有三类：起标签、定单位、挑语气。
 pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
     // 档位列 → 一段「时延与兜底」。tiers 已按档位排序，此处原序输出（顺序是
-    // 数据给的事实，不是排版选择）。
+    // 数据给的事实，不是排版选择）。它是报表列里唯一需要反序列化才排得出版的一格
+    // （其余各列读的是对象），反序列化失败 = 这一格今天没渲染 ⇒ 一段空表。
+    let tiers: Vec<TierRow> = stats
+        .reports
+        .get("tiers")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or_default();
     let perf = ReadingSection {
         title: Some("时延与兜底".into()),
-        rows: stats
-            .tiers
+        rows: tiers
             .iter()
             .map(|t| ReadingRow {
                 label: format!("{} 档", t.tier),

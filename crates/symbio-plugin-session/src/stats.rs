@@ -41,7 +41,7 @@
 //!
 //! 本模块的读数一律走 `Projection::read_all`（= `now = i64::MAX` + 全量预算）：WAL 是
 //! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——按报表读的列
-//! （`report_value`）与尚未迁移的能力视图（`capability_views` 的 `read_shared_view_all`）
+//! （`reports::read_all`）与尚未迁移的能力视图（`capability_views` 的 `read_shared_view_all`）
 //! 走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
@@ -66,7 +66,7 @@ use super::token_ledger::token_ledger;
 
 use super::plugin::SessionPlugin;
 use super::stats_reading::{
-    capability_views, commitments_reading, content_scope_of, fleet_reading, panel_of, report_value,
+    capability_views, commitments_reading, content_scope_of, fleet_reading, panel_of,
     usage_section, ViewerRequest,
 };
 
@@ -92,62 +92,6 @@ pub(crate) struct TierRow {
     pub samples: usize,
 }
 
-/// 成本台账的**空形状**：`{ by_principal: {}, total_ms: 0 }`（与 owner 交的形状同键）。
-///
-/// 与其余空形状同一条纪律：读方不替 owner 猜形状——猜错一次，出口就长出一份
-/// nobody 认识的读数。
-fn empty_ledger() -> serde_json::Value {
-    serde_json::json!({ "by_principal": {}, "total_ms": 0 })
-}
-
-/// 校准账的**空形状**：`{ by_skill: {} }`（与 owner 交的形状同键）。
-///
-/// 「本会话没判过技能」与「这条视图今天读不出来」在出口上都读成这一份空表；两者的区别
-/// 由 `capability_views` 那一列的可诊断缺席承担（与 [`empty_ledger`] 同一条分工）。
-fn empty_calibration() -> serde_json::Value {
-    serde_json::json!({ "by_skill": {} })
-}
-
-/// 声誉台账的**空形状**：`{ by_principal: {} }`（与 owner 交的形状同键）。
-///
-/// 与 [`empty_ledger`] 同一条纪律：读方不替 owner 猜形状。
-fn empty_reputation() -> serde_json::Value {
-    serde_json::json!({ "by_principal": {} })
-}
-
-/// 就绪集列的**空形状**：`{ ready: [], cap }`——容量是生效容量（`cap = 0` 按 1，与
-/// owner 那侧的调度器同一口径）。
-///
-/// 只在整条报表读不出来时用（本二进制没链接 owner / 登记表不合法）：读方不替 owner
-/// 猜形状，这一份是文档写过的形状，与迁移前的列逐字相同。
-fn empty_readyset(cap: usize) -> serde_json::Value {
-    let cap = cap.max(1);
-    serde_json::json!({ "ready": [], "cap": cap })
-}
-
-/// 声誉列的**排版**：把台账里本会话主体那一行单独提出来，另附整本账。
-///
-/// 本函数不加总、不打分——「守约 − 违约」的算式住在声誉能力包那一侧（`D-221`），
-/// 这里只做两件事：按名字取一行，以及没立过约时补一行零。那一行零不是重算，是让
-/// 出口恒有一格 `own` 可读（t75 判的正是它的 `principal` 必须是**目标会话**的主体，
-/// 不是请求方的——跨会话查数时两者不同）。
-fn reputation_reading(ledger: serde_json::Value, principal: &str) -> serde_json::Value {
-    let rows = ledger
-        .get("by_principal")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let own = rows.get(principal).cloned().unwrap_or_else(|| {
-        serde_json::json!({
-            "principal": principal,
-            "offered": 0,
-            "kept": 0,
-            "broken": 0,
-            "score": 0,
-        })
-    });
-    serde_json::json!({ "own": own, "by_principal": rows })
-}
-
 /// 会话级读数（四列同源，D-044）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct SessionStats {
@@ -156,19 +100,25 @@ pub(crate) struct SessionStats {
     /// 事实源在不在。不在 = 这个会话还没跑过一轮，全零读数是**有据的零**，
     /// 不是错误（读方不该为了读而创建文件）。
     pub has_wal: bool,
-    /// 按档位的时延 / 兜底两列。
-    pub tiers: Vec<TierRow>,
-    /// 成本台账（能力包交的 `cost.ledger` 视图读数原样交出）：`{ by_principal: { <主体>: {
-    /// principal, spent_ms, entries } }, total_ms }`，按主体字典序。
-    pub cost: serde_json::Value,
+    /// **报表列**（`D-387`）：键 = 报表登记的 `slot`，值 = owner 的 `render` 交出的
+    /// 整条读数。
+    ///
+    /// ## 键由登记表决定
+    ///
+    /// 本插件不认识任何一列的键名或形状：owner 在自己的 crate 里 `submit_reports!`
+    /// 一条登记，下一次读数就多一格。`#[serde(flatten)]` 把这些键抬到 `session/stats`
+    /// 顶层，于是**出口顶层键集合 == 已登记 `slot` 集合**是构造保证（全装配判据见
+    /// `crates/symbio` 的 `report_columns_acceptance`）。
+    ///
+    /// ## 键序与降级
+    ///
+    /// 序列化键序从「结构体声明序」变成 `BTreeMap` 的字典序——**数据不变，只是顺序**。
+    /// 某一列今天读不出来（没链接 owner / 登记表不合法）⇒ 该键**整条不出现**，由
+    /// `capability_views` 的可诊断缺席说明原因；读方不替 owner 猜空形状。
+    #[serde(flatten)]
+    pub reports: std::collections::BTreeMap<String, serde_json::Value>,
     /// 用量台账（`token_ledger` 视图原样序列化）：`{ by_principal: { <主体>: {
     /// principal, input, output, measured } }, input, output, calls }`，按主体字典序。
-    ///
-    /// ## 为什么与 [`Self::cost`] 是两列
-    ///
-    /// `cost` 是**时间**（事件的 `cost_ms`，按事件写出方累计），本列是 **token**
-    /// （应答载荷的 `usage`，按内容主体累计）。观察对象与归组键都不同——合成一列
-    /// 会让「花了多久」与「用了多少」互相冒充，而两者没有换算关系。
     ///
     /// ## 「没测量」与「测到零」
     ///
@@ -176,7 +126,6 @@ pub(crate) struct SessionStats {
     /// `usage`）；它与「每次都用了 0 个 token」由 `calls` 分辨，不靠补 0 编一个数
     /// ——与 `context_watermark` 缺数整条不出现是同一条纪律。
     ///
-    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒ 全零）。
     /// 钱的折算（价格 × 用量）不在这一列，它是下一列 [`Self::spend`]——本列只报
     /// 「用了多少」，「花了多少钱」由价格配置决定（不按模型名猜）。
     pub tokens: serde_json::Value,
@@ -185,9 +134,9 @@ pub(crate) struct SessionStats {
     /// by_principal: { <主体>: { principal, amount_nano, charges } } } } }`，
     /// 币种与主体均字典序。
     ///
-    /// ## 与 [`Self::tokens`] / [`Self::cost`] 是三列
+    /// ## 与 [`Self::tokens`] / 报表列 `cost` 是三列
     ///
-    /// `tokens` 是**用量**（provider 实测），`cost` 是**时间**（`cost_ms`），
+    /// `tokens` 是**用量**（provider 实测），报表列 `cost` 是**时间**（`cost_ms`），
     /// 本列是**钱**（价格 × 用量）。钱由价格折算，而价格是 Provider 配置
     /// （`ModelProviderConfig.pricing`，每个端点自己填）——所以本列的存在性取决于
     /// 配置，不是取决于 token 有没有测到：没配价格时它整列是
@@ -201,16 +150,6 @@ pub(crate) struct SessionStats {
     ///
     /// 不同币种**不相加**：金额只在同一币种内可加，汇率不是事实源里的东西。
     pub spend: serde_json::Value,
-    /// 校准（的**读侧**）：能力包 `crates/symbio-plugin-skill` 交的 `skill.calibration`
-    /// 视图读数原样交出（`{ by_skill: { <skill_id>: { skill_id, uses,
-    /// fallbacks } } }`，按 `skill_id` 字典序）——`confidence = 1 − 回退率` 的口径活在
-    /// owner 的折叠里，本处不重算。
-    ///
-    /// 观测面是技能召回行落下的 `memory.calibrated{skill_id, fallback}`，所以「本会话
-    /// 没编过技能」与「编了但一次没判过」都读成 `{ by_skill: {} }`——**有据的空**，不是
-    /// 缺列。与四列同一份切片、同一个 as-of，`may_read = false` 时同样走空切片
-    /// （与就绪集列同族，不取声誉列的空对象形态）。
-    pub calibration: serde_json::Value,
     /// 断点（`checkpoint` 视图原样序列化：`last_seq` / `event_count` /
     /// `kind_counts`——末两项就是「这一格里到底有多少事实」）。
     pub checkpoint: serde_json::Value,
@@ -223,14 +162,6 @@ pub(crate) struct SessionStats {
     /// 任务表两条**无宽限**（环与超界不是时序假象），本处只取数——
     /// 「不变量进 CI/读侧」：e2e 断言的就是这一列。
     pub invariants: serde_json::Value,
-    /// 声誉（的**读侧**）：`own` = 本会话
-    /// 主体自己的条目，`by_principal` = 这份事实源里每个主体的条目（`own` 在其中，
-    /// 原样摊开、不另造口径）。
-    ///
-    /// 无读权限 ⇒ **整列为空对象**，不是零值条目：t28 的三态（没源 / 有源不给 / 有数）
-    /// 靠它分辨「这里没有数」与「不给你看」——与四列用「空切片 ⇒ 全零」是同一条判定，
-    /// 换个列名不换判据。
-    pub reputation: serde_json::Value,
     /// 承诺 / 委托（`agent_run` 那一次立约的**读侧出口**）：
     /// `{ items: [ { id, from, to, promise, state, why, anchor_seq } ], total, kept,
     /// broken, settled, breach_rate }`，`items` 按承诺号字典序。
@@ -252,22 +183,6 @@ pub(crate) struct SessionStats {
     /// 归**四列**那一族（同一份切片、同一个 as-of）：`may_read = false` ⇒ 切片已空 ⇒
     /// `{ items: [], total: 0, … }`，两种「零条」由 `has_wal` 分辨。
     pub commitments: serde_json::Value,
-    /// 就绪任务集（的**读侧**）：
-    /// 报表 `slot = "readyset"` 的出口（`{ ready: [ { task_id, seq, depends_on } ], cap }`），
-    /// 按 `task_id` 字典序——同一份事实源永远读出同一个集合。
-    ///
-    /// ## 折叠与容量套用都不在本插件
-    ///
-    /// 「谁就绪」由任务能力包算（owner：`crates/symbio-plugin-task`，`D-289`），容量也由
-    /// 它套（`D-387`）：本插件按 `slot` 取整条读数，把本会话的 `task_cap` 经
-    /// [`symbio_plugin_api::reports::ReportCtx::cap`] 交给 owner——容量是**读者的预算**，
-    /// 不是折叠的一格，所以它进上下文而不进视图（`cap.max(1)` 后截断，与调度器同一口径）。
-    ///
-    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒ `{ready: []}`），
-    /// 不归声誉那一族（那列不给的是「有数但不给你看」的空对象）：就绪集为空在语义上
-    /// 与「没有任务 / 依赖未闭合」本来就同值，两种「空」由 `has_wal` 与本列的
-    /// 上下游（清单在不在）分辨，不靠列的形状。
-    pub readyset: serde_json::Value,
     /// 转写（**对话面读侧**）：
     /// `transcript` 投影原样序列化（`{ entries: [ { role, text } ] }`，按事件顺序 =
     /// append-only 的时间序；`role` 是 `"user"` / `"assistant"` / `"tool"`，
@@ -285,28 +200,6 @@ pub(crate) struct SessionStats {
     /// 逐条可见域（「这条是谁说的」）不在这里过滤：本列只有**整列**闸（`may_read`），
     /// 与其余各列同款。
     pub transcript: serde_json::Value,
-    /// 主动性（[DE-008 §3.1 外部效标](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") · 主动性）：
-    /// 报表 `slot = "conation"` 的出口（`{ intents: [ { seq, ts, goal, task_id } ], adoption_rate }`，
-    /// `intents` 按 seq 升序）——「自发发起且被采纳」的分子 / 分母同出一列：已升格
-    /// （`task_id` 非空）/ 已表达。折叠、挑格与率都归能力包 `conation`（`D-387`）。
-    ///
-    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ { intents: [] }`）：
-    /// 欲是流，截断它等于悄悄丢掉「想要过什么」的事实（conation 投影不设配额）。
-    pub conation: serde_json::Value,
-    /// 时域跨度（同上 · 时域跨度）：能力包 `slo` 的 `slo.span` 视图原样交出
-    /// （`{ events, span_ms }`——本会话事实源的首末事件 `ts` 跨度，Unix 毫秒）。
-    ///
-    /// 归**四列**那一族（同切片、同 as-of、`may_read = false` ⇒ `{ events: 0, span_ms: 0 }`）。
-    /// 实例级「任务级时长中位数」在 `fleet` 的 `axes.span` 族（单会话一个跨度没有
-    /// 中位数可言，见 `crates/symbio-plugin-slo/src/decl.rs::span_merged` 的「为什么」）。
-    pub span: serde_json::Value,
-    /// 自主程度（DE-008 §3.1 外部效标）：**读数由能力包交**（报表 `slot = "autonomy"`，
-    /// 视图 `conation.autonomy`，`D-387`；折叠两半见 `D-281`），本插件原样装一格，不算率、
-    /// 不认识形状。
-    ///
-    /// 归**四列**那一族（同切片、同 as-of）。读不到 ⇒ `null`（不是三个零：零是
-    /// 「没有闭环任务」，`null` 是「这一格今天读不出来」）。
-    pub autonomy: serde_json::Value,
     /// **能力视图**（DE-025 D-221）：别的插件公开的视图，按名字读出来的原样值。
     ///
     /// ## 为什么这一列没有写死的键名
@@ -467,26 +360,18 @@ pub(crate) fn read(
         readable: may_read,
     };
 
-    // 四列全部来自同一份事件切片（D-044：实测与判据同源）。
-    //
-    // 时延 + 兜底两列由能力包 `slo` 在报表里按 `tier` 并成一行（`D-387`）；本插件不
-    // 并表、不取分位数、不把两列各折一遍——那会与 owner 的口径漂移成两套。
-    let tiers = report_value("tiers", &snapshot, &report_ctx)
-        .and_then(|value| serde_json::from_value::<Vec<TierRow>>(value).ok())
-        .unwrap_or_default();
-    // 成本列：owner 用报表登记公开（`D-387`），此处只按 `slot` 取整条读数；
-    // 空形状住在 owner 的 `render` 里，整条读不出来时才退回文档写过的空账。
-    let cost = report_value("cost", &snapshot, &report_ctx).unwrap_or_else(empty_ledger);
-    // 用量列：与四列同一份切片、同一个 as-of。它读的是应答载荷的 `usage`
-    // （`token_ledger` 的模块文档说明为什么不能与 `cost` 合成一列）。
+    // 报表列（`D-387`）：`symbio_plugin_api::reports::read_all` 遍历已链接的报表登记，
+    // 一次读出全部列。键 = 登记的 `slot`，`SessionStats::reports` 用 `#[serde(flatten)]`
+    // 把它们抬到出口顶层——本插件不列任何列名、不认识任何一列的形状，加一条报表就多
+    // 一格。登记表不合法时整批缺席并出声；「某一列算不出来」由 owner 的 `render` 交
+    // 空形状（空形状住在 owner 那里）。
+    let reports = symbio_plugin_api::reports::read_all(&snapshot, &report_ctx);
+
+    // 以下各列仍由本插件折叠与排版（口径在 core 的投影 / 本插件的台账）。
+    // 用量列读应答载荷的 `usage`；金额列读 `spend`（价格 × 用量，写方在 adapter
+    // 边界折好）；断点列读 `checkpoint` 投影。
     let tokens = token_ledger().read_all(&snapshot).value;
-    // 金额列：同一个切片、同一个 as-of，读应答载荷的 `spend`（价格 × 用量，
-    // 写方在 adapter 边界折好）。它不重算价格——配置改了也只影响之后的事实。
     let spend = spend_ledger().read_all(&snapshot).value;
-    // 校准列：折叠与阈值口径归技能能力包（名册 #19/#20，`D-387` 报表登记），本插件
-    // 不重算回退率。整条报表读不出来（本二进制没链接 owner）时退回文档写过的空账。
-    let calibration =
-        report_value("calibration", &snapshot, &report_ctx).unwrap_or_else(empty_calibration);
     let ck = checkpoint().read_all(&snapshot).value;
 
     let tokens = serde_json::to_value(&tokens)
@@ -501,67 +386,20 @@ pub(crate) fn read(
     let invariants = serde_json::to_value(check_all(vocab, &snapshot))
         .map_err(|e| PluginError::InternalError(format!("不变量清单序列化失败：{e}")))?;
 
-    // 声誉列：折叠与 `own` 行都归声誉能力包（名册 #22/#28，`D-387` 报表登记），本插件
-    // 只按 `slot` 取整条读数。与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生）。
-    // 没有权限时 owner 的 `render` 交空对象——给零值等于替一个你本来看不到的主体报数。
-    // 整条报表读不出来（本二进制没链接 owner）时才退回文档写过的空形状并出声。
-    let reputation = report_value("reputation", &snapshot, &report_ctx).unwrap_or_else(|| {
-        if may_read {
-            reputation_reading(empty_reputation(), session_principal)
-        } else {
-            serde_json::json!({})
-        }
-    });
-
-    // 承诺列（段二）：与声誉列读**同一批格子**，但问的是另一件事——声誉问
-    // 「这个主体几分」，本列问「这一约是什么、违约为什么」。切片已按 `may_read` 取过。
+    // 承诺列（段二）：立约记录与违约率。切片已按 `may_read` 取过。
     let commitments = commitments_reading(&snapshot);
-
-    // 就绪集列：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
-    // 已被换成空的 ⇒ 本列是 `{ready: []}`（四列的形态），不是声誉那列的空对象。
-    // **折叠与容量套用都归任务能力包**（名册 #23，`D-289` / `D-387`）：本插件按 `slot`
-    // 取整条读数，容量经 `ReportCtx::cap` 交给 owner——读者的预算是参数，不是折叠的一格。
-    // 整条报表读不出来时才退回文档写过的空形状并出声。
-    let readyset = report_value("readyset", &snapshot, &report_ctx)
-        .unwrap_or_else(|| empty_readyset(task_cap));
 
     // 转写列（对话面读侧）：
     // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
     // 与四列同一份切片、同一个 as-of。口径（四格 → 三角色，含工具结果）只活在 core
     // 的 `transcript` 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒
-    // `{ entries: [] }`（四列形态，与就绪集 / 校准同族）。
+    // `{ entries: [] }`。
     let transcript = serde_json::to_value(
         transcript(CHAT_VOCAB, MESSAGE_VOCAB)
             .read_all(&snapshot)
             .value,
     )
     .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
-
-    // 主动性列（DE-008 §3.1.1 外部效标）：与四列同一份切片、同一个 as-of。观测面是
-    // `conation.expressed`（欲）与 `task.opened`（升格，溯源认）——「自发发起」的
-    // 分子分母都是事实源里已有的事件，不加新格子。`may_read = false` 时切片已空
-    // ⇒ `{ intents: [], adoption_rate: 0.0 }`（四列形态）。
-    //
-    // **读数由能力包交**（报表 `slot = conation`，`D-387`）：本插件按 `slot` 取整条读数，
-    // 不认识意图流的形状、也不算采纳率——率是 owner 的算式（单片那一半就在视图里，
-    // 跨会话那一半由 `ViewDecl::agg` 交）。owner 只下发历史形状的两格，其余三格
-    // （`declared` / 两个计数）是它自己判、自己合并用的中间量。
-    // 整条报表读不出来时退回文档写过的空形状并出声。
-    let conation = report_value("conation", &snapshot, &report_ctx)
-        .unwrap_or_else(|| serde_json::json!({ "intents": [], "adoption_rate": 0.0 }));
-
-    // 时域跨度列：`slo.span` 只读事件信封的 `ts`（入库时间，与 `cost_ms` 同源的实测面），
-    // as-of 之后的事件一概不见。空形状 `{ events: 0, span_ms: 0 }` 留在 owner 的 `render`
-    // （`D-387`），本插件只在整条报表读不出来时退回文档写过的这一份。
-    let span = report_value("span", &snapshot, &report_ctx)
-        .unwrap_or_else(|| serde_json::json!({ "events": 0, "span_ms": 0 }));
-
-    // 自主程度列（同上）：**折叠归能力包**（报表 `slot = autonomy`，视图
-    // `conation.autonomy`）——本插件按 `slot` 取整条读数，不认识分子分母是怎么数的，
-    // 也不再自己算率。读不到 ⇒ `null`，与 `may_read = false` 的零形状分开：后者是
-    // 「不给你看」，前者是「装配里没有 owner」。空形状住在 owner 的 `render`（`D-387`）。
-    let autonomy =
-        report_value("autonomy", &snapshot, &report_ctx).unwrap_or(serde_json::Value::Null);
 
     // 实例级聚合列。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
     // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（axes 两族给有据的
@@ -599,20 +437,13 @@ pub(crate) fn read(
     let reading = SessionStats {
         session_id: session_id.to_string(),
         has_wal,
-        tiers,
-        cost,
+        reports,
         tokens,
         spend,
-        calibration,
         checkpoint,
         invariants,
-        reputation,
         commitments,
-        readyset,
         transcript,
-        conation,
-        span,
-        autonomy,
         fleet,
         capability_views,
         skill_compile_enabled,

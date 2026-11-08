@@ -35,6 +35,7 @@
 use std::fmt;
 
 use serde_json::Value;
+use symbio_kernel::event::Event;
 use symbio_kernel::present::ReadingSection;
 
 /// 读方在装配这一刻能提供的上下文。
@@ -250,6 +251,78 @@ pub fn reports() -> Result<&'static [&'static ReportDecl], &'static [ReportError
         Ok(all) => Ok(all.as_slice()),
         Err(errors) => Err(errors.as_slice()),
     }
+}
+
+/// 读一条已声明视图的整片值：名字的唯一出处是 owner 的 `const`（`SV-001`）。
+///
+/// 读不到（声明表没冻结 / 名字不在表里）⇒ `Null` 占位并出声：owner 的 `render`
+/// 据此交自己的空形状——空形状住在 owner 那里，读方不替它猜。
+pub fn read_view(name: &str, snapshot: &[Event]) -> Value {
+    let frozen = match crate::sealed_declarations() {
+        Ok(frozen) => frozen,
+        Err(_) => {
+            crate::plugin_warn!(
+                "plugin-api",
+                "[reports] 声明表未冻结：视图 `{name}` 按空读数交"
+            );
+            return Value::Null;
+        }
+    };
+    match frozen.view(name) {
+        Some(view) => (view.eval)(snapshot, i64::MAX),
+        None => {
+            crate::plugin_warn!(
+                "plugin-api",
+                "[reports] 视图 `{name}` 不在冻结声明表里：按空读数交"
+            );
+            Value::Null
+        }
+    }
+}
+
+/// 把**已登记的全部报表**读成一张表：键 = `slot`，值 = owner 的 `render` 排好的整条读数。
+///
+/// ## 它是动态列的**唯一填充者**
+///
+/// `session/stats` 的报表列不再由读方逐列声明：本函数遍历 [`reports()`]，加一条登记
+/// 就多一格。`SessionStats::reports` 用 `#[serde(flatten)]` 把它们抬到出口顶层，于是
+/// 「出口顶层键集合 == 已登记 `slot` 集合」是构造保证——全装配下的回归判据见
+/// `crates/symbio` 的 `report_columns_acceptance`。
+///
+/// ## 为什么住在门面而不是读方
+///
+/// 报表登记面本来就在本 crate；把「读全部」也放在这里，装配宿主只依赖门面就能验到
+/// 「每一格都渲出来了」，读方（可卸载的 `session`）因此不需要在 crate 根暴露符号
+/// （E-014 / EX-004）。
+///
+/// 登记表本身不合法（[`reports()`] 交回错误）时返回空表并逐条出声：降级还是失败由
+/// 调用方决定（读侧不替装配面 panic）。
+pub fn read_all(
+    snapshot: &[Event],
+    ctx: &ReportCtx<'_>,
+) -> std::collections::BTreeMap<String, Value> {
+    let mut out = std::collections::BTreeMap::new();
+    let reports = match reports() {
+        Ok(reports) => reports,
+        Err(errors) => {
+            for why in errors {
+                crate::plugin_warn!(
+                    "plugin-api",
+                    "[reports] 报表登记不合法（{why}）：整批读数读不出来"
+                );
+            }
+            return out;
+        }
+    };
+    for report in reports {
+        let views: Vec<Value> = report
+            .views
+            .iter()
+            .map(|name| read_view(name, snapshot))
+            .collect();
+        out.insert(report.slot.to_string(), (report.render)(&views, ctx));
+    }
+    out
 }
 
 #[cfg(test)]

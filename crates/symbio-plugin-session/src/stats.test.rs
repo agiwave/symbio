@@ -411,35 +411,22 @@ fn totals_add_the_owner_rows() {
 // 那一半**：缺席时交什么形状、形状的键是不是那一列自己的。数字（分子分母、中位数）
 // 归 owner 的单测与 e2e。
 
-/// 三列读不到时交**文档写的空形状**，而不是编一个数。
+/// 报表列**没有 owner** 时整条不出现，而不是由读方猜一个空形状。
 ///
-/// 本进程不链接 owner ⇒ 三条视图都缺席。这条判据盯的是「装配坏了」必须长得像
-/// 「读不出来」，不能长得像「这一档没有数」——后者会让一次装配故障看起来像一次
-/// 正常的安静（`D-281` 理由 3）。
-///
-/// 空形状的**键**不是随便挑的：`{ by_tier: [] }` 是逐档视图的形状、`{ events, span_ms }`
-/// 是跨度视图的形状（`SessionStats::span` 的文档写的就是它）。若读方替 owner 猜一个
-/// 统一形状，前端就会拿到「跨度列里有一个 by_tier」这种东西。
+/// 本进程不链接任何 owner（E-009）⇒ `reports()` 为空 ⇒ `SessionStats::reports` 是空表。
+/// 这与迁移前的「读方替 owner 交一份文档写过的空形状」是两种降级语义：空形状会让
+/// 「装配里没有这个 owner」长得像「这一列本来就是空的」；整条缺席才可诊断
+/// （`D-281` 理由 3）。缺席的**原因**由能力视图那一列按名字报出。
 #[test]
-fn unavailable_columns_take_their_documented_empty_shape() {
+fn unregistered_reports_are_absent_from_the_exit() {
     let wal = seed("absent");
     let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
 
-    assert!(got.has_wal, "事实源在——空形状不是因为没源");
+    assert!(got.has_wal, "事实源在——缺席不是因为没源");
     assert!(
-        got.tiers.is_empty(),
-        "逐档两列缺席 ⇒ 一档也不编：{:?}",
-        got.tiers
-    );
-    assert_eq!(
-        got.span,
-        serde_json::json!({ "events": 0, "span_ms": 0 }),
-        "跨度列的空形状是它自己的键（不是逐档视图的 by_tier）"
-    );
-    assert_eq!(
-        got.autonomy,
-        serde_json::Value::Null,
-        "自主程度列归能力包（`conation.autonomy`）：本进程没链接 ⇒ null，不是零形状冒充读数"
+        got.reports.is_empty(),
+        "本进程不链接任何 owner ⇒ 报表列一格都不出现：{:?}",
+        got.reports.keys().collect::<Vec<_>>()
     );
     // 缺席必须**可诊断**：能力视图那一列按名字报出原因词与人话。
     let absent = got.capability_views.as_object().expect("能力视图列是对象");
@@ -514,9 +501,10 @@ fn panel_matches_the_columns_it_describes() {
     let wal = seed("panel");
     let mut got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
     // 逐档两列的**数**归 owner（本进程不链接 `slo`），而「这些数怎么说」是本插件的排版
-    // 代码（`panel_of` 收 `&SessionStats`）。这里交一档合成的行，验的正是那段排版：
-    // 面板里的值必须逐字来自列里的值——与 owner 在不在无关，也不会因此造出一份替身口径。
-    got.tiers = vec![TierRow {
+    // 代码（`panel_of` 收 `&SessionStats`）。这里往报表列里交一档合成的行，验的正是那段
+    // 排版：面板里的值必须逐字来自列里的值——与 owner 在不在无关，也不会因此造出一份
+    // 替身口径。行按 owner 的出口形状（`Vec<TierRow>` 序列化后的 JSON 数组）入表。
+    let tiers = vec![TierRow {
         tier: "deep".into(),
         turns: 2,
         fallbacks: 1,
@@ -526,6 +514,10 @@ fn panel_matches_the_columns_it_describes() {
         p99: 1200,
         samples: 1,
     }];
+    got.reports.insert(
+        "tiers".into(),
+        serde_json::to_value(&tiers).expect("档位行"),
+    );
     let panel = panel_of(&got);
 
     // 分区：时延兜底 / 事实源 / 不变量 / 技能 / 承诺，再加**能力视图**段
@@ -545,8 +537,8 @@ fn panel_matches_the_columns_it_describes() {
 
     // ① 时延段：一行对应一个档位，值与列逐字对上
     let perf = &panel.sections[0];
-    assert_eq!(perf.rows.len(), got.tiers.len(), "一行一档，不多不少");
-    for (row, col) in perf.rows.iter().zip(&got.tiers) {
+    assert_eq!(perf.rows.len(), tiers.len(), "一行一档，不多不少");
+    for (row, col) in perf.rows.iter().zip(&tiers) {
         assert!(
             row.value.contains(&format!("{} 轮", col.turns)),
             "轮数要对上：{} vs {}",
@@ -826,36 +818,16 @@ fn stats_recompute_equals_direct_apply() {
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
 
-    // 就绪集列的口径归任务能力包（名册 #23，`D-289` 按名字读）：本测试进程不链接它 ⇒
-    // 交**文档写的空形状**（`cap` 那一格仍是本插件的读者预算，不随 owner 缺席而消失）。
-    // **谁就绪**归 owner 的单测
-    // （`crates/symbio-plugin-task/src/readyset.test.rs`），**出口读得到真数**归 e2e
-    // （`t31-task-table.mjs` / `t42-full-derives-commitment-task.mjs` 钉 `ready` 的成员）。
-    assert_eq!(
-        got.readyset,
-        serde_json::json!({ "ready": [], "cap": crate::config::TASK_CAP }),
-        "owner 不在 ⇒ 编不出候选集：空集合是可诊断的缺席，不是「这个会话没有任务」"
-    );
-
-    // 时延 / 兜底两列的口径归能力包 `slo`（`D-221` 按名字读、`D-281` 折叠两半）：
-    // 本测试进程不链接它 ⇒ 两列交空表、`tiers` 为空。**数字**归 owner 的单测
-    // （`crates/symbio-plugin-slo/src/decl.test.rs`：轮数 2 / 兜底 1 / 样本 1 / P95 1200），
-    // **组合**归 e2e `t28-session-stats.mjs`（它读生产二进制的 `tiers[0]`）。
-    // 在这里补一份替身 owner 只会让那两条判据变成假绿。
+    // 报表列（就绪集 / 时延兜底 / 成本等）的口径与形状都归 owner（`D-387`）：本测试
+    // 进程不链接任何 owner ⇒ `reports()` 为空 ⇒ 这些键整条不出现。**数字**归 owner 的
+    // 单测（`crates/symbio-plugin-task/src/readyset.test.rs`、
+    // `crates/symbio-plugin-slo/src/decl.test.rs`、`crates/symbio-plugin-cost/src/decl.test.rs`），
+    // **组合**归 e2e（`t28-session-stats.mjs` / `t31-task-table.mjs`）。在这里补一份
+    // 替身 owner 只会让那些判据变成假绿。
     assert!(
-        got.tiers.is_empty(),
-        "owner 不在 ⇒ 一档也不编（空表是可诊断的缺席，不是「这一档没有数」）：{:?}",
-        got.tiers
-    );
-
-    // 成本列的口径归能力包 `cost`（名册 #18，`D-221` 按名字读）：本测试进程不链接它 ⇒
-    // 交**文档写的空形状**并出声。**数字**归 owner 的单测
-    // （`crates/symbio-plugin-cost/src/decl.test.rs`：按主体 500ms 两笔 / 全局 550），
-    // **组合**归 e2e `t28-session-stats.mjs`（它读生产二进制的 `cost.total_ms`）。
-    assert_eq!(
-        got.cost,
-        serde_json::json!({ "by_principal": {}, "total_ms": 0 }),
-        "owner 不在 ⇒ 编不出账：空台账是可诊断的缺席，不是「这个会话没花时间」"
+        got.reports.is_empty(),
+        "owner 不在 ⇒ 报表列一格都不出现：{:?}",
+        got.reports.keys().collect::<Vec<_>>()
     );
     assert_eq!(got.checkpoint, serde_json::to_value(&ck).unwrap());
 
@@ -1013,9 +985,8 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
 
     let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
     assert!(!got.has_wal);
-    assert!(got.tiers.is_empty());
+    assert!(got.reports.is_empty(), "没有源 ⇒ 报表列整条缺席");
     assert_eq!(got.checkpoint["event_count"], 0);
-    assert_eq!(got.cost["total_ms"], 0);
     assert_eq!(got.invariants, serde_json::json!([]), "空事实源 ⇒ 断言全绿");
     assert_eq!(
         got.transcript,
@@ -1072,15 +1043,14 @@ fn a_non_owner_reads_nothing_at_all() {
         .expect("读数");
         assert!(got.has_wal, "{viewer}: 事实源存在，只是不给你看");
         assert!(
-            got.tiers.is_empty(),
-            "{viewer}: 四列应为空：{:?}",
-            got.tiers
+            got.reports.is_empty(),
+            "{viewer}: 报表列整批缺席：{:?}",
+            got.reports.keys().collect::<Vec<_>>()
         );
         assert_eq!(
             got.checkpoint["event_count"], 0,
             "{viewer}: 断点列的事件数为 0"
         );
-        assert_eq!(got.cost["total_ms"], 0, "{viewer}: 成本列为 0");
         assert_eq!(
             got.invariants,
             serde_json::json!([]),
@@ -1088,10 +1058,9 @@ fn a_non_owner_reads_nothing_at_all() {
         );
         // 声誉列随四列一起没：**全有全无**，不按字段裁——按字段裁会留下
         // 「四列不给你、声誉给你」这种没有任何理由的半开半掩。
-        assert_eq!(
-            got.reputation,
-            serde_json::json!({}),
-            "{viewer}: 没有可见事实 ⇒ 不替你看不见的主体报数"
+        assert!(
+            !got.reports.contains_key("reputation"),
+            "{viewer}: 没有可见事实 ⇒ 声誉列整条不出"
         );
         // 转写列同四列一起没（空切片 ⇒ `{entries: []}`）：别人的对话不该从你的读数里漏出去。
         assert_eq!(
@@ -1227,29 +1196,26 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     let denied =
         read_path("s1", &wal, Some("session/main"), session_principal, &root).expect("读数");
     assert!(
-        denied.tiers.is_empty() && denied.checkpoint["event_count"] == 0,
+        denied.reports.is_empty() && denied.checkpoint["event_count"] == 0,
         "内容全私有 ⇒ 矩阵内非属主回到空切片（翻面的是可见域，不是别的）"
     );
 
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 声誉列的**读侧契约**：折叠归声誉能力包（名册 #22/#28，`D-221` 按名字读），本插件只
-/// 保证读不出来时交**文档写的空形状**并出声，且 `own` 恒有一行可读。
+/// 声誉列**没有 owner** 时整条不出现（`D-387`）：本插件不再替 owner 补 `own` 行。
 ///
-/// 这里刻意不复算、不跟反向：本测试二进制不链接 `crates/symbio-plugin-reputation`（E-009）⇒
-/// `reputation.ledger` 不在冻结表里 ⇒ 账只能是 `{ by_principal: {} }`。在这里补一份替身 owner
-/// 只会让两条真判据变成假绿——**数字**归 owner 的单测
+/// 本测试二进制不链接 `crates/symbio-plugin-reputation`（E-009）⇒ `reports()` 为空 ⇒
+/// `reputation` 这个键不存在。`own` 行的主体、配对规则与 as-of 都归 owner 的单测
 /// （`crates/symbio-plugin-reputation/src/decl.rs::tests`：账记在立约方、配对靠 `id`、
-/// 自报不进账、as-of、同切片同账），**生产二进制里读得到真数**归 e2e
+/// 自报不进账、as-of、同切片同账），生产二进制里读得到真数归 e2e
 /// （`t30-multi-principal.mjs` / `t42-full-derives-commitment-task.mjs` 钉 `own` 的
 /// `offered` / `kept`，`t71-peer-commitment.mjs` 钉对等主体的条目，`t74-elimination-loop.mjs`
 /// 钉同一张账喂给淘汰回路）。
 ///
-/// 本插件只钉自己那一半：`own` 的**主体**是目标会话的（不是请求方的），没立过约时那是一行
-/// 零而不是缺席；读侧闸关掉时**整列为空对象**——零值等于替一个你看不见的主体报数。
+/// 本插件只钉自己那一半：**不再由读方猜空账**——账算不出来就整条不出。
 #[test]
-fn reputation_column_degrades_but_still_names_its_principal() {
+fn reputation_column_is_absent_when_no_owner_registers_it() {
     let wal = seed("rep");
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     let store = EventWalStore::open(&wal).unwrap();
@@ -1276,30 +1242,18 @@ fn reputation_column_degrades_but_still_names_its_principal() {
     }
 
     let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(
-        got.reputation["own"],
-        serde_json::json!({
-            "principal": symbio_sdk::authz::PRINCIPAL_MAIN,
-            "offered": 0,
-            "kept": 0,
-            "broken": 0,
-            "score": 0,
-        }),
-        "owner 不在 ⇒ 折不出账，但 `own` 仍指得对本会话主体（缺席的账不是缺席的格）"
-    );
-    assert_eq!(
-        got.reputation["by_principal"],
-        serde_json::json!({}),
-        "台账本体交文档写的空形状：列读得出，只是这一格今天没有算式（缺席的原因在 capability_views 列里）"
-    );
     assert!(got.has_wal, "事实源在，账算不出来不改变这件事");
+    assert!(
+        !got.reports.contains_key("reputation"),
+        "本进程不链接声誉 owner ⇒ 整条不出现（不是读方补一份空账冒充读数）"
+    );
     assert!(
         got.invariants.as_array().is_some_and(|l| l.is_empty()),
         "承诺四格不新增违规：{:?}",
         got.invariants
     );
 
-    // 无读权限 ⇒ **整列为空对象**，不是零值条目（零值 = 替一个你看不见的主体报数）。
+    // 读侧闸关掉时同样整条缺席：列不在，就没有「给不给」的第二种形状可言。
     let denied = read_path(
         "s1",
         &wal,
@@ -1308,7 +1262,7 @@ fn reputation_column_degrades_but_still_names_its_principal() {
         &root,
     )
     .expect("读数");
-    assert_eq!(denied.reputation, serde_json::json!({}));
+    assert!(!denied.reports.contains_key("reputation"));
 }
 
 /// 承诺列（段二，DE-038 §5 的读侧出口）：
@@ -1436,23 +1390,20 @@ fn commitments_column_exposes_each_delegation_record() {
     assert_eq!(denied.commitments["total"], 0);
 }
 
-/// 就绪集列的**读侧契约**：折叠与容量套用都归任务能力包（名册 #23，`D-289` / `D-387`），
-/// 本插件只保证读不出来时交**文档写的空形状**（`{ready: [], cap: TASK_CAP}`）。
+/// 就绪集列**没有 owner** 时整条不出现（`D-387`）：折叠与容量套用都归任务能力包。
 ///
-/// 这里刻意不复算、不跟反向：本测试二进制不链接 `crates/symbio-plugin-task`（E-009）⇒
-/// 报表 `readyset` 没有登记项 ⇒ 列只能是那一份空形状。在这里补一份替身 owner 只会把
-/// 两条真判据变成假绿——**谁就绪、什么序、租约与挂起怎么算**归 owner 的单测
+/// 本测试二进制不链接 `crates/symbio-plugin-task`（E-009）⇒ 报表 `readyset` 没有登记项
+/// ⇒ `readyset` 这个键不存在（读方不再猜 `{ready: [], cap}` 这份空形状）。在这里补一份
+/// 替身 owner 只会把两条真判据变成假绿——**谁就绪、什么序、租约与挂起怎么算**归 owner 的单测
 /// （`crates/symbio-plugin-task/src/readyset.test.rs`：依赖闭包 / 一次一个 / 活租约出局 /
 /// 挂起与恢复 / 返工开新节点），**`cap` 由 owner 套上**归 owner 的报表单测
 /// （`crates/symbio-plugin-task/src/decl.test.rs`），**出口读得到真数**归 e2e
 /// （`t31-task-table.mjs` 钉成员与 `deniedReady.cap`，`t34-preemption.mjs` 钉抢占时的进出）。
-/// 读侧闸对本列的作用与四列那一族同款，由断点 / 转写列的闸用例共同承担。
 ///
 /// 载荷仍按**写方落下的真实形状**造（`task × opened`、`depends_on` 数组）：本插件不认识
-/// 这些字段，带着它们才试得出「不认识」是不是真的。格位由 `declarations.test.rs` 的夹具交
-/// （写闸 fail-closed，没声明的名字落不进环），**报表不登记** ⇒ 这一列读得出、算不出。
+/// 这些字段，带着它们才试得出「不认识」是不是真的。
 #[test]
-fn readyset_column_degrades_to_the_documented_empty_shape() {
+fn readyset_column_is_absent_when_no_owner_registers_it() {
     let dir = std::env::temp_dir().join(format!("symbio-stats-rs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时目录");
@@ -1479,20 +1430,16 @@ fn readyset_column_degrades_to_the_documented_empty_shape() {
             .expect("任务开格");
     }
 
-    let empty_column = serde_json::json!({
-        "ready": [],
-        "cap": crate::config::TASK_CAP
-    });
     let got =
         read_path("s-rs", &wal, None, symbio_sdk::authz::PRINCIPAL_MAIN, &root).expect("读数");
-    assert_eq!(
-        got.readyset, empty_column,
-        "owner 不在 ⇒ 折不出候选集：列读得出，只是这一族今天没有算式（原因在 capability_views 列里）"
+    assert!(
+        !got.reports.contains_key("readyset"),
+        "owner 不在 ⇒ 整条不出现（不是读方猜一份空集合冒充读数）"
     );
     assert!(got.has_wal, "事实源在，账算不出来不改变这件事");
 
     // 反向：读侧闸关 ⇒ 空切片 ⇒ 连不变量列也空（有源但不给你看）。
-    // 「没有任务」与「不给你看」在这一列同形，由 `has_wal` 与上下游分辨（四列那一族）。
+    // 列不在，就没有「没有任务」与「不给你看」的第二种形状可言（由 `has_wal` 分辨）。
     let denied = read_path(
         "s-rs",
         &wal,
@@ -1501,28 +1448,26 @@ fn readyset_column_degrades_to_the_documented_empty_shape() {
         &root,
     )
     .expect("读数");
-    assert_eq!(denied.readyset, empty_column);
+    assert!(!denied.reports.contains_key("readyset"));
     assert_eq!(denied.invariants, serde_json::json!([]));
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 校准列的**读侧契约**：折叠归技能能力包（名册 #19/#20，`D-221` 按名字读），本插件只
-/// 保证读不出来时交**文档写的空形状**并出声，而不是报错或凭空造一行账。
+/// 校准列**没有 owner** 时整条不出现（`D-387`）：折叠归技能能力包。
 ///
-/// 这里刻意不复算、不跟反向：本测试二进制不链接 `crates/symbio-plugin-skill`（E-009）⇒
-/// `skill.calibration` 不在冻结表里 ⇒ 列只能是 `{ by_skill: {} }`。在这里补一份替身 owner
-/// 只会让两条真判据变成假绿——**数字**归 owner 的单测（`crates/symbio-plugin-skill/src/decl.test.rs`：
+/// 本测试二进制不链接 `crates/symbio-plugin-skill`（E-009）⇒ `reports()` 为空 ⇒
+/// `calibration` 这个键不存在（读方不再猜 `{ by_skill: {} }` 这份空账）。
+/// **数字**归 owner 的单测（`crates/symbio-plugin-skill/src/decl.test.rs`：
 /// 三次里回退两次 ⇒ 置信度 1/3、缺字段的观测不计数、as-of 之后的观测不进账），
 /// **生产二进制里读得到真数**归 e2e（`t35-skill-compile.mjs`
-/// 按已知轮次钉 `by_skill` 的 `uses`）。读侧闸对本列的作用与其余列同族，由 `capability_views`
-/// 那一列的「本进程没链接 owner ⇒ 必须出声」用例与断点 / 转写列的闸用例共同承担。
+/// 按已知轮次钉 `by_skill` 的 `uses`）。
 ///
 /// 观测仍按**写方落下的真实形状**造（`Memory × Asserted`、`turn = 0`、`produced_by` 指向本轮
 /// 用户格）：本插件不认识这些字段，带着它们才试得出「不认识」是不是真的。格位由
-/// `declarations.test.rs` 的夹具交（写闸 fail-closed，没声明的名字落不进环），**视图名不交**
-/// ⇒ 这一列读得出、算不出。
+/// `declarations.test.rs` 的夹具交（写闸 fail-closed，没声明的名字落不进环），**报表不登记**
+/// ⇒ 这一列整条不出。
 #[test]
-fn calibration_column_degrades_to_the_documented_empty_shape() {
+fn calibration_column_is_absent_when_no_owner_registers_it() {
     let wal = seed("calibration");
     {
         let store = EventWalStore::open(&wal).expect("WAL");
@@ -1549,10 +1494,9 @@ fn calibration_column_degrades_to_the_documented_empty_shape() {
     }
 
     let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(
-        got.calibration,
-        serde_json::json!({ "by_skill": {} }),
-        "owner 不在 ⇒ 折不出账：列读得出，只是这一格今天没有算式（缺席的原因在 capability_views 列里）"
+    assert!(
+        !got.reports.contains_key("calibration"),
+        "owner 不在 ⇒ 整条不出现（不是读方猜一份空账冒充读数）"
     );
     assert!(got.has_wal, "事实源在，账算不出来不改变这件事");
 }

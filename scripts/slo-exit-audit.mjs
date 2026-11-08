@@ -21,7 +21,7 @@
  * | 码 | 判什么 |
  * |---|---|
  * | SX-001 | 出口表指认了 `session/stats` 里不存在的列 ⇒ 红（指认漂移 / 列被改名） |
- * | SX-002 | 规则源读不出（出口表或 `stats.rs` 的列集合提取失败）⇒ exit 2 |
+ * | SX-002 | 规则源读不出（出口表 / `stats.rs` 的固定字段 / `submit_reports!` 的 `slot` 提取失败）⇒ exit 2 |
  * | SX-003 | 反向自检用：出口表本身形状不对（没有那一列 / 没有 `阶` 头）⇒ exit 2 |
  *
  * ## 为什么 `—` 不是豁免
@@ -58,11 +58,16 @@ const EXIT_HEAD = '用户可见出口'
 /**
  * `session/stats` 的读数列集合。
  *
- * 从 `stats.rs` 的两个 `#[derive(Serialize)]` 结构体提 `pub` 字段：`SessionStats`
- * （顶层列）与 `TierRow`（`tiers` 列的子列）。**不硬编码一份列名**——硬编码的那份
- * 会在加列时静默变成假话（表里指认得对、代码里没有，守卫却照绿）。
+ * 两个来源，都不是手上的一份清单：
  *
- * 提取失败一律返回 null ⇒ 调用方 exit 2。宁可我读不出，不可我漏读。
+ * 1. `stats.rs` 的两个 `#[derive(Serialize)]` 结构体：`SessionStats` 的**固定** `pub`
+ *    字段（顶层列）与 `TierRow`（`tiers` 列的子列）。带 `#[serde(flatten)]` 的容器
+ *    字段（`reports`）不是列本身，排除——它的键见来源 2。
+ * 2. **报表登记**（`D-387`）：全仓 `crates/**` 里每条 `submit_reports!` 的 `slot: "…"`。
+ *    报表列是动态的（owner 登记一条就多一格），硬编码一份列名会在加列时静默变成假话。
+ *
+ * **不硬编码一份列名**——硬编码的那份会在加列时静默变成假话（表里指认得对、代码里
+ * 没有，守卫却照绿）。提取失败一律返回 null ⇒ 调用方 exit 2。宁可我读不出，不可我漏读。
  */
 export function readColumns(root) {
   const abs = path.join(root, STATS_REL)
@@ -87,17 +92,80 @@ export function readColumns(root) {
       }
     }
     const body = txt.slice(at, i)
-    // 只取 `pub 名字:` 形体；`pub(crate)` 不在本文件出现（出口结构体字段全是 pub）。
+    // 只取 `pub 名字:` 形体；带 `#[serde(flatten)]` 的是容器，不是顶层列。
     const names = []
-    for (const m of body.matchAll(/^\s*pub\s+([a-z_][a-z0-9_]*)\s*:/gm)) names.push(m[1])
+    let flattenNext = false
+    for (const line of body.split('\n')) {
+      if (/^\s*#\[serde\(flatten\)\]/.test(line)) {
+        flattenNext = true
+        continue
+      }
+      const m = line.match(/^\s*pub\s+([a-z_][a-z0-9_]*)\s*:/)
+      if (!m) continue
+      if (!flattenNext) names.push(m[1])
+      flattenNext = false
+    }
     return names.length ? names : null
   }
 
   const top = fieldsOf('SessionStats')
   const tier = fieldsOf('TierRow')
-  if (!top || !tier) return null
-  // 顶层列 + `tiers.<子列>`：出口表用点号指子列，故这里一次摊平。
-  return new Set([...top, ...tier.map((f) => `tiers.${f}`)])
+  const slots = readReportSlots(root)
+  if (!top || !tier || !slots) return null
+  // 固定列 + 报表 slot（动态）+ `tiers.<子列>`：出口表用点号指子列，故这里一次摊平。
+  return new Set([...top, ...slots, ...tier.map((f) => `tiers.${f}`)])
+}
+
+/** 递归列出目录下的 `.rs` 文件（跳过 `target`）。 */
+function walkRs(dir, out = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'target' || entry.name === 'node_modules') continue
+    const abs = path.join(dir, entry.name)
+    if (entry.isDirectory()) walkRs(abs, out)
+    else if (entry.isFile() && entry.name.endsWith('.rs')) out.push(abs)
+  }
+  return out
+}
+
+/**
+ * 全仓 `submit_reports!` 里登记的 `slot`（`D-387`：报表列的动态来源）。
+ *
+ * 扫描前先去掉注释，避免把文档里的示例调用当成一条真登记。`crates` 不在 ⇒ null
+ * （规则源读不出，调用方 exit 2）；没有登记 ⇒ 空集（合法的「还没迁报表」）。
+ */
+export function readReportSlots(root) {
+  const cratesDir = path.join(root, 'crates')
+  if (!fs.existsSync(cratesDir)) return null
+  const slots = new Set()
+  for (const abs of walkRs(cratesDir)) {
+    const txt = fs
+      .readFileSync(abs, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
+    let at = 0
+    while ((at = txt.indexOf('submit_reports!', at)) >= 0) {
+      const start = txt.indexOf('[', at)
+      if (start < 0) {
+        at += 1
+        continue
+      }
+      let depth = 0
+      let end = start
+      for (let j = start; j < txt.length; j++) {
+        if (txt[j] === '[') depth++
+        else if (txt[j] === ']') {
+          depth--
+          if (depth === 0) {
+            end = j
+            break
+          }
+        }
+      }
+      for (const m of txt.slice(start, end).matchAll(/slot\s*:\s*"([^"]+)"/g)) slots.add(m[1])
+      at = end + 1
+    }
+  }
+  return slots
 }
 
 /**
