@@ -12,7 +12,7 @@
  * | PTS-004 | 基线引用的 ADR **能打开**、理由**非空** | **改判据而不留决策**——基线是判据的一面，改它必须有决策挂得住 |
  * | PTS-005 | 协议格的**写点只在一个文件里**（两种形态：`symbio/src` 的 `Event::pending` 名字实参 ⊆ 协议常量 / `PortDecl::before`；`impl PortFactWriter` 里的 `store.append`——即 effects / `PortFactWriter` 链路） | **协议格到处有人写**——「四格由引擎独占」从此靠自觉（DE-050 §0） |
  * | PTS-006 | DE-050 §3.3 的**重试条文**写明 `retry(attempt+1)` 且**不含「未启用」** | **条文与机制分叉**——重试已进债键，条文若仍说「未启用」就是把在跑的路说成没跑 |
- * | PTS-007 | 机制层与读侧（`symbio-sdk` / `symbio-plugin-api` / `symbio-plugin-session` 的非测试源码）**不得比较端口名**（`port == "model"` / `port == PORT_TOOL`） | **读侧的端口特判回流**——收束载荷已经盖上章，读侧再认端口名就等于把「加端口不改读侧」作废 |
+ * | PTS-007 | **架构层与骨架**的读侧（`kernel` / `sdk` / `plugin-api` / `loop` / `session`）**不得比较端口名**（`port == "model"` / `port == PORT_TOOL`）；能力插件比对自己端口的名字属**所有权**，不判（边界见文件末「已知边界」） | **读侧的端口特判回流**——收束载荷已经盖上章，读侧再认端口名就等于把「加端口不改读侧」作废 |
  *
  * ## 为什么是这几格（而不是「机制键守恒」那种计数）
  *
@@ -745,6 +745,15 @@ if (retrySection !== null && !/retry\(attempt\+1\)/.test(retrySection)) {
  * `"reader"` 不在端口取值名单里，名单外的一律不判。
  *
  * 已知边界（刻意）：
+ *   - **适用范围是架构层与骨架的读侧**（`kernel` / `sdk` / `plugin-api` / `loop` /
+ *     `session` 里那些「读事实并决定语义」的代码）：它判的是**耦合**——读方依赖
+ *     别人的端口名。**能力插件比对自己端口的名字是所有权**，不是耦合：
+ *     `tool/round_done.rs` 的 `fact.key.port == TOOL`、`telegram/port.rs` 的
+ *     `input.port != NOTIFY` 因此刻意不判。扫描落点当前是 `sdk` / `plugin-api` /
+ *     `session` 三棵树；`kernel` 与 `loop` 的端口无感由 PTS-002 / PTS-003 判。
+ *   - `loop/plugin_rows.rs` 的 `is_row_port(port) == plugin_row` **保留**：`plugin_row`
+ *     是**机制端口**（环用它执行自己的行表），不是世界端口，不进「新增一个世界端口
+ *     改动架构文件数 = 0」的统计。
  *   - 只认比较运算，不认 `matches!(port, "model")` / `match port { "model" => … }`；
  *     真出现时仍可人工看见（误判成本高于收益）。
  *   - `*.test.rs` 与 `#[cfg(test)]` 模块不判：夹具按生产形状造事件，其中
