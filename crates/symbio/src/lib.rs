@@ -19,6 +19,8 @@ pub mod drive;
 pub mod init;
 #[cfg(test)]
 mod notify_port_acceptance;
+#[cfg(test)]
+mod probe_plugin_acceptance;
 
 // ── 门面出口 ──────────────────────────────────────────────────────────────
 // 宿主与 CLI 从这里取契约；插件自身只依赖插件门面（E-009）。
@@ -53,6 +55,7 @@ pub use symbio_plugin_memory;
 pub use symbio_plugin_model;
 pub use symbio_plugin_persona;
 pub use symbio_plugin_plugin_manager;
+pub use symbio_plugin_probe;
 pub use symbio_plugin_reputation;
 pub use symbio_plugin_session;
 pub use symbio_plugin_setting;

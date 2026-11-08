@@ -1,0 +1,9 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+#
+# 验收探针：证明「新增一个真实能力包」只需要本目录 + 生成物。
+# 它申报一个**世界端口**（probe_echo）与一笔债；债按会话前缀惰性——默认会话不欠账，
+# 因此它进了默认装配却不会改变任何既有会话的行为（`EX-006` 名册与工具面都不动）。
+plugin_id: probe
+plugin_comment: 验收探针：一个世界端口 + 一笔债 + 一个执行体（债按会话前缀惰性）
+plugin_assembly: sub_agent
+plugin_order: 205

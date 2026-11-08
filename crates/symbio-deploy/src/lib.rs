@@ -69,6 +69,9 @@ pub const PLUGIN_ID_PERSONA: &str = "persona";
 /// 插件管理与配置入口
 pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 
+/// 验收探针：一个世界端口 + 一笔债 + 一个执行体（债按会话前缀惰性）
+pub const PLUGIN_ID_PROBE: &str = "probe";
+
 /// 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰裁决与出口共用的那一个口径）
 pub const PLUGIN_ID_REPUTATION: &str = "reputation";
 
@@ -130,6 +133,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "vdfs", // VDFS 根（单槽归系统 Agent）
     "memory", // 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
     "setting", // 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
+    "probe", // 验收探针：一个世界端口 + 一笔债 + 一个执行体（债按会话前缀惰性）
     "glossary", // 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
 ];
 

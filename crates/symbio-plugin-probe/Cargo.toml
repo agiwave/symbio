@@ -1,0 +1,17 @@
+[package]
+name = "symbio-plugin-probe"
+version = "0.1.0"
+edition = "2021"
+description = "验收探针插件：一个世界端口 + 一笔债 + 一个执行体（先进默认装配，债按会话前缀惰性）"
+authors = ["Symbio Team"]
+license = "MIT"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+symbio-plugin-api = { path = "../symbio-plugin-api" }
+serde_json = { workspace = true }
+async-trait = { workspace = true }

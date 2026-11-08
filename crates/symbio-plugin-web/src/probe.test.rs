@@ -66,7 +66,7 @@ async fn a_new_world_port_registers_without_architecture_changes() {
     let provider: Arc<dyn PortProvider> = Arc::new(ProbePort);
     let rows = port_rows(&provider);
     assert_eq!(rows.len(), 1, "一个端口一行：端口名是数据");
-    assert_eq!(rows[0].name(), "<port:probe>:probe");
+    assert_eq!(rows[0].name(), "<port:web_probe>:web_probe");
     assert_eq!(rows[0].family().name(), "port", "全部端口共用唯一 multi 族");
 
     let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
@@ -75,19 +75,19 @@ async fn a_new_world_port_registers_without_architecture_changes() {
         .await;
     assert!(
         matches!(
-            capability_port_of(&*registry, PROBE_PORT).await,
+            capability_port_of(&*registry, WEB_PROBE_PORT).await,
             PortReading::Ready(_)
         ),
         "探针端口入表后应读作就绪"
     );
 }
 
-/// 执行面：债与执行体都在本 crate 内闭合，机制侧不需要认识 `probe`。
+/// 执行面：债与执行体都在本 crate 内闭合，机制侧不需要认识该端口。
 #[tokio::test]
 async fn the_probe_debt_and_executor_close_inside_the_capability_crate() {
     let spec = debt();
-    assert_eq!(spec.name, "probe-step");
-    assert_eq!(spec.port, PROBE_PORT);
+    assert_eq!(spec.name, "web-probe-step");
+    assert_eq!(spec.port, WEB_PROBE_PORT);
 
     let executor = ProbePort.executor().expect("探针提供者必须有执行面");
     let ctx = PortExecContext {
@@ -108,7 +108,7 @@ async fn the_probe_debt_and_executor_close_inside_the_capability_crate() {
         .execute(
             ctx,
             PortInput {
-                port: PROBE_PORT,
+                port: WEB_PROBE_PORT,
                 payload: spec.payload.clone(),
             },
         )

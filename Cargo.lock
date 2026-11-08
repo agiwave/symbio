@@ -4170,6 +4170,7 @@ dependencies = [
  "symbio-plugin-model",
  "symbio-plugin-persona",
  "symbio-plugin-plugin_manager",
+ "symbio-plugin-probe",
  "symbio-plugin-reputation",
  "symbio-plugin-session",
  "symbio-plugin-setting",
@@ -4595,6 +4596,15 @@ dependencies = [
  "symbio-providers",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "symbio-plugin-probe"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
 ]
 
 [[package]]
