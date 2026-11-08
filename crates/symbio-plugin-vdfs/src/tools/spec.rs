@@ -233,7 +233,7 @@ pub static SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "vdfs_edit",
-        description: "编辑文件（精确字符串替换，与原生 file_edit 一致）。old_string 必须在文件中精确匹配一次；自动保持原换行符风格（CRLF/LF）；拒绝编辑符号链接。匹配 0 次或多次均报错。",
+        description: "编辑文件（精确字符串替换）。old_string 必须在文件中精确匹配一次；自动保持原换行符风格（CRLF/LF）；拒绝编辑符号链接。匹配 0 次或多次均报错。",
         schema: || {
             serde_json::json!({
                 "type": "object",
@@ -274,7 +274,7 @@ pub static SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "vdfs_search",
-        description: "文件名模式搜索（Glob，与原生 glob_search 一致）。pattern 为文件名 Glob（如 '**/*.rs'、'src/**/*.toml'）；path 为可选搜索基目录（相对工作目录，缺省工作目录根）。仅返回普通文件，目录不返回。",
+        description: "文件名模式搜索（Glob）。pattern 为文件名 Glob（如 '**/*.rs'、'src/**/*.toml'）；path 为可选搜索基目录（相对工作目录，缺省工作目录根）。仅返回普通文件，目录不返回。",
         schema: || {
             serde_json::json!({
                 "type": "object",

@@ -14,14 +14,6 @@ impl SkillExecuteTool {
         Self { skills }
     }
 
-    fn build_skill_details(&self) -> Vec<String> {
-        self.skills
-            .iter()
-            .filter(|s| !s.disable_model_invocation)
-            .map(|s| format!("{} - {}", s.name, s.description))
-            .collect()
-    }
-
     fn build_skill_names(&self) -> Vec<String> {
         self.skills
             .iter()
@@ -51,14 +43,10 @@ impl SkillExecuteTool {
 impl Capability for SkillExecuteTool {
     fn meta(&self) -> CapabilityMeta {
         let skill_names = self.build_skill_names();
-        let skill_details = self.build_skill_details();
 
         CapabilityMeta {
             name: "read_skill".to_string(),
-            description: format!(
-                "获取指定技能的执行指导。\n\n可用技能：\n{}",
-                skill_details.join("\n")
-            ),
+            description: "获取指定技能的执行指导（从 `name` 的 enum 中选）。".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
