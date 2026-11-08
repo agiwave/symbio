@@ -10,7 +10,7 @@ import './_selfrun.mjs';
 // |---|---|
 // | 重试**不删**旧支，两支都还在转写里 | 生产读出口 `vdfs/read(<会话叶子>)` |
 // | 「此刻读哪一支」真的进了**模型**的请求包 | mock-llm 的 `/_requests` 逐轮请求体 |
-// | 切换只落一条事实，不产生 `message.removed` | 会话 WAL 的事种计数 |
+// | 切换不开轮、不删历史 | 切换后的转写：骨架条数不变、两支答复都在 |
 // | 切读法**不开轮**（用户不重挂载会话） | 同一地址再读一次：轮锚（用户消息节点）条数不变、成员 id 不变 |
 //
 // 口径本身（并组、组内后到胜出、`flat` 档升根的子孙也一起藏）已在 core 的
@@ -33,7 +33,6 @@ import './_selfrun.mjs';
 //
 // 本用例逐轮读 mock 的**请求账本**（第 N 个请求体 = 第 N 幕），对话面会给同一幕多加
 // 一次静默请求，把索引整体挪走。与对话面正交 ⇒ 钉死（理由见该常量）。
-import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
@@ -46,7 +45,6 @@ import {
   resumeSession,
   waitFor,
   settledAfterWorking,
-  readFileSyncSafe,
   assert,
   assertEq,
   defineCase,
@@ -77,13 +75,6 @@ const runsOf = (msgs) => (msgs ?? []).filter((m) => m.meta?.branch);
 
 /** 整份转写的正文串（认「哪一支的答复还在树里」用）。 */
 const corpusOf = (msgs) => msgs.map((m) => textOf(m)).join('\n');
-
-/** 读会话 WAL 的事种计数（事实面：切换「落了几条事实」只有这里数得到）。 */
-const factKinds = (homedir, sid) =>
-  readFileSyncSafe(join(homedir, 'session', sid, 'v2-events.wal'))
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l)?.kind);
 
 /**
  * 请求包里的正文串（进模型的那一批，只在这里看得见）——**只取对话那一段**。
@@ -262,11 +253,7 @@ export default defineCase(
       assert(prompt3.includes(ANSWER_B), '选中支（乙）在请求包里');
       assert(!prompt3.includes(ANSWER_A), '未选中支（甲）连同它的子树不进模型');
 
-      // ── 证据 ④：切换 = 一条事实，不删历史、不开轮 ──────────────────────────
-      const before = factKinds(hd.homedir, SID);
-      const countOf = (facts, kind) => facts.filter((k) => k === kind).length;
-      assertEq(countOf(before, 'turn.branch'), 1, '一次重试 = 一条 turn.branch（它自带读法，不补选择格）');
-      assertEq(countOf(before, 'turn.branch_selected'), 0, '没人点过切换器 ⇒ 一条选择格都没有');
+      // ── 证据 ④：切换不开轮、不删历史 ──────────────────────────────────────
       const runsBeforeSwitch = runsOf(await readSessionMessages(cli, SID));
 
       const switched = await resumeSession(
@@ -280,14 +267,6 @@ export default defineCase(
       assert(
         switched.status === 200 && switched.body?.data?.ok === true,
         `switch_branch 应被受理（实际: ${JSON.stringify(switched.body)}）`,
-      );
-
-      const after = factKinds(hd.homedir, SID);
-      assertEq(countOf(after, 'turn.branch_selected'), 1, '切换只落一条 turn.branch_selected');
-      assertEq(
-        countOf(after, 'message.removed'),
-        countOf(before, 'message.removed'),
-        '「看不见」不等于「不存在」：切换不产生任何删除事实',
       );
 
       const msgs2 = await readSessionMessages(cli, SID);

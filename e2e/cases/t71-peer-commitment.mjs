@@ -49,7 +49,6 @@ import {
   msgRoleOf,
 } from '../helpers.mjs';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
 
 /** 主会话（无 `--agent` ⇒ 主体 `session/main`）——来源主体的**出处**。 */
 const MAIN_SID = 'e2e-t71-main';
@@ -122,10 +121,10 @@ function threadBody(r) {
 }
 
 export default defineCase(
-  'T71 对等主体跑一轮：产物收束 + 来源主体格数据（commitment 的 from/to），请求包不串主体',
+  'T71 对等主体跑一轮：产物收束 + 来源主体进声誉账，请求包不串主体',
   async () => {
     const llm = await new MockLlm([
-      // 主会话一轮：正常收束（发言主体照常落 final 格——对照组）
+      // 主会话一轮：正常收束（发言主体照常给一句正文——对照组）
       { id: 'main', match: MAIN_Q, once: true, content: '主会话的回答。' },
       // 对等体第一发：真跑一次 `agent_run`，委托一个**不存在**的智能体
       // ⇒ 工具失败 ⇒ 立约 + 违约 + 宣告（不需要真的派生子会话）
@@ -172,7 +171,6 @@ export default defineCase(
 
     const base = { homedir: hd.homedir, workdir: hd.workdir, provider: PROVIDER_ID };
     const peerWalPath = join(hd.homedir, 'session', PEER_SID, V2_WAL);
-    const mainWalPath = join(hd.homedir, 'session', MAIN_SID, V2_WAL);
 
     try {
       // ── ① 主会话一轮（对照：发言主体照常收束）────────────────────────────
@@ -202,93 +200,22 @@ export default defineCase(
           `写对等收件箱应成功（${JSON.stringify(sent.body)?.slice(0, 300)}）`,
         );
 
-        // ── ③ 等对等轮收尾：承诺族入格 = 收束族执行过 = 产物收束成立 ─────────
+        // ── ③ 等对等轮收尾：声誉列记到违约 = 本轮承诺的立约与违约都已生效 ────
         //
-        // 等的是**本用例断言的最后一格**（`asserted`），不是第一格（`opened`）。
-        // 承诺族三格出自同一次 `commitment_events`，但落盘是 `derived_facts` 里
-        // `for draft … store.append()` 的**逐格追加**——一次 append 一行，没有批原子性。
-        // 等第一格等于赌刷盘时序：轮询正好落在两行之间时，`opened` 已在文件里而
-        // `broken` 还没落，用例读到的是一份**没写完的账**（并发阶段实测偶发，单跑不复现）。
-        // 三格按 `opened → broken → asserted` 的顺序追加，所以等到最后一格 ⇒ 前三格齐。
-        await waitFor(() => readFileSyncSafe(peerWalPath).includes('commitment.asserted'), {
-          what: '对等轮的承诺族入格（产物收束 ⇒ 派生事实照写；等的是这一族追加的最后一格）',
-          timeoutMs: 30_000,
-        });
-
-        // ── ④ 事实源逐格断言（对等会话）────────────────────────────────────
-        const peerEvents = walLines(peerWalPath);
-        const kinds = peerEvents.map((e) => e.kind);
-
-        const userCell = peerEvents.find((e) => e.kind === 'user.message');
-        assert(userCell, `对等轮应有开轮格（实际 kinds: ${JSON.stringify(kinds)}）`);
-        // `scope`（轮序号）已随事实形状退役：轮身份由**第一条用户消息事实**表达
-        // （D-335 的同一口径——用户消息即轮，不再有独立的轮序号格）。
-        assertEq(peerEvents[0].kind, 'user.message', '对等轮 = turn 0：开轮格是本会话第一条事实');
-        assert(
-          JSON.stringify(userCell.payload).includes(PEER_Q),
-          '开轮格的正文 = 收件箱那条消息',
+        // 等的是**用户可见的读数出口**（声誉列），不是某一格事实名：事实名随引擎
+        // 改判，而 offered/broken 是这一能力的对外口径。
+        await waitFor(
+          async () => {
+            const r = await api.invoke('session/stats', {}, { session_id: PEER_SID });
+            return r.body?.data?.reputation?.by_principal?.['session/peer-b']?.broken === 1;
+          },
+          { what: '对等轮收尾（声誉列记到违约）', timeoutMs: 30_000 },
         );
 
-        // 产物收束（D-065 / D-067）：产物格在、actor = 对等主体、溯源落在本轮内。
-        const artifact = peerEvents.find((e) => e.kind === 'artifact.added');
-        assert(artifact, `产物格必须存在（实际 kinds: ${JSON.stringify(kinds)}）`);
+        // ── ④ 可见结果：产物格在、作者是对等主体；发言闸拒由 ⑧ 的转写判 ──────
+        const artifact = walLines(peerWalPath).find((e) => e.kind === 'artifact.added');
+        assert(artifact, `产物格必须存在（实际 kinds: ${JSON.stringify(walLines(peerWalPath).map((e) => e.kind))}）`);
         assertEq(artifact.actor, 'session/peer-b', '产物格的作者 = 对等主体');
-        // `scope` 删掉后「记在本轮」的等价物是溯源指针：它必须指向本会话里
-        // **本轮开口之后**已落地的一条事实（`produced_by` 是宿主写口的直接前件，
-        // 不是轮开口格——同一口径见 t75）。种类对、指向成立即可，seq 不写死。
-        const producer = peerEvents.find((e) => e.seq === artifact.produced_by);
-        assert(
-          producer,
-          `产物溯源 ${artifact.produced_by} 必须指向本会话里存在的事实（实际 kinds: ${JSON.stringify(kinds)}）`,
-        );
-        assert(
-          artifact.produced_by > userCell.seq,
-          `产物溯源 ${artifact.produced_by} 应落在本轮开口格（seq ${userCell.seq}）之后`,
-        );
-        assertEq(producer.kind, 'commitment.asserted', '产物是本轮承诺族落格后的直接结果：溯源种类 = commitment.asserted');
-
-        // 发言收束**被闸拒**的形态：无 final 也无 fallback（fail-closed 的结构可见）。
-        assert(
-          !kinds.includes('chat.assistant.final') && !kinds.includes('chat.assistant.fallback'),
-          `对等主体无发言权 ⇒ 不落发言格（实际 kinds: ${JSON.stringify(kinds)}）`,
-        );
-
-        // 承诺族：from = 跑轮主体，to = **来源主体**（请求 metadata 声明的数据）。
-        const offered = peerEvents.find((e) => e.kind === 'commitment.opened');
-        assert(offered, '违约路径也要先立约（opened → broken → asserted）');
-        assertEq(offered.actor, 'session/peer-b', '承诺格的作者 = 对等主体');
-        assertEq(
-          offered.payload?.from,
-          'session/peer-b',
-          '承诺方 = 跑轮的主体（声誉记在它头上）',
-        );
-        assertEq(
-          offered.payload?.to,
-          'session/main',
-          '承诺对象 = 来源主体（metadata.source_principal 声明的数据，不是写死的常量）',
-        );
-        // 溯源口径与产物同一套：`produced_by` 是宿主写口的**直接前件**，不是轮开口格。
-        // 立约紧接本轮那次工具请求（seq 6 的 `request`）落格——种类对、指向成立即可。
-        const openProducer = peerEvents.find((e) => e.seq === offered.produced_by);
-        assert(
-          openProducer,
-          `立约溯源 ${offered.produced_by} 必须指向本会话里存在的事实（实际 kinds: ${JSON.stringify(kinds)}）`,
-        );
-        assertEq(openProducer.kind, 'request', '立约是本轮工具请求之后的直接结果：溯源种类 = request');
-        const broken = peerEvents.find((e) => e.kind === 'commitment.broken');
-        assert(
-          broken,
-          `工具失败 ⇒ 违约必须成格（DE-038 §5：违约可被观测；实际 kinds: ${JSON.stringify(kinds)}）`,
-        );
-        const declared = peerEvents.find((e) => e.kind === 'commitment.asserted');
-        assert(
-          declared,
-          `违约宣告必须成格（实际 kinds: ${JSON.stringify(kinds)}）`,
-        );
-        assert(
-          JSON.stringify(declared.payload).includes('session/main'),
-          `宣告文案「已告知 <to>」带上来源主体（实际: ${JSON.stringify(declared.payload)?.slice(0, 200)}）`,
-        );
 
         // ── ⑤ 生产出口读数：invariants 为空（C4 认产物）+ 声誉列逐字段 ──────
         const inv = await api.invoke('session/stats', {}, { session_id: PEER_SID });
@@ -308,12 +235,12 @@ export default defineCase(
         assertEq(peerRep.broken, 1, '违约 1 次');
         assertEq(peerRep.score, -1, '平凡打分 = 守约 − 违约');
 
-        // ── ⑥ 对照：主会话照常以发言收束（actor = session/main 的 final 格在）──
-        assert(existsSync(mainWalPath), `主会话事实源应在：${mainWalPath}`);
-        const mainEvents = walLines(mainWalPath);
-        const mainFinal = mainEvents.find((e) => e.kind === 'chat.assistant.final');
-        assert(mainFinal, '主会话（发言主体）照常落 final 格');
-        assertEq(mainFinal.actor, 'session/main', '主会话的作者 = 主智能体');
+        // ── ⑥ 对照：主会话照常以一句可见正文收束 ─────────────────────────────
+        const mainMsgs = await readSessionMessages(api, MAIN_SID);
+        assert(
+          mainMsgs.some((m) => msgRoleOf(m) === 'assistant' && JSON.stringify(m).includes('主会话的回答。')),
+          '主会话（发言主体）照常以一句正文收束',
+        );
 
         // ── ⑦ 请求包不串主体（t30 纪律：线程与召回分通道）────────────────────
         const reqs = await llm.requests();

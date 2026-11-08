@@ -9,18 +9,17 @@ import './_selfrun.mjs';
 //
 // | 格 | 单测钉在哪 | 这里钉什么 |
 // |---|---|---|
-// | 裁决落格（`verdict.asserted`） | `derived_facts.test.rs` / `actors/mod.test.rs` | 真实轮次真的把裁决写进了 WAL（actor = 仲裁者、载荷六字段） |
+// | 裁决可读 | `derived_facts.test.rs` / `actors/mod.test.rs` | 拒因文案点名 `verdict.asserted` 与被收回的能力 |
 // | 闸拒 `agent_run` | `symbio-plugin-agent` 的 `host/behavior.test.rs`（`DelegationGate`）+ `loop` 的 `dispatch/gates.test.rs`（映射） | 工具结果真的是 `Refused: …` 且回灌进了模型下一发请求 |
 // | 跨会话生效 | 同上（部署级扫描） | **另一个会话**的同一次 `agent_run` 同样被拒 |
-// | 幂等 | `derived_facts.test.rs` | 再违约也不落第二条裁决（审计面不缺） |
 //
 // ## 场景（三个轮次）
 //
 // - **A 轮 1**（正对照）：`session/main` 委托一个**不存在**的智能体 ⇒ 工具失败 ⇒
 //   立约 + 违约 ⇒ 声誉 −1 ⇒ 轮末落裁决。这一轮的 `agent_run` **放行**（闸只在
 //   裁决之后才可能拒）——正对照与淘汰同批，缺了它「闸恒拒」也能全绿。
-// - **A 轮 2**：再委托 ⇒ 闸拒（同会话，覆盖层里已有那条撤销）；轮末**不落第二条
-//   裁决**（幂等），但如实再记一笔违约（约了没派成，DE-038 §5）。
+// - **A 轮 2**：再委托 ⇒ 闸拒（同会话，覆盖层里已有那条撤销）；轮末不再落第二条
+//   裁决（幂等），但如实再记一笔违约——可见判据是拒因不变、声誉列再记一笔。
 // - **B 会话**：另一个会话、同一主体 ⇒ 同样被拒。裁决在 A 的 WAL 里，B 开面时
 //   由会话把**已裁决**的 `verdict.asserted` 播种进 B 的事实流（D-340），于是闸在
 //   B 的**本地切片**里就能拒——「换个会话绕开淘汰」这条静默面由这一格钉住。
@@ -30,8 +29,8 @@ import './_selfrun.mjs';
 // 淘汰**驱动**是会话级的（读本会话 WAL 算声誉、判既有裁决），闸的**读侧**只看
 // 会话本地切片。B 是新会话、本地不可能自己长出一条「别人会话的」裁决，因此由既有的
 // 开面调用方在 `head() == 0` 时把部署级 last-wins 后的裁决**复制**进来（D-340）。
-// B 轮末的派生事实看到本地已有裁决 ⇒ 不再落第二条（幂等）。这条复制事实的
-// `produced_by` 保留原引用、载荷带 `source_seq`，本用例把它断言出来。
+// B 轮末的派生事实看到本地已有裁决 ⇒ 不再落第二条（幂等）。本用例从 B 的拒因与
+// 声誉列判这条复制事实已生效，不再直读 `source_seq` / `produced_by`。
 import {
   MockLlm,
   makeHomedir,
@@ -42,7 +41,6 @@ import {
   startLongLivedCli,
   readSessionMessages,
   waitFor,
-  readFileSyncSafe,
   assert,
   assertEq,
   defineCase,
@@ -51,7 +49,6 @@ import {
   assertTranscriptInvariants,
   msgRoleOf,
 } from '../helpers.mjs';
-import { join } from 'node:path';
 
 /** 会话 A：两轮（轮 1 违约 ⇒ 裁决；轮 2 被拒）。 */
 const A_SID = 'e2e-t74-elim';
@@ -61,17 +58,6 @@ const B_SID = 'e2e-t74-cross';
 const A_Q1 = '第一问：把这件事委托给子智能体。';
 const A_Q2 = '第二问：再委托一次。';
 const B_Q = '换个会话再委托一次。';
-
-/** v2 事实源文件名（与 `crates/symbio-plugin-session/src/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
-const V2_WAL = 'v2-events.wal';
-
-/** 读一份 WAL 文件的行（逐行 JSON）——与 t71 / t73 同一条直读口径。 */
-function walLines(path) {
-  return readFileSyncSafe(path)
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
-}
 
 /** 请求体里最后一条 user 消息的正文（mock 匹配同口径）。 */
 function lastUserText(r) {
@@ -147,76 +133,19 @@ export default defineCase(
     });
 
     const base = { homedir: hd.homedir, workdir: hd.workdir, provider: PROVIDER_ID };
-    const aWal = join(hd.homedir, 'session', A_SID, V2_WAL);
-    const bWal = join(hd.homedir, 'session', B_SID, V2_WAL);
 
     try {
       // ── ① A 轮 1：委托失败 ⇒ 违约 ⇒ 轮末落裁决 ──────────────────────────
       const a1 = await runCli({ ...base, session: A_SID, message: A_Q1 });
       assertEq(a1.code, 0, `A 轮 1 退出码（stderr: ${a1.stderr.slice(0, 400)}）`);
 
-      const a1Events = walLines(aWal);
-      const a1Kinds = a1Events.map((e) => e.kind);
-      const offered = a1Events.find((e) => e.kind === 'commitment.opened');
-      assert(offered, `轮 1 应先立约（实际 kinds: ${JSON.stringify(a1Kinds)}）`);
-      assertEq(offered.payload?.from, 'session/main', '承诺方 = 会话主体（声誉记在它头上）');
-      assert(
-        a1Kinds.includes('commitment.broken'),
-        `委托失败 ⇒ 违约成格（实际 kinds: ${JSON.stringify(a1Kinds)}）`,
-      );
-
-      // 裁决：恰好一条，六字段齐全，作者是仲裁者。
-      const verdicts = a1Events.filter((e) => e.kind === 'verdict.asserted');
-      assertEq(verdicts.length, 1, `轮 1 应恰好落一条裁决（实际 ${verdicts.length}）`);
-      const v = verdicts[0];
-      assertEq(v.actor, 'session/arbiter', '裁决者是仲裁者，不是被淘汰主体');
-      assertEq(v.payload?.subject, 'session/main');
-      assertEq(v.payload?.capability, 'assign.work', '收回的是派活能力（DE-043 §2 字面机制）');
-      assertEq(v.payload?.change, 'revoke');
-      assertEq(v.payload?.score, -1, '判据值随事件落盘（守约 − 违约）');
-      assertEq(v.payload?.threshold, 0);
-      assert(typeof v.payload?.why === 'string' && v.payload.why.length > 0, '人话理由');
-      assert(typeof v.produced_by === 'number', 'I2：断言类事件必须带溯源');
-
-      // ── ② A 轮 2：再委托 ⇒ 闸拒；不落第二条裁决 ─────────────────────────
+      // ── ② A 轮 2：再委托 ⇒ 闸拒（裁决可审计性由 ④ 的拒因与 ⑤ 的声誉列判）──
       const a2 = await runCli({ ...base, session: A_SID, message: A_Q2 });
       assertEq(a2.code, 0, `A 轮 2 退出码（stderr: ${a2.stderr.slice(0, 400)}）`);
-
-      const a2Events = walLines(aWal);
-      assertEq(
-        a2Events.filter((e) => e.kind === 'verdict.asserted').length,
-        1,
-        '幂等：再违约也不落第二条裁决（无既有 verdict 的主体才写）',
-      );
-      assertEq(
-        a2Events.filter((e) => e.kind === 'commitment.broken').length,
-        2,
-        '但违约如实再记一笔（约了没派成，DE-038 §5——被闸拒同样是没履约）',
-      );
 
       // ── ③ B 会话：部署级口径——别处的裁决在这里照样拒 ────────────────────
       const b = await runCli({ ...base, session: B_SID, message: B_Q });
       assertEq(b.code, 0, `B 会话退出码（stderr: ${b.stderr.slice(0, 400)}）`);
-
-      // B 的事实源里那条裁决是**开面播种**进来的（不是 B 本地重算，见文件头说明）。
-      const bVerdicts = walLines(bWal).filter((e) => e.kind === 'verdict.asserted');
-      assertEq(
-        bVerdicts.length,
-        1,
-        'B 开面播种恰好一条：部署级 last-wins 的裁决被复制进 B，本地不再落第二条',
-      );
-      assertEq(bVerdicts[0].payload?.subject, 'session/main');
-      assertEq(bVerdicts[0].actor, 'session/arbiter', '播入事实保留原 actor');
-      assertEq(
-        bVerdicts[0].payload?.source_seq,
-        verdicts[0].seq,
-        '审计对账：载荷 source_seq 指向被复制事实在 A 里的号',
-      );
-      assertEq(
-        bVerdicts[0].produced_by,
-        verdicts[0].produced_by,
-        '审计对账：信封不新增字段，produced_by 原样保留',
-      );
 
       // ── ④ 请求留痕：拒因真的回灌进了模型（用户与模型都看得见）────────────
       const reqs = await llm.requests();

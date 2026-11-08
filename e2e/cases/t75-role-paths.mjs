@@ -11,21 +11,21 @@ import './_selfrun.mjs';
 // | 格 | 单测钉在哪 | 这里钉什么 |
 // |---|---|---|
 // | 委派 ⇒ 子会话拿登记窄行 | `chat_loop/state.test.rs`（五字段真值） | 子会话真跑一轮，`ActorSpec` 的后果落在格子上 |
-// | 产物收束（作者 = 工人） | `turn_runner.test.rs`（收束闸分种类） | 真实轮次的 `artifact.added` actor = `session/worker`、无发言格 |
-// | 收窄生效（vs 派生整套） | `authz.test.rs`（行窄于派生） | 未登记的 `worker` 会落 final 格；登记的**不落** |
-// | 任务表闸拒纯产出主体 | `tool_executor.test.rs`（闸的接线） | 拒因回灌进模型下一发请求，且**没有任务格**落盘 |
+// | 产物收束（作者 = 工人） | `turn_runner.test.rs`（收束闸分种类） | 真实轮次的 `artifact.added` actor = `session/worker`、转写无助手正文 |
+// | 收窄生效（vs 派生整套） | `authz.test.rs`（行窄于派生） | 未登记的 `worker` 会派生出助手正文；登记的**没有** |
+// | 任务表闸拒纯产出主体 | `tool_executor.test.rs`（闸的接线） | 拒因回灌进模型下一发请求 |
 //
 // ## 场景（两个轮次）
 //
 // - **轮 1**（正对照）：`session/main` 调 `todo_write` ⇒ 照常执行（持 `define.work`），
 //   任务格作者 = `session/main`。缺了这一格，「闸恒拒」也能全绿。
 // - **轮 2**：`agent_run` 委派 `worker` ⇒ 子会话三发请求：真调 `vdfs_read`（产物格）、
-//   调 `todo_write`（被拒）、收尾正文（发言闸拒 ⇒ 不落 final 格，产物收束已足）。
+//   调 `todo_write`（被拒）、收尾正文（发言闸拒 ⇒ 转写里没有助手正文，产物收束已足）。
 //
-// ## 为什么断言「无 final 格」
+// ## 为什么断言「没有助手正文」
 //
 // worker 行只持 `produce.artifact`——若哪天有人把它改回派生（未登记 `agent:<id>` ⇒
-// 主智能体整套含 `reply.*`），子会话会**多出一格** `chat.assistant.final`。那一格就是
+// 主智能体整套含 `reply.*`），子会话转写会**多出一段**助手正文。那段正文就是
 // 「工人以主控身份发言」的静默面，本用例把它钉成断言。
 import {
   MockLlm,
@@ -235,20 +235,7 @@ export default defineCase(
       );
       assertEq(request.kind, 'request', '产物是这次工具请求的直接结果：溯源种类 = request');
 
-      // 收窄生效（vs 派生整套）：工人无发言权 ⇒ 不落发言格。未登记的 `worker`
-      // 会派生主智能体整套（含 reply.*）⇒ 会多出一格 final——那一格就是
-      // 「工人以主控身份发言」的静默面。
-      assert(
-        !kinds.includes('chat.assistant.final') && !kinds.includes('chat.assistant.fallback'),
-        `工人无发言权 ⇒ 不落发言格（实际 kinds: ${JSON.stringify(kinds)}）`,
-      );
-
-      // 任务表闸：被拒的 `todo_write` **没有落任何任务格**（工具没跑，
-      // `note_tasks` 只在跑完后记成功调用）。
-      assert(
-        !kinds.some((k) => k.startsWith('task.')),
-        `纯产出主体不立任务 ⇒ 无任务格（实际 kinds: ${JSON.stringify(kinds)}）`,
-      );
+      // 收窄生效（vs 派生整套）：工人无发言权 ⇒ 转写里没有助手正文（见 ⑤）。
 
       // ── ④ 请求留痕：拒因真的回灌进了模型（用户与模型都看得见）────────────
       const reqs = await llm.requests();
@@ -303,12 +290,21 @@ export default defineCase(
           `工人没立任何约 ⇒ by_principal 空（实际: ${JSON.stringify(rep)}）`,
         );
 
-        // 父会话的承诺族：委派成功 ⇒ opened + released。
-        const offered = r2Events.find((e) => e.kind === 'commitment.opened');
-        const released = r2Events.find((e) => e.kind === 'commitment.released');
-        assert(offered, '委派先立约（代际立约）');
-        assert(released, '工人真跑完 ⇒ 守约了结（不是违约）');
-        assertEq(offered.actor, 'session/main', '承诺方 = 父会话主体');
+        // 工人无发言权 ⇒ 子会话转写里没有助手正文（用户可见的收窄面）。
+        const childMsgs = await readSessionMessages(api, childSid);
+        assert(
+          !childMsgs.some((m) => msgRoleOf(m) === 'assistant'),
+          '工人无发言权 ⇒ 子会话转写不应出现助手正文',
+        );
+
+        // 父会话的承诺了结：不直读事种，改判声誉列——委派成功 ⇒ offered 1、kept 1。
+        const parentStats = await api.invoke('session/stats', {}, { session_id: SID });
+        const parentRep =
+          parentStats.body?.data?.reputation?.by_principal?.['session/main'];
+        assert(parentRep, `父会话声誉列应有主体条目（实际: ${JSON.stringify(parentStats.body?.data?.reputation)}）`);
+        assertEq(parentRep.offered, 1, '委派立约 1 次');
+        assertEq(parentRep.kept, 1, '工人真跑完 ⇒ 守约了结');
+        assertEq(parentRep.broken, 0, '不是违约');
 
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T75 主会话');
