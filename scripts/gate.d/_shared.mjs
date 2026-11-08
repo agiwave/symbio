@@ -379,7 +379,11 @@ export const BASELINE = {
   // 拒绝打开事实源；不是补回被删的扩展覆盖。非侵蚀。
   // baseline-allow ciRustTestsTotal: 2170 → 2172（D-397）——新增 2 条判据用例：
   // 归宿行守端口格 ⇒ `SinkRowOnPortFact`；派发行改 `by = None` ⇒ 红。非侵蚀。
-  ciRustTestsTotal: 2177,
+  // baseline-allow ciRustTestsTotal: 2172 → 2177（路径语义上提 + 子树去重）——新增 5 条判据
+  // （vdfs 段 3 + 去重 2），不是补回被删的扩展覆盖。非侵蚀。
+  // baseline-allow ciRustTestsTotal: 2177 → 2179（探针端口）——新增 2 条，钉「新增一个世界端口
+  // 只改能力插件」的注册面 / 执行面；能力账本（EX-001）与名册（EX-006）不因此变动。非侵蚀。
+  ciRustTestsTotal: 2179,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
