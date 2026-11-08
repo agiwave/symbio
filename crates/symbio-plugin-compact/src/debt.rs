@@ -89,7 +89,11 @@ impl DebtSource for CompactDebts {
                 COMPACT_PORT,
                 format!("{WRITE_ROW}:{user_id}"),
                 // 载荷只带身份：摘要正文从 summarize 的收束事实读，水位从终答事实读。
-                json!({ "root_id": user_id, "final_id": final_id }),
+                json!({
+                    "root_id": user_id,
+                    "final_id": final_id,
+                    "after_port": ASSIST_PORT,
+                }),
             )
             .when(EVENT_CHAT_ASSISTANT_FINAL)
             .when_id(EVENT_CHAT_ASSISTANT_FINAL, final_id)

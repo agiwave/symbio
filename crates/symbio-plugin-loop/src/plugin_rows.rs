@@ -69,6 +69,10 @@ pub(crate) fn rows_from_debts(debts: &[Debt<'_>], events: &[Event]) -> Vec<DebtR
                 after_port: symbio_plugin_api::events::port_of_fact(debt.decl.owes.source),
                 lease_ms: ROW_LEASE_MS,
                 max_attempts: ROW_MAX_ATTEMPTS,
+                role: symbio_plugin_api::debt::ReplyRole::Internal,
+                accounts_usage: false,
+                accounts_spend: false,
+                failure: symbio_plugin_api::debt::FailureProjection::None,
             }
         })
         .collect()
@@ -219,6 +223,7 @@ impl PortExecutor for PluginRowExecutor {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(1);
         let ask = ask_id(row, &key, attempt);
+        let after_port = input.payload.get("after_port").and_then(Value::as_str);
         let events = exec
             .reader
             .as_ref()
@@ -226,7 +231,7 @@ impl PortExecutor for PluginRowExecutor {
             .unwrap_or_default();
 
         if let Some(reply) = reply_of(&events, &ask) {
-            let request = row_request(handler.row(), &key, &exec, &events, &principal);
+            let request = row_request(handler.row(), &key, &exec, &events, &principal, after_port);
             let drafts = handler.parse(&request, reply);
             if drafts.is_empty() {
                 return PortOutcome::failed(
@@ -250,7 +255,7 @@ impl PortExecutor for PluginRowExecutor {
             return paused();
         }
 
-        let request = row_request(handler.row(), &key, &exec, &events, &principal);
+        let request = row_request(handler.row(), &key, &exec, &events, &principal, after_port);
         match handler.run_ctx(&request, exec.ctx.clone()).await {
             RowStep::Facts(facts) => {
                 if facts.is_empty() {
@@ -356,6 +361,7 @@ fn row_request<'a>(
     exec: &'a PortExecContext,
     events: &'a [Event],
     principal: &'a str,
+    after_port: Option<&'a str>,
 ) -> RowRequest<'a> {
     let now_ms = events.iter().map(|e| e.ts).max().unwrap_or(0);
     let user_seq = events
@@ -372,6 +378,7 @@ fn row_request<'a>(
         user_seq,
         facts: events,
         history: events,
+        after_port,
     }
 }
 

@@ -12,6 +12,7 @@
  * | PTS-004 | 基线引用的 ADR **能打开**、理由**非空** | **改判据而不留决策**——基线是判据的一面，改它必须有决策挂得住 |
  * | PTS-005 | 协议格的**写点只在一个文件里**（两种形态：`symbio/src` 的 `Event::pending` 名字实参 ⊆ 协议常量 / `PortDecl::before`；`impl PortFactWriter` 里的 `store.append`——即 effects / `PortFactWriter` 链路） | **协议格到处有人写**——「四格由引擎独占」从此靠自觉（DE-050 §0） |
  * | PTS-006 | DE-050 §3.3 的**重试条文**写明 `retry(attempt+1)` 且**不含「未启用」** | **条文与机制分叉**——重试已进债键，条文若仍说「未启用」就是把在跑的路说成没跑 |
+ * | PTS-007 | 机制层与读侧（`symbio-sdk` / `symbio-plugin-api` / `symbio-plugin-session` 的非测试源码）**不得比较端口名**（`port == "model"` / `port == PORT_TOOL`） | **读侧的端口特判回流**——收束载荷已经盖上章，读侧再认端口名就等于把「加端口不改读侧」作废 |
  *
  * ## 为什么是这几格（而不是「机制键守恒」那种计数）
  *
@@ -97,8 +98,8 @@
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns PTS 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 重试条文）
-// @codes PTS-001 PTS-002 PTS-003 PTS-004 PTS-005 PTS-006
+// @ns PTS 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 重试条文 / 读侧不认端口名）
+// @codes PTS-001 PTS-002 PTS-003 PTS-004 PTS-005 PTS-006 PTS-007
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -434,10 +435,10 @@ function portValueLiterals() {
     if (resolved !== undefined) out.add(resolved)
     else unresolved.push(expr)
   }
-  return { values: out, unresolved }
+  return { values: out, unresolved, resolveName }
 }
 
-const { values: portValues, unresolved: portUnresolved } = portValueLiterals()
+const { values: portValues, unresolved: portUnresolved, resolveName } = portValueLiterals()
 for (const expr of portUnresolved) {
   report(
     'PTS-002',
@@ -728,6 +729,97 @@ if (retrySection !== null && !/retry\(attempt\+1\)/.test(retrySection)) {
   )
 }
 
+// ───────────────────────── PTS-007 读侧不认端口名 ─────────────────────────
+
+/**
+ * 收束载荷已经**盖章**（`stamp.role` / `stamp.usage` / `stamp.spend` /
+ * `stamp.failure`），机制层与读侧只认章与数据。读侧一旦再比较端口名
+ * （`port == "model"` / `port == PORT_TOOL`），「新增一个世界端口 ⇒ 改架构文件数 = 0」
+ * 这句话就立刻作废：读侧又变成按端口逐个打补丁的地方。
+ *
+ * 命中形状：一行里同时出现
+ *   ① 端口上下文（小写词 `port`，或解析到端口取值的常量名）；
+ *   ② 比较运算 `==` / `!=`；
+ *   ③ 一个**端口取值**（`"model"` 这类字面量，或解析到端口取值的常量）。
+ * 三者齐了才是「按端口名分支」。`stamp.role == Some("reader")` 不算——
+ * `"reader"` 不在端口取值名单里，名单外的一律不判。
+ *
+ * 已知边界（刻意）：
+ *   - 只认比较运算，不认 `matches!(port, "model")` / `match port { "model" => … }`；
+ *     真出现时仍可人工看见（误判成本高于收益）。
+ *   - `*.test.rs` 与 `#[cfg(test)]` 模块不判：夹具按生产形状造事件，其中
+ *     `port == "model"` 是在布置被测对象，不是读侧分支。
+ *   - 端口取值名单来自端口声明（与 PTS-002 同一份）；名单读不出时本格没有输入，
+ *     与其余各格一样**宁红不静默**。
+ */
+const PTS7_ROOTS = [
+  'crates/symbio-sdk/src',
+  'crates/symbio-plugin-api/src',
+  'crates/symbio-plugin-session/src',
+]
+
+function pts7Files(root) {
+  const out = []
+  const skip = new Set(['target', 'node_modules', '.git', '.symbio', '.workbuddy-ai'])
+  const walk = (dir) => {
+    if (!fs.existsSync(dir)) return
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!skip.has(entry.name)) walk(path.join(dir, entry.name))
+        continue
+      }
+      if (entry.name.endsWith('.rs') && !entry.name.endsWith('.test.rs')) {
+        out.push(path.join(dir, entry.name))
+      }
+    }
+  }
+  walk(root)
+  return out
+}
+
+/** 一行的常量 token（`PORT_TOOL` 这种形状；跳过字段/方法名的小写） */
+function pt7ConstTokens(line) {
+  return [...line.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)].map((m) => m[1])
+}
+
+/** 常量名是否解析到端口取值（`PORT_TOOL` / `MODEL_PORT` / `use … as` 别名） */
+function pt7IsPortConst(name) {
+  const value = resolveName(name)
+  return value !== undefined && portValues.has(value)
+}
+
+const PTS7_FILES = PTS7_ROOTS.flatMap((rel) => pts7Files(path.join(ROOT, rel)))
+if (PTS7_FILES.length === 0 || portValues.size === 0) {
+  report(
+    'PTS-007',
+    `读侧判据没有输入（扫描面 ${PTS7_FILES.length} 个文件、端口取值名单 ${portValues.size} 条）——` +
+      `三个读侧树或端口声明读不出时，最省事的实现就是「没什么可判 ⇒ 通过」，故宁红不静默`,
+  )
+} else {
+  for (const abs of PTS7_FILES) {
+    let code
+    try {
+      code = blankTestModules(blankComments(fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')).join('\n'))
+    } catch {
+      continue
+    }
+    const rel = path.relative(ROOT, abs).split(path.sep).join('/')
+    code.split('\n').forEach((line, i) => {
+      if (!/\bport\b/.test(line) && !pt7ConstTokens(line).some(pt7IsPortConst)) return
+      if (!/(?:==|!=)/.test(line)) return
+      const literals = stringLiteralsOf(line).filter((s) => portValues.has(s))
+      const consts = pt7ConstTokens(line).filter(pt7IsPortConst)
+      if (literals.length === 0 && consts.length === 0) return
+      const name = literals[0] ?? resolveName(consts[0])
+      report(
+        'PTS-007',
+        `${rel}:${i + 1}  读侧按端口名 \`${name}\` 分支 —— 收束载荷已经盖章（role / usage / spend / failure），` +
+          `读侧只认章与数据；按端口名比较会让「新增一个世界端口 ⇒ 改架构文件数 = 0」作废`,
+      )
+    })
+  }
+}
+
 // ───────────────────────── 输出 ─────────────────────────
 
 const ruleLine = (ok, rule, desc) =>
@@ -755,6 +847,11 @@ if (errors.length === 0) {
     `协议格写方唯一：${writers.join(' / ')}（命中 ${[...writePoints.values()].reduce((n, l) => n + l.length, 0)} 处构造）`,
   )
   ruleLine(true, 'PTS-006', `重试条文已写出：${PLAN_REL} §3.3`)
+  ruleLine(
+    true,
+    'PTS-007',
+    `读侧不认端口名：${PTS7_FILES.length} 个文件里零处「端口取值比较」（取值名单 ${[...portValues].sort().join(' / ')}）`,
+  )
   process.exit(0)
 }
 

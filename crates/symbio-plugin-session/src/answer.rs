@@ -120,7 +120,7 @@ async fn answer_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeReque
     };
     let reply = if verdict.needs_wording_generation() {
         // 生成路径：回执已经在事实面上（行债的派发与三格都归环），只读不写。
-        let Some(reply) = assist_reply(req.facts, user_id) else {
+        let Some(reply) = assist_reply(req.facts, user_id, req.after_port) else {
             return RowStep::Facts(Vec::new());
         };
         reply
@@ -198,10 +198,11 @@ async fn answer_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeReque
 ///
 /// 只读事实面上的 `response`；没有回执 = 这一次生成失败 / 被拒 ⇒ 本行不落终答，
 /// 由既有降级分支接管，**不在这里造一句**。
-fn assist_reply(events: &[Event], root_id: &str) -> Option<WordingReply> {
+fn assist_reply(events: &[Event], root_id: &str, port: Option<&str>) -> Option<WordingReply> {
+    let port = port?;
     let fact = events.iter().rev().find(|e| {
         e.kind == EVENT_RESPONSE
-            && e.payload.get("port").and_then(Value::as_str) == Some(MODEL_ASSIST_PORT)
+            && e.payload.get("port").and_then(Value::as_str) == Some(port)
             && e.payload.get("root_id").and_then(Value::as_str) == Some(root_id)
     })?;
     let reply: cm::AssistReply = serde_json::from_value(fact.payload.clone()).ok()?;
@@ -245,7 +246,11 @@ impl DebtSource for AnswerDebts {
             SESSION_ANSWER,
             PLUGIN_ROW,
             format!("{SESSION_ANSWER}:id={user_id}"),
-            json!({ "row": SESSION_ANSWER, "key": [["id", user_id]] }),
+            json!({
+                "row": SESSION_ANSWER,
+                "key": [["id", user_id]],
+                "after_port": MODEL_ASSIST_PORT,
+            }),
         )
         .when_id(CLASSIFY_ANSWERED, answered_id)
         .unless_id(

@@ -87,7 +87,10 @@ impl DebtSource for ModelDebts {
         .when(EVENT_USER_MESSAGE)
         .when_id(EVENT_SESSION_CONFIG, config_id.clone())
         .unless_id(FINAL_FACT_PREFIX, format!("{FINAL_FACT_PREFIX}:{user_id}"))
-        .after_port(PLUGIN_ROW);
+        .after_port(PLUGIN_ROW)
+        .reader_facing()
+        .accounts_usage()
+        .accounts_spend();
         let mut rows = vec![reply];
         // 工具轮结束后的续接：身份来自最近一条工具产物，没有产物就不欠。
         // `when` 认 `tool.requested`：没有这一轮的工具请求，`when_no_open` 会在
@@ -112,7 +115,10 @@ impl DebtSource for ModelDebts {
                 .when(EVENT_TOOL_REQUESTED)
                 .when_id(EVENT_SESSION_CONFIG, config_id)
                 .when_no_open(TOOL_PORT)
-                .after_port(TOOL_PORT),
+                .after_port(TOOL_PORT)
+                .reader_facing()
+                .accounts_usage()
+                .accounts_spend(),
             );
         }
         rows

@@ -31,6 +31,7 @@
 
 use symbio_kernel::event::{Event, EVENT_RESPONSE};
 use symbio_kernel::projection::Projection;
+use symbio_plugin_api::debt::{STAMP_KEY, STAMP_USAGE};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -60,8 +61,9 @@ pub struct TokenLedgerView {
 
 /// 用量台账投影：从事件切片累计各主体实测的 token。
 ///
-/// 只认 `response` 且 `payload.port == "model"` 的那一批：`turn` / `tool` 端口的
-/// 应答不带用量（它们的「代价」是别的东西，见各自的端口声明）。
+/// 只认 `response`、且环在收束载荷上盖了 `stamp.usage = true` 的那一批：端口
+/// 用不用得着记用量由债行自己声明，读侧不比较端口名。没有 `usage` 数据的记录跳过
+/// （章只说明「本笔进这本账」，不伪造读数）。
 pub fn token_ledger() -> Projection<TokenLedgerView> {
     Projection::new(|events: &[Event], now| {
         let mut by_principal: BTreeMap<String, TokenEntry> = BTreeMap::new();
@@ -73,7 +75,12 @@ pub fn token_ledger() -> Projection<TokenLedgerView> {
                 continue;
             }
             let payload = &e.payload;
-            if payload.get("port").and_then(|v| v.as_str()) != Some("model") {
+            if !payload
+                .get(STAMP_KEY)
+                .and_then(|stamp| stamp.get(STAMP_USAGE))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
                 continue;
             }
             let Some(usage) = payload.get("usage") else {

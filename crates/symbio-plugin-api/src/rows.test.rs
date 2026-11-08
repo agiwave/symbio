@@ -68,6 +68,7 @@ fn request_is_pure_values() {
         user_seq: 42,
         facts: &[],
         history: &[],
+        after_port: None,
     };
     assert_eq!(req.key_of("id"), Some("call-1"));
     assert_eq!(req.key_of("absent"), None);
@@ -92,6 +93,7 @@ fn parse_defaults_to_no_facts() {
         user_seq: 1,
         facts: &[],
         history: &[],
+        after_port: None,
     };
     let drafts = handler_for("test.row")
         .unwrap()

@@ -85,7 +85,30 @@ pub(crate) fn drive(rows: &[Decl]) -> usize {
 const PORTS_SRC = `pub(crate) static PORTS: &[PortDecl] = &[
     PortDecl { port: "turn", before: EVENT_SENT, lease_ms: 600_000, max_attempts: 1, concurrent: false },
     PortDecl { port: "tool", before: EVENT_SENT, lease_ms: 600_000, max_attempts: 1, concurrent: true },
+    PortDecl { port: "model", before: EVENT_SENT, lease_ms: 600_000, max_attempts: 1, concurrent: false },
 ];
+`
+
+/**
+ * PTS-007 的扫描面：三个读侧树各放一份**干净**样例。
+ *
+ * 这份样例本身就是一个判据：`stamp.role == Some("reader")` 必须**不红**
+ * （`reader` 不在端口取值名单里）——否则「只认章」这条会被自己的守卫误伤。
+ * 端口常量只作声明出现，比较留空。
+ */
+/** PTS-007 扫描的三个读侧树（与脚本里的 `PTS7_ROOTS` 同一份口径） */
+const READ_SIDE_ROOTS = [
+  'crates/symbio-sdk/src',
+  'crates/symbio-plugin-api/src',
+  'crates/symbio-plugin-session/src',
+]
+
+const READ_SIDE_SRC = `pub(crate) const PORT_TOOL: &str = "tool";
+
+pub(crate) fn is_reader(payload: &serde_json::Value) -> bool {
+    let role = payload.get("stamp").and_then(|s| s.get("role")).and_then(serde_json::Value::as_str);
+    role == Some("reader")
+}
 `
 
 /**
@@ -146,6 +169,9 @@ function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, por
   write(SOLVER_REL, solver)
   write(PORTS_REL, ports)
   write(WRITER_REL, writer)
+  // PTS-007 的扫描面：三个读侧树都要有文件，否则「判据没有输入」那一格会让
+  // 每一条夹具用例一起红（那是夹具缺件，不是被测判据的红）。
+  for (const rel of READ_SIDE_ROOTS) write(`${rel}/sample.rs`, READ_SIDE_SRC)
   // `plan: null` = 夹具里没有这份文档（用来证明 PTS-006 读不到输入时判红）。
   if (plan !== null) write(PLAN_REL, plan)
   // 基线挂的决策必须**能打开**（PTS-004）——夹具在设计文档里写一条 `### D-NNN`。
@@ -206,6 +232,10 @@ test('真仓当前状态通过，且各格判据都数得出非零输入', () =>
   }
   // PTS-006 的输入也要真的存在（真仓里那份文档不是夹具自动补的）。
   assert.match(r.stdout, /PTS-006.*050-义务环事实词表与债务表\.md §3\.3/, '真仓里契约 7 的条文没被判到 ⇒ PTS-006 可能没有输入')
+  // PTS-007 也要数得出扫描面（扫空了就变成「永远绿」）。
+  const readSide = /PTS-007.*读侧不认端口名：(\d+) 个文件/.exec(r.stdout)
+  assert.ok(readSide, '通过信息里没有「读侧不认端口名」的扫描文件数 ⇒ PTS-007 可能没有输入')
+  assert.ok(Number(readSide[1]) > 0, '读侧扫描面为 0 ⇒ 三个读侧树读不出')
 })
 
 // ── ② PTS-001：协议名闭集 ─────────────────────────────────────────────
@@ -527,6 +557,89 @@ test('PTS-006 重试条文文档读不出 ⇒ 红（不得「没读到 ⇒ 没�
     const r = run(root)
     assert.equal(r.status, 1, r.stdout)
     assert.match(r.stderr, /PTS-006.*读不出/)
+  } finally {
+    cleanup(root)
+  }
+})
+
+// ── ⑧ PTS-007：读侧不认端口名 ─────────────────────────────────────────
+
+test('PTS-007 读侧出现 `if port == "model"` ⇒ 红（退化用例）', () => {
+  const root = fixture()
+  try {
+    fs.mkdirSync(path.join(root, 'crates/symbio-plugin-session/src/answer'), { recursive: true })
+    fs.writeFileSync(
+      path.join(root, 'crates/symbio-plugin-session/src/answer/bad.rs'),
+      'pub(crate) fn pick(port: &str) -> bool {\n    if port == "model" { true } else { false }\n}\n',
+      'utf8',
+    )
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-007.*bad\.rs:2.*`model`/s)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-007 读侧用端口常量比较（`port == PORT_TOOL`）⇒ 红', () => {
+  const root = fixture()
+  try {
+    fs.mkdirSync(path.join(root, 'crates/symbio-sdk/src/projection'), { recursive: true })
+    fs.writeFileSync(
+      path.join(root, 'crates/symbio-sdk/src/projection/bad.rs'),
+      'pub(crate) fn pick(port: &str) -> bool {\n    port == PORT_TOOL\n}\n',
+      'utf8',
+    )
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-007.*bad\.rs:2.*`tool`/s)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-007 盖章比较（`stamp.role == Some("reader")`）不判 ⇒ 绿', () => {
+  // 夹具的 `READ_SIDE_SRC` 就是这一条；单独再写一遍，免得它被别处的注入掩盖。
+  const root = fixture()
+  try {
+    fs.mkdirSync(path.join(root, 'crates/symbio-sdk/src/projection'), { recursive: true })
+    fs.writeFileSync(
+      path.join(root, 'crates/symbio-sdk/src/projection/stamp.rs'),
+      'pub(crate) fn is_reader(payload: &serde_json::Value) -> bool {\n    payload.get("stamp").and_then(|s| s.get("role")).and_then(serde_json::Value::as_str) == Some("reader")\n}\n',
+      'utf8',
+    )
+    const r = run(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-007 测试文件里的端口比较不判 ⇒ 绿（夹具不是读侧分支）', () => {
+  const root = fixture()
+  try {
+    fs.mkdirSync(path.join(root, 'crates/symbio-plugin-session/src'), { recursive: true })
+    fs.writeFileSync(
+      path.join(root, 'crates/symbio-plugin-session/src/sample.test.rs'),
+      'fn response(port: &str) {\n    if port == "model" {}\n}\n',
+      'utf8',
+    )
+    const r = run(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-007 三个读侧树读不出 ⇒ 红（不得「没什么可判 ⇒ 通过」）', () => {
+  const root = fixture()
+  try {
+    for (const rel of READ_SIDE_ROOTS) {
+      fs.rmSync(path.join(root, rel), { recursive: true, force: true })
+    }
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-007.*读侧判据没有输入/s)
   } finally {
     cleanup(root)
   }

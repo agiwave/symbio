@@ -36,6 +36,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::chat::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::event::{Entity, Event, Verb, EVENT_FAILED, EVENT_RESPONSE};
+use crate::port_stamp::{STAMP_KEY, STAMP_ROLE};
 use crate::projection::vocab::MessageVocab;
 use symbio_kernel::event::branch::removed_ids;
 
@@ -308,12 +309,21 @@ fn meta_flag(m: &ChatNode, key: &str) -> bool {
 ///
 /// ## 只认本轮自己的往返
 ///
-/// 端口 `model`、**无 `via`**：内部往返（措辞 / 裁判 / 摘要）不是这一轮对读者说的话，
-/// 它们的 `response` 同样带正文，但绝不能顶替本轮答案。
+/// **无 `via`**，且环盖了 `stamp.role = "reader"`：内部往返（措辞 / 裁判 / 摘要）
+/// 不是这一轮对读者说的话，它们的 `response` 同样带正文，但绝不能顶替本轮答案。
 #[derive(Debug, Default)]
 pub struct OutputIndex {
     /// 逻辑 id（`model-<turn>-d<drive>-s<step>`）→ (answer 正文, answer 节点 id)。
     by_call: HashMap<String, (String, String)>,
+}
+
+/// 一次往返是否对读者说话：只认环盖的 `stamp.role`，不比较端口名。
+fn is_reader_reply(payload: &serde_json::Value) -> bool {
+    payload
+        .get(STAMP_KEY)
+        .and_then(|stamp| stamp.get(STAMP_ROLE))
+        .and_then(serde_json::Value::as_str)
+        == Some("reader")
 }
 
 impl OutputIndex {
@@ -324,7 +334,7 @@ impl OutputIndex {
             if !matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED) {
                 continue;
             }
-            if e.payload.get("port").and_then(|v| v.as_str()) != Some("model") {
+            if !is_reader_reply(&e.payload) {
                 continue;
             }
             if e.payload.get("via").is_some() {

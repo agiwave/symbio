@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use symbio_plugin_api::debt::{FailureProjection, ReplyRole};
 use symbio_plugin_api::drive::DRIVE_SENT;
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
@@ -303,10 +304,44 @@ async fn one_round_writes_request_sent_response() {
         .into_iter()
         .find(|f| f.kind == FactKind::Response)
         .unwrap();
-    // 环把端口名补进收束载荷（执行体不自报「我是哪个端口」）；重建面按
-    // `payload.port == "model"` 判这次往返是否对读者说话，缺了它正文 / 思考节点
-    // 会全部静默消失（见 `response_payloads` 的文档）。这里钉的是「补进去」。
-    assert_eq!(response.payload, json!({"answer": {"q": 1}, "port": "p1"}));
+    // 环把端口名与语义章补进收束载荷（执行体不自报）；读侧按章判这次往返是否
+    // 对读者说话、是否进台账、失败是否补卡，缺了它们这些节点会全部静默消失。
+    assert_eq!(
+        response.payload,
+        json!({
+            "answer": {"q": 1},
+            "port": "p1",
+            "stamp": {"role": "internal"},
+        })
+    );
+}
+
+#[tokio::test]
+async fn settlement_stamps_carry_the_row_declared_semantics() {
+    let stub = Arc::new(Stub::ok());
+    let mut row = DebtRow::new("a", "p1", "d", json!({}));
+    row.role = ReplyRole::Reader;
+    row.accounts_usage = true;
+    row.accounts_spend = true;
+    row.failure = FailureProjection::ToolCall;
+    let ctx = TestCtx::new(vec![row]).with_executor("p1", stub);
+
+    let _ = drive(&ctx).await;
+
+    let response = ctx
+        .snapshot()
+        .into_iter()
+        .find(|f| f.kind == FactKind::Response)
+        .unwrap();
+    assert_eq!(
+        response.payload["stamp"],
+        json!({
+            "role": "reader",
+            "usage": true,
+            "spend": true,
+            "failure": "tool_call",
+        })
+    );
 }
 
 #[tokio::test]
@@ -346,8 +381,10 @@ async fn non_retryable_error_lands_failed() {
     let last = ctx.snapshot().last().cloned().unwrap();
     assert_eq!(last.kind, FactKind::Failed);
     assert_eq!(last.payload["class"], "non_retryable");
-    // 失败与成功同一条身份位：端口由环补，读侧按它判「这次往返对读者说话」。
+    // 失败与成功同一条身份位与语义章：端口与角色都由环补，读侧按章判
+    // 「这次往返对读者说话」。
     assert_eq!(last.payload["port"], "p1");
+    assert_eq!(last.payload["stamp"], json!({"role": "internal"}));
 }
 
 /// 授权拒绝（`D-385`）：执行体交 `Denied` ⇒ 它这一笔的草稿**一概不落**，落

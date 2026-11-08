@@ -9,6 +9,12 @@ fn response(id: &str, port: &str, principal: &str, spend: Option<(u64, &str)>, t
         "id": id,
         "attempt": 1,
         "principal": principal,
+        // 夹具模拟环的盖章：只有模型往返的债行声明「进金额台账」。
+        "stamp": if port == "model" {
+            serde_json::json!({ "role": "reader", "usage": true, "spend": true })
+        } else {
+            serde_json::json!({ "role": "internal" })
+        },
     });
     if let Some((amount_nano, currency)) = spend {
         payload["spend"] = serde_json::json!({

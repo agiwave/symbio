@@ -6,6 +6,7 @@ use crate::ring::facts::{DebtKey, FactView};
 use serde_json::Value;
 use symbio_kernel::decl::Frozen;
 use symbio_kernel::event::Event;
+use symbio_plugin_api::debt::{FailureProjection, ReplyRole};
 use symbio_plugin_api::drive::Unless;
 
 /// 声明行这一圈的**选债输入**：冻结声明表 + 事实切片。
@@ -51,6 +52,14 @@ pub(crate) struct DebtRow {
     pub(crate) lease_ms: u64,
     /// 最多尝试次数（含首次）。
     pub(crate) max_attempts: u32,
+    /// 应答在读者面的角色（环据此盖章）。
+    pub(crate) role: ReplyRole,
+    /// 应答进用量台账。
+    pub(crate) accounts_usage: bool,
+    /// 应答进金额台账。
+    pub(crate) accounts_spend: bool,
+    /// 失败的落格形状。
+    pub(crate) failure: FailureProjection,
 }
 
 #[cfg(test)]
@@ -75,6 +84,10 @@ impl DebtRow {
             after_port: None,
             lease_ms: 60_000,
             max_attempts: 3,
+            role: ReplyRole::Internal,
+            accounts_usage: false,
+            accounts_spend: false,
+            failure: FailureProjection::None,
         }
     }
 

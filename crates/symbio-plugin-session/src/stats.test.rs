@@ -1651,6 +1651,12 @@ fn resp_event(id: &str, port: &str, principal: &str, usage: Option<(u64, Option<
         "id": id,
         "attempt": 1,
         "principal": principal,
+        // 夹具模拟环的盖章：只有模型往返的债行声明「进用量 / 金额台账」。
+        "stamp": if port == "model" {
+            serde_json::json!({ "role": "reader", "usage": true, "spend": true })
+        } else {
+            serde_json::json!({ "role": "internal" })
+        },
     });
     if let Some((input, output)) = usage {
         let mut u = serde_json::json!({ "input": input });

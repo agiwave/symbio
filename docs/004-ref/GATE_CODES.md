@@ -50,7 +50,7 @@ lists: [gate-codes=owner]
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
 | **PP** | 投影纯净性 | `scripts/projection-purity.mjs` | PP-001–005 | `PP-006` |
 | **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
-| **PTS** | 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 重试条文） | `scripts/port-surface-audit.mjs` | PTS-001–006 | `PTS-007` |
+| **PTS** | 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 重试条文 / 读侧不认端口名） | `scripts/port-surface-audit.mjs` | PTS-001–007 | `PTS-008` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–003 | `R-004` |
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–033 | `RG-034` |
@@ -220,6 +220,7 @@ lists: [gate-codes=owner]
 | **PTS-004** | `scripts/port-surface-audit.mjs` |
 | **PTS-005** | `scripts/port-surface-audit.mjs` |
 | **PTS-006** | `scripts/port-surface-audit.mjs` |
+| **PTS-007** | `scripts/port-surface-audit.mjs` |
 | **R-001** | `scripts/dead-code-audit.mjs` |
 | **R-002** | `scripts/dead-code-audit.mjs` |
 | **R-003** | `scripts/dead-code-audit.mjs` |

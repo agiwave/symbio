@@ -167,6 +167,11 @@ pub fn session_recall_id(user_fact_id: &str) -> String {
     format!("session-recall:{user_fact_id}")
 }
 
+/// 语义章契约住在 `symbio-sdk`（宿主机制层）；这里只转出给插件作者。
+pub use symbio_sdk::port_stamp::{
+    FailureProjection, ReplyRole, STAMP_FAILURE, STAMP_KEY, STAMP_ROLE, STAMP_SPEND, STAMP_USAGE,
+};
+
 /// 一行债：申报方给出的数据，宿主原样转给环。
 #[derive(Debug, Clone)]
 pub struct DebtSpec {
@@ -204,6 +209,14 @@ pub struct DebtSpec {
     pub lease_ms: u64,
     /// 最多尝试次数（含首次）。
     pub max_attempts: u32,
+    /// 应答在读者面的角色（环据此盖章；读侧不比较端口名）。
+    pub role: ReplyRole,
+    /// 本端口的应答进用量台账（`usage` 数据自身仍必须存在）。
+    pub accounts_usage: bool,
+    /// 本端口的应答进金额台账（`spend` 数据自身仍必须存在）。
+    pub accounts_spend: bool,
+    /// 失败的落格形状（工具调用补结果卡）。
+    pub failure: FailureProjection,
 }
 
 impl DebtSpec {
@@ -227,7 +240,35 @@ impl DebtSpec {
             after_port: None,
             lease_ms: 60_000,
             max_attempts: 3,
+            role: ReplyRole::Internal,
+            accounts_usage: false,
+            accounts_spend: false,
+            failure: FailureProjection::None,
         }
+    }
+
+    /// 本行往返的正文是对读者说的 assistant 消息。
+    pub fn reader_facing(mut self) -> Self {
+        self.role = ReplyRole::Reader;
+        self
+    }
+
+    /// 本端口的应答进用量台账（`usage` 数据自身仍必须存在）。
+    pub fn accounts_usage(mut self) -> Self {
+        self.accounts_usage = true;
+        self
+    }
+
+    /// 本端口的应答进金额台账（`spend` 数据自身仍必须存在）。
+    pub fn accounts_spend(mut self) -> Self {
+        self.accounts_spend = true;
+        self
+    }
+
+    /// 声明失败的落格形状。
+    pub fn failure_card(mut self, projection: FailureProjection) -> Self {
+        self.failure = projection;
+        self
     }
 
     /// 声明前置债 id。

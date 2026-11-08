@@ -31,8 +31,6 @@ use symbio_plugin_api::port::{
 };
 use symbio_plugin_api::{Entity, FactDraft, Verb, EVENT_RESPONSE};
 
-use crate::debt::ASSIST_PORT;
-
 /// 端口名（唯一来源：本插件）。
 pub(crate) const COMPACT_PORT: &str = "compact";
 
@@ -68,7 +66,8 @@ impl PortExecutor for CompactExecutor {
             return PortOutcome::ok();
         };
         let facts = reader.facts();
-        let Some(summary) = summary_of(&facts, &final_id) else {
+        let after_port = str_of(&input.payload, "after_port");
+        let Some(summary) = summary_of(&facts, &final_id, &after_port) else {
             // 摘要那笔没交回正文（失败 / 空转写）：不拿占位冒充摘要。
             return PortOutcome::ok();
         };
@@ -98,10 +97,10 @@ fn str_of(payload: &Value, key: &str) -> String {
         .to_string()
 }
 
-/// 本轮 `model.assist` 交回的摘要正文：按端口 + 终答身份双匹配，取最后一条。
-fn summary_of(facts: &[PortFact], final_id: &str) -> Option<String> {
+/// 本轮上游端口交回的摘要正文：按**债行声明的端口** + 终答身份双匹配，取最后一条。
+fn summary_of(facts: &[PortFact], final_id: &str, port: &str) -> Option<String> {
     let fact = facts.iter().rev().find(|f| {
-        f.port == ASSIST_PORT
+        f.port == port
             && f.kind == EVENT_RESPONSE
             && f.payload.get("final_id").and_then(Value::as_str) == Some(final_id)
     })?;

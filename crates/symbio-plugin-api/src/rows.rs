@@ -108,6 +108,9 @@ pub struct RowRequest<'a> {
     /// 与 [`crate::settle::Settling::history`] 同形：视图求解器按轮收窄
     /// 是为了给每个视图一个成本上界，行是一次单调用、按需读，不该被同一个上界误伤。
     pub history: &'a [Event],
+    /// 本行声明的**上游端口**（`DebtSpec.after_port`）：读别端口回执的行按它取，
+    /// 不引全局端口常量。`None` = 本行没有声明上游端口。
+    pub after_port: Option<&'a str>,
 }
 
 impl RowRequest<'_> {

@@ -14,6 +14,7 @@ use symbio_plugin_api::chat_node::{
 use symbio_plugin_api::context::{
     sections, Cadence, ContextRequest, ContextSection, DelegateVerdict, LiveInputs,
 };
+use symbio_plugin_api::debt::{STAMP_KEY, STAMP_ROLE};
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED, EVENT_SESSION_CONFIG,
     EVENT_TOOL_CALL_REQUESTED, EVENT_TOOL_REQUESTED, EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED,
@@ -98,6 +99,15 @@ struct RoundTripRequest {
     /// `calls` 的 `call_key` 都从这里取，环不再代装配。
     #[serde(default)]
     principal: String,
+}
+
+/// 一次往返是否对读者说话：只认环盖的 `stamp.role`，不比较端口名。
+fn is_reader_reply(payload: &serde_json::Value) -> bool {
+    payload
+        .get(STAMP_KEY)
+        .and_then(|stamp| stamp.get(STAMP_ROLE))
+        .and_then(serde_json::Value::as_str)
+        == Some("reader")
 }
 
 /// 把载荷里的 `messages`（ChatNode 数组）逐条译成请求消息。
@@ -266,7 +276,7 @@ fn turn_input(
             // 轮内追加的消息（D-249 的省略说明）：id 写的是它取代的区间，这里按
             // 节点自己的身份回灌成一条普通消息——读侧不解释「为什么」。
             EVENT_MESSAGE_ADDED => append_payload_nodes(&mut messages, &fact.payload),
-            EVENT_RESPONSE if fact.port == MODEL_PORT => {
+            EVENT_RESPONSE if is_reader_reply(&fact.payload) => {
                 // 收束轮可能与 `chat.assistant.final` 同文本（见 `first_text`）。
                 if !first_text(&mut seen_texts, fact) {
                     continue;

@@ -9,6 +9,9 @@ use std::sync::{Arc, Mutex};
 use futures::future::join_all;
 use serde_json::{json, Value};
 use symbio_kernel::decl::ring::owed;
+use symbio_plugin_api::debt::{
+    FailureProjection, STAMP_FAILURE, STAMP_KEY, STAMP_ROLE, STAMP_SPEND, STAMP_USAGE,
+};
 use symbio_plugin_api::drive::Unless;
 use symbio_plugin_api::effects::FactDraft;
 use symbio_plugin_api::port::{
@@ -689,7 +692,7 @@ async fn finish(
         ctx.append(Fact::new(
             FactKind::Failed,
             key,
-            failure_payload(&[], row.port, PortErrorClass::NonRetryable, reason),
+            failure_payload(&[], &row, PortErrorClass::NonRetryable, reason),
             now_ms,
         ));
         return;
@@ -733,14 +736,13 @@ async fn finish(
                 ctx.append(Fact::new(
                     FactKind::Failed,
                     key,
-                    failure_payload(&outcome.facts, row.port, class, &why),
+                    failure_payload(&outcome.facts, &row, class, &why),
                     now_ms,
                 ));
             }
         }
         None => {
-            let port = row.port;
-            let payloads = response_payloads(&protocol, &outcome, port);
+            let payloads = response_payloads(&protocol, &outcome, &row);
             let last = payloads.len().saturating_sub(1);
             for (idx, payload) in payloads.into_iter().enumerate() {
                 let mut fact = Fact::new(FactKind::Response, key.clone(), payload, now_ms);
@@ -764,10 +766,10 @@ fn class_name(class: PortErrorClass) -> &'static str {
 /// 收束载荷：执行体 emit 的每条 `response` 草稿按序各成一条事实（分片只是载荷），
 /// 没有草稿时退回返回体的唯一事实。环不合并、不解释分片。
 ///
-/// 环把**端口名**补进载荷（执行体不自报，也不该自报「我是哪个端口」）：读侧
-/// （`rebuild::output_nodes`）按 `port == "model"` 判这一次往返是否对读者说话，
-/// 缺了它，正文 / 思考节点在重建面全部静默消失。
-fn response_payloads(drafts: &[FactDraft], outcome: &PortOutcome, port: &str) -> Vec<Value> {
+/// 环把**端口名**与**语义章**（`stamp`）补进载荷：端口名是身份位，语义章是读侧
+/// 唯一允许用来分支的形状（读者角色 / 是否进台账 / 失败卡形状）。执行体不自报
+/// 「我是哪个端口」，也不自报这些语义——它们由债行声明，环原样盖章。
+fn response_payloads(drafts: &[FactDraft], outcome: &PortOutcome, row: &DebtRow) -> Vec<Value> {
     let emitted: Vec<Value> = drafts
         .iter()
         .filter(|d| d.kind == FactKind::Response.as_str())
@@ -783,18 +785,38 @@ fn response_payloads(drafts: &[FactDraft], outcome: &PortOutcome, port: &str) ->
         }
     };
     raw.into_iter()
-        .map(|payload| stamp_port(payload, port))
+        .map(|payload| stamp_row(payload, row))
         .collect()
 }
 
-/// 「端口」是环的身份位：对象载荷直接补键，非对象载荷包一层。
-fn stamp_port(payload: Value, port: &str) -> Value {
+/// 收束载荷的两枚章：`port` 是身份位，`stamp` 是语义位（读者角色 / 台账在场 /
+/// 失败卡形状）。对象载荷直接补键，非对象载荷包一层。
+fn stamp_row(payload: Value, row: &DebtRow) -> Value {
+    let mut stamp = serde_json::Map::new();
+    stamp.insert(STAMP_ROLE.to_string(), json!(row.role.as_str()));
+    if row.accounts_usage {
+        stamp.insert(STAMP_USAGE.to_string(), json!(true));
+    }
+    if row.accounts_spend {
+        stamp.insert(STAMP_SPEND.to_string(), json!(true));
+    }
+    if row.failure != FailureProjection::None {
+        stamp.insert(STAMP_FAILURE.to_string(), json!(row.failure.as_str()));
+    }
+    let stamp = Value::Object(stamp);
     match payload {
         Value::Object(mut map) => {
-            map.insert("port".to_string(), Value::String(port.to_string()));
+            map.insert("port".to_string(), Value::String(row.port.to_string()));
+            map.insert(STAMP_KEY.to_string(), stamp);
             Value::Object(map)
         }
-        other => json!({ "port": port, "facts": other }),
+        other => {
+            let mut wrapper = serde_json::Map::new();
+            wrapper.insert("port".to_string(), Value::String(row.port.to_string()));
+            wrapper.insert(STAMP_KEY.to_string(), stamp);
+            wrapper.insert("facts".to_string(), other);
+            Value::Object(wrapper)
+        }
     }
 }
 
@@ -803,16 +825,16 @@ fn stamp_port(payload: Value, port: &str) -> Value {
 ///
 /// `failed` 的声明字段本来就含 `port` / `root_id` / `text` / `reasoning` / `answer`
 /// 等（`symbio-kernel::decl::PROTOCOL_FACTS`），读侧（`rebuild::output_nodes`）正是
-/// 按 `port == "model"` 折正文 / 思考节点。失败若把这些产出裹进 `facts` 数组，
-/// 读侧只看得见顶层——被截断的思考会随失败一起消失（t77）；端口也必须与成功路径
+/// 按语义章折正文 / 思考节点。失败若把这些产出裹进 `facts` 数组，读侧只看得见
+/// 顶层——被截断的思考会随失败一起消失（t77）；端口与语义章也必须与成功路径
 /// （`response_payloads`）同一套补法，否则同一次往返在两种结局下是两个身份。
-fn failure_payload(facts: &[Value], port: &str, class: PortErrorClass, why: &str) -> Value {
+fn failure_payload(facts: &[Value], row: &DebtRow, class: PortErrorClass, why: &str) -> Value {
     let body = match facts {
         [] => json!({}),
         [only] => only.clone(),
         many => Value::Array(many.to_vec()),
     };
-    let mut payload = stamp_port(body, port);
+    let mut payload = stamp_row(body, row);
     if let Some(map) = payload.as_object_mut() {
         map.insert("class".to_string(), json!(class_name(class)));
         // 环侧读原因用 `reason`（notes 的 `reply_of` 与会话收束都读它）；执行体

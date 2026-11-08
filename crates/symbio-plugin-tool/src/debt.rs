@@ -14,7 +14,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
+use symbio_plugin_api::debt::{
+    debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest, FailureProjection,
+};
 use symbio_plugin_api::drive::DRIVE_SENT;
 use symbio_plugin_api::events::{EVENT_TOOL_CALL_REQUESTED, EVENT_USER_ANSWER};
 use symbio_plugin_api::CapabilityRow;
@@ -55,7 +57,8 @@ impl DebtSource for ToolDebts {
                 json!({ "request_id": request_id, "call_id": call_id }),
             )
             .when(EVENT_TOOL_CALL_REQUESTED)
-            .lease(600_000, 2);
+            .lease(600_000, 2)
+            .failure_card(FailureProjection::ToolCall);
             if let Some(previous) = chains.get(request_id).and_then(|ids| ids.last()) {
                 spec = spec.when_id(DRIVE_SENT, previous.clone());
             }
@@ -95,7 +98,8 @@ impl DebtSource for ToolDebts {
                     "call_id": call_id,
                 }),
             )
-            .when(EVENT_USER_ANSWER);
+            .when(EVENT_USER_ANSWER)
+            .failure_card(FailureProjection::ToolCall);
             // 与首派同一条派发链：恢复也要等前一笔已派发（不等它收束）。
             if let Some(previous) = chains
                 .get(request_id)

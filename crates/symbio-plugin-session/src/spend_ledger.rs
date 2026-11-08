@@ -38,6 +38,7 @@ use std::collections::BTreeMap;
 
 use symbio_kernel::event::{Event, EVENT_RESPONSE};
 use symbio_kernel::projection::Projection;
+use symbio_plugin_api::debt::{STAMP_KEY, STAMP_SPEND};
 
 /// 一个主体在一种币种下的累计金额。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -71,7 +72,7 @@ pub struct SpendLedgerView {
 
 /// 金额台账投影：从事件切片累计各币种、各主体的实测金额。
 ///
-/// 只认 `response` 且 `payload.port == "model"`、且带 `spend` 对象的那一批。
+/// 只认 `response`、环盖了 `stamp.spend = true`、且带 `spend` 对象的那一批。
 /// `spend` 缺 `amount_nano`（不是无符号整数）或缺非空 `currency` 的记录**跳过**：
 /// 金额没有币种就没有可加性，猜一个桶比少一条账更糟（写方保证形状，见
 /// `turn_runner/facts.rs`）。
@@ -83,7 +84,12 @@ pub fn spend_ledger() -> Projection<SpendLedgerView> {
                 continue;
             }
             let payload = &e.payload;
-            if payload.get("port").and_then(|v| v.as_str()) != Some("model") {
+            if !payload
+                .get(STAMP_KEY)
+                .and_then(|stamp| stamp.get(STAMP_SPEND))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
                 continue;
             }
             let Some(spend) = payload.get("spend") else {

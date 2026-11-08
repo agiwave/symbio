@@ -231,5 +231,9 @@ fn to_ring_row(row: DriveRow, after: Option<DebtKey>) -> DebtRow {
         after_port: row.after_port,
         lease_ms: row.lease_ms,
         max_attempts: row.max_attempts,
+        role: row.role,
+        accounts_usage: row.accounts_usage,
+        accounts_spend: row.accounts_spend,
+        failure: row.failure,
     }
 }

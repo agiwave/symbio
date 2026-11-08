@@ -669,7 +669,8 @@ fn response_answer_lands_as_a_child_at_its_own_position() {
             "response-model-m-1",
             1_500,
             serde_json::json!({
-                "port": "model", "id": "model-1", "attempt": 1,
+                "port": "model", "stamp": { "role": "reader" },
+                "id": "model-1", "attempt": 1,
                 "root_id": "T1", "text_id": "T1-text", "text": "答",
                 "answer": "答", "answer_id": "T1-text", "calls": [],
                 "principal": "session/main",
@@ -711,7 +712,8 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
             "response-model-1",
             1_500,
             serde_json::json!({
-                "port": "model", "id": "model-1", "attempt": 1,
+                "port": "model", "stamp": { "role": "reader" },
+                "id": "model-1", "attempt": 1,
                 "root_id": "T1", "text_id": "T1-t0", "text": "让我调用工具",
                 "answer": "让我调用工具", "answer_id": "T1-t0",
                 "calls": [{ "port": "tool", "id": "c-1", "name": "agent_run", "arguments": {} }],
@@ -724,7 +726,8 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
             "response-model-2",
             2_000,
             serde_json::json!({
-                "port": "model", "id": "model-2", "attempt": 1,
+                "port": "model", "stamp": { "role": "reader" },
+                "id": "model-2", "attempt": 1,
                 "root_id": "T1", "text_id": "T1-t1", "text": "汇总正文",
                 "answer": "汇总正文", "answer_id": "T1-t1", "calls": [],
                 "principal": "session/peer-b",
@@ -1162,7 +1165,8 @@ fn a_not_executed_call_is_projected_from_its_failure_fact() {
             "response-model-1",
             1_500,
             serde_json::json!({
-                "port": "model", "id": "model-1", "attempt": 1,
+                "port": "model", "stamp": { "role": "reader" },
+                "id": "model-1", "attempt": 1,
                 "calls": [{ "port": "tool", "id": "c-1", "name": "read", "arguments": {} }],
             }),
         ),
@@ -1178,7 +1182,8 @@ fn a_not_executed_call_is_projected_from_its_failure_fact() {
             crate::event::EVENT_FAILED,
             "c-1",
             serde_json::json!({
-                "port": "tool", "id": "c-1", "attempt": 1, "why": "not_executed",
+                "port": "tool", "stamp": { "failure": "tool_call" },
+                "id": "c-1", "attempt": 1, "why": "not_executed",
             }),
         ),
     ];
@@ -1224,7 +1229,8 @@ fn an_executed_call_does_not_get_a_projected_placeholder() {
             "response-model-1",
             1_500,
             serde_json::json!({
-                "port": "model", "id": "model-1", "attempt": 1,
+                "port": "model", "stamp": { "role": "reader" },
+                "id": "model-1", "attempt": 1,
                 "calls": [{ "port": "tool", "id": "c-1", "name": "read", "arguments": {} }],
             }),
         ),

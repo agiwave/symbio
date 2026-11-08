@@ -84,6 +84,7 @@ use crate::event::event_payload_node_id;
 use crate::event::{
     event_produced_text_node_id, event_result_node_id, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
 };
+use crate::port_stamp::{STAMP_FAILURE, STAMP_KEY, STAMP_ROLE};
 use crate::projection::vocab::{slot_of, ChatSlot};
 use crate::projection::vocab::{ChatVocab, MessageVocab};
 use crate::{Entity, Event, Verb};
@@ -335,7 +336,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 与「未执行」结果子项因此都由投影器按事实渲染。真正跑过的调用已有
     // `artifact.added` 产出的两张卡，这里一条都不补；父节点终态由子事实齐备自然给出。
     let existing: HashSet<String> = out.iter().map(|n| n.id.clone()).collect();
-    for mut node in unfinished_nodes(events, &existing, &out, c) {
+    for mut node in unfinished_nodes(events, &existing, &out) {
         if existing.contains(&node.id) {
             continue;
         }
@@ -426,7 +427,6 @@ fn nodes_of(
                 .get("root_id")
                 .and_then(|v| v.as_str())
                 .is_some_and(|turn| denied_speech.contains(turn)),
-            c,
         );
     }
     match slot_of(e, c, m) {
@@ -753,11 +753,15 @@ fn push_step_nodes(
 
 /// 这一条 `response` / `failed` 是不是**本轮自己的模型往返**。
 ///
-/// 两个维度都来自载荷、都从词表取名字：`port` 是这一轮模型端口的名字（`ChatVocab`
-/// 注入），`via` 缺席是「不是内部往返（措辞 / 裁判 / 摘要）」。core 不写端口的字面量
-/// ——与事件名同一条纪律（D-203 / D-206）。
-fn is_model_roundtrip(e: &Event, c: &ChatVocab) -> bool {
-    e.payload.get("port").and_then(|v| v.as_str()) == Some(c.model_port)
+/// 两个维度都来自载荷：`stamp.role == "reader"` 是这一轮对读者说话，`via` 缺席是
+/// 「不是内部往返（措辞 / 裁判 / 摘要）」。core 不写端口的字面量——与事件名同一条
+/// 纪律（D-203 / D-206）。
+fn is_model_roundtrip(e: &Event) -> bool {
+    e.payload
+        .get(STAMP_KEY)
+        .and_then(|stamp| stamp.get(STAMP_ROLE))
+        .and_then(serde_json::Value::as_str)
+        == Some("reader")
         && e.payload.get("via").is_none()
 }
 
@@ -774,8 +778,8 @@ fn is_model_roundtrip(e: &Event, c: &ChatVocab) -> bool {
 /// `speech_denied`：这一轮的发言被写侧闸拒 ⇒ **答复那一次**（无工具调用）不产节点。
 /// 正文与思考仍是网格里的事实，但从未获准进入对话（fail-closed）；工具轮的中途产出
 /// 不受影响——它们属于已经准许的循环。
-fn output_nodes(e: &Event, speech_denied: bool, c: &ChatVocab) -> Vec<ChatNode> {
-    if !is_model_roundtrip(e, c) {
+fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
+    if !is_model_roundtrip(e) {
         return Vec::new();
     }
     let Some(root) = str_of(e, "root_id") else {
@@ -842,14 +846,14 @@ fn call_identity(id: &str) -> &str {
 
 /// 把端口债键对回某次模型应答交回的调用；对不回的债（环侧另行开账的合成键）
 /// 返回 `None`——投影面不从合成键里凭空造节点。
-fn issued_call_id(events: &[Event], debt: &str, c: &ChatVocab) -> Option<String> {
+fn issued_call_id(events: &[Event], debt: &str) -> Option<String> {
     let id = call_identity(debt);
     events
         .iter()
         .rev()
         .any(|e| {
             e.kind == EVENT_RESPONSE
-                && is_model_roundtrip(e, c)
+                && is_model_roundtrip(e)
                 && e.payload
                     .get("calls")
                     .and_then(|v| v.as_array())
@@ -865,7 +869,8 @@ fn issued_call_id(events: &[Event], debt: &str, c: &ChatVocab) -> Option<String>
         .then(|| id.to_string())
 }
 
-/// 未执行工具调用的投影补位：`failed(port=tool)` 事实 → `[ToolCall 父?, 结果子]`。
+/// 未执行工具调用的投影补位：盖了 `stamp.failure = "tool_call"` 的 `failed`
+/// 事实 → `[ToolCall 父?, 结果子]`。
 ///
 /// ## 为什么需要它
 ///
@@ -885,17 +890,22 @@ fn unfinished_nodes(
     events: &[Event],
     existing: &HashSet<String>,
     projected: &[ChatNode],
-    c: &ChatVocab,
 ) -> Vec<ChatNode> {
     let mut nodes = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for e in events {
-        // 时序上「没跑到」只会以 `failed(port=tool)` 出现；实体格位由事实自身带，
-        // 这里不再重甄别（甄别写在 `nodes_of` 的格位判据里，避免同一判据两处）。
+        // 时序上「没跑到」只会以盖了 `failure = "tool_call"` 的 `failed` 出现；
+        // 实体格位由事实自身带，这里不再重甄别（甄别写在 `nodes_of` 的格位判据里，
+        // 避免同一判据两处）。
         if e.kind != EVENT_FAILED {
             continue;
         }
-        if e.payload.get("port").and_then(|v| v.as_str()) != Some("tool") {
+        if e.payload
+            .get(STAMP_KEY)
+            .and_then(|stamp| stamp.get(STAMP_FAILURE))
+            .and_then(serde_json::Value::as_str)
+            != Some("tool_call")
+        {
             continue;
         }
         let Some(call_id) = str_of(e, "id") else {
@@ -909,7 +919,7 @@ fn unfinished_nodes(
         // 端口债键 → **模型交回的调用 id**（节点身份）。开账兜底键是环侧合成的
         // （`…-c{idx:03}-{model_id}`），它与模型 id 不相等；节点面只认模型 id，
         // 因为那才是用户在流式面看到、并且下一轮请求要原样回灌的那一个。
-        let Some(node_id) = issued_call_id(events, &call_id, c) else {
+        let Some(node_id) = issued_call_id(events, &call_id) else {
             continue;
         };
         // 已有子节点（真正跑过）⇒ 调用卡与结果卡都归 `artifact.added`，这里不补。
@@ -922,7 +932,6 @@ fn unfinished_nodes(
         let why = text_of(e, "why");
         let req = events.iter().rev().find(|r| {
             r.kind == EVENT_REQUEST
-                && r.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
                 && r.payload.get("id").and_then(|v| v.as_str()) == Some(call_id.as_str())
         });
         let name = req
@@ -948,7 +957,7 @@ fn unfinished_nodes(
             // 回找不到 ⇒ 这不是一次模型发起的调用，不投影（见 `issued_call_id`）。
             let Some(resp) = events.iter().rev().find(|r| {
                 r.kind == EVENT_RESPONSE
-                    && is_model_roundtrip(r, c)
+                    && is_model_roundtrip(r)
                     && r.payload
                         .get("calls")
                         .and_then(|v| v.as_array())

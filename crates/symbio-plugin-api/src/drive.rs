@@ -164,6 +164,14 @@ pub struct DriveRow {
     pub lease_ms: u64,
     /// 最多尝试次数（含首次）。
     pub max_attempts: u32,
+    /// 应答在读者面的角色（环据此盖章）。
+    pub role: crate::debt::ReplyRole,
+    /// 应答进用量台账。
+    pub accounts_usage: bool,
+    /// 应答进金额台账。
+    pub accounts_spend: bool,
+    /// 失败的落格形状。
+    pub failure: crate::debt::FailureProjection,
 }
 
 /// 驱动安全阀出口的**机制事实名**（`Exhausted` / `Stalled` 共用一种形状）。

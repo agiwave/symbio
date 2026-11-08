@@ -412,6 +412,10 @@ impl DriveSupport for HostDriveSupport {
                     after_port: spec.after_port,
                     lease_ms: spec.lease_ms,
                     max_attempts: spec.max_attempts,
+                    role: spec.role,
+                    accounts_usage: spec.accounts_usage,
+                    accounts_spend: spec.accounts_spend,
+                    failure: spec.failure,
                 });
             }
         }
