@@ -35,6 +35,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
+use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{
     Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
@@ -64,9 +65,9 @@ pub(crate) const SKILL_RETREAT: &str = "skill.retreat";
 
 /// 对外可读视图：校准账本身（每条技能用过几次、其中回退几次）。
 ///
-/// 公开的理由只有一个读方在别的 crate：会话统计的校准列（`crates/symbio-plugin-session`
-/// 的 `stats`）。本能力自己要的那一半（置信度）经 [`calibration_ledger`] 直接折，
-/// 不绕名字读自己的观测。
+/// 公开的动作是下面的报表登记（`D-387`）：会话统计的校准列按 `slot` 取整条读数，
+/// 不依赖本 crate、也不经过 `shared_views` 生成物。本能力自己要的那一半（置信度）
+/// 经 [`calibration_ledger`] 直接折，不绕名字读自己的观测。
 pub(crate) const SKILL_CALIBRATION: &str = "skill.calibration";
 
 /// 技能正文与触发串的截断上限（字符）。
@@ -271,6 +272,28 @@ fn retreating_skills(events: &[Event], now: i64) -> Value {
         }
     }
     Value::Array(out)
+}
+
+// 报表登记（`D-387`）：`session/stats` 的 `calibration` 顶层键。`views` 是 owner 自己的
+// 常量；空账形状留在 [`report`]，读方不再替 owner 猜形状。
+symbio_plugin_api::submit_reports!([ReportDecl {
+    owner: "skill",
+    slot: "calibration",
+    order: 60,
+    views: &[SKILL_CALIBRATION],
+    fleet: None,
+    render: report,
+    fleet_render: None,
+    panel: None,
+}]);
+
+/// 校准列的排版：账原样交出；读不出来（读方以 `Null` 占位）时交 owner 的空账。
+fn report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    views
+        .first()
+        .filter(|value| !value.is_null())
+        .cloned()
+        .unwrap_or_else(|| json!({ "by_skill": {} }))
 }
 
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。

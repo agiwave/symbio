@@ -5,9 +5,7 @@ plugin_assembly: sub_agent
 plugin_order: 150
 # 本插件**拥有**的事件名不再进跨插件共享表（scripts/facts/events-rs.mjs 读的 `shared_events`）：
 # `memory.calibrated` 除 owner 之外没有生产读方——折叠搬进本包之后（`D-286`），唯一的另一个
-# 读者改按视图名读 `skill.calibration`，名字因此回到 `decl.rs` 自己那行常量（`CS-007`）。
+# 读者改按报表登记读 `slot: calibration`（`D-387`），名字因此回到 `decl.rs` 自己那行常量（`CS-007`）。
 # `memory.encoded` 也从不在这里：它的格位由 loop 交（会话统计也读它，E-009 的反面），
 # 本插件只是 `tag:"skill"` 那半的一个写方，事实形状归情景记忆能力包（`D-263`）。
-# 对外可读的视图（scripts/facts/views-rs.mjs 读取 → crates/symbio-plugin-api/src/view_names.rs）。
-# 会话统计（`crates/symbio-plugin-session`）按 `skill.calibration` 出校准列。
-shared_views: skill.calibration
+# 对外可读的报表在 `src/decl.rs` 的 `submit_reports!`（D-387）——不是清单里的 `shared_views`。

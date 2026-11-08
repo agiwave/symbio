@@ -44,8 +44,8 @@
 //! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{
-    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB,
-    SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW, TASK_READYSET_VIEW,
+    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB, SLO_FALLBACK_VIEW,
+    SLO_LATENCY_VIEW, SLO_SPAN_VIEW, TASK_READYSET_VIEW,
 };
 use std::sync::Arc;
 
@@ -551,9 +551,10 @@ pub(crate) fn read(
     // 金额列：同一个切片、同一个 as-of，读应答载荷的 `spend`（价格 × 用量，
     // 写方在 adapter 边界折好）。它不重算价格——配置改了也只影响之后的事实。
     let spend = spend_ledger().read_all(&snapshot).value;
-    // 校准列：折叠与阈值口径归技能能力包（名册 #19/#20，`D-221` 按名字读），本插件
-    // 不重算回退率。读不到 ⇒ 有据的空形状并出声，与成本列同一条纪律。
-    let calibration = read_view_or(SKILL_CALIBRATION_VIEW, &snapshot, empty_calibration);
+    // 校准列：折叠与阈值口径归技能能力包（名册 #19/#20，`D-387` 报表登记），本插件
+    // 不重算回退率。整条报表读不出来（本二进制没链接 owner）时退回文档写过的空账。
+    let calibration =
+        report_value("calibration", &snapshot, &report_ctx).unwrap_or_else(empty_calibration);
     let ck = checkpoint().read_all(&snapshot).value;
 
     // 档位取两列的并集：只开轮没收束的档位（时延列无样本）与只有兜底样本的
