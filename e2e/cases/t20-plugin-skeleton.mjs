@@ -149,11 +149,12 @@ export default defineCase(
     /**
      * 建会话并把一条消息写进它的收件箱（**唯一输入入口**），再等这一轮真正跑完。
      *
-     * 落库判据用**节点数**而不是"有没有回复"：一轮的节点是
-     * user + tool_call + tool 结果 + assistant 正文 ≥ 4 条，取到 4 条即本轮已收尾。
+     * 落库判据**不能只看节点数**：本用例开着 `opening_enabled`，那句首响会先于工具结果
+     * 落盘，于是「user + tool_call + tool + assistant ≥ 4」可能在 tool_call 还没收口时
+     * 就被首响凑满——读到的是 `streaming`。判据直接取本轮要断言的后置条件：
+     * **tool_call 节点已出现且 `status == completed`**，再叠加节点数兜底。
      * 节点数经**生产读出口**轮询（`vdfs/read` 会话叶子，前端加载历史的同一条路）。
-     * 阈值写成「基线 + 本轮新增」的形式——写死绝对条数会让"再加一条线"变成"改三处断言"。
-     */
+    */
     const runTurn = async (cli, sid, text) => {
       const root = (await cli.invoke('vdfs/root', {})).body?.data?.path;
       assert(typeof root === 'string' && root.length > 0, 'vdfs/root 应返回根地址');
@@ -170,10 +171,17 @@ export default defineCase(
       const w = await cli.invoke('vdfs/write', { path: `${sessionAddr}/inbox`, text });
       assertEq(w.status, 200, `写收件箱 ${sid}（${JSON.stringify(w.body)?.slice(0, 300)}）`);
 
-      await waitFor(async () => ((await readSessionMessages(cli, sid)) ?? []).length >= 4, {
-        what: `${sid} 一轮工具回路落库（user + tool_call + tool + assistant）`,
-        timeoutMs: 40_000,
-      });
+      await waitFor(
+        async () => {
+          const msgs = (await readSessionMessages(cli, sid)) ?? [];
+          const tc = msgs.find((m) => msgTypeOf(m) === 'tool_call');
+          return msgs.length >= 4 && tc && tc.status === 'completed';
+        },
+        {
+          what: `${sid} 一轮工具回路落库且 tool_call 已收口（user + tool_call + tool + assistant）`,
+          timeoutMs: 40_000,
+        },
+      );
       return readSessionMessages(cli, sid);
     };
 

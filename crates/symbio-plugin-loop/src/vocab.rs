@@ -4,8 +4,8 @@
 //! 继续登记，避免共享词汇表断裂。它们**不是环的机制**：环不读、不写、不按它们选债。
 //!
 //! 所有权按接入顺序逐条移交，**已完成**：会话簿记接管 `chat.*` / `user.message`
-//! （`session::declarations`），记忆接管 `memory.*`（`memory::decl`）。仍在途：
-//! `turn.branch` / `session.config` → 会话，`authz.*` / `task.controlled` → 工具，
+//! 与 `session.config` / `turn.branch` / `turn.dispatch`（`session::declarations`），
+//! 记忆接管 `memory.*`（`memory::decl`）。仍在途：`authz.*` / `task.controlled` → 工具，
 //! `commitment.*` → 代理。全部移交完成后删除本模块与 `PLUGIN.yml` 的 `shared_events`。
 
 use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
@@ -28,18 +28,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 机制事实（D-338）：`plugin_row` 执行体在 Ask 后落的「这一行在等」。
     // 行名与提示在载荷里；种类只有一个名字，否则进不了声明表。
     EventDecl::new("plugin.row.asked", (Entity::Scope, Verb::Asserted)),
-    EventDecl::new("session.config", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("task.controlled", (Entity::Control, Verb::Opened)),
-    EventDecl::new("turn.branch", (Entity::Scope, Verb::Asserted)),
-    // 幕级派发格（D-223 / D-262 / D-282）：开轮处由会话簿记落，载荷 `tier` /
-    // `budget_ms` / `principal` / `root_id`。它是**档位的唯一来源**，也是 `C5`
-    // 读预算的那一格（`DeclaresBudget`）。没有 `FactDecl`：没有一行以它为前提或出口，
-    // 视图读它走「声明过、无载荷形状」那一档（名字在表上、字段不进网格）。
-    EventDecl::with_roles(
-        "turn.dispatch",
-        (Entity::Scope, Verb::Asserted),
-        &[FactRole::DeclaresBudget],
-    ),
 ];
 
 /// 两个**宿主通用执行体**的声明（D-296 / D-303）。

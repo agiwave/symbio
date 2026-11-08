@@ -133,6 +133,20 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         (Entity::Scope, Verb::Opened),
         &[FactRole::DeclaresBudget],
     ),
+    // ── 自 `loop` 的临时词汇表移交（D-389）──
+    //
+    // 写方全在本插件（`plugin/turn` 的开轮处与 `commands`），读方按名字取清单生成常量
+    // （`model` 的隐藏分支、`slo` 的档位、能力包读 `session.config`）。格位 / 载荷原样
+    // 照抄，迁移只改归属。
+    EventDecl::new("session.config", (Entity::Scope, Verb::Asserted)),
+    EventDecl::new("turn.branch", (Entity::Scope, Verb::Asserted)),
+    // 幕级派发格（D-223 / D-262 / D-282）：载荷 `tier` / `budget_ms` / `principal` /
+    // `root_id`，是档位的唯一来源，也是 `C5` 读预算的那一格（`DeclaresBudget`）。
+    EventDecl::with_roles(
+        "turn.dispatch",
+        (Entity::Scope, Verb::Asserted),
+        &[FactRole::DeclaresBudget],
+    ),
 ];
 
 /// 收束行（D-250 / D-252）：终答落格之后，把能力交出的收束贡献落成事实。

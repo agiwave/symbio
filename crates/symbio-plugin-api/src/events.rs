@@ -90,7 +90,7 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 
 // ============ session ============
 
-/// session.config — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
+/// session.config — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
 pub const EVENT_SESSION_CONFIG: &str = "session.config";
 
 /// session.consolidated — owner `symbio-plugin-session`，格位 `(Message, Progressed)`
@@ -126,13 +126,13 @@ pub const EVENT_TOOL_REQUESTED: &str = "tool.requested";
 
 // ============ turn ============
 
-/// turn.branch — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
+/// turn.branch — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
 pub const EVENT_TURN_BRANCH: &str = "turn.branch";
 
 /// turn.branch_selected — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
 pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
 
-/// turn.dispatch — owner `symbio-plugin-loop`，格位 `(Scope, Asserted)`
+/// turn.dispatch — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
 pub const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
 
 // ============ user ============
@@ -169,7 +169,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← memory
     EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)), // message.added ← session
     EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)), // message.removed ← session
-    EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)), // session.config ← loop
+    EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)), // session.config ← session
     EventDecl::new(EVENT_SESSION_CONSOLIDATED, (Entity::Message, Verb::Progressed)), // session.consolidated ← session
     EventDecl::new(EVENT_SESSION_RECALL, (Entity::Scope, Verb::Asserted)), // session.recall ← session
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← task
@@ -179,9 +179,9 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::host(EVENT_TOOL_CALL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.call.requested ← model
     EventDecl::host(EVENT_TOOL_CALLS_DONE, (Entity::Scope, Verb::Asserted)), // tool.calls.done ← tool
     EventDecl::host(EVENT_TOOL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.requested ← model
-    EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← loop
+    EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← session
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // turn.branch_selected ← session
-    EventDecl::with_roles(EVENT_TURN_DISPATCH, (Entity::Scope, Verb::Asserted), &[FactRole::DeclaresBudget]), // turn.dispatch ← loop
+    EventDecl::with_roles(EVENT_TURN_DISPATCH, (Entity::Scope, Verb::Asserted), &[FactRole::DeclaresBudget]), // turn.dispatch ← session
     EventDecl::new(EVENT_USER_ANSWER, (Entity::Scope, Verb::Asserted)), // user.answer ← session
     EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← session
 ];
