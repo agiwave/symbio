@@ -20,7 +20,6 @@ pub struct SharedViewDecl {
 pub const VIEW_CONATION_AUTONOMY: &str = "conation.autonomy";
 pub const VIEW_CONATION_INTENTS: &str = "conation.intents";
 pub const VIEW_MEMORY_LIVE: &str = "memory.live";
-pub const VIEW_REPUTATION_LEDGER: &str = "reputation.ledger";
 pub const VIEW_SKILL_CALIBRATION: &str = "skill.calibration";
 pub const VIEW_SLO_FALLBACK: &str = "slo.fallback";
 pub const VIEW_SLO_LATENCY: &str = "slo.latency";
@@ -33,7 +32,6 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: VIEW_CONATION_AUTONOMY, owner: "conation" },
     SharedViewDecl { name: VIEW_CONATION_INTENTS, owner: "conation" },
     SharedViewDecl { name: VIEW_MEMORY_LIVE, owner: "memory" },
-    SharedViewDecl { name: VIEW_REPUTATION_LEDGER, owner: "reputation" },
     SharedViewDecl { name: VIEW_SKILL_CALIBRATION, owner: "skill" },
     SharedViewDecl { name: VIEW_SLO_FALLBACK, owner: "slo" },
     SharedViewDecl { name: VIEW_SLO_LATENCY, owner: "slo" },

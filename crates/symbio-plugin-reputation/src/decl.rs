@@ -48,6 +48,7 @@ use serde_json::{json, Value};
 use symbio_plugin_api::events::{
     EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OPENED, EVENT_COMMITMENT_RELEASED,
 };
+use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::{Entity, Event, EventDecl, PluginDeclarations, Verb, ViewDecl};
 
 /// 淘汰裁决的名字（本包自己写、自己声明；单消费方，不进共享表）。
@@ -70,8 +71,8 @@ pub(crate) const EVENTS: &[EventDecl] =
             .owned(VERDICT_AUTHOR),
     ];
 
-/// 对外可读的那条视图。名字经 `PLUGIN.yml` 的 `shared_views:` 投影进
-/// `symbio_plugin_api::view_names`；读方按名字读，不依赖本 crate（`D-221`）。
+/// 对外可读的那条视图。名字只在本 crate 出现一次（`SV-001`）；公开动作是下面的
+/// 报表登记（`D-387`），读方按报表的 `views` 取，不依赖本 crate（`D-221`）。
 pub(crate) const REPUTATION_LEDGER: &str = "reputation.ledger";
 
 /// owner —— 与目录名同形（`crates/symbio-plugin-reputation`），装配表按它排序与报缺口。
@@ -115,7 +116,7 @@ fn plain_score(kept: u64, broken: u64) -> i64 {
 /// 认输入只认**这三条名字**，不认格子：`Commitment × Closed` 上挤着 `released` 与
 /// `broken` 两个名字，按格子认就得再问一次名字，而 `asserted` 也在同一实体上——
 /// 「守约」与「自报守约」的差别正是本视图的全部口径（见模块文档「自报不进账」）。
-fn ledger(events: &[Event], now: i64) -> Value {
+pub(crate) fn ledger(events: &[Event], now: i64) -> Value {
     let mut offered_of: BTreeMap<String, u64> = BTreeMap::new();
     // commitment id → 立约方（收束格经它找回 `from`）。
     let mut open: BTreeMap<String, String> = BTreeMap::new();
@@ -169,6 +170,51 @@ fn ledger(events: &[Event], now: i64) -> Value {
         })
         .collect();
     json!({ "by_principal": Value::Object(by_principal) })
+}
+
+// 报表登记（`D-387`）：`session/stats` 的 `reputation` 顶层键。`views` 是 owner 自己的
+// 常量；台账本体与 `own` 行都在 [`report`] 里排，读方不再替 owner 猜形状。
+symbio_plugin_api::submit_reports!([ReportDecl {
+    owner: "reputation",
+    slot: "reputation",
+    order: 50,
+    views: &[REPUTATION_LEDGER],
+    fleet: None,
+    render: report,
+    fleet_render: None,
+    panel: None,
+}]);
+
+/// 声誉列的排版：台账原样交出，另附目标会话主体那一行。
+///
+/// 本函数不加总、不打分——「守约 − 违约」的算式在 [`ledger`] 里。它只做两件事：按
+/// 主体取一行，以及没立过约时补一行零。那一行零不是重算，是让出口恒有一格 `own`
+/// 可读（`t75` 判的正是它的 `principal` 必须是**目标会话**的主体，不是请求方的——
+/// 跨会话查数时两者不同）。
+///
+/// 无读权限 ⇒ 整列为空对象：零值等于替一个你本来就看不得的主体报数。
+fn report(views: &[Value], ctx: &ReportCtx<'_>) -> Value {
+    if !ctx.readable {
+        return json!({});
+    }
+    let ledger = match views.first() {
+        Some(value) if !value.is_null() => value.clone(),
+        _ => json!({ "by_principal": {} }),
+    };
+    let rows = ledger
+        .get("by_principal")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let own = rows.get(ctx.principal).cloned().unwrap_or_else(|| {
+        json!({
+            "principal": ctx.principal,
+            "offered": 0,
+            "kept": 0,
+            "broken": 0,
+            "score": 0,
+        })
+    });
+    json!({ "own": own, "by_principal": rows })
 }
 
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。

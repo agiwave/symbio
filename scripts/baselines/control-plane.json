@@ -13,7 +13,5 @@
   "extension": {
     "productionFiles": 9
   },
-  "baseline-allow": [
-    "sha256:2a1143c14536fe0ca9c16d1702e28eea81366c9778b420aa900aa4963c066513→sha256:1bb4ba3ffd8f8bc8638aa551c7ff65572637428a6b3b0dca249b68d6aa273f34 声明行求解搬回选债口（plan），数据源只交声明表与事实切片 D-377"
-  ]
+  "baseline-allow": []
 }

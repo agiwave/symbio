@@ -9,5 +9,4 @@ plugin_order: 61
 # `commitment.*` 四格的 owner 是 `loop`，写方是效果通路与 `agent` 的立约效果；本包只折别人的
 # 格。本包自己只写淘汰裁决 `verdict.asserted`（声明在本包 `decl.rs`，归属缺省 `@principal`），
 # 单消费方 ⇒ 仍然没有 `shared_events`。
-# 对外可读的视图（scripts/facts/views-rs.mjs 读取 → crates/symbio-plugin-api/src/view_names.rs）。
-shared_views: reputation.ledger
+# 对外可读的报表在 `src/decl.rs` 的 `submit_reports!`（D-387）——不是清单里的 `shared_views`。

@@ -25,11 +25,11 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 use symbio_plugin_api::{
-    principal_of, production_matrix, read_shared_view_all, Contribution, Contributor, Entity,
-    Event, FactDraft, Settling, Verb, CAP_ASSERT_VERIFICATION,
+    principal_of, production_matrix, Contribution, Contributor, Entity, Event, FactDraft, Settling,
+    Verb, CAP_ASSERT_VERIFICATION,
 };
 
-use crate::decl::{EVENT_VERDICT_ASSERTED, OWNER, REPUTATION_LEDGER};
+use crate::decl::{ledger, EVENT_VERDICT_ASSERTED, OWNER};
 
 /// 被收回的能力（DE-043 §2 淘汰行的字面机制）。
 ///
@@ -53,10 +53,9 @@ impl Contributor for EliminationVerdicts {
         if !production_matrix().can_write_name(&arbiter, CAP_ASSERT_VERIFICATION) {
             return Vec::new();
         }
-        // 读账失败 / 形状读不懂 ⇒ 本轮不淘汰（fail-closed 的方向是「不动 grants」）。
-        let Ok(ledger) = read_shared_view_all(REPUTATION_LEDGER, at.history) else {
-            return Vec::new();
-        };
+        // 读自己的视图：本包就是 owner，直接调折叠函数，不经过 `shared_views` 生成物
+        // （D-387：报表登记才是公开动作）。as-of 与读口一致：落盘即已发生。
+        let ledger = ledger(at.history, i64::MAX);
         let Some(rows) = ledger.get("by_principal").and_then(Value::as_object) else {
             return Vec::new();
         };

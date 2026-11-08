@@ -77,12 +77,10 @@ pub(crate) const SESSION_TERMINATED_SEAT: &str = "session.terminated-seat";
 // 读方侧的视图名：名字住 `plugin-api` 的词汇面（由 owner 的 `PLUGIN.yml`
 // `shared_views` 生成，D-364），本插件按名字读。以下别名只保留调用点的旧名字，
 // 读口不变；owner 改名时生成物与这里一起变，不再出现「各写一遍字面量」。
-// `reputation.ledger` 同时被淘汰回路读（D-044）；
 // `task.readyset` 只交本轮的容量，不是折叠的一格（D-289）。
 pub(crate) use symbio_plugin_api::view_names::{
     VIEW_CONATION_AUTONOMY as CONATION_AUTONOMY_VIEW,
     VIEW_CONATION_INTENTS as CONATION_INTENTS_VIEW,
-    VIEW_REPUTATION_LEDGER as REPUTATION_LEDGER_VIEW,
     VIEW_SKILL_CALIBRATION as SKILL_CALIBRATION_VIEW, VIEW_SLO_FALLBACK as SLO_FALLBACK_VIEW,
     VIEW_SLO_LATENCY as SLO_LATENCY_VIEW, VIEW_SLO_SPAN as SLO_SPAN_VIEW,
     VIEW_TASK_READYSET as TASK_READYSET_VIEW,

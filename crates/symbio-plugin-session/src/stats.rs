@@ -45,8 +45,7 @@
 
 use crate::declarations::{
     CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB,
-    REPUTATION_LEDGER_VIEW, SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW,
-    SLO_SPAN_VIEW, TASK_READYSET_VIEW,
+    SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW, SLO_SPAN_VIEW, TASK_READYSET_VIEW,
 };
 use std::sync::Arc;
 
@@ -618,18 +617,17 @@ pub(crate) fn read(
     let invariants = serde_json::to_value(check_all(vocab, &snapshot))
         .map_err(|e| PluginError::InternalError(format!("不变量清单序列化失败：{e}")))?;
 
-    // 声誉列：折叠归声誉能力包（名册 #22/#28，`D-221` 按名字读），本插件只取数 + 排版。
-    // 与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生），也与 `loop` 的淘汰
-    // 回路读的是**同一条算式**（D-044：两处各折一遍，迟早一个是负的、一个是守约）。
-    // 没有权限时不给零值条目——给零值等于替一个你本来看不到的主体报数。
-    let reputation = if may_read {
-        reputation_reading(
-            read_view_or(REPUTATION_LEDGER_VIEW, &snapshot, empty_reputation),
-            session_principal,
-        )
-    } else {
-        serde_json::json!({})
-    };
+    // 声誉列：折叠与 `own` 行都归声誉能力包（名册 #22/#28，`D-387` 报表登记），本插件
+    // 只按 `slot` 取整条读数。与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生）。
+    // 没有权限时 owner 的 `render` 交空对象——给零值等于替一个你本来看不到的主体报数。
+    // 整条报表读不出来（本二进制没链接 owner）时才退回文档写过的空形状并出声。
+    let reputation = report_value("reputation", &snapshot, &report_ctx).unwrap_or_else(|| {
+        if may_read {
+            reputation_reading(empty_reputation(), session_principal)
+        } else {
+            serde_json::json!({})
+        }
+    });
 
     // 承诺列（段二）：与声誉列读**同一批格子**，但问的是另一件事——声誉问
     // 「这个主体几分」，本列问「这一约是什么、违约为什么」。切片已按 `may_read` 取过。
