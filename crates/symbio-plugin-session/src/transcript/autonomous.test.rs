@@ -6,7 +6,7 @@ use super::*;
 use crate::plugin::SessionConfig;
 use std::sync::Arc;
 use symbio_kernel::event::{Entity, Event, Verb};
-use symbio_plugin_api::events::EVENT_USER_MESSAGE;
+use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::vocab;
 use symbio_sdk::invariants::check_all;
 
@@ -53,6 +53,27 @@ fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<Event> {
     EventWalStore::open_readonly(wal(p, sid))
         .expect("只读打开 WAL")
         .range(Seq::new(0))
+}
+
+/// 轮首装配那一步的等价物：把开关按共享名写进 `session.config` 快照。
+///
+/// 闸门读的是这条事实（`D-252` / `D-379`），不是插件里的活配置——因此凡是
+/// 「闸门应当开着」的用例都必须先有这一格。
+fn seed_config(p: &SessionPlugin, sid: &str, payload: serde_json::Value) {
+    EventWalStore::open(wal(p, sid))
+        .expect("打开 WAL")
+        .append(
+            Event::pending(
+                "u2",
+                EVENT_SESSION_CONFIG,
+                Entity::Scope,
+                Verb::Asserted,
+                "user:t",
+            )
+            .with_produced_by(0)
+            .with_payload(payload),
+        )
+        .expect("配置快照入格");
 }
 
 /// 主链路：触发 → 自检 → 欲三格按序入格、溯源逐级指向更早的格子；
@@ -139,6 +160,8 @@ async fn without_the_capability_pack_the_gate_opens_nothing() {
     let (_dir, p) = autonomy_plugin(true);
     let sid = "s-gate";
     seed_one_fact(&p, sid);
+    // 开关按事实打开：能力缺席是这条用例唯一的变量。
+    seed_config(&p, sid, serde_json::json!({ "conation_enabled": true }));
 
     // 触发照常发生（返回 true = 这一轮照常开跑）：能力缺席不该连累开轮。
     assert!(p.record_autonomous_trigger(sid, 60_000, "把周报写了").await);
@@ -213,6 +236,7 @@ async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
     let (_dir, p) = autonomy_plugin(true);
     let sid = "s-broad";
     seed_one_fact(&p, sid);
+    seed_config(&p, sid, serde_json::json!({ "conation_enabled": true }));
 
     let broad = "x".repeat(201); // > ConationPolicy::default().max_goal_len（200）
     assert!(p.record_autonomous_trigger(sid, 1, &broad).await);
@@ -239,8 +263,47 @@ async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
     );
 }
 
-// ==================== 发起者与意欲闸门的单元验收（D-189） ====================
+/// 开关的读法：看**最近一条** `session.config`，不看插件里的活配置（`D-252` / `D-379`）。
+///
+/// 三种情形各自可辨：快照说开、活配置说关 ⇒ 开；反之 ⇒ 关；快照缺该格 ⇒ 出厂值 `false`。
+/// 最后一条尤其重要——读不到不等于「开着」，装配问题不能被读成放行。
+#[tokio::test]
+async fn the_switch_is_read_from_the_snapshot_not_the_live_config() {
+    // 活配置关、快照开 ⇒ 读真（若仍读活值，这里会是 false）
+    let (_d1, p) = autonomy_plugin(false);
+    let sid = "s-switch-on";
+    seed_one_fact(&p, sid);
+    seed_config(&p, sid, serde_json::json!({ "conation_enabled": true }));
+    let facts = EventWalStore::open_readonly(wal(&p, sid)).expect("只读打开 WAL");
+    assert!(
+        conation_enabled_from(&facts),
+        "开关的真源是快照：活配置 false 不得覆盖快照的 true"
+    );
 
+    // 活配置开、快照关 ⇒ 读假
+    let (_d2, p) = autonomy_plugin(true);
+    let sid = "s-switch-off";
+    seed_one_fact(&p, sid);
+    seed_config(&p, sid, serde_json::json!({ "conation_enabled": false }));
+    let facts = EventWalStore::open_readonly(wal(&p, sid)).expect("只读打开 WAL");
+    assert!(
+        !conation_enabled_from(&facts),
+        "活配置 true 不得覆盖快照的 false"
+    );
+
+    // 快照缺该格 ⇒ 出厂值 false
+    let (_d3, p) = autonomy_plugin(true);
+    let sid = "s-switch-missing";
+    seed_one_fact(&p, sid);
+    seed_config(&p, sid, serde_json::json!({}));
+    let facts = EventWalStore::open_readonly(wal(&p, sid)).expect("只读打开 WAL");
+    assert!(
+        !conation_enabled_from(&facts),
+        "缺格取出厂值 false——装配问题不得被读成放行"
+    );
+}
+
+// ==================== 发起者与意欲闸门的单元验收（D-189） ====================
 use crate::declarations::EVENT_SYSTEM_TRIGGERED;
 use symbio_kernel::store::EventStore;
 use symbio_plugin_api::events::EVENT_CONATION_EXPRESSED;

@@ -230,6 +230,9 @@ impl SessionPlugin {
                 "progress_max_attempts": cfg.progress_max_attempts,
                 "readyset_cap": cfg.task_cap,
                 "skill_compile_enabled": cfg.skill_compile_enabled,
+                // 自主层开关：能力包（#32 迁走后）按共享名读这一格，不拿配置类型
+                // （D-252 / D-379）。
+                "conation_enabled": cfg.conation_enabled,
                 // 兜底表达：空表原因 / 收集错误明细（均为既有 config 载荷的字段，
                 // 不是新事件类型）。非空表时前者为 null，后者为空数组。
                 "tools_empty_reason": tools_empty_reason,

@@ -22,10 +22,12 @@
 
 use super::super::active::{InboxItem, PreemptPending};
 use super::super::plugin::SessionPlugin;
+use crate::config::default_conation_enabled;
 use crate::declarations::{CONATION_INTENTS_VIEW, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 use crate::store::EventWalStore;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::store::Store;
+use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
 use symbio_sdk::authz::EffectiveMatrix;
 use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
 use symbio_sdk::chat::chat_node as cm;
@@ -245,12 +247,9 @@ impl SessionPlugin {
             return true;
         };
 
-        let policy = {
-            let cfg = self.config.read().await;
-            ConationPolicy {
-                enabled: cfg.conation_enabled,
-                ..ConationPolicy::default()
-            }
+        let policy = ConationPolicy {
+            enabled: conation_enabled_from(&store),
+            ..ConationPolicy::default()
         };
         // 授权与本体同一把尺：自主主体在 `authz::ROWS` 里只持 `define.work`。
         let grants = symbio_sdk::authz::production_matrix();
@@ -329,6 +328,26 @@ fn long_goal_declared(store: &EventWalStore, goal: &str) -> Option<bool> {
     };
     let declared = value.get("declared").and_then(|d| d.as_array())?;
     Some(declared.iter().any(|g| g.as_str() == Some(goal)))
+}
+
+/// 本轮生效的自主层开关：**最近一条** `session.config` 的 `conation_enabled` 那一格。
+///
+/// 口径见 `D-252` / `D-379`：能力开关是一条事实，不读 `SessionConfig` 活值。
+/// 读不到（没有快照 / 缺该格 / 非布尔）⇒ 出厂值 `false`——与
+/// `ConationPolicy::default()` 同一个平凡值，不把装配问题读成「开着」。
+fn conation_enabled_from(store: &EventWalStore) -> bool {
+    store
+        .range(Seq::new(0))
+        .into_iter()
+        .rev()
+        .find(|event| event.kind == EVENT_SESSION_CONFIG)
+        .and_then(|event| {
+            event
+                .payload
+                .get("conation_enabled")
+                .and_then(|value| value.as_bool())
+        })
+        .unwrap_or_else(default_conation_enabled)
 }
 
 // ==================== 自主发起者与意欲闸门（D-189：唯一生产消费方在本文件） ====================
