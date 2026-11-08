@@ -181,12 +181,29 @@ export default defineCase(
       assertEq(w.status, 200, `写收件箱 ${sid}（${JSON.stringify(w.body)?.slice(0, 300)}）`);
     };
 
-    /** 等这一轮真正收尾：末轮正文落库（它是本轮最后一条消息；经读出口看） */
-    const waitDone = ({ cli, sid }) =>
-      waitFor(
-        async () => ((await readSessionMessages(cli, sid)) ?? []).some((m) => m.content === '两轮工具都跑完了。'),
+    /**
+     * 等这一轮真正收尾：末轮正文落库 **且** 会话已离开 `working`。
+     *
+     * 只等正文是不够的：轮内的读面是「落库列表 + 在途缓冲」，在途节点换权威号的
+     * 那一刻可能整段从读面消失（下一次读又回来）。门禁并发下这个窗口会放大——
+     * 实测 `--full` 里第一次读的 `tool_call` 骨架读成 0，紧接的第二次读就有。
+     * 轮末（`status !== 'working'`）才是稳定形态，末轮正文是它的最后一条消息。
+     */
+    const waitDone = async ({ cli, sid }) => {
+      const root = (await cli.invoke('vdfs/root', {})).body?.data?.path;
+      assert(typeof root === 'string' && root.length > 0, 'vdfs/root 应返回根地址');
+      const sessionPath = `${root.replace(/\/+$/, '')}/session/${sid}`;
+      await waitFor(
+        async () => {
+          const node = (await cli.invoke('vdfs/stat', { path: sessionPath })).body?.data;
+          if (!node || node.status === 'working') return false;
+          return ((await readSessionMessages(cli, sid)) ?? []).some(
+            (m) => m.content === '两轮工具都跑完了。',
+          );
+        },
         { what: `${sid} 末轮正文落库`, timeoutMs: 60_000 },
       );
+    };
 
     /** 该会话的汇报节点（按落点标记筛，不按文案筛；读出口 = 前端加载历史同一出口） */
     const reportsOf = async (c, sid) =>
