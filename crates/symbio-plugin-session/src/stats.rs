@@ -44,7 +44,7 @@
 //! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{
-    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, COST_LEDGER_VIEW, MESSAGE_VOCAB,
+    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB,
     REPUTATION_LEDGER_VIEW, SKILL_CALIBRATION_VIEW, SLO_FALLBACK_VIEW, SLO_LATENCY_VIEW,
     SLO_SPAN_VIEW, TASK_READYSET_VIEW,
 };
@@ -69,7 +69,7 @@ use super::token_ledger::token_ledger;
 
 use super::plugin::SessionPlugin;
 use super::stats_reading::{
-    capability_views, commitments_reading, content_scope_of, fleet_reading, panel_of,
+    capability_views, commitments_reading, content_scope_of, fleet_reading, panel_of, report_value,
     usage_section, ViewerRequest,
 };
 
@@ -528,6 +528,14 @@ pub(crate) fn read(
     };
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
+    // 报表读侧的公共上下文：三格都由本调用方给定，owner 的 `render` 只消费、不反查
+    // （`D-387`）。可见域整列判一次的口径不变，`readable` 只是把同一个答案告诉 owner。
+    let report_ctx = symbio_plugin_api::reports::ReportCtx {
+        principal: session_principal,
+        cap: task_cap,
+        readable: may_read,
+    };
+
     // 四列全部来自同一份事件切片（D-044：实测与判据同源）。
     //
     // 时延、兜底与成本三列由能力包交（`D-221` 按名字读、`D-281` 折叠两半）：本插件不认识
@@ -535,9 +543,9 @@ pub(crate) fn read(
     // 缺席，不是「这一档没有数」）。
     let latency = read_view_or(SLO_LATENCY_VIEW, &snapshot, empty_by_tier);
     let fallback = read_view_or(SLO_FALLBACK_VIEW, &snapshot, empty_by_tier);
-    // 成本列与 `loop` 的熔断闸门读的是**同一个视图名**：两处各折一遍必然漂移成
-    // 「闸门说还有余量、出口说已耗尽」（D-044）。
-    let cost = read_view_or(COST_LEDGER_VIEW, &snapshot, empty_ledger);
+    // 成本列：owner 用报表登记公开（`D-387`），此处只按 `slot` 取整条读数；
+    // 空形状住在 owner 的 `render` 里，整条读不出来时才退回文档写过的空账。
+    let cost = report_value("cost", &snapshot, &report_ctx).unwrap_or_else(empty_ledger);
     // 用量列：与四列同一份切片、同一个 as-of。它读的是应答载荷的 `usage`
     // （`token_ledger` 的模块文档说明为什么不能与 `cost` 合成一列）。
     let tokens = token_ledger().read_all(&snapshot).value;

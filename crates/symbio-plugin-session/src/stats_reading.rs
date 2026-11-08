@@ -24,11 +24,73 @@ use crate::declarations::{
 };
 use symbio_kernel::event::Event;
 use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
+use symbio_plugin_api::reports::ReportCtx;
 use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::chat::chat_node::ChatNodePresentationExt;
 use symbio_sdk::governance::VisScope;
 
 use super::stats::{empty_by_tier, SessionStats};
+
+/// 读一条报表（`D-387`）：按 `slot` 找到登记项，逐条取 `views` 的整片值，交回
+/// owner 的 `render`。
+///
+/// **不再查 `shared_views` 生成物**：报表登记本身就是「这些视图可读」的公开动作，
+/// 名单随报表走，`view_names.rs` 只留尚未迁移的条目。某一格读不出来时以 `Null`
+/// 占位，owner 的 `render` 各自交自己的空形状——空形状住在 owner 那里，读方不猜。
+///
+/// 登记表本身不合法（[`symbio_plugin_api::reports::reports`] 交回错误）时整条报表
+/// 读不出来，返回 `None`：降级还是失败由调用方决定（读侧不替装配面 panic）。
+pub(super) fn report_value(
+    slot: &str,
+    snapshot: &[Event],
+    ctx: &ReportCtx<'_>,
+) -> Option<serde_json::Value> {
+    let reports = match symbio_plugin_api::reports::reports() {
+        Ok(reports) => reports,
+        Err(errors) => {
+            for why in errors {
+                symbio_plugin_api::plugin_warn!(
+                    symbio_plugin_api::PLUGIN_ID_SESSION,
+                    "[stats] 报表登记不合法（{why}）：`{slot}` 这一列读不出来"
+                );
+            }
+            return None;
+        }
+    };
+    let report = reports.iter().find(|r| r.slot == slot)?;
+    let mut views = Vec::with_capacity(report.views.len());
+    for name in report.views {
+        views.push(read_report_view(name, snapshot));
+    }
+    Some((report.render)(&views, ctx))
+}
+
+/// 报表声明的视图名取整片值；名字的唯一出处是 owner 的 `const`（`SV-001`）。
+///
+/// 读不到（没冻结 / 名字不在表里）⇒ `Null` 占位并出声：owner 的 `render` 据此交
+/// 自己的空形状，出口仍是一份文档写过的形状。
+fn read_report_view(name: &str, snapshot: &[Event]) -> serde_json::Value {
+    let frozen = match symbio_plugin_api::sealed_declarations() {
+        Ok(frozen) => frozen,
+        Err(_) => {
+            symbio_plugin_api::plugin_warn!(
+                symbio_plugin_api::PLUGIN_ID_SESSION,
+                "[stats] 声明表未冻结：报表视图 `{name}` 按空读数交"
+            );
+            return serde_json::Value::Null;
+        }
+    };
+    match frozen.view(name) {
+        Some(view) => (view.eval)(snapshot, i64::MAX),
+        None => {
+            symbio_plugin_api::plugin_warn!(
+                symbio_plugin_api::PLUGIN_ID_SESSION,
+                "[stats] 报表视图 `{name}` 不在冻结声明表里：按空读数交"
+            );
+            serde_json::Value::Null
+        }
+    }
+}
 
 /// 读侧出口的**读方身份声明**：`session/stats` 与 `session/changes` 同一份载荷形状。
 ///

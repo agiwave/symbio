@@ -30,10 +30,11 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
+use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::{Event, PluginDeclarations, ViewDecl};
 
-/// 对外可读的那条视图。名字经 `PLUGIN.yml` 的 `shared_views:` 投影进
-/// `symbio_plugin_api::view_names`；读方按名字读，不依赖本 crate（`D-221`）。
+/// 对外可读的那条视图。名字只在本 crate 出现一次（`SV-001`）；公开动作是下面的
+/// 报表登记（`D-387`），读方按报表的 `views` 取，不依赖本 crate（`D-221`）。
 pub(crate) const COST_LEDGER: &str = "cost.ledger";
 
 /// owner —— 与目录名同形（`crates/symbio-plugin-cost`），装配表按它排序与报缺口。
@@ -85,6 +86,28 @@ fn ledger(events: &[Event], now: i64) -> Value {
         })
         .collect();
     json!({ "by_principal": Value::Object(by_principal), "total_ms": total_ms })
+}
+
+// 报表登记（`D-387`）：`session/stats` 的 `cost` 顶层键。`views` 是 owner 自己的
+// 常量；空形状留在 [`report`]，读方不再替 owner 猜形状。
+symbio_plugin_api::submit_reports!([ReportDecl {
+    owner: "cost",
+    slot: "cost",
+    order: 40,
+    views: &[COST_LEDGER],
+    fleet: None,
+    render: report,
+    fleet_render: None,
+    panel: None,
+}]);
+
+/// 成本列的排版：视图原样交出；读不出来（读方以 `Null` 占位）时交 owner 的空账。
+fn report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    views
+        .first()
+        .filter(|value| !value.is_null())
+        .cloned()
+        .unwrap_or_else(|| json!({ "by_principal": {}, "total_ms": 0 }))
 }
 
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。
