@@ -20,8 +20,8 @@
 
 mod facts;
 use facts::{
-    AXES, CAPABILITIES, DECLARED_DIM_COUNTS, DECLARED_GROWTH, DECLARED_SOCIAL, DIMENSIONS, KINDS,
-    LEVEL_MAX, PSEUDO, STAGE_CLAIMS, TIER_CORES, TIER_MAX,
+    AXES, CAPABILITIES, CAPABILITY_STATUSES, DECLARED_DIM_COUNTS, DECLARED_GROWTH, DECLARED_SOCIAL,
+    DIMENSIONS, KINDS, LEVEL_MAX, PSEUDO, STAGE_CLAIMS, TIER_CORES, TIER_MAX,
 };
 
 /// 一行的归类是否落在坐标系里。维度、轴、天梯上界、等级上界、类型闭集、阶号
@@ -44,6 +44,12 @@ fn classify(c: &facts::Capability) -> Result<(), String> {
     }
     if !KINDS.contains(&c.kind) {
         return Err(format!("「{}」的类型「{}」不在闭集内", c.name, c.kind));
+    }
+    if !CAPABILITY_STATUSES.contains(&c.status) {
+        return Err(format!(
+            "「{}」的实现状态「{}」不在三档内（应 done / planned / planned-unspecified）",
+            c.name, c.status
+        ));
     }
     if c.stages.is_empty() {
         return Err(format!("「{}」没有落点阶——坐标系与实施阶梯就此脱钩", c.name));
@@ -184,6 +190,16 @@ fn main() {
         LEVEL_MAX,
         KINDS.len()
     );
+    let status_counts: Vec<String> = CAPABILITY_STATUSES
+        .iter()
+        .map(|s| {
+            format!(
+                "{s} {}",
+                CAPABILITIES.iter().filter(|c| c.status == *s).count()
+            )
+        })
+        .collect();
+    println!("实现状态：{}", status_counts.join(" / "));
 
     let mut bad: Vec<String> = Vec::new();
     for c in CAPABILITIES {
@@ -343,6 +359,9 @@ fn main() {
     fake.kind = "花活";
     let fake_kind = classify(&fake).is_err();
     fake = base;
+    fake.status = "躺平";
+    let fake_status = classify(&fake).is_err();
+    fake = base;
     fake.stages = &["S99"];
     let fake_stage = classify(&fake).is_err();
     fake = base;
@@ -359,7 +378,7 @@ fn main() {
     let fill_breaks = shrunken.len() != declared.len() || declared.contains(&sample);
 
     println!(
-        "\n── 反向用例：假维度 = {fake_dim}，假轴 = {fake_axis}，越界天梯 = {fake_tier}，\n   越界等级 = {fake_level}，假类型 = {fake_kind}，不存在的阶 = {fake_stage}，无落点 = {no_stage}，\n   填掉「{} × {}」而 §6.2 不删那行 = {fill_breaks}",
+        "\n── 反向用例：假维度 = {fake_dim}，假轴 = {fake_axis}，越界天梯 = {fake_tier}，\n   越界等级 = {fake_level}，假类型 = {fake_kind}，假实现状态 = {fake_status}，不存在的阶 = {fake_stage}，无落点 = {no_stage}，\n   填掉「{} × {}」而 §6.2 不删那行 = {fill_breaks}",
         sample.0, sample.1
     );
 
@@ -447,8 +466,8 @@ fn main() {
         "每一维都不能为空（否则该维是摆设）"
     );
     assert!(
-        fake_dim && fake_axis && fake_tier && fake_level && fake_kind && fake_stage && no_stage,
-        "反向用例：分类器必须拒绝非法维度/轴/天梯/等级/类型/落点"
+        fake_dim && fake_axis && fake_tier && fake_level && fake_kind && fake_status && fake_stage && no_stage,
+        "反向用例：分类器必须拒绝非法维度/轴/天梯/等级/类型/实现状态/落点"
     );
     assert!(fill_breaks, "反向用例：填掉一个生长位而 §6.2 不删那行 ⇒ 必须失配");
     assert!(drift_caught, "反向用例：声明的条数与名册算出的不同 ⇒ 必须被抓到");
@@ -459,7 +478,7 @@ fn main() {
     assert!(PSEUDO.iter().all(|p| is_pseudo(p)), "§5 的每一条说法都必须被识别为伪高阶");
     assert!(!is_pseudo(real.name), "真实能力不应被误判为伪高阶");
 
-    println!("\n✅ 全部断言通过（含 9 类反向用例）：名册归位、等级与刻度、类型与落点、");
+    println!("\n✅ 全部断言通过（含 10 类反向用例）：名册归位、等级与刻度、类型与落点、实现状态三档、");
     println!("   阶梯咬合、台阶非空、生长位与声明同集合、天梯核心能力与名册一致、伪高阶可识别。");
     println!("   数据在 02，判据在这里。");
 }

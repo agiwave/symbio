@@ -29,13 +29,21 @@ const LEDGER = 'docs/003-design/026-能力拆分与影响类.md'
 const ROSTER_TEXT = [
   '# 能力名册（夹具）',
   '',
-  '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
-  '|---|---|---|:-:|:-:|:-:|:-:|---|',
-  '| 甲能力（≈4 槽） | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | — |',
-  '| 乙能力 | 知 | 时域跨度 | T3 | L3 | 认知 | S06 | — |',
-  '| 丙能力 | 行 | 自主程度 | T4 | L2 | 治理 | S09 | — |',
+  '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 | 实现状态 |',
+  '|---|---|---|:-:|:-:|:-:|:-:|---|---|',
+  '| 甲能力（≈4 槽） | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `crates/symbio-plugin-a/src/lib.rs::A` | done |',
+  '| 乙能力 | 知 | 时域跨度 | T3 | L3 | 认知 | S06 | `crates/symbio-plugin-c/src/lib.rs::B` | done |',
+  '| 丙能力 | 行 | 自主程度 | T4 | L2 | 治理 | S09 | — | planned |',
   '',
   '### 6.1.1 别的表',
+  '',
+].join('\n')
+
+const DEPLOY_TEXT = [
+  'pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[',
+  '    "plugin_manager",',
+  '    "a",',
+  '];',
   '',
 ].join('\n')
 
@@ -104,6 +112,9 @@ function cleanTree() {
     [LEDGER]: LEDGER_TEXT,
     'crates/symbio-plugin-a/Cargo.toml': '[package]\nname = "symbio-plugin-a"\n',
     'crates/symbio-plugin-c/Cargo.toml': '[package]\nname = "symbio-plugin-c"\n',
+    'crates/symbio-plugin-a/src/lib.rs': 'pub const A: &str = "a";\n',
+    'crates/symbio-plugin-c/src/lib.rs': 'pub const B: &str = "b";\n',
+    'crates/symbio-deploy/src/lib.rs': DEPLOY_TEXT,
   }
 }
 
@@ -148,6 +159,56 @@ test('干净夹具：名册与账本逐行对上，读数是 3 行', () => {
   const r = audit(cleanTree())
   assert.equal(r.status, 0, r.stdout + r.stderr)
   assert.match(r.stdout, /名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 不做 0 · 待裁决 1）/)
+})
+
+// ── 实现状态：设计在 / 实现还在，是两个字段 ─────────────────────────
+
+test('planned 改 done 但锚点是 —（指不出实现）⇒ 红', () => {
+  const files = cleanTree()
+  files[ROSTER] = files[ROSTER].replace(
+    '| 丙能力 | 行 | 自主程度 | T4 | L2 | 治理 | S09 | — | planned |',
+    '| 丙能力 | 行 | 自主程度 | T4 | L2 | 治理 | S09 | — | done |',
+  )
+  assertRed(audit(files), /标 done，但锚点/)
+})
+
+test('done 改 planned 但专用包仍在默认装配清单 ⇒ 红', () => {
+  const files = cleanTree()
+  files[ROSTER] = files[ROSTER].replace(
+    '| 甲能力（≈4 槽） | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `crates/symbio-plugin-a/src/lib.rs::A` | done |',
+    '| 甲能力（≈4 槽） | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `crates/symbio-plugin-a/src/lib.rs::A` | planned |',
+  )
+  assertRed(audit(files), /仍在默认装配清单/)
+})
+
+test('实现状态不在三档 ⇒ 红（状态不是自由文本）', () => {
+  const files = cleanTree()
+  files[ROSTER] = files[ROSTER].replace(
+    '`crates/symbio-plugin-a/src/lib.rs::A` | done |',
+    '`crates/symbio-plugin-a/src/lib.rs::A` | maybe |',
+  )
+  assertRed(audit(files), /不在三档/)
+})
+
+test('done 但锚点文件不在仓内 ⇒ 红（实现已经不在，状态却还说 done）', () => {
+  const files = cleanTree()
+  files[ROSTER] = files[ROSTER].replace(
+    '`crates/symbio-plugin-a/src/lib.rs::A` | done |',
+    '`crates/symbio-plugin-a/src/gone.rs::A` | done |',
+  )
+  assertRed(audit(files), /锚点文件/)
+})
+
+test('与 done 行同包共享的 crate 不适用 planned 装配判据 ⇒ 绿', () => {
+  const files = cleanTree()
+  files[ROSTER] = files[ROSTER]
+    .replace('`crates/symbio-plugin-c/src/lib.rs::B` | done |', '`crates/symbio-plugin-a/src/lib.rs::C` | done |')
+    .replace(
+      '`crates/symbio-plugin-a/src/lib.rs::A` | done |',
+      '`crates/symbio-plugin-a/src/lib.rs::A` | planned |',
+    )
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
 // ── 「不做（边界）」是单列一类（D-388 的收口口径） ─────────────────

@@ -56,7 +56,12 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 
 const ROSTER_REL = 'docs/003-design/008-能力注册表与能力坐标系.md'
 const LEDGER_REL = 'docs/003-design/026-能力拆分与影响类.md'
+const DEPLOY_REL = 'crates/symbio-deploy/src/lib.rs'
 const TASKS_REL = 'docs/007-task'
+
+/** 实现状态的三档闭集：设计在不在 / 实现还在不在，是两个字段。 */
+const ROSTER_STATUSES = ['done', 'planned', 'planned-unspecified']
+const STATUS_COLUMN = '实现状态'
 
 /** 处置闭集：`拆` 的三种限定与 `留` 的五个残留类，外加「待裁决」。 */
 const DISPOSITIONS = [
@@ -177,6 +182,15 @@ function cells(line) {
     .map((c) => c.trim())
 }
 
+/** 表头含 `needle` 的那一行（用于判列数与列名）。 */
+function headerAfter(text, needle) {
+  if (text === null) return null
+  const lines = text.split('\n')
+  const i = lines.findIndex((l) => l.trim().startsWith('|') && l.includes(needle))
+  if (i < 0) return null
+  return { line: i + 1, cells: cells(lines[i].trim()) }
+}
+
 /** 表头含 `needle` 的那张表之后的数据行（跳过分隔行；遇非表格行即止）。 */
 function tableAfter(text, needle) {
   if (text === null) return null
@@ -211,17 +225,39 @@ function report(rel, msg) {
 }
 
 const ledgerText = readRel(LEDGER_REL)
-const rosterRows = tableAfter(readRel(ROSTER_REL), '| 能力 | 维 | 轴 |')
+const rosterText = readRel(ROSTER_REL)
+const rosterRows = tableAfter(rosterText, '| 能力 | 维 | 轴 |')
+const rosterHeader = headerAfter(rosterText, '| 能力 | 维 | 轴 |')
 const ledgerRows = tableAfter(ledgerText, '| # | 能力 | 今天 |')
 const totalRows = tableAfter(ledgerText, '| 处置 | 条数 | 组成 |')
 
 let roster = []
 let ledger = []
+/** 表头是不是「七列 + 锚点 + 实现状态」的形状。形状不对只报一次，不逐行重复。 */
+let statusColumnOk = false
 
 if (!rosterRows || rosterRows.length === 0) {
   report(ROSTER_REL, '名册表读不出（`DE-008 §6.1` 的表格头没了）—— 判据没有输入，宁红不静默')
 } else {
-  roster = rosterRows.map((r) => ({ line: r.line, name: r.cells[0] }))
+  statusColumnOk =
+    rosterHeader !== null &&
+    rosterHeader.cells.length === 9 &&
+    rosterHeader.cells[7] === '锚点' &&
+    rosterHeader.cells[8] === STATUS_COLUMN
+  if (!statusColumnOk) {
+    report(
+      ROSTER_REL,
+      `名册表头必须是「能力 / 维 / 轴 / 天梯 / 等级 / 类型 / 落点 / 锚点 / ${STATUS_COLUMN}」九列` +
+        `（实际 ${rosterHeader ? rosterHeader.cells.join(' | ') : '（读不出）'}）—— 没有状态列，` +
+        '「设计在、实现没了」只能靠猜',
+    )
+  }
+  roster = rosterRows.map((r) => ({
+    line: r.line,
+    name: r.cells[0],
+    anchor: r.cells[7] ?? '',
+    status: (r.cells[8] ?? '').trim(),
+  }))
   const seen = new Map()
   for (const r of roster) {
     const key = keyOf(r.name)
@@ -233,6 +269,33 @@ if (!rosterRows || rosterRows.length === 0) {
       report(`${ROSTER_REL}:${r.line}`, `名册里「${r.name}」与第 ${seen.get(key)} 行规范化后同名——按名字对账会有一行永远对不上`)
     } else {
       seen.set(key, r.line)
+    }
+    if (!statusColumnOk) continue
+    if (!ROSTER_STATUSES.includes(r.status)) {
+      report(
+        `${ROSTER_REL}:${r.line}`,
+        `「${r.name}」的实现状态 \`${r.status || '（空）'}\` 不在三档（${ROSTER_STATUSES.join(' / ')}）—— ` +
+          '状态不是自由文本，新取值先改判据',
+      )
+      continue
+    }
+    if (r.status === 'done') {
+      const anchor = r.anchor.replace(/`/g, '').trim()
+      if (!anchor || anchor === '—') {
+        report(
+          `${ROSTER_REL}:${r.line}`,
+          `「${r.name}」标 done，但锚点是 \`${r.anchor || '（空）'}\` —— 指不出具体 crate / 工具 / 视图，` +
+            '「已实现」与「设计在」在日志里会长得一模一样',
+        )
+        continue
+      }
+      const file = anchor.split('::')[0].trim()
+      if (!fs.existsSync(path.join(ROOT, file))) {
+        report(
+          `${ROSTER_REL}:${r.line}`,
+          `「${r.name}」标 done，但锚点文件 \`${file}\` 不在仓内 —— 实现已经不在，状态却还说 done`,
+        )
+      }
     }
   }
 }
@@ -368,6 +431,56 @@ for (const row of ledger) {
       '把「决定不做」记成「已拆」会让完成率虚高；改记 `不做（边界）` 并挂决策号，' +
       '或真的把它建出来',
   )
+}
+
+// ── 实现状态 ↔ 默认装配清单 ─────────────────────────────────────────
+//
+// 「设计保留、实现撤回」与「还在默认装配里」不能同时成立：状态说没实现，装配清单
+// 却把它装给每个新会话。判据从处置账取该行的专用包（`与 #N 同包` 沿链找），再对
+// `ASSEMBLY_SUB_AGENT_PLUGINS` 的插件 id。**与 done 行同包共享是例外**——同一个 crate
+// 里既有已实现的能力又有撤回的能力时，装的是前者，不是后者。
+const deployText = readRel(DEPLOY_REL)
+function assemblyIds(text) {
+  if (!text) return null
+  const m = text.match(/ASSEMBLY_SUB_AGENT_PLUGINS[\s\S]*?=\s*&\[([\s\S]*?)\];/)
+  if (!m) return null
+  return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1])
+}
+const assembly = assemblyIds(deployText)
+const ledgerByKey = new Map(ledger.map((row) => [keyOf(row.name), row]))
+const doneCrates = new Set()
+for (const r of roster) {
+  if (r.status !== 'done') continue
+  // 锚点里的 crate 与处置账里写出的 crate 都算「这一行用的包」：有些已实现的行
+  // 锚在 `session` 上，而它的另一半实现住在能力包里（例如 #15 的另一半在 heartbeat）。
+  for (const m of r.anchor.matchAll(/crates\/(symbio-plugin-[A-Za-z0-9_-]+)\//g)) doneCrates.add(m[1])
+  const row = ledgerByKey.get(keyOf(r.name))
+  if (row) for (const crate of cratesOf(row)) doneCrates.add(crate)
+}
+if (statusColumnOk) {
+  if (!assembly) {
+    report(
+      DEPLOY_REL,
+      '默认装配清单读不出（找不到 `ASSEMBLY_SUB_AGENT_PLUGINS`）—— planned 行没有可核对的装配面，' +
+        '「实现撤回」与「仍在默认装配」之间的冲突看不见',
+    )
+  } else {
+    for (const r of roster) {
+      if (r.status !== 'planned' && r.status !== 'planned-unspecified') continue
+      const row = ledgerByKey.get(keyOf(r.name))
+      if (!row) continue // 漏行已由名册 ↔ 账本那一段报过
+      for (const crate of cratesOf(row)) {
+        const id = crate.replace(/^symbio-plugin-/, '')
+        if (!assembly.includes(id)) continue
+        if (doneCrates.has(crate)) continue
+        report(
+          `${ROSTER_REL}:${r.line}`,
+          `「${r.name}」标 ${r.status}，但专用包 \`${crate}\` 仍在默认装配清单` +
+            `（\`ASSEMBLY_SUB_AGENT_PLUGINS\` 里的 \`${id}\`）—— 状态说实现撤回，装配却说每个新会话都装它`,
+        )
+      }
+    }
+  }
 }
 
 // ── D-294 移除计划 ───────────────────────────────────────────────────
@@ -568,6 +681,10 @@ if (totalRows && totalRows.length) {
 
 // ── 输出 ────────────────────────────────────────────────────────────
 
+const statusSummary = ROSTER_STATUSES.map(
+  (s) => `${s} ${roster.filter((r) => r.status === s).length}`,
+).join(' / ')
+
 if (errors.length) {
   for (const e of errors) console.log(red(`[ERROR] EX-006 ${e.rel}: ${e.msg}`))
   console.log(
@@ -583,6 +700,7 @@ console.log(
   green(
     `capability-ledger-audit 通过：名册 ${roster.length} 行 = 账本 ${ledger.length} 行` +
       `（拆 ${splitCount} · 留守 ${residueCount} · 不做 ${boundaryCount} · 待裁决 ${pendingCount}）；` +
+      `实现状态 ${statusSummary}；` +
       '每行恰好一条处置，合计表与逐行账一致',
   ),
 )

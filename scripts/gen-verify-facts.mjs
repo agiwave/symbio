@@ -323,21 +323,32 @@ export function frameOf(frameMd) {
     return [parts[0], parts[1], int(plain(r[1]), `§3.3「${plain(r[0])}」的阶数`)]
   })
 
-  // §6.1 名册：七列（+ 可选的第八列「锚点」）。「落点」把坐标系接到实施阶梯
-  // （`SNN` 或 `SNN+SNN`），「类型」的闭集由同一节里那张小表拥有——程序不写死
-  // 「认知 / 工程 / 治理」三个词。
+  // §6.1 名册：七列（+ 可选的第八列「锚点」+ 可选的第九列「实现状态」）。「落点」把
+  // 坐标系接到实施阶梯（`SNN` 或 `SNN+SNN`），「类型」的闭集由同一节里那张小表拥有
+  // ——程序不写死「认知 / 工程 / 治理」三个词。
   //
   // **锚点列是第八列、且不由本生成器搬运**：它判的是「这条能力在代码里是哪几行」，
   // 落点在 `doc-symbol-audit` 的 D-011（那里有 Rust 语料）。facts 是**文档之间**的
   // 对账数据，把代码锚点搬进来只会长出第二份判据——两份口径必然漂移。故此处只
   // **容忍**这一列（列数变了要认识，不是要它的数据）。
+  //
+  // **实现状态是第九列**：`done` / `planned` / `planned-unspecified` 三档的闭集在这里
+  // 只是被搬运，取值判定在 `capability_frame.rs`（那里有正反向用例）。七列 / 八列是
+  // 兼容形状：缺这一列时状态为空，由 verify 程序判红，生成器不替它猜。
   const roster = table('能力', /^### 6\.1/, '§6.1 名册')
-  if (roster.header.length !== 7 && !(roster.header.length === 8 && plain(roster.header[7]) === '锚点')) {
+  const headerOk =
+    roster.header.length === 7 ||
+    (roster.header.length === 8 && plain(roster.header[7]) === '锚点') ||
+    (roster.header.length === 9 &&
+      plain(roster.header[7]) === '锚点' &&
+      plain(roster.header[8]) === '实现状态')
+  if (!headerOk) {
     throw new Error(
-      `${FRAME_REL} §6.1：名册必须是「能力 / 维 / 轴 / 天梯 / 等级 / 类型 / 落点」七列` +
-        `（可选第八列「锚点」），实际 ${roster.header.join(' | ')}`,
+      `${FRAME_REL} §6.1：名册必须是「能力 / 维 / 轴 / 天梯 / 等级 / 类型 / 落点」七列，` +
+        `可选第八列「锚点」与第九列「实现状态」（允许 7 / 8 / 9 列），实际 ${roster.header.join(' | ')}`,
     )
   }
+  const statuses = ['done', 'planned', 'planned-unspecified']
   const kinds = table('类型', /^### 6\.1/, '§6.1 类型闭集表').rows.map((r) => plain(r[0]))
   if (!kinds.length) throw new Error(`${FRAME_REL} §6.1：类型闭集表没有行`)
   const names = roster.rows.map((r) => plain(r[0]))
@@ -364,6 +375,7 @@ export function frameOf(frameMd) {
       level: int(lv, `§6.1「${name}」的等级`),
       kind: plain(r[5]),
       stages,
+      status: roster.header.length >= 9 ? plain(r[8]) : '',
     }
   })
 
@@ -385,6 +397,7 @@ export function frameOf(frameMd) {
     overlap,
     caps,
     kinds,
+    statuses,
     dimCounts,
     pseudo,
     growth,
@@ -675,6 +688,11 @@ pub fn in_domain(key: &str, value: &str) -> bool {
   out.push('/// DE-008 §6.1「类型」列的闭集（那张小表拥有它，程序不另抄一份）')
   out.push(`pub const KINDS: &[&str] = &[${frame.kinds.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
   out.push('')
+  out.push('/// DE-008 §6.1「实现状态」的三档闭集——`done` / `planned` / `planned-unspecified`')
+  out.push(`pub const CAPABILITY_STATUSES: &[&str] = &[${frame.statuses
+    .map((s) => `\n    ${rs(s)},`)
+    .join('')}\n];`)
+  out.push('')
   out.push('/// DE-008 §3.2 天梯每一级的「核心能力」——必须逐条是名册里**该级**的行')
   out.push(`pub struct TierCore {
     pub tier: usize,
@@ -712,6 +730,8 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     pub kind: &'static str,
     /// 由哪几阶点亮（阶梯的阶号，见 §1 总表）——坐标系与实施阶梯的咬合处
     pub stages: &'static [&'static str],
+    /// 实现状态：\`done\` / \`planned\` / \`planned-unspecified\`（闭集见 \`CAPABILITY_STATUSES\`）
+    pub status: &'static str,
 }`)
   out.push('')
   out.push(`pub const CAPABILITIES: &[Capability] = &[${frame.caps
@@ -719,7 +739,8 @@ pub fn in_domain(key: &str, value: &str) -> bool {
       (c) =>
         `\n    Capability {\n        name: ${rs(c.name)},\n        dim: ${rs(c.dim)},\n` +
         `        axis: ${rs(c.axis)},\n        tier: ${c.tier},\n        level: ${c.level},\n` +
-        `        kind: ${rs(c.kind)},\n        stages: &[${c.stages.map((s) => rs(s)).join(', ')}],\n    },`,
+        `        kind: ${rs(c.kind)},\n        stages: &[${c.stages.map((s) => rs(s)).join(', ')}],\n` +
+        `        status: ${rs(c.status)},\n    },`,
     )
     .join('')}\n];`)
   out.push('')

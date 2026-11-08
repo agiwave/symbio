@@ -208,6 +208,13 @@ pub const KINDS: &[&str] = &[
     "治理",
 ];
 
+/// DE-008 §6.1「实现状态」的三档闭集——`done` / `planned` / `planned-unspecified`
+pub const CAPABILITY_STATUSES: &[&str] = &[
+    "done",
+    "planned",
+    "planned-unspecified",
+];
+
 /// DE-008 §3.2 天梯每一级的「核心能力」——必须逐条是名册里**该级**的行
 pub struct TierCore {
     pub tier: usize,
@@ -274,6 +281,8 @@ pub struct Capability {
     pub kind: &'static str,
     /// 由哪几阶点亮（阶梯的阶号，见 §1 总表）——坐标系与实施阶梯的咬合处
     pub stages: &'static [&'static str],
+    /// 实现状态：`done` / `planned` / `planned-unspecified`（闭集见 `CAPABILITY_STATUSES`）
+    pub status: &'static str,
 }
 
 pub const CAPABILITIES: &[Capability] = &[
@@ -285,6 +294,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 1,
         kind: "认知",
         stages: &["S01"],
+        status: "done",
     },
     Capability {
         name: "情景记忆",
@@ -294,6 +304,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S06"],
+        status: "done",
     },
     Capability {
         name: "语义记忆",
@@ -303,6 +314,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S06"],
+        status: "done",
     },
     Capability {
         name: "程序记忆（技能）",
@@ -312,6 +324,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S11"],
+        status: "done",
     },
     Capability {
         name: "时序历史",
@@ -321,6 +334,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S05"],
+        status: "done",
     },
     Capability {
         name: "因果结构",
@@ -330,6 +344,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S10"],
+        status: "done",
     },
     Capability {
         name: "未来预测",
@@ -339,6 +354,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S12"],
+        status: "done",
     },
     Capability {
         name: "世界模型",
@@ -348,6 +364,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S06"],
+        status: "done",
     },
     Capability {
         name: "长期记忆检索",
@@ -357,6 +374,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "工程",
         stages: &["S06"],
+        status: "done",
     },
     Capability {
         name: "主动求知",
@@ -366,6 +384,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S12"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "工具接入（L1）",
@@ -375,6 +394,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 1,
         kind: "工程",
         stages: &["S02"],
+        status: "done",
     },
     Capability {
         name: "副作用分级",
@@ -384,6 +404,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 1,
         kind: "治理",
         stages: &["S02"],
+        status: "done",
     },
     Capability {
         name: "权限与配额",
@@ -393,6 +414,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "治理",
         stages: &["S09"],
+        status: "done",
     },
     Capability {
         name: "幂等与重试",
@@ -402,6 +424,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 1,
         kind: "工程",
         stages: &["S02"],
+        status: "done",
     },
     Capability {
         name: "执行隔离",
@@ -411,6 +434,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 1,
         kind: "工程",
         stages: &["S02"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "因果表征工具",
@@ -420,6 +444,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "认知",
         stages: &["S09"],
+        status: "done",
     },
     Capability {
         name: "可逆性设计",
@@ -429,6 +454,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "工程",
         stages: &["S09"],
+        status: "done",
     },
     Capability {
         name: "制造工具（L2）",
@@ -438,6 +464,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S13"],
+        status: "done",
     },
     Capability {
         name: "造工具的工具（L3）",
@@ -447,6 +474,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S13"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "抽象协议设计（L4）",
@@ -456,6 +484,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S13"],
+        status: "done",
     },
     Capability {
         name: "具身实时闭环",
@@ -465,6 +494,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "工程",
         stages: &["S09"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "对等协商",
@@ -474,6 +504,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S13"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "可撤销的承诺",
@@ -483,6 +514,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S09"],
+        status: "done",
     },
     Capability {
         name: "多轮对话",
@@ -492,6 +524,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "认知",
         stages: &["S01"],
+        status: "done",
     },
     Capability {
         name: "流式输出",
@@ -501,6 +534,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 1,
         kind: "工程",
         stages: &["S01"],
+        status: "done",
     },
     Capability {
         name: "时延分层（反射→自主）",
@@ -510,6 +544,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "工程",
         stages: &["S07"],
+        status: "done",
     },
     Capability {
         name: "打断与插话",
@@ -519,6 +554,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "工程",
         stages: &["S07"],
+        status: "done",
     },
     Capability {
         name: "多模态",
@@ -528,6 +564,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S09"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "人格语气一致",
@@ -537,6 +574,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "认知",
         stages: &["S10"],
+        status: "done",
     },
     Capability {
         name: "主动开口",
@@ -546,6 +584,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S12"],
+        status: "done",
     },
     Capability {
         name: "节奏与时机",
@@ -555,6 +594,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S10"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "规划与重规划",
@@ -564,6 +604,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "认知",
         stages: &["S03"],
+        status: "done",
     },
     Capability {
         name: "自我校验",
@@ -573,6 +614,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "治理",
         stages: &["S03", "S09"],
+        status: "done",
     },
     Capability {
         name: "成本控制",
@@ -582,6 +624,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "治理",
         stages: &["S04"],
+        status: "done",
     },
     Capability {
         name: "自我模型",
@@ -591,6 +634,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S11"],
+        status: "done",
     },
     Capability {
         name: "校准（说到做到率）",
@@ -600,6 +644,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S11"],
+        status: "done",
     },
     Capability {
         name: "承诺追踪",
@@ -609,6 +654,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "治理",
         stages: &["S13"],
+        status: "done",
     },
     Capability {
         name: "信任账本",
@@ -618,6 +664,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S13"],
+        status: "done",
     },
     Capability {
         name: "凸显仲裁",
@@ -627,6 +674,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 1,
         kind: "认知",
         stages: &["S04"],
+        status: "done",
     },
     Capability {
         name: "可解释",
@@ -636,6 +684,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S12"],
+        status: "done",
     },
     Capability {
         name: "技能编译",
@@ -645,6 +694,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S11"],
+        status: "done",
     },
     Capability {
         name: "反自动化回退",
@@ -654,6 +704,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S11"],
+        status: "done",
     },
     Capability {
         name: "独立验证与返工",
@@ -663,6 +714,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S03", "S09"],
+        status: "done",
     },
     Capability {
         name: "跨体承诺",
@@ -672,6 +724,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S08"],
+        status: "done",
     },
     Capability {
         name: "声誉与互信",
@@ -681,6 +734,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S08"],
+        status: "done",
     },
     Capability {
         name: "传递性信任",
@@ -690,6 +744,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S08"],
+        status: "done",
     },
     Capability {
         name: "冲突与仲裁",
@@ -699,6 +754,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S08"],
+        status: "done",
     },
     Capability {
         name: "目标自生成",
@@ -708,6 +764,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S12"],
+        status: "done",
     },
     Capability {
         name: "内在动机",
@@ -717,6 +774,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S12"],
+        status: "done",
     },
     Capability {
         name: "好奇与探索",
@@ -726,6 +784,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "认知",
         stages: &["S12"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "回避倾向",
@@ -735,6 +794,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "认知",
         stages: &["S12"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "完成度追求",
@@ -744,6 +804,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 2,
         kind: "认知",
         stages: &["S03"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "价值偏好",
@@ -753,6 +814,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 4,
         kind: "治理",
         stages: &["S10"],
+        status: "planned-unspecified",
     },
     Capability {
         name: "共同目标与分工",
@@ -762,6 +824,7 @@ pub const CAPABILITIES: &[Capability] = &[
         level: 3,
         kind: "治理",
         stages: &["S08"],
+        status: "planned-unspecified",
     },
 ];
 
