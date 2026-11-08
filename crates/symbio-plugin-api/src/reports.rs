@@ -280,6 +280,24 @@ pub fn read_view(name: &str, snapshot: &[Event]) -> Value {
     }
 }
 
+/// 一条已登记视图的读数**加口径版本**：供诊断列（`capability_views`）用。
+///
+/// 与 [`read_view`] 同一条路径（冻结声明表 + 名字），**不走 `shared_views` 的清单闸**：
+/// 报表登记就是公开（`D-387`），名字由 owner 的 `ReportDecl` 交出，读方不需要它再出现在
+/// 生成清单里。读不到 ⇒ 缺席原因（四种态之一），不是 `Null`——诊断列要说得出为什么没数。
+pub fn read_view_with_ver(
+    name: &str,
+    snapshot: &[Event],
+) -> Result<(u32, Value), crate::ViewUnavailable> {
+    let frozen = crate::sealed_declarations().map_err(|_| crate::ViewUnavailable::NotSealed)?;
+    let view = frozen
+        .view(name)
+        .ok_or_else(|| crate::ViewUnavailable::Unknown {
+            name: name.to_string(),
+        })?;
+    Ok((view.ver, (view.eval)(snapshot, i64::MAX)))
+}
+
 /// 把**已登记的全部报表**读成一张表：键 = `slot`，值 = owner 的 `render` 排好的整条读数。
 ///
 /// ## 它是动态列的**唯一填充者**

@@ -291,17 +291,18 @@ pub(super) fn capability_views(snapshot: &[Event]) -> serde_json::Value {
 }
 
 /// 一条视图读成一格：`{ owner, status, ver, value }` 或可诊断的缺席。
+///
+/// 读口用 [`symbio_plugin_api::reports::read_view_with_ver`]，**不**用
+/// `ViewRead::named`：后者要求名字在 `shared_views` 清单里，而报表登记就是公开
+/// （`D-387`）——过清单闸会把已登记的视图全部读成 `not_shared`。
 fn view_entry(owner: &str, name: &str, snapshot: &[Event]) -> serde_json::Value {
-    match symbio_plugin_api::ViewRead::named(name) {
-        Ok(view) => match (view.ver(), view.read_all(snapshot)) {
-            (Ok(ver), Ok(value)) => serde_json::json!({
-                "owner": owner,
-                "status": "ok",
-                "ver": ver,
-                "value": value,
-            }),
-            (Err(why), _) | (_, Err(why)) => view_unavailable(owner, &why),
-        },
+    match symbio_plugin_api::reports::read_view_with_ver(name, snapshot) {
+        Ok((ver, value)) => serde_json::json!({
+            "owner": owner,
+            "status": "ok",
+            "ver": ver,
+            "value": value,
+        }),
         Err(why) => view_unavailable(owner, &why),
     }
 }
