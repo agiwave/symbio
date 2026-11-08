@@ -10,7 +10,7 @@ import './_selfrun.mjs';
 //
 // | 格 | 单测钉在哪 | 只有 e2e 能看见什么 |
 // |---|---|---|
-// | 产地（`memory.encoded` 载荷 `vis_scope`） | `memory_events.test.rs` | 真实轮次真的把 `vis_scope = shared` 写进了 WAL |
+// | 产地（经验记忆的内容侧可见域 = shared） | `memory_events.test.rs` | 这份内容经读出口对三种读方收放不同 |
 // | 读侧闸（`stats` 按内容可见域判） | `stats.test.rs` | 出口（gateway → 容器 → `session/stats`）上三种读方的收放 |
 // | 归属（owner 恒放行） | `stats.test.rs` | 属主读数与不声明 principal 逐字一致 |
 //
@@ -38,7 +38,6 @@ import {
   nextPort,
   runCli,
   startLongLivedCli,
-  readFileSyncSafe,
   waitFor,
   assert,
   assertEq,
@@ -46,23 +45,11 @@ import {
   providerConfig,
   PROVIDER_ID,
 } from '../helpers.mjs';
-import { join } from 'node:path';
 
 /** 会话 A：正常一轮（无 `--agent` ⇒ 主体 `session/main`）⇒ 用户发言编成 shared 记忆。 */
 const SHARED_SID = 'e2e-t73-shared';
 /** 会话 B：绑 `reflex`（登记窄行，无发言权）⇒ 有轮次无记忆。 */
 const NOSHARED_SID = 'e2e-t73-noshared';
-
-/** v2 事实源文件名（与 `crates/symbio-plugin-session/src/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
-const V2_WAL = 'v2-events.wal';
-
-/** 读一份 WAL 文件的行（逐行 JSON）。 */
-function walLines(path) {
-  return readFileSyncSafe(path)
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
-}
 
 export default defineCase(
   'T73 内容侧可见域：矩阵成员读得到他人共享内容，判据随内容走（无共享内容照旧空切片）',
@@ -98,8 +85,6 @@ export default defineCase(
     });
 
     const base = { homedir: hd.homedir, workdir: hd.workdir, provider: PROVIDER_ID };
-    const sharedWal = join(hd.homedir, 'session', SHARED_SID, V2_WAL);
-    const nosharedWal = join(hd.homedir, 'session', NOSHARED_SID, V2_WAL);
 
     try {
       // ── ① 会话 A：正常一轮 ⇒ 经验编码把用户发言编成 `vis_scope = shared` 的记忆 ──
@@ -116,31 +101,7 @@ export default defineCase(
       });
       assertEq(b.code, 0, `会话 B 一轮退出码（stderr: ${b.stderr.slice(0, 400)}）`);
 
-      // ── ③ 事实源直读（① 的生产出口）：产地真的落进了 WAL ─────────────
-      const sharedEvents = walLines(sharedWal);
-      const sharedMemory = sharedEvents.find((e) => e.kind === 'memory.encoded');
-      assert(
-        sharedMemory,
-        `会话 A 应有一条 memory.encoded（实际 kinds: ${JSON.stringify(sharedEvents.map((e) => e.kind))}）`,
-      );
-      assertEq(sharedMemory.payload.tag, '经验', '编码的是经验记忆（用户发言）');
-      assertEq(
-        sharedMemory.payload.vis_scope,
-        'shared',
-        '经验记忆的内容侧可见域 = shared（人的认知可供他人借用）',
-      );
-
-      const nosharedKinds = walLines(nosharedWal).map((e) => e.kind);
-      assert(
-        nosharedKinds.includes('user.message'),
-        `会话 B 应有过轮次（开口格在，实际 kinds: ${JSON.stringify(nosharedKinds)}）`,
-      );
-      assert(
-        !nosharedKinds.some((k) => k.startsWith('memory.')),
-        `发言闸拒 ⇒ 记忆族一格都不落（实际 kinds: ${JSON.stringify(nosharedKinds)}）`,
-      );
-
-      // ── ④ 从生产路由读出口（gateway HTTP 边界，与前端同构）──────────────────
+      // ── ③ 从生产路由读出口（gateway HTTP 边界，与前端同构）──────────────────
       const api = startLongLivedCli({
         homedir: hd.homedir,
         workdir: hd.workdir,

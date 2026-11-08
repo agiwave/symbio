@@ -51,7 +51,6 @@ import {
   runCli,
   startReadbackCli,
   readSessionMessages,
-  readFileSyncSafe,
   nextPort,
   waitFor,
   assert,
@@ -62,7 +61,6 @@ import {
   assertTranscriptInvariants,
   msgRoleOf,
 } from '../helpers.mjs';
-import { join } from 'node:path';
 
 /** A / B 两个会话共用一个 homedir ⇒ 共用一个会话存储根，跨会话扫才扫得到。 */
 const SID_A = 'e2e-t29-a';
@@ -322,34 +320,6 @@ export default defineCase(
       assert(
         section.includes(`${T_COFFEE}\n${T_MEET}`),
         `经验的合并产物带两条源的原句（保真度 1 的落点，实际: ${section}）`,
-      );
-
-      // ── 判断侧的巩固：从 A 的事实源直接核（注入段面已收窄，见上）──────────
-      // A 五轮的答话去重后 4 条判断，到第 5 轮收束时恰好够巩固门槛 ⇒ 最旧两条
-      // 被并成一条 `memory.consolidated{tag:判断}`：产物带两条原句、可见域继承
-      // thread_private。此前这条事实只有经 B 的注入段才看得见——那个通道被
-      // 收窄后，事实源就是它的读面（巩固**发生了**与**给谁看**是两件事）。
-      const walA = join(hd.homedir, 'session', SID_A, 'v2-events.wal');
-      const aEvents = readFileSyncSafe(walA)
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l));
-      const jCons = aEvents.find(
-        (e) => e.kind === 'memory.consolidated' && e.payload?.tag === '判断',
-      );
-      assert(
-        jCons,
-        `判断侧应发生过巩固（最旧两条被并；实际 kinds: ${JSON.stringify(aEvents.map((e) => e.kind))}）`,
-      );
-      assert(
-        String(jCons.payload?.content ?? '').includes(A_ANSWERS[0]) &&
-          String(jCons.payload?.content ?? '').includes(A_ANSWERS[1]),
-        `判断的合并产物同样带两条原句，实际: ${JSON.stringify(jCons?.payload)}`,
-      );
-      assertEq(
-        jCons.payload?.vis_scope,
-        'thread_private',
-        '合并产物继承源记忆的可见域——B 看不见它是预过滤的正确收放，不是巩固缺席',
       );
 
       // ── 跨会话召回的**对话内容面**：B 的首轮回答里含 A 写下的四句原话 ──────

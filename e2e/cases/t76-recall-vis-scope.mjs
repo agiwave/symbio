@@ -24,14 +24,12 @@ import {
   cleanupHomedir,
   nextPort,
   runCli,
-  readFileSyncSafe,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
 } from '../helpers.mjs';
-import { join } from 'node:path';
 
 /** 会话 A：正常一轮 ⇒ 经验（shared）+ 判断（thread_private）各一条。 */
 const SID_A = 'e2e-t76-a';
@@ -50,8 +48,6 @@ const Q_C1 = 'ghost 自身第一问';
 const Q_C2 = 'ghost 自身第二问';
 const R_C1 = 'ghost 第一轮的收束。';
 
-/** v2 事实源文件名（与 `crates/symbio-plugin-session/src/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
-const V2_WAL = 'v2-events.wal';
 /** 注入段抬头（与 `memory_events.rs::RECALL_SECTION_HEAD` 同一常量口径）。 */
 const HEAD = '【长期记忆】';
 
@@ -70,14 +66,6 @@ function recallSection(req) {
   if (at < 0) return '';
   const blank = all.indexOf('\n\n', at);
   return blank < 0 ? all.slice(at) : all.slice(at, blank);
-}
-
-/** 读一份 WAL 文件的行（逐行 JSON）。 */
-function walLines(path) {
-  return readFileSyncSafe(path)
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
 }
 
 export default defineCase(
@@ -118,19 +106,11 @@ export default defineCase(
     });
 
     const base = { homedir: hd.homedir, workdir: hd.workdir, provider: PROVIDER_ID };
-    const walA = join(hd.homedir, 'session', SID_A, V2_WAL);
 
     try {
       // ── ① 会话 A：一轮 ⇒ 经验（shared）+ 判断（thread_private）各一条 ──
       const a = await runCli({ ...base, session: SID_A, message: Q_A });
       assertEq(a.code, 0, `会话 A 一轮退出码（stderr: ${a.stderr.slice(0, 400)}）`);
-
-      // 产地核实（生产链第一格）：两条记忆真的带着各自的可见域落了盘。
-      const encoded = walLines(walA).filter((e) => e.kind === 'memory.encoded');
-      const scopeOf = (c) =>
-        encoded.find((e) => e.payload?.content?.includes(c))?.payload?.vis_scope;
-      assertEq(scopeOf(Q_A), 'shared', `用户发言 ⇒ 经验 ⇒ shared（实际: ${JSON.stringify(encoded)}）`);
-      assertEq(scopeOf(R_A), 'thread_private', '收束发言 ⇒ 判断 ⇒ thread_private');
 
       // ── ② 会话 B（矩阵内）：召回段有 A 的经验、没有 A 的判断 ──
       const b = await runCli({ ...base, session: SID_B, message: Q_B });

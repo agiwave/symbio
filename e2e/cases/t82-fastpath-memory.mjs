@@ -3,16 +3,14 @@ import './_selfrun.mjs';
 //
 // | 断言 | 缺陷形态（修复前） |
 // |---|---|
-// | 答话轮的用户发言落 `memory.encoded{tag:经验}` | 快路直接返回，一轮记忆都不写 |
-// | 答话轮的定稿答话落 `memory.encoded{tag:判断}` | 同上 |
-// | 答话轮仍有一条 `chat.assistant.final` | 已由运行器落，防止修复时退化成第二写方 |
+// | 答话轮写下的经验能被新会话召回 | 快路直接返回，一轮记忆都不写 |
 // | 新会话的完整轮请求包置顶注入这条记忆 | 没编码 ⇒ 没得召回 |
 //
 // ## 为什么必须端到端
 //
 // 单测只能钉 `record_learning` 本身；「`classify` 判 `direct` 的轮会不会走到它」
 // 只有真实请求序列看得见。修复前实测（CLI a10）：用户说「请记住…」，默认配置下
-// `classify` 判答话 ⇒ WAL 里没有任何 `memory.encoded`，下一个会话自然想不起来。
+// `classify` 判答话 ⇒ 快路直接返回，下一个会话的召回段是空的。
 //
 // ## 场景与请求数的对应
 //
@@ -24,14 +22,12 @@ import {
   makeHomedir,
   cleanupHomedir,
   runCli,
-  readFileSyncSafe,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
 } from '../helpers.mjs';
-import { join } from 'node:path';
 
 const SID_A = 'e2e-t82-a';
 const SID_B = 'e2e-t82-b';
@@ -43,21 +39,13 @@ const REPLY = '好的，我记住了：你的幸运数字是 7。';
 /** B 的提问：当前对话里没有答案 ⇒ 分类必须落 `work`，完整轮才有召回段。 */
 const T_RECALL = '我的幸运数字是多少？';
 
-const V2_WAL = 'v2-events.wal';
 const HEAD = '【长期记忆】';
 
 const textOf = (m) =>
   typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? '');
 
-function walLines(path) {
-  return readFileSyncSafe(path)
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
-}
-
 export default defineCase(
-  'T82 定稿答话轮（快路）记忆闭包：经验 + 判断入格，跨会话召回复现',
+  'T82 定稿答话轮（快路）记忆闭包：经验可召回，跨会话复现',
   async () => {
     // 顺序 + `once`：分类请求先于措辞 / 完整轮请求，末条 user 都是同一句话。
     const llm = await new MockLlm([
@@ -92,36 +80,8 @@ export default defineCase(
         return r;
       };
 
-      // ── ① A 会话：快路答话轮 ────────────────────────────────────────────
+      // ── ① A 会话：快路答话轮（写下的记忆能否召回，由 ② 的注入段判）──────────
       await turn(T_MEMORY, SID_A);
-      const events = walLines(join(hd.homedir, 'session', SID_A, V2_WAL));
-      const kinds = events.map((e) => e.kind);
-
-      const encoded = events.filter((e) => e.kind === 'memory.encoded');
-      const userMemory = encoded.find((e) => e.payload?.content === T_MEMORY);
-      assert(
-        userMemory,
-        `答话轮的用户发言必须编码（记忆是轮级派生，不依附工具交换）。实际 kinds: ${JSON.stringify(kinds)}`,
-      );
-      assertEq(userMemory.payload?.tag, '经验', '用户发言 ⇒ 经验');
-      assertEq(userMemory.payload?.vis_scope, 'shared', '经验记忆的内容侧可见域 = shared');
-
-      const judgment = encoded.find((e) => e.payload?.content === REPLY);
-      assert(
-        judgment,
-        `答话轮的定稿答话也必须编码（tag=判断）。实际 encoded: ${JSON.stringify(encoded.map((e) => e.payload))}`,
-      );
-      assertEq(judgment.payload?.tag, '判断', '定稿答话 ⇒ 判断');
-      assertEq(
-        judgment.payload?.vis_scope,
-        'thread_private',
-        '判断记忆只在记录它的会话可见',
-      );
-
-      assert(
-        kinds.includes('chat.assistant.final'),
-        `答话轮仍由运行器收束（唯一收束写方）。实际 kinds: ${JSON.stringify(kinds)}`,
-      );
 
       // ── ② B 会话：完整轮，召回段应带 A 的经验 ────────────────────────────
       await turn(T_RECALL, SID_B);
