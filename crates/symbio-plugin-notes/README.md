@@ -19,7 +19,7 @@ impl: done
 | 上下文段 | [`src/context.rs`](src/context.rs) 的 `notes_context`（声明 `cost` / `prio`，D-243） | `submit_context_provider!` |
 | 效果行为 | [`src/behavior.rs`](src/behavior.rs) 的 `note_capture` | `submit_behavior!` |
 | 前置判断 | [`src/behavior.rs`](src/behavior.rs) 的 `ToolBehavior::before`（重复便签在执行前拒） | 同一个 `submit_behavior!`（D-219） |
-| 对外可读的折叠 | [`src/decl.rs`](src/decl.rs) 的 `ViewDecl`（`notes.recent` / `notes.digest` / `notes.insights`） | 自家 `PLUGIN.yml` 的 `shared_views` → 生成 `view_names.rs`，读方经 `plugin-api::views`（D-221） |
+| 视图 | [`src/decl.rs`](src/decl.rs) 的 `ViewDecl`（`notes.recent` / `notes.digest` / `notes.insights`） | 本包私有（没有第二个读者；名字不进 `shared_views`，D-221） |
 | 行执行体 | [`src/row.rs`](src/row.rs) 的 `NoteIndex` / `NoteReflect` / `NoteSummarize` | 声明 `ROWS` + `submit_row!`，由通用执行体 `plugin_row` 跑（D-241） |
 | 模型往返 | [`src/row.rs`](src/row.rs) 的 `NoteReflect` 交 `RowStep::Ask`（欠一笔 `request(port=model)`），回执落 `notes.insight` | 环按 `model` 端口派发（D-304） |
 | 通用省略 | [`src/row.rs`](src/row.rs) 的 `NoteSummarize` 落带 `elision` 的 `message.added`，组装跳过那段工具结果 | 与领域事实同一个写口（D-249） |

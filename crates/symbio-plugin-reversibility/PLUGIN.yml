@@ -3,7 +3,3 @@ plugin_id: reversibility
 plugin_comment: 可逆性设计：给动作标注可逆等级与补偿做法，视图按动作折出当前等级分布
 plugin_assembly: sub_agent
 plugin_order: 66
-# 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
-# crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住本插件的
-# `decl::VIEWS`；这里只登记「对外可读」这一件事。
-shared_views: reversibility.register

@@ -3,7 +3,3 @@ plugin_id: explain
 plugin_comment: 可解释：把一次决定的理由记成事实（工具），再折成可读的理由台账（视图）
 plugin_assembly: sub_agent
 plugin_order: 62
-# 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
-# crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住 `decl::VIEWS`。
-# 对外可读是 owner 的显式动作（D-221）：读方按名字读，不依赖本 crate。
-shared_views: explain.rationales

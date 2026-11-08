@@ -162,7 +162,7 @@ fn the_calibration_event_is_owned_here() {
     assert_eq!(frozen.event_owner(EVENT_MEMORY_CALIBRATED), Some(OWNER));
 }
 
-/// 回退视图对外可读：名字在冻结表里，owner 是本插件。
+/// 回退视图在冻结表里，owner 是本插件（是否公开由 `PLUGIN.yml` 决定，不在这条判据里）。
 #[test]
 fn the_retreat_view_is_sealed_under_this_owner() {
     let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");

@@ -250,13 +250,26 @@ fn absence_states_are_distinguishable() {
     );
 }
 
-/// 生成的公开表确实进了本 crate：notes 的夹具视图是本仓当前唯一一条共享视图。
+/// 生成的公开表确实进了本 crate：表非空、按名字全序、每条都带 owner。
+///
+/// **不点名任何业务视图**——点一个名字等于把清单内容抄成第二份，清单增删一行就要改这里。
+/// 夹具视图 [`RECENT`] 只登记在 `frozen()`，它进不了生成表，正好用来证明「未公开 ⇒ 不可读」。
 #[test]
 fn the_generated_shared_table_is_linked() {
+    let table = shared();
+    assert!(!table.is_empty(), "生成的公开表不该为空");
+    let names: Vec<&str> = table.iter().map(|v| v.name).collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted, "公开表按名字全序：读侧不依赖注册顺序");
     assert!(
-        shared().iter().any(|v| v.name == "notes.recent"),
-        "notes.recent 应出现在清单生成的共享视图表里：{:?}",
-        shared()
+        table.iter().all(|v| !v.owner.is_empty()),
+        "每条公开视图都要带 owner：{:?}",
+        table
+    );
+    assert!(
+        !table.iter().any(|v| v.name == RECENT),
+        "夹具视图不进生成表：它只活在测试自己的登记里"
     );
 }
 

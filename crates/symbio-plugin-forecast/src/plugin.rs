@@ -36,7 +36,8 @@ impl Plugin for ForecastPlugin {
         Self::metadata()
     }
 
-    /// 本插件不占用路由面：读出口是视图 `forecast.remaining`（按名字读）。
+    /// 本插件不占用路由面，也没有公开视图：`forecast.remaining` 只在本包内折，
+    /// 今天没有第二个读者。
     async fn route(
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,

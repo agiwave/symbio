@@ -1,27 +1,21 @@
 import './_selfrun.mjs';
 // T103 抽象协议设计（L4）是一条**插件能力**：两个工具（`protocol_propose` /
-// `protocol_join`）写协议提案与加入，一张视图（`protocol.catalog`）折出成立状态，
-// 一条只读路由（`protocol/catalog`）把同一份折叠交给第二方；摘掉插件后工具面消失而
-// 系统照常运行。
+// `protocol_join`）写协议提案与加入，一条只读路由（`protocol/catalog`）把折叠交给
+// 第二方；摘掉插件后工具面消失而系统照常运行。视图已收回插件私有，e2e 只钉事实落格；
+// 折叠由 owner 的 `decl.test.rs` 覆盖。
 //
 // ## 本用例钉的四件事
 //
 // | 段 | 唯一能看见它的地方 |
 // |---|---|
 // | 工具面 | 首次请求的 `tools` 里有 `protocol_propose` / `protocol_join` |
-// | 事实落格 | 工具调用之后，`session/stats` 的 `capability_views['protocol.catalog']` 有两条协议 |
-// | 第二方判据 | `handoff` 只有一个参与者仍是 `draft`，`review` 有两个参与者才是 `established` |
-// | 第二方读入口 | 网关 `/invoke` 调 `protocol/catalog`，拿到的值与视图**逐字相同** |
+// | 事实落格 | 直读会话 WAL 的 `protocol.proposed` / `protocol.joined` 事件 |
+// | 第二方判据 | 网关 `/invoke` 调 `protocol/catalog`：`handoff` 仍 `draft`，`review` 为 `established` |
+// | 第二方读入口 | `protocol/catalog` 路由是外部第二方的真实边界名 |
 //
 // 第三段是「协议需要第二方」的可执行形式：同一个行为既是提案也是加入，是否成立不由
-// 谁声明，而由**不同参与者**数决定。第四段钉住路由与视图没有第二份折叠——第二方
-// 从网关看到的成立状态，必须与宿主里任何插件读到的相同。
-//
-// ## 为什么经 `session/stats` 读视图
-//
-// 视图是 owner 对自己事实的纯折叠，读它必须经**生产读出口**（`session/stats` 遍历
-// 清单生成的公开表，D-221）——只有这条路能证明「装配真的把 owner 的 `ViewDecl`
-// 冻结进了同一张表」。直接调用本插件的求值函数是同义反复。
+// 谁声明，而由**不同参与者**数决定。`protocol/catalog` 路由没有随视图收回私有（它是
+// 外部第二方的边界名），折叠读回因此只走这条路由。
 //
 // ## 停用侧断言什么、不断言什么
 //
@@ -44,6 +38,7 @@ import {
   defineCase,
   providerConfig,
   PROVIDER_ID,
+  readFileSyncSafe,
 } from '../helpers.mjs';
 import { toolNamesOf, envelopeOf, isSilentAuxRequest } from '../llm-contract.mjs';
 
@@ -113,7 +108,7 @@ function homedirFor(port) {
   return makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(port) }],
     pluginConfigs: {
-      // 网关拉起才有 `session/stats` 与 `protocol/catalog` 两条生产路由可打
+      // 网关拉起才有 `protocol/catalog` 这条生产路由可打
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',
@@ -160,7 +155,44 @@ export default defineCase(
         `第一轮 stdout 应为收尾正文（实际: ${JSON.stringify(turn.stdout)}）`,
       );
 
-      // ── B 事实落格 + 第二方判据 + 路由与视图同源 ─────────────────────────
+      // ── B 事实落格：直读会话 WAL 里本插件的两条事实 ─────────────────────
+      //
+      // 事实在**轮末**写口落格（D-213）；one-shot CLI 已退出，WAL 就是事实源本身。
+      // 视图已收回插件私有，这里只钉五次有效断言落格。
+      const events = readFileSyncSafe(
+        join(hd.homedir, 'session', SID, 'v2-events.wal'),
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      const proposed = events.filter((e) => e.kind === 'protocol.proposed');
+      assertEq(
+        proposed.length,
+        2,
+        `两次提案：${JSON.stringify(proposed.map((e) => e.payload))}`,
+      );
+      assertEq(proposed.map((e) => e.payload?.name), ['handoff', 'review'], '提案按提出序');
+      assertEq(
+        proposed[0]?.payload?.messages,
+        ['request', 'accept', 'done'],
+        '消息序列原样落格',
+      );
+
+      const joined = events.filter((e) => e.kind === 'protocol.joined');
+      assertEq(
+        joined.length,
+        3,
+        `三次加入（2 提案 + 3 加入 = 五次有效断言）：${JSON.stringify(joined.map((e) => e.payload))}`,
+      );
+      assertEq(
+        joined.map((e) => e.payload?.participant),
+        ['reviewer', 'main', 'reviewer'],
+        '加入者按加入序',
+      );
+
+      // ── 第二方读入口：`protocol/catalog` 路由是外部第二方的真实边界名 ─────
+      // 网关不链接本 crate，也能拿到 owner 折出的成立状态；这是本用例唯一的折叠读口。
       const api = startLongLivedCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
@@ -170,53 +202,36 @@ export default defineCase(
       });
       try {
         await api.waitGatewayReady();
-
-        const inv = await api.invoke('session/stats', {}, { session_id: SID });
-        assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
-
-        const views = inv.body?.data?.capability_views;
-        const view = views?.['protocol.catalog'];
-        assert(view, `能力视图列应有 protocol.catalog 这一格（实际: ${JSON.stringify(views)}）`);
-        assertEq(view.status, 'ok', `跨插件读应成功：${JSON.stringify(view)}`);
-        assertEq(view.owner, 'protocol', 'owner 来自清单生成物');
-        assertEq(view.ver, 1, '版本随 owner 的 ViewDecl 走');
-
-        assertEq(view.value?.count, 2, `两个协议：${JSON.stringify(view.value)}`);
-        assertEq(
-          view.value?.observations,
-          5,
-          `五次有效断言（2 提案 + 3 加入）：${JSON.stringify(view.value)}`,
-        );
-        assertEq(view.value?.by_status?.draft, 1, `一个 draft：${JSON.stringify(view.value)}`);
-        assertEq(
-          view.value?.by_status?.established,
-          1,
-          `一个 established：${JSON.stringify(view.value)}`,
-        );
-
-        const handoff = view.value?.protocols?.find((p) => p.name === 'handoff');
-        assert(handoff, `清单应有 handoff：${JSON.stringify(view.value)}`);
-        assertEq(handoff.status, 'draft', '只有一个参与者 ⇒ 还不成立');
-        assertEq(handoff.participants, ['reviewer'], '参与者按不同值去重');
-        assertEq(handoff.messages, ['request', 'accept', 'done'], '消息序列按提出顺序透出');
-
-        const review = view.value?.protocols?.find((p) => p.name === 'review');
-        assert(review, `清单应有 review：${JSON.stringify(view.value)}`);
-        assertEq(review.status, 'established', '第二个参与者加入 ⇒ 成立');
-        assertEq(review.participants, ['main', 'reviewer'], '参与者按首次加入序');
-
-        // 第二方读入口：网关不链接本 crate，也能拿到同一份折叠。
         const viaRoute = await api.invoke('protocol/catalog', {}, { session_id: SID });
         assertEq(
           viaRoute.status,
           200,
           `protocol/catalog 应成功（实际: ${JSON.stringify(viaRoute.body)}）`,
         );
+        const catalog = viaRoute.body?.data;
+        assertEq(catalog?.count, 2, `两个协议：${JSON.stringify(catalog)}`);
         assertEq(
-          viaRoute.body?.data,
-          view.value,
-          '路由与视图必须逐字相同——第二方看到的成立状态不能分叉',
+          catalog?.observations,
+          5,
+          `五次有效断言（2 提案 + 3 加入）：${JSON.stringify(catalog)}`,
         );
+        assertEq(catalog?.by_status?.draft, 1, `一个 draft：${JSON.stringify(catalog)}`);
+        assertEq(
+          catalog?.by_status?.established,
+          1,
+          `一个 established：${JSON.stringify(catalog)}`,
+        );
+
+        const handoff = catalog?.protocols?.find((p) => p.name === 'handoff');
+        assert(handoff, `清单应有 handoff：${JSON.stringify(catalog)}`);
+        assertEq(handoff.status, 'draft', '只有一个参与者 ⇒ 还不成立');
+        assertEq(handoff.participants, ['reviewer'], '参与者按不同值去重');
+        assertEq(handoff.messages, ['request', 'accept', 'done'], '消息序列按提出顺序透出');
+
+        const review = catalog?.protocols?.find((p) => p.name === 'review');
+        assert(review, `清单应有 review：${JSON.stringify(catalog)}`);
+        assertEq(review.status, 'established', '第二个参与者加入 ⇒ 成立');
+        assertEq(review.participants, ['main', 'reviewer'], '参与者按首次加入序');
       } finally {
         api.stop();
       }

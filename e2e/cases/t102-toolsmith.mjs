@@ -1,25 +1,17 @@
 import './_selfrun.mjs';
 // T102 制造工具（L2 受限）是一条**插件能力**：一个工具（`toolsmith_define`）登记本插件
-// 自己的工具定义，一张视图（`toolsmith.recipes`）折出当前清单；摘掉插件后工具面消失而
-// 系统照常运行。
+// 自己的工具定义；摘掉插件后工具面消失而系统照常运行。视图已收回插件私有，e2e 只钉
+// 事实落格；折叠由 owner 的 `decl.test.rs` 覆盖。
 //
-// ## 本用例钉的三件事
+// ## 本用例钉的两件事
 //
 // | 段 | 唯一能看见它的地方 |
 // |---|---|
 // | 工具面 | 首次请求的 `tools` 里有 `toolsmith_define` |
-// | 事实落格 | 工具调用之后，`session/stats` 的 `capability_views['toolsmith.recipes']` 有两个定义 |
-// | 限制成立 | 调用参数里夹带 `owner: 'vdfs'`，清单里的 owner 仍是 `toolsmith`；同名再登记按后写覆盖 |
+// | 事实落格 | 直读会话 WAL 的 `toolsmith.defined` 事件有三次登记，owner 恒为 `toolsmith` |
 //
-// 第三段是本条「受限」的可执行形式：限制不靠调用方守规矩，靠形状（入参没有 owner）与
-// 视图过滤（owner 不是 toolsmith 的定义读不出来）。`observations` 同时说明被修订的那条
-// 没有丢——它是证据量。
-//
-// ## 为什么经 `session/stats` 读视图
-//
-// 视图是 owner 对自己事实的纯折叠，读它必须经**生产读出口**（`session/stats` 遍历
-// 清单生成的公开表，D-221）——只有这条路能证明「装配真的把 owner 的 `ViewDecl`
-// 冻结进了同一张表」。直接调用本插件的求值函数是同义反复。
+// 限制的可执行形式在事实载荷里：调用参数夹带 `owner: 'vdfs'`，落格的定义 owner 仍是
+// `toolsmith`（写方写死）；同名再登记留下两条事实，后一条描述是修订后的版本。
 //
 // ## 停用侧断言什么、不断言什么
 //
@@ -34,20 +26,18 @@ import {
   makeHomedir,
   DIALOG_FACE_OFF,
   cleanupHomedir,
-  nextPort,
   runCli,
-  startLongLivedCli,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
+  readFileSyncSafe,
 } from '../helpers.mjs';
 import { toolNamesOf, envelopeOf, isSilentAuxRequest } from '../llm-contract.mjs';
 
 const SID = 'e2e-t102';
 const SID_OFF = 'e2e-t102-off';
-const GW = nextPort();
 
 /** 三次登记：`summarize_ticket` 被修订一次，第三条夹带 owner 试图冒充别的插件。 */
 const DEFINITIONS = [
@@ -98,15 +88,6 @@ function homedirFor(port) {
   return makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(port) }],
     pluginConfigs: {
-      // 网关拉起才有 `session/stats` 这条生产路由可打（视图读数走它）
-      gateway: {
-        inbound_enabled: true,
-        inbound_protocol: 'http',
-        inbound_bind: '127.0.0.1',
-        inbound_port: GW,
-        inbound_token: '',
-        inbound_readonly: false,
-      },
       session: { ...DIALOG_FACE_OFF },
     },
   });
@@ -119,7 +100,7 @@ function firstMainTools(reqs) {
 }
 
 export default defineCase(
-  'T102 制造工具（L2 受限）：工具登记自身定义、视图折出清单、夹带 owner 无效、停用后工具面消失',
+  'T102 制造工具（L2 受限）：工具登记自身定义、夹带 owner 无效、停用后工具面消失',
   async () => {
     const llm = await new MockLlm(scenarios()).start();
     const hd = homedirFor(llm.port);
@@ -146,63 +127,44 @@ export default defineCase(
         `第一轮 stdout 应为收尾正文（实际: ${JSON.stringify(turn.stdout)}）`,
       );
 
-      // ── B 事实落格 + 清单折出当前定义 ───────────────────────────────────
-      const api = startLongLivedCli({
-        homedir: hd.homedir,
-        workdir: hd.workdir,
-        session: SID,
-        provider: PROVIDER_ID,
-        gatewayPort: GW,
-      });
-      try {
-        await api.waitGatewayReady();
-        const inv = await api.invoke('session/stats', {}, { session_id: SID });
-        assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
+      // ── B 事实落格：直读会话 WAL 里本插件自己的领域事实 ─────────────────
+      //
+      // 事实在**轮末**写口落格（D-213）；one-shot CLI 已退出，WAL 就是事实源本身。
+      // 视图已收回插件私有，这里只钉三次登记都落格、owner 恒为 toolsmith。
+      const events = readFileSyncSafe(
+        join(hd.homedir, 'session', SID, 'v2-events.wal'),
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
 
-        const views = inv.body?.data?.capability_views;
-        const view = views?.['toolsmith.recipes'];
-        assert(view, `能力视图列应有 toolsmith.recipes 这一格（实际: ${JSON.stringify(views)}）`);
-        assertEq(view.status, 'ok', `跨插件读应成功：${JSON.stringify(view)}`);
-        assertEq(view.owner, 'toolsmith', 'owner 来自清单生成物');
-        assertEq(view.ver, 1, '版本随 owner 的 ViewDecl 走');
-
+      const defined = events.filter((e) => e.kind === 'toolsmith.defined');
+      assertEq(
+        defined.length,
+        3,
+        `三次登记都落格（含被修订的那条）：${JSON.stringify(defined.map((e) => e.payload))}`,
+      );
+      for (const e of defined) {
         assertEq(
-          view.value?.count,
-          2,
-          `两个定义（summarize_ticket 只算一次）：${JSON.stringify(view.value)}`,
+          e.payload?.owner,
+          'toolsmith',
+          `夹带 owner 无效，落格的 owner 只能是 toolsmith：${JSON.stringify(e.payload)}`,
         );
-        assertEq(
-          view.value?.observations,
-          3,
-          `三次登记都是证据（一次修订被覆盖）：${JSON.stringify(view.value)}`,
-        );
-
-        for (const tool of view.value?.tools ?? []) {
-          assertEq(
-            tool.owner,
-            'toolsmith',
-            `夹带 owner 无效，清单里只能是 toolsmith 自己的定义：${JSON.stringify(tool)}`,
-          );
-        }
-
-        const summarize = view.value?.tools?.find((t) => t.name === 'summarize_ticket');
-        assert(summarize, `清单应有 summarize_ticket：${JSON.stringify(view.value)}`);
-        assertEq(
-          summarize.description,
-          '把工单压成一句话（含优先级）',
-          `后一次定义覆盖前一次：${JSON.stringify(summarize)}`,
-        );
-        assertEq(
-          summarize.input_schema?.properties?.priority?.type,
-          'boolean',
-          '修订后的 schema 原样透出',
-        );
-
-        const ping = view.value?.tools?.find((t) => t.name === 'ping_owner');
-        assertEq(ping?.description, '给负责人发提醒');
-      } finally {
-        api.stop();
       }
+      assertEq(defined[0]?.payload?.name, 'summarize_ticket', '第一次登记的工具名');
+      assertEq(defined[1]?.payload?.name, 'ping_owner', '第二次登记的工具名');
+      assertEq(defined[1]?.payload?.description, '给负责人发提醒', '第二个工具的描述');
+      assertEq(defined[2]?.payload?.name, 'summarize_ticket', '第三次又是同名工具');
+      assertEq(
+        defined[2]?.payload?.description,
+        '把工单压成一句话（含优先级）',
+        '第二条同名事实是修订后的描述',
+      );
+      assertEq(
+        defined[2]?.payload?.input_schema?.properties?.priority?.type,
+        'boolean',
+        '修订后的 schema 原样落格',
+      );
 
       // ── C 卸任：工具面消失，会话照常跑完 ─────────────────────────────────
       const manifest = join(hd.homedir, 'toolsmith', 'PLUGIN.yml');

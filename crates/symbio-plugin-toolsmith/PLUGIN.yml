@@ -3,7 +3,3 @@ plugin_id: toolsmith
 plugin_comment: 制造工具（L2 受限）：只能登记本插件自己的工具定义，清单按名字折出当前版本
 plugin_assembly: sub_agent
 plugin_order: 67
-# 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
-# crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住本插件的
-# `decl::VIEWS`；这里只登记「对外可读」这一件事。
-shared_views: toolsmith.recipes

@@ -9,6 +9,5 @@ plugin_order: 150
 # `memory.encoded` 也从不在这里：它的格位由 loop 交（会话统计也读它，E-009 的反面），
 # 本插件只是 `tag:"skill"` 那半的一个写方，事实形状归情景记忆能力包（`D-263`）。
 # 对外可读的视图（scripts/facts/views-rs.mjs 读取 → crates/symbio-plugin-api/src/view_names.rs）。
-# 宿主（loop）按 `skill.retreat` 过滤本轮提示词：低置信技能不进模型面前。
 # 会话统计（`crates/symbio-plugin-session`）按 `skill.calibration` 出校准列。
-shared_views: skill.retreat, skill.calibration
+shared_views: skill.calibration

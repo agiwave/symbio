@@ -3,6 +3,3 @@ plugin_id: forecast
 plugin_comment: 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
 plugin_assembly: sub_agent
 plugin_order: 63
-# 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
-# crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住 `decl::VIEWS`。
-shared_views: forecast.remaining

@@ -5,19 +5,21 @@ import './_selfrun.mjs';
 //
 // T88 证的是「插件的工具随装配位进出」；本用例证的是 DE-025 的**扩展面本身**
 // （EX-001）：一个新能力包不改 core / kernel / loop / session，只靠 plugin-api 的
-// 提交点就能做到——工具、前置判断、领域事实、效果、上下文、**对外可读的视图**、
+// 提交点就能做到——工具、前置判断、领域事实、效果、上下文、**插件私有视图**、
 // **轮内行执行**、**模型往返**八面：
 //
 // | 面 | 提交点 | 本用例的读数 |
 // |---|---|---|
 // | 工具 | `traverse` + `CapabilityRow::tool` | 模型请求的 `tools` 里出现 `notes_add` |
 // | 前置判断 | `submit_behavior!` + `ToolBehavior::before` | 重复便签被拒，工具结果里带回 `Refused: …` |
-// | 领域事实 | `submit_declarations!`（`Domain × Opened`） | 工具轮结束后事件真的落格 |
+// | 领域事实 | `submit_declarations!`（`Domain × Opened`） | 直读会话 WAL 的 `notes.created` 事件 |
 // | 效果 | `submit_behavior!` + `CapabilityMeta.behaviors` | 下一轮上下文里出现那条便签 |
 // | 上下文 | `submit_context_provider!` | 下一轮请求前缀里出现 `最近记下的便签` |
-// | 视图 | `ViewDecl` + `PLUGIN.yml` 的 `shared_views` | `session/stats` 的 `capability_views['notes.recent']` 读到那条便签 |
-// | 轮内行执行 | `submit_row!`（`by = plugin_row`，D-241） | `capability_views['notes.digest']` 读到行执行体落下的 `notes.indexed` |
-// | 模型往返 | `RowStep::Ask` + `submit_row!`（D-242） | 行执行体借宿主一次往返；`capability_views['notes.insights']` 读到 `notes.insight` |
+// | 视图 | `ViewDecl` | 直读会话 WAL 的 `notes.created` 事件 |
+// | 轮内行执行 | `submit_row!`（`by = plugin_row`，D-241） | 直读会话 WAL 的 `notes.indexed` 事件 |
+// | 模型往返 | `RowStep::Ask` + `submit_row!`（D-242） | 行执行体借宿主一次往返；直读会话 WAL 的 `notes.insight` 事件 |
+//
+// 视图已收回插件私有：e2e 只钉事实落格；折叠由 owner 的 `decl.test.rs` 覆盖。
 //
 // 第九面（通用省略，D-249）不在本用例：它要等到一条答成的洞察之后，读数在
 // `t91-notes-elision.mjs`（摘要进消息、那段工具结果不再进提示词）。
@@ -115,7 +117,7 @@ function homedirFor(port, { notesEnabled, gatewayPort }) {
   return makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(port) }],
     pluginConfigs: {
-      // 网关拉起才有 `session/stats` 这条**生产路由**可打（第六面的读数走它）。
+      // 网关拉起才有生产路由可打（卡片读数经 `readSessionMessages` 走它）。
       // 与 T28 同一份配置形状：无此段时入站监听不会被拉起。
       gateway: {
         inbound_enabled: true,
@@ -241,11 +243,69 @@ export default defineCase(
         `重复便签应在执行前被拒并回灌模型（实际: ${judged.slice(-800)}）`,
       );
 
-      // ── 第六面：owner 声明的视图被**另一个插件**的读数口按名字读到 ──────
-      // 判据只有一句：`notes.recent` 这一格出现在 `session/stats` 里，值就是 notes
-      // 自己的折叠算出来的那条便签。session 没为便签写过一行——它只遍历清单生成的
-      // 公开表（DE-025 D-221）；走生产路由（gateway → 容器 → 路由）才证得到「装配
-      // 真的把 owner 的 ViewDecl 冻结进了同一张表」。
+      // ── 事实落格：直读会话 WAL 里 notes 自己写的三笔事实 ───────────────
+      //
+      // 视图已收回插件私有：e2e 只钉事实落格；折叠由 owner 的 `decl.test.rs` 覆盖。
+      // 第三轮那次调用被 `before` 拒（`success = false`），行前件的 `eq` 不收它——
+      // 所以索引与洞察都只有一条。
+      const events = readFileSyncSafe(
+        join(hd.homedir, 'session', 'e2e-t89', 'v2-events.wal'),
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      const created = events.filter((e) => e.kind === 'notes.created');
+      assertEq(
+        created.length,
+        1,
+        `三轮里只有一条便签落格（第三条被 before 拒）：${JSON.stringify(created.map((e) => e.payload))}`,
+      );
+      assertEq(created[0]?.payload?.text, NOTE_TEXT, '行为落下的正文');
+
+      // 第七面：轮内行执行体把成功产物记成一条 `notes.indexed`，按 tool_call_id 关账。
+      const indexed = events.filter((e) => e.kind === 'notes.indexed');
+      assertEq(
+        indexed.length,
+        1,
+        `只有一次成功的 notes_add 会开行债（重复那条被 before 拒）：${JSON.stringify(indexed.map((e) => e.payload))}`,
+      );
+      // 回执里的 `tool_call_id` 是**执行层交回**的权威 id，不是模型给的那个：
+      // 端到端只断言它存在（行按它开账与关账），正文才是这条通路的内容判据。
+      const indexedId = indexed[0]?.payload?.tool_call_id;
+      assert(
+        typeof indexedId === 'string' && indexedId.length > 0,
+        `行执行体应把工具调用的结果按 tool_call_id 收进索引：${JSON.stringify(indexed[0]?.payload)}`,
+      );
+      assertEq(
+        indexed[0]?.payload?.text,
+        NOTE_TEXT,
+        '行执行体从 artifact.added 的定稿参数里取出的正文应与原调用一致',
+      );
+
+      // 第八面：能力行借宿主一次模型往返，答成的回执落一条 `notes.insight`。
+      const insights = events.filter((e) => e.kind === 'notes.insight');
+      assertEq(
+        insights.length,
+        1,
+        `只有一条成功索引的便签会开反思行：${JSON.stringify(insights.map((e) => e.payload))}`,
+      );
+      assertEq(insights[0]?.payload?.status, 'ok', '这次往返应答成');
+      assertEq(
+        insights[0]?.payload?.text,
+        INSIGHT_TEXT,
+        '洞察正文就是模型回执，由能力的解析函数原样落格',
+      );
+      assertEq(
+        insights[0]?.payload?.tool_call_id,
+        indexedId,
+        '反思与索引说的是同一条工具调用',
+      );
+
+      // ── 第九面：行交出的对话面草稿真的变成转写里的一张卡（D-293）──────
+      // `notes.index` 交的是 `DialogDraft`（纯值），节点 id / 轮号由宿主盖；用户
+      // 看见的是转写里的一个节点，不是 WAL 里的一条草稿。重复那条便签被 `before`
+      // 拒、行根本没开，所以这张卡**恰好一张**。
       const api = startLongLivedCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
@@ -255,60 +315,6 @@ export default defineCase(
       });
       try {
         await api.waitGatewayReady();
-        const inv = await api.invoke('session/stats', {}, { session_id: 'e2e-t89' });
-        assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
-        const view = inv.body?.data?.capability_views?.['notes.recent'];
-        assert(view, `能力视图列应有 notes.recent 这一格（实际: ${JSON.stringify(inv.body?.data?.capability_views)}）`);
-        assertEq(view.status, 'ok', `跨插件读应成功，不是缺席态：${JSON.stringify(view)}`);
-        assertEq(view.owner, 'notes', 'owner 来自清单生成物');
-        assertEq(view.ver, 1, '版本随 owner 的 ViewDecl 走');
-        assertEq(
-          view.value?.count,
-          1,
-          `三轮里只有一条便签落格（第三条被 before 拒）：${JSON.stringify(view.value)}`,
-        );
-        assertEq(
-          view.value?.items?.[0]?.text,
-          NOTE_TEXT,
-          '读到的正文就是行为落下的那条事实（折叠在 owner 手里）',
-        );
-
-        // ── 第七面：轮内行执行体落下的派生事实被同一读口读到 ─────────────
-        // `notes.index` 这一行把 `notes_add` 的成功产物记成 `notes.indexed`；行本身
-        // 归 `plugin_row`（宿主唯一执行体），实现由能力包经 `submit_row!` 交出。
-        // 这条读数同时证两件事：宿主没有按工具名或行名写分支，能力包的草稿经唯一
-        // 写口真的入了格。第三轮那次调用被 `before` 拒（`success = false`），
-        // 行前件的 `eq` 不收它——所以计数仍是 1。
-        const digest = inv.body?.data?.capability_views?.['notes.digest'];
-        assert(
-          digest,
-          `能力视图列应有 notes.digest 这一格（实际: ${JSON.stringify(inv.body?.data?.capability_views)}）`,
-        );
-        assertEq(digest.status, 'ok', `notes.digest 跨插件读应成功：${JSON.stringify(digest)}`);
-        assertEq(digest.owner, 'notes', 'owner 来自清单生成物');
-        assertEq(digest.ver, 1, '版本随 owner 的 ViewDecl 走');
-        assertEq(
-          digest.value?.count,
-          1,
-          `只有一次成功的 notes_add 会开行债（重复那条被 before 拒）：${JSON.stringify(digest.value)}`,
-        );
-        // 回执里的 `tool_call_id` 是**执行层交回**的权威 id，不是模型给的那个：
-        // 端到端只断言它存在（行按它开账与关账），正文才是这条通路的内容判据。
-        const indexedId = digest.value?.items?.[0]?.tool_call_id;
-        assert(
-          typeof indexedId === 'string' && indexedId.length > 0,
-          `行执行体应把工具调用的结果按 tool_call_id 收进索引：${JSON.stringify(digest.value)}`,
-        );
-        assertEq(
-          digest.value?.items?.[0]?.text,
-          NOTE_TEXT,
-          '行执行体从 artifact.added 的定稿参数里取出的正文应与原调用一致',
-        );
-
-        // ── 第九面：行交出的对话面草稿真的变成转写里的一张卡（D-293）──────
-        // `notes.index` 交的是 `DialogDraft`（纯值），节点 id / 轮号由宿主盖；用户
-        // 看见的是转写里的一个节点，不是 WAL 里的一条草稿。重复那条便签被 `before`
-        // 拒、行根本没开，所以这张卡**恰好一张**。
         const msgs = await readSessionMessages(api, 'e2e-t89');
         assert(msgs, '跑过三轮 ⇒ 生产读出口应读回转写');
         const cards = msgs.filter((m) => m.meta?.card?.kind === 'note');
@@ -319,39 +325,6 @@ export default defineCase(
         );
         assertEq(textOf(cards[0]), `已记下：${NOTE_TEXT}`, '卡的正文字面');
         assertEq(cards[0].meta.card.text, NOTE_TEXT, '卡的载荷带原文（纯值原样透传）');
-
-        // ── 第八面：能力行借宿主一次模型往返，落下的洞察被同一读口读到 ─────
-        // `notes.reflect` 读 `notes.indexed`、交一条提示；宿主调模型、落四格协议事实，
-        // 回执交回 `parse`，落一条 `notes.insight`。`status = ok` 说明这次往返答成了；
-        // `tool_call_id` 与索引行同键——两笔事实说的是同一条便签。
-        const insights = inv.body?.data?.capability_views?.['notes.insights'];
-        assert(
-          insights,
-          `能力视图列应有 notes.insights 这一格（实际: ${JSON.stringify(inv.body?.data?.capability_views)}）`,
-        );
-        assertEq(insights.status, 'ok', `notes.insights 跨插件读应成功：${JSON.stringify(insights)}`);
-        assertEq(insights.owner, 'notes', 'owner 来自清单生成物');
-        assertEq(insights.ver, 1, '版本随 owner 的 ViewDecl 走');
-        assertEq(
-          insights.value?.count,
-          1,
-          `只有一条成功索引的便签会开反思行：${JSON.stringify(insights.value)}`,
-        );
-        assertEq(
-          insights.value?.items?.[0]?.status,
-          'ok',
-          `这次往返应答成：${JSON.stringify(insights.value)}`,
-        );
-        assertEq(
-          insights.value?.items?.[0]?.text,
-          INSIGHT_TEXT,
-          '洞察正文就是模型回执，由能力的解析函数原样落格',
-        );
-        assertEq(
-          insights.value?.items?.[0]?.tool_call_id,
-          indexedId,
-          '反思与索引说的是同一条工具调用',
-        );
       } finally {
         api.stop();
       }

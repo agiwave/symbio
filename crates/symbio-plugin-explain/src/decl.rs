@@ -1,4 +1,4 @@
-//! 本插件拥有的事实名、格位、归宿行与对外可读的视图（DE-024 D-197 / DE-025 D-209 / D-221）。
+//! 本插件拥有的事实名、格位、归宿行与包内视图（DE-024 D-197 / DE-025 D-209 / D-221）。
 //!
 //! 一条事实 `explain.rationale`：**「这次决定为什么这样做」被记下了**。名字、格位、载荷
 //! 形状与归宿行同在这里，写方（[`super::behavior`]）与读方（[`EXPLAIN_RATIONALES`] 视图）
@@ -14,9 +14,8 @@
 //! ## 视图为什么也在这里
 //!
 //! [`EXPLAIN_RATIONALES`] 是纯折叠：从 `explain.rationale` 折出理由台账与去重后的
-//! 决定列表。它在 `PLUGIN.yml` 的 `shared_views:` 登记为**对外可读**，别的插件经
-//! `symbio_plugin_api::views` 按名字读——不依赖本 crate，也不在任何控制面里再写一份
-//! （D-221）。名字、版本、成本与算法只有这里一个来源。
+//! 决定列表。它只在本包内折，名字不进 `PLUGIN.yml` 的 `shared_views:`：今天没有第二个
+//! 读者（`D-221` 的公开动作只对真有读方的视图做）。名字、版本、成本与算法只有这里一个来源。
 
 use serde_json::{json, Value};
 
@@ -31,7 +30,7 @@ pub(crate) const EXPLAIN_RATIONALE: &str = "explain.rationale";
 /// 本插件的 LLM 可见工具名。工具面与行为声明的连接都取它，不存在第二份拼写。
 pub(crate) const EXPLAIN_TOOL: &str = "explain_record";
 
-/// 对外可读的视图：理由台账的读回（条目 + 去重决定 + 计数）。
+/// 包内视图：理由台账的读回（条目 + 去重决定 + 计数）；名字不公开（没有第二个读者）。
 pub(crate) const EXPLAIN_RATIONALES: &str = "explain.rationales";
 
 /// 视图最多保留的条数。超出只影响**输出长度**，不影响扫描成本上界。

@@ -2,7 +2,7 @@
 //!
 //! 本插件做四件事：让模型提出协议（`protocol_propose`）、让参与者加入（`protocol_join`）、
 //! 把每次成功调用落成领域事实（经行为端口交草稿）、把那些事实折成一张清单
-//! （`protocol.catalog`，对外可读），并通过 `protocol/catalog` 路由把同一份折叠交给
+//! （`protocol.catalog`，名字只在本包内用），并通过 `protocol/catalog` 路由把同一份折叠交给
 //! **第二方**。
 //!
 //! ## 为什么这里需要一条路由
@@ -99,8 +99,8 @@ impl Plugin for ProtocolPlugin {
 
     /// 路由入口：`protocol/catalog`（**只读**）。
     ///
-    /// 返回与视图 `protocol.catalog` 逐字一致的折叠值：第二方看到的成立状态，必须与
-    /// 宿主里任何一个插件读到的相同。
+    /// 返回与视图 `protocol.catalog` 逐字一致的折叠值：第二方经路由看到的成立状态，必须与
+    /// 本包视图折出的相同。
     async fn route(
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,

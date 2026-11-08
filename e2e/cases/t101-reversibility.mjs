@@ -1,25 +1,18 @@
 import './_selfrun.mjs';
-// T101 可逆性设计是一条**插件能力**：一个工具（`reversibility_annotate`）落下领域事实，
-// 一张视图（`reversibility.register`）把它们折成「每个动作当前等级 + 等级分布」；
-// 摘掉插件后工具面消失而系统照常运行。
+// T101 可逆性设计是一条**插件能力**：一个工具（`reversibility_annotate`）落下领域事实；
+// 摘掉插件后工具面消失而系统照常运行。视图已收回插件私有，e2e 只钉事实落格；折叠由
+// owner 的 `decl.test.rs` 覆盖。
 //
-// ## 本用例钉的三件事
+// ## 本用例钉的两件事
 //
 // | 段 | 唯一能看见它的地方 |
 // |---|---|
 // | 工具面 | 首次请求的 `tools` 里有 `reversibility_annotate` |
-// | 事实落格 | 工具调用之后，`session/stats` 的 `capability_views['reversibility.register']` 有三次登记 |
-// | 判断可修正 | 同一动作的第二次标注把第一次压过（`改配置` 从可补偿升为不可逆），`observations` 仍记四次 |
+// | 事实落格 | 直读会话 WAL 的 `reversibility.assessed` 事件有四次登记 |
 //
-// 第三段是这张能力与「把事实原样吐出来」的分水岭：等级分布 `by_level` 必须按**当前**
-// 判断算（`compensable` 归零、`irreversible` 计二），而 `observations` 同时说明被覆盖的
-// 那条没有丢——它是证据量。
-//
-// ## 为什么经 `session/stats` 读视图
-//
-// 视图是 owner 对自己事实的纯折叠，读它必须经**生产读出口**（`session/stats` 遍历
-// 清单生成的公开表，D-221）——只有这条路能证明「装配真的把 owner 的 `ViewDecl`
-// 冻结进了同一张表」。直接调用本插件的求值函数是同义反复。
+// 同一动作的两次标注都留在事实源里：`改配置` 先是 `compensable`（带补偿做法），
+// 后一条是 `irreversible`——「当前等级」的折叠由 owner 自己验，e2e 只钉四次登记
+// 与后一条的载荷。
 //
 // ## 停用侧断言什么、不断言什么
 //
@@ -34,20 +27,18 @@ import {
   makeHomedir,
   DIALOG_FACE_OFF,
   cleanupHomedir,
-  nextPort,
   runCli,
-  startLongLivedCli,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
+  readFileSyncSafe,
 } from '../helpers.mjs';
 import { toolNamesOf, envelopeOf, isSilentAuxRequest } from '../llm-contract.mjs';
 
 const SID = 'e2e-t101';
 const SID_OFF = 'e2e-t101-off';
-const GW = nextPort();
 
 /** 四次标注：`改配置` 被判两次（后一次更保守），其余各一次。 */
 const ASSESSMENTS = [
@@ -81,15 +72,6 @@ function homedirFor(port) {
   return makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(port) }],
     pluginConfigs: {
-      // 网关拉起才有 `session/stats` 这条生产路由可打（视图读数走它）
-      gateway: {
-        inbound_enabled: true,
-        inbound_protocol: 'http',
-        inbound_bind: '127.0.0.1',
-        inbound_port: GW,
-        inbound_token: '',
-        inbound_readonly: false,
-      },
       session: { ...DIALOG_FACE_OFF },
     },
   });
@@ -102,7 +84,7 @@ function firstMainTools(reqs) {
 }
 
 export default defineCase(
-  'T101 可逆性设计：工具落可逆等级、视图按动作折出当前分布、停用后工具面消失而会话照常',
+  'T101 可逆性设计：工具落可逆等级事实、停用后工具面消失而会话照常',
   async () => {
     const llm = await new MockLlm(scenarios()).start();
     const hd = homedirFor(llm.port);
@@ -129,64 +111,34 @@ export default defineCase(
         `第一轮 stdout 应为收尾正文（实际: ${JSON.stringify(turn.stdout)}）`,
       );
 
-      // ── B 事实落格 + 视图折出当前分布 ───────────────────────────────────
-      const api = startLongLivedCli({
-        homedir: hd.homedir,
-        workdir: hd.workdir,
-        session: SID,
-        provider: PROVIDER_ID,
-        gatewayPort: GW,
-      });
-      try {
-        await api.waitGatewayReady();
-        const inv = await api.invoke('session/stats', {}, { session_id: SID });
-        assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
+      // ── B 事实落格：直读会话 WAL 里本插件自己的领域事实 ─────────────────
+      //
+      // 事实在**轮末**写口落格（D-213）；one-shot CLI 已退出，WAL 就是事实源本身。
+      // 视图已收回插件私有，这里只钉四次登记原样落格、后一条 `改配置` 是 `irreversible`。
+      const events = readFileSyncSafe(
+        join(hd.homedir, 'session', SID, 'v2-events.wal'),
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
 
-        const views = inv.body?.data?.capability_views;
-        const view = views?.['reversibility.register'];
-        assert(view, `能力视图列应有 reversibility.register 这一格（实际: ${JSON.stringify(views)}）`);
-        assertEq(view.status, 'ok', `跨插件读应成功：${JSON.stringify(view)}`);
-        assertEq(view.owner, 'reversibility', 'owner 来自清单生成物');
-        assertEq(view.ver, 1, '版本随 owner 的 ViewDecl 走');
-
-        assertEq(
-          view.value?.count,
-          3,
-          `三个动作（改配置只算一次）：${JSON.stringify(view.value)}`,
-        );
-        assertEq(
-          view.value?.observations,
-          4,
-          `四次标注都是证据（一次被覆盖）：${JSON.stringify(view.value)}`,
-        );
-        assertEq(
-          view.value?.by_level?.reversible,
-          1,
-          `可逆动作一个：${JSON.stringify(view.value)}`,
-        );
-        assertEq(
-          view.value?.by_level?.compensable,
-          0,
-          `改配置已升为不可逆，可补偿归零：${JSON.stringify(view.value)}`,
-        );
-        assertEq(
-          view.value?.by_level?.irreversible,
-          2,
-          `不可逆动作两个（发邮件、改配置）：${JSON.stringify(view.value)}`,
-        );
-
-        const config = view.value?.actions?.find((a) => a.action === '改配置');
-        assert(config, `动作清单应有改配置：${JSON.stringify(view.value)}`);
-        assertEq(config.level, 'irreversible', `后一次判断覆盖前一次：${JSON.stringify(config)}`);
-        assertEq(config.undo, '', '不可逆动作没有补偿做法');
-
-        const send = view.value?.actions?.find((a) => a.action === '发邮件给客户');
-        assertEq(send?.level, 'irreversible');
-        const cache = view.value?.actions?.find((a) => a.action === '删缓存');
-        assertEq(cache?.level, 'reversible');
-      } finally {
-        api.stop();
-      }
+      const assessed = events.filter((e) => e.kind === 'reversibility.assessed');
+      assertEq(
+        assessed.length,
+        4,
+        `四次成功标注都落格（含被修正的那条）：${JSON.stringify(assessed.map((e) => e.payload))}`,
+      );
+      assertEq(assessed[0]?.payload?.action, ASSESSMENTS[0].action, '第一条动作');
+      assertEq(assessed[0]?.payload?.level, ASSESSMENTS[0].level, '第一条等级');
+      assertEq(assessed[0]?.payload?.undo, '', '可逆动作没有补偿做法');
+      assertEq(assessed[1]?.payload?.action, ASSESSMENTS[1].action, '第二条动作');
+      assertEq(assessed[1]?.payload?.level, ASSESSMENTS[1].level, '第二条等级');
+      assertEq(assessed[2]?.payload?.action, '改配置', '第三次标注的动作');
+      assertEq(assessed[2]?.payload?.level, 'compensable', '第一次判断是可补偿');
+      assertEq(assessed[2]?.payload?.undo, '把旧配置写回', '补偿做法原样落格');
+      assertEq(assessed[3]?.payload?.action, '改配置', '第四次标注仍是同一动作');
+      assertEq(assessed[3]?.payload?.level, 'irreversible', '后一条判断更保守');
+      assertEq(assessed[3]?.payload?.undo, '', '不可逆动作没有补偿做法');
 
       // ── C 卸任：工具面消失，会话照常跑完 ─────────────────────────────────
       const manifest = join(hd.homedir, 'reversibility', 'PLUGIN.yml');

@@ -1,4 +1,4 @@
-//! 本插件拥有的事实名、格位、归宿行与对外可读的视图（DE-024 D-197 / DE-025 D-209 / D-221）。
+//! 本插件拥有的事实名、格位、归宿行与包内视图（DE-024 D-197 / DE-025 D-209 / D-221）。
 //!
 //! 一条事实 `causal.link`：**「A 导致 B」这件事被断言过**。名字、格位、载荷形状与
 //! 归宿行同在这里，写方（[`super::behavior`]）与读方（[`CAUSAL_LINKS`] 视图）都从本
@@ -14,9 +14,8 @@
 //! ## 视图为什么也在这里
 //!
 //! [`CAUSAL_LINKS`] 是纯折叠：从 `causal.link` 折出「因 → 果」的邻接表与根因。
-//! 它在 `PLUGIN.yml` 的 `shared_views:` 登记为**对外可读**，别的插件经
-//! `symbio_plugin_api::views` 按名字读——不依赖本 crate，也不在任何控制面里再写一份
-//! （D-221）。名字、版本、成本与算法只有这里一个来源。
+//! 它只在本包内折，名字不进 `PLUGIN.yml` 的 `shared_views:`：今天没有第二个读者
+//! （`D-221` 的公开动作只对真有读方的视图做）。名字、版本、成本与算法只有这里一个来源。
 
 use serde_json::{json, Value};
 
@@ -31,7 +30,7 @@ pub(crate) const CAUSAL_LINK: &str = "causal.link";
 /// 本插件的 LLM 可见工具名。工具面与行为声明的连接都取它，不存在第二份拼写。
 pub(crate) const CAUSAL_TOOL: &str = "causal_assert";
 
-/// 对外可读的视图：因果图的读回（邻接 + 根因 + 计数）。
+/// 包内视图：因果图的读回（邻接 + 根因 + 计数）；名字不公开（没有第二个读者）。
 pub(crate) const CAUSAL_LINKS: &str = "causal.links";
 
 /// 视图最多保留的条数。超出只影响**输出长度**，不影响扫描成本上界。

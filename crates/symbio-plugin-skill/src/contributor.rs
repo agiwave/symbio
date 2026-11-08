@@ -94,8 +94,8 @@ symbio_plugin_api::submit_contributor!(SkillCompile);
 /// 的同一句判据）。所以这里只认**这轮召回条目里** `tag:"skill"` 的那些行。
 ///
 /// `skill_id` 从被召回的**源事件**读：召回条目只带 `{seq, content, tag}`，归属它的
-/// 那条 `memory.encoded` 才是 `skill_id` 的产地。`fallback` 恒 `false`：被回退的技能
-/// 已被 `skill.retreat` 挡在提示词之外，不会出现在召回条目里。
+/// 那条 `memory.encoded` 才是 `skill_id` 的产地。`fallback` 恒 `false`：`D-318` 之后
+/// 宿主不再按 `skill.retreat` 过滤提示词，召回条目里没有「这一条是被回退的技能」这一位。
 pub(crate) struct SkillCalibrate;
 
 impl Contributor for SkillCalibrate {

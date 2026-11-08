@@ -6,10 +6,10 @@
 //! | 行为（`ToolBehavior`） | 一次成功提案/加入 ⇒ 一条领域事实草稿 | 宿主唯一的写口（I-1） |
 //! | 事实（`EventDecl` / `FactDecl` / 归宿行） | `protocol.proposed` / `protocol.joined` 落在 `domain × asserted` | 写闸按声明校验名字与格位 |
 //! | 路由（`plugin_routes`） | `protocol/catalog`：第二方的**只读**读入口 | 外部调用方（网关 / 另一个实例） |
-//! | 视图（`ViewDecl` + `shared_views`） | `protocol.catalog` 折出协议清单与成立状态 | 任何按名字读的插件（D-221） |
+//! | 视图（`ViewDecl`） | `protocol.catalog` 折出协议清单与成立状态 | 本包私有的折叠；外部第二方走 `catalog` 路由（`plugin_routes`），不按视图名读 |
 //!
 //! `kernel` / `sdk` / `loop` / `session` 一行都不动；`plugin-api` 只有生成物
-//! （`routes.rs` 增 `ROUTE_PROTOCOL_CATALOG`、`view_names.rs` 增 `protocol.catalog`）。
+//! `routes.rs` 的 `ROUTE_PROTOCOL_CATALOG`（视图名不公开，`view_names.rs` 不再增条目）。
 //!
 //! ## 「协议需要第二方」怎么落
 //!

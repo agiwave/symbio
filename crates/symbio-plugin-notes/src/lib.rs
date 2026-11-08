@@ -9,7 +9,7 @@
 //! | 领域事实 | [`decl`] 的 `EventDecl`（`notes.created`，`Domain × Opened`） | `submit_declarations!` |
 //! | 上下文段 | [`context::NotesProvider`] | `submit_context_provider!` |
 //! | 行为 | [`behavior::NoteCapture`] | `submit_behavior!` |
-//! | 视图 | [`decl`] 的 `ViewDecl`（`notes.recent` / `notes.digest` / `notes.insights`） | `submit_declarations!` + `PLUGIN.yml` 的 `shared_views` |
+//! | 视图 | [`decl`] 的 `ViewDecl`（`notes.recent` / `notes.digest` / `notes.insights`） | `submit_declarations!`；名字不公开（本包私有，D-221） |
 //! | 行执行体 | [`row::NoteIndex`] / [`row::NoteReflect`] / [`row::NoteSummarize`] | `submit_row!`（通用执行体 `plugin_row`，D-241） |
 //! | 模型往返 | [`row::NoteReflect`] 交 `RowStep::Ask`（欠一笔 `request(port=model.assist)`），回执落 `notes.insight` | [`debt`] 申报认领行，提示经「在等」事实载荷（D-338） |
 //! | 通用省略 | [`row::NoteSummarize`] 落带 `elision` 的 `message.added`，组装跳过那段工具结果 | 与领域事实同一个写口（D-249） |

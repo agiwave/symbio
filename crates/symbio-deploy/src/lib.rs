@@ -54,7 +54,7 @@ pub const PLUGIN_ID_HOME: &str = "home";
 /// 钩子
 pub const PLUGIN_ID_HOOK: &str = "hook";
 
-/// 幂等台账：一个工具、一条 Domain 事实、一张共享视图；同一个键在同一会话里只记一次
+/// 幂等台账：一个工具、一条 Domain 事实、一张视图；同一个键在同一会话里只记一次
 pub const PLUGIN_ID_IDEMPOTENCY: &str = "idempotency";
 
 /// 本地文件
@@ -141,7 +141,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "reputation", // 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰裁决与出口共用的那一个口径）
     "explain", // 可解释：把一次决定的理由记成事实（工具），再折成可读的理由台账（视图）
     "forecast", // 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
-    "idempotency", // 幂等台账：一个工具、一条 Domain 事实、一张共享视图；同一个键在同一会话里只记一次
+    "idempotency", // 幂等台账：一个工具、一条 Domain 事实、一张视图；同一个键在同一会话里只记一次
     "world_model", // 世界模型：一次观察记一条领域事实，视图按（实体，属性）折出当前世界
     "reversibility", // 可逆性设计：给动作标注可逆等级与补偿做法，视图按动作折出当前等级分布
     "toolsmith", // 制造工具（L2 受限）：只能登记本插件自己的工具定义，清单按名字折出当前版本

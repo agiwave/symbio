@@ -1,4 +1,4 @@
-//! 本插件拥有的事实名、格位、归宿行与对外可读的视图（DE-024 D-197 / DE-025 D-209 / D-221）。
+//! 本插件拥有的事实名、格位、归宿行与包内视图（DE-024 D-197 / DE-025 D-209 / D-221）。
 //!
 //! 一条事实 `reversibility.assessed`：**「某个动作被判断为这个可逆等级」**。名字、格位、
 //! 载荷形状与归宿行同在这里，写方（[`super::behavior`]）与读方（[`REVERSIBILITY_REGISTER`]）
@@ -25,8 +25,8 @@
 //!
 //! [`REVERSIBILITY_REGISTER`] 从 `reversibility.assessed` 折出「每个动作当前等级」与
 //! 等级分布。它按标注序取**最后一条**（同动作后写覆盖），`observations` 保留被覆盖的
-//! 证据量。视图在 `PLUGIN.yml` 的 `shared_views:` 登记为对外可读，读方按名字读，
-//! 不依赖本 crate（D-221）。
+//! 证据量。视图只在本包内折，名字不进 `PLUGIN.yml` 的 `shared_views:`——今天没有第二个
+//! 读者（`D-221`）。
 
 use serde_json::{json, Map, Value};
 
@@ -41,7 +41,7 @@ pub(crate) const REVERSIBILITY_ASSESSED: &str = "reversibility.assessed";
 /// 本插件的 LLM 可见工具名。工具面与行为声明的连接都取它，不存在第二份拼写。
 pub(crate) const REVERSIBILITY_TOOL: &str = "reversibility_annotate";
 
-/// 对外可读的视图：当前动作登记表。
+/// 包内视图：当前动作登记表；名字不公开（没有第二个读者）。
 pub(crate) const REVERSIBILITY_REGISTER: &str = "reversibility.register";
 
 /// 三个可逆等级。工具、行为与视图共用这一张名单（读方按同一口径判「是否认识」）。

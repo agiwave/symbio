@@ -8,7 +8,7 @@
 //! | 工具（`Capability`） | `causal_assert` | 模型（经工具面调用） |
 //! | 行为（`ToolBehavior`） | 一次成功断言 ⇒ 一条 `causal.link` 草稿 | 宿主唯一的写口（I-1） |
 //! | 事实（`EventDecl` / `FactDecl` / 归宿行） | `causal.link` 落在 `domain × asserted` | 写闸按声明校验名字与格位 |
-//! | 视图（`ViewDecl` + `shared_views`） | `causal.links` 折出邻接表与根因 | 任何按名字读的插件（D-221） |
+//! | 视图（`ViewDecl`） | `causal.links` 折出邻接表与根因 | 本包私有：没有第二读者，名字不进 `shared_views`（D-221 的公开动作只对真有读方的视图做） |
 //!
 //! 没有新路由、没有配置、没有新端口——`kernel` / `sdk` / `loop` / `session` 一行都不动。
 //!

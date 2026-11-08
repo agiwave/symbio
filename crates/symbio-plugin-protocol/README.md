@@ -20,7 +20,7 @@ impl: done
 | 工具 | `protocol_propose(name, title, purpose, messages)` / `protocol_join(name, participant)` | 模型（经工具面调用） |
 | 行为 | 一次成功提案 / 加入 ⇒ 一条领域事实草稿 | 宿主唯一的写口（I-1，D-213） |
 | 事实 | `protocol.proposed` / `protocol.joined`，格位 `domain × asserted` | 写闸按声明校验名字与格位；`seal` 按归宿行判它有没有人看护 |
-| 视图 | `protocol.catalog` → `{ count, observations, by_status, protocols }` | 任何按名字读的插件（`shared_views`，D-221） |
+| 视图 | `protocol.catalog` → `{ count, observations, by_status, protocols }` | 本包私有的折叠；外部第二方走 `catalog` 路由（不按视图名读） |
 | 路由 | `protocol/catalog`（**只读**） | 第二方：网关 `/invoke` 或另一个实例 |
 
 **没有配置、没有 VDFS 挂载点、没有新端口。**

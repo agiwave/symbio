@@ -1,4 +1,4 @@
-//! 本插件交的**唯一扩展面**：一张对外可读的读数视图（`DE-025` D-221 / D-294）。
+//! 本插件交的**唯一扩展面**：一张包内的读数视图（`DE-025` D-221 / D-294）。
 //!
 //! 视图读的是任务插件**公开**的两条事件（`task.opened` / `task.asserted`），不 import
 //! 任何兄弟 crate：名字经 `PLUGIN.yml` 的 `shared_events` 投影进
@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use symbio_plugin_api::events::{EVENT_TASK_ASSERTED, EVENT_TASK_OPENED};
 use symbio_plugin_api::{Event, PluginDeclarations, ViewDecl};
 
-/// 对外可读的视图：任务的剩余读数。
+/// 包内视图：任务的剩余读数；名字不公开（没有第二个读者）。
 pub(crate) const FORECAST_REMAINING: &str = "forecast.remaining";
 
 /// owner —— 与目录名同形（`crates/symbio-plugin-forecast`），装配表按它排序与报缺口。

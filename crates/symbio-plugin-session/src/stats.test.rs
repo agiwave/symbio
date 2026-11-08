@@ -672,10 +672,10 @@ fn panel_matches_the_columns_it_describes() {
 /// 而这个文件与 `stats_reading.rs` 都没有为此改过一行。缺席也必须是**有名有姓**
 /// 的缺席（原因词 + 人话），不许塌成空对象。
 ///
-/// 本测试二进制只链接 session 与协议行夹具，owner（`notes`）的 `ViewDecl` 不在
-/// 冻结表里 ⇒ 期望是 `unknown`。读到真值的那条路在 e2e T89（生产二进制链接全部
-/// 插件，`capability_views['notes.recent']` 读出 `status: ok` 与正文），两侧合起来
-/// 才是「跨插件可读」的完整证据。
+/// 本测试二进制只链接 session 与协议行夹具，公开清单里 owner 的 `ViewDecl` 不在
+/// 冻结表里 ⇒ 期望是 `unknown`。读到真值的那条路在链接了全部插件的 e2e
+/// （`capability_views[<公开名>]` 读出 `status: ok`），两侧合起来才是「跨插件可读」
+/// 的完整证据。
 #[test]
 fn capability_views_column_follows_the_shared_manifest() {
     let wal = seed("capability-views");

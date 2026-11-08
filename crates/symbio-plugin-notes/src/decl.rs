@@ -1,4 +1,4 @@
-//! 本插件拥有的事件名、事实形状与对外可读的视图（DE-024 D-197 / DE-025 D-209 / D-221）。
+//! 本插件拥有的事件名、事实形状与包内视图（DE-024 D-197 / DE-025 D-209 / D-221）。
 //!
 //! `notes.created` 是本插件**唯一**的事实名：名字、格位与载荷形状同在这里，写方
 //! （[`super::behavior`]）与读方（[`super::context`] / [`NOTES_RECENT`]）都从本模块取，
@@ -10,8 +10,7 @@
 //! ## 视图为什么也在这里
 //!
 //! [`NOTES_RECENT`] 是本插件交出的纯折叠：从 `notes.created` 折出最近几条便签。
-//! 它在 `PLUGIN.yml` 的 `shared_views:` 里登记为**对外可读**，别的插件经
-//! `symbio_plugin_api::views` 按名字读——不依赖本 crate，也不在 core 里再写一份
+//! 它只在本包内折，名字不进 `PLUGIN.yml` 的 `shared_views:`：今天没有第二个读者
 //! （DE-025 D-221）。名字、版本、成本与算法只有这里一个来源。
 
 use serde_json::{json, Value};
@@ -54,13 +53,13 @@ pub(crate) const NOTES_SUMMARY: &str = "notes.summary";
 /// `by = plugin_row`（压成什么、压哪一段都由本能力判，宿主只落格）。
 pub(crate) const NOTES_SUMMARIZE: &str = "notes.summarize";
 
-/// 对外可读的视图：本能力在轮内反思出的洞察。
+/// 包内视图：本能力在轮内反思出的洞察。
 pub(crate) const NOTES_INSIGHTS: &str = "notes.insights";
 
-/// 对外可读的视图：最近几条便签（新→旧）。
+/// 包内视图：最近几条便签（新→旧）。
 pub(crate) const NOTES_RECENT: &str = "notes.recent";
 
-/// 对外可读的视图：本能力在轮内索引过的工具结果。
+/// 包内视图：本能力在轮内索引过的工具结果。
 pub(crate) const NOTES_DIGEST: &str = "notes.digest";
 
 /// 视图最多保留的条数。超出只影响**输出长度**，不影响扫描成本上界。

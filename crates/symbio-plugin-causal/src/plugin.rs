@@ -2,7 +2,7 @@
 //!
 //! 本插件只做三件事：给模型一个能断言语义因果的工具（`causal_assert`）、把每次成功
 //! 断言落成一条领域事实（`causal.link`，经行为端口交草稿）、把那些事实折成一张可读的
-//! 因果图（`causal.links` 视图，对外可读）。
+//! 因果图（`causal.links` 视图，名字只在本包内用）。
 //!
 //! ## 为什么这三件事必须同包
 //!
@@ -75,7 +75,7 @@ impl Plugin for CausalPlugin {
 
     /// 路由入口：**无自有协议**。
     ///
-    /// 断言的入口是工具（模型侧），读出口是视图（`causal.links`，按名字读）。
+    /// 断言的入口是工具（模型侧），折叠留在本包的视图 `causal.links` 里。
     /// 两条都比一条自造协议更短，且都不需要本插件认识调用方。
     async fn route(
         self: Arc<Self>,
@@ -83,7 +83,7 @@ impl Plugin for CausalPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
-            "causal 无自有协议路由 `{path}`：断言走工具 `causal_assert`，读出口是视图 `causal.links`"
+            "causal 无自有协议路由 `{path}`：断言走工具 `causal_assert`，折叠在本包视图 `causal.links`（不对外）"
         )))
     }
 

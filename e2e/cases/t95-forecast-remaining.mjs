@@ -1,23 +1,18 @@
 import './_selfrun.mjs';
-// T95 未来预测（读数视图）：任务事实 → `forecast.remaining` → 经生产读出口读回。
+// T95 未来预测：任务事实落格、`forecast.remaining` 不再是对外视图。
 //
 // ## 本用例钉的是「一条读数能力真的只靠自己目录落地」
 //
 // 名册 #34「未来预测」（`docs/003-design/026-能力拆分与影响类.md` §2.3）是 `D-294`
-// 首条准入能力的落地：`crates/symbio-plugin-forecast` 交**一张视图**，不新增事实、
-// 工具或端口，`kernel` / `sdk` / `loop` / `session` 一行都不动。
+// 首条准入能力的落地：`crates/symbio-plugin-forecast` 只折**任务插件的事实**，不新增
+// 事实、工具或端口，`kernel` / `sdk` / `loop` / `session` 一行都不动。视图已收回插件
+// 私有，e2e 只钉事实落格；折叠由 owner 的 `decl.test.rs` 覆盖。
 //
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
-// | 视图被装配冻结、可被按名字读 | `session/stats` 的 `capability_views['forecast.remaining']` |
-// | 折叠读的是**任务事实**而不是自己编的数 | 声明三条任务、完成一条 ⇒ `{opened: 3, closed: 1, remaining: 2}` |
-// | 剩余量是**集合差**不是「开过减断言过的字符串」 | `outstanding` 只剩 `[t1, t2]`（`t3` 已终态） |
-//
-// ## 为什么经 `session/stats` 读
-//
-// 视图是 owner 对自己事实的纯折叠；`session/stats` 遍历 `shared_views` 清单生成公开表
-// （`D-221`），只有这条路能证明「装配真的把 owner 的 `ViewDecl` 冻结进了同一张表」。
-// 直接调用本插件的求值函数是同义反复。
+// | 折叠读的是**任务事实**而不是预测插件自己编的数 | 直读会话 WAL 的 `task.opened` / `task.asserted` 事件 |
+// | `forecast.remaining` 已收回插件私有 | `session/stats` 的 `capability_views` 里没有这个键 |
+import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
@@ -31,12 +26,13 @@ import {
   defineCase,
   providerConfig,
   PROVIDER_ID,
+  readFileSyncSafe,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t95';
 const GW = nextPort();
 
-/** 三条任务：`t2` 等 `t1`；`t3` 已验收完成 ⇒ 剩余 = `t1`、`t2`。 */
+/** 三条任务：`t2` 等 `t1`；`t3` 已验收完成。 */
 const TODOS = [
   { id: 't1', content: '分析架构', status: 'in_progress' },
   { id: 't2', content: '落地实现', status: 'pending', depends_on: ['t1'] },
@@ -49,7 +45,7 @@ function homedirFor(port) {
   return makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(port) }],
     pluginConfigs: {
-      // 网关拉起才有 `session/stats` 这条生产路由可打（视图读数走它）
+      // 网关拉起才有 `session/stats` 这条生产路由可打（判据：公开表里没有本视图）
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',
@@ -64,7 +60,7 @@ function homedirFor(port) {
 }
 
 export default defineCase(
-  'T95 未来预测：任务事实折成 forecast.remaining，经 session/stats 读回',
+  'T95 未来预测：任务事实落格、forecast.remaining 不再是对外视图',
   async () => {
     const llm = await new MockLlm([
       {
@@ -92,7 +88,40 @@ export default defineCase(
         `stdout 应为收尾正文（实际: ${JSON.stringify(turn.stdout)}）`,
       );
 
-      // 事实在轮末写口落格（D-213），读数必须在同一进程里读同一份存储。
+      // ── 事实源：任务插件自己写下的事实（预测插件只读它们，不产事实）────────
+      const events = readFileSyncSafe(
+        join(hd.homedir, 'session', SID, 'v2-events.wal'),
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      const opened = events.filter((e) => e.kind === 'task.opened');
+      assertEq(
+        opened.length,
+        TODOS.length,
+        `三条声明都应开格：${JSON.stringify(opened.map((e) => e.payload))}`,
+      );
+      assertEq(
+        opened.map((e) => e.payload?.task_id),
+        ['t1', 't2', 't3'],
+        '开格按声明序落格',
+      );
+      assertEq(opened[0]?.payload?.goal, TODOS[0].content, '第一条任务正文');
+      assertEq(opened[1]?.payload?.depends_on, ['t1'], '依赖原样落格');
+      assertEq(opened[2]?.payload?.goal, TODOS[2].content, '第三条任务正文');
+
+      const asserted = events.filter((e) => e.kind === 'task.asserted');
+      assertEq(
+        asserted.length,
+        1,
+        `只有完成的 t3 被验收：${JSON.stringify(asserted.map((e) => e.payload))}`,
+      );
+      assertEq(asserted[0]?.payload?.task_id, 't3', '终态的是 t3');
+
+      // ── 部署面：本批「视图收回私有」的判据 ──────────────────────────────
+      // 事实在轮末写口落格（D-213），公开表由 `session/stats` 遍历清单生成；
+      // 这里只断言 `forecast.remaining` 已不在公开表里，不读它的值。
       const api = startLongLivedCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
@@ -105,23 +134,10 @@ export default defineCase(
         const inv = await api.invoke('session/stats', {}, { session_id: SID });
         assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
 
-        const views = inv.body?.data?.capability_views;
-        const view = views?.['forecast.remaining'];
+        const views = inv.body?.data?.capability_views ?? {};
         assert(
-          view,
-          `能力视图列应有 forecast.remaining 这一格（实际: ${JSON.stringify(views)}）`,
-        );
-        assertEq(view.status, 'ok', `跨插件读应成功，不是缺席态：${JSON.stringify(view)}`);
-        assertEq(view.owner, 'forecast', 'owner 来自清单生成物');
-        assertEq(view.ver, 1, '版本随 owner 的 ViewDecl 走');
-
-        assertEq(view.value?.opened, 3, `三条声明都开过：${JSON.stringify(view.value)}`);
-        assertEq(view.value?.closed, 1, `t3 完成了 ⇒ 一条终态：${JSON.stringify(view.value)}`);
-        assertEq(view.value?.remaining, 2, `剩 t1、t2 两件没完成：${JSON.stringify(view.value)}`);
-        assertEq(
-          view.value?.outstanding,
-          ['t1', 't2'],
-          `剩余量是集合差，已终态的 t3 不在里面：${JSON.stringify(view.value)}`,
+          !('forecast.remaining' in views),
+          `forecast.remaining 已收回插件私有，不应出现在公开表里（实际键: ${JSON.stringify(Object.keys(views))}）`,
         );
       } finally {
         api.stop();

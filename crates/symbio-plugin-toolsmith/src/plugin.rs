@@ -2,7 +2,7 @@
 //!
 //! 本插件只做三件事：给模型一个能登记自身工具定义的工具（`toolsmith_define`）、把每次
 //! 成功登记落成一条领域事实（`toolsmith.defined`，经行为端口交草稿）、把那些事实折成
-//! 一张当前定义清单（`toolsmith.recipes`，对外可读）。
+//! 一张当前定义清单（`toolsmith.recipes`，名字只在本包内用）。
 //!
 //! ## 受限边界（写在这里，不由调用方猜）
 //!
@@ -77,7 +77,7 @@ impl Plugin for ToolsmithPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
-            "toolsmith 无自有协议路由 `{path}`：登记走工具 `toolsmith_define`，读出口是视图 `toolsmith.recipes`"
+            "toolsmith 无自有协议路由 `{path}`：登记走工具 `toolsmith_define`，折叠在本包视图 `toolsmith.recipes`（不对外）"
         )))
     }
 

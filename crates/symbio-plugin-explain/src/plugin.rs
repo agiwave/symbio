@@ -2,7 +2,7 @@
 //!
 //! 本插件只做三件事：给模型一个能记下决定理由的工具（`explain_record`）、把每次成功
 //! 记录落成一条领域事实（`explain.rationale`，经行为端口交草稿）、把那些事实折成一张
-//! 可读的理由台账（`explain.rationales` 视图，对外可读）。
+//! 可读的理由台账（`explain.rationales` 视图，名字只在本包内用）。
 //!
 //! ## 本插件不认识任何兄弟插件
 //!
@@ -68,7 +68,7 @@ impl Plugin for ExplainPlugin {
 
     /// 路由入口：**无自有协议**。
     ///
-    /// 记录的入口是工具（模型侧），读出口是视图（`explain.rationales`，按名字读）。
+    /// 记录的入口是工具（模型侧），折叠留在本包的视图 `explain.rationales` 里。
     /// 两条都比一条自造协议更短，且都不需要本插件认识调用方。
     async fn route(
         self: Arc<Self>,
@@ -76,7 +76,7 @@ impl Plugin for ExplainPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
-            "explain 无自有协议路由 `{path}`：记录走工具 `explain_record`，读出口是视图 `explain.rationales`"
+            "explain 无自有协议路由 `{path}`：记录走工具 `explain_record`，折叠在本包视图 `explain.rationales`（不对外）"
         )))
     }
 

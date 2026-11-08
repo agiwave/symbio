@@ -2,7 +2,7 @@
 //!
 //! 本插件只做三件事：给模型一个能标注动作可逆等级的工具（`reversibility_annotate`）、
 //! 把每次成功标注落成一条领域事实（`reversibility.assessed`，经行为端口交草稿）、把那些
-//! 事实折成一张可读的登记表（`reversibility.register`，对外可读）。
+//! 事实折成一张可读的登记表（`reversibility.register`，名字只在本包内用）。
 //!
 //! ## 为什么这三件事必须同包
 //!
@@ -78,7 +78,7 @@ impl Plugin for ReversibilityPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
-            "reversibility 无自有协议路由 `{path}`：标注走工具 `reversibility_annotate`，读出口是视图 `reversibility.register`"
+            "reversibility 无自有协议路由 `{path}`：标注走工具 `reversibility_annotate`，折叠在本包视图 `reversibility.register`（不对外）"
         )))
     }
 

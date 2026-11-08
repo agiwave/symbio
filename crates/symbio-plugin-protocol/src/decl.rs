@@ -1,4 +1,4 @@
-//! 本插件拥有的事实名、格位、归宿行与对外可读的视图（DE-024 D-197 / DE-025 D-209 / D-221）。
+//! 本插件拥有的事实名、格位、归宿行与包内视图（DE-024 D-197 / DE-025 D-209 / D-221）。
 //!
 //! 两条事实：
 //!
@@ -43,7 +43,7 @@ pub(crate) const PROTOCOL_PROPOSE_TOOL: &str = "protocol_propose";
 /// 加入工具名。
 pub(crate) const PROTOCOL_JOIN_TOOL: &str = "protocol_join";
 
-/// 对外可读的视图：协议清单与成立状态。
+/// 包内视图：协议清单与成立状态；外部第二方走 `protocol/catalog` 路由（名字不公开）。
 pub(crate) const PROTOCOL_CATALOG: &str = "protocol.catalog";
 
 /// 成立所需的**不同参与者**数。1 个不算协议，2 个才是双方。

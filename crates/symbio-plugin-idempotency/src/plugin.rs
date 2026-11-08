@@ -55,14 +55,14 @@ impl Plugin for IdempotencyPlugin {
 
     /// 路由入口：**无自有协议**。
     ///
-    /// 记录的入口是工具（模型侧），读出口是视图（`idempotency.ledger`，按名字读）。
+    /// 记录的入口是工具（模型侧），折叠留在本包的视图 `idempotency.ledger` 里。
     async fn route(
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
-            "idempotency 无自有协议路由 `{path}`：记录走工具 `idempotent_record`，读出口是视图 `idempotency.ledger`"
+            "idempotency 无自有协议路由 `{path}`：记录走工具 `idempotent_record`，折叠在本包视图 `idempotency.ledger`（不对外）"
         )))
     }
 

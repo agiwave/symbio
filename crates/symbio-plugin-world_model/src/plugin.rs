@@ -2,7 +2,7 @@
 //!
 //! 本插件只做三件事：给模型一个能记下世界状态观察的工具（`world_observe`）、把每次
 //! 成功观察落成一条领域事实（`world.observed`，经行为端口交草稿）、把那些事实折成一张
-//! 可读的世界模型视图（`world.model`，对外可读）。
+//! 可读的世界模型视图（`world.model`，名字只在本包内用）。
 //!
 //! ## 为什么这三件事必须同包
 //!
@@ -73,7 +73,7 @@ impl Plugin for WorldModelPlugin {
 
     /// 路由入口：**无自有协议**。
     ///
-    /// 观察的入口是工具（模型侧），读出口是视图（`world.model`，按名字读）。
+    /// 观察的入口是工具（模型侧），折叠留在本包的视图 `world.model` 里。
     /// 两条都比一条自造协议更短，且都不需要本插件认识调用方。
     async fn route(
         self: Arc<Self>,
@@ -81,7 +81,7 @@ impl Plugin for WorldModelPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
-            "world_model 无自有协议路由 `{path}`：观察走工具 `world_observe`，读出口是视图 `world.model`"
+            "world_model 无自有协议路由 `{path}`：观察走工具 `world_observe`，折叠在本包视图 `world.model`（不对外）"
         )))
     }
 

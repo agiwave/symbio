@@ -1,4 +1,4 @@
-//! 本插件拥有的事实名、格位、归宿行与对外可读的视图（DE-024 D-197 / DE-025 D-209 / D-221）。
+//! 本插件拥有的事实名、格位、归宿行与包内视图（DE-024 D-197 / DE-025 D-209 / D-221）。
 //!
 //! 一条事实 `toolsmith.defined`：**「某个工具名被定义成这份描述与 schema」**。名字、格位、
 //! 载荷形状与归宿行同在这里，写方（[`super::behavior`]）与读方（[`TOOLSMITH_RECIPES`]）
@@ -35,7 +35,7 @@ pub(crate) const TOOLSMITH_DEFINED: &str = "toolsmith.defined";
 /// 本插件的 LLM 可见工具名。
 pub(crate) const TOOLSMITH_TOOL: &str = "toolsmith_define";
 
-/// 对外可读的视图：本插件的工具定义清单。
+/// 包内视图：本插件的工具定义清单；名字不公开（没有第二个读者）。
 pub(crate) const TOOLSMITH_RECIPES: &str = "toolsmith.recipes";
 
 /// 定义的 owner 恒为它。写方写死、视图过滤，两处共用这一个常量。

@@ -1,4 +1,4 @@
-//! 本插件拥有的事实名、格位、归宿行与对外可读的视图（DE-024 D-197 / DE-025 D-209 / D-221）。
+//! 本插件拥有的事实名、格位、归宿行与包内视图（DE-024 D-197 / DE-025 D-209 / D-221）。
 //!
 //! 一条事实 `idempotency.recorded`：**「这个键已经按这个值记过一次」**。名字、格位、
 //! 载荷形状与归宿行同在这里，写方（[`super::behavior`]）与读方（[`IDEMPOTENCY_LEDGER`]
@@ -12,10 +12,8 @@
 //!
 //! ## 视图为什么也在这里
 //!
-//! [`IDEMPOTENCY_LEDGER`] 是纯折叠：从 `idempotency.recorded` 按键去重折出台账。它在
-//! `PLUGIN.yml` 的 `shared_views:` 登记为**对外可读**，别的插件经
-//! `symbio_plugin_api::views` 按名字读——不依赖本 crate，也不在任何控制面里再写一份
-//! （D-221）。
+//! [`IDEMPOTENCY_LEDGER`] 是纯折叠：从 `idempotency.recorded` 按键去重折出台账。它只在
+//! 本包内折，名字不进 `PLUGIN.yml` 的 `shared_views:`：今天没有第二个读者（`D-221`）。
 
 use serde_json::{json, Value};
 
@@ -30,7 +28,7 @@ pub(crate) const IDEMPOTENCY_RECORDED: &str = "idempotency.recorded";
 /// 本插件的 LLM 可见工具名。工具面与行为声明都取它，不存在第二份拼写。
 pub(crate) const IDEMPOTENCY_TOOL: &str = "idempotent_record";
 
-/// 对外可读的视图：按键去重后的幂等台账。
+/// 包内视图：按键去重后的幂等台账；名字不公开（没有第二个读者）。
 pub(crate) const IDEMPOTENCY_LEDGER: &str = "idempotency.ledger";
 
 /// 视图最多保留的条数。超出只影响**输出长度**，不影响扫描成本上界。

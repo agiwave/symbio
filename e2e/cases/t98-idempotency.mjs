@@ -1,6 +1,7 @@
 import './_selfrun.mjs';
-// T98 幂等台账是一条**插件能力**：一个工具（`idempotent_record`）落下领域事实，一张视图
-// （`idempotency.ledger`）把它们按键折成台账；摘掉插件后工具面消失而系统照常运行。
+// T98 幂等台账是一条**插件能力**：一个工具（`idempotent_record`）落下领域事实；摘掉
+// 插件后工具面消失而系统照常运行。视图已收回插件私有，e2e 只钉事实落格；折叠由
+// owner 的 `decl.test.rs` 覆盖。
 //
 // ## 本用例钉的是「新增能力只改自己的能力包」
 //
@@ -10,21 +11,14 @@ import './_selfrun.mjs';
 // | 段 | 唯一能看见它的地方 |
 // |---|---|
 // | 工具面 | 首次请求的 `tools` 里有 `idempotent_record` |
-// | 事实落格 | 同一键第二次调用在执行前被拒，`capability_views['idempotency.ledger']` 仍只有一格 |
-// | 台账的形状 | 同一格里 `keys` 按键去重、首写为准 |
-// | 普通工具不受影响 | 装与不装本插件，`notes_add` 两次不同正文都落两格（`notes.recent.count == 2`） |
+// | 事实落格 | 同一键第二次调用在执行前被拒，直读会话 WAL 的 `idempotency.recorded` 仍只有一条 |
+// | 普通工具不受影响 | 装与不装本插件，`notes_add` 两次不同正文都落两条 `notes.created` |
 //
 // ## 为什么跨两轮调同一个键
 //
 // 同轮同键由写口按事件 id 去重；**执行前拒绝**只有跨轮才看得见——第一轮的
 // `idempotency.recorded` 已在会话事实里，第二轮 `before` 读到它才拒。只判同轮会漏掉
 // 这条判据的一半。
-//
-// ## 为什么经 `session/stats` 读视图
-//
-// 视图是 owner 对自己事实的纯折叠，读它必须经**生产读出口**（`session/stats` 遍历
-// 清单生成的公开表，D-221）——只有这条路能证明「装配真的把 owner 的 `ViewDecl`
-// 冻结进了同一张表」。直接调用本插件的求值函数是同义反复。
 //
 // ## 停用侧断言什么、不断言什么
 //
@@ -39,20 +33,18 @@ import {
   makeHomedir,
   DIALOG_FACE_OFF,
   cleanupHomedir,
-  nextPort,
   runCli,
-  startLongLivedCli,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
+  readFileSyncSafe,
 } from '../helpers.mjs';
 import { toolNamesOf, envelopeOf, isSilentAuxRequest } from '../llm-contract.mjs';
 
 const SID = 'e2e-t98';
 const SID_OFF = 'e2e-t98-off';
-const GW = nextPort();
 
 /** 同一个键两次：第一次落格，第二次在执行前被拒。 */
 const KEY = 'build-42';
@@ -103,15 +95,6 @@ function homedirFor(port) {
   return makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(port) }],
     pluginConfigs: {
-      // 网关拉起才有 `session/stats` 这条生产路由可打（视图读数走它）
-      gateway: {
-        inbound_enabled: true,
-        inbound_protocol: 'http',
-        inbound_bind: '127.0.0.1',
-        inbound_port: GW,
-        inbound_token: '',
-        inbound_readonly: false,
-      },
       session: { ...DIALOG_FACE_OFF },
     },
   });
@@ -124,7 +107,7 @@ function firstMainTools(reqs) {
 }
 
 export default defineCase(
-  'T98 幂等台账：同键跨轮被拒、视图按键折台账、装与不装普通工具行为一致',
+  'T98 幂等台账：同键跨轮被拒、装与不装普通工具行为一致',
   async () => {
     const llm = await new MockLlm(scenarios()).start();
     const hd = homedirFor(llm.port);
@@ -173,49 +156,37 @@ export default defineCase(
       });
       assertEq(notesOn.code, 0, `便签轮 CLI 退出码（stderr: ${notesOn.stderr.slice(0, 600)}）`);
 
-      // ── D 经生产读出口读两格视图 ────────────────────────────────────────
-      const api = startLongLivedCli({
-        homedir: hd.homedir,
-        workdir: hd.workdir,
-        session: SID,
-        provider: PROVIDER_ID,
-        gatewayPort: GW,
-      });
-      try {
-        await api.waitGatewayReady();
-        const inv = await api.invoke('session/stats', {}, { session_id: SID });
-        assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
+      // ── D 事实源读数：启用侧两组事实 ────────────────────────────────────
+      //
+      // 事实在**轮末**写口落格（D-213）；one-shot CLI 已退出，WAL 就是事实源本身。
+      // 视图已收回插件私有，这里只钉「幂等键只落一条」与「普通工具照常落两条」。
+      const events = readFileSyncSafe(
+        join(hd.homedir, 'session', SID, 'v2-events.wal'),
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
 
-        const views = inv.body?.data?.capability_views;
-        const ledger = views?.['idempotency.ledger'];
-        assert(ledger, `能力视图列应有 idempotency.ledger 这一格（实际: ${JSON.stringify(views)}）`);
-        assertEq(ledger.status, 'ok', `跨插件读应成功，不是缺席态：${JSON.stringify(ledger)}`);
-        assertEq(ledger.owner, 'idempotency', 'owner 来自清单生成物');
-        assertEq(ledger.ver, 1, '版本随 owner 的 ViewDecl 走');
-        assertEq(
-          ledger.value?.count,
-          1,
-          `同一键两次（一次落格、一次被拒）⇒ 只有一格：${JSON.stringify(ledger.value)}`,
-        );
-        assertEq(ledger.value?.entries?.[0]?.key, KEY, '键原样透出');
-        assertEq(
-          ledger.value?.entries?.[0]?.value,
-          VALUE_FIRST,
-          `首写为准（不是第二次的 ${VALUE_SECOND}）：${JSON.stringify(ledger.value)}`,
-        );
-        // **折出来的**那一格：`keys` 按键去重
-        assertEq(ledger.value?.keys, [KEY], `键应去重且保序：${JSON.stringify(ledger.value)}`);
+      const recorded = events.filter((e) => e.kind === 'idempotency.recorded');
+      assertEq(
+        recorded.length,
+        1,
+        `同一键两次（一次落格、一次被拒）⇒ 只有一条：${JSON.stringify(recorded.map((e) => e.payload))}`,
+      );
+      assertEq(recorded[0]?.payload?.key, KEY, '键原样落格');
+      assertEq(
+        recorded[0]?.payload?.value,
+        VALUE_FIRST,
+        `首写为准（不是第二次的 ${VALUE_SECOND}）：${JSON.stringify(recorded[0]?.payload)}`,
+      );
 
-        const notes = views?.['notes.recent'];
-        assert(notes, `能力视图列应有 notes.recent 这一格（实际: ${JSON.stringify(views)}）`);
-        assertEq(
-          notes.value?.count,
-          NOTES.length,
-          `启用侧普通工具两条不同正文应落两格：${JSON.stringify(notes.value)}`,
-        );
-      } finally {
-        api.stop();
-      }
+      const created = events.filter((e) => e.kind === 'notes.created');
+      assertEq(
+        created.length,
+        NOTES.length,
+        `启用侧普通工具两条不同正文应落两条：${JSON.stringify(created.map((e) => e.payload))}`,
+      );
+      assertEq(created.map((e) => e.payload?.text), NOTES, '两条便签正文按写入序');
 
       // ── E 卸任：工具面消失，普通工具与普通工具读数逐字一致 ───────────────
       //    「可卸载」的可执行形式是**装配期**不构造（`plugin_enabled: false`）。
@@ -246,27 +217,20 @@ export default defineCase(
       assert(offTools.includes('notes_add'), '停用后普通工具（notes_add）应在场');
       assert(off.stdout.includes('好了。'), `停用后这一轮仍应跑完（实际: ${JSON.stringify(off.stdout)}）`);
 
-      const apiOff = startLongLivedCli({
-        homedir: hd.homedir,
-        workdir: hd.workdir,
-        session: SID_OFF,
-        provider: PROVIDER_ID,
-        gatewayPort: GW,
-      });
-      try {
-        await apiOff.waitGatewayReady();
-        const inv = await apiOff.invoke('session/stats', {}, { session_id: SID_OFF });
-        assertEq(inv.status, 200, `停用侧 session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
-        const notes = inv.body?.data?.capability_views?.['notes.recent'];
-        assert(notes, `停用侧仍应有 notes.recent 这一格（实际: ${JSON.stringify(inv.body?.data)}）`);
-        assertEq(
-          notes.value?.count,
-          NOTES.length,
-          `停用侧普通工具两条不同正文也应落两格（与启用侧逐字一致）：${JSON.stringify(notes.value)}`,
-        );
-      } finally {
-        apiOff.stop();
-      }
+      // 停用侧同样直读 WAL：普通工具的领域事实照常两条（与启用侧逐字一致）。
+      const offEvents = readFileSyncSafe(
+        join(hd.homedir, 'session', SID_OFF, 'v2-events.wal'),
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      const offCreated = offEvents.filter((e) => e.kind === 'notes.created');
+      assertEq(
+        offCreated.length,
+        NOTES.length,
+        `停用侧普通工具两条不同正文也应落两条：${JSON.stringify(offCreated.map((e) => e.payload))}`,
+      );
+      assertEq(offCreated.map((e) => e.payload?.text), NOTES, '停用侧便签正文按写入序');
     } finally {
       llm.stop();
       cleanupHomedir(hd);

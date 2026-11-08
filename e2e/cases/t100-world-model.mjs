@@ -1,23 +1,17 @@
 import './_selfrun.mjs';
-// T100 世界模型是一条**插件能力**：一个工具（`world_observe`）落下领域事实，一张视图
-// （`world.model`）把它们折成「当前世界」；摘掉插件后工具面消失而系统照常运行。
+// T100 世界模型是一条**插件能力**：一个工具（`world_observe`）落下领域事实；摘掉插件后
+// 工具面消失而系统照常运行。视图已收回插件私有，e2e 只钉事实落格；折叠由 owner 的
+// `decl.test.rs` 覆盖。
 //
-// ## 本用例钉的三件事
+// ## 本用例钉的两件事
 //
 // | 段 | 唯一能看见它的地方 |
 // |---|---|
 // | 工具面 | 首次请求的 `tools` 里有 `world_observe` |
-// | 事实落格 | 工具调用之后，`session/stats` 的 `capability_views['world.model']` 有两条观察 |
-// | 后写覆盖 | 同一实体同一属性的第二条观察把第一条压过（`状态 = 离线`，置信度跟随后一条） |
+// | 事实落格 | 直读会话 WAL 的 `world.observed` 事件有三次观察 |
 //
-// 第三段是这张视图与「把事实原样吐出来」的分水岭：`count` 只证明落格，覆盖才证明
-// 折叠真的按「现在是什么」算过。`observations` 同时说明被覆盖的那条没有丢——它是证据量。
-//
-// ## 为什么经 `session/stats` 读视图
-//
-// 视图是 owner 对自己事实的纯折叠，读它必须经**生产读出口**（`session/stats` 遍历
-// 清单生成的公开表，D-221）——只有这条路能证明「装配真的把 owner 的 `ViewDecl`
-// 冻结进了同一张表」。直接调用本插件的求值函数是同义反复。
+// 三次观察里 `服务器/状态` 被观察两次：两条都留在事实源里，后一条的载荷是
+// `离线 / 60`——「后写覆盖」的折叠由 owner 自己验，e2e 只钉这次观察确实落格。
 //
 // ## 停用侧断言什么、不断言什么
 //
@@ -32,22 +26,20 @@ import {
   makeHomedir,
   DIALOG_FACE_OFF,
   cleanupHomedir,
-  nextPort,
   runCli,
-  startLongLivedCli,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
+  readFileSyncSafe,
 } from '../helpers.mjs';
 import { toolNamesOf, envelopeOf, isSilentAuxRequest } from '../llm-contract.mjs';
 
 const SID = 'e2e-t100';
 const SID_OFF = 'e2e-t100-off';
-const GW = nextPort();
 
-/** 三次观察：`服务器/状态` 被观察两次（后写覆盖），`数据库/版本` 是另一个实体。 */
+/** 三次观察：`服务器/状态` 被观察两次（后一次是 `离线`），`数据库/版本` 是另一个实体。 */
 const OBSERVATIONS = [
   { entity: '服务器', attribute: '状态', value: '在线', confidence: 80 },
   { entity: '服务器', attribute: '状态', value: '离线', confidence: 60 },
@@ -80,15 +72,6 @@ function homedirFor(port) {
   return makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(port) }],
     pluginConfigs: {
-      // 网关拉起才有 `session/stats` 这条生产路由可打（视图读数走它）
-      gateway: {
-        inbound_enabled: true,
-        inbound_protocol: 'http',
-        inbound_bind: '127.0.0.1',
-        inbound_port: GW,
-        inbound_token: '',
-        inbound_readonly: false,
-      },
       session: { ...DIALOG_FACE_OFF },
     },
   });
@@ -101,7 +84,7 @@ function firstMainTools(reqs) {
 }
 
 export default defineCase(
-  'T100 世界模型：工具落领域事实、视图按实体折出当前值、停用后工具面消失而会话照常',
+  'T100 世界模型：工具落领域事实、停用后工具面消失而会话照常',
   async () => {
     const llm = await new MockLlm(scenarios()).start();
     const hd = homedirFor(llm.port);
@@ -128,63 +111,32 @@ export default defineCase(
         `第一轮 stdout 应为收尾正文（实际: ${JSON.stringify(turn.stdout)}）`,
       );
 
-      // ── B 事实落格 + 视图折出当前世界：经生产读出口读 owner 的折叠 ───────
+      // ── B 事实落格：直读会话 WAL 里本插件自己的领域事实 ─────────────────
       //
-      // 事实在**轮末**写口落格（D-213），因此读数必须在同一进程里读同一份存储——
-      // 故这里起一个长驻 CLI 并等网关就绪，而不是再跑一个 one-shot。
-      const api = startLongLivedCli({
-        homedir: hd.homedir,
-        workdir: hd.workdir,
-        session: SID,
-        provider: PROVIDER_ID,
-        gatewayPort: GW,
-      });
-      try {
-        await api.waitGatewayReady();
-        const inv = await api.invoke('session/stats', {}, { session_id: SID });
-        assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
+      // 事实在**轮末**写口落格（D-213）；one-shot CLI 已退出，WAL 就是事实源本身。
+      // 视图已收回插件私有，这里只钉三次观察原样落格、后一次带 `离线 / 60`。
+      const events = readFileSyncSafe(
+        join(hd.homedir, 'session', SID, 'v2-events.wal'),
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
 
-        const views = inv.body?.data?.capability_views;
-        const view = views?.['world.model'];
-        assert(view, `能力视图列应有 world.model 这一格（实际: ${JSON.stringify(views)}）`);
-        assertEq(view.status, 'ok', `跨插件读应成功，不是缺席态：${JSON.stringify(view)}`);
-        assertEq(view.owner, 'world_model', 'owner 来自清单生成物');
-        assertEq(view.ver, 1, '版本随 owner 的 ViewDecl 走');
-
-        assertEq(
-          view.value?.count,
-          2,
-          `两个实体（服务器、数据库）：${JSON.stringify(view.value)}`,
-        );
-        assertEq(
-          view.value?.observations,
-          3,
-          `三次观察都是证据（一次被覆盖）：${JSON.stringify(view.value)}`,
-        );
-
-        const server = view.value?.entities?.find((e) => e.entity === '服务器');
-        const db = view.value?.entities?.find((e) => e.entity === '数据库');
-        assert(server, `实体清单应有服务器：${JSON.stringify(view.value)}`);
-        assert(db, `实体清单应有数据库：${JSON.stringify(view.value)}`);
-        assertEq(
-          server.attributes?.['状态']?.value,
-          '离线',
-          `同实体同属性后写覆盖：${JSON.stringify(server)}`,
-        );
-        assertEq(
-          server.attributes?.['状态']?.confidence,
-          60,
-          '置信度跟随后一条观察',
-        );
-        assertEq(
-          !('状态' in (db.attributes ?? {})),
-          true,
-          `别的实体的属性不能漏进这一格：${JSON.stringify(db)}`,
-        );
-        assertEq(db.attributes?.['版本']?.value, '16');
-      } finally {
-        api.stop();
-      }
+      const observed = events.filter((e) => e.kind === 'world.observed');
+      assertEq(
+        observed.length,
+        3,
+        `三次成功观察：${JSON.stringify(observed.map((e) => e.payload))}`,
+      );
+      assertEq(observed[0]?.payload?.entity, '服务器', '第一条观察实体');
+      assertEq(observed[0]?.payload?.attribute, '状态', '第一条观察属性');
+      assertEq(observed[0]?.payload?.value, '在线', '第一条观察值');
+      assertEq(observed[0]?.payload?.confidence, 80, '第一条观察置信度');
+      assertEq(observed[1]?.payload?.value, '离线', '同实体同属性的后一条观察值');
+      assertEq(observed[1]?.payload?.confidence, 60, '置信度跟随后一条观察');
+      assertEq(observed[2]?.payload?.entity, '数据库', '另一个实体');
+      assertEq(observed[2]?.payload?.attribute, '版本', '另一个属性');
+      assertEq(observed[2]?.payload?.value, '16', '另一个实体的值');
 
       // ── C 卸任：工具面消失，会话照常跑完 ─────────────────────────────────
       //    「可卸载」的可执行形式是**装配期**不构造（`plugin_enabled: false`），
