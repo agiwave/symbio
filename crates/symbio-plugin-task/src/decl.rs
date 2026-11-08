@@ -6,10 +6,13 @@
 //! `PLUGIN.yml` 的 `shared_events:` 投影进 `symbio_plugin_api::events`，
 //! 本插件**不要求别的插件链进来**。
 //!
-//! 就绪集折叠也在这里交出（`PLUGIN.yml` 的 `shared_views:` → `task.readyset`）：
-//! 算式住 owner，第二个读者按名字读（`D-221`），本插件不认识任何兄弟插件。
-//! 折叠不认端口形参，也不认识别人交来的表：[`TASK_VOCAB`] 就是它读的那五格。
+//! 就绪集折叠也在这里交出：算式住 owner，第二个读者按报表登记取（`D-221` / `D-387`），
+//! 本插件不认识任何兄弟插件。折叠不认端口形参，也不认识别人交来的表：[`TASK_VOCAB`]
+//! 就是它读的那五格。
 
+use serde_json::{json, Value};
+
+use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::{
     Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb, ViewDecl, PRINCIPAL_SCHEDULER,
 };
@@ -54,8 +57,9 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-task";
 
 /// 对外可读的那条视图：就绪集（名册 #23，`D-289`）。
 ///
-/// 名字经 `PLUGIN.yml` 的 `shared_views:` 投影进 `symbio_plugin_api::view_names`；
-/// 读方按名字读、不认识形状（`D-221`）——`session` 的统计列因此不再链 core 的投影。
+/// 读方按报表登记取（`D-387`）、不认识形状（`D-221`）——`session` 的统计列因此不再
+/// 链 core 的投影，也不自己套容量：`ReportCtx::cap` 是读者的预算，由 owner 的
+/// [`readyset_report`] 套上（`cap = 0` 按 1，与调度器同一口径）。
 pub(crate) const READYSET_VIEW: &str = "task.readyset";
 
 /// 扫描成本上界（事件条数）。它是环内窗口求值的预算；跨插件读口不查它——读侧按
@@ -127,6 +131,40 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。
 symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
+
+// 就绪集列的报表登记（`D-387`）：视图是 `task.readyset`，出口是 `{ ready, cap }`。
+//
+// 没有 `fleet`：就绪集是**当前**候选集，把两个会话的候选集并起来不是任何一个读数的
+// 口径（与 `memory.live` 同一族判断，见 [`VIEWS`] 的 `agg`）。
+symbio_plugin_api::submit_reports!([ReportDecl {
+    owner: "task",
+    slot: "readyset",
+    order: 80,
+    views: &[READYSET_VIEW],
+    fleet: None,
+    render: readyset_report,
+    fleet_render: None,
+    panel: None,
+}]);
+
+/// 就绪集列的**排版**：owner 交的是「谁就绪、按什么序」（[`READYSET_VIEW`]），本函数
+/// 只套上读者的预算——`cap` 是读者的预算，不是折叠的一格（[`crate::readyset`] 的
+/// 模块文档）。
+///
+/// `cap = 0` 按 1 处理，与调度器同一口径（容量为零的调度器不是「更保守」，是「永不动」）。
+/// 视图值缺席（读方交的是 `Null` 占位）⇒ 空表，仍产出 `{ ready: [], cap }` 这一份
+/// 文档写的形状。
+fn readyset_report(views: &[Value], ctx: &ReportCtx<'_>) -> Value {
+    let cap = ctx.cap.max(1);
+    let mut ready = views
+        .first()
+        .and_then(|value| value.get("ready"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    ready.truncate(cap);
+    json!({ "ready": ready, "cap": cap })
+}
 
 fn submitted_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {

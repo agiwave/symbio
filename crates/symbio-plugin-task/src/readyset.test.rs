@@ -364,11 +364,12 @@ fn an_n_step_chain_advances_exactly_one_task_at_a_time() {
     assert!(violations.is_empty(), "全链跑完不留违规：{violations:?}");
 }
 
-/// 声明的视图在装配表里按名字读得出，且读出的就是折叠那一份（**不含** `cap`）。
+/// 声明的视图在冻结声明表里按名字读得出，且读出的就是折叠那一份（**不含** `cap`）。
 ///
 /// 这一条钉的是「owner 交的是同一张表」：`session` 的统计列与本包的调度段读的是同一个
-/// `eval`，容量各套各的——所以两侧的前缀必然同源。视图名若改名或漏进 `PLUGIN.yml`
-/// 的 `shared_views`，这条先红。
+/// `eval`，容量各套各的——所以两侧的前缀必然同源。视图名若改名、或这条 `ViewDecl`
+/// 从 `decl.rs::VIEWS` 里掉出去，这条先红（报表登记的 `views` 指向同一个名字，
+/// 由 `decl.test.rs` 的登记用例守）。
 #[test]
 fn the_declared_view_is_readable_by_name_and_carries_no_capacity() {
     let store = EventStore::new();
@@ -376,8 +377,9 @@ fn the_declared_view_is_readable_by_name_and_carries_no_capacity() {
     open_task(&store, "b", &["a"]);
     let snapshot = store.range(Seq::new(0));
 
-    let by_name =
-        symbio_plugin_api::read_shared_view_all(READYSET_VIEW, &snapshot).expect("按名字读视图");
+    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let view = frozen.view(READYSET_VIEW).expect("视图应在冻结声明表里");
+    let by_name = (view.eval)(&snapshot, i64::MAX);
     assert_eq!(
         by_name,
         readyset_value(&snapshot, i64::MAX),

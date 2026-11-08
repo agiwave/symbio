@@ -1436,21 +1436,21 @@ fn commitments_column_exposes_each_delegation_record() {
     assert_eq!(denied.commitments["total"], 0);
 }
 
-/// 就绪集列的**读侧契约**：折叠归任务能力包（名册 #23，`D-289`），本插件只保证两件事——
-/// 读不出来时交**文档写的空形状**，以及**读者的预算随列报出**（视图交的是无界候选集，
-/// `task_cap` 在这里套上，所以 `cap` 这一格永远是 session 的，不是 owner 的）。
+/// 就绪集列的**读侧契约**：折叠与容量套用都归任务能力包（名册 #23，`D-289` / `D-387`），
+/// 本插件只保证读不出来时交**文档写的空形状**（`{ready: [], cap: TASK_CAP}`）。
 ///
 /// 这里刻意不复算、不跟反向：本测试二进制不链接 `crates/symbio-plugin-task`（E-009）⇒
-/// `task.readyset` 不在冻结表里 ⇒ 列只能是 `{ready: [], cap: TASK_CAP}`。在这里补一份替身
-/// owner 只会把两条真判据变成假绿——**谁就绪、什么序、租约与挂起怎么算**归 owner 的单测
+/// 报表 `readyset` 没有登记项 ⇒ 列只能是那一份空形状。在这里补一份替身 owner 只会把
+/// 两条真判据变成假绿——**谁就绪、什么序、租约与挂起怎么算**归 owner 的单测
 /// （`crates/symbio-plugin-task/src/readyset.test.rs`：依赖闭包 / 一次一个 / 活租约出局 /
-/// 挂起与恢复 / 返工开新节点 / `cap` 只截长度不改成员），**出口读得到真数**归 e2e
+/// 挂起与恢复 / 返工开新节点），**`cap` 由 owner 套上**归 owner 的报表单测
+/// （`crates/symbio-plugin-task/src/decl.test.rs`），**出口读得到真数**归 e2e
 /// （`t31-task-table.mjs` 钉成员与 `deniedReady.cap`，`t34-preemption.mjs` 钉抢占时的进出）。
 /// 读侧闸对本列的作用与四列那一族同款，由断点 / 转写列的闸用例共同承担。
 ///
 /// 载荷仍按**写方落下的真实形状**造（`task × opened`、`depends_on` 数组）：本插件不认识
 /// 这些字段，带着它们才试得出「不认识」是不是真的。格位由 `declarations.test.rs` 的夹具交
-/// （写闸 fail-closed，没声明的名字落不进环），**视图名不交** ⇒ 这一列读得出、算不出。
+/// （写闸 fail-closed，没声明的名字落不进环），**报表不登记** ⇒ 这一列读得出、算不出。
 #[test]
 fn readyset_column_degrades_to_the_documented_empty_shape() {
     let dir = std::env::temp_dir().join(format!("symbio-stats-rs-{}", std::process::id()));

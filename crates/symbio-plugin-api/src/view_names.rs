@@ -20,7 +20,6 @@ pub struct SharedViewDecl {
 pub const VIEW_CONATION_AUTONOMY: &str = "conation.autonomy";
 pub const VIEW_CONATION_INTENTS: &str = "conation.intents";
 pub const VIEW_MEMORY_LIVE: &str = "memory.live";
-pub const VIEW_TASK_READYSET: &str = "task.readyset";
 
 /// 跨插件可读视图（按名字排序）。
 #[rustfmt::skip]
@@ -28,5 +27,4 @@ pub const SHARED_VIEWS: &[SharedViewDecl] = &[
     SharedViewDecl { name: VIEW_CONATION_AUTONOMY, owner: "conation" },
     SharedViewDecl { name: VIEW_CONATION_INTENTS, owner: "conation" },
     SharedViewDecl { name: VIEW_MEMORY_LIVE, owner: "memory" },
-    SharedViewDecl { name: VIEW_TASK_READYSET, owner: "task" },
 ];

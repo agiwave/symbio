@@ -360,7 +360,8 @@ pub struct SessionConfig {
     ///
     /// `cap` 不喂给折叠：`task.readyset` 交的是**未截断**的候选集（owner 在
     /// `crates/symbio-plugin-task`，`D-289`），截断发生在读者这一侧——调度段（owner 经
-    /// 事实读到同一个数）与本插件的 `stats.readyset` 列各按它截。
+    /// 事实读到同一个数）与本插件的 `stats.readyset` 列各按它截；后者在报表登记之后
+    /// 经 `ReportCtx::cap` 把预算交给 owner 的 `render`（`D-387`）。
     ///
     /// `0` 与 `1` 同义（容量为零的调度器不是「更保守」，是「永不动」）：
     /// 读侧按 `cap.max(1)` 归一，不把「写错一个数」变成「系统停摆」。

@@ -4,7 +4,7 @@
 //!
 //! | 消费方 | 形态 | 扩展面 |
 //! |---|---|---|
-//! | 读出口 `session/stats` 的 `readyset` 列 | 事实源读什么算什么 | 共享声明视图（`task.readyset`，`D-289`） |
+//! | 读出口 `session/stats` 的 `readyset` 列 | 事实源读什么算什么 | 报表登记（`task.readyset`，`D-289` / `D-387`） |
 //! | 调度段 [`prompt_section`] | 请求视图置顶一段 `role=user` 的提示 | 上下文 provider（`context`） |
 //! | 收束调度 | 就绪集 → `task.ready` / `task.assigned` | 收束贡献（[`ScheduleContributor`]，D-250） |
 //!

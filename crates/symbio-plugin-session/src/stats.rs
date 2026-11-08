@@ -44,7 +44,7 @@
 //! （`read_shared_view_all`）走的是同一个口，两族因此同一个 as-of。
 
 use crate::declarations::{
-    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB, TASK_READYSET_VIEW,
+    CHAT_VOCAB, CONATION_AUTONOMY_VIEW, CONATION_INTENTS_VIEW, MESSAGE_VOCAB,
 };
 use std::sync::Arc;
 
@@ -139,26 +139,14 @@ fn empty_reputation() -> serde_json::Value {
     serde_json::json!({ "by_principal": {} })
 }
 
-/// 就绪集列的**排版**：owner 交的是「谁就绪、按什么序」（`task.readyset`，`D-289`），
-/// 本函数只套上本轮的容量——`cap` 是读者的预算，不是折叠的一格。
+/// 就绪集列的**空形状**：`{ ready: [], cap }`——容量是生效容量（`cap = 0` 按 1，与
+/// owner 那侧的调度器同一口径）。
 ///
-/// `cap = 0` 按 1 处理，与 owner 那侧的调度器同一条口径（容量为零的调度器不是「更保守」，
-/// 是「永不动」）。视图读不出来时 [`empty_readyset`] 先给一份空表，这里因此仍产出
-/// `{ ready: [], cap }` 这一份**文档写的形状**，与迁移前的列逐字相同。
-fn readyset_column(value: serde_json::Value, cap: usize) -> serde_json::Value {
+/// 只在整条报表读不出来时用（本二进制没链接 owner / 登记表不合法）：读方不替 owner
+/// 猜形状，这一份是文档写过的形状，与迁移前的列逐字相同。
+fn empty_readyset(cap: usize) -> serde_json::Value {
     let cap = cap.max(1);
-    let mut ready = value
-        .get("ready")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    ready.truncate(cap);
-    serde_json::json!({ "ready": ready, "cap": cap })
-}
-
-/// 就绪集的**空形状**：`{ ready: [] }`（owner 交的那一份去掉容量之后的键）。
-fn empty_readyset() -> serde_json::Value {
-    serde_json::json!({ "ready": [] })
+    serde_json::json!({ "ready": [], "cap": cap })
 }
 
 /// 声誉列的**排版**：把台账里本会话主体那一行单独提出来，另附整本账。
@@ -289,15 +277,15 @@ pub(crate) struct SessionStats {
     /// `{ items: [], total: 0, … }`，两种「零条」由 `has_wal` 分辨。
     pub commitments: serde_json::Value,
     /// 就绪任务集（的**读侧**）：
-    /// 共享视图 `task.readyset` 原样序列化（`{ ready: [ { task_id, seq, depends_on } ] }`），
+    /// 报表 `slot = "readyset"` 的出口（`{ ready: [ { task_id, seq, depends_on } ], cap }`），
     /// 按 `task_id` 字典序——同一份事实源永远读出同一个集合。
     ///
-    /// ## 折叠不在本插件，本插件只交本轮的容量
+    /// ## 折叠与容量套用都不在本插件
     ///
-    /// 「谁就绪」由任务能力包算（owner：`crates/symbio-plugin-task`，`D-289`），本插件按
-    /// 名字读——与 `cost.ledger` / `reputation.ledger` 同一条通路。容量是本会话配置里的
-    /// `task_cap`：它是**读者的预算**，视图交的是无界的候选集，`cap` 在这里套上
-    /// （`cap.max(1)` 后截断），所以这一列的读数与折叠搬出 core 之前逐字节相同。
+    /// 「谁就绪」由任务能力包算（owner：`crates/symbio-plugin-task`，`D-289`），容量也由
+    /// 它套（`D-387`）：本插件按 `slot` 取整条读数，把本会话的 `task_cap` 经
+    /// [`symbio_plugin_api::reports::ReportCtx::cap`] 交给 owner——容量是**读者的预算**，
+    /// 不是折叠的一格，所以它进上下文而不进视图（`cap.max(1)` 后截断，与调度器同一口径）。
     ///
     /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒ `{ready: []}`），
     /// 不归声誉那一族（那列不给的是「有数但不给你看」的空对象）：就绪集为空在语义上
@@ -553,13 +541,11 @@ pub(crate) fn read(
 
     // 就绪集列：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
     // 已被换成空的 ⇒ 本列是 `{ready: []}`（四列的形态），不是声誉那列的空对象。
-    // **折叠归任务能力包**（名册 #23，`D-289`）：本插件按名字读 owner 交的候选集，
-    // 只把自己的容量套上去——不引用兄弟插件（E-009），也不再链 core 的投影目录，
-    // 更不由本插件重算「谁就绪、什么序」。
-    let readyset = readyset_column(
-        read_view_or(TASK_READYSET_VIEW, &snapshot, empty_readyset),
-        task_cap,
-    );
+    // **折叠与容量套用都归任务能力包**（名册 #23，`D-289` / `D-387`）：本插件按 `slot`
+    // 取整条读数，容量经 `ReportCtx::cap` 交给 owner——读者的预算是参数，不是折叠的一格。
+    // 整条报表读不出来时才退回文档写过的空形状并出声。
+    let readyset = report_value("readyset", &snapshot, &report_ctx)
+        .unwrap_or_else(|| empty_readyset(task_cap));
 
     // 转写列（对话面读侧）：
     // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
