@@ -382,6 +382,16 @@ export const GUARDS = [
   // 注入四类噪声断言绿；② 读不出时最省事的实现报「0 条 ⇒ 通过」 ⇒ 基线或 `crates/`
   // 缺失一律退 2；行名是常量时需要解析，解析不出判 SR-004 而不是静默跳过。
   'sink-row-audit',
+  // `facade-loc-audit`（FA-001…004）判**`plugin-api` 自有实现的行数只许降**。契约面
+  // （`effects` / `port` / `text` / `context` / `reports`）一旦长回去，扩展层的读者就多
+  // 一份与契约无关的机制代码；这句话此前只有散文，而散文拦不住逐行添加。基线
+  // `scripts/baselines/plugin-api-loc.json` 记五个文件行数与全 crate 合计，**超一行即红**；
+  // 行数下降也必须同批下调基线，否则「删 N 行再加 N 行」能把棘轮抹平。
+  //
+  // 失效形态与 `sink-row-audit` 同族：① 口径写宽（把 `*.test.rs` 的测试代码算进实现）
+  // ⇒ 读数虚高；回归测试塞 5,000 行测试文件断言仍绿；② 读不出时报「0 行 ⇒ 通过」⇒
+  // 缺 crate 目录或基线一律退 2；③ 最核心的一条由回归测试钉住：**给实现加 5 行 ⇒ 红**。
+  'facade-loc-audit',
   // `extension-locality-audit`（EX-002）判**新增能力包有没有动架构面**：一个提交新增
   // `crates/symbio-plugin-<名字>/PLUGIN.yml` 时，`core` / `kernel` / `loop` / `session`
   // 四棵树的**目录指纹**必须与父提交逐一相等。它补的是既有守卫之间那条缝：`SC-006`

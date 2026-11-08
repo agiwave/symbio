@@ -34,6 +34,7 @@ lists: [gate-codes=owner]
 | **EL** | 引擎收口（DE-044 的账本读数） | `scripts/engine-ledger-audit.mjs` | EL-001–003 | `EL-004` |
 | **EOL** | 行尾（工作树 / 入库 / 声明三面一致） | `scripts/eol-audit.mjs` | EOL-001–003 | `EOL-004` |
 | **EX** | 能力全面拆分（名册处置与迁移边界） | `scripts/capability-ledger-audit.mjs` · `scripts/capability-migration-audit.mjs` · `scripts/extension-locality-audit.mjs` · `scripts/extension-vocab-audit.mjs` · `scripts/uninstall-edge-audit.mjs` | EX-002–004、EX-006–008 | `EX-009` |
+| **FA** | 门面（plugin-api）自有实现行数棘轮 | `scripts/facade-loc-audit.mjs` | FA-001–004 | `FA-005` |
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–006 | `GW-007` |
@@ -148,6 +149,10 @@ lists: [gate-codes=owner]
 | **EX-006** | `scripts/capability-ledger-audit.mjs` |
 | **EX-007** | `scripts/capability-migration-audit.mjs` |
 | **EX-008** | `scripts/extension-vocab-audit.mjs` |
+| **FA-001** | `scripts/facade-loc-audit.mjs` |
+| **FA-002** | `scripts/facade-loc-audit.mjs` |
+| **FA-003** | `scripts/facade-loc-audit.mjs` |
+| **FA-004** | `scripts/facade-loc-audit.mjs` |
 | **FB-001** | `scripts/facts-boundary-audit.mjs` |
 | **FB-002** | `scripts/facts-boundary-audit.mjs` |
 | **GC-001** | `scripts/gate-codes-audit.mjs` |

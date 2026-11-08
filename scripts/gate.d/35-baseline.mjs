@@ -199,6 +199,25 @@ function coverageCells(text) {
   return cells
 }
 
+/** `scripts/baselines/plugin-api-loc.json`（FA-001…004）：门面自有实现逐项行数 + 合计。
+ *  一格一文件（键 = 相对路径），另有一格 `合计`。判据面的对账在 `facade-loc-audit`；
+ *  本条只管「基线文件本身有没有被改松」——两半合起来才是「契约面不会悄悄长回去」。
+ *  少了这一条，绕过 FA-001 只需把某个数字改大，且不留任何痕迹。 */
+function facadeLocCells(text) {
+  const cells = new Map()
+  let obj
+  try {
+    obj = JSON.parse(text)
+  } catch {
+    return cells
+  }
+  for (const f of obj?.files ?? []) {
+    if (typeof f?.path === 'string' && Number.isInteger(f.lines)) cells.set(f.path, f.lines)
+  }
+  if (Number.isInteger(obj?.total?.lines)) cells.set('合计', obj.total.lines)
+  return cells
+}
+
 /** `scripts/baselines/tool-surface.json`：默认装配下 `tools` 数组字节数（一格，只许降）。
  *  实测量由 `e2e/cases/t46-prompt-shape-baseline.mjs` 读同一份基线并断言；本条只判
  *  「基线文件有没有被改松」——两半合起来才是「工具面不会悄悄长回去」。 */
@@ -371,6 +390,18 @@ const RATCHETS = [
     // 不设豁免标记：收窄自动生效，变宽只能改基线，而改基线会被本条按基准版本抓住。
     waivers: () => new Map(),
     label: '默认装配下 tools 数组字节数（只许降）',
+  },
+  {
+    // FA-001 的基线文件自身：五个自有实现文件与合计的行数只许降。这条是那条棘轮的
+    // **反向绕过口**——把数字改大就能让实现悄悄长回去，而 `facade-loc-audit` 只对
+    // 基线判断，看不见「基线被改松」本身。
+    id: 'facade-loc',
+    file: 'scripts/baselines/plugin-api-loc.json',
+    dir: 'ceiling',
+    cellsOf: facadeLocCells,
+    // 不设豁免标记：收窄自动生效，变宽只能改基线，而改基线会被本条按基准版本抓住。
+    waivers: () => new Map(),
+    label: '门面（plugin-api）自有实现行数（逐文件 + 合计，只许降）',
   },
   {
     id: 'coverage',
