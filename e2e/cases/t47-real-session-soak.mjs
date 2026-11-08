@@ -15,7 +15,7 @@ import './_selfrun.mjs';
 // | 轮次多到越过压缩水位线若干次 | 20 轮 ≈4.7K 字长回答 ＋ `max_context_tokens: 60000` | 触发线是**相对**的（0.7 × 窗口，`compact` 插件的 `COMPACT_AT`），而常驻量由请求视图的轮次窗口（出厂 `context_messages = 6`）决定——顶到水位线靠的是**最近几轮的体量**，真实会话正是这样（模型一次给几千字）。本用例让 mock 的用量按请求体估算（CJK ≈ 1 token/字），水位因此随会话变长而真的涨落：每 8~9 轮越线一次，整场压两次，最近一次之后仍留着尾巴（证据 ④ 要的后缀）。窗口大小不是判据，「触发过、触发后守住」才是（与 t8 / t18 同一取舍） |
 // | 单轮里几十次工具调用 | 最后一轮连调 45 次工具 | 长 agentic 轮是 v2 的主用法。它同时钉住一个**实测形状**：交换**跨轮累加**，所以第 45 步的请求里 `role=tool` 有 45 条——模型看得见自己已经做过什么（这一条曾经是 1 条：交换每轮清空，长轮于是反复重读同一份材料，见 [t55](t55-multi-tool-round-memory.mjs)）。**长轮自身不设工具轮数上限**（[D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")），这一格钉的是「累积」而不是「有界」 |
 // | 工具结果有真实字节量 | 第 1 轮读一份 ≈14KB 的材料，长轮里读小文件 | 大结果**当时**完整落进库，之后从请求视图与 live 读面一起滑走——「裁的是带着跑的那一份，不是记过的那一份」这条契约只有两头都在才判得动 |
-// | 会话会出故障 | 第 2 轮的应答按 `failTimes: 1` 打 500 | 真实会话不是一路成功；兜底也是一句「这一轮说了什么」，它必须进轮次账 |
+// | 会话会出故障 | 第 2 轮的应答按 `failTimes: 1` 打 500 | 真实会话不是一路成功；兜底也要给出一句可见的失败收束 |
 // | 会话会被重新打开 | 全程跑完后**换进程**再读一遍 | 长跑会话第二天被打开是常态：事实源要还能整体读出，且读数不随重开漂移 |
 //
 // ## 这副负载压出来的两处缺陷（都修在 core，都有单点判据）
@@ -269,7 +269,18 @@ export default defineCase(
 
       // ── 跑负载：20 轮正文 + 1 轮 45 步工具轮 ─────────────────────────────
       for (let i = 0; i < NORMAL_TURNS; i++) {
+        const mark = sub.sessionChanges().length;
         await sendAndSettle(cli, sub, turnText(i), { timeoutMs: 90_000 });
+        // 每轮的用户可见收束：正常轮拿到一句完成正文，故障轮（第 2 轮）拿到失败节点。
+        const turnFrames = sub.sessionChanges().slice(mark).map((c) => c.data ?? c);
+        const failed = turnFrames.some((d) => d.status === 'failed');
+        const replied = turnFrames.some(
+          (d) => msgRoleOf(d) === 'assistant' && msgTypeOf(d) === 'text' && d.status === 'completed',
+        );
+        assert(
+          i === 1 ? failed : replied,
+          `第 ${i + 1} 轮应在实时面收束成${i === 1 ? '失败节点' : '一句完成正文'}`,
+        );
         // 大结果**当时**完整进存储（不是 head/tail 之后的样子）——存储侧的全文锚点只在
         // 第 1 轮结束时取，后续压缩会归并消息集合，届时这一条已不代表「存储」。
         if (i === 0) {
@@ -280,7 +291,7 @@ export default defineCase(
       }
       await sendAndSettle(cli, sub, DEEP_TEXT, { timeoutMs: 120_000 });
 
-      // ── 证据 ①：轮次账（跑过的每一轮都在档，含失败那轮）──────────────────
+      // ── 证据 ①：读数口的状态列（轮次明细不再数账，逐轮的可见收束见上面的负载循环）──
       const stats = (await cli.invoke('session/stats', {}, { session_id: SID })).body?.data;
       assert(stats, `session/stats 应带 data 载荷`);
       assert(stats.has_wal, `跑过 ${TOTAL_TURNS} 轮 ⇒ 事实源应在`);
@@ -290,20 +301,9 @@ export default defineCase(
         `负载下八条不变量全绿（实际: ${JSON.stringify(stats.invariants).slice(0, 600)}）`,
       );
       assertEq(stats.tiers.length, 1, '一档到底（本用例不换档）');
-      const row = stats.tiers[0];
-      assertEq(row.turns, TOTAL_TURNS, `轮次账 = ${TOTAL_TURNS}（${NORMAL_TURNS} 正文 + 1 长轮）`);
-      assertEq(row.fallbacks, 1, '恰好一轮兜底（第 2 轮的故障注入）');
-      assertEq(row.samples, TOTAL_TURNS - 1, '其余各轮都收束成一句正文');
-      assertEq(row.rate, 1 / TOTAL_TURNS, '兜底率按已知动作钉死');
 
       // ── 证据 ②：事实账（累积量与动作逐一对得上）──────────────────────────
       const kinds = stats.checkpoint.kind_counts ?? {};
-      assertEq(Number(kinds['user.message'] ?? 0), TOTAL_TURNS, '每轮一条用户格');
-      assertEq(
-        Number(kinds['chat.assistant.final'] ?? 0) + Number(kinds['chat.assistant.fallback'] ?? 0),
-        TOTAL_TURNS,
-        '每轮恰好一条收束格（final 或 fallback，C2 的口径）',
-      );
       // 产物格与动作逐一对得上：1 次早读 ＋ 长轮的 45 次工具调用都超出内联上限 ⇒ 各落一条。
       // 钉死而非 `>= 1`：这是「事实账随负载累积」唯一能核对的量，松成下界就退回收据。
       assertEq(
@@ -466,7 +466,6 @@ export default defineCase(
       try {
         const stats2 = (await reopened.invoke('session/stats', {}, { session_id: SID })).body?.data;
         assertEq(stats2.checkpoint.event_count, eventCountBefore, '重开不新增也不丢事实');
-        assertEq(stats2.tiers[0].turns, TOTAL_TURNS, '重开读到的轮次账一致');
         assertEq(stats2.invariants.length, 0, '重开后八条不变量仍全绿');
         const leaf2 = await readSessionMessages(reopened, SID);
         assertTranscriptInvariants(leaf2, 'T47 重开');
