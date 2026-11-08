@@ -108,6 +108,9 @@ pub const PLUGIN_ID_TELEGRAM: &str = "telegram";
 /// 工具世界（执行 / 路由 / 结果提取）
 pub const PLUGIN_ID_TOOL: &str = "tool";
 
+/// 制造工具（L2 受限）：只能登记本插件自己的工具定义，清单按名字折出当前版本
+pub const PLUGIN_ID_TOOLSMITH: &str = "toolsmith";
+
 /// VDFS 根（单槽归系统 Agent）
 pub const PLUGIN_ID_VDFS: &str = "vdfs";
 
@@ -138,6 +141,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "idempotency", // 幂等台账：一个工具、一条 Domain 事实、一张共享视图；同一个键在同一会话里只记一次
     "world_model", // 世界模型：一次观察记一条领域事实，视图按（实体，属性）折出当前世界
     "reversibility", // 可逆性设计：给动作标注可逆等级与补偿做法，视图按动作折出当前等级分布
+    "toolsmith", // 制造工具（L2 受限）：只能登记本插件自己的工具定义，清单按名字折出当前版本
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "compact", // 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）

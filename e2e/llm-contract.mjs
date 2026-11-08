@@ -147,6 +147,7 @@ export const FACTORY_TOOLS = Object.freeze([
   'vdfs_delete',
   'vdfs_mkdir',
   'reversibility_annotate',
+  'toolsmith_define',
   'web_fetch',
   'web_search',
   'world_observe',

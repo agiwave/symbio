@@ -85,6 +85,7 @@ const DEFAULT_BASELINE = [
   'vdfs_tree',
   'vdfs_write',
   'reversibility_annotate',
+  'toolsmith_define',
   'web_fetch',
   'web_search',
   'world_observe',

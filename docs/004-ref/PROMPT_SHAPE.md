@@ -11,9 +11,9 @@
 
 | 请求 | 消息数 | 消息序列（role + 结构载体） | system 小节标签序列 | 工具数 |
 |---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 28 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 28 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 28 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 29 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 29 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 29 |
 
 ## 规模观测（**不进判据**：同一列里既有装配代码的字，也有负载的字）
 
@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 28 | 667 | 27173 | 28050 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 28 | 723 | 27173 | 28342 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 28 | 1157 | 27173 | 28843 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 29 | 667 | 28122 | 29000 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 29 | 723 | 28122 | 29292 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 29 | 1157 | 28122 | 29793 |
 
 ## 基线（判据本体）
 
@@ -70,7 +70,7 @@
         []
       ],
       "tools": {
-        "count": 28,
+        "count": 29,
         "names": [
           "agent_run",
           "causal_assert",
@@ -87,6 +87,7 @@
           "mcp__mockserv__add",
           "notes_add",
           "reversibility_annotate",
+          "toolsmith_define",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -101,7 +102,7 @@
           "http_request",
           "world_observe"
         ],
-        "schema_bytes": 27173
+        "schema_bytes": 28122
       }
     },
     {
@@ -155,7 +156,7 @@
         []
       ],
       "tools": {
-        "count": 28,
+        "count": 29,
         "names": [
           "agent_run",
           "causal_assert",
@@ -172,6 +173,7 @@
           "mcp__mockserv__add",
           "notes_add",
           "reversibility_annotate",
+          "toolsmith_define",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -186,7 +188,7 @@
           "http_request",
           "world_observe"
         ],
-        "schema_bytes": 27173
+        "schema_bytes": 28122
       }
     },
     {
@@ -258,7 +260,7 @@
         []
       ],
       "tools": {
-        "count": 28,
+        "count": 29,
         "names": [
           "agent_run",
           "causal_assert",
@@ -275,6 +277,7 @@
           "mcp__mockserv__add",
           "notes_add",
           "reversibility_annotate",
+          "toolsmith_define",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -289,7 +292,7 @@
           "http_request",
           "world_observe"
         ],
-        "schema_bytes": 27173
+        "schema_bytes": 28122
       }
     }
   ]

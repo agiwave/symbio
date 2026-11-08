@@ -57,6 +57,7 @@ symbio-plugin-slo = { path = "../symbio-plugin-slo" }
 symbio-plugin-task = { path = "../symbio-plugin-task" }
 symbio-plugin-telegram = { path = "../symbio-plugin-telegram" }
 symbio-plugin-tool = { path = "../symbio-plugin-tool" }
+symbio-plugin-toolsmith = { path = "../symbio-plugin-toolsmith" }
 symbio-plugin-vdfs = { path = "../symbio-plugin-vdfs" }
 symbio-plugin-web = { path = "../symbio-plugin-web" }
 symbio-plugin-world_model = { path = "../symbio-plugin-world_model" }

@@ -181,7 +181,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 93 · draft 1 · retired 2（共 96）
+**计数**：active 94 · draft 1 · retired 2（共 97）
 
 ## 现行设计（active）
 
@@ -275,6 +275,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-setting/README`](../../crates/symbio-plugin-setting/README.md) | Setting 插件 | 与代码一致 |
 | [`crates/symbio-plugin-skill/README`](../../crates/symbio-plugin-skill/README.md) | Skill 插件 | 与代码一致 |
 | [`crates/symbio-plugin-telegram/README`](../../crates/symbio-plugin-telegram/README.md) | Telegram 插件 | 与代码一致 |
+| [`crates/symbio-plugin-toolsmith/README`](../../crates/symbio-plugin-toolsmith/README.md) | 制造工具插件（L2 受限） | 与代码一致 |
 | [`crates/symbio-plugin-vdfs/README`](../../crates/symbio-plugin-vdfs/README.md) | VDFS 插件 | 与代码一致 |
 | [`crates/symbio-plugin-web/README`](../../crates/symbio-plugin-web/README.md) | Web 插件 | 与代码一致 |
 | [`crates/symbio-plugin-world_model/README`](../../crates/symbio-plugin-world_model/README.md) | 世界模型插件 | 与代码一致 |

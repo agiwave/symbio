@@ -4183,6 +4183,7 @@ dependencies = [
  "symbio-plugin-task",
  "symbio-plugin-telegram",
  "symbio-plugin-tool",
+ "symbio-plugin-toolsmith",
  "symbio-plugin-vdfs",
  "symbio-plugin-web",
  "symbio-plugin-world_model",
@@ -4771,6 +4772,16 @@ dependencies = [
  "symbio-plugin-api",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "symbio-plugin-toolsmith"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "symbio-plugin-api",
+ "tokio",
 ]
 
 [[package]]
