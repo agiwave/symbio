@@ -108,6 +108,24 @@ impl SessionPlugin {
         Ok(())
     }
 
+    pub(super) async fn dispatch_watch(
+        &self,
+        path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::Watch { sink } => {
+                self.watch_at_path(path, sink).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Unwatch => {
+                self.unwatch_at_path(path).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            _ => Err(VdfsError::NotImplemented),
+        }
+    }
+
     /// 会话转写（**含在途消息**）——`<根>/session/<id>/message` 的唯一数据源。
     ///
     /// 落库转写 ∪ 本轮在途缓冲。之所以要并上后者：流式期间消息**还没落库**

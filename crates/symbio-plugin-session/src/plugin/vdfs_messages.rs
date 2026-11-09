@@ -431,13 +431,8 @@ impl SessionPlugin {
                     _ => Err(VdfsError::NotImplemented),
                 }
             }
-            VdfsRequest::Watch { sink } => {
-                self.watch_at_path(path, sink).await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Unwatch => {
-                self.unwatch_at_path(path).await?;
-                Ok(VdfsResponse::Unit)
+            req @ (VdfsRequest::Watch { .. } | VdfsRequest::Unwatch) => {
+                self.dispatch_watch(path, req).await
             }
             _ => Err(VdfsError::NotImplemented),
         }

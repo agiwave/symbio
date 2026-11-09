@@ -76,13 +76,8 @@ impl SessionPlugin {
             VdfsRequest::Delete { .. } => {
                 Err(VdfsError::Forbidden("会话挂载根不可删除".to_string()))
             }
-            VdfsRequest::Watch { sink } => {
-                self.watch_at_path(path, sink).await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Unwatch => {
-                self.unwatch_at_path(path).await?;
-                Ok(VdfsResponse::Unit)
+            req @ (VdfsRequest::Watch { .. } | VdfsRequest::Unwatch) => {
+                self.dispatch_watch(path, req).await
             }
             _ => Err(VdfsError::NotImplemented),
         }
@@ -147,13 +142,8 @@ impl SessionPlugin {
                     .map_err(vdfs_from_plugin_error)?;
                 Ok(VdfsResponse::Unit)
             }
-            VdfsRequest::Watch { sink } => {
-                self.watch_at_path(path, sink).await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Unwatch => {
-                self.unwatch_at_path(path).await?;
-                Ok(VdfsResponse::Unit)
+            req @ (VdfsRequest::Watch { .. } | VdfsRequest::Unwatch) => {
+                self.dispatch_watch(path, req).await
             }
             // 中止（`DE-047` 驱动级信号）：**只置位、不取走**。取走之后本轮后续派发
             // （如工具行）读到的是新造的死信号——「用户按下中止、工具照常跑」。
@@ -235,13 +225,8 @@ impl SessionPlugin {
                     crate::memory::SESSION_MEMORY_FILE
                 )))
             }
-            VdfsRequest::Watch { sink } => {
-                self.watch_at_path(path, sink).await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Unwatch => {
-                self.unwatch_at_path(path).await?;
-                Ok(VdfsResponse::Unit)
+            req @ (VdfsRequest::Watch { .. } | VdfsRequest::Unwatch) => {
+                self.dispatch_watch(path, req).await
             }
             _ => Err(VdfsError::NotImplemented),
         }
@@ -279,13 +264,8 @@ impl SessionPlugin {
             VdfsRequest::Delete { .. } => {
                 Err(VdfsError::Forbidden(format!("该路径不可删除：{path}")))
             }
-            VdfsRequest::Watch { sink } => {
-                self.watch_at_path(path, sink).await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Unwatch => {
-                self.unwatch_at_path(path).await?;
-                Ok(VdfsResponse::Unit)
+            req @ (VdfsRequest::Watch { .. } | VdfsRequest::Unwatch) => {
+                self.dispatch_watch(path, req).await
             }
             _ => Err(VdfsError::NotImplemented),
         }
@@ -335,13 +315,8 @@ impl SessionPlugin {
                     .map_err(vdfs_from_plugin_error)?;
                 Ok(VdfsResponse::Unit)
             }
-            VdfsRequest::Watch { sink } => {
-                self.watch_at_path(path, sink).await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Unwatch => {
-                self.unwatch_at_path(path).await?;
-                Ok(VdfsResponse::Unit)
+            req @ (VdfsRequest::Watch { .. } | VdfsRequest::Unwatch) => {
+                self.dispatch_watch(path, req).await
             }
             _ => Err(VdfsError::NotImplemented),
         }
