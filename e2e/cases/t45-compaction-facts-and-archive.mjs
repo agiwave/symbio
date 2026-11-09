@@ -41,6 +41,7 @@ import {
   providerConfig,
   PROVIDER_ID,
 } from '../helpers.mjs';
+import { extractObservations } from '../../scripts/prompt-shape-audit.mjs';
 
 /** 本用例的会话 id */
 const SID = 'e2e-t45';
@@ -234,6 +235,16 @@ export default defineCase(
         assert(
           !existsSync(messagesPath),
           '读出口不得重建缓存——缓存缺失时读的是 WAL 重建结果',
+        );
+
+        // 观测行（不参与判定）：压缩次数与峰值请求体——同一负载在「段裁剪接回」前后的
+        // 可比读数（t47 / t106 报同一组数）。
+        const reqs = await llm.requests();
+        const peakBytes = Math.max(
+          ...extractObservations(reqs).map((o) => o.request_bytes),
+        );
+        console.log(
+          `  [读数] 压缩 ${snaps.length} 次 · 模型请求 ${reqs.length} 次 · 峰值请求体 ${(peakBytes / 1024).toFixed(1)}KB`,
         );
       } finally {
         cli.stop();

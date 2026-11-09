@@ -28,6 +28,7 @@ import {
   providerConfig,
   PROVIDER_ID,
 } from '../helpers.mjs';
+import { extractObservations } from '../../scripts/prompt-shape-audit.mjs';
 
 const LIMIT = 16_384;
 const K = 0.5;
@@ -117,7 +118,8 @@ export default defineCase('压缩摘要按预算切片：摘要输入 ≤ k×lim
     );
 
     // ① 摘要请求的输入 token ≤ k × limit（改前：整份转写 ⇒ 这里红）。
-    const summaryRequests = (await llm.requests()).filter(isSummaryRequest);
+    const reqs = await llm.requests();
+    const summaryRequests = reqs.filter(isSummaryRequest);
     assert(
       summaryRequests.length >= 2,
       `至少应有两次摘要往返（实得 ${summaryRequests.length}）`,
@@ -151,9 +153,11 @@ export default defineCase('压缩摘要按预算切片：摘要输入 ≤ k×lim
     );
 
     // 实测读数留在输出里：报号与日后回归取数不必另写脚本。
+    const peakBytes = Math.max(...extractObservations(reqs).map((o) => o.request_bytes));
     console.log(
       `  [读数] 摘要输入 token: ${summarySizes.join(', ')}｜转写 ${transcriptTokens}` +
-        `｜水位 ${watermarks.join('→')}`,
+        `｜水位 ${watermarks.join('→')}` +
+        `｜压缩 ${summaryRequests.length} 次 · 模型请求 ${reqs.length} 次 · 峰值请求体 ${(peakBytes / 1024).toFixed(1)}KB`,
     );
   } finally {
     llm.stop();
