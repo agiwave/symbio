@@ -25,9 +25,7 @@ pub(crate) async fn compose_wording(
     verdict: Verdict,
     snapshot: RunSnapshot,
 ) -> Option<WordingReply> {
-    let Some(session_id) = ctx.get(SESSION_ID) else {
-        return None;
-    };
+    let session_id = ctx.get(SESSION_ID)?;
     let request = ComposeRequest {
         session_id: session_id.clone(),
         verdict,
@@ -40,9 +38,7 @@ pub(crate) async fn compose_wording(
     if child.set_payload(request).is_err() {
         return None;
     }
-    let Some(parent) = ctx.parent().and_then(|parent| parent.upgrade()) else {
-        return None;
-    };
+    let parent = ctx.parent().and_then(|parent| parent.upgrade())?;
     let reply = match parent.route(child).await {
         Ok(response) => response.get::<WordingReply>().ok(),
         Err(e) => {
@@ -53,8 +49,5 @@ pub(crate) async fn compose_wording(
             None
         }
     };
-    let Some(reply) = reply else {
-        return None;
-    };
-    Some(reply)
+    reply
 }
