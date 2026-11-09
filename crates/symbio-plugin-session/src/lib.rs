@@ -27,6 +27,7 @@ mod stats_reading;
 mod termination;
 mod token_ledger;
 mod transcript;
+pub(crate) mod wording;
 mod working;
 // `plugin` / `types` 作为公共契约层（crate 内可见），让 `lib.rs` 能直接
 // `pub use plugin::xxx::X` 拿到公共类型（避免在 session 顶层做中间

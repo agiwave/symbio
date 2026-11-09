@@ -45,21 +45,18 @@ use symbio_plugin_api::debt::{session_config_id, DebtFacts, DebtSource, DebtSpec
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
 };
-use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
 use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep, PLUGIN_ROW};
 use symbio_plugin_api::{
-    ComposeRequest, Entity, ExecEventSink, FactDraft, PluginInvokeRequest, PluginInvokeRequestExt,
-    RunSnapshot, Verb, Verdict, WordingReply, PATH,
+    Entity, ExecEventSink, FactDraft, PluginInvokeRequest, RunSnapshot, Verb, Verdict,
 };
-use symbio_sdk::keys::SESSION_ID;
 use symbio_sdk::turn::facts::ReportDraft;
 
 use crate::config::{
     default_progress_enabled, default_progress_interval_ms, default_progress_lease_ms,
     default_progress_max_attempts, default_progress_max_per_turn, default_progress_min_rounds,
 };
-use crate::convergence::dialog_context;
 use crate::declarations::{CHAT_VOCAB, EVENT_CHAT_ASSISTANT_REPORTED, OWNER};
+use crate::wording::compose_wording;
 
 /// 汇报行的行名 / 债名前缀。
 pub(crate) const SESSION_PROGRESS: &str = "session.progress";
@@ -127,38 +124,12 @@ async fn progress_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeReq
     let Some(ctx) = ctx else {
         return RowStep::Facts(Vec::new());
     };
-    let Some(session_id) = ctx.get(SESSION_ID) else {
-        return RowStep::Facts(Vec::new());
+    let verdict = Verdict::Report;
+    let snapshot = RunSnapshot {
+        tool_rounds: rounds,
+        quiet_ms,
     };
-    let compose = ComposeRequest {
-        session_id: session_id.clone(),
-        verdict: Verdict::Report,
-        context: dialog_context(req.facts),
-        snapshot: RunSnapshot {
-            tool_rounds: rounds,
-            quiet_ms,
-        },
-    };
-    // 跨插件只走 route：子上下文是同一份 ctx 的 fork，父句柄也取自这份 ctx。
-    let child = ctx.fork();
-    child.set(PATH, ROUTE_COMPOSE_WORDING.to_string());
-    if child.set_payload(compose).is_err() {
-        return RowStep::Facts(Vec::new());
-    }
-    let Some(parent) = ctx.parent().and_then(|parent| parent.upgrade()) else {
-        return RowStep::Facts(Vec::new());
-    };
-    let reply = match parent.route(child).await {
-        Ok(response) => response.get::<WordingReply>().ok(),
-        Err(e) => {
-            symbio_plugin_api::plugin_warn!(
-                "session",
-                "compose/wording 不可用（{session_id}）：{e}"
-            );
-            None
-        }
-    };
-    let Some(reply) = reply else {
+    let Some(reply) = compose_wording(&ctx, req.facts, verdict, snapshot).await else {
         return RowStep::Facts(Vec::new());
     };
     let text = reply.text;

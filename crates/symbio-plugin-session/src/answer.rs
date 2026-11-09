@@ -40,18 +40,15 @@ use symbio_plugin_api::debt::{session_config_id, DebtFacts, DebtSource, DebtSpec
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
 };
-use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
 use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep, PLUGIN_ROW};
 use symbio_plugin_api::{
-    ComposeRequest, FactDraft, PluginInvokeRequest, PluginInvokeRequestExt, RunSnapshot, Verdict,
-    WordingReply, EVENT_RESPONSE, PATH,
+    FactDraft, PluginInvokeRequest, RunSnapshot, Verdict, WordingReply, EVENT_RESPONSE,
 };
 use symbio_sdk::authz::PRINCIPAL_MAIN;
 use symbio_sdk::chat::chat_node as cm;
-use symbio_sdk::keys::SESSION_ID;
 
-use crate::convergence::dialog_context;
 use crate::declarations::OWNER;
+use crate::wording::compose_wording;
 
 /// 终答行的行名 / 债名前缀。本行与判决行、首响行同在 `plugin_row` 端口；模型行
 /// 只等端口（`after_port(plugin_row)`），不认这个行名。
@@ -129,35 +126,8 @@ async fn answer_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeReque
         let Some(ctx) = ctx else {
             return RowStep::Facts(Vec::new());
         };
-        let Some(session_id) = ctx.get(SESSION_ID) else {
-            return RowStep::Facts(Vec::new());
-        };
-        let request = ComposeRequest {
-            session_id: session_id.clone(),
-            verdict,
-            context: dialog_context(req.facts),
-            snapshot: RunSnapshot::default(),
-        };
-        // 跨插件只走 route：子上下文是同一份 ctx 的 fork，父句柄也取自这份 ctx。
-        let child = ctx.fork();
-        child.set(PATH, ROUTE_COMPOSE_WORDING.to_string());
-        if child.set_payload(request).is_err() {
-            return RowStep::Facts(Vec::new());
-        }
-        let Some(parent) = ctx.parent().and_then(|parent| parent.upgrade()) else {
-            return RowStep::Facts(Vec::new());
-        };
-        let reply = match parent.route(child).await {
-            Ok(response) => response.get::<WordingReply>().ok(),
-            Err(e) => {
-                symbio_plugin_api::plugin_warn!(
-                    "session",
-                    "compose/wording 不可用（{session_id}）：{e}"
-                );
-                None
-            }
-        };
-        let Some(reply) = reply else {
+        let snapshot = RunSnapshot::default();
+        let Some(reply) = compose_wording(&ctx, req.facts, verdict, snapshot).await else {
             return RowStep::Facts(Vec::new());
         };
         reply
