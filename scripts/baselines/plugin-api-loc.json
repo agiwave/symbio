@@ -8,7 +8,8 @@
     { "path": "port.rs", "lines": 450, "adr": "D-404" },
     { "path": "text.rs", "lines": 0, "adr": "D-413", "retired": "crates/symbio-sdk/src/text/tokenizer.rs" },
     { "path": "context.rs", "lines": 0, "adr": "D-413", "retired": "crates/symbio-sdk/src/plugin/context.rs" },
-    { "path": "reports.rs", "lines": 344, "adr": "D-399" }
+    { "path": "reports.rs", "lines": 0, "adr": "D-416", "retired": "crates/symbio-sdk/src/plugin/reports.rs" },
+    { "path": "views.rs", "lines": 0, "adr": "D-416", "retired": "crates/symbio-sdk/src/plugin/views.rs" }
   ],
-  "total": { "lines": 2387, "adr": "D-415" }
+  "total": { "lines": 1995, "adr": "D-416" }
 }

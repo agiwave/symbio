@@ -293,7 +293,10 @@ fn view_entry(owner: &str, name: &str, snapshot: &[Event]) -> serde_json::Value 
 }
 
 /// 一格缺席：原因词（稳定拼写）+ 人话细节。两者都要——前者给分支，后者给定位。
-fn view_unavailable(owner: &str, why: &symbio_plugin_api::ViewUnavailable) -> serde_json::Value {
+fn view_unavailable(
+    owner: &str,
+    why: &symbio_sdk::plugin::views::ViewUnavailable,
+) -> serde_json::Value {
     serde_json::json!({
         "owner": owner,
         "status": "unavailable",

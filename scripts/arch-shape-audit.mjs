@@ -337,12 +337,14 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields: D-413 五个链接期注册表整块搬进 sdk——RetrievalRequest(2) / Retrieved(3) / Retrieval(2) / RetrieverDecl(1) / RowRequest(9) / ModelAsk(1) / RowDecl(1) / Settling(9) / Contribution(1) / ContributorDecl(1) / FactSourceOpenerDecl(1) / DriveTarget(11) / DriveBindingDecl(1) / DriveEntryDecl(1) 共 44 格随注册表换地址。与 D-408 / D-412 同一份类型闭包论证（Collect 实现在定义类型的 crate 生成，sdk 只依赖内核）；此前住 plugin-api，不在 CS-009 扫描面。
 // core-shape-allow enumVariants: D-413 五个链接期注册表整块搬进 sdk——RowStep(2) / ModelReply(2) / SettleFace(2) 共 6 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包。
 // core-shape-allow structFields: D-415 冻结声明表整块搬进 sdk——DeclarationsDecl(2：`owner` / `make`) 随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。与 D-408 / D-412 / D-413 同一份类型闭包论证（`inventory::collect!` 的 `Collect` 实现在定义类型的 crate 生成，sdk 只依赖内核）；词汇层回落表（`events.rs`）按 CS-008 / CP-004 留在 plugin-api，没有随行。
+// core-shape-allow structFields: D-416 报表登记面整块搬进 sdk——ReportDecl(8：`owner` / `slot` / `order` / `views` / `fleet` / `render` / `fleet_render` / `panel`) / ReportCtx(3：`principal` / `cap` / `readable`) 共 11 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。与 D-412 / D-413 / D-415 同一份类型闭包论证（`inventory::collect!` 实现在定义类型的 crate 生成，读侧要冻结声明表，sdk 只依赖内核）。
+// core-shape-allow enumVariants: D-416 报表登记面整块搬进 sdk——ReportError(6：`EmptySlot` / `EmptyViews` / `EmptyViewName` / `EmptyFleet` / `DuplicateSlot` / `DuplicateView`) / ViewUnavailable(2：`NotSealed` / `Unknown`) 共 8 格随读口换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 598, enumVariants: 255 }
+  : { structFields: 609, enumVariants: 263 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

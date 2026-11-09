@@ -5,7 +5,8 @@
 //! 能力效果的机制面（[`effects`] / [`behaviors`]，随 `submit_behavior!` 从门面
 //! 整块搬来，`D-408`）、上下文贡献的机制面（[`context`]，随 `submit_context_provider!`
 //! 整块搬来，`D-412`），以及五个链接期注册表（[`retrieval`] / [`rows`] / [`settle`] /
-//! [`fact_source`] / [`drive_entry`]，随各自的提交宏整块搬来，`D-413`）。
+//! [`fact_source`] / [`drive_entry`]，随各自的提交宏整块搬来，`D-413`）；跨插件报表的
+//! 登记与读取（[`reports`]）与视图缺席原因（[`views`]）随注册表搬来（`D-416`）。
 
 pub use symbio_kernel::plugin::*;
 
@@ -17,9 +18,11 @@ pub mod context;
 pub mod drive_entry;
 pub mod effects;
 pub mod fact_source;
+pub mod reports;
 pub mod retrieval;
 pub mod rows;
 pub mod settle;
+pub mod views;
 
 // 域内子模块私有，公开面在此显式重导出
 pub use dir::{

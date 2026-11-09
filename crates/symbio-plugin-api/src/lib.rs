@@ -19,7 +19,7 @@
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //!   与词汇读法（冻结机制住 sdk，回落表是 [`events`]，D-415）
-//! - [`views`]：视图读不出来的缺席原因（公开读口是 [`reports`] 的报表登记）
+//! - [`reports`]：跨插件报表的登记面与读口（实现住 sdk，本 crate 只转出，D-416）
 //! - [`vocab`]：跨插件共享名的唯一住处（端口 / 行为 / 路径段 / 治理能力，D-364）
 //!
 //! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、机制入口与
@@ -28,7 +28,7 @@
 //! | 臂 | 来源 | 条数 | 性质 |
 //! |---|---|---|---|
 //! | 语法臂 | `symbio-kernel` | 136 | 形状与闭集，**不计债但计件**（D-278） |
-//! | SDK 臂 | `symbio-sdk` | 122 | 只碰内核词汇的宿主机制（含授权判定），进棘轮 |
+//! | SDK 臂 | `symbio-sdk` | 124 | 只碰内核词汇的宿主机制（含授权判定），进棘轮 |
 //!
 //! 第三臂（旧 core 的 6 条授权符号）已于 D-276 清零：授权判定只查一张部署表，
 //! 不认识轮次 / 幕 / 判决，按 sdk 自己的章程（「插件要用的宿主机制……授权判定」）归位。
@@ -54,15 +54,14 @@ pub mod drive;
 pub mod events;
 pub mod hooks;
 pub mod port;
-pub mod reports;
 pub mod routes;
 pub mod termination;
-pub mod views;
 pub mod vocab;
 
 // 已搬到 `symbio_sdk` 的端口模块不再各留一份转发文件（`D-408` / `D-412` / `D-413`）：
 // 模块名在根上一行转出，插件照旧写 `symbio_plugin_api::rows::…`。`text` 的实现住在
 // `symbio_sdk::text::tokenizer`，沿用它原来的门面名转出（`D-404`）。
+pub use symbio_sdk::plugin::reports;
 pub use symbio_sdk::plugin::{behaviors, context, effects, fact_source, retrieval, rows, settle};
 pub use symbio_sdk::text::tokenizer as text;
 
@@ -100,9 +99,9 @@ pub use symbio_sdk::submit_behavior;
 pub use symbio_sdk::submit_context_provider;
 pub use symbio_sdk::submit_contributor;
 pub use symbio_sdk::submit_declarations;
+pub use symbio_sdk::submit_reports;
 pub use symbio_sdk::submit_retriever;
 pub use symbio_sdk::submit_row;
-pub use views::ViewUnavailable;
 
 // ==================== 扩展层宿主面 ====================
 // 本块是**扩展层插件唯一需要认识的宿主入口**：能力包与结构件插件只写

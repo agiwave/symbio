@@ -93,6 +93,6 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `T-053-plugin-api分类清单` | plugin-api 分类清单：契约留下、实现迁 sdk、reports 拆两半（先清单，后搬迁） | now | arch | — |
+| `T-053-plugin-api分类清单` | plugin-api 分类清单：契约留下、实现迁 sdk（先清单，后搬迁） | now | arch | — |
 
 <!-- registry:summary end -->

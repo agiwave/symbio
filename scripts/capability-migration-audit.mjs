@@ -12,7 +12,7 @@
  * | 类别 | 怎么认 | 判什么 |
  * |---|---|---|
  * | **迁移批次** | 提交正文里一行 `Migration: <批次>` | 机制面（`sdk` / `kernel` / `plugin-api`）的**净变化**：非生成 `.rs` 的机制行「新增 − 删除」**不得为正**（净零 / 净减皆合法，`D-404`）；`loop` / `session` 没有新增**带能力名**的源码行（绑定切换可以是通用胶水，为某条能力新加的行不行）；且至少删掉一行旧实现 |
- * | **搬迁批次** | 同一 `Migration:` 段里 `from: <path> (<n>)` / `to: <path> (<n>)`，且净变化 ≤ 0 | `to` 新增行 ≤ `from` 删除行（净增即红，不许借搬迁名义加面）；两侧行数与 diff 实际相符；`from` 在 `plugin-api` 时，`plugin-api` 必须仍有 `pub use` 把该模块转出（否则扩展插件多一条依赖边，E-009）。**净零既不记欠账也不抵账，净减才按迁移抵 1 笔** |
+ * | **搬迁批次** | 同一 `Migration:` 段里 `from: <path> (<n>)` / `to: <path> (<n>)`，且净变化 ≤ 0 | `to` 新增行 ≤ `from` 删除行（净增即红，不许借搬迁名义加面）；两侧行数与 diff 实际相符；`from` 在 `plugin-api` 且该模块**有扩展层消费方**时，`plugin-api` 必须仍有 `pub use` 把该模块转出（否则扩展插件多一条依赖边，E-009）。**净零既不记欠账也不抵账，净减才按迁移抵 1 笔** |
  * | **架构补件** | 在架构面新增 `pub` 项，且没有 `Migration:` | 引用一条**能打开**的 `### D-NNN`；新增的非注释代码不含插件 id 字符串、不含工具名 |
  *
  * 三类之外（只改注释、只删架构面、只动文档）不判——判据不假装能判它没定义的东西。
@@ -81,7 +81,8 @@
  * - 搬迁按「逐树新增」判 ⇒ 每一次搬迁都红，判据把架构变干净这件事本身拦下（`D-404`）；
  * - 搬迁按「净变化」判却不要 `from` / `to` 与行数 ⇒ 净增的那一行可以混在「删除更多」
  *   的搬迁里溜过去，借搬迁名义加面；
- * - 搬走 `plugin-api` 的实现却不留 `pub use` ⇒ 扩展插件被迫依赖 `sdk`，多一条依赖边（E-009）。
+ * - 搬走 `plugin-api` 的实现却不留 `pub use`，而扩展插件还在用那条路径 ⇒ 被迫依赖 `sdk`，
+ *   多一条依赖边（E-009）；零消费方的模块不判——门面上留空转转发会被 HS-003 判红（`D-416`）。
  *
  * 用法：
  * ```bash
@@ -108,6 +109,9 @@ import { blankComments } from './rust-scan.mjs'
 import { toolFacts } from './facts/_capability.mjs'
 import { pluginIds } from './facts/_plugin-yml.mjs'
 import { backfillShas, loadBackfill } from './core-change-backfill.mjs'
+// 红 3 的前提是「扩展插件真在用这条门面路径」：消费方的唯一口径归 HS-003，这里借用它，
+// 不另写一份「谁在用 `symbio_plugin_api::X`」的扫描（D-416）。
+import { CONTROL_PLANE, collectConsumers } from './plugin-surface-audit.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
@@ -639,6 +643,43 @@ function moduleStem(filePath) {
   return base
 }
 
+/** 扩展层插件目录（与 HS-003 同一批：控制面不在「扩展消费方」里）。 */
+function extensionPluginNames(root) {
+  const cratesDir = path.join(root, 'crates')
+  if (!fs.existsSync(cratesDir)) return []
+  return fs
+    .readdirSync(cratesDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name.startsWith('symbio-plugin-') && !CONTROL_PLANE.includes(e.name))
+    .map((e) => e.name)
+}
+
+let extensionConsumersCache
+function extensionConsumers(root) {
+  extensionConsumersCache ??= collectConsumers(root, extensionPluginNames(root))
+  return extensionConsumersCache
+}
+
+/**
+ * 被搬走的模块有没有**扩展层消费方**。
+ *
+ * 红 3 要防的是「扩展插件被迫多依赖 sdk」：只有真有插件在写 `symbio_plugin_api::<模块名>`
+ * （或引用模块里的公开项）时，缺转出行才会造出那条边。零消费方的模块（如只服务报表读口与
+ * 诊断列的 `ViewUnavailable`）在门面上留一行转发，恰好是 HS-003 判红的空转条目——两条判据
+ * 不能互相逼出对方禁止的形状（`D-416`）。搬走的文件内容就在 `removed` 里，公开项名从那里读。
+ */
+function hasExtensionConsumers(file, stem, root) {
+  const used = extensionConsumers(root)
+  if (used.has(stem)) return true
+  for (const raw of file.removed) {
+    const code = (blankComments(raw)[0] ?? '').trim()
+    const m = code.match(
+      /^pub(?:\s*\([^)]*\))?\s+(?:async\s+)?(?:fn|struct|enum|trait|type|const|static|union|mod)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+    )
+    if (m && used.has(m[1])) return true
+  }
+  return false
+}
+
 /**
  * 提交类别。
  *
@@ -760,6 +801,8 @@ export function relocationErrors({ message, patch }) {
       continue
     }
     const stem = moduleStem(pair.from.path)
+    const fromFile = patch.find((f) => f.path === pair.from.path)
+    if (!fromFile || !hasExtensionConsumers(fromFile, stem, repoRoot)) continue
     const reexported = patch.some(
       (f) =>
         inTrees(f.path, PLUGIN_API_TREES) &&

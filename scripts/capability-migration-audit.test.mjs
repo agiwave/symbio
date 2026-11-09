@@ -414,6 +414,17 @@ test('relocationErrors 红 3：搬走 plugin-api 实现却不留 `pub use` ⇒ E
   assert.ok(errors.some((e) => /E-009/.test(e) && /pub use/.test(e)), errors.join('\n'))
 })
 
+test('relocationErrors 红 3：零扩展消费方的模块搬走不要求空转转发（D-416）', () => {
+  const from = 'crates/symbio-plugin-api/src/zz_fixture.rs'
+  const to = 'crates/symbio-sdk/src/zz_fixture.rs'
+  const message = `feat: 搬内部枚举进 sdk\n\nMigration: D-416\nfrom: ${from} (1)\nto: ${to} (1)`
+  const files = [
+    { path: from, removed: ['pub fn helper() {}'], added: [] },
+    { path: to, added: ['pub fn helper() {}'], removed: [] },
+  ]
+  assert.deepEqual(reloc(message, files), [])
+})
+
 test('crossTreeMoves：同树内删了又加不算搬家', () => {
   const same = patchOf([
     { path: 'crates/symbio-sdk/src/a.rs', added: ['pub fn helper() {}'], removed: [] },

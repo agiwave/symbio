@@ -123,12 +123,11 @@ export const WHITELIST_BASELINE = 0
 // `pub use …::*;` 与壳内宏转发给出，旧读数只是看不见（`readFacadeArms` 只读 lib.rs）。
 // 同一批里扩展面对 `drive_entry` 的出口从 9 个符号 + 整模块收窄到 1 个符号。
 // 这是「把读数改成真的」，不是放宽：物理门面行数同期从 2703 降到 2635（FA-002）。
-// 120 → 122（D-415）：冻结声明表的收集、装配与冻结搬进 sdk 之后，门面根上多两条
-// 指向 sdk 的出口：`sealed_declarations` 与 `submit_declarations`。前者此前由门面
-// `declarations.rs` 定义、后者此前是门面宏——同两个名字换住所，不是新增面。词汇读法
-// （`vocab` / `declared_vocab` / `declared_event_cell`）与 `events` 生成物**留在门面**
-// （CS-008 / CP-004：内核与 sdk 的生产代码零事件名字面量），因此不计入本臂。
-export const SDK_BASELINE = 122
+// 122 → 124（D-416）：跨插件报表的登记面与读口整块搬进 sdk 之后，门面在根上转出
+// 模块名 `reports` 与提交宏 `submit_reports`。两者此前分别经门面 `reports.rs` 与
+// `#[macro_export]` 给出，**同两个名字换住所**。视图缺席原因 `ViewUnavailable` 只有
+// 控制面 `session` 用，按 HS-003 不上门面（`session` 走 E-009）。
+export const SDK_BASELINE = 124
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。
@@ -162,7 +161,9 @@ export const GRAMMAR_BASELINE = 137
 // D-415 复查时补上**单段模块转出**（`pub use symbio_sdk::events;`）这一形态：它同样
 // 一行放出一整个命名空间，此前不在 `collect` 的匹配里。补完后实测仍是 13——`events`
 // 按 CS-008 / CP-004 留在门面，没有换成 `pub use`。
-export const MODULE_REEXPORT_BASELINE = 13
+// 13 → 14（D-416）：`reports` 模块随登记面整块搬进 sdk，一行放出报表的全部类型与读口；
+// 这是 D-278 要显式化的形状。`views` 没有上门面（零扩展消费方，HS-003）。
+export const MODULE_REEXPORT_BASELINE = 14
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'

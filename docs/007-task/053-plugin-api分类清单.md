@@ -1,14 +1,14 @@
 ---
 kind: task
 id: T-053-plugin-api分类清单
-title: plugin-api 分类清单：契约留下、实现迁 sdk、reports 拆两半（先清单，后搬迁）
+title: plugin-api 分类清单：契约留下、实现迁 sdk（先清单，后搬迁）
 status: doing
 track: arch
 prio: now
 created: 2026-11-08
 deps: []
-where: "`crates/symbio-plugin-api/src`（`port.rs` 450 行、`reports.rs` 344 行；生产文件合计 2 387 行）；`crates/symbio-sdk/src/plugin/`（`effects` / `behaviors` / `context` / `retrieval` / `rows` / `settle` / `fact_source` / `drive_entry`）；`crates/symbio-sdk/src/declarations.rs`（冻结机制）；`crates/symbio-sdk/src/text/tokenizer.rs`；`crates/symbio-sdk/src/capability/port.rs`（端口读/校验半与装配期判重）；`scripts/plugin-surface-audit.mjs`（HS-002 / HS-006）；`scripts/facade-loc-audit.mjs`（FA-001…FA-004）"
-exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 / 实现 / 机制）/ 处置（留守 api / 迁 sdk / 只转出）），不改代码；清单经批准后才搬迁；api 只留纯类型、宏、声明面与 re-export；`effects::apply`、端口能力校验、`text` 预算算术、`context` 拼装迁 sdk、api 只转出；`reports` 拆开——`ReportDecl` / `submit_reports!` / `inventory` 是契约，`validate` / `reports()` / `read_view` 是实现；「自有实现只许降」由行数棘轮 `FA-001`…`FA-004`（`scripts/facade-loc-audit.mjs`）判，不另开 HS 臂；搬迁后 `gate --full` 全绿
+where: "`crates/symbio-plugin-api/src`（`port.rs` 450 行；生产文件合计 1 995 行）；`crates/symbio-sdk/src/plugin/`（`effects` / `behaviors` / `context` / `retrieval` / `rows` / `settle` / `fact_source` / `drive_entry` / `reports` / `views`）；`crates/symbio-sdk/src/declarations.rs`（冻结机制）；`crates/symbio-sdk/src/text/tokenizer.rs`；`crates/symbio-sdk/src/capability/port.rs`（端口读/校验半与装配期判重）；`scripts/plugin-surface-audit.mjs`（HS-002 / HS-006）；`scripts/facade-loc-audit.mjs`（FA-001…FA-004）"
+exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 / 实现 / 机制）/ 处置（留守 api / 迁 sdk / 只转出）），不改代码；清单经批准后才搬迁；api 只留纯类型、宏、声明面与 re-export；`effects::apply`、端口能力校验、`text` 预算算术、`context` 拼装、`reports` 整块迁 sdk，api 只转出；「自有实现只许降」由行数棘轮 `FA-001`…`FA-004`（`scripts/facade-loc-audit.mjs`）判，不另开 HS 臂；搬迁后 `gate --full` 全绿
 ---
 
 # plugin-api 分类清单
@@ -39,11 +39,13 @@ exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 /
 **生产文件合计 4 494 行；同目录 `*.test.rs` 另 1 921 行不计入基线。**
 
 **收尾时的现值（2026-11-09，以 `scripts/baselines/plugin-api-loc.json` 与 `scripts/arch-dead-code.json` 为准）**：
-`port` **450**（读/校验半 `D-404`，装配期判重 `D-414`）、`reports` **344**；门面合计 **2 387**（原 4 494）；
-`effects` / `text` / `context` 三格按退役形态记 `lines: 0` + `retired`（文件已删，格子钉零）。
+`port` **450**（读/校验半 `D-404`，装配期判重 `D-414`）；门面合计 **1 995**（原 4 494）；
+`effects` / `text` / `context` / `reports` / `views` 五格按退役形态记 `lines: 0` + `retired`
+（文件已删，格子钉零）。
 `effects` / `behaviors`（`D-408`）、`text`（`D-404`）、`context`（`D-412`）与五个链接期注册表
-`retrieval` / `rows` / `settle` / `fact_source` / `drive_entry`（`D-413`）整块住在
-`crates/symbio-sdk/src/plugin/`；冻结机制（`D-415`）住在 `crates/symbio-sdk/src/declarations.rs`，
+`retrieval` / `rows` / `settle` / `fact_source` / `drive_entry`（`D-413`）、`reports` 与
+`views`（`D-416`）整块住在 `crates/symbio-sdk/src/plugin/`；冻结机制（`D-415`）住在
+`crates/symbio-sdk/src/declarations.rs`，
 词汇读法与共享事件生成物留在 `crates/symbio-plugin-api/src/declarations.rs` / `events.rs`。
 门面不再留纯转发文件，模块名在 `lib.rs` 根上一行转出，提交宏同在根上。`drive_entry` 只转出 `publish_deployment_root`
 （唯一扩展层消费方）。
@@ -68,10 +70,8 @@ exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 /
   下列 Tokenizer 实现与 `truncate_*`（`crates/symbio-sdk/src/text/tokenizer.rs` 237 / 243 行）为搬迁前快照；
 - `context` 拼装：`fit_sections`（`crates/symbio-sdk/src/plugin/context.rs` 228 行）、
   `sections`（同文件 335 行）——文件 347 行（搬迁前快照）；
-- `reports` 两半：`ReportDecl`（`crates/symbio-plugin-api/src/reports.rs` 57 行）/
-  `submit_reports!`（同文件 86 行）留；
-  `validate`（170 行）/ `reports()`（234 行）/ `read_view`（256 行）/ `read_view_with_ver`（284 行）迁
-  ——文件 344 行。
+- `reports`：`ReportDecl` / `submit_reports!` / `validate` / `reports()` / `read_view` /
+  `read_view_with_ver` 与 `ViewUnavailable` 整块迁 sdk（`D-416`）——文件 344 + 47 行。
 
 ## 是否阻塞横向扩展
 
@@ -87,7 +87,7 @@ HS-002 / HS-006 只数转发条数，看不见实现。**这一条已由棘轮�
    已登记在 `018-模块架构.md` 的 `D-399`。
 2. 逐块搬迁（清单已评审）。第一块 `text` 已落地：实现住 `symbio-sdk/src/text/tokenizer.rs`，
    api 侧在根上转出模块名（`D-413` 收掉了过渡期的转发文件）。
-   搬迁后 api 侧只留转出行，实现住在 sdk；`reports` 的契约与实现分居两处。
+   搬迁后 api 侧只留转出行，实现住在 sdk。
    每搬一块 **同批下调基线**（`FA-002` 会拦住「删了不同批下调」）。口径见
    054 的 `D-404`：净零搬迁不记欠账，`from` / `to` 与两侧行数写进提交正文。
 
@@ -127,10 +127,13 @@ HS-002 / HS-006 只数转发条数，看不见实现。**这一条已由棘轮�
    字面量。`FA-002` 同批下调（`declarations.rs` 175 → 27，合计 2533 → 2387），
    `HS-002` 120 → 122；`CS-009` 596 → 598（`DeclarationsDecl` 2 格随注册表进入扫描面）。
 
-   > **`reports` 现在是一个闭包，可以整块搬**：它的读侧三函数（`read_view` /
-   > `read_view_with_ver` / `read_all`）调的 `sealed_declarations()` 已随 `D-415` 住进 sdk，
-   > `ViewUnavailable`（`views.rs`）是一份纯枚举。门面转出注册面与读口即可，不再需要把
-   > `reports` 切成两半。
+   **`reports` 已落地（`D-416`）**：读侧三函数调的 `sealed_declarations()` 随 `D-415` 住进
+   sdk 之后，`reports` 不再有第二个落点——`reports.rs`（344）与 `reports.test.rs`（169）
+   连同 `views.rs`（47，`ViewUnavailable`）整块搬进 `crates/symbio-sdk/src/plugin/`；门面改为
+   `pub use symbio_sdk::plugin::reports;` 与 `pub use symbio_sdk::submit_reports;`，
+   `ViewUnavailable` 只留控制面读方直取 sdk（`E-009`）。`FA-002` 同批下调（合计 2387 → 1995），
+   `HS-002` 122 → 124，`HS-006` 13 → 14；`CS-009` 598 → 609 : 263（`ReportDecl` 8 格 +
+   `ReportCtx` 3 格、`ReportError` 6 + `ViewUnavailable` 2 变体随注册表进入扫描面）。
 3. HS-002 / HS-006（`scripts/plugin-surface-audit.mjs`）仍只判「转发了几条」；
    「门面持有实现」这一面由 `FA-001` 判，不重复造第二臂。
 4. 跑 `gate --full`，全绿后提交。

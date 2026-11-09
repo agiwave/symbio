@@ -12,7 +12,7 @@
 //!
 //! [`reports()`] 按 `(order, slot)` 排序：`order` 相同按 `slot` 字典序，`slot` 全局唯一
 //! 由登记判据保证（见下）。排序在读取侧做而不是装配期做一次，与
-//! [`crate::settle::contributors`] / [`crate::context::providers`] 同一条纪律：本仓不持有
+//! [`crate::plugin::settle::contributors`] / [`crate::plugin::context::providers`] 同一条纪律：本仓不持有
 //! 第二个可变注册表。同一份登记连跑两次，输出必须逐字节相同。
 //!
 //! ## 登记判据返回错误，不 panic
@@ -24,7 +24,7 @@
 //! - 同一视图进两条报表——两处各算一遍，口径静默漂移；
 //! - `fleet` 显式写成空串——落点为空时写不进去，等于静默丢实例级读数。
 //!
-//! [`reports()`] 把非法登记作为 `Err` 交回调用方（与 [`crate::sealed_declarations`]
+//! [`reports()`] 把非法登记作为 `Err` 交回调用方（与 [`crate::declarations::sealed_declarations`]
 //! 同一形状）：装载期由部署面报出，读侧由读数方决定降级还是失败。`Gap` 是内核声明 /
 //! 环的词汇，报表是出品装配面——不把错误类型塞回内核，也不拿 panic 替调用方做决定。
 
@@ -33,6 +33,9 @@ use std::fmt;
 use serde_json::Value;
 use symbio_kernel::event::Event;
 use symbio_kernel::present::ReadingSection;
+
+use crate::declarations::sealed_declarations;
+use crate::plugin::views::ViewUnavailable::{self, NotSealed, Unknown};
 
 /// 读方在装配这一刻能提供的上下文。
 ///
@@ -254,11 +257,11 @@ pub fn reports() -> Result<&'static [&'static ReportDecl], &'static [ReportError
 /// 读不到（声明表没冻结 / 名字不在表里）⇒ `Null` 占位并出声：owner 的 `render`
 /// 据此交自己的空形状——空形状住在 owner 那里，读方不替它猜。
 pub fn read_view(name: &str, snapshot: &[Event]) -> Value {
-    let frozen = match crate::sealed_declarations() {
+    let frozen = match crate::declarations::sealed_declarations() {
         Ok(frozen) => frozen,
         Err(_) => {
             crate::plugin_warn!(
-                "plugin-api",
+                "symbio::reports",
                 "[reports] 声明表未冻结：视图 `{name}` 按空读数交"
             );
             return Value::Null;
@@ -268,7 +271,7 @@ pub fn read_view(name: &str, snapshot: &[Event]) -> Value {
         Some(view) => (view.eval)(snapshot, i64::MAX),
         None => {
             crate::plugin_warn!(
-                "plugin-api",
+                "symbio::reports",
                 "[reports] 视图 `{name}` 不在冻结声明表里：按空读数交"
             );
             Value::Null
@@ -281,16 +284,11 @@ pub fn read_view(name: &str, snapshot: &[Event]) -> Value {
 /// 与 [`read_view`] 同一条路径（冻结声明表 + 名字）：报表登记就是公开（`D-387`），
 /// 名字由 owner 的 `ReportDecl` 交出，读方不需要它再出现在第二份清单里。读不到 ⇒
 /// 缺席原因（两种态之一），不是 `Null`——诊断列要说得出为什么没数。
-pub fn read_view_with_ver(
-    name: &str,
-    snapshot: &[Event],
-) -> Result<(u32, Value), crate::ViewUnavailable> {
-    let frozen = crate::sealed_declarations().map_err(|_| crate::ViewUnavailable::NotSealed)?;
-    let view = frozen
-        .view(name)
-        .ok_or_else(|| crate::ViewUnavailable::Unknown {
-            name: name.to_string(),
-        })?;
+pub fn read_view_with_ver(name: &str, snapshot: &[Event]) -> Result<(u32, Value), ViewUnavailable> {
+    let frozen = sealed_declarations().map_err(|_| NotSealed)?;
+    let view = frozen.view(name).ok_or_else(|| Unknown {
+        name: name.to_string(),
+    })?;
     Ok((view.ver, (view.eval)(snapshot, i64::MAX)))
 }
 
@@ -303,11 +301,12 @@ pub fn read_view_with_ver(
 /// 「出口顶层键集合 == 已登记 `slot` 集合」是构造保证——全装配下的回归判据见
 /// `crates/symbio` 的 `report_columns_acceptance`。
 ///
-/// ## 为什么住在门面而不是读方
+/// ## 为什么住在机制臂而不是读方
 ///
-/// 报表登记面本来就在本 crate；把「读全部」也放在这里，装配宿主只依赖门面就能验到
-/// 「每一格都渲出来了」，读方（可卸载的 `session`）因此不需要在 crate 根暴露符号
-/// （E-014 / EX-004）。
+/// 报表登记表与「读全部」是同一个类型闭包：登记要 `inventory::collect!`，读取要
+/// 冻结声明表（[`crate::declarations::sealed_declarations`]）——两者都在本 crate。
+/// 装配宿主经门面转出的模块名调用，读方（可卸载的 `session`）因此不需要在 crate 根
+/// 暴露符号（E-014 / EX-004）。
 ///
 /// 登记表本身不合法（[`reports()`] 交回错误）时返回空表并逐条出声：降级还是失败由
 /// 调用方决定（读侧不替装配面 panic）。
@@ -321,7 +320,7 @@ pub fn read_all(
         Err(errors) => {
             for why in errors {
                 crate::plugin_warn!(
-                    "plugin-api",
+                    "symbio::reports",
                     "[reports] 报表登记不合法（{why}）：整批读数读不出来"
                 );
             }
