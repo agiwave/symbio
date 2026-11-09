@@ -1,17 +1,19 @@
 <!--
   子节点递归渲染 —— **会话流里唯一知道「怎么往下递归」的地方**
 
-  会话流是一棵无限递归的树（骨架 → 思考/正文/工具 → 工具的过程/结果 → …），
-  每层都要把 `depth + 1` 传下去、把 `retry/delete/edit` 原样抛上来。
-  这套契约只写一次，个体渲染器只说「这里有一批子节点」，
-  不再各自重复 `:depth="(depth ?? 0) + 1"` 与三行事件转发。
+  会话流是一棵无限递归的树，每层都要把 `depth + 1` 传下去、把
+  `retry/delete/edit` 原样抛上来。这套契约只写一次，个体渲染器只说
+  「子流摆在这里」（`subtree` 插槽），不再各自重复 `:depth="(depth ?? 0) + 1"`
+  与三行事件转发。
+
+  「要不要递归」不在这里判——那是分派器 `MessageNode` 的结构判据（有无子，
+  与形态无关，[D-423]）。本组件只负责「往下一层的契约」。
 
   ## 循环引用说明
 
-  本组件 import `MessageNode`，而 `MessageNode` 经渲染器注册表间接 import 本组件，
-  形成环。这是**「类型 → 组件」注册表 + 递归渲染**必然产生的结构，ESM 能正确处理：
-  环上唯一的引用点在渲染函数内（`_createVNode`），模块求值期不触碰该绑定，
-  因此求值顺序不会读到未初始化的导出。
+  本组件 import `MessageNode`，而 `MessageNode` 也 import 本组件，形成环。
+  这是**递归渲染**必然产生的结构，ESM 能正确处理：环上唯一的引用点在渲染函数内
+  （`_createVNode`），模块求值期不触碰该绑定，因此求值顺序不会读到未初始化的导出。
 -->
 <template>
   <MessageNode
@@ -19,7 +21,7 @@
     :key="child.id"
     :node="child"
     :depth="childDepth"
-    :parent-type="parentType"
+    :has-parent="true"
     :parent-failed="parentFailed"
     @retry="emit('retry', $event)"
     @delete="emit('delete', $event)"
@@ -37,9 +39,7 @@ const props = defineProps<{
   nodes: ChatNode[]
   /** **父节点**的深度；子节点实际深度为 `depth + 1` */
   depth: number
-  /** 子节点应看到的父节点类型（容器 = `skeleton`）——决定「工具返回」「正文直排」等判定 */
-  parentType?: string
-  /** 父骨架是否已失败：子节点据此隐藏自身错误框，避免重复报错 */
+  /** 父节点是否已失败：子节点据此隐藏自身错误框，避免重复报错 */
   parentFailed?: boolean
 }>()
 

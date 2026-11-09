@@ -49,6 +49,10 @@
 
     <!-- 其余折叠叶：Markdown 正文 -->
     <div v-else class="markdown-body" v-html="rendered" />
+
+    <template v-for="name in ($slots.subtree ? ['subtree'] : [])" :key="name" #[name]>
+      <slot name="subtree" />
+    </template>
   </NodeShell>
 </template>
 

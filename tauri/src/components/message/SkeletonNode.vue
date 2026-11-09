@@ -1,8 +1,8 @@
 <!--
   容器骨架渲染器 —— `type = skeleton` 的唯一形态（[T-155 B2a]，[ADR-070 §决策 1]）
 
-  **一整轮助手响应**与**一次工具调用**在这一格里结构同构：一个可折叠头部 + 一条子流。
-  前端对它们渲染完全一样，一律递归 `children`，不认 `turn` / `tool` 这些业务名。
+  **一次工具调用**与**一段子过程**在这一格里结构同构：一个可折叠头部 + 一条子流。
+  前端对它们渲染完全一样，不认 `turn` / `tool` 这些业务名。
   两者的差别全是**数据**：标题 / 图标 / 可用动作由后端在交互面填进 `title` / `icon` /
   `actions`，本组件照数据显示；工具参数就住在骨架自身的 `content` 里，容器把它当
   **首条正文**渲染（数据驱动，不为「工具」写特例）。
@@ -10,8 +10,9 @@
   折叠体（自上而下，各段**只在有内容时出现**）：
   1. **等待骨架**：仍在 streaming、且没有任何真实子节点 → 三点脉动 +「正在思考…」；
   2. **首条正文**：自身 `content` 非空（典型是工具参数 JSON）→ 高亮代码块；
-  3. **子流**：`MessageChildren` 递归（`parent-type = skeleton`）——助手正文 / 思考折叠叶 /
-     工具返回 / 子过程段都从这里长出去，深一层仍是同一个 SkeletonNode（分形复用）；
+  3. **子流**：分派器经 `subtree` 插槽交来（[D-423]：递归判据 = 有无子，与形态无关）——
+     助手正文 / 思考折叠叶 / 工具返回 / 子过程段都从这里长出去，深一层仍是同一个
+     SkeletonNode（分形复用）。本组件只决定**落点在折叠体内**；
   4. **无响应兜底**：父骨架自述「这次没跑」却没有任何子节点时把话讲明白（历史数据用；
      **已释放态不出这条**——子节点是被本地摘掉的，不是「这次没跑」）；
   5. **折叠释放摘要**（[] 惰性重取）：后代已本地释放 ⇒ 一行 chip（多少条 / 什么类型 /
@@ -40,17 +41,9 @@
       <!-- ② 首条正文：骨架自身的 content（工具参数 JSON）——有则显示，无（整轮）则跳过 -->
       <pre v-else-if="hasSelfContent" class="json req">{{ selfText }}</pre>
 
-      <!-- ③ 子流：一律递归（助手正文 / 思考 / 工具返回 / 子过程段） -->
-      <MessageChildren
-        v-if="realChildren.length"
-        :nodes="realChildren"
-        :depth="depth ?? 0"
-        parent-type="skeleton"
-        :parent-failed="isFailed"
-        @retry="emit('retry', $event)"
-        @delete="emit('delete', $event)"
-        @edit="emit('edit', $event)"
-      />
+      <!-- ③ 子流：分派器按「有无子」交来（[D-423]），本组件只决定落点——
+           放在折叠体内，因此收起工具卡会一并藏住它的结果。 -->
+      <slot name="subtree" />
 
       <!-- ④ 无响应兜底：历史数据 / 不守不变量的写入方。
            已释放态不出这条——子节点是被本地摘掉的，不是「这次没跑」。 -->
@@ -108,17 +101,14 @@ import {
   agentNameOf,
   canSupplyToolArgs,
   isAbortedStatus,
-  isFailedStatus,
   isStreamingStatus,
-  isTypingKind,
   messageParentSessionId,
   messageTypeLabel,
-  messageTypeOf,
   missingResultNoteOf,
+  renderableChildrenOf,
   type MessageFacets,
 } from '@/registry/messageTypes'
 import NodeShell from './NodeShell.vue'
-import MessageChildren from './MessageChildren.vue'
 import MessageErrorBox from './MessageErrorBox.vue'
 import SkeletonPending from './SkeletonPending.vue'
 
@@ -173,12 +163,9 @@ const releasedChip = computed(() => {
 
 const agentName = computed(() => agentNameOf(props.node, props.facets.subSession))
 
-/** 真实子节点：剔掉合成的 typing 占位（它是派生节点、不是内容） */
-const realChildren = computed<ChatNode[]>(() =>
-  (props.node.children || []).filter((c) => !isTypingKind(messageTypeOf(c))),
-)
+/** 真实子节点：判据与分派器同一份（剔掉合成的 typing 占位） */
+const realChildren = computed<ChatNode[]>(() => renderableChildrenOf(props.node))
 
-const isFailed = computed(() => isFailedStatus(props.facets.status))
 const isAborted = computed(() => isAbortedStatus(props.facets.status))
 /** 需要向用户交代的非正常终态（失败 / 中止） */
 const isUnsettled = computed(() => isUnsettledNodeStatus(props.facets.status))

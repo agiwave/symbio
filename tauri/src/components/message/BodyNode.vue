@@ -41,6 +41,12 @@
       />
       <div v-else class="markdown-body" v-html="rendered" />
     </template>
+
+    <!-- 子流：本形态不折叠它（收起用户气泡只收起气泡，回答留在流里）。
+         按需转发——空槽同样会被外壳当成「有子流」而画出空区域。 -->
+    <template v-for="name in ($slots.subtree ? ['subtree'] : [])" :key="name" #[name]>
+      <slot name="subtree" />
+    </template>
   </NodeShell>
 </template>
 

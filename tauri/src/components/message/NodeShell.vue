@@ -6,7 +6,9 @@
   - 折叠头部：图标 + 标题 + 心跳标 + 收起态摘要 + 状态标签（含运行中动效与秒数）
     + 悬停操作（编辑 / 就地重试 / 删除）+ 分支切换器（同一问题的第几支，常驻）；
   - 折叠交互：默认态与深层级策略查 `registry/messageTypes`，本组件只持有**交互态**；
-  - 折叠体：**不关心内容**，由调用方经默认插槽填入（气泡 / Markdown / 工具卡 / 表单…）。
+  - 折叠体：**不关心内容**，由调用方经默认插槽填入（气泡 / Markdown / 工具卡 / 表单…）；
+  - 子流：`subtree` 插槽落在折叠体**之外**（折叠收起的是本节点的内容，不是后代的内容）。
+    要把子流放折叠体内的渲染器（骨架）自己消费该插槽，不经本组件转发。
 
   这样「哪种节点长什么样」只有一份实现，个体渲染器只负责「折叠体里放什么」。
   头部是否渲染由 `facets.responseText` 决定：骨架的直接正文子节点内联直排，
@@ -86,6 +88,13 @@
 
     <div v-if="effectiveOpen" class="node-body">
       <slot />
+    </div>
+
+    <!-- 子流（[D-423]）：由分派器经渲染器转交。落在折叠体**之外**——
+         折叠一个节点头收起的是它自己的内容，不是它后代各自独立的内容。
+         骨架是唯一把子流放折叠体内的形态（它自己消费 subtree 插槽，不经这里）。 -->
+    <div v-if="$slots.subtree" class="node-subtree">
+      <slot name="subtree" />
     </div>
   </div>
 </template>
@@ -502,6 +511,15 @@ const runningDuration = computed(() => {
    全部引用统一变量 --msg-gap，确保「助手 ↔ 思考过程」与「思考过程 ↔ 工具调用」等
    所有间隔完全一致（机制化保障，而非散落硬编码）。 */
 .node-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--msg-gap, 0.6rem);
+  padding: var(--msg-gap, 0.6rem) 0 0;
+}
+
+/* 子流区域：与折叠体同一套纵向节奏（同一个 --msg-gap），因此「用户气泡 ↔ 回答」
+   与「骨架 ↔ 子步骤」的间隔完全一致。只在真有子流时渲染，空区域不留间距。 */
+.node-subtree {
   display: flex;
   flex-direction: column;
   gap: var(--msg-gap, 0.6rem);

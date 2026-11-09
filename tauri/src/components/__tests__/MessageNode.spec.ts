@@ -444,6 +444,131 @@ describe('MessageNode：压缩后的历史记忆（折叠叶，不是「你说�
 })
 
 /**
+ * 结构轴递归（[D-423]）—— **这次事故的回归锚**。
+ *
+ * [D-335] 之后轮的根就是用户消息节点（`body` / `person`）：`rebuild` 折出的骨架与它
+ * 同 id 被并掉，模型正文 / 思考 / 工具卡全部挂在它下面。而递归曾经只由 `skeleton`
+ * 渲染器施加，于是整棵响应子树永不渲染——界面只剩一个用户气泡，typing 熄灭后什么都没有。
+ *
+ * 因此这一组的夹具一律用**生产形状**（根 = body/person），断言的是「子流必须被画出来」，
+ * 而不是「某种类型会递归」。判据与形态无关：换个形态当根，结论不变。
+ */
+describe('MessageNode：结构轴递归（生产形状 = 用户 body 节点当根）', () => {
+  const turnRoot = (children: ChatNode[]) =>
+    msg({ id: 'u1', principal: AS_PERSON, type: 'body', content: '读文件', children })
+
+  it('用户 body 根带子 → 整棵响应子树必须渲染', () => {
+    const w = mountNode(
+      turnRoot([msg({ id: 'a1', type: 'body', content: '读完了，内容如上。', parent_id: 'u1' })]),
+    )
+    expect(w.find('.user-bubble').text()).toContain('读文件')
+    expect(w.text(), '响应子树不渲染 = 用户发完消息只看到自己的气泡').toContain('读完了，内容如上。')
+    expect(w.find('.node-subtree').exists()).toBe(true)
+  })
+
+  it('用户根下的助手正文直排：不重复一行折叠头（父是 body 也算容器）', () => {
+    const w = mountNode(turnRoot([msg({ id: 'a1', type: 'body', content: '回答', parent_id: 'u1' })]))
+    expect(w.findAll('.node-head'), '只有用户根那一行头').toHaveLength(1)
+    expect(w.find('.node-subtree .markdown-body').text()).toContain('回答')
+  })
+
+  it('工具链全可见：工具卡 + 结果 + 收尾正文；层级只由 depth 表达', () => {
+    const w = mountNode(
+      turnRoot([
+        msg({
+          id: 'tc1',
+          type: 'skeleton',
+          title: 'vdfs_read',
+          content: '{"path":"a.txt"}',
+          parent_id: 'u1',
+          children: [
+            msg({ id: 'res1', type: 'body', principal: AS_TOOL, content: '文件内容', parent_id: 'tc1' }),
+          ],
+        }),
+        msg({ id: 'a1', type: 'body', content: '读完了。', parent_id: 'u1' }),
+      ]),
+    )
+    expect(w.find('.type-skeleton').exists()).toBe(true)
+    expect(w.text()).toContain('"path":"a.txt"')
+    expect(w.text()).toContain('文件内容')
+    expect(w.text()).toContain('读完了。')
+    // depth1 与根左缘齐平；depth2 才缩进 + 引导竖线
+    expect(w.find('.type-skeleton').classes()).not.toContain('nested')
+    expect(w.findAll('.msg.nested')).toHaveLength(1)
+  })
+
+  it('递归与形态无关：notice 当根带子，子流照样渲染', () => {
+    const w = mountNode(
+      msg({
+        id: 'n1',
+        type: 'notice',
+        content: '一段提示',
+        children: [msg({ id: 'a1', type: 'body', content: '子流内容', parent_id: 'n1' })],
+      }),
+    )
+    expect(w.text()).toContain('子流内容')
+  })
+
+  it('收起用户气泡只收起气泡：回答留在流里（轮不是可折叠的可见对象）', async () => {
+    const w = mountNode(turnRoot([msg({ id: 'a1', type: 'body', content: '回答还在', parent_id: 'u1' })]))
+    await w.find('.node-head').trigger('click')
+    expect(w.find('.user-bubble').exists()).toBe(false)
+    expect(w.text()).toContain('回答还在')
+  })
+
+  it('收起工具卡则藏住它的结果（骨架把子流放在折叠体内）', async () => {
+    const w = mountNode(
+      turnRoot([
+        msg({
+          id: 'tc1',
+          type: 'skeleton',
+          title: 'vdfs_read',
+          content: '{}',
+          parent_id: 'u1',
+          children: [
+            msg({ id: 'res1', type: 'body', principal: AS_TOOL, content: '结果正文', parent_id: 'tc1' }),
+          ],
+        }),
+      ]),
+    )
+    expect(w.find('.type-skeleton .msg').exists()).toBe(true)
+    // 0 = 用户根，1 = 工具卡
+    await w.findAll('.node-head')[1].trigger('click')
+    expect(w.find('.type-skeleton .node-body').exists()).toBe(false)
+    // 子流整棵从 DOM 摘掉（收起态只在头部留一行摘要）
+    expect(w.find('.type-skeleton .msg').exists()).toBe(false)
+  })
+
+  it('子树里的重试一路抛到根（递归契约不吞事件）', async () => {
+    const w = mountNode(
+      turnRoot([
+        msg({
+          id: 'tc1',
+          type: 'skeleton',
+          title: 'shell',
+          status: 'failed',
+          error: '工具执行失败',
+          meta: { failure_kind: 'error', recoverable: true },
+          actions: ['retry'],
+          content: '{}',
+          parent_id: 'u1',
+          children: [],
+        }),
+      ]),
+    )
+    await w.find('.error-box button.retry').trigger('click')
+    expect(w.emitted('retry')?.[0]).toEqual(['tc1'])
+  })
+
+  it('typing 占位不算真实子：不渲染成一条正文', () => {
+    const w = mountNode(
+      turnRoot([msg({ id: '__typing__u1', type: 'typing', status: 'streaming', parent_id: 'u1' })]),
+    )
+    expect(w.find('.node-subtree').exists()).toBe(false)
+  })
+})
+
+/**
  * 节点头的键盘可达性。此前节点头是裸 `div` + `@click`：Tab 键永远走不到它。
  * 这里锁住三件事：可聚焦（tabindex）、开关语义（role / aria-expanded）、键盘能真的触发折叠。
  */

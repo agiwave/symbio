@@ -133,6 +133,10 @@
         </div>
       </template>
     </div>
+
+    <template v-for="name in ($slots.subtree ? ['subtree'] : [])" :key="name" #[name]>
+      <slot name="subtree" />
+    </template>
   </NodeShell>
 </template>
 

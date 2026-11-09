@@ -19,6 +19,7 @@ use symbio_sdk::plugin::drive_entry::{DriveEntry, DriveTarget};
 use super::layout::SessionParams;
 use super::wal::WalStore;
 use crate::declarations::EVENT_SESSION_CONSOLIDATED;
+use crate::transcript::live::{self, LiveIndex};
 use crate::transcript::supplements::SupplementDrain;
 
 /// 会话存储目录（进程内首次登记；开面据此解析共享实例）。
@@ -64,6 +65,10 @@ pub(crate) struct SessionFactSource {
     /// 补充整合的**批次边界折叠器**：`artifact.added`（工具结果）落格后，把忙窗内
     /// 排队的补充抽干并合并成一条，落一条 `message.added`。`None` = 只读事实源。
     supplements: Option<SupplementDrain>,
+    /// 实时投影的**配对索引**（见 `transcript::live` 模块头）：派发清单与拒言事实。
+    ///
+    /// 只是索引不是事实：未命中时回读事实源兜底，故它丢了也不影响正确性。
+    live: std::sync::Mutex<LiveIndex>,
 }
 
 impl SessionFactSource {
@@ -98,6 +103,7 @@ impl SessionFactSource {
             drive,
             sink,
             supplements,
+            live: std::sync::Mutex::new(LiveIndex::new()),
         })
     }
 
@@ -126,6 +132,42 @@ impl SessionFactSource {
         // `messages.json` 一起折，别处只落事实会让读缓存与重建分叉（LWF-001）。
         tokio::task::block_in_place(|| drain.land_merged_sync(&handle));
     }
+
+    /// 事实落格即投影（`D-424`，见 `transcript::live` 模块头）：把刚落格的事实与它的
+    /// 配对事实折成终态节点，**同步**交给转写唯一写入点。
+    ///
+    /// 同步而不是 spawn：帧必须先于下一轮模型的流式帧到达，否则「思考完成了」「工具
+    /// 结果出来了」会晚于下一段正文出现。`block_in_place` 是既有的同步发射先例
+    /// （见 [`Self::fold_supplements`]）：只在多线程 runtime 的 worker 上可用；其它
+    /// 形态（单线程 runtime / 无运行时 / 单测）退化为不发——实时面丢的帧由轮收尾的
+    /// 重建面补齐，正确性不变。
+    fn project_live(&self, event: Event) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        if handle.runtime_flavor() != tokio::runtime::RuntimeFlavor::MultiThread {
+            return;
+        }
+        let frames = {
+            let mut index = self
+                .live
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            index.observe(&event);
+            if !live::projects(&event) {
+                return;
+            }
+            live::frames(&event, index.partners(&event, &self.wal))
+        };
+        if frames.is_empty() {
+            return;
+        }
+        tokio::task::block_in_place(|| {
+            for frame in frames {
+                handle.block_on(self.sink.emit(frame));
+            }
+        });
+    }
 }
 
 impl FactSource for SessionFactSource {
@@ -146,10 +188,25 @@ impl FactSource for SessionFactSource {
             actor
         };
         let kind = draft.kind.clone();
-        let event = symbio_plugin_api::fact_source::draft_into_event(actor, draft);
+        let mut event = symbio_plugin_api::fact_source::draft_into_event(actor, draft);
+        // 时刻属于信封，落格时由事实源兜底；这里先写同一时刻，落格后的投影就能用
+        // 手上这一份（含 `event_id`，`seq` 在 append 后补），不必回读全史——
+        // `Store::range` 要拼接归档段，长会话下每次都是全量克隆。
+        event.ts = symbio_sdk::clock::clock_now_ms();
+        let watched = live::watches(&event);
+        // 只读事实源没有出口，落地即止；不需要投影时也不复制载荷。
+        let replay = watched && self.drive.is_some();
+        let stored = replay.then(|| event.clone());
         let seq = Store::append(&*self.wal, event)
             .map(|seq| seq.value())
             .map_err(|e| format!("{e:?}"))?;
+
+        // **落格即投影**（D-424）：终态节点由投影器在此刻折出（见 `transcript::live`）。
+        if let Some(mut event) = stored {
+            // 投影副本不是入库信封：号直接写字段，不借 `Store` 的赋号/兜底纪律。
+            event.seq = Some(Seq::new(seq));
+            self.project_live(event);
+        }
 
         // **批次边界**：工具结果刚进事实源，而环的下一次请求还没装配。此刻折进忙窗
         // 内排队的补充——合并事实的 seq 因此必然排在工具结果之后（见 `fold_supplements`）。

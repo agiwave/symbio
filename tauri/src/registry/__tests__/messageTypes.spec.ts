@@ -382,21 +382,45 @@ describe('facetsOf：props → facets 的唯一实现', () => {
     ).toBe(false)
   })
 
-  it('工具返回必须限定父节点是骨架（否则子会话内部文本会被误判）', () => {
+  it('工具返回 = tool 角色 + body 形态 + 有渲染父（[D-423]：父是什么形态不再参与判定）', () => {
     const node = {
       id: 'r',
       type: NODE_KIND_BODY,
       principal: { kind: 'tool', id: 'vdfs/write' },
     } as const
-    expect(facetsOf(node, NODE_KIND_SKELETON).toolResult).toBe(true)
-    expect(facetsOf(node, NODE_KIND_BODY).toolResult).toBe(false)
-    expect(facetsOf(node, undefined).toolResult).toBe(false)
+    expect(facetsOf(node, true).toolResult).toBe(true)
+    expect(facetsOf(node, false).toolResult).toBe(false)
+    expect(facetsOf(node).toolResult).toBe(false)
+    // 助手正文不是工具返回，哪怕也挂在容器下
+    expect(
+      facetsOf({ id: 'a', type: NODE_KIND_BODY, principal: { kind: 'agent', id: 'session/main' } }, true)
+        .toolResult,
+    ).toBe(false)
   })
 
-  it('正文直排必须限定父节点是骨架且自身是正文（折叠叶要保留单行行头）', () => {
-    expect(facetsOf({ id: 'x', type: NODE_KIND_BODY }, NODE_KIND_SKELETON).responseText).toBe(true)
-    expect(facetsOf({ id: 'r', type: NODE_KIND_NOTICE }, NODE_KIND_SKELETON).responseText).toBe(false)
-    expect(facetsOf({ id: 'x', type: NODE_KIND_BODY }, NODE_KIND_BODY).responseText).toBe(false)
+  it('正文直排 = 有渲染父 + body + 非 tool 角色（折叠叶要保留单行行头）', () => {
+    expect(facetsOf({ id: 'x', type: NODE_KIND_BODY }, true).responseText).toBe(true)
+    expect(facetsOf({ id: 'r', type: NODE_KIND_NOTICE }, true).responseText).toBe(false)
+    expect(facetsOf({ id: 'x', type: NODE_KIND_BODY }, false).responseText).toBe(false)
+  })
+
+  it('生产形状：轮的根是用户 body 节点，其助手正文子节点必须直排（[D-335] / [D-423]）', () => {
+    // root_id = 用户消息事实 id；rebuild 折出的骨架与它同 id 被并掉，
+    // 于是根是 body/person，模型正文挂在它下面。父不再是 skeleton——
+    // 旧判据在这里转假，正文会带着一整行折叠头画出来。
+    const answer = {
+      id: 'a',
+      parent_id: 'u',
+      type: NODE_KIND_BODY,
+      principal: { kind: 'agent', id: 'session/main' },
+    } as const
+    expect(facetsOf(answer, true).responseText).toBe(true)
+    const root = {
+      id: 'u',
+      type: NODE_KIND_BODY,
+      principal: { kind: 'person', id: 'person/local' },
+    } as const
+    expect(facetsOf(root).responseText).toBe(false)
   })
 
   it('工具名取自 meta.tool_name（[T-147d-ii]：顶层 name 已退役）', () => {

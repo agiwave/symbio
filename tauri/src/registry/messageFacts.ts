@@ -12,7 +12,7 @@
  *
  * ## 为什么 `MessageFacets` 住在这里而不是各组件自己算
  *
- * 判定要用到的不只是节点自身字段，还有「父节点是什么形态」「子节点里有没有待审批」
+ * 判定要用到的不只是节点自身字段，还有「有没有渲染父」「子节点里有没有待审批」
  * 这类**上下文**。把它们显式列进 facets，而不是让本模块去读 props，好处是每个判定都是
  * 纯函数：可直接单测，且不需要为了测试搭一棵组件树。
  * 组件只负责把 props 交给 `facetsOf`（那一层是"读 props"，不是"做判定"）——
@@ -103,6 +103,17 @@ export const isNoticeKind = (kind: NodeKind): boolean => kind === NODE_KIND_NOTI
 /** 正文叶：`body` / `notice` 是唯二把 `content` 当正文呈现的形态。 */
 export const isContentKind = (kind: NodeKind): boolean =>
   kind === NODE_KIND_BODY || kind === NODE_KIND_NOTICE
+
+/**
+ * 该节点交给渲染器的子流（[D-423]：递归判据 = 有无子，与形态无关）。
+ *
+ * 剔掉合成的 typing 占位：它是派生节点、不是内容，等待态由各渲染器自己的
+ * 在途信号呈现（骨架的 `SkeletonPending` / 面板的兜底行）。分派器与渲染器
+ * 都问这一个函数，「什么算真实子」因此只有一份判据。
+ */
+export function renderableChildrenOf(node: ChatNode): ChatNode[] {
+  return (node.children ?? []).filter((c) => !isTypingKind(messageTypeOf(c)))
+}
 
 /** 节点的状态（缺省 = 已结束） */
 export function messageStatusOf(node: Pick<ChatNode, 'status'>): NodeStatus {
@@ -269,7 +280,7 @@ export interface MessageFacets {
    * 右对齐的用户气泡，正文是 `[CONTEXT SNAPSHOT …]` 这类内部标记。
    */
   compacted: boolean
-  /** 骨架的**直接正文子节点**：内联直排，不重复渲染折叠头部 */
+  /** 容器的**直接正文子节点**：内联直排，不重复渲染折叠头部 */
   responseText: boolean
 }
 
@@ -280,10 +291,12 @@ export interface MessageFacets {
  * 都调它，因此同一个节点在两侧得到的判定必然一致——不存在「分派器认为是工具结果、
  * 渲染器认为不是」这种分叉。
  *
- * @param node       消息节点
- * @param parentType 父节点的生效形态（`skeleton`；根级为 undefined）
+ * @param node      消息节点
+ * @param hasParent 是否**作为子节点被渲染**（结构事实，不是父的形态）。
+ *   递归由分派器按「有无子」普遍施加（[D-423]），任何形态都可能当容器，
+ *   因此上下文判据只问「有没有渲染父」，不再问「父是不是 skeleton」。
  */
-export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
+export function facetsOf(node: ChatNode, hasParent = false): MessageFacets {
   const role = messageRoleOf(node)
   const type = messageTypeOf(node)
   return {
@@ -302,22 +315,18 @@ export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
     promptKind: promptKindOf(node),
     // 合成「请求」子节点：渲染期把骨架自身 content 提升为独立子节点时打的标
     toolRequest: messageIsToolRequest(node),
-    // 工具返回必须限定父节点是骨架：子会话过程段内部的文本子节点 role 也是 tool，
-    // 只有「tool 角色 + body 形态 + 父是骨架」才是一次工具调用的返回体
-    toolResult:
-      role === CHAT_ROLE_TOOL &&
-      type === NODE_KIND_BODY &&
-      parentType === NODE_KIND_SKELETON,
+    // 工具返回必须限定「有渲染父」：子会话过程段内部的文本子节点 role 也是 tool，
+    // 只有「tool 角色 + body 形态 + 挂在某个容器下」才是一次工具调用的返回体
+    toolResult: role === CHAT_ROLE_TOOL && type === NODE_KIND_BODY && hasParent,
     hasWaitingChild: (node.children || []).some(
       (c) => c.status === NODE_STATUS_WAITING_USER_ACTION,
     ),
     recoverable: messageIsRecoverable(node),
     failureKind: messageFailureKind(node),
     compacted: messageIsCompacted(node),
-    // 骨架的**助手正文**子节点：内联直排（无折叠头部）。排除 tool 角色——那是工具返回
-    // （有「↩ 响应」头部），不是本轮正文；两者形态都是 body 挂在骨架下，靠 role 分辨。
-    responseText:
-      parentType === NODE_KIND_SKELETON && type === NODE_KIND_BODY && role !== CHAT_ROLE_TOOL,
+    // 容器的**助手正文**子节点：内联直排（无折叠头部）。排除 tool 角色——那是工具返回
+    // （有「↩ 响应」头部），不是本轮正文；两者形态都是 body 挂在容器下，靠 role 分辨。
+    responseText: hasParent && type === NODE_KIND_BODY && role !== CHAT_ROLE_TOOL,
   }
 }
 
