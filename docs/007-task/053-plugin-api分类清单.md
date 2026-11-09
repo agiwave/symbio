@@ -38,6 +38,12 @@ exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 /
 `routes.rs` 91 · `behaviors.rs` 87 · `termination.rs` 79 · `views.rs` 47 · `vocab.rs` 45。
 **生产文件合计 4 494 行；同目录 `*.test.rs` 另 1 921 行不计入基线。**
 
+**收尾时的现值（2026-11-09，以 `scripts/baselines/plugin-api-loc.json` 与 `scripts/arch-dead-code.json` 为准）**：
+`effects` **7**（562 → 7，整块搬进 `crates/symbio-sdk/src/plugin/effects.rs`，`D-408`）、`port` **478**（`D-404` 已搬）、
+`text` **6**（已搬）、`context` **347**、`reports` **344**；门面合计 **3 833**（原 4 494）。
+另按 `D-409` 撤掉了行侧效果面（`EffectFace` / `DialogDraft` / `LiveDraft` / `EffectDraft` 与
+`RowStep` 的 `FactsWithEffects` 变体），零调用清单由 73 条降到 71 条。
+
 ## 内容
 
 | 类 | 判据 | 处置 |
@@ -78,6 +84,17 @@ HS-002 / HS-006 只数转发条数，看不见实现。**这一条已由棘轮�
    搬迁后 api 侧只留 `pub use`，实现住在 sdk；`reports` 的契约与实现分居两处。
    每搬一块 **同批下调基线**（`FA-002` 会拦住「删了不同批下调」）。口径见
    054 的 `D-404`：净零搬迁不记欠账，`from` / `to` 与两侧行数写进提交正文。
+
+   **第二块 `effects` 已落地（`D-408`），并顺带撤了一条零使用通道（`D-409`）**：
+   `effects` + `behaviors` 整块搬进 `crates/symbio-sdk/src/plugin/`（门面只留 7 行转出），
+   同时删掉 D-293 的**行侧效果面**（`EffectFace` / `DialogDraft` / `LiveDraft` / `EffectDraft`
+   与 `RowStep` 的 `FactsWithEffects` 变体）。这一笔因此是**净减**，按迁移记 1 笔（`EX-007` 7 → 6）。
+
+   > **剩下两块为什么不能「只搬函数」**：`context` 的 `fit_sections` / `sections` 吃的是门面的
+   > `Section`，`reports` 的 `validate` / `reports()` 吃的是 `ReportDecl`——而 `ReportDecl` 正是
+   > `submit_reports!` 的采集类型。`inventory::collect!` 的采集类型必须与宏同 crate，`sdk` 又不能
+   > 依赖门面（`D-258`），所以它们的搬法和 `effects` 一模一样：**类型闭包整块搬、门面转出**。
+   > 只搬函数体那一半在这里是做不到的（`D-408` 的三条硬事实）。
 3. HS-002 / HS-006（`scripts/plugin-surface-audit.mjs`）仍只判「转发了几条」；
    「门面持有实现」这一面由 `FA-001` 判，不重复造第二臂。
 4. 跑 `gate --full`，全绿后提交。
