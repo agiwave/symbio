@@ -1,11 +1,10 @@
 //! LLM 契约层 —— 模型服务的唯一契约面（协议无关、插件无关）。
 //!
-//! 两个模块各管一段，共同构成 session 与 model 之间的完整契约：
-//!
-//! | 模块 | 职责 |
-//! |---|---|
-//! | [`model_provider`] | [`model_provider::ModelProvider`] trait（session 唯一依赖的模型契约）+ 结束原因与用量（`ModelFinishReason` / `ModelUsage`） |
-//! | [`turn`] | 单轮产物（`TurnOutput` · `TurnToolCallInfo`）+ 共享帧原语（`llm_emit_message` / `llm_message_frame` / `llm_removed_frame`）与 id 原语 `llm_short_id` |
+//! 契约类型住在内核（D-188 C2b）：`ModelProvider` / `ModelFinishReason` / `ModelUsage`
+//! 在 `symbio_kernel::llm`，单轮产物 `TurnOutput` / `TurnToolCallInfo` 在
+//! `symbio_kernel::llm::turn`。本模块只留**有实现的共享帧原语**：
+//! `llm_emit_message` / `llm_message_frame` / `llm_removed_frame` 与 id 原语
+//! `llm_short_id`——它们的消费方在两个以上，且构造即约定（完整消息必带状态）。
 //!
 //! **只被一个插件消费的部分不在本层**（D-023 的依赖方数量判据）：
 //! 落库视图与消息构造（`llm_build_assistant_messages` / `llm_build_tool_message` /
@@ -17,7 +16,7 @@
 //! 依赖关系（单向）：
 //!
 //! ```text
-//! session ──────────────▶ ModelProvider trait（本层）
+//! session ──────────────▶ ModelProvider trait（symbio_kernel::llm）
 //! model  ── BoundProvider 实现 ModelProvider
 //!        ── round_trip 内部消费 turn 的帧原语与 TurnOutput
 //! ```
@@ -29,7 +28,6 @@
 //! 插件使用，按「依赖方数量」判据（D-023）住在
 //! 该插件内。本层只留**多消费方**共用的契约与数据结构。
 
-pub mod model_provider;
 pub mod turn;
 
 // `turn` 是**子命名空间**，不是契约的对外地址：插件门面按符号取帧原语与 id 原语，

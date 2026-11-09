@@ -49,7 +49,7 @@ impl PrincipalKind {
     /// 是否智能体一族——kind 层的族判据（[D-069 §决策 3]），生产面今天没有调用点（基线在案）。
     ///
     /// 从结构体字段**直接读**，不从 id 反推：协议携带 `Principal` 结构体；只有字符串
-    /// 可读的入口（如授权表）改走 `crates/symbio-sdk/src/view/mod.rs::principal_namespace`
+    /// 可读的入口（如授权表）改走 `crates/symbio-sdk/src/authz/mod.rs::principal_namespace`
     /// 的归属段解析。
     pub fn is_agent(&self) -> bool {
         matches!(self, PrincipalKind::Agent)

@@ -29,7 +29,14 @@
 //!    绝对地址一律从**上下文里的当前父地址 + 相对地址**拼接
 //!    （`address::absolute_addr`），不得持有根名。
 
-pub use symbio_kernel::vdfs::*;
+// 契约词汇只供本域子模块取用（`super::…`）；本域**不再**整模块转出内核的公开面
+// ——那会让 `symbio_sdk::vdfs::<内核符号>` 成为第二条合法路径（DE-018 的 D-419）。
+use symbio_kernel::vdfs::*;
+
+// 例外：`config_mount_vdfs!` 的宏体写
+// `$crate::vdfs::{VdfsProvider, VdfsContext, VdfsRequest, VdfsResult, VdfsResponse}`，
+// 展开在消费方 crate——这五条必须是公开路径。
+pub use symbio_kernel::vdfs::{VdfsContext, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult};
 
 pub mod address;
 pub mod host;

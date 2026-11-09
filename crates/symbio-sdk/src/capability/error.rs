@@ -17,8 +17,8 @@
 //! 调用（子智能体的嵌套会话经收件箱地址写入复用同一管线，
 //! 不由 agent 直接驱动），因此定义在 session 插件内。
 
-use crate::keys::SymbioKey;
 use std::sync::Arc;
+use symbio_kernel::keys::SymbioKey;
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use tokio::sync::Mutex;
 

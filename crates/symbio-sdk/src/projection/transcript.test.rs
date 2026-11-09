@@ -11,7 +11,7 @@ use crate::test_fixtures::{
     CHAT, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
     EVENT_USER_MESSAGE, MESSAGE,
 };
-use crate::view::Budget;
+use symbio_kernel::view::Budget;
 
 /// 请求包里的文本：条目按 `exclude_from_context` 过滤后投影成消息。
 ///

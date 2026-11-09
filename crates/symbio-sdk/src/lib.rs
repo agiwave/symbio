@@ -27,9 +27,9 @@
 //! ## 根为什么平铺内核词汇
 //!
 //! 本 crate 的模块沿用 `use super::*;` 取词汇（那是它们搬过来之前的写法），而它们要的
-//! 词汇就是内核的封闭语法。根平铺 `symbio_kernel::*` 让这 20 多个模块一次搬完而不必逐个改写
-//! import，代价是 `symbio_sdk::<符号>` 也能写到内核的类型——**门面的白名单仍然逐条列出**，
-//! 插件看不到这份平铺（HS-001 判的是插件的依赖面，不是 sdk 的内部写法）。
+//! 词汇就是内核的封闭语法。根对内核做一次**私有** `use symbio_kernel::*`：子模块取得到，
+//! crate 外写不出 `symbio_sdk::<内核符号>`——内核符号在 crate 外只剩 `symbio_kernel::…`
+//! 一条路径（DE-018 的 D-419）。各域模块同样只私有转引内核词汇，公开面只留自己的实现。
 //!
 //! `inventory` 同样出根：`submit_object_creator!` 宏里写的是 `$crate::inventory::submit!`，
 //! 而 `$crate` 展开成本 crate——宏的使用方不必依赖 `inventory`。
@@ -63,7 +63,6 @@ pub mod projection;
 pub mod text;
 pub mod turn;
 pub mod vdfs;
-pub mod view;
 
 /// 用例自己交的事件拼写与三张词表（DE-024 D-203 / D-205 / D-206）。
 ///

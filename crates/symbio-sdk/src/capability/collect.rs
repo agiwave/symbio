@@ -22,8 +22,8 @@
 
 use std::sync::Arc;
 
-use crate::keys::SymbioKey;
 use symbio_kernel::capability::{family, CapabilityMeta};
+use symbio_kernel::keys::SymbioKey;
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// 能力收集器 Key —— 第一条收集**通道**（能力 = 可调用对象）

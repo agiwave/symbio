@@ -14,7 +14,9 @@ pub mod port;
 mod prompt;
 mod tool_name;
 
-pub use symbio_kernel::capability::*;
+// 契约词汇只供本域子模块取用（`super::…`）；本域**不再**整模块转出内核的公开面
+// ——那会让 `symbio_sdk::capability::<内核符号>` 成为第二条合法路径（DE-018 的 D-419）。
+use symbio_kernel::capability::*;
 
 // 三条收集通道键与错误桶键住本域（键与值同住，D-095 根因一）。**只导实例、
 // 不导 `…Key` 类型**——实例是 `ctx` 上的读写凭据（对外协议面），类型名没有任何

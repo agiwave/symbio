@@ -62,7 +62,15 @@ use std::sync::{OnceLock, RwLock};
 
 use crate::governance::VisScope;
 use crate::governance::{Capability, PermissionMatrix};
-use crate::view::principal_namespace;
+
+/// id 的**归属段**（`<namespace>/<name>` 的第一段）——不是主体清单，是路由用的地址解析首段。
+///
+/// 「什么地址算哪一族」只在这里回答一次：主体派生（[`principal_of`] 认下已带
+/// 命名空间的地址）与测试面的地址形状判据都读它。归 `authz` 而不是视图层：
+/// 它回答的是主体身份的族属，与视图预算无关（`DE-018` 的 `D-419` 同批归位）。
+pub fn principal_namespace(id: &str) -> Option<&str> {
+    id.split_once('/').map(|(ns, _)| ns)
+}
 
 /// 本机主智能体的身份——**表里那一行的名字**与收束事件的 `actor`
 /// 是同一个常量：授权判定的对象若与实际写入的主体各写一份字符串，两边迟早漂移
@@ -555,10 +563,8 @@ fn insert_binding(map: &mut BoundRows, holder: &str, principal: &str, grants: Ve
 /// 本机会话的**主体派生**（部署事实 → [`PRINCIPAL_MAIN`] 同族的取值点）：
 /// 会话选定了哪个 agent，这轮所有断言就是哪个主体；未选 ⇒ 主智能体。
 ///
-/// 判据取自 core 的命名空间登记表 [`principal_namespace`]
-/// （[D-069 §决策 3](../../../../docs/003-design/005-协议规范.md#d-069-principal-三字段kind-与-id-分家id-是可路由地址 "DE-005-协议规范")）——
-/// 「什么地址算哪一族」只定义一次，可见域判据（`view::is_agent_id`）与身份派生
-/// 共用登记表，两处各写一个字面量迟早漂移成「判的是 A、写的是 B」。
+/// 判据是 [`principal_namespace`]（[D-069 §决策 3](../../../../docs/003-design/005-协议规范.md#d-069-principal-三字段kind-与-id-分家id-是可路由地址 "DE-005-协议规范")）——
+/// 「什么地址算哪一族」只定义一次；两处各写一个字面量迟早漂移成「判的是 A、写的是 B」。
 ///
 /// 平凡值（DE-038 §4）：今天所有会话未选智能体 ⇒ 恒为 `session/main`，与
 /// [`PRINCIPAL_MAIN`] **逐字一致**（收束事件的 `actor` 取的正是它）。
@@ -586,7 +592,7 @@ pub fn principal_of(agent_id: Option<&str>) -> String {
 /// 读侧（`session/stats`）与写侧隔着 E-009 的插件墙两头都要用，留在任一侧都会变成
 /// 另一条反向引用。
 pub fn request_principal(ctx: &dyn symbio_kernel::plugin::PluginInvokeRequest) -> String {
-    use crate::plugin::PluginInvokeRequestExt;
+    use symbio_kernel::plugin::PluginInvokeRequestExt;
     principal_of(ctx.get(crate::keys::AGENT_ID).as_deref())
 }
 

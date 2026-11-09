@@ -84,13 +84,13 @@
 //! 不向上推任何东西——「写完之后还要做什么」（重启监听 / 重建缓存）留在插件
 //! 自己的 `write` 里。
 
-use crate::keys::SymbioKey;
 use crate::vdfs::vdfs_notify_change;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
+use symbio_kernel::keys::SymbioKey;
 use symbio_kernel::present::DetailDefinition;
 use symbio_kernel::vdfs::{
     VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsRequest, VdfsResponse, VdfsResult,

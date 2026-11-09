@@ -31,8 +31,8 @@
 
 use super::super::event::{event_payload_node_id, event_result_node_id, Event};
 use super::vocab::{slot_node_of, slot_of, ChatSlot};
-use super::Projection;
 use crate::projection::vocab::{ChatVocab, MessageVocab};
+use symbio_kernel::Projection;
 
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +51,7 @@ pub struct TranscriptView {
 
 // 形状本身住内核（它是模型接缝的输入词汇，与 `TurnOutput` 同一类，D-255）；本模块只留
 // **从转写行构造**它的转换——那是投影的知识，不是模型的词汇。
-pub use symbio_kernel::llm::prompt_message::PromptMessage;
+use symbio_kernel::llm::prompt_message::PromptMessage;
 
 impl From<&TranscriptEntry> for PromptMessage {
     fn from(e: &TranscriptEntry) -> Self {

@@ -32,12 +32,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::{AdapterError, DeltaSink, FullModel, LlmAdapter, LlmTurn, SilentDeltas};
-use crate::capability::CapabilityMeta;
 use crate::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_RUN,
     CHAT_STYLE_TAG_TOOL,
 };
 use crate::llm::turn::llm_short_id;
+use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::exec::ExecAbortSignal;
 use symbio_kernel::exec::ExecEnv;
 use symbio_kernel::exec::ExecEventSink;

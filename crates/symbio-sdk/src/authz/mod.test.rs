@@ -29,7 +29,6 @@
 
 use super::*;
 use crate::governance::Capability;
-use crate::view::principal_namespace;
 
 /// 表的形状：主智能体持 5 项、缺 `assert.verification`，可见域 `thread_private`。
 #[test]
@@ -943,5 +942,28 @@ fn every_principal_constant_is_a_row_and_every_row_is_a_constant() {
     assert!(
         !consts.contains(&PRINCIPAL_USER),
         "用户不入能力表：它的发言不是「智能体的权威动作种类」"
+    );
+}
+
+/// **可路由地址的归属段解析**（[D-069 §决策 2]）：`<ns>/<name>` 或更长的路径都取
+/// 第一段——与 VDFS 地址、route 常量同族形状。判据随函数归本报（DE-018 的 D-419：
+/// `view` 模块整体搬走之后，`principal_namespace` 只剩这一处）。
+#[test]
+fn principal_namespace_is_the_first_route_segment() {
+    assert_eq!(principal_namespace("session/main"), Some("session"));
+    assert_eq!(principal_namespace("vdfs/write"), Some("vdfs"));
+    assert_eq!(principal_namespace("person/local"), Some("person"));
+    // 多段路径也取首段——将来 `<ns>/<sub>/<name>` 的形态不破坏判据。
+    assert_eq!(principal_namespace("session/s42/worker"), Some("session"));
+    // 边界：首段空（`/foo`）→ 返回 Some("")；地址必须以归属段起头才能路由。
+    assert_eq!(principal_namespace("/foo"), Some(""));
+    // 未带 namespace 的裸 id：没有归属段，返回 None。
+    assert_eq!(principal_namespace("user"), None);
+    assert_eq!(principal_namespace(""), None);
+    // 大小写敏感：`Session` 与 `session` 是两个归属段。
+    assert_eq!(
+        principal_namespace("Session/main"),
+        Some("Session"),
+        "归属段按字面比较，不做大小写归一"
     );
 }

@@ -9,13 +9,14 @@
 //! 生产路径上的第一条绿线，后续每一步（prompt 结构化、`turn.supplemented`）都必须保持
 //! 它绿。
 
-use super::super::transcript::{transcript, PromptMessage};
+use super::super::transcript::transcript;
 use super::{verify, PromptGap as Gap};
 use crate::event::{Entity, Event, Verb};
 use crate::test_fixtures::{
     CHAT, EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_REPORTED,
     EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE, MESSAGE,
 };
+use symbio_kernel::llm::prompt_message::PromptMessage;
 
 /// 一条送进模型的消息。
 ///
@@ -205,7 +206,7 @@ fn a_progress_report_lands_but_stays_out_of_the_request() {
         report(0, "已经完成 1 轮工具调用，用时约 3 秒，还在继续。"),
     ];
     let view = transcript(CHAT, MESSAGE)
-        .apply(&events, i64::MAX, crate::view::Budget::generous())
+        .apply(&events, i64::MAX, symbio_kernel::view::Budget::generous())
         .value;
 
     let excluded: Vec<_> = view
@@ -462,7 +463,7 @@ fn branch_events() -> Vec<Event> {
 fn a_replaced_branch_does_not_make_the_judge_red() {
     let events = branch_events();
     let view = transcript(CHAT, MESSAGE)
-        .apply(&events, i64::MAX, crate::view::Budget::generous())
+        .apply(&events, i64::MAX, symbio_kernel::view::Budget::generous())
         .value;
     let msgs = request_messages(&view);
     assert_eq!(
@@ -483,7 +484,7 @@ fn a_replaced_branch_does_not_make_the_judge_red() {
 fn a_leaked_replaced_branch_shows_up_as_an_unsourced_message() {
     let events = branch_events();
     let view = transcript(CHAT, MESSAGE)
-        .apply(&events, i64::MAX, crate::view::Budget::generous())
+        .apply(&events, i64::MAX, symbio_kernel::view::Budget::generous())
         .value;
     let mut msgs = request_messages(&view);
     msgs.insert(1, entry("assistant", "甲答复", None));

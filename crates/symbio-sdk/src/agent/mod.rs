@@ -37,10 +37,10 @@
 //! 用户工作目录里的文件不归它管——那是宿主策略（工作区闸 + 审批）的地界；
 //! **别的** Agent 的包也不归它管（没有谁的 manifest 能描述别人的树）。
 
-use crate::keys::SymbioKey;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use symbio_kernel::keys::SymbioKey;
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 // ═══════════════════════════════════════════════════════════════════════════

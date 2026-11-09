@@ -72,14 +72,14 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
 ///
 /// 旧 `TranscriptView::to_messages` 的唯一读法（出口已删）；这里按同一条折一遍，
 /// 让「prompt 来自事实切片」这条断言继续走真实的转写投影。
-fn request_messages(events: &[Event]) -> Vec<crate::projection::transcript::PromptMessage> {
+fn request_messages(events: &[Event]) -> Vec<symbio_kernel::llm::prompt_message::PromptMessage> {
     crate::projection::transcript::transcript(CHAT, MESSAGE)
         .read_all(events)
         .value
         .entries
         .iter()
         .filter(|e| !e.exclude_from_context)
-        .map(crate::projection::transcript::PromptMessage::from)
+        .map(symbio_kernel::llm::prompt_message::PromptMessage::from)
         .collect()
 }
 
@@ -343,7 +343,7 @@ fn forced_failure_produces_fallback_with_provenance() {
 // 真实接线完全一致，只换适配器。
 
 use crate::adapters::{AdapterError, FullModel, LatencyTier, LlmAdapter, TokenIssuer};
-use crate::projection::transcript::PromptMessage;
+use symbio_kernel::llm::prompt_message::PromptMessage;
 
 /// 零 LLM 桩的**本文件版**。
 ///

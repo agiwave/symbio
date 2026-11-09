@@ -38,7 +38,9 @@
 //! 遍历端点归 `plugin::traverse`，
 //! 嵌入服务 id 归 `embedding::ids`，信封载荷键归 `plugin`。判据见 D-095。
 
-pub use symbio_kernel::keys::SymbioKey;
+// 机制 trait 是内核词汇：本模块只借来定义键类型（`impl SymbioKey`），**不转出**
+// ——内核符号只保留 `symbio_kernel::keys::SymbioKey` 一条路径（DE-018 的 D-419）。
+use symbio_kernel::keys::SymbioKey;
 
 macro_rules! define_string_key {
     // 带承认标记的形态（`dead-code-audit` R-002）：lint 属性**由宏转发**到生成的结构体与
