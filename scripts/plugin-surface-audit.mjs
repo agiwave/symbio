@@ -16,15 +16,17 @@
  *
  * | 编号 | 判什么 | 红了怎么办 |
  * |---|---|---|
- * | HS-001 | 非控制面插件的源码（注释外）出现 `symbio_sdk::` / `symbio_deploy::` | 从门面或 `symbio_kernel` 取那个符号；门面里没有 ⇒ 说明它还不该给插件看，先论证再加白名单 |
+ * | HS-001 | 非控制面插件的源码（注释外）出现 `symbio_sdk::` / `symbio_deploy::` / `symbio_kernel::` | 从门面取那个符号；门面里没有 ⇒ 说明它还不该给插件看，先论证再加白名单 |
  * | HS-002 | 门面白名单条数超过基线（只许降） | 加一条要配一条决策理由，并同步上调基线 |
  * | HS-003 | 门面白名单里有符号在**扩展层插件代码里零引用** | 删掉它——白名单的每一条都要报得出消费方（与 C-003 同一把尺子）；报不出的就是空转条目 |
  * | HS-004 | 插件胶水层 `symbio-providers` 把**嵌入臂**设成默认开启（`default = ["embedding"]` 或依赖不是 `optional`） | 那一条 `default = []` 是有意的：`ort` / `tokenizers` 带来 55 个传递依赖（168 → 113），而插件侧只有 `local` 一个消费者。要开就在宿主与需要它的插件那里显式开（D-254） |
  * | HS-005 | 门面 manifest **或任一活跃 crate 的源码 / manifest** 里出现旧 core 名（两种拼写） | 旧 core 已整棵并入 `symbio-sdk`（D-279）；门面只依赖 kernel + sdk + deploy，活跃区不再把已删名写成引用。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
  * | HS-006 | 语法臂条数 > 基线，或模块级转发条数 > 基线 | 两格都「只许不涨」：语法臂不计债但计件；模块转发一行换 N 条，要显式（D-278） |
  *
- * `symbio_kernel::` 前缀**放行**：kernel 已进插件依赖白名单，禁前缀就是「许依赖、
- * 禁使用」的自相矛盾。
+ * `symbio_kernel::` 前缀对扩展层插件同样不放行（D-418）：DE-002 说扩展层插件的**唯一**
+ * 宿主依赖是 `symbio-plugin-api`，而语法臂本来就把扩展层要用的共享类型转出去了。放行
+ * 源码前缀等于绕开门面的计件与消费方核对——插件随手写一条 `symbio_kernel::…` 即可，
+ * 既不进门面棘轮、也不需要论证。控制面（`loop` / `session`）仍豁免这一档。
  *
  * ## 为什么按插件身份分档，而不是一刀切
  *
@@ -64,14 +66,16 @@ import { stripRustCode } from './extension-vocab-audit.mjs'
 export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-loop', 'symbio-plugin-session']
 
 /**
- * 源码里不得出现的两个前缀：`symbio_sdk::` / `symbio_deploy::`（应用侧门面）。
+ * 源码里不得出现的三个前缀：`symbio_sdk::` / `symbio_deploy::`（应用侧门面）与
+ * `symbio_kernel::`（共享语法）。
  *
- * `symbio_kernel::` **已放行**：kernel 是插件依赖白名单里的共享语法，禁前缀就是
- * 「许依赖、禁使用」的自相矛盾。原核心 crate 的根名随该 crate 一起消失（D-279）。
+ * kernel 也在其中（D-418）：扩展层插件的唯一宿主依赖是 `symbio-plugin-api`，语法臂
+ * 已经把扩展层要用的共享类型转了出去。直接写 `symbio_kernel::` 会绕开门面的计件与
+ * 消费方核对——那正是本判据要守的通道。控制面（`loop` / `session`）按身份豁免。
  *
  * manifest 依赖边不在这里判——它只有 E-009 一个 owner。
  */
-export const FORBIDDEN_PREFIXES = ['symbio_sdk::', 'symbio_deploy::']
+export const FORBIDDEN_PREFIXES = ['symbio_sdk::', 'symbio_deploy::', 'symbio_kernel::']
 
 /**
  * 机制臂条数基线：**只降不升**（HS-002）。实测低于它时打提示要求同步下调。
@@ -144,7 +148,11 @@ export const SDK_BASELINE = 124
 // 门面转出。消费方是 `symbio-plugin-model` 的执行体。
 // 138 → 137（`D-339`）：`OWNER_PRINCIPAL` 在扩展层零消费（唯一引用方 session 属控制面），
 // 按 HS-003 从门面删除；控制面改从 `symbio_kernel::event` 取，棘轮随实测下调。
-export const GRAMMAR_BASELINE = 137
+// 137 → 139（`D-418`）：HS-001 对扩展层禁用 `symbio_kernel::` 之后，model 执行体原先
+// 直取的三条语法（`event::branch::{removed_ids, unselected_roots}`、`ClosureReason`）
+// 必须经门面转出——它们本来就是内核共享类型，只是此前有一条旁路没被计件。此前实测
+// 136（基线 137 留了一格余量），加三条后按实测收平到 139。
+export const GRAMMAR_BASELINE = 139
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。
@@ -535,8 +543,9 @@ export function run(root) {
           if (!line.includes(pfx)) continue
           errors.push(
             `${path.relative(root, f).split(path.sep).join('/')}:${idx + 1}  \`${pfx}\`——` +
-              '扩展层插件源码只经 `symbio_plugin_api::…` 或白名单里的 `symbio_kernel::…` 取宿主面（HS-001）；' +
-              '`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它们等于「插件 → 应用」反向耦合',
+              '扩展层插件源码只经 `symbio_plugin_api::…` 取宿主面（HS-001 / D-418）：' +
+              '`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它们等于「插件 → 应用」反向耦合；' +
+              '`symbio_kernel` 的共享语法由门面的语法臂转出，绕开它等于绕开门面的计件与消费方核对',
           )
         }
       }
@@ -675,7 +684,7 @@ export function run(root) {
   console.log(
     green(
       `✓ HS-001 扩展层零直接依赖：${scannedPlugins} 个非控制面插件的 ${scannedFiles} 个源文件` +
-        `没有 \`symbio_sdk::\` / \`symbio_deploy::\` 前缀（控制面 ${CONTROL_PLANE.length} 个源码前缀豁免：` +
+        `没有 \`symbio_sdk::\` / \`symbio_deploy::\` / \`symbio_kernel::\` 前缀（控制面 ${CONTROL_PLANE.length} 个源码前缀豁免：` +
         `${CONTROL_PLANE.join(' / ')}；manifest 依赖边归 E-009，控制面不豁免）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}，` +
         `读数来自 ${arms.read} 条 \`pub use\` 语句：` +
         `${FACADE_ARMS.map((c) => `${c} ${arms.counts[c] ?? 0}`).join(' · ')}）` +

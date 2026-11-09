@@ -14,16 +14,11 @@ dead_code = "warn"
 
 [dependencies]
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-# 内核（封闭语法的共享类型层）：闭集取值（`ClosureReason`）与事件常量都在这里，
-# 执行体写收束事实时直接取类型，不在本 crate 另抄字面量。分支读法
-# （`event::branch`）也在这一层——它是事实判断，不是呈现（DE-051 D-362）。
-symbio-kernel = { path = "../symbio-kernel" }
 symbio-providers = { path = "../symbio-providers" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续
 # `derive(Deserialize)`——Tauri 命令参数与 gateway 的 WS 入帧都依赖它。
 # 副作用仅限「反序列化 `Rc/Arc` 不保留共享身份」，本仓从不依赖该身份。
-# 内核 crate（封闭语法的共享类型层）：core 与插件都经它拿事件 / 视图 / 声明容器。
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -67,3 +62,5 @@ tokio = { workspace = true, features = ["test-util"] }
 # 测试用：词汇拼写取 core 的测试夹具（D-204「拼写只有一个来源」）。
 # 本插件不是 `turn.*` / `message.*` 的 owner，测试也不该再抄一份字面量。
 symbio-sdk = { path = "../symbio-sdk", features = ["test-fixtures"] }
+# 测试用：事件存储基线（`MemoryStore`）直接取内核。
+symbio-kernel = { path = "../symbio-kernel" }

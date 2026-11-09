@@ -13,7 +13,8 @@
  *   ⑬ 门面一条 `pub use …::` 都读不到 → exit 1 —— 「0 条机制臂」与「一条都没读到」不许长得一样（D-280）。
  *
  * 插件的 **manifest 依赖边**不在这里判：它只有 `plugin-entry-audit` 的 E-009 一个
- * owner（白名单 = plugin-api / kernel / providers + 第三方）。本脚本只剩源码前缀那一半。
+ * owner（按身份分档：扩展层 plugin-api / providers，控制面另许 kernel；`D-418`）。
+ * 本脚本只剩源码前缀那一半。
  *
  * 用法：node --test scripts/plugin-surface-audit.test.mjs
  */
@@ -121,6 +122,40 @@ test('② 源码直取 core ⇒ 红', () => {
     assert.equal(r.status, 1, r.stdout + r.stderr)
     assert.match(r.stdout, /symbio_sdk::/)
     assert.match(r.stdout, /HS-001/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('②b 源码直取 kernel ⇒ 红（D-418：语法也走门面）', () => {
+  const root = fixture({
+    'symbio-plugin-fix': {
+      rs: 'use symbio_kernel::event::ClosureReason;\npub fn f(_: ClosureReason) {}\n',
+    },
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /symbio_kernel::/)
+    assert.match(r.stdout, /HS-001/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('②c 控制面源码直取 kernel ⇒ 绿（源码前缀豁免）', () => {
+  const root = fixture({
+    'symbio-plugin-loop': {
+      rs: 'use symbio_kernel::event::ClosureReason;\npub fn f(_: ClosureReason) {}\n',
+      manifest: CLEAN_MANIFEST.replace('symbio-plugin-fix', 'symbio-plugin-loop'),
+    },
+    'symbio-plugin-fix': {},
+    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
   } finally {
     rmTree(root)
   }

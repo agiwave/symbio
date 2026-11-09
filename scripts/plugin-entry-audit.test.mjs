@@ -904,10 +904,11 @@ test('E-009 不误报：装配方 `crates/symbio` 聚合全部插件（inventory
   assert.equal(r.status, 0, r.stdout)
 })
 
-// ── E-009 后半（依赖边闭集）：`symbio-*` 只许 plugin-api / kernel / providers ─────
+// ── E-009 后半（依赖边闭集）：`symbio-*` 按插件身份分档 ─────────────────────
 //
 // 判据从「只禁兄弟插件」扩成**生产依赖闭集**：`symbio-sdk` / `symbio-deploy` 是应用侧
-// 门面，插件依赖它就是「插件 → 应用」反向耦合；控制面插件不豁免。dev / build 仍只判
+// 门面，插件依赖它就是「插件 → 应用」反向耦合；控制面插件不豁免。D-418 起扩展层的
+// 共享语法也只能经门面的语法臂取——`symbio-kernel` 只许控制面直连。dev / build 仍只判
 // 兄弟插件。`symbio-providers` 的三条准入条件由 providers 条件块实际检查。
 
 test('E-009 命中：[dependencies] 出现 `symbio-sdk`（应用侧门面）', () => {
@@ -941,16 +942,38 @@ test('E-009 命中：控制面插件同样受白名单约束（`session` 依赖 
   assert.match(r.stdout, /E-009 crates\/symbio-plugin-session\/Cargo\.toml/)
 })
 
-test('E-009 不误报：白名单三件套 + 第三方进 [dependencies]', () => {
+test('E-009 命中：扩展层插件的 [dependencies] 出现 `symbio-kernel`（直连语法）', () => {
   const r = audit({
     ...CLEAN,
     ...mcpManifest(
       '\n[dependencies]\n' +
         'symbio-plugin-api = { path = "../symbio-plugin-api" }\n' +
-        'symbio-kernel = { path = "../symbio-kernel" }\n' +
+        'symbio-kernel = { path = "../symbio-kernel" }\n',
+    ),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, depHit(6))
+  assert.match(r.stdout, /只许控制面/)
+})
+
+test('E-009 不误报：白名单两件套 + 第三方进 [dependencies]（扩展层）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      '\n[dependencies]\n' +
+        'symbio-plugin-api = { path = "../symbio-plugin-api" }\n' +
         'symbio-providers = { path = "../symbio-providers" }\n' +
         'serde = { version = "1" }\n',
     ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-009 不误报：控制面 `session` 直连 `symbio-kernel`（按身份放行）', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-plugin-session/Cargo.toml':
+      '[package]\nname = "symbio-plugin-session"\n\n[dependencies]\nsymbio-kernel = { path = "../symbio-kernel" }\nsymbio-plugin-api = { path = "../symbio-plugin-api" }\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })

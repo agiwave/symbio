@@ -32,7 +32,7 @@
  * | E-006 | **权威清单**（`003-ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
- * | E-009 | 插件依赖边闭集：**`[dependencies]` 的 `symbio-*` 只许 `plugin-api` / `kernel` / `providers`（+ 第三方）**；兄弟插件、`symbio` 宿主门面（只许 dev）、`include!`/`#[path]` 跨 crate、源码 `symbio_plugin_<兄弟>` 一律禁，**测试代码同样判**；例外只有一条**限期豁免**（`scripts/exemptions/plugin-session-sdk.json`：crate / 依赖精确匹配、`expires` 到点即红、`symbols` 符号级冻结） | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过（Rust 私有可见性包含"定义模块的后代"），旧实现判的就是这个形态。拆 crate（D-191）后兄弟插件是独立 crate，该路径**不可能存在**——约束由 cargo 的依赖图物理给出，但它的物理位置也搬到了 `Cargo.toml`：现在能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条**静默空转**（全仓 4 处 `crate::plugins` 全是注释），绿灯是假的。现判六条通路：清单闭集（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法；`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它就是「插件→应用」反向耦合，控制面插件不豁免）· 源码裸 `symbio_plugin_<x>` · 旧路径兜底 · `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码）· `symbio-providers` 的三条准入条件（自身不依赖插件 / 不含端口名 / 不含业务事实名）。唯一例外是 `plugin-session` 的 `symbio-sdk` 限期豁免（session 退役时同批删除）：对象、到期日、符号集都是**数据**，过期 / 扩散 / 新增用法三者任一即红。测试也判：让它对仓内可见去喂一条测试，隔离已经先被拆掉了一个模块 |
+ * | E-009 | 插件依赖边闭集：**`[dependencies]` 的 `symbio-*` 按身份分档——扩展层只许 `plugin-api` / `providers`（+ 第三方），控制面另许 `kernel`**；兄弟插件、`symbio` 宿主门面（只许 dev）、`include!`/`#[path]` 跨 crate、源码 `symbio_plugin_<兄弟>` 一律禁，**测试代码同样判**；例外只有一条**限期豁免**（`scripts/exemptions/plugin-session-sdk.json`：crate / 依赖精确匹配、`expires` 到点即红、`symbols` 符号级冻结） | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过（Rust 私有可见性包含"定义模块的后代"），旧实现判的就是这个形态。拆 crate（D-191）后兄弟插件是独立 crate，该路径**不可能存在**——约束由 cargo 的依赖图物理给出，但它的物理位置也搬到了 `Cargo.toml`：现在能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条**静默空转**（全仓 4 处 `crate::plugins` 全是注释），绿灯是假的。现判六条通路：清单闭集（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法；`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它就是「插件→应用」反向耦合，控制面插件不豁免；扩展层直连 `symbio-kernel` 同样红——共享语法走门面的语法臂，`D-418`）· 源码裸 `symbio_plugin_<x>` · 旧路径兜底 · `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码）· `symbio-providers` 的三条准入条件（自身不依赖插件 / 不含端口名 / 不含业务事实名）。唯一例外是 `plugin-session` 的 `symbio-sdk` 限期豁免（session 退役时同批删除）：对象、到期日、符号集都是**数据**，过期 / 扩散 / 新增用法三者任一即红。测试也判：让它对仓内可见去喂一条测试，隔离已经先被拆掉了一个模块 |
  * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../docs/003-design/001-核心架构.md "D-083") 的闭族通货：宿主机制面 `symbio_sdk::` + 封闭语法 `symbio_kernel::` + 通用库 + crate 根日志/工厂宏 + 本插件自己的模块根。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_sdk::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
@@ -795,11 +795,13 @@ function pluginIdOfDir(dir) {
 }
 
 /**
- * 插件生产依赖的 `symbio-*` 闭集。
+ * 插件生产依赖的 `symbio-*` 闭集：**按插件身份分档**（D-418）。
  *
- * - `symbio-plugin-api`：宿主词汇层，插件唯一的通用门面；
- * - `symbio-kernel`：共享语法（事实 / 事件 / 声明），只放类型不放容器概念；
- * - `symbio-providers`：外部世界连接原语库（HTTP / 文件 / 进程），等同第三方。
+ * - 扩展层插件只有 `symbio-plugin-api`（宿主词汇层、唯一宿主依赖）与
+ *   `symbio-providers`（外部世界连接原语库，等同第三方）。共享语法由门面的语法臂
+ *   转出，manifest 直连 kernel 等于绕开门面的计件与消费方核对。
+ * - 控制面（`loop` / `session`，DE-026 的影响类）另许 `symbio-kernel`：它们按轮的
+ *   顺序运行、直接读事件流，源码前缀也按同一身份豁免（HS-001）。
  *
  * 其余一律不在白名单：`symbio-sdk` / `symbio-deploy` 是**应用侧门面**，插件依赖它们
  * 等于「插件 → 应用」反向耦合；兄弟插件只能经容器路由；`symbio` 宿主门面只许 dev（④）。
@@ -807,7 +809,12 @@ function pluginIdOfDir(dir) {
  * `symbio-providers` 是**带条件的白名单**：它进白名单的前提是「不是第二个共享层」，
  * 三条条件由下面的 providers 条件块实际检查，不是写在注释里就算数。
  */
-const PLUGIN_DEP_WHITELIST = new Set(['symbio-plugin-api', 'symbio-kernel', 'symbio-providers'])
+const CONTROL_PLANE_IDS = new Set(['loop', 'session'])
+const PLUGIN_DEP_WHITELIST = new Set(['symbio-plugin-api', 'symbio-providers'])
+const CONTROL_PLANE_DEP_WHITELIST = new Set([...PLUGIN_DEP_WHITELIST, 'symbio-kernel'])
+function depWhitelistFor(id) {
+  return CONTROL_PLANE_IDS.has(id) ? CONTROL_PLANE_DEP_WHITELIST : PLUGIN_DEP_WHITELIST
+}
 const PROVIDERS_ID = 'symbio-providers'
 
 /**
@@ -1075,20 +1082,26 @@ const sdkExemption = loadSdkExemption()
           sdkExemption !== null &&
           dep === SDK_EXEMPTION_DEP &&
           `${PLUGIN_CRATE_PREFIX}${id}` === sdkExemption.data.crate
-        if (!PLUGIN_DEP_WHITELIST.has(dep) && !sdkDepExempt && !exempted(raw, i, 'E-009')) {
+        if (
+          !depWhitelistFor(id).has(dep) &&
+          !sdkDepExempt &&
+          !exempted(raw, i, 'E-009')
+        ) {
           const why =
             dep === 'symbio-sdk' || dep === 'symbio-deploy'
               ? `\`${dep}\` 是应用侧门面 —— 插件依赖它等于「插件 → 应用」反向耦合`
-              : /^symbio-plugin-/.test(dep)
-                ? `\`${dep}\` 是兄弟插件 —— 跨插件调用只能经容器路由（\`ctx.parent()\` → \`parent.route(ctx)\`）+ 地址常量`
-                : `\`${dep}\` 不在插件依赖白名单`
+              : dep === 'symbio-kernel'
+                ? `\`${dep}\` 只许控制面（\`loop\` / \`session\`）直连 —— 扩展层插件的共享语法经门面的语法臂取，直连等于绕开门面的计件与消费方核对`
+                : /^symbio-plugin-/.test(dep)
+                  ? `\`${dep}\` 是兄弟插件 —— 跨插件调用只能经容器路由（\`ctx.parent()\` → \`parent.route(ctx)\`）+ 地址常量`
+                  : `\`${dep}\` 不在插件依赖白名单`
           report(
             'E-009',
             'error',
             rel(abs),
             i + 1,
-            `${why}。插件 [dependencies] 的 \`symbio-*\` 只许 \`symbio-plugin-api\` / ` +
-              `\`symbio-kernel\` / \`symbio-providers\`（+ 第三方）`,
+            `${why}。扩展层插件 [dependencies] 的 \`symbio-*\` 只许 \`symbio-plugin-api\` / ` +
+              `\`symbio-providers\`（+ 第三方）；控制面另许 \`symbio-kernel\``,
           )
         }
       }

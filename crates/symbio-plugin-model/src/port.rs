@@ -25,10 +25,10 @@ use symbio_plugin_api::port::{
     PortProvider, PortReply,
 };
 use symbio_plugin_api::{
-    llm_short_id, CapabilityMeta, CapabilityRow, Entity, ExecEnv, ExecEventSink,
-    ExecTranscriptWriter, FactDraft, ModelFinishReason, ModelProvider, PluginError,
-    PluginInvokeRequestExt, PromptMessage, TurnOutput, TurnToolCallInfo, Verb, EVENT_FAILED,
-    EVENT_RESPONSE,
+    llm_short_id, removed_ids, unselected_roots, CapabilityMeta, CapabilityRow, ClosureReason,
+    Entity, ExecEnv, ExecEventSink, ExecTranscriptWriter, FactDraft, ModelFinishReason,
+    ModelProvider, PluginError, PluginInvokeRequestExt, PromptMessage, TurnOutput,
+    TurnToolCallInfo, Verb, EVENT_FAILED, EVENT_RESPONSE,
 };
 
 /// 本插件服务的端口名（提供者自己定义；契约层不认识它）。
@@ -196,8 +196,8 @@ fn turn_input(
     // 「哪一支是活的」是事实层判断，折法住在 `symbio_kernel::event::branch`（DE-051
     // D-362）：投影、请求包裁支、这里读的是同一个函数。「还在不在」的证据与转写投影
     // 同源（`message.removed`），两处对同一份历史因此得出同一组隐藏支。
-    let removed = symbio_kernel::event::branch::removed_ids(events, EVENT_MESSAGE_REMOVED);
-    let hidden_branches = symbio_kernel::event::branch::unselected_roots(
+    let removed = removed_ids(events, EVENT_MESSAGE_REMOVED);
+    let hidden_branches = unselected_roots(
         events,
         |id| !removed.contains(id),
         EVENT_TURN_BRANCH,
@@ -680,9 +680,9 @@ impl PortExecutor for ModelExecutor {
                     // 开始写 `reason` 之后，这一段成为「所有终结格都要带 reason」的边界
                     // ——模型自己是终答的写方，这里不能空着（t47 的八条不变量）。
                     payload["reason"] = serde_json::json!(if output.finish.is_length() {
-                        symbio_kernel::event::ClosureReason::Exhausted.as_str()
+                        ClosureReason::Exhausted.as_str()
                     } else {
-                        symbio_kernel::event::ClosureReason::Completed.as_str()
+                        ClosureReason::Completed.as_str()
                     });
                 }
                 // ── 空正文收束不是「答完了」 ─────────────────────────────
