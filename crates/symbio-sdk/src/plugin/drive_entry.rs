@@ -31,9 +31,9 @@ use std::sync::{Arc, RwLock};
 
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::Plugin;
-use symbio_sdk::agent::AgentScope;
 
-use crate::fact_source::FactSource;
+use crate::agent::AgentScope;
+use crate::plugin::fact_source::FactSource;
 
 /// 一次踢驱动要交回的全部输入：**根已绑在实现实例上**，这里只带本会话的事实。
 ///

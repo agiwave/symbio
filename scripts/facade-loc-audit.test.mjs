@@ -145,6 +145,62 @@ test('FA-003：adr 打不开、登记的文件不在生产里 ⇒ 两条都红',
   }
 })
 
+test('退役条目：文件已删、lines 钉 0 ⇒ 通过（等效收紧，不是删格）', () => {
+  const files = cleanFiles()
+  delete files[`${SRC}/effects.rs`]
+  const baseline = cleanBaseline()
+  baseline.files[0] = {
+    path: 'effects.rs',
+    lines: 0,
+    adr: 'D-399',
+    retired: 'crates/symbio-sdk/src/plugin/effects.rs',
+  }
+  baseline.total = { lines: 8, adr: 'D-399' }
+  const box = sandbox(files, baseline)
+  try {
+    const { status, out } = run(box.root)
+    assert.equal(status, 0, out)
+    assert.match(out, /effects\.rs {2}0 行/)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('退役条目：文件又出现 ⇒ 红（退役没做完或实现长回来了）', () => {
+  const baseline = cleanBaseline()
+  baseline.files[0] = {
+    path: 'effects.rs',
+    lines: 0,
+    adr: 'D-399',
+    retired: 'crates/symbio-sdk/src/plugin/effects.rs',
+  }
+  const box = sandbox(cleanFiles(), baseline)
+  try {
+    const { status, out } = run(box.root)
+    assert.equal(status, 1, out)
+    assert.match(out, /FA-003.*effects\.rs.*仍在 .* 下/)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('退役条目：lines 不是 0 或新家为空 ⇒ 红（退役不留下限余量，也不许无主）', () => {
+  const files = cleanFiles()
+  delete files[`${SRC}/effects.rs`]
+  const baseline = cleanBaseline()
+  baseline.files[0] = { path: 'effects.rs', lines: 3, adr: 'D-399', retired: ' ' }
+  baseline.total = { lines: 8, adr: 'D-399' }
+  const box = sandbox(files, baseline)
+  try {
+    const { status, out } = run(box.root)
+    assert.equal(status, 1, out)
+    assert.match(out, /FA-003.*effects\.rs.*lines 必须是 0/)
+    assert.match(out, /FA-003.*effects\.rs.*retired 必须是非空字符串/)
+  } finally {
+    box.cleanup()
+  }
+})
+
 test('测试代码不计：*.test.rs 再长也不进读数', () => {
   const files = cleanFiles()
   files[`${SRC}/effects.test.rs`] = rustLines(5_000)

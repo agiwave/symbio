@@ -190,7 +190,7 @@ impl Convergence {
         session_id: &str,
         user_seq: u64,
         source: &dyn FactSource,
-        drive: Option<&Arc<dyn symbio_plugin_api::DriveEntry>>,
+        drive: Option<&Arc<dyn symbio_sdk::plugin::drive_entry::DriveEntry>>,
     ) -> Result<bool, PluginError> {
         let events = source.range(0);
         let user = events

@@ -52,7 +52,7 @@ fn main_entry_resolves_to_the_bound_instance() {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let root: Arc<dyn Plugin> = Arc::new(FakeRoot);
     symbio_plugin_api::publish_deployment_root(Arc::clone(&root));
-    let bound = symbio_plugin_api::declared_drive_binding()
+    let bound = symbio_sdk::plugin::drive_entry::declared_drive_binding()
         .expect("驱动绑定必须已登记")
         .bind(Arc::clone(&root));
     let resolved = main_drive().expect("主部署根已登记");
@@ -61,7 +61,7 @@ fn main_entry_resolves_to_the_bound_instance() {
         "主部署入口解析到的实例必须与 bind 交出的是同一份（t29：等的那份不能是另一个）"
     );
     assert!(
-        symbio_plugin_api::declared_drive_entry().is_some(),
+        symbio_sdk::plugin::drive_entry::declared_drive_entry().is_some(),
         "主部署驱动入口必须可被 declared_drive_entry 取到"
     );
 }
@@ -80,7 +80,7 @@ async fn settled_port_resolves_the_registered_entry() {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let root: Arc<dyn Plugin> = Arc::new(FakeRoot);
         symbio_plugin_api::publish_deployment_root(Arc::clone(&root));
-        let _bound = symbio_plugin_api::declared_drive_binding()
+        let _bound = symbio_sdk::plugin::drive_entry::declared_drive_binding()
             .expect("驱动绑定必须已登记")
             .bind(Arc::clone(&root));
     }

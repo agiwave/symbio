@@ -2,8 +2,8 @@
 //!
 //! ## 它补的是哪一格
 //!
-//! 一轮结束时要写的事实不都属于「这次工具调用发生了什么」（[`crate::effects]`），
-//! 也不都欠成一条行（[`crate::rows`]）：记忆的编码与巩固、技能编译、任务调度都
+//! 一轮结束时要写的事实不都属于「这次工具调用发生了什么」（[`crate::plugin::effects`]），
+//! 也不都欠成一条行（[`crate::plugin::rows`]）：记忆的编码与巩固、技能编译、任务调度都
 //! 在收束这一刻凭本轮的产物算，且它们**不保证产出**——一句空发言不编码、活记忆
 //! 不够四条不巩固、没有就绪任务不派活。把它们写成环上的债，就得给每条能力编一个
 //! 「天然空转」的 `owes`，环会在同一个债上反复选中它直到步数上界。
@@ -19,7 +19,7 @@
 //!
 //! [`Settling`] 只交**收束这一刻的值**：时刻 / 主体 / 溯源锚 / 幂等词干 / 用户发言 /
 //! 收束正文 / 完整史。没有 `&mut Ctx`、没有 store、没有 `async`，也**没有轮号与配置
-//! 包**（D-252）：与 [`crate::rows::RowRequest`] 同一条纪律——「下一步跑什么」仍归
+//! 包**（D-252）：与 [`crate::plugin::rows::RowRequest`] 同一条纪律——「下一步跑什么」仍归
 //! 控制面，「这一轮是第几轮」不是能力面的判据。要读开关就读 `history` 里那条
 //! `session.config` 事实，缺省用 core 的出厂值。
 //!
@@ -33,21 +33,21 @@
 //! ## 归属由能力声明，信封由宿主盖章
 //!
 //! 草稿的 `turn` 恒为宿主当轮的格号、`ts` 恒为本次询问的 [`Settling::now_ms`]——
-//! 「收束事实发生在这一刻」是宿主面，能力交不出这两格（[`crate::effects::FactDraft::into_event`]
+//! 「收束事实发生在这一刻」是宿主面，能力交不出这两格（[`crate::plugin::effects::FactDraft::into_event`]
 //! 不收轮号）。落格归属（信封 `actor`）由**事件声明**给定（`EventDecl::owner`，D-339）：
 //! 需要归到认知归属人的事实，在申报方的声明里写 `person/local`；其余写 `@principal`，
 //! 由会话装配解析成本轮主体。贡献者只交事实，不替宿主决定归属（DE-026 D-252）。
 //!
 //! ## 失败口径
 //!
-//! 贡献者自己算不出来时记日志、返回空（与 [`crate::rows::RowHandler::run`] 的
+//! 贡献者自己算不出来时记日志、返回空（与 [`crate::plugin::rows::RowHandler::run`] 的
 //! 「必须保证推进」不同：这里不是债，空是合法结局）；落格失败由宿主记日志、**不打断**
 //! 下一个贡献者——本轮已收束，附加事实失败不该把成功的一轮说成失败。
 
 use symbio_kernel::event::Event;
 
-use crate::context::RecallFacts;
-use crate::effects::FactDraft;
+use crate::plugin::context::RecallFacts;
+use crate::plugin::effects::FactDraft;
 
 /// 这一轮走的是哪一面——贡献者据此判断自己该不该落笔。
 ///
@@ -149,7 +149,7 @@ inventory::collect!(ContributorDecl);
 macro_rules! submit_contributor {
     ($c:expr) => {
         $crate::inventory::submit! {
-            $crate::settle::ContributorDecl { contributor: &$c }
+            $crate::plugin::settle::ContributorDecl { contributor: &$c }
         }
     };
 }

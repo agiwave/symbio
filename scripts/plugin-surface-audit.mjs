@@ -116,7 +116,14 @@ export const WHITELIST_BASELINE = 0
  * 授权常量（债源与执行体同一把尺）。它满足 §5.1 两条：不提能力名（是一条主体身份），
  * 且 ≥2 条能力要用（conation 的债与执行体）。上调一格，记在 D-386 的「判据」节。
  */
-export const SDK_BASELINE = 106
+// 106 → 120（D-413）：门面收掉九份纯转发壳文件之后，原先藏在壳里的出口在根上如实
+// 计件——7 个已搬走的模块名（`behaviors` / `context` / `effects` / `fact_source` /
+// `retrieval` / `rows` / `settle`）、改名转出的 `text`、5 个提交宏与
+// `publish_deployment_root`。**没有一个名字是新增的**：它们此前分别经壳里的
+// `pub use …::*;` 与壳内宏转发给出，旧读数只是看不见（`readFacadeArms` 只读 lib.rs）。
+// 同一批里扩展面对 `drive_entry` 的出口从 9 个符号 + 整模块收窄到 1 个符号。
+// 这是「把读数改成真的」，不是放宽：物理门面行数同期从 2703 降到 2635（FA-002）。
+export const SDK_BASELINE = 120
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。
@@ -144,7 +151,10 @@ export const GRAMMAR_BASELINE = 137
  * 这不是要禁掉模块转发——同族符号整块给出是合理的——而是要它**显式**：一行换 N 条，
  * 得在账上有数，不能是排版事故。
  */
-export const MODULE_REEXPORT_BASELINE = 6
+// 6 → 13（D-413）：同一次「壳文件收掉」把 7 个模块名与改名转出的 `text` 抬到根上。
+// 它们此前各自在壳里以 `pub use …::*;` 放出一整个命名空间——那正是本判据要显式化的
+// 形状（D-278），只是壳文件让读数漏掉了。一行换 N 条的账现在记在门面上，条目一个不少。
+export const MODULE_REEXPORT_BASELINE = 13
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
@@ -226,6 +236,56 @@ const GRAMMAR_SINGLE_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_]+)*::([A-Za-z0-
  */
 const SDK_RE = /pub use symbio_sdk(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
 const SDK_SINGLE_RE = /pub use symbio_sdk(?:::[A-Za-z0-9_]+)*::([A-Za-z0-9_]+);/g
+/**
+ * 带改名的转发（`pub use symbio_sdk::text::tokenizer as text;`）。
+ *
+ * 三臂的另外两条正则都要求 `;` 紧跟在名字后，改名写法读不到——而插件看到的正是
+ * **别名**。读不到它，这一行既不进棘轮、也逃过 HS-003（一条完全不可审的出口）。
+ * 条目名取别名：消费方写的就是别名。
+ */
+const AS_ALIAS_RE =
+  /pub use\s+(symbio_kernel|symbio_sdk|symbio_deploy)((?:::[A-Za-z0-9_]+)*)::([A-Za-z0-9_]+)\s+as\s+([A-Za-z0-9_]+)\s*;/g
+
+/** 来源 crate 的源码根（判「这条转发放出的是不是一个模块」）。 */
+const CRATE_SRC = {
+  symbio_kernel: 'symbio-kernel',
+  symbio_sdk: 'symbio-sdk',
+}
+
+/** `pub use <crate>::<segs>::<name>` 指向的是不是一个真实模块（按文件判，不按名字猜）。 */
+function isModuleItem(root, crate, segs, name) {
+  const dir = CRATE_SRC[crate]
+  if (!dir) return false
+  const base = path.join(root, 'crates', dir, 'src', ...segs)
+  return fs.existsSync(path.join(base, name + '.rs')) || fs.existsSync(path.join(base, name, 'mod.rs'))
+}
+
+/**
+ * 门面在根上转出的**模块名**（含改名后的别名）。
+ *
+ * 这些名字是「本 crate 内的转手」：`pub use rows::{RowHandler, …};` 的 `rows` 已由
+ * 根上一行 `pub use symbio_sdk::plugin::rows;` 从机制臂转来，第二条只是把同一个
+ * 来源的符号再摊到根上——它不是「三臂之外的来源」，不该按白名单条目计。判据按
+ * **来源**分区，所以别名必须跟随它的来处（`D-413`）。
+ */
+export function facadeModuleAliases(root, src) {
+  const out = new Set()
+  for (const m of src.matchAll(/pub use\s+(symbio_kernel|symbio_sdk)::([A-Za-z0-9_:]+)::\{([^}]*)\};/g)) {
+    const segs = m[2].split('::')
+    for (const raw of m[3].replace(/\n/g, ' ').split(',')) {
+      const parts = raw.trim().split(/\s+as\s+/)
+      const name = (parts[0] ?? '').trim()
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue
+      if (isModuleItem(root, m[1], segs, name)) out.add((parts[1] ?? name).trim())
+    }
+  }
+  for (const m of src.matchAll(
+    /pub use\s+(symbio_kernel|symbio_sdk)::([A-Za-z0-9_:]+)::([A-Za-z0-9_]+)(?:\s+as\s+([A-Za-z0-9_]+))?;/g,
+  )) {
+    if (isModuleItem(root, m[1], m[2].split('::'), m[3])) out.add(m[4] ?? m[3])
+  }
+  return out
+}
 
 /** 把 `a, b as c` 这类清单切成符号名（取 `as` 之后的别名）。 */
 function splitSymbols(body) {
@@ -256,9 +316,16 @@ export function readFacadeArms(root) {
       ? fs.readdirSync(ownDir).map((f) => f.replace(/\.rs$/, '')).concat(['crate', 'self', 'super'])
       : [],
   )
+  // 根上从三臂转出的模块名也是「本 crate 内的转手」：`pub use rows::{…}` 的来源
+  // 不是另一个 crate，而是同一份机制臂的再摊开（`D-413`）。
+  for (const name of facadeModuleAliases(root, src)) own.add(name)
   const counts = {}
   const other = []
   let read = 0
+  for (const m of src.matchAll(AS_ALIAS_RE)) {
+    read += 1
+    counts[m[1]] = (counts[m[1]] ?? 0) + 1
+  }
   for (const m of src.matchAll(USE_STMT_RE)) {
     read += 1
     const crate = m[1]
@@ -295,6 +362,7 @@ export function readGrammar(root) {
   const out = []
   for (const m of src.matchAll(GRAMMAR_RE)) out.push(...splitSymbols(m[1]))
   for (const m of src.matchAll(GRAMMAR_SINGLE_RE)) out.push(m[1])
+  for (const m of src.matchAll(AS_ALIAS_RE)) if (m[1] === 'symbio_kernel') out.push(m[4])
   return out.length ? out : null
 }
 
@@ -306,6 +374,7 @@ export function readSdkArm(root) {
   const out = []
   for (const m of src.matchAll(SDK_RE)) out.push(...splitSymbols(m[1]))
   for (const m of src.matchAll(SDK_SINGLE_RE)) out.push(m[1])
+  for (const m of src.matchAll(AS_ALIAS_RE)) if (m[1] === 'symbio_sdk') out.push(m[4])
   return out.length ? out : null
 }
 
@@ -381,6 +450,12 @@ export function collectModuleReexports(root) {
     const base = crates[m[1]]
     const segs = m[2].split('::')
     if (isMod(base, segs, m[3])) out.add(m[3])
+  }
+  // 改名转出：放出的名字是别名，但对插件来说就是那一整个模块（`text` → `tokenizer`）。
+  for (const m of src.matchAll(AS_ALIAS_RE)) {
+    if (!(m[1] in crates)) continue
+    const segs = m[2].split('::').filter(Boolean)
+    if (isMod(crates[m[1]], segs, m[3])) out.add(m[4])
   }
   return out
 }

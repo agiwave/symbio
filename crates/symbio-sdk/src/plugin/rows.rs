@@ -46,8 +46,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use symbio_kernel::event::Event;
+use symbio_kernel::plugin::PluginInvokeRequest;
 
-use crate::effects::FactDraft;
+use crate::plugin::effects::FactDraft;
 
 /// 通用行执行体的名字：`Decl.by` 与 `ActorDecl.name` 都用它。
 ///
@@ -105,7 +106,7 @@ pub struct RowRequest<'a> {
     pub facts: &'a [Event],
     /// 完整史（含本轮之前）：累计口径的判断（技能表、巩固、校准）按它读。
     ///
-    /// 与 [`crate::settle::Settling::history`] 同形：视图求解器按轮收窄
+    /// 与 [`crate::plugin::settle::Settling::history`] 同形：视图求解器按轮收窄
     /// 是为了给每个视图一个成本上界，行是一次单调用、按需读，不该被同一个上界误伤。
     pub history: &'a [Event],
     /// 本行声明的**上游端口**（`DebtSpec.after_port`）：读别端口回执的行按它取，
@@ -192,7 +193,7 @@ pub trait RowHandler: Sync {
     fn run_ctx<'a>(
         &'a self,
         req: &'a RowRequest<'_>,
-        ctx: Option<Arc<dyn crate::PluginInvokeRequest>>,
+        ctx: Option<Arc<dyn PluginInvokeRequest>>,
     ) -> Pin<Box<dyn Future<Output = RowStep> + Send + 'a>> {
         let _ = ctx;
         Box::pin(async move { self.run(req) })
@@ -227,7 +228,7 @@ inventory::collect!(RowDecl);
 macro_rules! submit_row {
     ($h:expr) => {
         $crate::inventory::submit! {
-            $crate::rows::RowDecl { handler: &$h }
+            $crate::plugin::rows::RowDecl { handler: &$h }
         }
     };
 }

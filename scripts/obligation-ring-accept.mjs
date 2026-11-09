@@ -128,7 +128,7 @@ const DECLARED_PORTS = [
   // 工具执行端口
   { port: 'tool', source: 'crates/symbio-plugin-tool/src/declarations.rs:79（PortDecl{port: TOOL} → PORT_TOOL，api/vocab.rs:24）' },
   // 行执行端口（所有 `by: plugin_row` 的债行都走它；`plugin_row` 是宿主词汇）
-  { port: 'plugin_row', source: 'crates/symbio-plugin-loop/src/plugin_rows.rs:58（port: PLUGIN_ROW，api/rows.rs:56）' },
+  { port: 'plugin_row', source: 'crates/symbio-plugin-loop/src/plugin_rows.rs:58（port: PLUGIN_ROW，sdk/src/plugin/rows.rs:56）' },
   // 上下文压缩的落格端口（摘要走 model.assist，产物由这条落）
   { port: 'compact', source: 'crates/symbio-plugin-compact/src/port.rs:38（PortProvider::ports → COMPACT_PORT）' },
   // 意向提升端口

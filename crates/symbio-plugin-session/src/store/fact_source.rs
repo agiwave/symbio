@@ -11,10 +11,10 @@ use std::sync::{Arc, OnceLock, RwLock, Weak};
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::store::Store;
-use symbio_plugin_api::drive_entry::{DriveEntry, DriveTarget};
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 use symbio_plugin_api::fact_source::{FactSource, FactSourceOpener, Principal};
 use symbio_plugin_api::FactDraft;
+use symbio_sdk::plugin::drive_entry::{DriveEntry, DriveTarget};
 
 use super::layout::SessionParams;
 use super::wal::WalStore;
@@ -266,4 +266,4 @@ impl FactSourceOpener for SessionFactOpener {
 
 static SESSION_FACT_OPENER: SessionFactOpener = SessionFactOpener;
 
-symbio_plugin_api::submit_fact_source_opener!(SESSION_FACT_OPENER);
+symbio_sdk::submit_fact_source_opener!(SESSION_FACT_OPENER);

@@ -334,12 +334,14 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // plugin-api（不在扫描面），搬进来的是同一份类型闭包，不是新长出的数据面。
 // core-shape-allow structFields: D-412 context 整块搬进 sdk——ContextRequest(6) / ContextSection(4) / SectionFit(4) / LiveInputs(3) / RecallLine(3) / RecallFacts(2) / ContextProviderDecl(1) 共 23 格随注册表换地址，与 D-408 同一份类型闭包论证（Collect 实现在定义类型的 crate 生成，sdk 只依赖内核）。**另清存量余量**：搬迁前实测已是 529 而基线停在 539，那 10 格不是本批造成的，但留着会让下一次新增正好填进来（FA-002 / AD-002 同一条理由），故直接钉到搬后实测 552，不留余量。
 // core-shape-allow enumVariants: D-412 context 整块搬进 sdk——Cadence(2) / DelegateVerdict(3) 共 5 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包，不是新长出的取值面。
+// core-shape-allow structFields: D-413 五个链接期注册表整块搬进 sdk——RetrievalRequest(2) / Retrieved(3) / Retrieval(2) / RetrieverDecl(1) / RowRequest(9) / ModelAsk(1) / RowDecl(1) / Settling(9) / Contribution(1) / ContributorDecl(1) / FactSourceOpenerDecl(1) / DriveTarget(11) / DriveBindingDecl(1) / DriveEntryDecl(1) 共 44 格随注册表换地址。与 D-408 / D-412 同一份类型闭包论证（Collect 实现在定义类型的 crate 生成，sdk 只依赖内核）；此前住 plugin-api，不在 CS-009 扫描面。
+// core-shape-allow enumVariants: D-413 五个链接期注册表整块搬进 sdk——RowStep(2) / ModelReply(2) / SettleFace(2) 共 6 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 552, enumVariants: 249 }
+  : { structFields: 596, enumVariants: 255 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

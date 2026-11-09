@@ -9,12 +9,13 @@
 //! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂）
 //! - [`behaviors`]：行为名的收集面（实现住 sdk，本 crate 只转出，D-408）
 //! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）（转出，`D-408`）
-//! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）
+//! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）（转出，`D-413`）
 //! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份（转出，`D-412`）
 //! - [`port`]：世界端口的注册面（`PortProvider` 与 port 族——名字与契约静态，提供者随活插件的能力行动态收集）
 //! - [`text`]：Token 计量与头尾切分的**转发**（实现归 `symbio_sdk::text::tokenizer`，`D-404`）
-//! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）
-//! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）
+//! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）（转出，`D-413`）
+//! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）（转出，`D-413`）
+//! - [`fact_source`]：事实源的登记面（转出，`D-413`）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //! - [`views`]：视图读不出来的缺席原因（公开读口是 [`reports`] 的报表登记）
@@ -26,7 +27,7 @@
 //! | 臂 | 来源 | 条数 | 性质 |
 //! |---|---|---|---|
 //! | 语法臂 | `symbio-kernel` | 136 | 形状与闭集，**不计债但计件**（D-278） |
-//! | SDK 臂 | `symbio-sdk` | 114 | 只碰内核词汇的宿主机制（含授权判定），进棘轮 |
+//! | SDK 臂 | `symbio-sdk` | 120 | 只碰内核词汇的宿主机制（含授权判定），进棘轮 |
 //!
 //! 第三臂（旧 core 的 6 条授权符号）已于 D-276 清零：授权判定只查一张部署表，
 //! 不认识轮次 / 幕 / 判决，按 sdk 自己的章程（「插件要用的宿主机制……授权判定」）归位。
@@ -44,26 +45,23 @@
 //! `declarations` 只依赖 `symbio-sdk` 的声明容器，不认识任何具体插件；收集在链接期
 //! 发生，因此插件之间仍然零依赖（DE-024 D-198）。
 
-pub mod behaviors;
-pub mod context;
 pub mod debt;
 pub mod declarations;
 pub mod drive;
-pub mod drive_entry;
-pub mod effects;
 pub mod events;
-pub mod fact_source;
 pub mod hooks;
 pub mod port;
 pub mod reports;
-pub mod retrieval;
 pub mod routes;
-pub mod rows;
-pub mod settle;
 pub mod termination;
-pub mod text;
 pub mod views;
 pub mod vocab;
+
+// 已搬到 `symbio_sdk` 的端口模块不再各留一份转发文件（`D-408` / `D-412` / `D-413`）：
+// 模块名在根上一行转出，插件照旧写 `symbio_plugin_api::rows::…`。`text` 的实现住在
+// `symbio_sdk::text::tokenizer`，沿用它原来的门面名转出（`D-404`）。
+pub use symbio_sdk::plugin::{behaviors, context, effects, fact_source, retrieval, rows, settle};
+pub use symbio_sdk::text::tokenizer as text;
 
 pub use context::{
     fit_sections, providers as context_providers, sections as context_sections, Cadence,
@@ -74,10 +72,10 @@ pub use declarations::{
     assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations, vocab,
     DeclarationsDecl,
 };
-pub use drive_entry::{
-    declared_drive_binding, declared_drive_entry, deployment_root, publish_deployment_root,
-    DriveBinding, DriveBindingDecl, DriveEntry, DriveEntryDecl, DriveTarget,
-};
+// 驱动入口模块整块归 sdk（`D-413`），门面只留扩展层插件真正要的一条：`home` 的装配根
+// 登记。驱动句柄与解析口（`DriveEntry` / `DriveTarget` / `declared_drive_binding`）只有
+// 控制面 `session` 用，而控制面按影响类运行、本就不在该门面的约束面内，直接从
+// `symbio_sdk::plugin::drive_entry` 取——留在这里会是一条零扩展消费方的空转条目（HS-003）。
 pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,
@@ -85,13 +83,11 @@ pub use effects::{
 pub use fact_source::{
     declared_fact_source_opener, Fact, FactSource, FactSourceOpener, Principal, FACT_SOURCE,
 };
+pub use symbio_sdk::plugin::drive_entry::publish_deployment_root;
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
-// `submit_behavior!` 随注册表搬进 sdk（D-408），经本 crate 的 `effects` 模块转出到根：
-// 插件侧写 `symbio_plugin_api::submit_behavior!` 不变（E-009）。
-pub use effects::submit_behavior;
-// `submit_context_provider!` 同形（D-412）：经 `context` 壳转出到根，插件侧写法不变。
-pub use context::submit_context_provider;
+// 提交宏随各自的注册表整块搬进 sdk（D-408 / D-412 / D-413）；门面在根上转出，
+// 插件侧 `symbio_plugin_api::submit_*!` 的写法不变（E-009）。
 pub use port::{
     capability_port_check, capability_port_of, port_family, port_row_name, port_rows, AuthzVerdict,
     PortCapabilities, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
@@ -99,6 +95,11 @@ pub use port::{
 };
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};
 pub use settle::{Contribution, Contributor, SettleFace, Settling};
+pub use symbio_sdk::submit_behavior;
+pub use symbio_sdk::submit_context_provider;
+pub use symbio_sdk::submit_contributor;
+pub use symbio_sdk::submit_retriever;
+pub use symbio_sdk::submit_row;
 pub use views::ViewUnavailable;
 
 // ==================== 扩展层宿主面 ====================

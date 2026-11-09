@@ -49,7 +49,7 @@ pub struct RetrievalRequest<'a> {
 /// 检索出的一条记忆（**自有**形状：行得通，因为读数比输入切片活得久）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Retrieved {
-    /// 来源事实的存储 `seq`——与 [`crate::RecallLine::seq`] 同一格身份。
+    /// 来源事实的存储 `seq`——与 [`crate::plugin::context::RecallLine::seq`] 同一格身份。
     pub seq: u64,
     pub content: String,
     pub tag: String,
@@ -58,8 +58,9 @@ pub struct Retrieved {
 /// 一条能力的检索读数。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Retrieval {
-    /// 本次检索是否没扫完（预算耗尽等）——降级必须随读数走，与 [`crate::RecallFacts`]
-    /// 的 `degraded` 同一格语义（DE-036 §6 验收 2：不允许空且不标）。
+    /// 本次检索是否没扫完（预算耗尽等）——降级必须随读数走，与
+    /// [`crate::plugin::context::RecallFacts`] 的 `degraded` 同一格语义
+    /// （DE-036 §6 验收 2：不允许空且不标）。
     pub degraded: bool,
     /// 排好序的条目。**次序是包内判据的结论**：宿主不再排第二遍。
     pub entries: Vec<Retrieved>,
@@ -96,7 +97,7 @@ inventory::collect!(RetrieverDecl);
 macro_rules! submit_retriever {
     ($r:expr) => {
         $crate::inventory::submit! {
-            $crate::retrieval::RetrieverDecl { retriever: &$r }
+            $crate::plugin::retrieval::RetrieverDecl { retriever: &$r }
         }
     };
 }

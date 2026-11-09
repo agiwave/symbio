@@ -26,15 +26,15 @@ use std::sync::Arc;
 
 pub use symbio_host::drive::{drive_on_new_fact, open_fact_source, settled, FactWorld};
 
-use symbio_plugin_api::{DriveEntry, DriveTarget};
+use symbio_sdk::plugin::drive_entry::{DriveEntry, DriveEntryDecl, DriveTarget};
 
 /// 主部署的那一份实例。
 ///
 /// 每次调用按当前部署根解析：`HostDriveBinding` 按根缓存，因此这里拿到的与插件
 /// `drive_entry` 绑的是同一个实例；reload 重建根后自然换到新根。
 fn main_drive() -> Option<Arc<dyn DriveEntry>> {
-    let root = symbio_plugin_api::deployment_root()?;
-    Some(symbio_plugin_api::declared_drive_binding()?.bind(root))
+    let root = symbio_sdk::plugin::drive_entry::deployment_root()?;
+    Some(symbio_sdk::plugin::drive_entry::declared_drive_binding()?.bind(root))
 }
 
 /// 主部署实例的静态入口（`inventory` 登记；未装配时 `None`）。
@@ -43,7 +43,7 @@ struct MainDriveEntry;
 static MAIN_DRIVE_ENTRY: MainDriveEntry = MainDriveEntry;
 
 inventory::submit! {
-    symbio_plugin_api::DriveEntryDecl { entry: &MAIN_DRIVE_ENTRY }
+    DriveEntryDecl { entry: &MAIN_DRIVE_ENTRY }
 }
 
 impl DriveEntry for MainDriveEntry {

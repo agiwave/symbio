@@ -43,7 +43,8 @@ impl Plugin for FakeRoot {
 /// 同一个根绑两次拿到同一个实例；不同根各自一份。
 #[test]
 fn binding_is_one_instance_per_root() {
-    let binding = symbio_plugin_api::declared_drive_binding().expect("驱动绑定必须已登记");
+    let binding =
+        symbio_sdk::plugin::drive_entry::declared_drive_binding().expect("驱动绑定必须已登记");
     let root: Arc<dyn Plugin> = Arc::new(FakeRoot);
     let first = binding.bind(Arc::clone(&root));
     let second = binding.bind(Arc::clone(&root));

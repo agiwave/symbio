@@ -45,10 +45,11 @@ use symbio_kernel::plugin::{
 };
 use symbio_plugin_api::drive::{DriveKey, EVENT_DRIVER_STALLED};
 use symbio_plugin_api::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
-use symbio_plugin_api::{
-    DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget, ExecEventSink, FactDraft,
-};
+use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::keys::{AGENT_ID, MODE, RISK_LEVEL, SOURCE_PRINCIPAL, WORKDIR};
+use symbio_sdk::plugin::drive_entry::{
+    declared_drive_entry, DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget,
+};
 
 use crate::Host;
 
@@ -108,7 +109,7 @@ pub fn open_fact_source(session_id: &str) -> Result<Arc<dyn FactSource>, String>
 /// 「主部署用哪个入口」；把等待体留在装配 crate 会让「状态在宿主、读数在装配」
 /// 重新分裂一次（P1 的原始病灶缩小一号，不是治好）。判据见 `D-400`。
 pub async fn settled(session_id: &str) {
-    if let Some(entry) = symbio_plugin_api::declared_drive_entry() {
+    if let Some(entry) = declared_drive_entry() {
         entry.settled(session_id).await;
     }
 }

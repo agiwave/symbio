@@ -381,7 +381,7 @@ function ratchet(label, code, measuredMap, baselineMap) {
 
 ratchet('载荷类型 import', 'LP-001', measured.lp001, base.lp001PayloadImports)
 // LP-003 存量 `plugin_rows.rs: 4` 全部是 `ModelReply`：D-338 行派发机制的通用回执值
-// （`symbio-plugin-api/src/rows.rs`，只有 Text / Failed，与任何端口无关），不是新进的
+// （`symbio-sdk/src/plugin/rows.rs`，只有 Text / Failed，与任何端口无关），不是新进的
 // 世界载荷。这是已裁定的机制面（D-241 / D-304 / D-338），词根随类型名的历史沿革留下；
 // 它是机制类型而非世界语义，故按存量登记，不靠改名把判据的注意力从真问题上移开。
 ratchet('世界语义词根', 'LP-003', measured.lp003, base.lp003WorldRoots)

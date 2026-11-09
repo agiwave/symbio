@@ -220,7 +220,7 @@ impl SessionStore {
     pub(crate) fn fact_source_bound(
         &self,
         session_id: &str,
-        drive: Option<Arc<dyn symbio_plugin_api::DriveEntry>>,
+        drive: Option<Arc<dyn symbio_sdk::plugin::drive_entry::DriveEntry>>,
         sink: symbio_kernel::exec::ExecEventSink,
         supplements: Option<crate::transcript::supplements::SupplementDrain>,
         abort_signal: Arc<std::sync::RwLock<Option<symbio_kernel::exec::ExecAbortSignal>>>,

@@ -255,7 +255,7 @@
     },
     {
       "symbol": "writes_of",
-      "path": "crates/symbio-plugin-api/src/rows.rs",
+      "path": "crates/symbio-sdk/src/plugin/rows.rs",
       "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
       "evidence": "docs/003-design/022-行表与派发面.md"
     },

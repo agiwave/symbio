@@ -86,7 +86,7 @@ pub struct SessionPlugin {
     ///
     /// 懒建：构造时父句柄可能还是弱引用，等第一次开轮再 upgrade；之后整份插件
     /// 共享同一实例（按会话的重入位因此只有一份）。
-    drive: OnceLock<Option<Arc<dyn symbio_plugin_api::DriveEntry>>>,
+    drive: OnceLock<Option<Arc<dyn symbio_sdk::plugin::drive_entry::DriveEntry>>>,
     /// 指向自身的弱引用：轮收尾的后台任务（[`SessionPlugin::spawn_turn_closer`]）
     /// 要活得比写臂久，必须持有一份 `'static` 的插件句柄，而 `dispatch` 只有 `&self`。
     ///
@@ -303,11 +303,14 @@ impl SessionPlugin {
     /// 本实例所属**部署根**的驱动实例（父插件即根；按根构造一次，随插件留守）。
     ///
     /// 未装配驱动工厂（单测）或无父插件 ⇒ `None`：写口落地即止，不去猜入口。
-    pub(crate) fn drive_entry(&self) -> Option<Arc<dyn symbio_plugin_api::DriveEntry>> {
+    pub(crate) fn drive_entry(
+        &self,
+    ) -> Option<Arc<dyn symbio_sdk::plugin::drive_entry::DriveEntry>> {
         self.drive
             .get_or_init(|| {
                 let root = self.parent.as_ref()?.upgrade()?;
-                symbio_plugin_api::declared_drive_binding().map(|binding| binding.bind(root))
+                symbio_sdk::plugin::drive_entry::declared_drive_binding()
+                    .map(|binding| binding.bind(root))
             })
             .clone()
     }

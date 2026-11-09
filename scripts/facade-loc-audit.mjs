@@ -17,8 +17,22 @@
  * |---|---|---|
  * | `FA-001` | 某文件或合计的行数**超过**基线 | 红；实现只许往 `symbio-sdk` / `symbio-host` 搬，不许往回长 |
  * | `FA-002` | 行数**低于**基线却没同批下调基线 | 红；否则基线留出余量，「删了再加」就不触发 FA-001 |
- * | `FA-003` | 基线条目形状不对（缺 `path` / `lines` / `adr`、`adr` 打不开、重名、登记的文件不在生产里） | 红；每个数字都必须带能打开的决策号 |
+ * | `FA-003` | 基线条目形状不对（缺 `path` / `lines` / `adr`、`adr` 打不开、重名、登记的文件不在生产里、退役条目却还指着活文件） | 红；每个数字都必须带能打开的决策号 |
  * | `FA-004` | 范围读不出（`crates/symbio-plugin-api/src` 缺失、没有生产 `.rs`、基线缺失或 JSON 坏） | 退 2；读不出不许当「0 行 ⇒ 通过」 |
+ *
+ * ## 退役条目：文件整份删除时，格子留 0，不留空
+ *
+ * 门面里的纯转发文件（整份 `pub use …::*`）搬到 sdk 后**不该继续存在**，而删文件必须
+ * 同批删基线条目（否则「删了再加」能抹平棘轮）。删格本身会被 `35-baseline` 的棘轮元守卫
+ * 记成「放松」（它看不见文件已经不在），所以退役的形态不是删格，而是**把这一格钉到 0**
+ * 并写明它搬去了哪（`retired`）：0 是没有余量的上限，文件若再出现，FA-003 直接红。
+ *
+ * | 字段 | 要求 |
+ * |---|---|
+ * | `lines` | 必须是 **0**（退役 = 这一层不再承载任何实现行） |
+ * | `retired` | 非空字符串，写新家（`crates/symbio-sdk/src/plugin/<mod>.rs`） |
+ * | 文件 | `CRATE_DIR` 下**必须不存在**（存在 ⇒ 退役没做完或又长回来了） |
+ * | `adr` | 照旧：能打开的 `### D-NNN` |
  *
  * ## 统计口径（这条比脚本本身重要）
  *
@@ -127,7 +141,24 @@ export function checkBaseline(baseline, scanned, root = ROOT) {
     }
     if (seen.has(f.path)) errors.push({ code: 'FA-003', message: `${where} 重复登记 ${f.path}` })
     seen.add(f.path)
-    if (!isCount(f.lines)) {
+    const retired = f.retired !== undefined
+    if (retired && (typeof f.retired !== 'string' || f.retired.trim() === '')) {
+      errors.push({ code: 'FA-003', message: `${where}（${f.path}）retired 必须是非空字符串（写新家路径）` })
+    }
+    if (retired) {
+      if (f.lines !== 0) {
+        errors.push({
+          code: 'FA-003',
+          message: `${where}（${f.path}）退役条目的 lines 必须是 0（实为 ${f.lines}）—— 退役不留下限余量`,
+        })
+      }
+      if (live.has(f.path)) {
+        errors.push({
+          code: 'FA-003',
+          message: `${where} 登记了退役的 ${f.path}（→ ${f.retired}），但它仍在 ${CRATE_DIR} 下 —— 要么没删干净，要么又长回来了`,
+        })
+      }
+    } else if (!isCount(f.lines)) {
       errors.push({ code: 'FA-003', message: `${where}（${f.path}）缺少正整数 lines` })
     }
     if (!isAdr(f.adr)) {
@@ -138,7 +169,7 @@ export function checkBaseline(baseline, scanned, root = ROOT) {
         message: `${where}（${f.path}）挂的决策 ${f.adr} 不存在 ⇒ 每个数字都要带能打开的 D 号`,
       })
     }
-    if (!live.has(f.path)) {
+    if (!retired && !live.has(f.path)) {
       errors.push({
         code: 'FA-003',
         message: `${where} 登记了 ${f.path}，但 ${CRATE_DIR} 下没有这个生产文件 —— 删文件必须同批删基线条目（防「删了再加」抹平）`,

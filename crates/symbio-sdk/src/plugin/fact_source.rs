@@ -22,7 +22,7 @@ use std::sync::Arc;
 use symbio_kernel::event::Seq as KernelSeq;
 use symbio_kernel::store::{MemoryStore, Store};
 
-use crate::FactDraft;
+use crate::plugin::effects::FactDraft;
 
 /// 写方主体：完整主体名（如 `person/local` / `agent:main`）。
 pub type Principal = String;
@@ -144,7 +144,7 @@ pub fn draft_into_event(actor: Principal, draft: FactDraft) -> Fact {
 macro_rules! submit_fact_source_opener {
     ($opener:expr) => {
         $crate::inventory::submit! {
-            $crate::fact_source::FactSourceOpenerDecl { opener: &$opener }
+            $crate::plugin::fact_source::FactSourceOpenerDecl { opener: &$opener }
         }
     };
 }

@@ -23,9 +23,9 @@ use symbio_plugin_api::debt::{session_config_id, session_recall_id};
 use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE};
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::retrieval::{retrieve_all, RetrievalRequest};
-use symbio_plugin_api::DriveEntry;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
+use symbio_sdk::plugin::drive_entry::DriveEntry;
 use symbio_sdk::turn::facts::FleetSnapshot;
 
 /// 工具表的**去重**：子 Agent 作用域会把同一能力以 `agent_<id>_<name>` 再注册一遍，
