@@ -1,6 +1,11 @@
 use super::*;
 use crate::ring::facts::{DebtKey, Fact, FactKind, FactView};
-use crate::ring::table::{DebtRow, DebtSource, Table};
+use crate::ring::table::{DebtRow, DebtSource, DeclInput, Table};
+use symbio_kernel::decl::ring::{Decl, Pattern};
+use symbio_kernel::decl::{ActorDecl, Builder, FactDecl, Frozen, PluginDeclarations, ViewDecl};
+use symbio_kernel::event::{Entity, Event as KernelEvent, EventDecl, Verb};
+use symbio_kernel::LatencyTier;
+use symbio_plugin_api::rows::PLUGIN_ROW;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1577,4 +1582,214 @@ async fn replaying_the_same_fact_log_is_byte_identical() {
             "事实时间取自日志里的现在，不是墙钟：{fact:?}"
         );
     }
+}
+
+// ── 选债口按视图切点切片（`Frozen::scan_bound` 的接线）───────────────────
+//
+// 视图求值有长度上界（`Frozen::eval` 超 `cost` 回 `None`），而 `owed` 把 `None`
+// 折成空集——「算不出来」与「没有欠账」同形。切点由声明表回答，选债口取**尾部**；
+// 下面两条一个钉接线后的行为，一个钉「不切就会零债」这个前提本身。
+
+const SLICE_SRC: &str = "slice.src";
+const SLICE_EXIT: &str = "slice.exit";
+const SLICE_VIEW: &str = "slice.view";
+const SLICE_ROW: &str = "slice.row";
+
+const SLICE_EVENTS: &[EventDecl] = &[
+    EventDecl::new(SLICE_SRC, (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(SLICE_EXIT, (Entity::Scope, Verb::Asserted)),
+];
+
+const SLICE_FACTS: &[FactDecl] = &[
+    FactDecl {
+        name: SLICE_SRC,
+        port: None,
+        key: &["id"],
+        expand: &[],
+        fields: &["id"],
+    },
+    FactDecl {
+        name: SLICE_EXIT,
+        port: None,
+        key: &["id"],
+        expand: &[],
+        fields: &["id"],
+    },
+];
+
+/// 视图：把 `SLICE_SRC` 每条事实的 `id` 折成一条实例。
+///
+/// 函数体**不看条数**——超界由 `Frozen::eval` 判。于是它同时是「切对了就看得见」
+/// 与「不切就整族消失」的同一份读法。
+fn slice_ids(events: &[KernelEvent], _now: i64) -> Value {
+    Value::Array(
+        events
+            .iter()
+            .filter(|e| e.kind == SLICE_SRC)
+            .map(|e| json!({ "id": e.payload.get("id").cloned().unwrap_or(Value::Null) }))
+            .collect(),
+    )
+}
+
+/// 归宿行：`by = None` 只回答「这个事实名有人管」（§3.4 第 7 条）。
+fn cover_row(fact: &'static str) -> Decl {
+    let exits: &'static [Pattern] = Box::leak(Box::new([Pattern {
+        source: fact,
+        key: &[],
+        eq: &[],
+    }]));
+    Decl {
+        name: fact,
+        by: None,
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: exits[0],
+        until: exits,
+        unless: &[],
+    }
+}
+
+/// 一份「视图为源头、`cost` 很小」的冻结表：事实条数可以超过视图声明。
+fn declaration_world(cost: u32) -> Arc<Frozen> {
+    let mut rows: Vec<Decl> = [
+        symbio_kernel::event::EVENT_REQUEST,
+        symbio_kernel::event::EVENT_SENT,
+        symbio_kernel::event::EVENT_RESPONSE,
+        symbio_kernel::event::EVENT_FAILED,
+        symbio_kernel::event::EVENT_RETRY,
+    ]
+    .into_iter()
+    .map(cover_row)
+    .collect();
+    let exits: &'static [Pattern] = Box::leak(Box::new([Pattern {
+        source: SLICE_EXIT,
+        key: &["id"],
+        eq: &[],
+    }]));
+    rows.push(Decl {
+        name: SLICE_ROW,
+        by: Some(PLUGIN_ROW),
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: Pattern {
+            source: SLICE_VIEW,
+            key: &["id"],
+            eq: &[],
+        },
+        until: exits,
+        unless: &[],
+    });
+    let views: &'static [ViewDecl] = Box::leak(Box::new([ViewDecl {
+        name: SLICE_VIEW,
+        ver: 1,
+        reads: &[(SLICE_SRC, "id")],
+        evidence: &[SLICE_SRC],
+        cost,
+        eval: slice_ids,
+        agg: None,
+    }]));
+    let mut b = Builder::new();
+    b.declare(
+        "fixture/slice",
+        PluginDeclarations {
+            events: SLICE_EVENTS,
+            facts: SLICE_FACTS,
+            views,
+            ports: &[],
+            actors: vec![ActorDecl {
+                name: PLUGIN_ROW,
+                mode: LatencyTier::Reflex,
+                reads: &[],
+                writes: &[SLICE_SRC, SLICE_EXIT],
+            }],
+            rows: &rows,
+        },
+    );
+    b.seal(&[])
+        .unwrap_or_else(|gaps| panic!("切片夹具应能冻结，实测缺口：{gaps:?}"))
+}
+
+fn slice_event(kind: &'static str, id: &str, ts: i64) -> KernelEvent {
+    KernelEvent::pending(
+        format!("{kind}:{id}"),
+        kind,
+        Entity::Scope,
+        Verb::Asserted,
+        "fixture",
+    )
+    .with_payload(json!({ "id": id }))
+    .with_ts(ts)
+}
+
+/// 六条事实、视图只声明扫两条；债源 `SLICE_SRC` 压在**尾部**（最近的一条）。
+fn over_cost_events() -> Vec<KernelEvent> {
+    let mut events: Vec<KernelEvent> = (0..5)
+        .map(|i| slice_event(SLICE_EXIT, &format!("noise-{i}"), i))
+        .collect();
+    events.push(slice_event(SLICE_SRC, "wanted", 5));
+    events
+}
+
+/// 声明行的债源只交数据；这里给环一份带冻结表的选债输入。
+struct SliceSource {
+    frozen: Arc<Frozen>,
+    events: Vec<KernelEvent>,
+}
+
+impl DebtSource for SliceSource {
+    fn rows(&self, _facts: &FactView<'_>) -> Vec<DebtRow> {
+        Vec::new()
+    }
+
+    fn declarations(&self) -> Option<DeclInput> {
+        Some(DeclInput {
+            frozen: self.frozen.clone(),
+            events: self.events.clone(),
+        })
+    }
+}
+
+/// 正向：事件数超过视图 `cost` 时，视图为源头的债**仍然被选中**。
+#[tokio::test]
+async fn view_sourced_debt_survives_a_slice_longer_than_the_view_cost() {
+    let stub = Arc::new(Stub::ok());
+    let ctx = TestCtx::with_source(Box::new(SliceSource {
+        frozen: declaration_world(2),
+        events: over_cost_events(),
+    }))
+    .with_executor(PLUGIN_ROW, stub.clone());
+
+    let report = drive(&ctx).await;
+
+    assert_eq!(
+        report.dispatched, 1,
+        "超界切片不许让视图债整族静默消失（零告警）"
+    );
+    let seen = stub.seen();
+    assert_eq!(seen[0].0, PLUGIN_ROW);
+    assert_eq!(
+        seen[0].1,
+        json!({"row": SLICE_ROW, "key": [["id", "wanted"]]})
+    );
+}
+
+/// 反向：把**整份**切片直接交给 `owed`（不切）⇒ 视图算不出来 ⇒ 零债。
+///
+/// 这条钉的是缺陷形状本身，也是正向用例的前提：没有接线，正向那条也会零派发。
+#[test]
+fn without_the_window_the_view_yields_no_debt_at_all() {
+    let frozen = declaration_world(2);
+    let events = over_cost_events();
+
+    let whole = owed(frozen.rows(), &frozen, &events, 0);
+    assert!(
+        whole.is_empty(),
+        "整份切片超界 ⇒ eval 回 None ⇒ owed 折成空集（本缺陷的形状）"
+    );
+
+    let bound = frozen.scan_bound().expect("有视图就有切点");
+    let tail = &events[events.len() - bound..];
+    let windowed = owed(frozen.rows(), &frozen, tail, 0);
+    assert_eq!(windowed.len(), 1, "尾部窗口内视图仍然算得出来");
+    assert_eq!(windowed[0].decl.name, SLICE_ROW);
 }

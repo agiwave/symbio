@@ -313,12 +313,28 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
     // 就是派发器之外的第二个选债口。
     let mut all_rows: Vec<DebtRow> = rows.to_vec();
     if let Some(input) = source.declarations() {
-        let debts = owed(
-            input.frozen.rows(),
-            &input.frozen,
-            &input.events,
-            now_ms as i64,
-        );
+        // 视图求值对切片长度有上界（`Frozen::eval` 超 `cost` 回 `None`），而 `owed`
+        // 把 `None` 折成空集（`ring.rs` 的 `_ => Vec::new()`，字节冻结）——「算不出来」
+        // 与「没有欠账」同形：视图为源头的债整族静默消失，环照常空转，零告警。
+        //
+        // 切点由声明表回答（`Frozen::scan_bound`，装载期已钉住 `cost` 一致），不再由
+        // 调用方手抄常数。取**尾部** `b` 条：事实账只追加，视图是「最近这段」的折叠，
+        // 窗口的语义就是最近的 `b` 条；反过来取头部会把窗口钉在会话开端，越跑越看不见
+        // 新事实——同样是静默漏账，只是换了个方向。
+        let events = match input.frozen.scan_bound() {
+            Some(bound) if input.events.len() > bound => {
+                &input.events[input.events.len() - bound..]
+            }
+            // `None`（一条视图都没声明）或未超界：整份交出去，不切。
+            _ => input.events.as_slice(),
+        };
+        // 切完之后 `events.len() <= 每一条视图的 cost` ⇒ `eval` 的超界分支在环里
+        // **不可达**。真走到了，是装载期 `Gap::ViewCostMismatch` 漏判的声明问题，不是
+        // 运行期可以兜的事——这里不写「超界就退回整份 / 退回空集」的兜底，那只会把
+        // 装载错误重新读成「没有欠账」。
+        let debts = owed(input.frozen.rows(), &input.frozen, events, now_ms as i64);
+        // 投影仍拿**整份**：`rows_from_debts` 只按 `(row, key)` 找「在等」的 ask 事实，
+        // 不喂视图求值；用切片会让挂起中的债误判成「没问过」而被重发。
         all_rows.extend(crate::plugin_rows::rows_from_debts(&debts, &input.events));
     }
     let rows = all_rows.as_slice();
