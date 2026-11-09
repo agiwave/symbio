@@ -5,8 +5,8 @@
     { "path": "effects.rs", "lines": 7, "adr": "D-408" },
     { "path": "port.rs", "lines": 478, "adr": "D-404" },
     { "path": "text.rs", "lines": 6, "adr": "D-404" },
-    { "path": "context.rs", "lines": 347, "adr": "D-399" },
+    { "path": "context.rs", "lines": 8, "adr": "D-412" },
     { "path": "reports.rs", "lines": 344, "adr": "D-399" }
   ],
-  "total": { "lines": 3833, "adr": "D-404" }
+  "total": { "lines": 3496, "adr": "D-412" }
 }

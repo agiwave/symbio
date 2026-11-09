@@ -10,7 +10,7 @@
 //! - [`behaviors`]：行为名的收集面（实现住 sdk，本 crate 只转出，D-408）
 //! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）（转出，`D-408`）
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）
-//! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份
+//! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份（转出，`D-412`）
 //! - [`port`]：世界端口的注册面（`PortProvider` 与 port 族——名字与契约静态，提供者随活插件的能力行动态收集）
 //! - [`text`]：Token 计量与头尾切分的**转发**（实现归 `symbio_sdk::text::tokenizer`，`D-404`）
 //! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）
@@ -90,6 +90,8 @@ pub use inventory;
 // `submit_behavior!` 随注册表搬进 sdk（D-408），经本 crate 的 `effects` 模块转出到根：
 // 插件侧写 `symbio_plugin_api::submit_behavior!` 不变（E-009）。
 pub use effects::submit_behavior;
+// `submit_context_provider!` 同形（D-412）：经 `context` 壳转出到根，插件侧写法不变。
+pub use context::submit_context_provider;
 pub use port::{
     capability_port_check, capability_port_of, port_family, port_row_name, port_rows, AuthzVerdict,
     PortCapabilities, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,

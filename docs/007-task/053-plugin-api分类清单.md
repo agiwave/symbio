@@ -40,7 +40,8 @@ exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 /
 
 **收尾时的现值（2026-11-09，以 `scripts/baselines/plugin-api-loc.json` 与 `scripts/arch-dead-code.json` 为准）**：
 `effects` **7**（562 → 7，整块搬进 `crates/symbio-sdk/src/plugin/effects.rs`，`D-408`）、`port` **478**（`D-404` 已搬）、
-`text` **6**（已搬）、`context` **347**、`reports` **344**；门面合计 **3 833**（原 4 494）。
+`text` **6**（已搬）、`context` **8**（347 → 8，整块搬进 `crates/symbio-sdk/src/plugin/context.rs`，`D-412`）、
+`reports` **344**；门面合计 **3 496**（原 4 494）。
 另按 `D-409` 撤掉了行侧效果面（`EffectFace` / `DialogDraft` / `LiveDraft` / `EffectDraft` 与
 `RowStep` 的 `FactsWithEffects` 变体），零调用清单由 73 条降到 71 条。
 
@@ -95,6 +96,21 @@ HS-002 / HS-006 只数转发条数，看不见实现。**这一条已由棘轮�
    > `submit_reports!` 的采集类型。`inventory::collect!` 的采集类型必须与宏同 crate，`sdk` 又不能
    > 依赖门面（`D-258`），所以它们的搬法和 `effects` 一模一样：**类型闭包整块搬、门面转出**。
    > 只搬函数体那一半在这里是做不到的（`D-408` 的三条硬事实）。
+
+   **第三块 `context` 已落地（`D-412`）**：`context.rs`（347 行）+ `context.test.rs`（266 行）
+   整块搬进 `crates/symbio-sdk/src/plugin/`，门面壳 8 行；`submit_context_provider!` 随注册表
+   搬走并经壳转出到根，四个插件的提交写法一字未改。同批下调 `FA-002`（347 → 8、合计
+   3833 → 3496），`CS-009` 钉到搬后实测 **552 : 249**——其中 23 格字段 / 5 格变体是换地址，
+   另清掉搬迁前就存在的 10 格 `structFields` 存量余量（实测 529 / 基线 539）。
+
+   > **`reports` 与 `context` 不同形，搬前须先裁**：`context` 的闭包只碰 kernel 与 sdk 自己的
+   > 类型，整块搬得动；`reports` 的读侧三函数（`read_view` / `read_view_with_ver` / `read_all`）
+   > 还要调门面的 `sealed_declarations()`（`declarations.rs`）与 `ViewUnavailable`（`views.rs`），
+   > 而 `sealed_declarations` 又依赖门面的 `events::SHARED_EVENTS`（清单生成物）与
+   > `rows::row_writes()`。把它整块搬进 sdk 会逼出 `sdk → plugin-api` 的反向边（`D-258` 直接红）。
+   > 因此 `reports` 不是「同一个闭包换地址」，而是**两个闭包**：注册表半（`ReportDecl` /
+   > `submit_reports!` / `validate` / `reports()`，只碰 kernel，搬得动）与读侧半（依赖冻结声明表，
+   > 搬不动）。怎么切要先裁，不在本批顺手造形状。
 3. HS-002 / HS-006（`scripts/plugin-surface-audit.mjs`）仍只判「转发了几条」；
    「门面持有实现」这一面由 `FA-001` 判，不重复造第二臂。
 4. 跑 `gate --full`，全绿后提交。

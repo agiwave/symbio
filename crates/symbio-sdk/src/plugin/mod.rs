@@ -3,7 +3,8 @@
 //! 契约本体（`Plugin` / 上下文 / 信封 / 错误）已在 `symbio_kernel`（D-188 C2b），
 //! 这里保留宿主事实：插件目录与清单（[`dir`]）、遍历端点（[`traverse`]），
 //! 以及能力效果的机制面（[`effects`] / [`behaviors`]，随 `submit_behavior!` 从门面
-//! 整块搬来，`D-408`）。
+//! 整块搬来，`D-408`）与上下文贡献的机制面（[`context`]，随 `submit_context_provider!`
+//! 整块搬来，`D-412`）。
 
 pub use symbio_kernel::plugin::*;
 
@@ -11,6 +12,7 @@ mod dir;
 mod traverse;
 
 pub mod behaviors;
+pub mod context;
 pub mod effects;
 
 // 域内子模块私有，公开面在此显式重导出
