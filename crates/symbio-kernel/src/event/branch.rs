@@ -31,7 +31,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::event::{Entity, Event, Verb};
+use crate::event::{payload_str, Entity, Event, Verb};
 
 /// 一个成员根在组里的位置与此刻读法（字面 = 投影侧 `meta.branch` 的五个字段）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,13 +244,4 @@ fn anchor_of(parent: &mut HashMap<String, String>, id: &str) -> String {
         cur = next;
     }
     root
-}
-
-/// 一条事件载荷里的**非空**字符串字段（空串读作「这个字段没记」，与 `event` 同口径）。
-fn payload_str(e: &Event, key: &str) -> Option<String> {
-    e.payload
-        .get(key)
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
 }

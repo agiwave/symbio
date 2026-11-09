@@ -66,28 +66,26 @@ pub(crate) fn stamped_responses<'a>(
     now: i64,
     stamp: &'a str,
 ) -> impl Iterator<Item = (&'a serde_json::Value, String)> + 'a {
-    events
-        .iter()
-        .filter_map(move |e| {
-            if e.ts > now || e.kind != EVENT_RESPONSE {
-                return None;
-            }
-            let payload = &e.payload;
-            if !payload
-                .get(STAMP_KEY)
-                .and_then(|s| s.get(stamp))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            {
-                return None;
-            }
-            let principal = payload
-                .get("principal")
-                .and_then(|v| v.as_str())
-                .unwrap_or(e.actor.as_str())
-                .to_string();
-            Some((payload, principal))
-        })
+    events.iter().filter_map(move |e| {
+        if e.ts > now || e.kind != EVENT_RESPONSE {
+            return None;
+        }
+        let payload = &e.payload;
+        if !payload
+            .get(STAMP_KEY)
+            .and_then(|s| s.get(stamp))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            return None;
+        }
+        let principal = payload
+            .get("principal")
+            .and_then(|v| v.as_str())
+            .unwrap_or(e.actor.as_str())
+            .to_string();
+        Some((payload, principal))
+    })
 }
 
 /// 用量台账投影：从事件切片累计各主体实测的 token。

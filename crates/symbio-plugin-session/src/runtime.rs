@@ -20,7 +20,7 @@
 //! 工具、任务、记忆、消息编辑里不承载根 run 节点的那些）一律不改变结局。
 
 use crate::declarations::{EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_MESSAGE_EDITED};
-use symbio_kernel::event::Event;
+use symbio_kernel::event::{payload_str, Event};
 use symbio_plugin_api::drive::EVENT_DRIVER_STALLED;
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED,
@@ -155,15 +155,6 @@ fn stall_error(e: &Event) -> String {
         }
         _ => format!("驱动停摆：一圈没有新增事实（未收束 {open} 笔）"),
     }
-}
-
-/// 载荷里的非空字符串（空串视为「没记」，与事件层 `payload_str` 同口径）。
-fn payload_str(e: &Event, key: &str) -> Option<String> {
-    e.payload
-        .get(key)
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
 }
 
 #[cfg(test)]

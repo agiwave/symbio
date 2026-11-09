@@ -717,7 +717,10 @@ pub fn event_answer_node_id(e: &Event) -> String {
 }
 
 /// 取载荷里的**非空**字符串字段（空串读出来是「这个字段没记」，不是「记了空」）。
-fn payload_str(e: &Event, key: &str) -> Option<String> {
+///
+/// 事件层唯一的共享读口：`event::branch` 折分支事实、`session` 折轮次结局都调这一份。
+/// 各读侧自己抄一遍的后果是「空串算不算没记」在两处给出不同答案。
+pub fn payload_str(e: &Event, key: &str) -> Option<String> {
     e.payload
         .get(key)
         .and_then(|v| v.as_str())
