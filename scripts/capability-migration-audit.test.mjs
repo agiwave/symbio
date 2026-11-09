@@ -189,6 +189,20 @@ test('classifyCommit：同批再动 sdk ⇒ 仍按补件判', () => {
   assert.equal(classifyCommit({ message: 'feat: 补件', patch }), 'supplement')
 })
 
+// 删符号时 `pub use` 名单必然被重写。它是**接线**不是机制面（与本文件 `isMechanismLine`
+// 同一条口径，头注释也写明「`use` 行（含 `pub use` 转发）两边都不计」）——把它算成
+// 「新增公开项」，每一个纯删除的收口提交都会被记一笔补件欠账。
+test('classifyCommit：只重写 `pub use` 名单（删符号）⇒ 两类都不是', () => {
+  const patch = patchOf([
+    {
+      path: CORE,
+      added: ['pub use self::spec::{one, two};'],
+      removed: ['pub use self::spec::{one, two, three, four};'],
+    },
+  ])
+  assert.equal(classifyCommit({ message: 'refactor: 删掉零调用判据', patch }), null)
+})
+
 // ── 迁移批次 ──────────────────────────────────────────────────────────────
 
 const IDS = ['memory', 'local', 'notes']

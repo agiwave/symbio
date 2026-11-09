@@ -469,6 +469,9 @@ export function mechanismAdditions(patch) {
   for (const file of patch) {
     if (!inTrees(file.path, CORE_TREES) || !isCapabilitySource(file.path)) continue
     for (const line of file.added) {
+      // `use` / `mod` 是接线不是机制面（同 `isMechanismLine`）：只重写 `pub use` 的名单
+      // （删符号时必然发生）不构成「新增公开项」。
+      if (!isMechanismLine(line)) continue
       if (PUB_ITEM_RE.test(line)) out.push({ path: file.path, line: line.trim() })
     }
   }
