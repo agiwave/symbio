@@ -13,43 +13,81 @@
  * 读 `<homedir>/session/<sid>/v2-events.wal`（事实层唯一真相）**及其归档段**
  * （`transcripts/wal-archive/`，`archive_before` 搬走的前缀；见 `readSessionEvents`）。
  * 只读 live 会把每一段被归档的历史判成悬空引用——会话一长就满屏假红。`--cli-log` 可选：
- * 给了它才能判 J8 / J9（账实相符与具名归因），因为它们要数**真实发生的模型 HTTP 调用**——这件事
+ * 给了它才能判 J8（账实相符），因为它要数**真实发生的模型 HTTP 调用**——这件事
  * 在 WAL 里原理上不可见（一次没入账的调用恰好不会留下任何格）。
+ *
+ * ## 读法锚点：`ring:` 身份，不是载荷（2026-11 重锚）
+ *
+ * 本脚本曾经按 `payload.id` 分组、按 `payload.port` 取端口、按 `turn.stage{decide}.model_calls`
+ * 取观测。那套读法对应的是上一代事实本体（`entity: Turn`、`payload: {id, port, via}`、
+ * 端口集 `turn/model/tool`）。现行 WAL 里这些**全部不存在**，于是它在一份完全合规的
+ * 实测上报 29 项失效（28×J6「端口缺失」+ 1×J8），**而 J7 因为「0 观测 ⇔ 0 三格」
+ * 静默判绿**——判据自己的两种最坏失效（假红 + 假绿）同时出现。
+ *
+ * 现行协议事实的身份在 **`event_id`**：`ring:{port}:{id}:{attempt}:{kind}[:{shard}]`
+ * （`crates/symbio-host/src/lib.rs:594-607` 的 `ring_event_id`，解析口径同
+ * `:641-673` 的 `ring_key_of`：`id` 自身可含 `:`，从右往左定界）。由此：
+ *
+ * - **端口是行名 / 端口名**（`plugin_row` / `model.assist` / `model` / `tool` / …），
+ *   不是「五事实的类别」；
+ * - `sent` 载荷只有 `deadline_ms`（挂起时再带 `shard`），**没有** `id` / `port`；
+ * - 顺序是 **sent → request → response**：宿主先领租约（`before`）再问行（`request`）。
+ *   旧判据假设的 `request → sent` 是上一代派发器的顺序；
+ * - 一次往返的 `sent` 可能**多于一条**：执行体判「要挂起等人」时，`finish` 会补一条
+ *   `{deadline_ms: null, shard: 1}` 的 `sent`（`symbio-plugin-loop/src/ring/engine.rs:713-726`），
+ *   它不是第二次派发，也不是第二个分片。
  *
  * ## 判据（逐条，编号即输出编号）
  *
  * | # | 判据 | 口径来源 |
  * |---|------|----------|
- * | J1 | 每一组端口往返（按 `payload.id` 分组）四要素齐整：`request` → `sent` → 终态（`response` \| `failed`），且**有且只有一次** `request`。**例外**：被拒的那一笔（`authz.denied`）没有 `sent` 是对的——没放行就没派发（e2e T78 的同一条判据）；反过来「拒了却派发了」判红 | DE-015 §4 五事实 |
- * | J2 | `user.message` 的 seq 先于本轮任何协议 `request` | DE-015 判据 2（溯源不悬空的时间面） |
- * | J3 | `sent` 的 seq 严格小于终态的 seq | DE-015 §4（引擎写 before，应答在后） |
- * | J4 | 收束格（`chat.assistant.final` \| `chat.assistant.fallback`，两种都算）的 `reason` 非空 | DE-015 §6 结局必须有名 |
- * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq | DE-015 §4 溯源不悬空 |
- * | J6 | 孤名 = 0：`request` 的 `port` 必须在端口声明集里 | （装载期硬拒的实测对账） |
- * | J7 | 模型往返的**观测 ⇔ 三格**双向对账（`MODEL_PATHS` 逐条）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起。观测一律读事实层（WAL） | DE-015 判据 2 全量口径 |
- * | J8 | 给了 `--cli-log` 时：真实模型 HTTP 调用数 == `sent(port=model)` 数 + J7 判出的豁免未入账数 + J9 的**具名项**（轮外重试）。`--strict` 下没给日志即判红 | DE-015 §0「没有别的调度代码」 |
- * | J9 | 具名项不许超编：`[Compress] 压缩 LLM 请求开始` 数 − `sent(via=compress/summary)` 数 **≤** `[Wake] RetryCompaction` 数。多出来的 = 一条新长出的静默路径；负数 = 账比日志多 | DE-015 §5.2 / D-131（轮外重试不入账的**机器可判**边界） |
+ * | J1 | 按 `(port,id,attempt)` 分组的每一笔：`request` **恰一次**、`sent` **≥1**、终态（`response` \| `failed`）**恰一个**；带挂起 `sent`（`deadline_ms: null`）的笔允许终态为 0；授权被拒（`authz.denied`）且**没派发**时不要求 `sent`，且拒的笔不得以 `response` 收束 | DE-015 §4 五事实 |
+ * | J2 | 每一条协议 `request` 都在某个**已开且未关**的 scope 里：它之前必须有一条 `user.message`，且这两者之间没有同一 scope 的 `session.terminated` | DE-015 判据 2（溯源不悬空的时间面） |
+ * | J3 | 一笔的最小 `sent.seq` 严格小于它的终态 `seq`（挂起补的 `sent` 若晚于终态不算） | DE-015 §4（引擎写 before，应答在后） |
+ * | J4 | 收束格（`chat.assistant.final` \| `chat.assistant.fallback`）的 `reason` 非空 | DE-015 §6 结局必须有名 |
+ * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq（含归档段） | DE-015 §4 溯源不悬空 |
+ * | J6 | 孤名 = 0：协议事实必须带 `ring:` 身份，且身份里的端口在**声明集**里（见 `DECLARED_PORTS`，每项带出处） | （装载期硬拒的实测对账） |
+ * | J7 | 模型往返的**观测 ⇔ 三格**双向对账，逐条路径（见 `MODEL_PATHS`）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起 | DE-015 判据 2 全量口径 |
+ * | J8 | 给了 `--cli-log` 时：`[LLM] 请求发起` 行数 == `sent`（模型端口、剔除挂起补条）数。`--strict` 下没给日志即判红 | DE-015 §0「没有别的调度代码」 |
+ * | J9 | 压缩产物 ⇔ 摘要往返：每一条 `session.consolidated` 都必须指名到一笔**已收束**的 `compact-summarize` 往返（`model.assist` 端口，`id` 尾缀 = 产物指纹） | DE-015 §5.2 / D-131 的**产物侧** |
  *
- * ## 观测口径为什么必须是「这次调用打过模型」，不是「判决来自模型」
+ * ## 三条退场（SP-033 §5：写明退场 + 承接判据，不静默删）
  *
- * `turn.stage{decide}` 的 `source` 记的是判决的**来源**（规则 / 模型 / 兜底），不是
- * 有没有调用：模型调了而应答不可解析 ⇒ `Escalate{unclassified}` ⇒ `source=fallback`，
- * 这次调用在事实层零痕迹。拿它当观测会同时假红（豁免额减不平、J8 数不拢）和假绿
- * （把「模型没答上」读成「没找模型」）。
+ * ① **J7 的 `compress/summary` 路径退场**。旧读法用 `turn.stage{compress}.model_calls`
+ *    当观测；现行事实里没有这一格，也没有任何**独立于环**的事实能说「这一轮该压」——
+ *    压缩是阈值触发的内部状态，不由某条事实宣告。承接判据是 **J9**：压缩的产物
+ *    （`session.consolidated`）必须指名到一笔入环的摘要往返，产物与往返的配对关系
+ *    比「观测次数」更强（它连**哪一笔**都钉住）。「有一次静默的摘要调用」由 **J8**
+ *    兜住（摘要往返是 `model.assist` 的 HTTP 调用，没入环就数不平）。
  *
- * 所以观测落在同一格的**另一个字段**上：`model_calls`（这次判决打了几次模型）。
- * 它由**派发那一步**数出来（闭包里数，不是靠返回值推断），因此「派发被拒（执行体
- * 压根没跑）= 0」与「跑完但落格失败 = 1」分得开。
+ * ② **J9 的「轮外重试具名项」退场**。旧读法数日志里的 `[Compress] 压缩 LLM 请求开始`
+ *    与 `[Wake] RetryCompaction`；这两个标记在现行代码里**都不存在**——用户点
+ *    `retry_compaction` 现在落一条 `message.removed`（`symbio-plugin-compact/src/debt.rs:37`、
+ *    `current_owe` 的纪元推进），重试走的是**环内**的新债键，不再有「轮外那一笔」。
+ *    所以那条边界不是被放宽，而是**结构上消失了**；承接判据仍是 J8（每一次摘要
+ *    HTTP 调用都必须有 `sent`）+ J9 的产物配对。
  *
- * ## J7/J8 为什么需要一张**豁免表**，以及它为什么不会变成长期的绿灯
+ * ③ **J7/J8 的豁免表退场（`MODEL_PATHS[].exemption` + J8 的 `exempted` 项）**。
+ *    豁免表是「某条模型路径还没入环」时的临时桥，条目必须带任务号与期限。现行架构里
+ *    分类与措辞两条产线**都已入环**（各自有 `model.assist` 的三格），没有可豁免的对象；
+ *    留一张空表等于留一个「以后往里加一条就绿」的口子。所以 J8 的等式收敛成
+ *    `HTTP == sent(模型端口)`——这不是放宽：原来的豁免项本身就是**已知债**，现在债没了。
+ *    「有一条静默的模型调用」仍由 J8 的差额判红。
  *
- * 豁免表是**临时桥**：某条模型路径还没进环时，先在这里记一笔「已知未入账」，带上
- * 任务号与期限，J8 的等式就暂时平得了。两条路径（判决 / 措辞）都进环之后，表是
- * **空的**——空表才是常态，豁免只许减不许加。三条机制保证它减得干净：
+ * ## 端口声明集为什么必须来自事实面之外
  *
- * ① 每条豁免必须带任务号与期限，期限过了就红；
- * ② `--strict` 下「有条目却无观测」也红（已进环就该删）；
- * ③ 差额一旦超过豁免额，J8 红。
+ * J6 判的是「这次运行有没有人往一个没声明的端口上写事实」。名单若从被判的事实里
+ * 反推（比如「把 WAL 里出现过的端口都当已声明」），它恒真。所以 `DECLARED_PORTS` 是
+ * 一张**带出处的常量表**：每一项都指向声明它的那一行源码。上一版的教训是反的——
+ * 常量留在 `['turn','model','tool']`，而声明侧早换成了行名，于是 J6 把整份 WAL 判红；
+ * 现在 `obligation-ring-accept.test.mjs` 有一条漂移守卫：它扫源码里的端口声明，
+ * 与这张表**逐项比对**，多一个端口不更新表就红。
+ *
+ * ## 观测口径为什么读「模型端口上的 sent」而不是「某种来源字段」
+ *
+ * J8 只数**入账的派发**：`sent` 是引擎在执行体之前落的 before 事实，一次执行体
+ * 调用恰一条（挂起补条除外，它不是派发）。读 `response` 会把「失败但有终态」的
+ * 往返漏掉；读规则/兜底字段会把「调了模型但答不可解析」读成没调。
  *
  * 用法：
  *   node scripts/obligation-ring-accept.mjs --homedir=.symbio --session=verify-ring-3 \
@@ -58,7 +96,7 @@
  *
  * ⚠️ `--cli-log` 那份日志必须是**一次 CLI 实测的产物**，且它的跨度 = 所列会话的跨度
  * （多会话时 J8 只能整轮判）。`[LLM] 请求发起` 是 **INFO** 级 ⇒ 不带 `-v` 也有；
- * 少了它 J8 / J9 数不出真实 HTTP 调用数，只能报「未判」——`--strict` 下那判红。
+ * 少了它 J8 数不出真实 HTTP 调用数，只能报「未判」——`--strict` 下那判红。
  */
 
 import fs from 'node:fs'
@@ -72,77 +110,126 @@ import { green, red, dim } from './color.mjs'
 const PROTOCOL = new Set(['request', 'sent', 'response', 'failed'])
 /** 终态：一次往返的两种结局。 */
 const TERMINAL = new Set(['response', 'failed'])
+/** 协议事实的入库身份前缀（`crates/symbio-host/src/lib.rs:591`）。 */
+const RING = 'ring:'
 
 /**
- * 端口声明集的**实测对账口径**：`loop_rows::PORTS` 的 `id` 列表。
+ * **端口声明集**（J6 的判据本体）——每一项都带出处，且必须来自**事实面之外**。
  *
- * 这里写成一份常量而不是去解析 Rust 源码：J6 判的是「CLI 跑起来的这次装载里，
- * 有没有人往一个没人消费的端口上写事实」，它要的是**运行时事实**与声明的对账。
- * 声明侧的静态对账（行引用了未声明的端口 ⇒ 拒绝启动）已经在装载期判掉了，
- * 那部分是 `ring.rs` 的静态审计（`Decl` 引用不到就 Err，不成告警）。
- * 两侧名单若漂移，本常量会被 J6 判红（写了 `port=foo` 的事实却在声明集里查不到）。
+ * 加一个端口 = 这里加一行 + 更新 `obligation-ring-accept.test.mjs` 的漂移守卫；
+ * 只加代码不加这里，J6 会在下一次实测把新端口判红（红的，不是绿的）。
+ * 名字的出处有两种形态：端口提供者的 `PortProvider::ports()`，或 `PortDecl { port }`。
  */
-const DECLARED_PORTS = ['turn', 'model', 'tool']
+const DECLARED_PORTS = [
+  // `model` 插件的主往返端口
+  { port: 'model', source: 'crates/symbio-plugin-model/src/port.rs:69（PortProvider::ports → PORT_MODEL，api/vocab.rs:31）' },
+  // `model` 插件的一次性问答端口（classify / compose / compact 的模型往返都走它）
+  { port: 'model.assist', source: 'crates/symbio-plugin-model/src/assist.rs:67（PortProvider::ports → PORT_MODEL_ASSIST，api/vocab.rs:21）' },
+  // 工具执行端口
+  { port: 'tool', source: 'crates/symbio-plugin-tool/src/declarations.rs:79（PortDecl{port: TOOL} → PORT_TOOL，api/vocab.rs:24）' },
+  // 行执行端口（所有 `by: plugin_row` 的债行都走它；`plugin_row` 是宿主词汇）
+  { port: 'plugin_row', source: 'crates/symbio-plugin-loop/src/plugin_rows.rs:58（port: PLUGIN_ROW，api/rows.rs:56）' },
+  // 上下文压缩的落格端口（摘要走 model.assist，产物由这条落）
+  { port: 'compact', source: 'crates/symbio-plugin-compact/src/port.rs:38（PortProvider::ports → COMPACT_PORT）' },
+  // 意向提升端口
+  { port: 'conation', source: 'crates/symbio-plugin-conation/src/port.rs:43（PortProvider::ports → PROMOTE_PORT，debt.rs:32）' },
+  // 记忆端口
+  { port: 'memory', source: 'crates/symbio-plugin-memory/src/port.rs:29（PortProvider::ports → MEMORY_PORT）' },
+  // 探针端口的回声往返（自检用）
+  { port: 'probe_echo', source: 'crates/symbio-plugin-probe/src/declarations.rs:19（PortDecl{port: PROBE_PORT}，probe/src/port.rs:10）' },
+  // 演示探针（demo 插件）
+  { port: 'demo', source: 'crates/symbio-demo-probe/src/port.rs:9（PortProvider::ports → DEMO_PORT）' },
+  // 电报外发端口
+  { port: 'notify', source: 'crates/symbio-plugin-telegram/src/declarations.rs:22（PortDecl{port: NOTIFY}，telegram/src/port.rs:20）' },
+  // 网页探活端口
+  { port: 'web_probe', source: 'crates/symbio-plugin-web/src/probe.rs:31（PortProvider::ports → "web_probe"）' },
+]
+const DECLARED = new Set(DECLARED_PORTS.map((p) => p.port))
+
+/**
+ * **会发 HTTP 的端口**（J8 的左边）。
+ *
+ * 判据是「这一条 `sent` 背后必然有一次模型往返」，所以名单只收 `model` 声明的两个
+ * 端口：主往返 `model` 与一次性问答 `model.assist`。`tool` 会发网络请求（web_fetch
+ * 等），但它的调用不是**模型**往返，日志里也没有 `[LLM] 请求发起`。
+ */
+const MODEL_PORTS = new Set(['model', 'model.assist'])
+
+/** 分类行的名字：`classify.decide:<root_id>`（`crates/symbio-plugin-classify/src/`）。 */
+const CLASSIFY_ROW = 'classify.decide'
+/** 措辞产线的用途名，落在 `model.assist` 的 `request.payload.via`（`compose/src/debt.rs:102`）。 */
+const COMPOSE_VIA = 'compose/wording'
+/** 摘要行的名字：`compact-summarize:<指纹>`（`crates/symbio-plugin-compact/src/debt.rs:79`）。 */
+const SUMMARIZE_ROW = 'compact-summarize'
+/** 压缩产物事实名；`event_id` 形如 `session.consolidated:<指纹>`。 */
+const CONSOLIDATED = 'session.consolidated'
+/** 判决事实（模型 / 规则两条路径共用这两个种类，靠 `reason` 分来源）。 */
+const CLASSIFY_ESCALATE = 'classify.escalate'
+const CLASSIFY_ANSWERED = 'classify.answered'
+
+/**
+ * **只有模型能产出的理由码**（J7 的观测口径）。
+ *
+ * 规则表只有问候 / 致谢 / 确认 / 空输入四档，全部落 `Answered`；模型四词
+ * （`direct` / `clarify` / `refuse` / `work`）映射为 `from_context` / `clarify` /
+ * `refuse` / `needs_work`，解析失败落 `unclassified`。所以下面这集合里的理由码
+ * 出现一次 = 分类产线**真的打过一次模型**（`crates/symbio-plugin-classify/src/decide.rs:62-100`）。
+ * 反过来，规则四档不在集合里——它们 0 次调用、0 组三格，双向都平。
+ */
+const MODEL_VERDICT_REASONS = new Set([
+  'from_context',
+  'clarify',
+  'refuse',
+  'needs_work',
+  'unclassified',
+])
+
+/** 收束格：两种都算（`chat.assistant.fallback` 由 `close` 执行体独占写）。 */
+const CLOSING = ['chat.assistant.final', 'chat.assistant.fallback']
 
 /**
  * **模型往返的入账路径表**（J7 的判据本体）。
  *
- * 一条路径 = 「事实面上的某个观测 ⇒ 必然对应一组 `via` 相同的 port 三格」。
- * 两个方向都判，缺哪个都红：
- *  - 只有三格没有观测 ⇒ 一次没人发起的往返（不会发生，但形状上成立）；
- * - 只有观测没有三格 ⇒ **一条绕开债环的模型调用**。
+ * 一条路径 = 「事实面上的某个观测 ⇒ 必然对应一组同端口的往返三格」。两个方向都判，
+ * 缺哪个都红：
+ *  - 只有三格没有观测 ⇒ 一次没人发起的往返；
+ *  - 只有观测没有三格 ⇒ **一条绕开债环的模型调用**。
  *
- * `observed` 返回**权重**（这一格代表几次模型往返），求和即得观测次数。权重大于 1
- * 是真实情形：`turn.stage{decide}` 一格里记着这一轮判决打了几次模型。
+ * `observed` 返回**权重**（这一格代表几次模型往返），求和即得观测次数。
+ * `rounds` 是这条路径的「三格组」判据：读**逻辑笔**（`port + id`，忽略 `attempt`），
+ * 因为一次失败重试会换尝试号，但观测侧仍只有一次判决。
  *
- * `exemption` 非空 = 这条路径**已知未入账**，豁免带任务号与期限（**只许减不许加**，
- * 见文件头）。期限过了、或观测从此消失（说明已进环）却没删条目，J7 都判红。
+ * `guard` 非空 = 这条路径只在配置允许时才判：`compose` 关掉时 `from_context` 照样
+ * 会落（分类不知道下游裁掉了措辞产线），此时强求三格是**假红**。
  */
 const MODEL_PATHS = [
   {
-    via: 'compose/wording',
-    port: 'model',
-    // `Answered{from_context}` 的含义是「答案已在对话里」⇒ 措辞必须由模型组织出来
-    // （`Verdict::needs_wording_generation` 是同一条规则的唯一实现，两侧共用）。
-    // 这条理由码只由**模型**产出（规则表只有寒暄 / 谢谢 / 确认 / 空话四档），所以
-    // 「见过一次 `from_context`」= 「措辞产线打过一次模型」。
-    observed: (f) =>
-      f.kind === 'turn.stage' &&
-      f.payload?.stage === 'decide' &&
-      f.payload?.reason === 'from_context'
-        ? 1
-        : 0,
-    exemption: null,
-    why: '短路轮的答话组织：编排层发起的那一次模型往返（T-238）',
-  },
-  {
     via: 'classify/decide',
-    port: 'model',
-    // 判决往返的观测读**次数**，不读**来源**：`turn.stage{decide}.source` 记的是判决
-    // 的来源（`rule` / `model` / `fallback` / `absent`），模型调了而应答不可解析 ⇒
-    // 落 `Escalate{unclassified}` ⇒ `source=fallback`——那次调用在事实层不留痕迹。
-    // `model_calls` 才是「这次判决打了几次模型」这个数（派发那一步数出来的），
-    // 它与三格组数一一对应：规则短路 = 0 格 0 次。
-    observed: (f) =>
-      f.kind === 'turn.stage' && f.payload?.stage === 'decide'
-        ? (f.payload?.model_calls ?? 0)
-        : 0,
-    exemption: null,
-    why: '判决自身的那一次分类调用',
+    // 观测：经模型产出的判决事实（规则四档不在集合里，见 `MODEL_VERDICT_REASONS`）。
+    observed: (e) => {
+      if (e.kind === CLASSIFY_ESCALATE) return 1
+      if (e.kind === CLASSIFY_ANSWERED) {
+        const reason = e.payload?.reason
+        return typeof reason === 'string' && MODEL_VERDICT_REASONS.has(reason) ? 1 : 0
+      }
+      return 0
+    },
+    rounds: (r) => r.port === 'model.assist' && r.id.startsWith(`${CLASSIFY_ROW}:`),
+    guard: () => true,
+    why: '轮首判决的那一次分类调用',
   },
   {
-    via: 'compress/summary',
-    port: 'model',
-    // 自动语义压缩的摘要请求，可能**两笔**（快照校验不过时有一次纠正重试）——
-    // 所以观测读的是 `turn.stage{compress}.model_calls`（派发那一步数出来的），
-    // 而不是「见过一次 compress 格」：一格代表 0..2 次往返。
-    // 续写幕会重跑压缩，那格按幕锚各落一份，数不会被幂等键吞掉。
-    observed: (f) =>
-      f.kind === 'turn.stage' && f.payload?.stage === 'compress'
-        ? (f.payload?.model_calls ?? 0)
-        : 0,
-    exemption: null,
-    why: '语义压缩的摘要往返（含纠正重试）',
+    via: 'compose/wording',
+    // 观测：`Answered{from_context}` 是**唯一**要组织措辞的判决
+    // （`Verdict::needs_wording_generation` 是这条规则的唯一实现，两侧共用）。
+    observed: (e) =>
+      e.kind === CLASSIFY_ANSWERED && e.payload?.reason === 'from_context' ? 1 : 0,
+    // 三格：`request.payload.via` 是这条产线自报的用途名（旧本体里它在三格载荷上，
+    // 现在仍在 `request` 载荷上——这是 compose 唯一保留、也是唯一需要的自报位）。
+    rounds: (r) => r.port === 'model.assist' && r.request?.payload?.via === COMPOSE_VIA,
+    // 措辞产线被关掉时，`from_context` 仍会落，但没有三格可要——不是缺口。
+    guard: (cfg) => cfg.composeEnabled !== false,
+    why: '短路轮的答话组织：编排层发起的那一次模型往返',
   },
 ]
 
@@ -161,7 +248,7 @@ function parseArgs(argv) {
     }
   }
   if (!out.homedir || out.sessions.length === 0) {
-    console.error(red('用法: --homedir=<dir> --session=<sid> [--session=<sid> ...] [--cli-log=<file>]'))
+    console.error(red('用法: --homedir=<dir> --session=<sid> [--session=<sid> ...] [--cli-log=<file>] [--strict]'))
     process.exit(2)
   }
   return out
@@ -195,8 +282,9 @@ function replayFile(file) {
  * 连报 16 项假红，而真正的结论（压缩真发生、摘要往返入了账）全在归档段里。
  *
  * 读法与写侧逐字对齐：段名 `<wal 文件名>.<first>-<last>`，`first` 既是段内首号也是
- * 排序键；逐段重放后按 `first` 升序拼接，live 接在后面，**不重排**。目录不存在 /
- * 某段读不开 ⇒ 当作没有（与 Rust 侧「读不开就是没有」同一口径）。
+ * 排序键；逐段重放后按 `first` 升序拼接，live 接在后面。目录不存在 / 某段读不开 ⇒ 当作
+ * 没有（与 Rust 侧「读不开就是没有」同一口径）。最后按 `seq` 稳定排序：后续所有判据
+ * 都假设数组单调递增，段与 live 的拼接顺序不能成为判据的一部分。
  */
 function readSessionEvents(walFile) {
   const events = []
@@ -216,113 +304,214 @@ function readSessionEvents(walFile) {
     for (const [, name] of segments) events.push(...replayFile(path.join(dir, name)))
   }
   events.push(...replayFile(walFile))
-  return events
-}
-
-/** 按 `payload.id` 把协议事实折成一组往返。 */
-function groupRounds(events) {
-  const byId = new Map()
-  for (const e of events) {
-    if (!PROTOCOL.has(e.kind)) continue
-    const id = e.payload?.id
-    if (typeof id !== 'string' || !id) continue
-    if (!byId.has(id)) byId.set(id, [])
-    byId.get(id).push(e)
-  }
-  return byId
+  return events.sort((a, b) => (a.seq ?? -1) - (b.seq ?? -1))
 }
 
 /**
- * 一条路径的「观测 ⇔ 三格」双向对账（J7 的判据本体，两侧共用）。
+ * 协议事实的 `ring:` 身份 → `{ port, id, attempt, shard }`；不是协议事实 / 身份坏了 ⇒ null。
  *
- * 返回 `unaccounted` = 命中豁免、确实没入账的往返笔数（J8 的账实减法用它）。
+ * 形状 `ring:{port}:{id}:{attempt}:{kind}[:{shard}]`，`id` 自身可含 `:` ⇒ 从右定界：
+ * 最右可能是分片号，往左依次是种类与尝试号，剩下的中段整体是 `id`。这是
+ * `crates/symbio-host/src/lib.rs:641-673`（`ring_key_of`）的同一口径；两侧若漂移，
+ * J6 的「缺 ring 身份」会把它判出来。
  */
-function comparePath(p, observations, groups, strict, note) {
-  let unaccounted = 0
+function ringKey(e) {
+  const raw = e.event_id
+  if (typeof raw !== 'string' || !raw.startsWith(RING)) return null
+  const parts = raw.slice(RING.length).split(':')
+  const kindAt = parts.lastIndexOf(e.kind)
+  // `kind` 右侧只允许一位分片号；左侧必须还有端口、至少一段 id、尝试号。
+  if (kindAt < 3 || parts.length - kindAt > 2) return null
+  const attempt = Number(parts[kindAt - 1])
+  if (!Number.isInteger(attempt) || attempt < 0) return null
+  const port = parts[0]
+  if (!port) return null
+  return {
+    port,
+    id: parts.slice(1, kindAt - 1).join(':'),
+    attempt,
+    shard: parts.length > kindAt + 1 ? parts[kindAt + 1] : null,
+  }
+}
+
+/** 一笔派发的挂起补条：`{deadline_ms: null, shard: N}`（`engine.rs:713-726`），不是新派发。 */
+function suspended(e) {
+  return e.kind === 'sent' && e.payload?.deadline_ms === null
+}
+
+/** 按 `(port,id,attempt)` 把协议事实折成一笔往返。 */
+function groupRounds(events) {
+  const byKey = new Map()
+  for (const e of events) {
+    if (!PROTOCOL.has(e.kind)) continue
+    const k = ringKey(e)
+    if (!k) continue
+    const key = `${k.port}\u0000${k.id}\u0000${k.attempt}`
+    if (!byKey.has(key)) byKey.set(key, { ...k, facts: [] })
+    byKey.get(key).facts.push(e)
+  }
+  return byKey
+}
+
+/**
+ * 按 `(port,id)` 把协议事实折成**逻辑笔**（忽略尝试号）。
+ *
+ * J7 用它：一次失败重试换的是尝试号，不是「第二次判决」，观测侧仍然只有一格；
+ * 拿 `(port,id,attempt)` 组数当三格数会把重试判成「记了账没人发起」。
+ */
+function logicalRounds(events) {
+  const byKey = new Map()
+  for (const e of events) {
+    if (!PROTOCOL.has(e.kind)) continue
+    const k = ringKey(e)
+    if (!k) continue
+    const key = `${k.port}\u0000${k.id}`
+    if (!byKey.has(key)) byKey.set(key, { port: k.port, id: k.id, facts: [] })
+    byKey.get(key).facts.push(e)
+  }
+  const out = []
+  for (const r of byKey.values()) {
+    out.push({
+      port: r.port,
+      id: r.id,
+      facts: r.facts,
+      request: r.facts.find((f) => f.kind === 'request') ?? null,
+    })
+  }
+  return out
+}
+
+/** 会话配置里与 J7 守卫有关的两个开关（缺省视为开：出厂默认就是开）。 */
+function sessionFlags(events) {
+  let classifyEnabled = true
+  let composeEnabled = true
+  for (const e of events) {
+    if (e.kind !== 'session.config') continue
+    const p = e.payload ?? {}
+    if (typeof p.classify_enabled === 'boolean') classifyEnabled = p.classify_enabled
+    if (typeof p.compose_enabled === 'boolean') composeEnabled = p.compose_enabled
+  }
+  return { classifyEnabled, composeEnabled }
+}
+
+/**
+ * 双向对账（J7 的判据本体，逐条路径）。
+ *
+ * `observations` / `groups` 都按**逻辑笔**计：同一笔的重试不制造第二个观测，也不
+ * 制造第二组三格。
+ */
+function comparePath(p, observations, groups, note) {
   if (observations > groups) {
-    if (!p.exemption) {
-      note(`J7 ${p.via}: 观测 ${observations} 次、入账三格 ${groups} 组——有 ${observations - groups} 次模型往返没进债环`)
-      return 0
-    }
-    if (new Date(p.exemption.until).getTime() < Date.now()) {
-      note(`J7 ${p.via}: 豁免 ${p.exemption.task} 已过期限 ${p.exemption.until}，仍未闭`)
-      return 0
-    }
-    unaccounted = observations - groups
+    note(`J7 ${p.via}: 观测 ${observations} 次、入账三格 ${groups} 组——有 ${observations - groups} 次模型往返没进债环`)
   }
   if (groups > observations) {
     note(`J7 ${p.via}: 入账三格 ${groups} 组 > 观测 ${observations} 次——记了账却没人发起这条路径`)
   }
-  // 豁免条目还在、观测却一次都没有 ⇒ 要么已进环，要么这次没走这条路径。
-  // 只在 `--strict` 下判红：后者是合法运行形态（规则短路 / 未挂载 classify），
-  // 判它红会把人训练成关掉 strict。
-  if (strict && p.exemption && observations === 0) {
-    note(`J7 ${p.via}: 豁免表（${p.exemption.task}）在本实测里没有观测——已进环就删条目，别留假绿灯`)
-  }
-  return unaccounted
 }
 
 /** J7（WAL 口径）：逐条判能在事实层观测的路径。 */
-function judgePaths(events, rounds, strict, note) {
-  let unaccounted = 0
+function judgePaths(events, logical, cfg, note) {
   for (const p of MODEL_PATHS) {
-    const groups = [...rounds.values()].filter((g) =>
-      g.some((f) => f.kind === 'request' && f.payload?.via === p.via && f.payload?.port === p.port),
-    ).length
-    // 观测次数 = 各格的权重之和（权重大于 1 的情形见 `MODEL_PATHS` 的文档）。
+    if (!p.guard(cfg)) continue
+    const groups = logical.filter((r) => p.rounds(r)).length
     const observations = events.reduce((n, e) => n + (p.observed(e) || 0), 0)
-    unaccounted += comparePath(p, observations, groups, strict, note)
+    comparePath(p, observations, groups, note)
   }
-  return unaccounted
 }
 
-function judgeSession(homedir, sid, strict) {
+function judgeSession(homedir, sid) {
   const wal = path.join(homedir, 'session', sid, 'v2-events.wal')
   if (!fs.existsSync(wal)) return { fatal: `读不到 WAL: ${wal}` }
   const events = readSessionEvents(wal)
   if (events.length === 0) return { fatal: `${wal} 是空的` }
 
   const rounds = groupRounds(events)
+  const logical = logicalRounds(events)
+  const cfg = sessionFlags(events)
   const problems = []
   const note = (m) => problems.push(m)
 
-  // J1 齐整（唯一 request、有 sent、恰一个终态）+ J3 顺序
-  for (const [id, g] of rounds) {
-    const requests = g.filter((f) => f.kind === 'request')
-    const sent = g.find((f) => f.kind === 'sent')
-    const terminals = g.filter((f) => TERMINAL.has(f.kind))
-    // **被拒的那一笔没有 `sent` 是对的**：没放行就没派发（e2e T78 判的正是这一条）。
-    // 所以「缺 sent」只在**没被拒**时判红；被拒的判据另取：拒了却派发了 ⇒ 判红。
-    const denied = events.some((e) => e.kind === 'authz.denied' && e.payload?.id === id)
-    if (requests.length !== 1) {
-      note(`J1 ${id}: request 有 ${requests.length} 笔（应为 1）—— ${g.map((f) => f.kind).join('/')}`)
-    }
-    if (!sent && !denied) note(`J1 ${id}: 缺 sent`)
-    if (denied && sent) note(`J1 ${id}: 授权被拒却派发了（拒 ⇒ 不得有 sent）`)
-    if (terminals.length !== 1) note(`J1 ${id}: 终态（response|failed）有 ${terminals.length} 笔（应为 1）`)
-    // J3 sent 先于终态
-    if (sent && terminals.length > 0 && !terminals.every((t) => t.seq > sent.seq)) {
-      note(`J3 ${id}: sent#${sent.seq} 不在终态之前`)
+  // 授权被拒的笔：`authz.denied` 是世界事实（无 `ring:` 前缀），载荷带
+  // `{port,id,attempt}`（`symbio-plugin-tool/src/port.rs:301-312`）。
+  const deniedKeys = new Set()
+  for (const e of events) {
+    if (e.kind !== 'authz.denied') continue
+    const p = e.payload ?? {}
+    if (typeof p.port === 'string' && typeof p.id === 'string' && Number.isInteger(p.attempt)) {
+      deniedKeys.add(`${p.port}\u0000${p.id}\u0000${p.attempt}`)
     }
   }
-  // J2 输入格先于判决：每一组 `request` 所在轮，必须已有一条**更早**的同轮 `user.message`
-  // （判据 12 的输入闭包：轮的一切下游事实都锚在它的输入格之后）
+
+  // 可重试失败的「终态」是一条 `retry`：它写在**下一次尝试的键**上，`payload.from`
+  // 指回本次尝试号（`engine.rs:727-737`）。所以按 `(port,id,attempt)` 分组时，被重试
+  // 掉的那一笔自己没有 response|failed，**这是对的**——它的结局是下一笔。
+  const retriedFrom = new Map()
+  for (const e of events) {
+    if (e.kind !== 'retry') continue
+    const k = ringKey(e)
+    const from = e.payload?.from
+    if (!k || !Number.isInteger(from)) continue
+    retriedFrom.set(`${k.port}\u0000${k.id}\u0000${from}`, e)
+  }
+
+  // J1 齐整（唯一 request、≥1 sent、恰一个终态）+ J3 顺序
+  for (const [key, g] of rounds) {
+    const requests = g.facts.filter((f) => f.kind === 'request')
+    const sents = g.facts.filter((f) => f.kind === 'sent')
+    const terminals = g.facts.filter((f) => TERMINAL.has(f.kind))
+    const denied = deniedKeys.has(key)
+    // 执行体判「要挂起等人」时会补一条 `{deadline_ms: null, shard}` 的 sent；那一笔
+    // 在新触发到来前没有终态是**对的**，所以终态允许为 0。
+    const isSuspended = sents.some((f) => suspended(f))
+    const retried = retriedFrom.get(key) ?? null
+    if (requests.length !== 1) {
+      note(`J1 ${g.port}/${g.id}#${g.attempt}: request 有 ${requests.length} 笔（应为 1）—— ${g.facts.map((f) => f.kind).join('/')}`)
+    }
+    // **没放行就没派发**：`authz.denied` 的笔可以没有 sent（e2e T78 的同一条判据）。
+    if (sents.length === 0 && !denied) note(`J1 ${g.port}/${g.id}#${g.attempt}: 缺 sent`)
+    if (terminals.length > 1) {
+      note(`J1 ${g.port}/${g.id}#${g.attempt}: 终态（response|failed）有 ${terminals.length} 笔（应为 1）`)
+    }
+    if (terminals.length === 0 && !isSuspended && !retried) {
+      note(`J1 ${g.port}/${g.id}#${g.attempt}: 缺终态（response|failed / retry / 挂起 sent）`)
+    }
+    // 拒的笔必须按失败收束：拒不是一种成功结局。
+    if (denied && terminals.some((t) => t.kind === 'response')) {
+      note(`J1 ${g.port}/${g.id}#${g.attempt}: 授权被拒却以 response 收束（应落 failed）`)
+    }
+    // J3 sent 先于终态：取**最早**那条 sent（挂起补条可能晚于终态，它不是派发锚点）。
+    // 被重试掉的一笔，它的「终态」是那条 retry 事实。
+    const ends = retried ? [...terminals, retried] : terminals
+    if (sents.length > 0 && ends.length > 0) {
+      const firstSent = Math.min(...sents.map((s) => s.seq))
+      if (!ends.every((t) => t.seq > firstSent)) {
+        note(`J3 ${g.port}/${g.id}#${g.attempt}: sent#${firstSent} 不在终态之前`)
+      }
+    }
+  }
+
+  // J2 输入格先于判决：每一条协议 `request` 都必须落在某个**已开且未关**的 scope 里。
+  //
+  // 现行事实没有 `turn` 字段（scope 由 `user.message` 开启、`session.terminated` 关闭），
+  // 所以判据改成「同一条时间线」的形式：request 之前有 user.message，且这两者之间
+  // 没有**同一个 root** 的终止格。少读这一条，「scope 关了还在派发」就看不见。
   const users = events.filter((e) => e.kind === 'user.message')
   if (users.length === 0) note('J2 没有 user.message 格（这次实测没有输入？）')
+  const terms = events.filter((e) => e.kind === 'session.terminated')
   for (const e of events) {
     if (e.kind !== 'request') continue
-    const inTurn = users.filter((u) => u.turn === e.turn && u.seq < e.seq)
-    if (inTurn.length === 0) {
-      note(`J2 request#${e.seq}（turn=${e.turn}）之前没有同轮 user.message 输入格`)
+    const opened = users.filter((u) => u.seq < e.seq)
+    if (opened.length === 0) {
+      note(`J2 request#${e.seq} 之前没有 user.message 输入格`)
+      continue
+    }
+    const opener = opened[opened.length - 1]
+    const root = opener.payload?.id ?? opener.event_id
+    if (terms.some((t) => t.seq > opener.seq && t.seq < e.seq && t.payload?.root_id === root)) {
+      note(`J2 request#${e.seq} 落在已终止的 scope（root=${root}）之后，此前没有新的输入格`)
     }
   }
   // J4 收束格 reason 非空
-  //
-  // 「收束格」是**两种**：`chat.assistant.final`（正常定稿）与 `chat.assistant.fallback`
-  // （模型没答成 / 空答由 `close` 执行体独占写）。只认 final 会把
-  // **每一条失败轮**都判成「没跑到定稿」——而失败轮恰恰是 D-122 决策 5 要求
-  // 「照样有格」的那一轮。判据的口径必须与方案里的收束格集合一致。
-  const CLOSING = ['chat.assistant.final', 'chat.assistant.fallback']
   const finals = events.filter((e) => CLOSING.includes(e.kind))
   if (finals.length === 0) note('J4 没有收束格（这次实测没跑到定稿）')
   for (const f of finals) {
@@ -336,42 +525,25 @@ function judgeSession(homedir, sid, strict) {
     if (!seqs.has(pb)) note(`J5 ${e.kind}#${e.seq} 的 produced_by=${pb} 不存在`)
     else if (pb >= e.seq) note(`J5 ${e.kind}#${e.seq} 的 produced_by=${pb} 不早于自己`)
   }
-  // J6 端口都在声明集里
+  // J6 端口都在声明集里（且协议事实必须带 ring: 身份）
   for (const e of events) {
     if (!PROTOCOL.has(e.kind)) continue
-    const port = e.payload?.port
-    if (!DECLARED_PORTS.includes(port)) note(`J6 ${e.kind}#${e.seq} 的端口 "${port ?? '(缺)'}" 未在声明集里`)
+    const k = ringKey(e)
+    if (!k) {
+      note(`J6 ${e.kind}#${e.seq} 的 event_id "${e.event_id}" 不是 ring: 身份——端口无从判定`)
+      continue
+    }
+    if (!DECLARED.has(k.port)) note(`J6 ${e.kind}#${e.seq} 的端口 "${k.port}" 未在声明集里`)
   }
-  // J7 观测 ⇔ 三格（含豁免表）；返回值给 J8 做减法
-  const unaccounted = judgePaths(events, rounds, strict, note)
-  return { events, rounds, sid, problems, unaccounted }
+  // J7 观测 ⇔ 三格（逐条路径；退场的 compress 路径见文件头）
+  judgePaths(events, logical, cfg, note)
+
+  return { events, rounds, logical, cfg, sid, problems }
 }
 
 /** 数真实模型 HTTP 调用：`[LLM] 请求发起 <endpoint> (model=..., msgs=..., ...)` 一次调用一行。 */
 function countHttp(logLines) {
   return logLines.filter((l) => l.includes('[LLM] 请求发起')).length
-}
-
-/**
- * 数**用户主动重试压缩**的次数（J8 的具名项 / J9 的上界）。
- *
- * 这一行由 `pipeline.rs::retry_compaction` 在找到压缩节点之后立刻打——它是这条路径
- * 在日志上**唯一**的具名痕迹（WAL 里没有：轮外往返按定义不入账）。所以「具名」不是
- * 靠一张表，而是靠**这一行在代码里的位置**：删掉它，J9 立刻判「差额没人解释」。
- */
-function countOutOfTurn(logLines) {
-  return logLines.filter((l) => l.includes('[Wake] RetryCompaction')).length
-}
-
-/**
- * 数**真的打到模型的压缩摘要**次数（J9 的左边）。
- *
- * `compress_with_snapshot_core` 在调模型之前打这一行，**两个分支都打**（轮内自动
- * 压缩与轮外重试）——所以它是「这一次摘要往返发生过」的完整观测，而 WAL 里的
- * `sent(via=compress/summary)` 只是**入账了的那部分**。两者的差就是本判据要说的那件事。
- */
-function countCompressStarts(logLines) {
-  return logLines.filter((l) => l.includes('[Compress] 压缩 LLM 请求开始')).length
 }
 
 const args = parseArgs(process.argv.slice(2))
@@ -388,19 +560,26 @@ let totalProblems = 0
 const summary = []
 const judged = []
 for (const sid of args.sessions) {
-  const r = judgeSession(args.homedir, sid, args.strict)
+  const r = judgeSession(args.homedir, sid)
   if (r.fatal) {
     console.log(red(`✗ ${sid}: ${r.fatal}`))
     process.exit(2)
   }
-  r.sentModel = r.events.filter((e) => e.kind === 'sent' && e.payload?.port === 'model').length
+  // J8 的左边：模型端口的 sent，剔除挂起补条（它不是派发）。
+  r.sentModel = r.events.filter((e) => {
+    if (e.kind !== 'sent' || suspended(e)) return false
+    const k = ringKey(e)
+    return k !== null && MODEL_PORTS.has(k.port)
+  }).length
   judged.push(r)
-  summary.push(`${sid}: sent(model) ${r.sentModel} / 往返 ${r.rounds.size} 组 / 豁免未入账 ${r.unaccounted}`)
+  summary.push(
+    `${sid}: sent(模型端口) ${r.sentModel} / 往返 ${r.rounds.size} 笔（(port,id,attempt)）/ 逻辑债 ${r.logical.length} 条`,
+  )
   if (r.problems.length === 0) {
-    console.log(green(`✓ ${sid}: J1…J7（事实层口径）全项通过（${r.events.length} 格 / ${r.rounds.size} 组端口往返）`))
+    console.log(green(`✓ ${sid}: J1…J7（事实层口径）全项通过（${r.events.length} 格 / ${r.rounds.size} 笔端口往返）`))
   } else {
     totalProblems += r.problems.length
-    console.log(red(`✗ ${sid}: ${r.problems.length} 项失效（${r.events.length} 格 / ${r.rounds.size} 组往返）`))
+    console.log(red(`✗ ${sid}: ${r.problems.length} 项失效（${r.events.length} 格 / ${r.rounds.size} 笔往返）`))
     for (const p of r.problems) console.log(red(`    ${p}`))
   }
 }
@@ -409,88 +588,73 @@ for (const s of summary) console.log(dim(`    ${s}`))
 // J8 只能**整轮**判：一次 `--cli-log` 覆盖所列全部会话，而日志行内没有会话号——
 // 把计数按会话摊开就是编数。文件头的输入约定（日志跨度 = 所列会话的跨度）在这里兑现。
 if (logLines) {
-  const whole = []
   const http = countHttp(logLines)
   const sentModel = judged.reduce((n, r) => n + r.sentModel, 0)
-  const exempted = judged.reduce((n, r) => n + r.unaccounted, 0)
-
-  // **具名项**（D-131）：用户主动重试压缩时那一笔摘要往返没有轮可挂 ⇒ 不入账。
-  // 它不进 `MODEL_PATHS` 的豁免表（那张表只许减不许加），而是从日志里**数出来**：
-  // `[Compress] 压缩 LLM 请求开始` 两个分支都打，而 WAL 里只有入账了的那部分有三格，
-  // 两者之差 = 真的发生过却没入账的摘要往返数。
-  const compressStarts = countCompressStarts(logLines)
-  const sentSummary = judged.reduce(
-    (n, r) =>
-      n +
-      r.events.filter(
-        (e) => e.kind === 'sent' && e.payload?.port === 'model' && e.payload?.via === 'compress/summary',
-      ).length,
-    0,
-  )
-  const unaccountedSummary = compressStarts - sentSummary
-  const outOfTurn = countOutOfTurn(logLines)
-
-  // J8 的等式里多这一项之后，「差额」才有一个**具名**的解释对象；而这一项自己要被
-  // J9 判「不超编」——两半合起来才是「这一笔没入账，且它只能是那一条路径」。
-  const expect = sentModel + exempted + unaccountedSummary
-  if (http !== expect) {
-    whole.push(
-      `J8 真实模型调用 ${http} 次 ≠ 入账 ${sentModel} + 豁免未入账 ${exempted} + 未入账摘要 ${unaccountedSummary} = ${expect}（差额 = 一条没人记账的模型路径）`,
+  console.log(dim(`    整轮：HTTP ${http} / sent(模型端口) ${sentModel}`))
+  if (http !== sentModel) {
+    totalProblems += 1
+    console.log(
+      red(
+        `    J8 真实模型调用 ${http} 次 ≠ 入账 ${sentModel} 次（模型端口的 sent，剔除挂起补条）——` +
+          '差额 = 一条没人记账的模型路径',
+      ),
     )
-  }
-  console.log(
-    dim(
-      `    整轮：HTTP ${http} / sent(model) ${sentModel} / 豁免未入账 ${exempted} / 未入账摘要 ${unaccountedSummary}`,
-    ),
-  )
-  if (whole.length === 0) {
+  } else {
     console.log(green('✓ 整轮：J8 通过'))
-  } else {
-    totalProblems += whole.length
-    for (const p of whole) console.log(red(`    ${p}`))
-  }
-
-  // ── J9：具名项不许超编（DE-015 §5.2 / D-131）──────────────────────
-  //
-  // J8 只说明「差额 = 未入账的摘要往返」，它没说这些摘要往返**从哪来**。J9 补这一半：
-  // 每一次真的打到模型却没入账的摘要，都必须由一次**用户主动重试**解释。两个方向都判：
-  //  - `unaccountedSummary > outOfTurn` ⇒ 有一条**没被点名**的未入账往返（新长出的静默路径）；
-  //  - `unaccountedSummary < 0` ⇒ 三格比日志里的摘要请求还多（日志缺行，或有人拿
-  //    `via=compress/summary` 记了不是摘要的往返）。
-  //
-  // 为什么不用 WAL 判这条边界：轮外那一笔**在事实层零痕迹**——这正是本判据要说的那件事。
-  console.log(
-    dim(
-      `    整轮：摘要请求 ${compressStarts} / 入账三格 ${sentSummary} / 未入账 ${unaccountedSummary} / 轮外重试 ${outOfTurn}`,
-    ),
-  )
-  if (unaccountedSummary > outOfTurn) {
-    totalProblems += 1
-    console.log(
-      red(
-        `    J9 未入账的摘要往返 ${unaccountedSummary} 次 > 轮外重试 ${outOfTurn} 次——` +
-          `差额只能由「用户主动重试压缩」解释，多出来的是**新长出的静默路径**`,
-      ),
-    )
-  } else if (unaccountedSummary < 0) {
-    totalProblems += 1
-    console.log(
-      red(
-        `    J9 入账三格 ${sentSummary} > 摘要请求 ${compressStarts}——账上比日志里多，` +
-          '要么日志缺行，要么有人拿 via=compress/summary 记了不是摘要的往返',
-      ),
-    )
-  } else {
-    console.log(green('✓ 整轮：J9 通过（未入账的摘要往返全部由具名重试解释）'))
   }
 } else if (args.strict) {
-  // strict 的意义是「不判等于放行」：J8 / J9 要数真实发生的模型 HTTP 调用，那只在 CLI
+  // strict 的意义是「不判等于放行」：J8 要数真实发生的模型 HTTP 调用，那只在 CLI
   // 日志里——没给日志就是没判过，不能报成全过。
-  console.log(red('✗ --strict：没给 --cli-log——J8 / J9（账实相符）未判'))
+  console.log(red('✗ --strict：没给 --cli-log——J8（账实相符）未判'))
   totalProblems += 1
 } else {
-  console.log(dim('    J8 / J9 未判：没有 --cli-log（账实相符需要真实 HTTP 计数）'))
+  console.log(dim('    J8 未判：没有 --cli-log（账实相符需要真实 HTTP 计数）'))
 }
+
+// ── J9：压缩产物 ⇔ 摘要往返（DE-015 §5.2 / D-131 的产物侧）──────────────
+//
+// 这一条**只读事实**，不需要日志：压缩产物的 `event_id` 是
+// `session.consolidated:<指纹>`，摘要往返的债键是 `compact-summarize:<同一个指纹>`
+// （两侧的指纹来自同一把 `key`：`crates/symbio-plugin-compact/src/debt.rs:143-186`
+// 与 `port.rs:113`）。
+//
+// 只看一个方向：**产物必须指名到一笔已收束的往返**。反方向（有往返没产物）不判：
+// 写压缩产物的那一行可能在会话结束时还没跑完（摘要成功、落格未到），那不是静默
+// 路径。真正的「有往返没账」由 J8 兜住。
+// 配对在**会话内**做：两个会话各自压各自的段，指纹跨会话撞车不该被当成同一笔。
+let j9Consolidated = 0
+let j9Summaries = 0
+let j9Closed = 0
+let j9Bad = 0
+for (const r of judged) {
+  const consolidated = r.events.filter((e) => e.kind === CONSOLIDATED)
+  const summarize = r.logical.filter(
+    (x) => x.port === 'model.assist' && x.id.startsWith(`${SUMMARIZE_ROW}:`),
+  )
+  const closed = summarize.filter((x) => x.facts.some((f) => f.kind === 'response'))
+  j9Consolidated += consolidated.length
+  j9Summaries += summarize.length
+  j9Closed += closed.length
+  for (const c of consolidated) {
+    const prefix = `${CONSOLIDATED}:`
+    const fingerprint = String(c.event_id).startsWith(prefix) ? String(c.event_id).slice(prefix.length) : null
+    const hit = fingerprint ? closed.find((x) => x.id === `${SUMMARIZE_ROW}:${fingerprint}`) : null
+    if (!hit) {
+      j9Bad += 1
+      console.log(
+        red(
+          `    J9 ${r.sid} 压缩产物 ${c.event_id}（seq#${c.seq}）找不到配对的摘要往返：` +
+            `应有一笔 ${SUMMARIZE_ROW}:${fingerprint ?? '(身份缺失)'} 的 response —— 产物不是模型产出的`,
+        ),
+      )
+    }
+  }
+}
+console.log(
+  dim(`    整轮：压缩产物 ${j9Consolidated} / 摘要往返 ${j9Summaries}（已收束 ${j9Closed}）`),
+)
+if (j9Bad > 0) totalProblems += j9Bad
+else console.log(green('✓ 整轮：J9 通过（每笔压缩产物都指名到一次入环的摘要往返）'))
 
 console.log(totalProblems === 0 ? green('义务环实测判定：全项通过') : red(`义务环实测判定：${totalProblems} 项失效`))
 process.exit(totalProblems === 0 ? 0 : 1)
