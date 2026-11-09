@@ -33,7 +33,7 @@ impl ConationPlugin {
 
     pub fn metadata() -> PluginMeta {
         PluginMeta::new(PLUGIN_ID_CONATION, PLUGIN_TITLE)
-            .with_description("「欲」的表达与它的升格读数：四条事实、两条视图、一笔升格债")
+            .with_description("「欲」的表达与它的升格读数：一条事实、两条视图、一笔升格债")
             .with_version("0.1.16")
     }
 }

@@ -17,27 +17,7 @@
       "adr": "D-397"
     },
     {
-      "name": "heartbeat.cadence",
-      "why": "心跳是观测事实，写即闭合",
-      "adr": "D-397"
-    },
-    {
       "name": "conation.expressed",
-      "why": "表达记录，写方可选、无时机债务",
-      "adr": "D-397"
-    },
-    {
-      "name": "conation.inquiry",
-      "why": "表达记录，写方可选、无时机债务",
-      "adr": "D-397"
-    },
-    {
-      "name": "conation.curiosity",
-      "why": "表达记录，写方可选、无时机债务",
-      "adr": "D-397"
-    },
-    {
-      "name": "conation.avoidance",
       "why": "表达记录，写方可选、无时机债务",
       "adr": "D-397"
     },

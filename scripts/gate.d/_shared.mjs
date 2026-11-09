@@ -389,7 +389,12 @@ export const BASELINE = {
   // 用例随之整段删除（`actors/mod.test.rs`、`projection/transcript.test.rs`、`loop/ring/engine.test.rs`
   // 合计 -10）。被测对象已不存在，覆盖对象消失不叫丢覆盖：等价读法由 `authz::content_visible`、
   // `transcript()`、`flatten_whole_tree` 侧的生产路径与 e2e 承接。非侵蚀。
-  ciRustTestsTotal: 2194,
+  // baseline-allow ciRustTestsTotal: 2194 → 2192（D-411）——撤回四条零写方声明面时，
+  // 随之删掉两条**只测那两条声明面存在**的用例（`conation/decl.test.rs` 的
+  // `the_three_unbuilt_capabilities_ship_name_cell_field_and_row` 与
+  // `heartbeat/decl.test.rs` 的声明面用例）。被测对象已整体撤回，覆盖对象消失不叫丢覆盖；
+  // 剩下的 `conation.expressed` 那条真链由 `t36-autonomous-initiator` 端到端钉住。非侵蚀。
+  ciRustTestsTotal: 2192,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

@@ -28,16 +28,13 @@
 //! 判决不再是一条视图：开关、目标宽度与「已声明」由本包申报的债行判，动作由本包的
 //! 端口执行体做（`D-386`）。视图只回答「发生过什么」，动作面不借查询面绕路。
 //!
-//! ## 三条随包事实为什么只交声明（`#36` / `#50` / `#51`）
+//! ## 为什么本包只声明一条事实
 //!
-//! 主动求知、好奇与探索、回避倾向在名册里是「拆（未建）」：它们没有控制面实现可搬，
-//! 而是**随本包一起建出来**。最小能力面取「事实」这一格——名字、格位、载荷字段、归宿行
-//! 都先立住，`DE-026` 的逐行处置就成立了；**写方（谁在什么时候表达一条求知 / 好奇 / 回避）
-//! 不在这一批**，所以三条行都是 `by = None`，也不进 `shared_events`（没有第二个消费方）。
-//!
-//! 为什么不顺带补一个视图：视图至少要有一条能读的事实，而这三条事实今天没有写方，
-//! 折出来的只会是「有据的零」——那会把「能力还没接」伪装成「读数是零」。声明面是
-//! 诚实的下限：它说得出「这个能力叫什么、落在哪一格」，说不出的时候不编读数。
+//! 名册 #36 / #50 / #51（主动求知 / 好奇与探索 / 回避倾向）曾随本包交过名字、格位、载荷
+//! 与 `by = None` 归宿行，但**从未有写方，也没有消费方**：声明一条运行期不会产生的事实
+//! 只是假声明。按 `D-411`（`D-395` 的「删实现不删设计行」）四条零写方声明面整体撤回，
+//! 设计行仍留名册 `planned-unspecified`。本包只留 `conation.expressed`——它有真实写方
+//! （会话自主触发）、真实读者（升格债与 `CONATION_INTENTS`）与真实出口（`task.opened`）。
 
 use serde_json::{json, Value};
 
@@ -75,28 +72,6 @@ pub(crate) const CONATION_INTENTS: &str = "conation.intents";
 /// 单片与跨会话合并后同形，`null` 表示这一格读不出来（零是读数）。
 pub(crate) const CONATION_AUTONOMY: &str = "conation.autonomy";
 
-/// 名册 #36「主动求知」的最小能力面：**一次求知被发起**。
-///
-/// 它与 `conation.expressed` 同格（`Conation × Opened`），但不是同一条事实：「我想知道 X」
-/// 与「我想要 X」在治理上是两件事——前者升格成一次检索 / 提问，后者升格成任务
-/// （升格债的判据只对后者生效）。
-///
-/// 名字**只在本包内使用**：没有写方之前不进 `shared_events`（CS-007：单消费方的名字随
-/// owner 走，进了共享表就是第二张没人用的内核表）。
-pub(crate) const EVENT_CONATION_INQUIRY: &str = "conation.inquiry";
-
-/// 名册 #50「好奇与探索」的最小能力面：**对某个方向的好奇被表达**。
-///
-/// 与求知的分界：求知带着一个可被回答的问题，好奇只给一个值得探索的方向——两者都不
-/// 承诺会有产物，所以是 `Opened` 而不是 `Asserted`。
-pub(crate) const EVENT_CONATION_CURIOSITY: &str = "conation.curiosity";
-
-/// 名册 #51「回避倾向」的最小能力面：**某类目标被自述为倾向回避**。
-///
-/// 格位是 `Conation × Asserted`：回避是对**自己**的一条断言，不打开任何待定意图；
-/// 它归自我模型（名册的轴是「自我模型精度」），不是新一轮的欲。
-pub(crate) const EVENT_CONATION_AVOIDANCE: &str = "conation.avoidance";
-
 /// owner —— 与目录名同形（`crates/symbio-plugin-conation`），装配表按它排序与报缺口。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-conation";
 
@@ -107,125 +82,44 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-conation";
 /// 所以这里不按「欲通常很少」调小——调小会改整张表的切点。
 const COST: u32 = 4096;
 
-pub(crate) const EVENTS: &[EventDecl] = &[
-    EventDecl::new(EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)),
-    // 名册 #36 / #50 / #51 的随包能力面：名字与格位先立住，写方落地时只接生产侧。
-    EventDecl::new(EVENT_CONATION_INQUIRY, (Entity::Conation, Verb::Opened)),
-    EventDecl::new(EVENT_CONATION_CURIOSITY, (Entity::Conation, Verb::Opened)),
-    EventDecl::new(EVENT_CONATION_AVOIDANCE, (Entity::Conation, Verb::Asserted)),
-];
+pub(crate) const EVENTS: &[EventDecl] = &[EventDecl::new(
+    EVENT_CONATION_EXPRESSED,
+    (Entity::Conation, Verb::Opened),
+)];
 
-pub(crate) const FACTS: &[FactDecl] = &[
-    FactDecl {
-        name: EVENT_CONATION_EXPRESSED,
-        port: None,
-        key: &[],
-        expand: &[],
-        // 只声明视图真正读的那一格。`ts` / `seq` / `produced_by` 是信封字段，不是载荷。
-        fields: &["goal"],
-    },
-    // 三条随包事实各只交一格：`topic` 是「关于什么」的稳定主语（一个问题 / 一个方向 /
-    // 一类被回避的目标）。判据（该不该追问、该不该探索）还没有 owner，所以不放进来。
-    FactDecl {
-        name: EVENT_CONATION_INQUIRY,
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["topic"],
-    },
-    FactDecl {
-        name: EVENT_CONATION_CURIOSITY,
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["topic"],
-    },
-    FactDecl {
-        name: EVENT_CONATION_AVOIDANCE,
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["topic"],
-    },
-];
+pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
+    name: EVENT_CONATION_EXPRESSED,
+    port: None,
+    key: &[],
+    expand: &[],
+    // 只声明视图真正读的那一格。`ts` / `seq` / `produced_by` 是信封字段，不是载荷。
+    fields: &["goal"],
+}];
 
 /// 本插件事实的**归宿行**：`owes` 与 `until` 同源——有表达即闭合，没有则不欠。
 ///
 /// 行表是义务，不是触发器；这条自读行只回答「这条事实归谁看护」。没有它，`seal` 会把
 /// `conation.expressed` 判成 `OrphanFact`（每条事实都要有归宿行）。
 ///
-/// 三条随包事实各有一条同形行（名册 #36 / #50 / #51）：`by = None` 是「这笔账不由引擎
-/// 执行」的声明位——写方还没接，行不假装有人跑它。接上写方时只改 `by` 与写侧，不动名字。
-pub(crate) const ROWS: &[Decl] = &[
-    Decl {
-        name: EVENT_CONATION_EXPRESSED,
-        by: None,
-        tier: LatencyTier::Reflex,
-        expand: None,
-        owes: Pattern {
-            source: EVENT_CONATION_EXPRESSED,
-            key: &[],
-            eq: &[],
-        },
-        until: &[Pattern {
-            source: EVENT_CONATION_EXPRESSED,
-            key: &[],
-            eq: &[],
-        }],
-        unless: &[],
+/// `D-411` 之前另有四条同形行挂在零写方事实上，已随那些事实一并撤回——给一条永远不会
+/// 发生的事实配归宿行，只是把「没人执行」写成「有人看护」。
+pub(crate) const ROWS: &[Decl] = &[Decl {
+    name: EVENT_CONATION_EXPRESSED,
+    by: None,
+    tier: LatencyTier::Reflex,
+    expand: None,
+    owes: Pattern {
+        source: EVENT_CONATION_EXPRESSED,
+        key: &[],
+        eq: &[],
     },
-    Decl {
-        name: EVENT_CONATION_INQUIRY,
-        by: None,
-        tier: LatencyTier::Reflex,
-        expand: None,
-        owes: Pattern {
-            source: EVENT_CONATION_INQUIRY,
-            key: &[],
-            eq: &[],
-        },
-        until: &[Pattern {
-            source: EVENT_CONATION_INQUIRY,
-            key: &[],
-            eq: &[],
-        }],
-        unless: &[],
-    },
-    Decl {
-        name: EVENT_CONATION_CURIOSITY,
-        by: None,
-        tier: LatencyTier::Reflex,
-        expand: None,
-        owes: Pattern {
-            source: EVENT_CONATION_CURIOSITY,
-            key: &[],
-            eq: &[],
-        },
-        until: &[Pattern {
-            source: EVENT_CONATION_CURIOSITY,
-            key: &[],
-            eq: &[],
-        }],
-        unless: &[],
-    },
-    Decl {
-        name: EVENT_CONATION_AVOIDANCE,
-        by: None,
-        tier: LatencyTier::Reflex,
-        expand: None,
-        owes: Pattern {
-            source: EVENT_CONATION_AVOIDANCE,
-            key: &[],
-            eq: &[],
-        },
-        until: &[Pattern {
-            source: EVENT_CONATION_AVOIDANCE,
-            key: &[],
-            eq: &[],
-        }],
-        unless: &[],
-    },
-];
+    until: &[Pattern {
+        source: EVENT_CONATION_EXPRESSED,
+        key: &[],
+        eq: &[],
+    }],
+    unless: &[],
+}];
 
 pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {

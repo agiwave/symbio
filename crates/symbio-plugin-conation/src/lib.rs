@@ -4,7 +4,7 @@
 //!
 //! | 面 | 用在哪 | 谁读 |
 //! |---|---|---|
-//! | 事实（`EventDecl` / `FactDecl` / 归宿行） | `conation.expressed` 落在 `conation × opened`；随包的 `conation.inquiry` / `conation.curiosity`（`× opened`）与 `conation.avoidance`（`× asserted`）是名册 #36 / #50 / #51 的最小能力面 | 写闸按声明校验名字与格位；三条随包事实暂无写方，故不进共享表 |
+//! | 事实（`EventDecl` / `FactDecl` / 归宿行） | 只有 `conation.expressed`，落在 `conation × opened`；#36 / #50 / #51 的零写方声明面已按 `D-411` 撤回，设计行留名册 | 写闸按声明校验名字与格位；名字进 `shared_events` 是因为写方在会话（跨插件） |
 //! | 视图（`ViewDecl` + 报表登记） | `conation.intents` 折出意图流 + 两个计数 + 采纳率 | 任何按名字读的插件（D-221） |
 //! | 多片合并（`ViewDecl::agg`） | N 份单片读数 → 实例级的采纳率 | 实例级聚合列的读方（D-281） |
 //! | 债（`DebtSource`） | 「这一条欲该不该升格」的三个 early return（未 enabled / 未授权 / 已声明） | 环的计划层（D-386） |

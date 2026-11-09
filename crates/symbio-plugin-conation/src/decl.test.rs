@@ -248,54 +248,6 @@ fn every_view_ships_both_halves_and_its_reads_are_declared() {
     }
 }
 
-// ==================== 随包落地的三条未建能力（名册 #36 / #50 / #51） ====================
-//
-// 这一批只交**声明面**（`DE-026` 的「最小形态：事实 / 段 / 工具之一」）。用例钉住四样：
-// 名字在 `EVENTS`、格位正确、载荷只交一格、归宿行存在。写方不在时少任何一样，装配期的
-// `seal` 会判红，而不是运行期表现为「这条能力什么都没发生」。
-//
-// 也钉住「不进共享表」：三条事实都没有第二个消费方，进 `shared_events` 就是一条没人读的
-// 登记（`CS-007`）。
-
-#[test]
-fn the_three_unbuilt_capabilities_ship_name_cell_field_and_row() {
-    for (name, verb) in [
-        (EVENT_CONATION_INQUIRY, Verb::Opened),
-        (EVENT_CONATION_CURIOSITY, Verb::Opened),
-        (EVENT_CONATION_AVOIDANCE, Verb::Asserted),
-    ] {
-        let event = EVENTS
-            .iter()
-            .find(|e| e.name == name)
-            .unwrap_or_else(|| panic!("{name} 必须在 EVENTS 里"));
-        assert_eq!(event.cell, (Entity::Conation, verb), "{name}: 格位");
-
-        let fact = FACTS
-            .iter()
-            .find(|f| f.name == name)
-            .unwrap_or_else(|| panic!("{name} 必须在 FACTS 里"));
-        assert_eq!(fact.fields, &["topic"], "{name}: 只交一格载荷");
-
-        let row = ROWS
-            .iter()
-            .find(|r| r.name == name)
-            .unwrap_or_else(|| panic!("{name} 的归宿行缺失会被 seal 判成 OrphanFact"));
-        assert!(row.by.is_none(), "{name}: 写方还没接，行不假装有人跑它");
-        assert_eq!(row.owes.source, name);
-        assert!(
-            row.until.iter().any(|p| p.source == name),
-            "{name}: 自读即闭合，出口必须与 owes 同源"
-        );
-
-        assert!(
-            !symbio_plugin_api::events::SHARED_EVENTS
-                .iter()
-                .any(|e| e.name == name),
-            "{name}: 单消费方的名字随 owner 走，不进共享表（CS-007）"
-        );
-    }
-}
-
 // ==================== 自主程度列的报表登记（D-387） ====================
 
 fn report_ctx() -> symbio_plugin_api::reports::ReportCtx<'static> {
