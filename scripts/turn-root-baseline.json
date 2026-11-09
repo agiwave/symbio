@@ -2,8 +2,8 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 145,
-      "test": 182
+      "prod": 142,
+      "test": 179
     },
     "F2": {
       "prod": 21,
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-09",
+      "faces": "F1.prod / F1.test",
+      "reason": "`4a2485aa`（D-405）删掉 15 条零调用的旧判据与旧读法（`actors/{control,spec}.rs` 的淘汰与 agent 判据、`turn/node_build.rs` 的两条旧建树口、`projection/transcript.rs`、`view/mod.rs`、`llm/frames.rs` 整文件），它们自己与只服务它们的用例里带着轮次词根，F1 生产面 145 → 142、测试面 182 → 179 为**实测收窄**；目标 0 不变，余量继续按退场批次清。"
+    },
     {
       "date": "2026-11-08",
       "faces": "F2.prod",

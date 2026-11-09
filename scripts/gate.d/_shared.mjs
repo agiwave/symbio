@@ -385,7 +385,11 @@ export const BASELINE = {
   // 只改能力插件」的注册面 / 执行面；能力账本（EX-001）与名册（EX-006）不因此变动。非侵蚀。
   // baseline-allow ciRustTestsTotal: 2179 → 2181（真实能力包探针）——新增 2 条：默认装配接纳
   // （symbio 冻结表）与环上驱动（选债→执行体还事实→配对）。非侵蚀。
-  ciRustTestsTotal: 2204,
+  // baseline-allow ciRustTestsTotal: 2204 → 2194（D-405）——删掉的 15 条零调用旧判据，其**专属**
+  // 用例随之整段删除（`actors/mod.test.rs`、`projection/transcript.test.rs`、`loop/ring/engine.test.rs`
+  // 合计 -10）。被测对象已不存在，覆盖对象消失不叫丢覆盖：等价读法由 `authz::content_visible`、
+  // `transcript()`、`flatten_whole_tree` 侧的生产路径与 e2e 承接。非侵蚀。
+  ciRustTestsTotal: 2194,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -415,7 +419,7 @@ export const BASELINE = {
   // baseline-allow e2eCases: 97 → 88（D-395）——9 条整例退役（t89/t91/t93/t94/t98/t100/t101/
   // t102/t103），它们钉的是被撤回的专用验证包；判据对象随实现一起消失，通用扩展面由
   // `t96-glossary-extension.mjs` 承接。非侵蚀。
-  e2eCases: 90,
+  e2eCases: 91,
   // 累计「补件 : 迁移」的**欠账本金**（D-372，`capability-migration-audit` 的付账线）。
   // 不是「比值上限」：范围基线一变计数就变，比值当阈值会假红。这里记的是判据落地当天的
   // 存量（实测 21 个补件 / 15 个迁移批次）。文档里手写的「补件 20 / 迁移 5」是 2026-11-01

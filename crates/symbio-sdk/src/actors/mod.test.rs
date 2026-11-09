@@ -433,12 +433,7 @@ async fn rehearse_reasoner_turn(
         .expect("用户消息必入库");
     let snapshot = store.range(crate::event::Seq::new(0));
     let started = Instant::now();
-    let outcome = llm
-        .generate(
-            &tok,
-            &request_messages(&snapshot),
-        )
-        .await;
+    let outcome = llm.generate(&tok, &request_messages(&snapshot)).await;
     let cost_ms = started.elapsed().as_millis() as u64;
     match outcome {
         Ok(reply) => {
@@ -510,10 +505,7 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
     let snapshot = store.range(crate::event::Seq::new(0));
     let llm = MinimalStub::succeed("stub-model");
     let reply = llm
-        .generate(
-            &TokenIssuer::issue_deep(),
-            &request_messages(&snapshot),
-        )
+        .generate(&TokenIssuer::issue_deep(), &request_messages(&snapshot))
         .await
         .expect("成功桩必答");
     assert!(

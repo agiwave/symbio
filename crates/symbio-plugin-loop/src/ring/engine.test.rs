@@ -1,15 +1,14 @@
 use super::*;
 use crate::ring::facts::{DebtKey, Fact, FactKind, FactView};
 use crate::ring::table::{DebtRow, DebtSource, DeclInput, Table};
-use symbio_kernel::decl::ring::{Decl, Pattern};
-use symbio_kernel::decl::{ActorDecl, Builder, FactDecl, Frozen, PluginDeclarations, ViewDecl};
-use symbio_kernel::event::{Entity, Event as KernelEvent, EventDecl, Verb};
-use symbio_kernel::LatencyTier;
-use symbio_plugin_api::rows::PLUGIN_ROW;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use symbio_kernel::decl::ring::{Decl, Pattern};
+use symbio_kernel::decl::{ActorDecl, Builder, FactDecl, Frozen, PluginDeclarations, ViewDecl};
+use symbio_kernel::event::{Entity, Event as KernelEvent, EventDecl, Verb};
+use symbio_kernel::LatencyTier;
 use symbio_plugin_api::debt::{FailureProjection, ReplyRole};
 use symbio_plugin_api::drive::DRIVE_SENT;
 use symbio_plugin_api::effects::FactDraft;
@@ -17,6 +16,7 @@ use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortFactWriter, PortInput,
     PortOutcome,
 };
+use symbio_plugin_api::rows::PLUGIN_ROW;
 
 /// 测试宿主：事实在内存里，债表与执行体由测试给定。
 ///

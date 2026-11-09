@@ -427,7 +427,10 @@ fn a_snapshot_report_node_stays_out_of_the_request_package() {
         "摘要 + 界面文本 + 压缩后的问：界面文本仍在转写里（用户看得见）"
     );
     assert_eq!(
-        view.entries.iter().filter(|e| e.exclude_from_context).count(),
+        view.entries
+            .iter()
+            .filter(|e| e.exclude_from_context)
+            .count(),
         1,
         "且被标出来"
     );
