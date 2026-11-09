@@ -77,6 +77,8 @@
 
 use std::collections::HashSet;
 
+use super::mutations::added_messages;
+use super::mutations::is_reader_reply;
 use crate::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
     CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
@@ -85,10 +87,11 @@ use crate::event::event_payload_node_id;
 use crate::event::{
     event_produced_text_node_id, event_result_node_id, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
 };
-use crate::port_stamp::{STAMP_FAILURE, STAMP_KEY, STAMP_ROLE};
+use crate::port_stamp::{STAMP_FAILURE, STAMP_KEY};
 use crate::projection::vocab::{slot_of, ChatSlot};
 use crate::projection::vocab::{ChatVocab, MessageVocab};
 use crate::{Entity, Event, Verb};
+use symbio_kernel::event::payload_str;
 
 // 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
@@ -421,24 +424,6 @@ fn removed_ids(e: &Event) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `message.added` → 载荷里的节点列表（`{ messages: [...] }`）。
-///
-/// 载荷是**写侧**给定的形状（`message_events::added`），一条坏条目不吃掉整批——
-/// 与 `nodes_of` 对其它格的容错同一条口径：**重建必须对任意历史事件容错**。
-/// 与 `message.edited` 不同，这里**照单全收**：诞生格的节点本就带着它自己的
-/// 位置语义（发射顺序），不存在「硬插到错误位置」的问题。
-fn added_nodes(e: &Event) -> Vec<ChatNode> {
-    e.payload
-        .get("messages")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| serde_json::from_value::<ChatNode>(v.clone()).ok())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// 一条事件 → 它承载的节点（顺序即树内顺序）。
 ///
 /// `denied_speech` 是本切片里发言被拒的分组（见 [`rebuild`] 的索引）。
@@ -493,7 +478,7 @@ fn nodes_of(
         Some(ChatSlot::ArtifactAdded) => artifact_nodes(e, group_of_call, node_of_call),
         // 诞生格：**没有别的格可搭车**的节点在这里出生（压缩记录节点是最典型的一个）。
         // 按**发射顺序**插到列表末尾——顺序锚由本函数统一发号。
-        Some(ChatSlot::MessageAdded) => added_nodes(e),
+        Some(ChatSlot::MessageAdded) => added_messages(e),
         // 变更格与取代格在 [`rebuild`] 的循环里已经处理（改 / 删 / 换基），不产新节点。
         Some(ChatSlot::MessageEdited | ChatSlot::MessageRemoved | ChatSlot::Consolidated) => {
             Vec::new()
@@ -639,7 +624,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
             return vec![node];
         }
         let reasoning_id =
-            str_of(e, "reasoning_id").unwrap_or_else(|| format!("{}-reasoning", node.id));
+            payload_str(e, "reasoning_id").unwrap_or_else(|| format!("{}-reasoning", node.id));
         let reasoning_node = ChatNode {
             id: reasoning_id,
             parent_id: Some(node.id.clone()),
@@ -653,7 +638,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         .with_style_tag(CHAT_STYLE_TAG_REASONING);
         return vec![node, reasoning_node];
     }
-    let Some(group) = str_of(e, "root_id") else {
+    let Some(group) = payload_str(e, "root_id") else {
         return Vec::new();
     };
     let principal = actor_principal(e);
@@ -714,7 +699,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     if !reasoning.trim().is_empty() && !reasoning_only {
         nodes.push(
             ChatNode {
-                id: str_of(e, "reasoning_id").unwrap_or_else(|| format!("{group}-reasoning")),
+                id: payload_str(e, "reasoning_id").unwrap_or_else(|| format!("{group}-reasoning")),
                 parent_id: Some(group.clone()),
                 principal: Some(principal.clone()),
                 msg_type: Some(NodeKind::Notice),
@@ -731,7 +716,8 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         // 正文子节点的 id 与写侧同源：优先取执行体交出的 `answer_id`（含
         // reasoning-only 那条分支），旧事实没有该键时按 core 的
         // [`event_produced_text_node_id`] 派生。
-        let child_id = str_of(e, "answer_id").unwrap_or_else(|| event_produced_text_node_id(e));
+        let child_id =
+            payload_str(e, "answer_id").unwrap_or_else(|| event_produced_text_node_id(e));
         // 形状经 `llm_build_text_node`（单点定义），只覆写「此刻」为事件时刻。
         let mut m = llm_build_text_node(&group, &text, None, child_id, &principal);
         m.timestamp = Some(e.ts);
@@ -797,20 +783,6 @@ fn push_step_nodes(
         m.status = Some(status.clone());
         nodes.push(m);
     }
-}
-
-/// 这一条 `response` / `failed` 是不是**本轮自己的模型往返**。
-///
-/// 两个维度都来自载荷：`stamp.role == "reader"` 是这一轮对读者说话，`via` 缺席是
-/// 「不是内部往返（措辞 / 裁判 / 摘要）」。core 不写端口的字面量——与事件名同一条
-/// 纪律（D-203 / D-206）。
-fn is_model_roundtrip(e: &Event) -> bool {
-    e.payload
-        .get(STAMP_KEY)
-        .and_then(|stamp| stamp.get(STAMP_ROLE))
-        .and_then(serde_json::Value::as_str)
-        == Some("reader")
-        && e.payload.get("via").is_none()
 }
 
 /// 压缩失败（`failed` + `stamp.failure = compression`）→ 一个 `Failed` 压缩叶（D-402 ①）。
@@ -888,10 +860,10 @@ fn compression_failure_node(e: &Event) -> Option<ChatNode> {
 /// 正文与思考仍是网格里的事实，但从未获准进入对话（fail-closed）；工具轮的中途产出
 /// 不受影响——它们属于已经准许的循环。
 fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
-    if !is_model_roundtrip(e) {
+    if !is_reader_reply(&e.payload) || e.payload.get("via").is_some() {
         return Vec::new();
     }
-    let Some(root) = str_of(e, "root_id") else {
+    let Some(root) = payload_str(e, "root_id") else {
         return Vec::new();
     };
     // 节点主体 = **写这条事实的人**（`actor`），不是载荷里的 `principal`。
@@ -962,7 +934,8 @@ fn issued_call_id(events: &[Event], debt: &str) -> Option<String> {
         .rev()
         .any(|e| {
             e.kind == EVENT_RESPONSE
-                && is_model_roundtrip(e)
+                && is_reader_reply(&e.payload)
+                && e.payload.get("via").is_none()
                 && e.payload
                     .get("calls")
                     .and_then(|v| v.as_array())
@@ -1017,7 +990,7 @@ fn unfinished_nodes(
         {
             continue;
         }
-        let Some(call_id) = str_of(e, "id") else {
+        let Some(call_id) = payload_str(e, "id") else {
             continue;
         };
         // 同一笔的多次尝试各有 `failed`：只认首次出现的终局（与「同 id 只认首次」
@@ -1066,7 +1039,8 @@ fn unfinished_nodes(
             // 回找不到 ⇒ 这不是一次模型发起的调用，不投影（见 `issued_call_id`）。
             let Some(resp) = events.iter().rev().find(|r| {
                 r.kind == EVENT_RESPONSE
-                    && is_model_roundtrip(r)
+                    && is_reader_reply(&r.payload)
+                    && r.payload.get("via").is_none()
                     && r.payload
                         .get("calls")
                         .and_then(|v| v.as_array())
@@ -1081,7 +1055,7 @@ fn unfinished_nodes(
             }) else {
                 continue;
             };
-            let root = str_of(resp, "root_id").unwrap_or_else(|| format!("root-{node_id}"));
+            let root = payload_str(resp, "root_id").unwrap_or_else(|| format!("root-{node_id}"));
             let mut call = llm_build_tool_call_node(
                 &root,
                 node_id.clone(),
@@ -1147,7 +1121,7 @@ fn artifact_nodes(
     group_of_call: &std::collections::HashMap<String, String>,
     node_of_call: &std::collections::HashMap<String, String>,
 ) -> Vec<ChatNode> {
-    let call_id = str_of(e, "tool_call_id");
+    let call_id = payload_str(e, "tool_call_id");
     let Some(group) = call_id
         .as_deref()
         .and_then(|id| group_of_call.get(id))
@@ -1295,15 +1269,6 @@ fn artifact_nodes(
 }
 
 // ── 载荷取值（缺失一律静默给默认值：重建必须对**任意**历史事件容错）────────────
-
-/// 取非空字符串字段。
-fn str_of(e: &Event, key: &str) -> Option<String> {
-    e.payload
-        .get(key)
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
 
 /// 取字符串字段（允许空串——正文可以是空串，那是「答了空话」的事实）。
 fn text_of(e: &Event, key: &str) -> String {

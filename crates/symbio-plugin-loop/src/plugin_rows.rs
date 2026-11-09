@@ -103,17 +103,6 @@ fn ask_since<'a>(events: &'a [Event], row: &str, trace: &str, _attempt: u32) -> 
     })
 }
 
-/// 回执事件里的环债 id（`ring:<port>:<id>:<attempt>:<kind>`）。
-fn ring_id(event_id: &str, kind: &str) -> Option<String> {
-    let rest = event_id.strip_prefix("ring:")?;
-    let parts: Vec<&str> = rest.split(':').collect();
-    let at = parts.iter().rposition(|p| *p == kind)?;
-    if at < 2 {
-        return None;
-    }
-    Some(parts[1..at - 1].join(":"))
-}
-
 /// 与这笔「在等」配对回执：先找 `response`，再找 `failed`。
 fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<ModelReply<'a>> {
     let mut found = None;
@@ -123,7 +112,11 @@ fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<ModelReply<'a>> {
         {
             continue;
         }
-        if ring_id(&event.event_id, &event.kind).as_deref() != Some(ask) {
+        if symbio_kernel::event::ring_parts(&event.event_id, &event.kind)
+            .map(|(_, id, _)| id)
+            .as_deref()
+            != Some(ask)
+        {
             continue;
         }
         if event.kind == symbio_plugin_api::EVENT_RESPONSE {

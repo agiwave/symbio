@@ -326,7 +326,7 @@ pub struct OutputIndex {
 }
 
 /// 一次往返是否对读者说话：只认环盖的 `stamp.role`，不比较端口名。
-fn is_reader_reply(payload: &serde_json::Value) -> bool {
+pub(crate) fn is_reader_reply(payload: &serde_json::Value) -> bool {
     payload
         .get(STAMP_KEY)
         .and_then(|stamp| stamp.get(STAMP_ROLE))

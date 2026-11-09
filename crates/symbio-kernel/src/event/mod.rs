@@ -728,6 +728,23 @@ pub fn payload_str(e: &Event, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// 环协议事实的共享读口：从 `ring:{port}:{id}:{attempt}:{kind}[:{shard}]` 还原
+/// `(port, id, attempt)`。`id` 自身可含 `:`，故从右定界；尾段 `[:shard]` 被
+/// `rposition` 自然忽略。`attempt` 以原样字符串交回，解析留给读侧。
+pub fn ring_parts(event_id: &str, kind: &str) -> Option<(String, String, String)> {
+    let rest = event_id.strip_prefix("ring:")?;
+    let parts: Vec<&str> = rest.split(':').collect();
+    let kind_at = parts.iter().rposition(|p| *p == kind)?;
+    if kind_at < 3 {
+        return None;
+    }
+    Some((
+        parts[0].to_string(),
+        parts[1..kind_at - 1].join(":"),
+        parts[kind_at - 1].to_string(),
+    ))
+}
+
 /// 信封的最小契约（[DE-001 §2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的 `type Event: EventEnvelope`）。
 ///
 /// `Store` 只需要知道三件事：幂等键是什么、seq 在不在、seq 怎么赋值。

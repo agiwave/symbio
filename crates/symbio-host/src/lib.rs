@@ -639,22 +639,12 @@ fn event_to_drive_fact(event: Event) -> DriveFact {
 /// 含 `:`；因此从右往左定界：最右是可选分片号，往左依次是种类与尝试号，
 /// 剩下的中段整体是 `id`。不是 `ring:` 抬起的事实 ⇒ 世界事实的三元组。
 fn ring_key_of(event_id: &str, kind: &str) -> (String, String, u32) {
-    let Some(rest) = event_id.strip_prefix("ring:") else {
+    let Some((port, id, attempt)) = symbio_kernel::event::ring_parts(event_id, kind) else {
         return (String::new(), event_id.to_string(), 0);
     };
-    let parts: Vec<&str> = rest.split(':').collect();
-    let Some(kind_at) = parts.iter().rposition(|part| *part == kind) else {
+    let Ok(attempt) = attempt.parse::<u32>() else {
         return (String::new(), event_id.to_string(), 0);
     };
-    // `kind` 左侧必须还有尝试号与端口位。
-    if kind_at < 2 {
-        return (String::new(), event_id.to_string(), 0);
-    }
-    let Ok(attempt) = parts[kind_at - 1].parse::<u32>() else {
-        return (String::new(), event_id.to_string(), 0);
-    };
-    let port = parts[0].to_string();
-    let id = parts[1..kind_at - 1].join(":");
     (port, id, attempt)
 }
 
