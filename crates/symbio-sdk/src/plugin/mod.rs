@@ -1,12 +1,17 @@
 //! 插件核心 Trait（上下文注入版）——宿主侧补充面
 //!
 //! 契约本体（`Plugin` / 上下文 / 信封 / 错误）已在 `symbio_kernel`（D-188 C2b），
-//! 这里保留宿主事实：插件目录与清单（[`dir`]）、遍历端点（[`traverse`]）。
+//! 这里保留宿主事实：插件目录与清单（[`dir`]）、遍历端点（[`traverse`]），
+//! 以及能力效果的机制面（[`effects`] / [`behaviors`]，随 `submit_behavior!` 从门面
+//! 整块搬来，`D-408`）。
 
 pub use symbio_kernel::plugin::*;
 
 mod dir;
 mod traverse;
+
+pub mod behaviors;
+pub mod effects;
 
 // 域内子模块私有，公开面在此显式重导出
 pub use dir::{

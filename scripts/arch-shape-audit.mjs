@@ -329,12 +329,15 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // ——两笔都各自有放宽行在上面，不是余量。531 → 539 是 `SessionView` 的八格随
 // P2-3b2-1 搬进 sdk（放宽行在上面，D-315）；它此前住在会话插件的请求构造里，
 // 不在本判据的扫描面内，搬进来的是同一份回体契约而不是新长出的数据面。
+// core-shape-allow enumVariants: D-408 effects/behaviors 整块搬进 sdk——Kind(2) / FileOp(4) /
+// BeforeDecision(2) 共 8 格随注册表换地址。CS-009 只扫 sdk + kernel，这些枚举此前住
+// plugin-api（不在扫描面），搬进来的是同一份类型闭包，不是新长出的数据面。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 539, enumVariants: 237 }
+  : { structFields: 539, enumVariants: 244 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

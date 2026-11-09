@@ -14,6 +14,7 @@
 use crate::actors::pattern_for_principal;
 use crate::authz::PRINCIPAL_ARBITER;
 use crate::governance::GrantsChange;
+use crate::plugin::effects::BeforeReadings;
 use symbio_kernel::actors::{ActorSpec, Scope};
 use symbio_kernel::event::{Entity, Event, Verb};
 
@@ -205,5 +206,26 @@ impl EliminationDecider {
             }
         }
         out
+    }
+}
+
+/// 前置判断的读数构造：从**会话本地事实切片**折出「主体的 `assign.work` 是否被收回」。
+///
+/// 与 [`EliminationDecider::verdict_grants_changes`] 同一件事的读侧——裁决格
+/// （`verdict × asserted`）折成覆盖层，再按主体取当前值（DE-043 §3）。调用点是 tool
+/// 端口执行体入口、`apply_before` 之前：此时闸还没问行为，但读侧非要交的结论已经能在
+/// 本会话切片里算出来。切片只来自该会话的读写口——跨会话的裁决由部署层在会话开面播种
+/// 进同一份切片（D-340），本函数永远不读别人的会话。
+///
+/// 判据是**调用方主体**（`principal`），不是被委派的目标：闸管的是「谁还能派活」，
+/// 与目标存不存在无关。
+impl BeforeReadings {
+    pub fn from_facts(facts: &[Event], principal: &str) -> Self {
+        let overlay = crate::governance::GrantsOverlay::fold(
+            EliminationDecider::verdict_grants_changes(facts),
+        );
+        Self {
+            assign_work_revoked: overlay.is_revoked(principal, crate::authz::CAP_ASSIGN_WORK),
+        }
     }
 }

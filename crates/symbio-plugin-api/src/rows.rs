@@ -127,11 +127,6 @@ impl RowRequest<'_> {
 pub enum RowStep {
     /// 本步直接落格（不需要往返）：中间产物，落完继续欠下一步。
     Facts(Vec<FactDraft>),
-    /// 本步落事实**并交效果草稿**（D-293）：事实先由写口落，效果再交三个宿主写口。
-    ///
-    /// 只有声明了对应 [`RowHandler::effects`] 的行才能走这一档：写口按声明复核形状，
-    /// 未声明的效果在写口一处被拒。
-    FactsWithEffects(Vec<FactDraft>, Vec<crate::effects::EffectDraft>),
     /// 本步欠一笔 `request(port=model)`（D-304）：宿主据它发起一次往返并记账，
     /// 回执交 [`RowHandler::parse`] 关账。
     Ask(ModelAsk),
@@ -203,14 +198,6 @@ pub trait RowHandler: Sync {
         Box::pin(async move { self.run(req) })
     }
 
-    /// 本行声明产出的**效果面**（D-293）：默认空 = 这一行不交任何效果。
-    ///
-    /// 声明只用于装配期把面折成事实生产者（阶段格 / 对话面各对应一条宿主事实），
-    /// 以及运行期对草稿形状的校验；它不给出写句柄——落格仍在宿主唯一写口。
-    fn effects(&self) -> &'static [crate::effects::EffectFace] {
-        &[]
-    }
-
     /// 模型往返的回执 → 这一笔债的产物（D-242）。
     ///
     /// 只有 `run` 交过 [`RowStep::Ask`] 的实现会被调到；收的仍然是纯值。
@@ -273,22 +260,6 @@ pub fn declared_writes() -> Vec<&'static str> {
     let mut all: Vec<&'static str> = handlers()
         .iter()
         .flat_map(|h| h.writes().iter().copied())
-        .collect();
-    all.sort_unstable();
-    all.dedup();
-    all
-}
-
-/// 这一行声明的效果面（未登记的行 = 空，`None` 与空在判据上同义）。
-pub fn effects_of(row: &str) -> Option<&'static [crate::effects::EffectFace]> {
-    handler_for(row).map(|h| h.effects())
-}
-
-/// 全部行实现声明的效果面并集（装配期折成宿主事实的生产者面，D-293）。
-pub fn declared_effects() -> Vec<crate::effects::EffectFace> {
-    let mut all: Vec<crate::effects::EffectFace> = handlers()
-        .iter()
-        .flat_map(|h| h.effects().iter().copied())
         .collect();
     all.sort_unstable();
     all.dedup();

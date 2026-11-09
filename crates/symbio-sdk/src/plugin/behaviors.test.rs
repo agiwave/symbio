@@ -1,7 +1,7 @@
 //! 行为名收集面的判据：没有手写名单、一个只在测试里存在的能力也能走完整条链。
 
 use super::*;
-use crate::effects::{
+use crate::plugin::effects::{
     apply, expects_facts, EffectCall, EffectEnv, EffectInput, FactDraft, ToolBehavior,
 };
 use symbio_kernel::event::{Entity, Verb};
@@ -83,7 +83,7 @@ fn the_collected_capability_lands_its_fact() {
 #[test]
 fn known_names_are_the_collected_handlers() {
     let names = known();
-    for behavior in crate::effects::handlers() {
+    for behavior in crate::plugin::effects::handlers() {
         assert!(
             names.contains(&behavior.behavior()),
             "{} 报的名字 {:?} 没进收集结果",

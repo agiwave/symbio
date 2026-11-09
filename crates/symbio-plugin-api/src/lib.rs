@@ -7,8 +7,8 @@
 //!
 //! - [`routes`]：跨插件调用路径（地址）常量
 //! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂）
-//! - [`behaviors`]：行为名的收集面（名字与造格声明由实现自报，本 crate 不持有）
-//! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）
+//! - [`behaviors`]：行为名的收集面（实现住 sdk，本 crate 只转出，D-408）
+//! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）（转出，`D-408`）
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）
 //! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份
 //! - [`port`]：世界端口的注册面（`PortProvider` 与 port 族——名字与契约静态，提供者随活插件的能力行动态收集）
@@ -87,6 +87,9 @@ pub use fact_source::{
 };
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
+// `submit_behavior!` 随注册表搬进 sdk（D-408），经本 crate 的 `effects` 模块转出到根：
+// 插件侧写 `symbio_plugin_api::submit_behavior!` 不变（E-009）。
+pub use effects::submit_behavior;
 pub use port::{
     capability_port_check, capability_port_of, port_family, port_row_name, port_rows, AuthzVerdict,
     PortCapabilities, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,

@@ -22,13 +22,9 @@ use serde_json::{json, Value};
 use symbio_kernel::decl::ring::Debt;
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::drive::DriveFact;
-use symbio_plugin_api::effects::EffectDraft;
-use symbio_plugin_api::events::EVENT_MESSAGE_ADDED;
-use symbio_plugin_api::node_build::dialog_node;
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
-use symbio_plugin_api::principal::Principal;
 use symbio_plugin_api::rows::{
     ask_id, handler_for, ModelReply, RowRequest, RowStep, ASK_KIND, PLUGIN_ROW,
 };
@@ -265,56 +261,6 @@ impl PortExecutor for PluginRowExecutor {
                     );
                 }
                 if let Err(outcome) = emit_attributed(&exec, facts).await {
-                    return outcome;
-                }
-                PortOutcome::ok()
-            }
-            RowStep::FactsWithEffects(facts, effects) => {
-                // 对话面效果（D-293）：能力只交纯值草稿，节点 id 与轮号由宿主盖。
-                // 节点身份由 `(owner, anchor, key)` 派生 ⇒ 重复投递撞同一事件 id，
-                // 由写口的 Duplicate 吸收（不在实时面上多出一张卡）。
-                let mut drafts = facts;
-                for effect in effects {
-                    match effect {
-                        EffectDraft::Dialog(draft) => {
-                            let id = format!(
-                                "dlg-{}-{}-{}",
-                                handler.owner(),
-                                exec.idempotency_key,
-                                draft.key
-                            );
-                            let who: &str = match draft.role {
-                                "user" => "user",
-                                "system" => "system",
-                                _ => principal.as_str(),
-                            };
-                            let mut node = dialog_node(
-                                &draft.text,
-                                "effect",
-                                false,
-                                &Principal::from_legacy(who),
-                            );
-                            node.id = id.clone();
-                            if let Some(card) = &draft.card {
-                                if let Some(meta) = node.meta.as_mut() {
-                                    meta["card"] = card.clone();
-                                }
-                            }
-                            drafts.push(FactDraft {
-                                key: id,
-                                kind: EVENT_MESSAGE_ADDED.to_string(),
-                                entity: Entity::Message,
-                                verb: Verb::Opened,
-                                payload: json!({ "messages": [node] }),
-                                produced_by: exec.origin,
-                            });
-                        }
-                        // 实时上线面还没有生产草稿（本仓此刻没有能力交 `LiveDraft`）：
-                        // 不在这里私造帧。
-                        EffectDraft::Live(_) => {}
-                    }
-                }
-                if let Err(outcome) = emit_attributed(&exec, drafts).await {
                     return outcome;
                 }
                 PortOutcome::ok()

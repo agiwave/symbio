@@ -2,11 +2,11 @@
   "note": "plugin-api 自有实现的行数棘轮：只许降。数的是生产文件物理行（含空行与注释），*.test.rs / tests.rs 与 #[cfg(test)] mod 不计。超一行即红；行数下降必须同批下调本文件，否则基线留出的余量会让「删 N 行再加 N 行」逃过判据。",
   "crate": "crates/symbio-plugin-api/src",
   "files": [
-    { "path": "effects.rs", "lines": 562, "adr": "D-399" },
+    { "path": "effects.rs", "lines": 7, "adr": "D-408" },
     { "path": "port.rs", "lines": 478, "adr": "D-404" },
     { "path": "text.rs", "lines": 6, "adr": "D-404" },
     { "path": "context.rs", "lines": 347, "adr": "D-399" },
     { "path": "reports.rs", "lines": 344, "adr": "D-399" }
   ],
-  "total": { "lines": 4494, "adr": "D-404" }
+  "total": { "lines": 3833, "adr": "D-404" }
 }

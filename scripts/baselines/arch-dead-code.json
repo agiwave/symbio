@@ -225,7 +225,7 @@
     },
     {
       "symbol": "is_known",
-      "path": "crates/symbio-plugin-api/src/behaviors.rs",
+      "path": "crates/symbio-sdk/src/plugin/behaviors.rs",
       "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
       "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
     },
@@ -237,7 +237,7 @@
     },
     {
       "symbol": "into_event",
-      "path": "crates/symbio-plugin-api/src/effects.rs",
+      "path": "crates/symbio-sdk/src/plugin/effects.rs",
       "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
       "evidence": "docs/003-design/018-模块架构.md"
     },
@@ -258,18 +258,6 @@
       "path": "crates/symbio-plugin-api/src/port.rs",
       "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
       "evidence": "docs/003-design/048-端口机制裁决.md"
-    },
-    {
-      "symbol": "declared_effects",
-      "path": "crates/symbio-plugin-api/src/rows.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/022-行表与派发面.md"
-    },
-    {
-      "symbol": "effects_of",
-      "path": "crates/symbio-plugin-api/src/rows.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/022-行表与派发面.md"
     },
     {
       "symbol": "writes_of",
