@@ -13,5 +13,7 @@
   "extension": {
     "productionFiles": 9
   },
-  "baseline-allow": []
+  "baseline-allow": [
+    "sha256:1bb4ba3ffd8f8bc8638aa551c7ff65572637428a6b3b0dca249b68d6aa273f34→sha256:42a6e33370e471248135f078e8134edcedd8fce4d7d8aca00b9ebbe32f8e4cda 选债口按视图切点切片：`plan` 在调 `owed` 之前取 `Frozen::scan_bound()`、超界只交尾部 `b` 条，`rows_from_debts` 仍拿整份；改前会话事实一超过视图 cost，`eval` 回 `None`、`owed` 折空集 ⇒ 视图为源头的债整族静默消失且零告警。驱动循环体只多一层切片，无新增世界域名 / 端口名 / 业务事实名字面量 D-222"
+  ]
 }
