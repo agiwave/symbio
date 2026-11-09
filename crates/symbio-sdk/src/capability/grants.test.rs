@@ -58,12 +58,12 @@ fn raise_only_goes_up() {
     );
 }
 
-/// 线格式往返：`to_json` 产出的就是配置文档里的那张映射。
+/// 线格式往返：序列化产出的就是配置文档里的那张映射。
 #[test]
 fn wire_format_round_trips_as_a_plain_map() {
     let mut g = ApprovalGrants::default();
     g.raise("shell", CapabilityRiskLevel::High);
-    let json = g.to_json();
+    let json = serde_json::to_string(&g).expect("映射必然可序列化");
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(value, serde_json::json!({ "shell": "high" }));
     assert_eq!(ApprovalGrants::parse(&json), g);

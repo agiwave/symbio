@@ -17,7 +17,7 @@ impl: done
 
 | 面 | 交出物 | 谁用 |
 |---|---|---|
-| 视图 | `reputation.ledger` → `{ by_principal: { <主体>: { principal, offered, kept, broken, score } } }` | `loop` 的淘汰回路（`derived_facts::record_elimination`）与 `session` 的 `stats` 声誉列 |
+| 视图 | `reputation.ledger` → `{ by_principal: { <主体>: { principal, offered, kept, broken, score } } }` | 本包 `elimination.rs` 的淘汰裁决与 `session` 的 `stats` 声誉列 |
 | 事实 | **无**——读的是 `loop` 那一族的载荷字段，本包不产格 | 装载期这四对读法落在断言格通道（`D-282`） |
 | 行为 / 工具 / 路由 / 配置 | **无** | — |
 

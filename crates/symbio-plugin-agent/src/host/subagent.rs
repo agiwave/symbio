@@ -1024,7 +1024,7 @@ fn relabel_for_parent(message: &mut ChatNode, tool_call_id: &str) {
     message.parent_id = Some(tool_call_id.to_string());
     if message.node_role() == Some(NodeRole::Assistant) {
         // 改写到哪一格就跟到哪一格：这张卡现在是 **agent_run 工具的响应**，族归
-        // 工具自己——带着子会话 agent 主体的转播节点会被 `visible_to` 当作第三方私有。
+        // 工具自己——带着子会话 agent 主体的转播节点会被读侧可见域判据当作第三方私有。
         message.principal = Some(symbio_plugin_api::principal::Principal::tool_principal(
             NAME,
         ));

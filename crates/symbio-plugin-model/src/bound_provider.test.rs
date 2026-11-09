@@ -37,10 +37,12 @@ use symbio_sdk::test_fixtures::{CHAT as CHAT_VOCAB, MESSAGE as MESSAGE_VOCAB};
 /// 事件切片 → 转写投影 → 消息数组。测试不能引兄弟插件的实现（E-009），故在此
 /// 直接调同一个投影入口。
 fn render_messages(events: &[Event]) -> Vec<PromptMessage> {
-    transcript(CHAT_VOCAB, MESSAGE_VOCAB)
-        .read_all(events)
-        .value
-        .to_messages()
+    let view = transcript(CHAT_VOCAB, MESSAGE_VOCAB).read_all(events).value;
+    view.entries
+        .iter()
+        .filter(|e| !e.exclude_from_context)
+        .map(PromptMessage::from)
+        .collect()
 }
 
 /// 走**生产同一条路径**：事件切片 → `render_messages` → `generate_timed`。

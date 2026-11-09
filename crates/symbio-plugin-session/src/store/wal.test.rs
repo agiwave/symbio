@@ -902,7 +902,12 @@ fn an_artifact_round_is_complete_after_reopen() {
     let view = transcript(CHAT_VOCAB, MESSAGE_VOCAB)
         .apply(&events, i64::MAX, Budget::generous())
         .value;
-    let entries: Vec<PromptMessage> = view.to_messages();
+    let entries: Vec<PromptMessage> = view
+        .entries
+        .iter()
+        .filter(|e| !e.exclude_from_context)
+        .map(PromptMessage::from)
+        .collect();
     assert_eq!(entries.len(), 3, "三条都要进 prompt：{entries:?}");
     assert_eq!(entries[1].role, "tool");
     assert_eq!(

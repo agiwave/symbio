@@ -260,45 +260,9 @@
       "evidence": "docs/003-design/022-行表与派发面.md"
     },
     {
-      "symbol": "elimination_event",
-      "path": "crates/symbio-sdk/src/actors/control.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
       "symbol": "restoration_event",
       "path": "crates/symbio-sdk/src/actors/control.rs",
       "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "should_eliminate",
-      "path": "crates/symbio-sdk/src/actors/control.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "actor_can_assert_verification",
-      "path": "crates/symbio-sdk/src/actors/spec.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "actor_can_judge_intent",
-      "path": "crates/symbio-sdk/src/actors/spec.rs",
-      "why": "待裁：`16ad2f4d` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "actor_can_land_artifact",
-      "path": "crates/symbio-sdk/src/actors/spec.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "actor_can_land_speech",
-      "path": "crates/symbio-sdk/src/actors/spec.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
       "evidence": "docs/003-design/001-核心架构.md"
     },
     {
@@ -326,12 +290,6 @@
       "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
     },
     {
-      "symbol": "to_json",
-      "path": "crates/symbio-sdk/src/capability/grants.rs",
-      "why": "待裁：`16ad2f4d` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
-    },
-    {
       "symbol": "capability_model_resolve",
       "path": "crates/symbio-sdk/src/capability/model.rs",
       "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
@@ -344,12 +302,6 @@
       "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
     },
     {
-      "symbol": "llm_emit_state",
-      "path": "crates/symbio-sdk/src/llm/frames.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
       "symbol": "branch_hide_unselected",
       "path": "crates/symbio-sdk/src/projection/branch.rs",
       "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
@@ -358,18 +310,6 @@
     {
       "symbol": "verify",
       "path": "crates/symbio-sdk/src/projection/prompt_fidelity.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "excluded",
-      "path": "crates/symbio-sdk/src/projection/transcript.rs",
-      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "to_messages",
-      "path": "crates/symbio-sdk/src/projection/transcript.rs",
       "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
       "evidence": "docs/003-design/001-核心架构.md"
     },
@@ -386,40 +326,16 @@
       "evidence": "docs/003-design/001-核心架构.md"
     },
     {
-      "symbol": "count_raw",
-      "path": "crates/symbio-sdk/src/text/tokenizer.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/035-长会话与断点恢复.md"
-    },
-    {
       "symbol": "feedback",
       "path": "crates/symbio-sdk/src/text/tokenizer.rs",
       "why": "待接线：校准回灌的唯一调用点（`report_provider_usage`）在 `34526409` 被当「零消费声明」退役，`TokenFeedback` 从此不再更新",
       "evidence": "docs/003-design/035-长会话与断点恢复.md"
     },
     {
-      "symbol": "detach_if_flat",
-      "path": "crates/symbio-sdk/src/turn/node_build.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "llm_build_tool_call_nodes",
-      "path": "crates/symbio-sdk/src/turn/node_build.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
       "symbol": "has_subscribers",
       "path": "crates/symbio-sdk/src/vdfs/host.rs",
       "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
       "evidence": "docs/003-design/009-VDFS规范.md"
-    },
-    {
-      "symbol": "visible_to",
-      "path": "crates/symbio-sdk/src/view/mod.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
     }
   ]
 }

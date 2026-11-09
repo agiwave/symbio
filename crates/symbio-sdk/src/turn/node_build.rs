@@ -18,9 +18,9 @@
 //!
 //! | 符号 | 消费方 |
 //! |---|---|
-//! | [`dialog_node`] | [`crate::turn::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `report_exec`）· `chat_loop/compose` 的判决落地 |
-//! | [`llm_build_text_node`] / [`llm_build_tool_call_nodes`] / [`llm_build_tool_call_node`] / [`tool_call_args_text`] / [`llm_build_tool_message`] | 留守 `message_build::llm_build_assistant_messages` · `tool_dispatch` · `tool_executor` · `rebuild` |
-//! | [`PresentationTree`] / [`detach_if_flat`] / [`flatten_whole_tree`] / [`turn_root_of`] | 留守 `config`（解析）· `chat_session/read` · `plugin/nodes` · 驱动器 `chat_loop/io` · `orchestrator/failure` · `resume` |
+//! | [`dialog_node`] | [`crate::turn::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `report_exec`） |
+//! | [`llm_build_text_node`] / [`llm_build_tool_call_node`] / [`tool_call_args_text`] / [`llm_build_tool_message`] | 落库构造 · 工具分发 · 重建引擎 |
+//! | [`PresentationTree`] / [`flatten_whole_tree`] / [`turn_root_of`] | 读侧投影（`PresentationTree` 的解析与整树折叠） |
 //!
 //! core 侧**没有任何东西反过来调本模块**——方向永远是消费方 → core。
 
@@ -30,8 +30,6 @@ use crate::chat::chat_node::{
 use crate::chat::principal::Principal;
 use crate::clock::clock_now_ms;
 use crate::llm::llm_short_id;
-
-use symbio_kernel::llm::TurnToolCallInfo;
 
 /// 结果节点身份的唯一派生：`{call_id}-result`（内核规则的转发，见
 /// [`symbio_kernel::event::result_node_id`]）。
@@ -106,53 +104,11 @@ pub fn llm_build_text_node(
     }
 }
 
-/// 助手**工具调用**子节点组（骨架 `Skeleton` + tag `tool`，`parent_id` 指向本轮骨架）。
-///
-/// 工具调用骨架（`Skeleton` + tag `tool`）自身携带请求参数（`content` = JSON 文本），
-/// 不设独立的请求子节点。`id` 是节点 id（与流式帧一致），provider 的 wire id 存
-/// `tool_call_id`。
-///
-/// 单点定义：落库视图（`session::message_build::llm_build_assistant_messages`）与
-/// 工具分发方（`tool_dispatch`）都经此构造——两处各写一份，工具卡片的形状迟早会
-/// 分叉（前端读的是同一套字段）。
-pub fn llm_build_tool_call_nodes(
-    parent_id: &str,
-    tool_calls: &[TurnToolCallInfo],
-    principal: &Principal,
-) -> Vec<ChatNode> {
-    tool_calls
-        .iter()
-        .map(|tc| {
-            let tc_id = tc.id.clone().unwrap_or_else(llm_short_id);
-            llm_build_tool_call_node(
-                parent_id,
-                tc_id,
-                tc.name.clone(),
-                tool_call_args_text(tc),
-                tc.wire_id.clone(),
-                principal,
-            )
-        })
-        .collect()
-}
-
-/// ToolCall 节点的**定稿参数文本**（JSON 文本；解析失败 ⇒ 残破原文而非占位 `{}`：
-/// 存储层保真，事后能看出模型究竟发了什么，而不是留下一个看似合法的假空参数）。
-///
-/// 落库构造（[`llm_build_tool_call_nodes`]）与事件载荷（`turn_runner` 的
-/// `artifact.added`）共用这一个取法——两处各写一份必然漂移。
-pub fn tool_call_args_text(tc: &TurnToolCallInfo) -> String {
-    match &tc.parse_error {
-        Some(raw) => raw.clone(),
-        None => tc.arguments.to_string(),
-    }
-}
-
 /// 助手**单个工具调用**子节点（骨架 `Skeleton` + tag `tool`，`parent_id` 指向本轮骨架）。
 ///
 /// `args_text` 是**已定稿的参数文本**（JSON 文本，或解析失败时的残破原文）——
 /// 重建引擎从事件载荷直接回放这段文本，不再经 `Value` 重序列化（键序一变，
-/// 同一次调用在重建前后就是两个内容）。形状与 [`llm_build_tool_call_nodes`] 同源。
+/// 同一次调用在重建前后就是两个内容）。骨架与 tag 约定与同组其它构造同源。
 pub fn llm_build_tool_call_node(
     parent_id: &str,
     id: String,
@@ -280,18 +236,6 @@ impl PresentationTree {
         ("flat", "本轮全部铺平到会话根"),
         ("deep", "子会话挂到发起它的工具卡内（递归嵌套）"),
     ];
-}
-
-/// 单个「本轮响应骨架直接子节点」在 flat 档下升根（并打 turn_root 记号）。
-///
-/// `run_root_id` 是本轮响应骨架的 id：只有 `parent_id` 恰指它的节点才脱——这样
-/// 工具结果（parent = tool_call）天然不受影响。站 B 逐帧落点用它（那一帧的父就是
-/// 本轮 root_id），站 A 落库 Vec 里逐节点用它（root_id 同为骨架 id）。
-pub fn detach_if_flat(node: &mut ChatNode, run_root_id: &str, mode: PresentationTree) {
-    if mode == PresentationTree::Flat && node.parent_id.as_deref() == Some(run_root_id) {
-        node.parent_id = None;
-        node.meta = merge_turn_root(node.meta.take(), run_root_id);
-    }
 }
 
 /// 对刚落库 / 重建的一整棵树套用 flat 折叠（rebuild 读层用：rebuild 核心 config-free、

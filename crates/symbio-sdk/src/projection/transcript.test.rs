@@ -13,6 +13,19 @@ use crate::test_fixtures::{
 };
 use crate::view::Budget;
 
+/// 请求包里的文本：条目按 `exclude_from_context` 过滤后投影成消息。
+///
+/// 旧 `TranscriptView::to_messages` 的唯一语义就是这一步；出口已删，读法现在由
+/// 条目上的那一个布尔 + `PromptMessage::from` 组成——这里按同一条读法折一遍，
+/// 「界面文本不进请求包」的判据不变。
+fn sent_texts(view: &super::TranscriptView) -> Vec<String> {
+    view.entries
+        .iter()
+        .filter(|e| !e.exclude_from_context)
+        .map(|e| super::PromptMessage::from(e).text)
+        .collect()
+}
+
 /// 投影成 `(role, text)` 序列（折叠关心的就是这两格）。
 fn entries(events: &[Event]) -> Vec<(String, String)> {
     transcript(CHAT, MESSAGE)
@@ -413,8 +426,12 @@ fn a_snapshot_report_node_stays_out_of_the_request_package() {
         3,
         "摘要 + 界面文本 + 压缩后的问：界面文本仍在转写里（用户看得见）"
     );
-    assert_eq!(view.excluded().len(), 1, "且被标出来");
-    let sent: Vec<String> = view.to_messages().into_iter().map(|m| m.text).collect();
+    assert_eq!(
+        view.entries.iter().filter(|e| e.exclude_from_context).count(),
+        1,
+        "且被标出来"
+    );
+    let sent = sent_texts(&view);
     assert!(
         !sent.iter().any(|t| t.contains("已经完成 1 轮")),
         "界面文本不得进请求包：模型会以为那是它自己刚说的"
@@ -462,7 +479,7 @@ fn the_replaced_branch_stays_out_of_the_request_package() {
         ],
         "两支的正文都留在转写里（隐藏是读法，不是删除）"
     );
-    let sent: Vec<String> = view.to_messages().into_iter().map(|m| m.text).collect();
+    let sent = sent_texts(&view);
     assert_eq!(
         sent,
         vec!["问".to_string(), "乙答复".to_string()],
@@ -489,15 +506,11 @@ fn switching_back_moves_the_request_package_back() {
         )
         .with_payload(serde_json::json!({ "selected": "t-1" })),
     );
-    let sent: Vec<String> = transcript(CHAT, MESSAGE)
+    let view = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, Budget::generous())
-        .value
-        .to_messages()
-        .into_iter()
-        .map(|m| m.text)
-        .collect();
+        .value;
     assert_eq!(
-        sent,
+        sent_texts(&view),
         vec!["问".to_string(), "甲答复".to_string()],
         "切回旧支后模型读的必须是旧支"
     );
@@ -516,15 +529,11 @@ fn a_truncated_selected_branch_falls_back_instead_of_hiding_everything() {
         assistant(2, "x-2", "乙答复"),
         removed(&["t-2", "x-2"]),
     ];
-    let sent: Vec<String> = transcript(CHAT, MESSAGE)
+    let view = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, Budget::generous())
-        .value
-        .to_messages()
-        .into_iter()
-        .map(|m| m.text)
-        .collect();
+        .value;
     assert_eq!(
-        sent,
+        sent_texts(&view),
         vec!["问".to_string(), "甲答复".to_string()],
         "乙那支已被删掉（条目本身也不在），甲必须照读"
     );

@@ -561,11 +561,12 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
  取值收敛，不需要第二套"终态"构造逻辑。
 27. **帧语义只由字段给出，不由节点类型反推**：`delta` = 尾部追加，`content` = 整条替换；
  同帧携带两者是**协议违例**（写入点报错丢弃——不发布、不落地）。追加对正文 /
- 思考 / **工具参数** / **工具响应**一律成立（后端构造帧只有三处：
- `symbio_kernel::llm::turn::llm_message_frame`（完整消息）/
- `symbio_sdk/llm/frames.rs::llm_state_frame`（剥正文的状态帧）/
- `crates/symbio-plugin-model/src/stream.rs::llm_emit_delta`（增量）；工具参数与 Text / Reasoning 同构，
- 工具响应透传子会话的增量帧。三个位置由消费方数量决定，见 D-023）。
+ 思考 / **工具参数** / **工具响应**一律成立（后端构造帧只有两处：
+ `crates/symbio-sdk/src/llm/turn.rs::llm_message_frame`（完整消息）/
+ `crates/symbio-plugin-model/src/stream.rs::llm_emit_delta`（增量）；剥正文的状态帧
+ （「思考即正文」的收口形态）由流循环在 `crates/symbio-plugin-model/src/stream.rs` 就地发，
+ 不再有独立的构造函数。工具参数与 Text / Reasoning 同构，
+ 工具响应透传子会话的增量帧。两个位置由消费方数量决定，见 D-023）。
  消费端按 `type` / `role` 猜"该追加还是该替换"是错误来源：实测曾把
  `role = tool` 的流式响应当成全量重发，正文被**最后一片**覆盖——工具卡片
  有请求、响应是空的。落地动作与字段**一一对应**（`sessionTranscriptSync` 的落地口

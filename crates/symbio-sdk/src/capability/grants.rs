@@ -58,11 +58,6 @@ impl ApprovalGrants {
         *entry
     }
 
-    /// 线格式（`ctx[APPROVAL_GRANTS]`）：JSON 对象。
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(&self.0).unwrap_or_else(|_| "{}".to_string())
-    }
-
     fn from_wire(raw: BTreeMap<String, Value>) -> Self {
         Self(
             raw.into_iter()

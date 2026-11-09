@@ -258,7 +258,7 @@ fn relabel_anchors_top_level_assistant_as_tool_response() {
     assert_eq!(principal.kind, PrincipalKind::Tool);
     assert_eq!(
         principal.id, "agent/run",
-        "族归工具自己（`agent_run` 的合成地址），否则 visible_to 当它是子 agent 的第三方私有"
+        "族归工具自己（`agent_run` 的合成地址），否则读侧可见域判据当它是子 agent 的第三方私有"
     );
     assert_eq!(
         node.content.as_ref().map(|c| c.to_text()),

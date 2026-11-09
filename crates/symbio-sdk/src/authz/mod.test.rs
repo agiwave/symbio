@@ -29,7 +29,7 @@
 
 use super::*;
 use crate::governance::Capability;
-use crate::view::is_agent_id;
+use crate::view::principal_namespace;
 
 /// 表的形状：主智能体持 5 项、缺 `assert.verification`，可见域 `thread_private`。
 #[test]
@@ -489,41 +489,51 @@ fn all_principals_are_routable_ids() {
     assert_eq!(PRINCIPAL_MAIN, "session/main");
     assert_eq!(PRINCIPAL_USER, "person/local");
     assert_eq!(PRINCIPAL_TOOL_VDFS_WRITE, "vdfs/write");
-    // agent 命名空间登记表命中所有 `session/*`；其他三族不命中。
+    // agent 一族住在 `session/` 段；其他三族各住自己的 namespace。
     for p in [PRINCIPAL_MAIN, PRINCIPAL_AUTONOMOUS, PRINCIPAL_REFLEX] {
-        assert!(is_agent_id(p), "`{p}` 属 agent 命名空间");
+        assert_eq!(
+            principal_namespace(p),
+            Some("session"),
+            "`{p}` 属会话主体一族"
+        );
     }
     for p in [PRINCIPAL_USER, PRINCIPAL_TOOL_VDFS_WRITE] {
-        assert!(!is_agent_id(p), "`{p}` 不属 agent 命名空间");
+        assert_ne!(
+            principal_namespace(p),
+            Some("session"),
+            "`{p}` 不属会话主体一族"
+        );
     }
 }
 
-/// **主体名的两条派生分支与命名空间登记表同源**。
+/// **主体名的两条派生分支与地址形状同源**。
 ///
 /// `principal_of` 是全 crate 唯一把「资产 id」折成「主体地址」的地方，它的两条分支必须
-/// 各钉一次：**裸名兜底进 `session/`**（⇒ 这条主体恒被 `is_agent_id` 认作 agent 一族），
+/// 各钉一次：**裸名兜底进 `session/`**（⇒ 这条主体恒落在会话主体一族），
 /// **已带命名空间的原样认下**（⇒ 派生点绝不二次加前缀）。
 ///
 /// 为什么这条判据归 core、反例却归包侧：包侧 `agent/host/manifest.rs::is_valid_id` 禁斜杠
-/// 是本判据的**前半**（不给包自述族属的入口），但它无法证明「兜底出来的主体确实在登记表
-/// 里」——那是命名空间登记表与 id 语法之间的一致性，只有这里能判。
-/// 漂移的两侧表现不同：兜底族没登记 ⇒ `visible_to` 第 3 条不挡，别的智能体发言会进本主体的
-/// prompt（越权可见）；「原样认下」这一支被放宽 ⇒ 包自称的族说了算（身份伪造）。
+/// 是本判据的**前半**（不给包自述族属的入口），但它无法证明「兜底出来的主体确实带可路由
+/// 的归属段」——那是 id 语法与路由首段之间的一致性，只有这里能判。
+/// 「原样认下」这一支若被放宽 ⇒ 包自称的族说了算（身份伪造）。
 #[test]
 fn principal_of_derives_a_bare_asset_id_into_the_agent_family() {
-    // ① 裸 slug ⇒ 兜底进 session 一族，且兜底结果必须落在命名空间登记表里
+    // ① 裸 slug ⇒ 兜底进 session 一族，且兜底结果必须带可路由的会话归属段
     let derived = principal_of(Some("t210-agent"));
     assert_eq!(derived, "session/t210-agent");
-    assert!(
-        is_agent_id(&derived),
-        "兜底出来的主体必须被 `AGENT_NAMESPACES` 认作 agent——登记表与 id 语法对不上，\
-         `visible_to` 第 3 条就不挡"
+    assert_eq!(
+        principal_namespace(&derived),
+        Some("session"),
+        "兜底出来的主体必须落在会话主体一族（第一段是归属）"
     );
-    assert_eq!(principal_namespace(&derived), Some("session"));
     // ② 完整地址原样认下：派生点绝不二次加前缀（`session/session/x` 这种形状不许出现）
     assert_eq!(principal_of(Some("session/x")), "session/x");
     assert_eq!(principal_of(Some("person/local")), "person/local");
-    assert!(!is_agent_id("person/local"), "人一族不在 agent 登记表里");
+    assert_eq!(
+        principal_namespace("person/local"),
+        Some("person"),
+        "人一族住在 person 段"
+    );
     // ③ 缺省与空白 ⇒ 主会话主体（同一条判据的第三格）
     assert_eq!(principal_of(None), PRINCIPAL_MAIN);
     assert_eq!(principal_of(Some("   ")), PRINCIPAL_MAIN);
@@ -546,11 +556,11 @@ fn tool_principals_have_declared_rows() {
             grants.contains(&Capability::ProduceArtifact),
             "`{tool}` 的权威动作是产生产物（produce.artifact）"
         );
-        // 工具主体的 namespace 不在 agent 登记表里——visible_to 第 2/3 条按此判：
-        // 工具的响应在会话线程里对任何 viewer 都可见。
-        assert!(
-            !is_agent_id(tool),
-            "`{tool}` 的 namespace 不在 agent 登记表里（[ADR-069 §决策 3]）"
+        // 工具主体的归属段不是会话那一段——工具响应因此不属于任何会话主体一族。
+        assert_ne!(
+            principal_namespace(tool),
+            Some("session"),
+            "`{tool}` 的归属段是工具自己的 namespace（[ADR-069 §决策 3]）"
         );
     }
 }
@@ -568,8 +578,8 @@ fn person_local_is_not_in_the_capability_table() {
         production_matrix().grants_of(PRINCIPAL_USER).is_empty(),
         "`person/local` 在授权表里没有行——归一常量值不改变『人不入表』这条纪律"
     );
-    // 归一后 user 也不是 agent 命名空间成员（visible_to 会放行，但 can_reply 仍拒）。
-    assert!(!is_agent_id(PRINCIPAL_USER));
+    // 归一后 user 住 `person/` 段，不属会话主体一族（can_reply 仍拒）。
+    assert_eq!(principal_namespace(PRINCIPAL_USER), Some("person"));
 }
 
 // ── 绑定即登记（[D-100]）──────────────────────────────────────────────
@@ -653,7 +663,7 @@ fn binding_grants_no_visibility_scope() {
 /// **淘汰面只认部署表**：绑定登记不构成「部署授予过 `assign.work`」。
 ///
 /// 判据取两口之差：合流面（`can_write_name`）看得见绑定来的能力，部署面
-/// （`deployed_can_write_name`）看不见——`derived_facts::record_elimination` 走后者，
+/// （`deployed_can_write_name`）看不见——`crates/symbio-plugin-reputation/src/elimination.rs` 走后者，
 /// 运行期绑定的主体不会因此被回头淘汰（它本就不是部署事实）。
 #[test]
 fn the_elimination_face_ignores_bindings() {

@@ -34,6 +34,18 @@ fn entry(role: &str, text: &str, tool: Option<&str>) -> PromptMessage {
     }
 }
 
+/// 请求包里的消息：转写条目按 `exclude_from_context` 过滤后投影。
+///
+/// 旧 `TranscriptView::to_messages` 的唯一语义就是这一步；出口已删，这里按同一条
+/// 读法折一遍，判据的输入口径不变。
+fn request_messages(view: &super::super::transcript::TranscriptView) -> Vec<PromptMessage> {
+    view.entries
+        .iter()
+        .filter(|e| !e.exclude_from_context)
+        .map(PromptMessage::from)
+        .collect()
+}
+
 fn user_turn(turn: u64, text: &str) -> Event {
     Event::pending(
         format!("u-{turn}"),
@@ -196,7 +208,11 @@ fn a_progress_report_lands_but_stays_out_of_the_request() {
         .apply(&events, i64::MAX, crate::view::Budget::generous())
         .value;
 
-    let excluded = view.excluded();
+    let excluded: Vec<_> = view
+        .entries
+        .iter()
+        .filter(|e| e.exclude_from_context)
+        .collect();
     assert_eq!(
         excluded.len(),
         1,
@@ -204,7 +220,7 @@ fn a_progress_report_lands_but_stays_out_of_the_request() {
     );
     assert_eq!(excluded[0].role, "assistant", "它是助手说的话");
 
-    let messages = view.to_messages();
+    let messages = request_messages(&view);
     assert_eq!(
         messages.len(),
         1,
@@ -445,10 +461,10 @@ fn branch_events() -> Vec<Event> {
 #[test]
 fn a_replaced_branch_does_not_make_the_judge_red() {
     let events = branch_events();
-    let msgs = transcript(CHAT, MESSAGE)
+    let view = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, crate::view::Budget::generous())
-        .value
-        .to_messages();
+        .value;
+    let msgs = request_messages(&view);
     assert_eq!(
         msgs.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
         vec!["问", "乙答复"],
@@ -466,10 +482,10 @@ fn a_replaced_branch_does_not_make_the_judge_red() {
 #[test]
 fn a_leaked_replaced_branch_shows_up_as_an_unsourced_message() {
     let events = branch_events();
-    let mut msgs = transcript(CHAT, MESSAGE)
+    let view = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, crate::view::Budget::generous())
-        .value
-        .to_messages();
+        .value;
+    let mut msgs = request_messages(&view);
     msgs.insert(1, entry("assistant", "甲答复", None));
     let rep = verify(&events, &msgs, None, &CHAT, &MESSAGE);
     assert!(

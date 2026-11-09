@@ -46,12 +46,11 @@ impl PrincipalKind {
         }
     }
 
-    /// 是否智能体一族——`visible_to` 的运行时判据（[D-069 §决策 3]）。
+    /// 是否智能体一族——kind 层的族判据（[D-069 §决策 3]），生产面今天没有调用点（基线在案）。
     ///
-    /// 注意与 `symbio_sdk::view::is_agent_id` 的分工：那条**从 id 反推 kind**（用于
-    /// 只有字符串的授权表判据），本条**从结构体字段直接读**。协议携带 `Principal`
-    /// 结构体，`visible_to` 会切到 `kind.is_agent()`——`is_agent_id` 只服务 id 层的
-    /// 可见域判据（`view::visible_to`）。
+    /// 从结构体字段**直接读**，不从 id 反推：协议携带 `Principal` 结构体；只有字符串
+    /// 可读的入口（如授权表）改走 `crates/symbio-sdk/src/view/mod.rs::principal_namespace`
+    /// 的归属段解析。
     pub fn is_agent(&self) -> bool {
         matches!(self, PrincipalKind::Agent)
     }

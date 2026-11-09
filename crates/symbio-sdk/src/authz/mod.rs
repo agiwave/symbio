@@ -265,7 +265,7 @@ pub const CAP_ASSIGN_WORK: &str = Capability::AssignWork.name();
 /// 一致；预算 80ms（反射档）由 `actors::schedule::ScheduleDecider::spec` 给出。
 ///
 /// 注意它**不取代** `session/main` 上的 `assign.work`：那一格是淘汰回路的管辖对象
-/// （「谁还在被授予派活权」，见 `derived_facts::record_elimination`），两者是**同一能力
+/// （「谁还在被授予派活权」，见 `crates/symbio-plugin-reputation/src/elimination.rs`），两者是**同一能力
 /// 的两个用途**——一个是「有资格派」，一个是「派这个动作由谁执行」。
 pub use crate::keys::PRINCIPAL_SCHEDULER;
 

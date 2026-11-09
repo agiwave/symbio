@@ -7,9 +7,9 @@
 //!
 //! | 模块 | 内容 | 谁消费 |
 //! |---|---|---|
-//! | `spec` | 本机部署表的读法——模式派生（`pattern_for_principal`）与能力位判定（`actor_can_*`） | 全部能力包 |
+//! | `spec` | 本机部署表的读法——模式派生（`pattern_for_principal`）与能力位判定（`actor_can_assign_work`） | 全部能力包 |
 //! | `commitment` | 「谁向谁承诺了什么 / 是否履行」落成普通事件（`CommitmentKeeper`） | 写侧 `agent` · 读侧 `session` |
-//! | `control` | 淘汰裁决（`EliminationDecider`）：声誉投影低于阈值 ⇒ 收回 `assign.work` | 写侧 `loop` 轮末 · 读侧 `session` 工具层 |
+//! | `control` | 淘汰裁决（`EliminationDecider`）：声誉投影低于阈值 ⇒ 收回 `assign.work` | 写侧 `reputation` · 读侧 `session` 工具层 |
 //! | `skill` | `SKILL_TAG`：`memory.encoded` 载荷里的技能标签（DE-041） | 写侧技能能力包 · 读侧 `session` 路由 |
 //!
 //! ## 为什么四块住在一起（D-279）
@@ -32,10 +32,7 @@ mod spec;
 pub use self::commitment::{commitment_events, commitment_records};
 pub use self::control::EliminationDecider;
 pub use self::skill::SKILL_TAG;
-pub use self::spec::{
-    actor_can_assert_verification, actor_can_assign_work, actor_can_judge_intent,
-    actor_can_land_artifact, actor_can_land_speech, pattern_for_principal,
-};
+pub use self::spec::{actor_can_assign_work, pattern_for_principal};
 // `trivial_actor_spec` 是**测试面**的平凡值构造（ADR-067：生产构造点按真实授权行立规格）。
 #[cfg(test)]
 pub(crate) use self::spec::trivial_actor_spec;

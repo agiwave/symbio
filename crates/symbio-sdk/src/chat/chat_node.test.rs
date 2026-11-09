@@ -499,7 +499,7 @@ fn derived_actions_from_shape_status_meta() {
 ///
 /// 这条判据的意义不在「取哪一个」，而在**只有一个来源**：反过来让残留格优先，
 /// 每一处身份改写都得写两格、还得记住顺序——`attributed` 之后两格各说一套的
-/// 「半改」状态没有任何东西会变红（`visible_to` 按主体判、分派按 `role` 判）。
+/// 「半改」状态没有任何东西会变红（可见域按主体判、分派按 `role` 判）。
 #[test]
 fn the_principal_wins_when_both_identity_cells_disagree() {
     // 夹具走**wire 形态**（两格都在的节点只能是反序列化出来的：构造侧现在只写一份），

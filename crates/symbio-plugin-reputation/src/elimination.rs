@@ -37,7 +37,7 @@ use crate::decl::{ledger, EVENT_VERDICT_ASSERTED, OWNER};
 /// 本包仍不依赖兄弟插件，也不需要直接依赖 sdk（E-009）。
 use symbio_plugin_api::vocab::CAP_ASSIGN_WORK;
 
-/// 淘汰阈值：与 `symbio_sdk::actors::EliminationDecider::THRESHOLD` 同一个平凡值。
+/// 淘汰阈值：平凡值 0（`score = 守约 − 违约`，净分为负即淘汰）。
 const THRESHOLD: i64 = 0;
 
 pub(crate) struct EliminationVerdicts;

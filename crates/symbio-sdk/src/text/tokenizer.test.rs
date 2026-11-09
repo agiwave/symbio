@@ -42,7 +42,7 @@ fn calibration_converges_toward_actual() {
     // 假设真实值是估算的 2 倍（模拟中文场景的系统性低估）。
     // 反馈必须用「原始启发式估算」做分母（见 feedback 文档）：
     // 若用校准后的 count() 自反馈，比值会收敛到 √2 而非 2。
-    let raw = cal.count_raw(&text);
+    let raw = HeuristicTokenizer.count(&text);
     let actual = raw * 2;
     for _ in 0..40 {
         cal.feedback(actual, raw);

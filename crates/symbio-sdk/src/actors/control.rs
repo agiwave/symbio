@@ -2,8 +2,9 @@
 //!
 //! 抢占判定归 `crates/symbio-plugin-session/src/transcript/inbox`、外部执行闸门归
 //! `crates/symbio-plugin-loop/src/tools/dispatch/gates`（同插件内两处消费，D-190）；本模块的
-//! [`EliminationDecider`] 是唯一真正跨 owner 的策略——写侧裁决在 loop 轮末、
-//! 读侧翻译（[`EliminationDecider::verdict_grants_changes`]）在 session 工具层。
+//! [`EliminationDecider`] 是唯一真正跨 owner 的策略——写侧裁决在声誉包
+//! （`crates/symbio-plugin-reputation/src/elimination.rs`）、读侧翻译
+//! （[`EliminationDecider::verdict_grants_changes`]）在 session 工具层。
 //!
 //! **跨 owner 是它的归属，不是它的住址**（D-279）：两条判据给出相反结论——D-258 说
 //! 「认不认识容器概念」决定住哪个 crate，D-187 / D-189 / D-190 说「跨不跨 owner」决定留不留核。
@@ -26,9 +27,9 @@ use symbio_kernel::event::{Entity, Event, Verb};
 ///
 /// | 事 | 住哪 |
 /// |---|---|
-/// | 判据（阈值、低于即淘汰） | [`Self::should_eliminate`]（纯函数） |
-/// | 那一格事件（`verdict × asserted`） | [`Self::elimination_event`] / [`Self::restoration_event`] |
-/// | 什么时候判、对谁判 | 调用方（`crates/symbio-plugin-loop/src/derived_facts` 的轮末步） |
+/// | 那一格事件（`verdict × asserted`）的构造 | [`Self::restoration_event`]（恢复；撤销由声誉 owner 落） |
+/// | 判据（阈值、低于即淘汰）与撤销事件的构造 | `crates/symbio-plugin-reputation`（owner：`elimination.rs`） |
+/// | 读侧翻译（事件流水 → 覆盖层） | [`Self::verdict_grants_changes`] |
 ///
 /// ## 为什么 actor 是仲裁者而不是被淘汰主体
 ///
@@ -55,21 +56,6 @@ use symbio_kernel::event::{Entity, Event, Verb};
 pub struct EliminationDecider;
 
 impl EliminationDecider {
-    /// 淘汰阈值（平凡值）：声誉分**低于**它即淘汰。
-    ///
-    /// 平凡打分 = 守约 − 违约（`plain_score`），阈值 0 ⇒ **任何未配平的违约**
-    /// （净分为负）就触发。它是**参数不是架构**（DE-043 §4 的平凡值表同口径）：
-    /// 换阈值不改本判定的形状；`should_eliminate` 是唯一读它的地方。
-    ///
-    /// **为什么不分档（项 13 的复核结论）**：分档要的是**分数上的梯度**，
-    /// 而 `plain_score` 的取值只有计数差（一次立约了结 = ±1），没有任何一维能撑起
-    /// 「警告档 / 观察档 / 收回档」的**后果差异**——今天唯一的后果就是收回
-    /// `assign.work` 这一格（[D-108](../../../../docs/003-design/002-架构总览.md#d-108-淘汰是单向门恢复的生产触发器缺席记为边界自动恢复在本判据下不可能 "DE-002-架构总览") 记的
-    /// 单向门正是它的对面）。多分一档 = 多一个没有消费者的后果档位，而收回不可自动
-    /// 恢复，档位只会把「何时被永久锁死」变成一处更难看清的参数。真要有梯度，先要有
-    /// 第二种后果（分档的对象是后果，不是分数），那属 S13 社会面的裁决，不在此顺手加。
-    pub const THRESHOLD: i64 = 0;
-
     /// S13 仲裁者**行**（`ActorSpec` 生产构造点，与抢占判定者同批同形）。
     ///
     /// `{ principal: session/arbiter, pattern: decider, capabilities: [assert.verification],
@@ -89,54 +75,9 @@ impl EliminationDecider {
         }
     }
 
-    /// 纯判定：声誉分是否低于淘汰阈值。
-    ///
-    /// 入参是**一个分数**，不是投影的行型（`D-287`）：判定者只问「这个值够不够」，
-    /// 「这一行有哪些计数列、怎么折出来的」归声誉的 owner。折叠因此可以在不动本判定的
-    /// 情况下离开机制面——core 不再认识那条行的形状。
-    ///
-    /// 只问分数——「对谁判」（持 `assign.work` 的主体）、「判过没有」（无既有
-    /// verdict）都由调用方定：判定者不持有授权表以外的任何判据（与
-    /// `crates/symbio-plugin-tool/src/breaker.rs::CircuitBreaker::gate` 的 `authorized`
-    /// 出参同一条纪律）。
-    pub fn should_eliminate(&self, score: i64) -> bool {
-        score < Self::THRESHOLD
-    }
-
-    /// 淘汰事件（`verdict × asserted`，`change = "revoke"`）——可审计可撤销的那一格。
-    ///
-    /// 载荷六字段全为**数据**：`subject`（被收回的主体）、`capability`
-    /// （收回的能力，恒为 `assign.work`——DE-043 §2 淘汰行的字面机制）、`change`、
-    /// `score` / `threshold`（判据的当时值，审计时要能复算）、`why`（人话理由）。
-    /// `source_seq` = 溯源锚（I2：断言类事件必须非空）。
-    pub fn elimination_event(
-        &self,
-        verdict: &'static str,
-        subject: &str,
-        score: i64,
-        source_seq: u64,
-    ) -> Event {
-        Event::pending(
-            format!("v-elim-{subject}-{source_seq}"),
-            verdict,
-            Entity::Verdict,
-            Verb::Asserted,
-            PRINCIPAL_ARBITER,
-        )
-        .with_produced_by(source_seq)
-        .with_payload(serde_json::json!({
-            "subject": subject,
-            "capability": crate::authz::CAP_ASSIGN_WORK,
-            "change": "revoke",
-            "score": score,
-            "threshold": Self::THRESHOLD,
-            "why": format!("声誉分 {score} 低于淘汰阈值 {}（守约 − 违约，只认派生）", Self::THRESHOLD),
-        }))
-    }
-
     /// 恢复事件（`verdict × asserted`，`change = "restore"`）——淘汰的逆操作。
     ///
-    /// 与 [`Self::elimination_event`] **同格同键形状**：恢复不是删历史（Log 永不删），
+    /// 与撤销事件**同格同键形状**：恢复不是删历史（Log 永不删），
     /// 是再写一条 `restore`，last-wins 折叠出当前状态（`GrantsOverlay`）。申诉成立 /
     /// 人工复位走的都是这一格；`why` 由调用方给（申诉受理、人工复核……）。
     ///

@@ -10,8 +10,8 @@
 //! **只被一个插件消费的部分不在本层**（D-023 的依赖方数量判据）：
 //! 落库视图与消息构造（`llm_build_assistant_messages` / `llm_build_tool_message` /
 //! `TurnStreamChildIds` / `TurnOutput` 的三个方法）在 `crates/symbio-plugin-loop/src/message_build.rs`，
-//! 状态帧与删除帧的发射口在 `crates/symbio-sdk/src/llm/frames.rs`，增量帧 `llm_emit_delta`
-//! 在 `crates/symbio-plugin-model/src/stream.rs`。留守的六个导出逐个都有两个以上消费方
+//! 增量帧 `llm_emit_delta` 在 `crates/symbio-plugin-model/src/stream.rs`。留守的三个导出
+//! （`llm_emit_message` / `llm_removed_frame` / `llm_short_id`）逐个都有两个以上消费方
 //! （`llm_message_frame` 是登记在案的例外）。
 //!
 //! 依赖关系（单向）：
@@ -31,10 +31,6 @@
 
 pub mod model_provider;
 pub mod turn;
-
-mod frames;
-
-pub use frames::{llm_emit_state, llm_state_frame};
 
 // `turn` 是**子命名空间**，不是契约的对外地址：插件门面按符号取帧原语与 id 原语，
 // 路径里不该出现「一轮」这个词——那是控制面的容器概念（D-252 的 EX-008 判的就是

@@ -76,35 +76,6 @@ impl From<&TranscriptEntry> for PromptMessage {
     }
 }
 
-impl TranscriptView {
-    /// 投影成**消息数组**（D-048a 的结构化出口，**唯一出口**）。
-    ///
-    /// 不裁剪、不改写、不补分隔符：**它就是网格里的那些条**，按事件顺序。
-    /// 任何「为了 prompt 好看」的加工都会让模型看到网格没有的东西——那正是
-    /// `prompt_fidelity` 要报的「两条真源」。
-    pub fn to_messages(&self) -> Vec<PromptMessage> {
-        self.entries
-            .iter()
-            // 界面文本（汇报 / 首响）**不进请求包**——它们是给人看的，模型要是看见了
-            // 会当成「我刚说过这句」，于是线上出现连续两条 assistant。滤在这里而不是
-            // 在投影里不收，是因为落库与前端仍需要它们（用户得看得见自己被汇报了）。
-            .filter(|e| !e.exclude_from_context)
-            .map(PromptMessage::from)
-            .collect()
-    }
-
-    /// 视图里**按设计不进请求包**的条目（诊断 / 判据用）。
-    ///
-    /// 为什么要有这个出口：过滤之后「它们去哪了」就只剩投影实现这一处内部知识——
-    /// 测试与门禁无法从外面验证「汇报真的落了格、且真的没进请求包」。
-    pub fn excluded(&self) -> Vec<&TranscriptEntry> {
-        self.entries
-            .iter()
-            .filter(|e| e.exclude_from_context)
-            .collect()
-    }
-}
-
 /// `transcript` 投影：从事件切片读出对话转写。
 ///
 /// ## 折叠：不只是追加（D-053）
@@ -319,7 +290,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                 // 模型的对话内容——它是给人看的界面文本。
                 //
                 // 所以 `exclude_from_context: true` ⇒ 进转写（用户看得见、落库留得住）、
-                // 不进 `to_messages()`（模型看不见，否则线上会出现连续两条 assistant）。
+                // 不进请求包（模型看不见，否则线上会出现连续两条 assistant）。
                 //
                 // ⚠️ 它与 `chat.assistant.final` **不是**同一格：那格是 N3「每轮至多一条」，
                 // 而一轮可以汇报多次。挤进去会让「一轮一次最终答复」这条不变量失效。
@@ -340,7 +311,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                 }
                 // 对话面开场白（`Escalate` 首响）：与轮边界汇报同一条纪律
                 // ——助手说的界面文本，`exclude_from_context = true`（进转写、
-                // 不进 `to_messages()`）。理由码不同只影响 `meta.reason`，转写这层
+                // 不进请求包）。理由码不同只影响 `meta.reason`，转写这层
                 // 只关心「谁说了一句给人看的话」。
                 Some(ChatSlot::Opening) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");

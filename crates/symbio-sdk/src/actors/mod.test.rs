@@ -14,7 +14,6 @@ use symbio_kernel::event::{Entity, Event, EventDecl, FactRole, Verb};
 use symbio_kernel::store::{EventStore, Store};
 
 use crate::actors::*;
-use crate::authz::{production_matrix, PRINCIPAL_MAIN, PRINCIPAL_PEER};
 use crate::governance::{Capability, PermissionMatrix, PrincipalPolicy, VisScope};
 use crate::invariants::check_all;
 use crate::test_fixtures::{
@@ -40,68 +39,11 @@ fn trivial_spec_is_the_s01_baseline() {
     );
 }
 
-// ── 收束闸判读**规格自己身上**的能力集 ─────────────────────
-
-/// 三种主体形态一次钉住：会话主体（`reply` ⇒ 发言放 / 产物拒）、对等主体
-/// （`produce.artifact` ⇒ 发言拒 / 产物放）、空表（平凡值 ⇒ 两臂皆拒）。
-///
-/// 这条的**反向用例**在末尾：清空能力集后产物臂必须拒——判定若悄悄绕回授权表
-/// （不读规格），那条会绿，本判据即失效。
-#[test]
-fn spec_closure_judgments_read_the_specs_own_capability_set() {
-    let session = ActorSpec {
-        capabilities: production_matrix().grant_names_of(PRINCIPAL_MAIN),
-        ..trivial_actor_spec(PRINCIPAL_MAIN)
-    };
-    assert!(actor_can_land_speech(&session), "持 reply ⇒ 发言收束放行");
-    assert!(
-        actor_can_land_artifact(&session),
-        "主智能体行含 produce.artifact ⇒ 产物臂同样放行（两臂都持）"
-    );
-
-    let peer = ActorSpec {
-        capabilities: production_matrix().grant_names_of(PRINCIPAL_PEER),
-        ..trivial_actor_spec(PRINCIPAL_PEER)
-    };
-    assert!(
-        !actor_can_land_speech(&peer),
-        "对等主体无发言权（ADR-067：两条收束路各问自己那一项）"
-    );
-    assert!(
-        actor_can_land_artifact(&peer),
-        "对等主体的权威动作 = 产生产物"
-    );
-
-    // 反向用例：清空能力集 ⇒ 产物臂必拒。判定读的是**这个**集合，
-    // 不是绕回授权表——绕回去的话这条必绿。
-    let stripped = ActorSpec {
-        capabilities: Vec::new(),
-        ..peer.clone()
-    };
-    assert!(
-        !actor_can_land_artifact(&stripped),
-        "清空能力集后产物臂必须拒（证明判定读的是规格自己）"
-    );
-
-    // 平凡值 `trivial`：权限取实（该主体自己的授权行）——`session/main` 能收束。
-    // 这正是订正 trivial 空表的理由：空表下平凡值连一轮对话都收束不了
-    // （而 DE-031 §4 要求「平凡值下系统完整运行」）。
-    let baseline = trivial_actor_spec("session/main");
-    assert!(
-        actor_can_land_speech(&baseline) && actor_can_land_artifact(&baseline),
-        "平凡值权限取实：session/main 两臂都放"
-    );
-    // 而只持 define.work 的自主主体照旧无发言权——窄行不因「平凡值」豁免。
-    let autonomous = trivial_actor_spec("session/autonomous");
-    assert!(
-        !actor_can_land_speech(&autonomous),
-        "自主主体无发言权（平凡值不豁免窄行：自主行为不得冒充用户对话）"
-    );
-}
+// ── 授权读法：规格判定与表谓词必须一份口径 ─────────────────────
 
 /// 规格判定与表谓词**必须一致**：同一主体的两个入口，一份口径。
 ///
-/// 挡的是「口径分叉」：能力名（`Capability::Reply` 等）若在插件侧再抄一份表，
+/// 挡的是「口径分叉」：能力名（`Capability::AssignWork`）若在插件侧再抄一份表，
 /// 改一处即静默错位，而错位方向是**放行**（fail-open）。四个主体覆盖
 /// 登记行（会话 / 对等 / 抢占判定者）与未登记的 `session/<id>`（表里没有行 ⇒ 全拒）。
 #[test]
@@ -119,21 +61,26 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
             ..trivial_actor_spec(p)
         };
         assert_eq!(
-            actor_can_land_speech(&spec),
-            matrix.can_reply(p),
-            "{p}: 首条收束两入口必须一致"
-        );
-        assert_eq!(
-            actor_can_land_speech(&spec),
-            matrix.can_reply(p),
-            "{p}: 追加收束两入口必须一致"
-        );
-        assert_eq!(
-            actor_can_land_artifact(&spec),
-            matrix.can_produce_artifact(p),
-            "{p}: 产物臂两入口必须一致"
+            actor_can_assign_work(&spec),
+            matrix.can_write_name(p, Capability::AssignWork.name()),
+            "{p}: 规格判定与表谓词两个入口必须一致"
         );
     }
+}
+
+/// 事件切片 → 请求包消息：转写条目按 `exclude_from_context` 过滤后投影。
+///
+/// 旧 `TranscriptView::to_messages` 的唯一读法（出口已删）；这里按同一条折一遍，
+/// 让「prompt 来自事实切片」这条断言继续走真实的转写投影。
+fn request_messages(events: &[Event]) -> Vec<crate::projection::transcript::PromptMessage> {
+    crate::projection::transcript::transcript(CHAT, MESSAGE)
+        .read_all(events)
+        .value
+        .entries
+        .iter()
+        .filter(|e| !e.exclude_from_context)
+        .map(crate::projection::transcript::PromptMessage::from)
+        .collect()
 }
 
 // ── 彩排：多主体与对等承诺 ──
@@ -489,10 +436,7 @@ async fn rehearse_reasoner_turn(
     let outcome = llm
         .generate(
             &tok,
-            &crate::projection::transcript::transcript(CHAT, MESSAGE)
-                .read_all(&snapshot)
-                .value
-                .to_messages(),
+            &request_messages(&snapshot),
         )
         .await;
     let cost_ms = started.elapsed().as_millis() as u64;
@@ -568,10 +512,7 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
     let reply = llm
         .generate(
             &TokenIssuer::issue_deep(),
-            &crate::projection::transcript::transcript(CHAT, MESSAGE)
-                .read_all(&snapshot)
-                .value
-                .to_messages(),
+            &request_messages(&snapshot),
         )
         .await
         .expect("成功桩必答");
@@ -687,62 +628,56 @@ fn the_arbiter_row_is_the_documented_five_fields() {
     assert_eq!(spec.scope, Scope::Root);
 }
 
-/// 判定半边：低于阈值才淘汰；**恰好等于阈值不淘汰**（边界值）。
+/// DE-043 §6 断言 3：裁决 = 一条**可审计、可撤销**的 grants 变更事件。
 ///
-/// 平凡打分 = 守约 − 违约、阈值 0 ⇒ 任何未配平的违约即淘汰；从没立约的主体算出 0 分，
-/// 与「恰好抵平」同一个边界值 ⇒ 同样**不**淘汰（没承诺过就没有可违约的东西）。
-/// 入参是一个分数而不是投影的行型（`D-287`），所以这里只喂数、不造条目：判定者与
-/// 「这一行怎么折出来」之间没有类型依赖，那条算式归声誉的 owner。
+/// 撤销事件的**写方**是声誉 owner（`crates/symbio-plugin-reputation/src/elimination.rs`
+/// 的 `verdict_draft`，同一份载荷），本域只剩读侧翻译与恢复事件的构造。判据两条：
+/// ① 载荷六字段齐全（`score` / `threshold` 让审计方能复算）；② `verdict_grants_changes`
+/// 把事件流水折成覆盖层后，`is_revoked` 翻真、恢复事件再翻假——回路闭合。
 #[test]
-fn should_eliminate_flips_only_below_the_threshold() {
-    let d = EliminationDecider;
-    assert!(d.should_eliminate(-1), "净违约 ⇒ 淘汰");
-    assert!(!d.should_eliminate(0), "恰好抵平 ⇒ 不淘汰（边界）");
-    assert!(!d.should_eliminate(1), "净守约 ⇒ 不淘汰");
-    assert!(
-        !d.should_eliminate(0),
-        "从没立约的主体（空条目算出 0 分）不被淘汰——与边界同值，判据也只有一条"
-    );
-}
-
-/// DE-043 §6 断言 3：淘汰 = 一条**可审计、可撤销**的 grants 变更事件。
-///
-/// 三条判据各钉一边：① 事件落在 `verdict × asserted` 格、actor 是仲裁者
-/// （不是被淘汰主体——「谁做的裁决」在事实源里说得出来）；② 载荷六字段齐全
-/// （score / threshold 让审计方能复算）；③ `verdict_grants_changes` 把事件流水
-/// 折成覆盖层后，`is_revoked` 翻真、恢复事件再翻假——回路闭合。
-#[test]
-fn elimination_is_an_auditable_revocable_grants_change() {
-    let d = EliminationDecider;
-    let ev = d.elimination_event(EVENT_VERDICT_ASSERTED, "session/b", -1, 42);
-    // ① 格子与作者。
-    assert_eq!(ev.kind, EVENT_VERDICT_ASSERTED);
-    assert_eq!(ev.entity, VEntity::Verdict);
-    assert_eq!(ev.verb, Verb::Asserted);
-    assert_eq!(
-        ev.actor, PRINCIPAL_ARBITER,
-        "裁决者是仲裁者，不是被淘汰主体"
-    );
-    assert_eq!(ev.produced_by, Some(42), "I2：断言类事件必须带溯源");
-    // ② 载荷六字段。
-    let p = &ev.payload;
+fn verdict_flow_folds_into_a_revocable_grants_overlay() {
+    let revoke = Event::pending(
+        "v-elim-session/b-42",
+        EVENT_VERDICT_ASSERTED,
+        VEntity::Verdict,
+        Verb::Asserted,
+        PRINCIPAL_ARBITER,
+    )
+    .with_produced_by(42)
+    .with_payload(serde_json::json!({
+        "subject": "session/b",
+        "capability": "assign.work",
+        "change": "revoke",
+        "score": -1,
+        "threshold": 0,
+        "why": "声誉分 -1 低于淘汰阈值 0",
+    }));
+    // ① 载荷六字段（写方在声誉 owner，读侧必须按同一形状翻译）。
+    let p = &revoke.payload;
     assert_eq!(p["subject"], "session/b");
     assert_eq!(p["capability"], "assign.work");
     assert_eq!(p["change"], "revoke");
     assert_eq!(p["score"], -1);
-    assert_eq!(p["threshold"], EliminationDecider::THRESHOLD);
+    assert_eq!(p["threshold"], 0);
     assert!(p["why"].as_str().is_some_and(|w| !w.is_empty()), "人话理由");
 
-    // ③ 流水 → 覆盖层：撤销生效、恢复可逆、再收回又生效（last-wins）。
-    let restored = d.restoration_event(
+    // ② 流水 → 覆盖层：撤销生效、恢复可逆、再收回又生效（last-wins）。
+    let restored = EliminationDecider.restoration_event(
         EVENT_VERDICT_ASSERTED,
         "session/b",
         "申诉受理：上游数据延迟有凭证",
         77,
     );
     assert_eq!(restored.kind, EVENT_VERDICT_ASSERTED);
+    assert_eq!(restored.entity, VEntity::Verdict);
+    assert_eq!(restored.verb, Verb::Asserted);
+    assert_eq!(
+        restored.actor, PRINCIPAL_ARBITER,
+        "裁决者是仲裁者，不是被淘汰主体"
+    );
+    assert_eq!(restored.produced_by, Some(77), "I2：断言类事件必须带溯源");
     assert_eq!(restored.payload["change"], "restore");
-    let changes = EliminationDecider::verdict_grants_changes(&[ev.clone(), restored.clone()]);
+    let changes = EliminationDecider::verdict_grants_changes(&[revoke.clone(), restored.clone()]);
     assert_eq!(
         changes,
         vec![
@@ -762,9 +697,9 @@ fn elimination_is_an_auditable_revocable_grants_change() {
     );
     assert!(
         GrantsOverlay::fold(EliminationDecider::verdict_grants_changes(&[
-            ev.clone(),
+            revoke.clone(),
             restored,
-            ev,
+            revoke,
         ]))
         .is_revoked("session/b", "assign.work"),
         "恢复之后再违约 ⇒ 再淘汰（last-wins）"
@@ -789,32 +724,6 @@ fn elimination_is_an_auditable_revocable_grants_change() {
     assert!(
         EliminationDecider::verdict_grants_changes(&[other, bogus]).is_empty(),
         "别的格子 / 笔误的 change ⇒ 一条都不译（不把笔误读成改判）"
-    );
-}
-
-/// 淘汰事件也是普通事件：入格后全链路不变量照旧绿（逃不出审计）。
-#[test]
-fn elimination_event_keeps_invariants_green() {
-    let store = EventStore::new();
-    // 根事件先落：淘汰判决的溯源指向它（`source_seq = 0`）。
-    // 没有它，那条边就指向**自己**——`provenance_dangling` 会把自指抓成前向边。
-    store
-        .append(Event::pending(
-            "u0",
-            EVENT_USER_MESSAGE,
-            Entity::Scope,
-            Verb::Opened,
-            "user",
-        ))
-        .unwrap();
-    store
-        .append(EliminationDecider.elimination_event(EVENT_VERDICT_ASSERTED, "session/b", -1, 0))
-        .unwrap();
-    let snapshot = store.range(crate::event::Seq::new(0));
-    assert!(
-        check_all(EVENTS, &snapshot).is_empty(),
-        "{:?}",
-        check_all(EVENTS, &snapshot)
     );
 }
 

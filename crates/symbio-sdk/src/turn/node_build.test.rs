@@ -7,9 +7,9 @@
 //! - **对话面节点形状**（原 `chat_loop/compose.test.rs`）：`dialog_node` 承载的
 //!   「落点 + 两个标记」——错了不会报错、只表现为界面不对，必须由断言钉住。
 //!   其中依赖 `conversation_view` 投影的两条**留在 session 侧**（投影不是 core 的地盘）。
-//! - **建树 flat 折叠**（原 `message_build.test.rs`）：`detach_if_flat` /
-//!   `flatten_whole_tree` / `turn_root_of` 的判据——`grouped`/`deep` 逐字
-//!   零改动、flat 只脱本轮直接子节点、夹在工具卡内的子会话骨架绝不折叠。
+//! - **建树 flat 折叠**（原 `message_build.test.rs`）：`flatten_whole_tree` /
+//!   `turn_root_of` 的判据——`grouped`/`deep` 逐字零改动、flat 只脱本轮直接子节点、
+//!   夹在工具卡内的子会话骨架绝不折叠。
 
 use super::*;
 use crate::chat::chat_node::{NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
@@ -182,40 +182,6 @@ fn tool_node(id: &str, parent: &str) -> ChatNode {
         ..Default::default()
     }
     .with_style_tag(CHAT_STYLE_TAG_TOOL)
-}
-
-#[test]
-fn detach_if_flat_raises_direct_child_and_stamps_turn_root() {
-    let mut n = node("body-1", Some("run-1"));
-    detach_if_flat(&mut n, "run-1", PresentationTree::Flat);
-    assert_eq!(n.parent_id, None, "flat：本轮直接子节点升根");
-    assert_eq!(
-        turn_root_of(&n),
-        Some("run-1"),
-        "升根后靠 turn_root 记号认回本轮骨架"
-    );
-}
-
-#[test]
-fn detach_if_flat_grouped_is_byte_for_byte_noop() {
-    let mut n = node("body-1", Some("run-1"));
-    n.meta = Some(serde_json::json!({ "style_tag": "reasoning" }));
-    let before = serde_json::to_value(&n).unwrap();
-    detach_if_flat(&mut n, "run-1", PresentationTree::Grouped);
-    assert_eq!(
-        serde_json::to_value(&n).unwrap(),
-        before,
-        "grouped 是今天行为：零改动"
-    );
-}
-
-#[test]
-fn detach_if_flat_ignores_child_not_under_this_root() {
-    // 工具结果节点的父是 tool_call，不是本轮响应骨架——flat 也不该动它。
-    let mut n = node("result-1", Some("tool-1"));
-    detach_if_flat(&mut n, "run-1", PresentationTree::Flat);
-    assert_eq!(n.parent_id.as_deref(), Some("tool-1"));
-    assert_eq!(turn_root_of(&n), None);
 }
 
 #[test]

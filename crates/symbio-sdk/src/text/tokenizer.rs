@@ -164,7 +164,7 @@ impl CalibratedTokenizer {
     }
 
     /// 反馈一次真实用量：`actual` 为该次请求的真实 token 数，
-    /// `estimated` 为**未经校准的原始启发式估算值**（[`Self::count_raw`]）。
+    /// `estimated` 为**未经校准的原始启发式估算值**（`HeuristicTokenizer::count`）。
     ///
     /// ⚠️ 不要把校准后的 `count()` 结果传进来：那会让观测比值依赖当前校准系数，
     /// 数学上收敛到 √(真实比值) 而非真实比值（自反馈偏差）。两者任一为 0 则忽略。
@@ -186,16 +186,6 @@ impl Tokenizer for CalibratedTokenizer {
         let base = self.inner.count(text);
         let r = self.ratio.load(Ordering::Relaxed) as f64 / 10_000.0;
         (base as f64 * r) as usize + 1
-    }
-}
-
-impl CalibratedTokenizer {
-    /// 原始启发式估算（不含校准系数）。
-    ///
-    /// 反馈 [`Self::feedback`] 时必须用这个值作为 `estimated`，
-    /// 否则自反馈会让校准收敛到 √(真实比值)。
-    pub fn count_raw(&self, text: &str) -> usize {
-        self.inner.count(text)
     }
 }
 
