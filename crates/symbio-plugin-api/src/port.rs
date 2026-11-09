@@ -52,12 +52,9 @@ use symbio_sdk::capability::{capability_report_error, CAPABILITY_VISITOR};
 // 读/校验半住 `symbio-sdk`（D-404）：`PortReading` / 族与行名 / 端口名校验 / 端口集派生
 // 都是宿主问表的机制，不是插件申报的形状。这里转发，插件与宿主的既有导入路径不变；
 // 注册面（`PortProvider` / `PortPayload` / [`port_rows`]）留在本文件。
+pub use symbio_sdk::capability::port::{capability_port_of, port_family, port_row_name};
 use symbio_sdk::capability::port::{check_port_name, registered_ports};
-pub use symbio_sdk::capability::port::PortReading;
-pub use symbio_sdk::capability::port::PORT_FAMILY;
-pub use symbio_sdk::capability::port::capability_port_of;
-pub use symbio_sdk::capability::port::port_family;
-pub use symbio_sdk::capability::port::port_row_name;
+pub use symbio_sdk::capability::port::{PortReading, PORT_FAMILY};
 
 /// 一个世界端口的提供者：申报端口名与提供者 id，并交出通用执行面。
 ///
