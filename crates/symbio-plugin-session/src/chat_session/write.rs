@@ -174,6 +174,16 @@ pub(crate) enum Carrier {
 }
 
 impl PersistentChatSession {
+    /// 构造「变更未入格」的早退错误：先出声，再把同一原因交回 `InternalError`。
+    fn change_not_landed(why: impl std::fmt::Display) -> PluginError {
+        symbio_plugin_api::plugin_error!(
+            "session",
+            "[message] 变更未能入格，本次变更未生效：{}",
+            why
+        );
+        PluginError::InternalError(format!("消息变更未能入格，本次变更未生效：{why}"))
+    }
+
     /// 一次消息列表变更的**唯一写入口**（D-054
     /// 决策 2 的「顺序反转」）。
     ///
@@ -204,14 +214,7 @@ impl PersistentChatSession {
         let facts = match self.store.facts(&self.session_id) {
             Ok(facts) => facts,
             Err(why) => {
-                symbio_plugin_api::plugin_error!(
-                    "session",
-                    "[message] 变更未能入格，本次变更未生效：{}",
-                    why
-                );
-                return Err(PluginError::InternalError(format!(
-                    "消息变更未能入格，本次变更未生效：{why}"
-                )));
+                return Err(Self::change_not_landed(why));
             }
         };
         if let Some(store) = facts {
@@ -254,14 +257,7 @@ impl PersistentChatSession {
                 } => {}
             }
             if let Some(why) = failure {
-                symbio_plugin_api::plugin_error!(
-                    "session",
-                    "[message] 变更未能入格，本次变更未生效：{}",
-                    why
-                );
-                return Err(PluginError::InternalError(format!(
-                    "消息变更未能入格，本次变更未生效：{why}"
-                )));
+                return Err(Self::change_not_landed(why));
             }
         }
 

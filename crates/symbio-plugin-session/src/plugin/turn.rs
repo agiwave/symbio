@@ -12,6 +12,7 @@
 use super::*;
 use crate::chat_session::Carrier;
 use crate::convergence::SessionStateChange;
+use crate::route_guard::require_sid;
 use crate::transcript::publish::append_and_publish;
 use crate::transcript::supplements::merge_supplements;
 use symbio_kernel::event::{Entity, Event, Verb};
@@ -454,12 +455,7 @@ impl SessionPlugin {
         &self,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let sid = ctx.get(SESSION_ID).unwrap_or_default();
-        if sid.is_empty() {
-            return Err(PluginError::ValidationError(
-                "session/consume 需要 metadata.session_id".into(),
-            ));
-        }
+        let sid = require_sid(&ctx, "session/consume")?;
         let source = self.fact_source_for(&ctx, &sid).await?;
         let seq = self.consume_inbox_turn(&ctx, &sid, &*source).await?;
         Ok(PluginPayload::new(&json!({ "seq": seq })))
@@ -470,12 +466,7 @@ impl SessionPlugin {
         &self,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let sid = ctx.get(SESSION_ID).unwrap_or_default();
-        if sid.is_empty() {
-            return Err(PluginError::ValidationError(
-                "session/project 需要 metadata.session_id".into(),
-            ));
-        }
+        let sid = require_sid(&ctx, "session/project")?;
         let payload = ctx.payload::<Value>()?;
         let seq = payload
             .get("seq")

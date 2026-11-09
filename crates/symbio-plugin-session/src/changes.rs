@@ -39,16 +39,16 @@ use serde::Serialize;
 
 use symbio_kernel::event::Event;
 use symbio_kernel::plugin::{
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
+    PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginPayload,
 };
 use symbio_sdk::authz::content_visible;
-use symbio_sdk::keys::SESSION_ID;
 
 use crate::projections::changes::workdir_changes;
 use symbio_plugin_api::effects::FileOp;
 
 use super::plugin::SessionPlugin;
-use super::stats_reading::{content_scope_of, ViewerRequest};
+use super::route_guard::{require_sid, viewer_of};
+use super::stats_reading::content_scope_of;
 use super::workdir::SEG_WORKDIR;
 
 /// 一行变更：**呈现就绪**（前端只排版，不判读）。
@@ -128,24 +128,10 @@ impl SessionPlugin {
         &self,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let sid = ctx.get(SESSION_ID).unwrap_or_default();
-        if sid.is_empty() {
-            return Err(PluginError::ValidationError(
-                "session/changes 需要 metadata.session_id".into(),
-            ));
-        }
+        let sid = require_sid(&ctx, "session/changes")?;
         // 载荷 = 读方身份声明（可选）；带了却解析不出 ⇒ 拒绝（fail-closed），
         // 与 `session/stats` 同判据。
-        let viewer: Option<String> = match ctx.payload::<serde_json::Value>()? {
-            serde_json::Value::Null => None,
-            v => {
-                serde_json::from_value::<ViewerRequest>(v)
-                    .map_err(|e| {
-                        PluginError::ValidationError(format!("session/changes 载荷不合法：{e}"))
-                    })?
-                    .principal
-            }
-        };
+        let viewer: Option<String> = viewer_of(&ctx, "session/changes")?;
         let source = self
             .get_store()
             .await?

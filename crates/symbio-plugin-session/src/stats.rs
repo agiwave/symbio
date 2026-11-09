@@ -51,12 +51,11 @@ use serde::{Deserialize, Serialize};
 
 use symbio_kernel::event::Event;
 use symbio_kernel::plugin::{
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
+    PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginPayload,
 };
 use symbio_kernel::present::ReadingPanel;
 use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
-use symbio_sdk::keys::SESSION_ID;
 use symbio_sdk::projection::transcript::transcript;
 
 use crate::projections::checkpoint::checkpoint;
@@ -65,9 +64,9 @@ use super::spend_ledger::spend_ledger;
 use super::token_ledger::token_ledger;
 
 use super::plugin::SessionPlugin;
+use super::route_guard::{require_sid, viewer_of};
 use super::stats_reading::{
-    capability_views, commitments_reading, content_scope_of, fleet_reading, panel_of,
-    usage_section, ViewerRequest,
+    capability_views, commitments_reading, content_scope_of, fleet_reading, panel_of, usage_section,
 };
 
 /// 一个档位的一行读数：时延列与兜底列并排（同一档位的两类收益同处一行）。
@@ -472,12 +471,7 @@ impl SessionPlugin {
         &self,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let sid = ctx.get(SESSION_ID).unwrap_or_default();
-        if sid.is_empty() {
-            return Err(PluginError::ValidationError(
-                "session/stats 需要 metadata.session_id".into(),
-            ));
-        }
+        let sid = require_sid(&ctx, "session/stats")?;
         let store = self.get_store().await?;
         // 本会话快照立即取（读侧闸要它算可见域）；部署级扫描推迟到闸判之后——
         // `read` 只在 `may_read` 时调用 `deep_facts`（不给看就不扫）。
@@ -488,16 +482,7 @@ impl SessionPlugin {
         // 载荷 = **读方身份声明**（可选）：不带 `principal` = 本机默认，与读侧闸
         // 引入之前逐字一致；带了却读不出身份（类型不对）⇒ 声明了却判不了 ⇒ 拒绝
         // 读数，不悄悄降级成「未声明」（fail-closed）。载荷整体缺席同理拒绝。
-        let viewer: Option<String> = match ctx.payload::<serde_json::Value>()? {
-            serde_json::Value::Null => None,
-            v => {
-                serde_json::from_value::<ViewerRequest>(v)
-                    .map_err(|e| {
-                        PluginError::ValidationError(format!("session/stats 载荷不合法：{e}"))
-                    })?
-                    .principal
-            }
-        };
+        let viewer: Option<String> = viewer_of(&ctx, "session/stats")?;
         // 会话主体 = **目标会话自己的**（`metadata.agent_id` → `principal_of`，
         // 与 `delegating_principal` / 心跳回退链同一份词汇），不是请求方的：
         // 本端点支持跨会话查数（委派监督、e2e 都传别人的 `session_id`），而
