@@ -184,7 +184,7 @@ owner 从各文档 front-matter 的 `lists: [<id>=owner]` 读（与 [RE-007-清�
 | 快速上手 / 开发新插件 / 排查问题 | [GU-006-QUICK_START](006-guide/006-QUICK_START.md "GU-006-QUICK_START") · [GU-005-PLUGIN_DEVELOPMENT](006-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [GU-007-TROUBLESHOOTING](006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") |
 | 看**全项目登记总账**（七类 kind × 条目数 × 状态分布） | 本页上方总账块（生成）；查询台 `node scripts/registry-board.mjs` |
 | 了解平台**要达成什么** / **用户拿它做什么** | [GO-001 · 产品目标](001-goal/001-产品目标.md "GO-001-产品目标") · [GO-002 · 技术目标](001-goal/002-技术目标.md "GO-002-技术目标") · [SC-000 · 场景总览](002-scene/README.md "SC-000-场景汇总") |
-| 看**目标形态**与尚未落地的设计 | `node scripts/registry-board.mjs --kind=design --impl=planned` |
+| 看**目标形态**与尚未落地的设计 | `node scripts/registry-board.mjs --kind=design --status=active`（设计文档的 `impl` 合法取值只有 `done` / `partial` / `none`，没有 `planned`） |
 | 看**某条纪律与它的判据** | [spec/](005-spec/README.md "SP-000-规范汇总")（每条 `## 规范` + `## 判据`） |
 | 查「某条约定写在哪」 | `node scripts/doc-find.mjs <词>`（全仓 md + Rust 文档注释检索） |
 
