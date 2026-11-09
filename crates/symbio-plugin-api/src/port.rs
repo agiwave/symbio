@@ -44,10 +44,20 @@ use serde_json::Value;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
+use symbio_kernel::capability::CapabilityRow;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_sdk::capability::{capability_report_error, CAPABILITY_VISITOR};
+
+// 读/校验半住 `symbio-sdk`（D-404）：`PortReading` / 族与行名 / 端口名校验 / 端口集派生
+// 都是宿主问表的机制，不是插件申报的形状。这里转发，插件与宿主的既有导入路径不变；
+// 注册面（`PortProvider` / `PortPayload` / [`port_rows`]）留在本文件。
+use symbio_sdk::capability::port::{check_port_name, registered_ports};
+pub use symbio_sdk::capability::port::PortReading;
+pub use symbio_sdk::capability::port::PORT_FAMILY;
+pub use symbio_sdk::capability::port::capability_port_of;
+pub use symbio_sdk::capability::port::port_family;
+pub use symbio_sdk::capability::port::port_row_name;
 
 /// 一个世界端口的提供者：申报端口名与提供者 id，并交出通用执行面。
 ///
@@ -413,43 +423,6 @@ impl PortPayload {
     }
 }
 
-/// 全部端口共用的唯一 `multi` 族（D-299）：族不区分端口，端口级分组由行名前缀
-/// （[`port_row_name`]）在读数里做——加端口不加族。
-pub const PORT_FAMILY: CapabilityFamily = CapabilityFamily::multi("port");
-
-/// 任何端口都落在唯一族里（端口集开放，`DE-047` I-6.7）：族不区分端口，端口级
-/// 分组由行名前缀（[`port_row_name`]）在读数里做——加端口不加族。
-pub fn port_family(_port: &str) -> Option<CapabilityFamily> {
-    Some(PORT_FAMILY)
-}
-
-/// port 行的行名：保留前缀，撞不上任何线上工具名。
-///
-/// 表键是全表唯一的名字空间（族不参与键），端口名当行名会与同名工具互相顶掉；
-/// 工具名不含尖括号，前缀使碰撞不可表达——与 `MOUNT_ROOT_ROW` 同一条手法。
-pub fn port_row_name(port: &str, provider_id: &str) -> String {
-    format!("<port:{port}>:{provider_id}")
-}
-
-/// 端口名的保留字符：环事件 id 的分隔符。
-///
-/// 事件 id 形如 `ring:{port}:{id}:{attempt}:{kind}`，端口位是首个字段；端口名一旦
-/// 含 `:`，解析会把端口位截断（`model:assist` 会被读成 `model`），事实键与债键对不上。
-/// 这里 **fail-closed**：注册期直接拒绝，不转义、不猜（D-336「已知编码风险」）。
-const PORT_NAME_RESERVED: &[char] = &[':'];
-
-/// 端口名校验：种进事件 id 之前就把保留字符挡在注册期。
-fn check_port_name(port: &str) {
-    if let Some(ch) = port.chars().find(|ch| PORT_NAME_RESERVED.contains(ch)) {
-        // panic-allow crates/symbio-plugin-api/src/port.rs::check_port_name: 注册期 fail-closed——含保留字符的端口名会让环事件 id 的端口位被截断，注册当场拒绝；带病启动比崩掉更难诊断（D-336）。
-        panic!(
-            "端口名 {port:?} 含有环事件 id 的保留字符 {ch:?}，端口注册失败。\
-             事件 id 是 `ring:{{port}}:{{id}}:{{attempt}}:{{kind}}`，端口位按 `:` 定界；\
-             命名端口时请避开保留集 {PORT_NAME_RESERVED:?}（D-336）。"
-        );
-    }
-}
-
 /// 提供者行：本提供者申报的**每个端口**一行（`multi` 族，`active = false`，不参与
 /// 表侧降位——端口级唯一由读数与装载期检查裁，D-299）。
 ///
@@ -471,87 +444,6 @@ pub fn port_rows(provider: &Arc<dyn PortProvider>) -> Vec<CapabilityRow> {
             )
         })
         .collect()
-}
-
-/// 一个端口的装配期读数。
-pub enum PortReading {
-    /// 0 行：端口缺席（没装提供者插件——合法装配态，响亮失败在调用点）。
-    Absent,
-    /// 1 行：就绪。
-    Ready(Arc<CapabilityRow>),
-    /// `>1` 行：判重——同端口的多个提供者**两行俱在**（单族不降位），`dropped` 是
-    /// 其余提供者的行名。
-    ///
-    /// 装载期已由 [`capability_port_check`] 落错误（不静默顶掉）；调用方拿到本读数
-    /// 同样必须响亮处理，不许当作 [`PortReading::Ready`] 用。
-    Duplicate {
-        kept: Arc<CapabilityRow>,
-        dropped: Vec<String>,
-    },
-}
-
-impl fmt::Debug for PortReading {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Absent => write!(f, "Absent"),
-            Self::Ready(row) => write!(f, "Ready({})", row.name()),
-            Self::Duplicate { kept, dropped } => {
-                write!(
-                    f,
-                    "Duplicate {{ kept: {}, dropped: {dropped:?} }}",
-                    kept.name()
-                )
-            }
-        }
-    }
-}
-
-/// 读一个端口的提供者行（纯读数，不落错误）。
-///
-/// 判定的全部输入是**按行名前缀分组**后的行数（单一 `port` 族里其他端口的行不可
-/// 见）：`0` 缺席、`1` 就绪、`>1` 判重。行不降位（`active = false`），行数让
-/// 「多提供者」可判——读数不猜、不回落。
-pub async fn capability_port_of(visitor: &dyn Registry, port: &str) -> PortReading {
-    let prefix = port_row_name(port, "");
-    let rows: Vec<_> = visitor
-        .list(PORT_FAMILY)
-        .await
-        .into_iter()
-        .filter(|r| r.name().starts_with(&prefix))
-        .collect();
-    match rows.len() {
-        0 => PortReading::Absent,
-        // panic-allow crates/symbio-plugin-api/src/port.rs::capability_port_of: 行数已判定为 1，next() 取不到说明 list 与 len 之间表被改写（同一次调用内不会发生），属代码缺陷。
-        1 => PortReading::Ready(rows.into_iter().next().expect("len == 1")),
-        _ => {
-            let mut it = rows.into_iter();
-            // panic-allow crates/symbio-plugin-api/src/port.rs::capability_port_of: 行数已判定为 >1，next() 取不到说明 list 与 len 之间表被改写（同一次调用内不会发生），属代码缺陷。
-            let kept = it.next().expect("len > 1");
-            let dropped = it.map(|r| r.name().to_string()).collect();
-            PortReading::Duplicate { kept, dropped }
-        }
-    }
-}
-
-/// 从 `port` 族里已注册的行名派生端口集（`DE-047` I-6.7）。
-///
-/// 行名形状唯一来源是 [`port_row_name`]：`<port:{port}>:{provider_id}`。解析不出的行
-/// （不是本族造的）由 `filter_map` 跳过——它们本来就不可见（`Registry::list` 按族取）。
-async fn registered_ports(visitor: &dyn Registry) -> Vec<String> {
-    let mut out = Vec::new();
-    for row in visitor.list(PORT_FAMILY).await {
-        let Some(rest) = row.name().strip_prefix("<port:") else {
-            continue;
-        };
-        let Some((port, _)) = rest.split_once(">:") else {
-            continue;
-        };
-        let port = port.to_string();
-        if !out.contains(&port) {
-            out.push(port);
-        }
-    }
-    out
 }
 
 /// 装配期判重检查（D-298 / D-299 / `DE-047` I-6.7）：端口集从**已注册行**派生

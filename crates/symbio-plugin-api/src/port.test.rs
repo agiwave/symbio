@@ -2,7 +2,7 @@
 
 use super::*;
 use async_trait::async_trait;
-use symbio_kernel::capability::family;
+use symbio_kernel::capability::{family, CapabilityFamily, CapabilityRow, Registry};
 use symbio_sdk::capability::capability_take_errors;
 use tokio::sync::RwLock;
 
