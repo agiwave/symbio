@@ -27,7 +27,8 @@
 //!
 //! - `0` 行 = 缺席（合法装配态：没装提供者插件）；响亮失败发生在调用点（消费方拿到
 //!   [`PortReading::Absent`] 自行落事实并中止）。
-//! - `>1` 行 = 判重：两行俱在（谁都没被顶掉），[`capability_port_check`] 落一条错误
+//! - `>1` 行 = 判重：两行俱在（谁都没被顶掉），
+//!   [`symbio_sdk::capability::port::capability_port_check`] 落一条错误
 //!   进 `CAPABILITY_ERRORS`（装载期判红）并指名两者，**不静默顶掉**。不做显式
 //!   优先级——单 provider 场景没有挑选判据，「挑一个」正是要消灭的静默形态。
 //! - 端口集开放：任何已注册的行名前缀就是一个合法端口名；0 行即 [`PortReading::Absent`]。
@@ -46,14 +47,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use symbio_kernel::capability::CapabilityRow;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
-use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
-use symbio_sdk::capability::{capability_report_error, CAPABILITY_VISITOR};
+use symbio_kernel::plugin::PluginInvokeRequest;
 
-// 读/校验半住 `symbio-sdk`（D-404）：`PortReading` / 族与行名 / 端口名校验 / 端口集派生
-// 都是宿主问表的机制，不是插件申报的形状。这里转发，插件与宿主的既有导入路径不变；
-// 注册面（`PortProvider` / `PortPayload` / [`port_rows`]）留在本文件。
-pub use symbio_sdk::capability::port::{capability_port_of, port_family, port_row_name};
-use symbio_sdk::capability::port::{check_port_name, registered_ports};
+// 读/校验半住 `symbio-sdk`（D-404 / `D-414`）：`PortReading` / 族与行名 / 端口名校验 /
+// 端口集派生 / 装配期判重检查都是宿主问表的机制，不是插件申报的形状。这里转发，插件与
+// 宿主的既有导入路径不变；注册面（`PortProvider` / `PortPayload` / [`port_rows`]）留在
+// 本文件。
+use symbio_sdk::capability::port::check_port_name;
+pub use symbio_sdk::capability::port::{capability_port_check, capability_port_of};
+pub use symbio_sdk::capability::port::{port_family, port_row_name};
 pub use symbio_sdk::capability::port::{PortReading, PORT_FAMILY};
 
 /// 一个世界端口的提供者：申报端口名与提供者 id，并交出通用执行面。
@@ -441,36 +443,6 @@ pub fn port_rows(provider: &Arc<dyn PortProvider>) -> Vec<CapabilityRow> {
             )
         })
         .collect()
-}
-
-/// 装配期判重检查（D-298 / D-299 / `DE-047` I-6.7）：端口集从**已注册行**派生
-/// （`<port:{port}>:` 前缀），每个端口按行名前缀读一次分组行数；判重 ⇒ 落一条错误
-/// 进 `CAPABILITY_ERRORS`。
-///
-/// **时点契约**：必须在能力收集结束、编排方读错误桶（`capability_take_errors`）
-/// 裁决**之前**调用——判重错误与收集期错误同桶同路，裁决即中止会话（装载期硬红）。
-/// 落桶之后才裁决 ⇒ 错误留在桶里无人读，判重退化为「照常跑」，那是本检查要消灭的
-/// 形态。缺席**不报错**——「没装提供者插件」是合法装配态（不装 model 插件的部署
-/// 存在），响亮失败发生在调用点。没有 `CAPABILITY_VISITOR` 的 ctx 上本函数静默跳过：
-/// 收集尚未开始时没有表可读。
-pub async fn capability_port_check(ctx: &Arc<dyn PluginInvokeRequest>) {
-    let Some(visitor) = ctx.get(CAPABILITY_VISITOR) else {
-        return;
-    };
-    for port in registered_ports(&*visitor).await {
-        if let PortReading::Duplicate { kept, dropped } = capability_port_of(&*visitor, &port).await
-        {
-            capability_report_error(
-                ctx,
-                "core",
-                format!(
-                    "世界端口 `{port}` 注册了多个提供者：`{}` 与 {dropped:?} 两行俱在",
-                    kept.name(),
-                ),
-            )
-            .await;
-        }
-    }
 }
 
 #[cfg(test)]

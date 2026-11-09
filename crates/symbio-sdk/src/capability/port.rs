@@ -1,11 +1,12 @@
-//! 世界端口的**读/校验半**：族与行名、端口名校验、按行名前缀分组的读数。
+//! 世界端口的**读/校验半**：族与行名、端口名校验、按行名前缀分组的读数与装配期判重。
 //!
 //! ## 为什么这一半住 sdk
 //!
 //! 注册面（`PortProvider` / `PortPayload` / `port_rows`）是**插件写的**形状——能力包
 //! 申报端口时用它，住 `symbio-plugin-api`。读/校验半是**宿主与编排方问表**的机制：
-//! 按行名前缀分组、判重、从已注册行派生端口集、把非法端口名挡在注册期。它不认识任何
-//! 世界词，也不被插件实现，与本域其余读口同一条边界（D-404）。
+//! 按行名前缀分组、判重、从已注册行派生端口集、把非法端口名挡在注册期、装配期把判重
+//! 落进能力错误桶。它不认识任何世界词，也不被插件实现，与本域其余读口同一条边界
+//! （D-404 / D-414）。
 //!
 //! 族与行名形状是同一条契约的两半：`PORT_FAMILY` 的声明、`port_row_name` 的拼法、
 //! `capability_port_of` 的分组必须同源，否则读数与注册面会各说各话。
@@ -13,7 +14,9 @@
 use std::fmt;
 use std::sync::Arc;
 
+use crate::capability::{capability_report_error, CAPABILITY_VISITOR};
 use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// 全部端口共用的唯一 `multi` 族（D-299）：族不区分端口，端口级分组由行名前缀
 /// （[`port_row_name`]）在读数里做——加端口不加族。
@@ -131,4 +134,34 @@ pub async fn registered_ports(visitor: &dyn Registry) -> Vec<String> {
         }
     }
     out
+}
+
+/// 装配期判重检查（D-298 / D-299 / `DE-047` I-6.7）：端口集从**已注册行**派生
+/// （`<port:{port}>:` 前缀），每个端口按行名前缀读一次分组行数；判重 ⇒ 落一条错误
+/// 进 `CAPABILITY_ERRORS`。
+///
+/// **时点契约**：必须在能力收集结束、编排方读错误桶（`capability_take_errors`）
+/// 裁决**之前**调用——判重错误与收集期错误同桶同路，裁决即中止会话（装载期硬红）。
+/// 落桶之后才裁决 ⇒ 错误留在桶里无人读，判重退化为「照常跑」，那是本检查要消灭的
+/// 形态。缺席**不报错**——「没装提供者插件」是合法装配态（不装 model 插件的部署
+/// 存在），响亮失败发生在调用点。没有 `CAPABILITY_VISITOR` 的 ctx 上本函数静默跳过：
+/// 收集尚未开始时没有表可读。
+pub async fn capability_port_check(ctx: &Arc<dyn PluginInvokeRequest>) {
+    let Some(visitor) = ctx.get(CAPABILITY_VISITOR) else {
+        return;
+    };
+    for port in registered_ports(&*visitor).await {
+        if let PortReading::Duplicate { kept, dropped } = capability_port_of(&*visitor, &port).await
+        {
+            capability_report_error(
+                ctx,
+                "core",
+                format!(
+                    "世界端口 `{port}` 注册了多个提供者：`{}` 与 {dropped:?} 两行俱在",
+                    kept.name(),
+                ),
+            )
+            .await;
+        }
+    }
 }

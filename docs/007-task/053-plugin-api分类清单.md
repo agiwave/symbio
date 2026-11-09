@@ -7,7 +7,7 @@ track: arch
 prio: now
 created: 2026-11-08
 deps: []
-where: "`crates/symbio-plugin-api/src`（`port.rs` 478 行、`reports.rs` 344 行；生产文件合计 2 561 行）；`crates/symbio-sdk/src/plugin/`（`effects` / `behaviors` / `context` / `retrieval` / `rows` / `settle` / `fact_source` / `drive_entry`）；`crates/symbio-sdk/src/text/tokenizer.rs`；`scripts/plugin-surface-audit.mjs`（HS-002 / HS-006）；`scripts/facade-loc-audit.mjs`（FA-001…FA-004）"
+where: "`crates/symbio-plugin-api/src`（`port.rs` 450 行、`reports.rs` 344 行；生产文件合计 2 533 行）；`crates/symbio-sdk/src/plugin/`（`effects` / `behaviors` / `context` / `retrieval` / `rows` / `settle` / `fact_source` / `drive_entry`）；`crates/symbio-sdk/src/text/tokenizer.rs`；`crates/symbio-sdk/src/capability/port.rs`（端口读/校验半与装配期判重）；`scripts/plugin-surface-audit.mjs`（HS-002 / HS-006）；`scripts/facade-loc-audit.mjs`（FA-001…FA-004）"
 exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 / 实现 / 机制）/ 处置（留守 api / 迁 sdk / 只转出）），不改代码；清单经批准后才搬迁；api 只留纯类型、宏、声明面与 re-export；`effects::apply`、端口能力校验、`text` 预算算术、`context` 拼装迁 sdk、api 只转出；`reports` 拆开——`ReportDecl` / `submit_reports!` / `inventory` 是契约，`validate` / `reports()` / `read_view` 是实现；「自有实现只许降」由行数棘轮 `FA-001`…`FA-004`（`scripts/facade-loc-audit.mjs`）判，不另开 HS 臂；搬迁后 `gate --full` 全绿
 ---
 
@@ -39,7 +39,7 @@ exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 /
 **生产文件合计 4 494 行；同目录 `*.test.rs` 另 1 921 行不计入基线。**
 
 **收尾时的现值（2026-11-09，以 `scripts/baselines/plugin-api-loc.json` 与 `scripts/arch-dead-code.json` 为准）**：
-`port` **478**（`D-404` 已搬）、`reports` **344**；门面合计 **2 561**（原 4 494）；
+`port` **450**（读/校验半 `D-404`，装配期判重 `D-414`）、`reports` **344**；门面合计 **2 533**（原 4 494）；
 `effects` / `text` / `context` 三格按退役形态记 `lines: 0` + `retired`（文件已删，格子钉零）。
 `effects` / `behaviors`（`D-408`）、`text`（`D-404`）、`context`（`D-412`）与五个链接期注册表
 `retrieval` / `rows` / `settle` / `fact_source` / `drive_entry`（`D-413`）整块住在
@@ -111,6 +111,12 @@ HS-002 / HS-006 只数转发条数，看不见实现。**这一条已由棘轮�
    `crates/symbio-sdk/src/plugin/`；门面九份纯转发文件一并收掉，模块名与提交宏在根上转出，
    插件侧 `symbio_plugin_api::submit_*!` 写法不变。同批下调 `FA-002`（门面合计 3496 → 2561），
    `CS-009` 钉到搬后实测 **596 : 255**（+44 字段 / +6 变体，全是换地址）。
+
+   **端口装配判重已落地（`D-414`）**：`capability_port_check`（`port.rs` 余下的宿主侧检查）
+   整条搬进 `crates/symbio-sdk/src/capability/port.rs`，门面在 `port` 模块里转出，
+   `session` 调用点不变；`lib.rs` 根上没有消费方的同名入口同批撤掉。`FA-002` 同批下调
+   （`port.rs` 478 → 450，合计 2561 → 2533）；注册面（`PortProvider` / `PortPayload` /
+   `port_rows`）按 `D-404` 的切法留门面——它写表，检查问表。
 
    > **`reports` 与 `context` 不同形，搬前须先裁**：`context` 的闭包只碰 kernel 与 sdk 自己的
    > 类型，整块搬得动；`reports` 的读侧三函数（`read_view` / `read_view_with_ver` / `read_all`）

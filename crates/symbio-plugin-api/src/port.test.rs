@@ -3,7 +3,10 @@
 use super::*;
 use async_trait::async_trait;
 use symbio_kernel::capability::{family, CapabilityFamily, CapabilityRow, Registry};
+use symbio_kernel::plugin::PluginInvokeRequestExt;
 use symbio_sdk::capability::capability_take_errors;
+use symbio_sdk::capability::port::capability_port_check;
+use symbio_sdk::capability::CAPABILITY_VISITOR;
 use tokio::sync::RwLock;
 
 /// 最小登记表：只装行、按族过滤（各插件测试的同款夹具）。
