@@ -49,10 +49,10 @@
 
 use symbio_kernel::event::branch::branch_marks;
 
-use crate::chat::chat_node::ChatNode;
 use crate::event::Event;
 use crate::projection::vocab::ChatVocab;
 use crate::turn::node_build::subtree_of;
+use symbio_kernel::chat::chat_node::ChatNode;
 
 /// 成员根节点上的分支标注键（`meta.branch`）。
 ///

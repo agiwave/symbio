@@ -33,6 +33,7 @@ use super::transcript::publish::append_and_publish;
 use super::types::SessionSummary;
 use serde_json::Value;
 use std::sync::Arc;
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::plugin::PluginError;
 use symbio_plugin_api::events::{
@@ -42,7 +43,6 @@ use symbio_plugin_api::events::{
 use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::PRINCIPAL_MAIN;
-use symbio_sdk::chat::chat_node as cm;
 
 /// 会话运行态的一次变化。
 ///

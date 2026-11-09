@@ -130,6 +130,7 @@ pub use symbio_kernel::capability::{
     family, Capability, CapabilityCategory, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel,
     CapabilityRow, Registry,
 };
+pub use symbio_kernel::chat::{chat_node, principal};
 pub use symbio_kernel::decl::{ring, Builder, FactDecl, PluginDeclarations, ViewDecl};
 pub use symbio_kernel::dialog::{
     ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
@@ -149,11 +150,10 @@ pub use symbio_kernel::llm::{ModelFinishReason, ModelProvider, ModelSpend, Model
 pub use symbio_kernel::llm::{PromptMessage, PromptToolCall, TurnOutput, TurnToolCallInfo};
 pub use symbio_kernel::plugin::error::{lock_read, lock_write};
 pub use symbio_kernel::plugin::{
-    Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginMessageWire, PluginMeta, PluginPayload, PluginPayloadWire, PluginSimpleRequest,
-    PluginStopReason, SimpleResponse, SuccessResponse,
+    Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload, PluginPayloadWire,
+    PluginSimpleRequest, PluginStopReason, SimpleResponse, SuccessResponse,
 };
-pub use symbio_kernel::plugin::{PluginError, PluginInvokeResponse};
 pub use symbio_kernel::present::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection,
@@ -189,7 +189,7 @@ pub use symbio_sdk::capability::{
     capability_prompts, capability_report_error, capability_take_errors, capability_to_wire,
     capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
 };
-pub use symbio_sdk::chat::{chat_node, principal};
+pub use symbio_sdk::chat::chat_node::{message_of_node, AssistReply, AssistRequest, SEG_MESSAGES};
 pub use symbio_sdk::clock::clock_now_ms;
 pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
 pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};

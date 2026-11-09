@@ -294,7 +294,7 @@ fn message_of_node_folds_attr_tool_name_into_meta() {
 /// 读到后同样只有一份身份，显式 `principal` 优先。
 #[test]
 fn message_of_node_folds_legacy_role_into_principal() {
-    use crate::chat::principal::PrincipalKind;
+    use symbio_kernel::chat::principal::PrincipalKind;
 
     let m = message_of_node(
         &vdfs_with_attrs("j", serde_json::json!({"role": "user"})),

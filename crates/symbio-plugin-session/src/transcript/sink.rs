@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::exec::ExecTranscriptWriter;
-use symbio_sdk::chat::chat_node as cm;
 
 use crate::active::ActiveSessionManager;
 

@@ -24,12 +24,12 @@
 //!
 //! core 侧**没有任何东西反过来调本模块**——方向永远是消费方 → core。
 
-use crate::chat::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_TOOL,
-};
-use crate::chat::principal::Principal;
 use crate::clock::clock_now_ms;
 use crate::llm::llm_short_id;
+use symbio_kernel::chat::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_TOOL,
+};
+use symbio_kernel::chat::principal::Principal;
 
 /// 结果节点身份的唯一派生：`{call_id}-result`（内核规则的转发，见
 /// [`symbio_kernel::event::result_node_id`]）。

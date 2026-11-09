@@ -12,12 +12,12 @@ use super::PersistentChatSession;
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
+use symbio_kernel::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use tokio::sync::RwLock;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_sdk::chat::principal::Principal {
-    use symbio_sdk::chat::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_kernel::chat::principal::Principal {
+    use symbio_kernel::chat::principal::Principal;
     match role {
         NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),

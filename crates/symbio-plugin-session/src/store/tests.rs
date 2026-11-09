@@ -238,8 +238,8 @@ async fn save_leaves_no_temp_file_behind() {
 
 /// 造一条用户文本消息（标题 / 摘要推导的输入）
 fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
-    use symbio_sdk::chat::chat_node::MessageContent;
-    use symbio_sdk::chat::principal::Principal;
+    use symbio_kernel::chat::chat_node::MessageContent;
+    use symbio_kernel::chat::principal::Principal;
     ChatNode {
         id: format!("m{}", text.len()),
         principal: Some(Principal::from_legacy(if role_is_user {

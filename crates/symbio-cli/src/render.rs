@@ -30,8 +30,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
+use symbio::symbio_kernel::chat::chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus};
 use symbio::symbio_kernel::vdfs::VDFS_STATUS_WORKING;
-use symbio::symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus};
 
 use crate::protocol::{is_progress_surface, meta_of, waiting_card, WaitingCard, MODE_AUTO};
 

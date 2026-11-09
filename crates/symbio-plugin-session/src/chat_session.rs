@@ -26,9 +26,9 @@ use super::config::SessionConfig;
 use super::store::SessionStore;
 use std::collections::HashSet;
 use std::sync::Arc;
+use symbio_kernel::chat::chat_node as cm;
+use symbio_kernel::chat::chat_node::{ChatNode, NodeRole};
 use symbio_kernel::plugin::PluginError;
-use symbio_sdk::chat::chat_node as cm;
-use symbio_sdk::chat::chat_node::{ChatNode, NodeRole};
 use symbio_sdk::clock::clock_now_ms;
 use tokio::sync::RwLock;
 

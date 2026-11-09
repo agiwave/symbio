@@ -41,11 +41,11 @@ use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep, PLUGIN_ROW};
+use symbio_plugin_api::AssistReply;
 use symbio_plugin_api::{
     FactDraft, PluginInvokeRequest, RunSnapshot, Verdict, WordingReply, EVENT_RESPONSE,
 };
 use symbio_sdk::authz::PRINCIPAL_MAIN;
-use symbio_sdk::chat::chat_node as cm;
 
 use crate::declarations::OWNER;
 use crate::wording::compose_wording;
@@ -175,7 +175,7 @@ fn assist_reply(events: &[Event], root_id: &str, port: Option<&str>) -> Option<W
             && e.payload.get("port").and_then(Value::as_str) == Some(port)
             && e.payload.get("root_id").and_then(Value::as_str) == Some(root_id)
     })?;
-    let reply: cm::AssistReply = serde_json::from_value(fact.payload.clone()).ok()?;
+    let reply: AssistReply = serde_json::from_value(fact.payload.clone()).ok()?;
     Some(WordingReply {
         text: reply.text,
         reasoning: reply.reasoning,

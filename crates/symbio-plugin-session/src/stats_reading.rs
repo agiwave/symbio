@@ -19,10 +19,10 @@
 //! （`D-281`）。同一份事实长出两套口径，读数与投影就会静默漂移，而两边都自称是 SLO。
 
 use crate::declarations::COMMITMENT_VOCAB;
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::event::Event;
 use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 use symbio_plugin_api::reports::ReportCtx;
-use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::chat::chat_node::ChatNodePresentationExt;
 use symbio_sdk::governance::VisScope;
 

@@ -144,7 +144,7 @@ async fn progress_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeReq
         tool_rounds: rounds,
         quiet_ms,
     }
-    .to_message(&symbio_sdk::chat::principal::Principal::from_legacy(
+    .to_message(&symbio_kernel::chat::principal::Principal::from_legacy(
         req.principal,
     ));
     node.id = format!("report:{boundary}");

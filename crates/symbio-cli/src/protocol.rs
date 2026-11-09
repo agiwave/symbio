@@ -13,7 +13,7 @@
 //! 因此只在本文件定义一次（M-010）。
 
 use serde_json::Value;
-use symbio::symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeStatus};
+use symbio::symbio_kernel::chat::chat_node::{ChatNode, MessageContent, NodeStatus};
 
 /// 会话域的**挂载段名**（ASCII）。
 pub(crate) const SESSION_SEG: &str = "session";

@@ -34,8 +34,8 @@ use super::paths::session_id_from_new_path;
 use super::plugin::SessionPlugin;
 use super::types::Session;
 use serde_json::{json, Value};
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::plugin::PluginError;
-use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::clock::clock_now_ms;
 
 use symbio_kernel::vdfs::{VdfsContent, VdfsError, VdfsResponse, VdfsResult, VdfsWriteResponse};

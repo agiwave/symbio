@@ -131,7 +131,12 @@ export const WHITELIST_BASELINE = 0
 // 模块名 `reports` 与提交宏 `submit_reports`。两者此前分别经门面 `reports.rs` 与
 // `#[macro_export]` 给出，**同两个名字换住所**。视图缺席原因 `ViewUnavailable` 只有
 // 控制面 `session` 用，按 HS-003 不上门面（`session` 走 E-009）。
-export const SDK_BASELINE = 124
+// 124 → 126（D-420）：`chat` 组合模块分拣——`chat_node` / `principal` 两个模块级条目
+// 回到语法臂（它们本来就是内核共享语法），SDK 臂腾出的两格换成 sdk 自己的实现出口：
+// `AssistReply` / `AssistRequest` / `SEG_MESSAGES` / `message_of_node`。净 +2 是把原先
+// 藏在「一行放出整个命名空间」里的实现摊到账上（HS-006 的另一格，D-278），四条的实现
+// 与消费方都没变——不是新增机制面。
+export const SDK_BASELINE = 126
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。
@@ -152,7 +157,10 @@ export const SDK_BASELINE = 124
 // 直取的三条语法（`event::branch::{removed_ids, unselected_roots}`、`ClosureReason`）
 // 必须经门面转出——它们本来就是内核共享类型，只是此前有一条旁路没被计件。此前实测
 // 136（基线 137 留了一格余量），加三条后按实测收平到 139。
-export const GRAMMAR_BASELINE = 139
+// 139 → 141（`D-420`）：`chat_node` / `principal` 两个模块级条目从 SDK 臂换到语法臂。
+// 它们本来就是 `symbio-kernel` 的共享语法，此前经 sdk 的整模块转出才被记在 SDK 臂；
+// 同两个名字换主人，门面之外没有任何新增的可写路径。
+export const GRAMMAR_BASELINE = 141
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。
@@ -171,6 +179,7 @@ export const GRAMMAR_BASELINE = 139
 // 按 CS-008 / CP-004 留在门面，没有换成 `pub use`。
 // 13 → 14（D-416）：`reports` 模块随登记面整块搬进 sdk，一行放出报表的全部类型与读口；
 // 这是 D-278 要显式化的形状。`views` 没有上门面（零扩展消费方，HS-003）。
+// D-420 后 `chat_node` / `principal` 改由语法臂从内核转出：同两个名字换来源，条数不变。
 export const MODULE_REEXPORT_BASELINE = 14
 
 /** 门面白名单所在的文件与块的起止标记。 */

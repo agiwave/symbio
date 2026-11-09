@@ -8,21 +8,23 @@ use serde_json::json;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
 fn principal_for(
-    role: symbio_sdk::chat::chat_node::NodeRole,
-) -> symbio_sdk::chat::principal::Principal {
-    use symbio_sdk::chat::principal::Principal;
+    role: symbio_kernel::chat::chat_node::NodeRole,
+) -> symbio_kernel::chat::principal::Principal {
+    use symbio_kernel::chat::principal::Principal;
     match role {
-        symbio_sdk::chat::chat_node::NodeRole::User => {
+        symbio_kernel::chat::chat_node::NodeRole::User => {
             Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER)
         }
-        symbio_sdk::chat::chat_node::NodeRole::Assistant => Principal::from_legacy("session/main"),
-        symbio_sdk::chat::chat_node::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
-        symbio_sdk::chat::chat_node::NodeRole::System => Principal::from_legacy("system/local"),
+        symbio_kernel::chat::chat_node::NodeRole::Assistant => {
+            Principal::from_legacy("session/main")
+        }
+        symbio_kernel::chat::chat_node::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        symbio_kernel::chat::chat_node::NodeRole::System => Principal::from_legacy("system/local"),
     }
 }
 
 fn user_msg(text: &str) -> ChatNode {
-    use symbio_sdk::chat::chat_node as cm;
+    use symbio_kernel::chat::chat_node as cm;
     ChatNode {
         id: "m1".into(),
         principal: Some(principal_for(cm::NodeRole::User)),
@@ -51,7 +53,7 @@ fn derive_title_truncates_long_text() {
 
 #[test]
 fn derive_title_skips_empty_and_non_user() {
-    use symbio_sdk::chat::chat_node as cm;
+    use symbio_kernel::chat::chat_node as cm;
     let empty = ChatNode {
         id: "m0".into(),
         principal: Some(principal_for(cm::NodeRole::User)),
@@ -72,7 +74,7 @@ fn display_title_prefers_metadata_then_content_then_default() {
 }
 
 fn assistant_msg(text: &str) -> ChatNode {
-    use symbio_sdk::chat::chat_node as cm;
+    use symbio_kernel::chat::chat_node as cm;
     ChatNode {
         id: "a1".into(),
         principal: Some(principal_for(cm::NodeRole::Assistant)),
@@ -100,7 +102,7 @@ fn summary_ignores_user_messages() {
 
 #[test]
 fn summary_skips_textless_assistant_messages() {
-    use symbio_sdk::chat::chat_node as cm;
+    use symbio_kernel::chat::chat_node as cm;
     // 纯工具调用 / 推理消息没有正文：继续往前找最近一条**有文本**的回复
     let tool_only = ChatNode {
         id: "t1".into(),

@@ -23,8 +23,8 @@
 
 use super::super::active::ActiveSessionManager;
 use super::super::chat_session::{Carrier, MessageChange, PersistentChatSession};
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::plugin::PluginError;
-use symbio_sdk::chat::chat_node as cm;
 
 /// 落库 + **落库回包**的唯一实现（`../docs/109-vdfs-session-messages.md` §3.4）。
 ///
@@ -102,7 +102,7 @@ fn attributed(m: cm::ChatNode, session_principal: &str) -> cm::ChatNode {
     if m.principal.is_some() {
         return m;
     }
-    use symbio_sdk::chat::principal::Principal;
+    use symbio_kernel::chat::principal::Principal;
     let mut out = m;
     // 归属判据与字符串主体一致，这里只把它折成 `Principal` 结构体：
     // `person/local` ⇒ Person 一族，`session/*` ⇒ Agent 一族（`from_legacy` 按 namespace 派生）。

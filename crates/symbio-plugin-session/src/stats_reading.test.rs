@@ -15,8 +15,8 @@ use super::{
     trigger_label,
 };
 use serde_json::json;
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::present::{ReadingSection, ReadingTone};
-use symbio_sdk::chat::chat_node as cm;
 
 /// 一条压缩节点（形状 = 折叠叶；压缩的数字住在 `meta`，owner 是
 /// `crates/symbio-plugin-loop/src/context/pipeline.rs::compression_stats`）。

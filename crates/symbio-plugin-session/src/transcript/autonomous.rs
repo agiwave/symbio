@@ -24,10 +24,10 @@
 use super::super::active::InboxItem;
 use super::super::plugin::SessionPlugin;
 use crate::declarations::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::event::Event;
 use symbio_kernel::store::Store;
 use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
-use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::chat::session_chat;
 
 impl SessionPlugin {

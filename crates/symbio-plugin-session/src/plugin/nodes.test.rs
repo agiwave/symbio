@@ -8,8 +8,8 @@ use symbio_kernel::vdfs::{VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WO
 use crate::workdir;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库/投递面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: cm::NodeRole) -> symbio_sdk::chat::principal::Principal {
-    use symbio_sdk::chat::principal::Principal;
+fn principal_for(role: cm::NodeRole) -> symbio_kernel::chat::principal::Principal {
+    use symbio_kernel::chat::principal::Principal;
     match role {
         cm::NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),

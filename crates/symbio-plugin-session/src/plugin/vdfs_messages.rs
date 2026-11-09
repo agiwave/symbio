@@ -9,6 +9,7 @@
 //! `commands` 的调用，再把变更投进订阅表。
 
 use super::*;
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::event::{Entity, Verb};
 use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
@@ -18,7 +19,6 @@ use symbio_kernel::vdfs::{
 use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_USER_ANSWER};
 use symbio_plugin_api::fact_source::FACT_SOURCE;
 use symbio_plugin_api::FactDraft;
-use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::keys::SESSION_ID;
 use symbio_sdk::vdfs::host::{vdfs_from_plugin_error, vdfs_host_ctx};
 

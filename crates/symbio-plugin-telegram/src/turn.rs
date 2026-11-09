@@ -42,7 +42,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use symbio_plugin_api::chat_node::{message_of_node, ChatNode, NodeRole, NodeStatus, SEG_MESSAGES};
+use symbio_plugin_api::chat_node::{ChatNode, NodeRole, NodeStatus};
 use symbio_plugin_api::routes::{
     ROUTE_VDFS_READ, ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
     ROUTE_VDFS_WRITE,
@@ -54,6 +54,7 @@ use symbio_plugin_api::{
     VdfsChange, VdfsContent, VdfsNode, EVENT_BUS_KIND_VDFS, PATH, SESSION_ID, VDFS_STATUS_FAILED,
     VDFS_STATUS_WORKING, WORKDIR,
 };
+use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
 use tokio::sync::mpsc;
 
 /// 等待一轮结束的上限。与 `crates/symbio-cli/src/client.rs` 的 `TURN_TIMEOUT` 同量级：一轮里

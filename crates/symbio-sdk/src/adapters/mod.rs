@@ -21,8 +21,8 @@
 
 use async_trait::async_trait;
 
-use crate::chat::chat_node::ChatNode;
 use symbio_kernel::capability::CapabilityMeta;
+use symbio_kernel::chat::chat_node::ChatNode;
 use symbio_kernel::llm::PromptMessage;
 use symbio_kernel::llm::{ModelFinishReason, TurnToolCallInfo};
 use symbio_kernel::llm::{ModelSpend, ModelUsage};

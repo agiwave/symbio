@@ -20,13 +20,13 @@
 //! 工具、任务、记忆、消息编辑里不承载根 run 节点的那些）一律不改变结局。
 
 use crate::declarations::{EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_MESSAGE_EDITED};
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::event::{payload_str, Event};
 use symbio_plugin_api::drive::EVENT_DRIVER_STALLED;
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED,
     EVENT_USER_MESSAGE,
 };
-use symbio_sdk::chat::chat_node as cm;
 
 /// 上一轮结局——与 `attributes.outcome` 的词表同构。
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -899,7 +899,7 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
         .enumerate()
         .map(|(i, t)| cm::ChatNode {
             id: format!("m{i}"),
-            principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
+            principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
                 symbio_sdk::authz::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),

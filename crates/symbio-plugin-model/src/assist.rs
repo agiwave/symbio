@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use symbio_plugin_api::chat_node::{AssistReply, AssistRequest, ChatNode, MessageContent};
+use symbio_plugin_api::chat_node::{ChatNode, MessageContent};
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::port::{
     port_rows, PortErrorClass, PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome,
@@ -33,7 +33,8 @@ use symbio_plugin_api::port::{
 };
 use symbio_plugin_api::principal::{Principal, PrincipalKind};
 use symbio_plugin_api::{
-    llm_short_id, CapabilityRow, ExecEnv, ExecEventSink, ModelProvider, PluginError,
+    llm_short_id, AssistReply, AssistRequest, CapabilityRow, ExecEnv, ExecEventSink, ModelProvider,
+    PluginError,
 };
 
 /// 一次性问答端口的名字（数据）：名字住 `plugin-api` 的词汇面，提供者与本端口共用

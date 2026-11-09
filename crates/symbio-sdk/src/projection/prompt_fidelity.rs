@@ -358,7 +358,7 @@ fn claim_nodes(
     rep: &mut PromptReport,
     used: &mut [bool],
     messages: &[symbio_kernel::llm::PromptMessage],
-    msgs: &[crate::chat::chat_node::ChatNode],
+    msgs: &[symbio_kernel::chat::chat_node::ChatNode],
     mutations: &super::mutations::MessageMutations,
     kind: &str,
     fact: &str,

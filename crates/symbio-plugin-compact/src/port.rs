@@ -27,12 +27,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use symbio_plugin_api::chat_node::{
-    AssistReply, ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
 };
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome, PortProvider,
 };
-use symbio_plugin_api::{Entity, FactDraft, Verb, EVENT_FAILED, EVENT_RESPONSE};
+use symbio_plugin_api::{AssistReply, Entity, FactDraft, Verb, EVENT_FAILED, EVENT_RESPONSE};
 
 /// 端口名（唯一来源：本插件）。
 pub(crate) const COMPACT_PORT: &str = "compact";

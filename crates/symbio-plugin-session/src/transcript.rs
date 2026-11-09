@@ -44,8 +44,8 @@ use super::plugin::message_path;
 use indexmap::IndexMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::vdfs::VdfsChange;
-use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 use {
     symbio_plugin_api::plugin_debug, symbio_plugin_api::plugin_error,

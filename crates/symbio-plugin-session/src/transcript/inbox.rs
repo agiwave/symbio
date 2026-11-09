@@ -39,8 +39,9 @@
 use super::super::active::{ActiveSessionState, InboxItem};
 use super::super::plugin::{inbox_item_node, inbox_item_path, SessionConfig, SessionPlugin};
 use std::sync::Arc;
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::vdfs::VdfsChange;
-use symbio_sdk::chat::{chat_node as cm, session_chat};
+use symbio_sdk::chat::session_chat;
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 
 /// 抽干上界：一次取几条。

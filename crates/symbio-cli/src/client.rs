@@ -47,12 +47,12 @@ use symbio::init::create_root_plugin;
 use symbio::routes::{
     ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_WRITE,
 };
+use symbio::symbio_kernel::chat::chat_node::ChatNode;
 use symbio::symbio_kernel::plugin::{
     Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest,
 };
 use symbio::symbio_kernel::vdfs::{VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
 use symbio::symbio_plugin_api::events::EVENT_USER_MESSAGE;
-use symbio::symbio_sdk::chat::chat_node::ChatNode;
 use symbio::symbio_sdk::event_bus::{
     event_bus_resync_of, event_bus_vdfs_change_of, EventBusSubscribeRequest, EVENT_BUS_KIND_VDFS,
 };

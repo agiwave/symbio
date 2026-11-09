@@ -6,7 +6,7 @@
 //! `inbox.test.rs` 与 e2e（`e2e/cases/t19-supplements-merge.mjs`）负责。
 
 use super::*;
-use symbio_sdk::chat::chat_node as cm;
+use symbio_kernel::chat::chat_node as cm;
 use symbio_sdk::chat::session_chat;
 
 /// 造一条收件箱条目（params 与本模块无关，取默认）。
@@ -15,7 +15,7 @@ fn item(id: &str, text: &str) -> InboxItem {
         id: id.to_string(),
         message: cm::ChatNode {
             id: id.to_string(),
-            principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
+            principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
                 symbio_sdk::authz::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),

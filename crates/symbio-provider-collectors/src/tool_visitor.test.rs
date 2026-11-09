@@ -7,6 +7,7 @@ use super::*;
 
 use async_trait::async_trait;
 use symbio_kernel::capability::{family, Capability, CapabilityMeta, CapabilityRow};
+use symbio_kernel::chat::chat_node::ChatNode;
 use symbio_kernel::exec::ExecEnv;
 use symbio_kernel::llm::ModelProvider;
 use symbio_kernel::llm::TurnOutput;
@@ -19,7 +20,6 @@ use symbio_sdk::capability::{
     capability_configurables, capability_model_active, capability_model_resolve,
     capability_option_fields, capability_prompts, capability_vdfs_root,
 };
-use symbio_sdk::chat::chat_node::ChatNode;
 
 /// 最小模型服务桩：实现纯 trait 契约，仅用于验证注册存储语义，不发起真实请求
 struct MockProvider {

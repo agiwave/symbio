@@ -79,10 +79,6 @@ use std::collections::HashSet;
 
 use super::mutations::added_messages;
 use super::mutations::is_reader_reply;
-use crate::chat::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
-    CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
-};
 use crate::event::event_payload_node_id;
 use crate::event::{
     event_produced_text_node_id, event_result_node_id, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
@@ -91,15 +87,19 @@ use crate::port_stamp::{STAMP_FAILURE, STAMP_KEY};
 use crate::projection::vocab::{slot_of, ChatSlot};
 use crate::projection::vocab::{ChatVocab, MessageVocab};
 use crate::{Entity, Event, Verb};
+use symbio_kernel::chat::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
+    CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
+};
 use symbio_kernel::event::payload_str;
 
 // 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
-use crate::chat::principal::Principal;
 use crate::turn::facts::ReportDraft;
 use crate::turn::node_build::{
     dialog_node, llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message,
 };
+use symbio_kernel::chat::principal::Principal;
 
 /// 事件主体 → 节点身份：重建与写侧**同一条**派生（[`Principal::from_legacy`]）。
 ///
@@ -1216,7 +1216,9 @@ fn artifact_nodes(
     let tool_principal = if tool.is_empty() {
         None
     } else {
-        Some(crate::chat::principal::Principal::tool_principal(&tool))
+        Some(symbio_kernel::chat::principal::Principal::tool_principal(
+            &tool,
+        ))
     };
     let mut result = if needs_user_action {
         ChatNode {

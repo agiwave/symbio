@@ -15,11 +15,11 @@
 
 use super::*;
 use crate::stats_reading::present_message;
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::vdfs::{
     VdfsChangeSink, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse,
     VdfsResult,
 };
-use symbio_sdk::chat::chat_node as cm;
 use symbio_sdk::vdfs::host::vdfs_from_plugin_error;
 
 #[async_trait]

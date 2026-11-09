@@ -1,6 +1,6 @@
 //! 单轮 LLM 的**共享帧原语**与 id 原语；类型面已迁入 `symbio-kernel`（D-188 C2b）。
 
-use crate::chat::chat_node::{ChatNode, NodeStatus};
+use symbio_kernel::chat::chat_node::{ChatNode, NodeStatus};
 use symbio_kernel::exec::ExecEventSink;
 
 // 执行期出口（共享的完整消息帧）

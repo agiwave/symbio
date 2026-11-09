@@ -11,17 +11,17 @@
 //! 4. 载荷没记身份的格子**合成 id 必须稳定**（否则每次重开都多一批新节点）。
 
 use super::rebuild;
-use crate::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 use crate::test_fixtures::{
     CHAT, EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_CHAT_ASSISTANT_REPORTED, EVENT_USER_MESSAGE, MESSAGE,
 };
 use crate::{Entity, Event, Verb};
+use symbio_kernel::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 
 /// 身份写 `principal`（D-147）：夹具/载荷模仿的是**落库面**，而重建产物同样
 /// 只带主体；`role` 只是反序列化落点，不是写侧的身份来源。
-fn principal_for(role: NodeRole) -> crate::chat::principal::Principal {
-    use crate::chat::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_kernel::chat::principal::Principal {
+    use symbio_kernel::chat::principal::Principal;
     match role {
         NodeRole::User => Principal::from_legacy(crate::keys::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -65,7 +65,7 @@ enum NodeForm {
     Other,
 }
 
-fn form_of(m: &crate::chat::chat_node::ChatNode) -> NodeForm {
+fn form_of(m: &symbio_kernel::chat::chat_node::ChatNode) -> NodeForm {
     if m.is_reasoning() {
         NodeForm::Reasoning
     } else if m.is_text() {
@@ -83,7 +83,7 @@ fn form_of(m: &crate::chat::chat_node::ChatNode) -> NodeForm {
     }
 }
 
-fn shape(m: &crate::chat::chat_node::ChatNode) -> Shape {
+fn shape(m: &symbio_kernel::chat::chat_node::ChatNode) -> Shape {
     Shape {
         id: m.id.clone(),
         parent: m.parent_id.clone(),
@@ -94,7 +94,7 @@ fn shape(m: &crate::chat::chat_node::ChatNode) -> Shape {
     }
 }
 
-fn shapes(msgs: &[crate::chat::chat_node::ChatNode]) -> Vec<Shape> {
+fn shapes(msgs: &[symbio_kernel::chat::chat_node::ChatNode]) -> Vec<Shape> {
     msgs.iter().map(shape).collect()
 }
 
@@ -970,7 +970,7 @@ fn text_content_is_plain_text() {
 /// 一条 `message.edited`：载荷由**写侧同一条序列化路径**造出来
 /// （`serde_json::to_value(&msg)` 再包一层 `{"message": …}`，见
 /// `message_events::edited`）。手写 JSON 会让判据钉住我抄的那份，而不是写侧真的落的东西。
-fn edited_event(msg: crate::chat::chat_node::ChatNode) -> Event {
+fn edited_event(msg: symbio_kernel::chat::chat_node::ChatNode) -> Event {
     Event::pending(
         "m-edit-0",
         crate::test_fixtures::EVENT_MESSAGE_EDITED,
@@ -1006,7 +1006,7 @@ fn an_edit_replaces_the_node_in_place() {
         final_event(serde_json::json!({
             "text": "答", "root_id": "T1", "text_id": "T1-text", "status": "completed",
         })),
-        edited_event(crate::chat::chat_node::ChatNode {
+        edited_event(symbio_kernel::chat::chat_node::ChatNode {
             id: "u-node".into(),
             principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
@@ -1074,7 +1074,7 @@ fn truncating_everything_yields_an_empty_list() {
 fn an_edit_for_an_unknown_node_adds_nothing() {
     let events = vec![
         user_event("u-node", "问"),
-        edited_event(crate::chat::chat_node::ChatNode {
+        edited_event(symbio_kernel::chat::chat_node::ChatNode {
             id: "ghost".into(),
             principal: Some(principal_for(NodeRole::User)),
             content: Some(MessageContent::Text("谁都不是".into())),
@@ -1098,7 +1098,7 @@ fn rebuild_with_mutations_is_deterministic() {
         final_event(serde_json::json!({
             "text": "答", "root_id": "T1", "text_id": "T1-text", "status": "completed",
         })),
-        edited_event(crate::chat::chat_node::ChatNode {
+        edited_event(symbio_kernel::chat::chat_node::ChatNode {
             id: "u-node".into(),
             principal: Some(principal_for(NodeRole::User)),
             content: Some(MessageContent::Text("改过".into())),
@@ -1137,7 +1137,7 @@ fn a_malformed_edit_payload_is_skipped() {
 
 /// 一条 `session.consolidated`：载荷 = 压缩后的整份消息列表（写侧把
 /// `context.messages` 逐条序列化进去，与落库那一份同源）。
-fn snapshot_event(msgs: Vec<crate::chat::chat_node::ChatNode>) -> Event {
+fn snapshot_event(msgs: Vec<symbio_kernel::chat::chat_node::ChatNode>) -> Event {
     Event::pending(
         "snap-0",
         crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
@@ -1155,15 +1155,18 @@ fn snapshot_event(msgs: Vec<crate::chat::chat_node::ChatNode>) -> Event {
 }
 
 /// 带 `keep_from` 的 `session.consolidated`（D-401）：只压最旧前缀。
-fn snapshot_event_keeping(msgs: Vec<crate::chat::chat_node::ChatNode>, keep_from: &str) -> Event {
+fn snapshot_event_keeping(
+    msgs: Vec<symbio_kernel::chat::chat_node::ChatNode>,
+    keep_from: &str,
+) -> Event {
     let mut event = snapshot_event(msgs);
     event.payload["keep_from"] = serde_json::json!(keep_from);
     event
 }
 
 /// 快照列表里的一条普通文本节点。
-fn text_msg(id: &str, role: NodeRole, text: &str) -> crate::chat::chat_node::ChatNode {
-    crate::chat::chat_node::ChatNode {
+fn text_msg(id: &str, role: NodeRole, text: &str) -> symbio_kernel::chat::chat_node::ChatNode {
+    symbio_kernel::chat::chat_node::ChatNode {
         id: id.into(),
         principal: Some(principal_for(role)),
         msg_type: Some(NodeKind::Body),
@@ -1331,7 +1334,7 @@ fn mutations_after_the_snapshot_still_fold() {
             text_msg("u-keep", NodeRole::User, "保留的问题"),
             text_msg("u-drop", NodeRole::User, "保留但随后被删"),
         ]),
-        edited_event(crate::chat::chat_node::ChatNode {
+        edited_event(symbio_kernel::chat::chat_node::ChatNode {
             id: "u-keep".into(),
             principal: Some(principal_for(NodeRole::User)),
             content: Some(MessageContent::Text("保留的问题（改过）".into())),
@@ -1368,7 +1371,7 @@ fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
 
 /// 一条 `message.added`：载荷 = 完整 `ChatNode` 列表（写侧 `message_events::added`
 /// 直给，同一条序列化路径——手写 JSON 会钉住我抄的那份）。
-fn added_event(msgs: Vec<crate::chat::chat_node::ChatNode>) -> Event {
+fn added_event(msgs: Vec<symbio_kernel::chat::chat_node::ChatNode>) -> Event {
     Event::pending(
         "m-add-0",
         crate::test_fixtures::EVENT_MESSAGE_ADDED,
@@ -1388,7 +1391,7 @@ fn added_event(msgs: Vec<crate::chat::chat_node::ChatNode>) -> Event {
 /// 按发射顺序排在已有节点之后。
 #[test]
 fn an_added_event_births_the_payload_nodes_verbatim() {
-    let record = crate::chat::chat_node::ChatNode {
+    let record = symbio_kernel::chat::chat_node::ChatNode {
         id: "compact-record".into(),
         principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
@@ -1411,7 +1414,7 @@ fn an_added_event_births_the_payload_nodes_verbatim() {
 /// 该 `Runner` 写成 `Here` 只是多一条被去重的事实，不是多一个节点）。
 #[test]
 fn a_second_birth_for_a_known_id_does_not_duplicate() {
-    let record = crate::chat::chat_node::ChatNode {
+    let record = symbio_kernel::chat::chat_node::ChatNode {
         id: "u-node".into(),
         principal: Some(principal_for(NodeRole::User)),
         msg_type: Some(NodeKind::Body),
@@ -1501,7 +1504,7 @@ fn a_not_executed_call_is_projected_from_its_failure_fact() {
 #[test]
 fn an_executed_call_does_not_get_a_projected_placeholder() {
     // 结果子节点由既有节点表达；投影器只判「这通调用有没有子节点」，与它由谁落格无关。
-    let child = crate::chat::chat_node::ChatNode {
+    let child = symbio_kernel::chat::chat_node::ChatNode {
         id: "res-1".into(),
         parent_id: Some("c-1".into()),
         principal: Some(principal_for(NodeRole::Assistant)),

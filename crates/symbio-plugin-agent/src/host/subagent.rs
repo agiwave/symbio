@@ -46,7 +46,6 @@ use super::store::AgentDirStore;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use symbio_plugin_api::chat_node::{message_of_node, SEG_MESSAGES};
 use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
@@ -56,6 +55,7 @@ use symbio_plugin_api::{
     event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
     event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
 };
+use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
 use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame, PluginInvokeRequest,

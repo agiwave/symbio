@@ -18,11 +18,11 @@
 
 use super::*;
 use crate::stats_reading::present_message;
+use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::vdfs::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsResult, VDFS_STATUS_ACTIVE,
     VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
 };
-use symbio_sdk::chat::chat_node as cm;
 
 /// 会话的**运行态**——非持久化，随进程与当前请求变化。
 ///
@@ -410,7 +410,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     let body = raw.trim();
     if !body.starts_with('{') {
         return Ok(cm::ChatNode {
-            principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
+            principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
                 symbio_sdk::authz::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),
@@ -441,7 +441,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     // 身份缺省是 `person/local`（写体没标身份 = 这是一条用户发言）；写体里带
     // `principal` 或存量 `role` 的，按它自己声明的形状走。
     if message.principal.is_none() && message.legacy_role().is_none() {
-        message.principal = Some(symbio_sdk::chat::principal::Principal::from_legacy(
+        message.principal = Some(symbio_kernel::chat::principal::Principal::from_legacy(
             symbio_sdk::authz::PRINCIPAL_USER,
         ));
     }

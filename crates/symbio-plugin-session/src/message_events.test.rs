@@ -14,10 +14,10 @@
 use super::{drain_parked, edited, removed, AppendOutcome};
 use crate::declarations::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
 use crate::store::EventWalStore;
+use symbio_kernel::chat::chat_node::{ChatNode, MessageContent, NodeKind};
 use symbio_kernel::event::{Entity, Seq, Verb};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
-use symbio_sdk::chat::chat_node::{ChatNode, MessageContent, NodeKind};
 
 /// 造一个临时会话目录 + 一条 `user.message`（承载节点 `u-1`，正是要被改的那条）。
 ///
@@ -81,7 +81,7 @@ fn read_facts(dir: &std::path::Path) -> Vec<symbio_kernel::event::Event> {
 fn patched_user(id: &str, text: &str) -> ChatNode {
     ChatNode {
         id: id.into(),
-        principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
+        principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
             symbio_sdk::authz::PRINCIPAL_USER,
         )),
         msg_type: Some(NodeKind::Body),
@@ -826,7 +826,7 @@ fn an_explicit_principal_is_not_rewritten_to_the_session() {
 fn patched_msg(id: &str, text: &str, principal: Option<&str>, ts: i64) -> ChatNode {
     ChatNode {
         id: id.into(),
-        principal: principal.map(symbio_sdk::chat::principal::Principal::from_legacy),
+        principal: principal.map(symbio_kernel::chat::principal::Principal::from_legacy),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         timestamp: Some(ts),

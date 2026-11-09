@@ -12,11 +12,11 @@
 
 use super::*;
 use std::sync::Mutex;
-use symbio_sdk::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
+use symbio_kernel::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**投递/落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_sdk::chat::principal::Principal {
-    use symbio_sdk::chat::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_kernel::chat::principal::Principal {
+    use symbio_kernel::chat::principal::Principal;
     match role {
         NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),

@@ -38,7 +38,7 @@
 
 use super::super::active::{ActiveSessionState, InboxItem};
 use std::sync::Arc;
-use symbio_sdk::chat::chat_node as cm;
+use symbio_kernel::chat::chat_node as cm;
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 
 /// 合并标记的三个键名（唯一真源在 core 词汇表；重建侧与 loop 侧也读它们）。
@@ -67,7 +67,7 @@ fn merge_many(items: &[InboxItem]) -> cm::ChatNode {
         // （`useChatConnection.ts`：后端沿用调用方给的 id，前端按 id 合并）。
         id: items[0].id.clone(),
         parent_id: None,
-        principal: Some(symbio_sdk::chat::principal::Principal::from_legacy(
+        principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
             symbio_sdk::authz::PRINCIPAL_USER,
         )),
         msg_type: Some(cm::NodeKind::Body),

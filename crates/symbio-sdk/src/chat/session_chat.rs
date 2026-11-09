@@ -1,8 +1,8 @@
 //
 // 注意：工作区路径 (workdir) 由 PluginMessage.workdir 路由层统一传递，
 // 不在此业务结构体中重复定义。
-use super::chat_node::{ChatNode, ResumeRequest};
 use serde::{Deserialize, Serialize};
+use symbio_kernel::chat::chat_node::{ChatNode, ResumeRequest};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Request {

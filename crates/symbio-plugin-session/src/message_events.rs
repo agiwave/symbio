@@ -82,10 +82,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::declarations::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
+use symbio_kernel::chat::chat_node::ChatNode;
 use symbio_kernel::event::{Entity, Event, Seq, Verb};
 use symbio_kernel::store::{AppendError, Store};
 use symbio_plugin_api::events::EVENT_MESSAGE_ADDED;
-use symbio_sdk::chat::chat_node::ChatNode;
 
 /// 一条**待寄存**的变更事实（拿不到写者令牌时暂存，由持令牌方补落）。
 ///
@@ -538,7 +538,7 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
     let principal = msg
         .get("principal")
         .and_then(|v| {
-            serde_json::from_value::<symbio_sdk::chat::principal::Principal>(v.clone()).ok()
+            serde_json::from_value::<symbio_kernel::chat::principal::Principal>(v.clone()).ok()
         })
         .map(|p| p.id);
     let actor = principal.unwrap_or_else(|| {
