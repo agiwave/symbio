@@ -37,8 +37,8 @@ const repoRoot = path.resolve(path.dirname(script), '..')
 const HOST_LIB = [
   '//! 宿主装配 crate。',
   '// >>> plugin-links:begin',
-  'pub use symbio_plugin_alpha;',
-  'pub use symbio_plugin_beta;',
+  'use symbio_plugin_alpha as _;',
+  'use symbio_plugin_beta as _;',
   '// <<< plugin-links:end',
 ].join('\n')
 

@@ -4,10 +4,15 @@
  * ## 它替掉了什么
  *
  * 「有哪些插件」这件事在装配 crate 里被手写了三遍：`crates/symbio/Cargo.toml` 的
- * 依赖行、`crates/symbio/src/lib.rs` 的 `pub use` 行、以及 `PLUGIN.yml` 的清单本身。
- * 三者必须逐字对齐，而**没有任何东西会因此变红**——漏一行 `pub use` 的后果是
+ * 依赖行、`crates/symbio/src/lib.rs` 的链接行、以及 `PLUGIN.yml` 的清单本身。
+ * 三者必须逐字对齐，而**没有任何东西会因此变红**——漏一行的后果是
  * `inventory` 里那批注册项被链接器丢掉：插件「装上了」，只是它的工具、行为、
  * 上下文 provider 全部静默不生效。
+ *
+ * 链接行是私有的 `use symbio_plugin_<id> as _;`（`D-417`）：它只负责把 crate 拉进
+ * 链接图，**不**把插件的完整公开面挂到宿主门面上。装配方要导出什么，由 `lib.rs`
+ * 的上半段显式写；`pub use` 曾经同时是链接与出口，等于给每个插件开了一条无人复核的
+ * 第二条导入路径。
  *
  * 现在事实源是**目录**（`crates/symbio-plugin-<id>/`，与 `_plugin-yml.mjs` 的
  * `pluginIds` 同源）：加一个插件 = 建一个目录 + 带 `PLUGIN.yml`，两处链接行由
@@ -37,7 +42,7 @@ export function pluginLinks(root) {
     id,
     crateName: pluginCrateName(id),
     cargoLine: `${pluginCrateName(id)} = { path = "../${pluginCrateName(id)}" }`,
-    libLine: `pub use symbio_plugin_${id};`,
+    libLine: `use symbio_plugin_${id} as _;`,
   }));
 }
 

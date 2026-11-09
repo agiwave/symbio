@@ -55,7 +55,7 @@ test("两个目录 ⇒ 两条依赖行 + 两条链接行，块外字节原样保
     );
     assert.deepEqual(
       links.map((l) => l.libLine),
-      ["pub use symbio_plugin_alpha;", "pub use symbio_plugin_beta;"],
+      ["use symbio_plugin_alpha as _;", "use symbio_plugin_beta as _;"],
     );
 
     const cargo = renderCargo(`${CARGO_HEAD}# >>> plugin-links:begin\n# <<< plugin-links:end\n${CARGO_TAIL}`, links);
@@ -65,7 +65,7 @@ test("两个目录 ⇒ 两条依赖行 + 两条链接行，块外字节原样保
 
     const rs = renderRs(`${LIB_HEAD}// >>> plugin-links:begin\n// <<< plugin-links:end\n`, links);
     assert.ok(rs.startsWith(LIB_HEAD));
-    assert.ok(rs.includes("pub use symbio_plugin_alpha;"));
+    assert.ok(rs.includes("use symbio_plugin_alpha as _;"));
   });
 });
 

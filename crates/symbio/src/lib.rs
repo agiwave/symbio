@@ -2,9 +2,9 @@
 //!
 //! 插件实现住在各自的 `crates/symbio-plugin-<id>/`；本 crate 只做三件事：
 //!
-//! 1. **把插件 crate 链接进来**——`pub use <crate>;` 同时完成链接与门面出口；
-//!    漏一行，那个插件的 `inventory` 注册项就会被链接器丢掉（不报错，只少功能）。
-//!    这些行由 `scripts/facts/plugin-links-rs.mjs` 从目录投影，**不手改**。
+//! 1. **把插件 crate 链接进来**——按目录投影出私有的 `use <crate> as _;`（只链接，
+//!    不出口）；漏一行，那个插件的 `inventory` 注册项就会被链接器丢掉（不报错，
+//!    只少功能）。这些行由 `scripts/facts/plugin-links-rs.mjs` 从目录投影，**不手改**。
 //! 2. [`assembly`]：装配策略——一棵标准插件树挂哪些插件、哪些插件不许停用。
 //!    它不是机制而是**装配方的数据**（常量由 `PLUGIN.yml` 生成到 `symbio-deploy`），
 //!    故不住任何架构 crate（装配结果只经 `REQUIRED_PLUGINS` 回流）。
@@ -36,42 +36,43 @@ pub use symbio_plugin_api;
 pub use symbio_sdk;
 
 // 插件 crate 必须**被链接**，否则 `inventory` 里的工厂注册项会被链接器丢掉。
-// `pub use <crate>;` 同时完成两件事：链接 + 门面出口。
+// 链接是私有的（`use … as _`，见下面的生成块）：宿主门面只显式导出装配所需符号，
+// 不把每个插件的完整公开面挂到 `symbio::` 下（D-417）。
 pub use symbio_plugin_api::{hooks, routes};
 // >>> plugin-links:begin
-// 以下链接行由 `scripts/facts/plugin-links-rs.mjs` 从 `crates/symbio-plugin-<id>/` 目录投影，请勿手改；漏一行的后果是那个插件的 inventory 注册项被链接器丢掉（不报错，只少功能）。
-pub use symbio_plugin_agent;
-pub use symbio_plugin_classify;
-pub use symbio_plugin_compact;
-pub use symbio_plugin_compose;
-pub use symbio_plugin_composite;
-pub use symbio_plugin_conation;
-pub use symbio_plugin_cost;
-pub use symbio_plugin_event_bus;
-pub use symbio_plugin_forecast;
-pub use symbio_plugin_gateway;
-pub use symbio_plugin_glossary;
-pub use symbio_plugin_heartbeat;
-pub use symbio_plugin_home;
-pub use symbio_plugin_hook;
-pub use symbio_plugin_local;
-pub use symbio_plugin_loop;
-pub use symbio_plugin_mcp;
-pub use symbio_plugin_memory;
-pub use symbio_plugin_model;
-pub use symbio_plugin_persona;
-pub use symbio_plugin_plugin_manager;
-pub use symbio_plugin_probe;
-pub use symbio_plugin_reputation;
-pub use symbio_plugin_session;
-pub use symbio_plugin_setting;
-pub use symbio_plugin_skill;
-pub use symbio_plugin_slo;
-pub use symbio_plugin_task;
-pub use symbio_plugin_telegram;
-pub use symbio_plugin_tool;
-pub use symbio_plugin_vdfs;
-pub use symbio_plugin_web;
+// 以下链接行由 `scripts/facts/plugin-links-rs.mjs` 从 `crates/symbio-plugin-<id>/` 目录投影，请勿手改；漏一行的后果是那个插件的 inventory 注册项被链接器丢掉（不报错，只少功能）。链接是私有的（`use … as _`），宿主门面的出口在上半段显式写（D-417）。
+use symbio_plugin_agent as _;
+use symbio_plugin_classify as _;
+use symbio_plugin_compact as _;
+use symbio_plugin_compose as _;
+use symbio_plugin_composite as _;
+use symbio_plugin_conation as _;
+use symbio_plugin_cost as _;
+use symbio_plugin_event_bus as _;
+use symbio_plugin_forecast as _;
+use symbio_plugin_gateway as _;
+use symbio_plugin_glossary as _;
+use symbio_plugin_heartbeat as _;
+use symbio_plugin_home as _;
+use symbio_plugin_hook as _;
+use symbio_plugin_local as _;
+use symbio_plugin_loop as _;
+use symbio_plugin_mcp as _;
+use symbio_plugin_memory as _;
+use symbio_plugin_model as _;
+use symbio_plugin_persona as _;
+use symbio_plugin_plugin_manager as _;
+use symbio_plugin_probe as _;
+use symbio_plugin_reputation as _;
+use symbio_plugin_session as _;
+use symbio_plugin_setting as _;
+use symbio_plugin_skill as _;
+use symbio_plugin_slo as _;
+use symbio_plugin_task as _;
+use symbio_plugin_telegram as _;
+use symbio_plugin_tool as _;
+use symbio_plugin_vdfs as _;
+use symbio_plugin_web as _;
 // <<< plugin-links:end
 
 #[cfg(test)]

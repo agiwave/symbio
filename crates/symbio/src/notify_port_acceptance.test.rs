@@ -19,8 +19,8 @@ const NOTIFY: &str = "notify";
 
 #[test]
 fn production_table_accepts_the_third_port() {
-    // 必须经本 crate 的门面触达一次，`lib.rs` 里的 `pub use <插件 crate>;` 链接行才会把
-    // 全部插件 crate 拉进最终链接；否则本二进制里 inventory 为空，验收退化成空跑。
+    // 必须经本 crate 的门面触达一次，`lib.rs` 里的私有链接行（`use <插件 crate> as _;`）
+    // 才会把全部插件 crate 拉进最终链接；否则本二进制里 inventory 为空，验收退化成空跑。
     let _ = crate::assembly::PLUGIN_ID_HOME;
 
     let frozen: std::sync::Arc<Frozen> =
