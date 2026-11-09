@@ -246,7 +246,7 @@ const PROJ_BASELINE = process.env.CORE_PROJECTION_BASELINE
       const [files, ctors] = process.env.CORE_PROJECTION_BASELINE.split(':').map((n) => Number(n))
       return { files, ctors }
     })()
-  : { files: 2, ctors: 2 }
+  : { files: 1, ctors: 1 }
 
 const PROJ_CELL_LABEL = {
   files: 'core 产投影文件数',
