@@ -117,6 +117,9 @@ async fn opening_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeRequ
         entity: Entity::Scope,
         verb: Verb::Asserted,
         payload: json!({
+            // 首响是**轮内容**：父是轮根（用户消息节点，`D-335` / `D-426`）。
+            // 用户节点 id 就是 `user.message` 的事实 id（本债键里的 `user_id`）。
+            "root_id": user_id,
             // 节点身份与用户消息区分（用户节点 id 就是 `user.message` 的事件 id）。
             "id": format!("opening:{user_id}"),
             "reason": reason,

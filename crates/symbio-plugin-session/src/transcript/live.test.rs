@@ -69,7 +69,7 @@ fn response() -> Event {
     )
 }
 
-/// 首响：对话面开场白，没有配对事实（`D-424`）。
+/// 首响：对话面开场白，没有配对事实（`D-424`）；父（轮根）来自载荷 `root_id`（`D-426`）。
 fn opening() -> Event {
     event(
         "e-opening",
@@ -77,6 +77,7 @@ fn opening() -> Event {
         Entity::Scope,
         Verb::Asserted,
         serde_json::json!({
+            "root_id": "u1",
             "id": "opening:u1",
             "reason": "needs_work",
             "text": "我来处理",
@@ -183,7 +184,7 @@ fn fallback_reads_partner_from_fact_source() {
     assert_eq!(index.partners(&artifact(), &wal).len(), 1);
 }
 
-/// 首响没有 `root_id`，`frames_for` 的「轮根前置」不得把它吞掉。
+/// 首响没有配对，`frames_for` 的「轮根前置」不得把它吞掉；父仍取载荷的 `root_id`。
 #[test]
 fn opening_projects_through_frames_for() {
     let (_dir, wal) = wal();
@@ -191,6 +192,7 @@ fn opening_projects_through_frames_for() {
     let nodes = index.frames_for(&opening(), &wal);
     assert_eq!(nodes.len(), 1, "{nodes:?}");
     assert_eq!(nodes[0].id, "opening:u1");
+    assert_eq!(nodes[0].parent_id.as_deref(), Some("u1"));
 }
 
 /// 首响落格即下发：开场白是正在等的用户的第一句话，不能等到轮收尾。
@@ -201,7 +203,11 @@ fn opening_projects_immediately() {
     assert_eq!(nodes.len(), 1, "{nodes:?}");
     let node = &nodes[0];
     assert_eq!(node.id, "opening:u1");
-    assert_eq!(node.parent_id, None);
+    assert_eq!(
+        node.parent_id.as_deref(),
+        Some("u1"),
+        "首响挂轮根（用户消息节点）下，与工具 / 正文同级（D-426）"
+    );
     assert_eq!(node.msg_type, Some(NodeKind::Body));
     assert_eq!(node.status, Some(NodeStatus::Completed));
     assert_eq!(

@@ -239,13 +239,14 @@ pub(crate) const FACTS: &[FactDecl] = &[
     },
     // 首响格：内容由 compose 的模板产出、由会话的行落格（D-344 的「跨插件只走 route」）。
     // 它是一轮里**先于**终答/工具轮出现的对话面事实，排除出上下文（旧的 `escalate`
-    // 断言靠它把「我先看一下」与真正的答话分开）。
+    // 断言靠它把「我先看一下」与真正的答话分开）。`root_id` 是它在树上的父（轮根 =
+    // 用户消息节点，`D-426`）；实时面与重建面都按它挂节点。
     FactDecl {
         name: "chat.assistant.opening",
         port: None,
         key: &[],
         expand: &[],
-        fields: &["id", "reason", "text", "exclude_from_context"],
+        fields: &["root_id", "id", "reason", "text", "exclude_from_context"],
     },
 ];
 

@@ -281,7 +281,8 @@ export default defineCase(
       //    本线验的是**边界**，不是行为（行为见 `t21` / `t22`）。三条判据：
       //    ① 工具链照旧（插件装配没有改变工具链）；
       //    ② 对话面文本由 `compose` 产出 —— 它带 `meta.surface`，且 `reason` 来自判决；
-      //    ③ 它挂在**根级**（对话线与用户消息互为兄弟），不是某个 Turn 的子节点。
+      //    ③ 它挂在**轮根**（本轮用户消息节点）下——D-335 之后轮根就是用户消息，
+      //       首响与工具卡 / 正文同级（D-426）：根级会让结构轴递归把它排到整轮之后。
       //
       //    本线的输入被 mock 判成 `unclassified`（mock 对这一句返回的是工具调用、
       //    没有文本 ⇒ 分类解析不出词 ⇒ 兜底 `Escalate`），因此期望恰好一条首响节点。
@@ -299,9 +300,12 @@ export default defineCase(
       assertEq(surfaced[0].meta.surface, 'reply', '对话面节点带对话面标记（surface 是数据概念，与产出插件无关）');
       assertEq(surfaced[0].meta.reason, 'unclassified', '理由码来自上游判决（原样透传）');
       assertEq(msgRoleOf(surfaced[0]), 'assistant', '对话面节点是助手说的话');
-      assert(
-        surfaced[0].parent_id == null,
-        '对话面节点必须挂根级——挂在 Turn 之下会让前端「对话」面板看不到它',
+      const userMsg = msgs.find((m) => msgRoleOf(m) === 'user');
+      assert(userMsg, '本轮应有用户消息节点（轮根）');
+      assertEq(
+        surfaced[0].parent_id,
+        userMsg.id,
+        '首响必须挂轮根（用户消息）下——根级会让递归渲染把它排到整轮子树之后（D-426）',
       );
       assertEq(
         surfaced[0].meta.exclude_from_context,

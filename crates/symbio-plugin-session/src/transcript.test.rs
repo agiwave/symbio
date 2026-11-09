@@ -735,6 +735,22 @@ fn round_placeholder_retires_on_first_sibling() {
     assert!(removed < text, "删除必须先于首个子帧到达");
 }
 
+/// 首响挂在轮根下（`D-426`）⇒ 它落图时同样是「真实子节点」，等待骨架让位。
+#[test]
+fn opening_retires_the_round_placeholder() {
+    let (mut tr, _seen) = transcript();
+    tr.apply(placeholder_msg("round:r1", "u1"));
+    let mut opening = text_msg("opening:u1", NodeStatus::Completed, "我先看一下");
+    opening.parent_id = Some("u1".to_string());
+    tr.apply(opening);
+
+    assert!(
+        node_of(&tr, "round:r1").is_none(),
+        "首响落图 ⇒ 等待骨架让位"
+    );
+    assert!(node_of(&tr, "opening:u1").is_some());
+}
+
 /// 同一父上的新占位先撤旧占位：任何时刻只留一条「轮在飞」。
 #[test]
 fn new_placeholder_replaces_previous_under_same_parent() {

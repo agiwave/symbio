@@ -319,6 +319,21 @@ export default defineCase(
         true,
         'Escalate 的首响必须带剔除标记（界面开场白 ≠ 模型的对话内容）',
       );
+      // 位置：首响是**轮内容**，父 = 本轮用户消息（轮根，D-335 / D-426）。挂在根级
+      // 会让结构轴递归把它排到整棵轮子树之后（轮末补一句），而不是用户发言之后的第一声。
+      const b2User = escMsgs.filter((m) => msgRoleOf(m) === 'user').at(-1);
+      assert(b2User, 'B 线第 2 步应有用户消息节点（轮根）');
+      assertEq(
+        escOpening.parent_id,
+        b2User.id,
+        '首响挂轮根（本轮用户消息）下，与工具卡 / 正文同级',
+      );
+      const b2Tool = escMsgs.find((m) => msgTypeOf(m) === 'tool_call');
+      assert(b2Tool, 'B 线第 2 步应有工具调用节点');
+      assert(
+        escOpening.seq < b2Tool.seq,
+        `首响的轮内顺序锚要早于工具卡（实得 opening=${escOpening.seq} tool=${b2Tool.seq}）`,
+      );
 
       // ── 到达时序：首响帧早于第一条工具结果帧（开场白那一半的常驻判据）──
       //
@@ -353,6 +368,13 @@ export default defineCase(
         ).size,
         1,
         '一个轮首在实时面上就是一个节点（不多成两张卡）',
+      );
+      // 实时面与重建面是同一棵树：下发帧的父也必须是轮根（D-426）。
+      const openingFrame = liveB2.find((m) => m.data?.meta?.reason === 'needs_work');
+      assertEq(
+        openingFrame?.data?.parent_id,
+        b2User.id,
+        '实时面的首响帧同样挂轮根（与落库面同形）',
       );
 
       // ── C 卸载平凡值：不挂载 `compose` ⇒ 判决说能直接答却没人能说话 ⇒ 降级进工具循环 ──

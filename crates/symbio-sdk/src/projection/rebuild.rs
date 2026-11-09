@@ -470,9 +470,9 @@ fn nodes_of(
         Some(ChatSlot::FinalReply | ChatSlot::Fallback | ChatSlot::Progress) => produced_nodes(e),
         // 轮边界汇报：界面文本，进列表（用户看得见），但不是模型的对话内容。
         Some(ChatSlot::Reported) => vec![reported_node(e)],
-        // 对话面开场白（`Escalate` 首响）：与汇报同形（根级 / 带
-        // `meta.surface = "reply"` / `exclude_from_context`），只有理由码不同。
-        // 形状经 `dialog` 载荷里的 `reason` / `exclude_from_context` 复刻。
+        // 对话面开场白（`Escalate` 首响）：与汇报同形（带 `meta.surface = "reply"` /
+        // `exclude_from_context`），只有理由码不同；父是**轮根**（`D-426`）——它是
+        // 这一轮说给用户的第一句话，和工具卡 / 正文同级，不是独立的根级节点。
         Some(ChatSlot::Opening) => vec![opening_node(e)],
         // 工具结果：调用与结果两张卡都归这一格（一个事实一个 owner）。
         Some(ChatSlot::ArtifactAdded) => artifact_nodes(e, group_of_call, node_of_call),
@@ -554,6 +554,14 @@ fn reported_node(e: &Event) -> ChatNode {
 /// `exclude_from_context` 从载荷读——它们是这条节点的形状（`meta.reason` /
 /// `meta.exclude_from_context`），由写侧 `apply_verdict` 原样透传。
 ///
+/// ## 父是轮根（`D-426`）
+///
+/// `parent_id` 取载荷 `root_id`：首响是这一轮说给用户的第一句话，和工具卡 / 正文
+/// 一样挂在用户消息节点下。根级会让结构轴递归的渲染把它排到整轮子树之后（首响
+/// 变成轮末的一句），也会让按根切窗口的读数多算一轮。旧事件没有 `root_id`：节点
+/// id 形如 `opening:<用户消息 id>`，按前缀回填——与 [`event_payload_node_id`] 缺字段
+/// 时合成的同一条容错纪律，不把存量会话留在错误位置。
+///
 /// `id` 由载荷给（缺则按事件 id 合成，同 [`reported_node`]）；`timestamp` 覆写成
 /// 事件自身的 `ts`（构造器取「此刻」会破坏纯函数性，见模块头）。
 fn opening_node(e: &Event) -> ChatNode {
@@ -574,6 +582,13 @@ fn opening_node(e: &Event) -> ChatNode {
         &actor_principal(e),
     );
     node.id = event_payload_node_id(e, "id");
+    node.parent_id = e
+        .payload
+        .get("root_id")
+        .and_then(|v| v.as_str())
+        .filter(|root| !root.is_empty())
+        .map(str::to_string)
+        .or_else(|| node.id.strip_prefix("opening:").map(str::to_string));
     node.timestamp = Some(e.ts);
     node
 }

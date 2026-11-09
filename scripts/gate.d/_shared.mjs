@@ -394,7 +394,7 @@ export const BASELINE = {
   // `the_three_unbuilt_capabilities_ship_name_cell_field_and_row` 与
   // `heartbeat/decl.test.rs` 的声明面用例）。被测对象已整体撤回，覆盖对象消失不叫丢覆盖；
   // 剩下的 `conation.expressed` 那条真链由 `t36-autonomous-initiator` 端到端钉住。非侵蚀。
-  ciRustTestsTotal: 2215,
+  ciRustTestsTotal: 2218,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

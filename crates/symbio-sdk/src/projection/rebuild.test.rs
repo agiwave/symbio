@@ -843,6 +843,59 @@ fn reported_mirrors_the_persisted_shape() {
     assert_eq!(meta["exclude_from_context"], serde_json::json!(true));
 }
 
+/// 首响挂**轮根**（`D-426`）：`parent_id` 取载荷 `root_id`，与工具卡 / 正文同级。
+///
+/// 根级会让结构轴递归把它排到整轮子树之后——开场白从「第一声」变成「轮末补的一句」。
+#[test]
+fn opening_hangs_under_the_turn_root() {
+    let ev = Event::pending(
+        "op-1",
+        CHAT.opening,
+        Entity::Scope,
+        Verb::Asserted,
+        "session/main",
+    )
+    .with_ts(2_000)
+    .with_payload(serde_json::json!({
+        "root_id": "u-node",
+        "id": "opening:u-node",
+        "reason": "needs_work",
+        "text": "我先看一下",
+        "exclude_from_context": true,
+    }));
+
+    let msgs = rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE);
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0].parent_id.as_deref(), Some("u-node"));
+    assert_eq!(msgs[0].timestamp, Some(2_000), "时间戳覆写为事件自身的 ts");
+    let meta = msgs[0].meta.as_ref().expect("首响必须带 meta");
+    assert_eq!(meta["surface"], serde_json::json!("reply"));
+    assert_eq!(meta["reason"], serde_json::json!("needs_work"));
+    assert_eq!(meta["exclude_from_context"], serde_json::json!(true));
+}
+
+/// 存量首响事实没有 `root_id`：按节点 id 前缀回填父，不把它永久留在根级。
+#[test]
+fn opening_without_root_id_backfills_parent_from_its_id() {
+    let ev = Event::pending(
+        "op-2",
+        CHAT.opening,
+        Entity::Scope,
+        Verb::Asserted,
+        "session/main",
+    )
+    .with_ts(3_000)
+    .with_payload(serde_json::json!({
+        "id": "opening:u-node",
+        "reason": "needs_work",
+        "text": "我先看一下",
+        "exclude_from_context": true,
+    }));
+
+    let msgs = rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE);
+    assert_eq!(msgs[0].parent_id.as_deref(), Some("u-node"));
+}
+
 // ── ⑤ 状态是产出事实的状态，落到根与正文上 ────────────────────────────
 
 #[test]
