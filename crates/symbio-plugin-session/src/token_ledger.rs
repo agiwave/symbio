@@ -59,6 +59,37 @@ pub struct TokenLedgerView {
     pub calls: u64,
 }
 
+/// 收束应答的公共扫描：`ts`/`kind`/盖章/主体四处判据只在这里有一个答案。
+/// 产出逐条 `(payload, principal)`，两本账各自取自己的子对象再折叠。
+pub(crate) fn stamped_responses<'a>(
+    events: &'a [Event],
+    now: i64,
+    stamp: &'a str,
+) -> impl Iterator<Item = (&'a serde_json::Value, String)> + 'a {
+    events
+        .iter()
+        .filter_map(move |e| {
+            if e.ts > now || e.kind != EVENT_RESPONSE {
+                return None;
+            }
+            let payload = &e.payload;
+            if !payload
+                .get(STAMP_KEY)
+                .and_then(|s| s.get(stamp))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                return None;
+            }
+            let principal = payload
+                .get("principal")
+                .and_then(|v| v.as_str())
+                .unwrap_or(e.actor.as_str())
+                .to_string();
+            Some((payload, principal))
+        })
+}
+
 /// 用量台账投影：从事件切片累计各主体实测的 token。
 ///
 /// 只认 `response`、且环在收束载荷上盖了 `stamp.usage = true` 的那一批：端口
@@ -70,29 +101,12 @@ pub fn token_ledger() -> Projection<TokenLedgerView> {
         let mut total_in = 0u64;
         let mut total_out = 0u64;
         let mut calls = 0u64;
-        for e in events {
-            if e.ts > now || e.kind != EVENT_RESPONSE {
-                continue;
-            }
-            let payload = &e.payload;
-            if !payload
-                .get(STAMP_KEY)
-                .and_then(|stamp| stamp.get(STAMP_USAGE))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            {
-                continue;
-            }
+        for (payload, principal) in stamped_responses(events, now, STAMP_USAGE) {
             let Some(usage) = payload.get("usage") else {
                 continue;
             };
             let input = usage.get("input").and_then(|v| v.as_u64()).unwrap_or(0);
             let output = usage.get("output").and_then(|v| v.as_u64()).unwrap_or(0);
-            let principal = payload
-                .get("principal")
-                .and_then(|v| v.as_str())
-                .unwrap_or(e.actor.as_str())
-                .to_string();
             let entry = by_principal.entry(principal.clone()).or_insert(TokenEntry {
                 principal,
                 ..Default::default()

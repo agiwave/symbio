@@ -36,9 +36,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use symbio_kernel::event::{Event, EVENT_RESPONSE};
+use symbio_kernel::event::Event;
 use symbio_kernel::projection::Projection;
-use symbio_plugin_api::debt::{STAMP_KEY, STAMP_SPEND};
+use symbio_plugin_api::debt::STAMP_SPEND;
+
+use super::token_ledger::stamped_responses;
 
 /// 一个主体在一种币种下的累计金额。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -79,19 +81,7 @@ pub struct SpendLedgerView {
 pub fn spend_ledger() -> Projection<SpendLedgerView> {
     Projection::new(|events: &[Event], now| {
         let mut by_currency: BTreeMap<String, CurrencySpend> = BTreeMap::new();
-        for e in events {
-            if e.ts > now || e.kind != EVENT_RESPONSE {
-                continue;
-            }
-            let payload = &e.payload;
-            if !payload
-                .get(STAMP_KEY)
-                .and_then(|stamp| stamp.get(STAMP_SPEND))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            {
-                continue;
-            }
+        for (payload, principal) in stamped_responses(events, now, STAMP_SPEND) {
             let Some(spend) = payload.get("spend") else {
                 continue;
             };
@@ -107,11 +97,6 @@ pub fn spend_ledger() -> Projection<SpendLedgerView> {
                 continue;
             };
             let currency = currency.to_uppercase();
-            let principal = payload
-                .get("principal")
-                .and_then(|v| v.as_str())
-                .unwrap_or(e.actor.as_str())
-                .to_string();
             let bucket = by_currency
                 .entry(currency.clone())
                 .or_insert_with(|| CurrencySpend {
