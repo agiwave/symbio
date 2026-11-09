@@ -133,8 +133,9 @@ impl SessionFactSource {
         tokio::task::block_in_place(|| drain.land_merged_sync(&handle));
     }
 
-    /// 事实落格即投影（`D-424`，见 `transcript::live` 模块头）：把刚落格的事实与它的
-    /// 配对事实折成终态节点，**同步**交给转写唯一写入点。
+    /// 事实落格即投影（`D-424` / `D-425`，见 `transcript::live` 模块头）：把刚落格的事实与
+    /// 它的配对事实折成节点，**同步**交给转写唯一写入点——终态节点来自同一份 `rebuild`；
+    /// 面向读者的模型派发额外发一个**临时轮骨架**（内容未到时的可见形态，只走流通道）。
     ///
     /// 同步而不是 spawn：帧必须先于下一轮模型的流式帧到达，否则「思考完成了」「工具
     /// 结果出来了」会晚于下一段正文出现。`block_in_place` 是既有的同步发射先例
@@ -154,10 +155,7 @@ impl SessionFactSource {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             index.observe(&event);
-            if !live::projects(&event) {
-                return;
-            }
-            live::frames(&event, index.partners(&event, &self.wal))
+            index.frames_for(&event, &self.wal)
         };
         if frames.is_empty() {
             return;

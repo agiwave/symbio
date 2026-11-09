@@ -33,6 +33,7 @@
 use std::collections::HashMap;
 
 use symbio_kernel::chat::chat_node as cm;
+use symbio_kernel::chat::principal::Principal;
 use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::debt::{ReplyRole, STAMP_KEY, STAMP_ROLE};
@@ -52,11 +53,50 @@ pub(crate) struct LiveIndex {
     requests: HashMap<String, Event>,
     /// `root_id`（本轮开端事实 id）→ 拒言事实。
     denials: HashMap<String, Event>,
+    /// `root_id` → 该轮**在飞占位**的节点 id（`D-425`）。同一轮根同时最多一个。
+    rounds: HashMap<String, String>,
 }
 
 impl LiveIndex {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// 一帧事实 → 需要下发的节点序列（`D-424` 终态投影 + `D-425` 轮占位）。
+    ///
+    /// 占位与终态走同一出口：它们都是「这条事实落格这一刻该让用户看见什么」，
+    /// 只是占位只存在于流通道，`rebuild` 里不会有它。
+    pub(crate) fn frames_for(&mut self, event: &Event, wal: &EventWalStore) -> Vec<cm::ChatNode> {
+        // 首响没有配对、也不挂在轮根下：自己成切片（`D-424`）。
+        if event.kind == CHAT_VOCAB.opening {
+            return frames(event, Vec::new());
+        }
+        // 轮占位只认**带轮根**的事实：内部往返 / 工具端口的请求没有 `root_id`，
+        // 产物格的落点由派发清单给出（载荷里没有 `root_id`），它们照旧走终态投影。
+        let mut out = Vec::new();
+        if let Some(root) = root_of(event) {
+            // 开轮 / 同一轮根的下一段模型往返：先撤上一条占位，再发新的「轮在飞」骨架。
+            if starts_round(event) {
+                let placeholder = round_placeholder(event, &root);
+                if let Some(old) = self.rounds.insert(root, placeholder.id.clone()) {
+                    out.push(removed_frame(&old));
+                }
+                out.push(placeholder);
+                return out;
+            }
+
+            // 本轮已有产出 / 收束：占位退出。内容帧通常已在首个子帧到达时由转写撤掉
+            // （流式帧不经过事实源），这里的移除覆盖「不吐流式帧的提供方」与中止 / 拒言。
+            if ends_round(event) {
+                if let Some(old) = self.rounds.remove(&root) {
+                    out.push(removed_frame(&old));
+                }
+            }
+        }
+        if projects(event) {
+            out.extend(frames(event, self.partners(event, wal)));
+        }
+        out
     }
 
     /// 这条事实是否参与实时投影的配对；参与则收进索引（**不论它自己是否产节点**）。
@@ -120,8 +160,103 @@ impl LiveIndex {
 }
 
 /// 这条事实是否需要过实时投影（要收进索引，或据它折帧）。
+///
+/// `request` / `response` / `failed` 是否「带轮根」决定它们是否参与：内部往返与工具端口
+/// 的请求也落在这些格上，但它们的载荷没有 `root_id`，既不开轮也不收轮（`D-425`）。
 pub(crate) fn watches(event: &Event) -> bool {
-    event.kind == MESSAGE_VOCAB.tool_requested || CHAT_VOCAB.denies_speech(event) || projects(event)
+    event.kind == MESSAGE_VOCAB.tool_requested
+        || CHAT_VOCAB.denies_speech(event)
+        || projects(event)
+        || starts_round(event)
+        || (ends_round(event) && root_of(event).is_some())
+}
+
+/// 这条事实是否**开启**一段在飞窗口——轮占位该出现（`D-425`）。
+///
+/// `turn.dispatch` 是用户消息之后的第一条回合事实，分类 / 措辞这些内部往返都在它之后：
+/// 骨架从这里起，等待窗口从第一秒就可见；每次 reader `request` 再起一次，是同一轮里
+/// 每段模型往返各自的锚点（旧占位先撤）。
+fn starts_round(event: &Event) -> bool {
+    let rooted = root_of(event).is_some();
+    rooted
+        && (event.kind == symbio_plugin_api::events::EVENT_TURN_DISPATCH
+            || event.kind == symbio_plugin_api::EVENT_REQUEST)
+}
+
+/// 这条事实是否意味着**本轮输出已经开始或结束**——轮占位该退出（`D-425`）。
+///
+/// `chat.assistant.final` / `session.settled` / `session.terminated` 是兜底：模板直接
+/// 作答等不吐流式帧的轮次没有 `tool.requested` / reader `response`，靠轮收场事实退出。
+fn ends_round(event: &Event) -> bool {
+    event.kind == MESSAGE_VOCAB.tool_requested
+        || event.kind == symbio_plugin_api::EVENT_RESPONSE
+        || event.kind == symbio_plugin_api::EVENT_FAILED
+        || event.kind == symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL
+        || event.kind == crate::declarations::EVENT_SESSION_SETTLED
+        || event.kind == crate::declarations::EVENT_SESSION_TERMINATED
+}
+
+/// 轮占位的**带内标记**（`meta` 键）：转写据此识别「这条节点是临时骨架」。
+///
+/// 用 `meta` 而不是另开一个字段 / 通道：占位帧走的仍是同一条投递面，转写看到的只有
+/// 帧本身（`sink` 没有第二路）；标记必须随帧一起到，而且只有转写要读它。
+pub(crate) const PLACEHOLDER_KEY: &str = "placeholder";
+
+/// 这条节点是不是轮占位（转写侧判据，见 [`PLACEHOLDER_KEY`]）。
+pub(crate) fn is_round_placeholder(node: &cm::ChatNode) -> bool {
+    node.msg_type == Some(cm::NodeKind::Skeleton)
+        && node
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get(PLACEHOLDER_KEY))
+            .and_then(|v| v.as_bool())
+            == Some(true)
+}
+
+/// 「这一轮还在飞」的临时骨架（`D-425`）：父 = 轮根，身份 = 会话主体。
+///
+/// 形状与 `rebuild` 折出的整轮骨架同构（`Skeleton` + `run` + `streaming`），前端的
+/// 等待态因此零改动就能把它画成「正在思考… / 运行中 / 秒数」。
+fn round_placeholder(event: &Event, root: &str) -> cm::ChatNode {
+    let principal = event
+        .payload
+        .get("principal")
+        .and_then(|v| v.as_str())
+        .unwrap_or(event.actor.as_str());
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "style_tag".to_string(),
+        serde_json::Value::String(cm::CHAT_STYLE_TAG_RUN.to_string()),
+    );
+    meta.insert(PLACEHOLDER_KEY.to_string(), serde_json::Value::Bool(true));
+    // 运行中秒数的锚点（前端读 `meta.started_at`，与工具卡同一条读法）。
+    meta.insert("started_at".to_string(), serde_json::Value::from(event.ts));
+    cm::ChatNode {
+        id: format!("round:{}", event.event_id),
+        parent_id: Some(root.to_string()),
+        principal: Some(Principal::from_legacy(principal)),
+        msg_type: Some(cm::NodeKind::Skeleton),
+        status: Some(cm::NodeStatus::Streaming),
+        timestamp: Some(event.ts),
+        meta: Some(serde_json::Value::Object(meta)),
+        ..Default::default()
+    }
+}
+
+/// 撤掉一条轮占位：删除的线上表达就是带 `removed` 状态的帧（协议里没有操作枚举）。
+///
+/// 帧带同一个占位标记：占位通常已被首个子帧撤掉，这条「轮收束」兜底到达时多半
+/// 已经不在途——转写据此把**已不存在**的占位撤除静默吸收，不产生第二行删除日志。
+fn removed_frame(id: &str) -> cm::ChatNode {
+    let mut meta = serde_json::Map::new();
+    meta.insert(PLACEHOLDER_KEY.to_string(), serde_json::Value::Bool(true));
+    cm::ChatNode {
+        id: id.to_string(),
+        msg_type: Some(cm::NodeKind::Skeleton),
+        status: Some(cm::NodeStatus::Removed),
+        meta: Some(serde_json::Value::Object(meta)),
+        ..Default::default()
+    }
 }
 
 /// 这条事实（不含伙伴）是否产出实时终态帧。

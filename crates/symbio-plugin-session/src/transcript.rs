@@ -42,6 +42,7 @@
 
 use super::plugin::message_path;
 use indexmap::IndexMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use symbio_kernel::chat::chat_node as cm;
@@ -166,6 +167,9 @@ pub struct Transcript {
     pending: Option<PendingDelta>,
     /// 日志合并器（**只影响日志**，不参与序号与投递）。
     delta_log: DeltaLogCoalescer,
+    /// 轮占位登记（`D-425`）：父节点 id → 临时骨架 id。占位是「这一轮还在飞」的**流通道
+    /// 信号**，不进历史；同一父下出现第一个真实子帧时撤掉（见 [`Self::apply`]）。
+    placeholders: HashMap<String, String>,
 }
 
 impl Transcript {
@@ -183,6 +187,7 @@ impl Transcript {
             changes,
             pending: None,
             delta_log: DeltaLogCoalescer::default(),
+            placeholders: HashMap::new(),
         }
     }
 
@@ -225,6 +230,12 @@ impl Transcript {
         // 删除：不落图，就地广播该状态帧（帧照常占日志号，「删了什么」在时间线上可追溯）。
         // 删除的线上表达就是这条带 `removed` 状态的帧本身（消息词汇本就有这个状态）。
         if msg.status == Some(cm::NodeStatus::Removed) {
+            self.placeholders.retain(|_, id| id != &message_id);
+            // 轮占位的撤除是**幂等**的：首个子帧已经让位时，投影器那条「轮收束」
+            // 兜底到达的是「不在途」——静默吸收，不留第二行删除日志与空投递。
+            if live::is_round_placeholder(&msg) && !self.nodes.contains_key(&message_id) {
+                return;
+            }
             let detail = self
                 .nodes
                 .shift_remove(&message_id)
@@ -242,6 +253,24 @@ impl Transcript {
                 },
             );
             return;
+        }
+
+        // **轮占位让位**（`D-425`）：同一父下出现第一条真实节点（思考 / 正文 / 工具卡），
+        // 占位就该走了——它的语义是「这一轮还没产出可看的东西」，产出到了即失效。
+        // 流式帧不经过事实源，转写是唯一同时看得见占位与内容帧的地方。
+        if let Some(parent) = msg.parent_id.as_deref() {
+            if let Some(old) = self.placeholders.get(parent).cloned() {
+                if old != message_id {
+                    self.retire_placeholder(&old);
+                }
+            }
+        }
+        // 占位自己登记（同一父上的新占位已经在上面把旧占位撤掉）。
+        if live::is_round_placeholder(&msg) {
+            if let Some(parent) = msg.parent_id.as_deref() {
+                self.placeholders
+                    .insert(parent.to_string(), message_id.clone());
+            }
         }
 
         let existed = self.nodes.contains_key(&message_id);
@@ -345,6 +374,18 @@ impl Transcript {
         // 那是流式正文的主干道，逐帧克隆全量纯属浪费）。
         let frame = if existed { msg } else { node.clone() };
         self.emit(frame, FrameLog { level, detail });
+    }
+
+    /// 撤掉一条轮占位（`D-425`）：走同一条删除路径，不新造退场形式。
+    ///
+    /// 登记表与图都在 `apply` 的删除分支里收口，因此这里只构造一帧 `removed`——
+    /// 删除的线上表达本来就是一帧状态迁移。
+    fn retire_placeholder(&mut self, id: &str) {
+        self.apply(cm::ChatNode {
+            id: id.to_string(),
+            status: Some(cm::NodeStatus::Removed),
+            ..Default::default()
+        });
     }
 
     /// 在途图快照（VDFS 转写列表的叠加源）。

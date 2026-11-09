@@ -265,8 +265,15 @@ export default defineCase(
       // ── 实时面同构：两个面板读同一份流，工作节点也在这份流上 ──
       const frames = realtime.messages();
       assert(frames.length >= 3, `实时面应收到消息帧（实得 ${frames.length} 条）`);
+      // 轮占位（D-425）是**在飞标记**，不是轮节点：它带着 `meta.placeholder` 的
+      // 带内标记、只活在流通道、从不落库。`msgTypeOf` 把一切非工具骨架折回旧词
+      // `turn`，因此比对形状时先摘掉它——D-335 的判据仍然针对**无标记**的轮节点。
+      const isPlaceholder = (d) => d?.meta?.placeholder === true;
       const frameTypes = new Set(
-        frames.map((f) => (f.data ? msgTypeOf(f.data) : null)).filter(Boolean),
+        frames
+          .filter((f) => !isPlaceholder(f.data))
+          .map((f) => (f.data ? msgTypeOf(f.data) : null))
+          .filter(Boolean),
       );
       assert(
         frameTypes.has('tool_call'),
@@ -277,6 +284,10 @@ export default defineCase(
       assert(
         !frameTypes.has('turn'),
         `D-335：实时面不应出现独立 turn 节点（实得 ${[...frameTypes].join('/')}）`,
+      );
+      assert(
+        frames.some((f) => isPlaceholder(f.data)),
+        'D-425：本轮在飞时应下发过带标记的轮占位（首段内容的等待窗口）',
       );
       const hasUserFrame = frames.some((f) => msgRoleOf(f.data) === 'user');
       assert(hasUserFrame, '实时面应含用户消息帧（对话面板的另一半）');

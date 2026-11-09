@@ -51,6 +51,12 @@ import {
 /** 终态词（与后端 `is_terminal` 同口径） */
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
 
+/**
+ * 「已收场」= 终态 + 移除。移除是节点**已不存在**（`D-425` 的轮占位就是这么退场的），
+ * 不是「还在转圈」；后端 `is_terminal` 不含它，是因为它不会出现在落库结果里。
+ */
+const SETTLED = new Set([...TERMINAL, 'removed']);
+
 export default defineCase('T10 节点协议全景：Reason/Text/ToolCall 三态与增量收敛', async () => {
   const llm = await new MockLlm([
     {
@@ -130,7 +136,7 @@ export default defineCase('T10 节点协议全景：Reason/Text/ToolCall 三态�
         if (!TERMINAL.has(data.status)) entered.add(mid);
         last.set(mid, data.status);
       }
-      return [...entered].filter((id) => !TERMINAL.has(last.get(id)));
+      return [...entered].filter((id) => !SETTLED.has(last.get(id)));
     }
     /**
      * 收网**水位线**：见过 assistant 首帧才算「助手侧已经开跑」。
@@ -327,6 +333,7 @@ export default defineCase('T10 节点协议全景：Reason/Text/ToolCall 三态�
     );
 
     // ⑫ 凡是进入过非终态的节点，都必须以终态收场（不留永远转圈的「运行中」）。
+    //    收场含**移除**：轮占位（D-425）已完成使命后从流上撤掉，不是「还在跑」。
     //
     // 判据是「进入过非终态」而不是「全部节点都必须有终态」：用户消息不参与状态机
     // （后端落库回包发的是存储副本，落点即终态），这是**已知
@@ -335,10 +342,10 @@ export default defineCase('T10 节点协议全景：Reason/Text/ToolCall 三态�
       const frames = framesFor(id);
       // 从不带 status 的帧组成（纯 delta / content 帧）不参与状态机，跳过
       if (frames.every((f) => f.data?.status == null)) continue;
-      if (!frames.some((f) => f.data?.status != null && !TERMINAL.has(f.data.status))) continue;
+      if (!frames.some((f) => f.data?.status != null && !SETTLED.has(f.data.status))) continue;
       const last = frames.filter((f) => f.data?.status != null).pop()?.data?.status;
       assert(
-        TERMINAL.has(last),
+        SETTLED.has(last),
         `节点 ${String(id).slice(0, 8)}（${frames[0].data?.type}）进入过非终态却收在 ${last}\n时间线:\n${timeline.join('\n')}`,
       );
     }

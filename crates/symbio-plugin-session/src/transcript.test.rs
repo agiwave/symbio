@@ -663,3 +663,115 @@ fn inflight_seq_occupies_only_its_own_segment() {
         "号段是计数器唯一的取值域"
     );
 }
+
+// ── 轮占位（D-425）────────────────────────────────────────────
+
+/// 轮占位帧：`Skeleton` + `run` + `streaming` + 带内标记（与 live 投影同形）。
+fn placeholder_msg(id: &str, parent: &str) -> cm::ChatNode {
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "style_tag".to_string(),
+        serde_json::Value::String("run".to_string()),
+    );
+    meta.insert("placeholder".to_string(), serde_json::Value::Bool(true));
+    cm::ChatNode {
+        id: id.to_string(),
+        parent_id: Some(parent.to_string()),
+        principal: Some(principal_for(NodeRole::Assistant)),
+        msg_type: Some(NodeKind::Skeleton),
+        status: Some(NodeStatus::Streaming),
+        meta: Some(serde_json::Value::Object(meta)),
+        ..Default::default()
+    }
+}
+
+/// 一条带父的正文流式帧（模型端口吐出的首个子帧）。
+fn child_frame(id: &str, parent: &str) -> cm::ChatNode {
+    cm::ChatNode {
+        id: id.to_string(),
+        parent_id: Some(parent.to_string()),
+        msg_type: Some(NodeKind::Body),
+        status: Some(NodeStatus::Streaming),
+        delta: Some("你".to_string()),
+        ..Default::default()
+    }
+}
+
+fn removal_count(seen: &Arc<Mutex<Vec<VdfsChange>>>, id: &str) -> usize {
+    seen_of(seen)
+        .iter()
+        .filter(|c| {
+            c.data
+                .as_ref()
+                .is_some_and(|d| d["id"] == id && d["status"] == "removed")
+        })
+        .count()
+}
+
+/// 同父的第一条真实帧到达 ⇒ 占位以删除帧让位（先删除、后子帧），子帧照常落图。
+#[test]
+fn round_placeholder_retires_on_first_sibling() {
+    let (mut tr, seen) = transcript();
+    tr.apply(placeholder_msg("round:r1", "u1"));
+    assert!(node_of(&tr, "round:r1").is_some());
+
+    tr.apply(child_frame("t1", "u1"));
+    assert!(node_of(&tr, "round:r1").is_none(), "首个子帧让占位让位");
+    assert!(node_of(&tr, "t1").is_some());
+
+    let delivered = seen_of(&seen);
+    let removed = delivered
+        .iter()
+        .position(|c| {
+            c.data
+                .as_ref()
+                .is_some_and(|d| d["id"] == "round:r1" && d["status"] == "removed")
+        })
+        .expect("应有占位删除帧");
+    let text = delivered
+        .iter()
+        .position(|c| c.data.as_ref().is_some_and(|d| d["id"] == "t1"))
+        .expect("应有正文帧");
+    assert!(removed < text, "删除必须先于首个子帧到达");
+}
+
+/// 同一父上的新占位先撤旧占位：任何时刻只留一条「轮在飞」。
+#[test]
+fn new_placeholder_replaces_previous_under_same_parent() {
+    let (mut tr, _seen) = transcript();
+    tr.apply(placeholder_msg("round:r1", "u1"));
+    tr.apply(placeholder_msg("round:r2", "u1"));
+    assert!(node_of(&tr, "round:r1").is_none(), "旧占位已让位");
+    assert!(node_of(&tr, "round:r2").is_some());
+}
+
+/// 已让位的占位再收到投影器的「轮收束」兜底：不在途 ⇒ 静默吸收，不产生第二条删除。
+#[test]
+fn stale_placeholder_removal_is_silent() {
+    let (mut tr, seen) = transcript();
+    tr.apply(placeholder_msg("round:r1", "u1"));
+    tr.apply(child_frame("t1", "u1"));
+    let before = seen_of(&seen).len();
+
+    let mut late = placeholder_msg("round:r1", "u1");
+    late.status = Some(NodeStatus::Removed);
+    tr.apply(late);
+
+    assert_eq!(seen_of(&seen).len(), before, "已让位的占位不再投递删除帧");
+}
+
+/// 投影器已显式撤掉占位（不吐流式帧的提供方）：登记随之清空，后续子帧不再重复删除。
+#[test]
+fn projector_removal_leaves_no_duplicate_delete() {
+    let (mut tr, seen) = transcript();
+    tr.apply(placeholder_msg("round:r1", "u1"));
+    tr.apply(removed_msg("round:r1"));
+    let before = removal_count(&seen, "round:r1");
+
+    tr.apply(child_frame("t1", "u1"));
+    assert_eq!(
+        removal_count(&seen, "round:r1"),
+        before,
+        "登记已清，不再重复发删除"
+    );
+}

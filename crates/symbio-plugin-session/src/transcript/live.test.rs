@@ -5,11 +5,13 @@
 //! 已覆盖折叠细节，本文件不重复。
 
 use super::*;
-use symbio_kernel::chat::chat_node::{NodeKind, NodeStatus};
-use symbio_kernel::event::{Entity, Verb, EVENT_FAILED, EVENT_RESPONSE};
+use symbio_kernel::chat::chat_node::{NodeKind, NodeStatus, CHAT_STYLE_TAG_RUN};
+use symbio_kernel::event::{Entity, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE};
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TOOL_REQUESTED,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TOOL_REQUESTED, EVENT_TURN_DISPATCH,
 };
+
+use crate::declarations::{EVENT_SESSION_SETTLED, EVENT_SESSION_TERMINATED};
 
 fn event(id: &str, kind: &str, entity: Entity, verb: Verb, payload: serde_json::Value) -> Event {
     Event::pending(id, kind, entity, verb, "session/main").with_payload(payload)
@@ -98,6 +100,24 @@ fn denial() -> Event {
     )
 }
 
+/// 面向读者的模型派发（`root_id` 非空 = 这一轮对读者说话）；`None` = 内部往返。
+fn model_request(id: &str, root: Option<&str>) -> Event {
+    let mut payload = serde_json::json!({
+        "provider": "LMStudio",
+        "principal": "session/main",
+    });
+    if let Some(root) = root {
+        payload["root_id"] = serde_json::json!(root);
+    }
+    event(id, EVENT_REQUEST, Entity::Scope, Verb::Asserted, payload)
+}
+
+fn wal() -> (tempfile::TempDir, crate::store::EventWalStore) {
+    let dir = tempfile::tempdir().unwrap();
+    let wal = crate::store::EventWalStore::open(dir.path().join("e.jsonl")).unwrap();
+    (dir, wal)
+}
+
 fn by_id<'a>(nodes: &'a [cm::ChatNode], id: &str) -> &'a cm::ChatNode {
     nodes
         .iter()
@@ -161,6 +181,16 @@ fn fallback_reads_partner_from_fact_source() {
     assert_eq!(partners.len(), 1, "回读没找到派发清单");
     // 收进索引：第二次不再回读。
     assert_eq!(index.partners(&artifact(), &wal).len(), 1);
+}
+
+/// 首响没有 `root_id`，`frames_for` 的「轮根前置」不得把它吞掉。
+#[test]
+fn opening_projects_through_frames_for() {
+    let (_dir, wal) = wal();
+    let mut index = LiveIndex::new();
+    let nodes = index.frames_for(&opening(), &wal);
+    assert_eq!(nodes.len(), 1, "{nodes:?}");
+    assert_eq!(nodes[0].id, "opening:u1");
 }
 
 /// 首响落格即下发：开场白是正在等的用户的第一句话，不能等到轮收尾。
@@ -248,4 +278,172 @@ fn tool_port_response_is_not_projected() {
     tool.payload["stamp"]["role"] = serde_json::json!("internal");
     tool.payload["port"] = serde_json::json!("tool");
     assert!(!projects(&tool));
+}
+
+/// 面向读者的派发 → 一个临时轮骨架（`D-425`）：父 = 轮根、形状 = 整轮骨架。
+#[test]
+fn reader_request_projects_round_placeholder() {
+    let request = model_request("e-round", Some("u1"));
+    assert!(watches(&request));
+    let (_dir, wal) = wal();
+    let mut index = LiveIndex::new();
+    let nodes = index.frames_for(&request, &wal);
+    assert_eq!(nodes.len(), 1, "{nodes:?}");
+    let node = &nodes[0];
+    assert_eq!(node.id, "round:e-round");
+    assert_eq!(node.parent_id.as_deref(), Some("u1"));
+    assert_eq!(node.msg_type, Some(NodeKind::Skeleton));
+    assert_eq!(node.status, Some(NodeStatus::Streaming));
+    assert_eq!(node.style_tag(), Some(CHAT_STYLE_TAG_RUN));
+    assert!(is_round_placeholder(node));
+    // 运行中秒数的锚点（前端读 `meta.started_at`，与工具卡同一条读法）。
+    assert_eq!(
+        node.meta.as_ref().and_then(|meta| meta.get("started_at")),
+        Some(&serde_json::json!(request.ts))
+    );
+    // 在途号归转写唯一写入点（与终态投影同一条纪律）。
+    assert_eq!(node.seq, None);
+}
+
+/// 内部往返与工具端口的请求没有轮根：不开轮、不产占位。
+#[test]
+fn requests_without_root_have_no_placeholder() {
+    let (_dir, wal) = wal();
+    let mut index = LiveIndex::new();
+    let internal = model_request("e-internal", None);
+    assert!(!watches(&internal));
+    assert!(index.frames_for(&internal, &wal).is_empty());
+
+    let tool_port = event(
+        "e-tool-port",
+        EVENT_REQUEST,
+        Entity::Scope,
+        Verb::Asserted,
+        serde_json::json!({
+            "call_id": "wire-1",
+            "request_id": "tool.requested:model:model:u1:1",
+        }),
+    );
+    assert!(!watches(&tool_port));
+    assert!(index.frames_for(&tool_port, &wal).is_empty());
+}
+
+/// 产物格没有 `root_id`：轮占位逻辑不参与，终态投影照常出。
+#[test]
+fn artifact_projects_through_frames_for() {
+    let (_dir, wal) = wal();
+    let mut index = LiveIndex::new();
+    index.observe(&request());
+    let nodes = index.frames_for(&artifact(), &wal);
+    assert_eq!(nodes.len(), 2, "{nodes:?}");
+    assert_eq!(by_id(&nodes, "card-1").status, Some(NodeStatus::Completed));
+    assert_eq!(
+        by_id(&nodes, "wire-1-result").parent_id.as_deref(),
+        Some("card-1")
+    );
+}
+
+/// 开轮派发即出骨架：用户消息之后的第一条回合事实，不等 reader 请求（`D-425`）。
+#[test]
+fn dispatch_projects_placeholder_immediately() {
+    let (_dir, wal) = wal();
+    let mut index = LiveIndex::new();
+    let dispatch = event(
+        "e-dispatch",
+        EVENT_TURN_DISPATCH,
+        Entity::Scope,
+        Verb::Asserted,
+        serde_json::json!({
+            "root_id": "u1",
+            "tier": "deep",
+            "budget_ms": 600000,
+            "principal": "session/main",
+        }),
+    );
+    assert!(watches(&dispatch));
+    let nodes = index.frames_for(&dispatch, &wal);
+    assert_eq!(nodes.len(), 1, "{nodes:?}");
+    let node = &nodes[0];
+    assert_eq!(node.id, "round:e-dispatch");
+    assert_eq!(node.parent_id.as_deref(), Some("u1"));
+    assert!(is_round_placeholder(node));
+    assert_eq!(node.status, Some(NodeStatus::Streaming));
+}
+
+/// 不经过模型流的轮次：轮收场事实（终答 / 收束 / 终止）也撤占位。
+#[test]
+fn closing_facts_retire_placeholder() {
+    for kind in [
+        EVENT_CHAT_ASSISTANT_FINAL,
+        EVENT_SESSION_SETTLED,
+        EVENT_SESSION_TERMINATED,
+    ] {
+        let (_dir, wal) = wal();
+        let mut index = LiveIndex::new();
+        let dispatch = event(
+            "e-dispatch",
+            EVENT_TURN_DISPATCH,
+            Entity::Scope,
+            Verb::Asserted,
+            serde_json::json!({ "root_id": "u1", "principal": "session/main" }),
+        );
+        index.frames_for(&dispatch, &wal);
+
+        let end = event(
+            "e-end",
+            kind,
+            Entity::Scope,
+            Verb::Asserted,
+            serde_json::json!({ "root_id": "u1" }),
+        );
+        assert!(watches(&end), "{kind} 应参与实时投影");
+        let nodes = index.frames_for(&end, &wal);
+        assert_eq!(nodes.len(), 1, "{kind}: {nodes:?}");
+        assert_eq!(nodes[0].id, "round:e-dispatch");
+        assert_eq!(nodes[0].status, Some(NodeStatus::Removed));
+    }
+}
+
+/// 本轮输出事实落格 → 占位退出（不吐流式帧的提供方 / 中止 / 拒言的兜底）。
+#[test]
+fn output_fact_retires_placeholder() {
+    let (_dir, wal) = wal();
+    let mut index = LiveIndex::new();
+    index.frames_for(&model_request("e-round", Some("u1")), &wal);
+
+    let nodes = index.frames_for(&response(), &wal);
+    assert_eq!(nodes[0].id, "round:e-round");
+    assert_eq!(nodes[0].status, Some(NodeStatus::Removed));
+    // 收束事实自己的终态投影照常出（思考 + 正文）。
+    assert_eq!(by_id(&nodes, "r1").status, Some(NodeStatus::Completed));
+
+    // 同一轮根的第二次收束不重复撤（登记已清）。
+    let again = index.frames_for(&response(), &wal);
+    assert!(again.iter().all(|n| n.id != "round:e-round"), "{again:?}");
+}
+
+/// 派发清单（工具清单事实）同样收轮：占位在工具卡到达之前就该让位。
+#[test]
+fn dispatch_fact_retires_placeholder() {
+    let (_dir, wal) = wal();
+    let mut index = LiveIndex::new();
+    index.frames_for(&model_request("e-round", Some("u1")), &wal);
+    let nodes = index.frames_for(&request(), &wal);
+    assert_eq!(nodes.len(), 1, "{nodes:?}");
+    assert_eq!(nodes[0].id, "round:e-round");
+    assert_eq!(nodes[0].status, Some(NodeStatus::Removed));
+}
+
+/// 同一轮根的下一段派发：先撤旧占位，再发新的——同时最多一个。
+#[test]
+fn next_round_request_replaces_placeholder() {
+    let (_dir, wal) = wal();
+    let mut index = LiveIndex::new();
+    index.frames_for(&model_request("e-round-1", Some("u1")), &wal);
+    let nodes = index.frames_for(&model_request("e-round-2", Some("u1")), &wal);
+    assert_eq!(nodes.len(), 2, "{nodes:?}");
+    assert_eq!(nodes[0].id, "round:e-round-1");
+    assert_eq!(nodes[0].status, Some(NodeStatus::Removed));
+    assert_eq!(nodes[1].id, "round:e-round-2");
+    assert_eq!(nodes[1].status, Some(NodeStatus::Streaming));
 }
