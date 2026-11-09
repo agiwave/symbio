@@ -22,6 +22,7 @@ lists: [gate-codes=owner]
 
 | 前缀 | 归属 | 声明脚本 | 已用号段 | 下一个可用号 |
 |---|---|---|---|---|
+| **AD** | 架构树零调用判据 | `scripts/arch-dead-code-audit.mjs` | AD-001–004 | `AD-005` |
 | **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
 | **BS** | 棘轮基线面的变更审 | `scripts/baseline-scope-audit.mjs` | BS-001–005 | `BS-006` |
 | **CP** | 控制面形状（唯一循环体 / 机制层无域名 / 机制面指纹 / 第二推进循环） | `scripts/control-plane-audit.mjs` | CP-001、CP-004、CP-006、CP-009 | `CP-010` |
@@ -70,6 +71,10 @@ lists: [gate-codes=owner]
 
 | 判据码 | 声明脚本 |
 |---|---|
+| **AD-001** | `scripts/arch-dead-code-audit.mjs` |
+| **AD-002** | `scripts/arch-dead-code-audit.mjs` |
+| **AD-003** | `scripts/arch-dead-code-audit.mjs` |
+| **AD-004** | `scripts/arch-dead-code-audit.mjs` |
 | **AO-001** | `scripts/agent-ownership-audit.mjs` |
 | **AO-002** | `scripts/agent-ownership-audit.mjs` |
 | **AO-003** | `scripts/agent-ownership-audit.mjs` |

@@ -218,6 +218,21 @@ function facadeLocCells(text) {
   return cells
 }
 
+/** `scripts/baselines/arch-dead-code.json`（AD-001…004）：架构树零生产调用存量（一格，只许降）。
+ *  判据面的对账在 `arch-dead-code-audit`；本条只管「基线文件本身有没有被改松」——多加一条
+ *  等于给下一次新增留余量。`AD-002` 从另一头堵同一条缝：源码里已经接线的符号不许留在基线。 */
+function archDeadCodeCells(text) {
+  const cells = new Map()
+  let obj
+  try {
+    obj = JSON.parse(text)
+  } catch {
+    return cells
+  }
+  if (Array.isArray(obj?.symbols)) cells.set('存量', obj.symbols.length)
+  return cells
+}
+
 /** `scripts/baselines/tool-surface.json`：默认装配下 `tools` 数组字节数（一格，只许降）。
  *  实测量由 `e2e/cases/t46-prompt-shape-baseline.mjs` 读同一份基线并断言；本条只判
  *  「基线文件有没有被改松」——两半合起来才是「工具面不会悄悄长回去」。 */
@@ -402,6 +417,16 @@ const RATCHETS = [
     // 不设豁免标记：收窄自动生效，变宽只能改基线，而改基线会被本条按基准版本抓住。
     waivers: () => new Map(),
     label: '门面（plugin-api）自有实现行数（逐文件 + 合计，只许降）',
+  },
+  {
+    // AD-001 的基线文件自身：存量只许降（出路是接线或删除）。这条堵的是反向绕过口——
+    // 往基线里多挂一条，AD-001 就少拦一个零调用符号。
+    id: 'arch-dead-code',
+    file: 'scripts/baselines/arch-dead-code.json',
+    dir: 'ceiling',
+    cellsOf: archDeadCodeCells,
+    waivers: () => new Map(),
+    label: '架构树零生产调用存量（只许降）',
   },
   {
     id: 'coverage',

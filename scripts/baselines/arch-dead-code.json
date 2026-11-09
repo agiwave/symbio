@@ -1,0 +1,443 @@
+{
+  "note": "架构树（kernel / sdk / plugin-api）零生产调用基线（AD-001…004）。只许降：接线或删除后必须同批移除条目（AD-002），否则基线留出的余量会被下一次新增正好填进来。首版存量 2026-11-09（73 条）：其中 23 条标 `待裁`，是 `60cedd50` / `16ad2f4d` 删旧编排时丢掉最后调用点的判据；其余是该类型自带的公开构造/查询口（契约实现）。`evidence` 为决策号或契约文档路径（AD-003 校验可打开）。",
+  "symbols": [
+    {
+      "symbol": "declares",
+      "path": "crates/symbio-kernel/src/capability/mod.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
+    },
+    {
+      "symbol": "with_category",
+      "path": "crates/symbio-kernel/src/capability/mod.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
+    },
+    {
+      "symbol": "with_risk",
+      "path": "crates/symbio-kernel/src/capability/mod.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
+    },
+    {
+      "symbol": "is_agent",
+      "path": "crates/symbio-kernel/src/chat/principal.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "with_title",
+      "path": "crates/symbio-kernel/src/chat/principal.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "event_cell",
+      "path": "crates/symbio-kernel/src/decl/mod.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/014-单环一表.md"
+    },
+    {
+      "symbol": "event_owner",
+      "path": "crates/symbio-kernel/src/decl/mod.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/014-单环一表.md"
+    },
+    {
+      "symbol": "fact_owner",
+      "path": "crates/symbio-kernel/src/decl/mod.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/014-单环一表.md"
+    },
+    {
+      "symbol": "host_written",
+      "path": "crates/symbio-kernel/src/decl/mod.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/014-单环一表.md"
+    },
+    {
+      "symbol": "scan_bound",
+      "path": "crates/symbio-kernel/src/decl/mod.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/014-单环一表.md"
+    },
+    {
+      "symbol": "unmanned_roles",
+      "path": "crates/symbio-kernel/src/decl/mod.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/014-单环一表.md"
+    },
+    {
+      "symbol": "view_owner",
+      "path": "crates/symbio-kernel/src/decl/mod.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/014-单环一表.md"
+    },
+    {
+      "symbol": "port_of",
+      "path": "crates/symbio-kernel/src/decl/ring.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/014-单环一表.md"
+    },
+    {
+      "symbol": "with_cost_ms",
+      "path": "crates/symbio-kernel/src/event/mod.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "to_frame",
+      "path": "crates/symbio-kernel/src/plugin/error.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/007-第三方插件体系.md"
+    },
+    {
+      "symbol": "with_author",
+      "path": "crates/symbio-kernel/src/plugin/mod.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/007-第三方插件体系.md"
+    },
+    {
+      "symbol": "into_value",
+      "path": "crates/symbio-kernel/src/plugin/transport.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/007-第三方插件体系.md"
+    },
+    {
+      "symbol": "try_into_event",
+      "path": "crates/symbio-kernel/src/plugin/transport.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/007-第三方插件体系.md"
+    },
+    {
+      "symbol": "has_warn",
+      "path": "crates/symbio-kernel/src/present/reading.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "row_count",
+      "path": "crates/symbio-kernel/src/present/reading.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "is_not_implemented",
+      "path": "crates/symbio-kernel/src/vdfs/error.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "with_field",
+      "path": "crates/symbio-kernel/src/vdfs/error.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "effective_ext",
+      "path": "crates/symbio-kernel/src/vdfs/node.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "with_attribute",
+      "path": "crates/symbio-kernel/src/vdfs/node.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "with_binary",
+      "path": "crates/symbio-kernel/src/vdfs/node.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "with_children",
+      "path": "crates/symbio-kernel/src/vdfs/node.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "with_ext",
+      "path": "crates/symbio-kernel/src/vdfs/node.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "with_kind",
+      "path": "crates/symbio-kernel/src/vdfs/node.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "with_search",
+      "path": "crates/symbio-kernel/src/vdfs/node.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "with_size",
+      "path": "crates/symbio-kernel/src/vdfs/node.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "with_status",
+      "path": "crates/symbio-kernel/src/vdfs/node.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "is_action",
+      "path": "crates/symbio-kernel/src/vdfs/request.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "is_list",
+      "path": "crates/symbio-kernel/src/vdfs/request.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "is_read",
+      "path": "crates/symbio-kernel/src/vdfs/request.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "is_stat",
+      "path": "crates/symbio-kernel/src/vdfs/request.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "is_unit",
+      "path": "crates/symbio-kernel/src/vdfs/request.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "is_write",
+      "path": "crates/symbio-kernel/src/vdfs/request.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "is_known",
+      "path": "crates/symbio-plugin-api/src/behaviors.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
+    },
+    {
+      "symbol": "declared_event_cell",
+      "path": "crates/symbio-plugin-api/src/declarations.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/014-单环一表.md"
+    },
+    {
+      "symbol": "into_event",
+      "path": "crates/symbio-plugin-api/src/effects.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/018-模块架构.md"
+    },
+    {
+      "symbol": "is_denied",
+      "path": "crates/symbio-plugin-api/src/port.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/048-端口机制裁决.md"
+    },
+    {
+      "symbol": "port_family",
+      "path": "crates/symbio-plugin-api/src/port.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/048-端口机制裁决.md"
+    },
+    {
+      "symbol": "with_authz",
+      "path": "crates/symbio-plugin-api/src/port.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/048-端口机制裁决.md"
+    },
+    {
+      "symbol": "declared_effects",
+      "path": "crates/symbio-plugin-api/src/rows.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/022-行表与派发面.md"
+    },
+    {
+      "symbol": "effects_of",
+      "path": "crates/symbio-plugin-api/src/rows.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/022-行表与派发面.md"
+    },
+    {
+      "symbol": "writes_of",
+      "path": "crates/symbio-plugin-api/src/rows.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/022-行表与派发面.md"
+    },
+    {
+      "symbol": "elimination_event",
+      "path": "crates/symbio-sdk/src/actors/control.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "restoration_event",
+      "path": "crates/symbio-sdk/src/actors/control.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "should_eliminate",
+      "path": "crates/symbio-sdk/src/actors/control.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "actor_can_assert_verification",
+      "path": "crates/symbio-sdk/src/actors/spec.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "actor_can_judge_intent",
+      "path": "crates/symbio-sdk/src/actors/spec.rs",
+      "why": "待裁：`16ad2f4d` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "actor_can_land_artifact",
+      "path": "crates/symbio-sdk/src/actors/spec.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "actor_can_land_speech",
+      "path": "crates/symbio-sdk/src/actors/spec.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "issue_deep",
+      "path": "crates/symbio-sdk/src/adapters/mod.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "issue_reflex",
+      "path": "crates/symbio-sdk/src/adapters/mod.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "for_turn",
+      "path": "crates/symbio-sdk/src/adapters/provider_adapter.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "tool_metas",
+      "path": "crates/symbio-sdk/src/capability/collect.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
+    },
+    {
+      "symbol": "to_json",
+      "path": "crates/symbio-sdk/src/capability/grants.rs",
+      "why": "待裁：`16ad2f4d` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
+    },
+    {
+      "symbol": "capability_model_resolve",
+      "path": "crates/symbio-sdk/src/capability/model.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
+    },
+    {
+      "symbol": "capability_resolve",
+      "path": "crates/symbio-sdk/src/capability/tool_name.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
+    },
+    {
+      "symbol": "llm_emit_state",
+      "path": "crates/symbio-sdk/src/llm/frames.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "branch_hide_unselected",
+      "path": "crates/symbio-sdk/src/projection/branch.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "verify",
+      "path": "crates/symbio-sdk/src/projection/prompt_fidelity.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "excluded",
+      "path": "crates/symbio-sdk/src/projection/transcript.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "to_messages",
+      "path": "crates/symbio-sdk/src/projection/transcript.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "closes_as_final",
+      "path": "crates/symbio-sdk/src/projection/vocab.rs",
+      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "is_closure",
+      "path": "crates/symbio-sdk/src/projection/vocab.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "count_raw",
+      "path": "crates/symbio-sdk/src/text/tokenizer.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/035-长会话与断点恢复.md"
+    },
+    {
+      "symbol": "feedback",
+      "path": "crates/symbio-sdk/src/text/tokenizer.rs",
+      "why": "待接线：校准回灌的唯一调用点（`report_provider_usage`）在 `34526409` 被当「零消费声明」退役，`TokenFeedback` 从此不再更新",
+      "evidence": "docs/003-design/035-长会话与断点恢复.md"
+    },
+    {
+      "symbol": "detach_if_flat",
+      "path": "crates/symbio-sdk/src/turn/node_build.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "llm_build_tool_call_nodes",
+      "path": "crates/symbio-sdk/src/turn/node_build.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    },
+    {
+      "symbol": "has_subscribers",
+      "path": "crates/symbio-sdk/src/vdfs/host.rs",
+      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
+      "evidence": "docs/003-design/009-VDFS规范.md"
+    },
+    {
+      "symbol": "visible_to",
+      "path": "crates/symbio-sdk/src/view/mod.rs",
+      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "evidence": "docs/003-design/001-核心架构.md"
+    }
+  ]
+}
