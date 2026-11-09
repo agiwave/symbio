@@ -1,4 +1,4 @@
-//! `crates/symbio-plugin-api/src/declarations.rs` 的单元测试。
+//! `crates/symbio-sdk/src/declarations.rs` 的单元测试。
 //!
 //! 判据：链接期提交进来的声明表**能被装配方看到**，且冻结后的格位与 owner 与提交一致。
 //! 端到端那一半（写闸按冻结表收 / 拒）住在 `symbio-plugin-session` 的
@@ -9,7 +9,7 @@ use super::*;
 use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::decl::ring::Decl;
 use symbio_kernel::decl::ring::Pattern;
-use symbio_kernel::event::EventDecl;
+use symbio_kernel::event::{Entity, EventDecl, Verb};
 
 /// 协议五格的归宿行：装配表必须能通过 `seal` 的判据 7，否则收集通道的用例
 /// 会先被「没人消费的事实」挡住，测不到收集本身。

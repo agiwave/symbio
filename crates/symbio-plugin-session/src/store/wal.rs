@@ -97,7 +97,7 @@ impl<'a> Vocab<'a> {
     fn of(declarations: Option<&'a Frozen>) -> Self {
         Vocab {
             instance: declarations.map(Frozen::events),
-            process: symbio_plugin_api::declared_vocab(),
+            process: symbio_sdk::declarations::declared_vocab(),
         }
     }
 

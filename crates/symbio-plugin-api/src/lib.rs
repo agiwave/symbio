@@ -6,7 +6,7 @@
 //! 宿主共用的词：
 //!
 //! - [`routes`]：跨插件调用路径（地址）常量
-//! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂）
+//! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂；清单生成物）
 //! - [`behaviors`]：行为名的收集面（实现住 sdk，本 crate 只转出，D-408）
 //! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）（转出，`D-408`）
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）（转出，`D-413`）
@@ -18,6 +18,7 @@
 //! - [`fact_source`]：事实源的登记面（转出，`D-413`）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
+//!   与词汇读法（冻结机制住 sdk，回落表是 [`events`]，D-415）
 //! - [`views`]：视图读不出来的缺席原因（公开读口是 [`reports`] 的报表登记）
 //! - [`vocab`]：跨插件共享名的唯一住处（端口 / 行为 / 路径段 / 治理能力，D-364）
 //!
@@ -27,7 +28,7 @@
 //! | 臂 | 来源 | 条数 | 性质 |
 //! |---|---|---|---|
 //! | 语法臂 | `symbio-kernel` | 136 | 形状与闭集，**不计债但计件**（D-278） |
-//! | SDK 臂 | `symbio-sdk` | 120 | 只碰内核词汇的宿主机制（含授权判定），进棘轮 |
+//! | SDK 臂 | `symbio-sdk` | 122 | 只碰内核词汇的宿主机制（含授权判定），进棘轮 |
 //!
 //! 第三臂（旧 core 的 6 条授权符号）已于 D-276 清零：授权判定只查一张部署表，
 //! 不认识轮次 / 幕 / 判决，按 sdk 自己的章程（「插件要用的宿主机制……授权判定」）归位。
@@ -42,8 +43,10 @@
 //! HS-005 门面 manifest 三条 / HS-006 语法臂与模块级转发只许不涨）。
 //!
 //! 插件不得依赖宿主 crate（`symbio`）——那会形成「插件 ← 宿主 ← 插件」的环。
-//! `declarations` 只依赖 `symbio-sdk` 的声明容器，不认识任何具体插件；收集在链接期
-//! 发生，因此插件之间仍然零依赖（DE-024 D-198）。
+//! 声明表的收集与冻结在 `symbio_sdk::declarations` 里；词汇读法（冻结表缺席时回落
+//! 清单生成物）随 `events.rs` 留在本 crate——内核与 sdk 的生产代码零事件名字面量
+//! （CS-008 / CP-004），回落表不能搬走。收集在链接期发生，因此插件之间仍然零依赖
+//! （DE-024 D-198）。
 
 pub mod debt;
 pub mod declarations;
@@ -68,10 +71,8 @@ pub use context::{
     ContextProvider, ContextRequest, ContextSection, DelegateVerdict, LiveInputs, RecallFacts,
     RecallLine, SectionFit,
 };
-pub use declarations::{
-    assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations, vocab,
-    DeclarationsDecl,
-};
+pub use declarations::{declared_event_cell, vocab};
+pub use symbio_sdk::declarations::sealed_declarations;
 // 驱动入口模块整块归 sdk（`D-413`），门面只留扩展层插件真正要的一条：`home` 的装配根
 // 登记。驱动句柄与解析口（`DriveEntry` / `DriveTarget` / `declared_drive_binding`）只有
 // 控制面 `session` 用，而控制面按影响类运行、本就不在该门面的约束面内，直接从
@@ -98,6 +99,7 @@ pub use settle::{Contribution, Contributor, SettleFace, Settling};
 pub use symbio_sdk::submit_behavior;
 pub use symbio_sdk::submit_context_provider;
 pub use symbio_sdk::submit_contributor;
+pub use symbio_sdk::submit_declarations;
 pub use symbio_sdk::submit_retriever;
 pub use symbio_sdk::submit_row;
 pub use views::ViewUnavailable;

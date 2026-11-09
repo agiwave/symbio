@@ -37,6 +37,10 @@
 pub use inventory;
 use symbio_kernel::*;
 
+// `submit_declarations!` 的宏体写的是 `$crate::DeclarationsDecl`：收集类型与本 crate 同住，
+// 使用方不必认识 `symbio_sdk` 的模块路径（与 `submit_object_creator!` 同形）。
+pub use declarations::DeclarationsDecl;
+
 pub mod actors;
 pub mod adapters;
 pub mod agent;
@@ -45,6 +49,7 @@ pub mod capability;
 pub mod chat;
 pub mod clock;
 pub mod creator;
+pub mod declarations;
 pub mod embedding;
 pub mod event_bus;
 pub mod governance;

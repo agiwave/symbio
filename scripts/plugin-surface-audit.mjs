@@ -123,7 +123,12 @@ export const WHITELIST_BASELINE = 0
 // `pub use …::*;` 与壳内宏转发给出，旧读数只是看不见（`readFacadeArms` 只读 lib.rs）。
 // 同一批里扩展面对 `drive_entry` 的出口从 9 个符号 + 整模块收窄到 1 个符号。
 // 这是「把读数改成真的」，不是放宽：物理门面行数同期从 2703 降到 2635（FA-002）。
-export const SDK_BASELINE = 120
+// 120 → 122（D-415）：冻结声明表的收集、装配与冻结搬进 sdk 之后，门面根上多两条
+// 指向 sdk 的出口：`sealed_declarations` 与 `submit_declarations`。前者此前由门面
+// `declarations.rs` 定义、后者此前是门面宏——同两个名字换住所，不是新增面。词汇读法
+// （`vocab` / `declared_vocab` / `declared_event_cell`）与 `events` 生成物**留在门面**
+// （CS-008 / CP-004：内核与 sdk 的生产代码零事件名字面量），因此不计入本臂。
+export const SDK_BASELINE = 122
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。
@@ -154,6 +159,9 @@ export const GRAMMAR_BASELINE = 137
 // 6 → 13（D-413）：同一次「壳文件收掉」把 7 个模块名与改名转出的 `text` 抬到根上。
 // 它们此前各自在壳里以 `pub use …::*;` 放出一整个命名空间——那正是本判据要显式化的
 // 形状（D-278），只是壳文件让读数漏掉了。一行换 N 条的账现在记在门面上，条目一个不少。
+// D-415 复查时补上**单段模块转出**（`pub use symbio_sdk::events;`）这一形态：它同样
+// 一行放出一整个命名空间，此前不在 `collect` 的匹配里。补完后实测仍是 13——`events`
+// 按 CS-008 / CP-004 留在门面，没有换成 `pub use`。
 export const MODULE_REEXPORT_BASELINE = 13
 
 /** 门面白名单所在的文件与块的起止标记。 */
@@ -450,6 +458,11 @@ export function collectModuleReexports(root) {
     const base = crates[m[1]]
     const segs = m[2].split('::')
     if (isMod(base, segs, m[3])) out.add(m[3])
+  }
+  // 单段转出（`pub use symbio_sdk::events;`）同样一行放出一整个命名空间：不给它留
+  // 不计数的一格，否则「换个写法」就能绕过本判据（D-415）。
+  for (const m of src.matchAll(/pub use (symbio_kernel|symbio_sdk)::([A-Za-z0-9_]+);/g)) {
+    if (isMod(crates[m[1]], [], m[2])) out.add(m[2])
   }
   // 改名转出：放出的名字是别名，但对插件来说就是那一整个模块（`text` → `tokenizer`）。
   for (const m of src.matchAll(AS_ALIAS_RE)) {

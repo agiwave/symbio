@@ -6,7 +6,7 @@
   "knife": "T-034",
   "phase": "P4–P6",
   "retire": "session 退役时同批删除本豁免",
-  "reason": "session 是 T-034 里排在 P4–P6 的待退役控制面；把 SDK 那一半搬进 plugin-api 等于让契约层长成一个大 SDK，且要靠调宽 HS-002 才绿——那是为了让门变绿而改门。故走限期豁免，不搬层。`ReportDraft` 由轮边界汇报节点的唯一构造器给出（`ReportDraft::to_message`），session 的债行只递参数、不在这里复抄节点形状。`AgentScope` / `agent_perms_of` 是 D-349「权限作用域随驱动目标进轮 ctx」的落地符号（`e43b8f43`）：轮装配发布作用域、事实源在 `append` 时取当前值、驱动只把同一个槽放上 ctx，解析权仍归 agent 插件；session 只是持有与透传，没有第二份解析。`stamp_branches` / `META_BRANCH` 是 D-358「分支投影」的读写符号（`e75e5d7f`）：写侧给换下来的轮根打隐藏标记、读侧据此过滤，折法只住 `symbio_sdk::projection::branch`；session 是这一族事实的 owner，不能另抄一份折法，故随本豁免一并冻结，去 turn 化 / 迁回契约层仍随 session 退役同批处理。 D-413 收掉门面 `drive_entry` 转发、只留扩展插件真正用的 `publish_deployment_root` 之后，session 原先经门面 `pub use` 间接取自 `symbio_sdk::plugin::drive_entry` 的四个符号（`DriveEntry` / `DriveTarget` / `declared_drive_binding` / `submit_fact_source_opener`）改从 sdk 本体取：依赖边与符号本体都没变，变的只是中间那一跳；它们与 D-349 / D-358 同形——session 只持有与透传驱动句柄、事实源在链接期登记，解析权与注册表都在 sdk，session 退役时随本豁免一并消失。",
+  "reason": "session 是 T-034 里排在 P4–P6 的待退役控制面；把 SDK 那一半搬进 plugin-api 等于让契约层长成一个大 SDK，且要靠调宽 HS-002 才绿——那是为了让门变绿而改门。故走限期豁免，不搬层。`ReportDraft` 由轮边界汇报节点的唯一构造器给出（`ReportDraft::to_message`），session 的债行只递参数、不在这里复抄节点形状。`AgentScope` / `agent_perms_of` 是 D-349「权限作用域随驱动目标进轮 ctx」的落地符号（`e43b8f43`）：轮装配发布作用域、事实源在 `append` 时取当前值、驱动只把同一个槽放上 ctx，解析权仍归 agent 插件；session 只是持有与透传，没有第二份解析。`stamp_branches` / `META_BRANCH` 是 D-358「分支投影」的读写符号（`e75e5d7f`）：写侧给换下来的轮根打隐藏标记、读侧据此过滤，折法只住 `symbio_sdk::projection::branch`；session 是这一族事实的 owner，不能另抄一份折法，故随本豁免一并冻结，去 turn 化 / 迁回契约层仍随 session 退役同批处理。 D-413 收掉门面 `drive_entry` 转发、只留扩展插件真正用的 `publish_deployment_root` 之后，session 原先经门面 `pub use` 间接取自 `symbio_sdk::plugin::drive_entry` 的四个符号（`DriveEntry` / `DriveTarget` / `declared_drive_binding` / `submit_fact_source_opener`）改从 sdk 本体取：依赖边与符号本体都没变，变的只是中间那一跳；它们与 D-349 / D-358 同形——session 只持有与透传驱动句柄、事实源在链接期登记，解析权与注册表都在 sdk，session 退役时随本豁免一并消失。 D-415 把冻结机制搬进 sdk 之后，session 的写闸从 sdk 取 `declared_vocab`：读的是同一张进程冻结表，词汇层只留回落读法；解析权仍在 sdk，session 只问表，随本豁免一并冻结。",
   "symbols": [
     "AGENT_ID",
     "AGENT_PERMS",
@@ -88,6 +88,7 @@
     "content_visible",
     "declared_addr_root",
     "declared_drive_binding",
+    "declared_vocab",
     "flatten_whole_tree",
     "from_legacy",
     "is_turn_final",

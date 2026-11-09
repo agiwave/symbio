@@ -3,10 +3,12 @@
   "crate": "crates/symbio-plugin-api/src",
   "files": [
     { "path": "effects.rs", "lines": 0, "adr": "D-413", "retired": "crates/symbio-sdk/src/plugin/effects.rs" },
+    { "path": "declarations.rs", "lines": 27, "adr": "D-415" },
+    { "path": "events.rs", "lines": 192, "adr": "D-415" },
     { "path": "port.rs", "lines": 450, "adr": "D-404" },
     { "path": "text.rs", "lines": 0, "adr": "D-413", "retired": "crates/symbio-sdk/src/text/tokenizer.rs" },
     { "path": "context.rs", "lines": 0, "adr": "D-413", "retired": "crates/symbio-sdk/src/plugin/context.rs" },
     { "path": "reports.rs", "lines": 344, "adr": "D-399" }
   ],
-  "total": { "lines": 2533, "adr": "D-413" }
+  "total": { "lines": 2387, "adr": "D-415" }
 }

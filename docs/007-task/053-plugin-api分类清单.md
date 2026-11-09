@@ -7,7 +7,7 @@ track: arch
 prio: now
 created: 2026-11-08
 deps: []
-where: "`crates/symbio-plugin-api/src`（`port.rs` 450 行、`reports.rs` 344 行；生产文件合计 2 533 行）；`crates/symbio-sdk/src/plugin/`（`effects` / `behaviors` / `context` / `retrieval` / `rows` / `settle` / `fact_source` / `drive_entry`）；`crates/symbio-sdk/src/text/tokenizer.rs`；`crates/symbio-sdk/src/capability/port.rs`（端口读/校验半与装配期判重）；`scripts/plugin-surface-audit.mjs`（HS-002 / HS-006）；`scripts/facade-loc-audit.mjs`（FA-001…FA-004）"
+where: "`crates/symbio-plugin-api/src`（`port.rs` 450 行、`reports.rs` 344 行；生产文件合计 2 387 行）；`crates/symbio-sdk/src/plugin/`（`effects` / `behaviors` / `context` / `retrieval` / `rows` / `settle` / `fact_source` / `drive_entry`）；`crates/symbio-sdk/src/declarations.rs`（冻结机制）；`crates/symbio-sdk/src/text/tokenizer.rs`；`crates/symbio-sdk/src/capability/port.rs`（端口读/校验半与装配期判重）；`scripts/plugin-surface-audit.mjs`（HS-002 / HS-006）；`scripts/facade-loc-audit.mjs`（FA-001…FA-004）"
 exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 / 实现 / 机制）/ 处置（留守 api / 迁 sdk / 只转出）），不改代码；清单经批准后才搬迁；api 只留纯类型、宏、声明面与 re-export；`effects::apply`、端口能力校验、`text` 预算算术、`context` 拼装迁 sdk、api 只转出；`reports` 拆开——`ReportDecl` / `submit_reports!` / `inventory` 是契约，`validate` / `reports()` / `read_view` 是实现；「自有实现只许降」由行数棘轮 `FA-001`…`FA-004`（`scripts/facade-loc-audit.mjs`）判，不另开 HS 臂；搬迁后 `gate --full` 全绿
 ---
 
@@ -39,12 +39,14 @@ exit: 先出一张逐块分类清单（每块：符号 / 现址 / 类（契约 /
 **生产文件合计 4 494 行；同目录 `*.test.rs` 另 1 921 行不计入基线。**
 
 **收尾时的现值（2026-11-09，以 `scripts/baselines/plugin-api-loc.json` 与 `scripts/arch-dead-code.json` 为准）**：
-`port` **450**（读/校验半 `D-404`，装配期判重 `D-414`）、`reports` **344**；门面合计 **2 533**（原 4 494）；
+`port` **450**（读/校验半 `D-404`，装配期判重 `D-414`）、`reports` **344**；门面合计 **2 387**（原 4 494）；
 `effects` / `text` / `context` 三格按退役形态记 `lines: 0` + `retired`（文件已删，格子钉零）。
 `effects` / `behaviors`（`D-408`）、`text`（`D-404`）、`context`（`D-412`）与五个链接期注册表
 `retrieval` / `rows` / `settle` / `fact_source` / `drive_entry`（`D-413`）整块住在
-`crates/symbio-sdk/src/plugin/`；门面不再留纯转发文件，模块名在 `lib.rs` 根上一行转出，
-提交宏同在根上。`drive_entry` 只转出 `publish_deployment_root`（唯一扩展层消费方）。
+`crates/symbio-sdk/src/plugin/`；冻结机制（`D-415`）住在 `crates/symbio-sdk/src/declarations.rs`，
+词汇读法与共享事件生成物留在 `crates/symbio-plugin-api/src/declarations.rs` / `events.rs`。
+门面不再留纯转发文件，模块名在 `lib.rs` 根上一行转出，提交宏同在根上。`drive_entry` 只转出 `publish_deployment_root`
+（唯一扩展层消费方）。
 另按 `D-409` 撤掉了行侧效果面（`EffectFace` / `DialogDraft` / `LiveDraft` / `EffectDraft` 与
 `RowStep` 的 `FactsWithEffects` 变体），零调用清单由 73 条降到 71 条。
 
@@ -118,14 +120,17 @@ HS-002 / HS-006 只数转发条数，看不见实现。**这一条已由棘轮�
    （`port.rs` 478 → 450，合计 2561 → 2533）；注册面（`PortProvider` / `PortPayload` /
    `port_rows`）按 `D-404` 的切法留门面——它写表，检查问表。
 
-   > **`reports` 与 `context` 不同形，搬前须先裁**：`context` 的闭包只碰 kernel 与 sdk 自己的
-   > 类型，整块搬得动；`reports` 的读侧三函数（`read_view` / `read_view_with_ver` / `read_all`）
-   > 还要调门面的 `sealed_declarations()`（`declarations.rs`）与 `ViewUnavailable`（`views.rs`），
-   > 而 `sealed_declarations` 又依赖门面的 `events::SHARED_EVENTS`（清单生成物）与
-   > `symbio_sdk::plugin::rows::row_writes()`。把它整块搬进 sdk 会逼出 `sdk → plugin-api` 的反向边（`D-258` 直接红）。
-   > 因此 `reports` 不是「同一个闭包换地址」，而是**两个闭包**：注册表半（`ReportDecl` /
-   > `submit_reports!` / `validate` / `reports()`，只碰 kernel，搬得动）与读侧半（依赖冻结声明表，
-   > 搬不动）。怎么切要先裁，不在本批顺手造形状。
+   **冻结机制已落地（`D-415`）**：`DeclarationsDecl`（收集类型）、装配与 owner 校验、
+   进程内冻结一次与 `submit_declarations!` 搬进 `crates/symbio-sdk/src/declarations.rs`；
+   门面 `declarations.rs` 只留词汇读法（`vocab` / `declared_event_cell`，27 行），
+   `events.rs`（192，清单生成物）**不动**——CS-008 / CP-004 要求内核与 sdk 生产代码零事件名
+   字面量。`FA-002` 同批下调（`declarations.rs` 175 → 27，合计 2533 → 2387），
+   `HS-002` 120 → 122；`CS-009` 596 → 598（`DeclarationsDecl` 2 格随注册表进入扫描面）。
+
+   > **`reports` 现在是一个闭包，可以整块搬**：它的读侧三函数（`read_view` /
+   > `read_view_with_ver` / `read_all`）调的 `sealed_declarations()` 已随 `D-415` 住进 sdk，
+   > `ViewUnavailable`（`views.rs`）是一份纯枚举。门面转出注册面与读口即可，不再需要把
+   > `reports` 切成两半。
 3. HS-002 / HS-006（`scripts/plugin-surface-audit.mjs`）仍只判「转发了几条」；
    「门面持有实现」这一面由 `FA-001` 判，不重复造第二臂。
 4. 跑 `gate --full`，全绿后提交。
