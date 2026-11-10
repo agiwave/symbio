@@ -4,15 +4,17 @@
 //! 1. **判定 [`approval_gate`]**——风险档与阈值的比较、`approved: true` 放行、
 //!    逐工具的永久放行上限、`mode=auto` 走 `PERMISSION_DENIED`（无人可授权时
 //!    **不产卡**），其余产卡。
-//! 2. **注册面投影 [`ApprovalGate`]**——`meta` / `name` / `risk_for` 原样透传；
-//!    `execute` 只在闸门放行时才落到内层。这条是 vdfs / web / mcp / skill 都受益的
-//!    那条唯一路径（`DefaultToolVisitor::put`）。
+//! 2. **端口执行体 [`GatedExecutor`]**——判定是执行的第一段：拦下时停等载荷按
+//!    `RESULT_KEY` 交回且**不落内层**；放行才拆信封执行。这条是 vdfs / web / mcp /
+//!    skill 都受益的唯一路径（`DefaultToolVisitor::put` 派生端口行时裹上的那个）。
 
 use super::*;
 use serde_json::json;
 use symbio_kernel::capability::failure_kind;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::PluginSimpleRequest;
+use symbio_plugin_api::port::PortFactEmit;
+use symbio_plugin_api::{PortExecContext, PortInput};
 
 /// 最小可判定的能力桩：固定风险、可选动态覆写、记录是否被真正执行。
 struct StubTool {
@@ -60,22 +62,57 @@ impl Capability for StubTool {
     async fn execute(
         &self,
         _args: Value,
-        _env: &ExecEnv,
+        _env: &symbio_kernel::exec::ExecEnv,
         _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> Result<Value, PluginError> {
+    ) -> Result<Value, symbio_kernel::plugin::PluginError> {
         self.executed
             .store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(json!({"ok": true}))
     }
 }
 
-/// `ExecEnv` 的最小构造（本模块只用它做参数透传）——从 plugin 现有测试借来。
-fn env_stub() -> ExecEnv {
-    ExecEnv::new(ExecEventSink::silent(), ExecAbortSignal::new())
+/// 判定用：从桩取风险回答（与 put 收口同一个形状——闭包捕获能力，动态覆写生效）。
+fn risk_of(tool: &Arc<StubTool>) -> RiskOf {
+    let t = Arc::clone(tool);
+    Arc::new(move |args: &Value| t.risk_for(args))
+}
+
+/// 端口执行体用：同一形状裹出 `GatedExecutor`。
+fn gated(tool: &Arc<StubTool>) -> Arc<GatedExecutor> {
+    let cap: Arc<dyn Capability> = tool.clone();
+    Arc::new(GatedExecutor::new(tool.meta(), risk_of(tool), cap))
 }
 
 fn ctx() -> Arc<dyn PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
+}
+
+/// 端口执行上下文：与派发侧同形（ctx 是唯一被用到的字段）。
+fn exec_ctx(c: Arc<dyn PluginInvokeRequest>) -> PortExecContext {
+    PortExecContext {
+        abort: ExecAbortSignal::new(),
+        idempotency_key: "test-1".to_string(),
+        sink: ExecEventSink::Null,
+        emit: PortFactEmit::silent(),
+        ctx: Some(c),
+        subject: String::new(),
+        group: String::new(),
+        session_id: "s".to_string(),
+        origin: None,
+        scratch_dir: None,
+        reader: None,
+        source: String::new(),
+    }
+}
+
+/// 执行体的出口约定：主结果值在 `facts[0]` 的 `RESULT_KEY` 里。
+fn result_of(outcome: &PortOutcome) -> Value {
+    outcome
+        .facts
+        .first()
+        .and_then(|f| f.get(RESULT_KEY))
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 // ==================== 判定：approval_gate ====================
@@ -85,9 +122,13 @@ fn ctx() -> Arc<dyn PluginInvokeRequest> {
 fn high_risk_over_default_threshold_produces_confirm_card() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let c = ctx();
-    let payload = approval_gate(&c, &*tool, &json!({"path": "tmp/x"}))
-        .unwrap()
-        .expect("High > Medium(默认) 应产卡");
+    let payload = approval_gate(
+        &c,
+        &tool.meta(),
+        risk_of(&tool).as_ref(),
+        &json!({"path": "tmp/x"}),
+    )
+    .expect("High > Medium(默认) 应产卡");
     assert_eq!(
         payload.get("failure_kind").and_then(|v| v.as_str()),
         Some(failure_kind::NEEDS_APPROVAL),
@@ -109,7 +150,7 @@ fn low_risk_passes_through_default_threshold() {
     let tool = StubTool::new("read_file", CapabilityRiskLevel::Low);
     let c = ctx();
     assert!(
-        approval_gate(&c, &*tool, &json!({})).unwrap().is_none(),
+        approval_gate(&c, &tool.meta(), risk_of(&tool).as_ref(), &json!({})).is_none(),
         "Low ≤ Medium(默认) 应放行"
     );
 }
@@ -120,9 +161,13 @@ fn low_risk_passes_through_default_threshold() {
 fn approved_argument_bypasses_gate_even_for_high_risk() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let c = ctx();
-    assert!(approval_gate(&c, &*tool, &json!({"approved": true}))
-        .unwrap()
-        .is_none());
+    assert!(approval_gate(
+        &c,
+        &tool.meta(),
+        risk_of(&tool).as_ref(),
+        &json!({"approved": true})
+    )
+    .is_none());
 }
 
 /// 会话阈值 `high` 抬高 ⇒ High 风险也放行（`>` 是严格大于）。
@@ -131,7 +176,7 @@ fn session_threshold_high_allows_high_risk_tool() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let c = ctx();
     c.set(RISK_LEVEL, "high".to_string());
-    assert!(approval_gate(&c, &*tool, &json!({})).unwrap().is_none());
+    assert!(approval_gate(&c, &tool.meta(), risk_of(&tool).as_ref(), &json!({})).is_none());
 }
 
 /// 会话阈值 `low` 降低 ⇒ Medium 风险也要审批（新阈值生效即改变行为——本 ADR 覆盖点）。
@@ -140,7 +185,7 @@ fn session_threshold_low_gates_medium_risk_tool() {
     let tool = StubTool::new("write_file", CapabilityRiskLevel::Medium);
     let c = ctx();
     c.set(RISK_LEVEL, "low".to_string());
-    let payload = approval_gate(&c, &*tool, &json!({})).unwrap();
+    let payload = approval_gate(&c, &tool.meta(), risk_of(&tool).as_ref(), &json!({}));
     assert!(payload.is_some(), "Medium > Low 应拦下");
 }
 
@@ -150,8 +195,7 @@ fn auto_mode_returns_permission_denied_not_confirm_card() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let c = ctx();
     c.set(MODE, "auto".to_string());
-    let payload = approval_gate(&c, &*tool, &json!({}))
-        .unwrap()
+    let payload = approval_gate(&c, &tool.meta(), risk_of(&tool).as_ref(), &json!({}))
         .expect("auto 模式仍需给出失败载荷");
     assert_eq!(
         payload["failure_kind"].as_str(),
@@ -168,17 +212,21 @@ fn auto_mode_returns_permission_denied_not_confirm_card() {
     );
 }
 
-/// `risk_for` 覆写生效（shell 按命令分级的机制面）——闸门读工具动态风险，
+/// 风险回答覆写生效（shell 按命令分级的机制面）——闸门读动态风险，
 /// 不看工具名；否则「声明 Medium 但按高危命令升到 High」这类工具会漏拦。
 #[test]
-fn dynamic_risk_from_risk_for_is_what_gate_uses() {
-    // meta.risk = Medium；risk_for 覆写返回 High
+fn dynamic_risk_from_risk_fn_is_what_gate_uses() {
+    // meta.risk = Medium；风险回答覆写返回 High
     let tool = StubTool::new("shell", CapabilityRiskLevel::Medium)
         .with_dyn_risk(CapabilityRiskLevel::High);
     let c = ctx();
-    let payload = approval_gate(&c, &*tool, &json!({"command": "rm -rf /"}))
-        .unwrap()
-        .expect("risk_for 覆写后应按 High 拦下");
+    let payload = approval_gate(
+        &c,
+        &tool.meta(),
+        risk_of(&tool).as_ref(),
+        &json!({"command": "rm -rf /"}),
+    )
+    .expect("风险覆写后应按 High 拦下");
     assert_eq!(
         payload["failure_kind"].as_str(),
         Some(failure_kind::NEEDS_APPROVAL)
@@ -196,13 +244,13 @@ fn per_tool_grant_ceiling_allows_only_that_tool() {
 
     let shell = StubTool::new("shell", CapabilityRiskLevel::High);
     assert!(
-        approval_gate(&c, &*shell, &json!({})).unwrap().is_none(),
+        approval_gate(&c, &shell.meta(), risk_of(&shell).as_ref(), &json!({})).is_none(),
         "本次风险 ≤ 该工具上限 ⇒ 放行"
     );
 
     let other = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     assert!(
-        approval_gate(&c, &*other, &json!({})).unwrap().is_some(),
+        approval_gate(&c, &other.meta(), risk_of(&other).as_ref(), &json!({})).is_some(),
         "授权只管自己那一格，别的工具不继承"
     );
 }
@@ -213,9 +261,13 @@ fn grant_ceiling_below_the_call_risk_still_asks() {
     let tool = StubTool::new("shell", CapabilityRiskLevel::High);
     let c = ctx();
     c.set(APPROVAL_GRANTS, json!({"shell": "medium"}).to_string());
-    let payload = approval_gate(&c, &*tool, &json!({"command": "rm -rf /"}))
-        .unwrap()
-        .expect("High > 上限 Medium ⇒ 仍要审批");
+    let payload = approval_gate(
+        &c,
+        &tool.meta(),
+        risk_of(&tool).as_ref(),
+        &json!({"command": "rm -rf /"}),
+    )
+    .expect("High > 上限 Medium ⇒ 仍要审批");
     assert_eq!(
         payload["prompt"]["risk_level"].as_str(),
         Some("high"),
@@ -223,52 +275,71 @@ fn grant_ceiling_below_the_call_risk_still_asks() {
     );
 }
 
-// ==================== 注册面投影：ApprovalGate ====================
+// ==================== 端口执行体：GatedExecutor ====================
 
-/// wrapper **不改** `meta` / `name` / `risk_for`——否则按名查表、目录页与
-/// 分级判定都会看到包装层给的默认档，`vdfs_delete` 的 High 声明就丢了。
+/// 放行路径：`approved: true` 时执行体落到内层；`executed` 置位，结果按
+/// `RESULT_KEY` 交回。
 #[tokio::test]
-async fn wrapper_preserves_meta_name_and_dynamic_risk() {
-    let inner = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
-    let gated = ApprovalGate::new(inner.clone());
-    assert_eq!(gated.name(), "vdfs_delete");
-    assert_eq!(gated.meta().risk, Some(CapabilityRiskLevel::High));
-    assert_eq!(gated.risk_for(&json!({})), CapabilityRiskLevel::High);
-}
-
-/// 放行路径：`approved: true` 时 wrapper 落到内层执行；`executed` 置位。
-#[tokio::test]
-async fn wrapper_executes_inner_when_approved() {
-    let inner = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
-    let gated = ApprovalGate::new(inner.clone());
-    let c = ctx();
-    let out = gated
-        .execute(json!({"approved": true}), &env_stub(), c)
-        .await
-        .unwrap();
-    assert_eq!(out["ok"], json!(true));
+async fn executor_executes_inner_when_approved() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let g = gated(&tool);
+    let out = g
+        .execute(
+            exec_ctx(ctx()),
+            PortInput {
+                port: "vdfs_delete".to_string(),
+                payload: json!({"approved": true}),
+            },
+        )
+        .await;
+    assert!(out.success(), "放行路径不该报错");
+    assert_eq!(result_of(&out)["ok"], json!(true));
     assert!(
-        inner.executed.load(std::sync::atomic::Ordering::SeqCst),
+        tool.executed.load(std::sync::atomic::Ordering::SeqCst),
         "闸门放行必须落到内层"
     );
 }
 
-/// 拦截路径：wrapper 返回确认卡载荷、**不**触发内层执行。
+/// 拦截路径：执行体交回确认卡载荷（`failure_kind` 在结果里）、**不**触发内层执行。
 #[tokio::test]
-async fn wrapper_returns_card_without_running_inner() {
-    let inner = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
-    let gated = ApprovalGate::new(inner.clone());
-    let c = ctx();
-    let out = gated
-        .execute(json!({"path": "tmp/x"}), &env_stub(), c)
-        .await
-        .unwrap();
+async fn executor_returns_card_without_running_inner() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let g = gated(&tool);
+    let out = g
+        .execute(
+            exec_ctx(ctx()),
+            PortInput {
+                port: "vdfs_delete".to_string(),
+                payload: json!({"path": "tmp/x"}),
+            },
+        )
+        .await;
+    assert!(out.success(), "停等不是失败：载荷里带 failure_kind");
     assert_eq!(
-        out["failure_kind"].as_str(),
+        result_of(&out)["failure_kind"].as_str(),
         Some(failure_kind::NEEDS_APPROVAL),
     );
     assert!(
-        !inner.executed.load(std::sync::atomic::Ordering::SeqCst),
+        !tool.executed.load(std::sync::atomic::Ordering::SeqCst),
         "被拦下时绝不落到内层——这就是「拦下不落内层」的核心不变量"
     );
+}
+
+/// 没有调用方上下文 ⇒ 诚实的非重试失败（闸门连判定的材料都没有）。
+#[tokio::test]
+async fn executor_without_request_context_fails_nonretryable() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let g = gated(&tool);
+    let mut exec = exec_ctx(ctx());
+    exec.ctx = None;
+    let out = g
+        .execute(
+            exec,
+            PortInput {
+                port: "vdfs_delete".to_string(),
+                payload: json!({}),
+            },
+        )
+        .await;
+    assert!(!out.success(), "无信封无法拆参，必须显式失败");
 }

@@ -7,12 +7,14 @@
 //! 其中之一。它不是任何插件的内部物，故按「不存在第二种实现的机制底座直接组合具体类型」
 //! 落在实现层——完整判据见 [`symbio_providers::collectors`] 的模块文档。
 
-use super::approval::ApprovalGate;
+use super::approval::GatedExecutor;
 use async_trait::async_trait;
 use indexmap::IndexMap;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use symbio_kernel::capability::{Capability, CapabilityFamily, CapabilityRow, Registry};
+use symbio_kernel::capability::{CapabilityFamily, CapabilityRiskLevel, CapabilityRow, Registry};
+use symbio_plugin_api::PortExecutor;
 use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存注册表实现，一次会话请求一个实例
@@ -67,24 +69,31 @@ impl Default for DefaultToolVisitor {
 #[async_trait]
 impl Registry for DefaultToolVisitor {
     async fn put(&self, row: CapabilityRow) {
-        // 闸门住在收口点：每条进表的**工具**能力都裹一层 [`ApprovalGate`]——
-        // `meta` / `name` / `risk_for` 原样透传（见 `approval.rs`），故 `get` 与
-        // `list` 看到的名字、声明位（三位）与风险档都不变；判定只发生在
-        // 执行那一步（`capability_invoke` → `Capability::execute`）。
+        // 闸门住在收口点：每条进表的**工具**能力在派生端口行时裹进执行体
+        // （`GatedExecutor`：判定是执行的第一段，`D-385` / `D-440` ③-A）。
+        // `meta` / `name` / `risk_for` 在收口处取好快照与风险回答，工具行本体
+        // 原样入表——`get` 与 `list` 看到的名字、声明位与风险档都不变；判定只
+        // 发生在执行那一步（端口查表 → `GatedExecutor::execute`）。
         // 非工具行（其余各族）不裹，原样入表。
         let row = match row.cap().cloned() {
             Some(cap) => {
-                let gated = Arc::new(ApprovalGate::new(cap));
+                let meta = cap.meta();
+                let risk: Arc<dyn Fn(&Value) -> CapabilityRiskLevel + Send + Sync> = {
+                    let cap = Arc::clone(&cap);
+                    Arc::new(move |args: &Value| cap.risk_for(args))
+                };
+                let executor: Arc<dyn PortExecutor> =
+                    Arc::new(GatedExecutor::new(meta.clone(), risk, Arc::clone(&cap)));
                 // 工具就是端口（D-440 ②）：工具行入表的同时派生它的端口行
                 // （端口名 = 行名，执行体裹已过闸的同一能力）。派发侧不再从行上取
                 // 执行对象，改按端口名查这张表；`Capability` 退场后这里就是
                 // 工具端口唯一的注册点。
                 self.put(crate::tool_port::tool_port_row(
-                    gated.clone(),
-                    Capability::name(gated.as_ref()).as_str(),
+                    executor,
+                    meta.name.as_str(),
                 ))
                 .await;
-                CapabilityRow::tool(gated)
+                CapabilityRow::tool(cap)
             }
             None => row,
         };

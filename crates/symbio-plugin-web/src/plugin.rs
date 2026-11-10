@@ -148,7 +148,8 @@ impl Plugin for WebPlugin {
             let args = ctx
                 .payload::<serde_json::Value>()
                 .unwrap_or(serde_json::Value::Null);
-            if let Some(payload) = approval_gate(&ctx, tool.as_ref(), &args)? {
+            let meta = tool.meta();
+            if let Some(payload) = approval_gate(&ctx, &meta, &|a| tool.risk_for(a), &args) {
                 return Ok(PluginPayload::new(&payload));
             }
             return symbio_plugin_api::capability_invoke(tool.as_ref(), ctx).await;

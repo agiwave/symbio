@@ -213,11 +213,12 @@ impl Plugin for LocalPlugin {
 
         let payload = ctx.payload::<serde_json::Value>()?;
         if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
-            // 审批闸门住在能力进表的收口点（`DefaultToolVisitor::put` 的
-            // `ApprovalGate` 装饰器）；`route` 是本插件的注册表未命中回落，
+            // 审批闸门住在端口执行体的第一段（`DefaultToolVisitor::put` 派生端口行
+            // 时裹上的 `GatedExecutor`）；`route` 是本插件的注册表未命中回落，
             // 拿到的是**未包壳**的裸工具，判定只能在这里自己走一遍——
-            // 但判定与装饰器共用同一份真源 [`symbio_providers::collectors::approval_gate`]。
-            if let Some(payload) = approval_gate(&ctx, tool.as_ref(), &payload)? {
+            // 但判定与执行体共用同一份真源 [`symbio_providers::collectors::approval_gate`]。
+            let meta = tool.meta();
+            if let Some(payload) = approval_gate(&ctx, &meta, &|a| tool.risk_for(a), &payload) {
                 return Ok(PluginPayload::new(&payload));
             }
 
