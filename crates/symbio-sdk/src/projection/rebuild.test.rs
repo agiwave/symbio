@@ -460,7 +460,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
 /// 「正常结束」同形。旧形状靠一条**空正文节点**承这个状态，那正是 `dialog` 分支存在
 /// 的理由；改成终态移交之后，那条空节点不必存在。
 #[test]
-fn aborted_turn_carries_its_terminal_status_onto_the_turn_node() {
+fn aborted_status_lands_on_the_round_root() {
     let events = vec![
         user_event("u-node", "慢慢说"),
         Event::pending(
@@ -482,16 +482,16 @@ fn aborted_turn_carries_its_terminal_status_onto_the_turn_node() {
     ];
 
     let got = rebuild(&events, &CHAT, &MESSAGE);
-    let turn = got
+    let root = got
         .iter()
         .find(|m| m.id == "u-node")
         .expect("用户节点即轮节点");
     assert_eq!(
-        turn.status,
+        root.status,
         Some(NodeStatus::Aborted),
         "中止的终态必须写到轮根上，否则这一轮与「正常结束」同形"
     );
-    assert_eq!(turn.error, None, "中止不是失败，不带错误信息");
+    assert_eq!(root.error, None, "中止不是失败，不带错误信息");
     assert_eq!(
         shapes(&got)
             .iter()
@@ -836,7 +836,10 @@ fn answered_turn_folds_into_the_same_tree_as_a_work_turn() {
     let msgs = rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE);
     assert_eq!(shapes(&msgs).len(), 3, "轮骨架 + 思考子 + 正文子");
     let reply = shape(&msgs[2]);
-    assert_eq!(reply.id, "T1-text", "正文身份取载荷 `answer_id`（与写侧同源）");
+    assert_eq!(
+        reply.id, "T1-text",
+        "正文身份取载荷 `answer_id`（与写侧同源）"
+    );
     assert_eq!(reply.ty, NodeForm::Body);
     assert_eq!(
         reply.parent.as_deref(),

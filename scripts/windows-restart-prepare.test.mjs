@@ -131,8 +131,15 @@ test('Windows prepare-only: real Cargo fixture and safety boundaries', { skip: p
         await assert.rejects(run(process.execPath, ['-e', source], { cwd: root, timeoutMs: mode === 'timeout' ? 200 : 10000,
           out, err, cancelFile: mode === 'cancel' ? flag : undefined }), mode === 'timeout' ? /Timeout/ : /Cancelled/);
       } finally { clearTimeout(timer); fs.closeSync(out); fs.closeSync(err); }
-      for (let i = 0; i < 100 && !fs.existsSync(marker); i++) await sleep(100);
-      assert.equal(fs.readFileSync(marker, 'utf8'), 'natural exit');
+      // 判据是**内容到了**（子进程跑完那 1s 的活、没被杀），不是文件出现：子进程的
+      // `writeFileSync` 先创建再写入，读到「在、但还空」是合法中间态。只等 `existsSync`
+      // 再立刻读，会把这段窗口判成「没跑完」——批内并发一高就必假红（实测本轮门禁）。
+      let body = '';
+      for (let i = 0; i < 100 && body !== 'natural exit'; i++) {
+        if (fs.existsSync(marker)) body = fs.readFileSync(marker, 'utf8');
+        if (body !== 'natural exit') await sleep(100);
+      }
+      assert.equal(body, 'natural exit');
       await assertUntouched();
     });
   }
