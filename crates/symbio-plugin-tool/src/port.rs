@@ -43,7 +43,7 @@ use crate::declarations::EVENT_AUTHZ_DENIED;
 use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
-    capability_invoke, capability_to_wire,
+    capability_to_wire,
     chat_node::{ChatNode, NodeStatus, CHAT_STYLE_TAG_TOOL},
     effects::annotations,
     effects::apply,
@@ -2053,9 +2053,43 @@ impl ToolPort {
                 let visitor = tool_visitor.clone();
                 let tool_ctx2 = tool_ctx.clone();
                 let canonical = invoke_name.clone();
+                let exec2 = exec.clone();
+                let args2 = args.clone();
                 Box::pin(async move {
-                    match visitor.get(&canonical).await.and_then(|r| r.cap().cloned()) {
-                        Some(cap) => capability_invoke(cap.as_ref(), tool_ctx2).await,
+                    // 按端口名从收集表取执行体（`D-440` ②：工具就是端口；行只携带
+                    // 数据，执行面在端口行上）。执行体裹的是注册收口点已过闸的
+                    // 同一个能力，闸门判定只有一份。
+                    match symbio_plugin_api::port_executor_of(visitor.as_ref(), &canonical).await {
+                        Some(executor) => {
+                            let exec_ctx = PortExecContext {
+                                ctx: Some(tool_ctx2),
+                                ..exec2
+                            };
+                            let outcome = executor
+                                .execute(
+                                    exec_ctx,
+                                    PortInput {
+                                        port: canonical.clone(),
+                                        payload: args2,
+                                    },
+                                )
+                                .await;
+                            // 桥的出口约定：结果值在 `facts` 的 `RESULT_KEY` 项里；
+                            // 失败走 `error`。信封 ↔ 结果的换算仍在桥内经
+                            // `capability_invoke` 收口，本处只解包。
+                            match outcome.error {
+                                Some((_, why)) => Err(PluginError::InternalError(why)),
+                                None => {
+                                    let value = outcome
+                                        .facts
+                                        .first()
+                                        .and_then(|f| f.get(symbio_plugin_api::RESULT_KEY))
+                                        .cloned()
+                                        .unwrap_or(serde_json::Value::Null);
+                                    Ok(PluginPayload::new(&value))
+                                }
+                            }
+                        }
                         None => Err(PluginError::NotFound(format!(
                             "Tool not found: {canonical}"
                         ))),

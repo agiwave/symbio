@@ -4778,6 +4778,7 @@ dependencies = [
  "indexmap 2.14.2",
  "serde_json",
  "symbio-kernel",
+ "symbio-plugin-api",
  "symbio-sdk",
  "tempfile",
  "tokio",

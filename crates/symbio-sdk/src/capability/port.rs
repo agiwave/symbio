@@ -579,3 +579,26 @@ pub fn port_rows(provider: &Arc<dyn PortProvider>) -> Vec<CapabilityRow> {
         })
         .collect()
 }
+
+/// 执行体交回**主结果值**的约定键：`facts` 里带这个键的项是调用方要的纯值，其余
+/// 事实是端口插件自己声明的世界事实。（`D-440` ②：工具行执行体的结果经它交回，
+/// 派发侧按名取出后继续自己的编排。）
+pub const RESULT_KEY: &str = "result";
+
+/// 按端口名从收集表取执行体（`D-440`：端口集是装配期收集出来的，查表即得）。
+///
+/// 遍历 `PORT_FAMILY` 行、按提供者申报的端口名匹配——与宿主 `gather` 折执行体表
+/// 是同一条读法，只是不要求调用方预折整张表：按名一次取一个。工具世界的派发步
+/// （一笔 `port.tool` 债内的多次调用）按此逐名解析，行上不再持执行对象。
+pub async fn port_executor_of(visitor: &dyn Registry, port: &str) -> Option<Arc<dyn PortExecutor>> {
+    for row in visitor.list(PORT_FAMILY).await {
+        let Some(payload) = row.payload::<PortPayload>() else {
+            continue;
+        };
+        let provider = payload.provider();
+        if provider.ports().iter().any(|p| p == port) {
+            return provider.executor();
+        }
+    }
+    None
+}

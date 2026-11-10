@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
+use symbio_kernel::capability::{Capability, CapabilityFamily, CapabilityRow, Registry};
 use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存注册表实现，一次会话请求一个实例
@@ -73,7 +73,19 @@ impl Registry for DefaultToolVisitor {
         // 执行那一步（`capability_invoke` → `Capability::execute`）。
         // 非工具行（其余各族）不裹，原样入表。
         let row = match row.cap().cloned() {
-            Some(cap) => CapabilityRow::tool(Arc::new(ApprovalGate::new(cap))),
+            Some(cap) => {
+                let gated = Arc::new(ApprovalGate::new(cap));
+                // 工具就是端口（D-440 ②）：工具行入表的同时派生它的端口行
+                // （端口名 = 行名，执行体裹已过闸的同一能力）。派发侧不再从行上取
+                // 执行对象，改按端口名查这张表；`Capability` 退场后这里就是
+                // 工具端口唯一的注册点。
+                self.put(crate::tool_port::tool_port_row(
+                    gated.clone(),
+                    Capability::name(gated.as_ref()).as_str(),
+                ))
+                .await;
+                CapabilityRow::tool(gated)
+            }
             None => row,
         };
         self.record_family(row.family()).await;

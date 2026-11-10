@@ -8,9 +8,9 @@
 //!
 //! 语义细则（端口集开放 / 提供者随能力表走 / 判重与缺席）见 sdk 侧模块文档。
 
-pub use symbio_sdk::capability::port::{capability_port_check, capability_port_of};
-pub use symbio_sdk::capability::port::{check_port_name, port_family, port_row_name};
-pub use symbio_sdk::capability::port::{port_rows, AuthzVerdict, PendingPrompt};
+pub use symbio_sdk::capability::port::{capability_port_check, capability_port_of, port_row_name};
+pub use symbio_sdk::capability::port::{check_port_name, port_executor_of, port_family};
+pub use symbio_sdk::capability::port::{port_rows, AuthzVerdict, PendingPrompt, RESULT_KEY};
 pub use symbio_sdk::capability::port::{PortCapabilities, PortErrorClass, PortExecContext};
 pub use symbio_sdk::capability::port::{PortExecHandles, PortExecutor, PortFact};
 pub use symbio_sdk::capability::port::{PortFactEmit, PortFactReader, PortFactWriter};

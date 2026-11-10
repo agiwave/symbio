@@ -303,7 +303,59 @@ fn subagent_pending_payload_is_recognized_as_pending_intent() {
 
 // ==================== 注册面 ====================
 
+/// 能力桥（与 `provider-collectors::tool_port` 的 `CapabilityBridge` 同形——夹具
+/// 不依赖那个 crate，就地最小复刻；派发侧读到的出口约定两边一致：结果值在
+/// `facts` 的 `RESULT_KEY` 项里，失败走 `error`）。
+struct FixtureBridge {
+    cap: Arc<dyn Capability>,
+}
+
+#[async_trait]
+impl PortExecutor for FixtureBridge {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(request) = exec.ctx else {
+            return PortOutcome::failed(PortErrorClass::NonRetryable, "no caller ctx");
+        };
+        use symbio_plugin_api::PluginInvokeRequestExt;
+        let _ = request.set_payload(input.payload);
+        match symbio_plugin_api::capability_invoke(self.cap.as_ref(), request).await {
+            Ok(payload) => {
+                let value = payload
+                    .get::<serde_json::Value>()
+                    .unwrap_or(serde_json::Value::Null);
+                let mut out = PortOutcome::ok();
+                out.facts = vec![json!({ symbio_plugin_api::RESULT_KEY: value })];
+                out
+            }
+            Err(e) => PortOutcome::failed(PortErrorClass::NonRetryable, e.to_string()),
+        }
+    }
+}
+
+/// 单端口提供者（端口名 = 工具行名），与 `tool_port::ToolRowPort` 同形。
+struct FixturePort {
+    name: String,
+    executor: Arc<dyn PortExecutor>,
+}
+
+impl PortProvider for FixturePort {
+    fn ports(&self) -> Vec<String> {
+        Vec::from([self.name.clone()])
+    }
+
+    fn provider_id(&self) -> &str {
+        "fixture"
+    }
+
+    fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
+        Some(Arc::clone(&self.executor))
+    }
+}
+
 /// 最小登记表（与 `plugin-api` 的 port.test 同款夹具）。
+///
+/// `put` 带同一条派生（`D-440` ②）：工具行入表的同时进端口表——生产里这是
+/// `DefaultToolVisitor::put` 的职责，夹具按同一形状派生，派发侧的查表才有得读。
 struct FakeRegistry {
     rows: RwLock<Vec<Arc<CapabilityRow>>>,
 }
@@ -319,6 +371,16 @@ impl FakeRegistry {
 #[async_trait]
 impl Registry for FakeRegistry {
     async fn put(&self, row: CapabilityRow) {
+        if let Some(cap) = row.cap().cloned() {
+            let name = row.name().to_string();
+            let executor: Arc<dyn PortExecutor> = Arc::new(FixtureBridge { cap });
+            self.rows.write().await.push(Arc::new(CapabilityRow::new(
+                symbio_plugin_api::port::PORT_FAMILY,
+                symbio_plugin_api::port_row_name(&name, "fixture"),
+                PortPayload::new(Arc::new(FixturePort { name, executor })),
+                false,
+            )));
+        }
         self.rows.write().await.push(Arc::new(row));
     }
 
