@@ -49,7 +49,7 @@ async fn execute_without_a_live_host_reports_honestly() {
     let env = ExecEnv::from_request(&*ctx);
 
     let err = tool
-        .execute(json!({ "action": "get" }), &env, ctx)
+        .run(json!({ "action": "get" }), &env, ctx)
         .await
         .expect_err("没有宿主必须失败");
     assert!(
@@ -70,7 +70,7 @@ async fn execute_without_a_provider_reports_honestly() {
     let env = ExecEnv::from_request(&*ctx);
 
     let err = tool
-        .execute(json!({ "action": "get" }), &env, ctx)
+        .run(json!({ "action": "get" }), &env, ctx)
         .await
         .expect_err("没有 VDFS 视图必须失败");
     assert!(

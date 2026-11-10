@@ -3,7 +3,10 @@ use crate::types::Skill;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_plugin_api::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
+use symbio_plugin_api::{
+    port_result, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PortErrorClass,
+    PortExecContext, PortExecutor, PortInput, PortOutcome,
+};
 
 pub struct SkillExecuteTool {
     skills: Vec<Skill>,
@@ -37,11 +40,8 @@ impl SkillExecuteTool {
         let response = assemble_response(skill, args.get("args").and_then(Value::as_str))?;
         Ok(serde_json::to_value(&response)?)
     }
-}
 
-#[async_trait]
-impl Capability for SkillExecuteTool {
-    fn meta(&self) -> CapabilityMeta {
+    pub fn meta(&self) -> CapabilityMeta {
         let skill_names = self.build_skill_names();
 
         CapabilityMeta {
@@ -70,8 +70,24 @@ impl Capability for SkillExecuteTool {
             ..Default::default()
         }
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for SkillExecuteTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl SkillExecuteTool {
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,

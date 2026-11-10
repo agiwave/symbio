@@ -33,9 +33,8 @@ use super::{fs::VDFS_ADDR_ROOT, host, protocol as p, provider::ToolVdfs, tools};
 use std::sync::{Arc, Weak};
 use symbio_plugin_api::PLUGIN_ID_VDFS;
 use symbio_plugin_api::{
-    CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
-    TRAVERSE_AVAILABLE_TOOLS,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
 use tokio::sync::RwLock;
 
@@ -125,8 +124,8 @@ impl Plugin for VdfsPlugin {
             // 封装 provider 持有本次广播的能力管理器；工具注册进同一个 visitor，
             // 执行时其中已注册好全部挂载 provider（容器同时注册的组合根供前端链路用）。
             let provider = Arc::new(ToolVdfs::new(visitor.clone()));
-            for tool in tools::vdfs_tools(provider) {
-                visitor.put(CapabilityRow::tool(tool)).await;
+            for (meta, executor) in tools::vdfs_tools(provider) {
+                symbio_providers::register_tool(visitor.as_ref(), meta, None, executor).await;
             }
         }
 

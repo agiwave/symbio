@@ -2,8 +2,8 @@
 //!
 //! 环只按端口名问一笔债；线上名怎么解析（`mcp__fs__read` → 能力名）、挂死怎么判
 //! （空闲而不是总时长）、结果怎么压成一段文本，都是本插件的私事。工具世界由能力表
-//! 承载：本类型经 `Registry::get` + `capability_invoke` 调各工具插件的 `Capability`，
-//! 自己不做执行。
+//! 承载：本类型按线上名解析出 canonical 名，再经 `port_executor_of` 取该工具自己
+//! 的端口执行体（工具即端口，D-440），自己不做执行。
 //!
 //! ## 载荷契约（环 → 本插件）
 //!
@@ -487,14 +487,15 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
             None
         };
         // 注册表里没有可判的能力（route-only 工具）⇒ 放行是**交给下游路由闸门**的
-        // 延迟判定；不能凭一个猜出来的风险档拒绝它。
+        // 延迟判定；不能凭一个猜出来的风险档拒绝它。风险档读工具行的自述快照
+        // （D-440：行是纯数据，`risk_for` 随 `Capability` 退场，动态档由注册收口点
+        // 的执行体闸在执行时判）。
         let resolved = match (name, visitor.as_ref()) {
             (Some(name), Some(visitor)) => match resolve(name, known.iter().map(String::as_str)) {
                 Some(canonical) => visitor
                     .get(&canonical)
                     .await
-                    .and_then(|row| row.cap().cloned())
-                    .map(|cap| (canonical, cap.risk_for(&args))),
+                    .map(|row| (canonical, row.meta().effective_risk())),
                 None => None,
             },
             _ => None,
@@ -2076,7 +2077,7 @@ impl ToolPort {
                                 .await;
                             // 桥的出口约定：结果值在 `facts` 的 `RESULT_KEY` 项里；
                             // 失败走 `error`。信封 ↔ 结果的换算仍在桥内经
-                            // `capability_invoke` 收口，本处只解包。
+                            // `port_result` 收口，本处只解包。
                             match outcome.error {
                                 Some((_, why)) => Err(PluginError::InternalError(why)),
                                 None => {

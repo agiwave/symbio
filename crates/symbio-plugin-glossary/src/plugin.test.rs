@@ -2,8 +2,8 @@
 
 use super::{GlossaryPlugin, GlossaryTool};
 use crate::behavior::GLOSSARY_RECORD;
+use symbio_plugin_api::CapabilityCategory;
 use symbio_plugin_api::PLUGIN_ID_GLOSSARY;
-use symbio_plugin_api::{Capability, CapabilityCategory};
 
 #[test]
 fn the_plugin_identity_comes_from_the_manifest() {
@@ -19,4 +19,11 @@ fn the_tool_declares_its_behavior() {
     assert_eq!(meta.name, "glossary_define");
     assert!(meta.declares(GLOSSARY_RECORD));
     assert_eq!(meta.category, Some(CapabilityCategory::Other));
+}
+
+/// `meta.declares` 是元数据自有的判据（不再经由已退场的 `Capability` trait）。
+#[test]
+fn the_meta_declares_directly() {
+    let meta = GlossaryTool.meta();
+    assert!(!meta.declares("glossary_other"));
 }

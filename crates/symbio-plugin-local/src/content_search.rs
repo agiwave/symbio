@@ -1,4 +1,4 @@
-//! 内容搜索工具 - 使用正则表达式搜索文件内容 - 实现 Tool trait
+//! 内容搜索工具 —— 工具端口执行体（`PortExecutor`），使用正则表达式搜索文件内容
 //!
 //! 直接调用 ripgrep 库（grep / grep-searcher / grep-regex / ignore）完成跨平台搜索，
 //! 不依赖 rg / PowerShell / grep 等外部可执行文件，各操作系统行为一致，并遵循 .gitignore。
@@ -17,8 +17,9 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse,
+    port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PortErrorClass, PortExecContext, PortExecutor,
+    PortInput, PortOutcome,
 };
 
 const MAX_RESULTS: usize = 1000;
@@ -415,9 +416,8 @@ fn type_to_globs(ty: &str) -> &'static [&'static str] {
     }
 }
 
-#[async_trait]
-impl Capability for ContentSearchTool {
-    fn meta(&self) -> CapabilityMeta {
+impl ContentSearchTool {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: "content_search".to_string(),
             description:
@@ -484,7 +484,7 @@ impl Capability for ContentSearchTool {
         }
     }
 
-    async fn execute(
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,
@@ -500,6 +500,20 @@ impl Capability for ContentSearchTool {
         }
         let data = self.execute_inner(&args, &workdir_str).await?;
         Ok(serde_json::to_value(&data)?)
+    }
+}
+
+#[async_trait]
+impl PortExecutor for ContentSearchTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
     }
 }
 

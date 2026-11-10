@@ -26,9 +26,9 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{
-    vdfs_context, Capability, CapabilityMeta, DynVdfsProvider, ExecEnv, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, VdfsContent, VdfsContext, VdfsRequest,
-    VdfsResponse, SESSION_ID,
+    port_result, vdfs_context, CapabilityMeta, DynVdfsProvider, ExecEnv, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PortErrorClass, PortExecContext, PortExecutor,
+    PortInput, PortOutcome, VdfsContent, VdfsContext, VdfsRequest, VdfsResponse, SESSION_ID,
 };
 
 /// 心跳间隔下限（秒）：调度器扫描周期 15s + 抖动 0-30s，低于 10s 的间隔
@@ -49,9 +49,8 @@ impl HeartbeatTool {
     }
 }
 
-#[async_trait]
-impl Capability for HeartbeatTool {
-    fn meta(&self) -> CapabilityMeta {
+impl HeartbeatTool {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: "heartbeat".to_string(),
             description: "设置当前会话的心跳任务：会话空闲达到指定间隔后，自动发送提示词触发一轮工作（后台无人值守执行）。action=set 启用并更新参数；action=cancel 停用；action=get 查看当前配置（默认）。".to_string(),
@@ -85,8 +84,24 @@ impl Capability for HeartbeatTool {
             ..Default::default()
         }
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for HeartbeatTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl HeartbeatTool {
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,

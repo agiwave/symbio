@@ -16,12 +16,13 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 
 const MAX_ENTRIES: usize = 2000;
 
-/// 列目录工具（框架原生 `Capability`）
+/// 列目录工具（工具端口执行体）
 pub struct ListTool {
     provider: Arc<ToolVdfs>,
 }
@@ -30,11 +31,8 @@ impl ListTool {
     pub fn new(provider: Arc<ToolVdfs>) -> Self {
         Self { provider }
     }
-}
 
-#[async_trait]
-impl Capability for ListTool {
-    fn meta(&self) -> CapabilityMeta {
+    pub fn meta(&self) -> CapabilityMeta {
         tool(
             "vdfs_list",
             "列出目录下的直接子项（文件与子目录）。每项返回 name / type（directory|file）/ size / modified；支持 ignore 按名称 glob 过滤（如 ['*.tmp','node_modules']）。系统资源类别挂接在虚拟目录 '.vdfsv2' 下——列 '.vdfsv2' 可枚举当前可访问的全部类别（如 plugin_manager/session 等），列 '.vdfsv2/<类别>/...' 深入具体资源。",
@@ -56,8 +54,24 @@ impl Capability for ListTool {
             &[],
         )
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for ListTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl ListTool {
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,

@@ -215,11 +215,9 @@ impl Plugin for HeartbeatPlugin {
         let path = ctx.get(PATH).unwrap_or_default();
         if path == TRAVERSE_AVAILABLE_TOOLS {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-                visitor
-                    .put(CapabilityRow::tool(Arc::new(HeartbeatTool::new(
-                        Arc::downgrade(&self),
-                    ))))
-                    .await;
+                let tool = HeartbeatTool::new(Arc::downgrade(&self));
+                let meta = tool.meta();
+                symbio_providers::register_tool(visitor.as_ref(), meta, None, Arc::new(tool)).await;
             }
         }
         if path == TRAVERSE_AVAILABLE_OPTIONS {

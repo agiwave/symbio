@@ -38,9 +38,9 @@ mod approval;
 mod tool_port;
 mod tool_visitor;
 
-pub use approval::approval_gate;
+pub use approval::{approval_gate, RiskOf};
 pub use tool_port::tool_port_row;
-pub use tool_visitor::DefaultToolVisitor;
+pub use tool_visitor::{register_tool, DefaultToolVisitor};
 
 use std::sync::Arc;
 use symbio_kernel::capability::Registry;

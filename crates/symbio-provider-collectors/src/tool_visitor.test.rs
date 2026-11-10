@@ -5,9 +5,7 @@
 
 use super::*;
 
-use symbio_kernel::capability::{family, Capability, CapabilityMeta, CapabilityRow};
-use symbio_kernel::exec::ExecEnv;
-use symbio_kernel::plugin::PluginError;
+use symbio_kernel::capability::{family, CapabilityMeta, CapabilityRow};
 use symbio_kernel::present::DetailField;
 use symbio_kernel::vdfs::{
     VdfsContent, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
@@ -121,7 +119,7 @@ async fn new_active_row_demotes_the_previous_one() {
 #[tokio::test]
 async fn key_space_is_shared_across_kinds() {
     let mgr = DefaultToolVisitor::new();
-    mgr.put(CapabilityRow::tool(decl_tool("web/search"))).await;
+    mgr.put(CapabilityRow::tool(decl_meta("web/search"))).await;
     register(&mgr, Some("web/search"), &["web/search"]).await;
 
     assert_eq!(
@@ -164,36 +162,14 @@ async fn system_prompt_overwrite_keeps_first_registration_slot() {
 // 只由插件侧的使用方式间接兜着。表的三方法落位后，把语义钉在本文件：
 // **顺序 / 覆盖 / 按名取 / 两种口径逐条相等**。
 
-/// 只带元数据的最小能力桩：注册面只读 `meta()`，执行永不到达。
-struct DeclTool(CapabilityMeta);
-
-#[async_trait]
-impl Capability for DeclTool {
-    fn meta(&self) -> CapabilityMeta {
-        self.0.clone()
-    }
-
-    fn name(&self) -> String {
-        self.0.name.clone()
-    }
-
-    async fn execute(
-        &self,
-        _args: serde_json::Value,
-        _env: &ExecEnv,
-        _ctx: Arc<dyn symbio_kernel::plugin::PluginInvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        Ok(serde_json::json!({"ok": true}))
-    }
-}
-
-fn decl_tool(name: &str) -> Arc<dyn Capability> {
-    Arc::new(DeclTool(CapabilityMeta {
+/// 只带元数据的最小桩：工具行是纯数据（`D-440` ③），注册面只读 `meta()`。
+fn decl_meta(name: &str) -> CapabilityMeta {
+    CapabilityMeta {
         name: name.to_string(),
         description: format!("{name} 的说明"),
         input_schema: serde_json::json!({"type": "object"}),
         ..Default::default()
-    }))
+    }
 }
 
 /// **守门人**（DE-025 §3）：同一份工具清单以两种口径导出，逐条相等——
@@ -204,7 +180,7 @@ async fn tool_rows_match_the_meta_dump_entry_by_entry() {
     let mgr = DefaultToolVisitor::new();
     let names = ["local/shell", "local/read", "web/search"];
     for n in names {
-        mgr.put(CapabilityRow::tool(decl_tool(n))).await;
+        mgr.put(CapabilityRow::tool(decl_meta(n))).await;
     }
 
     let listed: Vec<String> = mgr
@@ -231,10 +207,10 @@ async fn tool_rows_match_the_meta_dump_entry_by_entry() {
 #[tokio::test]
 async fn tool_put_overwrite_keeps_first_registration_slot() {
     let mgr = DefaultToolVisitor::new();
-    mgr.put(CapabilityRow::tool(decl_tool("local/shell"))).await;
-    mgr.put(CapabilityRow::tool(decl_tool("local/read"))).await;
-    mgr.put(CapabilityRow::tool(decl_tool("local/shell"))).await;
-    mgr.put(CapabilityRow::tool(decl_tool("web/search"))).await;
+    mgr.put(CapabilityRow::tool(decl_meta("local/shell"))).await;
+    mgr.put(CapabilityRow::tool(decl_meta("local/read"))).await;
+    mgr.put(CapabilityRow::tool(decl_meta("local/shell"))).await;
+    mgr.put(CapabilityRow::tool(decl_meta("web/search"))).await;
 
     let listed: Vec<String> = mgr
         .list(family::TOOL)
@@ -250,7 +226,7 @@ async fn tool_put_overwrite_keeps_first_registration_slot() {
 #[tokio::test]
 async fn tool_get_missing_name_is_none() {
     let mgr = DefaultToolVisitor::new();
-    mgr.put(CapabilityRow::tool(decl_tool("local/shell"))).await;
+    mgr.put(CapabilityRow::tool(decl_meta("local/shell"))).await;
     assert!(mgr.get("local/shel").await.is_none());
     assert!(mgr.get("").await.is_none());
 }
@@ -260,7 +236,7 @@ async fn tool_get_missing_name_is_none() {
 #[tokio::test]
 async fn tool_list_of_another_kind_is_empty() {
     let mgr = DefaultToolVisitor::new();
-    mgr.put(CapabilityRow::tool(decl_tool("local/shell"))).await;
+    mgr.put(CapabilityRow::tool(decl_meta("local/shell"))).await;
     assert!(mgr.list(family::MODEL).await.is_empty());
 }
 

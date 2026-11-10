@@ -585,6 +585,25 @@ pub fn port_rows(provider: &Arc<dyn PortProvider>) -> Vec<CapabilityRow> {
 /// 派发侧按名取出后继续自己的编排。）
 pub const RESULT_KEY: &str = "result";
 
+/// 工具世界的通用出口换算（`D-440` ③）：**工具结果本身**（任意 JSON）或
+/// 工具错误 ⇒ [`PortOutcome`]。
+///
+/// 这是「信封 ↔ 结果」换算的唯一收口：执行体内部按工具自己的形状干活，出口
+/// 一律经本函数装载——成功值放 `facts` 的 [`RESULT_KEY`] 项，失败走 `error`
+/// （非重试类：工具错误是不是可重试，判据在编排侧的失败语义里，不在工具侧）。
+/// 取代了旧 `capability_invoke` 的信封拆装位置。
+pub fn port_result(result: Result<Value, symbio_kernel::plugin::PluginError>) -> PortOutcome {
+    match result {
+        Ok(value) => PortOutcome {
+            authz: AuthzVerdict::Authorized,
+            facts: vec![serde_json::json!({ RESULT_KEY: value })],
+            error: None,
+            reply: Default::default(),
+        },
+        Err(e) => PortOutcome::failed(PortErrorClass::NonRetryable, e.to_string()),
+    }
+}
+
 /// 按端口名从收集表取执行体（`D-440`：端口集是装配期收集出来的，查表即得）。
 ///
 /// 遍历 `PORT_FAMILY` 行、按提供者申报的端口名匹配——与宿主 `gather` 折执行体表

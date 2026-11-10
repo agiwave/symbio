@@ -7,10 +7,6 @@ mod row;
 
 pub use row::{CapabilityFamily, CapabilityRow};
 
-use crate::exec::ExecEnv;
-use crate::plugin::{
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
-};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -233,81 +229,6 @@ impl ApprovalBasis {
     }
 }
 
-/// 工具世界内部的可执行契约（`D-440`：工具即端口，本 trait 退场）。
-///
-/// 8 个工具插件都要 `impl` 它（经门面转出命名），而插件之间互不依赖 ⇒ 定义必须落在
-/// 一个共享 crate；这是它今天住内核的**唯一**理由，不是「环的语法」。搬进 `sdk` / 门面
-/// 只换个共享地址，架构里照样有工具契约（`D-439`）。按 DE-053 的 `D-440`：端口集是
-/// 装配期动态收集出来的，工具就是端口；工具插件改 `impl PortProvider` + `PortExecutor`
-/// 后，本 trait 与行的专用载荷一起退场。
-#[async_trait]
-pub trait Capability: Send + Sync + 'static {
-    fn meta(&self) -> CapabilityMeta;
-
-    fn name(&self) -> String {
-        self.meta().name
-    }
-
-    /// 本次调用的**生效风险等级**（审批闸门读它）。
-    ///
-    /// 默认实现 = [`CapabilityMeta::effective_risk`]，即「工具自声明的静态档」。
-    /// 绝大多数工具到此为止；**风险随参数变化**的工具覆写它——shell 是唯一
-    /// 已知的例子：`rm -rf ./build` 与 `git status` 同属一个工具，风险却差两档。
-    ///
-    /// ## 为什么不写成「闸门按工具名特判」
-    ///
-    /// 闸门里出现 `if name == "cmd"` 这类判定，等于把「有哪些工具」这份清单
-    /// 复制到审批层：工具改名/新增/改名都要回来改闸门，而漏改的表现是**静默放行**
-    /// （新工具落到默认档，免审批）。让工具自己回答「我这次有多危险」，闸门只负责
-    /// 拿这个数去比阈值——判定与清单就都留在工具这一侧了。
-    fn risk_for(&self, args: &Value) -> CapabilityRiskLevel {
-        let _ = args;
-        self.meta().effective_risk()
-    }
-
-    /// 执行能力调用。
-    ///
-    /// 三个入参各有一义，不再混在同一个键值袋里：
-    /// - `args`：**模型给的参数**（工具调用参数 / 直接调用的 payload）；
-    /// - `env`：**执行期环境**（出口 + 中止）——与 `ModelProvider::round_trip`
-    ///   共用同一类型，见 [`ExecEnv`]；
-    /// - `ctx`：**请求信封**——只有需要转发（`agent_run` 起子会话经 VDFS 地址写入、
-    ///   MCP 网关、VDFS 挂载解析）或读会话上下文（`WORKDIR` / `RISK_LEVEL`…）的
-    ///   工具才碰它。
-    ///
-    /// 返回**工具结果本身**（任意 JSON），不再经 `PluginPayload` 那层多态载荷：
-    /// 工具从来只用 `Data` 一个变体，其余三个（`Empty` / `Native` / `Session`）
-    /// 是路由层的形态，与工具无关。信封 ↔ 结果的换算收口在 [`capability_invoke`]。
-    async fn execute(
-        &self,
-        args: Value,
-        env: &ExecEnv,
-        ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> Result<Value, PluginError>;
-}
-
-/// 把请求信封拆成 `(args, env, ctx)` 调用能力，再把结果装回信封。
-///
-/// ## 这是唯一「拆信封」的地方
-///
-/// 所有分发路径（按名执行的两步：`get` + 本函数 / `Plugin::route` 的工具分支 /
-/// 装饰器）都必须经这里，否则「工具怎么写」与「信封长什么样」会重新耦合——
-/// 而耦合的表现就是每个工具各写一份 `ctx.payload::<Value>().unwrap_or(...)`
-/// 与各读一次 `EVENT_SINK` / `ABORT_SIGNAL`。
-///
-/// 参数缺席（信封里没有 payload）⇒ `Value::Null`：与收口前各工具自己的
-/// `unwrap_or(Value::Null)` 口径一致，由工具自己给出「缺少必填参数」的报错。
-pub async fn capability_invoke(
-    cap: &dyn Capability,
-    ctx: Arc<dyn PluginInvokeRequest>,
-) -> PluginInvokeResponse<PluginPayload> {
-    let args = ctx.payload::<Value>().unwrap_or(Value::Null);
-    let env = ExecEnv::from_request(&*ctx);
-    cap.execute(args, &env, ctx)
-        .await
-        .map(|value| PluginPayload::new(&value))
-}
-
 /// 工具结果里的 `failure_kind` 闭集 —— 「本轮结束于等待用户动作」的两种形态。
 ///
 /// ## 为什么需要共享常量
@@ -360,12 +281,12 @@ pub mod failure_kind {
 /// 专用词法（模型族的 `capability_model_*`）是表之上的自由函数，不回头往 trait
 /// 上挂方法。
 ///
-/// ## 为什么 `invoke` 不在表上
+/// ## 为什么执行不在表上
 ///
-/// 执行不是表的职责：表答「这一行是什么、怎么找到它」，
-/// [`Capability::execute`] 答「跑起来是什么」。按名执行是 `get(name)` +
-/// `capability_invoke` 两步——拆开之后，
-/// 这三个方法在 4a–4e 各族（工具 / 模型 / 提示词 / 挂载 / 选项）全部复用：
+/// 执行不是表的职责（`D-440`）：表答「这一行是什么、怎么找到它」，执行在
+/// **端口收集表**上（按端口名查执行体）。按名找到的这一行只携带数据——
+/// `get(name)` 交给目录装配与读面，`put` / `list` 在 4a–4e 各族
+/// （工具 / 模型 / 提示词 / 挂载 / 选项）全部复用：
 /// 4b 的模型族落位时一个方法都没有变形（只加了行的形态）。
 ///
 /// ## 顺序是表的一部分
@@ -378,9 +299,9 @@ pub mod failure_kind {
 pub trait Registry: Send + Sync + 'static {
     /// 入表一行（**全族的唯一写入入口**）。
     ///
-    /// 实现必须把每条进表的能力裹上审批闸
-    /// （`providers/collectors/approval.rs`）：闸门住在收口点，`meta` /
-    /// `risk_for` 原样透传，故 `get` / `list` 都不受影响，执行那一步才判定。
+    /// 行是纯数据（`D-440`）：入表不裹闸、不派生——工具的注册收口是
+    /// `providers/collectors` 的 `register_tool`（一次写裹闸的端口行与纯数据的
+    /// 工具行两条），审批判定发生在端口执行体的第一段。
     ///
     /// ## 单槽族的**唯一生效**也在这里维持
     ///

@@ -3,8 +3,9 @@
 //! ## 为什么住在这里
 //!
 //! 闸门判的是「工具自声明的风险 vs 会话阈值 / 工具授权上限」，两个量都**在工具自己
-//! 身上与请求信封上**：风险函数由工具回答（`Capability::risk_for`，`D-440` ③ 收口前
-//! 的过渡形状），`ctx[RISK_LEVEL]` / `ctx[APPROVAL_GRANTS]` / `ctx[MODE]` 由信封给出。
+//! 身上与请求信封上**：风险函数由工具在注册收口处给出（`RiskOf` 闭包，shell 的
+//! 动态覆写原样生效），`ctx[RISK_LEVEL]` / `ctx[APPROVAL_GRANTS]` / `ctx[MODE]`
+//! 由信封给出。
 //! 判据是纯比较（[`CapabilityRiskLevel::approval_basis`]），不吃任何插件的私有状态，
 //! 因此**能**也**该**住到收集器这一层——它是所有能力注册的收口点，把闸门搬到这里，
 //! `vdfs` / `web` / `mcp` / `skill` 的裸注册也一并过闸。此前闸门长在 `local` 插件自己
@@ -18,18 +19,17 @@
 //! 照常工作），放行才拆信封落到内层。判定只有 [`approval_gate`] 一份——装饰器、
 //! 自由函数、端口桥三层合一后，再没有第二处「值得复制的判定」。
 //!
-//! `D-440` ③-B（工具直接 `impl PortExecutor`）之后，风险函数与内层执行体都由工具
-//! 自己给出，本模块只保留判定与执行体形状。
+//! 工具直接 `impl PortExecutor`（`D-440` ③ 终态）：风险函数在 `register_tool`
+//! 注册时给出，内层执行体就是工具自己，本模块只保留判定与执行体形状。
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use symbio_kernel::capability::{Capability, CapabilityMeta, CapabilityRiskLevel};
+use symbio_kernel::capability::{CapabilityMeta, CapabilityRiskLevel};
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::{
-    capability_invoke, AuthzVerdict, PortErrorClass, PortExecContext, PortExecutor, PortInput,
-    PortOutcome, RESULT_KEY,
+    AuthzVerdict, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, RESULT_KEY,
 };
 use symbio_sdk::capability::ApprovalGrants;
 use symbio_sdk::keys::{APPROVAL_GRANTS, MODE, RISK_LEVEL};
@@ -157,34 +157,33 @@ fn confirm_prompt_payload(
     })
 }
 
-/// 端口执行体形态的审批闸门（`D-440` ③-A）：**判定是执行的第一段**。
+/// 端口执行体形态的审批闸门（`D-440` ③）：**判定是执行的第一段**。
 ///
-/// `meta` 与 `risk` 在构造时从能力取好（注册收口点一次性快照），`cap` 是被裹的
-/// 内层能力。`execute` 先判 [`approval_gate`]：拦下 ⇒ 停等载荷按 [`RESULT_KEY`]
-/// 交回（普通结果形态，派发侧 pending 机制不变，`authz` 维持放行——停等不是
-/// 拒绝，环不落它交来的事实之外的东西）；放行 ⇒ 拆信封执行，出口同样按
-/// [`RESULT_KEY`] 装载。
+/// `meta` 与 `risk` 在注册收口处取好快照，`inner` 是被裹的内层执行体
+/// （工具自己的 `PortExecutor`）。`execute` 先判 [`approval_gate`]：拦下 ⇒
+/// 停等载荷按 [`RESULT_KEY`] 交回（普通结果形态，派发侧 pending 机制不变，
+/// `authz` 维持放行——停等不是拒绝）；放行 ⇒ 原样透传给内层。
 pub struct GatedExecutor {
     meta: CapabilityMeta,
     risk: RiskOf,
-    cap: Arc<dyn Capability>,
+    inner: Arc<dyn PortExecutor>,
 }
 
 impl GatedExecutor {
-    /// 由一条能力造执行体：`meta` 是入表时的自述快照，`risk` 是工具的风险回答
-    /// （动态覆写在闭包里原样生效），`cap` 是内层执行对象。
-    pub fn new(meta: CapabilityMeta, risk: RiskOf, cap: Arc<dyn Capability>) -> Self {
-        Self { meta, risk, cap }
+    /// 由一条内层执行体造闸门执行体：`meta` 是注册时的自述快照，`risk` 是工具的
+    /// 风险回答（动态覆写在闭包里原样生效）。
+    pub fn new(meta: CapabilityMeta, risk: RiskOf, inner: Arc<dyn PortExecutor>) -> Self {
+        Self { meta, risk, inner }
     }
 }
 
 #[async_trait]
 impl PortExecutor for GatedExecutor {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
-        let Some(request) = exec.ctx else {
+        let Some(request) = exec.ctx.clone() else {
             return PortOutcome::failed(
                 PortErrorClass::NonRetryable,
-                "工具端口执行体没有调用方上下文，无法拆信封",
+                "工具端口执行体没有调用方上下文，无法判闸",
             );
         };
         if let Some(payload) =
@@ -199,20 +198,8 @@ impl PortExecutor for GatedExecutor {
                 reply: Default::default(),
             };
         }
-        // 放行：信封 ↔ 结果的换算收口在 `capability_invoke`，本处只喂参数。
-        let _ = request.set_payload(input.payload);
-        match capability_invoke(self.cap.as_ref(), request).await {
-            Ok(payload) => {
-                let value = payload.get::<Value>().unwrap_or(Value::Null);
-                PortOutcome {
-                    authz: AuthzVerdict::Authorized,
-                    facts: vec![json!({ RESULT_KEY: value })],
-                    error: None,
-                    reply: Default::default(),
-                }
-            }
-            Err(e) => PortOutcome::failed(PortErrorClass::NonRetryable, e.to_string()),
-        }
+        // 放行：判定不截断执行——上下文与输入原样到达内层。
+        self.inner.execute(exec, input).await
     }
 }
 

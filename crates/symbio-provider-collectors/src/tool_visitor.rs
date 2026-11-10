@@ -7,13 +7,12 @@
 //! 其中之一。它不是任何插件的内部物，故按「不存在第二种实现的机制底座直接组合具体类型」
 //! 落在实现层——完整判据见 [`symbio_providers::collectors`] 的模块文档。
 
-use super::approval::GatedExecutor;
+use super::approval::{GatedExecutor, RiskOf};
 use async_trait::async_trait;
 use indexmap::IndexMap;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use symbio_kernel::capability::{CapabilityFamily, CapabilityRiskLevel, CapabilityRow, Registry};
+use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
 use symbio_plugin_api::PortExecutor;
 use tokio::sync::RwLock;
 
@@ -69,34 +68,9 @@ impl Default for DefaultToolVisitor {
 #[async_trait]
 impl Registry for DefaultToolVisitor {
     async fn put(&self, row: CapabilityRow) {
-        // 闸门住在收口点：每条进表的**工具**能力在派生端口行时裹进执行体
-        // （`GatedExecutor`：判定是执行的第一段，`D-385` / `D-440` ③-A）。
-        // `meta` / `name` / `risk_for` 在收口处取好快照与风险回答，工具行本体
-        // 原样入表——`get` 与 `list` 看到的名字、声明位与风险档都不变；判定只
-        // 发生在执行那一步（端口查表 → `GatedExecutor::execute`）。
-        // 非工具行（其余各族）不裹，原样入表。
-        let row = match row.cap().cloned() {
-            Some(cap) => {
-                let meta = cap.meta();
-                let risk: Arc<dyn Fn(&Value) -> CapabilityRiskLevel + Send + Sync> = {
-                    let cap = Arc::clone(&cap);
-                    Arc::new(move |args: &Value| cap.risk_for(args))
-                };
-                let executor: Arc<dyn PortExecutor> =
-                    Arc::new(GatedExecutor::new(meta.clone(), risk, Arc::clone(&cap)));
-                // 工具就是端口（D-440 ②）：工具行入表的同时派生它的端口行
-                // （端口名 = 行名，执行体裹已过闸的同一能力）。派发侧不再从行上取
-                // 执行对象，改按端口名查这张表；`Capability` 退场后这里就是
-                // 工具端口唯一的注册点。
-                self.put(crate::tool_port::tool_port_row(
-                    executor,
-                    meta.name.as_str(),
-                ))
-                .await;
-                CapabilityRow::tool(cap)
-            }
-            None => row,
-        };
+        // 表只认行（`D-440` ③）：行是纯数据，入表不裹闸、不派生——工具的
+        // 注册收口是 [`register_tool`]（一次写两条：裹闸的端口行 + 纯数据的
+        // 工具行），其余各族直接入表。
         self.record_family(row.family()).await;
         let name = row.name().to_string();
         let family = row.family();
@@ -143,6 +117,33 @@ impl Registry for DefaultToolVisitor {
             .cloned()
             .collect()
     }
+}
+
+/// 工具注册的**唯一收口**（`D-440` ③）：一次写两条行——
+///
+/// 1. **端口行**：端口名 = `meta.name`，执行体是裹了审批闸的 [`GatedExecutor`]
+///    （判定是执行的第一段，`D-385`）。派发侧按端口名查表取到的就是它。
+/// 2. **工具行**：纯数据（`CapabilityMeta` 快照），目录装配与读面从这里看工具。
+///
+/// `risk = None` ⇒ 用静态档（`meta.effective_risk()`）；**风险随参数变化**的工具
+/// （shell）传入自己的回答闭包。注册顺序：先端口行后工具行，与派生期一致。
+pub async fn register_tool(
+    visitor: &dyn Registry,
+    meta: symbio_kernel::capability::CapabilityMeta,
+    risk: Option<RiskOf>,
+    executor: Arc<dyn PortExecutor>,
+) {
+    let risk: RiskOf = {
+        let m = meta.clone();
+        risk.unwrap_or_else(|| Arc::new(move |_| m.effective_risk()))
+    };
+    let gated: Arc<dyn PortExecutor> = Arc::new(GatedExecutor::new(meta.clone(), risk, executor));
+    visitor
+        .put(crate::tool_port::tool_port_row(gated, &meta.name))
+        .await;
+    visitor
+        .put(symbio_kernel::capability::CapabilityRow::tool(meta))
+        .await;
 }
 
 #[cfg(test)]

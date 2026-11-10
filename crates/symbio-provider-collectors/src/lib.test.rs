@@ -6,33 +6,16 @@
 //! 编译不报错、行为只在某个读点少一行时才露出来。
 
 use super::*;
-use symbio_kernel::capability::{family, Capability, CapabilityMeta, CapabilityRow};
-use symbio_kernel::exec::ExecEnv;
-use symbio_kernel::plugin::{
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
-};
+use symbio_kernel::capability::{family, CapabilityMeta, CapabilityRow};
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
 use symbio_sdk::capability::{CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR};
 
-/// 只为「跨键可见」准备的一行：测试只看它进没进表。
-struct Marker(String);
-
-#[async_trait::async_trait]
-impl Capability for Marker {
-    fn meta(&self) -> CapabilityMeta {
-        CapabilityMeta {
-            name: self.0.clone(),
-            ..Default::default()
-        }
-    }
-
-    async fn execute(
-        &self,
-        _args: serde_json::Value,
-        _env: &ExecEnv,
-        _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        Ok(serde_json::Value::Null)
-    }
+/// 只为「跨键可见」准备的一行：测试只看它进没进表（行是纯数据，`D-440` ③）。
+fn marker_row(name: &str) -> CapabilityRow {
+    CapabilityRow::tool(CapabilityMeta {
+        name: name.to_string(),
+        ..Default::default()
+    })
 }
 
 /// 同一实例挂三键 ⇒ 三条通道取回的是同一个 `Arc`，写入任何一条都进同一张表。
@@ -60,9 +43,7 @@ async fn one_registry_on_three_keys_is_one_table() {
     }
 
     // 行为证据：只经工具通道写一行，另两条通道立刻读得到（同一个 `rows` 锁）。
-    tool_channel
-        .put(CapabilityRow::tool(Arc::new(Marker("marker".into()))))
-        .await;
+    tool_channel.put(marker_row("marker")).await;
     for channel in [&option_channel, &configurable_channel] {
         assert_eq!(
             channel.list(family::TOOL).await.len(),

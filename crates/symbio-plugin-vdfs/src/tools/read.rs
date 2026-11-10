@@ -9,10 +9,11 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 
-/// 读文件工具（框架原生 `Capability`）
+/// 读文件工具（工具端口执行体）
 pub struct ReadTool {
     provider: Arc<ToolVdfs>,
 }
@@ -21,11 +22,8 @@ impl ReadTool {
     pub fn new(provider: Arc<ToolVdfs>) -> Self {
         Self { provider }
     }
-}
 
-#[async_trait]
-impl Capability for ReadTool {
-    fn meta(&self) -> CapabilityMeta {
+    pub fn meta(&self) -> CapabilityMeta {
         tool(
             "vdfs_read",
             "读取文件内容（带行号、支持分页）。文本文件返回 content 字段（含行号与 [行 X-Y，共 N 行] 摘要）；二进制文件（如图片）返回 base64 的 b64 字段且 binary=true。目录没有正文可读——别换一种地址写法重试，改调 vdfs_list（path 原样可用）。",
@@ -44,8 +42,24 @@ impl Capability for ReadTool {
             &[],
         )
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for ReadTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl ReadTool {
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,

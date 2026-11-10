@@ -1,4 +1,4 @@
-//! MCP 工具的 `Capability` 包装
+//! MCP 工具的端口执行体包装
 //!
 //! 每个远程 MCP 工具对应一个 `McpToolCapability` 实例；实例由
 //! `McpPlugin::traverse` 在每次 `parent.traverse` 时根据 `manager.discover_tools`
@@ -20,13 +20,14 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityCategory, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
+    port_result, CapabilityCategory, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 
 use super::manager::McpManager;
 use super::types::{McpTool, McpToolCallResponse};
 
-/// 单个 MCP 工具的 `Capability` 包装
+/// 单个 MCP 工具的端口执行体包装
 pub struct McpToolCapability {
     /// MCP server 名称（在 `McpConfig.servers` 中的 key）
     server_name: String,
@@ -64,11 +65,8 @@ impl McpToolCapability {
     pub fn namespaced_name(server_name: &str, tool_name: &str) -> String {
         format!("mcp.{server_name}.{tool_name}")
     }
-}
 
-#[async_trait]
-impl Capability for McpToolCapability {
-    fn meta(&self) -> CapabilityMeta {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: Self::namespaced_name(&self.server_name, &self.tool_name),
             description: format!("[MCP:{}] {}", self.server_name, self.description),
@@ -78,8 +76,24 @@ impl Capability for McpToolCapability {
             ..Default::default()
         }
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for McpToolCapability {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl McpToolCapability {
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,

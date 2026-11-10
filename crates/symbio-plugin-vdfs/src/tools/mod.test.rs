@@ -34,8 +34,7 @@ fn empty_provider() -> Arc<ToolVdfs> {
 
 #[test]
 fn metas_are_llm_ready() {
-    for t in vdfs_tools(empty_provider()) {
-        let m = t.meta();
+    for (m, _) in vdfs_tools(empty_provider()) {
         assert!(!m.description.is_empty());
         assert_eq!(m.category, Some(CapabilityCategory::Resource));
         assert!(m.input_schema.get("type").is_some());
@@ -53,7 +52,7 @@ fn metas_are_llm_ready() {
 fn tools_cover_all_ops() {
     let names: Vec<String> = vdfs_tools(empty_provider())
         .iter()
-        .map(|t| t.name())
+        .map(|(m, _)| m.name.clone())
         .collect();
     assert_eq!(
         names,

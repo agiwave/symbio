@@ -66,13 +66,12 @@ fn assert_all_snapshots_use_derived_ids(ops: &[ChatNode], msg_id: &str, tool_cal
     }
 }
 
-/// 按生产路径调用工具：信封拆出 `args` / `env`，与 `capability_invoke` 同形。
-///
-/// 测试只关心 `execute` 本身，故在这里复刻那一步拆解——工具侧不再自己读信封。
+/// 直接调工具的内部入口 `run`：信封拆解（ctx → `env`）在 `PortExecutor::execute`
+/// 外壳里，生产语义由单测另行覆盖，测试只关心执行本体。
 async fn exec(tool: &ShellTool, ctx: Arc<dyn PluginInvokeRequest>) -> Result<Value, PluginError> {
     let args = ctx.payload::<Value>().unwrap_or(Value::Null);
     let env = ExecEnv::from_request(&*ctx);
-    tool.execute(args, &env, ctx).await
+    tool.run(args, &env, ctx).await
 }
 
 // ── pump：增量帧的唯一产生点 ────────────────────────────────────────

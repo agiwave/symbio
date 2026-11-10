@@ -15,7 +15,7 @@
 //! 此前这四样散在七个文件里，而第 1~3 样之外的部分（结构体声明、`new`、`impl`、
 //! 导入行）是纯复制。新增一个工具 = 新建一个文件、抄一遍骨架、填四个洞。
 //!
-//! 本模块把「骨架」抽成 [`VdfsTool`]（**唯一**的 `Capability` 实现），把「四个洞」
+//! 本模块把「骨架」抽成 [`VdfsTool`]（**唯一**的 `PortExecutor` 实现），把「四个洞」
 //! 抽成 [`ToolSpec`]（静态表 + 一个异步闭包）。于是每个工具退化成**一条表项**。
 //!
 //! ## 边界：为什么不是九个全收
@@ -33,8 +33,8 @@ use futures::future::BoxFuture;
 use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-    VdfsItem,
+    port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, VdfsItem,
 };
 
 /// 工具的真逻辑签名：`(provider, 已拆好的参数, ctx) -> 回执 JSON`。
@@ -67,7 +67,7 @@ pub struct ToolSpec {
     pub call: ToolCall,
 }
 
-/// 同形工具的**唯一** `Capability` 实现——所有 [`ToolSpec`] 共用它。
+/// 同形工具的**唯一**端口执行体——所有 [`ToolSpec`] 共用它。
 pub struct VdfsTool {
     provider: Arc<ToolVdfs>,
     spec: &'static ToolSpec,
@@ -77,11 +77,8 @@ impl VdfsTool {
     pub fn new(provider: Arc<ToolVdfs>, spec: &'static ToolSpec) -> Self {
         Self { provider, spec }
     }
-}
 
-#[async_trait]
-impl Capability for VdfsTool {
-    fn meta(&self) -> CapabilityMeta {
+    pub fn meta(&self) -> CapabilityMeta {
         tool(
             self.spec.name,
             self.spec.description,
@@ -91,8 +88,24 @@ impl Capability for VdfsTool {
             self.spec.behaviors,
         )
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for VdfsTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl VdfsTool {
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,

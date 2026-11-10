@@ -1,4 +1,4 @@
-//! 任务清单工具 - 实现 Tool trait（等价于 Trae 的 TodoWrite）
+//! 任务清单工具 —— 工具端口执行体（等价于 Trae 的 TodoWrite）
 //!
 //! 以会话（session_id）为作用域维护一份结构化任务清单，
 //! 帮助 Agent 跟踪复杂多步任务的进度。纯内存状态，不落盘。
@@ -8,8 +8,9 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, AGENT_ID, SESSION_ID, WORKDIR,
+    port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PortErrorClass, PortExecContext, PortExecutor,
+    PortInput, PortOutcome, AGENT_ID, SESSION_ID, WORKDIR,
 };
 use tokio::sync::{OnceCell, RwLock};
 
@@ -136,9 +137,8 @@ impl TodoWriteTool {
     }
 }
 
-#[async_trait]
-impl Capability for TodoWriteTool {
-    fn meta(&self) -> CapabilityMeta {
+impl TodoWriteTool {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: "todo_write".to_string(),
             description:
@@ -178,7 +178,7 @@ impl Capability for TodoWriteTool {
         }
     }
 
-    async fn execute(
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,
@@ -194,6 +194,20 @@ impl Capability for TodoWriteTool {
         };
         let data = self.execute_inner(&args, &key).await?;
         Ok(serde_json::to_value(&data)?)
+    }
+}
+
+#[async_trait]
+impl PortExecutor for TodoWriteTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
     }
 }
 

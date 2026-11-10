@@ -28,8 +28,8 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use symbio_plugin_api::PLUGIN_ID_MCP;
 use symbio_plugin_api::{
-    plugin_dir_from_ctx, Capability, CapabilityMeta, CapabilityRow, Plugin, PluginDir, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    plugin_dir_from_ctx, CapabilityMeta, Plugin, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
 };
 use symbio_providers::DirVdfs;
 use tokio::sync::RwLock;
@@ -588,13 +588,20 @@ impl Plugin for McpPlugin {
             match self.manager.discover_tools(name, server_cfg).await {
                 Ok(tools) => {
                     for tool in tools {
-                        let cap: Arc<dyn Capability> = Arc::new(McpToolCapability::new(
+                        let tool = McpToolCapability::new(
                             name.clone(),
                             tool,
                             server_cfg.clone(),
                             self.manager.clone(),
-                        ));
-                        tool_visitor.put(CapabilityRow::tool(cap)).await;
+                        );
+                        let meta = tool.meta();
+                        symbio_providers::register_tool(
+                            tool_visitor.as_ref(),
+                            meta,
+                            None,
+                            Arc::new(tool),
+                        )
+                        .await;
                     }
                 }
                 Err(e) => {

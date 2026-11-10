@@ -8,9 +8,9 @@
  *
  * | 编号 | 格 | 判什么 | 它拦的是哪一种膨胀 |
  * |---|---|---|---|
- * | CS-001 | `traits` | **内核四 trait**（Store / Capability / VdfsProvider / Registry）的声明数（冻结 4） | **新增接缝**：每多一个内核抽象，就多一处「所有实现方都得知道」的地方。域 trait 不占此格（DE-023 A2 收窄口径） |
- * | CS-001 | `methods` | 上述四 trait 的 `fn` 成员总数（冻结 11） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
- * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 2） | **接口上长实现**：行为代码住进架构模块 |
+ * | CS-001 | `traits` | **内核三 trait**（Store / VdfsProvider / Registry）的声明数（冻结 3） | **新增接缝**：每多一个内核抽象，就多一处「所有实现方都得知道」的地方。域 trait 不占此格（DE-023 A2 收窄口径） |
+ * | CS-001 | `methods` | 上述三 trait 的 `fn` 成员总数（冻结 7） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
+ * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 0） | **接口上长实现**：行为代码住进架构模块 |
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0（**全 core**） | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作。依赖方向不随内核边界变化，故不收窄 |
  * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里**新引入的**插件 id 引用数只许降；与内核既有 wire 词同名的字面量可按同文件 `arch-shape-allow` 登记抵扣 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179）。判的是**耦合**而不是**字符串相同**（2026-11-03 收窄，D-303） |
@@ -208,16 +208,17 @@ const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
 // 不占这条棘轮——在那里加成员不等于「内核接缝变宽」。
 //
 // `ModelProvider` 于 `D-437` 退出这一格：执行契约归 model 插件（`port.model` 是
-// 环唯一认的那条边），内核只剩四个跨侧共用的接缝。这是一次**收窄**，因此不需要
-// `core-shape-allow`——那一格只对放宽有效。
-const KERNEL_TRAITS = ['Store', 'Capability', 'VdfsProvider', 'Registry']
+// 环唯一认的那条边）。`Capability` 于 `D-440` 退出这一格：工具即端口，执行契约归
+// `PortExecutor`（住 sdk，随端口收集表走），内核只剩三个跨侧共用的接缝。这两次
+// 都是**收窄**，因此不需要 `core-shape-allow`——那一格只对放宽有效。
+const KERNEL_TRAITS = ['Store', 'VdfsProvider', 'Registry']
 
 const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
   ? (() => {
       const [traits, methods, defaults] = process.env.CORE_SHAPE_BASELINE.split(':').map((n) => Number(n))
       return { traits, methods, defaults }
     })()
-  : { traits: 4, methods: 11, defaults: 2 }
+  : { traits: 3, methods: 7, defaults: 0 }
 
 /**
  * CS-005 词汇棘轮（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-200）。

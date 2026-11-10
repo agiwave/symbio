@@ -26,12 +26,11 @@
 //!
 //! ## 行上的自述快照
 //!
-//! 工具行的元数据（`CapabilityMeta`）在 `CapabilityRow::tool(cap)` 入表时取**一次**
-//! `cap.meta()`，连同行名一起存进行——行名与 `meta().name` 出自**同一次**自述调用，
-//! 结构上不可能分叉（改名装饰器改的正是 `meta().name`，而它裹在内层、先于入表被
-//! 取到）。`row.meta()` 读快照，不回头调能力：读者要的是这一行**携带的事实**，
-//! 不是对执行对象的反向引用——`D-440`（工具即端口）收口后，这份快照就是
-//! 工具行退成纯数据时留下的全部。
+//! 工具行的元数据（`CapabilityMeta`）由注册方在 `CapabilityRow::tool(meta)` 入表时
+//! 给出**一次**，连同行名一起存进行——行名与 `meta.name` 出自**同一次**自述，
+//! 结构上不可能分叉。`row.meta()` 读快照：读者要的是这一行**携带的事实**，不是对
+//! 执行对象的反向引用——`D-440`（工具即端口）收口后，这份快照就是工具行的全部，
+//! 执行面在端口收集表上（按端口名查执行体）。
 //!
 //! ## 谁住在这里
 //!
@@ -41,7 +40,7 @@
 //! `loop_rows`——三处各住各的，见 DE-025 §3。
 
 use super::family;
-use crate::capability::{Capability, CapabilityMeta};
+use crate::capability::CapabilityMeta;
 use crate::present::DetailField;
 use crate::vdfs::{VdfsItem, VdfsProvider};
 use std::any::Any;
@@ -106,15 +105,12 @@ impl Hash for CapabilityFamily {
     }
 }
 
-/// 工具行的载荷：**元数据快照**（入表时取一次）+ 可调用对象
-/// （注册收口点已裹审批闸，见 `DefaultToolVisitor::put`）。
+/// 工具行的载荷：**元数据快照**（注册方入表时给出，行上唯一的事实）。
 ///
-/// `meta` 是**数据**：`row.meta()` 的读者（工具目录装配、风险/行为闸门读面）
-/// 只需要这份自述，不需要能力实例——`D-440` 收口后执行面走端口收集表，
-/// 这份快照就是行上**活到最后**的部分。`cap` 是**执行体**，过渡期暂住载荷里。
+/// `D-440` 收口后工具行是**纯数据**：目录装配、风险/行为闸门读面只需要这份自述；
+/// 执行面走端口收集表，行上不再持可调用对象（「行是数据，端口是行为」）。
 struct ToolPayload {
     meta: CapabilityMeta,
-    cap: Arc<dyn Capability>,
 }
 
 /// 模型行的载荷：一个**空标记**。
@@ -157,8 +153,8 @@ struct ConfigurablePayload(VdfsItem);
 /// 读侧用 [`Self::payload`] 下转型，内核不认识它。
 ///
 /// 构造只走本文件的具名构造器，或新族自己的 `CapabilityRow::new`：
-/// 工具与模型行的名字从载荷自述派生（能力的 `meta().name` / provider 的
-/// `provider_id()`），提示词行的名字是调用方给的**覆盖键**，调用方没有别的口子可填。
+/// 工具行的名字 = 元数据自述的 `name`，模型行的名字 = provider 的
+/// `provider_id()`，提示词行的名字是调用方给的**覆盖键**，调用方没有别的口子可填。
 #[derive(Clone)]
 pub struct CapabilityRow {
     family: CapabilityFamily,
@@ -190,12 +186,11 @@ impl CapabilityRow {
         }
     }
 
-    /// 工具行：名字与元数据 = `cap.meta()`（入表时取**一次**的全名自述，
-    /// 含挂载点前缀）。
-    pub fn tool(cap: Arc<dyn Capability>) -> Self {
-        let meta = cap.meta();
+    /// 工具行：名字 = `meta.name`（注册方入表时给出的全名自述，含挂载点前缀）。
+    /// 行是**纯数据**：执行体经 `register_tool` 同批写进端口收集表，不在这里。
+    pub fn tool(meta: CapabilityMeta) -> Self {
         let name = meta.name.clone();
-        Self::new(family::TOOL, name, ToolPayload { meta, cap }, false)
+        Self::new(family::TOOL, name, ToolPayload { meta }, false)
     }
 
     /// 模型行：名字 = `provider_id`，载荷是空标记（**不装执行对象**，`D-437`）。
@@ -265,11 +260,6 @@ impl CapabilityRow {
         self.payload::<ToolPayload>()
             .map(|p| p.meta.clone())
             .unwrap_or_default()
-    }
-
-    /// 取可调用对象；非工具族为 `None`（调用方据此给诚实的 NotFound）。
-    pub fn cap(&self) -> Option<&Arc<dyn Capability>> {
-        self.payload::<ToolPayload>().map(|p| &p.cap)
     }
 
     /// 取系统提示词正文；非提示词族为 `None`。

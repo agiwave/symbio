@@ -12,10 +12,11 @@ use tokio::sync::RwLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use symbio_plugin_api::{
-    Capability, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel, CapabilityRow,
+    port_result, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel, CapabilityRow,
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginInvokeRequest,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PortPayload, PortReading,
-    Registry, CAPABILITY_VISITOR,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PortErrorClass,
+    PortExecContext, PortExecutor, PortInput, PortOutcome, PortPayload, PortReading, Registry,
+    CAPABILITY_VISITOR,
 };
 
 // ==================== 记账 fail-closed：造格型的账没落就不许报成功 ====================
@@ -303,59 +304,11 @@ fn subagent_pending_payload_is_recognized_as_pending_intent() {
 
 // ==================== 注册面 ====================
 
-/// 能力桥（与 `provider-collectors::tool_port` 的 `CapabilityBridge` 同形——夹具
-/// 不依赖那个 crate，就地最小复刻；派发侧读到的出口约定两边一致：结果值在
-/// `facts` 的 `RESULT_KEY` 项里，失败走 `error`）。
-struct FixtureBridge {
-    cap: Arc<dyn Capability>,
-}
-
-#[async_trait]
-impl PortExecutor for FixtureBridge {
-    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
-        let Some(request) = exec.ctx else {
-            return PortOutcome::failed(PortErrorClass::NonRetryable, "no caller ctx");
-        };
-        use symbio_plugin_api::PluginInvokeRequestExt;
-        let _ = request.set_payload(input.payload);
-        match symbio_plugin_api::capability_invoke(self.cap.as_ref(), request).await {
-            Ok(payload) => {
-                let value = payload
-                    .get::<serde_json::Value>()
-                    .unwrap_or(serde_json::Value::Null);
-                let mut out = PortOutcome::ok();
-                out.facts = vec![json!({ symbio_plugin_api::RESULT_KEY: value })];
-                out
-            }
-            Err(e) => PortOutcome::failed(PortErrorClass::NonRetryable, e.to_string()),
-        }
-    }
-}
-
-/// 单端口提供者（端口名 = 工具行名），与 `tool_port::ToolRowPort` 同形。
-struct FixturePort {
-    name: String,
-    executor: Arc<dyn PortExecutor>,
-}
-
-impl PortProvider for FixturePort {
-    fn ports(&self) -> Vec<String> {
-        Vec::from([self.name.clone()])
-    }
-
-    fn provider_id(&self) -> &str {
-        "fixture"
-    }
-
-    fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
-        Some(Arc::clone(&self.executor))
-    }
-}
-
 /// 最小登记表（与 `plugin-api` 的 port.test 同款夹具）。
 ///
-/// `put` 带同一条派生（`D-440` ②）：工具行入表的同时进端口表——生产里这是
-/// `DefaultToolVisitor::put` 的职责，夹具按同一形状派生，派发侧的查表才有得读。
+/// 工具桩本身就是端口执行体（`D-440` ③：`Capability` 退场，桥随之消失）：端口行
+/// 与工具行都由 `register_tool` 收口写入，本表只做行容器——派发侧的查表
+/// （`port_executor_of`）依赖端口行存在，走收口最不易漏。
 struct FakeRegistry {
     rows: RwLock<Vec<Arc<CapabilityRow>>>,
 }
@@ -371,16 +324,6 @@ impl FakeRegistry {
 #[async_trait]
 impl Registry for FakeRegistry {
     async fn put(&self, row: CapabilityRow) {
-        if let Some(cap) = row.cap().cloned() {
-            let name = row.name().to_string();
-            let executor: Arc<dyn PortExecutor> = Arc::new(FixtureBridge { cap });
-            self.rows.write().await.push(Arc::new(CapabilityRow::new(
-                symbio_plugin_api::port::PORT_FAMILY,
-                symbio_plugin_api::port_row_name(&name, "fixture"),
-                PortPayload::new(Arc::new(FixturePort { name, executor })),
-                false,
-            )));
-        }
         self.rows.write().await.push(Arc::new(row));
     }
 
@@ -436,19 +379,34 @@ async fn tool_port_registers_one_row_and_exposes_an_executor() {
 
 // ==================== 执行面（经 `PortExecutor`）====================
 
-/// 夹具能力：按 canonical 名注册，返回固定 JSON。
+/// 夹具工具：按 canonical 名注册，返回固定 JSON。
 struct EchoTool {
     meta: CapabilityMeta,
     data: serde_json::Value,
 }
 
-#[async_trait]
-impl Capability for EchoTool {
+impl EchoTool {
     fn meta(&self) -> CapabilityMeta {
         self.meta.clone()
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for EchoTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl EchoTool {
+    async fn run(
         &self,
         _args: serde_json::Value,
         _env: &ExecEnv,
@@ -491,15 +449,16 @@ async fn ctx_with_tool(
 ) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(Some(Weak::clone(&Arc::downgrade(parent))), None);
     let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
-    registry
-        .put(CapabilityRow::tool(Arc::new(EchoTool {
-            meta: CapabilityMeta {
-                name: name.to_string(),
-                ..Default::default()
-            },
-            data,
-        }) as Arc<dyn Capability>))
-        .await;
+    // 注册走 `register_tool` 收口（与生产同一条路）：端口行 + 工具行一并入表，
+    // 派发侧按名查执行体才有着落。
+    let tool = EchoTool {
+        meta: CapabilityMeta {
+            name: name.to_string(),
+            ..Default::default()
+        },
+        data,
+    };
+    symbio_providers::register_tool(registry.as_ref(), tool.meta(), None, Arc::new(tool)).await;
     req.set(CAPABILITY_VISITOR, registry);
     Arc::new(req)
 }
@@ -1339,13 +1298,28 @@ struct ProbeTool {
     sleep_ms: u64,
 }
 
-#[async_trait]
-impl Capability for ProbeTool {
+impl ProbeTool {
     fn meta(&self) -> CapabilityMeta {
         self.meta.clone()
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for ProbeTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl ProbeTool {
+    async fn run(
         &self,
         _args: serde_json::Value,
         _env: &ExecEnv,
@@ -1365,7 +1339,7 @@ fn probe(
     active: &Arc<AtomicUsize>,
     peak: &Arc<AtomicUsize>,
     sleep_ms: u64,
-) -> Arc<dyn Capability> {
+) -> Arc<ProbeTool> {
     Arc::new(ProbeTool {
         meta: CapabilityMeta {
             name: name.to_string(),
@@ -1381,14 +1355,14 @@ fn probe(
 async fn ctx_with_probes(
     parent: &Arc<dyn Plugin>,
     session: &str,
-    tools: Vec<Arc<dyn Capability>>,
+    tools: Vec<Arc<ProbeTool>>,
 ) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(Some(Weak::clone(&Arc::downgrade(parent))), None);
     // 执行窗口按会话分格：每个用例用自己的会话 id，避免并行跑的单测共用一格。
     req.set(SESSION_ID, session.to_string());
     let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
     for tool in tools {
-        registry.put(CapabilityRow::tool(tool)).await;
+        symbio_providers::register_tool(registry.as_ref(), tool.meta(), None, tool).await;
     }
     req.set(CAPABILITY_VISITOR, registry);
     Arc::new(req)

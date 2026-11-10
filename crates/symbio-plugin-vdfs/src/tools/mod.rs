@@ -1,9 +1,8 @@
 //! VDFS 工具集 —— 把 VDFS 暴露给大语言模型
 //!
-//! ## 每个工具 = 一个框架原生 `Capability`，持有封装的 provider
+//! ## 每个工具 = 一个工具端口执行体（`PortExecutor`），持有封装的 provider
 //!
-//! 本目录下的每一个文件（`list.rs` / `read.rs` / …）定义一个**框架原生的
-//! `Capability` 实现**：
+//! 本目录下的每一个文件（`list.rs` / `read.rs` / …）定义一个**端口执行体实现**：
 //!
 //! - `meta()` 返回工具的 LLM 元数据（名称 / 描述 / 入参 schema / 示例 / 风险类别）；
 //! - `execute()` 做两件事——① **对文件系统的操作改为对 `ToolVdfs` 的操作**
@@ -33,7 +32,7 @@
 //!
 //! 九个工具里，**七个**是「转发到 provider 的某个方法 + 包一层回执」的同形体，
 //! 差异只有「名字 / 描述 / schema / 示例 / 保留策略 / 调哪个方法」六样。
-//! 它们由 [`spec::SPECS`] 一张表驱动，`Capability` 实现**只有一份**
+//! 它们由 [`spec::SPECS`] 一张表驱动，`PortExecutor` 实现**只有一份**
 //! （[`spec::VdfsTool`]）——不再一个工具一个文件。
 //!
 //! `read`（行号 + 分页）与 `list`（ignore glob 过滤 + 目录优先排序）带
@@ -47,7 +46,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, PluginError,
+    CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, PluginError, PortExecutor,
 };
 
 /// 工具链路的封装 provider（地址翻译 + 按挂载名直调，见 `super::super::provider`）
@@ -55,7 +54,7 @@ pub use super::provider::ToolVdfs;
 
 /// 把**已拆好的调用参数**解析为具体请求类型（缺省容忍空载荷）。
 ///
-/// 参数由 `symbio_plugin_api::capability_invoke` 从信封拆出后作为入参给出，
+/// 参数由端口执行体外壳（`PortExecutor::execute`）从信封拆出后作为入参给出，
 /// 因此这里不再自己回读 `ctx.payload()`——「拆信封」只有一处。
 pub(crate) fn request_of<T: DeserializeOwned + Default>(args: &Value) -> T {
     serde_json::from_value::<T>(args.clone()).unwrap_or_default()
@@ -130,25 +129,29 @@ pub fn tool(
 ///
 /// 顺序固定（`tools_cover_all_ops` 测试锁死）：表装不下的两个（`list` / `read`）
 /// 手动插入到它们在原清单里的位置，其余七条由 [`spec::SPECS`] 按表序展开。
-pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<Arc<dyn Capability>> {
-    let by_name = |name: &str| -> Arc<dyn Capability> {
+/// 返回 `(meta, 执行体)` 二元组：meta 供注册点静态交档，执行体走端口行。
+pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<(CapabilityMeta, Arc<dyn PortExecutor>)> {
+    let by_name = |name: &str| -> (CapabilityMeta, Arc<dyn PortExecutor>) {
         let s = spec::SPECS
             .iter()
             .find(|s| s.name == name)
             .unwrap_or_else(|| panic!("规格表缺少工具 {name}"));
-        Arc::new(spec::VdfsTool::new(provider.clone(), s))
+        let t = spec::VdfsTool::new(provider.clone(), s);
+        (t.meta(), Arc::new(t))
     };
 
+    let list_tool = list::ListTool::new(provider.clone());
+    let read_tool = read::ReadTool::new(provider.clone());
     vec![
-        Arc::new(list::ListTool::new(provider.clone())), // 1. vdfs_list
-        by_name("vdfs_tree"),                            // 2. vdfs_tree
-        by_name("vdfs_stat"),                            // 3. vdfs_stat
-        Arc::new(read::ReadTool::new(provider.clone())), // 4. vdfs_read
-        by_name("vdfs_edit"),                            // 5. vdfs_edit
-        by_name("vdfs_search"),                          // 6. vdfs_search
-        by_name("vdfs_write"),                           // 7. vdfs_write
-        by_name("vdfs_delete"),                          // 8. vdfs_delete
-        by_name("vdfs_mkdir"),                           // 9. vdfs_mkdir
+        (list_tool.meta(), Arc::new(list_tool)), // 1. vdfs_list
+        by_name("vdfs_tree"),                    // 2. vdfs_tree
+        by_name("vdfs_stat"),                    // 3. vdfs_stat
+        (read_tool.meta(), Arc::new(read_tool)), // 4. vdfs_read
+        by_name("vdfs_edit"),                    // 5. vdfs_edit
+        by_name("vdfs_search"),                  // 6. vdfs_search
+        by_name("vdfs_write"),                   // 7. vdfs_write
+        by_name("vdfs_delete"),                  // 8. vdfs_delete
+        by_name("vdfs_mkdir"),                   // 9. vdfs_mkdir
     ]
 }
 

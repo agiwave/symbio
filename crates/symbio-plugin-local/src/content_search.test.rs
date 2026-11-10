@@ -319,7 +319,8 @@ async fn no_window_returns_everything_without_note() {
 ///
 /// 消费方 `extract_result`（loop 插件）第 2 条判据读 `output`；两侧互不可见，
 /// 这条断言是「约定可执行」的生产方一半。前面那些用例打的是 `search` 内部方法
-/// （只验正文形状），这条走 `Capability::execute`，钉的是**交付给编排层的信封形状**。
+/// （只验正文形状），这条走工具内部入口 `run`（信封拆解在 `PortExecutor::execute`
+/// 外壳里），钉的是**交付给编排层的信封形状**。
 #[tokio::test]
 async fn result_carries_the_llm_visible_text_in_output() {
     use symbio_plugin_api::{ExecEnv, PluginInvokeRequest, PluginSimpleRequest, WORKDIR};
@@ -331,7 +332,7 @@ async fn result_carries_the_llm_visible_text_in_output() {
     let env = ExecEnv::from_request(&*ctx);
 
     let data = tool()
-        .execute(
+        .run(
             serde_json::json!({ "pattern": "MARK", "path": "." }),
             &env,
             ctx,

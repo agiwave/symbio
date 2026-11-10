@@ -39,11 +39,10 @@
 //! 入口上——写入口只有一个，作用域规则也就只有一处（见 `capability/model.rs`）。
 
 use async_trait::async_trait;
-use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    family, Capability, CapabilityFamily, CapabilityMeta, CapabilityRow, ExecEnv, PluginError,
-    PluginInvokeRequest, Registry, SCOPE_TWIN,
+    family, port::PORT_FAMILY, CapabilityFamily, CapabilityRow, PortExecutor, PortPayload,
+    Registry, SCOPE_TWIN,
 };
 
 /// 子 Agent 插件树的注册代理
@@ -54,6 +53,14 @@ pub struct SubAgentVisitor {
     /// 本作用域登记进来的**工具数**（`max_tools` 限额的读数，见
     /// [`Self::tool_count`]）。只数工具行——提示词段 / 选项行不是「工具」。
     tools: std::sync::atomic::AtomicUsize,
+    /// 同批端口行的执行体暂存（端口名 → 执行体）。
+    ///
+    /// `register_tool` 先写端口行后写工具行（D-440 ③ 的写入顺序）：工具行的执行面
+    /// 住在**同批到达的端口行**上，这里按端口名暂存，等工具行到齐时取出——前缀化
+    /// 重注册的执行体就是它（注册收口点已过闸，原样透传）。未配对的端口行（子树
+    /// 自己的端口面）留在这里随轮丢弃：与旧行为一致——端口行此前就在本层被丢弃。
+    /// tokio 的锁：不毒化、无 panic 面，锁卫只在取/放一条语句内，不跨 await。
+    pending: tokio::sync::Mutex<std::collections::HashMap<String, Arc<dyn PortExecutor>>>,
 }
 
 impl SubAgentVisitor {
@@ -62,6 +69,7 @@ impl SubAgentVisitor {
             inner,
             agent_id: agent_id.into(),
             tools: std::sync::atomic::AtomicUsize::new(0),
+            pending: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -92,41 +100,6 @@ fn safe_segment(id: &str) -> String {
             }
         })
         .collect()
-}
-
-/// 改名包装：只改 `meta().name`，执行原样委托
-struct PrefixedCapability {
-    inner: Arc<dyn Capability>,
-    name: String,
-}
-
-#[async_trait]
-impl Capability for PrefixedCapability {
-    fn meta(&self) -> CapabilityMeta {
-        let mut meta = self.inner.meta();
-        meta.name = self.name.clone();
-        meta
-    }
-
-    /// 透传给被改名的工具：装饰器只换名字，不重判风险。
-    ///
-    /// 默认实现读 `self.meta().effective_risk()`——那是**静态**档。风险随参数变化
-    /// 的工具（shell 按命令分级）覆写 `risk_for`，改名包装若不显式转发，注册收口点
-    /// 的审批闸就读到默认档而丢掉动态分级（闸门住在 `DefaultToolVisitor`
-    /// 之后，这条透传路径必须完整）。
-    fn risk_for(&self, args: &serde_json::Value) -> symbio_plugin_api::CapabilityRiskLevel {
-        self.inner.risk_for(args)
-    }
-
-    async fn execute(
-        &self,
-        args: Value,
-        env: &ExecEnv,
-        ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> Result<Value, PluginError> {
-        // 装饰器只改名字，执行期环境与信封原样透传（不拆不装）。
-        self.inner.execute(args, env, ctx).await
-    }
 }
 
 #[async_trait]
@@ -169,34 +142,59 @@ impl Registry for SubAgentVisitor {
             self.inner.put(row).await;
             return;
         }
-        // 子作用域的工具加名前缀再入内表（`agent_<safe_id>_<name>`）：
-        // 行的构造走词汇自己的 `tool()`，名前缀由改名装饰器承载——与机制化之前
-        // 「包一层 PrefixedCapability 再 register」同一条路，只是入口从 register
-        // 换成 put（DE-025 §3）。**前缀副本与根工具的去重不在写入侧做**（写入顺序
-        // 不确定），但「这个前缀名对应哪个本名」由本层声明：装配面据此折叠，
-        // 不必认识 `agent_` 这套命名规则（D-428）。
-        let Some(cap) = row.cap().cloned() else {
+        // 端口行（D-440：工具的执行面住在端口行上）：**不转发**——子树自己的端口面
+        // （`port.tool` 等系统端口）归系统侧，与旧行为一致（此前端口行就在本层丢弃）。
+        // 这里只把**工具行派生端口**的执行体按端口名暂存，等同批的工具行到齐后一并
+        // 前缀化重注册（写入顺序：`register_tool` 先端口行后工具行）。
+        if row.family() == PORT_FAMILY {
+            if let Some(payload) = row.payload::<PortPayload>() {
+                let provider = payload.provider();
+                if let Some(executor) = provider.executor() {
+                    let mut pending = self.pending.lock().await;
+                    for port in provider.ports() {
+                        pending.insert(port, Arc::clone(&executor));
+                    }
+                }
+            }
             return;
-        };
-        let base = cap.name();
-        let name = self.tool(&base);
-        // 声明行的键不能和工具行同名（表键是全表唯一命名空间）；键的形状由本层
-        // 自己给，读侧只取载荷，不解析它。
-        self.inner
-            .put(CapabilityRow::new(
-                SCOPE_TWIN,
-                format!("twin:{name}"),
-                (name.clone(), base),
-                false,
-            ))
-            .await;
-        self.tools
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.inner
-            .put(CapabilityRow::tool(
-                Arc::new(PrefixedCapability { inner: cap, name }) as Arc<dyn Capability>,
-            ))
-            .await
+        }
+        // 子作用域的工具加名前缀再入内表（`agent_<safe_id>_<name>`）：
+        // 前缀化发生在 meta 层（D-440：行是纯数据，改名装饰器随 `Capability` 一起
+        // 退场）——取行的自述快照改 `name`，执行体用同批端口行带来的那一份，经
+        // `register_tool` 一次写入前缀化的端口行 + 工具行（派发侧按前缀名查执行体）。
+        // **前缀副本与根工具的去重不在写入侧做**（写入顺序不确定），但「这个前缀名
+        // 对应哪个本名」由本层声明：装配面据此折叠，不必认识 `agent_` 这套命名规则
+        // （D-428）。
+        if row.family() == family::TOOL {
+            let mut meta = row.meta();
+            let base = meta.name.clone();
+            let name = self.tool(&base);
+            meta.name = name.clone();
+            // 声明行的键不能和工具行同名（表键是全表唯一命名空间）；键的形状由本层
+            // 自己给，读侧只取载荷，不解析它。
+            self.inner
+                .put(CapabilityRow::new(
+                    SCOPE_TWIN,
+                    format!("twin:{name}"),
+                    (name.clone(), base.clone()),
+                    false,
+                ))
+                .await;
+            self.tools
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // 执行体缺席 = 纯数据行（无执行体可绑）：按数据形状照旧入表，
+            // 派发侧对它诚实 NotFound——工具面（目录 / 风险 / 行为读数）不受影响。
+            // （锁卫只在 remove 这条语句内，不跨后面的 await。）
+            let executor = self.pending.lock().await.remove(&base);
+            if let Some(executor) = executor {
+                symbio_providers::register_tool(self.inner.as_ref(), meta, None, executor).await;
+            } else {
+                self.inner.put(CapabilityRow::tool(meta)).await;
+            }
+            return;
+        }
+        // 其余族（嵌套作用域的声明行等）不在转发清单里：此前它们无执行对象可取、
+        // 同样在这一层止步。
     }
 
     async fn list(&self, family: CapabilityFamily) -> Vec<Arc<CapabilityRow>> {

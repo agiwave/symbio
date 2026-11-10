@@ -4412,6 +4412,7 @@ dependencies = [
  "serde",
  "serde_json",
  "symbio-plugin-api",
+ "symbio-providers",
  "tokio",
  "tracing",
 ]
@@ -4723,6 +4724,7 @@ dependencies = [
  "async-trait",
  "serde_json",
  "symbio-plugin-api",
+ "symbio-providers",
  "tokio",
  "tracing",
 ]

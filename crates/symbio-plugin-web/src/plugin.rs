@@ -3,18 +3,20 @@
 pub use super::web_config::WebConfig;
 use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::WebSearchTool};
 // 审批闸门住在能力注册收口点（`providers/collectors/approval.rs`）；`route` 兜底
-// 拿到的是本插件私藏的裸工具，判定与装饰器共用同一份真源（`http_request`
+// 拿到的是本插件私藏的裸执行体，判定与装饰器共用同一份真源（`http_request`
 // 声明 `High` 却经这条路径直接跑，正是「风险只是宣传语」的第二个洞）。
 use async_trait::async_trait;
+use serde_json::Value;
 use std::sync::{Arc, Weak};
 use symbio_plugin_api::PLUGIN_ID_WEB;
 use symbio_plugin_api::{
-    plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload,
+    plugin_dir_from_ctx, CapabilityMeta, CapabilityRiskLevel, ExecAbortSignal, ExecEventSink,
+    Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PortExecContext, PortExecutor, PortInput,
+    RESULT_KEY,
 };
 use symbio_plugin_api::{DetailDefinition, DetailField};
-use symbio_providers::approval_gate;
+use symbio_providers::{approval_gate, RiskOf};
 use tokio::sync::RwLock;
 
 // ==================== 配置文档（`<根>/web/PLUGIN.yml`） ====================
@@ -61,12 +63,25 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
+/// `route` 兜底用的工具条目：自述快照 + 风险回答 + 端口执行体。
+///
+/// 工具改形为 [`PortExecutor`] 后不再有 `Arc<dyn Capability>` 可藏；兜底路径
+/// 自己持有这三样，审批判定仍走 [`approval_gate`] 这一份真源，与注册收口点
+/// （`register_tool`）同一读法。
+struct ToolEntry {
+    meta: CapabilityMeta,
+    /// `None` = 静态档（`meta.effective_risk()`，与 `register_tool` 的 `risk = None`
+    /// 分支同义）；`Some` = 风险随参数变化的覆写闭包。
+    risk: Option<RiskOf>,
+    executor: Arc<dyn PortExecutor>,
+}
+
 #[derive(Clone)]
 pub struct WebPlugin {
     config: Arc<RwLock<WebConfig>>,
     /// 配置文件的呈现与校验（`<根>/web/PLUGIN.yml`）——落盘写的是本插件自己目录里的文件
     config_file: PluginConfigFile,
-    tool_impls: Arc<Vec<Arc<dyn Capability>>>,
+    tool_impls: Arc<Vec<ToolEntry>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
 }
 
@@ -97,7 +112,25 @@ impl WebPlugin {
         let web_search = Arc::new(WebSearchTool::new(Arc::clone(&config_lock)));
         let http_request = Arc::new(HttpRequestTool::new(Arc::clone(&config_lock)));
 
-        let tool_impls: Vec<Arc<dyn Capability>> = vec![web_fetch, web_search, http_request];
+        // 三个工具都是**静态档**：风险交 `register_tool` 的 `None` 分支兜底，
+        // 兜底条目在这里取好 meta 快照，两条路径判定一致。
+        let tool_impls: Vec<ToolEntry> = vec![
+            ToolEntry {
+                meta: web_fetch.meta(),
+                risk: None,
+                executor: web_fetch,
+            },
+            ToolEntry {
+                meta: web_search.meta(),
+                risk: None,
+                executor: web_search,
+            },
+            ToolEntry {
+                meta: http_request.meta(),
+                risk: None,
+                executor: http_request,
+            },
+        ];
 
         Self {
             config: config_lock,
@@ -144,15 +177,64 @@ impl Plugin for WebPlugin {
             }
         }
 
-        if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
-            let args = ctx
-                .payload::<serde_json::Value>()
-                .unwrap_or(serde_json::Value::Null);
-            let meta = tool.meta();
-            if let Some(payload) = approval_gate(&ctx, &meta, &|a| tool.risk_for(a), &args) {
+        if let Some(entry) = self.tool_impls.iter().find(|e| e.meta.name == path) {
+            let args = ctx.payload::<Value>().unwrap_or(Value::Null);
+
+            // 审批闸门：本处拿到的是**未包壳**的裸执行体（闸门长在注册收口点的
+            // `GatedExecutor` 里），判定只能在这里自己走一遍——但判定与执行体
+            // 共用同一份真源 [`approval_gate`]。静态档工具取 `meta.effective_risk()`，
+            // 与 `register_tool` 的 `risk = None` 分支同义。
+            let static_risk = entry.meta.effective_risk();
+            let static_risk_fn = |_: &Value| static_risk;
+            let risk_fn: &dyn Fn(&Value) -> CapabilityRiskLevel = match &entry.risk {
+                Some(risk) => risk.as_ref(),
+                None => &static_risk_fn,
+            };
+            if let Some(payload) = approval_gate(&ctx, &entry.meta, risk_fn, &args) {
                 return Ok(PluginPayload::new(&payload));
             }
-            return symbio_plugin_api::capability_invoke(tool.as_ref(), ctx).await;
+
+            // 造最小端口上下文：sink / abort 从 ctx 读出（缺席即静默 / 永不中止），
+            // 与执行体内部 `ExecEnv::from_request` 的读法同一口径；其余字段工具不读
+            // （都从 ctx 取），填缺省值。
+            let exec = PortExecContext {
+                abort: ExecAbortSignal::of(&*ctx),
+                idempotency_key: String::new(),
+                sink: ExecEventSink::of(&*ctx),
+                emit: symbio_plugin_api::port::PortFactEmit::silent(),
+                ctx: Some(Arc::clone(&ctx)),
+                subject: String::new(),
+                group: String::new(),
+                session_id: String::new(),
+                origin: None,
+                scratch_dir: None,
+                reader: None,
+                source: String::new(),
+            };
+            let outcome = entry
+                .executor
+                .execute(
+                    exec,
+                    PortInput {
+                        port: path.clone(),
+                        payload: args,
+                    },
+                )
+                .await;
+            // 信封 ↔ 结果换算：成功值在 `facts` 的 [`RESULT_KEY`] 项里（与派发侧
+            // 同一条取法），失败转插件错误。
+            return match outcome.error {
+                Some((_, why)) => Err(PluginError::InternalError(why)),
+                None => {
+                    let value = outcome
+                        .facts
+                        .first()
+                        .and_then(|f| f.get(RESULT_KEY))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    Ok(PluginPayload::new(&value))
+                }
+            };
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }
@@ -171,8 +253,16 @@ impl Plugin for WebPlugin {
         }
 
         if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
-            for tool in self.tool_impls.iter() {
-                visitor.put(CapabilityRow::tool(tool.clone())).await;
+            // 注册收口点（`register_tool`）一次写两条行：裹闸的端口行 + 纯数据的
+            // 工具行。本插件全部工具都是静态档（`risk = None`）。
+            for entry in self.tool_impls.iter() {
+                symbio_providers::register_tool(
+                    visitor.as_ref(),
+                    entry.meta.clone(),
+                    None,
+                    Arc::clone(&entry.executor),
+                )
+                .await;
             }
         }
         // 顺带声明「本插件有一份配置文档」：设置页据此列出本项并指路到

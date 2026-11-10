@@ -3,7 +3,7 @@
 //! ## 架构定位：普通工具，零特殊化
 //!
 //! agent_run 与 file_read / shell 等工具完全同构：
-//! - 经 `traverse(available_tools)` 注册（Capability 机制，见 `super::plugin`）；
+//! - 经 `traverse(available_tools)` 注册（工具即端口，`register_tool` 收口，见 `super::plugin`）；
 //! - 子会话过程经**执行期出口** `ExecEventSink`（由 ctx 注入，见 `symbio_plugin_api::exec`）
 //!   转播到父视图，前端按普通流式工具渲染——工具**不返回通道**；
 //! - 子会话内工具需要用户审批时，产出 `user_prompt(WaitingUserAction)`——与
@@ -56,11 +56,12 @@ use symbio_plugin_api::{
     event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
 };
 use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
-use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
-    ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame, PluginInvokeRequest,
-    PluginInvokeRequestExt, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
+    port_result, ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame,
+    PluginInvokeRequest, PluginInvokeRequestExt, PortErrorClass, PortExecContext, PortExecutor,
+    PortInput, PortOutcome, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
 };
+use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
     VdfsContent, VdfsListResponse, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
 };
@@ -108,9 +109,8 @@ impl AgentRunCapability {
     }
 }
 
-#[async_trait::async_trait]
-impl symbio_plugin_api::Capability for AgentRunCapability {
-    fn meta(&self) -> symbio_plugin_api::CapabilityMeta {
+impl AgentRunCapability {
+    pub fn meta(&self) -> symbio_plugin_api::CapabilityMeta {
         symbio_plugin_api::CapabilityMeta {
             name: NAME.to_string(),
             // 行为名自声明：本工具提供 `assign.work`（淘汰闸的管辖对象），
@@ -162,8 +162,26 @@ impl symbio_plugin_api::Capability for AgentRunCapability {
             ..Default::default()
         }
     }
+}
 
-    async fn execute(
+/// 工具即端口（`D-440` ③）：`execute` 只做「拆信封」——调用方上下文缺席时诚实失败，
+/// 否则从请求折出执行期环境，把载荷与信封交给 [`Self::run`]，出口统一经 `port_result`。
+#[async_trait::async_trait]
+impl PortExecutor for AgentRunCapability {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl AgentRunCapability {
+    async fn run(
         &self,
         args: Value,
         env: &ExecEnv,

@@ -1,4 +1,4 @@
-//! HTTP 请求工具 - 实现 Tool trait
+//! HTTP 请求工具 —— 工具端口执行体（`PortExecutor`）
 
 use super::net_guard::{agent_network_allowed, extract_host, is_private_or_local_host};
 use super::web_config::WebConfig;
@@ -7,7 +7,8 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use symbio_plugin_api::{
-    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeResponse,
+    port_result, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeResponse,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 use tokio::sync::RwLock;
 
@@ -210,9 +211,8 @@ impl HttpRequestTool {
     }
 }
 
-#[async_trait]
-impl Capability for HttpRequestTool {
-    fn meta(&self) -> CapabilityMeta {
+impl HttpRequestTool {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: "http_request".to_string(),
             description: "发送 HTTP 请求。支持 GET、POST、PUT、DELETE 等方法。".to_string(),
@@ -252,7 +252,7 @@ impl Capability for HttpRequestTool {
         }
     }
 
-    async fn execute(
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,
@@ -261,6 +261,20 @@ impl Capability for HttpRequestTool {
         let scope = symbio_plugin_api::agent_perms_of(ctx.as_ref());
         let data = self.execute_inner(&args, scope.as_ref()).await?;
         Ok(serde_json::to_value(&data)?)
+    }
+}
+
+#[async_trait]
+impl PortExecutor for HttpRequestTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
     }
 }
 

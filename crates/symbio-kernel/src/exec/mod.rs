@@ -224,7 +224,7 @@ impl std::fmt::Debug for ExecEventSink {
 ///
 /// 收口前，执行期输入散在**两处、三种形态**：
 /// - `ModelProvider::round_trip` 写成**显式参数**（`sink` / `abort`）；
-/// - `Capability::execute` 塞进**请求信封**（`ctx`）——出口、中止、参数、会话上下文
+/// - 工具执行体读**请求信封**（`ctx`）——出口、中止、参数、会话上下文
 ///   （`WORKDIR` / `MODE` / `RISK_LEVEL`…）与路由键（`PATH` / `PLUGIN_PARENT` / `trace_id`）
 ///   混在同一个键值袋里，于是每个工具都得自己记住「我该读哪些键」。
 ///
@@ -232,7 +232,7 @@ impl std::fmt::Debug for ExecEventSink {
 /// 最后给一个终局值。把这件事具名化之后，两个接口同形：
 ///
 /// ```text
-/// Capability::execute(args, env, ctx)   -> Result<Value, PluginError>
+/// 工具执行体.run(args, env, ctx)        -> Result<Value, PluginError>
 /// ModelProvider::round_trip(inputs, env) -> Result<RoundOutput, PluginError>
 /// ```
 ///
@@ -376,9 +376,9 @@ impl std::fmt::Debug for ExecAbortSignal {
 
 /// 执行期**事件出口** Key —— 出方向的通道凭据。
 ///
-/// ## 为什么走 `ctx` 而不是给 `Capability::execute` 加参数
+/// ## 为什么走 `ctx` 而不是给工具执行体加参数
 ///
-/// `Capability::execute(ctx)` 的入参是**请求信封**（`PATH` / `trace_id` / `payload`
+/// 工具执行体的入参是**请求信封**（`PATH` / `trace_id` / `payload`
 /// / 会话上下文），不是执行期上下文。出口与中止信号是**执行期**的，与「这次调用
 /// 从哪条路径来」无关：同一个 `shell` 能力既可能被会话编排层调用（有出口），
 /// 也可能被 `route()` 直接调用（无出口 ⇒ 静默）。用 `ctx` 承载，缺席即静默，

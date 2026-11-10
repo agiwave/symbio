@@ -1,4 +1,4 @@
-//! 询问用户工具 - 实现 Capability（对应 Trae 的 AskUserQuestion）
+//! 询问用户工具 —— 工具端口执行体（对应 Trae 的 AskUserQuestion）
 //!
 //! 支持单问题（question）或批量问题（questions[]，1~4 个，对齐 Trae）。
 //!
@@ -18,8 +18,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt,
+    port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 
 const MAX_QUESTIONS: usize = 4;
@@ -150,9 +150,8 @@ impl AskUserTool {
     }
 }
 
-#[async_trait]
-impl Capability for AskUserTool {
-    fn meta(&self) -> CapabilityMeta {
+impl AskUserTool {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: "ask_user".to_string(),
             description:
@@ -210,7 +209,7 @@ impl Capability for AskUserTool {
         }
     }
 
-    async fn execute(
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,
@@ -250,6 +249,20 @@ impl Capability for AskUserTool {
             "failure_kind": symbio_plugin_api::failure_kind::NEEDS_INTERACTION,
             "prompt": prompt,
         }))
+    }
+}
+
+#[async_trait]
+impl PortExecutor for AskUserTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
     }
 }
 

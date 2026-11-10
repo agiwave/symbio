@@ -3,7 +3,7 @@
 //! ## 这一层治什么
 //!
 //! `symbio-plugin-api` 的门面按来源分臂之后（D-255），机制臂一度还有 115 条——每一条都指向
-//! 宿主的一个子系统（`PluginDir` 的配置 IO、`EventBus` 的订阅表、`capability_invoke`
+//! 宿主的一个子系统（`PluginDir` 的配置 IO、`EventBus` 的订阅表、`port_result`
 //! 的调用栈、`principal` 的授权表）。那些子系统**不认容器概念**：它们只碰内核的词汇
 //! （`PluginInvokeRequest` / `Event` / `VdfsChange` / `Store`）与自己的表，却和控制面住在一起，
 //! 于是「插件要用一条机制」和「插件要认识整个宿主」被绑成同一件事。

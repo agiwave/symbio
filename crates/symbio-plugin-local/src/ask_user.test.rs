@@ -33,7 +33,7 @@ async fn interactive_mode_returns_pending_intent_not_a_channel() {
     let ctx = ctx_with(ask_args(), "interactive");
     let env = ExecEnv::from_request(&*ctx);
     let data = tool
-        .execute(ask_args(), &env, ctx)
+        .run(ask_args(), &env, ctx)
         .await
         .expect("交互模式应成功返回");
 
@@ -65,7 +65,7 @@ async fn result_carries_the_llm_visible_text_in_content() {
     let ctx = ctx_with(ask_args(), "interactive");
     let env = ExecEnv::from_request(&*ctx);
     let data = tool
-        .execute(ask_args(), &env, ctx)
+        .run(ask_args(), &env, ctx)
         .await
         .expect("交互模式应成功返回");
 
@@ -88,7 +88,7 @@ async fn auto_mode_returns_continuable_error_not_pending() {
     let ctx = ctx_with(ask_args(), "auto");
     let env = ExecEnv::from_request(&*ctx);
     let data = tool
-        .execute(ask_args(), &env, ctx)
+        .run(ask_args(), &env, ctx)
         .await
         .expect("自动模式应返回可继续的错误");
 
@@ -111,7 +111,7 @@ async fn too_few_options_is_rejected() {
     );
     let env = ExecEnv::from_request(&*ctx);
     assert!(
-        tool.execute(
+        tool.run(
             json!({ "question": "选哪个？", "options": [{ "label": "只有一个" }] }),
             &env,
             ctx

@@ -7,9 +7,9 @@ use std::path::Path;
 use std::sync::Arc;
 use symbio_plugin_api::PLUGIN_ID_SKILL;
 use symbio_plugin_api::{
-    plugin_dir_from_ctx, CapabilityRow, DetailDefinition, DetailField, Plugin, PluginConfigFile,
-    PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, TRAVERSE_AVAILABLE_TOOLS,
+    plugin_dir_from_ctx, DetailDefinition, DetailField, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, TRAVERSE_AVAILABLE_TOOLS,
 };
 use tokio::sync::RwLock;
 
@@ -501,8 +501,15 @@ impl Plugin for SkillPlugin {
 
             if !skills.is_empty() {
                 if let Some(tool_visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
-                    let skill_tool = Arc::new(SkillExecuteTool::new(skills));
-                    tool_visitor.put(CapabilityRow::tool(skill_tool)).await;
+                    let tool = SkillExecuteTool::new(skills);
+                    let meta = tool.meta();
+                    symbio_providers::register_tool(
+                        tool_visitor.as_ref(),
+                        meta,
+                        None,
+                        Arc::new(tool),
+                    )
+                    .await;
                 }
             }
         }

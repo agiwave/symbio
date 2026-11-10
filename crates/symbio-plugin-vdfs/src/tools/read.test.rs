@@ -8,7 +8,7 @@
 use super::*;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, ExecEnv, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
+    ExecEnv, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
 };
 use symbio_providers::DefaultToolVisitor;
 
@@ -29,7 +29,7 @@ async fn text_result_carries_numbered_content_and_pagination_echo() {
 
     let tool = ReadTool::new(empty_provider());
     let data = tool
-        .execute(
+        .run(
             serde_json::json!({ "path": "note.txt", "offset": 2, "limit": 1 }),
             &env,
             ctx,
@@ -78,7 +78,7 @@ async fn reading_a_directory_answers_with_the_next_call_not_with_a_path_lookalik
     let env = ExecEnv::from_request(&*ctx);
 
     let err = ReadTool::new(empty_provider())
-        .execute(serde_json::json!({ "path": "sub" }), &env, ctx)
+        .run(serde_json::json!({ "path": "sub" }), &env, ctx)
         .await
         .expect_err("目录没有正文，应报错");
     let text = err.to_string();
@@ -108,7 +108,7 @@ async fn a_missing_path_names_the_address_and_labels_the_workdir_as_context() {
     let env = ExecEnv::from_request(&*ctx);
 
     let err = ReadTool::new(empty_provider())
-        .execute(serde_json::json!({ "path": "nope.md" }), &env, ctx)
+        .run(serde_json::json!({ "path": "nope.md" }), &env, ctx)
         .await
         .expect_err("不存在的文件应报错");
     let text = err.to_string();

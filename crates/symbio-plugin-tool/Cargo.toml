@@ -18,3 +18,8 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 async-trait = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+# 测试里工具桩经 `register_tool` 收口注册（与生产同一条写入路径：端口行 + 工具行），
+# 收口函数住在收集器 crate。
+symbio-providers = { path = "../symbio-providers" }

@@ -72,7 +72,7 @@ pub trait ModelProvider: Send + Sync {
     /// （`D-222` 裁决 7）。方法名与返回类型现在说的是同一件事：`round_trip` 交
     /// `RoundOutput`（`D-436`）。
     ///
-    /// `env` 与 [`symbio_plugin_api::Capability::execute`] 共用同一类型
+    /// `env` 与工具执行体（`PortExecutor`）共用同一类型
     /// （[`ExecEnv`]）：两者都是「一次带中止的流式执行」——出方向写事件、
     /// 入方向读中止。模型执行不被路由，因此没有 `ctx` 入参。
     async fn round_trip(

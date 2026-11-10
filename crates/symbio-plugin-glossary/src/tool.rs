@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
-    PluginInvokeRequest,
+    port_result, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
+    PluginInvokeRequest, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 
 use super::behavior::GLOSSARY_RECORD;
@@ -19,9 +19,8 @@ use super::decl::{GLOSSARY_TOOL, MAX_DEFINITION_CHARS, MAX_TERM_CHARS};
 
 pub(crate) struct GlossaryTool;
 
-#[async_trait]
-impl Capability for GlossaryTool {
-    fn meta(&self) -> CapabilityMeta {
+impl GlossaryTool {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: GLOSSARY_TOOL.to_string(),
             description: "定义一个项目术语（term + definition）；定义落进本会话的事实源，后续轮次的上下文会带上当前的术语表。同一个术语再次定义会覆盖旧释义。".to_string(),
@@ -48,8 +47,24 @@ impl Capability for GlossaryTool {
             behaviors: &[GLOSSARY_RECORD],
         }
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for GlossaryTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl GlossaryTool {
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,

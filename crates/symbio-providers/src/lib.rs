@@ -101,7 +101,7 @@ pub use symbio_provider_embedding as embedding;
 pub use symbio_provider_memory as memory;
 pub use symbio_provider_vdfs_service as vdfs_service;
 
-pub use symbio_provider_collectors::{approval_gate, new_registry};
+pub use symbio_provider_collectors::{approval_gate, new_registry, register_tool, RiskOf};
 // `DefaultToolVisitor` 是**测试面**的句柄（各插件测试要拿具体类型做跨键装配 /
 // 直接 `put`），生产装配一律经 `new_registry()`——故只在测试构建里出口。
 pub use symbio_provider_collectors::DefaultToolVisitor;

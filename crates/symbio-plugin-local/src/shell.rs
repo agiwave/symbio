@@ -1,4 +1,4 @@
-//! Shell 命令执行工具 - 实现 Tool trait
+//! Shell 命令执行工具 —— 工具端口执行体（`PortExecutor`）
 //!
 //! ## 安全模型
 //!
@@ -41,8 +41,9 @@ use std::time::Duration;
 use symbio_plugin_api::CapabilityRiskLevel;
 use symbio_plugin_api::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
-    Capability, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt,
+    port_result, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PortErrorClass, PortExecContext, PortExecutor,
+    PortInput, PortOutcome,
 };
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 
@@ -497,9 +498,8 @@ fn risk_level_str(risk: &CapabilityRiskLevel) -> String {
     }
 }
 
-#[async_trait]
-impl Capability for ShellTool {
-    fn meta(&self) -> CapabilityMeta {
+impl ShellTool {
+    pub fn meta(&self) -> CapabilityMeta {
         let (_os_name, shell_name, tool_name, example_commands) = get_os_info();
         let description = format!("执行操作系统 {shell_name} 命令");
         CapabilityMeta {
@@ -516,7 +516,8 @@ impl Capability for ShellTool {
                 "required": ["command"]
             }),
             category: Some(symbio_plugin_api::CapabilityCategory::SystemOperation),
-            // 静态档取**最高可能**：shell 的实际风险随命令而变（见 `risk_for`），
+            // 静态档取**最高可能**：shell 的实际风险随命令而变（注册点以闭包作答，
+            // 复用执行期同一份 `SecurityPolicy::command_risk_level`，见 plugin.rs），
             // 这里的声明只兜住「有人只看 meta 不看参数」的那些读者。
             risk: Some(CapabilityRiskLevel::High),
             examples: Some(vec![
@@ -530,18 +531,7 @@ impl Capability for ShellTool {
         }
     }
 
-    /// 风险随命令而变：`git status` 是 Low，`rm -rf ./` 是 High。判定复用执行期
-    /// 同一份 [`SecurityPolicy::command_risk_level`]，所以**审批卡上写的档与真正
-    /// 执行时判的档必然一致**——闸门自己算一遍的话，两处规则会各自漂移。
-    fn risk_for(&self, args: &Value) -> CapabilityRiskLevel {
-        args.get("command")
-            .and_then(|v| v.as_str())
-            .map(|cmd| self.security.command_risk_level(cmd))
-            // 参数缺失/非字符串：`execute` 会以 ValidationError 拒掉，这里按最高档算
-            .unwrap_or(CapabilityRiskLevel::High)
-    }
-
-    async fn execute(
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,
@@ -582,6 +572,20 @@ impl Capability for ShellTool {
             )
             .await?;
         Ok(serde_json::to_value(&resp)?)
+    }
+}
+
+#[async_trait]
+impl PortExecutor for ShellTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
     }
 }
 #[cfg(test)]

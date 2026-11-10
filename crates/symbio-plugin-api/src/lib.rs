@@ -89,9 +89,9 @@ pub use inventory;
 // 提交宏随各自的注册表整块搬进 sdk（D-408 / D-412 / D-413）；门面在根上转出，
 // 插件侧 `symbio_plugin_api::submit_*!` 的写法不变（E-009）。
 pub use port::{
-    capability_port_of, port_executor_of, port_family, port_row_name, port_rows, AuthzVerdict,
-    PortCapabilities, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
-    PortPayload, PortProvider, PortReading, RESULT_KEY,
+    capability_port_of, port_executor_of, port_family, port_result, port_row_name, port_rows,
+    AuthzVerdict, PortCapabilities, PortErrorClass, PortExecContext, PortExecutor, PortInput,
+    PortOutcome, PortPayload, PortProvider, PortReading, RESULT_KEY,
 };
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};
 pub use settle::{Contribution, Contributor, SettleFace, Settling};
@@ -127,7 +127,7 @@ pub use symbio_deploy::*;
 // 「一条符号属于语法还是机制」在门面上直接可读，HS-002 的棘轮只压机制臂，目标才是可判的
 // 0（D-255）。
 pub use symbio_kernel::capability::{
-    family, Capability, CapabilityCategory, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel,
+    family, CapabilityCategory, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel,
     CapabilityRow, Registry,
 };
 pub use symbio_kernel::chat::{chat_node, principal};
@@ -178,7 +178,7 @@ pub use symbio_sdk::llm::{PromptMessage, PromptToolCall};
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、
 // 对象构造器的链接期登记、日志与协议键。它们与「插件要用一条机制」是同一件事，
 // 与「插件要认识整个宿主」被绑成同一件事。SDK 把这条绑定切开：这一臂只依赖内核。
-pub use symbio_kernel::capability::{capability_invoke, failure_kind};
+pub use symbio_kernel::capability::failure_kind;
 pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 pub use symbio_sdk::capability::{
     capability_announce_config_snapshot, capability_announce_configurable,

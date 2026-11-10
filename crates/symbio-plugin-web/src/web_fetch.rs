@@ -1,11 +1,14 @@
-//! Web 获取工具 - 实现 Tool trait
+//! Web 获取工具 —— 工具端口执行体（`PortExecutor`）
 
 use super::net_guard::{agent_network_allowed, extract_host, is_private_or_local_host};
 use super::web_config::WebConfig;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_plugin_api::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
+use symbio_plugin_api::{
+    port_result, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PortErrorClass,
+    PortExecContext, PortExecutor, PortInput, PortOutcome,
+};
 use tokio::sync::RwLock;
 
 const MAX_RESPONSE_SIZE: usize = 1_048_576; // 1MB
@@ -123,9 +126,8 @@ impl WebFetchTool {
     }
 }
 
-#[async_trait]
-impl Capability for WebFetchTool {
-    fn meta(&self) -> CapabilityMeta {
+impl WebFetchTool {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: "web_fetch".to_string(),
             description: "获取网页内容。支持 HTTP/HTTPS 协议。".to_string(),
@@ -148,7 +150,7 @@ impl Capability for WebFetchTool {
         }
     }
 
-    async fn execute(
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,
@@ -157,6 +159,20 @@ impl Capability for WebFetchTool {
         let scope = symbio_plugin_api::agent_perms_of(ctx.as_ref());
         let result = self.execute_inner(args, scope.as_ref()).await?;
         Ok(serde_json::to_value(&result)?)
+    }
+}
+
+#[async_trait]
+impl PortExecutor for WebFetchTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
     }
 }
 

@@ -52,7 +52,7 @@ use symbio_plugin_api::AgentScope;
 use symbio_plugin_api::VdfsAccess;
 use symbio_plugin_api::ASSEMBLY_SUB_AGENT_PLUGINS;
 use symbio_plugin_api::{
-    capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
+    capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx,
     CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, Registry, AGENT_ID,
     CAPABILITY_VISITOR, PATH, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
@@ -426,16 +426,17 @@ impl Plugin for AgentPlugin {
             .iter()
             .map(|record| record.manifest.id.clone())
             .collect();
-        // `register_batch(vec![一个元素])` 随 Tool 族收敛为 put（DE-025 §3）：
-        // 其实这里从来只有一个能力，批入口本无存在理由。
-        // （`new` 自己返回 `Arc<Self>`，此处只做最后一次 trait object 收窄。）
-        let agent_run: Arc<dyn Capability> = super::subagent::AgentRunCapability::new(
+        // 注册走 `register_tool` 唯一收口（D-440 ③）：一次写入前缀端口行 + 工具行，
+        // 派发侧按名查执行体才有着落。`risk` 传 `None`——本工具没有参数级风险覆写，
+        // 静态缺省档（`meta.effective_risk()`）就是它的风险回答。
+        let agent_run = super::subagent::AgentRunCapability::new(
             workdir.clone(),
             self.dir().dir().to_path_buf(),
             agent_ids,
             self.router.clone(),
         );
-        tool_visitor.put(CapabilityRow::tool(agent_run)).await;
+        symbio_providers::register_tool(tool_visitor.as_ref(), agent_run.meta(), None, agent_run)
+            .await;
 
         // ── 已选择智能体 → 装配它的能力 ──
         if let Some(agent_id) = agent_id {

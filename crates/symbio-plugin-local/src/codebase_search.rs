@@ -42,9 +42,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use symbio_plugin_api::EmbeddingService;
 use symbio_plugin_api::{
-    creator_create_object, Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
+    creator_create_object, port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginSimpleRequest,
-    EMBEDDING_LOCAL,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, EMBEDDING_LOCAL,
 };
 
 const CHUNK_LINES: usize = 40;
@@ -894,9 +894,8 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-#[async_trait]
-impl Capability for CodebaseSearchTool {
-    fn meta(&self) -> CapabilityMeta {
+impl CodebaseSearchTool {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: "codebase_search".to_string(),
             description:
@@ -922,7 +921,7 @@ impl Capability for CodebaseSearchTool {
         }
     }
 
-    async fn execute(
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,
@@ -938,6 +937,20 @@ impl Capability for CodebaseSearchTool {
         }
         let data = self.execute_inner(&args, &workdir_str).await?;
         Ok(serde_json::to_value(&data)?)
+    }
+}
+
+#[async_trait]
+impl PortExecutor for CodebaseSearchTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
     }
 }
 

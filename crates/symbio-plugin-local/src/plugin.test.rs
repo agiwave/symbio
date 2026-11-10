@@ -15,7 +15,11 @@ fn codebase_search_is_registered() {
         PLUGIN_ID_LOCAL,
     );
     let plugin = LocalPlugin::new(None, LocalConfig::default(), dir);
-    let names: Vec<String> = plugin.tool_impls.iter().map(|t| t.name()).collect();
+    let names: Vec<String> = plugin
+        .tool_impls
+        .iter()
+        .map(|t| t.meta.name.clone())
+        .collect();
     assert!(
         names.iter().any(|n| n == "codebase_search"),
         "codebase_search 未注册，实际工具清单：{names:?}"

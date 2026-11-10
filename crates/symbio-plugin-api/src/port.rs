@@ -10,9 +10,9 @@
 
 pub use symbio_sdk::capability::port::{capability_port_check, capability_port_of, port_row_name};
 pub use symbio_sdk::capability::port::{check_port_name, port_executor_of, port_family};
+pub use symbio_sdk::capability::port::{port_result, PortExecHandles, PortExecutor, PortFact};
 pub use symbio_sdk::capability::port::{port_rows, AuthzVerdict, PendingPrompt, RESULT_KEY};
 pub use symbio_sdk::capability::port::{PortCapabilities, PortErrorClass, PortExecContext};
-pub use symbio_sdk::capability::port::{PortExecHandles, PortExecutor, PortFact};
 pub use symbio_sdk::capability::port::{PortFactEmit, PortFactReader, PortFactWriter};
 pub use symbio_sdk::capability::port::{PortInput, PortOutcome, PortPayload, PortProvider};
 pub use symbio_sdk::capability::port::{PortReading, PortReply, PORT_FAMILY};

@@ -8,9 +8,8 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use symbio_plugin_api::PLUGIN_ID_GLOSSARY;
 use symbio_plugin_api::{
-    CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
-    TRAVERSE_AVAILABLE_TOOLS,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
 
 use super::tool::GlossaryTool;
@@ -55,9 +54,9 @@ impl Plugin for GlossaryPlugin {
         let path = ctx.get(PATH).unwrap_or_default();
         if path == TRAVERSE_AVAILABLE_TOOLS {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-                visitor
-                    .put(CapabilityRow::tool(Arc::new(GlossaryTool)))
-                    .await;
+                let tool = GlossaryTool;
+                let meta = tool.meta();
+                symbio_providers::register_tool(visitor.as_ref(), meta, None, Arc::new(tool)).await;
             }
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

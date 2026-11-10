@@ -5,9 +5,12 @@
 use super::*;
 
 use async_trait::async_trait;
+use serde_json::Value;
 use symbio_plugin_api::{
-    capability_prompts, capability_vdfs_root, family, CapabilityRow, VdfsContent, VdfsContext,
-    VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, SCOPE_TWIN,
+    capability_prompts, capability_vdfs_root, family, port_result, CapabilityMeta, CapabilityRow,
+    ExecEnv, PluginError, PluginInvokeRequest, PortErrorClass, PortExecContext, PortExecutor,
+    PortInput, PortOutcome, VdfsContent, VdfsContext, VdfsError, VdfsProvider, VdfsRequest,
+    VdfsResponse, VdfsResult, SCOPE_TWIN,
 };
 
 #[test]
@@ -83,16 +86,31 @@ impl VdfsProvider for LabeledRoot {
 /// 最小工具桩：只需一个名字，执行从不发生。
 struct EchoTool(&'static str);
 
-#[async_trait]
-impl Capability for EchoTool {
+impl EchoTool {
     fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: self.0.to_string(),
             ..Default::default()
         }
     }
+}
 
-    async fn execute(
+#[async_trait]
+impl PortExecutor for EchoTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl EchoTool {
+    async fn run(
         &self,
         _args: Value,
         _env: &ExecEnv,
@@ -180,9 +198,15 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
     let inner: Arc<dyn Registry> = Arc::new(symbio_providers::DefaultToolVisitor::new());
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
 
-    scoped
-        .put(CapabilityRow::tool(Arc::new(EchoTool("read_skill"))))
-        .await;
+    // 注册走生产形状（`register_tool` 先端口行后工具行）：前缀化 meta 的行键 =
+    // 前缀化名，执行体随前缀化的端口行一起进内表（派发侧按前缀名查得到它）。
+    symbio_providers::register_tool(
+        &scoped,
+        EchoTool("read_skill").meta(),
+        None,
+        Arc::new(EchoTool("read_skill")),
+    )
+    .await;
     scoped
         .put(CapabilityRow::prompt(
             "persona",
@@ -197,6 +221,14 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
             .await
             .is_some_and(|row| row.name() == "agent_reviewer_read_skill"),
         "子 Agent 的工具应带前缀进内层（并集，两份都生效）"
+    );
+    // 前缀化的端口行随同批写入：派发侧按前缀名查得到执行体（注册收口点过闸后的
+    // 那一份——改名的只是 meta，执行面随行）。
+    assert!(
+        symbio_plugin_api::port_executor_of(inner.as_ref(), "agent_reviewer_read_skill")
+            .await
+            .is_some(),
+        "前缀名必须查得到执行体，否则子 Agent 的工具不可派发"
     );
     // 本名声明（D-428）：每个前缀工具都交出「前缀名 → 本名」一对，装配面据此折叠，
     // 不需要认识 `agent_` 这套前缀形状。声明行的键不与工具行同名，读侧只取载荷。

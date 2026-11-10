@@ -15,7 +15,7 @@
 use super::*;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, ExecEnv, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
+    ExecEnv, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
 };
 use symbio_providers::DefaultToolVisitor;
 
@@ -45,7 +45,7 @@ async fn list(path: &str, workdir: &str, ignore: Option<Value>) -> Value {
         args["ignore"] = ig;
     }
     ListTool::new(empty_provider())
-        .execute(args, &env, ctx)
+        .run(args, &env, ctx)
         .await
         .expect("列举应成功")
 }

@@ -15,7 +15,7 @@
 //! - [`stdio`]：stdio transport 实现（每次调用临时 spawn 子进程）
 //! - [`http`]：http transport 实现（每次调用新建短连接）
 //! - [`types`]：JSON-RPC 2.0 协议层类型
-//! - [`capability`]：把单个 MCP 工具包装为标准 `Capability` 供 agent 工具机制调用
+//! - [`capability`]：把单个 MCP 工具包装为工具端口执行体（`PortExecutor`）供 agent 工具机制调用
 //!
 //! ## 存储策略
 //!

@@ -6,19 +6,20 @@ use super::{
     ask_user::AskUserTool, codebase_search::CodebaseSearchTool, content_search::ContentSearchTool,
     shell::ShellTool, todo_write::TodoWriteTool,
 };
-// 审批闸门的判定住在能力收集器（`DefaultToolVisitor` 那条收口路径的唯一真源）；
-// 本插件的 `route` 兜底也调它——两条路径**判定只有一份**。
+// 审批闸门的判定住在能力注册收口点（`register_tool` 派生端口行时裹上的
+// `GatedExecutor`）；本插件的 `route` 兜底也调它——两条路径**判定只有一份**。
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use symbio_plugin_api::PLUGIN_ID_LOCAL;
 use symbio_plugin_api::{
-    plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload,
+    plugin_dir_from_ctx, CapabilityMeta, CapabilityRiskLevel, ExecAbortSignal, ExecEventSink,
+    Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PortExecContext, PortExecutor, PortInput,
+    RESULT_KEY,
 };
 use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption};
-use symbio_providers::approval_gate;
+use symbio_providers::{approval_gate, RiskOf};
 use tokio::sync::RwLock;
 
 // ==================== 配置文档（`<根>/local/PLUGIN.yml`） ====================
@@ -112,13 +113,26 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
+/// `route` 兜底用的工具条目：自述快照 + 风险回答 + 端口执行体。
+///
+/// 工具改形为 [`PortExecutor`] 后不再有 `Arc<dyn Capability>` 可藏；兜底路径
+/// 自己持有这三样，审批判定仍走 [`approval_gate`] 这一份真源，与注册收口点
+/// （`register_tool`）同一读法。
+struct ToolEntry {
+    meta: CapabilityMeta,
+    /// `None` = 静态档（`meta.effective_risk()`，与 `register_tool` 的 `risk = None`
+    /// 分支同义）；`Some` = 风险随参数变化的覆写闭包（shell）。
+    risk: Option<RiskOf>,
+    executor: Arc<dyn PortExecutor>,
+}
+
 #[derive(Clone)]
 pub struct LocalPlugin {
     config: Arc<RwLock<LocalConfig>>,
     /// 配置文件的呈现与校验（`<根>/local/PLUGIN.yml`）——节点形状 / 校验 / 落盘
     /// 都在它手上，落盘写的是**本插件自己目录里的**文件
     config_file: PluginConfigFile,
-    tool_impls: Arc<Vec<Arc<dyn Capability>>>,
+    tool_impls: Arc<Vec<ToolEntry>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
     security: Arc<SecurityPolicy>,
 }
@@ -162,8 +176,49 @@ impl LocalPlugin {
         // 文件编辑类能力（read/edit/write/delete/list/search）已迁入 VDFS 的物理层
         // （见 crates/symbio-plugin-vdfs/src/physical.rs），由 `vdfs` 插件以 `vdfs_*` 工具统一暴露，
         // 此处不再提供原生工具。本插件在 VDFS 上只挂一个**配置文件**。
-        let tool_impls: Vec<Arc<dyn Capability>> =
-            vec![shell, content_search, todo_write, codebase_search, ask_user];
+        //
+        // shell 是唯一的**动态风险**工具：风险随命令而变（`git status` 是 Low，
+        // `rm -rf ./` 是 High）。闭包捕获**同一份** `SecurityPolicy`，判定复用执行期
+        // 同一个 [`SecurityPolicy::command_risk_level`]——审批卡上写的档与真正执行时
+        // 判的档必然一致；闸门自己算一遍的话，两处规则会各自漂移。其余工具静态档
+        // （`risk = None`，交 `register_tool` 读 `meta.effective_risk()`）。
+        let shell_risk: RiskOf = {
+            let security = Arc::clone(&security);
+            Arc::new(move |args: &Value| {
+                args.get("command")
+                    .and_then(|v| v.as_str())
+                    .map(|cmd| security.command_risk_level(cmd))
+                    // 参数缺失/非字符串：执行期会以 ValidationError 拒掉，这里按最高档算
+                    .unwrap_or(CapabilityRiskLevel::High)
+            })
+        };
+        let tool_impls: Vec<ToolEntry> = vec![
+            ToolEntry {
+                meta: shell.meta(),
+                risk: Some(shell_risk),
+                executor: shell,
+            },
+            ToolEntry {
+                meta: content_search.meta(),
+                risk: None,
+                executor: content_search,
+            },
+            ToolEntry {
+                meta: todo_write.meta(),
+                risk: None,
+                executor: todo_write,
+            },
+            ToolEntry {
+                meta: codebase_search.meta(),
+                risk: None,
+                executor: codebase_search,
+            },
+            ToolEntry {
+                meta: ask_user.meta(),
+                risk: None,
+                executor: ask_user,
+            },
+        ];
 
         Self {
             config: config_lock,
@@ -211,20 +266,64 @@ impl Plugin for LocalPlugin {
             }
         }
 
-        let payload = ctx.payload::<serde_json::Value>()?;
-        if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
-            // 审批闸门住在端口执行体的第一段（`DefaultToolVisitor::put` 派生端口行
-            // 时裹上的 `GatedExecutor`）；`route` 是本插件的注册表未命中回落，
-            // 拿到的是**未包壳**的裸工具，判定只能在这里自己走一遍——
-            // 但判定与执行体共用同一份真源 [`symbio_providers::collectors::approval_gate`]。
-            let meta = tool.meta();
-            if let Some(payload) = approval_gate(&ctx, &meta, &|a| tool.risk_for(a), &payload) {
+        if let Some(entry) = self.tool_impls.iter().find(|e| e.meta.name == path) {
+            let args = ctx.payload::<Value>().unwrap_or(Value::Null);
+
+            // 审批闸门：本处拿到的是**未包壳**的裸执行体（闸门长在注册收口点的
+            // `GatedExecutor` 里），判定只能在这里自己走一遍——但判定与执行体
+            // 共用同一份真源 [`approval_gate`]；shell 的动态风险覆写在闭包里原样生效。
+            let static_risk = entry.meta.effective_risk();
+            let static_risk_fn = |_: &Value| static_risk;
+            let risk_fn: &dyn Fn(&Value) -> CapabilityRiskLevel = match &entry.risk {
+                Some(risk) => risk.as_ref(),
+                None => &static_risk_fn,
+            };
+            if let Some(payload) = approval_gate(&ctx, &entry.meta, risk_fn, &args) {
                 return Ok(PluginPayload::new(&payload));
             }
 
-            // 信封 ↔ 结果换算收口在 `capability_invoke`：本处与按名执行
-            // （`Registry::get` + `capability_invoke`）走同一条拆信封路径。
-            return symbio_plugin_api::capability_invoke(tool.as_ref(), ctx).await;
+            // 造最小端口上下文：sink / abort 从 ctx 读出（缺席即静默 / 永不中止），
+            // 与执行体内部 `ExecEnv::from_request` 的读法同一口径——「会话里跑」与
+            // 「被 route() 直连调用」仍共用同一条执行路径；其余字段工具不读（都从
+            // ctx 取），填缺省值。
+            let exec = PortExecContext {
+                abort: ExecAbortSignal::of(&*ctx),
+                idempotency_key: String::new(),
+                sink: ExecEventSink::of(&*ctx),
+                emit: symbio_plugin_api::port::PortFactEmit::silent(),
+                ctx: Some(Arc::clone(&ctx)),
+                subject: String::new(),
+                group: String::new(),
+                session_id: String::new(),
+                origin: None,
+                scratch_dir: None,
+                reader: None,
+                source: String::new(),
+            };
+            let outcome = entry
+                .executor
+                .execute(
+                    exec,
+                    PortInput {
+                        port: path.clone(),
+                        payload: args,
+                    },
+                )
+                .await;
+            // 信封 ↔ 结果换算：成功值在 `facts` 的 [`RESULT_KEY`] 项里（与派发侧
+            // 同一条取法），失败转插件错误。
+            return match outcome.error {
+                Some((_, why)) => Err(PluginError::InternalError(why)),
+                None => {
+                    let value = outcome
+                        .facts
+                        .first()
+                        .and_then(|f| f.get(RESULT_KEY))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    Ok(PluginPayload::new(&value))
+                }
+            };
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }
@@ -243,11 +342,17 @@ impl Plugin for LocalPlugin {
         }
 
         if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
-            // 审批闸门由收口点（`DefaultToolVisitor::put`）统一加壳，
-            // 本处只交裸工具——过去在这里手工 `SecureToolWrapper::new` 的做法
-            // 让闸门长在插件的注册循环里，`vdfs` 等别的注册入口就漏了。
-            for tool in self.tool_impls.iter() {
-                visitor.put(CapabilityRow::tool(tool.clone())).await;
+            // 注册收口点（`register_tool`）一次写两条行：裹闸的端口行 + 纯数据的
+            // 工具行。shell 的动态风险闭包随条目交上去，静态档工具传 `None`
+            // （判定回落 `meta.effective_risk()`）。
+            for entry in self.tool_impls.iter() {
+                symbio_providers::register_tool(
+                    visitor.as_ref(),
+                    entry.meta.clone(),
+                    entry.risk.clone(),
+                    Arc::clone(&entry.executor),
+                )
+                .await;
             }
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
