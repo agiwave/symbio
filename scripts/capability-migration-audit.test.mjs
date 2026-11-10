@@ -712,7 +712,7 @@ test('activeDebtExemption：决策号打不开或理由为空 ⇒ 不生效（�
 })
 
 test('DEBT_EXEMPTIONS：真仓条目有决策号 / 可读日期 / 非空理由', () => {
-  assert.ok(DEBT_EXEMPTIONS.length >= 1)
+  // 空表合法（欠账清零后豁免撤下，D-403 收口）；有条目则每条必须形状合规。
   for (const e of DEBT_EXEMPTIONS) {
     assert.match(e.decision, /^D-\d+$/)
     assert.match(e.through, /^\d{4}-\d{2}-\d{2}$/)
