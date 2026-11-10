@@ -4506,7 +4506,6 @@ dependencies = [
  "serde_json",
  "symbio-kernel",
  "symbio-plugin-api",
- "symbio-providers",
  "symbio-testkit",
  "tempfile",
  "time",

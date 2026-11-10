@@ -629,12 +629,9 @@ fn host_write_is_one_event_cell() {
     );
 }
 
-/// 每一档守卫角色都要有人居住：装配口把「判据空转」报成缺口（DE-024 D-203）。
-///
-/// 这条用例钉的是**方向**——owner 删掉一行 `roles`，表现不是拒绝而是「看不见」
-/// （守卫从拦人变成全绿）。所以它在冻结之后由装配口逐档问一遍，不靠人记得。
+/// 角色取自这一行的 `roles`，不是「同格就算」——判据读的是声明，不是格位表（DE-024 D-203）。
 #[test]
-fn unmanned_roles_are_reported_per_variant() {
+fn roles_come_from_the_declaration_row() {
     // 只住一档：其余三档在表上无人。
     const PARTIAL: &[EventDecl] = &[EventDecl::with_roles(
         "fixture.final",
@@ -654,15 +651,6 @@ fn unmanned_roles_are_reported_per_variant() {
         },
     );
     let frozen = b.seal(&[]).expect("只交事件行也能冻结");
-    assert_eq!(
-        frozen.unmanned_roles(),
-        vec![
-            FactRole::StopsTurn,
-            FactRole::DeclaresBudget,
-            FactRole::CountsRework
-        ],
-        "缺口名单按 `FactRole::ALL` 的顺序，逐档有名有姓"
-    );
     assert!(frozen.holds_role("fixture.final", FactRole::FinalizesTurn));
     assert!(
         !frozen.holds_role("fixture.final", FactRole::StopsTurn),
@@ -671,43 +659,5 @@ fn unmanned_roles_are_reported_per_variant() {
     assert!(
         !frozen.holds_role("fixture.absent", FactRole::FinalizesTurn),
         "表上没有的名字不扮演任何东西"
-    );
-
-    // 四档住满（一格多名、一名多档都允许）⇒ 空名单。
-    const FULL: &[EventDecl] = &[
-        EventDecl::with_roles(
-            "fixture.a",
-            (Entity::Scope, Verb::Closed),
-            &[FactRole::FinalizesTurn],
-        ),
-        EventDecl::with_roles(
-            "fixture.b",
-            (Entity::Scope, Verb::Asserted),
-            &[FactRole::StopsTurn, FactRole::DeclaresBudget],
-        ),
-        EventDecl::new("fixture.c", (Entity::Task, Verb::Asserted)),
-        EventDecl::with_roles(
-            "fixture.d",
-            (Entity::Task, Verb::Asserted),
-            &[FactRole::CountsRework],
-        ),
-    ];
-    let mut b = Builder::empty();
-    b.declare(
-        "plugins/fixture",
-        PluginDeclarations {
-            events: FULL,
-            facts: &[],
-            views: &[],
-            ports: &[],
-            actors: Vec::new(),
-            rows: &[],
-        },
-    );
-    let frozen = b.seal(&[]).expect("角色不影响形状判据");
-    assert!(
-        frozen.unmanned_roles().is_empty(),
-        "{:?}",
-        frozen.unmanned_roles()
     );
 }

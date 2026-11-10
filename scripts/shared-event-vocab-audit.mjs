@@ -11,6 +11,7 @@
  * | 编号 | 判什么 | 它拦的是哪一种腐烂 |
  * |---|---|---|
  * | CS-007 | 清单上每条名字：① 除 owner 外**至少一个**插件在生产代码里引用它；② 内核 `event/mod.rs` / `CELLS` 上不许再有它 | 清单变成第二张内核表：登记一条没人用的名字、或者登记完忘了把内核那一行删掉，两处都留着就是两个 owner |
+ * | CS-011 | `FactRole` 的四档**每档都有生产居住者**（插件生产源码里的 `FactRole::<档>`） | 判据读角色、角色来自 owner 的 `EventDecl.roles`；owner 删掉那一行不会报错，只让那道守卫从「拒绝」变成「看不见」（DE-024 D-203） |
  *
  * 名字**形状**（`<域>.<事实>`）、owner 有没有为它提交带格位的 `EventDecl`、以及「一条名字
  * 两个 owner」由生成器 `parseEventList` / `collectSharedEvents` 抛错拦住（读不懂的清单连
@@ -29,7 +30,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
-// @codes CS-007
+// @codes CS-007 CS-011
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -89,6 +90,47 @@ function refRe(name) {
   return new RegExp(`"${esc}"|\\b${CONST_OF(name)}\\b`)
 }
 
+/**
+ * CS-011 的扫描面：插件 crate 的**生产**源码（`src/**.rs`，剔掉 `*.test.rs`）。
+ *
+ * 为什么不扫内核与 `plugin-api`：内核只定义 `FactRole`，门面只转出协议五格的宿主声明，
+ * 两者都不回答「谁在守着这一档判据」；居住者必须是被判据读的那张表上的 owner。
+ */
+function productionPluginSources(root) {
+  const dir = path.join(root, 'crates')
+  if (!fs.existsSync(dir)) throw new Error('范围读不出：缺少 crates/')
+  const out = []
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.startsWith('symbio-plugin-')) continue
+    const src = path.join(dir, name, 'src')
+    if (!fs.existsSync(src)) continue
+    const walk = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const abs = path.join(d, e.name)
+        if (e.isDirectory()) walk(abs)
+        else if (e.name.endsWith('.rs') && !e.name.endsWith('.test.rs')) out.push(abs)
+      }
+    }
+    walk(src)
+  }
+  if (out.length === 0) throw new Error('范围读不出：没有任何插件生产源码')
+  return out
+}
+
+/** 四档角色各被哪些生产文件持有（`DE-024` D-203 的居住账）。 */
+function roleResidents(root) {
+  const roles = ['FinalizesTurn', 'StopsTurn', 'DeclaresBudget', 'CountsRework']
+  const residents = new Map(roles.map((r) => [r, []]))
+  for (const abs of productionPluginSources(root)) {
+    const text = fs.readFileSync(abs, 'utf8')
+    for (const m of text.matchAll(/FactRole::([A-Za-z]+)/g)) {
+      const bucket = residents.get(m[1])
+      if (bucket) bucket.push(path.relative(root, abs))
+    }
+  }
+  return residents
+}
+
 let faces
 let kernel
 let rows
@@ -136,12 +178,33 @@ for (const name of kernel) {
   }
 }
 
-if (errors.length) {
-  for (const e of errors) console.log(red(`✗ CS-007 ${e}`))
-  console.log(`\n事件名共享表：${errors.length} 条违规`)
-  process.exit(1)
+// ---- CS-011：四档守卫角色每档都要有生产居住者（DE-024 D-203）----
+// 判据空转的经典形态：角色表少一行不报错，只让那道守卫从「拒绝」变成「看不见」。
+// 装配期判不了（只链接部分插件的用例会假红，见 `assemble_declarations` 的说明），
+// 所以判在整仓这一面：生产声明里缺一档就红。
+let roleGaps = []
+let roleLine = ''
+try {
+  const residents = roleResidents(ROOT)
+  for (const [role, where] of residents) {
+    if (where.length === 0) {
+      roleGaps.push(
+        `${role} 没有任何生产声明持有它——判据读角色，角色缺席时那道守卫不报错、只是不再判`,
+      )
+    }
+    roleLine += `${roleLine ? ' · ' : ''}${role}←${where.length}`
+  }
+} catch (e) {
+  console.log(`${red('[ERROR]')} shared-event-vocab-audit：${e.message}`)
+  process.exit(2)
 }
 
+if (errors.length || roleGaps.length) {
+  for (const e of errors) console.log(red(`✗ CS-007 ${e}`))
+  for (const e of roleGaps) console.log(red(`✗ CS-011 ${e}`))
+  console.log(`\n事件名共享表：${errors.length} 条违规 · 角色居住：${roleGaps.length} 档无人`)
+  process.exit(1)
+}
 const summary = rows
   .map((r) => `${r.name}←${r.owner}→${(r.consumers ?? []).join('/')}`)
   .join('、')
@@ -151,4 +214,5 @@ console.log(
       '每条都有 owner 的 `EventDecl` 与外部消费方，内核表上都不再有它',
   ),
 )
+console.log(green(`✓ CS-011 守卫角色：四档都有生产居住者（${roleLine}）`))
 for (const n of notes) console.log(`  · ${n}`)

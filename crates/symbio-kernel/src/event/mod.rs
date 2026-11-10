@@ -42,9 +42,11 @@ pub type Cell = (Entity, Verb);
 /// `Frozen::holds_role` 读它，不再拿名字比字符串——于是「新增一条共享事件名」
 /// 与「改动架构」脱钩（DE-024 D-203）。
 ///
-/// **每档都必须有人居住**：装配口逐档查居住（`Frozen::unmanned_roles` ⇒
-/// `Gap::UnmannedRole`），门禁 CS-008 判整仓。少了这条，owner 删掉角色会让对应判据
-/// **静默不判**——判据从「拒绝」变成「看不见」，正是 J3 点名的失效形状。
+/// **每档都必须有人居住**：由整仓判据 `CS-011`（`scripts/shared-event-vocab-audit.mjs`）
+/// 逐档查插件生产声明里的 `FactRole::*`，缺一档即红。为什么不在装配口判：`seal` 也会被
+/// **只链接了部分插件**的用例调到，那种子集装配缺档是假红（见 `assemble_declarations` 的说明）。
+/// 少了这一道，owner 删掉角色会让对应判据**静默不判**——判据从「拒绝」变成「看不见」，
+/// 正是 J3 点名的失效形状。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactRole {
     /// 本轮的**定稿发言**（同格还有兜底格，它不算定稿）。
@@ -68,7 +70,7 @@ impl FactRole {
         }
     }
 
-    /// 闭集全集：`seal` 逐档查居住，新加一档自动进检查面。
+    /// 闭集全集：`CS-011` 逐档查居住（整仓判，判据不靠装配口），新加一档自动进检查面。
     pub const ALL: &'static [FactRole] = &[
         FactRole::FinalizesTurn,
         FactRole::StopsTurn,

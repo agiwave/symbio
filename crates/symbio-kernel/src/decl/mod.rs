@@ -582,19 +582,6 @@ impl Frozen {
         self.events.iter().any(|e| e.name == name && e.host)
     }
 
-    /// 每一档角色都有人住吗（装配口的整体检查，DE-024 D-203）。
-    ///
-    /// 为什么这条必须存在：判据读角色，而角色来自声明。owner 删掉一行 `roles` 的
-    /// 表现不是「拒绝」而是「看不见」——守卫从拦人变成空转，全绿。这与 J3 点名的
-    /// 静默失效同形，所以它在**冻结时**判，不在运行期判。
-    pub fn unmanned_roles(&self) -> Vec<FactRole> {
-        FactRole::ALL
-            .iter()
-            .copied()
-            .filter(|role| !self.events.iter().any(|e| e.roles.contains(role)))
-            .collect()
-    }
-
     /// 这个事件名归谁：把含它的声明表交进 [`Builder`] 的那个 owner。
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn event_owner(&self, name: &str) -> Option<&'static str> {

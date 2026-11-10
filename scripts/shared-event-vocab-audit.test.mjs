@@ -43,12 +43,18 @@ const KERNEL_GRID = `pub const CELLS: &[EventDecl] = &[
 ];
 `
 
-/** owner 插件：清单登记 + 自家 `EventDecl`。 */
+/** owner 插件：清单登记 + 自家 `EventDecl` + 四档角色各有人住（CS-011 的干净面）。 */
 const OWNER = {
   'crates/symbio-plugin-loop/PLUGIN.yml': 'id: loop\nshared_events: memory.encoded\n',
-  'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, Verb};
+  'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, FactRole, Verb};
 pub const EVENTS: &[EventDecl] = &[
     EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
+];
+pub const ROLES: &[FactRole] = &[
+    FactRole::FinalizesTurn,
+    FactRole::StopsTurn,
+    FactRole::DeclaresBudget,
+    FactRole::CountsRework,
 ];
 `,
 }
@@ -158,4 +164,52 @@ test('⑤ 内核表上的多消费方存量：只报数，不判红', () => {
   )
   assert.equal(r.status, 0, r.stdout + r.stderr)
   assert.match(r.stdout, /内核表上的「task\.held」/)
+})
+
+test('⑥ CS-011：干净夹具四档都有人住 ⇒ 绿', () => {
+  const r = audit(clean())
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /✓ CS-011/)
+  assert.match(r.stdout, /CountsRework←1/)
+})
+
+test('⑥ CS-011：删掉一档角色 ⇒ 红（判据读角色，缺席只让守卫变哑）', () => {
+  const r = audit(
+    clean({
+      'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, FactRole, Verb};
+pub const EVENTS: &[EventDecl] = &[
+    EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
+];
+pub const ROLES: &[FactRole] = &[
+    FactRole::FinalizesTurn,
+    FactRole::StopsTurn,
+    FactRole::DeclaresBudget,
+];
+`,
+    }),
+  )
+  assert.equal(r.status, 1, r.stdout + r.stderr)
+  assert.match(r.stdout, /✗ CS-011 CountsRework/)
+})
+
+test('⑥ CS-011：角色只写在 `.test.rs` 里不算居住 ⇒ 红', () => {
+  const r = audit(
+    clean({
+      'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, Verb};
+pub const EVENTS: &[EventDecl] = &[
+    EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
+];
+`,
+      'crates/symbio-plugin-loop/src/control_decl.test.rs': `use symbio_sdk::{FactRole};
+pub const ROLES: &[FactRole] = &[
+    FactRole::FinalizesTurn,
+    FactRole::StopsTurn,
+    FactRole::DeclaresBudget,
+    FactRole::CountsRework,
+];
+`,
+    }),
+  )
+  assert.equal(r.status, 1, r.stdout + r.stderr)
+  assert.match(r.stdout, /✗ CS-011/)
 })

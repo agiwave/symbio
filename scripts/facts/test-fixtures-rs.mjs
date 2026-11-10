@@ -164,8 +164,8 @@ export function render({ root }) {
 
   L.push('/// 用例交出去的声明表：格位与角色与各 owner 的 `EventDecl` 逐条相同。')
   L.push('///')
-  L.push('/// 三档角色必须有人住（`seal` 的 `Gap::UnmannedRole`）：预算声明在开轮 / 派发，')
-  L.push('/// 收束在定稿，停机在被拒。夹具表照抄这三处，否则守卫判据会在「角色没人住」上红。')
+  L.push('/// 三档角色必须有人住（判据 `CS-011` 判整仓：插件生产声明里缺一档即红）：')
+  L.push('/// 预算声明在开轮 / 派发，收束在定稿，停机在被拒。夹具表照抄这三处，否则守卫判据会在「角色没人住」上红。')
   L.push('#[rustfmt::skip]')
   L.push('pub const EVENTS: &[EventDecl] = &[')
   L.push('    // 协议五格：名字与格位是内核语法的一部分，夹具照内核常量走。')
