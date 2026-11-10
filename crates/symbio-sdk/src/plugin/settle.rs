@@ -33,7 +33,7 @@
 //! ## 归属由能力声明，信封由宿主盖章
 //!
 //! 草稿的 `turn` 恒为宿主当轮的格号、`ts` 恒为本次询问的 [`Settling::now_ms`]——
-//! 「收束事实发生在这一刻」是宿主面，能力交不出这两格（[`crate::plugin::effects::FactDraft::into_event`]
+//! 「收束事实发生在这一刻」是宿主面，能力交不出这两格（[`crate::plugin::fact_source::draft_into_event`]
 //! 不收轮号）。落格归属（信封 `actor`）由**事件声明**给定（`EventDecl::owner`，D-339）：
 //! 需要归到认知归属人的事实，在申报方的声明里写 `person/local`；其余写 `@principal`，
 //! 由会话装配解析成本轮主体。贡献者只交事实，不替宿主决定归属（DE-026 D-252）。

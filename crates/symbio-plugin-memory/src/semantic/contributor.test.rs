@@ -5,6 +5,7 @@
 
 use super::*;
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
+use symbio_plugin_api::fact_source::draft_into_event;
 use symbio_plugin_api::{
     check_all, vocab, Entity, Event, EventStore, RecallLine, Seq, SettleFace, Store, Verb,
     PRINCIPAL_USER,
@@ -126,7 +127,7 @@ fn a_second_settle_of_the_same_turn_does_not_duplicate() {
     assert_eq!(first.len(), 1);
 
     // 落格（宿主的那一步：信封由它盖）。
-    let mut event = first[0].fact.clone().into_event(PRINCIPAL_USER);
+    let mut event = draft_into_event(PRINCIPAL_USER.to_string(), first[0].fact.clone());
     event.ts = 9_000;
     store.append(event).expect("入格");
 
@@ -166,7 +167,7 @@ fn the_fact_keeps_the_invariants_green() {
     }];
     let recall = facts(&lines, false);
     let out = SemanticRecall.contribute(&settling(Some(&recall), user_seq, &[]));
-    let mut event = out[0].fact.clone().into_event(PRINCIPAL_USER);
+    let mut event = draft_into_event(PRINCIPAL_USER.to_string(), out[0].fact.clone());
     event.ts = 9_000;
     store.append(event).expect("入格");
 

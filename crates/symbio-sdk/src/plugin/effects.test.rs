@@ -3,6 +3,8 @@
 use super::*;
 use symbio_kernel::event::{Entity, Verb};
 
+use crate::plugin::fact_source::draft_into_event;
+
 /// 测试夹具的名字：只在本测试二进制里登记，不依赖任何真插件被链接。
 const TEST_TASK: &str = "test_task_table";
 const TEST_GATE: &str = "test_gatekeeper";
@@ -86,7 +88,7 @@ fn declared_tool_produces_draft_with_anchor() {
     assert_eq!(d.key, "r-t3-call-1");
     assert_eq!(d.produced_by, Some(42));
 
-    let event = d.clone().into_event("session/a");
+    let event = draft_into_event("session/a".to_string(), d.clone());
     assert_eq!(event.actor, "session/a");
     assert_eq!(event.event_id, "r-t3-call-1");
     assert_eq!(event.kind, "test.recorded");

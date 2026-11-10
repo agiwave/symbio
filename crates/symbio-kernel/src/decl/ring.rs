@@ -157,6 +157,10 @@ pub struct PortDecl {
 }
 
 /// 按端口名取声明。`None` = 没有这个端口（漏声明，不是默认值）。
+///
+/// 查询口（`AD-002` 契约面）：本仓生产面当前未直调——环只在装配判据里问「这个端口
+/// 登记过没有」（`ports().iter().any(...)`，那是存在性而不是取声明），取声明的是
+/// 执行侧的端口实现。留着它是因为「按名取一行」是声明表的读法，不是某处的私有便利。
 pub fn port_of<'a>(ports: &'a [PortDecl], name: &str) -> Option<&'a PortDecl> {
     ports.iter().find(|p| p.port == name)
 }

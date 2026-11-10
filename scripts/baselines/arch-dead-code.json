@@ -64,13 +64,13 @@
     {
       "symbol": "port_of",
       "path": "crates/symbio-kernel/src/decl/ring.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "why": "查询口：按名取一行端口声明（`None` = 漏声明，不是默认值）。本仓生产面当前未直调——装配判据只问「登记过没有」（`ports().iter().any(...)`），取声明的是执行侧的端口实现（D-434）",
       "evidence": "docs/003-design/014-单环一表.md"
     },
     {
       "symbol": "with_cost_ms",
       "path": "crates/symbio-kernel/src/event/mod.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "why": "构造口：事件信封 `cost_ms` 列（I3 预算记账）的链式写法。生产侧唯一写入点是写口 `draft_into_event` 从载荷提入（字段赋值），本仓未走链式（D-434）",
       "evidence": "docs/003-design/001-核心架构.md"
     },
     {
@@ -172,7 +172,7 @@
     {
       "symbol": "with_status",
       "path": "crates/symbio-kernel/src/vdfs/node.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
+      "why": "构造口：VDFS 节点 `status` 格的链式写法。生产调用点一律直接写字段（`n.status = …`，见 mcp / model / session 的节点投影），本仓未走链式（D-434）",
       "evidence": "docs/003-design/009-VDFS规范.md"
     },
     {
@@ -222,12 +222,6 @@
       "path": "crates/symbio-plugin-api/src/declarations.rs",
       "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
       "evidence": "docs/003-design/014-单环一表.md"
-    },
-    {
-      "symbol": "into_event",
-      "path": "crates/symbio-sdk/src/plugin/effects.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/018-模块架构.md"
     },
     {
       "symbol": "is_denied",

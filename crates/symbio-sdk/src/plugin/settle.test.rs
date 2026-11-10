@@ -3,6 +3,8 @@
 use super::*;
 use symbio_kernel::event::{Entity, Verb};
 
+use crate::plugin::fact_source::draft_into_event;
+
 fn draft(key: &str) -> FactDraft {
     FactDraft {
         key: key.to_string(),
@@ -74,12 +76,12 @@ fn contributors_are_ordered_by_prio_then_owner() {
 
 /// 草稿**不带信封**：轮号与时刻只在宿主落格那一刻成立（D-252）。
 ///
-/// 这里按宿主的落格写法走一遍——`into_event` 只交主体与形状，`turn` / `ts` 由写方盖。
+/// 这里按宿主的落格写法走一遍——`draft_into_event` 只交主体与形状，`turn` / `ts` 由写方盖。
 #[test]
 fn draft_carries_no_envelope_and_the_host_stamps_it() {
     let at = at();
     let contributed = Contribution::new(draft("d-1"));
-    let mut event = contributed.fact.into_event(at.principal);
+    let mut event = draft_into_event(at.principal.to_string(), contributed.fact);
     event.ts = at.now_ms;
     assert_eq!(event.actor, "session/a");
     assert_eq!(event.event_id, "d-1");

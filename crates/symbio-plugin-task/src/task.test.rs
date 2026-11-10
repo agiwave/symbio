@@ -10,6 +10,7 @@ use symbio_plugin_api::effects::{
     BeforeDecision, BeforeReadings, BeforeRequest, EffectEnv, EffectInput, ToolBehavior,
 };
 use symbio_plugin_api::settle::{Contributor, SettleFace, Settling};
+use symbio_plugin_api::fact_source::draft_into_event;
 use symbio_plugin_api::PRINCIPAL_SCHEDULER;
 use symbio_plugin_api::{
     actor_can_assign_work, check_all, Entity, Event, EventDecl, EventStore, Pattern, Scope, Seq,
@@ -126,7 +127,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
         applied: &[],
     };
     for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
-        let event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
+        let event = draft_into_event(PRINCIPAL_MAIN.to_string(), draft);
         store.append(event).expect("任务事件入格");
     }
 }
@@ -672,7 +673,7 @@ fn apply_effects(
         };
         for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
             kinds.push(draft.kind.clone());
-            let event = draft.into_event(symbio_plugin_api::PRINCIPAL_MAIN);
+            let event = draft_into_event(PRINCIPAL_MAIN.to_string(), draft);
             store.append(event.clone()).expect("任务事件入格");
             applied.push(event);
         }
@@ -996,10 +997,10 @@ fn the_draft_carries_no_envelope() {
     let store = EventStore::new();
     let (anchor, history) = contributor_history(&store);
     let at = settling(SettleFace::Generated, &history, "t3", anchor);
-    let event = ScheduleContributor.contribute(&at)[0]
-        .fact
-        .clone()
-        .into_event(PRINCIPAL_SCHEDULER);
+    let event = draft_into_event(
+        PRINCIPAL_SCHEDULER.to_string(),
+        ScheduleContributor.contribute(&at)[0].fact.clone(),
+    );
     assert_eq!(event.ts, 0, "草稿不带时刻：信封由写口盖（D-252）");
     assert_eq!(event.actor, PRINCIPAL_SCHEDULER);
 }

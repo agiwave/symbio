@@ -12,7 +12,7 @@
 //! ```text
 //! 能力插件 ──submit_row!──▶ inventory（编译期随二进制生效）
 //! 义务环选债 ──债实例 + 本行事实切片（纯值）──▶ RowHandler::run
-//! 宿主唯一写口 ──FactDraft::into_event──▶ 事实源
+//! 宿主唯一写口 ──draft_into_event──▶ 事实源
 //! ```
 //!
 //! 执行体不认识任何能力名：它按 `Decl.by = plugin_row` 找到这一行的实现，把纯值
