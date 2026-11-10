@@ -45,9 +45,14 @@ pub const SURFACE_REPLY: &str = "reply";
 
 /// 构造对话面文本节点（**纯函数**，可单测）。
 ///
-/// `exclude_from_context`：`Answered` 的答话为 `false`（它进请求包——它就是这一轮的
-/// 答复），`Escalate` 的首响为 `true`（界面开场白，不进请求包）。判据见
-/// `compose` 侧的判决文档。
+/// 两个用户，都是「界面上的话，不是模型的对话内容」：
+/// - 进度汇报：`ReportDraft::to_message`，`exclude_from_context = true`；它站在
+///   **轮边界**上，不属于某一轮 ⇒ 根级；
+/// - 首响（`Escalate`）：重建侧 `opening_node` 用它复刻落库那一格，再把父改写成
+///   轮根（`D-426`）——形状一份，位置由事实给。
+///
+/// 答话（`Answered`）**不走这里**（`D-435`）：它与工具轮的正文是同一条通道
+/// （轮根下的正文子 + 载荷 `meta` 带 `surface` / `reason`），不是第三种节点。
 ///
 /// `principal` 是**这条发言是谁说的**（D-147：身份只写一份）。对话面文本恒由
 /// 本会话主体产出，调用方从请求上下文取 `request_principal`（`authz` 域，控制面）。

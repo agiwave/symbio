@@ -299,20 +299,16 @@ impl Convergence {
                                         "status": "aborted",
                                         "reason": "interrupted",
                                         "text": &text,
-                                        "principal": PRINCIPAL_MAIN,
-                                        // 对话面节点：与正常终答同一形状（`rebuild`
-                                        // 的 `dialog` 分支折出一条正文节点），否则
-                                        // 只剩「轮骨架」——D-335 后骨架不是发布身份，
-                                        // 这一轮在对话面就凭空消失。id 与模型端口
-                                        // 交回的正文身份同源（`{root}-text`）：中止前
-                                        // 已流过正文时，`failed` 折出的节点与它同 id，
+                                        "answer": &text,
+                                        // 正文身份与模型端口交回的同源（`{root}-text`）：
+                                        // 中止前已流过正文时，`failed` 折出的节点与它同 id，
                                         // 重建按 id 合成一条，不会多出第二个 aborted。
-                                        "dialog": {
-                                            "id": format!("{root_id}-text"),
-                                            "reason": "interrupted",
-                                            "text": &text,
-                                            "exclude_from_context": false,
-                                        },
+                                        "answer_id": format!("{root_id}-text"),
+                                        "principal": PRINCIPAL_MAIN,
+                                        // 对话面标记：与正常终答同一个键（`D-435`）。
+                                        // 中止轮不写正文节点时（`text` 为空）这一轮只剩
+                                        // 用户节点上的 `aborted` 交代——不再发一条空正文。
+                                        "meta": { "surface": "reply", "reason": "interrupted" },
                                     }),
                                     produced_by: Some(user_seq),
                                 },
@@ -330,7 +326,7 @@ impl Convergence {
                         .cloned()
                         .collect();
                     // 正文节点全部由 `rebuild` 从事实折出：中止前已流过正文时来自
-                    // `failed` 的半截，否则来自刚落格的终答 `dialog`（同 id，合一条）。
+                    // `failed` 的半截，否则来自刚落格的终答（同 id，合一条）。
                     // 中止不推 `failed:` 节点（那是失败路径，D-044 / D-165）。
                     let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
                         &fresh_waiting,

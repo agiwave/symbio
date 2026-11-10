@@ -363,20 +363,11 @@ impl OutputIndex {
         Self { by_call }
     }
 
-    /// 一条**收束 / 进展**事实「说了什么」：对话面 → 载荷正文（无模型轮）→
-    /// 按 `responses` 倒序取最后一条往返的正文。
+    /// 一条**收束 / 进展**事实「说了什么」：载荷正文（无模型轮）→ 折成 `answer`
+    /// 的正文（末轮「思考即正文」）→ 按 `responses` 倒序取最后一条往返的正文。
     ///
     /// 兜底格不在这里：它的正文是 `detail`（失败的人话），由调用方自己读。
     pub fn produced_text(&self, e: &Event) -> String {
-        if let Some(dialog) = e.payload.get("dialog") {
-            if let Some(text) = dialog
-                .get("text")
-                .and_then(|v| v.as_str())
-                .filter(|t| !t.is_empty())
-            {
-                return text.to_string();
-            }
-        }
         let direct = e
             .payload
             .get("text")

@@ -237,10 +237,11 @@ export default defineCase(
       assertEq(msgRoleOf(tplReply[0]), 'assistant', '对话面节点是助手说的话');
       assertEq(msgTypeOf(tplReply[0]), 'text', '对话面节点是文本节点');
       assertEq(tplReply[0].content, TEMPLATE_THANKS, 'A 线应拿到致谢模板的原文');
-      assert(
-        tplReply[0].parent_id == null,
-        '答话必须挂在根级（对话线）',
-      );
+      // 答话是**轮根下的正文子**（`D-435`）：与工具轮的正文子同一棵树，不再是
+      // 根级兄弟节点——根级那句会让按根切窗口多算一轮，也会让渲染把它排到轮末。
+      const tplUser = tplMsgs.find((m) => msgRoleOf(m) === 'user');
+      assert(tplUser, 'A 线应有用户消息节点（轮根）');
+      assertEq(tplReply[0].parent_id, tplUser.id, '答话挂在轮根下');
       assertEq(
         tplReply[0].meta?.exclude_from_context,
         undefined,
@@ -265,19 +266,19 @@ export default defineCase(
       const genReply = genMsgs.filter((m) => m.meta?.surface === 'reply');
       assertEq(genReply.length, 1, 'B 线应恰有一条对话面节点');
       assertEq(genReply[0].content, ANSWER_FROM_CONTEXT, '答话应是生成产线的产物（不是模板）');
-      assert(
-        genReply[0].parent_id == null,
-        '答话必须挂在根级（对话线）',
-      );
+      const genUser = genMsgs.find((m) => msgRoleOf(m) === 'user');
+      assert(genUser, 'B 线应有用户消息节点（轮根）');
+      assertEq(genReply[0].parent_id, genUser.id, '答话挂在轮根下');
       // 思考事实入格：生成产线是这条轮次里唯一一次真实模型推理，mock 已带
-      // `reasoning` ⇒ 收束格载荷携带 reasoning/reasoning_id ⇒ 重建复刻 Reason 节点
-      // （挂在答话节点之下）。此前它在措辞插件出口就被丢弃，Reason 节点从未存在。
+      // `reasoning` ⇒ 收束格载荷携带 reasoning/reasoning_id ⇒ 重建复刻 Reason 节点。
+      // 它与正文**同级**（同挂轮根）——与工具轮的树同形（`D-435`）：此前它在措辞
+      // 插件出口就被丢弃，Reason 节点从未存在；挂成答话的子节点则是第二种树形。
       const genReason = genMsgs.find(
         (m) =>
           msgTypeOf(m) === 'reasoning' &&
-          m.parent_id === genReply[0].id,
+          m.parent_id === genUser.id,
       );
-      assert(genReason, '答话节点下应有 Reason 子节点（思考事实入格）');
+      assert(genReason, '答话轮的轮根下应有 Reason 子节点（思考事实入格）');
       assertEq(genReason.content, '想一想：用户在问对话内容，直接从上下文总结即可。', 'Reason 节点正文 = 生成时的思考内容');
       assertEq(genReason.status, 'completed', 'Reason 节点落库即终态');
 

@@ -210,21 +210,23 @@ export default defineCase(
       // 分类请求是**内部请求**：它必须静默（不产生任何可见节点）。
       //
       // 断言取它**真正要拦的东西**：分类请求自己不得泄漏成可见节点。`compose` 为
-      // `Answered` 写一句答话之后，"零助手节点"不再成立，因此判据落在"恰一条助手节点，
-      // 且它是根级的对话面节点"上。
+      // `Answered` 写一句答话之后，"零助手节点"不再成立，因此判据落在"恰一条助手
+      // 正文节点，且它是带对话面标记的那条"上。
       //
-      // 判据取"恰一条助手节点，且它是根级的对话面节点"：泄漏的形态是 Turn 骨架
-      // （已由上面那条断言拦住）或 Turn 的子文本节点，两者都不是根级、也都不带
-      // `meta.surface = "reply"`。
+      // 判据取**父是轮根 + `meta.surface = "reply"`**（`D-435`）：泄漏的形态是多出来
+      // 的第二条正文（分类请求自己说了一句话），它与答话的差别只在标记，不在位置。
+      const userMsg = clsMsgs.find((m) => msgRoleOf(m) === 'user');
+      assert(userMsg, 'B 线应有用户消息节点（轮根）');
       const assistants = clsMsgs.filter((m) => msgRoleOf(m) === 'assistant');
       assertEq(
         assistants.length,
         1,
         `B 线只该有 compose 写的那一条答话（实得 ${assistants.length} 条助手节点）`,
       );
-      assert(
-        assistants[0].parent_id == null,
-        '答话必须挂在根级（对话线），不是某个 Turn 的子节点',
+      assertEq(
+        assistants[0].parent_id,
+        userMsg.id,
+        '答话挂在轮根下（与工具轮的正文子同级）',
       );
       assertEq(assistants[0].meta?.surface, 'reply', '答话必须带对话面标记（surface 是数据概念）');
       assertEq(assistants[0].meta?.reason, 'clarify', '答话必须带上游判决的理由码（原样透传）');

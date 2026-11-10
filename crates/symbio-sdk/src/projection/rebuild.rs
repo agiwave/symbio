@@ -598,61 +598,19 @@ fn opening_node(e: &Event) -> ChatNode {
 /// 形状与 `crates/symbio-plugin-loop/src/message_build::llm_build_assistant_messages` 同源（同一判据：
 /// reasoning-only 时那段内容归 Text 子节点，不另立 Reasoning 子，否则同一段内容
 /// 在存储层出现两份）。
+///
+/// ## 答话轮走**这一条**，不再有 `dialog` 分支（`D-435`）
+///
+/// `chat.assistant.final` 的三个写方（模型端口 / 答话行 / 中止收束）交出同一份载荷
+/// 形状，所以这里只有一条折叠路径：轮骨架（id = `root_id`，与用户节点同 id ⇒「同 id
+/// 只认首次」并进那一条）+ 思考 / 正文子节点。对话面的两样标记（`surface` /
+/// `reason`）走载荷 `meta`，随正文子节点复刻——与 [`user_node`] 同一条纪律，不是
+/// 第二种节点形状。
+///
+/// 旧事件里答话写成 `dialog` 子对象的，`text` / `answer` 都还在顶层（写方两个键
+/// 同值），折叠按下面同一条路径得到同一个节点；只有「`dialog` 里那段正文与顶层
+/// 不一致」的残破事实才会少一个节点——那种事实没有第二条读法能自洽，不猜。
 fn produced_nodes(e: &Event) -> Vec<ChatNode> {
-    // 定稿答话（`Answered` / `Escalate` 的对话面节点）：收束格带 `dialog` 载荷 ⇒
-    // 它是一条**根级**节点，不是某个 Turn 的子节点（`parent_id = None`，与用户发言
-    // 互为兄弟）。形状经 `node_build::dialog_node` **同一构造器**复刻——落库侧那一格
-    // 就是它产的，重建再抄一遍迟早各错各的（同 `ReportDraft::to_message` 的纪律）。
-    if let Some(dialog) = e.payload.get("dialog") {
-        let id = dialog.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let reason = dialog
-            .get("reason")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        let exclude = dialog
-            .get("exclude_from_context")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        // 正文归对话面节点自己（`with_dialog` 把顶层 `text` 移进 `dialog.text`）；
-        // 顶层那份只作旧事件容错。
-        let text = dialog
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .unwrap_or_else(|| text_of(e, "text"));
-        let mut node = dialog_node(text.as_str(), reason, exclude, &actor_principal(e));
-        // id 由载荷给（缺则按事件 id 稳定合成——旧事件容错，与 `user_node` 同口径）。
-        node.id = if id.is_empty() {
-            e.event_id.clone()
-        } else {
-            id.to_string()
-        };
-        // 时间戳覆写成事件自身（构造器取「此刻」会破坏纯函数性，见模块头）。
-        node.timestamp = Some(e.ts);
-        node.status = Some(status_of(e));
-        // 思考事实（答话轮的模型推理，`WordingReply` 带回、收束格入格）：
-        // 有正文 + 有思考 ⇒ 推理节点是这条答话的**子节点**（与生成路径的
-        // 骨架树形一致：思考挂在它所属的那次产出之下）。载荷没有就是旧事件 /
-        // 模板产线，一个节点都不多发——形状逐字复刻，不自我发明。
-        let reasoning = text_of(e, "reasoning");
-        if reasoning.trim().is_empty() {
-            return vec![node];
-        }
-        let reasoning_id =
-            payload_str(e, "reasoning_id").unwrap_or_else(|| format!("{}-reasoning", node.id));
-        let reasoning_node = ChatNode {
-            id: reasoning_id,
-            parent_id: Some(node.id.clone()),
-            principal: Some(actor_principal(e)),
-            msg_type: Some(NodeKind::Notice),
-            content: Some(MessageContent::Text(reasoning)),
-            status: Some(status_of(e)),
-            timestamp: Some(e.ts),
-            ..Default::default()
-        }
-        .with_style_tag(CHAT_STYLE_TAG_REASONING);
-        return vec![node, reasoning_node];
-    }
     let Some(group) = payload_str(e, "root_id") else {
         return Vec::new();
     };
@@ -737,6 +695,12 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         let mut m = llm_build_text_node(&group, &text, None, child_id, &principal);
         m.timestamp = Some(e.ts);
         m.status = Some(status.clone());
+        // 对话面标记（`surface` / `reason` / `exclude_from_context`）随载荷复刻：
+        // 与 [`user_node`] 的 `meta` 同一条纪律——节点上的判别位必须来自事实，
+        // 否则同一条发言在实时面与重建面是两个身份。work 轮的正文没有这一格。
+        if let Some(meta) = e.payload.get("meta").filter(|m| !m.is_null()) {
+            m.meta = Some(meta.clone());
+        }
         nodes.push(m);
     }
 

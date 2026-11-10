@@ -137,27 +137,38 @@ async fn answer_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeReque
         // 契约里的平凡值：空串 = 没有对话面文本 ⇒ 不写节点（不另造一句顶上）。
         return RowStep::Facts(Vec::new());
     }
+    // 正文子节点的身份由内核那份派发算（`D-435`）：答话轮没有流式节点，回退到
+    // `{root}-text`——与被中止的 `failed` 半截同一个 id，两格折出的节点因此合成一条。
+    let reasoning = reply.reasoning.unwrap_or_default();
+    let answer_id = symbio_plugin_api::event_output_text_node_id(
+        &text,
+        &reasoning,
+        None,
+        reply.reasoning_id.as_deref(),
+        Some(user_id),
+    );
     RowStep::Facts(vec![FactDraft {
         key: format!("{EVENT_CHAT_ASSISTANT_FINAL}:{user_id}"),
         kind: EVENT_CHAT_ASSISTANT_FINAL.to_string(),
         entity: Entity::Scope,
         verb: Verb::Closed,
+        // **与 work 轮同一份终答载荷**（`D-435`）：答话不是第二种轮，它只是同一个
+        // 收束格在「没有工具循环」那一支上的取值。对话面的两样标记走 `meta`
+        // （投影按 `payload.meta` 复刻，与用户格同一条纪律），不另立 `dialog` 子对象
+        // ——那个对象只服务重建侧的一条专用分支，形状因此有两份。
         payload: json!({
             "root_id": user_id,
-            "text": text,
+            "text": text.clone(),
+            "answer": text,
+            "answer_id": answer_id,
             "principal": PRINCIPAL_MAIN,
             "cost_ms": reply.cost_ms,
             // 终结格必须标明这一轮为什么停（闭集取值，`closure_reason_closed`）；
-            // 对话面自己的 `dialog.reason` 是另一回事（为什么这样措辞）。
+            // 「为什么这样措辞」是对话面的标记，在下面 `meta.reason`，两者不混。
             "reason": ClosureReason::Completed.as_str(),
-            "reasoning": reply.reasoning,
+            "reasoning": reasoning,
             "reasoning_id": reply.reasoning_id,
-            "dialog": {
-                "id": format!("reply:{user_id}"),
-                "reason": reason,
-                "text": text,
-                "exclude_from_context": false,
-            },
+            "meta": { "surface": "reply", "reason": reason },
         }),
         produced_by: Some(req.user_seq),
     }])
