@@ -337,9 +337,15 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                     .as_ref()
                     .and_then(|meta| meta.get("context"))
                     .cloned();
-                // 失败移交的两格先取下来：`carries_state` 分支会把 `node` 整个搬走，
-                // 之后不能再借它（成功轮的 `error` 为空，不会被移交）。
-                let failure = node.error.clone().map(|error| (node.status.clone(), error));
+                // 终态移交的两格先取下来：`carries_state` 分支会把 `node` 整个搬走，
+                // 之后不能再借它。
+                //
+                // 移交的判据是**状态不是 `Completed`**，不是「有没有 `error`」：中止轮
+                // 没有错误信息（它没失败），但它的终态仍必须写到轮根上，否则这一轮
+                // 「被用户按停」在读面与「正常结束」同形（`D-435`：中止轮不再为这件事
+                // 造一条空正文节点）。成功轮不移交——既有节点自己的状态不被覆盖。
+                let terminal = (node.status != Some(NodeStatus::Completed))
+                    .then(|| (node.status.clone(), node.error.clone()));
                 if carries_state {
                     let kept = out[i].seq;
                     out[i] = node;
@@ -355,13 +361,15 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                         meta["context"] = watermark;
                     }
                 }
-                // 失败收束的骨架与用户节点同 id（D-335 之后 `root_id` 就是用户消息
-                // 事实 id）：骨架的失败状态与原因必须补到既有节点上，否则这一轮
-                // 「以失败结束」在读面不可见（D-381）。成功轮的骨架 `error` 为空，
-                // 不移交状态——既有节点自己的状态不被覆盖。
-                if let Some((status, error)) = failure {
+                // 收束格的骨架与用户节点同 id（`D-335` 之后 `root_id` 就是用户消息
+                // 事实 id）：这一轮的终态必须补到既有节点上，否则「以失败 / 中止结束」
+                // 在读面不可见（`D-381` 的失败那一半；`D-435` 把中止那一半补上）。
+                // `error` 缺席时**不覆盖**既有那格（中止没有错误信息，见上）。
+                if let Some((status, error)) = terminal {
                     out[i].status = status;
-                    out[i].error = Some(error);
+                    if error.is_some() {
+                        out[i].error = error;
+                    }
                 }
                 continue;
             }

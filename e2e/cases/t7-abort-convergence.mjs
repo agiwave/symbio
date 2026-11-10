@@ -6,7 +6,8 @@ import './_selfrun.mjs';
 // 钉的不变量：
 // - 中止后**不得有节点停在 streaming/pending**；
 // - 会话节点 attributes.outcome = "aborted"（经 vdfs/stat 真实边界读取）；
-// - 中止落在**本轮正文节点**的 status=aborted 上，且不落失败节点、不落兜底
+// - 中止落在**轮根**的 status=aborted 上（`D-435`：终态由骨架移交给轮根，中止轮
+//   不再为「看得见」造一条空正文节点），且不落失败节点、不落兜底
 //   （中止不是失败，D-044 / D-165）。
 import {
   MockLlm,
@@ -23,6 +24,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 export default defineCase('T7 中止收敛：运行中 action(会话地址, abort)，节点全部终态 + outcome=aborted', async () => {
@@ -82,13 +84,20 @@ export default defineCase('T7 中止收敛：运行中 action(会话地址, abor
     const msgs = await readSessionMessages(cli, 'e2e-t7');
     assertTranscriptInvariants(msgs, 'T7');
 
-    // 中止落在**本轮正文节点**的状态上；同时钉住「中止不落失败 / 兜底」。
+    // 中止落在**这一轮的终态**上（`D-435`）：轮根（用户消息节点兼任轮组）带
+    // `aborted`；中止前若已流过正文，那条正文子节点同为 `aborted`。不再为「让中止
+    // 看得见」造一条空正文节点——终态由骨架移交给轮根，位置与失败轮同一条。
     const aborted = msgs.filter((m) => m.status === 'aborted');
+    assert(aborted.length >= 1, '中止后应至少有一个节点带 aborted（本轮终态）');
+    const abortedRoot = aborted.find((m) => msgRoleOf(m) === 'user');
     assert(
-      aborted.length === 1,
-      `应恰好有一个 aborted 节点（实际 ${aborted.length}：${aborted.map((m) => `${msgTypeOf(m)}:${m.id}`).join(', ')}）`,
+      abortedRoot,
+      `轮根应带 aborted（实际带 aborted 的：${aborted.map((m) => `${msgRoleOf(m)}:${m.id}`).join(', ')}）`,
     );
-    assert(msgTypeOf(aborted[0]) === 'text', `aborted 应落在正文节点（实际 ${msgTypeOf(aborted[0])}）`);
+    assert(
+      aborted.every((m) => m.id === abortedRoot.id || m.parent_id === abortedRoot.id),
+      '其余带 aborted 的节点都是这一轮的正文子（不越出轮根）',
+    );
 
     // 中止不是失败：不推失败节点、不带错误信息（兜底是失败路径，D-044 / D-165）。
     const failedNodes = msgs.filter((m) => m.status === 'failed');

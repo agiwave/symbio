@@ -453,6 +453,55 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
     );
 }
 
+/// 中止轮的终态落在**轮根**上（`D-435`）。
+///
+/// 中止没有错误信息（它不是失败），所以「有没有 `error`」不能当移交的判据——中止轮
+/// 若把它们一起跳过，读面看到的是一轮没有任何终态的对话：与「还在跑」同形，也与
+/// 「正常结束」同形。旧形状靠一条**空正文节点**承这个状态，那正是 `dialog` 分支存在
+/// 的理由；改成终态移交之后，那条空节点不必存在。
+#[test]
+fn aborted_turn_carries_its_terminal_status_onto_the_turn_node() {
+    let events = vec![
+        user_event("u-node", "慢慢说"),
+        Event::pending(
+            "af-1",
+            EVENT_CHAT_ASSISTANT_FINAL,
+            Entity::Scope,
+            Verb::Closed,
+            "session/main",
+        )
+        .with_ts(2_000)
+        .with_payload(serde_json::json!({
+            "root_id": "u-node",
+            "status": "aborted",
+            "reason": "interrupted",
+            "text": "",
+            "answer": "",
+            "principal": "session/main",
+        })),
+    ];
+
+    let got = rebuild(&events, &CHAT, &MESSAGE);
+    let turn = got
+        .iter()
+        .find(|m| m.id == "u-node")
+        .expect("用户节点即轮节点");
+    assert_eq!(
+        turn.status,
+        Some(NodeStatus::Aborted),
+        "中止的终态必须写到轮根上，否则这一轮与「正常结束」同形"
+    );
+    assert_eq!(turn.error, None, "中止不是失败，不带错误信息");
+    assert_eq!(
+        shapes(&got)
+            .iter()
+            .filter(|s| s.ty == NodeForm::Body && s.id != "u-node")
+            .count(),
+        0,
+        "空正文不再造节点：终态由轮根承担"
+    );
+}
+
 /// 发起一批工具调用的那条事实：载荷带 `root_id` 与 `calls[]`。
 ///
 /// 产物不再复制轮号，重建按 `tool_call_id` 反查这里登记过的调用 id。
