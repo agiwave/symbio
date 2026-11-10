@@ -2,13 +2,15 @@
 //!
 //! 验收的判据不是「测试夹具能跑」，而是三件事同时成立：
 //! 1. 生产冻结表（链接 loop 与全部插件，经 `sealed_declarations`）接纳该端口的
-//!    `PortDecl` 与行——否则装载期就会红（`PortWithoutAnswerExit` / `UnmannedRow` 等）；
+//!    `PortDecl`，并由通用受理行覆盖它的应答出口——否则装载期就会红
+//!    （`PortWithoutAnswerExit` / `UnmannedRow` 等）；
 //! 2. 环的通用受理执行体（`PORT_ACTOR`）出现在冻结的执行体声明里；
-//! 3. 给一条 `request(port=notify)` 事实，环的选债器（`ring::owed`）会选中这一行。
+//! 3. 给一条 `request(port=notify)` 事实，环的选债器（`ring::owed`）会选中通用受理行
+//!    ——端口名是运行时数据，`eq` 里没有它（D-440）。
 //!
 //! 本文件不改 loop 的任何文件——零改动接入的证明见提交的 `git diff --stat`。
 
-use symbio_kernel::decl::ring::{owed, Lit};
+use symbio_kernel::decl::ring::owed;
 use symbio_kernel::decl::Frozen;
 use symbio_kernel::event::{Event, EVENT_REQUEST};
 use symbio_kernel::{Entity, Verb};
@@ -40,19 +42,18 @@ fn production_table_accepts_the_third_port() {
         "端口行绑定后 `{PORT_ACTOR}` 应进执行体声明表"
     );
 
-    // 3. 该端口的行绑在通用受理执行体上——行由插件声明，环不认识端口名。
+    // 3. 受理行是**端口无关**的通用行：按 `port` 绑定键，不对端口名做字面量
+    //    约束，因此同一行也受理 notify 之外的任何端口（D-440）。
     let row = frozen
         .rows()
         .iter()
         .find(|r| {
             r.by == Some(PORT_ACTOR)
                 && r.owes.source == EVENT_REQUEST
-                && r.owes
-                    .eq
-                    .iter()
-                    .any(|(field, lit)| *field == "port" && *lit == Lit::Str(NOTIFY))
+                && r.owes.key.contains(&"port")
+                && !r.owes.eq.iter().any(|(field, _)| *field == "port")
         })
-        .expect("生产表里应有 by=port、owes=request(port=notify) 的行");
+        .expect("生产表里应有 by=port 的通用受理行");
 
     // 4. 选债器：一条 request 事实就能让这一行欠账（可还、未被挂起）。
     let request = Event::pending(

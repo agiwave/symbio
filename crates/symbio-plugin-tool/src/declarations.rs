@@ -3,11 +3,9 @@
 //! 端口名与租约参数随本插件提交：环不持有端口清单，只按端口名问冻结表
 //! （`Frozen::ports`）。加一个端口只改提供者的 `ports()`，不改环。
 
-use symbio_plugin_api::ring::{Decl, Lit, Pattern, PortDecl};
-use symbio_plugin_api::rows::PORT_ACTOR;
+use symbio_plugin_api::ring::{Decl, Pattern, PortDecl};
 use symbio_plugin_api::{
-    Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, EVENT_FAILED,
-    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+    Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, EVENT_SENT,
 };
 
 use super::port::TOOL;
@@ -84,46 +82,9 @@ pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
     concurrency: 4,
 }];
 
-/// 端口行：一笔已宣布的 `request(port=tool)` → 落 `sent` → 执行体跑完 → `response` / `failed`。
-///
-/// `by` 写宿主词汇 [`PORT_ACTOR`]：动作是环的通用受理入口，本插件只声明端口与行
-/// （D-303 的「端口所属插件声明通用行」）。
+/// 端口协议格的行由环的通用出口行（`await-port`）承接：端口名是运行时字符串，
+/// 不进声明表（D-440）。本插件只留产物格的归宿行。
 static ROWS: &[Decl] = &[
-    Decl {
-        name: "await-tool",
-        by: Some(PORT_ACTOR),
-        // 工具调用可能跑秒–分钟（`PORTS` 的租约 600s）：最宽档。
-        tier: LatencyTier::Deep,
-        expand: None,
-        owes: Pattern {
-            source: EVENT_REQUEST,
-            key: &["port", "id", "attempt"],
-            eq: &[("port", Lit::Str(TOOL))],
-        },
-        until: &[
-            Pattern {
-                source: EVENT_SENT,
-                key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str(TOOL))],
-            },
-            Pattern {
-                source: EVENT_RESPONSE,
-                key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str(TOOL))],
-            },
-            Pattern {
-                source: EVENT_FAILED,
-                key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str(TOOL))],
-            },
-            Pattern {
-                source: EVENT_RETRY,
-                key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str(TOOL))],
-            },
-        ],
-        unless: &[],
-    },
     // 产物格的**归宿行**（`by = None`，不派发）。
     //
     // `artifact.added` 的读者是 model 的续接债与会话投影：它们不是环里的行前件，

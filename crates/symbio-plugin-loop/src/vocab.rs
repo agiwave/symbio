@@ -10,12 +10,14 @@
 //! （`agent::declarations`）。本模块如今只剩两条**机制私有名**（`plugin.row.asked`
 //! / `driver.stalled`）——名字的唯一定义处仍在 `plugin-api`，这里只登记格位。
 
+use symbio_kernel::decl::ring::{Decl, Pattern};
 use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, Verb};
+use symbio_kernel::LatencyTier;
 
 use symbio_plugin_api::drive::EVENT_DRIVER_STALLED;
 use symbio_plugin_api::rows::{declared_writes, ASK_KIND, PLUGIN_ROW, PORT_ACTOR};
-use symbio_plugin_api::EVENT_REQUEST;
+use symbio_plugin_api::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-loop";
 
@@ -60,6 +62,48 @@ fn actors() -> Vec<ActorDecl> {
     ]
 }
 
+/// 端口协议格的**通用出口行**（D-440）。
+///
+/// 一笔 `request` 不论 `port` 是什么运行时字符串，都按 `(port,id,attempt)` 开一笔债；
+/// `sent` / `response` / `failed` / `retry` 按同一组键收口。`eq` 里没有端口名的字面量，
+/// 因此端口名不进声明表：插件加载/卸载带来的端口增减只改提供者的 `ports()`，环的
+/// 行表一格不动。端口字段在 `key` 里——不同端口的应答不会串到同一笔债上。
+static PORT_ROWS: &[Decl] = &[Decl {
+    name: "await-port",
+    by: Some(PORT_ACTOR),
+    // 最宽档：工具调用是秒–分钟级，通用执行体 `PORT_ACTOR` 的 mode 也是 Deep。
+    tier: LatencyTier::Deep,
+    expand: None,
+    owes: Pattern {
+        source: EVENT_REQUEST,
+        key: &["port", "id", "attempt"],
+        eq: &[],
+    },
+    until: &[
+        Pattern {
+            source: EVENT_SENT,
+            key: &["port", "id", "attempt"],
+            eq: &[],
+        },
+        Pattern {
+            source: EVENT_RESPONSE,
+            key: &["port", "id", "attempt"],
+            eq: &[],
+        },
+        Pattern {
+            source: EVENT_FAILED,
+            key: &["port", "id", "attempt"],
+            eq: &[],
+        },
+        Pattern {
+            source: EVENT_RETRY,
+            key: &["port", "id", "attempt"],
+            eq: &[],
+        },
+    ],
+    unless: &[],
+}];
+
 symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 
 fn submitted_declarations() -> PluginDeclarations<'static> {
@@ -69,6 +113,6 @@ fn submitted_declarations() -> PluginDeclarations<'static> {
         views: &[],
         ports: &[],
         actors: actors(),
-        rows: &[],
+        rows: PORT_ROWS,
     }
 }

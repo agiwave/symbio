@@ -1068,10 +1068,14 @@ pub fn check_ports(rows: &[Decl], frozen: &Frozen, ports: &[PortDecl]) -> Vec<Ga
         for fact in [EVENT_RESPONSE, EVENT_FAILED] {
             let covered = port_field.is_some_and(|field| {
                 rows.iter().flat_map(|d| d.until).any(|p| {
+                    // `eq` 里没有端口约束的是**通用出口行**（D-440）：端口名是运行时
+                    // 字符串，声明期不出现；它按键绑定收口，覆盖所有端口。带约束的
+                    // 旧形状仍按字面量逐端口判，两种写法都算数。
                     p.source == fact
-                        && p.eq
-                            .iter()
-                            .any(|(name, lit)| *name == field && *lit == Lit::Str(port.port))
+                        && match p.eq.iter().find(|(name, _)| *name == field) {
+                            None => true,
+                            Some((_, lit)) => *lit == Lit::Str(port.port),
+                        }
                 })
             });
             if !covered {

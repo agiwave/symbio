@@ -3,17 +3,17 @@
 //! 两条用例回答两个不同问题：
 //! 1. **装配清单里的包能被装出来**：工厂已注册、构造成功、出厂 id 等于目录名
 //!    （E-001）。这条不依赖某个具体包，新增包自动被遍历到。
-//! 2. **已链接包交来的端口都进了冻结表并有受理行**：`submit_declarations!` 的每一条
-//!    `PortDecl` 都在 `sealed_declarations()` 里，且存在 `by = PORT_ACTOR`、
-//!    `owes = request(port=<该端口>)` 的行。这条同样不看包名，也不要求包在默认装配里
-//!    ——只由测试装配的包（`plugin_assembly: none`）照样被覆盖。
+//! 2. **已链接包交来的端口都进了冻结表，并被通用受理行覆盖**：`submit_declarations!`
+//!    的每一条 `PortDecl` 都在 `sealed_declarations()` 里；端口协议格由一条
+//!    `by = PORT_ACTOR`、`owes = request`、按 `port` 绑定键但**不按端口名分叉**的行
+//!    统一受理（D-440）。端口名是运行时字符串，不进任何行的 `eq`。这条同样不看包名，
+//!    也不要求包在默认装配里——只由测试装配的包（`plugin_assembly: none`）照样被覆盖。
 //!
 //! 工具面不变由 e2e 字节棘轮持有（文件头已说明），这里不重复。
 
 use std::sync::Arc;
 
 use symbio_plugin_api::inventory;
-use symbio_plugin_api::ring::Lit;
 use symbio_plugin_api::rows::PORT_ACTOR;
 use symbio_plugin_api::{
     creator_create_object, creator_ids, sealed_declarations, Plugin, PluginDir,
@@ -66,6 +66,18 @@ fn every_submitted_port_is_in_the_sealed_table_with_an_executor_row() {
         "端口行绑定后 `{PORT_ACTOR}` 应进执行体声明表"
     );
 
+    // 端口名是运行时字符串：受理行按 `port` 绑定键，不对它做字面量约束，因此
+    // 一条通用行覆盖全部已申报端口（加端口不用加行，D-440）。
+    assert!(
+        frozen.rows().iter().any(|r| {
+            r.by == Some(PORT_ACTOR)
+                && r.owes.source == EVENT_REQUEST
+                && r.owes.key.contains(&"port")
+                && !r.owes.eq.iter().any(|(field, _)| *field == "port")
+        }),
+        "端口协议格应由一条 `by = {PORT_ACTOR}` 的通用受理行覆盖，端口名不进声明表"
+    );
+
     let mut ports = 0;
     for decl in inventory::iter::<DeclarationsDecl>() {
         let submitted = (decl.make)();
@@ -74,19 +86,6 @@ fn every_submitted_port_is_in_the_sealed_table_with_an_executor_row() {
             assert!(
                 frozen.ports().iter().any(|p| p.port == port.port),
                 "`{}` 申报的端口 `{}` 没有被冻结表接纳",
-                decl.owner,
-                port.port
-            );
-            assert!(
-                frozen.rows().iter().any(|r| {
-                    r.by == Some(PORT_ACTOR)
-                        && r.owes.source == EVENT_REQUEST
-                        && r.owes
-                            .eq
-                            .iter()
-                            .any(|(field, lit)| *field == "port" && *lit == Lit::Str(port.port))
-                }),
-                "`{}` 申报的端口 `{}` 没有 `by = {PORT_ACTOR}` 的受理行",
                 decl.owner,
                 port.port
             );
