@@ -208,9 +208,8 @@ pub(crate) const ROWS: &[Decl] = &[
 /// `chat.assistant.reported` 是**对话面节点**，形状由 `EventDecl` 的格位加重建折法
 /// （`ChatVocab`）决定，没有任何视图或行按字段读它们的载荷，两者都不登记。
 ///
-/// 这条线曾经不对称：`opening` 登记了（并因此有 `session.opening-seat` 这条归宿行），
-/// `reported` 没有；同一理由在两边都成立，`opening` 那一份只是在替「登记了就得有归宿」
-/// 的连锁要求付账。`D-346` 把两份都收敛到「不登记」，行与基线同批撤掉。
+/// 线只有一条，两份都在同一边（`D-346`）：登记 `FactDecl` 会连带要求一条归宿行，
+/// 而归宿行只为「声明期查得到看护人」存在——两样都不买，就两样都不登记。
 pub(crate) const FACTS: &[FactDecl] = &[
     FactDecl {
         name: EVENT_SESSION_SETTLED,
