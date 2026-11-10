@@ -66,8 +66,8 @@ impl AssistPort {
 }
 
 impl PortProvider for AssistPort {
-    fn ports(&self) -> &'static [&'static str] {
-        &[ASSIST_PORT]
+    fn ports(&self) -> Vec<String> {
+        vec![ASSIST_PORT.to_string()]
     }
 
     fn provider_id(&self) -> &str {

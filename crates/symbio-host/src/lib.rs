@@ -194,7 +194,7 @@ impl Host {
                 continue;
             };
             for port in provider.ports() {
-                executors.insert(port.to_string(), Arc::clone(&executor));
+                executors.insert(port, Arc::clone(&executor));
             }
         }
 
@@ -381,7 +381,7 @@ impl DriveSupport for HostDriveSupport {
             for spec in source.rows(&request, &declared) {
                 rows.push(DriveRow {
                     name: spec.name,
-                    port: spec.port,
+                    port: spec.port.to_string(),
                     id: spec.id,
                     payload: spec.payload,
                     after: spec.after,

@@ -87,8 +87,8 @@ impl NotifyPort {
 }
 
 impl PortProvider for NotifyPort {
-    fn ports(&self) -> &'static [&'static str] {
-        &[NOTIFY]
+    fn ports(&self) -> Vec<String> {
+        vec![NOTIFY.to_string()]
     }
 
     fn provider_id(&self) -> &str {

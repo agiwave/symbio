@@ -68,7 +68,7 @@ pub use symbio_sdk::capability::port::{PortReading, PORT_FAMILY};
 /// [`PortInput`] / [`PortOutcome`]，能力位是 [`PortCapabilities`]。
 pub trait PortProvider: Send + Sync + 'static {
     /// 本提供者服务的端口名（可多个，`DE-047` I-6.1）。环只按端口名解析 provider。
-    fn ports(&self) -> &'static [&'static str];
+    fn ports(&self) -> Vec<String>;
     /// 提供者 id（行名后缀；判重读数里指名参与判重的各方）。
     fn provider_id(&self) -> &str;
 
@@ -102,7 +102,7 @@ pub struct PortCapabilities {
 #[derive(Debug, Clone)]
 pub struct PortInput {
     /// 端口名（与 `request` 事实载荷里的 `port` 同一个值）。
-    pub port: &'static str,
+    pub port: String,
     /// 载荷草稿：调用点的行 / 值。
     pub payload: Value,
 }
@@ -432,12 +432,12 @@ impl PortPayload {
 pub fn port_rows(provider: &Arc<dyn PortProvider>) -> Vec<CapabilityRow> {
     provider
         .ports()
-        .iter()
+        .into_iter()
         .map(|port| {
-            check_port_name(port);
+            check_port_name(&port);
             CapabilityRow::new(
                 PORT_FAMILY,
-                port_row_name(port, provider.provider_id()),
+                port_row_name(&port, provider.provider_id()),
                 PortPayload::new(provider.clone()),
                 false,
             )

@@ -460,7 +460,7 @@ fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext,
             reader: None,
         },
         PortInput {
-            port: TOOL,
+            port: TOOL.to_string(),
             payload: serde_json::json!({
                 "name": tool_name,
                 "args": {},
@@ -615,7 +615,7 @@ fn requested_call_with(
             ]))),
         },
         PortInput {
-            port: TOOL,
+            port: TOOL.to_string(),
             payload: serde_json::json!({
                 "request_id": "tool.requested:model-1",
                 "call_id": call_id,
@@ -752,7 +752,7 @@ async fn a_debt_naming_an_unseen_request_is_retryable_not_redirected() {
         serde_json::json!([{ "id": "c1", "name": "echo", "arguments": {} }]),
     );
     let input = PortInput {
-        port: TOOL,
+        port: TOOL.to_string(),
         payload: serde_json::json!({
             "request_id": "tool.requested:model-2",
             "call_id": "c1",
@@ -886,7 +886,7 @@ fn authz_call(
             reader: None,
         },
         PortInput {
-            port: TOOL,
+            port: TOOL.to_string(),
             payload,
         },
         captured,
@@ -1079,7 +1079,7 @@ fn open_call(
             reader: None,
         },
         PortInput {
-            port: TOOL,
+            port: TOOL.to_string(),
             payload,
         },
         captured,

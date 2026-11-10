@@ -115,30 +115,11 @@ pub async fn capability_port_of(visitor: &dyn Registry, port: &str) -> PortReadi
     }
 }
 
-/// 从 `port` 族里已注册的行名派生端口集（`DE-047` I-6.7）。
+/// 装配期判重检查（D-298 / D-299 / `DE-047` I-6.7）：**一次遍历**把已收集的
+/// provider 行按端口名分组，同名多提供者 ⇒ 落一条错误进 `CAPABILITY_ERRORS`。
 ///
-/// 行名形状唯一来源是 [`port_row_name`]：`<port:{port}>:{provider_id}`。解析不出的行
-/// （不是本族造的）由 `filter_map` 跳过——它们本来就不可见（`Registry::list` 按族取）。
-pub async fn registered_ports(visitor: &dyn Registry) -> Vec<String> {
-    let mut out = Vec::new();
-    for row in visitor.list(PORT_FAMILY).await {
-        let Some(rest) = row.name().strip_prefix("<port:") else {
-            continue;
-        };
-        let Some((port, _)) = rest.split_once(">:") else {
-            continue;
-        };
-        let port = port.to_string();
-        if !out.contains(&port) {
-            out.push(port);
-        }
-    }
-    out
-}
-
-/// 装配期判重检查（D-298 / D-299 / `DE-047` I-6.7）：端口集从**已注册行**派生
-/// （`<port:{port}>:` 前缀），每个端口按行名前缀读一次分组行数；判重 ⇒ 落一条错误
-/// 进 `CAPABILITY_ERRORS`。
+/// 端口集是装配期的**收集结果**（活插件 traverse 时申报，停用即缺席），不再有
+/// 「先按行名前缀派生端口集、再逐个回表分组」那层反推（D-440）。
 ///
 /// **时点契约**：必须在能力收集结束、编排方读错误桶（`capability_take_errors`）
 /// 裁决**之前**调用——判重错误与收集期错误同桶同路，裁决即中止会话（装载期硬红）。
@@ -150,7 +131,19 @@ pub async fn capability_port_check(ctx: &Arc<dyn PluginInvokeRequest>) {
     let Some(visitor) = ctx.get(CAPABILITY_VISITOR) else {
         return;
     };
-    for port in registered_ports(&*visitor).await {
+    // 端口集 = 本轮收集到的 provider 行一次遍历（不再有「先派生端口清单、再逐个
+    // 回表分组」那层反推，D-440）；分组判重仍走唯一读数，保证两行俱在不静默顶掉。
+    let mut ports: std::collections::BTreeSet<String> = Default::default();
+    for row in visitor.list(PORT_FAMILY).await {
+        let Some(rest) = row.name().strip_prefix("<port:") else {
+            continue;
+        };
+        let Some((port, _)) = rest.split_once(">:") else {
+            continue;
+        };
+        ports.insert(port.to_string());
+    }
+    for port in ports {
         if let PortReading::Duplicate { kept, dropped } = capability_port_of(&*visitor, &port).await
         {
             capability_report_error(

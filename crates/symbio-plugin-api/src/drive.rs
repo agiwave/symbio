@@ -140,8 +140,8 @@ pub enum Unless {
 pub struct DriveRow {
     /// 行名（申报方的标签）。
     pub name: &'static str,
-    /// 欠哪个端口（数据）。
-    pub port: &'static str,
+    /// 欠哪个端口（数据；运行时字符串，端口集由活插件装配期申报）。
+    pub port: String,
     /// 债身份。
     pub id: String,
     /// 交给执行体的载荷。

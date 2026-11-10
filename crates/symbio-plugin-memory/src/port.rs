@@ -34,8 +34,8 @@ const PROVIDER_ID: &str = "memory";
 pub(crate) struct MemoryPort;
 
 impl PortProvider for MemoryPort {
-    fn ports(&self) -> &'static [&'static str] {
-        &[MEMORY_PORT]
+    fn ports(&self) -> Vec<String> {
+        vec![MEMORY_PORT.to_string()]
     }
 
     fn provider_id(&self) -> &str {

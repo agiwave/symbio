@@ -175,7 +175,7 @@ async fn notify_port_registers_and_executes_for_real() {
                 reader: None,
             },
             PortInput {
-                port: NOTIFY,
+                port: NOTIFY.to_string(),
                 // 协议键 + 端口自己的行契约（`text`；`chat_id` 走配置默认值）
                 payload: serde_json::json!({
                     "port": NOTIFY,
@@ -217,7 +217,7 @@ async fn notify_port_without_token_fails_without_network() {
                 reader: None,
             },
             PortInput {
-                port: NOTIFY,
+                port: NOTIFY.to_string(),
                 payload: serde_json::json!({ "text": "hi", "chat_id": "42" }),
             },
         )

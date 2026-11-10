@@ -51,7 +51,7 @@ pub(crate) fn rows_from_debts(debts: &[Debt<'_>], events: &[Event]) -> Vec<DebtR
             let waiting = ask_since(events, row, &trace, 0).is_some();
             DebtRow {
                 name: row,
-                port: PLUGIN_ROW,
+                port: PLUGIN_ROW.to_string(),
                 id: format!("{row}:{trace}"),
                 payload: json!({ "row": row, "key": debt.key.0.clone() }),
                 after: None,

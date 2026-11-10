@@ -11,8 +11,8 @@ pub(crate) const DEMO_PORT: &str = "demo";
 pub(crate) struct DemoPort;
 
 impl PortProvider for DemoPort {
-    fn ports(&self) -> &'static [&'static str] {
-        &[DEMO_PORT]
+    fn ports(&self) -> Vec<String> {
+        vec![DEMO_PORT.to_string()]
     }
 
     fn provider_id(&self) -> &str {

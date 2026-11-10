@@ -78,8 +78,8 @@ async fn a_session_with_no_debt_reports_no_debt() {
 struct SmokeModel;
 
 impl PortProvider for SmokeModel {
-    fn ports(&self) -> &'static [&'static str] {
-        &["model"]
+    fn ports(&self) -> Vec<String> {
+        vec!["model".to_string()]
     }
 
     fn provider_id(&self) -> &str {
@@ -267,8 +267,8 @@ struct LoopModel {
 }
 
 impl PortProvider for LoopModel {
-    fn ports(&self) -> &'static [&'static str] {
-        &["model"]
+    fn ports(&self) -> Vec<String> {
+        vec!["model".to_string()]
     }
 
     fn provider_id(&self) -> &str {
@@ -343,8 +343,8 @@ struct LoopTool {
 }
 
 impl PortProvider for LoopTool {
-    fn ports(&self) -> &'static [&'static str] {
-        &["tool"]
+    fn ports(&self) -> Vec<String> {
+        vec!["tool".to_string()]
     }
 
     fn provider_id(&self) -> &str {

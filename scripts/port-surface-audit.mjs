@@ -319,7 +319,7 @@ for (const f of portFacts) {
 /**
  * 端口**取值**名单：谁声明端口，谁的声明就是名单来源。判定面认两种声明形状：
  * - `PortDecl { port: … }`（静态端口表，tool / telegram 这类）；
- * - `impl PortProvider for … { fn ports(&self) -> &'static [&'static str] { &[…] } }`
+ * - `impl PortProvider for … { fn ports(&self) -> Vec<String> { vec![…] } }`
  *   （提供者自报端口，model 这类：端口名随能力目录注册，没有静态端口表）。
  * 只认第一种会让「没有 PortDecl 的端口」从名单里**静默消失**——名单一窄，
  * PTS-002 就不再拦「引擎按这个端口的值分支」。扫 `crates` 下所有 `.rs`，不钉某一张表：
@@ -392,17 +392,18 @@ function portValueLiterals() {
           if (p) portExprs.push(p[1])
         }
       }
-      // 提供者自报端口：`fn ports(&self) -> &'static [&'static str] { &[词, …] }`。
+      // 提供者自报端口：`fn ports(&self) -> Vec<String> { vec![词, …] }`（D-440：
+      // 端口名是运行时数据，不再是编译期常量切片）。
       for (const m of code.matchAll(
-        /\bfn\s+ports\s*\(\s*&?\s*self\s*\)\s*->\s*&\s*'static\s*\[\s*&\s*'static\s*str\s*\]\s*\{/g,
+        /\bfn\s+ports\s*\(\s*&?\s*self\s*\)\s*->\s*Vec\s*<\s*String\s*>\s*\{/g,
       )) {
         const open = code.indexOf('{', m.index)
         if (open < 0) continue
         const body = code.slice(open + 1, matchBrace(code, open))
-        const arr = /&\s*\[([\s\S]*?)\]/.exec(body)
+        const arr = /vec!\s*\[([\s\S]*?)\]/.exec(body)
         if (!arr) continue
         for (const item of arr[1].split(',')) {
-          const token = item.trim()
+          const token = item.trim().replace(/\.to_string\(\)$/, '')
           if (token) portExprs.push(token)
         }
       }

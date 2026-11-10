@@ -23,8 +23,8 @@ pub(crate) struct DeclInput {
 pub(crate) struct DebtRow {
     /// 行名（应用侧的标签；环不解释，只用于回读）。
     pub(crate) name: &'static str,
-    /// 欠哪个端口（数据）。
-    pub(crate) port: &'static str,
+    /// 欠哪个端口（数据；运行时字符串，端口名由活插件装配期申报）。
+    pub(crate) port: String,
     /// 债身份，由欠债方从产生这笔债的事实派生（禁计数）。
     pub(crate) id: String,
     /// 交给执行体的载荷草稿。
@@ -67,13 +67,13 @@ impl DebtRow {
     /// 一行无前置的债；租约 60s、最多 3 次尝试。
     pub(crate) fn new(
         name: &'static str,
-        port: &'static str,
+        port: impl Into<String>,
         id: impl Into<String>,
         payload: Value,
     ) -> Self {
         Self {
             name,
-            port,
+            port: port.into(),
             id: id.into(),
             payload,
             after: None,

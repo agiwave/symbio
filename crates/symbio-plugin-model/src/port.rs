@@ -69,8 +69,8 @@ impl ModelPort {
 }
 
 impl PortProvider for ModelPort {
-    fn ports(&self) -> &'static [&'static str] {
-        &[MODEL_PORT]
+    fn ports(&self) -> Vec<String> {
+        vec![MODEL_PORT.to_string()]
     }
 
     fn provider_id(&self) -> &str {

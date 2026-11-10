@@ -27,8 +27,8 @@ pub(crate) const WEB_PROBE_ID: &str = "web_probe";
 pub(crate) struct ProbePort;
 
 impl PortProvider for ProbePort {
-    fn ports(&self) -> &'static [&'static str] {
-        &["web_probe"]
+    fn ports(&self) -> Vec<String> {
+        vec!["web_probe".to_string()]
     }
 
     fn provider_id(&self) -> &str {

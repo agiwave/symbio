@@ -76,7 +76,7 @@ async fn run(events: Vec<Event>) -> (bool, Arc<Mutex<Vec<FactDraft>>>) {
         source: "drive".to_string(),
     };
     let input = PortInput {
-        port: "memory",
+        port: "memory".to_string(),
         payload: serde_json::json!({ "tag": "经验" }),
     };
     let outcome = executor.execute(ctx, input).await;

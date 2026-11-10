@@ -61,8 +61,8 @@ struct FixtureProvider {
 }
 
 impl PortProvider for FixtureProvider {
-    fn ports(&self) -> &'static [&'static str] {
-        self.ports
+    fn ports(&self) -> Vec<String> {
+        self.ports.iter().map(|p| p.to_string()).collect()
     }
 
     fn provider_id(&self) -> &str {

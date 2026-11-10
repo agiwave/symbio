@@ -427,9 +427,9 @@ test('DECLARED_PORTS 与源码里的端口声明逐项一致（多一个 / 少�
     if (f.endsWith('.test.rs')) continue
     const text = fs.readFileSync(f, 'utf8')
     for (const m of text.matchAll(
-      /fn ports\(&self\)\s*->\s*&'static \[&'static str\]\s*\{\s*&\[([^\]]*)\]/g,
+      /fn ports\(&self\)\s*->\s*Vec<String>\s*\{\s*vec!\[([^\]]*)\]/g,
     )) {
-      for (const raw of m[1].split(',').map((s) => s.trim()).filter(Boolean)) {
+      for (const raw of m[1].split(',').map((s) => s.trim().replace(/\.to_string\(\)$/, '')).filter(Boolean)) {
         const value = resolve(raw, text)
         assert.ok(value, `${path.relative(repo, f)} 里的端口标识 ${raw} 解析不出字符串`)
         declared.add(value)

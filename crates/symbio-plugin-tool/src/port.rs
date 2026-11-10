@@ -1340,8 +1340,8 @@ fn window_for(session_id: &str) -> Arc<ExecWindow> {
 pub(crate) struct ToolPort;
 
 impl PortProvider for ToolPort {
-    fn ports(&self) -> &'static [&'static str] {
-        &[TOOL]
+    fn ports(&self) -> Vec<String> {
+        vec![TOOL.to_string()]
     }
 
     fn provider_id(&self) -> &str {
@@ -1514,7 +1514,7 @@ impl ToolPort {
                     .run(
                         exec.clone(),
                         PortInput {
-                            port: TOOL,
+                            port: TOOL.to_string(),
                             payload: json!({
                                 KEY_TOOL_NAME: tool_name.clone(),
                                 KEY_ARGS: args.clone(),
@@ -1649,7 +1649,7 @@ impl ToolPort {
                 self.run(
                     exec.clone(),
                     PortInput {
-                        port: TOOL,
+                        port: TOOL.to_string(),
                         payload: inner,
                     },
                 )

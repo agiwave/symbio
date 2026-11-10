@@ -355,10 +355,10 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
     // 由它自己的租约判死收束，不该挡住新一轮（t49 恢复轮）。
     let mut claimed: HashSet<String> = HashSet::new();
     for row in rows {
-        let attempt = view.attempt(row.port, &row.id).max(1);
-        let key = DebtKey::new(row.port, row.id.clone(), attempt);
+        let attempt = view.attempt(&row.port, &row.id).max(1);
+        let key = DebtKey::new(row.port.clone(), row.id.clone(), attempt);
         if view.closing(&key).is_none() && view.last_sent(&key).is_some() {
-            claimed.insert(row.port.to_string());
+            claimed.insert(row.port.clone());
         }
         if let Some(after) = &row.after {
             if view.closing(after).is_none() {
@@ -474,12 +474,16 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
     // `when_no_open` 表达（谓词，见 DE-051 §1）。排序只消除并列者之间的偶然顺序，
     // 不会让任何一行提前——需要「先 A 后 B」的地方，顺序碰巧对不算成立。
     candidates.sort_by(|a, b| {
-        (a.row.name, &a.row.id, a.row.port).cmp(&(b.row.name, &b.row.id, b.row.port))
+        (a.row.name, &a.row.id, a.row.port.as_str()).cmp(&(
+            b.row.name,
+            &b.row.id,
+            b.row.port.as_str(),
+        ))
     });
 
     // 第二处来源：这一圈**有动作**的行所在端口（首派发的行还没有 `sent`）。
     for candidate in &candidates {
-        claimed.insert(candidate.row.port.to_string());
+        claimed.insert(candidate.row.port.clone());
     }
 
     let mut work = Work::default();
@@ -524,10 +528,10 @@ enum Pick {
 
 /// 租约已过：有下一笔就记账并再举，没有就判死。
 fn expire(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, next: Option<u32>, now_ms: u64) {
-    let key = DebtKey::new(row.port, row.id.clone(), attempt);
+    let key = DebtKey::new(row.port.clone(), row.id.clone(), attempt);
     match next {
         Some(next) => {
-            let next_key = DebtKey::new(row.port, row.id.clone(), next);
+            let next_key = DebtKey::new(row.port.clone(), row.id.clone(), next);
             ctx.append(Fact::new(
                 FactKind::Retry,
                 next_key,
@@ -562,8 +566,8 @@ async fn dispatch(
     reader: Option<Arc<dyn PortFactReader>>,
 ) -> Option<JoinHandle<()>> {
     // 端口名要跟着收束载荷走：读侧按 `port` 判「这一次往返算不算对读者说的话」。
-    let port = row.port;
-    let key = DebtKey::new(row.port, row.id.clone(), attempt);
+    let port = row.port.as_str();
+    let key = DebtKey::new(row.port.clone(), row.id.clone(), attempt);
     let handles = ctx.exec_handles();
     // 中止是**本轮**的（`DE-047` 驱动级信号）：置位后，每一笔还没起活的派发都先看
     // 它一眼。已取消 ⇒ 不再调执行体，按中止关账——否则「用户按下中止、下一笔工具
@@ -602,7 +606,7 @@ async fn dispatch(
         ));
         return None;
     }
-    let Some(executor) = ctx.executor(row.port) else {
+    let Some(executor) = ctx.executor(&row.port) else {
         ctx.append(Fact::new(
             FactKind::Sent,
             key.clone(),
@@ -661,7 +665,7 @@ async fn dispatch(
         reader,
     };
     let input = PortInput {
-        port: row.port,
+        port: row.port.clone(),
         payload: row.payload.clone(),
     };
     let shared = ctx.shared();
@@ -741,7 +745,7 @@ async fn finish(
         }
         Some((class, why)) => {
             if class == PortErrorClass::Retryable && attempt < row.max_attempts {
-                let next_key = DebtKey::new(row.port, row.id, attempt + 1);
+                let next_key = DebtKey::new(row.port.clone(), row.id.clone(), attempt + 1);
                 ctx.append(Fact::new(
                     FactKind::Retry,
                     next_key,
@@ -822,13 +826,13 @@ fn stamp_row(payload: Value, row: &DebtRow) -> Value {
     let stamp = Value::Object(stamp);
     match payload {
         Value::Object(mut map) => {
-            map.insert("port".to_string(), Value::String(row.port.to_string()));
+            map.insert("port".to_string(), Value::String(row.port.clone()));
             map.insert(STAMP_KEY.to_string(), stamp);
             Value::Object(map)
         }
         other => {
             let mut wrapper = serde_json::Map::new();
-            wrapper.insert("port".to_string(), Value::String(row.port.to_string()));
+            wrapper.insert("port".to_string(), Value::String(row.port.clone()));
             wrapper.insert(STAMP_KEY.to_string(), stamp);
             wrapper.insert("facts".to_string(), other);
             Value::Object(wrapper)

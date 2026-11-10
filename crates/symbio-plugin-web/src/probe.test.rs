@@ -108,7 +108,7 @@ async fn the_probe_debt_and_executor_close_inside_the_capability_crate() {
         .execute(
             ctx,
             PortInput {
-                port: WEB_PROBE_PORT,
+                port: WEB_PROBE_PORT.to_string(),
                 payload: spec.payload.clone(),
             },
         )

@@ -40,8 +40,8 @@ pub(crate) const UNAUTHORIZED: &str = "unauthorized: define.work";
 pub(crate) struct ConationPort;
 
 impl PortProvider for ConationPort {
-    fn ports(&self) -> &'static [&'static str] {
-        &[PROMOTE_PORT]
+    fn ports(&self) -> Vec<String> {
+        vec![PROMOTE_PORT.to_string()]
     }
 
     fn provider_id(&self) -> &str {

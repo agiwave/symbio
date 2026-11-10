@@ -45,8 +45,8 @@ pub(crate) use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED as SESSION_
 pub(crate) struct CompactPort;
 
 impl PortProvider for CompactPort {
-    fn ports(&self) -> &'static [&'static str] {
-        &[COMPACT_PORT]
+    fn ports(&self) -> Vec<String> {
+        vec![COMPACT_PORT.to_string()]
     }
 
     fn provider_id(&self) -> &str {

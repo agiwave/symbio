@@ -93,8 +93,8 @@ struct FixturePort {
 }
 
 impl symbio_plugin_api::port::PortProvider for FixturePort {
-    fn ports(&self) -> &'static [&'static str] {
-        &["fixture"]
+    fn ports(&self) -> Vec<String> {
+        vec!["fixture".to_string()]
     }
 
     fn provider_id(&self) -> &str {

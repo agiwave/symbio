@@ -112,7 +112,7 @@ fn executor(outcome: FakeOutcome) -> Arc<dyn PortExecutor> {
 
 fn input(payload: serde_json::Value) -> PortInput {
     PortInput {
-        port: crate::port::MODEL_PORT,
+        port: crate::port::MODEL_PORT.to_string(),
         payload,
     }
 }

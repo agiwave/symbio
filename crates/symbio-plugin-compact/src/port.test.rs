@@ -77,7 +77,7 @@ async fn exec(
         source: "drive".to_string(),
     };
     let input = PortInput {
-        port: COMPACT_PORT,
+        port: COMPACT_PORT.to_string(),
         payload,
     };
     let outcome = executor.execute(ctx, input).await;

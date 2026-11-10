@@ -70,7 +70,7 @@ fn call(events: Vec<Event>) -> (PortExecContext, PortInput, Arc<Mutex<Vec<FactDr
         source: "autonomous".to_string(),
     };
     let input = PortInput {
-        port: "conation",
+        port: "conation".to_string(),
         payload: serde_json::json!({
             "intent_id": "want-1",
             "goal": "把周报写了",
