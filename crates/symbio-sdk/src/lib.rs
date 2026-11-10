@@ -42,7 +42,6 @@ use symbio_kernel::*;
 pub use declarations::DeclarationsDecl;
 
 pub mod actors;
-pub mod adapters;
 pub mod agent;
 pub mod authz;
 pub mod capability;

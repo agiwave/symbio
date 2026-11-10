@@ -463,12 +463,40 @@ export function movedLines(patch) {
 }
 
 /**
+ * 一行公开项声明的**名字**（`pub fn model(...)` → `model`；非声明行 → `null`）。
+ *
+ * 补件判的是「机制面多了一个公开项」，所以要认名字，不能只看「这一行出现在新增侧」：
+ * 换签名、拆文件、改名都是把同一行重写一遍，在 `--unified=0` 的 diff 里长得和新增一样。
+ */
+export function pubItemName(raw) {
+  const code = (blankComments(raw)[0] ?? '').trim()
+  const m = code.match(
+    /^pub(?:\([^)]*\))?\s+(?:async\s+|unsafe\s+|const\s+)*(?:trait|struct|enum|fn|type|const|static)\s+([A-Za-z_]\w*)/,
+  )
+  return m ? m[1] : null
+}
+
+/**
  * 补件在**机制面**（`sdk` / `kernel`）新增的公开项（前几项，供报错点名）。
  *
  * `plugin-api` 的改动不算补件：那是插件面的通用契约，不改内核的公开面与语义。
  * 只看**新增的非注释行**：注释里提一句 `pub fn` 不是机制。
+ *
+ * 同名公开项在本次提交里也从**机制面**删掉了，就不是新增（`D-437`）：那次改动把一个
+ * 契约拆成两半——一半留在原地、一半搬去插件——剩下那半在 diff 里整份是「新增」。
+ * 按行判会把一次净收窄（−369 行机制源码）读成六个新公开项，于是提交者只能挂一个与
+ * 本意无关的 `Core-Change`，而「补件次数是设计缺口的读数」这一格从此虚高。
+ * 只拿机制面的删除来抵：真正的补件是「插件里的口子搬进内核」，那确实让内核的面变宽。
  */
 export function mechanismAdditions(patch) {
+  const retired = new Set()
+  for (const file of patch) {
+    if (!inTrees(file.path, ARCH_TREES) || !isCapabilitySource(file.path)) continue
+    for (const raw of file.removed) {
+      const name = pubItemName(raw)
+      if (name) retired.add(name)
+    }
+  }
   const out = []
   for (const file of patch) {
     if (!inTrees(file.path, CORE_TREES) || !isCapabilitySource(file.path)) continue
@@ -476,7 +504,10 @@ export function mechanismAdditions(patch) {
       // `use` / `mod` 是接线不是机制面（同 `isMechanismLine`）：只重写 `pub use` 的名单
       // （删符号时必然发生）不构成「新增公开项」。
       if (!isMechanismLine(line)) continue
-      if (PUB_ITEM_RE.test(line)) out.push({ path: file.path, line: line.trim() })
+      if (!PUB_ITEM_RE.test(line)) continue
+      const name = pubItemName(line)
+      if (name && retired.has(name)) continue
+      out.push({ path: file.path, line: line.trim() })
     }
   }
   return out
@@ -606,12 +637,19 @@ function treeOf(filePath) {
  * 同树内的删了又加不算（那是同一处重写，不是搬家）。
  */
 export function crossTreeMoves(patch) {
+  // 判「搬了一行」要看它**是什么**，不能只看它长得一样。`}` / `);` / `},` 这类
+  // 不含标识符的行在每个文件里都有；把它们算成「跨树搬过去的一份面」，会让任何一笔
+  // 「删一个大文件 + 改另一个文件」的提交凭空多出十几行搬迁记录，于是提交者只能
+  // 去写一条假的 `from` / `to` 才过得了门——判据逼人撒谎，比漏判更糟。
+  // D-404 要判的是「一块实现有没有被搬到别处」，而一块实现必然带着名字。
+  const carriesName = (code) => /[A-Za-z_]/.test(code)
   const removedLines = new Map() // 行文本 -> 它被删所在的树集合
   for (const f of patch) {
     if (!inTrees(f.path, ARCH_TREES) || !f.path.endsWith('.rs') || isGenerated(f.path)) continue
     for (const raw of f.removed) {
       if (!isMechanismLine(raw)) continue
       const code = (blankComments(raw)[0] ?? '').trim()
+      if (!carriesName(code)) continue
       const trees = removedLines.get(code) ?? new Set()
       trees.add(treeOf(f.path))
       removedLines.set(code, trees)
@@ -624,6 +662,7 @@ export function crossTreeMoves(patch) {
     for (const raw of f.added) {
       if (!isMechanismLine(raw)) continue
       const code = (blankComments(raw)[0] ?? '').trim()
+      if (!carriesName(code)) continue
       const from = removedLines.get(code)
       if (!from) continue
       const here = treeOf(f.path)

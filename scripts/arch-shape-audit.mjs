@@ -348,7 +348,7 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 606, enumVariants: 262 }
+  : { structFields: 597, enumVariants: 260 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

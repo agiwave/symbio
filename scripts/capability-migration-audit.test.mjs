@@ -8,7 +8,10 @@
  * - 只认 `*.gen.rs` ⇒ `plugin-api` 的 `events.rs` / `routes.rs` 被当成
  *   机制增量，补件几乎条条假红，豁免写满之后没人再看；
  * - 决策号只判形状不查存在 ⇒ 拼一个 `D-999` 就能进架构；
- * - 注释里的插件 id / 工具名算成代码 ⇒ 「补件不是通用的」这条判据自伤。
+ * - 注释里的插件 id / 工具名算成代码 ⇒ 「补件不是通用的」这条判据自伤；
+ * - 按行判「跨树搬了一行」/「新增了一个公开项」⇒ `}` 在每个文件里都有、拆文件时
+ *   保留的那半整份是「新增」，一次净收窄会被读成十几个补件（`D-437`）——
+ *   判据逼提交者写假的 `from` / `to`，比漏判更糟。
  *
  * 本文件逐条注入并断言红，另有一条真仓冒烟证明读 git 那一半也真的在跑。
  *
@@ -36,6 +39,7 @@ import {
   isCapabilitySource,
   isGenerated,
   migrationErrors,
+  mechanismAdditions,
   movedLines,
   parsePatch,
   parseRelocationHeader,
@@ -431,6 +435,48 @@ test('crossTreeMoves：同树内删了又加不算搬家', () => {
     { path: 'crates/symbio-sdk/src/b.rs', added: [], removed: ['pub fn helper() {}'] },
   ])
   assert.equal(crossTreeMoves(same).count, 0)
+})
+
+test('crossTreeMoves：只含括号 / 标点的行不算跨树搬迁（D-437）', () => {
+  // `}` / `);` / `},` 在每个文件里都有。把它们算成「跨树搬过去的一份面」，任何一笔
+  // 「删掉一个文件 + 改另一个文件」的提交都会凭空多出十几行搬迁记录，于是提交者只能
+  // 写一条假的 `from` / `to` 才过得了门——判据逼人撒谎，比漏判更糟。
+  const p = patchOf([
+    { path: 'crates/symbio-kernel/src/llm/old.rs', deleted: true, removed: ['}', ');', '},', '};'] },
+    { path: 'crates/symbio-sdk/src/new.rs', new: true, added: ['}', ');', '},', '};'] },
+  ])
+  assert.equal(crossTreeMoves(p).count, 0)
+})
+
+test('crossTreeMoves：带名字的行仍然算搬迁（收窄只针对空壳行）', () => {
+  const p = patchOf([
+    { path: 'crates/symbio-kernel/src/llm/old.rs', deleted: true, removed: ['pub fn round_trip(&self) -> Out;'] },
+    { path: 'crates/symbio-sdk/src/new.rs', new: true, added: ['pub fn round_trip(&self) -> Out;'] },
+  ])
+  assert.equal(crossTreeMoves(p).count, 1)
+})
+
+test('mechanismAdditions：同名公开项也在机制面被删掉 ⇒ 不算新增（换签名 / 拆文件）', () => {
+  // 拆文件：旧文件整份消失，留下来的那半在新文件里「整份是新增」；
+  // 换签名：新旧行文本不同，但声明的是同一个名字。两者都没让机制面变宽。
+  const p = patchOf([
+    { path: 'crates/symbio-kernel/src/llm/model_provider.rs', deleted: true, removed: ['pub enum ModelFinishReason {'] },
+    { path: 'crates/symbio-kernel/src/llm/model.rs', new: true, added: ['pub enum ModelFinishReason {'] },
+    {
+      path: 'crates/symbio-kernel/src/capability/row.rs',
+      removed: ['pub fn model(provider: Provider) -> Self {'],
+      added: ['pub fn model(provider_id: &str) -> Self {'],
+    },
+  ])
+  assert.deepEqual(mechanismAdditions(p), [])
+})
+
+test('mechanismAdditions：真新增的公开项照样点名（抵账只认同名）', () => {
+  const p = patchOf([
+    { path: 'crates/symbio-kernel/src/llm/model_provider.rs', deleted: true, removed: ['pub enum ModelFinishReason {'] },
+    { path: 'crates/symbio-sdk/src/port.rs', new: true, added: ['pub trait PortExecutor {'] },
+  ])
+  assert.equal(mechanismAdditions(p).length, 1)
 })
 
 test('NET_GUARD：口径起点有提交号与理由，且不是判据起点本身', () => {

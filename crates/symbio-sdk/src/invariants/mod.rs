@@ -55,6 +55,7 @@
 //! 符号该下沉、不该占着架构出口。
 
 use super::event::{holds_role, Entity, Event, EventDecl, FactRole, Verb};
+use symbio_kernel::LatencyTier;
 
 // 判据内核（std-only）：算法层住 `kernel.rs`，本模块只做「事件切片 ⇒ 内核输入」
 // 的解析。verify/ 下的两个程序 `#[path]` 包含的就是那个文件——判定与生产共用
@@ -318,7 +319,7 @@ fn declared_budget_of(e: &Event) -> Option<u64> {
             e.payload
                 .get("tier")
                 .and_then(|v| v.as_str())
-                .and_then(crate::adapters::LatencyTier::from_name)
+                .and_then(LatencyTier::from_name)
                 .map(|t| t.budget_ms())
         })
 }

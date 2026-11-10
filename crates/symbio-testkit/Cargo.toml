@@ -18,7 +18,6 @@ symbio-sdk = { path = "../symbio-sdk" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-async-trait = { workspace = true }
 # 优化 1：从 chrono 迁移到更轻量的 time
 time = { workspace = true, features = ["serde", "formatting", "parsing", "macros"] }
 

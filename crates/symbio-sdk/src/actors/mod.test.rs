@@ -17,9 +17,10 @@ use crate::actors::*;
 use crate::governance::{Capability, PermissionMatrix, PrincipalPolicy, VisScope};
 use crate::invariants::check_all;
 use crate::test_fixtures::{
-    CHAT, COMMITMENT, EVENTS, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED, MESSAGE,
+    COMMITMENT, EVENTS, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
+    EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };
+use symbio_kernel::LatencyTier;
 
 // ── ActorSpec / Pattern（DE-001 §4 契约形状） ──────────────────────────────
 
@@ -66,21 +67,6 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
             "{p}: 规格判定与表谓词两个入口必须一致"
         );
     }
-}
-
-/// 事件切片 → 请求包消息：转写条目按 `exclude_from_context` 过滤后投影。
-///
-/// 旧 `TranscriptView::to_messages` 的唯一读法（出口已删）；这里按同一条折一遍，
-/// 让「prompt 来自事实切片」这条断言继续走真实的转写投影。
-fn request_messages(events: &[Event]) -> Vec<symbio_kernel::llm::prompt_message::PromptMessage> {
-    crate::projection::transcript::transcript(CHAT, MESSAGE)
-        .read_all(events)
-        .value
-        .entries
-        .iter()
-        .filter(|e| !e.exclude_from_context)
-        .map(symbio_kernel::llm::prompt_message::PromptMessage::from)
-        .collect()
 }
 
 // ── 彩排：多主体与对等承诺 ──
@@ -335,233 +321,6 @@ fn forced_failure_produces_fallback_with_provenance() {
     );
 }
 
-// ── 彩排：真实执行形状 ──
-//
-// 接入真实模型（pattern = reasoner）→ 真实对话 → N1/N5 仍全绿；
-// 兜底埋点 + 四层 budget_ms 就位 → 时延埋点可测。
-// 这里用 ⑤ adapters 的确定性桩（StubLlmAdapter）代替真实模型——闭环形状与
-// 真实接线完全一致，只换适配器。
-
-use crate::adapters::{AdapterError, FullModel, LatencyTier, LlmAdapter, TokenIssuer};
-use symbio_kernel::llm::prompt_message::PromptMessage;
-
-/// 零 LLM 桩的**本文件版**。
-///
-/// `StubLlmAdapter` 住 `symbio-testkit`（见该 crate 的 `stubs` 模块文档），而 core
-/// **不能**反向依赖测试设施——那会成环。故这里留一份只覆盖本文件三条演练路径的
-/// 最小实现：成功 / 确定性失败 / 注入时延。
-///
-/// 桩自身的判据（确定性）在 `symbio-testkit/src/stubs.test.rs` 守着；本文件只要求
-/// **行为与那份一致**，不重复断言。
-struct MinimalStub {
-    model: &'static str,
-    fail_with: Option<&'static str>,
-    delay_ms: u64,
-}
-
-impl MinimalStub {
-    fn succeed(model: &'static str) -> Self {
-        Self {
-            model,
-            fail_with: None,
-            delay_ms: 0,
-        }
-    }
-    fn always_fail(message: &'static str) -> Self {
-        Self {
-            model: "stub",
-            fail_with: Some(message),
-            delay_ms: 0,
-        }
-    }
-    fn with_delay(model: &'static str, delay_ms: u64) -> Self {
-        Self {
-            model,
-            fail_with: None,
-            delay_ms,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl LlmAdapter for MinimalStub {
-    fn model_id(&self) -> &str {
-        self.model
-    }
-    async fn generate(
-        &self,
-        _tok: &FullModel,
-        messages: &[PromptMessage],
-    ) -> Result<String, AdapterError> {
-        if self.delay_ms > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
-        }
-        match self.fail_with {
-            Some(msg) => Err(AdapterError::GenerationFailed(msg.to_string())),
-            // 回显末条正文：与 `StubLlmAdapter` 同口径（旧签名是单段文本）。
-            None => Ok(format!(
-                "[{}] {}",
-                self.model,
-                messages.last().map(|m| m.text.as_str()).unwrap_or("")
-            )),
-        }
-    }
-}
-use crate::invariants::budget_exceeded;
-use std::time::Instant;
-
-/// 一轮**真实执行形状**的对话：Decider 换成 Reasoner + 适配器，带 cost_ms 埋点。
-///
-/// 返回 (store, 收束事件 id)；失败路径产出 fallback（I3 到点必答）。
-async fn rehearse_reasoner_turn(
-    utterance: &str,
-    llm: &dyn crate::adapters::LlmAdapter,
-) -> (EventStore, Result<String, String>) {
-    let tok = TokenIssuer::issue_deep();
-    let store = EventStore::new();
-    let seq = store
-        .append(
-            Event::pending(
-                "u0",
-                EVENT_USER_MESSAGE,
-                Entity::Scope,
-                Verb::Opened,
-                "user",
-            )
-            .with_payload(serde_json::json!({ "text": utterance })),
-        )
-        .expect("用户消息必入库");
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let started = Instant::now();
-    let outcome = llm.generate(&tok, &request_messages(&snapshot)).await;
-    let cost_ms = started.elapsed().as_millis() as u64;
-    match outcome {
-        Ok(reply) => {
-            store
-                .append(
-                    Event::pending(
-                        "f0",
-                        EVENT_CHAT_ASSISTANT_FINAL,
-                        Entity::Scope,
-                        Verb::Closed,
-                        "session/main",
-                    )
-                    .with_produced_by(seq.value())
-                    .with_cost_ms(cost_ms)
-                    .with_payload(serde_json::json!({ "text": reply, "model": llm.model_id() })),
-                )
-                .expect("final 必入库");
-            (store, Ok(reply))
-        }
-        Err(e) => {
-            store
-                .append(
-                    Event::pending("fb0", EVENT_CHAT_ASSISTANT_FALLBACK, Entity::Scope, Verb::Closed, "session/main")
-                        .with_produced_by(seq.value())
-                        .with_cost_ms(cost_ms)
-                        .with_payload(serde_json::json!({ "text": "抱歉，我暂时答不上来。", "error": format!("{e:?}") })),
-                )
-                .expect("fallback 必入库");
-            (store, Err(format!("{e:?}")))
-        }
-    }
-}
-
-/// 验收：接入「真实模型」→ 真实对话 → N1/N5 仍全绿。
-#[tokio::test]
-async fn reasoner_turn_keeps_all_invariants_green() {
-    let llm = MinimalStub::succeed("stub-model");
-    let (store, outcome) = rehearse_reasoner_turn("写一首关于秋天的诗", &llm).await;
-    let reply = outcome.expect("成功桩必答");
-    assert!(reply.contains("stub-model"));
-    let snapshot = store.range(crate::event::Seq::new(0));
-    assert!(
-        check_all(EVENTS, &snapshot).is_empty(),
-        "{:?}",
-        check_all(EVENTS, &snapshot)
-    );
-}
-
-/// 输入契约：`Reasoner` **只看事件切片**——prompt 由事件渲染，
-/// 桩回显 prompt ⇒ 回显里能看到事件里的那条用户消息（零 LLM 侧的同一契约见
-/// `rehearse_turn`：应答是彩排内定值，形状一条不少）。
-#[tokio::test]
-async fn reasoner_reply_reads_the_user_message_from_events() {
-    use crate::adapters::TokenIssuer;
-
-    let store = EventStore::new();
-    store
-        .append(
-            Event::pending(
-                "u0",
-                EVENT_USER_MESSAGE,
-                Entity::Scope,
-                Verb::Opened,
-                "user",
-            )
-            .with_payload(serde_json::json!({ "text": "帮我看看这份计划" })),
-        )
-        .expect("用户消息必入库");
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let llm = MinimalStub::succeed("stub-model");
-    let reply = llm
-        .generate(&TokenIssuer::issue_deep(), &request_messages(&snapshot))
-        .await
-        .expect("成功桩必答");
-    assert!(
-        reply.contains("帮我看看这份计划"),
-        "prompt 必须来自事件切片：{}",
-        reply
-    );
-}
-
-/// 验收：生成失败 → 兜底埋点（cost_ms / produced_by / error 载荷）。
-#[tokio::test]
-async fn reasoner_failure_produces_fallback_with_telemetry() {
-    let llm = MinimalStub::always_fail("模型不可用");
-    let (store, outcome) = rehearse_reasoner_turn("任何话", &llm).await;
-    assert!(outcome.is_err());
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let fb = snapshot
-        .iter()
-        .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FALLBACK)
-        .expect("兜底必在");
-    assert!(fb.produced_by.is_some(), "兜底可被 I2 审计");
-    let payload: serde_json::Value = fb.payload.clone();
-    assert!(
-        payload.get("error").is_some(),
-        "失败原因入载荷（可观测）：{payload}"
-    );
-    assert!(
-        check_all(EVENTS, &snapshot).is_empty(),
-        "{:?}",
-        check_all(EVENTS, &snapshot)
-    );
-}
-
-/// 验收：四层 budget_ms 就位——同一时延在不同档位下结论不同。
-#[tokio::test]
-async fn four_tier_budgets_are_measurable() {
-    // 注入 120ms 时延：反射档（80ms）超预算，深度档（60s）预算内。
-    let llm = MinimalStub::with_delay("stub-model", 120);
-    let (store, _) = rehearse_reasoner_turn("你好", &llm).await;
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let cost_ms = snapshot.iter().find(|e| e.cost_ms > 0).map(|e| e.cost_ms);
-    assert!(cost_ms.is_some(), "cost_ms 埋点必非零（兜底埋点就位）");
-    let cost = cost_ms.unwrap();
-    assert!(
-        !budget_exceeded(&snapshot, Some(LatencyTier::Reflex.budget_ms())).is_empty(),
-        "反射档 {}/80ms 必须被看见超预算",
-        cost
-    );
-    assert!(
-        budget_exceeded(&snapshot, Some(LatencyTier::Deep.budget_ms())).is_empty(),
-        "同一时延在深度档预算内"
-    );
-    // 反向锚：预算表口径（DE-001 §10）在 adapters 域的单测里逐值钉死。
-    assert_eq!(LatencyTier::Reflex.budget_ms(), 80);
-}
-
 // ── 彩排：记忆链路 ──
 //
 // 这里留的是**内核侧**的判据：编码格子的溯源覆盖（I2）。巩固入库前的保真度
@@ -614,7 +373,7 @@ fn the_arbiter_row_is_the_documented_five_fields() {
     );
     assert_eq!(
         spec.budget_ms,
-        crate::adapters::LatencyTier::Reflex.budget_ms(),
+        LatencyTier::Reflex.budget_ms(),
         "淘汰判定是规则折叠：反射档"
     );
     assert_eq!(spec.scope, Scope::Root);
@@ -973,7 +732,6 @@ fn autonomous_actor_cannot_write_to_dialog() {
 /// 档位名字往返：LatencyTier::name / from_name 互逆；未知名字不静默归类。
 #[test]
 fn latency_tier_name_round_trip() {
-    use crate::adapters::LatencyTier;
     for t in [
         LatencyTier::Reflex,
         LatencyTier::Fast,

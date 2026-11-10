@@ -4887,7 +4887,6 @@ dependencies = [
 name = "symbio-testkit"
 version = "0.1.14"
 dependencies = [
- "async-trait",
  "serde_json",
  "symbio-kernel",
  "symbio-plugin-api",

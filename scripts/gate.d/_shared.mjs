@@ -195,7 +195,9 @@ export const BASELINE = {
   // 也有确定身份」不再有被测对象。环的 `scopes_do_not_cross` 改写为同数的
   // `a_closed_debt_is_not_dispatched_again`，`facts.test.rs` 与 slo 的按 scope 用例也都是
   // 1:1 改写；会话身份改由事实源打开时绑定（按实例分片）。非侵蚀。
-  rustTests: 2154,
+  // baseline-allow rustTests: 2154 → 2147（D-438）——与上面 `ciRustTestsTotal` 同一批 7 条：
+  // `adapters/mod.test.rs` 2 · `stubs.test.rs` 1 · `actors/mod.test.rs` 4（彩排真实执行形状）。
+  rustTests: 2147,
   kernelRustTests: 131,
 
   // baseline-allow ciRustTestsTotal: 同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
@@ -399,7 +401,12 @@ export const BASELINE = {
   // 组装，壳没了就没有对象），另有 `capability_model_*` 三个读口用例与两处模型行用例
   // 改写（少 1 条），新增 1 条「行不装执行对象」。真实 HTTP + SSE 的闭环由 e2e 的
   // `mock-llm` 用例承担，SSE 解析本身的单元覆盖在 `stream.test.rs`。非侵蚀。
-  ciRustTestsTotal: 2222,
+  // baseline-allow ciRustTestsTotal: 2222 → 2215（D-438）——`sdk::adapters` 整块退场，
+  // 带走的用例都挂在它身上：`adapters/mod.test.rs` 的两条零大小断言（`FullModel` /
+  // `TokenIssuer` 的 ZST 形状）、`stubs.test.rs` 的桩确定性一条、`actors/mod.test.rs`
+  // 的四条「彩排真实执行形状」（桩 → 适配器 → 兜底 / 预算）。闭环本身由 e2e 的
+  // `mock-llm` 承担，不影响覆盖；非侵蚀。
+  ciRustTestsTotal: 2215,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

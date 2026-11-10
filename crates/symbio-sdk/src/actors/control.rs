@@ -18,6 +18,7 @@ use crate::governance::GrantsChange;
 use crate::plugin::effects::BeforeReadings;
 use symbio_kernel::actors::{ActorSpec, Scope};
 use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_kernel::LatencyTier;
 
 /// 淘汰判定者（DE-043 §3，[DE-043 §2/§3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
 /// 声誉投影低于阈值 ⇒ 收回 `assign.work` 的**裁决侧**。
@@ -69,7 +70,7 @@ impl EliminationDecider {
         ActorSpec {
             pattern: pattern_for_principal(&principal),
             capabilities: crate::authz::production_matrix().grant_names_of(&principal),
-            budget_ms: crate::adapters::LatencyTier::Reflex.budget_ms(),
+            budget_ms: LatencyTier::Reflex.budget_ms(),
             scope: Scope::Root,
             principal,
         }

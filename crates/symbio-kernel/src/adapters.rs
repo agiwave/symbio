@@ -1,8 +1,11 @@
 //! 时延档位：四层预算的**数据面**（[DE-001 §10](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 //!
-//! 这里只装档位本身（判据是 `budget_ms`，不是「工具」这个名词）；令牌与签发中心
-//! （`RuleOnly` / `FullModel` / `TokenIssuer`）是部署侧的依赖注入策略，仍住
-//! `symbio_sdk::adapters`。
+//! 这里只装档位本身（判据是 `budget_ms`，不是「工具」这个名词）。
+//!
+//! 令牌与签发中心（`RuleOnly` / `FullModel` / `TokenIssuer`）不住这里：那条闸门的载体是
+//! `LlmAdapter` 的签名，而它在 `D-437` 之后没有生产实现（模型往返走 `port.model` 的执行体），
+//! 令牌于 `D-438` 一并退场。**缺口已登记**：今天「反射档禁模型」只剩本文件这句注释，
+//! 没有任何执行面；它该落在 `port.model` 的调用侧（按档位判），是独立的一笔。
 
 /// 时延档位。**判据是时延，不是形式**——约束的是 `budget_ms`，不是"工具"这个名词。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

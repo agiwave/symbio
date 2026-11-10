@@ -1,8 +1,9 @@
 //! LLM 契约层 —— 模型服务的唯一契约面（协议无关、插件无关）。
 //!
-//! 契约类型住在内核（D-188 C2b）：`ModelProvider` / `ModelFinishReason` / `ModelUsage`
-//! 在 `symbio_kernel::llm`，单轮产物 `RoundOutput` / `RoundToolCallInfo` 在
-//! `symbio_kernel::llm::round`。本模块只留**有实现的共享帧原语**：
+//! 模型往返的**数据词汇**住在内核（`D-188` C2b 的残留）：`ModelFinishReason` /
+//! `ModelUsage` / `ModelSpend` 在 `symbio_kernel::llm`，单轮产物 `RoundOutput` /
+//! `RoundToolCallInfo` 在 `symbio_kernel::llm::round`；执行契约 `ModelProvider`
+//! 已随 `D-437` 退回 model 插件（本层不再有模型端口）。本模块只留**有实现的共享帧原语**：
 //! `llm_emit_message` / `llm_message_frame` / `llm_removed_frame` 与 id 原语
 //! `llm_short_id`——它们的消费方在两个以上，且构造即约定（完整消息必带状态）。
 //!
@@ -16,9 +17,9 @@
 //! 依赖关系（单向）：
 //!
 //! ```text
-//! session ──────────────▶ ModelProvider trait（symbio_kernel::llm）
-//! model  ── BoundProvider 实现 ModelProvider
-//!        ── round_trip 内部消费 turn 的帧原语与 RoundOutput
+//! loop   ──────────────▶ port.model（端口名是数据，环不认识 provider 类型）
+//! model  ── ModelExecutor 实现 PortExecutor
+//!        ── round_trip 内部消费本层的帧原语与 RoundOutput
 //! ```
 //!
 //! **只有一侧认的东西都不在这里**：HTTP 重试机器与 SSE 流循环

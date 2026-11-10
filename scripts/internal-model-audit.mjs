@@ -4,20 +4,23 @@
  *
  * ## 为什么需要它
  *
- * 档位闸门只有一个挂点：`LlmAdapter::generate(&FullModel, …)`。`FullModel` 是胶囊令牌
- * （与 `ClassifyOnly` / `RuleOnly` 同族，私有构造），拿得到它才受档位约束。而
- * `ModelProvider::round_trip` 是对所有插件开放的 core trait——**直调它就绕过闸门**
- * （相应批次）。
+ * 这笔判据起于「档位闸门只有一个挂点」的年代：闸门挂在 `LlmAdapter::generate(&FullModel, …)`
+ * 上，而 `ModelProvider::round_trip` 对**所有插件**开放，直调它就绕过闸门。`D-437` 把
+ * `ModelProvider` 退进 model 插件（模块私有），`D-438` 又让 `LlmAdapter` 整块退场——
+ * 跨 crate 直调**已经不可能**，这条口径因此换了个锚点：
  *
- * 绕过本身不是罪：内部请求（无工具 + `silent()` 出口 + 固定 system prompt）本来就不该
- * 走对话链路的闸门。问题在于**没人枚举这些调用点**——闸门的覆盖范围因此无法复查，
- * 第四条内部请求可以悄悄溜进来而不留痕。本守卫把「调用点清单」变成机器判据。
+ * **模型往返只许有一个执行体**（`crates/symbio-plugin-model/src/port.rs` 的 `ModelExecutor`），
+ * 插件内其余直调（今天是问答端口的 `assist`）必须逐处登记理由。理由不再是「档位」——
+ * 那个执行面已退役并在 `018-模块架构 §3.3` 登记为缺口——而是「一次往返的记账、流式帧、
+ * 中止与用量只在执行体那一处」。绕过本身仍不是罪：内部请求（无工具 + `silent()` 出口 +
+ * 固定 system prompt）本来就不该走对话链路。问题在于**没人枚举这些调用点**：第四条内部
+ * 请求可以悄悄溜进来而不留痕。本守卫把「调用点清单」变成机器判据。
  *
  * ## 判定口径
  *
  * | 码 | 判据 | 为什么它需要登记 |
  * |---|---|---|
- * | IM-001 | 生产代码里 `\.round_trip\(` 未带豁免标记 | 新增一个绕过点必须当场写理由；只写代码不写理由，闸门的边界就没人说得清 |
+ * | IM-001 | 生产代码里 `\.round_trip\(` 未带豁免标记 | 新增一个绕过点必须当场写理由；只写代码不写理由，执行体的边界就没人说得清 |
  * | IM-002 | 豁免标记**空理由**（`// internal-model-allow IM-001:` 后面没字） | 写了像登记、实际不算 ⇒ 不单独报出来的话，人以为已经登记过 |
  * | IM-003 | 豁免标记**悬空**（本行与下一行都没有对应调用点） | 代码搬走而标记还在 ⇒ 判据对这一处永久失效（`plugin-special-case-audit` 的 SC-005 同族） |
  * | IM-004 | 登记的形状与 [D-106](../crates/symbio-plugin-model/README.md "D-106-模型消费端口归一") 决策 2 的定义不符 | D-106 重述了「内部请求」的**形状**（tools 空切片 + `silent()` 出口 + 就地构造 system prompt + 调用方中止）；只有第一条能机械核，就核这一条——声明悄悄腐烂时门禁变红，而不是烂在文档里 |
@@ -240,8 +243,8 @@ export function audit(srcRoot) {
         key,
         text:
           `绕过档位闸门的模型调用未登记：\n        ${site.text}\n` +
-          '        直调 `ModelProvider::round_trip` 不经 `LlmAdapter::generate(&FullModel, …)`。' +
-          '要么改走 `ProviderLlmAdapter::for_turn`，要么在上一行写 `// internal-model-allow IM-001: 理由`（标记写在调用点上方）',
+          '        直调 `ModelProvider::round_trip` 而不经端口执行体（`ModelExecutor`）。' +
+          '要么改走 `port.model`，要么在上一行写 `// internal-model-allow IM-001: 理由`（标记写在调用点上方）',
       })
       continue
     }

@@ -254,18 +254,6 @@
       "evidence": "docs/003-design/001-核心架构.md"
     },
     {
-      "symbol": "issue_deep",
-      "path": "crates/symbio-sdk/src/adapters/mod.rs",
-      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "issue_reflex",
-      "path": "crates/symbio-sdk/src/adapters/mod.rs",
-      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
       "symbol": "tool_metas",
       "path": "crates/symbio-sdk/src/capability/collect.rs",
       "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
