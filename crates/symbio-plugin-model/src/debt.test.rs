@@ -42,7 +42,7 @@ fn user_turn_debt_derives_its_identity_from_the_input_fact() {
     );
     // 时序只按**端口**表达：不写兄弟插件的行名，也不拼债 id（`after` 为空）。
     // 该端口没人认领 ⇒ 前提已了（缺席即收束）。
-    assert_eq!(reply.after_port, Some(PLUGIN_ROW));
+    assert_eq!(reply.after_port.as_deref(), Some(PLUGIN_ROW));
     assert!(
         reply.after.is_none(),
         "模型行不许再按兄弟插件的债 id 排时序：{:?}",
@@ -69,12 +69,12 @@ fn tool_result_adds_a_second_row_with_its_own_identity() {
         "没有这一轮的工具请求就不欠（否则每条响应都想再派一次）"
     );
     assert_eq!(
-        after_tools.when_no_open,
+        after_tools.when_no_open.as_deref(),
         Some(TOOL_PORT),
         "已落账的调用债（在飞 / 挂起）未收束就不欠"
     );
     assert_eq!(
-        after_tools.after_port,
+        after_tools.after_port.as_deref(),
         Some(TOOL_PORT),
         "逐笔债串链后，同圈首派的链上后一笔还没有账上痕迹，只有 after_port 挡得住"
     );

@@ -40,14 +40,14 @@ pub(crate) struct DebtRow {
     /// 该事实已存在 ⇒ 本行不欠（排除条件，与 `when` 同一条读面）。环只透传，不解释。
     pub(crate) unless: Option<Unless>,
     /// 该端口的债全部还清才欠；`None` = 无此前提。环只读端口名，不解释语义。
-    pub(crate) when_no_open: Option<&'static str>,
+    pub(crate) when_no_open: Option<String>,
     /// 前提（读**债状态**）：该端口**这一圈**还有人认领（可派发 / 在飞 / 挂起）⇒
     /// 本行不进计划；该端口没人认领 ⇒ 前提已了（**缺席即收束**）。
     ///
     /// 与 `when_no_open` 同族、方向相反：两者都只读债状态；`when_no_open` 是「端口
     /// 干净才**欠**」，本谓词是「端口干净才**可还**」。环只认端口名，不认行名。
     /// 上一轮遗留的未收束债不算认领——债表按当轮事实现算，遗留债不会被重新申报。
-    pub(crate) after_port: Option<&'static str>,
+    pub(crate) after_port: Option<String>,
     /// 一次派发的租约时长（毫秒）。
     pub(crate) lease_ms: u64,
     /// 最多尝试次数（含首次）。
@@ -125,15 +125,15 @@ impl DebtRow {
     }
 
     /// 声明「该端口的债全部还清才欠」（读债状态，不读事实状态）。
-    pub(crate) fn when_no_open(mut self, port: &'static str) -> Self {
-        self.when_no_open = Some(port);
+    pub(crate) fn when_no_open(mut self, port: impl Into<String>) -> Self {
+        self.when_no_open = Some(port.into());
         self
     }
 
     /// 声明前提「该端口这一圈没人认领才算已了」（读债状态，与 [`Self::when_no_open`]
     /// 对偶）。依赖方只写端口名——不写兄弟插件的行名，也不拼债 id。
-    pub(crate) fn after_port(mut self, port: &'static str) -> Self {
-        self.after_port = Some(port);
+    pub(crate) fn after_port(mut self, port: impl Into<String>) -> Self {
+        self.after_port = Some(port.into());
         self
     }
 

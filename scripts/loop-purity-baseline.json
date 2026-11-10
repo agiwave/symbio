@@ -1,8 +1,6 @@
 {
   "note": "LP-001…005 的存量棘轮（只许降）。目标：LP-001 / LP-002 / LP-004 / LP-005 归零，LP-003 随 tools/** 迁出与 turn 拆除递减。",
-  "baseline-allow": [
-    "lp002ForbiddenDeps/dev-dependencies:symbio-providers→(none) loop 的生产与测试面都不再引用 providers 任何符号（DefaultToolVisitor 连名字都不出现），死依赖随 D-431 删除 D-431"
-  ],
+  "baseline-allow": [],
   "lp001PayloadImports": {},
   "lp002ForbiddenDeps": [],
   "lp003WorldRoots": {

@@ -177,8 +177,8 @@ pub use symbio_sdk::port_stamp::{
 pub struct DebtSpec {
     /// 行名（申报方的标签）。
     pub name: &'static str,
-    /// 欠哪个端口——申报方自己的端口名，契约不解释。
-    pub port: &'static str,
+    /// 欠哪个端口——申报方自己的端口名，契约不解释（运行时字符串，端口集由活插件装配期申报）。
+    pub port: String,
     /// 债身份，由申报方从事实派生（禁计数）。
     pub id: String,
     /// 交给执行体的载荷。
@@ -196,7 +196,7 @@ pub struct DebtSpec {
     /// 排除条件：该事实已存在 ⇒ 本行不欠（与 `when` 同一条读面，按种类读）。
     pub unless: Option<Unless>,
     /// 该端口的债全部还清才欠（读债状态）；环只读端口名，不解释语义。
-    pub when_no_open: Option<&'static str>,
+    pub when_no_open: Option<String>,
     /// 前提（读债状态）：该端口**这一轮**还有人认领（可派发 / 在飞 / 挂起）⇒ 本行
     /// 不进计划；没人认领 ⇒ 前提已了（**缺席即收束**）。上一轮遗留的未收束债不算
     /// 认领（债表按当轮事实现算，遗留债由自己的租约收束）。
@@ -204,7 +204,7 @@ pub struct DebtSpec {
     /// 与 [`Self::when_no_open`] 同族、方向相反：一个问「端口干净才欠」，一个问
     /// 「端口干净才可还」。依赖方只认端口，不认行名——能力未挂载 / 开关关闭时
     /// 不产生任何债，本行因此不会被一笔永不出现的前置债挡住。
-    pub after_port: Option<&'static str>,
+    pub after_port: Option<String>,
     /// 单次派发租约（毫秒）。
     pub lease_ms: u64,
     /// 最多尝试次数（含首次）。
@@ -223,13 +223,13 @@ impl DebtSpec {
     /// 无前置的一行债；租约 60s、最多 3 次。
     pub fn new(
         name: &'static str,
-        port: &'static str,
+        port: impl Into<String>,
         id: impl Into<String>,
         payload: Value,
     ) -> Self {
         Self {
             name,
-            port,
+            port: port.into(),
             id: id.into(),
             payload,
             after: None,
@@ -305,14 +305,14 @@ impl DebtSpec {
     }
 
     /// 声明「该端口无未还债才欠」。
-    pub fn when_no_open(mut self, port: &'static str) -> Self {
-        self.when_no_open = Some(port);
+    pub fn when_no_open(mut self, port: impl Into<String>) -> Self {
+        self.when_no_open = Some(port.into());
         self
     }
 
     /// 声明前提「该端口这一轮没人认领才算已了」（与 [`Self::when_no_open`] 对偶）。
-    pub fn after_port(mut self, port: &'static str) -> Self {
-        self.after_port = Some(port);
+    pub fn after_port(mut self, port: impl Into<String>) -> Self {
+        self.after_port = Some(port.into());
         self
     }
 

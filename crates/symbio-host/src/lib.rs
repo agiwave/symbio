@@ -381,7 +381,7 @@ impl DriveSupport for HostDriveSupport {
             for spec in source.rows(&request, &declared) {
                 rows.push(DriveRow {
                     name: spec.name,
-                    port: spec.port.to_string(),
+                    port: spec.port,
                     id: spec.id,
                     payload: spec.payload,
                     after: spec.after,

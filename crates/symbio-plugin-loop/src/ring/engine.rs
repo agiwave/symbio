@@ -380,12 +380,8 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
             }
         }
         // 「该端口的债全部还清才欠」读的是债状态，不是事实状态（归属：选债）。
-        if let Some(port) = row.when_no_open {
-            if view
-                .unresolved()
-                .iter()
-                .any(|key| key.port.as_str() == port)
-            {
+        if let Some(port) = &row.when_no_open {
+            if view.unresolved().iter().any(|key| &key.port == port) {
                 continue;
             }
         }
@@ -488,7 +484,7 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
 
     let mut work = Work::default();
     for candidate in candidates {
-        if let Some(port) = candidate.row.after_port {
+        if let Some(port) = &candidate.row.after_port {
             if claimed.contains(port) {
                 // 前提还没了：本行不进计划。记下来，出口据此证明「有人在等」。
                 work.blocked.push(candidate.key);
