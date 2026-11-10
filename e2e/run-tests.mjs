@@ -6,6 +6,8 @@
 // - `E2E_DEBUG=1`                     失败时输出错误堆栈
 // - `E2E_CONCURRENCY=N`               覆盖并发度（默认见下）
 // - `E2E_PROFILE=real`                用真实 provider 跑（不影响等待上限：mock 与真 provider 统一 120s）
+// - 失败用例的**完整输出**写到 `.workbuddy-ai/e2e-failures/<runId>/<case>.log`
+//   （终端只印末 8 行；抖动类失败要全文才定得了归属，而重跑一轮代价最高）
 //
 // 为什么子进程隔离：用例各自起 mock、各自建临时 homedir、CLI 走子进程，
 // 一个用例卡死或泄漏句柄不应拖垮别的用例；单独跑一个用例也无需任何额外入口。
@@ -26,8 +28,8 @@
 // 全量动辄几分钟。现在两处收敛到同一口径（本文件是唯一入口，门禁那套保持独立）。
 
 import { spawn } from 'node:child_process';
-import { readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readdirSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { red, green, dim, bold } from '../scripts/color.mjs';
@@ -39,6 +41,25 @@ const repoRoot = join(here, '..');
 
 /** 单例硬上限（毫秒）：mock 与真 provider 统一 120s。 */
 const CASE_TIMEOUT_MS = 120_000;
+
+/**
+ * 失败用例的**完整输出**落盘（本轮一个目录）。
+ *
+ * 终端只印末 8 行，是给「一眼看出哪里红了」用的；而抖动那一类失败——每轮挂的用例
+ * 不同、单跑 100% 通过——恰恰**要全文**才能定归属：断言里带出的 stdout/stderr 尾巴、
+ * mock 收到的请求数、有没有残留进程，少一行就换一个结论。可它一轮 30~60s、命中率
+ * 个位数，「再跑一遍看看」是这个仓库最贵的动作。
+ *
+ * 与门禁的分工：门禁 `58-e2e.mjs` 走 `ctx.run`，逐例日志本来就落盘；这里补的是
+ * **独立入口**那条路——诊断时用的正是它，而它此前只有 8 行。
+ */
+function saveFailure(caseName, output, runId) {
+  const dir = resolve(repoRoot, '.workbuddy-ai', 'e2e-failures', runId);
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${caseName}.log`);
+  writeFileSync(file, output);
+  return file;
+}
 
 // ---------- 子进程自执行：`node cases/xxx.mjs` 直接跑该用例 ----------
 // 用例文件被 import 时只做定义（defineCase 不执行）；直接运行时由 `cases/_selfrun.mjs`
@@ -150,6 +171,13 @@ async function main() {
   // **起跑顺序**与端口基址是两件事：顺序按上一轮实测耗时降序（LPT），序号仍是
   // 过滤后列表里的位置。理由与判据在 `scripts/e2e-order.mjs`。
   const plan = orderForStart(cases, loadTimes(repoRoot));
+  // 本轮目录名（与门禁 `runId` 同形状：`YYYYMMDD-HHMMSS`，**本地时间**——
+  // 门禁日志目录也是本地时间，两处对齐才不用换算）。
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const runId =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   const results = new Array(cases.length);
   const measured = {};
   let cursor = 0;
@@ -166,6 +194,7 @@ async function main() {
       if (!r.ok) {
         const detail = r.output.trim().split('\n').slice(-8).join('\n      ');
         if (detail) console.log(`      ${red(detail)}`);
+        console.log(`      ${dim(`完整输出：${saveFailure(c.name, r.output, runId)}`)}`);
       }
     }
   };
