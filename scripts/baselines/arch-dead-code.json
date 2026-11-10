@@ -320,12 +320,6 @@
       "evidence": "docs/003-design/001-核心架构.md"
     },
     {
-      "symbol": "feedback",
-      "path": "crates/symbio-sdk/src/text/tokenizer.rs",
-      "why": "待接线：校准回灌的唯一调用点（`report_provider_usage`）在 `34526409` 被当「零消费声明」退役，`TokenFeedback` 从此不再更新",
-      "evidence": "docs/003-design/035-长会话与断点恢复.md"
-    },
-    {
       "symbol": "has_subscribers",
       "path": "crates/symbio-sdk/src/vdfs/host.rs",
       "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",

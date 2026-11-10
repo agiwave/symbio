@@ -24,6 +24,7 @@ use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortFactEmit, PortInput, PortOutcome,
     PortProvider, PortReply,
 };
+use symbio_plugin_api::text::{default_tokenizer, HeuristicTokenizer, Tokenizer};
 use symbio_plugin_api::{
     llm_short_id, removed_ids, unselected_roots, CapabilityMeta, CapabilityRow, ClosureReason,
     Entity, ExecEnv, ExecEventSink, ExecTranscriptWriter, FactDraft, ModelFinishReason,
@@ -470,9 +471,24 @@ fn estimate_prompt_tokens(
     tools: &[CapabilityMeta],
     messages: &[PromptMessage],
 ) -> usize {
-    use symbio_plugin_api::text::{default_tokenizer, Tokenizer};
+    prompt_tokens_with(default_tokenizer(), system_prompt, tools, messages)
+}
 
-    let tok = default_tokenizer();
+/// 用**指定尺子**量一次请求的输入体量（system prompt + 工具定义 + 消息）。
+///
+/// 为什么要能换尺子（`D-433`）：上面那条 D-243 说的是**预算与成本**必须同尺；
+/// 校准回灌的分母是唯一的例外，且必须例外——把校准后的读数当分母，观测比值就
+/// 依赖当前系数，不动点解是 √(真实比值) 而不是真实比值（自反馈偏差），
+/// 所以分母一律用未校准的 [`HeuristicTokenizer`]。
+///
+/// 量的是**发出去的那一整套**（含工具定义），不是只有消息正文：provider 报的
+/// `input` 用量含它，分母少算工具定义，比值就会系统性偏大，校准系数被压下去。
+fn prompt_tokens_with(
+    tok: &dyn Tokenizer,
+    system_prompt: &str,
+    tools: &[CapabilityMeta],
+    messages: &[PromptMessage],
+) -> usize {
     let mut total = tok.count(system_prompt);
     for cap in tools {
         // 工具定义实际发出去的是名字 + 描述 + 参数 Schema（与 adapter 的线格式同源）。
@@ -611,6 +627,15 @@ impl PortExecutor for ModelExecutor {
                 .round_trip(&system_prompt, &wire, &tools, &request.root_id, &env) => result,
         } {
             Ok(output) => {
+                // 校准回灌（`D-433`）：provider 报了实测**输入**用量，就把「实测 / 未校准
+                // 估算」交给进程内的 `CalibratedTokenizer`。断在这里校准永远停在初值 1.0，
+                // 未校准启发式对 CJK 的高估（实测约 31%）无人修正，压缩预检会把本可成功的
+                // 摘要请求误判成「注定超限」。缺席是正常的（协议或桩不保证给），不算缺陷；
+                // 分母为 0 的情形由 `feedback` 自己忽略，这里不重复判。
+                if let Some(actual) = output.usage.as_ref().and_then(|usage| usage.input) {
+                    let estimated = heuristic_prompt_tokens(&system_prompt, &tools, &prompt);
+                    default_tokenizer().feedback(actual as usize, estimated);
+                }
                 // 终答是**独立事实种类**（`chat.assistant.final`）：只有收束轮（无工具调用）
                 // 才落它。债表据此排除「这一轮已答完」，而环的 `request` / `sent` / `retry`
                 // 因种类不同不误命中——可重试失败后的重试轮不会被提前跳过。
@@ -879,6 +904,20 @@ async fn emit_outcome(
         produced_by: None,
     }])
     .await;
+}
+
+/// 一次请求的**未校准**启发式估算：校准回灌的分母（`D-433`）。
+///
+/// 为什么用原始启发式而不是 [`default_tokenizer`] 的 `count()`：把校准后的值喂回去，
+/// 观测比值会依赖当前系数，数学上收敛到 √(真实比值) 而不是真实比值（自反馈偏差）。
+/// 量的是 `prompt`（context 段 + 历史消息）而不是 `wire`：`wire_messages` 会把同一
+/// 调用的旧工具结果只留最后一条，那已经是**裁剪后**的线格式，分母该对原始输入负责。
+fn heuristic_prompt_tokens(
+    system: &str,
+    tools: &[CapabilityMeta],
+    prompt: &[PromptMessage],
+) -> usize {
+    prompt_tokens_with(&HeuristicTokenizer, system, tools, prompt)
 }
 
 /// 收束轮的上下文水位（终答载荷的 `context` 格，读侧折进 Turn 骨架 `meta.context`）。

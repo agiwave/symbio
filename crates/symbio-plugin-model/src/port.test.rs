@@ -566,3 +566,28 @@ fn a_nested_tool_result_is_not_degraded_again() {
         "末条 role=tool"
     );
 }
+
+/// 校准回灌的分母是**未校准**的启发式（`D-433`）。
+///
+/// 钉的是「用了哪把尺子」而不是具体数值：`default_tokenizer().count` 每条都乘当前
+/// 系数再 `+1`，只要有人把分母换成它，这里立刻不等——而且与全局系数取值无关，
+/// 所以不依赖其它用例的执行顺序。分母同时含工具定义与逐条结构开销：provider 报的
+/// `input` 用量含这两部分，少算就会让观测比值系统性偏大，把系数压下去。
+#[test]
+fn the_feedback_denominator_is_the_uncalibrated_heuristic() {
+    let system = "系统提示：按规范回答";
+    let messages = vec![super::PromptMessage {
+        role: "user".into(),
+        text: "甲乙丙丁".into(),
+        tool_call_id: None,
+        tool: None,
+        tool_calls: None,
+    }];
+    let heuristic = symbio_plugin_api::text::HeuristicTokenizer;
+    let expected = heuristic.count(system) + PER_MESSAGE_OVERHEAD + heuristic.count("甲乙丙丁");
+    assert_eq!(
+        heuristic_prompt_tokens(system, &[], &messages),
+        expected,
+        "分母必须是原始启发式的和，不能是校准后的 count()"
+    );
+}
