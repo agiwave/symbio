@@ -1,8 +1,8 @@
 //! `crates/symbio-kernel/src/capability/row.rs` 的单元测试。
 //!
-//! 钉三件事：**行的名字从能力自述派生**（调用方没有机会填错）、**meta 现取**
-//! （改名装饰器不会让表键与自述分叉）、**cap 拿到的是能力本身**（执行链路
-//! 经审批闸那一层不被行Vocabulary截断）。
+//! 钉三件事：**行的名字与 meta 出自同一次能力自述**（调用方没有机会填错，两份
+//! 表示结构上不分叉）、**meta 是入表时的快照**（行携带事实，不回头调能力）、
+//! **cap 拿到的是能力本身**（执行链路经审批闸那一层不被行词汇截断）。
 
 use super::*;
 use crate::capability::{CapabilityMeta, CapabilityRiskLevel};

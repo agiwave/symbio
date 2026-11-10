@@ -24,12 +24,14 @@
 //! 唯一生效由写入方维持：`put` 收到带生效位的行时，先把同族旧生效行降为普通行
 //! （[`CapabilityRow::demote`]），见 `DefaultToolVisitor::put` 的单槽移交。
 //!
-//! ## 为什么 schema 不另存一份
+//! ## 行上的自述快照
 //!
-//! 工具行的元数据（`CapabilityMeta`）**从能力自述派生**：`CapabilityRow::tool(cap)`
-//! 在入表时取一次 `cap.meta()` 的 name 作键，`row.meta()` 每次现取。两份表示（表里的
-//! 键与能力自述的 name）只可能在**改名装饰器**上分叉，而那种装饰器
-//! （`PrefixedCapability`）改的正是 `meta().name` 本身——现取永远同步。
+//! 工具行的元数据（`CapabilityMeta`）在 `CapabilityRow::tool(cap)` 入表时取**一次**
+//! `cap.meta()`，连同行名一起存进行——行名与 `meta().name` 出自**同一次**自述调用，
+//! 结构上不可能分叉（改名装饰器改的正是 `meta().name`，而它裹在内层、先于入表被
+//! 取到）。`row.meta()` 读快照，不回头调能力：读者要的是这一行**携带的事实**，
+//! 不是对执行对象的反向引用——`D-440`（工具即端口）收口后，这份快照就是
+//! 工具行退成纯数据时留下的全部。
 //!
 //! ## 谁住在这里
 //!
@@ -104,8 +106,16 @@ impl Hash for CapabilityFamily {
     }
 }
 
-/// 工具行的载荷：可调用对象（注册收口点已裹审批闸，见 `DefaultToolVisitor::put`）。
-struct ToolPayload(Arc<dyn Capability>);
+/// 工具行的载荷：**元数据快照**（入表时取一次）+ 可调用对象
+/// （注册收口点已裹审批闸，见 `DefaultToolVisitor::put`）。
+///
+/// `meta` 是**数据**：`row.meta()` 的读者（工具目录装配、风险/行为闸门读面）
+/// 只需要这份自述，不需要能力实例——`D-440` 收口后执行面走端口收集表，
+/// 这份快照就是行上**活到最后**的部分。`cap` 是**执行体**，过渡期暂住载荷里。
+struct ToolPayload {
+    meta: CapabilityMeta,
+    cap: Arc<dyn Capability>,
+}
 
 /// 模型行的载荷：一个**空标记**。
 ///
@@ -180,10 +190,12 @@ impl CapabilityRow {
         }
     }
 
-    /// 工具行：名字 = `cap.meta().name`（全名，含挂载点前缀）。
+    /// 工具行：名字与元数据 = `cap.meta()`（入表时取**一次**的全名自述，
+    /// 含挂载点前缀）。
     pub fn tool(cap: Arc<dyn Capability>) -> Self {
-        let name = cap.meta().name;
-        Self::new(family::TOOL, name, ToolPayload(cap), false)
+        let meta = cap.meta();
+        let name = meta.name.clone();
+        Self::new(family::TOOL, name, ToolPayload { meta, cap }, false)
     }
 
     /// 模型行：名字 = `provider_id`，载荷是空标记（**不装执行对象**，`D-437`）。
@@ -248,14 +260,16 @@ impl CapabilityRow {
         self.payload.downcast_ref::<T>()
     }
 
-    /// 工具元数据（每次现取，见模块文档「为什么 schema 不另存一份」）。
+    /// 工具元数据（入表时的自述快照，行上**携带的事实**）。
     pub fn meta(&self) -> CapabilityMeta {
-        self.cap().map(|c| c.meta()).unwrap_or_default()
+        self.payload::<ToolPayload>()
+            .map(|p| p.meta.clone())
+            .unwrap_or_default()
     }
 
     /// 取可调用对象；非工具族为 `None`（调用方据此给诚实的 NotFound）。
     pub fn cap(&self) -> Option<&Arc<dyn Capability>> {
-        self.payload::<ToolPayload>().map(|p| &p.0)
+        self.payload::<ToolPayload>().map(|p| &p.cap)
     }
 
     /// 取系统提示词正文；非提示词族为 `None`。
