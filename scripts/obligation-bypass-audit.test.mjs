@@ -2,7 +2,7 @@
  * obligation-bypass-audit 回归测试
  *
  * 这条守卫判四件事：两类计数各自 ≤ 基线（OB-001 调度旁路 / OB-004 幂等点问）、低于
- * 基线要提示下调（OB-002）、每处点名的**行必须在 `ROWS` 里**（OB-003）、承认标记本身
+ * 基线要提示下调（OB-002，按 SP-033 §4 已是**退场读数**，故必须带码打印）、每处点名的
  * 站得住（OB-004 的另一半：行得真的接了执行体、理由得有内容、标记不许悬空）。它最危险
  * 的失效形态全是**静默变绿**——数字算错、算宽、算不到，报出来都是「通过」，所以逐条钉：
  *
@@ -117,6 +117,13 @@ test('OB-002 幂等点问低于基线也要提示（两格都不许白留余量�
   const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': marked('beta') }, { baseline: '0', precheck: '5' })
   assert.equal(r.status, 0, out(r))
   assert.match(out(r), /提示.*幂等点问.*1<5.*PRECHECK_BASELINE/)
+})
+
+test('OB-002 退场读数带码打印：不判红也不许静默删除（SP-033 §5 程序 1）', () => {
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': caller(['alpha']) }, { baseline: '5' })
+  assert.equal(r.status, 0, out(r))
+  assert.match(out(r), /\[READ\] OB-002 调度旁路已收到基线下方（1<5）/)
+  assert.match(out(r), /\[READ\] 退场读数 \d+ 条：OB-001 \/ OB-002 \/ OB-004/)
 })
 
 test('承认过的点**不进**调度旁路那格：旁路基线 0 也能通过（数的是两个数）', () => {

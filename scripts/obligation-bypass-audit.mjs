@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * obligation-bypass-audit — 环的**派发面**只许收窄（OB-001…003）
+ * obligation-bypass-audit — 环的**派发面**只许收窄（OB-001…004）
  *
  * ## 它判什么
  *
  * | 码 | 判什么 | 它拦的是哪一种退化 |
  * |---|---|---|
  * | OB-001 | **调度旁路**（未承认的直调点）≤ `BYPASS_BASELINE` | 派发面变宽：又长出一条绕开 `drive` 的路 |
- * | OB-002 | 两类计数**低于**各自基线时提示同步下调 | 余量白留：棘轮松着，下一次「多一处」不会红 |
+ * | OB-002 | 两类计数**低于**各自基线时的下调提示（**退场读数**，SP-033 §4） | 余量白留：棘轮松着，下一次「多一处」不会红 |
  * | OB-003 | 每处直调点**与 `Dispatch { row: "…" }` 点名的行**必须是 `ROWS` 里真实存在的行 | 点名不存在的行 ⇒ `owes` 恒 `false` ⇒ 这段旁路代码**永不执行**、那一格**永不派发** |
  * | OB-004 | **幂等点问**必须就地承认（标记 + 非空理由 + 点名的行已接执行体 `by: Some`），且总数 ≤ `PRECHECK_BASELINE` | 把「第二套调度」洗成「护栏」：`by: None` 的行唯一的派发点就是这一处直问，它不是动手前复核 |
  *
@@ -19,7 +19,7 @@
  * | 类 | 判据 | 动作 |
  * |---|---|---|
  * | **调度旁路** | 点名的行 `by = None`（表里没人跑它）且该处**没有**承认标记 | 归零对象；**今天 0 处**（基线 `BYPASS_BASELINE = 0`，已收口） |
- * | **幂等点问** | 执行体（`by = Some`）动手前复核「本行还欠不欠」——并发 / 重放下第二次进入同一动作时的护栏 | **保留**，显式登记；今天 3 处 |
+ * | **幂等点问** | 执行体（`by = Some`）动手前复核「本行还欠不欠」——并发 / 重放下第二次进入同一动作时的护栏 | **保留**，显式登记；今天 0 处，上限随实测收到 0（新增一处必须过 `35-baseline` 的放宽留痕） |
  *
  * ⚠ **调度旁路的归零前件是「借用面按步获取」**，不是把 `owes()` 换个名字。理由是可执行的：
  * 给某条 `policy.*` 行接上执行体（`by: Some`）之后，内环派发器也会按 `prio`
@@ -131,10 +131,13 @@ const BYPASS_BASELINE = process.env.OBLIGATION_BYPASS_BASELINE
  * 为什么还要给它一个上限：护栏一旦可以随手加，「直问」就多了一条不用过外环收编的
  * 逃生通道——加一处、补一句理由，调度旁路的数就永远追不到它。所以它同样只许降，
  * 放宽要走 `35-baseline` 的 `obligation-precheck` 那一格。
+ *
+ * 实测已归零：护栏随派发面收口一起退场，上限同步收到 0，不给下一次「随手加一处」
+ * 留三格余量（OB-002 的下调提示就是为这处漂移存在的）。
  */
 const PRECHECK_BASELINE = process.env.OBLIGATION_PRECHECK_BASELINE
   ? Number(process.env.OBLIGATION_PRECHECK_BASELINE)
-  : 3
+  : 0
 
 /** 就地承认标记（OB-004）：与 R-002 的 `dead-code-allow` 同一判空口径 */
 const PRECHECK_MARK_RE = /\/\/\s*obligation-precheck\s+OB-004:\s*(\S[^\n]*)/
@@ -383,10 +386,12 @@ const precheck = sites.filter((s) => s.mark)
  * 挡住收敛，两种都不是判据。
  *
  * 降级 = **照旧算、照旧打印、不判红**（SP-033 §5 第 1 条：先写读数，再撤红，两次改动
- * 各自可回退）。`OB-003` 不在退场名单里：它断言的"行名可解析"并入 `TC-3`（装载期），
+ * 各自可回退）。`OB-002` 同在退场名单：它数的是「基线还留着几格余量」，也是过渡形状的
+ * 伴随物，只是从不判红（低于基线只提示下调），故以 `[READ]` 显式带码打印，不静默删除。
+ * `OB-003` 不在退场名单里：它断言的"行名可解析"并入 `TC-3`（装载期），
  * 与过渡形状无关，判红照旧。
  */
-const RETIRED = new Set(['OB-001', 'OB-001-baseline', 'OB-004'])
+const RETIRED = new Set(['OB-001', 'OB-001-baseline', 'OB-002', 'OB-004'])
 const tally = (code) => {
   if (RETIRED.has(code)) readings++
   else errors++
@@ -485,10 +490,26 @@ const brief = (list) => {
     .join(' · ')
 }
 
+// ── OB-002：两类计数低于各自基线 ⇒ 退场读数（SP-033 §4 / J0）──────────
+// 余量不是判据：它数的是「基线还留着几格」，是过渡形状的伴随物。按 §5 程序 1
+// 降为读数——照旧算、照旧打印、不判红，且读数必须带自己的判据码（静默删除不合法）。
+for (const [label, value, baseline, target] of [
+  ['调度旁路', bypass.length, BYPASS_BASELINE, 'BYPASS_BASELINE'],
+  ['幂等点问', precheck.length, PRECHECK_BASELINE, 'OBLIGATION_PRECHECK_BASELINE'],
+]) {
+  if (value >= baseline) continue
+  readings++
+  console.log(
+    yellow('提示') +
+      `：[READ] OB-002 ${label}已收到基线下方（${value}<${baseline}），请同步 ${target}——` +
+      `留着旧数字等于把余量白留给下一次`,
+  )
+}
+
 if (readings) {
   console.log(
     yellow(
-      `[READ] 退场读数 ${readings} 条：OB-001 / OB-004 已按 SP-033 §4 降为读数（不判红，承接在 TC-1b）`,
+      `[READ] 退场读数 ${readings} 条：OB-001 / OB-002 / OB-004 已按 SP-033 §4 降为读数（不判红，承接在 TC-1b）`,
     ),
   )
 }
@@ -510,19 +531,6 @@ console.log(
       `${rows.size} 行声明表内点名全部存在`,
   ),
 )
-if (bypass.length < BYPASS_BASELINE) {
-  console.log(
-    yellow('提示') +
-      `：调度旁路已收到基线下方（${bypass.length}<${BYPASS_BASELINE}），请同步本脚本的 BYPASS_BASELINE——` +
-      `留着旧数字等于把余量白留给下一次`,
-  )
-}
-if (precheck.length < PRECHECK_BASELINE) {
-  console.log(
-    yellow('提示') +
-      `：幂等点问已收到基线下方（${precheck.length}<${PRECHECK_BASELINE}），请同步 OBLIGATION_PRECHECK_BASELINE`,
-  )
-}
 if (definitionLines > 0) {
   console.log(dim(`（排除的定义行 ${definitionLines} 处不计）`))
 }
