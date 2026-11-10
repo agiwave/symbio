@@ -65,13 +65,12 @@ pub(crate) const EVENT_SESSION_RECALL: &str = symbio_plugin_api::events::EVENT_S
 /// `by = plugin_row`，实现见 `close_turn`。
 pub(crate) const SESSION_CLOSE_TURN: &str = "session.close-turn";
 
-/// 首响的**归宿行**（`by = None`）：只登记「`chat.assistant.opening` 归本插件看护」，
-/// 不参与派发。实际申报在运行时（`OpeningDebts`，开关读当轮 `session.config` 的
-/// `opening_enabled`）——行名的字面量见 `opening.rs`。
-pub(crate) const SESSION_OPENING_SEAT: &str = "session.opening-seat";
-
 /// 终止事实的**归宿行**（`by = None`）：只给 `session.terminated` 一个声明期读方
 /// （`OrphanFact`），不参与派发。实际写方是宿主侧簿记写方（`termination.rs`）。
+///
+/// 首响（`chat.assistant.opening`）没有同形的归宿行：它的 `FactDecl` 一并退场了
+/// （`D-346`）。理由见下面 `FACTS` 的注释——格位由 `EventDecl` 声明，形状只在
+/// 「视图 / 行按字段读」时才需要 `FactDecl` 那一份；首响两样都没有。
 pub(crate) const SESSION_TERMINATED_SEAT: &str = "session.terminated-seat";
 
 // 读方侧的视图名别名已全部退场：八列都改报表登记之后（`D-387`），读者按 `slot` 取
@@ -171,27 +170,11 @@ pub(crate) const ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
-    // 首响格的归宿（`by = None`，不派发）：`owes` / `until` 同键、同源，一有首响就
-    // 「既欠又还」，只为在装载期给这条事实一个读方（`OrphanFact` 的归宿行）。
-    Decl {
-        name: SESSION_OPENING_SEAT,
-        by: None,
-        tier: LatencyTier::Reflex,
-        expand: None,
-        owes: Pattern {
-            source: EVENT_CHAT_ASSISTANT_OPENING,
-            key: &["id"],
-            eq: &[],
-        },
-        until: &[Pattern {
-            source: EVENT_CHAT_ASSISTANT_OPENING,
-            key: &["id"],
-            eq: &[],
-        }],
-        unless: &[],
-    },
-    // 终止格的归宿（`by = None`，不派发）：与首响同一手法。写方是宿主侧簿记写方，
-    // 不在债表里；这里只负责让装载期查得到「谁看护这条事实」。
+    // 首响格**没有**归宿行（`D-346`）：它不再登记 `FactDecl`，`OrphanFact` 也就无从
+    // 提起。首响的债由 `OpeningDebts` 在运行时按开关申报（见 `opening.rs`），
+    // 与这张静态表无关。
+    // 终止格的归宿（`by = None`，不派发）：写方是宿主侧簿记写方，不在债表里；
+    // 这里只负责让装载期查得到「谁看护这条事实」。
     Decl {
         name: SESSION_TERMINATED_SEAT,
         by: None,
@@ -211,10 +194,23 @@ pub(crate) const ROWS: &[Decl] = &[
     },
 ];
 
-/// 本插件声明的事实形状：`session.*` 两条，以及随 `chat.*` 词汇移交过来的对话面两条。
+/// 本插件声明的事实形状：`session.*` 两条，以及随 `chat.*` 词汇移交过来的终答格一条。
 ///
-/// `chat.assistant.reported` 不登记形状：没有行以它为前提或出口；格位仍在本文件的
-/// `EVENTS` 里，登记成事实只会多出一条 `OrphanFact` 需要归宿行，而不是多一条检查。
+/// ## 什么时候才登记 `FactDecl`（`D-346`）
+///
+/// `FactDecl` 的用处只有两个：给**视图的 `reads`** 校验字段（`UndeclaredField`），
+/// 给**行模式的 `eq` / `key`** 校验字段（`seal` 的行检查）。两条都不沾的格，登记只
+/// 换来一条 `OrphanFact`——于是又要补一条「只为自己存在」的归宿行，净增两处声明、
+/// 零处检查。
+///
+/// 所以本表按那条线取舍：`session.settled` / `session.terminated` / 终答格有读方按字段
+/// 取值（状态视图、`reason`、正文与身份），继续登记；`chat.assistant.opening` 与
+/// `chat.assistant.reported` 是**对话面节点**，形状由 `EventDecl` 的格位加重建折法
+/// （`ChatVocab`）决定，没有任何视图或行按字段读它们的载荷，两者都不登记。
+///
+/// 这条线曾经不对称：`opening` 登记了（并因此有 `session.opening-seat` 这条归宿行），
+/// `reported` 没有；同一理由在两边都成立，`opening` 那一份只是在替「登记了就得有归宿」
+/// 的连锁要求付账。`D-346` 把两份都收敛到「不登记」，行与基线同批撤掉。
 pub(crate) const FACTS: &[FactDecl] = &[
     FactDecl {
         name: EVENT_SESSION_SETTLED,
@@ -236,17 +232,6 @@ pub(crate) const FACTS: &[FactDecl] = &[
         key: &[],
         expand: &[],
         fields: &["root_id", "final_id", "text"],
-    },
-    // 首响格：内容由 compose 的模板产出、由会话的行落格（D-344 的「跨插件只走 route」）。
-    // 它是一轮里**先于**终答/工具轮出现的对话面事实，排除出上下文（旧的 `escalate`
-    // 断言靠它把「我先看一下」与真正的答话分开）。`root_id` 是它在树上的父（轮根 =
-    // 用户消息节点，`D-426`）；实时面与重建面都按它挂节点。
-    FactDecl {
-        name: "chat.assistant.opening",
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["root_id", "id", "reason", "text", "exclude_from_context"],
     },
 ];
 

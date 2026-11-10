@@ -37,11 +37,6 @@
       "adr": "D-397"
     },
     {
-      "name": "session.opening-seat",
-      "why": "首响由模型写，是声明锚点不是环债（守 chat.assistant.opening）",
-      "adr": "D-397"
-    },
-    {
       "name": "session.terminated-seat",
       "why": "终止由宿主簿记写方写，不在债表（守 session.terminated）",
       "adr": "D-397"
