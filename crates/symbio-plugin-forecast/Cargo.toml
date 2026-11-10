@@ -19,3 +19,6 @@ async-trait = { workspace = true }
 
 # 日志宏在调用站点展开，宏体里的 `tracing::` 按调用方作用域解析 ⇒ 本 crate 的真实依赖。
 tracing = { workspace = true }
+
+[dev-dependencies]
+symbio-testkit = { path = "../symbio-testkit" }

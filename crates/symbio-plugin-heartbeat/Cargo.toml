@@ -34,6 +34,7 @@ time = { workspace = true, features = ["serde", "formatting", "parsing", "macros
 tracing = { workspace = true }
 
 [dev-dependencies]
+symbio-testkit = { path = "../symbio-testkit" }
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { workspace = true, features = ["test-util"] }

@@ -16,10 +16,10 @@ use std::sync::Arc;
 use symbio_plugin_api::inventory;
 use symbio_plugin_api::rows::PORT_ACTOR;
 use symbio_plugin_api::{
-    creator_create_object, creator_ids, sealed_declarations, Plugin, PluginDir,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, EVENT_REQUEST, PLUGIN_DIR,
+    creator_create_object, creator_ids, Plugin, PluginDir, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginSimpleRequest, EVENT_REQUEST, PLUGIN_DIR,
 };
-use symbio_sdk::declarations::DeclarationsDecl;
+use symbio_sdk::declarations::{sealed_declarations, DeclarationsDecl};
 
 #[tokio::test]
 async fn every_assembled_package_can_be_constructed() {

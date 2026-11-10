@@ -17,9 +17,9 @@ use symbio_kernel::vdfs::{
     VDFS_ACTION_RETRY_SUBTREE, VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE,
 };
 use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_USER_ANSWER};
-use symbio_plugin_api::fact_source::FACT_SOURCE;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::keys::SESSION_ID;
+use symbio_sdk::plugin::fact_source::FACT_SOURCE;
 use symbio_sdk::vdfs::host::{vdfs_from_plugin_error, vdfs_host_ctx};
 
 impl SessionPlugin {

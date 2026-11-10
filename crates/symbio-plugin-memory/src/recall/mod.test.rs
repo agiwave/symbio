@@ -7,7 +7,8 @@
 use super::*;
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
 use symbio_plugin_api::retrieval::{Retrieval, RetrievalRequest, Retriever};
-use symbio_plugin_api::{Entity, Event, EventStore, Seq, Store, Verb, PRINCIPAL_USER};
+use symbio_plugin_api::{Entity, Event, Verb, PRINCIPAL_USER};
+use symbio_testkit::{EventStore, Seq, Store};
 
 fn encode(store: &EventStore, id: &str, content: &str, tag: &str, ts: i64) {
     store

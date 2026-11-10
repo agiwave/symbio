@@ -12,9 +12,9 @@ use symbio_kernel::event::{Event, Seq};
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
-use symbio_plugin_api::fact_source::{FactSource, FactSourceOpener, Principal};
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::plugin::drive_entry::{DriveEntry, DriveTarget};
+use symbio_sdk::plugin::fact_source::{FactSource, FactSourceOpener, Principal};
 
 use super::layout::SessionParams;
 use super::wal::WalStore;
@@ -186,7 +186,7 @@ impl FactSource for SessionFactSource {
             actor
         };
         let kind = draft.kind.clone();
-        let mut event = symbio_plugin_api::fact_source::draft_into_event(actor, draft);
+        let mut event = symbio_sdk::plugin::fact_source::draft_into_event(actor, draft);
         // 时刻属于信封，落格时由事实源兜底；这里先写同一时刻，落格后的投影就能用
         // 手上这一份（含 `event_id`，`seq` 在 append 后补），不必回读全史——
         // `Store::range` 要拼接归档段，长会话下每次都是全量克隆。

@@ -13,7 +13,8 @@ use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortFact, PortFactEmit, PortFactReader, PortFactWriter,
     PortInput, PortOutcome, PortProvider,
 };
-use symbio_plugin_api::{Entity, Event, ExecAbortSignal, ExecEventSink, LatencyTier, Seq, Verb};
+use symbio_plugin_api::{Entity, Event, ExecAbortSignal, ExecEventSink, LatencyTier, Verb};
+use symbio_testkit::Seq;
 
 use super::ConationPort;
 

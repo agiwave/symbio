@@ -103,7 +103,7 @@ fn harness_protocol_rows() -> &'static [Decl] {
             symbio_plugin_api::EVENT_SENT,
             symbio_plugin_api::EVENT_RESPONSE,
             symbio_plugin_api::EVENT_FAILED,
-            symbio_plugin_api::EVENT_RETRY,
+            symbio_testkit::EVENT_RETRY,
         ]
         .into_iter()
         .map(|name| {
@@ -154,7 +154,7 @@ fn the_skill_package_submits_its_own_surfaces() {
 /// 校准观测的格位自本能力迁入起由本插件交（loop 不再声明它）。
 #[test]
 fn the_calibration_event_is_owned_here() {
-    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert_eq!(
         frozen.event_cell(EVENT_MEMORY_CALIBRATED),
         Some((Entity::Memory, Verb::Asserted))
@@ -165,7 +165,7 @@ fn the_calibration_event_is_owned_here() {
 /// 回退视图在冻结表里，owner 是本插件（是否公开由 `PLUGIN.yml` 决定，不在这条判据里）。
 #[test]
 fn the_retreat_view_is_sealed_under_this_owner() {
-    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert!(frozen.view(SKILL_RETREAT).is_some());
     assert_eq!(frozen.view_owner(SKILL_RETREAT), Some(OWNER));
 }
@@ -193,7 +193,7 @@ fn only_low_confidence_skills_retreat() {
             Verb::Opened,
             "session/main",
         );
-        e.seq = Some(symbio_plugin_api::Seq::new(seq));
+        e.seq = Some(symbio_testkit::Seq::new(seq));
         e.ts = 1;
         e.payload = serde_json::json!({ "tag": SKILL_TAG, "skill_id": skill_id, "content": "答" });
         e
@@ -206,7 +206,7 @@ fn only_low_confidence_skills_retreat() {
             Verb::Asserted,
             "session/main",
         );
-        e.seq = Some(symbio_plugin_api::Seq::new(seq));
+        e.seq = Some(symbio_testkit::Seq::new(seq));
         e.ts = 1;
         e.payload = serde_json::json!({ "skill_id": skill_id, "fallback": fallback });
         e
@@ -368,7 +368,7 @@ fn the_calibration_view_emits_the_ledger_in_key_order() {
 /// 「生产二进制里读得到真数」由 e2e `t35` 钉。
 #[test]
 fn the_calibration_view_is_sealed_under_this_owner() {
-    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert!(frozen.view(SKILL_CALIBRATION).is_some());
     assert_eq!(frozen.view_owner(SKILL_CALIBRATION), Some(OWNER));
 }

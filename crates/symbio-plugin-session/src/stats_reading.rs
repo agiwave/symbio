@@ -218,7 +218,7 @@ fn fleet_of(
     let reports = symbio_plugin_api::reports::reports().ok()?;
     let report = reports.iter().find(|r| r.slot == slot)?;
     let fleet_render = report.fleet_render?;
-    let frozen = symbio_plugin_api::sealed_declarations().ok()?;
+    let frozen = symbio_sdk::declarations::sealed_declarations().ok()?;
     let mut merged = Vec::with_capacity(report.views.len());
     for name in report.views {
         let view = frozen.view(name)?;

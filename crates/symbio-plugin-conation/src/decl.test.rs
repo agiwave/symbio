@@ -11,7 +11,7 @@
 //! 不链接存储（也不许链接：HS-001），所以用例在构造后手工补序号——测的是**折叠**，不是入库。
 
 use super::*;
-use symbio_plugin_api::Seq;
+use symbio_testkit::Seq;
 
 const INITIATOR: &str = "session/autonomous";
 

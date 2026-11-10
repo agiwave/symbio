@@ -4335,6 +4335,7 @@ dependencies = [
  "symbio-plugin-api",
  "symbio-providers",
  "symbio-sdk",
+ "symbio-testkit",
  "tempfile",
  "time",
  "tokio",
@@ -4349,6 +4350,7 @@ dependencies = [
  "serde",
  "serde_json",
  "symbio-plugin-api",
+ "symbio-testkit",
  "tokio",
  "tracing",
 ]
@@ -4383,6 +4385,7 @@ dependencies = [
  "async-trait",
  "serde_json",
  "symbio-plugin-api",
+ "symbio-testkit",
  "tracing",
 ]
 
@@ -4427,6 +4430,7 @@ dependencies = [
  "serde_json",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-testkit",
  "tempfile",
  "time",
  "tokio",
@@ -4545,6 +4549,7 @@ dependencies = [
  "serde_json",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-testkit",
  "tempfile",
  "tokio",
  "tracing",
@@ -4567,6 +4572,7 @@ dependencies = [
  "symbio-plugin-api",
  "symbio-providers",
  "symbio-sdk",
+ "symbio-testkit",
  "tempfile",
  "time",
  "tokio",
@@ -4597,6 +4603,7 @@ dependencies = [
  "serde_json",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-testkit",
  "tempfile",
  "tokio",
 ]
@@ -4617,6 +4624,7 @@ dependencies = [
  "async-trait",
  "serde_json",
  "symbio-plugin-api",
+ "symbio-testkit",
 ]
 
 [[package]]
@@ -4673,6 +4681,7 @@ dependencies = [
  "shellexpand",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-testkit",
  "tempfile",
  "tokio",
  "tracing",
@@ -4686,6 +4695,7 @@ dependencies = [
  "async-trait",
  "serde_json",
  "symbio-plugin-api",
+ "symbio-testkit",
 ]
 
 [[package]]
@@ -4710,6 +4720,7 @@ dependencies = [
  "serde_json",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-testkit",
  "tempfile",
  "time",
  "tokio",
@@ -4746,6 +4757,7 @@ dependencies = [
  "shellexpand",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-testkit",
  "tempfile",
  "time",
  "tokio",

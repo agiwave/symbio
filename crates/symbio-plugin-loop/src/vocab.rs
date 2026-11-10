@@ -15,9 +15,10 @@ use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, Verb};
 use symbio_kernel::LatencyTier;
 
+use symbio_kernel::event::EVENT_RETRY;
 use symbio_plugin_api::drive::EVENT_DRIVER_STALLED;
 use symbio_plugin_api::rows::{declared_writes, ASK_KIND, PLUGIN_ROW, PORT_ACTOR};
-use symbio_plugin_api::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};
+use symbio_plugin_api::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_SENT};
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-loop";
 

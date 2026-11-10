@@ -5,7 +5,8 @@
 
 use super::*;
 use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED};
-use symbio_plugin_api::{Entity, EventStore, Seq, Store, Verb, PRINCIPAL_USER};
+use symbio_plugin_api::{Entity, Verb, PRINCIPAL_USER};
+use symbio_testkit::{EventStore, Seq, Store};
 
 fn encode(store: &EventStore, id: &str, content: &str, tag: &str, ts: i64) -> u64 {
     store

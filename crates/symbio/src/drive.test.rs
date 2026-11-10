@@ -12,8 +12,8 @@ use symbio_kernel::event::{Entity, Verb, OWNER_PRINCIPAL};
 use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginMeta, PluginPayload};
 use symbio_kernel::store::MemoryStore;
 use symbio_plugin_api::drive::{DriveKey, EVENT_DRIVER_STALLED};
-use symbio_plugin_api::fact_source::{Fact, FactSource};
 use symbio_plugin_api::{FactDraft, PluginInvokeResponse};
+use symbio_sdk::plugin::fact_source::{Fact, FactSource};
 
 /// 驱动 trait 的返回别名需要具体化载荷类型（与内核签名一致）。
 type Response = PluginInvokeResponse<PluginPayload>;
@@ -156,7 +156,7 @@ fn safety_valve_lands_one_mechanism_fact() {
 /// ——改归属必须同时改这条用例，那是显式的架构动作，不是一次顺手。
 #[test]
 fn stall_owner_comes_from_the_declaration_table() {
-    let frozen = symbio_plugin_api::sealed_declarations().expect("装配侧声明表必须冻结成立");
+    let frozen = symbio_sdk::declarations::sealed_declarations().expect("装配侧声明表必须冻结成立");
     assert_eq!(
         frozen.event_writer(EVENT_DRIVER_STALLED),
         Some(OWNER_PRINCIPAL),

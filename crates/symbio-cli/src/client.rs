@@ -304,7 +304,7 @@ impl SymbioClient {
         payload: T,
         sid: Option<&str>,
         addr: Option<&str>,
-        source: Option<Arc<dyn symbio::symbio_plugin_api::fact_source::FactSource>>,
+        source: Option<Arc<dyn symbio_sdk::plugin::fact_source::FactSource>>,
     ) -> Result<Value, String> {
         if route_log_enabled() {
             match addr {
@@ -319,7 +319,7 @@ impl SymbioClient {
             ctx.set(SESSION_ID, sid.to_string());
         }
         if let Some(source) = source {
-            ctx.set(symbio::symbio_plugin_api::fact_source::FACT_SOURCE, source);
+            ctx.set(symbio_sdk::plugin::fact_source::FACT_SOURCE, source);
         }
         ctx.set_payload(payload)
             .map_err(|e| format!("构造 {path} 载荷失败: {e}"))?;

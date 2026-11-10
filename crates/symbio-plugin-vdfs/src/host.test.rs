@@ -9,8 +9,9 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use symbio_plugin_api::{CapabilityRow, PluginError, PluginMeta, PluginSimpleRequest, Registry};
-use symbio_plugin_api::{VdfsActionResult, VdfsValidationError, VDFS_KIND_DIR};
+use symbio_plugin_api::{VdfsActionResult, VdfsValidationError};
 use symbio_providers::DefaultToolVisitor;
+use symbio_testkit::VDFS_KIND_DIR;
 
 fn ctx_with(payload: Value) -> Arc<dyn PluginInvokeRequest> {
     let ctx = Arc::new(PluginSimpleRequest::new(None, None));

@@ -3,7 +3,8 @@
 
 use serde_json::json;
 use symbio_plugin_api::events::{EVENT_MEMORY_ENCODED, EVENT_SESSION_CONFIG};
-use symbio_plugin_api::{Contributor, Entity, Event, Seq, SettleFace, Settling, Verb};
+use symbio_plugin_api::{Contributor, Entity, Event, SettleFace, Settling, Verb};
+use symbio_testkit::Seq;
 
 use super::SkillCompile;
 use crate::decl::SKILL_TAG;

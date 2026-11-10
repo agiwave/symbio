@@ -5,11 +5,9 @@
 
 use super::*;
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
-use symbio_plugin_api::fact_source::draft_into_event;
-use symbio_plugin_api::{
-    check_all, vocab, Entity, Event, EventStore, RecallLine, Seq, SettleFace, Store, Verb,
-    PRINCIPAL_USER,
-};
+use symbio_plugin_api::{vocab, Entity, Event, RecallLine, SettleFace, Verb, PRINCIPAL_USER};
+use symbio_testkit::fact_source::draft_into_event;
+use symbio_testkit::{check_all, EventStore, Seq, Store};
 
 /// 一份读数：`(seq, content, tag)` 列表 + 降级位。
 fn facts<'a>(lines: &'a [RecallLine<'a>], degraded: bool) -> RecallFacts<'a> {

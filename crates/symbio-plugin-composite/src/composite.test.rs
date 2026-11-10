@@ -388,11 +388,11 @@ async fn resource_tree_membership_is_derived_from_providers() {
 
 use std::path::{Path, PathBuf};
 use symbio_plugin_api::{
-    capability_option_fields, family, vdfs_context, PluginStopReason, Registry, VdfsContent,
-    VdfsRequest, VdfsResponse, OPTION_VISITOR, PLUGIN_FILE, TRAVERSE_AVAILABLE_OPTIONS,
-    TRAVERSE_AVAILABLE_TOOLS,
+    family, vdfs_context, PluginStopReason, Registry, VdfsContent, VdfsRequest, VdfsResponse,
+    OPTION_VISITOR, PLUGIN_FILE, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use symbio_providers::DefaultToolVisitor;
+use symbio_testkit::capability_option_fields;
 
 /// 一次性插件根：判据的来源是磁盘（装配位写在 `PLUGIN.yml`），不能拿内存替身测
 fn guard_root(tag: &str) -> PathBuf {

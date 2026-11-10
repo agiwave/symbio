@@ -10,8 +10,8 @@ use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
     VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR,
 };
-use symbio_plugin_api::fact_source::FACT_SOURCE;
 use symbio_sdk::keys::SESSION_ID;
+use symbio_sdk::plugin::fact_source::FACT_SOURCE;
 use symbio_sdk::vdfs::host::vdfs_host_ctx;
 
 impl SessionPlugin {

@@ -44,12 +44,12 @@ use symbio_kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
 use symbio_plugin_api::drive::{DriveKey, EVENT_DRIVER_STALLED};
-use symbio_plugin_api::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
 use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::keys::{AGENT_ID, MODE, RISK_LEVEL, SOURCE_PRINCIPAL, WORKDIR};
 use symbio_sdk::plugin::drive_entry::{
     declared_drive_entry, DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget,
 };
+use symbio_sdk::plugin::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
 
 use crate::Host;
 

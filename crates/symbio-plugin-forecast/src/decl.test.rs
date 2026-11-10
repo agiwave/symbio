@@ -25,7 +25,7 @@ fn protocol_rows() -> &'static [Decl] {
         symbio_plugin_api::EVENT_SENT,
         symbio_plugin_api::EVENT_RESPONSE,
         symbio_plugin_api::EVENT_FAILED,
-        symbio_plugin_api::EVENT_RETRY,
+        symbio_testkit::EVENT_RETRY,
     ] {
         let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
             source: name,
@@ -76,7 +76,7 @@ fn ev(kind: &str, task: &str) -> Event {
 /// 装配后按名字解析得到本 owner 的视图，且版本随 `ViewDecl` 走。
 #[test]
 fn the_view_resolves_through_the_process_assembly() {
-    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert_eq!(frozen.view_owner(FORECAST_REMAINING), Some(OWNER));
     assert_eq!(frozen.view(FORECAST_REMAINING).map(|v| v.ver), Some(1));
 }
@@ -97,7 +97,7 @@ fn the_view_reads_only_shared_task_events() {
 /// 而不是静默跳过、也不是判成缺口。
 #[test]
 fn reads_on_event_only_cells_are_reported_once() {
-    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
     let reported: Vec<&str> = frozen
         .assertion_reads()
         .iter()

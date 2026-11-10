@@ -25,7 +25,6 @@ use symbio_plugin_api::debt::{
 use symbio_plugin_api::drive::{
     DriveFact, DrivePayload, DriveRow, DriveRunner, DriveSupport, DRIVE_FAMILY,
 };
-use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::port::{
     PortExecHandles, PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter,
     PortPayload, PORT_FAMILY,
@@ -37,6 +36,7 @@ use symbio_plugin_api::SymbioKey;
 use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::capability::CAPABILITY_VISITOR;
 use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_ID, WORKDIR};
+use symbio_sdk::plugin::fact_source::FactSource;
 use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
 
 pub use symbio_plugin_api::drive::{DriveKey, DriveOutcome, DriveReport};
@@ -481,7 +481,7 @@ struct WorldWriter {
 /// 先查冻结表；只链接了部分插件的用例再查共享词汇表。两处都没有说明这条事实
 /// 在声明期就没有归属——写口**拒绝在落账时猜一个默认值**。
 fn declared_owner(kind: &str) -> &'static str {
-    symbio_plugin_api::sealed_declarations()
+    symbio_sdk::declarations::sealed_declarations()
         .ok()
         .and_then(|frozen| frozen.event_writer(kind))
         .or_else(|| {

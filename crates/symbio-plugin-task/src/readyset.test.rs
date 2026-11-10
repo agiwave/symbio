@@ -29,9 +29,8 @@ use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
     EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED, READYSET_VIEW,
 };
-use symbio_plugin_api::{
-    check_all, Entity, Event, EventStore, Seq, Store, Verb, PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER,
-};
+use symbio_plugin_api::{Entity, Event, Verb, PRINCIPAL_SCHEDULER};
+use symbio_testkit::{check_all, EventStore, Seq, Store, PRINCIPAL_MAIN};
 
 /// 开一个任务（载荷 `{ task_id, depends_on, goal }`——与 `todo_write` 落格的形状同构）。
 fn open_task(store: &EventStore, id: &str, depends_on: &[&str]) {
@@ -377,7 +376,7 @@ fn the_declared_view_is_readable_by_name_and_carries_no_capacity() {
     open_task(&store, "b", &["a"]);
     let snapshot = store.range(Seq::new(0));
 
-    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
     let view = frozen.view(READYSET_VIEW).expect("视图应在冻结声明表里");
     let by_name = (view.eval)(&snapshot, i64::MAX);
     assert_eq!(

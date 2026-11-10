@@ -7,7 +7,8 @@
 
 use super::*;
 use symbio_plugin_api::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
-use symbio_plugin_api::{EVENT_BUS_KIND_SYSTEM, EVENT_BUS_RESYNC_MARKER_TYPE};
+use symbio_plugin_api::EVENT_BUS_KIND_SYSTEM;
+use symbio_testkit::EVENT_BUS_RESYNC_MARKER_TYPE;
 
 const SID: &str = "chat-1";
 const SESSION_ADDR: &str = "root/session/chat-1";

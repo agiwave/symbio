@@ -4,8 +4,9 @@
 use serde_json::json;
 use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED};
 use symbio_plugin_api::{
-    Contribution, Contributor, Entity, Event, Seq, SettleFace, Settling, Verb, PRINCIPAL_USER,
+    Contribution, Contributor, Entity, Event, SettleFace, Settling, Verb, PRINCIPAL_USER,
 };
+use symbio_testkit::Seq;
 
 use super::super::decl::{ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG};
 use super::EpisodicEncode;

@@ -41,11 +41,11 @@ use symbio_kernel::plugin::{
 use symbio_kernel::present::{DetailDefinition, DetailField, DetailOption, DetailSection};
 use symbio_kernel::vdfs::{VdfsAccess, VdfsChange};
 use symbio_kernel::vdfs::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
-use symbio_plugin_api::fact_source::{FactSource, FACT_SOURCE};
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_providers::MemoryFile;
 use symbio_sdk::chat::session_chat;
 use symbio_sdk::keys::SESSION_ID;
+use symbio_sdk::plugin::fact_source::{FactSource, FACT_SOURCE};
 use symbio_sdk::plugin::{plugin_dir_from_ctx, PluginConfigFile, PluginDir, PLUGIN_FILE};
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 use tokio::sync::{Mutex, OnceCell, RwLock};

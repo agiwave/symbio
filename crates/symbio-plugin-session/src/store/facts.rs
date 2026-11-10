@@ -122,7 +122,7 @@ impl SessionStore {
         // 装载期缺口是**硬错**（D-396）：不许降级成「没有冻结表也照开」——那样写闸
         // 会退到共享词汇面，环的协议事实被 `OffGrid` 静默拒收，工具重复派发、债务
         // 永不收束（t46 的停摆链）。缺口在这里换成会话打不开。
-        let store = open_fact_store(&wal, symbio_plugin_api::sealed_declarations())?;
+        let store = open_fact_store(&wal, symbio_sdk::declarations::sealed_declarations())?;
         let store = Arc::new(store);
         cache.insert(session_id.to_string(), store.clone());
         Ok(Some(store))
@@ -199,7 +199,7 @@ impl SessionStore {
     pub(crate) fn fact_source(
         &self,
         session_id: &str,
-    ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
+    ) -> Result<Option<Arc<dyn symbio_sdk::plugin::fact_source::FactSource>>, String> {
         self.fact_source_bound(
             session_id,
             None,
@@ -224,7 +224,7 @@ impl SessionStore {
         sink: symbio_kernel::exec::ExecEventSink,
         supplements: Option<crate::transcript::supplements::SupplementDrain>,
         abort_signal: Arc<std::sync::RwLock<Option<symbio_kernel::exec::ExecAbortSignal>>>,
-    ) -> Result<Option<Arc<dyn symbio_plugin_api::fact_source::FactSource>>, String> {
+    ) -> Result<Option<Arc<dyn symbio_sdk::plugin::fact_source::FactSource>>, String> {
         // 会话目录不存在 = 没跑过 = **没有事实源**（缺省态，不是失败）。
         // 只读面（`session/changes` 等）必须能回答「这个会话还没有 WAL」，
         // 不能把「还没开幕」报成取不到主体。

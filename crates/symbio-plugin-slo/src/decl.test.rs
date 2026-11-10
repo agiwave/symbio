@@ -15,7 +15,7 @@
 //! 本文件里每个 `final_reply` / `fallback_reply` 的第一个「谁」参数就是那条 `user.message` 的 id。
 
 use super::*;
-use symbio_plugin_api::Seq;
+use symbio_testkit::Seq;
 
 const PRINCIPAL: &str = "session/main";
 

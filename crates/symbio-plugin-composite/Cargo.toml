@@ -30,6 +30,7 @@ inventory = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+symbio-testkit = { path = "../symbio-testkit" }
 symbio-sdk = { path = "../symbio-sdk" }
 # 与 `symbio-plugin-agent` 同一处境：这几条用例要的是**一整棵装配树**，而每个插件的
 # 工厂注册（`inventory`）只存在于它自己的 crate 里。crate 化（D-191）之后单 crate 的

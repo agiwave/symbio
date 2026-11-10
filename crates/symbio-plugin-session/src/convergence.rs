@@ -40,9 +40,9 @@ use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_GRANTED, EVENT_CHAT_ASSISTANT_FALLBACK,
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_ANSWER, EVENT_USER_MESSAGE,
 };
-use symbio_plugin_api::fact_source::FactSource;
 use symbio_plugin_api::FactDraft;
 use symbio_sdk::authz::PRINCIPAL_MAIN;
+use symbio_sdk::plugin::fact_source::FactSource;
 
 /// 会话运行态的一次变化。
 ///

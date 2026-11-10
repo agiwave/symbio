@@ -155,7 +155,10 @@ export const WHITELIST_BASELINE = 0
 // 会话侧读的是事实键（`usage` / `spend` / `reason`），全仓没有第二个读者，它们不再是
 // 跨插件词汇。留下的请求侧（`PromptMessage` / `PromptToolCall`）与 `dialog` 的三个消费方
 // 没变，所以这是一个**净减**，不是搬臂。
-export const SDK_BASELINE = 138
+// 138 → 131（`D-443`）：按「谁在用」压缩——`fact_source` 登记面五条的唯一插件消费方
+// 是控制面 session（owner），按 D-253 / D-428 分档走 session 的 sdk 限期豁免直取本体，
+// 不占扩展层门面计件；测试面消费不再续命（通道归 `symbio-testkit`）。
+export const SDK_BASELINE = 133
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。
@@ -182,7 +185,10 @@ export const SDK_BASELINE = 138
 // 141 → 116（`D-438`）：其中 24 条是 `llm` / `dialog` 迁进 `symbio-sdk` 之后换臂（名字、
 // 消费方都没动，见 `SDK_BASELINE` 的注），余下 1 条是 `D-437` 撤掉的模型行读口。
 // 语法臂「只许不涨」，下调是账本跟着实测走。
-export const GRAMMAR_BASELINE = 116
+// 116 → 108（`D-443`）：`Builder` / `EVENT_RETRY` / `EventStore` / `Store` /
+// `VDFS_KIND_DIR` / `Seq` 六条零生产消费方（全部消费方是插件测试面）——测试通道归
+// `symbio-testkit`，门面不再为测试夹具背书；`EVENT_RETRY` 控制面 loop 改取内核本体。
+export const GRAMMAR_BASELINE = 108
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。
@@ -202,7 +208,9 @@ export const GRAMMAR_BASELINE = 116
 // 13 → 14（D-416）：`reports` 模块随登记面整块搬进 sdk，一行放出报表的全部类型与读口；
 // 这是 D-278 要显式化的形状。`views` 没有上门面（零扩展消费方，HS-003）。
 // D-420 后 `chat_node` / `principal` 改由语法臂从内核转出：同两个名字换来源，条数不变。
-export const MODULE_REEXPORT_BASELINE = 14
+// 14 → 13（`D-443`）：`fact_source` 模块级转发随登记面五条一并退场（session 走豁免
+// 直取 sdk 本体）。
+export const MODULE_REEXPORT_BASELINE = 13
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
@@ -443,8 +451,16 @@ function dependenciesHas(toml, name) {
 
 /**
  * 扩展层插件真正引用到的门面符号（剥注释后）：`symbio_plugin_api::X` 与
- * `symbio_plugin_api::{A, B}` 两种形态。测试文件也算消费方——这里只判「这条出口有没有
- * 人用」，不判「只有测试在用」（后者归 C-003 的三档口径，不在这里复判）。
+ * `symbio_plugin_api::{A, B}` 两种形态。
+ *
+ * **测试文件不算消费方**（D-443）：门面条目的存续消费方是扩展层**生产**代码——
+ * 这与全仓公共面的统一口径一致（`core-export-audit` C-003 / `arch-shape-audit`：
+ * 测试文件与 `#[cfg(test)]` 模块都不算）。测试是插件的内部验证，不是它对外承诺的
+ * 依赖面；测试要用的宿主词汇走 `[dev-dependencies]` 直取来源 crate（先例：
+ * `composite` / `model` 的测试直取 sdk，D-253 的门面口径节）。此前本函数把
+ * `.test.rs` 也计入消费方，注释把「只有测试在用」的复判悬空委托给 C-003——
+ * 而门面从来不在 C-003 的扫描范围里，委托落空，测试面消费在给条目续命
+ * （实测 SDK 臂 138 条里有 7 条的生产消费为零）。
  */
 export function collectConsumers(root, pluginNames) {
   const used = new Set()
@@ -452,19 +468,33 @@ export function collectConsumers(root, pluginNames) {
     const srcDir = path.join(root, 'crates', name, 'src')
     if (!fs.existsSync(srcDir)) continue
     for (const f of walkRs(srcDir)) {
+      if (f.endsWith('.test.rs')) continue
       const code = stripRustCode(fs.readFileSync(f, 'utf8'))
-      for (const m of code.matchAll(/symbio_plugin_api::\{([^}]*)\}/g)) {
-        for (const raw of m[1].split(',')) {
+      // 统一两形态（D-443 收集器保真度）：
+      // ① `use symbio_plugin_api::<路径表达式>;`——花括号当分隔符拆 token，每段取
+      //    **叶子名**（嵌套花括号 `a::{b::{C}, D}` 因此不截断——旧写法 `[^}]*` 在内层
+      //    第一个 `}` 处停，同一条 use 里排在嵌套组之后的符号全部漏计，生产消费方
+      //    被误判成空转（假红））。
+      // ② 内联限定路径 `symbio_plugin_api::a::b::C`（表达式里直接写全路径）——每段
+      //    都算（模块转发放出整个命名空间，叶子名是它放出的名字之一；只计首段会把
+      //    经子模块路径消费的条目误判成空转）。
+      for (const m of code.matchAll(/use\s+symbio_plugin_api::([^;]+);/g)) {
+        for (const raw of m[1].split(/[{},]/)) {
           const parts = raw.trim().split(/\s+as\s+/)
           // 别名只是本地名，**被消费的是 `as` 前面那个门面符号**。`X as _` 尤其如此：
           // 它把 trait / 常量带进作用域只为调方法（`LlmAdapter as _`），旧实现取别名
           // 得到 `_`、把真正的消费方数丢，白名单条目被误判成空转（HS-003 假红）。
-          for (const s of [parts[0].trim(), parts.length > 1 ? parts[1].trim() : '']) {
-            if (s !== '_' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(s)) used.add(s)
+          for (const cand of [parts[0], parts.length > 1 ? parts[1] : '']) {
+            const leaf = cand.trim().split('::').filter(Boolean).pop()
+            if (leaf && leaf !== '_' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(leaf)) used.add(leaf)
           }
         }
       }
-      for (const m of code.matchAll(/symbio_plugin_api::([A-Za-z_][A-Za-z0-9_]*)/g)) used.add(m[1])
+      for (const m of code.matchAll(/symbio_plugin_api::([A-Za-z0-9_:]+)/g)) {
+        for (const seg of m[1].split('::').filter(Boolean)) {
+          if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(seg)) used.add(seg)
+        }
+      }
     }
   }
   return used
@@ -625,13 +655,18 @@ export function run(root) {
     )
   }
 
-  const used = collectConsumers(root, plugins.filter((p) => !CONTROL_PLANE.includes(p)))
+  // 消费方计数：**全部插件的生产代码**（扩展层 + 控制面），测试文件不续命（D-443）。
+  // 控制面 loop / session 也是插件、也经门面拿宿主面——它们的生产消费同样证明一条
+  // 出口不是空转；旧口径把它们排除，等于让「只被控制面用」的活条目永远过不了这关，
+  // 反过来又逼着控制面去挖 E-009 不允许的 sdk 直连。测试面不计（与 C-003 同尺）：
+  // 只被测试用的条目是空转，通道归 `symbio-testkit`（E-009 ⑥ 的测试设施公共出口）。
+  const used = collectConsumers(root, plugins)
   // 两臂都判：语法臂不计债，但同样不许有空转条目——它也是门面对插件的承诺。
   for (const s of [...wl, ...gram, ...sdk]) {
     if (used.has(s)) continue
     errors.push(
-      `门面白名单 \`${s}\` 在扩展层插件代码里零引用——HS-003：白名单每一条都要报得出消费方` +
-        '（与 C-003 同一把尺子），报不出的就是空转条目，删掉它',
+      `门面白名单 \`${s}\` 在插件生产代码里零引用——HS-003：白名单每一条都要报得出消费方` +
+        '（与 C-003 同一把尺子，测试面不续命），报不出的就是空转条目，删掉它',
     )
   }
 

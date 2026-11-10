@@ -15,7 +15,8 @@ use symbio_kernel::decl::Frozen;
 use symbio_kernel::event::{Event, EVENT_REQUEST};
 use symbio_kernel::{Entity, Verb};
 use symbio_plugin_api::rows::PORT_ACTOR;
-use symbio_plugin_api::{sealed_declarations, EVENT_SENT};
+use symbio_plugin_api::EVENT_SENT;
+use symbio_sdk::declarations::sealed_declarations;
 
 const NOTIFY: &str = "notify";
 

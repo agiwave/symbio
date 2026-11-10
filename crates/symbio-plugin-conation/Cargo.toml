@@ -21,4 +21,5 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+symbio-testkit = { path = "../symbio-testkit" }
 tokio = { workspace = true, features = ["macros", "rt"] }

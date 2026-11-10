@@ -384,16 +384,12 @@ async fn tool_call_markers_are_one_per_call_and_idempotent() {
     assert_eq!(markers[1].payload["call_id"], "wire-2");
 
     // 同一 `(request_id, call_id)` 重放：键相同 ⇒ 事实源吸收，只留一条。
-    let source =
-        symbio_kernel::store::MemoryStore::<symbio_plugin_api::fact_source::Fact>::default();
+    let source = symbio_kernel::store::MemoryStore::<symbio_testkit::fact_source::Fact>::default();
     for draft in markers.iter().chain(markers.iter()) {
-        let _ = symbio_plugin_api::fact_source::FactSource::append(
-            &source,
-            "model".into(),
-            draft.clone(),
-        );
+        let _ =
+            symbio_testkit::fact_source::FactSource::append(&source, "model".into(), draft.clone());
     }
-    let facts = symbio_plugin_api::fact_source::FactSource::facts(&source);
+    let facts = symbio_testkit::fact_source::FactSource::facts(&source);
     let marked: Vec<_> = facts
         .iter()
         .filter(|fact| fact.kind == "tool.call.requested")

@@ -23,7 +23,7 @@ fn protocol_rows() -> &'static [Decl] {
         symbio_plugin_api::EVENT_SENT,
         symbio_plugin_api::EVENT_RESPONSE,
         symbio_plugin_api::EVENT_FAILED,
-        symbio_plugin_api::EVENT_RETRY,
+        symbio_testkit::EVENT_RETRY,
     ] {
         let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
             source: name,
@@ -63,7 +63,7 @@ symbio_plugin_api::submit_declarations!(
 /// 后者是 `rework_bounded` 唯一认它的依据（D-203：读侧不抄名字）。
 #[test]
 fn the_task_event_resolves_through_the_process_assembly() {
-    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert_eq!(
         frozen.event_cell(EVENT_TASK_REWORK_CREATED),
         Some((Entity::Task, symbio_plugin_api::Verb::Asserted))

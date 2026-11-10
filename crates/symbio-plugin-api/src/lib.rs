@@ -15,7 +15,6 @@
 //! - [`text`]：Token 计量与头尾切分的**转发**（实现归 `symbio_sdk::text::tokenizer`，`D-404`）
 //! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）（转出，`D-413`）
 //! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）（转出，`D-413`）
-//! - [`fact_source`]：事实源的登记面（转出，`D-413`）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //!   与词汇读法（冻结机制住 sdk，回落表是 [`events`]，D-415）
@@ -62,7 +61,7 @@ pub mod vocab;
 // 模块名在根上一行转出，插件照旧写 `symbio_plugin_api::rows::…`。`text` 的实现住在
 // `symbio_sdk::text::tokenizer`，沿用它原来的门面名转出（`D-404`）。
 pub use symbio_sdk::plugin::reports;
-pub use symbio_sdk::plugin::{behaviors, context, effects, fact_source, retrieval, rows, settle};
+pub use symbio_sdk::plugin::{behaviors, context, effects, retrieval, rows, settle};
 pub use symbio_sdk::text::tokenizer as text;
 
 pub use context::{
@@ -71,6 +70,9 @@ pub use context::{
     RecallLine, SectionFit,
 };
 pub use declarations::{declared_event_cell, vocab};
+// `sealed_declarations` 的唯一插件消费方是控制面（loop 驱动器取冻结表；session 按其
+// sdk 限期豁免直取本体）——loop 没有 sdk 直连通道（E-009 只另许 kernel），门面是
+// loop 的唯一合法取径（D-443）。
 pub use symbio_sdk::declarations::sealed_declarations;
 // 驱动入口模块整块归 sdk（`D-413`），门面只留扩展层插件真正要的一条：`home` 的装配根
 // 登记。驱动句柄与解析口（`DriveEntry` / `DriveTarget` / `declared_drive_binding`）只有
@@ -80,10 +82,11 @@ pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,
 };
-pub use fact_source::{
-    declared_fact_source_opener, Fact, FactSource, FactSourceOpener, Principal, FACT_SOURCE,
-};
 pub use symbio_sdk::plugin::drive_entry::publish_deployment_root;
+// fact_source 登记面（`FactSource` / `FactSourceOpener` / `FACT_SOURCE` / `Fact` /
+// `declared_fact_source_opener`）不上门面（D-443）：唯一插件消费方是控制面 session
+// （owner），按 D-253 / D-428 分档走其 sdk 限期豁免直取本体；`Principal` 留下（扩展层在用）。
+pub use symbio_sdk::plugin::fact_source::Principal;
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
 // 提交宏随各自的注册表整块搬进 sdk（D-408 / D-412 / D-413）；门面在根上转出，
@@ -131,11 +134,11 @@ pub use symbio_kernel::capability::{
     CapabilityRow, Registry,
 };
 pub use symbio_kernel::chat::{chat_node, principal};
-pub use symbio_kernel::decl::{ring, Builder, FactDecl, PluginDeclarations, ViewDecl};
+pub use symbio_kernel::decl::{ring, FactDecl, PluginDeclarations, ViewDecl};
 pub use symbio_kernel::event::branch::{removed_ids, unselected_roots};
 pub use symbio_kernel::event::{
     event_output_text_node_id, ClosureReason, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
-    EVENT_RETRY, EVENT_SENT, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
+    EVENT_SENT, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
 pub use symbio_kernel::exec::{
     ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter, ABORT_SIGNAL, EVENT_SINK,
@@ -151,20 +154,18 @@ pub use symbio_kernel::present::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection,
 };
-pub use symbio_kernel::store::{EventStore, Store};
 pub use symbio_kernel::vdfs::{
     vdfs_derive_ext, vdfs_has_parent_segment, vdfs_path_within, DynVdfsProvider, VdfsAccess,
     VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsItem,
     VdfsListResponse, VdfsNewType, VdfsNode, VdfsParams, VdfsProvider, VdfsRequest, VdfsResponse,
     VdfsResult, VdfsValidationError, VdfsWriteResponse, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
     VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS, VDFS_ACTION_TEST, VDFS_EXT_FORM,
-    VDFS_EXT_ZIP, VDFS_KIND_DIR, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR,
-    VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_ACTIVE,
-    VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED, VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN,
-    VDFS_STATUS_WORKING,
+    VDFS_EXT_ZIP, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR, VDFS_PLUGINS_FIELD,
+    VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
+    VDFS_STATUS_FAILED, VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN, VDFS_STATUS_WORKING,
 };
 pub use symbio_kernel::{
-    ActorSpec, Entity, Event, EventDecl, FactRole, LatencyTier, Pattern, Scope, Seq, Verb,
+    ActorSpec, Entity, Event, EventDecl, FactRole, LatencyTier, Pattern, Scope, Verb,
 };
 pub use symbio_sdk::dialog::{
     ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
@@ -182,9 +183,9 @@ pub use symbio_kernel::capability::failure_kind;
 pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 pub use symbio_sdk::capability::{
     capability_announce_config_snapshot, capability_announce_configurable,
-    capability_configurables, capability_entry_of, capability_option_fields, capability_prompts,
-    capability_report_error, capability_take_errors, capability_to_wire, capability_vdfs_root,
-    CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR, SCOPE_TWIN,
+    capability_configurables, capability_prompts, capability_report_error, capability_take_errors,
+    capability_to_wire, capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
+    OPTION_VISITOR, SCOPE_TWIN,
 };
 pub use symbio_sdk::chat::chat_node::{message_of_node, AssistReply, AssistRequest, SEG_MESSAGES};
 pub use symbio_sdk::clock::clock_now_ms;
@@ -193,12 +194,11 @@ pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};
 pub use symbio_sdk::event_bus::{
     event_bus_build_envelope, event_bus_register_subscriber, event_bus_resync_of,
     event_bus_unregister_subscriber, event_bus_vdfs_change_of, EventBus, EventBusSubscribeRequest,
-    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
+    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS,
 };
-pub use symbio_sdk::invariants::check_all;
 pub use symbio_sdk::keys::{
-    AGENT_ID, MODE, PATH, PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
-    REQUIRED_PLUGINS, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
+    AGENT_ID, MODE, PATH, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID, REQUIRED_PLUGINS,
+    RISK_LEVEL, SESSION_ID, TOOL_CALL_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
 };
 pub use symbio_sdk::llm::round::{llm_emit_message, llm_removed_frame, llm_short_id};
 pub use symbio_sdk::plugin::{
