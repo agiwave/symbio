@@ -12,11 +12,11 @@
 use super::super::transcript::transcript;
 use super::{verify, PromptGap as Gap};
 use crate::event::{Entity, Event, Verb};
+use crate::llm::PromptMessage;
 use crate::test_fixtures::{
     CHAT, EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_REPORTED,
     EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE, MESSAGE,
 };
-use symbio_kernel::llm::prompt_message::PromptMessage;
 
 /// 一条送进模型的消息。
 ///

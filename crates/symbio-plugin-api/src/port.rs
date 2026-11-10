@@ -282,7 +282,7 @@ pub enum PortErrorClass {
 #[derive(Debug, Clone, Default)]
 pub struct PortReply {
     /// 应答消息（不透明承载；环只传递，不解释内容）。
-    pub messages: Vec<symbio_kernel::llm::PromptMessage>,
+    pub messages: Vec<symbio_sdk::llm::PromptMessage>,
     /// 应答配对：执行体内的调用键 → 应答里的配对键（环只按它配对）。
     pub links: Vec<(String, String)>,
 }

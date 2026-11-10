@@ -49,6 +49,7 @@ pub mod chat;
 pub mod clock;
 pub mod creator;
 pub mod declarations;
+pub mod dialog;
 pub mod embedding;
 pub mod event_bus;
 pub mod governance;

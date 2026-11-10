@@ -314,7 +314,7 @@ impl PromptReport {
 fn claim(
     rep: &mut PromptReport,
     used: &mut [bool],
-    messages: &[symbio_kernel::llm::PromptMessage],
+    messages: &[crate::llm::PromptMessage],
     text: &str,
     role: &str,
     kind: &str,
@@ -357,7 +357,7 @@ fn claim(
 fn claim_nodes(
     rep: &mut PromptReport,
     used: &mut [bool],
-    messages: &[symbio_kernel::llm::PromptMessage],
+    messages: &[crate::llm::PromptMessage],
     msgs: &[symbio_kernel::chat::chat_node::ChatNode],
     mutations: &super::mutations::MessageMutations,
     kind: &str,
@@ -383,7 +383,7 @@ fn claim_nodes(
 /// 名字由调用方在构造期交进来（`c` 对话面 / `m` 消息面，DE-024 D-203）。
 pub fn verify(
     events: &[Event],
-    messages: &[symbio_kernel::llm::PromptMessage],
+    messages: &[crate::llm::PromptMessage],
     declared: Option<&str>,
     c: &ChatVocab,
     m: &MessageVocab,

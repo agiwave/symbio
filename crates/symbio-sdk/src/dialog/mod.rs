@@ -62,7 +62,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::chat::ChatNode;
+use symbio_kernel::chat::chat_node::ChatNode;
 use crate::llm::PromptMessage;
 
 /// `classify` 的入参：这一轮发生了什么

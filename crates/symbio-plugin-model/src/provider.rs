@@ -19,7 +19,7 @@
 //!
 //! ## 判据（一件事只有一个 owner）
 //!
-//! - 内核 `symbio_kernel::llm` 只剩**数据词汇**（`RoundOutput` / `ModelFinishReason` /
+//! - 架构层不再有模型调用词汇：数据词汇（`RoundOutput` / `ModelFinishReason` /
 //!   `ModelUsage` / `ModelSpend` / `PromptMessage`），它们跨侧共用、不是「按世界命名的
 //!   trait」，`CS-001` 因此从五个内核 trait 收到四个；
 //! - 本 trait 不出本 crate：`pub(crate)` 都不需要，模块本身是私有的

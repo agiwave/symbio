@@ -12,13 +12,13 @@ use symbio_kernel::event::{
     Entity, Event, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
     EVENT_SENT,
 };
-use symbio_kernel::llm::PromptMessage;
 use symbio_kernel::view::Budget;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::vocab;
 use symbio_sdk::invariants::check_all;
+use symbio_sdk::llm::PromptMessage;
 use symbio_sdk::projection::prompt_fidelity::verify as verify_prompt_fidelity;
 use symbio_sdk::projection::transcript::transcript;
 

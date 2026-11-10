@@ -1,13 +1,13 @@
 //! `PromptMessage` —— 送给模型的一组消息的**最小结构化形态**。
 //!
-//! 它住在内核，理由与 [`RoundOutput`](crate::llm::round::RoundOutput) 同一条：这是模型接缝
-//! 的**输入词汇**。`LlmAdapter::generate` 的入参就是 `&[PromptMessage]`（core 的 port），
-//! 而投影（core）、措辞与判决（`compose` / `classify`）、工具循环（`loop`）、以及测试替身
-//! （`testkit`）都要能命名它——跨 crate 共享的**纯数据**，没有行为、没有机制。
-//! 语法进内核、机制留 core（D-188 / D-255）这条线，把它划在前者。
+//! 它住本层（`D-438` 由内核迁入），理由与 [`RoundOutput`](crate::llm::RoundOutput) 同一条：
+//! 这是模型接缝的**输入词汇**，跨插件共享的**纯数据**——投影、措辞与判决（`compose` /
+//! `classify`）、工具循环（`loop`）、以及测试替身都要能命名它，而它没有行为、没有机制。
 //!
-//! 线的这一侧只放形状：`TranscriptEntry → PromptMessage` 这类**从 core 的投影构造**的
-//! 转换留在 core（那是投影的知识，不是模型的词汇）。
+//! 它住内核的凭据原本只有「`D-188` C2b：语法 trait 的签名类型」这一条，`D-437` 把
+//! `ModelProvider` 退进 model 插件之后凭据消失（`kernel/src/lib.rs` 的抬头：内核只装
+//! 语法，词汇归 `symbio_sdk` 与各 owner）。本层只放形状：`TranscriptEntry → PromptMessage`
+//! 这类**从投影构造**的转换跟着投影走（那是投影的知识，不是模型的词汇）。
 
 use serde::{Deserialize, Serialize};
 

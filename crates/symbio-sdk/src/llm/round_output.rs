@@ -1,6 +1,6 @@
-//! 单轮 LLM 产物的**类型面**：`port.model` 一次往返交出来的那个值。
+//! 单轮 LLM 产物的**类型面**：`port.model` 一次往返交出来的那个值（`D-438` 由内核迁入）。
 //!
-//! 帧构造 / 发射与 id 原语是宿主行为，留在 `symbio_sdk::llm::round`。
+//! 帧构造 / 发射与 id 原语同属本层，在 [`super::round`]。
 
 use super::model::{ModelFinishReason, ModelSpend, ModelUsage};
 use serde_json::Value;

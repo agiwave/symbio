@@ -27,7 +27,7 @@ impl: done
 ## 契约
 
 入参 `ComposeRequest`，出参是 `String`（一段面向用户的文本），定义在
-[`symbio_kernel::dialog`](../symbio-kernel/src/dialog/mod.rs) ——
+[`symbio_sdk::dialog`](../symbio-sdk/src/dialog/mod.rs) ——
 契约跨插件（`session` 生产，本插件消费），故落在 core（D-023）。
 
 出参是文本而非枚举，与 `classify` 正好相反：**判决是给编排层执行的，措辞是给人看的。**

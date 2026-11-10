@@ -144,7 +144,13 @@ export const WHITELIST_BASELINE = 0
 // 读口 `capability_scope_twins` 只有控制面用，按 HS-003 不上门面。两条准入同样成立：
 // 常量不含任何能力名，声明方（agent 子作用域）与读方（session 装配）是两个消费方，
 // 且前缀形状归声明方——控制面不再按名字猜副本。
-export const SDK_BASELINE = 119
+// 119 → 143（`D-438`）：`llm` 与 `dialog` 两块词汇从内核迁进 `symbio-sdk`（内核里零读者，
+// 凭据只有一条已不存在的 trait）。门面上**同一个名字换了个住所**——24 条出口从语法臂
+// 搬到 SDK 臂，一条不是新增：`RoundOutput` / `RoundToolCallInfo` / `PromptMessage` /
+// `PromptToolCall` / `ModelFinishReason` / `ModelUsage` / `ModelSpend` 与 `dialog` 的
+// 判决 / 措辞契约，消费方一条没变（HS-003 照旧逐条核）。语法臂同批 −24，见
+// `GRAMMAR_BASELINE` 的注。这是「把读数改成真的」，不是放宽。
+export const SDK_BASELINE = 143
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。
@@ -168,7 +174,10 @@ export const SDK_BASELINE = 119
 // 139 → 141（`D-420`）：`chat_node` / `principal` 两个模块级条目从 SDK 臂换到语法臂。
 // 它们本来就是 `symbio-kernel` 的共享语法，此前经 sdk 的整模块转出才被记在 SDK 臂；
 // 同两个名字换主人，门面之外没有任何新增的可写路径。
-export const GRAMMAR_BASELINE = 141
+// 141 → 116（`D-438`）：其中 24 条是 `llm` / `dialog` 迁进 `symbio-sdk` 之后换臂（名字、
+// 消费方都没动，见 `SDK_BASELINE` 的注），余下 1 条是 `D-437` 撤掉的模型行读口。
+// 语法臂「只许不涨」，下调是账本跟着实测走。
+export const GRAMMAR_BASELINE = 116
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。

@@ -132,11 +132,6 @@ pub use symbio_kernel::capability::{
 };
 pub use symbio_kernel::chat::{chat_node, principal};
 pub use symbio_kernel::decl::{ring, Builder, FactDecl, PluginDeclarations, ViewDecl};
-pub use symbio_kernel::dialog::{
-    ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
-    Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
-    REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
-};
 pub use symbio_kernel::event::branch::{removed_ids, unselected_roots};
 pub use symbio_kernel::event::{
     event_output_text_node_id, ClosureReason, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
@@ -146,8 +141,6 @@ pub use symbio_kernel::exec::{
     ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter, ABORT_SIGNAL, EVENT_SINK,
 };
 pub use symbio_kernel::keys::SymbioKey;
-pub use symbio_kernel::llm::{ModelFinishReason, ModelSpend, ModelUsage};
-pub use symbio_kernel::llm::{PromptMessage, PromptToolCall, RoundOutput, RoundToolCallInfo};
 pub use symbio_kernel::plugin::error::{lock_read, lock_write};
 pub use symbio_kernel::plugin::{
     Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -173,6 +166,13 @@ pub use symbio_kernel::vdfs::{
 pub use symbio_kernel::{
     ActorSpec, Entity, Event, EventDecl, FactRole, LatencyTier, Pattern, Scope, Seq, Verb,
 };
+pub use symbio_sdk::dialog::{
+    ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
+    Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
+    REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
+};
+pub use symbio_sdk::llm::{ModelFinishReason, ModelSpend, ModelUsage};
+pub use symbio_sdk::llm::{PromptMessage, PromptToolCall, RoundOutput, RoundToolCallInfo};
 
 // ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core，D-258） ----
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、

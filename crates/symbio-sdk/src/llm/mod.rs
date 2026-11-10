@@ -1,11 +1,17 @@
-//! LLM 契约层 —— 模型服务的唯一契约面（协议无关、插件无关）。
+//! LLM 契约层 —— 模型往返的**词汇与共享帧原语**（协议无关、插件无关）。
 //!
-//! 模型往返的**数据词汇**住在内核（`D-188` C2b 的残留）：`ModelFinishReason` /
-//! `ModelUsage` / `ModelSpend` 在 `symbio_kernel::llm`，单轮产物 `RoundOutput` /
-//! `RoundToolCallInfo` 在 `symbio_kernel::llm::round`；执行契约 `ModelProvider`
-//! 已随 `D-437` 退回 model 插件（本层不再有模型端口）。本模块只留**有实现的共享帧原语**：
-//! `llm_emit_message` / `llm_message_frame` / `llm_removed_frame` 与 id 原语
-//! `llm_short_id`——它们的消费方在两个以上，且构造即约定（完整消息必带状态）。
+//! ## 为什么整块在这里，而不是内核（`D-438`）
+//!
+//! 这些类型（`RoundOutput` / `RoundToolCallInfo` / `PromptMessage` / `PromptToolCall` /
+//! `ModelFinishReason` / `ModelUsage` / `ModelSpend`）住内核的凭据原本只有一条：
+//! `D-188` C2b 说「封闭语法 trait 及其**签名类型**进内核」，而 `ModelProvider` 的签名里
+//! 全是它们。`D-437` 把那条 trait 退进 model 插件之后，凭据就不存在了——内核里
+//! **没有任何生产代码**再读这些名字（`dialog` 读 `PromptMessage`，而 `dialog` 自己
+//! 也在内核里零读者）。按 `kernel/src/lib.rs` 抬头的判据（内核只装语法，**词汇**归
+//! `symbio_sdk` 与各 owner），它们的归属是本层。
+//!
+//! 执行契约不在本层：`ModelProvider` 在 `crates/symbio-plugin-model/src/provider.rs`
+//! （模块私有，`D-437`），一次往返的执行面是 `port.model` 的执行体。
 //!
 //! **只被一个插件消费的部分不在本层**（D-023 的依赖方数量判据）：
 //! 落库视图与消息构造（`llm_build_assistant_messages` / `llm_build_tool_message` /
@@ -29,10 +35,19 @@
 //! 插件使用，按「依赖方数量」判据（D-023）住在
 //! 该插件内。本层只留**多消费方**共用的契约与数据结构。
 
+pub mod model;
+pub mod prompt_message;
 pub mod round;
+pub mod round_output;
 
 // `round` 是**子命名空间**，不是契约的对外地址：插件门面按符号取帧原语与 id 原语。
 // 这三个在本层根上转出一次，`symbio_sdk::llm::round::…` 留给本 crate 内部与 core 的
 // 往返编排用。（名字取「一次往返」这个词而不是容器词：扩展面连内部路径都不用容器词，
 // EX-008 的路径段豁免因此只剩 `D-259` 那一条，见 `D-436`。）
 pub use round::{llm_emit_message, llm_removed_frame, llm_short_id};
+
+/// 模型往返的**数据词汇**在本层根上转出一次：插件的导入路径不必认识 `model` /
+/// `round_output` / `prompt_message` 三个子模块（`D-438`——它们与帧原语同属一次往返）。
+pub use model::*;
+pub use prompt_message::*;
+pub use round_output::*;
