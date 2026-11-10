@@ -254,12 +254,6 @@
       "evidence": "docs/003-design/001-核心架构.md"
     },
     {
-      "symbol": "tool_metas",
-      "path": "crates/symbio-sdk/src/capability/collect.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
-    },
-    {
       "symbol": "capability_resolve",
       "path": "crates/symbio-sdk/src/capability/tool_name.rs",
       "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
@@ -274,8 +268,8 @@
     {
       "symbol": "verify",
       "path": "crates/symbio-sdk/src/projection/prompt_fidelity.rs",
-      "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/001-核心架构.md"
+      "why": "契约实现：会话 WAL 测试的 prompt 保真度复核判据——core 只出让 `verify` / `transcript` 两个纯函数给测试复核（生产运行器不直调，属合法契约实现）",
+      "evidence": "crates/symbio-plugin-session/src/store/wal.test.rs"
     },
     {
       "symbol": "closes_as_final",

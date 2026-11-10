@@ -152,9 +152,6 @@ pub(crate) fn require_agent_scope(
 // 见 `symbio_sdk::capability::CapabilityError`：写侧是任意参与 traverse 的插件，
 // 读侧是 session 编排方（orchestrator 在收集结束后 `capability_take_errors` 统一裁决）。
 
-// 读侧助手 `tool_metas` 的实现住 core（[`symbio_sdk::capability::collect::tool_metas`]）：loop
-// 切出后它也是驱动器的读点，跨插件共用同一条口径（D-086 §7）。
-
 // ==================== 选项收集机制（宿主侧） ====================
 //
 // 本段原是旧 core 的 `capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是

@@ -24,7 +24,7 @@ use symbio_kernel::capability::*;
 // 域外消费方（C-003），`pub struct` 留在子模块里由本域自用。`CapabilityError`
 // 同理不出本域：读侧经 `capability_take_errors` 的返回类型推断拿到它，
 // 无需实名（字段 `plugin` / `message` 直接可读）。
-pub use collect::{tool_metas, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR};
+pub use collect::{CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR};
 pub use error::{
     capability_init_error_bucket, capability_report_error, capability_take_errors,
     CAPABILITY_ERRORS,

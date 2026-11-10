@@ -1,4 +1,4 @@
-//! 收集管线：三条收集**通道**的键，与读侧助手。
+//! 收集管线：三条收集**通道**的键。
 //!
 //! ## 为什么三条通道而不是一张表
 //!
@@ -13,23 +13,21 @@
 //! 只留机制与通用词汇键。键名（`tool_visitor` / `option_visitor` /
 //! `configurable_visitor`）是 `ctx` 上的外部协议面，**不随搬迁而变**。
 //!
-//! 读侧助手（[`tool_metas`]）原先住 session 的 `capabilities.rs`，四个读点共用
-//! （LLM 工具面 / 请求级开销估算 / 闸门声明位 / 线上名解析）。
-//! [D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §7 上移 core：驱动器切成
-//! 独立插件后，工具面读取在 session 与 loop 两侧都要用。
+//! 读侧不再设统一的「工具清单助手」：工具清单读点各自直走
+//! `Registry::list(family::TOOL)`（LLM 工具面 / 请求级开销估算 / 闸门声明位 /
+//! 线上名解析），口径即 `Registry` 本身，无需第二层包装（D-086 §7 的上移裁决
+//! 在 D-440 终态下收敛为「读点直连」，helper 于 `60cedd50` 后零调用，正式删除）。
 //!
-//! 顺序 = 注册顺序（D-057），调用方不得重排；取不到收集器落空表。
+//! 顺序 = 注册顺序（D-057），调用方不得重排。
 
 use std::sync::Arc;
 
-use symbio_kernel::capability::{family, CapabilityMeta};
 use symbio_kernel::keys::SymbioKey;
-use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// 能力收集器 Key —— 第一条收集**通道**（能力 = 可调用对象）
 ///
 /// 写侧是全体插件（`traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播时容器把收集器实例
-/// 挂上 ctx）；读侧是 [`tool_metas`]。
+/// 挂上 ctx）；读侧读点直走 `Registry::list(family::TOOL)`。
 pub struct CapabilityVisitorKey;
 impl SymbioKey for CapabilityVisitorKey {
     type Value = Arc<dyn symbio_kernel::capability::Registry>;
@@ -88,15 +86,3 @@ impl SymbioKey for ConfigurableVisitorKey {
     }
 }
 pub const CONFIGURABLE_VISITOR: ConfigurableVisitorKey = ConfigurableVisitorKey;
-
-pub async fn tool_metas(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<CapabilityMeta> {
-    match ctx.get(CAPABILITY_VISITOR) {
-        Some(visitor) => visitor
-            .list(family::TOOL)
-            .await
-            .into_iter()
-            .map(|row| row.meta())
-            .collect(),
-        None => Vec::new(),
-    }
-}
