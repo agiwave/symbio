@@ -28,7 +28,7 @@ const ENGINE = 'crates/symbio-plugin-loop/src/ring/engine.rs'
 const DRIVE = 'crates/symbio/src/drive.rs'
 const TURN = 'crates/symbio-plugin-session/src/plugin/turn.rs'
 
-/** 与基线等量的干净夹具：0 行 / 1 通道 / 1 处全量读。 */
+/** 与基线等量的干净夹具：0 行 / 1 通道 / 0 处全量读。 */
 function cleanFiles() {
   const decl = `    Decl {\n        name: "row",\n        prio: 1,\n    },\n`
   return {
@@ -36,7 +36,8 @@ function cleanFiles() {
     [ENGINE]:
       'struct CollectingWriter {\n    outlet: PortFactEmit,\n    collected: Mutex<Vec<FactDraft>>,\n}\n',
     [DRIVE]: 'fn d() { let _ = facts.range(Seq::new(head - 1)); }\n',
-    [TURN]: 'fn f() { let _ = facts.range(Seq::new(0)); }\n',
+    // 续读不带全量：基线已收到 0，夹具必须同档，否则「干净夹具」本身就成了变宽用例。
+    [TURN]: 'fn f() { let _ = facts.range(Seq::new(head)); }\n',
     // 夹具里的行常量：证明 `Decl {` 只有在 loop 源码里才进读数。
     'crates/symbio-plugin-session/src/rows.rs': `pub(crate) const TABLE: &[Decl] = &[\n${decl}];\n`,
   }
@@ -125,7 +126,7 @@ test('EL-003：多一处全量读 ⇒ 红（两种写法都算）', () => {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /EL-003/)
-    assert.match(r.out, /1 → 2/)
+    assert.match(r.out, /0 → 1/)
   } finally {
     box.cleanup()
   }

@@ -61,11 +61,12 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
  * 环不再自持行表；任何一行 `Decl {` 回到 loop 就是引擎又把行收回来了。
  * `channels = 1`：`CollectingWriter` 只有一条跨 await 累积的 `collected: Mutex<…>`；
  * 同步返回的端口结果不是通道。
- * `fullScans = 1`：驱动 / 回合路径只剩 `session/plugin/turn.rs` 的终答投影读一次全量
- * （按 `scope` 找终答事实，事实面没有「按实体取一条」以外的入口）；`ring/engine.rs`
- * 只读当前站的 `FactView`，`crates/symbio/src/drive.rs` 按 `head - 1` 续读，都不从 0 扫。
+ * `fullScans = 0`：驱动 / 回合路径三处（`ring/engine.rs`、`crates/symbio/src/drive.rs`、
+ * `session/plugin/turn.rs`）都不再从 0 扫全量——终答投影随会话基底改写为按 `scope`
+ * 读视图，`ring/engine.rs` 只读当前站的 `FactView`，`drive.rs` 按 `head - 1` 续读。
+ * 基线已随实测收到 0：留着的余量会被下一次新增正好填进来。
  */
-const BASELINE = { rows: 0, channels: 1, fullScans: 1 }
+const BASELINE = { rows: 0, channels: 1, fullScans: 0 }
 
 const LOOP_SRC = 'crates/symbio-plugin-loop/src'
 const DISPATCH = 'crates/symbio-plugin-loop/src/ring/engine.rs'
