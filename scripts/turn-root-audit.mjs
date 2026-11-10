@@ -81,6 +81,9 @@ const FACE_DEFS = [
     label: '事实 / 视图 / 行名',
     roots: ['crates'],
     exts: ['.rs', '.yml'],
+    // 两条内核角色名（`FinalizesTurn` / `StopsTurn`）实测已为 0：改名随 `D-318` 落成
+    // `FinalizesScope` / `StopsScope`。写法留在正则里是**防回潮**——有人把旧名写回来
+    // 时该红，而不是「名字删了就没人记得它长什么样」。
     pattern:
       /\bturn\.(?:stage|dispatch|dispatched|supplemented|branch|branch_selected|recalled|closed|head|stages|slice|embryo)\b|\bEntity::Turn\b|\b(?:FinalizesTurn|StopsTurn)\b|\b(?:turn_head|turn_closed|turn_slice|turn_stages|turn_recalled|final_unique_per_turn)\b|\b(?:close|prepare|continue)-turn\b/g,
   },

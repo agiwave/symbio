@@ -16,7 +16,7 @@
 //! - **内核不认识业务事件名**（DE-024 D-203 / D-204）：内核的两张表只留封闭语法——Entity×Verb
 //!   网格与协议五格。名字要跨插件就登记进清单，不要回内核加行（CS-005 / CS-007）。
 //! - **角色跟着投影**：`FactRole` 是 owner 交给守卫的陈述；跨插件共享的名字若只投影
-//!   「名字 + 格位」，读角色的守卫（`FinalizesTurn` / `StopsTurn` / …）在只链接本 crate
+//!   「名字 + 格位」，读角色的守卫（`FinalizesScope` / `StopsScope` / …）在只链接本 crate
 //!   的进程里就会静默失效。`SHARED_EVENTS` 因此逐行带上 owner 声明里的角色。
 //!
 //! # 命名
@@ -152,7 +152,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::host(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← tool
     EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Scope, Verb::Asserted)), // authz.granted ← tool
     EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Scope, Verb::Closed)), // chat.assistant.fallback ← session
-    EventDecl::host_with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesTurn]), // chat.assistant.final ← session
+    EventDecl::host_with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesScope]), // chat.assistant.final ← session
     EventDecl::new(EVENT_CLASSIFY_ANSWERED, (Entity::Verdict, Verb::Asserted)), // classify.answered ← classify
     EventDecl::new(EVENT_CLASSIFY_ESCALATE, (Entity::Verdict, Verb::Asserted)), // classify.escalate ← classify
     EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← agent

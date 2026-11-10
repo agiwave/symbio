@@ -636,7 +636,7 @@ fn roles_come_from_the_declaration_row() {
     const PARTIAL: &[EventDecl] = &[EventDecl::with_roles(
         "fixture.final",
         (Entity::Scope, Verb::Closed),
-        &[FactRole::FinalizesTurn],
+        &[FactRole::FinalizesScope],
     )];
     let mut b = Builder::empty();
     b.declare(
@@ -651,13 +651,13 @@ fn roles_come_from_the_declaration_row() {
         },
     );
     let frozen = b.seal(&[]).expect("只交事件行也能冻结");
-    assert!(frozen.holds_role("fixture.final", FactRole::FinalizesTurn));
+    assert!(frozen.holds_role("fixture.final", FactRole::FinalizesScope));
     assert!(
-        !frozen.holds_role("fixture.final", FactRole::StopsTurn),
+        !frozen.holds_role("fixture.final", FactRole::StopsScope),
         "角色取自这一行，不是「同格就算」"
     );
     assert!(
-        !frozen.holds_role("fixture.absent", FactRole::FinalizesTurn),
+        !frozen.holds_role("fixture.absent", FactRole::FinalizesScope),
         "表上没有的名字不扮演任何东西"
     );
 }

@@ -49,7 +49,7 @@ const HEADER = `//! 跨插件事件名常量 —— **由 \`scripts/facts/events
 //! - **内核不认识业务事件名**（DE-024 D-203 / D-204）：内核的两张表只留封闭语法——Entity×Verb
 //!   网格与协议五格。名字要跨插件就登记进清单，不要回内核加行（CS-005 / CS-007）。
 //! - **角色跟着投影**：\`FactRole\` 是 owner 交给守卫的陈述；跨插件共享的名字若只投影
-//!   「名字 + 格位」，读角色的守卫（\`FinalizesTurn\` / \`StopsTurn\` / …）在只链接本 crate
+//!   「名字 + 格位」，读角色的守卫（\`FinalizesScope\` / \`StopsScope\` / …）在只链接本 crate
 //!   的进程里就会静默失效。\`SHARED_EVENTS\` 因此逐行带上 owner 声明里的角色。
 //!
 //! # 命名
@@ -67,10 +67,10 @@ const DECL_RE =
  */
 const CELL_RE = /\(\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*Entity::([A-Za-z0-9_]+)\s*,\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*Verb::([A-Z][A-Za-z0-9_]*)\s*\)/
 /**
- * 声明处的**角色**：`&[FactRole::FinalizesTurn, …]`。
+ * 声明处的**角色**：`&[FactRole::FinalizesScope, …]`。
  *
  * 角色必须跟着格位一起投影到共享表上。理由是可判的：写闸判 I1「每轮至多一条 final」
- * 靠的是 `is_turn_final`，而它读的正是 `FactRole::FinalizesTurn`。迁移期内核 `CELLS`
+ * 靠的是 `is_turn_final`，而它读的正是 `FactRole::FinalizesScope`。迁移期内核 `CELLS`
  * 那第三臂替所有名字答了这一问，那一臂删掉之后，共享表若只投影名字 + 格位，
  * 「这一轮已经答完了」就会静默失效——闸门不报错，它只是不再拦。
  */

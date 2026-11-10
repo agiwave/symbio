@@ -51,8 +51,8 @@ pub const EVENTS: &[EventDecl] = &[
     EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
 ];
 pub const ROLES: &[FactRole] = &[
-    FactRole::FinalizesTurn,
-    FactRole::StopsTurn,
+    FactRole::FinalizesScope,
+    FactRole::StopsScope,
     FactRole::DeclaresBudget,
     FactRole::CountsRework,
 ];
@@ -181,8 +181,8 @@ pub const EVENTS: &[EventDecl] = &[
     EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
 ];
 pub const ROLES: &[FactRole] = &[
-    FactRole::FinalizesTurn,
-    FactRole::StopsTurn,
+    FactRole::FinalizesScope,
+    FactRole::StopsScope,
     FactRole::DeclaresBudget,
 ];
 `,
@@ -202,8 +202,8 @@ pub const EVENTS: &[EventDecl] = &[
 `,
       'crates/symbio-plugin-loop/src/control_decl.test.rs': `use symbio_sdk::{FactRole};
 pub const ROLES: &[FactRole] = &[
-    FactRole::FinalizesTurn,
-    FactRole::StopsTurn,
+    FactRole::FinalizesScope,
+    FactRole::StopsScope,
     FactRole::DeclaresBudget,
     FactRole::CountsRework,
 ];

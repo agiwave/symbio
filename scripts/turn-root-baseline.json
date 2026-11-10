@@ -6,8 +6,8 @@
       "test": 179
     },
     "F2": {
-      "prod": 21,
-      "test": 11
+      "prod": 11,
+      "test": 4
     },
     "F3": {
       "prod": 0,
@@ -25,8 +25,13 @@
   "adjustments": [
     {
       "date": "2026-11-10",
+      "faces": "F2.prod / F2.test",
+      "reason": "`D-318`（B2）表里最后一对内核角色名落地：`FinalizesTurn` / `StopsTurn` → `FinalizesScope` / `StopsScope`（`finalizes_scope` / `stops_scope`），角色名不落 WAL、无 alias。F2 生产面 21 → 11、测试面 11 → 4 为**实测收窄**；同批删掉 `pending` 的两条——它们的 `until` 写的是「随 Entity 裁决一并改名」，而 `Entity::Turn` 早在 `D-317` 就删了，条目一直在等一个已经发生过的条件。目标 0 不变。"
+    },
+    {
+      "date": "2026-11-10",
       "faces": "F2.test",
-      "reason": "`5b950295`（D-432）把「每档 `FactRole` 都有人住」从装配口挪到整仓判据 `CS-011`，内核那条用例里逐档点名的三条角色断言（`FinalizesTurn` / `StopsTurn`）随 `Frozen::unmanned_roles` 一并退场，F2 测试面实测 14 → 11 为**实测收窄**。TR-002 要的是同批降基线——那次漏了，本批补上；目标 0 不变。"
+      "reason": "`5b950295`（D-432）把「每档 `FactRole` 都有人住」从装配口挪到整仓判据 `CS-011`，内核那条用例里逐档点名的三条角色断言（`FinalizesScope` / `StopsScope`）随 `Frozen::unmanned_roles` 一并退场，F2 测试面实测 14 → 11 为**实测收窄**。TR-002 要的是同批降基线——那次漏了，本批补上；目标 0 不变。"
     },
     {
       "date": "2026-11-09",
@@ -36,7 +41,7 @@
     {
       "date": "2026-11-08",
       "faces": "F2.prod",
-      "reason": "D-390 拆名：`authz.denied` 与 model 语音键拒因分开，共享声明里的 `StopsTurn` 随生成物退场一处，角色只落在 owner 私有的 `model.speech.denied` 声明（其余两面不变）。F2 生产面实测 22 → 21 为**实测收窄**；目标 0 不变。"
+      "reason": "D-390 拆名：`authz.denied` 与 model 语音键拒因分开，共享声明里的 `StopsScope` 随生成物退场一处，角色只落在 owner 私有的 `model.speech.denied` 声明（其余两面不变）。F2 生产面实测 22 → 21 为**实测收窄**；目标 0 不变。"
     },
     {
       "date": "2026-11-08",
@@ -96,7 +101,7 @@
     {
       "date": "2026-11-04",
       "faces": "F1.prod / F1.test / F2.prod / F2.test",
-      "reason": "D-317（B1a）落地：`Entity::Turn` 变体删除、全仓改挂 `Entity::Scope`，信封 `turn` 字段改名 `scope`，行判据键随视图改 `scope`。F1 1454/1208 → 1271/870、F2 188/560 → 114/264 全部为实测收窄；F2 余量不是实体词（`Entity::Turn` 实测 0），而是内核角色名（`FinalizesTurn` / `StopsTurn`）与老层视图名（`turn_head` / `turn_stages` / `turn_closed` 等），归 B2。"
+      "reason": "D-317（B1a）落地：`Entity::Turn` 变体删除、全仓改挂 `Entity::Scope`，信封 `turn` 字段改名 `scope`，行判据键随视图改 `scope`。F1 1454/1208 → 1271/870、F2 188/560 → 114/264 全部为实测收窄；F2 余量不是实体词（`Entity::Turn` 实测 0），而是内核角色名（`FinalizesScope` / `StopsScope`）与老层视图名（`turn_head` / `turn_stages` / `turn_closed` 等），归 B2。"
     }
   ],
   "allow": [
@@ -106,22 +111,6 @@
       "pattern": "turn:\\s*NODE_KIND_SKELETON",
       "reason": "存量快照/旧转写的读边界折叠（数据迁移通道，不是展示保留）；存量清迁后基线降 0 并删本条",
       "until": "B3 后存量清迁"
-    }
-  ],
-  "pending": [
-    {
-      "face": "F2",
-      "file": "crates/symbio-kernel/src/event/mod.rs",
-      "pattern": "FinalizesTurn",
-      "reason": "内核角色名，随 Entity 裁决一并改名",
-      "until": "Entity 裁决落地"
-    },
-    {
-      "face": "F2",
-      "file": "crates/symbio-kernel/src/event/mod.rs",
-      "pattern": "StopsTurn",
-      "reason": "内核角色名，随 Entity 裁决一并改名",
-      "until": "Entity 裁决落地"
     }
   ]
 }

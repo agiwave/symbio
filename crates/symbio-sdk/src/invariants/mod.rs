@@ -83,14 +83,14 @@ impl Violation {
 
 /// 这一条是**停机事实**吗（C6 的口径：它得回答「这一轮为什么停」）？
 ///
-/// 收束格整格算（那上面的每一条都宣称本轮结束了）+ 收束闸的否定事实（`stops_turn`
+/// 收束格整格算（那上面的每一条都宣称本轮结束了）+ 收束闸的否定事实（`stops_scope`
 /// 角色——被拒不产生收束格，但它同样是一次停）。
 /// 产物格不是停——一工具结果落格后轮还在走，「为什么停」的答案在收束格上
 /// （DE-015 §4.3 判据 10 点名的就是这两种格）。拿结算尺去问停机，
 /// 就会向生产要一个它永远写不出的字段。
 pub fn is_stop_fact(vocab: &[EventDecl], e: &Event) -> bool {
     (e.entity == Entity::Scope && e.verb == Verb::Closed)
-        || holds_role(vocab, &e.kind, FactRole::StopsTurn)
+        || holds_role(vocab, &e.kind, FactRole::StopsScope)
 }
 
 /// 单事件的 I2 判据：`Some` = 这条**声明**缺溯源，写侧应拒绝它。
@@ -336,7 +336,7 @@ fn declared_budget_of(e: &Event) -> Option<u64> {
 /// ## 判定范围
 ///
 /// `turn × closed` 的两种格（`chat.assistant.final` / `chat.assistant.fallback`）
-/// 加上带 `StopsTurn` 角色的否定事实（拒绝不产生收束格，但它同样是一次"停"）。
+/// 加上带 `StopsScope` 角色的否定事实（拒绝不产生收束格，但它同样是一次"停"）。
 /// 具体名字由 owner 声明决定，这里只读角色（D-390：拒因已按写方拆成私有名）。
 /// 闭集由 [`symbio_kernel::event::ClosureReason::ALL`] 派生，**不在这里另写一份**——两处各写一份，
 /// 加一个新原因时就会出现"写侧合法、读侧报红"的两套绿。
@@ -350,7 +350,7 @@ fn declared_budget_of(e: &Event) -> Option<u64> {
 /// 但「整段放宽」是条**没有边界**的宽限：写方从今天起每条都带 `reason`，而一条
 /// 新落的格漏了 `reason`，在整段放宽下永远绿——判据 10 因此在生产里没有执行方
 /// （口径 ③）。宽限的边界改成日志自己说：第一条带 `reason` 的停机格
-/// （收束格或 `stops_turn` 角色）就是分界，**它之前**是历史归档段（放宽），**它之后**
+/// （收束格或 `stops_scope` 角色）就是分界，**它之前**是历史归档段（放宽），**它之后**
 /// 每一条都必须带。这个位置不需要常量、不需要日期——写方一旦开始写 `reason`，
 /// 之后的缺口就不可能再是历史造成的。整条日志一个 `reason` 都没有 ⇒ 分界落在末尾，
 /// 与旧行为逐字等价（纯历史存档不飘红）。

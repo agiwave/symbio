@@ -11,7 +11,7 @@
 //! 会话按格位 + 载荷的语音键认停（`ChatVocab::denies_speech`）。
 //!
 //! 格位是 `(Scope, Asserted)`：对外是一轮里的普通世界事实，收束与否由读者按自己的
-//! 判据决定（债表只问存在性）。语音键拒因同样落在这一格，但带 `StopsTurn` 角色——
+//! 判据决定（债表只问存在性）。语音键拒因同样落在这一格，但带 `StopsScope` 角色——
 //! 它是"这一轮为什么停"。
 
 use symbio_plugin_api::{Entity, EventDecl, FactRole, Verb};
@@ -22,7 +22,7 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-model";
 /// 模型侧的语音键拒因：**本插件私有**（D-390）。
 ///
 /// 拆名前它与工具侧的授权拒因共用 `authz.denied`。拆开后它只描述「本轮终答被
-/// 写侧闸拒」——这**是一次停轮**（不落 `final`，轮照样了结），因此带 `StopsTurn`
+/// 写侧闸拒」——这**是一次停轮**（不落 `final`，轮照样了结），因此带 `StopsScope`
 /// 与 `reason`；会话投影按格位 + `key = chat.assistant.final` 认它。
 pub(crate) const EVENT_MODEL_SPEECH_DENIED: &str = "model.speech.denied";
 
@@ -33,7 +33,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::with_roles(
         EVENT_MODEL_SPEECH_DENIED,
         (Entity::Scope, Verb::Asserted),
-        &[FactRole::StopsTurn],
+        &[FactRole::StopsScope],
     ),
 ];
 

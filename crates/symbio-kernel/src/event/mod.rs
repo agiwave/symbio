@@ -49,11 +49,11 @@ pub type Cell = (Entity, Verb);
 /// 正是 J3 点名的失效形状。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactRole {
-    /// 本轮的**定稿发言**（同格还有兜底格，它不算定稿）。
-    FinalizesTurn,
-    /// 回答「这一轮为什么停」的否定事实（收束格之外唯一的一档）。
-    StopsTurn,
-    /// 本轮预算档的声明来源（C5 的读数从这里取）。
+    /// 本 scope 的**定稿发言**（同格还有兜底格，它不算定稿）。
+    FinalizesScope,
+    /// 回答「这个 scope 为什么停」的否定事实（收束格之外唯一的一档）。
+    StopsScope,
+    /// 本 scope 预算档的声明来源（C5 的读数从这里取）。
     DeclaresBudget,
     /// 同一任务的**重做轮**（`rework_bounded` 的计数对象——终止前提）。
     CountsRework,
@@ -63,8 +63,8 @@ impl FactRole {
     /// 缺口报告里点名用的稳定拼写（与枚举变体一一对应，不参与判定）。
     pub const fn as_str(self) -> &'static str {
         match self {
-            FactRole::FinalizesTurn => "finalizes_turn",
-            FactRole::StopsTurn => "stops_turn",
+            FactRole::FinalizesScope => "finalizes_scope",
+            FactRole::StopsScope => "stops_scope",
             FactRole::DeclaresBudget => "declares_budget",
             FactRole::CountsRework => "counts_rework",
         }
@@ -72,8 +72,8 @@ impl FactRole {
 
     /// 闭集全集：`CS-011` 逐档查居住（整仓判，判据不靠装配口），新加一档自动进检查面。
     pub const ALL: &'static [FactRole] = &[
-        FactRole::FinalizesTurn,
-        FactRole::StopsTurn,
+        FactRole::FinalizesScope,
+        FactRole::StopsScope,
         FactRole::DeclaresBudget,
         FactRole::CountsRework,
     ];

@@ -17,7 +17,7 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-tool";
 /// 工具侧的授权拒因：**本插件私有**（D-390）。
 ///
 /// 拆名前它与 model 的语音键拒因共用 `authz.denied`——一个名字两个写方。拆开后
-/// 本插件这份只描述「这一笔调用没放行」：它**不是停轮事实**，因此不带 `StopsTurn`
+/// 本插件这份只描述「这一笔调用没放行」：它**不是停轮事实**，因此不带 `StopsScope`
 /// （C6 不再向它要 `reason`）。会话投影按格位 + 语音键认停，不按这个名字取。
 pub(crate) const EVENT_AUTHZ_DENIED: &str = "authz.denied";
 

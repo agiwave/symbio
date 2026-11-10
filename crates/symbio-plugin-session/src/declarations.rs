@@ -116,11 +116,11 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 消费插件（classify / compact / compose / cost / hook / model / tool …）的折叠与
     // 投影；名字经本插件 `PLUGIN.yml` 的 `shared_events` 投影成生成常量。
     EventDecl::new("chat.assistant.fallback", (Entity::Scope, Verb::Closed)),
-    // 终答：`FinalizesTurn` 是「这一轮已经答完」的唯一判据（`is_turn_final`）。
+    // 终答：`FinalizesScope` 是「这一轮已经答完」的唯一判据（`is_turn_final`）。
     EventDecl::host_with_roles(
         "chat.assistant.final",
         (Entity::Scope, Verb::Closed),
-        &[FactRole::FinalizesTurn],
+        &[FactRole::FinalizesScope],
     ),
     EventDecl::new("chat.assistant.opening", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("chat.assistant.progress", (Entity::Scope, Verb::Progressed)),

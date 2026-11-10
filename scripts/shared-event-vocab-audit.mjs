@@ -119,7 +119,7 @@ function productionPluginSources(root) {
 
 /** 四档角色各被哪些生产文件持有（`DE-024` D-203 的居住账）。 */
 function roleResidents(root) {
-  const roles = ['FinalizesTurn', 'StopsTurn', 'DeclaresBudget', 'CountsRework']
+  const roles = ['FinalizesScope', 'StopsScope', 'DeclaresBudget', 'CountsRework']
   const residents = new Map(roles.map((r) => [r, []]))
   for (const abs of productionPluginSources(root)) {
     const text = fs.readFileSync(abs, 'utf8')

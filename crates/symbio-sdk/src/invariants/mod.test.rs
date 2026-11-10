@@ -650,12 +650,12 @@ fn a_stop_fact_is_a_grid_cell_or_a_declared_role() {
     const VOCAB: &[EventDecl] = &[EventDecl::with_roles(
         "fixture.denied",
         (Entity::Scope, Verb::Asserted),
-        &[FactRole::StopsTurn],
+        &[FactRole::StopsScope],
     )];
     let denied = pending("d-1", "fixture.denied", Entity::Scope, Verb::Asserted, 1);
     assert!(
         is_stop_fact(VOCAB, &denied),
-        "声明了 stops_turn 的新名字就是停机事实"
+        "声明了 stops_scope 的新名字就是停机事实"
     );
     // 收束格整格算，不看名字（第一臂与词汇无关）。
     assert!(is_stop_fact(
