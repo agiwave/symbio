@@ -14,7 +14,7 @@ use super::*;
 /// 节点 id 与 wire id 分离：节点 id 稳定，wire id 保留 provider 原值。
 #[test]
 fn empty_id_delta_does_not_overwrite_real_id() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     let (node1, wire1, _, _, snapshot1) = acc.process_delta(
         0,
         Some("call_8f3a59f5f8e14258a427e432"),
@@ -52,7 +52,7 @@ fn empty_id_delta_does_not_overwrite_real_id() {
 /// 落库用的是后者，不一致会使工具结果子节点变孤儿。wire id 为 None，请求构建回退节点 id。
 #[test]
 fn missing_id_gets_stable_generated_guid() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     let (stream_id, wire, _, _, _) =
         acc.process_delta(0, None, Some("vdfs_list"), Some("{\"path\": \".\"}"));
     assert!(!stream_id.is_empty(), "流式期间即应有非空节点 id");
@@ -74,7 +74,7 @@ fn missing_id_gets_stable_generated_guid() {
 /// 纯空白 id 视为"不合法"，与缺失同等对待。
 #[test]
 fn whitespace_id_treated_as_missing() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     let (node_id, _, _, _, _) = acc.process_delta(0, Some("   "), None, Some("{}"));
     assert!(!node_id.trim().is_empty());
 }
@@ -82,7 +82,7 @@ fn whitespace_id_treated_as_missing() {
 /// 空串 name 不得覆盖首个增量的合法 name（与 id 同理）。
 #[test]
 fn empty_name_delta_does_not_overwrite_real_name() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     acc.process_delta(0, Some("call_x"), Some("cmd.exe"), Some(""));
     acc.process_delta(0, Some(""), Some(""), Some("{}"));
 
@@ -96,7 +96,7 @@ fn empty_name_delta_does_not_overwrite_real_name() {
 /// 同一批工具的执行顺序在两次运行间漂移。
 #[test]
 fn parallel_tool_calls_keep_separate_ids() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     acc.process_delta(0, Some("call_a"), Some("f1"), Some("{}"));
     acc.process_delta(1, Some("call_b"), Some("f2"), Some("{}"));
 
@@ -113,7 +113,7 @@ fn parallel_tool_calls_keep_separate_ids() {
 /// 乱序到达的分片同样按 index 收口（真实流里 index 可能先 1 后 0）。
 #[test]
 fn finish_sorts_by_wire_index() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     acc.process_delta(2, Some("call_c"), Some("f3"), Some("{}"));
     acc.process_delta(0, Some("call_a"), Some("f1"), Some("{}"));
     acc.process_delta(1, Some("call_b"), Some("f2"), Some("{}"));
@@ -138,9 +138,9 @@ fn finish_sorts_by_wire_index() {
 /// 的工具调用会更新到第一轮的老节点。
 #[test]
 fn reused_wire_id_across_turns_yields_distinct_node_ids() {
-    let mut turn1 = TurnToolCallAccumulator::default();
+    let mut turn1 = RoundToolCallAccumulator::default();
     let (node1, _, _, _, _) = turn1.process_delta(0, Some("call_0"), Some("f"), Some("{}"));
-    let mut turn2 = TurnToolCallAccumulator::default();
+    let mut turn2 = RoundToolCallAccumulator::default();
     let (node2, wire2, _, _, _) = turn2.process_delta(0, Some("call_0"), Some("f"), Some("{}"));
 
     assert_eq!(wire2, "call_0");
@@ -151,7 +151,7 @@ fn reused_wire_id_across_turns_yields_distinct_node_ids() {
 /// 必须视为 `{}` 且**不得**标记 parse_error，否则无参工具会被误拒。
 #[test]
 fn empty_arguments_treated_as_empty_object() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     acc.process_delta(0, Some("call_e"), Some("vdfs_list"), Some(""));
     acc.process_delta(1, Some("call_w"), Some("vdfs_list"), Some("   "));
 
@@ -166,7 +166,7 @@ fn empty_arguments_treated_as_empty_object() {
 /// 合法 JSON 参数照常解析，parse_error 为 None。
 #[test]
 fn valid_arguments_parse_without_error() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     acc.process_delta(
         0,
         Some("call_v"),
@@ -184,7 +184,7 @@ fn valid_arguments_parse_without_error() {
 /// 静默 `{}` 会让工具报「缺少必填参数」，模型看不懂原因便原样重试。
 #[test]
 fn truncated_arguments_flagged_not_silently_emptied() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     let raw = r#"{"command": "cargo test"#;
     acc.process_delta(0, Some("call_t"), Some("cmd"), Some(raw));
 
@@ -203,7 +203,7 @@ fn truncated_arguments_flagged_not_silently_emptied() {
 /// 「整条替换」与「尾部追加」两种语义，接收端不必按节点类型去猜。
 #[test]
 fn only_first_args_fragment_requires_snapshot() {
-    let mut acc = TurnToolCallAccumulator::default();
+    let mut acc = RoundToolCallAccumulator::default();
     let (_, _, args1, _, snap1) =
         acc.process_delta(0, Some("call_s"), Some("vdfs_read"), Some("{\"pa"));
     let (_, _, args2, _, snap2) = acc.process_delta(0, None, None, Some("th\": \".\"}"));
@@ -232,7 +232,7 @@ fn only_first_args_fragment_requires_snapshot() {
 #[test]
 fn retry_seeds_the_node_ids_of_the_failed_attempt() {
     let seeded = vec!["node-a".to_string(), "node-b".to_string()];
-    let mut acc = TurnToolCallAccumulator::with_node_ids(&seeded);
+    let mut acc = RoundToolCallAccumulator::with_node_ids(&seeded);
 
     let (node0, _, _, _, snap0) =
         acc.process_delta(0, Some("call_a"), Some("f1"), Some(r#"{"n":1}"#));
@@ -254,7 +254,7 @@ fn retry_seeds_the_node_ids_of_the_failed_attempt() {
 /// 的幽灵，执行层照它们发请求，provider 侧于是报「tool_call 无对应结果」。
 #[test]
 fn seeded_slots_without_new_deltas_do_not_become_ghost_calls() {
-    let mut acc = TurnToolCallAccumulator::with_node_ids(&["n0".into(), "n1".into(), "n2".into()]);
+    let mut acc = RoundToolCallAccumulator::with_node_ids(&["n0".into(), "n1".into(), "n2".into()]);
 
     // 这一批只产出 1 个调用
     acc.process_delta(0, Some("call_a"), Some("f1"), Some("{}"));
@@ -268,7 +268,7 @@ fn seeded_slots_without_new_deltas_do_not_become_ghost_calls() {
 /// 播种条目**单独**存在（一个增量都没收到）时，收口产物为空——不得凭空产出调用。
 #[test]
 fn seeded_accumulator_with_no_delta_yields_nothing() {
-    let acc = TurnToolCallAccumulator::with_node_ids(&["n0".into(), "n1".into()]);
+    let acc = RoundToolCallAccumulator::with_node_ids(&["n0".into(), "n1".into()]);
     assert!(
         acc.finish().is_empty(),
         "播种只是预留 id 槽位，本身不是调用"
@@ -282,7 +282,7 @@ fn seeded_accumulator_with_no_delta_yields_nothing() {
 /// 前端按 id 的 map 撞键，后端两条节点显示成同一条）。
 #[test]
 fn blank_seed_ids_are_ignored() {
-    let mut acc = TurnToolCallAccumulator::with_node_ids(&["   ".into(), "".into(), "n2".into()]);
+    let mut acc = RoundToolCallAccumulator::with_node_ids(&["   ".into(), "".into(), "n2".into()]);
 
     // 三个播种位里只有 `n2` 非空 ⇒ 它落在（非空序号 0 =）index 0 上。
     let (node, _, _, _, _) = acc.process_delta(0, Some("call_x"), Some("f"), Some("{}"));

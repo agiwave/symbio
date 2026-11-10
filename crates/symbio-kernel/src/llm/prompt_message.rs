@@ -1,6 +1,6 @@
 //! `PromptMessage` —— 送给模型的一组消息的**最小结构化形态**。
 //!
-//! 它住在内核，理由与 [`TurnOutput`](crate::llm::turn::TurnOutput) 同一条：这是模型接缝
+//! 它住在内核，理由与 [`RoundOutput`](crate::llm::round::RoundOutput) 同一条：这是模型接缝
 //! 的**输入词汇**。`LlmAdapter::generate` 的入参就是 `&[PromptMessage]`（core 的 port），
 //! 而投影（core）、措辞与判决（`compose` / `classify`）、工具循环（`loop`）、以及测试替身
 //! （`testkit`）都要能命名它——跨 crate 共享的**纯数据**，没有行为、没有机制。

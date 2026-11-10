@@ -5,7 +5,7 @@
 //! - [`ModelProtocol`]：插件私有的协议适配钩子实现（`Arc<dyn ModelProtocol>`）。
 //!
 //! 完整单轮行为（`round_trip` 五态机、`effective_context_tokens` 收敛）由本
-//! 类型实现，`TurnOutput` → `PluginError` 的映射固定为：
+//! 类型实现，`RoundOutput` → `PluginError` 的映射固定为：
 //! - `Aborted` → `PluginError::Aborted`；
 //! - `RetryWithoutContextId` → `plugin_warn!` + 同名错误（半截流由 chat_loop 重试分支以
 //!   `status = removed` 的删除帧清除）；
@@ -26,7 +26,7 @@ use symbio_plugin_api::chat_node::ChatNode;
 use symbio_plugin_api::plugin_error;
 use symbio_plugin_api::plugin_info;
 use symbio_plugin_api::plugin_warn;
-use symbio_plugin_api::TurnOutput;
+use symbio_plugin_api::RoundOutput;
 use symbio_plugin_api::{
     llm_removed_frame, CapabilityMeta, ExecEnv, ExecEventSink, ModelProvider, PluginError,
 };
@@ -53,7 +53,7 @@ impl BoundProvider {
 /// 没有真正收到增量 ⇒ 那些卡片再没有人认领，会永远停在时间线上。
 ///
 /// 判据只有一条：在 `seeded` 里、不在 `kept` 里。`kept` 是本批真正收口的调用
-/// （[`TurnOutput::tool_calls`] 由累积器的 `finish()` 产出，只含 `touched`），它们
+/// （[`RoundOutput::tool_calls`] 由累积器的 `finish()` 产出，只含 `touched`），它们
 /// 照常留给工具执行与落库；本批新出现、未经播种的 id 不在 `seeded` 里，因此不会
 /// 被误删。
 ///
@@ -108,7 +108,7 @@ impl ModelProvider for BoundProvider {
         tools: &[CapabilityMeta],
         root_id: &str,
         env: &ExecEnv,
-    ) -> Result<TurnOutput, PluginError> {
+    ) -> Result<RoundOutput, PluginError> {
         // 执行期环境（出口 + 中止）由调用方一次给全，协议层只管自己的流。
         let sink = env.sink();
         let abort = env.abort();
@@ -230,7 +230,7 @@ impl ModelProvider for BoundProvider {
         // 上游明确拒绝，原样重发只会再被拒，白等 N 次。
         const MAX_STREAM_RETRIES: u32 = 2;
         let mut stream_attempt: u32 = 0;
-        let mut out = TurnOutput::default();
+        let mut out = RoundOutput::default();
         let mut reuse_node_ids: Vec<String> = Vec::new();
         loop {
             match parse_sse_stream(

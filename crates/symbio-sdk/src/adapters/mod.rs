@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::chat::chat_node::ChatNode;
 use symbio_kernel::llm::PromptMessage;
-use symbio_kernel::llm::{ModelFinishReason, TurnToolCallInfo};
+use symbio_kernel::llm::{ModelFinishReason, RoundToolCallInfo};
 use symbio_kernel::llm::{ModelSpend, ModelUsage};
 
 // ── 四层时延（[DE-001 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，一等契约） ──
@@ -110,7 +110,7 @@ impl std::fmt::Display for AdapterError {
 ///
 /// 工具调用与正文是**同一次响应**的两面（模型要么答话、要么要工具），分两处返回
 /// 必然要回答"哪个是权威"——而答案是两个都不是：**一次响应 = 一个产物**。
-/// `tool_calls` 复用 core 既有的 [`TurnToolCallInfo`]：那是 provider 边界上已在用的
+/// `tool_calls` 复用 core 既有的 [`RoundToolCallInfo`]：那是 provider 边界上已在用的
 /// 类型，另立一个必然要写映射，两处形状必然漂移。
 #[derive(Debug, Clone, Default)]
 pub struct LlmTurn {
@@ -120,7 +120,7 @@ pub struct LlmTurn {
     ///
     /// 为什么必须带到端口面上：判「本轮是不是答了」的那一处只看得到 `text`，而
     /// reasoning 模型常常**只有思考没有正文**就把话说完（v1 早为此立了
-    /// `TurnOutput::is_reasoning_only / effective_text`）。思考只经流式桥走另一条路，
+    /// `RoundOutput::is_reasoning_only / effective_text`）。思考只经流式桥走另一条路，
     /// 端口返回体里没有它 ⇒ 判据把「想清楚了但没复述」读成「什么也没答」⇒ 整轮
     /// 落兜底格，实测表现为界面上只剩一串连续思考、既无正文也无解释。
     ///
@@ -128,7 +128,7 @@ pub struct LlmTurn {
     /// 但判据不得把「text 空」直接读成「无产出」——两样都空才是无产出。
     pub reasoning: String,
     /// 模型**请求**的工具调用（尚未执行）；空 = 本轮收束（落 final）。
-    pub tool_calls: Vec<TurnToolCallInfo>,
+    pub tool_calls: Vec<RoundToolCallInfo>,
     /// 这一次响应的**结束原因**（provider 原样归一化，见 [`ModelFinishReason`]）。
     ///
     /// 为什么必须带到端口面上：判「这一轮的思考算不算回答」的那一处（运行器末轮收束）
@@ -264,7 +264,7 @@ pub trait LlmAdapter: Send + Sync {
         let out = self.generate_timed(tok, messages).await?;
         // 一次性全文也是**一帧**：节点身份仍由「产出方」给出（本默认实现即产出
         // 方，故在此铸造）；展示层只按它建节点，不另铸。
-        sink.on_delta(&crate::llm::turn::llm_short_id(), &out.0);
+        sink.on_delta(&crate::llm::round::llm_short_id(), &out.0);
         Ok(out)
     }
 

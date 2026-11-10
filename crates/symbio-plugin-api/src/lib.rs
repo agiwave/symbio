@@ -147,7 +147,7 @@ pub use symbio_kernel::exec::{
 };
 pub use symbio_kernel::keys::SymbioKey;
 pub use symbio_kernel::llm::{ModelFinishReason, ModelProvider, ModelSpend, ModelUsage};
-pub use symbio_kernel::llm::{PromptMessage, PromptToolCall, TurnOutput, TurnToolCallInfo};
+pub use symbio_kernel::llm::{PromptMessage, PromptToolCall, RoundOutput, RoundToolCallInfo};
 pub use symbio_kernel::plugin::error::{lock_read, lock_write};
 pub use symbio_kernel::plugin::{
     Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -204,7 +204,7 @@ pub use symbio_sdk::keys::{
     AGENT_ID, MODE, PATH, PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
     REQUIRED_PLUGINS, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
 };
-pub use symbio_sdk::llm::turn::{llm_emit_message, llm_removed_frame, llm_short_id};
+pub use symbio_sdk::llm::round::{llm_emit_message, llm_removed_frame, llm_short_id};
 pub use symbio_sdk::plugin::{
     plugin_dir_from_ctx, plugin_expand_tilde_path, PluginConfigFile, PluginConfigMount, PluginDir,
     PluginEntry, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED,

@@ -1,14 +1,14 @@
 //! LLM 契约层 —— 模型服务的唯一契约面（协议无关、插件无关）。
 //!
 //! 契约类型住在内核（D-188 C2b）：`ModelProvider` / `ModelFinishReason` / `ModelUsage`
-//! 在 `symbio_kernel::llm`，单轮产物 `TurnOutput` / `TurnToolCallInfo` 在
-//! `symbio_kernel::llm::turn`。本模块只留**有实现的共享帧原语**：
+//! 在 `symbio_kernel::llm`，单轮产物 `RoundOutput` / `RoundToolCallInfo` 在
+//! `symbio_kernel::llm::round`。本模块只留**有实现的共享帧原语**：
 //! `llm_emit_message` / `llm_message_frame` / `llm_removed_frame` 与 id 原语
 //! `llm_short_id`——它们的消费方在两个以上，且构造即约定（完整消息必带状态）。
 //!
 //! **只被一个插件消费的部分不在本层**（D-023 的依赖方数量判据）：
 //! 落库视图与消息构造（`llm_build_assistant_messages` / `llm_build_tool_message` /
-//! `TurnStreamChildIds` / `TurnOutput` 的三个方法）在 `crates/symbio-plugin-loop/src/message_build.rs`，
+//! `RoundStreamChildIds` / `RoundOutput` 的三个方法）在 `crates/symbio-plugin-loop/src/message_build.rs`，
 //! 增量帧 `llm_emit_delta` 在 `crates/symbio-plugin-model/src/stream.rs`。留守的三个导出
 //! （`llm_emit_message` / `llm_removed_frame` / `llm_short_id`）逐个都有两个以上消费方
 //! （`llm_message_frame` 是登记在案的例外）。
@@ -18,7 +18,7 @@
 //! ```text
 //! session ──────────────▶ ModelProvider trait（symbio_kernel::llm）
 //! model  ── BoundProvider 实现 ModelProvider
-//!        ── round_trip 内部消费 turn 的帧原语与 TurnOutput
+//!        ── round_trip 内部消费 turn 的帧原语与 RoundOutput
 //! ```
 //!
 //! **只有一侧认的东西都不在这里**：HTTP 重试机器与 SSE 流循环
@@ -28,10 +28,10 @@
 //! 插件使用，按「依赖方数量」判据（D-023）住在
 //! 该插件内。本层只留**多消费方**共用的契约与数据结构。
 
-pub mod turn;
+pub mod round;
 
-// `turn` 是**子命名空间**，不是契约的对外地址：插件门面按符号取帧原语与 id 原语，
-// 路径里不该出现「一轮」这个词——那是控制面的容器概念（D-252 的 EX-008 判的就是
-// 扩展面的这条边界）。所以这三个在本层根上转出一次，`symbio_sdk::llm::turn::…`
-// 留给本 crate 内部与 core 的轮次编排用。
-pub use turn::{llm_emit_message, llm_removed_frame, llm_short_id};
+// `round` 是**子命名空间**，不是契约的对外地址：插件门面按符号取帧原语与 id 原语。
+// 这三个在本层根上转出一次，`symbio_sdk::llm::round::…` 留给本 crate 内部与 core 的
+// 往返编排用。（名字取「一次往返」这个词而不是容器词：扩展面连内部路径都不用容器词，
+// EX-008 的路径段豁免因此只剩 `D-259` 那一条，见 `D-436`。）
+pub use round::{llm_emit_message, llm_removed_frame, llm_short_id};

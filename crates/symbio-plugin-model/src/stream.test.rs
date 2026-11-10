@@ -15,10 +15,10 @@ use super::{
     MAX_TOOL_CALLS_PER_RESPONSE,
 };
 use crate::protocols::ModelProtocolEvent;
-use crate::tool_accumulator::TurnToolCallAccumulator;
+use crate::tool_accumulator::RoundToolCallAccumulator;
 use std::sync::Mutex;
 use symbio_plugin_api::chat_node::ChatNode;
-use symbio_plugin_api::{ExecEventSink, ExecTranscriptWriter, TurnOutput};
+use symbio_plugin_api::{ExecEventSink, ExecTranscriptWriter, RoundOutput};
 
 /// 录制帧的转写写入器：数「ToolCall 节点」的快照帧用了几个不同 id。
 struct RecordingWriter(pub Mutex<Vec<ChatNode>>);
@@ -31,8 +31,8 @@ impl ExecTranscriptWriter for RecordingWriter {
 }
 
 async fn feed_call(
-    acc: &mut TurnToolCallAccumulator,
-    out: &mut TurnOutput,
+    acc: &mut RoundToolCallAccumulator,
+    out: &mut RoundOutput,
     sink: &ExecEventSink,
     idx: usize,
     args: &str,
@@ -59,8 +59,8 @@ async fn feed_call(
 /// 主判据（反馈语义）：超限的调用不失败、不上 UI；收口时带丢弃标记。
 #[tokio::test]
 async fn calls_beyond_the_cap_are_marked_dropped_with_feedback_not_failed() {
-    let mut acc = TurnToolCallAccumulator::default();
-    let mut out = TurnOutput::default();
+    let mut acc = RoundToolCallAccumulator::default();
+    let mut out = RoundOutput::default();
     let sink = ExecEventSink::silent();
 
     // 超限批次（上限 + 5）全部放行：不再整轮 Err——模型必须拿到反馈而不是断流。
@@ -104,8 +104,8 @@ async fn calls_beyond_the_cap_are_marked_dropped_with_feedback_not_failed() {
 /// 超限调用的**UI 抑制**：33 个调用的响应只上线 32 个 ToolCall 节点（防刷屏）。
 #[tokio::test]
 async fn ui_nodes_are_not_created_for_calls_beyond_the_cap() {
-    let mut acc = TurnToolCallAccumulator::default();
-    let mut out = TurnOutput::default();
+    let mut acc = RoundToolCallAccumulator::default();
+    let mut out = RoundOutput::default();
     let writer = std::sync::Arc::new(RecordingWriter(Mutex::new(Vec::new())));
     let sink = ExecEventSink::direct(writer.clone());
 
@@ -137,8 +137,8 @@ async fn ui_nodes_are_not_created_for_calls_beyond_the_cap() {
 /// 反向：上限内的多调用响应（含同名不同参）不受影响——守卫只拦数量，不拦正常批次。
 #[tokio::test]
 async fn a_healthy_multi_call_response_passes() {
-    let mut acc = TurnToolCallAccumulator::default();
-    let mut out = TurnOutput::default();
+    let mut acc = RoundToolCallAccumulator::default();
+    let mut out = RoundOutput::default();
     let sink = ExecEventSink::silent();
 
     for idx in 0..10 {

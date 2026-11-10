@@ -83,7 +83,7 @@ pub(crate) async fn append_and_publish(
     for message in &persisted {
         mgr.transcript_apply(
             session_id,
-            symbio_sdk::llm::turn::llm_message_frame(message),
+            symbio_sdk::llm::round::llm_message_frame(message),
         )
         .await;
     }

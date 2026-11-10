@@ -2,8 +2,8 @@
 
 pub mod model_provider;
 pub mod prompt_message;
-pub mod turn;
+pub mod round;
 
 pub use model_provider::*;
 pub use prompt_message::*;
-pub use turn::*;
+pub use round::*;

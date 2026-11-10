@@ -28,8 +28,8 @@ use symbio_plugin_api::text::{default_tokenizer, HeuristicTokenizer, Tokenizer};
 use symbio_plugin_api::{
     llm_short_id, removed_ids, unselected_roots, CapabilityMeta, CapabilityRow, ClosureReason,
     Entity, ExecEnv, ExecEventSink, ExecTranscriptWriter, FactDraft, ModelFinishReason,
-    ModelProvider, PluginError, PluginInvokeRequestExt, PromptMessage, TurnOutput,
-    TurnToolCallInfo, Verb, EVENT_FAILED, EVENT_RESPONSE,
+    ModelProvider, PluginError, PluginInvokeRequestExt, PromptMessage, RoundOutput,
+    RoundToolCallInfo, Verb, EVENT_FAILED, EVENT_RESPONSE,
 };
 
 /// 本插件服务的端口名（提供者自己定义；契约层不认识它）。
@@ -927,7 +927,7 @@ fn heuristic_prompt_tokens(
 ///
 /// `compress_tokens` 需要 provider 的 `reserved_tokens`，而 `ModelProvider` 不暴露它——
 /// 按「不为读数扩 trait」留缺：读数退化成「已用 / 上限」，不自己发明阈值。
-fn context_watermark(output: &TurnOutput, limit: u32) -> Option<serde_json::Value> {
+fn context_watermark(output: &RoundOutput, limit: u32) -> Option<serde_json::Value> {
     let request_tokens = output.usage.as_ref().and_then(|usage| usage.input)?;
     Some(serde_json::json!({
         "request_tokens": request_tokens,
@@ -942,7 +942,7 @@ fn context_watermark(output: &TurnOutput, limit: u32) -> Option<serde_json::Valu
 /// 集合展开（`tool_calls` 是给环折 `LlmTurn` 的原始值，`calls` 是派发侧读的调用键）。
 fn outcome_payload(
     request: &RoundTripRequest,
-    output: Option<&TurnOutput>,
+    output: Option<&RoundOutput>,
     stream: &serde_json::Value,
     started: std::time::Instant,
     stopped: Option<(&str, &str)>,
@@ -1063,7 +1063,7 @@ fn outcome_payload(
 
 /// 末轮答话的取值（`final_answer` 迁入执行体，`D-314`）：正文 → 截断则空 →
 /// 端口思考 → 流上思考。四条顺序都是判据，不是偏好。
-fn fold_answer(output: &TurnOutput, stream_reasoning: &str) -> String {
+fn fold_answer(output: &RoundOutput, stream_reasoning: &str) -> String {
     if !output.text.trim().is_empty() {
         output.text.clone()
     } else if output.finish.is_length() {
@@ -1082,7 +1082,7 @@ fn fold_answer(output: &TurnOutput, stream_reasoning: &str) -> String {
 /// provider 没给 id 时兜底，绝不参与匹配（t3：两套 id 混用导致重复复读与二次执行）。
 fn dispatch_calls(
     request: &RoundTripRequest,
-    tool_calls: &[TurnToolCallInfo],
+    tool_calls: &[RoundToolCallInfo],
 ) -> Vec<serde_json::Value> {
     tool_calls
         .iter()

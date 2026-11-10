@@ -1,8 +1,8 @@
 //! SSE 流循环 —— 把响应字节流转成单轮产物（core `llm/` 契约的实现细节）。
 //! 只有 model 插件使用，故住在插件内而非 core `llm/`。行解析契约
 //! [`SseLineParser`] 与其实现方同处本插件（[`super::protocols`]），core 只
-//! 提供 [`TurnOutput`] 产物结构；本模块负责按 `\n` 切分、按前缀截断去重、把协议事件
-//! 分发给 [`TurnOutput`] 并经 `sink` 实时下发流式子节点——**不认识任何协议字段名**。
+//! 提供 [`RoundOutput`] 产物结构；本模块负责按 `\n` 切分、按前缀截断去重、把协议事件
+//! 分发给 [`RoundOutput`] 并经 `sink` 实时下发流式子节点——**不认识任何协议字段名**。
 //! 生命周期日志（请求发起 → 响应头 → 首块 → 首条内容 → 流结束）让卡死可定位到阶段，
 //! 阶段对照表见 [`parse_sse_stream`] 注释。
 use crate::http::STREAM_IDLE_TIMEOUT;
@@ -15,11 +15,11 @@ use symbio_plugin_api::plugin_error;
 use symbio_plugin_api::plugin_info;
 use symbio_plugin_api::plugin_warn;
 use symbio_plugin_api::ModelUsage;
-use symbio_plugin_api::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
+use symbio_plugin_api::{llm_emit_message, llm_short_id, RoundOutput, RoundToolCallInfo};
 use symbio_plugin_api::{ExecAbortSignal, ExecEventSink};
 
 use super::protocols::{utf8_chunk, ModelProtocolEvent, SseLineParser, SsePartialLineExtractor};
-use super::tool_accumulator::TurnToolCallAccumulator;
+use super::tool_accumulator::RoundToolCallAccumulator;
 
 /// 未结束的行超过这个长度才尝试增量提取。
 /// 太短时开提取器没有意义（下一块多半就把整行补齐了），反而多付一次字段扫描。
@@ -50,7 +50,7 @@ fn overflow_notice_text() -> String {
 /// 收口：把上限之外的调用打上丢弃标记（正文 = [`overflow_notice_text`]）。
 /// `tool_calls` 按**首次出现顺序**排列（累加器 `finish` 保序），故位置 ≥ 上限
 /// 之位的即超限调用。执行层读到 `overflow_notice` 非空就不执行、直接落结果。
-fn mark_overflow_dropped(tool_calls: &mut [TurnToolCallInfo]) {
+fn mark_overflow_dropped(tool_calls: &mut [RoundToolCallInfo]) {
     let notice = overflow_notice_text();
     for tc in tool_calls.iter_mut().skip(MAX_TOOL_CALLS_PER_RESPONSE) {
         tc.overflow_notice = Some(notice.clone());
@@ -264,16 +264,16 @@ pub async fn parse_sse_stream(
     abort: &ExecAbortSignal,
     parser: &dyn SseLineParser,
     reuse_node_ids: &[String],
-    out: &mut TurnOutput,
+    out: &mut RoundOutput,
 ) -> Result<(), StreamFailure> {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::<u8>::new();
     // 工具调用的分片累积器**只在本插件内活着**：它是流式状态机（过程），
-    // 收口后才把结果（`Vec<TurnToolCallInfo>`）写进 `out.tool_calls` 交出去。
+    // 收口后才把结果（`Vec<RoundToolCallInfo>`）写进 `out.tool_calls` 交出去。
     let mut tool_acc = if reuse_node_ids.is_empty() {
-        TurnToolCallAccumulator::default()
+        RoundToolCallAccumulator::default()
     } else {
-        TurnToolCallAccumulator::with_node_ids(reuse_node_ids)
+        RoundToolCallAccumulator::with_node_ids(reuse_node_ids)
     };
 
     // ── 生命周期日志与卡死防护 ──────────────────────────────────────────
@@ -598,8 +598,8 @@ async fn dispatch_and_track(
     ev: ModelProtocolEvent,
     root_id: &str,
     sink: &ExecEventSink,
-    out: &mut TurnOutput,
-    tool_acc: &mut TurnToolCallAccumulator,
+    out: &mut RoundOutput,
+    tool_acc: &mut RoundToolCallAccumulator,
     first_content_logged: &mut bool,
     started: std::time::Instant,
     // 超限调用的节点 id 集合（跨事件持续——同一调用的后续参数增量靠它识别）。
@@ -633,8 +633,8 @@ async fn dispatch_protocol_event(
     ev: ModelProtocolEvent,
     root_id: &str,
     sink: &ExecEventSink,
-    out: &mut TurnOutput,
-    tool_acc: &mut TurnToolCallAccumulator,
+    out: &mut RoundOutput,
+    tool_acc: &mut RoundToolCallAccumulator,
     // 超限调用集合（语义见 `dispatch_and_track` 的参数说明）
     overflow_ids: &mut std::collections::HashSet<String>,
     ev_error: &mut Option<String>,

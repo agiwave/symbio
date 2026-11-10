@@ -3,27 +3,27 @@
 //! ## 为什么住在这里，而不是共享层
 //!
 //! 唯一的驱动方是本插件的 `stream.rs`：它按协议增量逐块喂 [`process_delta`]。
-//! session 只读**结果**（`TurnOutput::tool_calls`），从不驱动累积过程——即
+//! session 只读**结果**（`RoundOutput::tool_calls`），从不驱动累积过程——即
 //! 「怎么把分片攒成一次调用」是 model 的实现细节，不是两侧共用的契约。
 //!
-//! 历史上它住在 `symbio_plugin_api::llm::turn`，理由是「`TurnOutput::into_messages`
-//! 依赖它」。那是**循环论证**（D-023 开头点名的那种推理）：`TurnOutput` 之所以
+//! 历史上它住在 `symbio_plugin_api::llm::turn`，理由是「`RoundOutput::into_messages`
+//! 依赖它」。那是**循环论证**（D-023 开头点名的那种推理）：`RoundOutput` 之所以
 //! 依赖它，只因为它把累积器当字段带着；把字段换成**结果形态**
-//! （`tool_calls: Vec<TurnToolCallInfo>`）之后，这条依赖自己就消失了。
+//! （`tool_calls: Vec<RoundToolCallInfo>`）之后，这条依赖自己就消失了。
 //!
 //! ## 契约 / 实现分工
 //!
 //! | 符号 | 住哪 | 理由 |
 //! |---|---|---|
-//! | [`TurnToolCallInfo`] | `symbio-kernel` | `TurnOutput::tool_calls` 的**元素类型**：本插件产出、session（`tool_executor` · 落库）消费，两个插件共用 |
+//! | [`RoundToolCallInfo`] | `symbio-kernel` | `RoundOutput::tool_calls` 的**元素类型**：本插件产出、session（`tool_executor` · 落库）消费，两个插件共用 |
 //! | `llm_short_id` | `symbio-kernel` | 消息节点 id 的统一格式：本模块（`entry.node_id`）与 session 的消息构造共用 |
-//! | [`TurnToolCallAccumulator`] | 本模块 | 只有 `stream.rs` 驱动 |
+//! | [`RoundToolCallAccumulator`] | 本模块 | 只有 `stream.rs` 驱动 |
 //!
 //! ## 三条不变量
 //!
 //! 1. **节点 id 在首个增量确定，此后只读**：流式帧、落库（`llm_build_assistant_messages`）、
 //!    工具执行（`process_tool_calls_async`）三处用的是同一个 id。见
-//!    [`process_delta`] 返回的 `node_id` 与 [`finish`] 产出的 `TurnToolCallInfo::id`。
+//!    [`process_delta`] 返回的 `node_id` 与 [`finish`] 产出的 `RoundToolCallInfo::id`。
 //! 2. **空串 / 纯空白的 `id` / `name` 增量不覆盖已定值**：实测 apinex qwen-3.8-max
 //!    网关只在首个增量携带合法 id，后续增量重复发 `id:""`；若用空值覆盖，最终得到
 //!    `Some("")`，工具调用被误判为 id 缺失而跳过。
@@ -36,7 +36,7 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use symbio_plugin_api::plugin_warn;
-use symbio_plugin_api::{llm_short_id, TurnToolCallInfo};
+use symbio_plugin_api::{llm_short_id, RoundToolCallInfo};
 
 /// 单次工具调用的累积态（**过程形态**，只在本模块内可见）。
 #[derive(Debug, Default)]
@@ -55,7 +55,7 @@ struct AccumulatedToolCall {
     /// 本条目在**当前这一次**流里是否真的收到过增量。
     ///
     /// 默认 `false`，只在 [`process_delta`] 里置真。为什么需要它：重试播种
-    /// （[`TurnToolCallAccumulator::with_node_ids`]）会带着上一批尝试的节点 id
+    /// （[`RoundToolCallAccumulator::with_node_ids`]）会带着上一批尝试的节点 id
     /// 建条目，而重试未必原样产出同样多的调用——上一批有 5 个、这一批只有 3 个时，
     /// 若按「有 entry 就有调用」收口，`finish` 会吐出 2 个**名字与参数全空**的幽灵
     /// 调用，执行层照它们发请求（provider 侧于是报「tool_call 无对应结果」）。
@@ -63,7 +63,7 @@ struct AccumulatedToolCall {
     touched: bool,
 }
 
-impl TurnToolCallAccumulator {
+impl RoundToolCallAccumulator {
     /// 以**上一批尝试已用过的节点 id** 播种（重试专用）。
     ///
     /// `ids` 按 wire `index` 升序（与 [`finish`] 的产出同序）。播种条目初始
@@ -106,13 +106,13 @@ impl TurnToolCallAccumulator {
 /// **生命周期**：`process_delta`（多次）→ `finish`（恰好一次，按值消费）。
 /// `finish` 取 `self` 而非 `&mut self`，是为了让「收口只有一次」成为类型层面的事实
 /// ——旧版 `get_completed(&mut self)` 可以被反复调用，于是不得不写一条「重复调用返回
-/// 相同 id」的兜底；那条兜底实际不可达（见 [`TurnToolCallAccumulator::finish`] 的注释）。
+/// 相同 id」的兜底；那条兜底实际不可达（见 [`RoundToolCallAccumulator::finish`] 的注释）。
 #[derive(Debug, Default)]
-pub(crate) struct TurnToolCallAccumulator {
+pub(crate) struct RoundToolCallAccumulator {
     calls: HashMap<usize, AccumulatedToolCall>,
 }
 
-impl TurnToolCallAccumulator {
+impl RoundToolCallAccumulator {
     /// 处理一片工具调用增量。
     ///
     /// 返回 `(node_id, wire_id, accumulated_args, name, snapshot_required)`：
@@ -188,7 +188,7 @@ impl TurnToolCallAccumulator {
         )
     }
 
-    /// 收口：把累积结果转成**结果形态**的 [`TurnToolCallInfo`]，按值消费。
+    /// 收口：把累积结果转成**结果形态**的 [`RoundToolCallInfo`]，按值消费。
     ///
     /// 当前已开启的调用数（新建过节点的 idx 个数）。
     ///
@@ -216,7 +216,7 @@ impl TurnToolCallAccumulator {
     /// - 合法 JSON：照常使用；
     /// - 非空且非法：参数已残破（典型为 `max_tokens` 截断），保留原文交给
     ///   `parse_error`，由执行侧拒绝执行并回报明确错误。
-    pub(crate) fn finish(self) -> Vec<TurnToolCallInfo> {
+    pub(crate) fn finish(self) -> Vec<RoundToolCallInfo> {
         let mut entries: Vec<(usize, AccumulatedToolCall)> = self.calls.into_iter().collect();
         entries.sort_by_key(|(index, _)| *index);
 
@@ -245,7 +245,7 @@ impl TurnToolCallAccumulator {
                         }
                     }
                 };
-                TurnToolCallInfo {
+                RoundToolCallInfo {
                     id: Some(call.node_id),
                     wire_id,
                     name: call.name,

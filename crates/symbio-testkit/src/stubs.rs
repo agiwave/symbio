@@ -126,7 +126,7 @@ impl LlmAdapter for StubLlmAdapter {
         if let Some(msg) = self.fail_with {
             return Err(AdapterError::GenerationFailed(msg.to_string()));
         }
-        let node_id = symbio_sdk::llm::turn::llm_short_id();
+        let node_id = symbio_sdk::llm::round::llm_short_id();
         let text = match &self.chunks {
             Some(chunks) => {
                 for c in chunks {
@@ -203,7 +203,7 @@ impl LlmAdapter for StubLlmAdapter {
             return Err(AdapterError::GenerationFailed(msg.to_string()));
         }
         // 分片同属**一条**流：节点身份只铸一次，各片按同一 id 追加。
-        let node_id = symbio_sdk::llm::turn::llm_short_id();
+        let node_id = symbio_sdk::llm::round::llm_short_id();
         for c in chunks {
             sink.on_delta(&node_id, c);
         }

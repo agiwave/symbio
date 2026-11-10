@@ -17,7 +17,7 @@
 //! | 符号 | 谁依赖 | 依赖什么 |
 //! |---|---|---|
 //! | [`ModelProvider`] | session（`chat_loop` 经 `Arc<dyn ModelProvider>` 驱动）· model（`BoundProvider` 实现） | `round_trip` / `effective_context_tokens` / 身份与限流方法 |
-//! | [`ModelFinishReason`] | session（区分「自然结束」与 `max_tokens` 截断）· model（`TurnOutput::finish` 的赋值方） | `from_provider` / `is_length` |
+//! | [`ModelFinishReason`] | session（区分「自然结束」与 `max_tokens` 截断）· model（`RoundOutput::finish` 的赋值方） | `from_provider` / `is_length` |
 //! | [`ModelUsage`] | model（上报）· session（校准 token 估算） | 字段读取 |
 //!
 //! 三个符号都是**会话引擎 ↔ 模型**两侧共用的，故留在本层；同一文件里
@@ -36,7 +36,7 @@ use crate::exec::ExecEnv;
 use crate::plugin::PluginError;
 use async_trait::async_trait;
 
-use super::turn::TurnOutput;
+use super::round::RoundOutput;
 
 /// 流结束原因（由各协议的 `finish_reason` / `stop_reason` / `finishReason` 归一化）
 ///
@@ -126,7 +126,7 @@ pub struct ModelSpend {
 ///   （原始协议配置串）、`rate_limit_ms`、`max_context_tokens`；
 /// - **上下文收敛**：`effective_context_tokens`（服务端上报值与用户设置取 min）；
 /// - **单轮执行**：`round_trip`（构造请求 → 带中止的 POST → SSE 流解析 →
-///   `TurnOutput`），协议差异由实现体内部的协议钩子吸收。
+///   `RoundOutput`），协议差异由实现体内部的协议钩子吸收。
 #[async_trait]
 pub trait ModelProvider: Send + Sync {
     /// Provider 唯一标识（注册表键；限流器与日志按此归组）
@@ -154,13 +154,12 @@ pub trait ModelProvider: Send + Sync {
     /// `ModelProvider` 实例都自带完整的「请求-解析」能力，会话引擎无需再
     /// 依赖 model 插件内部实现。
     ///
-    /// ## 名字为什么不带 `turn`
+    /// ## 名字为什么是「往返」而不是「轮」
     ///
-    /// 它的语义是**一次模型往返的产物**（`TurnOutput`）；幕（`turn`）是环的身份，
-    /// 不是端口（`D-222` 裁决 7）。名字里带 `turn` 会让读 trait 的人以为模型端口
-    /// 按幕执行——那正是词义扩散的形状，机制层的动词面上不该有幕。
-    /// 返回类型 `TurnOutput` 的同名不同义归 `DE-022` 的 R8 那一类（逐项给终态，
-    /// 不在这里顺手改）。
+    /// 它的语义是**一次模型往返的产物**（`RoundOutput`）；轮是环的身份，不是端口
+    /// （`D-222` 裁决 7）。方法名与返回类型现在说的是同一件事：`round_trip` 交
+    /// `RoundOutput`（`D-436`）。此前返回类型叫 `TurnOutput`，方法叫 `round_trip`
+    /// ——同一个契约两个词，读 trait 的人只能猜它们是不是一回事。
     ///
     /// `env` 与 [`crate::capability::Capability::execute`] 共用同一类型
     /// （[`ExecEnv`]）：两者都是「一次带中止的流式执行」——出方向写事件、
@@ -172,5 +171,5 @@ pub trait ModelProvider: Send + Sync {
         tools: &[CapabilityMeta],
         root_id: &str,
         env: &ExecEnv,
-    ) -> Result<TurnOutput, PluginError>;
+    ) -> Result<RoundOutput, PluginError>;
 }

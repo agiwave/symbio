@@ -233,7 +233,7 @@ impl std::fmt::Debug for ExecEventSink {
 ///
 /// ```text
 /// Capability::execute(args, env, ctx)   -> Result<Value, PluginError>
-/// ModelProvider::round_trip(inputs, env) -> Result<TurnOutput, PluginError>
+/// ModelProvider::round_trip(inputs, env) -> Result<RoundOutput, PluginError>
 /// ```
 ///
 /// 差别只剩 `ctx`：**工具是被路由、被注册的**（要转发、要解析挂载），因此还需要

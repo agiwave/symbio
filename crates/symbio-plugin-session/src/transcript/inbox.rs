@@ -137,7 +137,7 @@ impl SessionPlugin {
         let id = id
             .filter(|s| !s.trim().is_empty())
             .or_else(|| (!message.id.trim().is_empty()).then(|| message.id.clone()))
-            .unwrap_or_else(symbio_sdk::llm::turn::llm_short_id);
+            .unwrap_or_else(symbio_sdk::llm::round::llm_short_id);
         // 消息 id 与条目 id **是同一个值**：地址末段即身份，两处各生成一个会让
         // 「按地址取消息」在两套 id 之间对不上（见 `message_path` 的同款约定）。
         message.id = id.clone();

@@ -8,7 +8,7 @@ use super::*;
 use crate::capability::{CapabilityMeta, CapabilityRiskLevel};
 use crate::chat::ChatNode;
 use crate::exec::ExecEnv;
-use crate::llm::TurnOutput;
+use crate::llm::RoundOutput;
 use crate::plugin::{PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -112,7 +112,7 @@ impl ModelProvider for StubProvider {
         _tools: &[CapabilityMeta],
         _root_id: &str,
         _env: &ExecEnv,
-    ) -> Result<TurnOutput, PluginError> {
+    ) -> Result<RoundOutput, PluginError> {
         Err(PluginError::InternalError("stub".to_string()))
     }
 }

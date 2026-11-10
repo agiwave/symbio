@@ -14,15 +14,15 @@
 //! - `port`:            `ModelPort`——`port.model` 的世界提供者（D-298）：解析与
 //!   适配器构造收在本插件，环只按端口名取
 //! - `http`:            HTTP 重试机器（客户端单例 + 带中止的 POST，五态 `PostResult`）
-//! - `stream`:          SSE 流循环（字节流 → `TurnOutput`，流式子节点实时下发）
-//! - `tool_accumulator`: 工具调用增量累积（分片 → 完整调用的状态机，收口为 `TurnOutput.tool_calls`）
+//! - `stream`:          SSE 流循环（字节流 → `RoundOutput`，流式子节点实时下发）
+//! - `tool_accumulator`: 工具调用增量累积（分片 → 完整调用的状态机，收口为 `RoundOutput.tool_calls`）
 //! - `plugin`:          Core ModelPlugin entry point + factory registration + provider 注册表
 //!
 //! 边界：会话循环（chat_loop / turn_processor / tool_executor / resume /
 //! compression 等）属于 session 插件，model 对 session 零依赖；
 //! 协议抽象 `ModelProtocol`、事件方言 `ModelProtocolEvent`、行解析契约
 //! `SseLineParser` 都是本插件私有词汇，core 不承载它们——core 只留
-//! session 与 model **两侧共用**的 `ModelProvider` / `TurnOutput`。
+//! session 与 model **两侧共用**的 `ModelProvider` / `RoundOutput`。
 
 mod assist;
 mod bound_provider;

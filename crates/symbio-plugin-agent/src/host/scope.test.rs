@@ -7,7 +7,7 @@ use super::*;
 use async_trait::async_trait;
 use symbio_plugin_api::{
     capability_model_active, capability_model_resolve, capability_prompts, capability_vdfs_root,
-    family, CapabilityRow, ModelProvider, TurnOutput, VdfsContent, VdfsContext, VdfsError,
+    family, CapabilityRow, ModelProvider, RoundOutput, VdfsContent, VdfsContext, VdfsError,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, SCOPE_TWIN,
 };
 
@@ -113,7 +113,7 @@ impl ModelProvider for LabeledProvider {
         _tools: &[CapabilityMeta],
         _root_id: &str,
         _env: &ExecEnv,
-    ) -> Result<TurnOutput, PluginError> {
+    ) -> Result<RoundOutput, PluginError> {
         Err(PluginError::InternalError("mock".to_string()))
     }
 }

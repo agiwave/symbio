@@ -562,7 +562,7 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
 27. **帧语义只由字段给出，不由节点类型反推**：`delta` = 尾部追加，`content` = 整条替换；
  同帧携带两者是**协议违例**（写入点报错丢弃——不发布、不落地）。追加对正文 /
  思考 / **工具参数** / **工具响应**一律成立（后端构造帧只有两处：
- `crates/symbio-sdk/src/llm/turn.rs::llm_message_frame`（完整消息）/
+ `crates/symbio-sdk/src/llm/round.rs::llm_message_frame`（完整消息）/
  `crates/symbio-plugin-model/src/stream.rs::llm_emit_delta`（增量）；剥正文的状态帧
  （「思考即正文」的收口形态）由流循环在 `crates/symbio-plugin-model/src/stream.rs` 就地发，
  不再有独立的构造函数。工具参数与 Text / Reasoning 同构，

@@ -212,7 +212,7 @@ impl SessionPlugin {
     pub(crate) async fn new_session_id(&self) -> String {
         let store = self.get_store().await.ok();
         for _ in 0..8 {
-            let id = symbio_sdk::llm::turn::llm_short_id();
+            let id = symbio_sdk::llm::round::llm_short_id();
             let taken = match &store {
                 Some(s) => s.session_dir(&id).is_some(),
                 None => false,
@@ -335,7 +335,7 @@ impl SessionPlugin {
         // 与「重启后从 WAL 重建」差一个 `status` 字段。这不是视图差异，是**事实
         // 与视图不一致**：`status` 一旦缺失，重建就再也补不回来（事实源里没有它）。
         // 统一口径：规范化后的那条同时进事实与帧，重建与实时读读的是同一条。
-        let updated = symbio_sdk::llm::turn::llm_message_frame(&existing.clone());
+        let updated = symbio_sdk::llm::round::llm_message_frame(&existing.clone());
         // **顺序反转**（[D-054] 决策 2）：变更经唯一写入口 `apply` 落——事实先落、
         // 列表随后折叠写入。旧形态是「先写缓存、再补一条事实」，事实是事后补的，
         // 所以它天然是可选项；收进 `apply` 之后「改了列表却没落事实」表达不出来。
@@ -387,7 +387,7 @@ impl SessionPlugin {
         if !deleted_ids.is_empty() {
             let frames: Vec<cm::ChatNode> = deleted_ids
                 .iter()
-                .map(|id| symbio_sdk::llm::turn::llm_removed_frame(id))
+                .map(|id| symbio_sdk::llm::round::llm_removed_frame(id))
                 .collect();
             self.active_mgr
                 .transcript_apply_all(session_id, frames)
@@ -504,7 +504,7 @@ impl SessionPlugin {
         let frames: Vec<cm::ChatNode> = candidates
             .iter()
             .filter_map(|c| stamped.iter().find(|m| m.id == *c))
-            .map(symbio_sdk::llm::turn::llm_message_frame)
+            .map(symbio_sdk::llm::round::llm_message_frame)
             .collect();
         self.active_mgr
             .transcript_apply_all(session_id, frames)
@@ -546,7 +546,7 @@ impl SessionPlugin {
         // 两条消息一个名字——与 `new_session_id` 一样先查再落。
         let mut new_id = String::new();
         for _ in 0..8 {
-            let candidate = symbio_sdk::llm::turn::llm_short_id();
+            let candidate = symbio_sdk::llm::round::llm_short_id();
             if !messages.iter().any(|m| m.id == candidate) {
                 new_id = candidate;
                 break;

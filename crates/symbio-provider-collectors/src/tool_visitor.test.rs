@@ -10,7 +10,7 @@ use symbio_kernel::capability::{family, Capability, CapabilityMeta, CapabilityRo
 use symbio_kernel::chat::chat_node::ChatNode;
 use symbio_kernel::exec::ExecEnv;
 use symbio_kernel::llm::ModelProvider;
-use symbio_kernel::llm::TurnOutput;
+use symbio_kernel::llm::RoundOutput;
 use symbio_kernel::plugin::PluginError;
 use symbio_kernel::present::DetailField;
 use symbio_kernel::vdfs::{
@@ -55,7 +55,7 @@ impl ModelProvider for MockProvider {
         _tools: &[CapabilityMeta],
         _root_id: &str,
         _env: &ExecEnv,
-    ) -> Result<TurnOutput, PluginError> {
+    ) -> Result<RoundOutput, PluginError> {
         Err(PluginError::InternalError("mock".to_string()))
     }
 }

@@ -1,6 +1,6 @@
 //! 单轮 LLM 产物的**类型面**（`ModelProvider::round_trip` 的返回类型）。
 //!
-//! 帧构造 / 发射与 id 原语是宿主行为，留在 `symbio_kernel::llm::turn`。
+//! 帧构造 / 发射与 id 原语是宿主行为，留在 `symbio_sdk::llm::round`。
 
 use super::model_provider::{ModelFinishReason, ModelSpend, ModelUsage};
 use serde_json::Value;
@@ -9,7 +9,7 @@ use serde_json::Value;
 
 /// Tool call information
 #[derive(Debug, Clone)]
-pub struct TurnToolCallInfo {
+pub struct RoundToolCallInfo {
     /// 消息节点 id（会话内唯一）：流式帧 / 落库 / 工具结果锚定都用它。
     pub id: Option<String>,
     /// provider 原始 `tool_call_id`（wire id）。`None` = 供应商未提供，
@@ -51,7 +51,7 @@ pub struct TurnToolCallInfo {
 /// `llm_build_assistant_messages`。固有实现可落在同一 crate 的任意模块，
 /// 调用方不需要 import 实现所在处。
 #[derive(Default)]
-pub struct TurnOutput {
+pub struct RoundOutput {
     pub text: String,
     pub reasoning: String,
     pub response_id: Option<String>,
@@ -60,7 +60,7 @@ pub struct TurnOutput {
     /// `is_reasoning_only` / `effective_text` / `into_messages` 一律读这里，
     /// 不再由调用方另行传 `n_tools`——「有几个工具」与「是哪些工具」是同一
     /// 件事，分两处传入迟早会不一致。
-    pub tool_calls: Vec<TurnToolCallInfo>,
+    pub tool_calls: Vec<RoundToolCallInfo>,
     /// Short ID for the response text child node (consistent across delta updates)
     pub response_text_child_id: String,
     /// Short ID for the reasoning child node

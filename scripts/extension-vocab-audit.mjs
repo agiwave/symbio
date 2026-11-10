@@ -33,7 +33,9 @@
  *
  * 豁免通道（`EXEMPTIONS`）：**逐条** `{ path, token, why }`，路径与标识符都**精确等值**
  * （不是前缀、不是 glob），每条必须有理由正文。一条不解释自己的豁免就是永久后门，
- * 通配符在登记那一刻就被判红。现状为零条——存量在 D-252 整改批里已经清干净。
+ * 通配符在登记那一刻就被判红。现状 1 条（`D-259` 的模块路径段）——`D-253` 那两条
+ * 「端口签名类型」在 `D-436` 把类型改名之后不再带容器词，已随本次删除；豁免不是
+ * 永久名单，被豁免的写法消失了条目就得消失。
  *
  * 用法：node scripts/extension-vocab-audit.mjs [--root=<目录>]
  * 退出码：0 = 通过；1 = 有违规或豁免清单本身不成立；2 = 范围读不出。
@@ -76,26 +78,12 @@ export const GENERATED_FILES = [
 export const EXEMPTIONS = [
   {
     path: 'crates/symbio-plugin-api/src/lib.rs',
-    token: 'TurnToolCallInfo',
-    why:
-      'D-253：与 `TurnOutput` 同族——它是模型端口的**签名类型**（`ModelProvider` 的工具调用形状），' +
-      '模型插件必须能命名它；D-252 拦的是「配置 / 开关类型进能力面」，不是端口签名本身。',
-  },
-  {
-    path: 'crates/symbio-plugin-api/src/lib.rs',
-    token: 'TurnOutput',
-    why:
-      'D-253：它是 `ModelProvider` 的签名类型，模型插件必须能命名它；D-252 拦的是「配置 / 开关类型' +
-      '进能力面」，不是端口签名本身。改名要动 wire，收益只有脚本好看一点。',
-  },
-  {
-    path: 'crates/symbio-plugin-api/src/lib.rs',
     token: 'turn',
     why:
-      'D-259：这是 `pub use symbio_sdk::turn::{dispatch::TASK_CAP, node_build};` 两行里的**路径段**，' +
-      '不是形状——判据要拦的是「类型 / 变体 / 字段 / 形参认识容器」，而这两行导出的是一个模块名与' +
-      '一个 `usize` 出厂值。豁免按标识符精确等值，所以它只放过恰好叫 `turn` 的那一段：同文件里' +
-      '任何 `TurnSpec` / `turn_root_of` 这类**新出现的形状名**仍是另一个标识符，照旧判红。',
+      'D-259：这是 `pub use symbio_sdk::turn::node_build;` 里的**路径段**，不是形状——判据要拦的是' +
+      '「类型 / 变体 / 字段 / 形参认识容器」，这一行导出的是一个模块名。豁免按标识符精确等值，' +
+      '所以它只放过恰好叫 `turn` 的那一段：同文件里任何 `TurnSpec` / `turn_root_of` 这类**新出现的' +
+      '形状名**仍是另一个标识符，照旧判红。',
   },
 ]
 

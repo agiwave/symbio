@@ -86,7 +86,7 @@ pub fn dialog_node(
 /// 助手**正文**子节点（`msg_type = Body`，`parent_id` 指向本轮骨架）。
 ///
 /// `id` 由调用方给定：流式期已广播的节点 id **必须复用**（见
-/// `session::message_build::TurnStreamChildIds`），否则同一段正文在存储层与流式层
+/// `session::message_build::RoundStreamChildIds`），否则同一段正文在存储层与流式层
 /// 是两个身份。工具轮的中途正文也走本函数——分发方拿流式节点的 id 把这一轮
 /// **定格**成一条完整消息（`tool_dispatch`）。
 pub fn llm_build_text_node(

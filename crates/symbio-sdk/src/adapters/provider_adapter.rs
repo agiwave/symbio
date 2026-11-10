@@ -32,7 +32,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::{AdapterError, DeltaSink, FullModel, LlmAdapter, LlmTurn, SilentDeltas};
-use crate::llm::turn::llm_short_id;
+use crate::llm::round::llm_short_id;
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_RUN,
@@ -218,7 +218,7 @@ impl LlmAdapter for ProviderLlmAdapter {
         sink: Arc<dyn DeltaSink>,
     ) -> Result<(String, u64), AdapterError> {
         let turn = self.generate_turn(tok, messages, &[], sink).await?;
-        // 正文空但推理非空 ⇒ **回退取推理**（v1 同一语义：`TurnOutput::effective_text`）。
+        // 正文空但推理非空 ⇒ **回退取推理**（v1 同一语义：`RoundOutput::effective_text`）。
         // reasoning 模型常常想清楚了却不复述，那句思考就是它的全部回答；把它当
         // 「没答」判失败，调用方拿到的是失败而不是答案。
         //
@@ -532,7 +532,7 @@ impl LlmAdapter for ProviderLlmAdapter {
             reasoning: output.reasoning,
             tool_calls: output.tool_calls,
             // 结束原因直通：判「截断的思考算不算答话」的那一处只有在这里才看得见
-            // provider 说它是否说完（`TurnOutput::finish` 由协议层归一化，见 [`LlmTurn::finish`]）。
+            // provider 说它是否说完（`RoundOutput::finish` 由协议层归一化，见 [`LlmTurn::finish`]）。
             finish: output.finish,
             cost_ms: started.elapsed().as_millis() as u64,
             // provider 实测用量直通：这是校准反馈链的唯一数据源（见 `LlmTurn::usage`）。

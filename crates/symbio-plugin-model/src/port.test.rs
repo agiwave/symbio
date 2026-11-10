@@ -6,10 +6,7 @@ use serde_json::json;
 
 use super::*;
 use symbio_plugin_api::port::PortFactReader;
-use symbio_plugin_api::{ModelUsage, SymbioKey};
-
-/// 一次往返产物的别名：只在这里出现一次内核类型名，用于实现 trait 的返回签名。
-type RoundOutput = symbio_plugin_api::TurnOutput;
+use symbio_plugin_api::{ModelUsage, RoundOutput, SymbioKey};
 
 /// 固定的假 provider：只验证执行体对载荷、错误与产物的处理，不碰传输层。
 struct FakeModel {
@@ -88,7 +85,7 @@ impl ModelProvider for FakeModel {
             FakeOutcome::WithToolCalls => Ok(RoundOutput {
                 finish: ModelFinishReason::ToolCalls,
                 tool_calls: vec![
-                    symbio_plugin_api::TurnToolCallInfo {
+                    symbio_plugin_api::RoundToolCallInfo {
                         id: Some("call-1".into()),
                         wire_id: Some("wire-1".into()),
                         name: Some("echo".into()),
@@ -96,7 +93,7 @@ impl ModelProvider for FakeModel {
                         parse_error: None,
                         overflow_notice: None,
                     },
-                    symbio_plugin_api::TurnToolCallInfo {
+                    symbio_plugin_api::RoundToolCallInfo {
                         id: Some("call-2".into()),
                         wire_id: Some("wire-2".into()),
                         name: Some("echo".into()),

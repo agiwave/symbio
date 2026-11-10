@@ -2,8 +2,8 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 141,
-      "test": 179
+      "prod": 91,
+      "test": 142
     },
     "F2": {
       "prod": 11,
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-10",
+      "faces": "F1.prod / F1.test",
+      "reason": "`D-436`：模型端口的「一次往返产物」不再叫 `TurnOutput`。四个类型 `TurnOutput` / `TurnToolCallInfo` / `TurnToolCallAccumulator` / `TurnStreamChildIds` → `Round*`，两个模块 `kernel::llm::turn` / `sdk::llm::turn` → `round`。F1 生产面 141 → 91、测试面 179 → 142 为**实测收窄**；同时 `D-253` 那两条 EX-008 豁免（端口签名类型里的容器词）随类型改名失去豁免对象，一并删除，扩展面豁免回到 1 条（`D-259` 的模块路径段，待 `symbio-sdk/turn` 目录改名后清零）。目标 0 不变。"
+    },
     {
       "date": "2026-11-10",
       "faces": "F2.prod / F2.test",
@@ -112,5 +117,6 @@
       "reason": "存量快照/旧转写的读边界折叠（数据迁移通道，不是展示保留）；存量清迁后基线降 0 并删本条",
       "until": "B3 后存量清迁"
     }
-  ]
+  ],
+  "pending": []
 }
