@@ -2,8 +2,9 @@
 
 use super::*;
 use async_trait::async_trait;
+use std::sync::Arc;
 use symbio_kernel::capability::{family, CapabilityFamily, CapabilityRow, Registry};
-use symbio_kernel::plugin::PluginInvokeRequestExt;
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_sdk::capability::capability_take_errors;
 use symbio_sdk::capability::port::capability_port_check;
 use symbio_sdk::capability::CAPABILITY_VISITOR;

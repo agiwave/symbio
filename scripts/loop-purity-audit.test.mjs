@@ -21,7 +21,7 @@ const BASELINE_REL = 'scripts/loop-purity-baseline.json'
 const CARGO = 'crates/symbio-plugin-loop/Cargo.toml'
 const LIB = 'crates/symbio-plugin-loop/src/lib.rs'
 const RING = 'crates/symbio-plugin-loop/src/ring.rs'
-const API_PORT = 'crates/symbio-plugin-api/src/port.rs'
+const API_PORT = 'crates/symbio-sdk/src/capability/port.rs'
 
 function cleanFiles() {
   return {
