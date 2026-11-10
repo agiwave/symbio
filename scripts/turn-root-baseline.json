@@ -7,7 +7,7 @@
     },
     "F2": {
       "prod": 21,
-      "test": 14
+      "test": 11
     },
     "F3": {
       "prod": 0,
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-10",
+      "faces": "F2.test",
+      "reason": "`5b950295`（D-432）把「每档 `FactRole` 都有人住」从装配口挪到整仓判据 `CS-011`，内核那条用例里逐档点名的三条角色断言（`FinalizesTurn` / `StopsTurn`）随 `Frozen::unmanned_roles` 一并退场，F2 测试面实测 14 → 11 为**实测收窄**。TR-002 要的是同批降基线——那次漏了，本批补上；目标 0 不变。"
+    },
     {
       "date": "2026-11-09",
       "faces": "F1.prod / F1.test",
