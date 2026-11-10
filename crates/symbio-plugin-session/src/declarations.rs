@@ -231,7 +231,11 @@ pub(crate) const FACTS: &[FactDecl] = &[
         port: None,
         key: &[],
         expand: &[],
-        fields: &["root_id", "final_id", "text"],
+        // `root_id`：`session.close-turn` 行的 `key`（`seal` 的行检查要它在这里）；
+        // `text`：读方按它回灌正文（终答也要进下一轮对话线）。`final_id` 已删——
+        // 它不是载荷字段，而是这条事实 **id 的拼法**（`chat.assistant.final:<user_id>`，
+        // 见 `compact` 的换基债）；写成字段名会让「声明里有、两个写方都写不出」。
+        fields: &["root_id", "text"],
     },
 ];
 
