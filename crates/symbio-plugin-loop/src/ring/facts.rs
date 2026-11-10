@@ -165,6 +165,20 @@ impl<'a> FactView<'a> {
             .find(|f| f.kind == FactKind::Sent && &f.key == key)
     }
 
+    /// 这一笔尝试的**重试归属行**（`retry` 载荷的 `row`，D-442）。
+    ///
+    /// 多行共用同一个 `(port, id)` 时（工具端口的首派行与恢复行），attempt 自增后
+    /// 谁来重跑由这条指认回答——不是表序，而是**失败的那一行**。`retry` 是唯一
+    /// 携带行名的推进事实；读最新一条即可（同键同 attempt 只会有一条 `retry`）。
+    pub(crate) fn retry_owner(&self, key: &DebtKey) -> Option<&'a str> {
+        self.facts
+            .iter()
+            .rev()
+            .find(|f| f.kind == FactKind::Retry && &f.key == key)
+            .and_then(|f| f.payload.get("row"))
+            .and_then(Value::as_str)
+    }
+
     /// 某个 `(端口)` 的最后一笔收束事实（重放与读回都只看这一笔）。
     #[cfg(test)]
     pub(crate) fn last_closing(&self, port: &str) -> Option<&'a Fact> {

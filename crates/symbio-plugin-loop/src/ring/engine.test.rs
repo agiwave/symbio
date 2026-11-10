@@ -377,6 +377,81 @@ async fn retryable_error_advances_the_lease() {
     assert_eq!(stub.seen().len(), 2);
 }
 
+/// 重试归属（D-442 / D-351）：多行共用同一个 `(port, id)` 时（工具端口的首派行
+/// 与恢复行），attempt 自增后由 `retry` 载荷的 `row` 指认谁来重跑——不是表序
+/// 先到先得。这里被指认的行排在表序之后 ⇒ 新 attempt 上重跑的是它，表序第一行
+/// 不再跟着重来。
+#[tokio::test]
+async fn retry_follows_the_row_that_ran_not_table_order() {
+    let stub = Arc::new(Stub::ok());
+    let ctx = TestCtx::new(vec![
+        DebtRow::new("first", "p1", "d", json!({"q": "first"})),
+        DebtRow::new("resume", "p1", "d", json!({"q": "resume"})),
+    ])
+    .with_executor("p1", stub.clone())
+    .with_facts(vec![
+        // attempt 1 由恢复行跑过、失败可重试：派发时 `sent` 记了行名，租约推进
+        // 据此把归属写进 `retry`——下一圈只有被指认的行能认领新 attempt。
+        Fact::new(
+            FactKind::Sent,
+            DebtKey::new("p1", "d", 1),
+            json!({"deadline_ms": 60_000, "row": "resume"}),
+            100,
+        ),
+        Fact::new(
+            FactKind::Retry,
+            DebtKey::new("p1", "d", 2),
+            json!({"from": 1, "class": "retryable", "reason": "again", "row": "resume"}),
+            200,
+        ),
+    ]);
+    let _ = drive(&ctx).await;
+
+    let seen = stub.seen();
+    assert_eq!(seen.len(), 1);
+    // 重跑的是被指认的行（载荷 `resume`），不是表序第一行（载荷 `first`）。
+    assert_eq!(seen[0].1, json!({"q": "resume"}));
+    assert_eq!(seen[0].2, "p1:d:2");
+}
+
+/// 孤儿判死（D-442）：`retry` 指认的行这一圈没有任何源申报（行被删 / 触发事实
+/// 消失）。没有 `sent` 就没有租约，这笔债留着只会悬挂——判死是唯一诚实的收束：
+/// 可见的失败优于不可见的停摆。
+#[tokio::test]
+async fn retry_owner_row_gone_lands_failed() {
+    let stub = Arc::new(Stub::ok());
+    let ctx = TestCtx::new(vec![DebtRow::new(
+        "first",
+        "p1",
+        "d",
+        json!({"q": "first"}),
+    )])
+    .with_executor("p1", stub.clone())
+    .with_facts(vec![
+        Fact::new(
+            FactKind::Sent,
+            DebtKey::new("p1", "d", 1),
+            json!({"deadline_ms": 60_000, "row": "gone"}),
+            100,
+        ),
+        Fact::new(
+            FactKind::Retry,
+            DebtKey::new("p1", "d", 2),
+            json!({"from": 1, "class": "retryable", "reason": "again", "row": "gone"}),
+            200,
+        ),
+    ]);
+    let _ = drive(&ctx).await;
+
+    // 没有任何执行体被调用；这笔债以可见的失败收束，而不是悬挂。
+    assert!(stub.seen().is_empty());
+    let last = ctx.snapshot().last().cloned().unwrap();
+    assert_eq!(last.kind, FactKind::Failed);
+    assert_eq!(last.key.attempt, 2);
+    assert_eq!(last.payload["class"], "non_retryable");
+    assert_eq!(last.payload["reason"], "retry owner row gone");
+}
+
 #[tokio::test]
 async fn non_retryable_error_lands_failed() {
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))])

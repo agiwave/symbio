@@ -1424,8 +1424,9 @@ impl ToolPort {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty());
         // 恢复失败判 **NonRetryable**：读面里没有答复 / 产物不是「还没到」的时机问题，
-        // 重试只会把同一笔债抬到新 attempt 上重跑（首派跟着重来）。这是**当前选择、
-        // 非能力上限**：将来要做真正的重试归属，再单立一条裁决。
+        // 重试只会把同一笔债抬到新 attempt 上重跑（首派跟着重来）。D-442 已把重试
+        // 归属到行（恢复行重试不再带动首派重来），但缺读面 / 缺产物是账实不符——
+        // 归属解决「谁来重跑」，不改变「这种失败重跑也无益」，仍判不可重试。
         let Some(answer) = facts.iter().rev().find(|fact| {
             fact.kind == symbio_plugin_api::events::EVENT_USER_ANSWER
                 && answer_id.is_none_or(|id| fact.id == id)

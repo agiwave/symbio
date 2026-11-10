@@ -125,8 +125,9 @@ pub(crate) struct RunReport {
 struct Work {
     /// 可派发（可能先补 `request`）。
     dispatch: Vec<(DebtRow, u32)>,
-    /// 租约已过：推进尝试或判死。
-    expire: Vec<(DebtRow, u32, Option<u32>)>,
+    /// 租约已过：推进尝试或判死；第三位是**在跑那行**的名字（D-442 行归属，
+    /// 来自 `sent` 载荷——共键多行时，本圈报出过期候选的行未必是在跑的行）。
+    expire: Vec<(DebtRow, u32, Option<u32>, String)>,
     /// 已发未配，租约未过：**在飞**（环自己还能推进）。
     in_flight: Vec<DebtKey>,
     /// 挂起（`sent{deadline_ms:null}`）：只有挂起点之后的触发事实能重新点燃。
@@ -137,6 +138,11 @@ struct Work {
     /// 只用于出口：一圈没有动作、账上也没有未收束债，但这里非空 ⇒ 有人在等一笔
     /// 没人能还的前提。必须报 `Stalled`，**不能报 `NoDebt`**（否则就是静默停摆）。
     blocked: Vec<DebtKey>,
+    /// 重试归属行已不在（D-442）：`retry` 指认的行这一圈没有被任何源申报。
+    ///
+    /// 这笔债若留着只会悬挂——没有 `sent` 就没有租约，永远等不到动作。判死是
+    /// 唯一诚实的收束：可见的失败优于不可见的停摆。
+    orphaned: Vec<DebtKey>,
 }
 
 /// 驱动本会话到没有可还的债、只剩在飞或只剩等外部事实（或明确告诉调用方跑不完）。
@@ -193,8 +199,22 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
             continue;
         }
         if !work.expire.is_empty() {
-            for (row, attempt, next) in work.expire {
-                expire(ctx, row, attempt, next, now_ms);
+            for (row, attempt, next, owner) in work.expire {
+                expire(ctx, row, attempt, next, owner, now_ms);
+            }
+            if !advanced(ctx, &facts) {
+                return stalled(ctx, dispatched, work.blocked);
+            }
+            continue;
+        }
+        if !work.orphaned.is_empty() {
+            for key in work.orphaned {
+                ctx.append(Fact::new(
+                    FactKind::Failed,
+                    key,
+                    json!({"class": "non_retryable", "reason": "retry owner row gone"}),
+                    now_ms,
+                ));
             }
             if !advanced(ctx, &facts) {
                 return stalled(ctx, dispatched, work.blocked);
@@ -344,6 +364,10 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
     // 整个判断只用 `rows`（已由宿主按同一次事实快照求出），不第二次读事实（D-343）。
     let mut candidates: Vec<Candidate> = Vec::new();
     let mut seen = HashSet::new();
+    // 重试归属（D-442）的两本小账：`attributed` 记「这个键的 retry 指认过行」，
+    // `matched` 记「指认的行这一圈真的报了动作」。两者之差就是孤儿键。
+    let mut attributed: HashSet<DebtKey> = HashSet::new();
+    let mut matched: HashSet<DebtKey> = HashSet::new();
     // 前提端口：这一圈**有人认领**的端口。两处来源合起来才是完整的「认领」：
     // 1. 申报方这一轮报了这一行、且它那笔债还开着（已派发未收束）——**不看 `when`
     //    的判定**：`when` 读的是本圈计划快照（D-343），可能还没看见本圈刚落下的回执
@@ -400,6 +424,17 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
             continue;
         }
         let Some(sent) = view.last_sent(&key) else {
+            // 重试归属（D-442）：多行共用同一个 `(port, id)` 时，attempt 自增后由
+            // `retry` 载荷的 `row` 指认谁来重跑——不是表序先到先得。指认的不是本行
+            // ⇒ 本行这一圈不动作；指认的行整圈无人申报 ⇒ 该键记为孤儿，由驱动
+            // 判死（没有 `sent` 就没有租约，留着只会悬挂）。
+            if let Some(owner) = view.retry_owner(&key) {
+                attributed.insert(key.clone());
+                if owner != row.name {
+                    continue;
+                }
+                matched.insert(key.clone());
+            }
             // 幂等底线：同一 (port, id, attempt) 一圈只入批一次。
             if seen.insert(key.clone()) {
                 candidates.push(Candidate {
@@ -449,10 +484,18 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
             continue;
         }
         let next = (attempt < row.max_attempts).then(|| attempt + 1);
+        // 租约推进的行归属（D-442）：在跑的是 `sent` 载荷里记录的那一行，不是
+        // 本圈报出过期候选的这行——共键多行时后者可能只是恰好排在前面。
+        let owner = sent
+            .payload
+            .get("row")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| row.name.to_string());
         candidates.push(Candidate {
             row: row.clone(),
             key,
-            pick: Pick::Expire(next),
+            pick: Pick::Expire { next, owner },
         });
     }
 
@@ -493,11 +536,19 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
         }
         match candidate.pick {
             Pick::Dispatch => work.dispatch.push((candidate.row, candidate.key.attempt)),
-            Pick::Expire(next) => work
-                .expire
-                .push((candidate.row, candidate.key.attempt, next)),
+            Pick::Expire { next, owner } => {
+                work.expire
+                    .push((candidate.row, candidate.key.attempt, next, owner))
+            }
             Pick::InFlight => work.in_flight.push(candidate.key),
             Pick::Suspended => work.suspended.push(candidate.key),
+        }
+    }
+    // 重试归属的孤儿（D-442）：`retry` 指认了行、指认的行这一圈却无人申报。
+    // 判死而不是悬挂——见 `Work::orphaned` 的注释。
+    for key in attributed {
+        if !matched.contains(&key) && !work.blocked.contains(&key) {
+            work.orphaned.push(key);
         }
     }
     work
@@ -514,8 +565,8 @@ struct Candidate {
 enum Pick {
     /// 可派发（可能先补 `request`）。
     Dispatch,
-    /// 租约已过：推进尝试或判死。
-    Expire(Option<u32>),
+    /// 租约已过：推进尝试或判死；`owner` 是在跑那行的名字（D-442 行归属）。
+    Expire { next: Option<u32>, owner: String },
     /// 已发未配，租约未过：在飞。
     InFlight,
     /// 挂起：只有外部事实能推进。
@@ -523,7 +574,17 @@ enum Pick {
 }
 
 /// 租约已过：有下一笔就记账并再举，没有就判死。
-fn expire(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, next: Option<u32>, now_ms: u64) {
+///
+/// 行归属（D-442）：`owner` 是在跑那行的名字（来自 `sent` 载荷，派发时记录）——
+/// `retry` 带上它，下一圈 `plan` 才能让**失败的那一行**重跑，而不是表序第一行。
+fn expire(
+    ctx: &dyn DriveCtx,
+    row: DebtRow,
+    attempt: u32,
+    next: Option<u32>,
+    owner: String,
+    now_ms: u64,
+) {
     let key = DebtKey::new(row.port.clone(), row.id.clone(), attempt);
     match next {
         Some(next) => {
@@ -531,7 +592,12 @@ fn expire(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, next: Option<u32>, now
             ctx.append(Fact::new(
                 FactKind::Retry,
                 next_key,
-                json!({"from": attempt, "class": "retryable", "reason": "lease-expired"}),
+                json!({
+                    "from": attempt,
+                    "class": "retryable",
+                    "reason": "lease-expired",
+                    "row": owner,
+                }),
                 now_ms,
             ));
         }
@@ -539,7 +605,7 @@ fn expire(ctx: &dyn DriveCtx, row: DebtRow, attempt: u32, next: Option<u32>, now
             ctx.append(Fact::new(
                 FactKind::Failed,
                 key,
-                json!({"class": "non_retryable", "reason": "lease-expired"}),
+                json!({"class": "non_retryable", "reason": "lease-expired", "row": owner}),
                 now_ms,
             ));
         }
@@ -583,7 +649,7 @@ async fn dispatch(
         ctx.append(Fact::new(
             FactKind::Sent,
             key.clone(),
-            json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+            json!({"deadline_ms": now_ms.saturating_add(row.lease_ms), "row": row.name}),
             now_ms,
         ));
         ctx.append(Fact::new(
@@ -606,7 +672,7 @@ async fn dispatch(
         ctx.append(Fact::new(
             FactKind::Sent,
             key.clone(),
-            json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+            json!({"deadline_ms": now_ms.saturating_add(row.lease_ms), "row": row.name}),
             now_ms,
         ));
         ctx.append(Fact::new(
@@ -630,10 +696,11 @@ async fn dispatch(
     // 租约先落，执行体后跑（`DE-022` 的 `before`）：挂死时 `expire` 才有东西可判。
     // `request` 紧贴在它之后、执行体之前落：执行期间产生的世界事实以 `request` 为直接
     // 前件（I2 的溯源锚），租约只是基础设施，不顶替「这次请求」的因果位（`D-376`）。
+    // `row` 是行归属（D-442）：租约推进与重试据此认领「在跑的是哪一行」。
     ctx.append(Fact::new(
         FactKind::Sent,
         key.clone(),
-        json!({"deadline_ms": now_ms.saturating_add(row.lease_ms)}),
+        json!({"deadline_ms": now_ms.saturating_add(row.lease_ms), "row": row.name}),
         now_ms,
     ));
     ctx.append(Fact::new(
@@ -735,7 +802,7 @@ async fn finish(
             ctx.append(Fact::new(
                 FactKind::Sent,
                 key,
-                json!({"deadline_ms": Value::Null, "shard": 1}),
+                json!({"deadline_ms": Value::Null, "shard": 1, "row": row.name}),
                 now_ms,
             ));
         }
@@ -745,7 +812,7 @@ async fn finish(
                 ctx.append(Fact::new(
                     FactKind::Retry,
                     next_key,
-                    json!({"from": attempt, "class": class_name(class), "reason": why}),
+                    json!({"from": attempt, "class": class_name(class), "reason": why, "row": row.name}),
                     now_ms,
                 ));
             } else {
@@ -856,6 +923,8 @@ fn failure_payload(facts: &[Value], row: &DebtRow, class: PortErrorClass, why: &
         // 环侧读原因用 `reason`（notes 的 `reply_of` 与会话收束都读它）；执行体
         // 自带的 `why` 不覆盖，两个键同义并存。
         map.insert("reason".to_string(), json!(why));
+        // 行归属（D-442）：失败的诊断位——哪一行的动作没跑成。
+        map.insert("row".to_string(), json!(row.name));
     }
     payload
 }
