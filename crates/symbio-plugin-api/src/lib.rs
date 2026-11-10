@@ -171,8 +171,8 @@ pub use symbio_sdk::dialog::{
     Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
     REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
-pub use symbio_sdk::llm::{ModelFinishReason, ModelSpend, ModelUsage};
-pub use symbio_sdk::llm::{PromptMessage, PromptToolCall, RoundOutput, RoundToolCallInfo};
+// 一次往返的**产物**五个名字不转出（`D-439` 退回 model 插件）：跨侧共享的是事实键名。
+pub use symbio_sdk::llm::{PromptMessage, PromptToolCall};
 
 // ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core，D-258） ----
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、

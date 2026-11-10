@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 use serde_json::json;
 
 use super::*;
+use crate::round::{ModelUsage, RoundOutput};
 use symbio_plugin_api::port::PortFactReader;
-use symbio_plugin_api::{ModelUsage, RoundOutput, SymbioKey};
+use symbio_plugin_api::SymbioKey;
 
 /// 固定的假 provider：只验证执行体对载荷、错误与产物的处理，不碰传输层。
 struct FakeModel {
@@ -77,7 +78,7 @@ impl ModelProvider for FakeModel {
             FakeOutcome::WithToolCalls => Ok(RoundOutput {
                 finish: ModelFinishReason::ToolCalls,
                 tool_calls: vec![
-                    symbio_plugin_api::RoundToolCallInfo {
+                    crate::round::RoundToolCallInfo {
                         id: Some("call-1".into()),
                         wire_id: Some("wire-1".into()),
                         name: Some("echo".into()),
@@ -85,7 +86,7 @@ impl ModelProvider for FakeModel {
                         parse_error: None,
                         overflow_notice: None,
                     },
-                    symbio_plugin_api::RoundToolCallInfo {
+                    crate::round::RoundToolCallInfo {
                         id: Some("call-2".into()),
                         wire_id: Some("wire-2".into()),
                         name: Some("echo".into()),

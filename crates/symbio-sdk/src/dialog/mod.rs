@@ -62,8 +62,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use symbio_kernel::chat::chat_node::ChatNode;
 use crate::llm::PromptMessage;
+use symbio_kernel::chat::chat_node::ChatNode;
 
 /// `classify` 的入参：这一轮发生了什么
 #[derive(Debug, Clone, Serialize, Deserialize)]

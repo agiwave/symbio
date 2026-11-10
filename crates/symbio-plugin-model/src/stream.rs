@@ -6,6 +6,7 @@
 //! 生命周期日志（请求发起 → 响应头 → 首块 → 首条内容 → 流结束）让卡死可定位到阶段，
 //! 阶段对照表见 [`parse_sse_stream`] 注释。
 use crate::http::STREAM_IDLE_TIMEOUT;
+use crate::round::{ModelUsage, RoundOutput, RoundToolCallInfo};
 use futures::StreamExt;
 use std::collections::HashMap;
 use symbio_plugin_api::chat_node::{
@@ -14,8 +15,7 @@ use symbio_plugin_api::chat_node::{
 use symbio_plugin_api::plugin_error;
 use symbio_plugin_api::plugin_info;
 use symbio_plugin_api::plugin_warn;
-use symbio_plugin_api::ModelUsage;
-use symbio_plugin_api::{llm_emit_message, llm_short_id, RoundOutput, RoundToolCallInfo};
+use symbio_plugin_api::{llm_emit_message, llm_short_id};
 use symbio_plugin_api::{ExecAbortSignal, ExecEventSink};
 
 use super::protocols::{utf8_chunk, ModelProtocolEvent, SseLineParser, SsePartialLineExtractor};

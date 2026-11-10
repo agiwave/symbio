@@ -21,8 +21,9 @@ use super::{
     description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
 };
 use crate::http::get_http_client;
+use crate::round::{ModelFinishReason, ModelUsage};
 use symbio_plugin_api::capability_to_wire;
-use symbio_plugin_api::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
+use symbio_plugin_api::{PluginError, PluginInvokeRequest};
 use tracing::warn;
 
 pub struct AnthropicProtocol {

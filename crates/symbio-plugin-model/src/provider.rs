@@ -31,9 +31,10 @@
 //! `PortExecutor` 的实现搬过去，而不是把这个 trait 再抬回公共面——端口是**数据面
 //! 的接缝**，不是类型面的接缝。
 
+use crate::round::RoundOutput;
 use async_trait::async_trait;
 use symbio_plugin_api::chat_node::ChatNode;
-use symbio_plugin_api::{CapabilityMeta, ExecEnv, PluginError, RoundOutput};
+use symbio_plugin_api::{CapabilityMeta, ExecEnv, PluginError};
 
 /// 一次模型往返的执行契约（本插件私有）。
 ///

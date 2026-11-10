@@ -233,6 +233,13 @@ impl ApprovalBasis {
     }
 }
 
+/// 工具世界内部的可执行契约（`D-440`：工具即端口，本 trait 退场）。
+///
+/// 8 个工具插件都要 `impl` 它（经门面转出命名），而插件之间互不依赖 ⇒ 定义必须落在
+/// 一个共享 crate；这是它今天住内核的**唯一**理由，不是「环的语法」。搬进 `sdk` / 门面
+/// 只换个共享地址，架构里照样有工具契约（`D-439`）。按 DE-053 的 `D-440`：端口集是
+/// 装配期动态收集出来的，工具就是端口；工具插件改 `impl PortProvider` + `PortExecutor`
+/// 后，本 trait 与行的专用载荷一起退场。
 #[async_trait]
 pub trait Capability: Send + Sync + 'static {
     fn meta(&self) -> CapabilityMeta;

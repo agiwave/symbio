@@ -13,8 +13,9 @@ use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{description_for_llm, ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
 use crate::http::get_http_client;
+use crate::round::{ModelFinishReason, ModelUsage};
 use symbio_plugin_api::capability_to_wire;
-use symbio_plugin_api::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
+use symbio_plugin_api::{PluginError, PluginInvokeRequest};
 
 pub struct GeminiProtocol;
 

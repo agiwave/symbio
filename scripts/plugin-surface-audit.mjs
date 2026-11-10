@@ -150,7 +150,12 @@ export const WHITELIST_BASELINE = 0
 // `PromptToolCall` / `ModelFinishReason` / `ModelUsage` / `ModelSpend` 与 `dialog` 的
 // 判决 / 措辞契约，消费方一条没变（HS-003 照旧逐条核）。语法臂同批 −24，见
 // `GRAMMAR_BASELINE` 的注。这是「把读数改成真的」，不是放宽。
-export const SDK_BASELINE = 143
+// 143 → 138（`D-439`）：一次往返的**产物**五个名字（`RoundOutput` / `RoundToolCallInfo` /
+// `ModelFinishReason` / `ModelUsage` / `ModelSpend`）退回 model 插件——`port.model` 之后
+// 会话侧读的是事实键（`usage` / `spend` / `reason`），全仓没有第二个读者，它们不再是
+// 跨插件词汇。留下的请求侧（`PromptMessage` / `PromptToolCall`）与 `dialog` 的三个消费方
+// 没变，所以这是一个**净减**，不是搬臂。
+export const SDK_BASELINE = 138
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。

@@ -15,10 +15,11 @@ use super::{
     MAX_TOOL_CALLS_PER_RESPONSE,
 };
 use crate::protocols::ModelProtocolEvent;
+use crate::round::RoundOutput;
 use crate::tool_accumulator::RoundToolCallAccumulator;
 use std::sync::Mutex;
 use symbio_plugin_api::chat_node::ChatNode;
-use symbio_plugin_api::{ExecEventSink, ExecTranscriptWriter, RoundOutput};
+use symbio_plugin_api::{ExecEventSink, ExecTranscriptWriter};
 
 /// 录制帧的转写写入器：数「ToolCall 节点」的快照帧用了几个不同 id。
 struct RecordingWriter(pub Mutex<Vec<ChatNode>>);

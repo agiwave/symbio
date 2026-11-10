@@ -49,7 +49,7 @@ pub struct TranscriptView {
     pub entries: Vec<TranscriptEntry>,
 }
 
-// 形状本身住内核（它是模型接缝的输入词汇，与 `RoundOutput` 同一类，D-255）；本模块只留
+// 形状本身住 `crate::llm`（模型接缝的**请求**词汇，跨三个插件，D-438）；本模块只留
 // **从转写行构造**它的转换——那是投影的知识，不是模型的词汇。
 use crate::llm::PromptMessage;
 

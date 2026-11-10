@@ -10,6 +10,8 @@
 //!   + 四协议适配（SSE → 标准化事件流，`ping` 健康检查）
 //!   + `resolve_protocol_id` 与 `MODEL_PROTOCOL_*` 注册常量
 //! - `provider`:        `ModelProvider`——一次往返的执行契约（**本插件私有**，D-437）
+//! - `round`:           一次往返的产物与判决（`RoundOutput` / `ModelFinishReason` /
+//!   `ModelUsage` / `ModelSpend`，**本插件私有**，`D-439`）
 //! - `bound_provider`:  `BoundProvider`——绑定配置与协议实现，是上面那条契约的唯一实现
 //! - `port`:            `ModelPort`——`port.model` 的世界提供者（D-298）：解析与
 //!   适配器构造收在本插件，环只按端口名取
@@ -21,9 +23,10 @@
 //! 边界：会话循环（chat_loop / turn_processor / tool_executor / resume /
 //! compression 等）属于 session 插件，model 对 session 零依赖；
 //! 协议抽象 `ModelProtocol`、事件方言 `ModelProtocolEvent`、行解析契约
-//! `SseLineParser`、执行契约 `ModelProvider` 都是本插件私有词汇，core 不承载
-//! 它们——core 只留两侧共用的**数据**：`RoundOutput` / `ModelFinishReason` /
-//! `ModelUsage` / `ModelSpend`（D-437）。
+//! `SseLineParser`、执行契约 `ModelProvider` 与一次往返的产物形状
+//! （`RoundOutput` / `ModelFinishReason` / `ModelUsage` / `ModelSpend`）都是本插件
+//! 私有词汇，架构层不承载它们（`D-437` / `D-439`）——环只按 `port.model` 收事实，
+//! 事实的键名才是跨侧契约。
 
 mod assist;
 mod bound_provider;
@@ -36,6 +39,7 @@ mod plugin;
 mod port;
 mod protocols;
 mod provider;
+mod round;
 mod stream;
 mod tool_accumulator;
 

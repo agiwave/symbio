@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::model_providers::ModelPricing;
-use symbio_plugin_api::ModelUsage;
+use crate::round::ModelUsage;
 
 /// 路径末段才是 id：`<根>/model/<id>.model` 与裸 `<id>` 同解
 #[test]

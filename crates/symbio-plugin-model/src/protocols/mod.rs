@@ -30,11 +30,12 @@ mod sse;
 pub(crate) use sse::utf8_chunk;
 pub use sse::{SseLineParser, SsePartialLineExtractor};
 
+use crate::round::{ModelFinishReason, ModelUsage};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use serde_json::Value;
 use symbio_plugin_api::chat_node::ChatNode;
-use symbio_plugin_api::{CapabilityMeta, ModelFinishReason, ModelUsage, PluginError};
+use symbio_plugin_api::{CapabilityMeta, PluginError};
 
 use super::model_providers::ModelProviderConfig;
 

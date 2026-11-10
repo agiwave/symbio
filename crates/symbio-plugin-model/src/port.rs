@@ -27,12 +27,12 @@ use symbio_plugin_api::port::{
 use symbio_plugin_api::text::{default_tokenizer, HeuristicTokenizer, Tokenizer};
 use symbio_plugin_api::{
     llm_short_id, removed_ids, unselected_roots, CapabilityMeta, CapabilityRow, ClosureReason,
-    Entity, ExecEnv, ExecEventSink, ExecTranscriptWriter, FactDraft, ModelFinishReason,
-    PluginError, PluginInvokeRequestExt, PromptMessage, RoundOutput, RoundToolCallInfo, Verb,
-    EVENT_FAILED, EVENT_RESPONSE,
+    Entity, ExecEnv, ExecEventSink, ExecTranscriptWriter, FactDraft, PluginError,
+    PluginInvokeRequestExt, PromptMessage, Verb, EVENT_FAILED, EVENT_RESPONSE,
 };
 
 use crate::provider::ModelProvider;
+use crate::round::{ModelFinishReason, RoundOutput, RoundToolCallInfo};
 
 /// 本插件服务的端口名（提供者自己定义；契约层不认识它）。
 pub(crate) const MODEL_PORT: &str = "model";
