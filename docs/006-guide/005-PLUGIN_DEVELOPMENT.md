@@ -133,8 +133,13 @@ impl Plugin for MyPlugin {
         let path = ctx.get(PATH).unwrap_or_default();
         if path == TRAVERSE_AVAILABLE_TOOLS {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-                // 工具由**实例**提供：停用 ⇒ 不构造 ⇒ 工具从模型工具面消失
-                visitor.put(CapabilityRow::tool(Arc::new(MyTool))).await;
+                // 工具由**实例**提供：停用 ⇒ 不构造 ⇒ 工具从模型工具面消失。
+                // `register_tool` 是工具注册的唯一收口（D-440）：一次写两条行——
+                // 裹了审批闸的端口行（执行面）与纯元数据的工具行（目录面）。
+                let tool = MyTool;
+                let meta = tool.meta();
+                symbio_providers::register_tool(visitor.as_ref(), meta, None, Arc::new(tool))
+                    .await;
             }
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
@@ -151,9 +156,10 @@ mod tests;
 **跨插件调用只走地址**（`ctx.parent()` + `route`），**不要**依赖兄弟插件的 crate
 （E-009 判清单 / 源码 / `include!` 五条通路）——插件之间互不可见是架构公理。
 
-### 3. 工具（`Capability`）
+### 3. 工具（`PortExecutor`）
 
-工具不是 `traverse` 里返回的 JSON，而是一个实现 `Capability` 的类型，由 `traverse` 装进收集器：
+工具不是 `traverse` 里返回的 JSON，而是一个实现 `PortExecutor` 的类型（`D-440`：
+工具即端口），由 `traverse` 经 `register_tool` 装进收集器：
 
 ```rust
 // crates/symbio-plugin-my_plugin/src/tool.rs
@@ -161,15 +167,14 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use symbio_plugin_api::{
-    Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
-    PluginInvokeRequest,
+    port_result, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
+    PluginInvokeRequest, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 
 pub(crate) struct MyTool;
 
-#[async_trait]
-impl Capability for MyTool {
-    fn meta(&self) -> CapabilityMeta {
+impl MyTool {
+    pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: "my_greet".to_string(),
             description: "向某人打招呼".to_string(),
@@ -185,7 +190,25 @@ impl Capability for MyTool {
         }
     }
 
-    async fn execute(
+}
+
+#[async_trait]
+impl PortExecutor for MyTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        // 端口外壳：调用方上下文缺席 = 无法拆信封，诚实失败
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let env = ExecEnv::from_request(&*ctx);
+        port_result(self.run(input.payload, &env, ctx).await)
+    }
+}
+
+impl MyTool {
+    async fn run(
         &self,
         args: Value,
         _env: &ExecEnv,
