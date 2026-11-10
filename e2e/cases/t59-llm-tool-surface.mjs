@@ -24,7 +24,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   addMcpServer,
   makeAgentDir,
@@ -66,7 +66,7 @@ export default defineCase(
       await llm.reset();
       const hd1 = makeHomedir({
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-        pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+        pluginConfigs: { ...dialogFaceOff() },
       });
       try {
         const r1 = await runCli({
@@ -88,7 +88,7 @@ export default defineCase(
       await llm.reset();
       const hd2 = makeHomedir({
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-        pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+        pluginConfigs: { ...dialogFaceOff() },
       });
       makeSkill(hd2.homedir, 'probe-skill');
       try {
@@ -111,7 +111,7 @@ export default defineCase(
       await llm.reset();
       const hd3 = makeHomedir({
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-        pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+        pluginConfigs: { ...dialogFaceOff() },
       });
       addMcpServer(hd3, 'mockserv', {
         type: 'stdio',
@@ -145,7 +145,7 @@ export default defineCase(
       await llm.reset();
       const hd4 = makeHomedir({
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-        pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+        pluginConfigs: { ...dialogFaceOff() },
       });
       makeAgentDir(hd4.homedir, {
         id: 't59-agent',

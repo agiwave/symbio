@@ -26,7 +26,7 @@ import {
   runCli,
   startReadbackCli,
   readSessionMessages,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   nextPort,
   waitFor,
   assert,
@@ -75,7 +75,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 断言按请求轮廓写，与对话面正交 ⇒ 钉死（理由见 `DIALOG_FACE_OFF`）。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
 

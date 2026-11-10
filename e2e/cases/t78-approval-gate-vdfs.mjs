@@ -45,7 +45,7 @@ import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   runCli,
@@ -119,7 +119,7 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     // 预置两份待删文件（A/B 幕各一）；两幕走两个独立会话、同一 workdir——**每次跑之前重铺**。

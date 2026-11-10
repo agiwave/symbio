@@ -1,12 +1,17 @@
-//! `session/config.rs` 的单元测试 —— 记忆两道闸门 + 四个能力开关的取值与下界。
+//! `session/config.rs` 的单元测试 —— 记忆两道闸门、会话基底开关与建树策略。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
 //! 缺省值 / 向后兼容 / 「面板默认值与 serde 同源」的不变式由 `plugin.test.rs`
 //! 的 `config_definition_defaults_come_from_session_config` 锁定，这里**刻意不重复**。
-//! 本文件只回答「取值与出厂决定」这一件事——「出厂决定」指那些一旦翻转就会改变
-//! 用户可见行为的默认值（`classify_enabled` / `compose_enabled` / `opening_enabled`
-//! / `progress_enabled`），它们必须被断言钉住。
+//!
+//! ## 能力开关的默认值不在这里
+//!
+//! `classify_enabled` / `compose_enabled` / `conation_enabled` /
+//! `skill_compile_enabled` / `task_cap` 的出厂值随 D-427 迁到各自能力插件，
+//! 由那里的 `config.test.rs` 钉住（`classify` / `compose` / `conation` / `skill` /
+//! `task` 各一条）。本文件只钉**仍归会话基底**的那几格：记忆闸门、开场白、
+//! 中途汇报、建树策略——它们的实现体还在本插件里，翻默认值仍会改变用户可见行为。
 
 use super::*;
 
@@ -57,50 +62,6 @@ fn missing_memory_keys_fall_back_to_defaults() {
     );
 }
 
-/// 出厂**打开**判决与措辞："先交机制、默认关闭"已经结束——`compose` 的两条
-/// 产线已落地，`Answered` 必然有话说（最差是变体兜底），沉默的前提不复存在。
-///
-/// 本断言把「翻默认值」这一动作钉在**同一个改动**里：翻转它的人必须同时让措辞侧就位，
-/// 否则「你好」会变成沉默（那是回归，不是"少说一句"）。
-#[test]
-fn classify_and_compose_are_on_by_default() {
-    let c = SessionConfig::default();
-    assert!(c.classify_enabled);
-    assert!(c.compose_enabled);
-    assert!(default_classify_enabled());
-    assert!(default_compose_enabled());
-}
-
-/// 存量 `PLUGIN.yml` 没有这两个键时按缺省补齐（`#[serde(default)]` 的意义）
-#[test]
-fn missing_classify_and_compose_keys_fall_back_to_defaults() {
-    let c: SessionConfig = serde_json::from_str(r#"{"max_messages": 42}"#).unwrap();
-    let d = SessionConfig::default();
-    assert_eq!(c.classify_enabled, d.classify_enabled);
-    assert_eq!(c.compose_enabled, d.compose_enabled);
-}
-
-/// 两级开关**相互独立**：措辞关掉不会连累判决，判决关掉也不影响措辞配置。
-///
-/// 这不是"两个布尔恰好不同"——它们回答两个不同的问题（要不要干活 / 说什么），
-/// 组合起来四种形态都合法（见 `ChatOrchestrator::compose_enabled` 的说明）。
-#[test]
-fn classify_and_compose_switches_are_independent() {
-    let only_classify = SessionConfig {
-        classify_enabled: true,
-        compose_enabled: false,
-        ..SessionConfig::default()
-    };
-    assert!(only_classify.classify_enabled && !only_classify.compose_enabled);
-
-    let only_reply = SessionConfig {
-        classify_enabled: false,
-        compose_enabled: true,
-        ..SessionConfig::default()
-    };
-    assert!(!only_reply.classify_enabled && only_reply.compose_enabled);
-}
-
 /// 出厂**关闭**中途汇报，但三个上界仍是"打开即生效"的有意义取值。
 ///
 /// 关掉它的理由：机制化前端已按节点自身呈现「在跑什么 / 跑了多久」（工具子骨架运行态）
@@ -130,7 +91,7 @@ fn progress_reporting_is_off_by_default_but_bounds_stay_meaningful() {
 /// 与 `progress_enabled` 同一条理由：机制化前端的 Typing 占位已接管「点发送后立刻有动静」
 /// 这一职责，那句模板旁白（"我先看一下" / "好，我来处理"）与执行过程信息重复。
 /// 关掉后本轮照旧进工具循环干活，只是不说这句；真实答复（`Answered`）不受影响——
-/// 那是 `compose_enabled` 管的另一句话。
+/// 那是 `compose_enabled` 管的另一句话（该开关已归 `compose` 插件，D-427）。
 #[test]
 fn opening_remark_is_off_by_default() {
     let c = SessionConfig::default();
@@ -145,25 +106,23 @@ fn missing_opening_key_falls_back_to_default() {
     assert_eq!(c.opening_enabled, SessionConfig::default().opening_enabled);
 }
 
-/// 开场白开关与措辞**相互独立**：关掉开场白不牵连真实答复，反之亦然。
-///
-/// 这是本开关存在的核心理由——`compose_enabled` 一关会连 `Answered` 的答复一起没，
-/// 而"只想去掉派活前那句旁白、答复照常"必须是可表达的。合并成一个开关就做不到。
+/// 开场白与中途汇报**相互独立**：两个开关回答两个不同问题（派活前说不说一句 /
+/// 长任务中途要不要打断），关掉一个不该连累另一个。
 #[test]
-fn the_opening_switch_is_independent_of_compose() {
-    let only_answer = SessionConfig {
-        compose_enabled: true,
-        opening_enabled: false,
-        ..SessionConfig::default()
-    };
-    assert!(only_answer.compose_enabled && !only_answer.opening_enabled);
-
+fn the_opening_switch_is_independent_of_progress() {
     let only_opening = SessionConfig {
-        compose_enabled: false,
         opening_enabled: true,
+        progress_enabled: false,
         ..SessionConfig::default()
     };
-    assert!(!only_opening.compose_enabled && only_opening.opening_enabled);
+    assert!(only_opening.opening_enabled && !only_opening.progress_enabled);
+
+    let only_progress = SessionConfig {
+        opening_enabled: false,
+        progress_enabled: true,
+        ..SessionConfig::default()
+    };
+    assert!(!only_progress.opening_enabled && only_progress.progress_enabled);
 }
 
 /// 存量 `PLUGIN.yml` 没有这三个键时按缺省补齐（`#[serde(default)]` 的意义）
@@ -174,21 +133,6 @@ fn missing_progress_keys_fall_back_to_defaults() {
     assert_eq!(c.progress_enabled, d.progress_enabled);
     assert_eq!(c.progress_interval_ms, d.progress_interval_ms);
     assert_eq!(c.progress_max_per_turn, d.progress_max_per_turn);
-}
-
-/// 汇报开关与判决 / 措辞**相互独立**：关掉汇报不影响另外两个，反之亦然。
-///
-/// 与上面那条同一条理由——它们回答三个不同的问题（要不要判 / 说什么 / 要不要
-/// 中途打断）。合并成一个开关会让"只想要其中两个"变成不可能。
-#[test]
-fn the_progress_switch_is_independent_of_the_other_two() {
-    let c = SessionConfig {
-        classify_enabled: true,
-        compose_enabled: true,
-        progress_enabled: false,
-        ..SessionConfig::default()
-    };
-    assert!(c.classify_enabled && c.compose_enabled && !c.progress_enabled);
 }
 
 /// 建树策略出厂 = `grouped`（保持今天行为）：`flat` 才改组树，故默认档必须与
@@ -239,35 +183,4 @@ fn missing_presentation_tree_key_falls_back_to_default() {
     let c: SessionConfig = serde_json::from_str(r#"{"max_messages": 42}"#).unwrap();
     assert_eq!(c.presentation_tree, default_presentation_tree());
     assert_eq!(c.presentation_tree(), PresentationTree::Grouped);
-}
-
-/// 「欲」升格开关出厂关着（E3 平凡值，[DE-001 §4.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：关掉后心跳照常触发、「欲」照常
-/// 入格，只是**一条自主任务都不产生**——退化为纯响应式且仍完整运行。
-///
-/// 这条默认值一旦翻转，每个开了心跳的会话都会凭空多出 `budget_ms = 86400000` 的
-/// 长目标进就绪集（模型唯一的调度候选来源），属于必须钉住的出厂决定。
-#[test]
-fn conation_is_off_by_default_and_falls_back_when_the_key_is_missing() {
-    let d = SessionConfig::default();
-    assert!(!d.conation_enabled);
-    assert!(!default_conation_enabled());
-    let from_empty: SessionConfig = serde_json::from_str("{}").unwrap();
-    assert!(!from_empty.conation_enabled);
-}
-
-/// 技能编译开关出厂关着（DE-041 §4 平凡值 `projection = recall`：不编译，只检索）。
-///
-/// 这条默认值一旦翻转，每个会话都会在收束时凭空多出一条 `memory.encoded`——
-/// 技能集随对话长度增长，而它的回退机制还没被用户认可过。关掉时整条
-/// 编译 → 校准 → 回退链路**原地待命且不产生任何事实**，系统退化为纯检索。
-#[test]
-fn skill_compile_is_off_by_default_and_falls_back_when_the_key_is_missing() {
-    let d = SessionConfig::default();
-    assert!(!d.skill_compile_enabled);
-    assert!(!default_skill_compile_enabled());
-    let from_empty: SessionConfig = serde_json::from_str("{}").unwrap();
-    assert!(!from_empty.skill_compile_enabled);
-    // 键是**可配**的（默认值不是不可覆盖的常量）。
-    let on: SessionConfig = serde_json::from_str(r#"{"skill_compile_enabled":true}"#).unwrap();
-    assert!(on.skill_compile_enabled);
 }

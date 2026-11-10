@@ -52,7 +52,7 @@ import {
   defineCase,
   providerConfig,
   PROVIDER_ID,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   waitFor,
   nextPort,
   readSessionMessages,
@@ -140,7 +140,7 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         gateway: gatewayConfig(GATEWAY_PORT),
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     writeFileSync(join(hd.workdir, 'README.md'), `${WS_MARKER}\n`);

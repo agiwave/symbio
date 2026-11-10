@@ -7,8 +7,11 @@
 //! 的事：**指令段怎么写**——它直接决定答话像不像"这个助手本人"，而调它不该需要
 //! 改代码重编译。
 //!
-//! 「要不要用 `compose`」仍然**不在这里**——那归调用方（会话侧的措辞策略）。
-//! 判据同样是：插件目录 = 配置目录，各管各的旋钮。
+//! 「要不要用 `compose`」现在也在**这里**（D-427）：`compose_enabled` 曾由
+//! `SessionConfig` 代管，并且会话还要去债表按 `PLUGIN_ID_COMPOSE` 查本插件在场，
+//! 才能算出有效开关。如今本插件挂载即贡献自己的开关值，未挂载 ⇒ 那一格缺席 ⇒
+//! 读方按出厂值 `false` 收敛；会话不再认识本插件的名字。判据同样是：插件目录 =
+//! 配置目录，各管各的旋钮。
 //!
 //! ## 键的平凡值
 //!
@@ -24,8 +27,16 @@
 use serde::{Deserialize, Serialize};
 
 /// Compose 配置 —— 本插件的旋钮（字段真源）
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeConfig {
+    /// 要不要生成对话面措辞（D-427：本插件自持的开关，出厂 `true`）。
+    ///
+    /// 出厂值必须与迁移前 `SessionConfig::compose_enabled` 一致；过去会话还要
+    /// 「配置值 ∧ 债表里 compose 在场」才算有效，现在**挂载即贡献**：卸载时这一格
+    /// 直接缺席，读方按 `false` 收敛，等价且不需要按名字查表。
+    #[serde(default = "default_compose_enabled")]
+    pub compose_enabled: bool,
+
     /// 生成指令段的覆盖（缺席 ⇒ 用内置那份，见 `wording::INSTRUCTION`）。
     ///
     /// 覆盖的是**指令段**，不是整个系统提示词：注册段（人格 / 记忆）必须照旧拼在
@@ -41,6 +52,20 @@ pub struct ComposeConfig {
     /// 降级而不失效。
     #[serde(default)]
     pub model: Option<String>,
+}
+
+pub fn default_compose_enabled() -> bool {
+    true
+}
+
+impl Default for ComposeConfig {
+    fn default() -> Self {
+        Self {
+            compose_enabled: default_compose_enabled(),
+            instruction: None,
+            model: None,
+        }
+    }
 }
 
 impl ComposeConfig {

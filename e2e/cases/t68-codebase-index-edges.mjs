@@ -36,7 +36,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   nextPort,
@@ -123,7 +123,7 @@ export default defineCase(
       const GATEWAY_PORT = nextPort();
       const hd = makeHomedir({
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-        pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), session: { ...DIALOG_FACE_OFF } },
+        pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), ...dialogFaceOff() },
       });
       // 两个源码文件（各 1 块）⇒ 块数 ≤ 默认 limit(8) ⇒ 两模式下标记所在块都必然进结果集。
       mkdirSync(join(hd.workdir, 'src'), { recursive: true });
@@ -239,7 +239,7 @@ export default defineCase(
       const GATEWAY_PORT = nextPort();
       const hd = makeHomedir({
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-        pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), session: { ...DIALOG_FACE_OFF } },
+        pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), ...dialogFaceOff() },
       });
       // **刻意什么都不写**：工作区无可索引源码文件 ⇒ `scan_files` 空 ⇒ `get_index` 返回 None
       // ⇒ 落到 `keyword_search`，`mode = "keyword_fallback"`、`index = null`。

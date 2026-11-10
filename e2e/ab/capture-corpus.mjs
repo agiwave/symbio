@@ -15,7 +15,7 @@ import {
   E2E_ROOT,
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   addMcpServer,
   cleanupHomedir,
   runCli,
@@ -48,7 +48,7 @@ const hd = makeHomedir({
       inbound_token: '',
       inbound_readonly: false,
     },
-    session: { ...DIALOG_FACE_OFF },
+    ...dialogFaceOff(),
   },
 });
 addMcpServer(hd, 'mockserv', {

@@ -38,7 +38,7 @@ import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   addMcpServer,
   cleanupHomedir,
   runCli,
@@ -105,7 +105,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`）。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     // MCP stdio 工具：`echo` 的返回是确定的（`JSON.stringify(参数)`），断言

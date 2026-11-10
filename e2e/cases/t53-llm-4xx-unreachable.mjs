@@ -6,7 +6,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   nextPort,
@@ -33,7 +33,7 @@ export default defineCase('T53 LLM 不可用：401 错误态与起点不可达�
   const hd = makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
     pluginConfigs: {
-      session: { ...DIALOG_FACE_OFF },
+      ...dialogFaceOff(),
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',
@@ -49,7 +49,7 @@ export default defineCase('T53 LLM 不可用：401 错误态与起点不可达�
   const hdDead = makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(deadPort) }],
     pluginConfigs: {
-      session: { ...DIALOG_FACE_OFF },
+      ...dialogFaceOff(),
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',

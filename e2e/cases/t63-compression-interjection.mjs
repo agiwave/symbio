@@ -23,17 +23,15 @@ import './_selfrun.mjs';
 //
 // 触发参数与 t8/t18 同一口径：mock 恒报 `prompt_tokens: 64`（见 `mock-llm.mjs`），
 // 上限取 80 ⇒ 每轮越线。
-import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   startLongLivedCli,
   subscribeSessionRealtime,
   waitFor,
-  readFileSyncSafe,
+  sessionWalEvents,
   assert,
   assertEq,
   defineCase,
@@ -66,21 +64,6 @@ const SNAPSHOT = [
   '</state_snapshot>',
 ];
 
-/** 会话事实源：live 段 + 归档段（`transcripts/wal-archive`）的并集。 */
-const walEvents = (homedir, sid) => {
-  const dir = join(homedir, 'session', sid);
-  const archiveDir = join(dir, 'transcripts', 'wal-archive');
-  const texts = [join(dir, 'v2-events.wal')];
-  if (existsSync(archiveDir)) {
-    for (const name of readdirSync(archiveDir)) texts.push(join(archiveDir, name));
-  }
-  return texts
-    .map(readFileSyncSafe)
-    .join('')
-    .split('\n')
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line));
-};
 
 /** 一条请求的 system 正文（摘要请求 = compact 插件的压缩指令）。 */
 const systemTextOf = (q) => {
@@ -119,7 +102,7 @@ export default defineCase(
         { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 80 }) },
       ],
       pluginConfigs: {
-        session: { context_messages: 0, ...DIALOG_FACE_OFF },
+        ...dialogFaceOff({ session: { context_messages: 0 } }),
         gateway: {
           inbound_enabled: true,
           inbound_protocol: 'http',
@@ -201,13 +184,13 @@ export default defineCase(
         { what: '插话进了某一轮主请求的 messages（被消费，没被压缩吞掉）', timeoutMs: 60_000 },
       );
       await waitFor(
-        () => walEvents(hd.homedir, SID).some((e) => e.kind === 'session.consolidated'),
+        () => sessionWalEvents(hd.homedir, SID).some((e) => e.kind === 'session.consolidated'),
         { what: 'session.consolidated 落格', timeoutMs: 30_000 },
       );
       await waitTurns(turnsBeforeInterject + 1, '插话轮收束');
 
       // ── ④ 判据：压缩真的完成，且载荷是压缩 Notice ───────────────────────
-      const events = walEvents(hd.homedir, SID);
+      const events = sessionWalEvents(hd.homedir, SID);
       const consolidated = events.filter((e) => e.kind === 'session.consolidated');
       assert(consolidated.length >= 1, '应至少落一条 session.consolidated');
       const nodes = consolidated[0].payload?.messages ?? [];
@@ -235,7 +218,7 @@ export default defineCase(
       );
 
       // ── ⑥ 判据：插话没被丢弃、也没被重放（事实源 live + 归档并集恰好一条）──
-      const allEvents = walEvents(hd.homedir, SID);
+      const allEvents = sessionWalEvents(hd.homedir, SID);
       const interjectFacts = allEvents.filter(
         (e) => e.kind === 'user.message' && String(e.payload?.text ?? '') === INTERJECT,
       );

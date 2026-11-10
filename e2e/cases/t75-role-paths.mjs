@@ -31,7 +31,7 @@ import {
   MockLlm,
   makeHomedir,
   makeAgentDir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   runCli,
@@ -150,7 +150,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 对话面三项按 `DIALOG_FACE_OFF` 钉死（与 t42 同一条理由）。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     // 工人智能体目录：`agent_run` 的落点（t42 的 `reviewer` 同款）。

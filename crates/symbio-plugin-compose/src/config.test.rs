@@ -15,6 +15,17 @@ fn missing_keys_fall_back_to_defaults() {
     assert_eq!(ComposeConfig::default().instruction_override(), None);
 }
 
+/// D-427：自持开关出厂为开，且关掉是一条可写进配置的取值。
+/// 出厂值必须与迁移前 `SessionConfig::compose_enabled` 一致，否则卸载或缺键会
+/// 把「默认开」静默变成「默认关」。
+#[test]
+fn compose_enabled_defaults_to_on_and_stays_reachable() {
+    assert!(ComposeConfig::default().compose_enabled);
+    assert!(default_compose_enabled());
+    let c: ComposeConfig = serde_json::from_str(r#"{"compose_enabled": false}"#).unwrap();
+    assert!(!c.compose_enabled);
+}
+
 /// 指令段覆盖能从配置里写进来
 #[test]
 fn instruction_comes_from_config() {

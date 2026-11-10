@@ -46,7 +46,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   startReadbackCli,
@@ -172,7 +172,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 对话面钉死：本用例按精确请求数下标断言，主题与对话面正交（见 `DIALOG_FACE_OFF`）。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
 

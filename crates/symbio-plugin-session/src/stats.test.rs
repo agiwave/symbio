@@ -86,7 +86,7 @@ fn read_path(
         viewer,
         principal,
         false,
-        crate::config::TASK_CAP,
+        symbio_plugin_api::TASK_CAP,
     )
 }
 
@@ -1495,7 +1495,7 @@ fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
             viewer,
             symbio_sdk::authz::PRINCIPAL_MAIN,
             enabled,
-            crate::config::TASK_CAP,
+            symbio_plugin_api::TASK_CAP,
         )
         .expect("读数")
     };

@@ -70,7 +70,9 @@ export default defineCase(
       // 对话面**显式全开**：本用例验的就是它们，不能依赖默认值（默认值翻转
       // 不该悄悄改变本用例验的是什么）。
       pluginConfigs: {
-        session: { classify_enabled: true, compose_enabled: true, progress_enabled: true },
+        classify: { classify_enabled: true },
+        compose: { compose_enabled: true },
+        session: { progress_enabled: true },
       },
     });
 

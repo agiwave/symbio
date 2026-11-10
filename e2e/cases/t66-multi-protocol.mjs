@@ -26,7 +26,7 @@ import {
   E2E_ROOT,
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   addMcpServer,
   cleanupHomedir,
   runCli,
@@ -133,7 +133,7 @@ export default defineCase('T66 多协议适配：同一用户链路在四协议�
           inbound_token: '',
           inbound_readonly: false,
         },
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     addMcpServer(hd, 'mockserv', {

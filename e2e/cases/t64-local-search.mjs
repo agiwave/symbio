@@ -33,7 +33,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   nextPort,
@@ -101,7 +101,7 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
 

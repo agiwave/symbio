@@ -499,11 +499,28 @@ impl SessionPlugin {
             Some(agent) => symbio_sdk::authz::principal_of(Some(&agent)),
             None => symbio_sdk::authz::request_principal(ctx.as_ref()),
         };
-        // 技能编译开关是部署配置（不在这份事实源里）：与已编译数并读，才分得清
-        // 「关着」与「开着但没编译过」两种零。
+        // 这两个数是能力方贡献的（D-427）：技能编译开关归 `skill`、就绪集容量归
+        // `task`。统计是**读方**，按共享名读最近一条 `session.config`；读不到就用
+        // 出厂值——与所有读快照的决策同一口径，本插件不再持有这两格的配置类型。
+        // 与已编译数并读，才分得清「关着」与「开着但没编译过」两种零。
         let (skill_compile_enabled, task_cap) = {
-            let cfg = self.config.read().await;
-            (cfg.skill_compile_enabled, cfg.task_cap)
+            let latest = snapshot.as_ref().and_then(|events| {
+                events
+                    .iter()
+                    .rev()
+                    .find(|e| e.kind == symbio_plugin_api::events::EVENT_SESSION_CONFIG)
+                    .map(|e| &e.payload)
+            });
+            let flag = latest
+                .and_then(|p| p.get("skill_compile_enabled"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let cap = latest
+                .and_then(|p| p.get("readyset_cap"))
+                .and_then(serde_json::Value::as_u64)
+                .map(|v| v as usize)
+                .unwrap_or(symbio_plugin_api::TASK_CAP);
+            (flag, cap)
         };
         let stats = read(
             &sid,

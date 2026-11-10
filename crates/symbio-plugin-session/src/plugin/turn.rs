@@ -224,52 +224,59 @@ impl SessionPlugin {
         } else {
             None
         };
-        let cfg = self.config.read().await.clone();
-        // 答话措辞的**有效开关**：调用方开关 ∧ compose 本轮的债表在场（`debt` 族报到）。
-        // 关掉 / 未挂载时，本插件不欠 `session.answer` 债，也不欠 `model.assist` 往返；
-        // 模型行按「`plugin_row` 端口有没有人认领」自己判断，不读这个字段（D2）。
-        let compose_enabled = cfg.compose_enabled
-            && manager
-                .list(symbio_plugin_api::debt::DEBT_FAMILY)
-                .await
+        // 当轮配置快照 = 会话基底格 + 能力包在开轮 traverse 里各自贡献的格（D-427）。
+        //
+        // 两半的分工就是「谁的真源谁写」：`opening_*` / `progress_*` 的真源在本插件
+        // （实现体也仍在本插件，残留账见 `docs/007-task/005-会话内实现体收口.md`），
+        // 故**在这里直接投影**——不绕一次广播，也就不依赖本插件 `traverse` 与这次
+        // 写格的先后。能力开关的真源在能力包，本插件不认识它们的键名，只按 owner
+        // 合并收集口给出的那一张表；不按插件名去债表查「谁在场」——卸载一个能力包，
+        // 它的格子自然缺席，读方按自己的出厂值收敛（T3）。决策仍只读这一条开轮事实。
+        let mut config_payload = serde_json::Map::new();
+        config_payload.insert("system_prompt".to_string(), json!(system_prompt));
+        config_payload.insert("tools".to_string(), json!(tools));
+        // 兜底表达：空表原因 / 收集错误明细（均为既有 config 载荷的字段，
+        // 不是新事件类型）。非空表时前者为 null，后者为空数组。
+        config_payload.insert("tools_empty_reason".to_string(), json!(tools_empty_reason));
+        config_payload.insert(
+            "capability_errors".to_string(),
+            json!(capability_errors
                 .iter()
-                .any(|row| row.name() == format!("<debt>{}", symbio_plugin_api::PLUGIN_ID_COMPOSE));
+                .map(|e| json!({ "plugin": e.plugin, "message": e.message }))
+                .collect::<Vec<_>>()),
+        );
+        {
+            let cfg = self.config.read().await;
+            config_payload.insert("opening_enabled".to_string(), json!(cfg.opening_enabled));
+            config_payload.insert("progress_enabled".to_string(), json!(cfg.progress_enabled));
+            config_payload.insert(
+                "progress_interval_ms".to_string(),
+                json!(cfg.progress_interval_ms),
+            );
+            config_payload.insert(
+                "progress_max_per_turn".to_string(),
+                json!(cfg.progress_max_per_turn),
+            );
+            config_payload.insert(
+                "progress_min_rounds".to_string(),
+                json!(cfg.progress_min_rounds),
+            );
+            config_payload.insert(
+                "progress_lease_ms".to_string(),
+                json!(cfg.progress_lease_ms),
+            );
+            config_payload.insert(
+                "progress_max_attempts".to_string(),
+                json!(cfg.progress_max_attempts),
+            );
+        }
+        config_payload.extend(symbio_sdk::capability::capability_config_snapshot(&*manager).await);
         let config_draft = FactDraft {
             key: session_config_id(&item.id),
             kind: EVENT_SESSION_CONFIG.to_string(),
             entity: Entity::Scope,
             verb: Verb::Asserted,
-            payload: json!({
-                "system_prompt": system_prompt,
-                "tools": tools,
-                "classify_enabled": cfg.classify_enabled,
-                // 首响开关（调用方开关；没有 compose 时行会因路由取不到措辞而失败、
-                // 收敛为「不说话」）。模型债行不再读它：它等的是 `plugin_row` 端口
-                // 这一圈的认领，首响行不开就没人认领——缺席即收束。
-                "opening_enabled": cfg.opening_enabled,
-                // 答话措辞的**有效**开关：compose 的 `model.assist` 口债与会话的
-                // `session.answer` 债都按它决定欠不欠；模型行不读它。
-                "compose_enabled": compose_enabled,
-                "progress_enabled": cfg.progress_enabled,
-                "progress_interval_ms": cfg.progress_interval_ms,
-                "progress_max_per_turn": cfg.progress_max_per_turn,
-                "progress_min_rounds": cfg.progress_min_rounds,
-                // 债行的租约与尝试上界：策略数随 config 走，债行不写字面量。
-                "progress_lease_ms": cfg.progress_lease_ms,
-                "progress_max_attempts": cfg.progress_max_attempts,
-                "readyset_cap": cfg.task_cap,
-                "skill_compile_enabled": cfg.skill_compile_enabled,
-                // 自主层开关：能力包（#32 迁走后）按共享名读这一格，不拿配置类型
-                // （D-252 / D-379）。
-                "conation_enabled": cfg.conation_enabled,
-                // 兜底表达：空表原因 / 收集错误明细（均为既有 config 载荷的字段，
-                // 不是新事件类型）。非空表时前者为 null，后者为空数组。
-                "tools_empty_reason": tools_empty_reason,
-                "capability_errors": capability_errors
-                    .iter()
-                    .map(|e| json!({ "plugin": e.plugin, "message": e.message }))
-                    .collect::<Vec<_>>(),
-            }),
+            payload: serde_json::Value::Object(config_payload),
             // 溯源指同一轮刚落的 `user.message`（seq 就是它的号）。
             produced_by: Some(seq),
         };

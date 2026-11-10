@@ -33,7 +33,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   readSessionMessages,
@@ -96,7 +96,7 @@ export default defineCase(
         // 任务表挂在轮末收束的 `derived_facts::record_derived` 上（与 t30 同款）。
         // `task_cap: 3`：本用例要看见**两个**候选（t1 与 t3）——平凡值 `1` 会把就绪集
         // 截成一笔（串行 FIFO），那条「依赖关系真的穿到读侧」的判据就看不见了。
-        session: { ...DIALOG_FACE_OFF, task_cap: 3 },
+        ...dialogFaceOff({ task: { readyset_cap: 3 } }),
       },
     });
 

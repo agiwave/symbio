@@ -33,7 +33,7 @@ import {
   MockLlm,
   makeHomedir,
   makeAgentDir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   runCli,
@@ -72,7 +72,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 每轮收束把事实写进事实源（actor = 会话主体）。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     // reflex 智能体目录：会话绑定 `reflex` 时能力收集要求它存在（与 t30 / t71 同一硬约束）。

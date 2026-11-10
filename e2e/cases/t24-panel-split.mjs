@@ -108,12 +108,16 @@ function gatewayConfig(port) {
 
 /** 汇报要真的发生：判决关掉（本用例不验判决），措辞与汇报打开、阈值配到恒成立 */
 const SESSION = {
-  classify_enabled: false,
-  compose_enabled: true,
   progress_enabled: true,
   progress_interval_ms: 0,
   progress_min_rounds: 1,
   progress_max_per_turn: 5,
+};
+
+/** 对话面各归自己的插件（D-427）：判决关、措辞开 */
+const DIALOG = {
+  classify: { classify_enabled: false },
+  compose: { compose_enabled: true },
 };
 
 export default defineCase(
@@ -123,7 +127,7 @@ export default defineCase(
     const port = nextPort();
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-      pluginConfigs: { gateway: gatewayConfig(port), session: SESSION },
+      pluginConfigs: { gateway: gatewayConfig(port), ...DIALOG, session: SESSION },
     });
     const cli = startLongLivedCli({
       homedir: hd.homedir,

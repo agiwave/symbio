@@ -14,14 +14,13 @@ import './_selfrun.mjs';
 // 水位口径：mock 打开 `usageFromRequest`，把请求体按 CJK 1 token/字、其余 0.25/字符
 // 粗估（与真实 provider 同一量级）；主请求的实测值随 `model` 收束载荷的 `context`
 // 落进 WAL，读它就是「provider 报的水位」而不是测试自算的。
-import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
   cleanupHomedir,
   runCli,
-  readFileSyncSafe,
+  sessionWalEvents,
   waitFor,
   assert,
   defineCase,
@@ -53,20 +52,6 @@ function estimateTokens(text) {
   return Math.max(1, Math.ceil(weight));
 }
 
-const walEvents = (homedir, sid) => {
-  const dir = join(homedir, 'session', sid);
-  const archiveDir = join(dir, 'transcripts', 'wal-archive');
-  const texts = [join(dir, 'v2-events.wal')];
-  if (existsSync(archiveDir)) {
-    for (const name of readdirSync(archiveDir)) texts.push(join(archiveDir, name));
-  }
-  return texts
-    .map(readFileSyncSafe)
-    .join('')
-    .split('\n')
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line));
-};
 
 const isSummaryRequest = (req) =>
   (req.body?.messages ?? []).some(
@@ -102,7 +87,7 @@ export default defineCase('压缩摘要按预算切片：摘要输入 ≤ k×lim
     });
     assert(r.code === 0, `CLI 退出码（stderr 尾部: ${r.stderr.slice(-600)}）`);
 
-    const events = walEvents(hd.homedir, 'e2e-t106');
+    const events = sessionWalEvents(hd.homedir, 'e2e-t106');
 
     // 夹具规模：转写（user/final 正文）必须比切片预算大一个数量级。
     const transcriptTokens = events

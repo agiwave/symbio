@@ -184,10 +184,11 @@ pub use symbio_sdk::adapters::{
 };
 pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 pub use symbio_sdk::capability::{
-    capability_announce_configurable, capability_configurables, capability_entry_of,
-    capability_model_active, capability_model_resolve, capability_option_fields,
-    capability_prompts, capability_report_error, capability_take_errors, capability_to_wire,
-    capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
+    capability_announce_config_snapshot, capability_announce_configurable,
+    capability_configurables, capability_entry_of, capability_model_active,
+    capability_model_resolve, capability_option_fields, capability_prompts,
+    capability_report_error, capability_take_errors, capability_to_wire, capability_vdfs_root,
+    CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
 };
 pub use symbio_sdk::chat::chat_node::{message_of_node, AssistReply, AssistRequest, SEG_MESSAGES};
 pub use symbio_sdk::clock::clock_now_ms;
@@ -200,10 +201,9 @@ pub use symbio_sdk::event_bus::{
 };
 pub use symbio_sdk::invariants::check_all;
 pub use symbio_sdk::keys::{
-    AGENT_ID, MODE, PATH, PROVIDER_ID, REQUIRED_PLUGINS, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
-    TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
+    AGENT_ID, MODE, PATH, PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
+    REQUIRED_PLUGINS, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
 };
-pub use symbio_sdk::keys::{PRINCIPAL_MAIN, PRINCIPAL_SCHEDULER, PRINCIPAL_USER};
 pub use symbio_sdk::llm::turn::{llm_emit_message, llm_removed_frame, llm_short_id};
 pub use symbio_sdk::plugin::{
     plugin_dir_from_ctx, plugin_expand_tilde_path, PluginConfigFile, PluginConfigMount, PluginDir,

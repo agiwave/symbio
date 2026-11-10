@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   runCli,
@@ -98,7 +98,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 本用例与对话面正交 ⇒ 钉死三个开关，免得每轮多一次静默请求。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
 

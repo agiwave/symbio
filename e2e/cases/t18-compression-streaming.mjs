@@ -34,18 +34,17 @@ import './_selfrun.mjs';
 // 第三步的读数同用这一格：失败应答带 150ms `latencyMs`（模拟 provider 首字节），mock
 // 另记 `doneAt`；用例按主请求分轮数「额外请求数 / 额外往返 ms」，判据是同一前缀判死后，
 // 其后每轮这两项都为 0——即跨轮抑制省下的正是这份重复往返。
-import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   nextPort,
   startReadbackCli,
   readSessionMessages,
-  readFileSyncSafe,
+  sessionWalEvents,
   waitFor,
   assert,
   assertEq,
@@ -64,21 +63,6 @@ const MARKERS = Array.from({ length: ROUNDS }, (_, i) => `第${i + 1}轮问题`)
 const FILL = '上下文填充内容用于推高历史水位。';
 const REPLY = '填充：' + FILL.repeat(240);
 
-/** 会话事实源：live 段 + 归档段（`transcripts/wal-archive`）的并集。 */
-const walEvents = (homedir, sid) => {
-  const dir = join(homedir, 'session', sid);
-  const archiveDir = join(dir, 'transcripts', 'wal-archive');
-  const texts = [join(dir, 'v2-events.wal')];
-  if (existsSync(archiveDir)) {
-    for (const name of readdirSync(archiveDir)) texts.push(join(archiveDir, name));
-  }
-  return texts
-    .map(readFileSyncSafe)
-    .join('')
-    .split('\n')
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line));
-};
 
 /** 一条请求的 system 正文（摘要请求的特征 = compact 插件的摘要指令）。 */
 const systemText = (q) => {
@@ -109,7 +93,7 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
     ],
     pluginConfigs: {
       // 本用例的主题是压缩，与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
-      session: { context_messages: 0, ...DIALOG_FACE_OFF },
+      ...dialogFaceOff({ session: { context_messages: 0 } }),
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',
@@ -141,7 +125,7 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
     );
 
     // B：摘要失败 ⇒ 一条压缩事实都不落
-    const events = walEvents(hd.homedir, 'e2e-t18');
+    const events = sessionWalEvents(hd.homedir, 'e2e-t18');
     const kinds = [...new Set(events.map((e) => e.kind))].join(',');
     assert(
       !events.some((e) => e.kind === 'session.consolidated'),
@@ -287,7 +271,7 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
       { what: '失败产物在重试后重建', timeoutMs: 30_000 },
     );
     assert(
-      !walEvents(hd.homedir, 'e2e-t18').some((e) => e.kind === 'session.consolidated'),
+      !sessionWalEvents(hd.homedir, 'e2e-t18').some((e) => e.kind === 'session.consolidated'),
       '重试仍然失败 ⇒ 仍不得落 session.consolidated',
     );
   } finally {

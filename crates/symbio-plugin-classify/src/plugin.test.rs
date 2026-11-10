@@ -405,7 +405,15 @@ async fn traverse_announces_its_own_config() {
                 .collect()
         })
         .unwrap_or_default();
-    assert_eq!(keys, vec!["rule_shortcut", "model", "system_prompt"]);
+    assert_eq!(
+        keys,
+        vec![
+            "classify_enabled",
+            "rule_shortcut",
+            "model",
+            "system_prompt"
+        ]
+    );
 }
 
 /// E-001 的自证：`PluginMeta` 首参必须等于插件目录名（容器按目录名分发）

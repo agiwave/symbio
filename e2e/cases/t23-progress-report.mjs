@@ -57,6 +57,7 @@ import {
   startLongLivedCli,
   subscribeSessionRealtime,
   readSessionMessages,
+  sessionWalEvents,
   nextPort,
   waitFor,
   assert,
@@ -68,6 +69,15 @@ import {
   msgTypeOf,
   msgRoleOf,
 } from '../helpers.mjs';
+
+/** 事实面读数（**诊断用**，不进判据）：把「少一条汇报」分成两种——
+ * 「只发生了一个轮边界」还是「边界在、汇报没落」。没有这两个数，同一个红灯
+ * 得重跑一遍才知道往哪查。 */
+const walKindCounts = (homedir, sid) => {
+  const events = sessionWalEvents(homedir, sid);
+  const count = (kind) => events.filter((e) => e.kind === kind).length;
+  return `tool.calls.done=${count('tool.calls.done')} chat.assistant.reported=${count('chat.assistant.reported')}`;
+};
 
 /** 三条线各自的会话 id（各自从零开始，断言互不污染） */
 const SIDS = {
@@ -123,8 +133,6 @@ function gatewayConfig(port) {
 /** 长任务那一轮的 session 配置：判决关掉、措辞与汇报打开，阈值配到恒成立 */
 function longTaskSession(overrides) {
   return {
-    classify_enabled: false,
-    compose_enabled: true,
     progress_enabled: true,
     // 0 / 1：让"静默时长"与"最少轮次"两条恒成立，本用例只数**边界**。
     progress_interval_ms: 0,
@@ -149,7 +157,13 @@ export default defineCase(
       const port = nextPort();
       const hd = makeHomedir({
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-        pluginConfigs: { gateway: gatewayConfig(port), session: sessionCfg },
+        pluginConfigs: {
+          gateway: gatewayConfig(port),
+          // 对话面：判决关、措辞开——D-427 之后它们各归自己的插件。
+          classify: { classify_enabled: false },
+          compose: { compose_enabled: true },
+          session: sessionCfg,
+        },
       });
       const cli = startLongLivedCli({
         homedir: hd.homedir,
@@ -231,7 +245,11 @@ export default defineCase(
       const aMsgs = await readSessionMessages(a.cli, SIDS.report);
       assertTranscriptInvariants(aMsgs, 'T23-A');
       const aReports = await reportsOf(a.cli, SIDS.report);
-      assertEq(aReports.length, 2, `A 线两个轮边界应各汇报一次（实得 ${aReports.length} 条）`);
+      assertEq(
+        aReports.length,
+        2,
+        `A 线两个轮边界应各汇报一次（实得 ${aReports.length} 条；事实面 ${walKindCounts(a.hd.homedir, SIDS.report)}）`,
+      );
       for (const r of aReports) {
         assertEq(msgRoleOf(r), 'assistant', '汇报是助手说的话');
         assertEq(msgTypeOf(r), 'text', '汇报是文本节点');

@@ -26,7 +26,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   startLongLivedCli,
   nextPort,
@@ -85,7 +85,7 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         gateway: gatewayConfig(gatewayPort),
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
         // 不装：用户面的工具贡献插件全部停用（mcp 未配 server、无可观测工具，照停
         // 保持装配形状与裁决清单一致）。vdfs 是底座，不停——理由见文件头。
         local: { plugin_enabled: false },

@@ -8,20 +8,46 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use symbio_plugin_api::PLUGIN_ID_TASK;
 use symbio_plugin_api::{
-    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, PATH,
+    plugin_dir_from_ctx, DetailDefinition, DetailField, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, PATH,
 };
 
-pub struct TaskPlugin;
+use crate::config::TaskConfig;
+
+/// 插件的展示标题（元数据一处定义）。
+pub const PLUGIN_TITLE: &str = "任务";
+
+pub struct TaskPlugin {
+    /// 本能力自己的配置（D-427）：真源在 `<根>/task/PLUGIN.yml`。
+    config: TaskConfig,
+    config_file: PluginConfigFile,
+}
 
 impl TaskPlugin {
-    /// 工厂方法（满足 `submit_object_creator!` 协议）。无状态、无配置。
-    pub fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        Arc::new(TaskPlugin) as Arc<dyn Plugin>
+    /// 工厂方法（满足 `submit_object_creator!` 协议）。
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_TASK);
+        let config: TaskConfig = match dir.load::<TaskConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => TaskConfig::default(),
+            Err(e) => {
+                symbio_plugin_api::plugin_warn!("task", "读取自身配置失败，改用默认值：{e}");
+                TaskConfig::default()
+            }
+        };
+        Arc::new(TaskPlugin::new(config, dir)) as Arc<dyn Plugin>
+    }
+
+    pub fn new(config: TaskConfig, dir: PluginDir) -> Self {
+        Self {
+            config,
+            config_file: PluginConfigFile::new(dir, PLUGIN_TITLE, config_definition()),
+        }
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_ID_TASK, "任务")
+        PluginMeta::new(PLUGIN_ID_TASK, PLUGIN_TITLE)
             .with_description("任务表声明、独立验证与返工、就绪集调度")
             .with_version("0.1.14")
     }
@@ -47,10 +73,35 @@ impl Plugin for TaskPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn PluginInvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
+        // 本轮配置快照贡献（D-427）：容量是本能力的知识，由本能力交值；宿主只按
+        // owner 合并，不认识键名。卸载 ⇒ 该格缺席 ⇒ 读方按 TASK_CAP 收敛。
+        symbio_plugin_api::capability_announce_config_snapshot(
+            &ctx,
+            "readyset_cap",
+            serde_json::json!(self.config.readyset_cap),
+        )
+        .await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
+}
+
+fn config_definition() -> DetailDefinition {
+    let d = TaskConfig::default();
+    DetailDefinition::form(
+        PLUGIN_TITLE,
+        vec![DetailField::number(
+            "readyset_cap",
+            "就绪集容量",
+            "一轮最多派几笔就绪任务；卸载本插件同样让这一格缺席，读方按出厂值\
+             收敛（D-427）",
+            1.0,
+            64.0,
+            serde_json::json!(d.readyset_cap),
+        )],
+    )
 }
 
 symbio_plugin_api::submit_object_creator!(PLUGIN_ID_TASK, TaskPlugin::build, dyn Plugin);

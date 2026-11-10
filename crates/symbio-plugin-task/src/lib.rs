@@ -26,6 +26,7 @@
 //! 内部依赖是单向的：`context` / `task` / `readyset` 只读 [`decl`] 的名字；`plugin`
 //! 不认识其余模块。
 
+mod config;
 mod context;
 mod decl;
 mod plugin;

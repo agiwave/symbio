@@ -41,7 +41,7 @@ import {
   cleanupHomedir,
   startLongLivedCli,
   subscribeSessionRealtime,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   waitFor,
   assert,
   assertEq,
@@ -124,7 +124,7 @@ export default defineCase(
         // 每轮多插静默请求（classify / compose）——它们的末条 user 消息**同样**是那句
         // 「断流重发测试」，会把本用例编好的场景抢走（实测：断流落在对话面的静默请求上，
         // 主线工具轮根本没发生）。故钉死（理由见 `DIALOG_FACE_OFF`）。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     const cli = startLongLivedCli({

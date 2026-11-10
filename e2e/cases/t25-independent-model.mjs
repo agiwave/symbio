@@ -85,7 +85,7 @@ function gatewayConfig(port) {
 
 /** 会话配置：判决与措辞都开，汇报**显式关掉**——本用例数请求，不该被汇报调优影响 */
 function sessionConfig() {
-  return { classify_enabled: true, compose_enabled: true, progress_enabled: false };
+  return { progress_enabled: false };
 }
 
 /** 一个请求的 system 段（`round_trip` 的第一条消息；缺席给空串） */

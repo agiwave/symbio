@@ -14,6 +14,16 @@ fn rule_shortcut_defaults_to_on() {
     );
 }
 
+/// D-427：自持开关的出厂值必须与迁移前 `SessionConfig` 一致（默认开），
+/// 否则卸载或缺键会把「默认开」静默变成「默认关」。
+#[test]
+fn classify_enabled_defaults_to_on_and_stays_reachable() {
+    assert!(ClassifyConfig::default().classify_enabled);
+    assert!(default_classify_enabled());
+    let c: ClassifyConfig = serde_json::from_str(r#"{"classify_enabled": false}"#).unwrap();
+    assert!(!c.classify_enabled);
+}
+
 /// 存量 `PLUGIN.yml`（装配期刚补出身份键、还没有本插件业务键）必须能读成缺省
 #[test]
 fn missing_business_keys_fall_back_to_defaults() {

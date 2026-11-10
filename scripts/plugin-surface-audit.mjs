@@ -136,7 +136,10 @@ export const WHITELIST_BASELINE = 0
 // `AssistReply` / `AssistRequest` / `SEG_MESSAGES` / `message_of_node`。净 +2 是把原先
 // 藏在「一行放出整个命名空间」里的实现摊到账上（HS-006 的另一格，D-278），四条的实现
 // 与消费方都没变——不是新增机制面。
-export const SDK_BASELINE = 126
+// 126 → 127（D-427）：能力自持配置之后，插件侧需要一条通用的「本轮快照贡献」声明口。
+// 它满足 §5.1 两条准入：不提任何能力名，且每一条带开关的能力都要用（≥2 条）。
+// 宿主侧读口只有控制面 session 消费，按 HS-003 不上门面（与 `ViewUnavailable` 同例）。
+export const SDK_BASELINE = 127
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。

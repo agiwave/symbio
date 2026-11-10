@@ -14,8 +14,11 @@ dead_code = "warn"
 
 [dependencies]
 symbio-plugin-api = { path = "../symbio-plugin-api" }
+serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
+# `plugin_warn!` 在调用站点展开，宏体里的 `tracing::warn!` 按调用方作用域解析。
+tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

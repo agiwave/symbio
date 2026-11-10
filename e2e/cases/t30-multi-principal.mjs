@@ -52,7 +52,7 @@ import {
   MockLlm,
   makeHomedir,
   makeAgentDir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   runCli,
@@ -206,7 +206,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 每轮收束把事实写进事实源（actor = 会话主体）。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     makeAgentDir(hd.homedir, {

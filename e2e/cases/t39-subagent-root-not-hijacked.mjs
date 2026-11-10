@@ -44,7 +44,7 @@ import {
   MockLlm,
   makeHomedir,
   makeAgentDir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   waitFor,
@@ -108,7 +108,7 @@ export default defineCase(
 
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-      pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+      pluginConfigs: { ...dialogFaceOff() },
     });
     writeFileSync(join(hd.homedir, 'AGENTS.md'), SYS_MEMORY);
     // 子智能体目录自己的 `AGENTS.md`：两棵树的同一条路径指向两份不同的正文。

@@ -36,7 +36,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   startRealtimeSession,
@@ -138,7 +138,7 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
 

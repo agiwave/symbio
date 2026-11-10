@@ -29,7 +29,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   startLongLivedCli,
   nextPort,
@@ -102,7 +102,7 @@ async function bootSide(label, { heartbeatEnabled }) {
     providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
     pluginConfigs: {
       gateway: gatewayConfig(gatewayPort),
-      session: { ...DIALOG_FACE_OFF },
+      ...dialogFaceOff(),
       ...(heartbeatEnabled ? {} : { heartbeat: { plugin_enabled: false } }),
     },
   });

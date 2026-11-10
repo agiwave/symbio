@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   nextPort,
@@ -39,7 +39,7 @@ export default defineCase('T1 文本流式：SSE 分片输出 + 转写落盘', a
         inbound_token: '',
         inbound_readonly: false,
       },
-      session: { ...DIALOG_FACE_OFF },
+      ...dialogFaceOff(),
     },
   });
   let api = null;

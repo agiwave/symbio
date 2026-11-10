@@ -105,55 +105,6 @@ pub struct SessionConfig {
     /// 打爆。上界是**护栏**，不是策略：它只决定"这一批最多几条"，不决定合并与否。
     #[serde(default = "default_supplements_max_per_drain")]
     pub supplements_max_per_drain: usize,
-    /// 轮首判决总开关（**J2 平凡值：`false`**）。
-    ///
-    /// ## 它控制什么
-    ///
-    /// 每一轮开始时是否经容器 `route` 请 `classify` 判一次「直接回答还是派活」：
-    /// - `true`：判一次。`Answered` ⇒ 本轮不进工具循环（收尾）；
-    ///   `Escalate` ⇒ 照旧进工具循环；
-    /// - `false`：**不调用**，全部输入直接进工具循环——与未挂载 `classify` 时逐字一致。
-    ///
-    /// ## 出厂默认为什么是 `true`
-    ///
-    /// 判决本身只输出枚举，面向用户的那句话归 `compose`；在 `compose` 还是平凡实现
-    /// （恒空串）时打开本开关，「你好」会变成**沉默**——那不是"少说一句"，那是回归。
-    /// 因此 `compose` 落地前它只交付机制、默认关闭，并在字段文档里写明「`compose`
-    /// 落地时把默认翻成 `true`」；如今 `compose` 的两条产线（模板 / 生成）都已落地，
-    /// 判决为 `Answered` 时**必然有话说**（最差也是变体兜底），沉默的前提不复存在。
-    ///
-    /// 这与「一批一件事、每批行为可独立回退」是同一条纪律：
-    /// **让功能生效的那一批，负责它带来的全部影响**。
-    ///
-    /// ## 为什么它在 session 的配置面，而「用不用规则表」不在
-    ///
-    /// 本开关问的是「**调用方**要不要请判决」，是调用方的事；而「判决内部用不用规则表」
-    /// 是插件自己的策略，归 `classify` 自己的 `PLUGIN.yml`（`ClassifyConfig::rule_shortcut`）。
-    /// 把后者也塞进这里，等于让调用方为一段它看不见的策略维护一个开关。
-    #[serde(default = "default_classify_enabled")]
-    pub classify_enabled: bool,
-    /// 对话面措辞总开关（**J2 平凡值：`false`**）。
-    ///
-    /// ## 它控制什么
-    ///
-    /// 判决为 `Answered` / `Escalate` 时是否经容器 `route` 请 `compose` 说一句话：
-    /// - `true`：说。`Answered` 的答话进请求包（它就是这一轮的答复）；
-    ///   `Escalate` 的首响**不进**请求包（界面开场白，见 `chat_loop/compose.rs`）；
-    /// - `false`：**不调用**。`Answered` 于是拿不到措辞 ⇒ **降级进工具循环**
-    ///   （不沉默）；`Escalate` 没有首响。与未挂载 `compose` 时逐字一致。
-    ///
-    /// ## 为什么出厂默认就是 `true`
-    ///
-    /// 与 `classify_enabled` 相反：本开关**不需要**等谁落地。关掉它不会让任何东西
-    /// 变沉默——`Answered` 的降级方向是"照旧进工具循环"，那是引入判决之前的行为，
-    /// 完整可用。因此打开它是纯粹的增强，没有"先交机制再生效"的两段式需要。
-    ///
-    /// ## 为什么它在 session 的配置面
-    ///
-    /// 与 `classify_enabled` 同一条：问的是「**调用方**要不要请措辞」。措辞内部
-    /// 用模板还是用模型、用哪个提示词，都是 `compose` 自己的策略，归它自己的配置面。
-    #[serde(default = "default_compose_enabled")]
-    pub compose_enabled: bool,
     /// 对话面开场白（`Escalate` 首响）总开关（**出厂默认：`false`**）。
     ///
     /// ## 它控制什么
@@ -229,114 +180,6 @@ pub struct SessionConfig {
     /// 汇报债行的**最多尝试次数**（含首次）。默认 1：一句旁白重复说比漏说更糟。
     #[serde(default = "default_progress_max_attempts")]
     pub progress_max_attempts: u32,
-    /// 「欲」升格为任务的总开关（**E3 平凡值：`false`**，[DE-008 §2.3](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
-    ///
-    /// ## 它控制什么
-    ///
-    /// 心跳 tick 表达出来的意图（`conation.expressed`）要不要升格成长目标任务
-    /// （`task.opened`，`budget_ms = 86400000`）：
-    /// - `true`：conation 自申报的 `conation.promote` 债在环里判开关 / 授权 / 已声明，
-    ///   执行体据此开格（目标过宽仍拒）；
-    /// - `false`：`DebtSource::rows` 直接交空表 ⇒ **一条自主任务都不产生**，而「欲」
-    ///   照样入格、照样可被读——退化为纯响应式且完整运行。
-    ///
-    /// **口径**（`D-386`）：读的是**本轮** `session.config`（开轮时写），不是上一轮。
-    /// 本轮关掉即本轮不升格，不需要等下一轮。
-    ///
-    /// ## 与心跳开关是**两层**，不合并
-    ///
-    /// 触发（`HeartbeatConfig::enabled`，按会话、藏在 `Session.metadata`）问的是
-    /// 「系统要不要定时做事」；本开关（按插件、藏在 `PLUGIN.yml`）问的是「做出来的事
-    /// 要不要升格为长期任务」。两者的平凡值都关，但关掉的是**不同的东西**——合成一个
-    /// 就没法只关其中一层（DE-042 §4「两层开关独立」）。
-    ///
-    /// 为什么放 session 的配置面：它是**治理策略**（授权 / 预算 / 审计的入口），
-    /// 不是某个插件的内部参数，归编排侧的旋钮面（与 `classify_enabled` 同一条）。
-    ///
-    /// ## 开着之后还有一道长度闸
-    ///
-    /// 判据仍按 `crates/symbio-plugin-conation` 的 `MAX_GOAL_LEN`（**200 字节**）判
-    /// 「目标过宽 ⇒ 拒」。心跳拿 `HeartbeatConfig::prompt` 本身当目标，中文提示词
-    /// 3 字节一个字 ⇒ 约 66 字之后就会每趟被 `goal too broad` 拒掉（`conation.expressed`
-    /// 照样入格，但永远开不出长任务）。要开长目标，提示词就得短于这个上界。
-    #[serde(default = "default_conation_enabled")]
-    pub conation_enabled: bool,
-    /// 技能编译的总开关（**DE-041 §4 平凡值：`false`**，[DE-041 §4](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
-    ///
-    /// ## 它控制什么
-    ///
-    /// 轮末收束时，本轮的**成功轨迹**（`chat.assistant.final` 收束格）要不要被固化成一条
-    /// `memory.encoded{tag:"skill"}`——DE-041 §4 的平凡值 `projection = recall` 说的
-    /// 正是「不编译，只检索」：
-    /// - `true`：技能包的轮末贡献者（`contributor::SkillCompile`）在收束时写技能事件（同文去重，
-    ///   同一句 trigger 至多编译一次），本轮的用户发言与助手回答一起被固化下来；
-    /// - `false`：**零技能事件** ⇒ 技能包的召回行（`row::SkillRecall`）逐条跳过，置信度闸与
-    ///   反自动化回退整条链路原地待命、不产生任何事实——与 [`conation_enabled`]
-    ///   同一条「关掉后系统退化为纯响应式且仍完整运行」。
-    ///
-    /// ## 它**不**等于"开了就更快"
-    ///
-    /// 快路（技能命中后的抢先作答）今天只作用在**提示词与作答**上：低置信的技能
-    /// 会被摘出本轮召回视图（回退）。「真正跳过模型、跑出 DE-041 §6.2 的命中 P99 比
-    /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
-    #[serde(default = "default_skill_compile_enabled")]
-    pub skill_compile_enabled: bool,
-    /// 技能快路的**执行半边**（[DE-041 §4](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")
-    /// 参数表里的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
-    ///
-    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[D-079](../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类de-041-4-的-actorpattern-是开关参数前者不该做分派点 "DE-005-协议规范")）：
-    /// 那个字段是**主体分类**（由授权谓词派生：持 `reply.*` ⇒ `Reasoner`），从不做分派；
-    /// 这里是**逐轮开关**（命中时跳不跳模型）。两者名字撞了，把后者当成分派点会立刻
-    /// 把本开关关死——`session/main` 派生 `Reasoner`，接上去快路永不命中。
-    ///
-    /// ## 它控制什么
-    ///
-    /// [`skill_compile_enabled`] 让技能**存在**、技能包的 `skill.recall` 行让低置信技能**不进
-    /// 提示词**；本开关决定命中时**要不要跳过模型**：
-    /// - `true`：本轮发言**逐字命中**某条已编译技能（且该技能过置信度闸）⇒ 本轮以
-    ///   **技能正文**收束，**一次模型调用都不发生**（DE-041 §2「命中技能后走 `budget_ms`
-    ///   更小的 ActorSpec」、§6.2「命中后 `cost_ms` 显著低于未命中路径」）；
-    /// - `false`：**永远走完整推理**——退化成 S03（DE-041 §4 平凡值）。
-    ///
-    /// ## 与 [`skill_compile_enabled`] 为什么是两个开关
-    ///
-    /// DE-041 §4 的两行参数是独立的：`projection = skill_compile`（编不编）与
-    /// `actor.pattern`（命中后走不走快路，即本开关）。合成一个会让「只编译、不加速」
-    /// 无法表达——而那正是**观察编译质量**时最需要的形态（编译是数据，加速是行为）。
-    ///
-    /// ## 命中判据取**恒等**，不是"同类"
-    ///
-    /// 命中 = 本轮发言与技能的 `trigger` **逐字相同**（归一化 = `trim` + 与写方
-    /// **同一个**截断上限）。更宽的"同类"判定是算法问题（DE-041 §7：架构只提供
-    /// `skill_compile` 这个位置），本开关不假装它已解决——因此命中率取决于
-    /// **重复发言**，不取决于语义相似。这是诚实划界，不是缺陷：后续接入匹配算法时，
-    /// 改的是**数据**（`row::SkillRecall` 命中判据一处），不是结构。
-    ///
-    /// ## 跳过的是 v2 运行器里的那一次模型调用
-    ///
-    /// 判定照常发生（观测照常落格，与关着时同形），只是没人拿它去装配——
-    /// 这就是它作为一个独立开关的全部含义。见 `chat_loop/inputs.rs` 的 `fast_armed`。
-    #[serde(default = "default_skill_fast_path")]
-    pub skill_fast_path: bool,
-    // ── Q1：worker 启动判据的三条旋钮（D-047 裁决的「独立一批」）────────
-    //
-    // 出厂值即判据原样，两个平凡值都是**这一层关闭**，不是「永远命中」：
-    // 阈值 0 若也判长度，任何非空消息都命中 ⇒ 每条寒暄都开一个后台会话，
-    // 那正是 D-047 被否决方案的第一条。
-    /// 显式前缀（**带尾空格**：`/work 干活` 命中，`/worker 是什么` 不命中）。
-    /// 空串 = 本层关闭（`starts_with("")` 恒真，故显式跳过）。
-    #[serde(default = "default_worker_force_prefix")]
-    pub worker_force_prefix: String,
-    /// 关键词（子串、忽略大小写），**逗号分隔**；空串 = 空集 = 本层关闭。
-    ///
-    /// 刻意用逗号串而非数组：面板控件只有 `toggle / text / number / select`，
-    /// 声明一个没有对应控件的数组键，就是「后端存在、产品里开不了」——
-    /// `config_definition_covers_every_session_config_field` 正是防这个形态。
-    #[serde(default = "default_worker_keywords")]
-    pub worker_keywords: String,
-    /// 主题长度阈值（字符数）。**0 = 本层关闭**。
-    #[serde(default = "default_worker_min_chars")]
-    pub worker_min_chars: usize,
     /// 建树策略（`grouped` / `flat`，出厂默认 `grouped` = 今天行为；见 [`PresentationTree`]）。
     ///
     /// 后端组树时决定本轮节点的 `parent_id` 挂哪，前端只按 `parent_id` 插树、
@@ -346,24 +189,6 @@ pub struct SessionConfig {
     /// 改造在 149-ii 接线。
     #[serde(default = "default_presentation_tree")]
     pub presentation_tree: String,
-    /// 调度容量（`cap`）：**同时**是「一轮最多派几笔活」。
-    ///
-    /// ## 它是 `cap` 的写方
-    ///
-    /// [DE-034](../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约") §4 的平凡值是
-    /// `cap = 1`：调度器、租约、仲裁的逻辑**一行不改**，系统退化为串行 FIFO。
-    /// 这个数不是行常量、也不是调度器自己的字段——它是**会话**的旋钮，因为「同时
-    /// 能推进几件事」是这台机器上这个会话的配置。
-    ///
-    /// `cap` 不喂给折叠：`task.readyset` 交的是**未截断**的候选集（owner 在
-    /// `crates/symbio-plugin-task`，`D-289`），截断发生在读者这一侧——调度段（owner 经
-    /// 事实读到同一个数）与本插件的 `stats.readyset` 列各按它截；后者在报表登记之后
-    /// 经 `ReportCtx::cap` 把预算交给 owner 的 `render`（`D-387`）。
-    ///
-    /// `0` 与 `1` 同义（容量为零的调度器不是「更保守」，是「永不动」）：
-    /// 读侧按 `cap.max(1)` 归一，不把「写错一个数」变成「系统停摆」。
-    #[serde(default = "default_task_cap")]
-    pub task_cap: usize,
     /// 跨会话的工具授权清单（审批卡第三档「永久放行」）：能力名 → 允许的最高风险档。
     ///
     /// ## 为什么住会话插件的全局配置
@@ -378,35 +203,6 @@ pub struct SessionConfig {
     /// 见 [`ApprovalGrants`]）。
     #[serde(default)]
     pub approval_grants: ApprovalGrants,
-}
-
-// ── Q1 判据的出厂值：单一真源 ─────────────────────────────────────────
-//
-// 出厂值落在**配置面**而非判定模块——两者都是私有模块，判定侧能 import
-// 配置面、配置面反过来够不着判定侧；写成两处字面量就是必然漂移的第二份。
-
-/// 出厂值：显式前缀，**带尾空格**——`/work 干活` 命中，`/worker 是什么` 不命中。
-pub const FORCE_PREFIX: &str = "/work ";
-/// 出厂值：关键词（子串、忽略大小写）。**空集 = 本层关闭**。
-pub const KEYWORDS: &[&str] = &[];
-/// 出厂值：主题长度阈值（字符数）。**0 = 本层关闭**。
-pub const MIN_CHARS: usize = 0;
-
-pub fn default_worker_force_prefix() -> String {
-    FORCE_PREFIX.to_string()
-}
-pub fn default_worker_keywords() -> String {
-    KEYWORDS.join(",")
-}
-pub fn default_worker_min_chars() -> usize {
-    MIN_CHARS
-}
-
-/// 出厂值：调度容量（平凡值 = 串行 FIFO）。
-pub const TASK_CAP: usize = symbio_plugin_api::TASK_CAP;
-
-pub fn default_task_cap() -> usize {
-    TASK_CAP
 }
 
 pub fn default_presentation_tree() -> String {
@@ -433,15 +229,6 @@ pub fn default_supplements_enabled() -> bool {
 }
 pub fn default_supplements_max_per_drain() -> usize {
     20
-}
-pub fn default_classify_enabled() -> bool {
-    // `compose` 的两条产线已落地，`Answered` 必然有话说（最差是变体兜底），
-    // 沉默的前提不复存在。"先交机制、默认关闭"到此结束——见字段文档。
-    true
-}
-pub fn default_compose_enabled() -> bool {
-    // 关掉它不会让任何东西变沉默（`Answered` 降级进工具循环），因此无需两段式。
-    true
 }
 pub fn default_progress_enabled() -> bool {
     // 出厂**关闭**：机制化前端已按节点自身呈现「在跑什么 / 跑了多久」（工具子骨架的
@@ -479,31 +266,6 @@ pub fn default_progress_max_attempts() -> u32 {
     1
 }
 
-pub fn default_conation_enabled() -> bool {
-    // E3 平凡值（[DE-001 §4.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：关掉后「欲」照样入格、照样可读，只是不升格为任务——
-    // 系统退化为纯响应式且**仍完整运行**。开不开它是价值判断，不是架构选择。
-    false
-}
-
-pub fn default_skill_compile_enabled() -> bool {
-    // DE-041 §4 平凡值：编译开关 = false（不编译，只检索）。关掉后技能链路
-    // （编译 → 校准 → 回退）整条退到「没有技能」的形态，而召回 / 巩固照常跑；
-    // 技能从经验里学来，不是系统的前提。
-    //
-    // 翻向 true 的前置条件（写死， §3.1 同步）：① 技能编译的读数落地
-    // （凸度或明确替代刻度——今天只有 reliability）；② DE-016 价值验收埋点出数。
-    // 两条都满足才归届时的开关批翻向；在那之前 false 是安全退路口。
-    false
-}
-
-pub fn default_skill_fast_path() -> bool {
-    // DE-041 §4 平凡值：参数 `actor.pattern = reasoner`（永远走完整推理，退化成 S03）——
-    // 注意这是**参数表的取值**，不是 core 的 `ActorSpec.pattern`（D-079）。
-    // 开它是**行为改变**（命中时以技能正文收束、不调模型），因此默认关：
-    // 「不加速」是安全退路口，而"只编译不加速"本身是有意义的观察形态。
-    false
-}
-
 impl SessionConfig {
     /// 生效的会话记忆**写入**上限（下界 1 字节，避免配成 0 后一切写入都失败却看不出原因）
     pub fn effective_memory_max_bytes(&self) -> usize {
@@ -538,8 +300,6 @@ impl Default for SessionConfig {
             memory_inject_max_bytes: default_memory_inject_max_bytes(),
             supplements_enabled: default_supplements_enabled(),
             supplements_max_per_drain: default_supplements_max_per_drain(),
-            classify_enabled: default_classify_enabled(),
-            compose_enabled: default_compose_enabled(),
             opening_enabled: default_opening_enabled(),
             progress_enabled: default_progress_enabled(),
             progress_interval_ms: default_progress_interval_ms(),
@@ -547,14 +307,7 @@ impl Default for SessionConfig {
             progress_min_rounds: default_progress_min_rounds(),
             progress_lease_ms: default_progress_lease_ms(),
             progress_max_attempts: default_progress_max_attempts(),
-            conation_enabled: default_conation_enabled(),
-            skill_compile_enabled: default_skill_compile_enabled(),
-            skill_fast_path: default_skill_fast_path(),
-            worker_force_prefix: default_worker_force_prefix(),
-            worker_keywords: default_worker_keywords(),
-            worker_min_chars: default_worker_min_chars(),
             presentation_tree: default_presentation_tree(),
-            task_cap: default_task_cap(),
             approval_grants: ApprovalGrants::default(),
         }
     }

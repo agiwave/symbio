@@ -40,7 +40,7 @@ import { spawn } from 'node:child_process';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   cliExe,
   startLongLivedCli,
@@ -118,7 +118,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 轮次走 `turn_exec`：store 在**轮首** open、持整轮。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     const base = { homedir: hd.homedir, workdir: hd.workdir, provider: PROVIDER_ID };

@@ -18,17 +18,16 @@ import './_selfrun.mjs';
 // mock 恒报 `prompt_tokens: 64`（见 `mock-llm.mjs`），上限取 80 ⇒ 64 ≥ 0.7 × 80，
 // 每轮越线（t8/t18/t63 同一口径）。摘要由 `model.assist` 取：该端口的对话线与主请求
 // 同形，只能按 system（compact 插件的摘要指令）命中摘要场景。
-import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   startLongLivedCli,
   subscribeSessionRealtime,
   waitFor,
-  readFileSyncSafe,
+  sessionWalEvents,
   assert,
   assertEq,
   defineCase,
@@ -64,21 +63,6 @@ const SNAPSHOT_XML = [
   '</state_snapshot>',
 ].join('\n');
 
-/** 会话事实源：live 段 + 归档段（`transcripts/wal-archive`）的并集。 */
-const walEvents = (homedir, sid) => {
-  const dir = join(homedir, 'session', sid);
-  const archiveDir = join(dir, 'transcripts', 'wal-archive');
-  const texts = [join(dir, 'v2-events.wal')];
-  if (existsSync(archiveDir)) {
-    for (const name of readdirSync(archiveDir)) texts.push(join(archiveDir, name));
-  }
-  return texts
-    .map(readFileSyncSafe)
-    .join('')
-    .split('\n')
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line));
-};
 
 export default defineCase('T11 压缩的现行形态：session.consolidated 落格 + 重建收敛 + 无 compression 帧', async () => {
   const llm = await new MockLlm([
@@ -92,7 +76,7 @@ export default defineCase('T11 压缩的现行形态：session.consolidated 落�
     ],
     pluginConfigs: {
       // 本用例的主题是压缩，与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
-      session: { context_messages: 0, ...DIALOG_FACE_OFF },
+      ...dialogFaceOff({ session: { context_messages: 0 } }),
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',
@@ -146,10 +130,10 @@ export default defineCase('T11 压缩的现行形态：session.consolidated 落�
 
     // ③ 压缩落格（async 债链，等事实源里出现那条事实）
     await waitFor(
-      () => walEvents(hd.homedir, 'e2e-t11').some((e) => e.kind === 'session.consolidated'),
+      () => sessionWalEvents(hd.homedir, 'e2e-t11').some((e) => e.kind === 'session.consolidated'),
       { what: 'session.consolidated 落格', timeoutMs: 30_000 },
     );
-    const consolidated = walEvents(hd.homedir, 'e2e-t11').filter(
+    const consolidated = sessionWalEvents(hd.homedir, 'e2e-t11').filter(
       (e) => e.kind === 'session.consolidated',
     );
     assert(consolidated.length >= 1, '应至少落一条 session.consolidated');

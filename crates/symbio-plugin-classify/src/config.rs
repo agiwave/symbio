@@ -9,23 +9,36 @@
 //! 判据是：**「独立开关 / 独立模型」的落地形态是「插件目录 = 配置目录（各自 `PLUGIN.yml`）」**。
 //! 本文件是这句话的第一个实例。
 //!
-//! `session` 侧只留一个开关：`classify_enabled`（要不要请判决）——那才是调用方的事。
+//! 「要不要请判决」也是本插件的事（D-427）：`classify_enabled` 曾由 `SessionConfig`
+//! 代管，如今由本插件自持，并在开轮收集期贡献进当轮配置快照。挂载即贡献，
+//! 未挂载 ⇒ 那一格缺席 ⇒ 读方按出厂值收敛，不需要会话替本插件查在场。
 //!
-//! ## 三个键各自的平凡值
+//! ## 各键的平凡值
 //!
-//! | 键 | 平凡值 | 平凡值下 |
+//! | 键 | 出厂 | 关掉 / 留空时 |
 //! |---|---|---|
-//! | `rule_shortcut` | `false` | 规则表不生效，全部落快速档（慢但正确） |
+//! | `classify_enabled` | `true` | 不请判决，本轮直接进工具循环 |
+//! | `rule_shortcut` | `true`（平凡值 `false`） | 规则表不生效，全部落快速档（慢但正确） |
 //! | `model` | 缺席 | 用**会话选定的**模型（= 没有"独立模型"这件事之前的行为） |
 //! | `system_prompt` | 缺席 | 用内置的那份分类提示词 |
 //!
-//! 三个平凡值都能被直接验证，因此都是**参数**、不是预留（J2）。
+//! 平凡值都能被直接验证，因此都是**参数**、不是预留（J2）。`classify_enabled` 的
+//! 出厂值必须与迁移前 `SessionConfig` 的出厂值一致（`true`），否则卸载或缺键会把
+//! 「默认开」静默变成「默认关」。
 
 use serde::{Deserialize, Serialize};
 
 /// Classify 配置 —— 本插件的旋钮（字段真源）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClassifyConfig {
+    /// 要不要请判决（D-427：本插件自持的开关，出厂 `true`）。
+    ///
+    /// 真源在这里；开轮收集期由本插件贡献成 `classify_enabled` 一格。读方仍只读
+    /// 当轮 `session.config` 事实，读不到按自己的出厂值收敛——所以**卸载**与
+    /// **关掉**是两件可区分的事，都由本插件的名字在场与否回答。
+    #[serde(default = "default_classify_enabled")]
+    pub classify_enabled: bool,
+
     /// 规则短路开关（**J2 平凡值：`false`**）。
     ///
     /// - `true`（默认）：问候 / 致谢 / 确认 / 空输入由规则表直接判决，
@@ -61,6 +74,10 @@ pub struct ClassifyConfig {
     pub system_prompt: Option<String>,
 }
 
+pub fn default_classify_enabled() -> bool {
+    true
+}
+
 pub fn default_rule_shortcut() -> bool {
     true
 }
@@ -68,6 +85,7 @@ pub fn default_rule_shortcut() -> bool {
 impl Default for ClassifyConfig {
     fn default() -> Self {
         Self {
+            classify_enabled: default_classify_enabled(),
             rule_shortcut: default_rule_shortcut(),
             model: None,
             system_prompt: None,

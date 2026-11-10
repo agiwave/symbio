@@ -28,7 +28,7 @@
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   waitFor,
@@ -55,7 +55,7 @@ export default defineCase(
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       // 本用例只验终止事实，与对话面正交 ⇒ 三个开关钉死（理由见 `DIALOG_FACE_OFF`）。
-      pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+      pluginConfigs: { ...dialogFaceOff() },
     });
 
     try {

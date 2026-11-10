@@ -4,6 +4,7 @@
 //! `symbio_kernel`（D-188 C2b）。
 
 mod collect;
+mod config_snapshot;
 mod configurable;
 mod error;
 mod grants;
@@ -33,6 +34,9 @@ pub use error::{
 //
 // 注：全表共用的内存收集器（`DefaultToolVisitor`）**不在本域**——
 // 它是契约的默认实现，写入者是全体插件，故住 `symbio_kernel::capability::providers::collectors`。
+pub use config_snapshot::{
+    capability_announce_config_snapshot, capability_config_snapshot, CONFIG_SNAPSHOT,
+};
 pub use configurable::{
     capability_announce_configurable, capability_configurables, capability_entry_of,
 };

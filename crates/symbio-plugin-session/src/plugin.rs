@@ -567,6 +567,14 @@ symbio_plugin_api::submit_object_creator!(PLUGIN_ID_SESSION, SessionPlugin::buil
 /// `conation_enabled`（自主层）这两个**高阶能力**的开关曾长期只躺在配置文件里，
 /// 前端设置页根本没有它们的控件，正是这条判据要防的形态。
 ///
+/// ## 能力开关不在这张表里（D-427）
+///
+/// `classify_enabled` / `compose_enabled` / `conation_enabled` /
+/// `skill_compile_enabled` / `readyset_cap` 的真源与表单项都随能力包走了，
+/// 由各自插件的 `config_definition()` 产出。本表只覆盖**仍归会话基底**的格子：
+/// 消息与记忆闸门、开场白、中途汇报、建树策略、工具授权。两个判据因此各判各的
+/// 字段集——本表判 `SessionConfig`，能力包判它们自己的 `*Config`。
+///
 /// ## 默认值单一真源
 ///
 /// 字段默认值一律从 [`SessionConfig::default()`] 读出，不写第二份字面量：
@@ -608,35 +616,6 @@ fn config_definition() -> DetailDefinition {
                         "Model 对话时包含的上下文消息数量（0 表示不限制，6 表示 3 轮对话）",
                         json!(d.context_messages),
                     ),
-                    // ── Q1：worker 启动判据（三层按序短路，空值 / 0 = 该层关闭）───
-                    DetailField {
-                        default: Some(json!(d.worker_force_prefix)),
-                        ..DetailField::text(
-                            "worker_force_prefix",
-                            "委派前缀",
-                            "发言以此前缀开头即启动 worker（带尾空格，如 `/work `）；留空 = 关闭这一层",
-                        )
-                    },
-                    DetailField {
-                        default: Some(json!(d.worker_keywords)),
-                        ..DetailField::text(
-                            "worker_keywords",
-                            "委派关键词",
-                            "逗号分隔、忽略大小写，命中即启动 worker；留空 = 关闭这一层",
-                        )
-                    },
-                    unbounded_number(
-                        "worker_min_chars",
-                        "委派长度阈值",
-                        "发言字符数达到此值即启动 worker（0 = 关闭这一层）",
-                        json!(d.worker_min_chars),
-                    ),
-                    unbounded_number(
-                        "task_cap",
-                        "并发任务容量",
-                        "一轮最多派几笔活（就绪集容量）。1 = 串行 FIFO；0 与 1 同义",
-                        json!(d.task_cap),
-                    ),
                 ],
             },
             DetailSection {
@@ -674,18 +653,6 @@ fn config_definition() -> DetailDefinition {
                 title: Some("对话面机制".into()),
                 collapsed: true,
                 fields: vec![
-                    DetailField::toggle(
-                        "classify_enabled",
-                        "轮首判决",
-                        "每轮开始时请 `classify` 判一次「直接回答还是派活」；关闭后全部输入直接进工具循环",
-                        d.classify_enabled,
-                    ),
-                    DetailField::toggle(
-                        "compose_enabled",
-                        "对话面措辞",
-                        "判决结果由 `compose` 组织成一句话；关闭后「直接回答」降级进工具循环（不沉默）",
-                        d.compose_enabled,
-                    ),
                     DetailField::toggle(
                         "opening_enabled",
                         "对话面开场白",
@@ -752,32 +719,6 @@ fn config_definition() -> DetailDefinition {
                             })
                             .collect(),
                         &d.presentation_tree,
-                    ),
-                ],
-            },
-            DetailSection {
-                title: Some("自主与学习".into()),
-                collapsed: true,
-                fields: vec![
-                    DetailField::toggle(
-                        "conation_enabled",
-                        "「欲」升格为任务",
-                        "心跳表达出的意图是否经闸门升格成长目标任务。关闭后意图照样入格、照样可读，\
-                         但一条自主任务都不产生（退化为纯响应式，完整运行）",
-                        d.conation_enabled,
-                    ),
-                    DetailField::toggle(
-                        "skill_compile_enabled",
-                        "技能编译",
-                        "成功收束的轨迹固化成一条技能事实（同一句触发至多一条）；关闭后不编译、只检索",
-                        d.skill_compile_enabled,
-                    ),
-                    DetailField::toggle(
-                        "skill_fast_path",
-                        "技能快路（命中时跳过模型）",
-                        "本轮发言逐字命中某条已编译技能时，直接以技能正文收束、不调模型。\
-                         命中判据取恒等（更宽的「同类」判定是算法问题）",
-                        d.skill_fast_path,
                     ),
                 ],
             },

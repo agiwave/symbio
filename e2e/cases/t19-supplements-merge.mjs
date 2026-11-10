@@ -33,7 +33,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   startLongLivedCli,
   readSessionMessages,
@@ -138,14 +138,14 @@ export default defineCase(
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       // 本用例的主题是补充整合，与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
-      pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), session: { ...DIALOG_FACE_OFF } },
+      pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), ...dialogFaceOff() },
     });
     // C 线要关掉开关，配置不同 ⇒ 必须另起一个 homedir / 进程。
     const hdOff = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         gateway: gatewayConfig(GATEWAY_PORT_OFF),
-        session: { supplements_enabled: false, ...DIALOG_FACE_OFF },
+        ...dialogFaceOff({ session: { supplements_enabled: false } }),
       },
     });
 

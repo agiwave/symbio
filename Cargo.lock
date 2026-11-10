@@ -4346,9 +4346,11 @@ name = "symbio-plugin-conation"
 version = "0.1.14"
 dependencies = [
  "async-trait",
+ "serde",
  "serde_json",
  "symbio-plugin-api",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

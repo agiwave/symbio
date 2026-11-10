@@ -62,7 +62,7 @@ import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   addMcpServer,
   cleanupHomedir,
   nextPort,
@@ -237,7 +237,7 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     addMcpServer(hd, 'mockserv', {

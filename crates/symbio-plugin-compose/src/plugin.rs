@@ -165,6 +165,14 @@ impl Plugin for ComposePlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
+        // 本轮配置快照贡献（D-427）：真源是本插件自己的 PLUGIN.yml，值由本插件交。
+        // 挂载即贡献，卸载即缺席；会话不再按本插件的名字去债表算「有效开关」。
+        symbio_plugin_api::capability_announce_config_snapshot(
+            &ctx,
+            "compose_enabled",
+            serde_json::json!(self.config.compose_enabled),
+        )
+        .await;
         symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         // 措辞生成的行债（`compose-wording-model`）：装载期只挂「这一族归谁申报」，
         // 每轮 `rows()` 现算是否欠一次 `model.assist` 往返（分类判决与当轮配置为准）。
@@ -186,22 +194,32 @@ symbio_plugin_api::submit_object_creator!(PLUGIN_ID_COMPOSE, ComposePlugin::buil
 /// 可空字段没有"默认值"可写——它的缺省就是**留空**，故给 `placeholder` 说明
 /// 留空意味着什么，而不是编一个看起来像默认值的字面量。
 fn config_definition() -> DetailDefinition {
+    let d = ComposeConfig::default();
     DetailDefinition::form(
         "对话措辞设置",
-        vec![DetailField {
-            rows: Some(6),
-            full_width: true,
-            placeholder: Some("留空 = 用内置的指令段".into()),
-            ..DetailField {
-                widget: "textarea".to_string(),
-                ..DetailField::text(
-                    "instruction",
-                    "生成指令段",
-                    "覆盖内置的生成指令段（拼在人格与记忆之后）。只覆盖指令段，\
+        vec![
+            DetailField::toggle(
+                "compose_enabled",
+                "启用对话措辞",
+                "关掉后首响 / 答话都不生成；卸载本插件同样让这一格缺席，\
+                 读方按出厂值收敛（D-427）",
+                d.compose_enabled,
+            ),
+            DetailField {
+                rows: Some(6),
+                full_width: true,
+                placeholder: Some("留空 = 用内置的指令段".into()),
+                ..DetailField {
+                    widget: "textarea".to_string(),
+                    ..DetailField::text(
+                        "instruction",
+                        "生成指令段",
+                        "覆盖内置的生成指令段（拼在人格与记忆之后）。只覆盖指令段，\
                      不覆盖人格与记忆——同一个人在两处口吻不同，比一句措辞不理想糟得多",
-                )
-            }
-        }],
+                    )
+                }
+            },
+        ],
     )
 }
 

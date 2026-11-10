@@ -227,6 +227,14 @@ impl Plugin for ClassifyPlugin {
                 visitor.put(row).await;
             }
         }
+        // 本轮配置快照贡献（D-427）：真源是本插件自己的 PLUGIN.yml，值由本插件交，
+        // 键名只在这里出现一次。宿主不认识它，只按 owner 合并。
+        symbio_plugin_api::capability_announce_config_snapshot(
+            &ctx,
+            "classify_enabled",
+            serde_json::json!(self.config.classify_enabled),
+        )
+        .await;
         symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
@@ -249,6 +257,13 @@ fn config_definition() -> DetailDefinition {
     DetailDefinition::form(
         "意图判决设置",
         vec![
+            DetailField::toggle(
+                "classify_enabled",
+                "启用意图判决",
+                "关掉后本轮不请判决，直接进工具循环；卸载本插件同样让这一格缺席，\
+                 读方按出厂值收敛（D-427）",
+                d.classify_enabled,
+            ),
             DetailField::toggle(
                 "rule_shortcut",
                 "规则短路",

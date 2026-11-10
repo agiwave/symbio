@@ -23,7 +23,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   assert,
@@ -57,7 +57,7 @@ export default defineCase(
 
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-      pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+      pluginConfigs: { ...dialogFaceOff() },
     });
 
     /** 断言必须抛（反向用例 helper） */

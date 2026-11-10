@@ -86,7 +86,7 @@ work:
 | 插件 | 配置地址 | 主要键 |
 |---|---|---|
 | `home` | `<根>/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
-| `session` | `<根>/session/PLUGIN.yml` | `max_messages` / `context_messages` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes` / `classify_enabled` / `compose_enabled` / `progress_enabled` / `progress_interval_ms` / `progress_min_rounds` / `progress_max_per_turn` / `supplements_enabled` / `supplements_max_per_drain` / `conation_enabled` / `skill_compile_enabled` / `skill_fast_path` / `worker_force_prefix` / `worker_keywords` / `worker_min_chars`；字段全表见 `session/config.rs::SessionConfig`，覆盖性由单测 `config_definition_covers_every_session_config_field` 守着（少一个字段 = 后端存在、产品里开不了）。会话存储**无选型项**——已收为单一具体类型，见 D-011；上下文压缩的入口与配置都不在会话侧（`symbio-plugin-compact` 两行债，`D-336`） |
+| `session` | `<根>/session/PLUGIN.yml` | `max_messages` / `context_messages` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes` / `opening_enabled` / `progress_enabled` / `progress_interval_ms` / `progress_min_rounds` / `progress_max_per_turn` / `progress_lease_ms` / `progress_max_attempts` / `supplements_enabled` / `supplements_max_per_drain` / `presentation_tree` / `approval_grants`；字段全表见 `session/config.rs::SessionConfig`，覆盖性由单测 `config_definition_covers_every_session_config_field` 守着（少一个字段 = 后端存在、产品里开不了）。**能力开关不在这里**：`classify_enabled` / `compose_enabled` / `conation_enabled` / `skill_compile_enabled` / `readyset_cap` 随 D-427 迁到各自能力包，本行不再列它们。会话存储**无选型项**——已收为单一具体类型，见 D-011；上下文压缩的入口与配置都不在会话侧（`symbio-plugin-compact` 两行债，`D-336`） |
 | `memory` | `<根>/memory/PLUGIN.yml` | `workspace_enabled` / `workspace_max_bytes` / `workspace_inject_max_bytes`（工作区作用域）+ `memory_max_bytes` / `memory_inject_max_bytes`（智能体作用域）；字段全表见 `memory/config.rs::MemoryConfig` |
 | `setting` | `<根>/setting/PLUGIN.yml` | `display_name` / `description` / `reply_language` / `verbosity`（字段全表见 `setting/config.rs::SettingConfig`） |
 | `web` | `<根>/web/PLUGIN.yml` | `web_timeout` / `tavily_api_key` / `serper_api_key` / `search_api_base`（**空 = 各供应商官方端点**）/ `http_allowed_domains`（**空列表按缺省 `*` 处理**；字段全表见 `web/web_config.rs::WebConfig`）。曾登记的 `web_enabled` 是**无读者的死键**（③改判不做：开关语义由 `plugin_enabled` 承担），已从注册面移除 |
@@ -95,8 +95,11 @@ work:
 | `telegram` | `<根>/telegram/PLUGIN.yml` | 见下 |
 | `model` | `<根>/model/PLUGIN.yml` | `default_provider_id`（只有跨条目状态；每个 Provider 的明细是资源，见下） |
 | `mcp` | 无配置文档 | 配置就是它的资源树（`<根>/mcp/<id>`） |
-| `classify` | `<根>/classify/PLUGIN.yml` | `rule_shortcut` / `model` / `system_prompt`（字段全表见 `classify/config.rs::ClassifyConfig`） |
-| `compose` | `<根>/compose/PLUGIN.yml` | `model` / `instruction`（字段全表见 `compose/config.rs::ComposeConfig`） |
+| `classify` | `<根>/classify/PLUGIN.yml` | `classify_enabled` / `rule_shortcut` / `model` / `system_prompt`（字段全表见 `classify/config.rs::ClassifyConfig`） |
+| `compose` | `<根>/compose/PLUGIN.yml` | `compose_enabled` / `model` / `instruction`（字段全表见 `compose/config.rs::ComposeConfig`） |
+| `skill` | `<根>/skill/PLUGIN.yml` | `skill_compile_enabled`（字段全表见 `skill/types.rs::SkillConfig`） |
+| `conation` | `<根>/conation/PLUGIN.yml` | `conation_enabled`（字段全表见 `conation/config.rs::ConationConfig`） |
+| `task` | `<根>/task/PLUGIN.yml` | `readyset_cap`（字段全表见 `task/config.rs::TaskConfig`） |
 
 > **对话面两个插件的 `model` 填的是 provider 条目的 id**（`<根>/model/<id>/`），不是模型名——
 > **温度是条目的参数**（`provider.json`），因此它们各自不需要 `temperature` 键：换条目就是换温度。

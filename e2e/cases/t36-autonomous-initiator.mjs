@@ -55,7 +55,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   startLongLivedCli,
   nextPort,
@@ -191,7 +191,7 @@ export default defineCase(
         // `conation_enabled` **显式打开**：它默认 false（DE-042 §4 平凡值「关掉后系统
         // 退化为纯响应式」），本用例验的是打开之后闸门**能放行**的那条路。
         // 拒收那条路不靠这个开关，靠提示词长度——两个判决因此可以并存。
-        session: { ...DIALOG_FACE_OFF, conation_enabled: true },
+        ...dialogFaceOff({ conation: { conation_enabled: true } }),
       },
     });
 

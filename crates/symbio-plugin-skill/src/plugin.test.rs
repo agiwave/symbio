@@ -146,13 +146,13 @@ async fn store_roundtrip_through_the_dir_impl() {
 /// （`VDFS_ACTION_IMPORT`），不是这里的一个字段——故类型上没有任何导入痕迹。
 #[tokio::test]
 async fn new_type_declares_the_landing_detail() {
-    let plugin = SkillPlugin {
-        config: Arc::new(RwLock::new(SkillConfig::default())),
-        dir: PluginDir::at(
+    let plugin = SkillPlugin::new(
+        SkillConfig::default(),
+        PluginDir::at(
             std::env::temp_dir().join("symbio-test/skill"),
             PLUGIN_ID_SKILL,
         ),
-    };
+    );
     // 「根下可新建类型」挂在**根节点自己的自述**上（不在同步的 `PluginMeta` 上）：
     // 走 `Stat("")`，与更深层节点同一条通道（`VdfsNode::new_type`）。
     let root = plugin

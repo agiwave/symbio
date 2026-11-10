@@ -14,21 +14,45 @@ use symbio_plugin_api::port_rows;
 use symbio_plugin_api::PortProvider;
 use symbio_plugin_api::PLUGIN_ID_CONATION;
 use symbio_plugin_api::{
-    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
+    plugin_dir_from_ctx, DetailDefinition, DetailField, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, CAPABILITY_VISITOR, PATH,
 };
 
+use crate::config::ConationConfig;
 use crate::port::ConationPort;
 
 /// 插件的展示标题（元数据一处定义）。
 pub const PLUGIN_TITLE: &str = "目标自生成";
 
-pub struct ConationPlugin;
+pub struct ConationPlugin {
+    /// 本能力自己的配置（D-427）：真源在 `<根>/conation/PLUGIN.yml`。
+    config: ConationConfig,
+    config_file: PluginConfigFile,
+}
 
 impl ConationPlugin {
-    /// 工厂方法（满足 `submit_object_creator!` 协议）。无状态、无配置。
-    pub fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        Arc::new(ConationPlugin) as Arc<dyn Plugin>
+    /// 工厂方法（满足 `submit_object_creator!` 协议）。
+    ///
+    /// 与 persona / classify 同款：从**自己的目录**读自己的配置，读不到用出厂值。
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_CONATION);
+        let config: ConationConfig = match dir.load::<ConationConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => ConationConfig::default(),
+            Err(e) => {
+                symbio_plugin_api::plugin_warn!("conation", "读取自身配置失败，改用默认值：{e}");
+                ConationConfig::default()
+            }
+        };
+        Arc::new(ConationPlugin::new(config, dir)) as Arc<dyn Plugin>
+    }
+
+    pub fn new(config: ConationConfig, dir: PluginDir) -> Self {
+        Self {
+            config,
+            config_file: PluginConfigFile::new(dir, PLUGIN_TITLE, config_definition()),
+        }
     }
 
     pub fn metadata() -> PluginMeta {
@@ -68,8 +92,31 @@ impl Plugin for ConationPlugin {
                 visitor.put(row).await;
             }
         }
+        // 本轮配置快照贡献（D-427）：真源是本插件自己的 PLUGIN.yml，宿主只按 owner
+        // 合并。挂载即贡献，卸载即缺席 ⇒ 读方按出厂值 false 收敛。
+        symbio_plugin_api::capability_announce_config_snapshot(
+            &ctx,
+            "conation_enabled",
+            serde_json::json!(self.config.conation_enabled),
+        )
+        .await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
+}
+
+fn config_definition() -> DetailDefinition {
+    let d = ConationConfig::default();
+    DetailDefinition::form(
+        PLUGIN_TITLE,
+        vec![DetailField::toggle(
+            "conation_enabled",
+            "启用自主层升格",
+            "关掉后『欲』只入格不升格；卸载本插件同样让这一格缺席，读方按出厂值\
+             收敛（D-427）",
+            d.conation_enabled,
+        )],
+    )
 }
 
 symbio_plugin_api::submit_object_creator!(PLUGIN_ID_CONATION, ConationPlugin::build, dyn Plugin);

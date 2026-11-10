@@ -19,7 +19,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   waitFor,
@@ -44,7 +44,7 @@ async function toolNamesFor({ localEnabled, sessionTag }) {
   const hd = makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
     pluginConfigs: {
-      session: { ...DIALOG_FACE_OFF },
+      ...dialogFaceOff(),
       // 启用侧不写这一项：缺省即启用（`PluginDir::enabled` 的约定）。
       ...(localEnabled ? {} : { local: { plugin_enabled: false } }),
     },

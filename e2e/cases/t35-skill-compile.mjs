@@ -32,7 +32,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   runCli,
@@ -151,7 +151,7 @@ export default defineCase(
         // 技能编译挂在这条路上（`derived_facts::record_learning`）。
         // `skill_compile_enabled` **显式打开**：它默认 off（DE-041 §4 平凡值
         // 「不编译，只检索」），本用例验的正是打开之后的行为，不能依赖默认值。
-        session: { ...DIALOG_FACE_OFF, skill_compile_enabled: true },
+        ...dialogFaceOff({ skill: { skill_compile_enabled: true } }),
       },
     });
 

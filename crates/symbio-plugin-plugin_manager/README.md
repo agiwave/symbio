@@ -98,6 +98,6 @@ impl: done
 - 注册表动词（根上的 `Action(plugins|enable|disable)` / `Write` / `Delete`）：
  `crates/symbio-plugin-composite/src/vdfs.rs`
 - 插件目录与配置：`symbio_sdk::plugin::dir`（`PLUGIN.yml` 的保留键）
-- 可配置声明通道：`symbio_sdk::capability::configurable`（`ConfigurableVisitor` / `CONFIG_VISITOR`）
+- 可配置声明通道：`symbio_sdk::capability::configurable`（`ConfigurableVisitor` / `CONFIGURABLE_VISITOR`）
 - VDFS 机制：`docs/003-design/009-VDFS规范.md`（`DetailDefinition` 是 `ext = form` 节点的
  `schema` 方言；配置文件地址 = `<插件目录>/PLUGIN.yml`，见 §3.4 / §13.1）

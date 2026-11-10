@@ -81,7 +81,8 @@ export default defineCase(
         },
         // 两条线都要走到**worker 的末轮收束**——那是缺陷现场。判决与措辞开着时，
         // 「写一份报告」这句可能被判成直接答话，走的就不是同一条收束路径了。
-        session: { classify_enabled: false, compose_enabled: false },
+        classify: { classify_enabled: false },
+        compose: { compose_enabled: false },
       },
     });
 

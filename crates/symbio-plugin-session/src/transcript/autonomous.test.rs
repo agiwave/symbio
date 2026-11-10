@@ -20,14 +20,13 @@ use symbio_sdk::invariants::check_all;
 // （E-009），所以这里只能钉「读不到 ⇒ 不升格」；「只开一次」的组合证明在
 // `e2e/cases/t36-autonomous-initiator.mjs`。
 
-fn autonomy_plugin(conation_enabled: bool) -> (tempfile::TempDir, Arc<SessionPlugin>) {
+/// 开关不再住在 `SessionConfig`（D-427）：自主升格的闸门只读当轮
+/// `session.config` 事实，所以夹具只需默认配置，开关由 [`seed_config`] 播种。
+fn autonomy_plugin() -> (tempfile::TempDir, Arc<SessionPlugin>) {
     let dir = tempfile::tempdir().expect("临时目录创建失败");
     let plugin = Arc::new(SessionPlugin::new(
         None,
-        SessionConfig {
-            conation_enabled,
-            ..SessionConfig::default()
-        },
+        SessionConfig::default(),
         symbio_sdk::plugin::PluginDir::at(dir.path(), "session"),
     ));
     (dir, plugin)
@@ -84,7 +83,7 @@ fn seed_config(p: &SessionPlugin, sid: &str, payload: serde_json::Value) {
 /// 升格由能力包自己的债与执行体做，本二进制不链接它 ⇒ 一条自主任务都不产生（T3）。
 #[tokio::test]
 async fn trigger_facts_land_in_order_and_no_task_grows_without_the_capability_pack() {
-    let (_dir, p) = autonomy_plugin(false);
+    let (_dir, p) = autonomy_plugin();
     let sid = "s-hb";
     seed_one_fact(&p, sid);
 
@@ -154,7 +153,7 @@ async fn trigger_facts_land_in_order_and_no_task_grows_without_the_capability_pa
 /// 那会拿重复开工掩盖一个装配问题）。
 #[tokio::test]
 async fn without_the_capability_pack_nothing_promotes() {
-    let (_dir, p) = autonomy_plugin(true);
+    let (_dir, p) = autonomy_plugin();
     let sid = "s-gate";
     seed_one_fact(&p, sid);
     // 开关按事实打开：能力缺席是这条用例唯一的变量。
@@ -193,7 +192,7 @@ async fn without_the_capability_pack_nothing_promotes() {
 /// 2. 有写方在写 ⇒ 事实源是同一会话的唯一写入口，两个写方并存会重复 `head`。
 #[tokio::test]
 async fn no_fact_source_or_a_live_writer_both_block_the_trigger() {
-    let (_dir, p) = autonomy_plugin(false);
+    let (_dir, p) = autonomy_plugin();
     let sid = "s-none";
 
     assert!(

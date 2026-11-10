@@ -5,24 +5,32 @@
 use super::*;
 use serde_json::json;
 
-/// SkillConfig::default() 4 个字段默认值
+/// SkillConfig::default() 5 个字段默认值
 #[test]
 fn skill_config_default_values() {
     let cfg = SkillConfig::default();
-    assert_eq!(cfg.skill_dirs, vec![".symbio/skills".to_string()]);
+    assert_eq!(
+        cfg.skill_dirs,
+        vec![".symbio/skills".to_string(), "{HOMEDIR}/skills".to_string()]
+    );
     assert_eq!(cfg.max_skills, 20);
     assert_eq!(cfg.max_body_chars, 8000);
     assert!(cfg.report_token_estimate);
+    assert!(!cfg.skill_compile_enabled, "D-427：编译开关出厂关");
 }
 
 /// SkillConfig JSON 反序列化使用默认值
 #[test]
 fn skill_config_deserialize_uses_defaults_for_missing_fields() {
     let cfg: SkillConfig = serde_json::from_str("{}").unwrap();
-    assert_eq!(cfg.skill_dirs, vec![".symbio/skills".to_string()]);
+    assert_eq!(
+        cfg.skill_dirs,
+        vec![".symbio/skills".to_string(), "{HOMEDIR}/skills".to_string()]
+    );
     assert_eq!(cfg.max_skills, 20);
     assert_eq!(cfg.max_body_chars, 8000);
     assert!(cfg.report_token_estimate);
+    assert!(!cfg.skill_compile_enabled);
 }
 
 /// SkillConfig 反序列化支持覆盖所有字段

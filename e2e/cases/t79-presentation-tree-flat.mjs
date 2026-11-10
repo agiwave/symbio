@@ -34,7 +34,7 @@ import {
   E2E_ROOT,
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   addMcpServer,
   cleanupHomedir,
   runCli,
@@ -83,7 +83,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 本用例的全部差异就在这一行：建树策略翻到 flat，其它逐字同 T26。
-        session: { ...DIALOG_FACE_OFF, presentation_tree: 'flat' },
+        ...dialogFaceOff({ session: { presentation_tree: 'flat' } }),
       },
     });
     addMcpServer(hd, 'mockserv', {

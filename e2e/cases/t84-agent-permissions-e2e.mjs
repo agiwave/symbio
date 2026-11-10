@@ -35,7 +35,7 @@ import {
   defineCase,
   providerConfig,
   PROVIDER_ID,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   waitFor,
   msgRoleOf,
 } from '../helpers.mjs';
@@ -114,7 +114,7 @@ export default defineCase(
 
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-      pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+      pluginConfigs: { ...dialogFaceOff() },
     });
     // 工作区文件：判据 3 的靶子（会话 A 的智能体读它必须照常放行）
     writeFileSync(join(hd.workdir, 'README.md'), `${WS_MARKER}\n`);

@@ -22,7 +22,6 @@ import './_selfrun.mjs';
 // - 载荷首节点是 `notice` + `style_tag = compression`，正文是摘要；
 // - 重建后的历史里被压掉的用户消息消失、压缩节点在；
 // - 压缩不炸会话：触发轮回复照常完成。
-import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   MockLlm,
@@ -32,7 +31,7 @@ import {
   nextPort,
   startReadbackCli,
   readSessionMessages,
-  readFileSyncSafe,
+  sessionWalEvents,
   waitFor,
   assert,
   assertEq,
@@ -62,21 +61,6 @@ const SNAPSHOT_XML = [
   '</state_snapshot>',
 ].join('\n');
 
-/** 会话事实源：live 段 + 归档段（`transcripts/wal-archive`）的并集。 */
-const walEvents = (homedir, sid) => {
-  const dir = join(homedir, 'session', sid);
-  const archiveDir = join(dir, 'transcripts', 'wal-archive');
-  const texts = [join(dir, 'v2-events.wal')];
-  if (existsSync(archiveDir)) {
-    for (const name of readdirSync(archiveDir)) texts.push(join(archiveDir, name));
-  }
-  return texts
-    .map(readFileSyncSafe)
-    .join('')
-    .split('\n')
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line));
-};
 
 export default defineCase('T8 上下文压缩：水位触发 session.consolidated，重建历史归并', async () => {
   const llm = await new MockLlm([
@@ -118,7 +102,7 @@ export default defineCase('T8 上下文压缩：水位触发 session.consolidate
     assertEq(r.code, 0, `CLI 退出码（stderr 尾部: ${r.stderr.slice(-600)}）`);
 
     // ① 压缩真的发生：`compact` 插件落了一条 `session.consolidated`
-    const events = walEvents(hd.homedir, 'e2e-t8');
+    const events = sessionWalEvents(hd.homedir, 'e2e-t8');
     const consolidated = events.filter((e) => e.kind === 'session.consolidated');
     assert(
       consolidated.length >= 1,

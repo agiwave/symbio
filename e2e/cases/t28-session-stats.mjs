@@ -24,7 +24,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   runCli,
@@ -71,7 +71,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 每轮收束把事实写进事实源——读数口的事实源由真实轮次产生。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
 

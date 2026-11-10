@@ -31,7 +31,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   startLongLivedCli,
   waitFor,
@@ -106,7 +106,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 抢占的写方挂在**收束落格**与收件箱上。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
 

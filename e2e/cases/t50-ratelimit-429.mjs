@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 // 用户不用重开会话、不用重启进程；历史里两轮对话都完整可读。
 // 断言只走用户可见出口：实时面（用户在看的窗口）+ 生产读出口的转写 + mock 的请求账本。
 import {
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   MockLlm,
   makeHomedir,
   cleanupHomedir,
@@ -33,7 +33,7 @@ export default defineCase('T50 限流：429 配额超额被限后冷却自动恢
     providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
     // 本用例主题与对话面正交 ⇒ 把对话面三个开关钉死：配额语义只跟主对话轮对表，
     // 不然每轮多出的静默分类/措辞请求也让 429 的节奏难对上（DIALOG_FACE_OFF 的理由见 helpers）。
-    session: { ...DIALOG_FACE_OFF },
+    ...dialogFaceOff(),
     pluginConfigs: {
       gateway: {
         inbound_enabled: true,

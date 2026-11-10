@@ -395,11 +395,33 @@ export class MockHttp {
  * （含 `true`）——它们验的正是这个功能，不能依赖默认值（默认值翻转不该悄悄改变
  * 它们验的是什么）。
  */
+/**
+ * 三个开关的**关闭值**，按 owner 插件分组（D-427：配置真源在能力包自己的
+ * `PLUGIN.yml`，会话不再代管 `classify_enabled` / `compose_enabled`）。
+ *
+ * 用法：`pluginConfigs: { ...dialogFaceOff() }`；要在某个插件上再加键，传第二层：
+ * `dialogFaceOff({ session: { context_messages: 0 } })`。
+ */
 export const DIALOG_FACE_OFF = Object.freeze({
-  classify_enabled: false,
-  compose_enabled: false,
-  progress_enabled: false,
+  session: Object.freeze({ progress_enabled: false }),
+  classify: Object.freeze({ classify_enabled: false }),
+  compose: Object.freeze({ compose_enabled: false }),
 });
+
+/**
+ * 把 `DIALOG_FACE_OFF` 展开成 `pluginConfigs` 片段（按插件深合并 `extra`）。
+ *
+ * 加这一层而不是让用例自己拼三个 `PLUGIN.yml`：开关归属变了（从 session 挪到
+ * 能力包），用例该改的是**注入点**，不是「对话面关掉」这个意图。
+ */
+export function dialogFaceOff(extra = {}) {
+  const plugins = new Set([...Object.keys(DIALOG_FACE_OFF), ...Object.keys(extra)]);
+  const out = {};
+  for (const plugin of plugins) {
+    out[plugin] = { ...(DIALOG_FACE_OFF[plugin] ?? {}), ...(extra[plugin] ?? {}) };
+  }
+  return out;
+}
 
 export function makeHomedir({ providers, mcpServers, sessionConfig, pluginConfigs } = {}) {
   const homedir = mkdtempSync(join(tmpdir(), 'symbio-e2e-home-'));
@@ -1113,6 +1135,49 @@ export function readFileSyncSafe(path) {
   } catch {
     return '';
   }
+}
+
+/**
+ * 会话事实源的**全量事件**：live 段（`v2-events.wal`）+ 归档段（`transcripts/wal-archive`）。
+ *
+ * 两条纪律，各治一种真实故障：
+ *
+ * 1. **逐文件切行，不把几份原文拼起来再切**。WAL 是 append-only 的 JSONL，而写方
+ *    （`crates/symbio-plugin-session/src/store/wal.rs::append`）分两次落盘——先写行、
+ *    再写换行。读方若正好落在两步之间，末行就是一条**完整但还没有换行**的 JSON；
+ *    把下一份文件的原文直接接上去，两条事件会粘成一行，`JSON.parse` 报
+ *    「Unexpected non-whitespace character after JSON」。文件边界不该承担
+ *    「上一份文件是否以换行结尾」这个假设。
+ * 2. **末行解析不了就丢掉，其余行解析不了照抛**。写方先 `write_all` 行、再
+ *    `flush` + `sync_data`，未提交的尾行本来就可能只写了一半——它按定义不是事件
+ *    （崩溃语义也是「已落盘的还在，没落的不算」），丢掉不算丢数据；非末行解析
+ *    失败说明盘上真坏了，必须响亮地失败。
+ *
+ * 顺序沿用既有口径（live 在前、归档在后）：本函数只负责「读出全部事件」，
+ * 需要时序的断言自己按 `seq` 排。
+ */
+export function sessionWalEvents(homedir, sid) {
+  const dir = join(homedir, 'session', sid);
+  const archiveDir = join(dir, 'transcripts', 'wal-archive');
+  const files = [join(dir, 'v2-events.wal')];
+  if (existsSync(archiveDir)) {
+    for (const name of readdirSync(archiveDir)) files.push(join(archiveDir, name));
+  }
+  const events = [];
+  for (const file of files) {
+    const lines = readFileSyncSafe(file)
+      .split('\n')
+      .filter((line) => line.trim());
+    lines.forEach((line, i) => {
+      try {
+        events.push(JSON.parse(line));
+      } catch (err) {
+        if (i === lines.length - 1) return; // 未提交的尾行：写方还没把这一行写完
+        throw new Error(`${file} 第 ${i + 1} 行不是合法 JSON：${err.message}`);
+      }
+    });
+  }
+  return events;
 }
 
 // ---------- 断言辅助 ----------

@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   addMcpServer,
   runCli,
@@ -69,7 +69,7 @@ export default defineCase(
 
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-      pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+      pluginConfigs: { ...dialogFaceOff() },
     });
     const recordPath = join(hd.homedir, 'mcp-record.ndjson');
     addMcpServer(hd, 'mockserv', {

@@ -24,7 +24,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   makeAgentDir,
   runCli,
@@ -60,7 +60,7 @@ export default defineCase(
 
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port, { system_prompt: PERSONA }) }],
-      pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+      pluginConfigs: { ...dialogFaceOff() },
     });
     makeAgentDir(hd.homedir, {
       id: 'e2e-t57-agent',

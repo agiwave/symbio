@@ -43,7 +43,7 @@ import {
   E2E_ROOT,
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   addMcpServer,
   cleanupHomedir,
   runCli,
@@ -103,7 +103,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`）。
-        session: { ...DIALOG_FACE_OFF },
+        ...dialogFaceOff(),
       },
     });
     // MCP stdio 工具：`--record` 是「工具真的执行过」的进程外证据。

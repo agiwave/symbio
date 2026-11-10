@@ -28,7 +28,7 @@ import { rmSync, existsSync, readdirSync } from 'node:fs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   runCli,
@@ -123,7 +123,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // context_messages: 0 = 上下文窗口不按轮次截断（压缩判定的原料是完整历史）
-        session: { ...DIALOG_FACE_OFF, context_messages: 0 },
+        ...dialogFaceOff({ session: { context_messages: 0 } }),
       },
     });
 

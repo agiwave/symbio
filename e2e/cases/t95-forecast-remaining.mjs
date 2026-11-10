@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   nextPort,
   runCli,
@@ -54,7 +54,7 @@ function homedirFor(port) {
         inbound_token: '',
         inbound_readonly: false,
       },
-      session: { ...DIALOG_FACE_OFF },
+      ...dialogFaceOff(),
     },
   });
 }

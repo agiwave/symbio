@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   cleanupHomedir,
   runCli,
   nextPort,
@@ -39,7 +39,7 @@ export default defineCase('T4 多轮会话：第二轮请求携带第一轮历�
         inbound_token: '',
         inbound_readonly: false,
       },
-      session: { ...DIALOG_FACE_OFF },
+      ...dialogFaceOff(),
     },
   });
   let api = null;
@@ -53,7 +53,12 @@ export default defineCase('T4 多轮会话：第二轮请求携带第一轮历�
       stdinText: '第一轮问题\n第二轮问题\n',
     });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
-    assert(r.stdout.includes('第一轮回复') && r.stdout.includes('第二轮回复'), 'stdout 应含两轮回复');
+    // 失败时把两侧输出都带出来：只有一句「应含两轮回复」的话，看不出是少了一轮、
+    // 还是答复走了 stderr（`✖ …`），排查得重跑一遍。
+    assert(
+      r.stdout.includes('第一轮回复') && r.stdout.includes('第二轮回复'),
+      `stdout 应含两轮回复（stdout 末 400 字: ${JSON.stringify(r.stdout.slice(-400))}；stderr 末 400 字: ${JSON.stringify(r.stderr.slice(-400))}）`,
+    );
 
     const reqs = await llm.requests();
     assertEq(reqs.length, 2, 'mock-llm 应收到两次请求');

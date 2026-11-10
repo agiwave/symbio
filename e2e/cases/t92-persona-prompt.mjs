@@ -94,7 +94,9 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         // 对话面显式全开：本用例要读的就是「措辞」那条请求，不能依赖默认值。
-        session: { classify_enabled: true, compose_enabled: true, progress_enabled: false },
+        classify: { classify_enabled: true },
+        compose: { compose_enabled: true },
+        session: { progress_enabled: false },
         // 人格的**全部**输入：一段正文。没有它，本插件一条段都不交。
         persona: { persona: PERSONA },
       },

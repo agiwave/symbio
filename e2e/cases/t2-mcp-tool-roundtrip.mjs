@@ -6,7 +6,7 @@ import {
   E2E_ROOT,
   MockLlm,
   makeHomedir,
-  DIALOG_FACE_OFF,
+  dialogFaceOff,
   addMcpServer,
   cleanupHomedir,
   runCli,
@@ -47,7 +47,7 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
         inbound_token: '',
         inbound_readonly: false,
       },
-      session: { ...DIALOG_FACE_OFF },
+      ...dialogFaceOff(),
     },
   });
   addMcpServer(hd, 'mockserv', {

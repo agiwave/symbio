@@ -59,11 +59,9 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       // 对话面**显式开启**（本用例验的就是默认产品行为）；汇报关掉，避免多一次请求。
       pluginConfigs: {
-        session: {
-          classify_enabled: true,
-          compose_enabled: true,
-          progress_enabled: false,
-        },
+        classify: { classify_enabled: true },
+        compose: { compose_enabled: true },
+        session: { progress_enabled: false },
       },
     });
 

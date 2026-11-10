@@ -38,6 +38,14 @@ pub struct SkillConfig {
     /// 是否在 system_prompt 中显示 token 估算（默认 true）
     #[serde(default = "default_true")]
     pub report_token_estimate: bool,
+
+    /// 技能编译开关（D-427：本能力自持，出厂 `false`）。
+    ///
+    /// 此前由 `SessionConfig::skill_compile_enabled` 代管、轮首投影成
+    /// `session.config` 一格；现在真源在本插件的 `PLUGIN.yml`，开轮收集期由本插件
+    /// 贡献。卸载 ⇒ 该格缺席 ⇒ 读方按 `false` 收敛，与迁移前一致。
+    #[serde(default = "default_skill_compile_enabled")]
+    pub skill_compile_enabled: bool,
 }
 
 impl Default for SkillConfig {
@@ -47,6 +55,7 @@ impl Default for SkillConfig {
             max_skills: default_max_skills(),
             max_body_chars: default_max_body_chars(),
             report_token_estimate: default_true(),
+            skill_compile_enabled: default_skill_compile_enabled(),
         }
     }
 }
@@ -98,7 +107,10 @@ impl Skill {
 }
 
 fn default_skill_dirs() -> Vec<String> {
-    vec![".symbio/skills".to_string()]
+    // 与装配期 fallback 逐字一致（此前那两份默认值漂了：`SkillConfig::default()`
+    // 只有工作区级目录，而 `build()` 的 fallback 还多一条作用域级目录）。
+    // `{HOMEDIR}` 由 `resolve_skill_dirs_template` 解析为**本作用域**的系统根。
+    vec![".symbio/skills".to_string(), "{HOMEDIR}/skills".to_string()]
 }
 
 fn default_max_skills() -> usize {
@@ -107,6 +119,10 @@ fn default_max_skills() -> usize {
 
 fn default_max_body_chars() -> usize {
     8000
+}
+
+fn default_skill_compile_enabled() -> bool {
+    false
 }
 
 fn default_true() -> bool {

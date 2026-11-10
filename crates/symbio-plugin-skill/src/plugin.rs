@@ -7,9 +7,9 @@ use std::path::Path;
 use std::sync::Arc;
 use symbio_plugin_api::PLUGIN_ID_SKILL;
 use symbio_plugin_api::{
-    plugin_dir_from_ctx, CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    TRAVERSE_AVAILABLE_TOOLS,
+    plugin_dir_from_ctx, CapabilityRow, DetailDefinition, DetailField, Plugin, PluginConfigFile,
+    PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, TRAVERSE_AVAILABLE_TOOLS,
 };
 use tokio::sync::RwLock;
 
@@ -17,6 +17,8 @@ pub struct SkillPlugin {
     config: Arc<RwLock<SkillConfig>>,
     /// 本插件自己的目录（构造时由父插件经 `PLUGIN_DIR` 告知）
     dir: PluginDir,
+    /// 配置文档（D-427）：设置页据此列出 `<根>/skill/PLUGIN.yml`。
+    config_file: PluginConfigFile,
 }
 
 impl SkillPlugin {
@@ -40,18 +42,21 @@ impl SkillPlugin {
         // 自己的目录由父插件经 `PLUGIN_DIR` 告知——先取它，再用它推作用域根。
         let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_SKILL);
 
-        let mut config: SkillConfig = ctx
-            .config()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_else(|| SkillConfig {
-                // 加载路径优先级：
-                // 1. 工作区级别：`.symbio/skills`（项目内）
-                // 2. 本作用域级别：`{HOMEDIR}/skills`（= 本插件目录的上一级下的 skills）
-                // 3. 第三方工具兼容：`.qwen/skills`、`.sixth/skills`、`.qoder/skills`
-                skill_dirs: vec![".symbio/skills".to_string(), "{HOMEDIR}/skills".to_string()],
-                // 预算字段使用 SkillConfig::default() 的值
-                ..SkillConfig::default()
-            });
+        // 配置真源是**本插件自己的目录**（D-427）：`<根>/skill/PLUGIN.yml`。
+        // `ctx.config()` 保留为兼容回退（旧装配可能把配置随请求注入）；两者都缺席
+        // 才用出厂值。默认值只有 `SkillConfig::default()` 一份，不再在装配处
+        // 复制一份路径表——那两份此前就漂过一次（少一条作用域级目录）。
+        let mut config: SkillConfig = match dir.load::<SkillConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => ctx
+                .config()
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default(),
+            Err(e) => {
+                symbio_plugin_api::plugin_warn!("skill", "读取自身配置失败，改用默认值：{e}");
+                SkillConfig::default()
+            }
+        };
 
         // 作用域根 = 本插件目录的上一级（`<root>/skill` → `<root>`）。
         // 与 `PluginDir` 同源：都由父插件告知，不由本插件查全局。
@@ -68,6 +73,7 @@ impl SkillPlugin {
     pub fn new(config: SkillConfig, dir: PluginDir) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
+            config_file: PluginConfigFile::new(dir.clone(), "技能设置", config_definition()),
             dir,
         }
     }
@@ -500,8 +506,32 @@ impl Plugin for SkillPlugin {
                 }
             }
         }
+        // 本轮配置快照贡献（D-427）：编译开关的真源在本插件的 PLUGIN.yml，
+        // 由本插件交值；宿主只按 owner 合并，不认识键名。
+        let compile_enabled = self.config.read().await.skill_compile_enabled;
+        symbio_plugin_api::capability_announce_config_snapshot(
+            &ctx,
+            "skill_compile_enabled",
+            serde_json::json!(compile_enabled),
+        )
+        .await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
+}
+
+fn config_definition() -> DetailDefinition {
+    let d = SkillConfig::default();
+    DetailDefinition::form(
+        "技能设置",
+        vec![DetailField::toggle(
+            "skill_compile_enabled",
+            "启用技能编译",
+            "关掉后不编译新技能（已编译的仍可执行）；卸载本插件同样让这一格\
+             缺席，读方按出厂值收敛（D-427）",
+            d.skill_compile_enabled,
+        )],
+    )
 }
 
 symbio_plugin_api::submit_object_creator!(PLUGIN_ID_SKILL, SkillPlugin::build, dyn Plugin);
