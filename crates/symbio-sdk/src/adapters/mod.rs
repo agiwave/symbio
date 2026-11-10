@@ -301,10 +301,6 @@ pub trait LlmAdapter: Send + Sync {
     }
 }
 
-mod provider_adapter;
-
-pub use provider_adapter::{delta_event_sink, ProviderLlmAdapter};
-
 #[cfg(test)]
 #[path = "mod.test.rs"]
 mod tests;

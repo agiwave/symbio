@@ -1,8 +1,8 @@
-//! 单轮 LLM 产物的**类型面**（`ModelProvider::round_trip` 的返回类型）。
+//! 单轮 LLM 产物的**类型面**：`port.model` 一次往返交出来的那个值。
 //!
 //! 帧构造 / 发射与 id 原语是宿主行为，留在 `symbio_sdk::llm::round`。
 
-use super::model_provider::{ModelFinishReason, ModelSpend, ModelUsage};
+use super::model::{ModelFinishReason, ModelSpend, ModelUsage};
 use serde_json::Value;
 
 // 工具调用信息（**结果形态**——累积过程在 `crates/symbio-plugin-model/src/tool_accumulator.rs`）
@@ -39,7 +39,7 @@ pub struct RoundToolCallInfo {
 
 // 单轮产物
 
-/// 一轮 LLM 请求的**产物**（`ModelProvider::round_trip` 的返回类型）。
+/// 一轮 LLM 请求的**产物**（`port.model` 执行体的返回类型）。
 ///
 /// **只装结果，不装过程**：工具调用的分片累积是 model 插件的实现细节
 /// （`crates/symbio-plugin-model/src/tool_accumulator.rs`），收口后才以 [`Self::tool_calls`] 的形态

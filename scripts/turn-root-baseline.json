@@ -2,7 +2,7 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 91,
+      "prod": 90,
       "test": 142
     },
     "F2": {
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-10",
+      "faces": "F1.prod",
+      "reason": "`D-437`：`ModelProvider` 这一族名字随 trait 一起离开内核——`provider_id` / `api_protocol` / `rate_limit_ms` / `max_context_tokens` / `effective_context_tokens` 与 `ProviderLlmAdapter` 的 `provider_adapter` 相关标识符都在模型插件内部了。F1 生产面 91 → 90 为**实测收窄**；测试面 142 不变（用例改写后词根数持平）。目标 0 不变，`turn` 余量 260 → 259。"
+    },
     {
       "date": "2026-11-10",
       "faces": "F1.prod / F1.test",

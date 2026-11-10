@@ -31,14 +31,6 @@ impl ModelProvider for FakeModel {
         self.id
     }
 
-    fn api_protocol(&self) -> &str {
-        "fake"
-    }
-
-    fn rate_limit_ms(&self) -> u64 {
-        0
-    }
-
     fn max_context_tokens(&self) -> u32 {
         4096
     }
@@ -441,14 +433,6 @@ struct RecordingModel {
 impl ModelProvider for RecordingModel {
     fn provider_id(&self) -> &str {
         "active"
-    }
-
-    fn api_protocol(&self) -> &str {
-        "fake"
-    }
-
-    fn rate_limit_ms(&self) -> u64 {
-        0
     }
 
     fn max_context_tokens(&self) -> u32 {

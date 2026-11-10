@@ -156,7 +156,7 @@ lists: [route-contracts=owner]
 
 ## Model 插件
 
-**本插件无自有路由**：`ModelProvider::round_trip` 由 `session` 在会话循环内**直连调用**，不占路由；配置读写全在 VDFS 上（`<根>/model/<id>` 与 `<根>/model/PLUGIN.yml`）。
+**本插件无自有路由**：模型往返由环按端口名 `model` 取到本插件注册的 `PortProvider`，执行体在插件内部完成一次往返（`D-298` / `D-437`）；配置读写全在 VDFS 上（`<根>/model/<id>` 与 `<根>/model/PLUGIN.yml`）。
 
 ### 支持的协议
 

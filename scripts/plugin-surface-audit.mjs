@@ -144,7 +144,7 @@ export const WHITELIST_BASELINE = 0
 // 读口 `capability_scope_twins` 只有控制面用，按 HS-003 不上门面。两条准入同样成立：
 // 常量不含任何能力名，声明方（agent 子作用域）与读方（session 装配）是两个消费方，
 // 且前缀形状归声明方——控制面不再按名字猜副本。
-export const SDK_BASELINE = 128
+export const SDK_BASELINE = 119
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。

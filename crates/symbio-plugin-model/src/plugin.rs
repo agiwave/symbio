@@ -4,7 +4,7 @@
 //! - 多 Model Provider 注册表（`ModelProvidersConfig`，运行期内存视图）
 //! - Provider 注册：traverse 时按上下文解析出唯一生效 Provider
 //!   （`ctx[PROVIDER_ID]` > 默认 > 首个启用），绑定配置与协议实现为
-//!   `BoundProvider`（core `ModelProvider` trait 的生产实现）注册进
+//!   `BoundProvider`（本插件 `ModelProvider` 契约的唯一实现）注册进
 //!   CAPABILITY_VISITOR。本插件只做无状态 LLM 网关：chat 编排与限流属于
 //!   session 插件
 
@@ -833,7 +833,7 @@ impl Plugin for ModelPlugin {
             //
             // 单个 provider 的协议工厂不可用 ⇒ 它**不在目录里**，而不是让整次注册失败：
             // 一个配坏的条目不该把其余可用的模型一起带走。
-            let mut available: Vec<Arc<dyn symbio_plugin_api::ModelProvider>> = Vec::new();
+            let mut available: Vec<Arc<dyn crate::provider::ModelProvider>> = Vec::new();
             let mut active_in_catalog = false;
             for p in providers.providers.values().filter(|p| p.enabled) {
                 let Some(protocol_id) = resolve_protocol_id(&p.api_protocol) else {
@@ -889,10 +889,13 @@ impl Plugin for ModelPlugin {
             // 「生效者必然是目录里的一员」由此是结构而不是纪律——生效位长在目录行上：
             // 生效 provider 不在目录里（未启用 / 协议工厂不可用）⇒ 没有任何行带位
             // ⇒ 会话报「未找到可用的 Model Provider」，而不是替它挑一个别的。
+            // 行里只剩**目录事实**（id + 生效位，`D-437`）：执行对象留在下面的
+            // `ModelPort` 手里。行不再是「一个能跑的 provider」，因此表的读者
+            // 不会顺手拿到一次调用能力。
             for provider in &available {
                 let is_active = active_id.as_deref() == Some(provider.provider_id());
                 tool_visitor
-                    .put(CapabilityRow::model(provider.clone(), is_active))
+                    .put(CapabilityRow::model(provider.provider_id(), is_active))
                     .await;
             }
 

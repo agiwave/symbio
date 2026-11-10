@@ -2,14 +2,54 @@
   "note": "plugin-api 自有实现的行数棘轮：只许降。数的是生产文件物理行（含空行与注释），*.test.rs / tests.rs 与 #[cfg(test)] mod 不计。超一行即红；行数下降必须同批下调本文件，否则基线留出的余量会让「删 N 行再加 N 行」逃过判据。整份删除的转发文件不留空：条目钉到 lines:0 + retired（新家路径），文件若又出现即 FA-003 红。",
   "crate": "crates/symbio-plugin-api/src",
   "files": [
-    { "path": "effects.rs", "lines": 0, "adr": "D-413", "retired": "crates/symbio-sdk/src/plugin/effects.rs" },
-    { "path": "declarations.rs", "lines": 27, "adr": "D-415" },
-    { "path": "events.rs", "lines": 192, "adr": "D-415" },
-    { "path": "port.rs", "lines": 450, "adr": "D-404" },
-    { "path": "text.rs", "lines": 0, "adr": "D-413", "retired": "crates/symbio-sdk/src/text/tokenizer.rs" },
-    { "path": "context.rs", "lines": 0, "adr": "D-413", "retired": "crates/symbio-sdk/src/plugin/context.rs" },
-    { "path": "reports.rs", "lines": 0, "adr": "D-416", "retired": "crates/symbio-sdk/src/plugin/reports.rs" },
-    { "path": "views.rs", "lines": 0, "adr": "D-416", "retired": "crates/symbio-sdk/src/plugin/views.rs" }
+    {
+      "path": "effects.rs",
+      "lines": 0,
+      "adr": "D-413",
+      "retired": "crates/symbio-sdk/src/plugin/effects.rs"
+    },
+    {
+      "path": "declarations.rs",
+      "lines": 27,
+      "adr": "D-415"
+    },
+    {
+      "path": "events.rs",
+      "lines": 192,
+      "adr": "D-415"
+    },
+    {
+      "path": "port.rs",
+      "lines": 450,
+      "adr": "D-404"
+    },
+    {
+      "path": "text.rs",
+      "lines": 0,
+      "adr": "D-413",
+      "retired": "crates/symbio-sdk/src/text/tokenizer.rs"
+    },
+    {
+      "path": "context.rs",
+      "lines": 0,
+      "adr": "D-413",
+      "retired": "crates/symbio-sdk/src/plugin/context.rs"
+    },
+    {
+      "path": "reports.rs",
+      "lines": 0,
+      "adr": "D-416",
+      "retired": "crates/symbio-sdk/src/plugin/reports.rs"
+    },
+    {
+      "path": "views.rs",
+      "lines": 0,
+      "adr": "D-416",
+      "retired": "crates/symbio-sdk/src/plugin/views.rs"
+    }
   ],
-  "total": { "lines": 1995, "adr": "D-416" }
+  "total": {
+    "lines": 1990,
+    "adr": "D-437"
+  }
 }

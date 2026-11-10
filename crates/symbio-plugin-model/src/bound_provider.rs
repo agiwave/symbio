@@ -1,4 +1,4 @@
-//! BoundProvider —— core `ModelProvider` 纯 trait 的生产实现。
+//! BoundProvider —— `crate::provider::ModelProvider` 的唯一实现。
 //!
 //! 绑定两样东西：
 //! - [`ModelProviderConfig`]：持久化配置 schema（serde 字段名冻结，用户配置兼容）；
@@ -27,9 +27,9 @@ use symbio_plugin_api::plugin_error;
 use symbio_plugin_api::plugin_info;
 use symbio_plugin_api::plugin_warn;
 use symbio_plugin_api::RoundOutput;
-use symbio_plugin_api::{
-    llm_removed_frame, CapabilityMeta, ExecEnv, ExecEventSink, ModelProvider, PluginError,
-};
+use symbio_plugin_api::{llm_removed_frame, CapabilityMeta, ExecEnv, ExecEventSink, PluginError};
+
+use crate::provider::ModelProvider;
 
 use super::http::{endpoint_label, execute_post_with_abort, PostResult};
 use super::model_providers::ModelProviderConfig;
@@ -72,14 +72,6 @@ async fn revoke_untouched(sink: &ExecEventSink, seeded: &[String], kept: &[Strin
 impl ModelProvider for BoundProvider {
     fn provider_id(&self) -> &str {
         &self.cfg.id
-    }
-
-    fn api_protocol(&self) -> &str {
-        &self.cfg.api_protocol
-    }
-
-    fn rate_limit_ms(&self) -> u64 {
-        self.cfg.rate_limit_ms
     }
 
     fn max_context_tokens(&self) -> u32 {
@@ -349,7 +341,3 @@ impl ModelProvider for BoundProvider {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "bound_provider.test.rs"]
-mod tests;

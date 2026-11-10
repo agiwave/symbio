@@ -8,7 +8,6 @@ mod config_snapshot;
 mod configurable;
 mod error;
 mod grants;
-mod model;
 mod mount;
 mod option;
 pub mod port;
@@ -42,7 +41,6 @@ pub use configurable::{
     capability_announce_configurable, capability_configurables, capability_entry_of,
 };
 pub use grants::ApprovalGrants;
-pub use model::{capability_model_active, capability_model_resolve};
 pub use mount::capability_vdfs_root;
 pub use option::capability_option_fields;
 pub use prompt::capability_prompts;

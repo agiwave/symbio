@@ -146,7 +146,7 @@ pub use symbio_kernel::exec::{
     ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter, ABORT_SIGNAL, EVENT_SINK,
 };
 pub use symbio_kernel::keys::SymbioKey;
-pub use symbio_kernel::llm::{ModelFinishReason, ModelProvider, ModelSpend, ModelUsage};
+pub use symbio_kernel::llm::{ModelFinishReason, ModelSpend, ModelUsage};
 pub use symbio_kernel::llm::{PromptMessage, PromptToolCall, RoundOutput, RoundToolCallInfo};
 pub use symbio_kernel::plugin::error::{lock_read, lock_write};
 pub use symbio_kernel::plugin::{
@@ -179,14 +179,10 @@ pub use symbio_kernel::{
 // 对象构造器的链接期登记、日志与协议键。它们与「插件要用一条机制」是同一件事，
 // 与「插件要认识整个宿主」被绑成同一件事。SDK 把这条绑定切开：这一臂只依赖内核。
 pub use symbio_kernel::capability::{capability_invoke, failure_kind};
-pub use symbio_sdk::adapters::{
-    DeltaSink, FullModel, LlmAdapter, ProviderLlmAdapter, SilentDeltas, TokenIssuer,
-};
 pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 pub use symbio_sdk::capability::{
     capability_announce_config_snapshot, capability_announce_configurable,
-    capability_configurables, capability_entry_of, capability_model_active,
-    capability_model_resolve, capability_option_fields, capability_prompts,
+    capability_configurables, capability_entry_of, capability_option_fields, capability_prompts,
     capability_report_error, capability_take_errors, capability_to_wire, capability_vdfs_root,
     CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR, SCOPE_TWIN,
 };
@@ -212,7 +208,6 @@ pub use symbio_sdk::plugin::{
     TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 pub use symbio_sdk::projection::task_vocab::TaskVocab;
-pub use symbio_sdk::projection::transcript::transcript;
 pub use symbio_sdk::projection::vocab::CommitmentVocab;
 pub use symbio_sdk::text::merge_kernel::truncate_chars;
 pub use symbio_sdk::text::{text_floor_char_boundary, text_truncate_bytes};

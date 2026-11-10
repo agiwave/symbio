@@ -33,9 +33,10 @@ use symbio_plugin_api::port::{
 };
 use symbio_plugin_api::principal::{Principal, PrincipalKind};
 use symbio_plugin_api::{
-    llm_short_id, AssistReply, AssistRequest, CapabilityRow, ExecEnv, ExecEventSink, ModelProvider,
-    PluginError,
+    llm_short_id, AssistReply, AssistRequest, CapabilityRow, ExecEnv, ExecEventSink, PluginError,
 };
+
+use crate::provider::ModelProvider;
 
 /// 一次性问答端口的名字（数据）：名字住 `plugin-api` 的词汇面，提供者与本端口共用
 /// 同一常量（D-364）。

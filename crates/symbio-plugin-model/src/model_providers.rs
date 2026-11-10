@@ -122,7 +122,14 @@ pub struct ModelProviderConfig {
     /// Token 单价（可选）。缺席 = 不折算金额；见 [`ModelPricing`] 的「缺省 vs 零」。
     pub pricing: Option<ModelPricing>,
 
-    /// 最小请求间隔（毫秒）；0 表示不限制
+    /// 最小请求间隔（毫秒）；0 表示不限制。
+    ///
+    /// **当前没有执行方**：这个字段被解析、被详情页展示、被示例配置带着，但
+    /// 请求路径上没有任何一处读它——此前 `ModelProvider::rate_limit_ms` 是它
+    /// 唯一的出口，而那个出口没有调用方（`D-437` 删掉了那个 getter，让缺口留在
+    /// **字段**上而不是靠一个没人调的 getter 假装有执行面）。限流真正的落地位置
+    /// 应当是 `http::execute_post_with_abort` 之前的一道闸（每分钟 x 次 / 最小间隔），
+    /// 那是独立的一笔，不在 `D-437` 里顺手做。
     #[serde(default = "default_rate_limit_ms")]
     pub rate_limit_ms: u64,
 

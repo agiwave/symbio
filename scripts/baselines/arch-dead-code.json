@@ -266,21 +266,9 @@
       "evidence": "docs/003-design/001-核心架构.md"
     },
     {
-      "symbol": "for_turn",
-      "path": "crates/symbio-sdk/src/adapters/provider_adapter.rs",
-      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
       "symbol": "tool_metas",
       "path": "crates/symbio-sdk/src/capability/collect.rs",
       "why": "待裁：`60cedd50` 删旧编排时丢掉最后的调用点，需按新路径接线或删除",
-      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
-    },
-    {
-      "symbol": "capability_model_resolve",
-      "path": "crates/symbio-sdk/src/capability/model.rs",
-      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
       "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
     },
     {

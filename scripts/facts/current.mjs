@@ -127,7 +127,9 @@ function extractToolNames(t, consts) {
 }
 
 /** 核心 trait 白名单：只统计真正定义插件形态的 trait */
-const CORE_TRAITS = ["Plugin", "VdfsProvider", "Capability", "ModelProvider", "ConfigurableVisitor"];
+// 契约 trait 白名单（D-437 之后 `ModelProvider` 不在其中：它归 model 插件私有，
+// 不再是「插件实现的内核契约」）。
+const CORE_TRAITS = ["Plugin", "VdfsProvider", "Capability", "ConfigurableVisitor"];
 
 /** 单个插件的静态事实 */
 function analyzePlugin(crateDirName, ids) {
@@ -328,7 +330,7 @@ const DYNAMIC_ROUTES = {
   } 个操作）`,
   composite: "容器：按配置挂载的子插件名分发，运行期动态",
   agent: "已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`）",
-  model: "已无自有路由（模型往返经 `ModelProvider::round_trip` 进程内调用）",
+  model: "已无自有路由（模型往返由本插件注册的 `port.model` 执行体完成，环按端口名取行）",
 };
 
 const fmtList = (items) => (items.length ? items.map((x) => `\`${x}\``).join(" · ") : "—");

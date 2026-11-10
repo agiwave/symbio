@@ -40,7 +40,6 @@
 
 use super::family;
 use crate::capability::{Capability, CapabilityMeta};
-use crate::llm::ModelProvider;
 use crate::present::DetailField;
 use crate::vdfs::{VdfsItem, VdfsProvider};
 use std::any::Any;
@@ -108,8 +107,18 @@ impl Hash for CapabilityFamily {
 /// 工具行的载荷：可调用对象（注册收口点已裹审批闸，见 `DefaultToolVisitor::put`）。
 struct ToolPayload(Arc<dyn Capability>);
 
-/// 模型行的载荷：一个已启用的 provider；生效位在 [`CapabilityRow`] 上，不在载荷里。
-struct ModelPayload(Arc<dyn ModelProvider>);
+/// 模型行的载荷：一个**空标记**。
+///
+/// `D-437` 之前这里装的是 `Arc<dyn ModelProvider>`——「谁是可调用对象」那张脸让
+/// 执行契约必须住内核（行是内核类型，行认得它，它就得在公共面）。`port.model`
+/// 把执行面收进 model 插件之后，这一行只剩下两件事实：**它叫什么**（表键）与
+/// **它带不带生效位**。协议串一度也想放进来，但查遍了：目录的选择面走
+/// `contribute_options`（`OptionPayload`），执行面走 `port.model`，没有任何读者
+/// 需要从行上读协议——留一个没有读者的字段，只会让下一个人以为这里有信息。
+///
+/// **行是数据，端口是行为**：把行为装进行，行的每一个读者都会顺手变成那个行为的
+/// 读者，这正是这条 trait 当初被抬进架构的原因。空标记把这个形状钉死在这里。
+struct ModelEntry;
 
 /// 提示词行的载荷：一段文字，行名就是段名（覆盖键）。
 struct PromptPayload(String);
@@ -177,13 +186,15 @@ impl CapabilityRow {
         Self::new(family::TOOL, name, ToolPayload(cap), false)
     }
 
-    /// 模型行：名字 = `provider.provider_id()`。
+    /// 模型行：名字 = `provider_id`，载荷是空标记（**不装执行对象**，`D-437`）。
     ///
-    /// `active` 只由**写出整批的那一方**填（`capability::model::register`）：它知道
-    /// 这一批里哪个是当次生效者。表把「唯一生效」接过去，见 [`Self::demote`]。
-    pub fn model(provider: Arc<dyn ModelProvider>, active: bool) -> Self {
-        let name = provider.provider_id().to_string();
-        Self::new(family::MODEL, name, ModelPayload(provider), active)
+    /// `active` 只由**写出整批的那一方**填（model 插件的 traverse）：它知道这一批里
+    /// 哪个是当次生效者。表把「唯一生效」接过去，见 [`Self::demote`]。
+    ///
+    /// 两个入参都是**数据**：目录项的 id 与它带不带位。这一行因此可以被任何只持有
+    /// 目录快照的写方构造——不需要先有一个能跑的 provider 实例。
+    pub fn model(provider_id: &str, active: bool) -> Self {
+        Self::new(family::MODEL, provider_id.to_string(), ModelEntry, active)
     }
 
     /// 系统提示词行：名字 = 段名（覆盖键）。
@@ -245,11 +256,6 @@ impl CapabilityRow {
     /// 取可调用对象；非工具族为 `None`（调用方据此给诚实的 NotFound）。
     pub fn cap(&self) -> Option<&Arc<dyn Capability>> {
         self.payload::<ToolPayload>().map(|p| &p.0)
-    }
-
-    /// 取模型服务；非模型族为 `None`。
-    pub fn provider(&self) -> Option<&Arc<dyn ModelProvider>> {
-        self.payload::<ModelPayload>().map(|p| &p.0)
     }
 
     /// 取系统提示词正文；非提示词族为 `None`。

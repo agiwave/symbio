@@ -17,8 +17,8 @@ deps: [DE-016-工程落地与验证]
 
 | 设施 | 位置 | 说明 |
 |---|---|---|
-| `LlmAdapter::generate_timed` | `crates/symbio-sdk/src/adapters` | trait 默认方法：adapter 边界 `Instant` 计时，返回 `(文本, 实测毫秒)`。桩与真实适配器零改动共享 |
-| `Reasoner::reply_timed` | `crates/symbio-sdk/src/actors` | 埋点版 reply；`reply` 委托它 |
+| 执行体实测耗时 | `crates/symbio-plugin-model/src/port.rs` | `ModelExecutor` 落 `response{port=model}` 时写 `cost_ms`（`started.elapsed()`，覆盖解载荷到收束整段）。一次往返一个读数，不经中间层转发 |
+| `cost_ms` 读侧 | `crates/symbio-sdk/src/projection` | 逐轮读数进 final 的 `cost_ms`，`cost.ledger` 按主体累加 |
 | `cost_ms` 入事件 | final 事件字段 | 调用方把实测值写到 `chat.assistant.final` 的 `cost_ms` |
 | ③ `cost.ledger` | `crates/symbio-plugin-cost/src/decl.rs` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（接上真实来源） |
 

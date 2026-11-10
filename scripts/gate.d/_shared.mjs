@@ -394,7 +394,12 @@ export const BASELINE = {
   // `the_three_unbuilt_capabilities_ship_name_cell_field_and_row` 与
   // `heartbeat/decl.test.rs` 的声明面用例）。被测对象已整体撤回，覆盖对象消失不叫丢覆盖；
   // 剩下的 `conation.expressed` 那条真链由 `t36-autonomous-initiator` 端到端钉住。非侵蚀。
-  ciRustTestsTotal: 2231,
+  // baseline-allow ciRustTestsTotal: 2231 → 2222（D-437）——`bound_provider.test.rs` 的
+  // 八条用例随 `ProviderLlmAdapter` 一并退场（它们验的是 adapter 的通道分流与 `LlmTurn`
+  // 组装，壳没了就没有对象），另有 `capability_model_*` 三个读口用例与两处模型行用例
+  // 改写（少 1 条），新增 1 条「行不装执行对象」。真实 HTTP + SSE 的闭环由 e2e 的
+  // `mock-llm` 用例承担，SSE 解析本身的单元覆盖在 `stream.test.rs`。非侵蚀。
+  ciRustTestsTotal: 2222,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

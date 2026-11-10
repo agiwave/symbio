@@ -6,9 +6,8 @@ use super::*;
 
 use async_trait::async_trait;
 use symbio_plugin_api::{
-    capability_model_active, capability_model_resolve, capability_prompts, capability_vdfs_root,
-    family, CapabilityRow, ModelProvider, RoundOutput, VdfsContent, VdfsContext, VdfsError,
-    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, SCOPE_TWIN,
+    capability_prompts, capability_vdfs_root, family, CapabilityRow, VdfsContent, VdfsContext,
+    VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, SCOPE_TWIN,
 };
 
 #[test]
@@ -81,47 +80,6 @@ impl VdfsProvider for LabeledRoot {
     }
 }
 
-/// 最小模型服务桩（形状同 `providers/collectors/tool_visitor.test.rs`）
-struct LabeledProvider(&'static str);
-
-#[async_trait]
-impl ModelProvider for LabeledProvider {
-    fn provider_id(&self) -> &str {
-        self.0
-    }
-
-    fn api_protocol(&self) -> &str {
-        "openai_chat"
-    }
-
-    fn rate_limit_ms(&self) -> u64 {
-        0
-    }
-
-    fn max_context_tokens(&self) -> u32 {
-        262_144
-    }
-
-    async fn effective_context_tokens(&self) -> u32 {
-        262_144
-    }
-
-    async fn round_trip(
-        &self,
-        _system_prompt: &str,
-        _messages: &[symbio_plugin_api::chat_node::ChatNode],
-        _tools: &[CapabilityMeta],
-        _root_id: &str,
-        _env: &ExecEnv,
-    ) -> Result<RoundOutput, PluginError> {
-        Err(PluginError::InternalError("mock".to_string()))
-    }
-}
-
-fn provider(id: &'static str) -> Arc<dyn ModelProvider> {
-    Arc::new(LabeledProvider(id))
-}
-
 /// 最小工具桩：只需一个名字，执行从不发生。
 struct EchoTool(&'static str);
 
@@ -191,21 +149,19 @@ async fn sub_agent_root_registration_is_discarded() {
 #[tokio::test]
 async fn sub_agent_model_registration_is_discarded() {
     let inner: Arc<dyn Registry> = Arc::new(symbio_providers::DefaultToolVisitor::new());
-    inner.put(CapabilityRow::model(provider("sys"), true)).await;
+    inner.put(CapabilityRow::model("sys", true)).await;
 
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
-    scoped
-        .put(CapabilityRow::model(provider("child"), true))
-        .await;
+    scoped.put(CapabilityRow::model("child", true)).await;
 
-    assert_eq!(
-        capability_model_active(&*inner)
-            .await
-            .expect("系统生效者应仍在表里")
-            .provider_id(),
-        "sys",
-        "子 Agent 不得改掉会话的生效模型"
-    );
+    let actives: Vec<String> = inner
+        .list(family::MODEL)
+        .await
+        .into_iter()
+        .filter(|row| row.active())
+        .map(|row| row.name().to_string())
+        .collect();
+    assert_eq!(actives, ["sys"], "子 Agent 不得改掉会话的生效模型");
     assert!(
         inner
             .list(family::MODEL)
@@ -275,27 +231,16 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
 #[tokio::test]
 async fn read_side_forwards_to_inner_unchanged() {
     let inner: Arc<dyn Registry> = Arc::new(symbio_providers::DefaultToolVisitor::new());
-    inner.put(CapabilityRow::model(provider("sys"), true)).await;
+    inner.put(CapabilityRow::model("sys", true)).await;
     inner
         .put(CapabilityRow::mount_root(Arc::new(LabeledRoot("系统根"))))
         .await;
 
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
 
-    assert_eq!(
-        capability_model_active(&scoped)
-            .await
-            .expect("生效者应透传")
-            .provider_id(),
-        "sys"
-    );
-    assert_eq!(
-        capability_model_resolve(&scoped, Some("sys"))
-            .await
-            .expect("目录按 id 透传（只读）")
-            .provider_id(),
-        "sys"
-    );
+    let row = scoped.get("sys").await.expect("目录按 id 透传（只读）");
+    assert_eq!(row.family(), family::MODEL);
+    assert!(row.active(), "生效位随行透传");
     let root = capability_vdfs_root(&scoped).await.expect("根应透传");
     assert_eq!(label_of(&root).await, "系统根");
 }

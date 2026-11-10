@@ -8,8 +8,8 @@
  *
  * | 编号 | 格 | 判什么 | 它拦的是哪一种膨胀 |
  * |---|---|---|---|
- * | CS-001 | `traits` | **内核五 trait**（Store / Capability / ModelProvider / VdfsProvider / Registry）的声明数（冻结 5） | **新增接缝**：每多一个内核抽象，就多一处「所有实现方都得知道」的地方。域 trait 不占此格（DE-023 A2 收窄口径） |
- * | CS-001 | `methods` | 上述五 trait 的 `fn` 成员总数（冻结 17） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
+ * | CS-001 | `traits` | **内核四 trait**（Store / Capability / VdfsProvider / Registry）的声明数（冻结 4） | **新增接缝**：每多一个内核抽象，就多一处「所有实现方都得知道」的地方。域 trait 不占此格（DE-023 A2 收窄口径） |
+ * | CS-001 | `methods` | 上述四 trait 的 `fn` 成员总数（冻结 11） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
  * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 2） | **接口上长实现**：行为代码住进架构模块 |
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0（**全 core**） | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作。依赖方向不随内核边界变化，故不收窄 |
@@ -203,17 +203,21 @@ const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
  * ⚠️ 键序就是 `CORE_SHAPE_BASELINE` 的位置口径（`35-baseline` 的 env 覆盖判定按它 zip），
  * 也必须是 `35-baseline` 那条提取函数认的键名；任何一边单改都会红。
  */
-// 内核五 trait 是**封闭语法**（DE-023 §1）：它们的形状只许收窄。
+// 内核四 trait 是**封闭语法**（DE-023 §1）：它们的形状只许收窄。
 // 其余 trait 是域协议（Plugin / LlmAdapter / DeltaSink / …），随 B2/C 迁出内核，
 // 不占这条棘轮——在那里加成员不等于「内核接缝变宽」。
-const KERNEL_TRAITS = ['Store', 'Capability', 'ModelProvider', 'VdfsProvider', 'Registry']
+//
+// `ModelProvider` 于 `D-437` 退出这一格：执行契约归 model 插件（`port.model` 是
+// 环唯一认的那条边），内核只剩四个跨侧共用的接缝。这是一次**收窄**，因此不需要
+// `core-shape-allow`——那一格只对放宽有效。
+const KERNEL_TRAITS = ['Store', 'Capability', 'VdfsProvider', 'Registry']
 
 const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
   ? (() => {
       const [traits, methods, defaults] = process.env.CORE_SHAPE_BASELINE.split(':').map((n) => Number(n))
       return { traits, methods, defaults }
     })()
-  : { traits: 5, methods: 17, defaults: 2 }
+  : { traits: 4, methods: 11, defaults: 2 }
 
 /**
  * CS-005 词汇棘轮（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-200）。
@@ -344,7 +348,7 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 609, enumVariants: 262 }
+  : { structFields: 606, enumVariants: 262 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
