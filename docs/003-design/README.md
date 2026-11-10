@@ -235,7 +235,7 @@ board.columns: [impl]
 | [`DE-052-决策正文证据锚点冻结表`](052-决策正文证据锚点冻结表.md) | 决策正文证据锚点冻结表（DE-053 D-326 附表） | 部分落地 |
 | [`DE-053-环驱动与写口裁决`](053-环驱动与写口裁决.md) | 环驱动与写口裁决 | 部分落地 |
 | [`DE-054-判据欠账与到期豁免`](054-判据欠账与到期豁免.md) | 判据欠账与到期豁免 | 与代码一致 |
-| [`DE-055-能力自配置终态裁决`](055-能力自配置终态裁决.md) | 能力自配置终态裁决 | 部分落地 |
+| [`DE-055-能力自配置终态裁决`](055-能力自配置终态裁决.md) | 能力自配置终态裁决 | 与代码一致 |
 | [`DE-101-context-compression-design`](../../crates/symbio-plugin-session/src/docs/101-context-compression-design.md) | 会话上下文压缩设计 | 与代码一致 |
 | [`DE-104-module-layout`](../../crates/symbio-plugin-session/src/docs/104-module-layout.md) | Session / Loop 插件模块分工 | 与代码一致 |
 | [`DE-105-node-state-streaming`](../../crates/symbio-plugin-session/src/docs/105-node-state-streaming.md) | 节点状态流（Node-State Streaming）—— 实时面即节点状态 | 与代码一致 |

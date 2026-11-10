@@ -28,30 +28,30 @@ use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use symbio_sdk::plugin::drive_entry::DriveEntry;
 use symbio_sdk::turn::facts::FleetSnapshot;
 
-/// 工具表的**去重**：子 Agent 作用域会把同一能力以 `agent_<id>_<name>` 再注册一遍，
-/// 而 `PrefixedCapability` 只改名、执行原样透传（`crates/symbio-plugin-agent/src/host/scope.rs`），
-/// 所以对模型而言两份是同一个能力。这里按**名字集合**去掉前缀副本，子树独有的工具仍保留。
+/// 工具表的**去重**：子 Agent 作用域会把同一能力再注册一遍，而 `PrefixedCapability`
+/// 只改名、执行原样透传（`crates/symbio-plugin-agent/src/host/scope.rs`），所以对模型
+/// 而言两份是同一个能力。
 ///
-/// 判定不看遍历顺序：先取全量名集合，再对每个 `agent_` 开头的名字试所有 `_` 切点——
-/// 只要切点之后的基名也在集合里，它就是前缀副本。`safe_id` 本身可含 `_`/`-`，
-/// 因此不能假定前缀的固定长度。
-fn dedup_subtree_twins(
+/// 哪两个名字是同一能力的两份，由**声明面**回答（`SCOPE_TWIN` 的 `(前缀名, 本名)` 对，
+/// D-428）；本函数只做一次集合判定：前缀名与本名都在本轮工具表里 ⇒ 前缀那份是副本，
+/// 去掉。本名缺席（能力被卸载 / 子树独有工具）⇒ 前缀那份必须保留，否则能力会凭空消失。
+///
+/// 控制面不解析任何名字形状，也不认识前缀规则；判定与写入顺序无关（集合，不是遍历序）。
+fn dedup_declared_twins(
     metas: Vec<symbio_kernel::capability::CapabilityMeta>,
+    twins: &[(String, String)],
 ) -> Vec<symbio_kernel::capability::CapabilityMeta> {
-    let names: std::collections::HashSet<String> =
-        metas.iter().map(|meta| meta.name.clone()).collect();
+    let names: std::collections::HashSet<&str> =
+        metas.iter().map(|meta| meta.name.as_str()).collect();
+    let dropped: std::collections::HashSet<&str> = twins
+        .iter()
+        .filter(|(scoped, base)| names.contains(scoped.as_str()) && names.contains(base.as_str()))
+        .map(|(scoped, _)| scoped.as_str())
+        .collect();
     metas
         .into_iter()
-        .filter(|meta| !is_subtree_twin(&meta.name, &names))
+        .filter(|meta| !dropped.contains(meta.name.as_str()))
         .collect()
-}
-
-fn is_subtree_twin(name: &str, names: &std::collections::HashSet<String>) -> bool {
-    let Some(rest) = name.strip_prefix("agent_") else {
-        return false;
-    };
-    rest.match_indices('_')
-        .any(|(i, _)| names.contains(&rest[i + 1..]))
 }
 
 impl SessionPlugin {
@@ -203,13 +203,15 @@ impl SessionPlugin {
             .filter(|prompt| !prompt.trim().is_empty())
             .collect::<Vec<_>>()
             .join("\n\n");
-        let tools = dedup_subtree_twins(
+        let twins = symbio_sdk::capability::capability_scope_twins(&*manager).await;
+        let tools = dedup_declared_twins(
             manager
                 .list(symbio_kernel::capability::family::TOOL)
                 .await
                 .into_iter()
                 .map(|row| row.meta())
                 .collect(),
+            &twins,
         );
         // 收集过程的失败信号（traverse 侧记在 ctx 的桶里）：能力表为空/有错都要落 config，
         // 只是把原因写进载荷。**不造新事件类型**——模型行依赖的是 `session.config` 这条
@@ -227,7 +229,7 @@ impl SessionPlugin {
         // 当轮配置快照 = 会话基底格 + 能力包在开轮 traverse 里各自贡献的格（D-427）。
         //
         // 两半的分工就是「谁的真源谁写」：`opening_*` / `progress_*` 的真源在本插件
-        // （实现体也仍在本插件，残留账见 `docs/007-task/005-会话内实现体收口.md`），
+        // （实现体也仍在本插件，归属裁决见 DE-055 D-429），
         // 故**在这里直接投影**——不绕一次广播，也就不依赖本插件 `traverse` 与这次
         // 写格的先后。能力开关的真源在能力包，本插件不认识它们的键名，只按 owner
         // 合并收集口给出的那一张表；不按插件名去债表查「谁在场」——卸载一个能力包，

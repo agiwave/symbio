@@ -12,10 +12,11 @@
 //! - 判定与顺序无关，不需要给注册体系引入优先级概念；
 //! - 也不必修改架构 crate 的架构定义——本模块只在 agent 插件内做一层代理。
 //!
-//! **工具面的去重不在这一层做**：这里只保证「两份都能按各自名字取到」，而 LLM 看到的
-//! 那**一张**工具表由会话装配统一生成（`symbio-plugin-session` 的 `dedup_subtree_twins`：
-//! 去掉与根工具同名的前缀副本，子树独有的工具仍带前缀进场）。原因是写入顺序不确定——
-//! 按内表现判「根上有没有同名」会重新引入依赖遍历顺序的结果。
+//! **去重判定不在这一层做**：这里只保证「两份都能按各自名字取到」，并顺手把
+//! 「这个前缀名原本叫什么」交给会话装配（`SCOPE_TWIN` 声明行）。两份工具谁进模型的
+//! 那**一张**表，由 `symbio-plugin-session` 按声明与根工具集合统一折叠，判定与顺序无关。
+//! 原因是写入顺序不确定——按内表现判「根上有没有同名」会重新引入依赖遍历顺序的结果；
+//! 而按名字形状猜前缀副本（`agent_` + 切点）会把子 Agent 的命名规则搬进控制面（D-428）。
 //!
 //! ## 两套前缀形态
 //!
@@ -42,7 +43,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::{
     family, Capability, CapabilityFamily, CapabilityMeta, CapabilityRow, ExecEnv, PluginError,
-    PluginInvokeRequest, Registry,
+    PluginInvokeRequest, Registry, SCOPE_TWIN,
 };
 
 /// 子 Agent 插件树的注册代理
@@ -172,11 +173,23 @@ impl Registry for SubAgentVisitor {
         // 行的构造走词汇自己的 `tool()`，名前缀由改名装饰器承载——与机制化之前
         // 「包一层 PrefixedCapability 再 register」同一条路，只是入口从 register
         // 换成 put（DE-025 §3）。**前缀副本与根工具的去重不在写入侧做**（写入顺序
-        // 不确定），由会话装配在收集完成后按名字集合去重，见模块文档。
+        // 不确定），但「这个前缀名对应哪个本名」由本层声明：装配面据此折叠，
+        // 不必认识 `agent_` 这套命名规则（D-428）。
         let Some(cap) = row.cap().cloned() else {
             return;
         };
-        let name = self.tool(&cap.name());
+        let base = cap.name();
+        let name = self.tool(&base);
+        // 声明行的键不能和工具行同名（表键是全表唯一命名空间）；键的形状由本层
+        // 自己给，读侧只取载荷，不解析它。
+        self.inner
+            .put(CapabilityRow::new(
+                SCOPE_TWIN,
+                format!("twin:{name}"),
+                (name.clone(), base),
+                false,
+            ))
+            .await;
         self.tools
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.inner

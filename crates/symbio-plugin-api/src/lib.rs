@@ -188,7 +188,7 @@ pub use symbio_sdk::capability::{
     capability_configurables, capability_entry_of, capability_model_active,
     capability_model_resolve, capability_option_fields, capability_prompts,
     capability_report_error, capability_take_errors, capability_to_wire, capability_vdfs_root,
-    CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
+    CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR, SCOPE_TWIN,
 };
 pub use symbio_sdk::chat::chat_node::{message_of_node, AssistReply, AssistRequest, SEG_MESSAGES};
 pub use symbio_sdk::clock::clock_now_ms;

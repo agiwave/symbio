@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use symbio_plugin_api::{
     capability_model_active, capability_model_resolve, capability_prompts, capability_vdfs_root,
     family, CapabilityRow, ModelProvider, TurnOutput, VdfsContent, VdfsContext, VdfsError,
-    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
+    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, SCOPE_TWIN,
 };
 
 #[test]
@@ -241,6 +241,22 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
             .await
             .is_some_and(|row| row.name() == "agent_reviewer_read_skill"),
         "子 Agent 的工具应带前缀进内层（并集，两份都生效）"
+    );
+    // 本名声明（D-428）：每个前缀工具都交出「前缀名 → 本名」一对，装配面据此折叠，
+    // 不需要认识 `agent_` 这套前缀形状。声明行的键不与工具行同名，读侧只取载荷。
+    let declared: Vec<(String, String)> = inner
+        .list(SCOPE_TWIN)
+        .await
+        .into_iter()
+        .filter_map(|row| row.payload::<(String, String)>().cloned())
+        .collect();
+    assert_eq!(
+        declared,
+        [(
+            "agent_reviewer_read_skill".to_string(),
+            "read_skill".to_string()
+        )],
+        "子 Agent 的每个前缀工具都要声明本名：{declared:?}"
     );
     // 系统提示词：前缀在 `agent/<id>/` 段下
     let prompts = capability_prompts(&*inner).await;
