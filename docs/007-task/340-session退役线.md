@@ -44,10 +44,14 @@ created: 2026-11-11
    里它一行都占不上（不欠债、不执行债、不是七职）⇒ 只能降成数据，而「数据归谁」的答案是
    **写它的那个插件**。第一刀已落：`usage` / `spend` 两本账（287 行）搬到
    `crates/symbio-plugin-model/src/ledger.rs`，登记 `slot` = `usage` / `spend`；会话的出口按
-   `slot` 收，手工两列退场。**尚未归位的同类**：`projections::changes`（读 `artifact.added`
-   的 `args.path` / `file_op`）与 `plugin/nodes.rs` 的工具卡投影（读 `tool.requested` 的
-   `calls[]`）。它们的入场券还没写：前者的字段有 `FactDecl` 接着、后者是呈现面，两条都不像
-   `usage` / `spend` 那样「契约无人校验」，**不按本刀的判据硬搬**。
+   `slot` 收，手工两列退场。**同类的第二格由 `D-462` 答完，但答案不是「搬走」**：
+   `projections::changes` 读 `artifact.added` 的 `args.path` / `file_op`——那一格有两个写点
+   （`tool` 装基础格、行为 `annotate` 追加富化格）、三个读点（`sdk` 的折叠 / `session` 的
+   变更账 / `model` 的回灌），`sdk` 在门面之下，搬给任何一方都够不着；所以入场券换成
+   「把键声明出来」：键收进 `symbio-sdk` 的 `effects`，`SV-004` 钉写方键集合与读点字面量。
+   `changes` 因此**留在 `session`**——它折的是「本会话的工作目录改过什么」，那是本插件的
+   边界，键的契约由词表接着。**尚未作答**：`plugin/nodes.rs` 的工具卡投影（读
+   `tool.requested` 的 `calls[]`）——它是呈现面，且 `calls` 这一格还没进词表。
 5. **残余（没有边，69.1%）**：地址面 3462 行 + 其余 7809 行（命令面 / 统计读侧 / 配置 /
    活跃名册 / 工作目录）。地址面的入场券**已由 `D-459` 答完**：地址 = `<根>/<挂载名>/<七域>`，
    `<根>` 由 vdfs 插件静态声明、`<挂载名>` 是实例表的键（`session`），所以「换 owner 保地址」
@@ -130,6 +134,12 @@ exit: **不再是「删掉 crate」**（`D-458` / `D-459` 已判：存储与地�
   `crates/symbio/src/report_columns_acceptance.test.rs`、排版 4 条在 `session/stats.test.rs`
   ——**不在 session 的单测里断言「出口有 usage 键」**（那里不链接 `model`，`reports()` 恒空，
   断言会退化成恒真）。
+- 2026-11-11（第三批，**边四第二格**）：`D-462` 判产物格（`artifact.added`）的载荷契约。
+  两种「给键找个公共的家」的落点都被判据否掉：收进 `sdk` 的 `effects` 撞 `EX-007`
+  （机制层不许出现插件 id `"tool"`），从 owner 清单生成撞 `D-455`（为判据造事实源）。
+  结论：这格的契约只能由**判据**接——`shared-name-audit` 的 `SV-004` 拿写方
+  （`artifact_payload` + 各 `annotate`）当账本，读点逐格对账；容错档（`round`）显式列在
+  判据里，写方一出现就必须删。读点按函数 / 分支登记（`text` / `tool` 同形异义）。
 - 子任务见 `T-341-收窄session的sdk依赖边`。边二 的入场券已答（D-457）并改判为「开轮」；
   边三 的入场券已答（D-458）并改判为**验收条件**；地址面 的入场券已答（D-459）并判定
   **不为它登记任务**。三条边 + 残余里，**只剩边二（开轮）还有施工可能**，但它的出口

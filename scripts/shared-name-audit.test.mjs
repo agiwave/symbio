@@ -1,5 +1,5 @@
 /**
- * shared-name-audit 回归测试 —— 证明 SV-001 **会红**（D-364）
+ * shared-name-audit 回归测试 —— 证明 SV-001 / SV-003 / SV-004 **会红**（D-364 / D-462）
  *
  * 一个只会亮绿灯的守卫等于没有守卫。逐条注入真实违规并断言脚本变红：
  *   ① 干净夹具（两侧只 import）→ exit 0；
@@ -13,7 +13,10 @@
  *   ⑬ 无标记的 `test_fixtures.rs` 手抄 → exit 1（第二份定义）；
  *   ⑨ 登记与 024 契约表逐行相等 → exit 0（SV-003）；
  *   ⑩ 契约表有、登记没有 → exit 1；⑪ 登记了、表里没有 → exit 1；
- *   ⑫ 同一 slot 的 `fleet` 落点不一致 → exit 1。
+ *   ⑫ 同一 slot 的 `fleet` 落点不一致 → exit 1；
+ *   ⑭ 读点读的键都在写方账上 → exit 0（SV-004）；
+ *   ⑮ 读点读了写方不写的键 → exit 1；⑯ 写方改名而读方没跟 → exit 1；
+ *   ⑰ 写方源码缺失 → exit 2；⑱ 追加格与装配格重名 → exit 1。
  *
  * 用法：node --test scripts/shared-name-audit.test.mjs
  */
@@ -56,6 +59,30 @@ const DEFAULT_CORE = {
   'crates/symbio/src/lib.rs': '',
 }
 
+/**
+ * SV-004 的规则源：写方（`artifact_payload`）、行为（`annotate`）、三个登记的读点。
+ *
+ * 判据不设「词汇表」——它从写方源码读出账本，再拿读点去对。夹具因此只需要一个写方
+ * 和一个读点：判的是「读的键在不在账上」，不是「键有几格」。
+ */
+const DEFAULT_ARTIFACT = {
+  'crates/symbio-plugin-tool/src/port.rs':
+    'fn artifact_payload() -> serde_json::Value {\n' +
+    '    serde_json::json!({\n        "tool": 1,\n        "success": 2,\n    })\n}\n',
+  'crates/symbio-plugin-vdfs/src/behavior.rs':
+    'impl ToolBehavior for FileChange {\n' +
+    '    fn annotate(&self) -> Vec<(&\'static str, serde_json::Value)> {\n' +
+    '        vec![("file_op", serde_json::json!("write"))]\n' +
+    '    }\n}\n',
+  'crates/symbio-sdk/src/projection/rebuild.rs':
+    'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n',
+  'crates/symbio-plugin-session/src/projections/changes.rs':
+    'fn change_of() {\n    let _ = payload.get("success");\n}\n',
+  'crates/symbio-plugin-model/src/port.rs':
+    'fn turn_input() {\n    match kind {\n        EVENT_ARTIFACT_ADDED => {\n' +
+    '            let _ = payload.get("tool");\n        }\n        _ => {}\n    }\n}\n',
+}
+
 /** 造一个最小仓库：`crates/<插件>/src/<文件>`，内容由调用方给。 */
 function fixture(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shared-name-'))
@@ -63,6 +90,7 @@ function fixture(files) {
     [PLAN_REL]: DEFAULT_PLAN,
     [API_EVENTS_REL]: DEFAULT_API_EVENTS,
     ...DEFAULT_CORE,
+    ...DEFAULT_ARTIFACT,
     ...files,
   })) {
     const abs = path.join(root, rel)
@@ -283,6 +311,79 @@ test('⑥ 范围读不出 ⇒ exit 2', () => {
   try {
     const r = runOn(root)
     assert.equal(r.status, 2, r.stdout + r.stderr)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑭ 产物的读点用常量取键 ⇒ 绿（SV-004）', () => {
+  const root = fixture({
+    'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-004/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑮ 读点读了一格写方不写的键 ⇒ 红（写方改名后读方静默读空）', () => {
+  const root = fixture({
+    'crates/symbio-plugin-session/src/projections/changes.rs':
+      'fn change_of() {\n    let _ = payload.get("ghost");\n}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-004/)
+    assert.match(r.stdout, /ghost/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑯ 写方把键改名 ⇒ 红（读方仍在读旧键）', () => {
+  const root = fixture({
+    'crates/symbio-plugin-tool/src/port.rs':
+      'fn artifact_payload() -> serde_json::Value {\n' +
+      '    serde_json::json!({\n        "succeeded": 1,\n    })\n}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-004/)
+    assert.match(r.stdout, /tool/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑰ 写方缺失 ⇒ exit 2（规则源读不出不是「没有违规」）', () => {
+  const root = fixture({ 'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n' })
+  try {
+    fs.unlinkSync(path.join(root, 'crates/symbio-plugin-tool/src/port.rs'))
+    const r = runOn(root)
+    assert.equal(r.status, 2, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-004/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑱ 行为追加格与装配格重名 ⇒ 红（两个写点争同一格）', () => {
+  const root = fixture({
+    'crates/symbio-plugin-vdfs/src/behavior.rs':
+      'impl ToolBehavior for FileChange {\n' +
+      '    fn annotate(&self) -> Vec<(&\'static str, serde_json::Value)> {\n' +
+      '        vec![("tool", serde_json::json!(op))]\n' +
+      '    }\n}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-004/)
   } finally {
     rmTree(root)
   }

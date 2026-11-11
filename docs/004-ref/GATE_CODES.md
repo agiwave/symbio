@@ -62,7 +62,7 @@ lists: [gate-codes=owner]
 | **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
 | **SR** | 归宿行（by = None）条数棘轮 | `scripts/sink-row-audit.mjs` | SR-001–004 | `SR-005` |
 | **SRA** | 控制面 session 退役线的进度尺（豁免账 / 单槽登记） | `scripts/session-retire-audit.mjs` | SRA-001–005 | `SRA-006` |
-| **SV** | 共享词汇 | `scripts/shared-name-audit.mjs` | SV-001、SV-003 | `SV-004` |
+| **SV** | 共享词汇 | `scripts/shared-name-audit.mjs` | SV-001、SV-003–004 | `SV-005` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
 | **TR** | turn 词根冻结（废弃概念的存量棘轮） | `scripts/turn-root-audit.mjs` | TR-001–004 | `TR-005` |
@@ -312,6 +312,7 @@ lists: [gate-codes=owner]
 | **SRA-005** | `scripts/session-retire-audit.mjs` |
 | **SV-001** | `scripts/shared-name-audit.mjs` |
 | **SV-003** | `scripts/shared-name-audit.mjs` |
+| **SV-004** | `scripts/shared-name-audit.mjs` |
 | **SX-001** | `scripts/slo-exit-audit.mjs` |
 | **SX-002** | `scripts/slo-exit-audit.mjs` |
 | **SX-003** | `scripts/slo-exit-audit.mjs` |

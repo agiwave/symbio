@@ -12,6 +12,7 @@
  * |---|---|---|
  * | SV-001 | ① **有结构**的名字（含 `.` 或 `/`）出现在两个以上非 `plugin-api` 的插件生产代码里；② 同名 `const` 在两个以上插件 crate 各声明一次；③ 机制层（`symbio-sdk` / `symbio-kernel` / `symbio`）的生产代码里出现**词汇层已有的事件名**字面量（词汇家 = `symbio-plugin-api/src/events.rs`，owner 声明补私有名） | 两份字面量 = 两个 owner：改名只改一处，另一处静默漂移；或绕过词汇层把名字抄回实现（D-364 / D-392） |
  * | SV-003 | 全仓 `submit_reports!` 每条登记的 `(slot, fleet)` 与 `024` 的出品契约表**双向**逐行相等 | 加了列 / 改了 slot 却没更新契约，或表里留着一条已经删掉的列——出口形状与声称的形状静默分叉 |
+ * | SV-004 | 产物格（`artifact.added`）的**载荷键**：写方是 `tool` 的 `artifact_payload`（装配）与各行为的 `annotate`（追加）；登记的读点（`rebuild::artifact_nodes`、`changes` 全文、`model::turn_input`）读的键必须在写方账上或容错档里；两个写点不得争同一格 | 写方把键改名，读方静默读到「没有」——而「没有这个字段」在读侧本来就有合法含义（存量事件 / 该轮没有中途产出），于是没有判据会红（`D-462`） |
  *
  * ## 为什么扫 `test_fixtures.rs`，又跳过生成物
  *
@@ -41,7 +42,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns SV 共享词汇
-// @codes SV-001 SV-003
+// @codes SV-001 SV-003 SV-004
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -283,6 +284,191 @@ function reportContractErrors(root) {
   return { errors, table, registered: reg.bySlot }
 }
 
+/** 产物格的唯一装配点（基础格）。 */
+const ARTIFACT_WRITER_REL = path.join('crates', 'symbio-plugin-tool', 'src', 'port.rs')
+/**
+ * 登记的读点：`fn: null` = 整份文件。
+ *
+ * 为什么按函数登记而不是按仓库扫：`text` / `tool` 这类词在同一个文件里属于**不同的事实**
+ * （应答正文 / 对话节点正文 / 产物正文）。按仓库扫会把「同形异义」判成耦合；按函数收窄
+ * 之后，判据只落在「这段代码读的是产物格」上。
+ */
+const ARTIFACT_READ_SITES = [
+  { rel: path.join('crates', 'symbio-sdk', 'src', 'projection', 'rebuild.rs'), fn: 'artifact_nodes' },
+  { rel: path.join('crates', 'symbio-plugin-session', 'src', 'projections', 'changes.rs'), fn: null },
+  // `turn_input` 是一个按事实种类分支的大函数：按函数登记会把「消息 / 轮根」那些
+  // 别的格也算成产物格。`arm` 把它收窄到产物那条分支。
+  { rel: path.join('crates', 'symbio-plugin-model', 'src', 'port.rs'), arm: 'EVENT_ARTIFACT_ADDED' },
+]
+/**
+ * 容错档：**今天没有任何写方**、读方却要兼容的键。
+ *
+ * 只有一条：`round` 是中途产出的旧位置（现在的写侧把中途产出记在收束格），恢复路与
+ * 老会话里仍是它。写方一出现，这条必须删——判据的第三条盯的就是这个。
+ */
+const ARTIFACT_LEGACY_KEYS = new Set(['round'])
+
+/** 从 `openIdx` 处的 `{` 起配对，返回内文（不含两端括号）；配不上 ⇒ null。 */
+function sliceBraces(text, openIdx) {
+  let depth = 0
+  for (let i = openIdx; i < text.length; i++) {
+    if (text[i] === '"') {
+      i++
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === '\\') i++
+        i++
+      }
+      continue
+    }
+    if (text[i] === '{') depth++
+    else if (text[i] === '}') {
+      depth--
+      if (depth === 0) return text.slice(openIdx + 1, i)
+    }
+  }
+  return null
+}
+
+/** 函数体（大括号配对）；找不到 ⇒ null。 */
+function fnBody(text, name) {
+  const m = new RegExp(`\\bfn\\s+${name}\\s*[<(]`).exec(text)
+  if (!m) return null
+  const open = text.indexOf('{', m.index)
+  return open === -1 ? null : sliceBraces(text, open)
+}
+
+/** `match` 的一条分支体（`PAT => { … }`）；找不到 ⇒ null。 */
+function matchArm(text, pat) {
+  const at = text.indexOf(`${pat} =>`)
+  if (at === -1) return null
+  const open = text.indexOf('{', at)
+  return open === -1 ? null : sliceBraces(text, open)
+}
+
+/** 一层对象字面量的顶层键（深度 0 处 `"k":` 的 `k`）。 */
+function topLevelKeys(objText) {
+  const keys = []
+  let depth = 0
+  for (let i = 0; i < objText.length; i++) {
+    const c = objText[i]
+    if (c === '"') {
+      let j = i + 1
+      while (j < objText.length && objText[j] !== '"') j++
+      if (depth === 0) {
+        let k = j + 1
+        while (k < objText.length && /\s/.test(objText[k])) k++
+        if (objText[k] === ':') keys.push(objText.slice(i + 1, j))
+      }
+      i = j
+    } else if ('{[('.includes(c)) depth++
+    else if ('}])'.includes(c)) depth--
+  }
+  return keys
+}
+
+/**
+ * 产物格的载荷契约（`D-462`）——**写方是账本，读方来对账**。
+ *
+ * 这里不设「词汇表」：键的拼写没有公共的家可以放——机制层不许出现插件名
+ * （`EX-007`），而读方又跨层（`sdk` 在门面之下）。所以契约只能由**判据**接：
+ * 写方写哪几格从源码读出来，读方读的每一格都要在账上。
+ *
+ * 返回 `{ writer, enriched, reads }`；任何一半读不出 ⇒ `null`。
+ */
+function artifactContract(root) {
+  const writerAbs = path.join(root, ARTIFACT_WRITER_REL)
+  if (!fs.existsSync(writerAbs)) return null
+  const writerBody = fnBody(stripComments(fs.readFileSync(writerAbs, 'utf8')), 'artifact_payload')
+  if (!writerBody) return null
+  const at = writerBody.indexOf('serde_json::json!(')
+  if (at === -1) return null
+  const objInner = sliceBraces(writerBody, writerBody.indexOf('{', at))
+  if (!objInner) return null
+  const writer = [...new Set(topLevelKeys(objInner))]
+
+  // 追加格：所有插件里 `ToolBehavior::annotate` 的元组键（那套接口的语义就是补产物格）。
+  const enriched = new Set()
+  const cratesDir = path.join(root, 'crates')
+  if (!fs.existsSync(cratesDir)) return null
+  const pluginDirs = fs
+    .readdirSync(cratesDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name.startsWith('symbio-plugin-'))
+    .map((e) => path.join(cratesDir, e.name, 'src'))
+  for (const dir of pluginDirs) {
+    for (const abs of productionFiles(dir)) {
+      const body = fnBody(stripComments(fs.readFileSync(abs, 'utf8')), 'annotate')
+      if (!body) continue
+      for (const m of body.matchAll(/[(,]\s*"([a-z0-9_]+)"\s*,/g)) enriched.add(m[1])
+    }
+  }
+
+  const reads = []
+  for (const site of ARTIFACT_READ_SITES) {
+    const abs = path.join(root, site.rel)
+    if (!fs.existsSync(abs)) return null
+    const rel = site.rel.split(path.sep).join('/')
+    const text = stripComments(fs.readFileSync(abs, 'utf8'))
+    let body = site.fn ? fnBody(text, site.fn) : text
+    if (body === null) return null
+    if (site.arm) body = matchArm(text, site.arm)
+    if (body === null) return null
+    const where = site.fn
+      ? `${rel} 的 \`${site.fn}\``
+      : site.arm
+        ? `${rel} 的 \`${site.arm}\` 分支`
+        : rel
+    const shapes =
+      /payload\s*\.\s*get\(\s*"([a-z0-9_]+)"|payload\s*\[\s*"([a-z0-9_]+)"|text_of\(\s*\w+\s*,\s*"([a-z0-9_]+)"/g
+    for (const m of body.matchAll(shapes)) reads.push({ key: m[1] ?? m[2] ?? m[3], where })
+  }
+
+  return { writer, enriched: [...enriched], reads }
+}
+
+/** SV-004：产物格载荷键的契约（写方记账，读方对账）。 */
+function payloadKeyErrors(root) {
+  const c = artifactContract(root)
+  if (!c) return null
+  const errors = []
+  const written = new Set([...c.writer, ...c.enriched])
+
+  if (c.writer.length === 0) {
+    errors.push('\uff08\u8bfb\u4e0d\u5230\u4efb\u4f55\u88c5\u914d\u952e\u2014\u2014`artifact_payload` \u7684 `json!` \u89e3\u6790\u5931\u6548\uff0c\u5224\u636e\u4f1a\u6052\u771f\uff09')
+  }
+  if (c.reads.length === 0) {
+    errors.push('\uff08\u767b\u8bb0\u7684\u8bfb\u70b9\u4e00\u4e2a\u952e\u90fd\u6ca1\u8bfb\u5230\u2014\u2014`fn` \u540d\u5b57\u6216\u53d6\u503c\u5f62\u72b6\u53d8\u4e86\uff0c\u5224\u636e\u4f1a\u6052\u771f\uff09')
+  }
+
+  // \u2460 \u8bfb\u65b9\u8bfb\u7684\u6bcf\u4e00\u683c\u90fd\u8981\u5728\u5199\u65b9\u8d26\u4e0a\uff08\u6216\u5bb9\u9519\u6863\uff09\u3002
+  for (const read of c.reads) {
+    if (written.has(read.key) || ARTIFACT_LEGACY_KEYS.has(read.key)) continue
+    errors.push(
+      `${read.where} \u8bfb\u4e86 \`"${read.key}"\`\uff0c\u4f46\u4ea7\u7269\u683c\u6ca1\u6709\u8fd9\u4e00\u683c\u2014\u2014` +
+        '\u5199\u65b9\uff08`artifact_payload` \u4e0e\u5404 `annotate`\uff09\u90fd\u4e0d\u5199\u5b83\uff08`D-462`\uff09',
+    )
+  }
+
+  // \u2461 \u4e24\u4e2a\u5199\u70b9\u4e0d\u5f97\u4e89\u540c\u4e00\u683c\u3002
+  for (const key of c.enriched) {
+    if (!c.writer.includes(key)) continue
+    errors.push(
+      `\`"${key}"\` \u65e2\u88ab \`artifact_payload\` \u88c5\u914d\u3001\u53c8\u88ab\u884c\u4e3a \`annotate\` \u8ffd\u52a0\u2014\u2014` +
+        '\u4e24\u4e2a\u5199\u70b9\u4e89\u540c\u4e00\u683c\uff0c\u8bfb\u65b9\u5206\u4e0d\u6e05\u8c01\u8bf4\u4e86\u7b97\uff08`D-462`\uff09',
+    )
+  }
+
+  // \u2462 \u5bb9\u9519\u6863\u53ea\u6536\u6ca1\u6709\u5199\u65b9\u7684\u952e\u2014\u2014\u5199\u65b9\u4e00\u51fa\u73b0\u5c31\u5f97\u4ece\u8fd9\u91cc\u5220\u3002
+  for (const key of ARTIFACT_LEGACY_KEYS) {
+    if (!written.has(key)) continue
+    errors.push(
+      `\u5bb9\u9519\u6863\u91cc\u7684 \`"${key}"\` \u5df2\u7ecf\u6709\u5199\u65b9\u4e86\u2014\u2014` +
+        '\u628a\u5b83\u4ece `ARTIFACT_LEGACY_KEYS` \u5220\u6389\uff0c\u5b83\u4e0d\u518d\u662f\u300c\u53ea\u8bfb\u5bb9\u9519\u300d',
+    )
+  }
+
+  return { errors, contract: c }
+}
+
 /** 机制层 crate：它们不许自己写词汇层的事件名，只能 import / 由生成器投影（D-392）。 */
 const CORE_CRATES = ['symbio-sdk', 'symbio-kernel', 'symbio']
 
@@ -447,10 +633,20 @@ if (!contract) {
   process.exit(2)
 }
 
-if (errors.length || contract.errors.length) {
+const payload = payloadKeyErrors(ROOT)
+if (!payload) {
+  console.log(
+    `${red('[ERROR]')} shared-name-audit：SV-004 规则源读不出` +
+      ' （`crates/symbio-sdk/src/plugin/effects.rs` / 写方 `artifact_payload` / 行为 `annotate` / 登记的读点，任一处解析不了）',
+  )
+  process.exit(2)
+}
+
+if (errors.length || contract.errors.length || payload.errors.length) {
   for (const e of errors) console.log(red(`✗ SV-001 ${e}`))
   for (const e of contract.errors) console.log(red(`✗ SV-003 ${e}`))
-  console.log(`\n共享词汇：${errors.length + contract.errors.length} 条违规`)
+  for (const e of payload.errors) console.log(red(`✗ SV-004 ${e}`))
+  console.log(`\n共享词汇：${errors.length + contract.errors.length + payload.errors.length} 条违规`)
   process.exit(1)
 }
 
@@ -470,5 +666,13 @@ console.log(
   green(
     `✓ SV-003 报表契约：${contract.table.length} 行与 ${contract.registered.size} 条登记逐行相等` +
       `（实例级落点 ${withFleet} 条非空）`,
+  ),
+)
+console.log(
+  green(
+    `\u2713 SV-004 \u4ea7\u7269\u683c\u8f7d\u8377\u952e\uff1a\u5199\u65b9\u88c5\u914d ${payload.contract.writer.length} \u683c` +
+      ` + \u884c\u4e3a\u8ffd\u52a0 ${payload.contract.enriched.length} \u683c\uff0c` +
+      `${ARTIFACT_READ_SITES.length} \u4e2a\u767b\u8bb0\u8bfb\u70b9\u7684 ${payload.contract.reads.length} \u4e2a\u53d6\u952e\u5168\u5728\u8d26\u4e0a` +
+      `\uff0c\u5bb9\u9519\u6863 ${ARTIFACT_LEGACY_KEYS.size} \u683c\u65e0\u5199\u65b9`,
   ),
 )
