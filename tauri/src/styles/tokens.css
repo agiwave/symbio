@@ -143,6 +143,9 @@
   --color-chip-notice-fg: #7c3aed;
   --color-user-bubble: #2563eb;
   --color-user-bubble-fg: #ffffff;
+  /* 行内代码底色：只比正文底深一线——正文中标识符密集（一行可达七八个），
+     底色一旦过实整段就糊成斑块。与代码块底（--color-code-bg）分开各持一值。 */
+  --color-inline-code-bg: #eef2f7;
   --color-code-bg: #0f172a;
   --color-code-fg: #e2e8f0;
   --color-prompt-bg: #eef2ff;
@@ -240,6 +243,9 @@
   --color-chip-notice-fg: #c4b5fd;
   --color-user-bubble: #3b82f6;
   --color-user-bubble-fg: #ffffff;
+  /* 行内代码底色（深色）：用半透明的板岩灰做一层「轻雾」而不是实心块——
+     深色正文里实心块与 #181825 底对比过强，密集标识符会把段落打碎。 */
+  --color-inline-code-bg: rgba(148, 163, 184, 0.12);
   --color-code-bg: #11111b;
   --color-code-fg: #e2e8f0;
   --color-prompt-bg: #232347;

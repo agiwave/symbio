@@ -23,7 +23,9 @@
 
 .markdown-body {
   font-size: 0.9rem;
-  line-height: 1.6;
+  /* 智能体正文的行内代码很密（一行可达七八个标识符）：行高给足一档，
+     chip 才不会让相邻行「咬」在一起。 */
+  line-height: 1.72;
   color: var(--text-primary);
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -36,7 +38,7 @@
   margin-bottom: 0;
 }
 .markdown-body p {
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.65rem;
 }
 .markdown-body h1,
 .markdown-body h2,
@@ -60,7 +62,7 @@
 }
 .markdown-body ul,
 .markdown-body ol {
-  margin: 0.5rem 0;
+  margin: 0.6rem 0;
   padding-left: 1.6rem;
   list-style-position: outside;
 }
@@ -71,7 +73,7 @@
   list-style: decimal;
 }
 .markdown-body li {
-  margin: 0.2rem 0;
+  margin: 0.3rem 0;
 }
 .markdown-body li > ul,
 .markdown-body li > ol {
@@ -84,12 +86,23 @@
 .markdown-body a:hover {
   text-decoration: underline;
 }
+/*
+ * 行内代码 —— **去噪是第一目标**。智能体正文（工程语境）一行里常有七八个
+ * 标识符 chip：底色过实、字号过大、内边距过宽，任何一个过头都会把整段
+ * 打碎成斑块（截图实例：`symbio_sdk::actors::*` 密集段落）。三件事一起收：
+ *
+ * - 底色用专用令牌 `--color-inline-code-bg`（半透明轻雾，见 tokens.css），
+ *   只比正文底深一线，让 mono 字体本身承担「这是代码」的辨识度；
+ * - 字号压到 0.82em（mono 的 x 偏大，0.85em 时 chip 与汉字基线打架）；
+ * - 内边距收窄到 0.02rem 0.28rem——竖向 padding 在行内元素上不占行盒，
+ *   但会向外溢出底色，压窄后密集行才不会上下互蹭。
+ */
 .markdown-body code {
-  background: var(--color-msg-card);
-  padding: 0.1rem 0.3rem;
-  border-radius: 0.25rem;
+  background: var(--color-inline-code-bg);
+  padding: 0.02rem 0.28rem;
+  border-radius: 0.3rem;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 0.85em;
+  font-size: 0.82em;
 }
 .markdown-body pre {
   background: var(--color-code-bg);
