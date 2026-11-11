@@ -2,8 +2,8 @@
 //!
 //! 环只按端口名问一笔债；线上名怎么解析（`mcp__fs__read` → 能力名）、挂死怎么判
 //! （空闲而不是总时长）、结果怎么压成一段文本，都是本插件的私事。工具世界由能力表
-//! 承载：本类型按线上名解析出 canonical 名，再经 `port_executor_of` 取该工具自己
-//! 的端口执行体（工具即端口，D-440），自己不做执行。
+//! 承载：本类型按线上名解析出 canonical 名，再经装配期容器 `PORT_BINDINGS` 取该工具
+//! 自己的端口执行体（工具即端口，D-440 / D-468），自己不做执行。
 //!
 //! ## 载荷契约（环 → 本插件）
 //!
@@ -2040,7 +2040,7 @@ impl ToolPort {
         // 包成 `Box<dyn Future>` 是为了下面那个「轮询 + 空闲判定」的循环能重复借用。
         let mut route_fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<PluginPayload, PluginError>> + Send>,
-        > = if let Some(tool_visitor) = tool_visitor.filter(|_| resolved_name.is_some()) {
+        > = if resolved_name.is_some() {
             {
                 plugin_info!(
                     "tool",
@@ -2049,16 +2049,21 @@ impl ToolPort {
                     invoke_name
                 );
                 let _ = tool_ctx.set_payload(args.clone());
-                let visitor = tool_visitor.clone();
+                // 绑定在**派发之前**从调用方 ctx 读出（D-468）：装配期容器随 ctx 走，
+                // 执行体不由能力表的行携带。
+                let bound = tool_ctx
+                    .get(symbio_plugin_api::port::PORT_BINDINGS)
+                    .and_then(|bindings| bindings.get(&invoke_name).ok().flatten())
+                    .map(|(_, executor)| executor);
                 let tool_ctx2 = tool_ctx.clone();
                 let canonical = invoke_name.clone();
                 let exec2 = exec.clone();
                 let args2 = args.clone();
                 Box::pin(async move {
-                    // 按端口名从收集表取执行体（`D-440` ②：工具就是端口；行只携带
-                    // 数据，执行面在端口行上）。执行体裹的是注册收口点已过闸的
-                    // 同一个能力，闸门判定只有一份。
-                    match symbio_plugin_api::port_executor_of(visitor.as_ref(), &canonical).await {
+                    // 执行体来自装配期容器（`D-440` ② / D-468）：工具就是端口，绑定是
+                    // 装配期收集的事实。执行体裹的是注册收口点已过闸的同一个能力，
+                    // 闸门判定只有一份。
+                    match bound {
                         Some(executor) => {
                             let exec_ctx = PortExecContext {
                                 ctx: Some(tool_ctx2),
@@ -2295,20 +2300,17 @@ async fn exposure_aliases(exec: &PortExecContext) -> std::collections::BTreeMap<
             }
         }
     }
-    let Some(visitor) = exec
-        .ctx
-        .as_ref()
-        .and_then(|ctx| ctx.get(CAPABILITY_VISITOR))
-    else {
+    let Some(ctx) = exec.ctx.as_ref() else {
         return Default::default();
     };
-    let bound: std::collections::HashSet<String> = visitor
-        .list(symbio_plugin_api::port::PORT_FAMILY)
-        .await
-        .iter()
-        .filter_map(|row| row.payload::<symbio_plugin_api::PortPayload>())
-        .map(|payload| payload.port())
-        .collect();
+    let Some(visitor) = ctx.get(CAPABILITY_VISITOR) else {
+        return Default::default();
+    };
+    // 有效绑定 = 装配期收集的端口名（D-468）；冲突键不在 `bound()` 里。
+    let bound: std::collections::HashSet<String> = ctx
+        .get(symbio_plugin_api::port::PORT_BINDINGS)
+        .map(|bindings| bindings.bound().into_iter().collect())
+        .unwrap_or_default();
     visitor
         .list(family::TOOL)
         .await

@@ -1,8 +1,8 @@
 //! `port.tool` 提供者的单元测试：线上名解析 / 空闲超时 / 结果契约的行为判据
 //! 随执行体一起搬到本插件（代码搬家，钉住行为的用例跟着搬，不在原处留副本）。
 //!
-//! 注册面那一半与 `notify` 端口同款：`port_rows` 产行、`capability_port_of` 读到
-//! `Ready`、执行面可取。
+//! 注册面那一半与 `notify` 端口同款：`register_ports` 写进本次装配的绑定容器、
+//! 按端口名取回绑定、执行面可取。
 
 use super::*;
 use async_trait::async_trait;
@@ -14,9 +14,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use symbio_plugin_api::{
     port_result, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel, CapabilityRow,
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginInvokeRequest,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PortErrorClass,
-    PortExecContext, PortExecutor, PortInput, PortOutcome, PortPayload, PortReading, Registry,
-    CAPABILITY_VISITOR,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PortBindings,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, Registry,
+    CAPABILITY_VISITOR, PORT_BINDINGS,
 };
 
 // ==================== 记账 fail-closed：造格型的账没落就不许报成功 ====================
@@ -306,9 +306,9 @@ fn subagent_pending_payload_is_recognized_as_pending_intent() {
 
 /// 最小登记表（与 `plugin-api` 的 port.test 同款夹具）。
 ///
-/// 工具桩本身就是端口执行体（`D-440` ③：`Capability` 退场，桥随之消失）：端口行
-/// 与工具行都由 `register_tool` 收口写入，本表只做行容器——派发侧的查表
-/// （`port_executor_of`）依赖端口行存在，走收口最不易漏。
+/// 工具桩本身就是端口执行体（`D-440` ③：`Capability` 退场，桥随之消失）：**工具行**
+/// 入本表、**端口绑定**入装配期容器（`register_tool` 一次写两处，D-468）——派发侧
+/// 按端口名从容器取执行体，本表只管目录面。
 struct FakeRegistry {
     rows: RwLock<Vec<Arc<CapabilityRow>>>,
 }
@@ -349,32 +349,22 @@ impl Registry for FakeRegistry {
 }
 
 #[tokio::test]
-async fn tool_port_registers_one_row_and_exposes_an_executor() {
+async fn tool_port_registers_one_binding_and_exposes_an_executor() {
     let provider: Arc<dyn PortProvider> = Arc::new(ToolPort);
     assert_eq!(provider.ports(), &[TOOL], "提供者只申报 `tool` 一个端口");
     assert_eq!(provider.provider_id(), PLUGIN_ID_TOOL);
 
-    let rows = symbio_plugin_api::port_rows(&provider);
-    assert_eq!(rows.len(), 1, "单端口提供者只产一行");
-    assert_eq!(rows[0].name(), "<port:tool>:tool");
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let bindings = Arc::new(PortBindings::default());
+    ctx.set(PORT_BINDINGS, bindings.clone());
+    symbio_plugin_api::port::register_ports(&ctx, provider.as_ref()).await;
 
-    let registry = FakeRegistry::new();
-    for row in rows {
-        registry.put(row).await;
-    }
-    let PortReading::Ready(row) = symbio_plugin_api::capability_port_of(&registry, TOOL).await
-    else {
-        panic!("端口 `{TOOL}` 应就绪");
-    };
-    let provider = row
-        .payload::<PortPayload>()
-        .expect("端口行应带提供者")
-        .provider()
-        .clone();
-    assert!(
-        provider.executor().is_some(),
-        "提供者必须交出执行面（DE-047 I-6.4）"
-    );
+    assert_eq!(bindings.bound(), vec![TOOL.to_string()], "一个端口一条绑定");
+    let (owner, _executor) = bindings
+        .get(TOOL)
+        .expect("无冲突")
+        .expect("端口 `tool` 应就绪");
+    assert_eq!(owner, PLUGIN_ID_TOOL, "绑定记下提供者身份");
 }
 
 // ==================== 执行面（经 `PortExecutor`）====================
@@ -441,7 +431,7 @@ impl Plugin for NopPlugin {
     }
 }
 
-/// 带一条工具行的请求上下文（`CAPABILITY_VISITOR` 是执行期的数据源）。
+/// 带一条工具行与一条端口绑定的请求上下文（注册与派发同一条路）。
 async fn ctx_with_tool(
     parent: &Arc<dyn Plugin>,
     name: &str,
@@ -449,8 +439,11 @@ async fn ctx_with_tool(
 ) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(Some(Weak::clone(&Arc::downgrade(parent))), None);
     let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
-    // 注册走 `register_tool` 收口（与生产同一条路）：端口行 + 工具行一并入表，
-    // 派发侧按名查执行体才有着落。
+    // 注册走 `register_tool` 收口（与生产同一条路）：工具行进表、端口绑定进容器，
+    // 派发侧按名从容器取执行体才有着落。
+    req.set(CAPABILITY_VISITOR, registry);
+    req.set(PORT_BINDINGS, Arc::new(PortBindings::default()));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
     let tool = EchoTool {
         meta: CapabilityMeta {
             name: name.to_string(),
@@ -458,9 +451,8 @@ async fn ctx_with_tool(
         },
         data,
     };
-    symbio_providers::register_tool(registry.as_ref(), tool.meta(), None, Arc::new(tool)).await;
-    req.set(CAPABILITY_VISITOR, registry);
-    Arc::new(req)
+    symbio_providers::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
+    ctx
 }
 
 /// 一次执行的最小现场（parent 在场——提供者最先查宿主）。
@@ -1387,11 +1379,13 @@ async fn ctx_with_probes(
     // 执行窗口按会话分格：每个用例用自己的会话 id，避免并行跑的单测共用一格。
     req.set(SESSION_ID, session.to_string());
     let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
-    for tool in tools {
-        symbio_providers::register_tool(registry.as_ref(), tool.meta(), None, tool).await;
-    }
     req.set(CAPABILITY_VISITOR, registry);
-    Arc::new(req)
+    req.set(PORT_BINDINGS, Arc::new(PortBindings::default()));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+    for tool in tools {
+        symbio_providers::register_tool(&ctx, tool.meta(), None, tool).await;
+    }
+    ctx
 }
 
 /// 写侧档（`Medium`）与只读档同时到达：写侧独占执行窗口，峰值并发必须 = 1。
@@ -1636,6 +1630,9 @@ async fn ctx_with_strict_tool(
 ) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(Some(Weak::clone(&Arc::downgrade(parent))), None);
     let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
+    req.set(CAPABILITY_VISITOR, registry);
+    req.set(PORT_BINDINGS, Arc::new(PortBindings::default()));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
     let tool = StrictTool {
         meta: CapabilityMeta {
             name: name.to_string(),
@@ -1643,9 +1640,8 @@ async fn ctx_with_strict_tool(
         },
         seen,
     };
-    symbio_providers::register_tool(registry.as_ref(), tool.meta(), None, Arc::new(tool)).await;
-    req.set(CAPABILITY_VISITOR, registry);
-    Arc::new(req)
+    symbio_providers::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
+    ctx
 }
 
 #[tokio::test]

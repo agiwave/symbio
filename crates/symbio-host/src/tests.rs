@@ -13,7 +13,7 @@ use symbio_kernel::store::Store;
 use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::port::{
-    port_rows, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
+    PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
 };
 use symbio_plugin_api::FactDraft;
 use symbio_plugin_loop as _;
@@ -194,9 +194,7 @@ impl Plugin for SmokeRoot {
             .get(symbio_plugin_api::CAPABILITY_VISITOR)
             .ok_or_else(|| PluginError::NotFound("能力收集器缺席".into()))?;
         let provider: Arc<dyn PortProvider> = Arc::new(SmokeModel);
-        for row in port_rows(&provider) {
-            visitor.put(row).await;
-        }
+        symbio_plugin_api::port::register_ports(&ctx, provider.as_ref()).await;
         visitor
             .put(debt_row("smoke-model", Arc::new(SmokeDebts)))
             .await;
@@ -463,15 +461,11 @@ impl Plugin for ToolLoopRoot {
         let model: Arc<dyn PortProvider> = Arc::new(LoopModel {
             counters: Arc::clone(&self.counters),
         });
-        for row in port_rows(&model) {
-            visitor.put(row).await;
-        }
+        symbio_plugin_api::port::register_ports(&ctx, model.as_ref()).await;
         let tool: Arc<dyn PortProvider> = Arc::new(LoopTool {
             counters: Arc::clone(&self.counters),
         });
-        for row in port_rows(&tool) {
-            visitor.put(row).await;
-        }
+        symbio_plugin_api::port::register_ports(&ctx, tool.as_ref()).await;
         visitor
             .put(debt_row("smoke-model", Arc::new(SmokeDebts)))
             .await;

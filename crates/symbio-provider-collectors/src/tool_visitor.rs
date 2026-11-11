@@ -13,6 +13,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
+use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::PortExecutor;
 use tokio::sync::RwLock;
 
@@ -69,8 +70,8 @@ impl Default for DefaultToolVisitor {
 impl Registry for DefaultToolVisitor {
     async fn put(&self, row: CapabilityRow) {
         // 表只认行（`D-440` ③）：行是纯数据，入表不裹闸、不派生——工具的
-        // 注册收口是 [`register_tool`]（一次写两条：裹闸的端口行 + 纯数据的
-        // 工具行），其余各族直接入表。
+        // 注册收口是 [`register_tool`]（一次写两处：装配期容器的端口绑定 +
+        // 纯数据的工具行），其余各族直接入表。
         self.record_family(row.family()).await;
         let name = row.name().to_string();
         let family = row.family();
@@ -119,16 +120,20 @@ impl Registry for DefaultToolVisitor {
     }
 }
 
-/// 工具注册的**唯一收口**（`D-440` ③）：一次写两条行——
+/// 工具注册的**唯一收口**（`D-440` ③ / `D-468`）：一次写两处——
 ///
-/// 1. **端口行**：端口名 = `meta.name`，执行体是裹了审批闸的 [`GatedExecutor`]
-///    （判定是执行的第一段，`D-385`）。派发侧按端口名查表取到的就是它。
+/// 1. **端口绑定**：端口名 = `meta.name`（作用域里加前缀），执行体是裹了审批闸的
+///    [`GatedExecutor`]（判定是执行的第一段，`D-385`）。派发侧按端口名从装配期容器
+///    取到的就是它。
 /// 2. **工具行**：纯数据（`CapabilityMeta` 快照），目录装配与读面从这里看工具。
 ///
 /// `risk = None` ⇒ 用静态档（`meta.effective_risk()`）；**风险随参数变化**的工具
-/// （shell）传入自己的回答闭包。注册顺序：先端口行后工具行，与派生期一致。
+/// （shell）传入自己的回答闭包。
+///
+/// 写入口径只有这一处：`ctx` 上两个槽（`CAPABILITY_VISITOR` / `PORT_BINDINGS`）各自
+/// 可以缺席（夹具 / 内部请求），缺席就只写另一半——不造第二份注册事实。
 pub async fn register_tool(
-    visitor: &dyn Registry,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     meta: symbio_kernel::capability::CapabilityMeta,
     risk: Option<RiskOf>,
     executor: Arc<dyn PortExecutor>,
@@ -138,12 +143,19 @@ pub async fn register_tool(
         risk.unwrap_or_else(|| Arc::new(move |_| m.effective_risk()))
     };
     let gated: Arc<dyn PortExecutor> = Arc::new(GatedExecutor::new(meta.clone(), risk, executor));
-    visitor
-        .put(crate::tool_port::tool_port_row(gated, &meta.name))
-        .await;
-    visitor
-        .put(symbio_kernel::capability::CapabilityRow::tool(meta))
-        .await;
+    if let Some(bindings) = ctx.get(symbio_sdk::capability::port::PORT_BINDINGS) {
+        let port = symbio_sdk::capability::port::scoped_port_name(ctx, &meta.name);
+        symbio_sdk::capability::port::check_port_name(&port);
+        let errors = bindings.bind(&[port], "tool", Some(gated));
+        for error in errors {
+            symbio_sdk::capability::capability_report_error(ctx, "tool", error).await;
+        }
+    }
+    if let Some(visitor) = ctx.get(symbio_sdk::capability::CAPABILITY_VISITOR) {
+        visitor
+            .put(symbio_kernel::capability::CapabilityRow::tool(meta))
+            .await;
+    }
 }
 
 #[cfg(test)]

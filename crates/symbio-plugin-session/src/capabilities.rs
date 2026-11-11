@@ -87,6 +87,11 @@ pub async fn collect_capabilities(
     }
     traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     traverse_ctx.set(symbio_sdk::capability::CAPABILITY_VISITOR, manager.clone());
+    // 端口收集容器（D-468）：本次装配新建，插件在 traverse 里把绑定写进它。
+    // 判重就在写入点上：同名再登记当场把该键转成不可执行并落错误桶，
+    // 不需要「收集完再回表分组」的第二趟。
+    let bindings = std::sync::Arc::new(symbio_plugin_api::port::PortBindings::default());
+    traverse_ctx.set(symbio_plugin_api::port::PORT_BINDINGS, bindings.clone());
     capability_init_error_bucket(&traverse_ctx);
     // Agent 权限作用域槽（D-153）：agent 插件在 traverse 里发布（它是唯一能把
     // `agent_id` 解析成一份声明的地方），收集结束后由本函数把同一个 `Arc` 挂回
@@ -106,13 +111,6 @@ pub async fn collect_capabilities(
         );
     }
 
-    // 装配期端口判重（D-298 / `DE-047` I-6.7）：端口行是在上面这次 traverse 里由各
-    // 提供者插件 `put` 的，表只在**子 ctx** 上可见。`capability_port_check` 的时点契约
-    // 是「收集结束、编排方读错误桶之前」——这里正是那一点：检查在回写错误桶**之前**跑，
-    // 判重错误与收集期错误同桶同路。不接这一句，两个提供者同端口的装配错误就永远
-    // 留在子 ctx 的桶里无人读，判重退化为「照常跑」。
-    symbio_plugin_api::port::capability_port_check(&traverse_ctx).await;
-
     // 把子 ctx 上收集到的错误回写到调用方的 ctx，供编排方判定。
     // （`fork()` 会拷贝 extensions 快照，子 ctx 后续的写入不会自动回流）
     if let Some(bucket) = traverse_ctx.get(CAPABILITY_ERRORS) {
@@ -123,6 +121,9 @@ pub async fn collect_capabilities(
     if let Some(slot) = traverse_ctx.get(symbio_sdk::agent::AGENT_PERMS) {
         ctx.set(symbio_sdk::agent::AGENT_PERMS, slot);
     }
+    // 端口绑定同理（同一个 `Arc`，不复制内容）：开轮装配要读「有效绑定」折工具清单，
+    // 而容器只写在子 ctx 上。
+    ctx.set(symbio_plugin_api::port::PORT_BINDINGS, bindings);
 
     // tool 端口的提供者行由独立插件 `crates/symbio-plugin-tool` 自己注册（与 notify
     // 同一条 traverse 通路）；本插件的职责止于收集能力表。

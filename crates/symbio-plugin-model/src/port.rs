@@ -2,7 +2,7 @@
 //!
 //! 环（loop）只按端口名取——provider 怎么解析（严格查 `preferred` → 落回当次
 //! 生效者）、适配器怎么构造，都是这里的私事。`ModelPort` 在 traverse 里随能力
-//! 目录一起装：生效者缺席 ⇒ 不注册端口行 ⇒ 环在调用点响亮失败（落失败事实
+//! 目录一起装：生效者缺席 ⇒ 不登记端口绑定 ⇒ 环在调用点响亮失败（落失败事实
 //! 并中止），而不是在这里猜一个别的模型。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -26,9 +26,9 @@ use symbio_plugin_api::port::{
 };
 use symbio_plugin_api::text::{default_tokenizer, HeuristicTokenizer, Tokenizer};
 use symbio_plugin_api::{
-    llm_short_id, removed_ids, unselected_roots, CapabilityMeta, CapabilityRow, ClosureReason,
-    Entity, ExecEnv, ExecEventSink, ExecTranscriptWriter, FactDraft, PluginError,
-    PluginInvokeRequestExt, PromptMessage, Verb, EVENT_FAILED, EVENT_RESPONSE,
+    llm_short_id, removed_ids, unselected_roots, CapabilityMeta, ClosureReason, Entity, ExecEnv,
+    ExecEventSink, ExecTranscriptWriter, FactDraft, PluginError, PluginInvokeRequestExt,
+    PromptMessage, Verb, EVENT_FAILED, EVENT_RESPONSE,
 };
 
 use crate::provider::ModelProvider;
@@ -60,11 +60,6 @@ impl ModelPort {
         catalog: Vec<Arc<dyn ModelProvider>>,
     ) -> Self {
         Self { active, catalog }
-    }
-
-    /// 注册行（本提供者只服务一个端口，行数恒为 1）。
-    pub(crate) fn rows(self: Arc<Self>) -> Vec<CapabilityRow> {
-        symbio_plugin_api::port::port_rows(&(self as Arc<dyn PortProvider>))
     }
 }
 

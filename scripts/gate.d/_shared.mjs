@@ -200,6 +200,12 @@ export const BASELINE = {
   // baseline-allow rustTests: 2147 → 2152（D-465）——报表出口对账新增 5 条用例
   // （`owner_short` 归一一条、署错 owner / 视图查无此人 / 同一 owner 两种拼写 / 空名归
   // 纯判据各一条），全部落在 `sdk/plugin/reports.test.rs`。不是覆盖变更，是新判据。
+  // baseline-allow rustTests: 2152 → 2154（D-466）——删掉 `local` / `web` 的 `route` 工具
+  // 执行分支后，两侧各新增一条反例用例（`route_does_not_execute_tools_by_name`）：判据的对象
+  // 从「第二条执行面还在时也判闸」变成「按工具名 route 一律 NotFound」。新增的是判据，不是覆盖。
+  // baseline-allow rustTests: 2154 → 2152（D-468）——端口集载体从能力行换成装配期容器后，
+  // `port.test.rs` 里 5 条「行 / 表键」判据随载体退役，3 条容器判据（登记受检、无执行体即拒、
+  // scope 前缀）接手，净 −2。判重与「端口不进消费族」的覆盖由新三条承担，非放宽。
   rustTests: 2152,
   kernelRustTests: 131,
 
@@ -411,6 +417,10 @@ export const BASELINE = {
   // `mock-llm` 承担，不影响覆盖；非侵蚀。
   // baseline-allow ciRustTestsTotal: 2228 → 2233（D-465）——同一批 5 条在 CI 口径下
   // 折算（`--workspace` 求和含 sdk lib 目标），逐条归属见上方 `rustTests` 的注。非侵蚀。
+  // baseline-allow ciRustTestsTotal: 2233 → 2235（D-466）——同一批 2 条反例用例在 CI 口径下
+  // 的折算，逐条归属见上方 `rustTests` 的注。
+  // baseline-allow ciRustTestsTotal: 2235 → 2233（D-468）——同一批净 −2 在 CI 口径下的折算，
+  // 逐条归属见上方 `rustTests` 的注。非侵蚀。
   ciRustTestsTotal: 2233,
   cliRustTests: 21,
   tauriRustTests: 4,

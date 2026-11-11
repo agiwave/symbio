@@ -499,18 +499,10 @@ impl Plugin for SkillPlugin {
                 .list_skills(ctx.get(symbio_plugin_api::WORKDIR))
                 .await?;
 
-            if !skills.is_empty() {
-                if let Some(tool_visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
-                    let tool = SkillExecuteTool::new(skills);
-                    let meta = tool.meta();
-                    symbio_providers::register_tool(
-                        tool_visitor.as_ref(),
-                        meta,
-                        None,
-                        Arc::new(tool),
-                    )
-                    .await;
-                }
+            if !skills.is_empty() && ctx.get(symbio_plugin_api::CAPABILITY_VISITOR).is_some() {
+                let tool = SkillExecuteTool::new(skills);
+                let meta = tool.meta();
+                symbio_providers::register_tool(&ctx, meta, None, Arc::new(tool)).await;
             }
         }
         // 本轮配置快照贡献（D-427）：编译开关的真源在本插件的 PLUGIN.yml，

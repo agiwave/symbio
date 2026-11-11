@@ -911,16 +911,12 @@ impl Plugin for ModelPlugin {
                     active.clone(),
                     available.clone(),
                 ));
-                for row in port.rows() {
-                    tool_visitor.put(row).await;
-                }
+                symbio_plugin_api::port::register_ports(&ctx, port.as_ref()).await;
                 // 一次性问答（D-336）：同一生效者，独立端口成员 `model.assist`；
                 // 提问方的指令随行载荷进，本插件不认识它的世界语义。偏好 provider
                 // 从行载荷取（D-348），全集随端口带过去供按 id 解析。
                 let assist = Arc::new(super::assist::AssistPort::new(active, available));
-                for row in assist.rows() {
-                    tool_visitor.put(row).await;
-                }
+                symbio_plugin_api::port::register_ports(&ctx, assist.as_ref()).await;
             }
 
             // 人格在**注册期**就已选定（上面按 `PROVIDER_ID` 解析出生效 provider），

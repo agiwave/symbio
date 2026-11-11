@@ -19,7 +19,7 @@ pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
     concurrency: 0,
 }];
 
-// 端口行由环的通用出口行（`await-port`）承接：端口名是运行时字符串，不进声明表。
+// 端口声明由环的通用出口行（`await-port`）承接：端口名是运行时字符串，不进声明表。
 symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 
 fn submitted_declarations() -> PluginDeclarations<'static> {

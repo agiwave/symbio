@@ -125,7 +125,7 @@ impl Plugin for VdfsPlugin {
             // 执行时其中已注册好全部挂载 provider（容器同时注册的组合根供前端链路用）。
             let provider = Arc::new(ToolVdfs::new(visitor.clone()));
             for (meta, executor) in tools::vdfs_tools(provider) {
-                symbio_providers::register_tool(visitor.as_ref(), meta, None, executor).await;
+                symbio_providers::register_tool(&ctx, meta, None, executor).await;
             }
         }
 

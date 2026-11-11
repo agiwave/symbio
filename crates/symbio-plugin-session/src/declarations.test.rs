@@ -91,7 +91,7 @@ fn harness_declarations() -> PluginDeclarations<'static> {
         facts: &[],
         views: &[],
         ports: &[],
-        // 本插件不再声明任何端口行（端口行住在各端口所属插件与 loop），
+        // 本插件不再声明任何端口行（端口绑定住在各端口所属插件与 loop），
         // 因此测试夹具也不需要补 `port` 执行体——声明了却没有行指向它是
         // `OrphanActor`，整张装配表会失败。
         actors: HARNESS_ACTORS.to_vec(),

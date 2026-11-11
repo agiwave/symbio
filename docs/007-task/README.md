@@ -80,18 +80,22 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：☐ todo 0 · 🟡 doing 2 · done 0 · wont 0（共 2）
+**计数**：☐ todo 1 · 🟡 doing 4 · done 0 · wont 0（共 5）
 
 ## 待处理（按依赖顺序）
 
-（无）
+| 编号 | 任务 | 优先 | 轨 | 依赖 |
+|---|---|---|---|---|
+| `T-345-wire命名收进模型插件` | wire 命名收进模型插件 | next | arch | T-343-端口集搬到装配期收集 |
 
 ## 进行中
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-340-session退役线` | session 退役线 | now | arch | — |
+| `T-342-吸收v3机制面SPRINT` | 吸收 v3 机制面 SPRINT | now | arch | — |
 | `T-341-收窄session的sdk依赖边` | 收窄 session 的 sdk 依赖边 | next | arch | — |
+| `T-343-端口集搬到装配期收集` | 端口集搬到装配期收集 | next | arch | — |
 
 ## 分解树
 
@@ -100,5 +104,8 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 
 - [`T-340-session退役线`](340-session退役线.md) session 退役线（doing） · 子项 doing 1
   - [`T-341-收窄session的sdk依赖边`](341-收窄session的sdk依赖边.md) 收窄 session 的 sdk 依赖边（doing）
+- [`T-342-吸收v3机制面SPRINT`](342-吸收v3机制面SPRINT.md) 吸收 v3 机制面 SPRINT（doing） · 子项 todo 1 / doing 1
+  - [`T-343-端口集搬到装配期收集`](343-端口集搬到装配期收集.md) 端口集搬到装配期收集（doing）
+  - [`T-345-wire命名收进模型插件`](345-wire命名收进模型插件.md) wire 命名收进模型插件（todo）
 
 <!-- registry:summary end -->

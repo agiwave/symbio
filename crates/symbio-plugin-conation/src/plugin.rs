@@ -10,7 +10,6 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_plugin_api::port_rows;
 use symbio_plugin_api::PortProvider;
 use symbio_plugin_api::PLUGIN_ID_CONATION;
 use symbio_plugin_api::{
@@ -88,9 +87,7 @@ impl Plugin for ConationPlugin {
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
             visitor.put(crate::debt::row()).await;
             let provider: Arc<dyn PortProvider> = Arc::new(ConationPort);
-            for row in port_rows(&provider) {
-                visitor.put(row).await;
-            }
+            symbio_plugin_api::register_ports(&ctx, provider.as_ref()).await;
         }
         // 本轮配置快照贡献（D-427）：真源是本插件自己的 PLUGIN.yml，宿主只按 owner
         // 合并。挂载即贡献，卸载即缺席 ⇒ 读方按出厂值 false 收敛。

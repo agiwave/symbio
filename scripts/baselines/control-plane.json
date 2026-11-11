@@ -13,7 +13,5 @@
   "extension": {
     "productionFiles": 9
   },
-  "baseline-allow": [
-    "sha256:89827a0a9065b0067f0f4ec90df9d62bcfc278413a5ef5e47160c0314f7009af→sha256:fe9ed5b8cb0ed7920a80c90658b0b9ecd5c4b394d6231436a1bc1661f3937fb3 D-446 把 when_no_open 的判据从「整条端口」放宽为「作用域」：DebtRow.when_no_open 由 Option<String> 改为 Option<NoOpenScope>（类型在 symbio-sdk 的 debt_scope，门面只转出），plan 里那处求值从「端口相同」变成「端口相同且该债 id 在作用域内」；集合由申报方给出（NoOpenScope::among），环仍只转交字符串与 id、不解释端口语义也不解释 id 形状，没有新增世界域名 / 端口名 / 业务事实名字面量，plan / expire 的判定结构一格未变 D-446"
-  ]
+  "baseline-allow": []
 }

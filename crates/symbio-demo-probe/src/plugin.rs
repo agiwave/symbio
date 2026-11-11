@@ -1,12 +1,12 @@
-//! 假插件的门面与债表：端口行与债行都由本 crate 自己申报。
+//! 假插件的门面与债表：端口与债行都由本 crate 自己申报。
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::{
-    port_rows, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH,
 };
 
 use crate::port::{DemoPort, DEMO_PORT};
@@ -71,9 +71,7 @@ impl Plugin for DemoPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
             let provider: Arc<dyn PortProvider> = Arc::new(DemoPort);
-            for row in port_rows(&provider) {
-                visitor.put(row).await;
-            }
+            symbio_plugin_api::register_ports(&ctx, provider.as_ref()).await;
             visitor
                 .put(debt_row("demo-debts", Arc::new(DemoDebts)))
                 .await;

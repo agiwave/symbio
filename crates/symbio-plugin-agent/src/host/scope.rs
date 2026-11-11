@@ -40,10 +40,7 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_plugin_api::{
-    family, port::PORT_FAMILY, CapabilityFamily, CapabilityRow, PortExecutor, PortPayload,
-    Registry, SCOPE_TWIN,
-};
+use symbio_plugin_api::{family, CapabilityFamily, CapabilityRow, Registry, SCOPE_TWIN};
 
 /// 子 Agent 插件树的注册代理
 pub struct SubAgentVisitor {
@@ -53,14 +50,6 @@ pub struct SubAgentVisitor {
     /// 本作用域登记进来的**工具数**（`max_tools` 限额的读数，见
     /// [`Self::tool_count`]）。只数工具行——提示词段 / 选项行不是「工具」。
     tools: std::sync::atomic::AtomicUsize,
-    /// 同批端口行的执行体暂存（端口名 → 执行体）。
-    ///
-    /// `register_tool` 先写端口行后写工具行（D-440 ③ 的写入顺序）：工具行的执行面
-    /// 住在**同批到达的端口行**上，这里按端口名暂存，等工具行到齐时取出——前缀化
-    /// 重注册的执行体就是它（注册收口点已过闸，原样透传）。未配对的端口行（子树
-    /// 自己的端口面）留在这里随轮丢弃：与旧行为一致——端口行此前就在本层被丢弃。
-    /// tokio 的锁：不毒化、无 panic 面，锁卫只在取/放一条语句内，不跨 await。
-    pending: tokio::sync::Mutex<std::collections::HashMap<String, Arc<dyn PortExecutor>>>,
 }
 
 impl SubAgentVisitor {
@@ -69,7 +58,6 @@ impl SubAgentVisitor {
             inner,
             agent_id: agent_id.into(),
             tools: std::sync::atomic::AtomicUsize::new(0),
-            pending: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -85,8 +73,16 @@ impl SubAgentVisitor {
 
     /// 工具名：`agent_<safe_id>_<name>`
     fn tool(&self, name: &str) -> String {
-        format!("agent_{}_{}", safe_segment(&self.agent_id), name)
+        format!("{}{name}", scope_prefix(&self.agent_id))
     }
+}
+
+/// 作用域前缀：**工具名与端口名同一个前缀**（D-468）。
+///
+/// 子树登记端口时从 `ctx[PORT_SCOPE]` 读的就是它（见 `host::plugin` 的装配），
+/// 于是「工具行叫什么」与「端口绑定叫什么」不靠写入顺序对齐，靠同一个函数。
+pub(crate) fn scope_prefix(agent_id: &str) -> String {
+    format!("agent_{}_", safe_segment(agent_id))
 }
 
 /// 把 id 压进 `[A-Za-z0-9_-]`（工具名的协议字符集）
@@ -142,36 +138,11 @@ impl Registry for SubAgentVisitor {
             self.inner.put(row).await;
             return;
         }
-        // 端口行（D-440：工具的执行面住在端口行上）：**不转发**——子树自己的端口面
-        // （`port.tool` 等系统端口）归系统侧，与旧行为一致（此前端口行就在本层丢弃）。
-        // 这里只把**工具行派生端口**的执行体按端口名暂存，等同批的工具行到齐后一并
-        // 前缀化重注册（写入顺序：`register_tool` 先端口行后工具行）。
-        if row.family() == PORT_FAMILY {
-            if let Some(payload) = row.payload::<PortPayload>() {
-                let provider = payload.provider();
-                if let Some(executor) = provider.executor() {
-                    let mut pending = self.pending.lock().await;
-                    for port in provider.ports() {
-                        // 按端口键判重，不静默覆盖（D-445 ③）：子作用域里同名端口
-                        // 通常是同一能力的重复展开，保留先到者并留痕；装配期的
-                        // `capability_port_check` / host 折表另各有一道冲突判据。
-                        if pending.contains_key(&port) {
-                            symbio_plugin_api::plugin_warn!(
-                                "agent",
-                                "子 Agent 作用域端口 `{port}` 重复绑定，保留先到的执行体"
-                            );
-                            continue;
-                        }
-                        pending.insert(port, Arc::clone(&executor));
-                    }
-                }
-            }
-            return;
-        }
         // 子作用域的工具加名前缀再入内表（`agent_<safe_id>_<name>`）：
         // 前缀化发生在 meta 层（D-440：行是纯数据，改名装饰器随 `Capability` 一起
-        // 退场）——取行的自述快照改 `name`，执行体用同批端口行带来的那一份，经
-        // `register_tool` 一次写入前缀化的端口行 + 工具行（派发侧按前缀名查执行体）。
+        // 退场）——取行的自述快照改 `name`。**端口一侧不在本层**：登记时
+        // `register_tool` 已从 `ctx[PORT_SCOPE]` 取同一个前缀把端口名写好（D-468），
+        // 因此这里不再有「端口行到齐才配上执行体」的顺序契约。
         // **前缀副本与根工具的去重不在写入侧做**（写入顺序不确定），但「这个前缀名
         // 对应哪个本名」由本层声明：装配面据此折叠，不必认识 `agent_` 这套命名规则
         // （D-428）。
@@ -192,15 +163,10 @@ impl Registry for SubAgentVisitor {
                 .await;
             self.tools
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            // 执行体缺席 = 纯数据行（无执行体可绑）：按数据形状照旧入表，
-            // 派发侧对它诚实 NotFound——工具面（目录 / 风险 / 行为读数）不受影响。
-            // （锁卫只在 remove 这条语句内，不跨后面的 await。）
-            let executor = self.pending.lock().await.remove(&base);
-            if let Some(executor) = executor {
-                symbio_providers::register_tool(self.inner.as_ref(), meta, None, executor).await;
-            } else {
-                self.inner.put(CapabilityRow::tool(meta)).await;
-            }
+            // 工具行照数据形状入表：执行体不在这条行上（它是装配期容器里的一条绑定，
+            // 由子树自己的 `register_tool` 按前缀名写好）。前缀名查不到绑定 ⇒ 派发侧
+            // 诚实失败，工具面（目录 / 风险 / 行为读数）不受影响。
+            self.inner.put(CapabilityRow::tool(meta)).await;
             return;
         }
         // 其余族（嵌套作用域的声明行等）不在转发清单里：此前它们无执行对象可取、

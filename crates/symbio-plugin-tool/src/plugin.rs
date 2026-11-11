@@ -8,9 +8,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use symbio_plugin_api::{
-    port_rows, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH,
-    PLUGIN_ID_TOOL,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH, PLUGIN_ID_TOOL,
 };
 
 use super::port::ToolPort;
@@ -54,9 +53,7 @@ impl Plugin for ToolPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
             let provider: Arc<dyn PortProvider> = Arc::new(ToolPort);
-            for row in port_rows(&provider) {
-                visitor.put(row).await;
-            }
+            symbio_plugin_api::register_ports(&ctx, provider.as_ref()).await;
             for row in super::debt::debt_rows() {
                 visitor.put(row).await;
             }

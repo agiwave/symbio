@@ -129,7 +129,8 @@ pub fn tool(
 ///
 /// 顺序固定（`tools_cover_all_ops` 测试锁死）：表装不下的两个（`list` / `read`）
 /// 手动插入到它们在原清单里的位置，其余七条由 [`spec::SPECS`] 按表序展开。
-/// 返回 `(meta, 执行体)` 二元组：meta 供注册点静态交档，执行体走端口行。
+/// 返回 `(meta, 执行体)` 二元组：meta 供注册点静态交档，执行体经 `register_tool`
+/// 落进装配期容器。
 pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<(CapabilityMeta, Arc<dyn PortExecutor>)> {
     let by_name = |name: &str| -> (CapabilityMeta, Arc<dyn PortExecutor>) {
         let s = spec::SPECS

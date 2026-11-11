@@ -42,7 +42,7 @@ pub trait DriveRunner: Send + Sync {
 /// `drive` 行的载荷。
 ///
 /// 消费方经 `row.payload::<DrivePayload>()` 下转型取回——类型是声明方与消费方之间的
-/// 私有约定，表不参与校验（与 `PortPayload` 同一条开放载荷形状）。
+/// 私有约定，表不参与校验（与端口载荷同一条开放载荷形状）。
 #[derive(Clone)]
 pub struct DrivePayload(Arc<dyn DriveRunner>);
 

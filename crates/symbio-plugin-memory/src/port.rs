@@ -70,10 +70,9 @@ impl PortExecutor for MemoryPortExecutor {
     }
 }
 
-/// 端口行的登记（`port` 族的登记）。
-pub(crate) fn memory_port_rows() -> Vec<symbio_plugin_api::CapabilityRow> {
-    let provider: Arc<dyn PortProvider> = Arc::new(MemoryPort);
-    symbio_plugin_api::port::port_rows(&provider)
+/// 本插件的端口提供者（登记走 `register_ports`，D-468）。
+pub(crate) fn memory_port_provider() -> Arc<dyn PortProvider> {
+    Arc::new(MemoryPort)
 }
 
 #[cfg(test)]

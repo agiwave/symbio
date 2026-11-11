@@ -56,8 +56,8 @@ fn dedup_declared_twins(
 
 /// 本轮**暴露视图**（D-444 / D-445）：显式暴露 ∩ 作用域允许 ∩ 有效绑定 + wire 别名。
 ///
-/// - 有效绑定取装配期 `PORT_FAMILY` 行上的**端口键**（不是行名前缀）：只有描述行、
-///   没有执行体的孤儿行不进清单；只有端口行、没有描述行的内部端口也不进清单。
+/// - 有效绑定取装配期收集容器 `PortBindings` 的 `bound()`（D-468）：只有描述行、
+///   没有执行体的孤儿行不进清单；只有绑定、没有描述行的内部端口也不进清单。
 ///   作用域允许由 `collect_capabilities` 的 `agent_scope` 在同一次收集里保证。
 /// - wire 名是**描述数据**，由装配期一次算出并放进 `aliases`，供清单装配、四个协议的
 ///   下行序列化与模型返回调用解析共用；别名不是身份，端口键仍是内部 canonical 名。
@@ -252,15 +252,13 @@ impl SessionPlugin {
             .collect::<Vec<_>>()
             .join("\n\n");
         let twins = symbio_sdk::capability::capability_scope_twins(&*manager).await;
-        // 有效绑定 = 装配期收集到的端口键（行上的数据，D-445 ③）；描述与执行两视图
-        // 由同一张表的**同一次收集**得出，不维护第二份注册事实。
-        let bound_ports: std::collections::HashSet<String> = manager
-            .list(symbio_plugin_api::port::PORT_FAMILY)
-            .await
-            .iter()
-            .filter_map(|row| row.payload::<symbio_plugin_api::PortPayload>())
-            .map(|payload| payload.port())
-            .collect();
+        // 有效绑定 = 装配期收集到的端口名（D-445 ③ / D-468）：描述与执行两视图由
+        // **同一次收集**得出，不维护第二份注册事实。冲突键不在 `bound()` 里——
+        // 它们已在收集期落进错误桶（上面那句 `capability_errors` 会读到）。
+        let bound_ports: std::collections::HashSet<String> = ctx
+            .get(symbio_plugin_api::port::PORT_BINDINGS)
+            .map(|bindings| bindings.bound().into_iter().collect())
+            .unwrap_or_default();
         let (tools, tool_aliases, alias_collisions) = exposed_tools(
             dedup_declared_twins(
                 manager

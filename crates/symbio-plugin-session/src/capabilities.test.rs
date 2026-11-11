@@ -92,6 +92,20 @@ struct FixturePort {
     id: &'static str,
 }
 
+/// 最小执行体：判重用例从不真执行，容器只判「有没有」。
+struct FixtureExecutor;
+
+#[async_trait::async_trait]
+impl symbio_plugin_api::port::PortExecutor for FixtureExecutor {
+    async fn execute(
+        &self,
+        _ctx: symbio_plugin_api::port::PortExecContext,
+        _input: symbio_plugin_api::port::PortInput,
+    ) -> symbio_plugin_api::port::PortOutcome {
+        symbio_plugin_api::port::PortOutcome::ok()
+    }
+}
+
 impl symbio_plugin_api::port::PortProvider for FixturePort {
     fn ports(&self) -> Vec<String> {
         vec!["fixture".to_string()]
@@ -99,6 +113,10 @@ impl symbio_plugin_api::port::PortProvider for FixturePort {
 
     fn provider_id(&self) -> &str {
         self.id
+    }
+
+    fn executor(&self) -> Option<Arc<dyn symbio_plugin_api::port::PortExecutor>> {
+        Some(Arc::new(FixtureExecutor))
     }
 }
 
@@ -120,13 +138,15 @@ impl Plugin for DuplicatePortParent {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
-        if let Some(visitor) = ctx.get(symbio_sdk::capability::CAPABILITY_VISITOR) {
+        if ctx
+            .get(symbio_sdk::capability::CAPABILITY_VISITOR)
+            .is_some()
+        {
             for id in ["a", "b"] {
                 let provider: Arc<dyn symbio_plugin_api::port::PortProvider> =
                     Arc::new(FixturePort { id });
-                for row in symbio_plugin_api::port::port_rows(&provider) {
-                    visitor.put(row).await;
-                }
+                // 登记走装配期容器（D-468）：同端口第二次登记当场落错误桶。
+                symbio_plugin_api::port::register_ports(&ctx, provider.as_ref()).await;
             }
         }
         Ok(symbio_plugin_api::PluginPayload::new(&Vec::<
@@ -135,10 +155,10 @@ impl Plugin for DuplicatePortParent {
     }
 }
 
-/// 收集结束即判重，且错误经**调用方 ctx** 可见（`capability_take_errors` 的同一个桶）。
+/// 判重发生在**登记点**，错误经**调用方 ctx** 可见（`capability_take_errors` 的同一个桶）。
 ///
 /// 这条钉的是接线而不是判重规则本身（规则由 `plugin-api` 的 `port.test.rs` 守）：
-/// 端口行只在子 ctx 上，检查若不接在收集管线里，两个提供者同端口的装配错误会永远
+/// 容器挂在收集的子 ctx 上，登记错误若不落进桶，两个提供者同端口的装配错误会永远
 /// 无人读——判重退化为「照常跑」。
 #[tokio::test]
 async fn duplicate_port_providers_are_reported_through_the_collection_ctx() {

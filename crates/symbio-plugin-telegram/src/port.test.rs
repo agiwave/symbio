@@ -1,60 +1,20 @@
 //! `notify` 端口的注册面与执行面（DE-048 D-302）：真实插件端口，不是夹具。
 //!
 //! 两条断言各管一半：
-//! 1. **注册面**——provider 行经 `port_rows` 产出，`capability_port_of` 读数为 `Ready`，
-//!    执行面可取；
+//! 1. **注册面**——提供者经 `register_ports` 写进本次装配的绑定容器，按端口名取回
+//!    绑定、执行面可取；
 //! 2. **执行面**——执行体对一个本地 HTTP 靶子发出**真实**的 Bot API 请求。
 
 use super::*;
-use async_trait::async_trait;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Mutex;
-use symbio_plugin_api::port::{capability_port_of, PortReading};
+use symbio_plugin_api::port::{PortBindings, PORT_BINDINGS};
 use symbio_plugin_api::{
-    CapabilityFamily, CapabilityRow, ExecAbortSignal, ExecEventSink, PortPayload, Registry,
+    ExecAbortSignal, ExecEventSink, PluginInvokeRequest, PluginInvokeRequestExt as _,
+    PluginSimpleRequest,
 };
 use tokio::sync::RwLock;
-
-/// 最小登记表（与 `plugin-api` 的 port.test 同款夹具）。
-struct FakeRegistry {
-    rows: RwLock<Vec<Arc<CapabilityRow>>>,
-}
-
-impl FakeRegistry {
-    fn new() -> Self {
-        Self {
-            rows: RwLock::new(Vec::new()),
-        }
-    }
-}
-
-#[async_trait]
-impl Registry for FakeRegistry {
-    async fn put(&self, row: CapabilityRow) {
-        self.rows.write().await.push(Arc::new(row));
-    }
-
-    async fn get(&self, name: &str) -> Option<Arc<CapabilityRow>> {
-        self.rows
-            .read()
-            .await
-            .iter()
-            .rev()
-            .find(|r| r.name() == name)
-            .cloned()
-    }
-
-    async fn list(&self, fam: CapabilityFamily) -> Vec<Arc<CapabilityRow>> {
-        self.rows
-            .read()
-            .await
-            .iter()
-            .filter(|r| r.family() == fam)
-            .cloned()
-            .collect()
-    }
-}
 
 fn provider(api_base: &str, token: &str, chat_id: Option<&str>) -> Arc<dyn PortProvider> {
     let cfg = TelegramConfig {
@@ -135,29 +95,23 @@ async fn notify_port_registers_and_executes_for_real() {
     let provider = provider(&format!("http://{addr}"), "TEST", Some("42"));
 
     // ── 注册面 ──
-    let rows = symbio_plugin_api::port::port_rows(&provider);
-    assert_eq!(rows.len(), 1, "单端口提供者只产一行");
-    assert_eq!(rows[0].name(), "<port:notify>:telegram");
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let bindings = Arc::new(PortBindings::default());
+    ctx.set(PORT_BINDINGS, bindings.clone());
+    symbio_plugin_api::port::register_ports(&ctx, provider.as_ref()).await;
 
-    let registry = FakeRegistry::new();
-    for row in rows {
-        registry.put(row).await;
-    }
-    let PortReading::Ready(row) = capability_port_of(&registry, NOTIFY).await else {
-        panic!("端口 `{NOTIFY}` 应就绪");
-    };
-    let provider = row
-        .payload::<PortPayload>()
-        .expect("端口行应带提供者")
-        .provider()
-        .clone();
-    assert!(
-        provider.executor().is_some(),
-        "提供者必须交出执行面（DE-047 I-6.4）"
+    assert_eq!(
+        bindings.bound(),
+        vec![NOTIFY.to_string()],
+        "一个端口一条绑定"
     );
+    let (owner, executor) = bindings
+        .get(NOTIFY)
+        .expect("无冲突")
+        .expect("端口 `notify` 应就绪");
+    assert_eq!(owner, "telegram", "绑定记下提供者身份（DE-047 I-6.4）");
 
     // ── 执行面：真实 HTTP 发送 ──
-    let executor = provider.executor().expect("已断言有执行面");
     let outcome = executor
         .execute(
             PortExecContext {

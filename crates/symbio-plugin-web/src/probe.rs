@@ -20,7 +20,7 @@ use symbio_plugin_api::port::{
 
 /// 探针端口名：合法（无 `:` 等保留字符），且与仓内任何世界端口都不重名。
 pub(crate) const WEB_PROBE_PORT: &str = "web_probe";
-/// 探针提供者 id（端口行名后缀）。
+/// 探针提供者 id。
 pub(crate) const WEB_PROBE_ID: &str = "web_probe";
 
 /// 最小提供者：申报一个端口、交出一份执行面。

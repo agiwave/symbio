@@ -6,20 +6,19 @@ use super::{
     ask_user::AskUserTool, codebase_search::CodebaseSearchTool, content_search::ContentSearchTool,
     shell::ShellTool, todo_write::TodoWriteTool,
 };
-// 审批闸门的判定住在能力注册收口点（`register_tool` 派生端口行时裹上的
-// `GatedExecutor`）；本插件的 `route` 兜底也调它——两条路径**判定只有一份**。
+// 审批闸门的判定住在能力注册收口点（`register_tool` 写端口绑定时裹上的
+// `GatedExecutor`）；本插件只交声明，不再有第二条路径去判闸（D-466）。
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use symbio_plugin_api::PLUGIN_ID_LOCAL;
 use symbio_plugin_api::{
-    plugin_dir_from_ctx, CapabilityMeta, CapabilityRiskLevel, ExecAbortSignal, ExecEventSink,
-    Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PortExecContext, PortExecutor, PortInput,
-    RESULT_KEY,
+    plugin_dir_from_ctx, CapabilityMeta, CapabilityRiskLevel, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, PortExecutor,
 };
 use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption};
-use symbio_providers::{approval_gate, RiskOf};
+use symbio_providers::RiskOf;
 use tokio::sync::RwLock;
 
 // ==================== 配置文档（`<根>/local/PLUGIN.yml`） ====================
@@ -113,11 +112,11 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
-/// `route` 兜底用的工具条目：自述快照 + 风险回答 + 端口执行体。
+/// 注册用的工具条目：自述快照 + 风险回答 + 端口执行体。
 ///
-/// 工具改形为 [`PortExecutor`] 后不再有 `Arc<dyn Capability>` 可藏；兜底路径
-/// 自己持有这三样，审批判定仍走 [`approval_gate`] 这一份真源，与注册收口点
-/// （`register_tool`）同一读法。
+/// 工具改形为 [`PortExecutor`] 后不再有 `Arc<dyn Capability>` 可藏；`traverse` 把
+/// 这三样交给注册收口点（`register_tool`），闸门与行都在那里成形。本插件**不执行**
+/// 工具——`route` 对工具名一律 `NotFound`（D-466）。
 struct ToolEntry {
     meta: CapabilityMeta,
     /// `None` = 静态档（`meta.effective_risk()`，与 `register_tool` 的 `risk = None`
@@ -266,65 +265,9 @@ impl Plugin for LocalPlugin {
             }
         }
 
-        if let Some(entry) = self.tool_impls.iter().find(|e| e.meta.name == path) {
-            let args = ctx.payload::<Value>().unwrap_or(Value::Null);
-
-            // 审批闸门：本处拿到的是**未包壳**的裸执行体（闸门长在注册收口点的
-            // `GatedExecutor` 里），判定只能在这里自己走一遍——但判定与执行体
-            // 共用同一份真源 [`approval_gate`]；shell 的动态风险覆写在闭包里原样生效。
-            let static_risk = entry.meta.effective_risk();
-            let static_risk_fn = |_: &Value| static_risk;
-            let risk_fn: &dyn Fn(&Value) -> CapabilityRiskLevel = match &entry.risk {
-                Some(risk) => risk.as_ref(),
-                None => &static_risk_fn,
-            };
-            if let Some(payload) = approval_gate(&ctx, &entry.meta, risk_fn, &args) {
-                return Ok(PluginPayload::new(&payload));
-            }
-
-            // 造最小端口上下文：sink / abort 从 ctx 读出（缺席即静默 / 永不中止），
-            // 与执行体内部 `ExecEnv::from_request` 的读法同一口径——「会话里跑」与
-            // 「被 route() 直连调用」仍共用同一条执行路径；其余字段工具不读（都从
-            // ctx 取），填缺省值。
-            let exec = PortExecContext {
-                abort: ExecAbortSignal::of(&*ctx),
-                idempotency_key: String::new(),
-                sink: ExecEventSink::of(&*ctx),
-                emit: symbio_plugin_api::port::PortFactEmit::silent(),
-                ctx: Some(Arc::clone(&ctx)),
-                subject: String::new(),
-                group: String::new(),
-                session_id: String::new(),
-                origin: None,
-                scratch_dir: None,
-                reader: None,
-                source: String::new(),
-            };
-            let outcome = entry
-                .executor
-                .execute(
-                    exec,
-                    PortInput {
-                        port: path.clone(),
-                        payload: args,
-                    },
-                )
-                .await;
-            // 信封 ↔ 结果换算：成功值在 `facts` 的 [`RESULT_KEY`] 项里（与派发侧
-            // 同一条取法），失败转插件错误。
-            return match outcome.error {
-                Some((_, why)) => Err(PluginError::InternalError(why)),
-                None => {
-                    let value = outcome
-                        .facts
-                        .first()
-                        .and_then(|f| f.get(RESULT_KEY))
-                        .cloned()
-                        .unwrap_or(Value::Null);
-                    Ok(PluginPayload::new(&value))
-                }
-            };
-        }
+        // 工具不再有第二条执行面（`D-440` / `D-466`）：执行只经 `port.tool` 契约，
+        // 闸门在注册收口点的 `GatedExecutor` 里。按工具名 `route` 一律 `NotFound`——
+        // 保留父容器转发，是为了让本插件仍能代理挂在它下面的地址面。
         Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }
 
@@ -341,13 +284,13 @@ impl Plugin for LocalPlugin {
             )));
         }
 
-        if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
-            // 注册收口点（`register_tool`）一次写两条行：裹闸的端口行 + 纯数据的
+        if ctx.get(symbio_plugin_api::CAPABILITY_VISITOR).is_some() {
+            // 注册收口点（`register_tool`）一次写两处：裹闸的端口绑定 + 纯数据的
             // 工具行。shell 的动态风险闭包随条目交上去，静态档工具传 `None`
             // （判定回落 `meta.effective_risk()`）。
             for entry in self.tool_impls.iter() {
                 symbio_providers::register_tool(
-                    visitor.as_ref(),
+                    &ctx,
                     entry.meta.clone(),
                     entry.risk.clone(),
                     Arc::clone(&entry.executor),

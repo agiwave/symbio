@@ -8,9 +8,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use symbio_plugin_api::{
-    port_rows, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH,
-    PLUGIN_ID_COMPACT,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH, PLUGIN_ID_COMPACT,
 };
 
 use crate::debt::compact_debt_rows;
@@ -54,9 +53,7 @@ impl Plugin for CompactPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
             let provider: Arc<dyn PortProvider> = Arc::new(CompactPort);
-            for row in port_rows(&provider) {
-                visitor.put(row).await;
-            }
+            symbio_plugin_api::register_ports(&ctx, provider.as_ref()).await;
             for row in compact_debt_rows() {
                 visitor.put(row).await;
             }

@@ -299,10 +299,9 @@ impl Plugin for MemoryPlugin {
         }
 
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-            // 巩固的债 + 还债的端口：两行同一次收集交出（D-268 订正）。
-            for row in super::port::memory_port_rows() {
-                visitor.put(row).await;
-            }
+            // 巩固的债 + 还债的端口：两处在同一次收集里交出（D-268 订正）。
+            symbio_plugin_api::register_ports(&ctx, super::port::memory_port_provider().as_ref())
+                .await;
             for row in super::debt::memory_debt_rows() {
                 visitor.put(row).await;
             }

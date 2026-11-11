@@ -224,12 +224,6 @@
       "evidence": "docs/003-design/048-端口机制裁决.md"
     },
     {
-      "symbol": "port_family",
-      "path": "crates/symbio-sdk/src/capability/port.rs",
-      "why": "契约实现：端口族的公开查询口（开放端口集都落在同一个 multi 族），注册面直接用 PORT_FAMILY 常量，故本仓生产面未直调；消费方按端口名问族时用它",
-      "evidence": "docs/003-design/048-端口机制裁决.md"
-    },
-    {
       "symbol": "with_authz",
       "path": "crates/symbio-sdk/src/capability/port.rs",
       "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",

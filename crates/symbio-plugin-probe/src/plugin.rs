@@ -1,4 +1,4 @@
-//! 探针插件的门面与债表：端口行与债行都由本 crate 自己申报。
+//! 探针插件的门面与债表：端口与债行都由本 crate 自己申报。
 //!
 //! 债是**惰性**的：只有会话 id 以 `probe-` 开头时才欠账。这让插件能进默认装配
 //! （默认树每会话都会问一遍各债务源），却不改变任何既有会话的驱动步数——验收用它
@@ -9,8 +9,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::{
-    port_rows, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, PortProvider, CAPABILITY_VISITOR, PATH,
 };
 
 use crate::port::{ProbePort, PROBE_PORT};
@@ -81,9 +81,7 @@ impl Plugin for ProbePlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
             let provider: Arc<dyn PortProvider> = Arc::new(ProbePort);
-            for row in port_rows(&provider) {
-                visitor.put(row).await;
-            }
+            symbio_plugin_api::register_ports(&ctx, provider.as_ref()).await;
             visitor
                 .put(debt_row("probe-debts", Arc::new(ProbeDebts)))
                 .await;

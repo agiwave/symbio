@@ -1,75 +1,43 @@
-//! 世界端口的注册面：族与表键、端口名校验、**按端口键**的读数与装配期判重，
-//! 以及提供者 / 执行体的通用契约（`DE-047` I-6，D-445）。
+//! 世界端口的收集面：端口名校验、装配期的收集容器，以及提供者 / 执行体的通用契约
+//! （`DE-047` I-6，D-445 / D-468）。
 //!
-//! ## 为什么整张端口面住 sdk
+//! ## 端口集是装配期的收集结果，不是能力行（D-468）
 //!
-//! 读/校验半是**宿主与编排方问表**的机制，D-404 / D-414 先搬；`D-440` ②把**注册面**
-//! （`PortProvider` / `PortExecutor` / 载荷与读数）也搬了进来——门面（plugin-api）
-//! 是架构词汇层，自有实现只许降（FA-001）；端口契约不认识任何世界词，与本域其余
-//! 读口同一条边界。两半必须同源：`PORT_FAMILY` 的声明、`port_row_name` 的表键拼法、
-//! `capability_port_of` 的读数、`port_rows` 的造行各自分家，读数与注册就会各说各话。
-//! 端口身份是 [`PortPayload::port`] 这一格**数据**：行名只是全表唯一的表键，读数
-//! 不从行名反推端口集（D-445 ③；旧 `<port:…>` 前缀反推已退场）。
+//! 端口由活插件在自己的 `traverse` 里申报（[`register_ports`]），写进本次装配的
+//! [`PortBindings`] 容器；容器挂在 ctx 上（[`PORT_BINDINGS`]），装配方读快照折执行体表。
+//! 它**不借能力表的行存在**：端口名不是表键，于是行名编码、`<port:…>` 前缀，以及
+//! 「端口名与同名工具互相顶掉」这一族隐含约束一起消失。
 //!
-//! ## 端口集开放（`DE-047` I-6）
+//! 端口名仍是**数据**：本文件不出现 `ModelProvider` / `ToolProvider` 一类按世界命名的
+//! trait，执行面只有通用的 [`PortExecutor`] / [`PortInput`] / [`PortOutcome`]（I-6.2）。
+//! `PortDecl`、派发 / 等待两行模板、`Call{port,id,attempt,via}` 的幂等键与记账住 `loop`。
 //!
-//! 世界端口种类是**开放**的：提供者申报自己服务的端口名（可多个），环只按端口名解析
-//! provider；注册面（族 `multi("port")` + 表键 `<port:{port}>:{provider_id}`）不因新增
-//! 端口而变。端口名是**数据**，不是类型——本文件不出现 `ModelProvider` / `ToolProvider`
-//! 一类按世界命名的 trait，执行面只有通用的 [`PortExecutor`] / [`PortInput`] /
-//! [`PortOutcome`]（I-6.2）。`PortDecl`、派发 / 等待两行模板、
-//! `Call{port,id,attempt,via}` 的幂等键与记账住 `loop`。**提供者不静态注册**：
-//! `submit_*!` 一类的编译期收集器在这里没有位置——它们链接期生效、没有启用过滤，
-//! 插件停用后条目仍在（实例不构造不等于链接期条目消失），「停用即缺席」当场判红。
+//! ## 「停用即缺席」靠同一个前提
 //!
-//! ## 提供者随能力表走（单一 `port` 族，D-299）
-//!
-//! 提供者行由**活插件**在自己的 `traverse` 里 `put`（与工具 / 模型目录 / 挂载同一广播
-//! 机制）：停用的插件不参与装配、不 traverse、不写行；收集器每次装配重建，旧行不残留。
-//! 全部端口共用**一个 `multi` 族**，每（端口, 提供者）一行；端口级唯一由读数与装载期
-//! 检查裁（[`capability_port_of`] 按行上的 [`PortPayload::port`] 分组），不靠表侧 `demote`。
+//! 容器每次装配新建（宿主与会话各建各的）：停用的插件不 traverse、不登记，旧条目不会
+//! 残留。**提供者不静态注册**：`submit_*!` 一类的编译期收集器在端口面没有位置——它们
+//! 链接期生效、没有启用过滤，插件停用后条目仍在（实例不构造不等于链接期条目消失），
+//! 「停用即缺席」当场判红。
 //!
 //! ## 判重与缺席
 //!
-//! - `0` 行 = 缺席（合法装配态：没装提供者插件）；响亮失败发生在调用点（消费方拿到
-//!   [`PortReading::Absent`] 自行落事实并中止）。
-//! - `>1` 行 = 判重：两行俱在（谁都没被顶掉），[`capability_port_check`] 落一条错误
-//!   进 `CAPABILITY_ERRORS`（装载期判红）并指名两者，**不静默顶掉**。
-//! - 端口集开放：任何已注册的端口键就是一个合法端口名；0 行即 [`PortReading::Absent`]。
+//! - **未登记 = 缺席**（合法装配态：没装提供者插件）。响亮失败发生在调用点。
+//! - **同名再登记 = 冲突**：该键从此**永久**不可执行，两方提供者都在说明里被指名，
+//!   装配方读快照时整份失败。不静默顶掉、不先到者胜、也不靠第二次读表才看得见。
+//! - **端口集开放**：任何登记过的端口名都合法；加一个端口只改提供者的 `ports()`。
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
-use crate::capability::{capability_report_error, CAPABILITY_VISITOR};
+use crate::capability::capability_report_error;
 use crate::plugin::effects::FactDraft;
-use symbio_kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_kernel::keys::SymbioKey;
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
-
-/// 全部端口共用的唯一 `multi` 族（D-299）：族不区分端口，端口级分组读行上的
-/// 端口键（[`PortPayload::port`]）——加端口不加族。
-pub const PORT_FAMILY: CapabilityFamily = CapabilityFamily::multi("port");
-
-/// 任何端口都落在唯一族里（端口集开放，`DE-047` I-6.7）：族不区分端口，端口级
-/// 分组读行上的端口键——加端口不加族。
-pub fn port_family(_port: &str) -> Option<CapabilityFamily> {
-    Some(PORT_FAMILY)
-}
-
-/// port 行的**表键**：保留前缀，撞不上任何线上工具名。
-///
-/// 表键是全表唯一的名字空间（族不参与键），端口名当行名会与同名工具互相顶掉；
-/// 工具名不含尖括号，前缀使碰撞不可表达——与 `MOUNT_ROOT_ROW` 同一条手法。
-///
-/// **只是表键，不是身份来源**（D-445 ③）：端口身份是行载荷里的
-/// [`PortPayload::port`]。读数与判重一律读那一格，不解析本字符串、不从它反推
-/// 端口集；`check_port_name` 拒绝 `:` 也只是为了环事件 id 的定界稳定。
-pub fn port_row_name(port: &str, provider_id: &str) -> String {
-    format!("<port:{port}>:{provider_id}")
-}
 
 /// 端口名的保留字符：环事件 id 的分隔符。
 ///
@@ -90,111 +58,176 @@ pub fn check_port_name(port: &str) {
     }
 }
 
-/// 一个端口的装配期读数。
-pub enum PortReading {
-    /// 0 行：端口缺席（没装提供者插件——合法装配态，响亮失败在调用点）。
-    Absent,
-    /// 1 行：就绪。
-    Ready(Arc<CapabilityRow>),
-    /// `>1` 行：判重——同端口的多个提供者**两行俱在**（单族不降位），`dropped` 是
-    /// 其余提供者的行名。
-    ///
-    /// 装载期已由门面侧的 `capability_port_check` 落错误（不静默顶掉）；调用方拿到本读数
-    /// 同样必须响亮处理，不许当作 [`PortReading::Ready`] 用。
-    Duplicate {
-        kept: Arc<CapabilityRow>,
-        dropped: Vec<String>,
-    },
+/// 一条有效绑定：提供者 id + 执行体。
+type Binding = (String, Arc<dyn PortExecutor>);
+/// 一个端口名的条目：有效绑定，或一行冲突说明（键永久不可执行）。
+type Entry = Result<Binding, String>;
+/// 一次装配收集到的全部条目。
+type Entries = BTreeMap<String, Entry>;
+
+/// 一次装配的端口收集容器（D-468）。
+///
+/// 条目是 `Ok((提供者 id, 执行体))` 或 `Err(冲突说明)`：一条被拒的键**不会**被后来的
+/// 登记救回来——同一端口两个 owner 是装配错误，不是覆盖问题。
+///
+/// 只此一格数据（CS-009）：绑定用元组，不为「提供者 id + 执行体」再造一个公开结构。
+#[derive(Default)]
+pub struct PortBindings {
+    entries: Mutex<Entries>,
 }
 
-impl fmt::Debug for PortReading {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Absent => write!(f, "Absent"),
-            Self::Ready(row) => write!(f, "Ready({})", row.name()),
-            Self::Duplicate { kept, dropped } => {
-                write!(
-                    f,
-                    "Duplicate {{ kept: {}, dropped: {dropped:?} }}",
-                    kept.name()
-                )
+impl PortBindings {
+    /// 按名取绑定：未申报 `Ok(None)`，冲突 `Err(说明)`。
+    pub fn get(&self, port: &str) -> Result<Option<Binding>, String> {
+        let entries = self.entries();
+        match entries.get(port) {
+            None => Ok(None),
+            Some(Ok(binding)) => Ok(Some(binding.clone())),
+            Some(Err(error)) => Err(error.clone()),
+        }
+    }
+
+    /// 收集结束后的有效绑定快照：任一冲突都让**整份**快照失败（装配期硬红）。
+    ///
+    /// 快照固定本次装配结果；下一次装配必须新建容器，复用等于把旧绑定带进来。
+    pub fn snapshot(&self) -> Result<BTreeMap<String, Binding>, String> {
+        self.entries()
+            .iter()
+            .map(|(port, entry)| match entry {
+                Ok(binding) => Ok((port.clone(), binding.clone())),
+                Err(error) => Err(error.clone()),
+            })
+            .collect()
+    }
+
+    /// 有效绑定的端口名（不含冲突键）：消费方「清单 = 显式暴露 ∩ 有效绑定」用。
+    pub fn bound(&self) -> Vec<String> {
+        self.entries()
+            .iter()
+            .filter(|(_, entry)| entry.is_ok())
+            .map(|(port, _)| port.clone())
+            .collect()
+    }
+
+    fn entries(&self) -> std::sync::MutexGuard<'_, Entries> {
+        self.entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 登记一组端口；返回要让调用方落进错误桶的说明（冲突 / 无执行体）。
+    ///
+    /// 同名再登记**永久**把该键转成不可执行：先登记的那一份不再"胜出"——两份都可能被
+    /// 派发到，挑一个就是让描述与执行漂移。
+    ///
+    /// 公开的是「往容器里写」这一个动作：插件的端口集走 [`register_ports`]，工具端口
+    /// 走 `register_tool`（它要同时写工具行），两条都落在本方法上。
+    pub fn bind(
+        &self,
+        ports: &[String],
+        provider_id: &str,
+        executor: Option<Arc<dyn PortExecutor>>,
+    ) -> Vec<String> {
+        let mut entries = self.entries();
+        let mut errors = Vec::new();
+        for port in ports {
+            match entries.get(port) {
+                Some(existing) => {
+                    // 先前那次已经落错的键不再被当成提供者名读：错误里保留原来的说明，
+                    // 并把本次登记方指名——两方都在，键仍然永久不可执行。
+                    let error = match existing {
+                        Ok((previous, _)) => format!(
+                            "世界端口 `{port}` 重复登记：提供者 [{previous:?}, {provider_id:?}]；该端口不可执行"
+                        ),
+                        Err(previous) => format!(
+                            "世界端口 `{port}` 重复登记：提供者 `{provider_id}` 与先前的登记冲突（{previous}）；该端口不可执行"
+                        ),
+                    };
+                    entries.insert(port.clone(), Err(error.clone()));
+                    errors.push(error);
+                }
+                None => match executor.clone() {
+                    Some(executor) => {
+                        entries.insert(port.clone(), Ok((provider_id.to_string(), executor)));
+                    }
+                    None => {
+                        let error = format!(
+                            "世界端口 `{port}` 的提供者 `{provider_id}` 没有执行体，登记失败"
+                        );
+                        entries.insert(port.clone(), Err(error.clone()));
+                        errors.push(error);
+                    }
+                },
             }
         }
+        errors
     }
 }
 
-/// 读一个端口的提供者行（纯读数，不落错误）。
-///
-/// 判定的全部输入是**按端口键**过滤后的行数（单一 `port` 族里其他端口的行不可
-/// 见）：`0` 缺席、`1` 就绪、`>1` 判重。端口键取行载荷的 [`PortPayload::port`]，
-/// 不解析行名、不做前缀反推（D-445 ③）。行不降位（`active = false`），行数让
-/// 「多提供者」可判——读数不猜、不回落。
-pub async fn capability_port_of(visitor: &dyn Registry, port: &str) -> PortReading {
-    let rows: Vec<_> = visitor
-        .list(PORT_FAMILY)
-        .await
-        .into_iter()
-        .filter(|r| {
-            r.payload::<PortPayload>()
-                .is_some_and(|payload| payload.port() == port)
-        })
-        .collect();
-    match rows.len() {
-        0 => PortReading::Absent,
-        // panic-allow crates/symbio-sdk/src/capability/port.rs::capability_port_of: 行数已判定为 1，next() 取不到说明 list 与 len 之间表被改写（同一次调用内不会发生），属代码缺陷。
-        1 => PortReading::Ready(rows.into_iter().next().expect("len == 1")),
-        _ => {
-            let mut it = rows.into_iter();
-            // panic-allow crates/symbio-sdk/src/capability/port.rs::capability_port_of: 行数已判定为 >1，next() 取不到说明 list 与 len 之间表被改写（同一次调用内不会发生），属代码缺陷。
-            let kept = it.next().expect("len > 1");
-            let dropped = it.map(|r| r.name().to_string()).collect();
-            PortReading::Duplicate { kept, dropped }
-        }
+/// 端口收集容器的 ctx 槽（D-468）：一次装配一个实例，装配方读快照折执行体表。
+pub struct PortBindingsKey;
+impl SymbioKey for PortBindingsKey {
+    type Value = Arc<PortBindings>;
+    const WIRE: bool = false;
+    fn name(&self) -> &'static str {
+        "port_bindings"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "port_bindings".to_string()
     }
 }
+pub const PORT_BINDINGS: PortBindingsKey = PortBindingsKey;
 
-/// 装配期判重检查（D-298 / D-299 / `DE-047` I-6.7 / D-445 ③）：**一次遍历**把已收集的
-/// provider 行按**端口键**分组，同键多绑定 ⇒ 落一条错误进 `CAPABILITY_ERRORS`。
+/// 作用域前缀槽（D-468）：子 Agent 的作用域给每个端口名加同一个前缀。
 ///
-/// 端口集是装配期的**收集结果**（活插件 traverse 时申报，停用即缺席）。端口键直接读
-/// 行载荷 [`PortPayload::port`]：`strip_prefix("<port:")` / `split_once(">:")` 那层
-/// 行名反推已删除，也不再「先派生端口清单、再逐个回表分组」二次读表（D-445 ③）。
+/// **端口名与工具名同源**：作用域里工具行被改名为 `agent_<id>_<name>`，端口名必须用
+/// 同一个前缀——否则派发按前缀名查不到绑定。前缀为空（系统树）⇒ 端口名原样。
+pub struct PortScopeKey;
+impl SymbioKey for PortScopeKey {
+    type Value = String;
+    const WIRE: bool = false;
+    fn name(&self) -> &'static str {
+        "port_scope"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "port_scope".to_string()
+    }
+}
+pub const PORT_SCOPE: PortScopeKey = PortScopeKey;
+
+/// 把端口名交出去之前套上当前作用域的前缀（未设前缀 ⇒ 原样）。
+pub fn scoped_port_name(ctx: &Arc<dyn PluginInvokeRequest>, port: &str) -> String {
+    format!("{}{port}", ctx.get(PORT_SCOPE).unwrap_or_default())
+}
+
+/// 活插件在 `traverse` 里申报自己的端口（D-468）。
 ///
-/// **时点契约**：必须在能力收集结束、编排方读错误桶（`capability_take_errors`）
-/// 裁决**之前**调用——判重错误与收集期错误同桶同路，裁决即中止会话（装载期硬红）。
-/// 落桶之后才裁决 ⇒ 错误留在桶里无人读，判重退化为「照常跑」，那是本检查要消灭的
-/// 形态。缺席**不报错**——「没装提供者插件」是合法装配态（不装 model 插件的部署
-/// 存在），响亮失败发生在调用点。没有 `CAPABILITY_VISITOR` 的 ctx 上本函数静默跳过：
-/// 收集尚未开始时没有表可读。
-pub async fn capability_port_check(ctx: &Arc<dyn PluginInvokeRequest>) {
-    let Some(visitor) = ctx.get(CAPABILITY_VISITOR) else {
+/// 容器缺席（夹具 / 内部请求没有装收集）时静默跳过：没有容器就没有端口集，那不是
+/// 装配错误，与 `CAPABILITY_VISITOR` 缺席同一条口径。登记错误写进既有能力错误桶，
+/// 与收集期错误同桶同路（装配方裁决即中止）。
+pub async fn register_ports(ctx: &Arc<dyn PluginInvokeRequest>, provider: &dyn PortProvider) {
+    let Some(bindings) = ctx.get(PORT_BINDINGS) else {
         return;
     };
-    // 端口键 → 该键下的行名（按注册序）。分组的唯一依据是行上的端口键数据。
-    let mut groups: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-    for row in visitor.list(PORT_FAMILY).await {
-        let Some(payload) = row.payload::<PortPayload>() else {
-            continue;
-        };
-        groups
-            .entry(payload.port())
-            .or_default()
-            .push(row.name().to_string());
-    }
-    for (port, names) in groups {
-        if names.len() < 2 {
-            continue;
-        }
-        let kept = &names[0];
-        let dropped = &names[1..];
-        capability_report_error(
-            ctx,
-            "core",
-            format!(
-                "世界端口 `{port}` 注册了多个绑定：`{kept}` 与 {dropped:?} 两行俱在（按端口键判重，不覆盖）"
-            ),
-        )
-        .await;
+    let ports: Vec<String> = provider
+        .ports()
+        .into_iter()
+        .map(|port| {
+            // 端口名先进事件 id：非法名在这里 fail-closed（D-336）。
+            let name = scoped_port_name(ctx, &port);
+            check_port_name(&name);
+            name
+        })
+        .collect();
+    let errors = bindings.bind(&ports, provider.provider_id(), provider.executor());
+    for error in errors {
+        capability_report_error(ctx, provider.provider_id(), error).await;
     }
 }
 
@@ -553,99 +586,6 @@ pub struct PendingPrompt {
     pub failure_kind: String,
 }
 
-/// 单行端口绑定：把一个可申报多端口的提供者**收窄成一行一个端口**。
-///
-/// 私有实现类型（不进公共数据面，CS-009）：`port_rows` 为提供者的每个端口各造一个
-/// 包装，于是「这一行服务哪个端口」是提供者声明的**数据**，而不是从行名
-/// `<port:…>` 反推出来的猜测（D-445 ③）。执行面、能力位、绑定身份全部转发给原提供者。
-struct SinglePortProvider {
-    port: String,
-    provider_id: String,
-    inner: Arc<dyn PortProvider>,
-}
-
-impl PortProvider for SinglePortProvider {
-    fn ports(&self) -> Vec<String> {
-        // 动态端口名（数据，来自装配期申报）：不走 `vec![字面量]` 的静态声明形状，
-        // 端口面审计按静态声明解析时自然略过本类型（与 ToolRowPort 同形）。
-        Vec::from([self.port.clone()])
-    }
-
-    fn provider_id(&self) -> &str {
-        &self.provider_id
-    }
-
-    fn capabilities(&self) -> PortCapabilities {
-        self.inner.capabilities()
-    }
-
-    fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
-        self.inner.executor()
-    }
-}
-
-/// port 行的载荷（单字段：内核公共数据面只许降，CS-009）。
-///
-/// 消费方经 `row.payload::<PortPayload>()` 下转型取回——类型是声明方与消费方之间的
-/// 私有约定，表不参与校验（D-175 的开放载荷形状）。
-///
-/// 端口身份由 [`Self::port`] 从**这一行的提供者声明**读出；行名只是全表唯一的表键，
-/// 两者不再互相要求（D-445 ③）。
-pub struct PortPayload(Arc<dyn PortProvider>);
-
-impl PortPayload {
-    pub fn new(provider: Arc<dyn PortProvider>) -> Self {
-        Self(provider)
-    }
-
-    /// 取提供者。
-    pub fn provider(&self) -> &Arc<dyn PortProvider> {
-        &self.0
-    }
-
-    /// 本行的端口键：读数 / 判重 / 按名取执行体的唯一依据（D-445 ③）。
-    ///
-    /// 契约：端口行由 [`port_rows`] 或 `tool_port_row` 生成，每行的提供者恰好申报
-    /// 一个端口；多行共用执行体的场景由多个 [`SinglePortProvider`] 各自持有同一个
-    /// 执行体，不需要新增接口。
-    pub fn port(&self) -> String {
-        self.0.ports().into_iter().next().unwrap_or_default()
-    }
-
-    /// 由一个可申报多端口的提供者造单行绑定。
-    fn single(provider: Arc<dyn PortProvider>, port: String) -> Self {
-        let provider_id = provider.provider_id().to_string();
-        Self(Arc::new(SinglePortProvider {
-            port,
-            provider_id,
-            inner: provider,
-        }))
-    }
-}
-
-/// 提供者行：本提供者申报的**每个端口**一行（`multi` 族，`active = false`，不参与
-/// 表侧降位——端口级唯一由读数与装载期检查裁，D-299）。
-///
-/// 一个 provider 申报 N 个端口就产生 N 行（`DE-047` I-6.1）：端口身份是数据，行数随
-/// 数据走；新增端口只改提供者的 `ports()` 返回值，不改注册面、不改族。
-///
-/// 端口名先过 [`check_port_name`]（fail-closed）；非法端口名在这里就注册失败。
-pub fn port_rows(provider: &Arc<dyn PortProvider>) -> Vec<CapabilityRow> {
-    provider
-        .ports()
-        .into_iter()
-        .map(|port| {
-            check_port_name(&port);
-            CapabilityRow::new(
-                PORT_FAMILY,
-                port_row_name(&port, provider.provider_id()),
-                PortPayload::single(provider.clone(), port),
-                false,
-            )
-        })
-        .collect()
-}
-
 /// 执行体交回**主结果值**的约定键：`facts` 里带这个键的项是调用方要的纯值，其余
 /// 事实是端口插件自己声明的世界事实。（`D-440` ②：工具行执行体的结果经它交回，
 /// 派发侧按名取出后继续自己的编排。）
@@ -667,18 +607,5 @@ pub fn port_result(result: Result<Value, symbio_kernel::plugin::PluginError>) ->
             reply: Default::default(),
         },
         Err(e) => PortOutcome::failed(PortErrorClass::NonRetryable, e.to_string()),
-    }
-}
-
-/// 按端口名从收集表取执行体（`D-440` / D-445 ③：查行上的端口键即得）。
-///
-/// 走唯一读数 [`capability_port_of`]：只有**恰好一行**才算就绪；同端口多绑定直接
-/// 返回 `None`，不在两行里静默挑一个（装配期 `capability_port_check` 另有硬红）。
-/// 读数按行上的端口键过滤，不解析行名。与宿主 `gather` 折执行体表同源，只是
-/// 不要求调用方预折整张表：按名一次取一个。
-pub async fn port_executor_of(visitor: &dyn Registry, port: &str) -> Option<Arc<dyn PortExecutor>> {
-    match capability_port_of(visitor, port).await {
-        PortReading::Ready(row) => row.payload::<PortPayload>()?.provider().executor(),
-        PortReading::Absent | PortReading::Duplicate { .. } => None,
     }
 }

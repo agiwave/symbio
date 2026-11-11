@@ -8,9 +8,10 @@ use async_trait::async_trait;
 use serde_json::Value;
 use symbio_plugin_api::{
     capability_prompts, capability_vdfs_root, family, port_result, CapabilityMeta, CapabilityRow,
-    ExecEnv, PluginError, PluginInvokeRequest, PortErrorClass, PortExecContext, PortExecutor,
-    PortInput, PortOutcome, VdfsContent, VdfsContext, VdfsError, VdfsProvider, VdfsRequest,
-    VdfsResponse, VdfsResult, SCOPE_TWIN,
+    ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt as _, PortBindings,
+    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, VdfsContent,
+    VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
+    CAPABILITY_VISITOR, PORT_BINDINGS, PORT_SCOPE, SCOPE_TWIN,
 };
 
 #[test]
@@ -190,18 +191,36 @@ async fn sub_agent_model_registration_is_discarded() {
     );
 }
 
+/// 生产形状的登记现场：收集器 + 端口容器 + 作用域前缀挂在同一份 ctx 上。
+///
+/// 三样正是 host::plugin 给子树装配的那一格（D-468）：登记的写入口径只有
+/// register_tool，它从这份 ctx 上读到「写进哪个容器」与「端口名前缀是什么」。
+fn scoped_ctx(
+    scoped: &Arc<dyn Registry>,
+    prefix: &str,
+) -> (Arc<dyn PluginInvokeRequest>, Arc<PortBindings>) {
+    let ctx: Arc<dyn PluginInvokeRequest> =
+        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
+    ctx.set(CAPABILITY_VISITOR, Arc::clone(scoped));
+    let bindings = Arc::new(PortBindings::default());
+    ctx.set(PORT_BINDINGS, bindings.clone());
+    ctx.set(PORT_SCOPE, prefix.to_string());
+    (ctx, bindings)
+}
+
 /// **多槽转发**：工具 / 系统提示词**确实**带前缀并进内层。
 ///
 /// 与上面两条是一对：缺了它，「代理什么都不转发」也能让那两条通过。
 #[tokio::test]
 async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
     let inner: Arc<dyn Registry> = Arc::new(symbio_providers::DefaultToolVisitor::new());
-    let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
+    let scoped: Arc<dyn Registry> = Arc::new(SubAgentVisitor::new(Arc::clone(&inner), "reviewer"));
 
-    // 注册走生产形状（`register_tool` 先端口行后工具行）：前缀化 meta 的行键 =
-    // 前缀化名，执行体随前缀化的端口行一起进内表（派发侧按前缀名查得到它）。
+    // 注册走生产形状：子树自己的 `register_tool` 读 ctx 上的作用域前缀，工具行进
+    // 代理层、端口绑定按前缀名进容器（派发侧按前缀名查得到执行体）。
+    let (ctx, bindings) = scoped_ctx(&scoped, "agent_reviewer_");
     symbio_providers::register_tool(
-        &scoped,
+        &ctx,
         EchoTool("read_skill").meta(),
         None,
         Arc::new(EchoTool("read_skill")),
@@ -222,11 +241,12 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
             .is_some_and(|row| row.name() == "agent_reviewer_read_skill"),
         "子 Agent 的工具应带前缀进内层（并集，两份都生效）"
     );
-    // 前缀化的端口行随同批写入：派发侧按前缀名查得到执行体（注册收口点过闸后的
+    // 前缀化的端口绑定随登记写入：派发侧按前缀名查得到执行体（注册收口点过闸后的
     // 那一份——改名的只是 meta，执行面随行）。
     assert!(
-        symbio_plugin_api::port_executor_of(inner.as_ref(), "agent_reviewer_read_skill")
-            .await
+        bindings
+            .get("agent_reviewer_read_skill")
+            .expect("无冲突")
             .is_some(),
         "前缀名必须查得到执行体，否则子 Agent 的工具不可派发"
     );

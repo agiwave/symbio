@@ -573,10 +573,10 @@ impl Plugin for McpPlugin {
             )));
         }
 
-        // 仅当上游传入了 CAPABILITY_VISITOR 时才注册
-        let Some(tool_visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) else {
+        // 仅当上游装上了收集器时才注册（登记的写入口径在 `register_tool`）
+        if ctx.get(symbio_plugin_api::CAPABILITY_VISITOR).is_none() {
             return Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()));
-        };
+        }
 
         let cfg = self.config.read().await.clone();
 
@@ -595,13 +595,7 @@ impl Plugin for McpPlugin {
                             self.manager.clone(),
                         );
                         let meta = tool.meta();
-                        symbio_providers::register_tool(
-                            tool_visitor.as_ref(),
-                            meta,
-                            None,
-                            Arc::new(tool),
-                        )
-                        .await;
+                        symbio_providers::register_tool(&ctx, meta, None, Arc::new(tool)).await;
                     }
                 }
                 Err(e) => {

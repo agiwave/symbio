@@ -35,11 +35,9 @@
 
 // ⭐ 子模块一律私有（与 `providers/embedding` 同一约定）：**本文件是唯一出口**。
 mod approval;
-mod tool_port;
 mod tool_visitor;
 
 pub use approval::{approval_gate, RiskOf};
-pub use tool_port::tool_port_row;
 pub use tool_visitor::{register_tool, DefaultToolVisitor};
 
 use std::sync::Arc;

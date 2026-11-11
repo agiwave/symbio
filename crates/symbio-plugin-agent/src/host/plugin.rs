@@ -283,6 +283,12 @@ impl AgentPlugin {
             Arc::new(super::scope::SubAgentVisitor::new(Arc::clone(visitor), id));
         let scoped_dyn: Arc<dyn Registry> = Arc::clone(&scoped) as Arc<dyn Registry>;
         sub.set(CAPABILITY_VISITOR, scoped_dyn);
+        // 端口名与工具名同一个前缀（D-468）：子树里的 `register_tool` / `register_ports`
+        // 登记端口时读这一格，于是「工具行叫什么」与「绑定叫什么」不靠写入顺序对齐。
+        sub.set(
+            symbio_plugin_api::port::PORT_SCOPE,
+            super::scope::scope_prefix(id),
+        );
 
         if let Err(e) = tree.clone().traverse(String::new(), sub).await {
             symbio_plugin_api::plugin_warn!("agent", "子 Agent `{id}` 能力收集失败：{e:?}");
@@ -426,7 +432,7 @@ impl Plugin for AgentPlugin {
             .iter()
             .map(|record| record.manifest.id.clone())
             .collect();
-        // 注册走 `register_tool` 唯一收口（D-440 ③）：一次写入前缀端口行 + 工具行，
+        // 注册走 `register_tool` 唯一收口（D-440 ③）：一次写入前缀端口绑定 + 工具行，
         // 派发侧按名查执行体才有着落。`risk` 传 `None`——本工具没有参数级风险覆写，
         // 静态缺省档（`meta.effective_risk()`）就是它的风险回答。
         let agent_run = super::subagent::AgentRunCapability::new(
@@ -435,8 +441,7 @@ impl Plugin for AgentPlugin {
             agent_ids,
             self.router.clone(),
         );
-        symbio_providers::register_tool(tool_visitor.as_ref(), agent_run.meta(), None, agent_run)
-            .await;
+        symbio_providers::register_tool(&ctx, agent_run.meta(), None, agent_run).await;
 
         // ── 已选择智能体 → 装配它的能力 ──
         if let Some(agent_id) = agent_id {

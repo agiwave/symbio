@@ -1,8 +1,8 @@
 //! `notify` 端口的世界提供者（DE-047 不变量 6 / D-302）。
 //!
 //! 环只按端口名取——Bot API 基址怎么拼、消息怎么切块、错误怎么分类，都是这里的私事。
-//! 端口在 `traverse` 里随能力目录一起装：provider 行由 [`symbio_plugin_api::port::port_rows`]
-//! 产出，注册面不随端口数写死。
+//! 端口在 `traverse` 里随能力目录一起装：绑定由 [`symbio_plugin_api::port::register_ports`]
+//! 登记进装配期容器，注册面不随端口数写死。
 
 use std::sync::Arc;
 

@@ -28,12 +28,11 @@ use serde_json::{json, Value};
 use symbio_plugin_api::chat_node::{ChatNode, MessageContent};
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::port::{
-    port_rows, PortErrorClass, PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome,
-    PortProvider,
+    PortErrorClass, PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome, PortProvider,
 };
 use symbio_plugin_api::principal::{Principal, PrincipalKind};
 use symbio_plugin_api::{
-    llm_short_id, AssistReply, AssistRequest, CapabilityRow, ExecEnv, ExecEventSink, PluginError,
+    llm_short_id, AssistReply, AssistRequest, ExecEnv, ExecEventSink, PluginError,
 };
 
 use crate::provider::ModelProvider;
@@ -42,7 +41,7 @@ use crate::provider::ModelProvider;
 /// 同一常量（D-364）。
 pub(crate) use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
-/// 提供者 id（行名后缀；与 `model` 端口行的提供者区分）。
+/// 提供者 id（与 `model` 端口的提供者区分）。
 const ASSIST_PROVIDER: &str = "model-assist";
 
 pub(crate) struct AssistPort {
@@ -58,10 +57,6 @@ impl AssistPort {
         available: Vec<Arc<dyn ModelProvider>>,
     ) -> Self {
         Self { active, available }
-    }
-
-    pub(crate) fn rows(self: Arc<Self>) -> Vec<CapabilityRow> {
-        port_rows(&(self as Arc<dyn PortProvider>))
     }
 }
 
