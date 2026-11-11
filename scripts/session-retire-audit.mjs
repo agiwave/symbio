@@ -71,8 +71,12 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
  *
  * 2026-11-11：116 → **101**，去掉 15 条零命中余量（SR-001 首次量账的结果）。这次下调
  * 不是「退役推进了 13 步」——它只是把账本校准到真实依赖面。真实进度的分母是 101。
+ *
+ * 2026-11-11（同日晚些）：101 → **100**，`PromptMessage` 退场（D-452）。这是边一的
+ * **第一格真实进度**：判据 `verify` 的入参从线格式消息类型换成 `&[TranscriptEntry]`
+ * （它只比 role / text / tool 三格），于是 session 不再引用 `PromptMessage`。
  */
-const SYMBOL_BASELINE = 101
+const SYMBOL_BASELINE = 100
 
 const errors = []
 const notes = []

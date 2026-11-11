@@ -65,7 +65,7 @@
 
 use super::super::event::Event;
 use super::elision::{is_replacement, Elisions};
-use super::mutations::OutputIndex;
+use super::mutations::{OutputIndex, TranscriptEntry};
 use super::vocab::{slot_node_of, slot_of, ChatSlot};
 use crate::projection::vocab::{ChatVocab, MessageVocab};
 
@@ -280,9 +280,21 @@ impl PromptReport {
 
 /// **双向**完整性复核：网格 ↔ **送进模型的消息**。
 ///
-/// `events` = 事实网格的可见切片（窗口 / 可见域已在上游裁好），`messages` = 交给模型
-/// 的那批消息。**入参不含「投影」**——本函数自己按 `expected_role` 重算一遍，这样它能
-/// 同时照出「投影漏了」与「prompt 里有网格之外的」。
+/// `events` = 事实网格的可见切片（窗口 / 可见域已在上游裁好），`sent` = 交给模型
+/// 的那批行（转写条目里**没被** `exclude_from_context` 滤掉的那些）。**入参不含「投影」**
+/// ——本函数自己按 `expected_role` 重算一遍，这样它能同时照出「投影漏了」与「prompt 里
+/// 有网格之外的」。
+///
+/// ## 为什么入参是 [`TranscriptEntry`] 而不是线格式的消息类型
+///
+/// 判据只比 **role / text / tool 三格**（D-448 已定的比较面）。早先这里收
+/// `llm::PromptMessage`，理由是「送进模型的那批还带着 `tool_call_id`」——那句话在 D-448
+/// 之后已经不成立：**本函数从不读 `tool_call_id`**（谁合成调用 id 是组包侧 `plugin-model`
+/// 的规则，`prompt_fidelity.test.rs` 里也只写着「不冒充它」）。一个比判据宽的入参类型
+/// 不增加判据能看见的东西，只多一条**只有测试在读**的依赖（`D-452`）。
+///
+/// `exclude_from_context` 的过滤仍留在调用方：那是**组包规则**，本函数不重述它——
+/// 重述一遍就等于把「送出去什么」这件事从组包侧搬进判据侧，判据也就查不出组包漏滤了。
 ///
 /// 验的是**送出去的那批**（含 prefix 与本轮工具交换），不是投影中间产物——
 ///
@@ -314,13 +326,13 @@ impl PromptReport {
 fn claim(
     rep: &mut PromptReport,
     used: &mut [bool],
-    messages: &[crate::llm::PromptMessage],
+    sent: &[TranscriptEntry],
     text: &str,
     role: &str,
     kind: &str,
     fact: &str,
 ) {
-    let hit = messages
+    let hit = sent
         .iter()
         .enumerate()
         .position(|(i, m)| !used[i] && m.text == text);
@@ -331,7 +343,7 @@ fn claim(
         }),
         Some(i) => {
             used[i] = true;
-            let m = &messages[i];
+            let m = &sent[i];
             if m.role != role {
                 rep.gaps.push(PromptGap::RoleMismatch {
                     expected: role.to_string(),
@@ -357,7 +369,7 @@ fn claim(
 fn claim_nodes(
     rep: &mut PromptReport,
     used: &mut [bool],
-    messages: &[crate::llm::PromptMessage],
+    sent: &[TranscriptEntry],
     msgs: &[symbio_kernel::chat::chat_node::ChatNode],
     mutations: &super::mutations::MessageMutations,
     kind: &str,
@@ -376,14 +388,14 @@ fn claim_nodes(
             ),
             None => (entry.role.clone(), entry.text.clone()),
         };
-        claim(rep, used, messages, &text, &role, kind, fact);
+        claim(rep, used, sent, &text, &role, kind, fact);
     }
 }
 
 /// 名字由调用方在构造期交进来（`c` 对话面 / `m` 消息面，DE-024 D-203）。
 pub fn verify(
     events: &[Event],
-    messages: &[crate::llm::PromptMessage],
+    sent: &[TranscriptEntry],
     declared: Option<&str>,
     c: &ChatVocab,
     m: &MessageVocab,
@@ -430,7 +442,7 @@ pub fn verify(
             .unwrap_or(*si),
         None => 0,
     };
-    let mut used = vec![false; messages.len()];
+    let mut used = vec![false; sent.len()];
     for (idx, e) in events.iter().enumerate() {
         // 被最近一次快照**取代**的事件不再对 prompt 有主张：它们承载的那段历史已被
         // 快照载荷换基。跳过它们，与投影 [`super::transcript`] 的换基同一口径——
@@ -458,7 +470,7 @@ pub fn verify(
                     claim_nodes(
                         &mut rep,
                         &mut used,
-                        messages,
+                        sent,
                         msgs,
                         &mutations,
                         e.kind.as_str(),
@@ -480,7 +492,7 @@ pub fn verify(
                 claim_nodes(
                     &mut rep,
                     &mut used,
-                    messages,
+                    sent,
                     &super::mutations::added_messages(e),
                     &mutations,
                     e.kind.as_str(),
@@ -498,7 +510,7 @@ pub fn verify(
         if excluded_from_prompt(e, c, m) {
             rep.checked_events += 1;
             let text = payload_text(e, &outputs, c);
-            if messages.iter().any(|m| m.text == text) {
+            if sent.iter().any(|m| m.text == text) {
                 rep.gaps.push(PromptGap::ExcludedLeakedIntoPrompt {
                     kind: e.kind.as_str().to_string(),
                     fact: e.event_id.clone(),
@@ -542,7 +554,7 @@ pub fn verify(
         claim(
             &mut rep,
             &mut used,
-            messages,
+            sent,
             &text,
             &role,
             e.kind.as_str(),
@@ -551,7 +563,7 @@ pub fn verify(
     }
 
     // prompt 侧：每条消息都得被网格认领过，或被**显式声明**为请求级内容。
-    for (i, m) in messages.iter().enumerate() {
+    for (i, m) in sent.iter().enumerate() {
         rep.checked_entries += 1;
         if used[i] {
             continue;

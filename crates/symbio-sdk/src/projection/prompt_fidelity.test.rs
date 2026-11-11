@@ -9,42 +9,40 @@
 //! 生产路径上的第一条绿线，后续每一步（prompt 结构化、`turn.supplemented`）都必须保持
 //! 它绿。
 
-use super::super::transcript::transcript;
+use super::super::mutations::TranscriptEntry;
+use super::super::transcript::{transcript, TranscriptView};
 use super::{verify, PromptGap as Gap};
 use crate::event::{Entity, Event, Verb};
-use crate::llm::PromptMessage;
 use crate::test_fixtures::{
     CHAT, EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_REPORTED,
     EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE, MESSAGE,
 };
 
-/// 一条送进模型的消息。
+/// 一条**送进模型的行**（判据比的只有 role / text / tool 三格，D-448）。
 ///
-/// ⚠️ 这里**必须**构造 `PromptMessage` 而不是 `TranscriptEntry`：判据验的是
-/// 「送进模型的那批」，而那条路上 `tool` 消息还带着 `tool_call_id`。用投影条目
-/// 构造会让判据少验一样东西（而那恰恰是 D-048a 要保的东西）。
-fn entry(role: &str, text: &str, tool: Option<&str>) -> PromptMessage {
-    PromptMessage {
+/// ⚠️ 这里原先构造 `llm::PromptMessage`，注释写着「那条路上 `tool` 消息还带着
+/// `tool_call_id`，用投影条目会少验一样东西」。那句话在 D-448 收窄比较面之后**已经
+/// 是假的**：`verify` 从不读 `tool_call_id`（谁合成调用 id 是 `plugin-model` 的规则，
+/// 本文件也在注释里写着「不冒充它」）。替身比判据宽不增加任何覆盖，只让判据**看起来**
+/// 验得更多——那是 S-003 那类「判据的形状说它查了」的假象（D-452）。
+fn entry(role: &str, text: &str, tool: Option<&str>) -> TranscriptEntry {
+    TranscriptEntry {
         role: role.to_string(),
         text: text.to_string(),
-        // `role == "tool"` 必带调用 id（模型侧协议要求，缺了会被 provider 整条拒绝）。
-        // 具体怎么合成是**组装请求那一侧**的规则（`plugin-model`）；这里只是给判据
-        // 一个稳定的替身，不冒充生产规则（D-448）。
-        tool_call_id: tool.map(|t| format!("call_{t}_0")),
-        tool: tool.map(|t| t.to_string()),
-        tool_calls: None,
+        tool: tool.map(str::to_string),
+        exclude_from_context: false,
     }
 }
 
-/// 请求包里的消息：转写条目按 `exclude_from_context` 过滤后投影。
+/// 请求包里的行：转写条目按 `exclude_from_context` 过滤后即为「送出去的那批」。
 ///
-/// 旧 `TranscriptView::to_messages` 与 `PromptMessage::from` 都只做这一步，
-/// 两个出口都已删（D-448）；这里按同一条读法就地折，判据的输入口径不变。
-fn request_messages(view: &super::super::transcript::TranscriptView) -> Vec<PromptMessage> {
+/// 过滤留在这里而**不进** `verify`：它是**组包规则**。判据自己再滤一遍，就等于把
+/// 「送出去什么」从组包侧搬进判据侧——组包漏滤时判据也就查不出来了（D-452）。
+fn request_messages(view: &TranscriptView) -> Vec<TranscriptEntry> {
     view.entries
         .iter()
         .filter(|e| !e.exclude_from_context)
-        .map(|e| entry(&e.role, &e.text, e.tool.as_deref()))
+        .cloned()
         .collect()
 }
 

@@ -54,3 +54,11 @@ exit: 豁免账 101 → 0；`scripts/exemptions/plugin-session-sdk.json` 删除�
   `&[TranscriptEntry]`（折法留在 sdk，调用方不再需要模型消息类型）；② 或把这段校验
   搬进 session 的测试、`verify` 从 sdk 删除（先确认没有第二个消费方、并按
   `arch-dead-code` 的棘轮下调基线）。**不许**为了摘符号在 session 里再抄一份折法。
+- 2026-11-11（第一条真实收窄）：**`PromptMessage` 退场，101 → 100。** 走的是第 1 种走法
+  的一个变体：用法本身没错，但**判据的入参面比它的比较面宽**，于是那条用法只为「凑一个
+  类型」而存在。裁决落成 `D-452`：`verify` 收 `&[TranscriptEntry]`（它只比 role / text /
+  tool 三格），`exclude_from_context` 的过滤仍留调用方（那是组包规则）。同批改了那句
+  假注释——它声称「用投影条目会少验 `tool_call_id`」，而 `verify` 从不读那个字段。
+  session 侧只剩 `Vec<_>` 一次 `cloned()`；`SYMBOL_BASELINE` 101 → 100。
+  **下一步仍按同一形态找**：先问「判据 / 读口真的比了这么多格吗」，再问「谁在消费」——
+  只被测试用、且替身比判据宽的符号，往往是同一种病的下一格。

@@ -18,7 +18,6 @@ use symbio_plugin_api::events::{
 };
 use symbio_plugin_api::vocab;
 use symbio_sdk::invariants::check_all;
-use symbio_sdk::llm::PromptMessage;
 use symbio_sdk::projection::prompt_fidelity::verify as verify_prompt_fidelity;
 use symbio_sdk::projection::transcript::transcript;
 
@@ -902,20 +901,14 @@ fn an_artifact_round_is_complete_after_reopen() {
     let view = transcript(CHAT_VOCAB, MESSAGE_VOCAB)
         .apply(&events, i64::MAX, Budget::generous())
         .value;
-    // 请求包里的消息：条目按 `exclude_from_context` 过滤后投影。合成 `tool_call_id`
-    // 的规则住组装请求那一侧（`plugin-model`），这里不冒充它——判据比的是
-    // role / text / tool 三格（D-448）。
-    let entries: Vec<PromptMessage> = view
+    // 请求包里的行：转写条目按 `exclude_from_context` 过滤后就是**送出去的那批**
+    // （判据比 role / text / tool 三格，D-448；合成 `tool_call_id` 的规则住组装请求
+    // 那一侧 —— `plugin-model`，判据从不读它，D-452）。
+    let entries: Vec<_> = view
         .entries
         .iter()
         .filter(|e| !e.exclude_from_context)
-        .map(|e| PromptMessage {
-            role: e.role.clone(),
-            text: e.text.clone(),
-            tool_call_id: None,
-            tool: e.tool.clone(),
-            tool_calls: None,
-        })
+        .cloned()
         .collect();
     assert_eq!(entries.len(), 3, "三条都要进 prompt：{entries:?}");
     assert_eq!(entries[1].role, "tool");
