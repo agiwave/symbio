@@ -167,3 +167,72 @@ fn readable_is_distinguished_from_a_failed_read() {
         json!({ "by_skill": {} })
     );
 }
+
+// ── 出口对账（`D-465`，`D-463` 第三级）─────────────────────────────────────
+
+#[test]
+fn owner_short_strips_the_crate_path_not_the_name() {
+    assert_eq!(owner_short("crates/symbio-plugin-model"), "model");
+    assert_eq!(owner_short("crates/symbio-plugin-event_bus"), "event_bus");
+    // 短名本来就只有一种拼写：原样通过，不给它编一条规则。
+    assert_eq!(owner_short("model"), "model");
+    assert_eq!(owner_short("kernel"), "kernel");
+}
+
+#[test]
+fn a_report_reading_another_owners_view_is_rejected() {
+    let a = decl("cost", "cost", 40, &["model.usage"]);
+    let errors = check_view_owners(&[&a], |name| match name {
+        "model.usage" => Some("crates/symbio-plugin-model"),
+        _ => None,
+    });
+    assert_eq!(errors.len(), 1, "只该有一条诊断：{errors:?}");
+    for must in [
+        "`cost`",
+        "`model.usage`",
+        "crates/symbio-plugin-model",
+        "折这条账",
+    ] {
+        assert!(errors[0].contains(must), "诊断里缺 `{must}`：{}", errors[0]);
+    }
+}
+
+#[test]
+fn a_view_nobody_declared_is_rejected_rather_than_read_as_null() {
+    let a = decl("cost", "cost", 40, &["cost.ledgr"]);
+    let errors = check_view_owners(&[&a], |_| None);
+    assert_eq!(errors.len(), 1, "只该有一条诊断：{errors:?}");
+    for must in ["`cost.ledgr`", "冻结声明表"] {
+        assert!(errors[0].contains(must), "诊断里缺 `{must}`：{}", errors[0]);
+    }
+}
+
+#[test]
+fn same_owner_in_two_spellings_passes_the_reconciliation() {
+    let a = decl("model", "usage", 41, &["model.usage"]);
+    let b = decl("model", "spend", 42, &["model.spend"]);
+    let errors = check_view_owners(&[&a, &b], |name| match name {
+        "model.usage" | "model.spend" => Some("crates/symbio-plugin-model"),
+        _ => None,
+    });
+    assert!(
+        errors.is_empty(),
+        "同一 owner 的两种拼写不该被对账判红：{errors:?}"
+    );
+}
+
+#[test]
+fn an_empty_view_name_is_left_to_the_pure_validation() {
+    // 空名归 `EmptyViewName`（`validate` 已判）：对账跳过后不再报第二遍，
+    // 否则同一处错误会被数两次，两条判据的红条数对不上。
+    let a = decl("cost", "cost", 40, &[""]);
+    assert!(check_view_owners(&[&a], |_| None).is_empty());
+    assert_eq!(
+        validate(&[&a]),
+        vec![ReportError::EmptyViewName {
+            owner: "cost",
+            slot: "cost",
+            index: 0,
+        }]
+    );
+}

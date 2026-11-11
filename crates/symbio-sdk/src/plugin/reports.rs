@@ -24,6 +24,13 @@
 //! - 同一视图进两条报表——两处各算一遍，口径静默漂移；
 //! - `fleet` 显式写成空串——落点为空时写不进去，等于静默丢实例级读数。
 //!
+//! ## 还有一类：出口 owner 与折账 owner 对账（`D-465`）
+//!
+//! 上面四类只看登记表自己；[`check_view_owners`] 还要看**冻结声明表**——它判
+//! 「出这条列的人，是不是折这条账的人」。两处的输入不同（一张 inventory 表 vs 一张
+//! 冻结表），所以是两个函数而不是一个：`validate` 保持纯函数（单测直接构造夹具），
+//! 对账由唯一同时看得见两张表的地方调用——装配 [`crate::declarations::assemble_declarations`]。
+//!
 //! [`reports()`] 把非法登记作为 `Err` 交回调用方（与 [`crate::declarations::sealed_declarations`]
 //! 同一形状）：装载期由部署面报出，读侧由读数方决定降级还是失败。`Gap` 是内核声明 /
 //! 环的词汇，报表是出品装配面——不把错误类型塞回内核，也不拿 panic 替调用方做决定。
@@ -62,8 +69,9 @@ pub struct ReportDecl {
     ///
     /// 与 `ViewDecl` 的 owner **不同形**：那边是 crate 路径（`crates/symbio-plugin-X`），
     /// 因为 `declare(owner, …)` 收的是「交表方」的路径标识；这里是给人读的标签。
-    /// 两者今天**没有**任何校验把它们对起来——本字段只出现在错误信息里。这条缝是否要
-    /// 加固（归一后判「出口 owner == 折账 owner」）记在 `D-463`，尚未实现。
+    /// 两种拼写不统一（既成形状，不该为了判据搬家），对账靠归一：装配期
+    /// [`check_view_owners`] 把视图 owner 折成同一个短名（[`owner_short`]），再与这里
+    /// 逐条比对——出这条列的人必须就是折这条账的人（`D-465`，`D-463` 第三级）。
     pub owner: &'static str,
     /// `session/stats` 的顶层键；全局唯一，进 JSON 顶层就是出品契约（`SV-003`）。
     pub slot: &'static str,
@@ -225,6 +233,69 @@ pub fn validate(reports: &[&ReportDecl]) -> Vec<ReportError> {
     }
 
     errors
+}
+
+/// 交表方标识的**短名**：`crates/symbio-plugin-model` → `model`。
+///
+/// 两种拼写都留着（`D-465`）：`ViewDecl` 的 owner 是 `declare` 的入参，要能 grep 到目录；
+/// `ReportDecl.owner` 是给人读的标签，进错误信息。判据不该要求形状统一——那样会把
+/// 「对账」换成一次全仓改名，改完还是没人查。归一是一行 `strip_prefix`，比对才是判据。
+///
+/// `kernel`、以及任何不在 `crates/` 下的短名原样通过：它们本来就只有一种拼写。
+pub fn owner_short(owner: &str) -> &str {
+    let last = owner.rsplit('/').next().unwrap_or(owner);
+    last.strip_prefix("symbio-plugin-").unwrap_or(last)
+}
+
+/// 出口对账：**出这条列的人，必须就是折这条账的人**（`D-465`，`D-463` 第三级）。
+///
+/// ## 它补的是哪一格
+///
+/// [`validate`] 只看登记表自己，于是 `ReportDecl.owner` 此前只是错误信息里的一个词：
+/// A 插件把 B 插件的视图登记成自己的出口、视图搬走而报表没跟、视图名打错一个字母——
+/// 三种都过 `validate`，运行期读到的都是 `Null`，而 `Null` 在读侧本来就有合法含义
+/// （空账 / 这一轮没有），于是没有任何东西会红。
+///
+/// ## 为什么输入是「问名字」而不是冻结表
+///
+/// 判据只需要一个问题的答案：「这个名字的 owner 是谁」。把问题做成闭包，判据就留在
+/// `symbio-sdk`（报表词汇的家里）而不必认识 [`symbio_kernel::decl::Frozen`]；唯一的
+/// 生产调用点是装配期（`assemble_declarations`），那里同时握着两张表。
+///
+/// ## 空名不在这里判
+///
+/// `views` 里的空串归 [`ReportError::EmptyViewName`]（[`validate`] 已判）：这里跳过，
+/// 否则同一处错误报两遍，读侧的数会随判据数量变化。
+///
+/// ## 为什么交回的是人读的句子，不是 `ReportError`
+///
+/// `ReportError` 是**封闭取值面**（`CS-009` 按变体数守它）：每加一个变体，内核 / 契约
+/// 的公共数据面就宽一格。而这两条诊断**只有人读**——唯一的消费者是装配期的
+/// `assert!` 消息，没有任何一处会 `match` 它们的种类。为一条进日志的字符串加两个变体，
+/// 是拿契约面的宽度换一行文本；于是这里交 [`String`]，与 `D-462`「不设公共词表」同一条
+/// 纪律：**没有第二个消费者，就不给它造形状。**
+pub fn check_view_owners(
+    reports: &[&ReportDecl],
+    view_owner: impl Fn(&str) -> Option<&'static str>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for r in reports {
+        for view in r.views.iter().copied().filter(|v| !v.is_empty()) {
+            match view_owner(view) {
+                None => out.push(format!(
+                    "报表 `{}` 要读的视图 `{view}` 不在冻结声明表里（没有 owner 交这条 ViewDecl）",
+                    r.slot
+                )),
+                Some(owner) if owner_short(owner) != r.owner => out.push(format!(
+                    "报表 `{}` 署 `{}`，但它读的视图 `{view}` 由 `{owner}` 折——\
+                     出这条列的人必须就是折这条账的人",
+                    r.slot, r.owner
+                )),
+                Some(_) => {}
+            }
+        }
+    }
+    out
 }
 
 /// 按 `(order, slot)` 排序；`order` 相同按 `slot` 字典序（`slot` 全局唯一，不会退化

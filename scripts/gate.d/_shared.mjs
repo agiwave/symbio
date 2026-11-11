@@ -197,7 +197,10 @@ export const BASELINE = {
   // 1:1 改写；会话身份改由事实源打开时绑定（按实例分片）。非侵蚀。
   // baseline-allow rustTests: 2154 → 2147（D-438）——与上面 `ciRustTestsTotal` 同一批 7 条：
   // `adapters/mod.test.rs` 2 · `stubs.test.rs` 1 · `actors/mod.test.rs` 4（彩排真实执行形状）。
-  rustTests: 2147,
+  // baseline-allow rustTests: 2147 → 2152（D-465）——报表出口对账新增 5 条用例
+  // （`owner_short` 归一一条、署错 owner / 视图查无此人 / 同一 owner 两种拼写 / 空名归
+  // 纯判据各一条），全部落在 `sdk/plugin/reports.test.rs`。不是覆盖变更，是新判据。
+  rustTests: 2152,
   kernelRustTests: 131,
 
   // baseline-allow ciRustTestsTotal: 同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
@@ -406,7 +409,9 @@ export const BASELINE = {
   // `TokenIssuer` 的 ZST 形状）、`stubs.test.rs` 的桩确定性一条、`actors/mod.test.rs`
   // 的四条「彩排真实执行形状」（桩 → 适配器 → 兜底 / 预算）。闭环本身由 e2e 的
   // `mock-llm` 承担，不影响覆盖；非侵蚀。
-  ciRustTestsTotal: 2228,
+  // baseline-allow ciRustTestsTotal: 2228 → 2233（D-465）——同一批 5 条在 CI 口径下
+  // 折算（`--workspace` 求和含 sdk lib 目标），逐条归属见上方 `rustTests` 的注。非侵蚀。
+  ciRustTestsTotal: 2233,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

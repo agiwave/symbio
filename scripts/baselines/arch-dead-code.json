@@ -56,12 +56,6 @@
       "evidence": "docs/003-design/014-单环一表.md"
     },
     {
-      "symbol": "view_owner",
-      "path": "crates/symbio-kernel/src/decl/mod.rs",
-      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
-      "evidence": "docs/003-design/014-单环一表.md"
-    },
-    {
       "symbol": "port_of",
       "path": "crates/symbio-kernel/src/decl/ring.rs",
       "why": "查询口：按名取一行端口声明（`None` = 漏声明，不是默认值）。本仓生产面当前未直调——装配判据只问「登记过没有」（`ports().iter().any(...)`），取声明的是执行侧的端口实现（D-434）",

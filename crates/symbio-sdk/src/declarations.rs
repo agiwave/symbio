@@ -87,7 +87,39 @@ pub fn assemble_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
     // （各插件 `PLUGIN.yml` 的 `principal_*` 行），因此在子集装配里同样成立——注册表
     // 不随链接了哪些插件变化。
     assert_owners_registered(&frozen);
+    // D-465：出口 owner 与折账 owner 对账。放在这里是因为**只有这里同时握着两张表**
+    // ——报表登记（inventory）与冻结声明表（本函数的产物）。
+    assert_report_owners(&frozen);
     Ok(frozen)
+}
+
+/// 装配期的出口对账（`D-465`，`D-463` 第三级）：出这条列的人必须就是折这条账的人。
+///
+/// ## 为什么是断言，不是一条 `Gap`
+///
+/// 与 [`assert_owners_registered`] 同一条纪律：`Gap` 是内核声明 / 环的词汇，报表是
+/// 出品装配面（见 [`crate::plugin::reports`] 的模块文档）；把一个报表词汇塞进 `Gap`
+/// 会让内核认识「slot」。而这条错误也不该降级——`ReportDecl.owner` 是**承诺**，
+/// 承诺不成立时这列读数没有 owner，「谁对这条口径负责」就没人能答。
+///
+/// ## 为什么不会在子集装配里假红
+///
+/// 两边都是 `inventory` 的链接事实：报表与它的视图在同一个插件 crate 里提交，
+/// 链接到其中一个就同时链接到另一个。缺视图只可能是**真的缺**（视图搬走了 / 名字打错），
+/// 那正是这条判据要拦的形状。
+fn assert_report_owners(frozen: &Frozen) {
+    let reports = match crate::plugin::reports::reports() {
+        Ok(reports) => reports,
+        // 登记本身不合法（`slot` 撞车等）由 `reports()` 交回同一个 `Err`，读侧会逐条
+        // 出声；这里不替它判第二遍——两处报同一个错会让「哪条判据红了」变得不可数。
+        Err(_) => return,
+    };
+    let errors = crate::plugin::reports::check_view_owners(reports, |name| frozen.view_owner(name));
+    assert!(
+        errors.is_empty(),
+        "报表出口对账失败（D-465）：{}",
+        errors.join("；")
+    );
 }
 
 /// 装配期的归属校验（D-339）：`@principal` 之外，owner 必须能在主体注册表里查到。

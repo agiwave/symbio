@@ -646,7 +646,9 @@ impl Frozen {
     }
 
     /// 这一条视图归谁。口径同 [`Frozen::fact_owner`]。
-    #[cfg_attr(not(test), allow(dead_code))]
+    ///
+    /// 生产消费者是装配期的报表出口对账（`D-465`）：`ReportDecl.owner` 是短名，
+    /// 这里出的值是交表方的标识，两边由 `reports::owner_short` 归一再比。
     pub fn view_owner(&self, name: &str) -> Option<&'static str> {
         self.view_owners.get(name).copied()
     }
