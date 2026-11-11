@@ -58,7 +58,12 @@ pub struct ReportCtx<'a> {
 /// 全仓只出现一次——`SV-001` 守的就是「名字不许在两个插件 crate 各写一份」。
 #[derive(Debug, Clone, Copy)]
 pub struct ReportDecl {
-    /// 拥有这条报表的插件名（与 `ViewDecl` 的 owner 同源）。
+    /// 拥有这条报表的插件**短名**（与目录名同形，如 `cost` / `model`）。
+    ///
+    /// 与 `ViewDecl` 的 owner **不同形**：那边是 crate 路径（`crates/symbio-plugin-X`），
+    /// 因为 `declare(owner, …)` 收的是「交表方」的路径标识；这里是给人读的标签。
+    /// 两者今天**没有**任何校验把它们对起来——本字段只出现在错误信息里。这条缝是否要
+    /// 加固（归一后判「出口 owner == 折账 owner」）记在 `D-463`，尚未实现。
     pub owner: &'static str,
     /// `session/stats` 的顶层键；全局唯一，进 JSON 顶层就是出品契约（`SV-003`）。
     pub slot: &'static str,
