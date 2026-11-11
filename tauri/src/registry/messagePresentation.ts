@@ -208,7 +208,8 @@ const TYPE_PRESENTATION: Record<NodeKind, TypePresentation> = {
   },
 
   // 容器：一整轮与一次工具调用结构同构——一个可折叠头部 + 一条子流。
-  // 工具名 / 图标由后端 title/icon 给出；参数住骨架自身 content（SkeletonNode 当首条正文渲染）。
+  // 工具名 / 图标由后端 title/icon 给出；容器自身正文（请求参数）由分派器提升为
+  // 一条「请求」body 子节点（见 `messageRouting.requestViewOf`），与返回子节点同构。
   [NODE_KIND_SKELETON]: {
     // 根级骨架用 AI，子会话过程段用 ↳
     icon: (f) => (f.subSession ? '↳' : 'AI'),
@@ -225,9 +226,11 @@ const TYPE_PRESENTATION: Record<NodeKind, TypePresentation> = {
       if (isStreamingStatus(f.status)) return '运行中'
       return ''
     },
-    // 骨架默认展开（整轮 = 对话主体；工具与整轮同构）。待审批 / 用户消息等跨类型
-    // 例外由 `messageDefaultOpen` 先行处理，深层级收起由 `effectiveOpenOf` 兜底。
-    defaultOpen: () => true,
+    // 容器**默认单行折叠**（对齐行业智能体会话流：过程是折叠的，结论是直排的）。
+    // 折叠态由头部承担全部信号：运行中 = 标签 + 已用秒数；收起态摘要 = 首个
+    // 正文子节点或自身正文。跨类型例外（待审批 / 可恢复失败）由
+    // `messageDefaultOpen` 先行处理；深层级收起由 `effectiveOpenOf` 兜底。
+    defaultOpen: () => false,
   },
 
   // 待用户回应：提问 / 工具确认（子形态由 meta.prompt.kind 判别，标题据此）
@@ -376,10 +379,11 @@ export function messageIsRunningAction(f: MessageFacets): boolean {
  *
  * 只有**正文**流式时才显示：思考有「思考中…」标题、工具有「运行中」标签、
  * 压缩有「压缩中」标签，各自已经给出信号（`ownRunningSignal`）；
- * 再挂一个「回复中…」是重复噪音。
+ * 再挂一个「回复中…」是重复噪音。合成「请求」视图同理——它的在途信号由
+ * 宿容器的「运行中」标签承担（二者是同一次调用的两半），不再叠一层小字。
  */
 export function messageShowsLiveBadge(f: MessageFacets): boolean {
-  return isStreamingStatus(f.status) && !presentationOf(f.type).ownRunningSignal
+  return isStreamingStatus(f.status) && !presentationOf(f.type).ownRunningSignal && !f.toolRequest
 }
 
 // ==================== 折叠策略 ====================
@@ -414,24 +418,33 @@ export function messagePreviewFollowsLiveEdge(f: MessageFacets): boolean {
 /**
  * 折叠默认态（对齐行业智能体会话流）。
  *
- * - 待审批 / 用户消息 → 展开（用户需要看到并操作）
- * - 工具调用 → **始终单行**；例外：内含待审批子节点（否则审批入口被折叠隐藏）、
- *   或可恢复失败（会话因该失败暂停，需要操作入口）
+ * **折叠策略是纯前端机制，与后端无关**：后端不下发任何折叠字段，策略只住在
+ * 这张表与下面这条纯函数里；用户手动点击后的覆盖态存于组件本地交互态。
+ *
+ * - 待审批（自身或直接子节点）/ 可恢复失败 / 用户消息 → 展开（用户需要看到并操作）
+ * - **合成请求视图** → 始终单行（与工具返回同一风格：展开才见详细参数）
+ * - **容器（骨架）→ 始终单行**；待审批 / 可恢复失败是仅有的两个例外
+ *   （否则审批入口 / 重试入口被折叠隐藏）
  * - 思考 → **始终单行**（流式中 = 「思考中…」动效，完成后 = 单行摘要）
  * - 正文 → 助手展开；工具结果 / 子智能体内部文本收起
  * - 其余（提问 / 压缩）→ 展开
  *
- * 前两条是**跨类型**规则（任何类型的待审批 / 用户消息都展开），写在下面；
- * 其余逐类型的策略在 `TYPE_PRESENTATION.defaultOpen` 里自持。
- *
- * 用户手动点击后以 `userToggled` 为准（该状态在组件里，不在本函数）。
+ * 跨类型规则（前四条）写在下面；其余逐类型的策略在 `TYPE_PRESENTATION.defaultOpen`
+ * 里自持。用户手动点击后以 `userToggled` 为准（该状态在组件里，不在本函数）。
  */
 export function messageDefaultOpen(f: MessageFacets): boolean {
   // 压缩记忆：默认**收起**。它是可以很长的一段摘要，展开会盖过对话本体；
   // 折叠态的标题（「历史记忆」）已经把它交待清楚了。这条必须排在角色规则之前
   // ——它的 `role` 是 user（见 `MessageFacets.compacted`）。
   if (f.compacted) return false
+  // 合成「请求」视图：与「响应」同一风格——单行折叠，展开才见详细参数。
+  // 必须排在状态规则之前：宿主等待确认时请求视图继承 waiting 状态，不该被撑开。
+  if (f.toolRequest) return false
   if (isWaitingStatus(f.status)) return true
+  // 容器内含待审批子节点：审批入口不能被折叠隐藏（容器的展开例外之一）。
+  if (f.hasWaitingChild) return true
+  // 可恢复失败：会话因该失败暂停，用户需要就地看到原因与重试入口。
+  if (f.recoverable) return true
   if (f.role === CHAT_ROLE_USER) return true
   return presentationOf(f.type).defaultOpen(f)
 }

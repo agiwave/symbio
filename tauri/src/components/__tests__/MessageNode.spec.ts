@@ -47,14 +47,17 @@ function mountNode(node: ChatNode, extraProps: Record<string, unknown> = {}) {
 }
 
 describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
-  it('形态①：无子节点且流式中 → 等待骨架 +「运行中」标签', () => {
+  it('形态①：无子节点且流式中 → 默认单行折叠（头部「运行中」标签），展开才是等待骨架', async () => {
     const w = mountNode(msg({ id: 't1', type: 'skeleton', status: 'streaming', children: [] }))
+    // 默认折叠：头部就是全部信号（运行中标签），等待脉动藏在其下
+    expect(w.find('.node-head').attributes('aria-expanded')).toBe('false')
+    expect(w.find('.node-tag.run').text()).toContain('运行中')
+    await w.find('.node-head').trigger('click')
     expect(w.find('.skeleton-pending').exists()).toBe(true)
     expect(w.text()).toContain('正在思考')
-    expect(w.find('.node-tag.run').text()).toContain('运行中')
   })
 
-  it('形态②：子节点出现 → 等待骨架消失，折叠叶与正文作为子流直排', () => {
+  it('形态②：子节点出现 → 展开后等待骨架消失，折叠叶与正文作为子流直排', async () => {
     const w = mountNode(
       msg({
         id: 't1',
@@ -66,6 +69,7 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
         ],
       }),
     )
+    await w.find('.node-head').trigger('click')
     expect(w.find('.skeleton-pending').exists()).toBe(false)
     // 折叠叶与正文各是一格（分派钩子即 NodeKind 五值）
     expect(w.findAll('.type-notice').length).toBe(1)
@@ -73,7 +77,7 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
     expect(w.text()).toContain('你好世界')
   })
 
-  it('形态③：失败 → 交代条 + 重试（发射骨架 id，供 retry_subtree）', async () => {
+  it('形态③：失败 → 展开后交代条 + 重试（发射骨架 id，供 retry_subtree）', async () => {
     const w = mountNode(
       msg({
         id: 't1',
@@ -83,6 +87,7 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
         children: [msg({ id: 'x1', type: 'body', status: 'failed', content: '', error: '请求失败', parent_id: 't1' })],
       }),
     )
+    await w.find('.node-head').trigger('click')
     // 骨架级错误条存在且携带错误文本；叶子级错误由父失败抑制（不重复报错）
     const boxes = w.findAll('.error-box')
     expect(boxes.length).toBe(1)
@@ -91,8 +96,9 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
     expect(w.emitted('retry')?.[0]).toEqual(['t1'])
   })
 
-  it('形态③变体：失败且无子节点 → 交代条而非等待骨架（请求即败场景）', () => {
+  it('形态③变体：失败且无子节点 → 展开后交代条而非等待骨架（请求即败场景）', async () => {
     const w = mountNode(msg({ id: 't1', type: 'skeleton', status: 'failed', error: 'bad', children: [] }))
+    await w.find('.node-head').trigger('click')
     expect(w.find('.skeleton-pending').exists()).toBe(false)
     expect(w.find('.error-box').exists()).toBe(true)
   })
@@ -106,6 +112,7 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
         children: [msg({ id: 'x1', type: 'body', content: '半截', parent_id: 't1' })],
       }),
     )
+    await w.find('.node-head').trigger('click')
     const boxes = w.findAll('.error-box')
     expect(boxes.length, '中止必须有交代，否则这一轮看起来像正常结束').toBe(1)
     expect(boxes[0].text()).toContain('已中止')
@@ -115,7 +122,7 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
     expect(w.emitted('retry')?.[0]).toEqual(['t1'])
   })
 
-  it('已完成 → 既无交代条也无重试（正常结束不该有多余角标）', () => {
+  it('已完成 → 展开后既无交代条也无重试（正常结束不该有多余角标）', async () => {
     const w = mountNode(
       msg({
         id: 't1',
@@ -124,6 +131,7 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
         children: [msg({ id: 'x1', type: 'body', content: '完整', parent_id: 't1' })],
       }),
     )
+    await w.find('.node-head').trigger('click')
     expect(w.findAll('.error-box').length).toBe(0)
     expect(w.findAll('button.retry').length).toBe(0)
   })
@@ -149,8 +157,8 @@ describe('MessageNode：折叠叶（notice）始终单行', () => {
   })
 })
 
-describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正文）', () => {
-  it('运行中：单行「运行中」标签 + 动效点；有 started_at 才给时长', () => {
+describe('MessageNode：工具子骨架（skeleton 容器，自身正文提升为「请求」视图）', () => {
+  it('运行中：默认单行「运行中」标签 + 动效点；有 started_at 才给时长；展开后参数是「请求」视图', async () => {
     const { nowMs } = useRunningClock()
     const w = mountNode(
       msg({
@@ -168,10 +176,21 @@ describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正�
     expect(tag.find('.tag-dots').exists()).toBe(true)
     expect(tag.text()).toContain('运行中')
     expect(w.find('.tag-elapsed').text()).toBe('47s')
-    // 已有参数正文 → 不作空壳等待脉动：参数作首条正文（`pre.json.req`）直显，
-    // 「等待骨架」只属于「什么都没到」的骨架（否则运行中参数被脉动盖掉，观感=跑完才显示）。
+    // 默认折叠；展开后不作空壳等待脉动——自身正文已提升为「请求」视图子节点
+    expect(w.find('.node-head').attributes('aria-expanded')).toBe('false')
+    await w.find('.node-head').trigger('click')
     expect(w.find('.skeleton-pending').exists()).toBe(false)
-    expect(w.find('pre.json.req').text()).toContain('"cmd":"ls"')
+    const reqRow = w.find('.msg.type-body')
+    expect(reqRow.exists()).toBe(true)
+    expect(reqRow.find('.node-title').text()).toBe('请求')
+    // 请求视图默认也是单行：再展开它才见参数 JSON（与响应同一套折叠机制）
+    expect(reqRow.find('.node-head').attributes('aria-expanded')).toBe('false')
+    await reqRow.find('.node-head').trigger('click')
+    const pre = w.find('pre.json.req')
+    expect(pre.exists()).toBe(true)
+    // 高亮器把 JSON pretty-print 后逐 token 上色
+    expect(pre.text()).toContain('"cmd"')
+    expect(pre.text()).toContain('"ls"')
   })
 
   it('无 started_at（旧数据）→ 不显示时长，也不编一个数', () => {
@@ -195,7 +214,7 @@ describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正�
     expect(done.find('.node-tag').exists()).toBe(false)
   })
 
-  it('参数住在骨架自身 content → 收起首条正文渲染成 JSON 代码块（带请求强调边）', () => {
+  it('容器自身 content（请求参数）提升为「请求」视图：默认单行，展开才见 JSON（带请求强调边）', async () => {
     const w = mountNode(
       msg({
         id: 'tc1',
@@ -206,13 +225,22 @@ describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正�
         children: [],
       }),
     )
-    const pre = w.find('pre.json')
+    // 容器默认折叠
+    expect(w.find('.node-head').attributes('aria-expanded')).toBe('false')
+    await w.find('.node-head').trigger('click')
+    const reqRow = w.find('.msg.type-body')
+    expect(reqRow.find('.node-title').text()).toBe('请求')
+    // 请求视图默认单行；展开才是高亮 JSON 代码块
+    expect(reqRow.find('.node-head').attributes('aria-expanded')).toBe('false')
+    await reqRow.find('.node-head').trigger('click')
+    const pre = w.find('pre.json.req')
     expect(pre.exists()).toBe(true)
     expect(pre.classes()).toContain('req')
-    expect(pre.text()).toContain('"cmd":"ls"')
+    expect(pre.text()).toContain('"cmd"')
+    expect(pre.text()).toContain('"ls"')
   })
 
-  it('工具结果是 role=tool 的正文子节点，随子流递归渲染', () => {
+  it('工具结果是 role=tool 的正文子节点，随子流递归渲染（与「请求」视图同列，请求排最前）', async () => {
     const w = mountNode(
       msg({
         id: 'tc1',
@@ -223,9 +251,11 @@ describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正�
         children: [msg({ id: 'res1', type: 'body', principal: AS_TOOL, status: 'completed', content: '"ok"', parent_id: 'tc1' })],
       }),
     )
+    await w.find('.node-head').trigger('click')
     expect(w.find('.skeleton-pending').exists()).toBe(false)
-    // 结果子节点是工具一族的 body：分派钩子只会出现五值
-    expect(w.findAll('.type-body').length).toBeGreaterThan(0)
+    // 请求视图 + 结果子节点都在子流里：分派钩子只会出现五值
+    expect(w.findAll('.type-body').length).toBe(2)
+    expect(w.text()).toContain('请求')
     expect(w.text()).toContain('"ok"')
   })
 
@@ -472,7 +502,7 @@ describe('MessageNode：结构轴递归（生产形状 = 用户 body 节点当�
     expect(w.find('.node-subtree .markdown-body').text()).toContain('回答')
   })
 
-  it('工具链全可见：工具卡 + 结果 + 收尾正文；层级只由 depth 表达', () => {
+  it('工具链全可见：工具卡默认单行，展开后请求视图 + 结果 + 收尾正文同现；层级只由 depth 表达', async () => {
     const w = mountNode(
       turnRoot([
         msg({
@@ -489,12 +519,17 @@ describe('MessageNode：结构轴递归（生产形状 = 用户 body 节点当�
       ]),
     )
     expect(w.find('.type-skeleton').exists()).toBe(true)
+    // 工具卡默认单行折叠；收起态摘要是结果子节点内容，请求要展开才见
+    expect(w.text()).not.toContain('"path":"a.txt"')
+    // heads：[0] = 用户根，[1] = 工具卡
+    await w.findAll('.node-head')[1].trigger('click')
+    // 展开后：请求视图（收起态单行摘要即参数）与结果同现，收尾正文一直都在
     expect(w.text()).toContain('"path":"a.txt"')
     expect(w.text()).toContain('文件内容')
     expect(w.text()).toContain('读完了。')
-    // depth1 与根左缘齐平；depth2 才缩进 + 引导竖线
+    // depth1 与根左缘齐平；depth2 才缩进 + 引导竖线（请求视图与结果都在 depth2）
     expect(w.find('.type-skeleton').classes()).not.toContain('nested')
-    expect(w.findAll('.msg.nested')).toHaveLength(1)
+    expect(w.findAll('.msg.nested')).toHaveLength(2)
   })
 
   it('递归与形态无关：notice 当根带子，子流照样渲染', () => {
@@ -516,7 +551,7 @@ describe('MessageNode：结构轴递归（生产形状 = 用户 body 节点当�
     expect(w.text()).toContain('回答还在')
   })
 
-  it('收起工具卡则藏住它的结果（骨架把子流放在折叠体内）', async () => {
+  it('工具卡默认单行：收起态藏住「请求」与结果；展开即现，再收起再藏', async () => {
     const w = mountNode(
       turnRoot([
         msg({
@@ -531,11 +566,16 @@ describe('MessageNode：结构轴递归（生产形状 = 用户 body 节点当�
         }),
       ]),
     )
+    const heads = () => w.findAll('.node-head')
+    // 0 = 用户根，1 = 工具卡：默认已是折叠态，请求与结果都在 DOM 之外
+    expect(heads()[1].attributes('aria-expanded')).toBe('false')
+    expect(w.find('.type-skeleton .msg').exists()).toBe(false)
+    // 展开 → 请求视图与结果整棵子流出现
+    await heads()[1].trigger('click')
     expect(w.find('.type-skeleton .msg').exists()).toBe(true)
-    // 0 = 用户根，1 = 工具卡
-    await w.findAll('.node-head')[1].trigger('click')
-    expect(w.find('.type-skeleton .node-body').exists()).toBe(false)
-    // 子流整棵从 DOM 摘掉（收起态只在头部留一行摘要）
+    expect(w.text()).toContain('结果正文')
+    // 再收起 → 子流整棵从 DOM 摘掉（收起态只在头部留一行摘要）
+    await heads()[1].trigger('click')
     expect(w.find('.type-skeleton .msg').exists()).toBe(false)
   })
 
@@ -646,11 +686,12 @@ describe('MessageNode：已折叠释放的骨架（[] 惰性重取 · 判据 4�
     })
   }
 
-  it('已释放 → 折叠释放摘要 chip：多少条 / 什么类型 / 还在跑几个', () => {
+  it('已释放 → 展开后折叠释放摘要 chip：多少条 / 什么类型 / 还在跑几个', async () => {
     const w = mountLazy(
       noResultSkeleton(),
       lazyStub({ isReleased: true, summary: { count: 3, byType: { body: 2, skeleton: 1 }, running: 1 } }),
     )
+    await w.find('.node-head').trigger('click')
     const chip = w.find('.skeleton-released')
     expect(chip.exists()).toBe(true)
     expect(chip.text()).toContain('已折叠释放 3 项')
@@ -660,16 +701,18 @@ describe('MessageNode：已折叠释放的骨架（[] 惰性重取 · 判据 4�
     expect(chip.text()).toContain('还在跑 1 个')
   })
 
-  it('已释放 ⇒ 抑制「无响应兜底」（子节点是被本地摘掉的，不是「这次没跑」）', () => {
+  it('已释放 ⇒ 展开后抑制「无响应兜底」（子节点是被本地摘掉的，不是「这次没跑」）', async () => {
     const w = mountLazy(
       noResultSkeleton(),
       lazyStub({ isReleased: true, summary: { count: 1, byType: { body: 1 }, running: 0 } }),
     )
+    await w.find('.node-head').trigger('click')
     expect(w.find('.skeleton-missing').exists()).toBe(false)
   })
 
-  it('对照：未释放 ⇒ 兜底照出（「未执行」自述），且不出现释放 chip', () => {
+  it('对照：未释放 ⇒ 展开后兜底照出（「未执行」自述），且不出现释放 chip', async () => {
     const w = mountLazy(noResultSkeleton(), lazyStub())
+    await w.find('.node-head').trigger('click')
     expect(w.find('.skeleton-missing').exists()).toBe(true)
     expect(w.find('.skeleton-missing').text()).toContain('未执行')
     expect(w.find('.skeleton-released').exists()).toBe(false)
@@ -681,17 +724,18 @@ describe('MessageNode：已折叠释放的骨架（[] 惰性重取 · 判据 4�
     expect(w.find('.skeleton-missing').exists()).toBe(false)
   })
 
-  it('折叠态变化经注入面转发（收起 ⇒ onCollapse(mid, false)，供释放记账）', async () => {
+  it('折叠态变化经注入面转发（骨架默认折叠，首次点击是展开 ⇒ onCollapse(mid, true)）', async () => {
     const lazy = lazyStub({ isReleased: true, summary: { count: 2, byType: { body: 2 }, running: 0 } })
     const w = mountLazy(noResultSkeleton(), lazy)
-    // 骨架默认展开（整轮 = 对话主体）；点头收起 ⇒ 折叠态变化要送到惰性重取面
+    // 骨架默认单行折叠；点开 ⇒ 折叠态变化要送到惰性重取面（按需重取）
     await w.find('.node-head').trigger('click')
-    expect(lazy.onCollapse).toHaveBeenCalledWith('skel', false)
+    expect(lazy.onCollapse).toHaveBeenCalledWith('skel', true)
   })
 
-  it('缺注入面（单测直挂 / 旧面板）⇒ 界面照常：无 chip、无兜底抑制、折叠不炸', () => {
+  it('缺注入面（单测直挂 / 旧面板）⇒ 界面照常：无 chip、无兜底抑制、折叠不炸', async () => {
     const w = mountNode(noResultSkeleton())
     // 无 SKELETON_LAZY_KEY：isReleased 恒 false ⇒ 走未释放路径（兜底照出）
+    await w.find('.node-head').trigger('click')
     expect(w.find('.skeleton-missing').exists()).toBe(true)
     expect(w.find('.skeleton-released').exists()).toBe(false)
   })

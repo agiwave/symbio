@@ -4,23 +4,24 @@
   **一次工具调用**与**一段子过程**在这一格里结构同构：一个可折叠头部 + 一条子流。
   前端对它们渲染完全一样，不认 `turn` / `tool` 这些业务名。
   两者的差别全是**数据**：标题 / 图标 / 可用动作由后端在交互面填进 `title` / `icon` /
-  `actions`，本组件照数据显示；工具参数就住在骨架自身的 `content` 里，容器把它当
-  **首条正文**渲染（数据驱动，不为「工具」写特例）。
+  `actions`，本组件照数据显示。容器自身正文（典型是工具调用的请求参数）由分派器
+  提升为一条「请求」body 子节点（`requestViewOf`），与返回子节点同一套机制渲染——
+  本组件不为它写任何特例。
 
   折叠体（自上而下，各段**只在有内容时出现**）：
-  1. **等待骨架**：仍在 streaming、且没有任何真实子节点 → 三点脉动 +「正在思考…」；
-  2. **首条正文**：自身 `content` 非空（典型是工具参数 JSON）→ 高亮代码块；
-  3. **子流**：分派器经 `subtree` 插槽交来（[D-423]：递归判据 = 有无子，与形态无关）——
-     助手正文 / 思考折叠叶 / 工具返回 / 子过程段都从这里长出去，深一层仍是同一个
-     SkeletonNode（分形复用）。本组件只决定**落点在折叠体内**；
-  4. **无响应兜底**：父骨架自述「这次没跑」却没有任何子节点时把话讲明白（历史数据用；
+  1. **等待骨架**：仍在 streaming、且没有任何可见子流（`childStreamOf`，含自身正文
+     提升出的「请求」视图）→ 三点脉动 +「正在思考…」；
+  2. **子流**：分派器经 `subtree` 插槽交来（[D-423]：递归判据 = 有无子，与形态无关）——
+     「请求」视图 / 助手正文 / 思考折叠叶 / 工具返回 / 子过程段都从这里长出去，
+     深一层仍是同一个 SkeletonNode（分形复用）。本组件只决定**落点在折叠体内**；
+  3. **无响应兜底**：父骨架自述「这次没跑」却没有任何真实子节点时把话讲明白（历史数据用；
      **已释放态不出这条**——子节点是被本地摘掉的，不是「这次没跑」）；
-  5. **折叠释放摘要**（[] 惰性重取）：后代已本地释放 ⇒ 一行 chip（多少条 / 什么类型 /
+  4. **折叠释放摘要**（[] 惰性重取）：后代已本地释放 ⇒ 一行 chip（多少条 / 什么类型 /
      还在跑几个），展开时经 `expand_skeleton` 按需重取（折叠态变化经 `NodeShell` 的
      `@collapse` 转给注入面，实现住 `useChatConnection`）；
-  6. **交代条**：失败 / 中止 → `MessageErrorBox` + 重试（动词由后端 `actions` 决定，
+  5. **交代条**：失败 / 中止 → `MessageErrorBox` + 重试（动词由后端 `actions` 决定，
      经 `messageRetryTargetOf` 在面板侧分派，本组件只发 `retry` 事件）；
-  7. **补充参数**：`actions` 含 `supply` 时给一个就地补参数重跑的表单（纯数据判据）。
+  6. **补充参数**：`actions` 含 `supply` 时给一个就地补参数重跑的表单（纯数据判据）。
 
   层级只靠「缩进 + 左侧引导竖线」表达（见 `NodeShell.nested`），纵向间隔全由 `--msg-gap` 驱动。
 -->
@@ -35,14 +36,11 @@
     @collapse="onCollapse"
   >
     <div class="skeleton-body">
-      <!-- ① 等待骨架：streaming 且无真实子（合成的 typing 占位不算真实子） -->
+      <!-- ① 等待骨架：streaming 且无任何可见子流（合成的 typing 占位 / 请求视图都不算真实子） -->
       <SkeletonPending v-if="isPending" :text="`${agentName} 正在思考…`" />
 
-      <!-- ② 首条正文：骨架自身的 content（工具参数 JSON）——有则显示，无（整轮）则跳过 -->
-      <pre v-else-if="hasSelfContent" class="json req">{{ selfText }}</pre>
-
-      <!-- ③ 子流：分派器按「有无子」交来（[D-423]），本组件只决定落点——
-           放在折叠体内，因此收起工具卡会一并藏住它的结果。 -->
+      <!-- ② 子流：分派器按「有无可见子」交来（[D-423]），本组件只决定落点——
+           放在折叠体内，因此收起容器会一并藏住「请求」视图与它的结果。 -->
       <slot name="subtree" />
 
       <!-- ④ 无响应兜底：历史数据 / 不守不变量的写入方。
@@ -100,6 +98,7 @@ import { useMessageContent } from '@/composables/useMessageContent'
 import {
   agentNameOf,
   canSupplyToolArgs,
+  childStreamOf,
   isAbortedStatus,
   isStreamingStatus,
   messageParentSessionId,
@@ -170,24 +169,23 @@ const isAborted = computed(() => isAbortedStatus(props.facets.status))
 /** 需要向用户交代的非正常终态（失败 / 中止） */
 const isUnsettled = computed(() => isUnsettledNodeStatus(props.facets.status))
 
-const { text: selfText, errorText } = useMessageContent(
+const { errorText } = useMessageContent(
   () => props.node,
   () => props.facets,
 )
-/** 首条正文：骨架自身 content 非空（典型 = 工具参数 JSON）；整轮容器 content 为空 → 跳过 */
-const hasSelfContent = computed(() => selfText.value.trim().length > 0)
 
 /**
- * 等待态：streaming、既无真实子、自身也无正文 —— 才是「在等第一个 token」。
- *
- * 工具骨架的参数住在**自身 content**（首条正文），一到就该显示，不能被等待脉动盖掉——
- * 否则「运行中参数必须可见」这条会在结果子节点到达前失效（观感 = 「跑完才显示」）。
+ * 等待态：streaming 且**无任何可见子流**（`childStreamOf` = 真实子 + 自身正文
+ * 提升出的「请求」视图，与分派器的子流来源同一份判据）——才是「在等第一个节点」。
+ * 容器自身正文一到，请求视图立即顶掉等待脉动（否则「运行中参数必须可见」这条
+ * 会在结果子节点到达前失效，观感 = 「跑完才显示」）。
  */
 const isPending = computed(
-  () => isStreamingStatus(props.facets.status) && realChildren.value.length === 0 && !hasSelfContent.value,
+  () => isStreamingStatus(props.facets.status) && childStreamOf(props.node).length === 0,
 )
 
-/** 「有请求、无响应」的兜底（只在真的没有子节点时给；判定在 registry，本组件只画） */
+/** 「有请求、无响应」的兜底只看**真实子**（后端落地的子节点）：
+ *  请求视图是派生节点，不能让它把「这次没跑」的交代顶掉。 */
 const missingResultNote = computed<string | null>(() =>
   realChildren.value.length ? null : missingResultNoteOf(props.node),
 )

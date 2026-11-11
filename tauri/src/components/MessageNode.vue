@@ -42,7 +42,8 @@
   ## 设计要点（详见各渲染器文件头）
 
   - **容器骨架**（`skeleton`）：可折叠头部 + 一条子流；一次工具调用与子过程段同构，
-    工具参数（骨架自身 content）当首条正文渲染，等待态挂三点脉动骨架；
+    容器自身正文由分派器提升为「请求」视图子节点（与返回子节点同构），等待态挂
+    三点脉动骨架；
   - **统一折叠式节点**：可点击头部（图标 + 标题 + 状态标签）+ 折叠体，折叠策略集中
     在 `registry/messageTypes.messageDefaultOpen`；
   - **失败重试的动词**由后端下发的 `actions` 决定（`messageRetryTargetOf`）：
@@ -85,9 +86,9 @@ import type { ChatNode } from '@/schemas/chat_node'
 // 分派器因此**不需要知道任何具体组件**（新增渲染器不必改这里）。
 import '@/registry/messageRenderers'
 import {
+  childStreamOf,
   facetsOf,
   isFailedStatus,
-  renderableChildrenOf,
   resolveMessageRenderer,
   type MessageFacets,
 } from '@/registry/messageTypes'
@@ -113,7 +114,8 @@ const emit = defineEmits<{
 /** 呈现判定入参：**唯一**的「props → facets」实现，个体渲染器直接消费它 */
 const facets = computed<MessageFacets>(() => facetsOf(props.node, props.hasParent))
 const renderer = computed(() => resolveMessageRenderer(facets.value))
-const childNodes = computed(() => renderableChildrenOf(props.node))
+/** 子流：`childStreamOf` = 真实子 + 容器自身正文提升出的「请求」视图（唯一来源） */
+const childNodes = computed(() => childStreamOf(props.node))
 /** 有子才登记 `subtree` 插槽（空槽同样会被外壳当成「有子流」） */
 const subtreeSlots = computed(() => (childNodes.value.length ? ['subtree'] : []))
 const isFailed = computed(() => isFailedStatus(facets.value.status))

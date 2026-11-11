@@ -326,7 +326,10 @@ export function facetsOf(node: ChatNode, hasParent = false): MessageFacets {
     compacted: messageIsCompacted(node),
     // 容器的**助手正文**子节点：内联直排（无折叠头部）。排除 tool 角色——那是工具返回
     // （有「↩ 响应」头部），不是本轮正文；两者形态都是 body 挂在容器下，靠 role 分辨。
-    responseText: hasParent && type === NODE_KIND_BODY && role !== CHAT_ROLE_TOOL,
+    // 再排除合成「请求」视图——它也有自己的行头（「📤 请求」），按单行折叠呈现，
+    // 与响应同一风格，不走直排。
+    responseText:
+      hasParent && type === NODE_KIND_BODY && role !== CHAT_ROLE_TOOL && !messageIsToolRequest(node),
   }
 }
 

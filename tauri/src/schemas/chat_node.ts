@@ -176,8 +176,9 @@ export const NODE_KIND_NOTICE = 'notice'
  * 容器（一个骨架挂一条子流）。
  *
  * `run`（一整轮）与 `tool`（一次工具调用）与 `sub_agent` 全在这一格——结构同构，
- * 前端一律递归 `children`，不认 tool/turn。工具参数就住在骨架自身的 `content` 里，
- * 容器把它当作首条正文渲染（数据驱动，不为「工具」写特例）。
+ * 前端一律递归 `children`，不认 tool/turn。容器自身正文（典型是工具调用的请求参数）
+ * 住在骨架自身的 `content` 里，由前端在**渲染期**提升为一条「请求」body 子节点
+ * （`registry/messageRouting.requestViewOf`，不落存储），与返回子节点同一套机制。
  */
 export const NODE_KIND_SKELETON = 'skeleton'
 /** 等待用户回应（ask_user 提问 / 工具确认） */

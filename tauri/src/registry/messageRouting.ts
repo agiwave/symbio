@@ -36,12 +36,20 @@
 
 import type { Component } from 'vue'
 import {
+  NODE_KIND_BODY,
   NODE_KIND_SKELETON,
   NODE_KIND_TYPING,
   NODE_STATUS_STREAMING,
+  messageTextOf,
   type ChatNode,
 } from '@/schemas/chat_node'
-import { isStreamingStatus, messageTypeOf, type MessageFacets } from './messageFacts'
+import {
+  isStreamingStatus,
+  messageStatusOf,
+  messageTypeOf,
+  renderableChildrenOf,
+  type MessageFacets,
+} from './messageFacts'
 import { messageRendererKey, type MessageRenderer } from './messagePresentation'
 import { createRendererRegistry } from './factory'
 
@@ -95,6 +103,9 @@ export function synthesizeTypingChildren(visible: ChatNode[]): ChatNode[] {
   for (const host of visible) {
     if (!isTypingHost(host)) continue
     if (parentsWithRealChild.has(host.id)) continue
+    // 容器自身正文已有「请求」视图（可见子流）⇒ 不再挂「生成中」：
+    // 「无任何可见子流才挂占位」与渲染器的等待态判据（`childStreamOf`）同一句话。
+    if (requestViewOf(host)) continue
     out.push({
       id: typingIdOf(host.id),
       parent_id: host.id,
@@ -105,6 +116,60 @@ export function synthesizeTypingChildren(visible: ChatNode[]): ChatNode[] {
     })
   }
   return out
+}
+
+
+// ==================== 请求视图合成（[]，纯函数） ====================
+//
+// 容器（骨架）自身携带的正文（典型是一次工具调用的请求参数）不再是容器折叠体里
+// 的一段裸文本特例，而是被**提升为一条 body 子节点**：它与容器的真实子节点（如
+// 工具返回）住同一条子流、走同一套渲染机制（行头 + 单行折叠 + JSON 体）——
+// 「请求」与「响应」从此是同构的两行，风格必然一致。
+//
+// 判据是**纯形状**的：`skeleton` 形态 + 自身正文非空。前端不认容器里装的是什么
+// 业务（工具参数 / 未来任何容器自述正文），提升规则只有这一条。
+//
+// 与 typing 占位同一套纪律：派生节点**从不落地**，id 带稳定前缀
+// （`requestIdOf`）永不与后端 id 相撞；移除 ⟺ 谓词转假（正文清空 / 形态改变）。
+
+/** 请求视图的稳定合成 id——以宿主为键，跨帧不变（缓存 / 键控都靠它）。 */
+export function requestIdOf(hostId: string): string {
+  return `__toolRequest__${hostId}`
+}
+
+/**
+ * 容器的请求视图：自身正文非空 ⇒ 一条标记 `__toolRequest` 的 body 子节点。
+ *
+ * 状态 / 主体 / 序号都继承宿主：流式中的参数跟随宿主逐帧生长（折叠单行走马灯）；
+ * 呈现侧（`messageTitle` / `messageIcon` / `messageDefaultOpen`）按 `__toolRequest`
+ * 上下文标记给「请求」行头与单行折叠——与「响应」行同一套 legacy 链。
+ */
+export function requestViewOf(node: ChatNode): ChatNode | null {
+  if (messageTypeOf(node) !== NODE_KIND_SKELETON) return null
+  const text = messageTextOf(node.content)
+  if (!text.trim()) return null
+  return {
+    id: requestIdOf(node.id),
+    parent_id: node.id,
+    type: NODE_KIND_BODY,
+    status: messageStatusOf(node),
+    principal: node.principal,
+    seq: node.seq,
+    content: node.content,
+    meta: { __toolRequest: true },
+  }
+}
+
+/**
+ * 分派器交给渲染器的子流（**渲染期子流的唯一来源**）：
+ * 真实子节点 + 容器自身正文提升出的请求视图（**排最前**——请求先于响应，
+ * 与一次调用的时序同构）。分派器与渲染器的等待态判据都问这一个函数，
+ * 「什么算可见子流」因此只有一份判据。
+ */
+export function childStreamOf(node: ChatNode): ChatNode[] {
+  const request = requestViewOf(node)
+  const children = renderableChildrenOf(node)
+  return request ? [request, ...children] : children
 }
 
 /**

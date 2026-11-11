@@ -79,7 +79,7 @@ const BRANCH_BASELINE = process.env.KIND_BRANCH_BASELINE
       const [framework, registry] = process.env.KIND_BRANCH_BASELINE.split(':').map((n) => Number(n))
       return { framework, registry }
     })()
-  : { framework: 0, registry: 19 }
+  : { framework: 0, registry: 18 }
 
 const LABEL = {
   framework: '框架层分支（目标 0）',

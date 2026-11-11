@@ -34,8 +34,10 @@
     <!-- 正文 / 工具请求 / 工具返回 -->
     <template v-else>
       <MessageErrorBox v-if="showsOwnError" :text="errorText" />
+      <!-- 请求视图（toolRequest）与工具返回同走 JSON 高亮：参数流式未闭合时
+           高亮器退化为整段着色（比空白有用），不做 Markdown 渲染。 -->
       <pre
-        v-else-if="renderAsJson || facets.toolResult"
+        v-else-if="renderAsJson || facets.toolResult || facets.toolRequest"
         :class="['json', facets.toolRequest ? 'req' : '']"
         v-html="highlighted"
       />

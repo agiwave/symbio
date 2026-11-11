@@ -46,6 +46,7 @@ import {
   NODE_STATUS_LABELS,
   NODE_KIND_LABELS,
   agentNameOf,
+  childStreamOf,
   messageIsCompacted,
   canRetryCompaction,
   canRetryTool,
@@ -74,6 +75,8 @@ import {
   nodePrincipal,
   principalNamespace,
   principalPresentationOf,
+  requestIdOf,
+  requestViewOf,
   synthesizeTypingChildren,
   typingIdOf,
   isTypingHost,
@@ -280,8 +283,28 @@ describe('折叠策略', () => {
     expect(messageDefaultOpen(facets({ role: CHAT_ROLE_USER }))).toBe(true)
   })
 
-  it('容器默认展开（整轮是对话主体；工具与整轮同构）', () => {
-    expect(messageDefaultOpen(facets({ type: NODE_KIND_SKELETON }))).toBe(true)
+  it('容器默认单行折叠（过程是折叠的，结论是直排的；纯前端策略，与后端无关）', () => {
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_SKELETON }))).toBe(false)
+  })
+
+  it('容器的展开例外：内含待审批子节点 / 可恢复失败（入口不得被折叠隐藏）', () => {
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_SKELETON, hasWaitingChild: true }))).toBe(true)
+    expect(
+      messageDefaultOpen(facets({ type: NODE_KIND_SKELETON, status: NODE_STATUS_FAILED, recoverable: true })),
+    ).toBe(true)
+    // 非例外状态不展开（普通失败折叠成单行，标签交代状态）
+    expect(
+      messageDefaultOpen(facets({ type: NODE_KIND_SKELETON, status: NODE_STATUS_FAILED })),
+    ).toBe(false)
+  })
+
+  it('合成「请求」视图默认单行（与响应同风格；即便宿主等待确认也不被撑开）', () => {
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_BODY, toolRequest: true }))).toBe(false)
+    expect(
+      messageDefaultOpen(
+        facets({ type: NODE_KIND_BODY, toolRequest: true, status: NODE_STATUS_WAITING_USER_ACTION }),
+      ),
+    ).toBe(false)
   })
 
   it('折叠叶始终单行', () => {
@@ -735,6 +758,90 @@ describe('synthesizeTypingChildren：Typing 占位合成（[T-151] 三态）', (
     expect(isTypingHost(runHost(NODE_STATUS_STREAMING))).toBe(true)
     expect(isTypingHost(runHost(NODE_STATUS_COMPLETED))).toBe(false)
     expect(isTypingHost({ id: 'x', type: NODE_KIND_BODY, status: NODE_STATUS_STREAMING })).toBe(false)
+  })
+})
+
+describe('requestViewOf / childStreamOf：容器自身正文提升为「请求」视图（纯形状判据）', () => {
+  /** 一个自带正文的容器（典型：一次工具调用，参数住自身 content） */
+  const host = (extra: Partial<ChatNode> = {}): ChatNode => ({
+    id: 'tc1',
+    type: NODE_KIND_SKELETON,
+    status: NODE_STATUS_STREAMING,
+    seq: 3,
+    principal: { kind: 'agent', id: 'session/main' },
+    content: '{"cmd":"ls"}',
+    children: [],
+    ...extra,
+  })
+
+  it('容器自身正文非空 ⇒ 提升为一条标记 __toolRequest 的 body 子节点（继承宿主身份与状态）', () => {
+    const req = requestViewOf(host())
+    expect(req).not.toBeNull()
+    expect(req!.id).toBe(requestIdOf('tc1'))
+    expect(req!.parent_id).toBe('tc1')
+    expect(req!.type).toBe(NODE_KIND_BODY)
+    expect(req!.content).toBe('{"cmd":"ls"}')
+    expect(req!.status).toBe(NODE_STATUS_STREAMING)
+    expect(req!.principal).toEqual({ kind: 'agent', id: 'session/main' })
+    expect(req!.meta).toEqual({ __toolRequest: true })
+    // id 以宿主为键、跨帧稳定
+    expect(requestIdOf('tc1')).toBe(requestIdOf('tc1'))
+  })
+
+  it('纯形状判据：非容器 / 无正文 / 纯空白正文 ⇒ 不提升（前端不认任何业务名）', () => {
+    expect(requestViewOf(host({ type: NODE_KIND_BODY }))).toBeNull()
+    expect(requestViewOf(host({ content: '' }))).toBeNull()
+    expect(requestViewOf(host({ content: '   \n ' }))).toBeNull()
+    expect(requestViewOf(host({ content: undefined }))).toBeNull()
+  })
+
+  it('childStreamOf：请求视图排最前（请求先于响应），真实子随其后', () => {
+    const result: ChatNode = {
+      id: 'res1',
+      parent_id: 'tc1',
+      type: NODE_KIND_BODY,
+      status: NODE_STATUS_COMPLETED,
+      seq: 4,
+    }
+    const stream = childStreamOf(host({ children: [result] }))
+    expect(stream.map((n) => n.id)).toEqual([requestIdOf('tc1'), 'res1'])
+  })
+
+  it('childStreamOf：无自身正文 ⇒ 就是真实子，一个不多', () => {
+    const result: ChatNode = {
+      id: 'res1',
+      parent_id: 'tc1',
+      type: NODE_KIND_BODY,
+      status: NODE_STATUS_COMPLETED,
+      seq: 4,
+    }
+    expect(childStreamOf(host({ content: '', children: [result] })).map((n) => n.id)).toEqual(['res1'])
+    // typing 占位不算真实子（与 renderableChildrenOf 同一份判据）
+    const typing: ChatNode = {
+      id: typingIdOf('tc1'),
+      parent_id: 'tc1',
+      type: NODE_KIND_TYPING,
+      status: NODE_STATUS_STREAMING,
+      seq: 5,
+    }
+    expect(childStreamOf(host({ children: [typing] })).map((n) => n.id)).toEqual([requestIdOf('tc1')])
+  })
+
+  it('提升出的请求视图被 facets 认成上下文标记：有「请求」行头、不走正文直排', () => {
+    const req = requestViewOf(host())!
+    const f = facetsOf(req, true)
+    expect(f.toolRequest).toBe(true)
+    expect(f.responseText).toBe(false)
+    expect(f.toolResult).toBe(false)
+    expect(messageTitle(f, '助手')).toBe('请求')
+    expect(messageIcon(f)).toBe('📤')
+    expect(messageDefaultOpen(f)).toBe(false)
+    expect(messageRendererKey(f)).toBe('body')
+  })
+
+  it('宿主已有可见子流（请求视图）⇒ 不再合成 typing 占位（与渲染器等待态同一句话）', () => {
+    const out = synthesizeTypingChildren([host()])
+    expect(out).toEqual([])
   })
 })
 
