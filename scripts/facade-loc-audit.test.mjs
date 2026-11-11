@@ -215,6 +215,33 @@ test('测试代码不计：*.test.rs 再长也不进读数', () => {
   }
 })
 
+test('清单镜像不计：描述符声明的生成物再长也不进读数（D-470）', () => {
+  const files = cleanFiles()
+  files['scripts/facts/mirror.mjs'] = "const OUT_REL = 'crates/symbio-plugin-api/src/routes.rs'\n"
+  files[`${SRC}/routes.rs`] = rustLines(500)
+  const box = sandbox(files)
+  try {
+    const { status, out } = run(box.root)
+    assert.equal(status, 0, out)
+    assert.match(out, /生产合计 18 行/)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('清单镜像不计只认描述符：同一份文件没有声明时照旧计件（D-470）', () => {
+  const files = cleanFiles()
+  files[`${SRC}/routes.rs`] = rustLines(500)
+  const box = sandbox(files)
+  try {
+    const { status, out } = run(box.root)
+    assert.equal(status, 1, out)
+    assert.match(out, /FA-001.*合计.*实测 518 行 \/ 基线 18 行/)
+  } finally {
+    box.cleanup()
+  }
+})
+
 test('基线缺失 ⇒ 退 2（读不出不许当 0 行通过）', () => {
   const box = sandbox(cleanFiles(), null)
   try {

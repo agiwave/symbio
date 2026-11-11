@@ -43,7 +43,6 @@ use crate::declarations::EVENT_AUTHZ_DENIED;
 use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
-    capability_to_wire,
     chat_node::{ChatNode, NodeStatus, CHAT_STYLE_TAG_TOOL},
     effects::annotations,
     effects::apply,
@@ -434,7 +433,7 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     let visitor = exec.ctx.as_ref().and_then(|c| c.get(CAPABILITY_VISITOR));
-    let aliases = exposure_aliases(exec).await;
+    let aliases = exposure_aliases(exec);
     let mut out = Vec::with_capacity(tool_calls.len());
     for (idx, tc) in tool_calls.iter().enumerate() {
         let model_id = tc
@@ -1909,7 +1908,7 @@ impl ToolPort {
             Some(visitor) => visitor.list(family::TOOL).await,
             None => Vec::new(),
         };
-        let aliases = exposure_aliases(&exec).await;
+        let aliases = exposure_aliases(&exec);
         let resolved_name = resolve(&tool_name, &aliases);
         // 并发策略在本执行体（DE-048 D-311）：只读档（`Low`）可同时在途，受端口声明的
         // 上界约束；写侧档（`Medium` / `High`）与查不到风险档的调用独占**本会话**的
@@ -2279,49 +2278,22 @@ impl ToolPort {
 
 /// 本轮暴露快照的别名表（内部端口身份 → 模型侧别名，D-444 ①）。
 ///
-/// 首选读本轮 `session.config` 里由 session 装配的那一份——清单、四个协议的下行
-/// 序列化与这里的返回解析读同一份数据，插件停用 / 撤权 / MCP 变化后的旧调用不会
-/// 静默绑到同名新实现。没有 config 的夹具才从**同一张注册表**按「TOOL 行 ∩ 端口键」
-/// 用同一条规则重建：不是第二条执行路径，也不做字符串反演。
-async fn exposure_aliases(exec: &PortExecContext) -> std::collections::BTreeMap<String, String> {
-    if let Some(reader) = exec.reader.as_ref() {
-        if let Some(fact) = reader
-            .facts()
-            .into_iter()
-            .rev()
-            .find(|f| f.kind == symbio_plugin_api::events::EVENT_SESSION_CONFIG)
-        {
-            if let Some(value) = fact.payload.get("tool_aliases") {
-                if let Ok(map) = serde_json::from_value::<std::collections::BTreeMap<String, String>>(
-                    value.clone(),
-                ) {
-                    return map;
-                }
-            }
-        }
-    }
-    let Some(ctx) = exec.ctx.as_ref() else {
+/// 只读本轮 `session.config` 里由模型插件投影、session 落格的那一份（D-469）——
+/// 清单、四个协议的下行序列化与这里的返回解析读同一份数据，插件停用 / 撤权 /
+/// MCP 变化后的旧调用不会静默绑到同名新实现。没有快照 ⇒ 空表 ⇒ 解析失败落失败
+/// 事实（D-445 ②）；**不重建、不投影**：字符集规则只有一个 owner（模型插件）。
+fn exposure_aliases(exec: &PortExecContext) -> std::collections::BTreeMap<String, String> {
+    let Some(reader) = exec.reader.as_ref() else {
         return Default::default();
     };
-    let Some(visitor) = ctx.get(CAPABILITY_VISITOR) else {
-        return Default::default();
-    };
-    // 有效绑定 = 装配期收集的端口名（D-468）；冲突键不在 `bound()` 里。
-    let bound: std::collections::HashSet<String> = ctx
-        .get(symbio_plugin_api::port::PORT_BINDINGS)
-        .map(|bindings| bindings.bound().into_iter().collect())
-        .unwrap_or_default();
-    visitor
-        .list(family::TOOL)
-        .await
-        .iter()
-        .filter(|row| bound.contains(row.name()))
-        .map(|row| {
-            let canonical = row.name().to_string();
-            let wire = capability_to_wire(&canonical);
-            (canonical, wire)
-        })
-        .collect()
+    reader
+        .facts()
+        .into_iter()
+        .rev()
+        .find(|f| f.kind == symbio_plugin_api::events::EVENT_SESSION_CONFIG)
+        .and_then(|fact| fact.payload.get("tool_aliases").cloned())
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
 }
 
 /// 线上名 → **本轮实际暴露集合**里的内部端口身份（D-445 ②）。

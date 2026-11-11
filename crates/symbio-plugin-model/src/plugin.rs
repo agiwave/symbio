@@ -782,15 +782,43 @@ impl Plugin for ModelPlugin {
         Some(self)
     }
 
-    /// model 已无自有路由：配置的读写在 VDFS 上（`<根>/model/<id>` 的详情表单，
-    /// 以及节点动作 `set-default`），跨条目状态写自己的 `<本插件目录>/PLUGIN.yml`。
+    /// `project_tools`：本轮工具名的协议投影（`D-469`）。
+    ///
+    /// 配置的读写在 VDFS 上（`<根>/model/<id>` 的详情表单，以及节点动作
+    /// `set-default`），跨条目状态写自己的 `<本插件目录>/PLUGIN.yml`；本路由只回答
+    /// 「本轮哪些工具能见、各自叫什么」，不碰配置。
+    ///
+    /// 输入 `{ "names": [<候选身份，按注册序>] }`，输出
+    /// `{ exposed, aliases, collisions }`（见 [`super::tool_projection`]）。纯计算：
+    /// 不读事实、不落事实——协议字符集只在本插件换算，会话只转发结果。
     async fn route(
         self: Arc<Self>,
-        _ctx: Arc<dyn PluginInvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        Err(PluginError::NotFound(format!(
-            "{PLUGIN_ID_MODEL} 已无自有路由，请改用 VDFS 地址"
-        )))
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
+        let path = path.strip_prefix('/').unwrap_or(&path);
+        match path {
+            // 本轮工具名的协议投影：哪些能见、各自叫什么、谁因碰撞退出（D-469）
+            "project_tools" => {
+                let request: Value = ctx.payload()?;
+                let names = request
+                    .get("names")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| PluginError::ValidationError("缺少 names 清单".to_string()))?;
+                let names = names
+                    .iter()
+                    .map(|name| {
+                        name.as_str().map(str::to_string).ok_or_else(|| {
+                            PluginError::ValidationError("names 必须是字符串清单".to_string())
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(PluginPayload::new(&super::tool_projection::project(&names)))
+            }
+            _ => Err(PluginError::NotFound(format!(
+                "{PLUGIN_ID_MODEL} 无此路由：{path}"
+            ))),
+        }
     }
 
     async fn traverse(

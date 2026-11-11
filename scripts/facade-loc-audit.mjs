@@ -40,6 +40,16 @@
  * 测试模块整体不计（`isTestFile` 是唯一实现），文件内的空行与注释照算——
  * 契约面的文档注释也是读者要读的那部分。
  *
+ * **清单镜像不计行数**（`D-470`）：`events.rs` / `routes.rs` 是各插件 `PLUGIN.yml` 清单的
+ * 投影，由 `scripts/facts/` 的描述符重新生成——它们不是「手写进契约面的实现」。把它们
+ * 计进合计，会让「声明一条跨插件路由」直接顶破基线，而 `FA-001` 没有豁免通道：合法的
+ * 协议扩展被一条不针对它的棘轮挡住，可它一行实现都没写。
+ *
+ * 判定只有一个注册处（`generatedPaths`：描述符的 `OUT_REL`，与
+ * `capability-migration-audit` / `extension-locality-audit` 共用），**不按文件名猜**——
+ * `routes.rs` 若不再由描述符产出，它就是手写文件，照旧计件。生成物仍留在扫描结果里：
+ * 基线的存在性登记（`FA-003`）照旧判，只是行数不参与逐项与合计的比较。
+ *
  * ## 用法
  *
  *   node scripts/facade-loc-audit.mjs                  # 对真仓判定
@@ -59,6 +69,7 @@ import { fileURLToPath } from 'node:url'
 import { green, red, dim } from './color.mjs'
 import { walk, isTestFile } from './fs-walk.mjs'
 import { adrExists } from './adr-index.mjs'
+import { generatedPaths } from './capability-migration-audit.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -82,15 +93,22 @@ export function physicalLines(text) {
 export function scanCrate(root = ROOT) {
   const dir = path.join(root, CRATE_DIR)
   if (!fs.existsSync(dir)) return { files: [], total: 0, error: `${CRATE_DIR} 不存在` }
+  // 清单镜像只登记存在性（FA-003），行数不参与判定（D-470）
+  const generated = generatedPaths(root)
   const files = []
   for (const abs of walk(dir)) {
     if (!abs.endsWith('.rs') || isTestFile(abs)) continue
     const rel = path.relative(dir, abs).split(path.sep).join('/')
-    files.push({ path: rel, lines: physicalLines(fs.readFileSync(abs, 'utf8')) })
+    files.push({
+      path: rel,
+      lines: physicalLines(fs.readFileSync(abs, 'utf8')),
+      generated: generated.has(`${CRATE_DIR}/${rel}`),
+    })
   }
   files.sort((a, b) => a.path.localeCompare(b.path))
   if (files.length === 0) return { files, total: 0, error: `${CRATE_DIR} 下没有生产 .rs` }
-  return { files, total: files.reduce((n, f) => n + f.lines, 0) }
+  const counted = files.filter((f) => !f.generated)
+  return { files, total: counted.reduce((n, f) => n + f.lines, 0) }
 }
 
 /** 读基线；缺失或不是合法 JSON 都返回 `error`（调用方退 2）。 */
@@ -194,7 +212,9 @@ export function checkBaseline(baseline, scanned, root = ROOT) {
 /** 行数对账：增多判 FA-001，减少未同批下调判 FA-002。 */
 export function judge(scanned, baseline) {
   const errors = []
-  const nowByPath = new Map(scanned.files.map((f) => [f.path, f.lines]))
+  const nowByPath = new Map(
+    scanned.files.filter((f) => !f.generated).map((f) => [f.path, f.lines]),
+  )
   const compare = (label, now, was) => {
     if (!isCount(was)) return
     if (now > was) {

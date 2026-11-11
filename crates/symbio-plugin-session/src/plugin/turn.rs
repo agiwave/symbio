@@ -59,47 +59,53 @@ fn dedup_declared_twins(
 /// - 有效绑定取装配期收集容器 `PortBindings` 的 `bound()`（D-468）：只有描述行、
 ///   没有执行体的孤儿行不进清单；只有绑定、没有描述行的内部端口也不进清单。
 ///   作用域允许由 `collect_capabilities` 的 `agent_scope` 在同一次收集里保证。
-/// - wire 名是**描述数据**，由装配期一次算出并放进 `aliases`，供清单装配、四个协议的
-///   下行序列化与模型返回调用解析共用；别名不是身份，端口键仍是内部 canonical 名。
-/// - 两个身份映到同一 wire ⇒ **请求成形前拒绝**（D-444 ②）：冲突各方都不暴露，
-///   并把碰撞写进 `collisions` 供 `session.config` 报因。不靠返回时「精确匹配优先」
-///   选一个——那是消歧的假装版，会把调用静默绑到另一个工具。
-fn exposed_tools(
+/// - **本插件不算别名**（D-469）：候选集合交给 `model/project_tools`，取回
+///   `{ exposed, aliases, collisions }` 原样落 `session.config`。协议字符集是模型
+///   侧的知识，会话不认识 `_` 替换，也不替碰撞做「优先匹配」——碰撞整组退出由投影
+///   回答，会话只按回答过滤。
+fn candidate_tools(
     metas: Vec<symbio_kernel::capability::CapabilityMeta>,
     bound: &std::collections::HashSet<String>,
-) -> (
-    Vec<symbio_kernel::capability::CapabilityMeta>,
-    serde_json::Map<String, serde_json::Value>,
-    Vec<serde_json::Value>,
-) {
-    let mut by_wire: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-    for meta in metas.iter().filter(|meta| bound.contains(&meta.name)) {
-        // 走门面而不是 sdk 本体：`plugin-tool` 的派发与 `plugin-model` 的四个协议取的是
-        // 同一个符号（E-009 的限额豁免只冻结既有 sdk 用法，加一条是另一条路）。
-        let wire = symbio_plugin_api::capability_to_wire(&meta.name);
-        by_wire.entry(wire).or_default().push(meta.name.clone());
-    }
-    let mut aliases = serde_json::Map::new();
-    let mut collisions = Vec::new();
-    let mut rejected: std::collections::HashSet<String> = Default::default();
-    for (wire, mut names) in by_wire {
-        names.sort();
-        names.dedup();
-        if names.len() > 1 {
-            // 同名绑定（同一 wire 下多个身份）：整组退出本轮暴露集合。
-            collisions.push(json!({ "wire": wire, "names": names }));
-            rejected.extend(names);
-        } else {
-            // 正向表：内部端口身份 → 模型侧别名。协议按 canonical 查表，返回解析
-            // 按 value 反查（碰撞已拒绝，value 唯一），两端读同一份数据。
-            aliases.insert(names[0].clone(), json!(wire));
-        }
-    }
-    let exposed = metas
+) -> Vec<symbio_kernel::capability::CapabilityMeta> {
+    metas
         .into_iter()
-        .filter(|meta| bound.contains(&meta.name) && !rejected.contains(&meta.name))
-        .collect();
-    (exposed, aliases, collisions)
+        .filter(|meta| bound.contains(&meta.name))
+        .collect()
+}
+
+/// 本轮工具投影的读视图（`model/project_tools` 回执的形状，D-469）。
+///
+/// `collisions` 原样透传（形状归投影方解释），`session.config` 只负责搬运。
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+struct ToolProjectionView {
+    #[serde(default)]
+    exposed: Vec<String>,
+    #[serde(default)]
+    aliases: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    collisions: Vec<serde_json::Value>,
+}
+
+/// 经 route 问模型插件要一次投影；取不到 ⇒ `Err`，由调用方落「本轮无工具」。
+///
+/// 跨插件只走 route（与 `compose/wording` 同一形态）：子上下文是同一份 ctx 的
+/// fork；父句柄取**本插件的挂载父**（`get_parent`，与能力收集同一条路），不依赖
+/// 调用方 ctx 上有没有父指针——驱动重建的 ctx 不保证带它。
+async fn project_tools(
+    parent: &Arc<dyn Plugin>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    names: &[String],
+) -> Result<ToolProjectionView, PluginError> {
+    let child = ctx.fork();
+    child.set(
+        symbio_plugin_api::PATH,
+        symbio_plugin_api::routes::ROUTE_MODEL_PROJECT_TOOLS.to_string(),
+    );
+    child.set_payload(json!({ "names": names }))?;
+    let response = parent.clone().route(child).await?;
+    response
+        .get::<ToolProjectionView>()
+        .map_err(|e| PluginError::ParseError(format!("模型工具投影回执无法解析: {e}")))
 }
 
 impl SessionPlugin {
@@ -259,7 +265,10 @@ impl SessionPlugin {
             .get(symbio_plugin_api::port::PORT_BINDINGS)
             .map(|bindings| bindings.bound().into_iter().collect())
             .unwrap_or_default();
-        let (tools, tool_aliases, alias_collisions) = exposed_tools(
+        // 候选 = 显式暴露 ∩ 作用域 ∩ 有效绑定；协议命名（别名与碰撞）由模型插件的
+        // 投影回答（D-469）。投影缺席 ⇒ 本轮无工具：字符集规则不可用时不能把内部
+        // canonical 名直接当线上名送出去。
+        let candidates = candidate_tools(
             dedup_declared_twins(
                 manager
                     .list(symbio_kernel::capability::family::TOOL)
@@ -271,12 +280,45 @@ impl SessionPlugin {
             ),
             &bound_ports,
         );
+        let names: Vec<String> = candidates.iter().map(|meta| meta.name.clone()).collect();
+        let projected = if names.is_empty() {
+            Some(ToolProjectionView::default())
+        } else if let Some(parent) = self.get_parent() {
+            match project_tools(&parent, ctx, &names).await {
+                Ok(view) => Some(view),
+                Err(e) => {
+                    symbio_plugin_api::plugin_warn!("session", "model/project_tools 不可用：{e}");
+                    None
+                }
+            }
+        } else {
+            symbio_plugin_api::plugin_warn!(
+                "session",
+                "model/project_tools 不可用：没有父容器句柄"
+            );
+            None
+        };
+        let projection_unavailable = projected.is_none();
+        let (tools, tool_aliases, alias_collisions) = match projected {
+            Some(view) => {
+                let exposed: std::collections::HashSet<&str> =
+                    view.exposed.iter().map(String::as_str).collect();
+                let tools = candidates
+                    .into_iter()
+                    .filter(|meta| exposed.contains(meta.name.as_str()))
+                    .collect();
+                (tools, view.aliases, view.collisions)
+            }
+            None => (Vec::new(), Default::default(), Vec::new()),
+        };
         // 收集过程的失败信号（traverse 侧记在 ctx 的桶里）：能力表为空/有错都要落 config，
         // 只是把原因写进载荷。**不造新事件类型**——模型行依赖的是 `session.config` 这条
         // 输入本身，它必须在每一轮都出现，否则模型行会永远等不到输入。
         let capability_errors = capability_take_errors(ctx).await;
         let tools_empty_reason = if tools.is_empty() {
-            Some(if !alias_collisions.is_empty() {
+            Some(if projection_unavailable {
+                "projection_unavailable"
+            } else if !alias_collisions.is_empty() {
                 "wire_alias_collision"
             } else if capability_errors.is_empty() {
                 "no_tool_rows"
@@ -297,8 +339,9 @@ impl SessionPlugin {
         let mut config_payload = serde_json::Map::new();
         config_payload.insert("system_prompt".to_string(), json!(system_prompt));
         config_payload.insert("tools".to_string(), json!(tools));
-        // 本轮暴露快照的别名表（wire → 内部端口名）：清单、协议序列化、返回调用解析
-        // 三处读同一份数据（D-444 ①）；碰撞组已在上一步退出清单，这里只记原因。
+        // 本轮暴露快照的别名表（内部身份 → wire）：由模型插件的投影交出（D-469），
+        // 清单、协议序列化、返回调用解析三处读同一份数据（D-444 ①）；碰撞组已在
+        // 投影里整组退出清单，这里只记原因。
         config_payload.insert("tool_aliases".to_string(), json!(tool_aliases));
         config_payload.insert("tool_alias_collisions".to_string(), json!(alias_collisions));
         // 兜底表达：空表原因 / 收集错误明细（均为既有 config 载荷的字段，

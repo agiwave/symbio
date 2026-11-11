@@ -455,8 +455,31 @@ async fn ctx_with_tool(
     ctx
 }
 
+/// 本轮快照的别名表（`session.config` 里的 `tool_aliases`）：解析只读这一份（D-469）。
+fn aliases_fact(aliases: &[(&str, &str)]) -> symbio_plugin_api::port::PortFact {
+    let map: std::collections::BTreeMap<&str, &str> = aliases.iter().copied().collect();
+    symbio_plugin_api::port::PortFact {
+        id: "session.config:fixture".into(),
+        port: "session".into(),
+        kind: symbio_plugin_api::events::EVENT_SESSION_CONFIG.into(),
+        payload: serde_json::json!({ "tool_aliases": map }),
+    }
+}
+
 /// 一次执行的最小现场（parent 在场——提供者最先查宿主）。
+///
+/// 夹具里的线上名与内部名相同（名字都在协议字符集内），别名表因此是恒等表；
+/// 需要区分的用例走 [`call_with_aliases`] 显式给表。
 fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext, PortInput) {
+    call_with_aliases(tool_name, ctx, &[(tool_name, tool_name)])
+}
+
+/// 同 [`call`]，但显式给出本轮别名表（wire 名与内部名不同时的夹具）。
+fn call_with_aliases(
+    tool_name: &str,
+    ctx: Arc<dyn PluginInvokeRequest>,
+    aliases: &[(&str, &str)],
+) -> (PortExecContext, PortInput) {
     (
         PortExecContext {
             abort: ExecAbortSignal::new(),
@@ -470,7 +493,7 @@ fn call(tool_name: &str, ctx: Arc<dyn PluginInvokeRequest>) -> (PortExecContext,
             origin: None,
             scratch_dir: None,
             source: String::new(),
-            reader: None,
+            reader: Some(Arc::new(StaticReader(vec![aliases_fact(aliases)]))),
         },
         PortInput {
             port: TOOL.to_string(),
@@ -515,7 +538,8 @@ async fn wire_names_resolve_to_canonical_capabilities() {
         serde_json::json!({ "content": "ok" }),
     )
     .await;
-    let (exec, input) = call("mcp__fs__read", ctx);
+    let (exec, input) =
+        call_with_aliases("mcp__fs__read", ctx, &[("mcp.fs.read", "mcp__fs__read")]);
     let out = ToolPort.execute(exec, input).await;
     let (text, success, _) = decode(&out);
     assert_eq!(
@@ -631,6 +655,18 @@ fn requested_call_with(
     call_id: &str,
     calls: serde_json::Value,
 ) -> (PortExecContext, PortInput) {
+    // 夹具的线上名与内部名相同 ⇒ 本轮别名表按清单里的名字恒等展开。
+    let alias_pairs: Vec<(String, String)> = calls
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|call| call.get("name").and_then(|name| name.as_str()))
+        .map(|name| (name.to_string(), name.to_string()))
+        .collect();
+    let alias_refs: Vec<(&str, &str)> = alias_pairs
+        .iter()
+        .map(|(canonical, wire)| (canonical.as_str(), wire.as_str()))
+        .collect();
     (
         PortExecContext {
             abort: ExecAbortSignal::new(),
@@ -651,6 +687,7 @@ fn requested_call_with(
                     kind: "tool.requested".into(),
                     payload: serde_json::json!({ "root_id": "u-1", "calls": calls }),
                 },
+                aliases_fact(&alias_refs),
             ]))),
         },
         PortInput {
@@ -1102,6 +1139,25 @@ fn open_call(
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let emit =
         symbio_plugin_api::port::PortFactEmit::new(Arc::new(CapturedFacts(captured.clone())));
+    // 建账同样只读本轮快照的别名表（D-469）；夹具的线上名与内部名相同 ⇒ 恒等展开。
+    // 没有 ctx 的夹具也没有本轮快照（别名表为空），用于「解析不到 ⇒ 只按 route 记」。
+    let has_round = ctx.is_some();
+    let alias_pairs: Vec<(String, String)> = if has_round {
+        payload
+            .get("tool_calls")
+            .and_then(|calls| calls.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|call| call.get("name").and_then(|name| name.as_str()))
+            .map(|name| (name.to_string(), name.to_string()))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let alias_refs: Vec<(&str, &str)> = alias_pairs
+        .iter()
+        .map(|(canonical, wire)| (canonical.as_str(), wire.as_str()))
+        .collect();
     (
         PortExecContext {
             abort: ExecAbortSignal::new(),
@@ -1115,7 +1171,7 @@ fn open_call(
             origin: Some(3),
             scratch_dir: None,
             source: String::new(),
-            reader: None,
+            reader: Some(Arc::new(StaticReader(vec![aliases_fact(&alias_refs)]))),
         },
         PortInput {
             port: TOOL.to_string(),

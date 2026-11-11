@@ -184,8 +184,7 @@ pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_
 pub use symbio_sdk::capability::{
     capability_announce_config_snapshot, capability_announce_configurable,
     capability_configurables, capability_prompts, capability_report_error, capability_take_errors,
-    capability_to_wire, capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
-    OPTION_VISITOR, SCOPE_TWIN,
+    capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR, SCOPE_TWIN,
 };
 pub use symbio_sdk::chat::chat_node::{message_of_node, AssistReply, AssistRequest, SEG_MESSAGES};
 pub use symbio_sdk::clock::clock_now_ms;

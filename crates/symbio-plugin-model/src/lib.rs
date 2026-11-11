@@ -18,6 +18,7 @@
 //! - `http`:            HTTP 重试机器（客户端单例 + 带中止的 POST，五态 `PostResult`）
 //! - `stream`:          SSE 流循环（字节流 → `RoundOutput`，流式子节点实时下发）
 //! - `tool_accumulator`: 工具调用增量累积（分片 → 完整调用的状态机，收口为 `RoundOutput.tool_calls`）
+//! - `tool_projection`: 端口身份 → wire 别名的唯一实现与本轮暴露投影（`D-469`）
 //! - `plugin`:          Core ModelPlugin entry point + factory registration + provider 注册表
 //!
 //! 边界：会话循环（chat_loop / turn_processor / tool_executor / resume /
@@ -44,6 +45,7 @@ mod provider;
 mod round;
 mod stream;
 mod tool_accumulator;
+mod tool_projection;
 
 mod types;
 mod vocab;

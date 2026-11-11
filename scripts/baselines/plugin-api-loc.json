@@ -1,5 +1,5 @@
 {
-  "note": "plugin-api 自有实现的行数棘轮：只许降。数的是生产文件物理行（含空行与注释），*.test.rs / tests.rs 与 #[cfg(test)] mod 不计。超一行即红；行数下降必须同批下调本文件，否则基线留出的余量会让「删 N 行再加 N 行」逃过判据。整份删除的转发文件不留空：条目钉到 lines:0 + retired（新家路径），文件若又出现即 FA-003 红。",
+  "note": "plugin-api 自有实现的行数棘轮：只许降。数的是生产文件物理行（含空行与注释），*.test.rs / tests.rs 与 #[cfg(test)] mod 不计；描述符声明的清单镜像（events.rs / routes.rs）只作存在性登记，行数不参与判定（D-470）。超一行即红；行数下降必须同批下调本文件，否则基线留出的余量会让「删 N 行再加 N 行」逃过判据。整份删除的转发文件不留空：条目钉到 lines:0 + retired（新家路径），文件若又出现即 FA-003 红。",
   "crate": "crates/symbio-plugin-api/src",
   "files": [
     {
@@ -49,7 +49,7 @@
     }
   ],
   "total": {
-    "lines": 1562,
-    "adr": "D-440"
+    "lines": 1278,
+    "adr": "D-470"
   }
 }

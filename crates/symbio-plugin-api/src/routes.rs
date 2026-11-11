@@ -61,6 +61,11 @@ pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// hook/fire — 触发一次命名 hook（生命周期点调用，插件之间的通用挂钩）。
 pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 
+// ============ model ============
+
+/// model/project_tools — 本轮工具名的协议投影：哪些能见、各自叫什么、谁因碰撞退出（D-469）
+pub const ROUTE_MODEL_PROJECT_TOOLS: &str = "model/project_tools";
+
 // ============ vdfs ============
 
 /// vdfs/list — 经 `VDFS_OPS` 分发（无静态 `match` 臂）

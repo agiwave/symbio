@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use symbio_plugin_api::capability_to_wire;
 pub use symbio_plugin_api::chat_node::{ChatNode, ContentPart, MessageContent, NodeRole};
 pub use symbio_plugin_api::CapabilityMeta;
 
@@ -189,11 +188,9 @@ impl NativeMessage {
         }
 
         if let Some(ref tool_calls) = self.tool_calls {
-            // 历史 `tool_calls` 的 name 是模型发出的 wire 名（回灌）而非 canonical 名：
-            // 装配期别名表以 canonical 为键，此处查不到它；`to_api_value` 也拿不到本轮
-            // tools/aliases 上下文，故仍用 `capability_to_wire` 投影（对字符集内的 wire
-            // 名是恒等映射，请求形状逐字不变）。不为此硬塞全局状态。这是消息历史序列化
-            // 上唯一残留的一处投影，与下行 tools 清单无关。
+            // 历史 `tool_calls` 的 name 本来就是模型发出的 wire 名（回灌），字符集已在
+            // 投影时落定，这里原样回灌（D-469）：`to_api_value` 拿不到本轮
+            // tools/aliases 上下文，再投影一次只会多一处字符集规则，而请求形状不变。
             let api_tool_calls: Vec<serde_json::Value> = tool_calls
                 .iter()
                 .map(|tc| {
@@ -207,7 +204,7 @@ impl NativeMessage {
                         "id": tc.id,
                         "type": tc.kind.as_ref().unwrap_or(&"function".to_string()),
                         "function": {
-                            "name": capability_to_wire(&tc.name),
+                            "name": tc.name,
                             "arguments": args_str
                         }
                     })

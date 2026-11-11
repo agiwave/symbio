@@ -13,7 +13,6 @@ mod option;
 pub mod port;
 mod prompt;
 mod scoped_twin;
-mod tool_name;
 
 // 契约词汇只供本域子模块取用（`super::…`）；本域**不再**整模块转出内核的公开面
 // ——那会让 `symbio_sdk::capability::<内核符号>` 成为第二条合法路径（DE-018 的 D-419）。
@@ -45,4 +44,3 @@ pub use mount::capability_vdfs_root;
 pub use option::capability_option_fields;
 pub use prompt::capability_prompts;
 pub use scoped_twin::{capability_scope_twins, SCOPE_TWIN};
-pub use tool_name::capability_to_wire;
