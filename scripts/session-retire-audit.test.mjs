@@ -57,6 +57,12 @@ function cleanFiles() {
       'pub fn tick(d: ReportDraft) -> u64 { ClockNow::now() }',
       '',
     ].join('\n'),
+    // 事实源开面：SR-004 要求**恰好一家**（D-458）。夹具给一家，与真实仓同形。
+    [`${SESSION_SRC_REL}/store/fact_source.rs`]: [
+      'static SESSION_FACT_OPENER: SessionFactOpener = SessionFactOpener;',
+      'symbio_sdk::submit_fact_source_opener!(SESSION_FACT_OPENER);',
+      '',
+    ].join('\n'),
   }
 }
 
@@ -255,7 +261,11 @@ test('输入读不出：豁免 JSON 缺失 ⇒ 红（宁红不静默）', () => 
 
 test('输入读不出：session 源码目录被搬走 ⇒ 红（没有源码可量）', () => {
   const files = cleanFiles()
-  delete files[`${SESSION_SRC_REL}/lib.rs`]
+  // 夹具里每个 `src/` 下的文件都要删掉——留一个文件，「目录不存在」就没成立，
+  // 判据会退化成「符号零命中」（那也是红，但红的理由不是这一条）。
+  for (const rel of Object.keys(files)) {
+    if (rel.startsWith(`${SESSION_SRC_REL}/`)) delete files[rel]
+  }
   const box = sandbox(files)
   try {
     const r = run(box.root)
@@ -374,6 +384,57 @@ test('--coverage：判不出的文件落「没有归属」并被逐条列出，�
     assert.equal(r.status, 0, r.out)
     assert.equal(coverageRow(r.out, '边二 装配'), 0, r.out)
     assert.match(r.out, /stats_reading\.rs/s, '判不出的文件要列出来')
+  } finally {
+    box.cleanup()
+  }
+})
+
+// ================= SR-004：事实源开面是单槽（迁移的第一步必须响） =================
+//
+// `declared_fact_source_opener()` 取 `inventory::iter().next()`，没有去重、没有按域分派。
+// 存储迁移的第一步必然是「注册第二个开面」，而这一步在单槽下是**静的**：谁生效由链接
+// 顺序决定。两条用例分别钉住「多一家即红」与「零家也红」——后者是迁移走完却没换新家
+// 的形态，读面会硬错。
+
+test('SR-004：两处登记开面 ⇒ 红，并点名两处（单槽下第二个是静默死码）', () => {
+  const files = cleanFiles()
+  files[['crates', 'symbio-plugin-session', 'src', 'store', 'second_opener.rs'].join('/')] =
+    'static OTHER: OtherOpener = OtherOpener;' + String.fromCharCode(10) +
+    'symbio_sdk::submit_fact_source_opener!(OTHER);' + String.fromCharCode(10)
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /SR-004.*单槽/s)
+    assert.match(r.out, /fact_source\.rs:2/s, '第一个登记点要点名')
+    assert.match(r.out, /second_opener\.rs:2/s, '第二个登记点也要点名')
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('SR-004：零处登记 ⇒ 红（不是「边三收窄完成」，是没有人开面了）', () => {
+  const files = cleanFiles()
+  delete files[[SESSION_SRC_REL, 'store', 'fact_source.rs'].join('/')]
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /SR-004.*零登记/s)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('SR-004：注释里写宏名不算登记（去注释后判）', () => {
+  const files = cleanFiles()
+  files[[SESSION_SRC_REL, 'store', 'fact_source.rs'].join('/')] =
+    '// 将来会有人写 submit_fact_source_opener!(X);' + String.fromCharCode(10)
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /SR-004.*零登记/s, '注释不是登记')
   } finally {
     box.cleanup()
   }

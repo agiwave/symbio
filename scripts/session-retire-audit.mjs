@@ -9,6 +9,7 @@
  * | SR-001 | 豁免账 `symbols` 里**每一条**都必须真被 `symbio-plugin-session` 用到（去注释后至少命中一次） | `scripts/exemptions/plugin-session-sdk.json` × `crates/symbio-plugin-session/src/**` |
  * | SR-002 | `symbols` 条数 ≤ 基线（**只许降**；要涨必须回 sdk / 内核侧解决，不是往账上加） | 同上 |
  * | SR-003 | 豁免三字段自洽：`expires` 是**将来的**合法日期、`retire` 非空且写明删除动作、`knife` 形如登记号 | 同上 |
+ * | SR-004 | 事实源开面**恰好一家**：生产 `.rs` 里 `submit_fact_source_opener!` 的登记点必须是 1 处 | `crates/` 下全部 `.rs`（去测试） |
  *
  * 违规逐条点名**符号 / 字段**。退出码：0 = 通过；1 = 有违规或判据读不出输入。
  *
@@ -244,6 +245,72 @@ if (exemption) {
   notes.push(`到期日 ${expires}；${retire}`)
 }
 
+// ==================== SR-004：事实源开面是单槽 ====================
+
+/**
+ * 开面（`symbio_sdk::plugin::fact_source`）只认**一家**登记者：
+ * `declared_fact_source_opener()` 取 `inventory::iter::<FactSourceOpenerDecl>().next()`，
+ * 没有去重、没有按域分派。生产里登记的只有控制面 session 一家。
+ *
+ * 为什么这把尺要管这件事（`D-458`）：退役线的**边三**是存储，而存储迁移的第一步必然是
+ * 「注册第二个开面，让新的那一半先跑起来」。在单槽下这一步是**静的**——两个登记者里谁
+ * 生效由链接顺序决定，编译器不报、运行期不报，`open_fact_source()` 照旧返回 `Ok`。等到
+ * 你把旧的删掉，才发现生效的一直是它。所以「恰好一家」必须是一条判据：多出来的那家要么
+ * 先把重复处置设计出来（按什么分派），要么不要登记。
+ *
+ * 两个方向都判：**0 家**不是「迁移完成」，是读面已经没有开面了——`open_fact_source()`
+ * 恒返回 `Err("没有登记事实源开面")`，CLI 每次发送都硬错（`symbio-cli/src/client.rs`），
+ * 而宿主的安全阀出口只是静默退化（`symbio-host/src/drive.rs::record_stall`）。两种处置
+ * 并存，正是「停用」不能靠某一个调用点报错来发现的原因。
+ */
+function collectOpenerSites() {
+  const cratesDir = path.join(ROOT, 'crates')
+  if (!fs.existsSync(cratesDir)) return null
+  const sites = []
+  const walk = (d) => {
+    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      const abs = path.join(d, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name === 'target' || entry.name === 'node_modules') continue
+        walk(abs)
+      } else if (entry.name.endsWith('.rs') && !entry.name.endsWith('.test.rs') && entry.name !== 'tests.rs') {
+        const text = stripComments(fs.readFileSync(abs, 'utf8'))
+        text.split('\n').forEach((line, i) => {
+          if (line.includes('submit_fact_source_opener!')) {
+            sites.push({ rel: path.relative(ROOT, abs).split(path.sep).join('/'), line: i + 1, text: line.trim() })
+          }
+        })
+      }
+    }
+  }
+  walk(cratesDir)
+  return sites
+}
+
+const openerSites = collectOpenerSites()
+if (openerSites === null) {
+  report('SR-004', '`crates/` 不存在——开面登记点无从读，判据没有输入')
+} else if (openerSites.length === 0) {
+  report(
+    'SR-004',
+    '事实源开面零登记——`declared_fact_source_opener()` 恒 `None`，读面（CLI 投影 / ' +
+      '`session/project`）会硬错。这不是「存储边收窄完成」，是没有任何人开面了',
+  )
+} else if (openerSites.length > 1) {
+  const where = openerSites.map((s) => `${s.rel}:${s.line}`).join(' · ')
+  report(
+    'SR-004',
+    `事实源开面是**单槽**，却登记了 ${openerSites.length} 家（${where}）——` +
+      '`declared_fact_source_opener()` 只取迭代到的第一个，其余是**静默死码**（谁生效由链接顺序决定）。' +
+      '先把重复处置设计出来（按什么分派），再登记第二个；迁移不许靠链接顺序决定谁生效（D-458）',
+  )
+} else if (openerSites[0].rel !== 'crates/symbio-plugin-session/src/store/fact_source.rs') {
+  notes.push(
+    `事实源开面登记点已不在 session（${openerSites[0].rel}:${openerSites[0].line}）——` +
+      '存储换 owner 真的动过；请核对 D-451 边三的读数与寄存区补落点是否跟着搬',
+  )
+}
+
 // ==================== --breakdown（读数，不是判据） ====================
 
 /**
@@ -348,6 +415,19 @@ function isTestSrc(abs) {
   return name.endsWith('.test.rs') || name === 'tests.rs'
 }
 
+/**
+ * 一份源码的**内容行数**（与 `wc -l` 同一口径）。
+ *
+ * 原先这里写的是 `text.split('\n').length`——那对每个以换行结尾的文件多算 1 行，
+ * 56 个文件就是 56 行虚高（`D-458`：读数的分母必须是它声称的那个数，与 `D-454`
+ * 同一条纪律）。空文件记 0 行，不记 1 行。
+ */
+function locOf(text) {
+  if (text.length === 0) return 0
+  const body = text.endsWith('\n') ? text.slice(0, -1) : text
+  return body.split('\n').length
+}
+
 function printCoverage() {
   const rows = COVERAGE_BUCKETS.map((b) => ({ ...b, loc: 0, files: [] }))
   const other = { label: '没有归属的其余代码', loc: 0, files: [] }
@@ -355,7 +435,7 @@ function printCoverage() {
   for (const f of files) {
     if (isTestSrc(f)) continue
     const rel = path.relative(srcDir, f).split(path.sep).join('/')
-    const loc = fs.readFileSync(f, 'utf8').split('\n').length
+    const loc = locOf(fs.readFileSync(f, 'utf8'))
     total += loc
     const hit = rows.find((b) => b.match(rel))
     const target = hit ?? other
@@ -396,7 +476,8 @@ if (errors.length) {
 console.log(
   `${green('✓')} SR-001 豁免账零余量：${exemption.symbols.length} 条符号在 session 源码里都有真实用法\n` +
     `${green('✓')} SR-002 只许降：${exemption.symbols.length} 条 ≤ 基线 ${SYMBOL_BASELINE}\n` +
-    `${green('✓')} SR-003 豁免自洽：到期日 ${exemption.expires} · ${exemption.retire}`,
+    `${green('✓')} SR-003 豁免自洽：到期日 ${exemption.expires} · ${exemption.retire}\n` +
+    `${green('✓')} SR-004 事实源开面单槽：1 家（${openerSites[0].rel}:${openerSites[0].line}）`,
 )
 for (const n of notes) console.log(dim(`  · ${n}`))
 if (BREAKDOWN) printBreakdown(exemption.symbols)
