@@ -13,7 +13,7 @@
 //! - 全仓**没有** `impl RoundOutput`，三个读方法连同它们的调用点一起消失；
 //! - `loop` / `session` 的生产代码**零处**提到这五个名字——会话侧读的是端口执行体
 //!   落下的**事实载荷键**（`usage` / `spend` / `reason` / `truncated`），见
-//!   `crates/symbio-plugin-session/src/token_ledger.rs` 与 `spend_ledger.rs`；
+//!   `crates/symbio-plugin-model/src/ledger.rs`（两本账随写方走，`D-461`）；
 //! - 剩下的读者全在本插件：`stream.rs` 造、`bound_provider.rs` 填、`port.rs` 折成事实、
 //!   `tool_accumulator.rs` 累积、四个协议适配归一化 `finish`。
 //!
@@ -98,8 +98,8 @@ pub struct ModelUsage {
 /// ## 为什么币种跟着金额走
 ///
 /// 价格是**配置**（用户可以换供应商、指向自建端点），币种由配置说，不能在这里
-/// 猜或换算。不同币种的金额没有可加性，账本因此按币种分桶（见
-/// `symbio-plugin-session` 的 `spend_ledger`）。
+/// 猜或换算。不同币种的金额没有可加性，账本因此按币种分桶（见本插件的
+/// `ledger.rs`：金额按币种分桶、桶内按主体摊开）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelSpend {
     /// 金额，单位 1e-9 个货币单位（价格 × token 一次性折算后四舍五入）。

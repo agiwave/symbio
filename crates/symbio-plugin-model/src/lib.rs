@@ -33,6 +33,8 @@ mod bound_provider;
 mod debt;
 mod detail;
 mod http;
+/// 本插件写的那两本账（用量 / 金额）：写方在此，折叠也在此（`D-461`）。
+mod ledger;
 mod message_builder;
 mod model_providers;
 mod plugin;

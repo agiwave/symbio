@@ -472,7 +472,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
     ReadingPanel {
         title: "会话读数".into(),
         subtitle: Some(stats.session_id.clone()),
-        sections: match (usage_section(stats), capability_section(stats)) {
+        sections: match (usage_section(&stats.reports), capability_section(stats)) {
             (Some(usage), Some(capability)) => {
                 vec![
                     perf,
@@ -588,9 +588,21 @@ fn preview(value: &serde_json::Value) -> String {
 /// ## 钱为什么按币种分行
 ///
 /// 金额只在同一币种内可加（兑换率不是事实源里的东西）。一个币种一行，
-/// 行数由账本的币种数决定；币种顺序由 `spend_ledger` 的 BTreeMap 给。
-pub(super) fn usage_section(stats: &SessionStats) -> Option<ReadingSection> {
-    let t = &stats.tokens;
+/// 行数由账本的币种数决定；币种顺序由 `model` 那边 `by_currency` 的 BTreeMap 给。
+///
+/// ## 入参为什么只是那两格报表（`D-452` / `D-461`）
+///
+/// 本段只读 `usage` / `spend` 两个 `slot`，其余各列一概不碰。收成「整份读数」会让
+/// 判据的入参面比比较面宽，也会让测试必须造一份完整的 `SessionStats`——而入参
+/// **恰好就是它比较的那两格**时，测试只需造这两格。
+pub(super) fn usage_section(
+    reports: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Option<ReadingSection> {
+    // 两列是 `model` 的报表（`D-461`）：本插件按 `slot` 取，不持有也不重算它们的账。
+    // 取不到（没链接 owner / 登记表不合法）⇒ `Null` ⇒ 下面读成「一次实测都没有」，
+    // 整段不出——与「有账但是零」由 `calls` 分辨，不在这里补数。
+    const NULL: serde_json::Value = serde_json::Value::Null;
+    let t = reports.get("usage").unwrap_or(&NULL);
     let calls = t.get("calls").and_then(|v| v.as_u64()).unwrap_or(0);
     let mut rows = Vec::new();
 
@@ -642,7 +654,12 @@ pub(super) fn usage_section(stats: &SessionStats) -> Option<ReadingSection> {
     // 钱：一个币种一行。`by_currency` 为空 ⇒ 一行都没有（不是「0 元」）；
     // 币种不合计（没有汇率，跨币种求和是编一个数）。顺序由视图的 BTreeMap 给。
     let mut has_money = false;
-    if let Some(by_currency) = stats.spend.get("by_currency").and_then(|v| v.as_object()) {
+    if let Some(by_currency) = reports
+        .get("spend")
+        .unwrap_or(&NULL)
+        .get("by_currency")
+        .and_then(|v| v.as_object())
+    {
         for bucket in by_currency.values() {
             let currency = bucket
                 .get("currency")

@@ -43,7 +43,9 @@ fn submitted_declarations() -> symbio_plugin_api::PluginDeclarations<'static> {
     symbio_plugin_api::PluginDeclarations {
         events: EVENTS,
         facts: &[],
-        views: &[],
+        // 两本账的视图（`D-461`）：本插件写 `response.usage` / `response.spend`，
+        // 折叠也在这里；会话的读数出口按 `slot` 收，不认识它们的形状。
+        views: crate::ledger::VIEWS,
         // 端口声明仍在环侧（步二搬走）；本插件先只交事实名。
         ports: &[],
         actors: Vec::new(),

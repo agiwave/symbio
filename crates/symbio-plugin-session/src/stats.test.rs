@@ -1642,185 +1642,110 @@ fn transcript_column_surfaces_tool_rows() {
     );
 }
 
-// ── 用量列与面板那一段（后端半边）──────────────────────────────────────
+// ── 用量那一段（排版半边）────────────────────────────────────────────
+//
+// 口径（哪些应答进账、缺字段怎么跳、币种怎么归并）已经随写方搬到
+// `crates/symbio-plugin-model/src/ledger.rs`，判据在 `ledger.test.rs`。
+// 这里只钉本插件这一半：**按 `slot` 取两格报表，排成那一段**。
+//
+// 「列真的挂到出口上」不在本进程判：这里不链接 `model`（E-009），`reports()` 恒空，
+// 任何「出口有 usage 键」的断言都会退化成恒真。那条判据在全装配的
+// `crates/symbio/src/report_columns_acceptance.test.rs`（slot 集合 == 出口键集合）。
 
-/// 一条 `response` 事实（端口 / 主题 / 可选实测用量）。
-fn resp_event(id: &str, port: &str, principal: &str, usage: Option<(u64, Option<u64>)>) -> Event {
-    let mut payload = serde_json::json!({
-        "port": port,
-        "id": id,
-        "attempt": 1,
-        "principal": principal,
-        // 夹具模拟环的盖章：只有模型往返的债行声明「进用量 / 金额台账」。
-        "stamp": if port == "model" {
-            serde_json::json!({ "role": "reader", "usage": true, "spend": true })
-        } else {
-            serde_json::json!({ "role": "internal" })
-        },
-    });
-    if let Some((input, output)) = usage {
-        let mut u = serde_json::json!({ "input": input });
-        if let Some(o) = output {
-            u["output"] = serde_json::json!(o);
-        }
-        payload["usage"] = u;
+/// 造一份只有 `usage` / `spend` 两格的报表表——这正是 [`usage_section`] 的全部入参
+/// （`D-452`：入参面不许比比较面宽）。
+fn reports_of(
+    usage: Option<serde_json::Value>,
+    spend: Option<serde_json::Value>,
+) -> std::collections::BTreeMap<String, serde_json::Value> {
+    let mut map = std::collections::BTreeMap::new();
+    if let Some(v) = usage {
+        map.insert("usage".to_string(), v);
     }
-    Event::pending(id, "response", Entity::Scope, Verb::Asserted, "system")
-        .with_produced_by(1)
-        .with_payload(payload)
-}
-
-/// 一条**带金额**的 `response`（金额写入与用量同一次测量，见 `facts.rs`）。
-fn spend_event(id: &str, principal: &str, currency: &str, amount_nano: u64) -> Event {
-    let mut e = resp_event(id, "model", principal, Some((10, Some(5))));
-    e.payload["spend"] = serde_json::json!({
-        "amount_nano": amount_nano,
-        "currency": currency,
-    });
-    e
-}
-
-fn wal_with(tag: &str, events: Vec<Event>) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("symbio-stats-{}-{tag}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("临时目录");
-    let wal = dir.join(super::super::paths::V2_WAL_FILE);
-    let store = EventWalStore::open(&wal).unwrap();
-    for e in events {
-        store.append(e).unwrap();
+    if let Some(v) = spend {
+        map.insert("spend".to_string(), v);
     }
-    wal
+    map
 }
 
-/// 判据：**「没测量」与「测到零」不是一件事**。
-///
-/// 三件事一起才叫判据：
-///
-/// 1. 只有带 `usage` 键的 `response{port=model}` 进账——不带用量的应答既不贡献
-///    token，也不进 `calls`（`calls` 数的是「测到过几次」，不是「发了几次请求」）；
-/// 2. 只报了一侧（有的协议只有 `output_tokens`）时另一侧读 0 而不是丢条目；
-/// 3. 一次都没测到 ⇒ 面板上空**没有**「用量」这一段——写一行「输入 0」等于替
-///    provider 编一个它没给的数（与上下文水位缺数整条不出现同一条纪律）。
+/// 判据：**「没测量」与「测到零」不是一件事**——`calls` 是「测到过几次」，
+/// 为 0 时整段不出现（写一行「输入 0」等于替 provider 编一个它没给的数）。
 #[test]
-fn the_usage_column_counts_only_measured_responses() {
-    let wal = wal_with(
-        "token",
-        vec![
-            resp_event("m-r0", "model", "session/main", Some((1000, Some(200)))),
-            resp_event("m-r1", "model", "sub/worker", Some((500, None))),
-            // provider 没报 `usage`：不进账。
-            resp_event("m-r2", "model", "session/main", None),
-            // 别的端口的应答不带用量：混进来会把「一次往返」算成一次模型调用。
-            resp_event("c-a", "tool", "session/main", None),
-        ],
+fn the_usage_section_counts_only_measured_responses() {
+    let reports = reports_of(
+        Some(serde_json::json!({
+            "input": 1500,
+            "output": 200,
+            "calls": 2,
+            "by_principal": {
+                "session/main": { "principal": "session/main", "input": 1000, "output": 200, "measured": 1 },
+                "sub/worker": { "principal": "sub/worker", "input": 500, "output": 0, "measured": 1 },
+            },
+        })),
+        None,
     );
 
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(got.tokens["calls"], serde_json::json!(2), "{}", got.tokens);
-    assert_eq!(got.tokens["input"], serde_json::json!(1500));
-    assert_eq!(got.tokens["output"], serde_json::json!(200));
-    // 只报一侧的那一笔：另一侧是 0，条目仍在（按主体摊得开）。
+    let usage = super::usage_section(&reports).expect("测到过用量就必须有这一段");
     assert_eq!(
-        got.tokens["by_principal"]["sub/worker"]["output"],
-        serde_json::json!(0)
-    );
-    assert_eq!(
-        got.tokens["by_principal"]["sub/worker"]["measured"],
-        serde_json::json!(1)
+        usage.title.as_deref(),
+        Some("用量"),
+        "没有钱的行就不预告花费"
     );
 
-    let usage = got
-        .panel
-        .sections
-        .iter()
-        .find(|s| s.title.as_deref() == Some("用量"))
-        .expect("测到过用量就必须有这一段");
-    let total = usage
-        .rows
-        .iter()
-        .find(|r| r.label == "合计")
-        .expect("有合计行");
+    let row = |label: &str| {
+        usage
+            .rows
+            .iter()
+            .find(|r| r.label == label)
+            .unwrap_or_else(|| panic!("缺少 {label} 行：{:?}", usage.rows))
+    };
+    assert_eq!(row("输入").value, "1.5k");
+    assert_eq!(row("输出").value, "200");
     assert_eq!(
-        total.value, "1.7k",
+        row("合计").value,
+        "1.7k",
         "1500 + 200 走 format_tokens 的唯一实现"
     );
-
-    // 会话头那一格与这一段是**同一次装配**（两处调 `usage_section` 一个函数）：
-    // 行必须逐行相等。差一行就是两份口径，而两份口径漂了没人会红——
-    // 界面上只是「抽屉里四个数、头上一个数」，两边都自称是同一个会话的用量。
-    assert_eq!(
-        got.usage.as_ref().map(|s| &s.rows),
-        Some(&usage.rows),
-        "会话头的用量格必须与面板里那一段同源"
+    // 多主体才逐条摊开：单主体时上面的合计就是全部。
+    assert!(
+        row("按主体").value.contains("sub/worker"),
+        "两个主体要摊开：{:?}",
+        row("按主体")
     );
 
-    // 反向：一条带用量的都不给 ⇒ 整段不出现。
-    let none = wal_with(
-        "token-none",
-        vec![resp_event("m-r0", "model", "session/main", None)],
-    );
-    let bare = read_at(&none, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(bare.tokens["calls"], serde_json::json!(0));
-    assert!(
-        !bare
-            .panel
-            .sections
-            .iter()
-            .any(|s| s.title.as_deref() == Some("用量")),
-        "一次都没测到就不该有这一段：{:?}",
-        bare.panel.sections
+    // 反向：一次都没测到 ⇒ 整段不出现。
+    let none = reports_of(
+        Some(serde_json::json!({ "input": 0, "output": 0, "calls": 0, "by_principal": {} })),
+        None,
     );
     assert!(
-        bare.usage.is_none(),
-        "缺数时会话头那一格整格不出现，而不是画一条全零的读数"
+        super::usage_section(&none).is_none(),
+        "calls == 0 时不画一条全零的读数"
     );
 }
 
-/// 判据：钱是**第三种量**——按币种分桶、桶内按主体摊开；缺席不冒充 0 元。
-///
-/// 1. 同一币种跨主体相加，不同币种各自一桶（币种顺序由 BTreeMap 给）；
-/// 2. 面板一个币种一行（`花费 · USD`），金额由产者格式化到 1e-4；
-/// 3. 会话头那一格与面板那一段仍是**同一次装配**（逐行相等）。
+/// 判据：钱是**第三种量**——一个币种一行、币种不合计、零金额仍算一次带定价的往返。
 #[test]
-fn the_spend_column_is_grouped_by_currency_and_principals() {
-    let wal = wal_with(
-        "spend",
-        vec![
-            spend_event("m-r0", "session/main", "usd", 1_500_000),
-            spend_event("m-r1", "sub/worker", "  USD ", 500_000),
-            spend_event("m-r2", "session/main", "CNY", 12_345_000),
-            // 明确免费：币种在、金额 0 —— 进账（charges）但不加数。
-            spend_event("m-r3", "session/main", "CNY", 0),
-        ],
+fn the_usage_section_reports_one_row_per_currency() {
+    let reports = reports_of(
+        Some(serde_json::json!({
+            "input": 10, "output": 5, "calls": 1,
+            "by_principal": { "session/main": { "principal": "session/main", "input": 10, "output": 5, "measured": 1 } },
+        })),
+        Some(serde_json::json!({
+            "by_currency": {
+                "CNY": { "currency": "CNY", "amount_nano": 12_345_000, "charges": 2, "by_principal": {} },
+                "USD": { "currency": "USD", "amount_nano": 2_000_000, "charges": 2, "by_principal": {} },
+            },
+        })),
     );
 
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    let usd = &got.spend["by_currency"]["USD"];
+    let section = super::usage_section(&reports).expect("有钱的行就要出这一段");
     assert_eq!(
-        usd["amount_nano"],
-        serde_json::json!(2_000_000),
-        "{}",
-        got.spend
+        section.title.as_deref(),
+        Some("用量与花费"),
+        "有钱的行时标题要说出「花费」"
     );
-    assert_eq!(usd["charges"], serde_json::json!(2));
-    assert_eq!(
-        usd["by_principal"]["sub/worker"]["amount_nano"],
-        serde_json::json!(500_000)
-    );
-    let cny = &got.spend["by_currency"]["CNY"];
-    assert_eq!(cny["amount_nano"], serde_json::json!(12_345_000));
-    assert_eq!(
-        cny["charges"],
-        serde_json::json!(2),
-        "零金额也是一次带定价的往返"
-    );
-
-    let section = got
-        .panel
-        .sections
-        .iter()
-        .find(|s| s.title.as_deref() == Some("用量与花费"))
-        .expect("有钱的行时标题要说出「花费」");
     let row = |label: &str| {
         section
             .rows
@@ -1830,36 +1755,44 @@ fn the_spend_column_is_grouped_by_currency_and_principals() {
     };
     assert_eq!(row("花费 · USD").value, "0.0020");
     assert_eq!(row("花费 · CNY").value, "0.0123");
+    let labels: Vec<&str> = section
+        .rows
+        .iter()
+        .filter(|r| r.label.starts_with("花费"))
+        .map(|r| r.label.as_str())
+        .collect();
     assert_eq!(
-        got.usage.as_ref().map(|s| &s.rows),
-        Some(&section.rows),
-        "会话头的用量格必须与面板里那一段同源"
+        labels,
+        vec!["花费 · CNY", "花费 · USD"],
+        "一个币种一行，顺序由账本的 BTreeMap 给，不跨币种合计"
     );
 }
 
-/// 有用量、没定价 ⇒ 只有「用量」三行：不凭空写一行「0 元」，标题也不预告花费。
+/// 判据：有用量、没定价 ⇒ 只有「用量」三行：不凭空写一行「0 元」。
 #[test]
 fn usage_without_pricing_does_not_report_zero_money() {
-    let wal = wal_with(
-        "spend-none",
-        vec![resp_event(
-            "m-r0",
-            "model",
-            "session/main",
-            Some((1000, Some(200))),
-        )],
+    let reports = reports_of(
+        Some(serde_json::json!({
+            "input": 1000, "output": 200, "calls": 1,
+            "by_principal": {},
+        })),
+        Some(serde_json::json!({ "by_currency": {} })),
     );
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
-    assert_eq!(got.spend["by_currency"], serde_json::json!({}));
-    let section = got
-        .panel
-        .sections
-        .iter()
-        .find(|s| s.title.as_deref() == Some("用量"))
-        .expect("没定价不影响 token 那三行");
+    let section = super::usage_section(&reports).expect("没定价不影响 token 那三行");
+    assert_eq!(section.title.as_deref(), Some("用量"));
     assert!(
         section.rows.iter().all(|r| !r.label.starts_with("花费")),
         "没定价就没有金额可报：{:?}",
         section.rows
+    );
+}
+
+/// 判据：**没链接 owner 时不编数**——两格都不在 ⇒ 整段不出现（不是「0 token」）。
+#[test]
+fn an_absent_report_reads_as_no_usage_at_all() {
+    let empty = std::collections::BTreeMap::new();
+    assert!(
+        super::usage_section(&empty).is_none(),
+        "报表缺席 ⇒ 一段都不出；读方不替 owner 猜空形状"
     );
 }

@@ -1054,7 +1054,7 @@ fn outcome_payload(
             .collect::<Vec<_>>());
         payload["calls"] = serde_json::json!(dispatch_calls(request, &o.tool_calls));
         // 实测用量：只写测到的那一侧；缺席不写 `usage: null`（与环侧 `output_fields`
-        // 同一口径，`token_ledger` 按 `measured` 数条数）。
+        // 同一口径，本插件的 `ledger.rs` 按 `measured` 数条数）。
         if let Some(usage) = o.usage.as_ref() {
             if usage.input.is_some() || usage.output.is_some() {
                 let mut measured = serde_json::Map::new();

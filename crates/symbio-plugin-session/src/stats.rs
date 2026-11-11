@@ -60,9 +60,6 @@ use symbio_sdk::projection::transcript::transcript;
 
 use crate::projections::checkpoint::checkpoint;
 
-use super::spend_ledger::spend_ledger;
-use super::token_ledger::token_ledger;
-
 use super::plugin::SessionPlugin;
 use super::route_guard::{require_sid, viewer_of};
 use super::stats_reading::{
@@ -116,39 +113,10 @@ pub(crate) struct SessionStats {
     /// `capability_views` 的可诊断缺席说明原因；读方不替 owner 猜空形状。
     #[serde(flatten)]
     pub reports: std::collections::BTreeMap<String, serde_json::Value>,
-    /// 用量台账（`token_ledger` 视图原样序列化）：`{ by_principal: { <主体>: {
-    /// principal, input, output, measured } }, input, output, calls }`，按主体字典序。
-    ///
-    /// ## 「没测量」与「测到零」
-    ///
-    /// `calls: 0` + 三个零 = 这份事实源里没有一次带实测用量的应答（provider 没报
-    /// `usage`）；它与「每次都用了 0 个 token」由 `calls` 分辨，不靠补 0 编一个数
-    /// ——与 `context_watermark` 缺数整条不出现是同一条纪律。
-    ///
-    /// 钱的折算（价格 × 用量）不在这一列，它是下一列 [`Self::spend`]——本列只报
-    /// 「用了多少」，「花了多少钱」由价格配置决定（不按模型名猜）。
-    pub tokens: serde_json::Value,
-    /// 金额台账（`spend_ledger` 视图原样序列化）：
-    /// `{ by_currency: { <币种>: { currency, amount_nano, charges,
-    /// by_principal: { <主体>: { principal, amount_nano, charges } } } } }`，
-    /// 币种与主体均字典序。
-    ///
-    /// ## 与 [`Self::tokens`] / 报表列 `cost` 是三列
-    ///
-    /// `tokens` 是**用量**（provider 实测），报表列 `cost` 是**时间**（`cost_ms`），
-    /// 本列是**钱**（价格 × 用量）。钱由价格折算，而价格是 Provider 配置
-    /// （`ModelProviderConfig.pricing`，每个端点自己填）——所以本列的存在性取决于
-    /// 配置，不是取决于 token 有没有测到：没配价格时它整列是
-    /// `{ by_currency: {} }`（有据的空），token 列照旧有数。
-    ///
-    /// ## 「没定价」与「明确免费」
-    ///
-    /// `by_currency` 为空 = 这份事实源里没有一条带金额的往返（没配价格 / 没测到用量）；
-    /// 某个币种的 `charges > 0` 且 `amount_nano == 0` = 那个 Provider 的单价被显式
-    /// 配成 0。两者不合并，也不靠补零冒充（与 `tokens` 的 `calls` 同一条判据）。
-    ///
-    /// 不同币种**不相加**：金额只在同一币种内可加，汇率不是事实源里的东西。
-    pub spend: serde_json::Value,
+    // 用量与金额两列已随写方走（`D-461`）：`model` 写 `response.usage` /
+    // `response.spend`，折叠也归它；本出口按 `slot`（`usage` / `spend`）从
+    // [`Self::reports`] 收，不再持有这两本账。两列的口径与空形状见
+    // `crates/symbio-plugin-model/src/ledger.rs`。
     /// 断点（`checkpoint` 视图原样序列化：`last_seq` / `event_count` /
     /// `kind_counts`——末两项就是「这一格里到底有多少事实」）。
     pub checkpoint: serde_json::Value,
@@ -214,7 +182,7 @@ pub(crate) struct SessionStats {
     ///
     /// 未冻结 / 已声明但没实现分别报 `not_sealed` / `unknown`
     /// （词表在 `ViewUnavailable::reason`），不折叠成空值——「没算出来」与「算出来是空」
-    /// 必须分得开（与 `tokens.calls` 同一条纪律）。读侧没有「超预算」这一态：切片给多长
+    /// 必须分得开（与 `usage.calls` 同一条纪律）。读侧没有「超预算」这一态：切片给多长
     /// 就折多长，`cost` 只约束环内窗口求值（`D-284`）。
     ///
     /// 归**四列**那一族：与其余各列同一份切片、同一个 as-of；`may_read = false`
@@ -366,17 +334,11 @@ pub(crate) fn read(
     // 空形状（空形状住在 owner 那里）。
     let reports = symbio_plugin_api::reports::read_all(&snapshot, &report_ctx);
 
-    // 以下各列仍由本插件折叠与排版（口径在 core 的投影 / 本插件的台账）。
-    // 用量列读应答载荷的 `usage`；金额列读 `spend`（价格 × 用量，写方在 adapter
-    // 边界折好）；断点列读 `checkpoint` 投影。
-    let tokens = token_ledger().read_all(&snapshot).value;
-    let spend = spend_ledger().read_all(&snapshot).value;
+    // 以下各列仍由本插件折叠与排版（口径在 core 的投影与本插件的投影）。
+    // 断点列读 `checkpoint` 投影；用量与金额两列不在这里——它们是 `model` 的报表
+    // （`D-461`），随 `reports` 一起到。
     let ck = checkpoint().read_all(&snapshot).value;
 
-    let tokens = serde_json::to_value(&tokens)
-        .map_err(|e| PluginError::InternalError(format!("用量台账序列化失败：{e}")))?;
-    let spend = serde_json::to_value(&spend)
-        .map_err(|e| PluginError::InternalError(format!("金额台账序列化失败：{e}")))?;
     let checkpoint = serde_json::to_value(&ck)
         .map_err(|e| PluginError::InternalError(format!("断点序列化失败：{e}")))?;
     // 不变量清单的词汇面（DE-024 D-203）：判据问「这个名字扮演什么角色」，答案取自
@@ -437,8 +399,6 @@ pub(crate) fn read(
         session_id: session_id.to_string(),
         has_wal,
         reports,
-        tokens,
-        spend,
         checkpoint,
         invariants,
         commitments,
@@ -451,8 +411,8 @@ pub(crate) fn read(
         usage: None,
     };
     // 会话头那一格与面板里的「用量」段同源：两处都调 `usage_section` 这**一个**函数，
-    // 入参是同一份 `reading`。分别算两次是纯函数，不产生第二份口径。
-    let usage = usage_section(&reading);
+    // 入参是同一份 `reports`。分别算两次是纯函数，不产生第二份口径。
+    let usage = usage_section(&reading.reports);
     Ok(SessionStats {
         panel: panel_of(&reading),
         usage,

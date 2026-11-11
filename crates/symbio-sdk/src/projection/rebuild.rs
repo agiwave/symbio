@@ -854,7 +854,7 @@ fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
         return Vec::new();
     };
     // 节点主体 = **写这条事实的人**（`actor`），不是载荷里的 `principal`。
-    // 后者是计费口径（谁发起这一轮，`spend_ledger` / `token_ledger` 读它），
+    // 后者是计费口径（谁发起这一轮，`model` 的两本账读它，`D-461`），
     // 拿它当发言人会把助手正文署成用户（t10：正文节点折出 `person/local`，
     // 实时面按「用户说的话」呈现，且与收束轮的答话节点主体不一致）。
     let principal = actor_principal(e);
