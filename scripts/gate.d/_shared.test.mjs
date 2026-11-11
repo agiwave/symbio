@@ -30,6 +30,7 @@ import {
   parseBaselineCells,
   ratchetVerdict,
   stringLiteralsOf,
+  sdkSymbolsIn,
 } from './_shared.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
@@ -933,4 +934,36 @@ test('55-verify：rustc 必须先**串行预热**再进并发批（否则撞 rus
     '预热项标了 `parallel: true` ⇒ 它自己也在并发批里，与要修的竞态同形',
   )
   assert.match(block, /cmd:\s*'rustc'/, '预热项不是在调 rustc —— 上面几条钉的前提变了')
+})
+
+// ================= 取法：一段 Rust 文本里「经某个 crate」的符号 =================
+//
+// E-009（用了的必须在账上）与 SR-001（账上的必须真被用）必须用**同一份**取法，否则账本
+// 可以同时多出虚账、又留下冻结的洞而两边都绿（D-454）。所以这族用例钉的是取法本身：
+// 只认路径、不认名字；只认符号、不认方法名。
+
+test('sdkSymbolsIn：`use` 树只取叶子，不看前缀模块名', () => {
+  const used = sdkSymbolsIn('use symbio_sdk::chat::chat_node::{SEG_MESSAGES, ChatNodePresentationExt};')
+  assert.deepEqual([...used].sort(), ['ChatNodePresentationExt', 'SEG_MESSAGES'])
+})
+
+test('sdkSymbolsIn：名字来自别的 crate 时零命中（这是 14 条虚账的形态）', () => {
+  const src =
+    'use symbio_kernel::chat::chat_node::{ChatNode, NodeRole}; fn f(n: ChatNode) -> NodeRole { n.role }'
+  assert.equal(sdkSymbolsIn(src).size, 0, 'kernel 的词汇记在 sdk 账上就是记错了 crate')
+})
+
+test('sdkSymbolsIn：表达式位置的 `Type::method()` 记类型、不记方法名', () => {
+  const src = [
+    'fn a(dir: &str) { symbio_sdk::plugin::PluginDir::at(dir, "session"); }',
+    'fn b() -> u64 { symbio_sdk::llm::round::llm_short_id() }',
+  ].join('\n')
+  const used = sdkSymbolsIn(src)
+  assert.ok(used.has('PluginDir'), `方法名不是被依赖的东西：${[...used]}`)
+  assert.ok(!used.has('at'), `方法名不是被依赖的东西：${[...used]}`)
+  assert.ok(used.has('llm_short_id'), `模块里的自由函数照旧算符号：${[...used]}`)
+})
+
+test('sdkSymbolsIn：`as` 别名只认左侧', () => {
+  assert.deepEqual([...sdkSymbolsIn('use symbio_sdk::clock::ClockNow as Now;')], ['ClockNow'])
 })

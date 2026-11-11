@@ -57,6 +57,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from './color.mjs'
+import { sdkSymbolsIn } from './gate.d/_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -79,8 +80,11 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
  * 2026-11-11（同批）：100 → **97**，三条「只在测试里出现」的符号改走门面（D-453）：
  * `VDFS_PARENT_ADDR` / `vdfs_context` / `production_matrix` 在生产侧本来就有门面消费方，
  * 会话的测试是在模拟容器，取字就该与容器走同一条路。
+ *
+ * 2026-11-11（同批校准）：97 → **83**，SR-001 从「名字出现」改成「路径命中」（D-454）。
+ * 14 条虚账是记错了 crate 的 kernel 词汇与一条方法名（`at`），不是余量。真实依赖面一直是 83。
  */
-const SYMBOL_BASELINE = 97
+const SYMBOL_BASELINE = 83
 
 const errors = []
 const notes = []
@@ -143,18 +147,24 @@ if (exemption && files) {
   if (!Array.isArray(exemption.symbols)) {
     report('SR-002', `${EXEMPTION_REL} 的 \`symbols\` 不是数组——账本形状不对，条数无从判`)
   } else {
-    const corpus = files.map((f) => stripComments(fs.readFileSync(f, 'utf8'))).join('\n')
-    const stale = exemption.symbols.filter((sym) => {
-      // 词边界命中：避免 `PRINCIPAL_REFLEX` 被 `PRINCIPAL_REFLEXIVE` 之外的更长名命中。
-      const re = new RegExp(`\\b${sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
-      return !re.test(corpus)
-    })
+    // **按路径算，不按名字算**（D-454）。这段原先按「名字在源码里出现」判，于是 13 条
+    // `symbio_kernel` 的词汇（`ChatNode` / `NodeRole` / `NodeStatus` …）被当成 sdk 依赖
+    // 冻结在账上：账本凭空多 13 条，同时给这 13 个名字开了「随便从 sdk 取」的口子
+    // （E-009 只判「用了的必须在账上」，名字在账上就放行）。取法与 E-009 **同一份**
+    // （`scripts/gate.d/_shared.mjs`），两处判据从此量同一件事。
+    const used = new Set()
+    for (const f of files) {
+      for (const sym of sdkSymbolsIn(stripComments(fs.readFileSync(f, 'utf8')))) used.add(sym)
+    }
+    const stale = exemption.symbols.filter((sym) => !used.has(sym))
     for (const sym of stale) {
       report(
         'SR-001',
-        `\`${sym}\` 在 \`${SESSION_SRC_REL}\` 里零命中——账本比真实依赖面宽，请同批从 ${EXEMPTION_REL} 摘掉（余量冒充进度）`,
+        `\`${sym}\` 不经 \`symbio_sdk::\` 路径命中 \`${SESSION_SRC_REL}\`——账本比真实依赖面宽，` +
+          `请同批从 ${EXEMPTION_REL} 摘掉（余量冒充进度；名字在源码里出现不算用法，见 D-454）`,
       )
     }
+
     const n = exemption.symbols.length
     if (n > SYMBOL_BASELINE) {
       report(

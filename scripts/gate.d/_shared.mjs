@@ -1172,3 +1172,123 @@ export async function autoChain(ctx, { label, steps }) {
   console.log(yellow(`      ⚠ 门禁已自动生成并暂存 ${touched.length} 个文件：${shown}`))
   return { ok: true, note: `自动生成 ${touched.length} 个文件（已暂存）` }
 }
+
+// ── Rust 源码 → 某个 crate 前缀下的符号集合 ─────────────────────────────
+//
+// 两处判据在量**同一件事**的两面：E-009（`plugin-entry-audit`：用了的必须在账上）与
+// SR-001（`session-retire-audit`：账上的必须真被用）。它们必须用**同一份**取法——
+// 一边按「名字出现」、一边按「路径命中」的话，账本可以同时多出虚账、又留下冻结的洞，
+// 而两边都绿（D-454 就是这么发现的：13 条 kernel 词汇挂在 sdk 账上）。
+//
+// 所以取法只在这里写一次。**改这里就是改两处判据**。
+
+/**
+ * `A::B::C` 的末段；`as` 别名只认左侧。
+ */
+function crateLeafOf(pathText) {
+  const beforeAs = pathText.split(/\bas\b/)[0]
+  const ids = [...beforeAs.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)]
+    .map((m) => m[0])
+    .filter((w) => w !== 'self' && w !== 'super' && w !== 'crate')
+  return ids.length ? ids[ids.length - 1] : null
+}
+
+/** 顶层逗号切分（花括号内的逗号不切）。 */
+function crateSplitTop(text) {
+  const parts = []
+  let depth = 0
+  let cur = ''
+  for (const ch of text) {
+    if (ch === '{') depth++
+    else if (ch === '}') depth--
+    if (ch === ',' && depth === 0) {
+      parts.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  if (cur.trim()) parts.push(cur)
+  return parts
+}
+
+/** 展开一个 `use` 树（前缀之后的部分）里的叶子符号。 */
+function crateUseLeaves(tree, out) {
+  const open = tree.indexOf('{')
+  if (open >= 0) {
+    let depth = 0
+    let end = -1
+    for (let i = open; i < tree.length; i++) {
+      if (tree[i] === '{') depth++
+      else if (tree[i] === '}') {
+        depth--
+        if (depth === 0) {
+          end = i
+          break
+        }
+      }
+    }
+    if (end < 0) return
+    for (const part of crateSplitTop(tree.slice(open + 1, end))) crateUseLeaves(part, out)
+    return
+  }
+  if (tree.includes('*')) {
+    out.add('*')
+    return
+  }
+  const leaf = crateLeafOf(tree)
+  if (leaf) out.add(leaf)
+}
+
+/**
+ * 一段（**已剥注释的**）Rust 文本里经 `crate::` 取用的符号集合。
+ *
+ * 两种形态分开取：
+ * - `use crate::…::{a, b::C};` → 花括号里的**叶子**（含跨行 use 树）；
+ * - 表达式 / 类型位置的 `crate::a::b::C` → 路径末段。
+ * 后者必须先把 `use` 语句抹掉，否则 `use` 树的花括号会被误当成结构体字面量的字段。
+ *
+ * ⚠️ 只认路径，不认名字：源码里出现 `ChatNode` 不代表它来自这个 crate——它可能来自
+ * `symbio_kernel`。按名字算就是把别人的词汇记在这个 crate 的账上（D-454）。
+ */
+export function symbolsInCrate(text, crate) {
+  const prefix = `${crate}::`
+  const out = new Set()
+  for (const m of text.matchAll(/\buse\s+([^;]+);/g)) {
+    const idx = m[1].indexOf(prefix)
+    if (idx < 0) continue
+    crateUseLeaves(m[1].slice(idx + prefix.length), out)
+  }
+  const stripped = text.replace(/\buse\s+[^;]+;/g, (s) => ' '.repeat(s.length))
+  for (const m of stripped.matchAll(new RegExp('\\b' + crate + '::', 'g'))) {
+    const tail = stripped.slice(m.index + m[0].length, m.index + m[0].length + 240)
+    const path = /^\s*([A-Za-z_][A-Za-z0-9_]*(?:::\s*[A-Za-z_][A-Za-z0-9_]*)*)/.exec(tail)
+    if (!path) continue
+    const leaf = crateLeafOf(methodOwnerPath(path[1], tail.slice(path[0].length)))
+    if (leaf) out.add(leaf)
+  }
+  return out
+}
+
+/**
+ * `symbio_sdk::clock::ClockNow::now()` 里**符号是类型**、不是方法名。
+ *
+ * 只在「末段紧跟 `(`」且「末段小写、前一段大写」时把末段摘掉——这是 Rust 的命名约定，
+ * 不是猜：`…::round::llm_short_id()`（模块里的自由函数，前一段小写）照旧算 `llm_short_id`，
+ * `…::ClockNow::now()`（关联方法）算 `ClockNow`。不摘的话，账上会凭空多出一条 `now`，
+ * 而它既不在这条 crate 的账上、也不是被依赖的东西——判据会为一条方法名报红。
+ */
+function methodOwnerPath(pathText, after) {
+  if (!/^\s*\(/.test(after)) return pathText
+  const segs = pathText.split('::').map((s) => s.trim())
+  if (segs.length < 2) return pathText
+  const last = segs[segs.length - 1]
+  const prev = segs[segs.length - 2]
+  if (!/^[a-z_]/.test(last) || !/^[A-Z]/.test(prev)) return pathText
+  return segs.slice(0, -1).join('::')
+}
+
+/** `symbolsInCrate(text, 'symbio_sdk')` —— E-009 / SR-001 共用的那一条边。 */
+export function sdkSymbolsIn(text) {
+  return symbolsInCrate(text, 'symbio_sdk')
+}

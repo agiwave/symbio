@@ -90,6 +90,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
 import { blankComments, blankTestModules } from './rust-scan.mjs'
+import { sdkSymbolsIn } from './gate.d/_shared.mjs'
 // 「什么算一条路由臂」「哪些地址能被分发」由 route-facts 单一持有：本脚本与
 // `facts/current` / `facts/routes-ts` 读的是同一份实现（两份判据各写一遍正则，
 // 就会有一份开始漏掉复合臂而另一份不报）。
@@ -853,88 +854,6 @@ function todayIso() {
   const d = new Date()
   const p = (n) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
-
-/** `A::B::C` 的末段；`as` 别名只认左侧。 */
-function sdkLeafOf(pathText) {
-  const beforeAs = pathText.split(/\bas\b/)[0]
-  const ids = [...beforeAs.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)]
-    .map((m) => m[0])
-    .filter((w) => w !== 'self' && w !== 'super' && w !== 'crate')
-  return ids.length ? ids[ids.length - 1] : null
-}
-
-/** 顶层逗号切分（花括号内的逗号不切）。 */
-function sdkSplitTop(text) {
-  const parts = []
-  let depth = 0
-  let cur = ''
-  for (const ch of text) {
-    if (ch === '{') depth++
-    else if (ch === '}') depth--
-    if (ch === ',' && depth === 0) {
-      parts.push(cur)
-      cur = ''
-      continue
-    }
-    cur += ch
-  }
-  if (cur.trim()) parts.push(cur)
-  return parts
-}
-
-/** 展开一个 `use` 树（`symbio_sdk::` 之后的部分）里的叶子符号。 */
-function sdkUseLeaves(tree, out) {
-  const open = tree.indexOf('{')
-  if (open >= 0) {
-    let depth = 0
-    let end = -1
-    for (let i = open; i < tree.length; i++) {
-      if (tree[i] === '{') depth++
-      else if (tree[i] === '}') {
-        depth--
-        if (depth === 0) {
-          end = i
-          break
-        }
-      }
-    }
-    if (end < 0) return
-    for (const part of sdkSplitTop(tree.slice(open + 1, end))) sdkUseLeaves(part, out)
-    return
-  }
-  if (tree.includes('*')) {
-    out.add('*')
-    return
-  }
-  const leaf = sdkLeafOf(tree)
-  if (leaf) out.add(leaf)
-}
-
-/**
- * 一段（已剥注释的）Rust 文本里用到的 `symbio_sdk` 符号集合。
- *
- * 两种形态分开取：
- * - `use symbio_sdk::…::{a, b::C};` → 花括号里的**叶子**（含跨行 use 树）；
- * - 表达式 / 类型位置的 `symbio_sdk::a::b::C` → 路径末段。
- * 后者必须先把 `use` 语句抹掉，否则 `use` 树的花括号会被误当成结构体字面量的字段。
- */
-function sdkSymbolsIn(text) {
-  const out = new Set()
-  for (const m of text.matchAll(/\buse\s+([^;]+);/g)) {
-    const idx = m[1].indexOf('symbio_sdk::')
-    if (idx < 0) continue
-    sdkUseLeaves(m[1].slice(idx + 'symbio_sdk::'.length), out)
-  }
-  const stripped = text.replace(/\buse\s+[^;]+;/g, (s) => ' '.repeat(s.length))
-  for (const m of stripped.matchAll(/\bsymbio_sdk::/g)) {
-    const tail = stripped.slice(m.index + m[0].length, m.index + m[0].length + 240)
-    const path = /^\s*([A-Za-z_][A-Za-z0-9_]*(?:::\s*[A-Za-z_][A-Za-z0-9_]*)*)/.exec(tail)
-    if (!path) continue
-    const leaf = sdkLeafOf(path[1])
-    if (leaf) out.add(leaf)
-  }
-  return out
 }
 
 /**

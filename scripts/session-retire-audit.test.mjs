@@ -110,7 +110,30 @@ test('SR-001：账上一条符号零命中 ⇒ 红并点名（余量冒充进度
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /SR-001.*`NeverUsed`/s)
-    assert.match(r.out, /零命中/)
+    assert.match(r.out, /不经 .*symbio_sdk::.* 路径命中/)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('SR-001：名字在源码里出现、但只走 kernel 路径 ⇒ 红（按路径判，不按名字）', () => {
+  const files = cleanFiles()
+  files[`${SESSION_SRC_REL}/lib.rs`] = [
+    'use symbio_sdk::ClockNow;',
+    'use symbio_kernel::chat::chat_node::ChatNode;',
+    'pub fn tick(n: ChatNode) -> u64 { ClockNow::now() }',
+    '',
+  ].join('\n')
+  const box = sandbox(
+    withExemption(files, (d) => {
+      d.symbols = ['ClockNow', 'ChatNode']
+    }),
+  )
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /SR-001.*`ChatNode`/s)
+    assert.doesNotMatch(r.out, /`ClockNow`/, '真用的那条不该被点名')
   } finally {
     box.cleanup()
   }
@@ -136,8 +159,8 @@ test('SR-001：符号只出现在注释里 ⇒ 仍红（注释不是用法）', 
 })
 
 test('SR-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', () => {
-  // 基线是 97：造 98 条**都真被用**的符号，把 SR-001 摘干净，只看 SR-002。
-  const symbols = Array.from({ length: 98 }, (_, i) => `Sym${i}`)
+  // 基线是 83：造 84 条**都真被用**的符号，把 SR-001 摘干净，只看 SR-002。
+  const symbols = Array.from({ length: 84 }, (_, i) => `Sym${i}`)
   const files = withExemption(cleanFiles(), (d) => {
     d.symbols = symbols
   })
@@ -146,7 +169,7 @@ test('SR-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', () 
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-002.*98 条 > 基线 97/s)
+    assert.match(r.out, /SR-002.*84 条 > 基线 83/s)
     assert.doesNotMatch(r.out, /SR-001/)
   } finally {
     box.cleanup()

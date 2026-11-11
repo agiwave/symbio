@@ -68,3 +68,11 @@ exit: 豁免账 101 → 0；`scripts/exemptions/plugin-session-sdk.json` 删除�
   本体等于给同一件事留了第二条取字的路。改的是 `use` 与调用前缀，行为零变化（416 单测绿）。
   剩下真正「没有门面落点」的测试依赖（`verify` / `budget_exceeded` / `commitment_events`）
   不搬：它们读的是 core 的判据与成格口，硬搬只是把判据搬走，随边一闭合一起处理。
+- 2026-11-11（同批第三批，**校准**）：**97 → 83**（D-454）。开工前先按路径重算了一遍账，
+  发现 14 条**记错了 crate**：13 条 `symbio_kernel` 的词汇（`ChatNode` / `NodeRole` /
+  `NodeStatus` / `NodeKind` / `MessageContent` / `Parts` / `Text` / `User` / `Assistant` /
+  `Tool` / `System` / `chat_node` / `from_legacy`）与一条方法名 `at`。成因是两把尺的取法不同：
+  E-009 按路径判、SR-001 按名字判，于是「名字在源码里出现」被当成了 sdk 用法。清账的同批把
+  取法合成一份（`scripts/gate.d/_shared.mjs` 的 `sdkSymbolsIn`），SR-001 改路径级，并补了
+  「名字在、路径不在 ⇒ 红」「`Type::method()` 记类型」两组回归。**这不是进度**：真实依赖面
+  一直是 83，这一步只是把分母改对，并堵上那 14 个名字「随便从 sdk 取」的冻结口子。
