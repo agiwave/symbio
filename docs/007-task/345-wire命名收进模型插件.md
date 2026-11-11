@@ -7,7 +7,7 @@ track: arch
 prio: next
 created: 2026-11-11
 parent: T-342-吸收v3机制面SPRINT
-deps: [T-343-端口集搬到装配期收集]
+deps: []
 ---
 
 # wire 命名收进模型插件
