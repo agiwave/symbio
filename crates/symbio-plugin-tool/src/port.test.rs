@@ -1589,3 +1589,142 @@ fn approval_without_a_risk_level_writes_nothing() {
     let artifact = serde_json::json!({ "prompt": { "content": "随便问一句" } });
     assert!(approval_granted_draft("k1", &artifact, "call-1", "ask_user").is_none());
 }
+
+// ==================== 非法参数：端口不解释参数形状（D-450）====================
+//
+// 参数合法性由**执行体自己**判（MCP server 的 `inputSchema` / 本地工具的前置检查）：
+// 端口是零世界词的通用契约，它不知道也不该知道某个工具的 `arguments` 该长什么样。
+// 在端口层塞一份 JSON Schema 校验等于给同一件事维护两处判定（schema 与执行体），
+// 漂移形态是「校验放行的参数执行体拒绝」/「校验拒绝的参数执行体本可以跑」。
+//
+// 端口在这件事上要守的只有两条，都钉在下面：
+// 1. **不经手**：参数原样交给执行体，不解析、不补默认、不把「坏形状」换成 `{}`——
+//    换成 `{}` 就把「参数不合法」变成「参数合法但意图错了」，那才是误执行；
+// 2. **不冒充**：执行体拒收即失败事实，`success` 不写 true，正文是拒收理由。
+
+/// 夹具工具：只认 `{ "content": <string> }`，其余一律拒收——站的是真执行体那一侧。
+struct StrictTool {
+    meta: CapabilityMeta,
+    seen: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+}
+
+impl StrictTool {
+    fn meta(&self) -> CapabilityMeta {
+        self.meta.clone()
+    }
+}
+
+#[async_trait]
+impl PortExecutor for StrictTool {
+    async fn execute(&self, _exec: PortExecContext, input: PortInput) -> PortOutcome {
+        // 先记「我收到了什么」——判据 1 的证据只在这里。
+        self.seen.lock().unwrap().push(input.payload.clone());
+        match input.payload.get("content").and_then(|v| v.as_str()) {
+            Some(text) => port_result(Ok(serde_json::json!({ "content": text }))),
+            None => port_result(Err(PluginError::ValidationError(
+                "arguments.content 必须是字符串".to_string(),
+            ))),
+        }
+    }
+}
+
+/// 带一条**严格**工具行的请求上下文（同上，只是执行体自己判参数）。
+async fn ctx_with_strict_tool(
+    parent: &Arc<dyn Plugin>,
+    name: &str,
+    seen: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(Some(Weak::clone(&Arc::downgrade(parent))), None);
+    let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
+    let tool = StrictTool {
+        meta: CapabilityMeta {
+            name: name.to_string(),
+            ..Default::default()
+        },
+        seen,
+    };
+    symbio_providers::register_tool(registry.as_ref(), tool.meta(), None, Arc::new(tool)).await;
+    req.set(CAPABILITY_VISITOR, registry);
+    Arc::new(req)
+}
+
+#[tokio::test]
+async fn malformed_arguments_reach_the_executor_verbatim_and_a_rejection_never_claims_success() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ctx = ctx_with_strict_tool(&parent, "strict", seen.clone()).await;
+
+    // 正向对照：同一套夹具、同一条路径，**合法参数**必须报成功。没有它，下面那两条
+    // `success: false` 就说不清是「拒收」还是「这条路径根本不产出成功」。
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = requested_call_with(
+        ctx.clone(),
+        recorder,
+        "c0",
+        serde_json::json!([{ "id": "c0", "name": "strict", "arguments": { "content": "甲" } }]),
+    );
+    let out = ToolPort.execute(exec, input).await;
+    assert!(out.error.is_none(), "{out:?}");
+    assert_eq!(
+        out.facts[0]["success"],
+        serde_json::json!(true),
+        "合法参数必须跑通：{out:?}"
+    );
+
+    // 模型把参数写成**JSON 字符串**（有的提供方就这么发）。形状不对，但那是模型的原话：
+    // 端口既不能替它解析成对象（越权解释形状），也不能换成 `{}`（把「不合法」洗成「合法」）。
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = requested_call_with(
+        ctx.clone(),
+        recorder,
+        "c1",
+        serde_json::json!([
+            { "id": "c1", "name": "strict", "arguments": "{\"content\":\"甲\"}" }
+        ]),
+    );
+    let out = ToolPort.execute(exec, input).await;
+    assert!(
+        out.error.is_none(),
+        "工具拒收是信息性事实，不是协议失败：{out:?}"
+    );
+    assert_eq!(out.facts.len(), 1, "拒收的调用同样交回一条结果事实");
+    assert_eq!(
+        out.facts[0]["success"],
+        serde_json::json!(false),
+        "执行体没跑成的调用不许自称成功"
+    );
+    let text = out.facts[0]["result_text"].as_str().unwrap_or_default();
+    assert!(
+        text.contains("arguments.content"),
+        "失败正文必须是执行体给的拒收理由，不能是端口的通用套话：{text}"
+    );
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        &[
+            serde_json::json!({ "content": "甲" }),
+            serde_json::json!("{\"content\":\"甲\"}"),
+        ],
+        "参数原样交给执行体：不解析、不补默认、不把坏形状换成 {{}}"
+    );
+
+    // 缺 `arguments` 也一样：补 `{}` 等于替模型伪造了一份合法参数。
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = requested_call_with(
+        ctx,
+        recorder,
+        "c2",
+        serde_json::json!([{ "id": "c2", "name": "strict" }]),
+    );
+    let out = ToolPort.execute(exec, input).await;
+    assert!(out.error.is_none(), "{out:?}");
+    assert_eq!(out.facts[0]["success"], serde_json::json!(false));
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        &[
+            serde_json::json!({ "content": "甲" }),
+            serde_json::json!("{\"content\":\"甲\"}"),
+            serde_json::Value::Null
+        ],
+        "缺参数就是缺参数（`Null`），不补空对象"
+    );
+}
