@@ -11,9 +11,8 @@
 use super::*;
 use std::sync::Arc;
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
-use symbio_plugin_api::PLUGIN_ID_SESSION;
+use symbio_plugin_api::{PLUGIN_ID_SESSION, VDFS_PARENT_ADDR};
 use symbio_providers::MemoryFile;
-use symbio_sdk::keys::VDFS_PARENT_ADDR;
 use symbio_sdk::vdfs::address::absolute_addr;
 use tempfile::TempDir;
 

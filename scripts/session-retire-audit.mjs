@@ -75,8 +75,12 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
  * 2026-11-11（同日晚些）：101 → **100**，`PromptMessage` 退场（D-452）。这是边一的
  * **第一格真实进度**：判据 `verify` 的入参从线格式消息类型换成 `&[TranscriptEntry]`
  * （它只比 role / text / tool 三格），于是 session 不再引用 `PromptMessage`。
+ *
+ * 2026-11-11（同批）：100 → **97**，三条「只在测试里出现」的符号改走门面（D-453）：
+ * `VDFS_PARENT_ADDR` / `vdfs_context` / `production_matrix` 在生产侧本来就有门面消费方，
+ * 会话的测试是在模拟容器，取字就该与容器走同一条路。
  */
-const SYMBOL_BASELINE = 100
+const SYMBOL_BASELINE = 97
 
 const errors = []
 const notes = []

@@ -36,7 +36,7 @@ fn vctx() -> VdfsContext {
 fn host_vctx() -> VdfsContext {
     let req: std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> =
         std::sync::Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
-    symbio_sdk::vdfs::host::vdfs_context(&req)
+    symbio_plugin_api::vdfs_context(&req)
 }
 
 /// provider 自描述：**不含挂载名**——挂载名由容器按实例表派生
@@ -431,13 +431,13 @@ async fn creating_a_session_registers_its_principal_row_and_deleting_it_reclaims
 
     let principal = symbio_sdk::authz::principal_of(Some("t182-agent"));
     assert!(
-        symbio_sdk::authz::production_matrix().can_reply(&principal),
+        symbio_plugin_api::production_matrix().can_reply(&principal),
         "创建即登记：未部署身份拿到会话面缺省行"
     );
 
     p.delete_session_internal(sid).await.unwrap();
     assert!(
-        symbio_sdk::authz::production_matrix()
+        symbio_plugin_api::production_matrix()
             .grants_of(&principal)
             .is_empty(),
         "会话删除 ⇒ 登记行随之回收"
@@ -474,7 +474,7 @@ async fn rewriting_the_agent_identity_replaces_the_session_binding() {
 
     let old = symbio_sdk::authz::principal_of(Some("t182-rewrite-old"));
     let new = symbio_sdk::authz::principal_of(Some("t182-rewrite-new"));
-    let matrix = symbio_sdk::authz::production_matrix();
+    let matrix = symbio_plugin_api::production_matrix();
     assert!(matrix.grants_of(&old).is_empty(), "旧身份的登记随改写撤回");
     assert!(matrix.can_reply(&new), "新身份即时登记，不必等下一轮");
     p.delete_session_internal(sid).await.unwrap();
@@ -512,7 +512,7 @@ async fn a_delegated_child_is_registered_at_creation_and_reclaimed_with_its_pare
     .unwrap();
 
     let child_principal = symbio_sdk::authz::principal_of(Some("t182-child-agent"));
-    let matrix = symbio_sdk::authz::production_matrix();
+    let matrix = symbio_plugin_api::production_matrix();
     assert!(
         !matrix.can_reply(&child_principal),
         "委派取交集：worker 无发言权 ⇒ 子也无"
@@ -524,7 +524,7 @@ async fn a_delegated_child_is_registered_at_creation_and_reclaimed_with_its_pare
 
     p.delete_session_internal(parent).await.unwrap();
     assert!(
-        symbio_sdk::authz::production_matrix()
+        symbio_plugin_api::production_matrix()
             .grants_of(&child_principal)
             .is_empty(),
         "父会话删除（子会话一并删除）⇒ 子登记随子树回收"

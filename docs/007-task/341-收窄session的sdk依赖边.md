@@ -62,3 +62,9 @@ exit: 豁免账 101 → 0；`scripts/exemptions/plugin-session-sdk.json` 删除�
   session 侧只剩 `Vec<_>` 一次 `cloned()`；`SYMBOL_BASELINE` 101 → 100。
   **下一步仍按同一形态找**：先问「判据 / 读口真的比了这么多格吗」，再问「谁在消费」——
   只被测试用、且替身比判据宽的符号，往往是同一种病的下一格。
+- 2026-11-11（同批第二批）：**三条只在测试里出现的符号改走门面，100 → 97**（D-453）。
+  `VDFS_PARENT_ADDR` / `vdfs_context` / `production_matrix` 在生产里本来就走门面（容器写
+  上下文、子智能体折请求、回复闸与升格闸查授权表），会话的测试是在模拟容器，直取 sdk
+  本体等于给同一件事留了第二条取字的路。改的是 `use` 与调用前缀，行为零变化（416 单测绿）。
+  剩下真正「没有门面落点」的测试依赖（`verify` / `budget_exceeded` / `commitment_events`）
+  不搬：它们读的是 core 的判据与成格口，硬搬只是把判据搬走，随边一闭合一起处理。
