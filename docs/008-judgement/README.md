@@ -1,0 +1,48 @@
+---
+kind: judgement
+id: D-000-判定决策汇总
+title: 判定决策总览
+status: active
+projection: true
+lists: [judgement-entries=owner]
+created: 2026-11-11
+prefix: D
+label: 判定决策
+desc: 为什么这样判——取舍、理由与被否决的方案（一条决策一文档）
+---
+
+# 判定决策总览
+
+判定决策回答「为什么这样设计」：**一条裁决一个文档**，编号 `D-NNN` 就是它的身份。
+正文写取舍、理由与被否决的方案；设计文档、源码注释、守卫配置只引编号，不复述裁决。
+
+「一个事实只有一个 owner」：裁决正文只住本目录。宿主设计文档的「关键决策」节只留
+编号与一行指路，过程态记录（批次、欠账、到期豁免、收口注记）不进本目录，
+退场走 `git log`。
+
+编号沿用裁决诞生时的 `D-NNN`，因此守卫、豁免基线与源码注释里的署名不需要改写；
+`[[D-NNN]]` 由登记机制解析到本目录下的单文档。
+
+<!-- registry:summary begin -->
+<!-- list:judgement-entries owner -->
+
+> ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
+> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
+
+`judgement`（判定决策）的条目**在位存放**：文件本身就是登记，`title` 逐字等于正文首个 H1（RG-021 两面对账）。
+
+**计数**：active 0 · draft 0 · retired 0（共 0）
+
+## 现行文档（active）
+
+（无）
+
+## 草案（draft）
+
+（无）
+
+## 废止（retired）
+
+（无）
+
+<!-- registry:summary end -->
