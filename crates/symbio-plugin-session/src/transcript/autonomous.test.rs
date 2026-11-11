@@ -218,10 +218,9 @@ use crate::declarations::EVENT_SYSTEM_TRIGGERED;
 use crate::store::EventWalStore;
 use symbio_kernel::store::EventStore;
 use symbio_kernel::Seq;
-use symbio_plugin_api::events::EVENT_TASK_OPENED;
+use symbio_plugin_api::events::EVENT_TURN_DISPATCH;
 use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
 use symbio_sdk::authz::PRINCIPAL_USER;
-use symbio_sdk::invariants::budget_exceeded;
 
 /// 事实源里先放一格：触发是"从当时的状态出发"的，必须先有可指的锚。
 fn seed_root(store: &EventStore) -> u64 {
@@ -262,73 +261,75 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 
 /// DE-042 §6 验收 3 + 4：长目标超过自主层预算 → 必须被看见；预算改小 → 判定改变。
 ///
-/// 升格本身归 conation 的债与执行体（`D-386`）；这里只钉预算读数对**升格产物形状**
-/// 的反应——`task.opened` 的 `budget_ms` 就是自主层的 86.4M，没超过时读数不该报。
+/// 预算的**唯一来源**是 `turn.dispatch` 那一格（`DeclaresBudget`，`C5` 读它），所以这里
+/// 走 `check_all`——生产读侧（`stats.rs`）用的同一个入口，预算由它自己从事实里读。
+///
+/// 原先这条用例直接调 `budget_exceeded(&snapshot, Some(86.4M))`，预算由**测试自己塞**：
+/// 那样验的只是「谓词照传入的值判」，`declared_budget_ms` 读不到 `turn.dispatch` 也不会
+/// 有测试红——用例的注释声称在钉「升格产物形状 → 预算读数」，实际把最该验的那一跳绕开了
+/// （`D-455`）。
 #[test]
 fn long_goal_overrun_is_visible_and_budget_param_is_live() {
-    let store = EventStore::new();
-    let src = seed_root(&store);
-    let init = AutonomousInitiator;
-    store.append(init.trigger(src)).unwrap();
-    store
-        .append(
-            Event::pending(
-                "o-hb-1",
-                EVENT_TASK_OPENED,
-                Entity::Task,
-                Verb::Opened,
-                PRINCIPAL_AUTONOMOUS,
+    // 同一条耗时、不同档位预算 → 判定必须跟着变（预算来自事实，不是测试塞的参数）。
+    let overruns = |budget_ms: u64, cost_ms: u64| -> Vec<String> {
+        let store = EventStore::new();
+        let src = seed_root(&store);
+        // 幕级派发格：`tier` / `budget_ms` 的写侧形状照 `plugin/turn.rs`。
+        store
+            .append(
+                Event::pending(
+                    "d-hb-1",
+                    EVENT_TURN_DISPATCH,
+                    Entity::Scope,
+                    Verb::Asserted,
+                    PRINCIPAL_AUTONOMOUS,
+                )
+                .with_produced_by(src)
+                .with_payload(serde_json::json!({
+                    "root_id": "d-hb-1",
+                    "tier": "autonomic",
+                    "budget_ms": budget_ms,
+                    "principal": PRINCIPAL_AUTONOMOUS,
+                })),
             )
-            .with_produced_by(src)
-            .with_payload(serde_json::json!({
-                "task_id": "hb-1",
-                "depends_on": [],
-                "goal": "整理全年归档",
-                "budget_ms": symbio_kernel::adapters::LatencyTier::Autonomic.budget_ms(),
-            })),
-        )
-        .unwrap();
-    // 任务执行事件：耗时 90M ms > 自主层预算 86.4M。
-    store
-        .append(
-            Event::pending(
-                "g1",
-                "task.progress",
-                Entity::Task,
-                Verb::Progressed,
-                PRINCIPAL_AUTONOMOUS,
+            .unwrap();
+        store
+            .append(
+                Event::pending(
+                    "g1",
+                    "task.progress",
+                    Entity::Task,
+                    Verb::Progressed,
+                    PRINCIPAL_AUTONOMOUS,
+                )
+                .with_produced_by(src)
+                .with_cost_ms(cost_ms)
+                .with_payload(serde_json::json!({ "task_id": "hb-1" })),
             )
-            .with_produced_by(src)
-            .with_cost_ms(90_000_000)
-            .with_payload(serde_json::json!({ "task_id": "hb-1" })),
-        )
-        .unwrap();
-    let snapshot = store.range(Seq::new(0));
-    // 验收 3：超 86.4M 必须产出兜底（先被看见）。
-    let bad = budget_exceeded(
-        &snapshot,
-        Some(symbio_kernel::adapters::LatencyTier::Autonomic.budget_ms()),
-    );
-    assert_eq!(bad.len(), 1, "长目标超支必须被看见：{bad:?}");
-    // 验收 4（反向）：同一事件 70M ms（预算内）；把预算改成 60000 → 判定改变。
-    let ok_event = Event::pending(
-        "g2",
-        "task.progress",
-        Entity::Task,
-        Verb::Progressed,
-        PRINCIPAL_AUTONOMOUS,
-    )
-    .with_produced_by(src)
-    .with_cost_ms(70_000)
-    .with_payload(serde_json::json!({ "task_id": "hb-1" }));
-    let ok_events = vec![ok_event];
-    assert!(
-        budget_exceeded(&ok_events, Some(86_400_000)).is_empty(),
-        "70M 在自主层预算内"
-    );
+            .unwrap();
+        let snapshot = store.range(Seq::new(0));
+        check_all(vocab(), &snapshot)
+            .into_iter()
+            .filter(|v| v.why.contains("超出主体预算"))
+            .map(|v| v.why)
+            .collect()
+    };
+
+    // 验收 3：90M ms 超 86.4M 自主层预算 ⇒ 必须被看见。
     assert_eq!(
-        budget_exceeded(&ok_events, Some(60_000)).len(),
+        overruns(86_400_000, 90_000_000).len(),
         1,
-        "同一耗时，深挖档预算下违规"
+        "长目标超支必须被看见"
+    );
+    // 验收 4（反向）：70M ms 在同一预算内 ⇒ 不报。
+    assert!(
+        overruns(86_400_000, 70_000).is_empty(),
+        "70k 在自主层预算内"
+    );
+    // 验收 4（参数活性）：同一笔耗时，深挖档预算 60k ⇒ 判定改变。
+    assert_eq!(
+        overruns(60_000, 70_000).len(),
+        1,
+        "同一耗时、更小预算 ⇒ 违规（预算确实取自派发格）"
     );
 }

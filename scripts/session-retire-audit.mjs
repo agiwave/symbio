@@ -49,7 +49,17 @@
  *   两阶之间永远红。它在报告里把 `knife` 打出来，供人确认「这条账还有没有主人」。
  * - **本脚本不判「谁该搬去哪」**：那是 D-451 的阶次与各阶出口，不是一把尺能回答的。
  *
- * 用法：node scripts/session-retire-audit.mjs [--root=<仓库根>] [--verbose]
+ * ## `--breakdown`：账本按「住处」分解（**读数，不是判据**）
+ *
+ * 普通模式只答「还欠多少条」。这一条边的问题不是条数，而是**这些条数住在哪**：如果它们
+ * 全长在边二（装配）/ 边三（存储·转写）要搬的代码里，那么「边一先归零」就不是一条能走的
+ * 路（`D-456`）。`--breakdown` 把 82 条按 crate 目录结构分成四桶（装配面 / 存储·转写 /
+ * 两处都有 / 两处都没有）并逐条列出「两处都没有」的那些——它们才是三条边都没点到的地。
+ *
+ * 它**不改退出码、不进 GUARDS**：分组口径随目录结构漂，把它做成门禁只会得到一条天天红
+ * 的尺。要复核 `D-456` 里的数字，跑这一条命令。
+ *
+ * 用法：node scripts/session-retire-audit.mjs [--root=<仓库根>] [--verbose] [--breakdown]
  * 退出码：0 = 通过；1 = 有违规或读不出输入。
  */
 
@@ -63,6 +73,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.resolve(scriptDir, '..')
 const VERBOSE = process.argv.includes('--verbose')
+const BREAKDOWN = process.argv.includes('--breakdown')
 
 const EXEMPTION_REL = 'scripts/exemptions/plugin-session-sdk.json'
 const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
@@ -83,8 +94,11 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
  *
  * 2026-11-11（同批校准）：97 → **83**，SR-001 从「名字出现」改成「路径命中」（D-454）。
  * 14 条虚账是记错了 crate 的 kernel 词汇与一条方法名（`at`），不是余量。真实依赖面一直是 83。
+ *
+ * 2026-11-11（同批第四批）：83 → **82**，`budget_exceeded` 退场（D-455）：会话的自主层
+ * 验收原来自塞预算调谓词，改走 `check_all` 后判据自己从 `turn.dispatch` 读预算。
  */
-const SYMBOL_BASELINE = 83
+const SYMBOL_BASELINE = 82
 
 const errors = []
 const notes = []
@@ -138,7 +152,10 @@ function stripComments(text) {
 // ==================== SR-001 / SR-002 ====================
 
 const exemption = readJson(EXEMPTION_REL)
-const files = collectRs(path.join(ROOT, SESSION_SRC_REL))
+const srcDir = path.join(ROOT, SESSION_SRC_REL)
+const files = collectRs(srcDir)
+/** 每个文件里出现的 sdk 符号（与 SR-001 / E-009 同一份取法）；`--breakdown` 用它分组。 */
+const perFile = []
 if (files === null) {
   report('SR-001', `${SESSION_SRC_REL} 不存在——没有源码可量，判据没有输入`)
 }
@@ -154,7 +171,9 @@ if (exemption && files) {
     // （`scripts/gate.d/_shared.mjs`），两处判据从此量同一件事。
     const used = new Set()
     for (const f of files) {
-      for (const sym of sdkSymbolsIn(stripComments(fs.readFileSync(f, 'utf8')))) used.add(sym)
+      const syms = sdkSymbolsIn(stripComments(fs.readFileSync(f, 'utf8')))
+      for (const sym of syms) used.add(sym)
+      perFile.push({ rel: path.relative(srcDir, f).split(path.sep).join('/'), syms })
     }
     const stale = exemption.symbols.filter((sym) => !used.has(sym))
     for (const sym of stale) {
@@ -212,6 +231,62 @@ if (exemption) {
   notes.push(`到期日 ${expires}；${retire}`)
 }
 
+// ==================== --breakdown（读数，不是判据） ====================
+
+/**
+ * 账本按「住处」分解：账上每条符号被用在哪一块代码里。
+ *
+ * **这不是门禁。** 分组口径说错了只会让报告难看，不会放宽任何一条判据（`--breakdown` 的
+ * 退出码与普通模式完全一致）。它存在的唯一理由是让「这条边还剩什么」这类判断可以由一条
+ * 命令复现，而不是靠人在文档里数一遍——数错的分母比没有分母更糟（`D-454` 就是数错的产物）。
+ *
+ * 「住处」取自 crate 目录结构，不猜实现角色：
+ * - `store`：`store/`（WAL）与 `transcript/`（转写）——D-451 边三 的两块；
+ * - `asm`：`plugin.rs` / `plugin/` / `capabilities.rs` / `declarations.rs` / `options/`
+ *   ——D-451 边二 说「装配」时点名的那些面（traverse 收集、声明表、选项遍历、回合装配）；
+ * - `none`：三条边都没点到的地（命令面、统计读侧、投影）。
+ */
+const ASM_EXACT = new Set(['plugin.rs', 'capabilities.rs', 'declarations.rs'])
+const ASM_PREFIX = ['plugin/', 'options/']
+const STORE_PREFIX = ['store/', 'transcript/']
+
+function whereLives(rel) {
+  if (STORE_PREFIX.some((p) => rel.startsWith(p))) return 'store'
+  if (ASM_EXACT.has(rel) || ASM_PREFIX.some((p) => rel.startsWith(p))) return 'asm'
+  return 'other'
+}
+
+function printBreakdown(symbols) {
+  const homes = new Map(symbols.map((s) => [s, { at: new Set(), files: new Set() }]))
+  for (const { rel, syms } of perFile) {
+    const where = whereLives(rel)
+    for (const s of syms) {
+      const h = homes.get(s)
+      if (!h) continue
+      h.at.add(where)
+      h.files.add(rel)
+    }
+  }
+  const groups = [['asm', []], ['store', []], ['both', []], ['none', []]]
+  const by = Object.fromEntries(groups)
+  for (const [s, h] of homes) {
+    if (h.at.has('asm') && h.at.has('store')) by.both.push(s)
+    else if (h.at.has('asm')) by.asm.push(s)
+    else if (h.at.has('store')) by.store.push(s)
+    else by.none.push(s)
+  }
+  console.log(
+    `\n账本按「住处」分解（${symbols.length} 条）——读数，不是判据（D-456）：\n` +
+      `  只出现在 装配面（plugin.rs / plugin/ / capabilities.rs / declarations.rs / options/）  ${by.asm.length}\n` +
+      `  只出现在 存储·转写（store/ / transcript/）                                          ${by.store.length}\n` +
+      `  两处都有                                                                            ${by.both.length}\n` +
+      `  两处都没有（命令面 / 统计读侧 / 投影）                                              ${by.none.length}`,
+  )
+  for (const s of by.none.sort()) {
+    console.log(dim(`    ${s.padEnd(30)} ${[...homes.get(s).files].sort().join(' ')}`))
+  }
+}
+
 // ==================== 报告 ====================
 
 if (errors.length) {
@@ -230,4 +305,5 @@ console.log(
     `${green('✓')} SR-003 豁免自洽：到期日 ${exemption.expires} · ${exemption.retire}`,
 )
 for (const n of notes) console.log(dim(`  · ${n}`))
+if (BREAKDOWN) printBreakdown(exemption.symbols)
 process.exit(0)

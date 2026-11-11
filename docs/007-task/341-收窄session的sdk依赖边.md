@@ -2,7 +2,7 @@
 kind: task
 id: T-341-收窄session的sdk依赖边
 title: 收窄 session 的 sdk 依赖边
-status: todo
+status: doing
 track: arch
 prio: next
 parent: T-340-session退役线
@@ -13,8 +13,13 @@ created: 2026-11-11
 
 ## 内容
 
-D-451 的**边一**：把 `scripts/exemptions/plugin-session-sdk.json` 的 101 条符号收窄到 0，
-然后删掉这份豁免。它是三条边里唯一「读数已经可跑、出口已经写得出」的一条。
+D-451 的**边一**：把 `scripts/exemptions/plugin-session-sdk.json` 的 **82** 条符号收窄到 0，
+然后删掉这份豁免。
+
+**它是一条读数，不是施工段**（`D-456`）：82 条里 67 条住在边二（装配）/ 边三（存储·转写）
+要搬的代码里，它们的退场是那两条边的**结果**。本任务因此只负责两件事：① 摘掉那些「不住在
+边二/边三 代码里、且出口已经能说清」的独立残余（15 条「两处都没有」的）；② 每次边二/边三
+动完，把读数重新量一遍并核对账本。
 
 **每摘一条符号，只允许三种走法**（都是仓内已有的正路，不新造通道）：
 
@@ -32,7 +37,7 @@ D-451 的**边一**：把 `scripts/exemptions/plugin-session-sdk.json` 的 101 �
 where: `scripts/exemptions/plugin-session-sdk.json`、`crates/symbio-plugin-session/src/`、
 `crates/symbio-plugin-api/src/lib.rs`、`crates/symbio-sdk/src/`。
 
-exit: 豁免账 101 → 0；`scripts/exemptions/plugin-session-sdk.json` 删除；
+exit: 豁免账 82 → 0；`scripts/exemptions/plugin-session-sdk.json` 删除；
 `session-retire-audit` 与它的 10 条回归**同批从 `30-docs.mjs` 撤下**（它的输入没了，
 留着会变成一条永远红的守卫）；`plugin-entry-audit` 的 E-009 对 session 只剩「没有这条边」
 这一种读法。
@@ -76,3 +81,13 @@ exit: 豁免账 101 → 0；`scripts/exemptions/plugin-session-sdk.json` 删除�
   取法合成一份（`scripts/gate.d/_shared.mjs` 的 `sdkSymbolsIn`），SR-001 改路径级，并补了
   「名字在、路径不在 ⇒ 红」「`Type::method()` 记类型」两组回归。**这不是进度**：真实依赖面
   一直是 83，这一步只是把分母改对，并堵上那 14 个名字「随便从 sdk 取」的冻结口子。
+- 2026-11-11（同批第四批）：**82**（D-455）。`budget_exceeded` 退场：会话的自主层验收原先
+  自己递一个预算去调谓词（`budget_exceeded(&snapshot, Some(86.4M))`），而生产的预算读法
+  只认 `turn.dispatch` 上的 `DeclaresBudget` 角色——那条用例自称钉「预算从哪来」，实际一次
+  都没跑过那一跳。改走 `check_all`（生产读侧同一入口）后，判据自己从事实里读预算，用例
+  反而更强（新增一档「同一耗时、更小预算 ⇒ 违规」证明预算取自事实而非常量）。
+- 2026-11-11（同批）：**任务定性改了**（D-456）。`--breakdown` 量出 82 条的住处，67 条在
+  边二 / 边三 的代码里 ⇒ 本任务不再被当成「先做完才能开边二/三」的前置阶段，而是**读数**。
+  它剩下的独立残余是 15 条「两处都没有」的（命令面 6 / 统计读侧 5 / 配置 2 / 进度 1 /
+  投影 1）——每摘一条仍要回答「谁消费」。这批**一条都没摘**：它们的摘法还没写出来，
+  按 D-451 第 3 条只登记不开工。

@@ -70,8 +70,8 @@ function sandbox(files) {
   return { root, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) }
 }
 
-function run(root) {
-  const r = spawnSync(process.execPath, [script, `--root=${root}`], {
+function run(root, extra = []) {
+  const r = spawnSync(process.execPath, [script, `--root=${root}`, ...extra], {
     encoding: 'utf8',
     env: { ...process.env, NO_COLOR: '1' },
     timeout: 30_000,
@@ -159,8 +159,8 @@ test('SR-001：符号只出现在注释里 ⇒ 仍红（注释不是用法）', 
 })
 
 test('SR-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', () => {
-  // 基线是 83：造 84 条**都真被用**的符号，把 SR-001 摘干净，只看 SR-002。
-  const symbols = Array.from({ length: 84 }, (_, i) => `Sym${i}`)
+  // 基线是 82：造 83 条**都真被用**的符号，把 SR-001 摘干净，只看 SR-002。
+  const symbols = Array.from({ length: 83 }, (_, i) => `Sym${i}`)
   const files = withExemption(cleanFiles(), (d) => {
     d.symbols = symbols
   })
@@ -169,7 +169,7 @@ test('SR-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', () 
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-002.*84 条 > 基线 83/s)
+    assert.match(r.out, /SR-002.*83 条 > 基线 82/s)
     assert.doesNotMatch(r.out, /SR-001/)
   } finally {
     box.cleanup()
@@ -261,6 +261,56 @@ test('输入读不出：session 源码目录被搬走 ⇒ 红（没有源码可�
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /SR-001.*没有源码可量/s)
+  } finally {
+    box.cleanup()
+  }
+})
+
+// ================= --breakdown：账本按「住处」分解（读数，不是判据） =================
+//
+// 分解口径会随目录结构漂，所以这里钉的是**算术**：一条符号只落一个桶、四个桶的和等于
+// 账本条数。具体数字对不对由人看报告，等式由用例守。
+
+/** 取「标签 … N」那一行的 N（标签里有空格，故从尾部取）。 */
+function bucketCount(out, label) {
+  const line = out.split(String.fromCharCode(10)).find((l) => l.includes(label))
+  assert.ok(line, `报告里没有「${label}」这一行：${out}`)
+  const n = Number(line.trim().split(' ').pop())
+  assert.ok(Number.isFinite(n), `「${label}」的条数读不出：${line}`)
+  return n
+}
+
+test('--breakdown：每块代码一条符号 ⇒ 分桶互斥且合计等于条数', () => {
+  const files = cleanFiles()
+  files[`${SESSION_SRC_REL}/store/wal.rs`] = 'use symbio_sdk::ClockNow;'
+  files[`${SESSION_SRC_REL}/plugin.rs`] = 'use symbio_sdk::ReportDraft;'
+  delete files[`${SESSION_SRC_REL}/lib.rs`]
+  const box = sandbox(files)
+  try {
+    const r = run(box.root, ['--breakdown'])
+    assert.equal(r.status, 0, r.out)
+    assert.ok(r.out.includes('分解（2 条）'), r.out)
+    assert.equal(bucketCount(r.out, '只出现在 装配面'), 1, r.out)
+    assert.equal(bucketCount(r.out, '只出现在 存储'), 1, r.out)
+    assert.equal(bucketCount(r.out, '两处都有'), 0, r.out)
+    assert.equal(bucketCount(r.out, '两处都没有'), 0, r.out)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('--breakdown：同一条符号两处都出现 ⇒ 计入「两处都有」，不重复计入两侧', () => {
+  const files = cleanFiles()
+  files[`${SESSION_SRC_REL}/store/wal.rs`] = 'use symbio_sdk::ClockNow; use symbio_sdk::ReportDraft;'
+  files[`${SESSION_SRC_REL}/plugin.rs`] = 'use symbio_sdk::ReportDraft;'
+  delete files[`${SESSION_SRC_REL}/lib.rs`]
+  const box = sandbox(files)
+  try {
+    const r = run(box.root, ['--breakdown'])
+    assert.equal(r.status, 0, r.out)
+    assert.equal(bucketCount(r.out, '只出现在 存储'), 1, r.out)
+    assert.equal(bucketCount(r.out, '两处都有'), 1, r.out)
+    assert.equal(bucketCount(r.out, '只出现在 装配面'), 0, r.out)
   } finally {
     box.cleanup()
   }
