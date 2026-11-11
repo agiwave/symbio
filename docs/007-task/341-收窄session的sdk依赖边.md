@@ -13,13 +13,13 @@ created: 2026-11-11
 
 ## 内容
 
-D-451 的**边一**：把 `scripts/exemptions/plugin-session-sdk.json` 的 **82** 条符号收窄到 0，
-然后删掉这份豁免。
+D-451 的**边一**：把 `scripts/exemptions/plugin-session-sdk.json` 的 **82** 条符号**只许降**
+地管住——**不设归零**（`D-460`）。
 
 **它是一条读数，不是施工段**（`D-456`）：82 条里 67 条住在边二（装配）/ 边三（存储·转写）
-要搬的代码里，它们的退场是那两条边的**结果**。本任务因此只负责两件事：① 摘掉那些「不住在
-边二/边三 代码里、且出口已经能说清」的独立残余（15 条「两处都没有」的）；② 每次边二/边三
-动完，把读数重新量一遍并核对账本。
+要搬的代码里，但存储与地址面都随身份 `session` 留下（`D-458` / `D-459`），所以那 67 条也
+不会因为「搬走」而消失。本任务因此负责两件事：① 摘掉那些**入口只为凑一个形状而存在**的
+符号（`D-452` / `D-453` / `D-455` 那三种形态）；② 每次动过代码，把读数重新量一遍并核对账本。
 
 **每摘一条符号，只允许三种走法**（都是仓内已有的正路，不新造通道）：
 
@@ -37,10 +37,14 @@ D-451 的**边一**：把 `scripts/exemptions/plugin-session-sdk.json` 的 **82*
 where: `scripts/exemptions/plugin-session-sdk.json`、`crates/symbio-plugin-session/src/`、
 `crates/symbio-plugin-api/src/lib.rs`、`crates/symbio-sdk/src/`。
 
-exit: 豁免账 82 → 0；`scripts/exemptions/plugin-session-sdk.json` 删除；
-`session-retire-audit` 与它的 10 条回归**同批从 `30-docs.mjs` 撤下**（它的输入没了，
-留着会变成一条永远红的守卫）；`plugin-entry-audit` 的 E-009 对 session 只剩「没有这条边」
-这一种读法。
+exit: **不再是「82 → 0 + 删豁免」**（`D-460`：82 条里 15 条是其它插件也在用的 core 词汇、
+67 条随数据面留下，归零只在「会话不再使用 core 词汇」时可能，而那要么是抄类型、要么是会话
+不写字）。终态改为：
+
+- **只许降**：条数 ≤ `SYMBOL_BASELINE`（`SRA-002` 守），每摘一条同批下调；
+- **零余量**：账上每条都真被用（`SRA-001` 守），用法消失的条目当场摘掉；
+- **不得新增**：新用法即红（`E-009` 守）；
+- 豁免文件**随身份保留**，`2027-06-30` 是复核日，不是删除日。
 
 ## 处理过程
 
@@ -77,8 +81,8 @@ exit: 豁免账 82 → 0；`scripts/exemptions/plugin-session-sdk.json` 删除�
   发现 14 条**记错了 crate**：13 条 `symbio_kernel` 的词汇（`ChatNode` / `NodeRole` /
   `NodeStatus` / `NodeKind` / `MessageContent` / `Parts` / `Text` / `User` / `Assistant` /
   `Tool` / `System` / `chat_node` / `from_legacy`）与一条方法名 `at`。成因是两把尺的取法不同：
-  E-009 按路径判、SR-001 按名字判，于是「名字在源码里出现」被当成了 sdk 用法。清账的同批把
-  取法合成一份（`scripts/gate.d/_shared.mjs` 的 `sdkSymbolsIn`），SR-001 改路径级，并补了
+  E-009 按路径判、SRA-001 按名字判，于是「名字在源码里出现」被当成了 sdk 用法。清账的同批把
+  取法合成一份（`scripts/gate.d/_shared.mjs` 的 `sdkSymbolsIn`），SRA-001 改路径级，并补了
   「名字在、路径不在 ⇒ 红」「`Type::method()` 记类型」两组回归。**这不是进度**：真实依赖面
   一直是 83，这一步只是把分母改对，并堵上那 14 个名字「随便从 sdk 取」的冻结口子。
 - 2026-11-11（同批第四批）：**82**（D-455）。`budget_exceeded` 退场：会话的自主层验收原先
@@ -93,5 +97,14 @@ exit: 豁免账 82 → 0；`scripts/exemptions/plugin-session-sdk.json` 删除�
   按 D-451 第 3 条只登记不开工。
 - 2026-11-11（同批）：**本条账本的读数不变（82）**，但它的地位变了（D-458）。边三改判为
   验收条件之后，边一不再「等边三」，它只是边二（施工）与「能力面归零」这件事的读数。
-  `submit_fact_source_opener` 仍在账上——会话仍登记那一个开面，`SR-004` 的绊线盯的是
+  `submit_fact_source_opener` 仍在账上——会话仍登记那一个开面，`SRA-004` 的绊线盯的是
   「登记点恰好一家」，不是让这条符号退场。
+- 2026-11-11（同批）：**本任务的 exit 改了**（D-460）。开工前逐条查了 15 条「两处都没有」的
+  符号，发现它们**全部**在会话之外有生产消费方（`ReportDraft` 12 处、`SKILL_TAG` 12 处、
+  `commitment_events` 11 处、`ViewUnavailable` 11 处、`ApprovalGrants` 9 处、
+  `bind_inheriting` 8 处、`llm_removed_frame` 8 处……）——它们不是孤儿，是 **core 的词汇**，
+  会话只是使用者之一。加上 67 条随数据面 / 地址面留下（D-458 / D-459），「归零」写不出来。
+  所以豁免从「到期删除的欠条」改为**冻结账**：`retire` 改成「随身份保留（D-460）」、
+  `expires` 改成复核日、`SRA-003` 从「必须写删除动作」改为「写明可兑现的处置（删除，或
+  保留 / 冻结 + 依据决策号）」。**三条压力一条没松**：零余量 / 只许降 / 不得新增。
+  顺带修掉 `reason` 开头那句对已删任务号 `T-034` 的引用（`D-016` 禁止）。

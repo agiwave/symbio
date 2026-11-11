@@ -73,7 +73,6 @@
 use super::composite::broadcast_collect;
 use super::registry::PluginRegistry;
 use async_trait::async_trait;
-use std::collections::HashMap;
 use std::sync::Arc;
 use symbio_plugin_api::PLUGIN_ID_MANAGER;
 use symbio_plugin_api::{descend_addr, vdfs_host_ctx};
@@ -127,10 +126,15 @@ impl CompositeVdfs {
     ///
     /// 不缓存——子插件集合与注册内容由配置与生命周期决定，每次现取才与容器一致。
     ///
-    /// 目录名是路径首段的唯一键：**重名时保留排序后首个**并 `warn`。若不处理，
-    /// `list("")` 会给出两个同名节点而 `resolve` 只能命中一个——后来者**完全不可达**。
-    /// 因此**先排序、再去重**：胜出者由 `(order, 目录名)` 唯一确定，重名是装配
-    /// 错误，必须在日志里可见而不是静默丢弃。
+    /// 目录名是路径首段的唯一键。**唯一性由容器实例表的键保证**：`PluginRegistry`
+    /// 用 `IndexMap`，键就是目录名——VDFS 侧不做重复检查，只留一条调试断言，防止
+    /// `snapshot()` 将来被换成非键唯一的表（`D-459`）。
+    ///
+    /// 排序仍然必要：`order` 决定 `list("")` 的节点序，也决定能力收集的广播序。
+    ///
+    /// （原先这里写着「重名时保留排序后首个并 `warn`」，并配了一段去重分支。那段分支
+    /// **不可达**——输入就是键唯一的表；它让读者以为 VDFS 侧做了检查，而真正确保
+    /// 唯一的那道键在注册表里。）
     ///
     /// ## 两条收集通道，各管各的
     ///
@@ -179,21 +183,20 @@ impl CompositeVdfs {
 
         collected.sort_by(|a, b| (a.1.meta().order, &a.0).cmp(&(b.1.meta().order, &b.0)));
 
-        let mut dirs: Vec<(String, Arc<dyn Plugin>)> = Vec::with_capacity(collected.len());
-        // 目录名 → 是否已出现（仅用于重名告警）
-        let mut owners: HashMap<String, ()> = HashMap::new();
-        for (dir, p) in collected {
-            if owners.contains_key(&dir) {
-                symbio_plugin_api::plugin_warn!(
-                    "composite",
-                    "vdfs: 目录名「{dir}」被多个子插件重复注册，保留首个（其余不可达）"
-                );
-                continue;
-            }
-            owners.insert(dir.clone(), ());
-            dirs.push((dir, p));
-        }
-        Ok(dirs)
+        // 唯一性由注册表的**键**保证（`instances` 是 `IndexMap`，键就是目录名），
+        // VDFS 侧不再逐项去重——这里原先那段「重名则 `warn` 并保留首个」永远不会命中
+        // （`D-459`）。留下断言而不是检查：谁将来把 `snapshot()` 换成非键唯一的表，
+        // 调试构建会先响，而不是让某个子插件静默不可达。
+        debug_assert!(
+            collected
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == collected.len(),
+            "VDFS 子目录名必须唯一：重复只可能来自注册表被换成非键唯一的表"
+        );
+        Ok(collected)
     }
 
     /// 自身节点（`""`）——合成的目录节点，子节点为各子插件子目录

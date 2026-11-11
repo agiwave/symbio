@@ -549,7 +549,7 @@ export const GUARDS = [
   // 也照样判红——`insert` 这个原语本身仍能静默覆盖，冲突检查是承接体，不是保留它的许可。
   // 失效形态：`crates/` 下 0 份生产 `.rs` ⇒ 红（「没什么可判 ⇒ 通过」不算通过，D-280）。
   'dynamic-port-registration-audit',
-  // `session-retire-audit`（SR-001…003）判**控制面 session 退役线的进度尺没有失真**。
+  // `session-retire-audit`（SRA-001…005）判**控制面 session 退役线的进度尺没有失真**。
   // 「session 退役」被八处决策引用（D-349 / D-358 / D-413 / D-416 / D-427 / D-428 / D-438
   // / D-443 都写着「随 session 退役同批删除」），但它自己的范围与出口**从没登记过**：
   // 它挂的刀（一个任务号）早随「收口即删」消失，只剩豁免 JSON 里的一个到期日——没有出口的

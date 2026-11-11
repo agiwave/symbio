@@ -1,10 +1,10 @@
 /**
  * session-retire-audit 回归测试
  *
- * 判据面（SR-001/002/003，见 D-451）：
- *  - SR-001：豁免账里每条符号都必须在 `symbio-plugin-session/src` 里**真被用到**；
- *  - SR-002：符号条数 ≤ 基线（只许降）；
- *  - SR-003：`expires` 是**将来的**合法日期、`retire` 写明删除动作、`knife` 形如登记号。
+ * 判据面（SRA-001/002/003，见 D-451）：
+ *  - SRA-001：豁免账里每条符号都必须在 `symbio-plugin-session/src` 里**真被用到**；
+ *  - SRA-002：符号条数 ≤ 基线（只许降）；
+ *  - SRA-003：`expires` 是**将来的**合法日期、`retire` 写明删除动作、`knife` 形如登记号。
  *
  * 这把尺最危险的失效是**读数失真**：
  *   ① 余量留在账上却没人报（E-009 只判「用了的必须在账上」——正是这个单向判据让
@@ -43,7 +43,7 @@ function cleanFiles() {
         dependency: 'symbio-sdk',
         expires: '2099-12-31',
         knife: 'T-340',
-        retire: 'session 退役时同批删除本豁免',
+        retire: '随身份 `session` 保留（D-460）；条数只许降；2027-06-30 是复核日',
         reason: '夹具',
         symbols: ['ClockNow', 'ReportDraft'],
       },
@@ -57,10 +57,18 @@ function cleanFiles() {
       'pub fn tick(d: ReportDraft) -> u64 { ClockNow::now() }',
       '',
     ].join('\n'),
-    // 事实源开面：SR-004 要求**恰好一家**（D-458）。夹具给一家，与真实仓同形。
+    // 事实源开面：SRA-004 要求**恰好一家**（D-458）。夹具给一家，与真实仓同形。
     [`${SESSION_SRC_REL}/store/fact_source.rs`]: [
       'static SESSION_FACT_OPENER: SessionFactOpener = SessionFactOpener;',
       'symbio_sdk::submit_fact_source_opener!(SESSION_FACT_OPENER);',
+      '',
+    ].join('\n'),
+    // 地址根：SRA-005 要求**至多一家**（D-459）。夹具给一家（vdfs 插件那一处），与真实仓同形。
+    'crates/symbio-plugin-vdfs/src/plugin.rs': [
+      '// 根名的静态声明：字面量只在本插件内。',
+      'symbio_plugin_api::inventory::submit! {',
+      '    symbio_plugin_api::AddrRootDecl(VDFS_ADDR_ROOT)',
+      '}',
       '',
     ].join('\n'),
   }
@@ -98,15 +106,15 @@ test('干净夹具树 ⇒ 通过，且三条判据都读到输入', () => {
   try {
     const r = run(box.root)
     assert.equal(r.status, 0, r.out)
-    assert.match(r.out, /SR-001/)
-    assert.match(r.out, /SR-002/)
-    assert.match(r.out, /SR-003/)
+    assert.match(r.out, /SRA-001/)
+    assert.match(r.out, /SRA-002/)
+    assert.match(r.out, /SRA-003/)
   } finally {
     box.cleanup()
   }
 })
 
-test('SR-001：账上一条符号零命中 ⇒ 红并点名（余量冒充进度）', () => {
+test('SRA-001：账上一条符号零命中 ⇒ 红并点名（余量冒充进度）', () => {
   const box = sandbox(
     withExemption(cleanFiles(), (d) => {
       d.symbols = ['ClockNow', 'ReportDraft', 'NeverUsed']
@@ -115,14 +123,14 @@ test('SR-001：账上一条符号零命中 ⇒ 红并点名（余量冒充进度
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-001.*`NeverUsed`/s)
+    assert.match(r.out, /SRA-001.*`NeverUsed`/s)
     assert.match(r.out, /不经 .*symbio_sdk::.* 路径命中/)
   } finally {
     box.cleanup()
   }
 })
 
-test('SR-001：名字在源码里出现、但只走 kernel 路径 ⇒ 红（按路径判，不按名字）', () => {
+test('SRA-001：名字在源码里出现、但只走 kernel 路径 ⇒ 红（按路径判，不按名字）', () => {
   const files = cleanFiles()
   files[`${SESSION_SRC_REL}/lib.rs`] = [
     'use symbio_sdk::ClockNow;',
@@ -138,14 +146,14 @@ test('SR-001：名字在源码里出现、但只走 kernel 路径 ⇒ 红（按�
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-001.*`ChatNode`/s)
+    assert.match(r.out, /SRA-001.*`ChatNode`/s)
     assert.doesNotMatch(r.out, /`ClockNow`/, '真用的那条不该被点名')
   } finally {
     box.cleanup()
   }
 })
 
-test('SR-001：符号只出现在注释里 ⇒ 仍红（注释不是用法）', () => {
+test('SRA-001：符号只出现在注释里 ⇒ 仍红（注释不是用法）', () => {
   const files = cleanFiles()
   files[`${SESSION_SRC_REL}/lib.rs`] = [
     'use symbio_sdk::ClockNow;',
@@ -164,8 +172,8 @@ test('SR-001：符号只出现在注释里 ⇒ 仍红（注释不是用法）', 
   }
 })
 
-test('SR-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', () => {
-  // 基线是 82：造 83 条**都真被用**的符号，把 SR-001 摘干净，只看 SR-002。
+test('SRA-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', () => {
+  // 基线是 82：造 83 条**都真被用**的符号，把 SRA-001 摘干净，只看 SRA-002。
   const symbols = Array.from({ length: 83 }, (_, i) => `Sym${i}`)
   const files = withExemption(cleanFiles(), (d) => {
     d.symbols = symbols
@@ -175,14 +183,14 @@ test('SR-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', () 
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-002.*83 条 > 基线 82/s)
-    assert.doesNotMatch(r.out, /SR-001/)
+    assert.match(r.out, /SRA-002.*83 条 > 基线 82/s)
+    assert.doesNotMatch(r.out, /SRA-001/)
   } finally {
     box.cleanup()
   }
 })
 
-test('SR-003：到期日已过 ⇒ 红（限期豁免过期即红）', () => {
+test('SRA-003：到期日已过 ⇒ 红（限期豁免过期即红）', () => {
   const box = sandbox(
     withExemption(cleanFiles(), (d) => {
       d.expires = '2000-01-01'
@@ -191,13 +199,13 @@ test('SR-003：到期日已过 ⇒ 红（限期豁免过期即红）', () => {
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-003.*已过期/s)
+    assert.match(r.out, /SRA-003.*已过期/s)
   } finally {
     box.cleanup()
   }
 })
 
-test('SR-003：到期日不可解析 ⇒ 红（没有到期日就是永久豁免）', () => {
+test('SRA-003：到期日不可解析 ⇒ 红（没有到期日就是永久豁免）', () => {
   const box = sandbox(
     withExemption(cleanFiles(), (d) => {
       d.expires = '待定'
@@ -206,13 +214,13 @@ test('SR-003：到期日不可解析 ⇒ 红（没有到期日就是永久豁免
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-003.*不是可解析的日期/s)
+    assert.match(r.out, /SRA-003.*不是可解析的日期/s)
   } finally {
     box.cleanup()
   }
 })
 
-test('SR-003：retire 空 / 不含删除动作 ⇒ 红', () => {
+test('SRA-003：retire 空 / 不含删除动作 ⇒ 红', () => {
   for (const retire of ['', '以后再看', '   ']) {
     const box = sandbox(
       withExemption(cleanFiles(), (d) => {
@@ -222,14 +230,14 @@ test('SR-003：retire 空 / 不含删除动作 ⇒ 红', () => {
     try {
       const r = run(box.root)
       assert.equal(r.status, 1, r.out)
-      assert.match(r.out, /SR-003/)
+      assert.match(r.out, /SRA-003/)
     } finally {
       box.cleanup()
     }
   }
 })
 
-test('SR-003：knife 不是登记号 ⇒ 红（这条账要指得出主人）', () => {
+test('SRA-003：knife 不是登记号 ⇒ 红（这条账要指得出主人）', () => {
   for (const knife of ['', 'T034', 'T-34', 'knife-1']) {
     const box = sandbox(
       withExemption(cleanFiles(), (d) => {
@@ -239,7 +247,7 @@ test('SR-003：knife 不是登记号 ⇒ 红（这条账要指得出主人）', 
     try {
       const r = run(box.root)
       assert.equal(r.status, 1, r.out)
-      assert.match(r.out, /SR-003.*knife/s)
+      assert.match(r.out, /SRA-003.*knife/s)
     } finally {
       box.cleanup()
     }
@@ -253,7 +261,7 @@ test('输入读不出：豁免 JSON 缺失 ⇒ 红（宁红不静默）', () => 
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-003.*不存在/s)
+    assert.match(r.out, /SRA-003.*不存在/s)
   } finally {
     box.cleanup()
   }
@@ -270,7 +278,7 @@ test('输入读不出：session 源码目录被搬走 ⇒ 红（没有源码可�
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-001.*没有源码可量/s)
+    assert.match(r.out, /SRA-001.*没有源码可量/s)
   } finally {
     box.cleanup()
   }
@@ -389,14 +397,14 @@ test('--coverage：判不出的文件落「没有归属」并被逐条列出，�
   }
 })
 
-// ================= SR-004：事实源开面是单槽（迁移的第一步必须响） =================
+// ================= SRA-004：事实源开面是单槽（迁移的第一步必须响） =================
 //
 // `declared_fact_source_opener()` 取 `inventory::iter().next()`，没有去重、没有按域分派。
 // 存储迁移的第一步必然是「注册第二个开面」，而这一步在单槽下是**静的**：谁生效由链接
 // 顺序决定。两条用例分别钉住「多一家即红」与「零家也红」——后者是迁移走完却没换新家
 // 的形态，读面会硬错。
 
-test('SR-004：两处登记开面 ⇒ 红，并点名两处（单槽下第二个是静默死码）', () => {
+test('SRA-004：两处登记开面 ⇒ 红，并点名两处（单槽下第二个是静默死码）', () => {
   const files = cleanFiles()
   files[['crates', 'symbio-plugin-session', 'src', 'store', 'second_opener.rs'].join('/')] =
     'static OTHER: OtherOpener = OtherOpener;' + String.fromCharCode(10) +
@@ -405,7 +413,7 @@ test('SR-004：两处登记开面 ⇒ 红，并点名两处（单槽下第二个
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-004.*单槽/s)
+    assert.match(r.out, /SRA-004.*单槽/s)
     assert.match(r.out, /fact_source\.rs:2/s, '第一个登记点要点名')
     assert.match(r.out, /second_opener\.rs:2/s, '第二个登记点也要点名')
   } finally {
@@ -413,20 +421,20 @@ test('SR-004：两处登记开面 ⇒ 红，并点名两处（单槽下第二个
   }
 })
 
-test('SR-004：零处登记 ⇒ 红（不是「边三收窄完成」，是没有人开面了）', () => {
+test('SRA-004：零处登记 ⇒ 红（不是「边三收窄完成」，是没有人开面了）', () => {
   const files = cleanFiles()
   delete files[[SESSION_SRC_REL, 'store', 'fact_source.rs'].join('/')]
   const box = sandbox(files)
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-004.*零登记/s)
+    assert.match(r.out, /SRA-004.*零登记/s)
   } finally {
     box.cleanup()
   }
 })
 
-test('SR-004：注释里写宏名不算登记（去注释后判）', () => {
+test('SRA-004：注释里写宏名不算登记（去注释后判）', () => {
   const files = cleanFiles()
   files[[SESSION_SRC_REL, 'store', 'fact_source.rs'].join('/')] =
     '// 将来会有人写 submit_fact_source_opener!(X);' + String.fromCharCode(10)
@@ -434,7 +442,118 @@ test('SR-004：注释里写宏名不算登记（去注释后判）', () => {
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SR-004.*零登记/s, '注释不是登记')
+    assert.match(r.out, /SRA-004.*零登记/s, '注释不是登记')
+  } finally {
+    box.cleanup()
+  }
+})
+
+// ================= SRA-005：地址根也是单槽（0 家是合法降级） =================
+//
+// 与 SRA-004 同一个病（`inventory::iter().next()` 单槽），但**两个方向的判定不同**：
+// 事实源开面 0 家会让读面硬错，所以 0 家红；地址根 0 家只是「构建里没有 vdfs 插件」的
+// 既定降级（`declared_addr_root()` 返回 `None`），所以 0 家绿 + 提示。这三条用例钉的
+// 就是这个差别——判据不许把合法的降级当成错误，也不许把静默的第二家当成正常。
+
+test('SRA-005：两处声明地址根 ⇒ 红，并点名两处（单槽下第二个是静默死码）', () => {
+  const files = cleanFiles()
+  files[['crates', 'symbio-plugin-other', 'src', 'plugin.rs'].join('/')] =
+    'symbio_plugin_api::inventory::submit! {' + String.fromCharCode(10) +
+    '    symbio_plugin_api::AddrRootDecl("other-root")' + String.fromCharCode(10) +
+    '}' + String.fromCharCode(10)
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /SRA-005.*单槽/s)
+    assert.match(r.out, /symbio-plugin-vdfs\/src\/plugin\.rs:3/s, '第一个声明点要点名')
+    assert.match(r.out, /symbio-plugin-other\/src\/plugin\.rs:2/s, '第二个声明点也要点名')
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('SRA-005：零处声明 ⇒ 绿 + 提示（没有 vdfs 插件是合法降级，不是错误）', () => {
+  const files = cleanFiles()
+  delete files['crates/symbio-plugin-vdfs/src/plugin.rs']
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 0, r.out)
+    assert.match(r.out, /SRA-005[^\n]*零声明/s)
+    assert.match(r.out, /合法降级/s)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('SRA-005：注释里写声明不算声明（去注释后判）', () => {
+  const files = cleanFiles()
+  files['crates/symbio-plugin-vdfs/src/plugin.rs'] =
+    '// 将来会有人写 symbio_plugin_api::AddrRootDecl(VDFS_ADDR_ROOT)' + String.fromCharCode(10) +
+    '// 现在这一行只是注释' + String.fromCharCode(10)
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 0, r.out)
+    assert.match(r.out, /SRA-005[^\n]*零声明/s, '注释不是声明')
+  } finally {
+    box.cleanup()
+  }
+})
+
+// ============ SRA-003 的「保留」分支（D-460：删除这个出口写不出来） ============
+//
+// 终态是「随身份留下、只许降」时，「将来删除」是不可兑现的承诺。判据允许写「保留」，
+// 但要求同时写出**依据的决策号**——否则「保留」就是一句谁都不用负责的话，与本脚本
+// 存在的理由正好相反（它就是为了消灭「没有出口的将来会删」）。
+
+test('SRA-003：写「保留」但没给依据决策号 ⇒ 红（一句话没人负责）', () => {
+  const files = cleanFiles()
+  files[EXEMPTION_REL] = JSON.stringify(
+    {
+      rule: 'E-009',
+      crate: 'symbio-plugin-session',
+      dependency: 'symbio-sdk',
+      expires: '2099-12-31',
+      knife: 'T-340',
+      retire: '随身份保留，以后再说',
+      reason: '夹具',
+      symbols: ['ClockNow', 'ReportDraft'],
+    },
+    null,
+    2,
+  )
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /SRA-003.*可兑现的处置/s)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('SRA-003：写「保留 + 依据决策号」⇒ 绿（这是本账今天的真实形态）', () => {
+  const files = cleanFiles()
+  files[EXEMPTION_REL] = JSON.stringify(
+    {
+      rule: 'E-009',
+      crate: 'symbio-plugin-session',
+      dependency: 'symbio-sdk',
+      expires: '2099-12-31',
+      knife: 'T-340',
+      retire: '随身份 `session` 保留（D-460）；条数只许降',
+      reason: '夹具',
+      symbols: ['ClockNow', 'ReportDraft'],
+    },
+    null,
+    2,
+  )
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 0, r.out)
   } finally {
     box.cleanup()
   }
