@@ -59,7 +59,19 @@
  * 它**不改退出码、不进 GUARDS**：分组口径随目录结构漂，把它做成门禁只会得到一条天天红
  * 的尺。要复核 `D-456` 里的数字，跑这一条命令。
  *
- * 用法：node scripts/session-retire-audit.mjs [--root=<仓库根>] [--verbose] [--breakdown]
+ * ## `--coverage`：**代码**按「谁的活」分解（**读数，不是判据**）
+ *
+ * `--breakdown` 量的是账本（符号住在哪），`--coverage` 量的是 crate 本身（**行数**住在哪）。
+ * 两者回答的问题不同：前者答「这条依赖边还剩几条」，后者答「退役要处理的东西有多少被三条边
+ * 点到」。`D-457` 用后者发现：三条边点到的代码不到全 crate 的四分之一，而最大的那块
+ * （VDFS 地址面 `<根>/session/<id>/…`）**一条边都没有**——它不是空壳，CLI 与子智能体都在写它。
+ *
+ * 分桶按**文件的活**，不按目录名猜；判不出的文件落「没有归属」并逐条列出，不静默归并。
+ * 已知偏差写在按钮旁边：装配的折叠函数（`exposed_tools` / `dedup_declared_twins`）住在
+ * `plugin/turn.rs` 里，按文件口径整份记在「开轮序列」一侧——偏差方向是**边二读数偏小**，
+ * 也就是不会把这条边说大。
+ *
+ * 用法：node scripts/session-retire-audit.mjs [--root=<仓库根>] [--verbose] [--breakdown] [--coverage]
  * 退出码：0 = 通过；1 = 有违规或读不出输入。
  */
 
@@ -74,6 +86,7 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.resolve(scriptDir, '..')
 const VERBOSE = process.argv.includes('--verbose')
 const BREAKDOWN = process.argv.includes('--breakdown')
+const COVERAGE = process.argv.includes('--coverage')
 
 const EXEMPTION_REL = 'scripts/exemptions/plugin-session-sdk.json'
 const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
@@ -287,6 +300,87 @@ function printBreakdown(symbols) {
   }
 }
 
+// ==================== --coverage（读数，不是判据） ====================
+
+/**
+ * 每一块代码归谁——**按「这份代码在退役后由谁接」分**，不按目录名猜。
+ *
+ * 三条桶对应 `D-451`／`D-457` 的边二 / 边三，外加两个**没有边**的桶：
+ * - `address`：VDFS 地址面（`<根>/session/<id>/…`）。它不是空壳——CLI 往
+ *   `<根>/session/<id>/inbox` 写、子智能体也经 `/inbox` 发起子会话、CLI 按 `path`
+ *   归属订阅变更。**三条边没有一条管它**（`D-457`）。
+ * - `other`：判不出来的（命令面 / 统计读侧 / 配置 / 活跃名册 / 工作目录…）。落这里
+ *   的文件会被**逐条列出来**，不静默并进别的桶。
+ */
+const COVERAGE_BUCKETS = [
+  {
+    id: 'edge2',
+    label: '边二 装配（收集与折）',
+    match: (rel) => rel === 'capabilities.rs',
+  },
+  {
+    id: 'edge3',
+    label: '边三 存储·转写',
+    match: (rel) =>
+      rel.startsWith('store/') ||
+      rel.startsWith('transcript') ||
+      rel === 'convergence.rs',
+  },
+  {
+    id: 'address',
+    label: '地址面（VDFS）· 无边的归属',
+    match: (rel) =>
+      rel === 'plugin.rs' ||
+      rel === 'plugin/nodes.rs' ||
+      rel === 'declarations.rs' ||
+      rel.startsWith('plugin/vdfs_'),
+  },
+  {
+    id: 'turn',
+    label: '开轮序列（装配的折叠住这里）',
+    match: (rel) => rel === 'plugin/turn.rs',
+  },
+]
+
+/** 测试文件不算「要搬的代码」：它们的去处是随宿主一起删/改，不是搬。 */
+function isTestSrc(abs) {
+  const name = path.basename(abs)
+  return name.endsWith('.test.rs') || name === 'tests.rs'
+}
+
+function printCoverage() {
+  const rows = COVERAGE_BUCKETS.map((b) => ({ ...b, loc: 0, files: [] }))
+  const other = { label: '没有归属的其余代码', loc: 0, files: [] }
+  let total = 0
+  for (const f of files) {
+    if (isTestSrc(f)) continue
+    const rel = path.relative(srcDir, f).split(path.sep).join('/')
+    const loc = fs.readFileSync(f, 'utf8').split('\n').length
+    total += loc
+    const hit = rows.find((b) => b.match(rel))
+    const target = hit ?? other
+    target.loc += loc
+    target.files.push(rel)
+  }
+  const edges = rows.filter((r) => r.id === 'edge2' || r.id === 'edge3')
+  const covered = edges.reduce((n, r) => n + r.loc, 0)
+  const pct = (n) => `${((n / total) * 100).toFixed(1)}%`
+  console.log(
+    `\n退役覆盖面（非测试源码 ${total} 行）——读数，不是判据（D-457）：\n` +
+      [...rows, other]
+        .map((r) => `  ${r.label.padEnd(34)} ${String(r.loc).padStart(6)} 行  ${pct(r.loc).padStart(6)}  ${r.files.length} 个文件`)
+        .join('\n') +
+      `\n  ${'三条边合计（边二 + 边三；边一是条数，不占行）'.padEnd(32)} ${String(covered).padStart(6)} 行  ${pct(covered).padStart(6)}` +
+      `\n  ${'没有边的（地址面 + 其余）'.padEnd(32)} ${String(total - covered).padStart(6)} 行  ${pct(total - covered).padStart(6)}`,
+  )
+  console.log(dim('\n  「没有归属」逐文件（判不出就列出来，不静默并进别的桶）：'))
+  for (const r of other.files.sort()) console.log(dim(`    ${r}`))
+  if (rows.some((r) => r.id === 'turn' && r.files.includes('plugin/turn.rs'))) {
+    console.log(dim('  ⚠ 分桶偏差：装配的折叠（exposed_tools / dedup_declared_twins）住在'))
+    console.log(dim('    plugin/turn.rs 里，整份记在「开轮序列」⇒ 边二读数偏小，不偏大。'))
+  }
+}
+
 // ==================== 报告 ====================
 
 if (errors.length) {
@@ -306,4 +400,5 @@ console.log(
 )
 for (const n of notes) console.log(dim(`  · ${n}`))
 if (BREAKDOWN) printBreakdown(exemption.symbols)
+if (COVERAGE) printCoverage()
 process.exit(0)

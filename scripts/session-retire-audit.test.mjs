@@ -315,3 +315,66 @@ test('--breakdown：同一条符号两处都出现 ⇒ 计入「两处都有」�
     box.cleanup()
   }
 })
+
+// ================= --coverage：代码按「谁的活」分解（读数，不是判据） =================
+//
+// 与 `--breakdown` 同一条纪律：分桶口径会随目录结构漂，所以钉的是**算术**——每个文件只落
+// 一个桶、五个桶的和等于表头总数、测试文件不进账。具体数字由人看报告（D-457 就是用这份
+// 读数发现「三条边只点到全 crate 的三成」）。
+
+/** 取「标签 … N 行 …%」那一行的 N。 */
+function coverageRow(out, label) {
+  const line = out.split(String.fromCharCode(10)).find((l) => l.includes(label))
+  assert.ok(line, `报告里没有「${label}」这一行：${out}`)
+  const m = /(\d+)\s+行\s+[\d.]+%/.exec(line)
+  assert.ok(m, `「${label}」的行数读不出：${line}`)
+  return Number(m[1])
+}
+
+function coverageTotal(out) {
+  const m = /非测试源码 (\d+) 行/.exec(out)
+  assert.ok(m, `报告里没有表头总数：${out}`)
+  return Number(m[1])
+}
+
+test('--coverage：五个桶互斥且合计等于表头总数', () => {
+  const files = cleanFiles()
+  // 每块一地一个文件，另加两个测试文件（必须被排除）。
+  files[`${SESSION_SRC_REL}/store/wal.rs`] = 'a\nb\n'
+  files[`${SESSION_SRC_REL}/store/wal.test.rs`] = 'x\n'.repeat(80)
+  files[`${SESSION_SRC_REL}/store/tests.rs`] = 'y\n'.repeat(80)
+  files[`${SESSION_SRC_REL}/plugin/vdfs_catalog.rs`] = 'a\nb\nc\n'
+  files[`${SESSION_SRC_REL}/capabilities.rs`] = 'a\n'
+  const box = sandbox(files)
+  try {
+    const r = run(box.root, ['--coverage'])
+    assert.equal(r.status, 0, r.out)
+    const labels = [
+      '边二 装配',
+      '边三 存储·转写',
+      '地址面（VDFS）',
+      '开轮序列',
+      '没有归属的其余代码',
+    ]
+    const sum = labels.reduce((n, l) => n + coverageRow(r.out, l), 0)
+    assert.equal(sum, coverageTotal(r.out), r.out)
+    // 测试文件不进账：80 行的两个测试文件若被计入，总数会翻好几倍。
+    assert.ok(coverageTotal(r.out) < 80, `测试源码不该计入：${r.out}`)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('--coverage：判不出的文件落「没有归属」并被逐条列出，不静默并进别的桶', () => {
+  const files = cleanFiles()
+  files[`${SESSION_SRC_REL}/stats_reading.rs`] = 'a\nb\n'
+  const box = sandbox(files)
+  try {
+    const r = run(box.root, ['--coverage'])
+    assert.equal(r.status, 0, r.out)
+    assert.equal(coverageRow(r.out, '边二 装配'), 0, r.out)
+    assert.match(r.out, /stats_reading\.rs/s, '判不出的文件要列出来')
+  } finally {
+    box.cleanup()
+  }
+})
