@@ -22,12 +22,10 @@
 /* ── Markdown 正文排版 ─────────────────────────────────────── */
 
 .markdown-body {
-  /* 正文是会话流的主角，用足一档字号（16px @ 设计基准视口）；
-     小字号 + 小数像素是「发虚看不清」的直接来源（对比行业软件 15–16px）。 */
-  font-size: 1rem;
-  /* 智能体正文的行内代码很密（一行可达七八个标识符）：行高给足一档，
-     chip 才不会让相邻行「咬」在一起。 */
-  line-height: 1.72;
+  /* 对齐行业智能体会话流的正文密度（参考 WorkBuddy 等：14–15px）：
+     正文是会话流的主角，但过大会破坏每行信息量与段落呼吸感。 */
+  font-size: 0.9rem;
+  line-height: 1.65;
   color: var(--text-primary);
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -40,7 +38,7 @@
   margin-bottom: 0;
 }
 .markdown-body p {
-  margin: 0 0 0.65rem;
+  margin: 0 0 0.55rem;
 }
 .markdown-body h1,
 .markdown-body h2,
@@ -51,16 +49,16 @@
   font-weight: 600;
 }
 .markdown-body h1 {
-  font-size: 1.25rem;
+  font-size: 1.15rem;
 }
 .markdown-body h2 {
-  font-size: 1.125rem;
-}
-.markdown-body h3 {
   font-size: 1.02rem;
 }
-.markdown-body h4 {
+.markdown-body h3 {
   font-size: 0.95rem;
+}
+.markdown-body h4 {
+  font-size: 0.9rem;
 }
 .markdown-body ul,
 .markdown-body ol {
@@ -75,7 +73,7 @@
   list-style: decimal;
 }
 .markdown-body li {
-  margin: 0.3rem 0;
+  margin: 0.25rem 0;
 }
 .markdown-body li > ul,
 .markdown-body li > ol {

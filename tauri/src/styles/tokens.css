@@ -174,18 +174,20 @@
   /* 深色：让 UA 原生控件（输入框默认前景/光标/选区/滚动条/自动填充）走深色配色 */
   color-scheme: dark;
 
-  /* ── 表面 surface（深色）─────────────────────────────────────── */
-  --surface-page:     #16161d;
-  --surface-panel:    #1c1c25;
-  --surface-sunken:   #101017;
-  --surface-overlay:  #23232e;
+  /* ── 表面 surface（深色）───────────────────────────────────────
+     中性近黑（行业惯例：VS Code #1e1e1e / 各类桌面软件）：低饱和、
+     明度阶梯仅靠 2%~3% 的灰度差表达层级，不引入色相偏蓝。 */
+  --surface-page:     #0f0f10;
+  --surface-panel:    #161617;
+  --surface-sunken:   #0a0a0b;
+  --surface-overlay:  #1f1f21;
   --surface-hover:    rgba(255, 255, 255, 0.06);
   --surface-selected: rgba(129, 140, 248, 0.14);
 
   /* ── 毛玻璃表面 glass（深色）──────────────────────────────────
      深色下透明度**更高一点**（0.72 → 0.66）：深色底层本身暗，同透明度会显得
      比浅色沉闷；而深色主题的「玻璃感」主要靠边框与背景微光，不靠亮度差。 */
-  --surface-glass:    rgba(28, 28, 37, 0.66);
+  --surface-glass:    rgba(22, 22, 23, 0.66);
   --glass-blur:       14px;
 
   /* ── 文本 text（深色）────────────────────────────────────────── */
@@ -193,13 +195,13 @@
   --text-secondary: #a2aab8;
   --text-muted:     #7c8595;   /* 修正原 #64748b 3.45:1 → 4.54:1 */
   --text-disabled:  #5a616f;
-  --text-inverse:   #16161d;
-  --text-on-accent: #16161d;   /* 深色主色 #818cf8 上用深色前景（白字仅 2.98:1） */
+  --text-inverse:   #0f0f10;
+  --text-on-accent: #0f0f10;   /* 深色主色 #818cf8 上用深色前景（白字仅 2.98:1） */
 
   /* ── 描边 border（深色）──────────────────────────────────────── */
-  --border-subtle: #262632;
-  --border-default: #333343;
-  --border-strong:  #454558;
+  --border-subtle: #232325;
+  --border-default: #2f2f32;
+  --border-strong:  #45454a;
 
   /* ── 强调色 accent（深色）────────────────────────────────────── */
   --accent:          #818cf8;
@@ -223,43 +225,43 @@
   /* ── 模态遮罩（深色更深）────────────────────────────────────── */
   --overlay: rgba(0, 0, 0, 0.6);
 
-  /* ── 渐隐遮罩终点（对齐深色 --color-supply-bg #21222e）─────────── */
-  --surface-fade: rgba(33, 34, 46, 0.95);
+  /* ── 渐隐遮罩终点（对齐深色 --color-supply-bg #1c1c20）─────────── */
+  --surface-fade: rgba(22, 22, 23, 0.95);
 
   /* ── 会话区语义令牌（深色覆盖，原样保留）─────────────────────── */
-  --color-chat-bg: #181825;
-  --color-msg-card: #27273a;
+  --color-chat-bg: #0f0f10;
+  --color-msg-card: #1c1c1e;
   --msg-gap: 0.45rem;
-  --color-nested-line: #3f3f5a;
-  --color-chip-bg: #313147;
+  --color-nested-line: #38383c;
+  --color-chip-bg: #262629;
   --color-chip-fg: #94a3b8;
   --color-chip-user-bg: #1e3a5f;
   --color-chip-user-fg: #93c5fd;
   --color-chip-sub-bg: #0c2e3e;
   --color-chip-sub-fg: #38bdf8;
-  --color-chip-tool-bg: #232347;
+  --color-chip-tool-bg: #20202b;
   --color-chip-tool-fg: #a5b4fc;
-  --color-chip-notice-bg: #2e2342;
+  --color-chip-notice-bg: #231f2e;
   --color-chip-notice-fg: #c4b5fd;
   --color-user-bubble: #3b82f6;
   --color-user-bubble-fg: #ffffff;
   /* 行内代码底色（深色）：用半透明的板岩灰做一层「轻雾」而不是实心块——
-     深色正文里实心块与 #181825 底对比过强，密集标识符会把段落打碎。 */
+     深色正文里实心块与近黑底对比过强，密集标识符会把段落打碎。 */
   --color-inline-code-bg: rgba(148, 163, 184, 0.12);
-  --color-code-bg: #11111b;
+  --color-code-bg: #101012;
   --color-code-fg: #e2e8f0;
-  --color-prompt-bg: #232347;
+  --color-prompt-bg: #20202b;
   --color-prompt-border: #4f46e5;
   --color-error-bg: #2a1f24;
   --color-error-border: #7f1d1d;
   --color-error-fg: #fca5a5;
-  --color-supply-bg: #21222e;
-  --color-supply-border: #3f3f5a;
-  --color-option-bg: #21222e;
-  --color-option-border: #3f3f5a;
-  --color-option-active-bg: #232347;
+  --color-supply-bg: #1c1c20;
+  --color-supply-border: #38383c;
+  --color-option-bg: #1c1c20;
+  --color-option-border: #38383c;
+  --color-option-active-bg: #20202b;
   --color-option-active-border: #818cf8;
-  --color-tag-sub-bg: #232347;
+  --color-tag-sub-bg: #20202b;
   --color-tag-sub-fg: #a5b4fc;
   --color-tag-warn-bg: #3a2f12;
   --color-tag-warn-fg: #fcd34d;
