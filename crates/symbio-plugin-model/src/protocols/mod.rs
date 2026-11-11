@@ -30,6 +30,8 @@ mod sse;
 pub(crate) use sse::utf8_chunk;
 pub use sse::{SseLineParser, SsePartialLineExtractor};
 
+use std::collections::BTreeMap;
+
 use crate::round::{ModelFinishReason, ModelUsage};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
@@ -129,6 +131,20 @@ pub fn description_for_llm(meta: &CapabilityMeta) -> String {
     }
 }
 
+/// 工具在模型侧的 wire 名：按 canonical 名查装配期别名表，命中用别名、
+/// 未命中回退 canonical 名本身（老夹具 / 空别名表兼容）。
+///
+/// 与 [`description_for_llm`] 同为四个协议共用的装配口径（D-444）：别名是**描述数据**，
+/// 由装配期一次算出、随 `session.config` 下发；协议侧只读同一份表，不再各自做字符集
+/// 投影。线上工具名本就在协议字符集内，故命中值与回退值都等于旧投影结果——请求形状
+/// 逐字不变。
+pub fn wire_name_for_llm(meta: &CapabilityMeta, aliases: &BTreeMap<String, String>) -> String {
+    aliases
+        .get(&meta.name)
+        .cloned()
+        .unwrap_or_else(|| meta.name.clone())
+}
+
 /// 标准协议事件 —— 把不同提供商的流解析成**统一方言**。
 ///
 /// ## 依赖方对照表（D-023 决策 2）
@@ -184,6 +200,7 @@ pub trait ModelProtocol: SseLineParser + Send + Sync {
         system_prompt: &str,
         messages: &[ChatNode],
         tools: &[CapabilityMeta],
+        aliases: &BTreeMap<String, String>,
     ) -> Value;
 
     /// 连通性验证（最小请求探测；默认实现 fail-closed）

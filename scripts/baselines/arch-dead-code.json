@@ -254,12 +254,6 @@
       "evidence": "docs/003-design/001-核心架构.md"
     },
     {
-      "symbol": "capability_resolve",
-      "path": "crates/symbio-sdk/src/capability/tool_name.rs",
-      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
-      "evidence": "docs/003-design/008-能力注册表与能力坐标系.md"
-    },
-    {
       "symbol": "branch_hide_unselected",
       "path": "crates/symbio-sdk/src/projection/branch.rs",
       "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",

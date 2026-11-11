@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
@@ -12,11 +13,11 @@ use super::profile;
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{
-    description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES,
+    description_for_llm, error_text, sse_data, wire_name_for_llm, ModelProtocol,
+    MODEL_PROTOCOL_OPENAI_RESPONSES,
 };
 use crate::http::get_http_client;
 use crate::round::{ModelFinishReason, ModelUsage};
-use symbio_plugin_api::capability_to_wire;
 use symbio_plugin_api::{PluginError, PluginInvokeRequest};
 use tracing::debug;
 
@@ -52,6 +53,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         system: &str,
         messages: &[symbio_plugin_api::chat_node::ChatNode],
         tools: &[CapabilityMeta],
+        aliases: &BTreeMap<String, String>,
     ) -> Value {
         let mut input_items = Vec::new();
 
@@ -193,7 +195,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                 .iter()
                 .map(|t| json!({
                     "type": "function",
-                    "name": capability_to_wire(&t.name),
+                    "name": wire_name_for_llm(t, aliases),
                     "description": description_for_llm(t),
                     "parameters": t.input_schema
                 }))

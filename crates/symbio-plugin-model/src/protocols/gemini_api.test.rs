@@ -43,3 +43,35 @@ fn function_call_args_are_not_extracted_incrementally() {
     let mut ext = GeminiProtocol.open_partial_line(line).unwrap();
     assert!(feed_chunked(ext.as_mut(), line, 1).is_empty());
 }
+
+/// D-444：Gemini 的 tools 包在 `functionDeclarations` 里，name 同样按装配期别名表取；
+/// 空别名表回退 canonical 名本身（老夹具兼容）。
+#[test]
+fn function_declarations_use_alias_table_and_fall_back_to_canonical_name() {
+    let cfg = crate::model_providers::ModelProviderConfig {
+        model: "m".to_string(),
+        api_base: "http://localhost".to_string(),
+        ..Default::default()
+    };
+    let tools = vec![CapabilityMeta {
+        name: "mcp.fs.read".into(),
+        description: "读文件".into(),
+        input_schema: serde_json::json!({"type": "object"}),
+        ..Default::default()
+    }];
+
+    let mut aliases = BTreeMap::new();
+    aliases.insert("mcp.fs.read".to_string(), "mcp__fs__read".to_string());
+    let req = GeminiProtocol.prepare_request(&cfg, "", &[], &tools, &aliases);
+    assert_eq!(
+        req["tools"][0]["functionDeclarations"][0]["name"], "mcp__fs__read",
+        "functionDeclarations 内的 name 命中别名表取 wire 别名"
+    );
+
+    let empty: BTreeMap<String, String> = BTreeMap::new();
+    let req = GeminiProtocol.prepare_request(&cfg, "", &[], &tools, &empty);
+    assert_eq!(
+        req["tools"][0]["functionDeclarations"][0]["name"], "mcp.fs.read",
+        "空别名表 ⇒ 回退 canonical 名本身"
+    );
+}

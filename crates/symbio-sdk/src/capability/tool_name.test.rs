@@ -56,46 +56,23 @@ fn to_wire_is_idempotent_on_wire_names() {
 }
 
 #[test]
-fn resolve_prefers_the_literal_name() {
-    // `a__b` 既可能是 `a.b` 的线上形态，也可能本身就是 `a__b`。
-    // 字面名赢——歧义有确定答案，而不是「看注册顺序」。
-    let known = ["a.b", "a__b"];
-    assert_eq!(capability_resolve("a__b", known), Some("a__b"));
-
-    // 反过来，只有投影候选时也能命中
-    let known = ["a.b"];
-    assert_eq!(capability_resolve("a__b", known), Some("a.b"));
+fn wire_projection_is_not_injective_so_assembly_must_reject_collisions() {
+    // `a.b` 与 `a__b` 都映成 `a__b`。旧形状靠「字面名优先」在返回时挑一个，
+    // 那不是消歧；装配期必须让这两方都不暴露（判据在 session 的 exposed_tools
+    // 反例单测与 tool 插件的 resolve 歧义兜底里），本函数不负责解决。
+    assert_eq!(capability_to_wire("a.b"), capability_to_wire("a__b"));
+    assert_eq!(capability_to_wire("a.b"), "a__b");
 }
 
 #[test]
-fn resolve_is_order_independent_for_literal_matches() {
-    // 字面名排在投影候选**之后**也要赢（不是「先到先得」）
-    let known = ["a.b", "c", "a__b"];
-    assert_eq!(capability_resolve("a__b", known), Some("a__b"));
-}
-
-#[test]
-fn resolve_returns_none_for_unknown_names() {
-    // 解析失败必须是 None——调用方据此报错，而不是回退到字符串反演
-    assert_eq!(capability_resolve("nope", ["shell", "vdfs_read"]), None);
-    assert_eq!(capability_resolve("", ["shell"]), None);
-}
-
-#[test]
-fn resolve_round_trips_every_real_name_shape() {
-    // 出方向 → 入方向往返：四类真实名字形状都要能回到原名
-    let known = [
-        "vdfs_read",
-        "shell",
-        "mcp.filesystem.read_file",
-        "agent_reviewer_read_skill",
-    ];
-    for name in known {
-        let wire = capability_to_wire(name);
-        assert_eq!(
-            capability_resolve(&wire, known),
-            Some(name),
-            "{name} 往返失败"
-        );
+fn real_name_shapes_have_stable_wire_forms() {
+    // 出方向是唯一的一次换算：四类真实名字形状的别名必须稳定（存量会话兼容）。
+    for (canonical, wire) in [
+        ("vdfs_read", "vdfs_read"),
+        ("shell", "shell"),
+        ("mcp.filesystem.read_file", "mcp__filesystem__read_file"),
+        ("agent_reviewer_read_skill", "agent_reviewer_read_skill"),
+    ] {
+        assert_eq!(capability_to_wire(canonical), wire, "{canonical} 投影漂移");
     }
 }

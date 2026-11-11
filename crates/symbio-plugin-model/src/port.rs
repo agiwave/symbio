@@ -5,7 +5,7 @@
 //! 目录一起装：生效者缺席 ⇒ 不注册端口行 ⇒ 环在调用点响亮失败（落失败事实
 //! 并中止），而不是在这里猜一个别的模型。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use symbio_plugin_api::chat_node::{
@@ -165,7 +165,13 @@ fn append_payload_nodes(messages: &mut Vec<PromptMessage>, payload: &serde_json:
 fn turn_input(
     facts: &[PortFact],
     events: &[symbio_plugin_api::Event],
-) -> (String, Vec<CapabilityMeta>, Vec<PromptMessage>, u32) {
+) -> (
+    String,
+    Vec<CapabilityMeta>,
+    Vec<PromptMessage>,
+    u32,
+    BTreeMap<String, String>,
+) {
     let config = facts
         .iter()
         .rev()
@@ -178,6 +184,12 @@ fn turn_input(
     let tools = config
         .and_then(|fact| fact.payload.get("tools"))
         .and_then(|value| serde_json::from_value::<Vec<CapabilityMeta>>(value.clone()).ok())
+        .unwrap_or_default();
+    // 装配期下发的「canonical → wire」别名表（D-444）：缺字段 / 老夹具 ⇒ 空表，
+    // 协议侧回退工具名本身。清单装配与四个协议读同一份数据。
+    let tool_aliases = config
+        .and_then(|fact| fact.payload.get("tool_aliases"))
+        .and_then(|value| serde_json::from_value::<BTreeMap<String, String>>(value.clone()).ok())
         .unwrap_or_default();
 
     // `message.added` 的省略形态：`elision` 记的是**被取代的入库区间**（seq 闭区间）。
@@ -397,7 +409,7 @@ fn turn_input(
             _ => {}
         }
     }
-    (system_prompt, tools, messages, round)
+    (system_prompt, tools, messages, round, tool_aliases)
 }
 
 /// 这条应答事实的文本节点身份是否**首次出现**。
@@ -562,7 +574,7 @@ impl PortExecutor for ModelExecutor {
             .as_ref()
             .map(|reader| reader.facts())
             .unwrap_or_default();
-        let (system_prompt, tools, messages, round) = turn_input(&facts, &events);
+        let (system_prompt, tools, messages, round, tool_aliases) = turn_input(&facts, &events);
         let provider = request
             .provider
             .as_deref()
@@ -626,7 +638,7 @@ impl PortExecutor for ModelExecutor {
             _ = exec.abort.cancelled() => Err(PluginError::Aborted),
             result = provider
                 // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
-                .round_trip(&system_prompt, &wire, &tools, &request.root_id, &env) => result,
+                .round_trip(&system_prompt, &wire, &tools, &tool_aliases, &request.root_id, &env) => result,
         } {
             Ok(output) => {
                 // 校准回灌（`D-433`）：provider 报了实测**输入**用量，就把「实测 / 未校准
@@ -746,7 +758,15 @@ impl PortExecutor for ModelExecutor {
                     PortOutcome {
                         facts: vec![payload],
                         error: None,
-                        reply: PortReply { messages, links },
+                        // 中性承载（D-446 ②）：通用端口不认模型侧消息类型，模型插件
+                        // 把自己的往返产物折成不透明值交给环，环只传递、不解释。
+                        reply: PortReply {
+                            messages: messages
+                                .iter()
+                                .map(|m| serde_json::to_value(m).unwrap_or_default())
+                                .collect(),
+                            links,
+                        },
                         ..PortOutcome::ok()
                     }
                 }

@@ -27,8 +27,9 @@ fn entry(role: &str, text: &str, tool: Option<&str>) -> PromptMessage {
     PromptMessage {
         role: role.to_string(),
         text: text.to_string(),
-        // `role == "tool"` 必带调用 id（模型侧协议要求）——见 transcript 的
-        // `From<&TranscriptEntry>`：缺了会被 provider 整条拒绝。
+        // `role == "tool"` 必带调用 id（模型侧协议要求，缺了会被 provider 整条拒绝）。
+        // 具体怎么合成是**组装请求那一侧**的规则（`plugin-model`）；这里只是给判据
+        // 一个稳定的替身，不冒充生产规则（D-448）。
         tool_call_id: tool.map(|t| format!("call_{t}_0")),
         tool: tool.map(|t| t.to_string()),
         tool_calls: None,
@@ -37,13 +38,13 @@ fn entry(role: &str, text: &str, tool: Option<&str>) -> PromptMessage {
 
 /// 请求包里的消息：转写条目按 `exclude_from_context` 过滤后投影。
 ///
-/// 旧 `TranscriptView::to_messages` 的唯一语义就是这一步；出口已删，这里按同一条
-/// 读法折一遍，判据的输入口径不变。
+/// 旧 `TranscriptView::to_messages` 与 `PromptMessage::from` 都只做这一步，
+/// 两个出口都已删（D-448）；这里按同一条读法就地折，判据的输入口径不变。
 fn request_messages(view: &super::super::transcript::TranscriptView) -> Vec<PromptMessage> {
     view.entries
         .iter()
         .filter(|e| !e.exclude_from_context)
-        .map(PromptMessage::from)
+        .map(|e| entry(&e.role, &e.text, e.tool.as_deref()))
         .collect()
 }
 

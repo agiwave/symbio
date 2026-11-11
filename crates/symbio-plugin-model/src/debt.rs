@@ -3,7 +3,7 @@
 //! 两行是**两个输入身份**：
 //! - `model-reply`：用户输入事实的 id = 这一轮的身份（`when` 有输入、`unless_id` 该轮尚无终答）；
 //! - `model-after-tools`：最近一条工具产物事实的 id = 工具轮之后那一轮的身份
-//!   （`when` 有工具请求、`when_no_open` 工具端口无未还债）。
+//!   （`when` 有工具请求、`when_no_open` **本次调用集合**已收束）。
 //!
 //! ## 输入依赖写进 `when`（不是屏障）
 //!
@@ -42,11 +42,11 @@
 
 use std::sync::Arc;
 
-use serde_json::json;
+use serde_json::{json, Value};
 use symbio_plugin_api::debt::{session_config_id, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED,
-    EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG,
+    EVENT_TOOL_CALL_REQUESTED, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::rows::PLUGIN_ROW;
 
@@ -55,6 +55,34 @@ use crate::port::MODEL_PORT;
 /// 工具端口名（数据，不是类型）：名字住 `plugin-api` 的词汇面（D-364），
 /// 提供者 `tool` 与本行共用同一常量。
 use symbio_plugin_api::vocab::PORT_TOOL as TOOL_PORT;
+
+/// **本次**工具请求的调用集合：那几笔逐调用债的 id（D-446）。
+///
+/// 集合为什么是全的：模型在派发请求的那一刻就把整份 `calls[]` 写进 `tool.requested`
+/// 的载荷，同一处按 `calls[]` 落齐逐笔标记（`tool.call.requested`，见 `port.rs`）。
+/// 所以只要请求存在，集合就已经完整——之后只会逐笔收束，不会再生出新的一笔。
+///
+/// 读不到（旧会话没有标记 / 标记被归档）⇒ `None`，调用方退回整条端口的保守读法：
+/// **宁可多等一圈，也不能在不知道集合时放行**——放行会让模型在调用还没回时续跑，
+/// 那是比多等一圈贵得多的错。
+fn call_set_of(facts: &DebtFacts) -> Option<Vec<String>> {
+    let markers = facts.facts_of(EVENT_TOOL_CALL_REQUESTED);
+    let request_id = markers
+        .last()?
+        .1
+        .get("request_id")
+        .and_then(Value::as_str)?
+        .to_string();
+    let ids: Vec<String> = markers
+        .iter()
+        .filter(|(_, payload)| {
+            payload.get("request_id").and_then(Value::as_str) == Some(request_id.as_str())
+        })
+        .filter_map(|(_, payload)| payload.get("call_id").and_then(Value::as_str))
+        .map(|call_id| format!("tool:{request_id}:{call_id}"))
+        .collect();
+    (!ids.is_empty()).then_some(ids)
+}
 
 /// 终答事实的身份前缀：与执行体落的那条事实**逐字一致**（`chat.assistant.final:<root_id>`）。
 const FINAL_FACT_PREFIX: &str = EVENT_CHAT_ASSISTANT_FINAL;
@@ -98,27 +126,36 @@ impl DebtSource for ModelDebts {
         // 续接请求同样读本轮 config，因此依赖同一条身份。
         //
         // 两个门并用，读的是债状态的两面（谓词语义都不变）：
-        // - `when_no_open(tool)`：已落账的调用债（在飞 / 挂起）未收束就不欠；
+        // - `when_no_open(…调用集合)`：**本次调用**那几笔债未收束就不欠。集合只有
+        //   本插件知道（它自己按 `calls[]` 派生的 id），所以由本行给出——整条端口
+        //   的读法会让一笔迟归 / 卡住的旧调用把这轮续跑一起拖住（D-446）；
         // - `after_port(tool)`：本圈**有人认领**也不欠。工具债改逐笔后，同一请求
         //   的调用按 `calls[]` 串成派发链，后一笔在前一笔落 `sent` 的那一圈才首次
         //   可派——此时账上还没有它的任何事实，`unresolved()` 看不见它，只靠
         //   `when_no_open` 会让本行与它同圈派发（模型在调用未回时续跑）。
         //   `after_port` 的认领集合含本圈候选，正好补上这个窗口。
         if let Some(tool_id) = facts.latest_fact_id(EVENT_ARTIFACT_ADDED) {
+            let mut spec = DebtSpec::new(
+                "model-after-tools",
+                MODEL_PORT,
+                format!("model:after:{tool_id}"),
+                payload,
+            )
+            .when(EVENT_TOOL_REQUESTED)
+            .when_id(EVENT_SESSION_CONFIG, config_id);
+            spec = match call_set_of(facts) {
+                // 只认本次请求的那几笔调用：同端口上一笔迟归的旧债不挡（D-446）。
+                Some(ids) => {
+                    spec.when_no_open(symbio_plugin_api::debt::NoOpenScope::among(TOOL_PORT, ids))
+                }
+                // 读不到集合 ⇒ 整条端口（保守读法，见 `call_set_of` 的文档）。
+                None => spec.when_no_open(TOOL_PORT),
+            };
             rows.push(
-                DebtSpec::new(
-                    "model-after-tools",
-                    MODEL_PORT,
-                    format!("model:after:{tool_id}"),
-                    payload,
-                )
-                .when(EVENT_TOOL_REQUESTED)
-                .when_id(EVENT_SESSION_CONFIG, config_id)
-                .when_no_open(TOOL_PORT)
-                .after_port(TOOL_PORT)
-                .reader_facing()
-                .accounts_usage()
-                .accounts_spend(),
+                spec.after_port(TOOL_PORT)
+                    .reader_facing()
+                    .accounts_usage()
+                    .accounts_spend(),
             );
         }
         rows

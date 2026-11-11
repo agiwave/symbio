@@ -902,11 +902,20 @@ fn an_artifact_round_is_complete_after_reopen() {
     let view = transcript(CHAT_VOCAB, MESSAGE_VOCAB)
         .apply(&events, i64::MAX, Budget::generous())
         .value;
+    // 请求包里的消息：条目按 `exclude_from_context` 过滤后投影。合成 `tool_call_id`
+    // 的规则住组装请求那一侧（`plugin-model`），这里不冒充它——判据比的是
+    // role / text / tool 三格（D-448）。
     let entries: Vec<PromptMessage> = view
         .entries
         .iter()
         .filter(|e| !e.exclude_from_context)
-        .map(PromptMessage::from)
+        .map(|e| PromptMessage {
+            role: e.role.clone(),
+            text: e.text.clone(),
+            tool_call_id: None,
+            tool: e.tool.clone(),
+            tool_calls: None,
+        })
         .collect();
     assert_eq!(entries.len(), 3, "三条都要进 prompt：{entries:?}");
     assert_eq!(entries[1].role, "tool");

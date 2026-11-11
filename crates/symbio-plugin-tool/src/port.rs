@@ -20,8 +20,8 @@
 //! | `land_only` | `{ text, success, needs_user_action, prompt, failure_kind }`：只落产物格、不再执行（唤醒结果与没跑到的结果走这一形态） |
 //! | `gate` | `{ authorized, spent_ms, requested_ms, budget_ms }`：外部执行闸门的中性输入；快慢与开窗由执行体判 |
 //!
-//! 环侧的宿主插件（`parent`）经 `ctx.parent()` 取得：解析失败时按原样走到它，由它给出
-//! 诚实的 NotFound。
+//! 环侧的宿主插件（`parent`）经 `ctx.parent()` 取得：只用于钩子等宿主侧效果；
+//! **名字解析失败一律在执行体内部落成 NotFound 事实，不回落到宿主路由**（D-445 ②）。
 //!
 //! ## 产出契约（本插件 → 环）
 //!
@@ -56,9 +56,8 @@ use symbio_plugin_api::{
     failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel, Entity,
     ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext, PortExecutor,
-    PortInput, PortOutcome, PortProvider, PromptMessage, Verb, ABORT_SIGNAL, AGENT_ID,
-    CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK, PATH, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID,
-    WORKDIR,
+    PortInput, PortOutcome, PortProvider, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR,
+    EVENT_REQUEST, EVENT_SINK, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
 };
 
 /// 端口名：名字住 `plugin-api` 的词汇面（D-364），提供者与消费方 import 同一常量。
@@ -435,11 +434,7 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     let visitor = exec.ctx.as_ref().and_then(|c| c.get(CAPABILITY_VISITOR));
-    let rows = match visitor.as_ref() {
-        Some(visitor) => visitor.list(family::TOOL).await,
-        None => Vec::new(),
-    };
-    let known: Vec<String> = rows.iter().map(|row| row.name().to_string()).collect();
+    let aliases = exposure_aliases(exec).await;
     let mut out = Vec::with_capacity(tool_calls.len());
     for (idx, tc) in tool_calls.iter().enumerate() {
         let model_id = tc
@@ -491,7 +486,7 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
         // （D-440：行是纯数据，`risk_for` 随 `Capability` 退场，动态档由注册收口点
         // 的执行体闸在执行时判）。
         let resolved = match (name, visitor.as_ref()) {
-            (Some(name), Some(visitor)) => match resolve(name, known.iter().map(String::as_str)) {
+            (Some(name), Some(visitor)) => match resolve(name, &aliases) {
                 Some(canonical) => visitor
                     .get(&canonical)
                     .await
@@ -1119,13 +1114,13 @@ fn attach_reply(mut out: PortOutcome, payload: &serde_json::Value) -> PortOutcom
             body.push_str(note);
         }
     }
-    out.reply.messages.push(PromptMessage {
-        role: "tool".into(),
-        text: body,
-        tool_call_id: Some(key.to_string()),
-        tool: Some(name.to_string()),
-        tool_calls: None,
-    });
+    // 中性承载（D-446 ②）：通用端口不认模型角色 / `tool_call_id`。这里交回的是
+    // 结果本身，模型插件若要把结果投影成模型消息，由它按自己的协议装配。
+    out.reply.messages.push(json!({
+        "result": body,
+        "call_id": key,
+        "tool": name,
+    }));
     out
 }
 
@@ -1914,8 +1909,8 @@ impl ToolPort {
             Some(visitor) => visitor.list(family::TOOL).await,
             None => Vec::new(),
         };
-        let known_names: Vec<String> = tool_rows.iter().map(|row| row.name().to_string()).collect();
-        let resolved_name = resolve(&tool_name, known_names.iter().map(String::as_str));
+        let aliases = exposure_aliases(&exec).await;
+        let resolved_name = resolve(&tool_name, &aliases);
         // 并发策略在本执行体（DE-048 D-311）：只读档（`Low`）可同时在途，受端口声明的
         // 上界约束；写侧档（`Medium` / `High`）与查不到风险档的调用独占**本会话**的
         // 执行窗口——写文件、改配置、发消息这类并行会引入顺序不确定。环不再替这里
@@ -2039,15 +2034,17 @@ impl ToolPort {
         tool_ctx.set(EVENT_SINK, exec.sink.clone());
         tool_ctx.set(ABORT_SIGNAL, exec.abort.clone());
 
-        // 工具调用的发起（三条形态：能力命中 / 未命中回落 route / 无能力表直接 route）。
+        // 工具调用的发起：**只有一条路径**——名字在本轮暴露集合里，且端口执行体存在。
+        // 未暴露名称、未知别名、无能力表一律是失败事实，**不回落宿主路由**（D-445 ②）：
+        // 旧链「未命中 ⇒ p2.route」会把模型没被授权调用的名字交给任意路由处理器。
         // 包成 `Box<dyn Future>` 是为了下面那个「轮询 + 空闲判定」的循环能重复借用。
         let mut route_fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<PluginPayload, PluginError>> + Send>,
-        > = if let Some(tool_visitor) = tool_visitor {
-            if resolved_name.is_some() {
+        > = if let Some(tool_visitor) = tool_visitor.filter(|_| resolved_name.is_some()) {
+            {
                 plugin_info!(
                     "tool",
-                    "[Tool] 能力表命中: {} (能力名 {})",
+                    "[Tool] 本轮暴露集合命中: {} (端口名 {})",
                     tool_name,
                     invoke_name
                 );
@@ -2097,20 +2094,11 @@ impl ToolPort {
                         ))),
                     }
                 })
-            } else {
-                plugin_info!("tool", "[Tool] 能力表未命中: {}，回落到宿主路由", tool_name);
-                tool_ctx.set(PATH, invoke_name.clone());
-                let _ = tool_ctx.set_payload(args.clone());
-                let p2 = parent.clone();
-                let tool_ctx2 = tool_ctx.clone();
-                Box::pin(async move { p2.route(tool_ctx2).await })
             }
         } else {
-            tool_ctx.set(PATH, invoke_name.clone());
-            let _ = tool_ctx.set_payload(args.clone());
-            let p2 = parent.clone();
-            let tool_ctx2 = tool_ctx.clone();
-            Box::pin(async move { p2.route(tool_ctx2).await })
+            let why = format!("Tool not exposed in this round: {tool_name}");
+            plugin_warn!("tool", "[Tool] {why}");
+            Box::pin(async move { Err(PluginError::NotFound(why)) })
         };
 
         // 工具执行兜底超时：**空闲**上限（不是总时长上限）——「有进展就不算挂死」。
@@ -2284,16 +2272,70 @@ impl ToolPort {
     }
 }
 
-/// 线上名 → 能力名（精确命中优先，其后按投影函数比较）。
-fn resolve<'a>(wire: &str, known: impl Iterator<Item = &'a str>) -> Option<String> {
-    let names: Vec<&str> = known.collect();
-    if let Some(exact) = names.iter().find(|name| **name == wire) {
-        return Some((*exact).to_string());
+/// 本轮暴露快照的别名表（内部端口身份 → 模型侧别名，D-444 ①）。
+///
+/// 首选读本轮 `session.config` 里由 session 装配的那一份——清单、四个协议的下行
+/// 序列化与这里的返回解析读同一份数据，插件停用 / 撤权 / MCP 变化后的旧调用不会
+/// 静默绑到同名新实现。没有 config 的夹具才从**同一张注册表**按「TOOL 行 ∩ 端口键」
+/// 用同一条规则重建：不是第二条执行路径，也不做字符串反演。
+async fn exposure_aliases(exec: &PortExecContext) -> std::collections::BTreeMap<String, String> {
+    if let Some(reader) = exec.reader.as_ref() {
+        if let Some(fact) = reader
+            .facts()
+            .into_iter()
+            .rev()
+            .find(|f| f.kind == symbio_plugin_api::events::EVENT_SESSION_CONFIG)
+        {
+            if let Some(value) = fact.payload.get("tool_aliases") {
+                if let Ok(map) = serde_json::from_value::<std::collections::BTreeMap<String, String>>(
+                    value.clone(),
+                ) {
+                    return map;
+                }
+            }
+        }
     }
-    names
+    let Some(visitor) = exec
+        .ctx
+        .as_ref()
+        .and_then(|ctx| ctx.get(CAPABILITY_VISITOR))
+    else {
+        return Default::default();
+    };
+    let bound: std::collections::HashSet<String> = visitor
+        .list(symbio_plugin_api::port::PORT_FAMILY)
+        .await
         .iter()
-        .find(|name| capability_to_wire(name) == wire)
-        .map(|name| (*name).to_string())
+        .filter_map(|row| row.payload::<symbio_plugin_api::PortPayload>())
+        .map(|payload| payload.port())
+        .collect();
+    visitor
+        .list(family::TOOL)
+        .await
+        .iter()
+        .filter(|row| bound.contains(row.name()))
+        .map(|row| {
+            let canonical = row.name().to_string();
+            let wire = capability_to_wire(&canonical);
+            (canonical, wire)
+        })
+        .collect()
+}
+
+/// 线上名 → **本轮实际暴露集合**里的内部端口身份（D-445 ②）。
+///
+/// 别名表在装配期一次生成、碰撞已拒绝，故每个 wire 至多对应一个身份。查不到 ⇒
+/// `None`：调用方必须落失败事实，**不回落宿主路由、不反演字符串、不猜另一个工具**。
+/// 旧实现「精确匹配优先 + 投影反查」是在两个候选里选一个，等于替模型猜。
+fn resolve(wire: &str, aliases: &std::collections::BTreeMap<String, String>) -> Option<String> {
+    let mut hits = aliases.iter().filter(|(_, alias)| alias.as_str() == wire);
+    let first = hits.next()?;
+    if hits.next().is_some() {
+        // 装配期本该拒绝碰撞；这里再兜一道：有歧义就**拒绝**，不在两个候选里
+        // 挑一个（旧实现「精确匹配优先」正是这种挑法）。
+        return None;
+    }
+    Some(first.0.clone())
 }
 
 /// 参数摘要：截断到 `max_bytes`，落在字符边界上（多字节字符安全）。

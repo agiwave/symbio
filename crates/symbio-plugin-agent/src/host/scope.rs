@@ -152,6 +152,16 @@ impl Registry for SubAgentVisitor {
                 if let Some(executor) = provider.executor() {
                     let mut pending = self.pending.lock().await;
                     for port in provider.ports() {
+                        // 按端口键判重，不静默覆盖（D-445 ③）：子作用域里同名端口
+                        // 通常是同一能力的重复展开，保留先到者并留痕；装配期的
+                        // `capability_port_check` / host 折表另各有一道冲突判据。
+                        if pending.contains_key(&port) {
+                            symbio_plugin_api::plugin_warn!(
+                                "agent",
+                                "子 Agent 作用域端口 `{port}` 重复绑定，保留先到的执行体"
+                            );
+                            continue;
+                        }
                         pending.insert(port, Arc::clone(&executor));
                     }
                 }

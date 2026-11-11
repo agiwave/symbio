@@ -54,6 +54,54 @@ fn dedup_declared_twins(
         .collect()
 }
 
+/// 本轮**暴露视图**（D-444 / D-445）：显式暴露 ∩ 作用域允许 ∩ 有效绑定 + wire 别名。
+///
+/// - 有效绑定取装配期 `PORT_FAMILY` 行上的**端口键**（不是行名前缀）：只有描述行、
+///   没有执行体的孤儿行不进清单；只有端口行、没有描述行的内部端口也不进清单。
+///   作用域允许由 `collect_capabilities` 的 `agent_scope` 在同一次收集里保证。
+/// - wire 名是**描述数据**，由装配期一次算出并放进 `aliases`，供清单装配、四个协议的
+///   下行序列化与模型返回调用解析共用；别名不是身份，端口键仍是内部 canonical 名。
+/// - 两个身份映到同一 wire ⇒ **请求成形前拒绝**（D-444 ②）：冲突各方都不暴露，
+///   并把碰撞写进 `collisions` 供 `session.config` 报因。不靠返回时「精确匹配优先」
+///   选一个——那是消歧的假装版，会把调用静默绑到另一个工具。
+fn exposed_tools(
+    metas: Vec<symbio_kernel::capability::CapabilityMeta>,
+    bound: &std::collections::HashSet<String>,
+) -> (
+    Vec<symbio_kernel::capability::CapabilityMeta>,
+    serde_json::Map<String, serde_json::Value>,
+    Vec<serde_json::Value>,
+) {
+    let mut by_wire: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for meta in metas.iter().filter(|meta| bound.contains(&meta.name)) {
+        // 走门面而不是 sdk 本体：`plugin-tool` 的派发与 `plugin-model` 的四个协议取的是
+        // 同一个符号（E-009 的限额豁免只冻结既有 sdk 用法，加一条是另一条路）。
+        let wire = symbio_plugin_api::capability_to_wire(&meta.name);
+        by_wire.entry(wire).or_default().push(meta.name.clone());
+    }
+    let mut aliases = serde_json::Map::new();
+    let mut collisions = Vec::new();
+    let mut rejected: std::collections::HashSet<String> = Default::default();
+    for (wire, mut names) in by_wire {
+        names.sort();
+        names.dedup();
+        if names.len() > 1 {
+            // 同名绑定（同一 wire 下多个身份）：整组退出本轮暴露集合。
+            collisions.push(json!({ "wire": wire, "names": names }));
+            rejected.extend(names);
+        } else {
+            // 正向表：内部端口身份 → 模型侧别名。协议按 canonical 查表，返回解析
+            // 按 value 反查（碰撞已拒绝，value 唯一），两端读同一份数据。
+            aliases.insert(names[0].clone(), json!(wire));
+        }
+    }
+    let exposed = metas
+        .into_iter()
+        .filter(|meta| bound.contains(&meta.name) && !rejected.contains(&meta.name))
+        .collect();
+    (exposed, aliases, collisions)
+}
+
 impl SessionPlugin {
     /// 收件箱队首 → `user.message` 事实；返回这条事实的 `seq`（无消息 ⇒ `None`）。
     ///
@@ -204,21 +252,35 @@ impl SessionPlugin {
             .collect::<Vec<_>>()
             .join("\n\n");
         let twins = symbio_sdk::capability::capability_scope_twins(&*manager).await;
-        let tools = dedup_declared_twins(
-            manager
-                .list(symbio_kernel::capability::family::TOOL)
-                .await
-                .into_iter()
-                .map(|row| row.meta())
-                .collect(),
-            &twins,
+        // 有效绑定 = 装配期收集到的端口键（行上的数据，D-445 ③）；描述与执行两视图
+        // 由同一张表的**同一次收集**得出，不维护第二份注册事实。
+        let bound_ports: std::collections::HashSet<String> = manager
+            .list(symbio_plugin_api::port::PORT_FAMILY)
+            .await
+            .iter()
+            .filter_map(|row| row.payload::<symbio_plugin_api::PortPayload>())
+            .map(|payload| payload.port())
+            .collect();
+        let (tools, tool_aliases, alias_collisions) = exposed_tools(
+            dedup_declared_twins(
+                manager
+                    .list(symbio_kernel::capability::family::TOOL)
+                    .await
+                    .into_iter()
+                    .map(|row| row.meta())
+                    .collect(),
+                &twins,
+            ),
+            &bound_ports,
         );
         // 收集过程的失败信号（traverse 侧记在 ctx 的桶里）：能力表为空/有错都要落 config，
         // 只是把原因写进载荷。**不造新事件类型**——模型行依赖的是 `session.config` 这条
         // 输入本身，它必须在每一轮都出现，否则模型行会永远等不到输入。
         let capability_errors = capability_take_errors(ctx).await;
         let tools_empty_reason = if tools.is_empty() {
-            Some(if capability_errors.is_empty() {
+            Some(if !alias_collisions.is_empty() {
+                "wire_alias_collision"
+            } else if capability_errors.is_empty() {
                 "no_tool_rows"
             } else {
                 "capability_error"
@@ -237,6 +299,10 @@ impl SessionPlugin {
         let mut config_payload = serde_json::Map::new();
         config_payload.insert("system_prompt".to_string(), json!(system_prompt));
         config_payload.insert("tools".to_string(), json!(tools));
+        // 本轮暴露快照的别名表（wire → 内部端口名）：清单、协议序列化、返回调用解析
+        // 三处读同一份数据（D-444 ①）；碰撞组已在上一步退出清单，这里只记原因。
+        config_payload.insert("tool_aliases".to_string(), json!(tool_aliases));
+        config_payload.insert("tool_alias_collisions".to_string(), json!(alias_collisions));
         // 兜底表达：空表原因 / 收集错误明细（均为既有 config 载荷的字段，
         // 不是新事件类型）。非空表时前者为 null，后者为空数组。
         config_payload.insert("tools_empty_reason".to_string(), json!(tools_empty_reason));

@@ -45,6 +45,7 @@ impl ModelProvider for FakeModel {
         _system_prompt: &str,
         _messages: &[ChatNode],
         _tools: &[CapabilityMeta],
+        _aliases: &BTreeMap<String, String>,
         _root_id: &str,
         _env: &ExecEnv,
     ) -> Result<RoundOutput, PluginError> {
@@ -445,6 +446,7 @@ impl ModelProvider for RecordingModel {
         system_prompt: &str,
         messages: &[ChatNode],
         tools: &[CapabilityMeta],
+        _aliases: &BTreeMap<String, String>,
         _root_id: &str,
         _env: &ExecEnv,
     ) -> Result<RoundOutput, PluginError> {

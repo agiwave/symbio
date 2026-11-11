@@ -173,8 +173,16 @@ impl PortExecutor for AssistExecutor {
         // 能力方带进来的偏好优先；没带 / 取不到 ⇒ 会话选定（这一个端口实例的 active）。
         let provider = self.provider_for(request.provider.as_deref());
         match provider
+            // 一次性问答无工具表、不构对话轮 ⇒ 别名表为空（D-444 的装配期快照缺席）。
             // internal-model-allow IM-001: 问答端口是静默的一次性往返（无工具、无会话历史、不参与档位闸门）；走 `for_turn` 会把问答伪装成对话轮。
-            .round_trip(&request.system, &wire, &[], &root_id, &env)
+            .round_trip(
+                &request.system,
+                &wire,
+                &[],
+                &BTreeMap::<String, String>::new(),
+                &root_id,
+                &env,
+            )
             .await
         {
             Ok(output) => {

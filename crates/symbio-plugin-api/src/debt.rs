@@ -168,6 +168,7 @@ pub fn session_recall_id(user_fact_id: &str) -> String {
 }
 
 /// 语义章契约住在 `symbio-sdk`（宿主机制层）；这里只转出给插件作者。
+pub use symbio_sdk::debt_scope::NoOpenScope;
 pub use symbio_sdk::port_stamp::{
     FailureProjection, ReplyRole, STAMP_FAILURE, STAMP_KEY, STAMP_ROLE, STAMP_SPEND, STAMP_USAGE,
 };
@@ -195,8 +196,8 @@ pub struct DebtSpec {
     pub when_id: Option<(String, String)>,
     /// 排除条件：该事实已存在 ⇒ 本行不欠（与 `when` 同一条读面，按种类读）。
     pub unless: Option<Unless>,
-    /// 该端口的债全部还清才欠（读债状态）；环只读端口名，不解释语义。
-    pub when_no_open: Option<String>,
+    /// 该端口的债全部还清才欠；作用域见 [`NoOpenScope`]（可只认「本次调用集合」，D-446）。
+    pub when_no_open: Option<NoOpenScope>,
     /// 前提（读债状态）：该端口**这一轮**还有人认领（可派发 / 在飞 / 挂起）⇒ 本行
     /// 不进计划；没人认领 ⇒ 前提已了（**缺席即收束**）。上一轮遗留的未收束债不算
     /// 认领（债表按当轮事实现算，遗留债由自己的租约收束）。
@@ -304,8 +305,7 @@ impl DebtSpec {
         self
     }
 
-    /// 声明「该端口无未还债才欠」。
-    pub fn when_no_open(mut self, port: impl Into<String>) -> Self {
+    pub fn when_no_open(mut self, port: impl Into<NoOpenScope>) -> Self {
         self.when_no_open = Some(port.into());
         self
     }

@@ -39,8 +39,9 @@ pub(crate) struct DebtRow {
     pub(crate) when_id: Option<(String, String)>,
     /// 该事实已存在 ⇒ 本行不欠（排除条件，与 `when` 同一条读面）。环只透传，不解释。
     pub(crate) unless: Option<Unless>,
-    /// 该端口的债全部还清才欠；`None` = 无此前提。环只读端口名，不解释语义。
-    pub(crate) when_no_open: Option<String>,
+    /// 该端口的债全部还清才欠；`None` = 无此前提。作用域可以只是**这一批债 id**
+    /// （`NoOpenScope`，D-446）：同端口上别的债不挡。
+    pub(crate) when_no_open: Option<symbio_plugin_api::debt::NoOpenScope>,
     /// 前提（读**债状态**）：该端口**这一圈**还有人认领（可派发 / 在飞 / 挂起）⇒
     /// 本行不进计划；该端口没人认领 ⇒ 前提已了（**缺席即收束**）。
     ///
@@ -125,7 +126,10 @@ impl DebtRow {
     }
 
     /// 声明「该端口的债全部还清才欠」（读债状态，不读事实状态）。
-    pub(crate) fn when_no_open(mut self, port: impl Into<String>) -> Self {
+    pub(crate) fn when_no_open(
+        mut self,
+        port: impl Into<symbio_plugin_api::debt::NoOpenScope>,
+    ) -> Self {
         self.when_no_open = Some(port.into());
         self
     }

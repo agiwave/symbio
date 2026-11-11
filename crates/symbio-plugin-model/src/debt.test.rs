@@ -69,14 +69,53 @@ fn tool_result_adds_a_second_row_with_its_own_identity() {
         "没有这一轮的工具请求就不欠（否则每条响应都想再派一次）"
     );
     assert_eq!(
-        after_tools.when_no_open.as_deref(),
+        after_tools.when_no_open.as_ref().map(|scope| scope.port()),
         Some(TOOL_PORT),
-        "已落账的调用债（在飞 / 挂起）未收束就不欠"
+        "已落账的调用债未收束就不欠"
+    );
+    assert!(
+        after_tools
+            .when_no_open
+            .as_ref()
+            .is_some_and(|scope| scope.ids().is_none()),
+        "没有逐调用标记时不许假装知道「本次调用集合」——退回整条端口的保守读法"
     );
     assert_eq!(
         after_tools.after_port.as_deref(),
         Some(TOOL_PORT),
         "逐笔债串链后，同圈首派的链上后一笔还没有账上痕迹，只有 after_port 挡得住"
+    );
+}
+
+#[test]
+fn continuation_waits_for_this_rounds_call_set_not_the_whole_port() {
+    let mut facts = DebtFacts::default();
+    facts.note_fact(EVENT_USER_MESSAGE, "u-1");
+    facts.note_fact(EVENT_TOOL_REQUESTED, "tool.requested:m1");
+    // 模型在派发请求时按 `calls[]` 一次落齐的逐笔标记（D-378）。
+    for call_id in ["c1", "c2"] {
+        let marker_id = format!("tool.call.requested:tool.requested:m1:{call_id}");
+        facts.note_fact_payload(
+            EVENT_TOOL_CALL_REQUESTED,
+            &marker_id,
+            json!({ "request_id": "tool.requested:m1", "call_id": call_id }),
+        );
+    }
+    facts.note_fact(EVENT_ARTIFACT_ADDED, "a-1");
+
+    let rows = ModelDebts.rows(&request(None), &facts);
+    let scope = rows[1].when_no_open.as_ref().expect("续跑行必须带端口门");
+    assert_eq!(scope.port(), TOOL_PORT);
+    assert_eq!(
+        scope.ids(),
+        Some(
+            [
+                "tool:tool.requested:m1:c1".to_string(),
+                "tool:tool.requested:m1:c2".to_string()
+            ]
+            .as_slice()
+        ),
+        "只认本次请求的那两笔调用：同端口上一笔迟归的旧债不该拖住这轮续跑（D-446）"
     );
 }
 

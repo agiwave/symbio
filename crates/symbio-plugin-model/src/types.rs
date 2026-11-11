@@ -189,8 +189,11 @@ impl NativeMessage {
         }
 
         if let Some(ref tool_calls) = self.tool_calls {
-            // 工具名转线上形态（`/` `.` 等协议不允许的字符 → `__`，见
-            // `symbio_plugin_api::capability::tool_name`）
+            // 历史 `tool_calls` 的 name 是模型发出的 wire 名（回灌）而非 canonical 名：
+            // 装配期别名表以 canonical 为键，此处查不到它；`to_api_value` 也拿不到本轮
+            // tools/aliases 上下文，故仍用 `capability_to_wire` 投影（对字符集内的 wire
+            // 名是恒等映射，请求形状逐字不变）。不为此硬塞全局状态。这是消息历史序列化
+            // 上唯一残留的一处投影，与下行 tools 清单无关。
             let api_tool_calls: Vec<serde_json::Value> = tool_calls
                 .iter()
                 .map(|tc| {

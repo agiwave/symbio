@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
@@ -11,10 +12,12 @@ use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrActi
 use super::profile::{self, first_str, OPENAI_CHAT_REASONING_KEYS};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
-use super::{description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_CHAT};
+use super::{
+    description_for_llm, error_text, sse_data, wire_name_for_llm, ModelProtocol,
+    MODEL_PROTOCOL_OPENAI_CHAT,
+};
 use crate::http::get_http_client;
 use crate::round::{ModelFinishReason, ModelUsage};
-use symbio_plugin_api::capability_to_wire;
 use symbio_plugin_api::{PluginError, PluginInvokeRequest};
 
 pub struct OpenaiChatProtocol;
@@ -110,6 +113,7 @@ impl ModelProtocol for OpenaiChatProtocol {
         system: &str,
         messages: &[symbio_plugin_api::chat_node::ChatNode],
         tools: &[CapabilityMeta],
+        aliases: &BTreeMap<String, String>,
     ) -> Value {
         let flattened_messages = crate::message_builder::flatten_chat_messages(messages);
         // **出厂只发一条 system**：基础 `system` 与数组最前的 system 前缀段并成一条，
@@ -141,7 +145,7 @@ impl ModelProtocol for OpenaiChatProtocol {
                     json!({
                         "type": "function",
                         "function": {
-                            "name": capability_to_wire(&t.name),
+                            "name": wire_name_for_llm(t, aliases),
                             "description": description_for_llm(t),
                             "parameters": t.input_schema
                         }

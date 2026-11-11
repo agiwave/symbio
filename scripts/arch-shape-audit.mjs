@@ -345,12 +345,13 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields: D-416 报表登记面整块搬进 sdk——ReportDecl(8：`owner` / `slot` / `order` / `views` / `fleet` / `render` / `fleet_render` / `panel`) / ReportCtx(3：`principal` / `cap` / `readable`) 共 11 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。与 D-412 / D-413 / D-415 同一份类型闭包论证（`inventory::collect!` 实现在定义类型的 crate 生成，读侧要冻结声明表，sdk 只依赖内核）。
 // core-shape-allow enumVariants: D-416 报表登记面整块搬进 sdk——ReportError(6：`EmptySlot` / `EmptyViews` / `EmptyViewName` / `EmptyFleet` / `DuplicateSlot` / `DuplicateView`) / ViewUnavailable(2：`NotSealed` / `Unknown`) 共 8 格随读口换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包。
 // core-shape-allow structFields: D-440 端口注册面与执行契约整面搬进 sdk——PortCapabilities(3：`streaming` / `cancel` / `idempotent`) / PortInput(2：`port` / `payload`) / PortFact(4：`id` / `port` / `kind` / `payload`) / PortExecContext(11：`abort` / `idempotency_key` / `sink` / `emit` / `ctx` / `subject` / `group` / `session_id` / `origin` / `scratch_dir` / `reader`，`source` 随行) / PortExecHandles(5：`ctx` / `scratch_dir` / `sink` / `session_id` / `source`) / PortFactEmit(1) / PortReply(2：`messages` / `links`) / PortOutcome(4：`authz` / `facts` / `error` / `reply`) / PendingPrompt(3：`text` / `prompt` / `failure_kind`) / PortPayload(1) 共 33 格随门面减负换地址。此前住 plugin-api/port.rs（不在 CS-009 扫描面），FA-001 只许门面自有实现降（D-440 ②：门面 476→34 行）；搬的是同一份端口契约，不是新长出的数据面。基线钉到搬后实测 615，不留余量。
+// core-shape-allow structFields: D-446 `when_no_open` 的谓词要从「整条端口」放宽为「作用域」——`NoOpenScope`(2：`port` / `ids`) 是「端口干净才欠」的**同一件事的两半**，单格 `String` 表达不了「只认这一批债 id」，而那正是 D-446 要求的「本次调用集合收束」（一笔迟归的旧调用债不该把这一轮的续跑一起拖住）。两格折不开：折成元组塞回原字段，调用方各拼一半，`covers()` 这个唯一判据就无处安放；降 `pub(crate)` 不行——读它的两侧是环（`symbio-plugin-loop`）与申报方插件（跨 crate）。它补的是**新判据能力**，不是新长出的业务数据面：没有新增世界域名 / 端口名 / 事实名，也没有改动为某个插件开的口子。基线钉到实测 617，不留余量。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 615, enumVariants: 260 }
+  : { structFields: 617, enumVariants: 260 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

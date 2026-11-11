@@ -20,6 +20,8 @@
 //!
 //! 协议差异全部被 `ModelProtocol` 钩子吸收，本实现对所有协议通用。
 
+use std::collections::BTreeMap;
+
 use crate::round::RoundOutput;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -98,6 +100,7 @@ impl ModelProvider for BoundProvider {
         system_prompt: &str,
         messages: &[ChatNode],
         tools: &[CapabilityMeta],
+        aliases: &BTreeMap<String, String>,
         root_id: &str,
         env: &ExecEnv,
     ) -> Result<RoundOutput, PluginError> {
@@ -112,9 +115,9 @@ impl ModelProvider for BoundProvider {
         // 相邻两条同名「请求发起」（一条在此、一条在 `execute_post_with_abort` 内）
         // 会每次请求刷两行、语义重复。
         let turn_started = std::time::Instant::now();
-        let body = self
-            .protocol
-            .prepare_request(&self.cfg, system_prompt, messages, tools);
+        let body =
+            self.protocol
+                .prepare_request(&self.cfg, system_prompt, messages, tools, aliases);
         // 请求体**只序列化一次**：这一份字节既用来记日志里的「体量」，也用来实际发送。
         //
         // 若为量字节数另调 `to_vec`、发送侧再用 `.json(body)`，同一份请求体要序列化两遍；

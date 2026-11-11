@@ -16,11 +16,14 @@
  *   ④ **不许冒充**：归档目录里不匹配 `<wal 文件名>.<first>-<last>` 的文件不是段；
  *   ⑤ **输入缺失即退出 2**：读不出会话语就不判，不退化成「什么都没检查 ⇒ 绿灯」；
  *   ⑥ **反向三条**（假绿的牙齿）：多一次 HTTP 而少一笔 `sent` ⇒ J8 红；一笔缺终态
- *      ⇒ J1 红；`ring:` 身份里的端口不在声明集 ⇒ J6 红；
+ *      ⇒ J1 红；协议事实不带 `ring:` 身份 ⇒ J6 红（形状判据，端口白名单退场后仍不放宽）；
  *   ⑦ **J7 双向**：三格多于观测、观测多于三格，各判红；
  *   ⑧ **J9 配对**：压缩产物找不到配对的摘要往返 ⇒ 红；
- *   ⑨ **端口声明集不许漂移**：`DECLARED_PORTS` 的每一项都必须在它引用的声明文件里
- *      还以字面量出现——上一版就是常量留在旧端口集、而声明侧换成了行名。
+ *   ⑨ **动态端口准入**（D-447 ①）：含未在静态表中的自定义端口 `custom_probe` 的完整
+ *      事实序列，J6 仍通过、且输出里有「新端口」与「声明未出现」的漂移提示——
+ *      「新增端口不改验收表也能通过 J6」的可跑回归夹具。旧版那条「扫源码声明 ↔
+ *      `DECLARED_PORTS` 逐项比对，多一个端口不改表就红」的守卫随白名单一起退场：
+ *      它正是被收窄的那道门（见 obligation-ring-accept.mjs 文件头的退场 ④）。
  *
  * 夹具用**现行 WAL 形状**（`ring:{port}:{id}:{attempt}:{kind}[:{shard}]`），不留
  * 上一代形状的「历史读法」夹具：那会让下一个人以为旧本体还在。
@@ -37,7 +40,6 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./obligation-ring-accept.mjs', import.meta.url))
-const repo = path.resolve(path.dirname(script), '..')
 
 /** 现行协议事实身份：`ring:{port}:{id}:{attempt}:{kind}[:{shard}]`。 */
 const ring = (port, id, attempt, kind, shard = null) =>
@@ -251,13 +253,15 @@ test('反向②：一组往返缺终态（也没有挂起 sent）⇒ J1 红', ()
   assert.match(out(r), /J1 model\/model:u1#1: 缺终态/)
 })
 
-test('反向③：ring: 身份里的端口不在声明集 ⇒ J6 红', () => {
+test('反向③：协议事实不带 ring: 身份 ⇒ J6 红（形状判据，端口白名单已退场）', () => {
   const facts = base()
-  // 接在 final(5) 之后的一笔完整往返，只是端口是个没人声明的名字。
-  round(facts, 6, 'bogus_port', 'x:u1')
+  // 一条没有 ring: 身份的协议事实：groupRounds / J1 不会为它建笔，J2 只管 request，
+  // 只有 J6 会因为「端口无从判定」判红——钉住形状判据没随白名单一起被放宽。
+  // （端口名不在静态表已不再是失效，见本文件末尾的动态端口准入夹具。）
+  facts.push(ev(6, 'sent', 'orphan-event-6', { deadline_ms: 9_000_000_000_000 }))
   const r = accept({ live: lines(...facts) })
   assert.equal(r.status, 1, out(r))
-  assert.match(out(r), /J6 .*端口 "bogus_port" 未在声明集里/)
+  assert.match(out(r), /J6 .*不是 ring: 身份/)
 })
 
 // ── J1 的挂起补条：多一条 sent 不是「两笔派发」 ───────────────────────────
@@ -369,85 +373,20 @@ test('J2：scope 终止后没有新输入格就派发 ⇒ 红', () => {
   assert.match(out(r), /J2 request#8 落在已终止的 scope/)
 })
 
-// ── 声明集漂移守卫 ────────────────────────────────────────────────────────
+// ── 动态端口准入（D-447 ①）：静态白名单退场后的回归夹具 ───────────────────
 
-test('DECLARED_PORTS 与源码里的端口声明逐项一致（多一个 / 少一个都红）', () => {
-  // 为什么要解析源码：J6 的名单若靠手维护，它一定会漂——上一版就停在
-  // `['turn','model','tool']`，而声明侧早换成了行名（`plugin_row` / `model.assist`），
-  // 于是 J6 把一份合规 WAL 判成 28 项假红。现在的守卫**两个方向**都判：
-  // 少一个（声明删了、表没删）红；多一个（新增端口、表没加）也红。
-  //
-  // 解析口径只覆盖两种真声明形态：`PortProvider::ports()` 的返回值，与
-  // `PortDecl { port: X }`；再加 `plugin_row`（行派发端口，由 `plugin_rows.rs` 的
-  // `DebtRow` 写，不走 `PortProvider`）。
-  const rsFiles = []
-  const walk = (dir) => {
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, ent.name)
-      if (ent.isDirectory()) {
-        if (ent.name === 'target' || ent.name === 'node_modules') continue
-        walk(p)
-      } else if (ent.name.endsWith('.rs')) {
-        rsFiles.push(p)
-      }
-    }
-  }
-  walk(path.join(repo, 'crates'))
-
-  // `const NAME: &str = "value"` 的全仓索引（先非测试文件，再用测试文件补缺）。
-  const constMap = new Map()
-  for (const pass of [false, true]) {
-    for (const f of rsFiles) {
-      if (f.endsWith('.test.rs') !== pass) continue
-      const text = fs.readFileSync(f, 'utf8')
-      for (const m of text.matchAll(/(?:pub(?:\(crate\))?\s+)?const (\w+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
-        if (!constMap.has(m[1])) constMap.set(m[1], m[2])
-      }
-    }
-  }
-
-  /** 标识符 → 端口字符串：字面量 / 本文件常量 / `use … as X` 再查全仓常量。 */
-  const resolve = (ident, text) => {
-    if (/^".*"$/.test(ident)) return ident.slice(1, -1)
-    const local = text.match(new RegExp(`const ${ident}\\s*:\\s*&str\\s*=\\s*"([^"]+)"`))
-    if (local) return local[1]
-    for (const line of text.split('\n')) {
-      const u = line.match(/^\s*(?:pub\(crate\)\s+)?use\s+([\w:]+)(?:\s+as\s+(\w+))?\s*;/)
-      if (!u) continue
-      const tail = u[1].split('::').pop()
-      if ((u[2] ?? tail) !== ident) continue
-      if (constMap.has(tail)) return constMap.get(tail)
-    }
-    return null
-  }
-
-  const declared = new Set()
-  for (const f of rsFiles) {
-    // 只看生产声明：`.test.rs` 里的夹具端口（`fixture` 之类）不是声明。
-    if (f.endsWith('.test.rs')) continue
-    const text = fs.readFileSync(f, 'utf8')
-    for (const m of text.matchAll(
-      /fn ports\(&self\)\s*->\s*Vec<String>\s*\{\s*vec!\[([^\]]*)\]/g,
-    )) {
-      for (const raw of m[1].split(',').map((s) => s.trim().replace(/\.to_string\(\)$/, '')).filter(Boolean)) {
-        const value = resolve(raw, text)
-        assert.ok(value, `${path.relative(repo, f)} 里的端口标识 ${raw} 解析不出字符串`)
-        declared.add(value)
-      }
-    }
-  }
-  declared.add('plugin_row')
-
-  const judge = fs.readFileSync(script, 'utf8')
-  const table = [...judge.matchAll(/const DECLARED_PORTS = \[([\s\S]*?)\n\]/g)].map((m) => m[1]).join('\n')
-  assert.ok(table.length > 0, '判定器里的 DECLARED_PORTS 表没找到（结构变了？同步更新本守卫）')
-  const listed = [...table.matchAll(/\{\s*port:\s*'([^']+)'/g)].map((m) => m[1])
-  const missing = [...declared].filter((p) => !listed.includes(p))
-  const stale = listed.filter((p) => !declared.has(p))
-  assert.deepEqual(
-    { missing, stale },
-    { missing: [], stale: [] },
-    `DECLARED_PORTS 与源码声明不一致：源码有而表里没有 ${JSON.stringify(missing)}；` +
-      `表里有而源码没有 ${JSON.stringify(stale)}`,
-  )
+test('动态端口准入：含未在静态表中的自定义端口 custom_probe ⇒ J6 通过，且有「新端口」提示', () => {
+  // 旧版在这里放的是「扫源码声明 ↔ DECLARED_PORTS 逐项比对」的漂移守卫：多一个端口
+  // 不改表就红。它把「加端口先改验收表」钉成门禁，与 D-447 ① 正面冲突，随静态白名单
+  // 一起退场（见 obligation-ring-accept.mjs 文件头退场 ④）。承接夹具就是这一条：
+  // `custom_probe` 既不在静态表里、也不在源码里，一笔完整合规往返必须照样过 J6——
+  // 端口准入读的是**实测端口集**，不是那张表。
+  const facts = base()
+  round(facts, 6, 'custom_probe', 'probe:u1')
+  const r = accept({ live: lines(...facts) })
+  assert.equal(r.status, 0, out(r))
+  assert.match(out(r), /全项通过/)
+  assert.match(out(r), /新端口 "custom_probe"/)
+  // 另一侧漂移也只提示、不判红：静态表里多数声明端口本次没出现。
+  assert.match(out(r), /声明端口.*未出现/)
 })

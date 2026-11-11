@@ -406,7 +406,7 @@ export const BASELINE = {
   // `TokenIssuer` 的 ZST 形状）、`stubs.test.rs` 的桩确定性一条、`actors/mod.test.rs`
   // 的四条「彩排真实执行形状」（桩 → 适配器 → 兜底 / 预算）。闭环本身由 e2e 的
   // `mock-llm` 承担，不影响覆盖；非侵蚀。
-  ciRustTestsTotal: 2217,
+  ciRustTestsTotal: 2223,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

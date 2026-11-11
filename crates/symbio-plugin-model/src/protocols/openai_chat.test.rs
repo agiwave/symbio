@@ -178,11 +178,56 @@ fn prepared_request_carries_exactly_one_system_message() {
             ..Default::default()
         },
     ];
-    let req = OpenaiChatProtocol.prepare_request(&cfg, "基础", &msgs, &[]);
+    let req = OpenaiChatProtocol.prepare_request(
+        &cfg,
+        "基础",
+        &msgs,
+        &[],
+        &BTreeMap::<String, String>::new(),
+    );
     let arr = req["messages"].as_array().expect("messages 数组");
     let n = arr.iter().filter(|m| m["role"] == "system").count();
     assert_eq!(n, 1, "出厂只发一条 system（两条会被部分网关 400）");
     assert_eq!(arr[0]["role"], "system", "它在最前");
     assert_eq!(arr[0]["content"], "基础\n\n记忆段", "两段文本都在，没丢");
     assert_eq!(arr[1]["role"], "user", "后续消息原序跟进");
+}
+
+/// D-444：下行 tools 清单的 function name 按装配期别名表取，命中用别名；
+/// 空别名表回退 canonical 名本身（老夹具 / 空工具集兼容），其它字段与顺序不变。
+#[test]
+fn tools_use_alias_table_and_fall_back_to_canonical_name() {
+    let cfg = crate::model_providers::ModelProviderConfig {
+        model: "m".to_string(),
+        api_base: "http://localhost".to_string(),
+        ..Default::default()
+    };
+    // 非协议字符集的名字（含 `.`）：旧投影会变成 `mcp__fs__read`，
+    // 新口径由装配期别名表直接给出 wire 名。
+    let tools = vec![CapabilityMeta {
+        name: "mcp.fs.read".into(),
+        description: "读文件".into(),
+        input_schema: serde_json::json!({"type": "object"}),
+        ..Default::default()
+    }];
+
+    // 命中：别名表把 canonical 名映成模型侧 wire 名。
+    let mut aliases = BTreeMap::new();
+    aliases.insert("mcp.fs.read".to_string(), "mcp__fs__read".to_string());
+    let req = OpenaiChatProtocol.prepare_request(&cfg, "", &[], &tools, &aliases);
+    assert_eq!(
+        req["tools"][0]["function"]["name"], "mcp__fs__read",
+        "命中别名表 ⇒ function name 取 wire 别名"
+    );
+    assert_eq!(req["tool_choice"], "auto", "tool_choice 不随别名变化");
+    assert_eq!(req["tools"][0]["type"], "function");
+    assert_eq!(req["tools"][0]["function"]["description"], "读文件");
+
+    // 未命中（空表）：回退 canonical 名本身，不在这层做字符集投影（兼容老夹具）。
+    let empty: BTreeMap<String, String> = BTreeMap::new();
+    let req = OpenaiChatProtocol.prepare_request(&cfg, "", &[], &tools, &empty);
+    assert_eq!(
+        req["tools"][0]["function"]["name"], "mcp.fs.read",
+        "空别名表 ⇒ 回退 canonical 名本身"
+    );
 }

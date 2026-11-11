@@ -404,8 +404,14 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
             }
         }
         // 「该端口的债全部还清才欠」读的是债状态，不是事实状态（归属：选债）。
-        if let Some(port) = &row.when_no_open {
-            if view.unresolved().iter().any(|key| &key.port == port) {
+        // 作用域可能只是**这一批债 id**（D-446）：同端口上别的债不挡——一笔迟归 /
+        // 卡住的旧调用债不该把这一轮的续跑一起拖住。
+        if let Some(scope) = &row.when_no_open {
+            if view
+                .unresolved()
+                .iter()
+                .any(|key| key.port == scope.port() && scope.covers(&key.id))
+            {
                 continue;
             }
         }

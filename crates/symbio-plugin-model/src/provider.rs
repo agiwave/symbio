@@ -31,6 +31,8 @@
 //! `PortExecutor` 的实现搬过去，而不是把这个 trait 再抬回公共面——端口是**数据面
 //! 的接缝**，不是类型面的接缝。
 
+use std::collections::BTreeMap;
+
 use crate::round::RoundOutput;
 use async_trait::async_trait;
 use symbio_plugin_api::chat_node::ChatNode;
@@ -75,11 +77,15 @@ pub trait ModelProvider: Send + Sync {
     /// `env` 与工具执行体（`PortExecutor`）共用同一类型
     /// （[`ExecEnv`]）：两者都是「一次带中止的流式执行」——出方向写事件、
     /// 入方向读中止。模型执行不被路由，因此没有 `ctx` 入参。
+    ///
+    /// `aliases` 是装配期算好的「canonical → wire」别名表（D-444）：下行 tools 清单
+    /// 按它取模型侧名字，四个协议只读同一份数据、不再各自做字符集投影。
     async fn round_trip(
         &self,
         system_prompt: &str,
         messages: &[ChatNode],
         tools: &[CapabilityMeta],
+        aliases: &BTreeMap<String, String>,
         root_id: &str,
         env: &ExecEnv,
     ) -> Result<RoundOutput, PluginError>;

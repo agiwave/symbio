@@ -533,6 +533,32 @@ async fn wire_names_resolve_to_canonical_capabilities() {
     assert!(success);
 }
 
+/// 返回调用只认**本轮暴露快照**的别名表（D-445 ②）：不反演字符串、不回退
+/// 「精确匹配优先」、内部端口名本身也不当别名用。
+#[test]
+fn resolve_only_accepts_this_rounds_exposure_aliases() {
+    let mut aliases = std::collections::BTreeMap::new();
+    aliases.insert("mcp.fs.read".to_string(), "mcp__fs__read".to_string());
+    aliases.insert("shell".to_string(), "shell".to_string());
+    assert_eq!(
+        resolve("mcp__fs__read", &aliases).as_deref(),
+        Some("mcp.fs.read")
+    );
+    assert_eq!(resolve("shell", &aliases).as_deref(), Some("shell"));
+    assert!(
+        resolve("mcp.fs.read", &aliases).is_none(),
+        "内部端口身份不是 wire 别名，模型不能直接按它发起调用"
+    );
+    assert!(resolve("unknown", &aliases).is_none());
+    assert!(resolve("", &aliases).is_none());
+    // 装配期已拒绝 wire 碰撞；即便客户端硬塞一张有歧义的表，解析侧也**拒绝**
+    // 而不是在 `a.b` / `a__b` 里「精确匹配优先」挑一个。
+    let mut ambiguous = std::collections::BTreeMap::new();
+    ambiguous.insert("a.b".to_string(), "a__b".to_string());
+    ambiguous.insert("a__b".to_string(), "a__b".to_string());
+    assert!(resolve("a__b", &ambiguous).is_none());
+}
+
 #[tokio::test]
 async fn unknown_names_do_not_get_guessed() {
     let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);

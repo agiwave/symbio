@@ -184,17 +184,34 @@ impl Host {
             .await
             .map_err(|e| format!("能力收集失败: {e:?}"))?;
 
+        // 执行视图与 session 侧的描述视图由**同一次装配收集**的表读出：端口键取行上的
+        // `PortPayload::port`（提供者声明的数据），不解析行名前缀（D-445 ③）。
+        // 写入是**受检插入**：`entry().or_insert()` 没有覆盖语义，同键第二笔绑定写不进去。
+        // 旧实现用裸 `insert`，后写的实现会顶掉先写的，而描述视图仍指着前者——那正是
+        // 「描述与执行漂移」的来源。同一提供者把同一端口说两遍是**同一绑定的重复声明**，
+        // 保留先到的执行体；不同提供者抢同一个端口是**两个 owner**，装配期就拒绝。
         let mut executors: HashMap<String, Arc<dyn PortExecutor>> = HashMap::new();
+        let mut owners: HashMap<String, String> = HashMap::new();
         for row in manager.list(PORT_FAMILY).await {
             let Some(payload) = row.payload::<PortPayload>() else {
                 continue;
             };
-            let provider = payload.provider();
-            let Some(executor) = provider.executor() else {
+            let Some(executor) = payload.provider().executor() else {
                 continue;
             };
-            for port in provider.ports() {
-                executors.insert(port, Arc::clone(&executor));
+            let port = payload.port();
+            let owner = payload.provider().provider_id().to_string();
+            match owners.get(&port) {
+                Some(previous) if previous != &owner => {
+                    return Err(format!(
+                        "世界端口 `{port}` 有冲突绑定：`{previous}` 与 `{owner}`，装配期拒绝（D-445 ③）"
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    owners.insert(port.clone(), owner);
+                    executors.entry(port).or_insert(executor);
+                }
             }
         }
 

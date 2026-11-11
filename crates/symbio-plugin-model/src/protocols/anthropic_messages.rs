@@ -5,6 +5,7 @@ use async_trait::async_trait;
 
 use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -18,11 +19,11 @@ use super::profile::{
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{
-    description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
+    description_for_llm, error_text, sse_data, wire_name_for_llm, ModelProtocol,
+    MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
 };
 use crate::http::get_http_client;
 use crate::round::{ModelFinishReason, ModelUsage};
-use symbio_plugin_api::capability_to_wire;
 use symbio_plugin_api::{PluginError, PluginInvokeRequest};
 use tracing::warn;
 
@@ -78,6 +79,7 @@ impl ModelProtocol for AnthropicProtocol {
         system: &str,
         messages: &[symbio_plugin_api::chat_node::ChatNode],
         tools: &[CapabilityMeta],
+        aliases: &BTreeMap<String, String>,
     ) -> Value {
         let flattened_messages = crate::message_builder::flatten_chat_messages(messages);
         let mut anthropic_msgs: Vec<Value> = Vec::new();
@@ -269,7 +271,7 @@ impl ModelProtocol for AnthropicProtocol {
             req["tools"] = json!(tools
                 .iter()
                 .map(|t| json!({
-                    "name": capability_to_wire(&t.name),
+                    "name": wire_name_for_llm(t, aliases),
                     "description": description_for_llm(t),
                     "input_schema": t.input_schema
                 }))

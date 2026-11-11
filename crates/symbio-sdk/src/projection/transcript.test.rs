@@ -13,16 +13,16 @@ use crate::test_fixtures::{
 };
 use symbio_kernel::view::Budget;
 
-/// 请求包里的文本：条目按 `exclude_from_context` 过滤后投影成消息。
+/// 请求包里的文本：条目按 `exclude_from_context` 过滤后取正文。
 ///
-/// 旧 `TranscriptView::to_messages` 的唯一语义就是这一步；出口已删，读法现在由
-/// 条目上的那一个布尔 + `PromptMessage::from` 组成——这里按同一条读法折一遍，
-/// 「界面文本不进请求包」的判据不变。
+/// 旧 `TranscriptView::to_messages` 与随后的 `PromptMessage::from` 都只做这一步
+/// （后者在 D-448 一并删掉：合成 `tool_call_id` 的规则只该有一份，住组装请求那一侧）。
+/// 判据的口径不变——「界面文本不进请求包」。
 fn sent_texts(view: &super::TranscriptView) -> Vec<String> {
     view.entries
         .iter()
         .filter(|e| !e.exclude_from_context)
-        .map(|e| super::PromptMessage::from(e).text)
+        .map(|e| e.text.clone())
         .collect()
 }
 

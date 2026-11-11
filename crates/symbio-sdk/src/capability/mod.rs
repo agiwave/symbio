@@ -45,4 +45,4 @@ pub use mount::capability_vdfs_root;
 pub use option::capability_option_fields;
 pub use prompt::capability_prompts;
 pub use scoped_twin::{capability_scope_twins, SCOPE_TWIN};
-pub use tool_name::{capability_resolve, capability_to_wire};
+pub use tool_name::capability_to_wire;

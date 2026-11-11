@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
@@ -11,10 +12,9 @@ use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrActi
 use super::profile;
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
-use super::{description_for_llm, ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
+use super::{description_for_llm, wire_name_for_llm, ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
 use crate::http::get_http_client;
 use crate::round::{ModelFinishReason, ModelUsage};
-use symbio_plugin_api::capability_to_wire;
 use symbio_plugin_api::{PluginError, PluginInvokeRequest};
 
 pub struct GeminiProtocol;
@@ -49,6 +49,7 @@ impl ModelProtocol for GeminiProtocol {
         system: &str,
         messages: &[symbio_plugin_api::chat_node::ChatNode],
         tools: &[CapabilityMeta],
+        aliases: &BTreeMap<String, String>,
     ) -> Value {
         let flattened_messages = crate::message_builder::flatten_chat_messages(messages);
         let mut contents: Vec<Value> = Vec::new();
@@ -157,7 +158,7 @@ impl ModelProtocol for GeminiProtocol {
         if !tools.is_empty() {
             req["tools"] = json!([{
                 "functionDeclarations": tools.iter().map(|t| json!({
-                    "name": capability_to_wire(&t.name),
+                    "name": wire_name_for_llm(t, aliases),
                     "description": description_for_llm(t),
                     "parameters": t.input_schema
                 })).collect::<Vec<_>>()

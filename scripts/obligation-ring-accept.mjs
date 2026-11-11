@@ -46,12 +46,12 @@
  * | J3 | 一笔的最小 `sent.seq` 严格小于它的终态 `seq`（挂起补的 `sent` 若晚于终态不算） | DE-015 §4（引擎写 before，应答在后） |
  * | J4 | 收束格（`chat.assistant.final` \| `chat.assistant.fallback`）的 `reason` 非空 | DE-015 §6 结局必须有名 |
  * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq（含归档段） | DE-015 §4 溯源不悬空 |
- * | J6 | 孤名 = 0：协议事实必须带 `ring:` 身份，且身份里的端口在**声明集**里（见 `DECLARED_PORTS`，每项带出处） | （装载期硬拒的实测对账） |
+ * | J6 | 孤名 = 0：协议事实必须带 `ring:` 身份（形状判据，判红）。端口准入改读**实测端口集**；静态 `DECLARED_PORTS` 降级为漂移对照（「新端口」/「声明未出现」都只提示、不判红） | D-447 ①（装载期硬拒的实测对账） |
  * | J7 | 模型往返的**观测 ⇔ 三格**双向对账，逐条路径（见 `MODEL_PATHS`）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起 | DE-015 判据 2 全量口径 |
  * | J8 | 给了 `--cli-log` 时：`[LLM] 请求发起` 行数 == `sent`（模型端口、剔除挂起补条）数。`--strict` 下没给日志即判红 | DE-015 §0「没有别的调度代码」 |
  * | J9 | 压缩产物 ⇔ 摘要往返：每一条 `session.consolidated` 都必须指名到一笔**已收束**的 `compact-summarize` 往返（`model.assist` 端口，`id` 尾缀 = 产物指纹） | DE-015 §5.2 / D-131 的**产物侧** |
  *
- * ## 三条退场（SP-033 §5：写明退场 + 承接判据，不静默删）
+ * ## 四条退场（SP-033 §5：写明退场 + 承接判据，不静默删）
  *
  * ① **J7 的 `compress/summary` 路径退场**。旧读法用 `turn.stage{compress}.model_calls`
  *    当观测；现行事实里没有这一格，也没有任何**独立于环**的事实能说「这一轮该压」——
@@ -74,14 +74,28 @@
  *    `HTTP == sent(模型端口)`——这不是放宽：原来的豁免项本身就是**已知债**，现在债没了。
  *    「有一条静默的模型调用」仍由 J8 的差额判红。
  *
- * ## 端口声明集为什么必须来自事实面之外
+ * ④ **J6 的静态端口白名单拒绝 + 配套的「表 ↔ 源码声明」漂移守卫退场（D-447 ①）**。
+ *    白名单要求「加端口先改验收表」，与 D-440「端口名不进声明表」冲突；守卫又把
+ *    「新增源码声明不改表就红」钉成了门禁。承接判据是**动态端口集 + 漂移对照提示**：
+ *    端口准入读实测端口集，静态表只报「新端口 / 声明未出现」，两侧都不判红。形状侧
+ *    （`ring:` 身份、J1/J3/J7/J9）一条没放宽——退场的是「名单当拒绝依据」，不是判据。
  *
- * J6 判的是「这次运行有没有人往一个没声明的端口上写事实」。名单若从被判的事实里
- * 反推（比如「把 WAL 里出现过的端口都当已声明」），它恒真。所以 `DECLARED_PORTS` 是
- * 一张**带出处的常量表**：每一项都指向声明它的那一行源码。上一版的教训是反的——
- * 常量留在 `['turn','model','tool']`，而声明侧早换成了行名，于是 J6 把整份 WAL 判红；
- * 现在 `obligation-ring-accept.test.mjs` 有一条漂移守卫：它扫源码里的端口声明，
- * 与这张表**逐项比对**，多一个端口不更新表就红。
+ * ## 端口准入为什么不再查静态表（D-447 ①）
+ *
+ * J6 曾经判「这次运行有没有人往一个没声明的端口上写事实」，用一张带出处的常量表
+ * `DECLARED_PORTS` 当白名单。那与 D-440「端口名不进声明表」正面冲突：**加端口先改
+ * 验收表**才能不判红，而端口本就是装配期动态收集的结果。旧版还吃过一次反方向的亏——
+ * 常量停在 `['turn','model','tool']`、声明侧早换成了行名，J6 把整份合规 WAL 判成
+ * 28 项假红；后来配了一条「扫源码声明 ↔ 表逐项比对」的漂移守卫，多一个端口不改表就红，
+ * 反而把「加端口要改表」钉得更死。
+ *
+ * 现行口径：协议事实必须带 `ring:` 身份（这一条是形状，缺了它端口无从判定，仍判红）；
+ * 身份里的端口**就是本次实测的端口**，不再回表匹配。`DECLARED_PORTS` 保留、降级为
+ * **漂移对照**：实测端口不在表里 ⇒ 提示「新端口」；表里声明但本次没出现 ⇒ 提示一声。
+ * 两侧都只提示、不进失效计数，也不影响退出码。判红的仍是协议形状类问题（J1 四格 /
+ * 终态 / J3 顺序 / J7 配对 / J9 产物配对）。回归夹具 `obligation-ring-accept.test.mjs`
+ * 里有一条：含未在静态表中的自定义端口 `custom_probe` 的完整事实序列，J6 仍通过且输出
+ * 带「新端口」。
  *
  * ## 观测口径为什么读「模型端口上的 sent」而不是「某种来源字段」
  *
@@ -114,10 +128,11 @@ const TERMINAL = new Set(['response', 'failed'])
 const RING = 'ring:'
 
 /**
- * **端口声明集**（J6 的判据本体）——每一项都带出处，且必须来自**事实面之外**。
+ * **静态漂移对照表**（D-447 ① 之后不再是准入白名单）。
  *
- * 加一个端口 = 这里加一行 + 更新 `obligation-ring-accept.test.mjs` 的漂移守卫；
- * 只加代码不加这里，J6 会在下一次实测把新端口判红（红的，不是绿的）。
+ * 端口准入改读**实测端口集**（见 J6）：新增端口不必先在这里登记也能通过 J6。
+ * 这张表只用来报两种**漂移提示**（都不判红）：实测出现而表里没有 ⇒ 「新端口」；
+ * 表里声明而本次没出现 ⇒ 只是没跑到。每一项保留出处，便于对照时知道它从哪来；
  * 名字的出处有两种形态：端口提供者的 `PortProvider::ports()`，或 `PortDecl { port }`。
  */
 const DECLARED_PORTS = [
@@ -525,7 +540,10 @@ function judgeSession(homedir, sid) {
     if (!seqs.has(pb)) note(`J5 ${e.kind}#${e.seq} 的 produced_by=${pb} 不存在`)
     else if (pb >= e.seq) note(`J5 ${e.kind}#${e.seq} 的 produced_by=${pb} 不早于自己`)
   }
-  // J6 端口都在声明集里（且协议事实必须带 ring: 身份）
+  // J6 形状判据：协议事实必须带 ring: 身份（缺了它端口无从判定，判红）。
+  // 端口准入不再查静态白名单（D-447 ①）：实测端口集就是本次运行的动态端口集，
+  // 静态 DECLARED_PORTS 降级为**漂移对照**，两侧差异只提示、不进 problems。
+  const observedPorts = new Set()
   for (const e of events) {
     if (!PROTOCOL.has(e.kind)) continue
     const k = ringKey(e)
@@ -533,12 +551,25 @@ function judgeSession(homedir, sid) {
       note(`J6 ${e.kind}#${e.seq} 的 event_id "${e.event_id}" 不是 ring: 身份——端口无从判定`)
       continue
     }
-    if (!DECLARED.has(k.port)) note(`J6 ${e.kind}#${e.seq} 的端口 "${k.port}" 未在声明集里`)
+    observedPorts.add(k.port)
+  }
+  // 漂移对照（只提示，不判红）：
+  //  - 实测出现但不在静态表里 ⇒ 新端口（新增端口不必先改验收表）；
+  //  - 静态表里声明但本次没出现 ⇒ 只是没跑到，不是失效。
+  const drift = []
+  for (const p of [...observedPorts].sort()) {
+    if (!DECLARED.has(p)) {
+      drift.push(`新端口 "${p}"：本次实测出现，但不在静态漂移对照表里（D-447 ①：新增端口无需改验收表）`)
+    }
+  }
+  const absent = [...DECLARED].filter((p) => !observedPorts.has(p)).sort()
+  if (absent.length > 0) {
+    drift.push(`静态漂移对照表：${absent.length} 个声明端口本次未出现（${absent.join(' / ')}）——仅对照，非失效`)
   }
   // J7 观测 ⇔ 三格（逐条路径；退场的 compress 路径见文件头）
   judgePaths(events, logical, cfg, note)
 
-  return { events, rounds, logical, cfg, sid, problems }
+  return { events, rounds, logical, cfg, sid, problems, drift }
 }
 
 /** 数真实模型 HTTP 调用：`[LLM] 请求发起 <endpoint> (model=..., msgs=..., ...)` 一次调用一行。 */
@@ -582,6 +613,8 @@ for (const sid of args.sessions) {
     console.log(red(`✗ ${sid}: ${r.problems.length} 项失效（${r.events.length} 格 / ${r.rounds.size} 笔往返）`))
     for (const p of r.problems) console.log(red(`    ${p}`))
   }
+  // 漂移提示只输出 dim，不进 problems、不影响退出码（D-447 ①）。
+  for (const d of r.drift) console.log(dim(`    ${d}`))
 }
 for (const s of summary) console.log(dim(`    ${s}`))
 

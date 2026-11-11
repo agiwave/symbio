@@ -25,9 +25,10 @@
 //! 自己调用过什么、拿到了什么，会**重复调用同一个工具**。所以 `artifact.added`
 //! 进投影：多轮 prompt 因此能重建**含工具**的对话。
 //!
-//! 工具行投影成 `role: "tool"` 的**结构化消息**（带工具名与合成 `tool_call_id`，
-//! 见 [`PromptMessage`]）——与轮内交换（`tool_exchange_messages`）**同一形态**，
-//! 于是「历史里的工具轮」与「本轮的工具轮」在 prompt 里长得一样。
+//! 工具行投影成 `role: "tool"` 的**条目**（带工具名）——与轮内交换
+//! （`tool_exchange_messages`）**同一形态**，于是「历史里的工具轮」与「本轮的工具轮」
+//! 在 prompt 里长得一样。条目 → 请求消息的转换**不在这里**：合成 `tool_call_id` 的
+//! 唯一规则住在组装请求的那一侧（`plugin-model`），转写只给事实（D-448）。
 
 use super::super::event::{event_payload_node_id, event_result_node_id, Event};
 use super::vocab::{slot_node_of, slot_of, ChatSlot};
@@ -47,33 +48,6 @@ use super::mutations::{added_messages, snapshot_entries, OutputIndex, Transcript
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TranscriptView {
     pub entries: Vec<TranscriptEntry>,
-}
-
-// 形状本身住 `crate::llm`（模型接缝的**请求**词汇，跨三个插件，D-438）；本模块只留
-// **从转写行构造**它的转换——那是投影的知识，不是模型的词汇。
-use crate::llm::PromptMessage;
-
-impl From<&TranscriptEntry> for PromptMessage {
-    fn from(e: &TranscriptEntry) -> Self {
-        // `role == "tool"` **必须**带 `tool_call_id`：模型侧协议要求 tool 消息
-        // 关联到具体那次调用，缺了会被 provider 整条拒绝——那比拍平成 user 消息
-        // **更糟**（拍平至少还能答）。
-        //
-        // 网格里的 `artifact.added` 没有调用 id（那**才是事实**：调用 id 是本次运行的
-        // 句柄，不是跨轮事实）。所以按工具名合成一个**稳定 id**：
-        // - 稳定 = 同一格每次投影出同一个 id，跨轮不会漂；
-        // - 按名字而不是随机 = 同一工具的多次调用得到同一个 id，于是**诚实**地
-        //   表示「无法区分是第几次」——而虚假的唯一 id 会让模型以为它能对上，
-        //   配错时产生**看起来正确**的错误。
-        let tool_call_id = e.tool.as_deref().map(|tool| format!("call_{tool}_0"));
-        PromptMessage {
-            role: e.role.clone(),
-            text: e.text.clone(),
-            tool_call_id,
-            tool: e.tool.clone(),
-            tool_calls: None,
-        }
-    }
 }
 
 /// `transcript` 投影：从事件切片读出对话转写。
