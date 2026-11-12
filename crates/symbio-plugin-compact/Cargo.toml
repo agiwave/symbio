@@ -19,3 +19,6 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+# 测试要构造带 `PLUGIN_PARENT` 的调用方 ctx（钩子触发面判据：`PreCompact` 由执行体发），
+# 那个键只住 kernel 且门面不转出；只以 dev 形态进来，不进生产依赖边。
+symbio-kernel = { path = "../symbio-kernel" }

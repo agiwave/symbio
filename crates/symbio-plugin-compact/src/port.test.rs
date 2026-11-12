@@ -244,3 +244,91 @@ async fn an_empty_summary_is_a_failure_too() {
         json!("non_retryable_empty_summary")
     );
 }
+
+/// 钩子触发面：`PreCompact` 由**执行体**发出，且旁路观察者不改变判定链。
+///
+/// 两半判据缺一不可：「钩子跑了」与「钩子根本没跑」不能同形（记录器收到 `pre_compact`），
+/// 以及钩子不得改变结果（压缩照常落 `session.consolidated`）。触发权在债源，
+/// 执行体只发通知——所以这里也不读 `should_proceed`。
+#[tokio::test]
+async fn pre_compact_is_fired_by_the_executor_without_changing_the_outcome() {
+    use std::sync::Weak;
+
+    use symbio_kernel::plugin::{
+        Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
+        PluginSimpleRequest,
+    };
+    use symbio_plugin_api::hooks::HookOutput;
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<String>>);
+
+    #[async_trait]
+    impl Plugin for Recorder {
+        fn meta(&self) -> PluginMeta {
+            PluginMeta::new("recorder", "Recorder")
+        }
+
+        async fn route(
+            self: Arc<Self>,
+            _ctx: Arc<dyn PluginInvokeRequest>,
+        ) -> PluginInvokeResponse<PluginPayload> {
+            self.0.lock().unwrap().push("pre_compact".to_string());
+            let out = serde_json::to_value(HookOutput::default()).expect("钩子输出可序列化");
+            Ok(PluginPayload::new(&out))
+        }
+
+        async fn traverse(
+            self: Arc<Self>,
+            _path: String,
+            _ctx: Arc<dyn PluginInvokeRequest>,
+        ) -> PluginInvokeResponse<PluginPayload> {
+            Err(PluginError::NotFound("recorder".into()))
+        }
+    }
+
+    let recorder = Arc::new(Recorder::default());
+    let parent: Arc<dyn Plugin> = recorder.clone();
+    let weak: Weak<dyn Plugin> = Arc::downgrade(&parent);
+    let call_ctx = Arc::new(PluginSimpleRequest::new(Some(weak), None));
+
+    let final_id = "chat.assistant.final:u-1";
+    let facts = vec![final_fact(final_id), summary_fact(final_id)];
+    let captured: Arc<Mutex<Vec<FactDraft>>> = Arc::new(Mutex::new(Vec::new()));
+    let executor = CompactPort.executor().expect("本提供者必须有执行面");
+    let ctx = PortExecContext {
+        abort: ExecAbortSignal::new(),
+        idempotency_key: "compact:compact-write:1".to_string(),
+        sink: ExecEventSink::silent(),
+        emit: PortFactEmit::new(Arc::new(Captured(captured.clone()))),
+        ctx: Some(call_ctx),
+        subject: "compact:compact-write:1".to_string(),
+        group: String::new(),
+        session_id: "s-1".to_string(),
+        origin: None,
+        scratch_dir: None,
+        reader: Some(Arc::new(Snapshot(facts))),
+        source: "drive".to_string(),
+    };
+    let input = PortInput {
+        port: COMPACT_PORT.to_string(),
+        payload: json!({
+            "root_id": "u-1",
+            "final_id": final_id,
+            "after_port": "model.assist",
+            "split": false,
+        }),
+    };
+    let outcome = executor.execute(ctx, input).await;
+
+    assert!(outcome.success(), "旁路观察者不得改变结果");
+    assert_eq!(
+        recorder.0.lock().unwrap().as_slice(),
+        ["pre_compact"],
+        "压缩前必须发一次 PreCompact——不跑与跑了不许同形"
+    );
+    assert!(
+        !captured.lock().unwrap().is_empty(),
+        "通知不改变压缩本身：session.consolidated 照常落"
+    );
+}

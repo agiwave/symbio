@@ -29,9 +29,11 @@ use serde_json::{json, Value};
 use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
 };
+use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome, PortProvider,
 };
+use symbio_plugin_api::PluginInvokeRequestExt;
 use symbio_plugin_api::{AssistReply, Entity, FactDraft, Verb, EVENT_FAILED, EVENT_RESPONSE};
 
 /// 端口名（唯一来源：本插件）。
@@ -63,6 +65,16 @@ struct CompactExecutor;
 #[async_trait]
 impl PortExecutor for CompactExecutor {
     async fn execute(&self, ctx: PortExecContext, input: PortInput) -> PortOutcome {
+        // 压缩前的通知由**执行体**发出（环不按事件名调钩子，DE-048 D-312）——与工具端口
+        // 同一手法：父插件引用从调用方 ctx 取。**不拦**：压缩由债源按水位触发，拦下只会
+        // 让上下文继续涨到不可用；`PreCompact` 在这里是通知语义，`should_proceed = false`
+        // 不改变本轮行为（要拦就该在债源那一侧裁「不欠这笔」，不是在这里假装成功）。
+        if let Some(call_ctx) = ctx.ctx.clone() {
+            if let Some(parent) = call_ctx.parent().and_then(|w| w.upgrade()) {
+                // 输出（`should_proceed` / `context`）刻意不使用：这是通知，不是闸门。
+                fire_hook(&Some(parent), HookEvent::PreCompact, call_ctx).await;
+            }
+        }
         let root_id = str_of(&input.payload, "root_id");
         let final_id = str_of(&input.payload, "final_id");
         let Some(reader) = ctx.reader.clone() else {
