@@ -16,6 +16,7 @@
 import { connectPlugin, type Connection, type ConnectEvent } from './plugin'
 import { watchVdfs, unwatchVdfs } from './vdfs'
 import { logger } from '@/utils/logger'
+import { markConnected, markReconnecting, resetConnectionStatus } from './connectionStatus'
 import { VDFS_BUS_RESYNC, VDFS_EVENT_KIND, type VdfsChange } from '@/schemas/vdfs'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { ROUTE_EVENT_BUS_SUBSCRIBE } from '@/constants/routes.gen'
@@ -144,6 +145,7 @@ export function _resetEventBusForTest(): void {
   S.resyncHandlers.clear()
   S.vdfsWatchCounts.clear()
   S.vdfsWatchChain.clear()
+  resetConnectionStatus()
 }
 
 /**
@@ -176,6 +178,8 @@ export async function connectEventBus(): Promise<Connection> {
     S.connection = conn
     S.everConnected = true
     S.reconnectDelay = 1000
+    // 状态由**真实连接事件**给（`DE-020` 的判据要点）：首连与重连都算「通了」。
+    markConnected()
     logger.info('[event-bus]', 'Event bus connected', conn.connectionId)
 
     // 重连成功 ⇒ 断开期间的变更已经丢光了（后端见 `is_closed` 摘掉了订阅，
@@ -196,6 +200,7 @@ export async function connectEventBus(): Promise<Connection> {
   } catch (e) {
     S.connectionPromise = null
     logger.error('[event-bus]', 'Failed to connect:', e)
+    markReconnecting()
     scheduleReconnect()
     throw e
   }
@@ -438,6 +443,7 @@ function handleConnectionEvent(event: ConnectEvent): void {
       logger.warn('[event-bus]', 'Disconnected:', event.data)
     }
     S.connection = null
+    markReconnecting()
     scheduleReconnect()
     return
   }

@@ -17,6 +17,17 @@
         <template v-else>
           <h2 class="session-name">{{ store.activeTitle }}</h2>
           <span v-if="store.isActiveWorking" class="status-working">● AI 处理中</span>
+          <!-- 断连可见性（DE-020「还差什么」第 3 行）：状态来自**真实连接事件**
+               （`services/connectionStatus` 是唯一写口），界面不拿定时器猜。
+               `connecting` 只在启动的一瞬出现，与「断了、正在重连」是两件事。 -->
+          <span
+            v-if="connection !== 'connected'"
+            class="status-offline"
+            :class="{ 'is-retrying': connection === 'reconnecting' }"
+            :title="connection === 'reconnecting' ? '与后端的连接已断开，正在自动重连' : '正在连接后端'"
+          >
+            {{ connection === 'reconnecting' ? '● 已断开，正在重连' : '● 正在连接' }}
+          </span>
         </template>
         <!-- 会话头的用量读数：**一格**，由后端在交付出口排好（`session/stats.usage`）。
              这里不写任何标签 / 单位 / 换算——`ReadingMeter` 与抽屉里的面板是同一个
@@ -176,6 +187,7 @@ import SessionChangesList from './SessionChangesList.vue'
 import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { mergeDetailActions, vdfsJoin, type DetailAction } from '@/schemas/vdfs'
 import { readSessionStats, type SessionStats } from '@/services/sessionStats'
+import { connectionStatus } from '@/services/connectionStatus'
 import {
   readSessionChanges,
   type ChangeRow,
@@ -212,6 +224,8 @@ const merged = computed(() =>
 )
 
 const store = useSessionsStore()
+// 连接状态是只读视图（写口在 `services/connectionStatus`，由事件总线调用）。
+const connection = connectionStatus()
 
 const hasActive = computed(() => !!store.activeId)
 
@@ -521,6 +535,18 @@ function openChange(row: ChangeRow) {
 .status-working {
   font-size: 0.75rem;
   color: #22c55e;
+}
+
+/* 断连徽标：与「AI 处理中」同一行、同一字号。断开用告警色，首连用中性色——
+   启动那一瞬不是故障，把它染成红色只会训练用户忽略这个提示。 */
+.status-offline {
+  font-size: 0.75rem;
+  color: var(--text-muted, #9ca3af);
+  white-space: nowrap;
+}
+
+.status-offline.is-retrying {
+  color: var(--warning-solid, #f59e0b);
 }
 
 /* 会话头的用量格：占位随内容收缩，标题被压缩时它是**最后**让位的
