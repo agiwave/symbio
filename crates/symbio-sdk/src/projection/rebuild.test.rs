@@ -858,6 +858,63 @@ fn answered_turn_folds_into_the_same_tree_as_a_work_turn() {
     assert_eq!(meta["reason"], "from_context");
 }
 
+/// 两个产出点交的两份载荷，折出的是**同一棵树**（`D-345` 的出口判据，`D-482`）。
+///
+/// 左栏是模型端口的形状（`port.rs::outcome_payload`：带 `text_id` / `truncated` /
+/// `calls[]`），右栏是答话行的形状（`answer.rs::answer_step`：没有 `text_id`，
+/// 对话面标记走 `meta`）。两份载荷的键不能全等——它们掌握的信息不同——但**挂在
+/// 哪、是什么节点、正文是什么、状态是什么**必须逐字段相等。`D-345` 的病正是这一层
+/// 不相等（一条根级、一条轮下），而字段差异只是它的投影。
+#[test]
+fn the_two_final_writers_fold_into_one_tree() {
+    let work_side = final_event(serde_json::json!({
+        "root_id": "T1",
+        "text": "答 A",
+        "text_id": "T1-text",
+        "reasoning": "想一想",
+        "reasoning_id": "T1-reasoning",
+        "answer": "答 A",
+        "answer_id": "T1-text",
+        "truncated": false,
+        "principal": "main",
+        "cost_ms": 7,
+        "status": "completed",
+        "rounds": [],
+        "calls": [],
+    }));
+    let answer_side = final_event(serde_json::json!({
+        "root_id": "T1",
+        "text": "答 A",
+        "answer": "答 A",
+        // 答话行没有流式节点 ⇒ `event_output_text_node_id` 回退 `{root}-text`，
+        // 与模型端口的 `text_id` 同值。写侧算，读侧不猜。
+        "answer_id": "T1-text",
+        "reasoning": "想一想",
+        "reasoning_id": "T1-reasoning",
+        "principal": "main",
+        "cost_ms": 7,
+        "reason": "completed",
+        "meta": { "surface": "reply", "reason": "from_context" },
+    }));
+
+    let a = shapes(&rebuild(std::slice::from_ref(&work_side), &CHAT, &MESSAGE));
+    let b = shapes(&rebuild(
+        std::slice::from_ref(&answer_side),
+        &CHAT,
+        &MESSAGE,
+    ));
+    assert_eq!(
+        a, b,
+        "同一份终答在两条产出路径上必须是同一棵树（id / 父 / 型 / 正文 / 状态）"
+    );
+
+    // 反向：拓扑真的被断言覆盖了——把答话行的正文挪成根级，这条用例必须红。
+    // （不是再折一遍，而是证明上一条不是「两边都空」的假绿。）
+    assert_eq!(a.len(), 3, "轮骨架 + 思考子 + 正文子");
+    assert_eq!(a[1].parent.as_deref(), Some("T1"));
+    assert_eq!(a[2].parent.as_deref(), Some("T1"));
+}
+
 /// 无思考事实（模板产线 / 生成失败退模板）⇒ 轮骨架 + 正文子，**不多发**。
 #[test]
 fn answered_turn_without_reasoning_stays_one_body_node() {

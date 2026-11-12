@@ -30,13 +30,11 @@ where: docs/007-task/、crates/symbio-kernel/src/decl/、crates/symbio-sdk/src/�
 
 | 欠账 | 实测 |
 |---|---|
-| 终答格两棵树 | model 端口挂轮下 / session `answer.rs::answer_step` 根级（[DE-053-环驱动与写口裁决](../003-design/053-环驱动与写口裁决.md) D-345 的复查结论） |
 
 ### 子任务
 
 | 任务 | 目标形状（终态，不是省事） | 序 |
 |---|---|---|
-| `T-363-终答构造点归一` | 一个构造器产一种节点树，实时面 / 重建面 / 切窗口 / 前端渲染同源 | 三 |
 
 ### 不做什么
 
@@ -49,6 +47,11 @@ where: docs/007-task/、crates/symbio-kernel/src/decl/、crates/symbio-sdk/src/�
 
 ## 处理过程
 
+- 2026-11-12：`T-363` 已收口——`D-435` 已把树裁成一种（答话挂在轮根下的正文子，
+  `dialog` 子对象与专用分支退场），`D-346` 已把 `FactDecl` 两套登记收成一条线（走
+  「都不登记」）。本条补的是出口判据与口径：节点构造**只有一处**（`rebuild::produced_nodes`），
+  两个产出点只写载荷、载荷拼装仍两处不合并（信息差，不是重复），四个面同源因后三面都是
+  重建面的下游。新增 `the_two_final_writers_fold_into_one_tree`；裁决落 `DE-005` 的 `D-482`。
 - 2026-11-12：`T-360` 已收口——不是补件而是**判「不合并」**：实测唯一交 `RowStep::Ask` 的行
   是 `classify`，它产判决不产答复；答复格由 `session.answer` 走 `run_ctx` 落。同轮两次待答复
   卡的真链路早在 e2e `t105` 里绿（卡按 `D-382` 从 `tool.requested.calls[]` 出生、恢复按 wire id
