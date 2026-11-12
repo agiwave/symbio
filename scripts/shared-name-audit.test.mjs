@@ -60,10 +60,11 @@ const DEFAULT_CORE = {
 }
 
 /**
- * SV-004 的规则源：写方（`artifact_payload`）、行为（`annotate`）、三个登记的读点。
+ * SV-004 的规则源：写方（`artifact_payload` / `dispatch_calls`）、行为（`annotate`）、
+ * 登记的读点（产物格三个 + 派发清单格 `call_tables`）。
  *
- * 判据不设「词汇表」——它从写方源码读出账本，再拿读点去对。夹具因此只需要一个写方
- * 和一个读点：判的是「读的键在不在账上」，不是「键有几格」。
+ * 判据不设「词汇表」——它从写方源码读出账本，再拿读点去对。夹具因此只需要写方
+ * 和读点：判的是「读的键在不在账上」，不是「键有几格」。
  */
 const DEFAULT_ARTIFACT = {
   'crates/symbio-plugin-tool/src/port.rs':
@@ -75,12 +76,16 @@ const DEFAULT_ARTIFACT = {
     '        vec![("file_op", serde_json::json!("write"))]\n' +
     '    }\n}\n',
   'crates/symbio-sdk/src/projection/rebuild.rs':
-    'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n',
+    'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n' +
+    'fn call_tables() {\n    let _ = call.get("id");\n    let _ = e.payload.get("root_id");\n}\n',
   'crates/symbio-plugin-session/src/projections/changes.rs':
     'fn change_of() {\n    let _ = payload.get("success");\n}\n',
   'crates/symbio-plugin-model/src/port.rs':
     'fn turn_input() {\n    match kind {\n        EVENT_ARTIFACT_ADDED => {\n' +
-    '            let _ = payload.get("tool");\n        }\n        _ => {}\n    }\n}\n',
+    '            let _ = payload.get("tool");\n        }\n        _ => {}\n    }\n}\n' +
+    'fn dispatch_calls() -> Vec<serde_json::Value> {\n' +
+    '    let mut entry = serde_json::json!({\n        "id": 1,\n        "name": 2,\n        "arguments": 3,\n    });\n' +
+    '    entry["node_id"] = serde_json::json!(4);\n    entry\n}\n',
 }
 
 /** 造一个最小仓库：`crates/<插件>/src/<文件>`，内容由调用方给。 */
@@ -384,6 +389,75 @@ test('⑱ 行为追加格与装配格重名 ⇒ 红（两个写点争同一格�
     const r = runOn(root)
     assert.equal(r.status, 1, r.stdout + r.stderr)
     assert.match(r.stdout, /SV-004/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑲ calls 读点读了元素账上没有的键 ⇒ 红（wire_id 混进派发清单的读段）', () => {
+  const root = fixture({
+    'crates/symbio-sdk/src/projection/rebuild.rs':
+      'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n' +
+      'fn call_tables() {\n    let _ = call.get("id");\n    let _ = call.get("wire_id");\n}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-004/)
+    assert.match(r.stdout, /wire_id/)
+    assert.match(r.stdout, /派发清单格/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('⑳ calls 写方把条件格改名 ⇒ 红（读方仍读 node_id，静默读空）', () => {
+  const root = fixture({
+    'crates/symbio-sdk/src/projection/rebuild.rs':
+      'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n' +
+      'fn call_tables() {\n    let _ = call.get("id");\n    let _ = call.get("node_id");\n}\n',
+    'crates/symbio-plugin-model/src/port.rs':
+      'fn turn_input() {\n    match kind {\n        EVENT_ARTIFACT_ADDED => {\n' +
+      '            let _ = payload.get("tool");\n        }\n        _ => {}\n    }\n}\n' +
+      'fn dispatch_calls() -> Vec<serde_json::Value> {\n' +
+      '    let mut entry = serde_json::json!({\n        "id": 1,\n        "name": 2,\n        "arguments": 3,\n    });\n' +
+      '    entry["card_id"] = serde_json::json!(4);\n    entry\n}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-004/)
+    assert.match(r.stdout, /node_id/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('㉑ calls 读段函数不在 ⇒ exit 2（读段改名后判据会恒真）', () => {
+  const root = fixture({
+    'crates/symbio-sdk/src/projection/rebuild.rs':
+      'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 2, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-004/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('㉒ tool_calls 补写段读 wire_id ⇒ 绿（不登记、不并账——D-471 的同形异义边界）', () => {
+  const root = fixture({
+    'crates/symbio-sdk/src/projection/rebuild.rs':
+      'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n' +
+      'fn call_tables() {\n    let _ = call.get("id");\n    let _ = e.payload.get("root_id");\n}\n' +
+      'fn backfill_node_ids() {\n    let _ = call.get("wire_id");\n}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /派发清单格/)
   } finally {
     rmTree(root)
   }

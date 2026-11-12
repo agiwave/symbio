@@ -57,11 +57,14 @@ created: 2026-11-11
    （`D-471`）：写方唯一（`model` 的 `dispatch_calls`，五格 `id` / `name` / `arguments` /
    `node_id` / `overflow_notice`），读方五个跨四 crate（`sdk` 的 `rebuild` / 会话实时投影
    `live.rs` / 工具执行体 `read_requested` / 工具轮收束 `round_done.rs` / 模型逐笔标记）。
-   但**判据今天接不成**——`rebuild` 这一个函数同时读 `calls`（`tool.requested` /
+   但**判据当初接不成**——`rebuild` 这一个函数同时读 `calls`（`tool.requested` /
    `response`，同源）与 `tool_calls`（`response` 专有，键宇宙不同：`wire_id` /
    `parse_error` 只在后者、`node_id` 只在前者），按函数 / 文件提取会把 `wire_id` 收进
-   `calls` 的读点键集 ⇒ 误红。接它的前置是拆 `rebuild` 的读段（下一张入场券，本线不
-   开工）；这一格的契约先答清「谁消费」，判据等前置再接。
+   `calls` 的读点键集 ⇒ 误红。**前置已由 `D-472` 裁决并落成（`T-342`）**：读段拆分
+   （`call_tables` / `backfill_node_ids`）+ 判据扩元素键取法后，`rebuild` 这一个读点
+   已接进 `SV-004` 的派发清单格账（写方 `dispatch_calls` 五格）；其余四个读点
+   （`live.rs` / `read_requested` / `round_done` / 模型标记）仍在「谁消费」表上
+   人工核对，登记它们要各自量读段形状，不夹带。
 5. **残余（没有边，69.1%）**：地址面 3462 行 + 其余 7809 行（命令面 / 统计读侧 / 配置 /
    活跃名册 / 工作目录）。地址面的入场券**已由 `D-459` 答完**：地址 = `<根>/<挂载名>/<七域>`，
    `<根>` 由 vdfs 插件静态声明、`<挂载名>` 是实例表的键（`session`），所以「换 owner 保地址」

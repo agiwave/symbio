@@ -187,70 +187,12 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // `tool_call_id`。这比在每条产物上复制一份分组标识更准确——产物属于
     // **那一次调用**，不属于整批。
     //
-    // **分组只来自 `tool.requested`**（`D-382` ①）：卡的存在由派发清单决定，不由
-    // 助手往返的 `tool_calls[]` 倒推。一条产物若找不到发它的派发事实，就没有卡可挂。
-    let group_of_call: std::collections::HashMap<String, String> = events
-        .iter()
-        .filter(|e| e.kind == m.tool_requested)
-        .filter_map(|e| {
-            let group = e.payload.get("root_id")?.as_str()?;
-            Some((group, e.payload.get("calls")?.as_array()?))
-        })
-        .flat_map(|(group, calls)| {
-            calls.iter().filter_map(move |call| {
-                let id = call.get("id")?.as_str()?;
-                Some((id.to_owned(), group.to_owned()))
-            })
-        })
-        .collect();
-    // 调用身份（provider 的 wire id）→ 工具卡节点 id。
-    //
-    // 两个身份**不同**：`tool_calls[].id` 是流式面上那张卡的节点 id（跨轮复用同一
-    // wire id 时必须换一个节点 id，否则第二轮会更新第一轮的老卡）；`wire_id` 才是
-    // 与产物 / 下一轮请求配对的键。重建若拿 wire id 当节点 id，实时面那张卡永远
-    // 停在 `streaming`（t10 抓到）。这里只解「节点身份」，产物配对仍走 wire id。
-    //
-    // **两个来源，一份身份表**（`D-382` ③）：派发清单 `calls[]` 的
-    // `{ id, node_id }` 是主来源（恢复后再次发问没有助手往返，只有它）；助手往返
-    // 的 `tool_calls[]` 只补旧 WAL / 增量内容，不覆盖已有身份。同一批 `calls[]`
-    // 先按 `call_id` 排序再折（`D-382` ②：顺序由调用 id 决定，不由到达时刻决定）。
-    let mut node_of_call: std::collections::HashMap<String, String> = events
-        .iter()
-        .filter(|e| e.kind == m.tool_requested)
-        .filter_map(|e| e.payload.get("calls")?.as_array())
-        .flat_map(|calls| {
-            let mut rows: Vec<(String, String)> = calls
-                .iter()
-                .filter_map(|call| {
-                    let wire = call.get("id")?.as_str()?;
-                    let node = call
-                        .get("node_id")
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty())?;
-                    Some((wire.to_owned(), node.to_owned()))
-                })
-                .collect();
-            rows.sort_by(|a, b| a.0.cmp(&b.0));
-            rows
-        })
-        .collect();
-    for call in events
-        .iter()
-        .filter_map(|e| e.payload.get("tool_calls")?.as_array())
-        .flatten()
-    {
-        let Some(node) = call.get("id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let wire = call
-            .get("wire_id")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .unwrap_or(node);
-        node_of_call
-            .entry(wire.to_owned())
-            .or_insert_with(|| node.to_owned());
-    }
+    // 两组身份表由读段折出（`D-472` 拆分：读 `calls` 的段归 [`call_tables`]，
+    // 读 `tool_calls` 的补写段归 [`backfill_node_ids`]）——一个函数体装着两种
+    // 载荷契约的读法是职责失守，判据（`SV-004`）也要按函数收窄才接得上。
+    let (group_of_call, mut node_of_call) = call_tables(events, m);
+    // 助手往返的 `tool_calls[]` 只补旧 WAL / 增量内容，不覆盖已有身份（`D-382` ③）。
+    backfill_node_ids(&mut node_of_call, events);
 
     // 被 `message.removed` 判死的节点 id（循环末尾统一剔除）。
     let mut gone: HashSet<String> = HashSet::new();
@@ -405,6 +347,99 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 「哪一支当前读」因此对重建的两个消费者同口径，不需要谁记得再调一次。
     crate::projection::branch::stamp_branches(&mut out, events, c);
     out
+}
+
+/// 派发清单（`calls[]`）的两组身份表——`rebuild` 的读段（`D-472` 拆分）。
+///
+/// 本函数**只读派发清单那一个键宇宙**：`tool.requested` 载荷的 `calls[]` 元素的
+/// `id`（配对用 wire id）与 `node_id`（工具卡的节点身份）。读 `tool_calls` 的段
+/// 不在这里——那是另一个事实的载荷、另一套元素键（`wire_id` / `parse_error`），
+/// 混进同一个函数体，判据（`SV-004`）按函数提取时就会把两种契约读成一份（`D-471`
+/// 的同形异义病），所以拆出去（[`backfill_node_ids`]）。
+///
+/// **分组只来自 `tool.requested`**（`D-382` ①）：卡的存在由派发清单决定，不由
+/// 助手往返的 `tool_calls[]` 倒推。一条产物若找不到发它的派发事实，就没有卡可挂。
+/// 同一批 `calls[]` 先按调用 id 排序再折（`D-382` ②：顺序由调用 id 决定，不由
+/// 到达时刻决定）。
+///
+/// 返回 `(group_of_call, node_of_call)`：调用 id → 分组（发起事实的 `root_id`）、
+/// wire id → 工具卡节点 id。两个身份**不同**：`tool_calls[].id` 是流式面上那张卡
+/// 的节点 id（跨轮复用同一 wire id 时必须换一个节点 id，否则第二轮会更新第一轮的
+/// 老卡）；`wire_id` 才是与产物 / 下一轮请求配对的键。重建若拿 wire id 当节点 id，
+/// 实时面那张卡永远停在 `streaming`（t10 抓到）。这里只解「节点身份」，产物配对
+/// 仍走 wire id。
+fn call_tables(
+    events: &[Event],
+    m: &MessageVocab,
+) -> (
+    std::collections::HashMap<String, String>,
+    std::collections::HashMap<String, String>,
+) {
+    let group_of_call: std::collections::HashMap<String, String> = events
+        .iter()
+        .filter(|e| e.kind == m.tool_requested)
+        .filter_map(|e| {
+            let group = e.payload.get("root_id")?.as_str()?;
+            Some((group, e.payload.get("calls")?.as_array()?))
+        })
+        .flat_map(|(group, calls)| {
+            calls.iter().filter_map(move |call| {
+                let id = call.get("id")?.as_str()?;
+                Some((id.to_owned(), group.to_owned()))
+            })
+        })
+        .collect();
+    let node_of_call: std::collections::HashMap<String, String> = events
+        .iter()
+        .filter(|e| e.kind == m.tool_requested)
+        .filter_map(|e| e.payload.get("calls")?.as_array())
+        .flat_map(|calls| {
+            let mut rows: Vec<(String, String)> = calls
+                .iter()
+                .filter_map(|call| {
+                    let wire = call.get("id")?.as_str()?;
+                    let node = call
+                        .get("node_id")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())?;
+                    Some((wire.to_owned(), node.to_owned()))
+                })
+                .collect();
+            rows.sort_by(|a, b| a.0.cmp(&b.0));
+            rows
+        })
+        .collect();
+    (group_of_call, node_of_call)
+}
+
+/// 助手往返的 `tool_calls[]` 补写节点身份表——`rebuild` 的另一段读（`D-472` 拆分）。
+///
+/// **两个来源，一份身份表**（`D-382` ③）：派发清单 `calls[]` 的 `{ id, node_id }`
+/// 是主来源（恢复后再次发问没有助手往返，只有它，见 [`call_tables`]）；
+/// `tool_calls[]` 的 `{ id, wire_id }` 只补旧 WAL / 增量内容，**不覆盖已有身份**
+/// ——`or_insert_with` 的不覆盖语义就是这条边界的显式形态：主来源先折，补写段
+/// 后到且只填空位。合并顺序（先 [`call_tables`] 后本函数）由 [`rebuild`] 持有。
+fn backfill_node_ids(
+    node_of_call: &mut std::collections::HashMap<String, String>,
+    events: &[Event],
+) {
+    for call in events
+        .iter()
+        .filter_map(|e| e.payload.get("tool_calls")?.as_array())
+        .flatten()
+    {
+        let Some(node) = call.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let wire = call
+            .get("wire_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(node);
+        node_of_call
+            .entry(wire.to_owned())
+            .or_insert_with(|| node.to_owned());
+    }
 }
 
 /// `message.edited` → **补丁应用后**的整条消息（载荷 `message`）。

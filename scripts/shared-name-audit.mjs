@@ -12,7 +12,7 @@
  * |---|---|---|
  * | SV-001 | ① **有结构**的名字（含 `.` 或 `/`）出现在两个以上非 `plugin-api` 的插件生产代码里；② 同名 `const` 在两个以上插件 crate 各声明一次；③ 机制层（`symbio-sdk` / `symbio-kernel` / `symbio`）的生产代码里出现**词汇层已有的事件名**字面量（词汇家 = `symbio-plugin-api/src/events.rs`，owner 声明补私有名） | 两份字面量 = 两个 owner：改名只改一处，另一处静默漂移；或绕过词汇层把名字抄回实现（D-364 / D-392） |
  * | SV-003 | 全仓 `submit_reports!` 每条登记的 `(slot, fleet)` 与 `024` 的出品契约表**双向**逐行相等 | 加了列 / 改了 slot 却没更新契约，或表里留着一条已经删掉的列——出口形状与声称的形状静默分叉 |
- * | SV-004 | 产物格（`artifact.added`）的**载荷键**：写方是 `tool` 的 `artifact_payload`（装配）与各行为的 `annotate`（追加）；登记的读点（`rebuild::artifact_nodes`、`changes` 全文、`model::turn_input`）读的键必须在写方账上或容错档里；两个写点不得争同一格 | 写方把键改名，读方静默读到「没有」——而「没有这个字段」在读侧本来就有合法含义（存量事件 / 该轮没有中途产出），于是没有判据会红（`D-462`） |
+ * | SV-004 | 产物格（`artifact.added`）的**载荷键**：写方是 `tool` 的 `artifact_payload`（装配）与各行为的 `annotate`（追加）；登记的读点（`rebuild::artifact_nodes`、`changes` 全文、`model::turn_input`）读的键必须在写方账上或容错档里；两个写点不得争同一格。**同一结构的第二份账**（`D-471` / `D-472`）：派发清单格（`tool.requested` 的 `calls[]` 元素）——写方唯一（`model::dispatch_calls`，元素三格 + 条件两格），登记读点 `rebuild::call_tables` 只提取**元素键**（读段拆分后按函数收窄才接得上；`tool_calls` 的补写段是另一个键宇宙，不登记不并账） | 写方把键改名，读方静默读到「没有」——而「没有这个字段」在读侧本来就有合法含义（存量事件 / 该轮没有中途产出），于是没有判据会红（`D-462`） |
  *
  * ## 为什么扫 `test_fixtures.rs`，又跳过生成物
  *
@@ -308,6 +308,25 @@ const ARTIFACT_READ_SITES = [
  */
 const ARTIFACT_LEGACY_KEYS = new Set(['round'])
 
+/** 派发清单格（`tool.requested` 的 `calls[]` 元素）的唯一写点（`D-471`：写方唯一）。 */
+const CALLS_WRITER_REL = path.join('crates', 'symbio-plugin-model', 'src', 'port.rs')
+/**
+ * calls 格的登记读点（`D-472` 拆分后接上）。
+ *
+ * 只登记 `call_tables`——`rebuild` 里读派发清单的那一段。读 `tool_calls` 的补写段
+ * （`backfill_node_ids`）**不登记**：那是另一个事实的载荷、另一套元素键
+ * （`wire_id` / `parse_error`），把两个键宇宙并进一份账正是 `D-471` 否掉的
+ * 「同形异义」病。
+ *
+ * 取键形状是**元素键**（`call.get("…")`），不是产物格那三种 payload 层形状：
+ * `root_id` / `calls` 是 `tool.requested` 载荷层的键，写方不是 `dispatch_calls`
+ * （元素账只有五格：`id` / `name` / `arguments` + 条件 `node_id` /
+ * `overflow_notice`），不在这份账上。
+ */
+const CALLS_READ_SITES = [
+  { rel: path.join('crates', 'symbio-sdk', 'src', 'projection', 'rebuild.rs'), fn: 'call_tables' },
+]
+
 /** 从 `openIdx` 处的 `{` 起配对，返回内文（不含两端括号）；配不上 ⇒ null。 */
 function sliceBraces(text, openIdx) {
   let depth = 0
@@ -425,48 +444,117 @@ function artifactContract(root) {
   return { writer, enriched: [...enriched], reads }
 }
 
-/** SV-004：产物格载荷键的契约（写方记账，读方对账）。 */
+/**
+ * calls 格的写方账本（`D-471` 的五格）：元素 `json!` 对象的顶层键（基础三格）
+ * 加 `entry["…"]` 条件追加格。
+ */
+function callsWriterKeys(writerBody) {
+  const keys = new Set()
+  const at = writerBody.indexOf('serde_json::json!(')
+  if (at !== -1) {
+    const inner = sliceBraces(writerBody, writerBody.indexOf('{', at))
+    if (inner) for (const k of topLevelKeys(inner)) keys.add(k)
+  }
+  for (const m of writerBody.matchAll(/\w+\s*\[\s*"([a-z0-9_]+)"\s*\]\s*=/g)) keys.add(m[1])
+  return [...keys]
+}
+
+/**
+ * calls 格读点的取键形状：**元素键**（`var.get("…")`）。`payload.get` / `payload[…]`
+ * 不算——载荷层的键（`root_id` / `calls`）写方不是 `dispatch_calls`，不在元素账上。
+ */
+const CALLS_ELEMENT_SHAPE = /\b(?!payload\b)[a-z_][a-z0-9_]*\s*\.\s*get\(\s*"([a-z0-9_]+)"/g
+
+/**
+ * calls 格的载荷契约（`D-471` / `D-472`）——与产物格同一条结构：判据不设词汇表，
+ * 写方写哪几格从源码读出，读方读的每一格都要在账上。
+ * 返回 `{ writer, enriched, reads }`；任一半读不出 ⇒ `null`。
+ */
+function callsContract(root) {
+  const writerAbs = path.join(root, CALLS_WRITER_REL)
+  if (!fs.existsSync(writerAbs)) return null
+  const writerBody = fnBody(stripComments(fs.readFileSync(writerAbs, 'utf8')), 'dispatch_calls')
+  if (!writerBody) return null
+  if (writerBody.indexOf('serde_json::json!(') === -1) return null
+  const writer = callsWriterKeys(writerBody)
+
+  const reads = []
+  for (const site of CALLS_READ_SITES) {
+    const abs = path.join(root, site.rel)
+    if (!fs.existsSync(abs)) return null
+    const rel = site.rel.split(path.sep).join('/')
+    const text = stripComments(fs.readFileSync(abs, 'utf8'))
+    const body = fnBody(text, site.fn)
+    if (body === null) return null
+    const where = `${rel} 的 \`${site.fn}\``
+    for (const m of body.matchAll(CALLS_ELEMENT_SHAPE)) reads.push({ key: m[1], where })
+  }
+
+  return { writer, enriched: [], reads }
+}
+
+/** SV-004：载荷格的契约（写方记账，读方对账）——产物格与派发清单格同一结构。 */
 function payloadKeyErrors(root) {
-  const c = artifactContract(root)
-  if (!c) return null
+  const artifact = artifactContract(root)
+  const calls = artifact ? callsContract(root) : null
+  if (!artifact || !calls) return null
   const errors = []
-  const written = new Set([...c.writer, ...c.enriched])
+  const contracts = [
+    {
+      name: '产物格',
+      writerDesc: '写方（`artifact_payload` 与各 `annotate`）都不写它（`D-462`）',
+      ...artifact,
+      legacy: ARTIFACT_LEGACY_KEYS,
+      sites: ARTIFACT_READ_SITES.length,
+    },
+    {
+      name: '派发清单格',
+      writerDesc: '写方（`dispatch_calls` 的元素格）不写它（`D-471`）',
+      ...calls,
+      legacy: new Set(),
+      sites: CALLS_READ_SITES.length,
+    },
+  ]
 
-  if (c.writer.length === 0) {
-    errors.push('\uff08\u8bfb\u4e0d\u5230\u4efb\u4f55\u88c5\u914d\u952e\u2014\u2014`artifact_payload` \u7684 `json!` \u89e3\u6790\u5931\u6548\uff0c\u5224\u636e\u4f1a\u6052\u771f\uff09')
-  }
-  if (c.reads.length === 0) {
-    errors.push('\uff08\u767b\u8bb0\u7684\u8bfb\u70b9\u4e00\u4e2a\u952e\u90fd\u6ca1\u8bfb\u5230\u2014\u2014`fn` \u540d\u5b57\u6216\u53d6\u503c\u5f62\u72b6\u53d8\u4e86\uff0c\u5224\u636e\u4f1a\u6052\u771f\uff09')
+  for (const c of contracts) {
+    if (c.writer.length === 0) {
+      errors.push(`（${c.name}读不到任何写方键——写方的构造解析失效，判据会恒真）`)
+    }
+    if (c.reads.length === 0) {
+      errors.push(`（${c.name}登记的读点一个键都没读到——读段函数的名字或取键形状变了，判据会恒真）`)
+    }
+
+    // 写方账 = 装配 ∪ 行为追加（追加格对读方同样是账上的一格）。
+    const written = new Set([...c.writer, ...c.enriched])
+
+    // ① 读方读的每一格都要在写方账上（或容错档）。
+    for (const read of c.reads) {
+      if (written.has(read.key) || c.legacy.has(read.key)) continue
+      errors.push(
+        `${read.where} 读了 \`"${read.key}"\`，但${c.name}没有这一格——${c.writerDesc}`,
+      )
+    }
+
+    // ② 两个写点不得争同一格（今天只有产物格有第二个写点：行为 `annotate`）。
+    for (const key of c.enriched) {
+      if (!c.writer.includes(key)) continue
+      errors.push(
+        `\`"${key}"\` 既被 \`artifact_payload\` 装配、又被行为 \`annotate\` 追加——` +
+          '两个写点争同一格，读方分不清谁说了算（`D-462`）',
+      )
+    }
+
+    // ③ 容错档只收没有写方的键——写方一出现就得从这里删。
+    for (const key of c.legacy) {
+      if (!written.has(key)) continue
+      errors.push(
+        `容错档里的 \`"${key}"\` 已经有写方了——` +
+          '把它从 `ARTIFACT_LEGACY_KEYS` 删掉，它不再是「只读容错」',
+      )
+    }
   }
 
-  // \u2460 \u8bfb\u65b9\u8bfb\u7684\u6bcf\u4e00\u683c\u90fd\u8981\u5728\u5199\u65b9\u8d26\u4e0a\uff08\u6216\u5bb9\u9519\u6863\uff09\u3002
-  for (const read of c.reads) {
-    if (written.has(read.key) || ARTIFACT_LEGACY_KEYS.has(read.key)) continue
-    errors.push(
-      `${read.where} \u8bfb\u4e86 \`"${read.key}"\`\uff0c\u4f46\u4ea7\u7269\u683c\u6ca1\u6709\u8fd9\u4e00\u683c\u2014\u2014` +
-        '\u5199\u65b9\uff08`artifact_payload` \u4e0e\u5404 `annotate`\uff09\u90fd\u4e0d\u5199\u5b83\uff08`D-462`\uff09',
-    )
-  }
-
-  // \u2461 \u4e24\u4e2a\u5199\u70b9\u4e0d\u5f97\u4e89\u540c\u4e00\u683c\u3002
-  for (const key of c.enriched) {
-    if (!c.writer.includes(key)) continue
-    errors.push(
-      `\`"${key}"\` \u65e2\u88ab \`artifact_payload\` \u88c5\u914d\u3001\u53c8\u88ab\u884c\u4e3a \`annotate\` \u8ffd\u52a0\u2014\u2014` +
-        '\u4e24\u4e2a\u5199\u70b9\u4e89\u540c\u4e00\u683c\uff0c\u8bfb\u65b9\u5206\u4e0d\u6e05\u8c01\u8bf4\u4e86\u7b97\uff08`D-462`\uff09',
-    )
-  }
-
-  // \u2462 \u5bb9\u9519\u6863\u53ea\u6536\u6ca1\u6709\u5199\u65b9\u7684\u952e\u2014\u2014\u5199\u65b9\u4e00\u51fa\u73b0\u5c31\u5f97\u4ece\u8fd9\u91cc\u5220\u3002
-  for (const key of ARTIFACT_LEGACY_KEYS) {
-    if (!written.has(key)) continue
-    errors.push(
-      `\u5bb9\u9519\u6863\u91cc\u7684 \`"${key}"\` \u5df2\u7ecf\u6709\u5199\u65b9\u4e86\u2014\u2014` +
-        '\u628a\u5b83\u4ece `ARTIFACT_LEGACY_KEYS` \u5220\u6389\uff0c\u5b83\u4e0d\u518d\u662f\u300c\u53ea\u8bfb\u5bb9\u9519\u300d',
-    )
-  }
-
-  return { errors, contract: c }
+  return { errors, contracts }
 }
 
 /** 机制层 crate：它们不许自己写词汇层的事件名，只能 import / 由生成器投影（D-392）。 */
@@ -637,7 +725,7 @@ const payload = payloadKeyErrors(ROOT)
 if (!payload) {
   console.log(
     `${red('[ERROR]')} shared-name-audit：SV-004 规则源读不出` +
-      ' （`crates/symbio-sdk/src/plugin/effects.rs` / 写方 `artifact_payload` / 行为 `annotate` / 登记的读点，任一处解析不了）',
+      ' （产物格：`artifact_payload` / `annotate` / 登记读点；派发清单格：`dispatch_calls` / `call_tables`——任一处解析不了）',
   )
   process.exit(2)
 }
@@ -668,11 +756,20 @@ console.log(
       `（实例级落点 ${withFleet} 条非空）`,
   ),
 )
+const [art, cls] = payload.contracts
 console.log(
   green(
-    `\u2713 SV-004 \u4ea7\u7269\u683c\u8f7d\u8377\u952e\uff1a\u5199\u65b9\u88c5\u914d ${payload.contract.writer.length} \u683c` +
-      ` + \u884c\u4e3a\u8ffd\u52a0 ${payload.contract.enriched.length} \u683c\uff0c` +
-      `${ARTIFACT_READ_SITES.length} \u4e2a\u767b\u8bb0\u8bfb\u70b9\u7684 ${payload.contract.reads.length} \u4e2a\u53d6\u952e\u5168\u5728\u8d26\u4e0a` +
-      `\uff0c\u5bb9\u9519\u6863 ${ARTIFACT_LEGACY_KEYS.size} \u683c\u65e0\u5199\u65b9`,
+    `\u2713 SV-004 \u4ea7\u7269\u683c\u8f7d\u8377\u952e\uff1a\u5199\u65b9\u88c5\u914d ${art.writer.length} \u683c` +
+      ` + \u884c\u4e3a\u8ffd\u52a0 ${art.enriched.length} \u683c\uff0c` +
+      `${art.sites} \u4e2a\u767b\u8bb0\u8bfb\u70b9\u7684 ${art.reads.length} \u4e2a\u53d6\u952e\u5168\u5728\u8d26\u4e0a` +
+      `\uff0c\u5bb9\u9519\u6863 ${art.legacy.size} \u683c\u65e0\u5199\u65b9`,
+  ),
+)
+console.log(
+  green(
+    `\u2713 SV-004 \u6d3e\u53d1\u6e05\u5355\u683c\u8f7d\u8377\u952e\uff1a\u5199\u65b9\u5143\u7d20\u8d26 ${cls.writer.length} \u683c` +
+      `\uff08dispatch_calls \u552f\u4e00\u5199\u70b9\uff0cD-471\uff09\uff0c` +
+      `${cls.sites} \u4e2a\u767b\u8bb0\u8bfb\u70b9\u7684 ${cls.reads.length} \u4e2a\u5143\u7d20\u53d6\u952e\u5168\u5728\u8d26\u4e0a` +
+      `\uff08\u8bfb\u6bb5\u62c6\u5206\u540e\u63a5\u4e0a\uff0cD-472\uff09`,
   ),
 )
