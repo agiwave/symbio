@@ -5,7 +5,7 @@
 //! 插件自己的测试二进制只链接本 crate：`memory.encoded` 的**事实形状**自 DE-026 D-263
 //! 起住情景记忆能力包（`crates/symbio-plugin-memory`）。不在这里 ⇒ `seal` 报
 //! `OrphanFact` / `UnknownSource` / `UnknownFact` / `FactWithoutEvent`，
-//! 整张表失败（DE-015 §3.4）。夹具补的正是完整进程里由那个 owner 提供的那一半
+//! 整张表失败（装载期检查）。夹具补的正是完整进程里由那个 owner 提供的那一半
 //! ——事实形状与归宿行。它与 notes 的同名夹具同形，只在 `cfg(test)` 生效。
 //!
 //! **不补 `plugin_row` 执行体与 `user.message`**：本包的 `skill.recall` 行随 B2

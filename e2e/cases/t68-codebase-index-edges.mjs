@@ -24,7 +24,7 @@ import './_selfrun.mjs';
 // `codebase_search` 里嵌入服务是 `creator_create_object(EMBEDDING_LOCAL, ctx)`
 // **硬编码**的，模型 `include_bytes!` 编进二进制（`providers/embedding/local.rs`）——
 // 全仓**没有配置位**能把它切成 `EMBEDDING_NOOP`。因此「嵌入服务不可用」这条降级
-// 路径在 e2e 里驱动不了（要驱动得先加配置面，属能力新增，不在本批范围）。
+// 路径在 e2e 里驱动不了（要驱动得先加配置面，属能力新增）。
 //
 // 但 `keyword_fallback` 还有一条**可驱动**路径：工作区没有可索引的源码文件时
 // `get_index` 返回 `None`，直接落到 `keyword_search` 并置 `mode = "keyword_fallback"`、

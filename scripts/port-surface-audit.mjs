@@ -38,7 +38,7 @@
  * - **PTS-004 管「基线本身」**：基线是一处**判据面**，改它等于改判据，
  *   按本仓纪律（`SP-007`）必须有能打开的 ADR。
  * - **PTS-005 管「谁在写协议格」**：前四格判的是声明与引擎，这一格判**写侧**——
- *   `sent` / `response` / `failed` / `retry` 由引擎独占（DE-015 §2.3），装载期
+ *   `sent` / `response` / `failed` / `retry` 由引擎独占（DE-050 §0），装载期
  *   `ENGINE_ONLY_CELLS` 拦的是「执行体**声明**了它们」，而「另一个文件直接落一条
  *   `sent`」声明面上查不到。这条判据不钉文件名：它钉**写方唯一**（名单长度 == 1），
  *   因为「唯一」才是判据，「是 `port.rs`」只是今天的实测值。写点为 0 同样判红——
@@ -142,7 +142,7 @@ const PROTOCOL_CONSTS = [
 /**
  * 求解器的两个函数：判据 1 点名的那两段代码。
  *
- * ⚠️ 这是**判据的一部分**，不是配置：改它等于改判据（DE-015 §6 判据 1 的原话是
+ * ⚠️ 这是**判据的一部分**，不是配置：改它等于改判据（判据 1 的原话是
  * 「`drive` 与 `owed`」）。真要改，走 ADR + 基线更新（PTS-003 / PTS-004）。
  */
 const SOLVER_FNS = ['owed', 'drive']
@@ -255,7 +255,7 @@ const protocolNames = new Set()
 for (const c of PROTOCOL_CONSTS) {
   const v = consts?.get(c)
   if (v === undefined) {
-    report('PTS-001', `协议名常量 \`${c}\` 不在 ${EVENT_REL} 里 —— 协议族的名字必须单点定义（DE-015 §2.4 的五个协议名）`)
+    report('PTS-001', `协议名常量 \`${c}\` 不在 ${EVENT_REL} 里 —— 协议族的名字必须单点定义（DE-050 §0 的五个协议名）`)
   } else {
     protocolNames.add(v)
   }
@@ -310,7 +310,7 @@ for (const f of portFacts) {
   if (allowedProtocols.has(name)) continue
   report(
     'PTS-001',
-    `事实 \`${name}\` 带端口字段，却不在协议族（${[...protocolNames].join(' / ')}）里 —— 端口是载荷不是事实种类：加一个端口不得新增事实名（DE-015 §6 判据 1）`,
+    `事实 \`${name}\` 带端口字段，却不在协议族（${[...protocolNames].join(' / ')}）里 —— 端口是载荷不是事实种类：加一个端口不得新增事实名（判据 1）`,
   )
 }
 
@@ -568,7 +568,7 @@ if (baseline) {
  * 钉常量名不钉字面量：字面量的 owner 在 `event/mod.rs`（与 PTS-001 同一口径）。
  *
  * `request` **不在名单里**，这是口径不是遗漏：协议五格里只有这四格是引擎独占
- * （`decl/mod.rs` 的 `ENGINE_ONLY_CELLS`），`request` 由**决策者**写（DE-015 §2.4），
+ * （`decl/mod.rs` 的 `ENGINE_ONLY_CELLS`），`request` 由**决策者**写（DE-050 §0），
  * 把它算进「引擎的账」就把契约写反了。代价说清楚：今天它的写点也在 `port.rs`，
  * 但第二个 `request` 写点本条看不见——那条缝归装载期与运行期对账（判据 2）。
  */
@@ -686,7 +686,7 @@ if (writers.length === 0) {
 } else if (writers.length > 1) {
   report(
     'PTS-005',
-    `协议格有 ${writers.length} 个写点文件（${writers.join(' / ')}）—— 协议格由引擎独占（DE-015 §2.3）：` +
+    `协议格有 ${writers.length} 个写点文件（${writers.join(' / ')}）—— 协议格由引擎独占（DE-050 §0）：` +
       `第二处写点会让「四格 = 引擎的账」变成自觉，端口层的幂等键与租约也不再是单点逻辑`,
   )
 }

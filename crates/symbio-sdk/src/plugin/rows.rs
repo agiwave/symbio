@@ -17,7 +17,7 @@
 //!
 //! 执行体不认识任何能力名：它按 `Decl.by = plugin_row` 找到这一行的实现，把纯值
 //! 交进去，把 `Vec<FactDraft>` 拿回来。顺序由既有的 `(phase, anchor, name, key)` 决定，
-//! 失败由既有的账本守卫与步数上界兜底（D-123 / D-115）。
+//! 失败由既有的账本守卫与步数上界兜底。
 //!
 //! ## 为什么只收纯值
 //!
@@ -96,7 +96,7 @@ pub struct RowRequest<'a> {
     pub key: &'a [(String, String)],
     /// 本轮的幂等词干（事件号的跨轮唯一性从这里来；由宿主构造，见 DE-026 D-252）。
     pub anchor: &'a str,
-    /// 本次 drive 的 `now`（幕锚那条事实的 `ts`，D-115）：按时间判的前件读它。
+    /// 本次 drive 的 `now`（幕锚那条事实的 `ts`）：按时间判的前件读它。
     pub now_ms: i64,
     /// 写事件的 `actor`（本会话主体）。
     pub principal: &'a str,

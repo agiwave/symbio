@@ -9,7 +9,7 @@
 //! 空闲判定要的是**磁盘侧的 `updated_at`**，而它是回合内每条消息落盘持续推进的那一格。
 //! 缓存清单等于把 `metadata.heartbeat` 抄成第二份 owner——[D-076](README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README")
 //! #5 要避免的正是这个形态。代价（每 tick 一次全项目 options 广播）已在
-//! [D-077](README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 后果段**认下并命名**，不在本批优化。
+//! [D-077](README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 后果段**认下并命名**，当前保持现状。
 //!
 //! ## 触发失败为什么不写锚点
 //!

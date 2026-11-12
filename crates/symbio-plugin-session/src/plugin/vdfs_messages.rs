@@ -352,7 +352,7 @@ impl SessionPlugin {
                     // 踢一次驱动（契约 `symbio_sdk::plugin::drive_entry`），工具侧那一行
                     // 按 `kind` 分岔——`answer` 把答复原文落成结果，`approve` 合并
                     // `approved:true` 走正常执行，`deny` 不执行、落 `user_rejected`。
-                    // 挂起的调用**不在这里执行**（D-121：审批 / 答复恢复只能从事实进环）。
+                    // 挂起的调用**不在这里执行**（审批 / 答复恢复只能从事实进环）。
                     (Some(mid), action @ ("answer" | "approve" | "reject"), payload) => {
                         let kind = match action {
                             "approve" => "approve",

@@ -17,7 +17,7 @@
 //!
 //! 插件自己的测试二进制只链接本 crate：`commitment.*` 的格位由 `loop` 交（它是那一族的
 //! owner，也是会话统计的读方）。不在这里 ⇒ `seal` 对本视图的 `reads` 报 `UnknownFact`，
-//! 整张表失败（DE-015 §3.4），连「名字在装配表里」这条也证不了。夹具补的正是完整进程里
+//! 整张表失败（装载期检查），连「名字在装配表里」这条也证不了。夹具补的正是完整进程里
 //! 由 `loop` 提供的那一半，只在 `cfg(test)` 生效。
 
 use super::{
@@ -50,7 +50,7 @@ const HARNESS_EVENTS: &[EventDecl] = &[
 ///
 /// 内核总是声明 `request` / `sent` / `response` / `failed` / `retry` 五条事实，它们的
 /// 消费者行住在 `loop`；本二进制不链接它 ⇒ 缺行会报 `OrphanFact`，整张表失败
-/// （DE-015 §3.4），连「本视图在装配表里」这一条也证不了。
+/// （装载期检查），连「本视图在装配表里」这一条也证不了。
 fn harness_protocol_rows() -> &'static [Decl] {
     static ROWS: std::sync::OnceLock<Vec<Decl>> = std::sync::OnceLock::new();
     ROWS.get_or_init(|| {

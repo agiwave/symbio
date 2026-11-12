@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 修复被「不同 rustc 版本」污染的 cargo target 缓存。
 //
-// ## 背景（2026-09-11 实测定论）
+// ## 背景
 //
 // cargo 产物文件名里的哈希**不含编译器版本**（`deps/lib<krate>-<hash>.rmeta`），
 // 所以两代编译器会共用同一个文件路径。当 target 目录里混入了另一版编译器写下的

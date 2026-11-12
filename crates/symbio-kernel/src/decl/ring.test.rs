@@ -114,7 +114,7 @@ fn home(fact: &'static str) -> Decl {
     }
 }
 
-/// **装载只有一个出口**（DE-015 §3.3）：六张表灌进注册口，`seal` 跑完全部
+/// **装载只有一个出口**：六张表灌进注册口，`seal` 跑完全部
 /// 检查。所以反向用例断言的是这个 `Err`，正例断言 `Ok`——不再有「先冻结、再自己想
 /// 起来跑一遍行检查」这种两段式。
 fn freeze(rows: &[Decl], actors: &[ActorDecl]) -> Result<Arc<Frozen>, Vec<Gap>> {
@@ -429,7 +429,7 @@ fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
     }));
 }
 
-/// 第 6 条的第二档（`D-124` 订正 1）：出口**全是**引擎独占格的行——派发行的形状。
+/// 第 6 条的第二档：出口**全是**引擎独占格的行——派发行的形状。
 ///
 /// 交集判不了它：那等于要求执行体声明一条第 5 条禁止它声明的格，两条检查互斥，
 /// 这一行当年只能 `by: None`（`dispatch-model` / `dispatch-tool` 曾是或正是这个形状）。
@@ -503,7 +503,7 @@ fn an_actor_serving_an_engine_exit_row_needs_a_write_or_a_port_contract() {
 }
 
 /// 时延闸门：行的 `tier` 比执行体的 `mode` 更慢 ⇒ 这一行不可能按时跑完。
-/// （反射档拿不到模型句柄——DE-015 §3.4 第 6 条的后半。）
+/// （反射档拿不到模型句柄——装载期检查第 6 条的后半。）
 #[test]
 fn a_row_slower_than_its_actor_mode_is_a_gap() {
     let rows = {
@@ -763,7 +763,7 @@ fn a_port_is_declared_once_and_found_by_name() {
     assert!(port_of(PORTS, "model").is_none());
 }
 
-// ── 集合展开（DE-015 §3.3）──────────────────────────────────────────────
+// ── 集合展开 ──────────────────────────────────────────────────────────────
 
 /// 一篮子的**声明集**：`batch` 的 `calls` 声明为可展开字段。
 fn declare_batch() -> Builder {
@@ -1131,7 +1131,7 @@ fn a_row_that_closes_itself_is_not_a_cycle() {
     );
 }
 
-// ── 依赖图的边按**出口格**配（第 1 条 · D-160）────────────────────────────
+// ── 依赖图的边按**出口格**配 ──────────────────────────────────────────────
 
 /// 同一族事实的**不同档**不成边（正例）。
 ///
@@ -1264,7 +1264,7 @@ fn same_cell_or_uncovered_family_still_makes_an_edge() {
     );
 }
 
-// ── 出口视图的配图口径（第 1 条 · D-160）─────────────────────────────────
+// ── 出口视图的配图口径 ─────────────────────────────────────────────────────
 
 /// 夹具的两个执行体：`one` 写视图**证据**里那一格，`two` 只写视图**读面**里的那一格。
 const WRITER_G: ActorDecl = ActorDecl {
@@ -1321,10 +1321,10 @@ fn freeze_exit_view(evidence: &'static [&'static str]) -> Result<Arc<Frozen>, Ve
     b.seal(&[])
 }
 
-/// 出口视图**只帮我算**的那一格，在依赖图上不是收口方（D-160）：图无环、装载绿。
+/// 出口视图**只帮我算**的那一格，在依赖图上不是收口方：图无环、装载绿。
 ///
 /// 按 `reads` 全集配图会多出一条 `r_a → r_b`，与本来就有的 `r_b → r_a` 连成**假环**——
-/// 那是 D-160 落地前产线上 29 条环用例一起红的形状（共写同一族格子的行两两互等）。
+/// 那是依赖图改按出口格配之前产线上 29 条环用例一起红的形状（共写同一族格子的行两两互等）。
 #[test]
 fn an_anchor_read_on_an_exit_view_adds_no_edge() {
     assert_eq!(freeze_exit_view(&["g"]).err().unwrap_or_default(), vec![]);

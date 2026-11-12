@@ -24,7 +24,7 @@
 //!
 //! `eq` 是 `(字段, 字面量)` 列表，`key` 是参与债标识的字段名。没有否定、没有
 //! 比较、没有函数——更复杂的条件要么折成视图字段，要么留在执行体里。这是
-//! 「表里零代码」的类型形态（DE-015 判据 2）。
+//! 「表里零代码」的类型形态（TC-5 的横向扩展零改机制）。
 //!
 //! **事实源的字段**先查载荷，再落两个信封字段：`seq` / `ts`。它们不是
 //! `FactDecl.fields` 的一部分——信封是每条事实都有的，不必逐条声明。
@@ -37,7 +37,7 @@
 //! 端口级的东西（派发前先落哪个事实、租约多久、最多试几次）对**同一个端口的
 //! 每一行都一样，所以不写进行里（那会是三份会漂移的副本），而是每个端口声明
 //! 一次（[`PortDecl`]）。加一个端口 = 1 条 `PortDecl` + 适配器 + 2 行模板，
-//! 求解器与行表不变（DE-015 §6 判据 1，执行方 `scripts/port-surface-audit.mjs`）。
+//! 求解器与行表不变（判据 1，执行方 `scripts/port-surface-audit.mjs`）。
 
 use std::collections::HashSet;
 
@@ -104,7 +104,7 @@ pub struct Decl {
     pub tier: LatencyTier,
     pub owes: Pattern,
     /// 集合展开：`Some((list_field, element_key_field))` ⇒ `owes` 实例的
-    /// `list_field` 是数组，**逐元素**开一笔债（DE-015 §3.3；`FactDecl.expand`
+    /// `list_field` 是数组，**逐元素**开一笔债（`FactDecl.expand`
     /// 是它在事实侧的另一半）。
     ///
     /// 展开后键绑定**对元素求值**：`owes.key` 里每个字段都从元素上取。
@@ -127,7 +127,7 @@ pub struct Decl {
 ///
 /// `before` / `lease_ms` / `max_attempts` 对**同一个端口的每一行**都一样，写进
 /// 行里就是三份副本（dispatch / await / lease），而副本必然漂移。端口级的东西
-/// 按端口声明一次：加一个端口 = 加一条 `PortDecl` + 适配器 + 2 行模板（DE-015 §6
+/// 按端口声明一次：加一个端口 = 加一条 `PortDecl` + 适配器 + 2 行模板（
 /// 判据 1）。
 ///
 /// ## 为什么在 `ring` 而不在插件
@@ -142,7 +142,7 @@ pub struct PortDecl {
     /// 引擎在运行执行体**之前**落的那个事实名（协议族里的 `sent`）。
     ///
     /// 搬运行者不写它：它的 `run` 可能**不产生事实就返回**，依赖它自觉 ⇒
-    /// 派发行永远不还清，而没有任何东西会红（DE-015 §2.3 判据 2）。
+    /// 派发行永远不还清，而没有任何东西会红（TC-4 的事实面唯一写方）。
     pub before: &'static str,
     /// 租约：`sent` 之后多久没有应答算「卡住」（毫秒）。
     pub lease_ms: u64,
@@ -239,7 +239,7 @@ pub fn owed<'a>(rows: &'a [Decl], frozen: &Frozen, events: &[Event], now: i64) -
 ///
 /// 可还性只有一个声明位：[`owed`] 的 `blocked`（`by = None ∨ unless` 命中）。
 /// 「执行体还没接线」不是求解器的第四种条件——那种行显式写 `by = None`，
-/// 接线时与 `ActorDecl` 注册同批改回 `Some`（DE-015 §2.2 / D-118 订正 1）。
+/// 接线时与 `ActorDecl` 注册同批改回 `Some`。
 ///
 /// 按行点问（`crates/symbio-plugin-loop/src/loop_rows.rs::owes`）仍留给「刚写完 request，这一行
 /// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `name` 裁决）是
@@ -328,7 +328,7 @@ fn key_from(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> Option
 
 /// 只取键字段，不再判 `eq`。
 ///
-/// 集合展开时 `eq` 已经拦在**外层实例**上（D-116 决策 3），元素键只取身份字段；
+/// 集合展开时 `eq` 已经拦在**外层实例**上，元素键只取身份字段；
 /// 再对元素判一次 `eq` 会把「外层是 `port=model`、元素是 `port=tool`」的组合
 /// 全部滤掉——那正是创建行 `open-tools` 的形态。
 fn key_of(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> Option<Key> {
@@ -372,7 +372,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
     value.as_str().map(str::to_string)
 }
 
-/// 装载期的行检查（DE-015 §3.4 的第 2 / 7 条）。
+/// 装载期的行检查（[DE-001](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 装载期七道检查的第 2 / 7 条）。
 ///
 /// ## §3.4 七道检查 → 这一层的格子（指认表）
 ///
@@ -402,7 +402,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::UndeclaredExpand`]：`owes` 是事实，但它的 `expand` 列表字段没有写进
 ///   那条事实的 `FactDecl.expand`——求解器会去读一个事实自己都不承认的字段；
 /// - [`Gap::UnmannedRow`]：`by = Some(名字)` 而这个名字没有执行体声明——「这行
-///   有人跑」是假话，选中它只会得到 `no_progress`（DE-015 §3.4 第 6 条的前半）；
+///   有人跑」是假话，选中它只会得到 `no_progress`（装载期检查第 6 条的前半）；
 /// - [`Gap::OrphanActor`]：声明了执行体却没有任何行指向它——裸函数的另一面，
 ///   接线接了个没人派发的名字；
 /// - [`Gap::ActorCannotClose`]：执行体够不到它那一行的收口（§3.4 第 6 条的后半）——
@@ -613,7 +613,7 @@ fn fact_names_of(source: &'static str, frozen: &Frozen) -> Vec<&'static str> {
 ///
 /// 只有依赖图（§3.4 第 1 条）用它。差别在锚点：`turn_closed` 读 `turn.stage` 只为
 /// 折出幕锚，那一格谁都没替它关门——按 `reads` 建边会把「帮我算」读成「替我收」，
-/// 于是共写 `turn.stage` 一族的行两两互等成假环（判据见 DE-015 的 D-160）。
+/// 于是共写 `turn.stage` 一族的行两两互等成假环（依赖图的边按**出口格**配，见 [DE-050](../../../../docs/003-design/050-义务环事实词表与债务表.md "DE-050-义务环事实词表与债务表") §1.2）。
 /// 第 6 条仍按 [`fact_names_of`]：它判的是执行体**有没有能力**写到落在自己出口线
 /// 上的格，保守一档只多不少。
 fn exit_fact_names(source: &'static str, frozen: &Frozen) -> Vec<&'static str> {
@@ -763,7 +763,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
         // 源本身未声明时已经报了 `UnknownSource`，这里不重复报。
         //
         // 只查**会派发**的行：`by = None` 的行在 `owed` 里恒为 blocked，永远不会
-        // 开账——它是「尚未接线」的声明位（DE-015 §2.2），不是可还的债。对它判红
+        // 开账——它是「尚未接线」的声明位，不是可还的债。对它判红
         // 等于把「未接线」当成「断链」，而归宿行恰恰整张表都是 `by = None`。
         if decl.by.is_some()
             && (frozen.fact(decl.owes.source).is_some() || frozen.view(decl.owes.source).is_some())
@@ -791,7 +791,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
                         .chain(decl.unless)
                         .flat_map(|p| fact_names_of(p.source, frozen))
                         .collect();
-                    // 两档（D-124，订正 1）：出口里有**可声明的领域格** ⇒ 原判据（交集非空）；
+                    // 两档（装载期检查第 6 条）：出口里有**可声明的领域格** ⇒ 原判据（交集非空）；
                     // 出口**全是**引擎独占格 ⇒ 那是派发行的形状——引擎按 `PortDecl::before`
                     // 在动作之前落 `sent`、失败/租约到顶落 `failed`，关门本来就不归执行体。
                     // 此时若还要求交集，就是要求执行体声明第 5 条禁止它声明的格：
@@ -909,7 +909,7 @@ enum Visit {
 ///
 /// 名字按 [`exit_fact_names`] 展开（`evidence`），条件就是出口模式自己的 `eq`——
 /// 一格 `turn.stage` 说的从来不是「这一族」，而是「这一档」（`stage = compress`）。
-/// 第 1 条配边要比的正是这一对（DE-015 的 D-160）。
+/// 第 1 条配边要比的正是这一对（依赖图的边按**出口格**配）。
 fn exit_cells<'d>(decl: &'d Decl, frozen: &Frozen) -> Vec<(&'static str, &'d Pattern)> {
     decl.until
         .iter()

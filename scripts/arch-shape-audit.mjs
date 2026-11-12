@@ -28,9 +28,9 @@
  * 表里的冻结值是**现值**，owner 是本文件的 `SHAPE_BASELINE`（下面那一行）；放宽一格
  * 必须按 CS-002 在它旁边留一条 `core-shape-allow`，并有一条能打开的 ADR 论证「必需」。
  *
- * ## 为什么需要它（2026-10-12 的实测缺口）
+ * ## 为什么需要它（实测缺口）
  *
- * 2026-10-12 那一批「`VdfsProvider` 去样板」的处方（把单点分发推广成默认实现）要把
+ * 「`VdfsProvider` 去样板」的处方（把单点分发推广成默认实现）要把
  * `symbio_sdk::VdfsProvider` 从**一个方法**扩成**十个方法**。按当时全部门禁的口径算一遍：
  *
  * - `core-export-audit` C-001 / C-002：动的是那个符号**内部**，根出口一个字符没改；
@@ -195,7 +195,7 @@ const SELF_REL = 'scripts/arch-shape-audit.mjs'
 const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
 
 /**
- * 形状基线（2026-10-12 冻结，决策与理由见 [D-055](../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+ * 形状基线（冻结值，决策与理由见 [D-055](../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
  * 三格都是**上限**，只许降。数字本身不是判据，**改数字才是**：任何让形状变宽的改动都会
  * 撞红，而把它继续推下去只有一条路——改这一行的数字，那又会要求 CS-002 的一条
  * `core-shape-allow <格>: ADR-NNN <理由>`，且那个 ADR 文件必须真实存在。
@@ -235,48 +235,8 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  * 这条名字的归属证据（把「守卫要读」当成「名字该住内核」的裁决已被 D-203 撤回：守卫读的是
  * 格位与角色，词汇是数据，随 owner 交来）。逐条名字的出口见 DE-024 的 D-203 迁移路线。
  *
- * - **P1c 首批迁出**（2026-10-27）：`session.config` / `turn.stage` / `authz.granted` /
- *   `memory.recalled` / `task.ready`（loop）与 `system.triggered` / `system.health`
- *   （session）共 7 条名字随 owner 的 `EventDecl` 走，内核常量与 `CELLS` 行同步退役
- *   ⇒ 40/38 → 33/32。`task.ready` 本来就没有 `CELLS` 行，所以行数只减 6。
- *
- * - **P1c 第二批迁出**（同日）：`conation.expressed` 的读侧投影（`ConationView`）随**唯一
- *   生产消费方**下沉 `crates/symbio-plugin-session`，core 不再按这个名字读 ⇒ 内核常量与它的 `CELLS` 行
- *   一起退役 ⇒ 33/32 → 32/31（判据见 DE-024 D-201）。
- *
- * - **P1c 第三批迁出**（同日）：`recall` 投影（连同 `RecallView` / `RecallEntry` 与排序内核
- *   `recall_score.rs`）下沉 `crates/symbio-plugin-loop`——它的读侧全在本插件。`memory.consolidated` /
- *   `memory.forgotten` 自此只有 loop 读，两条内核常量与两行 `CELLS` 同批退役
- *   ⇒ 32/31 → 30/29。`memory.encoded` 当时留内核：`crates/symbio-plugin-session` 的 `stats` 是它的第二个
- *   生产读方，两个插件同时消费的名字不能被任一插件独占（E-009）——它的出口是**共享词汇表**
- *   （D-203 裁决三路线③），不是继续住在内核。
- *
- * - **D-203 首批迁出**（同日）：core 的终止性判据 `rework_bounded` 改读 `CountsRework`
- *   角色之后，`task.rework_created` 的唯一生产消费方只剩 `crates/symbio-plugin-loop`（CS-006 逐名点出）
- *   ⇒ 名字、`EventDecl` 行与 `CELLS` 行同批归 loop ⇒ 30/29 → 29/28。
- *
- * - **D-204 首批迁出**（同日）：跨插件名字的登记口改到各插件自己的 `PLUGIN.yml`
- *   （`shared_events:` → 生成 `symbio-plugin-api/src/events.rs`），「两个插件同时消费 ⇒
- *   只能住内核」这条 E-009 旧推论作废。core 完全不读的两条先走：`memory.encoded` 与
- *   `task.controlled`（原 `control.opened`，随 owner 的拼写约定改名）⇒ 内核常量与两行
- *   `CELLS` 同批退役 ⇒ 29/28 → 27/26（判据见 CS-007）。
- *
- * - **D-205 首批迁出**（同日）：core 的读侧投影不再把业务名字写死在折叠里——
- *   `calibration()` 改 `calibration_for(calibrated)`，名字由调用方在构造期交进来
- *   （owner 交自家常量，第二个消费方交清单生成物）。`memory.calibrated` 因此登记进
- *   loop 的 `shared_events`，内核常量与 `CELLS` 行同批退役 ⇒ 27/26 → 26/25。
- *   这一条拆掉的是「core 读者」那一类 16 条名字的**共同**理由：投影留在 core（两个
- *   插件同时消费），但认识名字的不是投影，是交出名字的那一方。
- *
- * - **D-206 任务族迁出**（同日）：多名字折叠收一张按族的结构体（core 的 `readyset_for(vocab, cap)`
- *   与会话插件的 `autonomy` 折叠都取 `TaskVocab`，字段按算法角色命名——终态与租约同落
- *   `Task × Asserted`，按格子命不出五格）。`task.opened` / `task.progress` / `task.held` /
- *   `task.asserted` / `task.assigned` 五条名字登记进 loop 的 `shared_events`，内核五条常量与
- *   四行 `CELLS` 同批退役 ⇒ 26/25 → 21/21。「读一个折叠就要交出整族」是这张表的形状带来的：
- *   session 交出 `TASK_VOCAB` 时，`task.assigned` 那种只有 loop 写的名字也有了真消费方，
- *   CS-007 因此不必为多名字折叠开一条口径。同一条「消费方分布」判据在这一族给出两个处置：
- *   `readyset` 被 loop 与 session 同时消费 ⇒ 留 core；`autonomy` 只有 session 读 ⇒ 随消费方
- *   搬进会话插件（C-004 的 `one` 格因此回到 11，见那份脚本的记录）。
+ * - 逐批迁出的明细（名字 / 常量 / `CELLS` 行的对应与计数）归 DE-024 的
+ *   D-203…D-206 迁移路线与 `git log`；本处只留冻结值，不复述实施顺序。
  *
  * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
  * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
@@ -780,13 +740,13 @@ if (pluginRefs.length > 0) {
 
 // ── CS-004 插件 id 字面量只许降（判「耦合」，不判「字符串相同」）──
 /**
- * 逐文件冻结存量（2026-10-26 实测值）。**只许降**：数字变小就同步改这里，
+ * 逐文件冻结存量（**只许降**）：数字变小就同步改这里，
  * 变大 = 内核又认了一个插件名字。整张表的目标是空表。
  *
  * 口径：`"<id>"` / `"<id>:"` / `"<id>/"` 三种字面量起点，逐个插件目录名匹配；
  * 测试模块与注释已剥离（测试里按名造插件是对的）。
  *
- * **2026-11-03 收窄（依据 D-303）**：这条判的是「内核是否**新引入**对插件 id 的
+ * **收窄（依据 D-303）**：这条判的是「内核是否**新引入**对插件 id 的
  * 耦合」，不是「字符串是否相同」。内核早已存在的 wire 词（能力家族名、chat 样式
  * 标签、principal 序列化词与 legacy 前缀）与新插件目录同名时，按**同文件登记**
  * 抵扣，基线数字不动：
@@ -797,7 +757,7 @@ if (pluginRefs.length > 0) {
  * 超出才是真红。登记只认内核文件集里的注释，判据面之外登记无效。
  */
 const NOUN_BASELINE = {
-  // 2026-10-26（DE-023 C2b）：判定范围随语法整份迁到 `crates/symbio-kernel/src`（标记在
+  // （DE-023 C2b）：判定范围随语法整份迁到 `crates/symbio-kernel/src`（标记在
   // `crates/symbio-kernel/src/lib.rs`）。域词汇里只剩两处**随类型一起**搬进内核的存量：
   //  - `chat/principal.rs`：`from_legacy` / `tool_principal` 的工具族前缀表（地址协议
   //    词汇，13 处）。清它要把这两个解析入口改成宿主侧自由函数（与 `actor_can_*`

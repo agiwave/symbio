@@ -41,15 +41,15 @@
  *
  * | # | 判据 | 口径来源 |
  * |---|------|----------|
- * | J1 | 按 `(port,id,attempt)` 分组的每一笔：`request` **恰一次**、`sent` **≥1**、终态（`response` \| `failed`）**恰一个**；带挂起 `sent`（`deadline_ms: null`）的笔允许终态为 0；授权被拒（`authz.denied`）且**没派发**时不要求 `sent`，且拒的笔不得以 `response` 收束 | DE-015 §4 五事实 |
- * | J2 | 每一条协议 `request` 都在某个**已开且未关**的 scope 里：它之前必须有一条 `user.message`，且这两者之间没有同一 scope 的 `session.terminated` | DE-015 判据 2（溯源不悬空的时间面） |
- * | J3 | 一笔的最小 `sent.seq` 严格小于它的终态 `seq`（挂起补的 `sent` 若晚于终态不算） | DE-015 §4（引擎写 before，应答在后） |
- * | J4 | 收束格（`chat.assistant.final` \| `chat.assistant.fallback`）的 `reason` 非空 | DE-015 §6 结局必须有名 |
- * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq（含归档段） | DE-015 §4 溯源不悬空 |
+ * | J1 | 按 `(port,id,attempt)` 分组的每一笔：`request` **恰一次**、`sent` **≥1**、终态（`response` \| `failed`）**恰一个**；带挂起 `sent`（`deadline_ms: null`）的笔允许终态为 0；授权被拒（`authz.denied`）且**没派发**时不要求 `sent`，且拒的笔不得以 `response` 收束 | DE-050 §0 五事实 |
+ * | J2 | 每一条协议 `request` 都在某个**已开且未关**的 scope 里：它之前必须有一条 `user.message`，且这两者之间没有同一 scope 的 `session.terminated` | DE-001 I2（溯源不悬空的时间面） |
+ * | J3 | 一笔的最小 `sent.seq` 严格小于它的终态 `seq`（挂起补的 `sent` 若晚于终态不算） | DE-050 §0（引擎写 before，应答在后） |
+ * | J4 | 收束格（`chat.assistant.final` \| `chat.assistant.fallback`）的 `reason` 非空 | DE-050 §3.2 结局必须有名 |
+ * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq（含归档段） | DE-001 I2 溯源不悬空 |
  * | J6 | 孤名 = 0：协议事实必须带 `ring:` 身份（形状判据，判红）。端口准入改读**实测端口集**；静态 `DECLARED_PORTS` 降级为漂移对照（「新端口」/「声明未出现」都只提示、不判红） | D-447 ①（装载期硬拒的实测对账） |
- * | J7 | 模型往返的**观测 ⇔ 三格**双向对账，逐条路径（见 `MODEL_PATHS`）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起 | DE-015 判据 2 全量口径 |
- * | J8 | 给了 `--cli-log` 时：`[LLM] 请求发起` 行数 == `sent`（模型端口、剔除挂起补条）数。`--strict` 下没给日志即判红 | DE-015 §0「没有别的调度代码」 |
- * | J9 | 压缩产物 ⇔ 摘要往返：每一条 `session.consolidated` 都必须指名到一笔**已收束**的 `compact-summarize` 往返（`model.assist` 端口，`id` 尾缀 = 产物指纹） | DE-015 §5.2 / D-131 的**产物侧** |
+ * | J7 | 模型往返的**观测 ⇔ 三格**双向对账，逐条路径（见 `MODEL_PATHS`）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起 | DE-001 I2 全量口径 |
+ * | J8 | 给了 `--cli-log` 时：`[LLM] 请求发起` 行数 == `sent`（模型端口、剔除挂起补条）数。`--strict` 下没给日志即判红 | SP-033 TC-1「没有别的调度代码」 |
+ * | J9 | 压缩产物 ⇔ 摘要往返：每一条 `session.consolidated` 都必须指名到一笔**已收束**的 `compact-summarize` 往返（`model.assist` 端口，`id` 尾缀 = 产物指纹） | DE-053 D-336 的**产物侧** |
  *
  * ## 四条退场（SP-033 §5：写明退场 + 承接判据，不静默删）
  *
@@ -120,7 +120,7 @@ import { green, red, dim } from './color.mjs'
 // 判据码命名空间：本脚本不占 `GATE_CODES.md` 的编号空间（它不是门禁步骤，
 // 判据编号 J1…J9 只在本文件与任务 evidence 里被引用）。
 
-/** 五个协议事实名（DE-015 §4：事实名是闭集，端口是载荷）。 */
+/** 五个协议事实名（DE-050 §0：事实名是闭集，端口是载荷）。 */
 const PROTOCOL = new Set(['request', 'sent', 'response', 'failed'])
 /** 终态：一次往返的两种结局。 */
 const TERMINAL = new Set(['response', 'failed'])
@@ -644,7 +644,7 @@ if (logLines) {
   console.log(dim('    J8 未判：没有 --cli-log（账实相符需要真实 HTTP 计数）'))
 }
 
-// ── J9：压缩产物 ⇔ 摘要往返（DE-015 §5.2 / D-131 的产物侧）──────────────
+// ── J9：压缩产物 ⇔ 摘要往返（DE-053 D-336 的产物侧）────────────────────
 //
 // 这一条**只读事实**，不需要日志：压缩产物的 `event_id` 是
 // `session.consolidated:<指纹>`，摘要往返的债键是 `compact-summarize:<同一个指纹>`

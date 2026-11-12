@@ -196,10 +196,10 @@ test('解析→判定：历史样本（动 kernel、正文无 trailer）判 CC-0
   // 原样保留在这里作反例）；sha 换成形状合法的占位值——判据不看 sha 指向谁。
   const body =
     'feat(loop): tool 端口的在途可观测兑现——派发与收应答分处两个环步\n\n' +
-    '1. 裁决（D-124 订正 1，落 DE-015）：装载期第 6 条后半对「出口全是引擎格」的行改判\n' +
+    '1. 裁决：装载期第 6 条后半对「出口全是引擎格」的行改判\n' +
     '   「有没有交出去的凭据」。\n\n' +
     '门禁：node scripts/gate.mjs 161/162 通过、e2e 86/86。\n\n' +
-    '结论落 DE-015（D-124 订正 1）。'
+    '结论落 SP-033 §3（TC-3）。'
   const files = [
     'crates/symbio-kernel/src/decl/ring.rs',
     'crates/symbio-plugin-loop/src/tool_dispatch.rs',

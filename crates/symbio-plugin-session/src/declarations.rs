@@ -98,7 +98,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 用户点了切换器：一次「关于这一轮的断言」，不是收束也不是开轮。
     EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)),
     // 用户答复（`kind ∈ answer|approve|deny`）：外部动作落事实，宿主再驱动一环
-    // （D-121）。前缀 `user.` 是既有族（与 `user.message` 同前缀）。
+    // 前缀 `user.` 是既有族（与 `user.message` 同前缀）。
     // 若将来出现**非用户**的答复（如超时自动拒绝），这个前缀会不够用——那属策略层，
     // 真出现再议，**现在不预留**。
     EventDecl::new("user.answer", (Entity::Scope, Verb::Asserted)),

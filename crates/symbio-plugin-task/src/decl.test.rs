@@ -4,7 +4,7 @@
 //!
 //! 本插件的测试二进制只链接自己：协议五格的归宿行住在
 //! `crates/symbio-plugin-loop`，不在这里 ⇒ `seal` 报 `OrphanFact`、整张表失败
-//! （DE-015 §3.4），于是 [`symbio_plugin_api::vocab`] 退回共享清单——而
+//! （装载期检查），于是 [`symbio_plugin_api::vocab`] 退回共享清单——而
 //! `task.rework_created` 的 `CountsRework` 角色只在本插件自己的声明里。
 //!
 //! 夹具补的正是完整进程里由 loop 提供的那一半：五条协议自读行，只在 `cfg(test)` 生效；

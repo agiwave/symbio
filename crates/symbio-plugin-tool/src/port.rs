@@ -1360,7 +1360,7 @@ impl PortExecutor for ToolPort {
         }
         // 恢复（答复）：动作已落成 `user.answer` 事实，环按行表派发到这里。
         // 该分支**不执行**挂起的调用——答复本身就是那次调用的结果，走 `land_only`
-        // 同一出口（`tool_call_id` 不变）。恢复只能从事实进环（D-121）。
+        // 同一出口（`tool_call_id` 不变）。恢复只能从事实进环。
         if input.payload.get(KEY_RESUME).is_some() {
             return self.run_resume(exec, input.payload).await;
         }

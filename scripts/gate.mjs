@@ -43,9 +43,9 @@
  *     → 56-frontend-build → 58-e2e → 60-facts（必须最后）
  *
  * ⚠️ **批只由「连续」的 `parallel: true` 阶段组成**：中间夹一个没标 `parallel` 的阶段，
- * 批就在那里断开，两侧各自成批、先后串行。这不是理论风险——`facts-write` 曾叫 `28-`，
- * 正夹在 `20-` 与 `30-` 之间，于是 docs 整段（6m25s）被串行在 backend（9m35s）之后，
- * 而本文件当时写的编排是「一整批」。**加阶段时先看它落在哪两个阶段之间**，再看它
+ * 批就在那里断开，两侧各自成批、先后串行。这不是理论风险——生成器阶段曾夹在
+ * `20-` 与 `30-` 之间，于是 docs 整段被串行在 backend 之后，而本文件当时写的编排
+ * 是「一整批」。**加阶段时先看它落在哪两个阶段之间**，再看它
  * 该不该标 `parallel`；两件事都不做，默认结果就是「悄悄地多串行一整段」。
  *
  * 两个「看着能并发、实际不能」的坑，判据各归其主文件：
@@ -151,11 +151,11 @@ let CONCURRENCY = 7
 /** 机器档案；在 banner 处 `await machine()` 后填充。 */
 let MACHINE = null
 
-// realpathSync.**native** 规范化盘符大小写：启动 cwd 可能以小写盘符传入（会话
-// 环境实测 `d:\...`；JS 版 realpathSync 与 libuv 一致地**保留**输入大小写，只有
+// realpathSync.**native** 规范化盘符大小写：启动 cwd 可能以小写盘符传入；
+// JS 版 realpathSync 与 libuv 一致地**保留**输入大小写，只有
 // native 版走 GetFinalPathNameByHandle 返回 NTFS 真实大小写）。小写路径若一路
 // 传给子任务，vitest v4 的 root 与模块真实路径大小写不一致 ⇒ 同一模块被当两个
-// 副本，worker 单例失效，全部 spec 报「failed to find the runner」——2026-09-28 实测。
+// 副本，worker 单例失效，全部 spec 报「failed to find the runner」。
 const scriptDir = fs.realpathSync.native(path.dirname(fileURLToPath(import.meta.url)))
 const repoRoot = path.resolve(scriptDir, '..')
 
@@ -219,10 +219,10 @@ const profile = valOf('--profile=')
 /**
  * 输出粒度开关：`GATE_VERBOSE=1` 恢复「逐条目实时刷输出」的旧行为。
  *
- * 默认（2026-11-01 起）是**统计式输出**：通过的任务不逐条打印（条目级明细全部
+ * 默认是**统计式输出**：通过的任务不逐条打印（条目级明细全部
  * 落在各任务日志与本轮 `_summary.md`），控制台在阶段尾给一行统计、汇总给一张
  * 阶段统计表；**失败项不受影响**——攒下的输出与条目名、日志路径一起当场印出。
- * 理由：172 项全绿时逐条 `✓` 刷屏，真正要找的那一行红反而被淹没；而「成功了
+ * 理由：全绿时逐条 `✓` 刷屏，真正要找的那一行红反而被淹没；而「成功了
  * 不需要看过程，失败了必须看现场」是两种不同的阅读需求，用同一个输出流伺候
  * 只会两头都不好读。
  */
@@ -312,11 +312,11 @@ if (onlyRaw !== null && only.length === 0) {
 // `git add`。
 //
 // 这不是「参数用错了」，是**静默作用在错误的仓库上**，所以这里拒绝而不是照跑。
-// 实测形态（2026-10-09）：`commit.test.mjs` 的 `--gate` 用例在一个临时 git 仓库里
-// 跑 `commit.mjs --dry-run --gate`，于是门禁在 symbio 上真的跑了起来——不但白跑
-// 60s（被测试自己的 timeout 砍断），它起的 cargo 还**抢走了 `.cargo-lock`**，
-// 让**正在跑的门禁**的 `cargo test -p symbio` 卡在 `Blocking waiting for file lock`
-// 上（实测日志首行即是它）。回归测试替被测系统制造锁争用，是这一条要断掉的。
+// 失败形态：`commit.test.mjs` 的 `--gate` 用例在一个临时 git 仓库里
+// 跑 `commit.mjs --dry-run --gate`，于是门禁在 symbio 上真的跑了起来——不但白跑，
+// 它起的 cargo 还**抢走了 `.cargo-lock`**，让**正在跑的门禁**的 `cargo test -p symbio`
+// 卡在 `Blocking waiting for file lock` 上。回归测试替被测系统制造锁争用，
+// 是这一条要断掉的。
 //
 // 判据 = 调用方 cwd 的 git 根 ≠ 本脚本所在仓库根。调用方**不在任何 git 仓库里**时
 // 不判（没有「另一个仓库」可言，且此时不存在「静默门禁错仓库」这个失败模式）。
@@ -858,10 +858,9 @@ console.log(dim(`  本轮日志：${relLog}/（每轮一个目录，留最近 ${
  * 32s；「结论行」与「并发」从来不是二选一。
  *
  * **`long: true` 的任务先起**（LPT：最长者先做）。并发池按声明序发任务，于是长杆
- * 排在第 38 位就得等前几波短任务跑完才开工——而它的时长往往比其余全部任务加起来
- * 还长，那几波等待是纯加项。实测（docs 阶段 61 项 / 8 泳道）：`windows-restart`
- * 排在第 38 位时 docs 墙钟 4m30s，其中 209s 是它、前 50s 是"等它被轮到"；
- * 先起之后这段等待消失。**只影响起跑顺序，不影响判定、不影响汇总顺序**（`out`
+ * 排在中间就得等前几波短任务跑完才开工——而它的时长往往比其余全部任务加起来
+ * 还长，那几波等待是纯加项。先起之后这段等待消失。
+ * **只影响起跑顺序，不影响判定、不影响汇总顺序**（`out`
  * 仍按声明序落）。它是个**时长提示**不是判据：写错了最多白排一次序。
  */
 function lastLogLine(file) {

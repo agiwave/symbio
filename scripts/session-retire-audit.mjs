@@ -33,13 +33,9 @@
  *
  * ## 为什么需要 SRA-001（实测出来的洞）
  *
- * 2026-11-11 首次量账：116 条里有 **13 条在 session 源码里零命中**（`CAP_DEFINE_WORK` /
- * `CHAT_STYLE_TAG_COMPRESSION` / `DrainedSupplement` / `EffectiveMatrix` / `PRINCIPAL_REFLEX` /
- * `PRINCIPAL_WORKER` / `actor_can_judge_intent` / `branch_hide_unselected` / `closes_turn` /
- * `is_turn_open` / `llm_state_frame` / `pattern_for_principal` / `unresolved_turns`）。E-009
- * 只判「用了的必须在账上」，于是这些条目在用法消失之后**静默留了下来**——账本比真实依赖面
- * 宽 13 条。余量本身无害，**余量冒充进度**有害：它让「退役走了多远」这个问题读出一个
- * 偏大的分母，也让下一个人以为那 13 个能力还挂在 session 身上。
+ * E-009 只判「用了的必须在账上」，符号在用法消失之后会**静默留在账本里**——
+ * 账本比真实依赖面宽出一截。余量本身无害，**余量冒充进度**有害：它让「退役走了
+ * 多远」读出一个偏大的分母，也让下一个人以为那些能力还挂在 session 身上。
  *
  * ## 已知边界（写在绿灯里，别把它当证明）
  *
@@ -99,36 +95,13 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
 /**
  * 符号条数基线（**只许降**）。
  *
- * 2026-11-11：116 → **101**，去掉 15 条零命中余量（SRA-001 首次量账的结果）。这次下调
- * 不是「退役推进了 13 步」——它只是把账本校准到真实依赖面。真实进度的分母是 101。
+ * 下调只有两种合法来源：① 符号在 session 源码里零命中（账本余量或用法退场）；
+ * ② 取字改走 `symbio_plugin_api::` 门面后不再直取 `symbio_sdk::` 本体。每次下调
+ * 都对应一条 D-NNN 裁决（D-452…D-455），理由与符号清单归裁决与 `git log`；这里只留当前值。
  *
- * 2026-11-11（同日晚些）：101 → **100**，`PromptMessage` 退场（D-452）。这是边一的
- * **第一格真实进度**：判据 `verify` 的入参从线格式消息类型换成 `&[TranscriptEntry]`
- * （它只比 role / text / tool 三格），于是 session 不再引用 `PromptMessage`。
- *
- * 2026-11-11（同批）：100 → **97**，三条「只在测试里出现」的符号改走门面（D-453）：
- * `VDFS_PARENT_ADDR` / `vdfs_context` / `production_matrix` 在生产侧本来就有门面消费方，
- * 会话的测试是在模拟容器，取字就该与容器走同一条路。
- *
- * 2026-11-11（同批校准）：97 → **83**，SRA-001 从「名字出现」改成「路径命中」（D-454）。
- * 14 条虚账是记错了 crate 的 kernel 词汇与一条方法名（`at`），不是余量。真实依赖面一直是 83。
- *
- * 2026-11-11（同批第四批）：83 → **82**，`budget_exceeded` 退场（D-455）：会话的自主层
- * 验收原来自塞预算调谓词，改走 `check_all` 后判据自己从 `turn.dispatch` 读预算。
- *
- * 2026-11-12：82 → **81**，`commitment_events` 退场（D-453 的走法 3）。这条当时被判
- * 「没有门面落点」而不搬；D-276 之后门面补上了 `pub use symbio_sdk::actors::commitment_events`，
- * 生产写侧 `agent/host/behavior.rs` 正是走它。会话的承诺列夹具模拟的是同一个成格口，
- * 取字随之同源，账上这一条零命中即摘。
- *
- * 2026-11-12（同批第二批）：81 → **51**，**门面已导出的 30 条一次退场**。账上还有一批
- * 符号门面（`symbio-plugin-api`）早就 `pub use` 了——会话却仍写 `symbio_sdk::` 路径直取
- * 本体。这批里没有一条是「控制面专属读口」（D-443 第 3 条不上门面的那批：`FactSource`
- * 登记面 / `PRINCIPAL_MAIN` / `session_chat` / `rebuild` / `SKILL_TAG` /
- * `commitment_records` / `VdfsChangeSubscriptions` / `DriveEntry` / 词汇结构体等全数
- * **留在账上**）——退场的 30 条个个在门面上有扩展层消费方，会话改走
- * `symbio_plugin_api::` 与 `commitment_events` 同一条走法：取字与生产写侧同源，账上
- * 零命中即摘。批量换径的落点（94 处单路径 + 7 组花括号组）见该批提交。
+ * 边界：`D-443` 第 3 条的「控制面专属读口」（`FactSource` 登记面 / `PRINCIPAL_MAIN` /
+ * `session_chat` / `rebuild` / `SKILL_TAG` / `commitment_records` /
+ * `VdfsChangeSubscriptions` / `DriveEntry` / 词汇结构体）**不上门面**，不因换径退场。
  */
 const SYMBOL_BASELINE = 51
 

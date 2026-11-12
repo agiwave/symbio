@@ -58,27 +58,11 @@ export default defineConfig({
      * - `src/registry/**` 单独设限：那是「前端零业务知识」的机制化核心
      *   （类型 → 呈现的映射表），它掉下去就是业务知识又溜回前端了。
      *
-     * ⚠️ **历史（教训）**：阈值曾长期停在 `40 / 40 / 38 / 38`，而 2026-09-20
-     * 实测已 60.93%——`lines` 高出阈值 20 个点，**棘轮形同虚设**。当时未上调，
-     * 理由写的是「本机 Windows / CI 跑 Linux，平台分支的覆盖可能不同，本地数字
-     * 不足以代表 CI，上调前先取 CI 实测值」。该理由已于 2026-09-23 **证伪**：
-     *
-     *   grep -rE "process\.platform|skipIf|platform ===|process\.|require\(" tauri/src  ⇒ 0 命中
-     *
-     * 前端源码与测试**没有任何平台分支**（也没有 locale / 时区分支：`time.ts` 的
-     * `toLocaleString()` 只被 `toMatch(/\d{4}/)` 断言，与 locale 无关）。而 CI 的
-     * frontend 作业跑的就是**同一条** `vitest run --coverage`（`.github/workflows/ci.yml`）。
-     * 既然分支与平台无关，「本地 vs CI 数字不同」这层差异**不存在**，等一次 CI
-     * 实测值不会带来任何新信息——那个「先决条件」本身就是个不会兑现的门。
-     *
-     * 对照：棘轮的另一半（**用例数**）落在 `scripts/gate.d/_shared.mjs` 的 `BASELINE`，
-     * 那一半早在 2026-09-20 就钉到了实测值（现为 49 文件 / 725 用例）。两半的病根
-     * 相同（**没人拧的棘轮等于没有棘轮**），修法也应相同：**直接钉实测值**。
-     *
-     * 2026-09-23 实测（49 文件 / 725 用例，`npm run test:coverage`）：
-     *   lines 67.72 / statements 66.53 / functions 64.12 / branches 62.61
-     *   `src/registry/**`：lines 92.38 / statements 93.06
-     * 下次上调：复测后同样「下取整 − 5」，并把新实测值写进各行的行尾注释。
+     * ⚠️ 阈值必须钉在实测值上：**没人拧的棘轮等于没有棘轮**。前端源码与测试
+     * 没有平台 / locale / 时区分支，CI frontend 作业跑的是同一条 `vitest run --coverage`，
+     * 所以「等一次 CI 实测值再上调」不会带来新信息。用例数那一半落在
+     * `scripts/gate.d/_shared.mjs` 的 `BASELINE`，两半同一条纪律。
+     * 上调口径：复测后同样「下取整 − 5」，并同步各行的行尾注释。
      */
     coverage: {
       provider: 'v8',
