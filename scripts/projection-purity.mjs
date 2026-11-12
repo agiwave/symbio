@@ -87,7 +87,7 @@ const ALLOW_RE = /^.*\/\/\s*projection-purity-allow\s+(\S+)\s*:\s*(\S.*)$/
 const errors = []
 const fail = (m) => errors.push(m)
 
-/** 决策锚点是否存在（扫描口径在 `decision-anchors.mjs`，三个审计共用一份）。 */
+/** 决策是否存在（`###` 锚点或判定决策单文档的 `id`，口径在 `decision-anchors.mjs`，三个审计共用一份）。 */
 const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
 
 const relPosix = (abs) => path.relative(ROOT, abs).split(path.sep).join('/')

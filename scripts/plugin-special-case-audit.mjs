@@ -267,9 +267,9 @@ function profileKeys(protocolsRoot) {
 }
 
 /**
- * 决策条目是否存在：`### D-NNN` 是设计文档里的条目，不是独立文件。
- * 扫描口径（根目录集合、跳过目录、锚点正则）住 `decision-anchors.mjs`——本审计与
- * CS-002 / PP-005 判的是同一句话，抄一份早晚两边不一致。
+ * 决策条目是否存在：历史裁决是设计文档里的 `### D-NNN`，判定决策 kind 的裁决是
+ * 单文档 front-matter 的 `id`。扫描口径（根目录集合、跳过目录、两种身份形态）住
+ * `decision-anchors.mjs`——本审计与 CS-002 / PP-005 判的是同一句话，抄一份早晚两边不一致。
  */
 const decisionExists = (id, docsRoot) => anchorExists(id, repoRoot, docsRoot)
 

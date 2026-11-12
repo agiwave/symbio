@@ -825,10 +825,11 @@ export const LIBS = [
   // 失败只给一行文件名、正文要自己去文件里翻（于是人再跑一遍 7 分钟的门禁）。
   'gate.d/_logs',
   'fs-walk',
-  // `decision-anchors` 是「`### D-NNN` 决策锚点在哪」的**唯一扫描实现**。登记成 LIBS：
-  // 三个消费方（`arch-shape-audit` 的 CS-002、`projection-purity` 的 PP-005、
+  // `decision-anchors` 是「一条 `D-NNN` 决策在哪」的**唯一扫描实现**：历史裁决认设计
+  // 文档的 `### D-NNN` 锚点，判定决策 kind 的裁决认单文档 front-matter 的 `id`（owner）。
+  // 登记成 LIBS：三个消费方（`arch-shape-audit` 的 CS-002、`projection-purity` 的 PP-005、
   // `plugin-special-case-audit` 的特例豁免）各自判「挂着的决策号存不存在」，
-  // 而**扫描只有一份**——各写一遍正则，就会有一个消费方在标题格式变了以后静默读不到，
+  // 而**扫描只有一份**——各写一遍正则，就会有一个消费方在身份形态变了以后静默读不到，
   // 于是「必须挂决策」退化成「随便挂什么都算挂」。判据在它三个消费方的回归测试里。
   'decision-anchors',
   'route-facts',

@@ -20,7 +20,7 @@
  *   ⑫ SC-006 不误报：前缀 / 后缀变体、`.test.rs` / `tests.rs` / 内联测试模块 → 绿；
  *   ⑬ SC-006 基线：在册且处数相符 → 绿；处数下降而基线不改 → 红（只许降）；
  *      基线缺决策 / 引用不存在的决策 → 红；基线读不出来 → 判据失效；
- *   ⑭ SC-006 豁免：必须挂一条**能打开的** `### D-NNN`；悬空 → SC-005。
+ *   ⑭ SC-006 豁免：必须挂一条**能打开的** `### D-NNN` 或判定决策单文档的 `id`；悬空 → SC-005。
  *
  * 用法：node --test scripts/plugin-special-case-audit.test.mjs
  */
@@ -291,6 +291,39 @@ test('SC-006 豁免：带能打开的决策 ⇒ 绿；缺决策 / 决策不在�
   })
   assert.equal(dangling.status, 1)
   assert.match(dangling.stderr, /SC-005/)
+})
+
+// `DOCS_ROOT` 覆盖的是「只扫这一棵树」的路径：判定决策 kind 的裁决没有 `###` 锚点，
+// 身份只在单文档的 front-matter `id` 上。这条钉住「覆盖路径也读得到 owner」，
+// 顺带钉住「不是 judgement kind 的 `id` 不算决策」——读的是 owner，不是任意编号。
+test('SC-006 豁免：判定决策单文档的 `id` 在 DOCS_ROOT 覆盖路径下也能打开 ⇒ 绿', () => {
+  const judgementDoc = (kind) => ({
+    '008-judgement/471-夹具裁决.md': [
+      '---',
+      `kind: ${kind}`,
+      'id: D-471-夹具裁决',
+      'title: 夹具裁决',
+      'status: active',
+      '---',
+      '',
+      '# 夹具裁决',
+    ].join('\n'),
+  })
+  const session = {
+    'autonomous.rs': [
+      'let h = meta.get("heartbeat");',
+      '// special-case-allow SC-006: D-471 挂在判定决策单文档上的豁免',
+      '',
+    ].join('\n'),
+  }
+
+  const waived = run({ session, docs: judgementDoc('judgement') })
+  assert.equal(waived.status, 0, waived.stderr)
+  assert.match(waived.stdout, /代码内豁免 1 处/)
+
+  const wrongKind = run({ session, docs: judgementDoc('design') })
+  assert.equal(wrongKind.status, 1)
+  assert.match(wrongKind.stderr, /没有 `### D-471` 条目/)
 })
 
 test('SC-006 基线读不出来 ⇒ 判据失效，不许「读空即全绿」', () => {

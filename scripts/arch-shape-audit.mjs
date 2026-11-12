@@ -187,9 +187,10 @@ const KERNEL_REL = 'crates/symbio-kernel/src'
 const SELF_REL = 'scripts/arch-shape-audit.mjs'
 
 /**
- * 决策条目是否存在：`D-NNN` 是设计文档内的锚点（`### D-NNN <标题>`），不是独立文件。
- * 扫描口径（扫哪些根、认哪种锚点）住 `decision-anchors.mjs`——三个判「豁免挂没挂决策」
- * 的审计共用一份，抄本不同会让同一条豁免在这边绿、那边红。
+ * 决策条目是否存在：历史裁决是设计文档内的 `### D-NNN` 锚点；判定决策 kind 的裁决
+ * 住在单文档里，身份是 front-matter 的 `id`。两种形态都认，扫描口径（扫哪些根、
+ * 认哪种形态）住 `decision-anchors.mjs`——三个判「豁免挂没挂决策」的审计共用一份，
+ * 抄本不同会让同一条豁免在这边绿、那边红。
  */
 const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
 
