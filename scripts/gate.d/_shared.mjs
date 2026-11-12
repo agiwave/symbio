@@ -462,7 +462,7 @@ export const BASELINE = {
   // baseline-allow e2eCases: 97 → 88（D-395）——9 条整例退役（t89/t91/t93/t94/t98/t100/t101/
   // t102/t103），它们钉的是被撤回的专用验证包；判据对象随实现一起消失，通用扩展面由
   // `t96-glossary-extension.mjs` 承接。非侵蚀。
-  e2eCases: 91,
+  e2eCases: 92,
   // 累计「补件 : 迁移」的**欠账本金**（D-372，`capability-migration-audit` 的付账线）。
   // 不是「比值上限」：范围基线一变计数就变，比值当阈值会假红。这里记的是判据落地当天的
   // 存量按脚本每轮重算，不手抄。文档里的手写读数

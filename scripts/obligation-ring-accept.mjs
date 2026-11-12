@@ -97,6 +97,30 @@
  * 里有一条：含未在静态表中的自定义端口 `custom_probe` 的完整事实序列，J6 仍通过且输出
  * 带「新端口」。
  *
+ * ## 「孤名 = 0」的拦截 owner（静态白名单退场后）
+ *
+ * 名单不当拒绝依据之后，孤儿端口名由**三处各自判得出**的地方拦住；J6 是它们的实测
+ * 对账，不是拦截面本身：
+ *
+ * 1. **装配期（唯一入口）**：端口集是本次装配新建的 `PortBindings`
+ *    （`crates/symbio-sdk/src/capability/port.rs`），只有插件经 `register_ports` /
+ *    `register_tool` 登记过的端口才有执行体，host `gather` 折 `snapshot()` 成交执行体表。
+ *    没人登记的名字在装配结果里根本不存在；同名两绑定 / 无执行体由 `bind` 落错误，
+ *    `snapshot()` 任一冲突**整份** `Err` ⇒ 装配失败（`DE-056 D-468`）。
+ * 2. **运行期环（失败不静默）**：`crates/symbio-plugin-loop/src/ring/engine.rs` 派发时
+ *    取不到执行体，仍按协议写全 `sent` / `request` / `failed`，`reason` 是
+ *    `no provider for port ...`；不是跳过这一笔，也不是用 `response` 冒充成功。反例
+ *    `crates/symbio-plugin-loop/src/ring/engine.test.rs` 的
+ *    `absent_executor_lands_failed_and_names_the_port` 钉住三格齐全与点名。
+ * 3. **运行期判定器（形状对账）**：本文件 J6 要求每条协议事实带 `ring:` 身份，端口因此
+ *    可观测；J1 同时要求每笔有终态。一个没有归属的端口名只要真的产生了协议事实，就会
+ *    以第 2 条的 `failed` 出现在 WAL 里，不会从判定面消失。静态 `DECLARED_PORTS` 只回答
+ *    「这次跑出了哪些端口」，不回答「准不准」。
+ *
+ * owner 是第 1 / 2 条：判红点分别在 `PortBindings::snapshot()`（装配失败）与
+ * `engine.rs` 的 `failed` 事实（非静默终态）。J6 的 `ring:` 形状判据与 J1 的终态判据
+ * 让这两处拦得住、也看得见。
+ *
  * ## 观测口径为什么读「模型端口上的 sent」而不是「某种来源字段」
  *
  * J8 只数**入账的派发**：`sent` 是引擎在执行体之前落的 before 事实，一次执行体

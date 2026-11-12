@@ -145,6 +145,43 @@ test('LP-003：注释里的词不算（注释由 D-016 管）', () => {
   }
 })
 
+test('LP-003 归属守卫：总数没变但换了别的世界词根 ⇒ 红（归属不许被总数顶掉）', () => {
+  // 基线是 `plugin_rows.rs: 4`（`LP003_RESIDUAL` 的 4 格 `ModelReply`）。这里造一个
+  // 「4 个 `ToolX` 顶替 4 个 `ModelReply`」的夹具：总数仍 4，棘轮的逐文件比较
+  // 「新增 / 收窄」都判不出——只有 token 级归属守卫能红。真实文件不在此列，基线
+  // 会先红（文件键不在基线里 ⇒ 新增）；所以用**基线同名文件**夹具，让棘轮绿、
+  // 只留归属守卫这一条红，钉住它确实在判 token 而不是总数。
+  const files = cleanFiles()
+  files['crates/symbio-plugin-loop/src/plugin_rows.rs'] =
+    'use symbio_plugin_api::rows::{ToolCall, RowRequest};\nfn reply_of() -> Option<ToolCall> {\n    let a = ToolCall::Text("");\n    let b = ToolCall::Failed("");\n    Some(a)\n}\n'
+  const baseline = cleanBaseline()
+  baseline.lp003WorldRoots = { 'plugin_rows.rs': 4 }
+  const box = sandbox(files, baseline)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /LP-003 出现未归属的世界词根：plugin_rows\.rs ToolCall/)
+    assert.doesNotMatch(r.out, /未归属.*ModelReply/)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('LP-003 归属守卫：归属内的词根照常通过（真仓形态）', () => {
+  const files = cleanFiles()
+  files['crates/symbio-plugin-loop/src/plugin_rows.rs'] =
+    'use symbio_plugin_api::rows::{ModelReply, RowRequest};\nfn reply_of() -> Option<ModelReply> {\n    let a = ModelReply::Text("");\n    let b = ModelReply::Failed("");\n    Some(a)\n}\n'
+  const baseline = cleanBaseline()
+  baseline.lp003WorldRoots = { 'plugin_rows.rs': 4 }
+  const box = sandbox(files, baseline)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 0, r.out)
+  } finally {
+    box.cleanup()
+  }
+})
+
 test('LP-004 新增：端口受理面出现世界具名的类型 ⇒ 红', () => {
   const files = cleanFiles()
   files[API_PORT] = `${files[API_PORT]}\npub struct ModelAsk;\n`

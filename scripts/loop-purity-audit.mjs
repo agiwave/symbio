@@ -95,6 +95,27 @@ const WORLD_ROOTS = [
  * 端口名字面值），而 `ModelProvider` / `tool_execute` 这类**类型与方法**入名即红。 */
 const INTERFACE_WORLD_ROOTS = new Set(['llm', 'tool', 'model', 'batch', 'gate'])
 
+/**
+ * LP-003 存量残余的**逐条归属**（判据脚本是唯一 owner，不另立台账；`DE-047` §4 只写判法）。
+ *
+ * 棘轮只数总数——它判不出「同一个总数换了个词根」。这张表补的是每一格的归属：现存 4 格
+ * 全在 `crates/symbio-plugin-loop/src/plugin_rows.rs`，全是同一个名字 `ModelReply`：
+ * `D-338` 行派发机制的通用回执值（`crates/symbio-sdk/src/plugin/rows.rs`，只有
+ * `Text` / `Failed` 两支，与任何端口无关），`D-241` / `D-304` 已裁定它是机制面。词根随
+ * 类型名的历史沿革留下；它是机制类型而非世界语义，判据管的是「环别把世界语义拿回来」，
+ * 不是「机制类型叫什么」。清零的唯一诚实路径是给这个共享类型换名——那是跨 crate 的
+ * 契约改名（`SP-003`「架构改动的边界」），先有裁决后有实施，不是本判据的判定面。
+ *
+ * 判法：实测命中**逐条** token 必须都在表内。少一格 = 基线棘轮的「收窄未同批下调」红；
+ * 多一格或换了别的词根 = 下面这条「未归属」红——归属不许被「总数没变」悄悄顶掉。
+ */
+const LP003_RESIDUAL = [
+  { rel: 'plugin_rows.rs', token: 'ModelReply', where: 'use 导入（`symbio_plugin_api::rows` 转出）' },
+  { rel: 'plugin_rows.rs', token: 'ModelReply', where: '`reply_of` 的返回类型' },
+  { rel: 'plugin_rows.rs', token: 'ModelReply', where: '`reply_of` 命中 `response` ⇒ `Text` 构造' },
+  { rel: 'plugin_rows.rs', token: 'ModelReply', where: '`reply_of` 命中 `failed` ⇒ `Failed` 构造' },
+]
+
 /** 端口签名里的具名世界载荷（`DE-047` I-6.2）：通用接口只许行 / 值类型。 */
 const WORLD_PAYLOADS = [
   'ToolCallRequest',
@@ -219,14 +240,27 @@ function forbiddenDeps(text) {
   return found.sort()
 }
 
+/** LP-003：世界语义词根命中（逐条：完整标识符 + 词根类）。计数由调用方折。 */
+function worldRootHits(text) {
+  const stripped = blankComments(text)
+  const isWord = (c) => /[A-Za-z0-9_]/.test(c)
+  const fullWordAt = (index, length) => {
+    let start = index
+    let end = index + length
+    while (start > 0 && isWord(stripped[start - 1])) start--
+    while (end < stripped.length && isWord(stripped[end])) end++
+    return stripped.slice(start, end)
+  }
+  const hits = []
+  for (const [re, label] of WORLD_ROOTS) {
+    for (const m of stripped.matchAll(re)) hits.push({ token: fullWordAt(m.index, m[0].length), label })
+  }
+  return hits
+}
+
 /** LP-003：世界语义词根计数。 */
 function worldRoots(text) {
-  const stripped = blankComments(text)
-  let count = 0
-  for (const [re] of WORLD_ROOTS) {
-    count += (stripped.match(re) || []).length
-  }
-  return count
+  return worldRootHits(text).length
 }
 
 /** LP-004：端口受理面里带世界词根的 trait / 类型 / 方法名。 */
@@ -290,6 +324,7 @@ function scan() {
   }
   const lp001 = {}
   const lp003 = {}
+  const lp003Hits = []
 
   // 先读一遍：LP-001 / LP-003 都按文件聚合计数。
   const texts = files.map((full) => ({
@@ -300,9 +335,10 @@ function scan() {
 
   for (const { rel, text } of texts) {
     const a = payloadImports(text)
-    const b = worldRoots(text)
+    const hits = worldRootHits(text)
     if (a > 0) lp001[rel] = a
-    if (b > 0) lp003[rel] = b
+    if (hits.length > 0) lp003[rel] = hits.length
+    for (const h of hits) lp003Hits.push({ rel, token: h.token, label: h.label })
   }
 
   const cargoFile = path.join(ROOT, LOOP_REL, 'Cargo.toml')
@@ -325,7 +361,7 @@ function scan() {
     process.exit(2)
   }
 
-  return { lp001, lp002, lp003, lp004, lp005 }
+  return { lp001, lp002, lp003, lp003Hits, lp004, lp005 }
 }
 
 function loadBaseline() {
@@ -380,11 +416,18 @@ function ratchet(label, code, measuredMap, baselineMap) {
 }
 
 ratchet('载荷类型 import', 'LP-001', measured.lp001, base.lp001PayloadImports)
-// LP-003 存量 `plugin_rows.rs: 4` 全部是 `ModelReply`：D-338 行派发机制的通用回执值
-// （`symbio-sdk/src/plugin/rows.rs`，只有 Text / Failed，与任何端口无关），不是新进的
-// 世界载荷。这是已裁定的机制面（D-241 / D-304 / D-338），词根随类型名的历史沿革留下；
-// 它是机制类型而非世界语义，故按存量登记，不靠改名把判据的注意力从真问题上移开。
+// LP-003 的存量 4 格逐条归属见上方 `LP003_RESIDUAL`（token 级守卫在下面）。
 ratchet('世界语义词根', 'LP-003', measured.lp003, base.lp003WorldRoots)
+
+// LP-003 的 token 级守卫：现存每一格都必须落在 `LP003_RESIDUAL` 的归属里。
+const residualTokens = new Set(LP003_RESIDUAL.map((e) => e.token))
+for (const h of measured.lp003Hits) {
+  if (!residualTokens.has(h.token)) {
+    failures.push(
+      `LP-003 出现未归属的世界词根：${h.rel} ${h.token}（${h.label}）——先给归属或清零，再谈基线`,
+    )
+  }
+}
 
 const depsNow = new Set(measured.lp002)
 const depsWas = new Set(base.lp002ForbiddenDeps || [])

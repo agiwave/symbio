@@ -1261,13 +1261,25 @@ async fn retry_does_not_poison_the_when_no_open_gate() {
 
 #[tokio::test]
 async fn absent_executor_lands_failed_and_names_the_port() {
+    // 「孤名」= 装配期没有任何插件登记的端口名。它不能静默跳过：环仍写全协议三格，
+    // 终态是 `failed` 且点名端口——这是 J6 白名单退场后真正拦住孤儿端口的那一处
+    // （`scripts/obligation-ring-accept.mjs` 文件头「孤名 = 0 的拦截 owner」）。
     let ctx = TestCtx::new(vec![DebtRow::new("a", "p1", "d", json!({}))]);
     let report = drive(&ctx).await;
 
     assert_eq!(report.dispatched, 1);
-    let last = ctx.snapshot().last().cloned().unwrap();
+    let facts = ctx.snapshot();
+    let kinds: Vec<_> = facts.iter().map(|f| f.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![FactKind::Sent, FactKind::Request, FactKind::Failed]
+    );
+    let last = facts.last().cloned().unwrap();
     assert_eq!(last.kind, FactKind::Failed);
-    assert!(last.payload["reason"].as_str().unwrap().contains("p1"));
+    assert!(last.payload["reason"]
+        .as_str()
+        .unwrap()
+        .contains("no provider for port p1"));
 }
 
 #[tokio::test]

@@ -520,6 +520,24 @@ export async function runCli({ homedir, workdir, message, provider = null, sessi
   // `ctx[AGENT_ID]` ⇒ 主体名 `agent:<ID>`（`chat_loop::request_principal` 的取值链）。
   if (agent) argv.push('--agent', agent);
   if (stdinText != null) argv.push('--repl'); // stdin 喂多轮时强制 REPL
+  // REPL 喂几行 = REPL 循环会打几个提示符（每轮先打「你 ›」再读一行）+ 收尾前再打一个
+  // （第 N+1 个提示符在等 EOF）。这是关闭时机的同步锚点，见下面 stdin 段的注释。
+  const replLineCount = stdinText == null ? 0 : stdinText.split('\n').filter((l) => l.trim() !== '').length;
+  const REPL_PROMPT = '你 ›';
+  let stdinClosed = false;
+  const closeStdinWhenIdle = () => {
+    if (stdinClosed) return;
+    const prompts = (stdout.match(new RegExp(REPL_PROMPT, 'g')) ?? []).length;
+    // 第 N+1 个提示符出现 ⇒ 最后一轮已收口、正在读下一行：此刻关 stdin，EOF 才轮到它。
+    if (prompts >= replLineCount + 1) {
+      stdinClosed = true;
+      try {
+        child.stdin.end();
+      } catch {
+        /* 子进程已退出 */
+      }
+    }
+  };
 
   const t0 = Date.now();
   const WHAT = 'CLI 完成本轮（模型调用 + 工具往返）';
@@ -528,8 +546,17 @@ export async function runCli({ homedir, workdir, message, provider = null, sessi
     env: { ...process.env, E2E_STDIO: '1', ...env },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  // 一次性模式不读 stdin（REPL 模式把 `stdinText` 喂完后必须关掉，否则 CLI 会等 EOF）。
-  child.stdin.end(stdinText ?? '');
+  // stdin 的关闭时机是 REPL 多轮的**真实竞态**，不是风格问题。一次性模式（`-m`）不读
+  // stdin，立刻关；REPL 模式先把整份输入写进管道但**不关**——`run_repl` 每轮先打
+  // 「你 ›」再 `next_line()`，等第 N+1 个提示符出现（最后一轮收口、正等下一行）才关，
+  // 让它读到 EOF 正常退出。旧写法 `end(stdinText)` 一次写入并立刻关：并发下 CLI 起跑
+  // 慢（加载插件树常见 > 1s），EOF 会与数据一起排在管道里，REPL 起读时把整段输入
+  // 连同 EOF 一次吞掉——实测形态是 stdout 只剩两个空 prompt、stderr 以「再见。」收尾，
+  // 第二轮从没被问过（`t4-multi-turn` 并发 7 下的偶发红，单例与并发 2 都不复现）。
+  // 提示符是「读下一行之前」的同步点，比任何 sleep 都准；关早了无害（数据已在管道里），
+  // 关晚了由 3s 静止观察点兜底。
+  if (stdinText == null) child.stdin.end('');
+  else child.stdin.write(stdinText.endsWith('\n') ? stdinText : `${stdinText}\n`);
 
   let stdout = '';
   let stderr = '';
@@ -560,6 +587,7 @@ export async function runCli({ homedir, workdir, message, provider = null, sessi
     child.stdout.on('data', (d) => {
       stdout += d;
       watch.lastProgress = Date.now();
+      closeStdinWhenIdle();
     });
     child.stderr.on('data', (d) => {
       stderr += d;

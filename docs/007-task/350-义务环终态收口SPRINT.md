@@ -113,3 +113,22 @@ where: `docs/007-task/`、`crates/symbio-kernel/src/decl/`、`scripts/`、`docs/
   退役线冻结账（`D-460` / `D-473` / `D-474` 与 `plugin-session-sdk.json`），有 owner、
   有账本，不是端口终态欠下的施工项。`loop-purity-audit` 实测 LP-004 / LP-005 = 0；
   子任务文件按「收口即删」删除。
+- 2026-11-12：`T-356` 收口。运行期符合性补成**两条真实行使路径**：`t107`（两次独立
+  CLI 进程）之外新建 `t108`（一次 REPL 进程吃两行 stdin，`e2e/cases/t108-ring-acceptance-repl.mjs`），
+  同一判定器、不同执行形状，J2 / J5 判的是进程内连续序列；e2e 用例棘轮 91 → 92。
+  `J1…J9` 每条判据都有可打开的失效用例（`obligation-ring-accept.test.mjs` 25 条注入，
+  新增 J3「sent 晚于终态必须红」与 J4「收束格 reason 为空必须红」反向五条全覆盖）。
+  孤名 owner 按「三层拦截」写进判定器文件头：装配期 `PortBindings::snapshot()`（没登记
+  的名字不存在）→ 运行期环引擎取不到执行体仍写全 `sent`/`request`/`failed` 三格且
+  reason 点名端口（非静默）→ J6 形状实测对账；owner 是前两层，J6 是对账，环侧反例
+  `absent_executor_lands_failed_and_names_the_port` 强化断言三格齐全。`LP-003` 不清零、
+  逐条归属：4 个词根全是 `plugin_rows.rs` 的 `ModelReply`（`D-338` 行派发通用回执值，
+  机制类型而非世界语义），清零的唯一诚实路径是跨 crate 契约改名（SP-003 协议面，
+  先裁决后实施）；`loop-purity-audit` 加 token 级守卫——总数没变但换了别的世界词根
+  ⇒ 红（归属不许被总数顶掉）。`DE-053` 三条核验结论写回正文且代码事实全部成立
+  （`D-435` 终答格 `fields` 只剩 `root_id`/`text`、`D-346` 的 `opening-seat` 行不存在、
+  `D-368` 的 `authz.granted` 写方与读者在位），档位不动。e2e 抖动根因查明并修复：
+  `runCli` 对 REPL 一次性 `stdin.end(stdinText)` 与起跑时序竞态（EOF 与数据并发排队，
+  第二轮读到 EOF 只剩空 prompt），改为先写整份输入、等第 N+1 个提示符出现再关；
+  `t108` 同时兼作该修复的真实回归，并发 7 全量三轮 92/92 全绿未复现，原复现日志目录
+  已不存在、以新读数作证据。子任务文件按「收口即删」删除。

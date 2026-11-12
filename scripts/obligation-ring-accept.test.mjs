@@ -15,8 +15,10 @@
  *      而是「到此为止」——与 `store/wal.rs::replay` 同口径；
  *   ④ **不许冒充**：归档目录里不匹配 `<wal 文件名>.<first>-<last>` 的文件不是段；
  *   ⑤ **输入缺失即退出 2**：读不出会话语就不判，不退化成「什么都没检查 ⇒ 绿灯」；
- *   ⑥ **反向三条**（假绿的牙齿）：多一次 HTTP 而少一笔 `sent` ⇒ J8 红；一笔缺终态
+ *   ⑥ **反向五条**（假绿的牙齿）：多一次 HTTP 而少一笔 `sent` ⇒ J8 红；一笔缺终态
  *      ⇒ J1 红；协议事实不带 `ring:` 身份 ⇒ J6 红（形状判据，端口白名单退场后仍不放宽）；
+ *      `sent` 晚于终态 ⇒ J3 红；收束格 `reason` 为空 ⇒ J4 红。连同下面的 J2 / J5 /
+ *      J7 / J9 反向夹具，**J1…J9 每一条都有可打开的失效用例**，不是只有正向绿灯；
  *   ⑦ **J7 双向**：三格多于观测、观测多于三格，各判红；
  *   ⑧ **J9 配对**：压缩产物找不到配对的摘要往返 ⇒ 红；
  *   ⑨ **动态端口准入**（D-447 ①）：含未在静态表中的自定义端口 `custom_probe` 的完整
@@ -262,6 +264,28 @@ test('反向③：协议事实不带 ring: 身份 ⇒ J6 红（形状判据，�
   const r = accept({ live: lines(...facts) })
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /J6 .*不是 ring: 身份/)
+})
+
+test('反向④：sent 的 seq 晚于终态 ⇒ J3 红（引擎写 before 的顺序绕不过）', () => {
+  const facts = base()
+  const sent = facts.find((e) => e.kind === 'sent')
+  const response = facts.find((e) => e.kind === 'response')
+  // 只换 seq，不换数组次序：判定器按 event_id 分组、按 seq 比先后，正是这条判据要钉的
+  // 「派发锚点必须在应答之前」。终态的溯源位一并指回配置格，避免连带 J5 噪音。
+  sent.seq = 4
+  response.seq = 2
+  response.produced_by = 1
+  const r = accept({ live: lines(...facts) })
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /J3 model\/model:u1#1: sent#4 不在终态之前/)
+})
+
+test('反向⑤：收束格 reason 为空 ⇒ J4 红（结局必须有名）', () => {
+  const facts = base()
+  facts.find((e) => e.kind === 'chat.assistant.final').payload.reason = ''
+  const r = accept({ live: lines(...facts) })
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /J4 收束格#5 的 reason 为空/)
 })
 
 // ── J1 的挂起补条：多一条 sent 不是「两笔派发」 ───────────────────────────
