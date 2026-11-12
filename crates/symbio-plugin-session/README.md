@@ -130,14 +130,14 @@ session:
 
 * **现状规则**：
  * 一次用户 Prompt 触发一个请求；请求内部 `推理 -> 工具调用 -> 工具结果返回 -> 再推理` 的迭代在
- v2 运行器的环体里跑完（[../loop/turn_runner.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 2e/2f），**主循环侧看不见第几轮工具**。
+ v2 运行器的环体里跑完（turn_runner.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`） 的 2e/2f），**主循环侧看不见第几轮工具**。
  * 界只有三条：单条响应内的工具调用数上限 `MAX_TOOL_CALLS_PER_RESPONSE = 32`
  （`crates/symbio-plugin-model/src/stream.rs`，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
  把剩余调用放到下一轮）、用户中止、provider 断流。
  * 长度截断（`finish = Length`）后的自动续写有 `loop_rows::MAX_STAGE_ROUNDS = 3`
- （[../loop/chat_loop/turn.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表")），它数的是**续写次数**，不是工具轮数。
+ （chat_loop/turn.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`）），它数的是**续写次数**，不是工具轮数。
 * **为什么这一层不设软上限**：主循环读不到工具轮数——工具在 v2 运行器的环体里一批批跑完
- （[../loop/turn_runner.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表")，步骤序列与批次边界见
+ （turn_runner.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`），步骤序列与批次边界见
  [DE-102-core-loop](src/docs/102-core-loop.md "DE-102-core-loop") §4.1），本轮请求侧只有一个
  「发过几次请求」的计数（续写才让它 >1）。一个判不到真实轮数的
  上限等于**没有上限**，却会让人以为设过：它与「默认不限制」逐字等价，配错与没配长得一样，
@@ -202,7 +202,7 @@ session:
 * **具体规则**（唯一入口 `build_request_sections`，段各自独立、非空才插）：
  * **长期记忆召回段 (Recall Context)**：`run_recall` 在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档或无目录时不读），转成端口形状（`RecallFacts`）交给 provider；`RecallProvider` 渲染出段落（`memory_events::prompt_section`，抬头 `【长期记忆】`），非空时产出 `meta.kind = "recall_context"` 的节点。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
  * **任务调度段 (Ready Set)**：`ReadySetProvider`（随任务能力包 `symbio-plugin-task` 提交）读本轮事实切片与**事实里的就绪集容量**（`session.config` 载荷的 `readyset_cap`，D-252）调 `task::prompt_section`（**只读**开档、不创建事实源，`off` 档不读），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**候选集空 ⇒ 整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
- * **委派者真源段 (Delegate Context)**：`DelegateProvider`（请求级节奏，`meta.kind = "delegate_context"`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）+ 能力目录 + worker 进展渲染成一段。输入是 `LiveInputs { tools, delegate, workers }`：工具清单是**收集成形后**的那份（发言级取不齐），委派结论是控制面 Q1 判完的三态（`NotJudged` / `Start { reason }` / `Idle`）。provider 不读配置、不重判；渲染函数仍是 [../loop/chat_loop/delegate.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 的 `delegate_section`。
+ * **委派者真源段 (Delegate Context)**：`DelegateProvider`（请求级节奏，`meta.kind = "delegate_context"`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）+ 能力目录 + worker 进展渲染成一段。输入是 `LiveInputs { tools, delegate, workers }`：工具清单是**收集成形后**的那份（发言级取不齐），委派结论是控制面 Q1 判完的三态（`NotJudged` / `Start { reason }` / `Idle`）。provider 不读配置、不重判；渲染函数仍是 chat_loop/delegate.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`） 的 `delegate_section`。
  * **段的消费形态**：`crates/symbio-sdk/src/plugin/context.rs::sections` 按 owner 字典序取出视图里**全部**段（不按下标——缺一段时下标全部左移；也不按名字查表——那会与 `slots` 形成第二处拼写），拼成一条 `system` 前缀消息交给运行器。**视图次序 = 装配次序 = 模型读到的次序**，而装配次序只与 owner 字典序有关（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
  * **水位治理不在本层**：压缩入口在 `symbio-plugin-compact` 的两行债（`compact-summarize`
  取摘要、`compact-write` 落 `session.consolidated`），触发读 provider 收束载荷的
@@ -240,7 +240,7 @@ session:
 活记忆到 4 条过 `consolidate::accept` 才合并——不另开文件、不经系统提示词、
 不进 VDFS。分工：文件记忆 = 会话自己的约定（人可读写）；事件记忆 = 可检索、
 可巩固、可排除式遗忘的**情景经验**（机器记账）。三段各自的判定方与四条口径见
-[memory_events.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 模块文档。
+`crates/symbio-plugin-memory/src/recall/` 模块文档。
 
 ### 系统提示词：只有一个注册通道
 
@@ -279,10 +279,10 @@ session:
 | 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
 | :--- | :--- | :--- | :--- | :--- |
 | **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `crates/symbio-plugin-session/src/chat_session/write.rs` |
-| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（[../loop/turn_runner.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | `crates/symbio-plugin-model/src/stream.rs` |
+| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（turn_runner.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`） 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | `crates/symbio-plugin-model/src/stream.rs` |
 | **加载轮次对齐 + 宏观语义快照合并（已退场，D-318）** | `context_messages` 仅剩**写入期**工具链裁剪用途 | — | 会话读路径只交全树，不再做轮次对齐；请求体由 `projection::transcript` 投影，会话侧语义合并已随 B2 退场 | `crates/symbio-plugin-session/src/chat_session/read.rs`<br>`crates/symbio-sdk/src/projection/transcript.rs` |
 | **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收） | `crates/symbio-plugin-session/src/chat_session/write.rs`（`prune_historical_tool_calls`） |
-| **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | [../loop/context/view.rs](../../docs/003-design/052-决策正文证据锚点冻结表.md "DE-052-决策正文证据锚点冻结表") |
+| **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | `crates/symbio-sdk/src/plugin/context.rs` |
 
 通过这套**协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪，内容节点恒为完整原文）→ 读路径（`get_messages` 只交全树）→ 请求层（`build_request_sections` 三段注入，只追加不改写）→ 请求投影（`projection::transcript` 从事实网格折出请求体）"的上下文治理链路，实现了高保真度的会话还原与清爽的本地持久化。请求体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）——模型看到的每条历史都能在网格里找到出处，`prompt_fidelity` 每轮复核这一点。
 

@@ -77,15 +77,10 @@ test('有效指认通过（exit 0）', () => {
   assert.match(r.stdout, /doc-symbol-audit 通过/)
 })
 
-// ── D-326：决策正文证据锚点按登记时点冻结 ──────────────────────────────
-// 决策段此前整段跳过 ⇒ 悬空锚点在这里是盲区。冻结表只登记裁决时点的旧锚点：
-// 指得到照常通过，指不到且表里没有对应行仍判 D-005 红。
-const FREEZE_DOC = 'docs/003-design/052-决策正文证据锚点冻结表.md'
-const freezeTable = (anchor) =>
-  `# 冻结表\n\n## 登记表\n\n| 文档 | 旧锚点 | 处置 | 现落点 |\n|---|---|---|---|\n` +
-  `| \`README.md\` | \`${anchor}\` | 已随 B2 退场（D-318） | — |\n`
-
-test('D-326：决策正文的悬空 .rs::符号锚点未登记 ⇒ 仍判红（D-005）', () => {
+// ── 决策段与现行正文同一条判据（`D-483`：冻结表已撤下）──────────────────
+// 决策段此前整段跳过（悬空锚点是盲区），后来按登记表冻结（表是第二个豁免面）。
+// 两者都已退场：决策正文按现行代码判，历史用普通文字记名。
+test('决策正文的悬空 .rs::符号锚点照常判红（D-005）', () => {
   const r = audit({
     ...RS,
     'README.md': '# R\n\n### D-100 裁决\n\n证据 `crates/nope/gone.rs::removed`。\n',
@@ -93,16 +88,6 @@ test('D-326：决策正文的悬空 .rs::符号锚点未登记 ⇒ 仍判红（D
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-005 README\.md:5/)
   assert.match(r.stdout, /crates\/nope\/gone\.rs::removed/)
-})
-
-test('D-326：决策正文的旧锚点登记进冻结表 ⇒ 通过', () => {
-  const r = audit({
-    ...RS,
-    'README.md': '# R\n\n### D-100 裁决\n\n证据 `crates/nope/gone.rs::removed`。\n',
-    [FREEZE_DOC]: freezeTable('crates/nope/gone.rs::removed'),
-  })
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /doc-symbol-audit 通过/)
 })
 
 test('单段反引号词：代码里没有同族时不是符号指认（exit 0）', () => {
