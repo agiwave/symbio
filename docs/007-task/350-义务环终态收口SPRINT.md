@@ -42,7 +42,6 @@ where: docs/007-task/、crates/symbio-kernel/、crates/symbio-plugin-api/、scri
 
 | 任务 | 目标形状（终态，不是省事） | 批次 |
 |---|---|---|
-| `T-355-端口终态收口` | `DE-056` 的 D-444…D-447 / D-468 逐条有落地锚，`D-447` 自陈的「绿灯只证明旧判据没被破坏」被消解 | 三 |
 | `T-356-运行期符合性与残余欠账` | 运行期符合性不止一条 e2e 行使；孤名判据降级后的拦截责任有 owner；纯度残余清零 | 三 |
 
 ### 不做什么
@@ -97,4 +96,20 @@ where: `docs/007-task/`、`crates/symbio-kernel/src/decl/`、`scripts/`、`docs/
   不进 ARCH / CONTROL」两条；`DE-026` 判据表与 `D-372`、`DE-051 §0`、`DE-002:164`、
   门禁注释全部收敛到 `PROTECTED_TREES` 一份。历史提交只读回放证明范围内新增能力包
   无一触碰 host，零回溯判红，`BEFORE_GUARD` / `GRANDFATHERED` 一条不加。
+  子任务文件按「收口即删」删除。
+- 2026-11-12：`T-355` 收口。`DE-056` 的 `impl` 由 `partial` 推成 `done`，不是批量改档：
+  四条裁决与新载体逐条补**落地锚**——`D-444` 的别名唯一实现在
+  `plugin-model/src/tool_projection.rs`，四个协议下行序列化共用
+  `protocols/mod.rs::wire_name_for_llm` 查同一份装配期别名表；`D-445` / `D-468` 的
+  `PortBindings::bind` / `snapshot()` / `register_tool` 是唯一注册收口，同名绑定整份
+  装配失败；`D-446` 的 `NoOpenScope` 与逐调用债、`D-447` 的 PTC / DPR 两份新判据与
+  J6 实测端口集一并写实。「硬验收对照」表从旧载体（`PortPayload::port` / `owners` /
+  `capability_port_check`）改指当前符号，验证段读数按本轮门禁实测同步。
+  `D-447` 自陈的「绿灯只证明旧判据没被破坏」由两份判**旧载体回流与类型耦合**的新判据
+  消解，不是重跑一遍旧绿项。`DE-048` **不推档**：正文里「未收口（如实记）」点名的旧编排
+  载体已退场，那是裁决时点的记录；`partial` 的残余由篇首自述点明为**决策段历史锚点**，
+  归属 `DE-052` 冻结表与「表空即撤下」的退役条件，不属端口终态线——按 `D-003` 行数预算
+  把说明压回原有行数，不放宽预算。唯一残余 `sdk/dialog` 的会话域词汇明确归 session
+  退役线冻结账（`D-460` / `D-473` / `D-474` 与 `plugin-session-sdk.json`），有 owner、
+  有账本，不是端口终态欠下的施工项。`loop-purity-audit` 实测 LP-004 / LP-005 = 0；
   子任务文件按「收口即删」删除。
