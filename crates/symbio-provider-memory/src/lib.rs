@@ -126,7 +126,7 @@ impl MemoryInjection {
     ///
     /// `text_floor_char_boundary`
     pub fn cut(text: &str, budget_bytes: usize) -> Self {
-        let end = symbio_sdk::text::text_floor_char_boundary(text, budget_bytes);
+        let end = symbio_contract::text::text_floor_char_boundary(text, budget_bytes);
         Self {
             text: text[..end].to_string(),
             truncated: end < text.len(),

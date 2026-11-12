@@ -178,7 +178,11 @@ export const WHITELIST_BASELINE = 0
 // （authz / actors / agent / embedding / turn / vdfs 地址 / projection vocab）按
 // 重开条件判回服务层，`message_of_node` 因依赖 keys 域的 `PRINCIPAL_*` 随 keys
 // 留服务层。迁移记 `Migration:`，插件协议零改动。
-export const SDK_BASELINE = 110
+// 110 → 107（`D-486`）：text 域三条（`truncate_chars` / `text_truncate_bytes` /
+// `text_floor_char_boundary`）改从契约层转出——纯 std 算法、memory / skill / local /
+// mcp / web 多 owner 共享，verify 以 `#[path]` standalone 包含同一份源码。
+// `tokenizer` 是有预算语义的宿主机制（`D-404`），按规则 C 留守。
+export const SDK_BASELINE = 107
 
 /**
  * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，
@@ -186,8 +190,9 @@ export const SDK_BASELINE = 110
  *
  * 19 → 22（`D-486` 批 2）：chat 域三条随批 1 的同一判据迁入（同一类型闭包的
  * 地址搬迁，不是新增承诺——sdk 侧同批 −3，两臂合计读数不变）。
+ * 22 → 25（`D-486`）：text 域三条同判据迁入（sdk 侧同批 −3）。
  */
-export const CONTRACT_BASELINE = 22
+export const CONTRACT_BASELINE = 25
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。

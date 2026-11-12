@@ -9,7 +9,7 @@
 //! 「禁止第二份实现」的判据。
 //!
 //! 同族的 `truncate_chars` 不在这里：它有两个不同 owner 的生产消费者（memory 的情景
-//! 编码、skill 的技能编译），留在 `symbio_sdk::text::merge_kernel`，不跟着搬。
+//! 编码、skill 的技能编译），留在 `symbio_contract::merge_kernel`（D-486），不跟着搬。
 //!
 //! ## 与 verify 共有同一份源码
 //!

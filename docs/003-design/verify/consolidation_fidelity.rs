@@ -48,7 +48,7 @@ mod merge;
 
 // 同族的字符口径截断有 2 个不同 owner 的生产消费者，仍住在共享文本域；
 // 上面那份合并算法只有巩固一个消费者，已私有化到 memory。
-#[path = "../../../crates/symbio-sdk/src/text/merge_kernel.rs"]
+#[path = "../../../crates/symbio-contract/src/merge_kernel.rs"]
 mod truncate;
 
 // ───────────────────────── 领域类型 ─────────────────────────

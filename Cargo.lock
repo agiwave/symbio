@@ -4830,6 +4830,7 @@ dependencies = [
 name = "symbio-provider-memory"
 version = "0.1.14"
 dependencies = [
+ "symbio-contract",
  "symbio-kernel",
  "symbio-sdk",
  "tempfile",

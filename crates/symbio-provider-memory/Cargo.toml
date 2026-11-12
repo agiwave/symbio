@@ -14,6 +14,7 @@ dead_code = "warn"
 
 [dependencies]
 symbio-sdk = { path = "../symbio-sdk" }
+symbio-contract = { path = "../symbio-contract" }
 symbio-kernel = { path = "../symbio-kernel" }
 # 优化 1：从 chrono 迁移到更轻量的 time
 time = { workspace = true, features = ["serde", "formatting", "parsing", "macros"] }

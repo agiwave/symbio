@@ -210,8 +210,8 @@ pub use symbio_sdk::plugin::{
 };
 pub use symbio_sdk::projection::task_vocab::TaskVocab;
 pub use symbio_sdk::projection::vocab::CommitmentVocab;
-pub use symbio_sdk::text::merge_kernel::truncate_chars;
-pub use symbio_sdk::text::{text_floor_char_boundary, text_truncate_bytes};
+pub use symbio_contract::merge_kernel::truncate_chars;
+pub use symbio_contract::text::{text_floor_char_boundary, text_truncate_bytes};
 /// 插件默认的并发任务容量出厂值（平凡值 = 串行 FIFO）。
 pub const TASK_CAP: usize = 1;
 pub use symbio_sdk::turn::node_build;
