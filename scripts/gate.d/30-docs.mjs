@@ -407,15 +407,19 @@ export const GUARDS = [
   // 在 `16ad2f4d` / `60cedd50` 的前后两版上跑，必须指出符号从哪一刻开始零调用。
   'arch-dead-code-audit',
   // `extension-locality-audit`（EX-002）判**新增能力包有没有动架构面**：一个提交新增
-  // `crates/symbio-plugin-<名字>/PLUGIN.yml` 时，`core` / `kernel` / `loop` / `session`
-  // 四棵树的**目录指纹**必须与父提交逐一相等。它补的是既有守卫之间那条缝：`SC-006`
-  // 判工具名字面量、`CP-006` 判机制面指纹、`arch-change-audit` 要求动 core/kernel 留理由，
-  // 没有一条看「这次加能力有没有顺手改控制面」——而「只判有没有新 crate」正是漏掉它的写法。
+  // `crates/symbio-plugin-<名字>/PLUGIN.yml` 时，`sdk` / `kernel` / `plugin-api` /
+  // `loop` / `session` **五棵树**的目录指纹必须与父提交逐一相等。五棵是并集
+  // （`capability-migration-audit.PROTECTED_TREES`，D-372）：任何一套旧口径里出现过的
+  // 树都算，少一棵就留一条「加能力时顺手改控制面」的路。它补的是既有守卫之间那条缝：
+  // `SC-006` 判工具名字面量、`CP-006` 判机制面指纹、`arch-change-audit` 要求动
+  // core/kernel 留理由，没有一条看「这次加能力有没有顺手改控制面」——而「只判有没有
+  // 新 crate」正是漏掉它的写法。
   //
-  // 两处例外各有理由：已存在的 `*.gen.rs` 是清单的镜像（作者只改自己目录，生成器保证
-  // 内容与清单一致），**新出现**的 `*.gen.rs` 不豁免（那是新增一条生成面）；判据诞生前
-  // 的 crate 拆分（`BEFORE_GUARD`）逐条带理由地不追溯。正向证据是夹具提交 `77ff41fa`，
-  // 它不在提交范围里也每轮判一次。
+  // 例外各有理由：已存在的生成件（`*.gen.rs` 加描述符声明的落点）是清单的镜像，
+  // **新出现**的生成件不豁免（那是新增一条生成面）；`Migration:` 批次归 EX-003 判
+  // （架构树零非生成 diff，且旧实现要真删）；判据诞生前的 crate 拆分（`BEFORE_GUARD`）
+  // 与四棵并五棵时的存量提交（`GRANDFATHERED`，含 `77ff41fa`）逐条带理由地不追溯。
+  // 正向证据是夹具提交 `f5e4bbed`，它不在提交范围里也每轮判一次。
   //
   // 失效形态全是「看起来在算」：指纹读不出时报「没有违规」、`.gen.rs` 一律豁免、
   // 只判新 crate 是否存在——三者各由回归测试注入并断言红。

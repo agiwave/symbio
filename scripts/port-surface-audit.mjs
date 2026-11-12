@@ -9,7 +9,7 @@
  * | PTS-001 | 带端口载荷的**事实名** ⊆ 协议族（`request` / `sent` / `response` / `failed` / `retry`），且端口字段名唯一 | **加端口顺手加事实名**——端口是载荷，不是事实种类（DE-050 §0） |
  * | PTS-002 | 求解器（`owed` 所在文件）里**不出现端口字段名与端口取值** | **端口渗进引擎**——引擎一旦认识端口，加端口就得改引擎 |
  * | PTS-003 | 求解函数 `owed` 的**字节**与基线一致 | 判据 1 的不变量：「加端口不改引擎」 |
- * | PTS-004 | 基线引用的 ADR **能打开**、理由**非空** | **基线失去决策锚点**——重算基线要挂得住既有裁决；改判据 / 协议本身才需新裁决 |
+ * | PTS-004 | 基线引用的裁决锚点 **能打开**、理由**非空** | **基线失去决策锚点**——重算基线要挂得住既有裁决；改判据 / 协议本身才需新裁决 |
  * | PTS-005 | 协议格的**写点只在一个文件里**（两种形态：`symbio/src` 的 `Event::pending` 名字实参 ⊆ 协议常量 / `PortDecl::before`；`impl PortFactWriter` 里的 `store.append`——即 effects / `PortFactWriter` 链路） | **协议格到处有人写**——「四格由引擎独占」从此靠自觉（DE-050 §0） |
  * | PTS-006 | DE-050 §3.3 的**重试条文**写明 `retry(attempt+1)` 且**不含「未启用」** | **条文与机制分叉**——重试已进债键，条文若仍说「未启用」就是把在跑的路说成没跑 |
  * | PTS-007 | **架构层与骨架**的读侧（`kernel` / `sdk` / `plugin-api` / `loop` / `session`）**不得比较端口名**（`port == "model"` / `port == PORT_TOOL`）；能力插件比对自己端口的名字属**所有权**，不判（边界见文件末「已知边界」） | **读侧的端口特判回流**——收束载荷已经盖上章，读侧再认端口名就等于把「加端口不改读侧」作废 |
@@ -39,7 +39,9 @@
  *   巨大）才需要先落一条新裁决。于是「改引擎」不是顺手的事，但也不是每次都要立法。
  * - **PTS-004 管「基线本身」**：基线是一处**判据面**，`adr` 必须指向能打开的
  *   既有裁决（按本仓纪律 `SP-007`），`reason` 必须解释本次为何重算；它判的是
- *   **锚点还在不在**，不是「这次改动配不配拥有一条新决策」。
+ *   **锚点还在不在**，不是「这次改动配不配拥有一条新决策」。「能打开」的读法
+ *   不在本脚本自定，统一走 `scripts/decision-anchors.mjs` 的 `hasDecisionAnchor`：
+ *   设计文档的 `### D-NNN` 与 `docs/008-judgement/` 的判定决策单文档都算。
  * - **PTS-005 管「谁在写协议格」**：前四格判的是声明与引擎，这一格判**写侧**——
  *   `sent` / `response` / `failed` / `retry` 由引擎独占（DE-050 §0），装载期
  *   `ENGINE_ONLY_CELLS` 拦的是「执行体**声明**了它们」，而「另一个文件直接落一条
@@ -111,6 +113,7 @@ import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
 import { blankComments, blankTestModules, matchBrace, skipString } from './rust-scan.mjs'
 import { stringLiteralsOf } from './gate.d/_shared.mjs'
+import { hasDecisionAnchor } from './decision-anchors.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -155,38 +158,11 @@ const SOLVER_FNS = ['owed']
 const errors = []
 const report = (rule, msg) => errors.push({ rule, msg })
 
-// 决策的存在形态是设计文档里的 `### D-NNN` 条目——adr 目录已废除，决策折入设计正文。
-// 全量扫一遍设计文档与组件级就地文档后缓存：一次读、多次判。
-let decisionSet = null
-function decisionExists(id) {
-  if (decisionSet === null) {
-    decisionSet = new Set()
-    const roots = [path.join(ROOT, 'docs', '003-design'), path.join(ROOT, 'crates'), path.join(ROOT, 'cli', 'docs'), path.join(ROOT, 'tauri', 'docs')]
-    const walk = (d) => {
-      let list
-      try {
-        list = fs.readdirSync(d, { withFileTypes: true })
-      } catch {
-        return
-      }
-      for (const e of list) {
-        const abs = path.join(d, e.name)
-        if (e.isDirectory()) {
-          if (e.name === 'archive' || e.name === 'target' || e.name === 'node_modules') continue
-          walk(abs)
-          continue
-        }
-        if (!e.name.endsWith('.md')) continue
-        for (const line of fs.readFileSync(abs, 'utf8').split(String.fromCharCode(10))) {
-          const m = /^#{2,6}\s+(D-\d{3}a?)\b/.exec(line)
-          if (m) decisionSet.add(m[1])
-        }
-      }
-    }
-    for (const r of roots) walk(r)
-  }
-  return decisionSet.has(`D-${id}`)
-}
+// 「这条 D-NNN 到底存不存在」不在本脚本再抄一遍扫描根与锚点正则：唯一读法是
+// `scripts/decision-anchors.mjs` 的 `hasDecisionAnchor`——它同时认设计文档里的
+// `### D-NNN` 锚点与 `docs/008-judgement/` 的判定决策单文档（D-471 起的新形态）。
+// `ROOT` 随 `--root=` 走，回归夹具因此在自己的临时树里判，不会串到真仓。
+const decisionExists = (id) => hasDecisionAnchor(id, ROOT)
 
 
 function readText(rel) {
@@ -289,7 +265,7 @@ const allowedProtocols = new Map()
       }
       for (const id of refs) {
         if (!decisionExists(id)) {
-          report('PTS-001', `豁免 \`protocol ${m[1]}\` 引用了决策 \`D-${id}\`，但设计文档里没有 \`### D-${id}\` 条目 —— 指向不存在的决策的豁免不算豁免`)
+          report('PTS-001', `豁免 \`protocol ${m[1]}\` 引用了决策 \`D-${id}\`，但设计文档 / 判定决策单文档里没有 \`D-${id}\` 这条裁决 —— 指向不存在的决策的豁免不算豁免`)
         }
       }
     }
@@ -560,7 +536,7 @@ if (baseline) {
   }
   for (const id of refs) {
     if (!decisionExists(id)) {
-      report('PTS-004', `基线引用了决策 \`D-${id}\`，但设计文档里没有 \`### D-${id}\` 条目 —— 指向不存在的决策的豁免不算豁免`)
+      report('PTS-004', `基线引用了决策 \`D-${id}\`，但设计文档 / 判定决策单文档里没有 \`D-${id}\` 这条裁决 —— 指向不存在的决策的豁免不算豁免`)
     }
   }
 }

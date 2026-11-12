@@ -19,8 +19,8 @@ on:
   #
   # 起因是一次**没有信号的漏跑**：在此之前这里只有 `[ main, master ]`，而
   # `v2-plan` 领先 `main` 80 个提交、却连**一次 workflow run 都没有**
-  # （`gh run list --branch v2-plan` 为空、无 PR）——1339 个 Rust 单测、42 个 e2e、
-  # 14 个守卫的绿灯**只存在于开发者本机**。这与本文件头部「漏跑的代价远大于多跑」
+  # （`gh run list --branch v2-plan` 为空、无 PR）——当时的 1339 个 Rust 单测、
+  # 42 个 e2e、14 个守卫的绿灯**只存在于开发者本机**。用例数随仓库长，不在这里维护第二份读数。这与本文件头部「漏跑的代价远大于多跑」
   # 是同一条教训的第二次出现：第一次漏的是文件类型，这次漏的是分支。
   #
   # 2026-10-13：**同一条教训第三次出现，形态是改名**。`v2-plan` 更名为 `v2` 后
@@ -313,14 +313,15 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Install frontend deps (e2e 要用的 WS 客户端)
-        # ⚠️ 这一步不能省，且**缺了不报"缺依赖"、报的是"42/42 全部用例失败"**：
+        # ⚠️ 这一步不能省，且**缺了不报"缺依赖"、报的是"全部用例一起失败"**：
         # `e2e/helpers.mjs` 第 16 行 `import WebSocket from
         # '../tauri/node_modules/ws/index.js'`——**不为测试再引一份**（该文件头注明说）。
         # 而每个 `e2e/cases/t*.mjs` 都 import helpers ⇒ `tauri/node_modules` 不存在时，
-        # 42 个用例**每一个**都在 import 期抛模块解析错误、立即 exit=1，
-        # 表现为「42/42 全红、每例 0s」，与"用例本身坏了"完全同形。
-        # 2026-10-07 首次在 v2-plan 上跑 CI 时实测：CLI 二进制重建成功（ok 2m2s），
-        # 随后 42 例在 0.4 秒内全灭。
+        # **每一个** e2e 用例都在 import 期抛模块解析错误、立即 exit=1，
+        # 表现为「全部用例全红、每例 0s」，与"用例本身坏了"完全同形。
+        # 用例条数的唯一 owner 是 `e2e/cases/` 与 `e2e/run-tests.mjs` 的发现式 runner，
+        # 注释不抄一份数字。2026-10-07 首次在 v2-plan 上跑 CI 时实测：CLI 二进制
+        # 重建成功（ok 2m2s），随后当时那 42 例在 0.4 秒内全灭。
         # `frontend-checks` 有 `npm ci`、这个 job 没有——依赖存在与否是**按 job**的。
         working-directory: tauri
         run: npm ci
