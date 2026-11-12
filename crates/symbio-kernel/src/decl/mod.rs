@@ -61,10 +61,10 @@
 //!
 //! ## 生产接线
 //!
-//! 装载入口在 `crates/symbio-plugin-loop/src/loop_rows.rs`：它把 [`Builder::new`] 预置的协议五格与
-//! 插件自己的声明集一起 `seal`，再交给 `owed` / `drive`。`Frozen::eval` 的成本上界
-//! 仍按声明生效：调用方传入**本轮切片**（不是整份 WAL），一轮的事件数由轮的生命周期
-//! 界定。
+//! 声明集由 [`Builder::new`] 预置的协议五格与插件自己的声明一起 `seal` 冻结；求解只在
+//! 环的选债口（`crates/symbio-plugin-loop/src/ring/engine.rs` 的 `plan` → `owed`）做一次。
+//! `Frozen::eval` 的成本上界仍按声明生效：调用方传入**本轮切片**（不是整份 WAL），
+//! 一轮的事件数由轮的生命周期界定。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -186,11 +186,10 @@ pub struct AssertionRead {
 ///
 /// ## `run` 不在这里
 ///
-/// 方案 §2.3 的草图把 `run` 画进 `ActorDecl`，其签名 `BoxFuture<'static, …>` 与
-/// §2.6 契约 1（`drive` 是 async、持本轮草稿）在类型上互斥：`'static` 的 future
-/// 借不到草稿，也借不到 `&dyn LlmAdapter`。执行体的可调用面因此住在**注册它的
-/// 插件**里（`crates/symbio-plugin-loop/src/turn_exec::ACTORS`），机制层只持有静态可查的四样——
-/// 「一个 `by` 一个动作」由绑定表与冻结表同时保证。裁决见 D-119。
+/// `ActorDecl` 只持有静态可查的四样——「一个 `by` 一个动作」由绑定表与冻结表同时保证。
+/// 执行体的可调用面住在**注册它的插件**里（`submit_row!` / `RowHandler`），环在派发期
+/// 按 `by` 解析；把 `run` 画进声明表，`BoxFuture<'static, …>` 借不到本轮草稿，还会把
+/// 运行期依赖钉进冻结表。裁决见 D-119。
 ///
 /// 与 `actors::ActorSpec` 无关：那里的 actor 是**主体**（人格 / 推理），这里的
 /// actor 是**执行体**（表里一个名字对应一次动作）。方案用同一个词，此处不改名。
@@ -407,7 +406,7 @@ impl Builder {
             }
             // §3.4 第 5 条（写入封闭）的声明侧：执行体的账本不许含引擎独占的格子。
             // 「实际写入 ⊆ `writes`」那一半在运行期对账，判定输入是日志尾段而不是
-            // 执行体交回的陈述（D-123 决策 1–2；实现 `crates/symbio-plugin-loop` 的 `turn_exec::drive`）。
+            // 执行体交回的陈述（D-123 决策 1–2）。
             for fact in a.writes {
                 if ENGINE_ONLY_CELLS.contains(fact) {
                     gaps.push(Gap::ActorWritesEngineCell {
@@ -505,7 +504,7 @@ impl Builder {
         if !gaps.is_empty() {
             return Err(gaps);
         }
-        // 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，裁决归 `drive`。
+        // 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，裁决归环。
         // 名单随表冻结一次，读侧（装载日志与用例）只问表，不再自己算第二遍。
         let overlaps = overlaps(&frozen.rows, &frozen);
         // owner 清单与表同源（DE-023 D-178）：`event` / `fact` / `view` 写入时逐条登记，
@@ -532,7 +531,7 @@ impl Builder {
 /// 冻结后的声明表：只有读方法，没有 `&mut self`——运行期注册口在类型上不存在。
 ///
 /// 六张注册表全在这里（事件 / 事实 / 视图 / 执行体 / 端口 / 行）：读侧（`owed` /
-/// `drive` / 派发适配器 / 租约看护者 / 写闸）拿的切片与这张表同源，插件的 `static`
+/// 派发适配器 / 租约看护者 / 写闸）拿的切片与这张表同源，插件的 `static`
 /// 只是**进表前**的数据形状。§3.3 的「三个时点」因此能在代码上指认：编译期收集 ⇒
 /// `Builder` 填六张表 ⇒ `seal` 检查并产出这一个不可变值。
 #[derive(Debug)]
@@ -672,11 +671,9 @@ impl Frozen {
     ///
     /// ## 为什么这个口必须存在
     ///
-    /// 切点此前是**手抄的常数**（`loop_rows::turn_slice` 不切、`chat_loop::drive` 抄了
-    /// 一个 `LEASE_WINDOW = 4096` 与七处 `cost: 4096` 同值）。手抄同值不是同步：任一侧
-    /// 单独改动，另一侧就静默失效，而失效的形状是 [`eval`](Self::eval) 回 `None`、
-    /// `owed` 把它折成空集——**「算不出来」与「没有欠账」同形**，环照常空转，零告警。
-    /// 于是切点改由这里回答，调用方不再持有那个数。
+    /// 切点只能由声明表回答：调用方持有副本就是手抄同值，任一侧单独改动，另一侧就
+    /// 静默失效，而失效的形状是 [`eval`](Self::eval) 回 `None`、`owed` 把它折成空集
+    /// ——**「算不出来」与「没有欠账」同形**，环照常空转，零告警。
     ///
     /// `None` = 一条视图都没声明（空表）：没有可切的界，调用方按「不切」处理。
     /// 非空表的 `cost` 一致性由 [`Gap::ViewCostMismatch`] 在装载期钉住——切片模型

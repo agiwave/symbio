@@ -130,8 +130,8 @@ fn seal_gaps(rows: &[Decl], actors: &[ActorDecl]) -> Vec<Gap> {
     freeze(rows, actors).err().unwrap_or_default()
 }
 
-/// 求解用例的**声明面**：事实与视图。每个事实补一行归宿才装得起来——`owed` /
-/// `drive` 拿的是各用例自己那份 `rows`，这张表只负责「名字与视图存在」，所以
+/// 求解用例的**声明面**：事实与视图。每个事实补一行归宿才装得起来——`owed`
+/// 拿的是各用例自己那份 `rows`，这张表只负责「名字与视图存在」，所以
 /// 归宿行写成 `by = None`，一个执行体也不注册。
 fn decl_world() -> Arc<Frozen> {
     let mut b = declare(&[]);
@@ -228,7 +228,6 @@ fn unless_blocks_without_closing() {
     let debts = owed(&rows, &decl_world(), &events, 0);
     assert_eq!(debts.len(), 1);
     assert!(debts[0].blocked, "`unless` 命中 ⇒ 在等，而不是没事");
-    assert!(drive(&rows, &decl_world(), &events, 0).is_none());
 }
 
 #[test]
@@ -245,7 +244,6 @@ fn by_none_is_the_declared_waiting_state() {
     let debts = owed(&rows, &decl_world(), &events, 0);
     assert_eq!(debts.len(), 1);
     assert!(debts[0].blocked);
-    assert!(drive(&rows, &decl_world(), &events, 0).is_none());
 }
 
 // ── 视图当源 ─────────────────────────────────────────────────────────────
@@ -299,71 +297,12 @@ fn a_null_view_has_no_instances() {
     assert!(owed(&rows, &decl_world(), &[], 0).is_empty());
 }
 
-// ── 裁决序 ───────────────────────────────────────────────────────────────
+// ── 空表 ─────────────────────────────────────────────────────────────────
 
 #[test]
-fn drive_takes_min_by_prio_then_name_then_key() {
-    let low = row(
-        "b",
-        10,
-        Some("b"),
-        pattern("f", &["id"], &[]),
-        &[pattern("g", &["id"], &[])],
-        &[],
-    );
-    let earlier = row(
-        "a",
-        10,
-        Some("a"),
-        pattern("f", &["id"], &[]),
-        &[pattern("g", &["id"], &[])],
-        &[],
-    );
-    let later = row(
-        "z",
-        20,
-        Some("z"),
-        pattern("f", &["id"], &[]),
-        &[pattern("g", &["id"], &[])],
-        &[],
-    );
-    let events = vec![
-        ev(1, 1, "f", json!({"id": "b"})),
-        ev(2, 1, "f", json!({"id": "a"})),
-    ];
-    let frozen = decl_world();
-    // 同 `prio` 按行名；注册顺序相反也不影响。
-    let rows = [low.clone(), earlier.clone(), later.clone()];
-    let picked = drive(&rows, &frozen, &events, 0).unwrap();
-    assert_eq!(picked.decl.name, "a");
-
-    let rows = [later.clone(), earlier.clone(), low.clone()];
-    assert_eq!(drive(&rows, &frozen, &events, 0).unwrap().decl.name, "a");
-}
-
-#[test]
-fn same_row_same_prio_breaks_ties_by_key() {
-    let rows = [row(
-        "r",
-        10,
-        Some("act"),
-        pattern("f", &["id"], &[]),
-        &[pattern("g", &["id"], &[])],
-        &[],
-    )];
-    let events = vec![
-        ev(1, 1, "f", json!({"id": "b"})),
-        ev(2, 1, "f", json!({"id": "a"})),
-    ];
-    let picked = drive(&rows, &decl_world(), &events, 0).unwrap();
-    assert_eq!(picked.key.trace(), "id=a");
-}
-
-#[test]
-fn empty_table_never_drives_but_is_complete() {
+fn empty_table_is_complete() {
     let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
     assert!(owed(&[], &decl_world(), &events, 0).is_empty());
-    assert!(drive(&[], &decl_world(), &events, 0).is_none());
 }
 
 /// 守卫用例的替身（D-118 订正 1）：「`by` 查不到动作」不再是求解时静默跳过，

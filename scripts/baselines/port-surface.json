@@ -1,8 +1,8 @@
 {
   "solver": {
     "file": "crates/symbio-kernel/src/decl/ring.rs",
-    "hash": "sha256:8e7b35e3a5f8e15dba58b59ff7ecc450b3664574fb058e0bbae6fe3af7a5bf92",
+    "hash": "sha256:af76f50ff8c0b49640ead2c95b678e68275b8b693cb92991900d7327ffeb0a1b",
     "adr": "D-118 D-119 D-188",
-    "reason": "T-241（D-118 订正 1 + D-119）：`drive` 的 `accept` 谓词退役，签名退回纯 `(rows, frozen, events, now)`。「注册表没覆盖的 `by` 在选债面跳过」是给求解器加了第四个未声明的过滤条件，并把「`by = Some` 却无人可跑」这一装载期第 6 条要拦的缺口永久合法化；回表形状是未接线行显式 `by = None`（§2.2「这笔账不由引擎执行」的唯一声明位），可执行性由 `UnmannedRow` / `OrphanActor` 双向装载检查保证，不在求解器里。这是求解器的**机制演进**，不是端口渗进引擎：`owed` 的字节、输入闭包、`PortDecl` 与声明表都没变，变的只是「取最小可还债」少了一层外部谓词（`!blocked` 那一条本就是 §2.2 的定义）。此前 T-229 的集合展开（D-116）仍成立；此后引擎再因机制原因改动，同批把本文件 hash 更新为当前指纹并写清理由与决策。D-188 C2a：文件随 `decl` 搬进 `symbio-kernel` crate，`pub(crate)` 按跨 crate 等价性放宽为 `pub`；`owed` / `drive` 的算法与输入闭包未动，指纹变化只来自可见性行。"
+    "reason": "T-241（D-118 订正 1 + D-119）：`drive` 的 `accept` 谓词退役，签名退回纯 `(rows, frozen, events, now)`；「注册表没覆盖的 `by` 在选债面跳过」是给求解器加了第四个未声明的过滤条件，并把「`by = Some` 却无人可跑」这一装载期第 6 条要拦的缺口永久合法化，故回表形状改为未接线行显式 `by = None`（§2.2 的唯一声明位），可执行性由 `UnmannedRow` / `OrphanActor` 双向装载检查保证。D-188 C2a：文件随 `decl` 搬进 `symbio-kernel` crate，`pub(crate)` 按跨 crate 等价性放宽为 `pub`。求解器归一（选债归环的封闭语法面收窄）：`drive` 在生产里零调用点——环的 `plan` 直接调 `owed`，唯一消费者是内核测试；`Debt` 的 `PartialEq` / `Eq` / `PartialOrd` / `Ord` 也只服务于它的 `.min()`，环的 `rows_from_debts` 只过滤不排序，裁决序在环的 `candidates.sort_by`。按「收窄封闭语法面不需要批准」删除这个看起来像第二个选债口的 `pub fn` 与随附比较面；`owed` 的算法、输入闭包与函数体字节未动。PTS-003 的冻结对象随之从两个函数收成 `owed` 一个，判据 1「加端口不改引擎」的不变量未放宽，PTS-002 的取值检查面同口径收窄。本次是求解器归一、与端口无关，故同批更新指纹；`adr` 沿用既有决策号，改基线不另造决策。此后引擎再因机制原因改动，同批把本文件 hash 更新为当前指纹并在 reason 写清理由。"
   }
 }

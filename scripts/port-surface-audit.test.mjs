@@ -67,13 +67,9 @@ const DECL_SRC = `const BUILTIN_FACTS: &[FactDecl] = &[
 ];
 `
 
-/** 求解器：判据 1 点名的那两个函数 */
+/** 求解器：判据 1 冻结的那一个求解函数 */
 const SOLVER_SRC = `pub(crate) fn owed(rows: &[Decl]) -> usize {
     rows.len()
-}
-
-pub(crate) fn drive(rows: &[Decl]) -> usize {
-    owed(rows)
 }
 `
 
@@ -309,8 +305,8 @@ test('豁免口：第 6 个协议名必须挂一条能打开的决策', () => {
 test('PTS-002 求解器里出现端口字段名 ⇒ 红', () => {
   const root = fixture({
     solver: SOLVER_SRC.replace(
-      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    owed(rows)\n}',
-      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    let _ = "port";\n    owed(rows)\n}',
+      '    rows.len()\n',
+      '    let _ = "port";\n    rows.len()\n',
     ),
   })
   try {
@@ -340,8 +336,8 @@ test('PTS-002 求解器里出现端口字段名（注释里不算）⇒ 绿', ()
 test('PTS-002 求解器函数体里出现端口取值 ⇒ 红（不命名字段也渗进）', () => {
   const root = fixture({
     solver: SOLVER_SRC.replace(
-      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    owed(rows)\n}',
-      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    let _ = "tool";\n    owed(rows)\n}',
+      '    rows.len()\n',
+      '    let _ = "tool";\n    rows.len()\n',
     ),
   })
   try {
@@ -365,7 +361,7 @@ test('PTS-002 端口取值只在注释里 ⇒ 绿（散文不是分支）', () =
   }
 })
 
-test('PTS-002 端口取值在两个函数体之外 ⇒ 绿（自陈的边界：判据面是 owed / drive）', () => {
+test('PTS-002 端口取值在求解函数体之外 ⇒ 绿（自陈的边界：判据面是 owed）', () => {
   // 边界要有名有姓：`ring.rs` 的信封字段名里就有 `"turn"`（轮号），它与端口
   // `turn` 的取值同名。把整份文件都算进来，这条真仓现状就成了假红。
   const root = fixture({
@@ -385,8 +381,8 @@ test('PTS-002 端口名单来自扫描而不是文件路径 ⇒ 换一张表也�
   const root = fixture({
     ports: '// 这张表搬走了\n',
     solver: SOLVER_SRC.replace(
-      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    owed(rows)\n}',
-      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    let _ = "tool";\n    owed(rows)\n}',
+      '    rows.len()\n',
+      '    let _ = "tool";\n    rows.len()\n',
     ),
   })
   try {

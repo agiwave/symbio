@@ -1,4 +1,4 @@
-//! 义务环的**表与求解**：模式 / 行 / 债 / `owed` / `drive`。
+//! 义务环的**表与求解**：模式 / 行 / 债 / `owed`。
 //!
 //! ## 一行是数据，不是函数
 //!
@@ -13,8 +13,10 @@
 //! open(d,key)      := ∃ f ⊨ d.owes ∧ key = bind(f) ∧ ¬∃ g ⊨ d.until ∧ key(g) = key
 //! blocked(d,key)   := d.by = None ∨ ∃ h ⊨ d.unless ∧ key(h) = key
 //! actionable(d,key) := open ∧ ¬blocked
-//! next(now)        := min { (d,key) | actionable } 按 (name, key)
 //! ```
+//!
+//! `owed` 返回全部 `open`（`blocked` 的照样返回）；谁先被派发由环按 `(name, key)`
+//! 裁决，本模块不排序、不取最小。
 //!
 //! 时间不进公式：需要时间的条件由视图把 `now` 折成布尔字段（[`Frozen::eval`]
 //! 的 `now` 是入参）。因此 `owed` 只读**事实切片 + 视图值 + 触发事件时间戳**，
@@ -189,32 +191,6 @@ pub struct Debt<'a> {
     pub blocked: bool,
 }
 
-impl PartialEq for Debt<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.order() == other.order() && self.blocked == other.blocked
-    }
-}
-
-impl Eq for Debt<'_> {}
-
-impl PartialOrd for Debt<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Debt<'_> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.order().cmp(&other.order())
-    }
-}
-
-impl Debt<'_> {
-    fn order(&self) -> (&'static str, &Key) {
-        (self.decl.name, &self.key)
-    }
-}
-
 /// 全量欠账：每个 `Decl` × 每个 `owes` 实例，收口（有 `until`/`unless` 同键命中）
 /// 的不返回。`blocked` 的债**照样返回**——「在等」与「没事」必须可区分。
 pub fn owed<'a>(rows: &'a [Decl], frozen: &Frozen, events: &[Event], now: i64) -> Vec<Debt<'a>> {
@@ -231,29 +207,6 @@ pub fn owed<'a>(rows: &'a [Decl], frozen: &Frozen, events: &[Event], now: i64) -
         }
     }
     debts
-}
-
-/// 取最小的一笔可还的债。这就是 `drive` 的**选择半边**——生产入口
-/// `turn_exec::drive` 直接调用它；执行半边（跑执行体、追加事实、
-/// 无进展守卫）在派发器里，选择规则不再变。
-///
-/// 可还性只有一个声明位：[`owed`] 的 `blocked`（`by = None ∨ unless` 命中）。
-/// 「执行体还没接线」不是求解器的第四种条件——那种行显式写 `by = None`，
-/// 接线时与 `ActorDecl` 注册同批改回 `Some`。
-///
-/// 按行点问（`crates/symbio-plugin-loop/src/loop_rows.rs::owes`）仍留给「刚写完 request，这一行
-/// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `name` 裁决）是
-/// 调度器唯一的选债口（D-118 决策 1–2）。
-pub fn drive<'a>(
-    rows: &'a [Decl],
-    frozen: &Frozen,
-    events: &[Event],
-    now: i64,
-) -> Option<Debt<'a>> {
-    owed(rows, frozen, events, now)
-        .into_iter()
-        .filter(|d| !d.blocked)
-        .min()
 }
 
 fn keys_of_all(patterns: &[Pattern], frozen: &Frozen, events: &[Event], now: i64) -> Vec<Key> {
@@ -1003,7 +956,7 @@ pub struct Overlap {
 }
 
 /// 「会不会真的同时命中」是**运行期**的问题（要读日志），静态只能回答「可能」。
-/// 所以第 4 条不报错，只报告：报告让遮蔽在装载期可见，裁决仍归 [`drive`] 取最小。
+/// 所以第 4 条不报错，只报告：报告让遮蔽在装载期可见，裁决归环按 `(name, key)` 取。
 ///
 /// 三条全成立才报，缺一条就是噪音：
 ///

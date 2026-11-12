@@ -421,7 +421,18 @@ export const BASELINE = {
   // 的折算，逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 2235 → 2233（D-468）——同一批净 −2 在 CI 口径下的折算，
   // 逐条归属见上方 `rustTests` 的注。非侵蚀。
-  ciRustTestsTotal: 2234,
+  // baseline-allow ciRustTestsTotal: 2234 → 2232（选债归环后的求解器归一）——`decl/ring.test.rs`
+  // 删 3 条 `#[test]`（`drive_takes_min_by_prio_then_name_then_key` /
+  // `same_row_same_prio_breaks_ties_by_key` / `empty_table_never_drives_but_is_complete`）、
+  // 留 1 条改名 `empty_table_is_complete`，净 −2；另两处 `drive(...).is_none()` 断言
+  // 随口删除，是同义重复，所属 `owed` 的 `blocked` 断言照旧保留。被测对象
+  // （生产零调用的 `pub fn drive` 与只服务它 `.min()` 的 `Debt` 比较面）已整体撤回，
+  // 覆盖对象消失不叫丢覆盖：真正的入批裁决序由 `ring/engine.rs::plan` 的
+  // `candidates.sort_by`（行名 / 债 id / 端口）持有，`engine.test.rs` 的
+  // `batch_order_depends_on_name_and_id_not_assembly_order` 与 e2e t107 钉住；
+  // 那两条测的 `(name, key)` 顺序在生产里从未执行。非侵蚀。
+  // 本次是重算基线（记账），沿用既有裁决锚点，不另造决策号。
+  ciRustTestsTotal: 2232,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
