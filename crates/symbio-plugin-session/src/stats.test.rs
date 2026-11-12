@@ -243,9 +243,10 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
 /// 这条是实例级聚合列的**范围**判据——它红的方式有两种，都是静默的：扫不到（`wals` 少）、
 /// 扫错范围（`wals` 多）。两者都不抛错，所以必须有一个断言直接盯数字。
 ///
-/// 逐档两列里**有什么**归 owner（`slo`）：本进程不链接它，于是两列是文档写的空形状、
-/// 合计两格是有据的零。这不是「少验了一条」——是「这一格不是本插件的数」：
-/// 数字在 `crates/symbio-plugin-slo/src/decl.test.rs`，组合在 e2e `t28`。
+/// 逐档两列里**有什么**归 owner（`slo`）：本进程不链接它，于是落点整条缺席、
+/// 合计两格是有据的零（`D-488`：落点缺席与报表列同一降级语义）。这不是「少验了一条」
+/// ——是「这一格不是本插件的数」：数字在 `crates/symbio-plugin-slo/src/decl.test.rs`，
+/// 组合在 e2e `t28`。
 #[test]
 fn fleet_aggregates_every_session_in_the_instance() {
     let (root, wals) = seed_instance("agg", 3);
@@ -263,10 +264,9 @@ fn fleet_aggregates_every_session_in_the_instance() {
         "实例下三个会话的 WAL 全部读进来（少一个就是静默漏扫）"
     );
     assert_eq!(got.fleet["sessions"], 3, "目录里有 WAL 的会话数");
-    assert_eq!(
-        got.fleet["by_tier"],
-        serde_json::json!({ "latency": [], "fallback": [] }),
-        "owner 不在 ⇒ 逐档两列是空表（形状恒在：读方不必为每个键分诊它在不在）"
+    assert!(
+        got.fleet.get("by_tier").is_none(),
+        "owner 不在 ⇒ 落点整条缺席（空表会让「装配里没有 owner」长得像「这一格本来就是空的」）"
     );
     assert_eq!(
         got.fleet["turns"], 0,
@@ -366,14 +366,9 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
         got.fleet,
         serde_json::json!({
             "wals": 0, "sessions": 0, "turns": 0, "fallbacks": 0,
-            "by_tier": { "latency": [], "fallback": [] },
-            "axes": {
-                "conation": { "expressed": 0, "escalated": 0, "adoption_rate": 0.0 },
-                "span": { "sessions": 0, "median_ms": null },
-                "autonomy": { "closed": 0, "unattended": 0, "unattended_rate": 0.0 },
-            },
         }),
-        "不给你读 ⇒ 空形状（与满读数同键：三族给有据的零 / 空，不缺列），不扫也不报数"
+        "不给你读 ⇒ 不扫也不报数（`D-488`）：空形状住 owner 那里（本进程不链接 owner，\
+         落点整条缺席，与报表列同一降级语义）；满装配下的有据零 / 空由 e2e 与 owner 单测钉"
     );
 }
 
@@ -439,15 +434,17 @@ fn unregistered_reports_are_absent_from_the_exit() {
     );
 }
 
-/// 实例级 `axes` 三族：形状恒在，各自归各自的 owner。
+/// 实例级落点（`by_tier` / `axes` 三族）**没有 owner 时整条缺席**，与报表列同一降级语义。
 ///
-/// - `span` / `conation` / `autonomy` 都归能力包（`slo` / `conation`）：本进程不链接它们
-///   ⇒ `span` 是有据的空，`conation` / `autonomy` 是 `null`（零是「一个会话都没发生过」，
-///   `null` 是「读不出来」）；
-/// - 跨会话合并的**数字**归 owner 的单测与 e2e（`e2e/cases/t36-autonomous-initiator.mjs`
-///   读真实装配的 `fleet.axes.conation`），不在这里造替身。
+/// - `span` / `conation` / `autonomy` 的落点都由能力包在 `ReportDecl::fleet` 里声明
+///   （`D-387` / `D-488`）：本进程不链接它们 ⇒ 登记面没有 fleet 报表 ⇒ 读方既不猜
+///   slot 也不猜落点，出口只有本插件自己的四格（`wals` / `sessions` / `turns` /
+///   `fallbacks`）。空形状（零 / 空 / `null`）住 owner 那里，由 owner 的单测与
+///   e2e（`e2e/cases/t36-autonomous-initiator.mjs` 读真实装配的
+///   `fleet.axes.conation`）钉——「读不出来 ⇒ null」与「没这个 owner」在这里
+///   是同一次缺席，分诊交给满装配。
 #[test]
-fn fleet_axes_report_owner_absence_as_null_not_zero() {
+fn fleet_landing_points_are_absent_when_no_owner_is_linked() {
     let (root, wals) = seed_instance("axes", 2);
     let got = read_path(
         "session-0",
@@ -457,24 +454,10 @@ fn fleet_axes_report_owner_absence_as_null_not_zero() {
         &root,
     )
     .expect("读数");
-    let axes = got.fleet.get("axes").expect("axes 族");
-    // 缺席的两轴交 `null`，不是零或三个零字段：把「读不出来」写成「有据的零」就是让
-    // 装配故障看起来像一次正常的安静；若在这里交替身把它算成零，`capability_views` 那条
-    // 「本进程没链接 owner ⇒ 必须出声」的用例也会变成假绿。
     assert!(
-        axes["conation"].is_null(),
-        "视图缺席 ⇒ 主动性轴交 null（不是有据的零；实际: {}）",
-        axes["conation"]
-    );
-    assert!(
-        axes["autonomy"].is_null(),
-        "视图缺席 ⇒ 自主程度轴交 null（不是零形状；实际: {}）",
-        axes["autonomy"]
-    );
-    assert_eq!(
-        axes["span"],
-        serde_json::json!({ "sessions": 0, "median_ms": null }),
-        "跨度轴缺席 ⇒ 有据的空（`null` 不是 0：没有样本与中位数 0ms 是两件事）"
+        got.fleet.get("axes").is_none() && got.fleet.get("by_tier").is_none(),
+        "本进程没链接任何 owner ⇒ 落点整条缺席，不由读方替 owner 造空形状（实际: {}）",
+        got.fleet
     );
 }
 

@@ -362,9 +362,6 @@ pub(crate) fn read(
     )
     .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
 
-    // 实例级聚合列。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
-    // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（axes 两族给有据的
-    // 零 / 空，不给「缺列」——读方不必为每个键分诊它在不在）。
     // 技能编译列：技能就是 `memory.encoded{tag:"skill"}` 这条事实，故只数
     // 切片里的格子，不另造投影。切片已按 `may_read` 取过 ⇒ 无权读的人得 0，
     // 与「开着但没编译过」由部署开关 `skill_compile_enabled` 分辨。
@@ -376,19 +373,14 @@ pub(crate) fn read(
         })
         .count();
 
-    let fleet = if may_read {
-        fleet_reading(&deep_facts(), &report_ctx)
-    } else {
-        serde_json::json!({
-            "wals": 0, "sessions": 0, "turns": 0, "fallbacks": 0,
-            "by_tier": { "latency": [], "fallback": [] },
-            "axes": {
-                "conation": { "expressed": 0, "escalated": 0, "adoption_rate": 0.0 },
-                "span": { "sessions": 0, "median_ms": null },
-                "autonomy": { "closed": 0, "unattended": 0, "unattended_rate": 0.0 },
-            },
-        })
-    };
+    // 实例级聚合列：owner 在 `ReportDecl::fleet` 里声明落点，读侧按登记求值、按登记
+    // 落格（`D-488`）。`may_read = false` 时**不扫**（扫遍实例再报「不给你看」是白花
+    // 代价）：交空快照，owner 的 `agg(&[])` 交有据的零 / 空——空形状住 owner 那里
+    // （与单会话列同一条），读方不再替 owner 猜形状。
+    let fleet = fleet_reading(
+        &if may_read { deep_facts() } else { Vec::new() },
+        &report_ctx,
+    );
 
     // 能力视图列（DE-025 D-221）：遍历**公开清单**，逐条经 plugin-api 的读口求值。
     // 本插件不认识任何具体视图名——名字、版本、成本与求值函数都在 owner 的声明里；

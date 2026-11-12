@@ -105,46 +105,35 @@ pub(super) fn commitments_reading(snapshot: &[Event]) -> serde_json::Value {
 pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> serde_json::Value {
     let sessions = snapshots.len();
 
-    // 已迁的列走**报表**（`D-387`）：每条视图按 owner 的 `agg` 合并，再由 `fleet_render`
-    // 排版。本插件只负责「每片求一次值、把值交回去」，不认识里面有哪些字段，也不在这里
-    // 写「率 = 分子 / 分母」「分位数怎么取」。
+    // 实例级落点全部来自**登记面**（`D-387` 的收尾，`D-488`）：owner 在
+    // `ReportDecl::fleet` 里声明叶路径（`by_tier` / `axes.span` …），本处按登记逐条
+    // 求值、按登记落点写格——加一条实例级报表 = owner 登记，本文件不动，也不认识
+    // 任何一个 slot 或落点。每条视图按 owner 的 `agg` 合并，再由 `fleet_render` 排版；
+    // 本插件只负责「每片求一次值、把值交回去」，不在这里写「率 = 分子 / 分母」
+    // 「分位数怎么取」。读不到 ⇒ `null`（零是「一个会话都没发生过」，`null` 是
+    // 「这一格读不出来」）；owner 缺席 ⇒ 落点整条缺席——与报表列同一降级语义，
+    // 「装配里没有 owner」不许长得像「这一格本来就是空的」。
     //
-    // 逐档两列是**累计口径**：被快照取代而移入归档段的前缀也在 `range(0)` 里，实例聚合
-    // 不会**静默**少算。
-    let by_tier = fleet_of("tiers", snapshots, ctx)
-        .unwrap_or_else(|| serde_json::json!({ "latency": [], "fallback": [] }));
-
-    // 跨度已迁：`fleet_render` 交 `agg` 之后的那一格；读不到才退回文档写过的空读数。
-    let span = fleet_of("span", snapshots, ctx).unwrap_or_else(
-        || serde_json::json!({ "sessions": 0, "median_ms": serde_json::Value::Null }),
-    );
-    // 主动性轴：报表 `slot = conation`，逐片 `eval` → owner `agg` → owner `fleet_render`。
-    // 形状归 owner（`expressed` / `escalated` / `adoption_rate`），本插件不列它的字段。
-    // 读不到 ⇒ `null`（不是三个零：零是「没有主动发起」，`null` 是「这一格今天读不出来」）。
-    let conation = fleet_of("conation", snapshots, ctx).unwrap_or(serde_json::Value::Null);
-    // 自主程度轴同样归能力包：报表 `slot = autonomy`，逐片 `eval` → owner `agg` →
-    // owner `fleet_render`，本处不认识分子分母。读不到 ⇒ `null`（与主动性的缺席同一条：
-    // 零是读数，`null` 是读不出来）。
-    let autonomy = fleet_of("autonomy", snapshots, ctx).unwrap_or(serde_json::Value::Null);
-
-    // 合计两格读 owner 交的逐档行（形状归 owner，本处只做加法）。
-    let (turns, fallbacks) = totals_of(&by_tier["fallback"]);
-
-    // 外部效标三族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
-    // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
-    // 三族都是 owner 的 `agg` 经 `fleet_render` 原样交出（`D-281` / `D-387`）：本插件
-    // 不列它们的字段。轴键取报表登记的 `fleet`（`axes.span` ⇒ `span`）——那是 owner
-    // 给这一格起的名字，读方不抄第二份字面量。
-    let mut axes = serde_json::Map::new();
-    for (slot, value) in [
-        ("span", span),
-        ("autonomy", autonomy),
-        ("conation", conation),
-    ] {
-        axes.insert(fleet_key_of(slot), value);
+    // `readable = false` 在这里没有分支：调用方交空快照，`agg(&[])` 交 owner 自己的
+    // 有据零 / 空，`fleet_render` 排版——空形状住 owner 那里，读方不替它猜。
+    let mut fleets = serde_json::Map::new();
+    if let Ok(reports) = symbio_plugin_api::reports::reports() {
+        for report in reports.iter().filter(|r| r.fleet.is_some()) {
+            let Some(leaf) = report.fleet else { continue };
+            let value = fleet_of(report, snapshots, ctx).unwrap_or(serde_json::Value::Null);
+            insert_at_leaf(&mut fleets, leaf, value);
+        }
     }
 
-    serde_json::json!({
+    // 合计两格读 owner 交的逐档行（形状归 owner，本处只做加法）；落点缺席时
+    // `totals_of` 对 `null` 交有据的零。
+    let by_tier = fleets
+        .get("by_tier")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let (turns, fallbacks) = totals_of(&by_tier["fallback"]);
+
+    let mut out = serde_json::json!({
         // 交到手里的快照数（打不开的已在存储层跳过并出声）
         "wals": sessions,
         // 与 `wals` 同值：键是出口形状的一部分（e2e 对账读它）；
@@ -152,32 +141,47 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> se
         "sessions": sessions,
         "turns": turns,
         "fallbacks": fallbacks,
-        // 逐档位并集：合并后由 owner 的分位数纯查询给出，与单会话列同一套口径
-        "by_tier": by_tier,
-        // 外部效标三族（DE-008 §3.1.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
-        // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
-        // 键名稳定（不随文档改字号）：conation ↔ 主动性、span ↔ 时域跨度。
-        "axes": axes,
-    })
+    });
+    if let Some(exit) = out.as_object_mut() {
+        for (key, value) in fleets {
+            exit.insert(key, value);
+        }
+    }
+    out
 }
 
-/// 轴键 = 报表登记的 `fleet` 去掉 `axes.` 前缀（`axes.span` ⇒ `span`）。
-///
-/// `fleet` 是 owner 在报表登记里给这一格起的名字（`D-387`），读方取它而不是在出口处
-/// 再抄一份字面量——两份叫法漂移了没有任何东西会变红。登记缺席时退回 `slot`：此时
-/// 这一格本来就是 `null`，键名只负责让形状可读。
-fn fleet_key_of(slot: &str) -> String {
-    symbio_plugin_api::reports::reports()
-        .ok()
-        .and_then(|reports| {
-            reports
-                .iter()
-                .find(|r| r.slot == slot)
-                .and_then(|r| r.fleet)
-        })
-        .and_then(|fleet| fleet.strip_prefix("axes."))
-        .unwrap_or(slot)
-        .to_string()
+/// 把 owner 交的值写到**登记声明的叶路径**上（`by_tier` ⇒ 顶层一格；
+/// `axes.span` ⇒ `axes` 下的 `span` 格）。落点与键名都是 owner 起的
+/// （`D-387`），读方不抄第二份字面量。中间段一律对象：`fleet` 的登记判据
+/// （`validate`）只放行非空叶路径，空串在装配期已红。
+fn insert_at_leaf(
+    root: &mut serde_json::Map<String, serde_json::Value>,
+    leaf: &str,
+    value: serde_json::Value,
+) {
+    let mut node = root;
+    let mut segments = leaf.split('.');
+    let last = segments.next_back().unwrap_or(leaf);
+    for segment in segments {
+        // 中间段对象由本函数自己建（`or_insert_with`）；唯一的冲突形态是某条更短的
+        // 落点已把这一段写成了叶子格（两条 fleet 路径前缀相撞）——那不是本函数能修的，
+        // 出声并放弃本格，让「登记撞车」可诊断而不是静默覆盖（与登记不合法的降级
+        // 同一条：读侧不替装配面 panic）。
+        let entry = node
+            .entry(segment.to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        match entry.as_object_mut() {
+            Some(child) => node = child,
+            None => {
+                symbio_plugin_api::plugin_warn!(
+                    symbio_plugin_api::PLUGIN_ID_SESSION,
+                    "[stats] fleet 落点 `{leaf}` 的中间段 `{segment}` 已被更短的落点写成叶子格：本格放弃"
+                );
+                return;
+            }
+        }
+    }
+    node.insert(last.to_string(), value);
 }
 
 /// 逐档累加 `turns` / `fallbacks` 两格——出口的合计两格。
@@ -209,16 +213,16 @@ pub(super) fn totals_of(fallback_rows: &serde_json::Value) -> (u64, u64) {
 ///
 /// 与 [`symbio_plugin_api::reports::read_all`] 同一条「不认识形状」的纪律；区别只在合并：单片读数按
 /// `ViewDecl::eval` 求，N 片交 `ViewDecl::agg`，最后才交给 `fleet_render`（`D-387`：
-/// `fleet_render` 是 `agg` 之后的排版，不是第三份口径）。
+/// `fleet_render` 是 `agg` 之后的排版，不是第三份口径）。报表由调用方从登记面交来
+/// （`D-488`），本函数不按名字查表。
 fn fleet_of(
-    slot: &str,
+    report: &symbio_plugin_api::reports::ReportDecl,
     snapshots: &[Vec<Event>],
     ctx: &ReportCtx<'_>,
 ) -> Option<serde_json::Value> {
-    let reports = symbio_plugin_api::reports::reports().ok()?;
-    let report = reports.iter().find(|r| r.slot == slot)?;
     let fleet_render = report.fleet_render?;
     let frozen = symbio_plugin_api::sealed_declarations().ok()?;
+    let slot = report.slot;
     let mut merged = Vec::with_capacity(report.views.len());
     for name in report.views {
         let view = frozen.view(name)?;
