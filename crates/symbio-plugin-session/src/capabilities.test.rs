@@ -138,10 +138,7 @@ impl Plugin for DuplicatePortParent {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> symbio_plugin_api::PluginInvokeResponse<symbio_plugin_api::PluginPayload> {
-        if ctx
-            .get(symbio_sdk::capability::CAPABILITY_VISITOR)
-            .is_some()
-        {
+        if ctx.get(symbio_plugin_api::CAPABILITY_VISITOR).is_some() {
             for id in ["a", "b"] {
                 let provider: Arc<dyn symbio_plugin_api::port::PortProvider> =
                     Arc::new(FixturePort { id });

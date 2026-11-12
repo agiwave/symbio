@@ -13,7 +13,7 @@ created: 2026-11-11
 
 ## 内容
 
-D-451 的**边一**：把 `scripts/exemptions/plugin-session-sdk.json` 的 **81** 条符号**只许降**
+D-451 的**边一**：把 `scripts/exemptions/plugin-session-sdk.json` 的 **51** 条符号**只许降**
 地管住——**不设归零**（`D-460`）。
 
 **它是一条读数，不是施工段**（`D-456`）：账上 67 条住在边二（装配）/ 边三（存储·转写）
@@ -116,4 +116,23 @@ exit: **不再是「82 → 0 + 删豁免」**（`D-460`：82 条里 15 条是其
   （注释自己写着「写侧改名，这两条一起红」），取字就该与写侧同源。三处夹具都走门面之后，
   账上这一条零命中，`SRA-001` 逼着当场摘掉；`SYMBOL_BASELINE` 82 → 81 与 `SRA-002`
   回归用例（83/82 → 82/81）同批下调，守卫 23 条回归全绿。
-  `commitment_records` / `SKILL_TAG` 仍直取 sdk，不动——它们不在这条走法上。
+- 2026-11-12（**边一第三格真实收窄，目前最大的一格**）：**81 → 51**，门面已导出的
+  30 条一次退场，全部走走法 3（经门面转出）。开工前先做了「账上符号 × 门面白名单」
+  的交叉比对：账上 81 条里有 **30 条**门面（`symbio-plugin-api`）早就 `pub use` 了，
+  会话却仍写 `symbio_sdk::` 路径直取本体——与 `commitment_events` 一模一样的形态，
+  只是存量是 30 条。批量换径：94 处单路径 + 7 组花括号组（整组全在门面的 4 组换前缀、
+  混合组拆分的 3 组，如 `authz::{PRINCIPAL_MAIN, PRINCIPAL_USER}` 拆成门面取
+  `PRINCIPAL_USER`、sdk 留 `PRINCIPAL_MAIN`）；`PluginDir::at(...)` 这类
+  `符号::方法` 的取字重写类型前缀、保留方法段。**谁在消费**：这 30 条个个在门面上
+  有扩展层消费方（`Principal` 在用、`CommitmentVocab` 的读者在 agent、
+  `capability_prompts` 在用……），所以 D-443 第 3 条「控制面专属读口不上门面」
+  **不适用**——留在账上的 51 条才是那批：`FactSource` 登记面 / `PRINCIPAL_MAIN` /
+  `session_chat` / `rebuild` / `SKILL_TAG` / `commitment_records` /
+  `VdfsChangeSubscriptions` / `DriveEntry` / 词汇结构体等，全数不动。
+  `SRA-001` 零余量（51 条全真用）、`SYMBOL_BASELINE` 81 → 51 与 `SRA-002` 回归
+  （83/82 → 52/51）同批下调，23 条回归全绿；409 条 session 单测绿。
+  顺带把门面 SDK 臂的基线同步下调（133 → 132：`D-469` 删转出行后实测已降、基线没跟，
+  守卫的 △ 提示点名要补）与门面 `sealed_declarations` 注释里「session 直取本体」的
+  过期表述。**剩下 51 条的下一次收窄**：没有「换路径」这种零风险形态了——每条都要么
+  等 owner 侧改造（走法 2），要么等用法消失（走法 1），要么是 D-460 定性的随身份
+  词汇（不摘）。

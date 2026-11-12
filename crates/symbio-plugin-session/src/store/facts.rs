@@ -122,7 +122,7 @@ impl SessionStore {
         // 装载期缺口是**硬错**（D-396）：不许降级成「没有冻结表也照开」——那样写闸
         // 会退到共享词汇面，环的协议事实被 `OffGrid` 静默拒收，工具重复派发、债务
         // 永不收束（t46 的停摆链）。缺口在这里换成会话打不开。
-        let store = open_fact_store(&wal, symbio_sdk::declarations::sealed_declarations())?;
+        let store = open_fact_store(&wal, symbio_plugin_api::sealed_declarations())?;
         let store = Arc::new(store);
         cache.insert(session_id.to_string(), store.clone());
         Ok(Some(store))
@@ -181,7 +181,7 @@ impl SessionStore {
         let agent_id = self
             .session_dir(session_id)
             .and_then(|dir| super::layout::read_agent_id(&dir));
-        symbio_sdk::authz::principal_of(agent_id.as_deref())
+        symbio_plugin_api::principal_of(agent_id.as_deref())
     }
 
     /// 本会话绑定的智能体作用域（metadata 的 `agent_id`）；未绑定 / 空串 ⇒ `None`。

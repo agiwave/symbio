@@ -286,8 +286,8 @@ pub(crate) const MESSAGE_VOCAB: symbio_sdk::projection::vocab::MessageVocab =
 
 /// 承诺面（4 条）：本插件只剩 `commitment_records`（承诺列）一个消费方——声誉列改按
 /// 名字读台账后，那条折叠搬进了声誉能力包，它的词汇面也跟着走（`D-288`）。
-pub(crate) const COMMITMENT_VOCAB: symbio_sdk::projection::vocab::CommitmentVocab =
-    symbio_sdk::projection::vocab::CommitmentVocab {
+pub(crate) const COMMITMENT_VOCAB: symbio_plugin_api::CommitmentVocab =
+    symbio_plugin_api::CommitmentVocab {
         opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
         released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
         broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,

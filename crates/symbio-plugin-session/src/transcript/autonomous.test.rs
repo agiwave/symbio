@@ -27,7 +27,7 @@ fn autonomy_plugin() -> (tempfile::TempDir, Arc<SessionPlugin>) {
     let plugin = Arc::new(SessionPlugin::new(
         None,
         SessionConfig::default(),
-        symbio_sdk::plugin::PluginDir::at(dir.path(), "session"),
+        symbio_plugin_api::PluginDir::at(dir.path(), "session"),
     ));
     (dir, plugin)
 }
@@ -219,8 +219,8 @@ use crate::store::EventWalStore;
 use symbio_kernel::store::EventStore;
 use symbio_kernel::Seq;
 use symbio_plugin_api::events::EVENT_TURN_DISPATCH;
-use symbio_sdk::authz::PRINCIPAL_AUTONOMOUS;
-use symbio_sdk::authz::PRINCIPAL_USER;
+use symbio_plugin_api::PRINCIPAL_AUTONOMOUS;
+use symbio_plugin_api::PRINCIPAL_USER;
 
 /// 事实源里先放一格：触发是"从当时的状态出发"的，必须先有可指的锚。
 fn seed_root(store: &EventStore) -> u64 {

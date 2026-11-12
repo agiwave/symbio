@@ -14,7 +14,7 @@ use symbio_sdk::chat::session_chat;
 fn principal_for(role: cm::NodeRole) -> symbio_kernel::chat::principal::Principal {
     use symbio_kernel::chat::principal::Principal;
     match role {
-        cm::NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
+        cm::NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
         cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         cm::NodeRole::System => Principal::from_legacy("system/local"),

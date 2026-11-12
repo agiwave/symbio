@@ -13,8 +13,9 @@ use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::store::Store;
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 use symbio_plugin_api::FactDraft;
+use symbio_plugin_api::Principal;
 use symbio_sdk::plugin::drive_entry::{DriveEntry, DriveTarget};
-use symbio_sdk::plugin::fact_source::{FactSource, FactSourceOpener, Principal};
+use symbio_sdk::plugin::fact_source::{FactSource, FactSourceOpener};
 
 use super::layout::SessionParams;
 use super::wal::WalStore;
@@ -50,7 +51,7 @@ pub(crate) struct SessionFactSource {
     ///
     /// 不放在 `params` 里：它不是 metadata 的静态选项，而是收集期才得到的运行期
     /// 事实；打开那一刻还没人发布。
-    agent_scope: Arc<RwLock<Option<symbio_sdk::agent::AgentScope>>>,
+    agent_scope: Arc<RwLock<Option<symbio_plugin_api::AgentScope>>>,
     /// 本轮入站来源主体（D-067）：由开轮写方从收件箱条目的 `params` 发布，`append`
     /// 时随驱动目标带进本轮 ctx。`None` = 本机用户发起（工具侧回落会话身份）。
     source_principal: Arc<RwLock<Option<String>>>,
@@ -83,7 +84,7 @@ impl SessionFactSource {
         workdir: Option<String>,
         agent_id: Option<String>,
         params: SessionParams,
-        agent_scope: Arc<RwLock<Option<symbio_sdk::agent::AgentScope>>>,
+        agent_scope: Arc<RwLock<Option<symbio_plugin_api::AgentScope>>>,
         source_principal: Arc<RwLock<Option<String>>>,
         abort_signal: Arc<RwLock<Option<ExecAbortSignal>>>,
         drive: Option<Arc<dyn DriveEntry>>,
@@ -190,7 +191,7 @@ impl FactSource for SessionFactSource {
         // 时刻属于信封，落格时由事实源兜底；这里先写同一时刻，落格后的投影就能用
         // 手上这一份（含 `event_id`，`seq` 在 append 后补），不必回读全史——
         // `Store::range` 要拼接归档段，长会话下每次都是全量克隆。
-        event.ts = symbio_sdk::clock::clock_now_ms();
+        event.ts = symbio_plugin_api::clock_now_ms();
         let watched = live::watches(&event);
         // 只读事实源没有出口，落地即止；不需要投影时也不复制载荷。
         let replay = watched && self.drive.is_some();

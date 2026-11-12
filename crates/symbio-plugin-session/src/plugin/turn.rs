@@ -23,7 +23,8 @@ use symbio_plugin_api::debt::{session_config_id, session_recall_id};
 use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE};
 use symbio_plugin_api::retrieval::{retrieve_all, RetrievalRequest};
 use symbio_plugin_api::FactDraft;
-use symbio_sdk::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
+use symbio_plugin_api::PRINCIPAL_USER;
+use symbio_sdk::authz::PRINCIPAL_MAIN;
 use symbio_sdk::plugin::drive_entry::DriveEntry;
 use symbio_sdk::plugin::fact_source::FactSource;
 use symbio_sdk::turn::facts::FleetSnapshot;
@@ -180,7 +181,7 @@ impl SessionPlugin {
         // 不能当作「没有选智能体」的宿主态放行——那正是 t84 的漏过窗口。
         let agent_perms = crate::capabilities::require_agent_scope(
             agent_scope.as_deref(),
-            symbio_sdk::agent::agent_perms_of(ctx.as_ref()),
+            symbio_plugin_api::agent_perms_of(ctx.as_ref()),
         )?;
         // 作用域要**随轮进执行 ctx**（D-153）：收集器把它挂在**本轮** ctx 上，而工具
         // 执行跑在驱动新建的 ctx 里。由事实源随驱动目标带过去（`set_agent_scope`），
@@ -250,7 +251,7 @@ impl SessionPlugin {
         //
         // 能力视图只在本轮**装配**（系统提示词 / 工具表 / 分类开关）里读；收尾面
         // 只投影终答，不再补写它——`session.answer` 行在驱动内落格。
-        let system_prompt = symbio_sdk::capability::capability_prompts(&*manager)
+        let system_prompt = symbio_plugin_api::capability_prompts(&*manager)
             .await
             .into_iter()
             .map(|(_, prompt)| prompt)

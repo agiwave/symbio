@@ -70,9 +70,9 @@ pub use context::{
     RecallLine, SectionFit,
 };
 pub use declarations::{declared_event_cell, vocab};
-// `sealed_declarations` 的唯一插件消费方是控制面（loop 驱动器取冻结表；session 按其
-// sdk 限期豁免直取本体）——loop 没有 sdk 直连通道（E-009 只另许 kernel），门面是
-// loop 的唯一合法取径（D-443）。
+// `sealed_declarations` 的插件消费方全是控制面（loop 驱动器取冻结表；session 经
+// 2026-11-12 的取字同源批改走本门面）——loop 没有 sdk 直连通道（E-009 只另许 kernel），
+// 门面是 loop 的唯一合法取径（D-443）。
 pub use symbio_sdk::declarations::sealed_declarations;
 // 驱动入口模块整块归 sdk（`D-413`），门面只留扩展层插件真正要的一条：`home` 的装配根
 // 登记。驱动句柄与解析口（`DriveEntry` / `DriveTarget` / `declared_drive_binding`）只有

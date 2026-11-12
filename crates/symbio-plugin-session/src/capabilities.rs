@@ -43,11 +43,12 @@
 use std::sync::Arc;
 use symbio_kernel::capability::Registry;
 use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_plugin_api::AgentScope;
+use symbio_plugin_api::OPTION_VISITOR;
+use symbio_plugin_api::{AGENT_ID, PATH};
+use symbio_plugin_api::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
 use symbio_providers::new_registry;
-use symbio_sdk::agent::AgentScope;
-use symbio_sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS, OPTION_VISITOR};
-use symbio_sdk::keys::{AGENT_ID, PATH};
-use symbio_sdk::plugin::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
+use symbio_sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS};
 
 /// 向所有插件广播"贡献工具"，返回装配好的能力管理器。
 ///
@@ -86,7 +87,7 @@ pub async fn collect_capabilities(
         traverse_ctx.set(AGENT_ID, scope.to_string());
     }
     traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-    traverse_ctx.set(symbio_sdk::capability::CAPABILITY_VISITOR, manager.clone());
+    traverse_ctx.set(symbio_plugin_api::CAPABILITY_VISITOR, manager.clone());
     // 端口收集容器（D-468）：本次装配新建，插件在 traverse 里把绑定写进它。
     // 判重就在写入点上：同名再登记当场把该键转成不可执行并落错误桶，
     // 不需要「收集完再回表分组」的第二趟。
@@ -118,8 +119,8 @@ pub async fn collect_capabilities(
     }
     // 权限作用域同理（同一个 Arc，不复制内容）：没有发布 = 本会话没选中 Agent，
     // 工具侧按宿主态处理。
-    if let Some(slot) = traverse_ctx.get(symbio_sdk::agent::AGENT_PERMS) {
-        ctx.set(symbio_sdk::agent::AGENT_PERMS, slot);
+    if let Some(slot) = traverse_ctx.get(symbio_plugin_api::AGENT_PERMS) {
+        ctx.set(symbio_plugin_api::AGENT_PERMS, slot);
     }
     // 端口绑定同理（同一个 `Arc`，不复制内容）：开轮装配要读「有效绑定」折工具清单，
     // 而容器只写在子 ctx 上。

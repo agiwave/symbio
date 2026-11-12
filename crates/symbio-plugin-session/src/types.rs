@@ -153,7 +153,7 @@ pub struct Session {
 
 impl Session {
     pub fn new(id: impl Into<String>) -> Self {
-        let now = symbio_sdk::clock::clock_now_ms();
+        let now = symbio_plugin_api::clock_now_ms();
         Self {
             id: id.into(),
             messages: Vec::new(),

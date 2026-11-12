@@ -18,9 +18,9 @@ use symbio_kernel::vdfs::{
 };
 use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_USER_ANSWER};
 use symbio_plugin_api::FactDraft;
-use symbio_sdk::keys::SESSION_ID;
+use symbio_plugin_api::SESSION_ID;
+use symbio_plugin_api::{vdfs_from_plugin_error, vdfs_host_ctx};
 use symbio_sdk::plugin::fact_source::FACT_SOURCE;
-use symbio_sdk::vdfs::host::{vdfs_from_plugin_error, vdfs_host_ctx};
 
 impl SessionPlugin {
     /// 转写区段（`<id>/message[/mid]`）：列表与单条消息。
@@ -238,7 +238,7 @@ impl SessionPlugin {
                         // 新支的轮根 = 新一条用户消息的节点 id（`retry_branch` 已铸好，
                         // 并把它换到返回节点上）。入队用这个 id：地址末段即身份。
                         let new_id = message.id.clone();
-                        let workdir = host.get(symbio_sdk::keys::WORKDIR);
+                        let workdir = host.get(symbio_plugin_api::WORKDIR);
                         let source_principal = host
                             .get(symbio_sdk::keys::SOURCE_PRINCIPAL)
                             .filter(|s| !s.trim().is_empty());
@@ -407,12 +407,12 @@ impl SessionPlugin {
                                 "call_id": wire_id,
                                 "answer": answer,
                                 "mode": mode,
-                                "by": symbio_sdk::authz::PRINCIPAL_USER,
+                                "by": symbio_plugin_api::PRINCIPAL_USER,
                             }),
                             produced_by: Some(anchor),
                         };
                         source
-                            .append(symbio_sdk::authz::PRINCIPAL_USER.to_string(), draft)
+                            .append(symbio_plugin_api::PRINCIPAL_USER.to_string(), draft)
                             .map_err(|e| {
                                 VdfsError::internal(format!("user.answer 落格失败：{e}"))
                             })?;

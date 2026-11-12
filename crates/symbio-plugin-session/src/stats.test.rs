@@ -984,7 +984,7 @@ fn declaring_the_owner_reads_everything() {
     let as_owner = read_path(
         "s1",
         &wal,
-        Some(symbio_sdk::authz::PRINCIPAL_USER),
+        Some(symbio_plugin_api::PRINCIPAL_USER),
         symbio_sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
@@ -1151,7 +1151,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     let as_owner = read_path(
         "s1",
         &wal,
-        Some(symbio_sdk::authz::PRINCIPAL_USER),
+        Some(symbio_plugin_api::PRINCIPAL_USER),
         session_principal,
         &root,
     )
@@ -1209,7 +1209,7 @@ fn reputation_column_is_absent_when_no_owner_registers_it() {
         COMMITMENT_VOCAB,
         "c-rep",
         symbio_sdk::authz::PRINCIPAL_MAIN,
-        symbio_sdk::authz::PRINCIPAL_USER,
+        symbio_plugin_api::PRINCIPAL_USER,
         "把这段复查看完",
         Ok(()),
         user_seq,

@@ -29,7 +29,7 @@ use std::sync::Arc;
 use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::chat::chat_node::{ChatNode, NodeRole};
 use symbio_kernel::plugin::PluginError;
-use symbio_sdk::clock::clock_now_ms;
+use symbio_plugin_api::clock_now_ms;
 use tokio::sync::RwLock;
 
 mod read;
@@ -94,7 +94,7 @@ pub(super) async fn delegating_principal_in(
     let parent_id = session.parent_session_id()?;
     let parent = store.load_session(parent_id).await.ok()?;
     let agent = parent.metadata.get("agent_id").and_then(|v| v.as_str());
-    Some(symbio_sdk::authz::principal_of(agent))
+    Some(symbio_plugin_api::principal_of(agent))
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ use symbio_kernel::vdfs::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
     VdfsNode, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT,
 };
-use symbio_sdk::vdfs::host::vdfs_from_plugin_error;
+use symbio_plugin_api::vdfs_from_plugin_error;
 
 impl SessionPlugin {
     /// 挂载根：会话清单 / 根节点 / 新建（名字由 provider 生成）。

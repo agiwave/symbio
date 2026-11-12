@@ -202,7 +202,7 @@ fn park(store_dir: &Path, change: &ParkedChange) -> Result<(), String> {
     let serial = PARK_SERIAL.fetch_add(1, Ordering::Relaxed) % 1_000_000;
     let stem = format!(
         "{:013}-{:07}-{serial:06}",
-        symbio_sdk::clock::clock_now_ms(),
+        symbio_plugin_api::clock_now_ms(),
         std::process::id()
     );
     let visible = dir.join(format!("{stem}.{PARKED_SUFFIX}"));
@@ -516,8 +516,8 @@ fn append(
 /// 取不到时回落到 `user` + `ts = 0`（旧行为）。回落是为了老写方不被这次修正打懵，
 /// 但它是**兜底不是默认**：有 principal / role 可判时绝不落到上面。
 fn actor_and_ts(payload: &Value) -> (String, i64) {
+    use symbio_plugin_api::PRINCIPAL_USER;
     use symbio_sdk::authz::PRINCIPAL_MAIN;
-    use symbio_sdk::authz::PRINCIPAL_USER;
 
     let msg = payload.get("message").cloned().or_else(|| {
         payload
@@ -560,7 +560,7 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
         .get("timestamp")
         .and_then(Value::as_i64)
         .filter(|t| *t > 0) // 上游把「没填」写成 0，这里一并兜住
-        .unwrap_or_else(symbio_sdk::clock::clock_now_ms);
+        .unwrap_or_else(symbio_plugin_api::clock_now_ms);
     (actor, ts)
 }
 

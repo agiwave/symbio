@@ -11,7 +11,7 @@ use super::super::plugin::SessionPlugin;
 use std::sync::Arc;
 use symbio_kernel::capability::CapabilityRiskLevel;
 use symbio_kernel::plugin::{PluginError, PluginInvokeRequest, PluginSimpleRequest};
-use symbio_sdk::plugin::PluginDir;
+use symbio_plugin_api::PluginDir;
 
 /// 本用例独占的插件目录（`test_dir()` 是共享临时目录，多个写盘用例会互相覆盖）。
 fn scratch_dir(tag: &str) -> PluginDir {

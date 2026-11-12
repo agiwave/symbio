@@ -10,9 +10,9 @@ use symbio_kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
     VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR,
 };
-use symbio_sdk::keys::SESSION_ID;
+use symbio_plugin_api::vdfs_host_ctx;
+use symbio_plugin_api::SESSION_ID;
 use symbio_sdk::plugin::fact_source::FACT_SOURCE;
-use symbio_sdk::vdfs::host::vdfs_host_ctx;
 
 impl SessionPlugin {
     /// 收件箱（`<id>/inbox[/iid]`）：**待消费**的用户消息。
@@ -134,7 +134,7 @@ impl SessionPlugin {
                         // 会话那一刻的常态。
                         let workdir = vdfs_host_ctx(ctx)
                             .ok()
-                            .and_then(|h| h.get(symbio_sdk::keys::WORKDIR));
+                            .and_then(|h| h.get(symbio_plugin_api::WORKDIR));
                         // 来源主体（D-067）：同取**请求上下文**（线上入口 =
                         // `metadata.source_principal`）。随条目寄存进 `params`，消费时经
                         // `run_inbox_turn` 挂回执行 ctx——「这条消息是谁发的」是**数据**，

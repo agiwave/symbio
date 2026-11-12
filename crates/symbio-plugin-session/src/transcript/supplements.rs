@@ -68,7 +68,7 @@ fn merge_many(items: &[InboxItem]) -> cm::ChatNode {
         id: items[0].id.clone(),
         parent_id: None,
         principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
-            symbio_sdk::authz::PRINCIPAL_USER,
+            symbio_plugin_api::PRINCIPAL_USER,
         )),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(merge_content(items)),

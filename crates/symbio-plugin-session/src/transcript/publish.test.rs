@@ -28,7 +28,7 @@ fn attributed_fills_by_role_and_never_overwrites() {
     // 人说的话不随会话变。
     assert_eq!(
         of(base(Some(cm::NodeRole::User))),
-        Some(symbio_sdk::authz::PRINCIPAL_USER.to_string())
+        Some(symbio_plugin_api::PRINCIPAL_USER.to_string())
     );
     // 助手正文、工具结果、压缩记录、系统说明都是本会话主体说的。
     assert_eq!(
@@ -51,6 +51,6 @@ fn attributed_fills_by_role_and_never_overwrites() {
     user.principal = None;
     assert_eq!(
         attributed(user, "session/reviewer").principal.map(|p| p.id),
-        Some(symbio_sdk::authz::PRINCIPAL_USER.to_string())
+        Some(symbio_plugin_api::PRINCIPAL_USER.to_string())
     );
 }

@@ -456,7 +456,7 @@ impl SessionPlugin {
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
         }) {
-            Some(agent) => symbio_sdk::authz::principal_of(Some(&agent)),
+            Some(agent) => symbio_plugin_api::principal_of(Some(&agent)),
             None => symbio_sdk::authz::request_principal(ctx.as_ref()),
         };
         // 这两个数是能力方贡献的（D-427）：技能编译开关归 `skill`、就绪集容量归

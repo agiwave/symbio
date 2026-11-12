@@ -19,7 +19,7 @@ use tokio::sync::RwLock;
 fn principal_for(role: NodeRole) -> symbio_kernel::chat::principal::Principal {
     use symbio_kernel::chat::principal::Principal;
     match role {
-        NodeRole::User => Principal::from_legacy(symbio_sdk::authz::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
         NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         NodeRole::System => Principal::from_legacy("system/local"),

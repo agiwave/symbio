@@ -16,7 +16,7 @@ fn item(id: &str, text: &str) -> InboxItem {
         message: cm::ChatNode {
             id: id.to_string(),
             principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
-                symbio_sdk::authz::PRINCIPAL_USER,
+                symbio_plugin_api::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(text.to_string())),

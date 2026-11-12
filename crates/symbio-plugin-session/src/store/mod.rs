@@ -104,7 +104,7 @@ pub struct SessionStore {
     /// 键的**存在**不代表已发布（值为 `None` = 本会话没选中 Agent ⇒ 宿主态）；
     /// 只有 agent 插件能把 `agent_id` 解析成作用域，本模块不重读 manifest。
     agent_scopes: std::sync::Mutex<
-        HashMap<String, Arc<std::sync::RwLock<Option<symbio_sdk::agent::AgentScope>>>>,
+        HashMap<String, Arc<std::sync::RwLock<Option<symbio_plugin_api::AgentScope>>>>,
     >,
     /// 每会话的**入站来源主体**槽（D-067）：开轮写方从收件箱条目的 `params` 发布，
     /// 事实源在 `append` 时取走并随驱动目标交给驱动（工具侧据此填 `EffectEnv.source`）。
@@ -131,7 +131,7 @@ impl SessionStore {
     pub(crate) fn agent_scope_cell(
         &self,
         session_id: &str,
-    ) -> Arc<std::sync::RwLock<Option<symbio_sdk::agent::AgentScope>>> {
+    ) -> Arc<std::sync::RwLock<Option<symbio_plugin_api::AgentScope>>> {
         let mut map = self
             .agent_scopes
             .lock()
@@ -145,7 +145,7 @@ impl SessionStore {
     pub(crate) fn set_agent_scope(
         &self,
         session_id: &str,
-        scope: Option<symbio_sdk::agent::AgentScope>,
+        scope: Option<symbio_plugin_api::AgentScope>,
     ) {
         if let Ok(mut cell) = self.agent_scope_cell(session_id).write() {
             *cell = scope;

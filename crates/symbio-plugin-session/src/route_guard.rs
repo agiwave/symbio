@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use symbio_kernel::plugin::{PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
-use symbio_sdk::keys::SESSION_ID;
+use symbio_plugin_api::SESSION_ID;
 
 use crate::stats_reading::ViewerRequest;
 

@@ -120,8 +120,17 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
  * 「没有门面落点」而不搬；D-276 之后门面补上了 `pub use symbio_sdk::actors::commitment_events`，
  * 生产写侧 `agent/host/behavior.rs` 正是走它。会话的承诺列夹具模拟的是同一个成格口，
  * 取字随之同源，账上这一条零命中即摘。
+ *
+ * 2026-11-12（同批第二批）：81 → **51**，**门面已导出的 30 条一次退场**。账上还有一批
+ * 符号门面（`symbio-plugin-api`）早就 `pub use` 了——会话却仍写 `symbio_sdk::` 路径直取
+ * 本体。这批里没有一条是「控制面专属读口」（D-443 第 3 条不上门面的那批：`FactSource`
+ * 登记面 / `PRINCIPAL_MAIN` / `session_chat` / `rebuild` / `SKILL_TAG` /
+ * `commitment_records` / `VdfsChangeSubscriptions` / `DriveEntry` / 词汇结构体等全数
+ * **留在账上**）——退场的 30 条个个在门面上有扩展层消费方，会话改走
+ * `symbio_plugin_api::` 与 `commitment_events` 同一条走法：取字与生产写侧同源，账上
+ * 零命中即摘。批量换径的落点（94 处单路径 + 7 组花括号组）见该批提交。
  */
-const SYMBOL_BASELINE = 81
+const SYMBOL_BASELINE = 51
 
 const errors = []
 const notes = []

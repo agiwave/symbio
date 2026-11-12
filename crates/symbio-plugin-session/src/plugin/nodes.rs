@@ -339,7 +339,7 @@ fn cursor_id(before: &str) -> Option<&str> {
 // 转写路径段 [`SEG_MESSAGES`] 与节点逆投影 [`message_of_node`] 已上移到
 // `symbio_kernel::chat::chat_node`——它们描述的是**跨插件契约**
 // （agent 的子会话转播桥也要用），不是本插件的私事。本模块继续按原名使用。
-use symbio_sdk::chat::chat_node::SEG_MESSAGES;
+use symbio_plugin_api::SEG_MESSAGES;
 
 /// 转写列表的**展示名**（`title`）。**只影响 UI**，不参与寻址。
 pub(crate) const TITLE_MESSAGES: &str = "消息";
@@ -411,12 +411,12 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     if !body.starts_with('{') {
         return Ok(cm::ChatNode {
             principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
-                symbio_sdk::authz::PRINCIPAL_USER,
+                symbio_plugin_api::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(raw.to_string())),
             status: Some(cm::NodeStatus::Completed),
-            timestamp: Some(symbio_sdk::clock::clock_now_ms()),
+            timestamp: Some(symbio_plugin_api::clock_now_ms()),
             ..Default::default()
         });
     }
@@ -442,7 +442,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     // `principal` 或存量 `role` 的，按它自己声明的形状走。
     if message.principal.is_none() && message.legacy_role().is_none() {
         message.principal = Some(symbio_kernel::chat::principal::Principal::from_legacy(
-            symbio_sdk::authz::PRINCIPAL_USER,
+            symbio_plugin_api::PRINCIPAL_USER,
         ));
     }
     message.msg_type.get_or_insert(cm::NodeKind::Body);

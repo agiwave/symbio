@@ -36,10 +36,10 @@ use super::types::Session;
 use serde_json::{json, Value};
 use symbio_kernel::chat::chat_node as cm;
 use symbio_kernel::plugin::PluginError;
-use symbio_sdk::clock::clock_now_ms;
+use symbio_plugin_api::clock_now_ms;
 
 use symbio_kernel::vdfs::{VdfsContent, VdfsError, VdfsResponse, VdfsResult, VdfsWriteResponse};
-use symbio_sdk::vdfs::host::vdfs_from_plugin_error;
+use symbio_plugin_api::vdfs_from_plugin_error;
 impl SessionPlugin {
     // ==================== 会话本体：新建 / 覆盖 ====================
 
@@ -212,7 +212,7 @@ impl SessionPlugin {
     pub(crate) async fn new_session_id(&self) -> String {
         let store = self.get_store().await.ok();
         for _ in 0..8 {
-            let id = symbio_sdk::llm::round::llm_short_id();
+            let id = symbio_plugin_api::llm_short_id();
             let taken = match &store {
                 Some(s) => s.session_dir(&id).is_some(),
                 None => false,
@@ -387,7 +387,7 @@ impl SessionPlugin {
         if !deleted_ids.is_empty() {
             let frames: Vec<cm::ChatNode> = deleted_ids
                 .iter()
-                .map(|id| symbio_sdk::llm::round::llm_removed_frame(id))
+                .map(|id| symbio_plugin_api::llm_removed_frame(id))
                 .collect();
             self.active_mgr
                 .transcript_apply_all(session_id, frames)
@@ -546,7 +546,7 @@ impl SessionPlugin {
         // 两条消息一个名字——与 `new_session_id` 一样先查再落。
         let mut new_id = String::new();
         for _ in 0..8 {
-            let candidate = symbio_sdk::llm::round::llm_short_id();
+            let candidate = symbio_plugin_api::llm_short_id();
             if !messages.iter().any(|m| m.id == candidate) {
                 new_id = candidate;
                 break;
@@ -605,7 +605,7 @@ impl SessionPlugin {
     /// 登记以**会话 id** 为持有人：同一会话换主体只替换这一条（旧行先撤），
     /// 删除会话时整册回收（[`Self::delete_session_internal`]）。
     async fn bind_session_identity(&self, session: &Session) {
-        let principal = symbio_sdk::authz::principal_of(
+        let principal = symbio_plugin_api::principal_of(
             session.metadata.get("agent_id").and_then(Value::as_str),
         );
         let Ok(store) = self.get_store().await else {

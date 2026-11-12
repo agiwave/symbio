@@ -12,11 +12,11 @@ use super::*;
 // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
 use crate::test_dir;
 use symbio_kernel::capability::Registry;
+use symbio_plugin_api::PATH;
+use symbio_plugin_api::TRAVERSE_AVAILABLE_TOOLS;
 use symbio_plugin_api::VDFS_PARENT_ADDR;
+use symbio_plugin_api::{capability_prompts, CAPABILITY_VISITOR};
 use symbio_providers::DefaultToolVisitor;
-use symbio_sdk::capability::{capability_prompts, CAPABILITY_VISITOR};
-use symbio_sdk::keys::PATH;
-use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
 
 /// 会话存储根**只**来自构造时父插件经 `PLUGIN_DIR` 告知的插件目录——
 /// **不读全局 homedir**（那在子智能体里会指错作用域）。

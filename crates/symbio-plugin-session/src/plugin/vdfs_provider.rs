@@ -20,7 +20,7 @@ use symbio_kernel::vdfs::{
     VdfsChangeSink, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse,
     VdfsResult,
 };
-use symbio_sdk::vdfs::host::vdfs_from_plugin_error;
+use symbio_plugin_api::vdfs_from_plugin_error;
 
 #[async_trait]
 impl VdfsProvider for SessionPlugin {

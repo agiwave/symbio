@@ -612,7 +612,7 @@ impl Store for WalStore {
         // 与 `assign_seq` 同点收口（且在序列化**之前**——盘上落的是兜底后的形态）：
         // 没带时刻的事件以落格时刻为准，事实源里不出现 `ts = 0` 的事件
         // （`d781a6c7` 号会话 548 个事件全 ts=0 的教训，见 trait 方法文档）。
-        event.fallback_timestamp(symbio_sdk::clock::clock_now_ms());
+        event.fallback_timestamp(symbio_plugin_api::clock_now_ms());
         let line = serde_json::to_vec(&event).expect("事件序列化失败（serde 不可能败于自有类型）");
         let mut file = std::fs::OpenOptions::new()
             .create(true)

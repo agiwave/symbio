@@ -106,7 +106,7 @@ symbio_plugin_api::submit_declarations!(
 
 #[test]
 fn owned_events_resolve_through_the_process_assembly() {
-    let frozen = symbio_sdk::declarations::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let frozen = symbio_plugin_api::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert_eq!(
         frozen.event_cell(EVENT_SYSTEM_TRIGGERED),
         Some((

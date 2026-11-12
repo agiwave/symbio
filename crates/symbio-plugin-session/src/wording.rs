@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use symbio_kernel::event::Event;
 use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
+use symbio_plugin_api::SESSION_ID;
 use symbio_plugin_api::{
     ComposeRequest, PluginInvokeRequest, PluginInvokeRequestExt, RunSnapshot, Verdict,
     WordingReply, PATH,
 };
-use symbio_sdk::keys::SESSION_ID;
 
 use crate::convergence::dialog_context;
 

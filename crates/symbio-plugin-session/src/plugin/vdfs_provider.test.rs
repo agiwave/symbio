@@ -20,7 +20,7 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     let plugin = SessionPlugin::new(
         None,
         SessionConfig::default(),
-        symbio_sdk::plugin::PluginDir::at(dir.path(), "session"),
+        symbio_plugin_api::PluginDir::at(dir.path(), "session"),
     );
     (dir, plugin)
 }
@@ -429,7 +429,7 @@ async fn creating_a_session_registers_its_principal_row_and_deleting_it_reclaims
     .into_write()
     .unwrap();
 
-    let principal = symbio_sdk::authz::principal_of(Some("t182-agent"));
+    let principal = symbio_plugin_api::principal_of(Some("t182-agent"));
     assert!(
         symbio_plugin_api::production_matrix().can_reply(&principal),
         "创建即登记：未部署身份拿到会话面缺省行"
@@ -472,8 +472,8 @@ async fn rewriting_the_agent_identity_replaces_the_session_binding() {
     .into_write()
     .unwrap();
 
-    let old = symbio_sdk::authz::principal_of(Some("t182-rewrite-old"));
-    let new = symbio_sdk::authz::principal_of(Some("t182-rewrite-new"));
+    let old = symbio_plugin_api::principal_of(Some("t182-rewrite-old"));
+    let new = symbio_plugin_api::principal_of(Some("t182-rewrite-new"));
     let matrix = symbio_plugin_api::production_matrix();
     assert!(matrix.grants_of(&old).is_empty(), "旧身份的登记随改写撤回");
     assert!(matrix.can_reply(&new), "新身份即时登记，不必等下一轮");
@@ -511,7 +511,7 @@ async fn a_delegated_child_is_registered_at_creation_and_reclaimed_with_its_pare
     .await
     .unwrap();
 
-    let child_principal = symbio_sdk::authz::principal_of(Some("t182-child-agent"));
+    let child_principal = symbio_plugin_api::principal_of(Some("t182-child-agent"));
     let matrix = symbio_plugin_api::production_matrix();
     assert!(
         !matrix.can_reply(&child_principal),
@@ -900,7 +900,7 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
         .map(|(i, t)| cm::ChatNode {
             id: format!("m{i}"),
             principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
-                symbio_sdk::authz::PRINCIPAL_USER,
+                symbio_plugin_api::PRINCIPAL_USER,
             )),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text((*t).to_string())),
@@ -935,7 +935,7 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
                 symbio_kernel::event::Entity::Message,
                 // `turn = 0`：种子是裸数据，不属于任何一轮（与 message_events::append 同约定）。
                 symbio_kernel::event::Verb::Opened,
-                symbio_sdk::authz::PRINCIPAL_USER,
+                symbio_plugin_api::PRINCIPAL_USER,
             )
             .with_payload(serde_json::json!({ "messages": payload })),
         )
@@ -1003,7 +1003,7 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
             EVENT_TURN_BRANCH,
             Entity::Scope,
             Verb::Asserted,
-            symbio_sdk::authz::PRINCIPAL_USER,
+            symbio_plugin_api::PRINCIPAL_USER,
         )
         .with_payload(serde_json::json!({ "of": of, "into": into }))
         .with_produced_by(anchor.value()),

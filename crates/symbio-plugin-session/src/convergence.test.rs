@@ -9,7 +9,7 @@ use super::*;
 use crate::config::SessionConfig;
 use crate::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED};
 use crate::types::Session;
-use symbio_sdk::plugin::PluginDir;
+use symbio_plugin_api::PluginDir;
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 /// 造一条已入库的事件（只给 `waits_for_user` 用：kind / payload / seq）。
 fn at(seq: u64, kind: &str, payload: serde_json::Value) -> Event {

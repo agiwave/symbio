@@ -158,7 +158,10 @@ export const WHITELIST_BASELINE = 0
 // 138 → 131（`D-443`）：按「谁在用」压缩——`fact_source` 登记面五条的唯一插件消费方
 // 是控制面 session（owner），按 D-253 / D-428 分档走 session 的 sdk 限期豁免直取本体，
 // 不占扩展层门面计件；测试面消费不再续命（通道归 `symbio-testkit`）。
-export const SDK_BASELINE = 133
+// 133 → 132（2026-11-12 同步）：`D-469` 把协议命名的规则收进模型插件时，sdk 的副本与
+// 门面的转出行同批删除，实测臂已降到 132 而基线没跟（守卫的 △ 提示）；基线跟着降，
+// 账本只许降（`D-269` 同一把尺子）。
+export const SDK_BASELINE = 132
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。

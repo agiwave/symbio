@@ -121,10 +121,11 @@ async fn option_definition_without_container_degrades_to_empty() {
 async fn session_contributes_option_fields_to_the_visitor() {
     use symbio_kernel::capability::Registry;
     use symbio_kernel::plugin::PluginSimpleRequest;
+    use symbio_plugin_api::OPTION_VISITOR;
+    use symbio_plugin_api::PATH;
+    use symbio_plugin_api::TRAVERSE_AVAILABLE_OPTIONS;
     use symbio_providers::DefaultToolVisitor;
-    use symbio_sdk::capability::{capability_option_fields, OPTION_VISITOR};
-    use symbio_sdk::keys::PATH;
-    use symbio_sdk::plugin::TRAVERSE_AVAILABLE_OPTIONS;
+    use symbio_sdk::capability::capability_option_fields;
 
     let p = Arc::new(plugin());
     let ctx = Arc::new(PluginSimpleRequest::new(None, None)).fork();

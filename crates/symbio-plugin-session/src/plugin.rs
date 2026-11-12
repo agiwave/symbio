@@ -42,11 +42,11 @@ use symbio_kernel::present::{DetailDefinition, DetailField, DetailOption, Detail
 use symbio_kernel::vdfs::{VdfsAccess, VdfsChange};
 use symbio_kernel::vdfs::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use symbio_plugin_api::PLUGIN_ID_SESSION;
+use symbio_plugin_api::SESSION_ID;
+use symbio_plugin_api::{plugin_dir_from_ctx, PluginConfigFile, PluginDir, PLUGIN_FILE};
 use symbio_providers::MemoryFile;
 use symbio_sdk::chat::session_chat;
-use symbio_sdk::keys::SESSION_ID;
 use symbio_sdk::plugin::fact_source::{FactSource, FACT_SOURCE};
-use symbio_sdk::plugin::{plugin_dir_from_ctx, PluginConfigFile, PluginDir, PLUGIN_FILE};
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 use tokio::sync::{Mutex, OnceCell, RwLock};
 
@@ -403,8 +403,7 @@ impl SessionPlugin {
             return;
         }
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address =
-            symbio_sdk::vdfs::address::absolute_addr(ctx, &super::memory::memory_rel_path(&sid));
+        let address = symbio_plugin_api::absolute_addr(ctx, &super::memory::memory_rel_path(&sid));
         match store.segment(&super::memory::segment_spec(&address)) {
             Ok(Some(segment)) => {
                 visitor
@@ -440,7 +439,7 @@ impl Plugin for SessionPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let path = ctx.get(symbio_sdk::keys::PATH).unwrap_or_default();
+        let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         // 会话存储已迁移到 <本插件目录>/ 全局目录，session/* 系列接口
@@ -489,10 +488,10 @@ impl Plugin for SessionPlugin {
         // 选项收集：会话作为选项宿主贡献「自有选项」（工作目录 / 风险等级 /
         // 运行模式）。与其它插件同构——命中 available_options 时才注册，
         // 经统一的 OPTION_VISITOR 收集器汇流。
-        if ctx.get(symbio_sdk::keys::PATH).unwrap_or_default()
-            == symbio_sdk::plugin::TRAVERSE_AVAILABLE_OPTIONS
+        if ctx.get(symbio_plugin_api::PATH).unwrap_or_default()
+            == symbio_plugin_api::TRAVERSE_AVAILABLE_OPTIONS
         {
-            if let Some(visitor) = ctx.get(symbio_sdk::capability::OPTION_VISITOR) {
+            if let Some(visitor) = ctx.get(symbio_plugin_api::OPTION_VISITOR) {
                 for (order, field) in self.session_option_fields() {
                     visitor.put(CapabilityRow::option(order, field)).await;
                 }
@@ -502,7 +501,7 @@ impl Plugin for SessionPlugin {
         // 搬进 `crates/symbio-plugin-heartbeat`（[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），
         // 而它曾是 session 在 LLM 可见工具清单里唯一的一条。
         // VDFS 挂载点由容器从 `get_vfs_provider` 派生（目录名 = 实例名）。
-        if let Some(visitor) = ctx.get(symbio_sdk::capability::CAPABILITY_VISITOR) {
+        if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
             // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）与本会话无关：
             // 那是「智能体自身」与「工作区」两个作用域，归 memory 插件（谁能读写它，谁负责
             // 注入它）。本会话的 `MEMORY.md` 归本插件——各作用域各有一个所有者，
@@ -548,7 +547,7 @@ impl Plugin for SessionPlugin {
             }
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        symbio_sdk::capability::capability_announce_configurable(&ctx, &self.config_file).await;
+        symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
