@@ -8,84 +8,78 @@ use symbio_sdk::keys::{PATH, SESSION_ID};
 
 /// Hook 事件枚举，用于在关键业务节点触发外部通知或拦截
 ///
-/// 设计遵循行业最佳实践，参考了 LangChain、LlamaIndex 等主流框架的 hook 设计模式：
-/// - 采用生命周期事件模式（Pre/Post）
-/// - 支持同步拦截和异步通知
-/// - 提供详细的上下文信息供外部处理
+/// ## 哪些变体真的会响（`D-478`）
+///
+/// 14 个变体里**只有三个有产者**：`PreToolUse` / `PostToolUse`（工具端口执行体，调用前后）、
+/// `PreCompact`（压缩端口执行体，压缩前）。三者都是**动作的前后沿**——它们发生之前没有任何
+/// 格可以订阅。
+///
+/// 其余十一个**没有产者，且不补**：要通知的事情都已经是一条**事实**（逐个注明是哪条），
+/// 订阅方读事实（名字经 `shared_events` 投影成生成常量）。同一件事两条通道正是漂移的来源。
+/// 设计参考 LangChain / LlamaIndex 的生命周期模式（Pre/Post 成对、可拦截），但那里的事件
+/// 没有事实面。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", content = "data")]
 pub enum HookEvent {
-    /// 工具调用前事件 - 在执行工具调用前触发
-    /// 可用于权限检查、审计日志、调用拦截等场景
+    /// 工具调用前 - 可用于权限检查、审计日志、调用拦截
     PreToolUse {
         tool_name: String,
         tool_input: serde_json::Value,
     },
-    /// 工具调用成功后事件 - 在工具执行成功后触发
-    /// 可用于结果记录、数据处理、后续工作流触发等
+    /// 工具调用成功后 - 可用于结果记录、数据处理、后续工作流
     PostToolUse {
         tool_name: String,
         tool_input: serde_json::Value,
         tool_output: serde_json::Value,
     },
-    /// 工具调用失败事件 - 在工具执行失败时触发
-    /// 可用于错误处理、告警通知、降级策略等
+    /// 工具调用失败 - **无产者（`D-478`）**：失败是产物格的事实（`artifact.added` 带
+    /// `success = false` 与 `failure_kind`）。
     PostToolUseFailure {
         tool_name: String,
         tool_input: serde_json::Value,
         error: String,
     },
-    /// 通用通知事件 - 用于发送各类业务通知
-    /// notification_type 可区分通知类型（如 info/warning/error 等）
+    /// 通用通知 - **无产者（`D-478`）**：无业务语义；真通知该是自己的事实（带 owner 与格位），
+    /// 不是一条通用字符串通道。
     Notification {
         message: String,
         notification_type: String,
     },
-    /// 用户提示提交事件 - 用户提交新消息时触发
-    /// 可用于输入预处理、敏感词过滤、记录用户行为等
+    /// 用户提示提交 - **无产者（`D-478`）**：用户提交就是 `user.message`（开轮的溯源也指向它）。
     UserPromptSubmit { prompt: String },
-    /// 会话开始事件 - 新会话创建时触发
-    /// source 表示会话来源，model 表示使用的模型
+    /// 会话开始 - **无产者（`D-478`）**：由 `user.message` + `session.config`（本轮生效的
+    /// 提示词 / 工具表 / 设置）表达。
     SessionStart { source: String, model: String },
-    /// 会话结束事件 - 会话正常结束时触发
-    /// reason 说明结束原因（如用户主动结束、达到会话上限等）
+    /// 会话结束 - **无产者（`D-478`）**：结束是 `session.terminated`（`(Scope, Closed)`），
+    /// 收束另有 `session.settled`。
     SessionEnd { reason: String },
-    /// 对话停止事件 - 在 chat_loop 终止时触发（包括正常结束和异常中止）
-    ///
-    /// **触发场景**（参考 chat_loop.rs 中的调用点）：
-    /// 1. 初始检查失败（如缺少必要上下文）
-    /// 2. 检测到中止标志（用户主动取消）
-    /// 3. 自动压缩过程中发生错误
-    /// 4. 协议处理失败
-    /// 5. 没有工具调用的单轮对话正常结束
-    /// 6. 多轮工具调用完成后的最终结束
-    ///
-    /// last_message 表示最后一条有效消息内容，用于外部系统了解对话状态
+    /// 对话停止 - **无产者（`D-478`）**：一轮的停止由 `chat.assistant.final`（终答）与
+    /// `session.settled` 表达；「为什么停」在驱动的返回里，不是一条通用字符串。
     Stop { last_message: String },
-    /// 子代理启动事件 - 启动子代理任务时触发
-    /// 可用于追踪子任务状态、实体监控等
+    /// 子代理启动 - **无产者（`D-478`）**：委托是一次工具调用（`agent_run`），开合落在
+    /// `artifact.added`（带工具名、参数与结果）。
     SubagentStart { subagent_name: String, task: String },
-    /// 子代理停止事件 - 子代理任务完成时触发
-    /// result 包含子代理执行结果摘要
+    /// 子代理停止 - **无产者（`D-478`）**：同 `SubagentStart`（结果在 `tool = agent_run` 的
+    /// 产物格，含 `success` / `text`）。
     SubagentStop {
         subagent_name: String,
         task: String,
         result: String,
     },
-    /// 消息压缩前事件 - 在执行会话消息压缩前触发
-    /// 可用于备份原始消息、记录压缩前状态等
+    /// 消息压缩前 - 可用于备份原始消息、记录压缩前状态
     PreCompact,
-    /// 消息压缩后事件 - 在会话消息压缩完成后触发
-    /// 包含压缩前后的消息数量，便于评估压缩效果
+    /// 消息压缩后 - **无产者（`D-478`）**：压缩完成落 `session.consolidated`（`generation` /
+    /// `fidelity` / `sources`）。「压缩前后消息数」是**读数**不是事件载荷：它属上下文管线的
+    /// 统计，塞进钩子只会让订阅方按一个没有来源的数字评估压缩效果。
     PostCompact {
         original_message_count: usize,
         compacted_message_count: usize,
     },
-    /// 权限请求事件 - 需要用户授权时触发
-    /// 用于实现工具调用的人工确认机制
+    /// 权限请求 - **无产者（`D-478`）**：授权结论是事实——`authz.granted` / `authz.denied`
+    /// 带工具名与拒因；「请求」那一步由会话的答复路径承载。
     PermissionRequest { tool_name: String, reason: String },
-    /// 停止失败事件 - 尝试停止对话但失败时触发
-    /// 可用于错误告警、重试机制等
+    /// 停止失败 - **无产者（`D-478`）**：驱动卡住落 `driver.stalled`（`D-393` 的安全阀出口，
+    /// `Exhausted` / `Stalled` 共用一种形状）。
     StopFailure { error: String, error_type: String },
 }
 
@@ -141,10 +135,10 @@ pub const HOOK_UNAVAILABLE_MARKER: &str = "[hook-unavailable]";
 /// 报错）在函数内部就吞成 `HookOutput::default()`，因此调用点的 `let _ = fire_hook(...)`
 /// **丢的不是错误**（没有错误可丢），只是不需要那份输出。
 ///
-/// [D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6 上移宿主：session 在派发前
-/// 触发 `UserPromptSubmit`，loop 在轮内触发 `PreCompact`，工具端口执行体在调用前后
-/// 触发 `PreToolUse` / `PostToolUse`（DE-048 D-312）；各插件共用这一条路由助手
-/// （不是新机制）。
+/// 触发点只有三处（`D-478`）：工具端口执行体在调用前后触发 `PreToolUse` / `PostToolUse`
+///（DE-048 D-312），压缩端口执行体在压缩前触发 `PreCompact`。其余变体没有产者，
+/// 它们要通知的事情已经是事实——订阅方读事实，不走第二条通道。各插件共用这一条
+/// 路由助手（不是新机制）。
 pub async fn fire_hook(
     parent: &Option<Arc<dyn Plugin>>,
     event: HookEvent,
