@@ -1,0 +1,21 @@
+[package]
+name = "symbio-contract"
+version = "0.1.14"
+description = "Symbio contract layer: pure shapes shared by plugins and host (plugin ABI, zero runtime state)"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+# 依赖面即判据：**内核 + serde**。出现第二个运行时依赖（tokio / notify / inventory…）
+# 就说明实现面混进了契约层——契约层的全部价值是「它的依赖清单就是插件 ABI 的真实重量」，
+# 混进一行 IO 这句话就死了（DE-023 的 D-486）。
+[dependencies]
+symbio-kernel = { path = "../symbio-kernel" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

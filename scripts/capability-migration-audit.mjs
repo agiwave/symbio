@@ -117,10 +117,12 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
 const argv = process.argv.slice(2)
 
-/** 机制面：迁移批次只许在这里收窄、不许变宽的三棵树（`D-283`；补件才改它）。 */
+/** 机制面：迁移批次只许在这里收窄、不许变宽的树（`D-283`；补件才改它）。
+ *  契约树随 `D-486` 加入——新 crate 不是棘轮盲区。 */
 export const ARCH_TREES = [
   'crates/symbio-sdk',
   'crates/symbio-kernel',
+  'crates/symbio-contract',
   'crates/symbio-plugin-api',
 ]
 

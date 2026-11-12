@@ -50,7 +50,6 @@ pub mod clock;
 pub mod creator;
 pub mod debt_scope;
 pub mod declarations;
-pub mod dialog;
 pub mod embedding;
 pub mod event_bus;
 pub mod governance;

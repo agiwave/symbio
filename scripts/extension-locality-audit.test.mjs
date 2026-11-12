@@ -78,10 +78,12 @@ test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-0
   assert.equal(isMigrationBatch(null), false)
 })
 
-test('TREES：六棵是并集且含 plugin-api 与 host（D-372 的唯一口径）', () => {
+test('TREES：七棵是并集且含契约树、plugin-api 与 host（D-372 口径 + D-486）', () => {
+  // D-486：契约树加入活跃区（第七棵），仍是六棵判据 + 契约的并集口径。
   assert.deepEqual(TREES, [
     'crates/symbio-sdk',
     'crates/symbio-kernel',
+    'crates/symbio-contract',
     'crates/symbio-plugin-api',
     'crates/symbio-plugin-loop',
     'crates/symbio-plugin-session',

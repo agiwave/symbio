@@ -4198,6 +4198,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "symbio-contract"
+version = "0.1.14"
+dependencies = [
+ "serde",
+ "serde_json",
+ "symbio-kernel",
+]
+
+[[package]]
 name = "symbio-demo-probe"
 version = "0.1.0"
 dependencies = [
@@ -4276,6 +4285,7 @@ dependencies = [
  "inventory",
  "serde",
  "serde_json",
+ "symbio-contract",
  "symbio-deploy",
  "symbio-kernel",
  "symbio-sdk",

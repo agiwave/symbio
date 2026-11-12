@@ -21,8 +21,8 @@
 //! - [`reports`]：跨插件报表的登记面与读口（实现住 sdk，本 crate 只转出，D-416）
 //! - [`vocab`]：跨插件共享名的唯一住处（端口 / 行为 / 路径段 / 治理能力，D-364）
 //!
-//! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、机制入口与
-//! 装配常量，逐条转发、逐条可审。按**来源**分两臂（D-255 / D-258 / D-276）：
+//! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、契约形状、机制
+//! 入口与装配常量，逐条转发、逐条可审。按**来源**分臂（D-255 / D-258 / D-276 / D-486）：
 //!
 //! | 臂 | 来源 | 条数（唯一 owner：`scripts/plugin-surface-audit.mjs`，HS-002 / HS-006） | 性质 |
 //! |---|---|---|---|
@@ -129,6 +129,11 @@ pub use symbio_deploy::*;
 // `symbio-kernel` 的直接依赖只有 6 个，插件经它取语法不增加任何机制面。按来源分臂之后，
 // 「一条符号属于语法还是机制」在门面上直接可读，HS-002 的棘轮只压机制臂，目标才是可判的
 // 0（D-255）。
+pub use symbio_contract::dialog::{
+    ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
+    Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
+    REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
+};
 pub use symbio_kernel::capability::{
     family, CapabilityCategory, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel,
     CapabilityRow, Registry,
@@ -167,13 +172,8 @@ pub use symbio_kernel::vdfs::{
 pub use symbio_kernel::{
     ActorSpec, Entity, Event, EventDecl, FactRole, LatencyTier, Pattern, Scope, Verb,
 };
-pub use symbio_sdk::dialog::{
-    ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
-    Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
-    REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
-};
 // 一次往返的**产物**五个名字不转出（`D-439` 退回 model 插件）：跨侧共享的是事实键名。
-pub use symbio_sdk::llm::{PromptMessage, PromptToolCall};
+pub use symbio_contract::llm::{PromptMessage, PromptToolCall};
 
 // ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core，D-258） ----
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、

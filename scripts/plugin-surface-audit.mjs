@@ -161,7 +161,16 @@ export const WHITELIST_BASELINE = 0
 // 133 → 132（2026-11-12 同步）：`D-469` 把协议命名的规则收进模型插件时，sdk 的副本与
 // 门面的转出行同批删除，实测臂已降到 132 而基线没跟（守卫的 △ 提示）；基线跟着降，
 // 账本只许降（`D-269` 同一把尺子）。
-export const SDK_BASELINE = 132
+// 132 → 113（`D-486`）：契约臂成立，dialog 17 条 + llm 请求词汇 2 条改从
+// `symbio-contract` 转出（五层规划的第一批，逐域套规则 B 的结果见该条映射表），
+// SDK 臂余下的是服务面（规则 C），基线随实测下调，余量不留。
+export const SDK_BASELINE = 113
+
+/**
+ * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，
+ * 依赖只有 kernel + serde——这一臂涨 = 插件 ABI 变重，要与「插件真的要用」同批论证。
+ */
+export const CONTRACT_BASELINE = 19
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。
@@ -268,7 +277,7 @@ export function heavyArmViolations(toml) {
 const USE_STMT_RE = /pub use\s+([A-Za-z_][A-Za-z0-9_]*)(?:::[A-Za-z0-9_]+)*::(\{[^}]*\}|[A-Za-z0-9_]+|\*)\s*;/g
 
 /** 门面允许的三个来源：语法（kernel）/ 机制（sdk）/ 装配常量（deploy）。 */
-export const FACADE_ARMS = ['symbio_kernel', 'symbio_sdk', 'symbio_deploy']
+export const FACADE_ARMS = ['symbio_kernel', 'symbio_contract', 'symbio_sdk', 'symbio_deploy']
 
 /**
  * 已退役的旧 core crate 名——HS-005 要禁的就是它（Cargo `[dependencies]` 侧的连字符拼写）。
@@ -295,6 +304,8 @@ const GRAMMAR_SINGLE_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_]+)*::([A-Za-z0-
  */
 const SDK_RE = /pub use symbio_sdk(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
 const SDK_SINGLE_RE = /pub use symbio_sdk(?:::[A-Za-z0-9_]+)*::([A-Za-z0-9_]+);/g
+const CONTRACT_RE = /pub use symbio_contract(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
+const CONTRACT_SINGLE_RE = /pub use symbio_contract(?:::[A-Za-z0-9_]+)*::([A-Za-z0-9_]+);/g
 /**
  * 带改名的转发（`pub use symbio_sdk::text::tokenizer as text;`）。
  *
@@ -422,6 +433,17 @@ export function readGrammar(root) {
   for (const m of src.matchAll(GRAMMAR_RE)) out.push(...splitSymbols(m[1]))
   for (const m of src.matchAll(GRAMMAR_SINGLE_RE)) out.push(m[1])
   for (const m of src.matchAll(AS_ALIAS_RE)) if (m[1] === 'symbio_kernel') out.push(m[4])
+  return out.length ? out : null
+}
+
+/** 读出门面契约臂的符号清单（`symbio_contract` 各分块的并集，D-486）。 */
+export function readContractArm(root) {
+  const p = path.join(root, FACADE)
+  if (!fs.existsSync(p)) return null
+  const src = fs.readFileSync(p, 'utf8')
+  const out = []
+  for (const m of src.matchAll(CONTRACT_RE)) out.push(...splitSymbols(m[1]))
+  for (const m of src.matchAll(CONTRACT_SINGLE_RE)) out.push(m[1])
   return out.length ? out : null
 }
 
@@ -627,11 +649,19 @@ export function run(root) {
   const wl = arms.other
   const gram = readGrammar(root) ?? []
   const sdk = readSdkArm(root) ?? []
+  const contract = readContractArm(root) ?? []
   const n = wl.length
   if (n > WHITELIST_BASELINE) {
     errors.push(
       `门面机制臂 ${n} 条 > 基线 ${WHITELIST_BASELINE}——HS-002 只许降（D-253 / D-255）；` +
         '新增一条要把「谁消费、为什么非给插件不可」写成决策理由，并同步上调 `WHITELIST_BASELINE`',
+    )
+  }
+  const nc = contract.length
+  if (nc > CONTRACT_BASELINE) {
+    errors.push(
+      `门面契约臂 ${nc} 条 > 基线 ${CONTRACT_BASELINE}——HS-002 只许降（D-486）：` +
+        '契约层是插件 ABI 的纯形状面，新增一条要与「插件真的要用」同批论证并同步上调基线',
     )
   }
   const ns = sdk.length
@@ -665,7 +695,7 @@ export function run(root) {
   // 只被测试用的条目是空转，通道归 `symbio-testkit`（E-009 ⑥ 的测试设施公共出口）。
   const used = collectConsumers(root, plugins)
   // 两臂都判：语法臂不计债，但同样不许有空转条目——它也是门面对插件的承诺。
-  for (const s of [...wl, ...gram, ...sdk]) {
+  for (const s of [...wl, ...gram, ...contract, ...sdk]) {
     if (used.has(s)) continue
     errors.push(
       `门面白名单 \`${s}\` 在插件生产代码里零引用——HS-003：白名单每一条都要报得出消费方` +
@@ -757,7 +787,8 @@ export function run(root) {
         `${CONTROL_PLANE.join(' / ')}；manifest 依赖边归 E-009，控制面不豁免）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}，` +
         `读数来自 ${arms.read} 条 \`pub use\` 语句：` +
         `${FACADE_ARMS.map((c) => `${c} ${arms.counts[c] ?? 0}`).join(' · ')}）` +
-        `+ SDK 臂 ${ns} 条（基线 ${SDK_BASELINE}，D-269 起同进棘轮）` +
+        `+ 契约臂 ${nc} 条（基线 ${CONTRACT_BASELINE}，D-486 五层规划）` +
+        `+ SDK 服务臂 ${ns} 条（基线 ${SDK_BASELINE}，D-269 起同进棘轮；规则 D 长期只降）` +
         `· 语法臂 ${gram.length} 条（基线 ${GRAMMAR_BASELINE}，不计债但计件）` +
         `· 模块级转发 ${moduleEntries.length} 条（基线 ${MODULE_REEXPORT_BASELINE}）` +
         `· HS-003 每条都有扩展层消费方（0 空转）· HS-004 胶水层重臂默认关闭（${HEAVY_ARM.feature}）` +

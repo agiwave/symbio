@@ -23,8 +23,11 @@ symbio-deploy = { path = "../symbio-deploy" }
 # 语法臂的来源（D-255）：门面按「语法 / 机制」分两臂导出，语法直接来自内核——
 # 内核的直接依赖只有 6 个，插件要共享类型时走的就该是这条边，而不是 core 的平铺。
 symbio-kernel = { path = "../symbio-kernel" }
-# 插件可依赖的宿主机制层（D-258）：门面的机制臂从这里取，core 从此不在插件的依赖图里
+# 插件可依赖的宿主机制层（D-258）：门面的服务臂从这里取，core 从此不在插件的依赖图里
 symbio-sdk = { path = "../symbio-sdk" }
+# 插件 ABI 的契约层（DE-023 的 D-486 五层规划）：纯形状、零运行时状态，依赖只有 kernel +
+# serde——它的 Cargo.toml 就是「插件 ABI 有多重」的答案，出现第二个运行时依赖即触发复核
+symbio-contract = { path = "../symbio-contract" }
 
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }

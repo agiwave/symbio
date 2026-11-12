@@ -46,7 +46,6 @@
 //! 插件使用，按「依赖方数量」判据住在该插件内。本层只留**多消费方**共用的请求词汇
 //! 与帧原语。
 
-pub mod prompt_message;
 pub mod round;
 
 // `round` 是**子命名空间**，不是契约的对外地址：插件门面按符号取帧原语与 id 原语。
@@ -55,6 +54,5 @@ pub mod round;
 // EX-008 的路径段豁免因此只剩 `D-259` 那一条，见 `D-436`。）
 pub use round::{llm_emit_message, llm_removed_frame, llm_short_id};
 
-/// 请求词汇在本层根上转出一次：插件的导入路径不必认识 `prompt_message` 子模块
-/// （与帧原语同属一次往返，`D-438`）。
-pub use prompt_message::*;
+// 请求词汇（`PromptMessage` / `PromptToolCall`）已迁契约层（`D-486`）：sdk 内部不再
+// 读它们（projection 只有注释引用），门面的契约臂从 `symbio_contract::llm` 直接转出。
