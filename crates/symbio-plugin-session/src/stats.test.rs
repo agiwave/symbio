@@ -1205,7 +1205,7 @@ fn reputation_column_is_absent_when_no_owner_registers_it() {
         .expect("已入格");
     // 一次守约的代际立约（写方 `derived_facts::record_derived` 落的就是这三格）。
     // 格子照写：本插件不认识它们，带着它们才试得出「不认识」是不是真的。
-    for e in symbio_sdk::actors::commitment_events(
+    for e in symbio_plugin_api::commitment_events(
         COMMITMENT_VOCAB,
         "c-rep",
         symbio_sdk::authz::PRINCIPAL_MAIN,
