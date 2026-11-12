@@ -29,8 +29,9 @@
  * ## 判据的语料来自 git 自己
  *
  * 不维护「哪些路径算 core」的清单：一次 `git log --no-merges --raw` 给出真实改动文件，
- * 目录常量只有两条（`crates/symbio-sdk/` / `crates/symbio-kernel/`），与
- * `arch-shape-audit` 的 `core-kernel-files:` 标记同源。新加一个 crate 不需要改本脚本。
+ * 目录常量只有三条（`crates/symbio-sdk/` / `crates/symbio-kernel/` /
+ * `crates/symbio-contract/`），与 `arch-shape-audit` 的 `core-kernel-files:` 标记同源。
+ * D-486 五层规划把契约层立为冻结 ABI 层——它的改动同样需要 `Core-Change:` 段。
  *
  * ## 用法
  *
@@ -56,7 +57,7 @@ const repoRoot = path.resolve(scriptDir, '..')
 const argv = process.argv.slice(2)
 
 /** 内核 / 契约层：改动这两处必须在提交里解释 */
-const ARCH_DIRS = ['crates/symbio-sdk/', 'crates/symbio-kernel/']
+const ARCH_DIRS = ['crates/symbio-sdk/', 'crates/symbio-kernel/', 'crates/symbio-contract/']
 /** 「扩能力」的证据：动到任何插件 / provider / 测试设施 */
 const EXT_DIRS = ['crates/symbio-plugin-', 'crates/symbio-provider', 'crates/symbio-testkit/']
 

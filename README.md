@@ -15,7 +15,7 @@ created: 2026-07-20
 
 | 层 | 目录 / 挂载点 | 职责 |
 | --- | --- | --- |
-| **核心库** | `crates/` | `symbio-kernel` 语法 · `symbio-sdk` 机制 · `symbio-plugin-api` 门面 · 插件与 provider 各一个 crate · `symbio` 装配 |
+| **核心库** | `crates/` | `symbio-kernel` 语法 · `symbio-contract` 插件 ABI 契约 · `symbio-sdk` 机制 · `symbio-plugin-api` 门面 · 插件与 provider 各一个 crate · `symbio` 装配 |
 | **桌面前端** | `tauri/` | Vue 3 + Pinia + Tauri 2；`src-tauri/` 是只暴露 3 个 IPC 命令（`route_v2` / `route_v2_send` / `route_v2_close`）的薄适配层 |
 | **命令行前端** | `crates/symbio-cli/` | 纯 Rust：REPL / 单次 / 管道 / 心跳守护，进程内直连插件树，不经 IPC |
 | **入站通道** | `gateway` · `telegram` 插件 | 树内插件：HTTP / WS 入站请求转发给父级路由（与 `route_v2` 同构）；Telegram 长轮询收发 |
@@ -75,7 +75,7 @@ node e2e/run-tests.mjs # 端到端：mock LLM / MCP / HTTP，不需要真 API Ke
 
 ```
 symbio/
-├── crates/ # Rust：symbio-kernel（语法）· symbio-sdk（机制）· symbio-plugin-api（门面）· 插件与 provider 各一 crate · symbio-cli
+├── crates/ # Rust：symbio-kernel（语法）· symbio-contract（插件 ABI 契约）· symbio-sdk（机制）· symbio-plugin-api（门面）· 插件与 provider 各一 crate · symbio-cli
 ├── tauri/ # Vue 3 桌面端（src-tauri = 3 命令的薄适配层）
 ├── docs/ # 系统级文档（目标 / 场景 / 计划 / 架构 / 参考 / 指南 / 规范 / 任务 / 决策，历史在 archive/）
 ├── e2e/ # 端到端用例（mock LLM / MCP / HTTP + 网关 WS）

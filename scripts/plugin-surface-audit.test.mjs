@@ -488,7 +488,7 @@ test('readGrammar 收齐多个 kernel 分块，且 `as` 取别名', () => {
 test('⑮ 机制臂块回到门面 ⇒ 红（HS-002）：判据靠来源分区，不靠死锚点', () => {
   // 这一条是 D-280 的正例：旧 core 整棵删掉之后，`BLOCK_START` 式的块锚点再也打不中，
   // HS-002 于是恒读到「0 条」、恒等于基线、恒绿。改判「门面把这些 `pub use` 发给了谁」之后，
-  // 任何一个三臂之外的来源都算机制臂——不需要锚点，写回来就红。
+  // 任何一个四臂之外的来源都算机制臂——不需要锚点，写回来就红。
   const root = fixture({
     'symbio-plugin-fix': { rs: 'use symbio_plugin_api::Event;\npub fn f(_: Event) {}\n' },
     'symbio-plugin-api': {

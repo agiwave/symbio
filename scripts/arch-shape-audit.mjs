@@ -17,7 +17,7 @@
  * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200）；这两格的**目标是零**（D-203 裁决三）——没到零的每一条都是待迁存量，CS-006 逐名点出它该随谁走 |
  * | CS-006 | —— | 逐条内核业务事件名核**消费方分布**：报出「≥2 crate 消费」与「core 读者」两类各几条，第三种（恰好一个消费方且 core 不读）判红 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是当批可迁的形状。这条把判据逐名落到代码；`core 读者` 那一类**不是**归属证据，是待迁存量——名字随那条读者一起迁出（DE-024 D-203） |
  * | CS-008 | —— | core / kernel 的**生产代码**里事件名字面量数 = 0（首段闭集 = `Entity` 的变体；`#[cfg(test)] mod x;` 的夹具文件剔出判据面） | **名字从第二条路回来**：CS-005 / CS-006 的输入都是内核那张表，表归零之后两者都没有输入，而 `match e.kind.as_str() { "chat.assistant.final" => … }` 照样能让「加一条事件」变成改架构模块。这条是 D-203 承诺的翻转，落成独立一格而不是翻转 CS-006（那会让判据在归零后空转） |
- * | CS-009 | `structFields` / `enumVariants` | core + kernel **生产代码**里 `pub struct` 的字段总数、`pub enum` 的变体总数，两格都只许降 | **数据面变宽**：CS-001 只数 trait / `fn` / 默认体，`CapabilityMeta` 的字段、`Entity` 的变体、`FactRole` 的变体都不在它的判定面里——内核可以靠数据面持续变宽而全绿（DE-025 D-212） |
+ * | CS-009 | `structFields` / `enumVariants` | core + kernel + contract **生产代码**里 `pub struct` 的字段总数、`pub enum` 的变体总数，两格都只许降 | **数据面变宽**：CS-001 只数 trait / `fn` / 默认体，`CapabilityMeta` 的字段、`Entity` 的变体、`FactRole` 的变体都不在它的判定面里——内核可以靠数据面持续变宽而全绿（DE-025 D-212） |
  * | CS-010 | —— | **内核文件集**的**生产代码**里出现 `PLUGIN.yml` 的**业务名**（`principal_*` 行的 owner 与能力名）**完整字面量** = 0 | **语法里认业务坐标**：内核「只含语法类型与冻结机制原语」这条判据，长时期内唯一可执行的半边是「不认插件 id」（CS-004）。owner（`session/main`）与能力名（`judge.intent`）是同一类回流：写死一条就把「加能力 / 换主体」变成改内核（DE-023 D-398） |
  *
  * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
@@ -548,7 +548,16 @@ if (!fs.existsSync(path.join(sdkDir, 'lib.rs'))) {
   process.exit(1)
 }
 const kernelDir = path.join(ROOT, KERNEL_REL)
-const scanDirs = [sdkDir, ...(fs.existsSync(path.join(kernelDir, 'lib.rs')) ? [kernelDir] : [])]
+// 契约层（D-486）：纯形状 crate，它的 pub struct / enum 与内核数据面同一条棘轮——
+// 纯形状的公共面只许降。批 1 把 `dialog` / `llm`（26 字段 / 5 变体）搬出 sdk 时基线没有
+// 下调，这份余量在 sdk+kernel 口径下一直悬着；契约层入扫后实测回到 615/256 = 基线，
+// 余量清零。搬地址不是新增长（D-408 / D-412 同一份类型闭包论证）。
+const contractDir = path.join(ROOT, 'crates/symbio-contract/src')
+const scanDirs = [
+  sdkDir,
+  ...(fs.existsSync(path.join(kernelDir, 'lib.rs')) ? [kernelDir] : []),
+  ...(fs.existsSync(path.join(contractDir, 'lib.rs')) ? [contractDir] : []),
+]
 const scopes = [
   readKernelScope(sdkDir, 'kernel.rs'),
   scanDirs.includes(kernelDir) ? readKernelScope(kernelDir, 'lib.rs') : null,

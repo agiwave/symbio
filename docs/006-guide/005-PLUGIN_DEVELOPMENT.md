@@ -40,10 +40,10 @@ edition = "2021"
 rust-version = "1.91"
 
 [dependencies]
-# **只依赖门面**：`symbio-plugin-api` 已经转出语法（kernel）与机制（sdk）两臂，
-# 装配常量也经它转出（`symbio-deploy` 的 `PLUGIN_ID_*`）。直接写 kernel / sdk /
-# deploy 三行会被 `plugin-surface-audit`（HS-001）判红——那不是风格问题，
-# 它决定「插件依赖几个架构模块」由边界决定还是由某段代码顺手写了哪个前缀决定。
+# **只依赖门面**：`symbio-plugin-api` 已经转出语法（kernel）、ABI 形状（contract）与
+# 机制（sdk）三臂，装配常量也经它转出（`symbio-deploy` 的 `PLUGIN_ID_*`）。直接写
+# kernel / contract / sdk / deploy 四行会被 `plugin-surface-audit`（HS-001）判红——
+# 那不是风格问题，它决定「插件依赖几个架构模块」由边界决定还是由某段代码顺手写了哪个前缀决定。
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 async-trait = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
