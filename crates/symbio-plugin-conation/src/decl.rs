@@ -40,9 +40,7 @@ use serde_json::{json, Value};
 
 use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::{
-    Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
-};
+use symbio_plugin_api::{Entity, Event, EventDecl, FactDecl, PluginDeclarations, Verb, ViewDecl};
 
 /// 「欲」的表达。跨插件共享：**写方是会话**（自主触发的落格是会话存储所有者的写窗口），
 /// 所以名字经 `PLUGIN.yml` 的 `shared_events:` 投影进 `symbio_plugin_api::events`，
@@ -106,7 +104,6 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
 pub(crate) const ROWS: &[Decl] = &[Decl {
     name: EVENT_CONATION_EXPRESSED,
     reads: &[],
-    tier: LatencyTier::Reflex,
     expand: None,
     owes: Pattern {
         source: EVENT_CONATION_EXPRESSED,

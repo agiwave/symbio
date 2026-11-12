@@ -4,7 +4,6 @@
 use super::*;
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use crate::projections::checkpoint::{checkpoint, CheckpointState};
-use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::decl::ring::Decl;
 use symbio_kernel::decl::ring::Pattern;
 use symbio_kernel::decl::{Builder, PluginDeclarations};
@@ -1123,7 +1122,6 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
             out.push(Decl {
                 name,
                 reads: &[],
-                tier: LatencyTier::Reflex,
                 expand: None,
                 owes: pattern[0],
                 until: pattern,
@@ -1247,7 +1245,6 @@ fn a_domain_cell_is_gated_like_any_other_declared_cell() {
             out.push(Decl {
                 name,
                 reads: &[],
-                tier: LatencyTier::Reflex,
                 expand: None,
                 owes: pattern[0],
                 until: pattern,

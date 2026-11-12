@@ -20,7 +20,7 @@
 //! 指过去会以 `UnknownSource` 拒绝整张声明表。归宿行不派发，`owes` 只表达
 //! 「这一格的归宿」，不需要再从别人的事实起账。
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::{Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb};
+use symbio_plugin_api::{Entity, EventDecl, FactDecl, PluginDeclarations, Verb};
 
 /// 判决：可直接回答。载荷 `{ id, reason }`，`id` = 本轮 `user.message` 的事实 id。
 pub(crate) const CLASSIFY_ANSWERED: &str = "classify.answered";
@@ -60,7 +60,6 @@ pub(crate) const ROWS: &[Decl] = &[Decl {
     // 归宿行的名字不参与派发（开不出账，`D-306`），取一个不与行名冲突的名字。
     name: "classify.verdict",
     reads: &[],
-    tier: LatencyTier::Reflex,
     expand: None,
     owes: Pattern {
         source: CLASSIFY_ANSWERED,

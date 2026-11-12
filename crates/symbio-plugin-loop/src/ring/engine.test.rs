@@ -1728,7 +1728,6 @@ fn cover_row(fact: &'static str) -> Decl {
     Decl {
         name: fact,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: exits[0],
         until: exits,
@@ -1756,7 +1755,6 @@ fn declaration_world(cost: u32) -> Arc<Frozen> {
     rows.push(Decl {
         name: SLICE_ROW,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
             source: SLICE_VIEW,

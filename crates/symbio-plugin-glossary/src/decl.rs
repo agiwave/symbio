@@ -6,7 +6,7 @@
 //! 事实名、工具名、行为名都**由本 crate 自报**：宿主只做收集，不按名字写分支。
 
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::{Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb};
+use symbio_plugin_api::{Entity, EventDecl, FactDecl, PluginDeclarations, Verb};
 
 /// LLM 可见工具名。
 pub(crate) const GLOSSARY_TOOL: &str = "glossary_define";
@@ -39,7 +39,6 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
 pub(crate) const ROWS: &[Decl] = &[Decl {
     name: GLOSSARY_DEFINED,
     reads: &[],
-    tier: LatencyTier::Reflex,
     expand: None,
     owes: Pattern {
         source: GLOSSARY_DEFINED,

@@ -4,9 +4,7 @@
 //! （`Frozen::ports`）。加一个端口只改提供者的 `ports()`，不改环。
 
 use symbio_plugin_api::ring::{Decl, Pattern, PortDecl};
-use symbio_plugin_api::{
-    Entity, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, EVENT_SENT,
-};
+use symbio_plugin_api::{Entity, EventDecl, FactDecl, PluginDeclarations, Verb, EVENT_SENT};
 
 use super::port::TOOL;
 
@@ -97,7 +95,6 @@ static ROWS: &[Decl] = &[
     Decl {
         name: "tool.artifact",
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
             source: "artifact.added",

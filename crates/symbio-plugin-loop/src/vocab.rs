@@ -13,7 +13,6 @@
 use symbio_kernel::decl::ring::{Decl, Pattern};
 use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, Verb};
-use symbio_kernel::LatencyTier;
 
 use symbio_kernel::event::EVENT_RETRY;
 use symbio_plugin_api::drive::EVENT_DRIVER_STALLED;
@@ -72,7 +71,6 @@ static PORT_ROWS: &[Decl] = &[Decl {
     name: "await-port",
     // 最宽档：工具调用是秒–分钟级，通用执行体 `PORT_ACTOR` 的 mode 也是 Deep。
     reads: &[],
-    tier: LatencyTier::Deep,
     expand: None,
     owes: Pattern {
         source: EVENT_REQUEST,

@@ -26,7 +26,7 @@ use super::{
 };
 use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{
-    Entity, Event, EventDecl, LatencyTier, PluginDeclarations, Verb, EVENT_FAILED, EVENT_REQUEST,
+    Entity, Event, EventDecl, PluginDeclarations, Verb, EVENT_FAILED, EVENT_REQUEST,
     EVENT_RESPONSE, EVENT_SENT,
 };
 use symbio_testkit::EVENT_RETRY;
@@ -71,7 +71,6 @@ fn harness_protocol_rows() -> &'static [Decl] {
             Decl {
                 name: Box::leak(format!("sink.{name}").into_boxed_str()),
                 reads: &[],
-                tier: LatencyTier::Reflex,
                 expand: None,
                 owes: pattern[0],
                 until: pattern,

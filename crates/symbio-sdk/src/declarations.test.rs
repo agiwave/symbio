@@ -6,7 +6,6 @@
 //! 收集通道，不复制写闸实现。
 
 use super::*;
-use symbio_kernel::adapters::LatencyTier;
 use symbio_kernel::decl::ring::Decl;
 use symbio_kernel::decl::ring::Pattern;
 use symbio_kernel::event::{Entity, EventDecl, Verb};
@@ -30,7 +29,6 @@ fn protocol_rows() -> &'static [Decl] {
         out.push(Decl {
             name,
             reads: &[],
-            tier: LatencyTier::Reflex,
             expand: None,
             owes: pattern[0],
             until: pattern,

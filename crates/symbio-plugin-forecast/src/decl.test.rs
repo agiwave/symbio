@@ -8,7 +8,7 @@
 use super::*;
 use serde_json::json;
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::{Entity, Event, EventDecl, LatencyTier, PluginDeclarations, Verb};
+use symbio_plugin_api::{Entity, Event, EventDecl, PluginDeclarations, Verb};
 
 /// 任务插件公开的两条事件（`PLUGIN.yml` 的 `shared_events`）。
 const TASK_EVENTS: &[EventDecl] = &[
@@ -35,7 +35,6 @@ fn protocol_rows() -> &'static [Decl] {
         out.push(Decl {
             name,
             reads: &[],
-            tier: LatencyTier::Reflex,
             expand: None,
             owes: pattern[0],
             until: pattern,

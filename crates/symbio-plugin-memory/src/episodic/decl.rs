@@ -14,7 +14,7 @@
 
 use symbio_plugin_api::events::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED};
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::{FactDecl, LatencyTier};
+use symbio_plugin_api::FactDecl;
 
 use crate::decl::EVENT_MEMORY_FORGOTTEN;
 
@@ -90,7 +90,6 @@ pub(crate) const ROWS: &[Decl] = &[
     Decl {
         name: EVENT_MEMORY_ENCODED,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
             source: EVENT_MEMORY_ENCODED,
@@ -115,7 +114,6 @@ pub(crate) const ROWS: &[Decl] = &[
     Decl {
         name: EVENT_MEMORY_CONSOLIDATED,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
             source: EVENT_MEMORY_CONSOLIDATED,
@@ -132,7 +130,6 @@ pub(crate) const ROWS: &[Decl] = &[
     Decl {
         name: EVENT_MEMORY_FORGOTTEN,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
             source: EVENT_MEMORY_FORGOTTEN,

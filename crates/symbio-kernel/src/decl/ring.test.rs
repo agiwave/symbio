@@ -131,7 +131,6 @@ fn home(fact: &'static str) -> Decl {
     Decl {
         name: fact,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: exit[0],
         until: exit,
@@ -190,7 +189,6 @@ fn row(
     Decl {
         name,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes,
         until: leak(until),
@@ -800,7 +798,6 @@ fn row_exp(
     Decl {
         name,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand,
         owes,
         until: leak(until),

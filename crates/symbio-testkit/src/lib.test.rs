@@ -41,7 +41,6 @@ fn cover(source: &'static str) -> Decl {
     Decl {
         name: Box::leak(format!("cover-{source}").into_boxed_str()),
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: exits[0],
         until: exits,
@@ -56,7 +55,6 @@ fn strategy_row(fact: &'static str) -> Decl {
     Decl {
         name: "fixture.new-row",
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: pattern(fact),
         until: exit,

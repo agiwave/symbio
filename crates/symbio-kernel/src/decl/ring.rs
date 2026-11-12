@@ -53,7 +53,7 @@ use serde_json::Value;
 
 use super::{Frozen, ENGINE_ONLY_CELLS};
 use crate::event::{EVENT_FAILED, EVENT_RESPONSE, EVENT_SENT};
-use crate::{Event, LatencyTier};
+use crate::Event;
 
 /// 行级写入归属：`(行名, 该行执行时实际写入的事实名)`。
 ///
@@ -121,8 +121,6 @@ pub struct Decl {
     /// 执行体的属性（`D-306` 裁决一：`ActorDecl::reads` 已删）——执行体是一段可复用的
     /// 代码，同一段代码替两行干活时，两行的前件本来就不一样。
     pub reads: &'static [&'static str],
-    /// 这一行动作允许的时延档。
-    pub tier: LatencyTier,
     pub owes: Pattern,
     /// 集合展开：`Some((list_field, element_key_field))` ⇒ `owes` 实例的
     /// `list_field` 是数组，**逐元素**开一笔债（`FactDecl.expand`

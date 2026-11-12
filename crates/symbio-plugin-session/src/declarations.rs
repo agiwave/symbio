@@ -13,7 +13,6 @@
 use symbio_kernel::decl::{FactDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::LatencyTier;
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
 /// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
@@ -155,7 +154,6 @@ pub(crate) const ROWS: &[Decl] = &[
     Decl {
         name: SESSION_CLOSE_TURN,
         reads: &[],
-        tier: LatencyTier::Fast,
         expand: None,
         owes: Pattern {
             source: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
@@ -177,7 +175,6 @@ pub(crate) const ROWS: &[Decl] = &[
     Decl {
         name: SESSION_TERMINATED_SEAT,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
             source: EVENT_SESSION_TERMINATED,

@@ -39,7 +39,6 @@ fn cover(fact: &'static str) -> Decl {
     Decl {
         name: fact,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: exits[0],
         until: exits,

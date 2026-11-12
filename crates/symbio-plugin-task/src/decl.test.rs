@@ -13,7 +13,7 @@
 use super::{EVENT_TASK_REWORK_CREATED, OWNER};
 use symbio_plugin_api::reports::ReportCtx;
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::{Entity, LatencyTier, PluginDeclarations};
+use symbio_plugin_api::{Entity, PluginDeclarations};
 
 /// 协议五格的自读行：完整进程里由 loop 交表，本二进制不链接它 ⇒ 夹具补上。
 fn protocol_rows() -> &'static [Decl] {
@@ -33,7 +33,6 @@ fn protocol_rows() -> &'static [Decl] {
         out.push(Decl {
             name,
             reads: &[],
-            tier: LatencyTier::Reflex,
             expand: None,
             owes: pattern[0],
             until: pattern,

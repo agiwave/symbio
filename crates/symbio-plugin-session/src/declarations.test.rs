@@ -74,7 +74,6 @@ fn protocol_rows() -> &'static [Decl] {
         out.push(Decl {
             name,
             reads: &[],
-            tier: LatencyTier::Reflex,
             expand: None,
             owes: pattern[0],
             until: pattern,

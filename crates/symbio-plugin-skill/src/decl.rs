@@ -37,9 +37,7 @@ use serde_json::{json, Value};
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
 use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::{
-    Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
-};
+use symbio_plugin_api::{Entity, Event, EventDecl, FactDecl, PluginDeclarations, Verb, ViewDecl};
 
 /// owner —— 与目录名同形（`crates/symbio-plugin-skill`），装配表按它排序与报缺口。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-skill";
@@ -145,7 +143,6 @@ pub(crate) const ROWS: &[Decl] = &[
     Decl {
         name: EVENT_MEMORY_CALIBRATED,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
             source: EVENT_MEMORY_CALIBRATED,

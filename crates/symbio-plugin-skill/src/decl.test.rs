@@ -19,9 +19,7 @@ use super::{
 };
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::{
-    Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
-};
+use symbio_plugin_api::{Entity, Event, EventDecl, FactDecl, PluginDeclarations, Verb, ViewDecl};
 
 /// loop 拥有的事实格（本二进制不链接它 ⇒ 夹具补格位与载荷字段）。
 const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
@@ -75,7 +73,6 @@ fn harness_encoded_sink_row() -> Decl {
     Decl {
         name: EVENT_MEMORY_ENCODED,
         reads: &[],
-        tier: LatencyTier::Reflex,
         expand: None,
         owes: pattern[0],
         until: pattern,
@@ -115,7 +112,6 @@ fn harness_protocol_rows() -> &'static [Decl] {
             Decl {
                 name: Box::leak(format!("sink.{name}").into_boxed_str()),
                 reads: &[],
-                tier: LatencyTier::Reflex,
                 expand: None,
                 owes: pattern[0],
                 until: pattern,
