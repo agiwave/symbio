@@ -639,6 +639,10 @@ function treeOf(filePath) {
  * 会把整份搬迁写成「旧文件全删 + 新文件全增」，两边的行文本一一对上。
  * 同树内的删了又加不算（那是同一处重写，不是搬家）。
  */
+/** 「一块实现的开头」：项声明（`fn` / `struct` / `impl` / `const` …），可带 `pub`。 */
+const ITEM_LINE_RE =
+  /^(?:pub(?:\([^)]*\))?\s+)?(?:default\s+)?(?:async\s+)?(?:unsafe\s+)?(?:extern\s+"[^"]*"\s+)?(?:fn|struct|enum|trait|type|union|const|static|impl|macro_rules)(?=[^A-Za-z0-9_]|$)/
+
 export function crossTreeMoves(patch) {
   // 判「搬了一行」要看它**是什么**，不能只看它长得一样。`}` / `);` / `},` 这类
   // 不含标识符的行在每个文件里都有；把它们算成「跨树搬过去的一份面」，会让任何一笔
@@ -646,13 +650,19 @@ export function crossTreeMoves(patch) {
   // 去写一条假的 `from` / `to` 才过得了门——判据逼人撒谎，比漏判更糟。
   // D-404 要判的是「一块实现有没有被搬到别处」，而一块实现必然带着名字。
   const carriesName = (code) => /[A-Za-z_]/.test(code)
+  // 判据要的是「一块实现被搬到别处」，而一块实现的开头一定是一个**项声明**。
+  // 只带名字的赋值行不算：`reads: &[],` / `writes: &[]` 这类字段初始化在几十个
+  // 构造点里各写一遍，删一处、加一处（字段从执行体上移到行）就长得像「跨树搬迁」，
+  // 提交者于是只能补一条与自己意思无关的 `from` / `to`——同 `carriesName` 那条的
+  // 理由（`D-437`）：判据逼人撒谎，比漏判更糟。
+  const isItemLine = (code) => ITEM_LINE_RE.test(code)
   const removedLines = new Map() // 行文本 -> 它被删所在的树集合
   for (const f of patch) {
     if (!inTrees(f.path, ARCH_TREES) || !f.path.endsWith('.rs') || isGenerated(f.path)) continue
     for (const raw of f.removed) {
       if (!isMechanismLine(raw)) continue
       const code = (blankComments(raw)[0] ?? '').trim()
-      if (!carriesName(code)) continue
+      if (!carriesName(code) || !isItemLine(code)) continue
       const trees = removedLines.get(code) ?? new Set()
       trees.add(treeOf(f.path))
       removedLines.set(code, trees)
@@ -665,7 +675,7 @@ export function crossTreeMoves(patch) {
     for (const raw of f.added) {
       if (!isMechanismLine(raw)) continue
       const code = (blankComments(raw)[0] ?? '').trim()
-      if (!carriesName(code)) continue
+      if (!carriesName(code) || !isItemLine(code)) continue
       const from = removedLines.get(code)
       if (!from) continue
       const here = treeOf(f.path)

@@ -30,7 +30,6 @@ where: docs/007-task/、crates/symbio-kernel/src/decl/、crates/symbio-sdk/src/�
 
 | 欠账 | 实测 |
 |---|---|
-| `port=session` 未落 | session 声明 `ports: &[]`（`crates/symbio-plugin-session/src/declarations.rs:306`） |
 | 钩子契约静默缩小 | `HookEvent` **14 个变体**，生产触发点只有 2 个（`plugin-tool/src/port.rs:1216` / `:1796`） |
 | 视图 owner 对账缺席 | `Frozen::view_owner` 除冻结与自检外**无生产消费者**（[DE-047-义务环判据与归属推导](../003-design/047-义务环判据与归属推导.md) 的 D-463） |
 | 行内两出口串不起来 | `RowStep` 只从 `RowHandler::run` 出，`parse` 的产物是 `Vec<FactDraft>`（[DE-025-能力包与扩展面](../003-design/025-能力包与扩展面.md) §5.2 缺口账第 5 行） |
@@ -40,7 +39,6 @@ where: docs/007-task/、crates/symbio-kernel/src/decl/、crates/symbio-sdk/src/�
 
 | 任务 | 目标形状（终态，不是省事） | 序 |
 |---|---|---|
-| `T-359-会话端口落地` | `session-call` / `session-config` / `session-facts` 三张投影各有生产写方与执行体，不再是 `ports: &[]` | 一 |
 | `T-360-行内两出口合一` | 一条行既能欠 `request(port=…)` 又能在同一轮落答复格；同轮双卡可跑 | 二 |
 | `T-361-视图owner对账第二级` | 第二级判到什么粒度先裁决，再按裁决落判据或写成「裁决不判 + 重开条件」 | 二 |
 | `T-362-钩子触发面补齐` | 14 个变体每个要么有产者、要么有一条裁「不触发」的决策；注释与正文同步 | 二 |
@@ -57,6 +55,9 @@ where: docs/007-task/、crates/symbio-kernel/src/decl/、crates/symbio-sdk/src/�
 
 ## 处理过程
 
+- 2026-11-12：`T-359` 已收口——不是落地而是撤回：四条 `port=session` 行不建，「会话的世界面」
+  由 `session.config` / `session.recall` 两条事实与插件调用面承担（证据与重开条件见 `DE-050`
+  的 `D-477`）。原入口事实「`ports: &[]` 是欠账」判断反了：那是删除达成隔离之后的结论。
 - 2026-11-12：`T-358` 已收口——`Decl.by` 移除、「谁执行」由 `owes` + 行注册表派生、`blocked`
   只由 `reads` 前件派生（`D-306` 裁决一的落地形状写回 `DE-048`）；`sink-row-audit` 的统计对象
   随之从 `by: None` 换成「一笔债都开不出来」，基线 9 条不变。

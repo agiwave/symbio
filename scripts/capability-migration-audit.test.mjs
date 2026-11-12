@@ -456,6 +456,17 @@ test('crossTreeMoves：带名字的行仍然算搬迁（收窄只针对空壳行
   assert.equal(crossTreeMoves(p).count, 1)
 })
 
+test('crossTreeMoves：只有名字的字段初始化不算搬迁（`reads: &[],` 不是一块实现）', () => {
+  // 字段从执行体上移到行时，`reads: &[],` 在几十个构造点里各写一遍：删一处（执行体侧）、
+  // 加一处（行侧）在 diff 里就是「跨树搬了一行」。它既不是声明也不是实现块，按搬迁判
+  // 只会逼提交者补一条与自己意思无关的 `from` / `to`（同 `}` / `);` 那条，`D-437`）。
+  const p = patchOf([
+    { path: 'crates/symbio-kernel/src/decl/mod.rs', removed: ['    reads: &[],'], added: [] },
+    { path: 'crates/symbio-sdk/src/declarations.test.rs', added: ['        reads: &[],'], removed: [] },
+  ])
+  assert.equal(crossTreeMoves(p).count, 0)
+})
+
 test('mechanismAdditions：同名公开项也在机制面被删掉 ⇒ 不算新增（换签名 / 拆文件）', () => {
   // 拆文件：旧文件整份消失，留下来的那半在新文件里「整份是新增」；
   // 换签名：新旧行文本不同，但声明的是同一个名字。两者都没让机制面变宽。
