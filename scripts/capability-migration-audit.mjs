@@ -141,15 +141,24 @@ export const CONTROL_TREES = ['crates/symbio-plugin-loop', 'crates/symbio-plugin
 const PLUGIN_API_TREES = ['crates/symbio-plugin-api']
 
 /**
- * **受保护目录的唯一一份**：`EX-002`（新增能力只改自己目录）判的就是这五棵树的
+ * 宿主运行时：驱动族唯一 runner 的持有者。它受保护但**不属**迁移批次的机制面
+ * （`D-475`）：只进 `PROTECTED_TREES` 的并集，不进 `ARCH_TREES` / `CONTROL_TREES`。
+ */
+export const HOST_TREES = ['crates/symbio-host']
+
+/**
+ * **受保护目录的唯一一份**：`EX-002`（新增能力只改自己目录）判的就是这六棵树的
  * 非生成物指纹。`extension-locality-audit` 直接引用本常量，不再抄第二份——
  * 此前两条任务的 exit 与审计脚本各写一套（有的漏 `sdk`、有的漏
  * `plugin-api`），同一提交在三处得到不同结论（D-372）。
  *
  * 取**并集**而不是交集：任何一套旧口径里出现的树都算受保护。少一棵就留一条
- * 「加能力时顺手改这里」的路，而这条路的代价正是本判据要防的。
+ * 「加能力时顺手改这里」的路，而这条路的代价正是本判据要防的。`D-475` 把
+ * `symbio-host` 补进并集：唯一 runner 的代码级硬约束拒绝第二个驱动，拒不了
+ * 「加一行按能力名分支」。受保护树回答「加能力能不能碰」，机制面三棵树回答
+ * 「迁移批次有没有新增行为」——两件事，`EX-007` 的判定面不变。
  */
-export const PROTECTED_TREES = [...ARCH_TREES, ...CONTROL_TREES]
+export const PROTECTED_TREES = [...ARCH_TREES, ...CONTROL_TREES, ...HOST_TREES]
 
 /** 迁移批次的声明：提交正文里一行 `Migration: <批次>`。 */
 export const MIGRATION_RE = /^\s*Migration[:：]\s*(\S.*)$/m

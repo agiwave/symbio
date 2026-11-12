@@ -4,10 +4,11 @@
  *
  * ## 它治的病
  *
- * 「加一个能力要不要动架构」只有一个可判的答案：**五棵树的目录指纹不变**——
+ * 「加一个能力要不要动架构」只有一个可判的答案：**六棵树的目录指纹不变**——
  * `crates/symbio-sdk` / `crates/symbio-kernel` / `crates/symbio-plugin-api` /
- * `crates/symbio-plugin-loop` / `crates/symbio-plugin-session` 是能力**不该**碰的架构面。
- * 五棵是**并集**（`capability-migration-audit.PROTECTED_TREES`，D-372）：任何一套旧口径
+ * `crates/symbio-plugin-loop` / `crates/symbio-plugin-session` / `crates/symbio-host`
+ * 是能力**不该**碰的架构面。六棵是**并集**
+ * （`capability-migration-audit.PROTECTED_TREES`，D-372 / D-475）：任何一套旧口径
  * 里出现过的树都算，少一棵就留一条「加能力时顺手改这里」的路。判据读指纹，不读
  * 「有没有新 crate」：新 crate 只是触发条件；一个提交完全可以新增能力包却顺手
  * 在 `loop` 里加一行按能力名分支，那正是 T1 要抓的形态。
@@ -15,14 +16,14 @@
  * 既有守卫各自只看见一半：`SC-006` 判控制面里的工具名字面量，`CP-006` 判机制面
  * 指纹与端口闭集，`arch-change-audit` 要求动 core/kernel 的提交留理由——没有一条
  * 判「这次新增能力有没有动控制面」。本判据补的是**提交的意图面**：同一次提交里
- * 既加能力包又改五棵树，只能说明机制补件夹带了（D-247 的「夹带」）。
+ * 既加能力包又改六棵树，只能说明机制补件夹带了（D-247 的「夹带」）。
  *
  * ## 两半
  *
  * | 半 | 判什么 |
  * |---|---|
- * | 正向证据 | 夹具提交 `f5e4bbed`（`symbio-plugin-glossary`）：新增能力包的五棵树指纹不变。它不在判据范围内也要判——T1 的唯一实证 |
- * | 向前判据 | 范围内**新增 `crates/symbio-plugin-<名字>/PLUGIN.yml`** 的提交，逐个比较父提交与本提交的五棵树指纹 |
+ * | 正向证据 | 夹具提交 `f5e4bbed`（`symbio-plugin-glossary`）：新增能力包的六棵树指纹不变。它不在判据范围内也要判——T1 的唯一实证 |
+ * | 向前判据 | 范围内**新增 `crates/symbio-plugin-<名字>/PLUGIN.yml`** 的提交，逐个比较父提交与本提交的六棵树指纹 |
  *
  * ## 三处例外，各自有理由
  *
@@ -40,12 +41,14 @@
  *   名单逐条带理由；判据之后的提交只有上面两条退路。
  * - **口径加宽的存量提交**：`GRANDFATHERED` 里的提交不判——四棵并成五棵时，它们按新口径
  *   回溯会红，但当时的判据不含 `plugin-api`。名单只减不增，每条带理由。
+ *   五棵并成六棵（`D-475` 纳入 `symbio-host`）时，范围内新增能力包的提交无一触碰 host，
+ *   零回溯判红，因此一条豁免都不加；这条实测是裁决依据，不是「门禁正绿」的巧合。
  *
  * ## 失效形态（回归测试钉的是这几条）
  *
  * - 读不出指纹时最省事的实现是「没什么可判 ⇒ 通过」——故任何一棵树读不出都判红；
  * - 把生成物一律豁免 ⇒ 手写一个新文件冒充生成物，故新出现的生成件不豁免；
- * - 只判「有没有新 crate」⇒ 新增能力包夹带 `loop` 分支照样绿，故判定对象是五棵树。
+ * - 只判「有没有新 crate」⇒ 新增能力包夹带 `loop` 分支照样绿，故判定对象是六棵树。
  *
  * 用法：
  * ```bash
@@ -78,14 +81,16 @@ const repoRoot = path.resolve(scriptDir, '..')
 const argv = process.argv.slice(2)
 
 /**
- * 能力不该碰的五棵树。**唯一一份来自 `capability-migration-audit.PROTECTED_TREES`**
- * （`sdk` / `kernel` / `plugin-api` / `loop` / `session`）——此前本文件少 `plugin-api`、
- * 拆分总任务的 exit 少 `sdk`、A 类插件化任务的 exit 只写三棵，同一提交在三处得到
- * 三种结论（D-372）。
+ * 能力不该碰的六棵树。**唯一一份来自 `capability-migration-audit.PROTECTED_TREES`**
+ * （`sdk` / `kernel` / `plugin-api` / `loop` / `session` / `host`）——此前本文件少
+ * `plugin-api`、拆分总任务的 exit 少 `sdk`、A 类插件化任务的 exit 只写三棵，同一提交
+ * 在三处得到三种结论（D-372）；`host` 由 `D-475` 补进并集，它只受保护、不属迁移批次的
+ * 机制面。
  *
  * 为什么以**最宽**为真：`plugin-api` 是能力唯一被允许「看见」的机制面，正因为它最像
- * 能力的地盘，才最容易在新增能力时被顺手加宽（多一条 `pub`、多一个视图契约）——
- * 漏掉它，判据就只守住了「远处的架构」，放过了「门口那一步」。生成物是唯一例外
+ * 能力的地盘，才最容易在新增能力时被顺手加宽（多一条 `pub`、多一个视图契约）；
+ * `host` 持有驱动族唯一 runner，代码级硬约束拒绝第二个驱动，却拒不了「加一行按能力名
+ * 分支」——漏掉哪一棵，判据都只守住了半条路。生成物是唯一例外
  * （清单的镜像，D-371），判的是非生成物指纹。
  */
 export const TREES = PROTECTED_TREES
@@ -107,7 +112,7 @@ function isGenerated(p, parentPaths) {
 /** 正向证据：扩展夹具的落地提交。范围里没有它也要判。 */
 export const FIXTURE = {
   sha: 'f5e4bbed',
-  why: 'symbio-plugin-glossary 落地（扩展夹具）：新增能力包的五棵树指纹不变',
+  why: 'symbio-plugin-glossary 落地（扩展夹具）：新增能力包的六棵树指纹不变',
 }
 
 /** 判据诞生前的一次性搬家：不追溯已推送的历史。每条必须有理由。 */
@@ -121,7 +126,7 @@ export const BEFORE_GUARD = [
 /**
  * 口径加宽（四棵 → 五棵，D-372）时的**存量提交**：按新口径回溯会红，但当时的判据
  * 不含 `plugin-api`，它们改的是 `behaviors.rs` 的中心名单（`D-363` 已让能力名退场）
- * 与清单镜像。名单**只减不增**：判据落地后的新增能力包按五棵判。
+ * 与清单镜像。名单**只减不增**：判据落地后的新增能力包按当时受保护树的并集判（现六棵）。
  */
 export const GRANDFATHERED = [
   {
@@ -161,7 +166,7 @@ export function validateBeforeGuard(entries) {
 }
 
 /**
- * 迁移批次的自声明（D-247）：正文一行 `Migration: <批次>`。这类提交里五棵树的变化是
+ * 迁移批次的自声明（D-247）：正文一行 `Migration: <批次>`。这类提交里六棵树的变化是
  * 迁移的**删除侧**——新包接管旧实现时，`loop` / `session` 的旧代码同批退场，指纹必然变；
  * 删得对不对归 `capability-migration-audit`（EX-003）判。本判据不重复判，只守
  * **没有**这条声明的新增能力包。
@@ -224,7 +229,7 @@ export function addedPackages(commit) {
 }
 
 /**
- * 五棵树的目录指纹。
+ * 六棵树的目录指纹。
  *
  * `entries` 是 `git ls-tree -r` 的结果（`{ path, oid }`）；`parentPaths` 是父提交的
  * 全量路径集合，用来只豁免**已存在**的生成物。指纹按路径排序后拼接，与输入顺序无关。
@@ -251,7 +256,7 @@ export function fingerprints(entries, parentPaths = new Set()) {
 }
 
 /**
- * 纯判定：新增了能力包的提交，五棵树的指纹必须逐一相等。
+ * 纯判定：新增了能力包的提交，六棵树的指纹必须逐一相等。
  *
  * 任何一棵树的指纹读不出也算红——判据没有输入时，「没有违规」是最坏的一种绿。
  */
@@ -299,7 +304,7 @@ function judgeCommit(sha, added, subject) {
     return {
       sha,
       subject,
-      errors: [`EX-002 读不出 ${sha}（或其父提交）的五棵目录树 —— 判据没有输入，宁红不静默`],
+      errors: [`EX-002 读不出 ${sha}（或其父提交）的六棵目录树 —— 判据没有输入，宁红不静默`],
     }
   }
   const parentPaths = new Set(before.map((e) => e.path))
@@ -346,7 +351,7 @@ function reportFailures(bad, subjects) {
   }
   console.log(
     dim(
-      '\n  判据是「新增能力包的五棵树指纹不变」。红了通常意味着两件事之一：' +
+      '\n  判据是「新增能力包的六棵树指纹不变」。红了通常意味着两件事之一：' +
         '\n  ① 机制补件应当独立成一次提交（带 `### D-NNN`），再让能力包进来；' +
         '\n  ② 新出现的生成件（`*.gen.rs` 或描述符 `OUT_REL` 落点）是一条新生成面，也属机制补件（D-371）。',
     ),
@@ -446,7 +451,7 @@ function main() {
   console.log(
     green(
       `✓ extension-locality-audit：夹具 ${FIXTURE.sha}（${fixtureAdded.join(' / ')}）` +
-        `+ 范围内 ${candidates.length} 个新增能力包提交，五棵树指纹不变`,
+        `+ 范围内 ${candidates.length} 个新增能力包提交，六棵树指纹不变`,
     ),
   )
   return 0

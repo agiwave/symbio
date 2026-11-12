@@ -408,9 +408,11 @@ export const GUARDS = [
   'arch-dead-code-audit',
   // `extension-locality-audit`（EX-002）判**新增能力包有没有动架构面**：一个提交新增
   // `crates/symbio-plugin-<名字>/PLUGIN.yml` 时，`sdk` / `kernel` / `plugin-api` /
-  // `loop` / `session` **五棵树**的目录指纹必须与父提交逐一相等。五棵是并集
+  // `loop` / `session` / `host` **六棵树**的目录指纹必须与父提交逐一相等。六棵是并集
   // （`capability-migration-audit.PROTECTED_TREES`，D-372）：任何一套旧口径里出现过的
-  // 树都算，少一棵就留一条「加能力时顺手改控制面」的路。它补的是既有守卫之间那条缝：
+  // 树都算，少一棵就留一条「加能力时顺手改控制面」的路。`host` 持有驱动族唯一 runner，
+  // 代码硬约束只拒第二个驱动、拒不了按能力名加分支，故一并纳入；名单是审计脚本自己的
+  // 常量，不改模块间依赖（SP-003「架构改动的边界」）。它补的是既有守卫之间那条缝：
   // `SC-006` 判工具名字面量、`CP-006` 判机制面指纹、`arch-change-audit` 要求动
   // core/kernel 留理由，没有一条看「这次加能力有没有顺手改控制面」——而「只判有没有
   // 新 crate」正是漏掉它的写法。
