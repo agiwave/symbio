@@ -173,8 +173,8 @@ test('SRA-001：符号只出现在注释里 ⇒ 仍红（注释不是用法）',
 })
 
 test('SRA-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', () => {
-  // 基线是 82：造 83 条**都真被用**的符号，把 SRA-001 摘干净，只看 SRA-002。
-  const symbols = Array.from({ length: 83 }, (_, i) => `Sym${i}`)
+  // 基线是 81：造 82 条**都真被用**的符号，把 SRA-001 摘干净，只看 SRA-002。
+  const symbols = Array.from({ length: 82 }, (_, i) => `Sym${i}`)
   const files = withExemption(cleanFiles(), (d) => {
     d.symbols = symbols
   })
@@ -183,7 +183,7 @@ test('SRA-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', ()
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SRA-002.*83 条 > 基线 82/s)
+    assert.match(r.out, /SRA-002.*82 条 > 基线 81/s)
     assert.doesNotMatch(r.out, /SRA-001/)
   } finally {
     box.cleanup()

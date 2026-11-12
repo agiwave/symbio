@@ -65,7 +65,6 @@
     "capability_scope_twins",
     "check_all",
     "clock_now_ms",
-    "commitment_events",
     "commitment_records",
     "content_visible",
     "declared_addr_root",

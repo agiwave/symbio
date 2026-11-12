@@ -58,7 +58,7 @@
  *
  * 普通模式只答「还欠多少条」。这一条边的问题不是条数，而是**这些条数住在哪**：如果它们
  * 全长在边二（装配）/ 边三（存储·转写）要搬的代码里，那么「边一先归零」就不是一条能走的
- * 路（`D-456`）。`--breakdown` 把 82 条按 crate 目录结构分成四桶（装配面 / 存储·转写 /
+ * 路（`D-456`）。`--breakdown` 把账本里的符号按 crate 目录结构分成四桶（装配面 / 存储·转写 /
  * 两处都有 / 两处都没有）并逐条列出「两处都没有」的那些——它们才是三条边都没点到的地。
  *
  * 它**不改退出码、不进 GUARDS**：分组口径随目录结构漂，把它做成门禁只会得到一条天天红
@@ -115,8 +115,13 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
  *
  * 2026-11-11（同批第四批）：83 → **82**，`budget_exceeded` 退场（D-455）：会话的自主层
  * 验收原来自塞预算调谓词，改走 `check_all` 后判据自己从 `turn.dispatch` 读预算。
+ *
+ * 2026-11-12：82 → **81**，`commitment_events` 退场（D-453 的走法 3）。这条当时被判
+ * 「没有门面落点」而不搬；D-276 之后门面补上了 `pub use symbio_sdk::actors::commitment_events`，
+ * 生产写侧 `agent/host/behavior.rs` 正是走它。会话的承诺列夹具模拟的是同一个成格口，
+ * 取字随之同源，账上这一条零命中即摘。
  */
-const SYMBOL_BASELINE = 82
+const SYMBOL_BASELINE = 81
 
 const errors = []
 const notes = []

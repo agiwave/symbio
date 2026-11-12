@@ -1273,7 +1273,7 @@ fn commitments_column_exposes_each_delegation_record() {
         .map(|s| s.value())
         .expect("已入格");
     // 一次违约的委托（写方 `record_derived` 落的正是这三格：立约 + 违约 + 告知）
-    for e in symbio_sdk::actors::commitment_events(
+    for e in symbio_plugin_api::commitment_events(
         COMMITMENT_VOCAB,
         "v2c-t1-run-1",
         symbio_sdk::authz::PRINCIPAL_MAIN,
@@ -1287,7 +1287,7 @@ fn commitments_column_exposes_each_delegation_record() {
     // 一条只立了约、还没了结的（在途）
     store
         .append(
-            symbio_sdk::actors::commitment_events(
+            symbio_plugin_api::commitment_events(
                 COMMITMENT_VOCAB,
                 "v2c-t2-run-1",
                 symbio_sdk::authz::PRINCIPAL_MAIN,
