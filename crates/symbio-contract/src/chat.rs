@@ -66,3 +66,6 @@ pub struct AssistReply {
 /// D-025 追记。
 pub const SEG_MESSAGES: &str = "message";
 
+#[cfg(test)]
+#[path = "chat.test.rs"]
+mod tests;
