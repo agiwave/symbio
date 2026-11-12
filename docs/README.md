@@ -65,7 +65,7 @@ impl: done
 | [ref · 参考](004-ref/README.md "RE-000-参考汇总") | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 13 | draft 0 · active 13 · retired 0 | — |
 | [spec · 规范](005-spec/README.md "SP-000-规范汇总") | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 27 | draft 0 · active 27 · retired 0 | — |
 | [guide · 指南](006-guide/README.md "GU-000-指南汇总") | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 14 | draft 0 · active 14 · retired 0 | — |
-| [task · 任务](007-task/README.md "T-000-任务汇总") | 编号前缀 `T-` | 要做什么、做到哪一步——可勾销的最小工作单元，收口即删（只留 git 历史） | 10 | todo 9 · doing 1 · done 0 · wont 0 | 7 条分解边 |
+| [task · 任务](007-task/README.md "T-000-任务汇总") | 编号前缀 `T-` | 要做什么、做到哪一步——可勾销的最小工作单元，收口即删（只留 git 历史） | 9 | todo 8 · doing 1 · done 0 · wont 0 | 6 条分解边 |
 | [judgement · 判定决策](008-judgement/README.md "D-000-判定决策汇总") | 编号前缀 `D-` | 为什么这样判——取舍、理由与被否决的方案（一条决策一文档） | 4 | draft 0 · active 4 · retired 0 | — |
 
 <!-- registry:summary end -->

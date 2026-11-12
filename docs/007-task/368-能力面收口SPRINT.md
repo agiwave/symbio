@@ -30,7 +30,6 @@ where: docs/007-task/、tauri/src/、crates/symbio-plugin-api/、crates/symbio-p
 |---|---|
 | 前端六项 | 多开 / 列表操作 / 断连可见性 / 消息操作 / 命令动作执行 / 无障碍——逐项在 `DE-020` 的「还差什么」表里 |
 | 外部插件 | 八类障碍已列（`DE-007` §2），第二期 / 第三期**未排期**，`D2` / `D3` / `D4` 三条仍「本期暂不裁决」 |
-| 折叠呈现轴 | `Text` / `Reasoning` / `Compression` 已是叶子，缺一个统一呈现轴（`DE-019`） |
 
 ### 子任务
 
@@ -38,7 +37,6 @@ where: docs/007-task/、tauri/src/、crates/symbio-plugin-api/、crates/symbio-p
 |---|---|---|
 | `T-369-前端六项` | `DE-020` 的六行逐项落地或逐项裁「不做」，不留「还差什么」的形容词 | 一 |
 | `T-370-外部插件三期` | `D2` / `D3` / `D4` 先裁决，再按裁决排期；跑通一个外部插件的端到端 | 二 |
-| `T-371-折叠呈现轴` | 三种叶子共用一个呈现轴（默认折叠 / 流式 / 类型图标），不再是三处各写一遍 | 一 |
 
 ### 不做什么
 
@@ -49,5 +47,8 @@ where: docs/007-task/、tauri/src/、crates/symbio-plugin-api/、crates/symbio-p
 
 ## 处理过程
 
+- 2026-11-12：`T-371` 已收口——呈现轴在码里（`tauri/src/registry/messagePresentation.ts` 的
+  `TYPE_PRESENTATION`，`Record<NodeKind, …>` 漏一格即编译错误），`DE-019` 那一行是 Explore
+  阶段的旧判定，已改为落地锚；`grep` 确认没有第二份「按旧叶子名」的分支。
 - 2026-11-12：登记。三条都是从设计文档的「诚实边界」段里出来的**真缺口**，
   与「判过不落」严格区分：前者有落地动作，后者只有重开条件。
