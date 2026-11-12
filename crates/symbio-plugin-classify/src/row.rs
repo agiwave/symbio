@@ -23,7 +23,7 @@
 
 use serde_json::{json, Value};
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
-use symbio_plugin_api::rows::{ModelAsk, ModelReply, RowHandler, RowRequest, RowStep};
+use symbio_plugin_api::rows::{ModelAsk, RowHandler, RowReply, RowRequest, RowStep};
 use symbio_plugin_api::{Entity, FactDraft, Verb};
 use symbio_plugin_api::{Verdict, REASON_UNCLASSIFIED};
 
@@ -88,13 +88,13 @@ impl RowHandler for ClassifyRow {
         })
     }
 
-    fn parse(&self, req: &RowRequest<'_>, reply: ModelReply<'_>) -> Vec<FactDraft> {
+    fn parse(&self, req: &RowRequest<'_>, reply: RowReply<'_>) -> Vec<FactDraft> {
         let Some(id) = req.key_of("id") else {
             return Vec::new();
         };
         let verdict = match reply {
-            ModelReply::Text(text) => parse_verdict(text),
-            ModelReply::Failed(_) => None,
+            RowReply::Text(text) => parse_verdict(text),
+            RowReply::Failed(_) => None,
         }
         .unwrap_or(Verdict::Escalate {
             reason: REASON_UNCLASSIFIED.to_string(),

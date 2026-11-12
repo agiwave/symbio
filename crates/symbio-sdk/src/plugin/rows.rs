@@ -30,7 +30,7 @@
 //!
 //! 反思 / 压缩 / 技能编译这类能力要一次 LLM 往返。它们不拿 provider：`run` 返回
 //! [`RowStep::Ask`] 交一条提示，宿主完成调用、预算、租约与四格协议事实，再把回执
-//! 以 [`ModelReply`] 交回 [`RowHandler::parse`]。能力看到的始终只有纯值——提示
+//! 以 [`RowReply`] 交回 [`RowHandler::parse`]。能力看到的始终只有纯值——提示
 //! 是自己造的那条，回执是模型答的那条；用哪个供应商、重试几次、花多少预算都是
 //! 宿主的事（D-242 的「被否」第一条）。
 //!
@@ -143,13 +143,16 @@ pub struct ModelAsk {
     pub prompt: String,
 }
 
-/// 一次模型往返的**回执**（纯值）：答成的正文，或失败的理由。
+/// 一次 `Ask` 的**回执**（纯值）：答成的正文，或失败的理由。
 ///
-/// 失败也是回执：宿主已经把 `failed(port=model)` 落格，解析函数仍要产出一笔关账
-/// 的事实——「推进优先于猜测」，而不是把债留在原地再打一次模型。
+/// 答方是谁不由类型表达：回执按 id 配对上 `plugin.row.asked` 的那条 `response` /
+/// `failed`（D-338），模型、人、别的端口走同一条配对规则（D-476）。
+///
+/// 失败也是回执：答方的 `failed` 已经落格，解析函数仍要产出一笔关账的事实——
+/// 「推进优先于猜测」，而不是把债留在原地再问一次。
 #[derive(Debug, Clone, Copy)]
-pub enum ModelReply<'a> {
-    /// 模型答成了；这里是正文。
+pub enum RowReply<'a> {
+    /// 答成了；这里是正文。
     Text(&'a str),
     /// 这一次往返失败（`failed` 已落格）；理由由端口给出。
     Failed(&'a str),
@@ -203,10 +206,10 @@ pub trait RowHandler: Sync {
     ///
     /// 只有 `run` 交过 [`RowStep::Ask`] 的实现会被调到；收的仍然是纯值。
     ///
-    /// **必须保证推进**：即使回执是 [`ModelReply::Failed`] 也要落一笔关账的事实。
+    /// **必须保证推进**：即使回执是 [`RowReply::Failed`] 也要落一笔关账的事实。
     /// 宿主把「交过 `Ask` 却一笔都不落」判成实现违约并报错——那不是可重试的暂态，
     /// 而是这一行没有回答「拿到回执之后写什么」。
-    fn parse(&self, req: &RowRequest<'_>, reply: ModelReply<'_>) -> Vec<FactDraft> {
+    fn parse(&self, req: &RowRequest<'_>, reply: RowReply<'_>) -> Vec<FactDraft> {
         let _ = (req, reply);
         Vec::new()
     }

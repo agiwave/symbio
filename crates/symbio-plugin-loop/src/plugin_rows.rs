@@ -26,7 +26,7 @@ use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 use symbio_plugin_api::rows::{
-    ask_id, handler_for, ModelReply, RowRequest, RowStep, ASK_KIND, PLUGIN_ROW,
+    ask_id, handler_for, RowReply, RowRequest, RowStep, ASK_KIND, PLUGIN_ROW,
 };
 use symbio_plugin_api::FactDraft;
 use symbio_plugin_api::PluginInvokeRequestExt;
@@ -105,7 +105,7 @@ fn ask_since<'a>(events: &'a [Event], row: &str, trace: &str, _attempt: u32) -> 
 }
 
 /// 与这笔「在等」配对回执：先找 `response`，再找 `failed`。
-fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<ModelReply<'a>> {
+fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<RowReply<'a>> {
     let mut found = None;
     for event in events.iter().rev() {
         if event.kind != symbio_plugin_api::EVENT_RESPONSE
@@ -126,14 +126,14 @@ fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<ModelReply<'a>> {
                 .get("text")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            found = Some(ModelReply::Text(text));
+            found = Some(RowReply::Text(text));
         } else {
             let why = event
                 .payload
                 .get("reason")
                 .and_then(Value::as_str)
                 .unwrap_or("端口失败");
-            found = Some(ModelReply::Failed(why));
+            found = Some(RowReply::Failed(why));
         }
         break;
     }

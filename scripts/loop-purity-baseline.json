@@ -1,10 +1,10 @@
 {
-  "note": "LP-001…005 的存量棘轮（只许降）。目标：LP-001 / LP-002 / LP-004 / LP-005 归零，LP-003 随 tools/** 迁出与 turn 拆除递减。",
+  "note": "LP-001…005 的存量棘轮（只许降）。五条自 2026-11-12 起全部为 0（LP-003 的 4 格随 D-476 改名清掉）。LP-003 的零键保留：删掉整格要一条 baseline-allow 署名（BS-003），而 0 是更紧的上限、不需要豁免。",
   "baseline-allow": [],
   "lp001PayloadImports": {},
   "lp002ForbiddenDeps": [],
   "lp003WorldRoots": {
-    "plugin_rows.rs": 4
+    "plugin_rows.rs": 0
   },
   "lp004WorldNamedContracts": 0,
   "lp005WorldPayloadSig": 0

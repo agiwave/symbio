@@ -96,25 +96,18 @@ const WORLD_ROOTS = [
 const INTERFACE_WORLD_ROOTS = new Set(['llm', 'tool', 'model', 'batch', 'gate'])
 
 /**
- * LP-003 存量残余的**逐条归属**（判据脚本是唯一 owner，不另立台账；`DE-047` §4 只写判法）。
+ * LP-003 的**逐条归属**表（判据脚本是唯一 owner，不另立台账；`DE-047` §4 只写判法）。
  *
- * 棘轮只数总数——它判不出「同一个总数换了个词根」。这张表补的是每一格的归属：现存 4 格
- * 全在 `crates/symbio-plugin-loop/src/plugin_rows.rs`，全是同一个名字 `ModelReply`：
- * `D-338` 行派发机制的通用回执值（`crates/symbio-sdk/src/plugin/rows.rs`，只有
- * `Text` / `Failed` 两支，与任何端口无关），`D-241` / `D-304` 已裁定它是机制面。词根随
- * 类型名的历史沿革留下；它是机制类型而非世界语义，判据管的是「环别把世界语义拿回来」，
- * 不是「机制类型叫什么」。清零的唯一诚实路径是给这个共享类型换名——那是跨 crate 的
- * 契约改名（`SP-003`「架构改动的边界」），先有裁决后有实施，不是本判据的判定面。
+ * 现在**为空**。这张表存在的理由不是「留个位置」：棘轮只数总数，判不出「同一个总数换了
+ * 个词根」。曾经 4 格全在 `crates/symbio-plugin-loop/src/plugin_rows.rs`，全是同一个
+ * 名字——`D-338` 行派发机制的回执值（只有 `Text` / `Failed` 两支，按 id 配对
+ * `response` / `failed`，与谁答无关）；词根是「只有模型答得回来」那段时间留下的误名。
+ * `D-476` 把它改名 `RowReply`，4 格一并消失，基线降到 0。
  *
- * 判法：实测命中**逐条** token 必须都在表内。少一格 = 基线棘轮的「收窄未同批下调」红；
- * 多一格或换了别的词根 = 下面这条「未归属」红——归属不许被「总数没变」悄悄顶掉。
+ * 判法不变：实测命中**逐条** token 必须都在表内。表空着，所以命中的第一格就是「未归属」红
+ * ——归零之后不再接受任何「先记账、后还账」的例外。
  */
-const LP003_RESIDUAL = [
-  { rel: 'plugin_rows.rs', token: 'ModelReply', where: 'use 导入（`symbio_plugin_api::rows` 转出）' },
-  { rel: 'plugin_rows.rs', token: 'ModelReply', where: '`reply_of` 的返回类型' },
-  { rel: 'plugin_rows.rs', token: 'ModelReply', where: '`reply_of` 命中 `response` ⇒ `Text` 构造' },
-  { rel: 'plugin_rows.rs', token: 'ModelReply', where: '`reply_of` 命中 `failed` ⇒ `Failed` 构造' },
-]
+const LP003_RESIDUAL = []
 
 /** 端口签名里的具名世界载荷（`DE-047` I-6.2）：通用接口只许行 / 值类型。 */
 const WORLD_PAYLOADS = [
@@ -383,7 +376,7 @@ if (PRINT || WRITE) {
   const body = JSON.stringify(
     {
       note:
-        'LP-001…005 的存量棘轮（只许降）。目标：LP-001 / LP-002 / LP-004 / LP-005 归零，LP-003 随 tools/** 迁出与 turn 拆除递减。',
+        'LP-001…005 的存量棘轮（只许降）。五条自 2026-11-12 起全部为 0（LP-003 的 4 格随 D-476 改名清掉）：0 就是上限，任何新增即红。',
       lp001PayloadImports: measured.lp001,
       lp002ForbiddenDeps: measured.lp002,
       lp003WorldRoots: measured.lp003,
@@ -416,10 +409,10 @@ function ratchet(label, code, measuredMap, baselineMap) {
 }
 
 ratchet('载荷类型 import', 'LP-001', measured.lp001, base.lp001PayloadImports)
-// LP-003 的存量 4 格逐条归属见上方 `LP003_RESIDUAL`（token 级守卫在下面）。
+// LP-003 已归零（`D-476` 改名）：`LP003_RESIDUAL` 为空，token 级守卫对命中的第一格就红。
 ratchet('世界语义词根', 'LP-003', measured.lp003, base.lp003WorldRoots)
 
-// LP-003 的 token 级守卫：现存每一格都必须落在 `LP003_RESIDUAL` 的归属里。
+// LP-003 的 token 级守卫：每一格都必须落在 `LP003_RESIDUAL` 的归属里（现在没有归属）。
 const residualTokens = new Set(LP003_RESIDUAL.map((e) => e.token))
 for (const h of measured.lp003Hits) {
   if (!residualTokens.has(h.token)) {

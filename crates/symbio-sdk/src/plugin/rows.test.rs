@@ -89,6 +89,6 @@ fn parse_defaults_to_no_facts() {
     };
     let drafts = handler_for("test.row")
         .unwrap()
-        .parse(&req, ModelReply::Failed("boom"));
+        .parse(&req, RowReply::Failed("boom"));
     assert!(drafts.is_empty());
 }

@@ -343,6 +343,6 @@ console.log(
   ),
 )
 if (lpAllow.records.length + cpAllow.records.length === 0) {
-  console.log(dim('  （没有 baseline-allow 记录：本次基线面一字未动）'))
+  console.log(dim('  （没有 baseline-allow 记录：本次没有需要署名的变宽 / 删格）'))
 }
 process.exit(0)
