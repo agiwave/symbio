@@ -31,14 +31,16 @@
 //!
 //! | 侧 | 调用点 | 判什么 |
 //! |---|---|---|
-//! | 写侧（发言） | 运行器落**收束格**前（`turn_runner::closure_gate`，`ClosureKind::Speech`） | [`can_reply`]（`reply`） |
-//! | 写侧（产物） | 运行器落 `artifact.added` 前（`turn_runner::closure_gate`，`ClosureKind::Artifact`） | [`can_produce_artifact`]（`ProduceArtifact`） |
+//! | 写侧（发言） | 模型执行体落 `chat.assistant.final` 前（`crates/symbio-plugin-model/src/port.rs`） | [`can_reply`]（`reply`） |
+//! | 写侧（产物） | 工具执行体的授权在 `gate_inputs`（`crates/symbio-plugin-tool/src/port.rs`，`can_write_name` + `CAP_EXTERNAL_EXECUTION`）；[`can_produce_artifact`] 今天只经 `pattern_for_principal` 参与模式派生 | `ProduceArtifact` |
 //! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | [`can_see`]（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
 //!
-//! 两道写侧闸判的是**两件事**（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")：收束格按种类判）：
-//! 发言收束问 `reply.*`、产物收束问 `produce.artifact`。没有发言权的主体（对等主体
+//! 两件事分开判是 `D-067` 的裁决（发言收束问 `reply.*`、产物收束问 `produce.artifact`）；
+//! 旧编排的收束闸 `turn_runner::closure_gate` 已随 `P2` 批删除，今天发言那一半在模型
+//! 执行体里落地——拒绝也留痕（拒因格），读侧 `rebuild` 的 `denied_speech` 把被拒的那句
+//! 挡在对话面之外。没有发言权的主体（对等主体
 //! `agent:peer-b` 只持 `produce.artifact`）因此仍能以**产物**收束一轮——「没有说话
-//! 资格就不能留下任何事实」正是那次裁决拆掉的耦合。两道闸的谓词都只定义在**本域**，
+//! 资格就不能留下任何事实」正是那次裁决拆掉的耦合。谓词都只定义在**本域**，
 //! 调用点不复述（口径只活在 core）。
 //!
 //! 表为什么与机制同住 core：它是**架构元素**——「谁持有什么能力」与本域的能力闭集
