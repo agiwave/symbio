@@ -1,10 +1,11 @@
 //! 控制面主体：淘汰回路（[DE-043](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）。
 //!
-//! 抢占判定归 `crates/symbio-plugin-session/src/transcript/inbox`、外部执行闸门归
-//! `crates/symbio-plugin-loop/src/tools/dispatch/gates`（同插件内两处消费，D-190）；本模块的
+//! 抢占面已删（`D-388`：`crates/symbio-plugin-session/src/transcript/inbox` 今天只做
+//! 「忙则排队」）；外部执行闸门的授权在 `crates/symbio-plugin-tool/src/port.rs::gate_inputs`，
+//! 审批判据在 `crates/symbio-provider-collectors/src/approval.rs`。本模块的
 //! [`EliminationDecider`] 是唯一真正跨 owner 的策略——写侧裁决在声誉包
-//! （`crates/symbio-plugin-reputation/src/elimination.rs`）、读侧翻译
-//! （[`EliminationDecider::verdict_grants_changes`]）在 session 工具层。
+//! （`crates/symbio-plugin-reputation/src/elimination.rs`）、读侧翻译就在本文件的
+//! [`EliminationDecider::verdict_grants_changes`]。
 //!
 //! **跨 owner 是它的归属，不是它的住址**（D-279）：两条判据给出相反结论——D-258 说
 //! 「认不认识容器概念」决定住哪个 crate，D-187 / D-189 / D-190 说「跨不跨 owner」决定留不留核。
