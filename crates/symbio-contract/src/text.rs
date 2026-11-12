@@ -1,3 +1,11 @@
+//! 字节口径的**纯文本截断**（真实事故驱动：中文参数按字节切片 → `tokio-rt-worker`
+//! panic → ChatLoop 任务 join 失败）。纯 std、零状态零 IO、内核不读、`local` / `mcp` /
+//! `web` / provider-memory 多 owner 共享 ⇒ 规则 B（D-486）。字符口径的
+//! [`crate::merge_kernel::truncate_chars`] 同族同批迁入。
+//!
+//! 「按显示长度截断」一律走本模块，不写裸切片：Rust 的 `&s[..n]` 按**字节**切片，
+//! `n` 落在多字节字符（CJK、emoji）内部会直接 panic。tokenizer（token 计量与头尾
+//! 切分）是有预算语义的宿主机制（`D-404`），留服务层。
 
 use std::borrow::Cow;
 

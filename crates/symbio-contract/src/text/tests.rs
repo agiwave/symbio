@@ -3,6 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
+use crate::merge_kernel::truncate_chars;
 
 /// 中文字符跨越字节切片点时不得 panic（真实事故场景）：
 /// `args_summary(&json!({...中文...}), 200)` 在 byte 200
@@ -52,4 +53,14 @@ fn floor_char_boundary_never_splits_char() {
 fn zero_budget_is_safe() {
     assert_eq!(text_truncate_bytes("中文", 0, "…"), "…");
     assert_eq!(text_floor_char_boundary("中文", 0), 0);
+}
+
+/// 字符口径：中文一字一字符——10 个汉字在 `max_chars = 10` 下原样保留，
+/// `max_chars = 5` 下收成 5 个字（字节口径会把它们切成 15 字节的碎片）。
+#[test]
+fn truncate_chars_counts_chars_not_bytes() {
+    let s = "一二三四五六七八九十";
+    assert_eq!(truncate_chars(s, 10), s);
+    assert_eq!(truncate_chars(s, 5), "一二三四五");
+    assert_eq!(truncate_chars("", 3), "");
 }
