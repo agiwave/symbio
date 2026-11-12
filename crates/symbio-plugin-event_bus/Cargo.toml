@@ -13,11 +13,13 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
+dashmap = { workspace = true }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-providers = { path = "../symbio-providers" }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 async-trait = { workspace = true }
+tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 ignore = { workspace = true }
 

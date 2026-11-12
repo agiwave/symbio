@@ -44,26 +44,21 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use symbio_plugin_api::chat_node::{ChatNode, NodeRole, NodeStatus};
 use symbio_plugin_api::routes::{
-    ROUTE_VDFS_READ, ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
-    ROUTE_VDFS_WRITE,
+    ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_READ, ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT,
+    ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, ROUTE_VDFS_WRITE,
 };
-use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{
-    event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
-    event_bus_vdfs_change_of, Plugin, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
-    VdfsChange, VdfsContent, VdfsNode, EVENT_BUS_KIND_VDFS, PATH, SESSION_ID, VDFS_STATUS_FAILED,
-    VDFS_STATUS_WORKING, WORKDIR,
+    event_bus_resync_of, event_bus_vdfs_change_of, Plugin, PluginFrame, PluginInvokeRequest,
+    PluginInvokeRequestExt, VdfsChange, VdfsContent, VdfsNode, EVENT_BUS_KIND_VDFS, PATH,
+    SESSION_ID, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING, WORKDIR,
 };
 use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
+use symbio_plugin_api::{PluginPayload, PLUGIN_ID_SESSION};
 use tokio::sync::mpsc;
 
 /// 等待一轮结束的上限。与 `crates/symbio-cli/src/client.rs` 的 `TURN_TIMEOUT` 同量级：一轮里
 /// 可能有长工具调用（构建 / 测试），超时是**兜底**，不是预期路径。
 const TURN_TIMEOUT: Duration = Duration::from_secs(900);
-
-/// 实时面收件队列容量。与 `event_bus` 插件建连接时的容量同量级——本插件**直接**
-/// 注册收件端（不经 `event_bus/subscribe` 建通道，理由见 [`run_turn`]）。
-const BUS_QUEUE: usize = 4096;
 
 /// 收件箱段名（地址契约 `<会话>/inbox` 的一段）。
 ///
@@ -143,25 +138,28 @@ pub(super) async fn run_turn(
 
     // ── ③ 开实时面（**先于入队**，否则首帧会丢）──
     //
-    // 与 `cli` / 前端 / `agent_run` 同构，但**不经 `event_bus/subscribe` 路由**：
-    // 那条路由是为**跨进程**消费方（前端）建 `PluginChannel` 的，而本插件与总线同
-    // 进程，直接注册收件端即可（`agent_run` 的转播桥正是这么做的——先例在那里）。
-    // 于是这里只有两步，而不是三步。
-    let (bus_tx, mut bus_rx) = mpsc::channel::<PluginFrame>(BUS_QUEUE);
-    let conn_id = format!("telegram-{session_id}");
-    event_bus_register_subscriber(conn_id.clone(), bus_tx);
-    if let Err(e) = route_json(
-        &router,
-        ctx,
-        ROUTE_VDFS_WATCH,
-        session_id,
-        json!({ "path": session_addr }),
-    )
-    .await
-    {
-        event_bus_unregister_subscriber(&conn_id);
-        return TurnOutcome::Broken(e);
-    }
+    // 与 `cli` / 前端 / `agent_run` 转播桥**同一条路径**（`D-487`）：经
+    // `event_bus/subscribe` 路由收件——「同进程所以走特权后门」的旧理由随该裁决
+    // 撤销（登记表归插件本体，后门不再存在；路由同进程照样建 `PluginChannel`）。
+    // 收件端 `bus_rx` 随本函数返回而 drop，投递端 `tx.closed()` 感知后由插件的
+    // 清理任务反注册——错误路径同样覆盖，无需手写配对调用。
+    let opened = match subscribe_bus_frames(&router, ctx).await {
+        Err(e) => Err(e),
+        Ok(rx) => route_json(
+            &router,
+            ctx,
+            ROUTE_VDFS_WATCH,
+            session_id,
+            json!({ "path": session_addr }),
+        )
+        .await
+        .map(|_| rx),
+    };
+    let mut bus_rx = match opened {
+        Ok(rx) => rx,
+        // 订阅失败与开闸失败同一条出口；订阅摘除随收件端 drop 走插件清理
+        Err(e) => return TurnOutcome::Broken(e),
+    };
 
     // ── ④ 入队 ──
     // 正文直接是用户消息文本（`parse_inbox_message` 的判别式：不以 `{` 起头即整段
@@ -176,7 +174,6 @@ pub(super) async fn run_turn(
     .await;
     if let Err(e) = queued {
         unwatch(&router, ctx, session_id, &session_addr).await;
-        event_bus_unregister_subscriber(&conn_id);
         return TurnOutcome::Broken(e);
     }
 
@@ -238,9 +235,8 @@ pub(super) async fn run_turn(
         }
     };
 
-    // ── ⑥ 摘除（与登记严格配对：先关闸门，再从总线摘除收件端）──
+    // ── ⑥ 摘除 vdfs 闸门（总线订阅随收件端 drop 由插件清理任务反注册）──
     unwatch(&router, ctx, session_id, &session_addr).await;
-    event_bus_unregister_subscriber(&conn_id);
     outcome
 }
 
@@ -449,6 +445,29 @@ fn is_resync(frame: &PluginFrame) -> bool {
 /// 错误，只在运行期表现为「调用失败」——`plugin-entry-audit` E-003 拦的正是这个。
 /// 本插件用到的协议路径都住 `symbio_plugin_api::routes`（跨插件消费的操作由 vdfs
 /// 的 `PLUGIN.yml` 投影，D-364），这里不写第二遍字面量。
+/// 经协议路径建立事件总线订阅，交回**收件端**（`D-487`）。
+///
+/// 与 `cli` / 前端 / `agent_run` 转播桥同一条 `event_bus/subscribe` 路由；
+/// 首个 `connected` 握手帧由收帧循环按「非 vdfs 变更帧」跳过。
+async fn subscribe_bus_frames(
+    router: &Arc<dyn Plugin>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> Result<mpsc::Receiver<PluginFrame>, String> {
+    let c = ctx.fork();
+    c.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
+    c.set_payload(json!({}))
+        .map_err(|e| format!("构造订阅载荷失败: {e}"))?;
+    let resp = router
+        .clone()
+        .route(c)
+        .await
+        .map_err(|e| format!("event_bus/subscribe 调用失败: {e}"))?;
+    match resp {
+        PluginPayload::Session(channel) => Ok(channel.rx),
+        other => Err(format!("event_bus/subscribe 返回了非会话载荷: {other:?}")),
+    }
+}
+
 async fn route_json(
     router: &Arc<dyn Plugin>,
     ctx: &Arc<dyn PluginInvokeRequest>,

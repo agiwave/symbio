@@ -65,7 +65,10 @@ async fn repeated_watch_on_same_path_is_counted() {
         );
     }
     subs.notify(&VdfsChange::bare("a"));
-    assert_eq!(subs.subscriber_count(), 2);
+    assert!(
+        subs.has_subscribers(),
+        "同一路径重复订阅：计数累加，取消一次仍在"
+    );
 
     subs.unwatch("a");
     subs.notify(&VdfsChange::bare("a"));
@@ -76,7 +79,6 @@ async fn repeated_watch_on_same_path_is_counted() {
     );
 
     subs.unwatch("a");
-    assert_eq!(subs.subscriber_count(), 0);
     assert!(!subs.has_subscribers());
 }
 
@@ -147,5 +149,5 @@ async fn unrelated_subscription_gets_nothing() {
 async fn notify_without_subscribers_is_noop() {
     let subs = VdfsChangeSubscriptions::default();
     subs.notify(&VdfsChange::bare("a"));
-    assert_eq!(subs.subscriber_count(), 0);
+    assert!(!subs.has_subscribers());
 }

@@ -181,16 +181,6 @@ impl VdfsChangeSubscriptions {
         }
     }
 
-    /// 当前订阅者总数（含同一路径的重复计数）
-    pub fn subscriber_count(&self) -> u32 {
-        self.by_path
-            .lock()
-            .unwrap()
-            .values()
-            .map(|(count, _)| *count)
-            .sum()
-    }
-
     /// 是否还有任何订阅者（provider 可据此决定是否停掉昂贵的上游监听）
     pub fn has_subscribers(&self) -> bool {
         !self.by_path.lock().unwrap().is_empty()
@@ -263,7 +253,7 @@ mod tests;
 // panic-allow crates/symbio-sdk/src/vdfs/host.rs::watch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-sdk/src/vdfs/host.rs::unwatch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-sdk/src/vdfs/host.rs::notify: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow crates/symbio-sdk/src/vdfs/host.rs::subscriber_count: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow crates/symbio-sdk/src/vdfs/host.rs::has_subscribers: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-sdk/src/vdfs/host.rs::has_subscribers: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-sdk/src/vdfs/host.rs::paths: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow crates/symbio-sdk/src/vdfs/host.rs::hub_of: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

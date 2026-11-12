@@ -195,9 +195,9 @@ pub use symbio_sdk::clock::clock_now_ms;
 pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
 pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};
 pub use symbio_sdk::event_bus::{
-    event_bus_build_envelope, event_bus_register_subscriber, event_bus_resync_of,
-    event_bus_unregister_subscriber, event_bus_vdfs_change_of, EventBus, EventBusSubscribeRequest,
-    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS,
+    event_bus_build_envelope, event_bus_resync_of, event_bus_vdfs_change_of, EventBus,
+    EventBusPublisher, EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
+    EVENT_BUS_SINK,
 };
 pub use symbio_sdk::keys::{
     AGENT_ID, MODE, PATH, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID, REQUIRED_PLUGINS,

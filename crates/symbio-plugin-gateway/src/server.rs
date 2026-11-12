@@ -46,9 +46,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use symbio_plugin_api::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
 use symbio_plugin_api::{
-    EventBusSubscribeRequest, Plugin, PluginChannel, PluginFrame, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginMessageWire, PluginPayload, PluginPayloadWire,
-    PluginSimpleRequest, SymbioKey, PATH, TRACE_ID,
+    Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginMessageWire, PluginPayload, PluginPayloadWire, PluginSimpleRequest, SymbioKey, PATH,
+    TRACE_ID,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -899,7 +899,7 @@ async fn handle_sse(stream: TcpStream, router: Arc<dyn Plugin>, cancel: Cancella
     let (mut read_half, mut write_half) = stream.into_split();
     let ctx = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
-    if let Err(e) = ctx.set_payload(EventBusSubscribeRequest {}) {
+    if let Err(e) = ctx.set_payload(serde_json::json!({})) {
         let b = format!("{{\"error\":\"{e}\"}}").into_bytes();
         let _ = write_half
             .write_all(&http_response(

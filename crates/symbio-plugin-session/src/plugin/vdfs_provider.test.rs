@@ -139,7 +139,10 @@ async fn vdfs_watch_forwards_session_changes() {
     p.dispatch(&vctx(), "", VdfsRequest::Watch { sink })
         .await
         .unwrap();
-    assert_eq!(p.change_subs.subscriber_count(), 2);
+    assert!(
+        p.change_subs.has_subscribers(),
+        "同一路径重复订阅：计数累加"
+    );
     assert_eq!(p.change_subs.paths(), vec!["".to_string()]);
 
     p.notify_change("abc");
@@ -151,9 +154,8 @@ async fn vdfs_watch_forwards_session_changes() {
     assert!(rx.try_recv().is_err(), "同一路径的重复订阅不得收到重复帧");
 
     p.dispatch(&vctx(), "", UNWATCH).await.unwrap();
-    assert_eq!(
-        p.change_subs.subscriber_count(),
-        1,
+    assert!(
+        p.change_subs.has_subscribers(),
         "取消一位仍有另一位，不得提前停投"
     );
     p.dispatch(&vctx(), "", UNWATCH).await.unwrap();

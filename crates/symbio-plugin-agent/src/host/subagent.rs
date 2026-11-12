@@ -49,17 +49,17 @@ use std::sync::Arc;
 use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
-use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
-use symbio_plugin_api::PLUGIN_ID_SESSION;
-use symbio_plugin_api::{
-    event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
-    event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
+use symbio_plugin_api::routes::{
+    ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
 };
+use symbio_plugin_api::PLUGIN_ID_SESSION;
+use symbio_plugin_api::{event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS};
 use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
 use symbio_plugin_api::{
     port_result, ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame,
-    PluginInvokeRequest, PluginInvokeRequestExt, PortErrorClass, PortExecContext, PortExecutor,
-    PortInput, PortOutcome, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext,
+    PortExecutor, PortInput, PortOutcome, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID,
+    TOOL_CALL_ID,
 };
 use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
@@ -351,9 +351,10 @@ impl AgentRunCapability {
 
         // ── 订阅子会话的实时面（先于发起本轮，避免丢首帧）──
         //
-        // 与 CLI / 前端**同构**：`event_bus/subscribe` 收件 + `vdfs/watch <会话地址>`
-        // 开闸，**两步缺一不可**（只订阅 = 永不响的频道；只 watch = 没有收件人）。
-        // 会话域的实时面**只有这一条**（D-025）：
+        // 与 CLI / 前端**同一条路径**（`D-487`：转播桥走 `event_bus/subscribe` 路由，
+        // 不再经登记表的特权后门）+ `vdfs/watch <会话地址>` 开闸，**两步缺一不可**
+        // （只订阅 = 永不响的频道；只 watch = 没有收件人）。会话域的实时面**只有
+        // 这一条**（D-025）：
         //
         // - 消息流式 = `<sid>/message/<mid>` 的 `updated` + `delta`；
         // - 会话运行态 = `<sid>` 的 `updated`——**本轮结束的唯一判据**（一轮里根
@@ -361,16 +362,11 @@ impl AgentRunCapability {
         //
         // 两者**不靠到达顺序**协作（那是把数据的属性当成传输的属性）：本桥的收尾
         // 判据是会话节点的 `status`，而它是**回读**来的——回读永远最新且幂等。
-        let (bus_tx, bus_rx) = tokio::sync::mpsc::channel::<PluginFrame>(4096);
-        let conn_id = format!("agent-run-{child_session_id}");
-        event_bus_register_subscriber(conn_id.clone(), bus_tx);
-        let session_addr = match session_vdfs_addr(&parent, &ctx, &child_session_id).await {
-            Ok(addr) => addr,
-            Err(e) => {
-                event_bus_unregister_subscriber(&conn_id);
-                return Err(e);
-            }
-        };
+        //
+        // 订阅的摘除不再手写配对调用：收件端（`bus_rx`）随本函数返回而 drop，
+        // 投递端 `tx.closed()` 感知后由插件的清理任务反注册（错误路径同样覆盖）。
+        let bus_rx = subscribe_bus_frames(&parent, &ctx).await?;
+        let session_addr = session_vdfs_addr(&parent, &ctx, &child_session_id).await?;
         vdfs_watch(&parent, &ctx, &session_addr, true).await;
 
         // ── 进程内 VDFS 视图：本轮经它发起，不绕路由 ──
@@ -453,9 +449,9 @@ impl AgentRunCapability {
             ))
         };
         if let Err(e) = started {
-            // 委托失败：清理订阅，错误直接作为工具结果回传
+            // 委托失败：摘除 vdfs 闸门（订阅随收件端 drop 由插件清理任务反注册），
+            // 错误直接作为工具结果回传
             vdfs_watch(&parent, &ctx, &session_addr, false).await;
-            event_bus_unregister_subscriber(&conn_id);
             return Err(e);
         }
 
@@ -479,7 +475,6 @@ impl AgentRunCapability {
                 invoke_ctx: ctx.clone(),
                 session_addr,
                 rel_base: format!("{PLUGIN_ID_SESSION}/{child_session_id}"),
-                conn_id,
                 child_session_id,
                 agent_id,
                 tool_call_id: ctx.get(TOOL_CALL_ID).unwrap_or_default(),
@@ -681,13 +676,12 @@ struct RelayBridge {
     provider: Option<Arc<dyn VdfsProvider>>,
     /// 回读用的请求上下文（`vdfs_context` 的原料）
     invoke_ctx: Arc<dyn PluginInvokeRequest>,
-    /// 摘除订阅要用（`vdfs/unwatch` 与 `event_bus_unregister_subscriber` 都要它）
+    /// 摘除 vdfs 闸门要用（`vdfs/unwatch`；订阅摘除随收件端 drop 走插件清理）
     router: Arc<dyn Plugin>,
     /// 子会话的**展示地址**（`<根>/session/<sid>`）——判定变更归属
     session_addr: String,
     /// 子会话在 provider 子树内的地址（`session/<sid>`）——回读用
     rel_base: String,
-    conn_id: String,
     child_session_id: String,
     agent_id: Option<String>,
     tool_call_id: String,
@@ -742,7 +736,6 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
         router,
         session_addr,
         rel_base,
-        conn_id,
         child_session_id,
         agent_id,
         tool_call_id,
@@ -929,9 +922,8 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
         }
     }
 
-    // 摘除订阅（与注册严格配对）：先关闸门（引用计数），再从总线摘除收件端
+    // 摘除 vdfs 闸门；总线订阅随本函数返回（收件端 drop）由插件清理任务反注册
     vdfs_watch(&router, &invoke_ctx, &session_addr, false).await;
-    event_bus_unregister_subscriber(&conn_id);
 
     // ── 结局判定：错误 > 待审批 > 文本（与收口前逐字一致）──
     if let Some(err) = relay_error {
@@ -1160,6 +1152,27 @@ async fn vdfs_watch(
             addr,
             e
         );
+    }
+}
+
+/// 经协议路径建立事件总线订阅，交回**收件端**（`D-487`）。
+///
+/// 与 CLI / 前端 / 网关同一条 `event_bus/subscribe` 路由——转播桥不再经登记表的
+/// 特权后门（`event_bus_register_subscriber` 已随 `D-487` 从 sdk 撤销）。订阅的
+/// 摘除不需要本侧配对调用：收件端 drop ⇒ 投递端 `tx.closed()` ⇒ 插件清理任务
+/// 反注册；首个 `connected` 握手帧由转播循环按「非变更帧」跳过。
+async fn subscribe_bus_frames(
+    parent: &Arc<dyn Plugin>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> Result<tokio::sync::mpsc::Receiver<PluginFrame>, PluginError> {
+    let c = ctx.fork();
+    c.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
+    let _ = c.set_payload(json!({}));
+    match parent.clone().route(c).await? {
+        PluginPayload::Session(channel) => Ok(channel.rx),
+        other => Err(PluginError::InternalError(format!(
+            "event_bus/subscribe 返回了非会话载荷: {other:?}"
+        ))),
     }
 }
 

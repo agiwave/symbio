@@ -54,7 +54,7 @@ use symbio::symbio_kernel::plugin::{
 use symbio::symbio_kernel::vdfs::{VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
 use symbio::symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio::symbio_sdk::event_bus::{
-    event_bus_resync_of, event_bus_vdfs_change_of, EventBusSubscribeRequest, EVENT_BUS_KIND_VDFS,
+    event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
 };
 use symbio::symbio_sdk::keys::{PATH, SESSION_ID, WORKDIR};
 // 读数面板方言：后端下发描述、CLI 只渲染。
@@ -191,7 +191,7 @@ impl SymbioClient {
         // 常量从 `symbio::routes` 导入（宿主侧地址模块，DE-023 D-184），
         // 不再是 `symbio-kernel` 的根出口——地址常量已随 `fire_hook` 一起搬出了内核。
         ctx.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
-        ctx.set_payload(EventBusSubscribeRequest {})
+        ctx.set_payload(json!({}))
             .map_err(|e| format!("构造订阅载荷失败: {e}"))?;
         let mut stream = match Arc::clone(&root)
             .route(ctx)

@@ -4380,12 +4380,14 @@ name = "symbio-plugin-event_bus"
 version = "0.1.14"
 dependencies = [
  "async-trait",
+ "dashmap",
  "ignore",
  "serde_json",
  "symbio-plugin-api",
  "symbio-providers",
  "tempfile",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

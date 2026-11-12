@@ -7,4 +7,5 @@
 //! 各插件统一 `use symbio_plugin_api::EventBus` 访问，
 //! 不得直接引用本模块（保持"插件互不可见"的分层原则）。
 
+mod bus;
 mod plugin;
