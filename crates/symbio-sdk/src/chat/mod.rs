@@ -20,7 +20,9 @@
 //!
 //! 本域的形状类型（节点 / 主体）已迁入 `symbio-kernel`（D-188 C2b）：节点词表经
 //! [`chat_node`] 私有取用，主体只在 `symbio_kernel::chat::principal`。sdk 公开面只留
-//! 自己的实现——`message_of_node` / `SEG_MESSAGES` / 一次性问答载荷（D-420）。
+//! 自己的实现——`message_of_node`（依赖 keys 域的宿主地址知识，按规划判服务层）。
+//! 一次性问答载荷与 `SEG_MESSAGES` 是纯形状、零 sdk 内部读者，已迁入
+//! `symbio-contract`（D-420 的计件随之走契约臂）。
 //!
 //! 本域**不依赖任何其它域**（只依赖 serde）：`llm` / `turn` / `projection` 都指向它。
 //! 一旦这里开始 `use` 别的域，就说明某个「机制」被误当成了形状。

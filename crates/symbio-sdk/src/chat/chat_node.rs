@@ -1,7 +1,10 @@
 //! 线格式节点的**类型面**已迁入 `symbio-kernel`；本文件保留宿主侧的转写地址与投影。
 //!
 //! 判据（D-188 C2b）：`ChatNode` 及同文件的值类型是 `ModelProvider` / 能力行的签名类型，
-//! 住内核；`SEG_MESSAGES`、`message_of_node` 与呈现派生依赖宿主地址 / 业务知识，留在这里。
+//! 住内核；`message_of_node` 与呈现派生依赖宿主地址 / 业务知识，留在这里。
+//! 一次性问答载荷与 `SEG_MESSAGES` 已迁入 `symbio-contract`（纯形状、≥2 扩展消费方、
+//! 零 sdk 内部读者）；`message_of_node` 依赖 keys 域的 `PRINCIPAL_*`（宿主地址知识），
+//! 随 keys 判服务层。
 
 use serde_json::Value;
 
@@ -9,51 +12,6 @@ use serde_json::Value;
 // 不留第二条路径。
 use symbio_kernel::chat::chat_node::*;
 use symbio_kernel::chat::principal::Principal;
-
-// ==================== 一次性问答的共享载荷（D-336） ====================
-//
-// 只在端口之间传递的**词汇形状**，不是机制、也不是会话历史。与 [`ChatNode`] 同层：
-// 它们由门面 SDK 臂在根上转出（`symbio_plugin_api::{AssistReply, AssistRequest}`），
-// 与内核的线格式模块分开计件（`D-420`）。
-//
-// 与「对话轮」的区分是判据而非命名偏好：对话轮（`Request` / `round_trip` 的
-// `ChatNode` 历史）参与会话、可带工具、留历史；一次性问答只发一轮、不带工具、
-// 不留历史（[D-336](../../../../docs/003-design/053-环驱动与写口裁决.md "DE-053-环驱动与写口裁决")）。
-
-/// 一次性问答的请求（`model.assist` 的行载荷）。
-///
-/// `system` 是提问方自己的指令（谁欠这一行谁给它），`user` 是待处理的正文；
-/// `user` 为空时由执行体从事实读面拼出本轮转写——载荷只带身份，不带正文。
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AssistRequest {
-    #[serde(default)]
-    pub system: String,
-    #[serde(default)]
-    pub user: String,
-    /// 提问方**偏好的 provider id**（`<根>/model/<id>`）。
-    ///
-    /// 能力方知道该用什么档（分类要便宜快的、措辞要好写的），这个偏好就该随请求
-    /// 带进来，而不是让会话替它猜。缺席 / 空串 / 取不到该条目 ⇒ 回落**会话选定**
-    /// 的那个 provider（降级而不失效）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-}
-
-/// 一次性问答的回复（`model.assist` 的应收载荷）。
-///
-/// `text` 是正文；`reasoning` / `reasoning_id` 是执行体如实带回的思考段（没有思考
-/// 产出就是 `None`，读方不得自造）；`cost_ms` 是这一次往返的耗时。
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AssistReply {
-    #[serde(default)]
-    pub text: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_id: Option<String>,
-    #[serde(default)]
-    pub cost_ms: u64,
-}
 
 // ==================== 转写地址与节点投影 ====================
 //
@@ -64,18 +22,6 @@ pub struct AssistReply {
 //
 // 判据：一个符号该不该在 core，看**消费方是谁**——只要有一个消费方不是它所在
 // 的那个插件，它就不是那个插件的私事（与 D-023「准入判据 = 依赖方数量」同款）。
-
-/// 会话内部：转写列表的**路径段**（ASCII，进地址）。
-///
-/// 转写是**列表**：`<根>/session/<id>/message` 的每一项是一条消息，顺序由
-/// `seq`（唯一权威顺序锚点）决定。这个地址只服务**读面**（一次 `read` 拿整份
-/// 历史）与**写面**（`vdfs/action` 的截断 / 清空）。
-///
-/// **实时面不在这个目录上**：一条消息的流式 = 它**自己那个地址**
-/// （`<id>/message/<mid>`）上的 `delta` 增量，目录只承载列表。把实时面挂在目录上
-/// 会让 `path` 的含义随帧类型漂移，且无法推广到第二类集合——理由见
-/// D-025 追记。
-pub const SEG_MESSAGES: &str = "message";
 
 /// [`ChatNode`] 的**逆投影**：VDFS 节点 + 正文 ⇒ 一条消息。
 ///

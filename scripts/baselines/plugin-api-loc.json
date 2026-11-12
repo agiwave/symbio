@@ -50,6 +50,7 @@
   ],
   "total": {
     "lines": 1272,
-    "adr": "D-470"
-  }
+    "adr": "D-486"
+  },
+  "total_note": "1272 → 1272（净 0）：D-486 五层规划批 2 把 chat 域三条（AssistRequest / AssistReply / SEG_MESSAGES）从 SDK 臂换到契约臂（契约臂 +1 行语句 +1 行注），同批压缩 D-276 授权账注释块（完整历史在 DE-018）抵平。词汇换住址，自有实现零变化，无余量。"
 }

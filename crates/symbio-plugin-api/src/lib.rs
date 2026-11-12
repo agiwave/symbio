@@ -174,6 +174,8 @@ pub use symbio_kernel::{
 };
 // 一次往返的**产物**五个名字不转出（`D-439` 退回 model 插件）：跨侧共享的是事实键名。
 pub use symbio_contract::llm::{PromptMessage, PromptToolCall};
+// 一次性问答载荷与转写地址段（D-486）：纯形状 + 字面量，session / compact / model 三插件共享。
+pub use symbio_contract::chat::{AssistReply, AssistRequest, SEG_MESSAGES};
 
 // ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core，D-258） ----
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、
@@ -186,7 +188,7 @@ pub use symbio_sdk::capability::{
     capability_configurables, capability_prompts, capability_report_error, capability_take_errors,
     capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR, SCOPE_TWIN,
 };
-pub use symbio_sdk::chat::chat_node::{message_of_node, AssistReply, AssistRequest, SEG_MESSAGES};
+pub use symbio_sdk::chat::chat_node::message_of_node;
 pub use symbio_sdk::clock::clock_now_ms;
 pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
 pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};
@@ -224,14 +226,12 @@ pub use symbio_sdk::{
 };
 
 // ---- 授权判定：机制臂的一部分，单列成账（D-276） ----
-// 这几条曾以「认识容器概念」为由留在旧 core（D-259），门面于是为它们整块依赖
-// 控制面——21 个扩展层插件的编译图里都躺着 grep / ignore / notify（实测多 34 个 crate）。
-// D-276 复核后改判：`principal_of` / `production_matrix` 只查一张**部署表**，`CAP_*` 是那张
-// 表的闭集，`actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——
-// 没有一条认识轮次、幕或判决。而 `symbio-sdk` 的章程本来就写着「授权判定」，欠的是实现。
-//
-// 这几条与上面的 SDK 臂同源、同一把尺子（HS-002），因此**并入 SDK 基线**：core 臂归零，
-// HS-005（门面 manifest 只许三条）随之成立。
+// 这几条曾以「认识容器概念」为由留在旧 core（D-259），门面为它们整块依赖控制面——21 个
+// 扩展层插件的编译图里躺着 grep / ignore / notify（多 34 个 crate）。D-276 复核改判：
+// `principal_of` / `production_matrix` 只查一张**部署表**，`CAP_*` 是那张表的闭集，
+// `actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——没有一条认识
+// 轮次、幕或判决。与 SDK 臂同源同一把尺（HS-002）**并入 SDK 基线**；HS-005 随之成立
+// （门面 manifest 现为只许四条，D-486）。
 pub use symbio_sdk::actors::{actor_can_assign_work, commitment_events};
 pub use symbio_sdk::authz::{
     principal_of, production_matrix, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK, PRINCIPAL_AUTONOMOUS,

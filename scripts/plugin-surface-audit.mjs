@@ -172,13 +172,22 @@ export const WHITELIST_BASELINE = 0
 // 132 → 113（`D-486`）：契约臂成立，dialog 17 条 + llm 请求词汇 2 条改从
 // `symbio-contract` 转出（五层规划的第一批，逐域套规则 B 的结果见该条映射表），
 // SDK 臂余下的是服务面（规则 C），基线随实测下调，余量不留。
-export const SDK_BASELINE = 113
+// 113 → 110（`D-486` 批 2）：chat 域的一次性问答载荷三条（`AssistRequest` /
+// `AssistReply` / `SEG_MESSAGES`）改从契约层转出——纯 serde 形状 + 字面量，三个
+// 互不相认的插件共享，零 sdk 内部读者。同批复核把普查表里带状态 / 机制键的域
+// （authz / actors / agent / embedding / turn / vdfs 地址 / projection vocab）按
+// 重开条件判回服务层，`message_of_node` 因依赖 keys 域的 `PRINCIPAL_*` 随 keys
+// 留服务层。迁移记 `Migration:`，插件协议零改动。
+export const SDK_BASELINE = 110
 
 /**
  * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，
  * 依赖只有 kernel + serde——这一臂涨 = 插件 ABI 变重，要与「插件真的要用」同批论证。
+ *
+ * 19 → 22（`D-486` 批 2）：chat 域三条随批 1 的同一判据迁入（同一类型闭包的
+ * 地址搬迁，不是新增承诺——sdk 侧同批 −3，两臂合计读数不变）。
  */
-export const CONTRACT_BASELINE = 19
+export const CONTRACT_BASELINE = 22
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。

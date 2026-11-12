@@ -28,5 +28,6 @@
 //! 插件经门面（`symbio_plugin_api`）取用——门面的契约臂从本层转出（HS-002 的
 //! 一部分，基线只许降）；宿主侧（gateway / cli）直接依赖。插件**不直接依赖**
 //! 本 crate（HS-001 不变）。
+pub mod chat;
 pub mod dialog;
 pub mod llm;
