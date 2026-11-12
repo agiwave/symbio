@@ -80,7 +80,7 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：☐ todo 0 · 🟡 doing 2 · done 0 · wont 0（共 2）
+**计数**：☐ todo 0 · 🟡 doing 0 · done 0 · wont 0（共 0）
 
 ## 待处理（按依赖顺序）
 
@@ -88,17 +88,6 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 
 ## 进行中
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-340-session退役线` | session 退役线 | now | arch | — |
-| `T-341-收窄session的sdk依赖边` | 收窄 session 的 sdk 依赖边 | next | arch | — |
-
-## 分解树
-
-分解关系只写在 `parent` 字段（子条目指向父条目、同 kind；编号平铺不体现层级——层级是投影不是身份）。
-同状态的父子在上面的分组表里相邻；本小节是跨状态的分解全景。
-
-- [`T-340-session退役线`](340-session退役线.md) session 退役线（doing） · 子项 doing 1
-  - [`T-341-收窄session的sdk依赖边`](341-收窄session的sdk依赖边.md) 收窄 session 的 sdk 依赖边（doing）
+（无）
 
 <!-- registry:summary end -->
