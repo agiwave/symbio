@@ -61,7 +61,7 @@ const DEFAULT_CORE = {
 
 /**
  * SV-004 的规则源：写方（`artifact_payload` / `dispatch_calls`）、行为（`annotate`）、
- * 登记的读点（产物格三个 + 派发清单格 `call_tables`）。
+ * 登记的读点（产物格三个 + 派发清单格六个，`D-471` 的「谁消费」表全表）。
  *
  * 判据不设「词汇表」——它从写方源码读出账本，再拿读点去对。夹具因此只需要写方
  * 和读点：判的是「读的键在不在账上」，不是「键有几格」。
@@ -69,7 +69,12 @@ const DEFAULT_CORE = {
 const DEFAULT_ARTIFACT = {
   'crates/symbio-plugin-tool/src/port.rs':
     'fn artifact_payload() -> serde_json::Value {\n' +
-    '    serde_json::json!({\n        "tool": 1,\n        "success": 2,\n    })\n}\n',
+    '    serde_json::json!({\n        "tool": 1,\n        "success": 2,\n    })\n}\n' +
+    'fn read_requested() {\n' +
+    '    let _ = fact.payload.get("calls");\n' +
+    '    let _ = call.get("id");\n    let _ = call.get("name");\n' +
+    '    let _ = call.get("node_id");\n    let _ = call.get("arguments");\n' +
+    '    let _ = call.get("overflow_notice");\n}\n',
   'crates/symbio-plugin-vdfs/src/behavior.rs':
     'impl ToolBehavior for FileChange {\n' +
     '    fn annotate(&self) -> Vec<(&\'static str, serde_json::Value)> {\n' +
@@ -80,12 +85,22 @@ const DEFAULT_ARTIFACT = {
     'fn call_tables() {\n    let _ = call.get("id");\n    let _ = e.payload.get("root_id");\n}\n',
   'crates/symbio-plugin-session/src/projections/changes.rs':
     'fn change_of() {\n    let _ = payload.get("success");\n}\n',
+  'crates/symbio-plugin-session/src/transcript/live.rs':
+    'fn partners() {\n    let _ = e.payload.get("tool_call_id");\n' +
+    '    let _ = call.get("id");\n}\n' +
+    'fn remember_request() {\n    let _ = e.payload.get("calls");\n' +
+    '    let _ = call.get("id");\n}\n',
+  'crates/symbio-plugin-tool/src/round_done.rs':
+    'fn observe() {\n    let _ = request.payload.get("calls");\n' +
+    '    let _ = call.get("id");\n}\n',
   'crates/symbio-plugin-model/src/port.rs':
     'fn turn_input() {\n    match kind {\n        EVENT_ARTIFACT_ADDED => {\n' +
     '            let _ = payload.get("tool");\n        }\n        _ => {}\n    }\n}\n' +
     'fn dispatch_calls() -> Vec<serde_json::Value> {\n' +
     '    let mut entry = serde_json::json!({\n        "id": 1,\n        "name": 2,\n        "arguments": 3,\n    });\n' +
-    '    entry["node_id"] = serde_json::json!(4);\n    entry\n}\n',
+    '    entry["node_id"] = serde_json::json!(4);\n' +
+    '    entry["overflow_notice"] = serde_json::json!(5);\n    entry\n}\n' +
+    'fn execute() {\n    let _ = payload.get("answer");\n    let _ = call.get("id");\n}\n',
 }
 
 /** 造一个最小仓库：`crates/<插件>/src/<文件>`，内容由调用方给。 */
@@ -351,9 +366,16 @@ test('⑮ 读点读了一格写方不写的键 ⇒ 红（写方改名后读方�
 
 test('⑯ 写方把键改名 ⇒ 红（读方仍在读旧键）', () => {
   const root = fixture({
+    // 同一份文件里还住着 calls 格的登记读点 `read_requested`，覆盖时不能弄丢它，
+    // 否则判据报「规则源读不出」（exit 2）而不是对账红（exit 1）。
     'crates/symbio-plugin-tool/src/port.rs':
       'fn artifact_payload() -> serde_json::Value {\n' +
-      '    serde_json::json!({\n        "succeeded": 1,\n    })\n}\n',
+      '    serde_json::json!({\n        "succeeded": 1,\n    })\n}\n' +
+      'fn read_requested() {\n' +
+      '    let _ = fact.payload.get("calls");\n' +
+      '    let _ = call.get("id");\n    let _ = call.get("name");\n' +
+      '    let _ = call.get("node_id");\n    let _ = call.get("arguments");\n' +
+      '    let _ = call.get("overflow_notice");\n}\n',
   })
   try {
     const r = runOn(root)
@@ -421,7 +443,9 @@ test('⑳ calls 写方把条件格改名 ⇒ 红（读方仍读 node_id，静默
       '            let _ = payload.get("tool");\n        }\n        _ => {}\n    }\n}\n' +
       'fn dispatch_calls() -> Vec<serde_json::Value> {\n' +
       '    let mut entry = serde_json::json!({\n        "id": 1,\n        "name": 2,\n        "arguments": 3,\n    });\n' +
-      '    entry["card_id"] = serde_json::json!(4);\n    entry\n}\n',
+      '    entry["card_id"] = serde_json::json!(4);\n    entry\n}\n' +
+      // 登记读点 `execute` 也住在这份文件里，覆盖时保留，否则 exit 2 而非对账红。
+      'fn execute() {\n    let _ = payload.get("answer");\n    let _ = call.get("id");\n}\n',
   })
   try {
     const r = runOn(root)
@@ -458,6 +482,24 @@ test('㉒ tool_calls 补写段读 wire_id ⇒ 绿（不登记、不并账——D
     const r = runOn(root)
     assert.equal(r.status, 0, r.stdout + r.stderr)
     assert.match(r.stdout, /派发清单格/)
+  } finally {
+    rmTree(root)
+  }
+})
+
+test('㉓ 会话侧登记读点读账外键 ⇒ 红（D-471 全表登记后，五个读点都在对账）', () => {
+  const root = fixture({
+    'crates/symbio-plugin-session/src/transcript/live.rs':
+      'fn partners() {\n    let _ = e.payload.get("tool_call_id");\n' +
+      '    let _ = call.get("card_id");\n}\n' +
+      'fn remember_request() {\n    let _ = e.payload.get("calls");\n' +
+      '    let _ = call.get("id");\n}\n',
+  })
+  try {
+    const r = runOn(root)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /SV-004/)
+    assert.match(r.stdout, /card_id/)
   } finally {
     rmTree(root)
   }

@@ -12,7 +12,7 @@
  * |---|---|---|
  * | SV-001 | ① **有结构**的名字（含 `.` 或 `/`）出现在两个以上非 `plugin-api` 的插件生产代码里；② 同名 `const` 在两个以上插件 crate 各声明一次；③ 机制层（`symbio-sdk` / `symbio-kernel` / `symbio`）的生产代码里出现**词汇层已有的事件名**字面量（词汇家 = `symbio-plugin-api/src/events.rs`，owner 声明补私有名） | 两份字面量 = 两个 owner：改名只改一处，另一处静默漂移；或绕过词汇层把名字抄回实现（D-364 / D-392） |
  * | SV-003 | 全仓 `submit_reports!` 每条登记的 `(slot, fleet)` 与 `024` 的出品契约表**双向**逐行相等 | 加了列 / 改了 slot 却没更新契约，或表里留着一条已经删掉的列——出口形状与声称的形状静默分叉 |
- * | SV-004 | 产物格（`artifact.added`）的**载荷键**：写方是 `tool` 的 `artifact_payload`（装配）与各行为的 `annotate`（追加）；登记的读点（`rebuild::artifact_nodes`、`changes` 全文、`model::turn_input`）读的键必须在写方账上或容错档里；两个写点不得争同一格。**同一结构的第二份账**（`D-471` / `D-472`）：派发清单格（`tool.requested` 的 `calls[]` 元素）——写方唯一（`model::dispatch_calls`，元素三格 + 条件两格），登记读点 `rebuild::call_tables` 只提取**元素键**（读段拆分后按函数收窄才接得上；`tool_calls` 的补写段是另一个键宇宙，不登记不并账） | 写方把键改名，读方静默读到「没有」——而「没有这个字段」在读侧本来就有合法含义（存量事件 / 该轮没有中途产出），于是没有判据会红（`D-462`） |
+ * | SV-004 | 产物格（`artifact.added`）的**载荷键**：写方是 `tool` 的 `artifact_payload`（装配）与各行为的 `annotate`（追加）；登记的读点（`rebuild::artifact_nodes`、`changes` 全文、`model::turn_input`）读的键必须在写方账上或容错档里；两个写点不得争同一格。**同一结构的第二份账**（`D-471` / `D-472`）：派发清单格（`tool.requested` 的 `calls[]` 元素）——写方唯一（`model::dispatch_calls`，元素三格 + 条件两格），`D-471`「谁消费」表的五个读点（六个登记函数，见 `CALLS_READ_SITES`）全部只提取**元素键**；`tool_calls` 的补写段是另一个键宇宙，不登记不并账 | 写方把键改名，读方静默读到「没有」——而「没有这个字段」在读侧本来就有合法含义（存量事件 / 该轮没有中途产出），于是没有判据会红（`D-462`） |
  *
  * ## 为什么扫 `test_fixtures.rs`，又跳过生成物
  *
@@ -311,12 +311,21 @@ const ARTIFACT_LEGACY_KEYS = new Set(['round'])
 /** 派发清单格（`tool.requested` 的 `calls[]` 元素）的唯一写点（`D-471`：写方唯一）。 */
 const CALLS_WRITER_REL = path.join('crates', 'symbio-plugin-model', 'src', 'port.rs')
 /**
- * calls 格的登记读点（`D-472` 拆分后接上）。
+ * calls 格的登记读点（`D-471` 的「谁消费」表，五个全部登记；`D-472` 拆分后接上）。
  *
- * 只登记 `call_tables`——`rebuild` 里读派发清单的那一段。读 `tool_calls` 的补写段
- * （`backfill_node_ids`）**不登记**：那是另一个事实的载荷、另一套元素键
- * （`wire_id` / `parse_error`），把两个键宇宙并进一份账正是 `D-471` 否掉的
- * 「同形异义」病。
+ * ① `call_tables`——`rebuild` 里读派发清单的那一段（`D-472` 拆出的读段）。读
+ *   `tool_calls` 的补写段（`backfill_node_ids`）**不登记**：那是另一个事实的载荷、
+ *   另一套元素键（`wire_id` / `parse_error`），把两个键宇宙并进一份账正是 `D-471`
+ *   否掉的「同形异义」病。
+ * ② `partners` / `remember_request`——会话实时投影的配对反查与索引收编；两者体内
+ *   的 `payload.get("tool_call_id")` / `payload.get("calls")` 是载荷层取键，不进
+ *   元素账（`tool_call_id` 是产物格的键，归 `D-462` 那份账管）。
+ * ③ `read_requested`——工具执行体，五格全读（含条件格 `node_id` /
+ *   `overflow_notice`）；`KEY_REQUEST_ID` 等常量键与 `KEY_REPLY_KEY` 不在字面量
+ *   形状里，且那些是 `tool.dispatch` 载荷层的键，不在元素账上。
+ * ④ `observe`——工具轮收束，只按 `id` 配对计数。
+ * ⑤ `execute`——模型逐笔标记的派生体；体内的 `payload.get("answer")` 是载荷层，
+ *   元素取键只有 `id`。
  *
  * 取键形状是**元素键**（`call.get("…")`），不是产物格那三种 payload 层形状：
  * `root_id` / `calls` 是 `tool.requested` 载荷层的键，写方不是 `dispatch_calls`
@@ -325,6 +334,11 @@ const CALLS_WRITER_REL = path.join('crates', 'symbio-plugin-model', 'src', 'port
  */
 const CALLS_READ_SITES = [
   { rel: path.join('crates', 'symbio-sdk', 'src', 'projection', 'rebuild.rs'), fn: 'call_tables' },
+  { rel: path.join('crates', 'symbio-plugin-session', 'src', 'transcript', 'live.rs'), fn: 'partners' },
+  { rel: path.join('crates', 'symbio-plugin-session', 'src', 'transcript', 'live.rs'), fn: 'remember_request' },
+  { rel: path.join('crates', 'symbio-plugin-tool', 'src', 'port.rs'), fn: 'read_requested' },
+  { rel: path.join('crates', 'symbio-plugin-tool', 'src', 'round_done.rs'), fn: 'observe' },
+  { rel: path.join('crates', 'symbio-plugin-model', 'src', 'port.rs'), fn: 'execute' },
 ]
 
 /** 从 `openIdx` 处的 `{` 起配对，返回内文（不含两端括号）；配不上 ⇒ null。 */
