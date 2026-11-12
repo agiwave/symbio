@@ -8,7 +8,7 @@
  * `crates/symbio-sdk` / `crates/symbio-kernel` / `crates/symbio-plugin-api` /
  * `crates/symbio-plugin-loop` / `crates/symbio-plugin-session` / `crates/symbio-host`
  * 是能力**不该**碰的架构面。六棵是**并集**
- * （`capability-migration-audit.PROTECTED_TREES`，D-372 / D-475）：任何一套旧口径
+ * （`capability-migration-audit.PROTECTED_TREES`，D-372）：任何一套旧口径
  * 里出现过的树都算，少一棵就留一条「加能力时顺手改这里」的路。判据读指纹，不读
  * 「有没有新 crate」：新 crate 只是触发条件；一个提交完全可以新增能力包却顺手
  * 在 `loop` 里加一行按能力名分支，那正是 T1 要抓的形态。
@@ -41,7 +41,7 @@
  *   名单逐条带理由；判据之后的提交只有上面两条退路。
  * - **口径加宽的存量提交**：`GRANDFATHERED` 里的提交不判——四棵并成五棵时，它们按新口径
  *   回溯会红，但当时的判据不含 `plugin-api`。名单只减不增，每条带理由。
- *   五棵并成六棵（`D-475` 纳入 `symbio-host`）时，范围内新增能力包的提交无一触碰 host，
+ *   五棵并成六棵（按 `D-372` 的并集口径纳入 `symbio-host`）时，范围内新增能力包的提交无一触碰 host，
  *   零回溯判红，因此一条豁免都不加；这条实测是裁决依据，不是「门禁正绿」的巧合。
  *
  * ## 失效形态（回归测试钉的是这几条）
@@ -84,7 +84,7 @@ const argv = process.argv.slice(2)
  * 能力不该碰的六棵树。**唯一一份来自 `capability-migration-audit.PROTECTED_TREES`**
  * （`sdk` / `kernel` / `plugin-api` / `loop` / `session` / `host`）——此前本文件少
  * `plugin-api`、拆分总任务的 exit 少 `sdk`、A 类插件化任务的 exit 只写三棵，同一提交
- * 在三处得到三种结论（D-372）；`host` 由 `D-475` 补进并集，它只受保护、不属迁移批次的
+ * 在三处得到三种结论（D-372）；`host` 按 `D-372` 的并集口径补进，它只受保护、不属迁移批次的
  * 机制面。
  *
  * 为什么以**最宽**为真：`plugin-api` 是能力唯一被允许「看见」的机制面，正因为它最像

@@ -78,7 +78,7 @@ test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-0
   assert.equal(isMigrationBatch(null), false)
 })
 
-test('TREES：六棵是并集且含 plugin-api 与 host（D-372 / D-475 的唯一口径）', () => {
+test('TREES：六棵是并集且含 plugin-api 与 host（D-372 的唯一口径）', () => {
   assert.deepEqual(TREES, [
     'crates/symbio-sdk',
     'crates/symbio-kernel',
@@ -90,7 +90,7 @@ test('TREES：六棵是并集且含 plugin-api 与 host（D-372 / D-475 的唯�
   assert.deepEqual(TREES, PROTECTED_TREES)
 })
 
-test('受保护树与机制面是两件事：host 只进并集，不进 ARCH / CONTROL（D-475 裁决 2）', () => {
+test('受保护树与机制面是两件事：host 只进并集，不进 ARCH / CONTROL（D-372 的并集口径）', () => {
   assert.deepEqual(HOST_TREES, ['crates/symbio-host'])
   assert.ok(TREES.includes('crates/symbio-host'))
   assert.ok(!ARCH_TREES.includes('crates/symbio-host'))
@@ -196,7 +196,7 @@ test('judgeNewCapability：新增能力包夹带 loop 分支 ⇒ 红且点名 lo
   assert.match(r.errors[0], /crates\/symbio-plugin-loop/)
 })
 
-test('judgeNewCapability：新增能力包夹带 host 分支 ⇒ 红且点名 host（D-475 裁决 4）', () => {
+test('judgeNewCapability：新增能力包夹带 host 分支 ⇒ 红且点名 host（D-372 的并集口径 / EX-002）', () => {
   const before = Object.fromEntries(TREES.map((t) => [t, 'h']))
   const after = { ...before, 'crates/symbio-host': 'changed' }
   const r = judgeNewCapability({ sha: 'x', added: ['crates/symbio-plugin-new/PLUGIN.yml'], before, after })

@@ -142,7 +142,7 @@ const PLUGIN_API_TREES = ['crates/symbio-plugin-api']
 
 /**
  * 宿主运行时：驱动族唯一 runner 的持有者。它受保护但**不属**迁移批次的机制面
- * （`D-475`）：只进 `PROTECTED_TREES` 的并集，不进 `ARCH_TREES` / `CONTROL_TREES`。
+ * （`D-372` 的并集口径）：只进 `PROTECTED_TREES` 的并集，不进 `ARCH_TREES` / `CONTROL_TREES`。
  */
 export const HOST_TREES = ['crates/symbio-host']
 
@@ -153,8 +153,8 @@ export const HOST_TREES = ['crates/symbio-host']
  * `plugin-api`），同一提交在三处得到不同结论（D-372）。
  *
  * 取**并集**而不是交集：任何一套旧口径里出现的树都算受保护。少一棵就留一条
- * 「加能力时顺手改这里」的路，而这条路的代价正是本判据要防的。`D-475` 把
- * `symbio-host` 补进并集：唯一 runner 的代码级硬约束拒绝第二个驱动，拒不了
+ * 「加能力时顺手改这里」的路，而这条路的代价正是本判据要防的。`D-372` 的并集口径
+ * 把 `symbio-host` 一并纳入：唯一 runner 的代码级硬约束拒绝第二个驱动，拒不了
  * 「加一行按能力名分支」。受保护树回答「加能力能不能碰」，机制面三棵树回答
  * 「迁移批次有没有新增行为」——两件事，`EX-007` 的判定面不变。
  */
