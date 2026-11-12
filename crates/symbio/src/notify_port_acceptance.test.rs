@@ -44,17 +44,17 @@ fn production_table_accepts_the_third_port() {
     );
 
     // 3. 受理行是**端口无关**的通用行：按 `port` 绑定键，不对端口名做字面量
-    //    约束，因此同一行也受理 notify 之外的任何端口（D-440）。
+    //    约束，因此同一行也受理 notify 之外的任何端口（D-440）。它归受理口是
+    //    派生的（`owes` 指向端口开启侧），行上没有 `by`（`D-306` 裁决一）。
     let row = frozen
         .rows()
         .iter()
         .find(|r| {
-            r.by == Some(PORT_ACTOR)
-                && r.owes.source == EVENT_REQUEST
+            r.owes.source == EVENT_REQUEST
                 && r.owes.key.contains(&"port")
                 && !r.owes.eq.iter().any(|(field, _)| *field == "port")
         })
-        .expect("生产表里应有 by=port 的通用受理行");
+        .expect("生产表里应有覆盖 request 的通用受理行");
 
     // 4. 选债器：一条 request 事实就能让这一行欠账（可还、未被挂起）。
     let request = Event::pending(

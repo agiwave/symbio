@@ -7,7 +7,6 @@ track: arch
 prio: now
 created: 2026-11-12
 parent: T-357-架构补件SPRINT
-deps: [T-358-行去by与可还性三派生]
 where: crates/symbio-kernel/src/decl/、crates/symbio-sdk/src/plugin/reports.rs、docs/003-design/047-义务环判据与归属推导.md
 exit: 第二级的判定粒度有裁决；按裁决落判据或写成「裁决不判 + 重开条件」；DE-047 的「数据就绪，校验缺席」句消失
 ---
@@ -64,5 +63,5 @@ exit: 第二级的判定粒度有裁决；按裁决落判据或写成「裁决�
 
 ## 处理过程
 
-- 2026-11-12：登记。先做 `T-358`（`reads` 上移到行）：行级前件落定之后，
-  「视图读什么」才有一份与 owner 表可对齐的声明面，否则第二级判据没有输入。
+- 2026-11-12：登记。前置已完成——`reads` 已上移到行（`D-306` 裁决一），行级前件是一份
+  与 owner 表可对齐的声明面；本条的输入就绪。

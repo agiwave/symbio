@@ -31,7 +31,7 @@
 //! ## 为什么本包只声明一条事实
 //!
 //! 名册 #36 / #50 / #51（主动求知 / 好奇与探索 / 回避倾向）曾随本包交过名字、格位、载荷
-//! 与 `by = None` 归宿行，但**从未有写方，也没有消费方**：声明一条运行期不会产生的事实
+//! 与归宿行，但**从未有写方，也没有消费方**：声明一条运行期不会产生的事实
 //! 只是假声明。按 `D-411`（`D-395` 的「删实现不删设计行」）四条零写方声明面整体撤回，
 //! 设计行仍留名册 `planned-unspecified`。本包只留 `conation.expressed`——它有真实写方
 //! （会话自主触发）、真实读者（升格债与 `CONATION_INTENTS`）与真实出口（`task.opened`）。
@@ -105,7 +105,7 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
 /// 发生的事实配归宿行，只是把「没人执行」写成「有人看护」。
 pub(crate) const ROWS: &[Decl] = &[Decl {
     name: EVENT_CONATION_EXPRESSED,
-    by: None,
+    reads: &[],
     tier: LatencyTier::Reflex,
     expand: None,
     owes: Pattern {

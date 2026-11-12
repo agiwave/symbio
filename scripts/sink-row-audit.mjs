@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sink-row-audit — 归宿行（`by = None`）的条数棘轮（SR-001…004）
+ * sink-row-audit — 归宿行（一笔债都开不出来）的条数棘轮（SR-001…004）
  *
  * ## 它治什么
  *
@@ -17,16 +17,27 @@
  * | `SR-001` | 生产比基线**多**一条归宿行（按名字计数，不是按名字集合） | 红；确需新增必须同批在基线里登记 `why` / `adr`，并在提交说明里回答「这一格为什么不需要派发」 |
  * | `SR-002` | 基线有而生产**没有**（清债了却没同批删基线） | 红；否则「删一条再加一条」能把总数抹平 |
  * | `SR-003` | 基线条目形状不对（缺 `name` / `why` / `adr`、理由为空、`D-NNN` 不存在、重名） | 红；新增的署名不许匿名或空头 |
- * | `SR-004` | 生产里有 `by: None` 的行，但它的 `name` 是解析不出的常量 | 红；否则这条行对棘轮隐形 |
+ * | `SR-004` | 生产里有归宿行，但它的 `name` / `owes` / `until` 不是可判的字面量 | 红；否则这条行对棘轮隐形 |
  *
  * ## 统计口径（这条比脚本本身重要）
  *
- * 数是**生产 `Decl` 字面量里 `by: None` 的行**，不是文本里出现 `by: None` 的次数：
+ * 归宿行不再是「写了 `by: None` 的行」——`D-306` 裁决一把 `Decl.by` 删了，「谁执行」
+ * 与「还不能执行」都由数据派生。今天的归宿行是**一笔债都开不出来**的行：
  *
- * - 先 `blankComments`，注释里提一句 `by: None` 不算；
- * - 再 `blankTestModules`，并跳过 `*.test.rs` / `tests.rs`，测试夹具不算；
- * - 只认 `Decl { … }` 字面量体内的 `by` 字段（`\bby\s*:\s*None\b`），
- *   所以 `produced_by: None`（`_` 前没有词边界）不会被误算。
+ * ```text
+ * ∃ u ∈ d.until:  u.source = d.owes.source  ∧  u.key = d.owes.key  ∧  u.eq = ∅
+ * ```
+ *
+ * 同源、同键、出口不带等值约束 ⇒ `owes` 展开出的每个实例本身就是一个 `until` 实例
+ * ⇒ `owed` 对这条行永远返回空。这正是内核 [`owed`] 的判据，只是搬到了静态面上：
+ * 脚本读字面量，内核读实例。
+ *
+ * 统计口径的三条边界：
+ *
+ * - 先 `blankComments`，注释里提一句不算；再 `blankTestModules`，并跳过 `*.test.rs`；
+ * - 只认 `Decl { … }` 字面量体（`FactDecl` / `PortDecl` 之类因缺词边界不会被误认）；
+ * - `owes` / `until` 必须是**字面量** `Pattern { … }`：判不了就不是归宿行，而是
+ *   `SR-004`——棘轮看不见的行不许存在（否则新增一条归宿行只要换个写法就能绕过）。
  *
  * `name` 可能是常量（`EVENT_MEMORY_ENCODED`）或别名（`use … as CLASSIFY_ANSWERED`），
  * 脚本从全仓生产 `.rs` 收集 `const …: &str = "…"` 与 `as` 别名后解析出字符串：
@@ -43,7 +54,7 @@
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns SR 归宿行（by = None）条数棘轮
+// @ns SR 归宿行（开不出账的行）条数棘轮
 // @codes SR-001 SR-002 SR-003 SR-004
 
 import fs from 'node:fs'
@@ -66,8 +77,17 @@ const CONST_RE =
   /(?:^|\n)\s*(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*&(?:'static\s+)?str\s*=\s*("(?:[^"\\]|\\.)*")/g
 const ALIAS_RE = /\b([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)\b/g
 const DECL_RE = /\bDecl\s*\{/g
-const BY_NONE_RE = /\bby\s*:\s*None\b/
+const OWES_RE = /\bowes\s*:/
+const UNTIL_RE = /\buntil\s*:/
+const UNLESS_RE = /\bunless\s*:/
+const PATTERN_RE = /\bPattern\s*\{/g
+// 类型定义不是行：`struct Decl { … }` 里的字段声明长得像行体。
+const STRUCT_HEAD_RE = /(?:struct|enum)\s+$/
+
 const NAME_RE = /\bname\s*:\s*([A-Za-z_][A-Za-z0-9_:]*|"(?:[^"\\]|\\.)*")/
+const SOURCE_RE = /\bsource\s*:\s*([A-Za-z_][A-Za-z0-9_:]*|"(?:[^"\\]|\\.)*")/
+const KEY_RE = /\bkey\s*:\s*(&?\s*\[[^\]]*\])/
+const EQ_RE = /\beq\s*:\s*(&?\s*\[[^\]]*\])/
 
 /** Rust 字符串字面量里的常见转义（这些常量值都只有普通字符，仍然解一遍）。 */
 function unescapeString(body) {
@@ -125,6 +145,66 @@ export function resolveName(token, consts, aliases) {
   return null
 }
 
+/** 归一化一段切片字面量（`&[ "a" , "b" ]` → `&["a","b"]`），用于「同键」比较。 */
+function normSlice(text) {
+  return text.replace(/\s+/g, '').replace(/^&?\[/, '').replace(/\]$/, '')
+}
+
+/**
+ * 一个 `Pattern { … }` 字面量的三元组（`source` / `key` / `eq`）。
+ *
+ * 任何一段读不出都返回 `null`——调用方把它判成「这条行对棘轮不可见」，而不是猜。
+ */
+function parsePattern(body) {
+  const s = SOURCE_RE.exec(body)
+  const k = KEY_RE.exec(body)
+  const e = EQ_RE.exec(body)
+  if (!s || !k || !e) return null
+  return { source: s[1].trim(), key: normSlice(k[1]), eq: normSlice(e[1]) }
+}
+
+/** 一个 `Decl { … }` 体里的全部 `Pattern { … }` 字面量（按出现顺序）。 */
+function literalPatterns(text) {
+  const out = []
+  for (const m of text.matchAll(PATTERN_RE)) {
+    const open = m.index + m[0].length - 1
+    const close = matchBrace(text, open)
+    if (close < 0) return null
+    const body = text.slice(open, close)
+    const parsed = parsePattern(body)
+    if (!parsed) return null
+    out.push(parsed)
+  }
+  return out
+}
+
+/**
+ * 判别一条 `Decl` 体是不是归宿行，并说明理由。
+ *
+ * @returns {{ sink: boolean, why?: string }}
+ */
+function classify(body) {
+  const owesAt = body.search(OWES_RE)
+  if (owesAt < 0) return { sink: false }
+  const untilAt = body.search(UNTIL_RE)
+  const unlessAt = body.search(UNLESS_RE)
+  if (untilAt < 0) return { sink: false, why: '缺少 `until` 出口，判不了它会不会开账' }
+  const owesText = body.slice(owesAt, untilAt)
+  const untilText = body.slice(untilAt, unlessAt > untilAt ? unlessAt : body.length)
+
+  const owes = literalPatterns(owesText)
+  if (!owes || owes.length !== 1) {
+    return { sink: false, why: '`owes` 不是单个字面量 `Pattern`，判不了它欠什么' }
+  }
+  const until = literalPatterns(untilText)
+  if (!until || until.length === 0) {
+    return { sink: false, why: '`until` 不是全字面量的 `Pattern` 列表，判不了它何时算还清' }
+  }
+  const owed = owes[0]
+  const covered = until.some((u) => u.source === owed.source && u.key === owed.key && u.eq === '')
+  return { sink: covered }
+}
+
 /**
  * 提取生产声明表里的归宿行。
  *
@@ -137,10 +217,21 @@ export function scanRows(root = ROOT) {
   const unresolved = []
   for (const { rel, text } of scanned.files) {
     for (const m of text.matchAll(DECL_RE)) {
+      // `struct Decl { … }` 是类型定义，不是一行声明。
+      if (STRUCT_HEAD_RE.test(text.slice(Math.max(0, m.index - 16), m.index))) continue
       const open = m.index + m[0].length - 1
       const close = matchBrace(text, open)
+      if (close < 0) continue
       const body = text.slice(open, close)
-      if (!BY_NONE_RE.test(body)) continue
+      const verdict = classify(body)
+      if (!verdict.sink) {
+        // 判不了 ≠ 不是归宿行：判不了就是棘轮的盲区，两种都要红。
+        if (verdict.why) {
+          const line = text.slice(0, m.index).split('\n').length
+          unresolved.push({ file: rel, line, token: verdict.why })
+        }
+        continue
+      }
       const line = text.slice(0, m.index).split('\n').length
       const nameM = NAME_RE.exec(body)
       if (!nameM) {
@@ -196,12 +287,18 @@ export function checkBaseline(rows, root = ROOT) {
     }
     seen.add(r.name)
     if (typeof r.why !== 'string' || r.why.trim() === '') {
-      errors.push({ code: 'SR-003', message: `${where}（${r.name}）缺少非空 why ⇒ 必须回答「这一格为什么不需要派发」` })
+      errors.push({
+        code: 'SR-003',
+        message: `${where}（${r.name}）缺少非空 why ⇒ 必须回答「这一格为什么不需要派发」`,
+      })
     }
     if (typeof r.adr !== 'string' || !/^D-\d{3}$/.test(r.adr.trim())) {
       errors.push({ code: 'SR-003', message: `${where}（${r.name}）缺少 adr（D-NNN）` })
     } else if (!exists(r.adr.trim())) {
-      errors.push({ code: 'SR-003', message: `${where}（${r.name}）挂的决策 ${r.adr} 不存在 ⇒ 新增归宿行必须带能打开的 D 号` })
+      errors.push({
+        code: 'SR-003',
+        message: `${where}（${r.name}）挂的决策 ${r.adr} 不存在 ⇒ 新增归宿行必须带能打开的 D 号`,
+      })
     }
   }
   return errors
@@ -216,7 +313,7 @@ export function judge(rows, baselineRows, unresolved) {
   for (const u of unresolved) {
     errors.push({
       code: 'SR-004',
-      message: `${u.file}:${u.line} 的归宿行 name 解析不出（${u.token}）⇒ 这条行对棘轮不可见，先把它写成可解析的字符串常量`,
+      message: `${u.file}:${u.line} 的归宿行判不了（${u.token}）⇒ 这条行对棘轮不可见，先把它写成字面量 \`Pattern\` / 可解析的名字常量`,
     })
   }
   const counts = (list, key) => {
@@ -260,7 +357,7 @@ export function judge(rows, baselineRows, unresolved) {
 function printBaseline(rows, baselineRows) {
   const prev = new Map(baselineRows.map((r) => [r.name, r]))
   const out = {
-    note: `归宿行（by = None）条数棘轮：只许降。统计口径是生产 Decl 字面量里 by: None 的行（剥注释、剔除 #[cfg(test)] 与 *.test.rs），不是文本出现次数。新增一行必须同批登记非空 why 与能打开的 adr（D-NNN），并在提交说明里回答「这一格为什么不需要派发」。`,
+    note: `归宿行（一笔债都开不出来）条数棘轮：只许降。统计口径是生产 Decl 字面量里 \`owes\` 被 \`until\` 同源同键完整覆盖（出口不带 eq）的行（剥注释、剔除 #[cfg(test)] 与 *.test.rs），不是文本出现次数。新增一行必须同批登记非空 why 与能打开的 adr（D-NNN），并在提交说明里回答「这一格为什么不需要派发」。`,
     rows: rows.map((r) => {
       const p = prev.get(r.name)
       return { name: r.name, why: p?.why ?? '', adr: p?.adr ?? '' }
@@ -286,7 +383,10 @@ if (baseline.error) {
   process.exit(2)
 }
 
-const errors = [...checkBaseline(baseline.rows, ROOT), ...judge(scanned.rows, baseline.rows, scanned.unresolved)]
+const errors = [
+  ...checkBaseline(baseline.rows, ROOT),
+  ...judge(scanned.rows, baseline.rows, scanned.unresolved),
+]
 
 if (errors.length) {
   for (const e of errors) console.log(red(`[ERROR] ${e.code} ${e.message}`))

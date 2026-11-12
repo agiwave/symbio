@@ -37,7 +37,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 ///
 /// 它们不属任何插件：`plugin_row` 的实现是各插件 `submit_row!` 的并集，`port` 的实现
 /// 是通用受理入口。名字由宿主词汇表定，声明在**装配侧**给出——部分装配（只链一个
-/// 插件）没有这两个执行体，也就没有这两条声明，装不出来的 `by` 就是真的缺。
+/// 插件）没有这两个执行体，也就没有这两条写入声明；行注册表里查不到的行走
+/// `Gap::UnmannedRow`，装载期就红（`D-306`）。
 fn actors() -> Vec<ActorDecl> {
     // 写入名单取自实现：`submit_row!` 的并集（`rows.rs` 的 `declared_writes`）。
     // `ActorDecl` 要求 `'static`，而并集是每次装配算出来的 ⇒ 限一次泄漏，之后复用。
@@ -48,14 +49,12 @@ fn actors() -> Vec<ActorDecl> {
             name: PLUGIN_ROW,
             // 反射 / 快速 / 深度三档的插件行都走它（`notes.reflect` 是最宽档）。
             mode: symbio_kernel::LatencyTier::Deep,
-            reads: &[],
             writes: row_writes,
         },
         ActorDecl {
             name: PORT_ACTOR,
             // 工具调用是秒–分钟级（`port.tool` 的租约 600s），最宽档。
             mode: symbio_kernel::LatencyTier::Deep,
-            reads: &[],
             // 端口执行体可以**开下一笔债**（工具批次把模型应答展开成逐调用 `request`，
             // `port.rs::open_drafts`）——这是 `request` 在声明面上的生产者。
             writes: &[EVENT_REQUEST],
@@ -71,8 +70,8 @@ fn actors() -> Vec<ActorDecl> {
 /// 行表一格不动。端口字段在 `key` 里——不同端口的应答不会串到同一笔债上。
 static PORT_ROWS: &[Decl] = &[Decl {
     name: "await-port",
-    by: Some(PORT_ACTOR),
     // 最宽档：工具调用是秒–分钟级，通用执行体 `PORT_ACTOR` 的 mode 也是 Deep。
+    reads: &[],
     tier: LatencyTier::Deep,
     expand: None,
     owes: Pattern {

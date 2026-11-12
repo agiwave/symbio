@@ -15,9 +15,13 @@
 //! 宿主唯一写口 ──draft_into_event──▶ 事实源
 //! ```
 //!
-//! 执行体不认识任何能力名：它按 `Decl.by = plugin_row` 找到这一行的实现，把纯值
-//! 交进去，把 `Vec<FactDraft>` 拿回来。顺序由既有的 `(phase, anchor, name, key)` 决定，
+//! 执行体不认识任何能力名：它按行名查 [`handler_for`] 找到这一行的实现，把纯值
+//! 交进去，把 `Vec<FactDraft>` 拿回来。顺序由选债口的 `(prio, name, key)` 全序决定，
 //! 失败由既有的账本守卫与步数上界兜底。
+//!
+//! 「这一行归谁跑」不再是行上的字段（D-306 裁决一）：`owes` 指向端口开启侧 ⇒ 环的
+//! 通用受理入口；否则查这张注册表。行表因此只是一张「欠什么、何时算还清」的表，
+//! 派发面由数据派生。
 //!
 //! ## 为什么只收纯值
 //!
@@ -50,7 +54,7 @@ use symbio_kernel::plugin::PluginInvokeRequest;
 
 use crate::plugin::effects::FactDraft;
 
-/// 通用行执行体的名字：`Decl.by` 与 `ActorDecl.name` 都用它。
+/// 通用行执行体的名字：`ActorDecl.name` 与 `with_executor` 的键都用它。
 ///
 /// 它是**宿主词汇**（与 `behaviors` 同一层）：能力包写这个名字，宿主认这个名字；
 /// 两边都不需要认识对方的具体身份。

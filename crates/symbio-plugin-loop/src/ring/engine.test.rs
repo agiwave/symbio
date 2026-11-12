@@ -1718,7 +1718,7 @@ fn slice_ids(events: &[KernelEvent], _now: i64) -> Value {
     )
 }
 
-/// 归宿行：`by = None` 只回答「这个事实名有人管」（§3.4 第 7 条）。
+/// 归宿行：只回答「这个事实名有人管」，不派发（§3.4 第 7 条）。
 fn cover_row(fact: &'static str) -> Decl {
     let exits: &'static [Pattern] = Box::leak(Box::new([Pattern {
         source: fact,
@@ -1727,7 +1727,7 @@ fn cover_row(fact: &'static str) -> Decl {
     }]));
     Decl {
         name: fact,
-        by: None,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: exits[0],
@@ -1755,7 +1755,7 @@ fn declaration_world(cost: u32) -> Arc<Frozen> {
     }]));
     rows.push(Decl {
         name: SLICE_ROW,
-        by: Some(PLUGIN_ROW),
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
@@ -1786,13 +1786,15 @@ fn declaration_world(cost: u32) -> Arc<Frozen> {
             actors: vec![ActorDecl {
                 name: PLUGIN_ROW,
                 mode: LatencyTier::Reflex,
-                reads: &[],
                 writes: &[SLICE_SRC, SLICE_EXIT],
             }],
             rows: &rows,
         },
     );
-    b.seal(&[])
+    // 这一行会开账，因此必须有人跑（`D-306`：谁执行由 `owes` 与行注册表派生）。
+    let row_writes: &'static [(&'static str, &'static [&'static str])] =
+        Box::leak(vec![(SLICE_ROW, &[SLICE_SRC, SLICE_EXIT][..])].into_boxed_slice());
+    b.seal(row_writes)
         .unwrap_or_else(|gaps| panic!("切片夹具应能冻结，实测缺口：{gaps:?}"))
 }
 

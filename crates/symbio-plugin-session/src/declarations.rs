@@ -13,7 +13,6 @@
 use symbio_kernel::decl::{FactDecl, PluginDeclarations};
 use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::rows::PLUGIN_ROW;
 use symbio_plugin_api::LatencyTier;
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
@@ -62,10 +61,10 @@ pub(crate) const EVENT_SESSION_TERMINATED: &str = "session.terminated";
 pub(crate) const EVENT_SESSION_RECALL: &str = symbio_plugin_api::events::EVENT_SESSION_RECALL;
 
 /// 收束行：终答落格之后，把能力交出的收束贡献（任务调度 / 记忆编码 …）落成事实。
-/// `by = plugin_row`，实现见 `close_turn`。
+/// 实现见 `close_turn`（行注册表按名解析，`D-306`）。
 pub(crate) const SESSION_CLOSE_TURN: &str = "session.close-turn";
 
-/// 终止事实的**归宿行**（`by = None`）：只给 `session.terminated` 一个声明期读方
+/// 终止事实的**归宿行**（开不出账）：只给 `session.terminated` 一个声明期读方
 /// （`OrphanFact`），不参与派发。实际写方是宿主侧簿记写方（`termination.rs`）。
 ///
 /// 首响（`chat.assistant.opening`）没有同形的归宿行：它的 `FactDecl` 一并退场了
@@ -155,7 +154,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 pub(crate) const ROWS: &[Decl] = &[
     Decl {
         name: SESSION_CLOSE_TURN,
-        by: Some(PLUGIN_ROW),
+        reads: &[],
         tier: LatencyTier::Fast,
         expand: None,
         owes: Pattern {
@@ -173,11 +172,11 @@ pub(crate) const ROWS: &[Decl] = &[
     // 首响格**没有**归宿行（`D-346`）：它不再登记 `FactDecl`，`OrphanFact` 也就无从
     // 提起。首响的债由 `OpeningDebts` 在运行时按开关申报（见 `opening.rs`），
     // 与这张静态表无关。
-    // 终止格的归宿（`by = None`，不派发）：写方是宿主侧簿记写方，不在债表里；
+    // 终止格的归宿（`owes` 被 `until` 覆盖 ⇒ 开不出账）：写方是宿主侧簿记写方，不在债表里；
     // 这里只负责让装载期查得到「谁看护这条事实」。
     Decl {
         name: SESSION_TERMINATED_SEAT,
-        by: None,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {

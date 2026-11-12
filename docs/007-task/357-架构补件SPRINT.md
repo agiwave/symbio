@@ -30,8 +30,6 @@ where: docs/007-task/、crates/symbio-kernel/src/decl/、crates/symbio-sdk/src/�
 
 | 欠账 | 实测 |
 |---|---|
-| `Decl.by` 未移除 | 172 处 `Decl {` 构造点里 **28 处**仍带 `by:`；内核 `blocked = decl.by.is_none() ∨ unless` 与 `used_by` 孤儿检查都在读它 |
-| `reads` 未上移 | 仍挂 `ActorDecl`（`crates/symbio-kernel/src/decl/mod.rs:108`），不是行级前件 |
 | `port=session` 未落 | session 声明 `ports: &[]`（`crates/symbio-plugin-session/src/declarations.rs:306`） |
 | 钩子契约静默缩小 | `HookEvent` **14 个变体**，生产触发点只有 2 个（`plugin-tool/src/port.rs:1216` / `:1796`） |
 | 视图 owner 对账缺席 | `Frozen::view_owner` 除冻结与自检外**无生产消费者**（[DE-047-义务环判据与归属推导](../003-design/047-义务环判据与归属推导.md) 的 D-463） |
@@ -42,7 +40,6 @@ where: docs/007-task/、crates/symbio-kernel/src/decl/、crates/symbio-sdk/src/�
 
 | 任务 | 目标形状（终态，不是省事） | 序 |
 |---|---|---|
-| `T-358-行去by与可还性三派生` | `Decl` 无 `by`；「谁执行」由 `owes` + 注册表派生，「还不能执行」由 `reads` 未产出 / 未配对前序债 / provider 缺失三条派生 | 一 |
 | `T-359-会话端口落地` | `session-call` / `session-config` / `session-facts` 三张投影各有生产写方与执行体，不再是 `ports: &[]` | 一 |
 | `T-360-行内两出口合一` | 一条行既能欠 `request(port=…)` 又能在同一轮落答复格；同轮双卡可跑 | 二 |
 | `T-361-视图owner对账第二级` | 第二级判到什么粒度先裁决，再按裁决落判据或写成「裁决不判 + 重开条件」 | 二 |
@@ -60,6 +57,9 @@ where: docs/007-task/、crates/symbio-kernel/src/decl/、crates/symbio-sdk/src/�
 
 ## 处理过程
 
+- 2026-11-12：`T-358` 已收口——`Decl.by` 移除、「谁执行」由 `owes` + 行注册表派生、`blocked`
+  只由 `reads` 前件派生（`D-306` 裁决一的落地形状写回 `DE-048`）；`sink-row-audit` 的统计对象
+  随之从 `by: None` 换成「一笔债都开不出来」，基线 9 条不变。
 - 2026-11-12：登记。由欠账全量盘点立批：架构面残余集中在 `DE-048` 的 D-306 / D-315、`DE-025`
   的表达力缺口账、`DE-047` 的 D-463、`DE-053` 的 D-345，以及 P2 批删 `chat_loop` / `turn_runner`
   时静默带走的 12 个钩子触发点。父任务只持标尺与分解，不持施工动作。

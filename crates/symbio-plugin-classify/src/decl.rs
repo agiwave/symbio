@@ -4,11 +4,12 @@
 //! `classify.answered` / `classify.escalate`。环只认事实，后续的模型债行抑制
 //! （下一轮）与收束后的第二问都从这一格读，不需要认识本插件的内部函数。
 //!
-//! ## 为什么归宿行是 `by = None`
+//! ## 为什么归宿行不派发
 //!
 //! 实际的债由 [`super::debt`] 的 `DebtSource` 申报（**挂载后才生效**，且带
 //! `classify_enabled` 与规则命中的收窄）。`Decl` 是链接期声明，不随挂载状态变化；
-//! 若把这一行写成 `by = Some(plugin_row)`，环会对**每一条** `user.message` 开账，
+//! 若把它写成会开账的行（`owes` 与 `until` 不同源，交给 `submit_row!` 的实现），
+//! 环会对**每一条** `user.message` 开账，
 //! 停用插件或 `classify_enabled=false` 都拦不住。
 //!
 //! 所以本行只登记「这两格事实归谁看护」：`owes` 与 `until` 同键（本轮用户输入
@@ -56,9 +57,9 @@ pub(crate) const FACTS: &[FactDecl] = &[
 ];
 
 pub(crate) const ROWS: &[Decl] = &[Decl {
-    // 归宿行的名字不参与派发（`by = None`），取一个不与行名冲突的名字。
+    // 归宿行的名字不参与派发（开不出账，`D-306`），取一个不与行名冲突的名字。
     name: "classify.verdict",
-    by: None,
+    reads: &[],
     tier: LatencyTier::Reflex,
     expand: None,
     owes: Pattern {

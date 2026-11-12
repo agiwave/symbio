@@ -144,7 +144,7 @@ pub(crate) const ROWS: &[Decl] = &[
     // 校准观测的归宿行（同上）。
     Decl {
         name: EVENT_MEMORY_CALIBRATED,
-        by: None,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {

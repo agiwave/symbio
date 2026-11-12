@@ -50,14 +50,13 @@ const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
 const HARNESS_ACTORS: &[ActorDecl] = &[ActorDecl {
     name: symbio_plugin_api::rows::PLUGIN_ROW,
     mode: LatencyTier::Deep,
-    reads: &[],
     writes: &[EVENT_SESSION_SETTLED],
 }];
 
 /// 协议五格的**覆盖行**：内核无条件声明协议事实（`PROTOCOL_EVENTS` /
 /// `PROTOCOL_FACTS`），而 `seal` 要求每个被声明的事实至少有一行读到它——否则报
 /// `OrphanFact`。本插件的单测二进制不链接 `loop`，那五行生产读者不在场，夹具因此
-/// 补五行同名的自读行（`by: None`：动作归环，这里只补「这一格有人读」）。
+/// 补五行同名的自读行（`owes` 与 `until` 同源 ⇒ 开不出账，这里只补「这一格有人读」）。
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();
     for name in [
@@ -74,7 +73,7 @@ fn protocol_rows() -> &'static [Decl] {
         }]));
         out.push(Decl {
             name,
-            by: None,
+            reads: &[],
             tier: LatencyTier::Reflex,
             expand: None,
             owes: pattern[0],

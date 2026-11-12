@@ -195,13 +195,15 @@ pub struct AssertionRead {
 /// actor 是**执行体**（表里一个名字对应一次动作）。方案用同一个词，此处不改名。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActorDecl {
-    /// 执行体名——行表 `by` 指向它。
+    /// 执行体名——注册表与环按它配（`rows::handler_for` / 端口受理口）。
     pub name: &'static str,
     /// 时延档：这个执行体允许的**最慢**一档（与行的 `tier` 同词表）。
     pub mode: LatencyTier,
-    /// 读的**视图名**（存在性检查的对象；空 = 这个执行体不读任何视图）。
-    pub reads: &'static [&'static str],
     /// 写的**事实名**（写入封闭与第 6 条收口检查的对象）。
+    ///
+    /// 读面不在这里：前件是**行**的属性（`Decl.reads`，D-306 裁决一）。执行体是一段
+    /// 可复用的代码，同一段代码替两行干活时，两行的前件本来就不一样；把读面挂在
+    /// 执行体上，等于让「这一行要等什么」只能精确到「这组行一共要等什么」。
     pub writes: &'static [&'static str],
 }
 
@@ -395,14 +397,6 @@ impl Builder {
         for a in &self.actors {
             if !actor_names.insert(a.name) {
                 gaps.push(Gap::DuplicateActor { name: a.name });
-            }
-            for view in a.reads {
-                if !view_names.contains(view) {
-                    gaps.push(Gap::UnknownReadView {
-                        actor: a.name,
-                        view,
-                    });
-                }
             }
             // §3.4 第 5 条（写入封闭）的声明侧：执行体的账本不许含引擎独占的格子。
             // 「实际写入 ⊆ `writes`」那一半在运行期对账，判定输入是日志尾段而不是

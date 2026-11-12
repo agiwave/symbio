@@ -60,7 +60,7 @@ lists: [gate-codes=owner]
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
 | **SD** | 会话死码台账（B 类能力待接入） | `scripts/session-dead-code-audit.mjs` | SD-001–002 | `SD-003` |
 | **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
-| **SR** | 归宿行（by = None）条数棘轮 | `scripts/sink-row-audit.mjs` | SR-001–004 | `SR-005` |
+| **SR** | 归宿行（开不出账的行）条数棘轮 | `scripts/sink-row-audit.mjs` | SR-001–004 | `SR-005` |
 | **SRA** | 控制面 session 退役线的进度尺（豁免账 / 单槽登记） | `scripts/session-retire-audit.mjs` | SRA-001–005 | `SRA-006` |
 | **SV** | 共享词汇 | `scripts/shared-name-audit.mjs` | SV-001、SV-003–004 | `SV-005` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |

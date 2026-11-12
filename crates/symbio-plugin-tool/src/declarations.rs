@@ -85,18 +85,18 @@ pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
 /// 端口协议格的行由环的通用出口行（`await-port`）承接：端口名是运行时字符串，
 /// 不进声明表（D-440）。本插件只留产物格的归宿行。
 static ROWS: &[Decl] = &[
-    // 产物格的**归宿行**（`by = None`，不派发）。
+    // 产物格的**归宿行**（`owes` 被 `until` 同键覆盖 ⇒ 开不出账，不派发；`D-306`）。
     //
     // `artifact.added` 的读者是 model 的续接债与会话投影：它们不是环里的行前件，
     // 因此这张行只声明「这一格有人看护」，让装载期的不变量有一个落点。写成
-    // `by = Some(...)` 会凭空给每条产物开一笔债；撤回了记录类索引之后也不该再有
+    // 写成会开账的行（`until` 换个源）会凭空给每条产物开一笔债；撤回了记录类索引之后也不该再有
     // 行把产物格当前件派发。
     //
     // `owes` 与 `until` 同键（`tool_call_id`）：既满足 `OrphanFact`，也满足
-    // `KeyMismatch`，而 `by = None` 让它不进任何一轮的候选集。
+    // `KeyMismatch`，而 `open` 恒空让它不进任何一轮的候选集。
     Decl {
         name: "tool.artifact",
-        by: None,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {

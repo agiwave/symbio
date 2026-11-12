@@ -28,9 +28,9 @@ fn ev(turn: u64, kind: &str, payload: Value) -> Event {
     e
 }
 
-/// 一行**只为归宿**存在的行（§3.4 第 7 条的最小形状）：`by` 为 `None` 时它不由引擎
-/// 跑，只回答「这个事实名有人管」；出口写成它自己，键与等值都不绑。
-fn cover(fact: &'static str, by: Option<&'static str>) -> Decl {
+/// 一行**只为归宿**存在的行（§3.4 第 7 条的最小形状）：`owes` 与 `until` 同源同键
+/// ⇒ 一笔债都开不出来 ⇒ 不需要执行体，只回答「这个事实名有人管」。
+fn cover(fact: &'static str) -> Decl {
     let exits: &'static [ring::Pattern] = Box::leak(Box::new([ring::Pattern {
         source: fact,
         key: &[],
@@ -38,7 +38,7 @@ fn cover(fact: &'static str, by: Option<&'static str>) -> Decl {
     }]));
     Decl {
         name: fact,
-        by,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: exits[0],
@@ -91,7 +91,7 @@ fn kernel_declares_only_the_protocol_cells() {
         EVENT_FAILED,
         EVENT_RETRY,
     ] {
-        b.row(cover(name, None));
+        b.row(cover(name));
     }
     let frozen = b.seal(&[]).expect("协议五格必须能冻结");
     let facts: Vec<_> = frozen.facts().iter().map(|f| f.name).collect();
@@ -128,7 +128,7 @@ fn protocol_events_match_the_kernel_grid() {
         EVENT_FAILED,
         EVENT_RETRY,
     ] {
-        b.row(cover(name, None));
+        b.row(cover(name));
     }
     let frozen = b.seal(&[]).expect("协议五格必须能冻结");
     for e in PROTOCOL_EVENTS {
@@ -155,7 +155,7 @@ fn a_plugin_fact_without_an_event_is_a_gap() {
         }]
         .into_boxed_slice(),
     );
-    let rows: &'static [Decl] = Box::leak(vec![cover(NAME, None)].into_boxed_slice());
+    let rows: &'static [Decl] = Box::leak(vec![cover(NAME)].into_boxed_slice());
     let mut b = Builder::new();
     b.declare(
         "plugins/fixture",
@@ -186,7 +186,7 @@ fn declare_records_the_owner_of_each_fact_and_view() {
         EVENT_FAILED,
         EVENT_RETRY,
     ] {
-        b.row(cover(name, None));
+        b.row(cover(name));
     }
     b.declare(
         "plugins/example",
@@ -237,7 +237,7 @@ fn every_protocol_reference_is_a_field() {
         EVENT_FAILED,
         EVENT_RETRY,
     ] {
-        b.row(cover(name, None));
+        b.row(cover(name));
     }
     let frozen = b.seal(&[]).unwrap();
     for f in frozen.facts() {
@@ -266,7 +266,7 @@ fn every_protocol_reference_is_a_field() {
 fn view_cannot_read_an_undeclared_field() {
     let mut b = Builder::empty();
     b.fact(request_fact());
-    b.row(cover(EVENT_REQUEST, None));
+    b.row(cover(EVENT_REQUEST));
     b.view(probe_view("probe", &[(EVENT_REQUEST, "attmpt")]));
     assert_eq!(
         gaps_of(b),
@@ -362,8 +362,8 @@ fn evidence_must_be_a_fact_the_view_reads() {
         expand: &[],
         fields: &["port", "id"],
     });
-    b.row(cover(EVENT_REQUEST, None));
-    b.row(cover(EVENT_SENT, None));
+    b.row(cover(EVENT_REQUEST));
+    b.row(cover(EVENT_SENT));
     b.view(ViewDecl {
         name: "probe",
         ver: 1,
@@ -387,7 +387,7 @@ fn duplicate_fact_is_rejected() {
     let mut b = Builder::empty();
     b.fact(request_fact());
     b.fact(request_fact());
-    b.row(cover(EVENT_REQUEST, None));
+    b.row(cover(EVENT_REQUEST));
     assert_eq!(
         gaps_of(b),
         vec![Gap::DuplicateFact {
@@ -400,7 +400,7 @@ fn duplicate_fact_is_rejected() {
 fn duplicate_view_is_rejected() {
     let mut b = Builder::empty();
     b.fact(request_fact());
-    b.row(cover(EVENT_REQUEST, None));
+    b.row(cover(EVENT_REQUEST));
     b.view(probe_view("probe", &[(EVENT_REQUEST, "id")]));
     b.view(probe_view("probe", &[(EVENT_REQUEST, "id")]));
     assert_eq!(gaps_of(b), vec![Gap::DuplicateView { name: "probe" }]);
@@ -410,7 +410,7 @@ fn duplicate_view_is_rejected() {
 fn fact_and_view_share_one_name_space() {
     let mut b = Builder::empty();
     b.fact(request_fact());
-    b.row(cover(EVENT_REQUEST, None));
+    b.row(cover(EVENT_REQUEST));
     b.view(probe_view(EVENT_REQUEST, &[(EVENT_REQUEST, "id")]));
     assert_eq!(
         gaps_of(b),
@@ -432,7 +432,7 @@ fn eval_respects_the_declared_cost() {
         expand: &[],
         fields,
     });
-    b.row(cover(EVENT_SENT, None));
+    b.row(cover(EVENT_SENT));
     b.view(ViewDecl {
         name: "probe",
         ver: 1,
@@ -492,7 +492,7 @@ fn probe_view_costing(
 fn the_scan_bound_is_the_cost_every_view_declares() {
     let mut b = Builder::empty();
     b.fact(request_fact());
-    b.row(cover(EVENT_REQUEST, None));
+    b.row(cover(EVENT_REQUEST));
     for name in ["alpha", "beta", "gamma"] {
         b.view(probe_view_costing(name, &[(EVENT_REQUEST, "id")], 64));
     }
@@ -513,7 +513,7 @@ fn the_scan_bound_is_the_cost_every_view_declares() {
 fn a_table_without_views_has_no_scan_bound() {
     let mut b = Builder::empty();
     b.fact(request_fact());
-    b.row(cover(EVENT_REQUEST, None));
+    b.row(cover(EVENT_REQUEST));
     let frozen = b.seal(&[]).expect("只有一行一事实也合法");
     assert_eq!(frozen.scan_bound(), None, "没有视图 ⇒ 没有可切的界");
 }
@@ -526,7 +526,7 @@ fn a_table_without_views_has_no_scan_bound() {
 fn a_view_cost_that_disagrees_with_the_bound_is_rejected_at_load_time() {
     let mut b = Builder::empty();
     b.fact(request_fact());
-    b.row(cover(EVENT_REQUEST, None));
+    b.row(cover(EVENT_REQUEST));
     b.view(probe_view_costing("wide", &[(EVENT_REQUEST, "id")], 4096));
     b.view(probe_view_costing("narrow", &[(EVENT_REQUEST, "id")], 8));
 
@@ -567,10 +567,9 @@ fn an_actor_cannot_claim_an_engine_cell() {
         b.actor(ActorDecl {
             name: "carrier",
             mode: LatencyTier::Deep,
-            reads: &[],
             writes,
         });
-        b.row(cover(cell, Some("carrier")));
+        b.row(cover(cell));
         assert_eq!(
             gaps_of(b),
             vec![Gap::ActorWritesEngineCell {
@@ -591,10 +590,9 @@ fn the_request_cell_belongs_to_the_decider() {
     b.actor(ActorDecl {
         name: "decider",
         mode: LatencyTier::Deep,
-        reads: &[],
         writes: &[EVENT_REQUEST],
     });
-    b.row(cover(EVENT_REQUEST, Some("decider")));
+    b.row(cover(EVENT_REQUEST));
     assert_eq!(gaps_of(b), vec![]);
 }
 

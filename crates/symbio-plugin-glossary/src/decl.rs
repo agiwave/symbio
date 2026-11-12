@@ -38,7 +38,7 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
 /// 只把「这条事实由本能力负责」写进声明表。
 pub(crate) const ROWS: &[Decl] = &[Decl {
     name: GLOSSARY_DEFINED,
-    by: None,
+    reads: &[],
     tier: LatencyTier::Reflex,
     expand: None,
     owes: Pattern {

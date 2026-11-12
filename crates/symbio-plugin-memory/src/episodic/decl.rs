@@ -89,7 +89,7 @@ pub(crate) const ROWS: &[Decl] = &[
     // 不是环上的债：它没有「必须发生」的时机，是收束这一刻的贡献。
     Decl {
         name: EVENT_MEMORY_ENCODED,
-        by: None,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
@@ -110,10 +110,11 @@ pub(crate) const ROWS: &[Decl] = &[
     // `memory` 端口执行体（`crate::consolidate`）。行是「谁接住这条事实」（`seal` 的
     // `OrphanFact`），与写方在哪无关。
     //
-    // 两行都是 `by: None` 的空转行：有即闭合，永远不会被选中，也不是任何能力的债。
+    // 两行都是空转行（`owes` 被 `until` 完整覆盖，`D-306`）：有即闭合，永远不会被
+    // 选中，也不是任何能力的债。
     Decl {
         name: EVENT_MEMORY_CONSOLIDATED,
-        by: None,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
@@ -130,7 +131,7 @@ pub(crate) const ROWS: &[Decl] = &[
     },
     Decl {
         name: EVENT_MEMORY_FORGOTTEN,
-        by: None,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {

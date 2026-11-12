@@ -33,15 +33,33 @@ fn pattern(source: &'static str) -> Pattern {
 }
 
 /// 一行「归宿」：某个事实被子句读到即算有归宿（判据 7）。
-fn cover(source: &'static str, by: Option<&'static str>) -> Decl {
+///
+/// `owes` 与 `until` 同源同键 ⇒ 一笔债都开不出来 ⇒ 不需要执行体（`D-306` 裁决一：
+/// 行不再声明自己归谁，谁执行由 `owes` 与行注册表派生）。
+fn cover(source: &'static str) -> Decl {
     let exits: &'static [Pattern] = Box::leak(Box::new([pattern(source)]));
     Decl {
-        name: Box::leak(format!("cover-{source}-{}", by.unwrap_or("none")).into_boxed_str()),
-        by,
+        name: Box::leak(format!("cover-{source}").into_boxed_str()),
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: exits[0],
         until: exits,
+        unless: &[],
+    }
+}
+
+/// 一条**会开账**的策略行（`owes` 与 `until` 不同源 ⇒ 必须有人跑）：装载期会按
+/// 行注册表判它有没有执行体。
+fn strategy_row(fact: &'static str) -> Decl {
+    let exit: &'static [Pattern] = Box::leak(Box::new([pattern(EVENT_SENT)]));
+    Decl {
+        name: "fixture.new-row",
+        reads: &[],
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: pattern(fact),
+        until: exit,
         unless: &[],
     }
 }
@@ -56,7 +74,7 @@ fn rows(sources: &[&'static str]) -> &'static [Decl] {
         EVENT_RETRY,
     ];
     all.extend_from_slice(sources);
-    let out: Vec<Decl> = all.iter().map(|s| cover(s, None)).collect();
+    let out: Vec<Decl> = all.iter().map(|s| cover(s)).collect();
     let leaked: &'static mut [Decl] = Box::leak(out.into_boxed_slice());
     leaked
 }
@@ -173,21 +191,26 @@ fn strategy_extension_is_owner_local() {
             actors: vec![ActorDecl {
                 name: "fixture-actor",
                 mode: LatencyTier::Reflex,
-                reads: &[],
                 writes: &[FIXTURE_FACT],
             }],
             rows: {
                 let mut out = rows(&[FIXTURE_FACT]).to_vec();
-                out.push(cover(FIXTURE_FACT, Some("fixture-actor")));
+                out.push(strategy_row(FIXTURE_FACT));
                 Box::leak(out.into_boxed_slice())
             },
         },
     );
-    let frozen = b.seal(&[]).expect("新增策略行 = 一行声明 + 一个执行体");
+    // 派发端只交两样数据：行表与行实现表。「谁执行」由后者派生（`D-306` 裁决一）——
+    // 行上没有「我归谁」这一栏可写。
+    let row_writes: &'static [(&'static str, &'static [&'static str])] =
+        Box::leak(vec![("fixture.new-row", &[FIXTURE_FACT][..])].into_boxed_slice());
+    let frozen = b
+        .seal(row_writes)
+        .expect("新增策略行 = 一行声明 + 一个行实现");
     assert!(frozen.actor("fixture-actor").is_some());
     assert!(
-        frozen.rows().iter().any(|r| r.by == Some("fixture-actor")),
-        "行的 by 指向执行体，派发只按数据解析"
+        frozen.rows().iter().any(|r| r.name == "fixture.new-row"),
+        "行表里有这一行，执行体由注册表回答"
     );
 }
 
@@ -218,7 +241,7 @@ fn plugin_extension_is_owner_local() {
             views: &[],
             ports: &[],
             actors: Vec::new(),
-            rows: Box::leak(vec![cover(B_FACT, None)].into_boxed_slice()),
+            rows: Box::leak(vec![cover(B_FACT)].into_boxed_slice()),
         },
     );
     let frozen = b

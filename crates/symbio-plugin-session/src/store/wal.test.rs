@@ -1122,7 +1122,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
             }]));
             out.push(Decl {
                 name,
-                by: None,
+                reads: &[],
                 tier: LatencyTier::Reflex,
                 expand: None,
                 owes: pattern[0],
@@ -1246,7 +1246,7 @@ fn a_domain_cell_is_gated_like_any_other_declared_cell() {
             }]));
             out.push(Decl {
                 name,
-                by: None,
+                reads: &[],
                 tier: LatencyTier::Reflex,
                 expand: None,
                 owes: pattern[0],

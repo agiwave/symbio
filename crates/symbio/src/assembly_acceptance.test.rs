@@ -68,14 +68,16 @@ fn every_submitted_port_is_in_the_sealed_table_with_an_executor_row() {
 
     // 端口名是运行时字符串：受理行按 `port` 绑定键，不对它做字面量约束，因此
     // 一条通用行覆盖全部已申报端口（加端口不用加行，D-440）。
+    //
+    // 「这一行归受理口」由 `owes` 派生（`D-306` 裁决一）：指向端口开启侧、且不钉
+    // 端口名。行上没有 `by` 可断，判据因此就是它欠的那一格。
     assert!(
         frozen.rows().iter().any(|r| {
-            r.by == Some(PORT_ACTOR)
-                && r.owes.source == EVENT_REQUEST
+            r.owes.source == EVENT_REQUEST
                 && r.owes.key.contains(&"port")
                 && !r.owes.eq.iter().any(|(field, _)| *field == "port")
         }),
-        "端口协议格应由一条 `by = {PORT_ACTOR}` 的通用受理行覆盖，端口名不进声明表"
+        "端口协议格应由一条通用受理行覆盖（`owes` 指向 request、端口名不进声明表）"
     );
 
     let mut ports = 0;

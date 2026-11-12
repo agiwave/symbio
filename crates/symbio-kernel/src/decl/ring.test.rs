@@ -50,12 +50,37 @@ fn list_view(events: &[Event], _now: i64) -> Value {
     )
 }
 
-/// 用例世界里的唯一执行体：`act`。行的 `by` 只有指向它才算「有人跑」。
+thread_local! {
+    /// 本用例的行实现表（`row()` 按第三参登记，`seal` 时取用）。
+    ///
+    /// 每个用例是一个线程（`cargo test` 默认一用例一线程），表因此天然隔离；进程内
+    /// 泄漏一份 `'static` 切片，与出口切片的做法相同。
+    static WIRED: std::cell::RefCell<Vec<(&'static str, &'static [&'static str])>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// 本用例登记过的行实现（`submit_row!` 的替身）：`seal` 的 `row_writes` 入参。
+///
+/// 「谁执行」是派生的（`D-306`），所以夹具也必须交出注册表而不是在行上写一个名字。
+fn wired_rows() -> &'static RowWrites {
+    let v: Vec<(&'static str, &'static [&'static str])> = WIRED.with(|w| w.borrow().clone());
+    // 后登记的覆盖先登记的：一个用例里同一行名可以先用一支名单、后换另一支
+    // （第 6 条的两档就是这样逐档试的），表里只留最后一次。
+    let mut out: Vec<(&'static str, &'static [&'static str])> = Vec::new();
+    for (name, writes) in v {
+        match out.iter_mut().find(|(n, _)| *n == name) {
+            Some(slot) => slot.1 = writes,
+            None => out.push((name, writes)),
+        }
+    }
+    Box::leak(out.into_boxed_slice())
+}
+
+/// 用例世界里的唯一执行体：`act`。行的第三参写它的写入名单才算「有人跑」。
 /// 写的两个事实正好覆盖各用例的出口（`g` / `h`），`done` 给批量世界用。
 const ACT: ActorDecl = ActorDecl {
     name: "act",
     mode: LatencyTier::Deep,
-    reads: &[],
     // `f` / `batch` 也是它写的：D-296 的前件生产者判据要求 `owes` 的源有人落格。
     writes: &["f", "g", "h", "done", "batch"],
 };
@@ -100,12 +125,12 @@ fn declare(actors: &[ActorDecl]) -> Builder {
     b
 }
 
-/// 只为了给一个声明事实**归宿**、不参与求解的一行（`by = None`）。
+/// 只为了给一个声明事实**归宿**、不参与求解的一行（开不出账）。
 fn home(fact: &'static str) -> Decl {
     let exit: &'static [Pattern] = Box::leak(Box::new([pattern(fact, &[], &[])]));
     Decl {
         name: fact,
-        by: None,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: exit[0],
@@ -122,7 +147,7 @@ fn freeze(rows: &[Decl], actors: &[ActorDecl]) -> Result<Arc<Frozen>, Vec<Gap>> 
     for r in rows {
         b.row(r.clone());
     }
-    b.seal(&[])
+    b.seal(wired_rows())
 }
 
 /// 反向用例的断言面：`seal()` 报出的缺口（装载成功 ⇒ 空表）。
@@ -132,13 +157,13 @@ fn seal_gaps(rows: &[Decl], actors: &[ActorDecl]) -> Vec<Gap> {
 
 /// 求解用例的**声明面**：事实与视图。每个事实补一行归宿才装得起来——`owed`
 /// 拿的是各用例自己那份 `rows`，这张表只负责「名字与视图存在」，所以
-/// 归宿行写成 `by = None`，一个执行体也不注册。
+/// 归宿行写成 `owes` 被 `until` 覆盖，一个执行体也不注册。
 fn decl_world() -> Arc<Frozen> {
     let mut b = declare(&[]);
     for name in ["f", "g", "h"] {
         b.row(home(name));
     }
-    b.seal(&[]).expect("用例的声明集必须能冻结")
+    b.seal(wired_rows()).expect("用例的声明集必须能冻结")
 }
 
 fn pattern(
@@ -152,16 +177,19 @@ fn pattern(
 fn row(
     name: &'static str,
     _band: u8,
-    by: Option<&'static str>,
+    impl_writes: Option<&'static [&'static str]>,
     owes: Pattern,
     until: &[Pattern],
     unless: &[Pattern],
 ) -> Decl {
+    if let Some(writes) = impl_writes {
+        WIRED.with(|w| w.borrow_mut().push((name, writes)));
+    }
     // 用例里的出口是现场拼的切片，`Decl` 要 `'static`——测试进程内泄漏可忽略。
     let leak = |p: &[Pattern]| Box::leak(p.to_vec().into_boxed_slice()) as &'static [Pattern];
     Decl {
         name,
-        by,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes,
@@ -177,7 +205,7 @@ fn open_debt_needs_owes_and_no_same_key_until() {
     let rows = [row(
         "r",
         10,
-        Some("act"),
+        Some(ACT.writes),
         pattern("f", &["id"], &[("x", Lit::Str("go"))]),
         &[pattern("g", &["id"], &[])],
         &[],
@@ -202,7 +230,7 @@ fn a_fact_without_until_keeps_the_debt_open_forever() {
     let rows = [row(
         "r",
         10,
-        Some("act"),
+        Some(ACT.writes),
         pattern("f", &["id"], &[]),
         &[],
         &[],
@@ -211,12 +239,15 @@ fn a_fact_without_until_keeps_the_debt_open_forever() {
     assert_eq!(owed(&rows, &decl_world(), &events, 0).len(), 1);
 }
 
+/// `unless` 命中 ⇒ **这笔债不成立**（`D-306` 裁决一：与 `until` 同键同效）。
+///
+/// 旧语义「欠着但没人还」不再是可表达的态：没人还由「没有执行体」派生，装载期就红。
 #[test]
-fn unless_blocks_without_closing() {
+fn unless_makes_the_debt_not_hold() {
     let rows = [row(
         "r",
         10,
-        Some("act"),
+        Some(ACT.writes),
         pattern("f", &["id"], &[]),
         &[pattern("g", &["id"], &[])],
         &[pattern("h", &["id"], &[])],
@@ -225,25 +256,66 @@ fn unless_blocks_without_closing() {
         ev(1, 1, "f", json!({"id": "a"})),
         ev(2, 1, "h", json!({"id": "a"})),
     ];
-    let debts = owed(&rows, &decl_world(), &events, 0);
+    // 同键的 `h` 命中 ⇒ 这笔债不成立：它既不在债表里，也不是 `blocked`。
+    assert!(owed(&rows, &decl_world(), &events, 0).is_empty());
+    // 没有 `h` 的那一笔照旧开着，且没有 `reads` 前件 ⇒ 可还。
+    let only_f = vec![ev(1, 1, "f", json!({"id": "a"}))];
+    let debts = owed(&rows, &decl_world(), &only_f, 0);
     assert_eq!(debts.len(), 1);
-    assert!(debts[0].blocked, "`unless` 命中 ⇒ 在等，而不是没事");
+    assert!(!debts[0].blocked);
 }
 
+/// 「还不能执行」是派生的（`D-306` 裁决一）：`reads` 有名字没实例 ⇒ 在等，不是没事。
 #[test]
-fn by_none_is_the_declared_waiting_state() {
-    let rows = [row(
+fn an_unproduced_read_keeps_the_debt_waiting() {
+    // 前件是**行**的属性（`Decl.reads`），不是执行体的：同一段实现替两行干活时，
+    // 两行要等的东西本来就不一样。
+    let mut decl = row(
         "r",
         10,
-        None,
+        Some(ACT.writes),
         pattern("f", &["id"], &[]),
         &[pattern("g", &["id"], &[])],
         &[],
-    )];
-    let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
-    let debts = owed(&rows, &decl_world(), &events, 0);
+    );
+    decl.reads = &["h"];
+    let rows = [decl];
+    let waiting = vec![ev(1, 1, "f", json!({"id": "a"}))];
+    let debts = owed(&rows, &decl_world(), &waiting, 0);
     assert_eq!(debts.len(), 1);
-    assert!(debts[0].blocked);
+    assert!(debts[0].blocked, "`reads` 里的 `h` 还没有实例");
+
+    let ready = vec![
+        ev(1, 1, "f", json!({"id": "a"})),
+        ev(2, 1, "h", json!({"id": "a"})),
+    ];
+    let debts = owed(&rows, &decl_world(), &ready, 0);
+    assert_eq!(debts.len(), 1);
+    assert!(!debts[0].blocked, "前件成立 ⇒ 可还");
+}
+
+/// 前件可以是视图：一条实例都没有 ⇒ 未成立；折出一条 ⇒ 成立。
+#[test]
+fn a_read_of_a_view_waits_for_an_instance() {
+    let mut decl = row(
+        "r",
+        10,
+        Some(ACT.writes),
+        pattern("g", &["id"], &[]),
+        &[pattern("h", &["id"], &[])],
+        &[],
+    );
+    decl.reads = &["v_list"];
+    let rows = [decl];
+    // `v_list` 折的是 `f` 的实例：一条 `f` 都没有 ⇒ 空数组 ⇒ 前件不成立。
+    let waiting = vec![ev(1, 1, "g", json!({"id": "a"}))];
+    assert!(owed(&rows, &decl_world(), &waiting, 0)[0].blocked);
+
+    let ready = vec![
+        ev(1, 1, "g", json!({"id": "a"})),
+        ev(2, 1, "f", json!({"id": "a"})),
+    ];
+    assert!(!owed(&rows, &decl_world(), &ready, 0)[0].blocked);
 }
 
 // ── 视图当源 ─────────────────────────────────────────────────────────────
@@ -253,7 +325,7 @@ fn views_are_expanded_into_instances() {
     let obj_rows = [row(
         "obj",
         10,
-        Some("act"),
+        Some(ACT.writes),
         pattern("v", &["id"], &[("ready", Lit::Bool(true))]),
         &[pattern("g", &["id"], &[])],
         &[],
@@ -271,7 +343,7 @@ fn views_are_expanded_into_instances() {
     let list_rows = [row(
         "list",
         10,
-        Some("act"),
+        Some(ACT.writes),
         pattern("v_list", &["id"], &[]),
         &[pattern("g", &["id"], &[])],
         &[],
@@ -288,7 +360,7 @@ fn a_null_view_has_no_instances() {
     let rows = [row(
         "r",
         10,
-        Some("act"),
+        Some(ACT.writes),
         pattern("v", &["id"], &[]),
         &[pattern("g", &["id"], &[])],
         &[],
@@ -305,39 +377,49 @@ fn empty_table_is_complete() {
     assert!(owed(&[], &decl_world(), &events, 0).is_empty());
 }
 
-/// 守卫用例的替身（D-118 订正 1）：「`by` 查不到动作」不再是求解时静默跳过，
-/// 而是装载期就红。`accept` 谓词存在时，这一行会永远不被选中却全绿；现在它拒绝启动。
+/// 「谁执行」不再是声明（`D-306` 裁决一）：会开账的行若不在注册表里、`owes` 也不指向
+/// 端口开启侧，就没有任何人跑它——装载期红，而不是运行期静默空转。
 #[test]
-fn a_by_without_an_actor_is_a_load_time_gap() {
+fn a_row_without_an_executor_is_a_load_time_gap() {
     let rows = [row(
         "unwired",
         0,
-        Some("nobody"),
+        None,
         pattern("f", &["id"], &[]),
         &[pattern("g", &["id"], &[])],
         &[],
     )];
     let gaps = seal_gaps(&rows, &[ACT]);
-    assert!(gaps.contains(&Gap::UnmannedRow {
-        row: "unwired",
-        by: "nobody"
-    }));
-    // 反方向同样要红：声明了执行体却没有行指向它 = 裸函数换了个写法。
-    assert!(gaps.contains(&Gap::OrphanActor { actor: "act" }));
-}
+    assert!(gaps.contains(&Gap::UnmannedRow { row: "unwired" }));
 
-/// `by = None` 是「这笔账不由引擎执行」的唯一声明位：它不是缺口，
-/// 但它也不该带来一个执行体。
-#[test]
-fn a_none_by_needs_no_actor() {
-    let rows = [row(
-        "waiting",
+    // 同一行登记了实现 ⇒ 同一张表装得起来（缺口不是永久的，缺的是注册）。
+    let wired = [row(
+        "unwired",
         0,
-        None,
+        Some(ACT.writes),
         pattern("f", &["id"], &[]),
-        &[pattern("g", &["id"], &[]), pattern("h", &["id"], &[])],
+        &[pattern("g", &["id"], &[])],
         &[],
     )];
+    assert!(!seal_gaps(&wired, &[ACT]).contains(&Gap::UnmannedRow { row: "unwired" }));
+}
+
+/// 归宿行（`owes` 被 `until` 完整覆盖 ⇒ 一笔债都开不出来）不需要执行体：
+/// 它为「这条事实归本能力负责」存在，不为派发存在。
+#[test]
+fn a_home_row_needs_no_executor() {
+    let rows = [
+        row(
+            "waiting",
+            0,
+            None,
+            pattern("f", &["id"], &[]),
+            &[pattern("f", &["id"], &[])],
+            &[],
+        ),
+        home("g"),
+        home("h"),
+    ];
     assert!(seal_gaps(&rows, &[]).is_empty());
 }
 
@@ -348,31 +430,20 @@ fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
     let rows = [row(
         "r",
         10,
-        Some("act"),
+        Some(&["z"]),
         pattern("f", &["id"], &[]),
         &[pattern("g", &["id"], &[])],
         &[],
     )];
-    let gaps = seal_gaps(
-        &rows,
-        &[ActorDecl {
-            name: "act",
-            mode: LatencyTier::Deep,
-            reads: &[],
-            writes: &["z"],
-        }],
-    );
-    assert!(gaps.contains(&Gap::ActorCannotClose {
-        row: "r",
-        actor: "act"
-    }));
+    let gaps = seal_gaps(&rows, &[ACT]);
+    assert!(gaps.contains(&Gap::ActorCannotClose { row: "r" }));
 }
 
 /// 第 6 条的第二档：出口**全是**引擎独占格的行——派发行的形状。
 ///
-/// 交集判不了它：那等于要求执行体声明一条第 5 条禁止它声明的格，两条检查互斥，
-/// 这一行当年只能 `by: None`（`dispatch-model` / `dispatch-tool` 曾是或正是这个形状）。
-/// 这一档判「有没有交出去的凭据」，两种形态都算：
+/// 交集判不了它：那等于要求执行体声明一条第 5 条禁止它声明的格，两条检查互斥。
+/// 这一档判「有没有交出去的凭据」（`D-306` 之后「谁跑」不声明了，这一格只剩凭据），
+/// 两种形态都算：
 ///
 /// 1. 名单非空（旧口径）——它自己写得出领域格；
 /// 2. 出口里有某个端口的 `before` 格（订正 1）——它挂上了一条派出契约，`check_ports`
@@ -382,17 +453,13 @@ fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
 /// 就是「注册了一段什么都不写的动作」。
 #[test]
 fn an_actor_serving_an_engine_exit_row_needs_a_write_or_a_port_contract() {
-    let gap = Gap::ActorCannotClose {
-        row: "r",
-        actor: "act",
-    };
+    let gap = Gap::ActorCannotClose { row: "r" };
     // `with_port` = 这一行挂的 `sent` 是不是某个端口的 `before`（`check_ports` 会替它
     // 要求应答出口；这里只关心第 6 条看不看得见那条契约）。
     let gaps_for = |writes: &'static [&'static str], with_port: bool| -> Vec<Gap> {
         let mut b = declare(&[ActorDecl {
             name: "act",
             mode: LatencyTier::Deep,
-            reads: &[],
             writes,
         }]);
         // 派发行按**端口**开账，夹具世界照生产那一格补上 `sent` 与它的字段。
@@ -420,12 +487,12 @@ fn an_actor_serving_an_engine_exit_row_needs_a_write_or_a_port_contract() {
         b.row(row(
             "r",
             10,
-            Some("act"),
+            Some(writes),
             pattern("f", &["id"], &[]),
             &[pattern(EVENT_SENT, &["id"], &[])],
             &[],
         ));
-        b.seal(&[]).err().unwrap_or_default()
+        b.seal(wired_rows()).err().unwrap_or_default()
     };
     assert!(
         !gaps_for(&["g"], false).contains(&gap),
@@ -441,37 +508,6 @@ fn an_actor_serving_an_engine_exit_row_needs_a_write_or_a_port_contract() {
     );
 }
 
-/// 时延闸门：行的 `tier` 比执行体的 `mode` 更慢 ⇒ 这一行不可能按时跑完。
-/// （反射档拿不到模型句柄——装载期检查第 6 条的后半。）
-#[test]
-fn a_row_slower_than_its_actor_mode_is_a_gap() {
-    let rows = {
-        let mut d = row(
-            "r",
-            10,
-            Some("act"),
-            pattern("f", &["id"], &[]),
-            &[pattern("g", &["id"], &[])],
-            &[],
-        );
-        d.tier = LatencyTier::Deep;
-        [d]
-    };
-    assert!(seal_gaps(
-        &rows,
-        &[ActorDecl {
-            name: "act",
-            mode: LatencyTier::Reflex,
-            reads: &[],
-            writes: &["g"],
-        }],
-    )
-    .contains(&Gap::ActorModeTooNarrow {
-        row: "r",
-        actor: "act"
-    }));
-}
-
 // ── 纯性 ─────────────────────────────────────────────────────────────────
 
 #[test]
@@ -479,7 +515,7 @@ fn same_slice_same_now_same_debts() {
     let rows = [row(
         "r",
         10,
-        Some("act"),
+        Some(ACT.writes),
         pattern("v_list", &["id"], &[]),
         &[pattern("g", &["id"], &[])],
         &[],
@@ -510,7 +546,7 @@ fn seal_finds_every_kind_of_gap() {
         row(
             "no-exit",
             10,
-            Some("act"),
+            Some(ACT.writes),
             pattern("f", &["id"], &[]),
             &[],
             &[],
@@ -519,7 +555,7 @@ fn seal_finds_every_kind_of_gap() {
         row(
             "key-mismatch",
             20,
-            Some("act"),
+            Some(ACT.writes),
             pattern("f", &["id"], &[]),
             &[pattern("g", &[], &[])],
             &[],
@@ -528,7 +564,7 @@ fn seal_finds_every_kind_of_gap() {
         row(
             "unknown",
             30,
-            Some("act"),
+            Some(ACT.writes),
             pattern("ghost", &["id"], &[]),
             &[pattern("g", &["id"], &[])],
             &[],
@@ -537,7 +573,7 @@ fn seal_finds_every_kind_of_gap() {
         row(
             "unknown",
             40,
-            Some("act"),
+            Some(ACT.writes),
             pattern("f", &["id"], &[]),
             &[pattern("g", &["id"], &[])],
             &[],
@@ -562,7 +598,7 @@ fn a_complete_row_set_has_no_gaps() {
     let rows = [row(
         "r",
         10,
-        Some("act"),
+        Some(ACT.writes),
         pattern("f", &["id"], &[]),
         &[pattern("g", &["id"], &[]), pattern("h", &["id"], &[])],
         &[],
@@ -570,7 +606,7 @@ fn a_complete_row_set_has_no_gaps() {
     assert!(seal_gaps(&rows, &[ACT]).is_empty());
 }
 
-/// 归宿行的边界（D-397）：`by = None` 只许守**不产生债务的格**。
+/// 归宿行的边界（D-397）：开不出账的行只许守**不产生债务的格**。
 ///
 /// 判据读的是事实自己的 `port`：端口事实是派发契约的输入，归宿必须是派发行。
 /// 这条与 `OrphanFact` 互补——前者说「有人接住」，本条说「接住的方式不能是
@@ -580,7 +616,7 @@ fn a_sink_row_may_not_guard_a_port_fact() {
     // 登记了端口 ⇒ 端口事实会产生债务；用归宿行接住 `req` ⇒ 红。
     let mut b = port_world(&[]);
     b.row(home("req"));
-    let gaps = b.seal(&[]).expect_err("端口事实的归宿行必须红");
+    let gaps = b.seal(wired_rows()).expect_err("端口事实的归宿行必须红");
     assert!(
         gaps.contains(&Gap::SinkRowOnPortFact {
             row: "req",
@@ -590,14 +626,15 @@ fn a_sink_row_may_not_guard_a_port_fact() {
     );
 }
 
-/// 退化用例：把一条**本该派发**的行改成 `by = None` ⇒ 红（D-397）。
+/// 派生出来的新风险（`D-306`）：`owes` 指向同一个端口开启格的两条行都会被读成受理行，
+/// 同一笔 `request` 就会被派发两遍。装载期红。
 #[test]
-fn a_dispatch_row_turned_into_a_sink_row_is_red() {
-    let dispatch = |by| {
+fn two_dispatch_rows_on_one_port_fact_are_red() {
+    let dispatch = |name: &'static str| {
         row(
-            "req.dispatch",
+            name,
             10,
-            by,
+            None,
             Pattern {
                 source: "req",
                 key: &[],
@@ -624,16 +661,19 @@ fn a_dispatch_row_turned_into_a_sink_row_is_red() {
         )
     };
     let mut b = port_world(&[REQ_ACT]);
-    b.row(dispatch(Some("req_act")));
-    assert!(b.seal(&[]).is_ok(), "先证明这一行本来是可派发的合法行");
+    b.row(dispatch("req.a"));
+    assert!(b.seal(wired_rows()).is_ok(), "一条受理行是合法形状");
 
     let mut b = port_world(&[REQ_ACT]);
-    b.row(dispatch(None));
-    let gaps = b.seal(&[]).expect_err("本该派发的行改成 by=None 必须红");
+    b.row(dispatch("req.a"));
+    b.row(dispatch("req.b"));
+    let gaps = b
+        .seal(wired_rows())
+        .expect_err("同一端口开启格只许一条受理行");
     assert!(
-        gaps.contains(&Gap::SinkRowOnPortFact {
-            row: "req.dispatch",
-            fact: "req"
+        gaps.contains(&Gap::DuplicateDispatchRow {
+            fact: "req",
+            row: "req.b"
         }),
         "{gaps:?}"
     );
@@ -643,7 +683,6 @@ fn a_dispatch_row_turned_into_a_sink_row_is_red() {
 const REQ_ACT: ActorDecl = ActorDecl {
     name: "req_act",
     mode: LatencyTier::Deep,
-    reads: &[],
     writes: &["req", "g"],
 };
 
@@ -732,12 +771,12 @@ fn world_batch() -> Arc<Frozen> {
     b.row(row(
         "home",
         99,
-        Some("act"),
+        Some(ACT.writes),
         pattern("batch", &[], &[]),
         &[pattern("done", &[], &[])],
         &[],
     ));
-    b.seal(&[]).expect("篮子世界的声明集必须能冻结")
+    b.seal(wired_rows()).expect("篮子世界的声明集必须能冻结")
 }
 
 /// 篮子表上的装载缺口（`rows` 与声明集一起 `seal`）。
@@ -746,7 +785,7 @@ fn seal_batch(rows: &[Decl]) -> Vec<Gap> {
     for r in rows {
         b.row(r.clone());
     }
-    b.seal(&[]).err().unwrap_or_default()
+    b.seal(wired_rows()).err().unwrap_or_default()
 }
 
 fn row_exp(
@@ -756,9 +795,11 @@ fn row_exp(
     until: &[Pattern],
 ) -> Decl {
     let leak = |p: &[Pattern]| Box::leak(p.to_vec().into_boxed_slice()) as &'static [Pattern];
+    // 展开用例的行都「有实现」：`seal_batch` 与 `row()` 走同一张登记表。
+    WIRED.with(|w| w.borrow_mut().push((name, ACT.writes)));
     Decl {
         name,
-        by: Some("act"),
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand,
         owes,
@@ -944,13 +985,12 @@ fn a_precondition_without_any_producer_is_a_gap() {
     const NO_F: ActorDecl = ActorDecl {
         name: "act",
         mode: LatencyTier::Deep,
-        reads: &[],
         writes: &["g", "h"],
     };
     let rows = [row(
         "r",
         10,
-        Some("act"),
+        Some(NO_F.writes),
         pattern("f", &["id"], &[]),
         &[pattern("g", &["id"], &[])],
         &[],
@@ -972,14 +1012,13 @@ fn a_later_phase_producer_is_not_a_gap() {
     const NO_F: ActorDecl = ActorDecl {
         name: "act",
         mode: LatencyTier::Deep,
-        reads: &[],
         writes: &["g", "h"],
     };
     let rows = [
         row(
             "early",
             10,
-            Some("act"),
+            Some(ACT.writes),
             pattern("f", &["id"], &[]),
             &[pattern("g", &["id"], &[])],
             &[],
@@ -987,13 +1026,14 @@ fn a_later_phase_producer_is_not_a_gap() {
         row(
             "late",
             60,
-            Some("act"),
+            Some(ACT.writes),
             pattern("g", &["id"], &[]),
             &[pattern("h", &["id"], &[])],
             &[],
         ),
     ];
-    let writes: &'static RowWrites = Box::leak(vec![("late", &["f", "h"][..])].into_boxed_slice());
+    let writes: &'static RowWrites =
+        Box::leak(vec![("early", &["g"][..]), ("late", &["f", "h"][..])].into_boxed_slice());
     let mut b = declare(&[NO_F]);
     for r in &rows {
         b.row(r.clone());
@@ -1014,20 +1054,18 @@ fn a_cycle_in_the_who_settles_whom_graph_is_a_gap() {
     const ONE: ActorDecl = ActorDecl {
         name: "one",
         mode: LatencyTier::Deep,
-        reads: &[],
         writes: &["f", "g", "h"],
     };
     const TWO: ActorDecl = ActorDecl {
         name: "two",
         mode: LatencyTier::Deep,
-        reads: &[],
         writes: &["f", "g", "h"],
     };
     let rows = [
         row(
             "r1",
             10,
-            Some("one"),
+            Some(ONE.writes),
             pattern("f", &["id"], &[]),
             &[pattern("g", &["id"], &[])],
             &[],
@@ -1035,7 +1073,7 @@ fn a_cycle_in_the_who_settles_whom_graph_is_a_gap() {
         row(
             "r2",
             20,
-            Some("two"),
+            Some(TWO.writes),
             pattern("f", &["id"], &[]),
             &[pattern("h", &["id"], &[])],
             &[],
@@ -1056,7 +1094,7 @@ fn a_row_that_closes_itself_is_not_a_cycle() {
     let rows = [row(
         "r",
         10,
-        Some("act"),
+        Some(ACT.writes),
         pattern("f", &["id"], &[]),
         &[pattern("g", &["id"], &[])],
         &[],
@@ -1082,20 +1120,18 @@ fn same_family_different_cell_is_not_an_edge() {
     const ONE: ActorDecl = ActorDecl {
         name: "one",
         mode: LatencyTier::Deep,
-        reads: &[],
         writes: &["f", "g"],
     };
     const TWO: ActorDecl = ActorDecl {
         name: "two",
         mode: LatencyTier::Deep,
-        reads: &[],
         writes: &["f", "g"],
     };
     let rows = [
         row(
             "r1",
             10,
-            Some("one"),
+            Some(ONE.writes),
             pattern("f", &["id"], &[]),
             &[pattern("g", &["id"], &[("x", Lit::Str("a"))])],
             &[],
@@ -1103,7 +1139,7 @@ fn same_family_different_cell_is_not_an_edge() {
         row(
             "r2",
             20,
-            Some("two"),
+            Some(TWO.writes),
             pattern("f", &["id"], &[]),
             &[pattern("g", &["id"], &[("x", Lit::Str("b"))])],
             &[],
@@ -1130,13 +1166,11 @@ fn same_cell_or_uncovered_family_still_makes_an_edge() {
     const ONE: ActorDecl = ActorDecl {
         name: "one",
         mode: LatencyTier::Deep,
-        reads: &[],
         writes: &["f", "g", "h"],
     };
     const TWO: ActorDecl = ActorDecl {
         name: "two",
         mode: LatencyTier::Deep,
-        reads: &[],
         writes: &["f", "g", "h"],
     };
     // 同一格：两边出口都含 `g{x=a}`（另带 `h` 只为把夹具的三个事实都覆盖到）。
@@ -1144,7 +1178,7 @@ fn same_cell_or_uncovered_family_still_makes_an_edge() {
         row(
             "r1",
             10,
-            Some("one"),
+            Some(ONE.writes),
             pattern("f", &["id"], &[]),
             &[
                 pattern("g", &["id"], &[("x", Lit::Str("a"))]),
@@ -1155,7 +1189,7 @@ fn same_cell_or_uncovered_family_still_makes_an_edge() {
         row(
             "r2",
             20,
-            Some("two"),
+            Some(TWO.writes),
             pattern("f", &["id"], &[]),
             &[
                 pattern("g", &["id"], &[("x", Lit::Str("a"))]),
@@ -1177,7 +1211,7 @@ fn same_cell_or_uncovered_family_still_makes_an_edge() {
         row(
             "r1",
             10,
-            Some("one"),
+            Some(ONE.writes),
             pattern("f", &["id"], &[]),
             &[
                 pattern("g", &["id"], &[("x", Lit::Str("a"))]),
@@ -1188,7 +1222,7 @@ fn same_cell_or_uncovered_family_still_makes_an_edge() {
         row(
             "r2",
             20,
-            Some("two"),
+            Some(TWO.writes),
             pattern("f", &["id"], &[]),
             &[pattern("h", &["id"], &[])],
             &[],
@@ -1209,14 +1243,12 @@ fn same_cell_or_uncovered_family_still_makes_an_edge() {
 const WRITER_G: ActorDecl = ActorDecl {
     name: "one",
     mode: LatencyTier::Deep,
-    reads: &[],
     // `h` 是两行的前件；`g` 是它的出口证据。
     writes: &["g", "h"],
 };
 const WRITER_F: ActorDecl = ActorDecl {
     name: "two",
     mode: LatencyTier::Deep,
-    reads: &[],
     writes: &["f", "h"],
 };
 
@@ -1226,7 +1258,7 @@ fn exit_view_rows() -> Vec<Decl> {
         row(
             "r_a",
             10,
-            Some("one"),
+            Some(WRITER_G.writes),
             pattern("h", &["id"], &[]),
             &[pattern("v_exit", &["id"], &[])],
             &[],
@@ -1234,7 +1266,7 @@ fn exit_view_rows() -> Vec<Decl> {
         row(
             "r_b",
             20,
-            Some("two"),
+            Some(WRITER_F.writes),
             pattern("h", &["id"], &[]),
             &[pattern("f", &["id"], &[]), pattern("g", &["id"], &[])],
             &[],
@@ -1257,7 +1289,7 @@ fn freeze_exit_view(evidence: &'static [&'static str]) -> Result<Arc<Frozen>, Ve
     for r in exit_view_rows() {
         b.row(r);
     }
-    b.seal(&[])
+    b.seal(wired_rows())
 }
 
 /// 出口视图**只帮我算**的那一格，在依赖图上不是收口方：图无环、装载绿。
@@ -1290,12 +1322,14 @@ fn the_full_read_set_as_evidence_is_the_cycle_that_was_missing() {
 #[test]
 fn overlapping_rows_are_reported_not_rejected() {
     let rows = [
+        // 第 4 条只读 `owes`：两行自闭合（出口含 `owes` 那一格），因此不需要执行体，
+        // 也不参与第 6 条与依赖图——夹具只为「同键同源、可能遮账」这一面服务。
         row(
             "r1",
             10,
             None,
             pattern("f", &["id"], &[]),
-            &[pattern("g", &["id"], &[])],
+            &[pattern("f", &["id"], &[]), pattern("g", &["id"], &[])],
             &[],
         ),
         row(
@@ -1303,7 +1337,7 @@ fn overlapping_rows_are_reported_not_rejected() {
             20,
             None,
             pattern("f", &["id"], &[]),
-            &[pattern("h", &["id"], &[])],
+            &[pattern("f", &["id"], &[]), pattern("h", &["id"], &[])],
             &[],
         ),
     ];
@@ -1328,15 +1362,15 @@ fn rows_that_cannot_collide_are_not_reported() {
             10,
             None,
             pattern("f", &["id"], &[]),
-            &[pattern("g", &["id"], &[])],
+            &[pattern("f", &["id"], &[]), pattern("g", &["id"], &[])],
             &[],
         ),
         row(
-            "by-turn",
+            "by-seq",
             20,
             None,
-            pattern("f", &["turn"], &[]),
-            &[pattern("g", &["turn"], &[])],
+            pattern("f", &["seq"], &[]),
+            &[pattern("f", &["seq"], &[]), pattern("g", &["seq"], &[])],
             &[],
         ),
         // 同一事实同一键，但 `x` 上两个不同字面量：不可能同时成立。
@@ -1345,7 +1379,10 @@ fn rows_that_cannot_collide_are_not_reported() {
             30,
             None,
             pattern("f", &["id"], &[("x", Lit::Str("go"))]),
-            &[pattern("g", &["id"], &[])],
+            &[
+                pattern("f", &["id"], &[("x", Lit::Str("go"))]),
+                pattern("g", &["id"], &[]),
+            ],
             &[],
         ),
     ];
@@ -1355,7 +1392,7 @@ fn rows_that_cannot_collide_are_not_reported() {
     for r in rows {
         b.row(r.clone());
     }
-    let frozen = b.seal(&[]).expect("相交报告只在装载成功的表上算");
+    let frozen = b.seal(wired_rows()).expect("相交报告只在装载成功的表上算");
     assert_eq!(
         frozen.overlaps(),
         vec![Overlap {
@@ -1385,7 +1422,7 @@ fn seal_protocol(rows: &[Decl], port: PortDecl) -> Vec<Gap> {
     for r in rows {
         b.row(r.clone());
     }
-    b.seal(&[]).err().unwrap_or_default()
+    b.seal(wired_rows()).err().unwrap_or_default()
 }
 
 fn port_x() -> PortDecl {
@@ -1401,7 +1438,7 @@ fn port_x() -> PortDecl {
 /// 第 5 条的端口侧：应答与失败两格都得落在某行的出口上。
 ///
 /// 缺 `failed` 的形状是「这笔调用永远不会成功也永远不会判死」——`await` 行开着，
-/// 谁都不派发它（`by = None`），而它挡住「本轮收束」，最后由停机判据兜掉。
+/// 谁都不派发它，而它挡住「本轮收束」，最后由停机判据兜掉。
 #[test]
 fn a_port_without_a_failure_exit_is_a_gap() {
     let rows = [row(
@@ -1409,7 +1446,11 @@ fn a_port_without_a_failure_exit_is_a_gap() {
         70,
         None,
         pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
-        &[pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))])],
+        &[
+            // 观察行自闭合（`D-306`：不开账就不需要执行体），守的格照旧进判据。
+            pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
+            pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))]),
+        ],
         &[],
     )];
     assert_eq!(
@@ -1435,6 +1476,9 @@ fn a_port_with_both_answer_exits_loads() {
         None,
         pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
         &[
+            // 观察行的 `owes` 被自己的出口覆盖 ⇒ 一笔债都开不出来（`D-306` 的
+            // 「不会开账就不需要执行体」）。它守的三格照旧进 `check_ports` 的判据。
+            pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
             pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))]),
             pattern(EVENT_FAILED, &["id"], &[("port", Lit::Str("x"))]),
         ],
@@ -1452,6 +1496,9 @@ fn another_ports_answer_does_not_cover_this_one() {
         None,
         pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
         &[
+            // 观察行的 `owes` 被自己的出口覆盖 ⇒ 一笔债都开不出来（`D-306` 的
+            // 「不会开账就不需要执行体」）。它守的三格照旧进 `check_ports` 的判据。
+            pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
             pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("y"))]),
             pattern(EVENT_FAILED, &["id"], &[("port", Lit::Str("y"))]),
         ],
@@ -1482,6 +1529,9 @@ fn a_ports_before_cell_must_be_declared() {
         None,
         pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
         &[
+            // 观察行的 `owes` 被自己的出口覆盖 ⇒ 一笔债都开不出来（`D-306` 的
+            // 「不会开账就不需要执行体」）。它守的三格照旧进 `check_ports` 的判据。
+            pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
             pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))]),
             pattern(EVENT_FAILED, &["id"], &[("port", Lit::Str("x"))]),
         ],

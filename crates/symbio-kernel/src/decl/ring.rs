@@ -3,17 +3,23 @@
 //! ## 一行是数据，不是函数
 //!
 //! 旧策略表（`loop_registry`，已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
-//! ——判断住在函数体里。这里的一行是 [`Decl`]：`owes` / `until` / `unless` 三个
-//! [`Pattern`] 加 `by`。判断因此可 diff、可装载期检查；执行体只拿到一笔
+//! ——判断住在函数体里。这里的一行是 [`Decl`]：`reads` 前件加 `owes` / `until` /
+//! `unless` 三个 [`Pattern`]。判断因此可 diff、可装载期检查；执行体只拿到一笔
 //! [`Debt`]。
 //!
 //! ## 欠账公式
 //!
 //! ```text
-//! open(d,key)      := ∃ f ⊨ d.owes ∧ key = bind(f) ∧ ¬∃ g ⊨ d.until ∧ key(g) = key
-//! blocked(d,key)   := d.by = None ∨ ∃ h ⊨ d.unless ∧ key(h) = key
+//! open(d,key)       := ∃ f ⊨ d.owes ∧ key = bind(f) ∧ ¬∃ g ⊨ d.until ∧ key(g) = key
+//!                     ∧ ¬∃ h ⊨ d.unless ∧ key(h) = key          （`unless` 收窄为「不成立」）
+//! blocked(d,key)    := ¬∃ 全部 d.reads 的实例                        （前件未成立）
 //! actionable(d,key) := open ∧ ¬blocked
 //! ```
+//!
+//! 「谁执行」**不在**这一行里：`owes` 指向端口开启侧 ⇒ 环的通用受理入口；否则由行
+//! 注册表回答（`handler_for(row)`），注册表里没有 ⇒ 这一行是归宿行，不开账（[`check_rows`]
+//! 按「会开账就必须有执行体」判红）。「还不能执行」也只有三条派生：`reads` 未成立、
+//! 前序债未配对（环的派发面）、端口 provider 缺失（派发前响亮失败）。
 //!
 //! `owed` 返回全部 `open`（`blocked` 的照样返回）；谁先被派发由环按 `(name, key)`
 //! 裁决，本模块不排序、不取最小。
@@ -41,11 +47,11 @@
 //! 一次（[`PortDecl`]）。加一个端口 = 1 条 `PortDecl` + 适配器 + 2 行模板，
 //! 求解器与行表不变（判据 1，执行方 `scripts/port-surface-audit.mjs`）。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-use super::{ActorDecl, Frozen, ENGINE_ONLY_CELLS};
+use super::{Frozen, ENGINE_ONLY_CELLS};
 use crate::event::{EVENT_FAILED, EVENT_RESPONSE, EVENT_SENT};
 use crate::{Event, LatencyTier};
 
@@ -57,19 +63,16 @@ use crate::{Event, LatencyTier};
 /// 装配方把实现声明的逐行名单交进来，依赖图与第 6 条按**这一行**的名单判（D-248）。
 pub type RowWrites = [(&'static str, &'static [&'static str])];
 
-/// 这一行的实际写入名单：有逐行声明就用它，否则退回执行体的并集。
+/// 这一行的实际写入名单：有逐行声明就用它，否则为空。
 ///
-/// 非通用执行体的行没有逐行声明（它们的 `run` 就是那一行自己），并集即该行的名单。
-fn row_writes_of<'a>(
-    row: &str,
-    actor: &'a ActorDecl,
-    row_writes: &'a RowWrites,
-) -> &'a [&'static str] {
+/// 逐行声明只对**注册表里有实现**的行存在（`submit_row!` 的 `writes()`）。没有实现
+/// 的行是归宿行，不开账，也就没有写入。
+fn row_writes_of<'a>(row: &str, row_writes: &'a RowWrites) -> &'a [&'static str] {
     row_writes
         .iter()
         .find(|(name, _)| *name == row)
         .map(|(_, writes)| *writes)
-        .unwrap_or(actor.writes)
+        .unwrap_or(&[])
 }
 
 /// 信封两格：每条事实都带，因此**不**要求写进 `FactDecl.fields`（模块文档 §「模式
@@ -96,12 +99,28 @@ pub struct Pattern {
 }
 
 /// 义务环的一行。
+///
+/// ## 它**不**声明自己归谁
+///
+/// 行上没有「执行体」字段（`D-306` 裁决一）：`owes` 指向端口开启侧 ⇒ 环的通用受理
+/// 入口；否则由行注册表回答（`rows::handler_for(row)`）。行能声明的只有「什么时候
+/// 欠」（`owes`）、「什么算还」（`until`）、「什么算不成立」（`unless`）与「可执行前
+/// 必须已经成立什么」（`reads`）——全是数据，没有一栏是「我是谁」。
 #[derive(Debug, Clone)]
 pub struct Decl {
-    /// 行的身份：日志、冲突报错、对拍都按它指认。
+    /// 行的身份：日志、冲突报错、对拍都按它指认；注册表也按它配实现。
     pub name: &'static str,
-    /// 执行体名。`None` ⇒ 恒 blocked、永不选中（「在等」的唯一声明位）。
-    pub by: Option<&'static str>,
+    /// **行级前件**：这一行可执行前必须已在事实源里成立的名单（事实名或视图名）。
+    ///
+    /// 与 `owes` 分工：`owes` 说「哪条事实一出现我就欠」，`reads` 说「我还得先看见
+    /// 什么才能动手」。空切片 = 本行没有 `owes` 之外的前件（现存行大多是这一档：
+    /// 它们需要的别的事实都是**可选**读，缺了有一支显式回落，不是硬前件）。
+    ///
+    /// 装载期逐个查名字能解析（事实或视图）且**有生产者**（`UnproducedPrecondition`）；
+    /// 运行期每一项没有实例 ⇒ 这笔债 `blocked`（[`owed`]）。前件是**行**的属性而不是
+    /// 执行体的属性（`D-306` 裁决一：`ActorDecl::reads` 已删）——执行体是一段可复用的
+    /// 代码，同一段代码替两行干活时，两行的前件本来就不一样。
+    pub reads: &'static [&'static str],
     /// 这一行动作允许的时延档。
     pub tier: LatencyTier,
     pub owes: Pattern,
@@ -118,7 +137,10 @@ pub struct Decl {
     pub expand: Option<(&'static str, &'static str)>,
     /// 任一命中（同键）即视为还清。
     pub until: &'static [Pattern],
-    /// 任一命中（同键）即挂起。
+    /// 任一命中（同键）⇒ 这笔债**不成立**（`D-306` 裁决一：与 `until` 同键同效）。
+    ///
+    /// 旧语义「欠着但没人还」不再是可表达的态：没人还由「没有执行体」派生，装载期
+    /// 就判红（`Gap::UnmannedRow`），而不是等到运行期把一笔债永远挂着。
     pub unless: &'static [Pattern],
 }
 
@@ -187,26 +209,54 @@ impl Key {
 pub struct Debt<'a> {
     pub decl: &'a Decl,
     pub key: Key,
-    /// `by = None` 或有 `unless` 命中：存在，但引擎不还。
+    /// 这一笔的**前件还没成立**（`reads` 里有名字在事实源里没有实例）。
+    ///
+    /// 存在，但这一圈还不能还。它与 `until` 命中的区别是「在等」与「没事」：前者
+    /// 迟早会可还（前件会产出），后者已经还清。派生自 `reads`，不由声明的 `by`
+    /// 或任何布尔字段决定（`D-306` 裁决一）。
     pub blocked: bool,
 }
 
-/// 全量欠账：每个 `Decl` × 每个 `owes` 实例，收口（有 `until`/`unless` 同键命中）
-/// 的不返回。`blocked` 的债**照样返回**——「在等」与「没事」必须可区分。
+/// 全量欠账：每个 `Decl` × 每个 `owes` 实例，收口（有 `until` 同键命中，或 `unless`
+/// 同键命中）的不返回。`blocked` 的债**照样返回**——「在等」与「没事」必须可区分。
 pub fn owed<'a>(rows: &'a [Decl], frozen: &Frozen, events: &[Event], now: i64) -> Vec<Debt<'a>> {
     let mut debts = Vec::new();
     for decl in rows {
         let until = keys_of_all(decl.until, frozen, events, now);
         let unless = keys_of_all(decl.unless, frozen, events, now);
+        let ready = decl
+            .reads
+            .iter()
+            .all(|name| instance_exists(name, frozen, events, now));
         for key in keys_of_expanded(&decl.owes, decl.expand, frozen, events, now) {
-            if until.contains(&key) {
+            if until.contains(&key) || unless.contains(&key) {
                 continue;
             }
-            let blocked = decl.by.is_none() || unless.contains(&key);
-            debts.push(Debt { decl, key, blocked });
+            debts.push(Debt {
+                decl,
+                key,
+                blocked: !ready,
+            });
         }
     }
     debts
+}
+
+/// 这个前件名此刻有没有实例。
+///
+/// 事实源：切片里有一条同名事实就算成立（前件问的是「出现过没有」，不是「最后一条
+/// 是什么」——取值由执行体自己从切片里读）。视图源按求值结果展开，判法与
+/// [`keys_of_expanded`] 完全一致：数组的每个元素是一条实例，对象是一条实例，
+/// `null` / 其它标量 / 求值失败 ⇒ 没有实例。
+fn instance_exists(name: &str, frozen: &Frozen, events: &[Event], now: i64) -> bool {
+    if frozen.fact(name).is_some() {
+        return events.iter().any(|e| e.kind == name);
+    }
+    match frozen.eval(name, events, now) {
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(_)) => true,
+        _ => false,
+    }
 }
 
 fn keys_of_all(patterns: &[Pattern], frozen: &Frozen, events: &[Event], now: i64) -> Vec<Key> {
@@ -325,6 +375,79 @@ fn scalar(value: Option<&Value>) -> Option<String> {
     value.as_str().map(str::to_string)
 }
 
+/// 这一行会不会开出债。
+///
+/// 判法只有一条：有没有一条 `until` **完整覆盖** `owes`。覆盖 = 同源、同键、
+/// `until.eq ⊆ owes.eq`——凡 `owes` 命中的实例，同键必然命中这条 `until`，于是
+/// `open` 恒空。现存归宿行（`owes` 与 `until` 同源同键）全落在这一档。
+///
+/// 不开账的行不需要执行体：它为 `OrphanFact` 与「这条事实归本能力负责」而存在。
+/// 反过来，**会开账却没有执行体**是装载期红（`Gap::UnmannedRow`）：这一格没有声明位，
+/// 只由数据判（`D-306` 裁决一）。
+fn may_open_debts(decl: &Decl) -> bool {
+    !decl.until.iter().any(|u| covers(u, &decl.owes))
+}
+
+/// `u` 完整覆盖 `o`（[`may_open_debts`] 的判法）。
+fn covers(u: &Pattern, o: &Pattern) -> bool {
+    u.source == o.source
+        && u.key == o.key
+        && u.eq
+            .iter()
+            .all(|(field, lit)| o.eq.iter().any(|(f, l)| f == field && l == lit))
+}
+
+/// 这一行的执行体——**派生**，行上没有这一栏（`D-306` 裁决一）。
+#[derive(Debug, Clone, Copy)]
+enum Exec<'a> {
+    /// 环的通用受理入口：`owes` 指向端口开启侧。选债 / 派发 / 等待 / 配对都由它做。
+    Port,
+    /// 行注册表里的实现，以及它声明写的格（逐行，不是执行体并集，D-248）。
+    Row { writes: &'a [&'static str] },
+}
+
+/// 谁执行这一行。
+///
+/// 两处数据、一个优先级：注册表里有实现就用实现（`submit_row!` 交的 `writes()` 是
+/// 逐行名单）；否则看 `owes` 是否指向端口开启侧（那就是通用受理行的形状）；
+/// 都没有 ⇒ 没人执行它。
+///
+/// 顺序不能反：一行若既有实现又欠端口请求，它是**消费者**，不是派发行——派发行只有
+/// 一条（`check_rows` 按 `DuplicateDispatchRow` 保证每个端口开启格至多一条）。
+fn executor_of<'a>(decl: &Decl, frozen: &Frozen, row_writes: &'a RowWrites) -> Option<Exec<'a>> {
+    if let Some((_, writes)) = row_writes.iter().find(|(name, _)| *name == decl.name) {
+        return Some(Exec::Row { writes });
+    }
+    let owes_port = fact_names_of(decl.owes.source, frozen)
+        .into_iter()
+        .any(|fact| port_opening(fact, frozen).is_some());
+    owes_port.then_some(Exec::Port)
+}
+
+/// 这条事实是不是**端口开启格**（`request` 那一侧）：有端口字段、且不是引擎独占格。
+///
+/// 引擎独占格（`sent` / `response` / `failed` / `retry`）不是派发契约的输入，
+/// 守着它们是合法的观察行，不能读成「本该派发」。
+fn port_opening(fact: &'static str, frozen: &Frozen) -> Option<&'static str> {
+    if ENGINE_ONLY_CELLS.contains(&fact) {
+        return None;
+    }
+    frozen.fact(fact).and_then(|f| f.port).map(|_| fact)
+}
+
+/// `owes` 里钉住的端口名（写在端口字段上的 `eq` 字面量）；未钉 ⇒ `None`。
+fn bound_port(decl: &Decl, frozen: &Frozen) -> Option<&'static str> {
+    let port_field = frozen.fact(decl.owes.source).and_then(|f| f.port)?;
+    decl.owes
+        .eq
+        .iter()
+        .find(|(name, _)| *name == port_field)
+        .and_then(|(_, lit)| match lit {
+            Lit::Str(port) => Some(*port),
+            _ => None,
+        })
+}
+
 /// 装载期的行检查（[DE-001](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 装载期七道检查的第 2 / 7 条）。
 ///
 /// ## §3.4 七道检查 → 这一层的格子（指认表）
@@ -336,7 +459,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// | 3 | 字段都在声明里 | [`check_rows`]（模式侧）+ `seal()` 的声明侧（视图 `reads` 与 `FactDecl` 自引用） | `UndeclaredPatternField` + `UndeclaredField` / `FactFieldUndeclared` |
 /// | 4 | 相交行对 | [`overlaps`]——**只报告，不红**（静态判不出「真的同时命中」） | `Overlap` |
 /// | 5 | 写入封闭 | `seal` 的声明侧（执行体不许声明引擎格）+ [`check_ports`]（端口有应答出口）；「实际写入 ⊆ `writes`」那一半要值返回账本，归 | `ActorWritesEngineCell` / `PortBeforeUndeclared` / `PortWithoutAnswerExit` |
-/// | 6 | 执行体收口 | [`check_rows`] | `UnmannedRow` / `OrphanActor` / `ActorCannotClose` / `ActorModeTooNarrow` |
+/// | 6 | 执行体收口 | [`check_rows`]（执行体由 `owes` + 行注册表派生，D-306） | `UnmannedRow` / `DuplicateDispatchRow` / `ActorCannotClose` |
 /// | 7 | 声明事实有归宿 | [`check_rows`] | `OrphanFact` |
 ///
 /// 除第 4 条（报告）以外，全部走同一个 `Err`：[`crate::decl::Builder::seal`] 是**唯一**的装载出口，
@@ -348,29 +471,30 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::DuplicateName`]：两行同名；
 /// - [`Gap::OrphanFact`]：一个被声明的事实没有任何行**直接或经由视图**读到——
 ///   拼错名字的静默形态，也是旧 `Verdict::Unmanned` 那一档的可观测性替代物；
-/// - [`Gap::SinkRowOnPortFact`]：`by = None` 的归宿行守着一个端口事实——端口事实
+/// - [`Gap::SinkRowOnPortFact`]：一条**不开账**的归宿行守着一个端口事实——端口事实
 ///   必须由派发行接住，用归宿行接住就是给「本该派发」开后门（D-397）；
 /// - [`Gap::ExpandKeyMissing`]：`expand` 的元素键字段不在 `owes.key` 里——元素
 ///   之间分不出谁是谁，`until` 无从按键还账；
 /// - [`Gap::UndeclaredExpand`]：`owes` 是事实，但它的 `expand` 列表字段没有写进
 ///   那条事实的 `FactDecl.expand`——求解器会去读一个事实自己都不承认的字段；
-/// - [`Gap::UnmannedRow`]：`by = Some(名字)` 而这个名字没有执行体声明——「这行
-///   有人跑」是假话，选中它只会得到 `no_progress`（装载期检查第 6 条的前半）；
-/// - [`Gap::OrphanActor`]：声明了执行体却没有任何行指向它——裸函数的另一面，
-///   接线接了个没人派发的名字；
+/// - [`Gap::UnmannedRow`]：这一行会开账，却既不在行注册表里、`owes` 也不指向端口
+///   开启侧——「这行有人跑」是假话，选中它只会得到 `no_progress`（装载期检查第 6 条
+///   的前半）；
+/// - [`Gap::DuplicateDispatchRow`]：两条行都想吃同一个端口开启格——同一笔
+///   `request` 会被派发两遍；
 /// - [`Gap::ActorCannotClose`]：执行体够不到它那一行的收口（§3.4 第 6 条的后半）——
 ///   出口里有可声明的领域格时，判它与出口（`until` / `unless`，视图按 `reads` 展开到
 ///   事实）**有无交集**；出口全是引擎独占格时（派发行的形状：引擎落 `before` / `failed`
 ///   替它关门），判它有没有**交出去的凭据**——名单非空，或出口里有某个端口的 `before` 格
 ///   （订正 1：纯派发半手里没有领域格，写的是引擎的 `sent`）。两支都指向同一个故障：
 ///   这一行既写不出领域格、也没有一条挂得上的派出契约；
-/// - [`Gap::ActorModeTooNarrow`]：行的 `tier` 比执行体的 `mode` 更慢——反射档
-///   拿不到模型句柄（§3.4 的 mode 闸门），却让一行声称要调模型；
 /// - [`Gap::UndeclaredPatternField`]：模式引用了一个不在那条事实载荷声明里的字段
 ///   （§3.4 第 3 条）——它与「字段这次没带」在求值时同形，只能装载期拦；
 /// - [`Gap::DependencyCycle`]：两行以上的「谁还清谁」成环（§3.4 第 1 条）——
 ///   类型级互相等待，运行期没有任何一步走得动；
-/// - [`Gap::UnproducedPrecondition`]：`owes` 展开出的某个事实没有任何生产者
+/// - [`Gap::UnknownRead`]：行级 `reads` 里的名字既不是事实也不是视图——它永远不成立，
+///   这一行永远是 `blocked`，而没有任何东西会红；
+/// - [`Gap::UnproducedPrecondition`]：`owes` / `reads` 展开出的某个事实没有任何生产者
 ///   （执行体名单、行级名单、引擎独占格、宿主写口四档都够不到它，D-296）——
 ///   那一行永远不会开账，而运行期只表现为「这一步没发生」。
 ///
@@ -401,7 +525,6 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 ///   会从依赖图里**静默消失**（第 1 条按证据集配图），比多一条假边更坏；
 /// - [`Gap::FactFieldUndeclared`]：事实自己的 `port` / `key` / `expand` 引用了不在
 ///   `fields` 里的字段；
-/// - [`Gap::UnknownReadView`]：执行体 `reads` 引用了未声明的视图——运行期静默返回空；
 /// - [`Gap::ActorWritesEngineCell`]：执行体将写协议四格里引擎独占的那些格（§2.3）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gap {
@@ -428,13 +551,18 @@ pub enum Gap {
         row: &'static str,
         fact: &'static str,
     },
+    /// `reads` 里的名字既不是事实也不是视图——运行期它永远不成立，这一行永远是
+    /// `blocked`，而没有任何东西会红。
+    UnknownRead {
+        row: &'static str,
+        name: &'static str,
+    },
     OrphanFact {
         fact: &'static str,
     },
-    /// `by = None` 的归宿行守着一个**端口事实**（`FactDecl.port` 非空），而本表
-    /// 登记了端口（会落 `before` ⇒ 产生债务）。端口事实是派发契约的输入，它的归宿
-    /// 必须是 `by = Some` 的派发行；用归宿行接住 = 把「本该派发」换成「没人派发但
-    /// 封闭性绿」（D-397）。
+    /// 一条**开不出账**的行守着一个**端口事实**（`FactDecl.port` 非空），而本表
+    /// 登记了端口（会落 `before` ⇒ 产生债务）。端口事实是派发契约的输入，接住它的
+    /// 必须是受理行；用归宿行接住 = 把「本该派发」换成「没人派发但封闭性绿」（D-397）。
     SinkRowOnPortFact {
         row: &'static str,
         fact: &'static str,
@@ -450,18 +578,14 @@ pub enum Gap {
     },
     UnmannedRow {
         row: &'static str,
-        by: &'static str,
     },
-    OrphanActor {
-        actor: &'static str,
+    /// 两条行都想吃同一个端口开启格——同一笔 `request` 会被派发两遍。
+    DuplicateDispatchRow {
+        fact: &'static str,
+        row: &'static str,
     },
     ActorCannotClose {
         row: &'static str,
-        actor: &'static str,
-    },
-    ActorModeTooNarrow {
-        row: &'static str,
-        actor: &'static str,
     },
     UndeclaredPatternField {
         row: &'static str,
@@ -540,10 +664,6 @@ pub enum Gap {
         field: &'static str,
         role: &'static str,
     },
-    UnknownReadView {
-        actor: &'static str,
-        view: &'static str,
-    },
     ActorWritesEngineCell {
         actor: &'static str,
         fact: &'static str,
@@ -602,6 +722,8 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
     let mut gaps = Vec::new();
     let producers = producer_surface(frozen, row_writes);
     let mut names = HashSet::new();
+    // 每个端口开启格的受理行（至多一条）：同一笔 `request` 只许被派发一遍。
+    let mut dispatch_rows: HashMap<&'static str, &'static str> = HashMap::new();
     for decl in rows {
         if !names.insert(decl.name) {
             gaps.push(Gap::DuplicateName { row: decl.name });
@@ -616,7 +738,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
         {
             gaps.push(Gap::KeyMismatch { row: decl.name });
         }
-        // 归宿行（`by = None`）**只许守不产生债务的格**（D-397）：
+        // 归宿行（不开账的行）**只许守不产生债务的格**（D-397）：
         //
         // - 端口事实里只有**开启侧**（非 `ENGINE_ONLY_CELLS`，即 `request` 那一格）
         //   是派发契约的输入；`sent` / `response` / `failed` / `retry` 由引擎写，
@@ -624,24 +746,13 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
         // - 开启侧还要真的钉到一个**本表登记过的端口**（`PortDecl` 会落 `before`
         //   ⇒ 产生债务）才构成「本该派发」；未钉端口时只要表里有端口就可能命中。
         //
-        // 命中即红：用 `by = None` 接住它 = 把「本该派发」换成「没人派发但封闭性绿」。
-        if decl.by.is_none() {
+        // 命中即红：用一条不开账的行接住它 = 把「本该派发」换成「没人派发但封闭性绿」。
+        if !may_open_debts(decl) {
             for fact in fact_names_of(decl.owes.source, frozen) {
-                let Some(f) = frozen.fact(fact) else { continue };
-                let Some(port_field) = f.port else { continue };
-                if ENGINE_ONLY_CELLS.contains(&fact) {
+                let Some(fact) = port_opening(fact, frozen) else {
                     continue;
-                }
-                let bound_port = decl
-                    .owes
-                    .eq
-                    .iter()
-                    .find(|(name, _)| *name == port_field)
-                    .and_then(|(_, lit)| match lit {
-                        Lit::Str(port) => Some(*port),
-                        _ => None,
-                    });
-                let produces_debt = match bound_port {
+                };
+                let produces_debt = match bound_port(decl, frozen) {
                     Some(port) => frozen.ports().iter().any(|p| p.port == port),
                     None => !frozen.ports().is_empty(),
                 };
@@ -712,78 +823,91 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
                 }
             }
         }
-        // 前件有生产者（D-296）：`owes` 的源展开成事实，逐个问四档里有没有人写。
-        // 源本身未声明时已经报了 `UnknownSource`，这里不重复报。
+        // 行级 `reads` 的每个名字都要能在冻结表里解析（D-306 裁决一）：解析不到
+        // ⇒ 前件永远不成立、这一行永远 `blocked`，而运行期只表现为「这一步没发生」。
+        for name in decl.reads {
+            if frozen.fact(name).is_none() && frozen.view(name).is_none() {
+                gaps.push(Gap::UnknownRead {
+                    row: decl.name,
+                    name,
+                });
+            }
+        }
+        // 前件有生产者（D-296）：前件名展开成事实，逐个问四档里有没有人写。
         //
-        // 只查**会派发**的行：`by = None` 的行在 `owed` 里恒为 blocked，永远不会
-        // 开账——它是「尚未接线」的声明位，不是可还的债。对它判红
-        // 等于把「未接线」当成「断链」，而归宿行恰恰整张表都是 `by = None`。
-        if decl.by.is_some()
-            && (frozen.fact(decl.owes.source).is_some() || frozen.view(decl.owes.source).is_some())
-        {
+        // 前件有两处来源，都要查：`owes` 的源（实例存在才开账，它就是最直接的前件）
+        // 与行级 `reads`。名字本身未声明时已经报了 `UnknownSource` / `UnknownRead`，
+        // 这里对未解析的名字不重复报。
+        //
+        // 只查**会开账**的行：不开账的行在 `owed` 里一笔都开不出来，它是「这条事实
+        // 归本能力负责」的归宿声明，不是可还的债。对它判红等于把「归宿」当成「断链」——
+        // 而归宿行恰恰整张表都是。
+        if may_open_debts(decl) {
             let mut seen = HashSet::new();
-            for fact in fact_names_of(decl.owes.source, frozen) {
-                if seen.insert(fact) && !producers.contains(fact) {
-                    gaps.push(Gap::UnproducedPrecondition {
-                        row: decl.name,
-                        fact,
-                    });
+            let sources = std::iter::once(decl.owes.source).chain(decl.reads.iter().copied());
+            for source in sources {
+                if frozen.fact(source).is_none() && frozen.view(source).is_none() {
+                    continue;
+                }
+                for fact in fact_names_of(source, frozen) {
+                    if seen.insert(fact) && !producers.contains(fact) {
+                        gaps.push(Gap::UnproducedPrecondition {
+                            row: decl.name,
+                            fact,
+                        });
+                    }
                 }
             }
         }
-        // 第 6 条的两半：`by` 指向一个**存在**的执行体，且它够得到这一行的收口。
-        // 未接线的行不在这儿豁免——它写 `by = None`（「这笔账不由引擎执行」的唯一
-        // 声明位），而不是留一个没人跑的名字。
-        if let Some(by) = decl.by {
-            match frozen.actor(by) {
-                None => gaps.push(Gap::UnmannedRow { row: decl.name, by }),
-                Some(actor) => {
+        // 第 6 条（派生）：会开账的行必须有执行体，且执行体的写入够得到这一行的收口。
+        //
+        // 「谁执行」不再是声明（`D-306` 裁决一）：`owes` 指向端口开启侧 ⇒ 环的通用
+        // 受理入口；否则行注册表里有实现 ⇒ 该实现；两者都没有 ⇒ 这一行永远没人跑。
+        // 「这一行永远没人跑」没有声明位，只能由数据判——判红比漏放有价值：
+        // 忘了 `submit_row!` 会在这里红，而不是在运行期静默空转。
+        if may_open_debts(decl) {
+            match executor_of(decl, frozen, row_writes) {
+                // 通用受理行不进这一判：它的出口按 `PortDecl` 的应答格收（`check_ports`
+                // 已要求每个端口有应答出口），它自己写的是引擎格，本来就不归它声明。
+                Some(Exec::Port) => {
+                    for fact in fact_names_of(decl.owes.source, frozen) {
+                        let Some(fact) = port_opening(fact, frozen) else {
+                            continue;
+                        };
+                        if let Some(first) = dispatch_rows.insert(fact, decl.name) {
+                            if first != decl.name {
+                                gaps.push(Gap::DuplicateDispatchRow {
+                                    fact,
+                                    row: decl.name,
+                                });
+                            }
+                        }
+                    }
+                }
+                Some(Exec::Row { writes }) => {
                     let exits: Vec<&'static str> = decl
                         .until
                         .iter()
                         .chain(decl.unless)
                         .flat_map(|p| fact_names_of(p.source, frozen))
                         .collect();
-                    // 两档（装载期检查第 6 条）：出口里有**可声明的领域格** ⇒ 原判据（交集非空）；
+                    // 两档（装载期检查第 6 条）：出口里有**可声明的领域格** ⇒ 交集非空；
                     // 出口**全是**引擎独占格 ⇒ 那是派发行的形状——引擎按 `PortDecl::before`
                     // 在动作之前落 `sent`、失败/租约到顶落 `failed`，关门本来就不归执行体。
                     // 此时若还要求交集，就是要求执行体声明第 5 条禁止它声明的格：
                     // 两条检查互斥 ⇒ 这一行永远不许接线。
-                    //
-                    // 这一档判得住的是「这一行有没有**交出去的凭据**」两种形态之一：
-                    // - 名单非空（旧口径）：它自己写得出领域格；
-                    // - 出口里有某个端口的 `before` 格（订正 1）：它挂上了一条**派出契约**，
-                    //   而 `check_ports` 已经要求那条端口有应答出口 ⇒ 关门链条完整，
-                    //   动作这一侧只需要「把这一笔交出去」。纯派发半（派出去 / 收回来分处
-                    //   两个环步之后的前一半）就落在这条上：它手里没有领域格可写，
-                    //   写的是引擎的 `sent`。
-                    //
-                    // 「这次真没写」两支都由运行期的账本守卫判（D-123 决策 1）：领域格那一支
-                    // 看空账本，派发那一支看 `sent` 关不关账（`waiting` ⇒ 步数上界 / `reap`）。
                     let engine_only_exits = !exits.is_empty()
                         && exits.iter().all(|f| super::ENGINE_ONLY_CELLS.contains(f));
-                    // 共享执行体的行按**自己**声明的写入判（D-248）：并集会把「这
-                    // 个执行体可能写」读成「这一行会写」，多行共用时每一行的出口
-                    // 都被别的行的并集认领，收口检查与依赖图同时失真。
-                    let writes = row_writes_of(decl.name, actor, row_writes);
                     let reaches_exit = if engine_only_exits {
                         !writes.is_empty() || frozen.ports.iter().any(|p| exits.contains(&p.before))
                     } else {
                         exits.iter().any(|f| writes.contains(f))
                     };
                     if !reaches_exit {
-                        gaps.push(Gap::ActorCannotClose {
-                            row: decl.name,
-                            actor: actor.name,
-                        });
-                    }
-                    if decl.tier > actor.mode {
-                        gaps.push(Gap::ActorModeTooNarrow {
-                            row: decl.name,
-                            actor: actor.name,
-                        });
+                        gaps.push(Gap::ActorCannotClose { row: decl.name });
                     }
                 }
+                None => gaps.push(Gap::UnmannedRow { row: decl.name }),
             }
         }
     }
@@ -806,14 +930,9 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
             gaps.push(Gap::OrphanFact { fact: fact.name });
         }
     }
-    // 执行体的另一半：声明了却没有任何行指向它，等于注册了一段死代码。
-    // 它与 `UnmannedRow` 合起来才是「一个 `by` 一个执行体」——两边都不许多。
-    let used_by: HashSet<&str> = rows.iter().filter_map(|d| d.by).collect();
-    for actor in frozen.actors() {
-        if !used_by.contains(actor.name) {
-            gaps.push(Gap::OrphanActor { actor: actor.name });
-        }
-    }
+    // 执行体那一侧不再有孤儿检查（`D-306` 裁决一）：执行体声明由注册表派生
+    // （`rows::declared_writes()` 的并集 + 端口受理口），没有「绑定表里写了一个没人
+    // 派发的名字」这条路径了——旧的 `OrphanActor` 判的正是那种表内失配。
     gaps.extend(check_dependency_graph(rows, frozen, row_writes));
     gaps
 }
@@ -835,7 +954,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
 ///
 /// - **自环不算**。一行自己写自己的出口正是正常形状（执行体干活，把这一行关掉），
 ///   它不构成等待；把自环算进环会让每一张真表都红。
-/// - `by = None` 的行没有出边。它的出口由插件代码落，不由某个行执行体跑；这张图
+/// - 开不出账的行没有出边。它的出口由插件代码落，不由某个行执行体跑；这张图
 ///   只画「行等行」，不去猜代码里写了什么。
 /// - 两边的出口**不共这一族事实**时不设防（见 [`writes_that_cell`] 的 `None` 分支）：
 ///   那条执行体多写的格落在哪一档，声明面说不出 ⇒ 照旧成边。
@@ -901,15 +1020,13 @@ fn producers_of(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites, at: usiz
         .enumerate()
         .filter(|(i, _)| *i != at)
         .filter(|(_, other)| {
-            other
-                .by
-                .and_then(|name| frozen.actor(name))
-                .is_some_and(|actor| {
-                    let writes = row_writes_of(other.name, actor, row_writes);
-                    exits
-                        .iter()
-                        .any(|(f, p)| writes.contains(f) && writes_that_cell(frozen, other, f, p))
-                })
+            // 只有「有实现」的行才画边：端口受理行写的是引擎格，归宿行没有执行体。
+            // 两者都不构成「别的行在替它关门」，画上去只会造出假环。
+            let writes = row_writes_of(other.name, row_writes);
+            !writes.is_empty()
+                && exits
+                    .iter()
+                    .any(|(f, p)| writes.contains(f) && writes_that_cell(frozen, other, f, p))
         })
         .map(|(i, _)| i)
         .collect()

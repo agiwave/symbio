@@ -37,14 +37,20 @@ use crate::ring::table::DebtRow;
 const ROW_LEASE_MS: u64 = 60_000;
 const ROW_MAX_ATTEMPTS: u32 = 1;
 
-/// 选债口求出的 `Debt` → 环认得的债行（`by == plugin_row` 的全部未结债）。
+/// 选债口求出的 `Debt` → 环认得的债行（**不是**端口受理行的全部未结、前件成立的债）。
 ///
-/// `Frozen::rows()` 参与选债是 D-304 裁决六：谁执行由 `by` 判别，环只认债行。
+/// 「谁执行」是派生的（`D-306` 裁决一），判据就是 `owes` 指向哪一格：
+///
+/// - 指向端口开启格（`request`）⇒ 环的通用受理入口，债由端口自己的债表进来，
+///   **不**走这条路（一条债被派发两遍是最坏的结果）；
+/// - 其余 ⇒ 行注册表里那一段实现（`handler_for`）。注册表里没有就是装载期红
+///   （`Gap::UnmannedRow`），运行期再由执行体响亮失败一次——不静默跳过。
+///
 /// **本函数不调 `owed`**：求解发生在环的选债口里（`TC-1b`），这里只做形状投影。
 pub(crate) fn rows_from_debts(debts: &[Debt<'_>], events: &[Event]) -> Vec<DebtRow> {
     debts
         .iter()
-        .filter(|debt| !debt.blocked && debt.decl.by == Some(PLUGIN_ROW))
+        .filter(|debt| !debt.blocked && debt.decl.owes.source != symbio_plugin_api::EVENT_REQUEST)
         .map(|debt| {
             let row = debt.decl.name;
             let trace = debt.key.trace();
@@ -177,7 +183,7 @@ async fn emit_attributed(
     Ok(())
 }
 
-/// 通用行执行体：按 `Decl.by == plugin_row` 派发到 [`RowHandler`]。
+/// 通用行执行体：按行注册表派发到 [`RowHandler`]（`D-306`：行不声明自己归谁）。
 pub(crate) struct PluginRowExecutor;
 
 #[async_trait::async_trait]

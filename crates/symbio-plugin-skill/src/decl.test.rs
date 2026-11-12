@@ -74,7 +74,7 @@ fn harness_encoded_sink_row() -> Decl {
     }]));
     Decl {
         name: EVENT_MEMORY_ENCODED,
-        by: None,
+        reads: &[],
         tier: LatencyTier::Reflex,
         expand: None,
         owes: pattern[0],
@@ -114,7 +114,7 @@ fn harness_protocol_rows() -> &'static [Decl] {
             }]));
             Decl {
                 name: Box::leak(format!("sink.{name}").into_boxed_str()),
-                by: None,
+                reads: &[],
                 tier: LatencyTier::Reflex,
                 expand: None,
                 owes: pattern[0],
