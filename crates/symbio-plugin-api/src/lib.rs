@@ -38,8 +38,8 @@
 //! `symbio-sdk` / `symbio-deploy`；控制面（`loop` / `session`）不在此列，它们按影响类
 //! 运行、本来就认识宿主的容器概念（D-253）——`loop` 只依赖内核（连 `symbio-sdk` 都不依赖），
 //! `session` 依赖内核与 `symbio-sdk`。判据是
-//! `plugin-surface-audit`（HS-001 零直接依赖 / HS-002 两臂棘轮 / HS-003 无空转条目 /
-//! HS-005 门面 manifest 三条 / HS-006 语法臂与模块级转发只许不涨）。
+//! `plugin-surface-audit`（HS-001 零直接依赖 / HS-002 三臂棘轮 / HS-003 无空转条目 /
+//! HS-005 门面 manifest 四条 / HS-006 语法臂与模块级转发只许不涨）。
 //!
 //! 插件不得依赖宿主 crate（`symbio`）——那会形成「插件 ← 宿主 ← 插件」的环。
 //! 声明表的收集与冻结在 `symbio_sdk::declarations` 里；词汇读法（冻结表缺席时回落
