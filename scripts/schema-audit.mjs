@@ -2,30 +2,32 @@
 /**
  * schema-audit.mjs —— schemas 定义使用情况审计
  *
+ * 范围：**只审前端镜像面**（`tauri/src/schemas`）。后端那半边（`symbio_sdk/schemas`）
+ * 已随 D-087 退役——它的 owner 是 `core-export-audit` C-003，本脚本不再维护第二份口径。
+ *
  * 目标：
- *   1. 找出「未被使用」的 schema 定义（后端 symbio_sdk/schemas、前端 tauri/src/schemas）
- *   2. 找出「仅被一个模块使用」的 schema 模块（下放候选）
+ *   1. 找出「未被引用」的前端 schema 文件（死文件）与「无人使用」的导出（死导出）
+ *   2. 找出「仅被一个模块引用」的 schema 文件（下放候选）
  *
  * 性质：**决策支持报告，不是判定**。它只输出候选清单，退出码恒为 0（除非自身崩溃）——
- *   因为「未被使用」的判定有天然盲区，必须人工 grep 复核后才可动手：
- *     · 后端：仅统计 `schemas::` 路径引用与标识符出现；`pub use` 再导出的顶层名
- *       （`crate::symbio_sdk::ChatNode`）靠标识符出现兜底。
- *     · 前端：模块级引用识别 `from '...'`（含 `export * from`）与相对路径，
- *       故 schemas 内部的再导出链（`vdfs.ts` → `./vdfs-form`）不再误报死文件。
+ *   因为「未被使用」的判定有天然盲区，必须人工 grep 复核后才可动手。前端这半边用两条
+ *   口径把误报压下去：①模块级引用识别 `from '...'`（含 `export * from`）与相对路径，
+ *   故 schemas 内部的再导出链（`vdfs.ts` → `./vdfs-form`）不误报死文件；②导出若在
+ *   定义文件内部仍被引用（词表常量与它的比较方同处）也不算死导出。
  *   本脚本已接入 `gate.mjs`（docs 阶段）：**崩溃会让门禁失败**，报告内容不判失败。
  *
  * 用法：node scripts/schema-audit.mjs
  * 输出：控制台报告。零外部依赖，纯 Node 实现。
  */
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// `--root=` 只为回归测试开的口子：测试在临时目录造一棵最小仓库，好让本脚本的判据
+// `--root=` 只为回归测试开的口子：测试在临时目录造一棵最小仓库，好让本脚本的报告
 // 能被「注入真实形状并断言报告正确」地验证。报告型脚本坏了没人发现（它不判失败），
-// 但它**会误导人去改本来没坏的东西**——实测事故：`schemas/hook` 被报成「仅 1 个外部
-// 消费文件」的下放候选，而它实际有 3 个消费文件（hook 插件自己走 `schemas::{HookEvent}`
-// 顶层再导出名，路径里没有子模块名，按「最长模块前缀」匹配得到 null ⇒ 消费方整个丢失）。
+// 但它**会误导人去改本来没坏的东西**——实测事故：`OUTCOME_COMPLETED`（定义在
+// `schemas/vdfs.ts`，也在同一文件里被比较）曾被列进「死导出」，读报告的人顺着去
+// 「清理」一个健康的词表常量。
 const rootArg = process.argv.find((a) => a.startsWith('--root='));
 const ROOT = rootArg
   ? resolve(rootArg.slice(7))
@@ -48,287 +50,20 @@ function walk(dir, exts, out = []) {
 const rel = (p) => relative(ROOT, p).split(sep).join('/');
 
 // ---------- 后端 ----------
-const backendFiles = walk(join(ROOT, 'crates'), ['.rs']);
-// ── 后端半边已退役（[D-087](../docs/003-design/001-核心架构.md "D-087")，2026-10-19）──────
-// `symbio_sdk/schemas/` 已拆成 `chat` / `dialog` / `present` / `turn` 四个域，
-// 本脚本赖以工作的三个前提同时消失：①有一个叫 schemas 的目录可枚举；②引用写成
-// `schemas::a::b`；③`schemas/mod.rs` 是唯一的再出口。
+// 后端半边**已退役**（D-087，2026-10-19）：`symbio_sdk/schemas/` 已拆成 chat / dialog /
+// present / turn，本脚本赖以工作的三个前提同时消失——①有一个叫 `schemas` 的目录可枚举；
+// ②引用写成 `schemas::a::b`；③`schemas/mod.rs` 是唯一的再出口。
 // 「某个契约定义有没有外部消费方」的判据**已经有人管**：`core-export-audit` C-003
 // （零消费方 0 / 单消费方棘轮）按根出口逐符号判，且带只降基线。两条口径并存就是
-// 「一个事实两个 owner」，它们迟早给出不同答案。故后端半边退役，本脚本只保留
-// **前端镜像面**（`tauri/src/schemas` ⇄ 后端真源）的审计。
-const schemasRoot = join(ROOT, 'crates/symbio-sdk/src/schemas');
-const backendSchemaFiles = existsSync(schemasRoot)
-  ? backendFiles.filter((f) => f.startsWith(schemasRoot))
-  : [];
-
-// 模块路径：schemas/<a>/b.rs -> a::b ; schemas/<a>/mod.rs -> a ; schemas/common.rs -> common
-// 统一用 '::' 连接，与 import 路径（schemas::a::b）一致
-function moduleKeyOf(file) {
-  const r = relative(schemasRoot, file).split(sep).join('::').replace(/\.rs$/, '');
-  if (r === 'mod') return ''; // schemas/mod.rs
-  return r.endsWith('::mod') ? r.slice(0, -'::mod'.length) : r;
-}
-const display = (key) => key.split('::').join('/');
-
-// 每个文件里的 pub 项定义
-const itemsByFile = new Map(); // file -> [{name, kind}]
-for (const f of backendSchemaFiles) {
-  const src = readFileSync(f, 'utf8');
-  const names = [];
-  const re = /\bpub\s+(struct|enum|type|const|fn|trait|static)\s+([A-Za-z0-9_]+)/g;
-  let m;
-  while ((m = re.exec(src))) names.push({ name: m[2], kind: m[1] });
-  itemsByFile.set(f, names);
-}
-const allModKeys = new Set(backendSchemaFiles.map(moduleKeyOf).filter(Boolean));
-
-// 符号名 -> 定义它的模块（`schemas::X` 这种**顶层再导出名**的归属）
+// 「一个事实两个 owner」，它们迟早给出不同答案。
 //
-// 为什么需要：消费方可以写 `use ...::schemas::{HookEvent}`（走 `schemas/mod.rs` 的
-// `pub use hook::{HookEvent, HookOutput}`），而不是 `schemas::hook::HookEvent`。
-// 前者的路径里**根本没有子模块名**，只按「最长模块前缀」匹配会得到 `null` ⇒
-// 该消费方整个丢失。实测后果：`schemas/hook` 有 3 个消费模块（hook 自己 3 个文件 +
-// session），报告却写「仅 1 个外部消费文件」，把它列成**下放候选**——
-// 报告说假话，读的人会顺着去改本来没坏的东西。
-//
-// 只在该名字**唯一**归属一个模块时启用；同名多处定义（有歧义）时保守放弃。
-const nameToModule = new Map(); // name -> moduleKey（仅唯一时）
-{
-  const seen = new Map(); // name -> Set(moduleKey)
-  for (const [f, names] of itemsByFile) {
-    const key = moduleKeyOf(f);
-    if (!key) continue;
-    for (const { name } of names) {
-      if (!seen.has(name)) seen.set(name, new Set());
-      seen.get(name).add(key);
-    }
-  }
-  for (const [name, keys] of seen) if (keys.size === 1) nameToModule.set(name, [...keys][0]);
-}
-
-/**
- * 把一条 `schemas::…` 引用路径归到某个模块。
- * @param {string[]} parts 路径分段（已剥掉 `schemas::` 前缀与 `as` 别名）
- * @returns {string|null} 模块 key
- */
-function moduleOfRef(parts) {
-  for (let i = parts.length; i >= 1; i--) {
-    const cand = parts.slice(0, i).join('::');
-    if (allModKeys.has(cand)) return cand;
-  }
-  // 顶层再导出名（`schemas::HookEvent`）：按符号名的唯一定义归属
-  return nameToModule.get(parts[0]) ?? null;
-}
-
-// 全库扫描：schemas:: 路径引用 + 标识符出现
-// consumerFile -> Set(schemaModuleKey)
-const consumersByModule = new Map(); // moduleKey -> Map(file -> count)
-const identFiles = new Map(); // identifier -> Set(file)（排除定义文件与 schemas/mod.rs）
-
-// 展开 use 语句花括号组：a::{b, c::d} -> [a::b, a::c::d]
-function splitTop(s) {
-  const parts = [];
-  let depth = 0, cur = '';
-  for (const ch of s) {
-    if (ch === '{') depth++;
-    if (ch === '}') depth--;
-    if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; } else cur += ch;
-  }
-  if (cur.trim()) parts.push(cur);
-  return parts.map((p) => p.trim()).filter(Boolean);
-}
-function expandUse(path, depth = 0) {
-  // 深度闸：\b 词边界挡住了 `Refuse => {`，但**文档注释里写出来的 use 片段**能再次
-  // 把它骗进来——`[^;]+` 会一路吃到很远的那个 `;`，中间夹着不成对的花括号时，
-  // `prefix + p + rest` 每层都把同一段正文再摊一遍，字符串指数增长直到
-  // `RangeError: Invalid string length`（2026-10-30 实测，整轮门禁因此红）。
-  // 花括号嵌套超过 8 层不可能是真的 use 语句；到此收手，按原样当一条路径，
-  // 让下游按「指不到模块」报出来，而不是让判据脚本自己崩掉。
-  if (depth > 8) return [path.trim()];
-  const i = path.indexOf('{');
-  if (i === -1) return [path.trim()];
-  const close = path.lastIndexOf('}');
-  const prefix = path.slice(0, i);
-  const body = path.slice(i + 1, close);
-  const rest = path.slice(close + 1); // 如 "::X"
-  const out = [];
-  for (const p of splitTop(body)) out.push(...expandUse(prefix + p + rest, depth + 1));
-  return out;
-}
-
-for (const f of backendFiles) {
-  const src = readFileSync(f, 'utf8');
-  const isSchemasMod = rel(f) === 'crates/symbio-sdk/src/schemas/mod.rs';
-
-  // 1) use 语句（含花括号组展开）
-  if (!isSchemasMod) {
-    // `\b` 是必须的（2026-09-30 实测事故）：没有词边界时，`GateDecision::Refuse => {`
-    // 里 "Refuse" 的 "use" 子串会被误当成 use 语句，花括号展开（expandUse）在
-    // match 块上无限递归直接栈爆。use 关键字前面必然是行首 / 空白（= 词边界）。
-    const useRe = /\b(?:pub\s+)?use\s+([^;]+);/g;
-    let um;
-    while ((um = useRe.exec(src))) {
-      for (const full of expandUse(um[1])) {
-        const idx = full.indexOf('schemas::');
-        if (idx === -1) continue;
-        const rest = full.slice(idx + 'schemas::'.length).split(' as ')[0].trim();
-        if (!rest) continue;
-        const best = moduleOfRef(rest.split('::'));
-        if (best) {
-          if (!consumersByModule.has(best)) consumersByModule.set(best, new Map());
-          const map = consumersByModule.get(best);
-          map.set(f, (map.get(f) ?? 0) + 1);
-        }
-      }
-    }
-
-    // 2) 内联路径引用（非 use 语句）
-    const re = /schemas::([A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*)/g;
-    let m;
-    while ((m = re.exec(src))) {
-      const best = moduleOfRef(m[1].split('::'));
-      if (best) {
-        if (!consumersByModule.has(best)) consumersByModule.set(best, new Map());
-        const map = consumersByModule.get(best);
-        map.set(f, (map.get(f) ?? 0) + 1);
-      }
-    }
-  }
-
-  // 2) 标识符出现（排除定义文件自身与 schemas/mod.rs 的 re-export 行）
-  if (!isSchemasMod) {
-    for (const [defFile, names] of itemsByFile) {
-      if (defFile === f) continue;
-      for (const { name } of names) {
-        const re = new RegExp(`\\b${name}\\b`);
-        if (re.test(src)) {
-          if (!identFiles.has(name)) identFiles.set(name, new Set());
-          identFiles.get(name).add(f);
-        }
-      }
-    }
-  }
-}
-
-// ---------- 后端报告 ----------
+// 那半边的机器（模块键推导、`use` 花括号展开 `expandUse`、标识符兜底、下放 / 删除候选、
+// 顶层模块文件清单，约 280 行）与它的三条回归测试一并删除：它们守的是一个**不存在的
+// 目录**，真仓里恒产出空表——正是「扫描面为空 ⇒ 恒绿」的现成形态；而三条回归测试用
+// 夹具造出 `symbio-sdk/src/schemas/`，把这份空转续了命（夹具非空、被测物扫 0 个文件，
+// 测试全绿）。判据本身不丢：`core-export-audit` C-003 是它的正式 owner。
 console.log('==================== 后端 schemas 审计 ====================\n');
-if (!backendSchemaFiles.length) {
-  console.log('  ⚠ 后端半边**已退役**（D-087）：schemas 已拆成 chat / dialog / present / turn。');
-  console.log('    「契约定义有无外部消费方」由 core-export-audit C-003 承接（零/单消费方棘轮），');
-  console.log('    本脚本此后只审前端镜像面——不在这里维护第二份口径。\n');
-}
-
-// 同文件自引用计数：定义行之外的出现次数（>0 说明定义文件内部还在用它，非死项）
-const selfOcc = new Map(); // name -> count in defining file
-for (const [f, names] of itemsByFile) {
-  const src = readFileSync(f, 'utf8');
-  for (const { name } of names) {
-    const count = (src.match(new RegExp(`\\b${name}\\b`, 'g')) ?? []).length;
-    selfOcc.set(name, (selfOcc.get(name) ?? 0) + count);
-  }
-}
-
-/**
- * 声明处（或其上一行）带 `// dead-code-allow R-001: <理由>` ⇒ **已承认保留**。
- *
- * 报告里若不区分，读者会把"刻意保留的跨栈契约半边"当成可以清理的垃圾——而那正是
- * `dead-code-audit` 的承认通道存在的意义。两个守卫必须说同一句话。
- */
-function waiverOf(src, name) {
-  const lines = src.split('\n');
-  const decl = new RegExp(`\\b(const|struct|enum|fn|type)\\s+${name}\\b`);
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!decl.test(lines[i])) continue;
-    for (const j of [i, i - 1]) {
-      if (j < 0) continue;
-      const m = lines[j].match(/\/\/\s*dead-code-allow\s+R-\d+\s*:\s*(.+?)\s*$/);
-      if (m) return m[1];
-    }
-  }
-  return null;
-}
-
-// 死项：外部无引用，且定义文件内除定义行外也无引用
-const deadItems = [];
-for (const f of backendSchemaFiles) {
-  const src = readFileSync(f, 'utf8');
-  for (const { name, kind } of itemsByFile.get(f) ?? []) {
-    const users = identFiles.get(name);
-    const own = selfOcc.get(name) ?? 1;
-    if ((!users || users.size === 0) && own <= 1) {
-      deadItems.push({ file: rel(f), name, kind, waiver: waiverOf(src, name) });
-    }
-  }
-}
-console.log('--- 死项（全库标识符无引用） ---');
-console.log('    ⚠️ 标注「已承认保留」的**不要删** —— 那是刻意保留的跨栈契约半边；');
-console.log('       其余的才是可清理项。（本表是**报告**，判定型规则是 dead-code-audit 的 R-001）');
-const byFile = new Map();
-for (const d of deadItems) {
-  if (!byFile.has(d.file)) byFile.set(d.file, []);
-  byFile.get(d.file).push(`${d.kind} ${d.name}${d.waiver ? `（已承认保留：${d.waiver}）` : ''}`);
-}
-for (const [f, list] of [...byFile].sort()) console.log(`  ${f}\n    ${list.join(', ')}`);
-if (deadItems.length === 0) console.log('  （无）');
-
-// 顶层模块（目录 = 下放单元）外部消费方
-const topConsumers = new Map(); // top -> Set(consumerFile)
-for (const f of backendSchemaFiles) {
-  const key = moduleKeyOf(f);
-  if (!key) continue;
-  const top = key.split('::')[0];
-  if (!topConsumers.has(top)) topConsumers.set(top, new Set());
-  const cons = consumersByModule.get(key);
-  if (cons) for (const cf of cons.keys()) if (!cf.startsWith(schemasRoot)) topConsumers.get(top).add(cf);
-}
-// schemas/mod.rs 的 pub use re-export 也算作「经由顶层模块出口」的消费途径：
-// 消费方 import 的是顶层名（crate::symbio_sdk::ChatNode），归属到被 re-export 的模块
-const modRs = existsSync(join(schemasRoot, 'mod.rs'))
-  ? readFileSync(join(schemasRoot, 'mod.rs'), 'utf8')
-  : '';
-const reExportRe = /pub\s+use\s+([A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*)\s*\{/g;
-let rm;
-while ((rm = reExportRe.exec(modRs))) {
-  const parts = rm[1].split('::');
-  if (parts.length >= 1 && topConsumers.has(parts[0])) {
-    // re-export 本身不算外部消费方，但其存在说明该模块被「出口」——
-    // 真正消费方在 identFiles 里已按标识符计入。此处仅保证模块不因 0 引用被误判为死。
-  }
-}
-
-const shortMod = (p) => {
-  const m = p.match(/src[\\/]plugins[\\/]([^/\\.]+)/);
-  return m ? m[1] : p;
-};
-
-console.log('\n--- 顶层模块外部消费方（下放/删除决策单元） ---');
-const moveCandidates = [];
-const deleteCandidates = [];
-for (const [top, cons] of [...topConsumers].sort((a, b) => a[0].localeCompare(b[0]))) {
-  const uniq = [...new Set(cons)];
-  const label = [...new Set(uniq.map(shortMod))].join(', ') || '（无外部消费方）';
-  console.log(`  ${top.padEnd(10)} [${uniq.length}] -> ${label}`);
-  if (uniq.length === 1) moveCandidates.push({ top, consumer: uniq[0] });
-  if (uniq.length === 0) deleteCandidates.push(top);
-}
-
-console.log('\n--- 下放候选（整个顶层模块仅 1 个外部消费文件） ---');
-for (const { top, consumer } of moveCandidates) console.log(`  schemas/${top}  =>  ${rel(consumer)}`);
-if (moveCandidates.length === 0) console.log('  （无）');
-
-console.log('\n--- 删除候选（整个顶层模块无外部消费方；需人工确认无 re-export 出口） ---');
-for (const t of deleteCandidates) console.log(`  schemas/${t}`);
-if (deleteCandidates.length === 0) console.log('  （无）');
-
-// 各顶层模块文件清单（便于评估迁移工作量）
-console.log('\n--- 顶层模块文件清单 ---');
-for (const [top, cons] of [...topConsumers].sort((a, b) => a[0].localeCompare(b[0]))) {
-  const files = backendSchemaFiles
-    .filter((f) => { const k = moduleKeyOf(f); return k && k.split('::')[0] === top; })
-    .map((f) => relative(schemasRoot, f).split(sep).join('/'));
-  console.log(`  ${top} (${files.length}): ${files.join(', ')}`);
-}
+console.log('  ⊘ 后端半边已退役（D-087）：契约定义的消费方判据由 core-export-audit C-003 承接。\n');
 
 // ---------- 前端 ----------
 const feFiles = walk(join(ROOT, 'tauri/src'), ['.ts', '.vue']);
