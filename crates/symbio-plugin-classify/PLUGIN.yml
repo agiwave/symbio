@@ -4,7 +4,10 @@ plugin_comment: 对话面·判决（无它 ⇒ 全部输入直接进工具循环
 plugin_assembly: sub_agent
 plugin_order: 60
 # 跨插件地址（相对臂）：生成 crates/symbio-plugin-api/src/routes.rs 的 ROUTE_* 常量
-plugin_routes: decide, parse
+# 本插件的 decide / parse 两条臂没有 Rust 侧调用方：判决请求按绝对地址由仓外 / 前端
+# 发起，parse 只在契约文档里描述应答解析。按 routes.rs「只收有真实 Rust 调用方的
+# 地址」的口径（routes-rs.mjs 的 assertRustConsumers 机检）不导出；前端全量镜像由
+# routes-ts.mjs 从 route() 臂生成，与这份清单无关。
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 decl::EVENTS。
 shared_events: classify.answered, classify.escalate

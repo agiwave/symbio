@@ -13,7 +13,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import routesRs, { collectDeclaredRoutes, render } from "./routes-rs.mjs";
+import routesRs, {
+  assertRustConsumers,
+  collectDeclaredRoutes,
+  render,
+  rustConsumerCorpus,
+} from "./routes-rs.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const GEN_FILE = path.join(REPO, "crates", "symbio-plugin-api", "src", "routes.rs");
@@ -157,6 +162,58 @@ test('render：按首段分组、名↔值同构、文件以单个换行结束',
   assert.match(out, /\/\/\/ alpha\/real — 甲\npub const ROUTE_ALPHA_REAL: &str = "alpha\/real";/);
   assert.ok(out.endsWith('";\n'));
   assert.ok(!out.endsWith('\n\n'));
+});
+
+test('声明了却没有任何真实 Rust 消费方 ⇒ 抛错（头部口径必须机检）', () => {
+  const routes = [
+    { route: "alpha/real", name: "ROUTE_ALPHA_REAL", prefix: "alpha", doc: "甲" },
+  ];
+  assert.throws(
+    () => assertRustConsumers(routes, ""),
+    /没有任何真实 Rust 消费方[\s\S]*ROUTE_ALPHA_REAL[\s\S]*PLUGIN.yml/,
+  );
+  // 名字整词匹配：`ROUTE_ALPHA_REAL_EXTRA` 不能给 `ROUTE_ALPHA_REAL` 续命
+  assert.throws(
+    () => assertRustConsumers(routes, "fn f() { let _ = ROUTE_ALPHA_REAL_EXTRA; }"),
+    /没有任何真实 Rust 消费方/,
+  );
+  assert.equal(
+    assertRustConsumers(routes, "ctx.set(ROUTE_ALPHA_REAL, payload);"),
+    routes,
+  );
+});
+
+test('消费方语料：注释 / use 转出 / 测试文件 / 生成物自身都不算调用', () => {
+  withRepo(
+    {
+      alpha: {
+        "PLUGIN.yml": manifest("plugin_routes: real\n"),
+        "src/plugin.rs": ROUTE_SRC,
+        "src/caller.rs": [
+          "// ROUTE_ALPHA_REAL 只出现在注释里，不算消费方",
+          "pub use crate::routes::ROUTE_ALPHA_GHOST;",
+          "mod nowhere;",
+          "fn unrelated() {}",
+        ].join("\n"),
+        "src/caller.test.rs": "fn t() { let _ = ROUTE_ALPHA_REAL; }",
+      },
+      // fixtureRepo 拼出的正是 crates/symbio-plugin-api —— 生成物自身整份排除
+      api: {
+        "src/routes.rs": 'pub const ROUTE_ALPHA_REAL: &str = "alpha/real";',
+      },
+    },
+    (root) => {
+      const corpus = rustConsumerCorpus(root);
+      assert.doesNotMatch(corpus, /ROUTE_ALPHA_REAL/);
+      assert.doesNotMatch(corpus, /ROUTE_ALPHA_GHOST/);
+    },
+  );
+});
+
+test('真仓：每条 plugin_routes 声明都能在 Rust 生产语料里找到消费方', () => {
+  const routes = collectDeclaredRoutes(REPO);
+  assert.ok(routes.length > 0);
+  assert.equal(assertRustConsumers(routes, rustConsumerCorpus(REPO)), routes);
 });
 
 test('真仓的生成物与各插件 PLUGIN.yml 一致（手改过它就红）', () => {

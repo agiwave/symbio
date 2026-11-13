@@ -670,9 +670,11 @@ export const TEST_ONLY = [
   'facts/routes-ts',
   // `facts/routes-rs` 是 Rust 侧跨插件地址常量的生成器（各插件 `PLUGIN.yml` 的
   // `plugin_routes` → `crates/symbio-plugin-api/src/routes.rs`）。失效形态同样静默：
-  // 声明了但 `route()` 里没有这条臂 / 两个插件声明同一条 / 生成物被手改——前两者
-  // 若被吞掉就产出一条没人能到达的常量，而编译器只报「未使用」甚至不报。回归测试
-  // 逐条注入这些坏形态（含 vdfs 的 `VDFS_OPS` 注册形态与 home 根容器）。
+  // 声明了但 `route()` 里没有这条臂 / 两个插件声明同一条 / **声明了但没有真实 Rust
+  // 消费方** / 生成物被手改——前三者若被吞掉就产出一条没人能到达或用不上的常量，
+  // 而编译器只报「未使用」甚至不报（`arch-dead-code-audit` 只扫 `pub fn`，扫不到
+  // 常量）。回归测试逐条注入这些坏形态（含 vdfs 的 `VDFS_OPS` 注册形态、home 根容器，
+  // 以及注释 / `use` / 测试文件都不算消费方的语料口径）。
   'facts/routes-rs',
   // `facts/assembly` 是编译期装配清单（`crates/symbio-deploy/src/lib.rs`）的生成器：插件 id /
   // 子树清单 / 不可停用集全部来自各插件目录的 `PLUGIN.yml`。失效形态同属「静默」——
@@ -802,7 +804,8 @@ export const TEST_ONLY = [
  *  - `facts/routes-ts`：`tauri/src/constants/routes.gen.ts` 的生成器，由 `gen-facts` 调用；
  *  - `facts/routes-rs`：`crates/symbio-plugin-api/src/routes.rs` 的生成器（各插件
  *    `PLUGIN.yml` 的 `plugin_routes` 投影），逐条核对地址真能被 `route()` / `VDFS_OPS`
- *    分发——声明幽灵地址直接抛错，由 `gen-facts` 调用；
+ *    分发、且常量真有 Rust 生产消费方——幽灵地址 / 零消费方常量直接抛错，由
+ *    `gen-facts` 调用；
  *  - `facts/assembly`：`crates/symbio-deploy/src/lib.rs` 的生成器（插件 id / 子树清单 /
  *    不可停用集），事实源是各插件目录的 `PLUGIN.yml`，由 `gen-facts` 调用；
  *  - `line-count`：门禁报告里的行数统计；
@@ -860,6 +863,12 @@ export const LIBS = [
   // 与 gen-doc-refs 逐字同形态的链接。登记成 LIBS：判据在它两个消费方的落盘产物里
   // （`facts.test.mjs` 扫「生成物里不得留下字面 refLink(」），本体不是独立门禁步骤。
   'facts/_ref-link',
+  // `facts/open-ends`：RE-015 未收口项总账，把「还有多少没收口」从会随「收口即删」
+  // 一起消失的任务文件里挪成常设读数。登记成 LIBS 而不是 GUARDS：它由 `gen-facts`
+  // 调用、漂移由 `gen-facts --check` 判，本体不是独立门禁步骤。每格数值从各 owner
+  // 实时取，owner 读不出直接让生成失败——静默报 0 会让「欠账归零」与「看不见」
+  // 长得一模一样，那正是它要治的病。
+  'facts/open-ends',
   'facts/current',
   'facts/gate-codes',
   'facts/injection-matrix',

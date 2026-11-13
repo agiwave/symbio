@@ -30,21 +30,15 @@
 //!
 //! 前端要用的地址是 `route()` 臂的生成物（`tauri/src/constants/routes.gen.ts`），
 //! 不在本模块登记。插件只声明自己要导出给 Rust 调用方的那几条，不为「将来可能
-//! 用到」预置常量。
+//! 用到」预置常量。生成器逐条在 `crates/` 的生产 `.rs`（已剥注释 / 测试 /
+//! `use` 转出行，且排除本文件）里核对常量名，查不到消费方直接抛错——这条
+//! 口径由 `scripts/facts/routes-rs.mjs` 的 `assertRustConsumers` 机检。
 //!
 //! # 命名
 //!
 //! 标识符去掉 `ROUTE_` 前缀后，必须**逐字等于**值的大写形式（`/` → `_`）。
 //! 这条与「值必须是真实分发目标」一起由 `scripts/plugin-entry-audit.mjs` 的
 //! E-012 检查。
-
-// ============ classify ============
-
-/// classify/decide — 判决这一轮该直接回答、还是派给工具循环。
-pub const ROUTE_CLASSIFY_DECIDE: &str = "classify/decide";
-
-/// classify/parse — 把一次判决往返的**应答**解析成判决（D-122 决策 2 的另一半）。
-pub const ROUTE_CLASSIFY_PARSE: &str = "classify/parse";
 
 // ============ compose ============
 

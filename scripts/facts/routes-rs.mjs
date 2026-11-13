@@ -17,19 +17,27 @@
  * ## 为什么不对全量路由生成常量
  *
  * `routes.gen.ts` 是前后端契约的**全量镜像**；本文件只收**有真实 Rust 消费方**的
- * 地址（调用方，或按名字判定的白名单）。给前端专用路由也生成一个后端常量，就是
- * 「为将来可能用到预置常量」——那正是这份表上一轮清理掉的腐烂。插件通过
- * `plugin_routes` 明确导出范围。
+ * 地址。给前端专用路由也生成一个后端常量，就是「为将来可能用到预置常量」——
+ * 那正是这份表上一轮清理掉的腐烂。插件通过 `plugin_routes` 明确导出范围。
+ *
+ * 这条口径由 [`assertRustConsumers`] **机检**：此前它只写在生成物头部，生成器
+ * 实际只核对注册处（`route()` 臂）存在，不核对常量有没有人用。于是
+ * `classify/decide` · `classify/parse` 留下了两条零引用常量，又因为
+ * `arch-dead-code-audit` 只扫 `pub fn` 而一路全绿——约定不机检就等于没有。
  *
  * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import {
   pluginRouteArms,
   routeArmDocs,
   routeConstName,
   vdfsOpIds,
 } from "../route-facts.mjs";
+import { isTestFile, walk } from "../fs-walk.mjs";
+import { blankComments, blankTestModules } from "../rust-scan.mjs";
 import { pluginIds, readPluginManifest } from "./_plugin-yml.mjs";
 
 const OUT_REL = "crates/symbio-plugin-api/src/routes.rs";
@@ -66,7 +74,9 @@ const HEADER = `//! 跨插件调用路径常量 —— **由 \`scripts/facts/rou
 //!
 //! 前端要用的地址是 \`route()\` 臂的生成物（\`tauri/src/constants/routes.gen.ts\`），
 //! 不在本模块登记。插件只声明自己要导出给 Rust 调用方的那几条，不为「将来可能
-//! 用到」预置常量。
+//! 用到」预置常量。生成器逐条在 \`crates/\` 的生产 \`.rs\`（已剥注释 / 测试 /
+//! \`use\` 转出行，且排除本文件）里核对常量名，查不到消费方直接抛错——这条
+//! 口径由 \`scripts/facts/routes-rs.mjs\` 的 \`assertRustConsumers\` 机检。
 //!
 //! # 命名
 //!
@@ -153,6 +163,64 @@ export function collectDeclaredRoutes(root) {
     }));
 }
 
+/** `use` / `pub use` 行：转出不是调用（与 `arch-dead-code-audit` 同一口径）。 */
+const USE_LINE_RE = /^\s*(?:pub(?:\s*\(\s*[^)]*\s*\))?\s+)?use\s/;
+/** `mod x;` 声明行：接线不是调用。 */
+const MOD_LINE_RE =
+  /^\s*(?:pub(?:\s*\(\s*[^)]*\s*\))?\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\s*;\s*$/;
+
+/**
+ * 「真实 Rust 消费方」语料。
+ *
+ * 只看 `crates/` 下的**生产** `.rs`：
+ * - 测试调用不算（写一条测试就能给没人用的常量续命）；
+ * - 注释不算、`use` / `mod` 行不算（转出不是调用）；
+ * - 生成物 `routes.rs` 自身整份排除，否则每条常量都被自己的定义行算成「有人用」。
+ *
+ * 「读空」不单列守卫：空语料会让 [`assertRustConsumers`] 对**所有**声明判红，
+ * 「看不见源码反而通过」在这个方向天然不成立。
+ */
+export function rustConsumerCorpus(root) {
+  const dir = path.join(root, "crates");
+  if (!fs.existsSync(dir)) {
+    throw new Error(`${path.relative(root, dir)} 不存在——消费方语料读不出，判据不许在看不见源码时通过`);
+  }
+  const parts = [];
+  for (const abs of walk(dir)) {
+    if (!abs.endsWith(".rs") || isTestFile(abs)) continue;
+    const rel = path.relative(root, abs).split(path.sep).join("/");
+    if (rel === OUT_REL) continue;
+    const cleaned = blankTestModules(blankComments(fs.readFileSync(abs, "utf8")).join("\n"));
+    parts.push(
+      cleaned
+        .split("\n")
+        .filter((line) => !USE_LINE_RE.test(line) && !MOD_LINE_RE.test(line))
+        .join("\n"),
+    );
+  }
+  return parts.join("\n");
+}
+
+/**
+ * 纯函数：每条声明的常量必须能在消费方语料里整词找到。
+ *
+ * 名字由 `routeConstName` 从 `[a-z0-9_/]` 的相对臂生成，不含正则元字符，可直接插值。
+ * 报错指回事实源——要修的是插件自己的 `PLUGIN.yml` 清单，不是生成物；`route()`
+ * 臂与前端 `routes.gen.ts` 的全量镜像都不受这条影响。
+ */
+export function assertRustConsumers(routes, corpus) {
+  const orphan = routes.filter((r) => !new RegExp(`\\b${r.name}\\b`).test(corpus));
+  if (orphan.length) {
+    throw new Error(
+      `${OUT_REL}：以下 plugin_routes 声明没有任何真实 Rust 消费方——` +
+        `本模块只收有 Rust 调用方的地址，前端全量镜像由 routes-ts.mjs 负责：\n` +
+        orphan.map((r) => `  · ${r.name}（${r.route}）`).join("\n") +
+        `\n从对应插件的 PLUGIN.yml 删掉这些声明即可（route() 臂与前端常量不变）`,
+    );
+  }
+  return routes;
+}
+
 /** 纯函数：声明清单 → 文件内容。导出给回归测试（测试不应触发写盘） */
 export function render(routes) {
   const L = [HEADER, ""];
@@ -175,5 +243,6 @@ export default {
   title: "跨插件地址常量（各插件 `PLUGIN.yml` 的 `plugin_routes` 投影）",
   out: OUT_REL,
   stamp: false,
-  render: ({ root }) => render(collectDeclaredRoutes(root)),
+  render: ({ root }) =>
+    render(assertRustConsumers(collectDeclaredRoutes(root), rustConsumerCorpus(root))),
 };
