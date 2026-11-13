@@ -790,34 +790,37 @@ console.log()
 // 形状不许复活：
 //   · `terminated.reason` —— 与顶层 `reason` 是同一件事的两份账，必然有一处先漂；
 //   · 停机格载荷里的 `why` —— 自由文本，与 `reason` 语义重叠，读侧要靠猜。
-// （`why` 在别的格子上仍然合法：commitment.breach / memory.consolidated 等没有
-//   竞争的 `reason` 字段，那条不在本规则的范围内。）
 //
 // 判据是**零出现**：这两个形状已经全部迁完，没有存量可言。放任一条回来的代价
 // 不是风格问题——读侧从此要判两个键，而多出来的那个键**不会让任何东西变红**。
 //
-// 范围收在**三个构造点文件**（`with_terminated` / `append_fallback` / `deny`）：
-// 停机格载荷只从这三处出生，扫整个目录会把 `memory_events` 那个格子的 `why`
-// （没有竞争的 `reason` 字段，不在本规则范围内）一起卷进来。
+// ## 扫描面（2026-11-13 重指）
+// 原先把范围写死成三个文件（`turn_runner.rs` / `turn_runner/facts.rs` /
+// `turn_runner/settle.rs`）。那三个路径随旧引擎退役**都已不存在**：`readFileSync`
+// 落进 `catch → continue`，判据在真仓里一个字节都没读过、恒绿——正是 `D-280`
+// 点名的「扫描面为空 ⇒ 读不到即全绿」。现改为遍历 `crates/symbio-plugin-loop/src`
+// 下全部 `.rs`（停机格只在这个 crate 里出生），并加一条「一个文件都没扫到即判红」，
+// 让同一个坏法不可能再悄悄发生。
+//
+// 不收窄到「只扫建停机格的那个函数」：`why` 在**别的 crate** 的别的格子上合法
+// （`commitment.breach` / `memory.consolidated` 没有竞争的 `reason` 字段）——那是
+// 它们自己的事；本 crate 里只有一个停机格，这里写 `why` 就是回潮。确需保留的，
+// 就地标 `grep-audit-allow S-016: <理由>`，理由为空不算豁免。
+//
 // 正则要求 `"reason"` / `reason` **带冒号或引号**：否则 `with_terminated(with_reason(..)`
 // 这种合法组合会被 `terminated…reason` 误命中——一条误报就会让人学会忽略这条规则。
 console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许回来）---')
 {
-  const S016_FILES = [
-    'crates/symbio-plugin-loop/src/turn_runner.rs',
-    'crates/symbio-plugin-loop/src/turn_runner/facts.rs',
-    'crates/symbio-plugin-loop/src/turn_runner/settle.rs',
-  ]
   const S016_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
   const S016_IS_REPO = path.resolve(S016_BASE) === path.resolve(repoRoot)
+  const S016_FILES = walk(path.join(S016_BASE, 'crates', 'symbio-plugin-loop', 'src'))
   // 两种写法都要认：`json!({ "why": .. })`（键后冒号）与 `payload["why"] = ..`
   // （下标赋值）。只认前者会漏掉生产里真正在用的那种。
   const RETIRED_RE = /terminated[^\n]*(?:"reason"\s*:|\breason\s*:)|"why"\]\s*=|\bwhy"\s*:/
   const WAIVER_S016_RE = /\/\/\s*grep-audit-allow S-016:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
   let s016 = 0
   const s016List = []
-  for (const rel of S016_FILES) {
-    const file = path.join(S016_BASE, rel)
+  for (const file of S016_FILES) {
     let lines
     try {
       lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
@@ -832,7 +835,15 @@ console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许�
       s016List.push(`${disp(file)}:${i + 1}`)
     })
   }
-  if (s016 > 0) {
+  // 「一个文件都没扫到」只在**真仓**判红：回归测试在临时目录里造一棵最小仓树，
+  // 上面本来就没有 `crates/symbio-plugin-loop`，那时按「跳过」处理（与 `S016_IS_REPO`
+  // 同一条件）。真仓里扫不到，说明 crate 改名或路径写错——那必须是红的。
+  if (S016_IS_REPO && S016_FILES.length === 0) {
+    err(
+      'S-016 扫描面为空：`crates/symbio-plugin-loop/src` 下一份 `.rs` 都没扫到 ⇒ ' +
+        '判据读不到任何东西（`D-280`）；路径写错或 crate 改名都要在这里变红，而不是静默变绿。',
+    )
+  } else if (s016 > 0) {
     err(
       `S-016 违例：停机原因出现已退役的形状（${s016} 处）——` +
         '`terminated.reason` 与停机格的 `why` 都已并入顶层 `reason`（闭集）。' +
@@ -841,7 +852,7 @@ console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许�
   } else {
     ok(
       S016_IS_REPO
-        ? 'S-016 通过：`turn_runner/` 下零处已退役的停机原因形状'
+        ? `S-016 通过：\`plugin-loop/src\` 下 ${S016_FILES.length} 份 .rs 里零处已退役的停机原因形状`
         : 'S-016 跳过：当前树不是真实仓库（临时 fixture）',
     )
   }

@@ -13,7 +13,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { judge, parseCommitRecords, requiresRange, validateBaseline } from './arch-change-audit.mjs'
+import { judge, parseCommitRecords, patchVerdict, requiresRange, validateBaseline } from './arch-change-audit.mjs'
 
 const SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
 const CORE = 'crates/symbio-sdk/src/lib.rs'
@@ -115,6 +115,52 @@ test('reason 里只写「D-」不算：必须是完整决策号形态', () => {
   const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: D- 理由\n'))
   assert.equal(r.errors.length, 1)
   assert.match(r.errors[0], /^CC-002/)
+})
+
+// ------------------------------------------------- 改动性质（收窄通道，2026-11-13）
+
+/**
+ * 判据只认「新增代码行」。这里钉五种 diff 形状，其中第 2、5 两条是真实的误红来源：
+ * 前者是「删掉零消费方常量」（`2016d5d2` 的 `CAP_EXTERNAL_EXECUTION`），后者是
+ * 「改一行」——删一行加一行，看着像收窄，其实是改语义。
+ */
+test('改动性质：只删代码行 ⇒ narrowing（收窄不要求理由）', () => {
+  const patch = [
+    'diff --git a/crates/symbio-sdk/src/authz/mod.rs b/crates/symbio-sdk/src/authz/mod.rs',
+    '--- a/crates/symbio-sdk/src/authz/mod.rs',
+    '+++ b/crates/symbio-sdk/src/authz/mod.rs',
+    '@@ -242,9 +242,0 @@',
+    '-/// **外部执行**能力名——熔断闸门的授权判据。',
+    '-pub const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name();',
+    '-',
+  ].join('\n')
+  assert.equal(patchVerdict(patch), 'narrowing')
+})
+
+test('改动性质：只改注释 ⇒ none', () => {
+  const patch = [
+    '--- a/x.rs',
+    '+++ b/x.rs',
+    '-//! 旧说明',
+    '+//! 新说明',
+    '-/// 旧文档',
+    '+/// 新文档',
+  ].join('\n')
+  assert.equal(patchVerdict(patch), 'none')
+})
+
+test('改动性质：新增代码行 ⇒ semantic（含「只加一行」）', () => {
+  const patch = ['--- a/x.rs', '+++ b/x.rs', '+pub fn new_face() {}'].join('\n')
+  assert.equal(patchVerdict(patch), 'semantic')
+})
+
+test('改动性质：改一行（删一行 + 加一行代码）不是收窄', () => {
+  const patch = ['--- a/x.rs', '+++ b/x.rs', '-    let a = 1;', '+    let a = 2;'].join('\n')
+  assert.equal(patchVerdict(patch), 'semantic')
+})
+
+test('改动性质：读不到 diff 一律当 semantic（错的绿比红的代价大）', () => {
+  assert.equal(patchVerdict(null), 'semantic')
 })
 
 // ---------------------------------------------------------------- 解析层（喂料）

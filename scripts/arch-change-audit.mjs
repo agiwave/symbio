@@ -6,7 +6,7 @@
  *
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
- * | CC-001 | 提交触及 `crates/symbio-sdk/**` 或 `crates/symbio-kernel/**` 的**生产** `.rs`，提交信息里没有 `Core-Change:` 段 | 内核 / 契约层被当成「顺手改一下」的地方：没有一行文字解释「为什么非动它不可」，就没有人能复核。纯测试断言（`.test.rs` / `tests/`）不改公开面与语义，不在判定面内 |
+ * | CC-001 | 提交**新增了** `crates/symbio-sdk/**` / `crates/symbio-kernel/**` / `crates/symbio-contract/**` 的生产 `.rs` 代码行，提交信息里没有 `Core-Change:` 段 | 内核 / 契约层被当成「顺手改一下」的地方：没有一行文字解释「为什么非动它不可」，就没有人能复核。纯测试断言（`.test.rs` / `tests/`）、纯注释、**纯收窄**（只删不增）都不改公开面与语义，不在判定面内 |
  * | CC-002 | 同一提交**既动插件又动 core/kernel**，而 `Core-Change:` 的值不是 `D-NNN` | 横向扩充能力的提交悄悄扩大了内核面——正是 DE-023 §2 第 1 条（扩展局部性）要拦的形态 |
  *
  * ## 为什么用提交信息，而不是再写一个静态审计
@@ -303,17 +303,37 @@ function commitsWithFiles(range) {
   return parseCommitRecords(out)
 }
 
-/** 一段 `git show --unified=0` 的输出里，改动是否只有注释 / 空行（无内核语义）。 */
-export function commentsOnlyPatch(patch) {
-  if (patch === null) return false
+/**
+ * 一段 `git show --unified=0` 的 diff 属于哪一种改动。
+ *
+ * | 返回值 | 含义 | 要不要 `Core-Change:` |
+ * |---|---|---|
+ * | `'none'` | 一行代码都没动（只改注释 / 空行） | 不要 |
+ * | `'narrowing'` | 只删代码、没新增任何代码行 | 不要 |
+ * | `'semantic'` | 新增了代码行（含改一行：删一行 + 加一行） | 要 |
+ *
+ * **收窄不需要理由**是这个仓库里反复立过的一条：所有棘轮（`CS-001` / `CS-009` /
+ * `PP-004` / `HS-002` / `HS-006`）都只许降，降不需要批准——批准只为「放宽」而存在。
+ * 本条此前只认「只改注释」，于是**删掉一个零消费方的常量**（内核面变小、风险变小）
+ * 会被要求补一条 `Core-Change:`，而设计文档里根本没有对应决策可挂：判据把人逼到
+ * 要么自造决策号、要么改写已推送的历史，两条都比它想拦的东西更糟。
+ *
+ * 读不到 diff（`patch === null`）一律当 `'semantic'`：错的绿比红的代价大。
+ */
+export function patchVerdict(patch) {
+  if (patch === null) return 'semantic'
+  let added = 0
+  let removed = 0
   for (const line of String(patch).split('\n')) {
     if (!/^[+-]/.test(line)) continue
     if (line.startsWith('+++') || line.startsWith('---')) continue
-    const code = line.slice(1)
-    const stripped = code.replace(/\/\/.*$/, '').trim()
-    if (stripped.length > 0) return false
+    const code = line.slice(1).replace(/\/\/.*$/, '').trim()
+    if (code.length === 0) continue
+    if (line[0] === '+') added += 1
+    else removed += 1
   }
-  return true
+  if (added > 0) return 'semantic'
+  return removed > 0 ? 'narrowing' : 'none'
 }
 
 const inDirs = (files, dirs) => files.some((f) => dirs.some((d) => f.startsWith(d)))
@@ -451,6 +471,7 @@ function main() {
   let coreTouching = 0
   let skipped = 0
   let backfilled = 0
+  let narrowed = 0
   for (const { sha, message, files: rawFiles } of commits) {
     if (BASELINE_SHAS.has(sha.slice(0, 8))) {
       skipped += 1
@@ -464,12 +485,17 @@ function main() {
       continue
     }
     let files = rawFiles
-    // 只加注释的内核改动（如 `arch-shape-allow` 登记）不构成「改内核」：判据要判的是
-    // 内核语义与形状的变更，不是文件被打开过。逐内核文件看真实 diff，注释行一律不计。
+    // 内核文件的改动性质要按**真实 diff** 判，不能按「文件被打开过」判：只加注释
+    // （`arch-shape-allow` 登记）、只删代码（零消费方常量退场）都不改变内核语义，
+    // 两者都不该要求架构理由。判法见 `patchVerdict`。
     if (inDirs(files, ARCH_DIRS)) {
       const core = files.filter((f) => ARCH_DIRS.some((d) => f.startsWith(d)))
       const patch = git(['show', '--format=', '--unified=0', sha, '--', ...core])
-      if (commentsOnlyPatch(patch)) files = files.filter((f) => !core.includes(f))
+      const verdict = patchVerdict(patch)
+      if (verdict !== 'semantic') {
+        files = files.filter((f) => !core.includes(f))
+        if (verdict === 'narrowing') narrowed += 1
+      }
     }
     if (inDirs(files.filter(isProductionSource), ARCH_DIRS)) coreTouching += 1
     const r = judge(sha, files, message)
@@ -480,7 +506,7 @@ function main() {
     console.log(
       green(
         `✓ arch-change-audit：${commits.length} 个提交（追溯豁免 ${skipped}，其中补记表 ${backfilled}）` +
-          `里 ${coreTouching} 个触及 core/kernel，全部留了理由`,
+          `里 ${coreTouching} 个触及 core/kernel，全部留了理由（另有 ${narrowed} 个只是收窄 / 改注释，无需理由）`,
       ),
     )
     return 0
