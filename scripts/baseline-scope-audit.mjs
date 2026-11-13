@@ -66,7 +66,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { red, green, dim } from './color.mjs'
-import { adrExists } from './adr-index.mjs'
+import { hasDecisionAnchor } from './decision-anchors.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -124,7 +124,7 @@ function allowRecords(obj) {
       malformed.push(String(item))
       continue
     }
-    if (!adrExists(ROOT, m[4])) {
+    if (!hasDecisionAnchor(m[4].slice(2), ROOT)) {
       malformed.push(`${item}（决策 ${m[4]} 不存在）`)
       continue
     }

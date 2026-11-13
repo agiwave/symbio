@@ -36,8 +36,8 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from './color.mjs'
-import { adrExists } from './adr-index.mjs'
-import { stripComments as stripCommentsKeepStrings } from './rust-scan.mjs'
+import { hasDecisionAnchor } from './decision-anchors.mjs'
+import { stripComments as stripCommentsKeepStrings, blankComments, matchBrace } from './rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -168,78 +168,12 @@ function stripCode(text) {
 }
 
 /**
- * 只剥注释、**保留字符串字面量**：`CP-004` 要找的正是代码里的字符串，
- * 所以不能用 `stripCode`（它会把字符串换成 `""`）。注释里的「例如 `chat.assistant.final`」
- * 是散文，不是机制层持有世界域名；只有代码字面量才是。
+ * 只剥注释、**保留字符串字面量**：`CP-004` 要找的正是代码里的字符串，所以不能用
+ * `stripCode`（它把字符串也换成 `""`）。判据只做 `includes` 子串比对、不看列号，
+ * 于是直接复用 `rust-scan.blankComments`（唯一真源）拼回字符串——本文件此前自带
+ * 一份 70 余行的等价实现，与共享版只是措辞不同。
  */
-function stripComments(text) {
-  let out = ''
-  let i = 0
-  let lineComment = false
-  let block = 0
-  while (i < text.length) {
-    const two = text.slice(i, i + 2)
-    const ch = text[i]
-    if (lineComment) {
-      if (ch === '\n') {
-        lineComment = false
-        out += '\n'
-      } else out += ' '
-      i++
-      continue
-    }
-    if (block > 0) {
-      if (two === '*/') {
-        block--
-        out += '  '
-        i += 2
-        continue
-      }
-      out += ch === '\n' ? '\n' : ' '
-      i++
-      continue
-    }
-    if (two === '//') {
-      lineComment = true
-      out += '  '
-      i += 2
-      continue
-    }
-    if (two === '/*') {
-      block++
-      out += '  '
-      i += 2
-      continue
-    }
-    if (ch === '"') {
-      out += ch
-      i++
-      while (i < text.length) {
-        out += text[i]
-        if (text[i] === '\\') {
-          i++
-          if (i < text.length) out += text[i]
-          i++
-          continue
-        }
-        if (text[i] === '"') {
-          i++
-          break
-        }
-        i++
-      }
-      continue
-    }
-    if (ch === "'" && text[i + 2] === "'" && text[i + 1] !== '\\') {
-      out += text.slice(i, i + 3)
-      i += 3
-      continue
-    }
-    out += ch
-    i++
-  }
-  return out
-}
+const commentsBlanked = (text) => blankComments(text).join('\n')
 
 function lineAt(text, index) {
   let line = 1
@@ -247,19 +181,13 @@ function lineAt(text, index) {
   return line
 }
 
-function matchBrace(text, open) {
-  let depth = 0
-  for (let i = open; i < text.length; i++) {
-    if (text[i] === '{') depth++
-    else if (text[i] === '}') {
-      depth--
-      if (depth === 0) return i
-    }
-  }
-  return text.length
-}
-
-/** 取每个 `loop` / `while` / `for` 的块体。 */
+/**
+ * 取每个 `loop` / `while` / `for` 的块体。
+ *
+ * `matchBrace` 走 `rust-scan` 的字符串感知版（唯一真源）：本文件此前自带一份
+ * 「只数花括号」的朴素实现，而 `format!("{{}}")` 这类字面量括号会让它错位，
+ * 于是块体截多截少、机制面指纹跟着漂——**静默漂**，不是报错。
+ */
 function loopBodies(code, re = LOOP_HEAD) {
   const out = []
   for (const m of code.matchAll(re)) {
@@ -287,7 +215,7 @@ function fnBody(code, name) {
  * import 顺序 / 尾逗号，基线就漂移一次、就要写一条 allow。漂移越频繁，allow 就越像
  * 橡皮图章——门最后只剩流程。归一化取三条：
  *
- * ① 注释已由 `stripComments` 去掉（保留字符串内容，不误伤 URL 里的 `//`）；
+ * ① 注释已由 `blankComments` 去掉（保留字符串内容，不误伤 URL 里的 `//`）；
  * ② 空白全部折叠成一个分隔符：换行、缩进、import 排序都不进指纹；
  * ③ 逗号不计（rustfmt 会给多行参数 / 结构体补尾逗号）。
  *
@@ -440,7 +368,7 @@ if (portNames.length === 0) {
 for (const src of [KERNEL_SRC, SDK_SRC, LOOP_SRC]) {
   for (const rel of walk(src)) {
     if (rel === VOCAB_REL) continue
-    const code = stripComments(read(rel) ?? '')
+    const code = commentsBlanked(read(rel) ?? '')
     for (const name of worldNames) {
       if (code.includes(`"${name}"`)) report('CP-004', rel, `机制层出现世界事件名字面量 "${name}"`)
     }
@@ -452,7 +380,7 @@ for (const src of [KERNEL_SRC, SDK_SRC, LOOP_SRC]) {
 // （见 `plugin-api/vocab.rs` 的「多义拼写」注），文本扫描分不出概念，故不在此判。
 for (const rel of walk(LOOP_SRC)) {
   if (rel === VOCAB_REL) continue
-  const code = stripComments(read(rel) ?? '')
+  const code = commentsBlanked(read(rel) ?? '')
   for (const name of portNames) {
     if (code.includes(`"${name}"`)) report('CP-004', rel, `派发面出现端口名字面量 "${name}"`)
   }
@@ -467,7 +395,7 @@ if (baseline === null && !(PRINT || WRITE)) {
 const mech = baseline?.mechanism ?? {}
 if (mech.file !== ENGINE_REL) report('CP-006', mech.file ?? BASELINE_REL, `机制面文件应为 ${ENGINE_REL}，基线写的是 ${mech.file ?? '(空)'}`)
 if (!mech.reason || !String(mech.reason).trim()) report('CP-006', BASELINE_REL, '机制面理由为空')
-if (!mech.adr || !adrExists(ROOT, mech.adr)) report('CP-006', BASELINE_REL, `机制面决策号不存在：${mech.adr ?? '(空)'}`)
+if (!mech.adr || !hasDecisionAnchor(String(mech.adr).replace(/^D-/, ''), ROOT)) report('CP-006', BASELINE_REL, `机制面决策号不存在：${mech.adr ?? '(空)'}`)
 
 const source = mechanismSource()
 // `engine.rs` 整个读不出（文件被删 / 权限）才是「范围读不出」退 2；

@@ -63,7 +63,7 @@ import { fileURLToPath } from 'node:url'
 import { green, red, dim } from './color.mjs'
 import { walk, isTestFile } from './fs-walk.mjs'
 import { blankComments, blankTestModules, matchBrace } from './rust-scan.mjs'
-import { adrExists } from './adr-index.mjs'
+import { hasDecisionAnchor } from './decision-anchors.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -263,13 +263,13 @@ export function readBaseline(root = ROOT) {
   return { note: obj.note ?? '', rows: obj.rows }
 }
 
-/** 基线条目的形状与署名（SR-003）。`adrExists` 是决策号存在性的唯一扫描实现。 */
+/** 基线条目的形状与署名（SR-003）。决策号存在性走 `decision-anchors`（唯一扫描实现）。 */
 export function checkBaseline(rows, root = ROOT) {
   const errors = []
   const seen = new Set()
   const cache = new Map()
   const exists = (adr) => {
-    if (!cache.has(adr)) cache.set(adr, adrExists(root, adr))
+    if (!cache.has(adr)) cache.set(adr, hasDecisionAnchor(adr.replace(/^D-/, ''), root))
     return cache.get(adr)
   }
   for (const [i, r] of rows.entries()) {

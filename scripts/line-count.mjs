@@ -3,10 +3,20 @@
  *
  * 供 `scripts/facts/current.mjs` 等消费方共同引用。
  * 本模块提取自 `facts/current.mjs`，确保事实表口径只有一个来源，绝无漂移。
+ *
+ * ## 分工：本模块只管「怎么数」，不管「怎么读」
+ *
+ * 字符串感知的扫描原语（`skipString` / `matchBrace` / `testModuleSpans` /
+ * `stripTestModules`）的**唯一真源是 `rust-scan.mjs`**——本文件此前自带一份副本，
+ * 是那个模块头注释点名的「四份实现」里唯一没被撤掉的一份（另三份
+ * `plugin-entry-audit` / `facts/current` / `core-surface` 早已改指过去）。
+ * 两份副本的 `matchBrace` 在未闭合花括号上返回值不同（`length - 1` vs `length`），
+ * 正是「同一件东西两个口径」的现成例子，故直接引用，不再保留本地副本。
  */
 
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { testModuleSpans } from "./rust-scan.mjs";
 
 /** 目录遍历时跳过的名字（构建产物 / 依赖 / 版本库） */
 export const SCOPE_SKIP = ["target", "vendor", "node_modules", "dist", ".git"];
@@ -45,96 +55,6 @@ export function countLines(files) {
   return n;
 }
 
-/**
- * 跳过字符串字面量，返回闭引号（或原始串收尾分隔符末位）的下标。
- *
- * 只**向前**扫描：返回值恒 ≥ `start`，调用方据此推进扫描位置；
- * 一旦返回更小的下标（曾用"向前 lastIndexOf 找 r" 的实现），
- * 外层扫描就会原地打转（实测踩坑：生成器死循环）。
- */
-export function skipString(txt, start) {
-  // 原始字符串判定：开引号紧跟在 `r` 或 `r###` 之后（`r"…"` / `r#"…"#` / `br#"…"#`）
-  let hashes = 0;
-  let j = start - 1;
-  while (j >= 0 && txt[j] === "#") {
-    hashes++;
-    j--;
-  }
-  if (j >= 0 && txt[j] === "r") {
-    const close = '"' + "#".repeat(hashes);
-    const end = txt.indexOf(close, start + 1);
-    return end < 0 ? txt.length - 1 : end + close.length - 1;
-  }
-  let p = start + 1;
-  while (p < txt.length) {
-    if (txt[p] === "\\") {
-      p += 2;
-      continue;
-    }
-    if (txt[p] === '"') return p;
-    p++;
-  }
-  return txt.length - 1;
-}
-
-/** 从 `{` 起做字符串感知的花括号配对，返回对应 `}` 的下标（失败返回文本末尾） */
-export function matchBrace(txt, openIdx) {
-  let depth = 0;
-  for (let p = openIdx; p < txt.length; p++) {
-    const c = txt[p];
-    if (c === '"') {
-      p = skipString(txt, p);
-      continue;
-    }
-    if (c === "{") depth++;
-    else if (c === "}") {
-      depth--;
-      if (depth === 0) return p;
-    }
-  }
-  return txt.length - 1;
-}
-
-/**
- * 收集 `#[cfg(test)]` 测试模块占据的字符区间 `[start, end)`。
- *
- * 扫描逻辑的**唯一真源**：`stripTestModules`（提取事实时剔除测试代码）与
- * `splitRustLines`（统计行数时把内联测试归属到"测试"列）都建立在它之上。
- */
-export function testModuleSpans(txt) {
-  const MARKER = "#[cfg(test)]";
-  const spans = [];
-  let i = 0;
-  for (;;) {
-    const idx = txt.indexOf(MARKER, i);
-    if (idx < 0) return spans;
-    const after = txt.slice(idx + MARKER.length);
-    const modHead = after.match(/^\s*(?:#\[[^\]]*\]\s*)*mod\s+[A-Za-z0-9_]+\s*\{/);
-    // 进度保证：无论匹配是否成功，i 都必须严格前进（否则死循环）
-    if (modHead) {
-      const open = idx + MARKER.length + modHead[0].length - 1;
-      const end = Math.max(matchBrace(txt, open) + 1, open + 1);
-      spans.push([idx, end]);
-      i = end;
-    } else {
-      // 不是模块（如 `#[cfg(test)] use …;`）——只吞掉标记本身，保留后续代码
-      i = idx + MARKER.length;
-    }
-  }
-}
-
-/** 剔除上面那些区间，其余文本原样保留（顺序拼接即等价于"挖掉"） */
-export function stripTestModules(txt) {
-  const spans = testModuleSpans(txt);
-  if (spans.length === 0) return txt;
-  let out = "";
-  let i = 0;
-  for (const [s, e] of spans) {
-    out += txt.slice(i, s);
-    i = e;
-  }
-  return out + txt.slice(i);
-}
 
 /**
  * `.rs` 文件的实现/测试行数归属。

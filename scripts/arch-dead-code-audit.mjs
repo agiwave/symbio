@@ -76,7 +76,7 @@ import { fileURLToPath } from 'node:url'
 import { green, red, dim } from './color.mjs'
 import { walk, isTestFile } from './fs-walk.mjs'
 import { blankComments, blankTestModules } from './rust-scan.mjs'
-import { adrExists } from './adr-index.mjs'
+import { hasDecisionAnchor } from './decision-anchors.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -279,12 +279,12 @@ export function evidenceErrors(root, evidence) {
   }
   const ev = evidence.trim()
   if (/^D-\d{3}$/.test(ev)) {
-    return adrExists(root, ev) ? [] : [`挂的决策 ${ev} 不存在 ⇒ 证据要能打开`]
+    return hasDecisionAnchor(ev.slice(2), root) ? [] : [`挂的决策 ${ev} 没有「### ${ev}」锚点 ⇒ 证据要能打开`]
   }
   return fs.existsSync(path.join(root, ev)) ? [] : [`证据路径 ${ev} 不存在 ⇒ 证据要能打开`]
 }
 
-/** 基线条目的形状与署名（`AD-003`）。`adrExists` 是决策号存在性的唯一扫描实现。 */
+/** 基线条目的形状与署名（`AD-003`）。决策号存在性走 `decision-anchors`（唯一扫描实现）。 */
 export function checkBaseline(baseline, root = ROOT) {
   const errors = []
   const seen = new Set()

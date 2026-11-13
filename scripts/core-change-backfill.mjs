@@ -40,7 +40,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { adrExists } from './adr-index.mjs'
+import { hasDecisionAnchor } from './decision-anchors.mjs'
 
 export const BACKFILL_REL = 'scripts/exemptions/core-change-backfill.json'
 export const BACKFILL_JUDGEMENTS = ['CC-001', 'EX-007']
@@ -48,9 +48,9 @@ export const BACKFILL_JUDGEMENTS = ['CC-001', 'EX-007']
 const SHA_RE = /^[0-9a-f]{7,40}$/
 const ADR_RE = /\bD-\d+\b/
 
-/** `D-NNN` 是否能在现行文档里打开（含模块 README 里的决策）。 */
+/** `D-NNN` 是否能在现行文档里打开（含模块 README 里的决策锚点）。 */
 function opensDecision(root, cited) {
-  return adrExists(root, cited)
+  return hasDecisionAnchor(cited.replace(/^D-/, ''), root)
 }
 
 /**

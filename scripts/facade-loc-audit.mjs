@@ -68,7 +68,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, dim } from './color.mjs'
 import { walk, isTestFile } from './fs-walk.mjs'
-import { adrExists } from './adr-index.mjs'
+import { hasDecisionAnchor } from './decision-anchors.mjs'
 import { generatedPaths } from './capability-migration-audit.mjs'
 
 const argv = process.argv.slice(2)
@@ -133,7 +133,7 @@ const isCount = (n) => Number.isInteger(n) && n > 0
 const isAdr = (s) => typeof s === 'string' && /^D-\d{3}$/.test(s.trim())
 
 /**
- * 基线条目的形状与署名（FA-003）。`adrExists` 是决策号存在性的唯一扫描实现。
+ * 基线条目的形状与署名（FA-003）。决策号存在性走 `decision-anchors`（唯一扫描实现）。
  *
  * @param {{files: object[], total: object}} baseline
  * @param {{path: string}[]} scanned  当前生产文件，用来判「登记的文件还在不在」
@@ -144,7 +144,7 @@ export function checkBaseline(baseline, scanned, root = ROOT) {
   const live = new Set(scanned.map((f) => f.path))
   const cache = new Map()
   const exists = (adr) => {
-    if (!cache.has(adr)) cache.set(adr, adrExists(root, adr))
+    if (!cache.has(adr)) cache.set(adr, hasDecisionAnchor(adr.replace(/^D-/, ''), root))
     return cache.get(adr)
   }
   for (const [i, f] of baseline.files.entries()) {

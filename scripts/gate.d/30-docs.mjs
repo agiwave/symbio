@@ -842,12 +842,19 @@ export const LIBS = [
   // 失败只给一行文件名、正文要自己去文件里翻（于是人再跑一遍 7 分钟的门禁）。
   'gate.d/_logs',
   'fs-walk',
-  // `decision-anchors` 是「一条 `D-NNN` 决策在哪」的**唯一扫描实现**：历史裁决认设计
-  // 文档的 `### D-NNN` 锚点，判定决策 kind 的裁决认单文档 front-matter 的 `id`（owner）。
-  // 登记成 LIBS：三个消费方（`arch-shape-audit` 的 CS-002、`projection-purity` 的 PP-005、
-  // `plugin-special-case-audit` 的特例豁免）各自判「挂着的决策号存不存在」，
-  // 而**扫描只有一份**——各写一遍正则，就会有一个消费方在身份形态变了以后静默读不到，
-  // 于是「必须挂决策」退化成「随便挂什么都算挂」。判据在它三个消费方的回归测试里。
+  // `decision-anchors` 是「一条 `D-NNN` 决策存不存在」的**唯一扫描实现**：设计文档（或
+  // 模块 `README.md`）的「关键决策」节里有一个 `### D-NNN` 标题（`DE-017 §6`）。
+  // 登记成 LIBS：十个消费方（`arch-shape-audit` 的 CS-002、`projection-purity` 的 PP-005、
+  // `plugin-special-case-audit` / `port-surface-audit` 的豁免，以及四份基线台账
+  // ——`arch-dead-code` / `facade-loc` / `sink-row` / `control-plane`——的署名校验）
+  // 各自判「挂着的决策号存不存在」，而**扫描只有一份**——各写一遍正则，就会有一个消费方
+  // 在身份形态变了以后静默读不到，于是「必须挂决策」退化成「随便挂什么都算挂」。
+  // 判据在它各消费方的回归测试里。
+  //
+  // 此前这里还并排放着一个 `adr-index`（全文 `includes('D-NNN')` 就算存在）。它已被
+  // 撤掉：那是同一问题的**弱读法**，会把三类东西当成决策——文档审计判据码
+  // （`doc-link` 的 D-006 / D-008 等）、正文里顺口提到的号（`D-433` 之类并无决策正文）、
+  // 以及 `docs/archive/` 里已退役的旧裁决。两个实现还各自在头注释里自称「唯一」。
   'decision-anchors',
   'route-facts',
   'gen-facts',
@@ -908,10 +915,6 @@ export const LIBS = [
   'gen-doc-refs',
   'line-count',
   'doc-find',
-  // `adr-index` 是「`D-NNN` 是否真的存在」的**唯一扫描实现**（从退役的 `known-red`
-  // 抽出）。登记成 LIBS：判据在它的消费方 `control-plane-audit` / `baseline-scope-audit`
-  // 的豁免校验里，本体不是独立门禁步骤——跑两遍就是同一件事。
-  'adr-index',
   'registry-lib',
   // `e2e-concurrency` 的门内版本在 `58-e2e.mjs` 里逐轮打印，本脚本供人工复核 + `--ci`。
   //
