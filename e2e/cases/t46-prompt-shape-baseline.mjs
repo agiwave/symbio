@@ -61,7 +61,7 @@ const SCENARIO = 'full-主线装配-工具轮-对话面关闭';
 /** 工具回显内容：固定文本，让「观测列」在两次重生成之间可比 */
 const ECHO_TEXT = '形状基线回显内容';
 
-const AUDIT_SCRIPT = join(E2E_ROOT, 'scripts', 'prompt-shape-audit.mjs');
+const AUDIT_SCRIPT = join(E2E_ROOT, 'scripts', 'audits', 'prompt-shape-audit.mjs');
 
 /** 工具面字节棘轮（只许降）：口径见文件里的 `note`。 */
 const TOOL_SURFACE_BASELINE = join(E2E_ROOT, 'scripts', 'baselines', 'tool-surface.json');

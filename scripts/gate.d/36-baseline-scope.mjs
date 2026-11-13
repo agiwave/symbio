@@ -96,7 +96,7 @@ export default {
           const r = await ctx.run({
             label: `baseline-scope-audit --base=${base.slice(0, 8)}`,
             cmd: process.execPath,
-            args: [path.join(repoRoot, 'scripts', 'baseline-scope-audit.mjs'), `--base=${base}`],
+            args: [path.join(repoRoot, 'scripts', 'audits', 'baseline-scope-audit.mjs'), `--base=${base}`],
             cwd: repoRoot,
             echo: 'all',
           })

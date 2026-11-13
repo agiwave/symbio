@@ -68,7 +68,7 @@ jobs:
         # （S-007 原为 CHANGELOG 维护检查，已随「不维护变更日志」一并废除）
         # grep-audit.mjs 为纯 Node 实现，不依赖 ripgrep；
         # 原 .sh 版在本步骤因 runner 未装 rg 而空跑并误报。
-        run: node scripts/grep-audit.mjs
+        run: node scripts/audits/grep-audit.mjs
 
       - name: Docs facts drift gate (docs/004-ref/006-当前事实表.md)
         # 与 ci.yml 同一条门禁：事实表必须与代码一致
