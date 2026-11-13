@@ -231,8 +231,8 @@ impl: partial
 
 <!-- doc-link-allow D-006: 本节引用的三个文件名**均不存在**——前两个是已修缺陷的被引述内容，第三个是"将来要立"的占位，都不是入链 -->
 `tauri/docs/110-FRONTEND.md` 顶部指向**本文**。视觉细则若将来要立，另建
-`frontend-ui-ux-design.md` 并在本文登记——`frontend-ui-ux-prd.md` 与
-`frontend-ui-ux-design.md` 两个文件名都不存在。
+`frontend-ui-ux-design.md` 并在本文登记——这两个文件名在**现行活跃树**里都不存在
+（同名旧稿只在 `docs/archive/`，不构成第二份现行规范）。
 
 ---
 

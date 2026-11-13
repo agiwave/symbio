@@ -1,4 +1,6 @@
-//! V2.6 分形路由专用会话管理 (支持外部 ID)
+//! `route_v2` 的连接生命周期：会话登记、60s 失活清理、300s 超时、EOF 泵与订阅令牌取消。
+//!
+//! 摘连接**不中止业务**——业务归后端，这里只负责不再往一条没有读者的通道上写。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

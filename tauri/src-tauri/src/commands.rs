@@ -1,4 +1,6 @@
-//! V2.7 新版分形路由指令 (影子文件 - 极致调试版)
+//! 三个 IPC 命令的实现：`route_v2` / `route_v2_send` / `route_v2_close`。
+//!
+//! 只做「metadata → ctx → `root.route` → 载荷分派」与连接生命周期，不含插件树知识与业务判定。
 
 use crate::AppState;
 use serde_json::Value;

@@ -1,6 +1,6 @@
 // Corresponding Backend: crates/symbio-kernel/src/plugin/transport.rs
 /**
- * Symbio 插件通讯内核 (V2.7 统一路由对称版)
+ * Symbio 插件通讯内核：统一消息模型 + 出站传输选择（native IPC / HTTP / gateway）。
  * 
  * 核心目标：
  * 1. 统一消息模型 (PluginMessage)，对称处理请求与响应。
@@ -60,7 +60,7 @@ export const HEAD_TRACE_ID = "trace_id";
 export const HEAD_ORIGIN = "origin";
 
 /**
- * 统一消息结构 (V2.7)
+ * 统一消息结构（与后端 `PluginMessageWire` 对齐）
  */
 export interface PluginMessage {
   metadata: Record<string, string>;
@@ -160,8 +160,8 @@ class ProtocolEnforcer {
       throw new Error(msg);
     }
     const keys = Object.keys(frame);
-    if (keys.length !== 1 || !['Data', 'Extension', 'Error'].includes(keys[0])) {
-      const msg = `[Protocol Violation] ${path} sent invalid frame structure (expected Data|Extension|Error)`;
+    if (keys.length !== 1 || !['Data', 'Error'].includes(keys[0])) {
+      const msg = `[Protocol Violation] ${path} sent invalid frame structure (expected Data|Error)`;
       logger.error('Protocol', msg, frame);
       throw new Error(msg);
     }
