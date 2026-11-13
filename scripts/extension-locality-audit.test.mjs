@@ -1,7 +1,7 @@
 /**
  * extension-locality-audit 回归测试 —— 证明 EX-002 **改输入后结论必须变**
  *
- * `EX-002`（T1）的判定对象是**提交 diff 的六棵树指纹**，不是「有没有新 crate」。
+ * `EX-002`（T1）的判定对象是**提交 diff 的受保护树指纹**，不是「有没有新 crate」。
  * 这条守卫的失效形态都是「看起来在算」：
  *
  * - 只判新 crate 是否存在 ⇒ 新增能力包夹带 `loop` 分支照样绿；
@@ -79,7 +79,7 @@ test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-0
 })
 
 test('TREES：七棵是并集且含契约树、plugin-api 与 host（D-372 口径 + D-486）', () => {
-  // D-486：契约树加入活跃区（第七棵），仍是六棵判据 + 契约的并集口径。
+  // D-486：契约树加入活跃区（第七棵），仍是受保护树判据 + 契约的并集口径。
   assert.deepEqual(TREES, [
     'crates/symbio-sdk',
     'crates/symbio-kernel',
@@ -183,7 +183,7 @@ test('judgeNewCapability：没有新增能力包的提交不判', () => {
   assert.deepEqual(r.errors, [])
 })
 
-test('judgeNewCapability：六棵树指纹不变 ⇒ 绿', () => {
+test('judgeNewCapability：受保护树指纹不变 ⇒ 绿', () => {
   const same = Object.fromEntries(TREES.map((t) => [t, 'h']))
   const r = judgeNewCapability({ sha: 'x', added: ['crates/symbio-plugin-new/PLUGIN.yml'], before: same, after: { ...same } })
   assert.deepEqual(r.errors, [])
@@ -231,5 +231,5 @@ test('真仓冒烟：夹具提交读得出，--last 跑绿', () => {
   const r = spawnSync(process.execPath, [script, '--last'], { cwd: repoRoot, encoding: 'utf8', shell: false })
   assert.equal(r.status, 0, r.stderr || r.stdout)
   assert.match(r.stdout, /f5e4bbed/)
-  assert.match(r.stdout, /六棵树指纹不变/)
+  assert.match(r.stdout, /受保护树指纹不变/)
 })

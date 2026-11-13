@@ -18,8 +18,8 @@ tauri/
 ├── src/ # Vue3 应用（视图、组件、store、API 层）
 ├── src-tauri/ # Tauri 宿主（Rust）：只有 `route_v2` 家族 command
 └── docs/ # 前端文档
- ├── 023-FRONTEND.md # 前端架构与机制（代码结构、与后端通信）
- └── 024-INTERACTION.md # 交互语义（用户看到什么、动作产生什么反馈）
+ ├── 110-FRONTEND.md # 前端架构与机制（代码结构、与后端通信）
+ └── 111-INTERACTION.md # 交互语义（用户看到什么、动作产生什么反馈）
 ```
 
 ## 宿主命令（src-tauri）

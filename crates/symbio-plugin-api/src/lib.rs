@@ -27,12 +27,12 @@
 //! | 臂 | 来源 | 条数（唯一 owner：`scripts/plugin-surface-audit.mjs`，HS-002 / HS-006） | 性质 |
 //! |---|---|---|---|
 //! | 语法臂 | `symbio-kernel` | `GRAMMAR_BASELINE` | 形状与闭集，**不计债但计件**（D-278） |
-//! | SDK 臂 | `symbio-sdk` | `SDK_BASELINE` | 只碰内核词汇的宿主机制（含授权判定），进棘轮；两臂只许不涨，改值过的是脚本棘轮，本表不抄第二份数字 |
+//! | SDK 臂 | `symbio-sdk` | `SDK_BASELINE` | 只碰内核词汇的宿主机制（含授权判定） |
+//! | 契约臂 | `symbio-contract` | `CONTRACT_BASELINE` | 插件间共享的纯形状（D-486） |
+//! | 模块转发 | 本 crate 自己的模块 | `MODULE_REEXPORT_BASELINE` | 端口与词汇的整块转出 |
 //!
-//! 第三臂（旧 core 的 6 条授权符号）已于 D-276 清零：授权判定只查一张部署表，
-//! 不认识轮次 / 幕 / 判决，按 sdk 自己的章程（「插件要用的宿主机制……授权判定」）归位。
-//! 本 crate 的 manifest 因此**只列** `symbio-kernel` / `symbio-sdk` / `symbio-deploy` 三条，
-//! HS-005 判它不许回头。
+//! 三臂只许不涨，改值过的是脚本棘轮；本表不抄第二份数字。旧 core 的 6 条授权符号已于 D-276 清零——
+//! 授权判定只查一张部署表，按 sdk 自己的章程归位；manifest 因此**只列** `symbio-kernel` / `symbio-sdk` / `symbio-contract` / `symbio-deploy` 四条，HS-005 判它不许回头。
 //!
 //! 插件因此只写 `symbio_plugin_api::…`，manifest 里也不列 `symbio-kernel` /
 //! `symbio-sdk` / `symbio-deploy`；控制面（`loop` / `session`）不在此列，它们按影响类

@@ -149,7 +149,7 @@ const PLUGIN_API_TREES = ['crates/symbio-plugin-api']
 export const HOST_TREES = ['crates/symbio-host']
 
 /**
- * **受保护目录的唯一一份**：`EX-002`（新增能力只改自己目录）判的就是这六棵树的
+ * **受保护目录的唯一一份**：`EX-002`（新增能力只改自己目录）判的就是受保护树的
  * 非生成物指纹。`extension-locality-audit` 直接引用本常量，不再抄第二份——
  * 此前两条任务的 exit 与审计脚本各写一套（有的漏 `sdk`、有的漏
  * `plugin-api`），同一提交在三处得到不同结论（D-372）。

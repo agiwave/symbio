@@ -14,7 +14,8 @@ impl: done
 
 ## 工具
 
-清单与逐项说明见 `docs/004-ref/003-ROUTES.md` §Local 插件（**权威**）。共 5 个原生工具：
+清单的 owner 是本篇的列表标记区（`lists: [local-tools=owner]`）；`docs/004-ref/003-ROUTES.md`
+§Local 插件是它的 `view`（只指路，不抄表）。共 5 个原生工具：
 
 <!-- list:local-tools owner -->
 

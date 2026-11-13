@@ -408,7 +408,7 @@ export const GUARDS = [
   'arch-dead-code-audit',
   // `extension-locality-audit`（EX-002）判**新增能力包有没有动架构面**：一个提交新增
   // `crates/symbio-plugin-<名字>/PLUGIN.yml` 时，`sdk` / `kernel` / `plugin-api` /
-  // `loop` / `session` / `host` **六棵树**的目录指纹必须与父提交逐一相等。六棵是并集
+  // `loop` / `session` / `host` **受保护树**的目录指纹必须与父提交逐一相等。并集口径见 `D-372`
   // （`capability-migration-audit.PROTECTED_TREES`，D-372）：任何一套旧口径里出现过的
   // 树都算，少一棵就留一条「加能力时顺手改控制面」的路。`host` 持有驱动族唯一 runner，
   // 代码硬约束只拒第二个驱动、拒不了按能力名加分支，故一并纳入；名单是审计脚本自己的
