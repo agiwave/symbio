@@ -43,6 +43,8 @@ const RISK_LEVEL_RS = 'crates/symbio-kernel/src/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 const READING_RS = 'crates/symbio-kernel/src/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
+const TRANSPORT_RS = 'crates/symbio-kernel/src/plugin/transport.rs'
+const PLUGIN_TS = 'tauri/src/services/plugin.ts'
 
 /** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
 const rsStruct = (name, ...fields) =>
@@ -482,6 +484,9 @@ const BASE = {
   [HOME_TS]: HOME_TS_SRC,
   [META_READER_TS]: META_READER_TS_SRC,
   'tauri/src/services/session.ts': 'export const x = 1\n',
+  // D 组：线路层信封（后端唯一真源 ↔ 前端手写副本）
+  [TRANSPORT_RS]: rsStruct('PluginMessageWire', 'metadata', 'payload'),
+  [PLUGIN_TS]: tsIface('PluginMessage', 'metadata', 'payload'),
 }
 
 /**
@@ -522,7 +527,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 29 对结构体字段 \+ E 组 6 条跨栈导航头 \+ G 组 ChatNode 顶层字段消费守卫 \+ H 组 1 个 meta 键读点/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 30 对结构体字段 \+ E 组 6 条跨栈导航头 \+ G 组 ChatNode 顶层字段消费守卫 \+ H 组 1 个 meta 键读点/,
   )
 })
 
@@ -751,6 +756,14 @@ test('词表数组被改名 → 变红（不是静默跳过）', () => {
 // ==================== D 组：结构体字段 ====================
 
 const VDFS_NODE_RS = 'crates/symbio-kernel/src/vdfs/node.rs'
+
+test('线路层信封的容器字段改名、前端没跟 → 变红（信封不再只有指针守着）', () => {
+  const r = mirror({
+    [TRANSPORT_RS]: rsStruct('PluginMessageWire', 'headers', 'payload'),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /前端持有后端不存在的字段：metadata/)
+})
 
 test('读数行字段改名、前端没跟 → 变红（T-202 守卫真的在看）', () => {
   const r = mirror({

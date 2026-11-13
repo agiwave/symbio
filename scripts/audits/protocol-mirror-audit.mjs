@@ -41,6 +41,11 @@
  *   问题，少一个才是。只比字段名不比类型：类型映射正则读不出来，而"改字段名"本就是
  *   后端最常见的契约变更。
  *
+ *   线路层信封（`PluginMessageWire` ↔ `PluginMessage`）也登记在这一组：它是**唯一**
+ *   一份手写 TS 副本、又不属于任何业务 schema，此前只被 E 组指针指着。两个 `enum`
+ *   （`PluginFrame` / `PluginPayloadWire`）的**变体集合**读不出来，由前端运行期的帧
+ *   白名单兜底——那里收窄成 `Data|Error`，多一个变体会当场抛错，不是静默。
+ *
  * **E. 跨栈导航头**（`Corresponding Frontend` / `Corresponding Backend` 必须指向真实文件）
  *   后端协议文件顶部写 `// Corresponding Frontend: <路径>`，前端镜像文件顶部写
  *   `// Corresponding Backend: <路径>`，两个方向都是**人**在两边之间跳转的入口。
@@ -118,6 +123,12 @@ const READING_TS = 'tauri/src/schemas/reading.ts'
 // （四个同名 namespace）。见 [D-112] 决策 2。
 const HOME_SCHEMAS_RS = 'crates/symbio-plugin-home/src/schemas.rs'
 const HOME_TS = 'tauri/src/schemas/home.ts'
+
+// 线路层信封：后端 `transport.rs` 是唯一真源，前端 `services/plugin.ts` 是手写副本。
+// 四个类型里只有容器字段名（`metadata` / `payload`）能被 D 组的正则读出来；
+// 两个 `enum` 的**变体集合**由前端运行期的帧白名单（`ProtocolEnforcer`）兜底。
+const TRANSPORT_RS = 'crates/symbio-kernel/src/plugin/transport.rs'
+const PLUGIN_TS = 'tauri/src/services/plugin.ts'
 
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
 const RUST_CONST_FILES = [VDFS_WORDS_RS, VDFS_PROTOCOL_RS]
@@ -348,6 +359,11 @@ const ENUM_SETS = [
  *    会红"。
  */
 const STRUCT_SETS = [
+  {
+    what: '线路层消息容器（Tauri IPC 与 HTTP/WS 共用同一份线上格式）',
+    rust: { file: TRANSPORT_RS, struct: 'PluginMessageWire' },
+    ts: { file: PLUGIN_TS, interface: 'PluginMessage' },
+  },
   {
     what: '会话消息',
     rust: { file: CHAT_NODE_RS, struct: 'ChatNode' },
