@@ -1048,3 +1048,81 @@ export function gateDeclarations(root) {
   const key = (x) => x.name
   return { entries: entries.sort((a, b) => (key(a) < key(b) ? -1 : 1)), problems: problems.sort((a, b) => (key(a) < key(b) ? -1 : 1)) }
 }
+
+// ── `@gens` 声明：生成链的「目录即清单」 ───────────────────────────────────
+//
+// `06-facts-write`（生成）与 `60-facts`（复核）原先各自抄一份生成器清单：哪几份、
+// 什么顺序、哪一份只生成不复核。加一份生成器要改两个阶段文件，而**漏改的失效形态是
+// 静默**——新生成器永远不会被跑，两个阶段都绿。
+//
+// 现在由生成器自己声明它在链上的位置与它支持的档位：
+//
+//     // @gens 10 write check     链上第 10 位；支持 `--write`（生成）与 `--check`（复核）
+//     // @gens 20 write           ＜只生成不复核：例如复核由别的阶段负责
+//
+// 顺序由**声明里的序数**给，不由文件名给：文件名是给人看的，序数是判据的输入
+// （`gate-wiring-audit` 的 GW-008 判它唯一）。两个阶段各自遍历一遍声明、按序数排序：
+// 声明 `write` 的进生成链，声明 `check` 的进复核阶段——**没有一个阶段知道生成器有哪几份**。
+export const GENS_MODES = ['write', 'check']
+
+const GENS_DECL_RE = /^\/\/\s*@gens\s+(\d+)\s+([a-z ]+)$/
+
+/**
+ * 读一份源码的 `@gens` 声明（可选）。
+ * 返回 `{ order, modes }` / `{ error: 'bad-shape' | 'bad-mode' | 'duplicate' }` / `null`（没声明）。
+ * 与 `@gate` 同一个读法：只看前 80 行。
+ */
+export function gensDeclOf(text) {
+  const hits = []
+  for (const line of text.split(/\r?\n/).slice(0, 80)) {
+    if (line.trim().startsWith('// @gens')) hits.push(line.trim())
+  }
+  if (hits.length === 0) return null
+  if (hits.length > 1) return { error: 'duplicate', detail: hits.join(' / ') }
+  const m = GENS_DECL_RE.exec(hits[0])
+  if (!m) return { error: 'bad-shape', detail: hits[0] }
+  const order = Number(m[1])
+  const modes = m[2].trim().split(/\s+/)
+  const bad = modes.filter((x) => !GENS_MODES.includes(x))
+  if (bad.length) return { error: 'bad-mode', detail: bad.join(' ') }
+  return { order, modes: [...new Set(modes)] }
+}
+
+/**
+ * 全量扫 `@gens`：`{ entries: [{ name, rel, order, modes }], problems: [...] }`，按序数排序。
+ * 只有**声明了的**脚本进 `entries`；一份都不声明返回空表（调用方自己判这算不算坏）。
+ */
+export function gensDeclarations(root) {
+  const files = scriptFilesOf(root)
+  if (files === null) return null
+  const entries = []
+  const problems = []
+  const seen = new Map()
+  for (const rel of files) {
+    if (rel.endsWith('.test.mjs') || isStageFile(rel)) continue
+    let text
+    try {
+      text = fs.readFileSync(path.join(root, 'scripts', rel), 'utf8')
+    } catch (e) {
+      problems.push({ name: rel, rel, error: 'unreadable', detail: (e && e.message) || String(e) })
+      continue
+    }
+    const d = gensDeclOf(text)
+    if (d === null) continue
+    const name = rel.replace(/\.mjs$/, '')
+    if (d.error) {
+      problems.push({ name, rel, ...d })
+      continue
+    }
+    const prev = seen.get(d.order)
+    if (prev) {
+      problems.push({ name, rel, error: 'duplicate-order', detail: `${d.order} 已被 ${prev} 占用` })
+      continue
+    }
+    seen.set(d.order, name)
+    entries.push({ name, rel, order: d.order, modes: d.modes })
+  }
+  entries.sort((a, b) => a.order - b.order)
+  return { entries, problems }
+}
+

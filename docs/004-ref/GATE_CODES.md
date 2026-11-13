@@ -10,7 +10,7 @@ lists: [gate-codes=owner]
 # 判据码登记表（自动生成）
 
 > ⚠️ **本表由 `scripts/facts/gate-codes.mjs` 从各脚本的 `// @ns` / `// @codes` 声明生成，请勿手改。**
-> 改了声明不用手动重跑——门禁会**自动重新生成并暂存**（`scripts/gen-facts.mjs`，见 `scripts/gate.d/60-facts.mjs`）。
+> 改了声明不用手动重跑——门禁会**自动重新生成并暂存**（`scripts/gens/gen-facts.mjs`，见 `scripts/gate.d/60-facts.mjs`）。
 >
 > 判据码是每条机械判定的**地址**：豁免注释、门禁日志、文档指认都指向它。
 > 每条判据**判什么**归声明它的那个脚本的头注释；撞号与漏登记由
@@ -38,7 +38,7 @@ lists: [gate-codes=owner]
 | **FA** | 门面（plugin-api）自有实现行数棘轮 | `scripts/audits/facade-loc-audit.mjs` | FA-001–004 | `FA-005` |
 | **FB** | 事实轨边界 | `scripts/audits/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/audits/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
-| **GW** | 门禁接线（脚本自声明与门禁执行的对账） | `scripts/audits/gate-wiring-audit.mjs` | GW-001–007 | `GW-008` |
+| **GW** | 门禁接线（脚本自声明与门禁执行的对账） | `scripts/audits/gate-wiring-audit.mjs` | GW-001–008 | `GW-009` |
 | **HS** | 扩展层插件宿主面 | `scripts/audits/plugin-surface-audit.mjs` | HS-001–006 | `HS-007` |
 | **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/audits/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
 | **INJ** | 异常注入矩阵 | `scripts/audits/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
@@ -54,7 +54,7 @@ lists: [gate-codes=owner]
 | **PS** | prompt 形状基线 | `scripts/audits/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
 | **PTS** | 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 重试条文 / 读侧不认端口名） | `scripts/audits/port-surface-audit.mjs` | PTS-001–007 | `PTS-008` |
 | **R** | 死代码 | `scripts/audits/dead-code-audit.mjs` | R-001–003 | `R-004` |
-| **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
+| **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gens/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–033 | `RG-034` |
 | **S** | 源码 grep 形态 | `scripts/audits/grep-audit.mjs` | S-001–003、S-006–010、S-012–017 | `S-018` |
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/audits/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
@@ -177,6 +177,7 @@ lists: [gate-codes=owner]
 | **GW-005** | `scripts/audits/gate-wiring-audit.mjs` |
 | **GW-006** | `scripts/audits/gate-wiring-audit.mjs` |
 | **GW-007** | `scripts/audits/gate-wiring-audit.mjs` |
+| **GW-008** | `scripts/audits/gate-wiring-audit.mjs` |
 | **HS-001** | `scripts/audits/plugin-surface-audit.mjs` |
 | **HS-002** | `scripts/audits/plugin-surface-audit.mjs` |
 | **HS-003** | `scripts/audits/plugin-surface-audit.mjs` |
@@ -241,10 +242,10 @@ lists: [gate-codes=owner]
 | **R-001** | `scripts/audits/dead-code-audit.mjs` |
 | **R-002** | `scripts/audits/dead-code-audit.mjs` |
 | **R-003** | `scripts/audits/dead-code-audit.mjs` |
-| **RF-001** | `scripts/gen-doc-refs.mjs` |
-| **RF-002** | `scripts/gen-doc-refs.mjs` |
-| **RF-003** | `scripts/gen-doc-refs.mjs` |
-| **RF-004** | `scripts/gen-doc-refs.mjs` |
+| **RF-001** | `scripts/gens/gen-doc-refs.mjs` |
+| **RF-002** | `scripts/gens/gen-doc-refs.mjs` |
+| **RF-003** | `scripts/gens/gen-doc-refs.mjs` |
+| **RF-004** | `scripts/gens/gen-doc-refs.mjs` |
 | **RG-001** | `scripts/registry-lib.mjs` |
 | **RG-002** | `scripts/registry-lib.mjs` |
 | **RG-003** | `scripts/registry-lib.mjs` |

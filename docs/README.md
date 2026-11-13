@@ -61,7 +61,7 @@ impl: done
 |---|---|---|---|---|---|
 | [goal · 目标](001-goal/README.md "GO-000-目标汇总") | 编号前缀 `GO-` | 要达成什么——产品 / 技术 / 工程三个大目标，各挂可度量判据 | 3 | draft 0 · active 3 · retired 0 | — |
 | [scene · 场景](002-scene/README.md "SC-000-场景汇总") | 编号前缀 `SC-` | 用户拿它做什么——角色、情境与用户判据 | 18 | draft 5 · active 13 · retired 0 | — |
-| [design · 设计](003-design/README.md "DE-000-设计总览") | 编号前缀 `DE-` | 产品与系统怎么设计——现状、目标形态与关键取舍（每篇的时态由 impl 标注） | 91 | draft 0 · active 89 · retired 2 | — |
+| [design · 设计](003-design/README.md "DE-000-设计总览") | 编号前缀 `DE-` | 产品与系统怎么设计——现状、目标形态与关键取舍（每篇的时态由 impl 标注） | 92 | draft 0 · active 90 · retired 2 | — |
 | [ref · 参考](004-ref/README.md "RE-000-参考汇总") | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 13 | draft 0 · active 13 · retired 0 | — |
 | [spec · 规范](005-spec/README.md "SP-000-规范汇总") | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 27 | draft 0 · active 27 · retired 0 | — |
 | [guide · 指南](006-guide/README.md "GU-000-指南汇总") | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 14 | draft 0 · active 14 · retired 0 | — |
@@ -94,7 +94,7 @@ impl: done
 - **目录不参与判定**：`kind` 只来自 front-matter；文档搬去别的目录不会破机制，只需把 `id` 与它一起改（判据会拦）。
  **模块文档就地登记**（`crates/symbio-plugin-*/README.md` 与模块 `docs/` 不搬进 `docs/`）——「就近放置」优先于「按类归堆」。
 - **引用只写编号**：文档之间互相引用时只写 `[[编号]]`（如 `[[SP-001]]`；要显示文字写 `[[编号|显示文字]]`），
- **地址既不手写也不维护**——由 `node scripts/gen-doc-refs.mjs` 从登记解析生成，每次门禁重算全仓地址。
+ **地址既不手写也不维护**——由 `node scripts/gens/gen-doc-refs.mjs` 从登记解析生成，每次门禁重算全仓地址。
  判据三条：编号不存在判红（RF-001）、地址漂移自动重算（RF-002）、**指向已登记文档的手工地址判红**（RF-003）。
  编号是身份（稳定），地址是位置（会变）。
 - **汇总页是投影**：各 kind 的汇总块住本 kind 目录 `README.md` 的 `<!-- registry:summary -->` 标记区，跨 kind 总账块住本页，
@@ -157,7 +157,7 @@ D-004 判**措辞标记**而不判**叙事**（`曾经` / `已改为` / `修订�
 | 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史** |
 | 一次性评审 / 迁移记录 / 体检报告 / 已退场的决策 | `docs/archive/` | 活文档不保留过程日志 |
 
-**变更时只改 owner 那一处**：结构事实重跑 `node scripts/gen-facts.mjs`（门禁自动重生成并暂存）；
+**变更时只改 owner 那一处**：结构事实重跑 `node scripts/gens/gen-facts.mjs`（门禁自动重生成并暂存）；
 跨模块架构改 [002-架构总览.md](003-design/002-架构总览.md "DE-002-架构总览") + [004-系统地图.md](003-design/004-系统地图.md "DE-004-系统地图") 各自己那一层；
 常见问题进 [故障排查指南](006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING")。
 

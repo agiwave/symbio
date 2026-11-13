@@ -45,7 +45,7 @@ use std::collections::{BTreeMap, BTreeSet};
 // **不再手抄。** 这张表此前是本文件里的一份字面量，于是它自己漂了：`store` 多了已退役的
 // `distributed`、`projection` 少了 `conation`、`actor.capability` / `event.*` / `principal`
 // 四行整行缺失——一个专抓「表—码失配」的程序，手里那份表本身是过期的。表侧改成读
-// `facts`（`scripts/gen-verify-facts.mjs` 从 DE-001 §8 抽，`gen-facts --check` 钉住新鲜度），
+// `facts`（`scripts/gens/gen-verify-facts.mjs` 从 DE-001 §8 抽，`gen-facts --check` 钉住新鲜度），
 // 这类漂移就没有发生的位置了。
 mod facts;
 

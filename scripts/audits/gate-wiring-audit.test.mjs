@@ -418,3 +418,53 @@ test('GW-007 是单向判据：audits/ 下不带 `-audit` 的名字照样放行'
   assert.equal(r.status, 0, r.stdout + r.stderr)
   assert.doesNotMatch(r.stdout, /GW-007/)
 })
+
+// ── GW-008 · 生成链的声明卫生（序数唯一 / 模式在闭集）──────────────────
+// 声明与**物化任务**的双向对账由真仓 dogfood（`06-facts-write` 的 `STEPS` 与
+// `60-facts` 的任务表）；这里钉的是解析面的三种坏法——它们不必有阶段文件就能判。
+
+test('GW-008 两条声明抢同一个序数 ⇒ 红（链上「谁先跑」没有答案）', () => {
+  const r = audit({
+    scripts: { g1: 'lib', g2: 'lib' },
+    tests: [],
+    extra: {
+      'scripts/g1.mjs': '// @gate lib\n// @gens 10 write\n',
+      'scripts/g2.mjs': '// @gate lib\n// @gens 10 check\n',
+    },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-008 scripts\/g2\.mjs 的 `@gens` 声明不合格（duplicate-order/)
+})
+
+test('GW-008 模式名拼错 ⇒ 红（拼错的那一档从此不跑，而阶段遍历的就是同一份声明）', () => {
+  const r = audit({
+    scripts: { g1: 'lib' },
+    tests: [],
+    extra: { 'scripts/g1.mjs': '// @gate lib\n// @gens 10 writes\n' },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-008 scripts\/g1\.mjs 的 `@gens` 声明不合格（bad-mode：writes）/)
+})
+
+test('GW-008 声明形状不对（缺序数）⇒ 红', () => {
+  const r = audit({
+    scripts: { g1: 'lib' },
+    tests: [],
+    extra: { 'scripts/g1.mjs': '// @gate lib\n// @gens write\n' },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-008 scripts\/g1\.mjs 的 `@gens` 声明不合格（bad-shape/)
+})
+
+test('GW-008 一份 write 一份 check、序数不同 ⇒ 绿（没有阶段文件时不制造义务）', () => {
+  const r = audit({
+    scripts: { 'grep-check': 'guard', g1: 'lib', g2: 'lib' },
+    tests: ['grep-check'],
+    extra: {
+      'scripts/g1.mjs': '// @gate lib\n// @gens 10 write\n',
+      'scripts/g2.mjs': '// @gate lib\n// @gens 20 check\n',
+    },
+  })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.doesNotMatch(r.stdout, /GW-008/)
+})

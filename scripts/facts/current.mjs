@@ -13,7 +13,7 @@
  *
  * ## 它怎么被调用
  *
- * **不要直接跑它**——`scripts/gen-facts.mjs` 遍历 `scripts/facts/` 逐个调用本文件
+ * **不要直接跑它**——`scripts/gens/gen-facts.mjs` 遍历 `scripts/facts/` 逐个调用本文件
  * 导出的描述符。直接跑与 runner 走的是同一份 `render()`，但绕过了目录遍历与
  * 契约校验（那份校验才是「加了文件忘了接线」的唯一检出点）。
  *
@@ -409,7 +409,7 @@ function render() {
   L.push(`# ${ENTRY_TITLE}`);
   L.push("");
   L.push("> ⚠️ **本文件由 `scripts/facts/current.mjs` 从代码提取生成，请勿手改。**");
-  L.push("> 改了代码不用手动重跑——门禁会**自动重新生成并暂存**（`scripts/gen-facts.mjs`，见 `scripts/gate.d/60-facts.mjs`）。");
+  L.push("> 改了代码不用手动重跑——门禁会**自动重新生成并暂存**（`scripts/gens/gen-facts.mjs`，见 `scripts/gate.d/60-facts.mjs`）。");
   L.push(">");
   L.push("> 本表回答「**现在是什么**」（结构；代码投影，不会漂移）；");
   L.push(`> 「**为什么这样设计**」看该主题设计文档的「关键决策」节（每条决策一个 \`### D-NNN\` 条目；总览见 ${refLink('DE-000-设计总览', '003-design/README.md')}）；`);
@@ -727,7 +727,7 @@ function capabilityMatrixSection(root, plugins) {
   return L.join("\n")
 }
 
-// ================= 事实描述符（由 `scripts/gen-facts.mjs` 遍历调用） =================
+// ================= 事实描述符（由 `scripts/gens/gen-facts.mjs` 遍历调用） =================
 //
 // 溯源行（`> 生成时间：… UTC · 源：git rev-parse HEAD = …`）的剔除与幂等落盘
 // 统一在 `facts/_lib.mjs`：溯源行**不参与**「内容变没变」的判定，否则 `gen`

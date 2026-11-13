@@ -22,7 +22,7 @@
  * 读不出 owner（文件被搬走 / 形状变了）直接抛错，绝不静默报 0：静默的 0
  * 正是「守卫读空了于是全绿」这一类最贵的失效。
  *
- * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
+ * 由 `scripts/gens/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
 // @gate lib
 

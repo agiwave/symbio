@@ -23,7 +23,7 @@
  * `ROUTE_` + 地址大写（`/` → `_`），与后端 `crates/symbio-plugin-api/src/routes.rs` 的常量命名
  * 规则同构，因此**同名同值**：一条被宿主登记过的地址，两端检索同一个标识符就能命中。
  *
- * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
+ * 由 `scripts/gens/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
 // @gate test
 
@@ -105,7 +105,7 @@ function renderFromCode() {
   return render(routes);
 }
 
-// ================= 事实描述符（由 `scripts/gen-facts.mjs` 遍历调用） =================
+// ================= 事实描述符（由 `scripts/gens/gen-facts.mjs` 遍历调用） =================
 //
 // 不带溯源行：产物是 TypeScript 源码，加一行生成时间戳会污染被编译的输出，
 // 而且它每次都变 ⇒ autoWork 的内容哈希永远对不上。

@@ -63,7 +63,6 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 const verifyDir = path.join(repoRoot, 'docs', '003-design', 'verify')
 const outDir = path.join(repoRoot, '.workbuddy-ai', 'verify-target')
-const genVerifyFacts = path.join(repoRoot, 'scripts', 'gen-verify-facts.mjs')
 
 const exeSuffix = process.platform === 'win32' ? '.exe' : ''
 
@@ -187,17 +186,12 @@ export default {
 
     fs.mkdirSync(outDir, { recursive: true })
 
-    // 期望数据（`verify/facts/mod.rs`）由 `06-facts-write` 生成——本地门禁跑到这里时
-    // 它已是本轮投影；但 CI 的 verify job 只跑本阶段（`--only=verify`），没有 06。
-    // 这一格 `--check` 补上那道漂移闸：没有它，「程序全绿」只证明「程序与仓库里
-    // 那份已提交的 mod.rs 自洽」，不证明 mod.rs 仍是文档的投影——文档改了、
-    // 忘了重跑生成器，正是这套「外置期望数据」要防的第一种失效。
-    yield {
-      label: 'verify: facts 漂移复核（gen-verify-facts --check）',
-      cmd: process.execPath,
-      args: [genVerifyFacts, '--check'],
-      cwd: repoRoot,
-    }
+    // 期望数据（`verify/facts/mod.rs`）**不在本阶段生成也不在这里复核**：生成在
+    // `06-facts-write` 的链上，漂移复核归 `60-facts`（`gen-verify-facts` 自己声明了
+    // `// @gens 40 write check`）。此处原先有一格 `--check`，理由是「CI 的 verify job
+    // 只跑 `--only=verify`，没有 06」——但 `facts` 阶段在 CI 里照样跑，两个 job 合起来
+    // 覆盖同一件事，本阶段留着它只是第二份同一个判据。**程序吃的必须是当前计划**这条
+    // 不因此放松：计划读不出来在生成器自身抛红，不会走到这里。
 
     // 程序吃的必须是**当前**计划；生成失败（表读不出来、名册与阶文件不配对）
     // 在生成器自身就抛红，不会走到这里。

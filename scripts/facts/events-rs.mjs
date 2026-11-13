@@ -21,7 +21,7 @@
  * D-197 / D-201），core 的判据读格子与角色、不读名字（D-203）。给没人共享的名字预置
  * 一条共享常量，就是给下一轮留腐烂——与 `routes-rs` 同一条纪律，由 CS-007 判红。
  *
- * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
+ * 由 `scripts/gens/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
 // @gate lib
 

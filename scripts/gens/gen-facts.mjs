@@ -14,8 +14,8 @@
  *
  * ## 用法
  *
- *   node scripts/gen-facts.mjs           # 生成全部（内容没变的整份沿用，不改写）
- *   node scripts/gen-facts.mjs --check   # 只比对，任一份漂移则非零退出（CI 用）
+ *   node scripts/gens/gen-facts.mjs           # 生成全部（内容没变的整份沿用，不改写）
+ *   node scripts/gens/gen-facts.mjs --check   # 只比对，任一份漂移则非零退出（CI 用）
  *
  * ## 三条退出码，刻意分开
  *
@@ -38,14 +38,15 @@
  * 一份错的，或报一个与真相无关的红。这条边界写在 `facts/README.md`。
  */
 // @gate lib
+// @gens 10 write check
 
 import { readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { red, green, dim, yellow } from './color.mjs'
-import { validateFact, driftOf, emit } from './facts/_lib.mjs'
+import { red, green, dim, yellow } from '../color.mjs'
+import { validateFact, driftOf, emit } from '../facts/_lib.mjs'
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const FACTS_DIR = path.join(ROOT, 'scripts', 'facts')
 const IS_CHECK = process.argv.includes('--check')
 

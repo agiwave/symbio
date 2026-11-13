@@ -16,7 +16,7 @@ import {
   generate,
 } from './gen-verify-facts.mjs'
 
-const REPO = path.resolve(import.meta.dirname, '..')
+const REPO = path.resolve(import.meta.dirname, '..', '..')
 
 // ── 最小可用夹具：DE-001 §8 参数表 + 02 坐标系七张表 + 阶梯总表 + 两阶文档 ──────
 //
@@ -608,7 +608,7 @@ test('生成物与 docs/003-design/verify/facts/mod.rs 逐字一致（漂移由�
 })
 
 test('--check 档：文档与生成物一致 ⇒ exit 0', () => {
-  const out = execFileSync(process.execPath, [path.join(REPO, 'scripts', 'gen-verify-facts.mjs'), '--check'], {
+  const out = execFileSync(process.execPath, [path.join(REPO, 'scripts', 'gens', 'gen-verify-facts.mjs'), '--check'], {
     encoding: 'utf8',
     cwd: REPO,
   })

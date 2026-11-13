@@ -380,7 +380,7 @@ export function markerErrors({ root }) {
     }
     const { blocks } = blankMarked(fs.readFileSync(abs, 'utf8').split(/\r?\n/))
     if (blocks === 0) {
-      errors.push(`EX-004 ${relPath} 缺 \`${MARK_BEGIN}\` 标记块——生成的链接行会被当成手写边；先跑 \`node scripts/gen-facts.mjs\``)
+      errors.push(`EX-004 ${relPath} 缺 \`${MARK_BEGIN}\` 标记块——生成的链接行会被当成手写边；先跑 \`node scripts/gens/gen-facts.mjs\``)
     }
   }
   return errors

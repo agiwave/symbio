@@ -531,9 +531,11 @@ test('★ 关键路径：cli release 重建在批内（backend 泳道尾），mo
   const fw = await import(pathToFileURL(path.join(dir, '06-facts-write.mjs')).href)
   // 链的顺序由导出的 `STEPS` 自述（它同时是 `autoChain` 的 `steps`——**判的就是跑的那份**，
   // 不是任务展示用的 label；抄一份名单进测试必然漂移）。
+  // 步骤集由各生成器的 `// @gens <序数> write` 声明决定，这里钉的是**语义顺序**：
+  // 事实（供 verify 期望数据读 CURRENT）→ 汇总页 → 引用地址展开 → verify 期望数据。
   assert.deepEqual(
     fw.STEPS.map((s) => s.label),
-    ['gen-facts', 'registry-audit --write', 'gen-doc-refs', 'gen-verify-facts'],
+    ['gens/gen-facts', 'audits/registry-audit', 'gens/gen-doc-refs', 'gens/gen-verify-facts'],
     'verify/facts/mod.rs 的生成必须在 06-facts-write 链里且排在最后（先于并发批、后于引用地址展开）',
   )
   assert.equal(

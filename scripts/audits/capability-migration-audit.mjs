@@ -178,7 +178,7 @@ const GENERATED_RE = /\.gen\.rs$/
  * 生成物不都叫 `*.gen.rs`——`plugin-api` 的 `events.rs` / `routes.rs` 是插件清单的
  * 投影，随能力包增删而变。按名字猜会把「加一条能力顺带重生成登记表」判成机制增量；
  * 只认后缀则这两份漏网，补件几乎条条假红。清单直接读描述符的 `OUT_REL`：那是生成器
- * 的唯一注册处（`scripts/gen-facts.mjs` 目录即接线），不在这里抄第二份路径。
+ * 的唯一注册处（`scripts/gens/gen-facts.mjs` 目录即接线），不在这里抄第二份路径。
  */
 export function generatedPaths(root) {
   const out = new Set()

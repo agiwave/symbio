@@ -54,7 +54,7 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 
 /** 清单的地址（唯一 owner；地址变了就改这一处）。 */
 export const LEDGER_REL = 'docs/004-ref/010-机制强制等级清单.md'
-/** 机制键的机器可读来源（生成物：`scripts/gen-verify-facts.mjs` 从 DE-001 §8 抽取）。 */
+/** 机制键的机器可读来源（生成物：`scripts/gens/gen-verify-facts.mjs` 从 DE-001 §8 抽取）。 */
 export const MECHANISMS_REL = 'docs/003-design/verify/facts/mod.rs'
 /** 判据码登记表（生成物：`scripts/facts/gate-codes.mjs`）。 */
 export const GATE_CODES_REL = 'docs/004-ref/GATE_CODES.md'

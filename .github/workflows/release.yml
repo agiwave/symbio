@@ -72,7 +72,7 @@ jobs:
 
       - name: Docs facts drift gate (docs/004-ref/006-当前事实表.md)
         # 与 ci.yml 同一条门禁：事实表必须与代码一致
-        run: node scripts/gen-facts.mjs --check
+        run: node scripts/gens/gen-facts.mjs --check
         continue-on-error: false
 
   # 检查版本一致性

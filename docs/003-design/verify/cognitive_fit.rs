@@ -23,7 +23,7 @@
 //!
 //! **本程序里没有手填的需求清单。** 16 条需求的 `(键, 取值)` 向量来自
 //! [DE-040 §2](../../003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入") 那张映射表，经
-//! `scripts/gen-verify-facts.mjs` 抽成 `facts::COGNITIVE_DEMANDS`；值域与匹配规则同源于
+//! `scripts/gens/gen-verify-facts.mjs` 抽成 `facts::COGNITIVE_DEMANDS`；值域与匹配规则同源于
 //! `facts::in_domain`。清单改了文档而程序照绿，就是这个批次要消灭的形态。
 //!
 //! 方法（沿用三条验证纪律）：

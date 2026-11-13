@@ -1,31 +1,33 @@
 // facts 复核阶段（**必须最后**）：「跑完这一整轮，事实还和代码一致吗」。
 // 「必须最后」由 `default.recheck` 自声明、`gate-wiring-audit` 的 GW-005 执行，不靠文件名巧合。
 //
+// ## 复核哪几份：没人在这里登记
+//
+// 由生成器自己声明（`// @gens <序数> check`，读法见 `_shared.gensDeclarations`），本阶段
+// 遍历声明、按序数排序、逐个以 `--check` 起进程。**生成器有几份、叫什么，这里不知道**——
+// 与 `06-facts-write` 同一个源，两处都不会因为新增一步而漏。
+//
 // ## 它与 `06-facts-write` 的分工
 //
-// 生成挪到了 `06-facts-write`（静态审计的前置——`30-docs` 的 D-007 / RF-003 要看
-// 已展开的最终形态，详见那篇的注释），本阶段只剩**复核**。
+// 生成在 `06-facts-write`（静态审计的前置——`30-docs` 的 D-007 / RF-003 要看已展开的末态）。
+// 复核必须留到最后：它问的是「这一整轮有没有谁改了代码」——`30-docs` 的自动修复器排在
+// 生成之后，所以末态复核看的是**整轮**跑完，不是链跑完。放在生成之后立刻跑，它只能证明
+// 「生成器刚刚跑过」——那是恒真的。
 //
-// 为什么复核必须留到最后：它问的是「这一整轮有没有谁改了代码」——`30-docs` 的自动修复器
-// 排在生成之后，所以末态复核看的是**整轮**跑完，不是链跑完。放在生成之后立刻跑，
-// 它只能证明「生成器刚刚跑过」——那是恒真的。
+// ## 这两道不重复
 //
-// 本机这一步恒绿（生成器跑过之后没人改代码）；CI 侧它与生成链的末态差异判定互为两道。
+// `06-facts-write` 的 `autoChain` 只在**链跑完**那一刻比一次差异；链绿着但产物被后续阶段
+// 改脏，只有这里看得见。而「逐格判差异」在链上不可行：`registry-audit --write` 的产物
+// （`[[编号]]` 记号）本身就是下一格的输入，逐格判在 `--ci` 下恒红。
 //
-// ## 这两格 `--check` 判的是「整轮」，链的末态判据判的是「链」
-//
-// 两道不重复：`06-facts-write` 的 `autoChain` 只在**链跑完**那一刻比一次差异，而 `30-docs`
-// 的自动修复器排在它后面——链绿着但汇总页被后续阶段改脏，只有这里看得见。
-// 「逐格判差异」在链上不可行：`registry-audit --write` 的产物（`[[编号]]` 记号）本身就是
-// 下一格的输入，逐格判在 `--ci` 下恒红，理由见 `06-facts-write` 头注释与
-// 生成链阶段id失配。
+// `--check` 是只读的，本地与 `--ci` 都跑得了（生成链的中间态在 `--ci` 下则不能）。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gensDeclarations } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
-const genFacts = path.join(scriptDir, '..', 'gen-facts.mjs')
-const docRefs = path.join(scriptDir, '..', 'gen-doc-refs.mjs')
+const scriptsDir = path.join(scriptDir, '..')
 
 export default {
   id: 'facts',
@@ -33,31 +35,21 @@ export default {
   // 只读复核阶段的自声明，消费方是 `gate-wiring-audit` 的 GW-005（判「生成先于复核」）。
   recheck: true,
   tasks(ctx) {
-    return [
-      {
-        label: 'gen-facts --check（整轮跑完后复核：事实与代码仍一致）',
-        run: (c) =>
-          ctx.run({
-            label: 'gen-facts --check',
-            cmd: process.execPath,
-            args: [genFacts, '--check'],
-            cwd: repoRoot,
-          }),
-      },
-      {
-        // 引用地址复核（RF-001…004）：树里不该有未展开的 `[[编号]]` 记号，也不该有
-        // 与编号不一致的手写地址。它是**只读**的，所以在 `--ci` 下与本地都跑得了——
-        // 与上面那条不成立的原因正相反（见头注释：生成链的中间态在 `--ci` 下恒红）。
-        // 单独实测 0.27s（本阶段两格合跑实测 1s），提交点带得上。
-        label: 'gen-doc-refs --check（引用地址与编号一致，含登记汇总页的展开末态）',
-        run: (c) =>
-          ctx.run({
-            label: 'gen-doc-refs --check',
-            cmd: process.execPath,
-            args: [docRefs, '--check'],
-            cwd: repoRoot,
-          }),
-      },
-    ]
+    const decl = gensDeclarations(repoRoot) ?? { entries: [], problems: [] }
+    const checkers = decl.entries.filter((e) => e.modes.includes('check'))
+    // 读空即全绿：扫不出声明时本阶段会「0 项全绿」，而那与「全都一致」同形。
+    if (checkers.length === 0) {
+      throw new Error('facts 阶段读不出任何 `// @gens <序数> check` 声明 ⇒ 末态复核会空转')
+    }
+    // `args` 留在任务顶层（与 `30-docs` 同形）：`gate-wiring-audit` 的 GW-008 靠物化出的
+    // 任务表判「声明了的是不是真的被跑到」，args 藏在 `run` 的闭包里就判不了。
+    return checkers.map((e) => {
+      const args = [path.join(scriptsDir, `${e.name}.mjs`), '--check']
+      return {
+        label: `${e.name} --check`,
+        args,
+        run: () => ctx.run({ label: `${e.name} --check`, cmd: process.execPath, args, cwd: repoRoot }),
+      }
+    })
   },
 }

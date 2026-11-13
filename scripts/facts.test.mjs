@@ -28,12 +28,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
-import { discover, runOrder } from './gen-facts.mjs'
+import { discover, runOrder } from './gens/gen-facts.mjs'
 import { validateFact, stripStamp, emit, driftOf } from './facts/_lib.mjs'
 import { closedSets, NO_MEMBER_SET } from './facts/_sets.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const RUNNER = path.join(REPO, 'scripts', 'gen-facts.mjs')
+const RUNNER = path.join(REPO, 'scripts', 'gens', 'gen-facts.mjs')
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'gen-facts-'))
 
@@ -103,15 +103,18 @@ const goodSource = (name = 'good') =>
 function runIn(tmpRepo, facts = {}) {
   const scripts = path.join(tmpRepo, 'scripts')
   const dir = path.join(scripts, 'facts')
+  // runner 现在住在 `scripts/gens/`（与真仓同形）：它按 `..','..'` 找仓库根，
+  // 放在 `scripts/` 下一层就会把临时仓的**父目录**当根，测到的不是它要测的东西。
+  fs.mkdirSync(path.join(scripts, 'gens'), { recursive: true })
   fs.mkdirSync(dir, { recursive: true })
-  fs.copyFileSync(RUNNER, path.join(scripts, 'gen-facts.mjs'))
+  fs.copyFileSync(RUNNER, path.join(scripts, 'gens', 'gen-facts.mjs'))
   fs.copyFileSync(path.join(REPO, 'scripts', 'color.mjs'), path.join(scripts, 'color.mjs'))
   fs.copyFileSync(path.join(REPO, 'scripts', 'facts', '_lib.mjs'), path.join(dir, '_lib.mjs'))
   for (const [name, source] of Object.entries(facts)) {
     fs.writeFileSync(path.join(dir, `${name}.mjs`), source, 'utf8')
   }
   try {
-    const stdout = execFileSync(process.execPath, [path.join(scripts, 'gen-facts.mjs')], {
+    const stdout = execFileSync(process.execPath, [path.join(scripts, 'gens', 'gen-facts.mjs')], {
       cwd: tmpRepo,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -269,14 +272,15 @@ test('端到端：好事实会被写出，且第二次运行不改写', () => {
 test('端到端：`--check` 对漂移判红、对一致判绿', () => {
   const repo = tmp()
   const scripts = path.join(repo, 'scripts')
+  fs.mkdirSync(path.join(scripts, 'gens'), { recursive: true })
   fs.mkdirSync(path.join(scripts, 'facts'), { recursive: true })
-  fs.copyFileSync(RUNNER, path.join(scripts, 'gen-facts.mjs'))
+  fs.copyFileSync(RUNNER, path.join(scripts, 'gens', 'gen-facts.mjs'))
   fs.copyFileSync(path.join(REPO, 'scripts', 'color.mjs'), path.join(scripts, 'color.mjs'))
   fs.copyFileSync(path.join(REPO, 'scripts', 'facts', '_lib.mjs'), path.join(scripts, 'facts', '_lib.mjs'))
   fs.writeFileSync(path.join(scripts, 'facts', 'good.mjs'), goodSource(), 'utf8')
   const check = () => {
     try {
-      execFileSync(process.execPath, [path.join(scripts, 'gen-facts.mjs'), '--check'], {
+      execFileSync(process.execPath, [path.join(scripts, 'gens', 'gen-facts.mjs'), '--check'], {
         cwd: repo,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],

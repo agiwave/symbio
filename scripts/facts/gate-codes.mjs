@@ -10,7 +10,7 @@
  * 口径与对账见 `gate-codes-audit.mjs`；每条判据**判什么**归该脚本自己的头注释，
  * 本表只给地址地图，不复述。
  *
- * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
+ * 由 `scripts/gens/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
 // @gate lib
 
@@ -79,7 +79,7 @@ function render() {
   L.push('# 判据码登记表（自动生成）')
   L.push('')
   L.push('> ⚠️ **本表由 `scripts/facts/gate-codes.mjs` 从各脚本的 `// @ns` / `// @codes` 声明生成，请勿手改。**')
-  L.push('> 改了声明不用手动重跑——门禁会**自动重新生成并暂存**（`scripts/gen-facts.mjs`，见 `scripts/gate.d/60-facts.mjs`）。')
+  L.push('> 改了声明不用手动重跑——门禁会**自动重新生成并暂存**（`scripts/gens/gen-facts.mjs`，见 `scripts/gate.d/60-facts.mjs`）。')
   L.push('>')
   L.push('> 判据码是每条机械判定的**地址**：豁免注释、门禁日志、文档指认都指向它。')
   L.push('> 每条判据**判什么**归声明它的那个脚本的头注释；撞号与漏登记由')
@@ -111,7 +111,7 @@ function render() {
   return L.join('\n')
 }
 
-// ================= 事实描述符（由 `scripts/gen-facts.mjs` 遍历调用） =================
+// ================= 事实描述符（由 `scripts/gens/gen-facts.mjs` 遍历调用） =================
 //
 // 本表**不带溯源行**：它的全部输入是各脚本里的 `@ns` / `@codes` 声明，
 // 同输入必然同输出——加一行时间戳只会让门禁每次都报「修复了 1 个文件」。

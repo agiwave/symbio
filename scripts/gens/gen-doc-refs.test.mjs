@@ -13,11 +13,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { stripAnsi } from './color.mjs'
+import { stripAnsi } from '../color.mjs'
 import { runGenDocRefs } from './gen-doc-refs.mjs'
-import { loadKinds } from './registry-lib.mjs'
+import { loadKinds } from '../registry-lib.mjs'
 
-const repoRoot = path.resolve(import.meta.dirname, '..')
+const repoRoot = path.resolve(import.meta.dirname, '..', '..')
 const REPO_KINDS = loadKinds(repoRoot).kinds
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-refs-'))

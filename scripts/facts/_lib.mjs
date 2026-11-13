@@ -8,7 +8,7 @@
  * 漂移、怎么报溯源」的副本，门禁里也是三段手抄的调用。
  *
  * 本模块把那份副本收成一处：`scripts/facts/` 下每个 `.mjs` 导出一份**描述符**，
- * runner（`scripts/gen-facts.mjs`）遍历目录逐个调用。**新增一份事实的成本 =
+ * runner（`scripts/gens/gen-facts.mjs`）遍历目录逐个调用。**新增一份事实的成本 =
  * 建一个文件**，不需要改门禁、不需要登记名单。
  *
  * ## 描述符契约（runner 逐条机检，违约即红）
@@ -99,8 +99,8 @@ export function emit({ out, content, stamp = true }) {
 /** `--check` 口径下的比对：返回 null = 一致，否则是给 人 看的一句话。 */
 export function driftOf({ out, content }) {
   const existing = readOrNull(out)
-  if (existing === null) return `${out} 不存在——先跑一次 \`node scripts/gen-facts.mjs\``
-  if (stripStamp(existing) !== stripStamp(content)) return `${out} 与代码漂移——重跑 \`node scripts/gen-facts.mjs\``
+  if (existing === null) return `${out} 不存在——先跑一次 \`node scripts/gens/gen-facts.mjs\``
+  if (stripStamp(existing) !== stripStamp(content)) return `${out} 与代码漂移——重跑 \`node scripts/gens/gen-facts.mjs\``
   return null
 }
 

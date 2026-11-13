@@ -59,27 +59,28 @@
  * 源码侧另有一条：**只碰注释行**——代码行里的字符串与字面量是内容，不是入链。
  *
  * 用法：
- *   node scripts/gen-doc-refs.mjs            改写（展开 `[[编号]]` + 重算地址 + 接管源码地址）
- *   node scripts/gen-doc-refs.mjs --check    只比对，漂移则非零退出（CI 用）
- *   node scripts/gen-doc-refs.mjs --root=<仓库根>   （回归测试夹具用）
+ *   node scripts/gens/gen-doc-refs.mjs            改写（展开 `[[编号]]` + 重算地址 + 接管源码地址）
+ *   node scripts/gens/gen-doc-refs.mjs --check    只比对，漂移则非零退出（CI 用）
+ *   node scripts/gens/gen-doc-refs.mjs --root=<仓库根>   （回归测试夹具用）
  * 退出码：0 = 一致 / 已改写；1 = RF-001 / RF-003 有违规（不写盘）；2 = 参数不识别。
  */
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RF 文档引用（编号 → 地址由机制生成）
 // @codes RF-001 RF-002 RF-003 RF-004
 // @gate test
+// @gens 30 write check
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { green, red, dim } from './color.mjs'
-import { loadEntries, relFrom } from './registry-lib.mjs'
+import { green, red, dim } from '../color.mjs'
+import { loadEntries, relFrom } from '../registry-lib.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
-const defaultRoot = path.resolve(scriptDir, '..')
+const defaultRoot = path.resolve(scriptDir, '..', '..')
 
 const USAGE =
-  '用法：node scripts/gen-doc-refs.mjs [--write] [--check] [--root=<仓库根>]\n' +
+  '用法：node scripts/gens/gen-doc-refs.mjs [--write] [--check] [--root=<仓库根>]\n' +
   '  [[编号]] / [[编号|显示文字]] / [[编号#锚点]] 展开成站内链接；已展开的地址按编号重算；\n' +
   '  源码注释里的手工地址按登记表唯一识别后自动接管（RF-004）；\n' +
   '  编号解析不出即红且不写盘（RF-001）；文档正文里指向已登记文档的手工地址判红（RF-003）。\n' +
@@ -460,9 +461,9 @@ export function runGenDocRefs(argv) {
     if (check) {
       for (const c of changed) {
         if (srcTakeoverRels.has(c)) {
-          lines.push(red(`[ERROR] RF-004 ${c} 的源码注释地址待接管 / 重算（重跑 node scripts/gen-doc-refs.mjs）`))
+          lines.push(red(`[ERROR] RF-004 ${c} 的源码注释地址待接管 / 重算（重跑 node scripts/gens/gen-doc-refs.mjs）`))
         } else {
-          lines.push(red(`[ERROR] RF-002 ${c} 的引用地址与编号不一致（重跑 node scripts/gen-doc-refs.mjs）`))
+          lines.push(red(`[ERROR] RF-002 ${c} 的引用地址与编号不一致（重跑 node scripts/gens/gen-doc-refs.mjs）`))
         }
       }
       lines.push(red(`gen-doc-refs 未通过（--check）：${changed.length} 个文件的引用需要重算`))

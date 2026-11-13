@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * gate-wiring-audit — 门禁接线对账（GW-001…GW-007）
+ * gate-wiring-audit — 门禁接线对账（GW-001…GW-008）
  *
  * 治的病：**脚本存在 ≠ 会被门禁跑**。
  *
@@ -49,6 +49,11 @@
  *     `session-dead-code`），而 CONTRIBUTING 里那句「静态审计脚本都在 `scripts/audits/`」
  *     当时已经是一句假话。判据只做单向（`-audit` ⇒ 在 `audits/`）：`projection-purity` 这类
  *     不带 `-audit` 的守卫照样要在里面，反向规则会把名字变成判据的输入。
+ *   - **GW-008**（生成链的声明卫生与对账）`// @gens <序数> write|check` 是生成器给
+ *     `06-facts-write`（生成）与 `60-facts`（复核）的**同一份**声明：两个阶段都遍历它、
+ *     按序数排序执行，谁都不点名生成器。所以「加了生成器却没进链」只能在本条判——
+ *     序数撞车 / 模式名拼错 / 声明了却不在物化出的任务里（枚举写窄的同一形状）。
+ *     反向也判：某个阶段跑了它却没声明，那一步就不在机制的账上。
  *
  * 用法：node scripts/audits/gate-wiring-audit.mjs [--root=<仓库根>] [--strict]
  *      （`--strict` 与其他判定型守卫同参数，本脚本没有 WARNING 级判定，带不带同义）
@@ -57,13 +62,13 @@
 // @gate guard
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns GW 门禁接线（脚本自声明与门禁执行的对账）
-// @codes GW-001 GW-002 GW-003 GW-004 GW-005 GW-006 GW-007
+// @codes GW-001 GW-002 GW-003 GW-004 GW-005 GW-006 GW-007 GW-008
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { green, red } from '../color.mjs'
-import { gateDeclarations, scriptFilesOf } from '../gate.d/_shared.mjs'
+import { gateDeclarations, gensDeclarations, scriptFilesOf } from '../gate.d/_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -155,20 +160,19 @@ async function stageMetaOf(root, stageList) {
 }
 
 /**
- * 物化 `30-docs` 的任务表 —— GW-003 / GW-004 拿它判「声明的东西真的被跑到没有」。
- * 与 `stageMetaOf` 用同一个 ctx 形状：物化期不许执行命令。读不出返回 `{ error }`，
- * 不当成「0 项」（那会让「枚举写窄」伪装成「本来就没有」）。
+ * 物化一个阶段的任务表。读不出返回 `{ error }`，不当成「0 项」。
+ * `root` 是仓库根：夹具可以只放它自己那份阶段文件。
  */
-async function docsTasksOf(root) {
-  const modPath = path.join(root, 'scripts', 'gate.d', '30-docs.mjs')
-  if (!fs.existsSync(modPath)) return { error: 'scripts/gate.d/30-docs.mjs 不存在' }
+async function stageTasksOf(root, file) {
+  const modPath = path.join(root, 'scripts', 'gate.d', file)
+  if (!fs.existsSync(modPath)) return { missing: true }
   let mod
   try {
     mod = await import(pathToFileURL(modPath).href)
   } catch (e) {
     return { error: (e && e.message ? e.message : String(e)).split('\n')[0] }
   }
-  if (typeof mod.default?.tasks !== 'function') return { error: '30-docs 没有导出 default.tasks' }
+  if (typeof mod.default?.tasks !== 'function') return { error: `${file} 没有导出 default.tasks` }
   const ctx = {
     repoRoot: root,
     scriptDir: path.join(root, 'scripts'),
@@ -184,13 +188,23 @@ async function docsTasksOf(root) {
     scope: { hits: () => true },
   }
   try {
-    return { tasks: Array.from(mod.default.tasks(ctx)) }
+    return { mod, tasks: Array.from(mod.default.tasks(ctx)) }
   } catch (e) {
-    return { error: (e && e.message ? e.message : String(e)).split('\n')[0] }
+    return { mod, error: (e && e.message ? e.message : String(e)).split('\n')[0] }
   }
 }
 
-console.log('--- gate-wiring-audit: 门禁接线对账（GW-001…007） ---')
+/**
+ * 物化 `30-docs` 的任务表 —— GW-003 / GW-004 拿它判「声明的东西真的被跑到没有」。
+ * 与 `stageTasksOf` 同源，只是调用点多一层壳（保住既有调用形状）。
+ */
+async function docsTasksOf(root) {
+  const r = await stageTasksOf(root, '30-docs.mjs')
+  return r.missing ? { error: 'scripts/gate.d/30-docs.mjs 不存在' } : r
+}
+
+
+console.log('--- gate-wiring-audit: 门禁接线对账（GW-001…008） ---')
 
 const decl = gateDeclarations(REPO_ROOT)
 const files = testNamesOf(REPO_ROOT)
@@ -261,6 +275,34 @@ const countOf = (b) => decl.entries.filter((e) => e.bucket === b).length
 // GW-007：`-audit` 命名的脚本必须住在 `scripts/audits/`（含它的 `.test.mjs`）。
 // 单向：`audits/` 里可以有别的名字（`projection-purity`），因为「名字」不是判据的输入。
 const strays = scripts.filter((rel) => /(^|\/)[^/]*-audit(\.test)?\.mjs$/.test(rel) && !rel.startsWith('audits/'))
+
+// GW-008：`@gens` 声明 ↔ 生成链 / 复核阶段物化出的**任务**。
+// 两个阶段都遍历同一份声明，所以「声明了却没被跑到」只能在**物化结果**上判——
+// 与 GW-003 同一条道理：枚举写窄（模式名拼错、过滤条件写错）时声明还在，跑的是空集。
+const gens = gensDeclarations(REPO_ROOT) ?? { entries: [], problems: [] }
+const gensBadShape = gens.problems
+const gensWriterDecl = gens.entries.filter((e) => e.modes.includes('write'))
+const gensCheckerDecl = gens.entries.filter((e) => e.modes.includes('check'))
+const writeRun = await stageTasksOf(REPO_ROOT, '06-facts-write.mjs')
+const checkRun = await stageTasksOf(REPO_ROOT, '60-facts.mjs')
+// 06 把整条链合成**一格** `autoChain` 工作，步骤自述在 `STEPS`；60 每份生成器一格。
+const stepsRan = Array.isArray(writeRun.mod?.STEPS)
+  ? writeRun.mod.STEPS.map((s) => (s?.args?.[0] ? relOf(s.args[0]) : null)).filter(Boolean)
+  : []
+const checksRan = (checkRun.tasks ?? []).map((t) => (t?.args?.[0] ? relOf(t.args[0]) : null)).filter(Boolean)
+const gensErrors = [
+  ...(writeRun.error ? [{ where: '06-facts-write', detail: writeRun.error }] : []),
+  ...(checkRun.error ? [{ where: '60-facts', detail: checkRun.error }] : []),
+  // 「整条链一条声明都没有」不在这里判：两个阶段自己会红（`writers.length === 0` 时
+  // `06-facts-write` 在模块加载期就抛，`60-facts` 在物化期抛）。这条判据只管
+  // **声明与物化结果对不上**——那才是「加了生成器却没进链」的形状。
+]
+const writeNotRun = writeRun.mod ? gensWriterDecl.filter((e) => !stepsRan.includes(e.name)) : []
+const checkNotRun = checkRun.tasks ? gensCheckerDecl.filter((e) => !checksRan.includes(e.name)) : []
+const runNotDeclared = [
+  ...stepsRan.filter((n) => !gensWriterDecl.some((e) => e.name === n)).map((n) => ({ n, where: '06-facts-write' })),
+  ...checksRan.filter((n) => !gensCheckerDecl.some((e) => e.name === n)).map((n) => ({ n, where: '60-facts' })),
+]
 
 let errors = 0
 for (const p of undeclared) {
@@ -416,6 +458,44 @@ for (const n of strays) {
   )
 }
 
+for (const p of gensBadShape) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-008 scripts/${p.rel} 的 \`@gens\` 声明不合格（${p.error}：${p.detail}）⇒ ` +
+        `序数不唯一 / 模式拼错都会让这一步**落进链外**，而两个事实阶段都还是绿的`,
+    ),
+  )
+}
+for (const g of gensErrors) {
+  errors++
+  console.log(red(`[ERROR] GW-008 ${g.where}：${g.detail}`))
+}
+for (const e of writeNotRun) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-008 scripts/${e.name}.mjs 声明了 \`@gens ${e.order} write\`，但 06-facts-write 的链里没有它 ⇒ ` +
+        `生成器永不执行（两个事实阶段都不会红：它们遍历的就是同一份声明，过滤条件写错也照样绿）`,
+    ),
+  )
+}
+for (const e of checkNotRun) {
+  errors++
+  console.log(
+    red(`[ERROR] GW-008 scripts/${e.name}.mjs 声明了 \`@gens ${e.order} check\`，但 60-facts 没有产出它的复核任务 ⇒ 末态漂移无人判`),
+  )
+}
+for (const u of runNotDeclared) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-008 ${u.where} 跑了 scripts/${u.n}.mjs，它却没有对应的 \`@gens\` 声明 ⇒ ` +
+        `这一步不在机制的账上（下一个读声明的人看不到它）`,
+    ),
+  )
+}
+
 if (errors) {
   console.log(
     `gate-wiring-audit 未通过：${errors} 处接线失效（${decl.entries.length} 份声明 / ` +
@@ -427,7 +507,8 @@ console.log(
   green(
     `gate-wiring-audit 通过：${decl.entries.length} 份脚本全部声明（guard ${countOf('guard')} / report ${countOf('report')} / ` +
       `test ${countOf('test')} / lib ${countOf('lib')} / off ${countOf('off')}），${files.length} 份测试与 ` +
-      `${guards.length} 条守卫全部被 30-docs 跑到；生成阶段 ${lastRegen ? lastRegen.file : '（无）'} 先于只读复核 ` +
+      `${guards.length} 条守卫全部被 30-docs 跑到；生成链 ${gensWriterDecl.length} 步与复核 ${gensCheckerDecl.length} 步` +
+      `（@gens 声明 ↔ 物化任务双向对账）；生成阶段 ${lastRegen ? lastRegen.file : '（无）'} 先于只读复核 ` +
       `${recheckStages.map((m) => m.file).join(' / ') || '（无）'}；${stages.length} 个阶段物化出 ${totalTasks} 项，无空转阶段`,
   ),
 )

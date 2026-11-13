@@ -9,12 +9,12 @@ impl: done
 
 # `scripts/facts/` —— 事实生成器目录
 
-**目录即接线**：`scripts/gen-facts.mjs` 遍历本目录下每个非 `_` 前缀的 `.mjs`，
+**目录即接线**：`scripts/gens/gen-facts.mjs` 遍历本目录下每个非 `_` 前缀的 `.mjs`，
 逐个调用它导出的 `render()`。新增一份事实 = 在这里建一个文件——
 不需要改门禁、不需要在任何名单里登记。
 
 由 `scripts/gate.d/60-facts.mjs` 的 `autoWork` 自动执行（生成并暂存）；
-CI 侧跑 `node scripts/gen-facts.mjs --check`，任一份漂移即红。
+CI 侧跑 `node scripts/gens/gen-facts.mjs --check`，任一份漂移即红。
 
 ## 一份事实长什么样
 

@@ -299,7 +299,7 @@ function main() {
   console.error(`\n== injection-matrix-audit：${errors.length} 处违规 ==`)
   for (const e of errors) console.error(`  ${red(e.rule)}  ${e.msg}`)
   console.error(
-    `\n${dim('数据源：e2e/injection-matrix.mjs；生成物：docs/004-ref/012-注入矩阵.md（node scripts/gen-facts.mjs）')}`,
+    `\n${dim('数据源：e2e/injection-matrix.mjs；生成物：docs/004-ref/012-注入矩阵.md（node scripts/gens/gen-facts.mjs）')}`,
   )
   return 1
 }

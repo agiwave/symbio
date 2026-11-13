@@ -189,7 +189,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { listSourceFiles, isSourceCommentLine, codeRanges, inCode } from '../gen-doc-refs.mjs'
+import { listSourceFiles, isSourceCommentLine, codeRanges, inCode } from '../gens/gen-doc-refs.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..', '..')
@@ -1374,7 +1374,7 @@ console.log(`D-019 注释链接的目标形态：判定 ${srcLinksChecked} 条�
 if (srcLinkBad.length > 0 || srcTickBad.length > 0) {
   console.log('\n提示：源码注释里的入链此前无人看（D-001 只读 .md），文档搬家后整批静默失效。处置：')
   console.log('      · 指向**已登记文档**的链接地址不用手改——门禁 gen-doc-refs 会按编号自动接管重算（RF-004），')
-  console.log('        但**此刻坏的照判**：先重跑 `node scripts/gen-doc-refs.mjs`，下次审计即绿；')
+  console.log('        但**此刻坏的照判**：先重跑 `node scripts/gens/gen-doc-refs.mjs`，下次审计即绿；')
   console.log('      · 指向非登记文件（脚本 / 源码 / 配置）的死链：改正路径或删掉入链（机制搬不动它）；')
   console.log('      · 反引号档确属缩写 / 示意 / 历史叙述：写 `doc-link-allow D-010: 理由`（本行或前一行）。')
 }

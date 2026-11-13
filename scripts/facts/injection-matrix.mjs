@@ -9,7 +9,7 @@
  * 不带溯源行（`stamp: false`）：输入是仓内数据，同输入必然同输出；时间戳只会让门禁
  * 每次都报「修复了 1 个文件」。
  *
- * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
+ * 由 `scripts/gens/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
 // @gate test
 
@@ -87,7 +87,7 @@ function render({ root = ROOT } = {}) {
   return L.join('\n')
 }
 
-// ================= 事实描述符（由 `scripts/gen-facts.mjs` 遍历调用） =================
+// ================= 事实描述符（由 `scripts/gens/gen-facts.mjs` 遍历调用） =================
 //
 // 不带溯源行：全部输入是仓内数据，同输入必然同输出（理由见 `facts/_lib.mjs` 的 `stamp` 契约）。
 export default {

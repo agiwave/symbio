@@ -25,7 +25,7 @@
  * `classify/decide` · `classify/parse` 留下了两条零引用常量，又因为
  * `arch-dead-code-audit` 只扫 `pub fn` 而一路全绿——约定不机检就等于没有。
  *
- * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
+ * 由 `scripts/gens/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
 // @gate test
 

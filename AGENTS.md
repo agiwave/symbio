@@ -64,7 +64,7 @@
 - 查待办 / 已完成 / 某一条：`node scripts/registry-board.mjs`（`--kind=` / `--status=` / `--id=`）
 - 登记新文档、改状态 = 写/改文档自己的 front-matter（字段规范：`docs/005-spec/001.md`）；
  漏了 front-matter 的 `.md` 由 RG-020 判红
-- 文档间引用**只写编号**（`[该批]`），地址由 `node scripts/gen-doc-refs.mjs` 生成并重算，
+- 文档间引用**只写编号**（`[该批]`），地址由 `node scripts/gens/gen-doc-refs.mjs` 生成并重算，
  **不手写站内地址**（机制见总纲 §1.1）
 - 改完跑 `node scripts/audits/registry-audit.mjs`；门禁自动重生成汇总标记区与引用地址并暂存（`gate.d/60-facts.mjs`）
 - `prio`（now / next / later）只排同层顺序，**不裁决冲突**；冲突按总纲 §4 分层消解

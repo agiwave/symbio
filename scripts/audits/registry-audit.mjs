@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // @gate guard
+// @gens 20 write
 /**
  * registry-audit — 登记条目守卫：字段 / 状态机 / 依赖 / 判据指认的机械校验
  *

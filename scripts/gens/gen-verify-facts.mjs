@@ -14,17 +14,17 @@
  *
  * | 生成物 | 真源 |
  * |---|---|
- * | `MECHANISMS` | [DE-001 §8 权威参数表](../docs/003-design/001-核心架构.md "DE-001-核心架构") 的「参数键」列 |
+ * | `MECHANISMS` | [DE-001 §8 权威参数表](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的「参数键」列 |
  * | `DOMAINS` | DE-001 §8 的「取值域」列——读法写在那张表下面，`↳ §N` 的集合去那一节读 |
- * | `DIMENSIONS` / `AXES` / `AXIS_POLARITIES` | [DE-008 §2 五维表 / §3 五轴表（末两列是极性）](../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") |
+ * | `DIMENSIONS` / `AXES` / `AXIS_POLARITIES` | [DE-008 §2 五维表 / §3 五轴表（末两列是极性）](../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") |
  * | `LEVEL_MAX` / `TIER_MAX` / `TIER_CORES` | DE-008 §3.1 刻度表（**列数** = 等级格数）/ §3.2 天梯表 |
  * | `OVERLAP_LIMIT` / `DECLARED_OVERLAP` | DE-008 §3.3 共线上限与登记表 |
  * | `CAPABILITIES` / `KINDS` | DE-008 §6.1 能力名册（七列）与类型闭集表 |
  * | `DECLARED_*` | DE-008 §2「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
  * | `PSEUDO` | DE-008 §5 伪高阶表的「说法」列 |
- * | `STAGE_CLAIMS` | [DE-030 阶梯总表](../docs/003-design/030-能力阶梯总览.md "DE-030-能力阶梯总览") |
+ * | `STAGE_CLAIMS` | [DE-030 阶梯总表](../../docs/003-design/030-能力阶梯总览.md "DE-030-能力阶梯总览") |
  * | `STAGE_DOCS` | 每阶 `1(2N)N-*.md`（–133）§3 的 ```capability-assign``` 块 + §4 的加粗平凡值行 |
- * | `COGNITIVE_DEMANDS` | [DE-040 §1 需求表](../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入")——全仓唯一一份认知体系需求清单 |
+ * | `COGNITIVE_DEMANDS` | [DE-040 §1 需求表](../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入")——全仓唯一一份认知体系需求清单 |
  *
  * **顶层键 vs 子键**：`projection.param` 在 §8 里与顶层键同列一张表，但 DE-001 §8 自己写明
  * 「它不是第 11 个机制键，是 `projection` 的子键」。判据因此是形状而非名单：
@@ -48,19 +48,20 @@
  *
  * ## 用法
  *
- *   node scripts/gen-verify-facts.mjs            # 写 docs/003-design/verify/facts/mod.rs
- *   node scripts/gen-verify-facts.mjs --check    # 只比对，不一致 exit 1（门禁档）
- *   node scripts/gen-verify-facts.mjs --stdout   # 打到标准输出（测试用，不落盘）
+ *   node scripts/gens/gen-verify-facts.mjs            # 写 docs/003-design/verify/facts/mod.rs
+ *   node scripts/gens/gen-verify-facts.mjs --check    # 只比对，不一致 exit 1（门禁档）
+ *   node scripts/gens/gen-verify-facts.mjs --stdout   # 打到标准输出（测试用，不落盘）
  */
 // @gate test
+// @gens 40 write check
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { tableWithHeader, plain, fencedBlock, cellsOf, isSeparator } from './md-table.mjs'
+import { tableWithHeader, plain, fencedBlock, cellsOf, isSeparator } from '../md-table.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
-const repoRoot = path.resolve(scriptDir, '..')
+const repoRoot = path.resolve(scriptDir, '..', '..')
 const OUT_REL = path.join('docs', '003-design', 'verify', 'facts', 'mod.rs')
 
 const ARCH_REL = path.join('docs', '003-design', '001-核心架构.md')
@@ -586,7 +587,7 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
 
   const rs = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
   const out = []
-  out.push('// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/003-design（核心架构 / 坐标系 / 能力阶梯）抽取，**不要手改**。')
+  out.push('// 生成物：由 `scripts/gens/gen-verify-facts.mjs` 从 docs/003-design（核心架构 / 坐标系 / 能力阶梯）抽取，**不要手改**。')
   out.push('// 要改这些数据就改文档（DE-001 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 / DE-040 §2），再重跑生成脚本。')
   out.push('//')
   out.push('// 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；')
@@ -865,7 +866,7 @@ if (MAIN) {
     } else {
       console.error(
         `gen-verify-facts --check: ${OUT_REL} 已与文档不一致。\n` +
-          '  改了 DE-001 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 就要重跑 `node scripts/gen-verify-facts.mjs`——\n' +
+          '  改了 DE-001 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 就要重跑 `node scripts/gens/gen-verify-facts.mjs`——\n' +
           '  让 verify 程序继续吃旧数据，它验的就还是旧计划（绿灯是假的）。',
       )
       process.exit(1)

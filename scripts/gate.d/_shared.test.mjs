@@ -31,6 +31,7 @@ import {
   ratchetVerdict,
   stringLiteralsOf,
   sdkSymbolsIn,
+  gensDeclOf,
 } from './_shared.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
@@ -354,16 +355,13 @@ test('facts-write 生成链是一个 autoChain 工作（末态判差异），CI 
 // `facts` 阶段里的只读引用复核（`gen-doc-refs --check`）：生成链（`autoChain`）看的是
 // 「链跑完」的末态，而 `30-docs` 的自动修复器排在它之后——这一格看的是**整轮**跑完。
 // 这条不得被当冗余删掉。反向判据（实测过）：删掉该任务 ⇒ 本条红。
-test('facts 阶段必须带一条只读的引用地址复核（CI 侧看得到未展开的记号）', () => {
-  const src = fs.readFileSync(
-    path.join(repoRoot, 'scripts', 'gate.d', '60-facts.mjs'),
-    'utf8',
-  )
-  assert.match(
-    src,
-    /args:\s*\[docRefs,\s*'--check'\]/,
-    '60-facts.mjs 里没有 `gen-doc-refs --check` —— CI 与 pre-push 就看不见未展开的记号',
-  )
+test('引用地址复核由 `gen-doc-refs` 自己声明 `@gens … check`（CI 侧看得到未展开的记号）', () => {
+  // 60-facts 不再点名任何生成器（它遍历声明），所以这条判据读的是**声明**：
+  // 地址展开器必须在复核那一档里存在，否则 CI 与 pre-push 就看不见未展开的记号。
+  const src = fs.readFileSync(path.join(repoRoot, 'scripts', 'gens', 'gen-doc-refs.mjs'), 'utf8')
+  const decl = gensDeclOf(src)
+  assert.ok(decl && !decl.error, 'gen-doc-refs.mjs 缺少合法的 `@gens` 声明')
+  assert.ok(decl.modes.includes('check'), 'gen-doc-refs 没声明 `check` ⇒ 末态复核里没有它')
 })
 
 // ⚠️ 下面两条钉的是**同一种失效模式：没有信号的漏跑**——漏跑时门禁与日志都一片绿，

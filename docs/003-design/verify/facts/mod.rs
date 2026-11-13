@@ -1,4 +1,4 @@
-// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/003-design（核心架构 / 坐标系 / 能力阶梯）抽取，**不要手改**。
+// 生成物：由 `scripts/gens/gen-verify-facts.mjs` 从 docs/003-design（核心架构 / 坐标系 / 能力阶梯）抽取，**不要手改**。
 // 要改这些数据就改文档（DE-001 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 / DE-040 §2），再重跑生成脚本。
 //
 // 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；
