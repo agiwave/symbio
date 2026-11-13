@@ -1075,31 +1075,3 @@ test('RG-033：退场档只剩锚点与指向——正文超预算即红，activ
   assert.deepEqual(errsOf(short), [], '几十行的退场档不判')
 })
 
-// ================= 新增 kind 自注册（DE-017） =================
-
-test('judgement：由 README meta 自注册，决策单文档按文档类形状真判', () => {
-  const cfg = REPO_KINDS.judgement
-  assert.ok(cfg, '新增 kind 必须出现在闭集里（建目录 + 写 meta 就要被读出来）')
-  assert.equal(cfg.prefix, 'D', '决策编号沿用 D-NNN，守卫与源码注释的署名不改写')
-  assert.equal(cfg.label, '判定决策')
-  assert.equal(cfg.titleEqualsH1, true, '决策是文档类：title 与 H1 两面对账')
-  assert.deepEqual(cfg.sections, [], '裁决正文形状自由，不另设必备小节')
-  assert.deepEqual(cfg.required, [], '落地进展由宿主 design 的 impl 承担，不另开第二条状态轴')
-
-  const body = '# 搬迁按净变化判\n\n## 裁决\n机制面只判净变化。\n\n## 被否决的方案\n逐树新增会拦住搬迁本身。\n'
-  const entry = (title) =>
-    docDoc('docs/008-judgement/404-净变化口径.md', {
-      kind: 'judgement',
-      id: 'D-404-净变化口径',
-      title,
-      status: 'active',
-      body,
-    })
-
-  const ok = caseRoot({ 'docs/008-judgement/404-净变化口径.md': entry('搬迁按净变化判') })
-  assert.deepEqual(errsOf(ok), [], '合法的 judgement 单文档不得误报')
-
-  // 反向：形状判据确实挂在这个新 kind 上，不是只注册了一个空名字。
-  const bad = caseRoot({ 'docs/008-judgement/404-净变化口径.md': entry('标题与 H1 不一致') })
-  expectOnly(errsOf(bad), /RG-021/)
-})

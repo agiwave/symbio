@@ -234,66 +234,6 @@ test('PP-005 正例：挂住夹具里真实存在的 `### D-221` ⇒ 绿', () =>
   assert.equal(r.status, 0, out(r))
 })
 
-// 判定决策 kind 建立之后，裁决正文由 `docs/008-judgement/` 的单文档持有，身份是
-// front-matter 的 `id`，宿主设计文档不再补第二处 `### D-NNN`。扫描根必须跟着 owner 走，
-// 否则新裁决在 PP-005 眼里全是「指向不存在的决策」。
-const judgementFixture = (kind) => ({
-  'docs/008-judgement/471-夹具裁决.md': [
-    '---',
-    `kind: ${kind}`,
-    'id: D-471-夹具裁决',
-    'title: 夹具裁决',
-    'status: active',
-    '---',
-    '',
-    '# 夹具裁决',
-  ].join('\n'),
-})
-
-test('PP-005 正例：判定决策单文档的 front-matter `id` 也能打开 ⇒ 绿', () => {
-  const r = audited({
-    ...repo(),
-    ...judgementFixture('judgement'),
-    'scripts/projection-purity.mjs': fakeScript(
-      '// projection-purity-allow files: D-471 挂在判定决策单文档上的豁免',
-    ),
-  })
-  assert.equal(r.status, 0, out(r))
-})
-
-test('PP-005 反例：不是 judgement kind 的 `id` 不算决策 ⇒ 红（读的是 owner，不是任意编号）', () => {
-  const r = audited({
-    ...repo(),
-    ...judgementFixture('design'),
-    'scripts/projection-purity.mjs': fakeScript(
-      '// projection-purity-allow files: D-471 这份文档不是判定决策',
-    ),
-  })
-  assert.equal(r.status, 1, out(r))
-  assert.match(out(r), /PP-005 放宽 `files` 引用了 `D-471`/, out(r))
-})
-
-test('PP-005 反例：汇总页（`projection: true`）的 `D-000` 不是裁决 ⇒ 红', () => {
-  const r = audited({
-    ...repo(),
-    'docs/008-judgement/README.md': [
-      '---',
-      'kind: judgement',
-      'id: D-000-判定决策汇总',
-      'status: active',
-      'projection: true',
-      '---',
-      '',
-      '# 判定决策总览',
-    ].join('\n'),
-    'scripts/projection-purity.mjs': fakeScript(
-      '// projection-purity-allow files: D-000 汇总页不是一条决策',
-    ),
-  })
-  assert.equal(r.status, 1, out(r))
-  assert.match(out(r), /PP-005 放宽 `files` 引用了 `D-000`/, out(r))
-})
-
 test('PP-005 反例：放宽的不是投影面的格 ⇒ 红', () => {
   const r = audited({
     ...repo(),

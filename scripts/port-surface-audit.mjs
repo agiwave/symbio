@@ -41,7 +41,7 @@
  *   既有裁决（按本仓纪律 `SP-007`），`reason` 必须解释本次为何重算；它判的是
  *   **锚点还在不在**，不是「这次改动配不配拥有一条新决策」。「能打开」的读法
  *   不在本脚本自定，统一走 `scripts/decision-anchors.mjs` 的 `hasDecisionAnchor`：
- *   设计文档的 `### D-NNN` 与 `docs/008-judgement/` 的判定决策单文档都算。
+ *   设计文档（含模块 `README.md`）的「关键决策」节里的 `### D-NNN` 锚点。
  * - **PTS-005 管「谁在写协议格」**：前四格判的是声明与引擎，这一格判**写侧**——
  *   `sent` / `response` / `failed` / `retry` 由引擎独占（DE-050 §0），装载期
  *   `ENGINE_ONLY_CELLS` 拦的是「执行体**声明**了它们」，而「另一个文件直接落一条
@@ -160,7 +160,7 @@ const report = (rule, msg) => errors.push({ rule, msg })
 
 // 「这条 D-NNN 到底存不存在」不在本脚本再抄一遍扫描根与锚点正则：唯一读法是
 // `scripts/decision-anchors.mjs` 的 `hasDecisionAnchor`——它同时认设计文档里的
-// `### D-NNN` 锚点与 `docs/008-judgement/` 的判定决策单文档（D-471 起的新形态）。
+// `### D-NNN` 锚点（设计文档或模块 README 的「关键决策」节）。
 // `ROOT` 随 `--root=` 走，回归夹具因此在自己的临时树里判，不会串到真仓。
 const decisionExists = (id) => hasDecisionAnchor(id, ROOT)
 
@@ -265,7 +265,7 @@ const allowedProtocols = new Map()
       }
       for (const id of refs) {
         if (!decisionExists(id)) {
-          report('PTS-001', `豁免 \`protocol ${m[1]}\` 引用了决策 \`D-${id}\`，但设计文档 / 判定决策单文档里没有 \`D-${id}\` 这条裁决 —— 指向不存在的决策的豁免不算豁免`)
+          report('PTS-001', `豁免 \`protocol ${m[1]}\` 引用了决策 \`D-${id}\`，但设计文档里没有 \`D-${id}\` 这条裁决 —— 指向不存在的决策的豁免不算豁免`)
         }
       }
     }
@@ -536,7 +536,7 @@ if (baseline) {
   }
   for (const id of refs) {
     if (!decisionExists(id)) {
-      report('PTS-004', `基线引用了决策 \`D-${id}\`，但设计文档 / 判定决策单文档里没有 \`D-${id}\` 这条裁决 —— 指向不存在的决策的豁免不算豁免`)
+      report('PTS-004', `基线引用了决策 \`D-${id}\`，但设计文档里没有 \`D-${id}\` 这条裁决 —— 指向不存在的决策的豁免不算豁免`)
     }
   }
 }
