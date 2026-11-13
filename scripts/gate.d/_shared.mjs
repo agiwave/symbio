@@ -457,7 +457,7 @@ export const BASELINE = {
   // 新义务环接入**只会回升**：B 类能力每接回一组，对应的 e2e 用例重新落地。
   // baseline-allow e2eCases: 91 → 90（D-318）——`346b3134` 整例退役 t41 技能快路：
   // 它唯一独有的断言依赖 `session.skill_fast_path`，该快路已随 B2 退场，没有生产事实可断；
-  // 能力断言由 t35-skill-compile 承接（退役口径见 `docs/004-ref/013-e2e实施表.md`）。
+  // 能力断言由 t35-skill-compile 承接（退役口径见 `docs/archive/013-e2e实施表.md`，2026-11-04 盘点快照）。
   // 收紧基线，不是放松。
   // baseline-allow e2eCases: 97 → 88（D-395）——9 条整例退役（t89/t91/t93/t94/t98/t100/t101/
   // t102/t103），它们钉的是被撤回的专用验证包；判据对象随实现一起消失，通用扩展面由

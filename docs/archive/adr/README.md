@@ -50,8 +50,9 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 <!-- registry:summary begin -->
 <!-- list:adr-entries owner -->
 
-> ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
-> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "DE-017-登记与汇总机制")。
+> **本区块是归档时的快照，不再重生成**（归档不进登记，`registry-audit --write` 不扫 `docs/archive/`）。
+> 126 条 ADR 已冻结，本表与它们一致；要读现行决策，看 `docs/003-design/` 各篇的「关键决策」节
+> （机制见 `docs/003-design/017-登记与汇总机制.md`，字段规范见 `docs/005-spec/001.md`）。
 
 **计数**：active 115 · superseded 8 · withdrawn 3（共 126）
 

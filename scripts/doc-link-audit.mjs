@@ -111,8 +111,10 @@
  *   而本条要防的两个历史病灶（009 涨到 1045 行时多出的是与四个模块 README 逐段重复的
  *   「范例」、`DECISIONS.md` 1782 行时多出的变更史）离 1000 仍然很远。
  *   买断的是「单主题深文档不必为凑行数而拆」；**不放宽的是拆分纪律本身**。
- *   撤销条件：任一篇正文破 1000 行就拆，**不二次调阈值**——阈值只能因「实测误报」动一次，
- *   再动就是把棘轮调松到失效。破线即拆，没有第二次。
+ *   撤销条件：任一篇**散文**破 1000 行就拆，**不二次调阈值**——阈值只能因「实测误报」动一次，
+ *   再动就是把棘轮调松到失效。破线即拆，没有第二次。（「散文」的界定与 2026-11-13 的
+ *   口径订正见下方 `MAX_DOC_LINES`：原先量整篇正文，把只追加的决策账也算进预算，
+ *   四篇裁决文档因此卡在余量 1 行上。）
  *
  * D-004 存在的理由：现行文档写「曾经是什么、后来改成了什么」，代价不是"多几句话"，而是
  *   **每次重构都要回头改历史**——历史既不可能与现状保持一致，改了又等于篡改。判据是
@@ -262,19 +264,62 @@ function processDocMarker(text) {
 
 // ==================== D-003：行数预算 ====================
 /**
- * 活跃文档的行数上限。**不给豁免**（`docs/archive/` 整体跳过是唯一的例外）：
+ * 活跃文档的**散文**行数上限。**不给豁免**（`docs/archive/` 整体跳过是唯一的例外）：
  * 超过它不是一个需要解释的特例，而是「内容该归别人了」或「该拆成两篇了」的信号，
  * 而这两个动作都不需要一个理由字段来正当化。
  *
- * 数值取 1000 而非更小，是为了不逼人把**必须在一起**的规范切碎——实测本仓库最长的
- * 两篇（`docs/003-design/009-VDFS规范.md` 1045、`session/docs/102-core-loop.md` 881）都不是"差一点点"，
- * 而是各自含着一整类可归给他处的内容。（由 800 上调，理由与撤销条件见上方 D-003 段。）
+ * ## 口径：量散文，不量决策账（2026-11-13 订正）
+ *
+ * 原先量的是**整篇正文**，于是「关键决策」节的 `### D-NNN` 条目被算进预算。这在一类
+ * 文档上直接把预算用错了地方——实测 `048-端口机制裁决` 正文 999 行里 **994 行是决策账、
+ * 散文只有 16 行**；`045` 是 982 / 28。四篇裁决文档因此卡在余量 1 行上：**加一条裁决
+ * 就必须先把这篇拆开**，而拆一个「按编号追加的账」没有正当的切分点——裁定书本来就不该
+ * 按篇幅分篇。
+ *
+ * 决策账与散文的膨胀方式不同：散文会重复、会跑题、会变成垃圾桶，所以要压；决策账是
+ * **只追加的定案记录**，它的长度是项目史的读数，不是质量问题，读它的人也是按
+ * `### D-NNN` 锚点跳（`decision-anchors` 是那条索引的唯一读法）。
+ *
+ * 于是判据改为：**散文行数**（正文减去所有 `### D-NNN` 决策块）。决策块按标题层级现算
+ * ——从 `### D-NNN` 起，到下一个一至三级标题止；不依赖节名叫「关键决策」还是「§2 关键
+ * 决策」（仓里五种写法都有，还有一篇 054 根本没有节名，标题下就是账本）。
+ *
+ * 不另设「决策账上限」：一条裁决约 25 行，账本破两千行意味着这一篇揽了几十个主题，
+ * 那时人自己会按主题分篇——加一个阈值只会多一条要维护的判据。
+ *
+ * 数值取 1000 而非更小，是为了不逼人把**必须在一起**的规范切碎（由 800 上调，
+ * 理由与撤销条件见上方 D-003 段）。
  */
 const MAX_DOC_LINES = 1000
 
 /** 行数口径：末尾无换行也算一行（与编辑器 / `Get-Content` 的计数一致） */
 function lineCount(text) {
   return text.replace(/\n$/, '').split('\n').length
+}
+
+/**
+ * 正文里属于 `### D-NNN` 决策块的行数（含块内子标题与空行）。
+ *
+ * 「一级到三级标题开块、`### D-NNN` 之外一律闭块」是这条判据的全部语法——`####` 也算
+ * 闭块，于是决策条目里的子标题会被算成散文（宁可多算散文，也不给审计留一个「把正文
+ * 塞进决策标题下面」的口子）。
+ */
+export function decisionBlockLines(lines) {
+  const DECISION_HEAD = /^###\s+D-\d{3}a?\b/
+  const HEADING = /^#{1,3}\s/
+  let n = 0
+  let inBlock = false
+  for (const l of lines) {
+    if (HEADING.test(l)) inBlock = DECISION_HEAD.test(l)
+    if (inBlock) n++
+  }
+  return n
+}
+
+/** 预算量的是散文：正文行数减去决策账。 */
+export function proseLineCount(body) {
+  const lines = body.replace(/\n$/, '').split('\n')
+  return lines.length - decisionBlockLines(lines)
 }
 
 // ==================== D-004：变更史不得混入活跃文档 ====================
@@ -997,8 +1042,8 @@ function scanBody (file) {
   const marker = processDocMarker(body)
   if (marker) misplaced.push({ rel, why: marker.source })
 
-  const lines = lineCount(body)
-  if (lines > MAX_DOC_LINES) oversized.push({ rel, lines })
+  const prose = proseLineCount(body)
+  if (prose > MAX_DOC_LINES) oversized.push({ rel, lines: prose, total: lineCount(body) })
 
   if (!waivedD004Whole(body)) {
     const hits = historyHits(body)
@@ -1151,16 +1196,16 @@ if (misplaced.length > 0) {
 }
 
 // ---- D-003：行数预算 ----
-console.log(`D-003 行数预算：上限 ${MAX_DOC_LINES} 行，超限 ${oversized.length} 篇`)
-for (const { rel, lines } of oversized) {
-  console.log(`  ✗ ${rel}  ${lines} 行（超 ${lines - MAX_DOC_LINES}）`)
+console.log(`D-003 行数预算：散文上限 ${MAX_DOC_LINES} 行（不含 \`### D-NNN\` 决策账），超限 ${oversized.length} 篇`)
+for (const { rel, lines, total } of oversized) {
+  console.log(`  ✗ ${rel}  散文 ${lines} 行（超 ${lines - MAX_DOC_LINES}）｜全文 ${total} 行`)
 }
 if (oversized.length > 0) {
   console.log('\n提示：超限即「内容不属于这里」或「该拆篇」的信号，按 docs/README.md 的 owner 表处置：')
-  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → docs/003-design/（只留 ADR 引用）')
-  console.log('      · 协议线上形状 → arch/004-PROTOCOLS.md；· 列表类事实 → CURRENT.md（自动生成，不手抄）')
+  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → docs/003-design/（只留决策指路）')
+  console.log('      · 协议线上形状 → docs/004-ref/ 对应 ref；· 列表类事实 → docs/004-ref/006-当前事实表.md（生成物，不手抄）')
   console.log('      · 实例 / 范例 → 由被举例的那个模块的 README 持有')
-  console.log('      本条**不给豁免**：拆分方向由 owner 表给出，不需要逐篇解释。')
+  console.log('      本条**不给豁免**：拆分方向由 owner 表给出，不需要逐篇解释。决策账不计入预算。')
 }
 
 // ---- D-004：变更史不得混入活跃文档 ----

@@ -315,6 +315,35 @@ test('D-003：docs/archive/ 不判（归档记录当时形态，改写等于篡�
   assert.equal(audit({ 'docs/archive/big.md': longDoc(2000) }).status, 0)
 })
 
+// 2026-11-13 口径订正：预算量**散文**，不量 `### D-NNN` 决策账。
+// 起因是四篇裁决文档（`048` 散文 10 行 / 全文 1001、`045` 22/1001、`054` 11/1001）
+// 卡在余量 1 行上——它们的正文几乎全是只追加的决策账，加一条裁决就必须先拆篇，
+// 而「按编号追加的账」没有正当的切分点。下面三条钉住新口径与它的边界。
+const ledgerDoc = (prose, block) =>
+  ['# 裁决账', ...Array(prose - 1).fill('散文'), ...block].join('\n') + '\n'
+/** 一个 `### D-001` 决策块：块内每一行都算决策账。 */
+const block = (n) => ['### D-001 一条裁决', ...Array(n - 1).fill('这条裁决的理由。')]
+
+test('D-003：决策账不计入预算（散文 900 + 决策账 400 > 上限 → 通过）', () => {
+  const r = audit({ 'docs/ledger.md': ledgerDoc(900, block(400)) })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-003：散文仍照判（散文超上限，哪怕同时有决策账 → 失败）', () => {
+  const r = audit({ 'docs/fat.md': ledgerDoc(LIMIT + 1, block(400)) })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /散文/)
+  assert.match(r.stdout, /决策账/)
+})
+
+test('D-003：决策块在下一个一至三级标题处结束 ⇒ 账后的正文照样算散文', () => {
+  // 边界：`### D-NNN` 拥有的是它自己那一节，不是它之后的整篇——账后面接一大段散文，
+  // 那段仍受预算约束。四级子标题留在块内（`####` 是那一条裁决自己的分节，见 018/022）。
+  const after = ['### D-001 一条裁决', ...Array(9).fill('这条裁决的理由。'), '## 附注']
+  const r = audit({ 'docs/after.md': ledgerDoc(10, [...after, ...Array(LIMIT + 5).fill('账后的正文。')]) })
+  assert.equal(r.status, 1, r.stdout)
+})
+
 // ── D-004：变更史不得混入活跃文档 ───────────────────────────────────────
 test('D-004：正文出现变更史叙述 → 失败（报出文件:行号）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n## 决策\n\n这条路径曾经走的是另一条路。\n' })
