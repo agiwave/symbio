@@ -28,18 +28,17 @@
  * 适合并发的：只读审计脚本（扫文件）、`rustc` 独立编译、彼此隔离的 e2e 用例。
  * 不适合的：任何 cargo 命令、写同一个输出目录的任务。
  *
- * **唯一的例外是 `15-rustdoc`**，它要的是**名字**不是速度：`cargo doc` 与 backend
- * 同争 `.cargo-lock`，并跑不会省下任何墙钟（锁把它们排成先后，总和不变），但
- * 独立成阶段 id 之后「这一轮不跑它」是一次显式选择（`--skip=rustdoc`），而不是
- * 从某个泳道里悄悄删掉一项。判据与代价写在那个文件头。
+ * **不适合的例证**：`cargo doc` 曾独立成阶段（`15-rustdoc`）以保住一个可被
+ * `--skip=rustdoc` 显式跳过的名字，但它与 backend 同争 `.cargo-lock`，并跑不省
+ * 任何墙钟；`D-274` 废弃该阶段后它已退回「需时手跑的一条命令」，本文件不再列它。
  *
  * 阶段级同构：阶段对象同样可以标 `parallel: true`——连续标了的**阶段**合成一批
  * 并发跑，约束与任务级相同：**只有相互无数据依赖的阶段才可标**（每个阶段为什么
- * 安全，写在它自己的文件头，不在本文件复述）。当前编排（2026-10-19）：
+ * 安全，写在它自己的文件头，不在本文件复述）。当前编排：
  *
  *   05-fmt（屏障，单独跑）
  *     → 06-facts-write（生成器链，串行；docs 读它的产物，故必须是批的前置）
- *     → [10-backend ∥ 15-rustdoc ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 36-baseline-scope ∥ 50-msrv ∥ 55-verify]
+ *     → [10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 36-baseline-scope ∥ 50-msrv ∥ 55-verify]
  *     → 56-frontend-build → 58-e2e → 60-facts（必须最后）
  *
  * ⚠️ **批只由「连续」的 `parallel: true` 阶段组成**：中间夹一个没标 `parallel` 的阶段，

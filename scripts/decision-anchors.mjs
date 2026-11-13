@@ -19,9 +19,8 @@
  *
  * ## 口径（改这里 = 改判据，三处一起改）
  *
- * - 扫描根：`docs/003-design/` + `docs/008-judgement/` + `crates/`（模块就地文档）+
- *   `tauri/docs/`，再加一份**可能不存在**的 CLI 文档面（`cli` 尚未落在这个布局里，
- *   目录不在就静默跳过——与 `doc-link-audit` 的 ROOTS 同一口径）；
+ * - 扫描根：`docs/003-design/` + `docs/008-judgement/` + `crates/`（模块就地文档，
+ *   含 `crates/symbio-cli/docs/`）+ `tauri/docs/`；
  *   调用方给了 `docsRoot` 时**只用它**（回归夹具把文档面指到临时目录）。
  * - 跳过 `node_modules` / `target` / `archive`：那些是历史或产物，不是现行登记。
  * - 锚点形态：`/^#{2,6}\s+(D-\d{3}a?)\b/`——`###` 到 `######` 都算，编号带可选字母尾巴。
@@ -111,7 +110,6 @@ export function decisionAnchorIds(repoRoot, docsRoot = null) {
           path.join(repoRoot, 'docs', '008-judgement'),
           path.join(repoRoot, 'crates'),
           path.join(repoRoot, 'tauri', 'docs'),
-          path.join(repoRoot, 'cli', 'docs'),
         ]
     ids = scan(roots)
     cache.set(key, ids)

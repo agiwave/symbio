@@ -199,7 +199,7 @@ const repoRoot = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot
 // "没加 --strict 所以没拦住"是预期行为。
 
 /** 扫描根（相对 repoRoot）；目录递归，文件直接检查 */
-const ROOTS = ['docs', 'crates', 'tauri', 'cli', 'e2e', '.github', 'examples']
+const ROOTS = ['docs', 'crates', 'tauri', 'e2e', '.github', 'examples']
 
 /** 根目录下的散落 Markdown */
 const ROOT_FILES = ['AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
@@ -886,7 +886,7 @@ if (malformedLinks.length > 0) {
 // 扫描范围 = 活文档根（`docs/` + 模块文档 + `e2e` / `.github` 说明 + 根目录散落 md）；
 // `examples/` 是示例包内容，不是项目文档，跳过（同 D-002 一直以来的口径）。
 // 三条规矩**共用同一次读盘**：分三遍读等于让守卫的代价翻三倍，而它们的扫描范围完全一致。
-const BODY_ROOTS = ['docs', 'crates', 'tauri', 'cli', 'e2e', '.github']
+const BODY_ROOTS = ['docs', 'crates', 'tauri', 'e2e', '.github']
 /**
  * 散文体检整体豁免 `docs/007-task/` 与 `docs/005-spec/`：
  *   · `007-task` 的 `## 处理过程` 就是它的职责（唯一允许写过程的 kind）；

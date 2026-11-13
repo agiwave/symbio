@@ -30,7 +30,7 @@ function audit(files, { strict = false } = {}) {
   try {
     for (const [rel, content] of Object.entries(files)) {
       const abs = rel.startsWith('cli/')
-        ? path.join(root, 'cli', 'src', rel.slice('cli/'.length))
+        ? path.join(root, 'crates', 'symbio-cli', 'src', rel.slice('cli/'.length))
         : path.join(root, 'tauri', 'src', rel)
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       fs.writeFileSync(abs, content)

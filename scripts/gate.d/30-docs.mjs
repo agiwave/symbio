@@ -668,6 +668,13 @@ export const TEST_ONLY = [
   // 恰恰来自这份生成物——生成物漏了，守卫也跟着漏。反向用例（不是臂的字符串不算路由、
   // 手改生成物必红）因此必须由门禁跑。
   'facts/routes-ts',
+  // `facts/current`：本体的失效形态是**读空即全绿**——源文件路径写错 → `catch` 吞掉 →
+  // 生成物写 0 → `gen-facts --check` 比对「生成结果 == 当前文件」→ 一致 → 本地与 CI
+  // 同时绿。D-191 把 CLI 拆成独立 crate（`crates/symbio-cli/`）之后，CLI 面就被确定性地投影成
+  // 0/0/0 而无人可见（本表曾是 LIBS：只被 `gen-facts` 调用、没有回归测试）。它的
+  // 测试逐条钉住输入契约：源文件不存在 / 为空 / 正则零命中一律抛错，不许返回空集合
+  // （与 `DE-017` 的「条目数非零」同一条纪律，只是这条落在 `scripts/facts/` 上）。
+  'facts/current',
   // `facts/routes-rs` 是 Rust 侧跨插件地址常量的生成器（各插件 `PLUGIN.yml` 的
   // `plugin_routes` → `crates/symbio-plugin-api/src/routes.rs`）。失效形态同样静默：
   // 声明了但 `route()` 里没有这条臂 / 两个插件声明同一条 / **声明了但没有真实 Rust
@@ -869,7 +876,6 @@ export const LIBS = [
   // 实时取，owner 读不出直接让生成失败——静默报 0 会让「欠账归零」与「看不见」
   // 长得一模一样，那正是它要治的病。
   'facts/open-ends',
-  'facts/current',
   'facts/gate-codes',
   'facts/injection-matrix',
   'facts/lists-index',

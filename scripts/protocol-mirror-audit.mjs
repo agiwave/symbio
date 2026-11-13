@@ -1331,7 +1331,17 @@ console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
           if (code.trim()) corpus.push({ f, code })
         }
       }
-      for (const f of walkRs(path.join(REPO, 'cli', 'src'))) {
+      // CLI 语料：**真仓里这一面必须非空**才算判过。D-191 把 CLI 拆成独立 crate
+      // （`crates/symbio-cli/`）之后这里曾指向旧目录，`walkRs` 扫到 0 文件而判据照绿
+      // ——「全绿」对第二前端不携带信息量（DE-017「读空即全绿」）。
+      // `--repo` 指向的是夹具树：它只搭判据要用到的那几棵，可以没有 CLI；
+      // 真仓（门禁的调用形态，不传 `--repo`）少一棵就是「扫描面坏了」。
+      const cliFiles = walkRs(path.join(REPO, 'crates', 'symbio-cli', 'src'))
+      if (cliFiles.length === 0 && !argValue('repo')) {
+        errors++
+        console.log(`  ${red(BAD)} G 组 CLI 语料为空：crates/symbio-cli/src 下一份 .rs 都没扫到`)
+      }
+      for (const f of cliFiles) {
         const src = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
         for (const line of src.split(/\r?\n/)) {
           const code = line.replace(/\/\/.*$/, '')

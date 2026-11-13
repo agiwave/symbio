@@ -193,20 +193,49 @@ function scopeRows() {
   ];
 }
 
+/**
+ * 结构事实的输入契约：**读不到就是「这一格坏了」，不是「这一格是 0」**。
+ *
+ * 生成物是「改代码即变」的投影，它的可信度上界是「输入确实被读到」。此前的写法是
+ * `catch { return [] }`：D-191 把 CLI 拆成独立 crate（`crates/symbio-cli/`）之后，`cliSurface()`
+ * 的路径没跟着改，CLI 面被**确定性地**投影成 0/0/0，而 `gen-facts --check` 只比对
+ * 「生成结果 == 当前文件」，于是本地与 CI 同样全绿——`DE-017` 命名过这种失效
+ * （「读空即全绿」），它的第二种形态不依赖任何开关，比漏写 `--ci` 更隐蔽。
+ *
+ * 所以源文件必须存在且非空；提取结果为空同样抛错。判据只有一条：
+ * 一个正常仓库里存在的事实，读不出就**让生成失败**，不许渲染成 0。
+ */
+export function requiredSource(file, what) {
+  if (!existsSync(file)) {
+    throw new Error(
+      `结构事实的源文件不存在：${what} —— ${path.relative(ROOT, file)}（目录搬迁后要同步这里的路径）`,
+    );
+  }
+  const txt = readFileSync(file, "utf8");
+  if (!txt.trim()) throw new Error(`结构事实的源文件是空的：${what} —— ${path.relative(ROOT, file)}`);
+  return txt;
+}
+
+/** 提取结果非空断言：`0` 只有在「真的没有」时才允许，所以由调用方指名哪些格不许为 0。 */
+export function requiredHits(list, what) {
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new Error(`结构事实提取为空：${what} —— 源文件读到了，但正则一条也没命中（格式变了？）`);
+  }
+  return list;
+}
+
 /** `generate_handler![…]` 里**实际注册**的 command（先剥注释，被注释掉的不算接缝） */
 function tauriCommands() {
   const file = path.join(ROOT, "tauri", "src-tauri", "src", "main.rs");
-  let txt;
-  try {
-    txt = stripComments(readFileSync(file, "utf8"));
-  } catch {
-    return [];
-  }
+  const txt = stripComments(requiredSource(file, "Tauri IPC 命令"));
   const m = txt.match(/generate_handler!\s*\[([\s\S]*?)\]/);
-  if (!m) return [];
-  return [...m[1].matchAll(/(?:commands|crate)::([a-z0-9_]+)|^\s*([a-z0-9_]+)\s*,/gm)]
-    .map((g) => g[1] ?? g[2])
-    .filter(Boolean);
+  if (!m) throw new Error("结构事实提取为空：`generate_handler![…]` 在 main.rs 里找不到");
+  return requiredHits(
+    [...m[1].matchAll(/(?:commands|crate)::([a-z0-9_]+)|^\s*([a-z0-9_]+)\s*,/gm)]
+      .map((g) => g[1] ?? g[2])
+      .filter(Boolean),
+    "Tauri IPC 命令",
+  );
 }
 
 /** `#[tauri::command]` 声明总数（与 generate_handler 注册数对比——差值才是「未注册历史函数」，不许硬编码） */
@@ -221,26 +250,31 @@ function tauriCommandDeclared() {
         n += (readFileSync(p, "utf8").match(/#\[tauri::command\]/g) ?? []).length;
     }
   };
-  try {
-    walk(dir);
-  } catch {
-    /* 目录缺失按 0 计，由差值分支自然处理 */
-  }
+  // 目录缺失不是「0 个声明」，是「这一格没输入」——与 `requiredSource` 同一条口径。
+  if (!existsSync(dir)) throw new Error(`结构事实的源目录不存在：Tauri 宿主 —— ${path.relative(ROOT, dir)}`);
+  walk(dir);
   return n;
 }
 
 /** 前端 router：route 条数与真实组件数（redirect 不算组件——视图收敛程度是可数的事实） */
 function tauriViews() {
   const file = path.join(ROOT, "tauri", "src", "router", "index.ts");
-  let txt;
-  try {
-    txt = readFileSync(file, "utf8");
-  } catch {
-    return { routes: 0, components: 0, components_list: [] };
-  }
-  const routes = [...txt.matchAll(/\{\s*(?:path|redirect)/g)].length;
+  // 判据只认代码：注释里写 `redirect: () => …` 是在解释「为什么不用 redirect」，
+  // 不是又一条 route。剥注释后再数，两处都不会被自己的说明文字喂成假读数。
+  const txt = stripComments(requiredSource(file, "前端路由"));
+  // 只数 `routes: [ … ]` 数组里的记录：`{` 必须紧跟 `[` 或 `,`。
+  // 早先只写 `\{\s*(?:path|redirect)`，把导航守卫的 `return { path: await
+  // coldStartPath(), replace: true }` 也算成一条 route——投影因此多 1 条，
+  // 且和「其余为旧地址 redirect」这句硬编码措辞互相背书（那条 redirect 早按 D-149 删了）。
+  const routes = [...txt.matchAll(/(?:^|[[,])\s*\{\s*(?:path|redirect)\s*:/gm)].length;
   const comps = [...new Set([...txt.matchAll(/component:\s*([A-Za-z]\w*)/g)].map((g) => g[1]))];
-  return { routes, components: comps.length, components_list: comps };
+  // `redirect:` 只在兜底那条上出现一次；旧地址的兼容 redirect 已按 D-149 删除，
+  // 所以这一格是**量出来的**，不是「其余都是旧地址」这句推论。
+  const redirects = [...txt.matchAll(/\bredirect:/g)].length;
+  if (routes === 0 || comps.length === 0) {
+    throw new Error("结构事实提取为空：前端路由 —— router/index.ts 读到了，但没解析出 route 记录");
+  }
+  return { routes, components: comps.length, components_list: comps, redirects };
 }
 
 /**
@@ -251,15 +285,11 @@ function tauriViews() {
  * 「子命令」，还漏掉了 `--heartbeat`——事实表里的清单一旦手写就会腐烂。
  */
 function cliSurface() {
-  const file = path.join(ROOT, "cli", "src", "args.rs");
-  let txt;
-  try {
-    txt = readFileSync(file, "utf8");
-  } catch {
-    return { longs: [], shorts: [], repl: [] };
-  }
+  const file = path.join(ROOT, "crates", "symbio-cli", "src", "args.rs");
+  const txt = requiredSource(file, "CLI 面（进程选项与 REPL 命令）");
   const m = txt.match(/const HELP: &str = "\s*([\s\S]*?)\n"/);
-  const help = m ? m[1] : "";
+  if (!m) throw new Error("结构事实提取为空：CLI 的 `HELP` 常量在 args.rs 里找不到");
+  const help = m[1];
   const section = (from, to) => {
     const a = help.indexOf(from);
     if (a < 0) return "";
@@ -269,11 +299,15 @@ function cliSurface() {
   };
   const optBlock = section("选项:", "交互模式内置命令:");
   const replBlock = section("交互模式内置命令:", "输出约定:");
-  return {
+  const out = {
     longs: [...new Set([...optBlock.matchAll(/--[a-z][\w-]*/g)].map((g) => g[0]))],
     shorts: [...new Set([...optBlock.matchAll(/(?:^|\s)-([A-Za-z])(?=[\s,])/g)].map((g) => `-${g[1]}`))],
     repl: [...new Set([...replBlock.matchAll(/(?:^|\s)(\/[\w-]+)/g)].map((g) => g[1]))],
   };
+  requiredHits(out.longs, "CLI 长选项");
+  requiredHits(out.shorts, "CLI 短选项");
+  requiredHits(out.repl, "CLI 交互模式内置命令");
+  return out;
 }
 
 /**
@@ -285,12 +319,7 @@ function cliSurface() {
  */
 function gatewayEndpoints() {
   const file = path.join(ROOT, "crates", "symbio-plugin-gateway", "src", "server.rs");
-  let txt;
-  try {
-    txt = stripComments(readFileSync(file, "utf8"));
-  } catch {
-    return { http: [], ws: false };
-  }
+  const txt = stripComments(requiredSource(file, "Gateway 端点"));
   const http = [
     ...new Set(
       [...txt.matchAll(/req\.method == "(\w+)" && req\.path\.starts_with\("([^"]+)"\)/g)].map(
@@ -298,7 +327,11 @@ function gatewayEndpoints() {
       )
     ),
   ];
-  return { http, ws: /fn\s+ws_handshake/.test(txt) };
+  requiredHits(http, "Gateway HTTP 端点");
+  if (!/fn\s+ws_handshake/.test(txt)) {
+    throw new Error("结构事实提取为空：Gateway 的 WS 升级口 `ws_handshake` 在 server.rs 里找不到");
+  }
+  return { http, ws: true };
 }
 
 // ================= 渲染 =================
@@ -523,8 +556,7 @@ function render() {
   L.push(
     `- **前端路由**：${views.routes} 条 route，其中真实组件 ${views.components} 个（${fmtList(
       views.components_list
-    )}）；其余为旧地址 ` +
-      "`redirect`。即「一台控件承载全部资源类型」在代码里可数。"
+    )}）、兜底 \`redirect\` ${views.redirects} 条。即「一台控件承载全部资源类型」在代码里可数。`
   );
   const gw = gatewayEndpoints();
   L.push(

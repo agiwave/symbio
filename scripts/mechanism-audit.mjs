@@ -177,7 +177,7 @@ const isTs = (p) => p.endsWith('.ts') && !p.endsWith('.d.ts')
 const isVueOrTs = (p) => isVue(p) || isTs(p)
 
 const SRC = path.join(repoRoot, 'tauri', 'src')
-const CLI_SRC = path.join(repoRoot, 'cli', 'src')
+const CLI_SRC = path.join(repoRoot, 'crates', 'symbio-cli', 'src')
 const isRs = (p) => p.endsWith('.rs')
 
 /** M-008 的判定对象：那份清单**本身**就是词表，不在脚本里抄一份 */
