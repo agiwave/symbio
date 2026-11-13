@@ -2,7 +2,7 @@
 /**
  * 事实 · `docs/004-ref/012-注入矩阵.md` —— 异常注入的**字段 × 能力面**矩阵
  *
- * 数据源是 `e2e/injection-matrix.mjs`（与 `scripts/injection-matrix-audit.mjs` 同一份）。
+ * 数据源是 `e2e/injection-matrix.mjs`（与 `scripts/audits/injection-matrix-audit.mjs` 同一份）。
  * 本生成器只做排版：**能生成的表不手抄**——手抄的矩阵有两个坏死方向（用例号变死链、
  * 夹具加字段而矩阵漏行），换行重排也会让「有没有变」变成人工 diff。
  *
@@ -11,6 +11,7 @@
  *
  * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
+// @gate test
 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,7 +50,7 @@ function render({ root = ROOT } = {}) {
   L.push(`# ${TITLE}`)
   L.push('')
   L.push('> ⚠️ **本表由 `scripts/facts/injection-matrix.mjs` 从 `e2e/injection-matrix.mjs` 生成，请勿手改。**')
-  L.push('> 数据源是同一条判据的输入，审计方是 `scripts/injection-matrix-audit.mjs`（INJ-001…003）。')
+  L.push('> 数据源是同一条判据的输入，审计方是 `scripts/audits/injection-matrix-audit.mjs`（INJ-001…003）。')
   L.push('')
   L.push('## 1. 口径')
   L.push('')

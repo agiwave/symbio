@@ -16,6 +16,7 @@
  * 说明：本脚本只做下载与解析校验，不编译，因此不需要 MSVC 环境变量。
  * 用 Node 写成，Windows / macOS / Linux 通用（仓库不使用 .sh / .ps1 平台脚本）。
  */
+// @gate off
 
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'

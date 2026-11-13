@@ -24,7 +24,7 @@
 //! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、契约形状、机制
 //! 入口与装配常量，逐条转发、逐条可审。按**来源**分臂（D-255 / D-258 / D-276 / D-486）：
 //!
-//! | 臂 | 来源 | 条数（唯一 owner：`scripts/plugin-surface-audit.mjs`，HS-002 / HS-006） | 性质 |
+//! | 臂 | 来源 | 条数（唯一 owner：`scripts/audits/plugin-surface-audit.mjs`，HS-002 / HS-006） | 性质 |
 //! |---|---|---|---|
 //! | 语法臂 | `symbio-kernel` | `GRAMMAR_BASELINE` | 形状与闭集，**不计债但计件**（D-278） |
 //! | SDK 臂 | `symbio-sdk` | `SDK_BASELINE` | 只碰内核词汇的宿主机制（含授权判定） |

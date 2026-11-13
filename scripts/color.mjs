@@ -33,6 +33,7 @@
  * `paint` 是工厂（`paint(code)(s)`）；不上色时原样返回，故调用方**不需要**自己判
  * `useColor`——这正是让「两处判断」不会漂成「一处对一处错」的原因。
  */
+// @gate test
 
 /** 是否上色：非 TTY、或 `NO_COLOR` 存在且非空 ⇒ 否 */
 export const useColor = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR

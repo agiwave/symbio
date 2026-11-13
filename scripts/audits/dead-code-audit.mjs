@@ -1,0 +1,485 @@
+#!/usr/bin/env node
+/**
+ * 死代码审计（前端 TS/Vue 判定 + Rust 声明级判定 R-001 / 承认标记判定 R-002）
+ *
+ * 四层判定，尽量零误报：
+ *  L1 import 依赖图：从入口（index.html→main.ts、测试、.d.ts、构建配置）可达性。
+ *  L2 字符串引用兜底：不可达但文件名仍被源码提及 → 降级「疑似」，不自动判死。
+ *  L3 schema 契约：schemas/*.ts 若被 route 调用方以类型名引用则视为存活。
+ *  L4 Rust 侧 **R-001（判定型）**：`pub` 声明但全仓（含 cli / tauri / 前端）
+ *     一次都没被提及。判据是「这个名字在整仓只出现一次（就是声明那行）」——
+ *     `dead_code` lint 对 `pub` 项结构性失明（`symbio_sdk/mod.rs` 一句
+ *     `pub use plugin::*` 就能让整批函数被当成对外 API），故需要这条补网。
+ *  L6 前端 **R-003（判定型）**：未被任何文件引用的导出必须二态——删掉，或整份文件
+ *     声明为契约面（文件头 `// dead-code-allow R-003: <理由>`）。「说不清该不该用」
+ *     不许留在第三态。
+ *  L5 Rust 侧 **R-002（判定型）**：`#[allow(dead_code)]` 承认标记必须带
+ *     `// dead-code-allow R-002: <非空理由>`，且数量走棘轮只许降——
+ *     收窄根导出（`core-export-audit` C-003）之后，只被测试引用的冻结契约名
+ *     会被 `dead_code` 逐个点名，留下的每一条都必须有「为什么留 / 什么时候摘」。
+ *
+ * 承认通道：确需保留但无 Rust 消费方的（消费方在前端 / 闭集成员），在声明行或
+ * 紧邻其上一行写 `// dead-code-allow R-001: <理由>`；**理由不可为空**（空理由
+ * 视为未承认，与 `grep-audit` / `plugin-entry-audit` 的豁免同一约定）。
+ * R-002 的承认写在 `#[allow(dead_code)]` 同行或其上 3 行，同一句话、同一个判空。
+ *
+ * 用法： node scripts/audits/dead-code-audit.mjs             # 死代码清单（明细只印死代码）
+ *        node scripts/audits/dead-code-audit.mjs --verbose   # 附带「未被引用的导出」明细
+ * 退出码：1 = 有「确认死代码」（前端文件级）、「未承认的 R-001」或「R-002 违规」；
+ *         0 = 通过。三者都在 gate.mjs 的 docs 阶段（判定型）。
+ *
+ * 已知边界：R-001 只抓「整仓一次都没被提过」这一最低风险形态。`pub` 项被**弱引用**
+ * （只在文档 / 注释里被提到，或在运行期被拼名字调用）一律视为存活——宁可漏报。
+ * R-002 同理只认**字面属性**：`cfg_attr` 里拼出来的 `allow`、宏内部生成的属性
+ * （`define_string_key!` 靠调用点透传臂转发）都按调用点那行算。
+ */
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// @ns R 死代码
+// @codes R-001 R-002 R-003
+// @gate guard
+
+import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
+import { join, dirname, resolve, relative, extname, basename } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+// `--root=` 只为回归测试开的口子：测试在临时目录造一棵最小仓库，好让本脚本的判据
+// 能被「注入真实违规并断言变红」地验证——判定型守卫的教条是「一个只会亮绿灯的
+// 守卫等于没有守卫」，而它腐烂的方式恰恰是「规则写错了所以永远不命中」。
+const rootArg = process.argv.find((a) => a.startsWith('--root='))
+const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..', '..')
+const ROOT = join(REPO_ROOT, 'tauri')
+const SRC = join(ROOT, 'src')
+const EXT = ['.vue', '.ts', '.js', '.tsx', '.mts']
+/** 打印「未被引用的导出」明细（默认只给个数，见文件末段说明） */
+const VERBOSE = process.argv.includes('--verbose')
+
+function walk(dir, out = []) {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name)
+    if (statSync(p).isDirectory()) walk(p, out)
+    else if (EXT.includes(extname(p))) out.push(p)
+  }
+  return out
+}
+
+const allFiles = walk(SRC)
+const fileSet = new Set(allFiles)
+const rel = (p) => relative(ROOT, p).replace(/\\/g, '/')
+const isTest = (p) => p.includes('__tests__') || /\.(spec|test)\.[cm]?[jt]sx?$/.test(p)
+const lineCount = (p) => readFileSync(p, 'utf8').split(/\r?\n/).length
+
+function resolveSpec(spec, fromFile) {
+  let base
+  if (spec.startsWith('@/')) base = join(SRC, spec.slice(2))
+  else if (spec.startsWith('.')) base = resolve(dirname(fromFile), spec)
+  else return null
+  return [base, ...EXT.map((e) => base + e), ...EXT.map((e) => join(base, 'index' + e))].find((c) =>
+    fileSet.has(c),
+  )
+}
+
+/** index.html 里的 /src/main.ts 在 Windows 下不能直接 resolve（会跑到盘符根） */
+const projPath = (spec) => resolve(ROOT, spec.replace(/^[\\/]+/, ''))
+
+const IMPORT_RE =
+  /(?:import|export)\s+[^'"]*?from\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)|import\s+['"]([^'"]+)['"]/g
+
+function reachableFrom(entries) {
+  const seen = new Set()
+  const queue = [...entries]
+  while (queue.length) {
+    const f = queue.pop()
+    if (!f || seen.has(f) || !fileSet.has(f)) continue
+    seen.add(f)
+    for (const m of readFileSync(f, 'utf8').matchAll(IMPORT_RE)) {
+      const r = resolveSpec(m[1] ?? m[2] ?? m[3], f)
+      if (r) queue.push(r)
+    }
+  }
+  return seen
+}
+
+const entries = []
+const seenEntry = new Set()
+const addEntry = (p, why) => {
+  if (fileSet.has(p) && !seenEntry.has(p)) {
+    seenEntry.add(p)
+    entries.push(p)
+  }
+}
+
+if (existsSync(join(ROOT, 'index.html')))
+  for (const m of readFileSync(join(ROOT, 'index.html'), 'utf8').matchAll(/\ssrc=["']([^"']+)["']/g))
+    addEntry(projPath(m[1]))
+
+for (const f of allFiles)
+  if (isTest(f) || f.endsWith('.d.ts') || /(^|[\\/])(vite|vitest)\.config\.[cm]?[jt]s$/.test(f))
+    addEntry(f)
+
+const reachable = reachableFrom(entries)
+const unreachable = allFiles.filter((f) => !reachable.has(f))
+
+const corpus = allFiles.map((f) => [f, readFileSync(f, 'utf8')])
+function stringReferenced(file) {
+  const stem = basename(file).replace(/\.[^.]+$/, '')
+  if (!stem || stem === 'index') return null
+  const re = new RegExp(`${stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.(vue|ts|js)`)
+  for (const [f, code] of corpus) {
+    if (f === file) continue
+    const m = code.match(re)
+    if (m) return { by: rel(f), token: m[0] }
+  }
+  return null
+}
+
+const dead = []
+const suspicious = []
+for (const f of unreachable) {
+  const hit = stringReferenced(f)
+  ;(hit ? suspicious : dead).push(hit ? [f, hit] : f)
+}
+
+console.log(`扫描 ${allFiles.length} 文件 · 入口 ${entries.length} · 可达 ${reachable.size}`)
+
+console.log(`\n【死代码】${dead.length} —— 无 import、无字符串引用：`)
+for (const f of dead) console.log(`  ${rel(f)}  (${lineCount(f)} 行)`)
+
+if (suspicious.length) {
+  console.log(`\n【疑似】${suspicious.length} —— 不可达但有字符串引用：`)
+  for (const [f, h] of suspicious) console.log(`  ${rel(f)}  ← ${h.by} 提到 "${h.token}"`)
+}
+
+// ── 未使用的导出（死代码的细粒度形式）──
+//
+// ## 判据：**「无人用」必须含定义文件自己**
+//
+// 原先只统计**其他文件**的引用（`g !== f`），于是「定义在本文件、也在本文件里用」
+// 的导出全被报了出来 —— 实测 89 条里抽查的每一条都是这一类：
+// `UseVdfsOptions` 是同文件里 `useVdfs()` 的形参类型、`messageTypeOf` 在同文件里
+// 被调两次、`HEAD_WORKDIR` 在同文件里被读写、`OUTCOME_*` 在同文件里被比较……
+// 那不是保守，是**报告在说假话**：它把健康的导出报成可清理的垃圾，读报告的人
+// 会顺着去"修"本来没坏的东西（`schema-audit` 的前端那一半踩的是同一个坑，
+// 同一条判据已在那边修过一次 —— 两处必须说同一句话）。
+//
+// 计数含声明行本身，故「只出现一次」= 只在这里声明、无人使用。
+//
+// ## 已知边界（写清楚，免得把绿灯当证明）
+//
+// 按**标识符文本**判，不是 AST。因此「经 barrel 再导出后由别处使用」仍可能命中
+// （`export * from '../x'` 里不出现名字）——这类是**误报**，处置方式不是喂豁免而是
+// 让消费方直接 `import` 那个模块（barrel 的 `export *` 只是转发，名字确实没出现在别处）。
+// 判据见下面的 R-003。
+console.log(`\n【导出级检查】`)
+
+/**
+ * 承认通道：声明行（或紧邻上一行）带 `// dead-code-allow R-001: <理由>` ⇒ 已承认保留。
+ * 与 Rust 侧 R-001 是**同一条约定**（理由不可为空）——两个守卫必须说同一句话，
+ * 否则「在 Rust 那边承认了、前端这边还报着」会让人再查一遍。
+ */
+function waiverOf(code, name) {
+  const lines = code.split('\n')
+  const decl = new RegExp(
+    `^[ \\t]*export\\s+(?:const|function|async\\s+function|class|interface|type|enum)\\s+${name.replace(/\$/g, '\\$')}\\b`,
+  )
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!decl.test(lines[i])) continue
+    for (const j of [i, i - 1]) {
+      if (j < 0) continue
+      // ⚠️ 空白用 `[ \t]` 而不是 `\s`：`\s` 含换行，理由为空时正则会把**下一行**
+      // 当成理由吃掉（实测：`// dead-code-allow R-003:` 单独一行 + 下一行是导出声明，
+      // 于是空理由被判成「已承认」）——豁免判空这条就静默失效了。
+      const m = lines[j].match(/\/\/[ \t]*dead-code-allow[ \t]+R-\d+[ \t]*:[ \t]*(.+?)[ \t]*$/)
+      if (m) return m[1]
+    }
+  }
+  return null
+}
+
+// ── R-003：前端未用导出必须**二态**（删掉，或整份文件声明为契约面）──
+//
+// ## 为什么要把它从「降级提示」升成判定
+//
+// 上面那段读数是 21 条路由常量里 15 条无人用、4 个谓词无人用——但它们既不删也不承认，
+// 于是「该不该有人用」没人说得清。这不是没人用的代码，是**说不清该不该用的代码**，
+// 而后者更坏：读报告的人只能猜。
+//
+// ## 两种终态，没有第三种
+//
+// - **删**：没有消费方、也没有「契约另一半」的辩护（组件谓词就属这一类）；
+// - **承认**：整份文件是契约面（全量镜像），未用导出是契约的另一半——写在那份文件的
+//   文件头：`// dead-code-allow R-003: <理由>`。语法与声明级 `R-001` 同一条，只是
+//   作用域是**整个文件**（生成物逐条标注只会让 69 行的文件长出一倍的注释）。
+//
+// 作用域放大是有意的：只有「这份文件的完整就是契约」时才该用它，而那种文件通常是
+// 生成物——生成器负责不让它漂，所以「新加一条未用导出」不会成为漏网。
+
+/**
+ * 文件级承认（R-003）：整份文件是契约面。理由不可为空（空理由视为未承认，
+ * 与 R-001 / R-002 同一条约定）。
+ */
+function fileWaiverOf(code) {
+  // 同 `waiverOf` 的空白坑：`[ \t]` 不含换行，空理由不会吃到下一行。
+  const m = code.match(/^[ \t]*\/\/[ \t]*dead-code-allow[ \t]+R-003[ \t]*:[ \t]*(.+?)[ \t]*$/m)
+  return m && m[1] ? m[1] : null
+}
+
+const unusedList = []
+for (const f of reachable) {
+  if (isTest(f) || f.endsWith('.d.ts')) continue
+  const code = readFileSync(f, 'utf8')
+  // ⚠️ 正则**锚定行首**。不锚定时，注释里举例说明的写法也会被当成真导出——
+  // `factory.ts` 的文档里就有一句「解构出去单独导出（`export const registerX = …`）」，
+  // 于是 `registerX` 被报成死导出，而它**根本不存在**。实测：不锚定 433 个名字、
+  // 锚定 432 个，差额恰好就是那一个注释里的假导出。
+  const names = [
+    ...[...code.matchAll(/^[ \t]*export\s+(?:const|function|async\s+function|class|interface|type|enum)\s+([A-Za-z0-9_$]+)/gm)].map((m) => m[1]),
+  ]
+  if (!names.length) continue
+  const dir = rel(f)
+  const fileWide = fileWaiverOf(code)
+  for (const n of names) {
+    const re = new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`)
+    // 别的文件用过 ⇒ 活；否则再看**定义文件自己**用过没（声明行本身算 1 次）
+    if (corpus.some(([g, c]) => g !== f && re.test(c))) continue
+    // ⚠️ 计数必须用**全局**正则：非全局的 `match()` 只返回首个匹配，
+    // `.length` 恒为 1（无捕获组时），于是「出现过几次」永远算成 1 —— 这条
+    // 判据会静默失效、89 条一条都筛不掉，而输出看起来毫无异常。
+    const selfOcc = (code.match(new RegExp(re.source, 'g')) ?? []).length
+    if (selfOcc > 1) continue
+    unusedList.push({ dir, name: n, waiver: waiverOf(code, n) ?? fileWide, fileWide })
+  }
+}
+const unusedExports = unusedList.length
+// R-003 判定面：**没有**任何承认的未用导出才是违规。文件级承认与声明级承认等价——
+// 二者都说了「为什么留」，缺的正是这句话（而不是缺一行注释）。
+const unusedUnwaived = unusedList.filter((u) => !u.waiver)
+if (VERBOSE) {
+  for (const u of unusedList) {
+    const why = u.fileWide && u.waiver ? `文件头承认（R-003）：${u.waiver}` : u.waiver ? `已承认保留：${u.waiver}` : '**未承认**'
+    console.log(`  ${u.dir} :: ${u.name}（${why}）`)
+  }
+}
+if (unusedUnwaived.length) {
+  for (const u of unusedUnwaived) {
+    console.log(`  R-003 ${u.dir} :: ${u.name} —— 既没消费方也没承认：删掉，或在文件头写 \`// dead-code-allow R-003: <理由>\`（契约面才配这条）`)
+  }
+} else if (unusedExports) {
+  console.log(`  ${unusedExports} 个导出全库无人用，全部已承认（文件头或声明处写了理由）`)
+} else {
+  console.log('  （无全库无人用的导出）')
+}
+
+// ── Rust 侧 R-001：`pub` 声明但全仓一次都没被提及（**判定型**）──
+//
+// 为什么需要：前端侧有 import 依赖图这张硬网；**Rust 侧一张都没有**。`dead_code`
+// lint 对 `pub` 项结构性失明——`symbio_sdk/mod.rs` 里一句 `pub use plugin::*`
+// 就足以让整批函数被当成"对外 API"，于是攒出过一批零调用的 helper（8 个锁/错误
+// 辅助函数，全仓含 cli / tauri 零引用）。
+//
+// ## 为什么这条能判失败，而 `plugin-entry-audit` 的 `refs=0` 不能
+//
+// 「定义了但没人用」在**路由**上不可判：路径可以在运行期拼（工具名、子插件名），
+// 网关还会把外部 `path` 原样转发给容器 route（见 plugin-entry-audit 头部的两条
+// 理由）。但本规则判的不是运行期字符串，而是**一个静态符号名**——`pub fn foo`
+// 的 `foo` 有没有在仓库任何地方被写过一次，是纯文本事实，没有动态解析的余地。
+//
+// ## 承认通道（唯一出口）
+//
+// 确有必须保留而无 Rust 消费方的（消费方在前端、闭集成员等），在声明行或紧邻其上
+// 一行写 `// dead-code-allow R-001: <理由>`。**理由不可为空**——否则「随手加个
+// 注释就过」会让这条守卫退化成橡皮图章（与 grep-audit / plugin-entry-audit 同一约定）。
+const REPO = REPO_ROOT
+const repoRel = (p) => relative(REPO, p).replace(/\\/g, '/')
+
+const rustSources = []
+const tsSources = []
+const widen = (dir, exts, sink) => {
+  let ents
+  try {
+    ents = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const e of ents) {
+    const p = join(dir, e.name)
+    if (e.isDirectory()) {
+      if (['target', 'vendor', 'node_modules', 'dist', '.git'].includes(e.name)) continue
+      widen(p, exts, sink)
+      continue
+    }
+    if (exts.some((x) => e.name.endsWith(x))) sink.push(p)
+  }
+}
+// Rust 侧「整仓」的取范围：D-191 拆 crate 后所有生产 .rs 都在 `crates/` 下
+// （core、内核、插件、provider、cli 各是一个 crate）；`tauri/src-tauri` 是壳侧。
+// 拆分前这里是 symbio/ 与 cli/ 两个根——那两条路径现在都不存在，`widen` 会静默
+// 返回空，于是 R-001 只剩 tauri 一份语料：**语料越小，越容易把活代码判成死代码**，
+// 而它在真仓里表现成「R-001 通过」。
+widen(join(REPO, 'crates'), ['.rs'], rustSources)
+widen(join(REPO, 'tauri', 'src-tauri'), ['.rs'], rustSources)
+// 名字可能被非 Rust 侧提及（路由串常量等），一并纳入「是否被提过」的语料
+widen(join(REPO, 'tauri', 'src'), ['.ts', '.vue'], tsSources)
+
+const read = (files) => files.map((f) => [f, readFileSync(f, 'utf8')])
+const rustCorpus = read(rustSources)
+const nameCorpus = rustCorpus.concat(read(tsSources))
+
+const DECL_RE =
+  /^pub(?:\([^)]*\))?\s+(?:async\s+)?(?:unsafe\s+)?(fn|struct|enum|trait|const|static|type)\s+([A-Za-z_][A-Za-z0-9_]*)/gm
+
+/** 承认通道：`// dead-code-allow R-001: <理由>`（理由为空 = 未承认） */
+const WAIVER_RE = /\/\/\s*dead-code-allow\s+(R-\d+)\s*:\s*(\S.*)$/
+
+/**
+ * 取声明的承认理由：看**声明行本身**与紧邻其上 3 行（覆盖 `#[allow(dead_code)]`
+ * 同行注理由、或独立一行注释两种写法）。返回理由字符串；未承认返回 `null`。
+ */
+function waiverReason(lines, declLine) {
+  for (let i = declLine; i >= Math.max(0, declLine - 3); i--) {
+    const hit = lines[i].match(WAIVER_RE)
+    if (hit) return hit[2].trim()
+  }
+  return null
+}
+
+// 判据：**该名字在全仓只出现过一次**（就是声明那一行）⇒ 没人用过。
+//
+// 为什么不按"别的文件里有没有"来判：同一文件内的引用同样是真引用——
+// `#[serde(default = "default_max_messages")]`、`submit_object_creator!(…, SettingPlugin::build, …)`
+// 都只在声明文件里出现，按"别文件"判会把它们全数误报（实测踩坑）。
+// 反过来，本规则只抓"从没被任何人提过"这一最低风险形态，与「导出级检查」同一取向。
+const tokenCount = new Map()
+for (const [, code] of nameCorpus) {
+  for (const m of code.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) {
+    tokenCount.set(m[0], (tokenCount.get(m[0]) ?? 0) + 1)
+  }
+}
+
+const rustUnused = []
+const rustWaived = []
+let rustDecls = 0
+for (const [file, code] of rustCorpus) {
+  if (file.endsWith('.test.rs') || basename(file) === 'tests.rs') continue
+  const lines = code.split(/\r?\n/)
+  for (const m of code.matchAll(DECL_RE)) {
+    const [, kind, name] = m
+    rustDecls++
+    if ((tokenCount.get(name) ?? 0) > 1) continue
+    // 声明所在行（0 基）：`m.index` 落在 `^` 之后，即行首
+    const declLine = code.slice(0, m.index).split('\n').length - 1
+    const reason = waiverReason(lines, declLine)
+    const where = `${repoRel(file)} :: ${kind} ${name}`
+    if (reason) rustWaived.push(`${where}  ← ${reason}`)
+    else rustUnused.push(where)
+  }
+}
+
+console.log(`\n【R-001】Rust 声明级检查（判定型）`)
+console.log(`  扫描 ${rustCorpus.length} 个 .rs · ${rustDecls} 处 pub 声明`)
+if (rustUnused.length) {
+  console.log(`  ✗ ${rustUnused.length} 处全仓零引用且未承认：`)
+  for (const line of rustUnused) console.log(`    ${line}`)
+  console.log(`    ↳ 删掉它；确需保留则写 \`// dead-code-allow R-001: 理由\`（理由必填）`)
+} else {
+  console.log('  ✓ 无全仓零引用的 pub 声明')
+}
+if (rustWaived.length) {
+  console.log(`  · ${rustWaived.length} 处已承认保留（消费方不在 Rust 侧，见各行理由）：`)
+  for (const line of rustWaived) console.log(`    ${line}`)
+}
+
+// ── R-002：`dead_code` 承认标记必须带理由，且数量只许降（判定型）──
+//
+// 起因：`core-export-audit` C-003 把「名字没跨出 core」的符号从根出口收窄之后，
+// `dead_code` lint 会把**只被测试引用的冻结契约名**逐个点名——那正是规则 2 的应有
+// 之义（无消费者的东西不该占着根出口），但这些契约名要留到接线那天。于是就地承认。
+// 承认若既无理由又无数量约束，半年后就是 138 个没人说得清的 `allow`，死码审计等于
+// 自废。故：
+//   ① 每个 `#[allow(dead_code)]`（含模块级 `#![allow(dead_code)]`）必须在**同一行**
+//      或其上 3 行内写 `// dead-code-allow R-002: <非空理由>`——与 R-001 同一判空；
+//   ② 数量走棘轮：只许降，`grep -c` 即可复核，不靠自觉。
+//   ③ 理由必须**指名消费方**（`消费方=<谁在用>`）：这类标记存在的唯一理由是消费方
+//      不在 Rust 侧（前端镜像 / 协议文档 / 审计脚本），rustc 看不见那些调用点——
+//      判据只能是理由里那个非空名字（口径登记在 `SP-015`）。
+const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
+  ? Number(process.env.DEAD_CODE_R002_BASELINE)
+  : 8
+  // 8 = 全部为 C 类结构性承认（消费方在前端镜像 / 协议文档 / 审计脚本）。下调就在这里
+  // 写理由；上调不合法——新死码要么接上、要么删掉。`TurnRunner` 族下沉时基线**未动**：
+  // `ActorSpec` 的字段失去经 `TurnInput` 的顺带可达性后，处置是把它升为根 `pub use` +
+  // `core-export-audit` C-003 的单消费方豁免（1 个生产消费方 `crates/symbio-plugin-session`，
+  // 属「接缝」），不是 R-002——R-002 只收**零生产消费方**的冻结契约名。
+
+/**
+ * R-002 的承认理由：复用 R-001 的回看（同行 + 上 3 行、理由非空）。
+ * 不校验规则号——`#[allow(dead_code)]` 与它所压制的那条 `pub` 声明常是同一件事
+ * （`route.rs` 的路由常量同时挂 R-001 与 R-002），两个通道必须说同一句话。
+ */
+function r002Reason(lines, i) {
+  return waiverReason(lines, i)
+}
+
+// ③ **承认必须指名消费方**：消费方不在 Rust 侧（前端镜像 / 协议文档 / 审计脚本）
+//    是这类标记存在的唯一理由——rustc 看不见那些调用点，判据只能是理由里那个名字。
+function hasConsumer(reason) {
+  const m = reason.match(/消费方=([^）)]*)/)
+  return Boolean(m && m[1].trim())
+}
+
+const r002NoReason = []
+const r002NoConsumer = []
+let r002Marks = 0
+for (const [file, code] of rustCorpus) {
+  const lines = code.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    // 只认**代码位置**的属性：以 `//` 开头的行是文档/注释里举例的写法
+    // （`plugin/route.rs` 的文档段就提了一句 `#[allow(dead_code)]`），
+    // 照单全收会凭空多出一条「没有理由的标记」。
+    if (lines[i].trimStart().startsWith('//')) continue
+    if (!/#!?\[allow\(dead_code\)\]/.test(lines[i].split('//')[0])) continue
+    r002Marks++
+    const reason = r002Reason(lines, i)
+    if (!reason) {
+      r002NoReason.push(`${repoRel(file)}:${i + 1}`)
+      continue
+    }
+    if (!hasConsumer(reason)) {
+      r002NoConsumer.push(`${repoRel(file)}:${i + 1}  理由未指名消费方：${reason.slice(0, 60)}`)
+    }
+  }
+}
+
+const r002OverRatchet = r002Marks > R002_BASELINE
+console.log(`\n【R-002】死码承认标记检查（判定型）`)
+console.log(`  ${r002Marks} 处 \`[allow(dead_code)]\` · 棘轮 ${r002Marks}/${R002_BASELINE}`)
+if (r002NoReason.length) {
+  console.log(`  ✗ ${r002NoReason.length} 处承认标记没有理由：`)
+  for (const loc of r002NoReason) console.log(`    ${loc}`)
+  console.log('    ↳ 标记同行或其上 3 行内写 `// dead-code-allow R-002: 理由`（R-001 的理由同样认，理由必填）')
+}
+if (r002NoConsumer.length) {
+  console.log(`  ✗ ${r002NoConsumer.length} 处承认没指名消费方：`)
+  for (const loc of r002NoConsumer) console.log(`    ${loc}`)
+  console.log('    ↳ 理由写 `消费方=<谁在用>`——消费方不在 Rust 侧是这类标记存在的唯一理由')
+}
+if (r002OverRatchet) {
+  console.log(`  ✗ 承认标记 ${r002Marks} > 基线 ${R002_BASELINE} —— 只许降：`)
+  console.log('    ↳ 新出现的死码要么删掉、要么接上，不许再加 allow')
+}
+if (!r002NoReason.length && !r002NoConsumer.length && !r002OverRatchet) {
+  console.log('  ✓ 标记均带理由并指名消费方，数量未超基线')
+}
+
+const lines = dead.reduce((n, f) => n + lineCount(f), 0)
+console.log(`\n合计可移除：${dead.length} 文件 / ${lines} 行`)
+process.exit(
+  dead.length ||
+    rustUnused.length ||
+    r002NoReason.length ||
+    r002NoConsumer.length ||
+    r002OverRatchet ||
+    unusedUnwaived.length
+    ? 1
+    : 0,
+)

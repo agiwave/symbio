@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @gate test
 /**
  * obligation-ring-accept — 义务环符合性的 **CLI 实测判定**（口径 1 的第三件套）
  *

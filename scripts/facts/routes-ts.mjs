@@ -25,6 +25,7 @@
  *
  * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
+// @gate test
 
 import { controlPlaneRoutes, routeConstName } from "../route-facts.mjs";
 import { fileURLToPath } from "node:url";

@@ -81,7 +81,7 @@ export default {
       }),
     )
 
-    // `dead_code` 的豁免与销账归 `scripts/session-dead-code-audit.mjs`（D-331 / SD-001）：
+    // `dead_code` 的豁免与销账归 `scripts/audits/session-dead-code-audit.mjs`（D-331 / SD-001）：
     // clippy 只判其余 lint，`-A dead_code` 让开这一族，否则「B 类待接入能力」会把
     // `-D warnings` 变成一张永远红的清单。这不是放宽——新死码仍由 SD-001 按台账判红，
     // 台账外的死码过不了门禁。
@@ -97,7 +97,7 @@ export default {
     tasks.push({
       label: 'session 死码台账（D-331 / SD-001）',
       cmd: process.execPath,
-      args: [path.join(scriptDir, '..', 'session-dead-code-audit.mjs')],
+      args: [path.join(scriptDir, '..', 'audits', 'session-dead-code-audit.mjs')],
       cwd: repoRoot,
     })
 

@@ -41,7 +41,7 @@ import {
   providerConfig,
   PROVIDER_ID,
 } from '../helpers.mjs';
-import { extractObservations } from '../../scripts/prompt-shape-audit.mjs';
+import { extractObservations } from '../../scripts/audits/prompt-shape-audit.mjs';
 
 /** 本用例的会话 id */
 const SID = 'e2e-t45';

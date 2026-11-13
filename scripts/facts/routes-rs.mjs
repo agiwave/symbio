@@ -27,6 +27,7 @@
  *
  * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
+// @gate test
 
 import fs from "node:fs";
 import path from "node:path";
@@ -81,7 +82,7 @@ const HEADER = `//! 跨插件调用路径常量 —— **由 \`scripts/facts/rou
 //! # 命名
 //!
 //! 标识符去掉 \`ROUTE_\` 前缀后，必须**逐字等于**值的大写形式（\`/\` → \`_\`）。
-//! 这条与「值必须是真实分发目标」一起由 \`scripts/plugin-entry-audit.mjs\` 的
+//! 这条与「值必须是真实分发目标」一起由 \`scripts/audits/plugin-entry-audit.mjs\` 的
 //! E-012 检查。`;
 
 /** 相对臂的合法形状：生成器只认 match 臂提取器认得的字符，再加一条「不能有 `-`」。 */

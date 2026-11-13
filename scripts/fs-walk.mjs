@@ -15,6 +15,7 @@
  * ② 把 `#[cfg(test)] mod test_support;` 当成生产模块——那一批类型会被数成生产消费方，
  *    于是「只有一个消费方」的下放判据永远不命中。
  */
+// @gate lib
 
 import fs from 'node:fs'
 import path from 'node:path'

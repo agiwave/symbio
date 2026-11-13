@@ -50,6 +50,7 @@
  * 不该为了打印一行帮助先花 170ms（同理见 `gate.mjs` 里「日志目录懒建」那段）。
  * 首次调用 `machine()` 才算。
  */
+// @gate lib
 
 import fs from 'node:fs'
 import os from 'node:os'

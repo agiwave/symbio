@@ -395,7 +395,7 @@ export async function greet(name: string) {
 
 ## 测试
 
-测试跟着实现文件走（`node scripts/test-layout-audit.mjs` 判定）：一个实现文件一个
+测试跟着实现文件走（`node scripts/audits/test-layout-audit.mjs` 判定）：一个实现文件一个
 `<名字>.test.rs`，用 `#[path]` 挂到同一模块下——与 `plugin.rs` 末尾那三行一致。
 
 ```rust

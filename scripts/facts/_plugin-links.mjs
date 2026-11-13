@@ -28,6 +28,7 @@
  * 标记缺失即抛错（不生成）：一份「找不到块所以什么都没改」的生成器会在漂移那天
  * 报绿——那正是本仓反复买到教训的一侧。
  */
+// @gate lib
 
 import { pluginIds, PLUGIN_CRATE_PREFIX } from "./_plugin-yml.mjs";
 

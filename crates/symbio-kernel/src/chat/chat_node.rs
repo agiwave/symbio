@@ -267,7 +267,7 @@ pub struct ChatNode {
     ///
     /// 为什么不是私有字段：`ChatNode { .., ..Default::default() }` 的**函数式更新
     /// 语法要求每个字段可见**（E0451），私有化会把全仓数百个不碰的构造点一起炸掉
-    /// ——机制的爆炸半径大于收益。写侧新增直写由 `scripts/grep-audit.mjs`
+    /// ——机制的爆炸半径大于收益。写侧新增直写由 `scripts/audits/grep-audit.mjs`
     /// （S-014）棘轮钉住（只许降）。
     #[serde(skip_serializing)]
     pub role: Option<NodeRole>,

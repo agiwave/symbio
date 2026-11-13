@@ -554,7 +554,7 @@ mod tests;
 // ── panic 面登记（PN-001…003）─────────────────────────────────────────
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
-// 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
+// 判据见 `scripts/audits/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
 // panic-allow crates/symbio-sdk/src/invariants/kernel.rs::dep_graph_core: 穷尽性不变量：indeg 与 graph 同构造（同一批键），走到 expect 说明本文件的判据漏了一个分支，属代码缺陷。
 // panic-allow crates/symbio-sdk/src/invariants/mod.rs::seq_monotonic: 解析层不变量：内核返回的下标必落在「有 seq 的事件」范围内（内核只对这条序列工作），走到 expect 说明解析与内核的输入约定破了，属代码缺陷。
 // panic-allow crates/symbio-sdk/src/invariants/mod.rs::rework_bounded: 同上：越界轮必来自本切片（内核只对刚收集的 replaces 计数）。

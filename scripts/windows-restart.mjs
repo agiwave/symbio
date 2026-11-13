@@ -4,6 +4,7 @@
 // Flow: verify identity/hash/cancel -> stop explicit PID via one PowerShell process-object handle ->
 // launch candidate with user-asserted cwd/args -> survival window -> status.json. Old exe file is
 // never modified or deleted; rollback relaunches it. Survival is NOT application readiness.
+// @gate test
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';

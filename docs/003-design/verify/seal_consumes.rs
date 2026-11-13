@@ -24,7 +24,7 @@
 //!
 //! `SIDE_REGISTRY` 是一个绕开 `Builder` 的进程级注册通道。类型面**挡不住**它——
 //! 一级强制只守「句柄进不来」，守不住「有人在别处自己开一张表」。那条账必须由二级
-//! 强制结：`scripts/port-surface-audit.mjs` 与「表里零代码」（DE-051 的端口面判据）的
+//! 强制结：`scripts/audits/port-surface-audit.mjs` 与「表里零代码」（DE-051 的端口面判据）的
 //! 静态扫描。把它写在这里而不是删掉，是为了标出本文件的证明**止于何处**。
 //!
 //! 编译运行：rustc --edition 2021 seal_consumes.rs -o sc && ./sc

@@ -42,7 +42,7 @@ pub type Cell = (Entity, Verb);
 /// `Frozen::holds_role` 读它，不再拿名字比字符串——于是「新增一条共享事件名」
 /// 与「改动架构」脱钩（DE-024 D-203）。
 ///
-/// **每档都必须有人居住**：由整仓判据 `CS-011`（`scripts/shared-event-vocab-audit.mjs`）
+/// **每档都必须有人居住**：由整仓判据 `CS-011`（`scripts/audits/shared-event-vocab-audit.mjs`）
 /// 逐档查插件生产声明里的 `FactRole::*`，缺一档即红。为什么不在装配口判：`seal` 也会被
 /// **只链接了部分插件**的用例调到，那种子集装配缺档是假红（见 `assemble_declarations` 的说明）。
 /// 少了这一道，owner 删掉角色会让对应判据**静默不判**——判据从「拒绝」变成「看不见」，

@@ -22,6 +22,7 @@
  *
  * 结果按 `docsRoot` 缓存一次（同一进程里逐条豁免各扫一遍全仓会拖慢门禁）。
  */
+// @gate lib
 import fs from 'node:fs'
 import path from 'node:path'
 

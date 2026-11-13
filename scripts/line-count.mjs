@@ -13,6 +13,7 @@
  * 两份副本的 `matchBrace` 在未闭合花括号上返回值不同（`length - 1` vs `length`），
  * 正是「同一件东西两个口径」的现成例子，故直接引用，不再保留本地副本。
  */
+// @gate lib
 
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";

@@ -4,7 +4,7 @@
 //! / `turns` 同族）：投影 A 不得读投影 B 的输出（L2，DE-001 §13.2），
 //! 而「变更怎么折、快照怎么读」是多个投影（`transcript` / `rebuild` / `turns`）与
 //! 复核（`prompt_fidelity`）**共用**的读法。这条不变量由
-//! `scripts/projection-purity.mjs` 静态守——**产投影的文件不得导入产投影的兄弟模块**，
+//! `scripts/audits/projection-purity.mjs` 静态守——**产投影的文件不得导入产投影的兄弟模块**，
 //! 共享读法不产投影，因此谁都可以导它。
 //!
 //! ## 它为什么存在

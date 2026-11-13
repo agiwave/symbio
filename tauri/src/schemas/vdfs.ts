@@ -25,7 +25,7 @@ import {
 
 export * from './vdfs-form'
 
-// 操作名与地址常量**必须**定义在本文件：`scripts/mechanism-audit.mjs` 的 M-007
+// 操作名与地址常量**必须**定义在本文件：`scripts/audits/mechanism-audit.mjs` 的 M-007
 // 禁止在别处再定义一份（导入使用是允许的）。理由是它们是 VDFS **契约**的一部分，
 // 要与下面的响应类型、变更词汇、地址代数同处一个文件——拆开就是把契约拆成两半。
 // 控制面路由（`home/*` / `event_bus/*` / `gateway/*`）不在此列，
@@ -209,7 +209,7 @@ export interface VdfsNewType {
  * 于是地址落在**条目**上（{@link VdfsItem}），由分发层按 `<父地址>/<name>`
  * 回填；需要「可寻址的一项」时用 `VdfsItem`。
  *
- * 与后端 `symbio_kernel::vdfs::VdfsNode` 逐字同构（`scripts/protocol-mirror-audit.mjs` 校验）。
+ * 与后端 `symbio_kernel::vdfs::VdfsNode` 逐字同构（`scripts/audits/protocol-mirror-audit.mjs` 校验）。
  */
 export interface VdfsNode {
   /** 父节点内的唯一标识（路径段） */
@@ -454,7 +454,7 @@ export interface VdfsWriteResponse {
 export const VDFS_BUS_RESYNC = 'resync'
 
 /** 数据变更事件（总线上下发的形状；与后端 `VdfsChange` 逐字同构，由
- *  `scripts/protocol-mirror-audit.mjs` 校验）。
+ *  `scripts/audits/protocol-mirror-audit.mjs` 校验）。
  *
  *  路径即对外展示地址（根锚点打头的虚拟地址，或工作目录相对地址），消费方直接比对。
  *
@@ -630,7 +630,7 @@ export function isVdfsUnder(path: string | null | undefined, dir: string): boole
 /** 转写列表的场景类型（后端 `VDFS_KIND_MESSAGES`）。
  *
  * 稳定 ASCII 协议词：**与展示名解耦**——段名可以随文案调整，
- * `kind` 才是对外承诺的标识。跨栈一致性由 `scripts/protocol-mirror-audit.mjs`
+ * `kind` 才是对外承诺的标识。跨栈一致性由 `scripts/audits/protocol-mirror-audit.mjs`
  * 的 X-002 组校验。 */
 export const VDFS_KIND_MESSAGES = 'messages'
 

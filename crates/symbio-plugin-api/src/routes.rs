@@ -37,7 +37,7 @@
 //! # 命名
 //!
 //! 标识符去掉 `ROUTE_` 前缀后，必须**逐字等于**值的大写形式（`/` → `_`）。
-//! 这条与「值必须是真实分发目标」一起由 `scripts/plugin-entry-audit.mjs` 的
+//! 这条与「值必须是真实分发目标」一起由 `scripts/audits/plugin-entry-audit.mjs` 的
 //! E-012 检查。
 
 // ============ compose ============

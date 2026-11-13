@@ -25,6 +25,7 @@
  * 当场抛错（而不是等到运行期 `PermissionMatrix::from_names` 拒绝构造，把一条笔误
  * 变成一次「整个授权表降级为空矩阵」的故障）。
  */
+// @gate test
 
 import fs from "node:fs";
 import path from "node:path";

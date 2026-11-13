@@ -37,6 +37,7 @@
  * - 表级 `authorized_by` 只说明「谁批了这一行」，不应被读成「机制面改动是这条决策
  *   批的」。
  */
+// @gate test
 
 import fs from 'node:fs'
 import path from 'node:path'

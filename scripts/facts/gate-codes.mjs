@@ -12,8 +12,9 @@
  *
  * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
+// @gate lib
 
-import { collect } from "../gate-codes-audit.mjs";
+import { collect } from "../audits/gate-codes-audit.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -82,7 +83,7 @@ function render() {
   L.push('>')
   L.push('> 判据码是每条机械判定的**地址**：豁免注释、门禁日志、文档指认都指向它。')
   L.push('> 每条判据**判什么**归声明它的那个脚本的头注释；撞号与漏登记由')
-  L.push('> [`scripts/gate-codes-audit.mjs`](../../scripts/gate-codes-audit.mjs) 判（GC-001–006）。')
+  L.push('> [`scripts/audits/gate-codes-audit.mjs`](../../scripts/audits/gate-codes-audit.mjs) 判（GC-001–006）。')
   L.push('')
   L.push('<!-- list:gate-codes owner -->')
   L.push('')

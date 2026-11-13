@@ -10,6 +10,7 @@
  *
  * 事实源与依赖行同源（目录），两块由同一份共享材料渲染，见 `_plugin-links.mjs`。
  */
+// @gate lib
 
 import fs from "node:fs";
 import path from "node:path";

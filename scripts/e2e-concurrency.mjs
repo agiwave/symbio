@@ -23,6 +23,7 @@
 //
 // 用法：node scripts/e2e-concurrency.mjs            读最近一轮日志出建议
 //      node scripts/e2e-concurrency.mjs --ci       有 CI 时要求不低于默认值
+// @gate lib
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { latestE2ELogs } from './gate.d/_logs.mjs'

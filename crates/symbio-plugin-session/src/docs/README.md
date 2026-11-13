@@ -54,5 +54,5 @@ impl: done
  引用系统级文档用 `../../../../../docs/...`。代码注释里的文档路径统一用**仓库根相对**写法
  <!-- doc-link-allow D-006: 以下两个反引号路径是"路径该怎么写"的示意，并非入链 -->
  （`crates/symbio-plugin-session/src/docs/x.md`），插件内部注释可用 `docs/x.md`。
-- **新增文档**：放本目录，并在上表登记一行；改完跑 `node scripts/doc-link-audit.mjs --strict`。
+- **新增文档**：放本目录，并在上表登记一行；改完跑 `node scripts/audits/doc-link-audit.mjs --strict`。
 - **历史实施记录**不写在这里，进 `docs/archive/implementation-logs/`。

@@ -30,6 +30,7 @@
  * （`[文字](地址 "编号")`）：RF-002 按标题里的编号重算地址，形态不一致就会被它反复
  * 「修复」，而 `--check` 又判漂移——两份机器互相打架，红的原因却不是漂移。
  */
+// @gate lib
 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

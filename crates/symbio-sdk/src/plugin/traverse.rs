@@ -14,7 +14,7 @@
 //! `<插件目录名>/<子路径>`）。值（`"available_tools"` / `"available_options"`）
 //! 是插件与调用方之间的字面量约定，跨进程可见，**不可改**；标识符刻意**不带**
 //! `ROUTE_` 前缀，正是为了与路由地址区分开——这条边界由
-//! `scripts/domain-vocab-audit.mjs` 守住。
+//! `scripts/audits/domain-vocab-audit.mjs` 守住。
 //!
 //! ## 为什么住 `plugin` 域
 //!

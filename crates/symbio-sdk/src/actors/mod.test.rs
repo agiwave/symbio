@@ -71,7 +71,7 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
 
 // ── 彩排：多主体与对等承诺 ──
 //
-// principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/no-direct-call-audit.mjs，
+// principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/audits/no-direct-call-audit.mjs，
 // 出口判据「直连调用 0」；成对性拒绝 = DE-038 §6 验收 3，已在 governance 测试区覆盖）。
 // commitment 立约成格与配对判在这里；声誉台账的读数与「双跑一致」随折叠归它的 owner 包
 // （`crates/symbio-plugin-reputation/src/decl.test.rs`，DE-045 D-288），本区只留淘汰裁决那一侧。

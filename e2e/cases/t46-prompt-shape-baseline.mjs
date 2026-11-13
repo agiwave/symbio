@@ -11,7 +11,7 @@ import './_selfrun.mjs';
 // 基线本体在 [`docs/004-ref/PROMPT_SHAPE.md`](../../docs/004-ref/PROMPT_SHAPE.md)
 // （生成物，唯一写者是本用例带 `PROMPT_SHAPE_UPDATE=1`），**判据口径**（什么进基线、
 // 什么只作观测、为什么规模不进判据）在 [D-057](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README")，
-// **提取与比对实现**在 `scripts/prompt-shape-audit.mjs`（PS-001…003）。
+// **提取与比对实现**在 `scripts/audits/prompt-shape-audit.mjs`（PS-001…003）。
 // 本用例只做三件事：跑一次真实链路 ⇒ 把 mock-llm 收到的原样请求体落盘 ⇒ 交给脚本判。
 //
 // ## 为什么从运行时抓，不静态读装配代码
@@ -52,7 +52,7 @@ import {
   PROVIDER_ID,
   waitFor,
 } from '../helpers.mjs';
-import { extractObservations, extractShape } from '../../scripts/prompt-shape-audit.mjs';
+import { extractObservations, extractShape } from '../../scripts/audits/prompt-shape-audit.mjs';
 
 /** 会话 id 固定：它出现在 prompt 的记忆地址里，随机 id 会让基线每次都不一致 */
 const SID = 'e2e-t46';

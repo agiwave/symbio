@@ -45,6 +45,7 @@ export const TIMES_FILE = path.join('.workbuddy-ai', 'e2e-case-times.json')
  *
  * 上报给 `_machine.mjs` 当上限（那边不再自己写一个数）。
  */
+// @gate test
 export const CONCURRENCY_CEILING = 12
 
 /** 缓存里只认这些形状：正有限数。别的一律当「没测过」。 */

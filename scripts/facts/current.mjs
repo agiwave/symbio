@@ -30,6 +30,7 @@
  *   - 不猜 VDFS 挂载点的资源存储选型（`vdfs_service` 的 Single/Dir/Memory 是
  *     实现细节，见 `docs/003-design/009-VDFS规范.md` §11）。
  */
+// @gate test
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { execSync } from "node:child_process";

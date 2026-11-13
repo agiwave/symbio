@@ -3,7 +3,7 @@
  *
  * ## 为什么要有它
  *
- * `scripts/mechanism-audit.mjs` 的 M-003 / M-004 / M-005 是**文本匹配**：
+ * `scripts/audits/mechanism-audit.mjs` 的 M-003 / M-004 / M-005 是**文本匹配**：
  * 它看不见重导出、看不见 `import type`、也看不见动态导入。三条规则真正想守住
  * 的东西——「出站请求只走 services」「契约层零呈现依赖」「service 不认识
  * store」——本质是**依赖方向**，用 import 图表达才准确。

@@ -22,6 +22,7 @@
  * `mcp` / `agent` / `legacy` 三个合成命名空间不在这里：它们不是部署事实，
  * 是工具名拼接规则的产物（`mcp__server__tool` 与 `agent_xxx`），住 `principal.rs`。
  */
+// @gate test
 
 import fs from "node:fs";
 import path from "node:path";

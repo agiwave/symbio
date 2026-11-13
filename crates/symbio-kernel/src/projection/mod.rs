@@ -22,7 +22,7 @@
 //! ⇒ 窗口 = 全量 ⇒ 行为与框架接管前逐字一致。
 //!
 //! 一级强制拦得住「句柄进不来」，拦不住「体内调全局函数」（形参表合法）——
-//! 那由静态扫描（`scripts/projection-purity.mjs`，门禁事实）与双跑比对兜底。分级是
+//! 那由静态扫描（`scripts/audits/projection-purity.mjs`，门禁事实）与双跑比对兜底。分级是
 //! 诚实划界，不是含糊。可执行论证（含**编译不过**的反向用例）见
 //! `docs/003-design/verify/projection_purity.rs`。
 

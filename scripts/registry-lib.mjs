@@ -24,7 +24,7 @@
  *   2. **汇总 = 投影**：任何「列表 / 看板 / 总账」都由本库渲染，
  *      `registry/` 下各级 `INDEX.md` 由门禁自动重生成（`gate.d/06-facts-write.mjs` 的生成链），
  *      不存在第二处手抄；
- *   3. **校验 = 守卫**：`scripts/registry-audit.mjs` 把字段 / 状态机 / 依赖 /
+ *   3. **校验 = 守卫**：`scripts/audits/registry-audit.mjs` 把字段 / 状态机 / 依赖 /
  *      优先级 / 取代链 / 判据指认 / **未登记文档** / **分解**全部机械判定（RG-001…RG-032），
  *      违规即红，范围读不出 exit 2。
  *
@@ -50,6 +50,7 @@
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解）
 // @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-029 RG-030 RG-031 RG-032 RG-033
+// @gate lib
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -1635,7 +1636,7 @@ function withTree(kind, allEntries, lines, dir, cfgStatusRules) {
 }
 
 const HEADER_NOTE =
-  '> ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**\n' +
+  '> ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**\n' +
   '> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [[SP-001]]，' +
   '机制见 [[DE-017-登记与汇总机制|DE-017 · 登记与汇总机制]]。\n'
 
@@ -1838,7 +1839,7 @@ export function renderRootIndex(allEntries, { kinds }) {
     ]
   })
   return [
-    '> ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**',
+    '> ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**',
     '> 条目各是一个单文档：条目类**在位存放**（文件即条目，kind 只来自 front-matter，目录不参与判定）；',
     '> 各 kind 的形状与汇总版式由其 README meta 自描述；机制见 [[DE-017-登记与汇总机制|DE-017 · 登记与汇总机制]]，字段规范见 [[SP-001]]。',
     '',

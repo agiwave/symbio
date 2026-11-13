@@ -76,6 +76,7 @@
  *   node scripts/tauri-binary.mjs --print    # 只打印当前指纹（壳回显的就是它）
  *   node scripts/tauri-binary.mjs --stamp    # 把当前指纹写进构建戳（构建前置步骤）
  */
+// @gate test
 
 import fs from 'node:fs'
 import path from 'node:path'

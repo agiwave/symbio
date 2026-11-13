@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @gate off
 /**
  * gate — 通用门控框架。
  *

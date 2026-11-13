@@ -81,7 +81,7 @@ import {
   msgTypeOf,
   msgRoleOf,
 } from '../helpers.mjs';
-import { extractObservations } from '../../scripts/prompt-shape-audit.mjs';
+import { extractObservations } from '../../scripts/audits/prompt-shape-audit.mjs';
 
 const SID = 'e2e-t47';
 

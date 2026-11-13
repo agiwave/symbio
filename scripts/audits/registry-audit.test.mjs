@@ -1,0 +1,1077 @@
+// `registry-audit` 的回归测试（连带覆盖 `registry-lib` 与 `registry-board`）。
+//
+// 这套登记机制的失效形态只有一种且最坏：**判定写宽 ⇒ 违规条目照样过，日志一片绿**。
+// 所以每条判据都配一个注入的真实违规（必须红、且只红这一条）与一个反向用例
+// （合法夹具不得误报）；报告型的 `registry-board` 与 `schema-audit` 同理——
+// 坏掉的报告天天被读，比没有报告更坏，所以它「有违规时拒绝打印」也要钉住。
+//
+// 跑法：node --test scripts/audits/registry-audit.test.mjs
+
+import { test, after } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { stripAnsi } from '../color.mjs'
+import { allKeys, loadKinds, parseEntryText, loadEntries, auditEntries, renderKindIndex, renderRootIndex } from '../registry-lib.mjs'
+
+const repoRoot = path.resolve(import.meta.dirname, '..', '..')
+// kind 形状已**自描述化**：闭集与形状键来自各 kind README meta（这里读真仓的，
+// 夹具沿用同一份形状，保证测的是与线上一致的配置面）。
+const REPO_KINDS = loadKinds(repoRoot).kinds
+const ALL_KEYS = allKeys(REPO_KINDS)
+import { runRegistryAudit } from './registry-audit.mjs'
+import { runRegistryBoard } from '../registry-board.mjs'
+
+// ================= 夹具 =================
+//
+// 用真实文件系统而不是内存对象：`loadEntries` 判的就是「registry/ 下有哪些文件、
+// 叫什么名字」，打桩等于把被测的目录事实换掉。
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-'))
+let caseNo = 0
+
+const TASK_BODY = '## 内容\n说明。\n\n## 处理过程\n- 待补\n'
+const SPEC_BODY = '## 规范\n条文。\n\n## 判据\n人工核对。\n'
+const ADR_BODY = '## 决策\n一句话结论。\n\n## 状态\n- status：现行。\n'
+
+/** front-matter 序列化（夹具写文件用）。 */
+function fm(meta) {
+  const lines = ['---']
+  for (const [k, v] of Object.entries(meta)) {
+    if (v === null || v === undefined) lines.push(`${k}:`)
+    else if (Array.isArray(v)) lines.push(`${k}: [${v.join(', ')}]`)
+    else lines.push(`${k}: ${v}`)
+  }
+  lines.push('---', '')
+  return lines.join('\n')
+}
+
+function taskDoc(id, over = {}) {
+  const { body, ...meta } = over
+  return (
+    fm({ kind: 'task', id, title: `${id} 任务`, status: 'todo', created: '2026-10-11', track: 'meta', deps: [], ...meta }) +
+    (body ?? TASK_BODY)
+  )
+}
+
+function specDoc(id, over = {}) {
+  const { body, ...meta } = over
+  return (
+    fm({ kind: 'spec', id, title: `${id} 规范`, status: 'active', created: '2026-10-11', scope: '夹具', deps: [], ...meta }) +
+    (body ?? SPEC_BODY)
+  )
+}
+
+/** adr 夹具：`adr` 序号默认从 id 去前缀推得（正向用例不该因手抄不对账）。 */
+function adrDoc(id, over = {}) {
+  const { body, ...meta } = over
+  return (
+    fm({
+      kind: 'adr',
+      id,
+      title: `${id} 决策`,
+      status: 'active',
+      impl: 'done',
+      domain: '平台基座',
+      created: '2026-10-11',
+      adr: id.replace(/^ADR-/, ''),
+      deps: [],
+      ...meta,
+    }) + (body ?? ADR_BODY)
+  )
+}
+
+/** SP-001 夹具：字段表默认从 ALL_KEYS 生成（正向用例不该因手抄表腐烂）。 */
+function sp001Doc(rows = ALL_KEYS.map((k) => `| \`${k}\` | 说明 |`)) {
+  return (
+    fm({ kind: 'spec', id: 'SP-001', title: '字段规范（夹具）', status: 'active', created: '2026-10-11', scope: '夹具' }) +
+    '\n## 规范\n\n条文。\n\n## 字段\n\n| 字段 | 说明 |\n|---|---|\n' +
+    rows.join('\n') +
+    '\n\n## 判据\n\n人工核对。\n'
+  )
+}
+
+/**
+ * 文档类夹具：**在位存放**的条目——编号 = 仓根相对路径，title = 正文首个 H1。
+ * 写到 `docs/<rel>`（rel 不带 `docs/` 前缀时补上；以 `docs/` 开头则原样）。
+ */
+function docDoc(relWithDocs, over = {}) {
+  const rel = relWithDocs.startsWith('docs/') ? relWithDocs : `docs/${relWithDocs}`
+  const { body, ...meta } = over
+  const title = over.title ?? `${rel.replace(/\.md$/, '')} 文档`
+  // `impl` 是 design 的必填轴（「做到哪一步」），其余文档类 kind 不声明该字段。
+  const impl = (meta.kind ?? 'design') === 'design' ? { impl: 'done' } : {}
+  return (
+    fm({ kind: 'design', id: rel.replace(/\.md$/, ''), title, status: 'active', created: '2026-10-11', ...impl, ...meta }) +
+    (body ?? `# ${title}\n\n正文。\n`)
+  )
+}
+
+/**
+ * 根账宿主页夹具（docs/README.md）：它是普通登记条目（kind: guide，id = 路径），
+ * 但 RG-030 要求它带 `registry:summary` 标记对（跨 kind 总账块的落笔处）——
+ * 夹具照这个形态写，否则任何碰到它的用例都会多出一条 RG-030。
+ */
+function rootDoc(over = {}) {
+  return docDoc('docs/README.md', {
+    kind: 'guide',
+    id: 'docs/README',
+    title: '文档中心',
+    // `lists: [kinds=owner]` + 块内引导标记：与真仓 docs/README.md 同一形态——
+    // 总账块由 --write 重写，`list:kinds` 标记是块内容的一部分（RG-029 两面对账）。
+    lists: ['kinds=owner'],
+    body: '# 文档中心\n\n<!-- registry:summary begin -->\n<!-- list:kinds owner -->\n<!-- registry:summary end -->\n',
+    ...over,
+  })
+}
+
+/**
+ * 注入全部 kind README（**先注入、后写用例文件**——用例自带的 README 覆盖注入件）。
+ * kind 形状靠这些 meta 自描述，没有它们连 `task` 这种 kind 都不认识；形状与清单
+ * 声明（`lists`，与正文 list 标记成对）都读真仓的 README——与线上一致。
+ */
+function injectKindReadmes(base) {
+  for (const cfg of Object.values(REPO_KINDS)) {
+    const text = fs.readFileSync(path.join(repoRoot, cfg.file ?? path.join(cfg.dir, 'README.md')), 'utf8')
+    const dir = path.join(base, cfg.dir)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'README.md'), text)
+  }
+  // 根账宿主页（docs/README.md）**不在此注入**：它是普通登记条目（kind: guide），
+  // 多数用例不关心它（RG-030 只在它存在时检查）；需要它的用例（--write）自带夹具。
+}
+
+/**
+ * 一个用例一座目录：扫描范围是**整个仓**，夹具共用目录会互相串断言。
+ * 默认自带 SP-001（RG-011 对它有要求）；`noSp` 用于测 SP-001 缺失。
+ * 键以 `docs/` 开头 ⇒ 按仓根相对路径写；否则写到 `docs/<kind>/` 下（条目与文档同构：
+ * **kind 只来自 front-matter，目录不参与判定**）。
+ */
+function caseRoot(files, { noSp = false } = {}) {
+  const base = path.join(tmp, `case${++caseNo}`)
+  injectKindReadmes(base)
+  const all = { ...files }
+  if (!noSp && !all['spec/001.md']) all['spec/001.md'] = sp001Doc()
+  for (const [rel, content] of Object.entries(all)) {
+    // 键以 `/` 开头 = 仓根相对（如 `/AGENTS.md`）；以 `docs/` 开头 = 仓根相对；否则住 `docs/<kind>/`
+    const p = path.join(base, rel.startsWith('/') ? rel.slice(1) : rel.startsWith('docs/') ? rel : path.join('docs', rel))
+    fs.mkdirSync(path.dirname(p), { recursive: true })
+    fs.writeFileSync(p, content)
+  }
+  return base
+}
+
+function errsOf(base) {
+  const { entries, errors } = loadEntries(base)
+  return [...errors, ...auditEntries(entries, base, [], REPO_KINDS)]
+}
+
+/**
+ * 闭环档夹具专用：**滤掉 RG-031**。
+ *
+ * 若干判据（RG-007 的 `done` 分支、RG-008 的「前置已闭环」、RG-025 的「父已退场」）
+ * 的前提就是「存在一条闭环条目」，而 RG-031 判的正是这个前提本身（闭环即删）。
+ * 两者在夹具里必然同时成立；断言其它判据时把 RG-031 滤掉，RG-031 自己的用例单独钉它。
+ * **不许**在真仓用这个口子——它只活在测试里，生产判定一条不少。
+ */
+const errsOfOpen = (base) => errsOf(base).filter((e) => !/RG-031/.test(e))
+
+/** 只允许这一条错（其余夹具必须干净，否则测不出"这一条判据在工作"）。 */
+function expectOnly(errs, re) {
+  assert.equal(errs.length, 1, `期望只有一条违规，实得：\n${errs.join('\n')}`)
+  assert.match(errs[0], re, errs[0])
+}
+
+after(() => {
+  try {
+    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 3 })
+  } catch {
+    /* 沙箱的 safe-delete 垫片可能拒删，交 OS 回收 */
+  }
+})
+
+// ================= 解析（RG-001） =================
+
+test('parseEntryText：受限 YAML 四种值形态（裸 / 引号 / 行内列表 / 块列表）', () => {
+  const text = [
+    '---',
+    'kind: task',
+    'title: "带: 冒号与 # 井号的标题"',
+    "track: '单引号'",
+    'deps: [T-001, T-002]',
+    'where:',
+    '  - docs/003-design/14.md',
+    '  - scripts/x.mjs',
+    '---',
+    'body',
+  ].join('\n')
+  const { meta, errors } = parseEntryText(text, 'x.md')
+  assert.deepEqual(errors, [])
+  assert.equal(meta.title, '带: 冒号与 # 井号的标题')
+  assert.equal(meta.track, '单引号')
+  assert.deepEqual(meta.deps, ['T-001', 'T-002'])
+  assert.deepEqual(meta.where, ['docs/003-design/14.md', 'scripts/x.mjs'])
+})
+
+test('RG-001：首行不是 --- / 未闭合 / 行形状 / 重复键 / 未知字段 各自变红', () => {
+  assert.match(parseEntryText('kind: task\n', 'x.md').errors[0], /RG-001 首行/)
+  assert.match(parseEntryText('---\nkind: task\n', 'x.md').errors[0], /RG-001 .*闭合/)
+
+  const badLine = caseRoot({ 'task/001.md': '---\nkind: task\n这不是键值\nid: T-001\ntitle: x\nstatus: todo\ncreated: 2026-10-11\ntrack: meta\ndeps: []\n---\n' + TASK_BODY })
+  expectOnly(errsOf(badLine), /RG-001 第 3 行不是/)
+
+  const dup = caseRoot({ 'task/001.md': '---\nkind: task\nkind: task\nid: T-001\ntitle: x\nstatus: todo\ncreated: 2026-10-11\ntrack: meta\ndeps: []\n---\n' + TASK_BODY })
+  expectOnly(errsOf(dup), /RG-001 字段 `kind` 重复/)
+
+  const unknown = caseRoot({ 'task/001.md': taskDoc('T-001', { bogus: 1 }) })
+  expectOnly(errsOf(unknown), /RG-001 未知字段 `bogus`/)
+})
+
+test('RG-001：错域字段被指名（task 里写 scope）', () => {
+  const base = caseRoot({ 'task/001.md': taskDoc('T-001', { scope: 'x' }) })
+  expectOnly(errsOf(base), /RG-001 未知字段 `scope`/)
+})
+
+// ================= 字段与编号（RG-002…005） =================
+
+test('RG-002：必填字段缺失变红；**目录不参与判定**（kind 只来自 front-matter）', () => {
+  const missing = caseRoot({ 'task/001.md': fm({ kind: 'task', id: 'T-001', title: 'x', status: 'todo', created: '2026-10-11', deps: [] }) + TASK_BODY })
+  expectOnly(errsOf(missing), /RG-002 必填字段 `track`/)
+
+  // 反向：条目放在别的目录下不再判红——目录只是组织，kind 是数据（机制不写死目录结构）。
+  const elsewhere = caseRoot({ 'docs/003-design/001.md': taskDoc('T-001') })
+  assert.deepEqual(errsOf(elsewhere), [], 'task 放在 docs/003-design/ 下必须合法')
+})
+
+test('RG-003：id 形状 / 文件名对账 / 跨 kind 重复 各自变红', () => {
+  const shape = caseRoot({ 'task/bad!id.md': taskDoc('bad!id') })
+  expectOnly(errsOf(shape), /RG-003 id 不合形状/)
+
+  // 编号的名称段允许 Unicode 字母数字（圈号等）——编号段本身仍是 <前缀>-<三位序号>
+  const circle = caseRoot({ 'task/041-结束①.md': taskDoc('T-041-结束①') })
+  assert.deepEqual(errsOf(circle), [], '名称段含 Unicode（圈号）必须合法')
+
+  const renamed = caseRoot({ 'task/wrong.md': taskDoc('T-040') })
+  expectOnly(errsOf(renamed), /RG-003 文件名编号对账（id=T-040 应对应 `040\.md` 或 `040\/README\.md`）/)
+
+  // 落点形态两种等价（分形）：平铺 `<stem>.md` 或目录 `<stem>/README.md`——
+  // 与 kind 登记处 `NNN-kind/README.md` 同构，按文件系统事实自判，不设模式声明。
+  const tree = caseRoot({ 'task/040/README.md': taskDoc('T-040') })
+  assert.deepEqual(errsOf(tree), [], '目录形态（父目录名 = id 去前缀）必须放行')
+  const treeWrong = caseRoot({ 'task/other/README.md': taskDoc('T-040') })
+  expectOnly(errsOf(treeWrong), /RG-003 文件名编号对账/)
+
+  // 跨 kind 撞号：新规范下同前缀只属于一个 kind，所以撞号必然伴随「前缀与 kind 不符」
+  // ——两条判据都在工作（前缀对账 + 编号重复）
+  const dup = caseRoot({ 'spec/050.md': specDoc('T-050'), 'task/050.md': taskDoc('T-050') })
+  const dupErrs = errsOf(dup)
+  assert.equal(dupErrs.length, 2, `期望两条违规，实得：\n${dupErrs.join('\n')}`)
+  assert.match(dupErrs.join('\n'), /RG-022 spec 的编号前缀必须是 `SP-`/)
+  assert.match(dupErrs.join('\n'), /RG-003 编号 `T-050` 重复/)
+})
+
+test('RG-004 / RG-005：状态词与日期变红', () => {
+  const badStatus = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'nope' }) })
+  expectOnly(errsOf(badStatus), /RG-004 status="nope" 不在 task 的状态词/)
+
+  const badDate = caseRoot({ 'task/001.md': taskDoc('T-001', { created: '2026-13-40' }) })
+  expectOnly(errsOf(badDate), /RG-005 created 不是有效日期/)
+})
+
+test('RG-014：prio 词表外变红；合法值放行（反向）', () => {
+  const bad = caseRoot({ 'task/001.md': taskDoc('T-001', { prio: 'urgent' }) })
+  expectOnly(errsOf(bad), /RG-014 prio 不在词表/)
+
+  const ok = caseRoot({ 'task/001.md': taskDoc('T-001', { prio: 'now' }) })
+  assert.deepEqual(errsOf(ok), [], 'prio: now 合法，不判红')
+})
+
+// ================= 依赖（RG-006 / RG-008） =================
+
+test('RG-006：deps 形状 / 不存在的编号 / 重复登记 变红', () => {
+  const shape = caseRoot({ 'task/001.md': taskDoc('T-001', { deps: 'oops' }) })
+  expectOnly(errsOf(shape), /RG-006 deps 必须是/)
+
+  const missing = caseRoot({ 'task/001.md': taskDoc('T-001', { deps: ['T-999'] }) })
+  expectOnly(errsOf(missing), /RG-006 deps 指到不存在的编号 `T-999`/)
+
+  const twice = caseRoot({ 'task/001.md': taskDoc('T-001', { deps: ['T-002', 'T-002'] }), 'task/002.md': taskDoc('T-002') })
+  expectOnly(errsOf(twice), /RG-006 deps 重复登记 `T-002`/)
+})
+
+test('RG-006：自指与成环变红（环上的编号永远等不到前置闭环）', () => {
+  const self = caseRoot({ 'task/001.md': taskDoc('T-001', { deps: ['T-001'] }) })
+  const selfErrs = errsOf(self)
+  assert.ok(selfErrs.length >= 1 && selfErrs.every((e) => /RG-006/.test(e)), selfErrs.join('\n'))
+  assert.ok(selfErrs.some((e) => /含自身/.test(e)), selfErrs.join('\n'))
+
+  const cyc = caseRoot({ 'task/020.md': taskDoc('T-020', { deps: ['T-021'] }), 'task/021.md': taskDoc('T-021', { deps: ['T-020'] }) })
+  expectOnly(errsOf(cyc), /RG-006 依赖成环：T-0(20|21) -> T-0(20|21)/)
+})
+
+test('RG-008：doing 要求前置已闭环；前置 done 则放行（反向）', () => {
+  const blocked = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'doing', deps: ['T-002'] }), 'task/002.md': taskDoc('T-002') })
+  expectOnly(errsOf(blocked), /RG-008 status=doing 要求前置 `T-002` 已闭环，而它是 todo/)
+
+  const ok = caseRoot({
+    'task/001.md': taskDoc('T-001', { status: 'doing', deps: ['T-002'] }),
+    'task/002.md': taskDoc('T-002', { status: 'done', evidence: 'abc1234' }),
+  })
+  assert.deepEqual(errsOfOpen(ok), [], '前置已闭环 ⇒ 开工不判')
+})
+
+test('RG-008：依赖机制全部 kind 同一套——文档类的 active 同样要求前置已闭环', () => {
+  // 文档类不搞特殊化：`active` 断言「这篇现行」，其 `deps` 前置就必须已闭环
+  const blockedDoc = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['DE-008-b'] }),
+    'docs/003-design/008-b.md': docDoc('docs/003-design/008-b.md', { kind: 'design', id: 'DE-008-b', status: 'draft' }),
+  })
+  expectOnly(errsOf(blockedDoc), /RG-008 status=active 要求前置 `DE-008-b` 已闭环，而它是 draft/)
+
+  const okDoc = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['DE-008-b'] }),
+    'docs/003-design/008-b.md': docDoc('docs/003-design/008-b.md', { kind: 'design', id: 'DE-008-b' }),
+  })
+  assert.deepEqual(errsOf(okDoc), [], '前置 active ⇒ 放行')
+
+  // 跨 kind 同样强制：文档的 active 前置可以是一条已闭环的 task
+  const okTask = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['T-002'] }),
+    'task/002.md': taskDoc('T-002', { status: 'done', evidence: 'abc1234' }),
+  })
+  assert.deepEqual(errsOfOpen(okTask), [], '前置 task 已 done ⇒ 放行')
+
+  // design 与其他文档类同构：active 要求前置已闭环
+  const blockedDesign = caseRoot({
+    'docs/003-design/090-x.md': docDoc('docs/003-design/090-x.md', { id: 'DE-090-x', deps: ['DE-091-x'] }),
+    'docs/003-design/091-x.md': docDoc('docs/003-design/091-x.md', { id: 'DE-091-x', status: 'retired', reason: '夹具' }),
+  })
+  expectOnly(errsOf(blockedDesign), /RG-008 status=active 要求前置 `DE-091-x` 已闭环，而它是 retired/)
+
+  // draft 文档可以引草案——门槛只档「生效中」状态
+  const draft = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', status: 'draft', deps: ['DE-008-b'] }),
+    'docs/003-design/008-b.md': docDoc('docs/003-design/008-b.md', { kind: 'design', id: 'DE-008-b', status: 'draft' }),
+  })
+  assert.deepEqual(errsOf(draft), [], 'draft 引 draft 不判')
+})
+
+test('RG-022：全仓一套编号规范——编号条目 <前缀>-<三位序号>[-名称]；导航文档 id 是路径', () => {
+  // 合规编号条目放行（前缀在闭集、序号三位、名称段中文合法）
+  const okEntry = caseRoot({
+    'docs/003-design/001-核心架构.md': docDoc('docs/003-design/001-核心架构.md', {
+      kind: 'design',
+      id: 'DE-001-核心架构',
+    }),
+    'task/016.md': taskDoc('T-016', { track: 'S' }),
+  })
+  assert.deepEqual(errsOf(okEntry), [], '合规编号条目（带名称段 / 纯编号）放行')
+
+  // 历史遗留前缀（轨前缀 S2.7 / 无连字符）不合新语法 ⇒ 红
+  const badPrefix = caseRoot({
+    'docs/003-design/S2.7.md': docDoc('docs/003-design/S2.7.md', { kind: 'design', id: 'S2.7' }),
+  })
+  expectOnly(errsOf(badPrefix), /RG-022 编号条目 id 必须匹配/)
+
+  // 前缀不在闭集 ⇒ 红
+  const badKind = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'XX-001-a' }),
+  })
+  expectOnly(errsOf(badKind), /RG-022 编号条目 id 必须匹配/)
+
+  // 语法合法但前缀与 kind 不符（plan 用了 T-）⇒ 红——编号空间才可盲信
+  const wrongPrefix = caseRoot({
+    'docs/003-design/056.md': docDoc('docs/003-design/056.md', { kind: 'design', id: 'T-056' }),
+  })
+  expectOnly(errsOf(wrongPrefix), /RG-022 design 的编号前缀必须是 `DE-`/)
+
+  // 编号条目：文件名与编号不符 ⇒ 红
+  const mismatch = caseRoot({
+    'docs/003-design/别的名字.md': docDoc('docs/003-design/别的名字.md', { kind: 'design', id: 'DE-001-核心架构' }),
+  })
+  expectOnly(errsOf(mismatch), /RG-003 文件名编号对账/)
+
+  // 导航文档：id 含 / 但不是仓根相对路径 ⇒ 红
+  const badNav = caseRoot({ 'docs/README.md': rootDoc({ id: 'docs/006-guide/README' }) })
+  expectOnly(errsOf(badNav), /RG-003 导航文档 id 必须等于仓根相对路径/)
+
+  // 导航文档：README / INDEX 的 id = 路径 ⇒ 放行（不进 deps，见 RG-023）
+  const okNav = caseRoot({ 'docs/README.md': rootDoc() })
+  assert.deepEqual(errsOf(okNav), [], '导航 README 放行')
+})
+
+test('RG-023：deps 是依赖图的边，只收编号条目——导航文档（id 含 /）判红', () => {
+  const bad = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['docs/README'] }),
+    'docs/README.md': rootDoc(),
+  })
+  expectOnly(errsOf(bad), /RG-023 deps 目标必须是编号条目/)
+
+  const ok = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['DE-008-b'] }),
+    'docs/003-design/008-b.md': docDoc('docs/003-design/008-b.md', { kind: 'design', id: 'DE-008-b' }),
+  })
+  assert.deepEqual(errsOf(ok), [], '编号条目互依赖放行')
+})
+
+// ================= 分解：parent（RG-024 / RG-025） =================
+//
+// parent 与 deps 正交：deps 答「必须先有什么」（DAG、可跨 kind），parent 答「是谁的一部分」
+// （树、同 kind）。回归钉三件事：① 结构判据（存在 / 同 kind / 自指 / 不成环）；
+// ② 状态档位单调（子生效 ⇒ 父生效、父退场 ⇒ 子退场）；③ 呈现（分解树小节缩进 +
+// board --children/--parent），以及「无 parent 数据时汇总页零变化」这个反向面。
+
+test('RG-024：parent 含 / / 不存在 / 跨 kind / 自指 / 成环 各自变红；同 kind 放行（反向）', () => {
+  // 含 / ⇒ parent 是编号不是路径（跨位置关联走引用，不走 parent）
+  const slash = caseRoot({
+    'task/050.md': taskDoc('T-050', { parent: 'docs/007-task/T-051' }),
+    'task/051.md': taskDoc('T-051'),
+  })
+  expectOnly(errsOf(slash), /RG-024 parent 不得含/)
+
+  const missing = caseRoot({ 'task/050.md': taskDoc('T-050', { parent: 'T-999' }) })
+  expectOnly(errsOf(missing), /RG-024 parent 指到不存在的编号 `T-999`/)
+
+  // 跨 kind：分解是同类事物的大小之分——task 挂到 design 下没有语义（走 deps / 引用）
+  const cross = caseRoot({
+    'task/050.md': taskDoc('T-050', { parent: 'DE-001-a' }),
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a' }),
+  })
+  expectOnly(errsOf(cross), /RG-024 parent `DE-001-a` 是设计/)
+
+  const self = caseRoot({ 'task/050.md': taskDoc('T-050', { parent: 'T-050' }) })
+  expectOnly(errsOf(self), /RG-024 parent 含自身/)
+
+  const cyc = caseRoot({
+    'task/050.md': taskDoc('T-050', { parent: 'T-051' }),
+    'task/051.md': taskDoc('T-051', { parent: 'T-050' }),
+  })
+  expectOnly(errsOf(cyc), /RG-024 parent 成环/)
+
+  // 反向：同 kind 父子（大任务 → 小任务）合法
+  const ok = caseRoot({
+    'task/050.md': taskDoc('T-050'),
+    'task/051.md': taskDoc('T-051', { parent: 'T-050' }),
+  })
+  assert.deepEqual(errsOf(ok), [], '同 kind 分解放行（反向）')
+})
+
+test('RG-025：父子状态档位单调——子 doing 父 todo / 父 done 子 doing 变红；中间组合放行', () => {
+  // R1：子生效 ⇒ 父不得停在未生效档（「小任务都 doing 了，大任务还写着 todo」是谎报）
+  const r1 = caseRoot({
+    'task/050.md': taskDoc('T-050'),
+    'task/051.md': taskDoc('T-051', { parent: 'T-050', status: 'doing' }),
+  })
+  expectOnly(errsOf(r1), /RG-025 子条目 status=doing（生效档）要求父条目 `T-050` 同在生效档/)
+
+  // R2：父退场 ⇒ 子不得停在生效档（「大任务都 done 了，还有小任务 doing」是谎报）
+  const r2 = caseRoot({
+    'task/050.md': taskDoc('T-050', { status: 'done', evidence: 'abc' }),
+    'task/051.md': taskDoc('T-051', { parent: 'T-050', status: 'doing' }),
+  })
+  expectOnly(errsOfOpen(r2), /RG-025 父条目 `T-050` status=done（退场档）要求子条目同处退场档/)
+
+  // 反向：中间组合合法——分解允许部分未动、允许中途砍子项
+  const notStarted = caseRoot({
+    'task/050.md': taskDoc('T-050', { status: 'doing' }),
+    'task/051.md': taskDoc('T-051', { parent: 'T-050' }),
+  })
+  assert.deepEqual(errsOf(notStarted), [], '父 doing 子 todo ⇒ 放行（分解未动）')
+  const cut = caseRoot({
+    'task/050.md': taskDoc('T-050', { status: 'doing' }),
+    'task/051.md': taskDoc('T-051', { parent: 'T-050', status: 'wont', reason: '不需要了' }),
+  })
+  assert.deepEqual(errsOfOpen(cut), [], '子 wont 父 doing ⇒ 放行（中途砍子项）')
+  const same = caseRoot({
+    'task/050.md': taskDoc('T-050', { status: 'doing' }),
+    'task/051.md': taskDoc('T-051', { parent: 'T-050', status: 'doing' }),
+  })
+  assert.deepEqual(errsOf(same), [], '父子同处 doing ⇒ 放行')
+
+  // 文档类同款：子 active ⇒ 父不得停在 draft（goal 树：子目标现行、总目标草案 = 谎报）
+  const docR1 = caseRoot({
+    'docs/003-design/016-a.md': docDoc('docs/003-design/016-a.md', { kind: 'design', id: 'DE-016-a', status: 'draft' }),
+    'docs/003-design/016-b.md': docDoc('docs/003-design/016-b.md', { kind: 'design', id: 'DE-016-b', parent: 'DE-016-a' }),
+  })
+  expectOnly(errsOf(docR1), /RG-025 子条目 status=active（生效档）要求父条目 `DE-016-a` 同在生效档/)
+})
+
+test('分解渲染：INDEX 分解树缩进到孙层、同层按编号序、无 parent 数据时零变化（反向）', () => {
+  const base = caseRoot({
+    'task/050.md': taskDoc('T-050', { title: '大任务' }),
+    'task/051.md': taskDoc('T-051', { title: '小任务一', parent: 'T-050' }),
+    'task/052.md': taskDoc('T-052', { title: '小任务二', parent: 'T-050' }),
+    'task/053.md': taskDoc('T-053', { title: '孙任务', parent: 'T-051' }),
+  })
+  const { entries } = loadEntries(base)
+  const out = renderKindIndex('task', entries, REPO_KINDS)
+  assert.equal(out, renderKindIndex('task', entries, REPO_KINDS), '同输入逐字节同输出')
+  assert.match(out, /## 分解树/)
+  assert.match(out, /^- \[`T-050`\]\(\.\.\/task\/050\.md\)/m, '顶层不缩进')
+  assert.match(out, /\n {2}- \[`T-051`\]\(\.\.\/task\/051\.md\)/, '子层缩进两格')
+  assert.match(out, /\n {4}- \[`T-053`\]\(\.\.\/task\/053\.md\)/, '孙层缩进四格')
+  assert.ok(out.indexOf('`T-051`') < out.indexOf('`T-052`'), '同层按编号序（确定性）')
+  assert.ok(out.indexOf('`T-050`') < out.indexOf('`T-051`'), '分组表里父先于子（parent 边进拓扑序）')
+
+  // 反向：没有分解数据的 kind，汇总页不出现分解树小节（新机制零回归面）
+  const flat = caseRoot({ 'task/060.md': taskDoc('T-060') })
+  assert.ok(!renderKindIndex('task', loadEntries(flat).entries, REPO_KINDS).includes('## 分解树'), '无 parent 数据 ⇒ 无树小节')
+})
+
+test('分解投影增强：父行子项状态计数 + 总账分解列 + 渲染器样板文字不残留旧编号', () => {
+  const base = caseRoot({
+    'task/050.md': taskDoc('T-050', { title: '大任务' }),
+    'task/051.md': taskDoc('T-051', { title: '小任务一', parent: 'T-050' }),
+    'task/052.md': taskDoc('T-052', { title: '小任务二', parent: 'T-050', status: 'done', evidence: '提交 x' }),
+    'task/053.md': taskDoc('T-053', { title: '孙任务', parent: 'T-051' }),
+  })
+  const { entries } = loadEntries(base)
+  const out = renderKindIndex('task', entries, REPO_KINDS)
+  assert.match(out, /`T-050`\]\(\.\.\/task\/050\.md\)[^|]*· 子项 todo 1 \/ done 1/, '父行带直接子项状态计数（按 kind 状态机顺序）')
+  assert.match(out, /`T-051`\]\(\.\.\/task\/051\.md\)[^|]*· 子项 todo 1/, '中间层父行也计数')
+  assert.match(out, /`T-052`\]\(\.\.\/task\/052\.md\)[^|]*（done）\n/, '叶子行不计数（无直接子条）')
+  assert.ok(!out.includes('14 · 登记与汇总机制'), '渲染器样板文字与编号对齐——不残留 PLN-14 旧号')
+
+  const root = renderRootIndex(entries, { kinds: REPO_KINDS })
+  assert.match(root, /\| 分解 \|/, '总账表有分解列')
+  // 汇总页现已**登记**，所以指向它的链接写成**编号引用**（`[任务汇总|task · 任务]`），
+  // 由 `gen-doc-refs` 展开成真实地址——手写地址会被 RF-003 判红。
+  // 断言也跟着改：这里测的是 `--write` 的**原始产出**，不是展开后的形态。
+  assert.match(root, /\[\[T-000-任务汇总\|task · 任务\]\]\s*\|[^|]*\|[^|]*\|\s*4\s*\|[^|]*\|\s*3 条分解边/, 'task 行报有效 parent 边数（3）')
+  assert.match(root, /\[\[SP-000-规范汇总\|spec · 规范\]\]\s*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|\s*—/, '无分解的 kind 显示 —')
+})
+
+test('board --children / --parent：分解子树与父链两个查询出口；互斥与不存在有出口', () => {
+  const base = caseRoot({
+    'task/050.md': taskDoc('T-050', { title: '大任务' }),
+    'task/051.md': taskDoc('T-051', { title: '小任务一', parent: 'T-050' }),
+    'task/052.md': taskDoc('T-052', { title: '孙任务', parent: 'T-051' }),
+  })
+  const ch = runRegistryBoard([`--root=${base}`, '--children=T-050'])
+  assert.equal(ch.code, 0, stripAnsi(ch.lines.join('\n')))
+  const chText = stripAnsi(ch.lines.join('\n'))
+  assert.match(chText, /=== T-050 的分解子树（parent 字段）：直接子 1（todo 1） ?· 递归共 2 个===/, '标题行带直接子状态分布与递归总数')
+  assert.match(chText, /T-051[\s\S]*T-052/, '子树递归到孙辈')
+
+  const par = runRegistryBoard([`--root=${base}`, '--parent=T-052'])
+  assert.equal(par.code, 0, stripAnsi(par.lines.join('\n')))
+  const parText = stripAnsi(par.lines.join('\n'))
+  assert.match(parText, /=== T-052 的父链（parent 字段，深度 2）===/)
+  assert.match(parText, /T-050[\s\S]*T-051[\s\S]*T-052.*← 当前/, '从顶层祖先到当前条目')
+
+  // 单条视图 / 子树 / 父链三选一；编号不存在有明确出口（不是静默空输出）
+  assert.equal(runRegistryBoard([`--root=${base}`, '--id=T-050', '--children=T-050']).code, 2)
+  assert.equal(runRegistryBoard([`--root=${base}`, '--children=T-050', '--parent=T-050']).code, 2)
+  assert.equal(runRegistryBoard([`--root=${base}`, '--children=T-999']).code, 1)
+})
+
+test('RG-015：supersedes 目标不存在 / 指向 task / 自身 / 双 active / 成环 变红；旧条 retired 则放行', () => {
+  const missing = caseRoot({ 'spec/010.md': specDoc('SP-010', { supersedes: ['SP-999'] }) })
+  expectOnly(errsOf(missing), /RG-015 supersedes 指到不存在的编号 `SP-999`/)
+
+  const atTask = caseRoot({ 'spec/010.md': specDoc('SP-010', { supersedes: ['T-050'] }), 'task/050.md': taskDoc('T-050') })
+  expectOnly(errsOf(atTask), /RG-015 supersedes 指向 task/)
+
+  const self = caseRoot({ 'spec/010.md': specDoc('SP-010', { supersedes: ['SP-010'] }) })
+  expectOnly(errsOf(self), /RG-015 supersedes 含自身/)
+
+  const bothActive = caseRoot({
+    'spec/010.md': specDoc('SP-010', { supersedes: ['SP-020'] }),
+    'spec/020.md': specDoc('SP-020'),
+  })
+  expectOnly(errsOf(bothActive), /RG-015 status=active 的规范不得取代另一条 active 规范/)
+  const retiredTarget = caseRoot({
+    'spec/010.md': specDoc('SP-010', { supersedes: ['SP-020'] }),
+    'spec/020.md': specDoc('SP-020', { status: 'retired', reason: '被 SP-010 取代' }),
+  })
+  assert.deepEqual(errsOf(retiredTarget), [], '旧条已 retired ⇒ 取代链合法（反向）')
+
+  const cyc = caseRoot({
+    'spec/010.md': specDoc('SP-010', { status: 'retired', reason: '链', supersedes: ['SP-020'] }),
+    'spec/020.md': specDoc('SP-020', { status: 'retired', reason: '链', supersedes: ['SP-010'] }),
+  })
+  expectOnly(errsOf(cyc), /RG-015 supersedes 成环/)
+})
+
+test('RG-016：clears 指到不存在 / 指向非 task 变红；指向开放 task 放行（反向）', () => {
+  const missing = caseRoot({ 'spec/010.md': specDoc('SP-010', { clears: ['W99'] }) })
+  expectOnly(errsOf(missing), /RG-016 clears 指到不存在的编号/)
+
+  const wrongKind = caseRoot({
+    'spec/011.md': specDoc('SP-011', { clears: ['SP-012'] }),
+    'spec/012.md': specDoc('SP-012'),
+  })
+  expectOnly(errsOf(wrongKind), /RG-016 clears 指向 spec/)
+
+  // 反向：清除任务**开放**（todo）不判红——clears 是指认不是前置，与 deps 的语义相反
+  const base = caseRoot({
+    'task/060.md': taskDoc('T-060'),
+    'spec/013.md': specDoc('SP-013', { clears: ['T-060'] }),
+  })
+  assert.deepEqual(errsOf(base), [], 'clears 指到 task 合法，且不要求其闭环')
+
+  // 渲染：spec INDEX 的 active 表带「清除」列，clears 编号落列（列被删要有回归兜住）
+  const { entries } = loadEntries(base)
+  const idx = renderKindIndex('spec', entries, REPO_KINDS)
+  assert.match(idx, /\| 编号 \| 规范 \| 适用范围 \| 判据 \| 清除 \| 取代 \|/, 'active 表含清除列')
+  assert.match(idx, /\| 人工 \| T-060 \| — \|/, 'clears 编号渲染进清除列')
+})
+
+// ================= design 的两轴（RG-017 / RG-015） =================
+//
+// `status` 与 `impl` 是正交两轴：**「这篇还算不算数」（status）** 与 **「做到哪一步」（impl）**
+// 必须拆成两个字段——adr kind 废除后，决策折入设计正文的 `### D-NNN` 条目，这两轴落在
+// `design` 上。回归照旧要有：退化成一列自由文本就等于两轴白分。
+
+test('RG-017：design 的 impl 词表外变红；合法值放行（反向）', () => {
+  const bad = caseRoot({
+    'docs/003-design/100-x.md': docDoc('docs/003-design/100-x.md', { id: 'DE-100-x', impl: '半成品' }),
+  })
+  expectOnly(errsOf(bad), /RG-017 impl 不在词表/)
+
+  const ok = caseRoot({
+    'docs/003-design/101-x.md': docDoc('docs/003-design/101-x.md', { id: 'DE-101-x', impl: 'partial' }),
+  })
+  assert.deepEqual(errsOf(ok), [], 'impl=partial 是合法词 ⇒ 放行（现行但只落地了一半）')
+})
+
+test('RG-007：design 的 retired 必填 reason（废止要留理由）', () => {
+  const noReason = caseRoot({
+    'docs/003-design/110-x.md': docDoc('docs/003-design/110-x.md', { id: 'DE-110-x', status: 'retired' }),
+  })
+  expectOnly(errsOf(noReason), /RG-007 status=retired 必须填 `reason`/)
+
+  const ok = caseRoot({
+    'docs/003-design/111-x.md': docDoc('docs/003-design/111-x.md', { id: 'DE-111-x', status: 'retired', reason: '已并入 001' }),
+  })
+  assert.deepEqual(errsOf(ok), [], 'retired + reason ⇒ 放行（反向）')
+})
+
+test('design 渲染：status 分组、impl 成列（「现行但只落地一半」能在机读面表达）', () => {
+  const base = caseRoot({
+    'docs/003-design/200-x.md': docDoc('docs/003-design/200-x.md', { id: 'DE-200-x', impl: 'partial', title: '半落地的现行设计' }),
+    'docs/003-design/201-x.md': docDoc('docs/003-design/201-x.md', { id: 'DE-201-x', status: 'retired', reason: '被 DE-200 取代' }),
+  })
+  const { entries } = loadEntries(base)
+  const a = renderKindIndex('design', entries, REPO_KINDS)
+  assert.equal(a, renderKindIndex('design', entries, REPO_KINDS), '同输入逐字节同输出')
+  assert.match(a, /现行设计（active）/)
+  assert.match(a, /废止（retired）/)
+  assert.match(a, /DE-200-x.*部分落地/, 'impl=partial 渲染成「部分落地」')
+  assert.match(a, /active 1 · draft 0 · retired 1/)
+})
+
+test('RG-015（design）：取代链方向属于**取代者**——旧条 retired 不写 supersedes', () => {
+  // 方向语义：`supersedes` 是新条指认「我取代了谁」。这条回归钉的是**语义方向**——
+  // 把 supersedes 写到被取代的旧条上是本仓真实出过的错（DE-002/016 互指反了）。
+  const ok = caseRoot({
+    'docs/003-design/300-x.md': docDoc('docs/003-design/300-x.md', { id: 'DE-300-x', supersedes: ['DE-301-x'] }),
+    'docs/003-design/301-x.md': docDoc('docs/003-design/301-x.md', { id: 'DE-301-x', status: 'retired', reason: '被 DE-300 取代' }),
+  })
+  assert.deepEqual(errsOf(ok), [], '新条 supersedes 旧条（旧条 retired）⇒ 合法')
+
+  // 反向：两条都 active 时 supersedes 仍是未消解的矛盾（与 spec 同判）
+  const bothActive = caseRoot({
+    'docs/003-design/302-x.md': docDoc('docs/003-design/302-x.md', { id: 'DE-302-x', supersedes: ['DE-303-x'] }),
+    'docs/003-design/303-x.md': docDoc('docs/003-design/303-x.md', { id: 'DE-303-x' }),
+  })
+  expectOnly(errsOf(bothActive), /RG-015 status=active 的设计不得取代另一条 active 设计/)
+
+  // 跨 kind 取代没有语义
+  const crossKind = caseRoot({
+    'docs/003-design/304-x.md': docDoc('docs/003-design/304-x.md', { id: 'DE-304-x', supersedes: ['SP-010'] }),
+    'spec/010.md': specDoc('SP-010'),
+  })
+  expectOnly(errsOf(crossKind), /RG-015 supersedes 指向 spec（`SP-010`）——取代关系只在同 kind 之间/)
+})
+
+// ================= 状态矩阵（RG-007） =================
+test('RG-007：done 必须有 evidence、不得留 signal；wont / retired 必须有 reason', () => {
+  const noEvidence = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'done' }) })
+  expectOnly(errsOfOpen(noEvidence), /RG-007 status=done 必须填 `evidence`/)
+
+  const withSignal = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'done', evidence: 'abc', signal: '快照' }) })
+  expectOnly(errsOfOpen(withSignal), /RG-007 status=done 不得带 `signal`/)
+
+  const noReason = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'wont' }) })
+  expectOnly(errsOfOpen(noReason), /RG-007 status=wont 必须填 `reason`/)
+
+  const retiredNoReason = caseRoot({ 'spec/002.md': specDoc('SP-002', { status: 'retired' }) })
+  expectOnly(errsOf(retiredNoReason), /RG-007 status=retired 必须填 `reason`/)
+
+  const todoEvidence = caseRoot({ 'task/001.md': taskDoc('T-001', { evidence: 'abc' }) })
+  expectOnly(errsOf(todoEvidence), /RG-007 status=todo 不得带 `evidence`/)
+})
+
+// ================= 正文小节与判据指认（RG-009 / RG-012） =================
+
+test('RG-009：正文缺必有小节变红', () => {
+  const base = caseRoot({ 'task/001.md': taskDoc('T-001', { body: '## 内容\n只有内容\n' }) })
+  expectOnly(errsOf(base), /RG-009 正文缺 `## 处理过程`/)
+
+  const spec = caseRoot({ 'spec/002.md': specDoc('SP-002', { body: '## 规范\n只有条文\n' }) })
+  expectOnly(errsOf(spec), /RG-009 正文缺 `## 判据`/)
+})
+
+test('RG-012：出口判据指认的脚本不存在变红；存在则放行（反向）', () => {
+  const dead = caseRoot({ 'task/001.md': taskDoc('T-001', { exit: '由 `scripts/not-here.mjs` 守' }) })
+  expectOnly(errsOf(dead), /RG-012 .*`scripts\/not-here\.mjs` 不存在/)
+
+  const live = caseRoot({
+    'task/001.md': taskDoc('T-001', { exit: '由 `scripts/audits/registry-audit.mjs` 守' }),
+  })
+  // 占位脚本落在**仓根**（RG-012 按仓根相对路径解析），不是 docs/ 里
+  fs.mkdirSync(path.join(live, 'scripts', 'audits'), { recursive: true })
+  fs.writeFileSync(path.join(live, 'scripts', 'audits', 'registry-audit.mjs'), '// 夹具占位\n')
+  assert.deepEqual(errsOf(live), [], '指认的脚本真实存在 ⇒ 放行')
+})
+
+// ================= 范围与命名空间（RG-010 / RG-013） =================
+
+test('RG-010：扫不到任何 `.md` ⇒ exit 2（不退化成什么都没校验）', () => {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-none-'))
+  const r1 = runRegistryAudit([`--root=${empty}`])
+  assert.equal(r1.code, 2)
+  assert.match(stripAnsi(r1.lines.join('\n')), /RG-010 登记范围读不出/)
+  fs.rmSync(empty, { recursive: true, force: true })
+
+  // 有 `.md` 但没有登记 ⇒ 不是 exit 2 而是 exit 1（RG-020 指名道姓）
+  const unregistered = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-empty-'))
+  fs.mkdirSync(path.join(unregistered, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(unregistered, 'docs', 'x.md'), '# 裸文档\n')
+  const r2 = runRegistryAudit([`--root=${unregistered}`])
+  assert.equal(r2.code, 1)
+  assert.match(stripAnsi(r2.lines.join('\n')), /docs\/x\.md：RG-020 未登记文档/)
+  fs.rmSync(unregistered, { recursive: true, force: true })
+})
+
+test('RG-013：front-matter 的 kind 不在 kind 闭集变红（命名空间闭合）', () => {
+  const base = caseRoot({ 'docs/weird/x.md': '---\nkind: weird\n---\n' })
+  expectOnly(errsOf(base), /RG-013 docs\/weird\/x\.md：kind="weird" 不在 kind 闭集/)
+})
+
+// ================= SP-001 字段表对账（RG-011） =================
+
+test('RG-011：SP-001 缺失 / 字段表缺行 变红；表 = ALL_KEYS 则放行', () => {
+  const noSp = caseRoot({ 'task/001.md': taskDoc('T-001') }, { noSp: true })
+  expectOnly(errsOf(noSp), /RG-011 .*SP-001 不存在/)
+
+  const drifted = caseRoot({ 'spec/001.md': sp001Doc(ALL_KEYS.filter((k) => k !== 'scope').map((k) => `| \`${k}\` | 说明 |`)) })
+  expectOnly(errsOf(drifted), /RG-011 .*表里缺：scope/)
+
+  const ok = caseRoot({ 'task/001.md': taskDoc('T-001') })
+  assert.deepEqual(errsOf(ok), [], '字段表恰好等于代码 schema ⇒ 放行')
+})
+
+// ================= 汇总渲染与 CLI =================
+
+test('渲染确定性：同输入同输出；待处理列表里前置排在后继之前', () => {
+  const base = caseRoot({
+    'task/010.md': taskDoc('T-010'),
+    'task/011.md': taskDoc('T-011', { deps: ['T-010'] }),
+  })
+  const { entries } = loadEntries(base)
+  const a = renderKindIndex('task', entries, REPO_KINDS)
+  const b = renderKindIndex('task', entries, REPO_KINDS)
+  assert.equal(a, b, '同输入必须逐字节同输出（这是 autoWork 重生成的前提）')
+  assert.ok(a.indexOf('`T-010`') < a.indexOf('`T-011`'), '前置任务必须排在后继之前')
+  assert.match(a, /计数.*todo 2/)
+})
+
+test('排序：拓扑序永远在前；同层按 prio 再按编号（确定性）', () => {
+  const base = caseRoot({
+    'task/030.md': taskDoc('T-030', { prio: 'later' }),
+    'task/031.md': taskDoc('T-031', { prio: 'now' }),
+    'task/032.md': taskDoc('T-032'), // 缺席 = 最低档
+    'task/033.md': taskDoc('T-033', { prio: 'now', deps: ['T-030'] }), // 有依赖 ⇒ 拓扑压过 prio
+  })
+  const { entries } = loadEntries(base)
+  const out = renderKindIndex('task', entries, REPO_KINDS)
+  const pos = (id) => out.indexOf(`\`${id}\``)
+  assert.ok(pos('T-030') < pos('T-033'), 'T-030 虽 later，但它是前置 ⇒ 排在 T-033 前（deps 是义务）')
+  assert.ok(pos('T-031') < pos('T-030'), '同层按 prio：now 在 later 前')
+  assert.ok(pos('T-030') < pos('T-032'), '缺席 = 最低档：later 在无 prio 前')
+})
+
+// ================= 在位文档（文档类 kind）=================
+//
+// 文档类与条目类的区别只有两条，各自必须有回归：
+//   ① **文档即条目、在位存放**：编号 = 仓根相对路径（RG-003）、title = 正文首个 H1（RG-021）；
+//   ② **目录不参与判定**：文档在哪个目录下与 kind 无关，搬迁不破机制（RG-002 反向用例）。
+// 另加「全仓 .md 必须登记」的执行方（RG-020）与豁免面。
+
+test('RG-020：未登记文档（无 front-matter / 缺 kind）变红', () => {
+  const bare = caseRoot({ 'docs/003-design/notes.md': '# 裸文档\n\n没有 front-matter。\n' })
+  expectOnly(errsOf(bare), /docs\/003-design\/notes\.md：RG-020 未登记文档/)
+
+  const noKind = caseRoot({ 'docs/003-design/notes.md': '---\nstatus: active\ncreated: 2026-10-11\n---\n\n# 裸文档\n' })
+  expectOnly(errsOf(noKind), /docs\/003-design\/notes\.md：RG-020 front-matter 缺 `kind`/)
+})
+
+test('RG-003（导航文档）：id 含 / 必须等于仓根相对路径；写错即红（反向：写对放行）', () => {
+  const wrong = caseRoot({ 'docs/README.md': rootDoc({ id: 'docs/006-guide/README' }) })
+  expectOnly(errsOf(wrong), /RG-003 导航文档 id 必须等于仓根相对路径（去 `\.md`）（应为 `docs\/README`）/)
+
+  const ok = caseRoot({ 'docs/README.md': rootDoc() })
+  assert.deepEqual(errsOf(ok), [], '导航文档 id = 路径 ⇒ 放行（反向）')
+})
+
+test('RG-021：title 必须逐字等于正文首个 H1；缺 H1 或不对账即红', () => {
+  // 挑 `titleEqualsH1: true` 的 kind（ref）——design / spec / task 的 id 自带名称段，
+  // meta 里显式关掉了这条判据，用它们测等于测一个已声明不生效的规则。
+  const mismatch = caseRoot({ 'docs/004-ref/x.md': docDoc('docs/004-ref/x.md', { kind: 'ref', title: '标题 A', body: '# 标题 B\n\n正文。\n' }) })
+  expectOnly(errsOf(mismatch), /RG-021 title="标题 A" 与正文首个 H1 "标题 B" 不一致/)
+
+  const noH1 = caseRoot({ 'docs/004-ref/x.md': docDoc('docs/004-ref/x.md', { kind: 'ref', title: '标题 A', body: '没有标题。\n' }) })
+  expectOnly(errsOf(noH1), /RG-021 文档类缺正文首个 `# 标题`/)
+
+  // 反向：代码围栏里的 `# ` 不算 H1（第一行 H1 才是 title 的来源）
+  const fenced = caseRoot({ 'docs/004-ref/x.md': docDoc('docs/004-ref/x.md', { kind: 'ref', title: '标题 A', body: '```\n# 不是标题\n```\n\n# 标题 A\n' }) })
+  assert.deepEqual(errsOf(fenced), [], '围栏内的 # 不算 H1 ⇒ 放行（反向）')
+})
+
+test('RG-031：闭环档的任务文件必须已删——done / wont 都红，文档类的 retired 是在位归档（反向）', () => {
+  const done = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'done', evidence: '结论落 DE-001 的 D-001' }) })
+  expectOnly(errsOf(done), /RG-031 收口即删/)
+
+  const wont = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'wont', reason: '不做' }) })
+  expectOnly(errsOf(wont), /RG-031 收口即删/)
+
+  // 错误信息必须把「先落结论、再摘 deps 边」说全——否则第一次真用就会被 RG-006 卡死
+  assert.match(errsOf(done)[0], /落进设计文档/)
+  assert.match(errsOf(done)[0], /deps/)
+
+  // 正向：没有闭环条目 ⇒ 绿
+  const open = caseRoot({
+    'task/001.md': taskDoc('T-001'),
+    'task/002.md': taskDoc('T-002', { status: 'doing' }),
+  })
+  assert.deepEqual(errsOf(open), [], '只有 todo / doing ⇒ 不判')
+
+  // 反向（判据不点名 kind）：文档类的 retired 是**在位归档**——编号 = 路径、被别的文档引用着
+  const retiredDoc = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', status: 'retired', reason: '被取代' }),
+  })
+  assert.deepEqual(errsOf(retiredDoc), [], '文档类 retired ⇒ 在位归档，不删文件')
+})
+
+test('RG-032：锚不许落在 .gitignore 覆盖的路径上——三类各红一次，真锚绿', () => {
+  // 夹具仓自带 `.gitignore`（`caseRoot` 不写，这里第一个用例补上；后续用例共用同一份形状）
+  const gi = ['tmp/', 'logs/', '.workbuddy*/', '*.log'].join('\n')
+  // 键以 `/` 开头 = 仓根相对——`.gitignore` 必须在**仓根**，否则 `loadIgnoreRules` 读不到
+  const withIgnore = (files) => caseRoot({ '/.gitignore': gi, ...files })
+
+  // 反向三条：目录前缀 / 别的目录前缀 / 通配前缀
+  const inTmp = withIgnore({
+    'task/001.md': taskDoc('T-001', { status: 'done', evidence: '实测见 tmp/verify-2026-10-24/01.md 的全项通过' }),
+  })
+  // `evidence` 只在闭环档合法，而 RG-031 判的就是闭环档文件不许留——夹具里两者必然同时红，
+  // 故这一格走 `errsOfOpen`（滤掉 RG-031），RG-032 的那一条照旧要出现。
+  expectOnly(errsOfOpen(inTmp), /RG-032 `evidence` 指到被忽略的路径 `tmp\/verify-2026-10-24\/01\.md`（命中 .gitignore 的 `tmp\/`）/)
+
+  const inLogs = withIgnore({
+    'task/001.md': taskDoc('T-001', { where: 'logs/gate-3.log · docs/007-task/' }),
+  })
+  expectOnly(errsOf(inLogs), /RG-032 `where` 指到被忽略的路径 `logs\/gate-3\.log`（命中 .gitignore 的 `logs\/`）/)
+
+  const inWorkbuddy = withIgnore({
+    'task/001.md': taskDoc('T-001', { exit: '`.workbuddy-ai/gate-logs/` 下留最近的日志即可' }),
+  })
+  expectOnly(errsOf(inWorkbuddy), /RG-032 `exit` 指到被忽略的路径 `\.workbuddy-ai\/gate-logs`（命中 .gitignore 的 `\.workbuddy\*\/`）/)
+
+  // 正向两条：`docs/` 与 `scripts/` 下的真锚不判；`*.log` 按 basename 也命中（后缀规则在工作）
+  const ok = withIgnore({
+    'task/001.md': taskDoc('T-001', {
+      where: 'docs/003-design/015-义务环.md · scripts/audits/registry-audit.mjs',
+      // `exit` 会被 RG-012 判「文件此刻存在」，所以这里指夹具里真有的那一篇；
+      // 版本化路径的正向面由 `where` 承担（RG-012 不判 `where`——落点可以尚不存在）。
+      exit: '见 docs/007-task/README.md 的收口即删节',
+    }),
+  })
+  assert.deepEqual(errsOf(ok), [], '版本化路径 ⇒ 放行（反向）')
+
+  const byExt = withIgnore({
+    // 目录不在忽略名单里，只有 `*.log` 这条**后缀**规则命中——测的是 basename 那一支
+    'task/001.md': taskDoc('T-001', { where: '见 debug/gate-3.log 的收尾行' }),
+  })
+  expectOnly(errsOf(byExt), /命中 .gitignore 的 `\*\.log`/)
+
+  // 不加 `.gitignore` 的夹具仓不判（判据的数据源缺失时不许凭想象判）
+  const noIgnore = caseRoot({
+    'task/001.md': taskDoc('T-001', { where: '见 tmp/x.md' }),
+  })
+  assert.deepEqual(errsOf(noIgnore), [], '没有 .gitignore ⇒ 无可判的规则集')
+})
+
+test('RG-020 豁免：archive / 生成页 / 指令面不进登记范围（反向）', () => {
+  const base = caseRoot({
+    'docs/archive/old.md': '# 历史快照（无 front-matter）\n',
+    // 汇总页现在是**登记条目**，生成器会发 front-matter + `projection: true`
+    // （有身份、没内容）。夹具照新形态写——否则这条用例测的是一个已经不存在的形态。
+    'docs/003-design/README.md':
+      // 汇总页现在是**登记条目**，生成器会发 front-matter + `projection: true`
+      // （有身份、没内容）。夹具照新形态写——否则这条用例测的是一个已经不存在的形态。
+      '---\nkind: design\nid: DE-000-设计总览\ntitle: 设计登记索引（自动生成）\n' +
+      'status: active\nprojection: true\ncreated: 2026-10-14\nprefix: DE\nlabel: 设计\ndesc: 设计汇总\n---\n\n# 设计登记索引（自动生成）\n',
+    '/AGENTS.md': '# 指令（无 front-matter）\n',
+  })
+  assert.deepEqual(errsOf(base), [], '豁免面不得误报')
+})
+
+test('文档类渲染：按 status 分组、编号列是可点的相对链接（从索引一步到正文）', () => {
+  const base = caseRoot({
+    'docs/003-design/a.md': docDoc('docs/003-design/a.md', { kind: 'design', title: 'A 文档' }),
+    'docs/003-design/b.md': docDoc('docs/003-design/b.md', { kind: 'design', title: 'B 草案', status: 'draft' }),
+    'docs/003-design/c.md': docDoc('docs/003-design/c.md', { kind: 'design', title: 'C 废止', status: 'retired', reason: '被 A 取代' }),
+  })
+  const { entries } = loadEntries(base)
+  const out = renderKindIndex('design', entries, REPO_KINDS)
+  assert.equal(out, renderKindIndex('design', entries, REPO_KINDS), '同输入逐字节同输出')
+  assert.match(out, /现行设计（active）/)
+  assert.match(out, /草案（draft）/)
+  assert.match(out, /废止（retired）/)
+  assert.match(out, /\[`docs\/003-design\/a`\]\(a\.md\)/, '同目录文档应渲染成同目录相对链接（从索引一步到正文）')
+  // 跨目录：从 docs/003-design/README.md 到 docs/003-design/x.md 必须写成 ../003-design/x.md
+  const cross = caseRoot({ 'docs/003-design/x.md': docDoc('docs/003-design/x.md', { title: 'X 文档' }) })
+  assert.match(
+    renderKindIndex('design', loadEntries(cross).entries, REPO_KINDS),
+    /\[`docs\/003-design\/x`\]\(x\.md\)/,
+    '索引到正文的链接必须能从汇总页直接点开',
+  )
+  assert.match(out, /被 A 取代/, 'retired 表带理由列')
+  assert.match(out, /计数.*active 1 · draft 1 · retired 1/)
+})
+
+test('--write：生成三个汇总页，再跑一次显示已是最新', () => {
+  const base = caseRoot({
+    // done 是过渡档（收口即删）：汇总页只列 open 的任务，所以夹具用 todo
+    'task/001.md': taskDoc('T-001', { status: 'todo', prio: 'now' }),
+    'docs/README.md': rootDoc(),
+  })
+  const first = runRegistryAudit([`--root=${base}`, '--write'])
+  assert.equal(first.code, 0, stripAnsi(first.lines.join('\n')))
+  for (const rel of ['docs/README.md', 'docs/007-task/README.md', 'docs/005-spec/README.md']) {
+    assert.ok(fs.existsSync(path.join(base, rel)), `${rel} 应被生成`)
+  }
+  const board = fs.readFileSync(path.join(base, 'docs/007-task/README.md'), 'utf8')
+  // 证据列**不上面**（汇总页是导航，细节去读任务文档）；断言改成它的反面——
+  // 「证据文本不出现在汇总页里」，防的是哪天又被加回来。
+  assert.match(board, /`T-001`/)
+  assert.ok(!board.includes('abc1234'), '已完成表不应带证据列：细节去读文档，别在列表里展开')
+  assert.match(fs.readFileSync(path.join(base, 'docs/README.md'), 'utf8'), /task · 任务/)
+
+  const second = runRegistryAudit([`--root=${base}`, '--write'])
+  assert.equal(second.code, 0)
+  assert.match(stripAnsi(second.lines.join('\n')), /已是最新/, '第二次必须逐字节无变化')
+})
+
+test('registry-audit：违规时拒绝写汇总页（exit 1）；参数不识别 exit 2', () => {
+  const base = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'done' }) })
+  const readme = path.join(base, 'docs/007-task/README.md')
+  const before = fs.readFileSync(readme, 'utf8')
+  const r = runRegistryAudit([`--root=${base}`, '--write'])
+  assert.equal(r.code, 1)
+  assert.equal(fs.readFileSync(readme, 'utf8'), before, '有违规不得写汇总页（逐字节不变）')
+  assert.equal(runRegistryAudit(['--bogus']).code, 2)
+})
+
+test('registry-board：先校验后打印；有违规只报错不打印看板', () => {
+  const bad = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'nope' }) })
+  const rb = runRegistryBoard([`--root=${bad}`])
+  assert.equal(rb.code, 1)
+  const text = stripAnsi(rb.lines.join('\n'))
+  assert.ok(!text.includes('登记看板'), '有违规时不得打印结论（报告说假话比没有更坏）')
+
+  const ok = caseRoot({ 'task/010.md': taskDoc('T-010', { prio: 'now' }), 'spec/002.md': specDoc('SP-002') })
+  const r1 = runRegistryBoard([`--root=${ok}`])
+  assert.equal(r1.code, 0, stripAnsi(r1.lines.join('\n')))
+  const out = stripAnsi(r1.lines.join('\n'))
+  assert.match(out, /登记看板/)
+  assert.match(out, /☐ T-010/)
+  assert.match(out, /\[meta·now\]/, '看板行应带 prio 标记')
+  assert.match(out, /SP-002/)
+
+  const single = runRegistryBoard([`--root=${ok}`, '--id=T-010'])
+  assert.equal(single.code, 0)
+  assert.match(stripAnsi(single.lines.join('\n')), /=== T-010（task · todo）===/)
+
+  assert.equal(runRegistryBoard([`--root=${ok}`, '--kind=nope']).code, 2)
+  assert.equal(runRegistryBoard(['--bogus']).code, 2)
+})
+
+// ================= 本仓真实登记（dogfood） =================
+
+// 守卫对自己也要成立：本仓真实登记必须零违规，且**每一类 kind 都真的读到了条目**——
+// 只断言「exit 0」挡不住「读空即全绿」（解析口径失效时什么条目都读不到），
+// 只数总数也挡不住「某一类整体装载不到」——所以七个 kind 逐个断言非空。
+test('本仓当前登记自洽，且每类 kind 都读到了条目', () => {
+  const r = runRegistryAudit([`--root=${repoRoot}`])
+  assert.equal(r.code, 0, stripAnsi(r.lines.join('\n')))
+  const { entries } = loadEntries(repoRoot)
+  const tasks = entries.filter((e) => e.kind === 'task')
+  const specs = entries.filter((e) => e.kind === 'spec')
+  // 任务只留 open 的（done / wont 收口即删，只进 git 历史），所以这里不设高水位。
+  assert.ok(tasks.length >= 1, `只读到 ${tasks.length} 个任务——装载口径或种子有问题`)
+  assert.ok(specs.length >= 1, `只读到 ${specs.length} 个规范——SP-001 装载不到`)
+  for (const kind of Object.keys(REPO_KINDS)) {
+    assert.ok(entries.filter((e) => e.kind === kind).length >= 1, `文档类 kind \`${kind}\` 一个条目都没读到`)
+  }
+  assert.ok(
+    entries.some((e) => e.kind === 'design' && e.rel.startsWith('docs/003-design/')),
+    '系统级文档必须真的进了 design（在位文档装载口径）',
+  )
+  assert.ok(
+    entries.some((e) => e.kind === 'design' && e.rel.includes('crates/')),
+    '模块级文档（模块 README / docs）必须在同一机制内',
+  )
+  assert.ok(
+    specs.some((e) => e.meta.id === 'SP-001'),
+    'SP-001 必须在（RG-011 的对账对象）',
+  )
+})
+
+test('RG-033：退场档只剩锚点与指向——正文超预算即红，active 的长文与只剩锚点的退场档都绿', () => {
+  // 240 行正文 = 远超「裁决锚点 + 指向」的量；判据只看行数，不看它写了什么
+  const longBody = (title) => `# ${title}\n\n` + Array.from({ length: 240 }, (_, i) => `第 ${i} 行正文。`).join('\n') + '\n'
+
+  const over = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', {
+      kind: 'design',
+      id: 'DE-001-a',
+      title: '标题 A',
+      status: 'retired',
+      reason: '目标形状并入 DE-002，锚点保留原址作为宿主',
+      body: longBody('标题 A'),
+    }),
+  })
+  expectOnly(errsOf(over), /RG-033 退场档正文 \d+ 行，超过 200 行预算/)
+  // 错误信息要把两条去处说全，否则第一次真用只会看到「超预算」而不知道删到哪
+  assert.match(errsOf(over)[0], /裁决锚点与指向/)
+  assert.match(errsOf(over)[0], /reason/)
+
+  // 反向一：同一份长正文，`active` 不判——预算只约束退场档（在位文档本来就要承载设计）
+  const active = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', {
+      kind: 'design',
+      id: 'DE-001-a',
+      title: '标题 A',
+      body: longBody('标题 A'),
+    }),
+  })
+  assert.deepEqual(errsOf(active), [], 'active 文档不受退场预算约束')
+
+  // 反向二：退场但只剩锚点与指向 ⇒ 绿（这正是 D-145 的终态形状）
+  const short = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', {
+      kind: 'design',
+      id: 'DE-001-a',
+      title: '标题 A',
+      status: 'retired',
+      reason: '目标形状并入 DE-002，锚点保留原址作为宿主',
+      body: '# 标题 A\n\n> 已退场，只留裁决锚点。\n',
+    }),
+  })
+  assert.deepEqual(errsOf(short), [], '几十行的退场档不判')
+})
+

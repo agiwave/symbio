@@ -56,6 +56,7 @@ const REPO_ROOT = path.resolve(SHARED_DIR, '..', '..')
  *      extract_result 判定顺序。逐批明细见对应提交（`git log --grep=<批次/主题>`；
  *      本仓库不维护变更日志，变更历史即提交历史）。
  */
+// @gate test
 export const BASELINE = {
   // 各测试套件的计数基线（**只增不减**）。
   // 向下（删测试）必须配 `// baseline-allow <key>: <理由>`（见 `35-baseline.mjs` 元守卫，防『悄悄下调基线』）。
@@ -955,4 +956,95 @@ function methodOwnerPath(pathText, after) {
 /** `symbolsInCrate(text, 'symbio_sdk')` —— E-009 / SR-001 共用的那一条边。 */
 export function sdkSymbolsIn(text) {
   return symbolsInCrate(text, 'symbio_sdk')
+}
+
+// ── `@gate` 声明：门禁的「目录即清单」 ─────────────────────────────────────
+//
+// 每个 `scripts/**` 下的脚本在自己的头注释里写一行：
+//
+//     // @gate guard     本体静态跑得出（带 `--strict`）+ 同名回归测试
+//     // @gate report    只跑本体（退出码恒 0，结论要人工复核）
+//     // @gate test      只跑回归测试（本体要运行时输入 / 由别的阶段执行 / 根本没有本体）
+//     // @gate lib       只被引用，门禁不跑它
+//     // @gate off       不进门禁（git hook / 人工 / 门禁入口自己）
+//
+// `30-docs` 扫这条声明分组执行，于是**加一条守卫不用改任何名单**——写脚本、写同名
+// `.test.mjs`、写下这一行，下一轮门禁就会跑它。
+//
+// 声明是自述，所以要有对账（`gate-wiring-audit`）：GW-001 每份脚本都得声明、
+// GW-002 守卫必须真有回归测试、GW-003 / GW-004 声明的东西**是否真的被跑到**。
+// 光有声明没有执行方，就是「看起来接了线」——那正是这份机制唯一的坏法。
+export const GATE_BUCKETS = ['guard', 'report', 'test', 'lib', 'off']
+
+const GATE_DECL_RE = /^\/\/\s*@gate\s+([A-Za-z]+)\s*$/
+const GATE_SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio'])
+
+/**
+ * 阶段文件（`gate.d/` 下非 `_` 前缀）由 `gate.mjs` 按文件名接入，不写 `@gate` 声明：
+ * 它们的接线是 `export default { id }`，顺序由 GW-005 判。
+ */
+export function isStageFile(rel) {
+  return rel.startsWith('gate.d/') && !rel.slice('gate.d/'.length).startsWith('_')
+}
+
+/** 递归列出 `scripts/` 下的 `.mjs`，返回相对 `scripts/` 的正斜杠路径 */
+export function scriptFilesOf(root) {
+  const base = path.join(root, 'scripts')
+  if (!fs.existsSync(base)) return null
+  const out = []
+  const walk = (dir, prefix) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (ent.isDirectory()) {
+        if (!GATE_SKIP_DIRS.has(ent.name)) walk(path.join(dir, ent.name), `${prefix}${ent.name}/`)
+        continue
+      }
+      if (ent.name.endsWith('.mjs')) out.push(`${prefix}${ent.name}`)
+    }
+  }
+  walk(base, '')
+  return out.sort()
+}
+
+/**
+ * 读一份源码的 `@gate` 声明。
+ * 返回 `{ bucket }` / `{ error: 'missing' | 'unknown' | 'duplicate' }`。
+ * 只看前 80 行：声明写在头注释里，掉到正文深处的「声明」读的人看不见，也不该算。
+ */
+export function gateDeclOf(text) {
+  const hits = []
+  for (const line of text.split(/\r?\n/).slice(0, 80)) {
+    const m = GATE_DECL_RE.exec(line.trim())
+    if (m) hits.push(m[1])
+  }
+  if (hits.length === 0) return { error: 'missing' }
+  if (hits.length > 1) return { error: 'duplicate', detail: hits.join(' / ') }
+  if (!GATE_BUCKETS.includes(hits[0])) return { error: 'unknown', detail: hits[0] }
+  return { bucket: hits[0] }
+}
+
+/**
+ * 全量扫声明：`{ entries: [{ name, rel, bucket }], problems: [...] }`，两者都按名排序。
+ * `entries` 只含**合法声明**的脚本；`problems` 逐条带回原因，由调用方决定红在哪条判据上。
+ */
+export function gateDeclarations(root) {
+  const files = scriptFilesOf(root)
+  if (files === null) return null
+  const entries = []
+  const problems = []
+  for (const rel of files) {
+    if (rel.endsWith('.test.mjs') || isStageFile(rel)) continue
+    const name = rel.replace(/\.mjs$/, '')
+    let text
+    try {
+      text = fs.readFileSync(path.join(root, 'scripts', rel), 'utf8')
+    } catch (e) {
+      problems.push({ name, rel, error: 'unreadable', detail: (e && e.message) || String(e) })
+      continue
+    }
+    const d = gateDeclOf(text)
+    if (d.error) problems.push({ name, rel, ...d })
+    else entries.push({ name, rel, bucket: d.bucket })
+  }
+  const key = (x) => x.name
+  return { entries: entries.sort((a, b) => (key(a) < key(b) ? -1 : 1)), problems: problems.sort((a, b) => (key(a) < key(b) ? -1 : 1)) }
 }

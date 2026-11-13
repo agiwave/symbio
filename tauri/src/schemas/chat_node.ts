@@ -62,7 +62,7 @@ export interface Principal {
  * 里是 `Principal` 结构体；前端消费方一律通过本函数拿到结构体形态。
  *
  * 与后端 Rust 侧 `Principal::from_legacy` **逐字一致**——同一份判据两处实现由
- * `scripts/protocol-mirror-audit.mjs` 的 C 组（词表）与本文件的 kind 常量数组守住。
+ * `scripts/audits/protocol-mirror-audit.mjs` 的 C 组（词表）与本文件的 kind 常量数组守住。
  */
 export function normalizePrincipal(value: Principal | string | undefined | null): Principal | undefined {
   if (value === undefined || value === null) return undefined
@@ -316,7 +316,7 @@ export function isUnsettledNodeStatus(status?: NodeStatus | null): boolean {
  * `messageTypes` 的重试分派——谁也不与后端对齐，改一个词就得靠人记得改两处。
  *
  * 处置与上面三张词表相同：常量在此、类型由常量数组派生，跨栈一致性交给
- * `scripts/protocol-mirror-audit.mjs` 的 C 组（后端枚举取值 ↔ 本词表）。
+ * `scripts/audits/protocol-mirror-audit.mjs` 的 C 组（后端枚举取值 ↔ 本词表）。
  */
 
 /** 子树重试：删除靶子节点及其子树 → 重新走 LLM 请求（[D-070 §决策 5]） */
@@ -407,7 +407,7 @@ export function messageTextOf(content: MessageContent | undefined | null): strin
  * `ChatNode` 从不下发：`agent_id` 在 `meta` 里（见 `registry/messageTypes.agentNameOf`），
  * `prompt` 在后端是 `#[serde(skip_serializing)]`（内容在 `meta.prompt`）。
  * 留着它们只会让人以为能从顶层读到。字段与后端的对应由
- * `scripts/protocol-mirror-audit.mjs` 的 D 组守着。
+ * `scripts/audits/protocol-mirror-audit.mjs` 的 D 组守着。
  */
 export interface ChatNode {
   id: string;

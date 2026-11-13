@@ -138,6 +138,13 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 **不数条数、不写号段**（「四条规矩」「E-001–E-011」这类）——条数会增、号段会跳，
 抄了必然漂移。
 
+**静态审计脚本都在 `scripts/audits/`，进门靠脚本头一行声明**——`// @gate guard|report|test|lib|off`
+（读它的唯一一处是 `scripts/gate.d/_shared.mjs` 的 `gateDeclarations`）。`30-docs` 只按声明分组
+执行，**没有待维护的清单**：新建一份守卫 = 建 `scripts/audits/x-audit.mjs` + 同名
+`x-audit.test.mjs` + 头里写 `@gate guard`，其余自动。声明漏了 / 写错桶 / 同名两处、
+或声明了却没被 `30-docs` 跑到，[`gate-wiring-audit`](scripts/audits/gate-wiring-audit.mjs)
+（GW-*）判红——这是机制唯一的坏死方式：**枚举写窄了，判据静默不跑**。
+
 找不到某条机制 / 约定写在哪：`node scripts/doc-find.mjs <关键词>`（搜全仓 `*.md` 与源码
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
@@ -219,7 +226,7 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
 - 文档**不要抄**代码签名与字段表：要清单就读定义（或它的 `//!` 头注释）。手抄的表必然漂移
  ——本仓库已数次出现「文档列的文件早已不存在」。
 - **过程文档必须归档**：一次性评审 / 迁移记录 / 已落地的实施方案一律 `git mv` 进
- `docs/archive/`（**模块目录同样适用**），由 `node scripts/doc-link-audit.mjs` 的 D-002 判定。
+ `docs/archive/`（**模块目录同样适用**），由 `node scripts/audits/doc-link-audit.mjs` 的 D-002 判定。
 - **活跃文档散文不得超过 1000 行**（D-003）：判据量的是**剥离 front-matter 后的正文、
  再减去所有 `### D-NNN` 决策块**——决策账是只追加的定案记录，长度是项目史的读数，
  读它的人按锚点跳（`decision-anchors` 是那条索引的唯一读法），不该被当成"该拆篇"的信号。
@@ -228,15 +235,15 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
  别人了」或「该拆篇了」的信号，按上面那张职责边界表处置。同一脚本的 D-004 另判**变更史残留**
  （「曾经 / 修订 / 后记 / 测试基线 A → B」），历史一律归 `git log`。
  ```bash
- node scripts/doc-link-audit.mjs # 文档体检（D 系判据），任一命中即失败
+ node scripts/audits/doc-link-audit.mjs # 文档体检（D 系判据），任一命中即失败
  ```
 
 ### Rust 侧
 
 - 遵循 `rustfmt.toml` + `clippy.toml`，**不要**手动格式化后被 CI 反复退回。
 - 异步上下文请使用 `tokio::sync::Mutex` / `tokio::sync::RwLock`；`std::sync::*` 只在 `spawn_blocking` 内部使用。
- - 审计脚本 `scripts/grep-audit.mjs` 中的 **S-002 规则**默认扫描全部插件（含测试代码）；这是邻近行启发式检查，不替代锁生命周期审查。
- - 已人工确认的 S-002 误报可在命中行末添加 `// grep-audit-allow S-002: 具体理由`，仅豁免该行，不应借此隐藏真实跨 await 持锁。回归测试 `node --test scripts/grep-audit.test.mjs` 已接入统一门禁。
+ - 审计脚本 `scripts/audits/grep-audit.mjs` 中的 **S-002 规则**默认扫描全部插件（含测试代码）；这是邻近行启发式检查，不替代锁生命周期审查。
+ - 已人工确认的 S-002 误报可在命中行末添加 `// grep-audit-allow S-002: 具体理由`，仅豁免该行，不应借此隐藏真实跨 await 持锁。回归测试 `node --test scripts/audits/grep-audit.test.mjs` 已接入统一门禁。
 - 日志：使用 `tracing`（`info!` / `warn!` / `error!` / `debug!`），**不要**用 `eprintln!` / `println!`。
  - 项目在 `tauri/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
 - 错误：实现 `thiserror` 派生 `PluginError` 变体，不要用 `String` 当错误类型。
@@ -263,7 +270,7 @@ mod tests;
 
 要点：
 
-- 布局由 `node scripts/test-layout-audit.mjs` 判定（已接入 `gate.mjs`），不靠人工记住。
+- 布局由 `node scripts/audits/test-layout-audit.mjs` 判定（已接入 `gate.mjs`），不靠人工记住。
 - **一个实现文件对应一个测试文件**。不要写"一个测试文件同时测几个实现文件"，
  也不要写"几个测试文件测同一个实现文件"——测试跟着它测的那个实现走。
 - **不要为测试文件单独建目录**。`X/tests.rs` 那种形态会让"模块"与"目录"两个概念

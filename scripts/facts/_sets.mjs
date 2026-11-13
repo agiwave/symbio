@@ -45,6 +45,7 @@
  *   「见下」不是清单声明，而它们的详细键表在 owner 文档内部——跨文档判据
  *   跨不进去，也不该跨进去（同一文档内的重复归文件内判据）。
  */
+// @gate lib
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -53,7 +54,7 @@ import { fileURLToPath } from 'node:url'
 import { loadEntries } from '../registry-lib.mjs'
 import { capabilityFacts } from './_capability.mjs'
 import { pluginSources, extractRouteArms, vdfsOps } from '../route-facts.mjs'
-import { collect as collectGateCodes } from '../gate-codes-audit.mjs'
+import { collect as collectGateCodes } from '../audits/gate-codes-audit.mjs'
 
 /** 正文里的清单标记：`<!-- list:<id> owner -->`（RG-029 守它与 front-matter 两面对账）。 */
 const LIST_MARK = (id) => new RegExp(`<!--\\s*list:\\s*${id}\\s+owner\\s*-->`)

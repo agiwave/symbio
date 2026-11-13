@@ -38,6 +38,7 @@
  *
  * 临时文件放 .git/ 下（不污染工作区、不进 status），路径随进程结束清理。
  */
+// @gate test
 
 import fs from 'node:fs'
 import path from 'node:path'

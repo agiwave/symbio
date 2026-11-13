@@ -20,6 +20,7 @@
  * 汇总页的文件形态在 `docs/README.md`（总账块）与各 kind 的 `README.md`（门禁自动重生成）；
  * 本脚本只服务「现在要干什么」。
  */
+// @gate off
 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

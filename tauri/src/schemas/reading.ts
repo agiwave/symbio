@@ -8,7 +8,7 @@
  * 换一个产者（成本、记忆、任何只读路由）前端零改动。
  *
  * 后端真源：`crates/symbio-kernel/src/present/reading.rs`。
- * 跨栈镜像由 `scripts/protocol-mirror-audit.mjs` 的两张登记表看守：结构体在
+ * 跨栈镜像由 `scripts/audits/protocol-mirror-audit.mjs` 的两张登记表看守：结构体在
  * `STRUCT_SETS`（`ReadingRow` / `ReadingSection` / `ReadingPanel`），闭集词表在
  * `ENUM_SETS`（`ReadingTone` ↔ `READING_TONES`）。字段或取值改名 ⇒ 该审计红。
  */

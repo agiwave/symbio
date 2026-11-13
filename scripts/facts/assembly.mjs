@@ -25,6 +25,7 @@
  * 前缀都取同一个字面量。某个 id 暂时没有代码引用不代表它可以删——删掉会让下一次
  * 「按名字查找插件」重新手写字符串。文件头按 R-003 承认这一点，口径写在生成器里。
  */
+// @gate test
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";

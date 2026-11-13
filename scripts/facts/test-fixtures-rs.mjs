@@ -20,6 +20,7 @@
  * `#[cfg(test)]` 用例反向依赖一个上层 crate（或形成 dev-dependency 环）；而生产代码
  * 里一份副本都不留的前提已经由 `#[cfg(any(test, feature = "test-fixtures"))]` 满足。
  */
+// @gate lib
 import { pluginDeclarationFaces } from './events-rs.mjs'
 
 const OUT = 'crates/symbio-sdk/src/test_fixtures.rs'

@@ -23,7 +23,7 @@
  * `meta` 是后端 flatten 出来的**场景字段袋**，字段名与含义只有后端契约知道。组件里直接写
  * `node.meta.recoverable` 等于把后端字段名抄进视图层——后端改一个字段名要在所有渲染器里找。
  * 于是**读取集中在这一处**，组件只问「能不能重试」，不问「meta 里有没有 recoverable」。
- * 这也是机制审计（`scripts/mechanism-audit.mjs` M-001）的判定依据：`components/` 下
+ * 这也是机制审计（`scripts/audits/mechanism-audit.mjs` M-001）的判定依据：`components/` 下
  * 不允许出现对后端 meta 字段的直接读取。
  *
  * 口径提醒：随 [D-111](../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")，「那几个数怎么说」
@@ -94,7 +94,7 @@ export function messageTypeOf(node: Pick<ChatNode, 'type'>): NodeKind {
  *
  * 框架层（组件 / store / service / composable）只问「是不是这个形状」，
  * 不再自己写 `type === NODE_KIND_*`——分派轴住在 registry，框架零类型分支
- * （判据见 `scripts/kind-branch-audit.mjs`）。
+ * （判据见 `scripts/audits/kind-branch-audit.mjs`）。
  */
 export const isSkeletonKind = (kind: NodeKind): boolean => kind === NODE_KIND_SKELETON
 export const isTypingKind = (kind: NodeKind): boolean => kind === NODE_KIND_TYPING
@@ -357,7 +357,7 @@ export const isUserFacet = (f: Pick<MessageFacets, 'role'>): boolean =>
 // 字段名，要在所有渲染器里找。因此**读取集中在这一点**，组件只问「能不能重试」，
 // 不问「meta 里有没有 recoverable」。
 //
-// 这也是机制审计脚本（`scripts/mechanism-audit.mjs`）的判定依据：
+// 这也是机制审计脚本（`scripts/audits/mechanism-audit.mjs`）的判定依据：
 // `components/` 下不允许出现对后端 meta 字段的直接读取。
 
 /** 合成「请求」子节点标记（渲染期提升，不落存储） */

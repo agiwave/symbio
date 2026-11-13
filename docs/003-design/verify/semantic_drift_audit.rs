@@ -30,7 +30,7 @@
 //!
 //! **表侧是生成物**：键与值域读 `facts`（`DE-001 §8` 的投影），本文件不抄第二份。
 //! **D4 的边界**：它比的是「表 ↔ 赋值样本」，不解析 Rust 源码。文档取值 ↔ 真实代码目录
-//! 的对账由 `scripts/doc-symbol-audit.mjs` 的 **D-014** 负责（那里有文件语料），
+//! 的对账由 `scripts/audits/doc-symbol-audit.mjs` 的 **D-014** 负责（那里有文件语料），
 //! 两处各判一件事——一个判据抄成两份，同一个输入就可能只翻红一处。
 //!
 //! 论证纪律：每个维度配**反向用例**（构造一个合规样本，再构造一个漂移样本，
@@ -238,7 +238,7 @@ pub fn check_d3_trivial_abuse(scenarios: &[Scenario], _unused: f64) -> Vec<Findi
 ///
 /// 两个方向都要看：赋值样本里用了表外的键（代码悄悄长了机制），或表里的键在样本里
 /// 一次都没出现（表发明了没人用的键）。样本是**赋值**而不是源码扫描——本程序不解析
-/// Rust 源码；文档取值 ↔ 真实代码目录的对账归 `scripts/doc-symbol-audit.mjs` 的
+/// Rust 源码；文档取值 ↔ 真实代码目录的对账归 `scripts/audits/doc-symbol-audit.mjs` 的
 /// **D-014**（那里有文件语料），两处各判一件事，不重复判同一件。
 pub fn check_d4_table_code(table: &BTreeSet<String>, scenarios: &[Scenario]) -> Vec<Finding> {
     let in_code: BTreeSet<String> = scenarios

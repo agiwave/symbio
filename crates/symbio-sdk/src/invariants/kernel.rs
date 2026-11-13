@@ -130,5 +130,5 @@ pub fn rework_core(replaces: &[&str], max_rework: u32) -> Vec<(String, u32, u32)
     bad
 }
 
-// ── panic 面登记（判据见 `scripts/panic-audit.mjs`）──────────────────
+// ── panic 面登记（判据见 `scripts/audits/panic-audit.mjs`）──────────────────
 // panic-allow crates/symbio-sdk/src/invariants/kernel.rs::dep_graph_core: 穷尽性不变量：indeg 与 graph 同构造（同一批键），走到 expect 说明本文件的判据漏了一个分支，属代码缺陷。

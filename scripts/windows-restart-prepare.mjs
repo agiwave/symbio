@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // One-shot, prepare-only supervisor. No process termination or application launch.
+// @gate test
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';

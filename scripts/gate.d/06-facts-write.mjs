@@ -55,7 +55,7 @@ import { autoChain } from './_shared.mjs'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 const genFacts = path.join(scriptDir, '..', 'gen-facts.mjs')
-const regAudit = path.join(scriptDir, '..', 'registry-audit.mjs')
+const regAudit = path.join(scriptDir, '..', 'audits', 'registry-audit.mjs')
 const docRefs = path.join(scriptDir, '..', 'gen-doc-refs.mjs')
 const verifyFacts = path.join(scriptDir, '..', 'gen-verify-facts.mjs')
 

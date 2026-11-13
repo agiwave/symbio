@@ -36,7 +36,7 @@ const git = (ctx, args, label) => ctx.run({ label, cmd: 'git', args, cwd: repoRo
 
 // ── 提取函数：各落点的形状不同，判据的**读法**也必须不同 ─────────
 
-/** `scripts/arch-shape-audit.mjs` 的 `SHAPE_BASELINE`：同样是三元尾部的对象字面量，三格。
+/** `scripts/audits/arch-shape-audit.mjs` 的 `SHAPE_BASELINE`：同样是三元尾部的对象字面量，三格。
  *  键名与键序就是 `CORE_SHAPE_BASELINE=<traits>:<methods>:<defaults>` 的位置口径，
  *  也必须是审计侧读的那三格——任何一边单改，这里就会读不出格（⇒ 判红，不是判绿）。 */
 function coreShapeCells(text) {
@@ -52,7 +52,7 @@ function coreShapeCells(text) {
   return cells
 }
 
-/** `scripts/arch-shape-audit.mjs` 的 `VOCAB_BASELINE`：同样是三元尾部的对象字面量，两格。
+/** `scripts/audits/arch-shape-audit.mjs` 的 `VOCAB_BASELINE`：同样是三元尾部的对象字面量，两格。
  *  键序就是 `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 的位置口径。 */
 function vocabCells(text) {
   const cells = new Map()
@@ -66,7 +66,7 @@ function vocabCells(text) {
   return cells
 }
 
-/** `scripts/arch-shape-audit.mjs` 的 `DATA_BASELINE`（CS-009）：三元尾部对象，两格。
+/** `scripts/audits/arch-shape-audit.mjs` 的 `DATA_BASELINE`（CS-009）：三元尾部对象，两格。
  *  键序就是 `CORE_DATA_BASELINE=<structFields>:<enumVariants>` 的位置口径。
  *  与 `coreShapeCells` 分开读的理由：两组量住同一个文件但失效面不同，混着读会让
  *  「哪一格涨了」在日志里看不出来。 */
@@ -82,7 +82,7 @@ function coreDataCells(text) {
   return cells
 }
 
-/** `scripts/projection-purity.mjs` 的 `PROJ_BASELINE`（PP-004）：三元尾部对象，两格。
+/** `scripts/audits/projection-purity.mjs` 的 `PROJ_BASELINE`（PP-004）：三元尾部对象，两格。
  *  键序就是 `CORE_PROJECTION_BASELINE=<files>:<ctors>` 的位置口径；放宽的**资格**由
  *  PP-005 判（注释里必须挂一条存在的 `### D-NNN`），本条只判数字有没有比上一版更松。 */
 function coreProjectionCells(text) {
@@ -95,7 +95,7 @@ function coreProjectionCells(text) {
   return cells
 }
 
-/** `scripts/kind-branch-audit.mjs` 的 `BRANCH_BASELINE`：三元尾部对象，两格。
+/** `scripts/audits/kind-branch-audit.mjs` 的 `BRANCH_BASELINE`：三元尾部对象，两格。
  *  `framework` 是「框架层自己认形态」的存量（目标 0），`registry` 是机制层判据与映射表；
  *  两格都只许降。键序就是 `KIND_BRANCH_BASELINE=<framework>:<registry>` 的位置口径。 */
 function kindBranchCells(text) {
@@ -108,7 +108,7 @@ function kindBranchCells(text) {
   return cells
 }
 
-/** `scripts/spec-coverage-audit.mjs` 的 `BASELINE`：两格债务（人工判据存量 / 无执行方）。 */
+/** `scripts/audits/spec-coverage-audit.mjs` 的 `BASELINE`：两格债务（人工判据存量 / 无执行方）。 */
 function specCoverageCells(text) {
   const cells = new Map()
   const m = /:\s*\{\s*manual:\s*(\d+),\s*missing:\s*(\d+)\s*\}/.exec(text.replace(/\r\n/g, '\n'))
@@ -119,7 +119,7 @@ function specCoverageCells(text) {
   return cells
 }
 
-/** `scripts/injection-matrix-audit.mjs` 的 `BASELINE`：未归属格 / 已登记缺口格。 */
+/** `scripts/audits/injection-matrix-audit.mjs` 的 `BASELINE`：未归属格 / 已登记缺口格。 */
 function injectionMatrixCells(text) {
   const cells = new Map()
   const m = /:\s*\{\s*unassigned:\s*(\d+),\s*deferred:\s*(\d+)\s*\}/.exec(text.replace(/\r\n/g, '\n'))
@@ -130,7 +130,7 @@ function injectionMatrixCells(text) {
   return cells
 }
 
-/** `scripts/dead-code-audit.mjs` 的 `R002_BASELINE`：默认值是三元尾部的那个字面量。
+/** `scripts/audits/dead-code-audit.mjs` 的 `R002_BASELINE`：默认值是三元尾部的那个字面量。
  *  注意三元问号那一侧是 `? Number(…)` 而**不是** `: Number(…)`——写成后者会永远取不到
  *  格，于是这一项在日志里显示成「跳过」，看上去无害，实则这条棘轮**已经没人守了**。 */
 function deadCodeCells(text) {
@@ -141,7 +141,7 @@ function deadCodeCells(text) {
   return cells
 }
 
-/** `scripts/grep-audit.mjs` 的 `LEGACY_ROLE_WRITE_BASELINE`（S-014）：与 R-002 同构的
+/** `scripts/audits/grep-audit.mjs` 的 `LEGACY_ROLE_WRITE_BASELINE`（S-014）：与 R-002 同构的
  *  三元形状，一格——ChatNode 存量 `role` 格直写的总数上限（只许降）。 */
 function legacyRoleCells(text) {
   const cells = new Map()
@@ -151,7 +151,7 @@ function legacyRoleCells(text) {
   return cells
 }
 
-/** `scripts/obligation-bypass-audit.mjs` 的 `BYPASS_BASELINE`（OB-001）：同构的三元形状，
+/** `scripts/audits/obligation-bypass-audit.mjs` 的 `BYPASS_BASELINE`（OB-001）：同构的三元形状，
  *  一格——**调度旁路**（未承认的直调 `owes()`）点数上限（只许降）。它是「收口完成 = 调度
  *  旁路归零」这条定义的**唯一持有者**：设计文档正文只写口径，数字住这里，所以放宽它就
  *  等于放宽那个定义。 */
@@ -273,7 +273,7 @@ const RATCHETS = [
     // `arch-shape-audit` 的 CS-002 判（注释里必须有能打开的 ADR），本条只判「数字有没有比
     // 上一版更松」——两半合起来才是「放宽 = 写一份决策」。
     id: 'core-shape',
-    file: 'scripts/arch-shape-audit.mjs',
+    file: 'scripts/audits/arch-shape-audit.mjs',
     dir: 'ceiling',
     cellsOf: coreShapeCells,
     waivers: waiverReader('core-shape-allow'),
@@ -285,7 +285,7 @@ const RATCHETS = [
     // 留着」由 CS-006 逐名判据（DE-024 D-202）；放宽 = 让「新事件仍要改内核手写表」
     // 悄悄回来，所以必须改一个提交进仓库的数字。
     id: 'vocab',
-    file: 'scripts/arch-shape-audit.mjs',
+    file: 'scripts/audits/arch-shape-audit.mjs',
     dir: 'ceiling',
     cellsOf: vocabCells,
     // 不设豁免标记：收窄自动生效，变宽只能改基线，而改基线会被本条按基准版本抓住。
@@ -298,7 +298,7 @@ const RATCHETS = [
     // 住同一个文件、用同一个豁免标记名，但**是另一组格**：放宽的资格由 CS-002 判，
     // 本条只判「数字有没有比上一版更松」。
     id: 'core-data',
-    file: 'scripts/arch-shape-audit.mjs',
+    file: 'scripts/audits/arch-shape-audit.mjs',
     dir: 'ceiling',
     cellsOf: coreDataCells,
     waivers: waiverReader('core-shape-allow'),
@@ -310,7 +310,7 @@ const RATCHETS = [
     // `symbio_sdk/projection/`，「加一个能力」就又成了改架构模块（DE-025 D-221）；
     // 放宽的资格由 PP-005 判（必须挂一条存在的决策），本条只判数字有没有比上一版更松。
     id: 'core-projection',
-    file: 'scripts/projection-purity.mjs',
+    file: 'scripts/audits/projection-purity.mjs',
     dir: 'ceiling',
     cellsOf: coreProjectionCells,
     waivers: waiverReader('projection-purity-allow'),
@@ -322,7 +322,7 @@ const RATCHETS = [
     // 放宽的**资格**由 `kind-branch-audit` 的 KB-001 判（超过基线即红），本条只判
     // 「数字有没有比上一版更松」——两半合起来才是「框架真的零分支」。
     id: 'kind-branch',
-    file: 'scripts/kind-branch-audit.mjs',
+    file: 'scripts/audits/kind-branch-audit.mjs',
     dir: 'ceiling',
     cellsOf: kindBranchCells,
     waivers: waiverReader('kind-branch-allow'),
@@ -332,7 +332,7 @@ const RATCHETS = [
   {
     // 规范执行方覆盖：`manual` 是「无机器判据」的合法存量，`missing` 是违规存量（目标 0）。
     id: 'spec-coverage',
-    file: 'scripts/spec-coverage-audit.mjs',
+    file: 'scripts/audits/spec-coverage-audit.mjs',
     dir: 'ceiling',
     cellsOf: specCoverageCells,
     waivers: waiverReader('spec-coverage-allow'),
@@ -343,7 +343,7 @@ const RATCHETS = [
     // 异常注入矩阵：`unassigned` 是没归属的格（目标 0），`deferred` 是已登记缺口的格。
     // 缺口只能被补成用例而减少；把 `deferred` 改大等于把「暂不测」变成新常态。
     id: 'injection-matrix',
-    file: 'scripts/injection-matrix-audit.mjs',
+    file: 'scripts/audits/injection-matrix-audit.mjs',
     dir: 'ceiling',
     cellsOf: injectionMatrixCells,
     waivers: waiverReader('injection-allow'),
@@ -352,7 +352,7 @@ const RATCHETS = [
   },
   {
     id: 'dead-code',
-    file: 'scripts/dead-code-audit.mjs',
+    file: 'scripts/audits/dead-code-audit.mjs',
     dir: 'ceiling',
     cellsOf: deadCodeCells,
     waivers: waiverReader('dead-code-allow'),
@@ -364,7 +364,7 @@ const RATCHETS = [
     // 会炸掉全部 `..Default::default()` 构造点（函数式更新要求字段可见），
     // 所以钉数字而不是钉编译。
     id: 'legacy-role',
-    file: 'scripts/grep-audit.mjs',
+    file: 'scripts/audits/grep-audit.mjs',
     dir: 'ceiling',
     cellsOf: legacyRoleCells,
     waivers: waiverReader('legacy-role-allow'),
@@ -376,7 +376,7 @@ const RATCHETS = [
     // 而定义要成立，那个数就不能被悄悄改大——「改一个数字」看起来像维护，实际是在
     // 取消一条已经写进设计的定义。`D-158` 之后这里只数**调度旁路**：动手前复核另立一格。
     id: 'obligation-bypass',
-    file: 'scripts/obligation-bypass-audit.mjs',
+    file: 'scripts/audits/obligation-bypass-audit.mjs',
     dir: 'ceiling',
     cellsOf: obligationBypassCells,
     waivers: waiverReader('obligation-bypass-allow'),
@@ -388,7 +388,7 @@ const RATCHETS = [
     // 就地理由 + 点名的行确实接了执行体，而那件事由 `obligation-bypass-audit` 自己判；
     // 这一格只管「在册的护栏有没有变多」。
     id: 'obligation-precheck',
-    file: 'scripts/obligation-bypass-audit.mjs',
+    file: 'scripts/audits/obligation-bypass-audit.mjs',
     dir: 'ceiling',
     cellsOf: obligationPrecheckCells,
     waivers: waiverReader('obligation-precheck-allow'),

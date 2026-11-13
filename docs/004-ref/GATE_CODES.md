@@ -14,7 +14,7 @@ lists: [gate-codes=owner]
 >
 > 判据码是每条机械判定的**地址**：豁免注释、门禁日志、文档指认都指向它。
 > 每条判据**判什么**归声明它的那个脚本的头注释；撞号与漏登记由
-> [`scripts/gate-codes-audit.mjs`](../../scripts/gate-codes-audit.mjs) 判（GC-001–006）。
+> [`scripts/audits/gate-codes-audit.mjs`](../../scripts/audits/gate-codes-audit.mjs) 判（GC-001–006）。
 
 <!-- list:gate-codes owner -->
 
@@ -22,224 +22,225 @@ lists: [gate-codes=owner]
 
 | 前缀 | 归属 | 声明脚本 | 已用号段 | 下一个可用号 |
 |---|---|---|---|---|
-| **AD** | 架构树零调用判据 | `scripts/arch-dead-code-audit.mjs` | AD-001–004 | `AD-005` |
-| **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
-| **BS** | 棘轮基线面的变更审 | `scripts/baseline-scope-audit.mjs` | BS-001–005 | `BS-006` |
-| **CP** | 控制面形状（唯一循环体 / 机制层无域名 / 机制面指纹 / 第二推进循环） | `scripts/control-plane-audit.mjs` | CP-001、CP-004、CP-006、CP-009 | `CP-010` |
-| **CS** | core 形状 | `scripts/arch-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–011 | `CS-012` |
-| **D** | 文档正文与链接 | `scripts/capability-migration-audit.mjs` · `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–020、D-403–404 | `D-405` |
-| **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
-| **DR** | 死路径（写出来的 crate 名必须存在） | `scripts/dead-path-audit.mjs` | DR-001–003 | `DR-004` |
-| **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
-| **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–014 | `E-015` |
-| **EL** | 引擎收口（DE-044 的账本读数） | `scripts/engine-ledger-audit.mjs` | EL-001–003 | `EL-004` |
-| **EOL** | 行尾（工作树 / 入库 / 声明三面一致） | `scripts/eol-audit.mjs` | EOL-001–003 | `EOL-004` |
-| **EX** | 能力全面拆分（名册处置与迁移边界） | `scripts/capability-ledger-audit.mjs` · `scripts/capability-migration-audit.mjs` · `scripts/extension-locality-audit.mjs` · `scripts/extension-vocab-audit.mjs` · `scripts/uninstall-edge-audit.mjs` | EX-002–004、EX-006–008 | `EX-009` |
-| **FA** | 门面（plugin-api）自有实现行数棘轮 | `scripts/facade-loc-audit.mjs` | FA-001–004 | `FA-005` |
-| **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
-| **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
-| **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–006 | `GW-007` |
-| **HS** | 扩展层插件宿主面 | `scripts/plugin-surface-audit.mjs` | HS-001–006 | `HS-007` |
-| **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
-| **INJ** | 异常注入矩阵 | `scripts/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
-| **KB** | 前端分支（形态 / 资源类型） | `scripts/kind-branch-audit.mjs` | KB-001–002 | `KB-003` |
-| **LP** | 义务环纯度（类型 / 依赖 / 世界语义词根 / 端口受理面） | `scripts/loop-purity-audit.mjs` | LP-001–005 | `LP-006` |
-| **LWF** | 列表写入口事实 | `scripts/list-write-fact-audit.mjs` | LWF-001–002 | `LWF-003` |
-| **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–010 | `M-011` |
-| **ME** | 机制强制等级清单 | `scripts/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
-| **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
-| **OB** | 义务环派发面（调度旁路与幂等点问的两类计数棘轮） | `scripts/obligation-bypass-audit.mjs` | OB-001–004 | `OB-005` |
-| **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
-| **PP** | 投影纯净性 | `scripts/projection-purity.mjs` | PP-001–005 | `PP-006` |
-| **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
-| **PTS** | 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 重试条文 / 读侧不认端口名） | `scripts/port-surface-audit.mjs` | PTS-001–007 | `PTS-008` |
-| **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–003 | `R-004` |
+| **AD** | 架构树零调用判据 | `scripts/audits/arch-dead-code-audit.mjs` | AD-001–004 | `AD-005` |
+| **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/audits/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
+| **BS** | 棘轮基线面的变更审 | `scripts/audits/baseline-scope-audit.mjs` | BS-001–005 | `BS-006` |
+| **CP** | 控制面形状（唯一循环体 / 机制层无域名 / 机制面指纹 / 第二推进循环） | `scripts/audits/control-plane-audit.mjs` | CP-001、CP-004、CP-006、CP-009 | `CP-010` |
+| **CS** | core 形状 | `scripts/audits/arch-shape-audit.mjs` · `scripts/audits/shared-event-vocab-audit.mjs` | CS-001–011 | `CS-012` |
+| **D** | 文档正文与链接 | `scripts/audits/capability-migration-audit.mjs` · `scripts/audits/doc-link-audit.mjs` · `scripts/audits/doc-symbol-audit.mjs` | D-001–014、D-016–020、D-403–404 | `D-405` |
+| **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/audits/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
+| **DR** | 死路径（写出来的 crate 名必须存在） | `scripts/audits/dead-path-audit.mjs` | DR-001–003 | `DR-004` |
+| **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/audits/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
+| **E** | 插件入口与门面 | `scripts/audits/plugin-entry-audit.mjs` | E-001–009、E-011–014 | `E-015` |
+| **EL** | 引擎收口（DE-044 的账本读数） | `scripts/audits/engine-ledger-audit.mjs` | EL-001–003 | `EL-004` |
+| **EOL** | 行尾（工作树 / 入库 / 声明三面一致） | `scripts/audits/eol-audit.mjs` | EOL-001–003 | `EOL-004` |
+| **EX** | 能力全面拆分（名册处置与迁移边界） | `scripts/audits/capability-ledger-audit.mjs` · `scripts/audits/capability-migration-audit.mjs` · `scripts/audits/extension-locality-audit.mjs` · `scripts/audits/extension-vocab-audit.mjs` · `scripts/audits/uninstall-edge-audit.mjs` | EX-002–004、EX-006–008 | `EX-009` |
+| **FA** | 门面（plugin-api）自有实现行数棘轮 | `scripts/audits/facade-loc-audit.mjs` | FA-001–004 | `FA-005` |
+| **FB** | 事实轨边界 | `scripts/audits/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
+| **GC** | 判据码命名空间本身 | `scripts/audits/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
+| **GW** | 门禁接线（脚本自声明与门禁执行的对账） | `scripts/audits/gate-wiring-audit.mjs` | GW-001–007 | `GW-008` |
+| **HS** | 扩展层插件宿主面 | `scripts/audits/plugin-surface-audit.mjs` | HS-001–006 | `HS-007` |
+| **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/audits/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
+| **INJ** | 异常注入矩阵 | `scripts/audits/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
+| **KB** | 前端分支（形态 / 资源类型） | `scripts/audits/kind-branch-audit.mjs` | KB-001–002 | `KB-003` |
+| **LP** | 义务环纯度（类型 / 依赖 / 世界语义词根 / 端口受理面） | `scripts/audits/loop-purity-audit.mjs` | LP-001–005 | `LP-006` |
+| **LWF** | 列表写入口事实 | `scripts/audits/list-write-fact-audit.mjs` | LWF-001–002 | `LWF-003` |
+| **M** | 机制表 | `scripts/audits/mechanism-audit.mjs` | M-001–010 | `M-011` |
+| **ME** | 机制强制等级清单 | `scripts/audits/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
+| **NDC** | 主体直连 | `scripts/audits/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
+| **OB** | 义务环派发面（调度旁路与幂等点问的两类计数棘轮） | `scripts/audits/obligation-bypass-audit.mjs` | OB-001–004 | `OB-005` |
+| **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/audits/panic-audit.mjs` | PN-001–003 | `PN-004` |
+| **PP** | 投影纯净性 | `scripts/audits/projection-purity.mjs` | PP-001–005 | `PP-006` |
+| **PS** | prompt 形状基线 | `scripts/audits/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
+| **PTS** | 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 重试条文 / 读侧不认端口名） | `scripts/audits/port-surface-audit.mjs` | PTS-001–007 | `PTS-008` |
+| **R** | 死代码 | `scripts/audits/dead-code-audit.mjs` | R-001–003 | `R-004` |
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–033 | `RG-034` |
-| **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–010、S-012–017 | `S-018` |
-| **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
-| **SD** | 会话死码台账（B 类能力待接入） | `scripts/session-dead-code-audit.mjs` | SD-001–002 | `SD-003` |
-| **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
-| **SR** | 归宿行（开不出账的行）条数棘轮 | `scripts/sink-row-audit.mjs` | SR-001–004 | `SR-005` |
-| **SRA** | 控制面 session 退役线的进度尺（豁免账 / 单槽登记） | `scripts/session-retire-audit.mjs` | SRA-001–005 | `SRA-006` |
-| **SV** | 共享词汇 | `scripts/shared-name-audit.mjs` | SV-001、SV-003–004 | `SV-005` |
-| **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
-| **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
-| **TR** | turn 词根冻结（废弃概念的存量棘轮） | `scripts/turn-root-audit.mjs` | TR-001–004 | `TR-005` |
-| **V** | 分域形状 | `scripts/domain-vocab-audit.mjs` | V-001–002 | `V-003` |
+| **S** | 源码 grep 形态 | `scripts/audits/grep-audit.mjs` | S-001–003、S-006–010、S-012–017 | `S-018` |
+| **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/audits/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
+| **SD** | 会话死码台账（B 类能力待接入） | `scripts/audits/session-dead-code-audit.mjs` | SD-001–002 | `SD-003` |
+| **SPC** | 规范执行方覆盖 | `scripts/audits/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
+| **SR** | 归宿行（开不出账的行）条数棘轮 | `scripts/audits/sink-row-audit.mjs` | SR-001–004 | `SR-005` |
+| **SRA** | 控制面 session 退役线的进度尺（豁免账 / 单槽登记） | `scripts/audits/session-retire-audit.mjs` | SRA-001–005 | `SRA-006` |
+| **SV** | 共享词汇 | `scripts/audits/shared-name-audit.mjs` | SV-001、SV-003–004 | `SV-005` |
+| **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/audits/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
+| **TD** | 工具自声明行为位（声明面基线对账） | `scripts/audits/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
+| **TR** | turn 词根冻结（废弃概念的存量棘轮） | `scripts/audits/turn-root-audit.mjs` | TR-001–004 | `TR-005` |
+| **V** | 分域形状 | `scripts/audits/domain-vocab-audit.mjs` | V-001–002 | `V-003` |
 
 ## 2. 逐码归属
 
 | 判据码 | 声明脚本 |
 |---|---|
-| **AD-001** | `scripts/arch-dead-code-audit.mjs` |
-| **AD-002** | `scripts/arch-dead-code-audit.mjs` |
-| **AD-003** | `scripts/arch-dead-code-audit.mjs` |
-| **AD-004** | `scripts/arch-dead-code-audit.mjs` |
-| **AO-001** | `scripts/agent-ownership-audit.mjs` |
-| **AO-002** | `scripts/agent-ownership-audit.mjs` |
-| **AO-003** | `scripts/agent-ownership-audit.mjs` |
-| **AO-004** | `scripts/agent-ownership-audit.mjs` |
-| **AO-005** | `scripts/agent-ownership-audit.mjs` |
-| **AO-006** | `scripts/agent-ownership-audit.mjs` |
-| **BS-001** | `scripts/baseline-scope-audit.mjs` |
-| **BS-002** | `scripts/baseline-scope-audit.mjs` |
-| **BS-003** | `scripts/baseline-scope-audit.mjs` |
-| **BS-004** | `scripts/baseline-scope-audit.mjs` |
-| **BS-005** | `scripts/baseline-scope-audit.mjs` |
-| **CP-001** | `scripts/control-plane-audit.mjs` |
-| **CP-004** | `scripts/control-plane-audit.mjs` |
-| **CP-006** | `scripts/control-plane-audit.mjs` |
-| **CP-009** | `scripts/control-plane-audit.mjs` |
-| **CS-001** | `scripts/arch-shape-audit.mjs` |
-| **CS-002** | `scripts/arch-shape-audit.mjs` |
-| **CS-003** | `scripts/arch-shape-audit.mjs` |
-| **CS-004** | `scripts/arch-shape-audit.mjs` |
-| **CS-005** | `scripts/arch-shape-audit.mjs` |
-| **CS-006** | `scripts/arch-shape-audit.mjs` |
-| **CS-007** | `scripts/shared-event-vocab-audit.mjs` |
-| **CS-008** | `scripts/arch-shape-audit.mjs` |
-| **CS-009** | `scripts/arch-shape-audit.mjs` |
-| **CS-010** | `scripts/arch-shape-audit.mjs` |
-| **CS-011** | `scripts/shared-event-vocab-audit.mjs` |
-| **D-001** | `scripts/doc-link-audit.mjs` |
-| **D-002** | `scripts/doc-link-audit.mjs` |
-| **D-003** | `scripts/doc-link-audit.mjs` |
-| **D-004** | `scripts/doc-link-audit.mjs` |
-| **D-005** | `scripts/doc-symbol-audit.mjs` |
-| **D-006** | `scripts/doc-link-audit.mjs` |
-| **D-007** | `scripts/doc-link-audit.mjs` |
-| **D-008** | `scripts/doc-link-audit.mjs` |
-| **D-009** | `scripts/doc-symbol-audit.mjs` |
-| **D-010** | `scripts/doc-link-audit.mjs` |
-| **D-011** | `scripts/doc-symbol-audit.mjs` |
-| **D-012** | `scripts/doc-symbol-audit.mjs` |
-| **D-013** | `scripts/doc-link-audit.mjs` |
-| **D-014** | `scripts/doc-symbol-audit.mjs` |
-| **D-016** | `scripts/doc-link-audit.mjs` |
-| **D-017** | `scripts/doc-link-audit.mjs` |
-| **D-018** | `scripts/doc-link-audit.mjs` |
-| **D-019** | `scripts/doc-link-audit.mjs` |
-| **D-020** | `scripts/doc-symbol-audit.mjs` |
-| **D-403** | `scripts/capability-migration-audit.mjs` |
-| **D-404** | `scripts/capability-migration-audit.mjs` |
-| **DC-001** | `scripts/doc-count-audit.mjs` |
-| **DC-002** | `scripts/doc-count-audit.mjs` |
-| **DC-003** | `scripts/doc-count-audit.mjs` |
-| **DC-004** | `scripts/doc-count-audit.mjs` |
-| **DC-005** | `scripts/doc-count-audit.mjs` |
-| **DR-001** | `scripts/dead-path-audit.mjs` |
-| **DR-002** | `scripts/dead-path-audit.mjs` |
-| **DR-003** | `scripts/dead-path-audit.mjs` |
-| **DS-001** | `scripts/doc-section-audit.mjs` |
-| **DS-002** | `scripts/doc-section-audit.mjs` |
-| **E-001** | `scripts/plugin-entry-audit.mjs` |
-| **E-002** | `scripts/plugin-entry-audit.mjs` |
-| **E-003** | `scripts/plugin-entry-audit.mjs` |
-| **E-004** | `scripts/plugin-entry-audit.mjs` |
-| **E-005** | `scripts/plugin-entry-audit.mjs` |
-| **E-006** | `scripts/plugin-entry-audit.mjs` |
-| **E-007** | `scripts/plugin-entry-audit.mjs` |
-| **E-008** | `scripts/plugin-entry-audit.mjs` |
-| **E-009** | `scripts/plugin-entry-audit.mjs` |
-| **E-011** | `scripts/plugin-entry-audit.mjs` |
-| **E-012** | `scripts/plugin-entry-audit.mjs` |
-| **E-013** | `scripts/plugin-entry-audit.mjs` |
-| **E-014** | `scripts/plugin-entry-audit.mjs` |
-| **EL-001** | `scripts/engine-ledger-audit.mjs` |
-| **EL-002** | `scripts/engine-ledger-audit.mjs` |
-| **EL-003** | `scripts/engine-ledger-audit.mjs` |
-| **EOL-001** | `scripts/eol-audit.mjs` |
-| **EOL-002** | `scripts/eol-audit.mjs` |
-| **EOL-003** | `scripts/eol-audit.mjs` |
-| **EX-002** | `scripts/extension-locality-audit.mjs` |
-| **EX-003** | `scripts/capability-migration-audit.mjs` |
-| **EX-004** | `scripts/uninstall-edge-audit.mjs` |
-| **EX-006** | `scripts/capability-ledger-audit.mjs` |
-| **EX-007** | `scripts/capability-migration-audit.mjs` |
-| **EX-008** | `scripts/extension-vocab-audit.mjs` |
-| **FA-001** | `scripts/facade-loc-audit.mjs` |
-| **FA-002** | `scripts/facade-loc-audit.mjs` |
-| **FA-003** | `scripts/facade-loc-audit.mjs` |
-| **FA-004** | `scripts/facade-loc-audit.mjs` |
-| **FB-001** | `scripts/facts-boundary-audit.mjs` |
-| **FB-002** | `scripts/facts-boundary-audit.mjs` |
-| **GC-001** | `scripts/gate-codes-audit.mjs` |
-| **GC-002** | `scripts/gate-codes-audit.mjs` |
-| **GC-003** | `scripts/gate-codes-audit.mjs` |
-| **GC-004** | `scripts/gate-codes-audit.mjs` |
-| **GC-005** | `scripts/gate-codes-audit.mjs` |
-| **GC-006** | `scripts/gate-codes-audit.mjs` |
-| **GW-001** | `scripts/gate-wiring-audit.mjs` |
-| **GW-002** | `scripts/gate-wiring-audit.mjs` |
-| **GW-003** | `scripts/gate-wiring-audit.mjs` |
-| **GW-004** | `scripts/gate-wiring-audit.mjs` |
-| **GW-005** | `scripts/gate-wiring-audit.mjs` |
-| **GW-006** | `scripts/gate-wiring-audit.mjs` |
-| **HS-001** | `scripts/plugin-surface-audit.mjs` |
-| **HS-002** | `scripts/plugin-surface-audit.mjs` |
-| **HS-003** | `scripts/plugin-surface-audit.mjs` |
-| **HS-004** | `scripts/plugin-surface-audit.mjs` |
-| **HS-005** | `scripts/plugin-surface-audit.mjs` |
-| **HS-006** | `scripts/plugin-surface-audit.mjs` |
-| **IM-001** | `scripts/internal-model-audit.mjs` |
-| **IM-002** | `scripts/internal-model-audit.mjs` |
-| **IM-003** | `scripts/internal-model-audit.mjs` |
-| **IM-004** | `scripts/internal-model-audit.mjs` |
-| **INJ-001** | `scripts/injection-matrix-audit.mjs` |
-| **INJ-002** | `scripts/injection-matrix-audit.mjs` |
-| **INJ-003** | `scripts/injection-matrix-audit.mjs` |
-| **KB-001** | `scripts/kind-branch-audit.mjs` |
-| **KB-002** | `scripts/kind-branch-audit.mjs` |
-| **LP-001** | `scripts/loop-purity-audit.mjs` |
-| **LP-002** | `scripts/loop-purity-audit.mjs` |
-| **LP-003** | `scripts/loop-purity-audit.mjs` |
-| **LP-004** | `scripts/loop-purity-audit.mjs` |
-| **LP-005** | `scripts/loop-purity-audit.mjs` |
-| **LWF-001** | `scripts/list-write-fact-audit.mjs` |
-| **LWF-002** | `scripts/list-write-fact-audit.mjs` |
-| **M-001** | `scripts/mechanism-audit.mjs` |
-| **M-002** | `scripts/mechanism-audit.mjs` |
-| **M-003** | `scripts/mechanism-audit.mjs` |
-| **M-004** | `scripts/mechanism-audit.mjs` |
-| **M-005** | `scripts/mechanism-audit.mjs` |
-| **M-006** | `scripts/mechanism-audit.mjs` |
-| **M-007** | `scripts/mechanism-audit.mjs` |
-| **M-008** | `scripts/mechanism-audit.mjs` |
-| **M-009** | `scripts/mechanism-audit.mjs` |
-| **M-010** | `scripts/mechanism-audit.mjs` |
-| **ME-001** | `scripts/mechanism-enforcement-audit.mjs` |
-| **ME-002** | `scripts/mechanism-enforcement-audit.mjs` |
-| **ME-003** | `scripts/mechanism-enforcement-audit.mjs` |
-| **ME-004** | `scripts/mechanism-enforcement-audit.mjs` |
-| **ME-005** | `scripts/mechanism-enforcement-audit.mjs` |
-| **NDC-001** | `scripts/no-direct-call-audit.mjs` |
-| **NDC-002** | `scripts/no-direct-call-audit.mjs` |
-| **OB-001** | `scripts/obligation-bypass-audit.mjs` |
-| **OB-002** | `scripts/obligation-bypass-audit.mjs` |
-| **OB-003** | `scripts/obligation-bypass-audit.mjs` |
-| **OB-004** | `scripts/obligation-bypass-audit.mjs` |
-| **PN-001** | `scripts/panic-audit.mjs` |
-| **PN-002** | `scripts/panic-audit.mjs` |
-| **PN-003** | `scripts/panic-audit.mjs` |
-| **PP-001** | `scripts/projection-purity.mjs` |
-| **PP-002** | `scripts/projection-purity.mjs` |
-| **PP-003** | `scripts/projection-purity.mjs` |
-| **PP-004** | `scripts/projection-purity.mjs` |
-| **PP-005** | `scripts/projection-purity.mjs` |
-| **PS-001** | `scripts/prompt-shape-audit.mjs` |
-| **PS-002** | `scripts/prompt-shape-audit.mjs` |
-| **PS-003** | `scripts/prompt-shape-audit.mjs` |
-| **PTS-001** | `scripts/port-surface-audit.mjs` |
-| **PTS-002** | `scripts/port-surface-audit.mjs` |
-| **PTS-003** | `scripts/port-surface-audit.mjs` |
-| **PTS-004** | `scripts/port-surface-audit.mjs` |
-| **PTS-005** | `scripts/port-surface-audit.mjs` |
-| **PTS-006** | `scripts/port-surface-audit.mjs` |
-| **PTS-007** | `scripts/port-surface-audit.mjs` |
-| **R-001** | `scripts/dead-code-audit.mjs` |
-| **R-002** | `scripts/dead-code-audit.mjs` |
-| **R-003** | `scripts/dead-code-audit.mjs` |
+| **AD-001** | `scripts/audits/arch-dead-code-audit.mjs` |
+| **AD-002** | `scripts/audits/arch-dead-code-audit.mjs` |
+| **AD-003** | `scripts/audits/arch-dead-code-audit.mjs` |
+| **AD-004** | `scripts/audits/arch-dead-code-audit.mjs` |
+| **AO-001** | `scripts/audits/agent-ownership-audit.mjs` |
+| **AO-002** | `scripts/audits/agent-ownership-audit.mjs` |
+| **AO-003** | `scripts/audits/agent-ownership-audit.mjs` |
+| **AO-004** | `scripts/audits/agent-ownership-audit.mjs` |
+| **AO-005** | `scripts/audits/agent-ownership-audit.mjs` |
+| **AO-006** | `scripts/audits/agent-ownership-audit.mjs` |
+| **BS-001** | `scripts/audits/baseline-scope-audit.mjs` |
+| **BS-002** | `scripts/audits/baseline-scope-audit.mjs` |
+| **BS-003** | `scripts/audits/baseline-scope-audit.mjs` |
+| **BS-004** | `scripts/audits/baseline-scope-audit.mjs` |
+| **BS-005** | `scripts/audits/baseline-scope-audit.mjs` |
+| **CP-001** | `scripts/audits/control-plane-audit.mjs` |
+| **CP-004** | `scripts/audits/control-plane-audit.mjs` |
+| **CP-006** | `scripts/audits/control-plane-audit.mjs` |
+| **CP-009** | `scripts/audits/control-plane-audit.mjs` |
+| **CS-001** | `scripts/audits/arch-shape-audit.mjs` |
+| **CS-002** | `scripts/audits/arch-shape-audit.mjs` |
+| **CS-003** | `scripts/audits/arch-shape-audit.mjs` |
+| **CS-004** | `scripts/audits/arch-shape-audit.mjs` |
+| **CS-005** | `scripts/audits/arch-shape-audit.mjs` |
+| **CS-006** | `scripts/audits/arch-shape-audit.mjs` |
+| **CS-007** | `scripts/audits/shared-event-vocab-audit.mjs` |
+| **CS-008** | `scripts/audits/arch-shape-audit.mjs` |
+| **CS-009** | `scripts/audits/arch-shape-audit.mjs` |
+| **CS-010** | `scripts/audits/arch-shape-audit.mjs` |
+| **CS-011** | `scripts/audits/shared-event-vocab-audit.mjs` |
+| **D-001** | `scripts/audits/doc-link-audit.mjs` |
+| **D-002** | `scripts/audits/doc-link-audit.mjs` |
+| **D-003** | `scripts/audits/doc-link-audit.mjs` |
+| **D-004** | `scripts/audits/doc-link-audit.mjs` |
+| **D-005** | `scripts/audits/doc-symbol-audit.mjs` |
+| **D-006** | `scripts/audits/doc-link-audit.mjs` |
+| **D-007** | `scripts/audits/doc-link-audit.mjs` |
+| **D-008** | `scripts/audits/doc-link-audit.mjs` |
+| **D-009** | `scripts/audits/doc-symbol-audit.mjs` |
+| **D-010** | `scripts/audits/doc-link-audit.mjs` |
+| **D-011** | `scripts/audits/doc-symbol-audit.mjs` |
+| **D-012** | `scripts/audits/doc-symbol-audit.mjs` |
+| **D-013** | `scripts/audits/doc-link-audit.mjs` |
+| **D-014** | `scripts/audits/doc-symbol-audit.mjs` |
+| **D-016** | `scripts/audits/doc-link-audit.mjs` |
+| **D-017** | `scripts/audits/doc-link-audit.mjs` |
+| **D-018** | `scripts/audits/doc-link-audit.mjs` |
+| **D-019** | `scripts/audits/doc-link-audit.mjs` |
+| **D-020** | `scripts/audits/doc-symbol-audit.mjs` |
+| **D-403** | `scripts/audits/capability-migration-audit.mjs` |
+| **D-404** | `scripts/audits/capability-migration-audit.mjs` |
+| **DC-001** | `scripts/audits/doc-count-audit.mjs` |
+| **DC-002** | `scripts/audits/doc-count-audit.mjs` |
+| **DC-003** | `scripts/audits/doc-count-audit.mjs` |
+| **DC-004** | `scripts/audits/doc-count-audit.mjs` |
+| **DC-005** | `scripts/audits/doc-count-audit.mjs` |
+| **DR-001** | `scripts/audits/dead-path-audit.mjs` |
+| **DR-002** | `scripts/audits/dead-path-audit.mjs` |
+| **DR-003** | `scripts/audits/dead-path-audit.mjs` |
+| **DS-001** | `scripts/audits/doc-section-audit.mjs` |
+| **DS-002** | `scripts/audits/doc-section-audit.mjs` |
+| **E-001** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-002** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-003** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-004** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-005** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-006** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-007** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-008** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-009** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-011** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-012** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-013** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-014** | `scripts/audits/plugin-entry-audit.mjs` |
+| **EL-001** | `scripts/audits/engine-ledger-audit.mjs` |
+| **EL-002** | `scripts/audits/engine-ledger-audit.mjs` |
+| **EL-003** | `scripts/audits/engine-ledger-audit.mjs` |
+| **EOL-001** | `scripts/audits/eol-audit.mjs` |
+| **EOL-002** | `scripts/audits/eol-audit.mjs` |
+| **EOL-003** | `scripts/audits/eol-audit.mjs` |
+| **EX-002** | `scripts/audits/extension-locality-audit.mjs` |
+| **EX-003** | `scripts/audits/capability-migration-audit.mjs` |
+| **EX-004** | `scripts/audits/uninstall-edge-audit.mjs` |
+| **EX-006** | `scripts/audits/capability-ledger-audit.mjs` |
+| **EX-007** | `scripts/audits/capability-migration-audit.mjs` |
+| **EX-008** | `scripts/audits/extension-vocab-audit.mjs` |
+| **FA-001** | `scripts/audits/facade-loc-audit.mjs` |
+| **FA-002** | `scripts/audits/facade-loc-audit.mjs` |
+| **FA-003** | `scripts/audits/facade-loc-audit.mjs` |
+| **FA-004** | `scripts/audits/facade-loc-audit.mjs` |
+| **FB-001** | `scripts/audits/facts-boundary-audit.mjs` |
+| **FB-002** | `scripts/audits/facts-boundary-audit.mjs` |
+| **GC-001** | `scripts/audits/gate-codes-audit.mjs` |
+| **GC-002** | `scripts/audits/gate-codes-audit.mjs` |
+| **GC-003** | `scripts/audits/gate-codes-audit.mjs` |
+| **GC-004** | `scripts/audits/gate-codes-audit.mjs` |
+| **GC-005** | `scripts/audits/gate-codes-audit.mjs` |
+| **GC-006** | `scripts/audits/gate-codes-audit.mjs` |
+| **GW-001** | `scripts/audits/gate-wiring-audit.mjs` |
+| **GW-002** | `scripts/audits/gate-wiring-audit.mjs` |
+| **GW-003** | `scripts/audits/gate-wiring-audit.mjs` |
+| **GW-004** | `scripts/audits/gate-wiring-audit.mjs` |
+| **GW-005** | `scripts/audits/gate-wiring-audit.mjs` |
+| **GW-006** | `scripts/audits/gate-wiring-audit.mjs` |
+| **GW-007** | `scripts/audits/gate-wiring-audit.mjs` |
+| **HS-001** | `scripts/audits/plugin-surface-audit.mjs` |
+| **HS-002** | `scripts/audits/plugin-surface-audit.mjs` |
+| **HS-003** | `scripts/audits/plugin-surface-audit.mjs` |
+| **HS-004** | `scripts/audits/plugin-surface-audit.mjs` |
+| **HS-005** | `scripts/audits/plugin-surface-audit.mjs` |
+| **HS-006** | `scripts/audits/plugin-surface-audit.mjs` |
+| **IM-001** | `scripts/audits/internal-model-audit.mjs` |
+| **IM-002** | `scripts/audits/internal-model-audit.mjs` |
+| **IM-003** | `scripts/audits/internal-model-audit.mjs` |
+| **IM-004** | `scripts/audits/internal-model-audit.mjs` |
+| **INJ-001** | `scripts/audits/injection-matrix-audit.mjs` |
+| **INJ-002** | `scripts/audits/injection-matrix-audit.mjs` |
+| **INJ-003** | `scripts/audits/injection-matrix-audit.mjs` |
+| **KB-001** | `scripts/audits/kind-branch-audit.mjs` |
+| **KB-002** | `scripts/audits/kind-branch-audit.mjs` |
+| **LP-001** | `scripts/audits/loop-purity-audit.mjs` |
+| **LP-002** | `scripts/audits/loop-purity-audit.mjs` |
+| **LP-003** | `scripts/audits/loop-purity-audit.mjs` |
+| **LP-004** | `scripts/audits/loop-purity-audit.mjs` |
+| **LP-005** | `scripts/audits/loop-purity-audit.mjs` |
+| **LWF-001** | `scripts/audits/list-write-fact-audit.mjs` |
+| **LWF-002** | `scripts/audits/list-write-fact-audit.mjs` |
+| **M-001** | `scripts/audits/mechanism-audit.mjs` |
+| **M-002** | `scripts/audits/mechanism-audit.mjs` |
+| **M-003** | `scripts/audits/mechanism-audit.mjs` |
+| **M-004** | `scripts/audits/mechanism-audit.mjs` |
+| **M-005** | `scripts/audits/mechanism-audit.mjs` |
+| **M-006** | `scripts/audits/mechanism-audit.mjs` |
+| **M-007** | `scripts/audits/mechanism-audit.mjs` |
+| **M-008** | `scripts/audits/mechanism-audit.mjs` |
+| **M-009** | `scripts/audits/mechanism-audit.mjs` |
+| **M-010** | `scripts/audits/mechanism-audit.mjs` |
+| **ME-001** | `scripts/audits/mechanism-enforcement-audit.mjs` |
+| **ME-002** | `scripts/audits/mechanism-enforcement-audit.mjs` |
+| **ME-003** | `scripts/audits/mechanism-enforcement-audit.mjs` |
+| **ME-004** | `scripts/audits/mechanism-enforcement-audit.mjs` |
+| **ME-005** | `scripts/audits/mechanism-enforcement-audit.mjs` |
+| **NDC-001** | `scripts/audits/no-direct-call-audit.mjs` |
+| **NDC-002** | `scripts/audits/no-direct-call-audit.mjs` |
+| **OB-001** | `scripts/audits/obligation-bypass-audit.mjs` |
+| **OB-002** | `scripts/audits/obligation-bypass-audit.mjs` |
+| **OB-003** | `scripts/audits/obligation-bypass-audit.mjs` |
+| **OB-004** | `scripts/audits/obligation-bypass-audit.mjs` |
+| **PN-001** | `scripts/audits/panic-audit.mjs` |
+| **PN-002** | `scripts/audits/panic-audit.mjs` |
+| **PN-003** | `scripts/audits/panic-audit.mjs` |
+| **PP-001** | `scripts/audits/projection-purity.mjs` |
+| **PP-002** | `scripts/audits/projection-purity.mjs` |
+| **PP-003** | `scripts/audits/projection-purity.mjs` |
+| **PP-004** | `scripts/audits/projection-purity.mjs` |
+| **PP-005** | `scripts/audits/projection-purity.mjs` |
+| **PS-001** | `scripts/audits/prompt-shape-audit.mjs` |
+| **PS-002** | `scripts/audits/prompt-shape-audit.mjs` |
+| **PS-003** | `scripts/audits/prompt-shape-audit.mjs` |
+| **PTS-001** | `scripts/audits/port-surface-audit.mjs` |
+| **PTS-002** | `scripts/audits/port-surface-audit.mjs` |
+| **PTS-003** | `scripts/audits/port-surface-audit.mjs` |
+| **PTS-004** | `scripts/audits/port-surface-audit.mjs` |
+| **PTS-005** | `scripts/audits/port-surface-audit.mjs` |
+| **PTS-006** | `scripts/audits/port-surface-audit.mjs` |
+| **PTS-007** | `scripts/audits/port-surface-audit.mjs` |
+| **R-001** | `scripts/audits/dead-code-audit.mjs` |
+| **R-002** | `scripts/audits/dead-code-audit.mjs` |
+| **R-003** | `scripts/audits/dead-code-audit.mjs` |
 | **RF-001** | `scripts/gen-doc-refs.mjs` |
 | **RF-002** | `scripts/gen-doc-refs.mjs` |
 | **RF-003** | `scripts/gen-doc-refs.mjs` |
@@ -276,51 +277,51 @@ lists: [gate-codes=owner]
 | **RG-031** | `scripts/registry-lib.mjs` |
 | **RG-032** | `scripts/registry-lib.mjs` |
 | **RG-033** | `scripts/registry-lib.mjs` |
-| **S-001** | `scripts/grep-audit.mjs` |
-| **S-002** | `scripts/grep-audit.mjs` |
-| **S-003** | `scripts/grep-audit.mjs` |
-| **S-006** | `scripts/grep-audit.mjs` |
-| **S-007** | `scripts/grep-audit.mjs` |
-| **S-008** | `scripts/grep-audit.mjs` |
-| **S-009** | `scripts/grep-audit.mjs` |
-| **S-010** | `scripts/grep-audit.mjs` |
-| **S-012** | `scripts/grep-audit.mjs` |
-| **S-013** | `scripts/grep-audit.mjs` |
-| **S-014** | `scripts/grep-audit.mjs` |
-| **S-015** | `scripts/grep-audit.mjs` |
-| **S-016** | `scripts/grep-audit.mjs` |
-| **S-017** | `scripts/grep-audit.mjs` |
-| **SC-001** | `scripts/plugin-special-case-audit.mjs` |
-| **SC-002** | `scripts/plugin-special-case-audit.mjs` |
-| **SC-003** | `scripts/plugin-special-case-audit.mjs` |
-| **SC-004** | `scripts/plugin-special-case-audit.mjs` |
-| **SC-005** | `scripts/plugin-special-case-audit.mjs` |
-| **SC-006** | `scripts/plugin-special-case-audit.mjs` |
-| **SD-001** | `scripts/session-dead-code-audit.mjs` |
-| **SD-002** | `scripts/session-dead-code-audit.mjs` |
-| **SPC-001** | `scripts/spec-coverage-audit.mjs` |
-| **SPC-002** | `scripts/spec-coverage-audit.mjs` |
-| **SPC-003** | `scripts/spec-coverage-audit.mjs` |
-| **SR-001** | `scripts/sink-row-audit.mjs` |
-| **SR-002** | `scripts/sink-row-audit.mjs` |
-| **SR-003** | `scripts/sink-row-audit.mjs` |
-| **SR-004** | `scripts/sink-row-audit.mjs` |
-| **SRA-001** | `scripts/session-retire-audit.mjs` |
-| **SRA-002** | `scripts/session-retire-audit.mjs` |
-| **SRA-003** | `scripts/session-retire-audit.mjs` |
-| **SRA-004** | `scripts/session-retire-audit.mjs` |
-| **SRA-005** | `scripts/session-retire-audit.mjs` |
-| **SV-001** | `scripts/shared-name-audit.mjs` |
-| **SV-003** | `scripts/shared-name-audit.mjs` |
-| **SV-004** | `scripts/shared-name-audit.mjs` |
-| **SX-001** | `scripts/slo-exit-audit.mjs` |
-| **SX-002** | `scripts/slo-exit-audit.mjs` |
-| **SX-003** | `scripts/slo-exit-audit.mjs` |
-| **TD-001** | `scripts/tool-decls-audit.mjs` |
-| **TD-002** | `scripts/tool-decls-audit.mjs` |
-| **TR-001** | `scripts/turn-root-audit.mjs` |
-| **TR-002** | `scripts/turn-root-audit.mjs` |
-| **TR-003** | `scripts/turn-root-audit.mjs` |
-| **TR-004** | `scripts/turn-root-audit.mjs` |
-| **V-001** | `scripts/domain-vocab-audit.mjs` |
-| **V-002** | `scripts/domain-vocab-audit.mjs` |
+| **S-001** | `scripts/audits/grep-audit.mjs` |
+| **S-002** | `scripts/audits/grep-audit.mjs` |
+| **S-003** | `scripts/audits/grep-audit.mjs` |
+| **S-006** | `scripts/audits/grep-audit.mjs` |
+| **S-007** | `scripts/audits/grep-audit.mjs` |
+| **S-008** | `scripts/audits/grep-audit.mjs` |
+| **S-009** | `scripts/audits/grep-audit.mjs` |
+| **S-010** | `scripts/audits/grep-audit.mjs` |
+| **S-012** | `scripts/audits/grep-audit.mjs` |
+| **S-013** | `scripts/audits/grep-audit.mjs` |
+| **S-014** | `scripts/audits/grep-audit.mjs` |
+| **S-015** | `scripts/audits/grep-audit.mjs` |
+| **S-016** | `scripts/audits/grep-audit.mjs` |
+| **S-017** | `scripts/audits/grep-audit.mjs` |
+| **SC-001** | `scripts/audits/plugin-special-case-audit.mjs` |
+| **SC-002** | `scripts/audits/plugin-special-case-audit.mjs` |
+| **SC-003** | `scripts/audits/plugin-special-case-audit.mjs` |
+| **SC-004** | `scripts/audits/plugin-special-case-audit.mjs` |
+| **SC-005** | `scripts/audits/plugin-special-case-audit.mjs` |
+| **SC-006** | `scripts/audits/plugin-special-case-audit.mjs` |
+| **SD-001** | `scripts/audits/session-dead-code-audit.mjs` |
+| **SD-002** | `scripts/audits/session-dead-code-audit.mjs` |
+| **SPC-001** | `scripts/audits/spec-coverage-audit.mjs` |
+| **SPC-002** | `scripts/audits/spec-coverage-audit.mjs` |
+| **SPC-003** | `scripts/audits/spec-coverage-audit.mjs` |
+| **SR-001** | `scripts/audits/sink-row-audit.mjs` |
+| **SR-002** | `scripts/audits/sink-row-audit.mjs` |
+| **SR-003** | `scripts/audits/sink-row-audit.mjs` |
+| **SR-004** | `scripts/audits/sink-row-audit.mjs` |
+| **SRA-001** | `scripts/audits/session-retire-audit.mjs` |
+| **SRA-002** | `scripts/audits/session-retire-audit.mjs` |
+| **SRA-003** | `scripts/audits/session-retire-audit.mjs` |
+| **SRA-004** | `scripts/audits/session-retire-audit.mjs` |
+| **SRA-005** | `scripts/audits/session-retire-audit.mjs` |
+| **SV-001** | `scripts/audits/shared-name-audit.mjs` |
+| **SV-003** | `scripts/audits/shared-name-audit.mjs` |
+| **SV-004** | `scripts/audits/shared-name-audit.mjs` |
+| **SX-001** | `scripts/audits/slo-exit-audit.mjs` |
+| **SX-002** | `scripts/audits/slo-exit-audit.mjs` |
+| **SX-003** | `scripts/audits/slo-exit-audit.mjs` |
+| **TD-001** | `scripts/audits/tool-decls-audit.mjs` |
+| **TD-002** | `scripts/audits/tool-decls-audit.mjs` |
+| **TR-001** | `scripts/audits/turn-root-audit.mjs` |
+| **TR-002** | `scripts/audits/turn-root-audit.mjs` |
+| **TR-003** | `scripts/audits/turn-root-audit.mjs` |
+| **TR-004** | `scripts/audits/turn-root-audit.mjs` |
+| **V-001** | `scripts/audits/domain-vocab-audit.mjs` |
+| **V-002** | `scripts/audits/domain-vocab-audit.mjs` |

@@ -65,7 +65,7 @@ export interface ResumePayload {
    *  「运行 / 工具」的区分住在后端 `meta.style_tag`，前端不读它、只按形状定位锚点。 */
   targetId: string
   /** 恢复动作——词表在 `schemas/chat_node.ts`（后端 `ResumeAction` 的镜像，
-   *  由 `scripts/protocol-mirror-audit.mjs` 的 C 组守着）。此处**不**再抄一份
+   *  由 `scripts/audits/protocol-mirror-audit.mjs` 的 C 组守着）。此处**不**再抄一份
    *  字面量联合：抄一份就等于多一份真相，改一个词要记得改两处。 */
   action: ResumeAction
   /** supply 时的补充参数（与原 args 浅合并） */

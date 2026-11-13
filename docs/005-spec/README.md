@@ -41,7 +41,7 @@ board.columns: [scope]
 <!-- registry:summary begin -->
 <!-- list:spec-entries owner -->
 
-> ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
+> ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
 **计数**：active 27 · draft 0 · retired 0（共 27）
@@ -55,28 +55,28 @@ board.columns: [scope]
 | `SP-004` | 提交纪律 1b——跨批行为变更的中间态提交 | 跨多批才能完成的行为变更（中间态必然有红点） | `scripts/check-commit-msg.mjs` | — | — |
 | `SP-005` | 提交纪律 1c——原子批次：多开关必须同翻 | 任一真子集观测值恒零的开关组 | 人工 | — | — |
 | `SP-006` | 提交纪律 2——每一批新增一条 e2e，且跑出厂默认路径 | 全部行为批次的 e2e 用例 | `scripts/gate.d/58-e2e.mjs` | — | — |
-| `SP-007` | 提交纪律 3——架构改动必须逐条论证「必需」 | 全部架构改动（新字段 / 新 kind / 新机制元素 / 放宽既有形状） | `scripts/arch-shape-audit.mjs` | — | — |
-| `SP-008` | 提交纪律 4——不做历史数据兼容 | 全部数据形状与协议形状的改动 | `scripts/schema-audit.mjs` | — | — |
+| `SP-007` | 提交纪律 3——架构改动必须逐条论证「必需」 | 全部架构改动（新字段 / 新 kind / 新机制元素 / 放宽既有形状） | `scripts/audits/arch-shape-audit.mjs` | — | — |
+| `SP-008` | 提交纪律 4——不做历史数据兼容 | 全部数据形状与协议形状的改动 | `scripts/audits/schema-audit.mjs` | — | — |
 | `SP-009` | 提交纪律 5——完成判据必须含一条端到端判据 | 全部批次的完成判据 | `scripts/gate.d/58-e2e.mjs` | — | — |
-| `SP-010` | 纪律 1——只写目标态：注释只写不变量与陷阱，不写过程 | 全部活跃文档与源码注释 | `scripts/grep-audit.mjs` | — | — |
+| `SP-010` | 纪律 1——只写目标态：注释只写不变量与陷阱，不写过程 | 全部活跃文档与源码注释 | `scripts/audits/grep-audit.mjs` | — | — |
 | `SP-011` | 纪律 2——机制优先：每条问题落成守卫 / 真源 / 类型约束 | 全部改进批次与问题登记 | 人工 | — | — |
 | `SP-012` | 纪律 3——不新增真相：改文档前先确认那条事实的 owner | 全部文档改动 | 人工 | — | — |
 | `SP-013` | 纪律 4——出口可核对：判据要么是守卫，要么是脚本可核对的锚 | 全部任务的 exit 字段与批次出口 | 人工 | — | — |
 | `SP-014` | 纪律 5——豁免必有清除任务：无清除任务的豁免不许登记 | 守卫豁免注释 / 豁免账本条目 | 人工 | — | — |
-| `SP-015` | 死码承认台账——理由指名消费方 + 棘轮只许降 + 终局基线 8 | 全部 #[allow(dead_code)] 标记；owner = scripts/dead-code-audit.mjs 的 R-002 段 | `scripts/dead-code-audit.mjs` | — | — |
-| `SP-016` | 逐阶出口的口径——用户可见出口必须是 session/stats 真存在的一列 | SLO 出口表与任何「这一阶长出来了」的声称 | `scripts/slo-exit-audit.mjs` | — | — |
-| `SP-017` | CI 断言的口径——每条断言必须落成一条可执行判据 | CI 断言清单与守卫脚本 | `scripts/no-direct-call-audit.mjs` | — | — |
+| `SP-015` | 死码承认台账——理由指名消费方 + 棘轮只许降 + 终局基线 8 | 全部 #[allow(dead_code)] 标记；owner = scripts/audits/dead-code-audit.mjs 的 R-002 段 | `scripts/audits/dead-code-audit.mjs` | — | — |
+| `SP-016` | 逐阶出口的口径——用户可见出口必须是 session/stats 真存在的一列 | SLO 出口表与任何「这一阶长出来了」的声称 | `scripts/audits/slo-exit-audit.mjs` | — | — |
+| `SP-017` | CI 断言的口径——每条断言必须落成一条可执行判据 | CI 断言清单与守卫脚本 | `scripts/audits/no-direct-call-audit.mjs` | — | — |
 | `SP-022` | 验证纪律 1——每条声称对应一条可执行断言 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-023` | 验证纪律 2——断言的输入不得包含结论 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/_shared.mjs` | — | — |
 | `SP-024` | 验证纪律 3——每条断言配反向用例（改输入，结论必须变） | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-025` | 验证纪律 4——声称「编译期强制」必须附一段已知编译不过的代码 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-026` | 验证纪律 5——编译期反例必须写在外部模块里 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
-| `SP-028` | doc-link D-004 全文豁免（定义变更史禁区的两处反例措辞） | docs/archive/13-质量改进总纲.md 首行与 docs/README.md 首行的 doc-link-allow D-004 | `scripts/doc-link-audit.mjs` | — | — |
-| `SP-029` | dead-code R-002 契约登记存量（8 处） | scripts/dead-code-audit.mjs 的 R-002 死码承认账本（终局基线 8，见 docs/003-design/016-工程落地与验证.md §3.1） | `scripts/dead-code-audit.mjs` | — | — |
-| `SP-030` | panic-allow 不变量登记（C7，56 个登记项 / 71 处 panic 面） | crates/** 的 panic-allow 注释、scripts/panic-audit.mjs 账本与 scripts/gate.d/_shared.mjs 的 BASELINE.panicSites | `scripts/panic-audit.mjs` | — | — |
+| `SP-028` | doc-link D-004 全文豁免（定义变更史禁区的两处反例措辞） | docs/archive/13-质量改进总纲.md 首行与 docs/README.md 首行的 doc-link-allow D-004 | `scripts/audits/doc-link-audit.mjs` | — | — |
+| `SP-029` | dead-code R-002 契约登记存量（8 处） | scripts/audits/dead-code-audit.mjs 的 R-002 死码承认账本（终局基线 8，见 docs/003-design/016-工程落地与验证.md §3.1） | `scripts/audits/dead-code-audit.mjs` | — | — |
+| `SP-030` | panic-allow 不变量登记（C7，56 个登记项 / 71 处 panic 面） | crates/** 的 panic-allow 注释、scripts/audits/panic-audit.mjs 账本与 scripts/gate.d/_shared.mjs 的 BASELINE.panicSites | `scripts/audits/panic-audit.mjs` | — | — |
 | `SP-031` | color 守卫自指豁免（测试与实现提到禁用模式） | scripts/color.test.mjs（守卫回归与实现里的禁用模式字样） | `scripts/color.test.mjs` | — | — |
-| `SP-032` | 设计文档的编号分区——0xx 系统级、1xx 组件级 | docs/003-design/ 的系统级设计，与就地存放的组件级设计（crates/**、tauri/docs、crates/symbio-cli/docs） | `scripts/registry-audit.mjs` | — | — |
-| `SP-033` | 控制面终态判据：六条不变量与判据的退场规则 | 控制面（义务环 / 派发面 / 驱动循环）的验收判据；不覆盖文档登记、插件入口、前端与 SLO 等其它判据命名空间 | `scripts/control-plane-audit.test.mjs` | — | — |
+| `SP-032` | 设计文档的编号分区——0xx 系统级、1xx 组件级 | docs/003-design/ 的系统级设计，与就地存放的组件级设计（crates/**、tauri/docs、crates/symbio-cli/docs） | `scripts/audits/registry-audit.mjs` | — | — |
+| `SP-033` | 控制面终态判据：六条不变量与判据的退场规则 | 控制面（义务环 / 派发面 / 驱动循环）的验收判据；不覆盖文档登记、插件入口、前端与 SLO 等其它判据命名空间 | `scripts/audits/control-plane-audit.test.mjs` | — | — |
 
 ## 草案（draft）
 

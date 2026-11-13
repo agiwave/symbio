@@ -416,21 +416,21 @@ test('ci.yml：verify 阶段必须上 CI', () => {
 })
 
 // ⚠️ 与上两条同族（**参数漏写 ⇒ 守卫静默降级**），只是换了个地方：
-// `30-docs.mjs` 调那 12 个守卫时若不传 `--strict`，它们的 **WARNING 级判定永远不红**
+// `30-docs.mjs` 调每一条 `guard` 时若不传 `--strict`，它们的 **WARNING 级判定永远不红**
 // ——只剩 ERROR 会拦，而 WARNING 恰恰是「需要人看一眼」的那一类。于是它天天被打印、
 // 天天没人看，门禁却一路绿。
 //
 // 这不是假设：`doc-link-audit` 的文件头至今写着「2026-09-20 前失效链接只在 `--strict`
 // 下失败，而门禁从不带该参数 ⇒ **从未真的红过**」——同一个坑已经踩过一次。而参数漏写
 // 同样不报错、不变慢、本地复现不出来，只能靠断言钉住。
-test('gate：调 12 个守卫必须传 --strict，否则 WARNING 级判定永不红', () => {
+test('gate：调守卫必须传 --strict，否则 WARNING 级判定永不红', () => {
   const src = fs.readFileSync(path.join(repoRoot, 'scripts/gate.d', '30-docs.mjs'), 'utf8')
-  const m = src.match(/for \(const name of GUARDS\) \{[\s\S]*?args:\s*\[([^\]]*)\]/)
-  assert.ok(m, '没找到 GUARDS 的调用处——接线变了，这条断言要跟着改')
+  const m = src.match(/for \(const name of names\('guard'\)\) \{[\s\S]*?args:\s*\[([^\]]*)\]/)
+  assert.ok(m, '没找到 guard 的调用处——接线变了，这条断言要跟着改')
   assert.match(
     m[1],
     /--strict/,
-    `GUARDS 调用没带 --strict ⇒ WARNING 只打印不判红（已踩过一次的坑）：args: [${m[1].trim()}]`,
+    `guard 调用没带 --strict ⇒ WARNING 只打印不判红（已踩过一次的坑）：args: [${m[1].trim()}]`,
   )
 })
 

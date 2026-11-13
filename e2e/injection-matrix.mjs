@@ -1,5 +1,5 @@
 // 异常注入矩阵的**唯一数据源**：`注入字段 × 能力面`，每格归属一个用例 / 一条不适用理由 /
-// 一条缺口归属。`scripts/injection-matrix-audit.mjs` 判它自洽，`scripts/facts/injection-matrix.mjs`
+// 一条缺口归属。`scripts/audits/injection-matrix-audit.mjs` 判它自洽，`scripts/facts/injection-matrix.mjs`
 // 渲染成 `docs/004-ref/012-注入矩阵.md`。
 //
 // ## 为什么矩阵是数据而不是文档

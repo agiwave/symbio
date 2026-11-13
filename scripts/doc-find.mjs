@@ -19,6 +19,7 @@
  *
  * 排除：archive/、node_modules/、target/、.git/、.symbio/、以及 .workbuddy 开头的目录
  */
+// @gate lib
 
 import fs from 'node:fs'
 import path from 'node:path'

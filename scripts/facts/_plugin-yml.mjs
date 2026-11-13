@@ -31,6 +31,7 @@
  * | `trigger_kinds` | `crates/symbio-kernel/src/event/trigger_kinds.gen.rs` |
  * | （目录名本身） | `crates/symbio/Cargo.toml` 与 `crates/symbio/src/lib.rs` 的标记块 |
  */
+// @gate lib
 
 import fs from "node:fs";
 import path from "node:path";

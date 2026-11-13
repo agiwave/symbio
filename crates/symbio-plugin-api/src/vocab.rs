@@ -8,7 +8,7 @@
 //! 条件键，以及治理能力名的门面别名。
 //!
 //! 判据：同一个**有结构**的名字（含 `.` / `/`）出现在两个非 `plugin-api` 的插件
-//! crate 里即红；同名 `const` 在两个插件各声明一次也红（`scripts/shared-name-audit.mjs`
+//! crate 里即红；同名 `const` 在两个插件各声明一次也红（`scripts/audits/shared-name-audit.mjs`
 //! 的 SV-001）。新增共享名 = 在这里加一条，两侧 import；只在单个插件内出现的名字
 //! 不要搬进来——那是实现自报的词汇（D-363）。
 //!

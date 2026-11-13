@@ -23,6 +23,7 @@
  * 这一节的判据形态与 §1/§2 的**覆盖面**判据相反：那一节是「抽不到就标动态」，
  * 这一节是「抽不到就标空」——两者都不许臆造，只是空格的位置不同。
  */
+// @gate lib
 
 import path from 'node:path'
 import fs from 'node:fs'

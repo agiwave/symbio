@@ -23,6 +23,7 @@
  *
  * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
+// @gate lib
 
 import fs from 'node:fs'
 import path from 'node:path'

@@ -9,7 +9,7 @@
 //
 // 与既有判据的分工（一个事实只有一个 owner）：
 // - 本模块判**语义正确性**（值对不对、段全不全、序对不对）；
-// - `scripts/prompt-shape-audit.mjs`（PS-001…003）判出厂主线的**结构形状**；
+// - `scripts/audits/prompt-shape-audit.mjs`（PS-001…003）判出厂主线的**结构形状**；
 // - t21/t22/t23/t29/t35 判对话面 / 记忆 / 技能的**行为**。
 //
 // ## 使用方式
@@ -23,7 +23,7 @@
 // 命名编号 LC-001…：新增一条契约 = 加一个编号 + 一段「拦哪一种失效」的说明，
 // 编号即契约的引用锚（与 PS-001 同形）。
 
-import { PLATFORM_VARIANT_TOOL, PLATFORM_VARIANT_TOOL_NAMES } from '../scripts/prompt-shape-audit.mjs';
+import { PLATFORM_VARIANT_TOOL, PLATFORM_VARIANT_TOOL_NAMES } from '../scripts/audits/prompt-shape-audit.mjs';
 
 // ---------- 基础提取 ----------
 

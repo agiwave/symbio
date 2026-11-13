@@ -43,6 +43,7 @@
  *   node scripts/cli-binary.mjs            # 需要就重建；打印一行结论
  *   node scripts/cli-binary.mjs --check    # 只判不建；不可信则退出码 1
  */
+// @gate test
 
 import fs from 'node:fs'
 import path from 'node:path'

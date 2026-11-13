@@ -45,7 +45,7 @@
 //! 端口级的东西（派发前先落哪个事实、租约多久、最多试几次）对**同一个端口的
 //! 每一行都一样，所以不写进行里（那会是三份会漂移的副本），而是每个端口声明
 //! 一次（[`PortDecl`]）。加一个端口 = 1 条 `PortDecl` + 适配器 + 2 行模板，
-//! 求解器与行表不变（判据 1，执行方 `scripts/port-surface-audit.mjs`）。
+//! 求解器与行表不变（判据 1，执行方 `scripts/audits/port-surface-audit.mjs`）。
 
 use std::collections::{HashMap, HashSet};
 

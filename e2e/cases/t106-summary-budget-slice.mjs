@@ -27,7 +27,7 @@ import {
   providerConfig,
   PROVIDER_ID,
 } from '../helpers.mjs';
-import { extractObservations } from '../../scripts/prompt-shape-audit.mjs';
+import { extractObservations } from '../../scripts/audits/prompt-shape-audit.mjs';
 
 const LIMIT = 16_384;
 const K = 0.5;

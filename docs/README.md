@@ -53,7 +53,7 @@ impl: done
 <!-- registry:summary begin -->
 <!-- list:kinds owner -->
 
-> ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
+> ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 条目各是一个单文档：条目类**在位存放**（文件即条目，kind 只来自 front-matter，目录不参与判定）；
 > 各 kind 的形状与汇总版式由其 README meta 自描述；机制见 [DE-017 · 登记与汇总机制](003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")，字段规范见 [SP-001](005-spec/001.md)。
 
@@ -98,7 +98,7 @@ impl: done
  判据三条：编号不存在判红（RF-001）、地址漂移自动重算（RF-002）、**指向已登记文档的手工地址判红**（RF-003）。
  编号是身份（稳定），地址是位置（会变）。
 - **汇总页是投影**：各 kind 的汇总块住本 kind 目录 `README.md` 的 `<!-- registry:summary -->` 标记区，跨 kind 总账块住本页，
- 都由 `node scripts/registry-audit.mjs --write` 生成（门禁自动重跑）；查询看 `node scripts/registry-board.mjs`。
+ 都由 `node scripts/audits/registry-audit.mjs --write` 生成（门禁自动重跑）；查询看 `node scripts/registry-board.mjs`。
 
 ## 文档下沉原则
 
@@ -108,7 +108,7 @@ impl: done
 - **系统级文档**（本目录）只保留**跨模块**的核心逻辑、边界与约定，涉及单模块内部实现时**引用**模块文档，不复制细节；
 - **历史**一律进 `archive/`（归档不进登记）：已废止的机制、一次性评审、已落地的实施方案、已退场的决策记录——**git log 是变更史**。
 
-下面这些由 `node scripts/doc-link-audit.mjs` 机械判定（任一命中即失败）：**站内链接必须有效**、
+下面这些由 `node scripts/audits/doc-link-audit.mjs` 机械判定（任一命中即失败）：**站内链接必须有效**、
 **过程文档不得滞留活跃目录**（D-002）、**活跃文档散文不得超过 1000 行**（D-003——量剥离 front-matter 后的正文、**再减去
 `### D-NNN` 决策账**；决策账只追加、按锚点跳读，不占预算。`docs/007-task/` 与 `docs/005-spec/`
 整目录不参与散文体检）、**正文不得写变更史**（D-004——历史归 `git log`）、

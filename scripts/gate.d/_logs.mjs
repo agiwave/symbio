@@ -33,6 +33,7 @@
  * 跨轮次是必要的：`--only=backend` 跑一轮之后，最新轮次里没有 e2e 日志，
  * 读「最新轮次」会得到空集，而读「最新的一份」才对。
  */
+// @gate test
 
 import fs from 'node:fs'
 import path from 'node:path'

@@ -52,6 +52,7 @@
  *   node scripts/gen-verify-facts.mjs --check    # 只比对，不一致 exit 1（门禁档）
  *   node scripts/gen-verify-facts.mjs --stdout   # 打到标准输出（测试用，不落盘）
  */
+// @gate test
 
 import fs from 'node:fs'
 import path from 'node:path'

@@ -7,6 +7,7 @@
  * 块外的字节原样保留（package / lints / 非插件依赖 / dev-deps 都不归本生成器管），
  * 理由与「为什么是标记块」见 `_plugin-links.mjs` 的文件头。
  */
+// @gate lib
 
 import fs from "node:fs";
 import path from "node:path";

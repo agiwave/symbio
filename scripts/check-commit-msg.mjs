@@ -23,6 +23,7 @@
  *
  * 退出码：0 = 通过；1 = 不符合规范。
  */
+// @gate off
 
 import fs from 'node:fs'
 import path from 'node:path'

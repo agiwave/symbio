@@ -25,7 +25,7 @@ import { allKeys, loadKinds } from './registry-lib.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(scriptDir, '..')
-const AUDIT = path.join(scriptDir, 'registry-audit.mjs')
+const AUDIT = path.join(scriptDir, 'audits', 'registry-audit.mjs')
 const KINDS = loadKinds(REPO).kinds
 
 function runAudit(root) {

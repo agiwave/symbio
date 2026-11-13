@@ -28,6 +28,7 @@
  *
  * 两者互不替代：本模块不验证「这份清单真的在正文里」，RG-029 不关心「谁拥有哪份」。
  */
+// @gate lib
 
 import { fileURLToPath } from "node:url";
 import path from "node:path";

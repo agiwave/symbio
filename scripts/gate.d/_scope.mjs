@@ -40,6 +40,7 @@ import { spawnSync } from 'node:child_process'
  * 例如 `crates/<crate>/PLUGIN.yml` 归 `rust`：它不被编译，但被 `cargo test` 与 e2e
  * **在运行时读**（插件清单是装配事实源），所以它变了就必须重跑那两条。
  */
+// @gate test
 const SURFACE_RULES = [
   // 前端源（Vue / TS / vite 配置 / 前端依赖锁）：`tauri/` 下除 `src-tauri/` 的部分。
   ['frontend', (f) => f.startsWith('tauri/') && !f.startsWith('tauri/src-tauri/') && !f.endsWith('.md')],

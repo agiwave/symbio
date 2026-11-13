@@ -67,6 +67,7 @@
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RF 文档引用（编号 → 地址由机制生成）
 // @codes RF-001 RF-002 RF-003 RF-004
+// @gate test
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -256,7 +257,7 @@ export function runGenDocRefs(argv) {
   for (const a of argv) {
     if (a === '--check') check = true
     else if (a === '--write') continue // 默认即改写；--write 是显式同义词（门禁生成链用）
-    else if (a === '--strict') continue // 门禁对所有 GUARDS 传 --strict；本脚本无 WARNING 档
+    else if (a === '--strict') continue // 门禁对所有 guard 声明传 --strict；本脚本无 WARNING 档
     else if (a.startsWith('--root=')) root = path.resolve(a.slice(7))
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE], changed: [] }
   }

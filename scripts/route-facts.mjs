@@ -29,6 +29,7 @@
  * `VDFS_OPS`，可以读出来（`vdfsOps`）。判「一条地址能不能被分发」时必须把它算进来，
  * 否则 `vdfs/watch` 这类**真实存在**的地址会被读成幽灵——这正是 E-012 要抓的反面。
  */
+// @gate lib
 
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";

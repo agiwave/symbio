@@ -11,7 +11,7 @@
 //! ## 内核文件集
 //!
 //! 下面的 `core-kernel-files:` 标记是 CS-001（形状）与 CS-004（插件 id 字面量）
-//! 的**判定范围**，由 `scripts/arch-shape-audit.mjs` 读取。C2b 把五个封闭语法 trait
+//! 的**判定范围**，由 `scripts/audits/arch-shape-audit.mjs` 读取。C2b 把五个封闭语法 trait
 //! 及其签名类型也搬进来后，标记整份迁到本文件（C2a 时它还分居 kernel.rs）。
 // core-kernel-files: actors.rs adapters.rs keys.rs capability/family.rs capability/mod.rs capability/row.rs chat/chat_node.rs chat/mod.rs chat/principal.rs decl/mod.rs decl/ring.rs event/mod.rs exec/mod.rs plugin/error.rs plugin/mod.rs plugin/response.rs plugin/transport.rs present/detail.rs present/mod.rs present/reading.rs projection/mod.rs store/mod.rs vdfs/access.rs vdfs/change.rs vdfs/content.rs vdfs/context.rs vdfs/error.rs vdfs/mod.rs vdfs/node.rs vdfs/path.rs vdfs/provider.rs vdfs/request.rs vdfs/words.rs view/mod.rs
 

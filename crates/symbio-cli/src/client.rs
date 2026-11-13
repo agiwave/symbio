@@ -185,7 +185,7 @@ impl SymbioClient {
         let ctx = Arc::new(PluginSimpleRequest::new(None, None));
         // 绝对地址**取常量**，不写字面量：`set(PATH, "<字面量>")` 会让「路由改名」
         // 不产生任何编译错误，只在运行期表现为「订阅失败」——而失败的样子与
-        // 「后端没发布」完全一样。这条由 `scripts/plugin-entry-audit.mjs` 的 E-003
+        // 「后端没发布」完全一样。这条由 `scripts/audits/plugin-entry-audit.mjs` 的 E-003
         // 判定型守卫强制。
         //
         // 常量从 `symbio::routes` 导入（宿主侧地址模块，DE-023 D-184），

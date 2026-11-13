@@ -15,7 +15,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
-    "lint:styles": "node ../scripts/style-audit.mjs"
+    "lint:styles": "node ../scripts/audits/style-audit.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

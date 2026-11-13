@@ -24,11 +24,12 @@
  *
  * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
+// @gate lib
 
 import fs from "node:fs";
 import path from "node:path";
 import { CELLS } from "../../e2e/injection-matrix.mjs";
-import { DEBT_EXEMPTIONS } from "../capability-migration-audit.mjs";
+import { DEBT_EXEMPTIONS } from "../audits/capability-migration-audit.mjs";
 import { loadEntries } from "../registry-lib.mjs";
 import { walk } from "../fs-walk.mjs";
 import { blankComments } from "../rust-scan.mjs";
@@ -62,28 +63,28 @@ export const ROWS = [
     unit: "条",
     label: "架构树零生产调用 `pub fn`",
     owner: "`scripts/baselines/arch-dead-code.json`",
-    how: "`node scripts/arch-dead-code-audit.mjs --report`",
+    how: "`node scripts/audits/arch-dead-code-audit.mjs --report`",
   },
   {
     key: "sessionFrozen",
     unit: "条",
     label: "session 退役线冻结符号",
     owner: "`scripts/exemptions/plugin-session-sdk.json`",
-    how: "`node scripts/session-retire-audit.mjs`",
+    how: "`node scripts/audits/session-retire-audit.mjs`",
   },
   {
     key: "debtExemptions",
     unit: "条",
     label: "EX-007 到期豁免",
-    owner: "`scripts/capability-migration-audit.mjs`",
-    how: "`node scripts/capability-migration-audit.mjs`",
+    owner: "`scripts/audits/capability-migration-audit.mjs`",
+    how: "`node scripts/audits/capability-migration-audit.mjs`",
   },
   {
     key: "injectionGaps",
     unit: "格",
     label: "e2e 注入矩阵 `gap`",
     owner: "`e2e/injection-matrix.mjs`",
-    how: "`node scripts/injection-matrix-audit.mjs`",
+    how: "`node scripts/audits/injection-matrix-audit.mjs`",
   },
   {
     key: "ignoredTests",
