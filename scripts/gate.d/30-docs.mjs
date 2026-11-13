@@ -17,7 +17,8 @@
 //
 // 声明是自述，所以三件事由 `gate-wiring-audit` 反向对账：声明齐不齐（GW-001）、
 // 守卫有没有回归测试（GW-002）、声明的东西**是不是真的被跑到**（GW-003 / GW-004）
-// ——枚举写窄了在那里红，而不是静默少跑。
+// ——枚举写窄了在那里红，而不是静默少跑；`-audit` 名的脚本必须在 `scripts/audits/` 下
+// （GW-007），否则「审计脚本都在那个目录」只是一句话。
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
