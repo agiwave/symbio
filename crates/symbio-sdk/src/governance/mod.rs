@@ -32,7 +32,7 @@
 //! | 侧 | 调用点 | 判什么 |
 //! |---|---|---|
 //! | 写侧（发言） | 模型执行体落 `chat.assistant.final` 前（`crates/symbio-plugin-model/src/port.rs`） | [`can_reply`]（`reply`） |
-//! | 写侧（产物） | 工具执行体的授权在 `gate_inputs`（`crates/symbio-plugin-tool/src/port.rs`，`can_write_name` + `CAP_EXTERNAL_EXECUTION`）；[`can_produce_artifact`] 今天只经 `pattern_for_principal` 参与模式派生 | `ProduceArtifact` |
+//! | 写侧（产物） | 授权位由上游写入 `gate` 载荷，`crates/symbio-plugin-tool/src/port.rs::gate_inputs` 只读 `gate.authorized`（闸门不查矩阵）；[`can_produce_artifact`] 今天只经 `pattern_for_principal` 参与模式派生 | `ProduceArtifact` |
 //! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | [`can_see`]（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
 //!
 //! 两件事分开判是 `D-067` 的裁决（发言收束问 `reply.*`、产物收束问 `produce.artifact`）；

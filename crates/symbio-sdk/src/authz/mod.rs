@@ -241,20 +241,11 @@ pub fn content_visible(scope: VisScope, viewer: &str) -> bool {
     viewer == SESSION_OWNER || production_matrix().can_see(viewer, SESSION_OWNER, scope)
 }
 
-/// **外部执行**能力名（`ProduceArtifact` 的书写形态）——熔断闸门的授权判据
-/// （[DE-039 §6](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断") 验收 1）。
-///
-/// 提成常量而不是在闸门那里再写一遍字面量：能力名只有一个拼法，写两处迟早漂移成
-/// 「表授予 A、闸门判 B」，而这种错位**没有任何东西会变红**（两边都是合法能力名）。
-/// 拼法本身住在 `governance` 的声明表里（[`Capability::name`]）——本常量不重复它，
-/// 只给那道闸一个**语义名**（⑥）。
-pub const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name();
-
 /// **指派工作**能力名（`AssignWork` 的书写形态）——淘汰回路收回的那一项
 /// （[DE-043 §2](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")
 /// 「淘汰 = 声誉投影低于阈值 → 不再被授予 `assign.work`」）。
 ///
-/// 与 [`CAP_EXTERNAL_EXECUTION`] 同一条理由提成常量：这个名字出现在三个地方——
+/// 按「一个拼法只写一处」提成常量：这个名字出现在三个地方——
 /// 授权表行（`session/market` / `session/main`）、淘汰裁决的载荷（`verdict.asserted`
 /// 的 `capability` 字段）与闸门的撤销判据（`agent_run` 前问覆盖层）——三处各写
 /// 一遍字面量，迟早漂移成「裁决收回 A、闸门判 B」。
