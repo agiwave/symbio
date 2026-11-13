@@ -9,7 +9,7 @@ impl: done
 
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：持有事实源、转写与运行态，负责加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具与选项，并在**一轮的边界**上派发 / 等待 / 收尾（[D-086](../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。一轮的执行本体（主循环、上下文压缩、工具链）住在独立插件 [`crates/symbio-plugin-loop`](../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")：session 经 `loop/<sid>` 的 `run_turn` 动作把交付包交给它，loop 只经地址面 `session/<sid>/_run/<op>` 回读 / 写回会话状态。Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：持有事实源、转写与运行态，负责加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具与选项，并在**一轮的边界**上派发 / 等待 / 收尾（[D-086](../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。一轮的执行本体（主循环）住在独立插件 [`crates/symbio-plugin-loop`](../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")：它是不动点驱动，**由宿主 `symbio-host` 起唯一一次**，行数据由会话侧在装配期交来、环只按行还债，事实经 `Host.source` 落库；一轮的装配与收尾仍在会话插件的 `plugin/turn.rs`。Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
@@ -134,8 +134,10 @@ session:
  * 界只有三条：单条响应内的工具调用数上限 `MAX_TOOL_CALLS_PER_RESPONSE = 32`
  （`crates/symbio-plugin-model/src/stream.rs`，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
  把剩余调用放到下一轮）、用户中止、provider 断流。
- * 长度截断（`finish = Length`）后的自动续写有 `loop_rows::MAX_STAGE_ROUNDS = 3`
- （chat_loop/turn.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`）），它数的是**续写次数**，不是工具轮数。
+ * 长度截断（`finish = Length`）由模型侧归一成 `ModelFinishReason::Length`，随结果以
+ `truncated` / `reason` 上报（`crates/symbio-plugin-model/src/round.rs`）：收束判据据此区分
+ 「自然结束」与「被截断」，末轮答话在截断时取空（同 crate `port.rs` 的 `fold_answer`）。
+ 续写次数不是内核常量——它由上层按需再发一轮决定。
 * **为什么这一层不设软上限**：主循环读不到工具轮数——工具在 v2 运行器的环体里一批批跑完
  （turn_runner.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`），步骤序列与批次边界见
  [DE-102-core-loop](src/docs/102-core-loop.md "DE-102-core-loop") §4.1），本轮请求侧只有一个

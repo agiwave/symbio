@@ -20,7 +20,13 @@ function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'ad-audit-'))
 }
 
-/** 最小夹具：三棵架构树各一条 `pub fn`，`crates` 下补足语料下限（50 个生产 .rs）。 */
+/**
+ * 最小夹具：架构树各一条 `pub fn`，`crates` 下补足语料下限（50 个生产 .rs）。
+ *
+ * `symbio-contract`（`D-486` 之后是扫描面的第四棵树）只放一个 `pub struct`：
+ * 判据要的是「这棵树下有生产 .rs」，而本测试判的是「零调用的 `pub fn`」——
+ * 多放一个 `pub fn` 会把每条断言里的符号数一起推高，测的就不再是判据本身。
+ */
 function fixture({ sdk = 'pub fn target() {}\n', caller = '', testCaller = '', baseline = null, filler = 48 } = {}) {
   const root = tmpRoot()
   const w = (rel, text) => {
@@ -31,6 +37,7 @@ function fixture({ sdk = 'pub fn target() {}\n', caller = '', testCaller = '', b
   w('crates/symbio-sdk/src/lib.rs', sdk)
   w('crates/symbio-kernel/src/lib.rs', 'pub fn k() {}\n')
   w('crates/symbio-plugin-api/src/lib.rs', 'pub fn a() {}\n')
+  w('crates/symbio-contract/src/lib.rs', 'pub fn contract_marker() {}\nfn uses_marker() {\n    contract_marker()\n}\n')
   w('docs/003-design/018-模块架构.md', '# 模块架构\n')
   if (caller) w('crates/consumer/src/lib.rs', caller)
   if (testCaller) w('crates/symbio-sdk/src/lib.test.rs', testCaller)

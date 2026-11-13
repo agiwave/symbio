@@ -11,7 +11,7 @@
  * | CS-001 | `traits` | **内核三 trait**（Store / VdfsProvider / Registry）的声明数（冻结 3） | **新增接缝**：每多一个内核抽象，就多一处「所有实现方都得知道」的地方。域 trait 不占此格（DE-023 A2 收窄口径） |
  * | CS-001 | `methods` | 上述三 trait 的 `fn` 成员总数（冻结 7） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
  * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 0） | **接口上长实现**：行为代码住进架构模块 |
- * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
+ * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: D-NNN <非空理由>`，且那条决策在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0（**全 core**） | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作。依赖方向不随内核边界变化，故不收窄 |
  * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里**新引入的**插件 id 引用数只许降；与内核既有 wire 词同名的字面量可按同文件 `arch-shape-allow` 登记抵扣 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179）。判的是**耦合**而不是**字符串相同**（2026-11-03 收窄，D-303） |
  * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200）；这两格的**目标是零**（D-203 裁决三）——没到零的每一条都是待迁存量，CS-006 逐名点出它该随谁走 |
@@ -198,7 +198,7 @@ const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
  * 形状基线（冻结值，决策与理由见 [D-055](../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
  * 三格都是**上限**，只许降。数字本身不是判据，**改数字才是**：任何让形状变宽的改动都会
  * 撞红，而把它继续推下去只有一条路——改这一行的数字，那又会要求 CS-002 的一条
- * `core-shape-allow <格>: ADR-NNN <理由>`，且那个 ADR 文件必须真实存在。
+ * `core-shape-allow <格>: D-NNN <理由>`，且那条决策必须真实存在。
  * 于是「顺手把架构改宽一点」在机制上等于「写一份决策」，而不是「改一个数字」。
  *
  * ⚠️ 键序就是 `CORE_SHAPE_BASELINE` 的位置口径（`35-baseline` 的 env 覆盖判定按它 zip），
@@ -312,7 +312,7 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 615, enumVariants: 256 }
+  : { structFields: 614, enumVariants: 256 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
@@ -606,7 +606,7 @@ for (const [key, cap] of Object.entries(SHAPE_BASELINE)) {
       'CS-001',
       `核心形状变宽：${CELL_LABEL[key]} 实测 ${now} > 基线 ${cap} —— symbio_kernel 的公共形状只许收窄。` +
         `要让这一步成立，先在 \`docs/003-design/\` 立一条 ADR 逐条论证「必需」（SP-007；` +
-        `被这份棘轮钉住的先例见 D-055），再在基线旁写 core-shape-allow ${key}: ADR-NNN <理由>。逐 trait 清单：--verbose`,
+        `被这份棘轮钉住的先例见 D-055），再在基线旁写 core-shape-allow ${key}: D-NNN <理由>。逐 trait 清单：--verbose`,
     )
   }
 }

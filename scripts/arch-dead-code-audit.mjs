@@ -89,10 +89,18 @@ const ROOT = rootArg
 
 export const BASELINE_REL = 'scripts/baselines/arch-dead-code.json'
 
-/** 扫描面：架构三树（与 `capability-migration-audit` 的 `ARCH_TREES` 同一份口径）。 */
+/**
+ * 扫描面：架构树（与 `capability-migration-audit` 的 `ARCH_TREES` 同一份口径）。
+ *
+ * ⚠️ 两处必须同时改：这份列表与 `capability-migration-audit.ARCH_TREES` 是同一件事的
+ * 两个读者（同一个常量被两个脚本各抄一遍，`D-372` 治过一次「名单抄本分叉」）。
+ * `D-486` 把 `symbio-contract` 立为冻结 ABI 层之后，它一度只进了受保护树与 CS-009 的
+ * 数据面，**没进本扫描面**——契约层的零调用 `pub fn` 因此是 AD-001…004 的盲区。
+ */
 export const ARCH_TREES = [
   'crates/symbio-sdk',
   'crates/symbio-kernel',
+  'crates/symbio-contract',
   'crates/symbio-plugin-api',
 ]
 

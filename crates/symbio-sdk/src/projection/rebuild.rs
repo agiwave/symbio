@@ -28,7 +28,7 @@
 //! |---|---|---|
 //! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`crate::turn::node_build`] 的 `llm_build_*` | 直接调用 |
 //! | 对话面节点（首响 / 汇报 / 答话） | [`crate::turn::node_build::dialog_node`]、[`crate::turn::facts::ReportDraft::to_message`] | 直接调用 |
-//! | 用户发言 / 补充 | **写入侧内联构造**（CLI 请求体 / `turn_exec::supplement_into_request`） | 逐字复刻（无共享构造器） |
+//! | 用户发言 / 补充 | **写入侧内联构造**（入站请求体 / 会话的补充路径） | 逐字复刻（无共享构造器） |
 //!
 //! 「逐字复刻」那两格是**已知的脆弱点**：没有共享构造器可调，只能靠判据钉住
 //! （`rebuild.test.rs` 的形状复刻用例）。不在这里自作主张给用户消息补 `status`
